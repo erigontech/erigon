@@ -438,6 +438,133 @@ func filterDiscoveredByLocalTip(discovered map[string]string, localTip uint64) m
 	return out
 }
 
+// stateDomainKey extracts the (subdir/<version>-<domain>.<fromStep>,
+// toStep) tuple from a state-domain entry name. Returns
+// (subdirAndDomain, fromStep, toStep, true) for names matching the
+// state-domain naming convention (e.g. "domain/v1.1-accounts.272-280.kv"
+// → ("domain/v1.1-accounts", 272, 280, true)), or zero values + false
+// for any other shape.
+//
+// The "subdirAndDomain" key distinguishes (kind, domain) and version
+// — two files whose names differ only in the step range collide on the
+// same key. That's the equivalence the overlap check operates over.
+func stateDomainKey(name string) (key string, fromStep, toStep uint64, ok bool) {
+	// Must live under a state-kind subdir.
+	hasSubdir := strings.HasPrefix(name, "domain/") ||
+		strings.HasPrefix(name, "history/") ||
+		strings.HasPrefix(name, "idx/") ||
+		strings.HasPrefix(name, "accessor/")
+	if !hasSubdir {
+		return "", 0, 0, false
+	}
+
+	// Strip trailing extension (anything after the LAST `.`).
+	stem := name
+	if dot := strings.LastIndexByte(stem, '.'); dot > 0 {
+		stem = stem[:dot]
+	}
+	// Step range is the trailing "<fromStep>-<toStep>" segment.
+	dash := strings.LastIndexByte(stem, '-')
+	if dash <= 0 {
+		return "", 0, 0, false
+	}
+	dotBeforeRange := strings.LastIndexByte(stem[:dash], '.')
+	if dotBeforeRange <= 0 {
+		return "", 0, 0, false
+	}
+	fromStr := stem[dotBeforeRange+1 : dash]
+	toStr := stem[dash+1:]
+	from, err1 := parseUintFast(fromStr)
+	to, err2 := parseUintFast(toStr)
+	if err1 || err2 || to <= from {
+		return "", 0, 0, false
+	}
+	// Key = everything up to AND INCLUDING the dot before the range,
+	// minus the trailing dot. That groups e.g.
+	// "domain/v1.1-accounts.272-280.kv" and
+	// "domain/v1.1-accounts.272-278.kv" under the same key.
+	return stem[:dotBeforeRange], from, to, true
+}
+
+// parseUintFast is a tiny digits-only parser (no allocations, no
+// hex/sign handling). Returns (0, true) on any non-decimal byte.
+func parseUintFast(s string) (uint64, bool) {
+	if s == "" {
+		return 0, true
+	}
+	var n uint64
+	for i := 0; i < len(s); i++ {
+		c := s[i]
+		if c < '0' || c > '9' {
+			return 0, true
+		}
+		n = n*10 + uint64(c-'0')
+	}
+	return n, false
+}
+
+// filterDiscoveredByStateOverlap drops discovered state-domain entries
+// whose step range is a STRICT SUPERSET of a local entry for the same
+// (subdir, version, domain) key. This catches the mode-B truncated-
+// regen scenario: local holds v1.1-accounts.272-278.kv (regen output
+// covering the unwind target's actual step coverage), but a peer
+// chain.toml still advertises v1.1-accounts.272-280.kv (pre-mode-B
+// broad). Accepting the peer entry would download the broad and
+// reintroduce broad/narrow overlap — the same failure shape that the
+// truncated-rename fix at the write layer eliminates locally.
+//
+// Non-state entries pass through unchanged.
+//
+// Cold start (local has no state entries for a given key): also pass-
+// through; bootstrap can ingest any peer-advertised state file. The
+// filter only fires once a local truncated version exists.
+func filterDiscoveredByStateOverlap(discovered, local map[string]string) map[string]string {
+	if len(local) == 0 {
+		return discovered
+	}
+	// Build local state-key → list of (from, to) ranges.
+	type rng struct{ from, to uint64 }
+	localByKey := make(map[string][]rng, 64)
+	for name := range local {
+		key, from, to, ok := stateDomainKey(name)
+		if !ok {
+			continue
+		}
+		localByKey[key] = append(localByKey[key], rng{from, to})
+	}
+	if len(localByKey) == 0 {
+		return discovered
+	}
+
+	out := make(map[string]string, len(discovered))
+	for name, hash := range discovered {
+		key, dFrom, dTo, ok := stateDomainKey(name)
+		if !ok {
+			out[name] = hash
+			continue
+		}
+		drop := false
+		for _, lr := range localByKey[key] {
+			// Drop if discovered range strictly extends past a local
+			// range — i.e. discovered overlaps + reaches further.
+			// Equal-range discovered entries are not dropped (the hash
+			// equality check downstream covers same-name matches).
+			if dFrom <= lr.from && dTo > lr.to {
+				drop = true
+				break
+			}
+			if dFrom < lr.from && dTo >= lr.to {
+				drop = true
+				break
+			}
+		}
+		if !drop {
+			out[name] = hash
+		}
+	}
+	return out
+}
+
 // ApplyDiscoveredChainToml integrates discovered chain.toml entries into
 // the registry. Behaviour depends on bootstrapFromPreverified:
 //
@@ -487,6 +614,21 @@ func ApplyDiscoveredChainToml(networkName string, discoveredToml []byte, snapDir
 				if dropped := before - len(discovered); dropped > 0 {
 					_ = dropped // logged at the call-site once SetLogger plumbing lands
 				}
+			}
+			// State-domain overlap filter. Mode-B regen produces
+			// truncated .kv files (e.g. v1.1-accounts.272-280 →
+			// v1.1-accounts.272-278); peer chain.tomls may still
+			// advertise the broader pre-truncation version. Accepting
+			// the broader version would re-introduce overlapping-file
+			// state that the maximality invariant prohibits — same
+			// failure mode as the block-side filter above, just for
+			// state files. Drop discovered entries that strictly
+			// extend past a local truncated counterpart for the same
+			// domain.kind.
+			beforeState := len(discovered)
+			discovered = filterDiscoveredByStateOverlap(discovered, localMap)
+			if dropped := beforeState - len(discovered); dropped > 0 {
+				_ = dropped // logged at the call-site once SetLogger plumbing lands
 			}
 		}
 	}

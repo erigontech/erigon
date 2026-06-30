@@ -25,6 +25,7 @@ import (
 	"github.com/erigontech/erigon/common/dir"
 	"github.com/erigontech/erigon/db/snapshotsync/fileset"
 	"github.com/erigontech/erigon/db/snaptype"
+	"github.com/erigontech/erigon/node/components/storage/snapshot"
 )
 
 // FinalizeUnwind executes the FS / inventory / downloader / republish
@@ -144,6 +145,27 @@ func (p *Provider) FinalizeUnwind() error {
 			// a stale hash and the downloader would yank the .kv to .part.
 			_ = dir.RemoveFile(pair.finalPath + ".torrent")
 			regenBaseNames = append(regenBaseNames, filepath.Base(pair.finalPath))
+			// Inventory write-through for the new truncated file. The
+			// block-side rebuildBlockStraddles does the analogous
+			// AddFile (provider_unwind_snapshot_rebuild.go:209); without
+			// the symmetric call here the truncated .kv would exist on
+			// disk + show up in Aggregator.dirtyFiles via OpenFolder,
+			// but the storage component's Inventory would have no entry
+			// for it — chain.toml emission reads Inventory and would
+			// silently fail to advertise the new file. Audited
+			// 2026-06-30 alongside the truncated-rename landing.
+			if p.Inventory != nil {
+				entry := &snapshot.FileEntry{
+					Name:         filepath.Base(pair.finalPath),
+					Local:        true,
+					Advertisable: true,
+				}
+				snapshot.PopulateFromName(entry)
+				if err := p.Inventory.AddFile(entry); err != nil && p.logger != nil {
+					p.logger.Warn("[storage] Provider.FinalizeUnwind: Inventory.AddFile for regen output failed (chain.toml will not advertise this file until next disk-scan reconcile)",
+						"name", entry.Name, "err", err)
+				}
+			}
 			// Truncated case: the old broad file's .torrent sidecar
 			// would still advertise the now-retired file. Remove it
 			// alongside the broad .kv itself (the .kv was renamed to
@@ -197,6 +219,19 @@ func (p *Provider) FinalizeUnwind() error {
 		for _, oldPath := range accessorOlds {
 			if err := dir.RemoveFile(oldPath); err != nil && !os.IsNotExist(err) && p.logger != nil {
 				p.logger.Warn("[storage] Provider.FinalizeUnwind: remove accessor .old sidecar failed (harmless leftover; cleanup on next restart)", "err", err, "path", oldPath)
+			}
+		}
+		// Trigger chain.toml republish: the regen swap changed the
+		// set of advertisable state files (new truncated names, broad
+		// removed). Without this call, chain.toml on disk would carry
+		// the old broad advertisement until some unrelated downstream
+		// event (next retire/merge) re-emitted. Same call site as the
+		// staged-trim block above; lives here so state-domain-only
+		// mode-B unwinds (where no block files were trimmed) still
+		// surface the regen output in the next published manifest.
+		if p.republishChainToml != nil {
+			if err := p.republishChainToml(); err != nil && p.logger != nil {
+				p.logger.Warn("[storage] Provider.FinalizeUnwind: republishChainToml after regen failed (continuing — next inventory-change event will retry)", "err", err)
 			}
 		}
 	}

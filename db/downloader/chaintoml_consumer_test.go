@@ -250,3 +250,163 @@ func TestFilterDiscoveredByLocalTip_NonBlockPassThrough(t *testing.T) {
 	assert.Equal(t, discovered, got,
 		"non-block entries must pass through unconditionally")
 }
+
+// TestStateDomainKey covers the parser that extracts the
+// (subdir/version/domain, fromStep, toStep) shape used by the
+// state-overlap filter. Each row is an input name → expected outcome.
+func TestStateDomainKey(t *testing.T) {
+	cases := []struct {
+		name     string
+		input    string
+		wantKey  string
+		wantFrom uint64
+		wantTo   uint64
+		wantOk   bool
+	}{
+		{"accounts kv",
+			"domain/v1.1-accounts.272-280.kv",
+			"domain/v1.1-accounts", 272, 280, true},
+		{"commitment kv with patch version",
+			"domain/v2.1-commitment.272-280.kv",
+			"domain/v2.1-commitment", 272, 280, true},
+		{"accounts history under history/",
+			"history/v1.0-accountsHistory.0-1024.v",
+			"history/v1.0-accountsHistory", 0, 1024, true},
+		{"accessor under accessor/",
+			"accessor/v1.1-accounts.272-280.bt",
+			"accessor/v1.1-accounts", 272, 280, true},
+		{"block file (top-level, not under state subdir)",
+			"v1.1-003000-003010-headers.seg",
+			"", 0, 0, false},
+		{"non-state subdir",
+			"caplin/v1.1-000000-000010-beaconblocks.seg",
+			"", 0, 0, false},
+		{"malformed — no step range",
+			"domain/v1.1-accounts.kv",
+			"", 0, 0, false},
+		{"malformed — zero range",
+			"domain/v1.1-accounts.5-5.kv",
+			"", 0, 0, false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			key, from, to, ok := stateDomainKey(tc.input)
+			assert.Equal(t, tc.wantOk, ok)
+			if tc.wantOk {
+				assert.Equal(t, tc.wantKey, key)
+				assert.Equal(t, tc.wantFrom, from)
+				assert.Equal(t, tc.wantTo, to)
+			}
+		})
+	}
+}
+
+// TestFilterDiscoveredByStateOverlap_BroadDropped is the load-bearing
+// test: local has a truncated narrower file (272-278), peer
+// advertises the broader pre-mode-B version (272-280). The peer entry
+// must be dropped — accepting it would re-introduce the broad/narrow
+// overlap that the truncated-rename fix at the write layer
+// eliminated locally.
+func TestFilterDiscoveredByStateOverlap_BroadDropped(t *testing.T) {
+	discovered := map[string]string{
+		"domain/v1.1-accounts.272-280.kv": "hash-broad",
+	}
+	local := map[string]string{
+		"domain/v1.1-accounts.272-278.kv": "hash-truncated",
+	}
+	got := filterDiscoveredByStateOverlap(discovered, local)
+	assert.Empty(t, got, "peer broad must be dropped when local has truncated narrower version")
+}
+
+// TestFilterDiscoveredByStateOverlap_LeftExtension covers the
+// symmetric case: peer's range starts BEFORE local's (e.g. peer
+// 268-280, local 272-278). The peer's range strictly contains
+// local's, so it's also dropped.
+func TestFilterDiscoveredByStateOverlap_LeftExtension(t *testing.T) {
+	discovered := map[string]string{
+		"domain/v1.1-accounts.268-280.kv": "hash-wider-both-sides",
+	}
+	local := map[string]string{
+		"domain/v1.1-accounts.272-278.kv": "hash-truncated",
+	}
+	got := filterDiscoveredByStateOverlap(discovered, local)
+	assert.Empty(t, got, "peer wider-on-both-sides entry must be dropped")
+}
+
+// TestFilterDiscoveredByStateOverlap_EqualRangeKept covers the case
+// where peer's range exactly matches a local file. We pass it through
+// — the hash comparison downstream catches identity vs mismatch; the
+// filter is only for overlap drops, not equality.
+func TestFilterDiscoveredByStateOverlap_EqualRangeKept(t *testing.T) {
+	discovered := map[string]string{
+		"domain/v1.1-accounts.272-278.kv": "hash-discovered",
+	}
+	local := map[string]string{
+		"domain/v1.1-accounts.272-278.kv": "hash-local",
+	}
+	got := filterDiscoveredByStateOverlap(discovered, local)
+	assert.Equal(t, discovered, got, "equal-range entries pass through (hash check handles equality)")
+}
+
+// TestFilterDiscoveredByStateOverlap_NarrowerKept covers the case
+// where peer's range is NARROWER than local — e.g. peer advertises
+// 272-276 and local has 272-280. Local is the broader file (perhaps
+// from a merge); peer's narrower is a candidate refinement. We pass
+// it through — the file-set rule will handle the broad-vs-narrow at
+// the runtime visibility layer.
+func TestFilterDiscoveredByStateOverlap_NarrowerKept(t *testing.T) {
+	discovered := map[string]string{
+		"domain/v1.1-accounts.272-276.kv": "hash-narrower",
+	}
+	local := map[string]string{
+		"domain/v1.1-accounts.272-280.kv": "hash-broad-local",
+	}
+	got := filterDiscoveredByStateOverlap(discovered, local)
+	assert.Equal(t, discovered, got, "peer narrower entries pass through (filter only drops peer-broader)")
+}
+
+// TestFilterDiscoveredByStateOverlap_DifferentDomainKept covers the
+// case where peer's range LOOKS like it would overlap, but the domain
+// (or kind, or version) differs. Filter key includes domain+kind+
+// version, so different keys never trigger the overlap rule.
+func TestFilterDiscoveredByStateOverlap_DifferentDomainKept(t *testing.T) {
+	discovered := map[string]string{
+		"domain/v1.1-storage.272-280.kv": "hash-storage-broad",
+	}
+	local := map[string]string{
+		"domain/v1.1-accounts.272-278.kv": "hash-accounts-truncated",
+	}
+	got := filterDiscoveredByStateOverlap(discovered, local)
+	assert.Equal(t, discovered, got, "different-domain entries must not overlap-match")
+}
+
+// TestFilterDiscoveredByStateOverlap_BlockEntriesPassThrough confirms
+// the filter doesn't affect block-file entries — those are addressed
+// by filterDiscoveredByLocalTip at a different layer.
+func TestFilterDiscoveredByStateOverlap_BlockEntriesPassThrough(t *testing.T) {
+	discovered := map[string]string{
+		"v1.1-003000-003010-headers.seg": "hash-block",
+	}
+	local := map[string]string{
+		"domain/v1.1-accounts.272-278.kv": "hash-state-unrelated",
+	}
+	got := filterDiscoveredByStateOverlap(discovered, local)
+	assert.Equal(t, discovered, got, "block entries are not state files; filter must pass them through")
+}
+
+// TestFilterDiscoveredByStateOverlap_NoLocalState confirms the
+// pass-through behaviour when there are no local state files to
+// compare against (e.g. cold-start node).
+func TestFilterDiscoveredByStateOverlap_NoLocalState(t *testing.T) {
+	discovered := map[string]string{
+		"domain/v1.1-accounts.272-280.kv": "hash-broad",
+		"domain/v1.1-storage.0-128.kv":    "hash-storage",
+	}
+	local := map[string]string{
+		// Only block + meta entries — no state-domain locally.
+		"v1.1-003000-003010-headers.seg": "hash-block",
+		"salt-state.txt":                 "hash-salt",
+	}
+	got := filterDiscoveredByStateOverlap(discovered, local)
+	assert.Equal(t, discovered, got, "no local state → cold-start pass-through")
+}

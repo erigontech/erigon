@@ -1183,6 +1183,14 @@ func (p *Provider) Initialize(deps Deps) error {
 		p.scanLocalBlockFilesAtStartup(deps.Inventory)
 	}
 
+	// Sweep any orphan .regen / .old sidecars left by a previous
+	// process's mid-Unwind or mid-FinalizeUnwind crash. The pair of
+	// transient suffixes are produced ONLY during an active mode-B
+	// unwind tx — finding either at startup means the prior tx didn't
+	// finish cleanly. See provider_unwind_recovery.go for the
+	// per-case recovery rule.
+	p.recoverOrphanRegenSidecars()
+
 	return nil
 }
 

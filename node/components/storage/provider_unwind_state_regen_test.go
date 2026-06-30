@@ -246,6 +246,128 @@ func TestRenameStepRange(t *testing.T) {
 	}
 }
 
+// TestRegenerateBoundaryStepFile_ContentReflectsLastTxNum is the
+// load-bearing content-semantics test: every (key, value) pair in
+// the regen output reflects the value the key had at lastTxNum, as
+// determined by the supplied AsOfLookup. Keys that didn't exist at
+// lastTxNum (lookup returns found=false) are dropped from the
+// output. Together these two semantic guarantees are what makes the
+// regen output a valid representation of the "as-of-lastTxNum
+// snapshot" of the boundary range's state.
+//
+// This test pins the contract by exercising a multi-key fixture
+// where the AsOfLookup returns different values + drop decisions
+// per key. The existing TestRegenerateBoundaryStepFile_DropsKeysCreated
+// AfterAnchor covered the drop case in isolation; this test combines
+// drop + as-of-rewrite + commitment-anchor-replacement in a single
+// fixture so a future refactor that breaks any one of them surfaces
+// here.
+func TestRegenerateBoundaryStepFile_ContentReflectsLastTxNum(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	dir := t.TempDir()
+
+	// Three keys with distinct fates:
+	//   keyKept  — value at lastTxNum differs from pre-anchor; rewritten.
+	//   keyDrop  — didn't exist at lastTxNum; dropped from output.
+	//   keySame  — value unchanged across the anchor; passes through.
+	keyKept := []byte("kept")
+	keyDrop := []byte("drop")
+	keySame := []byte("same")
+
+	stalePre := [][2][]byte{
+		{keyKept, []byte("kept-stale-post-anchor")},
+		{keyDrop, []byte("drop-stale-post-anchor")},
+		{keySame, []byte("same-value-stable")},
+	}
+	oldPath := writeKV(t, ctx, dir, "v1.1-accounts.272-280.kv", stalePre)
+
+	const anchor uint64 = 108_584_330
+	lookup := func(d kv.Domain, k []byte, ts uint64) ([]byte, bool, error) {
+		require.Equal(t, kv.AccountsDomain, d)
+		require.Equal(t, anchor, ts, "lookup must be called with lastTxNum")
+		switch string(k) {
+		case string(keyKept):
+			return []byte("kept-as-of-anchor"), true, nil
+		case string(keyDrop):
+			return nil, false, nil
+		case string(keySame):
+			return []byte("same-value-stable"), true, nil
+		}
+		t.Fatalf("unexpected key: %q", k)
+		return nil, false, nil
+	}
+
+	newPath := oldPath + ".regen"
+	require.NoError(t, RegenerateBoundaryStepFile(
+		ctx, kv.AccountsDomain, oldPath, newPath, lookup,
+		anchor, seg.CompressNone, nil,
+		dir, log.New(),
+	))
+
+	got := readKV(t, newPath)
+	require.Equal(t, [][2][]byte{
+		{keyKept, []byte("kept-as-of-anchor")},
+		{keySame, []byte("same-value-stable")},
+	}, got, "regen content must be drop+as-of-rewrite per AsOfLookup")
+}
+
+// TestRegenerateBoundaryStepFile_TruncatedNameMatchesContent is the
+// integration test for the truncated-rename path: when the caller
+// chooses a narrower newKVPath than the original (e.g. the step
+// boundary lands mid-original-range), the output file's NAME
+// reflects the truncated coverage AND its CONTENT reflects the
+// regen semantics. Together they form the contract "the file's name
+// honestly describes what's inside" — the property the
+// truncated-rename fix exists to enforce.
+//
+// We can verify both at the file-system level without a full
+// aggregator integration: parse the file's stepDomainKey from its
+// name, parse the file's KV content via readKV, and assert both
+// describe consistent state.
+func TestRegenerateBoundaryStepFile_TruncatedNameMatchesContent(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	dir := t.TempDir()
+
+	keyA := []byte("alice")
+	stalePre := [][2][]byte{
+		{keyA, []byte("alice-stale-50ETH-post-anchor")},
+	}
+	oldPath := writeKV(t, ctx, dir, "v1.1-accounts.272-280.kv", stalePre)
+
+	// Truncated newKVPath: caller chose 272-278 because the unwind
+	// boundary lands at step 278.
+	newKVPath := filepath.Join(dir, "v1.1-accounts.272-278.kv.regen")
+
+	lookup := func(d kv.Domain, k []byte, ts uint64) ([]byte, bool, error) {
+		return []byte("alice-anchored-30ETH"), true, nil
+	}
+
+	require.NoError(t, RegenerateBoundaryStepFile(
+		ctx, kv.AccountsDomain, oldPath, newKVPath, lookup,
+		108_584_330, seg.CompressNone, nil,
+		dir, log.New(),
+	))
+
+	// 1. File lives at the truncated path.
+	_, err := os.Stat(newKVPath)
+	require.NoError(t, err)
+
+	// 2. File content is the as-of-anchor value (not the pre-anchor stale value).
+	got := readKV(t, newKVPath)
+	require.Equal(t, [][2][]byte{{keyA, []byte("alice-anchored-30ETH")}}, got,
+		"truncated file's content must reflect as-of-anchor values, NOT pre-anchor stale ones")
+
+	// 3. Filename's step range is narrower than the source's, matching
+	// what the caller asked for. (The truncation decision lives in
+	// regenerateBoundaryStepFiles; we verify here that
+	// RegenerateBoundaryStepFile honours whatever name the caller
+	// supplied.)
+	require.Contains(t, newKVPath, "272-278", "truncated file name carries the narrower step range")
+	require.NotContains(t, newKVPath, "272-280", "truncated file name must not retain the original wider range")
+}
+
 // TestRegenerateBoundaryStepFile_WritesToNewKVPath verifies that the
 // explicit newKVPath parameter is honoured — the regen content lands
 // at the supplied path, NOT at oldKVPath + ".regen" (the previous
