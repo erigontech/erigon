@@ -61,7 +61,8 @@ func (p *Provider) FinalizeUnwind() error {
 	p.pendingTrimLock.Unlock()
 
 	hadRegen := regen != nil && len(regen.pairs) > 0
-	if (staged == nil || len(staged.names) == 0) && rebuilt == nil && !hadRegen {
+	hadRemovals := regen != nil && len(regen.removals) > 0
+	if (staged == nil || len(staged.names) == 0) && rebuilt == nil && !hadRegen && !hadRemovals {
 		return nil
 	}
 
@@ -232,6 +233,76 @@ func (p *Provider) FinalizeUnwind() error {
 		if p.republishChainToml != nil {
 			if err := p.republishChainToml(); err != nil && p.logger != nil {
 				p.logger.Warn("[storage] Provider.FinalizeUnwind: republishChainToml after regen failed (continuing — next inventory-change event will retry)", "err", err)
+			}
+		}
+	}
+
+	// State-domain removal block. Files entirely past stepBoundary
+	// (FromStep >= stepBoundary, per planStateFileActions's
+	// actionRemove classification) contain state at steps that
+	// haven't happened post-unwind — stale. Drop them now;
+	// post-unwind forward-exec re-creates the range into MDBX, and
+	// a future retire produces fresh canonical files under the same
+	// names. The block-side analog is sweepBlockOrphansPastBlock
+	// (called inside the staged-trim block above for block files);
+	// this is the state-domain analog the iter-3 mode_b wedge on
+	// 2026-06-30 surfaced as missing.
+	if hadRemovals {
+		removalNames := make([]string, 0, len(regen.removals))
+		removalOldKVs := make([]string, 0, len(regen.removals))
+		removalAccessorOlds := make([]string, 0)
+		for _, r := range regen.removals {
+			oldSidecar := r.path + ".old"
+			if err := os.Rename(r.path, oldSidecar); err != nil && !os.IsNotExist(err) {
+				if p.logger != nil {
+					p.logger.Warn("[storage] Provider.FinalizeUnwind: rename past-boundary .kv → .old failed (continuing)", "err", err, "path", r.path)
+				}
+				continue
+			}
+			removalOldKVs = append(removalOldKVs, oldSidecar)
+			removalAccessorOlds = append(removalAccessorOlds, p.renameAccessorsToOld(r.path)...)
+			_ = dir.RemoveFile(r.path + ".torrent")
+			if p.Inventory != nil {
+				p.Inventory.RemoveFile(r.name)
+			}
+			removalNames = append(removalNames, filepath.Base(r.path))
+		}
+		// Close the now-unlinked .old mmaps before unlinking the
+		// inodes — same .old-dance reasoning as the regen swap above.
+		if p.AllSnapshots != nil {
+			if err := p.AllSnapshots.OpenFolder(); err != nil && p.logger != nil {
+				p.logger.Warn("[storage] Provider.FinalizeUnwind: removal OpenFolder failed (continuing)", "err", err)
+			}
+		}
+		if p.Aggregator != nil {
+			if err := p.Aggregator.OpenFolder(); err != nil && p.logger != nil {
+				p.logger.Warn("[storage] Provider.FinalizeUnwind: removal Aggregator.OpenFolder failed (continuing)", "err", err)
+			}
+		}
+		// Drop downloader entries so any in-flight torrent for the
+		// retired files gets cancelled.
+		if p.downloaderClient != nil && len(removalNames) > 0 {
+			if err := p.downloaderClient.Delete(context.Background(), removalNames); err != nil && p.logger != nil {
+				p.logger.Warn("[storage] Provider.FinalizeUnwind: downloaderClient.Delete for past-boundary removals failed (continuing)", "err", err, "files", len(removalNames))
+			}
+		}
+		// Final unlink of the .old sidecars (the actual inodes go
+		// away now that the new OpenFolder closed the mmaps).
+		for _, oldPath := range removalOldKVs {
+			if err := dir.RemoveFile(oldPath); err != nil && !os.IsNotExist(err) && p.logger != nil {
+				p.logger.Warn("[storage] Provider.FinalizeUnwind: remove past-boundary .old sidecar failed (harmless leftover; cleanup on next restart)", "err", err, "path", oldPath)
+			}
+		}
+		for _, oldPath := range removalAccessorOlds {
+			if err := dir.RemoveFile(oldPath); err != nil && !os.IsNotExist(err) && p.logger != nil {
+				p.logger.Warn("[storage] Provider.FinalizeUnwind: remove past-boundary accessor .old failed (harmless leftover; cleanup on next restart)", "err", err, "path", oldPath)
+			}
+		}
+		// Republish chain.toml so the retired files drop out of the
+		// advertised set.
+		if p.republishChainToml != nil {
+			if err := p.republishChainToml(); err != nil && p.logger != nil {
+				p.logger.Warn("[storage] Provider.FinalizeUnwind: republishChainToml after past-boundary removals failed (continuing)", "err", err)
 			}
 		}
 	}

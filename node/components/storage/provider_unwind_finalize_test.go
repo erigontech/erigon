@@ -20,6 +20,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"testing"
 
@@ -184,6 +185,141 @@ func TestProvider_FinalizeUnwind_RegenStripsTorrentAndNotifiesDownloader(t *test
 	deletes := stub.snapshotDeletes()
 	require.Len(t, deletes, 1, "downloaderClient.Delete must be called exactly once for the regen batch")
 	require.Equal(t, []string{finalName}, deletes[0], "Delete must carry the basename of the regenerated .kv")
+
+	require.Nil(t, p.pendingRegen, "FinalizeUnwind must drain pendingRegen")
+}
+
+// TestProvider_FinalizeUnwind_RemovesEntirelyPastFiles is the load-
+// bearing integration test for the post-iter-3-mode_b fix. State-
+// domain .kv files entirely past the unwind boundary (per
+// planStateFileActions's actionRemove classification) MUST be unlinked
+// by FinalizeUnwind alongside their accessors + .torrent sidecar +
+// Inventory entry. Pre-fix, these files persisted on disk and served
+// stale post-boundary state, producing the ~4,800-gas mismatch at
+// block 3,091,971 we caught on hoodi.
+//
+// Fixture: three .kv files staged for removal (mimicking the on-disk
+// shape of accounts.278-279, 280-282, 280-284 from the iter-3 wedge).
+// Each with a fake .torrent sidecar + accessor (.bt) to exercise the
+// full cleanup path. After FinalizeUnwind:
+//   - The .kv files must be gone.
+//   - Their .torrent sidecars must be gone.
+//   - The .bt accessor files must be gone.
+//   - The downloader Delete batch must include all three basenames.
+//   - pendingRegen must be drained.
+func TestProvider_FinalizeUnwind_RemovesEntirelyPastFiles(t *testing.T) {
+	t.Parallel()
+	tmpDir := t.TempDir()
+
+	type pastFile struct {
+		name        string
+		path        string
+		torrentPath string
+		btPath      string
+	}
+	pastFiles := []pastFile{
+		{name: "v1.1-accounts.278-279.kv"},
+		{name: "v1.1-accounts.280-282.kv"},
+		{name: "v1.1-accounts.280-284.kv"},
+	}
+	for i := range pastFiles {
+		pastFiles[i].path = filepath.Join(tmpDir, pastFiles[i].name)
+		pastFiles[i].torrentPath = pastFiles[i].path + ".torrent"
+		pastFiles[i].btPath = strings.TrimSuffix(pastFiles[i].path, ".kv") + ".bt"
+		require.NoError(t, os.WriteFile(pastFiles[i].path, []byte("stale past-boundary content"), 0o600))
+		require.NoError(t, os.WriteFile(pastFiles[i].torrentPath, []byte("stale torrent"), 0o600))
+		require.NoError(t, os.WriteFile(pastFiles[i].btPath, []byte("stale accessor"), 0o600))
+	}
+
+	stub := &recordingDownloaderClient{}
+	p := &Provider{
+		snapDir:          tmpDir,
+		downloaderClient: stub,
+	}
+	removals := make([]removalEntry, 0, len(pastFiles))
+	for _, f := range pastFiles {
+		removals = append(removals, removalEntry{
+			path: f.path,
+			name: f.name,
+		})
+	}
+	p.pendingRegen = &pendingRegenState{removals: removals}
+
+	require.NoError(t, p.FinalizeUnwind())
+
+	for _, f := range pastFiles {
+		_, err := os.Stat(f.path)
+		require.True(t, os.IsNotExist(err), "past-boundary .kv must be removed: %s", f.path)
+		_, err = os.Stat(f.torrentPath)
+		require.True(t, os.IsNotExist(err), "past-boundary .torrent must be removed: %s", f.torrentPath)
+		_, err = os.Stat(f.btPath)
+		require.True(t, os.IsNotExist(err), "past-boundary .bt accessor must be removed: %s", f.btPath)
+	}
+
+	deletes := stub.snapshotDeletes()
+	require.Len(t, deletes, 1, "downloaderClient.Delete must be called exactly once for the removal batch")
+	wantNames := []string{
+		"v1.1-accounts.278-279.kv",
+		"v1.1-accounts.280-282.kv",
+		"v1.1-accounts.280-284.kv",
+	}
+	require.ElementsMatch(t, wantNames, deletes[0],
+		"Delete batch must cover every past-boundary basename so any in-flight torrent is cancelled")
+
+	require.Nil(t, p.pendingRegen, "FinalizeUnwind must drain pendingRegen")
+}
+
+// TestProvider_FinalizeUnwind_RegenAndRemovalsTogether covers the
+// composite case the iter-3 mode_b layout produces: BOTH a regen
+// straddler (with truncation) AND multiple files entirely past the
+// boundary, all in the same FinalizeUnwind call. The two paths must
+// compose cleanly — both must finish, regardless of order.
+func TestProvider_FinalizeUnwind_RegenAndRemovalsTogether(t *testing.T) {
+	t.Parallel()
+	tmpDir := t.TempDir()
+
+	// Straddler that gets regen+truncate (272-280 → 272-278).
+	broadPath := filepath.Join(tmpDir, "v1.1-accounts.272-280.kv")
+	truncPath := filepath.Join(tmpDir, "v1.1-accounts.272-278.kv")
+	regenPath := truncPath + ".regen"
+	require.NoError(t, os.WriteFile(broadPath, []byte("pre-regen broad"), 0o600))
+	require.NoError(t, os.WriteFile(regenPath, []byte("regen truncated"), 0o600))
+
+	// Past-boundary file to remove.
+	pastPath := filepath.Join(tmpDir, "v1.1-accounts.280-282.kv")
+	require.NoError(t, os.WriteFile(pastPath, []byte("stale past"), 0o600))
+
+	stub := &recordingDownloaderClient{}
+	p := &Provider{
+		snapDir:          tmpDir,
+		downloaderClient: stub,
+	}
+	p.pendingRegen = &pendingRegenState{
+		pairs: []regenPair{{
+			regenPath:    regenPath,
+			finalPath:    truncPath,
+			oldBroadPath: broadPath,
+		}},
+		removals: []removalEntry{{
+			path: pastPath,
+			name: "v1.1-accounts.280-282.kv",
+		}},
+	}
+
+	require.NoError(t, p.FinalizeUnwind())
+
+	// Truncated regen output landed:
+	contents, err := os.ReadFile(truncPath)
+	require.NoError(t, err)
+	require.Equal(t, "regen truncated", string(contents))
+
+	// Broad file removed:
+	_, err = os.Stat(broadPath)
+	require.True(t, os.IsNotExist(err), "broad straddler must be removed")
+
+	// Past-boundary file removed:
+	_, err = os.Stat(pastPath)
+	require.True(t, os.IsNotExist(err), "past-boundary file must be removed")
 
 	require.Nil(t, p.pendingRegen, "FinalizeUnwind must drain pendingRegen")
 }

@@ -52,12 +52,30 @@ type regenPair struct {
 	domain       kv.Domain
 }
 
+// removalEntry captures a state-domain .kv file that the mode-B
+// unwind staged for removal. The file's [FromStep, ToStep) range is
+// entirely past the unwind boundary (FromStep >= stepBoundary), so
+// its content reflects state at steps that haven't happened post-
+// unwind — stale. FinalizeUnwind unlinks the .kv + its accessors
+// (.bt/.kvi/.kvei) + the .torrent sidecar + drops the Inventory
+// entry. The post-unwind forward-exec re-creates this step range
+// from MDBX live state; a future retire produces a fresh canonical
+// file under the same name.
+type removalEntry struct {
+	path   string // absolute path of the .kv file on disk
+	name   string // basename + kind-subdir prefix (matches Inventory FileEntry.Name)
+	domain kv.Domain
+}
+
 // pendingRegenState is the deferred set of boundary-step regeneration
-// ops mode-B staged for post-commit execution. FinalizeUnwind
-// atomically swaps each .regen → .kv + rebuilds accessors;
-// AbortUnwind unlinks each .regen on rollback.
+// + entirely-past-boundary removal ops mode-B staged for post-commit
+// execution. FinalizeUnwind atomically swaps each .regen → .kv,
+// rebuilds accessors, and unlinks the removals; AbortUnwind unlinks
+// each .regen on rollback and leaves the removals untouched (their
+// files were never mutated during Provider.Unwind).
 type pendingRegenState struct {
-	pairs []regenPair
+	pairs    []regenPair
+	removals []removalEntry
 }
 
 // regenerateBoundaryStepFiles walks every state domain
@@ -127,82 +145,108 @@ func (p *Provider) regenerateBoundaryStepFiles(
 	}
 
 	pairs := make([]regenPair, 0, len(snapshot.AllDomains))
+	removals := make([]removalEntry, 0)
 	for _, sd := range snapshot.AllDomains {
 		kvDomain, ok := snapshotDomainToKVDomain(sd)
 		if !ok {
 			return nil, fmt.Errorf("unknown storage domain %q: no kv.Domain mapping", sd)
 		}
-		boundary := p.boundaryStepFileForDomain(sd, stepBoundary)
-		if boundary == nil {
-			// Domain has no boundary-step file — possible early in
-			// chain history before the step has retired. Nothing to
-			// regenerate for this domain.
+
+		// Classify EVERY .kv file in this domain against stepBoundary.
+		// Pre-2026-06-30, regen only touched ONE boundary file per
+		// domain (whichever boundaryStepFileForDomain returned first).
+		// Iter-3 mode_b at depth 30k on hoodi surfaced the gap: files
+		// entirely past the unwind boundary stayed on disk and served
+		// stale post-unwind-target state, producing a ~4,800 gas
+		// mismatch at the first post-boundary block. The planner
+		// (planStateFileActions) handles ALL files per domain
+		// uniformly — regen straddlers, remove entirely-past.
+		var domainFiles []*snapshot.FileEntry
+		var ranges []stateFileRange
+		for _, e := range p.Inventory.AllDomainFiles(sd) {
+			if e.Kind != snapshot.KindKV {
+				continue
+			}
+			domainFiles = append(domainFiles, e)
+			ranges = append(ranges, stateFileRange{FromStep: e.FromStep, ToStep: e.ToStep})
+		}
+		if len(ranges) == 0 {
+			// Domain has no .kv files yet (early chain). Skip.
 			continue
 		}
-		// Inventory FileEntry.Name is the bare basename; resolve
-		// against the kind subdir (domain/) where the downloader writes
-		// the file in production. Plain filepath.Join(snapDir, name)
-		// only finds files in the legacy flat-layout case and is the
-		// reason a fresh hoodi datadir wedges mid-life mode-B setHead
-		// with "open old <snapDir>/v2.0-accounts.272-273.kv: no such
-		// file or directory" — see [[flow/orchestrator.go:70]] for the
-		// same fix in the validation-chain entrypoint.
-		oldPath := snapshot.ResolveExistingPath(p.snapDir, boundary.Name)
-		compression := p.Aggregator.DomainCompression(kvDomain)
 
+		compression := p.Aggregator.DomainCompression(kvDomain)
 		var anchor []byte
 		if kvDomain == kv.CommitmentDomain {
 			anchor = commitmentAnchor
 		}
 
-		// Truncated rename: when the boundary file's ToStep extends
-		// past the unwind-target step boundary, the regen output
-		// covers only [FromStep, stepBoundary) of state — a narrower
-		// range than the original file's name advertises. The new
-		// file MUST be named to match its actual coverage, otherwise
-		// the wider-named regen output co-exists with any pre-existing
-		// narrower files in the same range and rule-driven cull picks
-		// the wider one (M-A default direction), serving stale state
-		// for the truncated portion. This is the 2026-06-25 v2.0-
-		// accounts.272-280-co-exists-with-272-276 union-cover wedge
-		// reproduced live in iter-4 mode-B at depth 60k on hoodi.
-		// stepBoundary == boundary.ToStep is the aligned case: regen
-		// replaces the file in place (finalPath == oldBroadPath).
-		//
-		// Derive the new basename from filepath.Base(oldPath), NOT
-		// from boundary.Name — Inventory's Name field carries the
-		// kind-subdir prefix (e.g. "domain/v2.0-accounts.280-284.kv")
-		// matching the chain.toml entry shape, and joining that under
-		// filepath.Dir(oldPath) (already inside the kind subdir) would
-		// double up the prefix, producing "<snapDir>/domain/domain/...".
-		// Live-caught 2026-06-30 iter-1 mode_a2 right after the
-		// truncated-rename change landed.
-		oldBaseName := filepath.Base(oldPath)
-		truncatedBaseName := oldBaseName
-		if stepBoundary < boundary.ToStep {
-			truncatedBaseName = renameStepRange(oldBaseName, boundary.FromStep, boundary.ToStep, stepBoundary)
-		}
-		finalPath := filepath.Join(filepath.Dir(oldPath), truncatedBaseName)
-		regenPath := finalPath + ".regen"
+		// Walk every file; map each to an action via classifyStateFileForUnwind.
+		for i, fileEntry := range domainFiles {
+			action := classifyStateFileForUnwind(ranges[i], stepBoundary)
+			switch action {
+			case actionKeep:
+				// content valid post-unwind; nothing to do.
+				continue
+			case actionRemove:
+				// File entirely past boundary. Stage for removal at
+				// FinalizeUnwind time; the file itself isn't touched
+				// during Provider.Unwind so AbortUnwind doesn't need
+				// to undo anything for it.
+				removals = append(removals, removalEntry{
+					path:   snapshot.ResolveExistingPath(p.snapDir, fileEntry.Name),
+					name:   fileEntry.Name,
+					domain: kvDomain,
+				})
+				continue
+			case actionRegenInPlace, actionRegenTruncate:
+				// Regen straddler. Continue below.
+			default:
+				return nil, fmt.Errorf("unhandled stateFileAction %d for %s", action, fileEntry.Name)
+			}
 
-		if err := RegenerateBoundaryStepFile(
-			ctx, kvDomain, oldPath, regenPath, lookup, lastTxNum,
-			compression, anchor, p.snapTmpDir, p.logger,
-		); err != nil {
-			return nil, fmt.Errorf("regen %s boundary-step file %s: %w", sd, boundary.Name, err)
+			// Resolve oldPath against the live disk via Inventory's
+			// Name (which carries the kind-subdir prefix). Plain
+			// filepath.Join(snapDir, name) only finds files in the
+			// legacy flat-layout case.
+			oldPath := snapshot.ResolveExistingPath(p.snapDir, fileEntry.Name)
+
+			// Compute the truncated filename. Aligned (actionRegenInPlace)
+			// keeps the same basename; truncate (actionRegenTruncate)
+			// narrows the [FromStep, ToStep) → [FromStep, stepBoundary).
+			// Derive from filepath.Base(oldPath), NOT from
+			// fileEntry.Name — the latter carries the kind-subdir
+			// prefix and joining it back under filepath.Dir(oldPath)
+			// would double up the prefix (live-caught 2026-06-30
+			// iter-1 mode_a2 after the initial truncated-rename
+			// landing).
+			oldBaseName := filepath.Base(oldPath)
+			truncatedBaseName := oldBaseName
+			if action == actionRegenTruncate {
+				truncatedBaseName = renameStepRange(oldBaseName, fileEntry.FromStep, fileEntry.ToStep, stepBoundary)
+			}
+			finalPath := filepath.Join(filepath.Dir(oldPath), truncatedBaseName)
+			regenPath := finalPath + ".regen"
+
+			if err := RegenerateBoundaryStepFile(
+				ctx, kvDomain, oldPath, regenPath, lookup, lastTxNum,
+				compression, anchor, p.snapTmpDir, p.logger,
+			); err != nil {
+				return nil, fmt.Errorf("regen %s boundary-step file %s: %w", sd, fileEntry.Name, err)
+			}
+			pairs = append(pairs, regenPair{
+				regenPath:    regenPath,
+				finalPath:    finalPath,
+				oldBroadPath: oldPath,
+				domain:       kvDomain,
+			})
 		}
-		pairs = append(pairs, regenPair{
-			regenPath:    regenPath,
-			finalPath:    finalPath,
-			oldBroadPath: oldPath,
-			domain:       kvDomain,
-		})
 	}
 
-	if len(pairs) == 0 {
+	if len(pairs) == 0 && len(removals) == 0 {
 		return nil, nil
 	}
-	return &pendingRegenState{pairs: pairs}, nil
+	return &pendingRegenState{pairs: pairs, removals: removals}, nil
 }
 
 // boundaryStepFileForDomain returns the FileEntry for the .kv file
