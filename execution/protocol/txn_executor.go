@@ -732,12 +732,7 @@ func (st *TxnExecutor) verifyAuthorities(auths []types.Authorization, contractCr
 			return nil, stateIgasRefill, errors.New("SetCode transaction must have at least one authorization")
 		}
 		isAmsterdam := st.evm.ChainRules().IsAmsterdam
-		// EIP-8037: AUTH_BASE refilling distinguishes the authority's
-		// delegation state at transaction start (pre_tx) from its current
-		// state, which an earlier authorization in the same tx may have
-		// changed. The first time an authority is seen its current code is
-		// still the pre-tx code, so record it then.
-		preTxDelegated := make(map[accounts.Address]bool)
+		preTxDelegates := make(map[accounts.Address]bool)
 		refundSkippedAuth := func() {
 			if isAmsterdam {
 				st.state.AddRefund(params.AccountWriteCostEIP8038)
@@ -816,22 +811,20 @@ func (st *TxnExecutor) verifyAuthorities(auths []types.Authorization, contractCr
 					st.state.AddRefund(params.AccountWriteCostEIP8038)
 					stateIgasRefill += params.StateGasNewAccount
 				}
-				delegatedBeforeTx, seen := preTxDelegated[authority]
+				preTxDelegated, seen := preTxDelegates[authority]
 				if !seen {
-					delegatedBeforeTx = hasDelegation
-					preTxDelegated[authority] = delegatedBeforeTx
+					preTxDelegated = hasDelegation
+					preTxDelegates[authority] = preTxDelegated
 				}
 				if auth.Address == (common.Address{}) {
-					// Clearing writes no indicator bytes, so AUTH_BASE is
-					// always refilled; refill it again when the indicator being
-					// removed was itself written earlier in this same tx.
+					// clearing delegation doesn't write new bytes
 					stateIgasRefill += params.StateGasAuthBase
-					if hasDelegation && !delegatedBeforeTx {
+					if hasDelegation && !preTxDelegated {
+						// also clear same authority's delegation set earlier in this tx
 						stateIgasRefill += params.StateGasAuthBase
 					}
-				} else if hasDelegation || delegatedBeforeTx {
-					// Overwriting an existing indicator (now or pre-tx) writes
-					// no new bytes, so refill AUTH_BASE.
+				} else if hasDelegation || preTxDelegated {
+					// overwriting a delegate doesn't write new bytes
 					stateIgasRefill += params.StateGasAuthBase
 				}
 			} else if exists {
