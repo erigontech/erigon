@@ -620,15 +620,13 @@ func (evm *EVM) create(caller accounts.Address, codeAndHash *codeAndHash, gas md
 		// Preserve State so the parent's reservoir is restored by restoreChildGas.
 		return nil, accounts.NilAddress, mdgas.MdGas{State: gasRemaining.State}, mdgas.MdGasUsage{}, false, err
 	}
-	// EIP-8037: a deployable target that already exists and is non-empty
-	// (e.g. a balance-only leaf) is "alive"; the unconditional NEW_ACCOUNT
-	// charge is refilled on success since no new account leaf is created.
 	if evm.chainRules.IsAmsterdam {
+		// EIP-8037 check if deployable target was already created (e.g. balance only leaf)
+		// at this point !Empty is true only if balance > 0
 		empty, err := evm.intraBlockState.Empty(address)
 		if err != nil {
 			return nil, accounts.NilAddress, mdgas.MdGas{}, mdgas.MdGasUsage{}, false, fmt.Errorf("%w: %w", ErrIntraBlockStateFailed, err)
 		}
-		// at this point !Empty is true only if balance > 0
 		wasBalanceOnly = !empty
 	}
 	// Create a new account on the state
