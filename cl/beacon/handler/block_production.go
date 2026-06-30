@@ -1381,6 +1381,9 @@ func (a *ApiHandler) publishBlindedBlocks(w http.ResponseWriter, r *http.Request
 	if err != nil {
 		return nil, beaconhttp.NewEndpointError(http.StatusBadRequest, err)
 	}
+	if version >= clparams.GloasVersion {
+		return nil, beaconhttp.NewEndpointError(http.StatusBadRequest, cltypes.ErrGloasCannotBlind)
+	}
 
 	// todo: broadcast_validation
 

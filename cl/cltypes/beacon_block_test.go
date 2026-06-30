@@ -185,6 +185,106 @@ func TestGetExecutionRequestsListGloasBuilderRequests(t *testing.T) {
 	require.Equal(t, append(hexutil.Bytes{byte(cfg.BuilderExitRequestType)}, encodedExit...), list[1])
 }
 
+func TestDecodeExecutionRequestsListGloasAllTypes(t *testing.T) {
+	cfg := clparams.MainnetBeaconConfig
+	deposit := &solid.DepositRequest{Amount: 1, Index: 2}
+	deposit.PubKey[0] = 0x11
+	withdrawal := &solid.WithdrawalRequest{SourceAddress: common.HexToAddress("0x0000000000000000000000000000000000001234"), Amount: 3}
+	withdrawal.ValidatorPubKey[0] = 0x22
+	consolidation := &solid.ConsolidationRequest{SourceAddress: common.HexToAddress("0x0000000000000000000000000000000000005678")}
+	consolidation.SourcePubKey[0] = 0x33
+	consolidation.TargetPubKey[0] = 0x44
+	builderDeposit := &solid.BuilderDepositRequest{Amount: 4}
+	builderDeposit.PubKey[0] = 0x55
+	builderDeposit.WithdrawalCredentials[0] = byte(cfg.BuilderWithdrawalPrefix)
+	builderExit := &solid.BuilderExitRequest{SourceAddress: common.HexToAddress("0x0000000000000000000000000000000000009abc")}
+	builderExit.PubKey[0] = 0x66
+
+	encodedDeposit, err := deposit.EncodeSSZ(nil)
+	require.NoError(t, err)
+	encodedWithdrawal, err := withdrawal.EncodeSSZ(nil)
+	require.NoError(t, err)
+	encodedConsolidation, err := consolidation.EncodeSSZ(nil)
+	require.NoError(t, err)
+	encodedBuilderDeposit, err := builderDeposit.EncodeSSZ(nil)
+	require.NoError(t, err)
+	encodedBuilderExit, err := builderExit.EncodeSSZ(nil)
+	require.NoError(t, err)
+
+	out, err := DecodeExecutionRequestsList(&cfg, []hexutil.Bytes{
+		append(hexutil.Bytes{byte(cfg.DepositRequestType)}, encodedDeposit...),
+		append(hexutil.Bytes{byte(cfg.WithdrawalRequestType)}, encodedWithdrawal...),
+		append(hexutil.Bytes{byte(cfg.ConsolidationRequestType)}, encodedConsolidation...),
+		append(hexutil.Bytes{byte(cfg.BuilderDepositRequestType)}, encodedBuilderDeposit...),
+		append(hexutil.Bytes{byte(cfg.BuilderExitRequestType)}, encodedBuilderExit...),
+	}, clparams.GloasVersion)
+	require.NoError(t, err)
+
+	require.Equal(t, uint64(1), out.Deposits.Get(0).Amount)
+	require.Equal(t, withdrawal.SourceAddress, out.Withdrawals.Get(0).SourceAddress)
+	require.Equal(t, consolidation.SourceAddress, out.Consolidations.Get(0).SourceAddress)
+	require.Equal(t, uint64(4), out.BuilderDeposits.Get(0).Amount)
+	require.Equal(t, builderExit.SourceAddress, out.BuilderExits.Get(0).SourceAddress)
+}
+
+func TestDecodeExecutionRequestsListRejectsInvalidShape(t *testing.T) {
+	cfg := clparams.MainnetBeaconConfig
+	emptyDeposits, err := solid.NewStaticListSSZ[*solid.DepositRequest](1, solid.SizeDepositRequest).EncodeSSZ(nil)
+	require.NoError(t, err)
+	emptyWithdrawals, err := solid.NewStaticListSSZ[*solid.WithdrawalRequest](1, solid.SizeWithdrawalRequest).EncodeSSZ(nil)
+	require.NoError(t, err)
+	emptyBuilderDeposits, err := solid.NewStaticListSSZ[*solid.BuilderDepositRequest](int(cfg.MaxBuilderDepositRequestsPerPayload), solid.SizeBuilderDepositRequest).EncodeSSZ(nil)
+	require.NoError(t, err)
+
+	for _, tc := range []struct {
+		name     string
+		version  clparams.StateVersion
+		requests []hexutil.Bytes
+	}{
+		{
+			name:     "empty entry",
+			version:  clparams.GloasVersion,
+			requests: []hexutil.Bytes{{}},
+		},
+		{
+			name:     "type only entry",
+			version:  clparams.GloasVersion,
+			requests: []hexutil.Bytes{{byte(cfg.DepositRequestType)}},
+		},
+		{
+			name:    "duplicate",
+			version: clparams.GloasVersion,
+			requests: []hexutil.Bytes{
+				append(hexutil.Bytes{byte(cfg.DepositRequestType)}, emptyDeposits...),
+				append(hexutil.Bytes{byte(cfg.DepositRequestType)}, emptyDeposits...),
+			},
+		},
+		{
+			name:    "out of order",
+			version: clparams.GloasVersion,
+			requests: []hexutil.Bytes{
+				append(hexutil.Bytes{byte(cfg.WithdrawalRequestType)}, emptyWithdrawals...),
+				append(hexutil.Bytes{byte(cfg.DepositRequestType)}, emptyDeposits...),
+			},
+		},
+		{
+			name:     "unknown",
+			version:  clparams.GloasVersion,
+			requests: []hexutil.Bytes{{0xff, 0x00}},
+		},
+		{
+			name:     "builder before gloas",
+			version:  clparams.FuluVersion,
+			requests: []hexutil.Bytes{append(hexutil.Bytes{byte(cfg.BuilderDepositRequestType)}, emptyBuilderDeposits...)},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := DecodeExecutionRequestsList(&cfg, tc.requests, tc.version)
+			require.Error(t, err)
+		})
+	}
+}
+
 func TestGetExecutionRequestsListPreGloasOmitsBuilderRequests(t *testing.T) {
 	cfg := clparams.MainnetBeaconConfig
 	requests := NewExecutionRequestsWithVersion(&cfg, clparams.FuluVersion)
