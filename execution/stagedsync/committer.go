@@ -95,11 +95,6 @@ type commitmentCalculator struct {
 	// stage progress instead of finding a commitment state).
 	hasComputed bool
 
-	// lastStepCheckpointTxNum is the txNum of the last step-boundary checkpoint,
-	// so the block-end-edge checkpoint on *blockResult doesn't double-fire when
-	// the edge txResult already triggered one.
-	lastStepCheckpointTxNum uint64
-
 	// in receives the same applyResult stream as the apply loop,
 	// plus commitComputeRequest messages for explicit compute triggers.
 	in chan applyResult
@@ -317,11 +312,6 @@ func (cc *commitmentCalculator) handleMessage(ctx context.Context, msg applyResu
 			// mode now, so the first window block's per-block compute (and
 			// changeset) covers only its own deltas.
 			cc.computeTransition(ctx, r)
-		} else if cc.shouldCheckpointStepBoundary(r.lastTxNum) && cc.lastStepCheckpointTxNum != r.lastTxNum {
-			// Block ends exactly on a step edge but no edge txResult arrived
-			// (e.g. empty finalize) — serial's CommitStepBoundary checkpoints
-			// the block-end tx unconditionally, so checkpoint it here too.
-			cc.computeStepBoundary(ctx, &blockResult{BlockNum: r.BlockNum, BlockHash: r.BlockHash, lastTxNum: r.lastTxNum})
 		}
 		// In BatchCommitments mode (without forcePerBlockCompute): just
 		// accumulate — compute only on explicit commitComputeRequest from
@@ -478,7 +468,6 @@ func (cc *commitmentCalculator) computeStepBoundary(ctx context.Context, br *blo
 			err:      fmt.Errorf("commitmentCalculator: step-boundary compute failed: %w", err),
 		})
 	}
-	cc.lastStepCheckpointTxNum = br.lastTxNum
 }
 
 // computeAndCheck computes per-block commitment and validates the root.
