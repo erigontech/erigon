@@ -312,3 +312,129 @@ func requireBranchesConsistentWithAccounts(t *testing.T, doms *execctx.SharedDom
 	}
 	require.Positive(t, checked, "expected at least one commitment branch to verify at the step edge")
 }
+
+type stepEdgeOutcome struct {
+	commitmentState  []byte
+	accountsThruEdge int
+}
+
+// runBlockEndingOnStepEdge drives one block, in pure batch mode, whose finalize
+// (block-end) txNum is exactly the step-0 edge (txNum 15, stepSize 16). Regular
+// txs 1..14 each emit a txResult; none lands on the edge. The block-end txNum 15
+// IS the step edge, and deliverEdgeTxResult models whether the exec loop emits a
+// txResult there — in production that send is gated on `len(finalizeWrites) > 0`
+// in blockExecutor.nextResult (exec3_parallel.go), so an empty-finalize block
+// delivers only the blockResult. The blockResult (lastTxNum=15) always arrives.
+func runBlockEndingOnStepEdge(t *testing.T, deliverEdgeTxResult bool) stepEdgeOutcome {
+	t.Helper()
+	ctx := context.Background()
+	logger := log.New()
+	const stepSize = uint64(16)
+	const edgeTxNum = stepSize - 1 // 15: (txNum+1)%stepSize == 0
+
+	dirs := datadir.New(t.TempDir())
+	rawDb := mdbx.New(dbcfg.ChainDB, logger).InMem(t, dirs.Chaindata).MustOpen()
+	defer rawDb.Close()
+
+	agg, err := dbstate.NewTest(dirs).StepSize(stepSize).Logger(logger).Open(ctx, rawDb)
+	require.NoError(t, err)
+	defer agg.Close()
+
+	db, err := temporal.New(rawDb, agg)
+	require.NoError(t, err)
+
+	tx, err := db.BeginTemporalRw(ctx) //nolint:gocritic
+	require.NoError(t, err)
+	defer tx.Rollback()
+
+	doms, err := execctx.NewSharedDomains(ctx, tx, logger)
+	require.NoError(t, err)
+	defer doms.Close()
+
+	in := make(chan applyResult, 64)
+	out := make(chan commitmentResult, 64)
+	// forcePerBlockCompute=false + huge perBlockFrom => pure batch mode: the
+	// blockResult never triggers a per-block compute, so the only thing that can
+	// checkpoint the step edge is the step-boundary hook.
+	cc, err := newCommitmentCalculator(ctx, doms, db, "test", logger, false, in, out)
+	require.NoError(t, err)
+
+	rnd := rand.New(rand.NewSource(42))
+	writeAccount := func(txNum uint64) {
+		addrBytes := make([]byte, length.Addr)
+		rnd.Read(addrBytes)
+		addr := accounts.InternAddress([20]byte(addrBytes))
+		bal := *uint256.NewInt(txNum * 1000)
+		acc := accounts.Account{Nonce: txNum, Balance: bal, CodeHash: accounts.EmptyCodeHash}
+		buf := accounts.SerialiseV3(&acc)
+		require.NoError(t, doms.DomainPut(kv.AccountsDomain, tx, addrBytes, buf, txNum, nil))
+		cc.handleMessage(ctx, &txResult{
+			blockNum: 1,
+			txNum:    txNum,
+			writes: state.VersionedWrites{
+				&state.VersionedWrite{Address: addr, Path: state.NoncePath, Val: txNum},
+				&state.VersionedWrite{Address: addr, Path: state.BalancePath, Val: bal},
+			},
+		})
+	}
+
+	for txNum := uint64(1); txNum < edgeTxNum; txNum++ {
+		writeAccount(txNum)
+	}
+	if deliverEdgeTxResult {
+		writeAccount(edgeTxNum)
+	}
+	cc.handleMessage(ctx, &blockResult{BlockNum: 1, BlockHash: common.Hash{0x01}, lastTxNum: edgeTxNum})
+	cc.Stop()
+
+	stateBlob, _, err := doms.GetLatest(kv.CommitmentDomain, tx, commitmentdb.KeyCommitmentState)
+	require.NoError(t, err)
+
+	require.NoError(t, doms.Flush(ctx, tx))
+	it, err := tx.RangeAsOf(kv.AccountsDomain, nil, nil, edgeTxNum+1, order.Asc, -1)
+	require.NoError(t, err)
+	defer it.Close()
+	accCount := 0
+	for it.HasNext() {
+		_, v, err := it.Next()
+		require.NoError(t, err)
+		if len(v) > 0 {
+			accCount++
+		}
+	}
+	return stepEdgeOutcome{commitmentState: stateBlob, accountsThruEdge: accCount}
+}
+
+// TestHandleMessage_StepEdgeAtBlockEnd pins parity with serial when a step edge
+// lands exactly on a block's finalize (block-end) txNum. Serial runs
+// CommitStepBoundary on the block-end tx task unconditionally (exec3_serial.go),
+// so it always checkpoints the edge. In parallel the calculator only consults
+// shouldCheckpointStepBoundary in handleMessage's *txResult case, and the exec
+// loop suppresses the finalize txResult when the block produced no finalize
+// writes (`if len(finalizeWrites) > 0`). The two sub-cases differ ONLY by whether
+// a txResult is delivered at the edge txNum; both must leave a step-aligned
+// commitment checkpoint, else the step's commitment .kv lags its account-domain
+// .kv (the inconsistency fixed for the mid-block case).
+func TestHandleMessage_StepEdgeAtBlockEnd(t *testing.T) {
+	t.Run("with_finalize_writes", func(t *testing.T) {
+		res := runBlockEndingOnStepEdge(t, true)
+		require.GreaterOrEqual(t, len(res.commitmentState), 16,
+			"edge txResult delivered → step-boundary checkpoint written")
+		gotTxNum, gotBlockNum := commitmentdb.DecodeTxBlockNums(res.commitmentState)
+		require.Equal(t, uint64(15), gotTxNum)
+		require.Equal(t, uint64(1), gotBlockNum)
+	})
+
+	t.Run("empty_finalize", func(t *testing.T) {
+		res := runBlockEndingOnStepEdge(t, false)
+		require.Positive(t, res.accountsThruEdge,
+			"sanity: the account domain holds the block's writes through the step edge")
+		require.GreaterOrEqual(t, len(res.commitmentState), 16,
+			"a block ending on a step edge with empty finalize must still leave a step-aligned "+
+				"commitment checkpoint (serial does via CommitStepBoundary); otherwise step-0 "+
+				"commitment .kv lags its account .kv")
+		gotTxNum, gotBlockNum := commitmentdb.DecodeTxBlockNums(res.commitmentState)
+		require.Equal(t, uint64(15), gotTxNum)
+		require.Equal(t, uint64(1), gotBlockNum)
+	})
+}

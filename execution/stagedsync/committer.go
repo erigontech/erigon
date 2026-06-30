@@ -93,6 +93,11 @@ type commitmentCalculator struct {
 	// stage progress instead of finding a commitment state).
 	hasComputed bool
 
+	// lastStepCheckpointTxNum is the txNum of the last step-boundary checkpoint,
+	// so the block-end-edge checkpoint on *blockResult doesn't double-fire when
+	// the edge txResult already triggered one.
+	lastStepCheckpointTxNum uint64
+
 	// in receives the same applyResult stream as the apply loop,
 	// plus commitComputeRequest messages for explicit compute triggers.
 	in chan applyResult
@@ -208,14 +213,14 @@ func (cc *commitmentCalculator) perBlockCompute() bool {
 // shouldCheckpointStepBoundary reports whether this tx sits on a not-yet-frozen
 // step edge that the calculator must checkpoint itself, in every commitment mode
 // (the snapshot producer runs per-block and still needs step-aligned commitment).
-func (cc *commitmentCalculator) shouldCheckpointStepBoundary(r *txResult) bool {
+func (cc *commitmentCalculator) shouldCheckpointStepBoundary(txNum uint64) bool {
 	if cc.stepSize == 0 || dbg.DiscardCommitment() {
 		return false
 	}
-	if (r.txNum+1)%cc.stepSize != 0 {
+	if (txNum+1)%cc.stepSize != 0 {
 		return false
 	}
-	return r.txNum/cc.stepSize >= uint64(cc.roTx.StepsInFiles(kv.CommitmentDomain))
+	return txNum/cc.stepSize >= uint64(cc.roTx.StepsInFiles(kv.CommitmentDomain))
 }
 
 // handleMessage contains the break logic — decides what to do with each
@@ -245,7 +250,7 @@ func (cc *commitmentCalculator) handleMessage(ctx context.Context, msg applyResu
 			cc.state.ApplyWrites(r.writes)
 		}
 
-		if cc.shouldCheckpointStepBoundary(r) {
+		if cc.shouldCheckpointStepBoundary(r.txNum) {
 			cc.computeStepBoundary(ctx, &blockResult{BlockNum: r.blockNum, BlockHash: r.blockHash, lastTxNum: r.txNum})
 		}
 
@@ -287,6 +292,11 @@ func (cc *commitmentCalculator) handleMessage(ctx context.Context, msg applyResu
 			} else {
 				cc.computeAndCheck(ctx, r)
 			}
+		} else if cc.shouldCheckpointStepBoundary(r.lastTxNum) && cc.lastStepCheckpointTxNum != r.lastTxNum {
+			// Block ends exactly on a step edge but no edge txResult arrived
+			// (e.g. empty finalize) — serial's CommitStepBoundary checkpoints
+			// the block-end tx unconditionally, so checkpoint it here too.
+			cc.computeStepBoundary(ctx, &blockResult{BlockNum: r.BlockNum, BlockHash: r.BlockHash, lastTxNum: r.lastTxNum})
 		}
 		// In BatchCommitments mode (without forcePerBlockCompute): just
 		// accumulate — compute only on explicit commitComputeRequest from
@@ -443,6 +453,7 @@ func (cc *commitmentCalculator) computeStepBoundary(ctx context.Context, br *blo
 			err:      fmt.Errorf("commitmentCalculator: step-boundary compute failed: %w", err),
 		})
 	}
+	cc.lastStepCheckpointTxNum = br.lastTxNum
 }
 
 // computeAndCheck computes per-block commitment and validates the root.
