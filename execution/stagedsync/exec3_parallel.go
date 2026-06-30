@@ -566,7 +566,7 @@ func (pe *parallelExecutor) execImpl(ctx context.Context, execStage *StageState,
 						// Spawn per-block validation in a goroutine — the result is
 						// joined via Wait() below, after the other per-result work
 						// has had a chance to run in parallel with validation.
-						blockValidatorWaiter = newBlockValidator(applyResult.BlockGasUsed, applyResult.BlobGasUsed, checkReceipts, checkBloom, applyResult.Receipts,
+						blockValidatorWaiter = newBlockValidator(pe.cfg.engine, applyResult.BlockGasUsed, applyResult.BlobGasUsed, checkReceipts, checkBloom, applyResult.Receipts,
 							lastHeader, b.Transactions(), pe.cfg.chainConfig, pe.logger)
 
 						if !applyResult.isPartial && !execStage.CurrentSyncCycle.IsInitialCycle {
@@ -1680,6 +1680,7 @@ func (result *execResult) calcFees(
 		coinbaseNonce = coinbaseAcc.Nonce
 	}
 	coinbaseEmptyCodeHash := coinbaseAcc == nil || coinbaseAcc.IsEmptyCodeHash()
+	coinbaseSelfdestructed := false
 	for _, w := range result.TxOut {
 		if w.Address != result.Coinbase && (!hasBurnt || w.Address != burntAddr) {
 			continue
@@ -1705,10 +1706,23 @@ func (result *execResult) calcFees(
 			if w.Address == result.Coinbase {
 				coinbaseHasCodeHashWrite = true
 			}
+		case state.SelfDestructPath:
+			if w.Address == result.Coinbase {
+				if v, ok := w.Val.(bool); ok {
+					coinbaseSelfdestructed = v
+				}
+			}
 		}
 	}
 	oldCoinbaseBalance := newCoinbaseBalance
-	newCoinbaseBalance.Add(&newCoinbaseBalance, &result.ExecutionResult.FeeTipped)
+	// Burn the tip only for an actual SELFDESTRUCT of a contract coinbase.
+	// DeleteAccount also emits SelfDestructPath=true for EIP-161 empty-removal of
+	// a touched EOA coinbase, where the delayed tip must still be credited (it
+	// re-creates the account) to match serial.
+	coinbaseWasContract := !coinbaseEmptyCodeHash || coinbaseHasCodeHashWrite
+	if !(coinbaseSelfdestructed && coinbaseWasContract) {
+		newCoinbaseBalance.Add(&newCoinbaseBalance, &result.ExecutionResult.FeeTipped)
+	}
 	oldBurntBalance := newBurntBalance
 	if hasBurnt && chainRules.IsLondon {
 		newBurntBalance.Add(&newBurntBalance, &result.ExecutionResult.FeeBurnt)
@@ -1722,7 +1736,7 @@ func (result *execResult) calcFees(
 	// Use the worker's post-write Nonce / CodeHash (not pre-tx coinbaseAcc) so
 	// that a sender==coinbase tx whose worker wrote a non-empty Nonce isn't
 	// mistakenly treated as empty here when FeeTipped==0.
-	coinbaseEmptyRemoval := state.EIP161EmptyRemoval(chainRules.IsSpuriousDragon, chainRules.IsAura, result.Coinbase)
+	coinbaseEmptyRemoval := state.EIP161EmptyRemoval(chainRules.IsEIP161Enabled(), chainRules.IsAura, result.Coinbase)
 	// nil pre-state must not short-circuit to empty=true: a worker may
 	// have already bumped Nonce or set CodeHash, and EIP-161 emptiness
 	// must respect those writes — otherwise SelfDestructPath is emitted
@@ -1781,7 +1795,7 @@ func (result *execResult) calcFees(
 	if hasBurnt && newBurntBalance != oldBurntBalance {
 		result.CollectorWrites = result.CollectorWrites.SetAccountBalanceOrDelete(
 			burntAddr, burntAcc, newBurntBalance,
-			tracing.BalanceDecreaseGasBuy, state.EIP161EmptyRemoval(chainRules.IsSpuriousDragon, chainRules.IsAura, burntAddr))
+			tracing.BalanceDecreaseGasBuy, state.EIP161EmptyRemoval(chainRules.IsEIP161Enabled(), chainRules.IsAura, burntAddr))
 		addWrites = append(addWrites, &state.VersionedWrite{
 			Address:             burntAddr,
 			Path:                state.BalancePath,
@@ -2610,7 +2624,7 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 						return keys
 					}
 					// Mirror txtask.go's genesis rules-clobber so empty allocs (AuRa ZeroAddress) survive.
-					emptyRemoval := be.blockNum != 0 && pe.cfg.chainConfig.IsSpuriousDragon(be.blockNum)
+					emptyRemoval := be.blockNum != 0 && pe.cfg.chainConfig.IsEIP161Enabled(be.blockNum)
 					txResult.writes = normalizeWriteSet(rawWrites, be.versionMap, txVersion.TxIndex, resultIncarnation, stateReader, domainStorageKeys, emptyRemoval, pe.cfg.chainConfig.Aura != nil)
 				}
 
