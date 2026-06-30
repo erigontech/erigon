@@ -54,7 +54,7 @@ type FullMdGas struct {
 // MdGasUsage reports per-frame gas usage.
 type MdGasUsage struct {
 	Regular    uint64
-	State      int64
+	State      int64 // can be negative due to state clearing (e.g. SSTORE clear)
 	StateSpill uint64
 }
 

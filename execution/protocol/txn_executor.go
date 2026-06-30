@@ -614,7 +614,7 @@ func (st *TxnExecutor) Execute(refunds bool, gasBailout bool) (result *evmtypes.
 		if rules.IsAmsterdam {
 			combined := gasUsed.PlusIntrinsic(imdGas)
 			st.blockStateGasUsed = combined.StateClamped()
-			st.blockRegularGasUsed = max(combined.Regular, intrinsicGasResult.FloorGasCost)
+			st.blockRegularGasUsed = combined.Regular
 			st.txnGasUsedB4Refunds = combined.Total()
 			refund := min(st.txnGasUsedB4Refunds/refundQuotient, st.state.GetRefund())
 			st.txnGasUsed = max(intrinsicGasResult.FloorGasCost, st.txnGasUsedB4Refunds-refund)
@@ -633,7 +633,7 @@ func (st *TxnExecutor) Execute(refunds bool, gasBailout bool) (result *evmtypes.
 	} else if rules.IsAmsterdam {
 		combined := gasUsed.PlusIntrinsic(imdGas)
 		st.blockStateGasUsed = combined.StateClamped()
-		st.blockRegularGasUsed = max(combined.Regular, intrinsicGasResult.FloorGasCost)
+		st.blockRegularGasUsed = combined.Regular
 		st.txnGasUsedB4Refunds = combined.Total()
 		st.txnGasUsed = max(st.txnGasUsedB4Refunds, intrinsicGasResult.FloorGasCost)
 	} else {

@@ -35,7 +35,7 @@
 - shard: blocktests-devnet
   workers: 12
   # TODO: reduce to 0 (glamsterdam-devnet-6 EIPs WIP)
-  max-allowed-failures: 1145
+  max-allowed-failures: 207
   exec3-parallel: true
 - shard: enginextests-stable-sequential
   workers: 8
@@ -124,7 +124,7 @@
 - shard: blocktests-devnet-race-amsterdam
   workers: 12
   # TODO: reduce to 0 (glamsterdam-devnet-6 EIPs WIP)
-  max-allowed-failures: 1145
+  max-allowed-failures: 207
   exec3-parallel: true
 - shard: zkevm-witness-race
   workers: 8
