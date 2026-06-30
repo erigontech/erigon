@@ -159,6 +159,20 @@ func TestPublishChainTomlV2NilEnrUpdaterSkipped(t *testing.T) {
 		"a chain.v2 manifest must be written even when ENR updater is nil")
 }
 
+// TestPublishLocalChainTomlV2EmptyFingerprintGate pins the startup
+// race fix: PublishLocalChainTomlV2 returns nil silently when the
+// downloader hasn't yet been told its own ENR fingerprint. Pre-fix
+// every early-startup invocation fell through to
+// RollingV2Publisher.Publish which logs "ENR fingerprint not set"
+// and errors.
+func TestPublishLocalChainTomlV2EmptyFingerprintGate(t *testing.T) {
+	d := &Downloader{}
+	inv := seedInventory(t)
+	require.Empty(t, d.SelfENRFingerprint(), "precondition: fingerprint must start empty on a zero-value Downloader")
+	err := d.PublishLocalChainTomlV2(inv)
+	require.NoError(t, err, "empty fingerprint must be a silent no-op, not an error")
+}
+
 func TestPublishChainTomlV2Regenerates(t *testing.T) {
 	snapDir := t.TempDir()
 	torrentFS := NewAtomicTorrentFS(snapDir)

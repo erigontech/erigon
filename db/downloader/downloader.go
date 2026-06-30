@@ -901,6 +901,11 @@ func (d *Downloader) PublishLocalChainTomlV2(inv *storagesnapshot.Inventory) err
 	if d.v2PublishGateEnabled.Load() && !d.v2PublishGateOpen.Load() {
 		return nil
 	}
+	// Publisher names advertisements chain.v2.<enr-fp>.<seq>.toml; without
+	// a fingerprint, RollingV2Publisher.Publish errors. Skip until it's set.
+	if d.SelfENRFingerprint() == "" {
+		return nil
+	}
 	d.lock.RLock()
 	updater := d.enrUpdater
 	d.lock.RUnlock()
