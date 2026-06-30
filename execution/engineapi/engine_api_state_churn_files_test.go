@@ -33,23 +33,25 @@ import (
 )
 
 // waitForDomainFilesSettled blocks until background building has produced at
-// least one domain file and no build or merge is in flight, so the snapshot
-// boundary is stable before the test unwinds across it.
-func waitForDomainFilesSettled(t *testing.T, agg *state.Aggregator) {
+// least one domain file and any in-flight build/merge has drained, so the
+// snapshot boundary is stable before the test unwinds across it.
+func waitForDomainFilesSettled(ctx context.Context, t *testing.T, agg *state.Aggregator) {
 	t.Helper()
+	// First wait for a file to appear; FilesAmount()>0 is the signal that the
+	// background builder has run at least once.
 	require.Eventually(t, func() bool {
-		built := false
 		for _, n := range agg.FilesAmount() {
 			if n > 0 {
-				built = true
-				break
+				return true
 			}
 		}
-		return built && !agg.HasBackgroundFilesBuild2()
-	}, 60*time.Second, 100*time.Millisecond, "domain files never settled")
+		return false
+	}, 60*time.Second, 100*time.Millisecond, "no domain files were built")
+	// Then let the current build/merge finish so the file set stops changing.
+	<-agg.WaitForBuildAndMerge(ctx)
 }
 
-func TestEngineApiUnwindAcrossSnapshotFileBoundary(t *testing.T) {
+func TestEngineApiUnwindAcrossDomainStepBoundaries(t *testing.T) {
 	ctx := t.Context()
 	logger := testlog.Logger(t, log.LvlError)
 	dataDir := t.TempDir()
@@ -79,7 +81,7 @@ func TestEngineApiUnwindAcrossSnapshotFileBoundary(t *testing.T) {
 		payloads, _, churn, sums := buildChurnChain(ctx, t, eat, pokes, func(k int) int64 { return int64(k) })
 		tip := uint64(2 + pokes)
 
-		waitForDomainFilesSettled(t, eat.StateAgg)
+		waitForDomainFilesSettled(ctx, t, eat.StateAgg)
 		t.Logf("domain files settled: %v", eat.StateAgg.FilesAmount())
 
 		// Unwind a 60-block range. With snapshot files present it crosses several

@@ -385,7 +385,7 @@ func InitialiseEngineApiTester(ctx context.Context, args EngineApiTesterInitArgs
 	// see Done before downstream resources (DB, node) are torn down.
 	addCleanup(func() error { cancel(); return nil })
 	var stateAgg *state.Aggregator
-	if aggHolder, ok := ethBackend.ChainDB().(interface{ Agg() any }); ok {
+	if aggHolder, ok := ethBackend.ChainDB().(state.HasAgg); ok {
 		stateAgg, _ = aggHolder.Agg().(*state.Aggregator)
 	}
 	success = true
