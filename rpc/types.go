@@ -100,15 +100,19 @@ var (
 // UnmarshalJSON parses a JSON block number: named tags or 0x-prefixed hex when quoted,
 // bare decimal integer when unquoted. Quoted decimal strings are rejected.
 func (bn *BlockNumber) UnmarshalJSON(data []byte) error {
-	input := strings.TrimSpace(string(data))
-	if input == "null" || input == `"null"` {
+	input := string(data)
+	if input == "null" {
 		*bn = LatestBlockNumber
 		return nil
 	}
 	var blckNum uint64
+	var err error
 	if len(input) >= 2 && input[0] == '"' && input[len(input)-1] == '"' {
 		input = input[1 : len(input)-1]
 		switch input {
+		case "null":
+			*bn = LatestBlockNumber
+			return nil
 		case "earliest":
 			*bn = EarliestBlockNumber
 			return nil
@@ -128,17 +132,12 @@ func (bn *BlockNumber) UnmarshalJSON(data []byte) error {
 			*bn = LatestExecutedBlockNumber
 			return nil
 		}
-		var err error
 		blckNum, err = hexutil.DecodeUint64(input)
-		if err != nil {
-			return err
-		}
 	} else {
-		var err error
 		blckNum, err = strconv.ParseUint(input, 10, 64)
-		if err != nil {
-			return err
-		}
+	}
+	if err != nil {
+		return err
 	}
 	if blckNum > math.MaxInt64 {
 		return errors.New("block number larger than int64")

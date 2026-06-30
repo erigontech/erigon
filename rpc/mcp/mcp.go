@@ -71,15 +71,8 @@ func NewErigonMCPServer(ethAPI jsonrpc.EthAPI, erigonAPI jsonrpc.ErigonAPI, otsA
 // parseBlockNumberOrHash parses block number or hash from string
 func parseBlockNumberOrHash(s string) (rpc.BlockNumberOrHash, error) {
 	var result rpc.BlockNumberOrHash
-	if strings.HasPrefix(s, "0x") && len(s) == 66 {
-		hash := common.HexToHash(s)
-		return rpc.BlockNumberOrHashWithHash(hash, false), nil
-	}
-	blockNum, err := parseBlockNumber(s)
-	if err != nil {
-		return result, err
-	}
-	return rpc.BlockNumberOrHashWithNumber(blockNum), nil
+	err := result.UnmarshalJSON([]byte(`"` + s + `"`))
+	return result, err
 }
 
 // registerTools registers all MCP tools
@@ -513,7 +506,10 @@ func (e *ErigonMCPServer) handleGetBlockTransactionCountByHash(ctx context.Conte
 
 func (e *ErigonMCPServer) handleGetBalance(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 	addr := common.HexToAddress(req.GetString("address", ""))
-	blockNumOrHash, _ := parseBlockNumberOrHash(req.GetString("blockNumber", "latest"))
+	blockNumOrHash, err := parseBlockNumberOrHash(req.GetString("blockNumber", "latest"))
+	if err != nil {
+		return mcp.NewToolResultError(err.Error()), nil
+	}
 	balance, err := e.ethAPI.GetBalance(ctx, addr, &blockNumOrHash)
 	if err != nil {
 		return mcp.NewToolResultError(err.Error()), nil
@@ -549,7 +545,10 @@ func (e *ErigonMCPServer) handleGetTransactionByBlockHashAndIndex(ctx context.Co
 }
 
 func (e *ErigonMCPServer) handleGetTransactionByBlockNumberAndIndex(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-	blockNum, _ := parseBlockNumber(req.GetString("blockNumber", "latest"))
+	blockNum, err := parseBlockNumber(req.GetString("blockNumber", "latest"))
+	if err != nil {
+		return mcp.NewToolResultError(err.Error()), nil
+	}
 	idx := hexutil.Uint(req.GetInt("index", 0))
 	result, err := e.ethAPI.GetTransactionByBlockNumberAndIndex(ctx, blockNum, idx)
 	if err != nil {
@@ -574,7 +573,10 @@ func (e *ErigonMCPServer) handleGetTransactionReceipt(ctx context.Context, req m
 }
 
 func (e *ErigonMCPServer) handleGetBlockReceipts(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-	blockNumOrHash, _ := parseBlockNumberOrHash(req.GetString("blockNumberOrHash", "latest"))
+	blockNumOrHash, err := parseBlockNumberOrHash(req.GetString("blockNumberOrHash", "latest"))
+	if err != nil {
+		return mcp.NewToolResultError(err.Error()), nil
+	}
 	result, err := e.ethAPI.GetBlockReceipts(ctx, blockNumOrHash)
 	if err != nil {
 		return mcp.NewToolResultError(err.Error()), nil
@@ -586,14 +588,18 @@ func (e *ErigonMCPServer) handleGetLogs(ctx context.Context, req mcp.CallToolReq
 	var crit filters.FilterCriteria
 
 	if from := req.GetString("fromBlock", ""); from != "" {
-		if bn, err := parseBlockNumber(from); err == nil {
-			crit.FromBlock = big.NewInt(bn.Int64())
+		bn, err := parseBlockNumber(from)
+		if err != nil {
+			return mcp.NewToolResultError(err.Error()), nil
 		}
+		crit.FromBlock = big.NewInt(bn.Int64())
 	}
 	if to := req.GetString("toBlock", ""); to != "" {
-		if bn, err := parseBlockNumber(to); err == nil {
-			crit.ToBlock = big.NewInt(bn.Int64())
+		bn, err := parseBlockNumber(to)
+		if err != nil {
+			return mcp.NewToolResultError(err.Error()), nil
 		}
+		crit.ToBlock = big.NewInt(bn.Int64())
 	}
 	if addr := req.GetString("address", ""); addr != "" {
 		if strings.HasPrefix(addr, "[") {
@@ -629,7 +635,10 @@ func (e *ErigonMCPServer) handleGetLogs(ctx context.Context, req mcp.CallToolReq
 
 func (e *ErigonMCPServer) handleGetCode(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 	addr := common.HexToAddress(req.GetString("address", ""))
-	blockNumOrHash, _ := parseBlockNumberOrHash(req.GetString("blockNumber", "latest"))
+	blockNumOrHash, err := parseBlockNumberOrHash(req.GetString("blockNumber", "latest"))
+	if err != nil {
+		return mcp.NewToolResultError(err.Error()), nil
+	}
 	code, err := e.ethAPI.GetCode(ctx, addr, &blockNumOrHash)
 	if err != nil {
 		return mcp.NewToolResultError(err.Error()), nil
@@ -643,7 +652,10 @@ func (e *ErigonMCPServer) handleGetCode(ctx context.Context, req mcp.CallToolReq
 func (e *ErigonMCPServer) handleGetStorageAt(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 	addr := common.HexToAddress(req.GetString("address", ""))
 	pos := req.GetString("position", "0x0")
-	blockNumOrHash, _ := parseBlockNumberOrHash(req.GetString("blockNumber", "latest"))
+	blockNumOrHash, err := parseBlockNumberOrHash(req.GetString("blockNumber", "latest"))
+	if err != nil {
+		return mcp.NewToolResultError(err.Error()), nil
+	}
 	result, err := e.ethAPI.GetStorageAt(ctx, addr, pos, &blockNumOrHash)
 	if err != nil {
 		return mcp.NewToolResultError(err.Error()), nil
@@ -653,7 +665,10 @@ func (e *ErigonMCPServer) handleGetStorageAt(ctx context.Context, req mcp.CallTo
 
 func (e *ErigonMCPServer) handleGetStorageValues(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 	rawRequests := req.GetString("requests", "{}")
-	blockNumOrHash, _ := parseBlockNumberOrHash(req.GetString("blockNumber", "latest"))
+	blockNumOrHash, err := parseBlockNumberOrHash(req.GetString("blockNumber", "latest"))
+	if err != nil {
+		return mcp.NewToolResultError(err.Error()), nil
+	}
 
 	// Parse the JSON requests map
 	var parsed map[string][]string
@@ -690,7 +705,10 @@ func (e *ErigonMCPServer) handleGetStorageValues(ctx context.Context, req mcp.Ca
 
 func (e *ErigonMCPServer) handleGetTransactionCount(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 	addr := common.HexToAddress(req.GetString("address", ""))
-	blockNumOrHash, _ := parseBlockNumberOrHash(req.GetString("blockNumber", "latest"))
+	blockNumOrHash, err := parseBlockNumberOrHash(req.GetString("blockNumber", "latest"))
+	if err != nil {
+		return mcp.NewToolResultError(err.Error()), nil
+	}
 	count, err := e.ethAPI.GetTransactionCount(ctx, addr, &blockNumOrHash)
 	if err != nil {
 		return mcp.NewToolResultError(err.Error()), nil
@@ -729,7 +747,10 @@ func (e *ErigonMCPServer) handleCall(ctx context.Context, req mcp.CallToolReques
 		args.Gas = (*hexutil.Uint64)(&g)
 	}
 
-	blockNumOrHash, _ := parseBlockNumberOrHash(req.GetString("blockNumber", "latest"))
+	blockNumOrHash, err := parseBlockNumberOrHash(req.GetString("blockNumber", "latest"))
+	if err != nil {
+		return mcp.NewToolResultError(err.Error()), nil
+	}
 	result, err := e.ethAPI.Call(ctx, args, &blockNumOrHash, nil, nil)
 	if err != nil {
 		return mcp.NewToolResultError(err.Error()), nil
@@ -816,7 +837,10 @@ func (e *ErigonMCPServer) handleGetProof(ctx context.Context, req mcp.CallToolRe
 			return mcp.NewToolResultError(fmt.Sprintf("invalid storageKeys JSON: %v", err)), nil
 		}
 	}
-	blockNumOrHash, _ := parseBlockNumberOrHash(req.GetString("blockNumber", "latest"))
+	blockNumOrHash, err := parseBlockNumberOrHash(req.GetString("blockNumber", "latest"))
+	if err != nil {
+		return mcp.NewToolResultError(err.Error()), nil
+	}
 	result, err := e.ethAPI.GetProof(ctx, addr, keys, &blockNumOrHash)
 	if err != nil {
 		return mcp.NewToolResultError(err.Error()), nil
@@ -859,7 +883,10 @@ func (e *ErigonMCPServer) handleProtocolVersion(ctx context.Context, req mcp.Cal
 // ===== UNCLE HANDLERS =====
 
 func (e *ErigonMCPServer) handleGetUncleByBlockNumberAndIndex(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-	blockNum, _ := parseBlockNumber(req.GetString("blockNumber", "latest"))
+	blockNum, err := parseBlockNumber(req.GetString("blockNumber", "latest"))
+	if err != nil {
+		return mcp.NewToolResultError(err.Error()), nil
+	}
 	result, err := e.ethAPI.GetUncleByBlockNumberAndIndex(ctx, blockNum, hexutil.Uint(req.GetInt("index", 0)))
 	if err != nil {
 		return mcp.NewToolResultError(err.Error()), nil
@@ -883,7 +910,10 @@ func (e *ErigonMCPServer) handleGetUncleByBlockHashAndIndex(ctx context.Context,
 }
 
 func (e *ErigonMCPServer) handleGetUncleCountByBlockNumber(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-	blockNum, _ := parseBlockNumber(req.GetString("blockNumber", "latest"))
+	blockNum, err := parseBlockNumber(req.GetString("blockNumber", "latest"))
+	if err != nil {
+		return mcp.NewToolResultError(err.Error()), nil
+	}
 	count, err := e.ethAPI.GetUncleCountByBlockNumber(ctx, blockNum)
 	if err != nil {
 		return mcp.NewToolResultError(err.Error()), nil
@@ -919,7 +949,10 @@ func (e *ErigonMCPServer) handleErigonForks(ctx context.Context, req mcp.CallToo
 func (e *ErigonMCPServer) handleErigonBlockNumber(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 	var blockNumPtr *rpc.BlockNumber
 	if s := req.GetString("blockNumber", ""); s != "" {
-		bn, _ := parseBlockNumber(s)
+		bn, err := parseBlockNumber(s)
+		if err != nil {
+			return mcp.NewToolResultError(err.Error()), nil
+		}
 		blockNumPtr = &bn
 	}
 	result, err := e.erigonAPI.BlockNumber(ctx, blockNumPtr)
@@ -930,7 +963,10 @@ func (e *ErigonMCPServer) handleErigonBlockNumber(ctx context.Context, req mcp.C
 }
 
 func (e *ErigonMCPServer) handleErigonGetHeaderByNumber(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-	blockNum, _ := parseBlockNumber(req.GetString("blockNumber", "latest"))
+	blockNum, err := parseBlockNumber(req.GetString("blockNumber", "latest"))
+	if err != nil {
+		return mcp.NewToolResultError(err.Error()), nil
+	}
 	header, err := e.erigonAPI.GetHeaderByNumber(ctx, blockNum)
 	if err != nil {
 		return mcp.NewToolResultError(err.Error()), nil
@@ -968,7 +1004,10 @@ func (e *ErigonMCPServer) handleErigonGetBlockByTimestamp(ctx context.Context, r
 }
 
 func (e *ErigonMCPServer) handleErigonGetBalanceChangesInBlock(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-	blockNumOrHash, _ := parseBlockNumberOrHash(req.GetString("blockNumberOrHash", "latest"))
+	blockNumOrHash, err := parseBlockNumberOrHash(req.GetString("blockNumberOrHash", "latest"))
+	if err != nil {
+		return mcp.NewToolResultError(err.Error()), nil
+	}
 	result, err := e.erigonAPI.GetBalanceChangesInBlock(ctx, blockNumOrHash)
 	if err != nil {
 		return mcp.NewToolResultError(err.Error()), nil
@@ -988,14 +1027,18 @@ func (e *ErigonMCPServer) handleErigonGetLogsByHash(ctx context.Context, req mcp
 func (e *ErigonMCPServer) handleErigonGetLogs(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 	var crit filters.FilterCriteria
 	if from := req.GetString("fromBlock", ""); from != "" {
-		if bn, err := parseBlockNumber(from); err == nil {
-			crit.FromBlock = big.NewInt(bn.Int64())
+		bn, err := parseBlockNumber(from)
+		if err != nil {
+			return mcp.NewToolResultError(err.Error()), nil
 		}
+		crit.FromBlock = big.NewInt(bn.Int64())
 	}
 	if to := req.GetString("toBlock", ""); to != "" {
-		if bn, err := parseBlockNumber(to); err == nil {
-			crit.ToBlock = big.NewInt(bn.Int64())
+		bn, err := parseBlockNumber(to)
+		if err != nil {
+			return mcp.NewToolResultError(err.Error()), nil
 		}
+		crit.ToBlock = big.NewInt(bn.Int64())
 	}
 	if addr := req.GetString("address", ""); addr != "" {
 		crit.Addresses = []common.Address{common.HexToAddress(addr)}
@@ -1117,7 +1160,10 @@ func (e *ErigonMCPServer) handleOtsGetBlockTransactions(ctx context.Context, req
 
 func (e *ErigonMCPServer) handleOtsHasCode(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 	addr := common.HexToAddress(req.GetString("address", ""))
-	blockNumOrHash, _ := parseBlockNumberOrHash(req.GetString("blockNumber", "latest"))
+	blockNumOrHash, err := parseBlockNumberOrHash(req.GetString("blockNumber", "latest"))
+	if err != nil {
+		return mcp.NewToolResultError(err.Error()), nil
+	}
 
 	hasCode, err := e.otsAPI.HasCode(ctx, addr, blockNumOrHash)
 	if err != nil {
