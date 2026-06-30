@@ -35,6 +35,7 @@ import (
 	"github.com/erigontech/erigon/cl/pool"
 	"github.com/erigontech/erigon/cl/transition"
 	"github.com/erigontech/erigon/cl/utils/eth_clock"
+	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/libp2p/go-libp2p/core/peer"
 )
@@ -48,8 +49,12 @@ type seenBidKey struct {
 
 // pendingBidKey tracks bids waiting for proposer preferences.
 type pendingBidKey struct {
-	builderIndex uint64
-	slot         uint64
+	builderIndex    uint64
+	slot            uint64
+	parentBlockHash common.Hash
+	parentBlockRoot common.Hash
+	blockHash       common.Hash
+	signature       common.Bytes96
 }
 
 // pendingBidJob represents a pending bid waiting for proposer preferences to arrive.
@@ -242,7 +247,20 @@ func (s *executionPayloadBidService) validateAndStoreBid(
 	if parentState == nil {
 		return fmt.Errorf("%w: state for parent_block_root %v not available", errBidDependencyUnavailable, bid.ParentBlockRoot)
 	}
-	if bid.PrevRandao != parentState.GetRandaoMixes(state.Epoch(parentState)) {
+	// [IGNORE] parent_block_root is known in fork choice
+	parentHeader, ok := s.forkchoiceStore.GetHeader(bid.ParentBlockRoot)
+	if !ok {
+		return fmt.Errorf("%w: parent_block_root %v not known in fork choice",
+			ErrIgnore, bid.ParentBlockRoot)
+	}
+	if slot <= parentHeader.Slot {
+		return fmt.Errorf("bid slot %d is not greater than parent block slot %d", slot, parentHeader.Slot)
+	}
+	validationState, err := s.bidValidationState(parentState, slot)
+	if err != nil {
+		return fmt.Errorf("bid validation failed: %w", err)
+	}
+	if bid.PrevRandao != validationState.GetRandaoMixes(state.Epoch(validationState)) {
 		return fmt.Errorf("bid prev_randao does not match parent state randao mix")
 	}
 
@@ -253,55 +271,7 @@ func (s *executionPayloadBidService) validateAndStoreBid(
 			ErrIgnore, builderIndex, slot)
 	}
 
-	// State-dependent checks: IsActiveBuilder, CanBuilderCoverBid, BLS signature
-	if err := s.syncedDataManager.ViewHeadState(func(headState *state.CachingBeaconState) error {
-		// [REJECT] builder is active
-		if !state.IsActiveBuilder(headState, builderIndex) {
-			return fmt.Errorf("builder %d is not active", builderIndex)
-		}
-
-		// [IGNORE] builder can cover the bid
-		if !state.CanBuilderCoverBid(headState, builderIndex, bid.Value) {
-			return fmt.Errorf("%w: builder %d cannot cover bid value %d",
-				ErrIgnore, builderIndex, bid.Value)
-		}
-
-		// [REJECT] BLS signature verification
-		// Get builder public key from builders list
-		builders := headState.GetBuilders()
-		if builders == nil {
-			return fmt.Errorf("builders list not available")
-		}
-		if builderIndex >= uint64(builders.Len()) {
-			return fmt.Errorf("builder index %d out of range (max: %d)", builderIndex, builders.Len())
-		}
-		builder := builders.Get(int(builderIndex))
-		if builder == nil {
-			return fmt.Errorf("builder %d not found", builderIndex)
-		}
-		if builder.Version != s.beaconCfg.PayloadBuilderVersion {
-			return fmt.Errorf("builder %d has unsupported version %d", builderIndex, builder.Version)
-		}
-		pk := builder.Pubkey
-
-		epoch := s.ethClock.GetEpochAtSlot(slot)
-		domain, err := headState.GetDomain(s.beaconCfg.DomainBeaconBuilder, epoch)
-		if err != nil {
-			return fmt.Errorf("failed to get domain: %w", err)
-		}
-		signingRoot, err := computeSigningRoot(bid, domain)
-		if err != nil {
-			return fmt.Errorf("failed to compute signing root: %w", err)
-		}
-		valid, err := blsVerify(msg.Signature[:], signingRoot[:], pk[:])
-		if err != nil {
-			return fmt.Errorf("signature verification error: %w", err)
-		}
-		if !valid {
-			return fmt.Errorf("invalid builder signature")
-		}
-		return nil
-	}); err != nil {
+	if err := s.validateBuilderBid(msg, validationState); err != nil {
 		return fmt.Errorf("bid validation failed: %w", err)
 	}
 
@@ -317,16 +287,6 @@ func (s *executionPayloadBidService) validateAndStoreBid(
 			return fmt.Errorf("%w: bid gas_limit %d not compatible with target %d (parent %d)",
 				ErrIgnore, bid.GasLimit, prefs.TargetGasLimit, parentGasLimit)
 		}
-	}
-
-	// [IGNORE] parent_block_root is known in fork choice
-	parentHeader, ok := s.forkchoiceStore.GetHeader(bid.ParentBlockRoot)
-	if !ok {
-		return fmt.Errorf("%w: parent_block_root %v not known in fork choice",
-			ErrIgnore, bid.ParentBlockRoot)
-	}
-	if slot <= parentHeader.Slot {
-		return fmt.Errorf("bid slot %d is not greater than parent block slot %d", slot, parentHeader.Slot)
 	}
 
 	// [IGNORE] Highest bid check: only accept if this is the highest value bid for (slot, parentBlockHash, parentBlockRoot)
@@ -354,6 +314,67 @@ func (s *executionPayloadBidService) validateAndStoreBid(
 	return nil
 }
 
+func (s *executionPayloadBidService) bidValidationState(parentState *state.CachingBeaconState, bidSlot uint64) (*state.CachingBeaconState, error) {
+	if parentState.Slot() > bidSlot {
+		return nil, fmt.Errorf("parent state slot %d is after bid slot %d", parentState.Slot(), bidSlot)
+	}
+	if parentState.Slot() == bidSlot {
+		return parentState, nil
+	}
+	validationState, err := parentState.Copy()
+	if err != nil {
+		return nil, err
+	}
+	if err := transition.DefaultMachine.ProcessSlots(validationState, bidSlot); err != nil {
+		return nil, err
+	}
+	return validationState, nil
+}
+
+func (s *executionPayloadBidService) validateBuilderBid(msg *cltypes.SignedExecutionPayloadBid, validationState *state.CachingBeaconState) error {
+	bid := msg.Message
+	builderIndex := bid.BuilderIndex
+	if !state.IsActiveBuilder(validationState, builderIndex) {
+		return fmt.Errorf("builder %d is not active", builderIndex)
+	}
+	if !state.CanBuilderCoverBid(validationState, builderIndex, bid.Value) {
+		return fmt.Errorf("%w: builder %d cannot cover bid value %d", ErrIgnore, builderIndex, bid.Value)
+	}
+
+	builders := validationState.GetBuilders()
+	if builders == nil {
+		return fmt.Errorf("builders list not available")
+	}
+	if builderIndex >= uint64(builders.Len()) {
+		return fmt.Errorf("builder index %d out of range (max: %d)", builderIndex, builders.Len())
+	}
+	builder := builders.Get(int(builderIndex))
+	if builder == nil {
+		return fmt.Errorf("builder %d not found", builderIndex)
+	}
+	if builder.Version != s.beaconCfg.PayloadBuilderVersion {
+		return fmt.Errorf("builder %d has unsupported version %d", builderIndex, builder.Version)
+	}
+
+	epoch := state.GetEpochAtSlot(s.beaconCfg, bid.Slot)
+	domain, err := validationState.GetDomain(s.beaconCfg.DomainBeaconBuilder, epoch)
+	if err != nil {
+		return fmt.Errorf("failed to get domain: %w", err)
+	}
+	signingRoot, err := computeSigningRoot(bid, domain)
+	if err != nil {
+		return fmt.Errorf("failed to compute signing root: %w", err)
+	}
+	valid, err := blsVerify(msg.Signature[:], signingRoot[:], builder.Pubkey[:])
+	if err != nil {
+		return fmt.Errorf("signature verification error: %w", err)
+	}
+	if !valid {
+		return fmt.Errorf("invalid builder signature")
+	}
+	return nil
+}
+
 // queuePendingBid adds a bid to the pending queue for later processing when preferences arrive.
 func (s *executionPayloadBidService) queuePendingBid(msg *cltypes.SignedExecutionPayloadBid) {
 	if s.pendingCount.Add(1) > maxPendingBids {
@@ -361,10 +382,7 @@ func (s *executionPayloadBidService) queuePendingBid(msg *cltypes.SignedExecutio
 		return
 	}
 
-	key := pendingBidKey{
-		builderIndex: msg.Message.BuilderIndex,
-		slot:         msg.Message.Slot,
-	}
+	key := pendingBidKeyFor(msg)
 
 	if _, loaded := s.pendingBids.LoadOrStore(key, &pendingBidJob{
 		msg:          msg,
@@ -375,6 +393,17 @@ func (s *executionPayloadBidService) queuePendingBid(msg *cltypes.SignedExecutio
 		s.pendingCond.L.Lock()
 		s.pendingCond.Signal()
 		s.pendingCond.L.Unlock()
+	}
+}
+
+func pendingBidKeyFor(msg *cltypes.SignedExecutionPayloadBid) pendingBidKey {
+	return pendingBidKey{
+		builderIndex:    msg.Message.BuilderIndex,
+		slot:            msg.Message.Slot,
+		parentBlockHash: msg.Message.ParentBlockHash,
+		parentBlockRoot: msg.Message.ParentBlockRoot,
+		blockHash:       msg.Message.BlockHash,
+		signature:       msg.Signature,
 	}
 }
 

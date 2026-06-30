@@ -302,6 +302,21 @@ func TestExecutionRequestsJSONRejectsPreGloasBuilderRequests(t *testing.T) {
 	require.Error(t, err)
 }
 
+func TestExecutionRequestsJSONTreatsNullListsAsEmpty(t *testing.T) {
+	cfg := clparams.MainnetBeaconConfig
+	requests := NewExecutionRequestsWithVersion(&cfg, clparams.FuluVersion)
+
+	require.NotPanics(t, func() {
+		err := requests.UnmarshalJSON([]byte(`{"deposits":null,"withdrawals":null,"consolidations":null,"builder_deposits":null,"builder_exits":null}`))
+		require.NoError(t, err)
+	})
+	require.Equal(t, 0, requests.Deposits.Len())
+	require.Equal(t, 0, requests.Withdrawals.Len())
+	require.Equal(t, 0, requests.Consolidations.Len())
+	require.Equal(t, 0, requests.BuilderDeposits.Len())
+	require.Equal(t, 0, requests.BuilderExits.Len())
+}
+
 func TestExecutionRequestsMarshalJSONOmitsBuilderRequestsBeforeGloas(t *testing.T) {
 	cfg := clparams.MainnetBeaconConfig
 	requests := NewExecutionRequestsWithVersion(&cfg, clparams.FuluVersion)

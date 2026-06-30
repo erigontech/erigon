@@ -339,6 +339,20 @@ func TestExecutionRequestsFromListRejectsInvalidOrdering(t *testing.T) {
 	}
 }
 
+func TestEncodeGetPayloadResponseIgnoresExecutionRequestsBeforeElectra(t *testing.T) {
+	for _, version := range []clparams.StateVersion{clparams.CapellaVersion, clparams.DenebVersion} {
+		t.Run(version.String(), func(t *testing.T) {
+			resp := &engine_types.GetPayloadResponse{
+				ExecutionPayload:  engine_types.NewExecutionPayloadSSZ(version),
+				ExecutionRequests: []hexutil.Bytes{{0xff, 0x00}},
+			}
+
+			_, err := encodeGetPayloadResponse(resp, version)
+			require.NoError(t, err)
+		})
+	}
+}
+
 func TestExchangeCapabilitiesAdvertisesJSONRPCAndSSZREST(t *testing.T) {
 	srv := NewEngineServer(log.New(), &chain.Config{}, nil, nil, false, true, false, false, nil, nil, 0, 0)
 	caps := srv.ExchangeCapabilities([]string{"engine_newPayloadV1"})

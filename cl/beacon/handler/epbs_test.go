@@ -17,6 +17,7 @@
 package handler
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"net/http"
@@ -24,6 +25,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/go-chi/chi/v5"
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/cl/clparams"
@@ -67,13 +69,30 @@ func TestPostExecutionPayloadEnvelopeReturnsForkchoiceError(t *testing.T) {
 	fcu.OnExecutionPayloadErr = errors.New("invalid execution payload")
 
 	request := httptest.NewRequest(http.MethodPost, "/eth/v1/beacon/execution_payload_envelope", strings.NewReader(`{}`))
-	request.Header.Set("Content-Type", "application/json")
+	request.Header.Set("Content-Type", "application/json; charset=utf-8")
 	recorder := httptest.NewRecorder()
 
 	handler.PostEthV1BeaconExecutionPayloadEnvelope(recorder, request)
 
 	require.Equal(t, http.StatusInternalServerError, recorder.Code, recorder.Body.String())
 	require.Contains(t, recorder.Body.String(), "invalid execution payload")
+}
+
+func TestPostPtcDutiesRejectsTooManyValidators(t *testing.T) {
+	_, _, _, _, _, handler, _, _, _, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), true)
+	handler.beaconChainCfg.GloasForkEpoch = 0
+	indices := make([]string, maxPTCDutiesRequestItems+1)
+	for i := range indices {
+		indices[i] = `"1"`
+	}
+	request := httptest.NewRequest(http.MethodPost, "/eth/v1/validator/duties/ptc/0", strings.NewReader("["+strings.Join(indices, ",")+"]"))
+	rctx := chi.NewRouteContext()
+	rctx.URLParams.Add("epoch", "0")
+	request = request.WithContext(context.WithValue(request.Context(), chi.RouteCtxKey, rctx))
+
+	_, err := handler.PostEthV1ValidatorDutiesPtc(httptest.NewRecorder(), request)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "too many validator indices")
 }
 
 func TestPostExecutionPayloadBidAcceptsSSZ(t *testing.T) {

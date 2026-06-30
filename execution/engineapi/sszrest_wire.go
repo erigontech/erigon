@@ -244,10 +244,6 @@ func newBlobsBundleSSZ(b *engine_types.BlobsBundle, version clparams.StateVersio
 func encodeGetPayloadResponse(resp *engine_types.GetPayloadResponse, version clparams.StateVersion) ([]byte, error) {
 	payload := resp.ExecutionPayload
 	payload.SSZVersion = version
-	executionRequests, err := executionRequestsFromList(resp.ExecutionRequests, version)
-	if err != nil {
-		return nil, err
-	}
 	blockValue := blockValueHash(resp.BlockValue)
 	blobsBundle := newBlobsBundleSSZ(resp.BlobsBundle, version)
 	switch version {
@@ -256,6 +252,10 @@ func encodeGetPayloadResponse(resp *engine_types.GetPayloadResponse, version clp
 	case clparams.DenebVersion:
 		return ssz2.MarshalSSZ(nil, payload, blockValue[:], blobsBundle, resp.ShouldOverrideBuilder)
 	default:
+		executionRequests, err := executionRequestsFromList(resp.ExecutionRequests, version)
+		if err != nil {
+			return nil, err
+		}
 		return ssz2.MarshalSSZ(nil, payload, blockValue[:], blobsBundle, resp.ShouldOverrideBuilder, executionRequests)
 	}
 }

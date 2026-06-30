@@ -41,6 +41,7 @@ import (
 )
 
 const maxProposerPreferencesRequestItems = 2048
+const maxPTCDutiesRequestItems = 2048
 const maxEpbsJSONSize = 1 << 20
 const maxExecutionPayloadEnvelopeRequestSize = int64(execparams.MaxRlpBlockSize) * 4
 
@@ -83,9 +84,13 @@ func (a *ApiHandler) PostEthV1ValidatorDutiesPtc(w http.ResponseWriter, r *http.
 
 	// Parse request body for validator indices (string-encoded per Beacon API spec)
 	var idxsStr []string
-	if err := json.NewDecoder(r.Body).Decode(&idxsStr); err != nil {
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, maxEpbsJSONSize)).Decode(&idxsStr); err != nil {
 		return nil, beaconhttp.NewEndpointError(http.StatusBadRequest,
 			fmt.Errorf("invalid request body: %w", err))
+	}
+	if len(idxsStr) > maxPTCDutiesRequestItems {
+		return nil, beaconhttp.NewEndpointError(http.StatusBadRequest,
+			fmt.Errorf("too many validator indices: %d > %d", len(idxsStr), maxPTCDutiesRequestItems))
 	}
 	validatorIndices := make([]uint64, 0, len(idxsStr))
 	for _, s := range idxsStr {
@@ -683,7 +688,20 @@ func (a *ApiHandler) PostEthV1BeaconExecutionPayloadEnvelope(w http.ResponseWrit
 		Message: cltypes.NewExecutionPayloadEnvelope(a.beaconChainCfg),
 	}
 
-	switch r.Header.Get("Content-Type") {
+	contentTypeHeader := r.Header.Get("Content-Type")
+	contentType := ""
+	if contentTypeHeader == "" {
+		contentType = "application/json"
+	} else {
+		var err error
+		contentType, _, err = mime.ParseMediaType(contentTypeHeader)
+		if err != nil {
+			beaconhttp.NewEndpointError(http.StatusUnsupportedMediaType,
+				fmt.Errorf("unsupported content type: %s", contentTypeHeader)).WriteTo(w)
+			return
+		}
+	}
+	switch contentType {
 	case "application/json":
 		if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, maxExecutionPayloadEnvelopeRequestSize)).Decode(signedEnvelope); err != nil {
 			beaconhttp.NewEndpointError(http.StatusBadRequest, err).WriteTo(w)

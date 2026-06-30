@@ -140,6 +140,7 @@ func (e *ExecutionRequests) UnmarshalJSON(b []byte) error {
 	e.Consolidations = c.Consolidations
 	e.BuilderDeposits = c.BuilderDeposits
 	e.BuilderExits = c.BuilderExits
+	e.ensureLists()
 	if e.effectiveVersion() < clparams.GloasVersion && (e.BuilderDeposits.Len() > 0 || e.BuilderExits.Len() > 0) {
 		return fmt.Errorf("builder execution requests before gloas")
 	}
