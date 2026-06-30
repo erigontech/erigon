@@ -3,6 +3,7 @@ package stagedsync
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"runtime/pprof"
 	"sync"
@@ -53,6 +54,7 @@ type commitmentCalculator struct {
 	doms      *execctx.SharedDomains
 	db        kv.TemporalRoDB
 	logPrefix string
+	logger    log.Logger
 	stepSize  uint64
 
 	// updates is the calculator's OWN buffer — never shared with the
@@ -154,6 +156,7 @@ func newCommitmentCalculator(
 		doms:                 doms,
 		db:                   db,
 		logPrefix:            logPrefix,
+		logger:               logger,
 		stepSize:             doms.StepSize(),
 		updates:              calcUpdates,
 		state:                newCalcState(asOfReader, logger, logPrefix),
@@ -505,6 +508,11 @@ func (cc *commitmentCalculator) computeAndCheck(ctx context.Context, br *blockRe
 }
 
 func (cc *commitmentCalculator) publish(ctx context.Context, r commitmentResult) {
+	// The send is best-effort (it can drop on shutdown), so log genuine errors
+	// here; wrong-root is routine and the apply loop already logs it.
+	if r.err != nil && cc.logger != nil && !errors.Is(r.err, ErrWrongTrieRoot) {
+		cc.logger.Error("["+cc.logPrefix+"] commitment compute failed", "block", r.blockNum, "txNum", r.txNum, "err", r.err)
+	}
 	select {
 	case cc.out <- r:
 	case <-ctx.Done():
