@@ -127,9 +127,8 @@ type parallelExecutor struct {
 	currentChangeSetBlock uint64
 }
 
-// errDeliberateStop is the cancel cause set when the apply loop cancels
-// the executor on a deferred ErrWrongTrieRoot. Read via context.Cause so
-// completeness checks can distinguish an intentional stop from a silent miss.
+// errDeliberateStop is the cancel cause set when the apply loop stops the
+// executor on a deferred ErrWrongTrieRoot.
 var errDeliberateStop = errors.New("parallel executor: deliberate stop on wrong trie root")
 
 // ensureChangesetAccumulator makes pe.currentChangeSet point at a fresh,
@@ -1343,7 +1342,9 @@ func (pe *parallelExecutor) closeApplyChannels() (closedOrder []string) {
 // triggered the check) so a failure log identifies the exit path
 // involved without needing a stack trace.
 func (pe *parallelExecutor) execLoopExitCheck(ctx context.Context, reason string) error {
-	if errors.Is(context.Cause(ctx), errDeliberateStop) {
+	// A canceled context means the batch was aborted, not committed, so
+	// undrained blocks are expected — not the silent miss this guards against.
+	if ctx.Err() != nil {
 		return nil
 	}
 	pe.RLock()

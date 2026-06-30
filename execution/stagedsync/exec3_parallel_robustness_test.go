@@ -1147,8 +1147,9 @@ func TestApplyLoopCloseBranchSurfacesDeferredRootBeforeMissing(t *testing.T) {
 	})
 }
 
-// TestExecLoopExitCheckDeliberateStop verifies that a ctx cancelled with
-// errDeliberateStop suppresses the pending-block ErrInvalidBlock noise.
+// TestExecLoopExitCheckDeliberateStop verifies that a canceled ctx (deliberate
+// stop or graceful shutdown) suppresses the pending-block ErrInvalidBlock, while
+// a non-canceled exit with pending blocks still flags the silent miss.
 func TestExecLoopExitCheckDeliberateStop(t *testing.T) {
 	t.Run("pending blocks but deliberate-stop cause returns nil", func(t *testing.T) {
 		pe := &parallelExecutor{}
@@ -1160,20 +1161,20 @@ func TestExecLoopExitCheckDeliberateStop(t *testing.T) {
 		}
 	})
 
-	t.Run("pending blocks without deliberate-stop still errors", func(t *testing.T) {
+	t.Run("pending blocks without cancellation still errors", func(t *testing.T) {
 		pe := &parallelExecutor{}
 		pe.blockExecutors = map[uint64]*blockExecutor{3: {}}
 		err := pe.execLoopExitCheck(context.Background(), "silent-miss")
-		require.ErrorIs(t, err, rules.ErrInvalidBlock, "must still flag silent miss when not deliberately stopped")
+		require.ErrorIs(t, err, rules.ErrInvalidBlock, "must still flag silent miss when not canceled")
 	})
 
-	t.Run("pending blocks with unrelated cancel cause still errors", func(t *testing.T) {
+	t.Run("pending blocks on a graceful shutdown cancel returns nil", func(t *testing.T) {
 		pe := &parallelExecutor{}
 		pe.blockExecutors = map[uint64]*blockExecutor{3: {}}
 		ctx, cancel := context.WithCancelCause(context.Background())
-		cancel(errors.New("shutdown"))
-		err := pe.execLoopExitCheck(ctx, "non-deliberate-cancel")
-		require.ErrorIs(t, err, rules.ErrInvalidBlock, "unrelated cancel cause must not suppress the silent-miss error")
+		cancel(errors.New("shutdown")) // any cancellation, not only the deliberate-stop cause
+		require.NoError(t, pe.execLoopExitCheck(ctx, "graceful-shutdown"),
+			"a canceled context aborts the batch (nothing is committed), so undrained blocks are expected, not a silent miss")
 	})
 }
 
