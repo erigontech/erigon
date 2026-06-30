@@ -170,10 +170,8 @@ func (evm *EVM) Cancelled() bool { return evm.abort.Load() }
 // (reset to 0 for CALL, -StateGasNewAccount for CREATE) so TxnExecutor
 // can read gasUsed.State directly without checking the error.
 func (evm *EVM) handleFrameRevert(gasRemaining *mdgas.MdGas, err error, depth int, snapshot int, stateGasUsed int64, stateGasSpill uint64) {
-
 	// 1. Revert state changes.
 	evm.intraBlockState.RevertToSnapshot(snapshot, err)
-
 	// 2. EIP-8037 refill frame state gas
 	if evm.chainRules.IsAmsterdam {
 		gasRemaining.Regular += stateGasSpill
@@ -183,13 +181,17 @@ func (evm *EVM) handleFrameRevert(gasRemaining *mdgas.MdGas, err error, depth in
 		// paired update; surface it loudly and clamp.
 		newState := int64(gasRemaining.State) + stateGasUsed - int64(stateGasSpill)
 		if newState < 0 {
-			log.Error("EIP-8037 invariant violated; clamping reservoir to 0",
-				"gasRemainingState", gasRemaining.State, "stateGasUsed", stateGasUsed, "stateGasSpill", stateGasSpill, "depth", depth)
+			log.Error(
+				"EIP-8037 invariant violated; clamping reservoir to 0",
+				"gasRemainingState", gasRemaining.State,
+				"stateGasUsed", stateGasUsed,
+				"stateGasSpill", stateGasSpill,
+				"depth", depth,
+			)
 			newState = 0
 		}
 		gasRemaining.State = uint64(newState)
 	}
-
 	// 3. On exceptional halt (not REVERT), burn remaining regular gas.
 	if err != ErrExecutionReverted {
 		if evm.config.Tracer != nil && evm.config.Tracer.OnGasChange != nil {
