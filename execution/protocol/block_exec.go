@@ -375,8 +375,3 @@ func InitializeBlockExecution(engine rules.Engine, chain rules.ChainHeaderReader
 	blockContext := NewEVMBlockContext(header, GetHashFn(header, nil), engine, accounts.NilAddress, cc)
 	return ibs.FinalizeTx(blockContext.Rules(cc), stateWriter)
 }
-
-// Deprecated: use Engine.ValidateBlockPostExecution instead.
-func BlockPostValidation(blockGasUsed, blobGasUsed uint64, checkReceipts, checkBloom bool, receipts types.Receipts, h *types.Header, txns types.Transactions, chainConfig *chain.Config, logger log.Logger) error {
-	return rules.DefaultBlockPostValidation(chainConfig, h, blockGasUsed, blobGasUsed, checkReceipts, checkBloom, receipts, txns, logger)
-}
