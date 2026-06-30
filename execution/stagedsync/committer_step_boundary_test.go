@@ -55,24 +55,7 @@ func TestHandleMessage_StepBoundaryCheckpointMidBlock(t *testing.T) {
 	logger := log.New()
 	const stepSize = uint64(16)
 
-	dirs := datadir.New(t.TempDir())
-	rawDb := mdbx.New(dbcfg.ChainDB, logger).InMem(t, dirs.Chaindata).MustOpen()
-	defer rawDb.Close()
-
-	agg, err := dbstate.NewTest(dirs).StepSize(stepSize).Logger(logger).Open(ctx, rawDb)
-	require.NoError(t, err)
-	defer agg.Close()
-
-	db, err := temporal.New(rawDb, agg)
-	require.NoError(t, err)
-
-	tx, err := db.BeginTemporalRw(ctx) //nolint:gocritic
-	require.NoError(t, err)
-	defer tx.Rollback()
-
-	doms, err := execctx.NewSharedDomains(ctx, tx, logger)
-	require.NoError(t, err)
-	defer doms.Close()
+	db, tx, doms := setupStepTest(t)
 
 	in := make(chan applyResult, 64)
 	out := make(chan commitmentResult, 64)
@@ -150,24 +133,7 @@ func TestHandleMessage_StepCheckpointInPerBlockMode(t *testing.T) {
 	logger := log.New()
 	const stepSize = uint64(16)
 
-	dirs := datadir.New(t.TempDir())
-	rawDb := mdbx.New(dbcfg.ChainDB, logger).InMem(t, dirs.Chaindata).MustOpen()
-	defer rawDb.Close()
-
-	agg, err := dbstate.NewTest(dirs).StepSize(stepSize).Logger(logger).Open(ctx, rawDb)
-	require.NoError(t, err)
-	defer agg.Close()
-
-	db, err := temporal.New(rawDb, agg)
-	require.NoError(t, err)
-
-	tx, err := db.BeginTemporalRw(ctx) //nolint:gocritic
-	require.NoError(t, err)
-	defer tx.Rollback()
-
-	doms, err := execctx.NewSharedDomains(ctx, tx, logger)
-	require.NoError(t, err)
-	defer doms.Close()
+	db, tx, doms := setupStepTest(t)
 
 	in := make(chan applyResult, 64)
 	out := make(chan commitmentResult, 64)
@@ -228,24 +194,7 @@ func TestHandleMessage_PartialBlockComputeFailureNotSwallowed(t *testing.T) {
 	logger := log.New()
 	const stepSize = uint64(16)
 
-	dirs := datadir.New(t.TempDir())
-	rawDb := mdbx.New(dbcfg.ChainDB, logger).InMem(t, dirs.Chaindata).MustOpen()
-	defer rawDb.Close()
-
-	agg, err := dbstate.NewTest(dirs).StepSize(stepSize).Logger(logger).Open(ctx, rawDb)
-	require.NoError(t, err)
-	defer agg.Close()
-
-	db, err := temporal.New(rawDb, agg)
-	require.NoError(t, err)
-
-	tx, err := db.BeginTemporalRw(ctx) //nolint:gocritic
-	require.NoError(t, err)
-	defer tx.Rollback()
-
-	doms, err := execctx.NewSharedDomains(ctx, tx, logger)
-	require.NoError(t, err)
-	defer doms.Close()
+	db, tx, doms := setupStepTest(t)
 
 	in := make(chan applyResult, 64)
 	out := make(chan commitmentResult, 64)
@@ -332,24 +281,7 @@ func runBlockEndingOnStepEdge(t *testing.T, edgeTxHasWrites bool) stepEdgeOutcom
 	const stepSize = uint64(16)
 	const edgeTxNum = stepSize - 1 // 15: (txNum+1)%stepSize == 0
 
-	dirs := datadir.New(t.TempDir())
-	rawDb := mdbx.New(dbcfg.ChainDB, logger).InMem(t, dirs.Chaindata).MustOpen()
-	defer rawDb.Close()
-
-	agg, err := dbstate.NewTest(dirs).StepSize(stepSize).Logger(logger).Open(ctx, rawDb)
-	require.NoError(t, err)
-	defer agg.Close()
-
-	db, err := temporal.New(rawDb, agg)
-	require.NoError(t, err)
-
-	tx, err := db.BeginTemporalRw(ctx) //nolint:gocritic
-	require.NoError(t, err)
-	defer tx.Rollback()
-
-	doms, err := execctx.NewSharedDomains(ctx, tx, logger)
-	require.NoError(t, err)
-	defer doms.Close()
+	db, tx, doms := setupStepTest(t)
 
 	in := make(chan applyResult, 64)
 	out := make(chan commitmentResult, 64)
@@ -433,4 +365,32 @@ func TestHandleMessage_StepEdgeAtBlockEnd(t *testing.T) {
 		require.Equal(t, uint64(15), gotTxNum)
 		require.Equal(t, uint64(1), gotBlockNum)
 	})
+}
+
+// setupStepTest builds the shared in-memory temporal stack (stepSize 16) for the
+// step-boundary tests — like setup2CacheTest, but also returns the db the
+// commitment calculator needs for its own read tx.
+func setupStepTest(t *testing.T) (kv.TemporalRwDB, kv.TemporalRwTx, *execctx.SharedDomains) {
+	t.Helper()
+	ctx := context.Background()
+	logger := log.New()
+	dirs := datadir.New(t.TempDir())
+	rawDb := mdbx.New(dbcfg.ChainDB, logger).InMem(t, dirs.Chaindata).MustOpen()
+	t.Cleanup(rawDb.Close)
+
+	agg, err := dbstate.NewTest(dirs).StepSize(16).Logger(logger).Open(ctx, rawDb)
+	require.NoError(t, err)
+	t.Cleanup(agg.Close)
+
+	db, err := temporal.New(rawDb, agg)
+	require.NoError(t, err)
+
+	tx, err := db.BeginTemporalRw(ctx) //nolint:gocritic
+	require.NoError(t, err)
+	t.Cleanup(func() { tx.Rollback() })
+
+	doms, err := execctx.NewSharedDomains(ctx, tx, logger)
+	require.NoError(t, err)
+	t.Cleanup(doms.Close)
+	return db, tx, doms
 }
