@@ -24,12 +24,15 @@
 //  1. Tip: no item I with I.To > canonicalTip. Catches both past-tip
 //     orphans (I.From ≥ tip) AND straddlers (I.From < tip < I.To).
 //
-//  2. Maximality: no item I subsumed by another, with the winner
-//     direction tagged. The default direction is "wider wins, narrower
-//     removed" (merge output supersedes original chunks). Items tagged
-//     ProducedByRegen=true reverse the direction when they exactly tile
-//     a wider untagged item (boundary regens supersede pre-regen broad
-//     files).
+//  2. Maximality: no item I subsumed by another. The wider item wins;
+//     the narrower (proper subset) is removed. Merge output supersedes
+//     the original chunks under this rule. Mode-B's boundary-step
+//     regen does not produce overlapping ranges — its output is
+//     written under a truncated filename matching its actual coverage
+//     and the original broad file is removed in the same transaction
+//     (see node/components/storage/provider_unwind_state_regen_wire.go)
+//     — so the rule never has to disambiguate broad-vs-truncated co-
+//     existence at runtime.
 package fileset
 
 // Range is a half-open interval [From, To).
@@ -38,13 +41,11 @@ type Range struct {
 	To   uint64
 }
 
-// Tagged carries a Range plus metadata that drives the maximality
-// tiebreaker. ProducedByRegen=true marks an item as the output of a
-// boundary-step regeneration; such items win against a broader,
-// untagged predecessor that their union exactly tiles.
+// Tagged carries a Range for use in the rule predicates. The struct
+// exists so the rules can grow new tiebreaker tags in the future
+// without changing every call site; today there are no tags.
 type Tagged struct {
 	Range
-	ProducedByRegen bool
 }
 
 // StalePastTip returns the indices of items violating the tip
@@ -64,61 +65,32 @@ func StalePastTip(items []Tagged, tip uint64) []int {
 }
 
 // StaleNonMaximal returns the indices of items violating the
-// maximality invariant.
+// maximality invariant: item I is stale if it is a proper subset of
+// some other item J (J.From ≤ I.From, J.To ≥ I.To, at least one
+// inequality strict). The wider J wins; the narrower I is removed.
 //
-// M-A (single-dominator): I is a proper subset of some J in the set
-// (J.From ≤ I.From, J.To ≥ I.To, at least one inequality strict). I is
-// stale unless the tiebreaker reverses it.
-//
-// M-B (union-cover): I is exactly tiled — without gaps or overlaps —
-// by a set of items {J_k} all tagged ProducedByRegen=true. Then I is
-// stale (the regen tiling wins).
-//
-// Tiebreaker for M-A: when I is a proper subset of J and exactly one
-// of them is ProducedByRegen, the non-regen file is stale. When both
-// or neither is ProducedByRegen, the narrower (proper subset) is
-// stale — the default "wider wins" rule.
+// This is the M-A case from the rules' documented two-shape model.
+// The M-B "union-cover" case (a wider untagged item exactly tiled by
+// narrower regen-tagged items) is no longer in scope: mode-B's
+// regen path writes its output under a filename matching its actual
+// coverage and atomically removes the original broad file in the
+// same transaction, so the disambiguation the M-B branch was meant
+// to perform at runtime is enforced at the write layer instead.
 func StaleNonMaximal(items []Tagged) []int {
 	stale := make(map[int]struct{})
-
-	// M-A pass: pairwise proper-subset check with tagged tiebreaker.
 	for i, ii := range items {
 		for j, jj := range items {
 			if i == j {
 				continue
 			}
-			// Is i a (possibly improper) subset of j?
 			subset := jj.From <= ii.From && jj.To >= ii.To
 			strict := jj.From < ii.From || jj.To > ii.To
-			if !subset || !strict {
-				continue
-			}
-			// i is a strict subset of j. Choose the loser.
-			if ii.ProducedByRegen && !jj.ProducedByRegen {
-				// regen i (narrower) wins; j (wider, untagged) is stale.
-				stale[j] = struct{}{}
-			} else {
-				// default direction: narrower (i) is stale.
+			if subset && strict {
 				stale[i] = struct{}{}
+				break
 			}
 		}
 	}
-
-	// M-B pass: for each untagged item I, look for a set of
-	// regen-tagged items whose ranges exactly tile [I.From, I.To)
-	// with no gaps. If such a tiling exists, I is stale.
-	for i, it := range items {
-		if it.ProducedByRegen {
-			continue
-		}
-		if _, already := stale[i]; already {
-			continue
-		}
-		if exactTileByRegens(items, it.Range, i) {
-			stale[i] = struct{}{}
-		}
-	}
-
 	out := make([]int, 0, len(stale))
 	for i := range stale {
 		out = append(out, i)
@@ -126,52 +98,14 @@ func StaleNonMaximal(items []Tagged) []int {
 	return out
 }
 
-// exactTileByRegens reports whether the subset of `items` (excluding
-// index `skipIdx`) that is tagged ProducedByRegen and lies fully
-// within target exactly tiles target with no gaps and no overlaps.
-func exactTileByRegens(items []Tagged, target Range, skipIdx int) bool {
-	tiles := make([]Range, 0)
-	for k, it := range items {
-		if k == skipIdx {
-			continue
-		}
-		if !it.ProducedByRegen {
-			continue
-		}
-		if it.From < target.From || it.To > target.To {
-			continue
-		}
-		tiles = append(tiles, it.Range)
-	}
-	if len(tiles) == 0 {
-		return false
-	}
-	for i := 1; i < len(tiles); i++ {
-		for j := i; j > 0 && tiles[j-1].From > tiles[j].From; j-- {
-			tiles[j-1], tiles[j] = tiles[j], tiles[j-1]
-		}
-	}
-	if tiles[0].From != target.From {
-		return false
-	}
-	cursor := tiles[0].To
-	for k := 1; k < len(tiles); k++ {
-		if tiles[k].From != cursor {
-			return false
-		}
-		cursor = tiles[k].To
-	}
-	return cursor == target.To
-}
-
 // CullPlan returns the indices of items to remove, iterated to a
 // fixpoint: StalePastTip ∪ StaleNonMaximal, then re-applied on the
 // surviving set until no more items are flagged. Idempotent.
 //
-// Removing a wider item via M-B can expose a narrower item that
-// previously hid behind it as past-tip — running once isn't always
-// enough. A fixed-point loop with a bound on iterations keeps the
-// function total and easy to reason about.
+// Removing a wider item via StalePastTip can expose a narrower item
+// that previously hid behind it as past-tip — running once isn't
+// always enough. A fixed-point loop with a bound on iterations keeps
+// the function total and easy to reason about.
 func CullPlan(items []Tagged, tip uint64) []int {
 	keep := make([]int, len(items))
 	for i := range items {

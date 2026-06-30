@@ -88,28 +88,19 @@ func TestStaleNonMaximal_SubsumedByWide(t *testing.T) {
 	require.Equal(t, []int{1}, sortInts(StaleNonMaximal(items)))
 }
 
-// TestStaleNonMaximal_UnionCoverByRegens (M-B): the 2026-06-25
-// v2.0-accounts wedge as a unit test. Broad pre-mode-B file `272-280`
-// co-exists with narrow boundary-regen files `272-276`, `276-278`,
-// `278-280`. The narrows collectively tile the broad's range. With
-// regen tagging, the broad is the stale one — the narrower tiling is
-// the canonical refinement.
-func TestStaleNonMaximal_UnionCoverByRegens(t *testing.T) {
-	t.Parallel()
-	items := []Tagged{
-		{Range: Range{From: 272, To: 280}},                        // broad pre-mode-B (stale)
-		{Range: Range{From: 272, To: 276}, ProducedByRegen: true}, // narrow regen
-		{Range: Range{From: 276, To: 278}, ProducedByRegen: true}, // narrow regen
-		{Range: Range{From: 278, To: 280}, ProducedByRegen: true}, // narrow regen
-	}
-	require.Equal(t, []int{0}, sortInts(StaleNonMaximal(items)))
-}
-
-// TestStaleNonMaximal_UnionCoverWithoutRegenTags: same topology but
-// no regen tagging — default M-A direction takes over. The narrows
-// are proper subsets of the broad, so they're stale; broad survives.
-// This is the merge case: merge output supersedes original chunks.
-func TestStaleNonMaximal_UnionCoverWithoutRegenTags(t *testing.T) {
+// TestStaleNonMaximal_BroadAndNarrowsCoexist pins the default M-A
+// direction for the broad + narrows topology. With no flag to flip
+// the tiebreaker, the narrows are proper subsets of the broad and
+// therefore stale — the broad (merge output) wins. This is the
+// "merge supersedes original chunks" case. The mode-B regen path
+// historically created the same topology with narrow regen output,
+// but is now fixed at the write layer (the regen output is named
+// to match its actual coverage and the original broad is removed
+// in the same FinalizeUnwind transaction; see
+// node/components/storage/provider_unwind_state_regen_wire.go),
+// so the rule no longer needs a runtime tiebreaker to handle
+// regen-vs-merge co-existence.
+func TestStaleNonMaximal_BroadAndNarrowsCoexist(t *testing.T) {
 	t.Parallel()
 	items := []Tagged{
 		{Range: Range{From: 272, To: 280}},

@@ -130,18 +130,7 @@ type FilesItem struct {
 	// file can be deleted in 2 cases: 1. when `refcount == 0 && canDelete == true` 2. on app startup when `file.isSubsetOfFrozenFile()`
 	// other processes (which also reading files, may have same logic)
 	canDelete atomic.Bool
-
-	// producedByRegen marks files written by mode-B's boundary-step
-	// regeneration path. When a regen-tagged set of narrow files
-	// exactly tiles a wider untagged predecessor file, the wider
-	// file is the stale one (the narrower tiling is the canonical
-	// post-mode-B refinement). See db/snapshotsync/fileset/rules.go
-	// for the maximality tiebreaker contract.
-	producedByRegen bool
 }
-
-func (i *FilesItem) ProducedByRegen() bool     { return i.producedByRegen }
-func (i *FilesItem) SetProducedByRegen(v bool) { i.producedByRegen = v }
 
 func newFilesItemWithSnapConfig(startTxNum, endTxNum uint64, snapConfig *SnapshotConfig) *FilesItem {
 	return newFilesItem(startTxNum, endTxNum, snapConfig.RootNumPerStep, snapConfig.StepsInFrozenFile())
@@ -670,8 +659,7 @@ func calcVisibleFiles(files *DirtyFiles, l statecfg.Accessors, checker func(star
 		cands = append(cands, candidate{
 			item: item,
 			tagged: fileset.Tagged{
-				Range:           fileset.Range{From: item.startTxNum, To: item.endTxNum},
-				ProducedByRegen: item.producedByRegen,
+				Range: fileset.Range{From: item.startTxNum, To: item.endTxNum},
 			},
 			visible: visibleFile{
 				startTxNum: item.startTxNum,
