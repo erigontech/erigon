@@ -3453,11 +3453,16 @@ func normalizeWriteSet(writes state.VersionedWrites, vm *state.VersionMap, txInd
 				code = c
 			}
 		}
-		// Only recover EIP-7702 delegation designators — the demonstrated drop
-		// (a 7702 sender wrongly rejected as "not an eoa"). Gating on the
-		// designator shape keeps this from re-emitting ordinary unchanged
-		// contract code for every modified contract (write amplification with no
-		// correctness benefit) and never misattributes a callee's code.
+		// The codeHash-without-code asymmetry only arises from the SetCode
+		// short-circuit (new code == existing → no CodePath written), since a
+		// regular deploy writes CodePath and CodeHashPath together at the same
+		// incarnation. When the short-circuit fires the emitted codeHash is backed
+		// by either (a) the EIP-7702 designator this re-exec must re-emit, or
+		// (b) already-committed identical bytes (CREATE2 redeploy / unchanged
+		// contract) whose code is already in CodeDomain — benign, re-emitting it
+		// would be an elided DomainPut per modified contract. So recovery is gated
+		// to 7702 designators: that's the only case that leaves uncommitted code
+		// without its CodePath. (Gating also never misattributes a callee's code.)
 		if _, ok := types.ParseDelegation(code); !ok {
 			continue
 		}
