@@ -3,6 +3,7 @@ package stagedsync
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"runtime/pprof"
 	"sync"
@@ -398,12 +399,12 @@ func (cc *commitmentCalculator) computeWithoutCheck(ctx context.Context, br *blo
 	// when pastChangesAccumulator holds multiple changesets per block number
 	// (canonical + fork during reorg-bounce tests).
 	if _, err := cc.computeWithBlockAccumulator(ctx, br); err != nil {
-		// Partial-block compute is intentionally not verified (no header root
-		// to compare against), but a real ComputeCommitment failure leaves
-		// later trie state suspect — log so the failure isn't silent.
-		if cc.logger != nil {
-			cc.logger.Warn("["+cc.logPrefix+"] commitmentCalculator: computeWithoutCheck failed", "block", br.BlockNum, "txNum", br.lastTxNum, "err", err)
-		}
+		cc.publish(ctx, commitmentResult{
+			blockNum: br.BlockNum,
+			txNum:    br.lastTxNum,
+			err:      fmt.Errorf("commitmentCalculator: partial-block compute failed: %w", err),
+		})
+		return
 	}
 
 	cc.lastComputedBlock = br.BlockNum
@@ -546,6 +547,11 @@ func (cc *commitmentCalculator) computeTransition(ctx context.Context, br *block
 }
 
 func (cc *commitmentCalculator) publish(ctx context.Context, r commitmentResult) {
+	// The send is best-effort (it can drop on shutdown), so log genuine errors
+	// here; wrong-root is routine and the apply loop already logs it.
+	if r.err != nil && cc.logger != nil && !errors.Is(r.err, ErrWrongTrieRoot) {
+		cc.logger.Error("["+cc.logPrefix+"] commitment compute failed", "block", r.blockNum, "txNum", r.txNum, "err", r.err)
+	}
 	select {
 	case cc.out <- r:
 	case <-ctx.Done():
