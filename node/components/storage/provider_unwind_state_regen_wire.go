@@ -152,24 +152,9 @@ func (p *Provider) regenerateBoundaryStepFiles(
 			return nil, fmt.Errorf("unknown storage domain %q: no kv.Domain mapping", sd)
 		}
 
-		// Classify EVERY .kv file in this domain against stepBoundary.
-		// Pre-2026-06-30, regen only touched ONE boundary file per
-		// domain (whichever boundaryStepFileForDomain returned first).
-		// Iter-3 mode_b at depth 30k on hoodi surfaced the gap: files
-		// entirely past the unwind boundary stayed on disk and served
-		// stale post-unwind-target state, producing a ~4,800 gas
-		// mismatch at the first post-boundary block. The planner
-		// (planStateFileActions) handles ALL files per domain
+		// planStateFileActions handles ALL local .kv files per domain
 		// uniformly — regen straddlers, remove entirely-past.
-		var domainFiles []*snapshot.FileEntry
-		var ranges []stateFileRange
-		for _, e := range p.Inventory.AllDomainFiles(sd) {
-			if e.Kind != snapshot.KindKV {
-				continue
-			}
-			domainFiles = append(domainFiles, e)
-			ranges = append(ranges, stateFileRange{FromStep: e.FromStep, ToStep: e.ToStep})
-		}
+		domainFiles, ranges := localKVRanges(p.Inventory.AllDomainFiles(sd))
 		if len(ranges) == 0 {
 			// Domain has no .kv files yet (early chain). Skip.
 			continue
