@@ -258,7 +258,20 @@ scenario_test() {
     # Recovery polling. Success requires:
     #   (a) head reached at least target + RECOVERY_WINDOW_BLOCKS, AND
     #   (b) if require_forward=1, head exceeded pre_head + FORWARD_PROGRESS_MARGIN.
+    #
+    # Failure (stagnation): head hasn't advanced for STAGNATION_POLLS
+    # consecutive polls (default 6 * 30s = 3 min of zero progress). This
+    # is the liveness gate — the hard recovery_timeout becomes a safety
+    # net rather than the fail signal, so slow-but-progressing recoveries
+    # (e.g. deep mode-B over the network) don't false-fail when they're
+    # still making real progress. A node that is genuinely stuck (no
+    # head movement) fails fast at STAGNATION_POLLS * 30s regardless of
+    # how much total wall-clock we have left.
     recovery_ok=0
+    local last_head=$pre_head stagnation_polls=0
+    local STAGNATION_POLL_LIMIT="${STAGNATION_POLL_LIMIT:-6}"
+    local last_log_progress=0
+    local soft_wedge_errors=0
     while true; do
         sleep 5
         post_head_hex=$(eth_block_number)
@@ -281,11 +294,65 @@ scenario_test() {
             recovery_ok=1
             break
         fi
-        if [[ $elapsed -gt $recovery_timeout ]]; then
-            break
-        fi
+        # Liveness check: did head OR Caplin's BlockCollector progress
+        # advance since the last 30s window? During mode-B recovery,
+        # Caplin fetches the gapped history (DownloadHistoricalBlocks
+        # progress=N/M lines) and inserts blocks into EL in chunks
+        # (BlockCollector Inserted blocks progress=N) before EL's
+        # forward exec catches up — eth_blockNumber only updates once
+        # FCU lands, so head-only liveness false-fails the whole
+        # download-and-exec window. Count log progress as a liveness
+        # signal too.
         if [[ $((elapsed % 30)) -lt 6 ]]; then
-            echo "  t+${elapsed}s head=$post_head $( [[ $require_forward -eq 1 ]] && echo "pre_head+${FORWARD_PROGRESS_MARGIN}=$((pre_head + FORWARD_PROGRESS_MARGIN))" || echo "target+1000=$((target + RECOVERY_WINDOW_BLOCKS))")"
+            # Liveness signal = log byte growth since test start.
+            # Replaces the granular dl/bc/ex/ct stack because shallow
+            # mode_a2 recoveries (depth ≤ 1000) go through the FCU
+            # path and emit none of those specific markers for the
+            # full ~3 min recovery window, even when the system is
+            # actively re-executing. Any new bytes (mem stats, txpool
+            # stats, retire/merge, exec, chain.toml — anything) count
+            # as alive. The grep-based forbidden-pattern check + hard
+            # timeout catch genuine wedges; this gate only catches
+            # "erigon has stopped writing logs entirely."
+            local log_progress_now=0
+            if [[ -r "$LOG" ]]; then
+                log_progress_now=$(stat -c %s "$LOG" 2>/dev/null || echo 0)
+            fi
+            if [[ $post_head -gt $last_head || $log_progress_now -gt $last_log_progress ]]; then
+                stagnation_polls=0
+            else
+                stagnation_polls=$((stagnation_polls + 1))
+            fi
+            echo "  t+${elapsed}s head=$post_head log_bytes=${log_progress_now} stagnation=${stagnation_polls}/${STAGNATION_POLL_LIMIT} $( [[ $require_forward -eq 1 ]] && echo "pre_head+${FORWARD_PROGRESS_MARGIN}=$((pre_head + FORWARD_PROGRESS_MARGIN))" || echo "target+1000=$((target + RECOVERY_WINDOW_BLOCKS))")"
+            last_head=$post_head
+            last_log_progress=$log_progress_now
+            if [[ $stagnation_polls -ge $STAGNATION_POLL_LIMIT ]]; then
+                echo "  STAGNATION: head + log file both stopped for $((STAGNATION_POLL_LIMIT * 30))s — declaring stuck"
+                break
+            fi
+            # Soft-wedge check: forbidden error patterns during
+            # recovery mean the unwind path is spinning (e.g. iter-4
+            # 2026-06-29 had errors=36 invalid-block retries across
+            # 34min before head movement caught the wedge). The
+            # log-bytes gate above does NOT catch these because the
+            # error spam keeps the log growing. Abort the iter
+            # immediately on the FIRST forbidden line so the soak
+            # surfaces the wedge in <30s instead of waiting hours
+            # for the hard timeout.
+            soft_wedge_errors=$(tail -c +"$((log_offset + 1))" "$LOG" 2>/dev/null \
+                | grep -cE "parent's total difficulty not found|Could not start execution service|invalid block|halting process")
+            if [[ ${soft_wedge_errors:-0} -gt 0 ]]; then
+                echo "  SOFT-WEDGE: ${soft_wedge_errors} forbidden error line(s) detected — declaring stuck"
+                break
+            fi
+        fi
+        # Hard safety net: only fires if the system is making forward
+        # progress but the unwind/recovery genuinely takes longer than
+        # the depth-scaled budget. Bumped 2x vs the prior hard timeout
+        # since the liveness gate is the primary fail mechanism now.
+        if [[ $elapsed -gt $((recovery_timeout * 2)) ]]; then
+            echo "  HARD TIMEOUT after ${elapsed}s — exceeded 2x recovery_timeout (system progressing but extremely slow)"
+            break
         fi
     done
     PHASE_POST_HEAD=$post_head

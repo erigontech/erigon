@@ -115,11 +115,24 @@ echo "  launched pid=$!"
 # post-unwind head and the gap blocks weren't in snapshots. See
 # memory pin 2026-06-14-gate1-soak-architectural-fixes (bug 6).
 LIVE_TIP_FORWARD="${LIVE_TIP_FORWARD:-10000}"
-stage "Phase 3: wait for live tip (timeout ${SYNC_TIMEOUT_SEC}s; need head > bootstrap_floor + ${LIVE_TIP_FORWARD})"
-sync_end=$(( $(date +%s) + SYNC_TIMEOUT_SEC ))
+stage "Phase 3: wait for live tip (stagnation gate: stall=${SYNC_STAGNATION_POLL_LIMIT:-10} polls; need head > bootstrap_floor + ${LIVE_TIP_FORWARD})"
 prev_head=0
 bootstrap_floor=0
 stable_count=0
+# Liveness: head must advance between polls. Stagnation = no
+# advancement for SYNC_STAGNATION_POLL_LIMIT consecutive polls (default
+# 10 * 30s = 5 min of zero progress). The fail signal is stagnation,
+# NOT a wall-clock timeout — slow-but-progressing sync (e.g. 1k blk/min
+# catching up from snapshot tip to live) should be tolerated, not
+# false-failed. The SYNC_TIMEOUT_SEC env var is retained as a hard
+# upper bound (default 4h) for a genuinely-wedged process that the
+# stagnation gate somehow misses.
+SYNC_STAGNATION_POLL_LIMIT="${SYNC_STAGNATION_POLL_LIMIT:-10}"
+SYNC_HARD_DEADLINE_SEC="${SYNC_HARD_DEADLINE_SEC:-14400}"
+sync_end=$(( $(date +%s) + SYNC_HARD_DEADLINE_SEC ))
+stagnation_polls=0
+prev_head_for_progress=0
+prev_dl_progress=0
 while [[ $(date +%s) -lt $sync_end ]]; do
     h_hex=$(eth_block_number)
     if [[ "$h_hex" == "null" || -z "$h_hex" ]]; then
@@ -130,6 +143,7 @@ while [[ $(date +%s) -lt $sync_end ]]; do
     if [[ $prev_head -eq 0 ]]; then
         echo "  $(date -u +%H:%M:%S) initial head=$head"
         prev_head=$head
+        prev_head_for_progress=$head
         if [[ $head -gt 0 ]]; then
             bootstrap_floor=$head
             echo "  bootstrap_floor=$bootstrap_floor (snapshot tip; not yet live tip)"
@@ -143,7 +157,25 @@ while [[ $(date +%s) -lt $sync_end ]]; do
         echo "  bootstrap_floor=$bootstrap_floor (snapshot tip; not yet live tip)"
     fi
     past_floor=$((head - bootstrap_floor))
-    echo "  $(date -u +%H:%M:%S) head=$head delta=$delta past_floor=$past_floor"
+    # Liveness: head OR Caplin DownloadHistoricalBlocks must show
+    # progress. During fresh sync, Caplin can run for several minutes
+    # filling the block buffer before EL head advances; gating only on
+    # head would false-fail during that window. The DownloadHistory
+    # progress line "progress=N/M" advances monotonically inside that
+    # window and is the right complementary signal.
+    dl_progress_now=0
+    if [[ -n "$LOG" && -r "$LOG" ]]; then
+        dl_progress_now=$(grep -oE 'Downloading Execution History +progress=[0-9]+/' "$LOG" 2>/dev/null \
+            | tail -1 | grep -oE '[0-9]+/' | tr -d '/' || echo 0)
+        dl_progress_now=${dl_progress_now:-0}
+    fi
+    if [[ $head -gt $prev_head_for_progress || $dl_progress_now -gt $prev_dl_progress ]]; then
+        stagnation_polls=0
+    else
+        stagnation_polls=$((stagnation_polls + 1))
+    fi
+    prev_dl_progress=$dl_progress_now
+    echo "  $(date -u +%H:%M:%S) head=$head delta=$delta past_floor=$past_floor stagnation=${stagnation_polls}/${SYNC_STAGNATION_POLL_LIMIT}"
     if [[ $delta -le 5 && $delta -ge 0 && $past_floor -ge $LIVE_TIP_FORWARD ]]; then
         stable_count=$((stable_count + 1))
         if [[ $stable_count -ge 2 ]]; then
@@ -153,12 +185,17 @@ while [[ $(date +%s) -lt $sync_end ]]; do
     else
         stable_count=0
     fi
+    if [[ $stagnation_polls -ge $SYNC_STAGNATION_POLL_LIMIT ]]; then
+        echo "FAIL: sync stagnated — head has not advanced for $((SYNC_STAGNATION_POLL_LIMIT * 30))s (last head=$head); process likely wedged"
+        exit 1
+    fi
     prev_head=$head
+    prev_head_for_progress=$head
     sleep 30
 done
 
 if [[ $(date +%s) -ge $sync_end ]]; then
-    echo "FAIL: sync didn't reach live tip within ${SYNC_TIMEOUT_SEC}s"
+    echo "FAIL: sync did not reach live tip within hard deadline ${SYNC_HARD_DEADLINE_SEC}s (system was making progress but extremely slow)"
     exit 1
 fi
 
@@ -166,10 +203,12 @@ fi
 stage "Phase 4: run soak (iter=$ITER depths=$DEPTHS)"
 SOAK_OUT="/tmp/unwind-fresh-then-soak-$(date -u +%Y-%m-%dT%H%M%S).csv"
 SOAK_DRIVER_LOG="/tmp/unwind-fresh-then-soak-driver.log"
+set -o pipefail
 "$SOAK_CMD" --rpc "$RPC" --log "$LOG" --iter "$ITER" \
     --depths "$DEPTHS" --snap-dir "$SNAP_DIR" --out "$SOAK_OUT" \
     2>&1 | tee "$SOAK_DRIVER_LOG"
-SOAK_RC=$?
+SOAK_RC=${PIPESTATUS[0]}
+set +o pipefail
 
 stage "Result"
 echo "soak rc=$SOAK_RC csv=$SOAK_OUT driver=$SOAK_DRIVER_LOG"
