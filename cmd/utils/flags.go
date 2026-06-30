@@ -1151,6 +1151,20 @@ var (
 		Usage: "Port for MCP RPC server",
 		Value: 8553,
 	}
+	DecodedStateEnabledFlag = cli.BoolFlag{
+		Name:  "decoded.enabled",
+		Usage: "Enable decoded state tracking (mapping keys/values in pre-hashed form)",
+		Value: false,
+	}
+	DecodedStateFullModeFlag = cli.BoolFlag{
+		Name:  "decoded.fullmode",
+		Usage: "Track all contracts (default is whitelist mode)",
+		Value: false,
+	}
+	DecodedStateWhitelistFlag = cli.StringSliceFlag{
+		Name:  "decoded.whitelist",
+		Usage: "Contract addresses to track in whitelist mode (comma-separated)",
+	}
 	ErigondbDomainStepsInFrozenFileFlag = cli.StringFlag{
 		Name:  "erigondb.domain.steps-in-frozen-file",
 		Usage: `Override erigondb.toml "steps_in_frozen_file" for the domain merge cap only (history/inverted-index merges are unaffected). Pass a positive integer to set an explicit cap, or "Inf" to leave the domain merge unbounded. Default: unset, meaning the domain uses the same cap as determined by erigondb.toml.`,

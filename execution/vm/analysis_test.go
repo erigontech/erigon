@@ -58,6 +58,60 @@ func TestJumpDestAnalysis(t *testing.T) {
 	}
 }
 
+func TestJumpDestCacheRejectsMismatchedHashEntry(t *testing.T) {
+	t.Parallel()
+
+	jumpDestCache.Clear()
+	t.Cleanup(func() { jumpDestCache.Clear() })
+
+	code := make([]byte, 4000)
+	code[3648] = byte(JUMPDEST)
+	codeHash := crypto.Keccak256Hash(code)
+
+	jumpDestCache.Put(codeHash[:], jumpDestCacheEntry{
+		codeHash: common.HexToHash("0x01"),
+		codeLen:  3600,
+		analysis: codeBitmap(make([]byte, 3600)),
+	})
+
+	contract := NewContract(accounts.ZeroAddress, accounts.ZeroAddress, accounts.ZeroAddress, uint256.Int{})
+	contract.Code = code
+	contract.CodeHash = accounts.InternCodeHash(codeHash)
+
+	dest := *uint256.NewInt(3648)
+	valid, usedBitmap := contract.validJumpdest(dest)
+	if !valid || !usedBitmap {
+		t.Fatalf("expected valid jumpdest using rebuilt bitmap, got valid=%v usedBitmap=%v", valid, usedBitmap)
+	}
+}
+
+func TestJumpDestCacheRejectsMismatchedLengthEntry(t *testing.T) {
+	t.Parallel()
+
+	jumpDestCache.Clear()
+	t.Cleanup(func() { jumpDestCache.Clear() })
+
+	code := make([]byte, 4000)
+	code[3648] = byte(JUMPDEST)
+	codeHash := crypto.Keccak256Hash(code)
+
+	jumpDestCache.Put(codeHash[:], jumpDestCacheEntry{
+		codeHash: codeHash,
+		codeLen:  3600,
+		analysis: codeBitmap(make([]byte, 3600)),
+	})
+
+	contract := NewContract(accounts.ZeroAddress, accounts.ZeroAddress, accounts.ZeroAddress, uint256.Int{})
+	contract.Code = code
+	contract.CodeHash = accounts.InternCodeHash(codeHash)
+
+	dest := *uint256.NewInt(3648)
+	valid, usedBitmap := contract.validJumpdest(dest)
+	if !valid || !usedBitmap {
+		t.Fatalf("expected valid jumpdest using rebuilt bitmap, got valid=%v usedBitmap=%v", valid, usedBitmap)
+	}
+}
+
 func BenchmarkJumpdestAnalysisEmpty_1200k(bench *testing.B) {
 	// 1.4 ms
 	code := make([]byte, 1200000)

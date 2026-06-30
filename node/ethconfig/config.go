@@ -274,6 +274,11 @@ type Config struct {
 
 	MCPAddress string
 
+	// Decoded state configuration
+	DecodedStateEnabled   bool
+	DecodedStateFullMode  bool
+	DecodedStateWhitelist []string
+
 	// ErigondbDomainStepsInFrozenFile overrides erigondb.toml stepsInFrozenFile for the
 	// domain merge cap only (history/II are unaffected). nil = no override;
 	// config3.UnboundedDomainMerge disables the cap; any other positive value is used

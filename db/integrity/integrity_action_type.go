@@ -120,6 +120,12 @@ const (
 	// publishing snapshots for external distribution.
 	Publishable Check = "Publishable"
 
+	// HistoryEfConsistency verifies that history .v files and inverted-index .ef files
+	// are consistent — i.e., the entries are in the same order and have matching
+	// historyKeys. A mismatch means the .vi accessor (built from both files) will map
+	// some keys to wrong pages, causing HistorySeek to silently return wrong data.
+	HistoryEfConsistency Check = "HistoryEfConsistency"
+
 	// ReceiptRootIntegrity verifies that receipts from RCache domain produce receipt roots
 	// matching block headers. Reads receipts from RCache, computes the receipt root via
 	// DeriveSha, and compares it with block.header.ReceiptHash. Similar to StateRootVerifyByHistory
@@ -135,7 +141,7 @@ var FastChecks = []Check{
 	HistoryNoSystemTxs, CommitmentHistVal, StateRootVerifyByHistory,
 }
 
-var SlowChecks = []Check{StateVerify}
+var SlowChecks = []Check{StateVerify, HistoryEfConsistency}
 var DeprecatedChecks = []Check{
 	BorEvents, BorSpans, BorCheckpoints,
 	CommitmentKvDeref, //StateVerify - will overcome

@@ -54,7 +54,7 @@ type HistoricalTraceWorker struct {
 	in       *QueueWithRetry
 	out      *ResultsQueue
 
-	stateReader *state.HistoryReaderV3
+	stateReader historicalStateReader
 	ibs         *state.IntraBlockState
 	evm         *vm.EVM
 
@@ -79,6 +79,13 @@ type HistoricalTraceWorker struct {
 	vmCfg     *vm.Config
 }
 
+type historicalStateReader interface {
+	state.StateReader
+	SetTx(kv.TemporalTx)
+	SetTxNum(txNum uint64)
+	SetTrace(trace bool, tracePrefix string)
+}
+
 type TraceConsumer interface {
 	//Reduce receiving results of execution. They are sorted and have no gaps.
 	Reduce(br *BlockResult, task *TxResult, tx kv.TemporalTx) error
@@ -89,6 +96,8 @@ type TraceConsumerFunc func(br *BlockResult, task *TxResult, tx kv.TemporalTx) e
 func (f TraceConsumerFunc) Reduce(br *BlockResult, task *TxResult, tx kv.TemporalTx) error {
 	return f(br, task, tx)
 }
+
+type TaskSetupFunc func(task *TxTask)
 
 func NewHistoricalTraceWorker(
 	ctx context.Context,
@@ -168,6 +177,10 @@ func (rw *HistoricalTraceWorker) RunTxTask(txTask *TxTask) *TxResult {
 	var hooks *tracing.Hooks
 	if tracer := txTask.Tracer; tracer != nil {
 		hooks = tracer.Tracer().Hooks
+	} else {
+		hooks = txTask.TracingHooks()
+	}
+	if hooks != nil {
 		ibs.SetHooks(hooks)
 	}
 
@@ -199,59 +212,297 @@ func (rw *HistoricalTraceWorker) RunTxTask(txTask *TxTask) *TxResult {
 	case txTask.IsBlockEnd():
 		// this is handled by the reducer in process results
 	default:
-		tracer := calltracer.NewCallTracer(nil)
-		result.Err = func() error {
-			rw.taskGasPool.Reset(txTask.Tx().GetGasLimit(), txTask.Tx().GetBlobGas())
-			rw.vmCfg.Tracer = tracer.Tracer().Hooks
-			ibs.SetTxContext(txTask.BlockNumber(), txTask.TxIndex)
-			txn := txTask.Tx()
-
-			if txTask.Tx().Type() == types.AccountAbstractionTxType {
-				if !cc.AllowAA {
-					return errors.New("account abstraction transactions are not allowed")
+		result.Err = rw.runHistoricalTxIsolated(txTask, ibs, rules, hooks, &result)
+		if result.Err != nil && rw.shouldReplayBlockSequentially(txTask, result.Err) {
+			if txTask.DecodedCollector != nil {
+				if resettable, ok := txTask.DecodedCollector.(interface{ Reset() }); ok {
+					resettable.Reset()
 				}
-
-				msg, err := txn.AsMessage(types.Signer{}, nil, nil)
-				if err != nil {
-					return err
-				}
-
-				rw.evm.ResetBetweenBlocks(txTask.EvmBlockContext, protocol.NewEVMTxContext(msg), ibs, *rw.vmCfg, rules)
-				result := rw.execAATxn(txTask, tracer)
-				return result.Err
 			}
-
-			msg, err := txTask.TxMessage()
-			if err != nil {
-				return err
-			}
-			txContext := protocol.NewEVMTxContext(msg)
-			if rw.vmCfg.TraceJumpDest {
-				txContext.TxHash = txn.Hash()
-			}
-			rw.evm.ResetBetweenBlocks(txTask.EvmBlockContext, txContext, ibs, *rw.vmCfg, rules)
-			if hooks != nil && hooks.OnTxStart != nil {
-				hooks.OnTxStart(rw.evm.GetVMContext(), txn, msg.From())
-			}
-
-			// MA applytx
-			applyRes, err := protocol.ApplyMessage(rw.evm, msg, rw.taskGasPool, true /* refunds */, false /* gasBailout */, rw.execArgs.Engine)
-			if err != nil {
-				return err
+			result.ExecutionResult = evmtypes.ExecutionResult{}
+			result.Logs = nil
+			result.TraceFroms = nil
+			result.TraceTos = nil
+			if replayErr := rw.replayBlockSequentially(txTask, hooks, &result); replayErr == nil {
+				result.Err = nil
 			} else {
-				result.ExecutionResult = *applyRes
-				// Update the state with pending changes
-				ibs.SoftFinalise()
-
-				result.Logs = ibs.GetRawLogs(txTask.TxIndex)
-				result.TraceFroms = tracer.Froms()
-				result.TraceTos = tracer.Tos()
+				rw.logHistoricalNonceDiagnostics(txTask, "block_replay_fallback", replayErr)
+				// If both isolated execution and sequential replay fail with nonce
+				// mismatch, it indicates missing/inconsistent historical state rather
+				// than a real nonce issue. Surface as PrunedError so callers can
+				// distinguish data-availability failures from execution failures.
+				// Do not wrap the original nonce errors — they are symptoms, not the
+				// root cause, and callers should not match them.
+				if rw.isNonceMismatch(result.Err) && rw.isNonceMismatch(replayErr) {
+					result.Err = fmt.Errorf("%w: nonce mismatch in both isolated (%v) and sequential replay (%v)", state.PrunedError, result.Err, replayErr)
+				} else {
+					result.Err = errors.Join(result.Err, fmt.Errorf("historical block replay fallback: %w", replayErr))
+				}
 			}
-			return nil
-		}()
+		}
 	}
 	rw.vmCfg.Tracer = nil
 	return &result
+}
+
+func (rw *HistoricalTraceWorker) runHistoricalTxIsolated(txTask *TxTask, ibs *state.IntraBlockState, rules *chain.Rules, hooks *tracing.Hooks, result *TxResult) error {
+	if err := rw.historicalNoncePrecheck(txTask, ibs); err != nil {
+		rw.logHistoricalNonceDiagnostics(txTask, "isolated_precheck", err)
+		return err
+	}
+	tracer := calltracer.NewCallTracer(txTask.TracingHooks())
+	rw.taskGasPool.Reset(txTask.Tx().GetGasLimit(), txTask.Tx().GetBlobGas())
+	return rw.runHistoricalTxOnState(txTask, ibs, rules, hooks, tracer, rw.taskGasPool, result)
+}
+
+func (rw *HistoricalTraceWorker) historicalNoncePrecheck(txTask *TxTask, ibs *state.IntraBlockState) error {
+	if txTask == nil || txTask.TxIndex < 0 || txTask.IsBlockEnd() || txTask.Tx().Type() == types.AccountAbstractionTxType {
+		return nil
+	}
+	msg, err := txTask.TxMessage()
+	if err != nil {
+		return err
+	}
+	if !msg.CheckNonce() {
+		return nil
+	}
+	stNonce, err := ibs.GetNonce(msg.From())
+	if err != nil {
+		return fmt.Errorf("%w: %w", protocol.ErrInternalFailure, err)
+	}
+	msgNonce := msg.Nonce()
+	if stNonce < msgNonce {
+		return fmt.Errorf("%w: address %v, tx: %d state: %d", protocol.ErrNonceTooHigh, msg.From(), msgNonce, stNonce)
+	}
+	if stNonce > msgNonce {
+		return fmt.Errorf("%w: address %v, tx: %d state: %d", protocol.ErrNonceTooLow, msg.From(), msgNonce, stNonce)
+	}
+	return nil
+}
+
+func (rw *HistoricalTraceWorker) runHistoricalTxOnState(txTask *TxTask, ibs *state.IntraBlockState, rules *chain.Rules, hooks *tracing.Hooks, tracer *calltracer.CallTracer, gasPool *protocol.GasPool, result *TxResult) error {
+	rw.vmCfg.Tracer = nil
+	ibs.SetHooks(nil)
+	ibs.SetTxContext(txTask.BlockNumber(), txTask.TxIndex)
+
+	txn := txTask.Tx()
+	if txTask.Tx().Type() == types.AccountAbstractionTxType {
+		if !rw.execArgs.ChainConfig.AllowAA {
+			return errors.New("account abstraction transactions are not allowed")
+		}
+
+		msg, err := txn.AsMessage(types.Signer{}, nil, nil)
+		if err != nil {
+			return err
+		}
+		if tracer != nil {
+			rw.vmCfg.Tracer = tracer.Tracer().Hooks
+			ibs.SetHooks(rw.vmCfg.Tracer)
+		}
+
+		rw.evm.ResetBetweenBlocks(txTask.EvmBlockContext, protocol.NewEVMTxContext(msg), ibs, *rw.vmCfg, rules)
+		aaResult := rw.execAATxn(txTask, tracer)
+		if aaResult == nil {
+			return nil
+		}
+		if result != nil {
+			result.ExecutionResult = aaResult.ExecutionResult
+			result.Logs = aaResult.Logs
+			result.TraceFroms = aaResult.TraceFroms
+			result.TraceTos = aaResult.TraceTos
+			result.ValidationResults = aaResult.ValidationResults
+		}
+		return aaResult.Err
+	}
+
+	msg, err := txTask.TxMessage()
+	if err != nil {
+		return err
+	}
+	txContext := protocol.NewEVMTxContext(msg)
+	if rw.vmCfg.TraceJumpDest {
+		txContext.TxHash = txn.Hash()
+	}
+	if tracer != nil {
+		rw.vmCfg.Tracer = tracer.Tracer().Hooks
+		ibs.SetHooks(rw.vmCfg.Tracer)
+	}
+	rw.evm.ResetBetweenBlocks(txTask.EvmBlockContext, txContext, ibs, *rw.vmCfg, rules)
+	if hooks != nil && hooks.OnTxStart != nil {
+		hooks.OnTxStart(rw.evm.GetVMContext(), txn, msg.From())
+	}
+
+	applyRes, err := protocol.ApplyMessage(rw.evm, msg, gasPool, true /* refunds */, false /* gasBailout */, rw.execArgs.Engine)
+	if err != nil {
+		return err
+	}
+	ibs.SoftFinalise()
+	if result != nil {
+		result.ExecutionResult = *applyRes
+		result.Logs = ibs.GetRawLogs(txTask.TxIndex)
+		if tracer != nil {
+			result.TraceFroms = tracer.Froms()
+			result.TraceTos = tracer.Tos()
+		}
+	}
+	return nil
+}
+
+func (rw *HistoricalTraceWorker) isNonceMismatch(err error) bool {
+	return errors.Is(err, protocol.ErrNonceTooHigh) || errors.Is(err, protocol.ErrNonceTooLow)
+}
+
+func (rw *HistoricalTraceWorker) shouldReplayBlockSequentially(txTask *TxTask, err error) bool {
+	if err == nil || txTask == nil || txTask.TxIndex < 0 || txTask.IsBlockEnd() {
+		return false
+	}
+	if txTask.Tx().Type() == types.AccountAbstractionTxType {
+		return false
+	}
+	return rw.isNonceMismatch(err)
+}
+
+func (rw *HistoricalTraceWorker) replayBlockSequentially(txTask *TxTask, hooks *tracing.Hooks, result *TxResult) error {
+	blockStartTxNum := txTask.TxNum - uint64(txTask.TxIndex) - 1
+
+	rw.stateReader.SetTxNum(blockStartTxNum)
+	rw.stateWriter = state.NewNoopWriter()
+	rw.vmCfg.Tracer = nil
+	rw.ibs.Reset()
+
+	ibs := rw.ibs
+	ibs.SetTrace(txTask.Trace)
+	rw.stateReader.SetTrace(txTask.Trace, "")
+
+	if txTask.BlockNumber() == 0 {
+		return errors.New("historical sequential replay is not supported for genesis")
+	}
+
+	initTask := *txTask
+	initTask.ResetTx(blockStartTxNum, -1)
+	initResult := initTask.Execute(rw.evm, rw.execArgs.Engine, rw.execArgs.Genesis, ibs, noop, rw.execArgs.ChainConfig, rw.chain, rw.execArgs.Dirs, true)
+	if initResult.Err != nil {
+		return initResult.Err
+	}
+
+	gasPool := protocol.NewGasPool(txTask.BlockGasLimit(), rw.execArgs.ChainConfig.GetMaxBlobGasPerBlock(txTask.BlockTime()))
+	for replayIndex := 0; replayIndex <= txTask.TxIndex; replayIndex++ {
+		replayTask := *txTask
+		replayTask.ResetTx(blockStartTxNum+uint64(replayIndex)+1, replayIndex)
+		replayTask.ResetGasPool(gasPool)
+
+		if replayIndex == txTask.TxIndex {
+			return rw.runHistoricalTxOnState(&replayTask, ibs, replayTask.Rules(), hooks, calltracer.NewCallTracer(replayTask.TracingHooks()), gasPool, result)
+		}
+
+		msg, err := replayTask.TxMessage()
+		if err != nil {
+			return err
+		}
+		txContext := protocol.NewEVMTxContext(msg)
+		if rw.vmCfg.TraceJumpDest {
+			txContext.TxHash = replayTask.Tx().Hash()
+		}
+		rw.vmCfg.Tracer = nil
+		ibs.SetHooks(nil)
+		ibs.SetTxContext(replayTask.BlockNumber(), replayTask.TxIndex)
+		rw.evm.ResetBetweenBlocks(replayTask.EvmBlockContext, txContext, ibs, *rw.vmCfg, replayTask.Rules())
+
+		prefixResult := replayTask.Execute(rw.evm, rw.execArgs.Engine, rw.execArgs.Genesis, ibs, noop, rw.execArgs.ChainConfig, rw.chain, rw.execArgs.Dirs, true)
+		if prefixResult.Err != nil {
+			return prefixResult.Err
+		}
+	}
+	return nil
+}
+
+func (rw *HistoricalTraceWorker) logHistoricalNonceDiagnostics(txTask *TxTask, phase string, execErr error) {
+	if txTask == nil || txTask.TxIndex < 0 || txTask.IsBlockEnd() || rw.chainTx == nil {
+		return
+	}
+	msg, err := txTask.TxMessage()
+	if err != nil || msg == nil {
+		return
+	}
+	sender := msg.From()
+
+	type nonceSample struct {
+		nonce uint64
+		found bool
+		err   error
+	}
+	readHistorical := func(txNum uint64) nonceSample {
+		reader := state.NewHistoryReaderV3(rw.chainTx, txNum)
+		acc, readErr := reader.ReadAccountData(sender)
+		if readErr != nil {
+			return nonceSample{err: readErr}
+		}
+		if acc == nil {
+			return nonceSample{}
+		}
+		return nonceSample{nonce: acc.Nonce, found: true}
+	}
+	readLatest := func() nonceSample {
+		reader := state.NewReaderV3(rw.chainTx)
+		acc, readErr := reader.ReadAccountData(sender)
+		if readErr != nil {
+			return nonceSample{err: readErr}
+		}
+		if acc == nil {
+			return nonceSample{}
+		}
+		return nonceSample{nonce: acc.Nonce, found: true}
+	}
+
+	firstSystemTxNum := txTask.TxNum - uint64(txTask.TxIndex) - 1
+	firstUserTxNum := txTask.TxNum - uint64(txTask.TxIndex)
+	firstSystem := readHistorical(firstSystemTxNum)
+	firstUser := readHistorical(firstUserTxNum)
+	current := readHistorical(txTask.TxNum)
+	latest := readLatest()
+	historyStartFrom := state.StateHistoryStartTxNum(rw.chainTx)
+
+	txNumsReader := rw.execArgs.BlockReader.TxnumReader()
+	minTxNum, minErr := txNumsReader.Min(rw.ctx, rw.chainTx, txTask.BlockNumber())
+	maxPrevTxNum, maxPrevErr := uint64(0), error(nil)
+	prevBlockEnd := nonceSample{}
+	if txTask.BlockNumber() > 0 {
+		maxPrevTxNum, maxPrevErr = txNumsReader.Max(rw.ctx, rw.chainTx, txTask.BlockNumber()-1)
+		prevBlockEnd = readHistorical(maxPrevTxNum)
+	}
+
+	rw.logger.Warn("[historical_trace] nonce mismatch diagnostics",
+		"phase", phase,
+		"block", txTask.BlockNumber(),
+		"txIndex", txTask.TxIndex,
+		"txNum", txTask.TxNum,
+		"txHash", txTask.TxHash(),
+		"sender", sender,
+		"msgNonce", msg.Nonce(),
+		"historyStartFrom", historyStartFrom,
+		"minTxNum", minTxNum,
+		"minTxNumErr", minErr,
+		"maxPrevTxNum", maxPrevTxNum,
+		"maxPrevTxNumErr", maxPrevErr,
+		"noncePrevBlockEnd", prevBlockEnd.nonce,
+		"foundPrevBlockEnd", prevBlockEnd.found,
+		"errPrevBlockEnd", prevBlockEnd.err,
+		"firstSystemTxNum", firstSystemTxNum,
+		"nonceFirstSystem", firstSystem.nonce,
+		"foundFirstSystem", firstSystem.found,
+		"errFirstSystem", firstSystem.err,
+		"firstUserTxNum", firstUserTxNum,
+		"nonceFirstUser", firstUser.nonce,
+		"foundFirstUser", firstUser.found,
+		"errFirstUser", firstUser.err,
+		"nonceCurrent", current.nonce,
+		"foundCurrent", current.found,
+		"errCurrent", current.err,
+		"nonceLatest", latest.nonce,
+		"foundLatest", latest.found,
+		"errLatest", latest.err,
+		"execErr", execErr,
+	)
 }
 
 func (rw *HistoricalTraceWorker) execAATxn(txTask *TxTask, tracer *calltracer.CallTracer) *TxResult {
@@ -523,6 +774,14 @@ func (p *historicalResultProcessor) processResults(consumer TraceConsumer, cfg *
 }
 
 func CustomTraceMapReduce(ctx context.Context, fromBlock, toBlock uint64, consumer TraceConsumer, tx kv.TemporalTx, cfg *ExecArgs, logger log.Logger) (err error) {
+	return customTraceMapReduce(ctx, fromBlock, toBlock, consumer, tx, cfg, nil, logger)
+}
+
+func CustomTraceMapReduceWithTaskSetup(ctx context.Context, fromBlock, toBlock uint64, consumer TraceConsumer, tx kv.TemporalTx, cfg *ExecArgs, taskSetup TaskSetupFunc, logger log.Logger) (err error) {
+	return customTraceMapReduce(ctx, fromBlock, toBlock, consumer, tx, cfg, taskSetup, logger)
+}
+
+func customTraceMapReduce(ctx context.Context, fromBlock, toBlock uint64, consumer TraceConsumer, tx kv.TemporalTx, cfg *ExecArgs, taskSetup TaskSetupFunc, logger log.Logger) (err error) {
 	defer func() {
 		if rec := recover(); rec != nil {
 			err = fmt.Errorf("'CustomTraceMapReduce' paniced: %s, %s", rec, dbg.Stack())
@@ -586,7 +845,11 @@ func CustomTraceMapReduce(ctx context.Context, fromBlock, toBlock uint64, consum
 
 	ctx, cancleCtx := context.WithCancel(ctx)
 	workers := NewHistoricalTraceWorkers(consumer, cfg, ctx, toTxNum, in, WorkerCount, outTxNum, logger)
-	defer workers.Wait()
+	// Workers block in popWait until the queue is closed, so close it before waiting or an early return deadlocks.
+	defer func() {
+		in.Close()
+		workers.Wait()
+	}()
 
 	workersExited := &atomic.Bool{}
 	go func() {
@@ -642,6 +905,9 @@ func CustomTraceMapReduce(ctx context.Context, fromBlock, toBlock uint64, consum
 				// use history reader instead of state reader to catch up to the tx where we left off
 				HistoryExecution: true,
 				//Trace:            true,
+			}
+			if taskSetup != nil {
+				taskSetup(txTask)
 			}
 
 			in.Add(ctx, txTask)

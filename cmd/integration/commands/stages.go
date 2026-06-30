@@ -62,6 +62,7 @@ import (
 	"github.com/erigontech/erigon/execution/builder/buildercfg"
 	chain2 "github.com/erigontech/erigon/execution/chain"
 	chainspec "github.com/erigontech/erigon/execution/chain/spec"
+	"github.com/erigontech/erigon/execution/decodedstate"
 	"github.com/erigontech/erigon/execution/exec"
 	"github.com/erigontech/erigon/execution/protocol/rules"
 	"github.com/erigontech/erigon/execution/stagedsync"
@@ -132,6 +133,7 @@ var (
 	cmdStageExec        = makeStageCmd("stage_exec", stageExec, true, true, false)
 	cmdStageExecReplay  = makeStageCmd("stage_exec_replay", stageExecReplay, true, true, false)
 	cmdStageCustomTrace = makeStageCmd("stage_custom_trace", stageCustomTrace, true, true, false)
+	cmdStageDecoded     = makeStageCmd("stage_decoded_state", stageDecodedState, true, true, false)
 	cmdStageTxLookup    = makeStageCmd("stage_tx_lookup", stageTxLookup, true, false, false)
 	cmdPrintStages      = makeStageCmd("print_stages", printAllStages, false, false, true)
 )
@@ -338,6 +340,13 @@ func init() {
 	withTraceFlags(cmdStageCustomTrace)
 	withDomain(cmdStageCustomTrace)
 	rootCmd.AddCommand(cmdStageCustomTrace)
+
+	withStageBase(cmdStageDecoded)
+	withReset(cmdStageDecoded)
+	withBlock(cmdStageDecoded)
+	withTraceFlags(cmdStageDecoded)
+	withDecodedStateFlags(cmdStageDecoded, true, true)
+	rootCmd.AddCommand(cmdStageDecoded)
 
 	withStageBase(cmdStageTxLookup)
 	withReset(cmdStageTxLookup)
@@ -672,7 +681,7 @@ func stageExec(db kv.TemporalRwDB, ctx context.Context, logger log.Logger) error
 	cfg := stagedsync.StageExecuteBlocksCfg(db, pm, batchSize, chainConfig, engine, vmConfig, notifications,
 		/*stateStream=*/ false,
 		/*badBlockHalt=*/ true,
-		dirs, br, genesis, syncCfg, false /*experimentalBAL*/, exec.NewBlockReadAheader())
+		dirs, br, genesis, syncCfg, false /*experimentalBAL*/, exec.NewBlockReadAheader(), false /*decodedStateEnabled*/, decodedstate.Config{})
 
 	if unwind > 0 {
 		if err := db.ViewTemporal(ctx, func(tx kv.TemporalTx) error {
@@ -953,6 +962,53 @@ func stageCustomTrace(db kv.TemporalRwDB, ctx context.Context, logger log.Logger
 	}
 
 	return nil
+}
+
+func currentDecodedConfig() decodedstate.Config {
+	cfg := decodedstate.Config{
+		Enabled:  decodedStateEnabledCli,
+		FullMode: decodedStateFullModeCli,
+	}
+	for _, addrHex := range decodedStateWhitelistCli {
+		cfg.Whitelist = append(cfg.Whitelist, common.HexToAddress(addrHex))
+	}
+	return cfg
+}
+
+func stageDecodedState(db kv.TemporalRwDB, ctx context.Context, logger log.Logger) error {
+	dirs := datadir.New(datadirCli)
+	if err := datadir.ApplyMigrations(dirs); err != nil {
+		return err
+	}
+
+	br, engine, vmConfig, sync := newSync(ctx, db, nil /* miningConfig */, logger)
+	must(sync.SetCurrentStage(stages.Execution))
+
+	chainConfig := fromdb.ChainConfig(db)
+	genesis := readGenesis(chain)
+	blockReader, _ := blocksIO(db, logger)
+
+	decodedCfg := currentDecodedConfig()
+	stageCfg := stagedsync.StageDecodedStateCfg(db, dirs, blockReader, chainConfig, engine, genesis, syncCfg, decodedCfg)
+	stageCfg.StartBlock = decodedStateStartBlockCli
+	stageCfg.ToBlock = block
+	if reset {
+		return stagedsync.StageDecodedStateReset(ctx, db)
+	}
+
+	if txtrace {
+		vmConfig.Tracer = &tracing.Hooks{}
+	}
+
+	agg := db.(dbstate.HasAgg).Agg().(*dbstate.Aggregator)
+	defer br.(*freezeblocks.BlockRetire).MadvNormal().DisableReadAhead()
+
+	blockSnapBuildSema := semaphore.NewWeighted(int64(runtime.NumCPU()))
+	agg.SetSnapshotBuildSema(blockSnapBuildSema)
+	agg.PresetOfflineExecution()
+	agg.PeriodicalyPrintProcessSet(ctx)
+
+	return stagedsync.SpawnDecodedState(stageCfg, ctx, logger)
 }
 
 func stageTxLookup(db kv.TemporalRwDB, ctx context.Context, logger log.Logger) error {

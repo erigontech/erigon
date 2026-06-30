@@ -43,6 +43,7 @@ import (
 	"github.com/erigontech/erigon/db/state/execctx"
 	"github.com/erigontech/erigon/diagnostics/metrics"
 	"github.com/erigontech/erigon/execution/chain"
+	"github.com/erigontech/erigon/execution/decodedstate"
 	"github.com/erigontech/erigon/execution/exec"
 	"github.com/erigontech/erigon/execution/protocol/rules"
 	"github.com/erigontech/erigon/execution/stagedsync/stages"
@@ -79,8 +80,10 @@ type ExecuteBlockCfg struct {
 	syncCfg   ethconfig.Sync
 	genesis   *types.Genesis
 
-	experimentalBAL bool
-	readAheader     *exec.BlockReadAheader
+	experimentalBAL     bool
+	readAheader         *exec.BlockReadAheader
+	decodedStateEnabled bool
+	decodedStateConfig  decodedstate.Config
 }
 
 func StageExecuteBlocksCfg(
@@ -100,29 +103,34 @@ func StageExecuteBlocksCfg(
 	syncCfg ethconfig.Sync,
 	experimentalBAL bool,
 	readAheader *exec.BlockReadAheader,
+	decodedStateEnabled bool,
+	decodedStateConfig decodedstate.Config,
 ) ExecuteBlockCfg {
 	if dirs.SnapDomain == "" {
 		panic("empty `dirs` variable")
 	}
 
-	return ExecuteBlockCfg{
-		db:              db,
-		prune:           pm,
-		batchSize:       batchSize,
-		chainConfig:     chainConfig,
-		engine:          engine,
-		vmConfig:        vmConfig,
-		dirs:            dirs,
-		notifications:   notifications,
-		stateStream:     stateStream,
-		badBlockHalt:    badBlockHalt,
-		blockReader:     blockReader,
-		genesis:         genesis,
-		historyV3:       true,
-		syncCfg:         syncCfg,
-		experimentalBAL: experimentalBAL,
-		readAheader:     readAheader,
+	cfg := ExecuteBlockCfg{
+		db:                  db,
+		prune:               pm,
+		batchSize:           batchSize,
+		chainConfig:         chainConfig,
+		engine:              engine,
+		vmConfig:            vmConfig,
+		dirs:                dirs,
+		notifications:       notifications,
+		stateStream:         stateStream,
+		badBlockHalt:        badBlockHalt,
+		blockReader:         blockReader,
+		genesis:             genesis,
+		historyV3:           true,
+		syncCfg:             syncCfg,
+		experimentalBAL:     experimentalBAL,
+		readAheader:         readAheader,
+		decodedStateEnabled: decodedStateEnabled || decodedStateConfig.Enabled,
+		decodedStateConfig:  decodedStateConfig,
 	}
+	return cfg
 }
 
 // ChainConfig returns the chain configuration.
@@ -444,6 +452,16 @@ func UnwindExecutionStage(u *UnwindState, s *StageState, doms *execctx.SharedDom
 		if err = u.Done(rwTx); err != nil {
 			return err
 		}
+
+		if cfg.decodedStateEnabled {
+			unwindTxNum, err := cfg.blockReader.TxnumReader().Max(ctx, rwTx, u.UnwindPoint)
+			if err != nil {
+				return fmt.Errorf("resolve decoded unwind point block %d to txNum: %w", u.UnwindPoint, err)
+			}
+			if err := decodedstate.UnwindDecodedStateToTxNum(rwTx, unwindTxNum); err != nil {
+				return fmt.Errorf("unwind decoded state: %w", err)
+			}
+		}
 	} else {
 		// Nothing above the unwind point was committed, so there's no disk rollback
 		// and u.Done must NOT run — it would raise stage progress to u.UnwindPoint and
@@ -571,6 +589,17 @@ func PruneExecutionStage(ctx context.Context, s *PruneState, tx kv.RwTx, cfg Exe
 			); err != nil {
 				return err
 			}
+		}
+	}
+
+	if cfg.decodedStateEnabled && s.ForwardProgress > cfg.syncCfg.MaxReorgDepth {
+		pruneCutoffBlock := s.ForwardProgress - cfg.syncCfg.MaxReorgDepth
+		cutoffTxNum, err := cfg.blockReader.TxnumReader().Max(ctx, tx, pruneCutoffBlock)
+		if err != nil {
+			return fmt.Errorf("resolve decoded prune cutoff block %d to txNum: %w", pruneCutoffBlock, err)
+		}
+		if err := decodedstate.PruneDecodedHistoryToTxNum(tx, cutoffTxNum); err != nil {
+			return fmt.Errorf("prune decoded history: %w", err)
 		}
 	}
 

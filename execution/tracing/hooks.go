@@ -178,6 +178,7 @@ type Hooks struct {
 	OnEnter     EnterHook
 	OnExit      ExitHook
 	OnOpcode    OpcodeHook
+	OnKeccak256 func(addr accounts.Address, input []byte, output common.Hash)
 	OnFault     FaultHook
 	OnGasChange GasChangeHook
 	// Chain events

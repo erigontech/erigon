@@ -74,6 +74,7 @@ import (
 	"github.com/erigontech/erigon/execution/builder"
 	"github.com/erigontech/erigon/execution/chain"
 	chainspec "github.com/erigontech/erigon/execution/chain/spec"
+	"github.com/erigontech/erigon/execution/decodedstate"
 	"github.com/erigontech/erigon/execution/engineapi"
 	"github.com/erigontech/erigon/execution/engineapi/engine_block_downloader"
 	"github.com/erigontech/erigon/execution/exec"
@@ -849,6 +850,8 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 			config.Sync,
 			config.ExperimentalBAL,
 			backend.readAheader,
+			config.DecodedStateEnabled,
+			makeDecodedStateConfig(config),
 		),
 		backend.notifications.Events,
 		&vm.Config{},
@@ -1659,4 +1662,15 @@ func setBorDefaultTxPoolPriceLimit(config *txpoolcfg.Config, chainConfig *chain.
 		config.MinFeeCap = txpoolcfg.BorDefaultTxPoolPriceLimit
 	}
 	_ = config.MinFeeCap
+}
+
+func makeDecodedStateConfig(config *ethconfig.Config) decodedstate.Config {
+	cfg := decodedstate.Config{
+		Enabled:  config.DecodedStateEnabled,
+		FullMode: config.DecodedStateFullMode,
+	}
+	for _, addrHex := range config.DecodedStateWhitelist {
+		cfg.Whitelist = append(cfg.Whitelist, common.HexToAddress(addrHex))
+	}
+	return cfg
 }

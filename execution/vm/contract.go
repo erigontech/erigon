@@ -63,8 +63,16 @@ type Contract struct {
 	selfBalanceCached bool
 }
 
+type jumpDestCacheEntry struct {
+	codeHash common.Hash
+	codeLen  int
+	analysis bitvec
+}
+
 // around 64MB cache in the worst case.
-var jumpDestCache = cache.NewGenericCache[bitvec](64*datasize.MB, func(v bitvec) int { return len(v) })
+var jumpDestCache = cache.NewGenericCache[jumpDestCacheEntry](64*datasize.MB, func(v jumpDestCacheEntry) int {
+	return len(v.analysis)*8 + len(v.codeHash) + 8
+})
 
 // NewContract returns a new contract environment for the execution of EVM.
 func NewContract(caller accounts.Address, callerAddress accounts.Address, addr accounts.Address, value uint256.Int) *Contract {
@@ -104,16 +112,22 @@ func (c *Contract) isCode(udest uint64) bool {
 	}
 
 	if !isCodeHashZero {
-		if analysis, ok := jumpDestCache.Get(codeHash[:]); ok {
-			c.analysis = analysis
-			return c.analysis.codeSegment(udest)
+		if entry, ok := jumpDestCache.Get(codeHash[:]); ok {
+			if entry.codeHash == codeHash && entry.codeLen == len(c.Code) {
+				c.analysis = entry.analysis
+				return c.analysis.codeSegment(udest)
+			}
 		}
 	}
 
 	c.analysis = codeBitmap(c.Code)
 
 	if !isCodeHashZero {
-		jumpDestCache.Put(codeHash[:], c.analysis)
+		jumpDestCache.Put(codeHash[:], jumpDestCacheEntry{
+			codeHash: codeHash,
+			codeLen:  len(c.Code),
+			analysis: c.analysis,
+		})
 	}
 
 	return c.analysis.codeSegment(udest)

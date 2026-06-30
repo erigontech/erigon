@@ -54,6 +54,7 @@ import (
 	dbstate "github.com/erigontech/erigon/db/state"
 	"github.com/erigontech/erigon/execution/builder"
 	"github.com/erigontech/erigon/execution/chain"
+	"github.com/erigontech/erigon/execution/decodedstate"
 	"github.com/erigontech/erigon/execution/exec"
 	"github.com/erigontech/erigon/execution/execmodule"
 	"github.com/erigontech/erigon/execution/execmodule/chainreader"
@@ -327,6 +328,12 @@ func WithChainConfig(cfg *chain.Config) Option {
 	}
 }
 
+func WithEthConfig(mutator func(*ethconfig.Config)) Option {
+	return func(opts *options) {
+		opts.ethConfigMutators = append(opts.ethConfigMutators, mutator)
+	}
+}
+
 func WithFcuBackgroundCommit() Option {
 	return func(opts *options) {
 		opts.fcuBackgroundCommit = true
@@ -369,6 +376,7 @@ type options struct {
 	fcuBackgroundPrune       bool
 	alwaysGenerateChangesets *bool
 	sentryProtocol           uint
+	ethConfigMutators        []func(*ethconfig.Config)
 }
 
 func applyOptions(opts []Option) options {
@@ -450,6 +458,9 @@ func New(tb testing.TB, opts ...Option) *ExecModuleTester {
 	cfg.ExperimentalBAL = opt.experimentalBAL
 	cfg.FcuBackgroundPrune = opt.fcuBackgroundPrune
 	cfg.FcuBackgroundCommit = opt.fcuBackgroundCommit
+	for _, mutator := range opt.ethConfigMutators {
+		mutator(&cfg)
+	}
 
 	logLvl := log.LvlError
 	if lvl, ok := os.LookupEnv("MOCK_SENTRY_LOG_LEVEL"); ok {
@@ -641,6 +652,8 @@ func New(tb testing.TB, opts ...Option) *ExecModuleTester {
 			cfg.Sync,
 			false, /*experimentalBAL*/
 			readAheader,
+			cfg.DecodedStateEnabled,
+			decodedstate.Config{},
 		),
 		nil, /*notifier*/
 		&vm.Config{},
@@ -678,6 +691,8 @@ func New(tb testing.TB, opts ...Option) *ExecModuleTester {
 				cfg.Sync,
 				false, /*experimentalBAL*/
 				readAheader,
+				cfg.DecodedStateEnabled,
+				decodedstate.Config{},
 			),
 			stagedsync.StageTxLookupCfg(pruneMode, dirs.Tmp, mock.BlockReader),
 			stagedsync.StageFinishCfg(),

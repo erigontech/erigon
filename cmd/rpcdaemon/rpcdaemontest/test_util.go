@@ -125,6 +125,14 @@ func genTestChainOnce(t *testing.T) {
 }
 
 func CreateTestExecModule(t *testing.T) (*execmoduletester.ExecModuleTester, *blockgen.ChainPack, []*blockgen.ChainPack) {
+	m, chainPack, orphaned, err := CreateTestExecModuleWithError(t)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return m, chainPack, orphaned
+}
+
+func CreateTestExecModuleWithError(t *testing.T, opts ...execmoduletester.Option) (*execmoduletester.ExecModuleTester, *blockgen.ChainPack, []*blockgen.ChainPack, error) {
 	genTestChainOnce(t)
 
 	addresses := makeTestAddresses()
@@ -137,16 +145,22 @@ func CreateTestExecModule(t *testing.T) (*execmoduletester.ExecModuleTester, *bl
 		},
 		GasLimit: 10000000,
 	}
-	m := execmoduletester.New(t, execmoduletester.WithGenesisSpec(gspec), execmoduletester.WithKey(addresses.key))
+	baseOpts := make([]execmoduletester.Option, 0, 2+len(opts))
+	baseOpts = append(baseOpts,
+		execmoduletester.WithGenesisSpec(gspec),
+		execmoduletester.WithKey(addresses.key),
+	)
+	baseOpts = append(baseOpts, opts...)
+	m := execmoduletester.New(t, baseOpts...)
 
 	if err := m.InsertChain(testOrphanedChain); err != nil {
-		t.Fatal(err)
+		return m, nil, nil, err
 	}
 	if err := m.InsertChain(testChain); err != nil {
-		t.Fatal(err)
+		return m, nil, nil, err
 	}
 
-	return m, testChain, []*blockgen.ChainPack{testOrphanedChain}
+	return m, testChain, []*blockgen.ChainPack{testOrphanedChain}, nil
 }
 
 func generateChain(

@@ -41,6 +41,7 @@ import (
 	dbstate "github.com/erigontech/erigon/db/state"
 	"github.com/erigontech/erigon/db/state/execctx"
 	"github.com/erigontech/erigon/execution/commitment"
+	"github.com/erigontech/erigon/execution/decodedstate"
 	"github.com/erigontech/erigon/execution/exec"
 	"github.com/erigontech/erigon/execution/protocol"
 	"github.com/erigontech/erigon/execution/protocol/rules"
@@ -230,6 +231,8 @@ func ExecV3(ctx context.Context,
 				progress:          NewProgress(blockNum, inputTxNum, commitThreshold, false, execStage.LogPrefix(), logger),
 				enableChaosMonkey: execStage.CurrentSyncCycle.IsInitialCycle,
 				hooks:             hooks,
+				parallelDecoded:   cfg.decodedStateEnabled,
+				decodedConfig:     cfg.decodedStateConfig,
 			},
 			workerCount: cfg.syncCfg.ExecWorkerCount,
 		}
@@ -266,6 +269,7 @@ func ExecV3(ctx context.Context,
 				progress:          NewProgress(blockNum, inputTxNum, commitThreshold, false, execStage.LogPrefix(), logger),
 				enableChaosMonkey: execStage.CurrentSyncCycle.IsInitialCycle,
 				hooks:             hooks,
+				decodedConfig:     cfg.decodedStateConfig,
 			}}
 		se.lastCommittedTxNum.Store(inputTxNum)
 		se.lastCommittedBlockNum.Store(blockNum)
@@ -413,7 +417,10 @@ type txExecutor struct {
 	readCount    atomic.Int64
 	writeCount   atomic.Int64
 
-	enableChaosMonkey bool
+	enableChaosMonkey     bool
+	decodedStateCollector decodedstate.Collector
+	parallelDecoded       bool
+	decodedConfig         decodedstate.Config
 }
 
 func (te *txExecutor) readState() *state.StateV3Buffered {
@@ -633,6 +640,12 @@ func (te *txExecutor) executeBlocks(ctx context.Context, startBlockNum uint64, m
 				}
 
 				// Do not oversend, wait for the result heap to go under certain size
+				taskHooks := te.hooks
+				var taskDecodedCollector decodedstate.Collector
+				if te.parallelDecoded {
+					taskDecodedCollector = decodedstate.NewCollector(te.decodedConfig)
+					taskHooks = decodedstate.NewTracingHooks(taskDecodedCollector, te.hooks)
+				}
 				txTask := &exec.TxTask{
 					TxNum:           inputTxNum,
 					TxIndex:         txIndex,
@@ -646,7 +659,8 @@ func (te *txExecutor) executeBlocks(ctx context.Context, startBlockNum uint64, m
 					Config:           te.cfg.chainConfig,
 					Engine:           te.cfg.engine,
 					Trace:            dbg.TraceTx(blockNum, txIndex),
-					Hooks:            te.hooks,
+					Hooks:            taskHooks,
+					DecodedCollector: taskDecodedCollector,
 					Logger:           te.logger,
 					BlockStateCache:  blockStateCache,
 				}
