@@ -179,10 +179,10 @@ func makeHeader(number uint64, root common.Hash) *types.Header {
 }
 
 // TestFindExecutedDiffsetAtHeight_FallsBackAfterCanonicalReorg pins the unwind diffset
-// lookup. On a reorg the headers-stage unwind clears the canonical hash for the unwound
-// range before the execution stage unwinds, so a lookup keyed on the canonical hash
-// misses; without the fallback to the stored header the diffset is never found, the
-// unwind silently no-ops, and the unwound block's state survives as phantom data.
+// lookup. After a reorg clears the canonical hash for the unwound range, a lookup keyed
+// on the canonical hash misses; without the fallback to the stored header the diffset is
+// never found, the unwind silently no-ops, and the unwound block's state survives as
+// phantom data.
 func TestFindExecutedDiffsetAtHeight_FallsBackAfterCanonicalReorg(t *testing.T) {
 	t.Parallel()
 
@@ -231,9 +231,9 @@ func TestFindExecutedDiffsetAtHeight_FallsBackAfterCanonicalReorg(t *testing.T) 
 	require.Equal(t, hOld.Hash(), executed, "executedHash must be hOld when canonical points at hOld")
 	require.NotEmpty(t, diffs[kv.AccountsDomain], "AccountsDomain diff list must be non-empty")
 
-	// Phase 2: the headers-stage unwind clears the canonical hash for the unwound
-	// range. A canonical-hash lookup now misses (the pre-fix failure mode); the
-	// diffset must still be located by falling back to the stored header.
+	// Phase 2: a reorg clears the canonical hash for the unwound range. A canonical-hash
+	// lookup now misses (the pre-fix failure mode); the diffset must still be located by
+	// falling back to the stored header.
 	require.NoError(t, rawdb.TruncateCanonicalHash(tx, height, false))
 	_, canonOk, err := br.CanonicalHash(ctx, tx, height)
 	require.NoError(t, err)

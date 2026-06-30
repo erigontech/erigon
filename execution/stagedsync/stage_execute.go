@@ -147,9 +147,9 @@ func (cfg ExecuteBlockCfg) WithAuthor(author accounts.Address) ExecuteBlockCfg {
 
 var ErrTooDeepUnwind = errors.New("too deep unwind")
 
-// findExecutedDiffsetAtHeight returns the diffset of the block actually executed at
-// currentBlock, falling back to the stored header when the canonical hash was cleared by
-// the headers-stage unwind — otherwise the diffset, and the unwind, would be lost.
+// findExecutedDiffsetAtHeight returns the diffset of the block executed at currentBlock.
+// When no canonical hash is recorded at that height (e.g. the block is no longer canonical
+// after a reorg) it falls back to the stored header.
 func findExecutedDiffsetAtHeight(ctx context.Context, rwTx kv.TemporalRwTx, br services.FullBlockReader, doms *execctx.SharedDomains, currentBlock uint64) (diffSet [kv.DomainLen][]kv.DomainEntryDiff, executedHash common.Hash, found bool, err error) {
 	executedHash, ok, err := br.CanonicalHash(ctx, rwTx, currentBlock)
 	if err != nil {

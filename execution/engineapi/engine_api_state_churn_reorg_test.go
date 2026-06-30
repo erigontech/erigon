@@ -233,8 +233,8 @@ func recordChurnSum(ctx context.Context, t *testing.T, churn *contracts.StateChu
 }
 
 // assertChurnState waits for the canonical head to settle on want (matching both
-// number and hash) and then asserts the contract's live state is self-consistent
-// and equal to wantSum.
+// number and hash) and then asserts the contract's live state is self-consistent,
+// equal to wantSum, and at the cursor expected for want's height.
 func assertChurnState(
 	ctx context.Context,
 	t *testing.T,
@@ -245,9 +245,19 @@ func assertChurnState(
 ) {
 	height := want.ExecutionPayload.BlockNumber.Uint64()
 	assertCanonicalHead(ctx, t, eat, want)
-	tracked, computed, ok := readChurn(ctx, t, churn)
+
+	// fcu-to-ancestor unwinds for real only while the target stays above the finalized
+	// block (the mock CL pins finalized to genesis).
+	if fin, err := eat.RpcApiClient.GetBlockByNumber(ctx, rpc.FinalizedBlockNumber, false); err == nil && fin != nil {
+		require.Greaterf(t, height, fin.Number.Uint64(), "fcu target %d must stay above finalized %d", height, fin.Number.Uint64())
+	}
+
+	tracked, computed, cursor, ok := readChurn(ctx, t, churn)
 	require.Truef(t, ok, "in-EVM check() must hold at height %d: tracked=%s computed=%s", height, tracked, computed)
 	require.Equalf(t, wantSum, tracked, "live trackedSum must match the recorded value at height %d", height)
+	// cursor increments once per poke (height-2 at each block), so a head that moved
+	// without rolling back state would read the wrong value here.
+	require.Equalf(t, height-2, cursor.Uint64(), "live cursor must equal pokes applied at height %d", height)
 }
 
 // assertCanonicalHead blocks until the canonical head reported over JSON-RPC
@@ -263,10 +273,10 @@ func assertCanonicalHead(ctx context.Context, t *testing.T, eat engineapitester.
 	}, 30*time.Second, 25*time.Millisecond, "canonical head did not settle at block %d %s", wantNum, wantHash)
 }
 
-// readChurn reads trackedSum, computedSum and check() from the live state,
+// readChurn reads trackedSum, computedSum, cursor and check() from the live state,
 // retrying only on transient RPC errors (never on a value), so the returned
 // values can be asserted strictly by the caller.
-func readChurn(ctx context.Context, t *testing.T, churn *contracts.StateChurn) (tracked, computed *big.Int, ok bool) {
+func readChurn(ctx context.Context, t *testing.T, churn *contracts.StateChurn) (tracked, computed, cursor *big.Int, ok bool) {
 	opts := &bind.CallOpts{Context: ctx}
 	require.Eventually(t, func() bool {
 		var err error
@@ -276,8 +286,11 @@ func readChurn(ctx context.Context, t *testing.T, churn *contracts.StateChurn) (
 		if computed, err = churn.ComputedSum(opts); err != nil {
 			return false
 		}
+		if cursor, err = churn.Cursor(opts); err != nil {
+			return false
+		}
 		ok, err = churn.Check(opts)
 		return err == nil
 	}, 10*time.Second, 25*time.Millisecond, "state churn reads did not succeed")
-	return tracked, computed, ok
+	return tracked, computed, cursor, ok
 }
