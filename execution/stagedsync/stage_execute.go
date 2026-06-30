@@ -147,6 +147,36 @@ func (cfg ExecuteBlockCfg) WithAuthor(author accounts.Address) ExecuteBlockCfg {
 
 var ErrTooDeepUnwind = errors.New("too deep unwind")
 
+// findExecutedDiffsetAtHeight returns the diffset of the block executed at currentBlock.
+// When no canonical hash is recorded at that height (e.g. the block is no longer canonical
+// after a reorg) it falls back to the stored header.
+func findExecutedDiffsetAtHeight(ctx context.Context, rwTx kv.TemporalRwTx, br services.FullBlockReader, doms *execctx.SharedDomains, currentBlock uint64) (diffSet [kv.DomainLen][]kv.DomainEntryDiff, executedHash common.Hash, found bool, err error) {
+	executedHash, ok, err := br.CanonicalHash(ctx, rwTx, currentBlock)
+	if err != nil {
+		return diffSet, common.Hash{}, false, err
+	}
+	if !ok {
+		// we may have executed blocks which are not in the canonical chain
+		nonCanonicalHeaders, err := rawdb.ReadHeadersByNumber(rwTx, currentBlock)
+		if err != nil {
+			return diffSet, common.Hash{}, false, err
+		}
+		switch {
+		case len(nonCanonicalHeaders) == 0:
+			return diffSet, common.Hash{}, false, fmt.Errorf("can't find diffsets for: %d", currentBlock)
+		case len(nonCanonicalHeaders) == 1:
+			executedHash = nonCanonicalHeaders[0].Hash()
+		default:
+			return diffSet, common.Hash{}, false, fmt.Errorf("diffsets ambiguous for: %d, have %d headers", currentBlock, len(nonCanonicalHeaders))
+		}
+	}
+	diffSet, found, err = doms.GetDiffset(rwTx, executedHash, currentBlock)
+	if err != nil {
+		return diffSet, common.Hash{}, false, err
+	}
+	return diffSet, executedHash, found, nil
+}
+
 func unwindExec3(u *UnwindState, s *StageState, doms *execctx.SharedDomains, rwTx kv.TemporalRwTx, ctx context.Context, cfg ExecuteBlockCfg, accumulator *shards.Accumulator, logger log.Logger) (err error) {
 	br := cfg.blockReader
 	txNumsReader := br.TxnumReader()
@@ -160,28 +190,11 @@ func unwindExec3(u *UnwindState, s *StageState, doms *execctx.SharedDomains, rwT
 	t := time.Now()
 	var changeSet *[kv.DomainLen][]kv.DomainEntryDiff
 	for currentBlock := u.CurrentBlockNumber; currentBlock > u.UnwindPoint; currentBlock-- {
-		currentHash, ok, err := br.CanonicalHash(ctx, rwTx, currentBlock)
+		currentKeys, executedHash, found, err := findExecutedDiffsetAtHeight(ctx, rwTx, br, doms, currentBlock)
 		if err != nil {
 			return err
 		}
-		if !ok {
-			// we may have executed blocks which are not in the canonical chain
-			nonCanonicalHeaders, err := rawdb.ReadHeadersByNumber(rwTx, currentBlock)
-			if err != nil {
-				return err
-			}
-			switch {
-			case len(nonCanonicalHeaders) == 0:
-				return fmt.Errorf("can't find diffsets for: %d", currentBlock)
-			case len(nonCanonicalHeaders) == 1:
-				currentHash = nonCanonicalHeaders[0].Hash()
-			default:
-				return fmt.Errorf("diffsets ambiguous for: %d, have %d headers", currentBlock, len(nonCanonicalHeaders))
-			}
-		}
-		var currentKeys [kv.DomainLen][]kv.DomainEntryDiff
-		currentKeys, ok, err = doms.GetDiffset(rwTx, currentHash, currentBlock)
-		if !ok {
+		if !found {
 			if changeSet == nil {
 				// this handles the edge case where we're traversing backwards from
 				// the current block and we've not found the first diff yet it just
@@ -191,10 +204,7 @@ func unwindExec3(u *UnwindState, s *StageState, doms *execctx.SharedDomains, rwT
 				// all previous blocks
 				continue
 			}
-			return fmt.Errorf("domains.GetDiffset(%d, %s): not found", currentBlock, currentHash)
-		}
-		if err != nil {
-			return err
+			return fmt.Errorf("domains.GetDiffset(%d, %s): not found", currentBlock, executedHash)
 		}
 		if changeSet == nil {
 			changeSet = &currentKeys

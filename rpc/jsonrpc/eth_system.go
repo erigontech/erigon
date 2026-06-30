@@ -273,13 +273,13 @@ func (api *APIImpl) GasPrice(ctx context.Context) (*hexutil.Big, error) {
 	defer tx.Rollback()
 	oracle := api.newGasOracle(tx)
 	tipcap, err := oracle.SuggestTipCap(ctx)
-	gasResult := uint256.NewInt(0)
-
-	gasResult.Set(tipcap)
 	if err != nil {
 		return nil, err
 	}
-	if head := rawdb.ReadCurrentHeader(tx); head != nil && head.BaseFee != nil {
+	gasResult := uint256.NewInt(0)
+	gasResult.Set(tipcap)
+	overlayTx := api.filters.WithTemporalOverlay(tx)
+	if head := rawdb.ReadCurrentHeader(overlayTx); head != nil && head.BaseFee != nil {
 		gasResult.Add(tipcap, head.BaseFee)
 	}
 
@@ -355,13 +355,13 @@ func (api *APIImpl) FeeHistory(ctx context.Context, blockCount rpc.DecimalOrHex,
 
 // BlobBaseFee returns the base fee for blob gas at the current head.
 func (api *APIImpl) BlobBaseFee(ctx context.Context) (*hexutil.Big, error) {
-	// read current header
 	tx, err := api.db.BeginTemporalRo(ctx)
 	if err != nil {
 		return nil, err
 	}
 	defer tx.Rollback()
-	header := rawdb.ReadCurrentHeader(tx)
+	overlayTx := api.filters.WithTemporalOverlay(tx)
+	header := rawdb.ReadCurrentHeader(overlayTx)
 	if header == nil || header.ExcessBlobGas == nil {
 		return nil, nil
 	}
@@ -382,13 +382,13 @@ func (api *APIImpl) BlobBaseFee(ctx context.Context) (*hexutil.Big, error) {
 
 // BaseFee returns the base fee at the current head.
 func (api *APIImpl) BaseFee(ctx context.Context) (*hexutil.Big, error) {
-	// read current header
 	tx, err := api.db.BeginTemporalRo(ctx)
 	if err != nil {
 		return nil, err
 	}
 	defer tx.Rollback()
-	header := rawdb.ReadCurrentHeader(tx)
+	overlayTx := api.filters.WithTemporalOverlay(tx)
+	header := rawdb.ReadCurrentHeader(overlayTx)
 	if header == nil {
 		return nil, nil
 	}

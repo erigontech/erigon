@@ -20,6 +20,7 @@ import (
 	"context"
 	"testing"
 
+	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/common"
@@ -30,12 +31,14 @@ import (
 	"github.com/erigontech/erigon/db/kv/mdbx"
 	"github.com/erigontech/erigon/db/kv/rawdbv3"
 	"github.com/erigontech/erigon/db/kv/temporal"
+	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/db/snapshotsync/freezeblocks"
 	dbstate "github.com/erigontech/erigon/db/state"
 	"github.com/erigontech/erigon/db/state/changeset"
 	"github.com/erigontech/erigon/db/state/execctx"
 	"github.com/erigontech/erigon/execution/chain/networkname"
 	"github.com/erigontech/erigon/execution/stagedsync/stages"
+	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/node/ethconfig"
 )
 
@@ -165,4 +168,90 @@ func TestUnwindExecutionStage_PrunesUncommittedOverlayWrite(t *testing.T) {
 	got, _, err := doms.GetLatest(kv.StorageDomain, tx, survivorKey)
 	require.NoError(t, err)
 	require.Equal(t, survivorVal, got, "write at/below the committed progress must survive the prune")
+}
+
+func makeHeader(number uint64, root common.Hash) *types.Header {
+	return &types.Header{
+		Number:     *uint256.NewInt(number),
+		Root:       root,
+		Difficulty: *uint256.NewInt(1),
+	}
+}
+
+// TestFindExecutedDiffsetAtHeight_FallsBackAfterCanonicalReorg pins the unwind diffset
+// lookup. After a reorg clears the canonical hash for the unwound range, a lookup keyed
+// on the canonical hash misses; without the fallback to the stored header the diffset is
+// never found, the unwind silently no-ops, and the unwound block's state survives as
+// phantom data.
+func TestFindExecutedDiffsetAtHeight_FallsBackAfterCanonicalReorg(t *testing.T) {
+	t.Parallel()
+
+	logger := log.New()
+	dirs := datadir.New(t.TempDir())
+	rawDb := mdbx.New(dbcfg.ChainDB, logger).InMem(t, dirs.Chaindata).MustOpen()
+	t.Cleanup(rawDb.Close)
+
+	agg, err := dbstate.NewTest(dirs).StepSize(16).Logger(logger).Open(context.Background(), rawDb)
+	require.NoError(t, err)
+	t.Cleanup(agg.Close)
+
+	db, err := temporal.New(rawDb, agg)
+	require.NoError(t, err)
+
+	// Block reader backed only by MDBX — the unwind range is at the tip, above any
+	// frozen snapshot boundary, so no snapshots are needed.
+	snaps := freezeblocks.NewRoSnapshots(ethconfig.BlocksFreezing{ChainName: networkname.Mainnet}, dirs.Snap, logger)
+	t.Cleanup(snaps.Close)
+	br := freezeblocks.NewBlockReader(snaps, nil)
+
+	ctx := context.Background()
+	tx, err := db.BeginTemporalRw(ctx)
+	require.NoError(t, err)
+	defer tx.Rollback()
+
+	doms, err := execctx.NewSharedDomains(ctx, tx, logger)
+	require.NoError(t, err)
+	defer doms.Close()
+
+	const height = uint64(10)
+	hOld := makeHeader(height, common.Hash{0x01})
+	require.NoError(t, rawdb.WriteHeader(tx, hOld))
+
+	// Diffset is stored under hOld — the block actually executed at this height.
+	addr := common.Address{0xde, 0xad}
+	cs := &changeset.StateChangeSet{}
+	cs.Diffs[kv.AccountsDomain].DomainUpdate(addr[:], kv.Step(0), nil)
+	require.NoError(t, changeset.WriteDiffSet(tx, height, hOld.Hash(), cs))
+
+	// Phase 1: hOld is canonical → direct hit under the canonical hash.
+	require.NoError(t, rawdb.WriteCanonicalHash(tx, hOld.Hash(), height))
+	diffs, executed, found, err := findExecutedDiffsetAtHeight(ctx, tx, br, doms, height)
+	require.NoError(t, err)
+	require.True(t, found, "diffset must be found when the canonical hash matches the stored hash")
+	require.Equal(t, hOld.Hash(), executed, "executedHash must be hOld when canonical points at hOld")
+	require.NotEmpty(t, diffs[kv.AccountsDomain], "AccountsDomain diff list must be non-empty")
+
+	// Phase 2: a reorg clears the canonical hash for the unwound range. A canonical-hash
+	// lookup now misses (the pre-fix failure mode); the diffset must still be located by
+	// falling back to the stored header.
+	require.NoError(t, rawdb.TruncateCanonicalHash(tx, height, false))
+	_, canonOk, err := br.CanonicalHash(ctx, tx, height)
+	require.NoError(t, err)
+	require.False(t, canonOk, "sanity: canonical hash must be cleared at the unwound height — the pre-fix lookup keys on this and misses")
+
+	diffs, executed, found, err = findExecutedDiffsetAtHeight(ctx, tx, br, doms, height)
+	require.NoError(t, err)
+	require.True(t, found, "diffset must be located via the stored-header fallback after the canonical hash was cleared")
+	require.Equal(t, hOld.Hash(), executed, "executedHash must remain hOld (the actually-executed block) after the canonical flip")
+	require.NotEmpty(t, diffs[kv.AccountsDomain], "AccountsDomain diff list must survive the fallback")
+
+	// Phase 3: a height whose canonical header has no stored diffset — found must be
+	// false (no spurious match, no error).
+	const heightEmpty = uint64(11)
+	hEmpty := makeHeader(heightEmpty, common.Hash{0x03})
+	require.NoError(t, rawdb.WriteHeader(tx, hEmpty))
+	require.NoError(t, rawdb.WriteCanonicalHash(tx, hEmpty.Hash(), heightEmpty))
+	_, _, found, err = findExecutedDiffsetAtHeight(ctx, tx, br, doms, heightEmpty)
+	require.NoError(t, err)
+	require.False(t, found, "must report not-found when no diffset is stored at this height")
 }
