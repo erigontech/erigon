@@ -196,7 +196,7 @@ func TestApplyBuilderDepositRequestTopUpSweptExitedBuilderResetsWithdrawableEpoc
 	require.Equal(t, uint64(10)+cfg.MinBuilderWithdrawabilityDelay, builder.WithdrawableEpoch)
 }
 
-func TestApplyBuilderDepositRequestTopUpUnsweptExitedBuilderKeepsWithdrawableEpoch(t *testing.T) {
+func TestApplyBuilderDepositRequestTopUpUnsweptExitedBuilderResetsWithdrawableEpoch(t *testing.T) {
 	cfg := clparams.MainnetBeaconConfig
 	s := state2.New(&cfg)
 	s.SetSlot(cfg.SlotsPerEpoch * 10)
@@ -217,7 +217,7 @@ func TestApplyBuilderDepositRequestTopUpUnsweptExitedBuilderKeepsWithdrawableEpo
 
 	builder := s.GetBuilders().Get(0)
 	require.Equal(t, uint64(35), builder.Balance)
-	require.Equal(t, uint64(1), builder.WithdrawableEpoch)
+	require.Equal(t, uint64(10)+cfg.MinBuilderWithdrawabilityDelay, builder.WithdrawableEpoch)
 }
 
 func TestBuilderHelpersRejectHugeIndex(t *testing.T) {
