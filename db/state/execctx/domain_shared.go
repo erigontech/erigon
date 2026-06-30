@@ -348,14 +348,7 @@ func (sd *SharedDomains) flushPendingUpdates(ctx context.Context, tx kv.Temporal
 		return nil
 	}
 
-	// Genesis (block 0) has no changeset of its own; detach so its deferred
-	// branch writes aren't recorded in a later block's changeset and reversed
-	// when that block is unwound to genesis.
-	if upd.BlockNum == 0 {
-		prev := switcher.GetChangesetAccumulator()
-		switcher.SetChangesetAccumulator(nil)
-		defer switcher.SetChangesetAccumulator(prev)
-	}
+	defer sd.DetachAccumulatorForGenesisLocked(upd.BlockNum)()
 	// No past changeset found — write into whatever is current
 	_, err := commitment.ApplyDeferredBranchUpdates(upd.Deferred, runtime.NumCPU(), putBranch)
 	return err
@@ -465,6 +458,21 @@ func (sd *SharedDomains) GetChangesetAccumulatorLocked() *changeset.StateChangeS
 		return h.GetChangesetAccumulator()
 	}
 	return nil
+}
+
+// DetachAccumulatorForGenesisLocked detaches the changeset accumulator for
+// block 0 and returns a func that restores it (a no-op for any other block).
+// Block 0 has no changeset of its own, so without this its commitment writes
+// fall through to whatever accumulator is currently installed — the next
+// block's — and get reversed when that block is unwound to genesis, which is
+// the parallel-exec reorg-to-genesis crash. Callers must hold changesetMu.
+func (sd *SharedDomains) DetachAccumulatorForGenesisLocked(blockNum uint64) (restore func()) {
+	if blockNum != 0 {
+		return func() {}
+	}
+	prev := sd.GetChangesetAccumulatorLocked()
+	sd.SetChangesetAccumulatorLocked(nil)
+	return func() { sd.SetChangesetAccumulatorLocked(prev) }
 }
 
 // GetChangesetByBlockNum returns the saved changeset for a given block

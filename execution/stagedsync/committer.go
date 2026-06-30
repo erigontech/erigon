@@ -601,14 +601,7 @@ func (cc *commitmentCalculator) computeWithBlockAccumulator(ctx context.Context,
 	cc.doms.LockChangesetAccumulator()
 	defer cc.doms.UnlockChangesetAccumulator()
 	if cs == nil {
-		// Genesis (block 0) has no changeset of its own; detach the installed
-		// accumulator so its commitment writes aren't recorded in a later block's
-		// changeset and reversed when that block is unwound to genesis.
-		if br.BlockNum == 0 {
-			prev := cc.doms.GetChangesetAccumulatorLocked()
-			cc.doms.SetChangesetAccumulatorLocked(nil)
-			defer cc.doms.SetChangesetAccumulatorLocked(prev)
-		}
+		defer cc.doms.DetachAccumulatorForGenesisLocked(br.BlockNum)()
 		return cc.doms.ComputeCommitmentLocked(ctx, cc.roTx, true, br.BlockNum, br.lastTxNum, cc.logPrefix, nil)
 	}
 	// LOAD-BEARING swap under the outer lock (already taken above). The
