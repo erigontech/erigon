@@ -3358,6 +3358,22 @@ func doRetireCommand(cliCtx *cli.Context, dirs datadir.Dirs) error {
 	//defer br.MadvNormal().DisableReadAhead()
 	//defer agg.MadvNormal().DisableReadAhead()
 
+	forceSingleFile := cliCtx.Bool(utils.SegRetireForceSingleFileFlag.Name)
+	if forceSingleFile {
+		at := agg.BeginFilesRo()
+		hasRefs, refErr := at.CommitmentFilesHaveReferences()
+		at.Close()
+		if refErr != nil {
+			return fmt.Errorf("checking commitment references for --%s: %w", utils.SegRetireForceSingleFileFlag.Name, refErr)
+		}
+		if hasRefs {
+			return fmt.Errorf("--%s refused: commitment value files store shortened (file,offset) references "+
+				"into account/storage files, which a non-aligned full-span merge cannot rewrite — the merged file "+
+				"would be unreadable. This is detected from the files themselves, independent of the erigondb.toml "+
+				"references_in_commitment_branches setting", utils.SegRetireForceSingleFileFlag.Name)
+		}
+	}
+
 	if cliCtx.IsSet(utils.ErigondbDomainStepsInFrozenFileFlag.Name) {
 		s := cliCtx.String(utils.ErigondbDomainStepsInFrozenFileFlag.Name)
 		var v uint64
@@ -3496,7 +3512,7 @@ func doRetireCommand(cliCtx *cli.Context, dirs datadir.Dirs) error {
 	logger.Info("waiting for background build/merge to drain")
 	agg.WaitForFiles()
 
-	if cliCtx.Bool(utils.SegRetireForceSingleFileFlag.Name) {
+	if forceSingleFile {
 		logger.Info("force-single-file: collapsing each domain's .kv files into one full-span file (ignores power-of-two alignment; history/inverted-index untouched)")
 		agg.SetForceDomainSingleFileMerge(true)
 	}

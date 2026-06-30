@@ -263,6 +263,87 @@ func TestAggregator_SqueezeCommitment(t *testing.T) {
 	require.NotEqual(t, empty.RootHash[:], root)
 }
 
+// TestForceSingleFileMerge_ReferenceFreeCommitment proves the happy path: on a
+// reference-free datadir, force-merge collapses commitment into one file and the
+// recomputed state root is unchanged — i.e. Erigon reads the force-merged commitment
+// correctly. This is the case real datadirs like /erigon-data fall under.
+func TestForceSingleFileMerge_ReferenceFreeCommitment(t *testing.T) {
+	if testing.Short() {
+		t.Skip()
+	}
+	ctx := t.Context()
+	// disableCommitmentBranchTransform=true => commitment files store plain keys.
+	db, agg := testDbAggregatorWithFiles(t, &testAggConfig{stepSize: 10, disableCommitmentBranchTransform: true})
+
+	rwTx, err := db.BeginTemporalRw(ctx)
+	require.NoError(t, err)
+	defer rwTx.Rollback()
+	domains, err := execctx.NewSharedDomains(ctx, rwTx, log.New())
+	require.NoError(t, err)
+	latestRoot, err := domains.ComputeCommitment(ctx, rwTx, false, 0, 0, "", nil)
+	require.NoError(t, err)
+	require.NotEmpty(t, latestRoot)
+	domains.Close()
+	rwTx.Rollback()
+
+	acBefore := agg.BeginFilesRo()
+	hasRefs, err := acBefore.CommitmentFilesHaveReferences()
+	require.NoError(t, err)
+	require.False(t, hasRefs)
+	commitmentFilesBefore := len(acBefore.Files(kv.CommitmentDomain))
+	acBefore.Close()
+	require.Greater(t, commitmentFilesBefore, 1, "need multiple commitment files to exercise the merge")
+
+	agg.SetForceDomainSingleFileMerge(true)
+	require.NoError(t, agg.MergeLoop(ctx))
+
+	ac := agg.BeginFilesRo()
+	defer ac.Close()
+	require.Equal(t, 1, len(ac.Files(kv.CommitmentDomain)), "force-merge must leave a single commitment file")
+
+	// Recompute the root from the merged files: it must match.
+	rwTx2, err := db.BeginTemporalRw(ctx)
+	require.NoError(t, err)
+	defer rwTx2.Rollback()
+	domains2, err := execctx.NewSharedDomains(ctx, rwTx2, log.New())
+	require.NoError(t, err)
+	defer domains2.Close()
+	acit, err := rwTx2.Debug().RangeLatest(kv.AccountsDomain, nil, nil, -1)
+	require.NoError(t, err)
+	defer acit.Close()
+	trieCtx := domains2.GetCommitmentContext()
+	for acit.HasNext() {
+		k, _, err := acit.Next()
+		require.NoError(t, err)
+		trieCtx.TouchKey(kv.AccountsDomain, string(k), nil)
+	}
+	root, err := domains2.ComputeCommitment(ctx, rwTx2, false, 0, 0, "", nil)
+	require.NoError(t, err)
+	require.Equal(t, latestRoot, root, "force-merged commitment must reproduce the same state root")
+}
+
+func TestCommitmentFilesHaveReferences(t *testing.T) {
+	if testing.Short() {
+		t.Skip()
+	}
+	t.Run("referenced branches are detected", func(t *testing.T) {
+		_, agg := testDbAggregatorWithFiles(t, &testAggConfig{stepSize: 10, disableCommitmentBranchTransform: false})
+		ac := agg.BeginFilesRo()
+		defer ac.Close()
+		has, err := ac.CommitmentFilesHaveReferences()
+		require.NoError(t, err)
+		require.True(t, has, "files built with commitment branch references must be detected")
+	})
+	t.Run("plain-key files are reference-free", func(t *testing.T) {
+		_, agg := testDbAggregatorWithFiles(t, &testAggConfig{stepSize: 10, disableCommitmentBranchTransform: true})
+		ac := agg.BeginFilesRo()
+		defer ac.Close()
+		has, err := ac.CommitmentFilesHaveReferences()
+		require.NoError(t, err)
+		require.False(t, has, "files built without branch references must be reference-free")
+	})
+}
+
 func TestAggregator_RebuildCommitmentBasedOnFiles(t *testing.T) {
 	if testing.Short() {
 		t.Skip()

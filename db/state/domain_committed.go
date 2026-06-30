@@ -122,6 +122,54 @@ func (at *AggregatorRoTx) replaceShortenedKeysInBranch(prefix []byte, branch com
 	return result, nil
 }
 
+// CommitmentFilesHaveReferences reports whether any commitment value file stores
+// shortened (file,offset) references to account/storage keys instead of full plain
+// keys. Such files cannot be force-merged into a single non-aligned file: the merge
+// does not rewrite the references, so they would dangle at the deleted source files.
+// It samples up to maxKeysPerFile account/storage child keys per file and returns at
+// the first reference found. This inspects the files themselves, independent of the
+// erigondb.toml references_in_commitment_branches setting (which can disagree with
+// what was actually written).
+func (at *AggregatorRoTx) CommitmentFilesHaveReferences() (bool, error) {
+	const maxKeysPerFile = 1 << 14
+	cd := at.d[kv.CommitmentDomain]
+	for _, vf := range cd.files {
+		if vf.src == nil || vf.src.decompressor == nil {
+			continue
+		}
+		g := cd.dataReader(vf.src.decompressor)
+		g.Reset(0)
+		referenced, keysSeen := false, 0
+		for g.HasNext() && keysSeen < maxKeysPerFile {
+			key, _ := g.Next(nil)
+			if !g.HasNext() {
+				break
+			}
+			val, _ := g.Next(nil)
+			if bytes.Equal(key, commitmentdb.KeyCommitmentState) {
+				continue
+			}
+			if _, err := commitment.BranchData(val).ReplacePlainKeys(nil, func(k []byte, isStorage bool) ([]byte, error) {
+				keysSeen++
+				if isStorage {
+					if len(k) != length.Addr+length.Hash {
+						referenced = true
+					}
+				} else if len(k) != length.Addr {
+					referenced = true
+				}
+				return nil, nil
+			}); err != nil {
+				return false, err
+			}
+			if referenced {
+				return true, nil
+			}
+		}
+	}
+	return false, nil
+}
+
 func DecodeReferenceKey(from []byte) uint64 {
 	of, n := binary.Uvarint(from)
 	if n == 0 {
