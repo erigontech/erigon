@@ -1240,7 +1240,7 @@ func (pe *parallelExecutor) checkBlocksDrained(ctx context.Context, execErr erro
 	pending := slices.Sorted(maps.Keys(pe.blockExecutors))
 	pe.RUnlock()
 	if len(pending) > 0 {
-		return fmt.Errorf("%w: parallel exec committed cleanly but %d scheduled block(s) never drained: %v",
+		return fmt.Errorf("%w: parallel exec apply loop finished cleanly but %d scheduled block(s) never drained: %v",
 			rules.ErrInvalidBlock, len(pending), pending)
 	}
 	return nil
