@@ -55,7 +55,6 @@ type commitmentCalculator struct {
 	db        kv.TemporalRoDB
 	logPrefix string
 	logger    log.Logger
-	stepSize  uint64
 
 	// updates is the calculator's OWN buffer — never shared with the
 	// execLoop or apply loop. Only this goroutine reads/writes it.
@@ -165,7 +164,6 @@ func newCommitmentCalculator(
 		db:                   db,
 		logPrefix:            logPrefix,
 		logger:               logger,
-		stepSize:             doms.StepSize(),
 		updates:              calcUpdates,
 		state:                newCalcState(asOfReader, logger, logPrefix),
 		asOfReader:           asOfReader,
@@ -208,19 +206,6 @@ func (cc *commitmentCalculator) loop(ctx context.Context) {
 	}
 }
 
-// shouldCheckpointStepBoundary reports whether this tx sits on a not-yet-frozen
-// step edge that the calculator must checkpoint itself, in every commitment mode
-// (the snapshot producer runs per-block and still needs step-aligned commitment).
-func (cc *commitmentCalculator) shouldCheckpointStepBoundary(txNum uint64) bool {
-	if cc.stepSize == 0 || dbg.DiscardCommitment() {
-		return false
-	}
-	if (txNum+1)%cc.stepSize != 0 {
-		return false
-	}
-	return txNum/cc.stepSize >= uint64(cc.roTx.StepsInFiles(kv.CommitmentDomain))
-}
-
 // handleMessage contains the break logic — decides what to do with each
 // message in the stream.
 func (cc *commitmentCalculator) handleMessage(ctx context.Context, msg applyResult) {
@@ -248,7 +233,7 @@ func (cc *commitmentCalculator) handleMessage(ctx context.Context, msg applyResu
 			cc.state.ApplyWrites(r.writes)
 		}
 
-		if cc.shouldCheckpointStepBoundary(r.txNum) {
+		if cc.doms.IsUnfrozenStepEdge(cc.roTx, r.txNum) {
 			cc.computeStepBoundary(ctx, &blockResult{BlockNum: r.blockNum, BlockHash: r.blockHash, lastTxNum: r.txNum})
 		}
 
