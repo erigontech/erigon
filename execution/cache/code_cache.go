@@ -17,7 +17,6 @@
 package cache
 
 import (
-	"math"
 	"sync/atomic"
 	"unsafe"
 
@@ -27,6 +26,7 @@ import (
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/common/maphash"
+	"github.com/erigontech/erigon/execution/cache/coherence"
 )
 
 // uint64AsBytes returns a []byte view of a uint64 without allocation.
@@ -145,12 +145,10 @@ type CodeCache struct {
 	codeSizeEntries    atomic.Int64
 	codeSizeCapEntries int64
 
-	// Unwind coherence — see GenericCache. An entry is valid iff it was written
-	// in the current epoch OR its txNum is below unwindFloor. Unwind bumps the
-	// epoch and lowers the floor (O(1), no scan); stale entries drop lazily on
-	// their next Get. Applies to every layer, content-addressed ones included.
-	epoch       atomic.Uint32
-	unwindFloor atomic.Uint64
+	// Unwind coherence shared by every layer (content-addressed ones included):
+	// an entry is valid iff written in the current epoch OR its txNum is below
+	// the unwind floor. See execution/cache/coherence.
+	coh coherence.Gen
 
 	// Stats counters (atomic for concurrent access)
 	addrHits       atomic.Uint64
@@ -170,7 +168,7 @@ type CodeCache struct {
 // state after an unwind: it was written in a superseded epoch and its txNum is
 // at or above the unwind floor (the first unwound txNum). Mirrors GenericCache.
 func (c *CodeCache) isStale(txNum uint64, epoch uint32) bool {
-	return epoch != c.epoch.Load() && txNum >= c.unwindFloor.Load()
+	return c.coh.IsStale(txNum, epoch)
 }
 
 // NewCodeCache creates a new CodeCache with the specified byte capacities.
@@ -202,7 +200,7 @@ func NewCodeCache(codeCapacityBytes, addrCapacityBytes datasize.ByteSize) *CodeC
 	}
 	// Before any unwind every entry's txNum is below the floor, so the epoch
 	// check never strands a valid entry.
-	cc.unwindFloor.Store(math.MaxUint64)
+	cc.coh.Init()
 	return cc
 }
 
@@ -279,19 +277,24 @@ func (c *CodeCache) putCode(addr []byte, code []byte, keyHash [32]byte, txNum ui
 	if len(code) == 0 {
 		return
 	}
-	ep := c.epoch.Load()
+	ep := c.coh.Epoch()
 	codeID := maphash.Hash(code)
 
 	c.addrToHash.Add(common.BytesToAddress(addr), versionedAddressID{addrID: codeID, codeHash: keyHash, txNum: txNum, epoch: ep})
 
 	hashKey := uint64AsBytes(&codeID)
 	if existing, exists := c.hashToCode.Get(hashKey); exists {
-		// Bytes are immutable, but revive an entry stranded stale by a prior
-		// unwind when the same code is re-deployed on the live fork.
-		if c.isStale(existing.txNum, existing.epoch) {
-			c.hashToCode.Set(hashKey, codeEntry{code: existing.code, keyHash: existing.keyHash, txNum: txNum, epoch: ep})
+		if !c.isStale(existing.txNum, existing.epoch) {
+			return // live entry; bytes are immutable for a given hash, nothing to update
 		}
-		return
+		// Stale (stranded by a prior unwind, now re-deployed on the live fork):
+		// drop it through the accounted path so the fresh insert below re-adds it
+		// cleanly. LoadAndDelete is the same primitive the stale-Get eviction uses,
+		// so codeSize stays balanced under concurrency — a bare Set here would
+		// re-insert without re-adding the size a racing eviction subtracted.
+		if old, deleted := c.hashToCode.LoadAndDelete(hashKey); deleted {
+			c.codeSize.Add(-int64(8 + len(old.code)))
+		}
 	}
 	codeEntrySize := int64(8 + len(code))
 	if c.codeSize.Load()+codeEntrySize > int64(c.codeCapacityB) {
@@ -330,7 +333,7 @@ func (c *CodeCache) GetAddrCodeHash(addr []byte) ([32]byte, bool) {
 // readAhead's BAL prefetch when it learns the codeHash from the decoded
 // account record. txNum stamps the mapping for unwind invalidation.
 func (c *CodeCache) PutAddrCodeHash(addr []byte, h [32]byte, txNum uint64) {
-	c.addrToCodeHash.Add(common.BytesToAddress(addr), addrCodeHashEntry{hash: h, txNum: txNum, epoch: c.epoch.Load()})
+	c.addrToCodeHash.Add(common.BytesToAddress(addr), addrCodeHashEntry{hash: h, txNum: txNum, epoch: c.coh.Epoch()})
 }
 
 // DeleteAddrCodeHash drops the addr → codeHash mapping. Called on
@@ -382,7 +385,7 @@ func (c *CodeCache) PutWithCodeHash(addr []byte, code []byte, codeHash []byte, t
 	if len(code) == 0 || len(codeHash) == 0 {
 		return
 	}
-	ep := c.epoch.Load()
+	ep := c.coh.Epoch()
 	kh := hash32(codeHash)
 
 	if len(addr) > 0 {
@@ -394,12 +397,15 @@ func (c *CodeCache) PutWithCodeHash(addr []byte, code []byte, codeHash []byte, t
 	c.PutCodeSizeByCodeHash(codeHash, len(code), txNum)
 
 	if existing, exists := c.codeHashToCode.Get(codeHash); exists {
-		// Immutable bytes; revive an entry stranded stale by a prior unwind when
-		// the same code is re-deployed on the live fork.
-		if c.isStale(existing.txNum, existing.epoch) {
-			c.codeHashToCode.Set(codeHash, codeEntry{code: existing.code, keyHash: existing.keyHash, txNum: txNum, epoch: ep})
+		if !c.isStale(existing.txNum, existing.epoch) {
+			return // live entry; immutable bytes for a given hash
 		}
-		return
+		// Stale: drop through the accounted LoadAndDelete (same primitive the
+		// stale-Get eviction uses) so codeHashCodeSize stays balanced against a
+		// racing eviction, then the fresh insert below re-adds it.
+		if old, removed := c.codeHashToCode.LoadAndDelete(codeHash); removed {
+			c.codeHashCodeSize.Add(-int64(len(codeHash) + len(old.code)))
+		}
 	}
 	entrySize := int64(len(codeHash) + len(code))
 	if c.codeHashCodeSize.Load()+entrySize > int64(c.codeCapacityB) {
@@ -449,13 +455,18 @@ func (c *CodeCache) PutCodeSizeByCodeHash(codeHash []byte, size int, txNum uint6
 	if len(codeHash) == 0 || size < 0 {
 		return
 	}
-	ep := c.epoch.Load()
+	ep := c.coh.Epoch()
 	kh := hash32(codeHash)
 	if existing, exists := c.codeSizeByCodeHash.Get(codeHash); exists {
-		if c.isStale(existing.txNum, existing.epoch) {
-			c.codeSizeByCodeHash.Set(codeHash, codeSizeEntry{size: existing.size, keyHash: existing.keyHash, txNum: txNum, epoch: ep})
+		if !c.isStale(existing.txNum, existing.epoch) {
+			return // live entry; size for a given codeHash is immutable
 		}
-		return
+		// Stale: drop through the accounted LoadAndDelete (same primitive the
+		// stale-Get eviction uses) so codeSizeEntries stays balanced against a
+		// racing eviction, then the fresh insert below re-adds it.
+		if _, removed := c.codeSizeByCodeHash.LoadAndDelete(codeHash); removed {
+			c.codeSizeEntries.Add(-1)
+		}
 	}
 	if c.codeSizeEntries.Load() >= c.codeSizeCapEntries {
 		return
@@ -485,28 +496,17 @@ func (c *CodeCache) Clear() {
 	c.codeSize.Store(0)
 	c.codeHashCodeSize.Store(0)
 	c.codeSizeEntries.Store(0)
-	c.epoch.Store(0)
-	c.unwindFloor.Store(math.MaxUint64)
+	c.coh.Init()
 }
 
 // Unwind invalidates entries reflecting dead-fork state. Code deployed on the
 // rolled-back fork must stop being discoverable — even by codeHash — because
 // although a hash → bytes value is invariant, the code's EXISTENCE is not.
-// O(1) and scan-free: bump the epoch and lower the floor to
-// unwindToTxNum; every layer's entries at/above the floor from a superseded
-// epoch drop lazily on their next Get (re-fetching code shared with a
-// still-live deployment, an accepted multiplicity cost).
+// O(1) and scan-free; every layer's entries at/above the floor from a superseded
+// epoch drop lazily on their next Get (re-fetching code shared with a still-live
+// deployment, an accepted multiplicity cost). See coherence.Gen.Unwind.
 func (c *CodeCache) Unwind(unwindToTxNum uint64) {
-	c.epoch.Add(1)
-	for {
-		cur := c.unwindFloor.Load()
-		if unwindToTxNum >= cur {
-			break
-		}
-		if c.unwindFloor.CompareAndSwap(cur, unwindToTxNum) {
-			break
-		}
-	}
+	c.coh.Unwind(unwindToTxNum)
 }
 
 // Len returns the number of entries in the address cache.

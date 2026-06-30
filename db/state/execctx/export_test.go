@@ -1,6 +1,9 @@
 package execctx
 
-import "github.com/erigontech/erigon/db/kv"
+import (
+	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/execution/cache"
+)
 
 // CodeHashForAddr exposes the unexported codeHashForAddr for tests in the
 // external test package (which cannot import db/state to build a SharedDomains
@@ -9,8 +12,10 @@ func (sd *SharedDomains) CodeHashForAddr(tx kv.TemporalTx, addr []byte, txNum ui
 	return sd.codeHashForAddr(tx, addr, txNum)
 }
 
-// HasStateCache reports whether a state cache is attached (it is a no-op to
-// attach when USE_STATE_CACHE=false).
-func (sd *SharedDomains) HasStateCache() bool {
-	return sd.stateCache != nil
+// SetStateCacheForTest attaches a cache unconditionally, bypassing the
+// USE_STATE_CACHE env gate that SetStateCache honors. Cache-behavior tests use
+// it so they always exercise the cache instead of skipping when the env is off
+// — without mutating the process-global flag (which would race t.Parallel tests).
+func (sd *SharedDomains) SetStateCacheForTest(sc *cache.StateCache) {
+	sd.stateCache = sc
 }

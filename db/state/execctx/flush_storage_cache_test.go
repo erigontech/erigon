@@ -66,10 +66,7 @@ func TestCommit_UpdatesStorageStateCache(t *testing.T) {
 		require.NoError(t, err)
 		defer sd.Close()
 
-		sd.SetStateCache(sc)
-		if !sd.HasStateCache() {
-			t.Skip("state cache disabled (USE_STATE_CACHE=false); coherence test needs it on")
-		}
+		sd.SetStateCacheForTest(sc) // force-enable regardless of USE_STATE_CACHE
 
 		sd.SetTxNum(txNum)
 		require.NoError(t, sd.DomainPut(kv.StorageDomain, rwTx, key, val, txNum, prevVal))

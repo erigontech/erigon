@@ -32,10 +32,7 @@ func TestCodeHashForAddr_InBatchAccountWinsOverStaleLRU(t *testing.T) {
 	defer sd.Close()
 
 	sc := cache.NewDefaultStateCache()
-	sd.SetStateCache(sc)
-	if !sd.HasStateCache() {
-		t.Skip("state cache disabled (USE_STATE_CACHE=false); routing test needs it on")
-	}
+	sd.SetStateCacheForTest(sc) // force-enable regardless of USE_STATE_CACHE
 
 	var addr common.Address
 	addr[0] = 0xab

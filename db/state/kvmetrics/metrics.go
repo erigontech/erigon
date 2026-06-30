@@ -39,24 +39,11 @@ type DomainIOMetrics struct {
 	// misses on the same prefix). Updated by UpdateFileReadsUnique;
 	// gated by dbg.KVReadLevelledMetrics same as FileReadCount.
 	UniqueFileReadCount int64
-	// UniqueLenBuckets is the byte-length distribution of distinct
-	// prefixes seen by UpdateFileReadsUnique. The compact-encoded
-	// prefix length is 1 + ⌈depth/2⌉ bytes (HP encoding), so byte
-	// length maps to trie depth as follows:
-	//   0 : 1 byte    (depth 0-1, root)
-	//   1 : 2-4 bytes (depth 2-7, top trunk)
-	//   2 : 5-8 bytes (depth 8-15)
-	//   3 : 9-16 bytes (depth 16-31)
-	//   4 : 17-32 bytes (depth 32-63, near account leaf)
-	//   5 : 33 bytes (depth 64, storage subtree root)
-	//   6 : 34-36 bytes (depth 65-70, storage subtree top)
-	//   7 : 37-44 bytes (depth 71-86, mid storage)
-	//   8 : 45-64 bytes (depth 87-127, leaf-parents and deep)
-	//   9 : 65+ bytes (out of range)
-	// Used to localise where the per-block file reads concentrate —
-	// e.g., are the 25K commitment reads on bloat workload
-	// storage-subtree-trunk (where per-contract pinning helps) or
-	// leaf-parents (where it doesn't)?
+	// UniqueLenBuckets is the byte-length distribution of distinct prefixes seen
+	// by UpdateFileReadsUnique, bucketed by power-of-two length. Since the
+	// compact-encoded prefix length is ~1+⌈depth/2⌉ bytes, larger buckets are
+	// deeper trie nodes — used to localise where per-block file reads concentrate
+	// (top trunk vs storage-subtree vs leaf-parents). See lenBucket for the edges.
 	UniqueLenBuckets [10]int64
 
 	// StateCache hit/miss tracks the SharedDomains.stateCache layer

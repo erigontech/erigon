@@ -83,7 +83,7 @@ func TestCodeCache_ByteCheckRejectsForeignKeyHash(t *testing.T) {
 	foreign := make([]byte, 32)
 	copy(foreign, realHash)
 	foreign[0] ^= 0xff // different 32-byte key
-	cc.codeHashToCode.Set(foreign, codeEntry{code: code, keyHash: hash32(realHash), txNum: 1, epoch: cc.epoch.Load()})
+	cc.codeHashToCode.Set(foreign, codeEntry{code: code, keyHash: hash32(realHash), txNum: 1, epoch: cc.coh.Epoch()})
 
 	// The stored entry's keyHash is realHash, not foreign — Get must reject it.
 	_, ok = cc.GetByCodeHash(foreign)

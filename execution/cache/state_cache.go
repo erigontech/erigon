@@ -89,8 +89,15 @@ func stateCacheModeFromEnv() Mode {
 // is derived from the byte budget using the supplied per-domain avg.
 func newDomainCacheBytes(capacityBytes datasize.ByteSize, avgBytes uint32, mode Mode) *DomainCache {
 	capacityEntries := uint32(uint64(capacityBytes) / uint64(avgBytes))
-	if capacityEntries == 0 {
-		capacityEntries = 1
+	if capacityEntries < 1024 {
+		capacityEntries = 1024
+	}
+	// Clamp the slot count, same as NewGenericCache: freelru.NewSharded eagerly
+	// allocates the whole slot array up front, so an unclamped Account budget
+	// (1 GB / ~96 B ≈ 11M entries) would allocate gigabytes before caching
+	// anything. The byte budget still bounds residency below this cap.
+	if capacityEntries > 1<<22 {
+		capacityEntries = 1 << 22
 	}
 	return &DomainCache{
 		GenericCache: newGenericCacheEntries(capacityBytes, capacityEntries, func(v []byte) int { return len(v) }, mode),

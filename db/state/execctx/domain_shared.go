@@ -991,11 +991,11 @@ func (sd *SharedDomains) Commit(ctx context.Context, tx kv.RwTx, validate ...fun
 				sd.stateCache.Delete(kv.CodeDomain, u.key)
 			} else {
 				// Validated committed code: populate the addr layer AND the
-				// content-addressed codeHash->code map, with codeHash=keccak(v)
-				// (consistent by construction). This is the ONLY path that writes
-				// the code cache — reads never populate it (speculative code lives
-				// in the version map), so the shared map can only ever hold
-				// validated, self-consistent entries.
+				// content-addressed codeHash->code map, keyed by keccak(v) so each
+				// entry is self-consistent by construction. The read-fill path
+				// (PutCodeWithHash on a cold GetLatest, below) populates the same
+				// way — both key on keccak(v), never a separately-read account
+				// codeHash, so the shared map only ever holds self-consistent entries.
 				sd.stateCache.PutCodeWithHash(u.key, u.val, crypto.Keccak256(u.val), u.txN)
 			}
 		}

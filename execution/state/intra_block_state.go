@@ -725,18 +725,16 @@ func (sdb *IntraBlockState) GetCodeSize(addr accounts.Address) (int, error) {
 		if stateObject.data.CodeHash.IsEmpty() {
 			return 0, nil
 		}
-		// Geth pattern (core/state/state_object.go ~Code()): pay the full code
-		// fetch once on first touch and populate stateObject.code, so repeat
-		// EXTCODESIZE / EXTCODEHASH / CALL on the same addr in this tx are
-		// in-struct slice-len calls, not reader round-trips.
-		code, err := sdb.stateReader.ReadAccountCode(addr)
+		// Size-only read: ReadAccountCodeSize, not ReadAccountCode. It routes
+		// through the size-only cache layer, and is correct on the Stateless
+		// reader — a size-only witness node has the size but no bytes, so
+		// ReadAccountCode there returns nil (EXTCODESIZE 0) and diverges from
+		// consensus.
+		size, err := sdb.stateReader.ReadAccountCodeSize(addr)
 		if err != nil {
 			return 0, err
 		}
-		if code != nil {
-			stateObject.code = code
-		}
-		return len(code), nil
+		return size, nil
 	}
 
 	size, source, _, err := versionedRead(sdb, addr, CodeSizePath, accounts.NilKey, false, 0,
@@ -759,17 +757,11 @@ func (sdb *IntraBlockState) GetCodeSize(addr accounts.Address) (int, error) {
 			if dbg.KVReadLevelledMetrics {
 				readStart = time.Now()
 			}
-			// Geth pattern: load full code on first touch, populate
-			// stateObject.code so subsequent same-addr EXTCODESIZE /
-			// EXTCODEHASH / CALL within this tx hit the s.code branch
-			// above instead of re-entering the reader. With BAL prefetch
-			// the bytes are already in cache.StateCache, so this is
-			// effectively a hashmap probe + slice assignment.
-			code, codeErr := sdb.stateReader.ReadAccountCode(addr)
-			l := len(code)
-			if codeErr == nil && code != nil {
-				s.code = code
-			}
+			// Size-only read (see GetCodeSize's non-versioned branch): route
+			// through the size-only layer and stay correct on the Stateless
+			// reader's witness nodes (size known, bytes absent). ReadAccountCode
+			// would return nil there and report EXTCODESIZE 0.
+			l, codeErr := sdb.stateReader.ReadAccountCodeSize(addr)
 			err := codeErr
 			if dbg.KVReadLevelledMetrics {
 				sdb.codeReadDuration += time.Since(readStart)

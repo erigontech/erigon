@@ -18,7 +18,6 @@ package cache
 
 import (
 	"bytes"
-	"math"
 	"sync/atomic"
 
 	"github.com/c2h5oh/datasize"
@@ -27,6 +26,7 @@ import (
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/common/maphash"
+	"github.com/erigontech/erigon/execution/cache/coherence"
 )
 
 // avgBytesPerEntry is the assumption used to translate a byte budget into
@@ -59,16 +59,10 @@ type GenericCache[T any] struct {
 	currentSize     atomic.Int64
 	mode            Mode
 
-	// Cache coherence across unwinds is txNum/epoch based — no block awareness,
-	// no diffset. An entry is valid iff it was written in the current epoch OR
-	// its txNum is strictly below unwindFloor (the first unwound txNum), so it
-	// predates every unwind seen and can't be stale. Unwind bumps the epoch and
-	// lowers the floor (O(1), no scan); stale entries are dropped lazily on their
-	// next read. txNum slots
-	// are reused across forks, so the epoch — not the txNum — is what tells a
-	// dead fork's write apart from the live fork's at the same txNum.
-	epoch       atomic.Uint32
-	unwindFloor atomic.Uint64
+	// coh is the shared (epoch, floor) unwind-coherence primitive: an entry is
+	// valid iff written in the current epoch OR its txNum is below the unwind
+	// floor. See execution/cache/coherence.
+	coh coherence.Gen
 
 	hits         atomic.Uint64
 	misses       atomic.Uint64
@@ -116,7 +110,7 @@ func newGenericCacheEntries[T any](capacityBytes datasize.ByteSize, capacityEntr
 	}
 	// Before any unwind every entry predates the (nonexistent) floor, so all
 	// reads are valid; the floor only drops once an unwind happens.
-	c.unwindFloor.Store(math.MaxUint64)
+	c.coh.Init()
 	// OnEvict fires for capacity-driven LRU eviction (ModeEvictLRU) and
 	// for explicit Remove(). In both cases we want currentSize to follow.
 	lru.SetOnEvict(func(_ uint64, e entry[T]) {
@@ -182,7 +176,7 @@ func (c *GenericCache[T]) GetWithTxNum(key []byte) (T, uint64, bool) {
 	// dead block — e.g. an EIP-4788 beacon-root write in the block-begin system
 	// tx — and must be dropped; >= not > (the surviving block's last txNum is
 	// floor-1, so this never drops a live entry).
-	if e.epoch != c.epoch.Load() && e.txNum >= c.unwindFloor.Load() {
+	if c.coh.IsStale(e.txNum, e.epoch) {
 		c.data.Remove(h)
 		c.staleEvicted.Add(1)
 		c.misses.Add(1)
@@ -201,7 +195,7 @@ func (c *GenericCache[T]) Put(key []byte, value T, txNum uint64) {
 	h := maphash.Hash(key)
 	valBytes := c.sizeFunc(value)
 	newSize := len(key) + valBytes + 24
-	ep := c.epoch.Load()
+	ep := c.coh.Epoch()
 
 	existing, hasExisting := c.data.Get(h)
 
@@ -256,29 +250,15 @@ func (c *GenericCache[T]) Delete(key []byte) {
 func (c *GenericCache[T]) Clear() {
 	c.data.Purge()
 	c.currentSize.Store(0)
-	c.epoch.Store(0)
-	c.unwindFloor.Store(math.MaxUint64)
+	c.coh.Init()
 }
 
 // Unwind invalidates entries that reflect dead-fork state. unwindToTxNum is the
 // first rolled-back txNum (Min(UnwindPoint+1)); every entry at or above it is on
-// the dead fork. O(1): bump the epoch (so entries written in the new, live epoch
-// stay valid) and lower the floor to unwindToTxNum (so entries strictly below it
-// — which predate the unwind and can't be stale — stay warm). Stale entries (old
-// epoch, txNum >= floor) are dropped lazily on their next read. The floor only
-// ever moves down, to the deepest unwind seen, so a later shallower unwind can't
-// resurrect entries an earlier deeper one invalidated.
+// the dead fork. O(1) and scan-free; stale entries drop lazily on their next
+// read. See coherence.Gen.Unwind.
 func (c *GenericCache[T]) Unwind(unwindToTxNum uint64) {
-	c.epoch.Add(1)
-	for {
-		cur := c.unwindFloor.Load()
-		if unwindToTxNum >= cur {
-			break
-		}
-		if c.unwindFloor.CompareAndSwap(cur, unwindToTxNum) {
-			break
-		}
-	}
+	c.coh.Unwind(unwindToTxNum)
 }
 
 // Len returns the number of entries in the cache.
@@ -315,7 +295,7 @@ func (c *GenericCache[T]) PrintStatsAndReset(name string) {
 		"mode", c.mode.String(),
 		"hits", hits, "misses", misses, "hit_rate", hitRate,
 		"inserts", inserts, "evictions", evictions, "dropped", dropped,
-		"stale_evicted", staleEvicted, "epoch", c.epoch.Load(),
+		"stale_evicted", staleEvicted, "epoch", c.coh.Epoch(),
 		"entries", c.data.Len(), "size_mb", sizeBytes/(1024*1024),
 		"capacity_mb", int64(c.capacityB/datasize.MB), "usage_pct", usagePct,
 	)

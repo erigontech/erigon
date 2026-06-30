@@ -19,10 +19,10 @@ package commitment
 import (
 	"bytes"
 	"fmt"
-	"math"
 	"sync/atomic"
 
 	"github.com/erigontech/erigon/common/maphash"
+	"github.com/erigontech/erigon/execution/cache/coherence"
 )
 
 // KeyCommitmentState is the commitment-domain key under which the trie
@@ -67,16 +67,10 @@ type BranchCache struct {
 	bytesServed          atomic.Uint64
 	staleEvicted         atomic.Uint64 // entries dropped lazily on read after an unwind
 
-	// Cache coherence across unwinds is txN/epoch based — no block awareness,
-	// no diffset. An entry is valid iff it was written in the current epoch OR
-	// its txN is strictly below unwindFloor (the first unwound txN), so it
-	// predates every unwind seen and can't be stale. Unwind bumps the epoch and
-	// lowers the floor (O(1), no scan); stale entries are dropped lazily on
-	// their next Get. txNums are reused across forks, so the epoch — not the
-	// txN — is what tells a superseded entry from a live one. Mirrors
-	// execution/cache.GenericCache so every state cache honors one model (#21752).
-	epoch       atomic.Uint32
-	unwindFloor atomic.Uint64
+	// coh is the (epoch, floor) unwind-coherence primitive shared with the state
+	// and code caches: an entry is valid iff written in the current epoch OR its
+	// txN is below the unwind floor. See execution/cache/coherence.
+	coh coherence.Gen
 }
 
 type branchCacheEntry struct {
@@ -135,7 +129,7 @@ func NewBranchCache(tailCapacity int) *BranchCache {
 	}
 	// Before any unwind every entry's txN is at/below the floor, so the epoch
 	// check never strands a valid entry.
-	bc.unwindFloor.Store(math.MaxUint64)
+	bc.coh.Init()
 	return bc
 }
 
@@ -208,7 +202,7 @@ func (c *BranchCache) Get(prefix []byte) ([]byte, uint64, bool) {
 	// the read falls through to the reverted domain and repopulates. The floor
 	// is the first unwound txN (>= matches GenericCache: an entry stamped exactly
 	// at the floor belongs to a rolled-back block).
-	if entry.epoch != c.epoch.Load() && entry.txN >= c.unwindFloor.Load() {
+	if c.coh.IsStale(entry.txN, entry.epoch) {
 		c.Invalidate(prefix)
 		c.staleEvicted.Add(1)
 		return nil, 0, false
@@ -230,7 +224,7 @@ func (c *BranchCache) Put(prefix []byte, data []byte, step, txN uint64) {
 		data:  dataCopy,
 		step:  step,
 		txN:   txN,
-		epoch: c.epoch.Load(),
+		epoch: c.coh.Epoch(),
 	})
 }
 
@@ -255,20 +249,10 @@ func (c *BranchCache) Invalidate(prefix []byte) {
 // txN >= floor. O(1) and scan-free: bump the epoch (so entries written in the
 // new, live epoch stay valid) and lower the unwind floor to unwindToTxN (so
 // old-epoch entries at or above it are dropped lazily on their next Get). The
-// floor only ever decreases, so a shallow unwind cannot
-// resurrect entries a deeper one invalidated. Mirrors GenericCache.Unwind so
-// branch and state caches honor one (txN, epoch) model (#21752).
+// floor only ever decreases, so a shallow unwind cannot resurrect entries a
+// deeper one invalidated. See coherence.Gen.Unwind.
 func (c *BranchCache) Unwind(unwindToTxN uint64) {
-	c.epoch.Add(1)
-	for {
-		cur := c.unwindFloor.Load()
-		if unwindToTxN >= cur {
-			break
-		}
-		if c.unwindFloor.CompareAndSwap(cur, unwindToTxN) {
-			break
-		}
-	}
+	c.coh.Unwind(unwindToTxN)
 }
 
 // Clear empties the cache and resets stats counters across ALL tiers
@@ -284,8 +268,7 @@ func (c *BranchCache) Clear() {
 	c.tailMisses.Store(0)
 	c.bytesServed.Store(0)
 	c.staleEvicted.Store(0)
-	c.epoch.Store(0)
-	c.unwindFloor.Store(math.MaxUint64)
+	c.coh.Init()
 }
 
 // Stats returns a one-line summary of root-tier and tail-tier hit/miss
