@@ -1680,6 +1680,7 @@ func (result *execResult) calcFees(
 		coinbaseNonce = coinbaseAcc.Nonce
 	}
 	coinbaseEmptyCodeHash := coinbaseAcc == nil || coinbaseAcc.IsEmptyCodeHash()
+	coinbaseSelfdestructed := false
 	for _, w := range result.TxOut {
 		if w.Address != result.Coinbase && (!hasBurnt || w.Address != burntAddr) {
 			continue
@@ -1705,10 +1706,23 @@ func (result *execResult) calcFees(
 			if w.Address == result.Coinbase {
 				coinbaseHasCodeHashWrite = true
 			}
+		case state.SelfDestructPath:
+			if w.Address == result.Coinbase {
+				if v, ok := w.Val.(bool); ok {
+					coinbaseSelfdestructed = v
+				}
+			}
 		}
 	}
 	oldCoinbaseBalance := newCoinbaseBalance
-	newCoinbaseBalance.Add(&newCoinbaseBalance, &result.ExecutionResult.FeeTipped)
+	// Burn the tip only for an actual SELFDESTRUCT of a contract coinbase.
+	// DeleteAccount also emits SelfDestructPath=true for EIP-161 empty-removal of
+	// a touched EOA coinbase, where the delayed tip must still be credited (it
+	// re-creates the account) to match serial.
+	coinbaseWasContract := !coinbaseEmptyCodeHash || coinbaseHasCodeHashWrite
+	if !(coinbaseSelfdestructed && coinbaseWasContract) {
+		newCoinbaseBalance.Add(&newCoinbaseBalance, &result.ExecutionResult.FeeTipped)
+	}
 	oldBurntBalance := newBurntBalance
 	if hasBurnt && chainRules.IsLondon {
 		newBurntBalance.Add(&newBurntBalance, &result.ExecutionResult.FeeBurnt)
