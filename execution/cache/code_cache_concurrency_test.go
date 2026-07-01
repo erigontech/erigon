@@ -24,6 +24,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/common/crypto"
+	"github.com/erigontech/erigon/common/maphash"
 )
 
 // TestCodeCache_ConcurrentPutSameCode_NoSizeDrift guards against the size
@@ -83,19 +84,17 @@ func TestCodeCache_ByteCheckRejectsForeignKeyHash(t *testing.T) {
 	foreign := make([]byte, 32)
 	copy(foreign, realHash)
 	foreign[0] ^= 0xff // different 32-byte key
-	cc.codeHashToCode.Set(foreign, codeEntry{code: code, keyHash: hash32(realHash), txNum: 1, epoch: cc.coh.Epoch()})
+	cc.codeHashToCode.Add(maphash.Hash(foreign), codeEntry{code: code, keyHash: hash32(realHash), txNum: 1, epoch: cc.coh.Epoch()})
 
 	// The stored entry's keyHash is realHash, not foreign — Get must reject it.
 	_, ok = cc.GetByCodeHash(foreign)
 	require.False(t, ok, "byte-check must reject an entry whose keyHash differs from the requested codeHash")
 }
 
-// TestCodeCache_ConcurrentDistinctPuts_RespectCap exercises the back-out branch
-// of the shared insert path: many workers Put distinct codes whose combined size
-// far exceeds the byte cap. Each insert that races past the cap must subtract its
-// own cost and drop its entry, so after the dust settles the byte counters never
-// exceed the cap and stay non-negative — the bound holds under concurrency, not
-// just serial inserts.
+// TestCodeCache_ConcurrentDistinctPuts_RespectCap drives many workers putting
+// distinct codes whose combined size far exceeds a tiny cap. The freelru layer
+// evicts the coldest entries to stay within its entry cap (no freeze), and the
+// OnEvict-maintained byte counter must never drift negative under concurrency.
 func TestCodeCache_ConcurrentDistinctPuts_RespectCap(t *testing.T) {
 	const codeCap = 4 * datasize.KB
 	cc := NewCodeCache(codeCap, 16*datasize.MB)
@@ -113,8 +112,10 @@ func TestCodeCache_ConcurrentDistinctPuts_RespectCap(t *testing.T) {
 	}
 	wg.Wait()
 
-	require.LessOrEqual(t, cc.codeHashCodeSize.Load(), int64(codeCap),
-		"codeHashToCode must never exceed the byte cap after concurrent distinct Puts")
+	// The entry cap (codeCap/avgCodeEntryBytes) is the hard bound; residency
+	// settled far below the 128 distinct puts rather than freezing at the first.
+	require.Less(t, cc.codeHashToCode.Len(), workers,
+		"freelru must evict to its entry cap, not hold all 128 distinct codes")
 	require.GreaterOrEqual(t, cc.codeHashCodeSize.Load(), int64(0),
-		"codeHashToCode size must stay non-negative (no double back-out)")
+		"byte counter must stay non-negative (OnEvict accounting must not double-subtract)")
 }

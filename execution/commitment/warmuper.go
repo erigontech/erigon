@@ -31,6 +31,20 @@ import (
 	"github.com/erigontech/erigon/execution/commitment/nibbles"
 )
 
+// Warmer branch-read outcome counters. Hit: the branch read returned
+// >= 4 bytes; Empty: returned nothing or unparseable. Used to size the
+// value of bypassing the xorfilter in this call path.
+var (
+	warmerBranchHitCount   atomic.Uint64
+	warmerBranchEmptyCount atomic.Uint64
+)
+
+// WarmerBranchOutcomeStats returns process-cumulative counts. Snapshot
+// before/after for per-block deltas.
+func WarmerBranchOutcomeStats() (hit, empty uint64) {
+	return warmerBranchHitCount.Load(), warmerBranchEmptyCount.Load()
+}
+
 // TrieContextFactory creates new PatriciaContext instances for parallel warmup.
 type TrieContextFactory func() (PatriciaContext, func())
 
@@ -163,8 +177,10 @@ func (w *Warmuper) warmupKey(trieCtx PatriciaContext, hashedKey []byte, startDep
 
 		// Branch data format: 2-byte touch map + 2-byte bitmap + per-child data
 		if len(branchData) < 4 {
+			warmerBranchEmptyCount.Add(1)
 			break
 		}
+		warmerBranchHitCount.Add(1)
 
 		if depth >= len(hashedKey) {
 			break

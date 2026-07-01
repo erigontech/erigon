@@ -231,7 +231,9 @@ type ExecModule struct {
 	publishedSD    func() *execctx.SharedDomains // fallback for background commit
 
 	// stateCache is a cache for state data (accounts, storage, code)
-	stateCache  *cache.StateCache
+	stateCache *cache.StateCache
+	// codeStore is the persistent codehash-keyed code cache (in-mem + MDBX backing).
+	codeStore   *cache.CodeStore
 	readAheader *exec.BlockReadAheader
 
 	stopNode func() error
@@ -268,6 +270,10 @@ func NewExecModule(
 	if domainCache == nil {
 		domainCache = cache.NewDefaultStateCache()
 	}
+	var codeStore *cache.CodeStore
+	if dbg.UseCodeStore {
+		codeStore = cache.NewCodeStore(cache.DefaultCodeStoreMemBytes, cache.DefaultCodeStoreTableBytes)
+	}
 	forkValidator := newForkValidator(ctx, currentBlockNumber, pipelineExecutor, blockReader, syncCfg.MaxReorgDepth)
 
 	em := &ExecModule{
@@ -289,6 +295,7 @@ func NewExecModule(
 		fcuBackgroundCommit:     fcuBackgroundCommit,
 		onlySnapDownloadOnStart: onlySnapDownloadOnStart,
 		stateCache:              domainCache,
+		codeStore:               codeStore,
 		readAheader:             readAheader,
 		stopNode:                stopNode,
 	}
@@ -549,7 +556,40 @@ func (e *ExecModule) ValidateChain(ctx context.Context, blockHash common.Hash, b
 	}
 	var tx kv.TemporalRwTx = doms.BlockOverlay()
 
-	// Chain to the canonical generation so head-extending reads and fork unwind sets resolve via the parent link.
+	// DO NOT CHANGE THIS WITHOUT WORKING THROUGH THE UNWIND CACHING SCENARIOS.
+	// The earlier `header.ParentHash == ReadHeadBlockHash(tx)` head-extending-
+	// only gate has been intentionally widened back to "chain whenever a
+	// currentContext exists" because fork-payload caching needs the parent
+	// link too — see the two-role breakdown below. The narrower gate was
+	// merged from main during the post-#21017 rebase and is the WRONG choice
+	// for this branch; keep the wider gate.
+	//
+	// Chain the validation SD to the latest in-memory canonical generation:
+	// e.currentContext when present, otherwise the newest in-flight commit
+	// generation (gate item 2 — the prior FCU cleared currentContext and
+	// handed its SD to the background commit).
+	//
+	// The parent link serves two roles:
+	//
+	//  1. Head-extending payloads read the canonical generation's
+	//     not-yet-committed domain state instead of stale MDBX.
+	//
+	//  2. Fork payloads: unwindToCommonCanonical below must build an unwind
+	//     set, and the diffsets of the canonical blocks it unwinds live in
+	//     the canonical generation's pastChangesAccumulator — reachable only
+	//     through this parent link (GetDiffset chains to the parent). Without
+	//     it the unwind silently runs with no unwind set, leaving the
+	//     BranchCache unmasked and corrupting the computed root.
+	//
+	// For a fork payload the parent does NOT shadow the unwound base: once
+	// unwindToCommonCanonical has run, doms.mem.unwindChangeset holds every
+	// key the unwound canonical blocks touched, and TemporalMemBatch.getLatest
+	// resolves those from the unwind set before ever consulting the parent.
+	//
+	// Cherry-pick note: the upstream commit also chained to e.latestGen()
+	// (the gate-2 in-flight commit generation) when currentContext is nil;
+	// that generation chain is not on this branch, so currentContext is the
+	// only canonical generation here.
 	if e.currentContext != nil {
 		doms.SetParent(e.currentContext)
 	}
@@ -570,6 +610,7 @@ func (e *ExecModule) ValidateChain(ctx context.Context, blockHash common.Hash, b
 
 	// Set state cache in SharedDomains for use during state reading
 	doms.SetStateCache(e.stateCache)
+	doms.SetCodeStore(e.codeStore)
 	if err = e.unwindToCommonCanonical(doms, tx, header); err != nil {
 		doms.Close()
 		return ValidationResult{}, err

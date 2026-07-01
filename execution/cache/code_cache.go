@@ -21,6 +21,7 @@ import (
 	"unsafe"
 
 	"github.com/c2h5oh/datasize"
+	"github.com/elastic/go-freelru"
 	lru "github.com/hashicorp/golang-lru/v2"
 
 	"github.com/erigontech/erigon/common"
@@ -28,11 +29,6 @@ import (
 	"github.com/erigontech/erigon/common/maphash"
 	"github.com/erigontech/erigon/execution/cache/coherence"
 )
-
-// uint64AsBytes returns a []byte view of a uint64 without allocation.
-func uint64AsBytes(v *uint64) []byte {
-	return unsafe.Slice((*byte)(unsafe.Pointer(v)), 8)
-}
 
 // hash32 copies a codeHash slice into a fixed [32]byte for storage/compare.
 func hash32(b []byte) [32]byte {
@@ -50,6 +46,11 @@ const (
 	// cache (code size answers without loading bytes for
 	// EXTCODESIZE / EXTCODEHASH callers).
 	DefaultCodeSizeCacheEntries int64 = 1_000_000
+	// avgCodeEntryBytes translates the code byte budget into the freelru
+	// entry-count cap. Contract bytecode varies widely (a few bytes to 24 KB);
+	// the persistent (MDBX-backed) cold tier backstops entries evicted from this
+	// hot tier, so a loose byte bound here is acceptable.
+	avgCodeEntryBytes = 4096
 )
 
 // CodeCache is a multi-level concurrent cache for contract code, keyed by the
@@ -119,8 +120,8 @@ type CodeCache struct {
 	// codeID for the code at that address. An LRU so fresh-address workloads
 	// evict oldest entries and warm up the working set.
 	addrToHash *lru.Cache[common.Address, versionedAddressID]
-	hashToCode *maphash.Map[codeEntry] // maphash(code) → code, concurrent
-	codeSize   atomic.Int64            // current size in bytes (code only, hash is fixed 8 bytes)
+	hashToCode *freelru.ShardedLRU[uint64, codeEntry] // codeID(maphash(code)) → code, LRU-evicting
+	codeSize   atomic.Int64                           // resident bytes (stat; hard bound is the entry cap)
 
 	// addrToCodeHash maps a 20-byte address to its 32-byte Ethereum codeHash
 	// (keccak), separately from addrToHash (which uses the cheap maphash
@@ -134,14 +135,14 @@ type CodeCache struct {
 	// of L1 — Get-by-codeHash bypasses addr lookup entirely. Memory cost:
 	// duplicates code bytes vs L2 (worst case 2x byte storage); accepted
 	// for the per-key fast-path on many-addrs-one-code workloads.
-	codeHashToCode   *maphash.Map[codeEntry] // keccak(code) → code, concurrent
-	codeHashCodeSize atomic.Int64            // current size in bytes (codeHash layer)
+	codeHashToCode   *freelru.ShardedLRU[uint64, codeEntry] // keccak(code) → code, LRU-evicting
+	codeHashCodeSize atomic.Int64                           // resident bytes (stat; hard bound is the entry cap)
 
 	// Size-only layer: ethCodeHash → int (length in bytes). Answers
 	// EXTCODESIZE / EXTCODEHASH without loading the bytes. Tiny per-entry
 	// footprint (32B key + 8B value) so the same memory budget gives ~1000x
 	// the hit surface vs the bytes cache.
-	codeSizeByCodeHash *maphash.Map[codeSizeEntry]
+	codeSizeByCodeHash *freelru.ShardedLRU[uint64, codeSizeEntry]
 	codeSizeEntries    atomic.Int64
 	codeSizeCapEntries int64
 
@@ -171,44 +172,33 @@ func (c *CodeCache) isStale(txNum uint64, epoch uint32) bool {
 	return c.coh.IsStale(txNum, epoch)
 }
 
-// putAccounted is the shared insert path for the content-addressed code layers
-// (hashToCode, codeHashToCode, codeSizeByCodeHash). Each is a maphash.Map of
-// per-key-immutable entries carrying a (txNum, epoch) stamp, and the bookkeeping
-// is identical across all three: skip a live entry (its bytes/size are invariant
-// for a given key), drop a stale one through the accounted LoadAndDelete (the
-// same primitive stale-Get eviction uses, so a racing eviction can't
-// double-subtract), refuse the insert once the layer is full, and back it out if
-// it raced past the cap so concurrent distinct inserts can't overshoot. An entry
-// costs keyCost + valCost(e); capacity bounds counter. stamp/valCost are
+// putContent is the shared insert path for the content-addressed code layers
+// (hashToCode, codeHashToCode, codeSizeByCodeHash). Each is a freelru.ShardedLRU
+// of per-key-immutable entries carrying a (txNum, epoch) stamp: a live entry is
+// kept (its bytes/size are invariant for a given key), a stale one is removed
+// (its OnEvict decrements counter) so the fresh entry can replace it, and once
+// the entry-count cap is reached freelru.Add evicts the coldest entry (whose
+// OnEvict decrements counter) rather than freezing. counter tracks resident
+// bytes as a stat; the hard bound is the LRU's entry cap. stamp/valCost are
 // non-capturing so passing them allocates nothing on the put path.
-func putAccounted[T any](
-	m *maphash.Map[T],
-	key []byte,
+func putContent[T any](
+	lru *freelru.ShardedLRU[uint64, T],
+	h uint64,
 	newEntry T,
 	stamp func(T) (uint64, uint32),
 	valCost func(T) int64,
 	coh *coherence.Gen,
 	counter *atomic.Int64,
-	keyCost, capacity int64,
+	keyCost int64,
 ) {
-	cost := keyCost + valCost(newEntry)
-	if existing, exists := m.Get(key); exists {
+	if existing, ok := lru.Get(h); ok {
 		if txNum, epoch := stamp(existing); !coh.IsStale(txNum, epoch) {
 			return
 		}
-		if old, removed := m.LoadAndDelete(key); removed {
-			counter.Add(-(keyCost + valCost(old)))
-		}
+		lru.Remove(h) // stale — OnEvict decrements counter for the removed entry
 	}
-	if counter.Load()+cost > capacity {
-		return
-	}
-	if _, loaded := m.LoadOrStore(key, newEntry); !loaded {
-		if counter.Add(cost) > capacity {
-			counter.Add(-cost)
-			m.Delete(key)
-		}
-	}
+	counter.Add(keyCost + valCost(newEntry))
+	lru.Add(h, newEntry) // evicts the coldest entry when full; its OnEvict decrements counter
 }
 
 func codeEntryStamp(e codeEntry) (uint64, uint32)         { return e.txNum, e.epoch }
@@ -233,16 +223,41 @@ func NewCodeCache(codeCapacityBytes, addrCapacityBytes datasize.ByteSize) *CodeC
 	if err != nil {
 		panic(err)
 	}
+	// Byte budget → entry-count cap for the two bytes layers; the size-only
+	// layer is entry-counted directly. Floor at 1 so tiny (test) budgets still
+	// construct a valid, evicting LRU.
+	codeEntries := uint32(uint64(codeCapacityBytes) / avgCodeEntryBytes)
+	if codeEntries < 1 {
+		codeEntries = 1
+	}
+	hashToCode, err := freelru.NewSharded[uint64, codeEntry](codeEntries, u64identity)
+	if err != nil {
+		panic(err)
+	}
+	codeHashToCode, err := freelru.NewSharded[uint64, codeEntry](codeEntries, u64identity)
+	if err != nil {
+		panic(err)
+	}
+	sizeEntries := uint32(DefaultCodeSizeCacheEntries)
+	codeSizeByCodeHash, err := freelru.NewSharded[uint64, codeSizeEntry](sizeEntries, u64identity)
+	if err != nil {
+		panic(err)
+	}
 	cc := &CodeCache{
 		addrToHash:         addrLRU,
 		addrToCodeHash:     addrCodeHashLRU,
-		hashToCode:         maphash.NewMap[codeEntry](),
-		codeHashToCode:     maphash.NewMap[codeEntry](),
-		codeSizeByCodeHash: maphash.NewMap[codeSizeEntry](),
+		hashToCode:         hashToCode,
+		codeHashToCode:     codeHashToCode,
+		codeSizeByCodeHash: codeSizeByCodeHash,
 		codeSizeCapEntries: DefaultCodeSizeCacheEntries,
 		addrCapacityB:      addrCapacityBytes,
 		codeCapacityB:      codeCapacityBytes,
 	}
+	// OnEvict fires on capacity-driven LRU eviction and on explicit Remove, so
+	// the byte/entry counters follow residency without a separate scan.
+	hashToCode.SetOnEvict(func(_ uint64, e codeEntry) { cc.codeSize.Add(-(8 + int64(len(e.code)))) })
+	codeHashToCode.SetOnEvict(func(_ uint64, e codeEntry) { cc.codeHashCodeSize.Add(-(32 + int64(len(e.code)))) })
+	codeSizeByCodeHash.SetOnEvict(func(_ uint64, _ codeSizeEntry) { cc.codeSizeEntries.Add(-1) })
 	// Before any unwind every entry's txNum is below the floor, so the epoch
 	// check never strands a valid entry.
 	cc.coh.Init()
@@ -276,18 +291,13 @@ func (c *CodeCache) GetWithTxNum(addr []byte) ([]byte, uint64, bool) {
 	}
 	c.addrHits.Add(1)
 
-	hashKey := uint64AsBytes(&vID.addrID)
-	ce, ok := c.hashToCode.Get(hashKey)
+	ce, ok := c.hashToCode.Get(vID.addrID)
 	if !ok || len(ce.code) == 0 {
 		c.codeMisses.Add(1)
 		return nil, 0, false
 	}
 	if c.isStale(ce.txNum, ce.epoch) {
-		// Only the goroutine that actually removes the entry adjusts the byte
-		// counter, so concurrent stale readers can't double-subtract.
-		if old, removed := c.hashToCode.LoadAndDelete(hashKey); removed {
-			c.codeSize.Add(-int64(8 + len(old.code)))
-		}
+		c.hashToCode.Remove(vID.addrID) // OnEvict decrements codeSize
 		c.codeMisses.Add(1)
 		return nil, 0, false
 	}
@@ -327,11 +337,10 @@ func (c *CodeCache) putCode(addr []byte, code []byte, keyHash [32]byte, txNum ui
 
 	c.addrToHash.Add(common.BytesToAddress(addr), versionedAddressID{addrID: codeID, codeHash: keyHash, txNum: txNum, epoch: ep})
 
-	hashKey := uint64AsBytes(&codeID)
 	entry := codeEntry{code: code, keyHash: keyHash, txNum: txNum, epoch: ep}
-	// 8-byte maphash key + code bytes.
-	putAccounted(c.hashToCode, hashKey, entry, codeEntryStamp, codeEntryCodeLen,
-		&c.coh, &c.codeSize, 8, int64(c.codeCapacityB))
+	// freelru keyed by the codeID (maphash of code) directly; 8-byte key cost.
+	putContent(c.hashToCode, codeID, entry, codeEntryStamp, codeEntryCodeLen,
+		&c.coh, &c.codeSize, 8)
 }
 
 // GetAddrCodeHash returns the Ethereum codeHash for addr if cached. Lets
@@ -374,7 +383,8 @@ func (c *CodeCache) DeleteAddrCodeHash(addr []byte) {
 // after account-load). Many addresses sharing one codeHash all hit this
 // single codeHashToCode entry after the first population.
 func (c *CodeCache) GetByCodeHash(codeHash []byte) ([]byte, bool) {
-	ce, ok := c.codeHashToCode.Get(codeHash)
+	h := maphash.Hash(codeHash)
+	ce, ok := c.codeHashToCode.Get(h)
 	if !ok || len(ce.code) == 0 {
 		c.codeHashMisses.Add(1)
 		return nil, false
@@ -386,9 +396,7 @@ func (c *CodeCache) GetByCodeHash(codeHash []byte) ([]byte, bool) {
 		return nil, false
 	}
 	if c.isStale(ce.txNum, ce.epoch) {
-		if old, removed := c.codeHashToCode.LoadAndDelete(codeHash); removed {
-			c.codeHashCodeSize.Add(-int64(len(codeHash) + len(old.code)))
-		}
+		c.codeHashToCode.Remove(h) // OnEvict decrements codeHashCodeSize
 		c.codeHashMisses.Add(1)
 		return nil, false
 	}
@@ -420,9 +428,9 @@ func (c *CodeCache) PutWithCodeHash(addr []byte, code []byte, codeHash []byte, t
 	c.PutCodeSizeByCodeHash(codeHash, len(code), txNum)
 
 	entry := codeEntry{code: code, keyHash: kh, txNum: txNum, epoch: ep}
-	// 32-byte codeHash key + code bytes.
-	putAccounted(c.codeHashToCode, codeHash, entry, codeEntryStamp, codeEntryCodeLen,
-		&c.coh, &c.codeHashCodeSize, int64(len(codeHash)), int64(c.codeCapacityB))
+	// freelru keyed by maphash(codeHash); 32-byte key cost.
+	putContent(c.codeHashToCode, maphash.Hash(codeHash), entry, codeEntryStamp, codeEntryCodeLen,
+		&c.coh, &c.codeHashCodeSize, int64(len(codeHash)))
 }
 
 // GetCodeSizeByCodeHash retrieves the size (in bytes) of a contract by its
@@ -432,7 +440,8 @@ func (c *CodeCache) PutWithCodeHash(addr []byte, code []byte, codeHash []byte, t
 // cache hit the caller answers a 4-instruction map probe instead of paying
 // the file-accessor + decompression stack for the full bytes.
 func (c *CodeCache) GetCodeSizeByCodeHash(codeHash []byte) (int, bool) {
-	e, ok := c.codeSizeByCodeHash.Get(codeHash)
+	h := maphash.Hash(codeHash)
+	e, ok := c.codeSizeByCodeHash.Get(h)
 	if !ok {
 		c.codeSizeMisses.Add(1)
 		return 0, false
@@ -443,9 +452,7 @@ func (c *CodeCache) GetCodeSizeByCodeHash(codeHash []byte) (int, bool) {
 		return 0, false
 	}
 	if c.isStale(e.txNum, e.epoch) {
-		if _, removed := c.codeSizeByCodeHash.LoadAndDelete(codeHash); removed {
-			c.codeSizeEntries.Add(-1)
-		}
+		c.codeSizeByCodeHash.Remove(h) // OnEvict decrements codeSizeEntries
 		c.codeSizeMisses.Add(1)
 		return 0, false
 	}
@@ -464,8 +471,8 @@ func (c *CodeCache) PutCodeSizeByCodeHash(codeHash []byte, size int, txNum uint6
 	kh := hash32(codeHash)
 	entry := codeSizeEntry{size: size, keyHash: kh, txNum: txNum, epoch: ep}
 	// Entry-counted layer: each entry costs 1 against the entry cap.
-	putAccounted(c.codeSizeByCodeHash, codeHash, entry, codeSizeEntryStamp, zeroCost,
-		&c.coh, &c.codeSizeEntries, 1, c.codeSizeCapEntries)
+	putContent(c.codeSizeByCodeHash, maphash.Hash(codeHash), entry, codeSizeEntryStamp, zeroCost,
+		&c.coh, &c.codeSizeEntries, 1)
 }
 
 // Delete removes the address → code mapping for addr.
@@ -478,9 +485,9 @@ func (c *CodeCache) Delete(addr []byte) {
 func (c *CodeCache) Clear() {
 	c.addrToHash.Purge()
 	c.addrToCodeHash.Purge()
-	c.hashToCode.Clear()
-	c.codeHashToCode.Clear()
-	c.codeSizeByCodeHash.Clear()
+	c.hashToCode.Purge()
+	c.codeHashToCode.Purge()
+	c.codeSizeByCodeHash.Purge()
 	c.codeSize.Store(0)
 	c.codeHashCodeSize.Store(0)
 	c.codeSizeEntries.Store(0)

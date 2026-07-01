@@ -35,6 +35,8 @@ import (
 	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/empty"
 	"github.com/erigontech/erigon/common/u256"
+	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/execution/cache"
 	"github.com/erigontech/erigon/execution/rlp"
 	"github.com/erigontech/erigon/execution/tracing"
 	"github.com/erigontech/erigon/execution/types/accounts"
@@ -426,6 +428,21 @@ func (so *stateObject) Code() ([]byte, error) {
 			}
 		}
 	}
+
+	ch := so.data.CodeHash.Value()
+	var codeStore *cache.CodeStore
+	if cs, ok := so.db.stateReader.(interface {
+		CodeStore() (*cache.CodeStore, kv.TemporalTx)
+	}); ok {
+		var tx kv.TemporalTx
+		if codeStore, tx = cs.CodeStore(); codeStore != nil {
+			if code, ok := codeStore.GetByHash(tx, ch[:]); ok {
+				so.code = code
+				return code, nil
+			}
+		}
+	}
+
 	if dbg.TraceDomainIO || (dbg.TraceTransactionIO && (so.db.trace || dbg.TraceAccount(so.address.Handle()))) {
 		so.db.stateReader.SetTrace(true, fmt.Sprintf("%d (%d.%d)", so.db.blockNum, so.db.txIndex, so.db.version))
 	}
@@ -444,6 +461,9 @@ func (so *stateObject) Code() ([]byte, error) {
 		return nil, fmt.Errorf("can't read code for %x: %w", so.Address(), err)
 	}
 	so.code = code
+	if codeStore != nil && len(code) > 0 {
+		codeStore.SetMem(ch[:], code)
+	}
 	return code, nil
 }
 

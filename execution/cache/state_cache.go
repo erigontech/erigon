@@ -92,12 +92,11 @@ func newDomainCacheBytes(capacityBytes datasize.ByteSize, avgBytes uint32, mode 
 	if capacityEntries < 1024 {
 		capacityEntries = 1024
 	}
-	// Clamp the slot count, same as NewGenericCache: freelru.NewSharded eagerly
-	// allocates the whole slot array up front, so an unclamped Account budget
-	// (1 GB / ~96 B ≈ 11M entries) would allocate gigabytes before caching
-	// anything. The byte budget still bounds residency below this cap.
-	if capacityEntries > 1<<22 {
-		capacityEntries = 1 << 22
+	// Absolute safety ceiling on the eagerly-allocated slot array; must stay
+	// above the configured byte budgets' entry counts (Account 1 GB / ~96 B ≈
+	// 11.2M) or it silently caps residency below the budget.
+	if capacityEntries > 1<<24 {
+		capacityEntries = 1 << 24
 	}
 	return &DomainCache{
 		GenericCache: newGenericCacheEntries(capacityBytes, capacityEntries, func(v []byte) int { return len(v) }, mode),

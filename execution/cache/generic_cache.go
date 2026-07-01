@@ -84,8 +84,11 @@ func NewGenericCache[T any](capacityBytes datasize.ByteSize, sizeFunc func(T) in
 	if capacityEntries < 1024 {
 		capacityEntries = 1024
 	}
-	if capacityEntries > 1<<22 {
-		capacityEntries = 1 << 22
+	// Absolute safety ceiling on the eagerly-allocated slot array; kept above the
+	// configured byte budgets' entry counts so it never caps residency below the
+	// budget (see newDomainCacheBytes).
+	if capacityEntries > 1<<24 {
+		capacityEntries = 1 << 24
 	}
 	return newGenericCacheEntries(capacityBytes, capacityEntries, sizeFunc, mode)
 }

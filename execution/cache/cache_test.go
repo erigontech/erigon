@@ -306,9 +306,10 @@ func TestCodeCache_AddrCapacityLimit(t *testing.T) {
 	assert.True(t, ok, "most recent entry should remain")
 	assert.Equal(t, wideCode(1099), v)
 
-	// hashToCode stores all 1100 distinct codes (content-addressed,
-	// independent of addr LRU eviction).
-	assert.Equal(t, 1100, c.CodeLen())
+	// hashToCode now LRU-evicts at its own entry cap (codeCapacityB /
+	// avgCodeEntryBytes), so it holds far fewer than the 1100 distinct codes
+	// rather than growing unbounded.
+	assert.Less(t, c.CodeLen(), 1100)
 
 	// Updating an existing addr re-writes the entry (LRU promotes to MRU).
 	c.Put(wideAddr(1099), wideCode(4242), 0)
@@ -318,23 +319,25 @@ func TestCodeCache_AddrCapacityLimit(t *testing.T) {
 }
 
 func TestCodeCache_CodeCapacityLimit(t *testing.T) {
-	// Each code entry is 8 (hash) + 3 (code bytes) = 11 bytes
-	// Set code capacity to 25 bytes - enough for 2 entries but not 3
+	// Tiny byte budget → a 1-entry code layer cap. Successive distinct codes
+	// LRU-evict the coldest rather than freezing the layer.
 	c := NewCodeCache(25, 1024*1024) // 25 bytes code, 1MB addr
 
-	// Fill code capacity
 	c.Put(makeAddr(1), makeCode(1), 0)
 	c.Put(makeAddr(2), makeCode(2), 0)
-	assert.Equal(t, 2, c.CodeLen())
-
-	// Try to add more code - addr mapping added, but code not stored
 	c.Put(makeAddr(3), makeCode(3), 0)
-	assert.Equal(t, 3, c.Len())     // addr mapping added
-	assert.Equal(t, 2, c.CodeLen()) // code not added (at capacity)
 
-	// Get for addr3 should fail (code not in cache)
-	_, ok := c.Get(makeAddr(3))
-	assert.False(t, ok)
+	// Addr LRU keeps all three mappings (1MB); the code layer holds only the
+	// most-recent code(s) after eviction.
+	assert.Equal(t, 3, c.Len())
+	assert.LessOrEqual(t, c.CodeLen(), 1)
+
+	// Newest code is retrievable; the coldest was evicted from the code layer.
+	v, ok := c.Get(makeAddr(3))
+	assert.True(t, ok)
+	assert.Equal(t, makeCode(3), v)
+	_, ok = c.Get(makeAddr(1))
+	assert.False(t, ok, "coldest code should have been evicted")
 }
 
 func TestCodeCache_Delete(t *testing.T) {
@@ -392,7 +395,7 @@ func TestCodeCache_GetMissingCode(t *testing.T) {
 	c.Put(addr, code, 0)
 
 	// Clear the code cache but keep addr mapping
-	c.hashToCode.Clear()
+	c.hashToCode.Purge()
 	c.codeSize.Store(0)
 
 	// Get should fail at code lookup stage
