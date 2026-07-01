@@ -388,7 +388,7 @@ func (sd *SharedDomains) flushPendingUpdates(ctx context.Context, tx kv.Temporal
 	}
 
 	defer sd.DetachAccumulatorForGenesisLocked(upd.BlockNum)()
-	// No past changeset found — write into whatever is current
+	// No past changeset found — write into whatever is current (nil for genesis, detached above).
 	_, err := commitment.ApplyDeferredBranchUpdates(upd.Deferred, runtime.NumCPU(), putBranch)
 	return err
 }
