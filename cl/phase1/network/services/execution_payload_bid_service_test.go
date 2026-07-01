@@ -374,6 +374,7 @@ func TestExecutionPayloadBidServiceDuplicate(t *testing.T) {
 	require.NoError(t, err)
 
 	// Second call → IGNORE (already seen from this builder for this slot)
+	delete(fcMock.StateAtBlockRootVal, msg.Message.ParentBlockRoot)
 	ethClockMock.EXPECT().GetCurrentSlot().Return(uint64(100))
 
 	err = service.ProcessMessage(context.Background(), nil, msg)

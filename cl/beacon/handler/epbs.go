@@ -283,25 +283,22 @@ func aggregatePayloadAttestationMessages(
 		sigs map[int][]byte
 	}
 
-	ptcBySlot := make(map[uint64]map[uint64]int)
+	ptcBySlot := make(map[uint64]map[uint64][]int)
 	groups := make(map[dataKey]*payloadAttestationGroup)
 	for _, msg := range messages {
 		if msg == nil || msg.Data == nil {
 			continue
 		}
-		validatorToPTCIndex, ok := ptcBySlot[msg.Data.Slot]
+		validatorToPTCPositions, ok := ptcBySlot[msg.Data.Slot]
 		if !ok {
 			ptc, err := ptcProvider.GetPTC(msg.Data.Slot)
 			if err != nil {
 				return nil, err
 			}
-			validatorToPTCIndex = make(map[uint64]int, len(ptc))
-			for i, validatorIndex := range ptc {
-				validatorToPTCIndex[validatorIndex] = i
-			}
-			ptcBySlot[msg.Data.Slot] = validatorToPTCIndex
+			validatorToPTCPositions = payloadAttestationPTCPositions(ptc)
+			ptcBySlot[msg.Data.Slot] = validatorToPTCPositions
 		}
-		ptcIndex, ok := validatorToPTCIndex[msg.ValidatorIndex]
+		ptcPositions, ok := validatorToPTCPositions[msg.ValidatorIndex]
 		if !ok {
 			continue
 		}
@@ -319,10 +316,12 @@ func aggregatePayloadAttestationMessages(
 			}
 			groups[key] = group
 		}
-		if _, exists := group.sigs[ptcIndex]; !exists {
-			signature := make([]byte, len(msg.Signature))
-			copy(signature, msg.Signature[:])
-			group.sigs[ptcIndex] = signature
+		for _, ptcIndex := range ptcPositions {
+			if _, exists := group.sigs[ptcIndex]; !exists {
+				signature := make([]byte, len(msg.Signature))
+				copy(signature, msg.Signature[:])
+				group.sigs[ptcIndex] = signature
+			}
 		}
 	}
 
@@ -345,7 +344,7 @@ func aggregatePayloadAttestationMessages(
 		}
 		aggregatedSignature, err := bls.AggregateSignatures(signatures)
 		if err != nil {
-			return nil, err
+			continue
 		}
 		var signature common.Bytes96
 		copy(signature[:], aggregatedSignature)
@@ -384,6 +383,14 @@ func aggregatePayloadAttestationMessages(
 
 type payloadAttestationPTCProvider interface {
 	GetPTC(slot uint64) ([]uint64, error)
+}
+
+func payloadAttestationPTCPositions(ptc []uint64) map[uint64][]int {
+	positions := make(map[uint64][]int, len(ptc))
+	for i, validatorIndex := range ptc {
+		positions[validatorIndex] = append(positions[validatorIndex], i)
+	}
+	return positions
 }
 
 // PostEthV1BeaconPoolPayloadAttestations submits an array of PayloadAttestationMessages.

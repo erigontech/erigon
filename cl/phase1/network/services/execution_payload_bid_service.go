@@ -156,7 +156,13 @@ func (s *executionPayloadBidService) ProcessMessage(ctx context.Context, _ *uint
 		return fmt.Errorf("%w: bid slot %d is not current (%d) or next slot", ErrIgnore, slot, currentSlot)
 	}
 
-	preferences, parentState, ok, err := s.matchingProposerPreferences(msg)
+	seenKey := seenBidKey{builderIndex: builderIndex, slot: slot}
+	if s.seenCache.Contains(seenKey) {
+		return fmt.Errorf("%w: already seen bid from builder %d for slot %d",
+			ErrIgnore, builderIndex, slot)
+	}
+
+	preferences, ok, err := s.matchingProposerPreferences(msg)
 	if err != nil {
 		if errors.Is(err, errBidDependencyUnavailable) {
 			s.queuePendingBid(msg)
@@ -174,22 +180,22 @@ func (s *executionPayloadBidService) ProcessMessage(ctx context.Context, _ *uint
 		return nil
 	}
 
-	return s.validateAndStoreBid(msg, preferences, parentState)
+	return s.validateAndStoreBid(msg, preferences)
 }
 
-func (s *executionPayloadBidService) matchingProposerPreferences(msg *cltypes.SignedExecutionPayloadBid) (*cltypes.SignedProposerPreferences, *state.CachingBeaconState, bool, error) {
+func (s *executionPayloadBidService) matchingProposerPreferences(msg *cltypes.SignedExecutionPayloadBid) (*cltypes.SignedProposerPreferences, bool, error) {
 	bid := msg.Message
-	parentState, err := s.forkchoiceStore.GetStateAtBlockRoot(bid.ParentBlockRoot, true)
+	parentState, err := s.forkchoiceStore.GetStateAtBlockRoot(bid.ParentBlockRoot, false)
 	if err != nil || parentState == nil {
-		return nil, nil, false, fmt.Errorf("%w: state for parent_block_root %v not available", errBidDependencyUnavailable, bid.ParentBlockRoot)
+		return nil, false, fmt.Errorf("%w: state for parent_block_root %v not available", errBidDependencyUnavailable, bid.ParentBlockRoot)
 	}
 	proposalEpoch := state.GetEpochAtSlot(s.beaconCfg, bid.Slot)
 	dependentRoot := s.shufflingDependentRoot(bid.ParentBlockRoot, proposalEpoch)
 	if proposalEpoch > s.beaconCfg.MinSeedLookahead && dependentRoot == (common.Hash{}) {
-		return nil, nil, false, fmt.Errorf("%w: failed to compute proposer dependent root", ErrIgnore)
+		return nil, false, fmt.Errorf("%w: failed to compute proposer dependent root", ErrIgnore)
 	}
 	preferences, ok := s.epbsPool.GetPreference(bid.Slot, dependentRoot)
-	return preferences, parentState, ok, nil
+	return preferences, ok, nil
 }
 
 func (s *executionPayloadBidService) shufflingDependentRoot(root common.Hash, epoch uint64) common.Hash {
@@ -204,7 +210,6 @@ func (s *executionPayloadBidService) shufflingDependentRoot(root common.Hash, ep
 func (s *executionPayloadBidService) validateAndStoreBid(
 	msg *cltypes.SignedExecutionPayloadBid,
 	preferences *cltypes.SignedProposerPreferences,
-	parentState *state.CachingBeaconState,
 ) error {
 	bid := msg.Message
 	slot := bid.Slot
@@ -229,9 +234,6 @@ func (s *executionPayloadBidService) validateAndStoreBid(
 			bid.BlobKzgCommitments.Len(), maxBlobsPerBlock)
 	}
 
-	if parentState == nil {
-		return fmt.Errorf("%w: state for parent_block_root %v not available", errBidDependencyUnavailable, bid.ParentBlockRoot)
-	}
 	// [IGNORE] parent_block_root is known in fork choice
 	parentHeader, ok := s.forkchoiceStore.GetHeader(bid.ParentBlockRoot)
 	if !ok {
@@ -241,19 +243,16 @@ func (s *executionPayloadBidService) validateAndStoreBid(
 	if slot <= parentHeader.Slot {
 		return fmt.Errorf("bid slot %d is not greater than parent block slot %d", slot, parentHeader.Slot)
 	}
+	parentState, err := s.forkchoiceStore.GetStateAtBlockRoot(bid.ParentBlockRoot, false)
+	if err != nil || parentState == nil {
+		return fmt.Errorf("%w: state for parent_block_root %v not available", errBidDependencyUnavailable, bid.ParentBlockRoot)
+	}
 	validationState, err := s.bidValidationState(parentState, slot)
 	if err != nil {
 		return fmt.Errorf("bid validation failed: %w", err)
 	}
 	if bid.PrevRandao != validationState.GetRandaoMixes(state.Epoch(validationState)) {
 		return fmt.Errorf("bid prev_randao does not match parent state randao mix")
-	}
-
-	// [IGNORE] First valid bid from this builder for this slot
-	seenKey := seenBidKey{builderIndex: builderIndex, slot: slot}
-	if s.seenCache.Contains(seenKey) {
-		return fmt.Errorf("%w: already seen bid from builder %d for slot %d",
-			ErrIgnore, builderIndex, slot)
 	}
 
 	if err := s.validateBuilderBid(msg, validationState); err != nil {
@@ -284,6 +283,7 @@ func (s *executionPayloadBidService) validateAndStoreBid(
 	}
 
 	// All checks passed — mark as seen and store
+	seenKey := seenBidKey{builderIndex: builderIndex, slot: slot}
 	s.seenCache.Add(seenKey, struct{}{})
 	s.epbsPool.HighestBids.Add(bidKey, msg)
 
@@ -303,12 +303,12 @@ func (s *executionPayloadBidService) bidValidationState(parentState *state.Cachi
 	if parentState.Slot() > bidSlot {
 		return nil, fmt.Errorf("parent state slot %d is after bid slot %d", parentState.Slot(), bidSlot)
 	}
-	if parentState.Slot() == bidSlot {
-		return parentState, nil
-	}
 	validationState, err := parentState.Copy()
 	if err != nil {
 		return nil, err
+	}
+	if parentState.Slot() == bidSlot {
+		return validationState, nil
 	}
 	if err := transition.DefaultMachine.ProcessSlots(validationState, bidSlot); err != nil {
 		return nil, err
@@ -456,7 +456,13 @@ func (s *executionPayloadBidService) processPendingBids() {
 			return true
 		}
 
-		preferences, parentState, ok, err := s.matchingProposerPreferences(job.msg)
+		if s.seenCache.Contains(seenBidKey{builderIndex: pendingKey.builderIndex, slot: pendingKey.slot}) {
+			s.pendingBids.Delete(pendingKey)
+			s.pendingCount.Add(-1)
+			return true
+		}
+
+		preferences, ok, err := s.matchingProposerPreferences(job.msg)
 		if err != nil {
 			if errors.Is(err, errBidDependencyUnavailable) {
 				return true
@@ -477,7 +483,7 @@ func (s *executionPayloadBidService) processPendingBids() {
 		s.pendingBids.Delete(pendingKey)
 		s.pendingCount.Add(-1)
 
-		if err := s.validateAndStoreBid(job.msg, preferences, parentState); err != nil {
+		if err := s.validateAndStoreBid(job.msg, preferences); err != nil {
 			log.Trace("Failed to process pending execution payload bid",
 				"slot", pendingKey.slot,
 				"builderIndex", pendingKey.builderIndex,

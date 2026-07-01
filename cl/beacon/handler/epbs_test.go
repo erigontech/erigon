@@ -200,6 +200,44 @@ func TestAggregatePayloadAttestationMessagesFiltersAndLimits(t *testing.T) {
 	require.Equal(t, []int{2}, attestations.Get(1).AggregationBits.GetOnIndices())
 }
 
+func TestAggregatePayloadAttestationMessagesIncludesDuplicatePTCPositions(t *testing.T) {
+	cfg := clparams.MainnetBeaconConfig
+	cfg.PtcSize = 3
+	cfg.MaxPayloadAttestations = 1
+	ptc := fixedPTCProvider{ptc: map[uint64][]uint64{12: {10, 10, 11}}}
+	root := common.HexToHash("0x1111")
+
+	attestations, err := aggregatePayloadAttestationMessages(&cfg, ptc, []*cltypes.PayloadAttestationMessage{
+		newTestPayloadAttestationMessage(t, 10, root),
+		newTestPayloadAttestationMessage(t, 11, root),
+	})
+
+	require.NoError(t, err)
+	require.Equal(t, 1, attestations.Len())
+	require.Equal(t, []int{0, 1, 2}, attestations.Get(0).AggregationBits.GetOnIndices())
+}
+
+func TestAggregatePayloadAttestationMessagesSkipsMalformedSignatureGroup(t *testing.T) {
+	cfg := clparams.MainnetBeaconConfig
+	cfg.PtcSize = 2
+	cfg.MaxPayloadAttestations = 2
+	ptc := fixedPTCProvider{ptc: map[uint64][]uint64{12: {10, 11}}}
+	badRoot := common.HexToHash("0x1111")
+	goodRoot := common.HexToHash("0x2222")
+	bad := newTestPayloadAttestationMessage(t, 10, badRoot)
+	bad.Signature = common.Bytes96{0x01}
+
+	attestations, err := aggregatePayloadAttestationMessages(&cfg, ptc, []*cltypes.PayloadAttestationMessage{
+		bad,
+		newTestPayloadAttestationMessage(t, 11, goodRoot),
+	})
+
+	require.NoError(t, err)
+	require.Equal(t, 1, attestations.Len())
+	require.Equal(t, goodRoot, attestations.Get(0).Data.BeaconBlockRoot)
+	require.Equal(t, []int{1}, attestations.Get(0).AggregationBits.GetOnIndices())
+}
+
 type fixedPTCProvider struct {
 	ptc map[uint64][]uint64
 }

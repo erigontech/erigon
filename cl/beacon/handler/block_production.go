@@ -2360,11 +2360,7 @@ func (a *ApiHandler) aggregatePayloadAttestations(
 		return result
 	}
 
-	// Build a map from validator index -> PTC position for O(1) lookups.
-	validatorToPTCIndex := make(map[uint64]int, len(ptc))
-	for i, valIdx := range ptc {
-		validatorToPTCIndex[valIdx] = i
-	}
+	validatorToPTCPositions := payloadAttestationPTCPositions(ptc)
 
 	// 3. Group messages by identical PayloadAttestationData.
 	type dataKey struct {
@@ -2381,7 +2377,7 @@ func (a *ApiHandler) aggregatePayloadAttestations(
 	groups := make(map[dataKey]*group)
 
 	for _, msg := range msgs {
-		ptcIdx, ok := validatorToPTCIndex[msg.ValidatorIndex]
+		ptcPositions, ok := validatorToPTCPositions[msg.ValidatorIndex]
 		if !ok {
 			// Validator not in PTC for this slot; skip.
 			continue
@@ -2400,9 +2396,10 @@ func (a *ApiHandler) aggregatePayloadAttestations(
 			}
 			groups[dk] = g
 		}
-		// If we already have a vote from this PTC position, keep the first one.
-		if _, dup := g.sigs[ptcIdx]; !dup {
-			g.sigs[ptcIdx] = msg.Signature[:]
+		for _, ptcIdx := range ptcPositions {
+			if _, dup := g.sigs[ptcIdx]; !dup {
+				g.sigs[ptcIdx] = msg.Signature[:]
+			}
 		}
 	}
 

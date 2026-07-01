@@ -478,7 +478,7 @@ func TestCaplinBlockProductionGlamsterdamSlotNumber(t *testing.T) {
 	// so block production expects an envelope on disk. Provide one with empty ExecutionRequests.
 	fcu.Envelopes[baseBlockRoot] = &cltypes.SignedExecutionPayloadEnvelope{
 		Message: &cltypes.ExecutionPayloadEnvelope{
-			ExecutionRequests: &cltypes.ExecutionRequests{},
+			ExecutionRequests: cltypes.NewExecutionRequestsWithVersion(h.beaconChainCfg, clparams.GloasVersion),
 		},
 	}
 
