@@ -82,9 +82,19 @@ func FilterPreverifiedBySubsumingLocal(items snapcfg.PreverifiedItems, snapDir s
 // coverageKey identifies a class of files where a wider [From, To)
 // range subsumes narrower ranges of the same class. Includes subdir
 // so domain/v2.0-accounts.* does not match history/v2.0-accounts.*.
+//
+// Version is NOT part of the key: preverified.toml carries entries at
+// multiple version generations during a version bump (e.g. v2.0
+// narrows plus v2.1 broad for the same block range). A wider file of
+// any version already covers the data of narrower files at any
+// version — pulling the narrower ones just lands cross-version union-
+// cover on disk. Live-caught 2026-07-01 on hoodi commitment domain:
+// v2.1-commitment.272-280.kv + v2.0-commitment.{272-276,276-278,278-
+// 279}.kv coexisted after the bootstrap+preverified fallback pulled
+// both, producing gas-short first post-unwind blocks after mode-B at
+// depth 30k+.
 type coverageKey struct {
 	subdir  string
-	version string
 	typeStr string
 	ext     string
 }
@@ -120,7 +130,6 @@ func buildLocalCoverageIndex(snapDir string) localCoverageIndex {
 		}
 		k := coverageKey{
 			subdir:  subdir,
-			version: fi.Version.String(),
 			typeStr: fi.TypeString,
 			ext:     fi.Ext,
 		}
@@ -144,7 +153,6 @@ func (cov localCoverageIndex) covers(entryName string) bool {
 	}
 	k := coverageKey{
 		subdir:  subdir,
-		version: fi.Version.String(),
 		typeStr: fi.TypeString,
 		ext:     fi.Ext,
 	}

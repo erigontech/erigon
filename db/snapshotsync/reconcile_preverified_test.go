@@ -159,6 +159,49 @@ func TestReconcileCoverageRespectsClass(t *testing.T) {
 		"a local accounts file must not be treated as coverage for a preverified storage entry")
 }
 
+// TestFilterPreverifiedBySubsumingLocal_CrossVersionSubsumption pins
+// the fix for the 2026-07-01 iter-3 mode_b state-divergence wedge on
+// commitment domain. Preverified.toml carries a v2.0→v2.1 transition:
+// v2.0 narrower entries and a v2.1 broader entry that covers the same
+// block range. If the local disk has the v2.1 broad, the v2.0 narrows
+// contain redundant data — downloading them lands us in cross-version
+// union-cover on disk. Aggregator visible-set then reads ambiguously
+// at overlapping (key, step) pairs, producing a gas-short first
+// post-unwind block after mode-B at depth 30k+.
+//
+// Fix: subsumption is version-agnostic. A wider file of ANY version
+// subsumes narrower preverified entries of ANY version within the
+// same [subdir, typeStr, ext] class.
+func TestFilterPreverifiedBySubsumingLocal_CrossVersionSubsumption(t *testing.T) {
+	dir := t.TempDir()
+	domainDir := filepath.Join(dir, "domain")
+	// Local broad file at v2.1 (from fresh-sync or a peer's chain.v2 manifest).
+	touch(t, domainDir, "v2.1-commitment.272-280.kv")
+
+	// Preverified lists the v2.1 broad AND its constituent v2.0 narrows
+	// (transitional list to serve nodes at both version generations).
+	items := snapcfg.PreverifiedItems{
+		{Name: "domain/v2.1-commitment.272-280.kv", Hash: "h-broad"},
+		{Name: "domain/v2.0-commitment.272-276.kv", Hash: "h-narrow-1"},
+		{Name: "domain/v2.0-commitment.276-278.kv", Hash: "h-narrow-2"},
+		{Name: "domain/v2.0-commitment.278-279.kv", Hash: "h-narrow-3"},
+		// Distinct-range entry NOT covered — must survive.
+		{Name: "domain/v2.1-commitment.280-282.kv", Hash: "h-post"},
+	}
+
+	filtered := FilterPreverifiedBySubsumingLocal(items, dir)
+
+	got := make([]string, 0, len(filtered))
+	for _, p := range filtered {
+		got = append(got, p.Name)
+	}
+	sort.Strings(got)
+	require.Equal(t,
+		[]string{"domain/v2.1-commitment.280-282.kv"},
+		got,
+		"the v2.1 local broad subsumes both the v2.1 exact match AND the v2.0 narrower entries within its range — only the disjoint 280-282 file survives")
+}
+
 // TestFilterPreverifiedBySubsumingLocal_HoodiIter2ModeBLayout pins the
 // exact wedge from the 2026-07-01 iter-2 mode_b soak: hoodi's
 // preverified list carries BOTH a broad 100k-block file and its
