@@ -21,7 +21,6 @@ import (
 	"context"
 	"encoding/binary"
 	"encoding/hex"
-	"fmt"
 	"math/rand"
 	"testing"
 
@@ -403,11 +402,6 @@ func build500KStorageHeavyCorpus(b testing.TB) ([][]byte, []Update) {
 	return ub.Build()
 }
 
-// witnessSlot returns the deterministic j-th storage slot value used by the witness corpora.
-func witnessSlot(j int) []byte {
-	return common.FromHex(fmt.Sprintf("%064x", j+1))
-}
-
 // buildWitnessCorpus builds accts accounts (balance i+1) each with slots sequential
 // storage slots, processes them into (ms, hph) and returns the account plain keys.
 func buildWitnessCorpus(tb testing.TB, ms *MockState, hph *HexPatriciaHashed, accts, slots int) [][]byte {
@@ -419,7 +413,7 @@ func buildWitnessCorpus(tb testing.TB, ms *MockState, hph *HexPatriciaHashed, ac
 		addrs = append(addrs, a)
 		builder.Balance(common.Bytes2Hex(a), uint64(i+1))
 		for j := 0; j < slots; j++ {
-			slot := witnessSlot(j)
+			slot := slotHashBytes(j)
 			builder.Storage(common.Bytes2Hex(a), common.Bytes2Hex(slot), common.Bytes2Hex(slot))
 		}
 	}
@@ -434,7 +428,7 @@ func touchAccountsSlots(u *Updates, addrs [][]byte, slots int) {
 	for _, a := range addrs {
 		u.TouchPlainKey(string(a), nil, u.TouchAccount)
 		for j := 0; j < slots; j++ {
-			u.TouchPlainKey(string(storageKey(a, witnessSlot(j))), nil, u.TouchStorage)
+			u.TouchPlainKey(string(storageKey(a, slotHashBytes(j))), nil, u.TouchStorage)
 		}
 	}
 }
