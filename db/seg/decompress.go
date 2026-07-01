@@ -30,7 +30,6 @@ import (
 
 	"github.com/c2h5oh/datasize"
 
-	"github.com/erigontech/erigon/common/assert"
 	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/common/mmap"
@@ -346,7 +345,7 @@ func NewDecompressorWithMetadata(compressedFilePath string, hasMetadata bool) (*
 		}
 	}
 
-	if assert.Enable && pos != 24 {
+	if dbg.AssertEnabled && pos != 24 {
 		panic("pos != 24")
 	}
 	pos += dictSize // offset patterns

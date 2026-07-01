@@ -2,6 +2,7 @@ package tui
 
 import (
 	"errors"
+	"fmt"
 	"maps"
 	"path/filepath"
 	"slices"
@@ -16,6 +17,29 @@ import (
 
 	"github.com/erigontech/erigon/cmd/bumper/internal/schema"
 )
+
+var (
+	accentColor = lipgloss.Color("212")
+	dimColor    = lipgloss.Color("240")
+)
+
+func panelBorder(active bool) lipgloss.Style {
+	s := lipgloss.NewStyle().Border(lipgloss.RoundedBorder())
+	if active {
+		return s.BorderForeground(accentColor)
+	}
+	return s.BorderForeground(dimColor)
+}
+
+func tableStyles(active bool) table.Styles {
+	s := table.DefaultStyles()
+	if active {
+		s.Selected = lipgloss.NewStyle().Bold(true).Foreground(accentColor)
+	} else {
+		s.Selected = lipgloss.NewStyle().Foreground(dimColor)
+	}
+	return s
+}
 
 type focus int
 
@@ -229,6 +253,42 @@ func (m *model) updateStatus() {
 	m.status = base + " • " + tag + " • Ctrl+S=Save&Exit"
 }
 
+// changes lists the edits pending against the on-disk schema, one line per
+// changed version, e.g. "commitment.kv  v2.1 → v2.2".
+func (m *model) changes() []string {
+	groups := []struct {
+		name string
+		sel  func(schema.Category) schema.Group
+	}{
+		{"domain", func(c schema.Category) schema.Group { return c.Domain }},
+		{"hist", func(c schema.Category) schema.Group { return c.Hist }},
+		{"ii", func(c schema.Category) schema.Group { return c.Ii }},
+		{"block", func(c schema.Category) schema.Group { return c.Block }},
+	}
+	var out []string
+	for _, cat := range schema.Cats(m.cur) {
+		oc, cc := m.orig[cat], m.cur[cat]
+		for _, g := range groups {
+			cg := g.sel(cc)
+			keys := make([]string, 0, len(cg))
+			for k := range cg {
+				keys = append(keys, k)
+			}
+			slices.Sort(keys)
+			for _, k := range keys {
+				ov, cv := g.sel(oc)[k], cg[k]
+				if !ov.Current.Eq(cv.Current) {
+					out = append(out, fmt.Sprintf("%s.%s  %s → %s", cat, k, ov.Current.String(), cv.Current.String()))
+				}
+				if !ov.Min.Eq(cv.Min) {
+					out = append(out, fmt.Sprintf("%s.%s (min)  %s → %s", cat, k, ov.Min.String(), cv.Min.String()))
+				}
+			}
+		}
+	}
+	return out
+}
+
 func (m *model) Init() tea.Cmd { return nil }
 
 func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
@@ -319,7 +379,14 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.modal = mkSaveConfirm
 			m.foc = fModal
 			return m, nil
-		case "tab", "right":
+		case "tab":
+			if m.foc == fLeft {
+				m.foc = fRight
+			} else {
+				m.foc = fLeft
+			}
+			return m, nil
+		case "right":
 			if m.foc == fLeft {
 				m.foc = fRight
 			}
@@ -381,8 +448,13 @@ func (m *model) beginEdit() tea.Cmd {
 }
 
 func (m *model) View() tea.View {
+	leftActive := m.foc == fLeft
+	rightActive := m.foc == fRight || m.foc == fEdit
+	m.left.SetStyles(tableStyles(leftActive))
+	m.right.SetStyles(tableStyles(rightActive))
+
 	title := lipgloss.NewStyle().Bold(true).Render("Bumper 1.0.1")
-	left := lipgloss.NewStyle().Border(lipgloss.RoundedBorder()).Render(
+	left := panelBorder(leftActive).Render(
 		lipgloss.JoinVertical(lipgloss.Left, "Schemas", m.left.View()),
 	)
 	cat := ""
@@ -393,7 +465,7 @@ func (m *model) View() tea.View {
 	if m.foc == fEdit {
 		editorLine = "Edit: " + m.editor.View()
 	}
-	right := lipgloss.NewStyle().Border(lipgloss.RoundedBorder()).Render(
+	right := panelBorder(rightActive).Render(
 		lipgloss.JoinVertical(lipgloss.Left, cat, m.right.View(), editorLine),
 	)
 	help := "[↑/↓] move  [Tab] switch  [e] edit current  [m] edit min  [.] +0.1  [M] +1.0  [S] save  [Ctrl+S] save&exit  [Q] quit"
@@ -401,12 +473,27 @@ func (m *model) View() tea.View {
 	if m.err != nil {
 		stat = "Error: " + m.err.Error()
 	}
-	body := lipgloss.JoinVertical(lipgloss.Left,
+	rows := []string{
 		title,
 		lipgloss.JoinHorizontal(lipgloss.Top, left, "  ", right),
 		lipgloss.NewStyle().Faint(true).Render(help),
 		stat,
-	)
+	}
+	if ch := m.changes(); len(ch) > 0 {
+		const maxShow = 12
+		shown := ch
+		var extra int
+		if len(shown) > maxShow {
+			extra, shown = len(shown)-maxShow, shown[:maxShow]
+		}
+		block := []string{lipgloss.NewStyle().Bold(true).Render("Pending changes:")}
+		block = append(block, shown...)
+		if extra > 0 {
+			block = append(block, fmt.Sprintf("… (+%d more)", extra))
+		}
+		rows = append(rows, lipgloss.NewStyle().Foreground(accentColor).Render(strings.Join(block, "\n")))
+	}
+	body := lipgloss.JoinVertical(lipgloss.Left, rows...)
 	if m.foc == fModal {
 		box := lipgloss.NewStyle().
 			Border(lipgloss.RoundedBorder()).
