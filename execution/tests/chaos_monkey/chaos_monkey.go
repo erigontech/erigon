@@ -56,11 +56,8 @@ func ArmPreExecutionError(err error) (disarm func()) {
 
 // ThrowPreExecutionError reproduces a failure that hits executeBlocks before it
 // dispatches any block (snapshot step misalignment, a missing block, a BAL decode
-// error). Disarmed (nil) unless a test armed it via ArmPreExecutionError.
-func ThrowPreExecutionError(enabled bool) error {
-	if !enabled {
-		return nil
-	}
+// error). Returns nil unless a test armed it via ArmPreExecutionError.
+func ThrowPreExecutionError() error {
 	preExecMu.Lock()
 	defer preExecMu.Unlock()
 	return preExecErr
