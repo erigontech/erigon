@@ -122,8 +122,8 @@ type FilesItem struct {
 
 	refcount atomic.Int32
 
-	// file can be deleted in 2 cases: 1. when `refcount == 0 && canDelete == true` 2. on app startup when `file.isProperSubsetOf()` a bigger file
-	// other processes (which also reading files, may have same logic)
+	// Deprecated: only the not-yet-migrated forkable subsystem still uses this (with
+	// refcount); the aggregator reclaims via aggregatorVisible generations (retired + refcnt).
 	canDelete atomic.Bool
 }
 
