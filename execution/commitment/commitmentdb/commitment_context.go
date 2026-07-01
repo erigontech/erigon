@@ -13,7 +13,6 @@ import (
 	"time"
 
 	"github.com/erigontech/erigon/common"
-	"github.com/erigontech/erigon/common/assert"
 	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/empty"
@@ -21,6 +20,7 @@ import (
 	"github.com/erigontech/erigon/db/etl"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/rawdbv3"
+	"github.com/erigontech/erigon/db/state/kvmetrics"
 	"github.com/erigontech/erigon/diagnostics/metrics"
 	"github.com/erigontech/erigon/execution/commitment"
 	"github.com/erigontech/erigon/execution/commitment/nibbles"
@@ -38,9 +38,24 @@ type sd interface {
 	SetTxNum(blockNum uint64)
 	AsGetter(tx kv.TemporalTx) kv.TemporalGetter
 	AsPutDel(tx kv.TemporalTx) kv.TemporalPutDel
+	// MergeMetrics hands a finished worker's lock-free metrics accumulator to
+	// the per-batch aggregate and the process-level collector (once, not per
+	// read), tagged with source.
+	MergeMetrics(source kvmetrics.Source, wm *kvmetrics.DomainMetrics)
 	StepSize() uint64
 	Trace() bool
 	CommitmentCapture() bool
+
+	// ProbeReadLayers samples sd.mem, parent.mem and tx-direct (MDBX) for one
+	// key — BranchCache divergence-detection probe. Read-only.
+	ProbeReadLayers(domain kv.Domain, tx kv.TemporalTx, key []byte) (mem, parentMem, mdbx []byte, memOk, parentOk bool)
+
+	// Metrics exposes the per-SD DomainMetrics so callers can read
+	// per-domain (cache, db, file) read counters. Used by the
+	// cache-fp log line to break the aggregate `files=N` count down
+	// per domain (Storage value loads vs Commitment branch reads
+	// vs Account loads).
+	Metrics() *kvmetrics.DomainMetrics
 }
 
 type SharedDomainsCommitmentContext struct {
@@ -193,7 +208,11 @@ func NewSharedDomainsCommitmentContext(sd sd, mode commitment.Mode, tmpDir strin
 	return ctx
 }
 
-func (sdc *SharedDomainsCommitmentContext) trieContext(tx kv.TemporalTx, blockNum, txNum uint64) *TrieContext {
+// trieContext builds the main (root-fold) trie read context. readCtx carries
+// the per-ComputeCommitment lock-free metrics accumulator (nil-value => no
+// metrics); the main fold is single-goroutine so it owns that accumulator
+// exclusively. Warmup/concurrent-mount readers get their own via the factories.
+func (sdc *SharedDomainsCommitmentContext) trieContext(tx kv.TemporalTx, blockNum, txNum uint64, readCtx context.Context) *TrieContext {
 	mainTtx := &TrieContext{
 		getter:   sdc.sharedDomains.AsGetter(tx),
 		putter:   sdc.sharedDomains.AsPutDel(tx),
@@ -202,9 +221,9 @@ func (sdc *SharedDomainsCommitmentContext) trieContext(tx kv.TemporalTx, blockNu
 		blockNum: blockNum,
 	}
 	if sdc.stateReader != nil {
-		mainTtx.stateReader = sdc.stateReader.Clone(tx)
+		mainTtx.stateReader = sdc.stateReader.CloneForWorker(readCtx, tx)
 	} else {
-		mainTtx.stateReader = NewLatestStateReader(tx, sdc.sharedDomains)
+		mainTtx.stateReader = NewLatestStateReaderForWorker(readCtx, tx, sdc.sharedDomains)
 	}
 	sdc.patriciaTrie.ResetContext(mainTtx)
 	return mainTtx
@@ -340,7 +359,15 @@ func (sdc *SharedDomainsCommitmentContext) ComputeCommitment(ctx context.Context
 		}
 	}
 
-	trieContext := sdc.trieContext(tx, blockNum, txNum)
+	// Per-ComputeCommitment metrics accumulator for the main (root-fold) reads.
+	// The fold is single-goroutine, so this lock-free accumulator is owned
+	// exclusively here; merged into the shared metrics when commitment finishes.
+	// Warmup/concurrent-mount workers accumulate + merge independently.
+	commitMetrics := kvmetrics.NewDomainMetrics()
+	defer sdc.sharedDomains.MergeMetrics(kvmetrics.SourceCommitment, commitMetrics)
+	readCtx := kvmetrics.ContextWithMetrics(ctx, commitMetrics)
+
+	trieContext := sdc.trieContext(tx, blockNum, txNum, readCtx)
 
 	// If trie trace is configured, wrap the context with a recorder.
 	// Block-targeted: when TrieTraceBlock is set, only record that specific block.
@@ -509,6 +536,14 @@ func (sdc *SharedDomainsCommitmentContext) trieContextFactory(ctx context.Contex
 		if err != nil {
 			return &errorTrieContext{err: err}, func() {}
 		}
+		// Warmup workers run concurrently with the main commitment goroutine.
+		// Each gets its own lock-free metrics accumulator carried in a per-worker
+		// context, so reads neither share metrics state with the main goroutine
+		// (a data race) nor take the global metrics write lock (the prior hard
+		// serialization point). The accumulator is folded into the shared metrics
+		// once at teardown.
+		wm := kvmetrics.NewDomainMetrics()
+		workerCtx := kvmetrics.ContextWithMetrics(ctx, wm)
 		warmupCtx := &TrieContext{
 			getter:   sdc.sharedDomains.AsGetter(roTx),
 			putter:   sdc.sharedDomains.AsPutDel(roTx),
@@ -516,11 +551,12 @@ func (sdc *SharedDomainsCommitmentContext) trieContextFactory(ctx context.Contex
 			txNum:    txNum,
 		}
 		if sdc.stateReader != nil {
-			warmupCtx.stateReader = sdc.stateReader.Clone(roTx)
+			warmupCtx.stateReader = sdc.stateReader.CloneForWorker(workerCtx, roTx)
 		} else {
-			warmupCtx.stateReader = NewLatestStateReader(roTx, sdc.sharedDomains)
+			warmupCtx.stateReader = NewLatestStateReaderForWorker(workerCtx, roTx, sdc.sharedDomains)
 		}
 		cleanup := func() {
+			sdc.sharedDomains.MergeMetrics(kvmetrics.SourceWarmup, wm)
 			roTx.Rollback()
 		}
 		return warmupCtx, cleanup
@@ -548,6 +584,11 @@ func (sdc *SharedDomainsCommitmentContext) concurrentTrieContextFactory(ctx cont
 		collectors = append(collectors, collector)
 		mu.Unlock()
 
+		// Concurrent mounts run in parallel; each gets its own lock-free metrics
+		// accumulator via a per-worker context so they don't share metrics state
+		// (a race) or take the global metrics lock. Folded in at teardown.
+		wm := kvmetrics.NewDomainMetrics()
+		workerCtx := kvmetrics.ContextWithMetrics(ctx, wm)
 		warmupCtx := &TrieContext{
 			getter:         sdc.sharedDomains.AsGetter(roTx),
 			putter:         sdc.sharedDomains.AsPutDel(roTx),
@@ -556,11 +597,12 @@ func (sdc *SharedDomainsCommitmentContext) concurrentTrieContextFactory(ctx cont
 			localCollector: collector,
 		}
 		if sdc.stateReader != nil {
-			warmupCtx.stateReader = sdc.stateReader.Clone(roTx)
+			warmupCtx.stateReader = sdc.stateReader.CloneForWorker(workerCtx, roTx)
 		} else {
-			warmupCtx.stateReader = NewLatestStateReader(roTx, sdc.sharedDomains)
+			warmupCtx.stateReader = NewLatestStateReaderForWorker(workerCtx, roTx, sdc.sharedDomains)
 		}
 		cleanup := func() {
+			sdc.sharedDomains.MergeMetrics(kvmetrics.SourceWarmup, wm)
 			roTx.Rollback()
 		}
 		return warmupCtx, cleanup
@@ -638,7 +680,7 @@ func (sdc *SharedDomainsCommitmentContext) LatestCommitmentState(trieContext *Tr
 // SeekCommitment searches for last encoded state from DomainCommitted
 // and if state found, sets it up to current domain
 func (sdc *SharedDomainsCommitmentContext) SeekCommitment(ctx context.Context, tx kv.TemporalTx) (txNum, blockNum uint64, err error) {
-	trieContext := sdc.trieContext(tx, 0, 0) // blockNum/txNum not yet known; trieContext only used for reading here
+	trieContext := sdc.trieContext(tx, 0, 0, ctx) // blockNum/txNum not yet known; trieContext only used for reading here
 
 	_, _, state, err := sdc.LatestCommitmentState(trieContext)
 	if err != nil {
@@ -761,7 +803,7 @@ func (sdc *SharedDomainsCommitmentContext) restorePatriciaState(value []byte) (u
 		hext = ppht.RootTrie()
 	}
 	if hext == nil {
-		return 0, 0, errors.New("commitment trie not available")
+		return 0, 0, errors.New("unsupported trie variant: state restore requires a hex patricia trie")
 	}
 
 	if err := hext.SetState(cs.trieState); err != nil {
@@ -858,7 +900,7 @@ func (sdc *TrieContext) Account(plainKey []byte) (u *commitment.Update, err erro
 		u.CodeHash = acc.CodeHash.Value()
 	}
 
-	if assert.Enable { // verify code hash from account encoding matches stored code
+	if dbg.AssertEnabled { // verify code hash from account encoding matches stored code
 		code, _, err := sdc.readDomain(kv.CodeDomain, plainKey)
 		if err != nil {
 			return nil, err
