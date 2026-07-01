@@ -85,16 +85,29 @@ jobs:
             max-allowed-failures: 0
             exec_mode: parallel
     steps:
+      # Every matrix shard shares the self-hosted host's workspace and docker
+      # daemon, so a sibling's end-of-job cleanup can delete files or images a
+      # still-running shard depends on. Give each shard unique checkout dirs and
+      # image tag so cleanup only ever touches that shard's own state.
+      - name: Compute per-shard identifiers
+        run: |
+          slug="${{ github.run_id }}-${{ github.run_attempt }}-${{ strategy.job-index }}"
+          {
+            echo "ERIGON_DIR=erigon-full-$slug"
+            echo "HIVE_DIR=hive-$slug"
+            echo "IMAGE_TAG=hive/erigon:cilocal-$slug"
+          } >> "$GITHUB_ENV"
+
       - name: Checkout Erigon
         uses: actions/checkout@v7
         with:
-          path: erigon-full
+          path: ${{ env.ERIGON_DIR }}
 
       - name: Read pinned versions
         id: hive-version
         run: |
-          echo "ref=$(jq -r .hive_ref erigon-full/.github/workflows/hive-versions.json)" >> "$GITHUB_OUTPUT"
-          echo "execution_apis_ref=$(jq -r '.execution_apis_ref // empty' erigon-full/.github/workflows/hive-versions.json)" >> "$GITHUB_OUTPUT"
+          echo "ref=$(jq -r .hive_ref "$ERIGON_DIR"/.github/workflows/hive-versions.json)" >> "$GITHUB_OUTPUT"
+          echo "execution_apis_ref=$(jq -r '.execution_apis_ref // empty' "$ERIGON_DIR"/.github/workflows/hive-versions.json)" >> "$GITHUB_OUTPUT"
 
       - name: Checkout Hive
         uses: actions/checkout@v7
@@ -102,13 +115,13 @@ jobs:
           repository: ethereum/hive
           # version hive and update periodically/on-demand to prevent upstream changes in Hive affecting us with red CI
           ref: ${{ steps.hive-version.outputs.ref }}
-          path: hive
+          path: ${{ env.HIVE_DIR }}
 
       - name: Setup go env and cache
         uses: actions/setup-go@v6
         with:
           go-version: '>=1.25'
-          go-version-file: 'hive/go.mod'
+          go-version-file: ${{ env.HIVE_DIR }}/go.mod
 
       - name: Conditional Docker Login
         # Only login if we can. Workflow works without it but we want to avoid
@@ -144,7 +157,7 @@ jobs:
               sleep $((n*15)); n=$((n+1))
             done
           }
-          retry 3 docker build -t hive/erigon:cilocal erigon-full
+          retry 3 docker build -t "$IMAGE_TAG" "$ERIGON_DIR"
 
       - name: Get dependencies and build hive
         env:
@@ -154,7 +167,9 @@ jobs:
           # every erigon instance hive launches inherits it.
           ERIGON_EXEC3_PARALLEL: ${{ matrix.exec_mode == 'parallel' && 'true' || 'false' }}
         run: |
-          cd hive
+          cd "$HIVE_DIR"
+          image_repo="${IMAGE_TAG%:*}"
+          image_version="${IMAGE_TAG#*:}"
           retry() {
             local max=$1 n=1; shift
             until "$@"; do
@@ -166,13 +181,13 @@ jobs:
           retry 3 go get . >> buildlogs.log
           # Point hive's default (prebuilt-image) erigon client at the image we
           # built locally above, instead of cloning erigon inside the builder.
-          sed -i "s|^ARG baseimage=erigontech/erigon$|ARG baseimage=hive/erigon|" clients/erigon/Dockerfile
-          sed -i "s|^ARG tag=main-latest$|ARG tag=cilocal|" clients/erigon/Dockerfile
+          sed -i "s|^ARG baseimage=erigontech/erigon$|ARG baseimage=${image_repo}|" clients/erigon/Dockerfile
+          sed -i "s|^ARG tag=main-latest$|ARG tag=${image_version}|" clients/erigon/Dockerfile
           # Fail fast if the sed didn't apply (upstream Dockerfile ARGs changed),
           # otherwise hive would silently use the remote erigontech/erigon image.
-          if ! grep -q "^ARG baseimage=hive/erigon$" clients/erigon/Dockerfile \
-             || ! grep -q "^ARG tag=cilocal$" clients/erigon/Dockerfile; then
-            echo "ERROR: failed to repoint hive's erigon client Dockerfile at hive/erigon:cilocal"
+          if ! grep -q "^ARG baseimage=${image_repo}$" clients/erigon/Dockerfile \
+             || ! grep -q "^ARG tag=${image_version}$" clients/erigon/Dockerfile; then
+            echo "ERROR: failed to repoint hive's erigon client Dockerfile at ${IMAGE_TAG}"
             exit 1
           fi
           # Inject ERIGON_EXEC3_PARALLEL into the runtime image so the
@@ -197,7 +212,7 @@ jobs:
       # We also fail if more than half the tests fail
       - name: Run hive tests and parse output
         run: |
-          cd hive
+          cd "$HIVE_DIR"
           run_suite() {
             if [ $# -ne 3 ]; then
               echo "Error: run_suite requires exactly 3 parameters"
@@ -263,31 +278,32 @@ jobs:
           # exec_mode in the artifact name keeps the two matrix entries from
           # clobbering each other's logs on the same artifact key.
           name: ${{ steps.artifact-name.outputs.name }}
-          path: hive/workspace/logs
+          path: ${{ env.HIVE_DIR }}/workspace/logs
         continue-on-error: true
 
       - name: Check for failures
         run: |
-          if grep -q "failed" hive/failed.log; then
+          if grep -q "failed" "$HIVE_DIR/failed.log"; then
             echo "One or more tests failed."
             exit 1
           fi
           echo "All tests passed successfully."
 
-      # This step is not required UNTIL the github-managed runners are dismissed in favor of self-hosted ones (which is planned)
-      # So it is good to PROACTIVELY run it (it should not cause any issues within github-managed runners either)
-      - name: Remove Hive directory
+      # Scoped to this shard's own dirs: siblings share the workspace, so a
+      # blanket `rm -rf hive` would delete a still-running shard's checkout.
+      - name: Remove this shard's checkout dirs
         run: |
-          echo "Removing the Hive directory..."
-          rm -rf hive
+          echo "Removing this shard's checkout dirs..."
+          rm -rf "$ERIGON_DIR" "$HIVE_DIR"
         if: always()
 
-      # This step is not required UNTIL the github-managed runners are dismissed in favor of self-hosted ones (which is planned)
-      # So it is good to PROACTIVELY run it (it should not cause any issues within github-managed runners either)  
-      - name: Prune docker
+      # Scoped to this shard's own image: siblings share the docker daemon, so a
+      # host-global `docker system prune -af --volumes` would wipe images and
+      # build cache out from under still-running shards.
+      - name: Remove this shard's docker image
         run: |
-          echo "Pruning docker..."
-          docker system prune -af --volumes
+          echo "Removing this shard's erigon image..."
+          docker rmi -f "$IMAGE_TAG" 2>/dev/null || true
         if: always()
 
       # In the merge queue, cancel the run on first failure so the gate
