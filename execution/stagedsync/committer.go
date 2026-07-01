@@ -480,10 +480,9 @@ func (cc *commitmentCalculator) computeAndCheck(ctx context.Context, br *blockRe
 // not pend into the first window block's changeset-routed compute.
 func (cc *commitmentCalculator) flushPendingUpdatesWithoutChangeset(ctx context.Context, br *blockResult) {
 	cc.doms.LockChangesetAccumulator()
-	prev := cc.doms.GetChangesetAccumulatorLocked()
-	cc.doms.SetChangesetAccumulatorLocked(nil)
+	restore := cc.doms.DetachAccumulatorLocked()
 	err := cc.doms.FlushPendingUpdatesLocked(ctx, cc.roTx)
-	cc.doms.SetChangesetAccumulatorLocked(prev)
+	restore()
 	cc.doms.UnlockChangesetAccumulator()
 	if err != nil {
 		cc.publish(ctx, commitmentResult{
@@ -518,13 +517,12 @@ func (cc *commitmentCalculator) computeTransition(ctx context.Context, br *block
 	sdCtx.SetStateReader(cc.asOfReader)
 
 	cc.doms.LockChangesetAccumulator()
-	prev := cc.doms.GetChangesetAccumulatorLocked()
-	cc.doms.SetChangesetAccumulatorLocked(nil)
+	restore := cc.doms.DetachAccumulatorLocked()
 	rh, err := cc.doms.ComputeCommitmentLocked(ctx, cc.roTx, true, br.BlockNum, br.lastTxNum, cc.logPrefix, nil)
 	if err == nil {
 		err = cc.doms.FlushPendingUpdatesLocked(ctx, cc.roTx)
 	}
-	cc.doms.SetChangesetAccumulatorLocked(prev)
+	restore()
 	cc.doms.UnlockChangesetAccumulator()
 	if err != nil {
 		cc.publish(ctx, commitmentResult{

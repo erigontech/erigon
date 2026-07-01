@@ -47,6 +47,8 @@ type importFixtureCase struct {
 	} `json:"blocks"`
 }
 
+// Matches the Info-level line from ExecModule.logHeadUpdated; the hash-then-number
+// key order tracks its logArgs, so changing that log must update this regex.
 var headUpdatedRe = regexp.MustCompile(`head updated\s+hash=(0x[0-9a-fA-F]{64})\s+number=(\d+)`)
 
 // TestImportReorgUnwindToGenesis drives the real erigon init + import commands

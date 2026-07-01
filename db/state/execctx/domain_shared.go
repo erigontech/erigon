@@ -600,19 +600,23 @@ func (sd *SharedDomains) GetChangesetAccumulatorLocked() *changeset.StateChangeS
 	return nil
 }
 
-// DetachAccumulatorForGenesisLocked detaches the changeset accumulator for
-// block 0 and returns a func that restores it (a no-op for any other block).
-// Block 0 has no changeset of its own, so without this its commitment writes
-// fall through to whatever accumulator is currently installed — the next
-// block's — and get reversed when that block is unwound to genesis, which is
-// the parallel-exec reorg-to-genesis crash. Callers must hold changesetMu.
+// DetachAccumulatorLocked installs a nil changeset accumulator and returns a
+// func that restores the previous one. Callers must hold changesetMu.
+func (sd *SharedDomains) DetachAccumulatorLocked() (restore func()) {
+	prev := sd.GetChangesetAccumulatorLocked()
+	sd.SetChangesetAccumulatorLocked(nil)
+	return func() { sd.SetChangesetAccumulatorLocked(prev) }
+}
+
+// DetachAccumulatorForGenesisLocked detaches the accumulator for block 0 (a
+// no-op otherwise) so genesis commitment writes land in no changeset rather
+// than the next block's, where an unwind to genesis would reverse them.
+// Callers must hold changesetMu.
 func (sd *SharedDomains) DetachAccumulatorForGenesisLocked(blockNum uint64) (restore func()) {
 	if blockNum != 0 {
 		return func() {}
 	}
-	prev := sd.GetChangesetAccumulatorLocked()
-	sd.SetChangesetAccumulatorLocked(nil)
-	return func() { sd.SetChangesetAccumulatorLocked(prev) }
+	return sd.DetachAccumulatorLocked()
 }
 
 // GetChangesetByBlockNum returns the saved changeset for a given block
