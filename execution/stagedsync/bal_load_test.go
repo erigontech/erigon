@@ -119,7 +119,7 @@ func TestLoadFromBAL_MatchesApplyWrites(t *testing.T) {
 	}
 
 	csBAL := newTestCalcState()
-	csBAL.LoadFromBAL(bal)
+	csBAL.LoadFromBAL(bal, true, false)
 
 	// Incremental equivalent: the same values fed as a multi-write stream
 	// in ascending tx order — ApplyWrites' last-write-wins must land on
@@ -145,4 +145,37 @@ func TestLoadFromBAL_MatchesApplyWrites(t *testing.T) {
 	if _, ok := csBAL.accounts[addrD]; ok {
 		t.Error("a read-only BAL account leaked into calcState — LoadFromBAL must ignore StorageReads")
 	}
+}
+
+// TestLoadFromBAL_EmptyAccountBecomesDelete pins the EIP-161 reconstruction: the
+// BAL carries no deletion marker, so a touched account whose block-end state is
+// empty (balance 0, nonce 0, empty code) must be marked Deleted by LoadFromBAL —
+// otherwise FlushToUpdates writes a zero-valued leaf where serial removes the
+// leaf, giving a divergent trie root.
+func TestLoadFromBAL_EmptyAccountBecomesDelete(t *testing.T) {
+	t.Parallel()
+
+	emptied := accounts.InternAddress([20]byte{0xab})
+	live := accounts.InternAddress([20]byte{0xcd})
+	bal := types.BlockAccessList{
+		{Address: emptied, BalanceChanges: []*types.BalanceChange{{Index: 0, Value: *uint256.NewInt(0)}}},
+		{Address: live, BalanceChanges: []*types.BalanceChange{{Index: 0, Value: *uint256.NewInt(100)}}},
+	}
+
+	cs := newTestCalcState()
+	cs.LoadFromBAL(bal, true, false) // spuriousDragon on, non-AuRa
+
+	require.True(t, cs.accounts[emptied].Deleted,
+		"an EIP-161 empty account in the BAL must be reconstructed as a delete, not a zero-valued update")
+	require.False(t, cs.accounts[live].Deleted,
+		"a non-empty account must remain a regular update")
+
+	// The carve-out: with SpuriousDragon inactive, empties are NOT removed
+	// (pre-fork a touched empty account is created and persists).
+	csPre := newTestCalcState()
+	csPre.LoadFromBAL(types.BlockAccessList{
+		{Address: emptied, BalanceChanges: []*types.BalanceChange{{Index: 0, Value: *uint256.NewInt(0)}}},
+	}, false, false)
+	require.False(t, csPre.accounts[emptied].Deleted,
+		"pre-SpuriousDragon, an empty touched account is not removed")
 }

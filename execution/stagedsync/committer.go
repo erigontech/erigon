@@ -13,6 +13,7 @@ import (
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/order"
 	"github.com/erigontech/erigon/db/state/execctx"
+	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/commitment"
 	"github.com/erigontech/erigon/execution/commitment/commitmentdb"
 	"github.com/erigontech/erigon/execution/types/accounts"
@@ -59,10 +60,11 @@ type pendingBlock struct {
 // so by the time the calculator receives the blockResult, sd.mem has the
 // correct block-boundary state.
 type commitmentCalculator struct {
-	doms      *execctx.SharedDomains
-	db        kv.TemporalRoDB
-	logPrefix string
-	logger    log.Logger
+	doms        *execctx.SharedDomains
+	db          kv.TemporalRoDB
+	chainConfig *chain.Config
+	logPrefix   string
+	logger      log.Logger
 
 	// updates is the calculator's OWN buffer — never shared with the
 	// execLoop or apply loop. Only this goroutine reads/writes it.
@@ -166,6 +168,7 @@ func newCommitmentCalculator(
 	ctx context.Context,
 	doms *execctx.SharedDomains,
 	db kv.TemporalRoDB,
+	chainConfig *chain.Config,
 	logPrefix string,
 	logger log.Logger,
 	forcePerBlockCompute bool,
@@ -206,6 +209,7 @@ func newCommitmentCalculator(
 	return &commitmentCalculator{
 		doms:                 doms,
 		db:                   db,
+		chainConfig:          chainConfig,
 		logPrefix:            logPrefix,
 		logger:               logger,
 		updates:              calcUpdates,
@@ -330,7 +334,9 @@ func (cc *commitmentCalculator) foldBlockFromBAL(ctx context.Context, pb *pendin
 	}
 	reader := &asOfStateReader{sd: cc.doms, roTx: cc.roTx, txNum: req.lastTxNum + 1}
 	balState := newCalcState(reader, cc.logger, cc.logPrefix)
-	balState.LoadFromBAL(req.bal)
+	// EIP-161 empty-removal inputs, matching normalizeWriteSet on the exec path.
+	emptyRemoval := req.blockNum != 0 && cc.chainConfig.IsSpuriousDragon(req.blockNum)
+	balState.LoadFromBAL(req.bal, emptyRemoval, cc.chainConfig.Aura != nil)
 	if err := balState.LazyLoadErr(); err != nil {
 		cc.fail(ctx, br, fmt.Errorf("BAL-driven lazy-load: %w", err))
 		return

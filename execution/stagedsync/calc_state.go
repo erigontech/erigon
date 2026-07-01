@@ -339,11 +339,13 @@ func finalChange[T any](changes []T) (T, bool) {
 }
 
 // LoadFromBAL populates calcState from an EIP-7928 Block Access List rather
-// than the per-tx VersionedWrites stream: it takes each field's block-end
-// value and feeds the existing ApplyWrites, reusing its Deleted/EIP-161
-// routing. Storage reads are ignored — commitment consumes only the changed
-// set.
-func (cs *calcState) LoadFromBAL(bal types.BlockAccessList) {
+// than the per-tx VersionedWrites stream: it takes each field's block-end value
+// and feeds the existing ApplyWrites. The BAL carries no deletion marker, so an
+// account whose block-end state is empty (EIP-161) must be reconstructed as a
+// delete here: after the field changes and lazy-loaded pre-block fields are
+// merged, a touched all-zero account is marked Deleted so FlushToUpdates removes
+// its leaf instead of writing a zero-valued one. Storage reads are ignored.
+func (cs *calcState) LoadFromBAL(bal types.BlockAccessList, emptyRemoval, isAura bool) {
 	var writes state.VersionedWrites
 	for _, ac := range bal {
 		addr := ac.Address
@@ -371,6 +373,21 @@ func (cs *calcState) LoadFromBAL(bal types.BlockAccessList) {
 		}
 	}
 	cs.ApplyWrites(writes)
+
+	// EIP-161: a touched account whose merged block-end state is empty is
+	// removed from the trie. The BAL carries no deletion marker, so reconstruct
+	// it here, gated exactly as the incremental path (normalizeWriteSet).
+	for _, ac := range bal {
+		acc := cs.accounts[ac.Address]
+		if acc == nil || !acc.dirty || acc.Deleted {
+			continue
+		}
+		if acc.Balance.IsZero() && acc.Nonce == 0 && acc.CodeHash == empty.CodeHash &&
+			state.EIP161EmptyRemoval(emptyRemoval, isAura, ac.Address) {
+			acc.Deleted = true
+			acc.Incarnation = 0
+		}
+	}
 }
 
 // FlushToUpdates writes the accumulated dirty state to a commitment.Updates

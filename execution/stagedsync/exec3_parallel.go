@@ -288,7 +288,7 @@ func (pe *parallelExecutor) execImpl(ctx context.Context, execStage *StageState,
 	// cancelExecLoop lets a fold/root mismatch halt execution eagerly while
 	// teardown stays with execImpl's deferred executorCancel (one cleanup site).
 	forcePerBlockCompute := pe.cfg.syncCfg.KeepExecutionProofs
-	calculator, err := newCommitmentCalculator(executorContext, pe.rs.Domains(), pe.cfg.db, pe.logPrefix, pe.logger, forcePerBlockCompute, pe.changesetWindowStart, commitResults, blockRequests, rootResults, pe.cancelExecLoop)
+	calculator, err := newCommitmentCalculator(executorContext, pe.rs.Domains(), pe.cfg.db, pe.cfg.chainConfig, pe.logPrefix, pe.logger, forcePerBlockCompute, pe.changesetWindowStart, commitResults, blockRequests, rootResults, pe.cancelExecLoop)
 	if err != nil {
 		return nil, nil, err
 	}
