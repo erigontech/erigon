@@ -400,7 +400,12 @@ func payloadAttestationPTCPositions(ptc []uint64) map[uint64][]int {
 func (a *ApiHandler) PostEthV1BeaconPoolPayloadAttestations(w http.ResponseWriter, r *http.Request) {
 	var req []*cltypes.PayloadAttestationMessage
 
-	switch r.Header.Get("Content-Type") {
+	contentType, _, err := mime.ParseMediaType(r.Header.Get("Content-Type"))
+	if err != nil || contentType == "" {
+		contentType = "application/json"
+	}
+
+	switch contentType {
 	case "application/octet-stream":
 		octets, err := io.ReadAll(http.MaxBytesReader(w, r.Body, maxPayloadAttestationMessagesSSZSize(a.beaconChainCfg)))
 		if err != nil {

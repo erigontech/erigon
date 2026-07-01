@@ -319,15 +319,15 @@ func GetIndexForNewBuilder(s abstract.BeaconState) uint64 {
 }
 
 // AddBuilderToRegistry adds a new builder to the registry.
-func AddBuilderToRegistry(s abstract.BeaconState, pubkey common.Bytes48, version uint8, executionAddress common.Address, amount uint64, slot uint64) {
+func AddBuilderToRegistry(s abstract.BeaconState, pubkey common.Bytes48, version uint8, executionAddress common.Address, amount uint64, slot uint64) error {
 	cfg := s.BeaconConfig()
 	builders := s.GetBuilders()
 	if builders == nil {
-		return
+		return errors.New("builder registry unavailable")
 	}
 	index := GetIndexForNewBuilder(s)
 	if index >= cfg.BuilderRegistryLimit {
-		return
+		return fmt.Errorf("builder registry full: index %d >= limit %d", index, cfg.BuilderRegistryLimit)
 	}
 
 	builder := &cltypes.Builder{
@@ -345,12 +345,13 @@ func AddBuilderToRegistry(s abstract.BeaconState, pubkey common.Bytes48, version
 		builders.Append(builder)
 	}
 	s.SetBuilders(builders)
+	return nil
 }
 
 // ApplyDepositForBuilder processes a fork-onboarding builder deposit.
 // If the pubkey is new and signature is valid, registers a new builder.
 // If the pubkey already exists, increases the builder's balance.
-func ApplyDepositForBuilder(s abstract.BeaconState, pubkey common.Bytes48, withdrawalCredentials common.Hash, amount uint64, signature common.Bytes96, slot uint64) {
+func ApplyDepositForBuilder(s abstract.BeaconState, pubkey common.Bytes48, withdrawalCredentials common.Hash, amount uint64, signature common.Bytes96, slot uint64) error {
 	builders := s.GetBuilders()
 
 	// Check if pubkey already exists in builders
@@ -368,10 +369,10 @@ func ApplyDepositForBuilder(s abstract.BeaconState, pubkey common.Bytes48, withd
 		// New builder: verify deposit signature (proof of possession)
 		valid, err := IsValidDepositSignature(s.BeaconConfig(), pubkey, withdrawalCredentials, amount, signature)
 		if err != nil {
-			return
+			return nil
 		}
 		if valid {
-			AddBuilderToRegistry(
+			return AddBuilderToRegistry(
 				s,
 				pubkey,
 				s.BeaconConfig().PayloadBuilderVersion,
@@ -384,15 +385,16 @@ func ApplyDepositForBuilder(s abstract.BeaconState, pubkey common.Bytes48, withd
 		builder := builders.Get(builderIndex)
 		newBuilder := *builder
 		if amount > math.MaxUint64-newBuilder.Balance {
-			return
+			return fmt.Errorf("builder balance overflow: %d + %d", newBuilder.Balance, amount)
 		}
 		newBuilder.Balance += amount
 		builders.Set(builderIndex, &newBuilder)
 		s.SetBuilders(builders)
 	}
+	return nil
 }
 
-func ApplyBuilderDepositRequest(s abstract.BeaconState, request *solid.BuilderDepositRequest) {
+func ApplyBuilderDepositRequest(s abstract.BeaconState, request *solid.BuilderDepositRequest) error {
 	builders := s.GetBuilders()
 	builderIndex := -1
 	if builders != nil {
@@ -408,9 +410,9 @@ func ApplyBuilderDepositRequest(s abstract.BeaconState, request *solid.BuilderDe
 	if builderIndex == -1 {
 		valid, err := IsValidBuilderDepositSignature(s.BeaconConfig(), request)
 		if err != nil || !valid {
-			return
+			return nil
 		}
-		AddBuilderToRegistry(
+		return AddBuilderToRegistry(
 			s,
 			request.PubKey,
 			request.WithdrawalCredentials[0],
@@ -418,21 +420,21 @@ func ApplyBuilderDepositRequest(s abstract.BeaconState, request *solid.BuilderDe
 			request.Amount,
 			s.Slot(),
 		)
-		return
 	}
 
 	builder := builders.Get(builderIndex)
 	if builder == nil {
-		return
+		return nil
 	}
 	newBuilder := *builder
 	if newBuilder.WithdrawableEpoch != s.BeaconConfig().FarFutureEpoch && newBuilder.Balance == 0 {
 		newBuilder.WithdrawableEpoch = GetEpochAtSlot(s.BeaconConfig(), s.Slot()) + s.BeaconConfig().MinBuilderWithdrawabilityDelay
 	}
 	if request.Amount > math.MaxUint64-newBuilder.Balance {
-		return
+		return fmt.Errorf("builder balance overflow: %d + %d", newBuilder.Balance, request.Amount)
 	}
 	newBuilder.Balance += request.Amount
 	builders.Set(builderIndex, &newBuilder)
 	s.SetBuilders(builders)
+	return nil
 }

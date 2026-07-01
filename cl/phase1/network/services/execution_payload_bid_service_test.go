@@ -253,6 +253,43 @@ func TestExecutionPayloadBidServiceNoPreferences(t *testing.T) {
 	require.False(t, found)
 }
 
+func TestExecutionPayloadBidServiceRejectsNonZeroExecutionPaymentBeforeQueue(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	defer ctrl.Finish()
+
+	service, _, ethClockMock, _, _ := setupExecutionPayloadBidService(t, ctrl)
+	msg := newTestSignedExecutionPayloadBid(100, 1, 1000)
+	msg.Message.ExecutionPayment = 1
+
+	ethClockMock.EXPECT().GetCurrentSlot().Return(uint64(100))
+
+	err := service.ProcessMessage(context.Background(), nil, msg)
+
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "execution_payment must be 0")
+	require.Equal(t, int32(0), service.pendingCount.Load())
+}
+
+func TestExecutionPayloadBidServiceRejectsTooManyBlobCommitmentsBeforeQueue(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	defer ctrl.Finish()
+
+	service, _, ethClockMock, _, _ := setupExecutionPayloadBidService(t, ctrl)
+	msg := newTestSignedExecutionPayloadBid(100, 1, 1000)
+	maxBlobs := int(service.beaconCfg.GetBlobParameters(100 / service.beaconCfg.SlotsPerEpoch).MaxBlobsPerBlock)
+	for i := 0; i <= maxBlobs; i++ {
+		msg.Message.BlobKzgCommitments.Append(&cltypes.KZGCommitment{})
+	}
+
+	ethClockMock.EXPECT().GetCurrentSlot().Return(uint64(100))
+
+	err := service.ProcessMessage(context.Background(), nil, msg)
+
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "too many blob_kzg_commitments")
+	require.Equal(t, int32(0), service.pendingCount.Load())
+}
+
 func TestExecutionPayloadBidServiceWaitsForMatchingDependentRootPreference(t *testing.T) {
 	ctrl := gomock.NewController(t)
 	defer ctrl.Finish()

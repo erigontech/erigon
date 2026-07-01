@@ -409,7 +409,9 @@ func (b *CachingBeaconState) onboardBuildersFromPendingDeposits() error {
 			}
 		}
 
-		ApplyDepositForBuilder(b, deposit.PubKey, deposit.WithdrawalCredentials, deposit.Amount, deposit.Signature, deposit.Slot)
+		if err := ApplyDepositForBuilder(b, deposit.PubKey, deposit.WithdrawalCredentials, deposit.Amount, deposit.Signature, deposit.Slot); err != nil {
+			return err
+		}
 	}
 
 	b.SetPendingDeposits(newPendingDeposits)

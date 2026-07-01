@@ -64,6 +64,23 @@ func TestPostPayloadAttestationsRejectsOversizedSSZ(t *testing.T) {
 	require.Equal(t, http.StatusBadRequest, recorder.Code, recorder.Body.String())
 }
 
+func TestPostPayloadAttestationsAcceptsSSZContentTypeParameters(t *testing.T) {
+	_, _, _, _, _, handler, _, _, _, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), true)
+	msg := &cltypes.PayloadAttestationMessage{
+		Data: new(cltypes.PayloadAttestationData),
+	}
+	body, err := msg.EncodeSSZ(nil)
+	require.NoError(t, err)
+
+	request := httptest.NewRequest(http.MethodPost, "/eth/v1/beacon/pool/payload_attestations", strings.NewReader(string(body)))
+	request.Header.Set("Content-Type", "application/octet-stream; charset=utf-8")
+	recorder := httptest.NewRecorder()
+
+	handler.PostEthV1BeaconPoolPayloadAttestations(recorder, request)
+
+	require.Equal(t, http.StatusOK, recorder.Code, recorder.Body.String())
+}
+
 func TestPostExecutionPayloadEnvelopeReturnsForkchoiceError(t *testing.T) {
 	_, _, _, _, _, handler, _, _, fcu, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), true)
 	fcu.OnExecutionPayloadErr = errors.New("invalid execution payload")

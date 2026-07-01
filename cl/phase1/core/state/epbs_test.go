@@ -91,7 +91,7 @@ func TestApplyDepositForBuilder_NewBuilder_WithValidSignature(t *testing.T) {
 	require.True(t, state2.IsBuilderWithdrawalCredential(creds, &cfg))
 
 	slot := uint64(100)
-	state2.ApplyDepositForBuilder(s, pubkey, creds, amount, sig, slot)
+	require.NoError(t, state2.ApplyDepositForBuilder(s, pubkey, creds, amount, sig, slot))
 
 	// Post-condition: builder was added.
 	newBuilders := s.GetBuilders()
@@ -127,7 +127,7 @@ func TestApplyDepositForBuilder_TopUp(t *testing.T) {
 
 	topUpAmount := uint64(2e9)
 	// Signature is not checked for existing builders — zero sig is fine.
-	state2.ApplyDepositForBuilder(s, pubkey, creds, topUpAmount, common.Bytes96{}, 200)
+	require.NoError(t, state2.ApplyDepositForBuilder(s, pubkey, creds, topUpAmount, common.Bytes96{}, 200))
 
 	updatedBuilders := s.GetBuilders()
 	require.Equal(t, 1, updatedBuilders.Len(), "no new builder should be created on top-up")
@@ -150,7 +150,7 @@ func TestApplyDepositForBuilder_InvalidSignature_Ignored(t *testing.T) {
 	pubkey[0] = 0xAA
 	creds[0] = 0x03
 
-	state2.ApplyDepositForBuilder(s, pubkey, creds, 1e9, common.Bytes96{}, 0)
+	require.NoError(t, state2.ApplyDepositForBuilder(s, pubkey, creds, 1e9, common.Bytes96{}, 0))
 
 	require.Equal(t, 0, s.GetBuilders().Len(),
 		"invalid signature should prevent builder registration")
@@ -162,17 +162,17 @@ func TestApplyBuilderDepositRequestRejectsValidatorDepositSignature(t *testing.T
 	s.SetBuilders(solid.NewStaticListSSZ[*cltypes.Builder](64, 73))
 
 	pubkey, creds, amount, sig := makeValidBuilderDeposit(t, &cfg)
-	state2.ApplyBuilderDepositRequest(s, &solid.BuilderDepositRequest{
+	require.NoError(t, state2.ApplyBuilderDepositRequest(s, &solid.BuilderDepositRequest{
 		PubKey:                pubkey,
 		WithdrawalCredentials: creds,
 		Amount:                amount,
 		Signature:             sig,
-	})
+	}))
 
 	require.Equal(t, 0, s.GetBuilders().Len())
 }
 
-func TestAddBuilderToRegistryDoesNotExceedLimit(t *testing.T) {
+func TestAddBuilderToRegistryRejectsFullRegistry(t *testing.T) {
 	cfg := clparams.MainnetBeaconConfig
 	cfg.BuilderRegistryLimit = 1
 	s := state2.New(&cfg)
@@ -185,8 +185,10 @@ func TestAddBuilderToRegistryDoesNotExceedLimit(t *testing.T) {
 	})
 	s.SetBuilders(builders)
 
-	state2.AddBuilderToRegistry(s, common.Bytes48{0x22}, cfg.PayloadBuilderVersion, common.Address{0x33}, 1, s.Slot())
+	err := state2.AddBuilderToRegistry(s, common.Bytes48{0x22}, cfg.PayloadBuilderVersion, common.Address{0x33}, 1, s.Slot())
 
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "builder registry full")
 	require.Equal(t, 1, s.GetBuilders().Len())
 	require.Equal(t, common.Bytes48{0x11}, s.GetBuilders().Get(0).Pubkey)
 }
@@ -205,10 +207,10 @@ func TestApplyBuilderDepositRequestTopUpSweptExitedBuilderResetsWithdrawableEpoc
 	})
 	s.SetBuilders(builders)
 
-	state2.ApplyBuilderDepositRequest(s, &solid.BuilderDepositRequest{
+	require.NoError(t, state2.ApplyBuilderDepositRequest(s, &solid.BuilderDepositRequest{
 		PubKey: pubkey,
 		Amount: 25,
-	})
+	}))
 
 	builder := s.GetBuilders().Get(0)
 	require.Equal(t, uint64(25), builder.Balance)
@@ -229,10 +231,10 @@ func TestApplyBuilderDepositRequestTopUpUnsweptExitedBuilderDoesNotResetWithdraw
 	})
 	s.SetBuilders(builders)
 
-	state2.ApplyBuilderDepositRequest(s, &solid.BuilderDepositRequest{
+	require.NoError(t, state2.ApplyBuilderDepositRequest(s, &solid.BuilderDepositRequest{
 		PubKey: pubkey,
 		Amount: 25,
-	})
+	}))
 
 	builder := s.GetBuilders().Get(0)
 	require.Equal(t, uint64(35), builder.Balance)
@@ -266,11 +268,13 @@ func TestApplyBuilderDepositRequestDoesNotOverflowBalance(t *testing.T) {
 	})
 	s.SetBuilders(builders)
 
-	state2.ApplyBuilderDepositRequest(s, &solid.BuilderDepositRequest{
+	err := state2.ApplyBuilderDepositRequest(s, &solid.BuilderDepositRequest{
 		PubKey: pubkey,
 		Amount: 1,
 	})
 
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "builder balance overflow")
 	require.Equal(t, uint64(math.MaxUint64), s.GetBuilders().Get(0).Balance)
 }
 

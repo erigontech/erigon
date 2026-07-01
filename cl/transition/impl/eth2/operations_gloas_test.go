@@ -1,6 +1,7 @@
 package eth2_test
 
 import (
+	"math"
 	"testing"
 
 	"go.uber.org/mock/gomock"
@@ -94,6 +95,31 @@ func TestProcessBuilderDepositRequestTopsUpExistingBuilder(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, 1, s.GetBuilders().Len())
 	require.Equal(t, uint64(125), s.GetBuilders().Get(0).Balance)
+}
+
+func TestProcessBuilderDepositRequestRejectsBalanceOverflow(t *testing.T) {
+	cfg := clparams.MainnetBeaconConfig
+	s := state.New(&cfg)
+	s.SetVersion(clparams.GloasVersion)
+	builders := solid.NewStaticListSSZ[*cltypes.Builder](int(cfg.BuilderRegistryLimit), new(cltypes.Builder).EncodingSizeSSZ())
+	pubkey := common.Bytes48{0x11}
+	builders.Append(&cltypes.Builder{
+		Pubkey:            pubkey,
+		Version:           cfg.PayloadBuilderVersion,
+		Balance:           math.MaxUint64,
+		WithdrawableEpoch: cfg.FarFutureEpoch,
+	})
+	s.SetBuilders(builders)
+
+	machine := &eth2.Impl{}
+	err := machine.ProcessBuilderDepositRequest(s, &solid.BuilderDepositRequest{
+		PubKey: pubkey,
+		Amount: 1,
+	})
+
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "builder balance overflow")
+	require.Equal(t, uint64(math.MaxUint64), s.GetBuilders().Get(0).Balance)
 }
 
 func TestProcessBuilderExitRequestInitiatesActiveBuilderExit(t *testing.T) {

@@ -161,6 +161,9 @@ func (s *executionPayloadBidService) ProcessMessage(ctx context.Context, _ *uint
 		return fmt.Errorf("%w: already seen bid from builder %d for slot %d",
 			ErrIgnore, builderIndex, slot)
 	}
+	if err := s.validateBidStateless(bid); err != nil {
+		return err
+	}
 
 	preferences, ok, err := s.matchingProposerPreferences(msg)
 	if err != nil {
@@ -206,6 +209,19 @@ func (s *executionPayloadBidService) shufflingDependentRoot(root common.Hash, ep
 	return s.forkchoiceStore.Ancestor(root, dependentSlot).Root
 }
 
+func (s *executionPayloadBidService) validateBidStateless(bid *cltypes.ExecutionPayloadBid) error {
+	if bid.ExecutionPayment != 0 {
+		return fmt.Errorf("bid execution_payment must be 0, got %d", bid.ExecutionPayment)
+	}
+	epoch := state.GetEpochAtSlot(s.beaconCfg, bid.Slot)
+	maxBlobsPerBlock := int(s.beaconCfg.GetBlobParameters(epoch).MaxBlobsPerBlock)
+	if bid.BlobKzgCommitments.Len() > maxBlobsPerBlock {
+		return fmt.Errorf("bid has too many blob_kzg_commitments: %d > %d",
+			bid.BlobKzgCommitments.Len(), maxBlobsPerBlock)
+	}
+	return nil
+}
+
 // validateAndStoreBid performs all remaining validation checks after preferences are confirmed.
 func (s *executionPayloadBidService) validateAndStoreBid(
 	msg *cltypes.SignedExecutionPayloadBid,
@@ -216,22 +232,10 @@ func (s *executionPayloadBidService) validateAndStoreBid(
 	builderIndex := bid.BuilderIndex
 	prefs := preferences.Message
 
-	// [REJECT] execution_payment must be zero at gossip time
-	if bid.ExecutionPayment != 0 {
-		return fmt.Errorf("bid execution_payment must be 0, got %d", bid.ExecutionPayment)
-	}
-
 	// [REJECT] fee_recipient must match proposer preferences
 	if bid.FeeRecipient != prefs.FeeRecipient {
 		return fmt.Errorf("bid fee_recipient %v does not match proposer preferences %v",
 			bid.FeeRecipient, prefs.FeeRecipient)
-	}
-
-	epoch := state.GetEpochAtSlot(s.beaconCfg, slot)
-	maxBlobsPerBlock := int(s.beaconCfg.GetBlobParameters(epoch).MaxBlobsPerBlock)
-	if bid.BlobKzgCommitments.Len() > maxBlobsPerBlock {
-		return fmt.Errorf("bid has too many blob_kzg_commitments: %d > %d",
-			bid.BlobKzgCommitments.Len(), maxBlobsPerBlock)
 	}
 
 	// [IGNORE] parent_block_root is known in fork choice

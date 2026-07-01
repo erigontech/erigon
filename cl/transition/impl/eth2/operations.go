@@ -1767,8 +1767,7 @@ func (I *impl) ProcessBuilderDepositRequest(s abstract.BeaconState, req *solid.B
 	if req == nil {
 		return errors.New("ProcessBuilderDepositRequest: nil request")
 	}
-	state.ApplyBuilderDepositRequest(s, req)
-	return nil
+	return state.ApplyBuilderDepositRequest(s, req)
 }
 
 func (I *impl) ProcessBuilderExitRequest(s abstract.BeaconState, req *solid.BuilderExitRequest) error {
