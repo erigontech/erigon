@@ -117,6 +117,14 @@ func fixtureBaseWithCode() *UpdateBuilder {
 		CodeHash("ba7a3b7b095d3370c022ca655c790f0c0ead66f5", "24f3a02dc65eda502dbf75919e795458413d3c45b38bb35b51235432707900ed")
 }
 
+// fixtureBrokenUniqueRepr is fixtureBaseAccounts with a smaller ba7a3b7b balance and no code hash,
+// used by the broken-unique-representation test (its original table also repeats a couple of keys,
+// which Build de-duplicates).
+func fixtureBrokenUniqueRepr() *UpdateBuilder {
+	return fixtureBaseAccounts().
+		Balance("ba7a3b7b095d3370c022ca655c790f0c0ead66f5", 100000)
+}
+
 func generateCellRow(tb testing.TB, size int) (row []*cell, bitmap uint16) {
 	tb.Helper()
 

@@ -88,11 +88,11 @@ mid-iteration restore or intermediate-root assert (see Task 1 carve-out).
       Must pass before Task 4.
 
 ### Task 4: Route inline UpdateBuilder tables through the shared fixtures (root-sensitive)
-- [ ] Replace the copy-pasted ~18-key balance/storage tables with `fixtureBaseAccounts()` /
+- [x] Replace the copy-pasted ~18-key balance/storage tables with `fixtureBaseAccounts()` /
       `fixtureBaseWithCode()` in `UniqueRepresentation`, `DeferredBranchUpdates`, `AfterStateRestore`
       (chain small `.Balance`/`.Storage` deltas for follow-up rounds). Give `BrokenUniqueRepr` its
       own named fixture (dup-keys / no-codehash shape).
-- [ ] Verify byte-identical key set + order: `Test_HexPatriciaHashed_Sepolia` golden roots and all
+- [x] Verify byte-identical key set + order: `Test_HexPatriciaHashed_Sepolia` golden roots and all
       parity roots unchanged. If any root shifts, revert that substitution. Must pass before Task 5.
 
 ### Task 5: One random-corpus builder + shared witness corpus
