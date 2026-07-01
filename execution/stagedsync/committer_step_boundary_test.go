@@ -35,6 +35,7 @@ import (
 	"github.com/erigontech/erigon/db/kv/order"
 	"github.com/erigontech/erigon/db/kv/temporal"
 	dbstate "github.com/erigontech/erigon/db/state"
+	"github.com/erigontech/erigon/db/state/changeset"
 	"github.com/erigontech/erigon/db/state/execctx"
 	"github.com/erigontech/erigon/execution/commitment"
 	"github.com/erigontech/erigon/execution/commitment/commitmentdb"
@@ -363,6 +364,172 @@ func TestHandleMessage_StepEdgeAtBlockEnd(t *testing.T) {
 		require.Equal(t, uint64(15), gotTxNum)
 		require.Equal(t, uint64(1), gotBlockNum)
 	})
+}
+
+// TestHandleMessage_StepBoundaryDoesNotPolluteLiveChangeset pins that a
+// pre-window mid-block step checkpoint records into NO changeset: the lagging
+// calculator's live accumulator can be a later block's, and leaking there
+// corrupts that block's unwind.
+func TestHandleMessage_StepBoundaryDoesNotPolluteLiveChangeset(t *testing.T) {
+	ctx := context.Background()
+	logger := log.New()
+	const stepSize = uint64(16)
+
+	db, tx, doms := setupStepTest(t)
+
+	// Stand in for the exec loop having advanced into the changeset window and
+	// installed a later block's accumulator as live, while the calculator is
+	// still on an earlier block whose own changeset was never saved.
+	liveCS := &changeset.StateChangeSet{}
+	doms.SetChangesetAccumulator(liveCS)
+
+	in := make(chan applyResult, 64)
+	out := make(chan commitmentResult, 64)
+	cc, err := newCommitmentCalculator(ctx, doms, db, "test", logger, false, 1<<62, in, out)
+	require.NoError(t, err)
+	defer cc.Stop()
+
+	const stepEdgeTxNum = stepSize - 1 // 15: (txNum+1)%stepSize == 0
+	rnd := rand.New(rand.NewSource(42))
+	for txNum := uint64(1); txNum <= stepEdgeTxNum; txNum++ {
+		addrBytes := make([]byte, length.Addr)
+		rnd.Read(addrBytes)
+		addr := accounts.InternAddress([20]byte(addrBytes))
+		bal := *uint256.NewInt(txNum * 1000)
+		acc := accounts.Account{Nonce: txNum, Balance: bal, CodeHash: accounts.EmptyCodeHash}
+		buf := accounts.SerialiseV3(&acc)
+		require.NoError(t, doms.DomainPut(kv.AccountsDomain, tx, addrBytes, buf, txNum, nil))
+		cc.handleMessage(ctx, &txResult{
+			blockNum: 1,
+			txNum:    txNum,
+			writes: state.VersionedWrites{
+				&state.VersionedWrite{Address: addr, Path: state.NoncePath, Val: txNum},
+				&state.VersionedWrite{Address: addr, Path: state.BalancePath, Val: bal},
+			},
+		})
+	}
+
+	require.Zero(t, liveCS.Diffs[kv.CommitmentDomain].Len(),
+		"mid-block step-boundary compute leaked CommitmentDomain diffs into the live "+
+			"changeset accumulator — on that block's unwind they corrupt commitment state")
+
+	// The checkpoint must still advance to the step edge: the fix isolates the
+	// changeset, it does not suppress the checkpoint.
+	stateBlob, _, err := doms.GetLatest(kv.CommitmentDomain, tx, commitmentdb.KeyCommitmentState)
+	require.NoError(t, err)
+	require.GreaterOrEqual(t, len(stateBlob), 16,
+		"step-boundary checkpoint must still be written to sd, only kept out of the changeset")
+	gotTxNum, _ := commitmentdb.DecodeTxBlockNums(stateBlob)
+	require.Equal(t, stepEdgeTxNum, gotTxNum)
+}
+
+// TestHandleMessage_StepBoundaryRecordsIntoOwnChangesetInWindow is the in-window
+// mirror: the checkpoint MUST record into the block's own changeset, else the
+// block-end recompute stores mid-block prevData and the block's unwind is wrong.
+// Pins that isolation is window-aware, not unconditional.
+func TestHandleMessage_StepBoundaryRecordsIntoOwnChangesetInWindow(t *testing.T) {
+	ctx := context.Background()
+	logger := log.New()
+	const stepSize = uint64(16)
+
+	db, tx, doms := setupStepTest(t)
+
+	ownCS := &changeset.StateChangeSet{}
+	doms.SetChangesetAccumulator(ownCS)
+
+	in := make(chan applyResult, 64)
+	out := make(chan commitmentResult, 64)
+	// perBlockFrom=1 => block 1 is an in-window block (blockNum >= perBlockFrom).
+	cc, err := newCommitmentCalculator(ctx, doms, db, "test", logger, false, 1, in, out)
+	require.NoError(t, err)
+	defer cc.Stop()
+
+	const stepEdgeTxNum = stepSize - 1 // 15
+	rnd := rand.New(rand.NewSource(42))
+	for txNum := uint64(1); txNum <= stepEdgeTxNum; txNum++ {
+		addrBytes := make([]byte, length.Addr)
+		rnd.Read(addrBytes)
+		addr := accounts.InternAddress([20]byte(addrBytes))
+		bal := *uint256.NewInt(txNum * 1000)
+		acc := accounts.Account{Nonce: txNum, Balance: bal, CodeHash: accounts.EmptyCodeHash}
+		buf := accounts.SerialiseV3(&acc)
+		require.NoError(t, doms.DomainPut(kv.AccountsDomain, tx, addrBytes, buf, txNum, nil))
+		cc.handleMessage(ctx, &txResult{
+			blockNum: 1,
+			txNum:    txNum,
+			writes: state.VersionedWrites{
+				&state.VersionedWrite{Address: addr, Path: state.NoncePath, Val: txNum},
+				&state.VersionedWrite{Address: addr, Path: state.BalancePath, Val: bal},
+			},
+		})
+	}
+
+	require.Positive(t, ownCS.Diffs[kv.CommitmentDomain].Len(),
+		"an in-window block's mid-block step checkpoint must record into its own live "+
+			"changeset — isolating it would corrupt the block's post-unwind commitment state")
+}
+
+// TestHandleMessage_PreWindowPerBlockComputeDoesNotPolluteLiveChangeset guards
+// the block-boundary variant: forcePerBlockCompute makes even a pre-window block
+// compute per-block, so that compute must isolate or it leaks into a later
+// block's live changeset.
+func TestHandleMessage_PreWindowPerBlockComputeDoesNotPolluteLiveChangeset(t *testing.T) {
+	ctx := context.Background()
+	logger := log.New()
+
+	db, tx, doms := setupStepTest(t)
+
+	liveCS := &changeset.StateChangeSet{}
+	doms.SetChangesetAccumulator(liveCS)
+
+	in := make(chan applyResult, 64)
+	out := make(chan commitmentResult, 64)
+	// forcePerBlockCompute=true + perBlockFrom=5 => block 1 is pre-window yet
+	// still computes per-block.
+	cc, err := newCommitmentCalculator(ctx, doms, db, "test", logger, true, 5, in, out)
+	require.NoError(t, err)
+	defer cc.Stop()
+
+	rnd := rand.New(rand.NewSource(42))
+	for txNum := uint64(1); txNum <= 5; txNum++ {
+		addrBytes := make([]byte, length.Addr)
+		rnd.Read(addrBytes)
+		addr := accounts.InternAddress([20]byte(addrBytes))
+		bal := *uint256.NewInt(txNum * 1000)
+		acc := accounts.Account{Nonce: txNum, Balance: bal, CodeHash: accounts.EmptyCodeHash}
+		buf := accounts.SerialiseV3(&acc)
+		require.NoError(t, doms.DomainPut(kv.AccountsDomain, tx, addrBytes, buf, txNum, nil))
+		cc.handleMessage(ctx, &txResult{
+			blockNum: 1,
+			txNum:    txNum,
+			writes: state.VersionedWrites{
+				&state.VersionedWrite{Address: addr, Path: state.NoncePath, Val: txNum},
+				&state.VersionedWrite{Address: addr, Path: state.BalancePath, Val: bal},
+			},
+		})
+	}
+	// First partial block => computeWithoutCheck, a per-block compute with no
+	// root check; pre-window, so it must isolate its commitment writes.
+	cc.handleMessage(ctx, &blockResult{BlockNum: 1, BlockHash: common.Hash{0x01}, lastTxNum: 5, isPartial: true})
+
+	require.Zero(t, liveCS.Diffs[kv.CommitmentDomain].Len(),
+		"pre-window per-block compute leaked CommitmentDomain diffs into the live changeset accumulator")
+}
+
+// TestOwnsChangeset pins the isolation predicate at the window boundary — a wrong
+// answer either leaks a pre-window compute or over-isolates an in-window block.
+func TestOwnsChangeset(t *testing.T) {
+	cc := &commitmentCalculator{perBlockFrom: 100}
+	require.False(t, cc.ownsChangeset(0), "genesis owns no changeset")
+	require.False(t, cc.ownsChangeset(99), "pre-window block owns no changeset")
+	require.True(t, cc.ownsChangeset(100), "first in-window block owns its changeset")
+	require.True(t, cc.ownsChangeset(101), "in-window block owns its changeset")
+
+	// AlwaysGenerateChangesets from genesis => perBlockFrom == startBlockNum (0),
+	// but block 0 is still excluded by the exec loop.
+	genesisStart := &commitmentCalculator{perBlockFrom: 0}
+	require.False(t, genesisStart.ownsChangeset(0), "block 0 is always excluded")
+	require.True(t, genesisStart.ownsChangeset(1), "block 1 owns its changeset when the window starts at genesis")
 }
 
 // setupStepTest builds the shared in-memory temporal stack (stepSize 16) for the
