@@ -29,7 +29,7 @@ import (
 )
 
 func TestHashWithModificationsEmpty(t *testing.T) {
-	tr := New(common.Hash{})
+	tr := newEmpty()
 	// Populate the trie
 	// Build the root
 	var stream Stream
@@ -54,7 +54,7 @@ func TestHashWithModificationsEmpty(t *testing.T) {
 // buildAccountStorageTrie populates a trie with 10 hashed-key accounts, every other one
 // carrying storage items.
 func buildAccountStorageTrie() *Trie {
-	tr := New(common.Hash{})
+	tr := newEmpty()
 	var preimage [4]byte
 	var keys []string
 	for b := uint32(0); b < 10; b++ {

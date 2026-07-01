@@ -136,11 +136,16 @@ mid-iteration restore or intermediate-root assert (see Task 1 carve-out).
 - [x] Run `go test ./execution/commitment/...` green. Must pass before Task 8.
 
 ### Task 8: trie subpackage cleanup (package-local helpers only)
-- [ ] In package `trie` ONLY (never import the commitment helpers): normalize `New(common.Hash{})` →
+- [x] In package `trie` ONLY (never import the commitment helpers): normalize `New(common.Hash{})` →
       the existing `newEmpty()`; add `newCodeTrie(t)->(trie,rand,addr)` for the 11 `TestCodeNode*`
       prologues, `testAccount(nonce,balance,opts)` for the `accounts.Account{...}` literals, and
       `expectingCollector([]stepExpectation)` reproducing every hasHash/hasTree bitmask byte-for-byte.
-- [ ] Run `go test ./execution/commitment/trie/...` green; trie golden hashes unchanged.
+      (`testAccount` defaults Root=EmptyRoot/CodeHash=EmptyCodeHash via `accounts.NewAccount()`, with
+      `withIncarnation`/`withRoot`/`withCodeHash` opts; routed the balance/hash/deep-hash/proof/blinded
+      literals. `TestGetAccount` left untouched — its acc1 relies on a zero-value CodeHash that the
+      helper defaults differ from. `expectingCollector` routes the 4 structural GenStructStep collectors;
+      the noop collector in `Test2` is left as-is.)
+- [x] Run `go test ./execution/commitment/trie/...` green; trie golden hashes unchanged.
       Must pass before Task 9.
 
 ### Task 9: Gated deletions (only the three verified-subsumed)

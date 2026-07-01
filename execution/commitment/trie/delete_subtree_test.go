@@ -25,7 +25,6 @@ import (
 	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/common/u256"
 	"github.com/erigontech/erigon/db/kv/dbutils"
-	"github.com/erigontech/erigon/execution/types/accounts"
 )
 
 // requireValue asserts that key resolves to want; nil want means the key must be absent.
@@ -260,13 +259,7 @@ func TestTrieDeleteSubtree_ValueNode_PartialMatch(t *testing.T) {
 }
 
 func TestAccountNotRemovedAfterRemovingSubtrieAfterAccount(t *testing.T) {
-	acc := &accounts.Account{
-		Nonce:       2,
-		Incarnation: 2,
-		Balance:     u256.U64(200),
-		Root:        EmptyRoot,
-		CodeHash:    accounts.InternCodeHash(emptyState),
-	}
+	acc := testAccount(2, u256.U64(200), withIncarnation(2))
 
 	trie := newEmpty()
 	key, err := crypto.GenerateKey()
