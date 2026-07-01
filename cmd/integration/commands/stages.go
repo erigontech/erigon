@@ -24,7 +24,6 @@ import (
 	"os"
 	"runtime"
 	"slices"
-	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -38,13 +37,11 @@ import (
 
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cmd/hack/tool/fromdb"
-	"github.com/erigontech/erigon/cmd/utils"
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/dir"
 	"github.com/erigontech/erigon/common/estimate"
 	"github.com/erigontech/erigon/common/log/v3"
-	"github.com/erigontech/erigon/db/config3"
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/integrity"
 	"github.com/erigontech/erigon/db/kv"
@@ -336,6 +333,7 @@ func init() {
 	withPruneTo(cmdStageCustomTrace)
 	withTraceFlags(cmdStageCustomTrace)
 	withDomain(cmdStageCustomTrace)
+	withErigondbDomainStepsInFrozenFile(cmdStageCustomTrace)
 	rootCmd.AddCommand(cmdStageCustomTrace)
 
 	withStageBase(cmdStageTxLookup)
@@ -777,6 +775,9 @@ func stageExec(db kv.TemporalRwDB, ctx context.Context, logger log.Logger) error
 	agg := (db.(dbstate.HasAgg).Agg()).(*dbstate.Aggregator)
 	blockSnapBuildSema := semaphore.NewWeighted(int64(runtime.NumCPU()))
 	agg.SetSnapshotBuildSema(blockSnapBuildSema)
+	if err := agg.SetDomainStepsInFrozenFile(erigondbDomainStepsInFrozenFile); err != nil {
+		return err
+	}
 	agg.PresetOfflineExecution()
 	agg.PeriodicalyPrintProcessSet(ctx)
 	agg.LockWorkersEditing()
@@ -860,6 +861,9 @@ func stageCustomTrace(db kv.TemporalRwDB, ctx context.Context, logger log.Logger
 
 	blockSnapBuildSema := semaphore.NewWeighted(int64(runtime.NumCPU()))
 	agg.SetSnapshotBuildSema(blockSnapBuildSema)
+	if err := agg.SetDomainStepsInFrozenFile(erigondbDomainStepsInFrozenFile); err != nil {
+		return err
+	}
 	agg.PresetOfflineExecution()
 	agg.PeriodicalyPrintProcessSet(ctx)
 
@@ -982,26 +986,6 @@ func allSnapshots(ctx context.Context, db kv.RoDB, logger log.Logger) (*freezebl
 			return
 		}
 		aggOpts := dbstate.New(dirs).Logger(logger).WithErigonDBSettings(erigonDBSettings)
-		if erigondbDomainStepsInFrozenFile != "" {
-			var v uint64
-			if strings.EqualFold(erigondbDomainStepsInFrozenFile, "inf") {
-				v = config3.UnboundedDomainMerge
-			} else {
-				parsed, perr := strconv.ParseUint(erigondbDomainStepsInFrozenFile, 10, 64)
-				if perr != nil || parsed == 0 {
-					err = fmt.Errorf("invalid --%s value %q: must be a positive integer or \"Inf\"",
-						utils.ErigondbDomainStepsInFrozenFileFlag.Name, erigondbDomainStepsInFrozenFile)
-					return
-				}
-				v = parsed
-			}
-			stepsStr := "Inf"
-			if v != config3.UnboundedDomainMerge {
-				stepsStr = fmt.Sprintf("%d", v)
-			}
-			logger.Info("domain merge cap overridden", "steps_in_frozen_file", stepsStr)
-			aggOpts = aggOpts.ErigondbDomainStepsInFrozenFile(v)
-		}
 		_aggSingleton = aggOpts.MustOpen(ctx, db)
 
 		_aggSingleton.SetProduceMod(snapCfg.ProduceE3)

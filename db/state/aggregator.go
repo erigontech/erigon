@@ -26,6 +26,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"slices"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -249,6 +250,21 @@ func (a *Aggregator) Logger() log.Logger        { return a.logger }
 // merge work begins.
 func (a *Aggregator) SetErigondbDomainStepsInFrozenFile(steps uint64) {
 	a.erigondbDomainStepsInFrozenFile = steps
+}
+
+// SetDomainStepsInFrozenFile sets the domain merge cap from a flag spec: empty or
+// "Inf" means unbounded, otherwise a positive integer step count.
+func (a *Aggregator) SetDomainStepsInFrozenFile(spec string) error {
+	v := config3.UnboundedDomainMerge
+	if spec != "" && !strings.EqualFold(spec, "inf") {
+		parsed, err := strconv.ParseUint(spec, 10, 64)
+		if err != nil || parsed == 0 {
+			return fmt.Errorf("invalid domain steps-in-frozen-file %q: must be a positive integer or \"Inf\"", spec)
+		}
+		v = parsed
+	}
+	a.SetErigondbDomainStepsInFrozenFile(v)
+	return nil
 }
 
 func (a *Aggregator) ForTestReplaceKeysInValues(domain kv.Domain, v bool) {
