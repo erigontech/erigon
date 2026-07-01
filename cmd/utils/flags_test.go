@@ -172,10 +172,14 @@ func TestExecPerfFlags_OverrideDbg(t *testing.T) {
 	}
 
 	run := func(args ...string) {
+		// Fresh flag instances per run (v3 flags carry parse state across Run calls).
+		batchedIO, stateCache, workers := ExecBatchedIOFlag, ExecStateCacheFlag, ExecWorkersFlag
+		serial, noMerge, noPrune := ExecSerialFlag, ExecNoMergeFlag, ExecNoPruneFlag
+		noBgMaint := ExecNoBackgroundMaintenanceFlag
 		app := &cli.Command{}
 		app.Flags = []cli.Flag{
-			&ExecBatchedIOFlag, &ExecStateCacheFlag, &ExecWorkersFlag,
-			&ExecSerialFlag, &ExecNoMergeFlag, &ExecNoPruneFlag, &ExecNoBackgroundMaintenanceFlag,
+			&batchedIO, &stateCache, &workers,
+			&serial, &noMerge, &noPrune, &noBgMaint,
 		}
 		app.Action = apply
 		require.NoError(t, app.Run(context.Background(), append([]string{"test"}, args...)))

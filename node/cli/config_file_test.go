@@ -146,7 +146,6 @@ func TestSetFlagsFromConfigFile_StaticPeers(t *testing.T) {
 			cfgFile := filepath.Join(tmpDir, "erigon.toml")
 			require.NoError(t, os.WriteFile(cfgFile, []byte(tt.toml), 0o600))
 
-			// urfave/cli v3 flags carry parse state, so use fresh instances per run.
 			staticPeersFlag := staticPeersFlag
 			sentinelStaticPeersFlag := sentinelStaticPeersFlag
 			app := &cli.Command{}

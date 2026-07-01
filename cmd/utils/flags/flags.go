@@ -82,8 +82,8 @@ func (d *directoryValue) Set(val string) error {
 func (d *directoryValue) Get() any { return *d.destination }
 
 func (d *directoryValue) String() string {
-	if d.destination != nil {
-		return *d.destination
+	if d.destination != nil && *d.destination != "" {
+		return fmt.Sprintf("%q", *d.destination)
 	}
 	return ""
 }
@@ -127,12 +127,13 @@ func (b *bigValue) String() string {
 	return (*b.destination).String()
 }
 
-// GlobalBig returns the value of a BigFlag from the global flag set.
+// GlobalBig returns the value of a BigFlag from the global flag set. It never
+// returns nil so callers can dereference the result unconditionally.
 func GlobalBig(cmd *cli.Command, name string) *big.Int {
-	if v, ok := cmd.Value(name).(*big.Int); ok {
+	if v, ok := cmd.Value(name).(*big.Int); ok && v != nil {
 		return v
 	}
-	return nil
+	return new(big.Int)
 }
 
 // Expands a file path

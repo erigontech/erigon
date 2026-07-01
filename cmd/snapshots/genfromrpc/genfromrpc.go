@@ -42,7 +42,7 @@ var FromBlock = cli.Uint64Flag{
 }
 
 var Command = cli.Command{
-	Action:      func(ctx context.Context, cliCtx *cli.Command) error { return genFromRPc(cliCtx) },
+	Action:      func(_ context.Context, cliCtx *cli.Command) error { return genFromRPc(cliCtx) },
 	Name:        "genfromrpc",
 	Usage:       "genfromrpc utilities",
 	Flags:       []cli.Flag{&utils.DataDirFlag, &RpcAddr, &Verify, &FromBlock},
