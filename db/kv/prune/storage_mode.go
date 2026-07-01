@@ -31,31 +31,36 @@ import (
 
 var (
 	ArchiveMode = Mode{
-		Initialised: true,
-		History:     Distance(math.MaxUint64),
-		Blocks:      KeepAllBlocksPruneMode,
+		Initialised:       true,
+		History:           Distance(math.MaxUint64),
+		Blocks:            KeepAllBlocksPruneMode,
+		CommitmentHistory: KeepAllBlocksPruneMode,
 	}
 	FullMode = Mode{
-		Initialised: true,
-		Blocks:      Distance(config3.DefaultPruneDistance),
-		History:     Distance(config3.DefaultPruneDistance),
+		Initialised:       true,
+		Blocks:            Distance(config3.DefaultPruneDistance),
+		History:           Distance(config3.DefaultPruneDistance),
+		CommitmentHistory: KeepAllBlocksPruneMode,
 	}
 	BlocksMode = Mode{
-		Initialised: true,
-		Blocks:      KeepAllBlocksPruneMode,
-		History:     Distance(config3.DefaultPruneDistance),
+		Initialised:       true,
+		Blocks:            KeepAllBlocksPruneMode,
+		History:           Distance(config3.DefaultPruneDistance),
+		CommitmentHistory: KeepAllBlocksPruneMode,
 	}
 	MinimalMode = Mode{
-		Initialised: true,
-		Blocks:      Distance(config3.MinimalPruneDistance),
-		History:     Distance(config3.MinimalPruneDistance),
+		Initialised:       true,
+		Blocks:            Distance(config3.MinimalPruneDistance),
+		History:           Distance(config3.MinimalPruneDistance),
+		CommitmentHistory: KeepAllBlocksPruneMode,
 	}
 
 	DefaultMode = ArchiveMode
 	MockMode    = Mode{
-		Initialised: true,
-		History:     Distance(math.MaxUint64),
-		Blocks:      Distance(math.MaxUint64),
+		Initialised:       true,
+		History:           Distance(math.MaxUint64),
+		Blocks:            Distance(math.MaxUint64),
+		CommitmentHistory: KeepAllBlocksPruneMode,
 	}
 
 	ErrUnknownPruneMode = fmt.Errorf("--prune.mode must be one of %s, %s, %s, %s", fullModeStr, archiveModeStr, minimalModeStr, blockModeStr)
@@ -69,9 +74,10 @@ const (
 )
 
 type Mode struct {
-	Initialised bool // Set when the values are initialised (not default)
-	History     BlockAmount
-	Blocks      BlockAmount
+	Initialised       bool // Set when the values are initialised (not default)
+	History           BlockAmount
+	Blocks            BlockAmount
+	CommitmentHistory BlockAmount
 }
 
 // String renders m in the shape an operator would type on the CLI: the named
@@ -114,6 +120,7 @@ func (m Mode) String() string {
 		if m.History.toValue() != FullMode.History.toValue() {
 			fmt.Fprintf(&sb, " --prune.distance=%d", m.History.toValue())
 		}
+		appendCommitmentHistory(&sb, m)
 		return sb.String()
 	}
 	if m.Blocks == KeepAllBlocksPruneMode && m.History.Enabled() {
@@ -124,6 +131,7 @@ func (m Mode) String() string {
 		if m.History.toValue() != BlocksMode.History.toValue() {
 			fmt.Fprintf(&sb, " --prune.distance=%d", m.History.toValue())
 		}
+		appendCommitmentHistory(&sb, m)
 		return sb.String()
 	}
 
@@ -139,11 +147,20 @@ func (m Mode) String() string {
 	if m.Blocks.toValue() != DefaultMode.Blocks.toValue() {
 		fmt.Fprintf(&sb, " --prune.distance.blocks=%d", m.Blocks.toValue())
 	}
+	appendCommitmentHistory(&sb, m)
 	return sb.String()
 }
 
 func modeEquals(a, b Mode) bool {
-	return a.History.toValue() == b.History.toValue() && a.Blocks.toValue() == b.Blocks.toValue()
+	return a.History.toValue() == b.History.toValue() &&
+		a.Blocks.toValue() == b.Blocks.toValue() &&
+		a.CommitmentHistory.toValue() == b.CommitmentHistory.toValue()
+}
+
+func appendCommitmentHistory(sb *strings.Builder, m Mode) {
+	if m.CommitmentHistory != nil && m.CommitmentHistory.toValue() != KeepAllBlocksPruneMode.toValue() {
+		fmt.Fprintf(sb, " --prune.commitment-history.older=%d", m.CommitmentHistory.toValue())
+	}
 }
 
 func FromCli(pruneMode string, distanceHistory, distanceBlocks uint64) (Mode, error) {
