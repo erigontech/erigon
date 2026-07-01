@@ -53,11 +53,7 @@ func TestUpdates_NewEmpty_PreservesStreaming(t *testing.T) {
 
 func streamingRoot(t *testing.T, workers int, keys [][]byte, upds []Update, idxOrder []int) ([]byte, *MockState) {
 	t.Helper()
-	ms := NewMockState(t)
-	ms.SetConcurrentCommitment(true)
-	require.NoError(t, ms.applyPlainUpdates(keys, upds))
-
-	sc := newStreamCommitter(t, ms, workers, false)
+	sc, ms := newStreamingFixture(t, keys, upds, workers)
 	defer sc.Release()
 	for _, i := range idxOrder {
 		sc.TouchKey(KeyToHexNibbleHash(keys[i]), keys[i], nil)
@@ -120,15 +116,8 @@ func TestStreaming_NonEmptyPrevRefold(t *testing.T) {
 
 	seqRoot, seqMs := runIncremental(t, modeSeq, 0, k1, u1, k2, u2)
 
-	ms := NewMockState(t)
-	ms.SetConcurrentCommitment(true)
-
-	require.NoError(t, ms.applyPlainUpdates(k1, u1))
-	sc1 := NewStreamingCommitter(mockTrieCtxFactory(ms), length.Addr, DefaultTrieConfig())
-	sc1.SetNumWorkers(workers)
-	for _, k := range k1 {
-		sc1.TouchKey(KeyToHexNibbleHash(k), k, nil)
-	}
+	sc1, ms := newStreamingFixture(t, k1, u1, workers)
+	touchAll(sc1, k1)
 	_, err := sc1.Process(ctx)
 	require.NoError(t, err)
 	sc1.Release()
@@ -139,9 +128,7 @@ func TestStreaming_NonEmptyPrevRefold(t *testing.T) {
 	sc2 := NewStreamingCommitter(mockTrieCtxFactory(ms), length.Addr, DefaultTrieConfig())
 	defer sc2.Release()
 	sc2.SetNumWorkers(workers)
-	for _, k := range k2 {
-		sc2.TouchKey(KeyToHexNibbleHash(k), k, nil)
-	}
+	touchAll(sc2, k2)
 	for range 4 {
 		require.NoError(t, sc2.foldDirtySplits(ctx))
 		requireBranchesUnchanged(t, snap, ms)
@@ -202,13 +189,7 @@ func TestStreaming_SchedulerConcurrentParity(t *testing.T) {
 	seqRoot, seqMs := sequentialRoot(t, keys, upds)
 
 	for _, w := range benchWorkerCounts() {
-		ms := NewMockState(t)
-		ms.SetConcurrentCommitment(true)
-		require.NoError(t, ms.applyPlainUpdates(keys, upds))
-
-		sc := NewStreamingCommitter(mockTrieCtxFactory(ms), length.Addr, DefaultTrieConfig())
-		sc.SetNumWorkers(w)
-		require.NoError(t, sc.StartScheduler(context.Background()))
+		sc, ms := newStreamingFixture(t, keys, upds, w, true)
 
 		const goroutines = 4
 		var wg sync.WaitGroup
@@ -238,13 +219,8 @@ func TestStreaming_StorageMidAccountFold(t *testing.T) {
 		keys, upds := buildMixedCorpus(33, 2500)
 		seqRoot, seqMs := sequentialRoot(t, keys, upds)
 
-		ms := NewMockState(t)
-		ms.SetConcurrentCommitment(true)
-		require.NoError(t, ms.applyPlainUpdates(keys, upds))
-
-		sc := NewStreamingCommitter(mockTrieCtxFactory(ms), length.Addr, DefaultTrieConfig())
+		sc, ms := newStreamingFixture(t, keys, upds, 4)
 		defer sc.Release()
-		sc.SetNumWorkers(4)
 		sc.SetEagerFold(1) // below production floor: forces the gate path
 		require.NoError(t, sc.StartScheduler(context.Background()))
 
@@ -280,13 +256,8 @@ func TestStreaming_StorageMidAccountFold(t *testing.T) {
 
 		seqRoot, seqMs := sequentialRoot(t, keys, upds)
 
-		ms := NewMockState(t)
-		ms.SetConcurrentCommitment(true)
-		require.NoError(t, ms.applyPlainUpdates(keys, upds))
-
-		sc := NewStreamingCommitter(mockTrieCtxFactory(ms), length.Addr, DefaultTrieConfig())
+		sc, ms := newStreamingFixture(t, keys, upds, 4)
 		defer sc.Release()
-		sc.SetNumWorkers(4)
 		sc.SetEagerFold(1) // below production floor so the target split folds and foldGate fires
 
 		var once sync.Once
@@ -324,15 +295,8 @@ func TestStreaming_SchedulerCollapseParity(t *testing.T) {
 	seqRoot, seqMs := runIncremental(t, modeSeq, 0, k1, u1, k2, u2)
 
 	for _, w := range []int{1, 4} {
-		ms := NewMockState(t)
-		ms.SetConcurrentCommitment(true)
-
-		require.NoError(t, ms.applyPlainUpdates(k1, u1))
-		sc1 := NewStreamingCommitter(mockTrieCtxFactory(ms), length.Addr, DefaultTrieConfig())
-		sc1.SetNumWorkers(w)
-		for _, k := range k1 {
-			sc1.TouchKey(KeyToHexNibbleHash(k), k, nil)
-		}
+		sc1, ms := newStreamingFixture(t, k1, u1, w)
+		touchAll(sc1, k1)
 		_, err := sc1.Process(ctx)
 		require.NoError(t, err)
 		sc1.Release()
@@ -342,9 +306,7 @@ func TestStreaming_SchedulerCollapseParity(t *testing.T) {
 		sc2 := NewStreamingCommitter(mockTrieCtxFactory(ms), length.Addr, DefaultTrieConfig())
 		sc2.SetNumWorkers(w)
 		require.NoError(t, sc2.StartScheduler(ctx))
-		for _, k := range k2 {
-			sc2.TouchKey(KeyToHexNibbleHash(k), k, nil)
-		}
+		touchAll(sc2, k2)
 		sc2.Stop()
 		requireBranchesUnchanged(t, snap, ms)
 
@@ -471,11 +433,7 @@ func TestStreaming_FoldEagerPolicy(t *testing.T) {
 	seqRoot, seqMs := sequentialRoot(t, keys, upds)
 
 	newCommitter := func() (*StreamingCommitter, *MockState) {
-		ms := NewMockState(t)
-		ms.SetConcurrentCommitment(true)
-		require.NoError(t, ms.applyPlainUpdates(keys, upds))
-		sc := NewStreamingCommitter(mockTrieCtxFactory(ms), length.Addr, DefaultTrieConfig())
-		sc.SetNumWorkers(4)
+		sc, ms := newStreamingFixture(t, keys, upds, 4)
 		sc.SetEagerFold(1) // below production floor: forces the eager path
 		return sc, ms
 	}
@@ -483,9 +441,7 @@ func TestStreaming_FoldEagerPolicy(t *testing.T) {
 	t.Run("lazy_fall_through", func(t *testing.T) {
 		sc, ms := newCommitter()
 		defer sc.Release()
-		for _, k := range keys {
-			sc.TouchKey(KeyToHexNibbleHash(k), k, nil)
-		}
+		touchAll(sc, keys)
 		require.Zero(t, foldedSplitCount(sc), "no scheduler: nothing folds before Process")
 		root, err := sc.Process(context.Background())
 		require.NoError(t, err)
@@ -497,9 +453,7 @@ func TestStreaming_FoldEagerPolicy(t *testing.T) {
 		sc, ms := newCommitter()
 		defer sc.Release()
 		require.NoError(t, sc.StartScheduler(context.Background()))
-		for _, k := range keys {
-			sc.TouchKey(KeyToHexNibbleHash(k), k, nil)
-		}
+		touchAll(sc, keys)
 		waitSchedulerIdle(t, sc)
 		require.Positive(t, foldedSplitCount(sc), "eager policy must fold splits in the background")
 		root, err := sc.Process(context.Background())
@@ -512,9 +466,7 @@ func TestStreaming_FoldEagerPolicy(t *testing.T) {
 		sc, ms := newCommitter()
 		defer sc.Release()
 		require.NoError(t, sc.StartScheduler(context.Background()))
-		for _, k := range keys {
-			sc.TouchKey(KeyToHexNibbleHash(k), k, nil)
-		}
+		touchAll(sc, keys)
 		root, err := sc.Process(context.Background())
 		require.NoError(t, err)
 		require.Equal(t, seqRoot, root, "eager partial fall-through root != sequential")
@@ -525,11 +477,7 @@ func TestStreaming_FoldEagerPolicy(t *testing.T) {
 // carried=true touches via TouchPlainKeyDirect (carried *Update); carried=false via TouchPlainKey (nil/ctx-read).
 func streamingViaUpdatesRoot(t *testing.T, workers int, keys [][]byte, upds []Update, carried bool) ([]byte, *MockState) {
 	t.Helper()
-	ms := NewMockState(t)
-	ms.SetConcurrentCommitment(true)
-	require.NoError(t, ms.applyPlainUpdates(keys, upds))
-
-	sc := newStreamCommitter(t, ms, workers, false)
+	sc, ms := newStreamingFixture(t, keys, upds, workers)
 	defer sc.Release()
 
 	ut := NewUpdates(ModeParallel, t.TempDir(), KeyToHexNibbleHash)
@@ -568,13 +516,8 @@ func TestStreaming_UpdatesLifetimeRegression(t *testing.T) {
 	keys, upds := buildMixedCorpus(31, 4000)
 	seqRoot, seqMs := sequentialRoot(t, keys, upds)
 
-	ms := NewMockState(t)
-	ms.SetConcurrentCommitment(true)
-	require.NoError(t, ms.applyPlainUpdates(keys, upds))
-
-	sc := NewStreamingCommitter(mockTrieCtxFactory(ms), length.Addr, DefaultTrieConfig())
+	sc, ms := newStreamingFixture(t, keys, upds, 4)
 	defer sc.Release()
-	sc.SetNumWorkers(4)
 
 	ut := NewUpdates(ModeParallel, t.TempDir(), KeyToHexNibbleHash)
 	defer ut.Close()
@@ -664,12 +607,7 @@ func TestStreaming_NewSplitMidBlock(t *testing.T) {
 	require.NotEmpty(t, late, "corpus must populate the upper top-nibble half")
 
 	for _, w := range benchWorkerCounts() {
-		ms := NewMockState(t)
-		ms.SetConcurrentCommitment(true)
-		require.NoError(t, ms.applyPlainUpdates(keys, upds))
-
-		sc := NewStreamingCommitter(mockTrieCtxFactory(ms), length.Addr, DefaultTrieConfig())
-		sc.SetNumWorkers(w)
+		sc, ms := newStreamingFixture(t, keys, upds, w)
 		sc.SetEagerFold(1) // below production floor: forces background folding
 		require.NoError(t, sc.StartScheduler(context.Background()))
 
@@ -705,17 +643,10 @@ func TestStreaming_MultiBlockReuse(t *testing.T) {
 		seqRoot1, _ := sequentialRoot(t, k1, u1)
 		seqRoot2, seqMs := runIncremental(t, modeSeq, 0, k1, u1, k2, u2)
 
-		ms := NewMockState(t)
-		ms.SetConcurrentCommitment(true)
-		sc := NewStreamingCommitter(mockTrieCtxFactory(ms), length.Addr, DefaultTrieConfig())
+		sc, ms := newStreamingFixture(t, k1, u1, 4, true)
 		defer sc.Release()
-		sc.SetNumWorkers(4)
 
-		require.NoError(t, ms.applyPlainUpdates(k1, u1))
-		require.NoError(t, sc.StartScheduler(ctx))
-		for _, k := range k1 {
-			sc.TouchKey(KeyToHexNibbleHash(k), k, nil)
-		}
+		touchAll(sc, k1)
 		root1, err := sc.Process(ctx)
 		require.NoError(t, err)
 		require.Equal(t, seqRoot1, root1, "block-1 streaming root != sequential")
@@ -725,9 +656,7 @@ func TestStreaming_MultiBlockReuse(t *testing.T) {
 
 		require.NoError(t, ms.applyPlainUpdates(k2, u2))
 		require.NoError(t, sc.StartScheduler(ctx))
-		for _, k := range k2 {
-			sc.TouchKey(KeyToHexNibbleHash(k), k, nil)
-		}
+		touchAll(sc, k2)
 		root2, err := sc.Process(ctx)
 		require.NoError(t, err)
 		require.Equal(t, seqRoot2, root2, "block-2 streaming root after reset != sequential")
@@ -742,16 +671,10 @@ func TestStreaming_MultiBlockReuse(t *testing.T) {
 		seqRoot1, _ := sequentialRoot(t, k1, u1)
 		seqRoot2, seqMs := runIncremental(t, modeSeq, 0, k1, u1, k2, u2)
 
-		ms := NewMockState(t)
-		ms.SetConcurrentCommitment(true)
-		sc := NewStreamingCommitter(mockTrieCtxFactory(ms), length.Addr, DefaultTrieConfig())
+		sc, ms := newStreamingFixture(t, k1, u1, 4)
 		defer sc.Release()
-		sc.SetNumWorkers(4)
 
-		require.NoError(t, ms.applyPlainUpdates(k1, u1))
-		for _, k := range k1 {
-			sc.TouchKey(KeyToHexNibbleHash(k), k, nil)
-		}
+		touchAll(sc, k1)
 		root1, err := sc.Process(ctx)
 		require.NoError(t, err)
 		require.Equal(t, seqRoot1, root1, "block-1 streaming root != sequential")
@@ -760,9 +683,7 @@ func TestStreaming_MultiBlockReuse(t *testing.T) {
 		require.Empty(t, sc.splits, "Process left stale split state")
 
 		require.NoError(t, ms.applyPlainUpdates(k2, u2))
-		for _, k := range k2 {
-			sc.TouchKey(KeyToHexNibbleHash(k), k, nil)
-		}
+		touchAll(sc, k2)
 		root2, err := sc.Process(ctx)
 		require.NoError(t, err)
 		require.Equal(t, seqRoot2, root2, "block-2 streaming root without reset != sequential")
@@ -777,26 +698,17 @@ func TestStreaming_MultiBlockReuse(t *testing.T) {
 		seqRoot1, _ := sequentialRoot(t, k1, u1)
 		seqRoot2, seqMs := runIncremental(t, modeSeq, 0, k1, u1, k2, u2)
 
-		ms := NewMockState(t)
-		ms.SetConcurrentCommitment(true)
-		sc := NewStreamingCommitter(mockTrieCtxFactory(ms), length.Addr, DefaultTrieConfig())
+		sc, ms := newStreamingFixture(t, k1, u1, 4, true)
 		defer sc.Release()
-		sc.SetNumWorkers(4)
 
-		require.NoError(t, ms.applyPlainUpdates(k1, u1))
-		require.NoError(t, sc.StartScheduler(ctx))
-		for _, k := range k1 {
-			sc.TouchKey(KeyToHexNibbleHash(k), k, nil)
-		}
+		touchAll(sc, k1)
 		root1, err := sc.Process(ctx)
 		require.NoError(t, err)
 		require.Equal(t, seqRoot1, root1, "block-1 scheduler root != sequential")
 		require.Nil(t, sc.base, "Process must release the scheduler base after folding it down")
 
 		require.NoError(t, ms.applyPlainUpdates(k2, u2))
-		for _, k := range k2 {
-			sc.TouchKey(KeyToHexNibbleHash(k), k, nil)
-		}
+		touchAll(sc, k2)
 		root2, err := sc.Process(ctx)
 		require.NoError(t, err)
 		require.Equal(t, seqRoot2, root2, "block-2 lazy root after scheduler block (no reset) != sequential")
@@ -921,15 +833,8 @@ func TestStreaming_MultiDepthSplitParity(t *testing.T) {
 	requireBranchParity(t, seqMs, parMs)
 
 	for _, w := range benchWorkerCounts() {
-		ms := NewMockState(t)
-		ms.SetConcurrentCommitment(true)
-		require.NoError(t, ms.applyPlainUpdates(keys, upds))
-
-		sc := NewStreamingCommitter(mockTrieCtxFactory(ms), length.Addr, DefaultTrieConfig())
-		sc.SetNumWorkers(w)
-		for i := range keys {
-			sc.TouchKey(KeyToHexNibbleHash(keys[i]), keys[i], nil)
-		}
+		sc, ms := newStreamingFixture(t, keys, upds, w)
+		touchAll(sc, keys)
 		root, err := sc.Process(context.Background())
 		require.NoError(t, err)
 
@@ -987,15 +892,8 @@ func TestStreaming_StorageInteriorSplits(t *testing.T) {
 	seqRoot, seqMs := sequentialRoot(t, pk, upds)
 
 	for _, w := range benchWorkerCounts() {
-		ms := NewMockState(t)
-		ms.SetConcurrentCommitment(true)
-		require.NoError(t, ms.applyPlainUpdates(pk, upds))
-
-		sc := NewStreamingCommitter(mockTrieCtxFactory(ms), length.Addr, DefaultTrieConfig())
-		sc.SetNumWorkers(w)
-		for i := range pk {
-			sc.TouchKey(KeyToHexNibbleHash(pk[i]), pk[i], nil)
-		}
+		sc, ms := newStreamingFixture(t, pk, upds, w)
+		touchAll(sc, pk)
 		root, err := sc.Process(context.Background())
 		require.NoError(t, err)
 

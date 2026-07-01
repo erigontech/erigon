@@ -135,6 +135,23 @@ func newStreamCommitter(t *testing.T, ms *MockState, workers int, scheduler bool
 	return sc
 }
 
+// newStreamingFixture builds a concurrent MockState with keys/upds applied and a StreamingCommitter
+// wired to it. Pass scheduler=true to start the background scheduler before returning.
+func newStreamingFixture(t *testing.T, keys [][]byte, upds []Update, workers int, scheduler ...bool) (*StreamingCommitter, *MockState) {
+	t.Helper()
+	ms := NewMockState(t)
+	ms.SetConcurrentCommitment(true)
+	require.NoError(t, ms.applyPlainUpdates(keys, upds))
+	sc := newStreamCommitter(t, ms, workers, len(scheduler) > 0 && scheduler[0])
+	return sc, ms
+}
+
+func touchAll(sc *StreamingCommitter, keys [][]byte) {
+	for _, k := range keys {
+		sc.TouchKey(KeyToHexNibbleHash(k), k, nil)
+	}
+}
+
 func processRoot(t *testing.T, trie Trie, ut *Updates) []byte {
 	t.Helper()
 	root, err := trie.Process(context.Background(), ut, "", nil, WarmupConfig{})

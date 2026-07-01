@@ -110,11 +110,15 @@ mid-iteration restore or intermediate-root assert (see Task 1 carve-out).
       Must pass before Task 6.
 
 ### Task 6: newStreamingFixture + touchAll
-- [ ] Promote `newStreamingFixture(t,keys,upds,workers[,scheduler])` (`*StreamingCommitter,*MockState`)
+- [x] Promote `newStreamingFixture(t,keys,upds,workers[,scheduler])` (`*StreamingCommitter,*MockState`)
       and `touchAll(sc,keys)` to `parallel_testkit_test.go` (extract the `newCommitter` closure in
       `TestStreaming_FoldEagerPolicy`); adopt at the ~15 streaming parity sites. Callers keep their
       own scheduler / eager-lazy / `waitSchedulerIdle` wiring.
-- [ ] Run `go test ./execution/commitment/...` and `-race` on `streaming_commitment_test.go` green.
+      (`newStreamingFixture` wraps ms-create + concurrent-flag + applyPlainUpdates + `newStreamCommitter`;
+      variadic `scheduler` bool starts the scheduler at construction. Multi-block/two-committer sites
+      route only the first committer through the fixture and reuse the returned `ms`; the public
+      `InitializeTrieAndUpdates` round-trip test is left untouched — no direct committer.)
+- [x] Run `go test ./execution/commitment/...` and `-race` on `streaming_commitment_test.go` green.
       Must pass before Task 7.
 
 ### Task 7: Extract branch-encode / warmup / cell-equality helpers
