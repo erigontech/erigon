@@ -384,16 +384,11 @@ func (rs *StateV3) ApplyStateWrites(ctx context.Context,
 	// Skip when the commitment calculator goroutine is active (it owns
 	// the Updates buffer and handles all commitment computation).
 	// Also skip if the step is already frozen (nothing to commit).
-	stepSize := rs.domains.StepSize()
-	if (txNum+1)%stepSize == 0 && !dbg.DiscardCommitment() && !rs.domains.InlineTouchKeyDisabled() && !rs.skipStepBoundaryCommitment {
-		step := txNum / stepSize
-		lastFrozenStep := uint64(roTx.StepsInFiles(kv.CommitmentDomain))
-		if step >= lastFrozenStep {
-			_, err := rs.domains.ComputeCommitment(ctx, roTx, true, blockNum, txNum,
-				fmt.Sprintf("applying step %d", step), nil)
-			if err != nil {
-				return fmt.Errorf("StateV3.ApplyStateWrites: step boundary: %w", err)
-			}
+	if rs.domains.IsUnfrozenStepEdge(roTx, txNum) && !rs.domains.InlineTouchKeyDisabled() && !rs.skipStepBoundaryCommitment {
+		_, err := rs.domains.ComputeCommitment(ctx, roTx, true, blockNum, txNum,
+			fmt.Sprintf("applying step %d", txNum/rs.domains.StepSize()), nil)
+		if err != nil {
+			return fmt.Errorf("StateV3.ApplyStateWrites: step boundary: %w", err)
 		}
 	}
 	return nil
@@ -426,7 +421,7 @@ func (rs *StateV3) ApplyTxIndexes(
 // contain a commitment state at each step end, even when the boundary falls
 // mid-block.
 func (rs *StateV3) CommitStepBoundary(ctx context.Context, roTx kv.TemporalTx, blockNum, txNum uint64) error {
-	if (txNum+1)%rs.domains.StepSize() == 0 && !dbg.DiscardCommitment() && !rs.domains.InlineTouchKeyDisabled() && !rs.skipStepBoundaryCommitment {
+	if rs.domains.IsUnfrozenStepEdge(roTx, txNum) && !rs.domains.InlineTouchKeyDisabled() && !rs.skipStepBoundaryCommitment {
 		_, err := rs.domains.ComputeCommitment(ctx, roTx, true, blockNum, txNum,
 			fmt.Sprintf("applying step %d", txNum/rs.domains.StepSize()), nil)
 		if err != nil {
