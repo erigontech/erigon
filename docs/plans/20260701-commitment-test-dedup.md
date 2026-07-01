@@ -73,18 +73,18 @@ mid-iteration restore or intermediate-root assert (see Task 1 carve-out).
 - [x] Run `go test ./execution/commitment/...` green. Must pass before Task 3.
 
 ### Task 3: Close existing-helper usage gaps (parity oracles, key-wrap, worker counts, aliases)
-- [ ] Replace the inline branch-map union/diff loops with `requireBranchParity` in
+- [x] Replace the inline branch-map union/diff loops with `requireBranchParity` in
       `deep_storage_test.go` and `parallel_patricia_hashed_test.go`.
-- [ ] Build parallel `Updates` via `WrapKeyUpdates(ModeParallel, KeyToHexNibbleHash, …)` instead of
+- [x] Build parallel `Updates` via `WrapKeyUpdates(ModeParallel, KeyToHexNibbleHash, …)` instead of
       hand-rolled `TouchPlainKey` closures at the parallel/streaming sites.
-- [ ] Use `benchWorkerCounts()` ONLY where the existing worker list is exactly `{1,4,8}` or
+- [x] Use `benchWorkerCounts()` ONLY where the existing worker list is exactly `{1,4,8}` or
       `{1,4,8,NumCPU}`. Do NOT touch lists carrying other values — leave
       `TestVerifyParallel_RandomStorageIncremental` and `_StorageIncrementalDeletes` (`{1,2,4,8}`)
       as-is so the `workers=2` case survives.
-- [ ] Collapse only the `assertEquivalentRoot → assertEquivalentRootWorkers → requireRootParity`
+- [x] Collapse only the `assertEquivalentRoot → assertEquivalentRootWorkers → requireRootParity`
       alias chain. KEEP the 2-line `sequentialRoot`/`parallelRoot` aliases (inlining 30+ sites is
       churn that increases LOC).
-- [ ] Run `go test ./execution/commitment/...` and `-race` on the parallel/streaming files green.
+- [x] Run `go test ./execution/commitment/...` and `-race` on the parallel/streaming files green.
       Must pass before Task 4.
 
 ### Task 4: Route inline UpdateBuilder tables through the shared fixtures (root-sensitive)

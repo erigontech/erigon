@@ -84,7 +84,7 @@ func TestStreaming_RandomOrderParity(t *testing.T) {
 	rnd.Shuffle(len(idx), func(i, j int) { idx[i], idx[j] = idx[j], idx[i] })
 
 	seqRoot, seqMs := sequentialRoot(t, keys, upds)
-	for _, w := range []int{1, 4, 8} {
+	for _, w := range benchWorkerCounts() {
 		strRoot, strMs := streamingRoot(t, w, keys, upds, idx)
 		require.Equalf(t, seqRoot, strRoot, "streaming(workers=%d) root != sequential", w)
 		requireBranchParity(t, seqMs, strMs)
@@ -103,7 +103,7 @@ func TestStreaming_DeepBranchParity(t *testing.T) {
 	rnd.Shuffle(len(idx), func(i, j int) { idx[i], idx[j] = idx[j], idx[i] })
 
 	seqRoot, seqMs := sequentialRoot(t, keys, upds)
-	for _, w := range []int{1, 4, 8} {
+	for _, w := range benchWorkerCounts() {
 		strRoot, strMs := streamingRoot(t, w, keys, upds, idx)
 		require.Equalf(t, seqRoot, strRoot, "streaming(workers=%d) deep root != sequential", w)
 		requireBranchParity(t, seqMs, strMs)
@@ -201,7 +201,7 @@ func TestStreaming_SchedulerConcurrentParity(t *testing.T) {
 	keys, upds := buildMixedCorpus(77, 4000)
 	seqRoot, seqMs := sequentialRoot(t, keys, upds)
 
-	for _, w := range []int{1, 4, 8} {
+	for _, w := range benchWorkerCounts() {
 		ms := NewMockState(t)
 		ms.SetConcurrentCommitment(true)
 		require.NoError(t, ms.applyPlainUpdates(keys, upds))
@@ -555,7 +555,7 @@ func TestStreaming_UpdatesFunnelParity(t *testing.T) {
 	seqRoot, seqMs := sequentialRoot(t, keys, upds)
 
 	for _, carried := range []bool{false, true} {
-		for _, w := range []int{1, 4, 8} {
+		for _, w := range benchWorkerCounts() {
 			root, ms := streamingViaUpdatesRoot(t, w, keys, upds, carried)
 			require.Equalf(t, seqRoot, root, "funnel(carried=%v,workers=%d) root != sequential", carried, w)
 			requireBranchParity(t, seqMs, ms)
@@ -630,7 +630,7 @@ func TestStreaming_PublicProcessParity(t *testing.T) {
 	keys, upds := buildWhaleCorpus(bigAccountWhale(15_000))
 	seqRoot, seqMs := sequentialRoot(t, keys, upds)
 
-	for _, w := range []int{1, 4, 8} {
+	for _, w := range benchWorkerCounts() {
 		root, ms := streamingViaPublicProcessRoot(t, w, keys, upds)
 		require.Equalf(t, seqRoot, root, "public Process(workers=%d) root != sequential", w)
 		requireBranchParity(t, seqMs, ms)
@@ -663,7 +663,7 @@ func TestStreaming_NewSplitMidBlock(t *testing.T) {
 	require.NotEmpty(t, early, "corpus must populate the lower top-nibble half")
 	require.NotEmpty(t, late, "corpus must populate the upper top-nibble half")
 
-	for _, w := range []int{1, 4, 8} {
+	for _, w := range benchWorkerCounts() {
 		ms := NewMockState(t)
 		ms.SetConcurrentCommitment(true)
 		require.NoError(t, ms.applyPlainUpdates(keys, upds))
@@ -920,7 +920,7 @@ func TestStreaming_MultiDepthSplitParity(t *testing.T) {
 	require.Equal(t, seqRoot, parRoot, "parallel root != sequential")
 	requireBranchParity(t, seqMs, parMs)
 
-	for _, w := range []int{1, 4, 8} {
+	for _, w := range benchWorkerCounts() {
 		ms := NewMockState(t)
 		ms.SetConcurrentCommitment(true)
 		require.NoError(t, ms.applyPlainUpdates(keys, upds))
@@ -959,7 +959,7 @@ func TestStreaming_MultiDepthCollapseParity(t *testing.T) {
 			u1 := append(append([]Update{}, mu...), wu1...)
 
 			seqRoot, seqMs := runIncremental(t, modeSeq, 0, k1, u1, wk2, wu2)
-			for _, w := range []int{1, 4, 8} {
+			for _, w := range benchWorkerCounts() {
 				requireIncrementalEquiv(t, k1, u1, wk2, wu2, w)
 				strRoot, strMs := runIncremental(t, modeStreaming, w, k1, u1, wk2, wu2)
 				require.Equalf(t, seqRoot, strRoot, "whale storage collapse(workers=%d) root != sequential", w)
@@ -975,7 +975,7 @@ func TestStreaming_FullCollapseParity(t *testing.T) {
 	mk, mu := buildMixedCorpus(0xC0FFEE, 4000)
 	k1 := append(append([][]byte{}, mk...), wk1...)
 	u1 := append(append([]Update{}, mu...), wu1...)
-	for _, w := range []int{1, 4, 8} {
+	for _, w := range benchWorkerCounts() {
 		requireIncrementalEquiv(t, k1, u1, wk2, wu2, w)
 	}
 }
@@ -986,7 +986,7 @@ func TestStreaming_StorageInteriorSplits(t *testing.T) {
 
 	seqRoot, seqMs := sequentialRoot(t, pk, upds)
 
-	for _, w := range []int{1, 4, 8} {
+	for _, w := range benchWorkerCounts() {
 		ms := NewMockState(t)
 		ms.SetConcurrentCommitment(true)
 		require.NoError(t, ms.applyPlainUpdates(pk, upds))

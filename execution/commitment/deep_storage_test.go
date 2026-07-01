@@ -17,7 +17,6 @@
 package commitment
 
 import (
-	"bytes"
 	"context"
 	"encoding/hex"
 	"math/rand"
@@ -38,7 +37,7 @@ func TestDeepIntegration_BranchParity(t *testing.T) {
 	seq := NewHexPatriciaHashed(length.Addr, seqMs, DefaultTrieConfig())
 	seqRoot := processBatch(t, seqMs, seq, pk, upds)
 
-	for _, workers := range []int{1, 4, 8} {
+	for _, workers := range benchWorkerCounts() {
 		parMs := NewMockState(t)
 		parMs.SetConcurrentCommitment(true)
 		require.NoError(t, parMs.applyPlainUpdates(pk, upds))
@@ -53,26 +52,7 @@ func TestDeepIntegration_BranchParity(t *testing.T) {
 
 		require.Equalf(t, seqRoot, parRoot, "deep parallel(workers=%d) root != sequential", workers)
 
-		mism := 0
-		seen := map[string]struct{}{}
-		for k := range seqMs.cm {
-			seen[k] = struct{}{}
-		}
-		for k := range parMs.cm {
-			seen[k] = struct{}{}
-		}
-		for k := range seen {
-			sb, sok := seqMs.cm[k]
-			pb, pok := parMs.cm[k]
-			if !sok || !pok || !bytes.Equal(sb, pb) {
-				mism++
-			}
-		}
-		t.Logf("workers=%d seq branches=%d par branches=%d mismatched=%d", workers, len(seqMs.cm), len(parMs.cm), mism)
-		if mism != 0 {
-			branchDiff(t, seqMs, parMs)
-		}
-		require.Zerof(t, mism, "stored branch metadata differs between deep-parallel(workers=%d) and sequential", workers)
+		requireBranchParity(t, seqMs, parMs)
 	}
 }
 
