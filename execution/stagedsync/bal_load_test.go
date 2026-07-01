@@ -24,6 +24,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/execution/commitment"
 	"github.com/erigontech/erigon/execution/state"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/accounts"
@@ -169,6 +170,15 @@ func TestLoadFromBAL_EmptyAccountBecomesDelete(t *testing.T) {
 		"an EIP-161 empty account in the BAL must be reconstructed as a delete, not a zero-valued update")
 	require.False(t, cs.accounts[live].Deleted,
 		"a non-empty account must remain a regular update")
+
+	// Full chain: the reconstruction must actually emit a DeleteUpdate (leaf
+	// removal) through FlushToUpdates, not just set the flag — that is what
+	// makes the BAL-driven trie root match serial's DomainDel.
+	updates := newTestUpdates()
+	cs.FlushToUpdates(updates)
+	emptiedKey := emptied.Value()
+	assert.Equal(t, commitment.DeleteUpdate, lookupKeyUpdate(t, updates, string(emptiedKey[:])).Flags,
+		"emptied account must flush as DeleteUpdate")
 
 	// The carve-out: with SpuriousDragon inactive, empties are NOT removed
 	// (pre-fork a touched empty account is created and persists).
