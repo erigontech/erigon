@@ -32,6 +32,7 @@ import (
 	"github.com/stretchr/testify/require"
 	"github.com/urfave/cli/v2"
 
+	"github.com/erigontech/erigon/common/dir"
 	"github.com/erigontech/erigon/execution/tests/testforks"
 	erigoncli "github.com/erigontech/erigon/node/cli"
 )
@@ -88,7 +89,13 @@ func TestImportReorgUnwindToGenesis(t *testing.T) {
 	work := t.TempDir()
 	genesisPath := writeImportGenesis(t, work, tc)
 	rlpFiles := writeImportBlocks(t, work, tc)
-	dataDir := filepath.Join(work, "datadir")
+
+	// The import command leaves the chaindata open until process exit, which
+	// blocks t.TempDir's RemoveAll on Windows (an open file can't be deleted),
+	// so keep the datadir outside it and clean up best-effort.
+	dataDir, err := os.MkdirTemp("", "erigon-import-reorg-")
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = dir.RemoveAll(dataDir) })
 
 	require.NoError(t, runErigonCommand("init", "--datadir", dataDir, genesisPath))
 
