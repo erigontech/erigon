@@ -34,7 +34,10 @@ jobs:
           python3 docs/site/scripts/generate-llms.py --check
           python3 -m unittest discover docs/site/scripts -v
 
-      - uses: actions/setup-node@v6
+      # Deploy only runs on push to the release branch (not fork PRs), so the
+      # npm cache can't be poisoned by an untrusted actor; caching the
+      # docs-site deps keeps the build fast.
+      - uses: actions/setup-node@v6 # zizmor: ignore[cache-poisoning]
         with:
           node-version: '20'
           cache: npm
