@@ -514,13 +514,8 @@ func (vr versionedStateReader) ReadAccountIncarnation(address accounts.Address) 
 type VersionedWrites []*VersionedWrite
 
 // TouchUpdates feeds VersionedWrites directly to a commitment.Updates buffer
-// via TouchPlainKeyDirect. Each VersionedWrite maps to a single Update with
-// the appropriate key and flags. The Updates buffer handles per-key merging
-// (same address gets accumulated flags from BalancePath, NoncePath, etc.).
-//
-// This is used by the commitment calculator to process writes received via
-// the fan-out channel. No serialization/deserialization — the values pass
-// through as-is.
+// via TouchPlainKeyDirect, one partial Update per write. The buffer merges
+// per key (ModeUpdate and ModeParallel both accumulate flags additively).
 func (writes VersionedWrites) TouchUpdates(updates *commitment.Updates) {
 	for _, w := range writes {
 		if w.Val == nil {
@@ -1376,6 +1371,33 @@ func (io *VersionedIO) Merge(other *VersionedIO) *VersionedIO {
 		}
 	}
 	return merged
+}
+
+// mergeTx folds a single transaction's reads, writes and accesses (recorded at
+// version.TxIndex) into io at that index, accumulating into the slot rather
+// than overwriting it the way RecordReads does. The three per-tx slices grow in
+// lockstep so they stay equal length.
+func (io *VersionedIO) mergeTx(version Version, reads ReadSet, writes VersionedWrites, accesses AccessSet) {
+	idx := version.TxIndex + 1
+	n := max(idx+1, len(io.inputs), len(io.outputs), len(io.accessed))
+	if n > len(io.inputs) {
+		io.inputs = append(io.inputs, make([]versionedReadSet, n-len(io.inputs))...)
+	}
+	if n > len(io.outputs) {
+		io.outputs = append(io.outputs, make([]VersionedWrites, n-len(io.outputs))...)
+	}
+	if n > len(io.accessed) {
+		io.accessed = append(io.accessed, make([]AccessSet, n-len(io.accessed))...)
+	}
+	if len(reads) > 0 {
+		io.inputs[idx] = io.inputs[idx].Merge(versionedReadSet{version.Incarnation, reads})
+	}
+	if len(writes) > 0 {
+		io.outputs[idx] = io.outputs[idx].Merge(writes)
+	}
+	if len(accesses) > 0 {
+		io.accessed[idx] = io.accessed[idx].Merge(accesses)
+	}
 }
 
 func (io *VersionedIO) AsBlockAccessList() types.BlockAccessList {

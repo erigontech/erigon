@@ -72,6 +72,7 @@ import (
 	"github.com/erigontech/erigon/diagnostics/diaglib"
 	"github.com/erigontech/erigon/diagnostics/mem"
 	"github.com/erigontech/erigon/execution/builder"
+	"github.com/erigontech/erigon/execution/cache"
 	"github.com/erigontech/erigon/execution/chain"
 	chainspec "github.com/erigontech/erigon/execution/chain/spec"
 	"github.com/erigontech/erigon/execution/engineapi"
@@ -303,8 +304,11 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 		if config.KeepExecutionProofs {
 			statecfg.EnableHistoricalCommitment()
 		}
-		if config.ExperimentalConcurrentCommitment {
-			statecfg.ExperimentalConcurrentCommitment = true
+		if config.ExperimentalParallelCommitment {
+			statecfg.ExperimentalParallelCommitment = true
+		}
+		if config.ExperimentalStreamingCommitment {
+			statecfg.ExperimentalStreamingCommitment = true
 		}
 
 		if err = stages.UpdateMetrics(tx); err != nil {
@@ -958,6 +962,14 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 		Accumulator:    backend.notifications.Accumulator,
 		RecentReceipts: backend.notifications.RecentReceipts,
 	}
+	// Test harnesses (e.g. EngineApiTester) set StateCacheBudget small so each
+	// per-fixture ExecModule doesn't allocate the full production cache; 0 keeps
+	// the production default.
+	var domainStateCache *cache.StateCache
+	if config.StateCacheBudget > 0 {
+		b := config.StateCacheBudget
+		domainStateCache = cache.NewStateCache(b, b, b, b)
+	}
 	backend.execModule = execmodule.NewExecModule(
 		ctx,
 		blockReader,
@@ -969,6 +981,7 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 		hook,
 		accum,
 		execmoduleCache,
+		domainStateCache,
 		logger,
 		backend.engine,
 		config.Sync,
@@ -1540,15 +1553,6 @@ func (s *Ethereum) Stop() error {
 		case <-time.After(30 * time.Second):
 			s.logger.Warn("KZG warmup goroutine still running at shutdown")
 		}
-	}
-
-	// Drain the fire-and-forget background block-snapshot merge goroutine for
-	// shutdown hygiene; the merge itself touches neither chainDB nor snapshots,
-	// so the wait is bounded.
-	if s.components != nil && s.components.Storage != nil && s.components.Storage.BlockRetire != nil {
-		mergeCtx, mergeCancel := context.WithTimeout(context.Background(), 30*time.Second)
-		s.components.Storage.BlockRetire.WaitForMerges(mergeCtx)
-		mergeCancel()
 	}
 
 	s.chainDB.Close()

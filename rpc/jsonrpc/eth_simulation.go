@@ -38,6 +38,7 @@ import (
 	"github.com/erigontech/erigon/db/kv/rawdbv3"
 	"github.com/erigontech/erigon/db/services"
 	"github.com/erigontech/erigon/db/state/execctx"
+	"github.com/erigontech/erigon/db/state/kvmetrics"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/commitment/commitmentdb"
 	"github.com/erigontech/erigon/execution/protocol"
@@ -163,11 +164,15 @@ func (api *APIImpl) SimulateV1(ctx context.Context, req SimulationRequest, block
 		return nil, err
 	}
 
-	sharedDomains, err := execctx.NewSharedDomains(ctx, tx, api.logger, execctx.WithoutDeferredBranchUpdates())
+	sharedDomains, err := execctx.NewSharedDomains(ctx, tx, api.logger, execctx.WithoutDeferredBranchUpdates(), execctx.WithSequentialCommitment())
 	if err != nil {
 		return nil, err
 	}
 	defer sharedDomains.Close()
+	// Meter this request's state reads under the rpc source (flushed at Close).
+	// SimulateV1 owns this SharedDomains on a single goroutine.
+	sharedDomains.StartRequestMetrics(kvmetrics.SourceRPC)
+	sharedDomains.SetDeferCommitmentUpdates(false)
 
 	// Iterate over each given SimulatedBlock
 	parent := sim.base
@@ -997,6 +1002,12 @@ func (r *simulationStateReader) Read(d kv.Domain, plainKey []byte, stepSize uint
 }
 
 func (r *simulationStateReader) Clone(tx kv.TemporalTx) commitmentdb.StateReader {
+	return newHistoryCommitmentOnlyReader(tx, r.sd, r.commitmentAsOfTxNum, r.plainStateAsOfTxNum)
+}
+
+// CloneForWorker mirrors Clone. eth_simulation runs commitment single-threaded
+// (no concurrent warmup), so worker metering isn't needed here.
+func (r *simulationStateReader) CloneForWorker(_ context.Context, tx kv.TemporalTx) commitmentdb.StateReader {
 	return newHistoryCommitmentOnlyReader(tx, r.sd, r.commitmentAsOfTxNum, r.plainStateAsOfTxNum)
 }
 

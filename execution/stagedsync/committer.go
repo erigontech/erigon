@@ -7,12 +7,15 @@ import (
 	"runtime/pprof"
 	"sync"
 
+	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/kv/order"
 	"github.com/erigontech/erigon/db/state/execctx"
 	"github.com/erigontech/erigon/execution/commitment"
 	"github.com/erigontech/erigon/execution/commitment/commitmentdb"
+	"github.com/erigontech/erigon/execution/types/accounts"
 )
 
 // commitmentResult is the outcome of a single commitment computation.
@@ -41,9 +44,8 @@ type commitComputeRequest struct{}
 //   - Per-block mode (!BatchCommitments): computes at every blockResult.
 //     Used at chain tip or when shouldGenerateChangesets is true.
 //
-// The calculator owns its own commitment.Updates buffer. Writes from the
-// execLoop flow through VersionedWrites.TouchUpdates() which calls
-// TouchPlainKeyDirect() — no serialization round-trip.
+// The calculator owns its own commitment.Updates buffer, fed one aggregated
+// update per dirty key by calcState.FlushToUpdates — no serialization round-trip.
 //
 // It reads values from sd.mem (shared with the execLoop) via GetLatest.
 // The execLoop's Flush writes to sd.mem before sending the blockResult,
@@ -131,12 +133,13 @@ func newCommitmentCalculator(
 	in chan applyResult,
 	out chan commitmentResult,
 ) (*commitmentCalculator, error) {
-	// Create the calculator's own Updates buffer in ModeUpdate.
-	// ModeUpdate stores actual values (balance, nonce, storage) in the btree,
-	// so ComputeCommitment reads values from the Updates rather than sd.mem.
+	// ModeUpdate carries values in its btree for the trie to read; the parallel
+	// trie reads leaf values from the as-of reader, so keep its ModeParallel buffer.
 	sdCtxUpdates := doms.GetCommitmentContext().GetUpdates()
 	calcUpdates := sdCtxUpdates.NewEmpty()
-	calcUpdates.SetMode(commitment.ModeUpdate)
+	if sdCtxUpdates.Mode() != commitment.ModeParallel {
+		calcUpdates.SetMode(commitment.ModeUpdate)
+	}
 
 	// Open a persistent read-only TX for lazy-loading state from the domain.
 	// This lives for the calculator's lifetime, like worker TX handles.
@@ -625,6 +628,11 @@ type asOfStateReader struct {
 	sd    *execctx.SharedDomains
 	roTx  kv.TemporalTx
 	txNum uint64
+	// workerCtx, when non-nil, carries this worker's lock-free metrics
+	// accumulator; the CommitmentDomain read routes through GetLatestContext so
+	// a concurrent trie-warmup worker doesn't write the shared main accumulator
+	// (a race) or take the global metrics lock. Nil on the main reader.
+	workerCtx context.Context
 }
 
 func (r *asOfStateReader) WithHistory() bool { return false }
@@ -636,7 +644,11 @@ func (r *asOfStateReader) CheckDataAvailable(d kv.Domain, step kv.Step) error {
 func (r *asOfStateReader) Read(d kv.Domain, plainKey []byte, stepSize uint64) (enc []byte, step kv.Step, err error) {
 	if d == kv.CommitmentDomain {
 		// Branches: use GetLatest — written only by this calculator, sequential.
-		enc, step, err = r.sd.GetLatest(d, r.roTx, plainKey)
+		if r.workerCtx != nil {
+			enc, step, err = r.sd.GetLatestContext(r.workerCtx, d, r.roTx, plainKey)
+		} else {
+			enc, step, err = r.sd.GetLatest(d, r.roTx, plainKey)
+		}
 	} else {
 		// Account/storage/code: use GetAsOf to avoid reading future state.
 		// Check sd.mem first (in-memory data from current batch), then
@@ -665,6 +677,48 @@ func (r *asOfStateReader) Read(d kv.Domain, plainKey []byte, stepSize uint64) (e
 
 func (r *asOfStateReader) Clone(tx kv.TemporalTx) commitmentdb.StateReader {
 	return &asOfStateReader{sd: r.sd, roTx: tx, txNum: r.txNum}
+}
+
+// CloneForWorker meters the worker's CommitmentDomain reads into the per-worker
+// accumulator carried by workerCtx (this reader is used as the commitment
+// reader during block assembly, where trie-warmup runs concurrently — so it
+// must not write the shared main accumulator).
+func (r *asOfStateReader) CloneForWorker(workerCtx context.Context, tx kv.TemporalTx) commitmentdb.StateReader {
+	return &asOfStateReader{sd: r.sd, roTx: tx, txNum: r.txNum, workerCtx: workerCtx}
+}
+
+// asOfStorageEnumerator lists the persisted storage slots under an address via
+// the calculator's stable roTx snapshot (the pre-cycle baseline the trie was
+// built from), so a self-destruct deletes the whole subtree. The exec loop's
+// DomainDelPrefix runs with inline TouchKey disabled in parallel mode, so this
+// is the parallel path's equivalent of serial's per-slot delete touches.
+type asOfStorageEnumerator struct {
+	reader *asOfStateReader
+}
+
+func (e *asOfStorageEnumerator) EachStorageSlot(addr accounts.Address, fn func(key accounts.StorageKey) error) error {
+	addrVal := addr.Value()
+	toKey, _ := kv.NextSubtree(addrVal[:])
+	it, err := e.reader.roTx.RangeAsOf(kv.StorageDomain, addrVal[:], toKey, e.reader.txNum, order.Asc, kv.Unlim)
+	if err != nil {
+		return err
+	}
+	defer it.Close()
+	for it.HasNext() {
+		k, v, err := it.Next()
+		if err != nil {
+			return err
+		}
+		if len(v) == 0 || len(k) != 52 || !bytes.HasPrefix(k, addrVal[:]) {
+			continue
+		}
+		var h common.Hash
+		copy(h[:], k[20:])
+		if err := fn(accounts.InternKey(h)); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // Keep imports used.
