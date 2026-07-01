@@ -213,7 +213,7 @@ func gasSStoreEIP2200(evm *EVM, callContext *CallContext, availableGas mdgas.MdG
 		return mdgas.MdGas{}, ErrWriteProtection
 	}
 	// If we fail the minimum gas availability invariant, fail (0)
-	if callContext.gas <= params.SstoreSentryGasEIP2200 {
+	if callContext.meter.Regular() <= params.SstoreSentryGasEIP2200 {
 		return mdgas.MdGas{}, errors.New("not enough gas for reentrancy sentry")
 	}
 	// Gas sentry honoured, do the actual gas calculation based on the stored value

@@ -62,7 +62,7 @@ func makeGasSStoreFunc(clearingRefund uint64) gasFunc {
 		access := params.WarmStorageReadCostEIP2929
 		if _, slotMod := evm.IntraBlockState().AddSlotToAccessList(callContext.Address(), slot); slotMod {
 			access = coldAccess
-			if callContext.gas < access {
+			if callContext.meter.Regular() < access {
 				return mdgas.MdGas{}, ErrOutOfGas
 			}
 		}
@@ -333,15 +333,14 @@ func makeCallVariantGasCallEIP7702(statelessCalculator statelessGasFunc, statefu
 		// reduced balance.  After computing the 63/64 rule we restore the
 		// base so the interpreter can deduct (and trace) the full amount.
 		regularBase := accessGas + statefulBaseGas.Regular
-		if callContext.gas < regularBase {
+		if !callContext.meter.ChargeRegular(regularBase) {
 			return mdgas.MdGas{}, ErrOutOfGas
 		}
-		callContext.gas -= regularBase // temporary
 
 		if statefulBaseGas.State > 0 {
 			ok := callContext.useMdGas(statefulBaseGas.State, mdgas.StateGas, nil, tracing.GasChangeIgnored)
 			if !ok {
-				callContext.gas += regularBase // restore before error
+				callContext.meter.RefundRegular(regularBase) // restore before error
 				return mdgas.MdGas{}, ErrOutOfGas
 			}
 		}
@@ -363,11 +362,10 @@ func makeCallVariantGasCallEIP7702(statelessCalculator statelessGasFunc, statefu
 			if err != nil {
 				return mdgas.MdGas{}, err
 			}
-			if callContext.gas < delegationGas {
-				callContext.gas += regularBase
+			if !callContext.meter.ChargeRegular(delegationGas) {
+				callContext.meter.RefundRegular(regularBase)
 				return mdgas.MdGas{}, ErrOutOfGas
 			}
-			callContext.gas -= delegationGas // temporary
 			evm.intraBlockState.AddAddressToAccessList(dd)
 		}
 
@@ -380,7 +378,7 @@ func makeCallVariantGasCallEIP7702(statelessCalculator statelessGasFunc, statefu
 
 		// Restore the temporarily deducted base + delegation so the
 		// interpreter deducts (and traces) the full dynamic cost.
-		callContext.gas += regularBase + delegationGas
+		callContext.meter.RefundRegular(regularBase + delegationGas)
 
 		if dbg.TraceDynamicGas && evm.intraBlockState.Trace() {
 			fmt.Printf("%d (%d.%d) Variant Gas: base %d, access: %d, delegation: %d, call: %d\n",

@@ -894,12 +894,12 @@ func opMsize(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) {
 }
 
 func opGas(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) {
-	scope.Stack.push(*new(uint256.Int).SetUint64(scope.gas))
+	scope.Stack.push(*new(uint256.Int).SetUint64(scope.meter.Regular()))
 	return pc, nil, nil
 }
 
 func stGas(pc uint64, scope *CallContext) string {
-	return fmt.Sprintf("%s %d", GAS, scope.gas)
+	return fmt.Sprintf("%s %d", GAS, scope.meter.Regular())
 }
 
 func opSwap1(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) {
@@ -1001,7 +1001,7 @@ func stCreate(_ uint64, scope *CallContext) string {
 		input  = scope.Memory.GetCopy(offset.Uint64(), size.Uint64())
 	)
 
-	return fmt.Sprintf("%s %d %x %d", CREATE.String(), &value, input, &scope.gas)
+	return fmt.Sprintf("%s %d %x %d", CREATE.String(), &value, input, scope.meter.Regular())
 }
 
 func opCreate2(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) {
@@ -1026,7 +1026,6 @@ func execCreate(pc uint64, evm *EVM, scope *CallContext, value uint256.Int, inpu
 		gasChangeReason = tracing.GasChangeCallContractCreation2
 	}
 	scope.useGas(gas.Regular, evm.Config().Tracer, gasChangeReason)
-	scope.stateGas = 0 // pass reservoir to child via callGas; restoreChildGas returns it
 
 	res, addr, returnGas, childGasUsage, wasBalanceOnly, suberr := evm.Create(scope.Contract.Address(), input, gas, value, salt, false)
 	scope.Contract.selfBalanceCached = false
@@ -1047,25 +1046,21 @@ func execCreate(pc uint64, evm *EVM, scope *CallContext, value uint256.Int, inpu
 	}
 	scope.Stack.push(result)
 
-	scope.restoreChildGas(returnGas, evm.config.Tracer)
+	var childSpill uint64
+	if evm.chainRules.IsAmsterdam && suberr == nil {
+		childSpill = childGasUsage.StateSpill
+	}
+	scope.restoreChildGas(returnGas, childSpill, evm.config.Tracer)
 
 	if evm.chainRules.IsAmsterdam {
 		if suberr != nil {
 			// EIP-8037: child CREATE failed, so no account was created — refill
-			// the NEW_ACCOUNT the parent charged at CREATE entry. The child's
-			// own reservoir was already merged back via restoreChildGas above.
+			// the NEW_ACCOUNT the parent charged at CREATE entry.
 			scope.refillStateGas(params.StateGasNewAccount)
-		} else {
-			// EIP-8037: child success — its net state-gas usage is already
-			// captured via the leftover reservoir merged by restoreChildGas
-			// above; fold in only its spilled portion so an ancestor revert
-			// refills from the right pool.
-			scope.stateGasSpill += childGasUsage.StateSpill
-			if wasBalanceOnly {
-				// Target already existed and was non-empty: no new account
-				// leaf created, so refill the unconditional NEW_ACCOUNT charge.
-				scope.refillStateGas(params.StateGasNewAccount)
-			}
+		} else if wasBalanceOnly {
+			// Target already existed and was non-empty: no new account leaf
+			// created, so refill the unconditional NEW_ACCOUNT charge.
+			scope.refillStateGas(params.StateGasNewAccount)
 		}
 	}
 
@@ -1086,7 +1081,7 @@ func stCreate2(_ uint64, scope *CallContext) string {
 		input        = scope.Memory.GetCopy(offset.Uint64(), size.Uint64())
 	)
 
-	return fmt.Sprintf("%s %d %d %x %d", CREATE2.String(), &endowment, &salt, input, &scope.gas)
+	return fmt.Sprintf("%s %d %d %x %d", CREATE2.String(), &endowment, &salt, input, scope.meter.Regular())
 }
 
 func opCall(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) {
@@ -1114,7 +1109,6 @@ func opCall(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) {
 		gas.Regular += params.CallStipend
 	}
 
-	scope.stateGas = 0                             // pass reservoir to child via callGas; restoreChildGas returns it
 	newAccountCharged := evm.callNewAccountCharged // Captured before the call: nested CALL gas phases overwrite the flag.
 	ret, returnGas, childGasUsage, err := evm.Call(scope.Contract.Address(), toAddr, args, gas, value, false /* bailout */)
 	if err != nil {
@@ -1128,15 +1122,15 @@ func opCall(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) {
 		scope.Memory.Set(retOffset.Uint64(), retSize.Uint64(), ret)
 	}
 
-	scope.restoreChildGas(returnGas, evm.config.Tracer)
-	if evm.chainRules.IsAmsterdam {
-		if err == nil {
-			scope.stateGasSpill += childGasUsage.StateSpill
-		} else if newAccountCharged {
-			// EIP-8037: the value CALL charged NEW_ACCOUNT but failed, so no
-			// account was created — refill it source-based.
-			scope.refillStateGas(params.StateGasNewAccount)
-		}
+	var childSpill uint64
+	if evm.chainRules.IsAmsterdam && err == nil {
+		childSpill = childGasUsage.StateSpill
+	}
+	scope.restoreChildGas(returnGas, childSpill, evm.config.Tracer)
+	if evm.chainRules.IsAmsterdam && err != nil && newAccountCharged {
+		// EIP-8037: the value CALL charged NEW_ACCOUNT but failed, so no
+		// account was created — refill it source-based.
+		scope.refillStateGas(params.StateGasNewAccount)
 	}
 	scope.Contract.selfBalanceCached = false
 	evm.returnData = ret
@@ -1169,8 +1163,6 @@ func opCallCode(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error)
 		gas.Regular += params.CallStipend
 	}
 
-	scope.stateGas = 0 // pass reservoir to child via callGas; restoreChildGas returns it
-
 	ret, returnGas, childGasUsage, err := evm.CallCode(scope.Contract.Address(), toAddr, args, gas, value)
 	if err != nil {
 		temp.Clear()
@@ -1183,10 +1175,11 @@ func opCallCode(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error)
 		scope.Memory.Set(retOffset.Uint64(), retSize.Uint64(), ret)
 	}
 
-	scope.restoreChildGas(returnGas, evm.config.Tracer)
+	var childSpill uint64
 	if evm.chainRules.IsAmsterdam && err == nil {
-		scope.stateGasSpill += childGasUsage.StateSpill
+		childSpill = childGasUsage.StateSpill
 	}
+	scope.restoreChildGas(returnGas, childSpill, evm.config.Tracer)
 	scope.Contract.selfBalanceCached = false
 	evm.returnData = ret
 	return pc, ret, nil
@@ -1214,8 +1207,6 @@ func opDelegateCall(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, er
 	// Get arguments from the memory.
 	args := scope.Memory.GetPtr(inOffset.Uint64(), inSize.Uint64())
 
-	scope.stateGas = 0 // pass reservoir to child via callGas; restoreChildGas returns it
-
 	ret, returnGas, childGasUsage, err := evm.DelegateCall(scope.Contract.addr, scope.Contract.caller, toAddr, args, scope.Contract.value, gas)
 	if err != nil {
 		temp.Clear()
@@ -1228,10 +1219,11 @@ func opDelegateCall(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, er
 		scope.Memory.Set(retOffset.Uint64(), retSize.Uint64(), ret)
 	}
 
-	scope.restoreChildGas(returnGas, evm.config.Tracer)
+	var childSpill uint64
 	if evm.chainRules.IsAmsterdam && err == nil {
-		scope.stateGasSpill += childGasUsage.StateSpill
+		childSpill = childGasUsage.StateSpill
 	}
+	scope.restoreChildGas(returnGas, childSpill, evm.config.Tracer)
 	scope.Contract.selfBalanceCached = false
 	evm.returnData = ret
 	return pc, ret, nil
@@ -1259,8 +1251,6 @@ func opStaticCall(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, erro
 	// Get arguments from the memory.
 	args := scope.Memory.GetPtr(inOffset.Uint64(), inSize.Uint64())
 
-	scope.stateGas = 0 // pass reservoir to child via callGas; restoreChildGas returns it
-
 	ret, returnGas, childGasUsage, err := evm.StaticCall(scope.Contract.Address(), toAddr, args, gas)
 	if err != nil {
 		temp.Clear()
@@ -1272,10 +1262,11 @@ func opStaticCall(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, erro
 		scope.Memory.Set(retOffset.Uint64(), retSize.Uint64(), ret)
 	}
 
-	scope.restoreChildGas(returnGas, evm.config.Tracer)
+	var childSpill uint64
 	if evm.chainRules.IsAmsterdam && err == nil {
-		scope.stateGasSpill += childGasUsage.StateSpill
+		childSpill = childGasUsage.StateSpill
 	}
+	scope.restoreChildGas(returnGas, childSpill, evm.config.Tracer)
 	evm.returnData = ret
 	return pc, ret, nil
 }
