@@ -277,7 +277,7 @@ func (t *gloasWeightTree) removeAppliedContribution(validatorIndex uint64) {
 	if vi >= len(t.applied) || !t.applied[vi].set {
 		return
 	}
-	t.addDirectContribution(t.applied[vi].message, ^(t.applied[vi].contribution - 1))
+	t.addDirectContribution(t.applied[vi].message, -t.applied[vi].contribution)
 	t.applied[vi] = gloasVoteContribution{}
 }
 
@@ -396,7 +396,11 @@ func (t *gloasWeightTree) ShouldApplyProposerBoost() bool {
 		return false
 	}
 	t.boost = t.f.shouldApplyProposerBoostGloasWith(proposerBoostRoot, func(root common.Hash) bool {
+		fullScan := weightStore{f: t.f, checkpointState: t.state}
 		return t.f.isHeadWeakWith(root, t.state, func(root common.Hash) uint64 {
+			if t.nodes[root] == nil {
+				return fullScan.GetAttestationScore(ForkChoiceNode{Root: root, PayloadStatus: cltypes.PayloadStatusPending})
+			}
 			return t.GetAttestationScore(ForkChoiceNode{Root: root, PayloadStatus: cltypes.PayloadStatusPending})
 		})
 	})

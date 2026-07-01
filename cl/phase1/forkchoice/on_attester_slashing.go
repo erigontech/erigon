@@ -107,8 +107,9 @@ func (f *ForkChoiceStore) onProcessAttesterSlashing(attesterSlashing *cltypes.At
 	}
 
 	var anySlashed bool
+	trackGloasWeights := f.trackGloasWeights()
 	for _, index := range solid.IntersectionOfSortedSets(attestation1.AttestingIndices, attestation2.AttestingIndices) {
-		f.setUnequivocating(index)
+		f.setUnequivocating(index, trackGloasWeights)
 		if !anySlashed {
 			v, err := s.ValidatorForValidatorIndex(int(index))
 			if err != nil {

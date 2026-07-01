@@ -59,10 +59,28 @@ func TestPreGloasDoesNotDirtyGloasWeightTree(t *testing.T) {
 func TestPreGloasEquivocationDoesNotDirtyGloasWeightTree(t *testing.T) {
 	f := newGloasWeightTreeTestStore()
 
-	f.setUnequivocating(4)
+	f.setUnequivocating(4, f.trackGloasWeights())
 
 	require.True(t, f.isUnequivocating(4))
 	require.Empty(t, f.gloasWeightTree.dirty)
+}
+
+func TestGloasEpochEquivocationDirtiesWeightTree(t *testing.T) {
+	f := newGloasWeightTreeTestStore()
+	cfg := *f.beaconCfg
+	cfg.AltairForkEpoch = 0
+	cfg.BellatrixForkEpoch = 0
+	cfg.CapellaForkEpoch = 0
+	cfg.DenebForkEpoch = 0
+	cfg.ElectraForkEpoch = 0
+	cfg.FuluForkEpoch = 0
+	cfg.GloasForkEpoch = 0
+	f.beaconCfg = &cfg
+
+	f.setUnequivocating(4, f.trackGloasWeights())
+
+	require.True(t, f.isUnequivocating(4))
+	require.Contains(t, f.gloasWeightTree.dirty, uint64(4))
 }
 
 func TestGloasMarksDirtyWeightTree(t *testing.T) {
@@ -162,7 +180,7 @@ func TestGloasWeightTreeEquivocationDeltaMatchesFullScan(t *testing.T) {
 	}
 	require.True(t, found)
 
-	f.setUnequivocating(validatorIndex)
+	f.setUnequivocating(validatorIndex, true)
 	tree = f.gloasWeightTree.prepare(justified, cs)
 
 	require.Equal(t, NewWeightStore(f).GetAttestationScore(node), tree.GetAttestationScore(node))
@@ -191,12 +209,13 @@ func TestGloasWeightTreeFirstPrepareIncludesPreReadyEquivocation(t *testing.T) {
 	}
 	require.True(t, found)
 
-	f.setUnequivocating(validatorIndex)
-	require.Empty(t, f.gloasWeightTree.dirty)
+	f.setUnequivocating(validatorIndex, true)
+	require.Contains(t, f.gloasWeightTree.dirty, validatorIndex)
 
 	tree := f.gloasWeightTree.prepare(justified, cs)
 
 	require.Equal(t, NewWeightStore(f).GetAttestationScore(node), tree.GetAttestationScore(node))
+	require.Empty(t, f.gloasWeightTree.dirty)
 }
 
 func TestGloasWeightTreeRebuildsOnCheckpointStateChange(t *testing.T) {
@@ -281,5 +300,36 @@ func TestOnNewFinalizedPrunesGloasWeightTree(t *testing.T) {
 	f.onNewFinalized(solid.Checkpoint{Epoch: 1, Root: rootC2})
 
 	require.NotContains(t, f.gloasWeightTree.nodes, rootC2)
+	require.True(t, f.gloasWeightTree.allDirty)
+}
+
+func TestGloasWeightTreePruneFinalizedDropsBoundaryAndUnknownRoots(t *testing.T) {
+	f := buildExAnteStore(t)
+	justified := f.justifiedCheckpoint.Load().(solid.Checkpoint)
+	cs, err := f.getCheckpointState(justified)
+	require.NoError(t, err)
+	require.NotNil(t, cs)
+
+	_, rootC2 := decodeDiffBlock(t, diffBlockc2Enc)
+
+	f.mu.Lock()
+	defer f.mu.Unlock()
+
+	f.gloasWeightTree.prepare(justified, cs)
+	require.Contains(t, f.gloasWeightTree.nodes, rootC2)
+	header, hasHeader := f.forkGraph.GetHeader(rootC2)
+	require.True(t, hasHeader)
+	require.NotZero(t, header.Slot)
+
+	f.gloasWeightTree.pruneFinalized(header.Slot - 1)
+	require.Contains(t, f.gloasWeightTree.nodes, rootC2)
+
+	unknownRoot := common.HexToHash("0xdeadbeef")
+	f.gloasWeightTree.nodes[unknownRoot] = &gloasWeightNode{root: unknownRoot}
+
+	f.gloasWeightTree.pruneFinalized(header.Slot)
+
+	require.NotContains(t, f.gloasWeightTree.nodes, rootC2)
+	require.NotContains(t, f.gloasWeightTree.nodes, unknownRoot)
 	require.True(t, f.gloasWeightTree.allDirty)
 }

@@ -43,8 +43,6 @@ func (f *ForkChoiceStore) onTickPerSlot(time uint64) {
 	f.mu.Lock()
 	f.headHash = common.Hash{}
 	f.headPayloadStatus = cltypes.PayloadStatusPending
-	f.mu.Unlock()
-	// If this is a new slot, reset store.proposer_boost_root
 	f.proposerBoostRoot.Store(common.Hash{})
 	if f.computeSlotsSinceEpochStart(currentSlot) == 0 {
 		// Only promote unrealized checkpoints when the node is synced (processing
@@ -57,4 +55,5 @@ func (f *ForkChoiceStore) onTickPerSlot(time uint64) {
 			f.updateCheckpoints(f.unrealizedJustifiedCheckpoint.Load().(solid.Checkpoint), f.unrealizedFinalizedCheckpoint.Load().(solid.Checkpoint))
 		}
 	}
+	f.mu.Unlock()
 }
