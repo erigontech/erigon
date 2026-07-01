@@ -161,7 +161,7 @@ func TestIntegrateDirtyFile(t *testing.T) {
 	err := repo.OpenFolder()
 	require.NoError(t, err)
 
-	filesItem := newFilesItemWithSnapConfig(0, 1024, repo.cfg)
+	filesItem := newFilesItem(0, 1024)
 	filename, _ := repo.schema.DataFile(version.V1_0, 0, 1024)
 	comp, err := seg.NewCompressor(t.Context(), t.Name(), filename, dirs.Tmp, seg.DefaultCfg, log.LvlDebug, log.New())
 	require.NoError(t, err)
@@ -495,7 +495,7 @@ func TestRecalcVisibleFilesAfterMerge(t *testing.T) {
 		items := repo.FilesInRange(mr, vf) // vf passed should ideally from rotx, but doesn't matter here
 		require.Len(t, items, nFilesInRange)
 
-		merged := newFilesItemWithSnapConfig(mr.from, mr.to, repo.cfg)
+		merged := newFilesItem(mr.from, mr.to)
 		repo.IntegrateDirtyFile(merged)
 		dirEntries, err := filesFromDir(repo.schema.DataDirectory())
 		require.NoError(t, err)
