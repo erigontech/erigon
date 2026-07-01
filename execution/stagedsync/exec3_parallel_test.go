@@ -1349,3 +1349,41 @@ func BenchmarkDexScenarioWithMetadata(b *testing.B) {
 
 	testExecutorCombWithMetadata(b, totalTxs, numReads, numWrites, numNonIO, taskRunner, logger)
 }
+
+func TestFailCandidate_Consider(t *testing.T) {
+	commitErr := func(b uint64) error { return fmt.Errorf("wrong root block %d", b) }
+	execErr := func(b uint64) error { return fmt.Errorf("invalid block %d", b) }
+
+	t.Run("earliest block wins across streams regardless of arrival order", func(t *testing.T) {
+		var fc failCandidate
+		fc.consider(8, true, execErr(8))    // exec-fail at 8 seen first
+		fc.consider(5, false, commitErr(5)) // earlier commit-fail at 5 seen later
+		assert.True(t, fc.set)
+		assert.Equal(t, uint64(5), fc.block)
+		assert.False(t, fc.exec)
+	})
+
+	t.Run("same block: exec verdict supersedes commit wrong-root", func(t *testing.T) {
+		var fc failCandidate
+		fc.consider(7, false, commitErr(7))
+		fc.consider(7, true, execErr(7))
+		assert.Equal(t, uint64(7), fc.block)
+		assert.True(t, fc.exec)
+	})
+
+	t.Run("a later commit-fail does not override an earlier exec-fail", func(t *testing.T) {
+		var fc failCandidate
+		fc.consider(4, true, execErr(4))
+		fc.consider(9, false, commitErr(9))
+		assert.Equal(t, uint64(4), fc.block)
+		assert.True(t, fc.exec)
+	})
+
+	t.Run("a later same-block commit-fail does not downgrade an exec-fail", func(t *testing.T) {
+		var fc failCandidate
+		fc.consider(6, true, execErr(6))
+		fc.consider(6, false, commitErr(6))
+		assert.Equal(t, uint64(6), fc.block)
+		assert.True(t, fc.exec)
+	})
+}

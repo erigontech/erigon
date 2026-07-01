@@ -999,58 +999,7 @@ func TestApplyLoopFlush_InvalidTxWritesAreEstimate(t *testing.T) {
 			"OCC must still see it as a dependency")
 }
 
-// Pins processCommitErr: first ErrWrongTrieRoot must cancel the executor
-// (so the exec loop stops dispatching follow-on blocks on top of
-// known-wrong state — issue #21676) AND defer the err so a later
-// applyResult carrying ErrInvalidBlock can supersede it. Subsequent
-// ErrWrongTrieRoots must NOT re-cancel or overwrite the stash. Non-trie-
-// root errors are fast-fail.
-func TestProcessCommitErr(t *testing.T) {
-	wrong5 := fmt.Errorf("%w, block=5", ErrWrongTrieRoot)
-	wrong6 := fmt.Errorf("%w, block=6", ErrWrongTrieRoot)
-	fastFail := errors.New("commitment compute panic")
-
-	t.Run("nil err passes through", func(t *testing.T) {
-		var cancelCalls atomic.Int32
-		var stash error
-		require.NoError(t, processCommitErr(nil, func() { cancelCalls.Add(1) }, &stash))
-		require.Zero(t, cancelCalls.Load())
-		require.Nil(t, stash)
-	})
-
-	t.Run("first ErrWrongTrieRoot cancels and stashes", func(t *testing.T) {
-		var cancelCalls atomic.Int32
-		var stash error
-		require.NoError(t, processCommitErr(wrong5, func() { cancelCalls.Add(1) }, &stash))
-		require.Equal(t, int32(1), cancelCalls.Load(), "first ErrWrongTrieRoot must cancel exactly once")
-		require.ErrorIs(t, stash, ErrWrongTrieRoot)
-		require.Equal(t, wrong5.Error(), stash.Error())
-	})
-
-	t.Run("second ErrWrongTrieRoot does NOT re-cancel and does NOT overwrite", func(t *testing.T) {
-		var cancelCalls atomic.Int32
-		var stash error
-		require.NoError(t, processCommitErr(wrong5, func() { cancelCalls.Add(1) }, &stash))
-		require.Equal(t, int32(1), cancelCalls.Load())
-
-		require.NoError(t, processCommitErr(wrong6, func() { cancelCalls.Add(1) }, &stash))
-		require.Equal(t, int32(1), cancelCalls.Load(),
-			"only the first ErrWrongTrieRoot may signal cancel; subsequent ones are no-ops")
-		require.Equal(t, wrong5.Error(), stash.Error(),
-			"stash records the first failure; later trie-root errors must not overwrite")
-	})
-
-	t.Run("non-trie-root err is returned without cancel or stash", func(t *testing.T) {
-		var cancelCalls atomic.Int32
-		var stash error
-		err := processCommitErr(fastFail, func() { cancelCalls.Add(1) }, &stash)
-		require.Same(t, fastFail, err, "non-trie-root errors must pass through unchanged")
-		require.Zero(t, cancelCalls.Load(), "non-trie-root errors must not signal cancel")
-		require.Nil(t, stash, "non-trie-root errors must not be stashed")
-	})
-}
-
-// Pins the close-branch precedence: deferredRootErr must surface ahead of
+// Pins the close-branch precedence: the deferred failure must surface ahead of
 // the missing-blocks completeness error, otherwise a deliberate cancel masks
 // ErrWrongTrieRoot behind a generic ErrInvalidBlock. The closure mirrors the
 // production order — keep them in lock-step.

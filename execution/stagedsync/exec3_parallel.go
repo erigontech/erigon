@@ -360,15 +360,19 @@ func (pe *parallelExecutor) execImpl(ctx context.Context, execStage *StageState,
 		// would hang forever.
 		rootResultsClosed := false
 
-		// deferredRootErr stashes ErrWrongTrieRoot from the calculator so a
-		// later blockResult's post-execution validator (bad gas used, bad
-		// receipts, bad bloom, etc.) can supersede it. Block-validation
-		// errors take precedence over trie-root mismatches: a tx returning
-		// the wrong error category here breaks eest's validation taxonomy
-		// (the test expects the specific block-level error, not the
-		// downstream trie consequence). Surfaced only after applyResults
-		// closes and no block-validation error fired.
-		var deferredRootErr error
+		// fail tracks the earliest block-validity failure across the exec
+		// (blockResult.Err) and commit (ErrWrongTrieRoot) streams. Block-
+		// validation errors take precedence over trie-root mismatches on the
+		// same block: a wrong error category breaks eest's validation taxonomy.
+		// With fold-ahead a commit wrong-root can arrive before the block's exec
+		// verdict, so it is recorded and surfaced only after applyResults closes
+		// (once exec has had its say) — see failCandidate.consider.
+		var fail failCandidate
+		// finalized flips once the reported failure is decided (an exec verdict,
+		// or exec cleanly passing the block a commit wrong-root was deferred on).
+		// Remaining results are then drained without re-validation so a post-
+		// cancel block can't mask the recorded failure.
+		finalized := false
 
 		// blockUpdateCount/blockApplyCount count individual VersionedWrite entries
 		// (balance, nonce, incarnation, codeHash, code, storage, selfDestruct are
@@ -407,15 +411,25 @@ func (pe *parallelExecutor) execImpl(ctx context.Context, execStage *StageState,
 			return nil
 		}
 
-		// processCommit defers ErrWrongTrieRoot via processCommitErr so a
-		// same-block ErrInvalidBlock can supersede it; the first occurrence
-		// cancels the executor with errDeliberateStop, so later blocks'
-		// verdicts may not be produced. Uses the light context-cancel — teardown
-		// (stopWorkers + wait) stays with execImpl's deferred executorCancel so
-		// only the main goroutine drives cleanup.
+		// deliberateCancel is the light context-cancel — teardown (stopWorkers +
+		// wait) stays with execImpl's deferred executorCancel so only the main
+		// goroutine drives cleanup.
 		deliberateCancel := func() { pe.cancelExecLoop(errDeliberateStop) }
+		// processCommit records a commit failure. A wrong-root is deferred into
+		// `fail` (not acted on) so the block's own exec verdict can supersede it;
+		// it deliberately does NOT cancel — cancelling here would abort the block
+		// before exec produces its authoritative verdict. Non-wrong-root commit
+		// errors (lazy-load / compute) are infrastructure faults, so fast-fail.
 		processCommit := func(cr commitmentResult) error {
-			return processCommitErr(handleCommitResult(cr), deliberateCancel, &deferredRootErr)
+			err := handleCommitResult(cr)
+			if err == nil {
+				return nil
+			}
+			if !errors.Is(err, ErrWrongTrieRoot) {
+				return err
+			}
+			fail.consider(cr.blockNum, false, err)
+			return nil
 		}
 
 		// Apply loop: exits ONLY when applyResults is closed by the exec loop.
@@ -470,11 +484,11 @@ func (pe *parallelExecutor) execImpl(ctx context.Context, execStage *StageState,
 					// lastBlockResult+1 in a follow-up call. Each block still executes
 					// exactly once across the two batches, so we deliberately do NOT
 					// flag maxBlockNum-not-applied here.
-					// Surface deferredRootErr ahead of the missing-blocks
-					// check: a deliberate cancel manufactures a missing-block
-					// condition that would otherwise mask ErrWrongTrieRoot.
-					if deferredRootErr != nil {
-						return deferredRootErr
+					// Surface the earliest recorded failure ahead of the
+					// missing-blocks check: a deliberate cancel manufactures a
+					// missing-block condition that would otherwise mask it.
+					if fail.set {
+						return fail.err
 					}
 					if missing := applyLoopMissingBlocks(txResultBlocks, appliedBlocks); len(missing) > 0 {
 						return fmt.Errorf("%w: apply loop exited (reachedMaxBlock=%v lastBlockResult=%d maxBlockNum=%d) but %d block(s) had tx-results without a blockResult: %v",
@@ -518,25 +532,28 @@ func (pe *parallelExecutor) execImpl(ctx context.Context, execStage *StageState,
 					blockApplyCount += len(applyResult.writes)
 					pe.rs.SetTrace(false)
 				case *blockResult:
+					if finalized {
+						appliedBlocks[applyResult.BlockNum] = struct{}{}
+						continue
+					}
 					// Apply loop is the canonical error-emission point for
 					// block-validity rejections (insufficient funds, gas
 					// overflow, finalize rejection, scheduler-exhausted
 					// incarnations). The worker plumbs the diagnosis through
 					// blockResult.Err via nextResult → processResults → the
-					// exec loop's sendResult — and the exec loop exits
-					// immediately after sending (see the matching guard in
-					// the exec loop). The calculator skips its compute for
-					// this block (see committer.go case *blockResult). So
-					// here, on the apply side: mark the block applied (so
-					// the channel-close completeness check doesn't
-					// double-report as silent miss), drop pending
-					// accumulator notifications (we never announce invalid
-					// blocks), and surface the worker's err. Single emission
-					// point — no errors.Join of competing diagnostics.
+					// exec loop's sendResult, then exits on its own. Record the
+					// exec verdict (it wins its block over a commit wrong-root)
+					// and keep draining so an earlier commit wrong-root still in
+					// rootResults can supersede it; the earliest recorded failure
+					// is returned at channel-close. No cancel here — the exec loop
+					// self-exits after an errored block, and cancelling would join
+					// context.Canceled onto the reported error.
 					if applyResult.Err != nil {
 						appliedBlocks[applyResult.BlockNum] = struct{}{}
 						pendingAccumulatorWrites = pendingAccumulatorWrites[:0]
-						return applyResult.Err
+						fail.consider(applyResult.BlockNum, true, applyResult.Err)
+						finalized = true
+						continue
 					}
 					// StartChange + NotifyAccumulator must both run in the apply
 					// goroutine — keeps all accumulator access single-threaded
@@ -627,6 +644,15 @@ func (pe *parallelExecutor) execImpl(ctx context.Context, execStage *StageState,
 					// expected [startBlockNum, maxBlockNum] range to detect
 					// "block silently missed".
 					appliedBlocks[applyResult.BlockNum] = struct{}{}
+
+					// If a commit wrong-root was deferred for this (or an earlier)
+					// block, exec has now applied it cleanly — exec agrees the
+					// block is valid, so the divergence is real. Finalize on that
+					// earliest block and stop dispatching further work.
+					if fail.set && !fail.exec && applyResult.BlockNum >= fail.block {
+						finalized = true
+						deliberateCancel()
+					}
 
 					// SavePastChangesetAccumulator + SetChangesetAccumulator(nil) +
 					// rotation-to-next-block accumulator are all driven by the exec
@@ -1212,25 +1238,25 @@ func applyLoopFlushAsComplete(valid bool, cntInvalid int) bool {
 	return valid && cntInvalid == 0
 }
 
-// processCommitErr decides what the apply loop's commit-handler call site
-// should do with the err returned by handleCommitResult. ErrWrongTrieRoot is
-// stashed in *deferredRootErr (so a later applyResult carrying
-// ErrInvalidBlock can supersede it) and cancel() is invoked once on the
-// first occurrence so the exec loop stops dispatching further blocks on top
-// of a state we already know is wrong. Any other err is returned as-is for
-// fast-fail.
-func processCommitErr(err error, cancel context.CancelFunc, deferredRootErr *error) error {
-	if err == nil {
-		return nil
+// failCandidate is the apply loop's running "worst" block-validity failure across
+// the exec (blockResult.Err) and commit (ErrWrongTrieRoot) streams. Fold-ahead
+// lets a commit failure for block N be observed before N's exec verdict, so the
+// loop can no longer assume exec is seen first; the kept failure is chosen by
+// block number, with exec outranking commit on the same block.
+type failCandidate struct {
+	err   error
+	block uint64
+	exec  bool // exec verdict (specific, authoritative) vs commit wrong-root (generic)
+	set   bool
+}
+
+// consider merges a newly observed failure. The reported failure is the one at
+// the earliest block; on the same block an exec verdict wins, because it carries
+// the specific validation error while the commit side only sees the wrong root.
+func (fc *failCandidate) consider(block uint64, exec bool, err error) {
+	if !fc.set || block < fc.block || (block == fc.block && exec && !fc.exec) {
+		fc.err, fc.block, fc.exec, fc.set = err, block, exec, true
 	}
-	if errors.Is(err, ErrWrongTrieRoot) {
-		if *deferredRootErr == nil {
-			*deferredRootErr = err
-			cancel()
-		}
-		return nil
-	}
-	return err
 }
 
 // wrapAsExecAbort wraps origErr in ErrExecAbortError unless it already is one,
