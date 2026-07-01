@@ -246,10 +246,6 @@ func (pe *parallelExecutor) execImpl(ctx context.Context, execStage *StageState,
 	pe.rs.Domains().SetInMemHistoryReads(true)
 	defer pe.rs.Domains().SetInMemHistoryReads(prevInMemHistoryReads)
 
-	// Skip step-boundary commitment — the calculator handles this.
-	pe.rs.StateV3.SetSkipStepBoundaryCommitment(true)
-	defer pe.rs.StateV3.SetSkipStepBoundaryCommitment(false)
-
 	// Store channels and limits on pe so execLoop can access them.
 	pe.applyResultsCh = applyResults
 	pe.commitResultsCh = commitResults
