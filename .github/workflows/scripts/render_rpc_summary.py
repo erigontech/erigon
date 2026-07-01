@@ -2,16 +2,12 @@
 """Render a GitHub Actions job summary for the QA RPC integration tests.
 
 Reads the structured report the rpc-tests runner writes
-(``results/test_report.json``) and prints Markdown for the run summary page: a
-result badge, an overall stats table, and a table of the tests that failed.
-
-When the report is absent — an older runner that doesn't emit it, or a run that
-died during setup before producing it — it falls back to the pass/fail badge
-plus a size-capped tail of ``output.log``. It does not parse console text, so a
-change to the runner's output format cannot make it show a wrong result.
-
-The pass/fail verdict always comes from ``--result`` (the test step's exit code).
-The script never fails the job: it always exits 0 and always prints something.
+(``results/test_report.json``) into Markdown: a result badge, a stats table, and
+a table of failed tests. With no report, falls back to the badge plus a
+size-capped ``output.log`` tail. No console-text parsing, so a runner
+output-format change cannot make it show a wrong result. The verdict always
+comes from ``--result`` (the test step's exit code); the script never fails the
+job and always prints something.
 """
 import argparse
 import json
@@ -21,8 +17,8 @@ import sys
 STEP_SUMMARY_CAP = 900 * 1024
 LOG_TAIL_MAX_BYTES = 100 * 1024
 ERROR_MSG_MAXLEN = 240
-MAX_FAILURES_DEFAULT = 200
-LOG_TAIL_LINES_DEFAULT = 200
+MAX_FAILURES = 200
+LOG_TAIL_LINES = 200
 
 
 def badge(result):
@@ -39,10 +35,6 @@ def find_file(result_dir, *relatives):
         p = os.path.join(result_dir, rel)
         if os.path.isfile(p):
             return p
-    target = os.path.basename(relatives[-1])
-    for root, _, files in os.walk(result_dir):
-        if target in files:
-            return os.path.join(root, target)
     return None
 
 
@@ -107,14 +99,14 @@ def render(args):
             out += [f"## ❌ Failed tests ({len(failed)})", ""]
             out += ["By transport: " + ", ".join(f"`{t}` {n}" for t, n in sorted(by_transport.items())), ""]
             out += ["| # | Test | Transport | Error |", "| ---: | --- | --- | --- |"]
-            for i, f in enumerate(failed[: args.max_failures], 1):
+            for i, f in enumerate(failed[:MAX_FAILURES], 1):
                 name = one_line(f.get("test_name", ""), 120)
                 transport = one_line(f.get("transport_type", ""), 20)
                 err = one_line(f.get("error_message", ""), ERROR_MSG_MAXLEN) or "—"
                 out.append(f"| {i} | {name} | {transport} | {err} |")
             out.append("")
-            if len(failed) > args.max_failures:
-                out += [f"> …and {len(failed) - args.max_failures} more — see the `test-results` artifact.", ""]
+            if len(failed) > MAX_FAILURES:
+                out += [f"> …and {len(failed) - MAX_FAILURES} more — see the `test-results` artifact.", ""]
         elif (args.result or "").lower() != "failure":
             out += ["✅ All executed tests passed.", ""]
     else:
@@ -123,7 +115,7 @@ def render(args):
                 "per-test detail is in the `output.log` below and the `test-results` artifact.", ""]
 
     if log_path:
-        tail, clipped = read_log_tail(log_path, args.log_tail_lines, LOG_TAIL_MAX_BYTES)
+        tail, clipped = read_log_tail(log_path, LOG_TAIL_LINES, LOG_TAIL_MAX_BYTES)
         if tail:
             open_attr = " open" if ((args.result or "").lower() == "failure" and not report) else ""
             out += [f"<details{open_attr}><summary>output.log{' (tail)' if clipped else ''}</summary>", "",
@@ -147,8 +139,6 @@ def main():
     parser.add_argument("--chain", default="")
     parser.add_argument("--result", default="unknown", help="success | failure | unknown")
     parser.add_argument("--title-suffix", default="", help="Extra title context, e.g. the client name")
-    parser.add_argument("--max-failures", type=int, default=MAX_FAILURES_DEFAULT)
-    parser.add_argument("--log-tail-lines", type=int, default=LOG_TAIL_LINES_DEFAULT)
     args = parser.parse_args()
 
     try:

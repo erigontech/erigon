@@ -22,7 +22,7 @@ failed = 0
 
 def render(tmp, result="failure", **kw):
     args = SimpleNamespace(result_dir=tmp, workflow="QA - RPC Integration Tests", chain="mainnet",
-                           result=result, title_suffix="", max_failures=200, log_tail_lines=50)
+                           result=result, title_suffix="")
     for k, v in kw.items():
         setattr(args, k, v)
     return mod.render(args)
@@ -95,7 +95,7 @@ def case_setup_failure():
 
 def case_missing_dir():
     out = mod.render(SimpleNamespace(result_dir=os.path.join(HERE, "nope"), workflow="W", chain="",
-                                     result="failure", title_suffix="", max_failures=5, log_tail_lines=5))
+                                     result="failure", title_suffix=""))
     check("missing-dir: still shows badge", "❌ failure" in out)
 
 
