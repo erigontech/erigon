@@ -400,6 +400,7 @@ func (ba *BlockAssembler) AssembleBlock(stateReader state.StateReader, ibs *stat
 		// Record finalize system call I/O (EIP-7002, EIP-7251, etc.)
 		ibs.MergeTxIOInto(ba.balIO)
 		ibs.ResetVersionedIO()
+		ba.balIO.SetEIP8246(ba.cfg.ChainConfig.IsAmsterdam(header.Time) && !ba.cfg.ChainConfig.IsEIPDisabled(8246))
 		ba.BlockAccessList = ba.balIO.AsBlockAccessList()
 		// Only embed the BAL hash in the header for Amsterdam+ chains.
 		// For pre-Amsterdam chains with ExperimentalBAL, the BAL is computed

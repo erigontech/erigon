@@ -875,22 +875,13 @@ func versionedRead[T any](s *IntraBlockState, addr accounts.Address, path Accoun
 			revived = true
 		}
 		if !revived && path != CodePath {
-			// A prior tx self-destructed this account — all state reads must
-			// return the zero value of the type, not the caller-supplied default.
-			// refreshVersionedAccount passes the account's pre-destruction field
-			// values as defaultV, so using defaultV here would return stale data.
-			var zero T
 			sdVersion := Version{TxIndex: destructTxIndex, Incarnation: res.Incarnation()}
-			if commited {
-				return zero, MapRead, sdVersion, nil
-			}
-			if vw, ok := s.versionedWrite(addr, SelfDestructPath, key); !ok || vw.Val.(bool) {
-				// Record the SelfDestructPath dependency so that
-				// ValidateVersion can verify the destruct is still
-				// valid.  Without this entry the readSet would be
-				// empty for the affected address, and validation
-				// would have nothing to cross-check — allowing
-				// skipCheck to commit stale results.
+			if s.eip8246 && !commited && (path == BalancePath || path == CodeHashPath || path == IncarnationPath) {
+				// EIP-8246 removes the SELFDESTRUCT burn: a destroyed account
+				// keeps its balance and stays alive (empty code, wiped storage),
+				// so a concurrent reader must see the live account, not a zeroed
+				// one. Record the SelfDestructPath dependency for validation,
+				// then fall through to the actual (post-SD) value.
 				if s.versionedReads == nil {
 					s.versionedReads = ReadSet{}
 				}
@@ -902,10 +893,38 @@ func versionedRead[T any](s *IntraBlockState, addr accounts.Address, path Accoun
 					Version: sdVersion,
 					Val:     true,
 				})
-				return zero, MapRead, sdVersion, nil
-			}
-			destrcutedVersion = Version{
-				TxIndex: destructTxIndex,
+			} else {
+				// A prior tx self-destructed this account — all state reads must
+				// return the zero value of the type, not the caller-supplied default.
+				// refreshVersionedAccount passes the account's pre-destruction field
+				// values as defaultV, so using defaultV here would return stale data.
+				var zero T
+				if commited {
+					return zero, MapRead, sdVersion, nil
+				}
+				if vw, ok := s.versionedWrite(addr, SelfDestructPath, key); !ok || vw.Val.(bool) {
+					// Record the SelfDestructPath dependency so that
+					// ValidateVersion can verify the destruct is still
+					// valid.  Without this entry the readSet would be
+					// empty for the affected address, and validation
+					// would have nothing to cross-check — allowing
+					// skipCheck to commit stale results.
+					if s.versionedReads == nil {
+						s.versionedReads = ReadSet{}
+					}
+					s.versionedReads.Set(VersionedRead{
+						Address: addr,
+						Path:    SelfDestructPath,
+						Key:     accounts.NilKey,
+						Source:  MapRead,
+						Version: sdVersion,
+						Val:     true,
+					})
+					return zero, MapRead, sdVersion, nil
+				}
+				destrcutedVersion = Version{
+					TxIndex: destructTxIndex,
+				}
 			}
 		}
 	}
@@ -1224,6 +1243,13 @@ type VersionedIO struct {
 	inputs   []versionedReadSet
 	outputs  []VersionedWrites // write sets that should be checked during validation
 	accessed []AccessSet
+	eip8246  bool // EIP-8246: SELFDESTRUCT no longer burns, so a same-tx SD account keeps its balance in the BAL
+}
+
+func (io *VersionedIO) SetEIP8246(v bool) {
+	if io != nil {
+		io.eip8246 = v
+	}
 }
 
 func NewVersionedIO(numTx int) *VersionedIO {
@@ -1436,7 +1462,7 @@ func (io *VersionedIO) AsBlockAccessList() types.BlockAccessList {
 			}
 			account := ensureAccountState(ac, vw.Address)
 			accessIndex := vw.Version.blockAccessIndex()
-			account.updateWrite(vw, accessIndex)
+			account.updateWrite(vw, accessIndex, io.eip8246)
 		}
 
 		isUserTx := txIndex >= 0
@@ -1620,7 +1646,7 @@ func ensureAccountState(accounts map[accounts.Address]*accountState, addr accoun
 	return account
 }
 
-func (account *accountState) updateWrite(vw *VersionedWrite, accessIndex uint32) {
+func (account *accountState) updateWrite(vw *VersionedWrite, accessIndex uint32, eip8246 bool) {
 	switch vw.Path {
 	case StoragePath:
 		if val, ok := vw.Val.(uint256.Int); ok {
@@ -1636,8 +1662,9 @@ func (account *accountState) updateWrite(vw *VersionedWrite, accessIndex uint32)
 		// tx — a transfer to the pending-destroyed account, or the finalize-time
 		// priority fee — burns when the account is destroyed at end of tx, so per
 		// EIP-7928 its post-tx balance is zero. Writes from LATER transactions are
-		// real state changes and pass through unchanged.
-		if account.selfDestructed && accessIndex == account.selfDestructedAt && !val.IsZero() {
+		// real state changes and pass through unchanged. EIP-8246 removes the
+		// burn, so the preserved balance stays.
+		if !eip8246 && account.selfDestructed && accessIndex == account.selfDestructedAt && !val.IsZero() {
 			val.Clear()
 		}
 		// If we haven't seen a balance and the first write is zero, treat it

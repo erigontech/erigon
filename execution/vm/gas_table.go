@@ -497,6 +497,7 @@ func statefulGasCall(evm *EVM, callContext *CallContext, gas mdgas.MdGas, availa
 	var accountGas, stateGas uint64
 	var address = accounts.InternAddress(callContext.Stack.Back(1).Bytes20())
 	rules := evm.ChainRules()
+	evm.callNewAccountCharged = false
 	if rules.IsSpuriousDragon {
 		empty, err := evm.IntraBlockState().Empty(address)
 		if err != nil {
@@ -509,6 +510,7 @@ func statefulGasCall(evm *EVM, callContext *CallContext, gas mdgas.MdGas, availa
 		if transfersValue && empty {
 			if rules.IsAmsterdam {
 				stateGas = params.StateGasNewAccount
+				evm.callNewAccountCharged = true
 			} else {
 				accountGas = params.CallNewAccountGas
 			}
