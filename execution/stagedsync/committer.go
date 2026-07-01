@@ -251,15 +251,9 @@ func (cc *commitmentCalculator) loop(ctx context.Context) {
 	// Context cancellation is handled by the exec loop which closes
 	// cc.in after stopping.
 	//
-	// blockRequests is multiplexed alongside cc.in so a blockRequest never
-	// waits behind a block's txResults. When it closes (dispatch done) it
-	// is set to nil so the select ignores it. The loop is gated on cc.in
-	// alone: a blockRequest is only a heads-up for fold-ahead, and any still
-	// buffered when cc.in closes is for a block whose result was already
-	// processed (so it computed incrementally — correct) or one that never
-	// executed. Draining them after cc.in closes would be wrong, not right:
-	// handleBlockRequest would re-fold a block already finalized at its
-	// boundary (foldedAhead was cleared there), recomputing committed state.
+	// blockRequests is multiplexed but not a gate: it is only a fold-ahead
+	// heads-up, and draining leftovers after cc.in closes would re-fold
+	// already-finalized blocks. It is set to nil once closed.
 	in, reqs := cc.in, cc.blockRequests
 	for in != nil {
 		select {
@@ -289,7 +283,7 @@ func (cc *commitmentCalculator) handleBlockRequest(ctx context.Context, req *blo
 		cc.hasFirstBlock = true
 	}
 	mode := calcModeIncremental
-	if req.bal != nil && !dbg.IgnoreBAL && dbg.BALDrivenCommitment {
+	if len(req.bal) > 0 && !dbg.IgnoreBAL && dbg.BALDrivenCommitment {
 		mode = calcModeBALDriven
 	}
 	cc.pending[req.blockNum] = &pendingBlock{req: req, mode: mode}
@@ -378,6 +372,16 @@ func (cc *commitmentCalculator) computeRoot(ctx context.Context, br *blockResult
 	return cc.computeWithBlockAccumulator(ctx, br)
 }
 
+// flushAndComputeRoot flushes the incremental accumulator into a fresh updates
+// buffer and computes block br's root from it via computeRoot.
+func (cc *commitmentCalculator) flushAndComputeRoot(ctx context.Context, br *blockResult) ([]byte, error) {
+	cc.state.FlushToUpdates(cc.updates)
+	cc.state.ResetBlockFlags()
+	incUpdates := cc.updates
+	cc.updates = cc.updates.NewEmpty()
+	return cc.computeRoot(ctx, br, incUpdates, cc.asOfReader)
+}
+
 // shadowCrossCheck recomputes block N the incremental way and asserts the
 // root matches the BAL-driven root folded ahead by foldBlockFromBAL — the
 // dual-compute consistency net. Divergence fails the block. Publishes the
@@ -388,11 +392,7 @@ func (cc *commitmentCalculator) shadowCrossCheck(ctx context.Context, r *blockRe
 		cc.fail(ctx, r, fmt.Errorf("shadow incremental lazy-load: %w", err))
 		return
 	}
-	cc.state.FlushToUpdates(cc.updates)
-	cc.state.ResetBlockFlags()
-	incUpdates := cc.updates
-	cc.updates = cc.updates.NewEmpty()
-	rh, err := cc.computeRoot(ctx, r, incUpdates, cc.asOfReader)
+	rh, err := cc.flushAndComputeRoot(ctx, r)
 	if err != nil {
 		cc.fail(ctx, r, fmt.Errorf("shadow incremental compute: %w", err))
 		return
@@ -476,12 +476,9 @@ func (cc *commitmentCalculator) handleMessage(ctx context.Context, msg applyResu
 			if dbg.BALShadowCompute {
 				cc.shadowCrossCheck(ctx, r)
 			} else {
-				// The block's txResults still streamed into cc.state and
-				// set per-block dirty flags. The incremental compute is
-				// intentionally skipped here, so clear those flags — left
-				// set they would leak into the next block's incremental
-				// compute and flush extra updates. (shadowCrossCheck does
-				// this via its own FlushToUpdates+ResetBlockFlags.)
+				// Incremental compute is skipped, but the block's txResults
+				// still set per-block dirty flags — clear them so they don't
+				// leak into the next block.
 				cc.state.ResetBlockFlags()
 			}
 		case !dbg.BatchCommitments || cc.forcePerBlockCompute || r.BlockNum >= cc.perBlockFrom:
@@ -566,19 +563,7 @@ func (cc *commitmentCalculator) computeAndPublish(ctx context.Context, br *block
 		})
 		return
 	}
-	cc.state.FlushToUpdates(cc.updates)
-	cc.state.ResetBlockFlags()
-
-	sdCtx := cc.doms.GetCommitmentContext()
-	sdCtx.SetUpdates(cc.updates)
-	cc.updates = cc.updates.NewEmpty()
-
-	cc.asOfReader.txNum = br.lastTxNum + 1
-	sdCtx.SetStateReader(cc.asOfReader)
-
-	// Use hash-aware accumulator wrap — see computeWithBlockAccumulator
-	// docstring for why this is mandatory in reorg scenarios.
-	rh, err := cc.computeWithBlockAccumulator(ctx, br)
+	rh, err := cc.flushAndComputeRoot(ctx, br)
 	if err != nil {
 		cc.publish(ctx, commitmentResult{
 			blockNum: br.BlockNum,
@@ -615,22 +600,7 @@ func (cc *commitmentCalculator) computeWithoutCheck(ctx context.Context, br *blo
 		})
 		return
 	}
-	cc.state.FlushToUpdates(cc.updates)
-	cc.state.ResetBlockFlags()
-
-	sdCtx := cc.doms.GetCommitmentContext()
-	sdCtx.SetUpdates(cc.updates)
-	cc.updates = cc.updates.NewEmpty()
-
-	cc.asOfReader.txNum = br.lastTxNum + 1
-	sdCtx.SetStateReader(cc.asOfReader)
-
-	// Use the same hash-aware accumulator wrap as computeAndCheck — without
-	// it, the [state] write inside ComputeCommitment can land in a stale
-	// past-changeset entry chosen non-deterministically by GetChangesetByBlockNum
-	// when pastChangesAccumulator holds multiple changesets per block number
-	// (canonical + fork during reorg-bounce tests).
-	if _, err := cc.computeWithBlockAccumulator(ctx, br); err != nil {
+	if _, err := cc.flushAndComputeRoot(ctx, br); err != nil {
 		// Partial-block compute is intentionally not verified (no header root
 		// to compare against), but a real ComputeCommitment failure leaves
 		// later trie state suspect — log so the failure isn't silent.
@@ -658,30 +628,7 @@ func (cc *commitmentCalculator) computeAndCheck(ctx context.Context, br *blockRe
 		})
 		return
 	}
-	// Flush accumulated local state to the trie's Updates buffer.
-	// This produces one Update per dirty account/slot with the final
-	// block-end values — not intermediate per-TX values.
-	cc.state.FlushToUpdates(cc.updates)
-	cc.state.ResetBlockFlags()
-
-	sdCtx := cc.doms.GetCommitmentContext()
-	sdCtx.SetUpdates(cc.updates)
-	cc.updates = cc.updates.NewEmpty()
-
-	// Install asOfStateReader so fold/unfold sibling reads see state at
-	// this block's txNum, not the apply loop's future state in sd.mem.
-	cc.asOfReader.txNum = br.lastTxNum + 1
-	sdCtx.SetStateReader(cc.asOfReader)
-
-	// In per-block compute mode, the exec loop has (or is about to)
-	// swap the changeset accumulator to block N+1 by the time this runs.
-	// Wrap ComputeCommitment so any branch writes (mid-process inline
-	// flushes from `pendingPrefixes` collisions, plus any writes via
-	// putBranch) go into block N's saved changeset, not whatever the
-	// exec loop has set as current. Without this wrap, block N's
-	// branch deltas leak into block N+1's CS, producing a wrong-trie-root
-	// chain on subsequent blocks (see TestTxLookupUnwind reproducer).
-	rh, err := cc.computeWithBlockAccumulator(ctx, br)
+	rh, err := cc.flushAndComputeRoot(ctx, br)
 	if err != nil {
 		cc.publish(ctx, commitmentResult{
 			blockNum: br.BlockNum,

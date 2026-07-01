@@ -23,7 +23,9 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/execution/state"
+	"github.com/erigontech/erigon/execution/types"
 )
 
 // TestShouldComputeOnRequest_GenesisFirstBatch is the regression test for
@@ -184,4 +186,39 @@ func TestHandleMessage_TxResultPinsAsOfReaderTxNum(t *testing.T) {
 	})
 	require.Equal(t, uint64(12346), cc.asOfReader.txNum,
 		"empty writes → no lazy-load → don't bump txNum; the prior pin stands.")
+}
+
+// TestHandleBlockRequest_EmptyBALFallsToIncremental pins the empty-BAL gate.
+// A genuine empty BAL (0xc0) decodes to a non-nil empty slice, so a nil check
+// alone selects BAL-driven mode and folds zero changes → parent root →
+// spurious wrong-trie-root. Mode selection must gate on len(bal) > 0.
+func TestHandleBlockRequest_EmptyBALFallsToIncremental(t *testing.T) {
+	defer func(prev bool) { dbg.BALDrivenCommitment = prev }(dbg.BALDrivenCommitment)
+	defer func(prev bool) { dbg.IgnoreBAL = prev }(dbg.IgnoreBAL)
+	dbg.BALDrivenCommitment = true
+	dbg.IgnoreBAL = false
+
+	cc := &commitmentCalculator{
+		pending:     map[uint64]*pendingBlock{},
+		foldedAhead: map[uint64]bool{},
+		balRoots:    map[uint64][]byte{},
+		// Not the batch's first block and no blockResult seen yet, so the
+		// fold gate is shut — maybeFoldAhead returns before touching the
+		// (nil) doms/updates, isolating the mode-selection under test.
+		hasFirstBlock:      true,
+		firstBlockNum:      100,
+		hasSeenBlockResult: false,
+	}
+
+	emptyBAL := make(types.BlockAccessList, 0)
+	require.NotNil(t, emptyBAL, "empty BAL must be non-nil to exercise the gate")
+
+	cc.handleBlockRequest(context.Background(), &blockRequest{blockNum: 5, bal: emptyBAL})
+
+	pb, ok := cc.pending[5]
+	require.True(t, ok, "block request must be recorded")
+	assert.Equal(t, calcModeIncremental, pb.mode,
+		"an empty (non-nil) BAL declares no changes and must fall to "+
+			"incremental mode; folding it would compute the parent root and "+
+			"fail an otherwise-valid block with ErrWrongTrieRoot")
 }

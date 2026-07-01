@@ -327,43 +327,22 @@ func (cs *calcState) deleteStorageSubtree(addr accounts.Address) {
 	}
 }
 
-// finalChange returns the change carrying the highest tx Index from a BAL
-// per-field / per-slot change list — i.e. the block-end value, since the
-// BAL stores changes tx-indexed and the highest index is the last write in
-// the block. Scans for the max rather than assuming the list is sorted.
-// Returns (zero, false) for an empty list.
-func finalChange[T interface{ GetIndex() uint32 }](changes []T) (T, bool) {
-	var best T
-	var bestIdx uint32
-	found := false
-	for _, c := range changes {
-		if idx := c.GetIndex(); !found || idx >= bestIdx {
-			best, bestIdx, found = c, idx, true
-		}
+// finalChange returns the block-end change from a BAL per-field / per-slot
+// list — the last element, since BlockAccessList.Validate enforces
+// strictly-increasing tx indices. Returns (zero, false) for an empty list.
+func finalChange[T any](changes []T) (T, bool) {
+	if len(changes) == 0 {
+		var zero T
+		return zero, false
 	}
-	return best, found
+	return changes[len(changes)-1], true
 }
 
-// LoadFromBAL populates calcState from an EIP-7928 Block Access List
-// instead of the per-tx VersionedWrites stream. The BAL declares the
-// block's post-state up front, so the commitment calculator can build the
-// trie without waiting for execution to stream writes tx-by-tx.
-//
-// For each touched account it takes the block-end value per field — the
-// highest-tx-indexed change — and feeds the existing ApplyWrites, so the
-// SELFDESTRUCT / Deleted / EIP-161 routing is reused unchanged rather than
-// reimplemented.
-//
-// Storage *reads* are ignored: commitment only consumes the changed
-// (dirty) set.
-//
-// Account deletion and fresh-contract incarnation are not modelled, and by
-// design need not be: BALs exist only for Amsterdam+ blocks, and
-// post-EIP-6780 SELFDESTRUCT removes an account only when it was created in
-// the same transaction — so no pre-existing account is deleted at block
-// scope, and a destroy+recreate (incarnation bump) cannot span a block
-// boundary. Pre-Amsterdam blocks, where unconditional SELFDESTRUCT could
-// delete any account, carry no BAL and never reach this path.
+// LoadFromBAL populates calcState from an EIP-7928 Block Access List rather
+// than the per-tx VersionedWrites stream: it takes each field's block-end
+// value and feeds the existing ApplyWrites, reusing its Deleted/EIP-161
+// routing. Storage reads are ignored — commitment consumes only the changed
+// set.
 func (cs *calcState) LoadFromBAL(bal types.BlockAccessList) {
 	var writes state.VersionedWrites
 	for _, ac := range bal {

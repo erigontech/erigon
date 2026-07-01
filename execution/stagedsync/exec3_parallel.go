@@ -191,7 +191,13 @@ func (pe *parallelExecutor) execImpl(ctx context.Context, execStage *StageState,
 	// Both are fed by the fan-out in the execLoop's blockExecutor.
 	applyResults := make(chan applyResult, 2_048)
 	commitResults := make(chan applyResult, 2_048)
-	blockRequests := make(chan *blockRequest, 2_048)
+	// Only wire the BAL fold-ahead pipeline when BAL-driven commitment is on.
+	// A nil channel leaves the per-block alloc+send and calculator select arm
+	// inert (the receive on nil blocks forever, so the loop stays gated on cc.in).
+	var blockRequests chan *blockRequest
+	if dbg.BALDrivenCommitment {
+		blockRequests = make(chan *blockRequest, 2_048)
+	}
 
 	// rootResults receives per-block commitment roots from the calculator.
 	rootResults := make(chan commitmentResult, 64)

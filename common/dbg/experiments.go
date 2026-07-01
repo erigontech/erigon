@@ -115,16 +115,13 @@ var (
 	BadBlockHalt          = EnvBool("BAD_BLOCK_HALT", false)
 	IgnoreBAL             = EnvBool("IGNORE_BAL", false)
 	BatchCommitments      = EnvBool("BATCH_COMMITMENTS", true)
-	// BALDrivenCommitment: when true, a block carrying a BAL has its
-	// commitment folded from the BAL ahead of the per-tx result stream
-	// (overlapping execution). Default false — incremental commitment
-	// stays the consensus path until the shadow-compute check has proven
-	// the BAL-driven root matches across a full validation window.
+	// BALDrivenCommitment folds a block's commitment from its BAL ahead of the
+	// per-tx result stream, overlapping execution. Default off — incremental
+	// commitment stays the consensus path until shadow-compute proves parity.
 	BALDrivenCommitment = EnvBool("BAL_DRIVEN_COMMITMENT", false)
-	// BALShadowCompute: when true, every BAL-driven block is ALSO computed
-	// the incremental way and the two roots are asserted equal before the
-	// result is published — the dual-compute consistency net. Divergence
-	// fails the block. Doubles commitment work, so off for perf runs.
+	// BALShadowCompute (requires BALDrivenCommitment) also computes each
+	// BAL-driven block incrementally and asserts both roots match before
+	// publishing; without it the BAL-driven root is published directly.
 	BALShadowCompute     = EnvBool("BAL_SHADOW_COMPUTE", false)
 	CaplinEfficientReorg = EnvBool("CAPLIN_EFFICIENT_REORG", true)
 	UseTxDependencies    = EnvBool("USE_TX_DEPENDENCIES", false)

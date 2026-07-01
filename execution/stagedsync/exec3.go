@@ -524,14 +524,9 @@ func (te *txExecutor) executeBlocks(ctx context.Context, startBlockNum uint64, m
 			}
 		}()
 
-		// Channel close is handled by pe.execLoop's deferred close.
-		// Do NOT close the apply/commit channels here — execLoop owns them.
-		//
-		// blockRequests is the exception: this dispatch goroutine is its sole
-		// sender, so it must close it (the sender-closes idiom). Closing it
-		// from execLoop instead would race this goroutine's send select and
-		// panic on "send on closed channel". The calculator then sees
-		// end-of-stream once all buffered requests drain.
+		// execLoop owns the apply/commit channels, but blockRequests is closed
+		// by its sole sender (this goroutine) — closing it from execLoop would
+		// race this send select and panic on "send on closed channel".
 		if blockRequests != nil {
 			defer close(blockRequests)
 		}

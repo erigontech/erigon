@@ -29,8 +29,8 @@ import (
 	"github.com/erigontech/erigon/execution/types/accounts"
 )
 
-// finalChange must pick the change with the highest tx Index — the
-// block-end value — regardless of slice order.
+// finalChange returns the last (block-end) change; BAL change lists reach it
+// already validated strictly-increasing by tx Index.
 func TestFinalChange(t *testing.T) {
 	t.Parallel()
 
@@ -51,14 +51,6 @@ func TestFinalChange(t *testing.T) {
 	})
 	require.True(t, ok)
 	assert.Equal(t, uint64(90), ascending.Value.Uint64())
-
-	// Highest index wins even when it is not last in slice order.
-	outOfOrder, ok := finalChange([]*types.BalanceChange{
-		{Index: 5, Value: *uint256.NewInt(500)},
-		{Index: 2, Value: *uint256.NewInt(200)},
-	})
-	require.True(t, ok)
-	assert.Equal(t, uint64(500), outOfOrder.Value.Uint64())
 }
 
 // TestLoadFromBAL_MatchesApplyWrites is a differential test:
@@ -120,8 +112,8 @@ func TestLoadFromBAL_MatchesApplyWrites(t *testing.T) {
 		{
 			Address: addrE,
 			BalanceChanges: []*types.BalanceChange{
-				{Index: 5, Value: *uint256.NewInt(500)}, // out-of-order; final
 				{Index: 2, Value: *uint256.NewInt(200)},
+				{Index: 5, Value: *uint256.NewInt(500)}, // final
 			},
 		},
 	}
