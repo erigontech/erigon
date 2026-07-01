@@ -354,8 +354,8 @@ func (r retireReason) String() string {
 	}
 }
 
-// retire removes garbage files from dirtyFiles and returns them so the
-// caller can attach them to the outgoing visible generation. Physical deletion
+// retire removes outs from dirtyFiles; the caller still owns outs and must
+// attach it to the outgoing visible generation itself. Physical deletion
 // (closeFilesAndRemove) happens once the last reader of that generation closes
 // — so readers still pinning these files are never surprised.
 func retire(dirtyFiles *DirtyFiles, outs []*FilesItem, filenameBase string, reason retireReason, logger log.Logger) {

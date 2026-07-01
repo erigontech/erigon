@@ -62,9 +62,10 @@ func (ht *HistoryRoTx) retireBeforeStep(cutoff kv.Step) (deleted []string, retir
 	return deleted, retired
 }
 
-// RetireOldHistoryFiles deletes History+InvertedIndex files entirely below
+// RetireOldHistoryFiles retires History+InvertedIndex files entirely below
 // cutoffStep, for every domain except CommitmentDomain (its Disable flag
-// alone is false, so it needs an explicit skip).
+// alone is false, so it needs an explicit skip). Physical deletion is
+// deferred until no reader still pins the retired generation.
 func (a *Aggregator) RetireOldHistoryFiles(ctx context.Context, cutoffStep kv.Step) (retiredCount int, err error) {
 	if cutoffStep == 0 {
 		return 0, nil
@@ -97,12 +98,14 @@ func (a *Aggregator) RetireOldHistoryFiles(ctx context.Context, cutoffStep kv.St
 		retired = append(retired, r...)
 	}
 
+	if len(retired) == 0 {
+		return 0, nil
+	}
+
 	a.onFilesDelete(deleted)
 	a.recalcVisibleFiles(retired)
 
-	if len(retired) > 0 {
-		mxRetiredHistoryFiles.AddInt(len(retired))
-		a.logger.Info("[snapshots] retired old history files", "removed", len(retired), "cutoffStep", cutoffStep)
-	}
+	mxRetiredHistoryFiles.AddInt(len(retired))
+	a.logger.Info("[snapshots] retired old history files", "removed", len(retired), "cutoffStep", cutoffStep)
 	return len(retired), nil
 }
