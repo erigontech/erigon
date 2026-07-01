@@ -70,11 +70,7 @@ func whaleByNibble(slots int) (addr []byte, accHash []byte, accNib int, accUpd U
 	ub := NewUpdateBuilder()
 	ub.Balance(a, 12345)
 	for i := 0; i < slots; i++ {
-		loc := make([]byte, length.Hash)
-		rnd.Read(loc)
-		val := make([]byte, 32)
-		rnd.Read(val)
-		ub.Storage(a, hex.EncodeToString(loc), hex.EncodeToString(val))
+		addRandomSlot(ub, rnd, a)
 	}
 	pk, upds = ub.Build()
 	accHash = KeyToHexNibbleHash(addr)

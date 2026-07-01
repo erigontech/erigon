@@ -96,13 +96,17 @@ mid-iteration restore or intermediate-root assert (see Task 1 carve-out).
       parity roots unchanged. If any root shifts, revert that substitution. Must pass before Task 5.
 
 ### Task 5: One random-corpus builder + shared witness corpus
-- [ ] Add `addRandomAccount(ub,rnd,slots)` (+ per-nibble variant) and a corpus-spec struct to
+- [x] Add `addRandomAccount(ub,rnd,slots)` (+ per-nibble variant) and a corpus-spec struct to
       `parallel_testkit_test.go`; refactor `buildWhaleCorpus`/`buildMixedCorpus`/`build100KAccountsCorpus`/
       `build500KStorageHeavyCorpus`/`buildClusteredStorageCorpus`/`buildWhaleStorageGroups`/`whaleByNibble`
       into thin count/seed specs. Seeds and `rnd.Read` draw order UNCHANGED → byte-identical corpora.
-- [ ] Add `buildWitnessCorpus(tb,ms,hph,accts,slots)`+`touchAccountsSlots` for the witness flavor;
-      route the 5 witness accts×slots loops through it.
-- [ ] Run `go test ./execution/commitment/...` green (golden/parity roots are the drift tripwire).
+      (Added shared `addRandomSlot` primitive; `addRandomAccount`+/-1-balance nibble variant `addNibbleAccount`;
+      `whaleOpts` remains the whale corpus-spec struct. `build100KAccountsCorpus` left minimal — no slot loop
+      to share and its balance is `Uint64()` (no `+1`), so routing it would change the corpus.)
+- [x] Add `buildWitnessCorpus(tb,ms,hph,accts,slots)`+`touchAccountsSlots` for the witness flavor;
+      route the 5 witness accts×slots loops through it (`benchCapturedSuperset`, `BenchmarkBranchWitnessTotal`,
+      `BenchmarkWitnessCapture`, `benchWitnessTrie`, `TestWitnessNodesForKeys_ByHashEquivalence`).
+- [x] Run `go test ./execution/commitment/...` green (golden/parity roots are the drift tripwire).
       Must pass before Task 6.
 
 ### Task 6: newStreamingFixture + touchAll

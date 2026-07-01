@@ -21,6 +21,7 @@ import (
 	"context"
 	"encoding/binary"
 	"encoding/hex"
+	"fmt"
 	"math/rand"
 	"testing"
 
@@ -41,36 +42,52 @@ type whaleOpts struct {
 	tailAccounts     int
 }
 
+// addRandomSlot appends one random storage slot to account a, drawing loc then val.
+func addRandomSlot(ub *UpdateBuilder, rnd *rand.Rand, a string) {
+	loc := make([]byte, length.Hash)
+	rnd.Read(loc)
+	val := make([]byte, 32)
+	rnd.Read(val)
+	ub.Storage(a, hex.EncodeToString(loc), hex.EncodeToString(val))
+}
+
+// addRandomAccount appends a random-address account (balance rnd.Uint64()+1) with slots storage slots.
+func addRandomAccount(ub *UpdateBuilder, rnd *rand.Rand, slots int) {
+	addr := make([]byte, length.Addr)
+	rnd.Read(addr)
+	a := hex.EncodeToString(addr)
+	ub.Balance(a, rnd.Uint64()+1)
+	for range slots {
+		addRandomSlot(ub, rnd, a)
+	}
+}
+
+// addNibbleAccount appends an account pinned to top nibble (balance rnd.Uint64()) with slots storage slots.
+func addNibbleAccount(ub *UpdateBuilder, rnd *rand.Rand, nibble, seed, slots int) {
+	a := hex.EncodeToString(findAddressForNibble(nibble, seed))
+	ub.Balance(a, rnd.Uint64())
+	for range slots {
+		addRandomSlot(ub, rnd, a)
+	}
+}
+
 func buildWhaleCorpus(opts whaleOpts) (pk [][]byte, upds []Update) {
 	rnd := rand.New(rand.NewSource(opts.seed))
 	ub := NewUpdateBuilder()
-	addAcc := func(slots int) {
-		addr := make([]byte, length.Addr)
-		rnd.Read(addr)
-		a := hex.EncodeToString(addr)
-		ub.Balance(a, rnd.Uint64()+1)
-		for range slots {
-			loc := make([]byte, length.Hash)
-			rnd.Read(loc)
-			val := make([]byte, 32)
-			rnd.Read(val)
-			ub.Storage(a, hex.EncodeToString(loc), hex.EncodeToString(val))
-		}
-	}
 	for range opts.smallBefore {
-		addAcc(opts.smallBeforeSlots)
+		addRandomAccount(ub, rnd, opts.smallBeforeSlots)
 	}
 	if opts.bigSlots > 0 {
-		addAcc(opts.bigSlots)
+		addRandomAccount(ub, rnd, opts.bigSlots)
 	}
 	for _, w := range opts.extraWhales {
-		addAcc(w)
+		addRandomAccount(ub, rnd, w)
 	}
 	for range opts.smallAfter {
-		addAcc(opts.smallAfterSlots)
+		addRandomAccount(ub, rnd, opts.smallAfterSlots)
 	}
 	for range opts.tailAccounts {
-		addAcc(1)
+		addRandomAccount(ub, rnd, 1)
 	}
 	return ub.Build()
 }
@@ -328,11 +345,7 @@ func buildMixedCorpus(seed int64, nKeys int) ([][]byte, []Update) {
 		ub.Balance(a, rnd.Uint64()+1)
 		n++
 		for s := 0; s < rnd.Intn(5) && n < nKeys; s++ {
-			loc := make([]byte, length.Hash)
-			rnd.Read(loc)
-			val := make([]byte, 32)
-			rnd.Read(val)
-			ub.Storage(a, hex.EncodeToString(loc), hex.EncodeToString(val))
+			addRandomSlot(ub, rnd, a)
 			n++
 		}
 	}
@@ -367,12 +380,44 @@ func build500KStorageHeavyCorpus(b testing.TB) ([][]byte, []Update) {
 	const slotsPerAccount = 499
 	for _, addr := range addrs {
 		for range slotsPerAccount {
-			loc := make([]byte, length.Hash)
-			rnd.Read(loc)
-			val := make([]byte, 32)
-			rnd.Read(val)
-			ub.Storage(addr, hex.EncodeToString(loc), hex.EncodeToString(val))
+			addRandomSlot(ub, rnd, addr)
 		}
 	}
 	return ub.Build()
+}
+
+// witnessSlot returns the deterministic j-th storage slot value used by the witness corpora.
+func witnessSlot(j int) []byte {
+	return common.FromHex(fmt.Sprintf("%064x", j+1))
+}
+
+// buildWitnessCorpus builds accts accounts (balance i+1) each with slots sequential
+// storage slots, processes them into (ms, hph) and returns the account plain keys.
+func buildWitnessCorpus(tb testing.TB, ms *MockState, hph *HexPatriciaHashed, accts, slots int) [][]byte {
+	tb.Helper()
+	builder := NewUpdateBuilder()
+	addrs := make([][]byte, 0, accts)
+	for i := 0; i < accts; i++ {
+		a, _ := generateKeyWithHashedPrefix(nil, length.Addr)
+		addrs = append(addrs, a)
+		builder.Balance(common.Bytes2Hex(a), uint64(i+1))
+		for j := 0; j < slots; j++ {
+			slot := witnessSlot(j)
+			builder.Storage(common.Bytes2Hex(a), common.Bytes2Hex(slot), common.Bytes2Hex(slot))
+		}
+	}
+	plainKeys, updates := builder.Build()
+	processBatch(tb, ms, hph, plainKeys, updates)
+	return addrs
+}
+
+// touchAccountsSlots touches each account and its first `slots` storage slots into u
+// (slots == 0 touches accounts only).
+func touchAccountsSlots(u *Updates, addrs [][]byte, slots int) {
+	for _, a := range addrs {
+		u.TouchPlainKey(string(a), nil, u.TouchAccount)
+		for j := 0; j < slots; j++ {
+			u.TouchPlainKey(string(storageKey(a, witnessSlot(j))), nil, u.TouchStorage)
+		}
+	}
 }
