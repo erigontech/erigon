@@ -149,18 +149,18 @@ mid-iteration restore or intermediate-root assert (see Task 1 carve-out).
       Must pass before Task 9.
 
 ### Task 9: Gated deletions (only the three verified-subsumed)
-- [ ] Delete `TestParallelDeleteWithSurvivingSiblings` (`parallel_patricia_hashed_test.go:574`) —
+- [x] Delete `TestParallelDeleteWithSurvivingSiblings` (`parallel_patricia_hashed_test.go:574`) —
       subsumed by `_BranchInspection` (`:732`, byte-identical corpus at workers=4, asserts per-batch
       seq==par root + survival bitmap). Confirm `_BranchInspection` still passes.
-- [ ] Delete one of the byte-identical pair `TestTrieDeleteSubtree_ValueNode_PartialMatch` (`:245`)
+- [x] Delete one of the byte-identical pair `TestTrieDeleteSubtree_ValueNode_PartialMatch` (`:245`)
       / `TestTrieDeleteSubtree_DuoNode` (`:106`) — keep `_DuoNode`.
-- [ ] Delete `TestEncodeKeyV2_RoundTrip` (`nibbles_v2_test.go:121`) — encode∘decode identity is
+- [x] Delete `TestEncodeKeyV2_RoundTrip` (`nibbles_v2_test.go:121`) — encode∘decode identity is
       covered by `TestEncodeKeyV2_Vectors`+`_DecodeKeyV2_Vectors` (same `v2Vectors`) + `FuzzEncodeDecodeKeyV2`.
-- [ ] Do NOT touch: `Test_HexPatriciaHashed_StateRestoreAndContinue` skip (`:753`, case not covered),
+- [x] Do NOT touch: `Test_HexPatriciaHashed_StateRestoreAndContinue` skip (`:753`, case not covered),
       `TestPrintProof` (real assertions, sole `PrintProof` coverage), `#20961` skip, `-short` guards,
       env-gated trie-trace harness, and in-fuzz `t.Skip` input filters
       (`verify_test.go:405`, `hex_patricia_hashed_fuzz_test.go:45,178`).
-- [ ] Run `go test ./execution/commitment/... ./execution/commitment/trie/...` green. Must pass before Task 10.
+- [x] Run `go test ./execution/commitment/... ./execution/commitment/trie/...` green. Must pass before Task 10.
 
 ### Task 10: Acceptance verification
 - [ ] `go test ./execution/commitment/... ./execution/commitment/trie/... ./execution/commitment/commitmentdb/... ./execution/commitment/nibbles/...` all pass.

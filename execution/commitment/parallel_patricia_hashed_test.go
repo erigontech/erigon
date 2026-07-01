@@ -517,31 +517,6 @@ func stagedRootEquivalence(t *testing.T, batches []stagedBatch, numWorkers int) 
 	return prevRoot
 }
 
-func TestParallelDeleteWithSurvivingSiblings(t *testing.T) {
-	t.Parallel()
-
-	ub1 := NewUpdateBuilder()
-	for nib := range 8 {
-		for s := range 4 {
-			ub1.Balance(addrHex(nibbleAddr(nib, s)), uint64(100+nib*10+s))
-		}
-	}
-	pk1, up1 := ub1.Build()
-
-	ub2 := NewUpdateBuilder()
-	ub2.Delete(addrHex(nibbleAddr(0x0, 0)))
-	ub2.Delete(addrHex(nibbleAddr(0x0, 1)))
-	ub2.Balance(addrHex(nibbleAddr(0x5, 0)), 9999)
-	ub2.Balance(addrHex(nibbleAddr(0x5, 1)), 8888)
-	pk2, up2 := ub2.Build()
-
-	root := stagedRootEquivalence(t, []stagedBatch{
-		{label: "phase1-populate-8-nibbles", plainKeys: pk1, updates: up1},
-		{label: "phase2-delete-and-modify-touched", plainKeys: pk2, updates: up2},
-	}, 4)
-	require.NotEmpty(t, root)
-}
-
 func TestParallelAllDeleted(t *testing.T) {
 	t.Parallel()
 
