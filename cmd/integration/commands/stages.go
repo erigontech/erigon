@@ -627,9 +627,6 @@ func stageSenders(db kv.TemporalRwDB, ctx context.Context, logger log.Logger) er
 }
 
 func stageExec(db kv.TemporalRwDB, ctx context.Context, logger log.Logger) error {
-	if chainTipMode && noCommit {
-		return errors.New("--sync.mode.chaintip cannot work with --no-commit to be false")
-	}
 	dirs := datadir.New(datadirCli)
 	if err := datadir.ApplyMigrations(dirs); err != nil {
 		return err
@@ -715,9 +712,6 @@ func stageExec(db kv.TemporalRwDB, ctx context.Context, logger log.Logger) error
 		if err != nil {
 			return err
 		}
-		if noCommit {
-			return nil
-		}
 		return tx.Commit()
 	}
 
@@ -745,53 +739,37 @@ func stageExec(db kv.TemporalRwDB, ctx context.Context, logger log.Logger) error
 		block = sendersProgress
 	}
 
-	doms, err := execctx.NewSharedDomains(ctx, tx, logger)
-	if err != nil {
-		return err
-	}
-	doms.SetInMemHistoryReads(false)
+	agg := (db.(dbstate.HasAgg).Agg()).(*dbstate.Aggregator)
 
-	if chainTipMode {
-		//if chainTip = true, forced noCommit = false
-		for bn := execProgress; bn < block; bn++ {
-			if err := stagedsync.SpawnExecuteBlocksStage(s, sync, doms, tx, bn, ctx, cfg, logger); err != nil {
-				if !errors.Is(err, &stagedsync.ErrLoopExhausted{}) {
-					return err
-				}
-			}
-			if err := doms.Flush(ctx, tx); err != nil {
-				return err
-			}
-			doms.ClearRam(true)
-			if err := tx.Commit(); err != nil {
-				return err
-			}
-			if tx, err = db.BeginTemporalRw(ctx); err != nil {
-				return err
-			}
+	// Both modes run each batch in its own rwtx + SharedDomains (execBlocksBatch),
+	// then collate+prune (which also kicks background file building). Release the
+	// read tx first — MDBX allows one writer.
+	tx.Rollback()
+	tx = nil
 
+	collateAndPrune := func() error {
+		return agg.CollateAndPrune(ctx, db, func(tx kv.TemporalRwTx) error {
 			pruneStage, err := sync.PruneStageState(stages.Execution, s.BlockNumber, tx, s.CurrentSyncCycle.IsInitialCycle)
 			if err != nil {
 				return err
 			}
-			if _, err := stagedsync.PruneExecutionStage(ctx, pruneStage, tx, cfg, 0, logger); err != nil {
-				return err
-			}
-
-			if err := tx.Commit(); err != nil {
-				return err
-			}
-			if tx, err = db.BeginTemporalRw(ctx); err != nil {
-				return err
-			}
-		}
-		if err := doms.Flush(ctx, tx); err != nil {
+			_, err = stagedsync.PruneExecutionStage(ctx, pruneStage, tx, cfg, 0, logger)
 			return err
-		}
-		doms.ClearRam(true)
-		return tx.Commit()
+		}, logger)
 	}
-	agg := (db.(dbstate.HasAgg).Agg()).(*dbstate.Aggregator)
+
+	if chainTipMode {
+		for bn := execProgress; bn < block; bn++ {
+			if _, err := execBlocksBatch(ctx, db, sync, cfg, bn, false, logger); err != nil {
+				return err
+			}
+			if err := collateAndPrune(); err != nil {
+				return err
+			}
+		}
+		return nil
+	}
+
 	blockSnapBuildSema := semaphore.NewWeighted(int64(runtime.NumCPU()))
 	agg.SetSnapshotBuildSema(blockSnapBuildSema)
 	agg.PresetOfflineExecution()
@@ -799,62 +777,59 @@ func stageExec(db kv.TemporalRwDB, ctx context.Context, logger log.Logger) error
 	agg.LockWorkersEditing()
 
 	for {
-		if err := stagedsync.SpawnExecuteBlocksStage(s, sync, doms, tx, block, ctx, cfg, logger); err != nil {
-			if !errors.Is(err, &stagedsync.ErrLoopExhausted{}) {
-				return err
-			}
-		}
-
-		if err := doms.Flush(ctx, tx); err != nil {
+		execProgress, err = execBlocksBatch(ctx, db, sync, cfg, block, true, logger)
+		if err != nil {
 			return err
 		}
-		txNum := doms.TxNum()
-		doms.ClearRam(true)
-		if !noCommit {
-			if err := tx.Commit(); err != nil {
-				return err
-			}
-
-			agg.BuildFilesInBackground(txNum)
-
-			if tx, err = db.BeginTemporalRw(ctx); err != nil {
-				return err
-			}
-		}
-
-		// Prune in bounded, committed batches so a long prune survives Ctrl-C:
-		// prune progress is durable, so a restart only repeats the last batch.
-		for {
-			pruneStage, err := sync.PruneStageState(stages.Execution, s.BlockNumber, tx, false)
-			if err != nil {
-				return err
-			}
-			hasMore, err := stagedsync.PruneExecutionStage(ctx, pruneStage, tx, cfg, time.Minute, logger)
-			if err != nil {
-				return err
-			}
-			if !noCommit {
-				if err := tx.Commit(); err != nil {
-					return err
-				}
-				if tx, err = db.BeginTemporalRw(ctx); err != nil {
-					return err
-				}
-			}
-			if !hasMore {
-				break
-			}
-		}
-
-		if execProgress, err = stages.GetStageProgress(tx, stages.Execution); err != nil {
+		if err := collateAndPrune(); err != nil {
 			return err
 		}
 		if execProgress >= block {
 			break
 		}
 	}
-
 	return nil
+}
+
+// execBlocksBatch runs one stage_exec batch in its own rwtx and SharedDomains:
+// exec up to toBlock (or the batch limit), then doms.Commit. Commit (not Flush)
+// refreshes the aggregator BranchCache to match committed state — a stale cache
+// makes the next batch compute a wrong trie root — and commits the tx. A fresh
+// SharedDomains per call avoids reusing a committed (spent) one. Pruning and
+// file-building are the caller's job (agg.CollateAndPrune). Returns the Execution
+// stage progress after the batch.
+func execBlocksBatch(ctx context.Context, db kv.TemporalRwDB, st *stagedsync.Sync, cfg stagedsync.ExecuteBlockCfg, toBlock uint64, initialCycle bool, logger log.Logger) (uint64, error) {
+	tx, err := db.BeginTemporalRw(ctx)
+	if err != nil {
+		return 0, err
+	}
+	defer tx.Rollback()
+
+	doms, err := execctx.NewSharedDomains(ctx, tx, logger)
+	if err != nil {
+		return 0, err
+	}
+	defer doms.Close()
+	doms.SetInMemHistoryReads(false)
+
+	s, err := st.StageState(stages.Execution, tx, initialCycle, false)
+	if err != nil {
+		return 0, err
+	}
+
+	if err := stagedsync.SpawnExecuteBlocksStage(s, st, doms, tx, toBlock, ctx, cfg, logger); err != nil {
+		if !errors.Is(err, &stagedsync.ErrLoopExhausted{}) {
+			return 0, err
+		}
+	}
+	progress, err := stages.GetStageProgress(tx, stages.Execution)
+	if err != nil {
+		return 0, err
+	}
+	if err := doms.Commit(ctx, tx); err != nil {
+		return 0, err
+	}
+	return progress, nil
 }
 
 // stageExecReplay re-executes historic blocks using conflict-free parallel workers.
@@ -1215,7 +1190,6 @@ func newSync(ctx context.Context, db kv.TemporalRwDB, builderConfig *buildercfg.
 	if chainTipMode {
 		syncCfg.LoopBlockLimit = 1
 		syncCfg.AlwaysGenerateChangesets = true
-		noCommit = false
 	}
 
 	if !dbg.BatchCommitments {

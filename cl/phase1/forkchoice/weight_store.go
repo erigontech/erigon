@@ -183,14 +183,13 @@ type WeightStoreReader interface {
 	GetWeight(node ForkChoiceNode) uint64
 }
 
-// GetWeightStore returns a WeightStore for the ForkChoiceStore.
-func (f *ForkChoiceStore) GetWeightStore() WeightStore {
-	return NewWeightStore(f)
-}
-
-// GetIndexedWeightStore returns the indexed WeightStore for optimized GLOAS weight calculation.
-// Returns nil if not initialized.
-func (f *ForkChoiceStore) GetIndexedWeightStore() *indexedWeightStore {
+// headWeightStore returns the incremental indexed weight store for a head
+// computation, with cs supplying fresh validator balances and active/slashed
+// status. It seeds the index from latestMessages on first use. The caller must
+// hold f.mu for the duration of the scoring pass.
+func (f *ForkChoiceStore) headWeightStore(cs *checkpointState) WeightStore {
+	f.indexedWeightStore.seedFromLatestMessages()
+	f.indexedWeightStore.setCheckpointState(cs)
 	return f.indexedWeightStore
 }
 

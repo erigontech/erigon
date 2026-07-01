@@ -47,7 +47,7 @@ Erigon processes the chain in a series of **stages** rather than the traditional
 
 A simplified pipeline:
 
-```
+```text
 1. Snapshots    → fetch immutable history files via BitTorrent (OtterSync)
 2. Headers      → download and verify block headers
 3. Bodies       → download block bodies

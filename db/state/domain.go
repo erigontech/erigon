@@ -52,6 +52,7 @@ import (
 	"github.com/erigontech/erigon/db/state/statecfg"
 	"github.com/erigontech/erigon/db/version"
 	"github.com/erigontech/erigon/diagnostics/metrics"
+	"github.com/erigontech/erigon/execution/commitment"
 )
 
 var (
@@ -88,6 +89,9 @@ type Domain struct {
 	dirtyFiles *DirtyFiles
 
 	checker *DependencyIntegrityChecker
+
+	// Long-lived commitment-branch cache; non-nil only on the commitment domain.
+	branchCache *commitment.BranchCache
 
 	// _testBuildAccessorHook - test-only: called with the recsplit before the build loop in buildHashMapAccessor
 	_testBuildAccessorHook func(rs *recsplit.RecSplit)
@@ -134,6 +138,13 @@ func NewDomain(cfg statecfg.DomainCfg, stepSize, stepsInFrozenFile uint64, dirs 
 }
 func (d *Domain) SetChecker(checker *DependencyIntegrityChecker) {
 	d.checker = checker
+}
+
+// BranchCache returns the long-lived commitment-trie branch cache attached
+// to this domain. Non-nil only on the commitment domain. Lifetime is the
+// owning Aggregator's lifetime.
+func (d *Domain) BranchCache() *commitment.BranchCache {
+	return d.branchCache
 }
 
 func (d *Domain) kvNewFilePath(fromStep, toStep kv.Step) string {
@@ -1358,8 +1369,13 @@ func (dt *DomainRoTx) unwind(ctx context.Context, rwTx kv.RwTx, step, txNumUnwin
 			}
 		}
 
-		// nil = different step, skip; []byte{} = absent previously, write empty tombstone
-		if value != nil {
+		// A key changed at several steps in the range has one diff per step, sorted
+		// by key then descending step; only the lowest step's value is the value at
+		// txNumUnwindTo. Restore once, on the last (lowest-step) diff — else the
+		// DupSort table keeps several dups at unwindStep and getLatestFromDb returns
+		// the smallest. nil = different step, skip; []byte{} = absent, write tombstone.
+		lastForKey := i+1 == len(domainDiffs) || domainDiffs[i+1].Key[:len(domainDiffs[i+1].Key)-8] != keyStr[:len(keyStr)-8]
+		if value != nil && lastForKey {
 			if err := valsCursor.Put(fullKey, append(unwindStepBytes, value...)); err != nil {
 				return err
 			}
@@ -1711,7 +1727,7 @@ func (dt *DomainRoTx) getLatest(key []byte, roTx kv.Tx, maxStep kv.Step, metrics
 
 	v, foundInFile, _, endTxNum, err := dt.getLatestFromFiles(key, 0)
 	if metrics != nil && dbg.KVReadLevelledMetrics {
-		metrics.UpdateFileReads(dt.name, start)
+		metrics.UpdateFileReadsUnique(dt.name, key, start)
 	}
 
 	if err != nil {

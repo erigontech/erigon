@@ -17,6 +17,7 @@
 package eliasfano16
 
 import (
+	"bytes"
 	"testing"
 )
 
@@ -30,6 +31,9 @@ func FuzzSingleEliasFano(f *testing.F) {
 		if len(in) == 0 {
 			t.Skip()
 		}
+		// The fuzzing engine hands the input as a read-only buffer; clone it
+		// before growing so the appends below never write into that buffer.
+		in = bytes.Clone(in)
 		for len(in) < int(2*superQ) { // make input large enough to trigger supreQ jump logic
 			in = append(in, in...)
 		}
@@ -48,7 +52,11 @@ func FuzzSingleEliasFano(f *testing.F) {
 		for _, c := range keys {
 			ef.AddOffset(c)
 		}
-		ef.Build()
+		// Reject sequences out of domain for this compact 16-bit variant (encoded
+		// with eliasfano32 instead) rather than verifying an encoding that can't exist.
+		if !ef.build() {
+			return
+		}
 
 		// Try to read from ef
 		for i := 0; i < count; i++ {
@@ -67,6 +75,9 @@ func FuzzDoubleEliasFano(f *testing.F) {
 		if len(in) == 0 {
 			t.Skip()
 		}
+		// The fuzzing engine hands the input as a read-only buffer; clone it
+		// before growing so the appends below never write into that buffer.
+		in = bytes.Clone(in)
 		for len(in) < int(2*superQ) { // make input large enough to trigger supreQ jump logic
 			in = append(in, in...)
 		}
@@ -93,13 +104,15 @@ func FuzzDoubleEliasFano(f *testing.F) {
 		for _, c := range cumKeys {
 			ef1.AddOffset(c)
 		}
-		ef1.Build()
 		ef2 := NewEliasFano(uint64(numBuckets+1), position[numBuckets], minDeltaPosition)
 		for _, p := range position {
 			ef2.AddOffset(p)
 		}
-		ef2.Build()
-		ef.Build(cumKeys, position)
+		// Reject sequences out of domain for this compact 16-bit variant (encoded
+		// with eliasfano32 instead) rather than verifying encodings that can't exist.
+		if !ef1.build() || !ef2.build() || !ef.build(cumKeys, position) {
+			return
+		}
 		// Try to read from ef
 		for bucket := 0; bucket < numBuckets; bucket++ {
 			cumKey, bitPos := ef.Get2(uint64(bucket))

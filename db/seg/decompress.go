@@ -62,9 +62,9 @@ func (pt *patternTable) insertWord(cw *codeword) {
 	}
 }
 
-// posEntry is one slot in a Huffman position table. When bits==0 it is a
-// subtable router whose pos is the child index in posArena.tables; otherwise
-// pos is the decoded position (uint32 suffices: bounded by the word length).
+// posEntry is one slot in a Huffman position table: bits>0 is a terminal
+// (pos is the decoded position); bits==0 is a subtable router (pos is the
+// child index in posArena.tables), valid on the posMask!=0 path only.
 type posEntry struct {
 	pos  uint32
 	bits uint8
