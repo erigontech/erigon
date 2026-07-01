@@ -122,13 +122,18 @@ mid-iteration restore or intermediate-root assert (see Task 1 carve-out).
       Must pass before Task 7.
 
 ### Task 7: Extract branch-encode / warmup / cell-equality helpers
-- [ ] Add `encodeCellRow(tb,size)->(row,bm,enc)` to `testutil_test.go`; drop the
+- [x] Add `encodeCellRow(tb,size)->(row,bm,enc)` to `testutil_test.go`; drop the
       `generateCellRow → NewBranchEncoder(1024) → generateCellEncodeDataRow → EncodeBranch → NoError`
       4-liner at its ~11 test + 3 bench sites.
-- [ ] Add `testWarmuper(ctx,factory,workers)` filling the constant `MaxDepth:64`/`LogPrefix:"test"`/
+      (Routed the clean sites: branch_decode ×2, commitment_test ×5, commitment_bench ×2. Left the
+      three sites that mutate `row` between generate and encode — `TestDecodeBranchWithLeafHashes`,
+      the leaf-hash decode test, and `trie_reader`'s cell-driven `putBranch` — untouched.)
+- [x] Add `testWarmuper(ctx,factory,workers)` filling the constant `MaxDepth:64`/`LogPrefix:"test"`/
       `Enabled:true`; promote `cellMustEqual` to `testutil_test.go` (+ a decoder-only
       `requireDecodedCellEq` variant that skips `hashedExtension`/`stateHash`).
-- [ ] Run `go test ./execution/commitment/...` green. Must pass before Task 8.
+      (Routed all 8 warmuper-config literal sites; `requireDecodedCellEq` adopted in
+      `TestDecodeBranchInto_RoundTrip`.)
+- [x] Run `go test ./execution/commitment/...` green. Must pass before Task 8.
 
 ### Task 8: trie subpackage cleanup (package-local helpers only)
 - [ ] In package `trie` ONLY (never import the commitment helpers): normalize `New(common.Hash{})` →

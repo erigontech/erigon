@@ -172,3 +172,57 @@ func generateCellEncodeDataRow(tb testing.TB, row []*cell, bm uint16) [16]cellEn
 	}
 	return data
 }
+
+// encodeCellRow generates a random cell row of the given size and returns it with its
+// bitmap and the BranchData produced by encoding it (touchMap == afterMap == bitmap).
+func encodeCellRow(tb testing.TB, size int) (row []*cell, bm uint16, enc BranchData) {
+	tb.Helper()
+	row, bm = generateCellRow(tb, size)
+	be := NewBranchEncoder(1024)
+	cellData := generateCellEncodeDataRow(tb, row, bm)
+	enc, err := be.EncodeBranch(bm, bm, bm, &cellData)
+	require.NoError(tb, err)
+	return row, bm, enc
+}
+
+// testWarmuper builds a Warmuper with the constant test config (Enabled, MaxDepth 64,
+// LogPrefix "test"), varying only the context factory and worker count.
+func testWarmuper(ctx context.Context, factory TrieContextFactory, workers int) *Warmuper {
+	return NewWarmuper(ctx, WarmupConfig{
+		Enabled:    true,
+		CtxFactory: factory,
+		NumWorkers: workers,
+		MaxDepth:   64,
+		LogPrefix:  "test",
+	})
+}
+
+func cellMustEqual(tb testing.TB, first, second *cell) {
+	tb.Helper()
+	require.Equal(tb, first.hashedExtLen, second.hashedExtLen)
+	require.Equal(tb, first.hashedExtension[:first.hashedExtLen], second.hashedExtension[:second.hashedExtLen])
+	require.Equal(tb, first.hashLen, second.hashLen)
+	require.Equal(tb, first.hash[:first.hashLen], second.hash[:second.hashLen])
+	require.Equal(tb, first.accountAddrLen, second.accountAddrLen)
+	require.Equal(tb, first.storageAddrLen, second.storageAddrLen)
+	require.Equal(tb, first.accountAddr[:], second.accountAddr[:])
+	require.Equal(tb, first.storageAddr[:], second.storageAddr[:])
+	require.Equal(tb, first.extension[:first.extLen], second.extension[:second.extLen])
+	require.Equal(tb, first.stateHash[:first.stateHashLen], second.stateHash[:second.stateHashLen])
+
+	// encode doesn't code Nonce, Balance, CodeHash and Storage, Delete fields
+}
+
+// requireDecodedCellEq compares the fields the branch decoder is responsible for
+// restoring; hashedExtension and stateHash are derived separately and are skipped.
+func requireDecodedCellEq(tb testing.TB, i int, orig, decoded *cell) {
+	tb.Helper()
+	require.Equal(tb, orig.extLen, decoded.extLen, "cell %d extLen", i)
+	require.Equal(tb, orig.extension[:orig.extLen], decoded.extension[:decoded.extLen], "cell %d extension", i)
+	require.Equal(tb, orig.accountAddrLen, decoded.accountAddrLen, "cell %d accountAddrLen", i)
+	require.Equal(tb, orig.accountAddr[:orig.accountAddrLen], decoded.accountAddr[:decoded.accountAddrLen], "cell %d accountAddr", i)
+	require.Equal(tb, orig.storageAddrLen, decoded.storageAddrLen, "cell %d storageAddrLen", i)
+	require.Equal(tb, orig.storageAddr[:orig.storageAddrLen], decoded.storageAddr[:decoded.storageAddrLen], "cell %d storageAddr", i)
+	require.Equal(tb, orig.hashLen, decoded.hashLen, "cell %d hashLen", i)
+	require.Equal(tb, orig.hash[:orig.hashLen], decoded.hash[:decoded.hashLen], "cell %d hash", i)
+}

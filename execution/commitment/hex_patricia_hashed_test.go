@@ -1162,22 +1162,6 @@ func TestCell_fillFromFields(t *testing.T) {
 	}
 }
 
-func cellMustEqual(tb testing.TB, first, second *cell) {
-	tb.Helper()
-	require.Equal(tb, first.hashedExtLen, second.hashedExtLen)
-	require.Equal(tb, first.hashedExtension[:first.hashedExtLen], second.hashedExtension[:second.hashedExtLen])
-	require.Equal(tb, first.hashLen, second.hashLen)
-	require.Equal(tb, first.hash[:first.hashLen], second.hash[:second.hashLen])
-	require.Equal(tb, first.accountAddrLen, second.accountAddrLen)
-	require.Equal(tb, first.storageAddrLen, second.storageAddrLen)
-	require.Equal(tb, first.accountAddr[:], second.accountAddr[:])
-	require.Equal(tb, first.storageAddr[:], second.storageAddr[:])
-	require.Equal(tb, first.extension[:first.extLen], second.extension[:second.extLen])
-	require.Equal(tb, first.stateHash[:first.stateHashLen], second.stateHash[:second.stateHashLen])
-
-	// encode doesn't code Nonce, Balance, CodeHash and Storage, Delete fields
-}
-
 func Test_HexPatriciaHashed_hashRow(t *testing.T) {
 	t.Parallel()
 
