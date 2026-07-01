@@ -59,11 +59,7 @@ func benchWitnessTrie(b *testing.B) (*HexPatriciaHashed, [][]byte) {
 		}
 	}
 	plainKeys, updates := builder.Build()
-	require.NoError(b, ms.applyPlainUpdates(plainKeys, updates))
-	toProcess := WrapKeyUpdates(b, ModeDirect, KeyToHexNibbleHash, plainKeys, updates)
-	defer toProcess.Close()
-	_, err := hph.Process(context.Background(), toProcess, "", nil, WarmupConfig{})
-	require.NoError(b, err)
+	processBatch(b, ms, hph, plainKeys, updates)
 	return hph, accounts[:16]
 }
 

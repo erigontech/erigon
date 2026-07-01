@@ -64,11 +64,13 @@ mid-iteration restore or intermediate-root assert (see Task 1 carve-out).
       parity roots unchanged. Must pass before Task 2.
 
 ### Task 2: Route the remaining ModeDirect Process-ceremony sites
-- [ ] Route the same ceremony through `processSeq`/`processBatch`/`engineRoot` in
+- [x] Route the same ceremony through `processSeq`/`processBatch`/`engineRoot` in
       `trie_reader_test.go`, `witness_prune_test.go`, `witness_tracer_test.go`,
       `witness_strict_test.go`, `additive_updates_test.go`, `deep_storage_test.go`
       (same carve-out as Task 1; keep every existing assertion verbatim).
-- [ ] Run `go test ./execution/commitment/...` green. Must pass before Task 3.
+      (`additive_updates_test.go` already routes its seq oracle through `sequentialRoot`→`engineRoot`;
+      its parallel/streaming arms are additive double-touch assertions that cannot be collapsed.)
+- [x] Run `go test ./execution/commitment/...` green. Must pass before Task 3.
 
 ### Task 3: Close existing-helper usage gaps (parity oracles, key-wrap, worker counts, aliases)
 - [ ] Replace the inline branch-map union/diff loops with `requireBranchParity` in

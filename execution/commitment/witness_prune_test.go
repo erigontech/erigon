@@ -69,11 +69,7 @@ func TestWitnessNodesForKeys_ByHashEquivalence(t *testing.T) {
 				}
 			}
 			plainKeys, updates := builder.Build()
-			require.NoError(t, ms.applyPlainUpdates(plainKeys, updates))
-			toProcess := WrapKeyUpdates(t, ModeDirect, KeyToHexNibbleHash, plainKeys, updates)
-			defer toProcess.Close()
-			_, err := hph.Process(ctx, toProcess, "", nil, WarmupConfig{})
-			require.NoError(t, err)
+			processBatch(t, ms, hph, plainKeys, updates)
 
 			toWitness := NewUpdates(ModeDirect, "", KeyToHexNibbleHash)
 			defer toWitness.Close()
@@ -134,11 +130,7 @@ func TestWitnessNodesForKeys_AbsentSlotStopsAtBlindedChild(t *testing.T) {
 		builder.Storage(addrHex, common.Bytes2Hex(slotPlain), fmt.Sprintf("%064x", n+1))
 	}
 	plainKeys, updates := builder.Build()
-	require.NoError(t, ms.applyPlainUpdates(plainKeys, updates))
-	toProcess := WrapKeyUpdates(t, ModeDirect, KeyToHexNibbleHash, plainKeys, updates)
-	defer toProcess.Close()
-	_, err := hph.Process(ctx, toProcess, "", nil, WarmupConfig{})
-	require.NoError(t, err)
+	processBatch(t, ms, hph, plainKeys, updates)
 
 	absentSlot, _ := generateKeyWithHashedPrefix([]byte{1}, length.Hash)
 
