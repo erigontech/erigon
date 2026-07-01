@@ -288,11 +288,7 @@ func (sdc *SharedDomainsCommitmentContext) WitnessNodes(ctx context.Context, pro
 	if err != nil {
 		return nil, nil, err
 	}
-	witnessTrie, err := trie.RLPDecode(full)
-	if err != nil {
-		return nil, nil, fmt.Errorf("decode witness nodes: %w", err)
-	}
-	lean, err := witnessTrie.WitnessNodesForKeys(provedKeys)
+	lean, err := trie.WitnessNodesForKeysFromNodes(full, provedKeys)
 	if err != nil {
 		return nil, nil, fmt.Errorf("prune witness nodes: %w", err)
 	}
