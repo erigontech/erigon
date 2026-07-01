@@ -725,7 +725,16 @@ func (sdb *IntraBlockState) GetCodeSize(addr accounts.Address) (int, error) {
 		if stateObject.data.CodeHash.IsEmpty() {
 			return 0, nil
 		}
-		return sdb.stateReader.ReadAccountCodeSize(addr)
+		// Size-only read: ReadAccountCodeSize, not ReadAccountCode. It routes
+		// through the size-only cache layer, and is correct on the Stateless
+		// reader — a size-only witness node has the size but no bytes, so
+		// ReadAccountCode there returns nil (EXTCODESIZE 0) and diverges from
+		// consensus.
+		size, err := sdb.stateReader.ReadAccountCodeSize(addr)
+		if err != nil {
+			return 0, err
+		}
+		return size, nil
 	}
 
 	size, source, _, err := versionedRead(sdb, addr, CodeSizePath, accounts.NilKey, false, 0,
@@ -748,7 +757,12 @@ func (sdb *IntraBlockState) GetCodeSize(addr accounts.Address) (int, error) {
 			if dbg.KVReadLevelledMetrics {
 				readStart = time.Now()
 			}
-			l, err := sdb.stateReader.ReadAccountCodeSize(addr)
+			// Size-only read (see GetCodeSize's non-versioned branch): route
+			// through the size-only layer and stay correct on the Stateless
+			// reader's witness nodes (size known, bytes absent). ReadAccountCode
+			// would return nil there and report EXTCODESIZE 0.
+			l, codeErr := sdb.stateReader.ReadAccountCodeSize(addr)
+			err := codeErr
 			if dbg.KVReadLevelledMetrics {
 				sdb.codeReadDuration += time.Since(readStart)
 				sdb.codeReadCount++
