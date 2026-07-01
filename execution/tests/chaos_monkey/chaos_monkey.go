@@ -18,6 +18,7 @@ package chaos_monkey
 
 import (
 	"fmt"
+	"sync"
 
 	"math/rand/v2"
 
@@ -33,4 +34,34 @@ func ThrowRandomConsensusError(IsInitialCycle bool, txIndex int, badBlockHalt bo
 		return fmt.Errorf("monkey in the datacenter: %w: %v", rules.ErrInvalidBlock, txTaskErr)
 	}
 	return nil
+}
+
+var (
+	preExecMu  sync.Mutex
+	preExecErr error
+)
+
+// ArmPreExecutionError makes ThrowPreExecutionError return err (while chaos is
+// enabled) until the returned disarm func runs. Test-only; production never arms it.
+func ArmPreExecutionError(err error) (disarm func()) {
+	preExecMu.Lock()
+	preExecErr = err
+	preExecMu.Unlock()
+	return func() {
+		preExecMu.Lock()
+		preExecErr = nil
+		preExecMu.Unlock()
+	}
+}
+
+// ThrowPreExecutionError reproduces a failure that hits executeBlocks before it
+// dispatches any block (snapshot step misalignment, a missing block, a BAL decode
+// error). Disarmed (nil) unless a test armed it via ArmPreExecutionError.
+func ThrowPreExecutionError(enabled bool) error {
+	if !enabled {
+		return nil
+	}
+	preExecMu.Lock()
+	defer preExecMu.Unlock()
+	return preExecErr
 }

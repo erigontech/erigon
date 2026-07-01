@@ -46,6 +46,7 @@ import (
 	"github.com/erigontech/erigon/execution/protocol/rules"
 	"github.com/erigontech/erigon/execution/stagedsync/stages"
 	"github.com/erigontech/erigon/execution/state"
+	"github.com/erigontech/erigon/execution/tests/chaos_monkey"
 	"github.com/erigontech/erigon/execution/tracing"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/node/shards"
@@ -526,6 +527,12 @@ func (te *txExecutor) executeBlocks(ctx context.Context, startBlockNum uint64, m
 
 		// Channel close is handled by pe.execLoop's deferred close.
 		// Do NOT close channels here — execLoop owns the lifecycle.
+
+		// Test-only chaos injection (gated by the ChaosMonkey flag): reproduce
+		// executeBlocks failing before it dispatches any block.
+		if chaosErr := chaos_monkey.ThrowPreExecutionError(te.cfg.syncCfg.ChaosMonkey && te.enableChaosMonkey); chaosErr != nil {
+			return chaosErr
+		}
 
 		// Open a thread-local roTx for block metadata and StepsInFiles.
 		// Must NOT use the stageloop's rwTx — it's thread-bound.
