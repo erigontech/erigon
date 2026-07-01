@@ -318,8 +318,7 @@ func (sdb *IntraBlockState) HasStorage(addr accounts.Address) (bool, error) {
 	// IncarnationPath is written ONLY by CreateAccount and Selfdestruct —
 	// both operations that clear all storage.  If a prior TX wrote it, the
 	// account was created or destroyed in this block and HasStorage should
-	// return false.  This mirrors the same check in versionedRead for
-	// StoragePath (versionedio.go:660-703).
+	// return false. Mirrors the StoragePath check in versionedRead.
 	if sdb.versionMap != nil {
 		incRes := sdb.versionMap.Read(addr, IncarnationPath, accounts.NilKey, sdb.txIndex)
 		if incRes.Status() == MVReadResultDone {
@@ -339,7 +338,9 @@ func (sdb *IntraBlockState) HasStorage(addr accounts.Address) (bool, error) {
 		}
 	}
 
-	// Otherwise check in the DB
+	// EIP-684 CREATE-collision fall-through: the in-memory checks missed, so ask
+	// the reader — on snapshot-backed storage this is a kv.HasPrefix(StorageDomain)
+	// walk through the .bt index, a validation hot-path cost.
 	result, err := sdb.stateReader.HasStorage(addr)
 	return result, err
 }
@@ -2043,8 +2044,15 @@ func (sdb *IntraBlockState) GetRefund() uint64 {
 	return sdb.refund
 }
 
+// EIP161EmptyRemoval reports whether an empty account at addr is removed under
+// EIP-161 (SpuriousDragon). AuRa retains its SystemAddress even when empty, to
+// match the reference implementation.
+func EIP161EmptyRemoval(spuriousDragon, isAura bool, addr accounts.Address) bool {
+	return spuriousDragon && (!isAura || addr != params.SystemAddress)
+}
+
 func updateAccount(EIP161Enabled bool, isAura bool, stateWriter StateWriter, addr accounts.Address, stateObject *stateObject, isDirty bool, trace bool, tracingHooks *tracing.Hooks, useBlockOrigin bool) error {
-	emptyRemoval := EIP161Enabled && stateObject.data.Empty() && (!isAura || addr != params.SystemAddress)
+	emptyRemoval := EIP161EmptyRemoval(EIP161Enabled, isAura, addr) && stateObject.data.Empty()
 	if stateObject.selfdestructed || (isDirty && emptyRemoval) {
 		balance := stateObject.Balance()
 		if tracingHooks != nil && tracingHooks.OnBalanceChange != nil && !(&balance).IsZero() && stateObject.selfdestructed {
@@ -2094,8 +2102,8 @@ func updateAccount(EIP161Enabled bool, isAura bool, stateWriter StateWriter, add
 	return nil
 }
 
-func printAccount(EIP161Enabled bool, addr accounts.Address, stateObject *stateObject, isDirty bool) {
-	emptyRemoval := EIP161Enabled && stateObject.data.Empty()
+func printAccount(EIP161Enabled bool, isAura bool, addr accounts.Address, stateObject *stateObject, isDirty bool) {
+	emptyRemoval := EIP161EmptyRemoval(EIP161Enabled, isAura, addr) && stateObject.data.Empty()
 	if stateObject.selfdestructed || (isDirty && emptyRemoval) {
 		fmt.Printf("delete: %x\n", addr)
 	}
@@ -2319,13 +2327,12 @@ func (sdb *IntraBlockState) MakeWriteSet(chainRules *chain.Rules, stateWriter St
 	return nil
 }
 
-func (sdb *IntraBlockState) TxIO() *VersionedIO {
-	var io VersionedIO
+// MergeTxIOInto folds the current transaction's recorded reads, writes and
+// accesses into io at the current tx index, without building an intermediate
+// VersionedIO.
+func (sdb *IntraBlockState) MergeTxIOInto(io *VersionedIO) {
 	version := Version{BlockNum: sdb.blockNum, TxIndex: sdb.txIndex, Incarnation: sdb.version}
-	io.RecordReads(version, sdb.versionedReads)
-	io.RecordWrites(version, sdb.VersionedWrites(false))
-	io.RecordAccesses(version, sdb.addressAccess)
-	return &io
+	io.mergeTx(version, sdb.versionedReads, sdb.VersionedWrites(false), sdb.addressAccess)
 }
 
 func (sdb *IntraBlockState) Print(chainRules chain.Rules, all bool) {
@@ -2333,7 +2340,7 @@ func (sdb *IntraBlockState) Print(chainRules chain.Rules, all bool) {
 		_, isDirty := sdb.stateObjectsDirty[addr]
 		_, isDirty2 := sdb.journal.dirties[addr]
 
-		printAccount(chainRules.IsSpuriousDragon, addr, stateObject, all || isDirty || isDirty2)
+		printAccount(chainRules.IsSpuriousDragon, chainRules.IsAura, addr, stateObject, all || isDirty || isDirty2)
 	}
 }
 

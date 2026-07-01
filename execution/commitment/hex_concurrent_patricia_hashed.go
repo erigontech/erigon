@@ -34,6 +34,7 @@ func (hph *HexPatriciaHashed) mountTo(root *HexPatriciaHashed, nibble int) {
 
 	hph.mountedNib = nibble
 	hph.mounted = true
+	hph.mountWall = root.currentKeyLen + 1
 	for row := 0; row <= hph.activeRows; row++ {
 		for nib := 0; nib < len(hph.grid[row]); nib++ {
 			hph.grid[row][nib] = root.grid[row][nib]
@@ -171,12 +172,7 @@ func (p *ConcurrentPatriciaHashed) SetTraceDomain(b bool) {
 		p.mounts[i].SetTraceDomain(b)
 	}
 }
-func (p *ConcurrentPatriciaHashed) EnableWarmupCache(b bool) {
-	p.root.EnableWarmupCache(b)
-	for i := range p.mounts {
-		p.mounts[i].EnableWarmupCache(b)
-	}
-}
+
 func (p *ConcurrentPatriciaHashed) GetCapture(truncate bool) []string {
 	capture := p.root.GetCapture(truncate)
 	if truncate {

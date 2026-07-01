@@ -25,6 +25,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"runtime"
 	"strconv"
 	"strings"
 	"time"
@@ -316,12 +317,12 @@ func buildValueTransformer(
 	if detectedSqueezed == targetSqueezed {
 		return nil, nil
 	}
-	af, err := accounts.rawLookupFileByRange(startTxNum, endTxNum)
+	af, err := accounts.lookupVisibleFileByRange(startTxNum, endTxNum)
 	if err != nil {
 		return nil, fmt.Errorf("%q: %w (accounts step %d-%d): %w",
 			srcPath, errRangeMatch, stepFrom, stepTo, err)
 	}
-	sf, err := storage.rawLookupFileByRange(startTxNum, endTxNum)
+	sf, err := storage.lookupVisibleFileByRange(startTxNum, endTxNum)
 	if err != nil {
 		return nil, fmt.Errorf("%q: %w (storage step %d-%d): %w",
 			srcPath, errRangeMatch, stepFrom, stepTo, err)
@@ -617,22 +618,24 @@ func signedByteSizeHR(n int64) string {
 //     state are skipped (no output).
 //  2. Pre-swap check: verify every converted file produced its full set of
 //     accessor siblings (.kvi / .bt / .kvei per the commitment domain config).
-//  3. Backup originals: mkdir snapshots/backup/domains/ and mv every related
-//     original (.kv plus its accessor and .torrent siblings) into it.
+//  3. Backup originals: drop the aggregator's mmap handles on the originals
+//     (Windows can't rename a mapped file), then mkdir snapshots/backup/domains/
+//     and mv every related original (.kv plus accessor and .torrent siblings) into it.
 //  4. Promote: mv snapshots/rebuild/domain/* into snapshots/domain/, then
 //     rmdir the rebuild tree.
-//  5. Reload aggregator + emit revert instruction: agg.ReloadFiles() drops
-//     mmap handles on the now-gone originals and rescans snapshots/domain/.
+//  5. Reload aggregator + emit revert instruction: agg.ReloadFiles() rescans
+//     snapshots/domain/ and re-opens the promoted files.
 //
 // Phase 1 must complete for every file before Phase 2 begins — no per-file
 // interleaving with backup/promote. If anything fails in Phase 1 the caller
 // recovers by deleting snapshots/rebuild/; nothing in snapshots/domain/ has
 // been touched yet.
 //
-// IMPORTANT: agg.ReloadFiles() in Phase 5 invalidates the AggregatorRoTx
-// passed in via at. The caller must not use at after a successful return; it
-// should rollback its transaction and open a fresh one against the reloaded
-// aggregator if it needs to keep working.
+// IMPORTANT: the aggregator's dirty-file handles are closed before Phase 3 (and
+// agg.ReloadFiles() reopens them in Phase 5), which invalidates the
+// AggregatorRoTx passed in via at. The caller must not use at after this
+// returns; it should rollback its transaction and open a fresh one against the
+// reloaded aggregator if it needs to keep working.
 //
 // Pre-flight refuses to run if snapshots/backup/domains/ is non-empty (a
 // prior conversion's backup is still in place). By default it wipes a
@@ -734,8 +737,15 @@ func ConvertCommitmentFiles(ctx context.Context, at *AggregatorRoTx, opts Conver
 	}
 	logger.Info(fmt.Sprintf("[commitment_convert] phase 2 pre-swap check: %d files ok", len(convertedFiles)))
 
+	// Windows can't rename a mmapped file, so drop the aggregator's handles on
+	// the originals before Phase 3 moves them out of snapshots/domain/. This
+	// invalidates at; read only cached scalars (stepSize) past this point until
+	// Phase 5's ReloadFiles republishes.
+	stepSize := at.StepSize()
+	at.a.closeDirtyFilesNoReopen()
+
 	// Phase 3: backup originals.
-	movedToBackup, err := convertPhase3(dirs.SnapDomain, backupDir, convertedFiles, at.StepSize())
+	movedToBackup, err := convertPhase3(dirs.SnapDomain, backupDir, convertedFiles, stepSize)
 	if err != nil {
 		return err
 	}
@@ -1019,6 +1029,11 @@ func writeRestoreManifestAtomic(path string, entries []string) error {
 // entries inside it) to disk. Required on POSIX filesystems to make a rename
 // durable across power loss.
 func fsyncDir(path string) error {
+	if runtime.GOOS == "windows" {
+		// Windows rejects Sync on a directory handle opened via os.Open;
+		// directory-entry fsync for rename durability is a POSIX-only concern.
+		return nil
+	}
 	d, err := os.Open(path)
 	if err != nil {
 		return err
