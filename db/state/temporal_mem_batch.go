@@ -33,6 +33,7 @@ import (
 	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/db/state/changeset"
 	"github.com/erigontech/erigon/db/state/execctx"
+	"github.com/erigontech/erigon/db/state/kvmetrics"
 )
 
 type iodir int
@@ -96,13 +97,13 @@ type TemporalMemBatch struct {
 	// above the unwind target.
 	unwindChangesetRaw *[kv.DomainLen][]kv.DomainEntryDiff
 
-	metrics *changeset.DomainMetrics
+	metrics *kvmetrics.DomainMetrics
 }
 
 func NewTemporalMemBatch(tx kv.TemporalTx, ioMetrics any) *TemporalMemBatch {
 	sd := &TemporalMemBatch{
 		storage:           btree2.NewMap[string, []dataWithTxNum](128),
-		metrics:           ioMetrics.(*changeset.DomainMetrics),
+		metrics:           ioMetrics.(*kvmetrics.DomainMetrics),
 		inMemHistoryReads: true,
 	}
 	aggTx := AggTx(tx)
@@ -164,7 +165,7 @@ func (sd *TemporalMemBatch) putLatest(domain kv.Domain, key string, val []byte, 
 			dm.CachePutKeySize += putKeySize
 			dm.CachePutValueSize += putValueSize
 		} else {
-			sd.metrics.Domains[domain] = &changeset.DomainIOMetrics{
+			sd.metrics.Domains[domain] = &kvmetrics.DomainIOMetrics{
 				CachePutCount:     1,
 				CachePutSize:      putKeySize + putValueSize,
 				CachePutKeySize:   putKeySize,
@@ -328,8 +329,12 @@ func (sd *TemporalMemBatch) GetAsOf(domain kv.Domain, key []byte, ts uint64) (v 
 }
 
 func (sd *TemporalMemBatch) SizeEstimate() uint64 {
-	sd.latestStateLock.RLock()
-	defer sd.latestStateLock.RUnlock()
+	// CachePutSize is guarded by the metrics lock — the put path, Merge and the
+	// reset all mutate it under sd.metrics.Lock(), and MergeMetrics folds in a
+	// boundary worker's accumulator from another goroutine. Read under the same
+	// lock (not latestStateLock, which guards the domains map, not this counter).
+	sd.metrics.RLock()
+	defer sd.metrics.RUnlock()
 	return uint64(sd.metrics.CachePutSize)
 }
 
@@ -790,14 +795,54 @@ func (sd *TemporalMemBatch) flushLocked(ctx context.Context, tx kv.RwTx) error {
 	return nil
 }
 
-// Flush writes the mem-batch to tx.
-func (sd *TemporalMemBatch) Flush(ctx context.Context, tx kv.RwTx) error {
+// Flush writes the mem-batch to tx. With kv.WithFlushCallback options, the
+// registered per-domain callback is invoked for every (key, value, step, txNum)
+// tuple after the MDBX write succeeds, so a downstream cache can never be left
+// ahead of MDBX. Runs under latestStateLock so the callback's snapshot matches
+// flush-time state.
+func (sd *TemporalMemBatch) Flush(ctx context.Context, tx kv.RwTx, opts ...kv.FlushOption) error {
 	sd.latestStateLock.Lock()
 	defer sd.latestStateLock.Unlock()
-	return sd.flushLocked(ctx, tx)
+
+	if err := sd.flushLocked(ctx, tx); err != nil {
+		return err
+	}
+
+	if len(opts) > 0 {
+		var cfg kv.FlushConfig
+		for _, opt := range opts {
+			opt(&cfg)
+		}
+		for domain, cb := range cfg.DomainCallbacks {
+			// StorageDomain values live in the separate sd.storage btree, not
+			// sd.domains[StorageDomain]; iterate it directly so the storage
+			// cache is flush-updated and never serves stale slots.
+			if domain == kv.StorageDomain {
+				sd.storage.Scan(func(keyStr string, history []dataWithTxNum) bool {
+					if len(history) == 0 {
+						return true
+					}
+					latest := history[len(history)-1]
+					cb([]byte(keyStr), latest.data, kv.Step(latest.txNum/sd.stepSize), latest.txNum)
+					return true
+				})
+				continue
+			}
+			for keyStr, history := range sd.domains[domain] {
+				if len(history) == 0 {
+					continue
+				}
+				latest := history[len(history)-1]
+				cb([]byte(keyStr), latest.data, kv.Step(latest.txNum/sd.stepSize), latest.txNum)
+			}
+		}
+	}
+
+	return nil
 }
 
-// Flushes the batch then invokes cb per commitment tuple under the lock.
+// FlushWithCommitmentCallback flushes the batch then invokes cb per
+// commitment-domain tuple under the lock.
 func (sd *TemporalMemBatch) FlushWithCommitmentCallback(ctx context.Context, tx kv.RwTx, cb execctx.CommitmentFlushCallback) error {
 	sd.latestStateLock.Lock()
 	defer sd.latestStateLock.Unlock()

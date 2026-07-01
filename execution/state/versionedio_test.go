@@ -1416,11 +1416,11 @@ func TestEIP161EmptyRemoval(t *testing.T) {
 	userAddr := accounts.InternAddress(common.HexToAddress("0x1111"))
 
 	tests := []struct {
-		name           string
-		spuriousDragon bool
-		isAura         bool
-		addr           accounts.Address
-		want           bool
+		name          string
+		eip161Enabled bool
+		isAura        bool
+		addr          accounts.Address
+		want          bool
 	}{
 		{"pre-spurious-dragon user", false, false, userAddr, false},
 		{"pre-spurious-dragon aura system address", false, true, params.SystemAddress, false},
@@ -1431,7 +1431,87 @@ func TestEIP161EmptyRemoval(t *testing.T) {
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			require.Equal(t, tc.want, EIP161EmptyRemoval(tc.spuriousDragon, tc.isAura, tc.addr))
+			require.Equal(t, tc.want, EIP161EmptyRemoval(tc.eip161Enabled, tc.isAura, tc.addr))
 		})
 	}
+}
+
+// TestVersionedIO_mergeTxEquivalentToMerge asserts that folding per-tx IO into
+// an accumulator via mergeTx matches repeated Merge channel by channel (reads,
+// writes, accesses) and as a whole BAL — including the begin-system tx at index
+// -1 and two txs touching the same index.
+func TestVersionedIO_mergeTxEquivalentToMerge(t *testing.T) {
+	t.Parallel()
+
+	addrs := []accounts.Address{
+		accounts.InternAddress(common.HexToAddress("0x1111")),
+		accounts.InternAddress(common.HexToAddress("0x2222")),
+		accounts.InternAddress(common.HexToAddress("0x3333")),
+	}
+	slots := []accounts.StorageKey{
+		accounts.InternKey(common.HexToHash("0x01")),
+		accounts.InternKey(common.HexToHash("0x02")),
+	}
+	type txIO struct {
+		txIdx int
+		inc   int
+		addr  accounts.Address
+		slot  accounts.StorageKey
+		val   uint64
+	}
+	// A StoragePath read on a slot the tx does not write surfaces in the BAL as
+	// a StorageRead, so a dropped read also changes the hash; a balance read
+	// would contribute no BAL field.
+	reads := func(x txIO) ReadSet {
+		rs := ReadSet{}
+		rs.Set(VersionedRead{Address: x.addr, Path: StoragePath, Key: x.slot, Version: Version{TxIndex: x.txIdx, Incarnation: x.inc}, Val: *uint256.NewInt(x.val)})
+		return rs
+	}
+	writes := func(x txIO) VersionedWrites {
+		return VersionedWrites{
+			&VersionedWrite{Address: x.addr, Path: BalancePath, Version: Version{TxIndex: x.txIdx, Incarnation: x.inc}, Val: *uint256.NewInt(x.val + 1)},
+		}
+	}
+	accesses := func(x txIO) AccessSet { return AccessSet{x.addr: &accessOptions{}} }
+
+	txs := []txIO{
+		{-1, 0, addrs[0], slots[0], 5}, // begin-system tx (TxIndex -1)
+		{0, 0, addrs[0], slots[0], 10},
+		{1, 0, addrs[1], slots[0], 20},
+		{2, 1, addrs[2], slots[0], 30},
+		{2, 2, addrs[0], slots[1], 40}, // same index, higher incarnation: merge-into-existing
+	}
+
+	// Oracle: build a single-tx VersionedIO per tx and fold via repeated Merge.
+	merged := &VersionedIO{}
+	for _, x := range txs {
+		v := Version{TxIndex: x.txIdx, Incarnation: x.inc}
+		io := &VersionedIO{}
+		io.RecordReads(v, reads(x))
+		io.RecordWrites(v, writes(x))
+		io.RecordAccesses(v, accesses(x))
+		merged = merged.Merge(io)
+	}
+
+	fused := &VersionedIO{}
+	for _, x := range txs {
+		fused.mergeTx(Version{TxIndex: x.txIdx, Incarnation: x.inc}, reads(x), writes(x), accesses(x))
+	}
+
+	require.Equal(t, merged.Len(), fused.Len(), "Len mismatch")
+	require.Equal(t, merged.AsBlockAccessList().Hash(), fused.AsBlockAccessList().Hash(),
+		"mergeTx must produce a BAL identical to repeated Merge")
+
+	// The BAL hash does not surface a dropped access (a non-system access adds
+	// no BAL field), so compare every channel at every index directly: a mergeTx
+	// that overwrote instead of merged a slot passes the hash check but fails here.
+	for i := -1; i < merged.Len()-1; i++ {
+		require.Equal(t, merged.ReadSet(i), fused.ReadSet(i), "reads differ at tx %d", i)
+		require.Equal(t, merged.ReadSetIncarnation(i), fused.ReadSetIncarnation(i), "incarnation differs at tx %d", i)
+		require.ElementsMatch(t, merged.WriteSet(i), fused.WriteSet(i), "writes differ at tx %d", i)
+		require.Equal(t, merged.AccessedAddresses(i), fused.AccessedAddresses(i), "accesses differ at tx %d", i)
+	}
+
+	require.True(t, len(fused.inputs) == len(fused.outputs) && len(fused.outputs) == len(fused.accessed),
+		"mergeTx must keep inputs/outputs/accessed equal length")
 }
