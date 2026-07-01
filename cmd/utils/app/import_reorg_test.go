@@ -14,15 +14,14 @@
 // You should have received a copy of the GNU Lesser General Public License
 // along with Erigon. If not, see <http://www.gnu.org/licenses/>.
 
-package executiontests
+package app
 
 import (
+	"context"
 	"encoding/hex"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"regexp"
 	"runtime"
@@ -31,8 +30,10 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/require"
+	"github.com/urfave/cli/v2"
 
 	"github.com/erigontech/erigon/execution/tests/testforks"
+	erigoncli "github.com/erigontech/erigon/node/cli"
 )
 
 type importFixtureCase struct {
@@ -60,23 +61,12 @@ type importFixtureCase struct {
 
 var headUpdatedRe = regexp.MustCompile(`head updated\s+hash=(0x[0-9a-fA-F]{64})\s+number=(\d+)`)
 
-// lastImportedHead returns the final canonical head the import settled on (the
-// last head-update logged), or ("", 0) if none was logged.
-func lastImportedHead(out string) (hash string, number uint64) {
-	matches := headUpdatedRe.FindAllStringSubmatch(out, -1)
-	if len(matches) == 0 {
-		return "", 0
-	}
-	last := matches[len(matches)-1]
-	number, _ = strconv.ParseUint(last[2], 10, 64)
-	return last[1], number
-}
-
-// TestImportReorgUnwindToGenesis drives the real erigon init + import binary
-// flow for a chain that reorgs back to genesis, asserting the canonical head
-// advances to the heavier side chain. It must use the binary rather than the
-// in-process block-test harness: that harness commits genesis through a
-// separate path that doesn't hit this parallel-executor regression.
+// TestImportReorgUnwindToGenesis drives the real erigon init + import commands
+// in-process for a chain that reorgs back to genesis, asserting the canonical
+// head advances to the heavier side chain. Running the actual commands is what
+// exercises the parallel-executor genesis-commitment path this guards: the
+// in-process block-test harness commits genesis through a different path that
+// doesn't hit the regression.
 func TestImportReorgUnwindToGenesis(t *testing.T) {
 	if testing.Short() {
 		t.Skip()
@@ -96,14 +86,48 @@ func TestImportReorgUnwindToGenesis(t *testing.T) {
 	require.NotEmpty(t, tc.Blocks)
 
 	work := t.TempDir()
+	genesisPath := writeImportGenesis(t, work, tc)
+	rlpFiles := writeImportBlocks(t, work, tc)
+	dataDir := filepath.Join(work, "datadir")
 
+	require.NoError(t, runErigonCommand("init", "--datadir", dataDir, genesisPath))
+
+	// Import returns an error by design: the fixture ends with an intentionally
+	// invalid block (a post-merge uncle). Assert on the canonical head reached,
+	// not the error; a genuine startup failure surfaces as the head never
+	// advancing, with importErr reported in the failure message.
+	importArgs := append([]string{
+		"--http=false",
+		"--private.api.addr=",
+		"--authrpc.port=0",
+		"import", "--datadir", dataDir, "--networkid", "1337",
+	}, rlpFiles...)
+	importErr := runErigonCommand(importArgs...)
+
+	// The import command leaves the chaindata open until process exit, so assert
+	// on erigon's own log file (init and import both append to it) rather than
+	// reopening the DB.
+	logs, err := os.ReadFile(filepath.Join(dataDir, "logs", "erigon.log"))
+	require.NoError(t, err)
+	require.Containsf(t, string(logs), tc.GenesisHeader.Hash,
+		"genesis hash mismatch — chain config drift?")
+
+	head, number := lastImportedHead(t, string(logs))
+	require.Equalf(t, uint64(4), number,
+		"head did not advance to the heavier side chain (block 4); import err: %v", importErr)
+	require.Equalf(t, tc.LastBlockHash, head,
+		"final head mismatch (import err: %v)", importErr)
+}
+
+func writeImportGenesis(t *testing.T, dir string, tc importFixtureCase) string {
+	t.Helper()
 	alloc := make(map[string]json.RawMessage, len(tc.Pre))
 	for addr, acc := range tc.Pre {
 		alloc[strings.TrimPrefix(addr, "0x")] = acc
 	}
-	// Reuse the same chain config the in-process fixture tests resolve, so the
-	// CLI genesis can't silently drift from it; the genesis-hash check below
-	// still guards header/alloc drift.
+	// Reuse the chain config the in-process fixture tests resolve so the CLI
+	// genesis can't silently drift from it; the genesis-hash assertion still
+	// guards header/alloc drift.
 	configJSON, err := json.Marshal(testforks.Forks["Cancun"])
 	require.NoError(t, err)
 	genesis := map[string]any{
@@ -124,41 +148,46 @@ func TestImportReorgUnwindToGenesis(t *testing.T) {
 	}
 	genesisJSON, err := json.Marshal(genesis)
 	require.NoError(t, err)
-	genesisPath := filepath.Join(work, "genesis.json")
+	genesisPath := filepath.Join(dir, "genesis.json")
 	require.NoError(t, os.WriteFile(genesisPath, genesisJSON, 0o644))
+	return genesisPath
+}
 
+func writeImportBlocks(t *testing.T, dir string, tc importFixtureCase) []string {
+	t.Helper()
 	rlpFiles := make([]string, 0, len(tc.Blocks))
 	for i, b := range tc.Blocks {
 		data, err := hex.DecodeString(strings.TrimPrefix(b.Rlp, "0x"))
 		require.NoErrorf(t, err, "decode block %d rlp", i+1)
-		p := filepath.Join(work, fmt.Sprintf("%04d.rlp", i+1))
+		p := filepath.Join(dir, fmt.Sprintf("%04d.rlp", i+1))
 		require.NoError(t, os.WriteFile(p, data, 0o644))
 		rlpFiles = append(rlpFiles, p)
 	}
+	return rlpFiles
+}
 
-	bin := erigonBinaryForTest(t, root)
-	datadir := filepath.Join(work, "datadir")
+// lastImportedHead returns the hash and number of the final canonical head the
+// import settled on, from the last "head updated" log line.
+func lastImportedHead(t *testing.T, logs string) (hash string, number uint64) {
+	t.Helper()
+	matches := headUpdatedRe.FindAllStringSubmatch(logs, -1)
+	require.NotEmpty(t, matches, "no 'head updated' line found in import logs")
+	last := matches[len(matches)-1]
+	number, err := strconv.ParseUint(last[2], 10, 64)
+	require.NoError(t, err)
+	return last[1], number
+}
 
-	initOut, err := exec.Command(bin, "init", "--datadir", datadir, genesisPath).CombinedOutput() //nolint:gosec
-	require.NoErrorf(t, err, "erigon init failed:\n%s", initOut)
-	require.Containsf(t, string(initOut), tc.GenesisHeader.Hash,
-		"genesis hash mismatch — chain config drift?\n%s", initOut)
-
-	// Import exits non-zero by design: the fixture includes an intentionally
-	// invalid block (a post-merge uncle). We assert on the canonical head the
-	// import reached, not the exit code.
-	importArgs := append([]string{"import", "--datadir", datadir, "--networkid", "1337"}, rlpFiles...)
-	importOut, importErr := exec.Command(bin, importArgs...).CombinedOutput() //nolint:gosec
-	var exitErr *exec.ExitError
-	if importErr != nil && !errors.As(importErr, &exitErr) {
-		t.Fatalf("erigon import failed to run: %v\n%s", importErr, importOut)
-	}
-
-	head, number := lastImportedHead(string(importOut))
-	require.Equalf(t, uint64(4), number,
-		"head did not advance to the heavier side chain (block 4); reached block %d\n%s", number, importOut)
-	require.Equalf(t, tc.LastBlockHash, head,
-		"final head mismatch: want %s, have %s\n%s", tc.LastBlockHash, head, importOut)
+// runErigonCommand runs the erigon CLI app in-process — the same app the binary
+// builds — so init/import exercise the production command path. The no-op
+// ExitErrHandler makes a failing command return its error instead of calling
+// os.Exit, so import's expected invalid-block error is observable.
+func runErigonCommand(args ...string) error {
+	app := MakeApp("erigon", func(*cli.Context) error { return nil }, erigoncli.DefaultFlags)
+	app.ExitErrHandler = func(*cli.Context, error) {}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	return app.RunContext(ctx, append([]string{"erigon"}, args...))
 }
 
 // repoRootDir walks up from this source file to the module root (the dir with go.mod).
@@ -175,30 +204,4 @@ func repoRootDir(t *testing.T) string {
 		require.NotEqualf(t, parent, dir, "go.mod not found above %s", file)
 		dir = parent
 	}
-}
-
-// erigonBinaryForTest resolves the erigon binary to drive: $ERIGON_BIN (set by
-// CI), else a prebuilt build/bin/erigon, else a slow local from-scratch build
-// (which is why the test is skipped under -short).
-func erigonBinaryForTest(t *testing.T, root string) string {
-	t.Helper()
-	if b := os.Getenv("ERIGON_BIN"); b != "" {
-		return b
-	}
-	binPath := filepath.Join(root, "build", "bin", "erigon")
-	if _, err := os.Stat(binPath); err == nil {
-		return binPath
-	}
-	// Point go build's work dir (GOTMPDIR) at real disk under build/ rather
-	// than the default temp: the from-scratch erigon link is large and can
-	// overflow a small or tmpfs /tmp.
-	buildRoot := filepath.Join(root, "build")
-	require.NoError(t, os.MkdirAll(filepath.Join(buildRoot, "bin"), 0o755))
-	build := exec.Command("go", "build", "-o", binPath, "./cmd/erigon") //nolint:gosec
-	build.Dir = root
-	build.Env = append(os.Environ(), "GOTMPDIR="+buildRoot)
-	if b, err := build.CombinedOutput(); err != nil {
-		t.Fatalf("build erigon: %v\n%s", err, b)
-	}
-	return binPath
 }
