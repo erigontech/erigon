@@ -190,7 +190,7 @@ func (cs *calcState) ensureAccount(addr accounts.Address) *calcAccountState {
 // false and the conditional is a no-op. (For per-block writesets the calc
 // also relies on this — but blocks aren't single txs; the SD-then-recreate
 // pattern there spans txs, and last-write-wins on acc.Deleted still holds.)
-func (cs *calcState) ApplyWrites(writes state.VersionedWrites) {
+func (cs *calcState) ApplyWrites(writes state.VersionedWrites, eip8246 bool) {
 	// Pre-scan: which addresses are self-destructed BY THIS tx's writeset.
 	// For those, the trailing zero account-field writes that IBS emits as
 	// part of the SELFDESTRUCT (BalancePath=0, etc. — when not stripped by
@@ -219,7 +219,6 @@ func (cs *calcState) ApplyWrites(writes state.VersionedWrites) {
 		if w.Val == nil {
 			continue
 		}
-
 		switch w.Path {
 		case state.BalancePath:
 			acc := cs.ensureAccount(w.Address)
@@ -258,7 +257,11 @@ func (cs *calcState) ApplyWrites(writes state.VersionedWrites) {
 				acc.dirty = true
 				// Invariant 2: zero account fields so FlushToUpdates
 				// routes into the EIP-161 DeleteUpdate branch.
-				acc.Balance = uint256.Int{}
+				if !eip8246 {
+					// EIP-8246 keeps the residual balance (FlushToUpdates then
+					// emits a balance-only UPDATE); pre-8246 burns it.
+					acc.Balance = uint256.Int{}
+				}
 				acc.Nonce = 0
 				acc.CodeHash = empty.CodeHash
 				acc.Incarnation = 0

@@ -475,7 +475,7 @@ func TestSelfDestructKeepsDirtyStorageReadableSameTx(t *testing.T) {
 	require.NoError(t, ibs.SetState(addr, slot0, *uint256.NewInt(42)))
 	require.NoError(t, ibs.SetState(addr, slot1, *uint256.NewInt(99)))
 
-	_, err := ibs.Selfdestruct(addr)
+	_, err := ibs.Selfdestruct(addr, false)
 	require.NoError(t, err)
 
 	// After SELFDESTRUCT, same-tx reads must still see the dirty values.
