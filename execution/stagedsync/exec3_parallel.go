@@ -83,9 +83,14 @@ When rwLoop has nothing to do - it does Prune, or flush of WAL to RwTx (agg.rota
 
 type parallelExecutor struct {
 	txExecutor
-	execWorkers    []*exec.Worker
-	stopWorkers    func()
-	waitWorkers    func()
+	execWorkers []*exec.Worker
+	stopWorkers func()
+	waitWorkers func()
+	// cancelExecLoop cancels the exec-loop context only — the light signal the
+	// commitment calculator uses to halt execution on a fold/root mismatch.
+	// Teardown (stopWorkers + wait) stays solely with execImpl's deferred
+	// executorCancel so failure cleanup lives in one place.
+	cancelExecLoop context.CancelCauseFunc
 	in             *exec.QueueWithRetry
 	rws            *exec.ResultsQueue
 	workerCount    int
@@ -280,9 +285,10 @@ func (pe *parallelExecutor) execImpl(ctx context.Context, execStage *StageState,
 	// compute per-block — otherwise batch-mode dedupes branch updates across
 	// the batch and flushes them all into one block's changeset, which fails
 	// on subsequent reorgs. blockRequests feeds it BAL-declared block requests;
-	// executorCancel lets a fold/root mismatch halt execution eagerly.
+	// cancelExecLoop lets a fold/root mismatch halt execution eagerly while
+	// teardown stays with execImpl's deferred executorCancel (one cleanup site).
 	forcePerBlockCompute := pe.cfg.syncCfg.KeepExecutionProofs
-	calculator, err := newCommitmentCalculator(executorContext, pe.rs.Domains(), pe.cfg.db, pe.logPrefix, pe.logger, forcePerBlockCompute, pe.changesetWindowStart, commitResults, blockRequests, rootResults, executorCancel)
+	calculator, err := newCommitmentCalculator(executorContext, pe.rs.Domains(), pe.cfg.db, pe.logPrefix, pe.logger, forcePerBlockCompute, pe.changesetWindowStart, commitResults, blockRequests, rootResults, pe.cancelExecLoop)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -404,8 +410,10 @@ func (pe *parallelExecutor) execImpl(ctx context.Context, execStage *StageState,
 		// processCommit defers ErrWrongTrieRoot via processCommitErr so a
 		// same-block ErrInvalidBlock can supersede it; the first occurrence
 		// cancels the executor with errDeliberateStop, so later blocks'
-		// verdicts may not be produced.
-		deliberateCancel := func() { executorCancel(errDeliberateStop) }
+		// verdicts may not be produced. Uses the light context-cancel — teardown
+		// (stopWorkers + wait) stays with execImpl's deferred executorCancel so
+		// only the main goroutine drives cleanup.
+		deliberateCancel := func() { pe.cancelExecLoop(errDeliberateStop) }
 		processCommit := func(cr commitmentResult) error {
 			return processCommitErr(handleCommitResult(cr), deliberateCancel, &deferredRootErr)
 		}
@@ -1457,6 +1465,7 @@ func (pe *parallelExecutor) run(ctx context.Context) (context.Context, context.C
 
 	execLoopCtx, execLoopCtxCancel := context.WithCancelCause(ctx)
 	pe.execLoopGroup, execLoopCtx = errgroup.WithContext(execLoopCtx)
+	pe.cancelExecLoop = execLoopCtxCancel
 
 	var err error
 	pe.execWorkers, _, pe.rws, pe.stopWorkers, pe.waitWorkers, err = exec.NewWorkersPool(
