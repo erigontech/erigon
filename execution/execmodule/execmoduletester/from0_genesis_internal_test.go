@@ -145,10 +145,10 @@ func runFromZeroGenesisAllocPreservedAfterResetReExec(t *testing.T) {
 		"BUG #21138: after reset + integration-path re-exec, genesis-allocated balance dropped (mainnet block 46147)")
 }
 
-// newOfflineExecCfg rebuilds the exec-stage cfg directly (execmoduletester's own
+// setupOfflineExec rebuilds the exec-stage cfg directly (execmoduletester's own
 // copy is buried in emt.Sync) and locks the offline-execution writers like the
 // integration tool does, so periodic snapshot retiring doesn't fight the re-exec.
-func newOfflineExecCfg(emt *ExecModuleTester, batchSize datasize.ByteSize, badBlockHalt bool) stagedsync.ExecuteBlockCfg {
+func setupOfflineExec(emt *ExecModuleTester, batchSize datasize.ByteSize, badBlockHalt bool) stagedsync.ExecuteBlockCfg {
 	cfg := stagedsync.StageExecuteBlocksCfg(
 		emt.DB,
 		emt.cfg.Prune,
@@ -183,7 +183,7 @@ func newOfflineExecCfg(emt *ExecModuleTester, batchSize datasize.ByteSize, badBl
 func reExecViaIntegrationPath(t *testing.T, ctx context.Context, emt *ExecModuleTester, toBlock uint64, batchSize datasize.ByteSize, badBlockHalt bool, logger log.Logger) error {
 	t.Helper()
 
-	cfg := newOfflineExecCfg(emt, batchSize, badBlockHalt)
+	cfg := setupOfflineExec(emt, batchSize, badBlockHalt)
 
 	doms, err := newReusedDomains(ctx, emt, logger)
 	if err != nil {
@@ -357,7 +357,7 @@ func TestExec_RestoresCommitmentStateReader(t *testing.T) {
 	logger := log.New()
 	require.NoError(t, rawdbreset.ResetExec(ctx, emt.DB))
 
-	cfg := newOfflineExecCfg(emt, emt.cfg.BatchSize, false /*badBlockHalt*/)
+	cfg := setupOfflineExec(emt, emt.cfg.BatchSize, false /*badBlockHalt*/)
 
 	doms, err := newReusedDomains(ctx, emt, logger)
 	require.NoError(t, err)
