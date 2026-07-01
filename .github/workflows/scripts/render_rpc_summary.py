@@ -96,6 +96,41 @@ def parse_stats(log_text):
     return stats if "failed" in stats else None
 
 
+# A per-test result line: "NNNN. <transport>::<test_name>   <status-or-error>".
+# rpc-tests prints this for every executed test (OK lines are not suppressed by
+# --display-only-fail), so failures sit interspersed among the OK lines rather
+# than at the tail — parse them out explicitly.
+TEST_LINE_RE = re.compile(r"^\s*(\d{3,5})\.\s+(\S+)\s*::\s*(\S+)\s+(.*?)\s*$")
+
+
+def parse_failed_from_log(log_text):
+    """Best-effort per-test failed list from output.log when no structured report.
+
+    A test-result line whose status field is neither OK nor Skipped is treated
+    as a failure, with the trailing text as the error message. Returns rows in
+    the same shape as test_report.json's test_results.
+    """
+    if not log_text:
+        return []
+    text = log_text.replace("\r\n", "\n").replace("\r", "\n")
+    failed = []
+    for line in text.split("\n"):
+        m = TEST_LINE_RE.match(line)
+        if not m:
+            continue
+        status = m.group(4).strip()
+        if status == "" or status.startswith("OK") or status.startswith("Skipped"):
+            continue
+        failed.append({
+            "test_number": int(m.group(1)),
+            "transport_type": m.group(2),
+            "test_name": m.group(3),
+            "result": "FAILED",
+            "error_message": status,
+        })
+    return failed
+
+
 def one_line(text, maxlen):
     """Collapse to a single, table-safe line and truncate."""
     s = " ".join(str(text).split())
@@ -165,6 +200,11 @@ def render(args):
 
     report_summary = (report or {}).get("summary", {}) or {}
     failed_rows = [r for r in (report or {}).get("test_results", []) or [] if str(r.get("result", "")).upper() == "FAILED"]
+    failed_source = "report"
+    if not failed_rows:
+        log_failed = parse_failed_from_log(log_text)
+        if log_failed:
+            failed_rows, failed_source = log_failed, "log"
 
     # Overall counts: prefer the log's stats block, fall back to the report summary.
     failed_count = int_or_none(stats or {}, "failed")
@@ -221,6 +261,12 @@ def render(args):
 
         out.append(f"## ❌ Failed tests ({len(failed_rows)})")
         out.append("")
+        if failed_source == "log":
+            note = "Parsed from `output.log` (no structured `test_report.json` for this run); errors are the first log line only."
+            if failed_count is not None and failed_count != len(failed_rows):
+                note += f" Stats report {failed_count} failures vs {len(failed_rows)} parsed — see `output.log`."
+            out.append(f"> {note}")
+            out.append("")
         out.append("By transport: " + ", ".join(f"`{t}` {n}" for t, n in sorted(by_transport.items())))
         out.append("")
         top_apis = sorted(by_api.items(), key=lambda kv: (-kv[1], kv[0]))[:10]
