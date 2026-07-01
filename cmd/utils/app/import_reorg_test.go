@@ -21,6 +21,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"maps"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -38,24 +39,10 @@ import (
 )
 
 type importFixtureCase struct {
-	LastBlockHash string `json:"lastblockhash"`
-	GenesisHeader struct {
-		Hash          string `json:"hash"`
-		Nonce         string `json:"nonce"`
-		Timestamp     string `json:"timestamp"`
-		ExtraData     string `json:"extraData"`
-		GasLimit      string `json:"gasLimit"`
-		GasUsed       string `json:"gasUsed"`
-		Difficulty    string `json:"difficulty"`
-		MixHash       string `json:"mixHash"`
-		Coinbase      string `json:"coinbase"`
-		ParentHash    string `json:"parentHash"`
-		BaseFeePerGas string `json:"baseFeePerGas"`
-		ExcessBlobGas string `json:"excessBlobGas"`
-		Number        string `json:"number"`
-	} `json:"genesisBlockHeader"`
-	Pre    map[string]json.RawMessage `json:"pre"`
-	Blocks []struct {
+	LastBlockHash string                     `json:"lastblockhash"`
+	GenesisHeader map[string]json.RawMessage `json:"genesisBlockHeader"`
+	Pre           map[string]json.RawMessage `json:"pre"`
+	Blocks        []struct {
 		Rlp string `json:"rlp"`
 	} `json:"blocks"`
 }
@@ -90,9 +77,10 @@ func TestImportReorgUnwindToGenesis(t *testing.T) {
 	genesisPath := writeImportGenesis(t, work, tc)
 	rlpFiles := writeImportBlocks(t, work, tc)
 
-	// The import command leaves the chaindata open until process exit, which
-	// blocks t.TempDir's RemoveAll on Windows (an open file can't be deleted),
-	// so keep the datadir outside it and clean up best-effort.
+	// The import command holds the chaindata open until process exit: keep the
+	// datadir out of t.TempDir so RemoveAll can't fail on Windows (an open file
+	// can't be deleted), and read results from erigon's log below instead of
+	// reopening the DB.
 	dataDir, err := os.MkdirTemp("", "erigon-import-reorg-")
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = dir.RemoveAll(dataDir) })
@@ -111,13 +99,12 @@ func TestImportReorgUnwindToGenesis(t *testing.T) {
 	}, rlpFiles...)
 	importErr := runErigonCommand(importArgs...)
 
-	// The import command leaves the chaindata open until process exit, so assert
-	// on erigon's own log file (init and import both append to it) rather than
-	// reopening the DB.
+	// init and import both append to erigon's log; assert on it.
 	logs, err := os.ReadFile(filepath.Join(dataDir, "logs", "erigon.log"))
 	require.NoError(t, err)
-	require.Containsf(t, string(logs), tc.GenesisHeader.Hash,
-		"genesis hash mismatch — chain config drift?")
+	var genesisHash string
+	require.NoError(t, json.Unmarshal(tc.GenesisHeader["hash"], &genesisHash))
+	require.Containsf(t, string(logs), genesisHash, "genesis hash mismatch — chain config drift?")
 
 	head, number := lastImportedHead(t, string(logs))
 	require.Equalf(t, uint64(4), number,
@@ -132,27 +119,19 @@ func writeImportGenesis(t *testing.T, dir string, tc importFixtureCase) string {
 	for addr, acc := range tc.Pre {
 		alloc[strings.TrimPrefix(addr, "0x")] = acc
 	}
+	allocJSON, err := json.Marshal(alloc)
+	require.NoError(t, err)
 	// Reuse the chain config the in-process fixture tests resolve so the CLI
-	// genesis can't silently drift from it; the genesis-hash assertion still
-	// guards header/alloc drift.
+	// genesis can't drift from it; the genesis-hash assertion guards drift.
 	configJSON, err := json.Marshal(testforks.Forks["Cancun"])
 	require.NoError(t, err)
-	genesis := map[string]any{
-		"config":        json.RawMessage(configJSON),
-		"nonce":         tc.GenesisHeader.Nonce,
-		"timestamp":     tc.GenesisHeader.Timestamp,
-		"extraData":     tc.GenesisHeader.ExtraData,
-		"gasLimit":      tc.GenesisHeader.GasLimit,
-		"gasUsed":       tc.GenesisHeader.GasUsed,
-		"difficulty":    tc.GenesisHeader.Difficulty,
-		"mixHash":       tc.GenesisHeader.MixHash,
-		"coinbase":      tc.GenesisHeader.Coinbase,
-		"parentHash":    tc.GenesisHeader.ParentHash,
-		"baseFeePerGas": tc.GenesisHeader.BaseFeePerGas,
-		"excessBlobGas": tc.GenesisHeader.ExcessBlobGas,
-		"number":        tc.GenesisHeader.Number,
-		"alloc":         alloc,
-	}
+
+	// The fixture's genesisBlockHeader fields are the genesis.json fields;
+	// erigon ignores the block-only extras (stateRoot, bloom, ...).
+	genesis := maps.Clone(tc.GenesisHeader)
+	genesis["config"] = configJSON
+	genesis["alloc"] = allocJSON
+
 	genesisJSON, err := json.Marshal(genesis)
 	require.NoError(t, err)
 	genesisPath := filepath.Join(dir, "genesis.json")
