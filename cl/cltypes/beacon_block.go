@@ -766,13 +766,13 @@ func GetExecutionRequestsList(beaconCfg *clparams.BeaconChainConfig, r *Executio
 	}
 	ret := []hexutil.Bytes{}
 	appendRequests := func(typ byte, requests ssz.EncodableSSZ) bool {
-		ssz, err := requests.EncodeSSZ([]byte{})
+		encoded, err := requests.EncodeSSZ([]byte{})
 		if err != nil {
-			log.Warn("Error encoding deposits", "err", err)
+			log.Warn("Error encoding execution requests", "type", typ, "err", err)
 			return false
 		}
-		if len(ssz) > 0 {
-			ret = append(ret, append(hexutil.Bytes{typ}, ssz...))
+		if len(encoded) > 0 {
+			ret = append(ret, append(hexutil.Bytes{typ}, encoded...))
 		}
 		return true
 	}
