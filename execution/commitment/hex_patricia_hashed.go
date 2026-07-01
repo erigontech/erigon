@@ -3171,7 +3171,7 @@ func (cell *cell) Encode() []byte {
 		buf[pos] = byte(cell.extLen)
 		pos++
 		copy(buf[pos:pos+cell.extLen], cell.extension[:])
-		pos += cell.extLen //nolint
+		pos += cell.extLen //nolint:ineffassign
 	}
 	if cell.Deleted() {
 		flags |= cellFlagDelete
@@ -3227,7 +3227,7 @@ func (cell *cell) Decode(buf []byte) error {
 		cell.extLen = int16(buf[pos])
 		pos++
 		copy(cell.extension[:], buf[pos:pos+cell.extLen])
-		pos += cell.extLen //nolint
+		pos += cell.extLen //nolint:ineffassign
 	}
 	if flags&cellFlagDelete != 0 {
 		log.Warn("deleted cell should not be encoded", "cell", cell.String())
