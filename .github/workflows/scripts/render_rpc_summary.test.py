@@ -93,6 +93,13 @@ def case_setup_failure():
         check("setup: no false all-passed", "All executed tests passed" not in out)
 
 
+def case_unknown_result_no_false_pass():
+    with tempfile.TemporaryDirectory() as tmp:
+        write(tmp, "results/test_report.json", report(0, []))
+        out = render(tmp, result="unknown")
+        check("unknown: no false all-passed", "All executed tests passed" not in out)
+
+
 def case_malformed_json_shape():
     with tempfile.TemporaryDirectory() as tmp:
         write(tmp, "results/test_report.json", "[1, 2, 3]")  # valid JSON, wrong shape (not an object)
@@ -119,7 +126,8 @@ def case_missing_dir():
 
 def main():
     for fn in (case_report_all_passed, case_report_failures, case_no_report_with_log,
-               case_setup_failure, case_malformed_json_shape, case_empty_log, case_missing_dir):
+               case_setup_failure, case_unknown_result_no_false_pass, case_malformed_json_shape,
+               case_empty_log, case_missing_dir):
         fn()
     print(f"\n{passed} passed, {failed} failed")
     return 1 if failed else 0

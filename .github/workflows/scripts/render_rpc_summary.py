@@ -107,7 +107,7 @@ def render(args):
             out.append("")
             if len(failed) > MAX_FAILURES:
                 out += [f"> …and {len(failed) - MAX_FAILURES} more — see the `test-results` artifact.", ""]
-        elif (args.result or "").lower() != "failure":
+        elif (args.result or "").lower() == "success":
             out += ["✅ All executed tests passed.", ""]
     else:
         out += ["## No structured report", "",
