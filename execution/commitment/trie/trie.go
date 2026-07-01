@@ -1522,7 +1522,11 @@ func decodeAccountNode(val ValueNode, nodeMap map[common.Hash]Node) (*AccountNod
 	an := &AccountNode{
 		Account:     *acc,
 		RootCorrect: true,
-		CodeSize:    codeSizeUncached,
+	}
+	// -1 marks a code-bearing proof node whose code isn't in the witness; an
+	// empty-code account must stay 0 so serialization emits no bogus code size.
+	if !acc.IsEmptyCodeHash() {
+		an.CodeSize = codeSizeUncached
 	}
 
 	// If account has non-empty storage root, try to find it in nodeMap

@@ -38,11 +38,13 @@ func (s *witnessNodeSet) onNode(rlp, hash []byte) {
 	s.byHash[k] = common.Copy(rlp)
 }
 
-// nodes returns the collected nodes with the root node first, matching the
-// RLPDecode contract that treats the first node as the trie root. It errors when
-// the root hash was never captured: emitting an arbitrary node at index 0 would
-// silently build a mis-rooted trie.
+// nodes returns the captured nodes root first, per the RLPDecode contract that
+// treats index 0 as the trie root. A non-empty set missing its root is an error
+// rather than a silently mis-rooted trie.
 func (s *witnessNodeSet) nodes(root []byte) ([][]byte, error) {
+	if len(s.byHash) == 0 {
+		return nil, nil
+	}
 	rootKey := string(root)
 	r, ok := s.byHash[rootKey]
 	if !ok {

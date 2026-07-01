@@ -24,28 +24,25 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/common/length"
 	"github.com/erigontech/erigon/execution/commitment/trie"
 )
 
-// A proved key whose path steps onto a blinded child must stop cleanly in the prune,
-// not fall through to the error default. RLPDecode reconstructs blinded children as
-// *trie.HashNode (pointer), so WitnessNodesForKeys must match the pointer type — the
-// canonical exclusion-proof case (an absent slot diverging at a branch).
+// RLPDecode rebuilds blinded children as *trie.HashNode; a proved key that steps
+// onto one (an absent slot diverging at a canonical-mode branch) must stop cleanly
+// in both the prune and Prove, never panic on the pointer type.
 func TestWitnessNodesForKeys_AbsentSlotStopsAtBlindedChild(t *testing.T) {
 	ctx := context.Background()
 	ms := NewMockState(t)
 	hph := NewHexPatriciaHashed(length.Addr, ms, DefaultTrieConfig())
 	hph.SetTrace(false)
 
-	// One contract account whose storage carries a slot at every top storage-nibble,
-	// so its storage root is a 16-way branch; witnessing a single slot leaves the
-	// other children blinded.
 	addrPlain, _ := generateKeyWithHashedPrefix([]byte{0}, length.Addr)
 	addrHex := common.Bytes2Hex(addrPlain)
 	builder := NewUpdateBuilder().Balance(addrHex, 1)
 	slots := make([][]byte, 16)
-	for n := 0; n < 16; n++ {
+	for n := range 16 {
 		slotPlain, _ := generateKeyWithHashedPrefix([]byte{byte(n)}, length.Hash)
 		slots[n] = slotPlain
 		builder.Storage(addrHex, common.Bytes2Hex(slotPlain), fmt.Sprintf("%064x", n+1))
@@ -57,8 +54,6 @@ func TestWitnessNodesForKeys_AbsentSlotStopsAtBlindedChild(t *testing.T) {
 	_, err := hph.Process(ctx, toProcess, "", nil, WarmupConfig{})
 	require.NoError(t, err)
 
-	// An absent slot whose hashed path routes to storage-nibble 1 — a sibling we do
-	// not witness, so canonical mode leaves it a blinded *HashNode.
 	absentSlot, _ := generateKeyWithHashedPrefix([]byte{1}, length.Hash)
 
 	toWitness := NewUpdates(ModeDirect, "", KeyToHexNibbleHash)
@@ -67,7 +62,7 @@ func TestWitnessNodesForKeys_AbsentSlotStopsAtBlindedChild(t *testing.T) {
 	toWitness.TouchPlainKey(string(storageKey(addrPlain, slots[0])), nil, toWitness.TouchStorage)
 	toWitness.TouchPlainKey(string(storageKey(addrPlain, absentSlot)), nil, toWitness.TouchStorage)
 
-	nodes, provedKeys, _, err := hph.Witnesses(ctx, toWitness, false /* produceExclusionProofs: canonical */, "")
+	nodes, provedKeys, _, err := hph.Witnesses(ctx, toWitness, false, "")
 	require.NoError(t, err)
 
 	wt, err := trie.RLPDecode(nodes)
@@ -75,4 +70,10 @@ func TestWitnessNodesForKeys_AbsentSlotStopsAtBlindedChild(t *testing.T) {
 
 	_, err = wt.WitnessNodesForKeys(provedKeys)
 	require.NoError(t, err, "prune must stop at a blinded child, not error on *trie.HashNode")
+
+	storageProofKey := append(crypto.Keccak256(addrPlain), crypto.Keccak256(absentSlot)...)
+	require.NotPanics(t, func() {
+		_, _ = wt.Prove(crypto.Keccak256(addrPlain), 0, false)
+		_, _ = wt.Prove(storageProofKey, 0, true)
+	}, "Prove must not panic on a blinded *trie.HashNode (eth_getProof path)")
 }
