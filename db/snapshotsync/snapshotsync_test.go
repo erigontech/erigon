@@ -17,18 +17,51 @@
 package snapshotsync
 
 import (
-	"math"
+	"context"
 	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
 
 	"github.com/erigontech/erigon/db/kv/prune"
+	"github.com/erigontech/erigon/db/services"
 	"github.com/erigontech/erigon/db/snapcfg"
 	"github.com/erigontech/erigon/db/snaptype"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/chain/networkname"
 )
+
+type frozenBody struct {
+	blockNum  uint64
+	baseTxNum uint64
+	txCount   uint64
+}
+
+type fakeSnapshots struct {
+	services.BlockSnapshots
+	max uint64
+}
+
+func (f fakeSnapshots) SegmentsMax() uint64 { return f.max }
+
+// fakeBlockReader stubs the blockReader interface for getMinimumBlocksToDownload,
+// implementing only the methods that function touches.
+type fakeBlockReader struct {
+	blockReader
+	frozenMax uint64
+	bodies    []frozenBody
+}
+
+func (f *fakeBlockReader) Snapshots() services.BlockSnapshots { return fakeSnapshots{max: f.frozenMax} }
+
+func (f *fakeBlockReader) IterateFrozenBodies(fn func(blockNum, baseTxNum, txCount uint64) error) error {
+	for _, b := range f.bodies {
+		if err := fn(b.blockNum, b.baseTxNum, b.txCount); err != nil {
+			return err
+		}
+	}
+	return nil
+}
 
 func TestBlackListForPruning(t *testing.T) {
 	c, ok := snapcfg.KnownCfg(networkname.Mainnet)
@@ -54,7 +87,7 @@ func TestBlackListForPruning(t *testing.T) {
 	// effectiveCutoff mirrors the internal adjustBlockPrune clamp; without
 	// it the assertion accepts segments above the cutoff the function actually used.
 	effectiveCutoff := adjustBlockPrune(blockPrune, minBlockToDownload)
-	blackList, err := buildBlackListForPruning(prune.MinimalMode, nil, stepPrune, minBlockToDownload, blockPrune, preverified)
+	blackList, err := buildBlackListForPruning(prune.MinimalMode, nil, stepPrune, 0, minBlockToDownload, blockPrune, preverified)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -109,7 +142,7 @@ func TestBlackListForPruning_BlocksModeKeepsAllTransactions(t *testing.T) {
 	// range so at least some history files land in the blacklist; the exact
 	// number depends on the bundled preverified set.
 	const stepPrune = 5000
-	blackList, err := buildBlackListForPruning(prune.BlocksMode, nil, stepPrune, 100_000, 0, preverified)
+	blackList, err := buildBlackListForPruning(prune.BlocksMode, nil, stepPrune, 0, 100_000, 0, preverified)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -152,19 +185,27 @@ func TestDownloadFilteringApplies(t *testing.T) {
 		{"blocks", prune.BlocksMode, ccMainnet, true},
 		{
 			name: "archive+blocks-override chain-history-expiry (mainnet)",
-			mode: prune.Mode{Initialised: true, History: prune.KeepPostMergeBlocksPruneMode, Blocks: prune.KeepPostMergeBlocksPruneMode},
+			mode: prune.Mode{Initialised: true, History: prune.KeepPostMergeBlocksPruneMode, Blocks: prune.KeepPostMergeBlocksPruneMode, CommitmentHistory: prune.KeepAllBlocksPruneMode},
 			cc:   ccMainnet,
 			want: true, // pre-merge tx must still be filtered
 		},
 		{
 			name: "archive+blocks-override chain-history-expiry (no MergeHeight)",
-			mode: prune.Mode{Initialised: true, History: prune.KeepPostMergeBlocksPruneMode, Blocks: prune.KeepPostMergeBlocksPruneMode},
+			mode: prune.Mode{Initialised: true, History: prune.KeepPostMergeBlocksPruneMode, Blocks: prune.KeepPostMergeBlocksPruneMode, CommitmentHistory: prune.KeepAllBlocksPruneMode},
 			cc:   ccNoMerge,
 			want: false, // no MergeHeight → nothing to filter
 		},
 		{
 			name: "legacy full {DefaultBlocks, Distance}",
-			mode: prune.Mode{Initialised: true, History: prune.Distance(100_000), Blocks: prune.KeepPostMergeBlocksPruneMode},
+			mode: prune.Mode{Initialised: true, History: prune.Distance(100_000), Blocks: prune.KeepPostMergeBlocksPruneMode, CommitmentHistory: prune.KeepAllBlocksPruneMode},
+			cc:   ccMainnet,
+			want: true,
+		},
+		{
+			// Commitment-only config: History/Blocks unlimited but a bounded
+			// commitment window. Filtering must still apply (regression guard).
+			name: "commitment-history-only bounded",
+			mode: prune.Mode{Initialised: true, History: prune.KeepAllBlocksPruneMode, Blocks: prune.KeepAllBlocksPruneMode, CommitmentHistory: prune.Distance(100_000)},
 			cc:   ccMainnet,
 			want: true,
 		},
@@ -199,7 +240,7 @@ func TestBlackListForPruning_ChainHistoryExpiry(t *testing.T) {
 		Blocks:      prune.KeepPostMergeBlocksPruneMode,
 	}
 
-	blackList, err := buildBlackListForPruning(legacyFull, cc, 64, 100_000, 0, preverified)
+	blackList, err := buildBlackListForPruning(legacyFull, cc, 64, 0, 100_000, 0, preverified)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -224,99 +265,111 @@ func TestBlackListForPruning_ChainHistoryExpiry(t *testing.T) {
 	}
 }
 
-func TestCommitmentHistoryMinStep(t *testing.T) {
-	cases := []struct {
-		name          string
-		maxStateStep  uint64
-		distanceSteps uint64
-		want          uint64
-	}{
-		{"unlimited-distance-disables-filter", 100, 0, 0},
-		{"distance-larger-than-maxstep-disables-filter", 5, 10, 0},
-		{"distance-equal-to-maxstep-disables-filter", 10, 10, 0},
-		{"normal-case", 100, 8, 92},
-		{"recent", 100, 1, 99},
-	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			assert.Equal(t, tc.want, commitmentHistoryMinStep(tc.maxStateStep, tc.distanceSteps))
-		})
-	}
-}
-
-func TestBlocksToStepDistance(t *testing.T) {
-	cases := []struct {
-		name         string
-		olderBlocks  uint64
-		maxStateStep uint64
-		maxBlock     uint64
-		want         uint64
-	}{
-		{"zero-blocks-disables", 0, 100, 1_000_000, 0},
-		{"zero-maxStep-disables", 50_000, 0, 1_000_000, 0},
-		{"zero-maxBlock-disables", 50_000, 100, 0, 0},
-		// 100k blocks * 100 steps / 1M blocks = 10 steps
-		{"mainnet-like-100k-blocks-1M-chain", 100_000, 100, 1_000_000, 10},
-		// 100k blocks * 5 steps / 50k blocks = 10 steps (chain too young, but math is well-defined)
-		{"young-chain-blocks-exceed-maxBlock", 100_000, 5, 50_000, 10},
-		// 50k * 100 / 1M = 5 steps
-		{"half-window", 50_000, 100, 1_000_000, 5},
-		// olderBlocks*maxStateStep overflows uint64; rather than silently
-		// wrapping to a small (wrong) distance, return >= maxStateStep so
-		// commitmentHistoryMinStep disables filtering.
-		{"overflow-disables-filter", 2, math.MaxUint64, 3, math.MaxUint64},
-	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			assert.Equal(t, tc.want, blocksToStepDistance(tc.olderBlocks, tc.maxStateStep, tc.maxBlock))
-		})
-	}
-}
-
-func TestGetMaxBlockInSnapshots(t *testing.T) {
-	pv := snapcfg.Preverified{Items: snapcfg.PreverifiedItems{
-		{Name: "v1-000000-000500-headers.seg"},
-		{Name: "v1-000500-001000-headers.seg"},
-		{Name: "v1-000500-001000-bodies.seg"},
-		{Name: "v1-000500-001000-transactions.seg"},
-		// Consensus-layer segments carry slot-based "to" values (scaled here
-		// above the EL tip); they must not skew the EL max-block calculation.
-		{Name: "v1-001000-002000-beaconblocks.seg"},
-		{Name: "v1-002000-003000-blobsidecars.seg"},
-		// State segments are ignored too.
-		{Name: "domain/v1.0-commitment.0-64.kv"},
+// TestBuildBlackListForPruning_CommitmentHistory locks down the commitment
+// history filter folded into buildBlackListForPruning: commitment-domain
+// state-history files (idx/history/accessor) with To <= minCommitmentHistoryStep
+// are blacklisted, while commitment domain files, non-commitment history, and
+// transaction segments are left alone. Filtering runs even when History pruning
+// is off (commitment-only config).
+func TestBuildBlackListForPruning_CommitmentHistory(t *testing.T) {
+	preverified := snapcfg.Preverified{Items: snapcfg.PreverifiedItems{
+		{Name: "history/v1.0-commitment.0-16.v"},
+		{Name: "idx/v1.0-commitment.0-16.ef"},
+		{Name: "accessor/v1.0-commitment.0-16.vi"},
+		{Name: "history/v1.0-commitment.16-32.v"},
+		{Name: "history/v1.0-accounts.0-16.v"},
+		{Name: "domain/v1.0-commitment.0-16.kv"},
+		{Name: "v1.0-000000-000100-transactions.seg"},
 	}}
-	assert.Equal(t, uint64(1_000_000), getMaxBlockInSnapshots(pv))
+
+	// Archive keeps History/Blocks unlimited; only the commitment-history filter
+	// should fire (regression guard for commitment-only configs).
+	const minCommitmentHistoryStep = 16
+	blackList, err := buildBlackListForPruning(prune.ArchiveMode, nil, 0, minCommitmentHistoryStep, 0, 0, preverified)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	want := map[string]bool{
+		"history/v1.0-commitment.0-16.v":   true,
+		"idx/v1.0-commitment.0-16.ef":      true,
+		"accessor/v1.0-commitment.0-16.vi": true,
+	}
+	for name := range want {
+		if _, ok := blackList[name]; !ok {
+			t.Errorf("expected %s to be blacklisted (To <= minCommitmentHistoryStep=%d)", name, minCommitmentHistoryStep)
+		}
+	}
+	for _, keep := range []string{
+		"history/v1.0-commitment.16-32.v", // above the window
+		"history/v1.0-accounts.0-16.v",    // not commitment domain
+		"domain/v1.0-commitment.0-16.kv",  // domain files are never filtered
+		"v1.0-000000-000100-transactions.seg",
+	} {
+		if _, ok := blackList[keep]; ok {
+			t.Errorf("%s must not be blacklisted", keep)
+		}
+	}
 }
 
-func TestShouldSkipCommitmentHistorySegment(t *testing.T) {
-	cases := []struct {
-		name    string
-		file    string
-		minStep uint64
-		skip    bool
-	}{
-		// Filtering disabled.
-		{"min-step-zero-keeps-everything", "history/v1.0-commitment.0-16.v", 0, false},
-
-		// Non-commitment files are never filtered.
-		{"non-commitment-history-kept", "history/v1.0-accounts.0-16.v", 50, false},
-		{"transactions-segment-kept", "v1.0-000000-000100-transactions.seg", 50, false},
-		{"unparseable-name-kept", "salt-blocks.txt", 50, false},
-
-		// Commitment domain files are never filtered (only history/idx/accessor).
-		{"commitment-domain-kept", "domain/v1.0-commitment.0-16.kv", 50, false},
-
-		// Commitment-history files: filter by .To <= minStep.
-		{"history-fully-below-window-skipped", "history/v1.0-commitment.0-16.v", 16, true},
-		{"history-straddling-window-kept", "history/v1.0-commitment.0-16.v", 15, false},
-		{"history-above-window-kept", "history/v1.0-commitment.16-32.v", 8, false},
-		{"idx-fully-below-window-skipped", "idx/v1.0-commitment.0-16.ef", 32, true},
-		{"accessor-fully-below-window-skipped", "accessor/v1.0-commitment.0-16.vi", 32, true},
+// TestBuildBlackListForPruning_CommitmentHistoryDisabled verifies that a zero
+// minCommitmentHistoryStep disables commitment-history filtering entirely.
+func TestBuildBlackListForPruning_CommitmentHistoryDisabled(t *testing.T) {
+	preverified := snapcfg.Preverified{Items: snapcfg.PreverifiedItems{
+		{Name: "history/v1.0-commitment.0-16.v"},
+	}}
+	blackList, err := buildBlackListForPruning(prune.ArchiveMode, nil, 0, 0, 0, 0, preverified)
+	if err != nil {
+		t.Fatal(err)
 	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			assert.Equal(t, tc.skip, shouldSkipCommitmentHistorySegment(tc.file, tc.minStep))
-		})
+	if len(blackList) != 0 {
+		t.Errorf("commitment-history filtering must be disabled at minCommitmentHistoryStep=0, got %v", blackList)
 	}
+}
+
+// TestGetMinimumBlocksToDownload_MultiCutoff verifies the generalized single
+// pass returns correct parallel steps for two independent cutoffs.
+func TestGetMinimumBlocksToDownload_MultiCutoff(t *testing.T) {
+	const stepSize = 100
+	// blockNum -> baseTxNum. step(baseTxNum) = floor((baseTxNum-(stepSize-1))/stepSize).
+	br := &fakeBlockReader{
+		frozenMax: 1000,
+		bodies: []frozenBody{
+			{blockNum: 100, baseTxNum: 10_000},
+			{blockNum: 200, baseTxNum: 20_000},
+			{blockNum: 300, baseTxNum: 30_000},
+		},
+	}
+	// maxStateStep=150 → stateTxNum=15_000. Only block 100 (baseTxNum 10_000) is
+	// below the cutoff, so minToDownload=1000-100=900 and minBlock=1000-900=100.
+	minBlock, steps, err := getMinimumBlocksToDownload(context.Background(), br, 150, []uint64{100, 300}, stepSize)
+	if err != nil {
+		t.Fatal(err)
+	}
+	assert.Equal(t, uint64(100), minBlock)
+	// step(10_000) = (10_000-99)/100 = 99 ; step(30_000) = (30_000-99)/100 = 299.
+	assert.Equal(t, []uint64{99, 299}, steps)
+}
+
+// TestGetMinimumBlocksToDownload_SingleCutoffMatchesLegacy pins the Part-B
+// minBlockToDownload computation and the single-cutoff step, mirroring the
+// pre-refactor contract.
+func TestGetMinimumBlocksToDownload_SingleCutoff(t *testing.T) {
+	const stepSize = 100
+	br := &fakeBlockReader{
+		frozenMax: 300,
+		bodies: []frozenBody{
+			{blockNum: 100, baseTxNum: 10_000},
+			{blockNum: 200, baseTxNum: 20_000},
+			{blockNum: 300, baseTxNum: 30_000},
+		},
+	}
+	// maxStateStep=150 → stateTxNum=15_000. Only block 100 (baseTxNum 10_000) is
+	// below the cutoff, so minToDownload=300-100=200 and minBlock=300-200=100.
+	minBlock, steps, err := getMinimumBlocksToDownload(context.Background(), br, 150, []uint64{200}, stepSize)
+	if err != nil {
+		t.Fatal(err)
+	}
+	assert.Equal(t, uint64(100), minBlock)
+	assert.Equal(t, []uint64{199}, steps) // step(20_000) = (20_000-99)/100 = 199
 }

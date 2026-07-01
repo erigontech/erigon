@@ -21,7 +21,6 @@ import (
 	"errors"
 	"fmt"
 	"math"
-	"math/bits"
 	"strconv"
 	"strings"
 	"time"
@@ -108,16 +107,17 @@ func canSnapshotBePruned(name string) bool {
 // should be skipped at download time according to pruneMode:
 //   - state history files (idx/history/accessor): blacklisted when stepPrune
 //     reaches their To and pruneMode.History is enabled.
+//   - commitment-domain state history files: additionally blacklisted when
+//     minCommitmentHistoryStep >= their To, independent of pruneMode.History.
 //   - transaction segments: blacklisted by distance when pruneMode.Blocks is a
 //     finite Distance (res.To <= blockPrune), or by chain history-expiry when
 //     pruneMode.Blocks is KeepPostMergeBlocksPruneMode and cc has MergeHeight set
 //     (cc.IsPreMerge(res.From)). KeepAllBlocksPruneMode leaves tx segments alone.
-//   - bodies, headers, rcache files: never blacklisted here
-//     (canSnapshotBePruned filters them out).
+//   - bodies, headers, rcache, domain files: never blacklisted here.
 func buildBlackListForPruning(
 	pruneMode prune.Mode,
 	cc *chain.Config,
-	stepPrune, minBlockToDownload, blockPrune uint64,
+	stepPrune, minCommitmentHistoryStep, minBlockToDownload, blockPrune uint64,
 	preverified snapcfg.Preverified,
 ) (map[string]struct{}, error) {
 
@@ -125,9 +125,10 @@ func buildBlackListForPruning(
 
 	historyEnabled := pruneMode.History.Enabled()
 	blocksEnabled := pruneMode.Blocks.Enabled()
+	commitmentHistoryEnabled := minCommitmentHistoryStep > 0
 	applyChainHistoryExpiry := pruneMode.Blocks == prune.KeepPostMergeBlocksPruneMode && cc != nil && cc.MergeHeight != nil
 
-	if !historyEnabled && !blocksEnabled && !applyChainHistoryExpiry {
+	if !historyEnabled && !blocksEnabled && !commitmentHistoryEnabled && !applyChainHistoryExpiry {
 		return blackList, nil
 	}
 
@@ -142,14 +143,20 @@ func buildBlackListForPruning(
 			continue
 		}
 		if isStateSnapshot(name) {
-			if !historyEnabled {
-				continue
-			}
 			// parse "from" (0) and "to" (64) from the name
 			// parse the snapshot "kind". e.g kind of 'idx/v1.0-accounts.0-64.ef' is "idx/v1.0-accounts"
 			res, _, ok := snaptype.ParseFileName("", name)
 			if !ok {
 				return blackList, errors.New("invalid state snapshot name")
+			}
+			// Commitment-history filter runs independently of History pruning so
+			// commitment-only configs still skip old commitment segments.
+			if commitmentHistoryEnabled && isStateHistory(name) && strings.Contains(name, kv.CommitmentDomain.String()) && minCommitmentHistoryStep >= res.To {
+				blackList[name] = struct{}{}
+				continue
+			}
+			if !historyEnabled {
+				continue
 			}
 			if stepPrune < res.To {
 				continue
@@ -189,14 +196,17 @@ type blockReader interface {
 	TxnumReader() rawdbv3.TxNumsReader
 }
 
-// getMinimumBlocksToDownload - get the minimum number of blocks to download
+// getMinimumBlocksToDownload walks the frozen bodies once and computes, per
+// requested cutoff in pruneToBlocks, the minimum state step to download
+// (returned in minStateSteps, parallel to pruneToBlocks), plus the overall
+// minimum number of blocks to download.
 func getMinimumBlocksToDownload(
 	ctx context.Context,
 	blockReader blockReader,
 	maxStateStep uint64,
-	historyPruneTo uint64,
+	pruneToBlocks []uint64,
 	stepSize uint64,
-) (minBlockToDownload uint64, minStateStepToDownload uint64, err error) {
+) (minBlockToDownload uint64, minStateSteps []uint64, err error) {
 	started := time.Now()
 	var iterations int64
 	defer func() {
@@ -207,7 +217,10 @@ func getMinimumBlocksToDownload(
 	}()
 	frozenBlocks := blockReader.Snapshots().SegmentsMax()
 	minToDownload := uint64(math.MaxUint64)
-	minStateStepToDownload = uint64(math.MaxUint32)
+	minStateSteps = make([]uint64, len(pruneToBlocks))
+	for i := range minStateSteps {
+		minStateSteps[i] = uint64(math.MaxUint32)
+	}
 	stateTxNum := maxStateStep * stepSize
 	if err := blockReader.IterateFrozenBodies(func(blockNum, baseTxNum, txAmount uint64) error {
 		if iterations%1e6 == 0 {
@@ -216,10 +229,13 @@ func getMinimumBlocksToDownload(
 			}
 		}
 		iterations++
-		if blockNum == historyPruneTo {
-			minStateStepToDownload = (baseTxNum - (stepSize - 1)) / stepSize
-			if baseTxNum < (stepSize - 1) {
-				minStateStepToDownload = 0
+		for i, pruneTo := range pruneToBlocks {
+			if blockNum == pruneTo {
+				if baseTxNum < (stepSize - 1) {
+					minStateSteps[i] = 0
+				} else {
+					minStateSteps[i] = (baseTxNum - (stepSize - 1)) / stepSize
+				}
 			}
 		}
 		if stateTxNum <= baseTxNum { // only consider the block if it
@@ -234,11 +250,10 @@ func getMinimumBlocksToDownload(
 		}
 		return nil
 	}); err != nil {
-		return 0, 0, err
+		return 0, nil, err
 	}
 
-	// return the minimum number of blocks to download and the minimum step.
-	return frozenBlocks - minToDownload, minStateStepToDownload, nil
+	return frozenBlocks - minToDownload, minStateSteps, nil
 }
 
 func getMaxStepRangeInSnapshots(preverified snapcfg.Preverified) (uint64, error) {
@@ -266,30 +281,6 @@ func getMaxStepRangeInSnapshots(preverified snapcfg.Preverified) (uint64, error)
 	return maxTo, nil
 }
 
-// getMaxBlockInSnapshots returns the highest block number "to" across the EL
-// block-numbered preverified segments (headers/bodies/transactions). State
-// (domain/history/idx) and consensus-layer (beaconblocks/blobsidecars) segments
-// are ignored: the latter carry slot-based "to" values, not EL block numbers,
-// and would skew the blocks->steps conversion on chains where slots outrun blocks.
-func getMaxBlockInSnapshots(preverified snapcfg.Preverified) uint64 {
-	var maxTo uint64
-	for _, p := range preverified.Items {
-		if !strings.Contains(p.Name, "headers") &&
-			!strings.Contains(p.Name, "bodies") &&
-			!strings.Contains(p.Name, "transactions") {
-			continue
-		}
-		info, _, ok := snaptype.ParseFileName("", p.Name)
-		if !ok {
-			continue
-		}
-		if info.To > maxTo {
-			maxTo = info.To
-		}
-	}
-	return maxTo
-}
-
 func computeBlocksToPrune(blockReader blockReader, p prune.Mode) (blocksToPrune uint64, historyToPrune uint64) {
 	frozenBlocks := blockReader.Snapshots().SegmentsMax()
 	return p.Blocks.PruneTo(frozenBlocks), p.History.PruneTo(frozenBlocks)
@@ -308,7 +299,7 @@ func computeBlocksToPrune(blockReader blockReader, p prune.Mode) (blocksToPrune 
 // chain-history-expiry for blocks. The KeepPostMergeBlocksPruneMode + MergeHeight
 // branch covers that.
 func downloadFilteringApplies(pruneMode prune.Mode, cc *chain.Config) bool {
-	if pruneMode.History.Enabled() || pruneMode.Blocks.Enabled() {
+	if pruneMode.History.Enabled() || pruneMode.Blocks.Enabled() || pruneMode.CommitmentHistory.Enabled() {
 		return true
 	}
 	return pruneMode.Blocks == prune.KeepPostMergeBlocksPruneMode && cc != nil && cc.MergeHeight != nil
@@ -364,61 +355,6 @@ func isReceiptsSegmentPruned(ctx context.Context, tx kv.RwTx, txNumsReader rawdb
 	}
 	minStep := minTxNum / stepSize
 	return s.From < minStep
-}
-
-// commitmentHistoryMinStep returns the minimum step number a commitment-history
-// snapshot must end at to be downloaded, given a step distance bound. Snapshot
-// files with End <= returned step are entirely older than the configured window
-// and can be skipped. Returns 0 (no filtering) when distanceSteps == 0 or
-// maxStateStep is too small to apply the bound.
-func commitmentHistoryMinStep(maxStateStep, distanceSteps uint64) uint64 {
-	if distanceSteps == 0 || maxStateStep <= distanceSteps {
-		return 0
-	}
-	return maxStateStep - distanceSteps
-}
-
-// blocksToStepDistance converts a "last N blocks" window into a step-count
-// distance using the blocks-per-step ratio observed in the preverified set:
-// stepDistance = olderBlocks * maxStateStep / maxBlock. Returns 0 when the
-// ratio is undefined (no blocks/no steps), which disables filtering.
-func blocksToStepDistance(olderBlocks, maxStateStep, maxBlock uint64) uint64 {
-	if olderBlocks == 0 || maxStateStep == 0 || maxBlock == 0 {
-		return 0
-	}
-	hi, lo := bits.Mul64(olderBlocks, maxStateStep)
-	if hi != 0 {
-		// Overflow: the window already spans the whole chain, so return the
-		// full range and let commitmentHistoryMinStep disable filtering rather
-		// than wrapping to a bogus (smaller) distance.
-		return maxStateStep
-	}
-	return lo / maxBlock
-}
-
-// shouldSkipCommitmentHistorySegment reports whether the given preverified file
-// is a commitment-history segment that lies entirely below the keep-window
-// implied by minStep. The check is conservative: it only applies to history /
-// inverted-index files for the commitment domain (domain snapshots themselves
-// are always kept).
-func shouldSkipCommitmentHistorySegment(name string, minStep uint64) bool {
-	if minStep == 0 {
-		return false
-	}
-	if !isStateHistory(name) {
-		return false
-	}
-	if !strings.Contains(name, kv.CommitmentDomain.String()) {
-		return false
-	}
-	res, _, ok := snaptype.ParseFileName("", name)
-	if !ok {
-		return false
-	}
-	// A segment ending at `res.To` covers steps [res.From, res.To). We skip
-	// segments whose end-step is at or below the boundary — those are fully
-	// outside the keep window.
-	return res.To <= minStep
 }
 
 // unblackListFilesBySubstring - removes files from the blacklist that match any of the provided substrings.
@@ -512,42 +448,31 @@ func SyncSnapshots(
 		downloadRequest := make([]services.DownloadRequest, 0, len(preverifiedBlockSnapshots.Items))
 
 		blockPrune, historyPrune := computeBlocksToPrune(blockReader, prune)
+		commitmentHistoryPrune := prune.CommitmentHistory.PruneTo(frozenBlocks)
 		blackListForPruning := make(map[string]struct{})
 		wantToPrune := downloadFilteringApplies(prune, cc)
-
-		// Pre-compute the minimum commitment-history step from the configured
-		// block distance and the maximum state step in the preverified set, so
-		// that segments below this boundary are skipped in the download loop.
-		var commitmentHistoryMinStepBound uint64
-		if !headerchain && syncCfg.KeepExecutionProofs && syncCfg.CommitmentHistoryOlder > 0 {
-			maxStateStep, err := getMaxStepRangeInSnapshots(preverifiedBlockSnapshots)
-			if err != nil {
-				return err
-			}
-			maxBlock := getMaxBlockInSnapshots(preverifiedBlockSnapshots)
-			distanceSteps := blocksToStepDistance(syncCfg.CommitmentHistoryOlder, maxStateStep, maxBlock)
-			commitmentHistoryMinStepBound = commitmentHistoryMinStep(maxStateStep, distanceSteps)
-			if commitmentHistoryMinStepBound > 0 {
-				log.Info(fmt.Sprintf("[%s] Filtering old commitment-history segments", logPrefix),
-					"maxStateStep", maxStateStep,
-					"maxBlock", maxBlock,
-					"olderBlocks", syncCfg.CommitmentHistoryOlder,
-					"distanceSteps", distanceSteps,
-					"minStep", commitmentHistoryMinStepBound)
-			}
-		}
 
 		if !headerchain && wantToPrune {
 			maxStateStep, err := getMaxStepRangeInSnapshots(preverifiedBlockSnapshots)
 			if err != nil {
 				return err
 			}
-			minBlockToDownload, minStepToDownload, err := getMinimumBlocksToDownload(ctx, blockReader, maxStateStep, historyPrune, stepSize)
+			minBlockToDownload, minSteps, err := getMinimumBlocksToDownload(ctx, blockReader, maxStateStep, []uint64{historyPrune, commitmentHistoryPrune}, stepSize)
 			if err != nil {
 				return err
 			}
+			minStepToDownload := minSteps[0]
+			var minCommitmentHistoryStep uint64
+			if prune.CommitmentHistory.Enabled() {
+				minCommitmentHistoryStep = minSteps[1]
+				if minCommitmentHistoryStep > 0 {
+					log.Info(fmt.Sprintf("[%s] Filtering old commitment-history segments", logPrefix),
+						"pruneToBlock", commitmentHistoryPrune,
+						"minStep", minCommitmentHistoryStep)
+				}
+			}
 
-			blackListForPruning, err = buildBlackListForPruning(prune, cc, minStepToDownload, minBlockToDownload, blockPrune, preverifiedBlockSnapshots)
+			blackListForPruning, err = buildBlackListForPruning(prune, cc, minStepToDownload, minCommitmentHistoryStep, minBlockToDownload, blockPrune, preverifiedBlockSnapshots)
 			if err != nil {
 				return err
 			}
@@ -581,9 +506,6 @@ func SyncSnapshots(
 				continue
 			}
 			if !syncCfg.KeepExecutionProofs && isStateHistory(p.Name) && strings.Contains(p.Name, kv.CommitmentDomain.String()) {
-				continue
-			}
-			if shouldSkipCommitmentHistorySegment(p.Name, commitmentHistoryMinStepBound) {
 				continue
 			}
 
