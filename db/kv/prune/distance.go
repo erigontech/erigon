@@ -65,7 +65,9 @@ func normalizeDistanceAlias(s string) string {
 }
 
 func parseDistanceNumber(s, flag, aliasHint string) (uint64, error) {
-	n, err := strconv.ParseUint(strings.TrimSpace(s), 10, 64)
+	// Base 0 (prefix-aware: 0x/0o/0b + leading-zero octal) matches how the
+	// previous cli.Uint64Flag parsed these flags, so existing configs keep working.
+	n, err := strconv.ParseUint(strings.TrimSpace(s), 0, 64)
 	if err != nil {
 		return 0, fmt.Errorf("invalid %s value %q: expected %s", flag, s, aliasHint)
 	}

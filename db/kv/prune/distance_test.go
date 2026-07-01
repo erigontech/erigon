@@ -41,6 +41,12 @@ func TestParseBlocksDistance(t *testing.T) {
 		// Raw sentinel numbers must keep working for backward compatibility.
 		{in: "18446744073709551615", want: uint64(KeepPostMergeBlocksPruneMode)},
 		{in: "18446744073709551614", want: uint64(KeepAllBlocksPruneMode)},
+		// Prefix-aware bases must parse as they did under the previous
+		// cli.Uint64Flag (stdlib base 0), including leading-zero octal.
+		{in: "0x40000", want: 262_144},
+		{in: "0o20", want: 16},
+		{in: "0b1000", want: 8},
+		{in: "010", want: 8},
 		// Only keep-post-merge and keep-all are recognized.
 		{in: "post-merge", wantErr: true},
 		{in: "history-expiry", wantErr: true},
@@ -72,6 +78,9 @@ func TestParseHistoryDistance(t *testing.T) {
 		{in: "keep-all", want: uint64(math.MaxUint64)},
 		{in: "Keep-All", want: uint64(math.MaxUint64)},
 		{in: "18446744073709551615", want: uint64(math.MaxUint64)},
+		// Prefix-aware bases keep working (stdlib base-0 parity).
+		{in: "0x186a0", want: 100_000},
+		{in: "010", want: 8},
 		// keep-post-merge is block-only; everything else is invalid.
 		{in: "all", wantErr: true},
 		{in: "keep-post-merge", wantErr: true},
