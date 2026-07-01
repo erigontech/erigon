@@ -58,6 +58,27 @@ func ReconcilePreverifiedAgainstDisk(items snapcfg.PreverifiedItems, snapDir str
 	return missing
 }
 
+// FilterPreverifiedBySubsumingLocal drops entries whose [From, To)
+// range is fully contained by a locally-held wider file of the same
+// class. Complements ReconcilePreverifiedAgainstDisk for call sites
+// (headerchain OtterSync + Branch B request-building) that need the
+// filter applied to the input list rather than the missing-entry
+// list. snapDir=="" makes the filter a pass-through.
+func FilterPreverifiedBySubsumingLocal(items snapcfg.PreverifiedItems, snapDir string) snapcfg.PreverifiedItems {
+	if snapDir == "" || len(items) == 0 {
+		return items
+	}
+	cov := buildLocalCoverageIndex(snapDir)
+	out := make(snapcfg.PreverifiedItems, 0, len(items))
+	for _, p := range items {
+		if cov.covers(p.Name) {
+			continue
+		}
+		out = append(out, p)
+	}
+	return out
+}
+
 // coverageKey identifies a class of files where a wider [From, To)
 // range subsumes narrower ranges of the same class. Includes subdir
 // so domain/v2.0-accounts.* does not match history/v2.0-accounts.*.

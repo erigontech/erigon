@@ -483,7 +483,15 @@ func SyncSnapshots(
 
 		// send all hashes to the Downloader service
 		preverifiedBlockSnapshots := snapCfg.Preverified
-		downloadRequest := make([]services.DownloadRequest, 0, len(preverifiedBlockSnapshots.Items))
+		// Drop entries subsumed by a wider local file (and entries whose
+		// own file is already on disk). Without this, a peer-driven
+		// SetToml(local=false) drops us into this branch and OtterSync's
+		// header-chain fallback re-requests narrow files whose data is
+		// already covered by a broader local file — retire's next merge
+		// then feeds the union set into recsplit, producing duplicate
+		// tx-hash keys and a runaway retry loop.
+		items := FilterPreverifiedBySubsumingLocal(preverifiedBlockSnapshots.Items, snapDir)
+		downloadRequest := make([]services.DownloadRequest, 0, len(items))
 
 		blockPrune, historyPrune := computeBlocksToPrune(blockReader, prune)
 		blackListForPruning := make(map[string]struct{})
@@ -510,7 +518,7 @@ func SyncSnapshots(
 		}
 
 		// build all download requests
-		for _, p := range preverifiedBlockSnapshots.Items {
+		for _, p := range items {
 			if caplin == NoCaplin && (strings.Contains(p.Name, "beaconblocks") || strings.Contains(p.Name, "blobsidecars") || strings.Contains(p.Name, "caplin")) {
 				continue
 			}

@@ -159,6 +159,59 @@ func TestReconcileCoverageRespectsClass(t *testing.T) {
 		"a local accounts file must not be treated as coverage for a preverified storage entry")
 }
 
+// TestFilterPreverifiedBySubsumingLocal_HoodiIter2ModeBLayout pins the
+// exact wedge from the 2026-07-01 iter-2 mode_b soak: hoodi's
+// preverified list carries BOTH a broad 100k-block file and its
+// constituent 10k + 1k narrower files under distinct torrent hashes.
+// The header-chain OtterSync fallback re-requests every listed name
+// individually — so when the broad is already on disk locally, the
+// narrows must be dropped from the request queue. Without the filter,
+// downloader accepts them all and retire's next merge feeds the
+// union set into recsplit → duplicate tx hashes → runaway retry.
+func TestFilterPreverifiedBySubsumingLocal_HoodiIter2ModeBLayout(t *testing.T) {
+	dir := t.TempDir()
+	// Broad 100k file locally (from initial fresh sync bootstrap).
+	touch(t, dir, "v1.1-003000-003100-headers.seg")
+	touch(t, dir, "v1.1-003000-003100-bodies.seg")
+	touch(t, dir, "v1.1-003000-003100-transactions.seg")
+
+	// Preverified advertises the broad AND overlapping narrow files.
+	items := snapcfg.PreverifiedItems{
+		{Name: "v1.1-003000-003100-headers.seg", Hash: "h-broad-headers"},
+		{Name: "v1.1-003000-003100-bodies.seg", Hash: "h-broad-bodies"},
+		{Name: "v1.1-003000-003100-transactions.seg", Hash: "h-broad-txs"},
+		{Name: "v1.1-003000-003010-headers.seg", Hash: "h-narrow-10k-1"},
+		{Name: "v1.1-003000-003010-bodies.seg", Hash: "h-narrow-10k-1b"},
+		{Name: "v1.1-003060-003061-headers.seg", Hash: "h-narrow-1k-1"},
+		{Name: "v1.1-003064-003065-headers.seg", Hash: "h-narrow-1k-2"},
+		// Distinct-range entry NOT covered by the broad — must survive.
+		{Name: "v1.1-003100-003110-headers.seg", Hash: "h-post-broad"},
+	}
+
+	filtered := FilterPreverifiedBySubsumingLocal(items, dir)
+
+	got := make([]string, 0, len(filtered))
+	for _, p := range filtered {
+		got = append(got, p.Name)
+	}
+	sort.Strings(got)
+	require.Equal(t,
+		[]string{"v1.1-003100-003110-headers.seg"},
+		got,
+		"only entries neither already on disk nor subsumed by a wider local file survive; broad files self-subsume (on-disk) so they drop, narrow files are subsumed by the broad so they drop, and the disjoint post-broad file is the sole request")
+}
+
+// TestFilterPreverifiedBySubsumingLocal_NilOrEmpty defensively covers
+// snapDir=="" (test/degenerate configs) and empty inputs.
+func TestFilterPreverifiedBySubsumingLocal_NilOrEmpty(t *testing.T) {
+	// snapDir empty: filter is a pass-through.
+	items := snapcfg.PreverifiedItems{{Name: "v1.1-000000-000001-headers.seg", Hash: "h1"}}
+	require.Equal(t, items, FilterPreverifiedBySubsumingLocal(items, ""))
+
+	// Empty input: empty output.
+	require.Empty(t, FilterPreverifiedBySubsumingLocal(nil, t.TempDir()))
+}
+
 // TestReconcileAllMissing: nothing on disk → every preverified entry
 // reported as missing.
 func TestReconcileAllMissing(t *testing.T) {
