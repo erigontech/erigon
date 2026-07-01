@@ -16,7 +16,11 @@
 
 package commitment
 
-import "github.com/erigontech/erigon/common"
+import (
+	"fmt"
+
+	"github.com/erigontech/erigon/common"
+)
 
 // witnessNodeSet collects consensus trie nodes emitted during a witness fold,
 // deduplicated by node hash.
@@ -35,17 +39,21 @@ func (s *witnessNodeSet) onNode(rlp, hash []byte) {
 }
 
 // nodes returns the collected nodes with the root node first, matching the
-// RLPDecode contract that treats the first node as the trie root.
-func (s *witnessNodeSet) nodes(root []byte) [][]byte {
-	out := make([][]byte, 0, len(s.byHash))
+// RLPDecode contract that treats the first node as the trie root. It errors when
+// the root hash was never captured: emitting an arbitrary node at index 0 would
+// silently build a mis-rooted trie.
+func (s *witnessNodeSet) nodes(root []byte) ([][]byte, error) {
 	rootKey := string(root)
-	if r, ok := s.byHash[rootKey]; ok {
-		out = append(out, r)
+	r, ok := s.byHash[rootKey]
+	if !ok {
+		return nil, fmt.Errorf("witness root %x absent from captured node set", root)
 	}
+	out := make([][]byte, 0, len(s.byHash))
+	out = append(out, r)
 	for k, v := range s.byHash {
 		if k != rootKey {
 			out = append(out, v)
 		}
 	}
-	return out
+	return out, nil
 }

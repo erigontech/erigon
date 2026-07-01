@@ -1522,6 +1522,7 @@ func decodeAccountNode(val ValueNode, nodeMap map[common.Hash]Node) (*AccountNod
 	an := &AccountNode{
 		Account:     *acc,
 		RootCorrect: true,
+		CodeSize:    codeSizeUncached,
 	}
 
 	// If account has non-empty storage root, try to find it in nodeMap

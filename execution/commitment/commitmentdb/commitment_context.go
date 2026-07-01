@@ -316,7 +316,7 @@ func (sdc *SharedDomainsCommitmentContext) Witness(ctx context.Context, codeRead
 		if len(codeWithHash.Code) == 0 {
 			continue
 		}
-		if _, present := proofTrie.GetAccount(addrHash[:]); !present {
+		if acc, present := proofTrie.GetAccount(addrHash[:]); !present || acc == nil {
 			continue
 		}
 		if err := proofTrie.UpdateAccountCode(addrHash[:], trie.CodeNode(codeWithHash.Code)); err != nil {

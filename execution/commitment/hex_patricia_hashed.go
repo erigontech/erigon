@@ -112,9 +112,10 @@ type HexPatriciaHashed struct {
 	// Used by witness generation to capture paths that need resolution.
 	collapseTracer CollapseTracer
 
-	witnessTracer    witnessTracer
-	witnessLeafBuf   bytes.Buffer
-	witnessBranchBuf bytes.Buffer
+	witnessTracer     witnessTracer
+	witnessLeafBuf    bytes.Buffer
+	witnessLeafWriter io.Writer // keccak+witnessLeafBuf tee, built once while tracing
+	witnessBranchBuf  bytes.Buffer
 
 	cfg TrieConfig // static config, set at construction
 
@@ -689,7 +690,10 @@ func (hph *HexPatriciaHashed) completeLeafHash(buf []byte, compactLen int, key [
 		writer = hph.keccak
 		if hph.witnessTracer != nil {
 			hph.witnessLeafBuf.Reset()
-			writer = io.MultiWriter(hph.keccak, &hph.witnessLeafBuf)
+			if hph.witnessLeafWriter == nil {
+				hph.witnessLeafWriter = io.MultiWriter(hph.keccak, &hph.witnessLeafBuf)
+			}
+			writer = hph.witnessLeafWriter
 		}
 	}
 	if _, err := writer.Write(lenPrefix[:pl]); err != nil {
@@ -806,7 +810,10 @@ func (hph *HexPatriciaHashed) extensionHash(key []byte, hash []byte) (common.Has
 	var w io.Writer = hph.keccak
 	if hph.witnessTracer != nil {
 		hph.witnessLeafBuf.Reset()
-		w = io.MultiWriter(hph.keccak, &hph.witnessLeafBuf)
+		if hph.witnessLeafWriter == nil {
+			hph.witnessLeafWriter = io.MultiWriter(hph.keccak, &hph.witnessLeafBuf)
+		}
+		w = hph.witnessLeafWriter
 	}
 	if _, err := w.Write(lenPrefix[:pt]); err != nil {
 		return hashBuf, err
@@ -2447,7 +2454,11 @@ func (hph *HexPatriciaHashed) Witnesses(ctx context.Context, updates *Updates, p
 	if err != nil {
 		return nil, nil, nil, fmt.Errorf("root hash evaluation failed: %w", err)
 	}
-	return set.nodes(rootHash), provedKeys, rootHash, nil
+	nodes, err = set.nodes(rootHash)
+	if err != nil {
+		return nil, nil, nil, err
+	}
+	return nodes, provedKeys, rootHash, nil
 }
 
 func (hph *HexPatriciaHashed) Process(ctx context.Context, updates *Updates, logPrefix string, onProgress func(*CommitProgress), warmup WarmupConfig) (rootHash []byte, err error) {
