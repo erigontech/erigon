@@ -107,14 +107,14 @@ func TestModeString_LegacyShapes(t *testing.T) {
 
 func TestParseCLIMode(t *testing.T) {
 	t.Run("full", func(t *testing.T) {
-		mode, err := FromCli(fullModeStr, 0, 0, 0, false)
+		mode, err := FromCli(fullModeStr, 0, 0, 0)
 		assert.NoError(t, err)
 		assert.Equal(t, FullMode, mode)
 
 		assert.Equal(t, "full", mode.String())
 	})
 	t.Run("archive", func(t *testing.T) {
-		mode, err := FromCli(archiveModeStr, 0, 0, 0, false)
+		mode, err := FromCli(archiveModeStr, 0, 0, 0)
 		assert.NoError(t, err)
 		assert.Equal(t, ArchiveMode, mode)
 		assert.Equal(t, archiveModeStr, mode.String())
@@ -129,23 +129,23 @@ func TestParseCLIMode(t *testing.T) {
 		exp.Blocks = Distance(100500)
 		exp.History = Distance(400500)
 
-		mode, err := FromCli(archiveModeStr, exp.History.toValue(), exp.Blocks.toValue(), 0, false)
+		mode, err := FromCli(archiveModeStr, exp.History.toValue(), exp.Blocks.toValue(), 0)
 		assert.NoError(t, err)
 		assert.Equal(t, exp, mode)
 		assert.Equal(t, "archive --prune.distance=400500 --prune.distance.blocks=100500", mode.String())
 	})
 	t.Run("minimal", func(t *testing.T) {
-		mode, err := FromCli(minimalModeStr, 0, 0, 0, false)
+		mode, err := FromCli(minimalModeStr, 0, 0, 0)
 		assert.NoError(t, err)
 		assert.Equal(t, MinimalMode, mode)
 		assert.Equal(t, minimalModeStr, mode.String())
 	})
 	t.Run("garbage", func(t *testing.T) {
-		_, err := FromCli("garb", 1, 2, 0, false)
+		_, err := FromCli("garb", 1, 2, 0)
 		assert.ErrorIs(t, err, ErrUnknownPruneMode)
 	})
 	t.Run("empty", func(t *testing.T) {
-		mode, err := FromCli("", 0, 0, 0, false)
+		mode, err := FromCli("", 0, 0, 0)
 		assert.NoError(t, err)
 
 		assert.Equal(t, DefaultMode, mode)
@@ -154,20 +154,15 @@ func TestParseCLIMode(t *testing.T) {
 }
 
 func TestFromCli_CommitmentHistory(t *testing.T) {
-	t.Run("default-unset-keeps-all", func(t *testing.T) {
-		mode, err := FromCli(archiveModeStr, 0, 0, 0, false)
+	t.Run("zero-keeps-all", func(t *testing.T) {
+		// --prune.commitment-history.older=0 is the "unlimited" spelling.
+		mode, err := FromCli(archiveModeStr, 0, 0, 0)
 		require.NoError(t, err)
 		assert.Equal(t, KeepAllBlocksPruneMode, mode.CommitmentHistory)
 		assert.False(t, mode.CommitmentHistory.Enabled())
 	})
-	t.Run("explicit-zero-set-keeps-all", func(t *testing.T) {
-		// --prune.commitment-history.older=0 is today's "unlimited" spelling.
-		mode, err := FromCli(archiveModeStr, 0, 0, 0, true)
-		require.NoError(t, err)
-		assert.Equal(t, KeepAllBlocksPruneMode, mode.CommitmentHistory)
-	})
 	t.Run("bounded-set", func(t *testing.T) {
-		mode, err := FromCli(archiveModeStr, 0, 0, 100_000, true)
+		mode, err := FromCli(archiveModeStr, 0, 0, 100_000)
 		require.NoError(t, err)
 		assert.Equal(t, Distance(100_000), mode.CommitmentHistory)
 		assert.True(t, mode.CommitmentHistory.Enabled())

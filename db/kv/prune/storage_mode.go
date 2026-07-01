@@ -163,7 +163,7 @@ func appendCommitmentHistory(sb *strings.Builder, m Mode) {
 	}
 }
 
-func FromCli(pruneMode string, distanceHistory, distanceBlocks, commitmentHistoryOlder uint64, commitmentHistoryOlderSet bool) (Mode, error) {
+func FromCli(pruneMode string, distanceHistory, distanceBlocks, commitmentHistoryOlder uint64) (Mode, error) {
 	var mode Mode
 	switch pruneMode {
 	case archiveModeStr, "":
@@ -184,9 +184,9 @@ func FromCli(pruneMode string, distanceHistory, distanceBlocks, commitmentHistor
 	if distanceBlocks > 0 {
 		mode.Blocks = Distance(distanceBlocks)
 	}
-	// --prune.commitment-history.older=0 is the legacy "unlimited" spelling, so
-	// an explicit 0 maps to keep-all rather than "keep nothing".
-	if commitmentHistoryOlderSet && commitmentHistoryOlder > 0 {
+	// 0 (or unset) means unlimited: keep the named-mode default rather than
+	// Distance(0), which would mean "keep nothing".
+	if commitmentHistoryOlder > 0 {
 		mode.CommitmentHistory = Distance(commitmentHistoryOlder)
 	}
 	return mode, nil

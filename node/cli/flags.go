@@ -247,8 +247,7 @@ func applyRemainingEthFlags(ctx *cli.Context, cfg *ethconfig.Config, logger log.
 	}
 
 	commitmentHistoryOlder := ctx.Uint64(utils.CommitmentHistoryOlderFlag.Name)
-	commitmentHistoryOlderSet := ctx.IsSet(utils.CommitmentHistoryOlderFlag.Name)
-	mode, err := prune.FromCli(ctx.String(PruneModeFlag.Name), distance, blockDistance, commitmentHistoryOlder, commitmentHistoryOlderSet)
+	mode, err := prune.FromCli(ctx.String(PruneModeFlag.Name), distance, blockDistance, commitmentHistoryOlder)
 	if err != nil {
 		utils.Fatalf(fmt.Sprintf("error while parsing mode: %v", err))
 	}
@@ -330,9 +329,8 @@ func ApplyFlagsForEthConfigCobra(f *pflag.FlagSet, cfg *ethconfig.Config) {
 	pruneDistance := cobraUint64ValueOrDefault(f, PruneDistanceFlag.Name, PruneDistanceFlag.Value)
 
 	commitmentHistoryOlder := cobraUint64ValueOrDefault(f, utils.CommitmentHistoryOlderFlag.Name, 0)
-	commitmentHistoryOlderSet := f.Changed(utils.CommitmentHistoryOlderFlag.Name)
 
-	mode, err := prune.FromCli(pruneMode, pruneDistance, pruneBlockDistance, commitmentHistoryOlder, commitmentHistoryOlderSet)
+	mode, err := prune.FromCli(pruneMode, pruneDistance, pruneBlockDistance, commitmentHistoryOlder)
 	if err != nil {
 		utils.Fatalf(fmt.Sprintf("error while parsing mode: %v", err))
 	}
