@@ -3,6 +3,7 @@ package stagedsync
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"runtime/pprof"
 	"sync"
@@ -196,6 +197,12 @@ func (cc *commitmentCalculator) loop(ctx context.Context) {
 	}
 }
 
+// perBlockCompute reports whether commitment is computed at each block boundary
+// (vs accumulating into a batch).
+func (cc *commitmentCalculator) perBlockCompute() bool {
+	return !dbg.BatchCommitments || cc.forcePerBlockCompute
+}
+
 // handleMessage contains the break logic — decides what to do with each
 // message in the stream.
 func (cc *commitmentCalculator) handleMessage(ctx context.Context, msg applyResult) {
@@ -221,6 +228,10 @@ func (cc *commitmentCalculator) handleMessage(ctx context.Context, msg applyResu
 		if len(r.writes) > 0 {
 			cc.asOfReader.txNum = r.txNum
 			cc.state.ApplyWrites(r.writes)
+		}
+
+		if cc.doms.IsUnfrozenStepEdge(cc.roTx, r.txNum) {
+			cc.computeStepBoundary(ctx, &blockResult{BlockNum: r.blockNum, BlockHash: r.blockHash, lastTxNum: r.txNum})
 		}
 
 	case *blockResult:
@@ -251,7 +262,7 @@ func (cc *commitmentCalculator) handleMessage(ctx context.Context, msg applyResu
 		// || shouldGenerateChangesets || ...` check) — per-block compute is
 		// required when changesets must record per-block branch deltas
 		// (reorg support, KeepExecutionProofs).
-		if !dbg.BatchCommitments || cc.forcePerBlockCompute {
+		if cc.perBlockCompute() {
 			if cc.lastComputedBlock == 0 && r.isPartial {
 				// First block is partial (resumed mid-block).
 				// Compute it (like serial does) to save trie state, then
@@ -376,16 +387,47 @@ func (cc *commitmentCalculator) computeWithoutCheck(ctx context.Context, br *blo
 	// when pastChangesAccumulator holds multiple changesets per block number
 	// (canonical + fork during reorg-bounce tests).
 	if _, err := cc.computeWithBlockAccumulator(ctx, br); err != nil {
-		// Partial-block compute is intentionally not verified (no header root
-		// to compare against), but a real ComputeCommitment failure leaves
-		// later trie state suspect — log so the failure isn't silent.
-		if cc.logger != nil {
-			cc.logger.Warn("["+cc.logPrefix+"] commitmentCalculator: computeWithoutCheck failed", "block", br.BlockNum, "txNum", br.lastTxNum, "err", err)
-		}
+		cc.publish(ctx, commitmentResult{
+			blockNum: br.BlockNum,
+			txNum:    br.lastTxNum,
+			err:      fmt.Errorf("commitmentCalculator: partial-block compute failed: %w", err),
+		})
+		return
 	}
 
 	cc.lastComputedBlock = br.BlockNum
 	cc.hasComputed = true
+}
+
+// computeStepBoundary checkpoints commitment at a mid-block step edge. It must
+// not advance lastComputedBlock (or the block/batch-end compute gets suppressed)
+// and must not ResetBlockFlags (or the block-end compute loses the pre-edge
+// dirty keys and folds a wrong block root).
+func (cc *commitmentCalculator) computeStepBoundary(ctx context.Context, br *blockResult) {
+	if err := cc.state.LazyLoadErr(); err != nil {
+		cc.publish(ctx, commitmentResult{
+			blockNum: br.BlockNum,
+			txNum:    br.lastTxNum,
+			err:      fmt.Errorf("commitmentCalculator: step-boundary lazy-load failed: %w", err),
+		})
+		return
+	}
+	cc.state.FlushToUpdates(cc.updates)
+
+	sdCtx := cc.doms.GetCommitmentContext()
+	sdCtx.SetUpdates(cc.updates)
+	cc.updates = cc.updates.NewEmpty()
+
+	cc.asOfReader.txNum = br.lastTxNum + 1
+	sdCtx.SetStateReader(cc.asOfReader)
+
+	if _, err := cc.computeWithBlockAccumulator(ctx, br); err != nil {
+		cc.publish(ctx, commitmentResult{
+			blockNum: br.BlockNum,
+			txNum:    br.lastTxNum,
+			err:      fmt.Errorf("commitmentCalculator: step-boundary compute failed: %w", err),
+		})
+	}
 }
 
 // computeAndCheck computes per-block commitment and validates the root.
@@ -451,6 +493,16 @@ func (cc *commitmentCalculator) computeAndCheck(ctx context.Context, br *blockRe
 }
 
 func (cc *commitmentCalculator) publish(ctx context.Context, r commitmentResult) {
+	// The send is best-effort (it can drop on shutdown), so log genuine errors
+	// here as a breadcrumb — the apply loop surfaces the authoritative error.
+	// Wrong-root is routine (apply loop logs it) and ctx cancel/timeout is
+	// expected on shutdown, so skip both.
+	if r.err != nil && cc.logger != nil &&
+		!errors.Is(r.err, ErrWrongTrieRoot) &&
+		!errors.Is(r.err, context.Canceled) &&
+		!errors.Is(r.err, context.DeadlineExceeded) {
+		cc.logger.Warn("["+cc.logPrefix+"] commitment compute failed", "block", r.blockNum, "txNum", r.txNum, "err", r.err)
+	}
 	select {
 	case cc.out <- r:
 	case <-ctx.Done():
