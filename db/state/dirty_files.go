@@ -335,21 +335,39 @@ func filterDirtyFiles(fileNames []string, stepSize uint64, filenameBase, ext str
 	return res
 }
 
-// retireMergeFiles removes garbage files from dirtyFiles and returns them so the
+// retireReason identifies why a file was removed from dirtyFiles.
+type retireReason int
+
+const (
+	retireReasonMerged retireReason = iota + 1
+	retireReasonAged
+)
+
+func (r retireReason) String() string {
+	switch r {
+	case retireReasonMerged:
+		return "merged"
+	case retireReasonAged:
+		return "aged"
+	default:
+		return "unknown"
+	}
+}
+
+// retire removes garbage files from dirtyFiles and returns them so the
 // caller can attach them to the outgoing visible generation. Physical deletion
-// (closeFilesAndRemove) is the reclaimer's job once that generation drains — so
-// readers still pinning these files are never surprised. Returns outs unchanged.
-func retireMergeFiles(dirtyFiles *DirtyFiles, outs []*FilesItem, filenameBase string, logger log.Logger) []*FilesItem {
+// (closeFilesAndRemove) happens once the last reader of that generation closes
+// — so readers still pinning these files are never surprised.
+func retire(dirtyFiles *DirtyFiles, outs []*FilesItem, filenameBase string, reason retireReason, logger log.Logger) {
 	for _, out := range outs {
 		if out == nil {
 			panic("must not happen: " + filenameBase)
 		}
 		dirtyFiles.Delete(out)
 		if filenameBase == traceFileLife && out.decompressor != nil {
-			logger.Warn("[agg.dbg] retireMergeFiles: retire", "f", out.decompressor.FileName())
+			logger.Warn("[agg.dbg] retire", "f", out.decompressor.FileName(), "reason", reason)
 		}
 	}
-	return outs
 }
 
 func (d *Domain) openDirtyFiles(dirEntries []string) (err error) {

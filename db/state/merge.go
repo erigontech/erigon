@@ -323,6 +323,7 @@ func (ht *HistoryRoTx) staticFilesInRange(r HistoryRanges) (indexFiles, historyF
 	}
 
 	if r.history.needMerge {
+		prevEnd, haveSelected := uint64(0), false
 		for _, item := range ht.files {
 			if item.startTxNum < r.history.from {
 				continue
@@ -330,6 +331,10 @@ func (ht *HistoryRoTx) staticFilesInRange(r HistoryRanges) (indexFiles, historyF
 			if item.endTxNum > r.history.to {
 				break
 			}
+			if haveSelected && item.startTxNum != prevEnd {
+				return nil, nil, fmt.Errorf("History.staticFilesInRange: gap in source files for merge range [%d,%d): file ending at %d is followed by %s starting at %d", r.history.from, r.history.to, prevEnd, ht.h.FilenameBase, item.startTxNum)
+			}
+			prevEnd, haveSelected = item.endTxNum, true
 
 			historyFiles = append(historyFiles, item.src)
 
@@ -927,7 +932,8 @@ func (dt *DomainRoTx) cleanAfterMerge(mergedDomain, mergedHist, mergedIdx *Files
 	for _, out := range outs { // collect file names before files descriptors closed
 		deleted = append(deleted, out.FilePaths(dt.d.dirs.Snap)...)
 	}
-	retired = append(retired, retireMergeFiles(dt.d.dirtyFiles, outs, dt.d.FilenameBase, dt.d.logger)...)
+	retire(dt.d.dirtyFiles, outs, dt.d.FilenameBase, retireReasonMerged, dt.d.logger)
+	retired = append(retired, outs...)
 	return deleted, retired
 }
 
@@ -945,7 +951,8 @@ func (ht *HistoryRoTx) cleanAfterMerge(merged, mergedIdx *FilesItem) (deleted []
 	for _, out := range outs { // collect file names before files descriptors closed
 		deleted = append(deleted, out.FilePaths(ht.h.dirs.Snap)...)
 	}
-	retired = append(retired, retireMergeFiles(ht.h.dirtyFiles, outs, ht.h.FilenameBase, ht.h.logger)...)
+	retire(ht.h.dirtyFiles, outs, ht.h.FilenameBase, retireReasonMerged, ht.h.logger)
+	retired = append(retired, outs...)
 	return deleted, retired
 }
 
@@ -958,7 +965,8 @@ func (iit *InvertedIndexRoTx) cleanAfterMerge(merged *FilesItem) (deleted []stri
 	for _, out := range outs { // collect file names before files descriptors closed
 		deleted = append(deleted, out.FilePaths(iit.ii.dirs.Snap)...)
 	}
-	retired = append(retired, retireMergeFiles(iit.ii.dirtyFiles, outs, iit.ii.FilenameBase, iit.ii.logger)...)
+	retire(iit.ii.dirtyFiles, outs, iit.ii.FilenameBase, retireReasonMerged, iit.ii.logger)
+	retired = append(retired, outs...)
 	return deleted, retired
 }
 
