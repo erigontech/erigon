@@ -353,10 +353,8 @@ func (d *Domain) scanDirtyFiles(fileNames []string) (garbageFiles []*FilesItem) 
 	if d.FilenameBase == "" {
 		panic("assert: empty `filenameBase`")
 	}
-	l := filterDirtyFiles(fileNames, d.stepSize, d.stepsInFrozenFile, d.FilenameBase, "kv", d.logger)
+	l := filterDirtyFiles(fileNames, d.stepSize, d.FilenameBase, "kv", d.logger)
 	for _, dirtyFile := range l {
-		dirtyFile.frozen = false
-
 		if _, has := d.dirtyFiles.Get(dirtyFile); !has {
 			d.dirtyFiles.Set(dirtyFile)
 		}
@@ -1287,8 +1285,7 @@ func (d *Domain) integrateDirtyFiles(sf StaticFiles, txNumFrom, txNumTo uint64) 
 
 	d.History.integrateDirtyFiles(sf.HistoryFiles, txNumFrom, txNumTo)
 
-	fi := newFilesItem(txNumFrom, txNumTo, d.stepSize, d.stepsInFrozenFile)
-	fi.frozen = false
+	fi := newFilesItem(txNumFrom, txNumTo)
 	fi.decompressor = sf.valuesDecomp
 	fi.index = sf.valuesIdx
 	fi.bindex = sf.valuesBt
