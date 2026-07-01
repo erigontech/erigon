@@ -5,20 +5,22 @@ Turns what the rpc-tests runner leaves in the result dir into Markdown on the
 run summary page: an overall result badge, a stats table, and — when available
 — a table of the tests that failed.
 
-Two data sources, in order of reliability:
+Robustness layering, most stable first — parsing can only add detail, never
+change the verdict, so console-format drift degrades safely:
 
-1. ``output.log`` — always written when the test phase runs. Its trailing
-   statistics block ("Available tests: N", "Number of failed tests: N", …) is
-   printed unconditionally by rpc-tests ``run_tests.py`` and is stable across
-   versions, so it is the primary source for the overall counts. The runner
-   writes no literal "FAILED" token per line (a failed line just carries the
-   error text where "OK" would be), so the log is NOT parsed for the per-test
-   list — only for the summary block.
+1. Verdict — ``--result`` (the test step's exit code). Format-independent,
+   always the headline badge; never derived from parsing.
 
-2. ``results/test_report.json`` — a structured report the runner writes only
-   with ``--verbose 1`` and only on recent rpc-tests versions (older pinned
-   versions omit it). Used, when present, for the per-test failed list with
-   transport and error message. Treated as optional: absence is normal.
+2. Counts and per-test failures — ``results/test_report.json`` (a stable JSON
+   schema). Preferred when present. The runner writes it with ``--verbose 1``,
+   but only on rpc-tests versions that support it; older pinned versions omit
+   it, so absence is normal, not an error.
+
+3. Fallback when no report — ``output.log`` console text: the trailing stats
+   block ("Number of failed tests: N", …) for counts, and the per-test lines
+   ("NNNN. <transport>::<name>   <status>", non-OK/Skipped = failure) for the
+   failed list. Fragile to format changes and clearly labeled as log-parsed;
+   if it breaks, the verdict and the raw log tail still stand.
 
 The script is a *reporter*: it never fails the job. It always exits 0 and always
 prints something, so the run page shows an outcome even when the run died during
@@ -79,21 +81,50 @@ def read_text(path):
         return None
 
 
+ANSI_RE = re.compile(r"\x1b\[[0-9;?]*[ -/]*[@-~]")
+
+
+def _norm(text):
+    return ANSI_RE.sub("", text.replace("\r\n", "\n").replace("\r", "\n"))
+
+
 def parse_stats(log_text):
     """Extract the final statistics block from output.log; None if not present.
 
-    The log may hold several blocks (the runner retries on failure); take the
-    last occurrence of each label so the final attempt wins.
+    Scoped to the last block (the runner retries and emits one block per attempt)
+    so counts are not mixed across attempts.
     """
     if not log_text:
         return None
+    text = _norm(log_text)
+    idx = text.rfind("Available tests:")
+    region = text[idx:] if idx != -1 else text
     stats = {}
     for key, pat in STAT_PATTERNS:
-        matches = re.findall(pat, log_text)
-        if matches:
-            stats[key] = matches[-1]
+        m = re.search(pat, region)
+        if m:
+            stats[key] = m.group(1)
     # Require the failed-count line as the marker that a real stats block exists.
     return stats if "failed" in stats else None
+
+
+def stats_coherent(stats):
+    """True when the parsed counts satisfy the runner's arithmetic invariants.
+
+    A drifted/partial parse that violates executed == success + failed or
+    available == executed + not_executed is not trustworthy as a count source.
+    """
+    def g(k):
+        try:
+            return int(stats[k])
+        except (KeyError, ValueError, TypeError):
+            return None
+    ex, su, fa, av, ne = g("executed"), g("success"), g("failed"), g("available_tests"), g("not_executed")
+    if ex is not None and su is not None and fa is not None and ex != su + fa:
+        return False
+    if av is not None and ex is not None and ne is not None and av != ex + ne:
+        return False
+    return True
 
 
 # A per-test result line: "NNNN. <transport>::<test_name>   <status-or-error>".
@@ -101,25 +132,28 @@ def parse_stats(log_text):
 # --display-only-fail), so failures sit interspersed among the OK lines rather
 # than at the tail — parse them out explicitly.
 TEST_LINE_RE = re.compile(r"^\s*(\d{3,5})\.\s+(\S+)\s*::\s*(\S+)\s+(.*?)\s*$")
+PASS_TOKENS = ("ok", "pass", "passed", "success", "skip", "skipped")
 
 
 def parse_failed_from_log(log_text):
     """Best-effort per-test failed list from output.log when no structured report.
 
-    A test-result line whose status field is neither OK nor Skipped is treated
-    as a failure, with the trailing text as the error message. Returns rows in
-    the same shape as test_report.json's test_results.
+    A test-result line whose status field does not begin with a known pass/skip
+    token is treated as a failure, with the trailing text as the error message.
+    Fragile to console-format drift; the caller cross-checks the count and drops
+    the list if it disagrees wildly with the reported failure count.
     """
     if not log_text:
         return []
-    text = log_text.replace("\r\n", "\n").replace("\r", "\n")
+    text = _norm(log_text)
     failed = []
     for line in text.split("\n"):
         m = TEST_LINE_RE.match(line)
         if not m:
             continue
         status = m.group(4).strip()
-        if status == "" or status.startswith("OK") or status.startswith("Skipped"):
+        low = status.lower()
+        if status == "" or any(low.startswith(t) for t in PASS_TOKENS):
             continue
         failed.append({
             "test_number": int(m.group(1)),
@@ -198,25 +232,56 @@ def render(args):
             out.append(f"> ⚠️ Found `{os.path.relpath(report_path, args.result_dir)}` but could not parse it: {exc}")
             out.append("")
 
+    report_valid = report is not None
     report_summary = (report or {}).get("summary", {}) or {}
-    failed_rows = [r for r in (report or {}).get("test_results", []) or [] if str(r.get("result", "")).upper() == "FAILED"]
-    failed_source = "report"
-    if not failed_rows:
-        log_failed = parse_failed_from_log(log_text)
-        if log_failed:
-            failed_rows, failed_source = log_failed, "log"
+    result_lc = (args.result or "").lower()
+    stats_ok = stats is not None and stats_coherent(stats)
 
-    # Overall counts: prefer the log's stats block, fall back to the report summary.
-    failed_count = int_or_none(stats or {}, "failed")
-    if failed_count is None and "failed_tests" in report_summary:
+    # Counts: structured report first (stable schema); fall back to the log's stats
+    # block only when it is coherent. The verdict comes from --result, not here.
+    failed_count = None
+    if "failed_tests" in report_summary:
         try:
             failed_count = int(report_summary["failed_tests"])
         except (ValueError, TypeError):
-            pass
+            failed_count = None
+    if failed_count is None and stats_ok:
+        failed_count = int_or_none(stats, "failed")
 
-    # --- Overall stats table -------------------------------------------------
-    if stats:
-        table_rows = [
+    # Failed list: the report is authoritative when present; fall back to fragile
+    # log parsing only when there is no report. Drop the parsed list if its size
+    # disagrees wildly with the reported count (console-format drift).
+    failed_rows, failed_source, drift_note = [], None, None
+    if report_valid:
+        failed_rows = [r for r in report.get("test_results", []) or [] if str(r.get("result", "")).upper() == "FAILED"]
+        failed_source = "report"
+    elif failed_count and failed_count > 0:
+        parsed = parse_failed_from_log(log_text)
+        if parsed and len(parsed) <= max(failed_count * 3, failed_count + 5):
+            failed_rows, failed_source = parsed, "log"
+        elif parsed:
+            drift_note = (f"`output.log` parsing found {len(parsed)} candidate failures vs "
+                          f"{failed_count} reported — the console format may have changed; showing the count only.")
+
+    warn = []
+    if result_lc == "success" and failed_count and failed_count > 0:
+        warn.append(f"Job marked success but {failed_count} failing test(s) were recorded — investigate the mismatch.")
+    if stats is not None and not stats_ok:
+        warn.append("The `output.log` stats block failed its arithmetic check (format may have changed); see the raw log.")
+    for w in warn:
+        out.append(f"> ⚠️ {w}")
+        out.append("")
+
+    # --- Overall stats table: structured report first, coherent console stats next.
+    if report_summary:
+        rows = [(name, report_summary.get(key)) for name, key in (
+            ("Available tests", "available_tests"), ("Executed", "executed_tests"),
+            ("Passed", "success_tests"), ("Failed", "failed_tests"),
+            ("Not executed", "not_executed_tests"), ("Tested APIs", "available_tested_api"),
+            ("Loops", "number_of_loops"), ("Time elapsed", "time_elapsed"),
+        )]
+    elif stats is not None and stats_ok:
+        rows = [
             ("Available tests", stats.get("available_tests")),
             ("Executed", stats.get("executed")),
             ("Passed", stats.get("success")),
@@ -226,28 +291,16 @@ def render(args):
             ("Loops", stats.get("loops")),
             ("Time elapsed", stats.get("elapsed")),
         ]
+    else:
+        rows = []
+    if rows:
         out.append("## Overall")
         out.append("")
         out.append("| Metric | Value |")
         out.append("| --- | ---: |")
-        for name, val in table_rows:
+        for name, val in rows:
             if val is not None:
                 out.append(f"| {name} | {val} |")
-        out.append("")
-    elif report_summary:
-        # No log stats block, but a structured report exists — use it.
-        out.append("## Overall")
-        out.append("")
-        out.append("| Metric | Value |")
-        out.append("| --- | ---: |")
-        for name, key in [
-            ("Available tests", "available_tests"), ("Executed", "executed_tests"),
-            ("Passed", "success_tests"), ("Failed", "failed_tests"),
-            ("Not executed", "not_executed_tests"), ("Tested APIs", "available_tested_api"),
-            ("Loops", "number_of_loops"), ("Time elapsed", "time_elapsed"),
-        ]:
-            if report_summary.get(key) is not None:
-                out.append(f"| {name} | {report_summary[key]} |")
         out.append("")
 
     # --- Failed tests --------------------------------------------------------
@@ -286,19 +339,18 @@ def render(args):
             out.append(f"> …and {len(failed_rows) - len(shown)} more — see the `test-results` artifact.")
             out.append("")
     elif failed_count and failed_count > 0:
-        # We know the count but have no per-test detail (no/old structured report).
         out.append(f"## ❌ {failed_count} test(s) failed")
         out.append("")
-        out.append(
-            "> Per-test details aren't in a structured report for this run "
-            "(`results/test_report.json` absent or without failures listed). "
-            "The failing tests are in the `output.log` below and in the `test-results` artifact."
-        )
+        msg = ("Per-test details aren't available in a structured report for this run. "
+               "The failing tests are in the `output.log` below and in the `test-results` artifact.")
+        if drift_note:
+            msg = drift_note + " " + msg
+        out.append(f"> {msg}")
         out.append("")
-    elif failed_count == 0 and (args.result or "").lower() != "failure":
+    elif failed_count == 0 and result_lc != "failure":
         out.append("✅ All executed tests passed.")
         out.append("")
-    elif (args.result or "").lower() == "failure" and (stats or report is not None or log_text):
+    elif result_lc == "failure" and (stats is not None or report_valid or log_text):
         # Marked failed, some results exist, but no failed test-count was found.
         out.append("## ⚠️ Marked failed with no failing tests recorded")
         out.append("")
@@ -309,7 +361,7 @@ def render(args):
         )
         out.append("")
 
-    if not stats and not report and not log_text:
+    if not stats and not report_valid and not log_text:
         out.append("## No results produced")
         out.append("")
         out.append(
@@ -319,12 +371,13 @@ def render(args):
         )
         out.append("")
 
-    # --- output.log tail (collapsible; open when there are failures) ----------
+    # --- output.log tail: opened on failure, log-parsed failures, or any warning.
     if log_text is not None:
         tail, clipped = read_log_tail(log_text, args.log_tail_lines, LOG_TAIL_MAX_BYTES)
         if tail:
             note = " (tail)" if clipped else ""
-            open_attr = " open" if (failed_count and failed_count > 0 and not failed_rows) else ""
+            open_it = result_lc == "failure" or failed_source == "log" or bool(drift_note) or bool(warn)
+            open_attr = " open" if open_it else ""
             out.append(f"<details{open_attr}><summary>output.log{note}</summary>")
             out.append("")
             out.append("```")
