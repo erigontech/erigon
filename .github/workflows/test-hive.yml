@@ -85,10 +85,10 @@ jobs:
             max-allowed-failures: 0
             exec_mode: parallel
     steps:
-      # Every matrix shard shares the self-hosted host's workspace and docker
-      # daemon, so a sibling's end-of-job cleanup can delete files or images a
-      # still-running shard depends on. Give each shard unique checkout dirs and
-      # image tag so cleanup only ever touches that shard's own state.
+      # Matrix shards share the self-hosted host's workspace with their siblings
+      # (the docker daemon is per-runner). Give each shard unique checkout dirs
+      # and image tag so a sibling's cleanup can't delete the checkout out from
+      # under a still-running shard.
       - name: Compute per-shard identifiers
         run: |
           slug="${{ github.run_id }}-${{ github.run_attempt }}-${{ strategy.job-index }}"
@@ -297,13 +297,12 @@ jobs:
           rm -rf "$ERIGON_DIR" "$HIVE_DIR"
         if: always()
 
-      # Scoped to this shard's own image: siblings share the docker daemon, so a
-      # host-global `docker system prune -af --volumes` would wipe images and
-      # build cache out from under still-running shards.
-      - name: Remove this shard's docker image
+      # Per-runner docker daemon: a host-global prune is safe (no sibling shares
+      # it) and reclaims disk on this reused runner between jobs.
+      - name: Prune docker
         run: |
-          echo "Removing this shard's erigon image..."
-          docker rmi -f "$IMAGE_TAG" 2>/dev/null || true
+          echo "Pruning docker..."
+          docker system prune -af --volumes
         if: always()
 
       # In the merge queue, cancel the run on first failure so the gate
