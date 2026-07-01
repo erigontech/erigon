@@ -423,23 +423,30 @@ func TestHandleMessage_StepBoundaryDoesNotPolluteLiveChangeset(t *testing.T) {
 	require.Equal(t, stepEdgeTxNum, gotTxNum)
 }
 
-// TestHandleMessage_StepBoundaryRecordsIntoOwnChangesetInWindow is the in-window
-// mirror: the checkpoint MUST record into the block's own changeset, else the
-// block-end recompute stores mid-block prevData and the block's unwind is wrong.
-// Pins that isolation is window-aware, not unconditional.
+// TestHandleMessage_StepBoundaryRecordsIntoOwnChangesetInWindow pins the cs!=nil
+// hash-routing path: with block N's changeset saved and a DIFFERENT accumulator
+// live, the mid-block checkpoint must record its commitment writes into N's own
+// changeset, not the live one. (The stale-cs==nil TOCTOU itself needs concurrent
+// interleaving to trigger and isn't reproducible in this single-goroutine test.)
 func TestHandleMessage_StepBoundaryRecordsIntoOwnChangesetInWindow(t *testing.T) {
 	ctx := context.Background()
 	logger := log.New()
 	const stepSize = uint64(16)
+	blockHash := common.Hash{0xAB}
 
 	db, tx, doms := setupStepTest(t)
 
+	// Save block 1's own changeset (keyed by its hash) and install a DIFFERENT
+	// accumulator as the live one.
 	ownCS := &changeset.StateChangeSet{}
-	doms.SetChangesetAccumulator(ownCS)
+	liveCS := &changeset.StateChangeSet{}
+	doms.SavePastChangesetAccumulator(blockHash, 1, ownCS)
+	doms.SetChangesetAccumulator(liveCS)
 
 	in := make(chan applyResult, 64)
 	out := make(chan commitmentResult, 64)
-	// perBlockFrom=1 => block 1 is an in-window block (blockNum >= perBlockFrom).
+	// perBlockFrom=1 => block 1 is in-window, so it routes through the hash-aware
+	// wrap (ownsChangeset(1)=true) rather than the isolated path.
 	cc, err := newCommitmentCalculator(ctx, doms, db, "test", logger, false, 1, in, out)
 	require.NoError(t, err)
 	defer cc.Stop()
@@ -455,8 +462,9 @@ func TestHandleMessage_StepBoundaryRecordsIntoOwnChangesetInWindow(t *testing.T)
 		buf := accounts.SerialiseV3(&acc)
 		require.NoError(t, doms.DomainPut(kv.AccountsDomain, tx, addrBytes, buf, txNum, nil))
 		cc.handleMessage(ctx, &txResult{
-			blockNum: 1,
-			txNum:    txNum,
+			blockNum:  1,
+			blockHash: blockHash,
+			txNum:     txNum,
 			writes: state.VersionedWrites{
 				&state.VersionedWrite{Address: addr, Path: state.NoncePath, Val: txNum},
 				&state.VersionedWrite{Address: addr, Path: state.BalancePath, Val: bal},
@@ -465,8 +473,9 @@ func TestHandleMessage_StepBoundaryRecordsIntoOwnChangesetInWindow(t *testing.T)
 	}
 
 	require.Positive(t, ownCS.Diffs[kv.CommitmentDomain].Len(),
-		"an in-window block's mid-block step checkpoint must record into its own live "+
-			"changeset — isolating it would corrupt the block's post-unwind commitment state")
+		"the checkpoint must hash-route its commitment writes into block N's own saved changeset")
+	require.Zero(t, liveCS.Diffs[kv.CommitmentDomain].Len(),
+		"the checkpoint must NOT record commitment writes into the different live accumulator")
 }
 
 // TestHandleMessage_PreWindowPerBlockComputeDoesNotPolluteLiveChangeset guards
