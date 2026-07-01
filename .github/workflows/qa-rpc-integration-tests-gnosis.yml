@@ -126,26 +126,17 @@ jobs:
       - name: Generate Summary
         if: always() && steps.test_step.outputs.test_executed == 'true'
         run: |
-          SUMMARY_FILE="${{ env.TEST_RESULT_DIR }}/summary.md"
-          LOG_FILE="${{ env.TEST_RESULT_DIR }}/output.log"
-
-          cat << 'EOF' > $SUMMARY_FILE
-          # ${{ github.workflow }} Report
-
-          ## Test Configuration
-          - **Chain:** ${{ env.CHAIN }}
-          - **Result:** ${{ steps.test_step.outputs.TEST_RESULT }}
-
-          ## Test Output
-          ```
-          EOF
-
-          cat $LOG_FILE >> $SUMMARY_FILE
-
-          echo '```' >> $SUMMARY_FILE
-
-          cat $SUMMARY_FILE
-          cat $SUMMARY_FILE >> $GITHUB_STEP_SUMMARY
+          # Render structured results (which tests failed + overall stats) into the
+          # run summary page. The reporter never fails the job and always prints
+          # something, even when the run died before producing a report.
+          SUMMARY=$(python3 "${{ github.workspace }}/.github/workflows/scripts/render_rpc_summary.py" \
+            --result-dir "${{ env.TEST_RESULT_DIR }}" \
+            --workflow "${{ github.workflow }}" \
+            --chain "${{ env.CHAIN }}" \
+            --result "${{ steps.test_step.outputs.TEST_RESULT }}")
+          printf '%s\n' "$SUMMARY"
+          printf '%s\n' "$SUMMARY" >> "$GITHUB_STEP_SUMMARY"
+          mkdir -p "${{ env.TEST_RESULT_DIR }}" 2>/dev/null && printf '%s\n' "$SUMMARY" > "${{ env.TEST_RESULT_DIR }}/summary.md" || true
 
       - name: Resume the Erigon instance dedicated to db maintenance
         if: always()

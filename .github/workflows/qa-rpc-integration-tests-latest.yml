@@ -217,29 +217,17 @@ jobs:
       - name: Generate Summary
         if: always() && steps.test_step.outputs.test_executed == 'true'
         run: |
-          SUMMARY_FILE="${{ env.TEST_RESULT_DIR }}/summary.md"
-          LOG_FILE="${{ env.TEST_RESULT_DIR }}/output.log"
-
-          {
-            echo "# ${{ github.workflow }} Report"
-            echo ""
-            echo "## Test Configuration"
-            echo "- **Chain:** ${{ env.CHAIN }}"
-            echo "- **Result:** ${{ steps.test_step.outputs.TEST_RESULT }}"
-            echo ""
-            echo "## Test Output"
-            echo '```'
-            grep -E "Attempt [0-9]|Latest batch|failed:|sync on latest block" "$LOG_FILE" || echo "(none)"
-            echo '```'
-            echo ""
-            echo "## Final Statistics"
-            echo '```'
-            grep "Number of" "$LOG_FILE" | tail -5
-            echo '```'
-          } > "$SUMMARY_FILE"
-
-          cat "$SUMMARY_FILE"
-          cat "$SUMMARY_FILE" >> $GITHUB_STEP_SUMMARY
+          # Render structured results (which tests failed + overall stats) into the
+          # run summary page. The reporter never fails the job and always prints
+          # something, even when the run died before producing a report.
+          SUMMARY=$(python3 "${{ github.workspace }}/.github/workflows/scripts/render_rpc_summary.py" \
+            --result-dir "${{ env.TEST_RESULT_DIR }}" \
+            --workflow "${{ github.workflow }}" \
+            --chain "${{ env.CHAIN }}" \
+            --result "${{ steps.test_step.outputs.TEST_RESULT }}")
+          printf '%s\n' "$SUMMARY"
+          printf '%s\n' "$SUMMARY" >> "$GITHUB_STEP_SUMMARY"
+          mkdir -p "${{ env.TEST_RESULT_DIR }}" 2>/dev/null && printf '%s\n' "$SUMMARY" > "${{ env.TEST_RESULT_DIR }}/summary.md" || true
 
       - name: Stop Erigon
         if: always()
