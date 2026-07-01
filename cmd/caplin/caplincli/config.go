@@ -74,9 +74,9 @@ func SetupCaplinCli(ctx *cli.Command) (cfg *CaplinCliCfg, err error) {
 	cfg.AllowedEndpoints = ctx.StringSlice(utils.BeaconAPIFlag.Name)
 
 	cfg.BeaconApiReadTimeout = time.Duration(ctx.Uint64(caplinflags.BeaconApiReadTimeout.Name)) * time.Second
-	cfg.BeaconApiWriteTimeout = time.Duration(ctx.Uint(caplinflags.BeaconApiWriteTimeout.Name)) * time.Second
+	cfg.BeaconApiWriteTimeout = time.Duration(ctx.Uint64(caplinflags.BeaconApiWriteTimeout.Name)) * time.Second
 	cfg.MaxPeerCount = ctx.Uint64(utils.CaplinMaxPeerCount.Name)
-	cfg.BeaconAddr = fmt.Sprintf("%s:%d", ctx.String(caplinflags.BeaconApiAddr.Name), ctx.Int(caplinflags.BeaconApiPort.Name))
+	cfg.BeaconAddr = fmt.Sprintf("%s:%d", ctx.String(caplinflags.BeaconApiAddr.Name), ctx.Uint(caplinflags.BeaconApiPort.Name))
 	cfg.AllowCredentials = ctx.Bool(utils.BeaconApiAllowCredentialsFlag.Name)
 	cfg.AllowedMethods = ctx.StringSlice(utils.BeaconApiAllowMethodsFlag.Name)
 	cfg.AllowedOrigins = ctx.StringSlice(utils.BeaconApiAllowOriginsFlag.Name)
@@ -87,7 +87,7 @@ func SetupCaplinCli(ctx *cli.Command) (cfg *CaplinCliCfg, err error) {
 
 	cfg.RunEngineAPI = ctx.Bool(caplinflags.RunEngineAPI.Name)
 	cfg.EngineAPIAddr = ctx.String(caplinflags.EngineApiHostFlag.Name)
-	cfg.EngineAPIPort = ctx.Int(caplinflags.EngineApiPortFlag.Name)
+	cfg.EngineAPIPort = int(ctx.Uint(caplinflags.EngineApiPortFlag.Name))
 	if cfg.RunEngineAPI {
 		secret, err := ObtainJwtSecret(ctx)
 		if err != nil {

@@ -50,7 +50,9 @@ func SetupSentinelCli(ctx *cli.Command) (*SentinelCliCfg, error) {
 	cfg.Addr = ctx.String(sentinelflags.SentinelDiscoveryAddr.Name)
 	cfg.ServerTcpPort = uint(ctx.Uint(sentinelflags.SentinelTcpPort.Name))
 
-	cfg.LogLvl = ctx.Uint(logging.LogVerbosityFlag.Name)
+	if lvl, err := log.LvlFromString(ctx.String(logging.LogVerbosityFlag.Name)); err == nil {
+		cfg.LogLvl = uint(lvl)
+	}
 	if cfg.LogLvl == uint(log.LvlInfo) || cfg.LogLvl == 0 {
 		cfg.LogLvl = uint(log.LvlDebug)
 	}

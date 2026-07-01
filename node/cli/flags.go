@@ -432,7 +432,7 @@ func setEmbeddedRpcDaemon(ctx *cli.Command, cfg *nodecfg.Config, logger log.Logg
 		HttpListenAddress:        ctx.String(utils.HTTPListenAddrFlag.Name),
 		HttpPort:                 ctx.Int(utils.HTTPPortFlag.Name),
 		AuthRpcHTTPListenAddress: ctx.String(utils.AuthRpcAddr.Name),
-		AuthRpcPort:              ctx.Int(utils.AuthRpcPort.Name),
+		AuthRpcPort:              int(ctx.Uint(utils.AuthRpcPort.Name)),
 		JWTSecretPath:            jwtSecretPath,
 		TraceRequests:            ctx.Bool(utils.HTTPTraceFlag.Name),
 		DebugSingleRequest:       ctx.Bool(utils.HTTPDebugSingleFlag.Name),
@@ -468,11 +468,11 @@ func setEmbeddedRpcDaemon(ctx *cli.Command, cfg *nodecfg.Config, logger log.Logg
 			RpcSubscriptionFiltersMaxAddresses: ctx.Int(RpcSubscriptionFiltersMaxAddressesFlag.Name),
 			RpcSubscriptionFiltersMaxTopics:    ctx.Int(RpcSubscriptionFiltersMaxTopicsFlag.Name),
 		},
-		Gascap:              ctx.Uint64(utils.RpcGasCapFlag.Name),
+		Gascap:              uint64(ctx.Uint(utils.RpcGasCapFlag.Name)),
 		BlockRangeLimit:     ctx.Int(utils.RpcBlockRangeLimit.Name),
 		GetLogsMaxResults:   ctx.Int(utils.RpcGetLogsMaxResults.Name),
 		Feecap:              ctx.Float64(utils.RPCGlobalTxFeeCapFlag.Name),
-		MaxTraces:           ctx.Uint64(utils.TraceMaxtracesFlag.Name),
+		MaxTraces:           uint64(ctx.Uint(utils.TraceMaxtracesFlag.Name)),
 		TraceCompatibility:  ctx.Bool(utils.RpcTraceCompatFlag.Name),
 		GethCompatibility:   ctx.Bool(utils.RpcGethCompatFlag.Name),
 		BatchLimit:          ctx.Int(utils.RpcBatchLimit.Name),
@@ -541,7 +541,7 @@ func setEmbeddedRpcDaemon(ctx *cli.Command, cfg *nodecfg.Config, logger log.Logg
 // read-only interface to the database
 func setPrivateApi(ctx *cli.Command, cfg *nodecfg.Config) {
 	cfg.PrivateApiAddr = ctx.String(PrivateApiAddr.Name)
-	cfg.PrivateApiRateLimit = uint32(ctx.Uint64(PrivateApiRateLimit.Name))
+	cfg.PrivateApiRateLimit = uint32(ctx.Int(PrivateApiRateLimit.Name))
 	maxRateLimit := uint32(kv.ReadersLimit - 128) // leave some readers for P2P
 	if cfg.PrivateApiRateLimit > maxRateLimit {
 		log.Warn("private.api.ratelimit is too big", "force", maxRateLimit)

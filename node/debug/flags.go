@@ -273,7 +273,7 @@ func Setup(nodeCtx context.Context, ctx *cli.Command, rootLogger bool) (log.Logg
 	var torrentClientStatusAddr string
 
 	if metricsEnabled {
-		metricsPort := ctx.Int(metricsPortFlag.Name)
+		metricsPort := int(ctx.Uint(metricsPortFlag.Name))
 		metricsAddress = fmt.Sprintf("%s:%d", metricsAddr, metricsPort)
 		metricsMux = metrics.Setup(metricsAddress, logger)
 		torrentClientStatusAddr = metricsAddress

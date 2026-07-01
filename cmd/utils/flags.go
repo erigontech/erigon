@@ -1657,7 +1657,7 @@ func setShutter(ctx *cli.Command, chainName string, nodeConfig *nodecfg.Config, 
 		config.BootstrapNodes = ctx.StringSlice(ShutterP2pBootstrapNodesFlag.Name)
 	}
 	if ctx.IsSet(ShutterP2pListenPortFlag.Name) {
-		config.ListenPort = ctx.Uint64(ShutterP2pListenPortFlag.Name)
+		config.ListenPort = uint64(ctx.Uint(ShutterP2pListenPortFlag.Name))
 	}
 
 	ethConfig.Shutter = config
@@ -1729,7 +1729,7 @@ func setBorConfig(ctx *cli.Command, cfg *ethconfig.Config, nodeConfig *nodecfg.C
 	}
 
 	cfg.PolygonPosSingleSlotFinality = ctx.Bool(PolygonPosSingleSlotFinalityFlag.Name)
-	cfg.PolygonPosSingleSlotFinalityBlockAt = ctx.Uint64(PolygonPosSingleSlotFinalityBlockAtFlag.Name)
+	cfg.PolygonPosSingleSlotFinalityBlockAt = uint64(ctx.Int64(PolygonPosSingleSlotFinalityBlockAtFlag.Name))
 }
 
 func setBuilder(ctx *cli.Command, cfg *buildercfg.BuilderConfig) {
@@ -1796,7 +1796,7 @@ func setBeaconAPI(ctx *cli.Command, cfg *ethconfig.Config) error {
 	}
 
 	cfg.CaplinConfig.BeaconAPIRouter.Protocol = ctx.String(BeaconApiProtocolFlag.Name)
-	cfg.CaplinConfig.BeaconAPIRouter.Address = fmt.Sprintf("%s:%d", ctx.String(BeaconApiAddrFlag.Name), ctx.Int(BeaconApiPortFlag.Name))
+	cfg.CaplinConfig.BeaconAPIRouter.Address = fmt.Sprintf("%s:%d", ctx.String(BeaconApiAddrFlag.Name), ctx.Uint(BeaconApiPortFlag.Name))
 	cfg.CaplinConfig.BeaconAPIRouter.ReadTimeTimeout = time.Duration(ctx.Uint64(BeaconApiReadTimeoutFlag.Name)) * time.Second
 	cfg.CaplinConfig.BeaconAPIRouter.WriteTimeout = time.Duration(ctx.Uint64(BeaconApiWriteTimeoutFlag.Name)) * time.Second
 	cfg.CaplinConfig.BeaconAPIRouter.IdleTimeout = time.Duration(ctx.Uint64(BeaconApiIdleTimeoutFlag.Name)) * time.Second
