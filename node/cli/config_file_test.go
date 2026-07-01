@@ -17,12 +17,13 @@
 package cli
 
 import (
+	"context"
 	"os"
 	"path/filepath"
 	"testing"
 
 	"github.com/stretchr/testify/require"
-	"github.com/urfave/cli/v2"
+	"github.com/urfave/cli/v3"
 )
 
 func TestSetFlagsFromConfigFile_YAML(t *testing.T) {
@@ -72,9 +73,13 @@ func TestSetFlagsFromConfigFile_YAML(t *testing.T) {
 			cfgFile := filepath.Join(t.TempDir(), "erigon"+tt.ext)
 			require.NoError(t, os.WriteFile(cfgFile, []byte(tt.yaml), 0o600))
 
-			app := cli.NewApp()
+			// urfave/cli v3 flags carry parse state, so use fresh instances per run.
+			staticPeersFlag := staticPeersFlag
+			sentinelStaticPeersFlag := sentinelStaticPeersFlag
+			datadirFlag := datadirFlag
+			app := &cli.Command{}
 			app.Flags = []cli.Flag{&staticPeersFlag, &sentinelStaticPeersFlag, &datadirFlag}
-			app.Action = func(ctx *cli.Context) error {
+			app.Action = func(_ context.Context, ctx *cli.Command) error {
 				err := SetFlagsFromConfigFile(ctx, cfgFile)
 				require.NoError(t, err)
 
@@ -91,7 +96,7 @@ func TestSetFlagsFromConfigFile_YAML(t *testing.T) {
 				}
 				return nil
 			}
-			require.NoError(t, app.Run([]string{"erigon"}))
+			require.NoError(t, app.Run(context.Background(), []string{"erigon"}))
 		})
 	}
 }
@@ -141,9 +146,12 @@ func TestSetFlagsFromConfigFile_StaticPeers(t *testing.T) {
 			cfgFile := filepath.Join(tmpDir, "erigon.toml")
 			require.NoError(t, os.WriteFile(cfgFile, []byte(tt.toml), 0o600))
 
-			app := cli.NewApp()
+			// urfave/cli v3 flags carry parse state, so use fresh instances per run.
+			staticPeersFlag := staticPeersFlag
+			sentinelStaticPeersFlag := sentinelStaticPeersFlag
+			app := &cli.Command{}
 			app.Flags = []cli.Flag{&staticPeersFlag, &sentinelStaticPeersFlag}
-			app.Action = func(ctx *cli.Context) error {
+			app.Action = func(_ context.Context, ctx *cli.Command) error {
 				err := SetFlagsFromConfigFile(ctx, cfgFile)
 				require.NoError(t, err)
 
@@ -158,7 +166,7 @@ func TestSetFlagsFromConfigFile_StaticPeers(t *testing.T) {
 				return nil
 			}
 
-			err := app.Run([]string{"erigon"})
+			err := app.Run(context.Background(), []string{"erigon"})
 			require.NoError(t, err)
 		})
 	}

@@ -21,12 +21,13 @@
 package utils
 
 import (
+	"context"
 	"reflect"
 	"testing"
 
 	"github.com/spf13/cobra"
 	"github.com/stretchr/testify/require"
-	"github.com/urfave/cli/v2"
+	"github.com/urfave/cli/v3"
 
 	"github.com/erigontech/erigon/common/dbg"
 )
@@ -106,13 +107,17 @@ func TestResolveChainName(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			app := cli.NewApp()
-			app.Flags = []cli.Flag{&ChainFlag, &NetworkIdFlag}
-			app.Action = func(ctx *cli.Context) error {
+			// urfave/cli v3 flags carry parse state (hasBeenSet), so use fresh
+			// instances per run instead of the shared package-global flags.
+			chainFlag := ChainFlag
+			networkIdFlag := NetworkIdFlag
+			app := &cli.Command{}
+			app.Flags = []cli.Flag{&chainFlag, &networkIdFlag}
+			app.Action = func(_ context.Context, ctx *cli.Command) error {
 				require.Equal(t, tt.want, resolveChainName(ctx))
 				return nil
 			}
-			require.NoError(t, app.Run(append([]string{"test"}, tt.args...)))
+			require.NoError(t, app.Run(context.Background(), append([]string{"test"}, tt.args...)))
 		})
 	}
 }
@@ -139,7 +144,7 @@ func TestExecPerfFlags_OverrideDbg(t *testing.T) {
 		dbg.SetNoBackgroundMaintenance(origNoBackgroundMaintenance)
 	})
 
-	apply := func(ctx *cli.Context) error {
+	apply := func(_ context.Context, ctx *cli.Command) error {
 		if ctx.IsSet(ExecBatchedIOFlag.Name) {
 			v := ctx.Bool(ExecBatchedIOFlag.Name)
 			dbg.SetReadAhead(v)
@@ -167,13 +172,13 @@ func TestExecPerfFlags_OverrideDbg(t *testing.T) {
 	}
 
 	run := func(args ...string) {
-		app := cli.NewApp()
+		app := &cli.Command{}
 		app.Flags = []cli.Flag{
 			&ExecBatchedIOFlag, &ExecStateCacheFlag, &ExecWorkersFlag,
 			&ExecSerialFlag, &ExecNoMergeFlag, &ExecNoPruneFlag, &ExecNoBackgroundMaintenanceFlag,
 		}
 		app.Action = apply
-		require.NoError(t, app.Run(append([]string{"test"}, args...)))
+		require.NoError(t, app.Run(context.Background(), append([]string{"test"}, args...)))
 	}
 
 	t.Run("no flags set leaves dbg untouched", func(t *testing.T) {

@@ -29,7 +29,7 @@ import (
 	"time"
 
 	"github.com/holiman/uint256"
-	"github.com/urfave/cli/v2"
+	"github.com/urfave/cli/v3"
 	"google.golang.org/grpc"
 
 	"github.com/erigontech/erigon/cmd/erigon/node"
@@ -75,7 +75,7 @@ If only one file is used, import error will result in failure. If several files 
 processing will proceed even if an individual RLP-file import failure occurs.`,
 }
 
-func importChain(cliCtx *cli.Context) error {
+func importChain(ctx context.Context, cliCtx *cli.Command) error {
 	if cliCtx.NArg() < 1 {
 		utils.Fatalf("This command requires an argument.")
 	}
@@ -96,7 +96,7 @@ func importChain(cliCtx *cli.Context) error {
 		}
 	}
 
-	logger, tracer, _, _, err := debug.Setup(cliCtx, true /* rootLogger */)
+	logger, tracer, _, _, err := debug.Setup(ctx, cliCtx, true /* rootLogger */)
 	if err != nil {
 		return err
 	}
@@ -106,11 +106,11 @@ func importChain(cliCtx *cli.Context) error {
 		return err
 	}
 
-	ethCfg := node.NewEthConfigUrfave(cliCtx, nodeCfg, logger)
-	stack := makeConfigNode(cliCtx.Context, nodeCfg, logger)
+	ethCfg := node.NewEthConfigUrfave(ctx, cliCtx, nodeCfg, logger)
+	stack := makeConfigNode(ctx, nodeCfg, logger)
 	defer stack.Close()
 
-	ethereum, err := eth.New(cliCtx.Context, stack, ethCfg, logger, tracer)
+	ethereum, err := eth.New(ctx, stack, ethCfg, logger, tracer)
 	if err != nil {
 		return err
 	}

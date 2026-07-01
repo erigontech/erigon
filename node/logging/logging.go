@@ -24,7 +24,7 @@ import (
 	"strconv"
 
 	"github.com/spf13/cobra"
-	"github.com/urfave/cli/v2"
+	"github.com/urfave/cli/v3"
 	"gopkg.in/natefinch/lumberjack.v2"
 
 	"github.com/erigontech/erigon/common"
@@ -33,7 +33,7 @@ import (
 )
 
 // Determine the log dir path based on the given urfave context
-func LogDirPath(ctx *cli.Context) string {
+func LogDirPath(ctx *cli.Command) string {
 	dirPath := ""
 	if !ctx.Bool(LogDirDisableFlag.Name) {
 		dirPath = ctx.String(LogDirPathFlag.Name)
@@ -57,7 +57,7 @@ func LogDirPath(ctx *cli.Context) string {
 // and it would make sense to choose one over another
 func SetupLoggerCtx(
 	filePrefix string,
-	ctx *cli.Context,
+	ctx *cli.Command,
 	consoleDefaultLevel log.Lvl,
 	dirDefaultLevel log.Lvl,
 	rootHandler bool,

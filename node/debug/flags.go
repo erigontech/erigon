@@ -20,6 +20,7 @@
 package debug
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"net/http"
@@ -31,7 +32,7 @@ import (
 	"github.com/felixge/fgprof"
 	"github.com/pelletier/go-toml/v2"
 	"github.com/spf13/cobra"
-	"github.com/urfave/cli/v2"
+	"github.com/urfave/cli/v3"
 	"gopkg.in/yaml.v3"
 
 	"github.com/erigontech/erigon/common/dbg"
@@ -225,7 +226,7 @@ func SetupCobra(cmd *cobra.Command, filePrefix string) log.Logger {
 
 // SetupTracerCtx performs the tracing setup according to the parameters
 // contained in the given urfave context.
-func SetupTracerCtx(ctx *cli.Context) (*tracers.Tracer, error) {
+func SetupTracerCtx(ctx *cli.Command) (*tracers.Tracer, error) {
 	tracerName := ctx.String(vmTraceFlag.Name)
 	if tracerName == "" {
 		return nil, nil
@@ -238,7 +239,7 @@ func SetupTracerCtx(ctx *cli.Context) (*tracers.Tracer, error) {
 
 // Setup initializes profiling and logging based on the CLI flags.
 // It should be called as early as possible in the program.
-func Setup(ctx *cli.Context, rootLogger bool) (log.Logger, *tracers.Tracer, *http.ServeMux, *http.ServeMux, error) {
+func Setup(nodeCtx context.Context, ctx *cli.Command, rootLogger bool) (log.Logger, *tracers.Tracer, *http.ServeMux, *http.ServeMux, error) {
 	// ensure we've read in config file details before setting up metrics etc.
 	if err := SetFlagsFromConfigFile(ctx); err != nil {
 		log.Warn("failed setting config flags from yaml/toml file", "err", err)
@@ -322,14 +323,14 @@ func Setup(ctx *cli.Context, rootLogger bool) (log.Logger, *tracers.Tracer, *htt
 		}
 	}
 
-	go dbg.SaveHeapProfileNearOOMPeriodically(ctx.Context, dbg.SaveHeapWithLogger(&logger))
+	go dbg.SaveHeapProfileNearOOMPeriodically(nodeCtx, dbg.SaveHeapWithLogger(&logger))
 
 	return logger, tracer, metricsMux, pprofMux, nil
 }
 
 // SetupSimple is like Setup but only returns the logger, discarding the tracer and muxes.
-func SetupSimple(ctx *cli.Context, rootLogger bool) (log.Logger, error) {
-	logger, _, _, _, err := Setup(ctx, rootLogger)
+func SetupSimple(nodeCtx context.Context, ctx *cli.Command, rootLogger bool) (log.Logger, error) {
+	logger, _, _, _, err := Setup(nodeCtx, ctx, rootLogger)
 	return logger, err
 }
 
@@ -395,7 +396,7 @@ var (
 	metricsConfigs = []string{metricsEnabledFlag.Name, metricsAddrFlag.Name, metricsPortFlag.Name}
 )
 
-func SetFlagsFromConfigFile(ctx *cli.Context) error {
+func SetFlagsFromConfigFile(ctx *cli.Command) error {
 	filePath := ctx.String(configFlag.Name)
 	if filePath == "" {
 		return nil

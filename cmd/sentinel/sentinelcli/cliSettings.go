@@ -19,7 +19,7 @@ package sentinelcli
 import (
 	"fmt"
 
-	"github.com/urfave/cli/v2"
+	"github.com/urfave/cli/v3"
 
 	"github.com/erigontech/erigon/cmd/sentinel/sentinelflags"
 	"github.com/erigontech/erigon/common"
@@ -40,7 +40,7 @@ type SentinelCliCfg struct {
 	StaticPeers    []string `json:"static_peers"`
 }
 
-func SetupSentinelCli(ctx *cli.Context) (*SentinelCliCfg, error) {
+func SetupSentinelCli(ctx *cli.Command) (*SentinelCliCfg, error) {
 	cfg := &SentinelCliCfg{}
 
 	cfg.ServerAddr = fmt.Sprintf("%s:%d", ctx.String(sentinelflags.SentinelServerAddr.Name), ctx.Int(sentinelflags.SentinelServerPort.Name))

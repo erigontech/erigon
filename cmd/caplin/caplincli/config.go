@@ -23,7 +23,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/urfave/cli/v2"
+	"github.com/urfave/cli/v3"
 
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cmd/caplin/caplinflags"
@@ -62,7 +62,7 @@ type CaplinCliCfg struct {
 	Dirs datadir.Dirs
 }
 
-func SetupCaplinCli(ctx *cli.Context) (cfg *CaplinCliCfg, err error) {
+func SetupCaplinCli(ctx *cli.Command) (cfg *CaplinCliCfg, err error) {
 	cfg = &CaplinCliCfg{}
 	cfg.SentinelCliCfg, err = sentinelcli.SetupSentinelCli(ctx)
 	if err != nil {
@@ -114,7 +114,7 @@ func SetupCaplinCli(ctx *cli.Context) (cfg *CaplinCliCfg, err error) {
 	return cfg, err
 }
 
-func ObtainJwtSecret(ctx *cli.Context) ([]byte, error) {
+func ObtainJwtSecret(ctx *cli.Command) ([]byte, error) {
 	path := ctx.String(caplinflags.JwtSecret.Name)
 	if len(strings.TrimSpace(path)) == 0 {
 		return nil, errors.New("Missing jwt secret path")
