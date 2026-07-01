@@ -574,9 +574,10 @@ func (pe *parallelExecutor) execImpl(ctx context.Context, execStage *StageState,
 						blockValidatorWaiter = newBlockValidator(pe.cfg.engine, applyResult.BlockGasUsed, applyResult.BlobGasUsed, checkReceipts, checkBloom, applyResult.Receipts,
 							lastHeader, b.Transactions(), pe.cfg.chainConfig, pe.logger)
 
-						if !execStage.CurrentSyncCycle.IsInitialCycle {
-							pe.cfg.notifications.RecentReceipts.Add(applyResult.Receipts, b.Transactions(), lastHeader)
-						}
+					}
+
+					if applyResult.BlockNum > 0 && !execStage.CurrentSyncCycle.IsInitialCycle && applyResult.Header != nil {
+						pe.cfg.notifications.RecentReceipts.Add(applyResult.Receipts, applyResult.Txs, applyResult.Header)
 					}
 
 					if applyResult.BlockNum > lastBlockResult.BlockNum {
