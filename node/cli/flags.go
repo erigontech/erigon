@@ -246,16 +246,18 @@ func applyRemainingEthFlags(ctx *cli.Context, cfg *ethconfig.Config, logger log.
 		cfg.PersistReceiptsCacheV2 = true
 	}
 
-	mode, err := prune.FromCli(ctx.String(PruneModeFlag.Name), distance, blockDistance)
+	commitmentHistoryOlder := ctx.Uint64(utils.CommitmentHistoryOlderFlag.Name)
+	commitmentHistoryOlderSet := ctx.IsSet(utils.CommitmentHistoryOlderFlag.Name)
+	mode, err := prune.FromCli(ctx.String(PruneModeFlag.Name), distance, blockDistance, commitmentHistoryOlder, commitmentHistoryOlderSet)
 	if err != nil {
 		utils.Fatalf(fmt.Sprintf("error while parsing mode: %v", err))
 	}
 
-	cfg.Prune = mode
-
-	if err := prune.ValidateCommitmentHistoryOlder(mode, cfg.CommitmentHistoryOlder); err != nil {
+	if err := mode.Validate(); err != nil {
 		utils.Fatalf("%v", err)
 	}
+
+	cfg.Prune = mode
 
 	if batchSize := ctx.String(BatchSizeFlag.Name); batchSize != "" {
 		if err := cfg.BatchSize.UnmarshalText([]byte(batchSize)); err != nil {
@@ -327,9 +329,16 @@ func ApplyFlagsForEthConfigCobra(f *pflag.FlagSet, cfg *ethconfig.Config) {
 	pruneBlockDistance := cobraUint64ValueOrDefault(f, PruneBlocksDistanceFlag.Name, PruneBlocksDistanceFlag.Value)
 	pruneDistance := cobraUint64ValueOrDefault(f, PruneDistanceFlag.Name, PruneDistanceFlag.Value)
 
-	mode, err := prune.FromCli(pruneMode, pruneDistance, pruneBlockDistance)
+	commitmentHistoryOlder := cobraUint64ValueOrDefault(f, utils.CommitmentHistoryOlderFlag.Name, 0)
+	commitmentHistoryOlderSet := f.Changed(utils.CommitmentHistoryOlderFlag.Name)
+
+	mode, err := prune.FromCli(pruneMode, pruneDistance, pruneBlockDistance, commitmentHistoryOlder, commitmentHistoryOlderSet)
 	if err != nil {
 		utils.Fatalf(fmt.Sprintf("error while parsing mode: %v", err))
+	}
+
+	if err := mode.Validate(); err != nil {
+		utils.Fatalf("%v", err)
 	}
 
 	cfg.Prune = mode

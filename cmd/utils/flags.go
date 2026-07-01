@@ -1889,12 +1889,8 @@ func SetEthConfig(ctx *cli.Context, nodeConfig *nodecfg.Config, cfg *ethconfig.C
 	if ctx.Bool(KeepExecutionProofsFlag.Name) {
 		cfg.KeepExecutionProofs = true
 	}
-	if ctx.IsSet(CommitmentHistoryOlderFlag.Name) {
-		if !cfg.KeepExecutionProofs {
-			Fatalf("--%s requires --%s", CommitmentHistoryOlderFlag.Name, KeepExecutionProofsFlag.Name)
-		}
-		cfg.CommitmentHistoryOlder = ctx.Uint64(CommitmentHistoryOlderFlag.Name)
-		cfg.CommitmentHistoryOlderSet = true
+	if ctx.IsSet(CommitmentHistoryOlderFlag.Name) && !cfg.KeepExecutionProofs {
+		Fatalf("--%s requires --%s", CommitmentHistoryOlderFlag.Name, KeepExecutionProofsFlag.Name)
 	}
 
 	if ctx.IsSet(AlwaysGenerateChangesetsFlag.Name) {
