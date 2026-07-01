@@ -46,10 +46,10 @@ import (
 // result as "more work" (moreWork=true) and PipelineExecutor.RunLoop's
 // `for hasMore` re-runs Execution forever with zero progress and nothing logged.
 //
-// The test drives the real parallel executor (ExecV3, parallel=true) and mirrors
-// runStage's classification each cycle, capping the count so the test itself
-// cannot hang: if the error stays ErrLoopExhausted-classified every cycle the cap
-// trips; when the real error surfaces on the first cycle, the loop stops.
+// The test drives the real parallel executor (ExecV3, parallel=true) through the
+// injected failure and asserts the surfaced error is the real one and is not
+// classified as ErrLoopExhausted — the exact property that keeps runStage from
+// looping.
 func TestParallelExec_PreDispatchFailure_SurfacesInsteadOfInfiniteLoop(t *testing.T) {
 	ctx := context.Background()
 
@@ -70,8 +70,7 @@ func TestParallelExec_PreDispatchFailure_SurfacesInsteadOfInfiniteLoop(t *testin
 	require.NoError(t, rawdbv3.TxNums.Append(setupTx, maxBlockNum, lastTxNum+2))
 	require.NoError(t, setupTx.Commit())
 
-	const injectedErrMsg = "chaos monkey: simulated pre-dispatch failure (snapshot step misalignment)"
-	disarm := chaos_monkey.ArmPreExecutionError(errors.New(injectedErrMsg))
+	disarm := chaos_monkey.ArmPreExecutionError(errors.New("chaos monkey: simulated pre-dispatch failure (snapshot step misalignment)"))
 	defer disarm()
 
 	syncCfg := m.Cfg().Sync
@@ -82,56 +81,27 @@ func TestParallelExec_PreDispatchFailure_SurfacesInsteadOfInfiniteLoop(t *testin
 		m.Cfg().Genesis, syncCfg, false /*experimentalBAL*/, exec.NewBlockReadAheader(),
 	)
 
-	// One stage-loop cycle on a fresh tx/doms. Zero progress is made (the fault
-	// fires before dispatch), so the deferred rollback discards it and the next
-	// cycle re-opens clean — exactly what RunLoop's CommitCycle does.
-	runCycle := func() error {
-		rwTx, err := m.DB.BeginTemporalRw(ctx)
-		require.NoError(t, err)
-		defer rwTx.Rollback()
-		doms, err := execctx.NewSharedDomains(ctx, rwTx, m.Log)
-		require.NoError(t, err)
-		defer doms.Close()
+	rwTx, err := m.DB.BeginTemporalRw(ctx)
+	require.NoError(t, err)
+	defer rwTx.Rollback()
+	doms, err := execctx.NewSharedDomains(ctx, rwTx, m.Log)
+	require.NoError(t, err)
+	defer doms.Close()
 
-		s := &stagedsync.StageState{
-			State:            m.Sync,
-			ID:               stages.Execution,
-			BlockNumber:      1,
-			CurrentSyncCycle: stagedsync.CurrentSyncCycleInfo{IsInitialCycle: true}, // enables the chaos gate
-		}
-		return stagedsync.ExecV3(ctx, s, nil /*Unwinder*/, execCfg, doms, rwTx, true /*parallel*/, maxBlockNum, m.Log)
+	s := &stagedsync.StageState{
+		State:            m.Sync,
+		ID:               stages.Execution,
+		BlockNumber:      1,
+		CurrentSyncCycle: stagedsync.CurrentSyncCycleInfo{IsInitialCycle: true}, // enables the chaos gate
 	}
+	err = stagedsync.ExecV3(ctx, s, nil /*Unwinder*/, execCfg, doms, rwTx, true /*parallel*/, maxBlockNum, m.Log)
 
-	// RunLoop would spin unbounded on the pre-fix bug; cap it so the test itself
-	// cannot hang. Any completed cycle beyond the first means the loop wasn't stopped.
-	const maxCycles = 5
-	var (
-		cyclesRun int
-		surfaced  error
-		stopped   bool
-	)
-	for cyclesRun < maxCycles && !stopped {
-		cyclesRun++
-		execErr := runCycle()
-
-		var exhausted *stagedsync.ErrLoopExhausted
-		if errors.As(execErr, &exhausted) {
-			continue // runStage → moreWork=true; RunLoop re-runs Execution — the spin
-		}
-		surfaced = execErr // real error (or nil) → hasMore=false → RunLoop stops
-		stopped = true
-	}
-
-	require.True(t, stopped,
-		"pre-dispatch executeBlocks failure stayed classified as ErrLoopExhausted for all %d cycles: "+
-			"sync.go:runStage keeps returning moreWork=true and PipelineExecutor.RunLoop re-runs Execution "+
-			"forever with zero progress — the silent infinite loop this test guards against", maxCycles)
-	require.Equal(t, 1, cyclesRun, "the fix must surface the error on the first cycle, not loop")
-	require.Error(t, surfaced, "the executeBlocks failure must surface as a hard error")
-	require.ErrorContains(t, surfaced, "simulated pre-dispatch failure",
-		"the surfaced error must be the injected pre-dispatch fault")
-
+	// The fix must surface the injected error. Classified as ErrLoopExhausted
+	// instead, sync.go:runStage returns moreWork=true and PipelineExecutor.RunLoop
+	// re-runs Execution forever with zero progress.
+	require.ErrorContains(t, err, "simulated pre-dispatch failure",
+		"the pre-dispatch failure must surface as a hard error")
 	var exhausted *stagedsync.ErrLoopExhausted
-	require.False(t, errors.As(surfaced, &exhausted),
-		"the surfaced error must not carry ErrLoopExhausted, or sync.go:runStage would loop")
+	require.False(t, errors.As(err, &exhausted),
+		"pre-dispatch failure classified as ErrLoopExhausted → runStage loops forever with zero progress")
 }
