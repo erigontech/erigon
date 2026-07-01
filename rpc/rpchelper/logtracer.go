@@ -63,7 +63,8 @@ func (t *LogTracer) Hooks() *tracing.Hooks {
 
 func (t *LogTracer) onEnter(depth int, typ byte, from accounts.Address, to accounts.Address, precompile bool, input []byte, gas uint64, value uint256.Int, code []byte) {
 	t.logs = append(t.logs, make([]*types.Log, 0))
-	if vm.OpCode(typ) != vm.DELEGATECALL && vm.OpCode(typ) != vm.CALLCODE && !value.IsZero() {
+	op := vm.OpCode(typ)
+	if op != vm.DELEGATECALL && op != vm.CALLCODE && !value.IsZero() {
 		t.captureTransfer(from, to, &value)
 	}
 }
