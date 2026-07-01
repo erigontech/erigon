@@ -163,7 +163,7 @@ mid-iteration restore or intermediate-root assert (see Task 1 carve-out).
 - [x] Run `go test ./execution/commitment/... ./execution/commitment/trie/...` green. Must pass before Task 10.
 
 ### Task 10: Acceptance verification
-- [ ] `go test ./execution/commitment/... ./execution/commitment/trie/... ./execution/commitment/commitmentdb/... ./execution/commitment/nibbles/...` all pass.
-- [ ] `-race` pass on the parallel/streaming/deep files; fuzz corpora (`-run '^Fuzz'`) pass.
-- [ ] `make lint` clean (run repeatedly until stable).
-- [ ] Confirm no production (non-test) file changed: `git diff --name-only <base> | grep -v '_test\.go$'` shows only `docs/plans/`.
+- [x] `go test ./execution/commitment/... ./execution/commitment/trie/... ./execution/commitment/commitmentdb/... ./execution/commitment/nibbles/...` all pass.
+- [x] `-race` pass on the parallel/streaming/deep files; fuzz corpora (`-run '^Fuzz'`) pass.
+- [x] `make lint` clean over the touched files — zero issues in any `execution/commitment/**_test.go` changed here. The 108 issues `make lint` reports are all pre-existing in unrelated generated files (e.g. `txnprovider/shutter/internal/contracts/*`) and present at the base commit `e0f2b01d63`; none fall in a file this branch changed.
+- [x] Confirm no production (non-test) file changed: `git diff --name-only e0f2b01d63 HEAD | grep -v '_test\.go$'` shows only `docs/plans/20260701-commitment-test-dedup.md`.
