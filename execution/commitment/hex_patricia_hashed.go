@@ -67,9 +67,10 @@ type witnessTracer interface {
 // every method is a no-op. The buffers keep their capacity across pooled reuse,
 // so reset() only detaches the tracer.
 type witness struct {
-	tracer    witnessTracer
-	leafBuf   bytes.Buffer
-	branchBuf bytes.Buffer
+	tracer          witnessTracer
+	leafBuf         bytes.Buffer
+	branchBuf       bytes.Buffer
+	leafWriterCache io.Writer // keccak+leafBuf tee, built once per keccak
 }
 
 func (w *witness) active() bool { return w.tracer != nil }
@@ -82,7 +83,10 @@ func (w *witness) leafWriter(keccak io.Writer) io.Writer {
 		return keccak
 	}
 	w.leafBuf.Reset()
-	return io.MultiWriter(keccak, &w.leafBuf)
+	if w.leafWriterCache == nil {
+		w.leafWriterCache = io.MultiWriter(keccak, &w.leafBuf)
+	}
+	return w.leafWriterCache
 }
 
 func (w *witness) emitLeaf(hash []byte) {
@@ -2339,12 +2343,9 @@ func (hph *HexPatriciaHashed) foldMounted(ctx context.Context, nib int) (cell, e
 	return hph.grid[0][hph.mountedNib], nil
 }
 
-// captureExtensionDivergence handles the legacy exclusion-proof case: when the
-// key's path diverges inside a folded extension during positioning, the branch
-// behind that extension is never unfolded, so it is materialized here (same hash,
-// witness root unchanged) for a strict verifier to descend. The materialization
-// is hash-verified, so a wrong prefix errors rather than corrupting. Canonical
-// mode skips this.
+// captureExtensionDivergence materializes the branch behind a folded extension the
+// key diverges into (never unfolded during positioning) so a strict verifier can
+// descend it; it is hash-verified, so a wrong prefix errors rather than corrupts.
 func (hph *HexPatriciaHashed) captureExtensionDivergence(hashedKey []byte, set *witnessNodeSet) error {
 	if hph.activeRows == 0 {
 		return nil
@@ -2386,12 +2387,9 @@ func (hph *HexPatriciaHashed) captureExtensionDivergence(hashedKey []byte, set *
 	return nil
 }
 
-// Witnesses builds the execution-witness node set on the fly during the fold
-// traversal, capturing consensus node bytes as they are hashed rather than
-// reconstructing a separate trie from the grid. produceExclusionProofs
-// adds materialized diverging branches for legacy mode. It returns the captured
-// superset node set (root first), the fold's hashed keys (proof-path anchors),
-// and the root hash; callers prune to the lean set themselves.
+// Witnesses builds the execution-witness node set on the fly during the fold,
+// capturing consensus node bytes as they are hashed. It returns the captured superset
+// (root first), the fold's hashed keys, and the root hash; callers prune to the lean set.
 func (hph *HexPatriciaHashed) Witnesses(ctx context.Context, updates *Updates, produceExclusionProofs bool, logPrefix string) (nodes [][]byte, provedKeys [][]byte, rootHash []byte, err error) {
 	hph.memoizationOff = true
 	set := newWitnessNodeSet()
@@ -2474,7 +2472,11 @@ func (hph *HexPatriciaHashed) Witnesses(ctx context.Context, updates *Updates, p
 	if err != nil {
 		return nil, nil, nil, fmt.Errorf("root hash evaluation failed: %w", err)
 	}
-	return set.nodes(rootHash), provedKeys, rootHash, nil
+	nodes, err = set.nodes(rootHash)
+	if err != nil {
+		return nil, nil, nil, err
+	}
+	return nodes, provedKeys, rootHash, nil
 }
 
 func (hph *HexPatriciaHashed) Process(ctx context.Context, updates *Updates, logPrefix string, onProgress func(*CommitProgress), warmup WarmupConfig) (rootHash []byte, err error) {

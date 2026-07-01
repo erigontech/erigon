@@ -112,7 +112,7 @@ func (t *Trie) Prove(key []byte, fromLevel int, storage bool) ([][]byte, error) 
 			}
 		case ValueNode:
 			tn = nil
-		case HashNode:
+		case HashNode, *HashNode:
 			return nil, fmt.Errorf("encountered hashNode unexpectedly, key %x, fromLevel %d", key, fromLevel)
 		default:
 			panic(fmt.Sprintf("%T: invalid node: %v", tn, tn))
@@ -121,13 +121,9 @@ func (t *Trie) Prove(key []byte, fromLevel int, storage bool) ([][]byte, error) 
 	return proof, nil
 }
 
-// WitnessNodesForKeys returns the deduplicated RLP nodes on the paths to the given
-// hex-nibble keys, root first: the lean proof node set those keys need. Account keys
-// are 64 nibbles, account+storage keys 128, and shorter keys (collapse-sibling
-// prefixes) prove the path to that prefix. Keys carry no terminator and storage
-// descent is driven by remaining key length, so mixed-length keys work. A path that
-// reaches a HashNode (a blinded/diverged child) stops there; the parent already
-// proves the divergence.
+// WitnessNodesForKeys returns the deduplicated proof nodes (root first) on the paths
+// to the given hex-nibble keys — the lean node set a strict verifier needs. Descent is
+// driven by remaining key length, so mixed-length account (64) and storage (128) keys work.
 func (t *Trie) WitnessNodesForKeys(hexKeys [][]byte) ([][]byte, error) {
 	hasher := newHasher(t.valueNodesRLPEncoded)
 	defer returnHasherToPool(hasher)
@@ -150,7 +146,7 @@ func (t *Trie) WitnessNodesForKeys(hexKeys [][]byte) ([][]byte, error) {
 	}
 	addIfStructural := func(n Node) error {
 		switch n.(type) {
-		case *FullNode, *ShortNode, *DuoNode:
+		case *FullNode, *ShortNode:
 			return add(n)
 		}
 		return nil
@@ -169,9 +165,8 @@ func (t *Trie) WitnessNodesForKeys(hexKeys [][]byte) ([][]byte, error) {
 					nKey = nKey[:len(nKey)-1]
 				}
 				if len(k) < len(nKey) || !bytes.Equal(nKey, k[:len(nKey)]) {
-					// Key diverges from / ends inside this extension. Include the node
-					// behind it so a strict verifier can descend the exclusion/collapse
-					// branch (legacy mode materialized it; canonical leaves a HashNode).
+					// Key diverges inside this extension: include the node behind it so a
+					// strict verifier can descend the exclusion/collapse branch.
 					if err := addIfStructural(n.Val); err != nil {
 						return nil, err
 					}
@@ -190,25 +185,6 @@ func (t *Trie) WitnessNodesForKeys(hexKeys [][]byte) ([][]byte, error) {
 					tn = n.Children[k[0]]
 					k = k[1:]
 				}
-			case *DuoNode:
-				if err := add(n); err != nil {
-					return nil, err
-				}
-				if len(k) == 0 {
-					tn = nil
-				} else {
-					i1, i2 := n.childrenIdx()
-					switch k[0] {
-					case i1:
-						tn = n.child1
-						k = k[1:]
-					case i2:
-						tn = n.child2
-						k = k[1:]
-					default:
-						tn = nil
-					}
-				}
 			case *AccountNode:
 				if len(k) == 0 {
 					tn = nil
@@ -217,7 +193,7 @@ func (t *Trie) WitnessNodesForKeys(hexKeys [][]byte) ([][]byte, error) {
 				}
 			case ValueNode:
 				tn = nil
-			case HashNode:
+			case HashNode, *HashNode:
 				tn = nil
 			default:
 				return nil, fmt.Errorf("witness: invalid node %T on key %x", tn, key)

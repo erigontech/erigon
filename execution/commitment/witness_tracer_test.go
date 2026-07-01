@@ -110,7 +110,9 @@ func Test_WitnessTracer_CapturedNodesReconstructRoot(t *testing.T) {
 	require.NoError(t, err)
 	require.NotEmpty(t, c.byHash, "tracer must capture nodes")
 
-	tr, err := trie.RLPDecode(c.nodes(root))
+	nodeSet, err := c.nodes(root)
+	require.NoError(t, err)
+	tr, err := trie.RLPDecode(nodeSet)
 	require.NoError(t, err)
 	require.Equal(t, root, tr.Root(), "captured node-set must reconstruct the commitment root")
 }

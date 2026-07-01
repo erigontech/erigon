@@ -299,10 +299,9 @@ func (sdc *SharedDomainsCommitmentContext) WitnessNodes(ctx context.Context, pro
 	return lean, rootHash, nil
 }
 
-// Witness builds the proof trie from the full captured superset and re-attaches
-// codeReads to the present account nodes, since the consensus node RLP carries
-// only the code hash. It returns the unpruned trie so getProof/getWitness can do
-// their own per-consumer node selection (Prove / ExtractWitness with a retain list).
+// Witness builds the proof trie from the captured superset and re-attaches codeReads
+// to present account nodes, since the consensus RLP carries only the code hash. The
+// trie is returned unpruned; consumers do their own node selection.
 func (sdc *SharedDomainsCommitmentContext) Witness(ctx context.Context, codeReads map[common.Hash]witnesstypes.CodeWithHash, logPrefix string, produceExclusionProofs bool) (proofTrie *trie.Trie, rootHash []byte, err error) {
 	full, _, rootHash, err := sdc.witnessCapture(ctx, produceExclusionProofs, logPrefix)
 	if err != nil {
@@ -316,7 +315,7 @@ func (sdc *SharedDomainsCommitmentContext) Witness(ctx context.Context, codeRead
 		if len(codeWithHash.Code) == 0 {
 			continue
 		}
-		if _, present := proofTrie.GetAccount(addrHash[:]); !present {
+		if acc, present := proofTrie.GetAccount(addrHash[:]); !present || acc == nil {
 			continue
 		}
 		if err := proofTrie.UpdateAccountCode(addrHash[:], trie.CodeNode(codeWithHash.Code)); err != nil {
@@ -345,7 +344,7 @@ func (sdc *SharedDomainsCommitmentContext) WitnessLean(ctx context.Context, code
 		if len(codeWithHash.Code) == 0 {
 			continue
 		}
-		if _, present := proofTrie.GetAccount(addrHash[:]); !present {
+		if acc, present := proofTrie.GetAccount(addrHash[:]); !present || acc == nil {
 			continue
 		}
 		if err := proofTrie.UpdateAccountCode(addrHash[:], trie.CodeNode(codeWithHash.Code)); err != nil {
