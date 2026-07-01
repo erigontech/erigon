@@ -667,7 +667,7 @@ func (h *handler) runMethod(ctx context.Context, msg *jsonrpcMessage, callb *cal
 	_, err := callb.call(ctx, msg.Method, args, rs)
 	if err != nil {
 		err = remapDBOverload(ctx, err)
-		if rs.Written {
+		if rs.Written() {
 			rs.CloseIfOpen()
 			stream.WriteMore()
 		}

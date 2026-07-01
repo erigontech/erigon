@@ -21,7 +21,7 @@ package jsonstream
 // fields that follow other already-written fields in the same JSON object).
 type LazyFieldStream struct {
 	Stream
-	Written          bool
+	written          bool
 	openDepth        uint
 	field            string
 	prependSeparator bool
@@ -33,25 +33,28 @@ func NewLazyFieldStream(s Stream, field string, prependSeparator bool) *LazyFiel
 	return &LazyFieldStream{Stream: s, field: field, prependSeparator: prependSeparator}
 }
 
+// Written reports whether a value has been written to this field.
+func (s *LazyFieldStream) Written() bool { return s.written }
+
 // ResetField clears the Written flag so the stream can be reused for a new field in the same object.
-func (s *LazyFieldStream) ResetField() { s.Written = false }
+func (s *LazyFieldStream) ResetField() { s.written = false }
 
 // CloseIfOpen closes any partial value written to this field back to the enclosing object level.
 // It is a no-op when nothing has been written.
 func (s *LazyFieldStream) CloseIfOpen() {
-	if s.Written {
+	if s.written {
 		_ = s.Stream.ClosePending(s.openDepth)
 	}
 }
 
 func (s *LazyFieldStream) ensure() {
-	if !s.Written {
-		s.Written = true
-		s.openDepth = uint(s.Stream.Depth())
+	if !s.written {
+		s.written = true
 		if s.prependSeparator {
 			s.Stream.WriteMore()
 		}
 		s.Stream.WriteObjectField(s.field)
+		s.openDepth = uint(s.Stream.Depth() - 1)
 	}
 }
 

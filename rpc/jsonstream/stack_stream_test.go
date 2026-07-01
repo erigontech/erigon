@@ -982,7 +982,9 @@ func TestStackStream_Depth(t *testing.T) {
 func TestStackStream_ClosePendingPreservesStack(t *testing.T) {
 	newSS := func() *StackStream {
 		json := jsoniter.ConfigCompatibleWithStandardLibrary
-		return NewStackStream(json.BorrowStream(nil))
+		stream := json.BorrowStream(nil)
+		t.Cleanup(func() { json.ReturnStream(stream) })
+		return NewStackStream(stream)
 	}
 
 	t.Run("nothing_to_close_when_at_target_depth", func(t *testing.T) {
