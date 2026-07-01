@@ -1459,12 +1459,14 @@ func (sdb *IntraBlockState) GetIncarnation(addr accounts.Address) (uint64, error
 	return incarnation, err
 }
 
-// Selfdestruct marks the given account as suicided.
-// This clears the account balance.
+// Selfdestruct marks the given account as suicided. When preserveBalance is
+// false the account balance is burned (pre-EIP-6780/6780 behaviour); when true
+// the balance is left untouched (EIP-8246) and only cleared at finalization if
+// the account ends up empty.
 //
 // The account's state object is still available until the state is committed,
 // getStateObject will return a non-nil account after Suicide.
-func (sdb *IntraBlockState) Selfdestruct(addr accounts.Address) (bool, error) {
+func (sdb *IntraBlockState) Selfdestruct(addr accounts.Address, preserveBalance bool) (bool, error) {
 	if dbg.TraceTransactionIO && (sdb.trace || dbg.TraceAccount(addr.Handle())) {
 		fmt.Printf("%d (%d.%d) SelfDestruct %x\n", sdb.blockNum, sdb.txIndex, sdb.version, addr)
 	}
@@ -1483,17 +1485,19 @@ func (sdb *IntraBlockState) Selfdestruct(addr accounts.Address) (bool, error) {
 		wasCommited: !sdb.hasWrite(addr, SelfDestructPath, accounts.NilKey),
 	})
 
-	if sdb.tracingHooks != nil && sdb.tracingHooks.OnBalanceChange != nil && !prevBalance.IsZero() {
+	if !preserveBalance && sdb.tracingHooks != nil && sdb.tracingHooks.OnBalanceChange != nil && !prevBalance.IsZero() {
 		sdb.tracingHooks.OnBalanceChange(addr, prevBalance, zeroBalance, tracing.BalanceDecreaseSelfdestruct)
 	}
 
 	stateObject.markSelfdestructed()
 	stateObject.createdContract = false
-	stateObject.data.Balance.Clear()
 
 	versionWritten(sdb, addr, IncarnationPath, accounts.NilKey, stateObject.data.Incarnation)
 	versionWritten(sdb, addr, SelfDestructPath, accounts.NilKey, stateObject.selfdestructed)
-	versionWritten(sdb, addr, BalancePath, accounts.NilKey, uint256.Int{})
+	if !preserveBalance {
+		stateObject.data.Balance.Clear()
+		versionWritten(sdb, addr, BalancePath, accounts.NilKey, uint256.Int{})
+	}
 
 	// NOTE: we intentionally do NOT versionWritten(StoragePath, key, 0) for the
 	// dirty slots here. Pre-Cancun (and for CALL-based SELFDESTRUCT generally)
@@ -2051,9 +2055,12 @@ func EIP161EmptyRemoval(spuriousDragon, isAura bool, addr accounts.Address) bool
 	return spuriousDragon && (!isAura || addr != params.SystemAddress)
 }
 
-func updateAccount(EIP161Enabled bool, isAura bool, stateWriter StateWriter, addr accounts.Address, stateObject *stateObject, isDirty bool, trace bool, tracingHooks *tracing.Hooks, useBlockOrigin bool) error {
+func updateAccount(EIP161Enabled bool, isAura bool, stateWriter StateWriter, addr accounts.Address, stateObject *stateObject, isDirty bool, trace bool, tracingHooks *tracing.Hooks, useBlockOrigin bool, eip8246 bool) error {
 	emptyRemoval := EIP161EmptyRemoval(EIP161Enabled, isAura, addr) && stateObject.data.Empty()
-	if stateObject.selfdestructed || (isDirty && emptyRemoval) {
+	// EIP-8246: a self-destructed account that still holds a balance is reset to
+	// a balance-only account (nonce 0, empty code, empty storage) not deleted.
+	sdPreserveBalance := eip8246 && stateObject.selfdestructed && !stateObject.data.Balance.IsZero()
+	if (stateObject.selfdestructed && !sdPreserveBalance) || (isDirty && emptyRemoval) {
 		balance := stateObject.Balance()
 		if tracingHooks != nil && tracingHooks.OnBalanceChange != nil && !(&balance).IsZero() && stateObject.selfdestructed {
 			tracingHooks.OnBalanceChange(stateObject.address, balance, uint256.Int{}, tracing.BalanceDecreaseSelfdestructBurn)
@@ -2068,7 +2075,19 @@ func updateAccount(EIP161Enabled bool, isAura bool, stateWriter StateWriter, add
 		}
 		stateObject.deleted = true
 	}
-	if isDirty && (stateObject.createdContract || !stateObject.selfdestructed) && !emptyRemoval {
+	if sdPreserveBalance {
+		stateObject.data.Nonce = 0
+		stateObject.data.CodeHash = accounts.EmptyCodeHash
+		stateObject.data.Incarnation = 0
+		stateObject.code = nil
+		stateObject.deleted = false
+		if err := stateWriter.CreateContract(addr); err != nil {
+			return err
+		}
+		if err := stateWriter.UpdateAccountData(addr, &stateObject.original, &stateObject.data); err != nil {
+			return err
+		}
+	} else if isDirty && (stateObject.createdContract || !stateObject.selfdestructed) && !emptyRemoval {
 		stateObject.deleted = false
 		// Write any contract code associated with the state object
 		if stateObject.code != nil && stateObject.dirtyCode {
@@ -2139,7 +2158,7 @@ func (sdb *IntraBlockState) FinalizeTx(chainRules *chain.Rules, stateWriter Stat
 			continue
 		}
 
-		if err := updateAccount(chainRules.IsSpuriousDragon, chainRules.IsAura, stateWriter, addr, so, true, sdb.trace, sdb.tracingHooks, false); err != nil {
+		if err := updateAccount(chainRules.IsSpuriousDragon, chainRules.IsAura, stateWriter, addr, so, true, sdb.trace, sdb.tracingHooks, false, chainRules.IsAmsterdam && !chainRules.IsEIPDisabled(8246)); err != nil {
 			return err
 		}
 
@@ -2239,7 +2258,7 @@ func (sdb *IntraBlockState) CommitOverrideDirtyAccounts(chainRules *chain.Rules,
 		if !exists || so.deleted {
 			continue
 		}
-		if err := updateAccount(false, chainRules.IsAura, stateWriter, addr, so, true, sdb.trace, sdb.tracingHooks, true); err != nil {
+		if err := updateAccount(false, chainRules.IsAura, stateWriter, addr, so, true, sdb.trace, sdb.tracingHooks, true, chainRules.IsAmsterdam && !chainRules.IsEIPDisabled(8246)); err != nil {
 			return err
 		}
 	}
@@ -2283,7 +2302,7 @@ func (sdb *IntraBlockState) MakeWriteSet(chainRules *chain.Rules, stateWriter St
 		if dbg.TraceTransactionIO && (sdb.trace || dbg.TraceAccount(addr.Handle())) {
 			fmt.Printf("%d (%d.%d) Update Account %x\n", sdb.blockNum, sdb.txIndex, sdb.version, addr)
 		}
-		if err := updateAccount(chainRules.IsSpuriousDragon, chainRules.IsAura, stateWriter, addr, stateObject, isDirty, sdb.trace, sdb.tracingHooks, true); err != nil {
+		if err := updateAccount(chainRules.IsSpuriousDragon, chainRules.IsAura, stateWriter, addr, stateObject, isDirty, sdb.trace, sdb.tracingHooks, true, chainRules.IsAmsterdam && !chainRules.IsEIPDisabled(8246)); err != nil {
 			return err
 		}
 		// EIP-7928 BAL: when SELFDESTRUCT actually destroys (per EIP-6780,
@@ -2814,7 +2833,7 @@ func (sdb *IntraBlockState) ApplyVersionedWrites(writes VersionedWrites) error {
 					if _, err := sdb.GetOrNewStateObject(addr); err != nil {
 						return err
 					}
-					if _, err := sdb.Selfdestruct(addr); err != nil {
+					if _, err := sdb.Selfdestruct(addr, true); err != nil {
 						return err
 					}
 				} else {

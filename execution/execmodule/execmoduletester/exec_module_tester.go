@@ -540,6 +540,19 @@ func New(tb testing.TB, opts ...Option) *ExecModuleTester {
 		}
 	}
 
+	// Deploy Amsterdam system contracts (EIP-8282) when Amsterdam is active.
+	// These are required for the Merge engine's FinalizeAndAssemble to process
+	// builder deposit and exit requests.
+	if gspec.Config.IsAmsterdam(0) {
+		if err := blockgen.InitAmsterdamPreDeploys(mock.DB, gspec.Config, mock.Log); err != nil {
+			if tb != nil {
+				tb.Fatal(err)
+			} else {
+				panic(err)
+			}
+		}
+	}
+
 	blockWriter := blockio.NewBlockWriter()
 
 	mock.Address = crypto.PubkeyToAddress(mock.Key.PublicKey)

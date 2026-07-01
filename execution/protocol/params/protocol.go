@@ -289,6 +289,14 @@ var (
 	GenesisDifficulty = uint256.NewInt(131072) // Difficulty of the Genesis block.
 )
 
+// EIP-8282 - The Builder Deposit Addresses
+// Nick's-method derived address from the builder deposit contract deployment transaction.
+var BuilderDepositAddress = accounts.InternAddress(common.HexToAddress("0x0000884d2AA32eAa155F59A2f24eFa73D9008282"))
+
+// EIP-8282 - The Builder Exit Addresses
+// Nick's-method derived address from the builder exit contract deployment transaction.
+var BuilderExitAddress = accounts.InternAddress(common.HexToAddress("0x000014574A74c805590AFF9499fc7A690f008282"))
+
 // See EIP-7840: Add blob schedule to EL config files
 type BlobConfig struct {
 	BaseFeeUpdateFraction uint64 `json:"baseFeeUpdateFraction"`

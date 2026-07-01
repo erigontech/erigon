@@ -114,6 +114,12 @@ type Config struct {
 	// (Optional) EIP-7251: Increase the MAX_EFFECTIVE_BALANCE
 	ConsolidationRequestContract *common.Address `json:"consolidationRequestContractAddress,omitempty"`
 
+	// (Optional) EIP-8282: The Builder Deposit Addresses
+	BuilderDepositContract *common.Address `json:"builderDepositContractAddress,omitempty"`
+
+	// (Optional) EIP-8282: The Builder Exit Addresses
+	BuilderExitContract *common.Address `json:"builderExitContractAddress,omitempty"`
+
 	DefaultBlockGasLimit *uint64 `json:"defaultBlockGasLimit,omitempty"`
 
 	// Various rules engines
@@ -348,11 +354,9 @@ func (c *Config) IsMuirGlacier(num uint64) bool {
 	return isForked(c.MuirGlacierBlock, num)
 }
 
-// IsPetersburg returns whether num is either
-// - equal to or greater than the PetersburgBlock fork block,
-// - OR is nil, and Constantinople is active
+// IsPetersburg returns whether num is either equal to the Petersburg fork block or greater.
 func (c *Config) IsPetersburg(num uint64) bool {
-	return isForked(c.PetersburgBlock, num) || c.PetersburgBlock == nil && isForked(c.ConstantinopleBlock, num)
+	return isForked(c.PetersburgBlock, num)
 }
 
 // IsIstanbul returns whether num is either equal to the Istanbul fork block or greater.
@@ -539,6 +543,10 @@ func (c *Config) SecondsPerSlot() uint64 {
 
 func (c *Config) SystemContracts(time uint64) map[string]accounts.Address {
 	contracts := map[string]accounts.Address{}
+	if c.IsAmsterdam(time) {
+		contracts["BUILDER_DEPOSIT_CONTRACT_ADDRESS"] = c.GetBuilderDepositContract()
+		contracts["BUILDER_EXIT_CONTRACT_ADDRESS"] = c.GetBuilderExitContract()
+	}
 	if c.IsCancun(time) {
 		contracts["BEACON_ROOTS_ADDRESS"] = params.BeaconRootsAddress
 	}
@@ -567,6 +575,24 @@ func (c *Config) GetConsolidationRequestContract() accounts.Address {
 		return accounts.InternAddress(*c.ConsolidationRequestContract)
 	}
 	return params.ConsolidationRequestAddress
+}
+
+// GetBuilderDepositContract returns the configured EIP-8282 builder deposit contract address,
+// falling back to the default if not set in the chain config.
+func (c *Config) GetBuilderDepositContract() accounts.Address {
+	if c.BuilderDepositContract != nil {
+		return accounts.InternAddress(*c.BuilderDepositContract)
+	}
+	return params.BuilderDepositAddress
+}
+
+// GetBuilderExitContract returns the configured EIP-8282 builder exit contract address,
+// falling back to the default if not set in the chain config.
+func (c *Config) GetBuilderExitContract() accounts.Address {
+	if c.BuilderExitContract != nil {
+		return accounts.InternAddress(*c.BuilderExitContract)
+	}
+	return params.BuilderExitAddress
 }
 
 // CheckCompatible checks whether scheduled fork transitions have been imported

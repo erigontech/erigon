@@ -559,7 +559,7 @@ func TestIBSVersionedWrites_SelfdestructRetainsBalanceDropsOtherPaths(t *testing
 	require.NoError(t, ibs.SetBalance(addr, *uint256.NewInt(0), tracing.BalanceChangeUnspecified))
 
 	// Selfdestruct: records SelfDestructPath=true, IncarnationPath, BalancePath=0.
-	destructed, err := ibs.Selfdestruct(addr)
+	destructed, err := ibs.Selfdestruct(addr, false)
 	require.NoError(t, err)
 	require.True(t, destructed)
 

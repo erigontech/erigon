@@ -2611,7 +2611,9 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 					}
 					// Mirror txtask.go's genesis rules-clobber so empty allocs (AuRa ZeroAddress) survive.
 					emptyRemoval := be.blockNum != 0 && pe.cfg.chainConfig.IsSpuriousDragon(be.blockNum)
-					txResult.writes = normalizeWriteSet(rawWrites, be.versionMap, txVersion.TxIndex, resultIncarnation, stateReader, domainStorageKeys, emptyRemoval, pe.cfg.chainConfig.Aura != nil)
+					txRules := txTask.Rules()
+					eip8246 := txRules.IsAmsterdam && !txRules.IsEIPDisabled(8246)
+					txResult.writes = normalizeWriteSet(rawWrites, be.versionMap, txVersion.TxIndex, resultIncarnation, stateReader, domainStorageKeys, emptyRemoval, pe.cfg.chainConfig.Aura != nil, eip8246)
 				}
 
 				// Snapshot the finalized result before pushing — prevents
@@ -3064,7 +3066,7 @@ func MergeVersionedWrites(prev, next state.VersionedWrites) state.VersionedWrite
 // from the trie (wrong root in TestDeleteRecreateAccount / TestSelfDestructReceive
 // / TestEIP161AccountRemoval, all of which SD a contract whose storage predates
 // the block). Pass nil in unit tests that don't exercise pre-block storage.
-func normalizeWriteSet(writes state.VersionedWrites, vm *state.VersionMap, txIndex int, incarnation int, stateReader state.StateReader, domainStorageKeys func(addr accounts.Address) []accounts.StorageKey, emptyRemoval bool, isAura bool) state.VersionedWrites {
+func normalizeWriteSet(writes state.VersionedWrites, vm *state.VersionMap, txIndex int, incarnation int, stateReader state.StateReader, domainStorageKeys func(addr accounts.Address) []accounts.StorageKey, emptyRemoval bool, isAura bool, eip8246 bool) state.VersionedWrites {
 	filtered := make(state.VersionedWrites, 0, len(writes))
 
 	// sdStorageSlots returns the union of vm.StorageKeys (this batch) and
@@ -3151,8 +3153,15 @@ func normalizeWriteSet(writes state.VersionedWrites, vm *state.VersionMap, txInd
 		// and sometimes leave a phantom slot (TestCVE2020_26265).
 		if sdSet[w.Address] {
 			switch w.Path {
-			case state.BalancePath, state.NoncePath, state.IncarnationPath, state.CodeHashPath, state.CodePath, state.StoragePath:
+			case state.NoncePath, state.IncarnationPath, state.CodeHashPath, state.CodePath, state.StoragePath:
 				continue
+			case state.BalancePath:
+				// EIP-8246 keeps the post-SD balance so the calculator can
+				// preserve a balance-only account (or delete it when zero);
+				// pre-8246 drops it so the account is purely deleted.
+				if !eip8246 {
+					continue
+				}
 			}
 		}
 		switch w.Path {
