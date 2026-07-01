@@ -93,6 +93,24 @@ def case_setup_failure():
         check("setup: no false all-passed", "All executed tests passed" not in out)
 
 
+def case_malformed_json_shape():
+    with tempfile.TemporaryDirectory() as tmp:
+        write(tmp, "results/test_report.json", "[1, 2, 3]")  # valid JSON, wrong shape (not an object)
+        write(tmp, "output.log", "Number of failed tests:       1\n")
+        out = render(tmp, result="failure")
+        check("malformed: keeps verdict badge", "❌ failure" in out)
+        check("malformed: notes ignored report", "not a JSON object" in out)
+        check("malformed: falls back to log", "output.log" in out)
+
+
+def case_empty_log():
+    with tempfile.TemporaryDirectory() as tmp:
+        write(tmp, "output.log", "")  # present but empty
+        out = render(tmp, result="failure")
+        check("empty-log: no-results notice", "No results produced" in out)
+        check("empty-log: no empty details block", "<details" not in out)
+
+
 def case_missing_dir():
     out = mod.render(SimpleNamespace(result_dir=os.path.join(HERE, "nope"), workflow="W", chain="",
                                      result="failure", title_suffix=""))
@@ -101,7 +119,7 @@ def case_missing_dir():
 
 def main():
     for fn in (case_report_all_passed, case_report_failures, case_no_report_with_log,
-               case_setup_failure, case_missing_dir):
+               case_setup_failure, case_malformed_json_shape, case_empty_log, case_missing_dir):
         fn()
     print(f"\n{passed} passed, {failed} failed")
     return 1 if failed else 0

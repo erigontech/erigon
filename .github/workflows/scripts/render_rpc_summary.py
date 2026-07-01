@@ -30,14 +30,6 @@ def badge(result):
     return f"❓ {result or 'unknown'}"
 
 
-def find_file(result_dir, *relatives):
-    for rel in relatives:
-        p = os.path.join(result_dir, rel)
-        if os.path.isfile(p):
-            return p
-    return None
-
-
 def one_line(text, maxlen):
     """Collapse to a single, table-safe line and truncate."""
     s = " ".join(str(text).split())
@@ -66,31 +58,39 @@ def render(args):
     meta = ([f"**Chain:** {args.chain}"] if args.chain else []) + [f"**Result:** {badge(args.result)}"]
     out += ["  |  ".join(meta), ""]
 
-    report_path = find_file(args.result_dir, "results/test_report.json", "test_report.json")
-    log_path = find_file(args.result_dir, "output.log", "results/output.log")
+    report_path = os.path.join(args.result_dir, "results", "test_report.json")
+    log_path = os.path.join(args.result_dir, "output.log")
 
     report = None
-    if report_path:
+    if os.path.isfile(report_path):
         try:
             with open(report_path, encoding="utf-8") as fh:
-                report = json.load(fh)
+                loaded = json.load(fh)
+            if isinstance(loaded, dict):
+                report = loaded
+            else:
+                out += ["> ⚠️ `results/test_report.json` is not a JSON object; ignoring it.", ""]
         except (OSError, ValueError) as exc:
-            out += [f"> ⚠️ Could not parse `{os.path.basename(report_path)}`: {exc}", ""]
+            out += [f"> ⚠️ Could not parse `test_report.json`: {exc}", ""]
 
     if report:
-        summary = report.get("summary", {}) or {}
-        out += ["## Overall", "", "| Metric | Value |", "| --- | ---: |"]
-        for name, key in (
+        summary = report.get("summary")
+        if not isinstance(summary, dict):
+            summary = {}
+        stat_rows = [(name, summary[key]) for name, key in (
             ("Available tests", "available_tests"), ("Executed", "executed_tests"),
             ("Passed", "success_tests"), ("Failed", "failed_tests"),
             ("Not executed", "not_executed_tests"), ("Tested APIs", "available_tested_api"),
             ("Loops", "number_of_loops"), ("Time elapsed", "time_elapsed"),
-        ):
-            if summary.get(key) is not None:
-                out.append(f"| {name} | {summary[key]} |")
-        out.append("")
+        ) if summary.get(key) is not None]
+        if stat_rows:
+            out += ["## Overall", "", "| Metric | Value |", "| --- | ---: |"]
+            out += [f"| {name} | {val} |" for name, val in stat_rows]
+            out.append("")
 
-        failed = [r for r in report.get("test_results", []) or [] if str(r.get("result", "")).upper() == "FAILED"]
+        rows = report.get("test_results")
+        failed = [r for r in (rows if isinstance(rows, list) else [])
+                  if isinstance(r, dict) and str(r.get("result", "")).upper() == "FAILED"]
         if failed:
             by_transport = {}
             for f in failed:
@@ -114,16 +114,17 @@ def render(args):
                 "> No `results/test_report.json` for this run. The pass/fail result is the badge above; "
                 "per-test detail is in the `output.log` below and the `test-results` artifact.", ""]
 
-    if log_path:
+    tail, clipped = None, False
+    if os.path.isfile(log_path):
         tail, clipped = read_log_tail(log_path, LOG_TAIL_LINES, LOG_TAIL_MAX_BYTES)
-        if tail:
-            open_attr = " open" if ((args.result or "").lower() == "failure" and not report) else ""
-            out += [f"<details{open_attr}><summary>output.log{' (tail)' if clipped else ''}</summary>", "",
-                    "```", tail, "```", "", "</details>", ""]
+    if tail:
+        open_attr = " open" if ((args.result or "").lower() == "failure" and not report) else ""
+        out += [f"<details{open_attr}><summary>output.log{' (tail)' if clipped else ''}</summary>", "",
+                "```", tail, "```", "", "</details>", ""]
     elif not report:
         out += ["## No results produced", "",
-                "> ⚠️ No `output.log` or `results/test_report.json` — the run produced no results "
-                "(it likely failed during setup before any test ran). See the step logs and artifact.", ""]
+                "> ⚠️ No test results were produced — the run likely failed during setup before any "
+                "test ran. See the step logs and the `test-results` artifact.", ""]
 
     text = "\n".join(out).rstrip() + "\n"
     if len(text.encode("utf-8")) > STEP_SUMMARY_CAP:
@@ -139,7 +140,11 @@ def main():
     parser.add_argument("--chain", default="")
     parser.add_argument("--result", default="unknown", help="success | failure | unknown")
     parser.add_argument("--title-suffix", default="", help="Extra title context, e.g. the client name")
-    args = parser.parse_args()
+    try:
+        args = parser.parse_args()
+    except SystemExit:
+        sys.stdout.write("# RPC Integration Tests\n\n> ⚠️ Summary renderer called with invalid arguments.\n")
+        return 0
 
     try:
         if not args.result_dir or not os.path.isdir(args.result_dir):
