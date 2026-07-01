@@ -426,7 +426,7 @@ func ApplyBuilderDepositRequest(s abstract.BeaconState, request *solid.BuilderDe
 		return
 	}
 	newBuilder := *builder
-	if newBuilder.WithdrawableEpoch != s.BeaconConfig().FarFutureEpoch {
+	if newBuilder.WithdrawableEpoch != s.BeaconConfig().FarFutureEpoch && newBuilder.Balance == 0 {
 		newBuilder.WithdrawableEpoch = GetEpochAtSlot(s.BeaconConfig(), s.Slot()) + s.BeaconConfig().MinBuilderWithdrawabilityDelay
 	}
 	if request.Amount > math.MaxUint64-newBuilder.Balance {

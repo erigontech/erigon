@@ -164,6 +164,9 @@ func TestProcessPayloadAttestationRejectsNil(t *testing.T) {
 
 	require.Error(t, machine.ProcessPayloadAttestation(s, nil))
 	require.Error(t, machine.ProcessPayloadAttestation(s, &cltypes.PayloadAttestation{}))
+	require.Error(t, machine.ProcessPayloadAttestation(s, &cltypes.PayloadAttestation{
+		Data: &cltypes.PayloadAttestationData{},
+	}))
 }
 
 func TestProcessVoluntaryExitRejectsBuilderIndex(t *testing.T) {
