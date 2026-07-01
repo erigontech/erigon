@@ -1430,7 +1430,7 @@ func (pe *parallelExecutor) run(ctx context.Context) (context.Context, context.C
 	pe.blockExecutors = nil
 	// in is the per-transaction work queue consumed by OCC workers.
 	// 2048 entries keeps all workers saturated without unbounded accumulation.
-	pe.in = exec.NewQueueWithRetry(2_048)
+	pe.in = exec.NewQueueWithRetry(32_768)
 
 	pe.taskExecMetrics = exec.NewWorkerMetrics()
 	pe.blockExecMetrics = newBlockExecMetrics()
