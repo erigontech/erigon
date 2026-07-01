@@ -35,6 +35,7 @@ import (
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/crypto"
+	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/generics"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/rawdbv3"
@@ -613,9 +614,20 @@ func TestAssembleBlockWithFreshlyAddedTxns(t *testing.T) {
 }
 
 func insertBlocks(ctx context.Context, exec *execmodule.ExecModule, blocks []*types.Block) (execmodule.ExecutionStatus, error) {
+	return insertBlocksWithBAL(ctx, exec, blocks, nil)
+}
+
+// insertBlocksWithBAL inserts blocks, attaching the parallel per-block BAL bytes
+// (as blockgen's ChainPack.BlockAccessLists carries them) onto each RawBlock so
+// the BAL reaches the DB — GenerateChain sets the header's BlockAccessListHash
+// but not the block's BlockAccessList field. bals may be nil.
+func insertBlocksWithBAL(ctx context.Context, exec *execmodule.ExecModule, blocks []*types.Block, bals [][]byte) (execmodule.ExecutionStatus, error) {
 	rawBlocks := make([]*types.RawBlock, len(blocks))
 	for i, b := range blocks {
 		rawBlocks[i] = &types.RawBlock{Header: b.HeaderNoCopy(), Body: b.RawBody()}
+		if i < len(bals) {
+			rawBlocks[i].BlockAccessList = bals[i]
+		}
 	}
 	return retryBusy(ctx, func() (execmodule.ExecutionStatus, bool, error) {
 		status, err := exec.InsertBlocks(ctx, rawBlocks)
@@ -2308,6 +2320,135 @@ func TestUpdateForkChoiceShallowReorgAfterLargeBatchExec(t *testing.T) {
 		require.NoError(t, err)
 		require.Equal(t, uint64(chainLen), execProg)
 		require.Equal(t, fork.TopBlock.Hash(), rawdb.ReadHeadBlockHash(tx))
+		return nil
+	}))
+}
+
+// TestBALDrivenFoldAheadChangesetIntegrity probes the B3 review hypothesis: with
+// BAL-driven fold-ahead commitment, block N is folded from its BAL ahead of its
+// blockResult — before SavePastChangesetAccumulator(N) exists — so the fold's
+// ComputeCommitment runs on the cs==nil path under whatever accumulator is
+// installed. yperbasis's concern was that N's commitment-domain diffs are
+// therefore misrouted (into nil / N-1's accumulator), so N's saved per-block
+// changeset loses its commitment deltas and unwind restores a wrong trie root.
+//
+// This tests that claim directly and deterministically: a multi-block batch (so
+// blocks fold ahead while execution runs) with WithAlwaysGenerateChangesets so
+// every block's changeset is saved, then it reads each folded-ahead block's
+// saved diffset and asserts the CommitmentDomain deltas are present. fold-off is
+// the incremental control. If the fold misroutes, a folded block's commitment
+// diff is empty under fold-on but populated under fold-off. If both are
+// populated, the fold routes commitment diffs correctly and B3 is disproven.
+//
+// (An end-to-end divergent-fork reorg would be a stronger check, but blockgen
+// randomises ParentBeaconBlockRoot per block, so under Amsterdam — required for
+// BALs — two chains can't share a prefix and a mid-chain parent has no state.)
+func TestBALDrivenFoldAheadChangesetIntegrity(t *testing.T) {
+	t.Run("fold-off", func(t *testing.T) { runBALFoldAheadChangeset(t, false) })
+	t.Run("fold-on", func(t *testing.T) { runBALFoldAheadChangeset(t, true) })
+}
+
+func runBALFoldAheadChangeset(t *testing.T, foldAhead bool) {
+	defer func(prev bool) { dbg.BALDrivenCommitment = prev }(dbg.BALDrivenCommitment)
+	defer func(prev bool) { dbg.IgnoreBAL = prev }(dbg.IgnoreBAL)
+	dbg.BALDrivenCommitment = foldAhead
+	dbg.IgnoreBAL = false
+
+	ctx := t.Context()
+	privKey, err := crypto.GenerateKey()
+	require.NoError(t, err)
+	senderAddr := crypto.PubkeyToAddress(privKey.PublicKey)
+	m := execmoduletester.New(t,
+		execmoduletester.WithKey(privKey),
+		execmoduletester.WithGenesisSpec(&types.Genesis{
+			Config: chain.AllProtocolChanges, // Amsterdam-at-0 → every block carries a BAL
+			Alloc:  types.GenesisAlloc{senderAddr: {Balance: big.NewInt(1 * common.Ether)}},
+		}),
+		execmoduletester.WithExperimentalBAL(),
+		execmoduletester.WithAlwaysGenerateChangesets(true),
+	)
+
+	const chainLen = 12
+
+	// AllProtocolChanges is post-London, so txs need a fee cap above the base fee
+	// (transferGen's 1-wei price is only valid on the pre-London default).
+	canonical, err := blockgen.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, chainLen,
+		func(i int, b *blockgen.BlockGen) {
+			tx, txErr := types.SignTx(
+				types.NewTransaction(uint64(i), senderAddr, uint256.NewInt(1_000), 50000, uint256.NewInt(10_000_000_000), nil),
+				*types.LatestSignerForChainID(nil), privKey,
+			)
+			require.NoError(t, txErr)
+			b.AddTx(tx)
+		})
+	require.NoError(t, err)
+
+	// One large batch, so blocks 2..N fold ahead while execution runs. The fold
+	// verifies its root against each header, so a clean FCU already proves the
+	// fold produces correct roots; the changeset probe below checks the diffsets.
+	insRes, err := insertBlocksWithBAL(ctx, m.ExecModule, canonical.Blocks, canonical.BlockAccessLists)
+	require.NoError(t, err)
+	require.Equal(t, execmodule.ExecutionStatusSuccess, insRes)
+	fcuRes, err := updateForkChoice(ctx, m.ExecModule, canonical.TopBlock.Header())
+	require.NoError(t, err)
+	require.Equal(t, execmodule.ExecutionStatusSuccess, fcuRes.Status,
+		"batch with fold-ahead=%v must execute cleanly; validationError=%q", foldAhead, fcuRes.ValidationError)
+
+	m.ExecModule.WaitIdle(ctx)
+
+	// Every folded-ahead block's saved changeset must carry its CommitmentDomain
+	// deltas — that is exactly what B3 claims the fold loses. Each transfer block
+	// mutates the trie, so a correctly-routed changeset always has commitment
+	// entries; an empty one means the fold's branch writes were misrouted.
+	require.NoError(t, m.DB.ViewTemporal(ctx, func(tx kv.TemporalTx) error {
+		// Confirm the fold path had real work: blocks must carry non-empty BALs
+		// in the DB, otherwise fold-on would silently degrade to incremental and
+		// the test would prove nothing.
+		balBytes, err := rawdb.ReadBlockAccessListBytes(tx, canonical.Blocks[chainLen/2].Hash(), canonical.Blocks[chainLen/2].NumberU64())
+		require.NoError(t, err)
+		require.NotEmpty(t, balBytes, "blocks must carry a BAL so BAL-driven fold-ahead actually engages")
+
+		lowest, err := changeset.ReadLowestUnwindableBlock(tx)
+		require.NoError(t, err)
+		require.LessOrEqual(t, lowest, uint64(2), "whole batch must be unwindable under AlwaysGenerateChangesets")
+		for _, blk := range canonical.Blocks {
+			diffs, ok, err := changeset.ReadDiffSet(tx, blk.NumberU64(), blk.Hash())
+			require.NoError(t, err)
+			require.Truef(t, ok, "block %d must have a saved diffset", blk.NumberU64())
+			require.NotEmptyf(t, diffs[kv.CommitmentDomain],
+				"block %d changeset is missing CommitmentDomain deltas (fold-ahead=%v) — "+
+					"this is the B3 misroute: the fold's branch writes did not land in "+
+					"block N's changeset", blk.NumberU64(), foldAhead)
+		}
+		return nil
+	}))
+
+	// End-to-end: FCU back below the folded tip unwinds using those changesets,
+	// then FCU forward re-executes. If the fold-built commitment diffs were wrong,
+	// the unwind restores a bad root and the forward re-exec fails.
+	const reorgBackTo = chainLen - 4
+	back, err := updateForkChoice(ctx, m.ExecModule, canonical.Blocks[reorgBackTo-1].Header())
+	require.NoError(t, err)
+	require.Equal(t, execmodule.ExecutionStatusSuccess, back.Status, "reorg back must succeed")
+	m.ExecModule.WaitIdle(ctx)
+	require.NoError(t, m.DB.ViewTemporal(ctx, func(tx kv.TemporalTx) error {
+		execProg, err := stages.GetStageProgress(tx, stages.Execution)
+		require.NoError(t, err)
+		require.Equal(t, uint64(reorgBackTo), execProg, "FCU back must unwind execution (consuming the fold-built changesets)")
+		return nil
+	}))
+
+	fwd, err := updateForkChoice(ctx, m.ExecModule, canonical.TopBlock.Header())
+	require.NoError(t, err)
+	require.Equal(t, execmodule.ExecutionStatusSuccess, fwd.Status,
+		"forward re-exec after unwind must reach the correct root (fold-ahead=%v); validationError=%q",
+		foldAhead, fwd.ValidationError)
+	m.ExecModule.WaitIdle(ctx)
+	require.NoError(t, m.DB.ViewTemporal(ctx, func(tx kv.TemporalTx) error {
+		execProg, err := stages.GetStageProgress(tx, stages.Execution)
+		require.NoError(t, err)
+		require.Equal(t, uint64(chainLen), execProg)
+		require.Equal(t, canonical.TopBlock.Hash(), rawdb.ReadHeadBlockHash(tx))
 		return nil
 	}))
 }
