@@ -1,134 +1,149 @@
 # Commitment test-package de-duplication
 
-Branch: `awskii/commitment-test-refactor` (off #22099 `getwitness-blinded-storage`).
+Branch: `awskii/commitment-test-dedup` (off #22099 `getwitness-blinded-storage`).
 
 ## Problem
 
-~17k LOC of test code across ~50 files in `execution/commitment` (+ `trie`, `commitmentdb`, `nibbles`).
-The duplication is lopsided: one setup pattern is hand-inlined ~50× despite a shared helper
-already existing, and a second layer of already-existing helpers (parity oracles, key-wrap,
-fixtures) is reimplemented inline in a handful of sites. Goal: shorten and de-duplicate the
-tests **without losing any correctness check**.
+~17k LOC of test code across ~50 files in `execution/commitment` (+ `trie`, `commitmentdb`,
+`nibbles`). The duplication is lopsided: one setup pattern is hand-inlined ~50× despite a shared
+helper already existing, and a second layer of already-existing helpers (parity oracles, key-wrap,
+fixtures) is reimplemented inline in a handful of sites. Goal: shorten and de-duplicate the tests
+**without losing any correctness check**. Test-only — no production code changes.
 
-## Decisions
+## Decisions (fixed — do not revisit)
 
-- Delete dead/subsumed tests, but **per-candidate verify the specific case is still exercised by
-  a surviving test that asserts it** — not merely that the same code path is called elsewhere.
-- Include the legacy `execution/commitment/trie` subpackage, using **package-local** helpers only
+- Delete dead/subsumed tests only when the specific case is still asserted by a surviving live
+  test (not merely that the same code path is called). If not covered → leave the test untouched.
+- Include the legacy `execution/commitment/trie` subpackage, **package-local** helpers only
   (different trie type; never reach for the commitment `MockState`/`HexPatriciaHashed` helpers).
-- Defer medium-risk table-driving to a follow-up pass; land low-risk mechanical route-through first.
 - Helpers live in the existing testkit (`testutil_test.go`, `parallel_testkit_test.go`,
-  `patricia_state_mock_test.go`) — no new parallel test infrastructure.
+  `patricia_state_mock_test.go`) — no new test-infrastructure package.
 
 ## Correctness spine (must-keep, never weakened)
 
-Every phase is a mechanical route-through of code the tests already execute; no oracle changes.
-Load-bearing invariants that MUST survive verbatim:
-
-- Golden roots: `Test_HexPatriciaHashed_Sepolia` (hardcoded roots); trie-subpkg golden hashes
-  (`ShortNode` fa7297…, structural rootHash over the 100000-key set); `keys_nibbles` /
-  `nibbles_v2` / `nibbles` golden vectors.
-- Determinism: seq-per-key == single-batch root (`UniqueRepresentation`, `BrokenUniqueRepr`,
-  `ProcessWithDozensOfStorageKeys`, `AfterStateRestore`, `InTheMiddle`).
-- `DeferBranchUpdates` == eager, root **and** stored branch bytes (`DeferredBranchUpdates`,
-  `requireDeferredMatchesEager`, fuzz).
-- Fuzz: ModeDirect == ModeUpdate root; every root is `length.Hash`; ≤100k keys never error.
-- Parallel/streaming/branch parity oracles (`requireRootParity`, `requireAllEnginesParity`,
-  `requireBranchParity`) across worker sweeps; full-collapse → empty-trie root; deep-fold
-  `DeepLocalFolds`/`RefoldCount` probes; copy-on-write lifetime + keyArena pointer stability.
-- Witness: captured-set reconstructs root (memoizationOff); #21810 exclusion shape; byHash prune
-  == RLPDecode prune node set; `VerifyBranchHashes` accept/reject.
-
-Guard each phase: `go test ./execution/commitment/... ./execution/commitment/trie/...` green,
-plus `-race` on the parallel/streaming files and the fuzz corpora, before merge. Golden + parity
-roots are the tripwire for fixture/key-order drift.
+Every task is a mechanical route-through of code the tests already execute; no oracle changes.
+Load-bearing invariants that MUST survive verbatim: golden roots (`Test_HexPatriciaHashed_Sepolia`;
+trie-subpkg golden hashes; `keys_nibbles`/`nibbles`/`nibbles_v2` vectors); seq-per-key == single-batch
+root; `DeferBranchUpdates`==eager (root **and** stored branch bytes); fuzz ModeDirect==ModeUpdate;
+parallel/streaming/branch parity across worker sweeps; full-collapse→empty-trie root; deep-fold
+`DeepLocalFolds`/`RefoldCount` probes; copy-on-write lifetime + keyArena pointer stability; witness
+capture-reconstructs-root, #21810 exclusion shape, byHash-prune==RLPDecode-prune node set;
+`VerifyBranchHashes` accept/reject.
 
 **Tripwire blind spot:** the mid-stream-restore tests (`_AfterStateRestore`, `InTheMiddle`) assert
 that an `EncodeCurrentState`/`SetState` restore does NOT change the final root — so losing their
-restore hook keeps the root equal and passes silently. They are carved out of Phase 1; never
-collapse a seq-loop that carries a mid-iteration restore or intermediate-root assert.
+restore hook keeps the root equal and passes silently. Never collapse a seq-loop that carries a
+mid-iteration restore or intermediate-root assert (see Task 1 carve-out).
 
-## Phases (each independently mergeable, suite stays green)
+## Out of scope (do NOT do in this run)
 
-### Phase 1 — Adopt the Process helpers (Tier 1, low risk, ~260 LOC)
-Route the ~50 reinlined `NewMockState → applyPlainUpdates → WrapKeyUpdates(ModeDirect) → Process →
-Copy(root) → Close` sites through `processSeq`/`processBatch`/`engineRoot`. Keep every outer
-`require.Equal(rSeq,rBatch)` and golden/parity assertion verbatim. Promote one canonical
-trie-returning `processFreshTrie` (the `witness_parity_test.go:30` clone; it returns
-`(*HexPatriciaHashed, root)` — a different shape than `processBatch`, so move it, don't fold it
-into `processBatch`) to `testutil_test.go` and delete the co-located clone.
+- Table-driving the knob-only families (`ReplacePlainKeys*`, `CollectUpdate/CollectDeferredUpdate`,
+  `VerifyBranchHashes`, the 9 `TrieDeleteSubtree_*`). Medium risk (easy to silently drop a per-row
+  assertion) — separate reviewed pass. Do NOT attempt here.
+- Any production (non-test) code change.
+- Any new test-infrastructure package.
+- `git push`, PR creation, or force operations.
+- Adding any `t.Skip` (forbidden). Deleting a whole subsumed test is allowed; unskipping/folding a
+  known-crash skip is not.
 
-**Carve-out — do NOT route these:** any seq-loop that contains `EncodeCurrentState` / `SetState` /
-`Reset` mid-iteration, or a per-iteration/intermediate root assertion. The restore hook is the
-load-bearing part of the test and a plain `processSeq` still produces the same final
-`rSeq==rBatch`, so the golden/parity tripwire **cannot** catch its silent loss. Concretely, leave
-`Test_HexPatriciaHashed_ProcessUpdates_UniqueRepresentation_AfterStateRestore`
-(`hex_patricia_hashed_test.go:967`, mid-loop restore) and
-`..._InTheMiddle` (`:1045`, mid-loop restore + intermediate `somewhereRoot` assert) hand-written.
+## Tasks
 
-### Phase 2 — Close existing-helper usage gaps (Tier 2, low risk, ~350 LOC)
-- Replace inline branch-map union/diff loops with `requireBranchParity` (`deep_storage`,
-  `parallel_patricia`).
-- Build parallel `Updates` via `WrapKeyUpdates(ModeParallel)` instead of hand-rolled `TouchPlainKey`.
-- Route inline 18-key UpdateBuilder tables through `fixtureBaseAccounts`/`fixtureBaseWithCode`
-  (give `BrokenUniqueRepr` its own named fixture); recompute golden/parity root before/after.
-- Use `benchWorkerCounts()` **only** where the existing worker list is exactly `{1,4,8}` or
-  `{1,4,8,NumCPU}`. Do NOT replace lists carrying other values: `TestVerifyParallel_RandomStorageIncremental`
-  and `_StorageIncrementalDeletes` sweep `{1,2,4,8}` — leave those as-is so the `workers=2` parity
-  case survives (`benchWorkerCounts` omits 2).
-- Collapse only the `assertEquivalentRoot → assertEquivalentRootWorkers → requireRootParity` alias
-  chain. **Keep** the 2-line `sequentialRoot`/`parallelRoot` aliases — inlining their 30+ call
-  sites is churn that *increases* LOC.
+### Task 1: Promote the process helper and route the main file's seq-vs-batch tests
+- [ ] Move the trie-returning `processFreshTrie` from `witness_parity_test.go:30` to
+      `testutil_test.go` (it returns `(*HexPatriciaHashed, root)` — a different shape than
+      `processBatch`; move it, do NOT fold into `processBatch`); delete the co-located clone.
+- [ ] In `hex_patricia_hashed_test.go`, replace the hand-inlined
+      `applyPlainUpdates → WrapKeyUpdates(ModeDirect,KeyToHexNibbleHash) → Process → Copy(root) → Close`
+      seq/batch blocks with `processSeq`/`processBatch`, keeping every outer
+      `require.Equal(rSeq,rBatch)` and golden assertion verbatim.
+- [ ] CARVE-OUT: leave hand-written any seq-loop containing `EncodeCurrentState`/`SetState`/`Reset`
+      mid-iteration or a per-iteration/intermediate root assertion — specifically
+      `Test_HexPatriciaHashed_ProcessUpdates_UniqueRepresentation_AfterStateRestore` (`:967`) and
+      `..._InTheMiddle` (`:1045`).
+- [ ] Run `go test ./execution/commitment/...`; confirm `Test_HexPatriciaHashed_Sepolia` and all
+      parity roots unchanged. Must pass before Task 2.
 
-### Phase 3 — New small shared helpers (Tier 3, low-med, ~600 LOC)
-- `addRandomAccount(ub,rnd,slots)` + corpus-spec → collapse the 7 random-corpus builders;
-  `buildWitnessCorpus`+`touchAccountsSlots` for the witness flavor (seeds unchanged → byte-identical corpora).
-- `newStreamingFixture(t,keys,upds,workers)` + `touchAll(sc,keys)` (extract the `newCommitter`
-  closure); callers keep their own scheduler/eager/lazy wiring.
-- `encodeCellRow(tb,size)→(row,bm,enc)`; `testWarmuper(ctx,factory,workers)` (const MaxDepth/LogPrefix);
-  promote `cellMustEqual` (+ decoder-only `requireDecodedCellEq`); `benchProcess` timing skeleton
-  (preserve StopTimer/StartTimer boundaries — verify one before/after bench run).
+### Task 2: Route the remaining ModeDirect Process-ceremony sites
+- [ ] Route the same ceremony through `processSeq`/`processBatch`/`engineRoot` in
+      `trie_reader_test.go`, `witness_prune_test.go`, `witness_tracer_test.go`,
+      `witness_strict_test.go`, `additive_updates_test.go`, `deep_storage_test.go`
+      (same carve-out as Task 1; keep every existing assertion verbatim).
+- [ ] Run `go test ./execution/commitment/...` green. Must pass before Task 3.
 
-### Phase 4 — trie subpkg, package-local (Tier 3, low-med, ~180-355 LOC)
-Normalize `New(common.Hash{})` → `newEmpty()`. Add `newCodeTrie(t)→(trie,rand,addr)`,
-`testAccount(nonce,balance,opts)`, `expectingCollector([]stepExpectation)` reproducing every
-hasHash/hasTree bitmask byte-for-byte, `rebuildFromWitness(t,tr,rl)`. Package-local only.
+### Task 3: Close existing-helper usage gaps (parity oracles, key-wrap, worker counts, aliases)
+- [ ] Replace the inline branch-map union/diff loops with `requireBranchParity` in
+      `deep_storage_test.go` and `parallel_patricia_hashed_test.go`.
+- [ ] Build parallel `Updates` via `WrapKeyUpdates(ModeParallel, KeyToHexNibbleHash, …)` instead of
+      hand-rolled `TouchPlainKey` closures at the parallel/streaming sites.
+- [ ] Use `benchWorkerCounts()` ONLY where the existing worker list is exactly `{1,4,8}` or
+      `{1,4,8,NumCPU}`. Do NOT touch lists carrying other values — leave
+      `TestVerifyParallel_RandomStorageIncremental` and `_StorageIncrementalDeletes` (`{1,2,4,8}`)
+      as-is so the `workers=2` case survives.
+- [ ] Collapse only the `assertEquivalentRoot → assertEquivalentRootWorkers → requireRootParity`
+      alias chain. KEEP the 2-line `sequentialRoot`/`parallelRoot` aliases (inlining 30+ sites is
+      churn that increases LOC).
+- [ ] Run `go test ./execution/commitment/...` and `-race` on the parallel/streaming files green.
+      Must pass before Task 4.
 
-### Phase 5 — Deletions, gated by coverage verification (Tier 5, ~120 LOC)
-Gate for EACH candidate: (a) name the specific case it pins; (b) find a surviving test that
-exercises that case **with a real assertion** (not merely calls the same code path); (c) delete
-only if (b) holds. If (b) fails: **leave the test untouched** — do not delete, and never
-fold/unskip/reactivate a pre-existing skip (folding a known-crash path is a test an autonomous
-agent cannot legally recover from, since adding a skip is forbidden).
+### Task 4: Route inline UpdateBuilder tables through the shared fixtures (root-sensitive)
+- [ ] Replace the copy-pasted ~18-key balance/storage tables with `fixtureBaseAccounts()` /
+      `fixtureBaseWithCode()` in `UniqueRepresentation`, `DeferredBranchUpdates`, `AfterStateRestore`
+      (chain small `.Balance`/`.Storage` deltas for follow-up rounds). Give `BrokenUniqueRepr` its
+      own named fixture (dup-keys / no-codehash shape).
+- [ ] Verify byte-identical key set + order: `Test_HexPatriciaHashed_Sepolia` golden roots and all
+      parity roots unchanged. If any root shifts, revert that substitution. Must pass before Task 5.
 
-Only these three are cleared for deletion (each verified truly subsumed):
+### Task 5: One random-corpus builder + shared witness corpus
+- [ ] Add `addRandomAccount(ub,rnd,slots)` (+ per-nibble variant) and a corpus-spec struct to
+      `parallel_testkit_test.go`; refactor `buildWhaleCorpus`/`buildMixedCorpus`/`build100KAccountsCorpus`/
+      `build500KStorageHeavyCorpus`/`buildClusteredStorageCorpus`/`buildWhaleStorageGroups`/`whaleByNibble`
+      into thin count/seed specs. Seeds and `rnd.Read` draw order UNCHANGED → byte-identical corpora.
+- [ ] Add `buildWitnessCorpus(tb,ms,hph,accts,slots)`+`touchAccountsSlots` for the witness flavor;
+      route the 5 witness accts×slots loops through it.
+- [ ] Run `go test ./execution/commitment/...` green (golden/parity roots are the drift tripwire).
+      Must pass before Task 6.
 
-| candidate | case | surviving coverage (verified) |
-|---|---|---|
-| `TestParallelDeleteWithSurvivingSiblings` (`:574`) | 2-batch delete root parity | `_BranchInspection` (`:732`) runs the byte-identical corpus at `workers=4`, asserts per-batch `seqRoot==parRoot` + a root-branch survival bitmap → delete |
-| `TestTrieDeleteSubtree_ValueNode_PartialMatch` (`:245`) | delete-subtree present/absent | byte-for-byte identical to `_DuoNode` (`:106`) → delete one |
-| `TestEncodeKeyV2_RoundTrip` (`:121`) | encode∘decode == identity | `TestEncodeKeyV2_Vectors`+`_DecodeKeyV2_Vectors` (same `v2Vectors`) + `FuzzEncodeDecodeKeyV2` → delete |
+### Task 6: newStreamingFixture + touchAll
+- [ ] Promote `newStreamingFixture(t,keys,upds,workers[,scheduler])` (`*StreamingCommitter,*MockState`)
+      and `touchAll(sc,keys)` to `parallel_testkit_test.go` (extract the `newCommitter` closure in
+      `TestStreaming_FoldEagerPolicy`); adopt at the ~15 streaming parity sites. Callers keep their
+      own scheduler / eager-lazy / `waitSchedulerIdle` wiring.
+- [ ] Run `go test ./execution/commitment/...` and `-race` on `streaming_commitment_test.go` green.
+      Must pass before Task 7.
 
-Explicitly NOT deleted (failed the gate on review):
-- `Test_HexPatriciaHashed_StateRestoreAndContinue` (skip, `:753`) — its unique case (restore into a
-  **second, separately-backed** MockState → continue → compare roots) is NOT asserted by any live
-  test; it is also the known-crash path it documents. Leave the pre-existing skip untouched.
-- `TestPrintProof` (`trie/proof_test.go:17`) — NOT print-only: it asserts `require.NoError` on the
-  JSON unmarshal and on `PrintProof` for the account + each storage proof, and is the ONLY test of
-  production `PrintProof` (`trie/proof.go:650`). Keep it.
+### Task 7: Extract branch-encode / warmup / cell-equality helpers
+- [ ] Add `encodeCellRow(tb,size)->(row,bm,enc)` to `testutil_test.go`; drop the
+      `generateCellRow → NewBranchEncoder(1024) → generateCellEncodeDataRow → EncodeBranch → NoError`
+      4-liner at its ~11 test + 3 bench sites.
+- [ ] Add `testWarmuper(ctx,factory,workers)` filling the constant `MaxDepth:64`/`LogPrefix:"test"`/
+      `Enabled:true`; promote `cellMustEqual` to `testutil_test.go` (+ a decoder-only
+      `requireDecodedCellEq` variant that skips `hashedExtension`/`stateHash`).
+- [ ] Run `go test ./execution/commitment/...` green. Must pass before Task 8.
 
-Keep (do not touch): `#20961` skip (`:1692`), `-short` guards (bloatnet `:652`, verify `:373`),
-env-gated trie-trace harness (`:598`), and the **in-fuzz `t.Skip` input filters**
-(`verify_test.go:405` oversized-batch, `hex_patricia_hashed_fuzz_test.go:45,178` degenerate-input)
-— these are runtime input filters, not muted tests.
+### Task 8: trie subpackage cleanup (package-local helpers only)
+- [ ] In package `trie` ONLY (never import the commitment helpers): normalize `New(common.Hash{})` →
+      the existing `newEmpty()`; add `newCodeTrie(t)->(trie,rand,addr)` for the 11 `TestCodeNode*`
+      prologues, `testAccount(nonce,balance,opts)` for the `accounts.Account{...}` literals, and
+      `expectingCollector([]stepExpectation)` reproducing every hasHash/hasTree bitmask byte-for-byte.
+- [ ] Run `go test ./execution/commitment/trie/...` green; trie golden hashes unchanged.
+      Must pass before Task 9.
 
-## Out of scope (this run — deferred to a follow-up)
+### Task 9: Gated deletions (only the three verified-subsumed)
+- [ ] Delete `TestParallelDeleteWithSurvivingSiblings` (`parallel_patricia_hashed_test.go:574`) —
+      subsumed by `_BranchInspection` (`:732`, byte-identical corpus at workers=4, asserts per-batch
+      seq==par root + survival bitmap). Confirm `_BranchInspection` still passes.
+- [ ] Delete one of the byte-identical pair `TestTrieDeleteSubtree_ValueNode_PartialMatch` (`:245`)
+      / `TestTrieDeleteSubtree_DuoNode` (`:106`) — keep `_DuoNode`.
+- [ ] Delete `TestEncodeKeyV2_RoundTrip` (`nibbles_v2_test.go:121`) — encode∘decode identity is
+      covered by `TestEncodeKeyV2_Vectors`+`_DecodeKeyV2_Vectors` (same `v2Vectors`) + `FuzzEncodeDecodeKeyV2`.
+- [ ] Do NOT touch: `Test_HexPatriciaHashed_StateRestoreAndContinue` skip (`:753`, case not covered),
+      `TestPrintProof` (real assertions, sole `PrintProof` coverage), `#20961` skip, `-short` guards,
+      env-gated trie-trace harness, and in-fuzz `t.Skip` input filters
+      (`verify_test.go:405`, `hex_patricia_hashed_fuzz_test.go:45,178`).
+- [ ] Run `go test ./execution/commitment/... ./execution/commitment/trie/...` green. Must pass before Task 10.
 
-- **Table-driving the knob-only families** (`ReplacePlainKeys{/WithEmpty/PartialChange}`,
-  `CollectUpdate/CollectDeferredUpdate`, `VerifyBranchHashes`, the 9 `TrieDeleteSubtree_*`).
-  Medium risk (easy to silently drop a per-row assertion); handled as a separate reviewed pass,
-  not by this autonomous run. Do NOT attempt it here.
-- No production (non-test) code changes.
-- No new test infrastructure package; extend the existing testkit.
-- No behavior/coverage reduction — LOC drops from de-duplication, not from testing less.
-- No `git push` / PR creation from this run.
+### Task 10: Acceptance verification
+- [ ] `go test ./execution/commitment/... ./execution/commitment/trie/... ./execution/commitment/commitmentdb/... ./execution/commitment/nibbles/...` all pass.
+- [ ] `-race` pass on the parallel/streaming/deep files; fuzz corpora (`-run '^Fuzz'`) pass.
+- [ ] `make lint` clean (run repeatedly until stable).
+- [ ] Confirm no production (non-test) file changed: `git diff --name-only <base> | grep -v '_test\.go$'` shows only `docs/plans/`.
