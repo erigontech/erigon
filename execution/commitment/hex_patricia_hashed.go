@@ -1205,6 +1205,15 @@ func (hph *HexPatriciaHashed) computeCellHash(cell *cell, depth int16, buf []byt
 	return buf, nil
 }
 
+// clampToAccountBoundary caps an unfold/extension length so a descent from above the
+// 64-nibble account boundary stops exactly at it, where storage subtrees start.
+func clampToAccountBoundary(depth, length int16) int16 {
+	if depth < 64 && depth+length > 64 {
+		return 64 - depth
+	}
+	return length
+}
+
 func (hph *HexPatriciaHashed) needUnfolding(hashedKey []byte) int16 {
 	var cell *cell
 	var depth int16
@@ -1251,13 +1260,9 @@ func (hph *HexPatriciaHashed) needUnfolding(hashedKey []byte) int16 {
 	if hph.trace {
 		fmt.Printf("cpl=%d cell.hashedExtension=[%x] hashedKey[depth=%d:]=[%x]\n", cpl, cell.hashedExtension[:cell.hashedExtLen], depth, hashedKey[depth:])
 	}
-	unfolding := int16(cpl + 1)
-	if depth < 64 && depth+unfolding > 64 {
-		// This is to make sure that unfolding always breaks at the level where storage subtrees start
-		unfolding = 64 - depth
-		if hph.trace {
-			fmt.Printf("adjusted unfolding=%d <- %d\n", unfolding, cpl+1)
-		}
+	unfolding := clampToAccountBoundary(depth, int16(cpl+1))
+	if hph.trace && unfolding != int16(cpl+1) {
+		fmt.Printf("adjusted unfolding=%d <- %d\n", unfolding, cpl+1)
 	}
 	return unfolding
 }
@@ -2336,10 +2341,7 @@ func (hph *HexPatriciaHashed) captureExtensionDivergence(hashedKey []byte, set *
 	if cell.hashedExtLen == 0 || cell.hashLen == 0 {
 		return nil
 	}
-	extKeyLength := cell.hashedExtLen
-	if depth < 64 && extKeyLength+depth > 64 {
-		extKeyLength = 64 - depth
-	}
+	extKeyLength := clampToAccountBoundary(depth, cell.hashedExtLen)
 	hashedExtKey := cell.hashedExtension[:extKeyLength]
 	endPos := min(keyPos+extKeyLength+1, int16(len(hashedKey)))
 	fullPathLength := int(keyPos+1) + len(hashedExtKey)
