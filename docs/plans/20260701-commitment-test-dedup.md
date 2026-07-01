@@ -49,18 +49,18 @@ mid-iteration restore or intermediate-root assert (see Task 1 carve-out).
 ## Tasks
 
 ### Task 1: Promote the process helper and route the main file's seq-vs-batch tests
-- [ ] Move the trie-returning `processFreshTrie` from `witness_parity_test.go:30` to
+- [x] Move the trie-returning `processFreshTrie` from `witness_parity_test.go:30` to
       `testutil_test.go` (it returns `(*HexPatriciaHashed, root)` — a different shape than
       `processBatch`; move it, do NOT fold into `processBatch`); delete the co-located clone.
-- [ ] In `hex_patricia_hashed_test.go`, replace the hand-inlined
+- [x] In `hex_patricia_hashed_test.go`, replace the hand-inlined
       `applyPlainUpdates → WrapKeyUpdates(ModeDirect,KeyToHexNibbleHash) → Process → Copy(root) → Close`
       seq/batch blocks with `processSeq`/`processBatch`, keeping every outer
       `require.Equal(rSeq,rBatch)` and golden assertion verbatim.
-- [ ] CARVE-OUT: leave hand-written any seq-loop containing `EncodeCurrentState`/`SetState`/`Reset`
+- [x] CARVE-OUT: leave hand-written any seq-loop containing `EncodeCurrentState`/`SetState`/`Reset`
       mid-iteration or a per-iteration/intermediate root assertion — specifically
       `Test_HexPatriciaHashed_ProcessUpdates_UniqueRepresentation_AfterStateRestore` (`:967`) and
       `..._InTheMiddle` (`:1045`).
-- [ ] Run `go test ./execution/commitment/...`; confirm `Test_HexPatriciaHashed_Sepolia` and all
+- [x] Run `go test ./execution/commitment/...`; confirm `Test_HexPatriciaHashed_Sepolia` and all
       parity roots unchanged. Must pass before Task 2.
 
 ### Task 2: Route the remaining ModeDirect Process-ceremony sites

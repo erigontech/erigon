@@ -28,6 +28,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/length"
 )
 
 // forEachMode runs fn as a subtest once per Updates mode, named after the mode.
@@ -68,6 +69,21 @@ func processBatch(tb testing.TB, ms *MockState, trie *HexPatriciaHashed, plainKe
 	root, err := trie.Process(context.Background(), upds, "", nil, WarmupConfig{})
 	require.NoError(tb, err)
 	return common.Copy(root)
+}
+
+// processFreshTrie builds a fresh trie/state, applies the updates in a single ModeDirect batch and
+// returns both the trie (for post-run inspection) and the root.
+func processFreshTrie(t *testing.T, plainKeys [][]byte, updates []Update) (*HexPatriciaHashed, []byte) {
+	t.Helper()
+	ms := NewMockState(t)
+	hph := NewHexPatriciaHashed(length.Addr, ms, DefaultTrieConfig())
+	hph.SetTrace(false)
+	require.NoError(t, ms.applyPlainUpdates(plainKeys, updates))
+	toProcess := WrapKeyUpdates(t, ModeDirect, KeyToHexNibbleHash, plainKeys, updates)
+	defer toProcess.Close()
+	root, err := hph.Process(context.Background(), toProcess, "", nil, WarmupConfig{})
+	require.NoError(t, err)
+	return hph, root
 }
 
 // fixtureBaseAccounts returns a builder with a mixed set of account and storage updates shared

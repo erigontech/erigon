@@ -157,7 +157,6 @@ func Test_HexPatriciaHashed_UniqueRepresentation2(t *testing.T) {
 
 	msOne := NewMockState(t)
 	msTwo := NewMockState(t)
-	ctx := context.Background()
 
 	plainKeys, updates := NewUpdateBuilder().
 		Balance("71562b71999873db5b286df957af199ec94617f7", 999860099).
@@ -170,42 +169,8 @@ func Test_HexPatriciaHashed_UniqueRepresentation2(t *testing.T) {
 	trieOne := NewHexPatriciaHashed(length.Addr, msOne, DefaultTrieConfig())
 	trieTwo := NewHexPatriciaHashed(length.Addr, msTwo, DefaultTrieConfig())
 
-	//trieOne.SetTrace(true)
-	//trieTwo.SetTrace(true)
-
-	var rSeq, rBatch []byte
-	{
-		fmt.Printf("1. Trie sequential update (%d updates)\n", len(updates))
-		for i := 0; i < len(updates); i++ {
-			err := msOne.applyPlainUpdates(plainKeys[i:i+1], updates[i:i+1])
-			require.NoError(t, err)
-
-			updsOne := WrapKeyUpdates(t, ModeDirect, KeyToHexNibbleHash, plainKeys[i:i+1], updates[i:i+1])
-
-			sequentialRoot, err := trieOne.Process(ctx, updsOne, "", nil, WarmupConfig{})
-			require.NoError(t, err)
-
-			t.Logf("sequential root @%d hash %x\n", i, sequentialRoot)
-			rSeq = common.Copy(sequentialRoot)
-
-			updsOne.Close()
-		}
-	}
-	{
-		err := msTwo.applyPlainUpdates(plainKeys, updates)
-		require.NoError(t, err)
-
-		updsTwo := WrapKeyUpdates(t, ModeDirect, KeyToHexNibbleHash, plainKeys, updates)
-
-		fmt.Printf("\n2. Trie batch update (%d updates)\n", len(updates))
-		rh, err := trieTwo.Process(ctx, updsTwo, "", nil, WarmupConfig{})
-		require.NoError(t, err)
-		t.Logf("batch of %d root hash %x\n", len(updates), rh)
-
-		updsTwo.Close()
-
-		rBatch = common.Copy(rh)
-	}
+	rSeq := processSeq(t, msOne, trieOne, plainKeys, updates)
+	rBatch := processBatch(t, msTwo, trieTwo, plainKeys, updates)
 	require.Equal(t, rSeq, rBatch, "sequential and batch root should match")
 
 	plainKeys, updates = NewUpdateBuilder().
@@ -215,44 +180,13 @@ func Test_HexPatriciaHashed_UniqueRepresentation2(t *testing.T) {
 		Balance("0000000000000000000000000000000000000000", 3000000000000138901).
 		Build()
 
-	{
-		fmt.Printf("\n3. Trie follow-up update (%d updates)\n", len(updates))
-		for i := 0; i < len(updates); i++ {
-			err := msOne.applyPlainUpdates(plainKeys[i:i+1], updates[i:i+1])
-			require.NoError(t, err)
-
-			updsOne := WrapKeyUpdates(t, ModeDirect, KeyToHexNibbleHash, plainKeys[i:i+1], updates[i:i+1])
-
-			sequentialRoot, err := trieOne.Process(ctx, updsOne, "", nil, WarmupConfig{})
-			require.NoError(t, err)
-
-			t.Logf("sequential root @%d hash %x\n", i, sequentialRoot)
-			rSeq = common.Copy(sequentialRoot)
-
-			updsOne.Close()
-		}
-	}
-	{
-		fmt.Printf("\n2. Trie batch update (%d updates)\n", len(updates))
-		err := msTwo.applyPlainUpdates(plainKeys, updates)
-		require.NoError(t, err)
-
-		updsTwo := WrapKeyUpdates(t, ModeDirect, KeyToHexNibbleHash, plainKeys, updates)
-
-		rh, err := trieTwo.Process(ctx, updsTwo, "", nil, WarmupConfig{})
-		require.NoError(t, err)
-		t.Logf("batch of %d root hash %x\n", len(updates), rh)
-
-		rBatch = common.Copy(rh)
-		updsTwo.Close()
-	}
+	rSeq = processSeq(t, msOne, trieOne, plainKeys, updates)
+	rBatch = processBatch(t, msTwo, trieTwo, plainKeys, updates)
 	require.Equal(t, rBatch, rSeq, "sequential and batch root should match")
 }
 
 func Test_HexPatriciaHashed_BrokenUniqueRepr(t *testing.T) {
 	t.Parallel()
-
-	ctx := context.Background()
 
 	uniqTest := func(t *testing.T, sortHashedKeys bool, trace bool) {
 		t.Helper()
@@ -293,38 +227,8 @@ func Test_HexPatriciaHashed_BrokenUniqueRepr(t *testing.T) {
 		trieSequential.SetTrace(trace)
 		trieBatch.SetTrace(trace)
 
-		var rSeq, rBatch []byte
-		{
-			fmt.Printf("1. Trie sequential update (%d updates)\n", len(updates))
-			for i := 0; i < len(updates); i++ {
-				err := stateSeq.applyPlainUpdates(plainKeys[i:i+1], updates[i:i+1])
-				require.NoError(t, err)
-
-				updsOne := WrapKeyUpdates(t, ModeDirect, KeyToHexNibbleHash, plainKeys[i:i+1], updates[i:i+1])
-
-				sequentialRoot, err := trieSequential.Process(ctx, updsOne, "", nil, WarmupConfig{})
-				require.NoError(t, err)
-
-				t.Logf("sequential root @%d hash %x\n", i, sequentialRoot)
-				rSeq = common.Copy(sequentialRoot)
-
-				updsOne.Close()
-			}
-		}
-		{
-			fmt.Printf("\n2. Trie batch update (%d updates)\n", len(updates))
-			err := stateBatch.applyPlainUpdates(plainKeys, updates)
-			require.NoError(t, err)
-
-			updsTwo := WrapKeyUpdates(t, ModeDirect, KeyToHexNibbleHash, plainKeys, updates)
-
-			rh, err := trieBatch.Process(ctx, updsTwo, "", nil, WarmupConfig{})
-			require.NoError(t, err)
-			t.Logf("batch of %d root hash %x\n", len(updates), rh)
-
-			rBatch = common.Copy(rh)
-			updsTwo.Close()
-		}
+		rSeq := processSeq(t, stateSeq, trieSequential, plainKeys, updates)
+		rBatch := processBatch(t, stateBatch, trieBatch, plainKeys, updates)
 		require.Equal(t, rBatch, rSeq, "sequential and batch root should match")
 	}
 
@@ -340,7 +244,6 @@ func Test_HexPatriciaHashed_BrokenUniqueRepr(t *testing.T) {
 }
 
 func Test_HexPatriciaHashed_UniqueRepresentation(t *testing.T) {
-	ctx := context.Background()
 	stateSeq := NewMockState(t)
 	stateBatch := NewMockState(t)
 
@@ -376,38 +279,8 @@ func Test_HexPatriciaHashed_UniqueRepresentation(t *testing.T) {
 	// trieSequential.SetTrace(true)
 	// trieBatch.SetTrace(true)
 
-	var rSeq, rBatch []byte
-	{
-		fmt.Printf("1. Trie sequential update (%d updates)\n", len(updates))
-		for i := 0; i < len(updates); i++ {
-			err := stateSeq.applyPlainUpdates(plainKeys[i:i+1], updates[i:i+1])
-			require.NoError(t, err)
-
-			updsOne := WrapKeyUpdates(t, ModeDirect, KeyToHexNibbleHash, plainKeys[i:i+1], updates[i:i+1])
-
-			sequentialRoot, err := trieSequential.Process(ctx, updsOne, "", nil, WarmupConfig{})
-			require.NoError(t, err)
-
-			t.Logf("sequential root @%d hash %x\n", i, sequentialRoot)
-			rSeq = common.Copy(sequentialRoot)
-
-			updsOne.Close()
-		}
-	}
-	{
-		fmt.Printf("\n2. Trie batch update (%d updates)\n", len(updates))
-		err := stateBatch.applyPlainUpdates(plainKeys, updates)
-		require.NoError(t, err)
-
-		updsTwo := WrapKeyUpdates(t, ModeDirect, KeyToHexNibbleHash, plainKeys, updates)
-
-		rh, err := trieBatch.Process(ctx, updsTwo, "", nil, WarmupConfig{})
-		require.NoError(t, err)
-		t.Logf("batch of %d root hash %x\n", len(updates), rh)
-
-		rBatch = common.Copy(rh)
-		updsTwo.Close()
-	}
+	rSeq := processSeq(t, stateSeq, trieSequential, plainKeys, updates)
+	rBatch := processBatch(t, stateBatch, trieBatch, plainKeys, updates)
 	require.Equal(t, rBatch, rSeq, "sequential and batch root should match")
 }
 
