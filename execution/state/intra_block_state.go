@@ -199,6 +199,12 @@ type IntraBlockState struct {
 	codeReadCount       int64
 	version             int
 	dep                 int
+
+	// eip8246 pins whether SELFDESTRUCT preserves the account (EIP-8246 removes
+	// the balance burn). Set per-tx from the block rules in Prepare; under it a
+	// SelfDestructPath=true account must read as a live, balance-preserving,
+	// empty-code account rather than a destroyed one.
+	eip8246 bool
 }
 
 // Create a new state from a given trie
@@ -788,6 +794,22 @@ func (sdb *IntraBlockState) GetCodeHash(addr accounts.Address) (accounts.CodeHas
 			}
 			return s.data.CodeHash, nil
 		})
+	if err != nil {
+		return accounts.NilCodeHash, err
+	}
+	if sdb.eip8246 && hash == accounts.NilCodeHash {
+		// A prior tx's EIP-8246 SELFDESTRUCT leaves an existing empty-code
+		// account, but its CodeHashPath is dropped from the version map, so
+		// recover the codehash from the reconstructed account (EmptyCodeHash),
+		// distinguishing it from a genuinely absent account (NilCodeHash).
+		acc, _, _, err := sdb.getVersionedAccount(addr, false)
+		if err != nil {
+			return accounts.NilCodeHash, err
+		}
+		if acc != nil {
+			return acc.CodeHash, nil
+		}
+	}
 	return hash, err
 }
 
@@ -1024,6 +1046,23 @@ func (sdb *IntraBlockState) TouchAccount(addr accounts.Address) error {
 	return nil
 }
 
+// eip8246PreservedAccount reconstructs the live account a prior tx left behind
+// when EIP-8246 removed the SELFDESTRUCT burn: the balance survives, code and
+// nonce are cleared. Returns nil when the balance was moved out, leaving an
+// empty account that EIP-161 removes.
+func (sdb *IntraBlockState) eip8246PreservedAccount(addr accounts.Address) (*accounts.Account, error) {
+	bal, _, _, err := versionedRead(sdb, addr, BalancePath, accounts.NilKey, false, uint256.Int{}, nil, nil)
+	if err != nil {
+		return nil, err
+	}
+	if bal.IsZero() {
+		return nil, nil
+	}
+	acc := accounts.NewAccount()
+	acc.Balance = bal
+	return &acc, nil
+}
+
 func (sdb *IntraBlockState) getVersionedAccount(addr accounts.Address, readStorage bool) (*accounts.Account, ReadSource, Version, error) {
 	if sdb.versionMap == nil {
 		return nil, UnknownSource, UnknownVersion, nil
@@ -1034,6 +1073,33 @@ func (sdb *IntraBlockState) getVersionedAccount(addr accounts.Address, readStora
 
 	if err != nil {
 		return nil, UnknownSource, UnknownVersion, err
+	}
+
+	// EIP-8246: a prior tx's SELFDESTRUCT preserves the account (balance kept,
+	// code/nonce cleared) rather than destroying it. AddressPath reads zero
+	// under SD, so reconstruct the surviving account from the version map here,
+	// covering both committed and in-block-created accounts — unless a later tx
+	// re-created it, in which case fall through to the normal read.
+	if sdb.eip8246 && readAccount == nil {
+		if sdRes := sdb.versionMap.Read(addr, SelfDestructPath, accounts.NilKey, sdb.txIndex); sdRes.Status() == MVReadResultDone {
+			if destructed, ok := sdRes.Value().(bool); ok && destructed {
+				destructTxIndex := sdRes.DepIdx()
+				revived := false
+				for _, p := range []AccountPath{AddressPath, BalancePath, NoncePath, CodeHashPath} {
+					if hi, ok := sdb.versionMap.LatestTxIndex(addr, p, accounts.NilKey, sdb.txIndex-1); ok && hi > destructTxIndex {
+						revived = true
+						break
+					}
+				}
+				if !revived {
+					preserved, err := sdb.eip8246PreservedAccount(addr)
+					if err != nil {
+						return nil, StorageRead, UnknownVersion, err
+					}
+					return preserved, MapRead, Version{TxIndex: destructTxIndex}, nil
+				}
+			}
+		}
 	}
 
 	if readAccount == nil {
@@ -2411,6 +2477,7 @@ func (sdb *IntraBlockState) Prepare(rules *chain.Rules, sender, coinbase account
 	if dbg.TraceTransactionIO && (sdb.trace || dbg.TraceAccount(sender.Handle()) || !dst.IsNil() && dbg.TraceAccount(dst.Handle())) {
 		fmt.Printf("%d (%d.%d) ibs.Prepare: sender: %x, coinbase: %x, dest: %x, %x, %v, %v, %v\n", sdb.blockNum, sdb.txIndex, sdb.version, sender, coinbase, dst, precompiles, list, rules, authorities)
 	}
+	sdb.eip8246 = rules.IsAmsterdam && !rules.IsEIPDisabled(8246)
 	if rules.IsBerlin {
 		// Clear out any leftover from previous executions
 		sdb.accessList.Reset()
