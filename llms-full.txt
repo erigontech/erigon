@@ -2424,7 +2424,7 @@ Erigon supports configuration through environment variables, primarily for exper
 * `NO_PRUNE` - Disables pruning when set to true (flag equivalent: `--exec.no-prune`)
 * `NO_MERGE` - Disables merging operations (flag equivalent: `--exec.no-merge`)
 * `PRUNE_TOTAL_DIFFICULTY` - Controls total difficulty pruning (default: `true`)
-* `MAX_REORG_DEPTH` - Sets maximum reorganization depth (default: `512`)
+* `MAX_REORG_DEPTH` - Sets maximum reorganization depth (default: `96`)
 
 **Execution and Processing:**
 
@@ -4488,7 +4488,7 @@ The Erigon RPC Service, managed by Erigon's modular [RPC Daemon](/fundamentals/m
 * [`gRPC`](/interacting-with-erigon/grpc): API for lower-level data access.
 * [`overlay`](/interacting-with-erigon/overlay): Erigon-specific overlay API for replaying blocks with state overrides (archive nodes only).
 * [`parity`](/interacting-with-erigon/parity): Partial OpenEthereum compatibility (`parity_listStorageKeys`).
-* [`graphql`](/interacting-with-erigon/graphql): GraphQL endpoint following EIP-1767.
+* [`graphql`](/interacting-with-erigon/graphql): GraphQL endpoint following the ethereum/execution-apis schema.
 
 For a complete reference on the standard Ethereum JSON-RPC methods, especially those in the `eth`, `net`, and `web3` namespaces, it is recommended to consult the general documentation on [ethereum.org's JSON-RPC API page](https://ethereum.org/en/developers/docs/apis/json-rpc/). Additionally, for the formal specification of the `debug`, `engine`, and `eth` namespaces, including unique, detailed descriptions for methods like `eth_getProof` and `eth_simulateV1`, refer to the [Execution APIs documentation](https://ethereum.github.io/execution-apis).
 
@@ -7298,7 +7298,7 @@ curl -X POST http://localhost:8545 \
 URL: https://docs.erigon.tech/interacting-with-erigon/graphql
 
 
-Erigon implements the standard Ethereum GraphQL interface defined in [EIP-1767](https://eips.ethereum.org/EIPS/eip-1767), following the same schema as Geth.
+Erigon implements the Ethereum GraphQL interface originally introduced in [EIP-1767](https://eips.ethereum.org/EIPS/eip-1767). The schema is maintained in the [`ethereum/execution-apis`](https://github.com/ethereum/execution-apis) repository, kept in sync with client implementations such as Geth and Besu. Erigon follows that schema.
 
 ## Enabling GraphQL
 
@@ -7319,7 +7319,7 @@ GraphQL shares the same port as the HTTP JSON-RPC server (default `8545`). It do
 
 ## Schema Reference
 
-Erigon follows the Geth GraphQL schema. For the full schema reference, query examples, and field descriptions, see https://geth.ethereum.org/docs/interacting-with-geth/rpc/graphql.
+Erigon follows the GraphQL schema maintained in [`ethereum/execution-apis`](https://github.com/ethereum/execution-apis), which is kept in sync with major clients such as Geth and Besu. For human-readable field descriptions and query examples, the [Geth GraphQL reference](https://geth.ethereum.org/docs/interacting-with-geth/rpc/graphql) is a useful companion.
 
 The schema includes queries for blocks, transactions, accounts, logs, and pending state, as well as the `sendRawTransaction` mutation.
 
