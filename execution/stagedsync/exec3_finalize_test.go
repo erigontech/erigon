@@ -1852,7 +1852,7 @@ func TestNormalizeWriteSet_CodePathTravelsWithCodeHash(t *testing.T) {
 			Version: state.Version{TxIndex: txIndex, Incarnation: 0}}, // stale incarnation
 	}
 
-	result := normalizeWriteSet(rawWrites, vm, txIndex, 1, nil, nil, true, false)
+	result := normalizeWriteSet(rawWrites, vm, txIndex, 1, nil, nil, true, false, false)
 
 	var gotHash *accounts.CodeHash
 	var gotCode []byte
@@ -1908,7 +1908,7 @@ func TestNormalizeWriteSet_CodePathRecoveredFromStateReader(t *testing.T) {
 			Version: state.Version{TxIndex: txIndex, Incarnation: 0}},
 	}
 
-	result := normalizeWriteSet(rawWrites, vm, txIndex, 0, reader, nil, true, false)
+	result := normalizeWriteSet(rawWrites, vm, txIndex, 0, reader, nil, true, false, false)
 
 	require.Equal(t, 1, countPath(result, state.CodeHashPath),
 		"codeHash is filled from committed state for the modified account")
