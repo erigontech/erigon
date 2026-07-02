@@ -3366,13 +3366,20 @@ func normalizeWriteSet(writes *state.WriteSet, vm *state.VersionMap, txIndex int
 		if _, ok := types.ParseDelegation(code); !ok {
 			continue
 		}
+		// The recovered bytes (ceiling versionMap read or stateReader post-state)
+		// can race and disagree with the codeHash this tx emitted; only re-emit
+		// when they hash to it, else we'd persist code that mismatches its hash.
+		recovered := accounts.NewCode(code)
+		if recovered.Hash.Value() != h.Value() {
+			continue
+		}
 		filtered.SetCode(addr, &state.VersionedWrite[accounts.Code]{
 			WriteHeader: state.WriteHeader{
 				Address: addr,
 				Path:    state.CodePath,
 				Version: state.Version{TxIndex: txIndex, Incarnation: incarnation},
 			},
-			Val: accounts.Code{Hash: h, Bytes: code},
+			Val: recovered,
 		})
 	}
 
