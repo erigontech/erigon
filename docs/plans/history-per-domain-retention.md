@@ -16,7 +16,7 @@ state         = '1y'        # keep ~1 year of state history
 commitment    = 100_000     # keep the last 100k blocks of commitment history
 receipts      = false       # don't keep receipt history (re-exec on demand)
 domainA       = true        # keep everything (archive)
-domainB.after = 100_000     # keep history from absolute block 100000 onward
+domainB.after = 10_000_000     # keep history from absolute block 10M onward
 ```
 
 Every line is also a CLI flag with the identical name (CLI overrides the file):
@@ -32,8 +32,16 @@ Value grammar for the bare `--history.<domain>` flag:
 |---|---|
 | `false` / `off` | not generated / not kept |
 | `true` / `keep-all` | keep everything (archive) |
-| `<duration>` — `1y`, `90d` | keep ~that much wall-clock (converted to blocks) |
-| `<blocks>` — `100000` | keep the **last N blocks** |
+| `<blocks>` — `100000` (plain integer) | keep the **last N blocks** |
+| `<duration>` — `10d`, `2w`, `6mo`, `1y` | keep ~that much wall-clock (converted to blocks) |
+
+Duration units are restricted to `d` (days), `w` (weeks), `mo` (months), `y`
+(years) — a day is the smallest scale meaningful for a history window. `m` is
+deliberately **not** a unit: `10m` is ambiguous (10 minutes? 10 million? 10
+months?), so it is a hard error that suggests `10000000` or `6mo`. Block counts are
+plain integers with no magnitude shorthand (`k`/`M`/`B`) for the same reason;
+`config.toml` allows `_` separators (`10_000_000`). Parser rule: pure digits →
+blocks; digits + a recognized unit → duration; anything else → error.
 
 plus an optional sub-key for the absolute anchor:
 
