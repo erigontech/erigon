@@ -24,6 +24,7 @@ import (
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/ethutils"
+	"github.com/erigontech/erigon/node/gointerfaces/remoteproto"
 	"github.com/erigontech/erigon/rpc"
 	"github.com/erigontech/erigon/rpc/filters"
 	"github.com/erigontech/erigon/rpc/rpchelper"
@@ -150,9 +151,12 @@ func (api *APIImpl) GetFilterLogs(_ context.Context, index string) ([]*types.Log
 	return []*types.Log{}, nil
 }
 
-// NewHeads send a notification each time a new (header) block is appended to the chain.
-func (api *APIImpl) NewHeads(ctx context.Context) (*rpc.Subscription, error) {
-	if api.filters == nil {
+// subscribeRPC runs the shared subscription skeleton: guard checks, subscription
+// creation, and a goroutine that pumps items from the filter channel into notify until
+// the channel closes or the client goes away. subscribe is called inside the goroutine
+// and must return the item channel plus an unsubscribe func.
+func subscribeRPC[T any](ctx context.Context, apiFilters *rpchelper.Filters, subscribe func() (<-chan T, func()), notify func(notifier rpc.Notifier, rpcSub *rpc.Subscription, item T), closedWarn string) (*rpc.Subscription, error) {
+	if apiFilters == nil {
 		return &rpc.Subscription{}, rpc.ErrNotificationsUnsupported
 	}
 	notifier, supported := rpc.NotifierFromContext(ctx)
@@ -164,19 +168,15 @@ func (api *APIImpl) NewHeads(ctx context.Context) (*rpc.Subscription, error) {
 
 	go func() {
 		defer dbg.LogPanic()
-		headers, id := api.filters.SubscribeNewHeads(32)
-		defer api.filters.UnsubscribeHeads(id)
+		ch, unsubscribe := subscribe()
+		defer unsubscribe()
+
 		for {
 			select {
-			case h, ok := <-headers:
-				if h != nil {
-					err := notifier.Notify(rpcSub.ID, h)
-					if err != nil {
-						log.Warn("[rpc] error while notifying subscription", "err", err)
-					}
-				}
+			case item, ok := <-ch:
+				notify(notifier, rpcSub, item)
 				if !ok {
-					log.Warn("[rpc] new heads channel was closed")
+					log.Warn(closedWarn)
 					return
 				}
 			case <-rpcSub.Err():
@@ -186,171 +186,94 @@ func (api *APIImpl) NewHeads(ctx context.Context) (*rpc.Subscription, error) {
 	}()
 
 	return rpcSub, nil
+}
+
+// NewHeads send a notification each time a new (header) block is appended to the chain.
+func (api *APIImpl) NewHeads(ctx context.Context) (*rpc.Subscription, error) {
+	return subscribeRPC(ctx, api.filters,
+		func() (<-chan *types.Header, func()) {
+			headers, id := api.filters.SubscribeNewHeads(32)
+			return headers, func() { api.filters.UnsubscribeHeads(id) }
+		},
+		func(notifier rpc.Notifier, rpcSub *rpc.Subscription, h *types.Header) {
+			if h != nil {
+				err := notifier.Notify(rpcSub.ID, h)
+				if err != nil {
+					log.Warn("[rpc] error while notifying subscription", "err", err)
+				}
+			}
+		},
+		"[rpc] new heads channel was closed")
 }
 
 // NewPendingTransactions send a notification each time when a transaction had added into mempool.
 func (api *APIImpl) NewPendingTransactions(ctx context.Context, fullTx *bool) (*rpc.Subscription, error) {
-	if api.filters == nil {
-		return &rpc.Subscription{}, rpc.ErrNotificationsUnsupported
-	}
-	notifier, supported := rpc.NotifierFromContext(ctx)
-	if !supported {
-		return &rpc.Subscription{}, rpc.ErrNotificationsUnsupported
-	}
-
-	rpcSub := notifier.CreateSubscription()
-
-	go func() {
-		defer dbg.LogPanic()
-		txsCh, id := api.filters.SubscribePendingTxs(256)
-		defer api.filters.UnsubscribePendingTxs(id)
-
-		for {
-			select {
-			case txs, ok := <-txsCh:
-				for _, t := range txs {
-					if t != nil {
-						var err error
-						if fullTx != nil && *fullTx {
-							err = notifier.Notify(rpcSub.ID, newRPCPendingTransaction(t, nil, nil))
-						} else {
-							err = notifier.Notify(rpcSub.ID, t.Hash())
-						}
-
-						if err != nil {
-							log.Warn("[rpc] error while notifying subscription", "err", err)
-						}
-					}
-				}
-				if !ok {
-					log.Warn("[rpc] new pending transactions channel was closed")
-					return
-				}
-			case <-rpcSub.Err():
-				return
-			}
-		}
-	}()
-
-	return rpcSub, nil
+	return api.subscribePendingTransactions(ctx, 256, fullTx != nil && *fullTx)
 }
 
 // NewPendingTransactionsWithBody send a notification each time when a transaction had added into mempool.
 func (api *APIImpl) NewPendingTransactionsWithBody(ctx context.Context) (*rpc.Subscription, error) {
-	if api.filters == nil {
-		return &rpc.Subscription{}, rpc.ErrNotificationsUnsupported
-	}
-	notifier, supported := rpc.NotifierFromContext(ctx)
-	if !supported {
-		return &rpc.Subscription{}, rpc.ErrNotificationsUnsupported
-	}
+	return api.subscribePendingTransactions(ctx, 512, true)
+}
 
-	rpcSub := notifier.CreateSubscription()
+func (api *APIImpl) subscribePendingTransactions(ctx context.Context, chanSize int, fullTx bool) (*rpc.Subscription, error) {
+	return subscribeRPC(ctx, api.filters,
+		func() (<-chan []types.Transaction, func()) {
+			txsCh, id := api.filters.SubscribePendingTxs(chanSize)
+			return txsCh, func() { api.filters.UnsubscribePendingTxs(id) }
+		},
+		func(notifier rpc.Notifier, rpcSub *rpc.Subscription, txs []types.Transaction) {
+			for _, t := range txs {
+				if t != nil {
+					var err error
+					if fullTx {
+						err = notifier.Notify(rpcSub.ID, newRPCPendingTransaction(t, nil, nil))
+					} else {
+						err = notifier.Notify(rpcSub.ID, t.Hash())
+					}
 
-	go func() {
-		defer dbg.LogPanic()
-		txsCh, id := api.filters.SubscribePendingTxs(512)
-		defer api.filters.UnsubscribePendingTxs(id)
-
-		for {
-			select {
-			case txs, ok := <-txsCh:
-				for _, t := range txs {
-					if t != nil {
-						err := notifier.Notify(rpcSub.ID, newRPCPendingTransaction(t, nil, nil))
-						if err != nil {
-							log.Warn("[rpc] error while notifying subscription", "err", err)
-						}
+					if err != nil {
+						log.Warn("[rpc] error while notifying subscription", "err", err)
 					}
 				}
-				if !ok {
-					log.Warn("[rpc] new pending transactions channel was closed")
-					return
-				}
-			case <-rpcSub.Err():
-				return
 			}
-		}
-	}()
-
-	return rpcSub, nil
+		},
+		"[rpc] new pending transactions channel was closed")
 }
 
 // Logs send a notification each time a new log appears.
 func (api *APIImpl) Logs(ctx context.Context, crit filters.FilterCriteria) (*rpc.Subscription, error) {
-	if api.filters == nil {
-		return &rpc.Subscription{}, rpc.ErrNotificationsUnsupported
-	}
-	notifier, supported := rpc.NotifierFromContext(ctx)
-	if !supported {
-		return &rpc.Subscription{}, rpc.ErrNotificationsUnsupported
-	}
-
-	rpcSub := notifier.CreateSubscription()
-
-	go func() {
-		defer dbg.LogPanic()
-		logs, id := api.filters.SubscribeLogs(api.SubscribeLogsChannelSize, crit)
-		defer api.filters.UnsubscribeLogs(id)
-
-		for {
-			select {
-			case h, ok := <-logs:
-				if h != nil {
-					err := notifier.Notify(rpcSub.ID, h)
-					if err != nil {
-						log.Warn("[rpc] error while notifying subscription", "err", err)
-					}
+	return subscribeRPC(ctx, api.filters,
+		func() (<-chan *types.Log, func()) {
+			logs, id := api.filters.SubscribeLogs(api.SubscribeLogsChannelSize, crit)
+			return logs, func() { api.filters.UnsubscribeLogs(id) }
+		},
+		func(notifier rpc.Notifier, rpcSub *rpc.Subscription, h *types.Log) {
+			if h != nil {
+				err := notifier.Notify(rpcSub.ID, h)
+				if err != nil {
+					log.Warn("[rpc] error while notifying subscription", "err", err)
 				}
-				if !ok {
-					log.Warn("[rpc] log channel was closed")
-					return
-				}
-			case <-rpcSub.Err():
-				return
 			}
-		}
-	}()
-
-	return rpcSub, nil
+		},
+		"[rpc] log channel was closed")
 }
 
 // TransactionReceipts send a notification each time a new receipt appears.
 func (api *APIImpl) TransactionReceipts(ctx context.Context, crit filters.ReceiptsFilterCriteria) (*rpc.Subscription, error) {
-	if api.filters == nil {
-		return &rpc.Subscription{}, rpc.ErrNotificationsUnsupported
-	}
-	notifier, supported := rpc.NotifierFromContext(ctx)
-	if !supported {
-		return &rpc.Subscription{}, rpc.ErrNotificationsUnsupported
-	}
-
-	rpcSub := notifier.CreateSubscription()
-
-	go func() {
-		defer dbg.LogPanic()
-		receipts, id := api.filters.SubscribeReceipts(api.SubscribeLogsChannelSize, crit)
-		defer api.filters.UnsubscribeReceipts(id)
-
-		for {
-			select {
-			case protoReceipt, ok := <-receipts:
-				if protoReceipt != nil {
-					receipt := ethutils.MarshalSubscribeReceipt(protoReceipt)
-					err := notifier.Notify(rpcSub.ID, []map[string]any{receipt})
-					if err != nil {
-						log.Warn("[rpc] error while notifying subscription", "err", err)
-					}
+	return subscribeRPC(ctx, api.filters,
+		func() (<-chan *remoteproto.SubscribeReceiptsReply, func()) {
+			receipts, id := api.filters.SubscribeReceipts(api.SubscribeLogsChannelSize, crit)
+			return receipts, func() { api.filters.UnsubscribeReceipts(id) }
+		},
+		func(notifier rpc.Notifier, rpcSub *rpc.Subscription, protoReceipt *remoteproto.SubscribeReceiptsReply) {
+			if protoReceipt != nil {
+				receipt := ethutils.MarshalSubscribeReceipt(protoReceipt)
+				err := notifier.Notify(rpcSub.ID, []map[string]any{receipt})
+				if err != nil {
+					log.Warn("[rpc] error while notifying subscription", "err", err)
 				}
-				if !ok {
-					log.Warn("[rpc] receipts channel was closed")
-					return
-				}
-			case <-rpcSub.Err():
-				return
 			}
-		}
-	}()
-
-	return rpcSub, nil
+		},
+		"[rpc] receipts channel was closed")
 }
