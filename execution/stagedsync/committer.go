@@ -423,9 +423,7 @@ func (cc *commitmentCalculator) compute(ctx context.Context, t commitTarget, m c
 func (cc *commitmentCalculator) computeIsolated(ctx context.Context, t commitTarget) ([]byte, error) {
 	cc.doms.LockChangesetAccumulator()
 	defer cc.doms.UnlockChangesetAccumulator()
-	prev := cc.doms.GetChangesetAccumulatorLocked()
-	cc.doms.SetChangesetAccumulatorLocked(nil)
-	defer cc.doms.SetChangesetAccumulatorLocked(prev)
+	defer cc.doms.DetachAccumulatorLocked()()
 
 	rh, err := cc.doms.ComputeCommitmentLocked(ctx, cc.roTx, true, t.blockNum, t.lastTxNum, cc.logPrefix, nil)
 	if err != nil {
