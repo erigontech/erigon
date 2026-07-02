@@ -309,7 +309,18 @@ func (api *APIImpl) EstimateGas(ctx context.Context, argsOrNil *ethapi2.CallArgs
 		if err != nil {
 			return 0, errors.New("getCodeSize failed")
 		}
-		if codeSize == 0 {
+		// A plain transfer costs exactly TxGas unless it creates the recipient: on
+		// Amsterdam creating it also pays EIP-2780 NEW_ACCOUNT state gas, so an empty
+		// recipient is left to the binary search.
+		fastPath := codeSize == 0
+		if fastPath && chainConfig.IsAmsterdam(effectiveHeader.Time) {
+			empty, err := state.Empty(accounts.InternAddress(*args.To))
+			if err != nil {
+				return 0, errors.New("empty check failed")
+			}
+			fastPath = !empty
+		}
+		if fastPath {
 			failed, _, err := doCall(ctx, caller, params.TxGas, engine)
 			if err == nil && !failed {
 				return hexutil.Uint64(params.TxGas), nil
