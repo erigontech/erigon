@@ -423,9 +423,7 @@ func (cc *commitmentCalculator) compute(ctx context.Context, t commitTarget, m c
 func (cc *commitmentCalculator) computeIsolated(ctx context.Context, t commitTarget) ([]byte, error) {
 	cc.doms.LockChangesetAccumulator()
 	defer cc.doms.UnlockChangesetAccumulator()
-	prev := cc.doms.GetChangesetAccumulatorLocked()
-	cc.doms.SetChangesetAccumulatorLocked(nil)
-	defer cc.doms.SetChangesetAccumulatorLocked(prev)
+	defer cc.doms.DetachAccumulatorLocked()()
 
 	rh, err := cc.doms.ComputeCommitmentLocked(ctx, cc.roTx, true, t.blockNum, t.lastTxNum, cc.logPrefix, nil)
 	if err != nil {
@@ -466,10 +464,9 @@ func (cc *commitmentCalculator) computeAndCheck(ctx context.Context, br *blockRe
 // not pend into the first window block's changeset-routed compute.
 func (cc *commitmentCalculator) flushPendingUpdatesWithoutChangeset(ctx context.Context, br *blockResult) {
 	cc.doms.LockChangesetAccumulator()
-	prev := cc.doms.GetChangesetAccumulatorLocked()
-	cc.doms.SetChangesetAccumulatorLocked(nil)
+	restore := cc.doms.DetachAccumulatorLocked()
 	err := cc.doms.FlushPendingUpdatesLocked(ctx, cc.roTx)
-	cc.doms.SetChangesetAccumulatorLocked(prev)
+	restore()
 	cc.doms.UnlockChangesetAccumulator()
 	if err != nil {
 		cc.publish(ctx, commitmentResult{
@@ -550,19 +547,16 @@ func (cc *commitmentCalculator) computeWithBlockAccumulator(ctx context.Context,
 		return cc.doms.ComputeCommitmentLocked(ctx, cc.roTx, true, t.blockNum, t.lastTxNum, cc.logPrefix, nil)
 	}
 	// LOAD-BEARING swap under the outer lock (already taken above). The
-	// Set/restore dance below mutates the global current-accumulator
-	// pointer; the deferred branch writes from block N-1 (flushed inside
+	// swap below mutates the global current-accumulator pointer; the
+	// deferred branch writes from block N-1 (flushed inside
 	// ComputeCommitmentLocked → FlushPendingUpdatesLocked) AND the [state]
 	// marker write at end of compute also touch that same global pointer
 	// and the per-domain diff fields. Holding changesetMu through all of
 	// it serializes against the apply goroutine's DomainPut/DomainDel.
 	//
-	// Inside the lock we must use the *Locked variants of Get/Set/Compute
-	// — the public counterparts re-acquire the same Mutex and would
-	// self-deadlock.
-	prev := cc.doms.GetChangesetAccumulatorLocked()
-	cc.doms.SetChangesetAccumulatorLocked(cs)
-	defer cc.doms.SetChangesetAccumulatorLocked(prev)
+	// Inside the lock we must use the *Locked variants — the public
+	// counterparts re-acquire the same Mutex and would self-deadlock.
+	defer cc.doms.SwapAccumulatorLocked(cs)()
 	return cc.doms.ComputeCommitmentLocked(ctx, cc.roTx, true, t.blockNum, t.lastTxNum, cc.logPrefix, nil)
 }
 
