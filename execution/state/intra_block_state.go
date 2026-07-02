@@ -1986,8 +1986,10 @@ func updateAccount(eip161Enabled bool, isAura bool, stateWriter StateWriter, add
 	}
 	if isDirty && (stateObject.createdContract || !stateObject.selfdestructed) && !emptyRemoval {
 		stateObject.deleted = false
-		// Write any contract code associated with the state object
-		if stateObject.code.Bytes != nil && stateObject.dirtyCode {
+		// Write any contract code associated with the state object; dirtyCode is
+		// set only when code actually changed, so a clear-to-empty must still
+		// write through (empty CodeDomain, consistent with the empty codeHash).
+		if stateObject.dirtyCode {
 			if err := stateWriter.UpdateAccountCode(addr, stateObject.data.Incarnation, stateObject.data.CodeHash, stateObject.code.Bytes); err != nil {
 				return err
 			}

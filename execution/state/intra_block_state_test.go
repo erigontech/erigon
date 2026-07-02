@@ -33,9 +33,11 @@ import (
 
 	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/u256"
+	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/rawdbv3"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/tracing"
@@ -944,4 +946,38 @@ func TestApplyVersionedWrites(t *testing.T) {
 	sSingleProcess.SetCode(addr1, code, tracing.CodeChangeUnspecified)
 
 	sClean.ApplyVersionedWrites(states[3].VersionedWrites(true))
+}
+
+// TestMakeWriteSetClearsCodeDomainOnEmptyOverride pins that clearing an
+// account's code (e.g. an eth_simulateV1 stateOverride of "code":"0x") writes
+// through to the CodeDomain, keeping it consistent with the now-empty account
+// codeHash. Regression: gating the code write on a non-nil code slice skipped
+// the clear, leaving the CodeDomain holding stale code and tripping the
+// commitment codeHash-mismatch assert.
+func TestMakeWriteSetClearsCodeDomainOnEmptyOverride(t *testing.T) {
+	t.Parallel()
+
+	_, tx, domains := NewTestRwTx(t)
+
+	addr := accounts.InternAddress(common.HexToAddress("0xc0de"))
+	addrVal := addr.Value()
+	code := []byte{0x60, 0x00, 0x60, 0x00, 0xf3}
+
+	deploy := New(NewReaderV3(domains.AsGetter(tx)))
+	require.NoError(t, deploy.CreateAccount(addr, true))
+	require.NoError(t, deploy.SetNonce(addr, 1, tracing.NonceChangeUnspecified))
+	require.NoError(t, deploy.SetCode(addr, code, tracing.CodeChangeUnspecified))
+	require.NoError(t, deploy.MakeWriteSet(&chain.Rules{}, NewWriter(domains.AsPutDel(tx), nil, 0)))
+
+	got, _, err := domains.AsGetter(tx).GetLatest(kv.CodeDomain, addrVal[:])
+	require.NoError(t, err)
+	require.Equal(t, code, got)
+
+	clear := New(NewReaderV3(domains.AsGetter(tx)))
+	require.NoError(t, clear.SetCode(addr, []byte{}, tracing.CodeChangeUnspecified))
+	require.NoError(t, clear.MakeWriteSet(&chain.Rules{}, NewWriter(domains.AsPutDel(tx), nil, 1)))
+
+	got, _, err = domains.AsGetter(tx).GetLatest(kv.CodeDomain, addrVal[:])
+	require.NoError(t, err)
+	require.Empty(t, got, "clearing code must clear the CodeDomain entry")
 }

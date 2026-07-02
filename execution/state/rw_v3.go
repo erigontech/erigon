@@ -90,6 +90,7 @@ func (rs *StateV3) applyVersionedWrites(roTx kv.TemporalTx, blockNum, txNum uint
 			incarnation    *uint64
 			codeHash       *accounts.CodeHash
 			code           []byte
+			codeWritten    bool
 			selfDestruct   bool
 			createContract bool
 			storage        []storageItem
@@ -126,6 +127,7 @@ func (rs *StateV3) applyVersionedWrites(roTx kv.TemporalTx, blockNum, txNum uint
 			case CodePath:
 				if vw, ok := writes.GetCode(h.Address); ok {
 					d.code = vw.Val.Bytes
+					d.codeWritten = true
 				}
 			case SelfDestructPath:
 				if vw, ok := writes.GetSelfDestruct(h.Address); ok {
@@ -210,7 +212,7 @@ func (rs *StateV3) applyVersionedWrites(roTx kv.TemporalTx, blockNum, txNum uint
 				}
 			}
 
-			if d.balance != nil || d.nonce != nil || d.incarnation != nil || d.codeHash != nil || d.code != nil {
+			if d.balance != nil || d.nonce != nil || d.incarnation != nil || d.codeHash != nil || d.codeWritten {
 				// LightCollector emits only fields that changed vs the per-TX
 				// `original` snapshot, so missing fields here mean "unchanged"
 				// — we must read the current base (from blockCache when present,
@@ -258,7 +260,7 @@ func (rs *StateV3) applyVersionedWrites(roTx kv.TemporalTx, blockNum, txNum uint
 				}
 			}
 
-			if d.code != nil {
+			if d.codeWritten {
 				if dbg.TraceApply && (rs.trace.Load() || dbg.TraceAccount(addr.Handle())) {
 					code := d.code
 					if len(code) > 40 {
@@ -271,10 +273,12 @@ func (rs *StateV3) applyVersionedWrites(roTx kv.TemporalTx, blockNum, txNum uint
 					if !domains.InlineTouchKeyDisabled() {
 						domains.GetCommitmentContext().TouchKey(kv.CodeDomain, string(address[:]), d.code)
 					}
-				} else {
-					if err := domains.DomainPut(kv.CodeDomain, roTx, address[:], d.code, txNum, nil); err != nil {
+				} else if len(d.code) == 0 {
+					if err := domains.DomainDel(kv.CodeDomain, roTx, address[:], txNum, nil); err != nil {
 						return err
 					}
+				} else if err := domains.DomainPut(kv.CodeDomain, roTx, address[:], d.code, txNum, nil); err != nil {
+					return err
 				}
 			}
 
@@ -919,7 +923,11 @@ func (w *Writer) UpdateAccountCode(address accounts.Address, incarnation uint64,
 		fmt.Printf("code: %x, %x, valLen: %d\n", address, codeHash, len(code))
 	}
 	addressValue := address.Value()
-	if err := w.tx.DomainPut(kv.CodeDomain, addressValue[:], code, w.txNum, nil); err != nil {
+	if len(code) == 0 {
+		if err := w.tx.DomainDel(kv.CodeDomain, addressValue[:], w.txNum, nil); err != nil {
+			return err
+		}
+	} else if err := w.tx.DomainPut(kv.CodeDomain, addressValue[:], code, w.txNum, nil); err != nil {
 		return err
 	}
 	if w.accumulator != nil {
@@ -1081,10 +1089,10 @@ type BlockStateCache struct {
 type bcOpKind uint8
 
 const (
-	bcOpPutAccount bcOpKind = iota + 1
-	bcOpPutCode
-	bcOpPutStorage    // val=nil means storage delete
-	bcOpDeleteAccount // self-destruct / empty-removal: del code + del storage prefix
+	bcOpPutAccount    bcOpKind = iota + 1
+	bcOpPutCode                // val=nil means code delete
+	bcOpPutStorage             // val=nil means storage delete
+	bcOpDeleteAccount          // self-destruct / empty-removal: del code + del storage prefix
 )
 
 // bcWriteOp is one entry in BlockStateCache.writeLog. txNum is the
@@ -1301,7 +1309,11 @@ func (c *BlockStateCache) Flush(domains *execctx.SharedDomains, roTx kv.Temporal
 				return err
 			}
 		case bcOpPutCode:
-			if err := domains.DomainPut(kv.CodeDomain, roTx, addrVal[:], op.val, op.txNum, nil); err != nil {
+			if len(op.val) == 0 {
+				if err := domains.DomainDel(kv.CodeDomain, roTx, addrVal[:], op.txNum, nil); err != nil {
+					return err
+				}
+			} else if err := domains.DomainPut(kv.CodeDomain, roTx, addrVal[:], op.val, op.txNum, nil); err != nil {
 				return err
 			}
 		case bcOpPutStorage:
