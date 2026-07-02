@@ -449,6 +449,7 @@ func (api *TraceAPIImpl) filterV3(ctx context.Context, dbtx kv.TemporalTx, fromB
 	var lastHeader *types.Header
 	var lastSigner *types.Signer
 	var lastRules *chain.Rules
+	var lastBaseFee uint256.Int
 
 	noop := state.NewNoopWriter()
 	isPos := false
@@ -502,7 +503,19 @@ func (api *TraceAPIImpl) filterV3(ctx context.Context, dbtx kv.TemporalTx, fromB
 			lastBlockHash = lastHeader.Hash()
 			lastSigner = types.MakeSigner(chainConfig, blockNum, lastHeader.Time)
 			blockCtx := transactions.NewEVMBlockContext(engine, lastHeader, true /* requireCanonical */, dbtx, api._blockReader, chainConfig)
+			if err := overrideBlockContext(traceConfig, &blockCtx); err != nil {
+				if first {
+					first = false
+				} else {
+					stream.WriteMore()
+				}
+				stream.WriteObjectStart()
+				rpc.HandleError(err, stream)
+				stream.WriteObjectEnd()
+				continue
+			}
 			lastRules = blockCtx.Rules(chainConfig)
+			lastBaseFee = blockCtx.BaseFee
 		}
 		if isFnalTxn {
 			// TODO(yperbasis) proper rewards for Gnosis
@@ -608,7 +621,7 @@ func (api *TraceAPIImpl) filterV3(ctx context.Context, dbtx kv.TemporalTx, fromB
 			continue //guess block doesn't have transactions
 		}
 		txHash := txn.Hash()
-		msg, err := txn.AsMessage(*lastSigner, lastHeader.BaseFee, lastRules)
+		msg, err := txn.AsMessage(*lastSigner, &lastBaseFee, lastRules)
 		if err != nil {
 			if first {
 				first = false
@@ -639,6 +652,17 @@ func (api *TraceAPIImpl) filterV3(ctx context.Context, dbtx kv.TemporalTx, fromB
 		ibs := state.New(cachedReader)
 
 		blockCtx := transactions.NewEVMBlockContext(engine, lastHeader, true /* requireCanonical */, dbtx, api._blockReader, chainConfig)
+		if err := overrideBlockContext(traceConfig, &blockCtx); err != nil {
+			if first {
+				first = false
+			} else {
+				stream.WriteMore()
+			}
+			stream.WriteObjectStart()
+			rpc.HandleError(err, stream)
+			stream.WriteObjectEnd()
+			continue
+		}
 		evmTxCtx := protocol.NewEVMTxContext(msg)
 		evm := vm.NewEVM(blockCtx, evmTxCtx, ibs, chainConfig, vmConfig)
 
@@ -803,6 +827,9 @@ func (api *TraceAPIImpl) callBlock(
 	header := block.Header()
 	engine := api.engine()
 	blockCtx := transactions.NewEVMBlockContext(engine, header, true /* requireCanonical */, dbtx, api._blockReader, cfg)
+	if err := overrideBlockContext(traceConfig, &blockCtx); err != nil {
+		return nil, nil, nil, err
+	}
 	rules := blockCtx.Rules(cfg)
 	txs := block.Transactions()
 	var borStateSyncTxn types.Transaction
@@ -869,7 +896,7 @@ func (api *TraceAPIImpl) callBlock(
 			// we use an empty message for bor state sync txn since it gets handled differently
 		} else {
 			txnHash = txn.Hash()
-			msg, err = txn.AsMessage(*signer, header.BaseFee, rules)
+			msg, err = txn.AsMessage(*signer, &blockCtx.BaseFee, rules)
 			if err != nil {
 				return nil, nil, nil, fmt.Errorf("convert txn into msg: %w", err)
 			}
@@ -1036,6 +1063,10 @@ func (api *TraceAPIImpl) doCallBlockParallel(
 			// blockCtx captures workerTx in its GetHash closure, so it cannot
 			// be shared across workers (each needs its own copy).
 			blockCtx := transactions.NewEVMBlockContext(engine, header, true /* requireCanonical */, workerTx, api._blockReader, chainConfig)
+			if err := overrideBlockContext(traceConfig, &blockCtx); err != nil {
+				errOnce.Do(func() { firstErr = err; cancel() })
+				return
+			}
 			chainRules := blockCtx.Rules(chainConfig)
 			oeConfig, err := parseOeTracerConfig(traceConfig)
 			if err != nil {
@@ -1130,6 +1161,9 @@ func (api *TraceAPIImpl) callTransaction(
 	parentNo := rpc.BlockNumber(pNo)
 	engine := api.engine()
 	blockCtx := transactions.NewEVMBlockContext(engine, header, true /* requireCanonical */, dbtx, api._blockReader, cfg)
+	if err := overrideBlockContext(traceConfig, &blockCtx); err != nil {
+		return nil, err
+	}
 	rules := blockCtx.Rules(cfg)
 	var txn types.Transaction
 	var borStateSyncTxnHash common.Hash
@@ -1195,7 +1229,7 @@ func (api *TraceAPIImpl) callTransaction(
 		// we use an empty message for bor state sync txn since it gets handled differently
 	} else {
 		txnHash = txn.Hash()
-		msg, err = txn.AsMessage(*signer, header.BaseFee, rules)
+		msg, err = txn.AsMessage(*signer, &blockCtx.BaseFee, rules)
 		if err != nil {
 			return nil, fmt.Errorf("convert txn into msg: %w", err)
 		}

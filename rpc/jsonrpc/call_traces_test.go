@@ -29,8 +29,11 @@ import (
 
 	"github.com/erigontech/erigon/cmd/rpcdaemon/cli/httpcfg"
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/hexutil"
+	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/execmodule/execmoduletester"
 	"github.com/erigontech/erigon/execution/tests/blockgen"
+	"github.com/erigontech/erigon/execution/tracing/tracers/config"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/rpc"
 	"github.com/erigontech/erigon/rpc/jsonstream"
@@ -284,4 +287,66 @@ func TestFilterAddressIntersection(t *testing.T) {
 		}
 		require.Empty(t, blockNumbersFromTraces(t, stream.Buffer()))
 	})
+}
+
+func TestFilterBlockOverridesBaseFeeAffectsGasPrice(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow test")
+	}
+
+	const tipCap = 2
+	c := newBaseFeeTestChain(t, chain.AllProtocolChanges)
+	contractAddr, _, blockNumber, overrideBaseFee := c.setupBaseFeeOverrideCall(t, opGasprice, tipCap)
+	api := c.traceAPI()
+
+	n := rpc.BlockNumber(blockNumber)
+	traceReq := TraceFilterRequest{
+		FromBlock: &rpc.BlockNumberOrHash{BlockNumber: &n},
+		ToBlock:   &rpc.BlockNumberOrHash{BlockNumber: &n},
+		ToAddress: []*common.Address{&contractAddr},
+	}
+
+	s := jsoniter.ConfigDefault.BorrowStream(nil)
+	defer jsoniter.ConfigDefault.ReturnStream(s)
+	stream := jsonstream.Wrap(s)
+	err := api.Filter(context.Background(), traceReq, new(bool), traceConfigWithBaseFeeOverride(overrideBaseFee), stream)
+	require.NoError(t, err)
+
+	expectedGasPrice := new(uint256.Int).AddUint64(overrideBaseFee, tipCap)
+	expectedOutput := hexutil.Bytes(expectedGasPrice.PaddedBytes(32)).String()
+	require.Contains(t, string(stream.Buffer()), expectedOutput)
+}
+
+// TestFilterBlockOverridesOtherFieldsAffectOpcodes checks that filterV3's
+// per-transaction BlockContext picks up BlockOverrides fields other than
+// BaseFeePerGas too.
+func TestFilterBlockOverridesOtherFieldsAffectOpcodes(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow test")
+	}
+
+	for _, tc := range blockOverrideOpcodeCases() {
+		t.Run(tc.name, func(t *testing.T) {
+			c := newBaseFeeTestChain(t, chain.AllProtocolChanges)
+			contractAddr := c.deployOpcodeContract(t, tc.opcode)
+			_, blockNumber, _ := c.callWithDynamicFee(t, contractAddr, 2, 1)
+			api := c.traceAPI()
+
+			n := rpc.BlockNumber(blockNumber)
+			traceReq := TraceFilterRequest{
+				FromBlock: &rpc.BlockNumberOrHash{BlockNumber: &n},
+				ToBlock:   &rpc.BlockNumberOrHash{BlockNumber: &n},
+				ToAddress: []*common.Address{&contractAddr},
+			}
+
+			s := jsoniter.ConfigDefault.BorrowStream(nil)
+			defer jsoniter.ConfigDefault.ReturnStream(s)
+			stream := jsonstream.Wrap(s)
+			err := api.Filter(context.Background(), traceReq, new(bool), &config.TraceConfig{
+				BlockOverrides: tc.override,
+			}, stream)
+			require.NoError(t, err)
+			require.Contains(t, string(stream.Buffer()), hexutil.Bytes(tc.expected).String())
+		})
+	}
 }

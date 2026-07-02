@@ -19,7 +19,9 @@ package jsonrpc
 import (
 	"bytes"
 	"context"
+	"crypto/ecdsa"
 	"encoding/json"
+	"fmt"
 	"math/big"
 	"os"
 	"path/filepath"
@@ -40,6 +42,7 @@ import (
 	"github.com/erigontech/erigon/execution/execmodule/execmoduletester"
 	"github.com/erigontech/erigon/execution/protocol"
 	"github.com/erigontech/erigon/execution/protocol/misc"
+	"github.com/erigontech/erigon/execution/tests/blockgen"
 	"github.com/erigontech/erigon/execution/tests/testutil"
 	"github.com/erigontech/erigon/execution/tracing/tracers/config"
 	"github.com/erigontech/erigon/execution/types"
@@ -651,4 +654,350 @@ func TestTraceCallBlockOverridesBaseFeeAffectsGasPrice(t *testing.T) {
 	require.NoError(t, err)
 	// effective gas price = BaseFeePerGas(10) + MaxPriorityFeePerGas(2) = 12 = 0xc
 	require.Equal(t, "0x000000000000000000000000000000000000000000000000000000000000000c", result.Output.String())
+}
+
+// deployCodeReturningOpcode returns CREATE init code that deploys a contract
+// whose runtime returns the given zero-argument opcode's value as a 32-byte
+// word: <opcode>, PUSH1 0x00, MSTORE, PUSH1 0x20, PUSH1 0x00, RETURN.
+func deployCodeReturningOpcode(opcode byte) []byte {
+	runtime := []byte{opcode, 0x60, 0x00, 0x52, 0x60, 0x20, 0x60, 0x00, 0xf3}
+	initHeader := []byte{
+		0x60, byte(len(runtime)), // PUSH1 length
+		0x60, 0x0c, // PUSH1 12 (runtime offset in initcode)
+		0x60, 0x00, // PUSH1 0 (memory destination)
+		0x39,                     // CODECOPY
+		0x60, byte(len(runtime)), // PUSH1 length
+		0x60, 0x00, // PUSH1 0 (memory offset)
+		0xf3, // RETURN
+	}
+	return append(initHeader, runtime...)
+}
+
+const (
+	opCoinbase    = byte(vm.COINBASE)
+	opTimestamp   = byte(vm.TIMESTAMP)
+	opNumber      = byte(vm.NUMBER)
+	opDifficulty  = byte(vm.DIFFICULTY) // PREVRANDAO post-merge
+	opGaslimit    = byte(vm.GASLIMIT)
+	opGasprice    = byte(vm.GASPRICE)
+	opBasefee     = byte(vm.BASEFEE)
+	opBlobbasefee = byte(vm.BLOBBASEFEE)
+)
+
+// baseFeeTestChain is a funded single-account chain used to test BlockOverrides
+// handling: bankKey funds bankAddress at genesis under the given chain config.
+// head tracks the current chain tip so successive blocks can be mined on top
+// of each other.
+type baseFeeTestChain struct {
+	m           *execmoduletester.ExecModuleTester
+	bankKey     *ecdsa.PrivateKey
+	bankAddress common.Address
+	signer      *types.Signer
+	head        *types.Block
+}
+
+func newBaseFeeTestChain(t *testing.T, cfg *chain.Config) *baseFeeTestChain {
+	t.Helper()
+
+	m, bankKey, bankAddress := fundedBankGenesis(t, cfg)
+	return &baseFeeTestChain{
+		m:           m,
+		bankKey:     bankKey,
+		bankAddress: bankAddress,
+		signer:      types.LatestSignerForChainID(m.ChainConfig.ChainID),
+		head:        m.Genesis,
+	}
+}
+
+func (c *baseFeeTestChain) mineBlock(t *testing.T, gen func(*blockgen.BlockGen)) *blockgen.ChainPack {
+	t.Helper()
+
+	chainB, err := blockgen.GenerateChain(c.m.ChainConfig, c.head, c.m.Engine, c.m.DB, 1, func(_ int, block *blockgen.BlockGen) {
+		gen(block)
+	})
+	require.NoError(t, err)
+	require.NoError(t, c.m.InsertChain(chainB))
+	c.head = chainB.TopBlock
+
+	return chainB
+}
+
+// deployOpcodeContract mines a block deploying a contract whose runtime
+// returns the given opcode's value, and returns its address.
+func (c *baseFeeTestChain) deployOpcodeContract(t *testing.T, opcode byte) common.Address {
+	t.Helper()
+
+	var contractAddr common.Address
+	c.mineBlock(t, func(block *blockgen.BlockGen) {
+		nonce := block.TxNonce(c.bankAddress)
+		tx, err := types.SignTx(&types.LegacyTx{
+			CommonTx: types.CommonTx{
+				Nonce:    nonce,
+				GasLimit: 500_000,
+				Data:     deployCodeReturningOpcode(opcode),
+			},
+			GasPrice: *uint256.NewInt(1_000_000_000),
+		}, *c.signer, c.bankKey)
+		require.NoError(t, err)
+		block.AddTx(tx)
+		contractAddr = types.CreateAddress(c.bankAddress, nonce)
+	})
+
+	return contractAddr
+}
+
+// callWithDynamicFee mines a block with n EIP-1559 calls to contractAddr and
+// returns the call transactions' hashes, the block number they landed in,
+// and that block's real (non-overridden) BaseFee.
+func (c *baseFeeTestChain) callWithDynamicFee(t *testing.T, contractAddr common.Address, tipCap uint64, n int) (callTxHashes []common.Hash, blockNumber uint64, realBaseFee *uint256.Int) {
+	t.Helper()
+
+	chainB := c.mineBlock(t, func(block *blockgen.BlockGen) {
+		for range n {
+			nonce := block.TxNonce(c.bankAddress)
+			tx, err := types.SignTx(&types.DynamicFeeTransaction{
+				CommonTx: types.CommonTx{
+					Nonce:    nonce,
+					To:       &contractAddr,
+					GasLimit: 100_000,
+				},
+				ChainID: *c.signer.ChainID(),
+				TipCap:  *uint256.NewInt(tipCap),
+				FeeCap:  *uint256.NewInt(1_000_000_000_000),
+			}, *c.signer, c.bankKey)
+			require.NoError(t, err)
+			block.AddTx(tx)
+			callTxHashes = append(callTxHashes, tx.Hash())
+		}
+	})
+
+	callBlock := chainB.Headers[len(chainB.Headers)-1]
+	return callTxHashes, callBlock.Number.Uint64(), callBlock.BaseFee
+}
+
+// mineParallelEligibleBlock mines a block with 2 calls to contractAddr
+// (satisfying doCallBlockParallel's len(txs) > 1 requirement), then mines one
+// more block on top so the first is no longer latest (satisfying the
+// historical-state-reader requirement). Returns the eligible block's number
+// and its real (non-overridden) BaseFee.
+func (c *baseFeeTestChain) mineParallelEligibleBlock(t *testing.T, contractAddr common.Address, tipCap uint64) (blockNumber uint64, realBaseFee *uint256.Int) {
+	t.Helper()
+
+	_, blockNumber, realBaseFee = c.callWithDynamicFee(t, contractAddr, tipCap, 2)
+	c.callWithDynamicFee(t, contractAddr, tipCap, 1)
+	return blockNumber, realBaseFee
+}
+
+func traceConfigWithBaseFeeOverride(baseFee *uint256.Int) *config.TraceConfig {
+	return &config.TraceConfig{
+		BlockOverrides: &ethapi.BlockOverrides{
+			BaseFeePerGas: (*hexutil.Big)(baseFee.ToBig()),
+		},
+	}
+}
+
+func (c *baseFeeTestChain) traceAPI() *TraceAPIImpl {
+	return NewTraceAPI(newBaseApiForTest(c.m), c.m.DB, &httpcfg.HttpCfg{})
+}
+
+// setupBaseFeeOverrideCall deploys an opcode-emitting contract, mines a
+// single EIP-1559 call to it, and returns everything a BlockOverrides
+// baseFee-override test needs: the contract address, the call's tx hash, the
+// block it landed in, and a baseFee override distinct from the block's real one.
+func (c *baseFeeTestChain) setupBaseFeeOverrideCall(t *testing.T, opcode byte, tipCap uint64) (contractAddr common.Address, callTxHash common.Hash, blockNumber uint64, overrideBaseFee *uint256.Int) {
+	t.Helper()
+
+	contractAddr = c.deployOpcodeContract(t, opcode)
+	callTxHashes, blockNumber, realBaseFee := c.callWithDynamicFee(t, contractAddr, tipCap, 1)
+	return contractAddr, callTxHashes[0], blockNumber, new(uint256.Int).AddUint64(realBaseFee, 1_000_000)
+}
+
+func TestCallManyBlockOverridesBaseFeeAffectsGasPrice(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow test")
+	}
+
+	c := newBaseFeeTestChain(t, chain.AllProtocolChanges)
+	contractAddr := c.deployOpcodeContract(t, opGasprice)
+	api := c.traceAPI()
+
+	calls := fmt.Sprintf(`[[{"from":"%s","to":"%s","maxFeePerGas":"0x77359400","maxPriorityFeePerGas":"0x2"},["trace"]]]`,
+		c.bankAddress.Hex(), contractAddr.Hex())
+
+	results, err := api.CallMany(context.Background(), json.RawMessage(calls), nil, traceConfigWithBaseFeeOverride(uint256.NewInt(10)))
+	require.NoError(t, err)
+	require.Len(t, results, 1)
+	// effective gas price = BaseFeePerGas(10) + MaxPriorityFeePerGas(2) = 12 = 0xc
+	require.Equal(t, "0x000000000000000000000000000000000000000000000000000000000000000c", results[0].Output.String())
+}
+
+// blockOverrideOpcodeCase pairs one non-baseFee BlockOverrides field with the
+// opcode that observes it and the 32-byte word that opcode should return.
+type blockOverrideOpcodeCase struct {
+	name     string
+	opcode   byte
+	override *ethapi.BlockOverrides
+	expected []byte
+}
+
+func blockOverrideOpcodeCases() []blockOverrideOpcodeCase {
+	feeRecipient := common.HexToAddress("0x0000000000000000000000000000000000001234")
+	prevRandao := common.HexToHash("0xabababababababababababababababababababababababababababababab")
+
+	return []blockOverrideOpcodeCase{
+		{
+			name:     "number",
+			opcode:   opNumber,
+			override: &ethapi.BlockOverrides{Number: (*hexutil.Big)(big.NewInt(999))},
+			expected: uint256.NewInt(999).PaddedBytes(32),
+		},
+		{
+			name:     "timestamp",
+			opcode:   opTimestamp,
+			override: &ethapi.BlockOverrides{Time: newUint64(12345)},
+			expected: uint256.NewInt(12345).PaddedBytes(32),
+		},
+		{
+			name:     "gasLimit",
+			opcode:   opGaslimit,
+			override: &ethapi.BlockOverrides{GasLimit: newUint64(30_000_000)},
+			expected: uint256.NewInt(30_000_000).PaddedBytes(32),
+		},
+		{
+			name:     "feeRecipient",
+			opcode:   opCoinbase,
+			override: &ethapi.BlockOverrides{FeeRecipient: &feeRecipient},
+			expected: common.LeftPadBytes(feeRecipient[:], 32),
+		},
+		{
+			name:     "prevRandao",
+			opcode:   opDifficulty,
+			override: &ethapi.BlockOverrides{PrevRandao: &prevRandao},
+			expected: prevRandao[:],
+		},
+		{
+			name:     "blobBaseFee",
+			opcode:   opBlobbasefee,
+			override: &ethapi.BlockOverrides{BlobBaseFee: (*hexutil.Big)(big.NewInt(777))},
+			expected: uint256.NewInt(777).PaddedBytes(32),
+		},
+	}
+}
+
+// TestCallManyBlockOverridesOtherFieldsAffectOpcodes checks BlockOverrides
+// fields other than BaseFeePerGas — number, timestamp, gasLimit,
+// feeRecipient, prevRandao, blobBaseFee — all reach the EVM via CallMany,
+// not just baseFee.
+func TestCallManyBlockOverridesOtherFieldsAffectOpcodes(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow test")
+	}
+
+	for _, tc := range blockOverrideOpcodeCases() {
+		t.Run(tc.name, func(t *testing.T) {
+			c := newBaseFeeTestChain(t, chain.AllProtocolChanges)
+			contractAddr := c.deployOpcodeContract(t, tc.opcode)
+			api := c.traceAPI()
+
+			calls := fmt.Sprintf(`[[{"from":"%s","to":"%s"},["trace"]]]`, c.bankAddress.Hex(), contractAddr.Hex())
+			results, err := api.CallMany(context.Background(), json.RawMessage(calls), nil, &config.TraceConfig{
+				BlockOverrides: tc.override,
+			})
+			require.NoError(t, err)
+			require.Len(t, results, 1)
+			require.Equal(t, hexutil.Bytes(tc.expected).String(), results[0].Output.String())
+		})
+	}
+}
+
+func TestReplayTransactionBlockOverridesBaseFeeAffectsGasPrice(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow test")
+	}
+
+	const tipCap = 2
+	c := newBaseFeeTestChain(t, chain.AllProtocolChanges)
+	_, callTxHash, _, overrideBaseFee := c.setupBaseFeeOverrideCall(t, opGasprice, tipCap)
+	api := c.traceAPI()
+
+	result, err := api.ReplayTransaction(context.Background(), callTxHash, []string{"trace"}, new(bool), traceConfigWithBaseFeeOverride(overrideBaseFee))
+	require.NoError(t, err)
+	require.NotNil(t, result)
+
+	expectedGasPrice := new(uint256.Int).AddUint64(overrideBaseFee, tipCap)
+	require.Equal(t, hexutil.Bytes(expectedGasPrice.PaddedBytes(32)).String(), result.Output.String())
+}
+
+func TestReplayBlockTransactionsBlockOverridesBaseFeeAffectsGasPrice(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow test")
+	}
+
+	const tipCap = 2
+	c := newBaseFeeTestChain(t, chain.AllProtocolChanges)
+	_, _, blockNumber, overrideBaseFee := c.setupBaseFeeOverrideCall(t, opGasprice, tipCap)
+	api := c.traceAPI()
+
+	n := rpc.BlockNumber(blockNumber)
+	results, err := api.ReplayBlockTransactions(c.m.Ctx, rpc.BlockNumberOrHash{BlockNumber: &n}, []string{"trace"}, new(bool), traceConfigWithBaseFeeOverride(overrideBaseFee))
+	require.NoError(t, err)
+	require.Len(t, results, 1)
+
+	expectedGasPrice := new(uint256.Int).AddUint64(overrideBaseFee, tipCap)
+	require.Equal(t, hexutil.Bytes(expectedGasPrice.PaddedBytes(32)).String(), results[0].Output.String())
+}
+
+// TestReplayBlockTransactionsParallelPathBlockOverridesBaseFee exercises
+// doCallBlockParallel (taken for historical, multi-tx blocks when neither
+// stateDiff nor vmTrace is requested), which builds its own BlockContext per
+// worker and must apply BlockOverrides independently of the sequential path.
+func TestReplayBlockTransactionsParallelPathBlockOverridesBaseFee(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow test")
+	}
+
+	const tipCap = 2
+	c := newBaseFeeTestChain(t, chain.AllProtocolChanges)
+	contractAddr := c.deployOpcodeContract(t, opBasefee)
+	blockNumber, realBaseFee := c.mineParallelEligibleBlock(t, contractAddr, tipCap)
+	api := c.traceAPI()
+
+	overrideBaseFee := new(uint256.Int).AddUint64(realBaseFee, 1_000_000)
+	n := rpc.BlockNumber(blockNumber)
+	results, err := api.ReplayBlockTransactions(c.m.Ctx, rpc.BlockNumberOrHash{BlockNumber: &n}, []string{"trace"}, new(bool), traceConfigWithBaseFeeOverride(overrideBaseFee))
+	require.NoError(t, err)
+	require.Len(t, results, 2)
+
+	expected := hexutil.Bytes(overrideBaseFee.PaddedBytes(32)).String()
+	require.Equal(t, expected, results[0].Output.String())
+	require.Equal(t, expected, results[1].Output.String())
+}
+
+// TestReplayBlockTransactionsParallelPathBlockOverridesOtherFieldsAffectOpcodes
+// checks that doCallBlockParallel's per-worker BlockContext picks up
+// BlockOverrides fields other than BaseFeePerGas too.
+func TestReplayBlockTransactionsParallelPathBlockOverridesOtherFieldsAffectOpcodes(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow test")
+	}
+
+	for _, tc := range blockOverrideOpcodeCases() {
+		t.Run(tc.name, func(t *testing.T) {
+			c := newBaseFeeTestChain(t, chain.AllProtocolChanges)
+			contractAddr := c.deployOpcodeContract(t, tc.opcode)
+			blockNumber, _ := c.mineParallelEligibleBlock(t, contractAddr, 2)
+			api := c.traceAPI()
+
+			n := rpc.BlockNumber(blockNumber)
+			results, err := api.ReplayBlockTransactions(c.m.Ctx, rpc.BlockNumberOrHash{BlockNumber: &n}, []string{"trace"}, new(bool), &config.TraceConfig{
+				BlockOverrides: tc.override,
+			})
+			require.NoError(t, err)
+			require.Len(t, results, 2)
+
+			expected := hexutil.Bytes(tc.expected).String()
+			require.Equal(t, expected, results[0].Output.String())
+			require.Equal(t, expected, results[1].Output.String())
+		})
+	}
 }
