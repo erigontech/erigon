@@ -360,11 +360,10 @@ func targetOf(br *blockResult) commitTarget {
 // computeMode selects compute's per-call behaviour; isolation is otherwise
 // decided by ownsChangeset.
 type computeMode struct {
-	label            string // error-message context, e.g. "step-boundary "
-	midBlock         bool   // mid-block checkpoint: keep block flags dirty and don't advance lastComputedBlock (block-end otherwise)
-	isolateChangeset bool   // force isolation even for a block that owns a changeset (the pre-window fold)
-	checkRoot        bool   // compare the computed root against target.stateRoot
-	publishRoot      bool   // with checkRoot, publish the successful root too (batch-boundary request), not just mismatches
+	label       string // error-message context, e.g. "step-boundary "
+	midBlock    bool   // mid-block checkpoint: keep block flags dirty and don't advance lastComputedBlock (block-end otherwise)
+	checkRoot   bool   // compare the computed root against target.stateRoot
+	publishRoot bool   // with checkRoot, publish the successful root too (batch-boundary request), not just mismatches
 }
 
 // compute is the shared prologue/compute/footer for every calculator commitment
@@ -389,7 +388,7 @@ func (cc *commitmentCalculator) compute(ctx context.Context, t commitTarget, m c
 
 	var rh []byte
 	var err error
-	if m.isolateChangeset || !cc.ownsChangeset(t.blockNum) {
+	if !cc.ownsChangeset(t.blockNum) {
 		rh, err = cc.computeIsolated(ctx, t)
 	} else {
 		rh, err = cc.computeWithBlockAccumulator(ctx, t)
@@ -485,7 +484,7 @@ func (cc *commitmentCalculator) flushPendingUpdatesWithoutChangeset(ctx context.
 // pre-window block, isolated so their deltas don't leak into the first window
 // block's changeset.
 func (cc *commitmentCalculator) computeTransition(ctx context.Context, br *blockResult) {
-	cc.compute(ctx, targetOf(br), computeMode{isolateChangeset: true, checkRoot: true})
+	cc.compute(ctx, targetOf(br), computeMode{checkRoot: true})
 }
 
 func (cc *commitmentCalculator) publish(ctx context.Context, r commitmentResult) {
