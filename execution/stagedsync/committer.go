@@ -213,10 +213,8 @@ func (cc *commitmentCalculator) perBlockCompute(blockNum uint64) bool {
 	return !dbg.BatchCommitments || cc.forcePerBlockCompute || blockNum >= cc.perBlockFrom
 }
 
-// ownsChangeset reports whether block n gets its own changeset (mirrors the exec
-// loop's accumulator eligibility: genesis excluded, window starts at perBlockFrom).
-// A block owning none must compute isolated — the calculator lags the exec loop,
-// so its writes would otherwise land in a later block's live changeset.
+// ownsChangeset reports whether block n gets its own changeset: genesis excluded,
+// window starts at perBlockFrom. A block owning none must compute isolated.
 func (cc *commitmentCalculator) ownsChangeset(n uint64) bool {
 	return n != 0 && n >= cc.perBlockFrom
 }
@@ -489,10 +487,8 @@ func (cc *commitmentCalculator) computeTransition(ctx context.Context, br *block
 }
 
 func (cc *commitmentCalculator) publish(ctx context.Context, r commitmentResult) {
-	// The send is best-effort (it can drop on shutdown), so log genuine errors
-	// here as a breadcrumb — the apply loop surfaces the authoritative error.
-	// Wrong-root is routine (apply loop logs it) and ctx cancel/timeout is
-	// expected on shutdown, so skip both.
+	// Best-effort send; log only genuine errors as a breadcrumb (the apply loop
+	// surfaces the authoritative one). Wrong-root and shutdown cancels are expected.
 	if r.err != nil && cc.logger != nil &&
 		!errors.Is(r.err, ErrWrongTrieRoot) &&
 		!errors.Is(r.err, context.Canceled) &&
