@@ -309,21 +309,15 @@ func (api *APIImpl) EstimateGas(ctx context.Context, argsOrNil *ethapi2.CallArgs
 		if err != nil {
 			return 0, errors.New("getCodeSize failed")
 		}
-		// A plain transfer costs exactly TxGas unless it creates the recipient: on
-		// Amsterdam creating it also pays EIP-2780 NEW_ACCOUNT state gas, so an empty
-		// recipient is left to the binary search.
-		fastPath := codeSize == 0
-		if fastPath && chainConfig.IsAmsterdam(effectiveHeader.Time) {
-			empty, err := state.Empty(accounts.InternAddress(*args.To))
-			if err != nil {
-				return 0, errors.New("empty check failed")
-			}
-			fastPath = !empty
-		}
-		if fastPath {
-			failed, _, err := doCall(ctx, caller, params.TxGas, engine)
+		// A transfer to a codeless recipient has a fixed, gas-independent cost, so a
+		// single trial at the ceiling yields the exact estimate: return its actual gas
+		// used rather than a hardcoded TxGas. This stays correct across forks,
+		// including EIP-2780's re-priced transfers (self=12000, zero-value=15000,
+		// account creation adds NEW_ACCOUNT state gas).
+		if codeSize == 0 {
+			failed, result, err := doCall(ctx, caller, hi, engine)
 			if err == nil && !failed {
-				return hexutil.Uint64(params.TxGas), nil
+				return hexutil.Uint64(result.ReceiptGasUsed), nil
 			}
 		}
 	}
