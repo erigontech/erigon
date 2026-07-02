@@ -498,7 +498,7 @@ func statefulGasCall(evm *EVM, callContext *CallContext, gas mdgas.MdGas, availa
 	var address = accounts.InternAddress(callContext.Stack.Back(1).Bytes20())
 	rules := evm.ChainRules()
 	evm.callNewAccountCharged = false
-	if rules.IsSpuriousDragon {
+	if rules.IsEIP161Enabled() {
 		empty, err := evm.IntraBlockState().Empty(address)
 		if err != nil {
 			return mdgas.MdGas{}, err
@@ -716,7 +716,7 @@ func gasSelfdestruct(evm *EVM, callContext *CallContext, availableGas mdgas.MdGa
 		gas.Regular = params.SelfdestructGasEIP150
 		var address = callContext.peekAddress()
 
-		if evm.ChainRules().IsSpuriousDragon {
+		if evm.ChainRules().IsEIP161Enabled() {
 			// if empty and transfers value
 			empty, err := evm.IntraBlockState().Empty(address)
 			if err != nil {
