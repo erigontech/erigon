@@ -90,6 +90,7 @@ func importChain(cliCtx *cli.Context) error {
 		utils.NoDownloaderFlag.Name:      "true",
 		utils.ExternalConsensusFlag.Name: "true",
 		utils.MCPDisableFlag.Name:        "true",
+		utils.TxPoolDisableFlag.Name:     "true",
 	} {
 		if err := cliCtx.Set(flag, value); err != nil {
 			return fmt.Errorf("importChain: set %s=%s: %w", flag, value, err)
@@ -118,6 +119,9 @@ func importChain(cliCtx *cli.Context) error {
 	if err != nil {
 		return err
 	}
+	// The stack is never Start()ed, so the deferred stack.Close() skips
+	// lifecycle Stop — stop the backend explicitly to close chaindata on exit.
+	defer ethereum.Stop()
 
 	return importFiles(cliCtx.Args().Slice(), logger, func(fn string) error {
 		return ImportChain(ethereum, ethereum.ChainDB(), fn, logger)

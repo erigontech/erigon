@@ -23,15 +23,18 @@ import (
 	"maps"
 	"os"
 	"path/filepath"
-	"regexp"
-	"strconv"
 	"testing"
 
 	"github.com/stretchr/testify/require"
 	"github.com/urfave/cli/v2"
 
-	"github.com/erigontech/erigon/common/dir"
+	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/hexutil"
+	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/kv/dbcfg"
+	"github.com/erigontech/erigon/db/kv/mdbx"
+	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/execution/tests/testforks"
 	erigoncli "github.com/erigontech/erigon/node/cli"
 )
@@ -44,10 +47,6 @@ type importFixtureCase struct {
 		Rlp string `json:"rlp"`
 	} `json:"blocks"`
 }
-
-// Matches the Info-level line from ExecModule.logHeadUpdated; the hash-then-number
-// key order tracks its logArgs, so changing that log must update this regex.
-var headUpdatedRe = regexp.MustCompile(`head updated\s+hash=(0x[0-9a-fA-F]{64})\s+number=(\d+)`)
 
 // TestImportReorgUnwindToGenesis drives the real erigon init + import commands
 // in-process for a chain that reorgs back to genesis, asserting the canonical
@@ -75,21 +74,18 @@ func TestImportReorgUnwindToGenesis(t *testing.T) {
 	work := t.TempDir()
 	genesisPath := writeImportGenesis(t, work, tc)
 	rlpFiles := writeImportBlocks(t, work, tc)
+	dataDir := t.TempDir()
 
-	// The import command holds the chaindata open until process exit: keep the
-	// datadir out of t.TempDir so RemoveAll can't fail on Windows (an open file
-	// can't be deleted), and read results from erigon's log below instead of
-	// reopening the DB.
-	dataDir, err := os.MkdirTemp("", "erigon-import-reorg-")
-	require.NoError(t, err)
-	t.Cleanup(func() { _ = dir.RemoveAll(dataDir) })
-
-	require.NoError(t, runErigonCommand("init", "--datadir", dataDir, genesisPath))
+	// --log.dir.disable keeps the process-wide root logger from holding a log
+	// file under dataDir open past the commands, which would break t.TempDir
+	// cleanup on Windows.
+	require.NoError(t, runErigonCommand("--log.dir.disable", "init", "--datadir", dataDir, genesisPath))
 
 	// The fixture's next-to-last block is an intentionally invalid post-merge
 	// uncle: multi-file import skips the failed file, imports the final valid
 	// block 4, and returns the retained rejection error.
 	importArgs := append([]string{
+		"--log.dir.disable",
 		"--http=false",
 		"--private.api.addr=",
 		"--authrpc.port=0",
@@ -98,17 +94,30 @@ func TestImportReorgUnwindToGenesis(t *testing.T) {
 	importErr := runErigonCommand(importArgs...)
 	require.ErrorContains(t, importErr, "uncle")
 
-	// init and import both append to erigon's log; assert on it.
-	logs, err := os.ReadFile(filepath.Join(dataDir, "logs", "erigon.log"))
-	require.NoError(t, err)
 	var genesisHash string
 	require.NoError(t, json.Unmarshal(tc.GenesisHeader["hash"], &genesisHash))
-	require.Containsf(t, string(logs), genesisHash, "genesis hash mismatch — chain config drift?")
 
-	head, number := lastImportedHead(t, string(logs))
-	require.Equalf(t, uint64(4), number,
+	ctx := context.Background()
+	db, err := mdbx.New(dbcfg.ChainDB, log.New()).Path(filepath.Join(dataDir, "chaindata")).Accede(true).Readonly(true).Open(ctx)
+	require.NoError(t, err)
+	defer db.Close()
+
+	var storedGenesis, head common.Hash
+	var headNumber *uint64
+	require.NoError(t, db.View(ctx, func(tx kv.Tx) error {
+		var err error
+		if storedGenesis, err = rawdb.ReadCanonicalHash(tx, 0); err != nil {
+			return err
+		}
+		head = rawdb.ReadHeadBlockHash(tx)
+		headNumber = rawdb.ReadHeaderNumber(tx, head)
+		return nil
+	}))
+	require.Equal(t, genesisHash, storedGenesis.Hex(), "genesis hash mismatch — chain config drift?")
+	require.NotNilf(t, headNumber, "no canonical head; import err: %v", importErr)
+	require.Equalf(t, uint64(4), *headNumber,
 		"head did not advance to the heavier side chain (block 4); import err: %v", importErr)
-	require.Equalf(t, tc.LastBlockHash, head,
+	require.Equalf(t, tc.LastBlockHash, head.Hex(),
 		"final head mismatch (import err: %v)", importErr)
 }
 
@@ -143,18 +152,6 @@ func writeImportBlocks(t *testing.T, dir string, tc importFixtureCase) []string 
 		rlpFiles = append(rlpFiles, p)
 	}
 	return rlpFiles
-}
-
-// lastImportedHead returns the hash and number of the final canonical head the
-// import settled on, from the last "head updated" log line.
-func lastImportedHead(t *testing.T, logs string) (hash string, number uint64) {
-	t.Helper()
-	matches := headUpdatedRe.FindAllStringSubmatch(logs, -1)
-	require.NotEmpty(t, matches, "no 'head updated' line found in import logs")
-	last := matches[len(matches)-1]
-	number, err := strconv.ParseUint(last[2], 10, 64)
-	require.NoError(t, err)
-	return last[1], number
 }
 
 // runErigonCommand runs the erigon CLI app in-process — the same app the binary
