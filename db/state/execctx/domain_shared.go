@@ -803,8 +803,7 @@ func (sd *SharedDomains) StepSize() uint64 { return sd.stepSize }
 
 // IsUnfrozenStepEdge reports whether txNum is the last tx of a step whose
 // commitment is not yet frozen into files — where a step-boundary checkpoint
-// must be written. One predicate shared by the serial and parallel paths so
-// they can't silently diverge.
+// must be written.
 func (sd *SharedDomains) IsUnfrozenStepEdge(roTx kv.TemporalTx, txNum uint64) bool {
 	ss := sd.stepSize
 	if ss == 0 || dbg.DiscardCommitment() {
