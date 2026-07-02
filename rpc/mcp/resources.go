@@ -5,88 +5,113 @@ import (
 	"fmt"
 
 	"github.com/mark3labs/mcp-go/mcp"
+	"github.com/mark3labs/mcp-go/server"
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/rpc"
 )
 
-// registerResources registers all MCP resources
-func (e *ErigonMCPServer) registerResources() {
+// resourceHandlerSet holds one handler per resource shared by the embedded and
+// standalone servers.
+type resourceHandlerSet struct {
+	nodeInfo            server.ResourceHandlerFunc
+	chainConfig         server.ResourceHandlerFunc
+	recentBlocks        server.ResourceHandlerFunc
+	networkStatus       server.ResourceHandlerFunc
+	gasInfo             server.ResourceHandlerFunc
+	addressSummary      server.ResourceTemplateHandlerFunc
+	blockSummary        server.ResourceTemplateHandlerFunc
+	transactionAnalysis server.ResourceTemplateHandlerFunc
+}
+
+func registerResources(srv *server.MCPServer, h resourceHandlerSet) {
 	// Static resources
-	e.mcpServer.AddResource(
+	srv.AddResource(
 		mcp.NewResource("erigon://node/info",
 			"node info",
 			mcp.WithResourceDescription("Get node information and capabilities"),
 			mcp.WithMIMEType("application/json"),
 		),
-		e.handleResourceNodeInfo,
+		h.nodeInfo,
 	)
 
-	e.mcpServer.AddResource(
+	srv.AddResource(
 		mcp.NewResource("erigon://chain/config",
 			"chain config",
 			mcp.WithResourceDescription("Get chain configuration"),
 			mcp.WithMIMEType("application/json"),
 		),
-		e.handleResourceChainConfig,
+		h.chainConfig,
 	)
 
-	// Dynamic resources
-	e.mcpServer.AddResource(
+	srv.AddResource(
 		mcp.NewResource("erigon://blocks/recent",
 			"recent blocks",
 			mcp.WithResourceDescription("Get recent blocks (default: last 10)"),
 			mcp.WithMIMEType("application/json"),
 		),
-		e.handleResourceRecentBlocks,
+		h.recentBlocks,
 	)
 
-	e.mcpServer.AddResource(
+	srv.AddResource(
 		mcp.NewResource("erigon://network/status",
 			"network status",
 			mcp.WithResourceDescription("Get network sync status and peer info"),
 			mcp.WithMIMEType("application/json"),
 		),
-		e.handleResourceNetworkStatus,
+		h.networkStatus,
 	)
 
-	e.mcpServer.AddResource(
+	srv.AddResource(
 		mcp.NewResource("erigon://gas/current",
 			"gas current",
 			mcp.WithResourceDescription("Get current gas price information"),
 			mcp.WithMIMEType("application/json"),
 		),
-		e.handleResourceGasInfo,
+		h.gasInfo,
 	)
 
 	// Resource templates (with parameters)
-	e.mcpServer.AddResourceTemplate(
+	srv.AddResourceTemplate(
 		mcp.NewResourceTemplate("erigon://address/{address}/summary",
 			"address summary",
 			mcp.WithTemplateDescription("Get address summary (balance, nonce, code)"),
 			mcp.WithTemplateMIMEType("application/json"),
 		),
-		e.handleResourceAddressSummary,
+		h.addressSummary,
 	)
 
-	e.mcpServer.AddResourceTemplate(
+	srv.AddResourceTemplate(
 		mcp.NewResourceTemplate("erigon://block/{number}/summary",
 			"block summary",
 			mcp.WithTemplateDescription("Get block summary"),
 			mcp.WithTemplateMIMEType("application/json"),
 		),
-		e.handleResourceBlockSummary,
+		h.blockSummary,
 	)
 
-	e.mcpServer.AddResourceTemplate(
+	srv.AddResourceTemplate(
 		mcp.NewResourceTemplate("erigon://transaction/{hash}/analysis",
 			"transaction analysis",
 			mcp.WithTemplateDescription("Get transaction analysis"),
 			mcp.WithTemplateMIMEType("application/json"),
 		),
-		e.handleResourceTransactionAnalysis,
+		h.transactionAnalysis,
 	)
+}
+
+func (e *ErigonMCPServer) resourceHandlers() resourceHandlerSet {
+	return resourceHandlerSet{
+		nodeInfo:            e.handleResourceNodeInfo,
+		chainConfig:         e.handleResourceChainConfig,
+		recentBlocks:        e.handleResourceRecentBlocks,
+		networkStatus:       e.handleResourceNetworkStatus,
+		gasInfo:             e.handleResourceGasInfo,
+		addressSummary:      e.handleResourceAddressSummary,
+		blockSummary:        e.handleResourceBlockSummary,
+		transactionAnalysis: e.handleResourceTransactionAnalysis,
+	}
 }
 
 // Resource handlers

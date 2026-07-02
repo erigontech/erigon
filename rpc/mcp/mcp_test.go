@@ -1,9 +1,14 @@
 package mcp
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"testing"
+
+	"github.com/mark3labs/mcp-go/mcp"
+	"github.com/mark3labs/mcp-go/server"
+	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/rpc"
 )
@@ -133,6 +138,51 @@ func TestParseBlockNumberOrHash(t *testing.T) {
 			t.Errorf("parseBlockNumberOrHash(%q) returned JSON syntax error, want semantic error: %v", input, err)
 		}
 	}
+}
+
+func sortedKeys[V any](m map[string]V) []string {
+	keys := make([]string, 0, len(m))
+	for k := range m {
+		keys = append(keys, k)
+	}
+	return keys
+}
+
+func resourceTemplateURIs(t *testing.T, srv *server.MCPServer) []string {
+	t.Helper()
+	resp := srv.HandleMessage(context.Background(), []byte(`{"jsonrpc":"2.0","id":1,"method":"resources/templates/list"}`))
+	jsonResp, ok := resp.(mcp.JSONRPCResponse)
+	require.True(t, ok, "unexpected response type %T", resp)
+	result, ok := jsonResp.Result.(mcp.ListResourceTemplatesResult)
+	require.True(t, ok, "unexpected result type %T", jsonResp.Result)
+	uris := make([]string, 0, len(result.ResourceTemplates))
+	for _, tmpl := range result.ResourceTemplates {
+		uris = append(uris, tmpl.URITemplate.Raw())
+	}
+	return uris
+}
+
+// TestEmbeddedAndStandaloneCatalogsMatch guards against the two servers
+// drifting apart: they must expose the same tools (embedded additionally has
+// eth_getStorageValues), prompts, resources, and resource templates.
+func TestEmbeddedAndStandaloneCatalogsMatch(t *testing.T) {
+	embedded := NewErigonMCPServer(nil, nil, nil, "")
+	standalone := NewStandaloneMCPServer(nil, "")
+
+	embeddedTools := embedded.mcpServer.ListTools()
+	require.Contains(t, embeddedTools, "eth_getStorageValues")
+	delete(embeddedTools, "eth_getStorageValues")
+	require.ElementsMatch(t, sortedKeys(embeddedTools), sortedKeys(standalone.mcpServer.ListTools()))
+
+	require.ElementsMatch(t, sortedKeys(embedded.mcpServer.ListPrompts()), sortedKeys(standalone.mcpServer.ListPrompts()))
+	require.NotEmpty(t, embedded.mcpServer.ListPrompts())
+
+	require.ElementsMatch(t, sortedKeys(embedded.mcpServer.ListResources()), sortedKeys(standalone.mcpServer.ListResources()))
+	require.NotEmpty(t, embedded.mcpServer.ListResources())
+
+	embeddedTemplates := resourceTemplateURIs(t, embedded.mcpServer)
+	require.ElementsMatch(t, embeddedTemplates, resourceTemplateURIs(t, standalone.mcpServer))
+	require.NotEmpty(t, embeddedTemplates)
 }
 
 func TestMCPServerCreation(t *testing.T) {
