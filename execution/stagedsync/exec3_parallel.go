@@ -250,6 +250,14 @@ func (pe *parallelExecutor) execImpl(ctx context.Context, execStage *StageState,
 	pe.rs.StateV3.SetSkipStepBoundaryCommitment(true)
 	defer pe.rs.StateV3.SetSkipStepBoundaryCommitment(false)
 
+	// The calculator installs its own asOfStateReader on the shared commitment
+	// context; restore the prior reader on exit so it doesn't leak GetAsOf reads
+	// into later foreground commitment reads (which break when the caller runs
+	// with in-mem history reads disabled, e.g. offline re-exec).
+	sdCtx := pe.rs.Domains().GetCommitmentContext()
+	prevStateReader := sdCtx.StateReader()
+	defer sdCtx.SetStateReader(prevStateReader)
+
 	// Store channels and limits on pe so execLoop can access them.
 	pe.applyResultsCh = applyResults
 	pe.commitResultsCh = commitResults
