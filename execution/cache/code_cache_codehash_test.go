@@ -216,7 +216,7 @@ func BenchmarkCodeCache_GetByCodeHash_ManyAddrs_OneCode(b *testing.B) {
 }
 
 // TestCodeCache_Unwind_DropsUnwoundCodeEverywhere verifies the (txNum, epoch)
-// model the user requires (#21752): code deployed on a fork that is later
+// model: code deployed on a fork that is later
 // unwound must stop being discoverable on EVERY layer — addr→code, the
 // content-addressed codeHash→code, and the size layer — not just the addr
 // layer. The code's value is invariant for a hash, but its existence is not.

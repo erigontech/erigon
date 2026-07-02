@@ -273,8 +273,7 @@ func TestCodeCache_CodeDeduplication(t *testing.T) {
 
 func TestCodeCache_AddrCapacityLimit(t *testing.T) {
 	// addrToHash is an LRU keyed by 20-byte address. Verify eviction is
-	// LRU rather than no-op-when-full — fresh-address workloads must
-	// warm up (geth's lru.Cache pattern, mirroring core/state/database_code.go).
+	// LRU rather than no-op-when-full so fresh-address workloads warm up.
 	// makeAddr / makeCode wrap at 256, so we generate addrs/codes from
 	// a wider 16-bit space directly.
 	wideAddr := func(i int) []byte {
@@ -365,7 +364,7 @@ func TestCodeCache_Clear(t *testing.T) {
 	c.Clear()
 	assert.Equal(t, 0, c.Len())
 	// Clear hard-resets every layer: unwound/cleared code must not remain
-	// discoverable (#21752), so the content layer is dropped too.
+	// discoverable, so the content layer is dropped too.
 	assert.Equal(t, 0, c.CodeLen())
 }
 

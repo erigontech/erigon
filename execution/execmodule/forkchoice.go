@@ -549,7 +549,7 @@ func (e *ExecModule) updateForkChoice(ctx context.Context, originalBlockHash, sa
 			if err != nil {
 				return nil, nil, fmt.Errorf("updateForkChoice: begin rw after hasMore: %w", err)
 			}
-			defer commitRwTx.Rollback() // safety net; idempotent after successful Commit
+			defer commitRwTx.Rollback() // idempotent after a successful Commit
 			// The committed sd is spent; RunLoop closes it and continues on the
 			// fresh SD built below (no ClearRam reuse).
 			if err := sd.Commit(ctx, commitRwTx); err != nil {
@@ -699,8 +699,8 @@ func (e *ExecModule) updateForkChoice(ctx context.Context, originalBlockHash, sa
 			handOffSemaphore(func() error {
 				defer bgSD.Close()
 				// bgRoTx is rolled back inside runForkchoiceFlushCommit between
-				// Flush and Commit so the commit sees openTxs=1 in MDBX. This
-				// defer is a safety net — Rollback is idempotent.
+				// Flush and Commit so the commit sees openTxs=1 in MDBX; this
+				// defer is redundant (Rollback is idempotent).
 				defer bgRoTx.Rollback()
 				err := e.runPostForkchoice(bgSD, bgRoTx, finishProgressBefore, isSynced, initialCycle)
 				// Signal that the DB commit is done — RPC consumers can
@@ -834,7 +834,7 @@ func (e *ExecModule) dispatchNotificationsFromOverlay(sd *execctx.SharedDomains,
 // pinning them behind the still-open RO reader until the next commit. SD.Flush
 // only writes in-memory state to rwTx and does not read from the RO tx, so
 // closing it after Flush is safe. Rollback is idempotent, so callers keep their
-// outer `defer roTx.Rollback()` as a safety net.
+// outer `defer roTx.Rollback()` unchanged.
 func (e *ExecModule) runForkchoiceFlushCommit(sd *execctx.SharedDomains, roTxToCloseBeforeCommit kv.TemporalTx, finishProgressBefore uint64, isSynced bool) ([]any, error) {
 	timings := make([]any, 0, 2)
 

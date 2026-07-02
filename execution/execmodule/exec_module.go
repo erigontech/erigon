@@ -100,11 +100,6 @@ func GetBlockHashFromMissingSegmentError(err error) (common.Hash, bool) {
 // OnNewBlock is intentionally a no-op: in the embedded (non-remote) rpcdaemon
 // the SD is the authoritative source, so the coherent cache's state-tracking
 // machinery is unnecessary.
-//
-// This shim predates SharedDomains' current capabilities and will be simplified
-// as part of #19623 (2-cache IBS rationalization) once the StateReader/CacheView
-// interfaces stabilize. See also #19798 (event stream extraction) and #19855
-// (TransactionState/BlockState separation).
 type Cache struct {
 	execModule  *ExecModule
 	publishedSD func() *execctx.SharedDomains // returns the latest published SD from Events (for background commit)
@@ -544,10 +539,9 @@ func (e *ExecModule) ValidateChain(ctx context.Context, blockHash common.Hash, b
 	if err != nil {
 		return ValidationResult{}, err
 	}
-	// NOTE: do NOT defer doms.Close(). On the success path, ownership of
-	// doms transfers to forkValidator.sharedDom inside ValidatePayload —
-	// later phases (MergeExtendingFork, NotifyCurrentHeight) close it.
-	// We Close explicitly only on the early-return error paths below.
+	// Do not defer doms.Close(): on the success path ownership transfers to
+	// forkValidator.sharedDom inside ValidatePayload and later phases close it,
+	// so we Close explicitly only on the early-return error paths below.
 	doms.SetInMemHistoryReads(inMemHistoryReads)
 
 	if err := doms.InitBlockOverlay(roTx, roTx.Debug().Dirs().Tmp); err != nil {
@@ -556,13 +550,9 @@ func (e *ExecModule) ValidateChain(ctx context.Context, blockHash common.Hash, b
 	}
 	var tx kv.TemporalRwTx = doms.BlockOverlay()
 
-	// DO NOT CHANGE THIS WITHOUT WORKING THROUGH THE UNWIND CACHING SCENARIOS.
-	// The earlier `header.ParentHash == ReadHeadBlockHash(tx)` head-extending-
-	// only gate has been intentionally widened back to "chain whenever a
-	// currentContext exists" because fork-payload caching needs the parent
-	// link too — see the two-role breakdown below. The narrower gate was
-	// merged from main during the post-#21017 rebase and is the WRONG choice
-	// for this branch; keep the wider gate.
+	// Chain whenever a currentContext exists, not only when head-extending
+	// (header.ParentHash == head): fork-payload caching needs the parent link
+	// too — see the two-role breakdown below.
 	//
 	// Chain the validation SD to the latest in-memory canonical generation:
 	// e.currentContext when present, otherwise the newest in-flight commit

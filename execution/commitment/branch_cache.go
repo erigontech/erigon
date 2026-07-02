@@ -651,7 +651,7 @@ func (c *BranchCache) Invalidate(prefix []byte) {
 // unwindToTxN (so old-epoch entries at or above it are dropped lazily on their
 // next Get). The floor only ever decreases, so a shallow unwind cannot
 // resurrect entries a deeper one invalidated. Mirrors GenericCache.Unwind so
-// branch and state caches honor one (txN, epoch) model (#21752).
+// branch and state caches honor one (txN, epoch) model.
 func (c *BranchCache) Unwind(unwindToTxN uint64) {
 	c.coh.Unwind(unwindToTxN)
 }
