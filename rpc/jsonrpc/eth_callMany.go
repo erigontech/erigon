@@ -28,6 +28,7 @@ import (
 	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/common/math"
+	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/execution/protocol"
 	"github.com/erigontech/erigon/execution/state"
 	"github.com/erigontech/erigon/execution/types"
@@ -47,6 +48,54 @@ type Bundle struct {
 type StateContext struct {
 	BlockNumber      rpc.BlockNumberOrHash
 	TransactionIndex *int
+}
+
+func validateBundles(bundles []Bundle) error {
+	if len(bundles) == 0 {
+		return errors.New("empty bundles")
+	}
+	for _, bundle := range bundles {
+		if len(bundle.Transactions) != 0 {
+			return nil
+		}
+	}
+	return errors.New("empty bundles")
+}
+
+// blockHashGetter returns a BLOCKHASH resolver that prefers overrideBlockHash entries
+// over the canonical chain.
+func (api *BaseAPI) blockHashGetter(ctx context.Context, tx kv.Tx, overrideBlockHash map[uint64]common.Hash) func(i uint64) (common.Hash, error) {
+	return func(i uint64) (common.Hash, error) {
+		if hash, ok := overrideBlockHash[i]; ok {
+			return hash, nil
+		}
+		hash, ok, err := api._blockReader.CanonicalHash(ctx, tx, i)
+		if err != nil || !ok {
+			log.Debug("Can't get block hash by number", "number", i, "only-canonical", true, "err", err, "ok", ok)
+		}
+		return hash, err
+	}
+}
+
+// setupEVMTimeout cancels the EVM held by the returned pointer once timeout elapses (or
+// ctx is cancelled). Callers recreating the EVM in a loop must Store the new instance so
+// the cancellation always hits the current one. The returned cleanup must be deferred.
+func setupEVMTimeout(ctx context.Context, evm *vm.EVM, timeout time.Duration) (*atomic.Pointer[vm.EVM], func()) {
+	evmPtr := &atomic.Pointer[vm.EVM]{}
+	evmPtr.Store(evm)
+
+	var cancel context.CancelFunc
+	if timeout > 0 {
+		ctx, cancel = context.WithTimeout(ctx, timeout)
+	} else {
+		ctx, cancel = context.WithCancel(ctx)
+	}
+
+	stop := context.AfterFunc(ctx, func() { evmPtr.Load().Cancel() })
+	return evmPtr, func() {
+		stop()
+		cancel()
+	}
 }
 
 func (api *APIImpl) CallMany(ctx context.Context, bundles []Bundle, simulateContext StateContext, stateOverride *ethapi.StateOverrides, timeoutMilliSecondsPtr *int64) ([][]map[string]any, error) {
@@ -69,18 +118,8 @@ func (api *APIImpl) CallMany(ctx context.Context, bundles []Bundle, simulateCont
 	if err != nil {
 		return nil, err
 	}
-	if len(bundles) == 0 {
-		return nil, errors.New("empty bundles")
-	}
-	empty := true
-	for _, bundle := range bundles {
-		if len(bundle.Transactions) != 0 {
-			empty = false
-		}
-	}
-
-	if empty {
-		return nil, errors.New("empty bundles")
+	if err := validateBundles(bundles); err != nil {
+		return nil, err
 	}
 
 	defer func(start time.Time) { log.Trace("Executing EVM callMany finished", "runtime", time.Since(start)) }(time.Now())
@@ -133,16 +172,7 @@ func (api *APIImpl) CallMany(ctx context.Context, bundles []Bundle, simulateCont
 		return nil, fmt.Errorf("block %d(%x) not found", blockNum, hash)
 	}
 
-	getHash := func(i uint64) (common.Hash, error) {
-		if hash, ok := overrideBlockHash[i]; ok {
-			return hash, nil
-		}
-		hash, ok, err := api._blockReader.CanonicalHash(ctx, tx, i)
-		if err != nil || !ok {
-			log.Debug("Can't get block hash by number", "number", i, "only-canonical", true, "err", err, "ok", ok)
-		}
-		return hash, err
-	}
+	getHash := api.blockHashGetter(ctx, tx, overrideBlockHash)
 
 	blockCtx = protocol.NewEVMBlockContext(header, getHash, api.engine(), accounts.NilAddress /* author */, chainConfig)
 
@@ -151,31 +181,14 @@ func (api *APIImpl) CallMany(ctx context.Context, bundles []Bundle, simulateCont
 	signer := types.MakeSigner(chainConfig, blockNum, blockCtx.Time)
 	rules := evm.ChainRules()
 
-	// evmPtr is updated atomically each time evm is recreated in the loop,
-	// so the AfterFunc callback always cancels the current instance.
-	var evmPtr atomic.Pointer[vm.EVM]
-	evmPtr.Store(evm)
-
 	timeout := api.evmCallTimeout
 
 	if timeoutMilliSecondsPtr != nil && *timeoutMilliSecondsPtr > 0 {
 		timeout = time.Duration(*timeoutMilliSecondsPtr) * time.Millisecond
 	}
 
-	// Setup context so it may be cancelled the call has completed
-	// or, in case of unmetered gas, setup a context with a timeout.
-	var cancel context.CancelFunc
-	if timeout > 0 {
-		ctx, cancel = context.WithTimeout(ctx, timeout)
-	} else {
-		ctx, cancel = context.WithCancel(ctx)
-	}
-	// Make sure the context is cancelled when the call has completed
-	// this makes sure resources are cleaned up.
-	defer cancel()
-
-	stop := context.AfterFunc(ctx, func() { evmPtr.Load().Cancel() })
-	defer stop()
+	evmPtr, cleanup := setupEVMTimeout(ctx, evm, timeout)
+	defer cleanup()
 
 	// Setup the gas pool (also for unmetered requests)
 	// and apply the message.

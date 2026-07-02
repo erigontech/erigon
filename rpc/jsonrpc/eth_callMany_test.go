@@ -17,6 +17,7 @@
 package jsonrpc
 
 import (
+	"bytes"
 	"context"
 	"encoding/hex"
 	"fmt"
@@ -25,7 +26,10 @@ import (
 	"testing"
 
 	"github.com/holiman/uint256"
+	jsoniter "github.com/json-iterator/go"
+	"github.com/stretchr/testify/require"
 
+	"github.com/erigontech/erigon/cmd/rpcdaemon/rpcdaemontest"
 	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/db/datadir"
@@ -37,8 +41,34 @@ import (
 	"github.com/erigontech/erigon/rpc"
 	"github.com/erigontech/erigon/rpc/ethapi"
 	"github.com/erigontech/erigon/rpc/jsonrpc/contracts"
+	"github.com/erigontech/erigon/rpc/jsonstream"
 	"github.com/erigontech/erigon/rpc/rpccfg"
 )
+
+func TestCallManyEmptyBundles(t *testing.T) {
+	m, _, _ := rpcdaemontest.CreateTestExecModule(t)
+	baseApi := newBaseApiForTest(m)
+	api := newEthApiForTest(baseApi, m.DB, nil, nil)
+	debugApi := NewPrivateDebugAPI(baseApi, m.DB, nil, 5000000, false)
+	ctx := context.Background()
+
+	txIndex := -1
+	stateCtx := StateContext{BlockNumber: rpc.BlockNumberOrHashWithNumber(rpc.LatestBlockNumber), TransactionIndex: &txIndex}
+
+	for name, bundles := range map[string][]Bundle{
+		"noBundles":         {},
+		"noTransactions":    {{}, {}},
+		"emptyTransactions": {{Transactions: []ethapi.CallArgs{}}},
+	} {
+		_, err := api.CallMany(ctx, bundles, stateCtx, nil, nil)
+		require.EqualError(t, err, "empty bundles", name)
+
+		var buf bytes.Buffer
+		stream := jsonstream.New(jsoniter.NewStream(jsoniter.ConfigDefault, &buf, 4096))
+		err = debugApi.TraceCallMany(ctx, bundles, stateCtx, nil, stream)
+		require.EqualError(t, err, "empty bundles", name)
+	}
+}
 
 // block 1 contains 3 Transactions
 //	 1. deploy token A
