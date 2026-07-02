@@ -48,7 +48,7 @@ import (
 	"github.com/erigontech/erigon/db/kv/stream"
 	"github.com/erigontech/erigon/db/recsplit"
 	"github.com/erigontech/erigon/db/seg"
-	"github.com/erigontech/erigon/db/state/changeset"
+	"github.com/erigontech/erigon/db/state/kvmetrics"
 	"github.com/erigontech/erigon/db/state/statecfg"
 	"github.com/erigontech/erigon/db/version"
 	"github.com/erigontech/erigon/diagnostics/metrics"
@@ -361,10 +361,8 @@ func (d *Domain) scanDirtyFiles(fileNames []string) (garbageFiles []*FilesItem) 
 	if d.FilenameBase == "" {
 		panic("assert: empty `filenameBase`")
 	}
-	l := filterDirtyFiles(fileNames, d.stepSize, d.stepsInFrozenFile, d.FilenameBase, "kv", d.logger)
+	l := filterDirtyFiles(fileNames, d.stepSize, d.FilenameBase, "kv", d.logger)
 	for _, dirtyFile := range l {
-		dirtyFile.frozen = false
-
 		if _, has := d.dirtyFiles.Get(dirtyFile); !has {
 			d.dirtyFiles.Set(dirtyFile)
 		}
@@ -1300,8 +1298,7 @@ func (d *Domain) integrateDirtyFiles(sf StaticFiles, txNumFrom, txNumTo uint64) 
 
 	d.History.integrateDirtyFiles(sf.HistoryFiles, txNumFrom, txNumTo)
 
-	fi := newFilesItem(txNumFrom, txNumTo, d.stepSize, d.stepsInFrozenFile)
-	fi.frozen = false
+	fi := newFilesItem(txNumFrom, txNumTo)
 	fi.version, _ = version.ParseVersion(filepath.Base(sf.valuesDecomp.FilePath()))
 	fi.decompressor = sf.valuesDecomp
 	fi.index = sf.valuesIdx
@@ -1711,7 +1708,7 @@ func (dt *DomainRoTx) GetLatest(key []byte, roTx kv.Tx) ([]byte, kv.Step, bool, 
 	return dt.getLatest(key, roTx, math.MaxInt64, nil, time.Time{})
 }
 
-func (dt *DomainRoTx) getLatest(key []byte, roTx kv.Tx, maxStep kv.Step, metrics *changeset.DomainMetrics, start time.Time) ([]byte, kv.Step, bool, error) {
+func (dt *DomainRoTx) getLatest(key []byte, roTx kv.Tx, maxStep kv.Step, metrics *kvmetrics.DomainMetrics, start time.Time) ([]byte, kv.Step, bool, error) {
 	if dt.d.Disable {
 		return nil, 0, false, nil
 	}

@@ -149,7 +149,7 @@ func (h *History) scanDirtyFiles(fileNames []string) {
 	if h.stepSize == 0 {
 		panic("assert: empty `stepSize`")
 	}
-	for _, dirtyFile := range filterDirtyFiles(fileNames, h.stepSize, h.stepsInFrozenFile, h.FilenameBase, "v", h.logger) {
+	for _, dirtyFile := range filterDirtyFiles(fileNames, h.stepSize, h.FilenameBase, "v", h.logger) {
 		if _, has := h.dirtyFiles.Get(dirtyFile); !has {
 			h.dirtyFiles.Set(dirtyFile)
 		}
@@ -861,7 +861,7 @@ func (h *History) integrateDirtyFiles(sf HistoryFiles, txNumFrom, txNumTo uint64
 		existence: sf.efExistence,
 	}, txNumFrom, txNumTo)
 
-	fi := newFilesItem(txNumFrom, txNumTo, h.stepSize, h.stepsInFrozenFile)
+	fi := newFilesItem(txNumFrom, txNumTo)
 	fi.decompressor = sf.historyDecomp
 	fi.index = sf.historyIdx
 	h.dirtyFiles.Set(fi)

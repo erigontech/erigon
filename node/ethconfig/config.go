@@ -189,6 +189,12 @@ func NewSnapCfg(keepBlocks, produceE2, produceE3 bool, chainName string) BlocksF
 type Config struct {
 	Sync
 
+	// StateCacheBudget, when > 0, overrides the per-domain state-cache byte
+	// budget the ExecModule allocates. Test harnesses that build one ExecModule
+	// per fixture set this small to avoid the full production cache each time;
+	// 0 means the production default.
+	StateCacheBudget datasize.ByteSize
+
 	// The genesis block, which is inserted if the database is empty.
 	// If nil, the Ethereum main net block is used.
 	Genesis *types.Genesis `toml:",omitempty"`

@@ -381,7 +381,7 @@ func (iit *InvertedIndexRoTx) deduplicateFiles(ctx context.Context, files []*Fil
 	comp.Close()
 	comp = nil
 
-	outItem = newFilesItem(startTxNum, endTxNum, iit.stepSize, iit.stepsInFrozenFile)
+	outItem = newFilesItem(startTxNum, endTxNum)
 	if outItem.decompressor, err = seg.NewDecompressor(datPath); err != nil {
 		return nil, fmt.Errorf("merge %s decompressor [%d-%d]: %w", iit.ii.FilenameBase, startTxNum, endTxNum, err)
 	}
