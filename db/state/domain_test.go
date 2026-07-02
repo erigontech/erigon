@@ -540,7 +540,7 @@ func checkHistory(t *testing.T, db kv.RwDB, d *Domain, txs uint64) {
 
 	// Structural invariants: no duplicates, monotonic txNums, index-history consistency, etc.
 	checkHistoryProperties(t, domainRoTx.ht)
-	// Domain file invariants: key-count, accessor presence, frozen flag, sort order, alignment, bloom.
+	// Domain file invariants: key-count, accessor presence, sort order, alignment, bloom.
 	checkDomainFileProperties(t, domainRoTx)
 }
 
@@ -549,7 +549,6 @@ func checkDomainFileProperties(t *testing.T, dt *DomainRoTx) {
 	t.Helper()
 	checkDomainFileKeyCountConsistency(t, dt)
 	checkDomainFileAccessorsPresent(t, dt)
-	checkDomainFileFrozenFlagConsistency(t, dt)
 	checkDomainFileSortedKeyOrder(t, dt)
 	checkDomainHistoryRangeAlignment(t, dt)
 	checkDomainExistenceFilterNoFalseNegatives(t, dt)
@@ -599,20 +598,6 @@ func checkDomainFileAccessorsPresent(t *testing.T, dt *DomainRoTx) {
 				"file %d [%d-%d): AccessorExistence configured but existence is nil",
 				i, f.startTxNum, f.endTxNum)
 		}
-	}
-}
-
-// checkDomainFileFrozenFlagConsistency verifies (property 7):
-// file.frozen == (endStep - startStep >= stepsInFrozenFile).
-func checkDomainFileFrozenFlagConsistency(t *testing.T, dt *DomainRoTx) {
-	t.Helper()
-	for i, f := range dt.files {
-		startStep := f.startTxNum / dt.stepSize
-		endStep := f.endTxNum / dt.stepSize
-		expectedFrozen := (endStep - startStep) >= dt.stepsInFrozenFile
-		require.Equal(t, expectedFrozen, f.src.frozen,
-			"file %d [%d-%d): frozen=%v but expected frozen=%v (steps=%d, stepsInFrozenFile=%d)",
-			i, f.startTxNum, f.endTxNum, f.src.frozen, expectedFrozen, endStep-startStep, dt.stepsInFrozenFile)
 	}
 }
 

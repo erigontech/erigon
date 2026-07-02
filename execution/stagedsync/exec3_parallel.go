@@ -258,9 +258,13 @@ func (pe *parallelExecutor) execImpl(ctx context.Context, execStage *StageState,
 	pe.rs.Domains().SetInMemHistoryReads(true)
 	defer pe.rs.Domains().SetInMemHistoryReads(prevInMemHistoryReads)
 
-	// Skip step-boundary commitment — the calculator handles this.
-	pe.rs.StateV3.SetSkipStepBoundaryCommitment(true)
-	defer pe.rs.StateV3.SetSkipStepBoundaryCommitment(false)
+	// The calculator installs its own asOfStateReader on the shared commitment
+	// context; restore the prior reader on exit so it doesn't leak GetAsOf reads
+	// into later foreground commitment reads (which break when the caller runs
+	// with in-mem history reads disabled, e.g. offline re-exec).
+	sdCtx := pe.rs.Domains().GetCommitmentContext()
+	prevStateReader := sdCtx.StateReader()
+	defer sdCtx.SetStateReader(prevStateReader)
 
 	// Store channels and limits on pe so execLoop can access them.
 	// blockRequests is intentionally not stashed here: it is closed by its
@@ -389,22 +393,26 @@ func (pe *parallelExecutor) execImpl(ctx context.Context, execStage *StageState,
 		// handleCommitResult processes a single commitment result from the
 		// calculator. Defined here so both the blockResult handler and the
 		// rootResults case in the main select can use it.
+		// handleCommitResult classifies a commitment result. It performs NO
+		// unwind side-effects: a wrong-root is only classified here and routed
+		// through the fail/finalized machinery, so the reported failure and its
+		// block hash are chosen after exec has had its say (under fold-ahead a
+		// commit wrong-root can arrive before the block's exec verdict). The
+		// actual unwind for a !initialCycle wrong-root happens at finalization
+		// with the implicated block's own hash.
 		handleCommitResult := func(cr commitmentResult) error {
 			if cr.err != nil {
 				// Lazy-load / ComputeCommitment errors from the calculator
 				// don't wrap ErrWrongTrieRoot. Treating them as a wrong-root
-				// would mark a valid block as bad and
-				// trigger an unwind that throws away valid state. Fail fast
-				// instead and preserve the original error in the message.
+				// would mark a valid block as bad and trigger an unwind that
+				// throws away valid state. Fail fast instead and preserve the
+				// original error in the message.
 				if !errors.Is(cr.err, ErrWrongTrieRoot) {
 					return fmt.Errorf("[%s] commitment: %w", pe.logPrefix, cr.err)
 				}
 				pe.logger.Error(fmt.Sprintf("[%s] Wrong trie root of block %d: %x (%v)",
 					pe.logPrefix, cr.blockNum, cr.rootHash, cr.err))
-				if initialCycle {
-					return fmt.Errorf("%w, block=%d", ErrWrongTrieRoot, cr.blockNum)
-				}
-				return handleIncorrectRootHashError(cr.blockNum, lastBlockResult.BlockHash, rwTx, pe.cfg, execStage, pe.logger, u)
+				return fmt.Errorf("%w, block=%d", ErrWrongTrieRoot, cr.blockNum)
 			}
 			pe.txExecutor.lastCommittedBlockNum.Store(cr.blockNum)
 			pe.txExecutor.lastCommittedTxNum.Store(cr.txNum)
@@ -415,11 +423,14 @@ func (pe *parallelExecutor) execImpl(ctx context.Context, execStage *StageState,
 		// wait) stays with execImpl's deferred executorCancel so only the main
 		// goroutine drives cleanup.
 		deliberateCancel := func() { pe.cancelExecLoop(errDeliberateStop) }
-		// processCommit records a commit failure. A wrong-root is deferred into
-		// `fail` (not acted on) so the block's own exec verdict can supersede it;
-		// it deliberately does NOT cancel — cancelling here would abort the block
-		// before exec produces its authoritative verdict. Non-wrong-root commit
-		// errors (lazy-load / compute) are infrastructure faults, so fast-fail.
+		// processCommit records a commit failure into `fail`. Non-wrong-root
+		// commit errors (lazy-load / compute) are infrastructure faults, so
+		// fast-fail. A wrong-root is deferred so the block's own exec verdict can
+		// supersede it — EXCEPT when exec has already applied the block: then its
+		// verdict is in (this is an incremental, not fold-ahead, wrong-root), so
+		// finalize and cancel eagerly rather than keep building on known-wrong
+		// state. Fold-ahead wrong-roots arrive before the block is applied and so
+		// still defer, with the cancel firing once exec cleanly applies the block.
 		processCommit := func(cr commitmentResult) error {
 			err := handleCommitResult(cr)
 			if err == nil {
@@ -428,7 +439,11 @@ func (pe *parallelExecutor) execImpl(ctx context.Context, execStage *StageState,
 			if !errors.Is(err, ErrWrongTrieRoot) {
 				return err
 			}
-			fail.consider(cr.blockNum, false, err)
+			fail.consider(cr.blockNum, cr.blockHash, false, err)
+			if _, applied := appliedBlocks[cr.blockNum]; applied {
+				finalized = true
+				deliberateCancel()
+			}
 			return nil
 		}
 
@@ -487,7 +502,19 @@ func (pe *parallelExecutor) execImpl(ctx context.Context, execStage *StageState,
 					// Surface the earliest recorded failure ahead of the
 					// missing-blocks check: a deliberate cancel manufactures a
 					// missing-block condition that would otherwise mask it.
+					//
+					// A deferred commit wrong-root does its unwind here, not inline
+					// at classification time — so a !initialCycle reorg marks the
+					// bad block with the implicated block's OWN hash (fail.blockHash),
+					// not whatever block exec had last applied when the wrong-root
+					// arrived. initialCycle has no reorg: the error is fatal.
 					if fail.set {
+						if !fail.exec && errors.Is(fail.err, ErrWrongTrieRoot) && !initialCycle {
+							if err := handleIncorrectRootHashError(fail.block, fail.blockHash, rwTx, pe.cfg, execStage, pe.logger, u); err != nil {
+								return err
+							}
+							return nil
+						}
 						return fail.err
 					}
 					if missing := applyLoopMissingBlocks(txResultBlocks, appliedBlocks); len(missing) > 0 {
@@ -551,7 +578,7 @@ func (pe *parallelExecutor) execImpl(ctx context.Context, execStage *StageState,
 					if applyResult.Err != nil {
 						appliedBlocks[applyResult.BlockNum] = struct{}{}
 						pendingAccumulatorWrites = pendingAccumulatorWrites[:0]
-						fail.consider(applyResult.BlockNum, true, applyResult.Err)
+						fail.consider(applyResult.BlockNum, applyResult.BlockHash, true, applyResult.Err)
 						finalized = true
 						continue
 					}
@@ -602,7 +629,7 @@ func (pe *parallelExecutor) execImpl(ctx context.Context, execStage *StageState,
 						// Spawn per-block validation in a goroutine — the result is
 						// joined via Wait() below, after the other per-result work
 						// has had a chance to run in parallel with validation.
-						blockValidatorWaiter = newBlockValidator(applyResult.BlockGasUsed, applyResult.BlobGasUsed, checkReceipts, checkBloom, applyResult.Receipts,
+						blockValidatorWaiter = newBlockValidator(pe.cfg.engine, applyResult.BlockGasUsed, applyResult.BlobGasUsed, checkReceipts, checkBloom, applyResult.Receipts,
 							lastHeader, b.Transactions(), pe.cfg.chainConfig, pe.logger)
 
 						if !applyResult.isPartial && !execStage.CurrentSyncCycle.IsInitialCycle {
@@ -778,6 +805,7 @@ func (pe *parallelExecutor) execImpl(ctx context.Context, execStage *StageState,
 
 func (pe *parallelExecutor) LogExecution() {
 	pe.progress.LogExecution(pe.rs.StateV3, pe)
+	pe.doms.PrintCacheStats()
 	if domainMetrics := pe.domains().LogMetrics(); len(domainMetrics) > 0 {
 		pe.logger.Info(fmt.Sprintf("[%s] domain reads", pe.logPrefix), domainMetrics...)
 	}
@@ -1106,17 +1134,10 @@ func (pe *parallelExecutor) execLoop(ctx context.Context) (err error) {
 }
 
 func (pe *parallelExecutor) processRequest(ctx context.Context, execRequest *execRequest) (err error) {
-	// Validate state cache before processing block - ensures cache is cleared after reorgs
-	// This matches the behavior in serial execution (exec3_serial.go)
-	if len(execRequest.tasks) > 0 {
-		if txTask, ok := execRequest.tasks[0].(*exec.TxTask); ok && txTask.Header != nil {
-			parentHash := txTask.Header.ParentHash
-			blockHash := execRequest.blockHash
-			if stateCache := pe.doms.GetStateCache(); stateCache != nil {
-				stateCache.ValidateAndPrepare(parentHash, blockHash)
-			}
-		}
-	}
+	// The state cache is a SharedDomain implementation detail: it is populated
+	// only at flush (committed, fork-agnostic state) and invalidated only on
+	// unwind (txNum/epoch — see StateCache.Unwind). The executor does not touch
+	// it during forward execution.
 
 	prevSenderTx := map[accounts.Address]int{}
 	var scheduleable *blockExecutor
@@ -1244,18 +1265,19 @@ func applyLoopFlushAsComplete(valid bool, cntInvalid int) bool {
 // loop can no longer assume exec is seen first; the kept failure is chosen by
 // block number, with exec outranking commit on the same block.
 type failCandidate struct {
-	err   error
-	block uint64
-	exec  bool // exec verdict (specific, authoritative) vs commit wrong-root (generic)
-	set   bool
+	err       error
+	block     uint64
+	blockHash common.Hash // implicated block's hash — used to mark the bad block on a !initialCycle wrong-root unwind
+	exec      bool        // exec verdict (specific, authoritative) vs commit wrong-root (generic)
+	set       bool
 }
 
 // consider merges a newly observed failure. The reported failure is the one at
 // the earliest block; on the same block an exec verdict wins, because it carries
 // the specific validation error while the commit side only sees the wrong root.
-func (fc *failCandidate) consider(block uint64, exec bool, err error) {
+func (fc *failCandidate) consider(block uint64, blockHash common.Hash, exec bool, err error) {
 	if !fc.set || block < fc.block || (block == fc.block && exec && !fc.exec) {
-		fc.err, fc.block, fc.exec, fc.set = err, block, exec, true
+		fc.err, fc.block, fc.blockHash, fc.exec, fc.set = err, block, blockHash, exec, true
 	}
 }
 
@@ -1573,6 +1595,7 @@ type blockResult struct {
 
 type txResult struct {
 	blockNum              uint64
+	blockHash             common.Hash
 	txNum                 uint64
 	blockGasUsed          int64
 	blobGasUsed           uint64
@@ -1759,6 +1782,7 @@ func (result *execResult) calcFees(
 		coinbaseNonce = coinbaseAcc.Nonce
 	}
 	coinbaseEmptyCodeHash := coinbaseAcc == nil || coinbaseAcc.IsEmptyCodeHash()
+	coinbaseSelfdestructed := false
 	for _, w := range result.TxOut {
 		if w.Address != result.Coinbase && (!hasBurnt || w.Address != burntAddr) {
 			continue
@@ -1784,10 +1808,23 @@ func (result *execResult) calcFees(
 			if w.Address == result.Coinbase {
 				coinbaseHasCodeHashWrite = true
 			}
+		case state.SelfDestructPath:
+			if w.Address == result.Coinbase {
+				if v, ok := w.Val.(bool); ok {
+					coinbaseSelfdestructed = v
+				}
+			}
 		}
 	}
 	oldCoinbaseBalance := newCoinbaseBalance
-	newCoinbaseBalance.Add(&newCoinbaseBalance, &result.ExecutionResult.FeeTipped)
+	// Burn the tip only for an actual SELFDESTRUCT of a contract coinbase.
+	// DeleteAccount also emits SelfDestructPath=true for EIP-161 empty-removal of
+	// a touched EOA coinbase, where the delayed tip must still be credited (it
+	// re-creates the account) to match serial.
+	coinbaseWasContract := !coinbaseEmptyCodeHash || coinbaseHasCodeHashWrite
+	if !(coinbaseSelfdestructed && coinbaseWasContract) {
+		newCoinbaseBalance.Add(&newCoinbaseBalance, &result.ExecutionResult.FeeTipped)
+	}
 	oldBurntBalance := newBurntBalance
 	if hasBurnt && chainRules.IsLondon {
 		newBurntBalance.Add(&newBurntBalance, &result.ExecutionResult.FeeBurnt)
@@ -1801,7 +1838,7 @@ func (result *execResult) calcFees(
 	// Use the worker's post-write Nonce / CodeHash (not pre-tx coinbaseAcc) so
 	// that a sender==coinbase tx whose worker wrote a non-empty Nonce isn't
 	// mistakenly treated as empty here when FeeTipped==0.
-	coinbaseEmptyRemoval := state.EIP161EmptyRemoval(chainRules.IsSpuriousDragon, chainRules.IsAura, result.Coinbase)
+	coinbaseEmptyRemoval := state.EIP161EmptyRemoval(chainRules.IsEIP161Enabled(), chainRules.IsAura, result.Coinbase)
 	// nil pre-state must not short-circuit to empty=true: a worker may
 	// have already bumped Nonce or set CodeHash, and EIP-161 emptiness
 	// must respect those writes — otherwise SelfDestructPath is emitted
@@ -1860,7 +1897,7 @@ func (result *execResult) calcFees(
 	if hasBurnt && newBurntBalance != oldBurntBalance {
 		result.CollectorWrites = result.CollectorWrites.SetAccountBalanceOrDelete(
 			burntAddr, burntAcc, newBurntBalance,
-			tracing.BalanceDecreaseGasBuy, state.EIP161EmptyRemoval(chainRules.IsSpuriousDragon, chainRules.IsAura, burntAddr))
+			tracing.BalanceDecreaseGasBuy, state.EIP161EmptyRemoval(chainRules.IsEIP161Enabled(), chainRules.IsAura, burntAddr))
 		addWrites = append(addWrites, &state.VersionedWrite{
 			Address:             burntAddr,
 			Path:                state.BalancePath,
@@ -2592,7 +2629,12 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 					if txTask.IsHistoric() {
 						stateReader = state.NewHistoryReaderV3WithBlockCache(applyTx, pe.rs.Domains(), be.blockStateCache, txTask.Version().TxNum)
 					} else {
-						stateReader = state.NewCurrentCachedReaderV3(pe.rs.Domains().AsGetter(applyTx), be.blockStateCache)
+						// Use CachedReaderV3 with readCurrent=true so the
+						// finalize (including system TXs) reads from the
+						// BlockStateCache write buffer. This ensures the
+						// system TX sees all accumulated state from prior
+						// TXs in the block, not stale sd.mem values.
+						stateReader = state.NewCurrentCachedReaderV3(pe.rs.Domains().AsGetterNoMetrics(applyTx), be.blockStateCache)
 					}
 				}
 
@@ -2689,7 +2731,7 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 						return keys
 					}
 					// Mirror txtask.go's genesis rules-clobber so empty allocs (AuRa ZeroAddress) survive.
-					emptyRemoval := be.blockNum != 0 && pe.cfg.chainConfig.IsSpuriousDragon(be.blockNum)
+					emptyRemoval := be.blockNum != 0 && pe.cfg.chainConfig.IsEIP161Enabled(be.blockNum)
 					txResult.writes = normalizeWriteSet(rawWrites, be.versionMap, txVersion.TxIndex, resultIncarnation, stateReader, domainStorageKeys, emptyRemoval, pe.cfg.chainConfig.Aura != nil)
 				}
 
@@ -2742,6 +2784,7 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 
 			applyResult := txResult{
 				blockNum:              be.blockNum,
+				blockHash:             be.blockHash,
 				traceFroms:            map[accounts.Address]struct{}{},
 				traceTos:              map[accounts.Address]struct{}{},
 				txNum:                 task.Version().TxNum,
@@ -2855,7 +2898,7 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 				// the pre-block balance and stomped tx 28's in-block update.
 				reader = state.NewHistoryReaderV3WithBlockCache(applyTx, pe.rs.Domains(), be.blockStateCache, finalVersion.TxNum)
 			} else {
-				reader = state.NewCurrentCachedReaderV3(pe.rs.Domains().AsGetter(applyTx), be.blockStateCache)
+				reader = state.NewCurrentCachedReaderV3(pe.rs.Domains().AsGetterNoMetrics(applyTx), be.blockStateCache)
 			}
 			pe.RUnlock()
 
@@ -2932,6 +2975,7 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 			lastResult := be.results[len(be.results)-1]
 			if err := be.sendResult(ctx, &txResult{
 				blockNum:              be.blockNum,
+				blockHash:             be.blockHash,
 				txNum:                 txTask.Version().TxNum,
 				rules:                 lastResult.Rules(),
 				writes:                finalizeWrites,
@@ -3490,6 +3534,68 @@ func normalizeWriteSet(writes state.VersionedWrites, vm *state.VersionMap, txInd
 				}
 			}
 		}
+	}
+
+	// CodePath must travel with CodeHashPath: the case above and the fill loop
+	// recover an account's codeHash but not its code, so a validated writeset
+	// lacking a fresh CodePath (e.g. a re-executing 7702 tx whose SetCode
+	// short-circuited) would persist a codeHash with no code. Recover the code
+	// (versionMap, else stateReader post-state) and re-emit CodePath, bounded to
+	// 7702 designators so unchanged contract code isn't re-emitted. Forward-only:
+	// it can't repair codeHash-no-code already collated into snapshots.
+	codeInOutput := make(map[accounts.Address]bool)
+	codeHashInOutput := make(map[accounts.Address]accounts.CodeHash)
+	for _, w := range filtered {
+		switch w.Path {
+		case state.CodePath:
+			codeInOutput[w.Address] = true
+		case state.CodeHashPath:
+			if h, ok := w.Val.(accounts.CodeHash); ok {
+				codeHashInOutput[w.Address] = h
+			}
+		}
+	}
+	for addr, h := range codeHashInOutput {
+		if h.IsEmpty() || codeInOutput[addr] || sdSet[addr] {
+			continue
+		}
+		// Recover the code whose hash this tx emitted. Prefer the versionMap
+		// (this batch's writes); on the SetCode short-circuit path — a
+		// re-executing 7702 delegation whose code equals the already-committed
+		// designator, so the validated incarnation writes no CodePath and the
+		// prior incarnation's versionMap entry was invalidated on re-exec — the
+		// versionMap holds nothing for this tx, so fall back to the post-state
+		// via stateReader.
+		var code []byte
+		if rr := vm.Read(addr, state.CodePath, accounts.NilKey, txIndex+1); rr.Status() == state.MVReadResultDone {
+			if c, ok := rr.Value().([]byte); ok {
+				code = c
+			}
+		}
+		if len(code) == 0 && stateReader != nil {
+			if c, err := stateReader.ReadAccountCode(addr); err == nil {
+				code = c
+			}
+		}
+		// The codeHash-without-code asymmetry only arises from the SetCode
+		// short-circuit (new code == existing → no CodePath written), since a
+		// regular deploy writes CodePath and CodeHashPath together at the same
+		// incarnation. When the short-circuit fires the emitted codeHash is backed
+		// by either (a) the EIP-7702 designator this re-exec must re-emit, or
+		// (b) already-committed identical bytes (CREATE2 redeploy / unchanged
+		// contract) whose code is already in CodeDomain — benign, re-emitting it
+		// would be an elided DomainPut per modified contract. So recovery is gated
+		// to 7702 designators: that's the only case that leaves uncommitted code
+		// without its CodePath. (Gating also never misattributes a callee's code.)
+		if _, ok := types.ParseDelegation(code); !ok {
+			continue
+		}
+		filtered = append(filtered, &state.VersionedWrite{
+			Address: addr,
+			Path:    state.CodePath,
+			Val:     code,
+			Version: state.Version{TxIndex: txIndex, Incarnation: incarnation},
+		})
 	}
 
 	// EIP-161 empty account removal: if an account has Balance=0, Nonce=0,

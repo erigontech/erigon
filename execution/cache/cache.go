@@ -16,16 +16,24 @@
 
 package cache
 
-import "github.com/erigontech/erigon/common"
-
 // Cache is the interface for domain caches.
 // Implementations: GenericCache (for Account/Storage), CodeCache (for Code).
 type Cache interface {
 	// Get retrieves data for the given key.
 	Get(key []byte) ([]byte, bool)
 
-	// Put stores data for the given key.
-	Put(key []byte, value []byte)
+	// GetWithTxNum is Get plus the txNum the cached value reflects, so the
+	// read path can apply a step bound against an in-flight unwind's maxStep.
+	GetWithTxNum(key []byte) ([]byte, uint64, bool)
+
+	// Put stores data for the given key, stamped with the txNum the value
+	// reflects (used for txNum/epoch unwind invalidation).
+	Put(key []byte, value []byte, txNum uint64)
+
+	// PutIfAbsent is Put except that a live entry for key is left untouched
+	// (a stale one is replaced) — for prefetch writers, whose snapshot may
+	// already be superseded by an authoritative Put.
+	PutIfAbsent(key []byte, value []byte, txNum uint64)
 
 	// Delete removes the data for the given key.
 	Delete(key []byte)
@@ -33,18 +41,11 @@ type Cache interface {
 	// Clear removes all mutable entries from the cache.
 	Clear()
 
-	// GetBlockHash returns the hash of the last block processed.
-	GetBlockHash() common.Hash
-
-	// SetBlockHash sets the hash of the current block being processed.
-	SetBlockHash(hash common.Hash)
-
-	// ValidateAndPrepare checks if parentHash matches the cache's blockHash.
-	// If mismatch, clears mutable caches. Returns true if valid, false if cleared.
-	ValidateAndPrepare(parentHash common.Hash, incomingBlockHash common.Hash) bool
-
-	// ClearWithHash clears the cache and sets the block hash.
-	ClearWithHash(hash common.Hash)
+	// Unwind invalidates entries that reflect state above unwindToTxNum on a
+	// now-dead fork. Diffset-free and lazy: both GenericCache and CodeCache
+	// bump an epoch and lower a floor, so stale entries (including code and
+	// size) are evicted on the next read rather than walked eagerly.
+	Unwind(unwindToTxNum uint64)
 
 	// Len returns the number of entries in the cache.
 	Len() int

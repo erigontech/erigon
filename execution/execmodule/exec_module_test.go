@@ -26,6 +26,7 @@ import (
 	"errors"
 	"fmt"
 	"math/big"
+	"sort"
 	"testing"
 	"time"
 
@@ -49,6 +50,7 @@ import (
 	"github.com/erigontech/erigon/execution/execmodule/execmoduletester"
 	"github.com/erigontech/erigon/execution/protocol/misc"
 	"github.com/erigontech/erigon/execution/protocol/params"
+	"github.com/erigontech/erigon/execution/stagedsync"
 	"github.com/erigontech/erigon/execution/stagedsync/stages"
 	"github.com/erigontech/erigon/execution/state/contracts"
 	"github.com/erigontech/erigon/execution/tests/blockgen"
@@ -2324,35 +2326,65 @@ func TestUpdateForkChoiceShallowReorgAfterLargeBatchExec(t *testing.T) {
 	}))
 }
 
-// TestBALDrivenFoldAheadChangesetIntegrity probes the B3 review hypothesis: with
-// BAL-driven fold-ahead commitment, block N is folded from its BAL ahead of its
-// blockResult — before SavePastChangesetAccumulator(N) exists — so the fold's
-// ComputeCommitment runs on the cs==nil path under whatever accumulator is
-// installed. yperbasis's concern was that N's commitment-domain diffs are
-// therefore misrouted (into nil / N-1's accumulator), so N's saved per-block
-// changeset loses its commitment deltas and unwind restores a wrong trie root.
+// TestBALDrivenFoldAheadChangesetIntegrity guards against the fold misrouting a
+// block's commitment branch deltas into the wrong block's changeset. The BAL
+// fold computes a pre-window block ahead of its blockResult; if it recorded its
+// deferred branch writes into a later window block's changeset (instead of
+// isolated), that window block's saved diffset would gain entries it must not
+// have, and a later unwind would restore a wrong trie root.
 //
-// This tests that claim directly and deterministically: a multi-block batch (so
-// blocks fold ahead while execution runs) with WithAlwaysGenerateChangesets so
-// every block's changeset is saved, then it reads each folded-ahead block's
-// saved diffset and asserts the CommitmentDomain deltas are present. fold-off is
-// the incremental control. If the fold misroutes, a folded block's commitment
-// diff is empty under fold-on but populated under fold-off. If both are
-// populated, the fold routes commitment diffs correctly and B3 is disproven.
+// The batch uses a mid-batch changeset window (MaxReorgDepth places windowStart
+// inside the batch) so early blocks fold ahead (pre-window, isolated) while the
+// later window blocks keep per-block changesets. The check is differential and
+// per-key: the window blocks' CommitmentDomain diffsets must be byte-identical
+// whether the earlier blocks were folded (fold-on) or computed incrementally
+// (fold-off). A leak would show up as extra/changed entries under fold-on — the
+// vacuous NotEmpty check the previous version used could not see that. It also
+// asserts the fold path actually engaged (a real fold count) so a silent
+// degrade-to-incremental can't make the differential pass trivially.
 //
 // (An end-to-end divergent-fork reorg would be a stronger check, but blockgen
 // randomises ParentBeaconBlockRoot per block, so under Amsterdam — required for
 // BALs — two chains can't share a prefix and a mid-chain parent has no state.)
 func TestBALDrivenFoldAheadChangesetIntegrity(t *testing.T) {
-	t.Run("fold-off", func(t *testing.T) { runBALFoldAheadChangeset(t, false) })
-	t.Run("fold-on", func(t *testing.T) { runBALFoldAheadChangeset(t, true) })
+	off := runBALFoldAheadChangeset(t, false)
+	on := runBALFoldAheadChangeset(t, true)
+
+	require.Zero(t, off.folds, "fold-off must not fold any block")
+	require.Positive(t, on.folds, "fold-on must actually fold the pre-window blocks (else the differential is vacuous)")
+	// Compare the SET OF KEYS each window block's commitment changeset touched,
+	// not the raw diff bytes: per-block folds and a merged batch transition
+	// legitimately encode the same branches differently (step references), so
+	// byte-equality is too strict. But the set of branches a window block's own
+	// compute touches is fixed by the post-pre-window trie shape — a fold that
+	// leaked a pre-window block's deltas into a window block's changeset would
+	// add keys that block never touched, so the key sets must match.
+	require.Equal(t, off.windowCommitmentKeys, on.windowCommitmentKeys,
+		"a window block's commitment-changeset key set differs between incremental and "+
+			"fold-ahead — the fold misrouted a pre-window block's branch deltas into a "+
+			"window block's changeset")
 }
 
-func runBALFoldAheadChangeset(t *testing.T, foldAhead bool) {
+type balFoldResult struct {
+	// windowCommitmentKeys maps each window block number to the sorted set of
+	// CommitmentDomain changeset keys (branch prefixes) it touched — compared
+	// across modes to catch a fold misrouting deltas into the wrong block.
+	windowCommitmentKeys map[uint64][]string
+	folds                int64
+}
+
+func runBALFoldAheadChangeset(t *testing.T, foldAhead bool) balFoldResult {
 	defer func(prev bool) { dbg.BALDrivenCommitment = prev }(dbg.BALDrivenCommitment)
 	defer func(prev bool) { dbg.IgnoreBAL = prev }(dbg.IgnoreBAL)
 	dbg.BALDrivenCommitment = foldAhead
 	dbg.IgnoreBAL = false
+	stagedsync.ResetFoldsAheadForTest()
+
+	const chainLen = 12
+	// maxReorgDepth places the changeset window at maxBlock-depth = 12-4 = 8, so
+	// blocks 1..7 are pre-window (fold candidates) and 8..12 own changesets.
+	const maxReorgDepth = 4
+	const windowStart = chainLen - maxReorgDepth
 
 	ctx := t.Context()
 	privKey, err := crypto.GenerateKey()
@@ -2365,10 +2397,9 @@ func runBALFoldAheadChangeset(t *testing.T, foldAhead bool) {
 			Alloc:  types.GenesisAlloc{senderAddr: {Balance: big.NewInt(1 * common.Ether)}},
 		}),
 		execmoduletester.WithExperimentalBAL(),
-		execmoduletester.WithAlwaysGenerateChangesets(true),
+		execmoduletester.WithAlwaysGenerateChangesets(false),
+		execmoduletester.WithMaxReorgDepth(maxReorgDepth),
 	)
-
-	const chainLen = 12
 
 	// AllProtocolChanges is post-London, so txs need a fee cap above the base fee
 	// (transferGen's 1-wei price is only valid on the pre-London default).
@@ -2383,9 +2414,6 @@ func runBALFoldAheadChangeset(t *testing.T, foldAhead bool) {
 		})
 	require.NoError(t, err)
 
-	// One large batch, so blocks 2..N fold ahead while execution runs. The fold
-	// verifies its root against each header, so a clean FCU already proves the
-	// fold produces correct roots; the changeset probe below checks the diffsets.
 	insRes, err := insertBlocksWithBAL(ctx, m.ExecModule, canonical.Blocks, canonical.BlockAccessLists)
 	require.NoError(t, err)
 	require.Equal(t, execmodule.ExecutionStatusSuccess, insRes)
@@ -2396,37 +2424,45 @@ func runBALFoldAheadChangeset(t *testing.T, foldAhead bool) {
 
 	m.ExecModule.WaitIdle(ctx)
 
-	// Every folded-ahead block's saved changeset must carry its CommitmentDomain
-	// deltas — that is exactly what B3 claims the fold loses. Each transfer block
-	// mutates the trie, so a correctly-routed changeset always has commitment
-	// entries; an empty one means the fold's branch writes were misrouted.
+	res := balFoldResult{
+		windowCommitmentKeys: map[uint64][]string{},
+		folds:                stagedsync.FoldsAheadPerformedForTest(),
+	}
 	require.NoError(t, m.DB.ViewTemporal(ctx, func(tx kv.TemporalTx) error {
-		// Confirm the fold path had real work: blocks must carry non-empty BALs
-		// in the DB, otherwise fold-on would silently degrade to incremental and
-		// the test would prove nothing.
-		balBytes, err := rawdb.ReadBlockAccessListBytes(tx, canonical.Blocks[chainLen/2].Hash(), canonical.Blocks[chainLen/2].NumberU64())
+		// Confirm blocks carry BALs (checked on the tip, which is inside the
+		// window and so not pruned — pre-window BAL sidecars are pruned beyond
+		// MaxReorgDepth, but the fold reads them in-memory during execution, and
+		// on.folds asserts the fold path actually engaged).
+		balBytes, err := rawdb.ReadBlockAccessListBytes(tx, canonical.TopBlock.Hash(), canonical.TopBlock.NumberU64())
 		require.NoError(t, err)
 		require.NotEmpty(t, balBytes, "blocks must carry a BAL so BAL-driven fold-ahead actually engages")
 
-		lowest, err := changeset.ReadLowestUnwindableBlock(tx)
-		require.NoError(t, err)
-		require.LessOrEqual(t, lowest, uint64(2), "whole batch must be unwindable under AlwaysGenerateChangesets")
+		// Window blocks own per-block changesets; capture their CommitmentDomain
+		// deltas for the cross-mode differential.
 		for _, blk := range canonical.Blocks {
+			if blk.NumberU64() < windowStart {
+				continue
+			}
 			diffs, ok, err := changeset.ReadDiffSet(tx, blk.NumberU64(), blk.Hash())
 			require.NoError(t, err)
-			require.Truef(t, ok, "block %d must have a saved diffset", blk.NumberU64())
+			require.Truef(t, ok, "window block %d must have a saved diffset", blk.NumberU64())
 			require.NotEmptyf(t, diffs[kv.CommitmentDomain],
-				"block %d changeset is missing CommitmentDomain deltas (fold-ahead=%v) — "+
-					"this is the B3 misroute: the fold's branch writes did not land in "+
-					"block N's changeset", blk.NumberU64(), foldAhead)
+				"window block %d changeset is missing CommitmentDomain deltas (fold-ahead=%v)",
+				blk.NumberU64(), foldAhead)
+			keys := make([]string, 0, len(diffs[kv.CommitmentDomain]))
+			for _, d := range diffs[kv.CommitmentDomain] {
+				keys = append(keys, d.Key)
+			}
+			sort.Strings(keys)
+			res.windowCommitmentKeys[blk.NumberU64()] = keys
 		}
 		return nil
 	}))
 
-	// End-to-end: FCU back below the folded tip unwinds using those changesets,
-	// then FCU forward re-executes. If the fold-built commitment diffs were wrong,
-	// the unwind restores a bad root and the forward re-exec fails.
-	const reorgBackTo = chainLen - 4
+	// End-to-end: FCU back into the window unwinds using those changesets, then
+	// FCU forward re-executes. If the fold-built state were wrong, the unwind
+	// restores a bad root and the forward re-exec fails.
+	const reorgBackTo = chainLen - 2 // within the window (>= windowStart)
 	back, err := updateForkChoice(ctx, m.ExecModule, canonical.Blocks[reorgBackTo-1].Header())
 	require.NoError(t, err)
 	require.Equal(t, execmodule.ExecutionStatusSuccess, back.Status, "reorg back must succeed")
@@ -2434,7 +2470,7 @@ func runBALFoldAheadChangeset(t *testing.T, foldAhead bool) {
 	require.NoError(t, m.DB.ViewTemporal(ctx, func(tx kv.TemporalTx) error {
 		execProg, err := stages.GetStageProgress(tx, stages.Execution)
 		require.NoError(t, err)
-		require.Equal(t, uint64(reorgBackTo), execProg, "FCU back must unwind execution (consuming the fold-built changesets)")
+		require.Equal(t, uint64(reorgBackTo), execProg, "FCU back must unwind execution (consuming the window changesets)")
 		return nil
 	}))
 
@@ -2451,4 +2487,5 @@ func runBALFoldAheadChangeset(t *testing.T, foldAhead bool) {
 		require.Equal(t, canonical.TopBlock.Hash(), rawdb.ReadHeadBlockHash(tx))
 		return nil
 	}))
+	return res
 }
