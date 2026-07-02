@@ -341,8 +341,12 @@ func readFloor[T any](vm *VersionMap, addr accounts.Address, txIdx int, sel func
 		return val, res, false
 	}
 	res.depIdx = fk
-	if fv.flag == FlagDone {
+	switch fv.flag {
+	case FlagDone:
 		res.incarnation = fv.incarnation
+	case FlagEstimate:
+	default:
+		panic("unknown flag value")
 	}
 	return fv.Value, res, true
 }
@@ -499,6 +503,9 @@ func (vm *VersionMap) LatestTxIndex(addr accounts.Address, path AccountPath, key
 func (vm *VersionMap) AnyDoneBoolWriteEquals(addr accounts.Address, path AccountPath, key accounts.StorageKey, txIdxLimit int, target bool) bool {
 	if vm == nil {
 		return false
+	}
+	if path != SelfDestructPath {
+		panic("AnyDoneBoolWriteEquals: only SelfDestructPath is supported")
 	}
 	vm.mu.RLock()
 	defer vm.mu.RUnlock()

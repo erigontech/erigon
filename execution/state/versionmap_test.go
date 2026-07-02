@@ -715,3 +715,109 @@ func TestVersionedWritePoolReuse_NoStaleFields(t *testing.T) {
 	require.Equal(t, tracing.BalanceChangeReason(0), recycled.Reason, "Reason must reset to zero")
 	require.True(t, recycled.Val.Eq(&want), "Val must not retain the recycled value")
 }
+
+// TestBALPrePop_SameSenderTxs_NoConflicts ports the same-sender BAL
+// conflict-detection coverage to the typed VersionMap API: when the BAL
+// pre-populates balance/nonce for a run of same-sender txs, each tx's recorded
+// reads must validate without spurious conflicts.
+func TestBALPrePop_SameSenderTxs_NoConflicts(t *testing.T) {
+	t.Parallel()
+
+	sender := getAddress(7)
+	coinbase := getAddress(8)
+	const numTxs = 9
+
+	checkVersionEqual := func(readVersion, writeVersion Version) VersionValidity {
+		if readVersion == writeVersion {
+			return VersionValid
+		}
+		return VersionInvalid
+	}
+
+	vm := NewVersionMap(nil)
+	vm.HasBAL = true
+
+	for i := 0; i < numTxs; i++ {
+		writeFor(vm, sender, BalancePath, accounts.NilKey, Version{TxIndex: i, Incarnation: 0}, *uint256.NewInt(uint64(1000 - i)), true)
+		writeFor(vm, sender, NoncePath, accounts.NilKey, Version{TxIndex: i, Incarnation: 0}, uint64(i+1), true)
+		writeFor(vm, coinbase, BalancePath, accounts.NilKey, Version{TxIndex: i, Incarnation: 0}, *uint256.NewInt(uint64((i + 1) * 50)), true)
+	}
+
+	sourceFor := func(r ReadResult) ReadSource {
+		if r.Status() == MVReadResultDone {
+			return MapRead
+		}
+		return StorageRead
+	}
+
+	io := NewVersionedIO(numTxs)
+	for txIdx := 0; txIdx < numTxs; txIdx++ {
+		rs := ReadSet{}
+		rs.SetAddress(sender, VersionedRead[AccountView]{ReadHeader: ReadHeader{Source: StorageRead, Version: UnknownVersion}})
+		balVal, balRes, _ := readFor(vm, sender, BalancePath, accounts.NilKey, txIdx)
+		bv, _ := balVal.(uint256.Int)
+		rs.SetBalance(sender, VersionedRead[uint256.Int]{ReadHeader: ReadHeader{Source: sourceFor(balRes), Version: balRes.Version()}, Val: bv})
+		nonceVal, nonceRes, _ := readFor(vm, sender, NoncePath, accounts.NilKey, txIdx)
+		nv, _ := nonceVal.(uint64)
+		rs.SetNonce(sender, VersionedRead[uint64]{ReadHeader: ReadHeader{Source: sourceFor(nonceRes), Version: nonceRes.Version()}, Val: nv})
+		rs.SetAddress(coinbase, VersionedRead[AccountView]{ReadHeader: ReadHeader{Source: StorageRead, Version: UnknownVersion}})
+		cbBalVal, cbBalRes, _ := readFor(vm, coinbase, BalancePath, accounts.NilKey, txIdx)
+		cbv, _ := cbBalVal.(uint256.Int)
+		rs.SetBalance(coinbase, VersionedRead[uint256.Int]{ReadHeader: ReadHeader{Source: sourceFor(cbBalRes), Version: cbBalRes.Version()}, Val: cbv})
+		io.RecordReads(Version{TxIndex: txIdx, Incarnation: 0}, rs)
+	}
+
+	for txIdx := 0; txIdx < numTxs; txIdx++ {
+		valid := vm.ValidateVersion(txIdx, io, checkVersionEqual, false, "")
+		require.Equal(t, VersionValid, valid,
+			"tx %d: BAL-pre-populated reads should validate without conflicts; got %s", txIdx, valid)
+	}
+}
+
+// TestNoBAL_SameSenderTxs_DetectsConflicts is the safety counterpart: without a
+// BAL, a run of same-sender txs whose recorded StorageReads predate tx 0's
+// flushed balance/nonce must each invalidate (else parallel exec would commit
+// stale balances/nonces).
+func TestNoBAL_SameSenderTxs_DetectsConflicts(t *testing.T) {
+	t.Parallel()
+
+	sender := getAddress(11)
+	const numTxs = 9
+
+	checkVersionEqual := func(readVersion, writeVersion Version) VersionValidity {
+		if readVersion == writeVersion {
+			return VersionValid
+		}
+		return VersionInvalid
+	}
+
+	vm := NewVersionMap(nil)
+	require.False(t, vm.HasBAL, "test exercises the no-BAL path")
+
+	origBalance := *uint256.NewInt(1_000_000)
+	origNonce := uint64(42)
+	io := NewVersionedIO(numTxs)
+	for txIdx := 0; txIdx < numTxs; txIdx++ {
+		rs := ReadSet{}
+		rs.SetBalance(sender, VersionedRead[uint256.Int]{ReadHeader: ReadHeader{Source: StorageRead, Version: UnknownVersion}, Val: origBalance})
+		rs.SetNonce(sender, VersionedRead[uint64]{ReadHeader: ReadHeader{Source: StorageRead, Version: UnknownVersion}, Val: origNonce})
+		rs.SetAddress(sender, VersionedRead[AccountView]{ReadHeader: ReadHeader{Source: StorageRead, Version: UnknownVersion}})
+		io.RecordReads(Version{TxIndex: txIdx, Incarnation: 0}, rs)
+	}
+
+	postBalance := *uint256.NewInt(900_000)
+	postNonce := origNonce + 1
+	ws := &WriteSet{}
+	ws.SetBalance(sender, &VersionedWrite[uint256.Int]{WriteHeader: WriteHeader{Address: sender, Path: BalancePath, Version: Version{TxIndex: 0, Incarnation: 0}}, Val: postBalance})
+	ws.SetNonce(sender, &VersionedWrite[uint64]{WriteHeader: WriteHeader{Address: sender, Path: NoncePath, Version: Version{TxIndex: 0, Incarnation: 0}}, Val: postNonce})
+	vm.FlushVersionedWrites(ws, true, "")
+
+	require.Equal(t, VersionValid, vm.ValidateVersion(0, io, checkVersionEqual, false, ""),
+		"tx 0 should validate (no prior writes to conflict with)")
+
+	for txIdx := 1; txIdx < numTxs; txIdx++ {
+		valid := vm.ValidateVersion(txIdx, io, checkVersionEqual, false, "")
+		require.Equal(t, VersionInvalid, valid,
+			"tx %d: recorded StorageRead of sender.BalancePath conflicts with tx 0's flushed Done; got %s", txIdx, valid)
+	}
+}

@@ -1574,3 +1574,94 @@ func TestVersionedIO_mergeTxEquivalentToMerge(t *testing.T) {
 	require.True(t, len(fused.inputs) == len(fused.outputs) && len(fused.outputs) == len(fused.accessed),
 		"mergeTx must keep inputs/outputs/accessed equal length")
 }
+
+// TestSetAccountBalanceOrDelete_NoncePathOnly_AppendBalanceNotFullAccount
+// regression-pins the addrHasAnyWrite guard (#21017 bug #2): when the worker
+// already wrote a non-balance field, SetAccountBalanceOrDelete must append only
+// Balance, not re-emit Nonce/Incarnation/CodeHash from the pre-block snapshot.
+func TestSetAccountBalanceOrDelete_NoncePathOnly_AppendBalanceNotFullAccount(t *testing.T) {
+	t.Parallel()
+
+	addr := accounts.InternAddress(common.HexToAddress("0xA000"))
+	writes := &WriteSet{}
+	writes.SetNonce(addr, &VersionedWrite[uint64]{WriteHeader: WriteHeader{Address: addr, Path: NoncePath}, Val: 42})
+
+	acc := accounts.NewAccount()
+	acc.Balance = *uint256.NewInt(100)
+	acc.Nonce = 41 // stale; worker has it at 42
+	acc.Incarnation = 1
+	acc.CodeHash = accounts.EmptyCodeHash
+
+	result := writes.SetAccountBalanceOrDelete(addr, &acc, *uint256.NewInt(500), tracing.BalanceIncreaseRewardTransactionFee, true)
+
+	require.Equal(t, 2, result.Count(), "must append only BalancePath, not re-emit full account")
+	nw, ok := result.GetNonce(addr)
+	require.True(t, ok, "NoncePath must be preserved")
+	require.Equal(t, uint64(42), nw.Val, "worker's nonce must NOT be clobbered by stale snapshot")
+	bw, ok := result.GetBalance(addr)
+	require.True(t, ok, "BalancePath must be appended")
+	require.Equal(t, *uint256.NewInt(500), bw.Val)
+	_, ok = result.GetIncarnation(addr)
+	require.False(t, ok, "IncarnationPath must NOT be re-emitted from stale snapshot")
+	_, ok = result.GetCodeHash(addr)
+	require.False(t, ok, "CodeHashPath must NOT be re-emitted from stale snapshot")
+}
+
+// TestSetAccountBalanceOrDelete_CodeHashPathOnly_AppendBalanceNotFullAccount
+// covers the same guard for a CodeHash-only worker write.
+func TestSetAccountBalanceOrDelete_CodeHashPathOnly_AppendBalanceNotFullAccount(t *testing.T) {
+	t.Parallel()
+
+	addr := accounts.InternAddress(common.HexToAddress("0xB000"))
+	workerCodeHash := accounts.InternCodeHash(common.HexToHash("0xcafe"))
+	writes := &WriteSet{}
+	writes.SetCodeHash(addr, &VersionedWrite[accounts.CodeHash]{WriteHeader: WriteHeader{Address: addr, Path: CodeHashPath}, Val: workerCodeHash})
+
+	acc := accounts.NewAccount()
+	acc.Balance = *uint256.NewInt(100)
+	acc.Nonce = 5
+	acc.Incarnation = 2
+	acc.CodeHash = accounts.EmptyCodeHash // stale; worker installed real code
+
+	result := writes.SetAccountBalanceOrDelete(addr, &acc, *uint256.NewInt(500), tracing.BalanceIncreaseRewardTransactionFee, true)
+
+	require.Equal(t, 2, result.Count(), "must append only BalancePath, not re-emit full account")
+	cw, ok := result.GetCodeHash(addr)
+	require.True(t, ok, "CodeHashPath must be preserved")
+	require.Equal(t, workerCodeHash, cw.Val, "worker's CodeHash must NOT be clobbered by stale snapshot")
+	_, ok = result.GetBalance(addr)
+	require.True(t, ok, "BalancePath must be appended")
+	_, ok = result.GetNonce(addr)
+	require.False(t, ok, "NoncePath must NOT be re-emitted from stale snapshot")
+	_, ok = result.GetIncarnation(addr)
+	require.False(t, ok, "IncarnationPath must NOT be re-emitted from stale snapshot")
+}
+
+// TestSetAccountBalanceOrDelete_IncarnationPathOnly_AppendBalanceNotFullAccount
+// covers the same guard for an Incarnation-only worker write.
+func TestSetAccountBalanceOrDelete_IncarnationPathOnly_AppendBalanceNotFullAccount(t *testing.T) {
+	t.Parallel()
+
+	addr := accounts.InternAddress(common.HexToAddress("0xC000"))
+	writes := &WriteSet{}
+	writes.SetIncarnation(addr, &VersionedWrite[uint64]{WriteHeader: WriteHeader{Address: addr, Path: IncarnationPath}, Val: 7})
+
+	acc := accounts.NewAccount()
+	acc.Balance = *uint256.NewInt(100)
+	acc.Nonce = 3
+	acc.Incarnation = 6 // stale; worker has it at 7
+	acc.CodeHash = accounts.EmptyCodeHash
+
+	result := writes.SetAccountBalanceOrDelete(addr, &acc, *uint256.NewInt(500), tracing.BalanceIncreaseRewardTransactionFee, true)
+
+	require.Equal(t, 2, result.Count(), "must append only BalancePath, not re-emit full account")
+	iw, ok := result.GetIncarnation(addr)
+	require.True(t, ok, "IncarnationPath must be preserved")
+	require.Equal(t, uint64(7), iw.Val, "worker's incarnation must NOT be clobbered by stale snapshot")
+	_, ok = result.GetBalance(addr)
+	require.True(t, ok, "BalancePath must be appended")
+	_, ok = result.GetNonce(addr)
+	require.False(t, ok, "NoncePath must NOT be re-emitted from stale snapshot")
+	_, ok = result.GetCodeHash(addr)
+	require.False(t, ok, "CodeHashPath must NOT be re-emitted from stale snapshot")
+}

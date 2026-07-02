@@ -1943,6 +1943,13 @@ func (writes *WriteSet) SetAccountBalanceOrDelete(addr accounts.Address, acc *ac
 		bw.Reason = reason
 		return writes
 	}
+	if writes.hasAddr(addr) {
+		// The worker already wrote another field for this addr (e.g. Nonce on a
+		// miner self-send where sender == coinbase); append only Balance so the
+		// pre-block snapshot acc does not clobber those post-execution writes.
+		writes.SetBalance(addr, &VersionedWrite[uint256.Int]{WriteHeader: WriteHeader{Address: addr, Path: BalancePath, Reason: reason}, Val: val})
+		return writes
+	}
 	// Account not in writes — emit complete account fields.
 	writes.SetBalance(addr, &VersionedWrite[uint256.Int]{WriteHeader: WriteHeader{Address: addr, Path: BalancePath, Reason: reason}, Val: val})
 	writes.SetNonce(addr, &VersionedWrite[uint64]{WriteHeader: WriteHeader{Address: addr, Path: NoncePath}, Val: acc.Nonce})
