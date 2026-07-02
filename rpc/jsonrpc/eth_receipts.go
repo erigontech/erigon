@@ -77,6 +77,31 @@ func (api *BaseAPI) getReceipts(ctx context.Context, tx kv.TemporalTx, block *ty
 	return api.receiptsGenerator.GetReceipts(ctx, chainConfig, tx, block, eth.ReceiptsOpts{CommitmentHistoryEnabled: commitmentHistoryEnabled})
 }
 
+// getReceiptsWithBor returns the block's receipts plus, on bor chains with state sync
+// events in this block, the synthetic bor receipt (nil otherwise). The bor receipt is
+// returned separately because call sites marshal it differently from regular receipts.
+func (api *BaseAPI) getReceiptsWithBor(ctx context.Context, tx kv.TemporalTx, chainConfig *chain.Config, block *types.Block) (types.Receipts, *types.Receipt, error) {
+	receipts, err := api.getReceipts(ctx, tx, block)
+	if err != nil {
+		return nil, nil, err
+	}
+	if chainConfig.Bor == nil {
+		return receipts, nil, nil
+	}
+	events, err := api.bridgeReader.Events(ctx, block.Hash(), block.NumberU64())
+	if err != nil {
+		return nil, nil, err
+	}
+	if len(events) == 0 {
+		return receipts, nil, nil
+	}
+	borReceipt, err := api.borReceiptGenerator.GenerateBorReceipt(ctx, tx, block, events, chainConfig)
+	if err != nil {
+		return nil, nil, err
+	}
+	return receipts, borReceipt, nil
+}
+
 func (api *BaseAPI) getReceipt(ctx context.Context, cc *chain.Config, tx kv.TemporalTx, header *types.Header, txn types.Transaction, index int, txNum uint64, postState *receipts.PostStateInfo) (*types.Receipt, error) {
 	return api.receiptsGenerator.GetReceipt(ctx, cc, tx, header, txn, index, txNum, postState)
 }
@@ -634,7 +659,7 @@ func (api *APIImpl) GetBlockReceipts(ctx context.Context, numberOrHash rpc.Block
 	if err != nil {
 		return nil, err
 	}
-	receipts, err := api.getReceipts(ctx, tx, block)
+	receipts, borReceipt, err := api.getReceiptsWithBor(ctx, tx, chainConfig, block)
 	if err != nil {
 		return nil, err
 	}
@@ -644,20 +669,8 @@ func (api *APIImpl) GetBlockReceipts(ctx context.Context, numberOrHash rpc.Block
 		result = append(result, ethutils.MarshalReceipt(receipt, txn, chainConfig, block.HeaderNoCopy(), txn.Hash(), true, true))
 	}
 
-	if chainConfig.Bor != nil {
-		events, err := api.bridgeReader.Events(ctx, block.Hash(), blockNum)
-		if err != nil {
-			return nil, err
-		}
-
-		if len(events) != 0 {
-			borReceipt, err := api.borReceiptGenerator.GenerateBorReceipt(ctx, tx, block, events, chainConfig)
-			if err != nil {
-				return nil, err
-			}
-
-			result = append(result, ethutils.MarshalReceipt(borReceipt, bortypes.NewBorTransaction(), chainConfig, block.HeaderNoCopy(), borReceipt.TxHash, false, true))
-		}
+	if borReceipt != nil {
+		result = append(result, ethutils.MarshalReceipt(borReceipt, bortypes.NewBorTransaction(), chainConfig, block.HeaderNoCopy(), borReceipt.TxHash, false, true))
 	}
 
 	return result, nil

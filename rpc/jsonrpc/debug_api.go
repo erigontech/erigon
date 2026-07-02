@@ -699,26 +699,16 @@ func (api *DebugAPIImpl) GetRawReceipts(ctx context.Context, blockNrOrHash rpc.B
 	if block == nil {
 		return nil, nil
 	}
-	receipts, err := api.getReceipts(ctx, tx, block)
-	if err != nil {
-		return nil, err
-	}
 	chainConfig, err := api.chainConfig(ctx, tx)
 	if err != nil {
 		return nil, err
 	}
-	if chainConfig.Bor != nil {
-		events, err := api.bridgeReader.Events(ctx, block.Hash(), blockNum)
-		if err != nil {
-			return nil, err
-		}
-		if len(events) != 0 {
-			borReceipt, err := api.borReceiptGenerator.GenerateBorReceipt(ctx, tx, block, events, chainConfig)
-			if err != nil {
-				return nil, err
-			}
-			receipts = append(receipts, borReceipt)
-		}
+	receipts, borReceipt, err := api.getReceiptsWithBor(ctx, tx, chainConfig, block)
+	if err != nil {
+		return nil, err
+	}
+	if borReceipt != nil {
+		receipts = append(receipts, borReceipt)
 	}
 
 	result := make([]hexutil.Bytes, len(receipts))
