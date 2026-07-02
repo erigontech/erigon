@@ -2503,6 +2503,9 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 						}
 					}
 					if prevReceipt == nil {
+						if rawtemporaldb.ReceiptStoresFirstLogIdx(applyTx) {
+							return nil, fmt.Errorf("parallel execution is not supported on databases with legacy receipt domain schemas (ReceiptStoresFirstLogIdx == true)")
+						}
 						cumGasUsed, _, logIndexAfterTx, err := rawtemporaldb.ReceiptAsOf(applyTx, txVersion.TxNum)
 						if err != nil {
 							return nil, err
