@@ -187,6 +187,7 @@ func TestResourceTransactionAnalysisDerivesStatus(t *testing.T) {
 		{"reverted", map[string]any{"status": hexutil.Uint64(0)}, "reverted"},
 		{"success", map[string]any{"status": hexutil.Uint64(1)}, "success"},
 		{"pre-byzantium", map[string]any{"root": hexutil.Bytes{0x01}}, "unknown"},
+		{"not found", nil, "unknown"},
 	}
 
 	for _, tt := range tests {
