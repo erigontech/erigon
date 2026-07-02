@@ -258,31 +258,16 @@ func (api *DebugAPIImpl) TraceTransaction(ctx context.Context, hash common.Hash,
 		return err
 	}
 	// Retrieve the transaction and assemble its EVM context
-	var isBorStateSyncTxn bool
-	blockNum, txNum, ok, err := api.txnLookup(ctx, tx, hash)
+	blockNum, txNum, isBorStateSyncTxn, ok, err := api.txnLookupWithBorFallback(ctx, tx, hash, chainConfig)
 	if err != nil {
 		return err
 	}
-
 	if !ok {
-		if chainConfig.Bor == nil {
-			return fmt.Errorf("transaction not found")
-		}
-
-		// otherwise this may be a bor state sync transaction - check
-		blockNum, ok, err = api.bridgeReader.EventTxnLookup(ctx, hash)
-		if err != nil {
-			return err
-		}
-		if !ok {
-			return fmt.Errorf("transaction not found")
-		}
-		if config == nil || config.BorTraceEnabled == nil || !*config.BorTraceEnabled {
-			stream.WriteEmptyArray() // matches maticnetwork/bor API behaviour for consistency
-			return nil
-		}
-
-		isBorStateSyncTxn = true
+		return fmt.Errorf("transaction not found")
+	}
+	if isBorStateSyncTxn && (config == nil || config.BorTraceEnabled == nil || !*config.BorTraceEnabled) {
+		stream.WriteEmptyArray() // matches maticnetwork/bor API behaviour for consistency
+		return nil
 	}
 
 	if blockNum == 0 {
@@ -309,14 +294,10 @@ func (api *DebugAPIImpl) TraceTransaction(ctx context.Context, hash common.Hash,
 		// bor state sync txn is appended at the end of the block
 		txnIndex = block.Transactions().Len()
 	} else {
-		txNumMin, err := api._txNumReader.Min(ctx, tx, blockNum)
+		txnIndex, err = api.txnIndexInBlock(ctx, tx, blockNum, txNum, false)
 		if err != nil {
 			return err
 		}
-		if txNumMin+1 > txNum {
-			return fmt.Errorf("uint underflow txnums error txNum: %d, txNumMin: %d, blockNum: %d", txNum, txNumMin, blockNum)
-		}
-		txnIndex = int(txNum - txNumMin - 1)
 		if txnIndex >= block.Transactions().Len() {
 			return fmt.Errorf("transaction %#x not found", hash)
 		}

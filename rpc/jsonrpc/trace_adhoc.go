@@ -895,27 +895,12 @@ func (api *TraceAPIImpl) ReplayTransaction(ctx context.Context, txHash common.Ha
 		return nil, err
 	}
 
-	var isBorStateSyncTxn bool
-	blockNum, txNum, ok, err := api.txnLookup(ctx, tx, txHash)
+	blockNum, txNum, isBorStateSyncTxn, ok, err := api.txnLookupWithBorFallback(ctx, tx, txHash, chainConfig)
 	if err != nil {
 		return nil, err
 	}
-
 	if !ok {
-		if chainConfig.Bor == nil {
-			return nil, nil
-		}
-
-		// otherwise this may be a bor state sync transaction - check
-		blockNum, ok, err = api.bridgeReader.EventTxnLookup(ctx, txHash)
-		if err != nil {
-			return nil, err
-		}
-		if !ok {
-			return nil, nil
-		}
-
-		isBorStateSyncTxn = true
+		return nil, nil
 	}
 
 	err = api.BaseAPI.checkPruneHistory(ctx, tx, blockNum)
@@ -928,16 +913,10 @@ func (api *TraceAPIImpl) ReplayTransaction(ctx context.Context, txHash common.Ha
 		return nil, err
 	}
 
-	txNumMin, err := api._txNumReader.Min(ctx, tx, blockNum)
+	txnIndex, err := api.txnIndexInBlock(ctx, tx, blockNum, txNum, isBorStateSyncTxn)
 	if err != nil {
 		return nil, err
 	}
-
-	if txNumMin+1 > txNum && !isBorStateSyncTxn {
-		return nil, fmt.Errorf("uint underflow txnums error txNum: %d, txNumMin: %d, blockNum: %d", txNum, txNumMin, blockNum)
-	}
-
-	var txnIndex = int(txNum - txNumMin - 1)
 
 	if isBorStateSyncTxn {
 		txnIndex = -1

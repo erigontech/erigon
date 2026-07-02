@@ -807,18 +807,12 @@ func (api *DebugAPIImpl) GetRawTransaction(ctx context.Context, txnHash common.H
 		}
 	}
 
-	txNumMin, err := api._txNumReader.Min(ctx, tx, blockNum)
+	txnIndex, err := api.txnIndexInBlock(ctx, tx, blockNum, txNum, isBorStateSyncTx)
 	if err != nil {
 		return nil, err
 	}
 
-	if txNumMin+1 > txNum && !isBorStateSyncTx {
-		return nil, fmt.Errorf("uint underflow txnums error txNum: %d, txNumMin: %d, blockNum: %d", txNum, txNumMin, blockNum)
-	}
-
-	var txnIndex = txNum - txNumMin - 1
-
-	txn, err := api._txnReader.TxnByIdxInBlock(ctx, tx, blockNum, int(txnIndex))
+	txn, err := api._txnReader.TxnByIdxInBlock(ctx, tx, blockNum, txnIndex)
 	if err != nil {
 		return nil, err
 	}

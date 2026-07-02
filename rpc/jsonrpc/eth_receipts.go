@@ -510,13 +510,13 @@ func (api *APIImpl) GetTransactionReceipt(ctx context.Context, txnHash common.Ha
 		return nil, err
 	}
 
-	txNumMin, err := api._txNumReader.Min(ctx, overlayTx, blockNum)
+	// Private API returns 0 if transaction is not found.
+	isBorStateSyncTx := blockNum == 0 && chainConfig.Bor != nil
+
+	txnIndex, err := api.txnIndexInBlock(ctx, overlayTx, blockNum, txNum, isBorStateSyncTx)
 	if err != nil {
 		return nil, err
 	}
-
-	// Private API returns 0 if transaction is not found.
-	isBorStateSyncTx := blockNum == 0 && chainConfig.Bor != nil
 
 	if isBorStateSyncTx {
 		blockNum, ok, err = api.bridgeReader.EventTxnLookup(ctx, txnHash)
@@ -527,10 +527,6 @@ func (api *APIImpl) GetTransactionReceipt(ctx context.Context, txnHash common.Ha
 
 	if !ok {
 		return nil, nil
-	}
-
-	if txNumMin+1 > txNum && !isBorStateSyncTx {
-		return nil, fmt.Errorf("uint underflow txnums error txNum: %d, txNumMin: %d, blockNum: %d", txNum, txNumMin, blockNum)
 	}
 
 	header, err := api._blockReader.HeaderByNumber(ctx, overlayTx, blockNum)
@@ -563,8 +559,6 @@ func (api *APIImpl) GetTransactionReceipt(ctx context.Context, txnHash common.Ha
 
 		return ethutils.MarshalReceipt(borReceipt, bortypes.NewBorTransaction(), chainConfig, block.HeaderNoCopy(), txnHash, false, false), nil
 	}
-
-	var txnIndex = int(txNum - txNumMin - 1)
 
 	txn, err := api._blockReader.TxnByIdxInBlock(ctx, overlayTx, header.Number.Uint64(), txnIndex)
 	if err != nil {

@@ -239,6 +239,41 @@ func (api *BaseAPI) txnLookup(ctx context.Context, tx kv.Tx, txnHash common.Hash
 	return api._txnReader.TxnLookup(ctx, overlayTx, txnHash)
 }
 
+func (api *BaseAPI) txnLookupWithBorFallback(ctx context.Context, tx kv.Tx, txnHash common.Hash, chainConfig *chain.Config) (blockNum uint64, txNum uint64, isBorStateSyncTxn bool, ok bool, err error) {
+	blockNum, txNum, ok, err = api.txnLookup(ctx, tx, txnHash)
+	if err != nil {
+		return 0, 0, false, false, err
+	}
+	if ok {
+		return blockNum, txNum, false, true, nil
+	}
+	if chainConfig.Bor == nil {
+		return 0, 0, false, false, nil
+	}
+	blockNum, ok, err = api.bridgeReader.EventTxnLookup(ctx, txnHash)
+	if err != nil {
+		return 0, 0, false, false, err
+	}
+	if !ok {
+		return 0, 0, false, false, nil
+	}
+	return blockNum, txNum, true, true, nil
+}
+
+// txnIndexInBlock derives the in-block txn index from a global txNum. For bor state sync
+// txns txNum comes from a missed lookup, so the consistency check is skipped and the
+// returned index is meaningless.
+func (api *BaseAPI) txnIndexInBlock(ctx context.Context, tx kv.Tx, blockNum, txNum uint64, isBorStateSyncTxn bool) (int, error) {
+	txNumMin, err := api._txNumReader.Min(ctx, tx, blockNum)
+	if err != nil {
+		return 0, err
+	}
+	if txNumMin+1 > txNum && !isBorStateSyncTxn {
+		return 0, fmt.Errorf("uint underflow txnums error txNum: %d, txNumMin: %d, blockNum: %d", txNum, txNumMin, blockNum)
+	}
+	return int(txNum - txNumMin - 1), nil
+}
+
 func (api *BaseAPI) blockByNumberWithSenders(ctx context.Context, tx kv.Tx, number uint64) (*types.Block, error) {
 	blockNumber, hash, _, err := rpchelper.GetBlockNumber(ctx, rpc.BlockNumberOrHashWithNumber(rpc.BlockNumber(number)), tx, api._blockReader, api.filters)
 	if err != nil {

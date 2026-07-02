@@ -75,14 +75,10 @@ func (api *APIImpl) CallBundle(ctx context.Context, txHashes []common.Hash, stat
 			return nil, err
 		}
 
-		txNumMin, err := api._txNumReader.Min(ctx, tx, blockNumber)
+		txnIndex, err := api.txnIndexInBlock(ctx, tx, blockNumber, txNum, false)
 		if err != nil {
 			return nil, err
 		}
-		if txNumMin+1 > txNum {
-			return nil, fmt.Errorf("uint underflow txnums error txNum: %d, txNumMin: %d, blockNum: %d", txNum, txNumMin, blockNumber)
-		}
-		txnIndex := int(txNum - txNumMin - 1)
 		txn, err := api._txnReader.TxnByIdxInBlock(ctx, tx, blockNumber, txnIndex)
 		if err != nil {
 			return nil, err
