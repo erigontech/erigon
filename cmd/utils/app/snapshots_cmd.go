@@ -3432,25 +3432,8 @@ func doRetireCommand(ctx context.Context, cliCtx *cli.Command, dirs datadir.Dirs
 	defer br.MadvNormal().DisableReadAhead()
 	defer agg.MadvNormal().DisableReadAhead()
 
-	if cliCtx.IsSet(utils.ErigondbDomainStepsInFrozenFileFlag.Name) {
-		s := cliCtx.String(utils.ErigondbDomainStepsInFrozenFileFlag.Name)
-		var v uint64
-		if strings.EqualFold(s, "inf") {
-			v = config3.UnboundedDomainMerge
-		} else {
-			parsed, perr := strconv.ParseUint(s, 10, 64)
-			if perr != nil || parsed == 0 {
-				return fmt.Errorf("invalid --%s value %q: must be a positive integer or \"Inf\"",
-					utils.ErigondbDomainStepsInFrozenFileFlag.Name, s)
-			}
-			v = parsed
-		}
-		stepsStr := "Inf"
-		if v != config3.UnboundedDomainMerge {
-			stepsStr = fmt.Sprintf("%d", v)
-		}
-		logger.Info("domain merge cap overridden", "steps_in_frozen_file", stepsStr)
-		agg.SetErigondbDomainStepsInFrozenFile(v)
+	if err := agg.SetDomainStepsInFrozenFile(cliCtx.String(utils.ErigondbDomainStepsInFrozenFileFlag.Name)); err != nil {
+		return err
 	}
 
 	blockSnapBuildSema := semaphore.NewWeighted(int64(runtime.NumCPU()))
