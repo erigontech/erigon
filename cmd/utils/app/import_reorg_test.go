@@ -59,17 +59,7 @@ func TestImportReorgUnwindToGenesis(t *testing.T) {
 		t.Skip()
 	}
 
-	fixturePath := filepath.Join("..", "..", "..", "execution", "tests", "legacy-tests",
-		"BlockchainTests", "InvalidBlocks", "bcMultiChainTest", "UncleFromSideChain.json")
-	raw, err := os.ReadFile(fixturePath)
-	require.NoError(t, err)
-
-	var fixture map[string]importFixtureCase
-	require.NoError(t, json.Unmarshal(raw, &fixture))
-	const caseKey = "BlockchainTests/InvalidBlocks/bcMultiChainTest/UncleFromSideChain.json::UncleFromSideChain_Cancun"
-	tc, ok := fixture[caseKey]
-	require.Truef(t, ok, "case %q not found in fixture", caseKey)
-	require.NotEmpty(t, tc.Blocks)
+	tc := loadImportFixtureCase(t)
 
 	work := t.TempDir()
 	genesisPath := writeImportGenesis(t, work, tc)
@@ -119,6 +109,53 @@ func TestImportReorgUnwindToGenesis(t *testing.T) {
 		"head did not advance to the heavier side chain (block 4); import err: %v", importErr)
 	require.Equalf(t, tc.LastBlockHash, head.Hex(),
 		"final head mismatch (import err: %v)", importErr)
+}
+
+// TestImportClosesChaindataOnInitError makes ethereum.Init fail after eth.New
+// has opened chaindata (malformed --ethstats URL) and asserts the import
+// command still stops the backend: the in-process reopen below only succeeds
+// if chaindata was closed on the error path.
+func TestImportClosesChaindataOnInitError(t *testing.T) {
+	if testing.Short() {
+		t.Skip()
+	}
+
+	tc := loadImportFixtureCase(t)
+	work := t.TempDir()
+	genesisPath := writeImportGenesis(t, work, tc)
+	rlpFiles := writeImportBlocks(t, work, tc)
+	dataDir := t.TempDir()
+
+	require.NoError(t, runErigonCommand("--log.dir.disable", "init", "--datadir", dataDir, genesisPath))
+
+	importErr := runErigonCommand(
+		"--log.dir.disable",
+		"--http=false",
+		"--private.api.addr=",
+		"--authrpc.port=0",
+		"--ethstats", "invalid",
+		"import", "--datadir", dataDir, "--networkid", "1337", rlpFiles[0])
+	require.ErrorContains(t, importErr, "netstats")
+
+	db, err := mdbx.New(dbcfg.ChainDB, log.New()).Path(filepath.Join(dataDir, "chaindata")).Accede(true).Readonly(true).Open(context.Background())
+	require.NoError(t, err, "chaindata still open after failed import — backend not stopped on Init error?")
+	db.Close()
+}
+
+func loadImportFixtureCase(t *testing.T) importFixtureCase {
+	t.Helper()
+	fixturePath := filepath.Join("..", "..", "..", "execution", "tests", "legacy-tests",
+		"BlockchainTests", "InvalidBlocks", "bcMultiChainTest", "UncleFromSideChain.json")
+	raw, err := os.ReadFile(fixturePath)
+	require.NoError(t, err)
+
+	var fixture map[string]importFixtureCase
+	require.NoError(t, json.Unmarshal(raw, &fixture))
+	const caseKey = "BlockchainTests/InvalidBlocks/bcMultiChainTest/UncleFromSideChain.json::UncleFromSideChain_Cancun"
+	tc, ok := fixture[caseKey]
+	require.Truef(t, ok, "case %q not found in fixture", caseKey)
+	require.NotEmpty(t, tc.Blocks)
+	return tc
 }
 
 func writeImportGenesis(t *testing.T, dir string, tc importFixtureCase) string {

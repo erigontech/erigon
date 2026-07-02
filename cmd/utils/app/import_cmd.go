@@ -115,13 +115,14 @@ func importChain(cliCtx *cli.Context) error {
 	if err != nil {
 		return err
 	}
+	// The stack is never Start()ed, so the deferred stack.Close() skips
+	// lifecycle Stop — stop the backend explicitly to close chaindata on exit.
+	defer ethereum.Stop()
+
 	err = ethereum.Init(stack, ethCfg, ethCfg.Genesis.Config)
 	if err != nil {
 		return err
 	}
-	// The stack is never Start()ed, so the deferred stack.Close() skips
-	// lifecycle Stop — stop the backend explicitly to close chaindata on exit.
-	defer ethereum.Stop()
 
 	return importFiles(cliCtx.Args().Slice(), logger, func(fn string) error {
 		return ImportChain(ethereum, ethereum.ChainDB(), fn, logger)
