@@ -64,18 +64,18 @@ type SignedBLSToExecutionChange struct {
 }
 
 func (s *SignedBLSToExecutionChange) EncodeSSZ(buf []byte) ([]byte, error) {
-	return ssz2.MarshalSSZ(buf, s.Message, s.Signature[:])
+	return encodeSigned(buf, s.Message, s.Signature[:])
 }
 
 func (s *SignedBLSToExecutionChange) DecodeSSZ(buf []byte, version int) error {
 	s.Message = new(BLSToExecutionChange)
-	return ssz2.UnmarshalSSZ(buf, version, s.Message, s.Signature[:])
+	return decodeSigned(buf, version, s.Message, s.Signature[:])
 }
 
 func (s *SignedBLSToExecutionChange) HashSSZ() ([32]byte, error) {
-	return merkle_tree.HashTreeRoot(s.Message, s.Signature[:])
+	return hashSigned(s.Message, s.Signature[:])
 }
 
 func (s *SignedBLSToExecutionChange) EncodingSizeSSZ() int {
-	return 96 + s.Message.EncodingSizeSSZ()
+	return sizeSigned(s.Message)
 }

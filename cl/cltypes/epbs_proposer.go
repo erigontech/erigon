@@ -91,7 +91,7 @@ func (s *SignedProposerPreferences) EncodingSizeSSZ() int {
 	if s.Message == nil {
 		return length.Bytes96
 	}
-	return s.Message.EncodingSizeSSZ() + length.Bytes96
+	return sizeSigned(s.Message)
 }
 
 func (s *SignedProposerPreferences) Static() bool {
@@ -99,16 +99,16 @@ func (s *SignedProposerPreferences) Static() bool {
 }
 
 func (s *SignedProposerPreferences) EncodeSSZ(buf []byte) ([]byte, error) {
-	return ssz2.MarshalSSZ(buf, s.Message, s.Signature[:])
+	return encodeSigned(buf, s.Message, s.Signature[:])
 }
 
 func (s *SignedProposerPreferences) DecodeSSZ(buf []byte, version int) error {
 	s.Message = new(ProposerPreferences)
-	return ssz2.UnmarshalSSZ(buf, version, s.Message, s.Signature[:])
+	return decodeSigned(buf, version, s.Message, s.Signature[:])
 }
 
 func (s *SignedProposerPreferences) HashSSZ() ([32]byte, error) {
-	return merkle_tree.HashTreeRoot(s.Message, s.Signature[:])
+	return hashSigned(s.Message, s.Signature[:])
 }
 
 func (s *SignedProposerPreferences) Clone() clonable.Clonable {

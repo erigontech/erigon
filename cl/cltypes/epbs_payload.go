@@ -373,11 +373,11 @@ type SignedExecutionPayloadBid struct {
 }
 
 func (s *SignedExecutionPayloadBid) HashSSZ() ([32]byte, error) {
-	return merkle_tree.HashTreeRoot(s.Message, s.Signature[:])
+	return hashSigned(s.Message, s.Signature[:])
 }
 
 func (s *SignedExecutionPayloadBid) EncodingSizeSSZ() int {
-	return 4 + s.Message.EncodingSizeSSZ() + length.Bytes96 // 4 is the offset for Message (variable-length field)
+	return sizeSigned(s.Message)
 }
 
 func (s *SignedExecutionPayloadBid) Static() bool {
@@ -385,12 +385,12 @@ func (s *SignedExecutionPayloadBid) Static() bool {
 }
 
 func (s *SignedExecutionPayloadBid) EncodeSSZ(buf []byte) ([]byte, error) {
-	return ssz2.MarshalSSZ(buf, s.Message, s.Signature[:])
+	return encodeSigned(buf, s.Message, s.Signature[:])
 }
 
 func (s *SignedExecutionPayloadBid) DecodeSSZ(buf []byte, version int) error {
 	s.Message = new(ExecutionPayloadBid)
-	return ssz2.UnmarshalSSZ(buf, version, s.Message, s.Signature[:])
+	return decodeSigned(buf, version, s.Message, s.Signature[:])
 }
 
 func (s *SignedExecutionPayloadBid) Clone() clonable.Clonable {
@@ -494,7 +494,7 @@ type SignedExecutionPayloadEnvelope struct {
 }
 
 func (s *SignedExecutionPayloadEnvelope) HashSSZ() ([32]byte, error) {
-	return merkle_tree.HashTreeRoot(s.Message, s.Signature[:])
+	return hashSigned(s.Message, s.Signature[:])
 }
 
 func (s *SignedExecutionPayloadEnvelope) Static() bool {
@@ -502,18 +502,18 @@ func (s *SignedExecutionPayloadEnvelope) Static() bool {
 }
 
 func (s *SignedExecutionPayloadEnvelope) EncodeSSZ(buf []byte) ([]byte, error) {
-	return ssz2.MarshalSSZ(buf, s.Message, s.Signature[:])
+	return encodeSigned(buf, s.Message, s.Signature[:])
 }
 
 func (s *SignedExecutionPayloadEnvelope) DecodeSSZ(buf []byte, version int) error {
 	if s.Message == nil {
 		s.Message = NewExecutionPayloadEnvelope(s.beaconCfg)
 	}
-	return ssz2.UnmarshalSSZ(buf, version, s.Message, s.Signature[:])
+	return decodeSigned(buf, version, s.Message, s.Signature[:])
 }
 
 func (s *SignedExecutionPayloadEnvelope) EncodingSizeSSZ() int {
-	return 4 + s.Message.EncodingSizeSSZ() + length.Bytes96 // 4 is the offset for Message (variable-length)
+	return sizeSigned(s.Message)
 }
 
 func (s *SignedExecutionPayloadEnvelope) Clone() clonable.Clonable {
