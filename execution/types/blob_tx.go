@@ -270,19 +270,7 @@ func (stx *BlobTx) encodePayload(w io.Writer, b []byte, payloadSize, accessListL
 	if err := encodeBlobVersionedHashes(stx.BlobVersionedHashes, w, b); err != nil {
 		return err
 	}
-	// encode V
-	if err := rlp.EncodeUint256(stx.V, w, b); err != nil {
-		return err
-	}
-	// encode R
-	if err := rlp.EncodeUint256(stx.R, w, b); err != nil {
-		return err
-	}
-	// encode S
-	if err := rlp.EncodeUint256(stx.S, w, b); err != nil {
-		return err
-	}
-	return nil
+	return stx.encodeVRS(w, b)
 }
 
 func (stx *BlobTx) EncodeRLP(w io.Writer) error {
@@ -381,14 +369,7 @@ func (stx *BlobTx) DecodeRLP(s *rlp.Stream) error {
 	if len(stx.BlobVersionedHashes) == 0 {
 		return errors.New("a blob stx must contain at least one blob")
 	}
-	// decode V
-	if err = s.ReadUint256(&stx.V); err != nil {
-		return err
-	}
-	if err = s.ReadUint256(&stx.R); err != nil {
-		return err
-	}
-	if err = s.ReadUint256(&stx.S); err != nil {
+	if err = stx.decodeVRS(s); err != nil {
 		return err
 	}
 	return s.ListEnd()

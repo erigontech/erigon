@@ -230,20 +230,7 @@ func (tx *AccessListTx) encodePayload(w io.Writer, b []byte, payloadSize, access
 	if err := encodeAccessList(tx.AccessList, w, b); err != nil {
 		return err
 	}
-	// encode V
-	if err := rlp.EncodeUint256(tx.V, w, b); err != nil {
-		return err
-	}
-	// encode R
-	if err := rlp.EncodeUint256(tx.R, w, b); err != nil {
-		return err
-	}
-	// encode S
-	if err := rlp.EncodeUint256(tx.S, w, b); err != nil {
-		return err
-	}
-	return nil
-
+	return tx.encodeVRS(w, b)
 }
 
 // EncodeRLP implements rlp.Encoder

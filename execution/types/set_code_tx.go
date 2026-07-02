@@ -268,14 +268,7 @@ func (tx *SetCodeTransaction) DecodeRLP(s *rlp.Stream) error {
 		return err
 	}
 
-	// decode V
-	if err = s.ReadUint256(&tx.V); err != nil {
-		return err
-	}
-	if err = s.ReadUint256(&tx.R); err != nil {
-		return err
-	}
-	if err = s.ReadUint256(&tx.S); err != nil {
+	if err = tx.decodeVRS(s); err != nil {
 		return err
 	}
 	return s.ListEnd()
@@ -334,20 +327,7 @@ func (tx *SetCodeTransaction) encodePayload(w io.Writer, b []byte, payloadSize, 
 	if err := encodeAuthorizations(tx.Authorizations, w, b); err != nil {
 		return err
 	}
-	// encode V
-	if err := rlp.EncodeUint256(tx.V, w, b); err != nil {
-		return err
-	}
-	// encode R
-	if err := rlp.EncodeUint256(tx.R, w, b); err != nil {
-		return err
-	}
-	// encode S
-	if err := rlp.EncodeUint256(tx.S, w, b); err != nil {
-		return err
-	}
-	return nil
-
+	return tx.encodeVRS(w, b)
 }
 
 // ParseDelegation tries to parse the address from a delegation slice.

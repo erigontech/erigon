@@ -107,6 +107,26 @@ func (ct *CommonTx) GetBlobHashes() []common.Hash {
 	return []common.Hash{}
 }
 
+func (ct *CommonTx) encodeVRS(w io.Writer, b []byte) error {
+	if err := rlp.EncodeUint256(ct.V, w, b); err != nil {
+		return err
+	}
+	if err := rlp.EncodeUint256(ct.R, w, b); err != nil {
+		return err
+	}
+	return rlp.EncodeUint256(ct.S, w, b)
+}
+
+func (ct *CommonTx) decodeVRS(s *rlp.Stream) error {
+	if err := s.ReadUint256(&ct.V); err != nil {
+		return err
+	}
+	if err := s.ReadUint256(&ct.R); err != nil {
+		return err
+	}
+	return s.ReadUint256(&ct.S)
+}
+
 // LegacyTx is the transaction data of regular Ethereum transactions.
 type LegacyTx struct {
 	CommonTx
@@ -247,17 +267,7 @@ func (tx *LegacyTx) encodePayload(w io.Writer, b []byte, payloadSize int) error 
 	if err := rlp.EncodeString(tx.Data, w, b); err != nil {
 		return err
 	}
-	if err := rlp.EncodeUint256(tx.V, w, b); err != nil {
-		return err
-	}
-	if err := rlp.EncodeUint256(tx.R, w, b); err != nil {
-		return err
-	}
-	if err := rlp.EncodeUint256(tx.S, w, b); err != nil {
-		return err
-	}
-	return nil
-
+	return tx.encodeVRS(w, b)
 }
 
 func (tx *LegacyTx) EncodeRLP(w io.Writer) error {

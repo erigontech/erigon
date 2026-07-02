@@ -183,19 +183,7 @@ func (tx *DynamicFeeTransaction) encodePayload(w io.Writer, b []byte, payloadSiz
 	if err := encodeAccessList(tx.AccessList, w, b); err != nil {
 		return err
 	}
-	// encode V
-	if err := rlp.EncodeUint256(tx.V, w, b); err != nil {
-		return err
-	}
-	// encode R
-	if err := rlp.EncodeUint256(tx.R, w, b); err != nil {
-		return err
-	}
-	// encode S
-	if err := rlp.EncodeUint256(tx.S, w, b); err != nil {
-		return err
-	}
-	return nil
+	return tx.encodeVRS(w, b)
 }
 
 func (tx *DynamicFeeTransaction) EncodeRLP(w io.Writer) error {
@@ -253,14 +241,7 @@ func (tx *DynamicFeeTransaction) DecodeRLP(s *rlp.Stream) error {
 	if err = decodeAccessList(&tx.AccessList, s); err != nil {
 		return err
 	}
-	// decode V
-	if err = s.ReadUint256(&tx.V); err != nil {
-		return err
-	}
-	if err = s.ReadUint256(&tx.R); err != nil {
-		return err
-	}
-	if err = s.ReadUint256(&tx.S); err != nil {
+	if err = tx.decodeVRS(s); err != nil {
 		return err
 	}
 	return s.ListEnd()
