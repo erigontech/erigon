@@ -1215,7 +1215,7 @@ func collateAndMergeHistory(tb testing.TB, db kv.RwDB, h *History, txs uint64, d
 			}
 			indexOuts, historyOuts, err := hc.staticFilesInRange(r)
 			require.NoError(err)
-			indexIn, historyIn, err := hc.mergeFiles(ctx, indexOuts, historyOuts, r, background.NewProgressSet())
+			indexIn, historyIn, err := hc.mergeFiles(ctx, indexOuts, historyOuts, r, background.NewProgressSet(), nil)
 			require.NoError(err)
 			h.integrateMergedDirtyFiles(indexIn, historyIn)
 			return false
@@ -1271,7 +1271,7 @@ func collateAndMergeHistoryWithCollisionRetry(tb testing.TB, db kv.RwDB, h *Hist
 			}
 			indexOuts, historyOuts, err := hc.staticFilesInRange(r)
 			require.NoError(err)
-			indexIn, historyIn, err := hc.mergeFiles(ctx, indexOuts, historyOuts, r, background.NewProgressSet())
+			indexIn, historyIn, err := hc.mergeFiles(ctx, indexOuts, historyOuts, r, background.NewProgressSet(), nil)
 			require.NoError(err)
 			h.integrateMergedDirtyFiles(indexIn, historyIn)
 			return false

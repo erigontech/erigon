@@ -80,7 +80,7 @@ func benchmarkIIMergeFiles(b *testing.B, numFiles int) {
 	b.ResetTimer()
 
 	for b.Loop() {
-		out, err := ic.mergeFiles(ctx, inputFiles, mr.from, mr.to, ps)
+		out, err := ic.mergeFiles(ctx, inputFiles, mr.from, mr.to, ps, nil)
 		b.StopTimer()
 		require.NoError(b, err)
 		out.closeFilesAndRemove()
