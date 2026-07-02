@@ -1,170 +1,117 @@
 # Per-domain history retention — design decisions
 
-Context: bounding on-disk history retention per data domain (issue #21306 "prune
-frozen files", #21198 commitment-history download bounding). This records the flag
-surface, why it's shaped this way, how to add a new domain, and the other decisions.
+Bounding on-disk history retention per domain (#21306 "prune frozen files", #21198
+commitment-history download bounding).
 
-## The flag surface: `--history.<domain>=<retention>`
+## Flag surface: `--history.<domain>=<retention>`
 
-One flag per domain, under a `history.` namespace, whose *value* carries both on/off
-and the retention window. In `config.toml` every domain is a scalar leaf under one
-`[history]` table:
+One flag per domain; the value carries both on/off and the window. In `config.toml`
+each domain is a scalar leaf under one `[history]` table:
 
 ```toml
 [history]
 state         = '1y'        # keep ~1 year of state history
-commitment    = 100_000     # keep the last 100k blocks of commitment history
-receipts      = false       # don't keep receipt history (re-exec on demand)
+commitment    = 100_000     # keep the last 100k blocks
+receipts      = false       # don't keep (re-exec on demand)
 domainA       = true        # keep everything (archive)
-domainB.from = 10_000_000     # keep history from absolute block 10M onward
+domainB.from  = 10_000_000  # keep from absolute block 10M (inclusive)
 ```
 
-Every line is also a CLI flag with the identical name (CLI overrides the file):
-
-```
---history.state=1y  --history.commitment=100000  --history.receipts=false
---history.domainA=true  --history.domainB.from=100000
-```
-
-Value grammar for the bare `--history.<domain>` flag:
+Each is also a CLI flag of the same name, CLI overriding the file (`--history.state=1y`, …).
 
 | value | meaning |
 |---|---|
 | `false` / `off` | not generated / not kept |
-| `true` / `keep-all` | keep everything (archive) |
-| `<blocks>` — `100000` (plain integer) | keep the **last N blocks** |
-| `<duration>` — `10d`, `2w`, `6mo`, `1y` | keep ~that much wall-clock (converted to blocks) |
+| `true` / `keep-all` | keep everything |
+| `<blocks>` — `100000` | keep the last N blocks |
+| `<duration>` — `10d`, `2w`, `6mo`, `1y` | keep ~that wall-clock (→ blocks) |
 
-Duration units are restricted to `d` (days), `w` (weeks), `mo` (months), `y`
-(years) — a day is the smallest scale meaningful for a history window. `m` is
-deliberately **not** a unit: `10m` is ambiguous (10 minutes? 10 million? 10
-months?), so it is a hard error that suggests `10000000` or `6mo`. Block counts are
-plain integers with no magnitude shorthand (`k`/`M`/`B`) for the same reason;
-`config.toml` allows `_` separators (`10_000_000`). Parser rule: pure digits →
-blocks; digits + a recognized unit → duration; anything else → error.
+Duration units are `d`/`w`/`mo`/`y` only. `m` is rejected: `10m` is ambiguous
+(minutes? million? months?) — months are `mo`. Blocks are plain integers, no
+`k`/`M`/`B` (`_` separators allowed). Rule: pure digits → blocks; digits+unit →
+duration; else error. Optional `--history.<domain>.from=<block>` keeps from an
+absolute block (inclusive).
 
-plus an optional sub-key for the absolute anchor:
-
-| flag | meaning |
-|---|---|
-| `--history.<domain>.from=<block>` | keep history **from absolute block N** onward |
-
-`--prune.mode=archive\|full\|minimal\|blocks` stays as the coarse preset; it just
-sets `history.*` defaults that the per-domain flags override.
+`--prune.mode=archive|full|minimal|blocks` stays the coarse preset, setting
+`history.*` defaults that per-domain flags override.
 
 ## Why this shape
 
-**Why `history.`, not `prune.`** — Positive "what to keep" framing reads
-unambiguously: `history.state = 1y` is plainly "keep one year of state history",
-whereas `prune.state = 1y` forces the reader to guess whether `1y` is what's
-*removed* or what's *retained*. It is also Geth-compatible — Geth ships
-`--history.state=N` / `--history.transactions=N` / `--history.chain` — which eases
-migration and reuses an established mental model, and it drops a redundant word
-(`--prune.commitment-history.distance` becomes just `--history.commitment`).
-`--prune.mode` remains the coarse policy preset; `--history.<domain>` are the fine
-amounts — the same split Geth uses (profiles + `--history.*`) and Reth uses
+**`history.`, not `prune.`** — "what to keep" reads unambiguously (`history.state=1y`
+= keep 1y; `prune.state=1y` = keep or remove?), matches Geth
+(`--history.state`/`.transactions`/`.chain`), and drops a word
+(`--prune.commitment-history.distance` → `--history.commitment`). `--prune.mode`
+stays the preset — the same split as Geth (profiles + `--history.*`) and Reth
 (`--full`/`--minimal` + per-segment).
 
-**Why one polymorphic value per domain, not `enable` + `distance` sub-keys** —
-Folding on/off and the window into a single value (`=false` off, anything else on)
-removes the need for a separate enable flag (`.enable`, a bare toggle, or
-`--prune.include-*`) and a `.distance` verb. The decisive reason is `config.toml`:
-Erigon's loader (`node/cli/config_file.go`) flattens nested tables into dotted keys
-that must equal a flag name. A **scalar leaf per domain** nests perfectly as
-`[history]` with scalar keys — no key is ever both a scalar and a table, which is
-the exact conflict that sank every verb-first spelling (`prune.distance` scalar vs a
-`[prune.distance]` table) and every `.enable`-under-a-bare-toggle spelling. It is
-also an *extension, not new machinery*: `--prune.distance` is already a
-`cli.StringFlag` parsed by `prune.ParseHistoryDistance`, which already accepts
-several value shapes (base-0 integers, a `keep-all` sentinel) — we widen that
-parser's vocabulary.
+**One polymorphic value, not `enable`+`distance`** — folding on/off into the value
+(`=false` off, else on) drops the separate enable flag and `.distance` verb.
+Decisive: a scalar leaf nests cleanly as `[history]` in `config.toml`, where no key
+is both scalar and table (the conflict that sinks verb-first and `.enable`). It
+extends existing code — `--prune.distance` is already a `StringFlag` parsed by
+`prune.ParseHistoryDistance` (numbers + `keep-all`); we widen that parser.
 
-**Why bare number = "last N", and absolute via a `.from` sub-key** — A single
-scalar can't give a bare number two meanings. Keeping bare = distance ("last N
-blocks") matches Geth (`--history.state=N`) and Polkadot (`--state-pruning N`); the
-rarer absolute anchor gets an explicit `--history.<domain>.from=<block>` sub-key —
-a distinct flag — so there is no "last N vs from N" ambiguity (the same shape as
-`--http` / `--http.api`). In `config.toml` this is safe because a domain is *either*
-a scalar (`domainB = 100000`) *or* a table (`domainB.from = N`); TOML rejects both
-in one file, which conveniently enforces "at most one retention setting" for free.
-(On the CLI the two are independent flags, so that XOR must be validated in wiring.)
-`from` names what's *kept* and reads as **inclusive** of block N, which fits the
-`history.` framing better than Reth's `before` (which names what's *deleted*).
+**Bare number = last N; absolute via `.from`** — a scalar can't give a number two
+meanings, so bare = distance (Geth/Polkadot) and the absolute anchor is a distinct
+`.from` sub-key (like `--http`/`--http.api`). In `config.toml` a domain is *either*
+scalar *or* table, so TOML rejects both at once — enforcing "one setting" for free
+(the CLI must validate that XOR). `from` names what's kept (inclusive), fitting
+`history.` better than Reth's delete-side `before`.
 
-**Why no fork-named anchor sentinel (multi-chain)** — Erigon supports many chains
-(Gnosis, Polygon/Bor, testnets), not just Ethereum mainnet. A sentinel like
-`keep-post-merge` — or any fork-named anchor (`post-merge`, `post-prague`, …) — is
-Ethereum-mainnet-centric: on other chains the merge or a given fork happened at a
-different block, means something else, or does not exist, so the anchor is
-undefined. Fork-named anchors therefore must **not** be part of the cross-chain
-vocabulary. Prefer chain-agnostic forms: `keep-all`, a `<blocks>` distance, a
-`<duration>`, or the absolute `.from=<block>`. If a fork alias is offered at all it
-belongs behind per-chain config that *resolves to a block number* and is valid only
-where that fork exists — never a universal sentinel. (The existing `keep-post-merge`
-in `ParseBlocksDistance` is exactly this eth-centric case; don't extend the pattern
-to the new surface.)
+**No fork-named anchor sentinel** — Erigon runs many chains. `keep-post-merge` /
+`post-prague` / any fork anchor is Ethereum-centric: elsewhere the fork is at a
+different block, means something else, or doesn't exist. Use chain-agnostic forms
+(`keep-all`, blocks, duration, `.from`); a fork alias, if ever offered, is per-chain
+config resolving to a block number, never a universal sentinel.
+(`ParseBlocksDistance`'s existing `keep-post-merge` is this eth-centric case — don't
+extend it.)
 
-**Why blocks and durations, not steps** — Operators think in blocks (≈ time);
-*steps*, *domains*, and how many files back a domain is are implementation details we
-must stay free to change. Block→step conversion reuses `TxnumReader().Min(block) /
-stepSize` — the same math the retirement cutoff uses, so download-skip and on-disk
-retirement agree file-for-file. A duration is converted to blocks once, at parse
-time, using the chain's nominal block time; that makes it a fixed, deterministic
-block window, at the cost of being approximate and chain-dependent (12s Ethereum,
-~5s Gnosis, pre/post-merge differ) — fine for a fuzzy retention window, documented
-as such.
+**Blocks/durations, not steps** — operators think in blocks; steps and file counts
+are implementation details. Block→step reuses `TxnumReader().Min(block)/stepSize`,
+the same math as the retirement cutoff, so download-skip and on-disk retirement
+agree file-for-file. A duration converts to blocks once at parse (nominal block
+time): deterministic but approximate/chain-dependent (12s Ethereum, ~5s Gnosis) —
+fine for a fuzzy window.
 
-**Why the value carries two persistence semantics** — On/off (`false ↔ on`) is a
-hard, one-way, change-protected execution-mode switch: you can't retroactively fill
-data you never produced, so flipping it requires a resync. The window
-(distance/duration) is a soft, freely shrinkable/wideable knob (deleted history is
-re-downloadable). The parser yields `{enabled, kind, value}`; persistence
-change-protects `enabled` and accepts window changes with a warning — the same
-accept-with-warning behavior as today's `isRetentionWindowChange`.
+**Two persistence semantics in one value** — on/off is one-way and change-protected
+(can't backfill ungenerated data → resync to flip); the window is freely shrinkable
+(deleted history re-downloads). The parser yields `{enabled, kind, value}`;
+persistence guards `enabled`, accepts window changes with a warning (today's
+`isRetentionWindowChange`).
 
-## How to add a new domain `X`
+## Add a domain `X`
 
-1. **Flag** — a polymorphic `--history.X` (`cli.StringFlag` + a `ParseRetention`
-   mirroring `ParseHistoryDistance`); add `--history.X.from` only if X needs an
-   arbitrary absolute anchor. Both must be **real primary flags, not urfave aliases**
-   — an alias set from the config file does not propagate to its primary (only CLI
-   parsing's `normalizeFlags` does).
-2. **`prune.Mode`** — add a `Domain` const + an `extraDomainDBKey[X]` entry; the
-   generic `Extra map[Domain]BlockAmount` handles persistence via the existing
-   `EnsureNotChanged`. No new `Config` field, no new persistence func.
-3. **Wiring** — in `applyRemainingEthFlags` (and the cobra variant): parse
-   `--history.X`, set the domain in the mode, then `prune.Validate(mode)`.
-4. **Retirement** — add a case in `Aggregator.RetireOldHistoryFiles` mapping the
-   domain to X's cutoff, and extend `historyRetireCutoffStep` to compute it
-   (inheriting the general window unless X is bounded tighter).
-5. **Download filter** — `buildBlackListForPruning` already takes a per-domain
-   cutoff; add X's step to it.
+1. **Flag** — polymorphic `--history.X` (`StringFlag` + a `ParseRetention` mirroring
+   `ParseHistoryDistance`); add `--history.X.from` only for an absolute anchor. Real
+   primary flags, not urfave aliases (config-file aliases don't propagate to the
+   primary).
+2. **`prune.Mode`** — a `Domain` const + `extraDomainDBKey[X]`; the generic
+   `Extra map[Domain]BlockAmount` persists via existing `EnsureNotChanged`.
+3. **Wiring** — parse `--history.X` in `applyRemainingEthFlags` (+ cobra variant),
+   set it, `prune.Validate`.
+4. **Retirement** — a case in `RetireOldHistoryFiles` + extend
+   `historyRetireCutoffStep` (inherits the general window unless bounded tighter).
+5. **Download filter** — add X's step to `buildBlackListForPruning` (already per-domain).
 
-## Migration from the current flags
+## Migration
 
 | current | new |
 |---|---|
 | `--prune.distance=N` | `--history.state=N` |
 | `--prune.include-commitment-history` | `--history.commitment=keep-all` |
-| `+ --prune.commitment-history.distance=N` | `--history.commitment=N` |
+| `--prune.commitment-history.distance=N` | `--history.commitment=N` |
 | `--persist.receipts` | `--history.receipts=keep-all` |
 
-Keep the legacy names as accepted spellings via the "separate flags read with
-precedence" pattern (not urfave aliases, per the config-loader caveat above); their
-persisted DB keys are unchanged.
+Legacy names stay as accepted spellings (separate flags read with precedence, not
+urfave aliases); persisted DB keys unchanged.
 
 ## Other decisions
 
-- **`prune.Mode` stays the single retention model.** Per-domain retention lives in a
-  generic `Extra` map reusing one `EnsureNotChanged` persistence path — not
-  per-domain `Config` fields / per-domain `Ensure*` functions (which scale tech-debt
-  per domain).
-- **A domain inherits the general (`state`) window when unset, and `commitment` must
-  stay `≤ state`.** A commitment proof beyond the retained state history can't be
-  served (it falls back to state history). A minimal node keeps everything at the
-  `state` window; an archive node can bound `commitment` independently (the #21198
-  case).
-- **Whitelist download filter (#15589) deferred.** The per-file retention skip is
-  orthogonal to per-type whitelisting and works the same under either outer filter.
-- **RCache and standalone log/trace indices are out of scope** for state-history
-  retention — they follow blocks/receipts retention.
+- **`prune.Mode` is the single retention model** — one `Extra` map + one
+  `EnsureNotChanged` path, not per-domain `Config` fields.
+- **A domain inherits the `state` window when unset; `commitment` must be `≤ state`**
+  (a proof past retained state history can't be served). Minimal keeps all at
+  `state`; archive can bound `commitment` alone (#21198).
+- **Whitelist download filter (#15589) deferred** — orthogonal to the per-file skip.
+- **RCache and standalone log/trace indices are out of scope** — they follow
+  blocks/receipts, not `--history.state`.
