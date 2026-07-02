@@ -302,17 +302,17 @@ func TestEngineApiBlockGasOverflowSpillsToNextBlock(t *testing.T) {
 // resulting block respects the CL target as a cap.
 //
 // Setup picks numbers so the two values produce distinguishable block contents:
-//   - parent gas limit = 370_200 (room for two account-creating transfers)
+//   - parent gas limit = 367_400 (room for two account-creating transfers)
 //   - static --miner.gaslimit = 225_000 (would cap the block at one transfer)
-//   - CL targetGasLimit = 370_200 (room for two transfers)
+//   - CL targetGasLimit = 367_400 (room for two transfers)
 //
 // Three transfers are submitted; only two must fit. If the static target won,
-// the block would gas-limit at ~369_840 and contain a single transfer.
+// the block would gas-limit at ~367_040 and contain a single transfer.
 // See https://github.com/ethereum/execution-apis/pull/796.
 func TestEngineApiV4TargetGasLimitOverridesMinerGasLimit(t *testing.T) {
 	ctx := t.Context()
 	logger := testlog.Logger(t, log.LvlDebug)
-	const targetGasLimit uint64 = 370_200
+	const targetGasLimit uint64 = 367_400
 	const minerGasLimit uint64 = 225_000
 	genesis, coinbaseKey, err := engineapitester.DefaultEngineApiTesterGenesis()
 	require.NoError(t, err)

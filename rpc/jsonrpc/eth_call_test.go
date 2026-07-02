@@ -151,6 +151,37 @@ func TestEstimateGasBlockOverridesBlobBaseFeeSkipsZeroBlobFeeCap(t *testing.T) {
 	require.NoError(t, err)
 }
 
+// TestEstimateGasEIP2780SubTxGasTransfers verifies that eth_estimateGas returns
+// the true EIP-2780 cost for transfers that are cheaper than the legacy 21000,
+// rather than clamping up to it: a self-transfer costs only TX_BASE (12000), and
+// a zero-value no-data call to a distinct existing account costs TX_BASE +
+// COLD_ACCOUNT_ACCESS (15000).
+func TestEstimateGasEIP2780SubTxGasTransfers(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow test")
+	}
+
+	m, bankAddr, _, receiverAddr := chainWithDeployedContractAndConfig(t, chain.AllProtocolChanges)
+	api := newTestEthAPIWithFilters(t, m)
+
+	// Self-transfer: TX_BASE only (12000), not clamped up to the legacy 21000.
+	selfGas, err := api.EstimateGas(context.Background(), &ethapi.CallArgs{
+		From: &bankAddr,
+		To:   &bankAddr,
+	}, nil, nil, nil)
+	require.NoError(t, err)
+	require.Equal(t, hexutil.Uint64(12_000), selfGas)
+
+	// Zero-value no-data call to a distinct existing account: TX_BASE +
+	// COLD_ACCOUNT_ACCESS (15000).
+	distinctGas, err := api.EstimateGas(context.Background(), &ethapi.CallArgs{
+		From: &bankAddr,
+		To:   &receiverAddr,
+	}, nil, nil, nil)
+	require.NoError(t, err)
+	require.Equal(t, hexutil.Uint64(15_000), distinctGas)
+}
+
 func TestEthCallBlockOverridesBaseFeeAffectsGasPrice(t *testing.T) {
 	if testing.Short() {
 		t.Skip("slow test")
