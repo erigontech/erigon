@@ -88,6 +88,20 @@ func TestSetGetOrCreateGaugeVecReturnsExisting(t *testing.T) {
 	require.Same(t, gv, gv2)
 }
 
+func TestSetGetOrCreateGaugeVecWrongType(t *testing.T) {
+	s := NewSet()
+
+	cv := prometheus.NewCounterVec(prometheus.CounterOpts{Name: "v"}, []string{"l"})
+	s.mu.Lock()
+	nmv := &namedMetricVec{name: "v", metric: cv}
+	s.vecs["v"] = nmv
+	s.av = append(s.av, nmv)
+	s.mu.Unlock()
+
+	_, err := s.GetOrCreateGaugeVec("v", []string{"l"})
+	require.ErrorContains(t, err, `metric "v" isn't a GaugeVec. It is *prometheus.CounterVec`)
+}
+
 func TestSetGaugeVecDescribedOnce(t *testing.T) {
 	s := NewSet()
 

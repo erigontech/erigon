@@ -36,8 +36,7 @@ type namedMetric struct {
 
 type namedMetricVec struct {
 	name   string
-	metric *prometheus.GaugeVec
-	isAux  bool
+	metric prometheus.Collector
 }
 
 // Set is a set of metrics.
@@ -157,36 +156,9 @@ func newHistogram(name string, buckets []float64, help ...string) (prometheus.Hi
 //
 // Performance tip: prefer NewHistogram instead of GetOrCreateHistogram.
 func (s *Set) GetOrCreateHistogram(name string, help ...string) (prometheus.Histogram, error) {
-	s.mu.Lock()
-	nm := s.m[name]
-	s.mu.Unlock()
-	if nm == nil {
-		metric, err := newHistogram(name, nil, help...)
-		if err != nil {
-			return nil, fmt.Errorf("invalid metric name %q: %w", name, err)
-		}
-
-		nmNew := &namedMetric{
-			name:   name,
-			metric: metric,
-		}
-
-		s.mu.Lock()
-		nm = s.m[name]
-		if nm == nil {
-			nm = nmNew
-			s.m[name] = nm
-			s.a = append(s.a, nm)
-		}
-		s.mu.Unlock()
-	}
-
-	h, ok := nm.metric.(prometheus.Histogram)
-	if !ok {
-		return nil, fmt.Errorf("metric %q isn't a Histogram. It is %T", name, nm.metric)
-	}
-
-	return h, nil
+	return getOrCreate(s, name, func() (prometheus.Histogram, error) {
+		return newHistogram(name, nil, help...)
+	})
 }
 
 // NewCounter registers and returns new counter with the given name in the s.
@@ -236,36 +208,9 @@ func newCounter(name string, help ...string) (prometheus.Counter, error) {
 //
 // Performance tip: prefer NewCounter instead of GetOrCreateCounter.
 func (s *Set) GetOrCreateCounter(name string, help ...string) (prometheus.Counter, error) {
-	s.mu.Lock()
-	nm := s.m[name]
-	s.mu.Unlock()
-	if nm == nil {
-		// Slow path - create and register missing counter.
-		metric, err := newCounter(name, help...)
-		if err != nil {
-			return nil, fmt.Errorf("invalid metric name %q: %w", name, err)
-		}
-
-		nmNew := &namedMetric{
-			name:   name,
-			metric: metric,
-		}
-		s.mu.Lock()
-		nm = s.m[name]
-		if nm == nil {
-			nm = nmNew
-			s.m[name] = nm
-			s.a = append(s.a, nm)
-		}
-		s.mu.Unlock()
-	}
-
-	c, ok := nm.metric.(prometheus.Counter)
-	if !ok {
-		return nil, fmt.Errorf("metric %q isn't a Counter. It is %T", name, nm.metric)
-	}
-
-	return c, nil
+	return getOrCreate(s, name, func() (prometheus.Counter, error) {
+		return newCounter(name, help...)
+	})
 }
 
 // NewGauge registers and returns gauge with the given name.
@@ -317,36 +262,9 @@ func newGauge(name string, help ...string) (prometheus.Gauge, error) {
 //
 // Performance tip: prefer NewGauge instead of GetOrCreateGauge.
 func (s *Set) GetOrCreateGauge(name string, help ...string) (prometheus.Gauge, error) {
-	s.mu.Lock()
-	nm := s.m[name]
-	s.mu.Unlock()
-	if nm == nil {
-		// Slow path - create and register missing gauge.
-		metric, err := newGauge(name, help...)
-		if err != nil {
-			return nil, fmt.Errorf("invalid metric name %q: %w", name, err)
-		}
-
-		nmNew := &namedMetric{
-			name:   name,
-			metric: metric,
-		}
-		s.mu.Lock()
-		nm = s.m[name]
-		if nm == nil {
-			nm = nmNew
-			s.m[name] = nm
-			s.a = append(s.a, nm)
-		}
-		s.mu.Unlock()
-	}
-
-	g, ok := nm.metric.(prometheus.Gauge)
-	if !ok {
-		return nil, fmt.Errorf("metric %q isn't a Gauge. It is %T", name, nm.metric)
-	}
-
-	return g, nil
+	return getOrCreate(s, name, func() (prometheus.Gauge, error) {
+		return newGauge(name, help...)
+	})
 }
 
 // GetOrCreateGaugeVec returns registered GaugeVec in s with the given name
@@ -363,41 +281,9 @@ func (s *Set) GetOrCreateGauge(name string, help ...string) (prometheus.Gauge, e
 //
 // The returned GaugeVec is safe to use from concurrent goroutines.
 func (s *Set) GetOrCreateGaugeVec(name string, labels []string, help ...string) (*prometheus.GaugeVec, error) {
-	s.mu.Lock()
-	nm := s.vecs[name]
-	s.mu.Unlock()
-	if nm == nil {
-		metric, err := newGaugeVec(name, labels, help...)
-		if err != nil {
-			return nil, fmt.Errorf("invalid metric name %q: %w", name, err)
-		}
-
-		nmNew := &namedMetricVec{
-			name:   name,
-			metric: metric,
-		}
-
-		s.mu.Lock()
-		nm = s.vecs[name]
-		if nm == nil {
-			nm = nmNew
-			s.vecs[name] = nm
-			s.av = append(s.av, nm)
-		}
-		s.mu.Unlock()
-		s.registerMetricVec(name, metric, false)
-	}
-
-	if nm.metric == nil {
-		return nil, fmt.Errorf("metric %q is nil", name)
-	}
-
-	metricType := reflect.TypeFor[*prometheus.GaugeVec]()
-	if metricType != reflect.TypeFor[*prometheus.GaugeVec]() {
-		return nil, fmt.Errorf("metric %q isn't a GaugeVec. It is %s", name, metricType)
-	}
-
-	return nm.metric, nil
+	return getOrCreateVec(s, name, func() (*prometheus.GaugeVec, error) {
+		return newGaugeVec(name, labels, help...)
+	})
 }
 
 // newGaugeVec creates a new Prometheus GaugeVec.
@@ -507,14 +393,20 @@ func (s *Set) NewSummaryExt(name string, window time.Duration, quantiles map[flo
 //
 // Performance tip: prefer NewSummaryExt instead of GetOrCreateSummaryExt.
 func (s *Set) GetOrCreateSummaryExt(name string, window time.Duration, quantiles map[float64]float64, help ...string) (prometheus.Summary, error) {
+	return getOrCreate(s, name, func() (prometheus.Summary, error) {
+		return newSummary(name, window, quantiles, help...)
+	})
+}
+
+func getOrCreate[T prometheus.Metric](s *Set, name string, create func() (T, error)) (T, error) {
+	var zero T
 	s.mu.Lock()
 	nm := s.m[name]
 	s.mu.Unlock()
 	if nm == nil {
-		// Slow path - create and register missing summary.
-		metric, err := newSummary(name, window, quantiles, help...)
+		metric, err := create()
 		if err != nil {
-			return nil, fmt.Errorf("invalid metric name %q: %w", name, err)
+			return zero, fmt.Errorf("invalid metric name %q: %w", name, err)
 		}
 
 		nmNew := &namedMetric{
@@ -531,33 +423,59 @@ func (s *Set) GetOrCreateSummaryExt(name string, window time.Duration, quantiles
 		s.mu.Unlock()
 	}
 
-	sm, ok := nm.metric.(prometheus.Summary)
+	m, ok := any(nm.metric).(T)
 	if !ok {
-		return nil, fmt.Errorf("metric %q isn't a Summary. It is %T", name, nm.metric)
+		return zero, fmt.Errorf("metric %q isn't a %s. It is %T", name, metricTypeName[T](), nm.metric)
 	}
 
-	return sm, nil
+	return m, nil
+}
+
+func getOrCreateVec[T prometheus.Collector](s *Set, name string, create func() (T, error)) (T, error) {
+	var zero T
+	s.mu.Lock()
+	nm := s.vecs[name]
+	s.mu.Unlock()
+	if nm == nil {
+		metric, err := create()
+		if err != nil {
+			return zero, fmt.Errorf("invalid metric name %q: %w", name, err)
+		}
+
+		nmNew := &namedMetricVec{
+			name:   name,
+			metric: metric,
+		}
+		s.mu.Lock()
+		nm = s.vecs[name]
+		if nm == nil {
+			nm = nmNew
+			s.vecs[name] = nm
+			s.av = append(s.av, nm)
+		}
+		s.mu.Unlock()
+	}
+
+	m, ok := any(nm.metric).(T)
+	if !ok {
+		return zero, fmt.Errorf("metric %q isn't a %s. It is %T", name, metricTypeName[T](), nm.metric)
+	}
+
+	return m, nil
+}
+
+func metricTypeName[T any]() string {
+	t := reflect.TypeFor[T]()
+	if t.Kind() == reflect.Pointer {
+		t = t.Elem()
+	}
+	return t.Name()
 }
 
 func (s *Set) registerMetric(name string, m prometheus.Metric) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.mustRegisterLocked(name, m)
-}
-
-func (s *Set) registerMetricVec(name string, mv *prometheus.GaugeVec, isAux bool) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
-	if _, exists := s.vecs[name]; !exists {
-		nmv := &namedMetricVec{
-			name:   name,
-			metric: mv,
-			isAux:  isAux,
-		}
-		s.vecs[name] = nmv
-		s.av = append(s.av, nmv)
-	}
 }
 
 // mustRegisterLocked registers given metric with the given name.
