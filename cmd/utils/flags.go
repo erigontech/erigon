@@ -277,11 +277,6 @@ var (
 		Name:  "allow-insecure-unlock",
 		Usage: "Allow insecure account unlocking when account-related RPCs are exposed by http",
 	}
-	RPCGlobalGasCapFlag = cli.Uint64Flag{
-		Name:  "rpc.gascap",
-		Usage: "Sets a cap on gas that can be used in eth_call/estimateGas (0=infinite)",
-		Value: ethconfig.Defaults.RPCGasCap,
-	}
 	RPCGlobalTxFeeCapFlag = cli.Float64Flag{
 		Name:  "rpc.txfeecap",
 		Usage: "Sets a cap on transaction fee (in ether) that can be sent via the RPC APIs (0 = no cap)",
@@ -429,7 +424,7 @@ var (
 	RpcGasCapFlag = cli.UintFlag{
 		Name:  "rpc.gascap",
 		Usage: "Sets a cap on gas that can be used in eth_call/estimateGas",
-		Value: 50000000,
+		Value: uint(ethconfig.Defaults.RPCGasCap),
 	}
 	RpcBlockRangeLimit = cli.IntFlag{
 		Name:  "rpc.blockrange.limit",
@@ -1885,6 +1880,11 @@ func CheckExclusive(ctx *cli.Command, args ...any) {
 	}
 }
 
+// RpcGasCap reads the rpc.gascap flag; the accessor must match its registered UintFlag type.
+func RpcGasCap(ctx *cli.Command) uint64 {
+	return uint64(ctx.Uint(RpcGasCapFlag.Name))
+}
+
 // SetEthConfig applies eth-related command line flags to the config.
 func SetEthConfig(nodeCtx context.Context, ctx *cli.Command, nodeConfig *nodecfg.Config, cfg *ethconfig.Config, logger log.Logger) {
 	if !ctx.Bool(MCPDisableFlag.Name) && ctx.String(MCPAddrFlag.Name) != "" {
@@ -2017,8 +2017,8 @@ func SetEthConfig(nodeCtx context.Context, ctx *cli.Command, nodeConfig *nodecfg
 	if ctx.IsSet(ExecNoBackgroundMaintenanceFlag.Name) {
 		dbg.SetNoBackgroundMaintenance(ctx.Bool(ExecNoBackgroundMaintenanceFlag.Name))
 	}
-	if ctx.IsSet(RPCGlobalGasCapFlag.Name) {
-		cfg.RPCGasCap = ctx.Uint64(RPCGlobalGasCapFlag.Name)
+	if ctx.IsSet(RpcGasCapFlag.Name) {
+		cfg.RPCGasCap = RpcGasCap(ctx)
 	}
 	if cfg.RPCGasCap != 0 {
 		logger.Info("Set global gas cap", "cap", cfg.RPCGasCap)

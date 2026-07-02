@@ -469,7 +469,7 @@ func setEmbeddedRpcDaemon(ctx *cli.Command, cfg *nodecfg.Config, logger log.Logg
 			RpcSubscriptionFiltersMaxAddresses: ctx.Int(RpcSubscriptionFiltersMaxAddressesFlag.Name),
 			RpcSubscriptionFiltersMaxTopics:    ctx.Int(RpcSubscriptionFiltersMaxTopicsFlag.Name),
 		},
-		Gascap:              uint64(ctx.Uint(utils.RpcGasCapFlag.Name)),
+		Gascap:              utils.RpcGasCap(ctx),
 		BlockRangeLimit:     ctx.Int(utils.RpcBlockRangeLimit.Name),
 		GetLogsMaxResults:   ctx.Int(utils.RpcGetLogsMaxResults.Name),
 		Feecap:              ctx.Float64(utils.RPCGlobalTxFeeCapFlag.Name),

@@ -89,6 +89,22 @@ func TestCobraFlags_BoolDefaultsArePreserved(t *testing.T) {
 	require.False(t, gotFalse)
 }
 
+// A user-set --rpc.gascap must reach the config, not silently collapse to 0
+// (= infinite cap). rpc.gascap is registered as a UintFlag, so the accessor
+// behind RpcGasCap must be ctx.Uint; under urfave/cli v3 a mismatched read
+// yields 0.
+func TestRpcGasCap_UserValuePreserved(t *testing.T) {
+	// urfave/cli v3 flags carry parse state, so use a fresh copy per run.
+	gasCap := RpcGasCapFlag
+	app := &cli.Command{Flags: []cli.Flag{&gasCap}}
+	app.Action = func(_ context.Context, cmd *cli.Command) error {
+		require.True(t, cmd.IsSet(RpcGasCapFlag.Name))
+		require.Equal(t, uint64(30_000_000), RpcGasCap(cmd))
+		return nil
+	}
+	require.NoError(t, app.Run(context.Background(), []string{"erigon", "--rpc.gascap=30000000"}))
+}
+
 func TestResolveChainName(t *testing.T) {
 	tests := []struct {
 		name string
