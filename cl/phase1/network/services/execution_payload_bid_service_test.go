@@ -56,8 +56,8 @@ func setupExecutionPayloadBidService(t *testing.T, ctrl *gomock.Controller) (
 		epbsPool:          epbsPool,
 		emitters:          beaconevents.NewEventEmitter(),
 		seenCache:         seenCache,
-		pendingCond:       sync.NewCond(&sync.Mutex{}),
 	}
+	service.pending = service.newPendingQueue()
 
 	return service, mockSyncedData, ethClockMock, fcMock, epbsPool
 }
@@ -235,7 +235,7 @@ func TestExecutionPayloadBidServiceWaitsForMatchingDependentRootPreference(t *te
 
 	ethClockMock.EXPECT().GetCurrentSlot().Return(uint64(100))
 	require.NoError(t, service.ProcessMessage(context.Background(), nil, msg))
-	require.Equal(t, int32(1), service.pendingCount.Load())
+	require.Equal(t, int32(1), service.pending.count.Load())
 
 	addPreferencesToPool(epbsPool, 100)
 	fcMock.ExecutionPayloadStatusMap[msg.Message.ParentBlockHash] = execution_client.PayloadStatusValidated
@@ -245,8 +245,8 @@ func TestExecutionPayloadBidServiceWaitsForMatchingDependentRootPreference(t *te
 		return nil
 	})
 
-	service.processPendingBids()
-	require.Equal(t, int32(0), service.pendingCount.Load())
+	service.pending.processPending(context.Background())
+	require.Equal(t, int32(0), service.pending.count.Load())
 	_, found := epbsPool.HighestBids.Get(pool.HighestBidKey{Slot: 100, ParentBlockHash: msg.Message.ParentBlockHash, ParentBlockRoot: msg.Message.ParentBlockRoot})
 	require.True(t, found)
 }
@@ -262,7 +262,7 @@ func TestExecutionPayloadBidServiceWaitsForParentState(t *testing.T) {
 
 	ethClockMock.EXPECT().GetCurrentSlot().Return(uint64(100))
 	require.NoError(t, service.ProcessMessage(context.Background(), nil, msg))
-	require.Equal(t, int32(1), service.pendingCount.Load())
+	require.Equal(t, int32(1), service.pending.count.Load())
 
 	fcMock.StateAtBlockRootVal[msg.Message.ParentBlockRoot] = newBidParentState(service.beaconCfg, testDependentRoot)
 	fcMock.ExecutionPayloadStatusMap[msg.Message.ParentBlockHash] = execution_client.PayloadStatusValidated
@@ -272,8 +272,8 @@ func TestExecutionPayloadBidServiceWaitsForParentState(t *testing.T) {
 		return nil
 	})
 
-	service.processPendingBids()
-	require.Equal(t, int32(0), service.pendingCount.Load())
+	service.pending.processPending(context.Background())
+	require.Equal(t, int32(0), service.pending.count.Load())
 	_, found := epbsPool.HighestBids.Get(pool.HighestBidKey{Slot: 100, ParentBlockHash: msg.Message.ParentBlockHash, ParentBlockRoot: msg.Message.ParentBlockRoot})
 	require.True(t, found)
 }
@@ -583,16 +583,16 @@ func TestExecutionPayloadBidServicePendingQueueCap(t *testing.T) {
 	service, _, _, _, _ := setupExecutionPayloadBidService(t, ctrl)
 
 	// Fill the queue to the cap
-	service.pendingCount.Store(maxPendingBids)
+	service.pending.count.Store(maxPendingBids)
 
 	msg := newTestSignedExecutionPayloadBid(100, 999, 1000)
 
 	service.queuePendingBid(msg)
 
 	// Should still be at cap — new item was rejected
-	require.Equal(t, int32(maxPendingBids), service.pendingCount.Load())
+	require.Equal(t, int32(maxPendingBids), service.pending.count.Load())
 	key := pendingBidKey{builderIndex: 999, slot: 100}
-	_, exists := service.pendingBids.Load(key)
+	_, exists := service.pending.jobs.Load(key)
 	require.False(t, exists)
 }
 
@@ -602,7 +602,7 @@ func TestExecutionPayloadBidServicePendingQueueCapConcurrent(t *testing.T) {
 
 	service, _, _, _, _ := setupExecutionPayloadBidService(t, ctrl)
 
-	service.pendingCount.Store(maxPendingBids - 5)
+	service.pending.count.Store(maxPendingBids - 5)
 
 	var wg sync.WaitGroup
 	for i := 0; i < 100; i++ {
@@ -615,9 +615,9 @@ func TestExecutionPayloadBidServicePendingQueueCapConcurrent(t *testing.T) {
 	}
 	wg.Wait()
 
-	require.Equal(t, int32(maxPendingBids), service.pendingCount.Load())
+	require.Equal(t, int32(maxPendingBids), service.pending.count.Load())
 	stored := 0
-	service.pendingBids.Range(func(_, _ any) bool {
+	service.pending.jobs.Range(func(_, _ any) bool {
 		stored++
 		return true
 	})
@@ -632,17 +632,17 @@ func TestExecutionPayloadBidServicePendingExpiry(t *testing.T) {
 
 	msg := newTestSignedExecutionPayloadBid(100, 1, 1000)
 	key := pendingBidKey{builderIndex: 1, slot: 100}
-	service.pendingBids.Store(key, &pendingBidJob{
+	service.pending.jobs.Store(key, &pendingJob[*cltypes.SignedExecutionPayloadBid]{
 		msg:          msg,
 		creationTime: time.Now().Add(-pendingBidExpiry - time.Second), // expired
 	})
-	service.pendingCount.Store(1)
+	service.pending.count.Store(1)
 
 	// Expiry is checked before the slot check, so no ethClock call is expected.
-	service.processPendingBids()
+	service.pending.processPending(context.Background())
 
-	require.Equal(t, int32(0), service.pendingCount.Load())
-	_, exists := service.pendingBids.Load(key)
+	require.Equal(t, int32(0), service.pending.count.Load())
+	_, exists := service.pending.jobs.Load(key)
 	require.False(t, exists)
 }
 
@@ -654,19 +654,19 @@ func TestExecutionPayloadBidServicePendingStaleSlotDropped(t *testing.T) {
 
 	msg := newTestSignedExecutionPayloadBid(100, 1, 1000)
 	key := pendingBidKey{builderIndex: 1, slot: 100}
-	service.pendingBids.Store(key, &pendingBidJob{
+	service.pending.jobs.Store(key, &pendingJob[*cltypes.SignedExecutionPayloadBid]{
 		msg:          msg,
 		creationTime: time.Now(),
 	})
-	service.pendingCount.Store(1)
+	service.pending.count.Store(1)
 
 	// Bid slot 100 is neither current (200) nor next slot → dropped
 	ethClockMock.EXPECT().GetCurrentSlot().Return(uint64(200))
 
-	service.processPendingBids()
+	service.pending.processPending(context.Background())
 
-	require.Equal(t, int32(0), service.pendingCount.Load())
-	_, exists := service.pendingBids.Load(key)
+	require.Equal(t, int32(0), service.pending.count.Load())
+	_, exists := service.pending.jobs.Load(key)
 	require.False(t, exists)
 }
 
@@ -703,14 +703,14 @@ func TestExecutionPayloadBidServiceLoopProcessesQueuedBid(t *testing.T) {
 
 	// No preferences yet → queued as pending
 	require.NoError(t, service.ProcessMessage(context.Background(), nil, msg))
-	require.Equal(t, int32(1), impl.pendingCount.Load())
+	require.Equal(t, int32(1), impl.pending.count.Load())
 
 	addPreferencesToPool(epbsPool, 100)
 
 	bidKey := pool.HighestBidKey{Slot: 100, ParentBlockHash: msg.Message.ParentBlockHash, ParentBlockRoot: msg.Message.ParentBlockRoot}
 	require.Eventually(t, func() bool {
 		_, found := epbsPool.HighestBids.Get(bidKey)
-		return found && impl.pendingCount.Load() == 0
+		return found && impl.pending.count.Load() == 0
 	}, 5*time.Second, 10*time.Millisecond)
 }
 
