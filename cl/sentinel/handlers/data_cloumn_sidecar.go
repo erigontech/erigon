@@ -24,7 +24,7 @@ func (c *ConsensusHandlers) dataColumnSidecarsByRangeHandler(s network.Stream) e
 
 	// Use current epoch's version for decoding (supports Fulu and GLOAS)
 	version := c.beaconConfig.GetCurrentStateVersion(curEpoch)
-	req := &cltypes.ColumnSidecarsByRangeRequest{}
+	req := cltypes.NewColumnSidecarsByRangeRequest(c.beaconConfig)
 	if err := ssz_snappy.DecodeAndReadNoForkDigest(s, req, version); err != nil {
 		return ssz_snappy.EncodeAndWrite(s, &emptyString{}, InvalidRequestPrefix)
 	}

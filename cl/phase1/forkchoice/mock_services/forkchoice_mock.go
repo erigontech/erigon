@@ -24,6 +24,8 @@ import (
 
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
+	"github.com/erigontech/erigon/cl/consensus"
+	beaconengine "github.com/erigontech/erigon/cl/consensus/beacon"
 	"github.com/erigontech/erigon/cl/das"
 	"github.com/erigontech/erigon/cl/das/mock_services"
 	peerdasstatemock "github.com/erigontech/erigon/cl/das/state/mock_services"
@@ -240,6 +242,10 @@ func (f *ForkChoiceStorageMock) AnchorRoot() common.Hash {
 
 func (f *ForkChoiceStorageMock) Engine() execution_client.ExecutionEngine {
 	panic("implement me")
+}
+
+func (f *ForkChoiceStorageMock) ConsensusEngine() consensus.Engine {
+	return &beaconengine.Engine{}
 }
 
 func (f *ForkChoiceStorageMock) FinalizedCheckpoint() solid.Checkpoint {

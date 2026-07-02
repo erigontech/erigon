@@ -39,13 +39,12 @@ func GetDataColumnSidecars(
 	kzgCommitments *solid.ListSSZ[*cltypes.KZGCommitment],
 	kzgCommitmentsInclusionProof solid.HashVectorSSZ,
 	cellsAndKZGProofs []CellsAndKZGProofs,
+	cfg *clparams.BeaconChainConfig,
 ) ([]*cltypes.DataColumnSidecar, error) {
 
 	if len(cellsAndKZGProofs) != kzgCommitments.Len() {
 		return nil, fmt.Errorf("number of cells/proofs entries (%d) does not match number of KZG commitments (%d)", len(cellsAndKZGProofs), kzgCommitments.Len())
 	}
-
-	cfg := clparams.GetBeaconConfig()
 	sidecars := make([]*cltypes.DataColumnSidecar, cfg.NumberOfColumns)
 
 	// Initialize sidecars for each column
@@ -84,8 +83,8 @@ func GetDataColumnSidecarsGloas(
 	slot uint64,
 	beaconBlockRoot common.Hash,
 	cellsAndKZGProofs []CellsAndKZGProofs,
+	cfg *clparams.BeaconChainConfig,
 ) ([]*cltypes.DataColumnSidecar, error) {
-	cfg := clparams.GetBeaconConfig()
 	sidecars := make([]*cltypes.DataColumnSidecar, cfg.NumberOfColumns)
 
 	// Initialize sidecars for each column
@@ -104,7 +103,7 @@ func GetDataColumnSidecarsGloas(
 			columnProofs.Append(proof)
 		}
 
-		sidecar := cltypes.NewDataColumnSidecarWithVersion(clparams.GloasVersion)
+		sidecar := cltypes.NewDataColumnSidecarWithVersion(clparams.GloasVersion, cfg)
 		sidecar.Index = columnIndex
 		sidecar.Column = columnCells
 		sidecar.KzgProofs = columnProofs

@@ -56,7 +56,7 @@ func setupTestDataColumnStorage(t *testing.T) (DataColumnStorage, afero.Fs, *clp
 // Mock implementation removed - using eth_clock.NewMockEthereumClock instead
 
 func createTestDataColumnSidecar(slot uint64, columnIndex int64) *cltypes.DataColumnSidecar {
-	sidecar := cltypes.NewDataColumnSidecar()
+	sidecar := cltypes.NewDataColumnSidecar(globalBeaconConfig)
 	sidecar.Index = uint64(columnIndex)
 	sidecar.SignedBlockHeader = &cltypes.SignedBeaconBlockHeader{
 		Header: &cltypes.BeaconBlockHeader{
@@ -293,8 +293,8 @@ func TestWriteStream(t *testing.T) {
 	require.NoError(t, err)
 
 	// Verify the streamed data can be decoded
-	streamedData := &cltypes.DataColumnSidecar{}
 	version := storage.(*dataColumnStorageImpl).beaconChainConfig.GetCurrentStateVersion(1000 / 32)
+	streamedData := cltypes.NewDataColumnSidecarWithVersion(version, globalBeaconConfig)
 	err = ssz_snappy.DecodeAndReadNoForkDigest(&buf, streamedData, version)
 	require.NoError(t, err)
 	assert.Equal(t, sidecar.SignedBlockHeader.Header.Slot, streamedData.SignedBlockHeader.Header.Slot)

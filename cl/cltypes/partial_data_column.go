@@ -29,17 +29,18 @@ type PartialDataColumnHeader struct {
 	Slot                         uint64                         `json:"slot,omitempty"`                            // [New in Gloas:EIP7732]
 	BeaconBlockRoot              common.Hash                    `json:"beacon_block_root,omitempty"`               // [New in Gloas:EIP7732]
 
-	version clparams.StateVersion
+	version      clparams.StateVersion
+	beaconConfig *clparams.BeaconChainConfig
 }
 
-func NewPartialDataColumnHeader(version clparams.StateVersion) *PartialDataColumnHeader {
-	h := &PartialDataColumnHeader{version: version}
+func NewPartialDataColumnHeader(version clparams.StateVersion, cfg *clparams.BeaconChainConfig) *PartialDataColumnHeader {
+	h := &PartialDataColumnHeader{version: version, beaconConfig: cfg}
 	h.init()
 	return h
 }
 
 func (h *PartialDataColumnHeader) init() {
-	cfg := clparams.GetBeaconConfig()
+	cfg := h.beaconConfig
 	if h.KzgCommitments == nil {
 		h.KzgCommitments = solid.NewStaticListSSZ[*KZGCommitment](int(cfg.MaxBlobCommittmentsPerBlock), 48)
 	}
@@ -96,9 +97,9 @@ func (h *PartialDataColumnHeader) HashSSZ() ([32]byte, error) {
 
 func (h *PartialDataColumnHeader) Clone() clonable.Clonable {
 	if h == nil {
-		return &PartialDataColumnHeader{}
+		return &PartialDataColumnHeader{beaconConfig: clparams.GetBeaconConfig()}
 	}
-	return NewPartialDataColumnHeader(h.version)
+	return NewPartialDataColumnHeader(h.version, h.beaconConfig)
 }
 
 func (h *PartialDataColumnHeader) Static() bool {
@@ -115,17 +116,18 @@ type PartialDataColumnSidecar struct {
 	KzgProofs          *solid.ListSSZ[*KZGProof]                `json:"kzg_proofs"`
 	Header             *solid.ListSSZ[*PartialDataColumnHeader] `json:"header"`
 
-	version clparams.StateVersion
+	version      clparams.StateVersion
+	beaconConfig *clparams.BeaconChainConfig
 }
 
-func NewPartialDataColumnSidecar(version clparams.StateVersion) *PartialDataColumnSidecar {
-	s := &PartialDataColumnSidecar{version: version}
+func NewPartialDataColumnSidecar(version clparams.StateVersion, cfg *clparams.BeaconChainConfig) *PartialDataColumnSidecar {
+	s := &PartialDataColumnSidecar{version: version, beaconConfig: cfg}
 	s.init()
 	return s
 }
 
 func (s *PartialDataColumnSidecar) init() {
-	cfg := clparams.GetBeaconConfig()
+	cfg := s.beaconConfig
 	if s.CellsPresentBitmap == nil {
 		s.CellsPresentBitmap = solid.NewBitList(0, int(cfg.MaxBlobCommittmentsPerBlock))
 	}
@@ -183,9 +185,9 @@ func (s *PartialDataColumnSidecar) HashSSZ() ([32]byte, error) {
 
 func (s *PartialDataColumnSidecar) Clone() clonable.Clonable {
 	if s == nil {
-		return &PartialDataColumnSidecar{}
+		return &PartialDataColumnSidecar{beaconConfig: clparams.GetBeaconConfig()}
 	}
-	return NewPartialDataColumnSidecar(s.version)
+	return NewPartialDataColumnSidecar(s.version, s.beaconConfig)
 }
 
 func (s *PartialDataColumnSidecar) Static() bool {
@@ -206,18 +208,19 @@ func (s *PartialDataColumnSidecar) GetHeader() *PartialDataColumnHeader {
 //
 // Schema: available, requests
 type PartialDataColumnPartsMetadata struct {
-	Available *solid.BitList `json:"available"`
-	Requests  *solid.BitList `json:"requests"`
+	Available    *solid.BitList `json:"available"`
+	Requests     *solid.BitList `json:"requests"`
+	beaconConfig *clparams.BeaconChainConfig
 }
 
-func NewPartialDataColumnPartsMetadata() *PartialDataColumnPartsMetadata {
-	m := &PartialDataColumnPartsMetadata{}
+func NewPartialDataColumnPartsMetadata(cfg *clparams.BeaconChainConfig) *PartialDataColumnPartsMetadata {
+	m := &PartialDataColumnPartsMetadata{beaconConfig: cfg}
 	m.init()
 	return m
 }
 
 func (m *PartialDataColumnPartsMetadata) init() {
-	cfg := clparams.GetBeaconConfig()
+	cfg := m.beaconConfig
 	if m.Available == nil {
 		m.Available = solid.NewBitList(0, int(cfg.MaxBlobCommittmentsPerBlock))
 	}
@@ -247,7 +250,10 @@ func (m *PartialDataColumnPartsMetadata) HashSSZ() ([32]byte, error) {
 }
 
 func (m *PartialDataColumnPartsMetadata) Clone() clonable.Clonable {
-	return NewPartialDataColumnPartsMetadata()
+	if m == nil {
+		return NewPartialDataColumnPartsMetadata(clparams.GetBeaconConfig())
+	}
+	return NewPartialDataColumnPartsMetadata(m.beaconConfig)
 }
 
 func (m *PartialDataColumnPartsMetadata) Static() bool {
