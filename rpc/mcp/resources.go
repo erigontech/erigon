@@ -158,10 +158,15 @@ func (e *ErigonMCPServer) handleResourceNetworkStatus(ctx context.Context, req m
 
 	currentBlock, _ := e.ethAPI.BlockNumber(ctx)
 
+	syncing, err := e.ethAPI.Syncing(ctx)
+	if err != nil || syncing == nil {
+		syncing = false
+	}
+
 	status := map[string]any{
 		"node_info":     nodeInfo,
 		"current_block": currentBlock,
-		"syncing":       false, // Would check actual sync status
+		"syncing":       syncing,
 	}
 
 	return []mcp.ResourceContents{
@@ -200,9 +205,10 @@ func (e *ErigonMCPServer) handleResourceGasInfo(ctx context.Context, req mcp.Rea
 
 // Resource template handlers
 func (e *ErigonMCPServer) handleResourceAddressSummary(ctx context.Context, req mcp.ReadResourceRequest) ([]mcp.ResourceContents, error) {
-	// Extract address from URI
-	// This is a simplified example - you'd need proper URI parsing
-	address := req.Params.URI // Would extract {address} parameter
+	address := extractURIParam(req.Params.URI, "erigon://address/", "/summary")
+	if address == "" {
+		return nil, fmt.Errorf("missing address parameter in URI: %s", req.Params.URI)
+	}
 
 	latest := rpc.BlockNumberOrHashWithNumber(rpc.LatestBlockNumber)
 	balance, _ := e.ethAPI.GetBalance(ctx, common.HexToAddress(address), &latest)
@@ -226,9 +232,10 @@ func (e *ErigonMCPServer) handleResourceAddressSummary(ctx context.Context, req 
 }
 
 func (e *ErigonMCPServer) handleResourceBlockSummary(ctx context.Context, req mcp.ReadResourceRequest) ([]mcp.ResourceContents, error) {
-	// Extract block number from URI
-	// Simplified - needs proper parsing
-	blockNumStr := req.Params.URI
+	blockNumStr := extractURIParam(req.Params.URI, "erigon://block/", "/summary")
+	if blockNumStr == "" {
+		return nil, fmt.Errorf("missing block number parameter in URI: %s", req.Params.URI)
+	}
 
 	blockNum, err := parseBlockNumber(blockNumStr)
 	if err != nil {
@@ -250,16 +257,28 @@ func (e *ErigonMCPServer) handleResourceBlockSummary(ctx context.Context, req mc
 }
 
 func (e *ErigonMCPServer) handleResourceTransactionAnalysis(ctx context.Context, req mcp.ReadResourceRequest) ([]mcp.ResourceContents, error) {
-	// Extract tx hash from URI
-	txHash := req.Params.URI
+	txHash := extractURIParam(req.Params.URI, "erigon://transaction/", "/analysis")
+	if txHash == "" {
+		return nil, fmt.Errorf("missing transaction hash parameter in URI: %s", req.Params.URI)
+	}
 
-	tx, _ := e.ethAPI.GetTransactionByHash(ctx, common.HexToHash(txHash))
-	receipt, _ := e.ethAPI.GetTransactionReceipt(ctx, common.HexToHash(txHash))
+	hash := common.HexToHash(txHash)
+	tx, _ := e.ethAPI.GetTransactionByHash(ctx, hash)
+	receipt, _ := e.ethAPI.GetTransactionReceipt(ctx, hash)
+
+	status := "unknown"
+	if receiptStatus, ok := receipt["status"].(hexutil.Uint64); ok {
+		if receiptStatus == 0 {
+			status = "reverted"
+		} else {
+			status = "success"
+		}
+	}
 
 	analysis := map[string]any{
 		"transaction": tx,
 		"receipt":     receipt,
-		"status":      "success", // Would check receipt status
+		"status":      status,
 	}
 
 	return []mcp.ResourceContents{

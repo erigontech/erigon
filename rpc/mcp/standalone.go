@@ -79,17 +79,6 @@ func toJSONIndent(raw json.RawMessage) string {
 	return string(formatted)
 }
 
-// extractURIParam extracts a path parameter from an MCP resource template URI.
-// For example, given URI "erigon://address/0xABC/summary" and template prefix
-// "erigon://address/" with suffix "/summary", it returns "0xABC".
-func extractURIParam(uri, prefix, suffix string) string {
-	s := strings.TrimPrefix(uri, prefix)
-	if suffix != "" {
-		s = strings.TrimSuffix(s, suffix)
-	}
-	return s
-}
-
 // registerTools registers all MCP tools matching the embedded server.
 func (s *StandaloneMCPServer) registerTools() {
 	// ===== ETH TOOLS =====
