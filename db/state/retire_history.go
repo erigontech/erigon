@@ -79,7 +79,10 @@ func (a *Aggregator) RetireOldHistoryFiles(ctx context.Context, cutoffStep kv.St
 	var deleted []string
 	var retired []*FilesItem
 	for _, dt := range at.d {
-		if dt.name == kv.CommitmentDomain {
+		// commitment.history and rcache have special cli flags: --prune.include-commitment-history --persist.receipt
+		// if they enabled they are never pruned - it's current logic. we will change it in future PR's - but for now keep them
+		// See: https://github.com/erigontech/erigon/issues/21306 'step 4'
+		if dt.name == kv.CommitmentDomain || dt.name == kv.RCacheDomain {
 			continue
 		}
 		if dt.d.Disable || dt.d.SnapshotsDisabled || dt.d.HistoryDisabled {
