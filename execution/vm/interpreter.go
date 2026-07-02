@@ -504,7 +504,7 @@ func (evm *EVM) Run(contract Contract, gas mdgas.MdGas, input []byte, readOnly b
 			dynamicCost, err = operation.dynamicGas(evm, callContext, callContext.Gas(), memorySize)
 			if err != nil {
 				if !errors.Is(err, ErrOutOfGas) {
-					err = fmt.Errorf("%w: %v", ErrOutOfGas, err)
+					err = fmt.Errorf("%w: %w", ErrOutOfGas, err)
 				}
 				return nil, callContext.Gas(), mdgas.MdGasUsage{}, err
 			}

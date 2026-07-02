@@ -157,6 +157,23 @@ func (test *udpTest) waitPacketOut(validate any) (closed bool) {
 	return false
 }
 
+// TestUDPv4_RequestENRNoUDPEndpoint verifies that RequestENR returns a clean
+// errNoUDPEndpoint error for a node without a usable UDP endpoint, instead of
+// silently sending a packet to the zero address and waiting for a timeout.
+// This mirrors the existing guards in ping/Ping/findnode.
+func TestUDPv4_RequestENRNoUDPEndpoint(t *testing.T) {
+	t.Parallel()
+	test := newUDPTest(t)
+	defer test.close()
+
+	key := newkey()
+	// UDP port 0 makes UDPEndpoint return ok=false.
+	node := enode.NewV4(&key.PublicKey, net.ParseIP("1.2.3.4"), 2222, 0)
+	if _, err := test.udp.RequestENR(node); !errors.Is(err, errNoUDPEndpoint) {
+		t.Errorf("expected errNoUDPEndpoint, got %v", err)
+	}
+}
+
 func TestUDPv4_packetErrors(t *testing.T) {
 	test := newUDPTest(t)
 	defer test.close()

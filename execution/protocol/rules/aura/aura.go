@@ -384,7 +384,13 @@ func (c *AuRa) VerifyHeader(chain rules.ChainHeaderReader, header *types.Header,
 		log.Error("rules.ErrUnknownAncestor", "parentNum", number-1, "hash", header.ParentHash.String())
 		return rules.ErrUnknownAncestor
 	}
-	return ethash.VerifyHeaderBasics(chain, header, parent, true /*checkTimestamp*/, c.HasGasLimitContract() /*skipGasLimit*/)
+	if err := ethash.VerifyHeaderBasics(chain, header, parent, true /*checkTimestamp*/); err != nil {
+		return err
+	}
+	if !c.HasGasLimitContract() {
+		return misc.VerifyParentGasLimit(chain.Config(), parent, header)
+	}
+	return nil
 }
 
 // nolint
@@ -1204,6 +1210,12 @@ func (c *AuRa) GetTransferFunc() evmtypes.TransferFunc {
 
 func (c *AuRa) GetPostApplyMessageFunc() evmtypes.PostApplyMessageFunc {
 	return nil
+}
+
+func (c *AuRa) ValidateBlockPostExecution(chainConfig *chain.Config, header *types.Header,
+	gasUsed, blobGasUsed uint64, checkReceipts, checkBloom bool,
+	receipts types.Receipts, txns types.Transactions, logger log.Logger) error {
+	return rules.DefaultBlockPostValidation(chainConfig, header, gasUsed, blobGasUsed, checkReceipts, checkBloom, receipts, txns, logger)
 }
 
 /*

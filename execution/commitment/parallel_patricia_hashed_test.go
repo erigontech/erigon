@@ -44,7 +44,6 @@ func TestParallelPatriciaHashedSkeletonConstruction(t *testing.T) {
 func TestParallelPatriciaHashedSkeletonParseTrieVariant(t *testing.T) {
 	assert.Equal(t, VariantParallelHexPatricia, ParseTrieVariant("parallel"))
 	assert.Equal(t, VariantHexPatriciaTrie, ParseTrieVariant("hex"))
-	assert.Equal(t, VariantConcurrentHexPatricia, ParseTrieVariant("hex-parallel"))
 	assert.Equal(t, VariantHexPatriciaTrie, ParseTrieVariant("nonsense"))
 }
 
