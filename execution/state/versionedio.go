@@ -1528,13 +1528,14 @@ type accountState struct {
 	selfDestructedAt        uint32                              // access index of the selfdestruct
 	storageReadValues       map[accounts.StorageKey]uint256.Int // original read values for net-zero detection
 	nonRevertableUserAccess bool                                // true if a user tx (txIndex >= 0) has non-revertable access
+	initialCodeEmpty        bool                                // pre-block code was empty (created contract or empty-codehash read)
 }
 
 // check pre- and post-values, add to BAL if different
 func (a *accountState) finalize() {
 	applyToBalance(a.balance, a.changes, a.initialBalanceValue)
 	applyToNonce(a.nonce, a.changes)
-	applyToCode(a.code, a.changes)
+	applyToCode(a.code, a.changes, a.initialCodeEmpty)
 }
 
 type fieldTracker[T any] struct {
@@ -1587,8 +1588,18 @@ func newCodeTracker() *fieldTracker[[]byte] {
 	return &fieldTracker[[]byte]{}
 }
 
-func applyToCode(ct *fieldTracker[[]byte], ac *types.AccountChanges) {
+func applyToCode(ct *fieldTracker[[]byte], ac *types.AccountChanges, initialCodeEmpty bool) {
+	// A first code change back to empty when pre-block code was already empty
+	// (e.g. an EIP-7702 delegation set then cleared in the same tx) is a net-zero
+	// change and is omitted, matching EELS's post-vs-pre code-hash diff.
+	firstFiltered := false
 	ct.changes.apply(func(idx uint32, value []byte) {
+		if !firstFiltered {
+			firstFiltered = true
+			if initialCodeEmpty && len(value) == 0 {
+				return
+			}
+		}
 		ac.CodeChanges = append(ac.CodeChanges, &types.CodeChange{
 			Index:    idx,
 			Bytecode: bytes.Clone(value),
@@ -1719,6 +1730,12 @@ func (account *accountState) updateWrite(vw *VersionedWrite, accessIndex uint32,
 			account.selfDestructed = true
 			account.selfDestructedAt = accessIndex
 		}
+	case CreateContractPath:
+		// A contract created this block did not exist pre-block, so its pre-block
+		// code is empty; applyToCode uses this to drop a net-zero empty code change.
+		if val, ok := vw.Val.(bool); ok && val {
+			account.initialCodeEmpty = true
+		}
 	default:
 	}
 }
@@ -1760,6 +1777,17 @@ func (account *accountState) updateRead(vr *VersionedRead) {
 				// no-op check in updateWrite will incorrectly skip a real write.
 				if len(account.balance.changes.entries) == 0 {
 					account.setBalanceValue(val)
+				}
+			}
+		case CodeHashPath:
+			// Records whether pre-block code was empty, so applyToCode can drop a
+			// net-zero empty code change. A nil read is the absent-account case.
+			switch h := vr.Val.(type) {
+			case nil:
+				account.initialCodeEmpty = true
+			case accounts.CodeHash:
+				if h == accounts.EmptyCodeHash || h == (accounts.CodeHash{}) {
+					account.initialCodeEmpty = true
 				}
 			}
 		default:

@@ -431,6 +431,74 @@ func TestVersionedIO_PostWriteBalanceReadDoesNotPoisonInitialBalance(t *testing.
 	require.True(t, found, "burn target address must appear in BAL")
 }
 
+// TestCreateAccount_FundedThenCreated_SyntheticReadKeepsPreTxBalance is the
+// regression test for the eip7997 factory_deploys_to_pre_funded_address BAL
+// mismatch. A value transfer creates and funds an address (balance 0 -> 1), then
+// a CREATE2 deploys a contract at that same address in the same tx. CreateAccount
+// records a synthetic BalancePath read for conflict detection; it must only be
+// recorded on the first creation, keeping the pre-tx balance (0). Re-recording it
+// on the CREATE2 would capture the live funded balance (1) and seed a wrong
+// block-access-list baseline, dropping the real 0 -> 1 change as a net-zero no-op.
+func TestCreateAccount_FundedThenCreated_SyntheticReadKeepsPreTxBalance(t *testing.T) {
+	t.Parallel()
+
+	ibs := New(&minimalStateReader{})
+	ibs.SetVersionMap(NewVersionMap(nil))
+	ibs.SetTxContext(1, 0)
+	ibs.SetVersion(0)
+
+	addr := accounts.InternAddress(common.HexToAddress("0xf11577"))
+	require.NoError(t, ibs.CreateAccount(addr, false))                                          // value transfer creates the recipient
+	require.NoError(t, ibs.AddBalance(addr, *uint256.NewInt(1), tracing.BalanceChangeTransfer)) // funds it 0 -> 1
+	require.NoError(t, ibs.CreateAccount(addr, true))                                           // CREATE2 deploys the contract
+
+	vr, ok := ibs.VersionedReads()[addr][AccountKey{Path: BalancePath, Key: accounts.NilKey}]
+	require.True(t, ok, "a synthetic BalancePath read must be recorded for the created account")
+	bal, ok := vr.Val.(uint256.Int)
+	require.True(t, ok)
+	require.True(t, bal.IsZero(),
+		"the synthetic creation BalancePath read must keep the pre-tx balance (0); the CREATE2 re-creation must not overwrite it with the in-tx funded balance")
+}
+
+// TestVersionedIO_CreatedAccountEmptyCodeChangeOmitted is the regression test
+// for the eip8037 same_tx_create_then_clear_double_auth_base_refill BAL
+// mismatch. An EIP-7702 authority that did not exist pre-block (nil AddressPath
+// read, empty pre-block code) has a delegation set then cleared in the same tx,
+// so its net code write is empty. Per EIP-7928 a code change is recorded only
+// when the post-tx code hash differs from the pre-tx one; empty -> empty is not
+// a change and must be omitted. The nonce bump (0 -> 2) is a real change.
+func TestVersionedIO_CreatedAccountEmptyCodeChangeOmitted(t *testing.T) {
+	t.Parallel()
+
+	addr := accounts.InternAddress(common.HexToAddress("0xc0f6dc9"))
+
+	io := NewVersionedIO(1)
+
+	// The authority did not exist pre-block: its CodeHash reads as empty.
+	reads := ReadSet{}
+	reads.Set(VersionedRead{Address: addr, Path: CodeHashPath, Val: accounts.EmptyCodeHash})
+	io.RecordReads(Version{TxIndex: 0}, reads)
+
+	io.RecordWrites(Version{TxIndex: 0}, VersionedWrites{
+		&VersionedWrite{Address: addr, Path: NoncePath, Version: Version{TxIndex: 0}, Val: uint64(2)},
+		&VersionedWrite{Address: addr, Path: CodePath, Version: Version{TxIndex: 0}, Val: []byte{}},
+	})
+
+	bal := io.AsBlockAccessList()
+
+	found := false
+	for _, ac := range bal {
+		if ac.Address == addr {
+			found = true
+			require.Empty(t, ac.CodeChanges,
+				"a delegation set then cleared in the same tx nets to empty code; pre-block code of an absent account is empty, so no code change must be recorded\n%s", bal.DebugString())
+			require.Len(t, ac.NonceChanges, 1, "the nonce bump must be recorded")
+			require.Equal(t, uint64(2), ac.NonceChanges[0].Value)
+		}
+	}
+	require.True(t, found, "authority account must appear in BAL")
+}
+
 // TestVersionedIO_StorageNoOpWriteAfterChangeOmittedFromBAL verifies the
 // EIP-7928 rule that, for a slot written multiple times in a block, a write
 // storing the value an earlier write already set is a no-op and must be

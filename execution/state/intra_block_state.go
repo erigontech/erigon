@@ -2074,8 +2074,15 @@ func (sdb *IntraBlockState) CreateAccount(addr accounts.Address, contractCreatio
 	}
 
 	// for newly created accounts these synthetic read/writes are used so that account
-	// creation clashes between trnascations get detected
-	versionRead[uint256.Int](sdb, addr, BalancePath, accounts.NilKey, balSource, balVersion, newObj.Balance())
+	// creation clashes between trnascations get detected. Only record the
+	// BalancePath read on the first creation of this account in the tx: a
+	// re-creation (e.g. CREATE2 to an address funded and created earlier in the
+	// same tx) carries the live post-transfer balance, and overwriting the
+	// first read's pre-tx value with it would seed a wrong block-access-list
+	// baseline and drop the real balance change.
+	if _, seen := sdb.versionedReads[addr][AccountKey{Path: BalancePath, Key: accounts.NilKey}]; !seen {
+		versionRead[uint256.Int](sdb, addr, BalancePath, accounts.NilKey, balSource, balVersion, newObj.Balance())
+	}
 	versionRead[uint256.Int](sdb, addr, IncarnationPath, accounts.NilKey, incSource, incVersion, prevInc)
 	versionWritten(sdb, addr, BalancePath, accounts.NilKey, newObj.Balance())
 	versionWritten(sdb, addr, IncarnationPath, accounts.NilKey, newObj.data.Incarnation)
