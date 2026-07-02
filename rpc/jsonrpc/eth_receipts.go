@@ -114,9 +114,69 @@ func (api *BaseAPI) getCachedReceipts(ctx context.Context, hash common.Hash) (ty
 	return api.receiptsGenerator.GetCachedReceipts(ctx, hash)
 }
 
+// resolveLogsRange resolves a filter's block range. A BlockHash pins the range to that
+// block; otherwise negative tags are resolved against the chain, defaulting to the
+// latest executed block. With checkFuture, ranges past the latest executed block are
+// rejected as they are resolved.
+func (api *BaseAPI) resolveLogsRange(ctx context.Context, tx kv.Tx, crit filters.FilterCriteria, checkFuture bool) (begin, end uint64, err error) {
+	if crit.BlockHash != nil {
+		block, err := api.blockByHashWithSenders(ctx, tx, *crit.BlockHash)
+		if err != nil {
+			return 0, 0, err
+		}
+		if block == nil {
+			return 0, 0, fmt.Errorf("block not found: %x", *crit.BlockHash)
+		}
+
+		num := block.NumberU64()
+		return num, num, nil
+	}
+
+	// Convert the RPC block numbers into internal representations
+	latest, _, _, err := rpchelper.GetBlockNumber(ctx, rpc.BlockNumberOrHashWithNumber(rpc.LatestExecutedBlockNumber), tx, api._blockReader, nil)
+	if err != nil {
+		return 0, 0, err
+	}
+
+	begin = latest
+	if crit.FromBlock != nil {
+		fromBlock := crit.FromBlock.Int64()
+		if fromBlock > 0 {
+			begin = uint64(fromBlock)
+		} else {
+			blockNum := rpc.BlockNumber(fromBlock)
+			begin, _, _, err = rpchelper.GetBlockNumber(ctx, rpc.BlockNumberOrHashWithNumber(blockNum), tx, api._blockReader, api.filters)
+			if err != nil {
+				return 0, 0, err
+			}
+		}
+
+		if checkFuture && begin > latest {
+			return 0, 0, &rpc.CustomError{Message: ErrBlockRangeIntoFuture, Code: rpc.ErrCodeInvalidParams}
+		}
+	}
+	end = latest
+	if crit.ToBlock != nil {
+		toBlock := crit.ToBlock.Int64()
+		if toBlock > 0 {
+			end = uint64(toBlock)
+		} else {
+			blockNum := rpc.BlockNumber(toBlock)
+			end, _, _, err = rpchelper.GetBlockNumber(ctx, rpc.BlockNumberOrHashWithNumber(blockNum), tx, api._blockReader, api.filters)
+			if err != nil {
+				return 0, 0, err
+			}
+		}
+
+		if checkFuture && end > latest {
+			return 0, 0, &rpc.CustomError{Message: ErrBlockRangeIntoFuture, Code: rpc.ErrCodeInvalidParams}
+		}
+	}
+	return begin, end, nil
+}
+
 // GetLogs implements eth_getLogs. Returns an array of logs matching a given filter object.
 func (api *APIImpl) GetLogs(ctx context.Context, crit filters.FilterCriteria) (types.RPCLogs, error) {
-	var begin, end uint64
 	logs := types.RPCLogs{}
 
 	tx, beginErr := api.db.BeginTemporalRo(ctx)
@@ -138,63 +198,13 @@ func (api *APIImpl) GetLogs(ctx context.Context, crit filters.FilterCriteria) (t
 		}
 	}
 
-	if crit.BlockHash != nil {
-		if crit.FromBlock != nil || crit.ToBlock != nil {
-			return nil, &rpc.CustomError{Message: errBlockHashWithRange, Code: rpc.ErrCodeInvalidParams}
-		}
+	if crit.BlockHash != nil && (crit.FromBlock != nil || crit.ToBlock != nil) {
+		return nil, &rpc.CustomError{Message: errBlockHashWithRange, Code: rpc.ErrCodeInvalidParams}
+	}
 
-		block, err := api.blockByHashWithSenders(ctx, tx, *crit.BlockHash)
-		if err != nil {
-			return nil, err
-		}
-		if block == nil {
-			return nil, fmt.Errorf("block not found: %x", *crit.BlockHash)
-		}
-
-		num := block.NumberU64()
-		begin = num
-		end = num
-	} else {
-		// Convert the RPC block numbers into internal representations
-		latest, _, _, err := rpchelper.GetBlockNumber(ctx, rpc.BlockNumberOrHashWithNumber(rpc.LatestExecutedBlockNumber), tx, api._blockReader, nil)
-		if err != nil {
-			return nil, err
-		}
-
-		begin = latest
-		if crit.FromBlock != nil {
-			fromBlock := crit.FromBlock.Int64()
-			if fromBlock > 0 {
-				begin = uint64(fromBlock)
-			} else {
-				blockNum := rpc.BlockNumber(fromBlock)
-				begin, _, _, err = rpchelper.GetBlockNumber(ctx, rpc.BlockNumberOrHashWithNumber(blockNum), tx, api._blockReader, api.filters)
-				if err != nil {
-					return nil, err
-				}
-			}
-
-			if begin > latest {
-				return nil, &rpc.CustomError{Message: ErrBlockRangeIntoFuture, Code: rpc.ErrCodeInvalidParams}
-			}
-		}
-		end = latest
-		if crit.ToBlock != nil {
-			toBlock := crit.ToBlock.Int64()
-			if toBlock > 0 {
-				end = uint64(toBlock)
-			} else {
-				blockNum := rpc.BlockNumber(toBlock)
-				end, _, _, err = rpchelper.GetBlockNumber(ctx, rpc.BlockNumberOrHashWithNumber(blockNum), tx, api._blockReader, api.filters)
-				if err != nil {
-					return nil, err
-				}
-			}
-
-			if end > latest {
-				return nil, &rpc.CustomError{Message: ErrBlockRangeIntoFuture, Code: rpc.ErrCodeInvalidParams}
-			}
-		}
+	begin, end, err := api.resolveLogsRange(ctx, tx, crit, true)
+	if err != nil {
+		return nil, err
 	}
 
 	if end < begin {

@@ -575,54 +575,9 @@ func (api *OverlayAPIImpl) replayBlock(ctx context.Context, blockNum uint64, sta
 }
 
 func getBeginEnd(ctx context.Context, tx kv.Tx, api *OverlayAPIImpl, crit filters.FilterCriteria) (uint64, uint64, error) {
-	var begin, end uint64
-	if crit.BlockHash != nil {
-		block, err := api.blockByHashWithSenders(ctx, tx, *crit.BlockHash)
-		if err != nil {
-			return 0, 0, err
-		}
-
-		if block == nil {
-			return 0, 0, fmt.Errorf("block not found: %x", *crit.BlockHash)
-		}
-
-		num := block.NumberU64()
-		begin = num
-		end = num
-	} else {
-		// Convert the RPC block numbers into internal representations
-		latest, _, _, err := rpchelper.GetBlockNumber(ctx, rpc.BlockNumberOrHashWithNumber(rpc.LatestExecutedBlockNumber), tx, api._blockReader, nil)
-		if err != nil {
-			return 0, 0, err
-		}
-
-		begin = latest
-		if crit.FromBlock != nil {
-			fromBlock := crit.FromBlock.Int64()
-			if fromBlock > 0 {
-				begin = uint64(fromBlock)
-			} else {
-				blockNum := rpc.BlockNumber(fromBlock)
-				begin, _, _, err = rpchelper.GetBlockNumber(ctx, rpc.BlockNumberOrHashWithNumber(blockNum), tx, api._blockReader, api.filters)
-				if err != nil {
-					return 0, 0, err
-				}
-			}
-
-		}
-		end = latest
-		if crit.ToBlock != nil {
-			toBlock := crit.ToBlock.Int64()
-			if toBlock > 0 {
-				end = uint64(toBlock)
-			} else {
-				blockNum := rpc.BlockNumber(toBlock)
-				end, _, _, err = rpchelper.GetBlockNumber(ctx, rpc.BlockNumberOrHashWithNumber(blockNum), tx, api._blockReader, api.filters)
-				if err != nil {
-					return 0, 0, err
-				}
-			}
-		}
+	begin, end, err := api.resolveLogsRange(ctx, tx, crit, false)
+	if err != nil {
+		return 0, 0, err
 	}
 
 	if end < begin {

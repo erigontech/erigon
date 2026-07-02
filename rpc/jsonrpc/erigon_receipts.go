@@ -26,6 +26,7 @@ import (
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/order"
 	"github.com/erigontech/erigon/db/kv/rawdbv3"
 	"github.com/erigontech/erigon/execution/exec"
@@ -77,6 +78,33 @@ func (api *ErigonImpl) GetLogsByHash(ctx context.Context, hash common.Hash) ([][
 	return logs, nil
 }
 
+// logRangeLatestOnly resolves a filter range where the only negative tag accepted for
+// FromBlock/ToBlock is "latest"; other tags (pending, safe, finalized) are rejected.
+func logRangeLatestOnly(tx kv.Tx, crit filters.FilterCriteria) (begin, end uint64, err error) {
+	latest, err := rpchelper.GetLatestBlockNumber(tx)
+	if err != nil {
+		return 0, 0, err
+	}
+
+	begin = 0
+	if crit.FromBlock != nil {
+		if crit.FromBlock.Sign() >= 0 {
+			begin = crit.FromBlock.Uint64()
+		} else if !crit.FromBlock.IsInt64() || crit.FromBlock.Int64() != int64(rpc.LatestBlockNumber) {
+			return 0, 0, &rpc.CustomError{Message: fmt.Sprintf("negative value for FromBlock: %v", crit.FromBlock), Code: rpc.ErrCodeInvalidParams}
+		}
+	}
+	end = latest
+	if crit.ToBlock != nil {
+		if crit.ToBlock.Sign() >= 0 {
+			end = crit.ToBlock.Uint64()
+		} else if !crit.ToBlock.IsInt64() || crit.ToBlock.Int64() != int64(rpc.LatestBlockNumber) {
+			return 0, 0, &rpc.CustomError{Message: fmt.Sprintf("negative value for ToBlock: %v", crit.ToBlock), Code: rpc.ErrCodeInvalidParams}
+		}
+	}
+	return begin, end, nil
+}
+
 // GetLogs implements erigon_getLogs. Returns an array of logs matching a given filter object.
 func (api *ErigonImpl) GetLogs(ctx context.Context, crit filters.FilterCriteria) (types.ErigonLogs, error) {
 	var begin, end uint64
@@ -97,27 +125,10 @@ func (api *ErigonImpl) GetLogs(ctx context.Context, crit filters.FilterCriteria)
 		end = header.Number.Uint64()
 
 	} else {
-		// Convert the RPC block numbers into internal representations
-		latest, err := rpchelper.GetLatestBlockNumber(tx)
+		var err error
+		begin, end, err = logRangeLatestOnly(tx, crit)
 		if err != nil {
 			return nil, err
-		}
-
-		begin = 0
-		if crit.FromBlock != nil {
-			if crit.FromBlock.Sign() >= 0 {
-				begin = crit.FromBlock.Uint64()
-			} else if !crit.FromBlock.IsInt64() || crit.FromBlock.Int64() != int64(rpc.LatestBlockNumber) {
-				return nil, &rpc.CustomError{Message: fmt.Sprintf("negative value for FromBlock: %v", crit.FromBlock), Code: rpc.ErrCodeInvalidParams}
-			}
-		}
-		end = latest
-		if crit.ToBlock != nil {
-			if crit.ToBlock.Sign() >= 0 {
-				end = crit.ToBlock.Uint64()
-			} else if !crit.ToBlock.IsInt64() || crit.ToBlock.Int64() != int64(rpc.LatestBlockNumber) {
-				return nil, &rpc.CustomError{Message: fmt.Sprintf("negative value for ToBlock: %v", crit.ToBlock), Code: rpc.ErrCodeInvalidParams}
-			}
 		}
 	}
 
@@ -192,27 +203,9 @@ func (api *ErigonImpl) GetLatestLogs(ctx context.Context, crit filters.FilterCri
 		begin = header.Number.Uint64()
 		end = header.Number.Uint64()
 	} else {
-		// Convert the RPC block numbers into internal representations
-		latest, err := rpchelper.GetLatestBlockNumber(tx)
+		begin, end, err = logRangeLatestOnly(tx, crit)
 		if err != nil {
 			return nil, err
-		}
-
-		begin = 0
-		if crit.FromBlock != nil {
-			if crit.FromBlock.Sign() >= 0 {
-				begin = crit.FromBlock.Uint64()
-			} else if !crit.FromBlock.IsInt64() || crit.FromBlock.Int64() != int64(rpc.LatestBlockNumber) {
-				return nil, &rpc.CustomError{Message: fmt.Sprintf("negative value for FromBlock: %v", crit.FromBlock), Code: rpc.ErrCodeInvalidParams}
-			}
-		}
-		end = latest
-		if crit.ToBlock != nil {
-			if crit.ToBlock.Sign() >= 0 {
-				end = crit.ToBlock.Uint64()
-			} else if !crit.ToBlock.IsInt64() || crit.ToBlock.Int64() != int64(rpc.LatestBlockNumber) {
-				return nil, &rpc.CustomError{Message: fmt.Sprintf("negative value for ToBlock: %v", crit.ToBlock), Code: rpc.ErrCodeInvalidParams}
-			}
 		}
 	}
 	if end < begin {
