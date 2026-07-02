@@ -214,59 +214,15 @@ func encodeBlobVersionedHashes(hashes []common.Hash, w io.Writer, b []byte) erro
 }
 
 func (stx *BlobTx) encodePayload(w io.Writer, b []byte, payloadSize, accessListLen, blobHashesLen int) error {
-	// prefix
-	if err := rlp.EncodeListPrefix(payloadSize, w, b); err != nil {
+	if err := stx.encode1559Prefix(w, b, payloadSize, accessListLen); err != nil {
 		return err
 	}
-	// encode ChainID
-	if err := rlp.EncodeUint256(stx.ChainID, w, b); err != nil {
-		return err
-	}
-	// encode Nonce
-	if err := rlp.EncodeU64(stx.Nonce, w, b); err != nil {
-		return err
-	}
-	// encode MaxPriorityFeePerGas
-	if err := rlp.EncodeUint256(stx.TipCap, w, b); err != nil {
-		return err
-	}
-	// encode MaxFeePerGas
-	if err := rlp.EncodeUint256(stx.FeeCap, w, b); err != nil {
-		return err
-	}
-	// encode GasLimit
-	if err := rlp.EncodeU64(stx.GasLimit, w, b); err != nil {
-		return err
-	}
-	// encode To
-	if err := EncodeOptionalAddress(stx.To, w, b); err != nil {
-		return err
-	}
-	// encode Value
-	if err := rlp.EncodeUint256(stx.Value, w, b); err != nil {
-		return err
-	}
-	// encode Data
-	if err := rlp.EncodeString(stx.Data, w, b); err != nil {
-		return err
-	}
-	// prefix
-	if err := rlp.EncodeListPrefix(accessListLen, w, b); err != nil {
-		return err
-	}
-	// encode AccessList
-	if err := encodeAccessList(stx.AccessList, w, b); err != nil {
-		return err
-	}
-	// encode MaxFeePerBlobGas
 	if err := rlp.EncodeUint256(stx.MaxFeePerBlobGas, w, b); err != nil {
 		return err
 	}
-	// prefix
 	if err := rlp.EncodeListPrefix(blobHashesLen, w, b); err != nil {
 		return err
 	}
-	// encode BlobVersionedHashes
 	if err := encodeBlobVersionedHashes(stx.BlobVersionedHashes, w, b); err != nil {
 		return err
 	}

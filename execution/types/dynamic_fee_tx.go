@@ -138,49 +138,45 @@ func (tx *DynamicFeeTransaction) MarshalBinary(w io.Writer) error {
 	return nil
 }
 
-func (tx *DynamicFeeTransaction) encodePayload(w io.Writer, b []byte, payloadSize, accessListLen int) error {
-	// prefix
+// encode1559Prefix writes the payload list prefix and the leading fields shared
+// by all EIP-1559-style payloads: ChainID, Nonce, TipCap, FeeCap, GasLimit, To,
+// Value, Data and AccessList.
+func (tx *DynamicFeeTransaction) encode1559Prefix(w io.Writer, b []byte, payloadSize, accessListLen int) error {
 	if err := rlp.EncodeListPrefix(payloadSize, w, b); err != nil {
 		return err
 	}
-	// encode ChainID
 	if err := rlp.EncodeUint256(tx.ChainID, w, b); err != nil {
 		return err
 	}
-	// encode Nonce
 	if err := rlp.EncodeU64(tx.Nonce, w, b); err != nil {
 		return err
 	}
-	// encode MaxPriorityFeePerGas
 	if err := rlp.EncodeUint256(tx.TipCap, w, b); err != nil {
 		return err
 	}
-	// encode MaxFeePerGas
 	if err := rlp.EncodeUint256(tx.FeeCap, w, b); err != nil {
 		return err
 	}
-	// encode GasLimit
 	if err := rlp.EncodeU64(tx.GasLimit, w, b); err != nil {
 		return err
 	}
-	// encode To
 	if err := EncodeOptionalAddress(tx.To, w, b); err != nil {
 		return err
 	}
-	// encode Value
 	if err := rlp.EncodeUint256(tx.Value, w, b); err != nil {
 		return err
 	}
-	// encode Data
 	if err := rlp.EncodeString(tx.Data, w, b); err != nil {
 		return err
 	}
-	// prefix
 	if err := rlp.EncodeListPrefix(accessListLen, w, b); err != nil {
 		return err
 	}
-	// encode AccessList
-	if err := encodeAccessList(tx.AccessList, w, b); err != nil {
+	return encodeAccessList(tx.AccessList, w, b)
+}
+
+func (tx *DynamicFeeTransaction) encodePayload(w io.Writer, b []byte, payloadSize, accessListLen int) error {
+	if err := tx.encode1559Prefix(w, b, payloadSize, accessListLen); err != nil {
 		return err
 	}
 	return tx.encodeVRS(w, b)

@@ -275,55 +275,12 @@ func (tx *SetCodeTransaction) DecodeRLP(s *rlp.Stream) error {
 }
 
 func (tx *SetCodeTransaction) encodePayload(w io.Writer, b []byte, payloadSize, accessListLen, authorizationsLen int) error {
-	// prefix
-	if err := rlp.EncodeListPrefix(payloadSize, w, b); err != nil {
+	if err := tx.encode1559Prefix(w, b, payloadSize, accessListLen); err != nil {
 		return err
 	}
-	// encode ChainID
-	if err := rlp.EncodeUint256(tx.ChainID, w, b); err != nil {
-		return err
-	}
-	// encode Nonce
-	if err := rlp.EncodeU64(tx.Nonce, w, b); err != nil {
-		return err
-	}
-	// encode MaxPriorityFeePerGas
-	if err := rlp.EncodeUint256(tx.TipCap, w, b); err != nil {
-		return err
-	}
-	// encode MaxFeePerGas
-	if err := rlp.EncodeUint256(tx.FeeCap, w, b); err != nil {
-		return err
-	}
-	// encode GasLimit
-	if err := rlp.EncodeU64(tx.GasLimit, w, b); err != nil {
-		return err
-	}
-	// encode To
-	if err := EncodeOptionalAddress(tx.To, w, b); err != nil {
-		return err
-	}
-	// encode Value
-	if err := rlp.EncodeUint256(tx.Value, w, b); err != nil {
-		return err
-	}
-	// encode Data
-	if err := rlp.EncodeString(tx.Data, w, b); err != nil {
-		return err
-	}
-	// prefix
-	if err := rlp.EncodeListPrefix(accessListLen, w, b); err != nil {
-		return err
-	}
-	// encode AccessList
-	if err := encodeAccessList(tx.AccessList, w, b); err != nil {
-		return err
-	}
-	// prefix
 	if err := rlp.EncodeListPrefix(authorizationsLen, w, b); err != nil {
 		return err
 	}
-	// encode Authorizations
 	if err := encodeAuthorizations(tx.Authorizations, w, b); err != nil {
 		return err
 	}
