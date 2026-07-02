@@ -73,7 +73,7 @@ var (
 		Usage: "Prometheus HTTP server listening interface",
 		Value: "127.0.0.1",
 	}
-	metricsPortFlag = cli.UintFlag{
+	metricsPortFlag = cli.IntFlag{
 		Name:  "metrics.port",
 		Value: 6061,
 	}
@@ -266,15 +266,13 @@ func Setup(nodeCtx context.Context, ctx *cli.Command, rootLogger bool) (log.Logg
 	}
 	pprofEnabled := ctx.Bool(pprofFlag.Name)
 	metricsEnabled := ctx.Bool(metricsEnabledFlag.Name)
-	metricsAddr := ctx.String(metricsAddrFlag.Name)
 
 	var metricsMux, pprofMux *http.ServeMux
 	var metricsAddress string
 	var torrentClientStatusAddr string
 
 	if metricsEnabled {
-		metricsPort := int(ctx.Uint(metricsPortFlag.Name))
-		metricsAddress = fmt.Sprintf("%s:%d", metricsAddr, metricsPort)
+		metricsAddress = MetricsListenAddress(ctx)
 		metricsMux = metrics.Setup(metricsAddress, logger)
 		torrentClientStatusAddr = metricsAddress
 	}
@@ -326,6 +324,11 @@ func Setup(nodeCtx context.Context, ctx *cli.Command, rootLogger bool) (log.Logg
 	go dbg.SaveHeapProfileNearOOMPeriodically(nodeCtx, dbg.SaveHeapWithLogger(&logger))
 
 	return logger, tracer, metricsMux, pprofMux, nil
+}
+
+// MetricsListenAddress builds the host:port the standalone metrics server binds to.
+func MetricsListenAddress(ctx *cli.Command) string {
+	return fmt.Sprintf("%s:%d", ctx.String(metricsAddrFlag.Name), ctx.Int(metricsPortFlag.Name))
 }
 
 // SetupSimple is like Setup but only returns the logger, discarding the tracer and muxes.
