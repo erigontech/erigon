@@ -86,6 +86,12 @@ func (sdc *SharedDomainsCommitmentContext) SetStateReader(stateReader StateReade
 	sdc.stateReader = stateReader
 }
 
+// StateReader returns the currently installed custom state reader, or nil when
+// none is set (trieContext then builds the default latest-state reader).
+func (sdc *SharedDomainsCommitmentContext) StateReader() StateReader {
+	return sdc.stateReader
+}
+
 func (sdc *SharedDomainsCommitmentContext) EnableParaTrieDB(db kv.TemporalRoDB) {
 	sdc.paraTrieDB = db
 }
