@@ -74,15 +74,8 @@ func TestImportReorgUnwindToGenesis(t *testing.T) {
 	// The fixture's next-to-last block is an intentionally invalid post-merge
 	// uncle: multi-file import skips the failed file, imports the final valid
 	// block 4, and returns the retained rejection error.
-	importArgs := append([]string{
-		"--log.dir.disable",
-		"--http=false",
-		"--private.api.addr=",
-		"--authrpc.port=0",
-		"import", "--datadir", dataDir, "--networkid", "1337",
-	}, rlpFiles...)
+	importArgs := append([]string{"--log.dir.disable", "import", "--datadir", dataDir}, rlpFiles...)
 	importErr := runErigonCommand(importArgs...)
-	require.ErrorContains(t, importErr, "uncle")
 
 	var genesisHash string
 	require.NoError(t, json.Unmarshal(tc.GenesisHeader["hash"], &genesisHash))
@@ -104,6 +97,7 @@ func TestImportReorgUnwindToGenesis(t *testing.T) {
 		return nil
 	}))
 	require.Equal(t, genesisHash, storedGenesis.Hex(), "genesis hash mismatch — chain config drift?")
+	require.ErrorContains(t, importErr, "uncle")
 	require.NotNilf(t, headNumber, "no canonical head; import err: %v", importErr)
 	require.Equalf(t, uint64(4), *headNumber,
 		"head did not advance to the heavier side chain (block 4); import err: %v", importErr)
@@ -128,13 +122,8 @@ func TestImportClosesChaindataOnInitError(t *testing.T) {
 
 	require.NoError(t, runErigonCommand("--log.dir.disable", "init", "--datadir", dataDir, genesisPath))
 
-	importErr := runErigonCommand(
-		"--log.dir.disable",
-		"--http=false",
-		"--private.api.addr=",
-		"--authrpc.port=0",
-		"--ethstats", "invalid",
-		"import", "--datadir", dataDir, "--networkid", "1337", rlpFiles[0])
+	importErr := runErigonCommand("--log.dir.disable", "--ethstats", "invalid",
+		"import", "--datadir", dataDir, rlpFiles[0])
 	require.ErrorContains(t, importErr, "netstats")
 
 	db, err := mdbx.New(dbcfg.ChainDB, log.New()).Path(filepath.Join(dataDir, "chaindata")).Accede(true).Readonly(true).Open(context.Background())
@@ -147,7 +136,7 @@ func loadImportFixtureCase(t *testing.T) importFixtureCase {
 	fixturePath := filepath.Join("..", "..", "..", "execution", "tests", "legacy-tests",
 		"BlockchainTests", "InvalidBlocks", "bcMultiChainTest", "UncleFromSideChain.json")
 	raw, err := os.ReadFile(fixturePath)
-	require.NoError(t, err)
+	require.NoErrorf(t, err, "read fixture (legacy-tests submodule not initialized?)")
 
 	var fixture map[string]importFixtureCase
 	require.NoError(t, json.Unmarshal(raw, &fixture))
