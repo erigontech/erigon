@@ -149,6 +149,7 @@ func (api *DebugAPIImpl) traceBlock(ctx context.Context, blockNrOrHash rpc.Block
 	}
 
 	var gasUsed uint64
+	inner := jsonstream.NewLazyFieldStream(stream, "result", true)
 	for txnIndex, txn := range txns {
 		isBorStateSyncTxn := borStateSyncTxn == txn
 		var txnHash common.Hash
@@ -161,14 +162,14 @@ func (api *DebugAPIImpl) traceBlock(ctx context.Context, blockNrOrHash rpc.Block
 		stream.WriteObjectStart()
 		stream.WriteObjectField("txHash")
 		stream.WriteString(txnHash.Hex())
-		stream.WriteMore()
-		stream.WriteObjectField("result")
 		select {
 		default:
 		case <-ctx.Done():
 			return ctx.Err()
 		}
 		ibs.SetTxContext(blockCtx.BlockNumber, txnIndex)
+
+		inner.ResetField()
 
 		if isBorStateSyncTxn {
 			var stateSyncEvents []*types.Message
@@ -187,7 +188,7 @@ func (api *DebugAPIImpl) traceBlock(ctx context.Context, blockNrOrHash rpc.Block
 				block.NumberU64(),
 				block.Time(),
 				blockCtx,
-				stream,
+				inner,
 				api.evmCallTimeout,
 				stateSyncEvents,
 				txnIndex,
@@ -196,8 +197,6 @@ func (api *DebugAPIImpl) traceBlock(ctx context.Context, blockNrOrHash rpc.Block
 		} else {
 			msg, asMessageErr := txn.AsMessage(*signer, block.BaseFee(), rules)
 			if asMessageErr != nil {
-				// Fail closed here because tracing needs a valid Message-derived sender/fee context.
-				stream.WriteNil()
 				err = fmt.Errorf("convert transaction %s to message: %w", txnHash, asMessageErr)
 			} else {
 				txCtx := evmtypes.TxContext{
@@ -208,7 +207,7 @@ func (api *DebugAPIImpl) traceBlock(ctx context.Context, blockNrOrHash rpc.Block
 				}
 
 				var _gasUsed uint64
-				_gasUsed, err = transactions.TraceTx(ctx, engine, txn, msg, blockCtx, txCtx, &block.Header().Number, block.Hash(), txnIndex, ibs, config, chainConfig, stream, api.evmCallTimeout, precompiles)
+				_gasUsed, err = transactions.TraceTx(ctx, engine, txn, msg, blockCtx, txCtx, &block.Header().Number, block.Hash(), txnIndex, ibs, config, chainConfig, inner, api.evmCallTimeout, precompiles)
 				gasUsed += _gasUsed
 			}
 		}
@@ -216,8 +215,8 @@ func (api *DebugAPIImpl) traceBlock(ctx context.Context, blockNrOrHash rpc.Block
 			err = ibs.FinalizeTx(rules, state.NewNoopWriter())
 		}
 
-		// if we have an error we want to output valid json for it before continuing after clearing down potential writes to the stream
 		if err != nil {
+			inner.CloseIfOpen()
 			stream.WriteMore()
 			rpc.HandleError(err, stream)
 		}
