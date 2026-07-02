@@ -105,8 +105,11 @@ func canSnapshotBePruned(name string) bool {
 
 // buildBlackListForPruning returns the set of preverified snapshot names that
 // should be skipped at download time according to pruneMode:
-//   - state history files (idx/history/accessor): blacklisted when stepPrune
-//     reaches their To and pruneMode.History is enabled.
+//   - commitment history files: blacklisted when their To is at/below
+//     commitmentMinStep (commitment history is bounded independently of general
+//     state history, so this applies even for an archive History).
+//   - other state history files (idx/history/accessor): blacklisted when
+//     stepPrune reaches their To and pruneMode.History is enabled.
 //   - transaction segments: blacklisted by distance when pruneMode.Blocks is a
 //     finite Distance (res.To <= blockPrune), or by chain history-expiry when
 //     pruneMode.Blocks is KeepPostMergeBlocksPruneMode and cc has MergeHeight set
@@ -116,7 +119,7 @@ func canSnapshotBePruned(name string) bool {
 func buildBlackListForPruning(
 	pruneMode prune.Mode,
 	cc *chain.Config,
-	stepPrune, minBlockToDownload, blockPrune uint64,
+	stepPrune, minBlockToDownload, blockPrune, commitmentMinStep uint64,
 	preverified snapcfg.Preverified,
 ) (map[string]struct{}, error) {
 
@@ -126,7 +129,7 @@ func buildBlackListForPruning(
 	blocksEnabled := pruneMode.Blocks.Enabled()
 	applyChainHistoryExpiry := pruneMode.Blocks == prune.KeepPostMergeBlocksPruneMode && cc != nil && cc.MergeHeight != nil
 
-	if !historyEnabled && !blocksEnabled && !applyChainHistoryExpiry {
+	if !historyEnabled && !blocksEnabled && !applyChainHistoryExpiry && commitmentMinStep == 0 {
 		return blackList, nil
 	}
 
@@ -141,14 +144,28 @@ func buildBlackListForPruning(
 			continue
 		}
 		if isStateSnapshot(name) {
-			if !historyEnabled {
-				continue
-			}
 			// parse "from" (0) and "to" (64) from the name
 			// parse the snapshot "kind". e.g kind of 'idx/v1.0-accounts.0-64.ef' is "idx/v1.0-accounts"
 			res, _, ok := snaptype.ParseFileName("", name)
 			if !ok {
 				return blackList, errors.New("invalid state snapshot name")
+			}
+			// Commitment history uses its own (tighter) bound when configured
+			// via --prune.commitment-history.distance, otherwise it inherits the
+			// general state-history cutoff. A file is skipped when it lies
+			// entirely at/below the boundary (res.To <= cutoff).
+			if strings.Contains(name, kv.CommitmentDomain.String()) {
+				cutoff, hasCutoff := stepPrune, historyEnabled
+				if commitmentMinStep > 0 {
+					cutoff, hasCutoff = commitmentMinStep, true
+				}
+				if hasCutoff && res.To <= cutoff {
+					blackList[name] = struct{}{}
+				}
+				continue
+			}
+			if !historyEnabled {
+				continue
 			}
 			if stepPrune < res.To {
 				continue
@@ -434,20 +451,43 @@ func SyncSnapshots(
 		blockPrune, historyPrune := computeBlocksToPrune(blockReader, prune)
 		blackListForPruning := make(map[string]struct{})
 		wantToPrune := downloadFilteringApplies(prune, cc)
-		if !headerchain && wantToPrune {
-			maxStateStep, err := getMaxStepRangeInSnapshots(preverifiedBlockSnapshots)
-			if err != nil {
-				return err
+
+		// Commitment history is bounded independently of general state history:
+		// a node keeping full state history (archive) can still cap commitment
+		// history to the last N blocks. The step boundary is computed the same
+		// way the local retirement pass does (block distance → txNum → step) so
+		// the two agree file-for-file.
+		var commitmentMinStep uint64
+		if !headerchain && syncCfg.KeepExecutionProofs {
+			if ch := prune.CommitmentHistory(); ch != nil && ch.Enabled() {
+				if commitmentPruneTo := ch.PruneTo(frozenBlocks); commitmentPruneTo > 0 {
+					commitmentTxNum, err := txNumsReader.Min(ctx, tx, commitmentPruneTo)
+					if err != nil {
+						return err
+					}
+					commitmentMinStep = commitmentTxNum / stepSize
+				}
 			}
-			minBlockToDownload, minStepToDownload, err := getMinimumBlocksToDownload(ctx, blockReader, maxStateStep, historyPrune, stepSize)
-			if err != nil {
-				return err
+		}
+
+		if !headerchain && (wantToPrune || commitmentMinStep > 0) {
+			var minBlockToDownload, minStepToDownload uint64
+			if wantToPrune {
+				maxStateStep, err := getMaxStepRangeInSnapshots(preverifiedBlockSnapshots)
+				if err != nil {
+					return err
+				}
+				minBlockToDownload, minStepToDownload, err = getMinimumBlocksToDownload(ctx, blockReader, maxStateStep, historyPrune, stepSize)
+				if err != nil {
+					return err
+				}
 			}
 
-			blackListForPruning, err = buildBlackListForPruning(prune, cc, minStepToDownload, minBlockToDownload, blockPrune, preverifiedBlockSnapshots)
+			bl, err := buildBlackListForPruning(prune, cc, minStepToDownload, minBlockToDownload, blockPrune, commitmentMinStep, preverifiedBlockSnapshots)
 			if err != nil {
 				return err
 			}
+			blackListForPruning = bl
 		}
 
 		// If we want to get all receipts, we also need to unblack list log indexes (otherwise eth_getLogs won't work).

@@ -100,7 +100,7 @@ func TestRetireOldHistoryFiles_RetiresFrozenFileEntirelyBelowCutoff(t *testing.T
 	// pin the current generation to assert deferred (not immediate) deletion
 	at := agg.BeginFilesRo()
 
-	n, err := agg.RetireOldHistoryFiles(t.Context(), kv.Step(2))
+	n, err := agg.RetireOldHistoryFiles(t.Context(), kv.Step(2), 0)
 	require.NoError(t, err)
 	require.Positive(t, n)
 
@@ -148,9 +148,30 @@ func TestRetireOldHistoryFiles_SkipsCommitmentDomain(t *testing.T) {
 	old := newFilesItem(0, 2*stepSize)
 	commitmentHist.dirtyFiles.Set(old)
 
-	_, err := agg.RetireOldHistoryFiles(t.Context(), kv.Step(2))
+	_, err := agg.RetireOldHistoryFiles(t.Context(), kv.Step(2), 0)
 	require.NoError(t, err)
-	require.Equal(t, 1, commitmentHist.dirtyFiles.Len(), "CommitmentDomain history file must not be retired")
+	require.Equal(t, 1, commitmentHist.dirtyFiles.Len(), "CommitmentDomain history file must not be retired at the general cutoff")
+}
+
+// TestRetireOldHistoryFiles_CommitmentCutoff exercises the commitment-specific
+// cutoff: with general history unbounded (cutoffStep 0) but a commitment cutoff
+// set, only commitment history below the cutoff is retired.
+func TestRetireOldHistoryFiles_CommitmentCutoff(t *testing.T) {
+	stepSize, stepsInFrozenFile := uint64(10), uint64(2)
+	agg := testDbAndAggregatorSmallFrozen(t, stepSize, stepsInFrozenFile)
+	// commitment history is opt-in (--prune.include-commitment-history); enable it
+	// on this instance so the retirement guard doesn't skip it.
+	agg.d[kv.CommitmentDomain].HistoryDisabled = false
+	agg.d[kv.CommitmentDomain].SnapshotsDisabled = false
+
+	commitmentHist := agg.d[kv.CommitmentDomain].History
+	commitmentHist.dirtyFiles.Set(newFilesItem(0, 2*stepSize))          // steps [0,2) — below cutoff
+	commitmentHist.dirtyFiles.Set(newFilesItem(2*stepSize, 3*stepSize)) // steps [2,3) — above cutoff
+
+	n, err := agg.RetireOldHistoryFiles(t.Context(), 0, kv.Step(2))
+	require.NoError(t, err)
+	require.Positive(t, n)
+	require.Equal(t, 1, commitmentHist.dirtyFiles.Len(), "only commitment history below the cutoff is retired; above-cutoff kept")
 }
 
 // TestRetireOldHistoryFiles_StandaloneII exercises the standalone-II loop
@@ -169,7 +190,7 @@ func TestRetireOldHistoryFiles_StandaloneII(t *testing.T) {
 	mustExist(t, recentIdx, true)
 
 	at := agg.BeginFilesRo()
-	n, err := agg.RetireOldHistoryFiles(t.Context(), kv.Step(2))
+	n, err := agg.RetireOldHistoryFiles(t.Context(), kv.Step(2), 0)
 	require.NoError(t, err)
 	require.Positive(t, n)
 	at.Close()
@@ -207,7 +228,7 @@ func TestRetireOldHistoryFiles_ReclaimConcurrent(t *testing.T) {
 		}()
 	}
 
-	_, err := agg.RetireOldHistoryFiles(t.Context(), kv.Step(2))
+	_, err := agg.RetireOldHistoryFiles(t.Context(), kv.Step(2), 0)
 	require.NoError(t, err)
 	close(stop)
 	wg.Wait()

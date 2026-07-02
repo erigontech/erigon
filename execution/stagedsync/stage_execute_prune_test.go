@@ -59,24 +59,24 @@ func TestHistoryRetireCutoffStep_ConvertsBlockDistanceToStep(t *testing.T) {
 	}
 
 	t.Run("History disabled -> no cutoff", func(t *testing.T) {
-		_, ok, err := historyRetireCutoffStep(ctx, tx, br, prune.ArchiveMode, stepSize, forward)
+		cutoffStep, commitmentStep, err := historyRetireCutoffStep(ctx, tx, br, prune.ArchiveMode, stepSize, forward)
 		require.NoError(t, err)
-		require.False(t, ok)
+		require.Zero(t, cutoffStep)
+		require.Zero(t, commitmentStep)
 	})
 
 	t.Run("not enough history accumulated yet -> no cutoff", func(t *testing.T) {
 		pm := prune.Mode{Initialised: true, History: prune.Distance(1_000_000)}
-		_, ok, err := historyRetireCutoffStep(ctx, tx, br, pm, stepSize, forward)
+		cutoffStep, _, err := historyRetireCutoffStep(ctx, tx, br, pm, stepSize, forward)
 		require.NoError(t, err)
-		require.False(t, ok)
+		require.Zero(t, cutoffStep)
 	})
 
 	t.Run("finite distance -> correct step boundary", func(t *testing.T) {
 		// PruneTo(30, Distance(10)) = block 20; Min(20) = txNum 200; step = 20.
 		pm := prune.Mode{Initialised: true, History: prune.Distance(10)}
-		cutoffStep, ok, err := historyRetireCutoffStep(ctx, tx, br, pm, stepSize, forward)
+		cutoffStep, _, err := historyRetireCutoffStep(ctx, tx, br, pm, stepSize, forward)
 		require.NoError(t, err)
-		require.True(t, ok)
 		require.Equal(t, kv.Step(20), cutoffStep)
 	})
 
@@ -84,9 +84,18 @@ func TestHistoryRetireCutoffStep_ConvertsBlockDistanceToStep(t *testing.T) {
 		// PruneTo(30, Distance(29)) = block 1; Min(1) = txNum 10; with a large
 		// stepSize that floors to step 0, which must count as "nothing yet".
 		pm := prune.Mode{Initialised: true, History: prune.Distance(29)}
-		cutoffStep, ok, err := historyRetireCutoffStep(ctx, tx, br, pm, 1000, forward)
+		cutoffStep, _, err := historyRetireCutoffStep(ctx, tx, br, pm, 1000, forward)
 		require.NoError(t, err)
-		require.False(t, ok)
 		require.Equal(t, kv.Step(0), cutoffStep)
+	})
+
+	t.Run("commitment distance -> independent commitment cutoff", func(t *testing.T) {
+		// Archive general history (cutoff 0) + commitment bounded at distance 10:
+		// commitment step = 20, general stays 0.
+		pm := prune.ArchiveMode.WithCommitmentHistory(10)
+		cutoffStep, commitmentStep, err := historyRetireCutoffStep(ctx, tx, br, pm, stepSize, forward)
+		require.NoError(t, err)
+		require.Zero(t, cutoffStep)
+		require.Equal(t, kv.Step(20), commitmentStep)
 	})
 }

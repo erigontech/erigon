@@ -587,14 +587,14 @@ func PruneExecutionStage(ctx context.Context, s *PruneState, tx kv.RwTx, cfg Exe
 	agg := cfg.db.(state.HasAgg).Agg().(*state.Aggregator)
 	mxExecStepsInDB.Set(rawdbhelpers.IdxStepsCountV3(tx, agg.StepSize()) * 100)
 
-	cutoffStep, cutoffOk, err := historyRetireCutoffStep(ctx, tx, cfg.blockReader, cfg.prune, agg.StepSize(), s.ForwardProgress)
+	cutoffStep, commitmentCutoffStep, err := historyRetireCutoffStep(ctx, tx, cfg.blockReader, cfg.prune, agg.StepSize(), s.ForwardProgress)
 	if err != nil {
 		return err
 	}
-	if cutoffOk {
+	if cutoffStep > 0 || commitmentCutoffStep > 0 {
 		if pruneTimeout := remainingPruneTimeout(); pruneTimeout > 0 {
-			logger.Debug(fmt.Sprintf("[%s] history file retirement cutoff", s.LogPrefix()), "cutoffStep", cutoffStep, "willRetire", cutoffOk)
-			if _, err := agg.RetireOldHistoryFiles(ctx, cutoffStep); err != nil {
+			logger.Debug(fmt.Sprintf("[%s] history file retirement cutoff", s.LogPrefix()), "cutoffStep", cutoffStep, "commitmentCutoffStep", commitmentCutoffStep)
+			if _, err := agg.RetireOldHistoryFiles(ctx, cutoffStep, commitmentCutoffStep); err != nil {
 				return err
 			}
 		}
@@ -619,21 +619,37 @@ func PruneExecutionStage(ctx context.Context, s *PruneState, tx kv.RwTx, cfg Exe
 	return nil
 }
 
-// historyRetireCutoffStep converts the History retention distance into a step
-// boundary for RetireOldHistoryFiles. ok is false when there's nothing to
-// retire yet.
-func historyRetireCutoffStep(ctx context.Context, tx kv.Tx, blockReader services.FullBlockReader, pm prune.Mode, stepSize, forwardProgress uint64) (cutoffStep kv.Step, ok bool, err error) {
-	if !pm.History.Enabled() {
-		return 0, false, nil
+// historyRetireCutoffStep converts the configured retention distances into the
+// step boundaries for RetireOldHistoryFiles: cutoffStep for general state
+// history, commitmentCutoffStep for the commitment domain (bounded independently
+// by --prune.commitment-history.distance, inheriting the general window when
+// unset). A zero step means "nothing to retire yet" for that category.
+func historyRetireCutoffStep(ctx context.Context, tx kv.Tx, blockReader services.FullBlockReader, pm prune.Mode, stepSize, forwardProgress uint64) (cutoffStep, commitmentCutoffStep kv.Step, err error) {
+	blockToStep := func(pruneToBlock uint64) (kv.Step, error) {
+		if pruneToBlock == 0 {
+			return 0, nil
+		}
+		cutoffTxNum, err := blockReader.TxnumReader().Min(ctx, tx, pruneToBlock)
+		if err != nil {
+			return 0, err
+		}
+		return kv.Step(cutoffTxNum / stepSize), nil
 	}
-	cutoffBlock := pm.History.PruneTo(forwardProgress)
-	if cutoffBlock == 0 {
-		return 0, false, nil
+
+	if pm.History.Enabled() {
+		if cutoffStep, err = blockToStep(pm.History.PruneTo(forwardProgress)); err != nil {
+			return 0, 0, err
+		}
 	}
-	cutoffTxNum, err := blockReader.TxnumReader().Min(ctx, tx, cutoffBlock)
-	if err != nil {
-		return 0, false, err
+
+	commitmentEnabled, commitmentPruneTo := pm.History.Enabled(), pm.History.PruneTo(forwardProgress)
+	if ch := pm.CommitmentHistory(); ch != nil && ch.Enabled() {
+		commitmentEnabled, commitmentPruneTo = true, ch.PruneTo(forwardProgress)
 	}
-	cutoffStep = kv.Step(cutoffTxNum / stepSize)
-	return cutoffStep, cutoffStep > 0, nil
+	if commitmentEnabled {
+		if commitmentCutoffStep, err = blockToStep(commitmentPruneTo); err != nil {
+			return 0, 0, err
+		}
+	}
+	return cutoffStep, commitmentCutoffStep, nil
 }

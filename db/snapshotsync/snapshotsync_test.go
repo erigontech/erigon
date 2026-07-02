@@ -20,6 +20,9 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+
 	"github.com/erigontech/erigon/db/kv/prune"
 	"github.com/erigontech/erigon/db/snapcfg"
 	"github.com/erigontech/erigon/db/snaptype"
@@ -51,7 +54,7 @@ func TestBlackListForPruning(t *testing.T) {
 	// effectiveCutoff mirrors the internal adjustBlockPrune clamp; without
 	// it the assertion accepts segments above the cutoff the function actually used.
 	effectiveCutoff := adjustBlockPrune(blockPrune, minBlockToDownload)
-	blackList, err := buildBlackListForPruning(prune.MinimalMode, nil, stepPrune, minBlockToDownload, blockPrune, preverified)
+	blackList, err := buildBlackListForPruning(prune.MinimalMode, nil, stepPrune, minBlockToDownload, blockPrune, 0, preverified)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -89,6 +92,46 @@ func TestBlackListForPruning(t *testing.T) {
 	}
 }
 
+// TestBlackListForPruning_CommitmentHistory verifies that commitment history is
+// bounded by its own cutoff (--prune.commitment-history.distance), independently
+// of the general state-history window, and falls back to the general cutoff when
+// no explicit commitment bound is set.
+func TestBlackListForPruning_CommitmentHistory(t *testing.T) {
+	pv := snapcfg.Preverified{Items: snapcfg.PreverifiedItems{
+		{Name: "history/v1.0-commitment.0-16.v"},
+		{Name: "idx/v1.0-commitment.0-16.ef"},
+		{Name: "accessor/v1.0-commitment.0-16.vi"},
+		{Name: "history/v1.0-commitment.8-24.v"},  // straddles the boundary — keep
+		{Name: "history/v1.0-commitment.16-32.v"}, // above the boundary — keep
+		{Name: "history/v1.0-accounts.0-16.v"},    // non-commitment state history
+		{Name: "domain/v1.0-commitment.0-16.kv"},  // domain — never blacklisted
+	}}
+
+	t.Run("archive-history-commitment-bounded", func(t *testing.T) {
+		// Archive: general history unbounded, but commitment capped at step 16.
+		bl, err := buildBlackListForPruning(prune.ArchiveMode, nil, 0, 0, 0, 16, pv)
+		require.NoError(t, err)
+		assert.Contains(t, bl, "history/v1.0-commitment.0-16.v")
+		assert.Contains(t, bl, "idx/v1.0-commitment.0-16.ef")
+		assert.Contains(t, bl, "accessor/v1.0-commitment.0-16.vi")
+		assert.NotContains(t, bl, "history/v1.0-commitment.8-24.v")
+		assert.NotContains(t, bl, "history/v1.0-commitment.16-32.v")
+		assert.NotContains(t, bl, "history/v1.0-accounts.0-16.v") // archive keeps all general history
+		assert.NotContains(t, bl, "domain/v1.0-commitment.0-16.kv")
+	})
+
+	t.Run("commitment-inherits-general-history-cutoff", func(t *testing.T) {
+		// No explicit commitment bound (commitmentMinStep=0) with finite general
+		// history (stepPrune=16): commitment is treated like general history.
+		bl, err := buildBlackListForPruning(prune.MinimalMode, nil, 16, 0, 0, 0, pv)
+		require.NoError(t, err)
+		assert.Contains(t, bl, "history/v1.0-commitment.0-16.v")
+		assert.Contains(t, bl, "history/v1.0-accounts.0-16.v")
+		assert.NotContains(t, bl, "history/v1.0-commitment.16-32.v")
+		assert.NotContains(t, bl, "domain/v1.0-commitment.0-16.kv")
+	})
+}
+
 // TestBlackListForPruning_BlocksModeKeepsAllTransactions verifies that
 // --prune.mode=blocks (Blocks=KeepAllBlocksPruneMode, History finite)
 // blacklists state history but never transaction segments. Distance.Enabled()
@@ -106,7 +149,7 @@ func TestBlackListForPruning_BlocksModeKeepsAllTransactions(t *testing.T) {
 	// range so at least some history files land in the blacklist; the exact
 	// number depends on the bundled preverified set.
 	const stepPrune = 5000
-	blackList, err := buildBlackListForPruning(prune.BlocksMode, nil, stepPrune, 100_000, 0, preverified)
+	blackList, err := buildBlackListForPruning(prune.BlocksMode, nil, stepPrune, 100_000, 0, 0, preverified)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -196,7 +239,7 @@ func TestBlackListForPruning_ChainHistoryExpiry(t *testing.T) {
 		Blocks:      prune.KeepPostMergeBlocksPruneMode,
 	}
 
-	blackList, err := buildBlackListForPruning(legacyFull, cc, 64, 100_000, 0, preverified)
+	blackList, err := buildBlackListForPruning(legacyFull, cc, 64, 100_000, 0, 0, preverified)
 	if err != nil {
 		t.Fatal(err)
 	}

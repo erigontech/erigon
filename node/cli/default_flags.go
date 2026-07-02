@@ -42,6 +42,7 @@ var DefaultFlags = []cli.Flag{
 	&utils.TxPoolQueuedDormancyFlag,
 	&PruneDistanceFlag,
 	&PruneBlocksDistanceFlag,
+	&PruneCommitmentHistoryDistanceFlag,
 	&PruneModeFlag,
 	&utils.KeepExecutionProofsFlag,
 	&utils.FcuTimeoutFlag,

@@ -17,6 +17,7 @@
 package prune
 
 import (
+	"bytes"
 	"encoding/binary"
 	"errors"
 	"fmt"
@@ -72,6 +73,70 @@ type Mode struct {
 	Initialised bool // Set when the values are initialised (not default)
 	History     BlockAmount
 	Blocks      BlockAmount
+	// Extra holds per-category retention for categories beyond the two legacy
+	// fields above (--prune.<category>.distance). A category absent from the map
+	// is unbounded. Adding a new pruneable category = one map entry + one
+	// DatabaseInfo key in extraCategoryDBKey; no new struct field or persistence
+	// function. nil when no extra category is configured.
+	Extra map[Category]BlockAmount
+}
+
+// Category identifies a pruneable data category for per-category retention.
+type Category string
+
+const (
+	CommitmentHistory Category = "commitment-history"
+)
+
+// extraCategoryDBKey maps each extra retention category to its kv.DatabaseInfo
+// key. Get/setIfNotExist/overwriteStoredMode iterate it so persistence is
+// category-driven rather than field-per-domain.
+var extraCategoryDBKey = map[Category][]byte{
+	CommitmentHistory: kv.PruneCommitmentHistory,
+}
+
+// CommitmentHistory returns the configured commitment-history retention, or nil
+// when unbounded (not configured).
+func (m Mode) CommitmentHistory() BlockAmount { return m.Extra[CommitmentHistory] }
+
+// WithCommitmentHistory returns a copy of m with the commitment-history
+// retention set to distanceBlocks. The Extra map is cloned so shared package
+// vars (ArchiveMode etc.) are never mutated.
+func (m Mode) WithCommitmentHistory(distanceBlocks uint64) Mode {
+	extra := make(map[Category]BlockAmount, len(m.Extra)+1)
+	for k, v := range m.Extra {
+		extra[k] = v
+	}
+	extra[CommitmentHistory] = Distance(distanceBlocks)
+	m.Extra = extra
+	return m
+}
+
+func extraEqual(a, b map[Category]BlockAmount) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for k, va := range a {
+		vb, ok := b[k]
+		if !ok {
+			return false
+		}
+		if va.toValue() != vb.toValue() || !bytes.Equal(va.dbType(), vb.dbType()) {
+			return false
+		}
+	}
+	return true
+}
+
+// Validate checks cross-category retention constraints. Call it once the Mode is
+// fully assembled from flags.
+func Validate(m Mode) error {
+	if ch := m.CommitmentHistory(); ch != nil && ch.Enabled() && m.History.Enabled() {
+		if ch.toValue() > m.History.toValue() {
+			return fmt.Errorf("--prune.commitment-history.distance=%d exceeds --prune.distance=%d; commitment history older than state-history retention cannot serve eth_getProof", ch.toValue(), m.History.toValue())
+		}
+	}
+	return nil
 }
 
 // String renders m in the shape an operator would type on the CLI: the named
@@ -190,6 +255,19 @@ func Get(db kv.Getter) (Mode, error) {
 		prune.Blocks = blockAmount
 	}
 
+	for cat, key := range extraCategoryDBKey {
+		ba, err := get(db, key)
+		if err != nil {
+			return prune, err
+		}
+		if ba != nil {
+			if prune.Extra == nil {
+				prune.Extra = map[Category]BlockAmount{}
+			}
+			prune.Extra[cat] = ba
+		}
+	}
+
 	return prune, nil
 }
 
@@ -243,12 +321,18 @@ func EnsureNotChanged(tx kv.GetPut, pruneMode Mode) (Mode, error) {
 	}
 
 	if pruneMode.Initialised {
+		extraChanged := !extraEqual(pm.Extra, pruneMode.Extra)
+
 		// Little initial design flaw: we used maxUint64 as default value for prune distance so history expiry was not accounted for.
 		// We need to use because we are changing defaults in archive node from KeepPostMergeBlocksPruneMode to KeepAllBlocksPruneMode which is a different value so it would fail if we are running --prune.mode=archive.
-		if (pm.History == KeepPostMergeBlocksPruneMode && pruneMode.History == KeepPostMergeBlocksPruneMode) &&
-			(pm.Blocks == KeepPostMergeBlocksPruneMode && pruneMode.Blocks == KeepAllBlocksPruneMode) {
+		archiveBump := pm.History == KeepPostMergeBlocksPruneMode && pruneMode.History == KeepPostMergeBlocksPruneMode &&
+			pm.Blocks == KeepPostMergeBlocksPruneMode && pruneMode.Blocks == KeepAllBlocksPruneMode
+		if archiveBump && !extraChanged {
 			return pruneMode, nil
 		}
+
+		historyBlocksSame := pm.History == pruneMode.History && pm.Blocks == pruneMode.Blocks
+
 		// Retention-window changes (e.g., the EIP-8252 default bump from 100k
 		// to 262_144, or any operator-initiated --prune.distance change) are
 		// safe in both directions: widening cannot bring back already-pruned
@@ -258,12 +342,14 @@ func EnsureNotChanged(tx kv.GetPut, pruneMode Mode) (Mode, error) {
 		// Distance and KeepPostMergeBlocksPruneMode (chain-history-expiry policy)
 		// so that existing full-mode datadirs can adopt the EIP-8252 default
 		// without operator intervention, and operators can revert if needed
-		// even after the auto-upgrade rewrites the persisted value. Accept
-		// such changes, rewrite the persisted value so we don't warn on
+		// even after the auto-upgrade rewrites the persisted value. Per-category
+		// (Extra) changes are accepted in both directions too — widening is
+		// re-downloadable and narrowing just retires more on the next pass.
+		// Accept such changes, rewrite the persisted value so we don't warn on
 		// every restart, and log the transition. KeepAllBlocksPruneMode
 		// transitions remain rejected — narrowing from "keep all" is
 		// destructive enough to require explicit operator action.
-		if isRetentionWindowChange(pm, pruneMode) {
+		if isRetentionWindowChange(pm, pruneMode) || archiveBump || (historyBlocksSame && extraChanged) {
 			log.Warn("[prune] retention window changed from previous run; already-pruned data cannot be recovered",
 				"previous", pm.String(), "current", pruneMode.String())
 			if err := overwriteStoredMode(tx, pruneMode); err != nil {
@@ -342,7 +428,26 @@ func overwriteStoredMode(db kv.GetPut, pm Mode) error {
 	if err := writeBlockAmount(db, kv.PruneHistory, pm.History); err != nil {
 		return err
 	}
-	return writeBlockAmount(db, kv.PruneBlocks, pm.Blocks)
+	if err := writeBlockAmount(db, kv.PruneBlocks, pm.Blocks); err != nil {
+		return err
+	}
+	for cat, key := range extraCategoryDBKey {
+		if ba, ok := pm.Extra[cat]; ok {
+			if err := writeBlockAmount(db, key, ba); err != nil {
+				return err
+			}
+			continue
+		}
+		// Category widened to unbounded (removed from the map): drop the keys so
+		// a later Get doesn't read a stale bound.
+		if err := db.Delete(kv.DatabaseInfo, key); err != nil {
+			return err
+		}
+		if err := db.Delete(kv.DatabaseInfo, keyType(key)); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func setIfNotExist(db kv.GetPut, pm Mode) error {
@@ -352,7 +457,19 @@ func setIfNotExist(db kv.GetPut, pm Mode) error {
 	if err := setOnEmpty(db, kv.PruneHistory, pm.History); err != nil {
 		return err
 	}
-	return setOnEmpty(db, kv.PruneBlocks, pm.Blocks)
+	if err := setOnEmpty(db, kv.PruneBlocks, pm.Blocks); err != nil {
+		return err
+	}
+	for cat, ba := range pm.Extra {
+		key, ok := extraCategoryDBKey[cat]
+		if !ok {
+			continue
+		}
+		if err := setOnEmpty(db, key, ba); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func createBlockAmount(pruneType []byte, v []byte) (BlockAmount, error) {

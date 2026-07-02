@@ -90,6 +90,10 @@ var (
 		Name:  "prune.distance.blocks",
 		Usage: `Keep block history for the latest N blocks, or a named policy: "keep-post-merge" (prune pre-merge blocks only) or "keep-all" (keep every block). If unset, retention follows --prune.mode`,
 	}
+	PruneCommitmentHistoryDistanceFlag = cli.Uint64Flag{
+		Name:  "prune.commitment-history.distance",
+		Usage: `Keep commitment history for the latest N blocks (0 = unbounded, inherits --prune.distance). Must be <= --prune.distance. Requires --prune.include-commitment-history.`,
+	}
 	StateStreamDisableFlag = cli.BoolFlag{
 		Name:  "state.stream.disable",
 		Usage: "Disable streaming of state changes from core to RPC daemon",
@@ -257,6 +261,16 @@ func applyRemainingEthFlags(ctx *cli.Context, cfg *ethconfig.Config, logger log.
 		utils.Fatalf(fmt.Sprintf("error while parsing mode: %v", err))
 	}
 
+	if d := ctx.Uint64(PruneCommitmentHistoryDistanceFlag.Name); d > 0 {
+		if !ctx.Bool(utils.KeepExecutionProofsFlag.Name) {
+			utils.Fatalf("--%s requires --%s", PruneCommitmentHistoryDistanceFlag.Name, utils.KeepExecutionProofsFlag.Name)
+		}
+		mode = mode.WithCommitmentHistory(d)
+	}
+	if err := prune.Validate(mode); err != nil {
+		utils.Fatalf("%v", err)
+	}
+
 	cfg.Prune = mode
 
 	if batchSize := ctx.String(BatchSizeFlag.Name); batchSize != "" {
@@ -340,6 +354,16 @@ func ApplyFlagsForEthConfigCobra(f *pflag.FlagSet, cfg *ethconfig.Config) {
 		utils.Fatalf(fmt.Sprintf("error while parsing mode: %v", err))
 	}
 
+	if d := cobraUint64ValueOrDefault(f, PruneCommitmentHistoryDistanceFlag.Name, 0); d > 0 {
+		if !cobraBoolValueOrDefault(f, utils.KeepExecutionProofsFlag.Name, false) {
+			utils.Fatalf("--%s requires --%s", PruneCommitmentHistoryDistanceFlag.Name, utils.KeepExecutionProofsFlag.Name)
+		}
+		mode = mode.WithCommitmentHistory(d)
+	}
+	if err := prune.Validate(mode); err != nil {
+		utils.Fatalf("%v", err)
+	}
+
 	cfg.Prune = mode
 
 	if v := cobraStringValueOrDefault(f, BatchSizeFlag.Name, BatchSizeFlag.Value); v != "" {
@@ -383,6 +407,17 @@ func cobraBoolValueOrDefault(f *pflag.FlagSet, name string, fallback bool) bool 
 		return fallback
 	}
 	v, err := f.GetBool(name)
+	if err != nil {
+		utils.Fatalf("failed to read --%s: %v", name, err)
+	}
+	return v
+}
+
+func cobraUint64ValueOrDefault(f *pflag.FlagSet, name string, fallback uint64) uint64 {
+	if f.Lookup(name) == nil {
+		return fallback
+	}
+	v, err := f.GetUint64(name)
 	if err != nil {
 		utils.Fatalf("failed to read --%s: %v", name, err)
 	}

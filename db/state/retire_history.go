@@ -62,11 +62,13 @@ func (ht *HistoryRoTx) retireBeforeStep(cutoff kv.Step) (deleted []string, retir
 	return deleted, retired
 }
 
-// RetireOldHistoryFiles retires History+InvertedIndex files entirely below
-// cutoffStep. Physical deletion is deferred until no reader still pins the
-// retired generation.
-func (a *Aggregator) RetireOldHistoryFiles(ctx context.Context, cutoffStep kv.Step) (retiredCount int, err error) {
-	if cutoffStep == 0 {
+// RetireOldHistoryFiles retires History+InvertedIndex files entirely below the
+// retention boundary: cutoffStep for general state history + standalone indices,
+// and commitmentCutoffStep for the commitment domain (bounded independently by
+// --prune.commitment-history.distance). A zero cutoff disables that category.
+// Physical deletion is deferred until no reader still pins the retired generation.
+func (a *Aggregator) RetireOldHistoryFiles(ctx context.Context, cutoffStep, commitmentCutoffStep kv.Step) (retiredCount int, err error) {
+	if cutoffStep == 0 && commitmentCutoffStep == 0 {
 		return 0, nil
 	}
 	at := a.BeginFilesRo()
@@ -78,26 +80,34 @@ func (a *Aggregator) RetireOldHistoryFiles(ctx context.Context, cutoffStep kv.St
 	var deleted []string
 	var retired []*FilesItem
 	for _, dt := range at.d {
-		// commitment.history and rcache have special cli flags: --prune.include-commitment-history --persist.receipt
-		// if they enabled they are never pruned - it's current logic. we will change it in future PR's - but for now keep them
-		// See: https://github.com/erigontech/erigon/issues/21306 'step 4'
-		if dt.name == kv.CommitmentDomain || dt.name == kv.RCacheDomain {
+		// rcache has a special cli flag (--persist.receipt) and its own retention;
+		// leave it to a future PR. See https://github.com/erigontech/erigon/issues/21306
+		if dt.name == kv.RCacheDomain {
+			continue
+		}
+		cutoff := cutoffStep
+		if dt.name == kv.CommitmentDomain {
+			cutoff = commitmentCutoffStep
+		}
+		if cutoff == 0 {
 			continue
 		}
 		if dt.d.Disable || dt.d.SnapshotsDisabled || dt.d.HistoryDisabled {
 			continue
 		}
-		names, r := dt.ht.retireBeforeStep(cutoffStep)
+		names, r := dt.ht.retireBeforeStep(cutoff)
 		deleted = append(deleted, names...)
 		retired = append(retired, r...)
 	}
-	for _, iit := range at.standaloneIIs() {
-		if iit.ii.Disable {
-			continue
+	if cutoffStep > 0 {
+		for _, iit := range at.standaloneIIs() {
+			if iit.ii.Disable {
+				continue
+			}
+			names, r := iit.retireBeforeStep(cutoffStep)
+			deleted = append(deleted, names...)
+			retired = append(retired, r...)
 		}
-		names, r := iit.retireBeforeStep(cutoffStep)
-		deleted = append(deleted, names...)
-		retired = append(retired, r...)
 	}
 
 	if len(retired) == 0 {
@@ -108,6 +118,6 @@ func (a *Aggregator) RetireOldHistoryFiles(ctx context.Context, cutoffStep kv.St
 	a.recalcVisibleFiles(retired)
 
 	mxRetiredHistoryFiles.AddInt(len(retired))
-	a.logger.Info("[snapshots] retired old history files", "removed", len(retired), "cutoffStep", cutoffStep)
+	a.logger.Info("[snapshots] retired old history files", "removed", len(retired), "cutoffStep", cutoffStep, "commitmentCutoffStep", commitmentCutoffStep)
 	return len(retired), nil
 }
