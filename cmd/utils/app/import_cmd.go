@@ -77,7 +77,7 @@ processing will proceed even if an individual RLP-file import failure occurs.`,
 
 func importChain(cliCtx *cli.Context) error {
 	if cliCtx.NArg() < 1 {
-		utils.Fatalf("This command requires an argument.")
+		return errors.New("this command requires an argument")
 	}
 
 	// Force-disable subsystems the one-shot import doesn't need, via the normal
@@ -107,7 +107,10 @@ func importChain(cliCtx *cli.Context) error {
 	}
 
 	ethCfg := node.NewEthConfigUrfave(cliCtx, nodeCfg, logger)
-	stack := makeConfigNode(cliCtx.Context, nodeCfg, logger)
+	stack, err := makeConfigNode(cliCtx.Context, nodeCfg, logger)
+	if err != nil {
+		return err
+	}
 	defer stack.Close()
 
 	ethereum, err := eth.New(cliCtx.Context, stack, ethCfg, logger, tracer)

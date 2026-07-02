@@ -202,14 +202,13 @@ func MakeNodeWithDefaultConfig(cliCtx *cli.Context, logger log.Logger) (*node.No
 	if err != nil {
 		return nil, err
 	}
-	return makeConfigNode(cliCtx.Context, conf, logger), nil
+	return makeConfigNode(cliCtx.Context, conf, logger)
 }
 
-func makeConfigNode(ctx context.Context, config *nodecfg.Config, logger log.Logger) *node.Node {
+func makeConfigNode(ctx context.Context, config *nodecfg.Config, logger log.Logger) (*node.Node, error) {
 	stack, err := node.New(ctx, config, logger)
 	if err != nil {
-		utils.Fatalf("Failed to create Erigon node: %v", err)
+		return nil, fmt.Errorf("failed to create Erigon node: %w", err)
 	}
-
-	return stack
+	return stack, nil
 }

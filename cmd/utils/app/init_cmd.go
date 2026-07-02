@@ -18,6 +18,7 @@ package app
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 
@@ -65,25 +66,25 @@ func initGenesis(cliCtx *cli.Context) error {
 	// Make sure we have a valid genesis JSON
 	genesisPath := cliCtx.Args().First()
 	if len(genesisPath) == 0 {
-		utils.Fatalf("Must supply path to genesis JSON file")
+		return errors.New("must supply path to genesis JSON file")
 	}
 
 	file, err := os.Open(genesisPath)
 	if err != nil {
-		utils.Fatalf("Failed to read genesis file: %v", err)
+		return fmt.Errorf("failed to read genesis file: %w", err)
 	}
 	defer file.Close()
 
 	genesis := new(types.Genesis)
 	if err := json.NewDecoder(file).Decode(genesis); err != nil {
-		utils.Fatalf("invalid genesis file: %v", err)
+		return fmt.Errorf("invalid genesis file: %w", err)
 	}
 
 	if genesis.Config.BorJSON != nil {
 		borConfig := &borcfg.BorConfig{}
 		err = json.Unmarshal(genesis.Config.BorJSON, borConfig)
 		if err != nil {
-			panic(fmt.Sprintf("Could not parse 'bor' config for %s: %v", genesisPath, err))
+			return fmt.Errorf("could not parse 'bor' config for %s: %w", genesisPath, err)
 		}
 
 		genesis.Config.Bor = borConfig
@@ -98,8 +99,9 @@ func initGenesis(cliCtx *cli.Context) error {
 
 	chaindb, err := node.OpenDatabase(cliCtx.Context, stack.Config(), dbcfg.ChainDB, "", false, logger)
 	if err != nil {
-		utils.Fatalf("Failed to open database: %v", err)
+		return fmt.Errorf("failed to open database: %w", err)
 	}
+	defer chaindb.Close()
 
 	if tracer != nil {
 		if tracer.Hooks != nil && tracer.Hooks.OnBlockchainInit != nil {
@@ -108,7 +110,7 @@ func initGenesis(cliCtx *cli.Context) error {
 	}
 	_, block, err := genesiswrite.CommitGenesisBlock(chaindb, genesis, cliCtx.String(utils.ChainFlag.Name), datadir.New(cliCtx.String(utils.DataDirFlag.Name)), logger)
 	if err != nil {
-		utils.Fatalf("Failed to write genesis block: %v", err)
+		return fmt.Errorf("failed to write genesis block: %w", err)
 	}
 	chaindb.Close()
 	logger.Info("Successfully wrote genesis state", "hash", block.Hash(), "root", block.Root())
