@@ -19,19 +19,11 @@ package txpool
 import (
 	"context"
 	"errors"
-	"fmt"
 	"math"
-	"net"
-	"time"
 
-	"github.com/grpc-ecosystem/go-grpc-middleware/v2/interceptors/recovery"
 	"github.com/holiman/uint256"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials"
-	"google.golang.org/grpc/health"
-	"google.golang.org/grpc/health/grpc_health_v1"
-	"google.golang.org/grpc/keepalive"
-	"google.golang.org/grpc/reflection"
 	"google.golang.org/protobuf/types/known/emptypb"
 
 	"github.com/erigontech/erigon/common"
@@ -326,44 +318,14 @@ func (s *GrpcServer) Nonce(ctx context.Context, in *txpoolproto.NonceRequest) (*
 type NewSlotsStreams = grpcutil.StreamBroadcaster[txpoolproto.OnAddReply]
 
 func StartGrpc(txPoolServer txpoolproto.TxpoolServer, miningServer txpoolproto.MiningServer, addr string, creds *credentials.TransportCredentials, logger log.Logger) (*grpc.Server, error) {
-	lis, err := net.Listen("tcp", addr)
-	if err != nil {
-		return nil, fmt.Errorf("could not create listener: %w, addr=%s", err, addr)
+	var transportCredentials credentials.TransportCredentials
+	if creds != nil {
+		transportCredentials = *creds
 	}
-
-	var (
-		streamInterceptors = make([]grpc.StreamServerInterceptor, 0, 2)
-		unaryInterceptors  = make([]grpc.UnaryServerInterceptor, 0, 2)
-	)
-	streamInterceptors = append(streamInterceptors, recovery.StreamServerInterceptor())
-	unaryInterceptors = append(unaryInterceptors, recovery.UnaryServerInterceptor())
-
-	//if metrics.Enabled {
-	//	streamInterceptors = append(streamInterceptors, grpc_prometheus.StreamServerInterceptor)
-	//	unaryInterceptors = append(unaryInterceptors, grpc_prometheus.UnaryServerInterceptor)
-	//}
-
-	//cpus := uint32(runtime.GOMAXPROCS(-1))
-	opts := []grpc.ServerOption{
-		//grpc.NumStreamWorkers(cpus), // reduce amount of goroutines
+	grpcServer := grpcutil.NewServerWithOpts(transportCredentials,
 		grpc.ReadBufferSize(0),  // reduce buffers to save mem
 		grpc.WriteBufferSize(0), // reduce buffers to save mem
-		// Don't drop the connection, settings accordign to this comment on GitHub
-		// https://github.com/grpc/grpc-go/issues/3171#issuecomment-552796779
-		grpc.KeepaliveEnforcementPolicy(keepalive.EnforcementPolicy{
-			MinTime:             10 * time.Second,
-			PermitWithoutStream: true,
-		}),
-		grpc.ChainStreamInterceptor(streamInterceptors...),
-		grpc.ChainUnaryInterceptor(unaryInterceptors...),
-	}
-	if creds == nil {
-		// no specific opts
-	} else {
-		opts = append(opts, grpc.Creds(*creds))
-	}
-	grpcServer := grpc.NewServer(opts...)
-	reflection.Register(grpcServer) // Register reflection service on gRPC server.
+	)
 	if txPoolServer != nil {
 		txpoolproto.RegisterTxpoolServer(grpcServer, txPoolServer)
 	}
@@ -371,19 +333,9 @@ func StartGrpc(txPoolServer txpoolproto.TxpoolServer, miningServer txpoolproto.M
 		txpoolproto.RegisterMiningServer(grpcServer, miningServer)
 	}
 
-	//if metrics.Enabled {
-	//	grpc_prometheus.Register(grpcServer)
-	//}
-
-	healthServer := health.NewServer()
-	grpc_health_v1.RegisterHealthServer(grpcServer, healthServer)
-
-	go func() {
-		defer healthServer.Shutdown()
-		if err := grpcServer.Serve(lis); err != nil {
-			logger.Error("private RPC server fail", "err", err)
-		}
-	}()
+	if err := grpcutil.StartServer(grpcServer, addr, true, logger, "private RPC server fail"); err != nil {
+		return nil, err
+	}
 	logger.Info("Started gRPC server", "on", addr)
 	return grpcServer, nil
 }
