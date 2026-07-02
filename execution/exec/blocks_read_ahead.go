@@ -103,7 +103,8 @@ func (cpg *cachePopulatingGetter) GetLatest(name kv.Domain, k []byte) ([]byte, k
 		} else {
 			// Cache including nil/empty results: a probe returning no
 			// bytes is a valid negative answer (missing account, empty
-			// storage slot, no code) and caching it lets repeated probes
+			// storage slot; empty code lands here too but CodeCache drops
+			// zero-length puts) and caching it lets repeated probes
 			// skip the file accessor stack. Mirrors revm's CacheAccount
 			// { account: None, status: LoadedNotExisting } pattern.
 			// Stamp with an upper bound on the value's write txNum (last txNum
