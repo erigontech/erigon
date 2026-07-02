@@ -370,20 +370,24 @@ func (sd *SharedDomains) flushPendingUpdates(ctx context.Context, tx kv.Temporal
 		blockHash, cs = switcher.GetChangesetByBlockNum(upd.BlockNum)
 	}
 	if cs != nil {
-		// Apply deferred branch writes under the pending update's block
-		// changeset, then save it back. All accesses under changesetMu —
-		// see concurrency contract on the wrappers above.
-		defer sd.SwapAccumulatorLocked(cs)()
+		// Save current accumulator, switch to the pending update's block
+		// changeset, apply deferred branch writes, save it back, then
+		// restore the original accumulator. All accesses under
+		// changesetMu — see concurrency contract on the wrappers above.
+		prev := switcher.GetChangesetAccumulator()
+		switcher.SetChangesetAccumulator(cs)
 
 		if _, err := commitment.ApplyDeferredBranchUpdates(upd.Deferred, runtime.NumCPU(), putBranch); err != nil {
+			switcher.SetChangesetAccumulator(prev)
 			return err
 		}
 
 		switcher.SavePastChangesetAccumulator(blockHash, upd.BlockNum, cs)
+		switcher.SetChangesetAccumulator(prev)
 		return nil
 	}
 
-	// No past changeset found — write into whatever is current.
+	// No past changeset found — write into whatever is current
 	_, err := commitment.ApplyDeferredBranchUpdates(upd.Deferred, runtime.NumCPU(), putBranch)
 	return err
 }
@@ -551,8 +555,8 @@ func (sd *SharedDomains) flushRequestMetrics() {
 // derivation lands and this lock + the swap dance can both be deleted.
 //
 // Inside the locked window callers must use the *Locked variants
-// (SwapAccumulatorLocked / DetachAccumulatorLocked) — the public Set/Get
-// acquire the same Mutex and would self-deadlock.
+// (Set/GetChangesetAccumulatorLocked) — the public Set/Get acquire the
+// same Mutex and would self-deadlock.
 func (sd *SharedDomains) LockChangesetAccumulator()   { sd.changesetMu.Lock() }
 func (sd *SharedDomains) UnlockChangesetAccumulator() { sd.changesetMu.Unlock() }
 
@@ -566,43 +570,33 @@ func (sd *SharedDomains) SetChangesetAccumulator(acc *changeset.StateChangeSet) 
 	sd.changesetMu.Unlock()
 }
 
-// setChangesetAccumulatorLocked is the unlocked variant of
-// SetChangesetAccumulator for use under changesetMu.
-func (sd *SharedDomains) setChangesetAccumulatorLocked(acc *changeset.StateChangeSet) {
+// SetChangesetAccumulatorLocked is the unlocked variant for callers that
+// already hold changesetMu via LockChangesetAccumulator (the calculator's
+// per-block compute window).
+func (sd *SharedDomains) SetChangesetAccumulatorLocked(acc *changeset.StateChangeSet) {
 	sd.mem.(accHolder).SetChangesetAccumulator(acc)
 }
 
 // GetChangesetAccumulator returns the currently-installed live changeset
 // accumulator (the one DomainPut writes diff entries into). Returns nil if
 // none is installed. Locks changesetMu internally — must NOT be called
-// while already holding the lock (use getChangesetAccumulatorLocked).
+// while already holding the lock (use GetChangesetAccumulatorLocked).
 func (sd *SharedDomains) GetChangesetAccumulator() *changeset.StateChangeSet {
 	sd.changesetMu.Lock()
 	defer sd.changesetMu.Unlock()
-	return sd.getChangesetAccumulatorLocked()
-}
-
-// getChangesetAccumulatorLocked is the unlocked variant of
-// GetChangesetAccumulator for use under changesetMu.
-func (sd *SharedDomains) getChangesetAccumulatorLocked() *changeset.StateChangeSet {
 	if h, ok := sd.mem.(changesetSwitcher); ok {
 		return h.GetChangesetAccumulator()
 	}
 	return nil
 }
 
-// SwapAccumulatorLocked installs the given changeset accumulator and returns
-// a func that restores the previous one. Callers must hold changesetMu.
-func (sd *SharedDomains) SwapAccumulatorLocked(acc *changeset.StateChangeSet) (restore func()) {
-	prev := sd.getChangesetAccumulatorLocked()
-	sd.setChangesetAccumulatorLocked(acc)
-	return func() { sd.setChangesetAccumulatorLocked(prev) }
-}
-
-// DetachAccumulatorLocked installs a nil changeset accumulator and returns a
-// func that restores the previous one. Callers must hold changesetMu.
-func (sd *SharedDomains) DetachAccumulatorLocked() (restore func()) {
-	return sd.SwapAccumulatorLocked(nil)
+// GetChangesetAccumulatorLocked is the unlocked variant for callers that
+// already hold changesetMu.
+func (sd *SharedDomains) GetChangesetAccumulatorLocked() *changeset.StateChangeSet {
+	if h, ok := sd.mem.(changesetSwitcher); ok {
+		return h.GetChangesetAccumulator()
+	}
+	return nil
 }
 
 // GetChangesetByBlockNum returns the saved changeset for a given block
