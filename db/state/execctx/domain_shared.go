@@ -761,12 +761,6 @@ func (sd *SharedDomains) SetCodeStore(codeStore *cache.CodeStore) {
 	sd.codeStore = codeStore
 }
 
-// CodeStore exposes the code store + the backing tx so an addr-keyed reader can
-// serve a code-by-hash read using the application's authoritative codehash.
-func (tg *temporalGetter) CodeStore() (*cache.CodeStore, kv.TemporalTx) {
-	return tg.sd.codeStore, tg.tx
-}
-
 // PrintCacheStats logs the state cache hit/miss counters and resets them.
 // No-op when the cache is disabled. The cache is an SD-internal detail, so
 // callers observe it through SD rather than reaching for the cache directly.
@@ -980,12 +974,15 @@ func (sd *SharedDomains) Commit(ctx context.Context, tx kv.RwTx, validate ...fun
 	if sd.stateCache != nil {
 		opts = append(opts, stash(kv.AccountsDomain), stash(kv.StorageDomain))
 	}
-	// CodeDomain flush both populates the persistent code store (write path, has
-	// an RwTx) and stashes for the in-mem state cache.
+	// CodeDomain flush stashes state-cache updates and collects code for the
+	// persistent store. The code-store MDBX write is deferred to after flushMem —
+	// an in-callback tx.Put interleaves with the in-progress domain flush and
+	// corrupts it (reorg/unwind wrong root).
+	var codeStoreWrites [][2][]byte
 	if sd.stateCache != nil || sd.codeStore != nil {
 		opts = append(opts, kv.WithFlushCallback(kv.CodeDomain, func(k []byte, v []byte, step kv.Step, txNum uint64) {
 			if sd.codeStore != nil && len(v) > 0 {
-				_ = sd.codeStore.PutByHash(tx, crypto.Keccak256(v), v)
+				codeStoreWrites = append(codeStoreWrites, [2][]byte{crypto.Keccak256(v), append([]byte(nil), v...)})
 			}
 			if sd.stateCache != nil {
 				pending = append(pending, cacheUpdate{
@@ -1000,6 +997,11 @@ func (sd *SharedDomains) Commit(ctx context.Context, tx kv.RwTx, validate ...fun
 	}
 	if err := sd.flushMem(ctx, tx, opts...); err != nil {
 		return err
+	}
+	for _, cw := range codeStoreWrites {
+		if err := sd.codeStore.PutByHash(tx, cw[0], cw[1]); err != nil {
+			return err
+		}
 	}
 	if err := runValidate(); err != nil {
 		return err
@@ -1400,11 +1402,21 @@ func (sd *SharedDomains) GetCode(tx kv.TemporalTx, addr []byte, txNum uint64) ([
 	}
 
 	// Fast path: addr → account codeHash → content-addressed bytes, no
-	// per-address CodeDomain read.
-	if sd.stateCache != nil {
-		if codeHash := sd.codeHashForAddr(tx, addr, txNum); len(codeHash) > 0 {
-			if cv, ok := sd.stateCache.GetCodeByHash(codeHash); ok {
-				return cv, true, nil
+	// per-address CodeDomain read. The codeHash is resolved mem-first, so it
+	// reflects in-block code changes — keying the code store off it (rather than
+	// a stateObject's stale snapshot) is reorg-safe.
+	var codeHash []byte
+	if sd.stateCache != nil || sd.codeStore != nil {
+		if codeHash = sd.codeHashForAddr(tx, addr, txNum); len(codeHash) > 0 {
+			if sd.stateCache != nil {
+				if cv, ok := sd.stateCache.GetCodeByHash(codeHash); ok {
+					return cv, true, nil
+				}
+			}
+			if sd.codeStore != nil {
+				if cv, ok := sd.codeStore.GetByHash(tx, codeHash); ok {
+					return cv, true, nil
+				}
 			}
 		}
 	}

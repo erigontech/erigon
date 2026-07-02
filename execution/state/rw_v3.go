@@ -35,7 +35,6 @@ import (
 	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/db/rawdb/rawtemporaldb"
 	"github.com/erigontech/erigon/db/state/execctx"
-	"github.com/erigontech/erigon/execution/cache"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/accounts"
@@ -1009,18 +1008,6 @@ func NewReaderV3(getter kv.TemporalGetter) *ReaderV3 {
 		//trace:  true,
 		getter: getter,
 	}
-}
-
-// CodeStore returns the codehash-keyed code cache + backing tx when the reader's
-// getter exposes one, so callers holding an authoritative codehash can serve a
-// code read without the addr-keyed CodeDomain decompression.
-func (r *ReaderV3) CodeStore() (*cache.CodeStore, kv.TemporalTx) {
-	if g, ok := r.getter.(interface {
-		CodeStore() (*cache.CodeStore, kv.TemporalTx)
-	}); ok {
-		return g.CodeStore()
-	}
-	return nil, nil
 }
 
 func (r *ReaderV3) DiscardReadList()                   {}

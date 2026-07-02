@@ -121,14 +121,3 @@ func (s *CodeStore) Evict(tx kv.RwTx) error {
 	}
 	return nil
 }
-
-// SetMem populates only the in-memory tier — used on a read-path (RoTx) cold
-// decompress where the MDBX backing cannot be written.
-func (s *CodeStore) SetMem(codeHash, code []byte) {
-	if s == nil || len(codeHash) != 32 || len(code) == 0 {
-		return
-	}
-	var key [32]byte
-	copy(key[:], codeHash)
-	s.mem.Set(key, code)
-}
