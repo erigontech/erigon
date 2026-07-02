@@ -603,19 +603,16 @@ func (cc *commitmentCalculator) computeWithBlockAccumulator(ctx context.Context,
 		return cc.doms.ComputeCommitmentLocked(ctx, cc.roTx, true, br.BlockNum, br.lastTxNum, cc.logPrefix, nil)
 	}
 	// LOAD-BEARING swap under the outer lock (already taken above). The
-	// Set/restore dance below mutates the global current-accumulator
-	// pointer; the deferred branch writes from block N-1 (flushed inside
+	// swap below mutates the global current-accumulator pointer; the
+	// deferred branch writes from block N-1 (flushed inside
 	// ComputeCommitmentLocked → FlushPendingUpdatesLocked) AND the [state]
 	// marker write at end of compute also touch that same global pointer
 	// and the per-domain diff fields. Holding changesetMu through all of
 	// it serializes against the apply goroutine's DomainPut/DomainDel.
 	//
-	// Inside the lock we must use the *Locked variants of Get/Set/Compute
-	// — the public counterparts re-acquire the same Mutex and would
-	// self-deadlock.
-	prev := cc.doms.GetChangesetAccumulatorLocked()
-	cc.doms.SetChangesetAccumulatorLocked(cs)
-	defer cc.doms.SetChangesetAccumulatorLocked(prev)
+	// Inside the lock we must use the *Locked variants — the public
+	// counterparts re-acquire the same Mutex and would self-deadlock.
+	defer cc.doms.SwapAccumulatorLocked(cs)()
 	return cc.doms.ComputeCommitmentLocked(ctx, cc.roTx, true, br.BlockNum, br.lastTxNum, cc.logPrefix, nil)
 }
 

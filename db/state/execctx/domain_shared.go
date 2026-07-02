@@ -370,20 +370,16 @@ func (sd *SharedDomains) flushPendingUpdates(ctx context.Context, tx kv.Temporal
 		blockHash, cs = switcher.GetChangesetByBlockNum(upd.BlockNum)
 	}
 	if cs != nil {
-		// Save current accumulator, switch to the pending update's block
-		// changeset, apply deferred branch writes, save it back, then
-		// restore the original accumulator. All accesses under
-		// changesetMu — see concurrency contract on the wrappers above.
-		prev := switcher.GetChangesetAccumulator()
-		switcher.SetChangesetAccumulator(cs)
+		// Apply deferred branch writes under the pending update's block
+		// changeset, then save it back. All accesses under changesetMu —
+		// see concurrency contract on the wrappers above.
+		defer sd.SwapAccumulatorLocked(cs)()
 
 		if _, err := commitment.ApplyDeferredBranchUpdates(upd.Deferred, runtime.NumCPU(), putBranch); err != nil {
-			switcher.SetChangesetAccumulator(prev)
 			return err
 		}
 
 		switcher.SavePastChangesetAccumulator(blockHash, upd.BlockNum, cs)
-		switcher.SetChangesetAccumulator(prev)
 		return nil
 	}
 
@@ -600,12 +596,18 @@ func (sd *SharedDomains) GetChangesetAccumulatorLocked() *changeset.StateChangeS
 	return nil
 }
 
+// SwapAccumulatorLocked installs the given changeset accumulator and returns
+// a func that restores the previous one. Callers must hold changesetMu.
+func (sd *SharedDomains) SwapAccumulatorLocked(acc *changeset.StateChangeSet) (restore func()) {
+	prev := sd.GetChangesetAccumulatorLocked()
+	sd.SetChangesetAccumulatorLocked(acc)
+	return func() { sd.SetChangesetAccumulatorLocked(prev) }
+}
+
 // DetachAccumulatorLocked installs a nil changeset accumulator and returns a
 // func that restores the previous one. Callers must hold changesetMu.
 func (sd *SharedDomains) DetachAccumulatorLocked() (restore func()) {
-	prev := sd.GetChangesetAccumulatorLocked()
-	sd.SetChangesetAccumulatorLocked(nil)
-	return func() { sd.SetChangesetAccumulatorLocked(prev) }
+	return sd.SwapAccumulatorLocked(nil)
 }
 
 // DetachAccumulatorForGenesisLocked detaches the accumulator for block 0 (a
