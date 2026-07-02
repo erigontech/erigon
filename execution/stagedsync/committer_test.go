@@ -24,6 +24,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/erigontech/erigon/db/state/execctx"
 	"github.com/erigontech/erigon/execution/state"
 	"github.com/erigontech/erigon/execution/types/accounts"
 )
@@ -144,6 +145,9 @@ func TestHandleMessage_TxResultPinsAsOfReaderTxNum(t *testing.T) {
 	cc := &commitmentCalculator{
 		asOfReader: asOfReader,
 		state:      cs,
+		// Non-nil doms with stepSize 0 so the step-boundary hook short-circuits;
+		// this test pins asOfReader.txNum, not the checkpoint path.
+		doms: &execctx.SharedDomains{},
 	}
 
 	// A txResult must carry at least one write to enter the fix's
