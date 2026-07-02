@@ -16,14 +16,14 @@ state         = '1y'        # keep ~1 year of state history
 commitment    = 100_000     # keep the last 100k blocks of commitment history
 receipts      = false       # don't keep receipt history (re-exec on demand)
 domainA       = true        # keep everything (archive)
-domainB.after = 10_000_000     # keep history from absolute block 10M onward
+domainB.from = 10_000_000     # keep history from absolute block 10M onward
 ```
 
 Every line is also a CLI flag with the identical name (CLI overrides the file):
 
 ```
 --history.state=1y  --history.commitment=100000  --history.receipts=false
---history.domainA=true  --history.domainB.after=100000
+--history.domainA=true  --history.domainB.from=100000
 ```
 
 Value grammar for the bare `--history.<domain>` flag:
@@ -47,7 +47,7 @@ plus an optional sub-key for the absolute anchor:
 
 | flag | meaning |
 |---|---|
-| `--history.<domain>.after=<block>` | keep history **from absolute block N** onward |
+| `--history.<domain>.from=<block>` | keep history **from absolute block N** onward |
 
 `--prune.mode=archive\|full\|minimal\|blocks` stays as the coarse preset; it just
 sets `history.*` defaults that the per-domain flags override.
@@ -79,17 +79,17 @@ also an *extension, not new machinery*: `--prune.distance` is already a
 several value shapes (base-0 integers, a `keep-all` sentinel) — we widen that
 parser's vocabulary.
 
-**Why bare number = "last N", and absolute via a `.after` sub-key** — A single
+**Why bare number = "last N", and absolute via a `.from` sub-key** — A single
 scalar can't give a bare number two meanings. Keeping bare = distance ("last N
 blocks") matches Geth (`--history.state=N`) and Polkadot (`--state-pruning N`); the
-rarer absolute anchor gets an explicit `--history.<domain>.after=<block>` sub-key —
+rarer absolute anchor gets an explicit `--history.<domain>.from=<block>` sub-key —
 a distinct flag — so there is no "last N vs from N" ambiguity (the same shape as
 `--http` / `--http.api`). In `config.toml` this is safe because a domain is *either*
-a scalar (`domainB = 100000`) *or* a table (`domainB.after = N`); TOML rejects both
+a scalar (`domainB = 100000`) *or* a table (`domainB.from = N`); TOML rejects both
 in one file, which conveniently enforces "at most one retention setting" for free.
 (On the CLI the two are independent flags, so that XOR must be validated in wiring.)
-`after`/`from` names what's *kept*, which fits the `history.` framing better than
-Reth's `before` (which names what's *deleted*) — document whether N is inclusive.
+`from` names what's *kept* and reads as **inclusive** of block N, which fits the
+`history.` framing better than Reth's `before` (which names what's *deleted*).
 
 **Why no fork-named anchor sentinel (multi-chain)** — Erigon supports many chains
 (Gnosis, Polygon/Bor, testnets), not just Ethereum mainnet. A sentinel like
@@ -98,7 +98,7 @@ Ethereum-mainnet-centric: on other chains the merge or a given fork happened at 
 different block, means something else, or does not exist, so the anchor is
 undefined. Fork-named anchors therefore must **not** be part of the cross-chain
 vocabulary. Prefer chain-agnostic forms: `keep-all`, a `<blocks>` distance, a
-`<duration>`, or the absolute `.after=<block>`. If a fork alias is offered at all it
+`<duration>`, or the absolute `.from=<block>`. If a fork alias is offered at all it
 belongs behind per-chain config that *resolves to a block number* and is valid only
 where that fork exists — never a universal sentinel. (The existing `keep-post-merge`
 in `ParseBlocksDistance` is exactly this eth-centric case; don't extend the pattern
@@ -125,7 +125,7 @@ accept-with-warning behavior as today's `isRetentionWindowChange`.
 ## How to add a new domain `X`
 
 1. **Flag** — a polymorphic `--history.X` (`cli.StringFlag` + a `ParseRetention`
-   mirroring `ParseHistoryDistance`); add `--history.X.after` only if X needs an
+   mirroring `ParseHistoryDistance`); add `--history.X.from` only if X needs an
    arbitrary absolute anchor. Both must be **real primary flags, not urfave aliases**
    — an alias set from the config file does not propagate to its primary (only CLI
    parsing's `normalizeFlags` does).
