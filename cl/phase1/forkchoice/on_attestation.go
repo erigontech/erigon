@@ -181,16 +181,7 @@ func (f *ForkChoiceStore) isUnequivocating(validatorIndex uint64) bool {
 func (f *ForkChoiceStore) setUnequivocating(validatorIndex uint64, trackGloasWeights bool) {
 	index := int(validatorIndex) / 8
 	if index >= len(f.equivocatingIndicies) {
-		if index >= cap(f.equivocatingIndicies) {
-			capacity := index * 2
-			if capacity < index+1 {
-				capacity = index + 1
-			}
-			tmp := make([]byte, index+1, capacity)
-			copy(tmp, f.equivocatingIndicies)
-			f.equivocatingIndicies = tmp
-		}
-		f.equivocatingIndicies = f.equivocatingIndicies[:index+1]
+		f.equivocatingIndicies = common.EnsureEnoughSize(f.equivocatingIndicies, index+1)
 	}
 	subIndex := int(validatorIndex) % 8
 	f.equivocatingIndicies[index] |= 1 << uint(subIndex)

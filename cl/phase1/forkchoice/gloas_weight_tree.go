@@ -25,6 +25,7 @@ import (
 type gloasVoteContribution struct {
 	message      LatestMessage
 	contribution uint64
+	direct       bool
 	set          bool
 }
 
@@ -53,6 +54,8 @@ type gloasWeightTree struct {
 	checkpoint solid.Checkpoint
 	state      *checkpointState
 	ready      bool
+
+	missingRootVotes map[common.Hash]map[uint64]struct{}
 
 	boostKnown bool
 	boost      bool
@@ -104,9 +107,7 @@ func (t *gloasWeightTree) prepare(justified solid.Checkpoint, cs *checkpointStat
 		t.allDirty = true
 	}
 	t.state = cs
-	if t.ensureTopology(justified.Root) {
-		t.allDirty = true
-	}
+	t.ensureTopology(justified.Root)
 	if t.allDirty {
 		t.rebuildDirectWeights(cs)
 	} else {
@@ -116,8 +117,7 @@ func (t *gloasWeightTree) prepare(justified solid.Checkpoint, cs *checkpointStat
 	return t
 }
 
-func (t *gloasWeightTree) ensureTopology(root common.Hash) bool {
-	requiresDirectRebuild := false
+func (t *gloasWeightTree) ensureTopology(root common.Hash) {
 	if t.topologySeen == nil {
 		t.topologySeen = make(map[common.Hash]struct{})
 	} else {
@@ -136,18 +136,16 @@ func (t *gloasWeightTree) ensureTopology(root common.Hash) bool {
 		if !ok {
 			node = &gloasWeightNode{root: current, parentPayloadStatus: cltypes.PayloadStatusPending}
 			t.nodes[current] = node
-			requiresDirectRebuild = true
+			t.markMissingRootDirty(current)
 		}
 
-		if t.filterLiveChildren(current, node) {
-			requiresDirectRebuild = true
-		}
+		t.filterLiveChildren(current, node)
 		for _, child := range node.children {
 			childNode, ok := t.nodes[child]
 			if !ok {
 				childNode = &gloasWeightNode{root: child}
 				t.nodes[child] = childNode
-				requiresDirectRebuild = true
+				t.markMissingRootDirty(child)
 			}
 			block, ok := t.f.forkGraph.GetBlock(child)
 			if !ok || block == nil {
@@ -156,13 +154,11 @@ func (t *gloasWeightTree) ensureTopology(root common.Hash) bool {
 			parentPayloadStatus := t.f.getParentPayloadStatus(block.Block)
 			if childNode.parent != current {
 				childNode.parent = current
-				requiresDirectRebuild = true
 			}
 			childNode.parentPayloadStatus = parentPayloadStatus
 			t.stack = append(t.stack, child)
 		}
 	}
-	return requiresDirectRebuild
 }
 
 func (t *gloasWeightTree) filterLiveChildren(root common.Hash, node *gloasWeightNode) bool {
@@ -204,6 +200,9 @@ func (t *gloasWeightTree) rebuildDirectWeights(cs *checkpointState) {
 	t.applied = growGloasContributions(t.applied, t.f.latestMessages.latestMessagesCount())
 	for i := range t.applied {
 		t.applied[i] = gloasVoteContribution{}
+	}
+	if t.missingRootVotes != nil {
+		clear(t.missingRootVotes)
 	}
 	for i := 0; i < t.f.latestMessages.latestMessagesCount(); i++ {
 		t.addValidatorContribution(uint64(i), cs)
@@ -264,10 +263,16 @@ func (t *gloasWeightTree) addValidatorContribution(validatorIndex uint64, cs *ch
 	if contribution == 0 {
 		return
 	}
-	t.addDirectContribution(message, contribution)
+	direct := false
+	if t.nodes[message.Root] == nil {
+		t.trackMissingRootVote(message.Root, validatorIndex)
+	} else {
+		direct = t.addDirectContribution(message, contribution)
+	}
 	t.applied[vi] = gloasVoteContribution{
 		message:      message,
 		contribution: contribution,
+		direct:       direct,
 		set:          true,
 	}
 }
@@ -277,26 +282,30 @@ func (t *gloasWeightTree) removeAppliedContribution(validatorIndex uint64) {
 	if vi >= len(t.applied) || !t.applied[vi].set {
 		return
 	}
-	t.subtractDirectContribution(t.applied[vi].message, t.applied[vi].contribution)
+	if t.applied[vi].direct {
+		t.subtractDirectContribution(t.applied[vi].message, t.applied[vi].contribution)
+	} else {
+		t.untrackMissingRootVote(t.applied[vi].message.Root, validatorIndex)
+	}
 	t.applied[vi] = gloasVoteContribution{}
 }
 
-func (t *gloasWeightTree) addDirectContribution(message LatestMessage, contribution uint64) {
-	t.applyDirectContribution(message, contribution, true)
+func (t *gloasWeightTree) addDirectContribution(message LatestMessage, contribution uint64) bool {
+	return t.applyDirectContribution(message, contribution, true)
 }
 
 func (t *gloasWeightTree) subtractDirectContribution(message LatestMessage, contribution uint64) {
 	t.applyDirectContribution(message, contribution, false)
 }
 
-func (t *gloasWeightTree) applyDirectContribution(message LatestMessage, contribution uint64, add bool) {
+func (t *gloasWeightTree) applyDirectContribution(message LatestMessage, contribution uint64, add bool) bool {
 	node := t.nodes[message.Root]
 	if node == nil {
-		return
+		return false
 	}
 	supported := t.f.getSupportedNode(message)
 	if supported.Root != message.Root {
-		return
+		return false
 	}
 	switch supported.PayloadStatus {
 	case cltypes.PayloadStatusPending:
@@ -306,6 +315,41 @@ func (t *gloasWeightTree) applyDirectContribution(message LatestMessage, contrib
 	case cltypes.PayloadStatusFull:
 		node.directFull = applyWeightDelta(node.directFull, contribution, add)
 	}
+	return true
+}
+
+func (t *gloasWeightTree) trackMissingRootVote(root common.Hash, validatorIndex uint64) {
+	if t.missingRootVotes == nil {
+		t.missingRootVotes = make(map[common.Hash]map[uint64]struct{})
+	}
+	votes := t.missingRootVotes[root]
+	if votes == nil {
+		votes = make(map[uint64]struct{})
+		t.missingRootVotes[root] = votes
+	}
+	votes[validatorIndex] = struct{}{}
+}
+
+func (t *gloasWeightTree) untrackMissingRootVote(root common.Hash, validatorIndex uint64) {
+	votes := t.missingRootVotes[root]
+	if votes == nil {
+		return
+	}
+	delete(votes, validatorIndex)
+	if len(votes) == 0 {
+		delete(t.missingRootVotes, root)
+	}
+}
+
+func (t *gloasWeightTree) markMissingRootDirty(root common.Hash) {
+	votes := t.missingRootVotes[root]
+	if votes == nil {
+		return
+	}
+	for validatorIndex := range votes {
+		t.markDirty(validatorIndex)
+	}
+	delete(t.missingRootVotes, root)
 }
 
 func applyWeightDelta(weight, delta uint64, add bool) uint64 {
@@ -356,22 +400,7 @@ func (t *gloasWeightTree) recompute(root common.Hash) {
 }
 
 func (t *gloasWeightTree) GetWeight(node ForkChoiceNode) uint64 {
-	if t.f.isPreviousSlotPayloadDecision(node) {
-		return 0
-	}
-	attestationScore := t.GetAttestationScore(node)
-	if !t.ShouldApplyProposerBoost() {
-		return attestationScore
-	}
-	proposerBoostRoot := t.f.ProposerBoostRoot()
-	if proposerBoostRoot == (common.Hash{}) {
-		return attestationScore
-	}
-	proposerBoostNode := ForkChoiceNode{Root: proposerBoostRoot, PayloadStatus: cltypes.PayloadStatusPending}
-	if t.f.isAncestor(proposerBoostNode, node) {
-		return attestationScore + t.GetProposerScore()
-	}
-	return attestationScore
+	return getWeight(t, t.f, node)
 }
 
 func (t *gloasWeightTree) GetAttestationScore(node ForkChoiceNode) uint64 {
@@ -395,12 +424,7 @@ func (t *gloasWeightTree) GetAttestationScore(node ForkChoiceNode) uint64 {
 }
 
 func (t *gloasWeightTree) GetProposerScore() uint64 {
-	cs := t.state
-	if cs == nil {
-		return 0
-	}
-	committeeWeight := cs.activeBalance / t.f.beaconCfg.SlotsPerEpoch
-	return (committeeWeight * t.f.beaconCfg.ProposerScoreBoost) / 100
+	return getProposerScore(t.f, t.state)
 }
 
 func (t *gloasWeightTree) ShouldApplyProposerBoost() bool {
@@ -413,13 +437,10 @@ func (t *gloasWeightTree) ShouldApplyProposerBoost() bool {
 		t.boost = false
 		return false
 	}
+	fullScan := newWeightStoreFromCheckpointState(t.f, t.state)
 	t.boost = t.f.shouldApplyProposerBoostGloasWith(proposerBoostRoot, func(root common.Hash) bool {
-		fullScan := weightStore{f: t.f, checkpointState: t.state}
 		return t.f.isHeadWeakWith(root, t.state, func(root common.Hash) uint64 {
-			if t.nodes[root] == nil {
-				return fullScan.GetAttestationScore(ForkChoiceNode{Root: root, PayloadStatus: cltypes.PayloadStatusPending})
-			}
-			return t.GetAttestationScore(ForkChoiceNode{Root: root, PayloadStatus: cltypes.PayloadStatusPending})
+			return fullScan.GetAttestationScore(ForkChoiceNode{Root: root, PayloadStatus: cltypes.PayloadStatusPending})
 		})
 	})
 	t.boostKnown = true

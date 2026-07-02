@@ -59,6 +59,40 @@ func newWeightStoreFromCheckpointState(f *ForkChoiceStore, cs *checkpointState) 
 	return &weightStore{f: f, checkpointState: cs}
 }
 
+func getWeight(store WeightStore, f *ForkChoiceStore, node ForkChoiceNode) uint64 {
+	if f.isPreviousSlotPayloadDecision(node) {
+		return 0
+	}
+
+	attestationScore := store.GetAttestationScore(node)
+	if !store.ShouldApplyProposerBoost() {
+		return attestationScore
+	}
+
+	proposerBoostRoot := f.ProposerBoostRoot()
+	if proposerBoostRoot == (common.Hash{}) {
+		return attestationScore
+	}
+
+	proposerBoostNode := ForkChoiceNode{
+		Root:          proposerBoostRoot,
+		PayloadStatus: cltypes.PayloadStatusPending,
+	}
+	if f.isAncestor(proposerBoostNode, node) {
+		return attestationScore + store.GetProposerScore()
+	}
+
+	return attestationScore
+}
+
+func getProposerScore(f *ForkChoiceStore, cs *checkpointState) uint64 {
+	if cs == nil {
+		return 0
+	}
+	committeeWeight := cs.activeBalance / f.beaconCfg.SlotsPerEpoch
+	return (committeeWeight * f.beaconCfg.ProposerScoreBoost) / 100
+}
+
 // GetWeight returns the weight for a ForkChoiceNode.
 // [New in Gloas:EIP7732]
 //
@@ -74,32 +108,7 @@ func newWeightStoreFromCheckpointState(f *ForkChoiceStore, cs *checkpointState) 
 // So: PENDING OR not-previous-slot → calculate weight
 // NOT PENDING AND is-previous-slot → return 0
 func (w *weightStore) GetWeight(node ForkChoiceNode) uint64 {
-	if w.f.isPreviousSlotPayloadDecision(node) {
-		return 0
-	}
-
-	// Otherwise (PENDING OR not previous slot) → calculate weight
-	attestationScore := w.GetAttestationScore(node)
-
-	// Check if proposer boost should be applied
-	if !w.ShouldApplyProposerBoost() {
-		return attestationScore
-	}
-
-	proposerBoostRoot := w.f.ProposerBoostRoot()
-	if proposerBoostRoot == (common.Hash{}) {
-		return attestationScore
-	}
-
-	proposerBoostNode := ForkChoiceNode{
-		Root:          proposerBoostRoot,
-		PayloadStatus: cltypes.PayloadStatusPending,
-	}
-	if w.f.isAncestor(proposerBoostNode, node) {
-		return attestationScore + w.GetProposerScore()
-	}
-
-	return attestationScore
+	return getWeight(w, w.f, node)
 }
 
 // GetAttestationScore returns the attestation score for a ForkChoiceNode.
@@ -142,13 +151,7 @@ func (w *weightStore) GetAttestationScore(node ForkChoiceNode) uint64 {
 // proposer_score = (committee_weight * PROPOSER_SCORE_BOOST) / 100
 // where committee_weight = total_active_balance / SLOTS_PER_EPOCH
 func (w *weightStore) GetProposerScore() uint64 {
-	checkpointState := w.checkpointState
-	if checkpointState == nil {
-		return 0
-	}
-
-	committeeWeight := checkpointState.activeBalance / w.f.beaconCfg.SlotsPerEpoch
-	return (committeeWeight * w.f.beaconCfg.ProposerScoreBoost) / 100
+	return getProposerScore(w.f, w.checkpointState)
 }
 
 // ShouldApplyProposerBoost returns whether the proposer boost should be applied.

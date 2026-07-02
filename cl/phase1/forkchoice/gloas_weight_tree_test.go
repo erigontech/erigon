@@ -151,8 +151,9 @@ func TestGloasWeightTreePayloadStatusChangeSkipsDirectRebuild(t *testing.T) {
 		childNode.parentPayloadStatus = cltypes.PayloadStatusEmpty
 	}
 
-	require.False(t, f.gloasWeightTree.ensureTopology(justified.Root))
+	f.gloasWeightTree.ensureTopology(justified.Root)
 	require.Equal(t, actualStatus, childNode.parentPayloadStatus)
+	require.False(t, f.gloasWeightTree.allDirty)
 }
 
 func TestGloasWeightTreeEquivocationDeltaMatchesFullScan(t *testing.T) {
@@ -281,6 +282,90 @@ func TestGloasWeightTreeIgnoresStaleChildEdges(t *testing.T) {
 	f.gloasWeightTree.prepare(justified, cs)
 
 	require.NotContains(t, f.gloasWeightTree.nodes[justified.Root].children, staleChild)
+}
+
+func TestGloasWeightTreeTracksVotesForMissingRoots(t *testing.T) {
+	f := buildExAnteStore(t)
+	justified := f.justifiedCheckpoint.Load().(solid.Checkpoint)
+	cs, err := f.getCheckpointState(justified)
+	require.NoError(t, err)
+	require.NotNil(t, cs)
+	_, missingRoot := decodeDiffBlock(t, diffBlockc2Enc)
+
+	f.mu.Lock()
+	defer f.mu.Unlock()
+
+	var validatorIndex uint64
+	found := false
+	for i := 0; i < cs.validatorSetSize; i++ {
+		if readFromBitset(cs.actives, i) && !readFromBitset(cs.slasheds, i) && cs.balances[i] > 0 {
+			validatorIndex = uint64(i)
+			found = true
+			break
+		}
+	}
+	require.True(t, found)
+
+	f.setLatestMessage(validatorIndex, LatestMessage{Root: missingRoot}, false)
+	f.gloasWeightTree.applied = growGloasContributions(f.gloasWeightTree.applied, int(validatorIndex)+1)
+	f.gloasWeightTree.allDirty = false
+	delete(f.gloasWeightTree.nodes, missingRoot)
+	f.gloasWeightTree.addValidatorContribution(validatorIndex, cs)
+	require.Contains(t, f.gloasWeightTree.missingRootVotes[missingRoot], validatorIndex)
+	require.False(t, f.gloasWeightTree.applied[validatorIndex].direct)
+
+	f.gloasWeightTree.ensureTopology(justified.Root)
+	require.Contains(t, f.gloasWeightTree.dirty, validatorIndex)
+	require.NotContains(t, f.gloasWeightTree.missingRootVotes, missingRoot)
+	require.Contains(t, f.gloasWeightTree.nodes, missingRoot)
+
+	f.gloasWeightTree.applyDirtyValidators(cs)
+	require.True(t, f.gloasWeightTree.applied[validatorIndex].direct)
+	require.Equal(t, cs.balances[validatorIndex], f.gloasWeightTree.nodes[missingRoot].directPending)
+	require.Empty(t, f.gloasWeightTree.dirty)
+	require.False(t, f.gloasWeightTree.allDirty)
+}
+
+func TestGloasWeightTreeClearsMissingRootVoteWhenValidatorMovesAway(t *testing.T) {
+	f := buildExAnteStore(t)
+	justified := f.justifiedCheckpoint.Load().(solid.Checkpoint)
+	cs, err := f.getCheckpointState(justified)
+	require.NoError(t, err)
+	require.NotNil(t, cs)
+
+	f.mu.Lock()
+	defer f.mu.Unlock()
+
+	missingRoot := common.HexToHash("0xdeadbeef")
+	_, liveRoot := decodeDiffBlock(t, diffBlockc2Enc)
+	var validatorIndex uint64
+	found := false
+	for i := 0; i < cs.validatorSetSize; i++ {
+		if readFromBitset(cs.actives, i) && !readFromBitset(cs.slasheds, i) && cs.balances[i] > 0 {
+			validatorIndex = uint64(i)
+			found = true
+			break
+		}
+	}
+	require.True(t, found)
+
+	f.setLatestMessage(validatorIndex, LatestMessage{Root: missingRoot}, false)
+	f.gloasWeightTree.applied = growGloasContributions(f.gloasWeightTree.applied, int(validatorIndex)+1)
+	f.gloasWeightTree.allDirty = false
+	f.gloasWeightTree.addValidatorContribution(validatorIndex, cs)
+	require.Contains(t, f.gloasWeightTree.missingRootVotes[missingRoot], validatorIndex)
+
+	f.setLatestMessage(validatorIndex, LatestMessage{Root: liveRoot}, false)
+	f.gloasWeightTree.markDirty(validatorIndex)
+	f.gloasWeightTree.nodes[liveRoot] = &gloasWeightNode{root: liveRoot}
+	f.gloasWeightTree.applyDirtyValidators(cs)
+
+	require.NotContains(t, f.gloasWeightTree.missingRootVotes, missingRoot)
+	require.True(t, f.gloasWeightTree.applied[validatorIndex].direct)
+	require.Equal(t, cs.balances[validatorIndex], f.gloasWeightTree.nodes[liveRoot].directPending)
+
+	f.gloasWeightTree.markMissingRootDirty(missingRoot)
+	require.Empty(t, f.gloasWeightTree.dirty)
 }
 
 func TestOnNewFinalizedPrunesGloasWeightTree(t *testing.T) {
