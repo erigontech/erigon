@@ -246,10 +246,6 @@ func (pe *parallelExecutor) execImpl(ctx context.Context, execStage *StageState,
 	pe.rs.Domains().SetInMemHistoryReads(true)
 	defer pe.rs.Domains().SetInMemHistoryReads(prevInMemHistoryReads)
 
-	// Skip step-boundary commitment — the calculator handles this.
-	pe.rs.StateV3.SetSkipStepBoundaryCommitment(true)
-	defer pe.rs.StateV3.SetSkipStepBoundaryCommitment(false)
-
 	// The calculator installs its own asOfStateReader on the shared commitment
 	// context; restore the prior reader on exit so it doesn't leak GetAsOf reads
 	// into later foreground commitment reads (which break when the caller runs
@@ -1526,6 +1522,7 @@ type blockResult struct {
 
 type txResult struct {
 	blockNum              uint64
+	blockHash             common.Hash
 	txNum                 uint64
 	blockGasUsed          int64
 	blobGasUsed           uint64
@@ -2684,6 +2681,7 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 
 			applyResult := txResult{
 				blockNum:              be.blockNum,
+				blockHash:             be.blockHash,
 				traceFroms:            map[accounts.Address]struct{}{},
 				traceTos:              map[accounts.Address]struct{}{},
 				txNum:                 task.Version().TxNum,
@@ -2874,6 +2872,7 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 			lastResult := be.results[len(be.results)-1]
 			if err := be.sendResult(ctx, &txResult{
 				blockNum:              be.blockNum,
+				blockHash:             be.blockHash,
 				txNum:                 txTask.Version().TxNum,
 				rules:                 lastResult.Rules(),
 				writes:                finalizeWrites,
