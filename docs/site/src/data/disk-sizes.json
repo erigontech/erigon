@@ -1,5 +1,5 @@
 {
-  "ci_last_updated": "2026-07-01",
+  "ci_last_updated": "2026-07-02",
   "networks": {
     "mainnet": {
       "archive": {
@@ -9,9 +9,9 @@
         "source": "manual"
       },
       "full": {
-        "bytes": 2086269499497,
+        "bytes": 2089144137976,
         "display": "2.09 TB",
-        "measured_at": "2026-06-30",
+        "measured_at": "2026-07-02",
         "source": "ci"
       },
       "minimal": {
@@ -29,9 +29,9 @@
         "source": "manual"
       },
       "full": {
-        "bytes": 682953919972,
-        "display": "682.95 GB",
-        "measured_at": "2026-06-30",
+        "bytes": 688931641171,
+        "display": "688.93 GB",
+        "measured_at": "2026-07-02",
         "source": "ci"
       },
       "minimal": {
