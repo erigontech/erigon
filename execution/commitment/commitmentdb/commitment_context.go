@@ -295,13 +295,59 @@ func (sdc *SharedDomainsCommitmentContext) TouchHashedKey(hashedKey []byte) {
 	sdc.updates.TouchHashedKey(hashedKey)
 }
 
-func (sdc *SharedDomainsCommitmentContext) Witness(ctx context.Context, codeReads map[common.Hash]witnesstypes.CodeWithHash, logPrefix string, produceExclusionProofs bool) (proofTrie *trie.Trie, rootHash []byte, err error) {
+// witnessCapture runs the on-the-fly fold and returns the captured superset node
+// set (root first), the fold's hashed keys, and the root hash.
+func (sdc *SharedDomainsCommitmentContext) witnessCapture(ctx context.Context, produceExclusionProofs bool, logPrefix string) (nodes [][]byte, provedKeys [][]byte, rootHash []byte, err error) {
 	hexPatriciaHashed, ok := sdc.Trie().(*commitment.HexPatriciaHashed)
-	if ok {
-		return hexPatriciaHashed.GenerateWitness(ctx, sdc.updates, codeReads, logPrefix, produceExclusionProofs)
+	if !ok {
+		return nil, nil, nil, errors.New("shared domains commitment context doesn't have HexPatriciaHashed")
 	}
+	return hexPatriciaHashed.Witnesses(ctx, sdc.updates, produceExclusionProofs, logPrefix)
+}
 
-	return nil, nil, errors.New("shared domains commitment context doesn't have HexPatriciaHashed")
+// WitnessNodes builds the lean execution-witness node set: it prunes the captured
+// superset to the proof paths of the fold's keys, returning the RLP node bytes
+// (root first) and the root hash. This is the strict-verifier (reth) form.
+func (sdc *SharedDomainsCommitmentContext) WitnessNodes(ctx context.Context, produceExclusionProofs bool, logPrefix string) (nodes [][]byte, rootHash []byte, err error) {
+	full, provedKeys, rootHash, err := sdc.witnessCapture(ctx, produceExclusionProofs, logPrefix)
+	if err != nil {
+		return nil, nil, err
+	}
+	witnessTrie, err := trie.RLPDecode(full)
+	if err != nil {
+		return nil, nil, fmt.Errorf("decode witness nodes: %w", err)
+	}
+	lean, err := witnessTrie.WitnessNodesForKeys(provedKeys)
+	if err != nil {
+		return nil, nil, fmt.Errorf("prune witness nodes: %w", err)
+	}
+	return lean, rootHash, nil
+}
+
+// Witness builds the proof trie from the captured superset and re-attaches codeReads
+// to present account nodes, since the consensus RLP carries only the code hash. The
+// trie is returned unpruned; consumers do their own node selection.
+func (sdc *SharedDomainsCommitmentContext) Witness(ctx context.Context, codeReads map[common.Hash]witnesstypes.CodeWithHash, logPrefix string, produceExclusionProofs bool) (proofTrie *trie.Trie, rootHash []byte, err error) {
+	full, _, rootHash, err := sdc.witnessCapture(ctx, produceExclusionProofs, logPrefix)
+	if err != nil {
+		return nil, nil, err
+	}
+	proofTrie, err = trie.RLPDecode(full)
+	if err != nil {
+		return nil, nil, fmt.Errorf("decode witness nodes: %w", err)
+	}
+	for addrHash, codeWithHash := range codeReads {
+		if len(codeWithHash.Code) == 0 {
+			continue
+		}
+		if acc, present := proofTrie.GetAccount(addrHash[:]); !present || acc == nil {
+			continue
+		}
+		if err := proofTrie.UpdateAccountCode(addrHash[:], trie.CodeNode(codeWithHash.Code)); err != nil {
+			return nil, nil, fmt.Errorf("attach witness code for %x: %w", addrHash, err)
+		}
+	}
+	return proofTrie, rootHash, nil
 }
 
 // SetCollapseTracer sets a callback that will be invoked when a node collapse occurs
