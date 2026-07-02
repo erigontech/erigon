@@ -90,3 +90,20 @@ func TestDeepFold_PreExistingWhale_SubsetTouched(t *testing.T) {
 	u1 = append(append([]Update{}, fu...), u1...)
 	requireAllEnginesParity(t, k1, u1, k2, u2, 4)
 }
+
+// A pre-existing on-disk whale whose storage all sits under a SINGLE first-storage-nibble
+// has no branch record exactly at the account prefix — its storage top is a deeper
+// extension. The next block touches other first-nibbles, crossing deepStorageThreshold and
+// driving the deep storage fold. unfoldStorageBase finds no branch at the account prefix;
+// it must still recover the untouched single-nibble subtree rather than seeding an empty
+// base and dropping it, so the parallel/streaming root matches sequential. Regression for
+// the empty-seed sibling drop (#22113).
+func TestDeepFold_PreExistingWhale_SingleNibbleOnDisk(t *testing.T) {
+	onDisk := nibs(0)   // all existing slots under one first-nibble -> no branch at the account prefix
+	touch := nibs(3, 7) // next block touches disjoint first-nibbles, crossing the deep-fold threshold
+	k1, u1, k2, u2 := buildSubsetTouchedWhale(20260702, onDisk, touch, 120, 700)
+	fk, fu := buildMixedCorpus(4242, 200)
+	k1 = append(append([][]byte{}, fk...), k1...)
+	u1 = append(append([]Update{}, fu...), u1...)
+	requireAllEnginesParity(t, k1, u1, k2, u2, 4)
+}

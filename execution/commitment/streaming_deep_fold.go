@@ -31,6 +31,13 @@ import (
 )
 
 // Seed the base from the real on-disk branch, not a hand-seed, so untouched first-nibble subtrees survive instead of dropping and diverging the root from the sequential trie.
+// errStorageBaseNotBranch signals that the on-disk storage trie has no branch
+// exactly at the account prefix (its top is a deeper extension because the
+// existing slots share a first nibble). The deep parallel storage fold seeds
+// row 0 from that branch, so its absence would drop untouched on-disk siblings
+// from the storage root. Callers fall back to normal streaming recursion.
+var errStorageBaseNotBranch = errors.New("streaming: storage base has no branch at account prefix")
+
 func unfoldStorageBase(base *HexPatriciaHashed, accPrefix []byte) error {
 	d := int16(len(accPrefix))
 	copy(base.currentKey[:], accPrefix)
@@ -47,7 +54,7 @@ func unfoldStorageBase(base *HexPatriciaHashed, accPrefix []byte) error {
 		return err
 	}
 	if len(branch) < 4 {
-		return nil
+		return errStorageBaseNotBranch
 	}
 	base.branchBefore[0] = true
 	return base.decodeBranchIntoRow(0, d+1, branch[2:], false)
@@ -87,11 +94,17 @@ func dfsSubtreeDeep(w *HexPatriciaHashed, node *prefixNode, path []byte, storage
 
 	if isDeepStorageAccount(node, len(path)) {
 		sr, err := storageRoot(node, path)
-		if err != nil {
+		if err == nil {
+			setAccountStorageRoot(w, path, sr)
+			return nil
+		}
+		if !errors.Is(err, errStorageBaseNotBranch) {
 			return fmt.Errorf("storageRoot: %w", err)
 		}
-		setAccountStorageRoot(w, path, sr)
-		return nil
+		// No on-disk branch exactly at the account prefix: seeding row 0 from the
+		// (absent) branch would drop untouched on-disk siblings living under a
+		// deeper branch. Fall through to normal streaming recursion, which
+		// recovers them via per-key unfolds (the sequential path).
 	}
 
 	childIdx := 0
