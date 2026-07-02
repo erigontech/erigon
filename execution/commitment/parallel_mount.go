@@ -18,6 +18,23 @@ var cmtTiming = os.Getenv("ERIGON_CMT_TIMING") == "1"
 // deepStorageThreshold is the touched-slot count above which an account's storage subtree folds concurrently instead of streaming through its worker.
 const deepStorageThreshold = 1_000
 
+// seedRootBase synthesizes a row-0 wall when the on-disk root has no branch, so foldMounted stops
+// at the mount boundary and returns cells excluding the mount nibble for empty and non-empty bases alike.
+func seedRootBase(base *HexPatriciaHashed) {
+	if base.activeRows != 0 {
+		return
+	}
+	base.activeRows = 1
+	base.currentKeyLen = 0
+	base.depths[0] = 1
+	base.touchMap[0] = 0
+	base.afterMap[0] = 0
+	base.branchBefore[0] = false
+	for i := range base.grid[0] {
+		base.grid[0][i].reset()
+	}
+}
+
 // if nibble set is -1 then subtrie is not mounted to the nibble, but limited by depth: eg do not fold mounted trie above depth 63
 func (hph *HexPatriciaHashed) mountTo(root *HexPatriciaHashed, nibble int) {
 	hph.Reset()
@@ -81,6 +98,7 @@ func (p *ParallelPatriciaHashed) processMounted(ctx context.Context, updates *Up
 			return nil, fmt.Errorf("processMounted: unfold root: %w", err)
 		}
 	}
+	seedRootBase(base)
 	if cmtTiming {
 		tUnfolded = time.Now()
 	}

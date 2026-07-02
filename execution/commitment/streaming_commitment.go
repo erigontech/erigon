@@ -365,6 +365,7 @@ func (sc *StreamingCommitter) buildBase(ctx context.Context) (*HexPatriciaHashed
 			return nil, nil, fmt.Errorf("StreamingCommitter: unfold root: %w", err)
 		}
 	}
+	seedRootBase(base)
 	return base, cleanup, nil
 }
 
@@ -670,21 +671,14 @@ func (sc *StreamingCommitter) foldDirtySplits(ctx context.Context) error {
 	return err
 }
 
-// stitchSplitCells drops each folded split cell into the base row at its
-// top-nibble slot, stripping the leading extension nibble of a hash-only
-// sub-branch (the slot implies it) while leaving a leaf's key tail intact.
+// stitchSplitCells drops each folded split cell into the base row at its top-nibble slot;
+// foldMounted already returns cells excluding the mount nibble, so they are stitched verbatim.
 func stitchSplitCells(base *HexPatriciaHashed, cells *[16]cell, present *[16]bool) {
 	for nib := range 16 {
 		if !present[nib] {
 			continue
 		}
 		c := cells[nib]
-		if c.extLen > 0 && c.accountAddrLen == 0 && c.storageAddrLen == 0 {
-			c.extLen--
-			copy(c.extension[:], c.extension[1:])
-			c.hashedExtLen -= 2
-			copy(c.hashedExtension[:], c.hashedExtension[2:])
-		}
 		base.touchMap[0] |= uint16(1) << nib
 		if !c.IsEmpty() {
 			base.afterMap[0] |= uint16(1) << nib

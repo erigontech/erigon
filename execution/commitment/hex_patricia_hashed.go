@@ -2188,6 +2188,12 @@ func (hph *HexPatriciaHashed) updateCell(plainKey, hashedKey []byte, u *Update) 
 		copy(cell.accountAddr[:], plainKey)
 
 		cell.CodeHash = empty.CodeHash
+		// An account cell must not keep a stale storage plain key, or computeCellHash rehashes
+		// it as a singleton from the stale slot and drops the injected deep-fold storage root.
+		cell.storageAddrLen = 0
+		cell.StorageLen = 0
+		cell.Flags &^= StorageUpdate
+		cell.loaded &^= cellLoadStorage
 	} else { // set storage key
 		cell.storageAddrLen = int16(len(plainKey))
 		copy(cell.storageAddr[:], plainKey)
@@ -2317,11 +2323,7 @@ func (hph *HexPatriciaHashed) foldMounted(ctx context.Context, nib int) (cell, e
 		}
 		return hph.root, nil
 	}
-	if hph.trace {
-		fmt.Printf("mount as nibble %02x %s\n", hph.mountedNib, hph.grid[0][hph.mountedNib].String())
-	}
-	// todo potential bug
-	return hph.grid[0][hph.mountedNib], nil
+	return cell{}, fmt.Errorf("foldMounted[%x]: folded past the mount wall to an unrooted base; the base must be seeded with a wall row", hph.mountedNib)
 }
 
 // captureExtensionDivergence materializes the branch behind a folded extension the
