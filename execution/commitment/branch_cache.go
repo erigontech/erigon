@@ -46,115 +46,18 @@ func isCommitmentStateKey(prefix []byte) bool {
 	return bytes.Equal(prefix, KeyCommitmentState)
 }
 
-// BranchCache stores commitment-trie branch data:
+// BranchCache stores commitment-trie branch data: a bounded LRU tail plus a
+// single never-evicted slot for the root branch (a length-0 / no-key prefix).
+// Aggregator-scope (one instance per Domain), pulled via BranchCacheProvider and
+// plumbed to the trie through InitializeTrieAndUpdates. It is a passive store —
+// the trie walker/encoder drive all reads and writes; the cache never fetches
+// state itself.
 //
-//   - Bounded LRU tail with configurable capacity (eviction is well-defined,
-//     suitable for long-lived caching across many Process calls without
-//     unbounded memory growth).
-//   - Single pinned slot for the root branch (always hottest, always present
-//     once populated, never subject to LRU eviction). Compact prefix of
-//     length 0 (or single-byte "no-key" form) targets this slot.
-//
-// Lifetime: aggregator-scope (one instance per Domain). SharedDomains
-// pulls the instance via BranchCacheProvider on the AggregatorRoTx;
-// commitment-context plumbs it through to the trie via
-// InitializeTrieAndUpdates. The previous WarmupCache type (per-Process,
-// duplicating account/storage/branch caching above this layer) was
-// deleted in the WarmupCache consolidation; BranchCache is now the
-// single branch cache.
-//
-// # Responsibility split (architectural)
-//
-// The cache is a passive store. Reads and writes are driven by the
-// trie walker / encoder; the cache itself never reaches into the
-// underlying state.
-//
-//   - BranchCache: passive store of branch bytes.
-//     Doesn't fetch anything.
-//   - Branch warmer (warmuper.go): narrow scope — pre-fetches
-//     *branches* along touched-key paths via SD.GetLatest. No
-//     account/storage prefetch — that conflated branch warm-up with
-//     leaf-data fetch. If a fold needs leaf data the trie walker
-//     fetches it directly (or it's already in Updates / memoized as
-//     stateHash).
-//   - Trie walker, block-processing path: receives Updates from the
-//     executor, folds them. Memoized stateHashes serve siblings; new
-//     values come from Updates. Doesn't reach into leaf data via
-//     prefetch.
-//   - Trie walker, witness / proof generation path: walks the trie
-//     structure and *needs* to fetch state to materialize the proof.
-//     This is the walker's responsibility — it drives its own reads
-//     against SD. If that path turns out to be cold-bound on real
-//     workloads it may indicate a need for separate account / storage
-//     caches (the `add_execution_context_with_caches` work has a
-//     reference design for these). Treat that as a separate concern
-//     from this BranchCache — different scope, different lifetime,
-//     different invalidation. Do not regrow the branch warmer's
-//     scope to cover it.
-//
-// The disk_sto / disk_acc counters on the [commitment][cache-fp] log
-// line surface any fall-through where the trie compute reaches the
-// underlying ctx.Account / ctx.Storage paths. On block-processing
-// workloads they should remain zero; non-zero values signal a
-// memoization gap or a missing walker-side prefetch.
-//
-// # Concurrency contract — caller invariants
-//
-// Internally, the LRU tail is thread-safe (hashicorp/golang-lru/v2) and
-// the pinned root slot is an atomic.Pointer. So any combination of
-// concurrent Get / Put / Invalidate is mechanically safe — no panics, no
-// torn reads. But "mechanically safe" is NOT the same as "logically
-// consistent across writers." The cache is designed to be used under one
-// caller invariant:
-//
-//   - Single writer per prefix at any moment. The cache does not coordinate
-//     concurrent writes to the same key — last-Put-wins semantics, with no
-//     guarantee that the winning value is the one the application wanted.
-//
-// # Concurrency contract — how the existing concurrent trie satisfies it
-//
-// The current ConcurrentPatriciaHashed (parallel commitment calculator)
-// satisfies that invariant by construction:
-//
-//   - Mounts partition the prefix space by FIRST NIBBLE. Mount N's
-//     encoder only writes branches whose key starts with [0x0N ...].
-//     Different mounts therefore never write to the same prefix.
-//     (See hex_concurrent_patricia_hashed.go: NewConcurrentPatriciaHashed
-//     creates 16 mounts via SpawnSubTrie; each mount has its own HPH,
-//     own BranchEncoder, own PatriciaContext / roTx.)
-//
-//   - Root branch (prefix [0x00]) is written by the single root fold
-//     that runs SEQUENTIALLY after errgroup.Wait() in ParallelHashSort.
-//     One writer for the pinned root slot.
-//
-//   - Mount→root grid roll-up is mutex-protected via
-//     ConcurrentPatriciaHashed.rootMu — but that updates IN-MEMORY grid
-//     cells, not the cache. The cache only sees the eventual root
-//     branch when the post-Wait root fold encodes it.
-//
-// # Concurrency contract — what future parallel fold work must preserve
-//
-// A future parallel tree-reduce fold would change the picture: the parent
-// fold (incl. root) would no longer be a single post-Wait sequential pass.
-// Multiple goroutines would compute parent branches in parallel as their
-// children complete. This MUST not violate "single writer per prefix" —
-// any future Stage F design needs an explicit per-prefix coordination layer
-// (atomic counter on parent "children remaining"; only the last-decrementer
-// writes the parent). That coordination belongs at the orchestrator layer;
-// the cache itself does NOT add per-prefix locking because that would be
-// wasted work for the current architecture.
-//
-// If you are implementing parallel fold (or any other architecture that
-// breaks the "single writer per prefix" invariant), do NOT relax the
-// invariant by adding internal locking to the cache. Add the
-// coordination at the orchestrator layer where the partitioning logic
-// lives. The cache stays simple; the orchestrator owns the discipline.
-//
-// Likewise if you change the prefix partitioning (e.g. by-second-nibble
-// mounts, depth-based partitioning, anything other than first-nibble),
-// re-validate that distinct workers continue to write disjoint prefix
-// spaces. Re-read the partitioning code in
-// hex_concurrent_patricia_hashed.go and confirm.
+// Concurrency: the LRU tail and the atomic-pointer root slot make any mix of
+// concurrent Get/Put/Invalidate mechanically safe, but the cache does not
+// coordinate writers — callers must ensure a single writer per prefix
+// (last-Put-wins otherwise); add any such coordination at the orchestrator, not
+// by locking the cache.
 type BranchCache struct {
 	// Root tier — single slot for the root branch (always hottest, always
 	// present). Atomic-pointer access so no lock is needed for the hot

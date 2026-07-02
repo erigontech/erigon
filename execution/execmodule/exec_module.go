@@ -550,36 +550,12 @@ func (e *ExecModule) ValidateChain(ctx context.Context, blockHash common.Hash, b
 	}
 	var tx kv.TemporalRwTx = doms.BlockOverlay()
 
-	// Chain whenever a currentContext exists, not only when head-extending
-	// (header.ParentHash == head): fork-payload caching needs the parent link
-	// too — see the two-role breakdown below.
-	//
-	// Chain the validation SD to the latest in-memory canonical generation:
-	// e.currentContext when present, otherwise the newest in-flight commit
-	// generation (gate item 2 — the prior FCU cleared currentContext and
-	// handed its SD to the background commit).
-	//
-	// The parent link serves two roles:
-	//
-	//  1. Head-extending payloads read the canonical generation's
-	//     not-yet-committed domain state instead of stale MDBX.
-	//
-	//  2. Fork payloads: unwindToCommonCanonical below must build an unwind
-	//     set, and the diffsets of the canonical blocks it unwinds live in
-	//     the canonical generation's pastChangesAccumulator — reachable only
-	//     through this parent link (GetDiffset chains to the parent). Without
-	//     it the unwind silently runs with no unwind set, leaving the
-	//     BranchCache unmasked and corrupting the computed root.
-	//
-	// For a fork payload the parent does NOT shadow the unwound base: once
-	// unwindToCommonCanonical has run, doms.mem.unwindChangeset holds every
-	// key the unwound canonical blocks touched, and TemporalMemBatch.getLatest
-	// resolves those from the unwind set before ever consulting the parent.
-	//
-	// Cherry-pick note: the upstream commit also chained to e.latestGen()
-	// (the gate-2 in-flight commit generation) when currentContext is nil;
-	// that generation chain is not on this branch, so currentContext is the
-	// only canonical generation here.
+	// Chain the validation SD to the canonical generation (e.currentContext) for
+	// any payload with a parent, not just head-extending ones: head-extending
+	// payloads read its not-yet-committed domain state instead of stale MDBX, and
+	// fork payloads reach the canonical generation's pastChangesAccumulator (via
+	// GetDiffset's parent chain) to build the unwind set — without the link the
+	// unwind runs empty, leaving the BranchCache unmasked and corrupting the root.
 	if e.currentContext != nil {
 		doms.SetParent(e.currentContext)
 	}
