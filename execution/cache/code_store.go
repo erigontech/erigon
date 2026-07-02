@@ -21,6 +21,7 @@ type CodeStore struct {
 	// LRU and entries re-derive from CodeDomain.
 	tableCapBytes  uint64
 	tableSizeBytes atomic.Int64
+	tableSeeded    atomic.Bool
 
 	memHits   atomic.Uint64
 	tableHits atomic.Uint64
@@ -97,7 +98,21 @@ func (s *CodeStore) PutByHash(tx kv.RwTx, codeHash, code []byte) error {
 // order when over capacity. Safe: evicted entries are re-derivable from
 // CodeDomain on miss. Call on a write tx (e.g., at commit), never on reads.
 func (s *CodeStore) Evict(tx kv.RwTx) error {
-	if s == nil || s.tableCapBytes == 0 || uint64(s.tableSizeBytes.Load()) <= s.tableCapBytes {
+	if s == nil || s.tableCapBytes == 0 {
+		return nil
+	}
+	// tableSizeBytes starts at 0 each process start; seed it once from the
+	// persistent table (in the same key+value byte units the eviction loop
+	// decrements) so a backing that already exceeds the cap gets pruned rather
+	// than growing unbounded across restarts.
+	if s.tableSeeded.CompareAndSwap(false, true) {
+		total, err := sumTableBytes(tx)
+		if err != nil {
+			return err
+		}
+		s.tableSizeBytes.Store(total)
+	}
+	if uint64(s.tableSizeBytes.Load()) <= s.tableCapBytes {
 		return nil
 	}
 	c, err := tx.RwCursor(kv.TblCodeCache)
@@ -120,4 +135,22 @@ func (s *CodeStore) Evict(tx kv.RwTx) error {
 		s.tableSizeBytes.Add(-int64(len(k) + len(v)))
 	}
 	return nil
+}
+
+// sumTableBytes returns the total key+value byte size of TblCodeCache, in the
+// same units Evict tracks and decrements.
+func sumTableBytes(tx kv.RwTx) (int64, error) {
+	c, err := tx.Cursor(kv.TblCodeCache)
+	if err != nil {
+		return 0, err
+	}
+	defer c.Close()
+	var total int64
+	for k, v, err := c.First(); k != nil; k, v, err = c.Next() {
+		if err != nil {
+			return 0, err
+		}
+		total += int64(len(k) + len(v))
+	}
+	return total, nil
 }

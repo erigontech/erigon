@@ -60,4 +60,13 @@ func TestCodeStore_TwoTierAndEvict(t *testing.T) {
 	}
 	require.NoError(t, small.Evict(tx))
 	require.LessOrEqual(t, small.tableSizeBytes.Load(), int64(128))
+
+	// Restart scenario: a fresh store (tableSizeBytes=0) over an already-full
+	// backing must still prune — seed the size from the table, don't grow
+	// unbounded. Without the seed, Evict's under-cap early return would skip.
+	restarted := NewCodeStore(1<<20, 128)
+	require.Zero(t, restarted.tableSizeBytes.Load())
+	require.NoError(t, restarted.Evict(tx))
+	require.LessOrEqual(t, restarted.tableSizeBytes.Load(), int64(128),
+		"a fresh store must seed its size from the backing and prune, not grow unbounded across restarts")
 }

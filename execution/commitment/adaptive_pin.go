@@ -71,7 +71,7 @@ type DbBranchesProvider func(contractHash []byte) map[string][]byte
 
 type adaptiveContractState struct {
 	contractHash     [32]byte
-	promotedAtBlock  uint64
+	promotedAtTxNum  uint64
 	preload          *ContractTrunkPreload         // serial-BFS path (nil when parallel)
 	parallel         *ContractTrunkPreloadParallel // parallel-wave-BFS path (nil when serial)
 	coldBlocksInARow int
@@ -161,7 +161,7 @@ func (c *AdaptivePinController) onCacheMiss(prefix []byte) {
 // OnBlockComplete consumes the per-block miss snapshot and decides
 // promotions, extensions, and demotions. Synchronous — preloads run
 // inline so the new pin set is available for the next block's reads.
-func (c *AdaptivePinController) OnBlockComplete(ctx context.Context, blockNum uint64, reader CommitmentReader) {
+func (c *AdaptivePinController) OnBlockComplete(ctx context.Context, txNum uint64, reader CommitmentReader) {
 	misses := c.snapshotMisses()
 
 	c.mu.Lock()
@@ -173,7 +173,7 @@ func (c *AdaptivePinController) OnBlockComplete(ctx context.Context, blockNum ui
 	if c.parallelResolverFactory != nil {
 		r, release, err := c.parallelResolverFactory()
 		if err != nil {
-			c.warnf("[adaptive-pin] parallel resolver factory failed, falling back to serial", "err", err, "block", blockNum)
+			c.warnf("[adaptive-pin] parallel resolver factory failed, falling back to serial", "err", err, "txNum", txNum)
 		} else {
 			parallelResolve = r
 			releaseParallel = release
@@ -215,7 +215,7 @@ func (c *AdaptivePinController) OnBlockComplete(ctx context.Context, blockNum ui
 	if len(misses) > 0 && len(c.states) < c.cfg.MaxPromotedContracts {
 		candidates := pickPromotionCandidates(misses, c.cfg.PromoteThresholdMisses, c.cfg.MaxPromotedContracts-len(c.states))
 		for _, hash := range candidates {
-			state, err := c.promoteLocked(ctx, hash, blockNum, parallelResolve, reader)
+			state, err := c.promoteLocked(ctx, hash, txNum, parallelResolve, reader)
 			if err != nil {
 				c.warnf("[adaptive-pin] initial-view failed", "hash", hex.EncodeToString(hash[:]), "err", err)
 				continue
@@ -238,7 +238,7 @@ func (c *AdaptivePinController) OnBlockComplete(ctx context.Context, blockNum ui
 
 	if c.logger != nil && (promoted+extended+demoted > 0 || len(c.states) > 0) {
 		c.logger.Info("[adaptive-pin]",
-			"block", blockNum,
+			"txNum", txNum,
 			"promoted_total", len(c.states),
 			"promoted_this_block", promoted,
 			"extended_this_block", extended,
@@ -278,7 +278,7 @@ func (c *AdaptivePinController) demoteLocked(hash [32]byte, state *adaptiveContr
 func (c *AdaptivePinController) promoteLocked(
 	ctx context.Context,
 	hash [32]byte,
-	blockNum uint64,
+	txNum uint64,
 	parallelResolve BatchBranchResolver,
 	reader CommitmentReader,
 ) (*adaptiveContractState, error) {
@@ -299,7 +299,7 @@ func (c *AdaptivePinController) promoteLocked(
 		}
 		return &adaptiveContractState{
 			contractHash:    hash,
-			promotedAtBlock: blockNum,
+			promotedAtTxNum: txNum,
 			parallel:        p,
 		}, nil
 	}
@@ -315,7 +315,7 @@ func (c *AdaptivePinController) promoteLocked(
 	}
 	return &adaptiveContractState{
 		contractHash:    hash,
-		promotedAtBlock: blockNum,
+		promotedAtTxNum: txNum,
 		preload:         p,
 	}, nil
 }

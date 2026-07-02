@@ -483,6 +483,8 @@ func (c *BranchCache) lookup(prefix []byte) (*branchCacheEntry, bool) {
 		return nil, false
 	}
 	// Pinned tier: per-contract storage trunk (fixed skeleton + deep overflow).
+	// Only a lookup that actually routes to a pinned trunk counts toward the
+	// pinned hit/miss stats; account-trie and tail-only prefixes are excluded.
 	if st, _, stor, ok := c.storageRoute(prefix, false); ok {
 		var entry *branchCacheEntry
 		if slot := st.slot(stor); slot != nil {
@@ -494,8 +496,8 @@ func (c *BranchCache) lookup(prefix []byte) (*branchCacheEntry, bool) {
 			c.pinnedHits.Add(1)
 			return entry, true
 		}
+		c.pinnedMisses.Add(1)
 	}
-	c.pinnedMisses.Add(1)
 	entry, ok := c.tail.Get(maphash.Hash(prefix))
 	if !ok {
 		c.tailMisses.Add(1)
