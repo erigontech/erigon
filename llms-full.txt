@@ -1654,7 +1654,7 @@ They are enabled by default for **Minimal** and **Full Node.** They can be activ
 :::note[Breaking change in v3.5]
 **`--prune.mode=full` now follows the EIP-8252 reorg-retention window.** In v3.4, full mode pruned only pre-merge block data (EIP-4444 history-expiry) and **kept all post-merge block bodies, transactions, and receipts**, with a 100,000-block state-history window. In v3.5 it retains just the last **262,144 blocks (~36.4 days)** for *both* state and block data, matching [EIP-8252](https://github.com/ethereum/EIPs/pull/11601)'s `REORG_RETENTION_WINDOW`. The state-history window therefore grows (100,000 → 262,144), but **block bodies and receipts older than 262,144 blocks are now pruned** — a full node will no longer serve them.
 
-`--prune.mode=blocks` is unaffected for block data (it still keeps every block back to genesis); only its `History` window bumps from 100,000 to 262,144. `--prune.mode=minimal` is unchanged — both `Blocks` and `History` retain the 100,000-block window. **Existing datadirs upgrade automatically** on first start — Erigon rewrites the persisted mode and logs the transition, no operator action required. But **already-pruned block data cannot be recovered**: if you need to keep all post-merge blocks, switch to `--prune.mode=blocks` *before* upgrading. See [#21342](https://github.com/erigontech/erigon/pull/21342) for details.
+`--prune.mode=blocks` is unaffected for block data (it still keeps every block back to genesis); only its `History` window bumps from 100,000 to 262,144. `--prune.mode=minimal` is unchanged — both `Blocks` and `History` retain the 100,000-block window. **Existing datadirs upgrade automatically** on first start — Erigon rewrites the persisted mode and logs the transition, no operator action required. But **already-pruned block data cannot be recovered**, so choose *before* upgrading: set `--prune.distance.blocks=keep-post-merge` to retain the old full-mode behavior (keep post-merge blocks, prune only pre-merge), or use `--prune.mode=blocks` to keep every block back to genesis. See [#21342](https://github.com/erigontech/erigon/pull/21342) for details.
 :::
 
 ## Archive node
@@ -1960,10 +1960,10 @@ Flags for managing how old chain data is handled and stored. See [Snapshots Mana
 
 * `--prune.mode value`: Selects a pruning preset (`full`, `archive`, `minimal`, `blocks`). See also [Pruning Modes](/fundamentals/pruning-modes)
   * Default: `"full"`
-* `--prune.distance value`: Keeps state history for the latest `N` blocks.
-  * Default: `0`
-* `--prune.distance.blocks value`: Keeps block history for the latest `N` blocks.
-  * Default: `0`
+* `--prune.distance value`: Keeps state history for the latest `N` blocks, or `keep-all` to keep everything.
+  * Default: unset (retention follows `--prune.mode`)
+* `--prune.distance.blocks value`: Keeps block history for the latest `N` blocks, or a named policy: `keep-post-merge` (prune pre-merge blocks only) or `keep-all` (keep every block).
+  * Default: unset (retention follows `--prune.mode`)
 * `--prune.include-commitment-history, --prune.experimental.include-commitment-history, --experimental.commitment-history`: Enables fast `eth_getProof` for executed blocks by storing commitment history. Requires +32 GB RAM. See [`eth_getProof`](/interacting-with-erigon/eth#eth_getproof).
   * Default: `false`
 * `--snap.skip-state-snapshot-download`: Skips state download and starts from genesis.
