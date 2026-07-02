@@ -28,16 +28,14 @@ import (
 	"github.com/prometheus/client_golang/prometheus"
 )
 
-type namedMetric struct {
+type namedEntry[M any] struct {
 	name   string
-	metric prometheus.Metric
-	isAux  bool
+	metric M
 }
 
-type namedMetricVec struct {
-	name   string
-	metric prometheus.Collector
-}
+type namedMetric = namedEntry[prometheus.Metric]
+
+type namedMetricVec = namedEntry[prometheus.Collector]
 
 // Set is a set of metrics.
 //
@@ -399,61 +397,30 @@ func (s *Set) GetOrCreateSummaryExt(name string, window time.Duration, quantiles
 }
 
 func getOrCreate[T prometheus.Metric](s *Set, name string, create func() (T, error)) (T, error) {
-	var zero T
-	s.mu.Lock()
-	nm := s.m[name]
-	s.mu.Unlock()
-	if nm == nil {
-		metric, err := create()
-		if err != nil {
-			return zero, fmt.Errorf("invalid metric name %q: %w", name, err)
-		}
-
-		nmNew := &namedMetric{
-			name:   name,
-			metric: metric,
-		}
-		s.mu.Lock()
-		nm = s.m[name]
-		if nm == nil {
-			nm = nmNew
-			s.m[name] = nm
-			s.a = append(s.a, nm)
-		}
-		s.mu.Unlock()
-	}
-
-	m, ok := any(nm.metric).(T)
-	if !ok {
-		return zero, fmt.Errorf("metric %q isn't a %s. It is %T", name, metricTypeName[T](), nm.metric)
-	}
-
-	return m, nil
+	return getOrCreateIn[T](&s.mu, s.m, &s.a, name, func() (prometheus.Metric, error) { return create() })
 }
 
 func getOrCreateVec[T prometheus.Collector](s *Set, name string, create func() (T, error)) (T, error) {
+	return getOrCreateIn[T](&s.mu, s.vecs, &s.av, name, func() (prometheus.Collector, error) { return create() })
+}
+
+func getOrCreateIn[T, M any](mu *sync.Mutex, entries map[string]*namedEntry[M], list *[]*namedEntry[M], name string, create func() (M, error)) (T, error) {
 	var zero T
-	s.mu.Lock()
-	nm := s.vecs[name]
-	s.mu.Unlock()
+	mu.Lock()
+	defer mu.Unlock()
+	nm := entries[name]
 	if nm == nil {
 		metric, err := create()
 		if err != nil {
 			return zero, fmt.Errorf("invalid metric name %q: %w", name, err)
 		}
 
-		nmNew := &namedMetricVec{
+		nm = &namedEntry[M]{
 			name:   name,
 			metric: metric,
 		}
-		s.mu.Lock()
-		nm = s.vecs[name]
-		if nm == nil {
-			nm = nmNew
-			s.vecs[name] = nm
-			s.av = append(s.av, nm)
-		}
-		s.mu.Unlock()
+		entries[name] = nm
+		*list = append(*list, nm)
 	}
 
 	m, ok := any(nm.metric).(T)
@@ -545,9 +512,6 @@ func (s *Set) ListMetricNames() []string {
 	defer s.mu.Unlock()
 	metricNames := make([]string, 0, len(s.m))
 	for _, nm := range s.m {
-		if nm.isAux {
-			continue
-		}
 		metricNames = append(metricNames, nm.name)
 	}
 	slices.Sort(metricNames)
