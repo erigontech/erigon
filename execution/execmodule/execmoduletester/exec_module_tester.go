@@ -541,10 +541,11 @@ func New(tb testing.TB, opts ...Option) *ExecModuleTester {
 		}
 	}
 
-	// Deploy Amsterdam system contracts (EIP-8282) when Amsterdam is active.
-	// These are required for the Merge engine's FinalizeAndAssemble to process
-	// builder deposit and exit requests.
-	if gspec.Config.IsAmsterdam(0) {
+	// Deploy Amsterdam system contracts (EIP-8282) at genesis whenever Amsterdam is
+	// scheduled — a later fork transition must still find deployed code. These are
+	// required for the Merge engine's FinalizeAndAssemble to process builder
+	// deposit and exit requests.
+	if gspec.Config.AmsterdamTime != nil {
 		if err := blockgen.InitAmsterdamPreDeploys(mock.DB, gspec.Config, mock.Log); err != nil {
 			if tb != nil {
 				tb.Fatal(err)
