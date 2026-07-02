@@ -408,7 +408,7 @@ func (dt *DomainRoTx) mergeFiles(ctx context.Context, domainFiles, indexFiles, h
 			}
 		}
 	}()
-	if indexIn, historyIn, err = dt.ht.mergeFiles(ctx, indexFiles, historyFiles, r.history, ps); err != nil {
+	if indexIn, historyIn, err = dt.ht.mergeFiles(ctx, indexFiles, historyFiles, r.history, ps, nil); err != nil {
 		return nil, nil, nil, err
 	}
 
@@ -578,7 +578,110 @@ func (dt *DomainRoTx) mergeFiles(ctx context.Context, domainFiles, indexFiles, h
 	return
 }
 
-func (iit *InvertedIndexRoTx) mergeFiles(ctx context.Context, files []*FilesItem, startTxNum, endTxNum uint64, ps *background.ProgressSet) (*FilesItem, error) {
+// valuesDeduper switches history and inverted-index merges into snapshot-rebuild
+// deduplication mode: history entries repeating the previous value of a key are
+// dropped, and their txNums are removed from the merged index sequences so both
+// files stay consistent.
+type valuesDeduper struct {
+	skipTxNums map[string]map[uint64]struct{}
+	keptTxNums []uint64
+	dropped    int
+}
+
+func newValuesDeduper() *valuesDeduper {
+	return &valuesDeduper{skipTxNums: make(map[string]map[uint64]struct{})}
+}
+
+func (dd *valuesDeduper) skip(key []byte, txNum uint64) {
+	m, ok := dd.skipTxNums[string(key)]
+	if !ok {
+		m = make(map[uint64]struct{})
+		dd.skipTxNums[string(key)] = m
+	}
+	m[txNum] = struct{}{}
+	dd.dropped++
+}
+
+// writeDeduped writes ci's history values for the current key, collapsing each
+// run of equal consecutive values to the run's last txNum and recording the
+// dropped txNums. Deduplication is scoped to one source file: ci covers a
+// single file's sequence for the key.
+func (dd *valuesDeduper) writeDeduped(ci *CursorItem, ss *multiencseq.SequenceIterator, wr *seg.PagedWriter, valBuf, histKeyBuf []byte) ([]byte, []byte, error) {
+	var retainedVal []byte
+	var retained bool
+	var prevTxNum uint64
+	for ss.HasNext() {
+		txNum, err := ss.Next()
+		if err != nil {
+			panic(fmt.Sprintf("failed to extract txNum from ef. File: %s Key: %x", ci.kvReader.FileName(), ci.key))
+		}
+
+		if !ci.hist.HasNext() {
+			panic(fmt.Errorf("assert: no value??? %s, txNum=%d, key=%x", ci.hist.FileName(), txNum, ci.key))
+		}
+
+		var v []byte
+		_, v, valBuf, _ = ci.hist.Next2(valBuf[:0])
+
+		if !retained {
+			retainedVal = append(retainedVal[:0], v...)
+			retained = true
+			prevTxNum = txNum
+			continue
+		}
+		if bytes.Equal(retainedVal, v) {
+			dd.skip(ci.key, prevTxNum)
+			prevTxNum = txNum
+			continue
+		}
+
+		histKeyBuf = historyKey(prevTxNum, ci.key, histKeyBuf)
+		if err := wr.Add(histKeyBuf, retainedVal); err != nil {
+			return valBuf, histKeyBuf, err
+		}
+		retainedVal = append(retainedVal[:0], v...)
+		prevTxNum = txNum
+	}
+	if retained {
+		histKeyBuf = historyKey(prevTxNum, ci.key, histKeyBuf)
+		if err := wr.Add(histKeyBuf, retainedVal); err != nil {
+			return valBuf, histKeyBuf, err
+		}
+	}
+	return valBuf, histKeyBuf, nil
+}
+
+// mergeSortedSkipping is the dedup-mode counterpart of builder.MergeSorted:
+// same single-pass merge, minus the txNums recorded by writeDeduped.
+func (dd *valuesDeduper) mergeSortedSkipping(builder *multiencseq.SequenceBuilder, seqReader *multiencseq.SequenceReader, outBaseNum uint64, baseNums []uint64, seqs [][]byte, key []byte) error {
+	skipTxNums := dd.skipTxNums[string(key)]
+	dd.keptTxNums = dd.keptTxNums[:0]
+	var maxTxNum uint64
+	var it multiencseq.SequenceIterator
+	for i, data := range seqs {
+		seqReader.Reset(baseNums[i], data)
+		it.Reset(seqReader, 0)
+		for it.HasNext() {
+			v, err := it.Next()
+			if err != nil {
+				return err
+			}
+			maxTxNum = v
+			if _, drop := skipTxNums[v]; drop {
+				continue
+			}
+			dd.keptTxNums = append(dd.keptTxNums, v)
+		}
+	}
+	builder.Reset(outBaseNum, uint64(len(dd.keptTxNums)), maxTxNum)
+	for _, v := range dd.keptTxNums {
+		builder.AddOffset(v)
+	}
+	builder.Build()
+	return nil
+}
+
+func (iit *InvertedIndexRoTx) mergeFiles(ctx context.Context, files []*FilesItem, startTxNum, endTxNum uint64, ps *background.ProgressSet, dedup *valuesDeduper) (*FilesItem, error) {
 	if startTxNum == endTxNum {
 		panic(fmt.Sprintf("assert: startTxNum(%d) == endTxNum(%d)", startTxNum, endTxNum))
 	}
@@ -674,7 +777,11 @@ func (iit *InvertedIndexRoTx) mergeFiles(ctx context.Context, files []*FilesItem
 		}
 
 		// Merge all sequences for this key in a single pass (O(N·C), one EF allocation).
-		if err := builder.MergeSorted(&seqReader, startTxNum, mergeBaseNums, mergeSeqs); err != nil {
+		if dedup == nil {
+			if err := builder.MergeSorted(&seqReader, startTxNum, mergeBaseNums, mergeSeqs); err != nil {
+				return nil, err
+			}
+		} else if err := dedup.mergeSortedSkipping(&builder, &seqReader, startTxNum, mergeBaseNums, mergeSeqs, lastKey); err != nil {
 			return nil, err
 		}
 		for i := range mergeSeqs { // allow for GC
@@ -726,7 +833,7 @@ func (iit *InvertedIndexRoTx) mergeFiles(ctx context.Context, files []*FilesItem
 	return outItem, nil
 }
 
-func (ht *HistoryRoTx) mergeFiles(ctx context.Context, indexFiles, historyFiles []*FilesItem, r HistoryRanges, ps *background.ProgressSet) (indexIn, historyIn *FilesItem, err error) {
+func (ht *HistoryRoTx) mergeFiles(ctx context.Context, indexFiles, historyFiles []*FilesItem, r HistoryRanges, ps *background.ProgressSet, dedup *valuesDeduper) (indexIn, historyIn *FilesItem, err error) {
 	if !r.any() {
 		return nil, nil, nil
 	}
@@ -739,8 +846,10 @@ func (ht *HistoryRoTx) mergeFiles(ctx context.Context, indexFiles, historyFiles 
 		}
 	}()
 
-	if r.index.needMerge {
-		if indexIn, err = ht.iit.mergeFiles(ctx, indexFiles, r.index.from, r.index.to, ps); err != nil {
+	// In dedup mode the index merge waits until the history scan below has
+	// recorded which txNums it dropped.
+	if r.index.needMerge && dedup == nil {
+		if indexIn, err = ht.iit.mergeFiles(ctx, indexFiles, r.index.from, r.index.to, ps, nil); err != nil {
 			return nil, nil, err
 		}
 	}
@@ -841,23 +950,29 @@ func (ht *HistoryRoTx) mergeFiles(ctx context.Context, indexFiles, historyFiles 
 				seq.Reset(ci1.startTxNum, ci1.val)
 				ss.Reset(&seq, 0)
 
-				for ss.HasNext() {
-					txNum, err := ss.Next()
-					if err != nil {
-						panic(fmt.Sprintf("failed to extract txNum from ef. File: %s Key: %x", ci1.kvReader.FileName(), ci1.key))
-					}
-
-					if !ci1.hist.HasNext() {
-						panic(fmt.Errorf("assert: no value??? %s, txNum=%d, lastKey=%x, ci1.key=%x", ci1.hist.FileName(), txNum, lastKey, ci1.key))
-					}
-
-					var v []byte
-					_, v, valBuf, _ = ci1.hist.Next2(valBuf[:0]) // key from .v file can be empty if file is not compressed -> need to be built from txNum + key
-
-					histKeyBuf = historyKey(txNum, ci1.key, histKeyBuf)
-
-					if err = pagedWr.Add(histKeyBuf, v); err != nil {
+				if dedup != nil {
+					if valBuf, histKeyBuf, err = dedup.writeDeduped(ci1, &ss, pagedWr, valBuf, histKeyBuf); err != nil {
 						return nil, nil, err
+					}
+				} else {
+					for ss.HasNext() {
+						txNum, err := ss.Next()
+						if err != nil {
+							panic(fmt.Sprintf("failed to extract txNum from ef. File: %s Key: %x", ci1.kvReader.FileName(), ci1.key))
+						}
+
+						if !ci1.hist.HasNext() {
+							panic(fmt.Errorf("assert: no value??? %s, txNum=%d, lastKey=%x, ci1.key=%x", ci1.hist.FileName(), txNum, lastKey, ci1.key))
+						}
+
+						var v []byte
+						_, v, valBuf, _ = ci1.hist.Next2(valBuf[:0]) // key from .v file can be empty if file is not compressed -> need to be built from txNum + key
+
+						histKeyBuf = historyKey(txNum, ci1.key, histKeyBuf)
+
+						if err = pagedWr.Add(histKeyBuf, v); err != nil {
+							return nil, nil, err
+						}
 					}
 				}
 
@@ -879,6 +994,12 @@ func (ht *HistoryRoTx) mergeFiles(ctx context.Context, indexFiles, historyFiles 
 			return nil, nil, err
 		}
 		ps.Delete(p)
+
+		if r.index.needMerge && dedup != nil {
+			if indexIn, err = ht.iit.mergeFiles(ctx, indexFiles, r.index.from, r.index.to, ps, dedup); err != nil {
+				return nil, nil, err
+			}
+		}
 
 		if err = ht.h.buildVI(ctx, idxPath, decomp, indexIn.decompressor, indexIn.startTxNum, ps); err != nil {
 			return nil, nil, err

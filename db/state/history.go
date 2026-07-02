@@ -1504,8 +1504,10 @@ func (ht *HistoryRoTx) HistoryDump(fromTxNum, toTxNum int, keyToDump *[]byte, du
 	return nil
 }
 
-// CompactRange rebuilds the history files within the specified transaction range by performing a forced self-merge.
-// If the range contains existing static files, the method collects all files belonging to that span and merges them.
+// CompactRange rebuilds the history files within the specified transaction range by performing a forced self-merge
+// with value deduplication. If the range contains existing static files, the method collects all files belonging to
+// that span and rebuilds each file pair in place: the inputs are removed from disk, so the folder must be reopened
+// to use the rebuilt files.
 func (ht *HistoryRoTx) CompactRange(ctx context.Context, fromTxNum, toTxNum uint64) error {
 	if len(ht.iit.files) == 0 {
 		return nil
@@ -1527,9 +1529,19 @@ func (ht *HistoryRoTx) CompactRange(ctx context.Context, fromTxNum, toTxNum uint
 			*NewMergeRange("", true, efFiles[i].startTxNum, efFiles[i].endTxNum),
 		)
 
-		if err := ht.deduplicateFiles(ctx, []*FilesItem{efFiles[i]}, []*FilesItem{vFiles[i]}, mergeRange, background.NewProgressSet()); err != nil {
+		dedup := newValuesDeduper()
+		indexIn, historyIn, err := ht.mergeFiles(ctx, []*FilesItem{efFiles[i]}, []*FilesItem{vFiles[i]}, mergeRange, background.NewProgressSet(), dedup)
+		if err != nil {
 			return err
 		}
+		fmt.Println("Values to deduplicate:", dedup.dropped)
+
+		efFiles[i].closeFilesAndRemove()
+		if vFiles[i].StartStep(ht.stepSize) != indexIn.StartStep(ht.stepSize) || vFiles[i].EndStep(ht.stepSize) != indexIn.EndStep(ht.stepSize) {
+			vFiles[i].closeFilesAndRemove()
+		}
+		indexIn.closeFiles()
+		historyIn.closeFiles()
 	}
 
 	return nil

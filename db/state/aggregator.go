@@ -1972,7 +1972,7 @@ func (at *AggregatorRoTx) mergeFiles(ctx context.Context, files *FilesForMerge, 
 		rng := rng
 		g.Go(func() error {
 			var err error
-			mf.iis[id], err = at.iis[id].mergeFiles(ctx, files.ii[id], rng.from, rng.to, at.a.ps)
+			mf.iis[id], err = at.iis[id].mergeFiles(ctx, files.ii[id], rng.from, rng.to, at.a.ps, nil)
 			return err
 		})
 	}
