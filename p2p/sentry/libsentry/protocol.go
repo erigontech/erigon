@@ -17,17 +17,53 @@
 package libsentry
 
 import (
+	"fmt"
+	"maps"
+	"slices"
+
 	"github.com/erigontech/erigon/node/gointerfaces/sentryproto"
+	"github.com/erigontech/erigon/p2p/protocols/eth"
+	"github.com/erigontech/erigon/p2p/protocols/wit"
 )
+
+var (
+	UintToProtocolMap = map[uint]sentryproto.Protocol{
+		eth.ETH68: sentryproto.Protocol_ETH68,
+		eth.ETH69: sentryproto.Protocol_ETH69,
+		eth.ETH70: sentryproto.Protocol_ETH70,
+		eth.ETH71: sentryproto.Protocol_ETH71,
+	}
+	ProtocolToUintMap = inverseProtocolMap(UintToProtocolMap)
+
+	UintToSideProtocolMap = map[uint]sentryproto.Protocol{
+		wit.WIT1: sentryproto.Protocol_WIT0,
+	}
+	SupportedSideProtocols = map[sentryproto.Protocol]struct{}{
+		sentryproto.Protocol_WIT0: {},
+	}
+)
+
+func inverseProtocolMap(uintToProtocol map[uint]sentryproto.Protocol) map[sentryproto.Protocol]uint {
+	inv := make(map[sentryproto.Protocol]uint, len(uintToProtocol))
+	for version, protocol := range uintToProtocol {
+		if _, ok := inv[protocol]; ok {
+			panic(fmt.Sprintf("protocol %s mapped from multiple versions", protocol))
+		}
+		inv[protocol] = version
+	}
+	return inv
+}
 
 // ethProtocolsByVersion lists ETH protocols in ascending version order.
 // Used by MinProtocol to find the lowest version supporting a message.
-var ethProtocolsByVersion = []sentryproto.Protocol{
-	sentryproto.Protocol_ETH68,
-	sentryproto.Protocol_ETH69,
-	sentryproto.Protocol_ETH70,
-	sentryproto.Protocol_ETH71,
-}
+var ethProtocolsByVersion = func() []sentryproto.Protocol {
+	versions := slices.Sorted(maps.Keys(UintToProtocolMap))
+	protocols := make([]sentryproto.Protocol, len(versions))
+	for i, version := range versions {
+		protocols[i] = UintToProtocolMap[version]
+	}
+	return protocols
+}()
 
 func MinProtocol(m sentryproto.MessageId) sentryproto.Protocol {
 	for _, p := range ethProtocolsByVersion {
@@ -41,73 +77,29 @@ func MinProtocol(m sentryproto.MessageId) sentryproto.Protocol {
 	return -1
 }
 
-var ProtoIds = map[sentryproto.Protocol]map[sentryproto.MessageId]struct{}{
-	sentryproto.Protocol_ETH68: {
-		sentryproto.MessageId_GET_BLOCK_HEADERS_66:             struct{}{},
-		sentryproto.MessageId_BLOCK_HEADERS_66:                 struct{}{},
-		sentryproto.MessageId_GET_BLOCK_BODIES_66:              struct{}{},
-		sentryproto.MessageId_BLOCK_BODIES_66:                  struct{}{},
-		sentryproto.MessageId_GET_RECEIPTS_66:                  struct{}{},
-		sentryproto.MessageId_RECEIPTS_66:                      struct{}{},
-		sentryproto.MessageId_NEW_BLOCK_HASHES_66:              struct{}{},
-		sentryproto.MessageId_NEW_BLOCK_66:                     struct{}{},
-		sentryproto.MessageId_TRANSACTIONS_66:                  struct{}{},
-		sentryproto.MessageId_NEW_POOLED_TRANSACTION_HASHES_68: struct{}{},
-		sentryproto.MessageId_GET_POOLED_TRANSACTIONS_66:       struct{}{},
-		sentryproto.MessageId_POOLED_TRANSACTIONS_66:           struct{}{},
-	},
-	sentryproto.Protocol_WIT0: {
-		sentryproto.MessageId_GET_BLOCK_WITNESS_W0:  struct{}{},
-		sentryproto.MessageId_BLOCK_WITNESS_W0:      struct{}{},
-		sentryproto.MessageId_NEW_WITNESS_W0:        struct{}{},
-		sentryproto.MessageId_NEW_WITNESS_HASHES_W0: struct{}{},
-	},
-	sentryproto.Protocol_ETH69: {
-		sentryproto.MessageId_GET_BLOCK_HEADERS_66:             struct{}{},
-		sentryproto.MessageId_BLOCK_HEADERS_66:                 struct{}{},
-		sentryproto.MessageId_GET_BLOCK_BODIES_66:              struct{}{},
-		sentryproto.MessageId_BLOCK_BODIES_66:                  struct{}{},
-		sentryproto.MessageId_GET_RECEIPTS_69:                  struct{}{},
-		sentryproto.MessageId_RECEIPTS_66:                      struct{}{},
-		sentryproto.MessageId_NEW_BLOCK_HASHES_66:              struct{}{},
-		sentryproto.MessageId_NEW_BLOCK_66:                     struct{}{},
-		sentryproto.MessageId_TRANSACTIONS_66:                  struct{}{},
-		sentryproto.MessageId_NEW_POOLED_TRANSACTION_HASHES_68: struct{}{},
-		sentryproto.MessageId_GET_POOLED_TRANSACTIONS_66:       struct{}{},
-		sentryproto.MessageId_POOLED_TRANSACTIONS_66:           struct{}{},
-		sentryproto.MessageId_BLOCK_RANGE_UPDATE_69:            struct{}{},
-	},
-	sentryproto.Protocol_ETH70: {
-		sentryproto.MessageId_GET_BLOCK_HEADERS_66:             struct{}{},
-		sentryproto.MessageId_BLOCK_HEADERS_66:                 struct{}{},
-		sentryproto.MessageId_GET_BLOCK_BODIES_66:              struct{}{},
-		sentryproto.MessageId_BLOCK_BODIES_66:                  struct{}{},
-		sentryproto.MessageId_GET_RECEIPTS_70:                  struct{}{},
-		sentryproto.MessageId_RECEIPTS_70:                      struct{}{},
-		sentryproto.MessageId_NEW_BLOCK_HASHES_66:              struct{}{},
-		sentryproto.MessageId_NEW_BLOCK_66:                     struct{}{},
-		sentryproto.MessageId_TRANSACTIONS_66:                  struct{}{},
-		sentryproto.MessageId_NEW_POOLED_TRANSACTION_HASHES_68: struct{}{},
-		sentryproto.MessageId_GET_POOLED_TRANSACTIONS_66:       struct{}{},
-		sentryproto.MessageId_POOLED_TRANSACTIONS_66:           struct{}{},
-		sentryproto.MessageId_BLOCK_RANGE_UPDATE_69:            struct{}{},
-	},
-	sentryproto.Protocol_ETH71: {
-		sentryproto.MessageId_GET_BLOCK_HEADERS_66:             struct{}{},
-		sentryproto.MessageId_BLOCK_HEADERS_66:                 struct{}{},
-		sentryproto.MessageId_GET_BLOCK_BODIES_66:              struct{}{},
-		sentryproto.MessageId_BLOCK_BODIES_66:                  struct{}{},
-		sentryproto.MessageId_GET_RECEIPTS_70:                  struct{}{},
-		sentryproto.MessageId_RECEIPTS_70:                      struct{}{},
-		sentryproto.MessageId_NEW_BLOCK_HASHES_66:              struct{}{},
-		sentryproto.MessageId_NEW_BLOCK_66:                     struct{}{},
-		sentryproto.MessageId_TRANSACTIONS_66:                  struct{}{},
-		sentryproto.MessageId_NEW_POOLED_TRANSACTION_HASHES_68: struct{}{},
-		sentryproto.MessageId_GET_POOLED_TRANSACTIONS_66:       struct{}{},
-		sentryproto.MessageId_POOLED_TRANSACTIONS_66:           struct{}{},
-		sentryproto.MessageId_BLOCK_RANGE_UPDATE_69:            struct{}{},
-		// Added in eth/71 (EIP-8159 Block Access List Exchange)
-		sentryproto.MessageId_GET_BLOCK_ACCESS_LISTS_71: struct{}{},
-		sentryproto.MessageId_BLOCK_ACCESS_LISTS_71:     struct{}{},
-	},
+var ProtoIds = func() map[sentryproto.Protocol]map[sentryproto.MessageId]struct{} {
+	ids := make(map[sentryproto.Protocol]map[sentryproto.MessageId]struct{}, len(eth.FromProto)+len(wit.FromProto))
+	for version, fromProto := range eth.FromProto {
+		ids[protocolOf(UintToProtocolMap, version)] = messageIdSet(fromProto)
+	}
+	for version, fromProto := range wit.FromProto {
+		ids[protocolOf(UintToSideProtocolMap, version)] = messageIdSet(fromProto)
+	}
+	return ids
+}()
+
+func protocolOf(uintToProtocol map[uint]sentryproto.Protocol, version uint) sentryproto.Protocol {
+	protocol, ok := uintToProtocol[version]
+	if !ok {
+		panic(fmt.Sprintf("no sentry protocol registered for version %d", version))
+	}
+	return protocol
+}
+
+func messageIdSet(fromProto map[sentryproto.MessageId]uint64) map[sentryproto.MessageId]struct{} {
+	set := make(map[sentryproto.MessageId]struct{}, len(fromProto))
+	for id := range fromProto {
+		set[id] = struct{}{}
+	}
+	return set
 }

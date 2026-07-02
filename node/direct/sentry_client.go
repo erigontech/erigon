@@ -28,37 +28,25 @@ import (
 
 	"github.com/erigontech/erigon/node/gointerfaces/sentryproto"
 	"github.com/erigontech/erigon/node/gointerfaces/typesproto"
+	"github.com/erigontech/erigon/p2p/protocols/eth"
+	"github.com/erigontech/erigon/p2p/protocols/wit"
 	"github.com/erigontech/erigon/p2p/sentry/libsentry"
 )
 
 const (
-	ETH68 = 68
-	ETH69 = 69
-	ETH70 = 70
-	ETH71 = 71
+	ETH68 = eth.ETH68
+	ETH69 = eth.ETH69
+	ETH70 = eth.ETH70
+	ETH71 = eth.ETH71
 
-	WIT0 = 1
+	WIT0 = wit.WIT1
 )
 
 var (
-	ProtocolToUintMap = map[sentryproto.Protocol]uint{
-		sentryproto.Protocol_ETH68: ETH68,
-		sentryproto.Protocol_ETH69: ETH69,
-		sentryproto.Protocol_ETH70: ETH70,
-		sentryproto.Protocol_ETH71: ETH71,
-	}
-	UintToProtocolMap = map[uint]sentryproto.Protocol{
-		ETH68: sentryproto.Protocol_ETH68,
-		ETH69: sentryproto.Protocol_ETH69,
-		ETH70: sentryproto.Protocol_ETH70,
-		ETH71: sentryproto.Protocol_ETH71,
-	}
-	SupportedSideProtocols = map[sentryproto.Protocol]struct{}{
-		sentryproto.Protocol_WIT0: {},
-	}
-	UintToSideProtocolMap = map[uint]sentryproto.Protocol{
-		WIT0: sentryproto.Protocol_WIT0,
-	}
+	ProtocolToUintMap      = libsentry.ProtocolToUintMap
+	UintToProtocolMap      = libsentry.UintToProtocolMap
+	SupportedSideProtocols = libsentry.SupportedSideProtocols
+	UintToSideProtocolMap  = libsentry.UintToSideProtocolMap
 )
 
 //go:generate mockgen -typed=true -destination=./sentry_client_mock.go -package=direct . SentryClient

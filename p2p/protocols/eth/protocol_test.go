@@ -28,7 +28,6 @@ import (
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/execution/rlp"
 	"github.com/erigontech/erigon/execution/types"
-	"github.com/erigontech/erigon/node/direct"
 	"github.com/erigontech/erigon/node/gointerfaces/sentryproto"
 )
 
@@ -330,14 +329,14 @@ func TestBlockAccessListsPacket66RoundTrip(t *testing.T) {
 // the protocol name/length tables and that the two new message codes route to
 // their sentry MessageId counterparts via ToProto/FromProto.
 func TestEth71ProtocolRegistration(t *testing.T) {
-	if name, ok := ProtocolToString[direct.ETH71]; !ok || name != "eth71" {
+	if name, ok := ProtocolToString[ETH71]; !ok || name != "eth71" {
 		t.Fatalf("ProtocolToString[ETH71] = (%q, %v), want (eth71, true)", name, ok)
 	}
-	if length, ok := ProtocolLengths[direct.ETH71]; !ok || length != 20 {
+	if length, ok := ProtocolLengths[ETH71]; !ok || length != 20 {
 		t.Fatalf("ProtocolLengths[ETH71] = (%d, %v), want (20, true)", length, ok)
 	}
 
-	fwd := ToProto[direct.ETH71]
+	fwd := ToProto[ETH71]
 	if fwd == nil {
 		t.Fatal("ToProto has no ETH71 entry")
 	}
@@ -348,7 +347,7 @@ func TestEth71ProtocolRegistration(t *testing.T) {
 		t.Errorf("ToProto[ETH71][BlockAccessListsMsg] = %v, want BLOCK_ACCESS_LISTS_71", got)
 	}
 
-	rev := FromProto[direct.ETH71]
+	rev := FromProto[ETH71]
 	if rev == nil {
 		t.Fatal("FromProto has no ETH71 entry")
 	}

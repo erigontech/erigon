@@ -283,7 +283,7 @@ const NoSizeLimit = math.MaxInt
 // ReceiptQueryOpts controls the behavior differences between eth protocol versions
 // when answering GetReceipts queries.
 type ReceiptQueryOpts struct {
-	// EthVersion is the protocol version (e.g. direct.ETH68, direct.ETH69, direct.ETH70).
+	// EthVersion is the protocol version (e.g. ETH68, ETH69, ETH70).
 	// eth/69+ uses encoding without the Bloom field.
 	EthVersion uint
 	// FirstBlockReceiptIndex skips this many receipts from the first block (eth/70).
