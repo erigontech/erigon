@@ -878,16 +878,9 @@ func (a *accessedState) touchAll(sdCtx *commitmentdb.SharedDomainsCommitmentCont
 	}
 }
 
-// collectAccessedState rolls the RecordingState read/write maps and the three
-// code-tracking maps into a single accessedState. SortedCodes is sourced from
-// rs.GetPreStateCode() (pre-block reads only): the witness must carry the
-// bytecode that existed at the start of the block, not code created in-block.
-// A stateless verifier re-derives in-block-created code by replaying the
-// transactions, so emitting it would be redundant over-inclusion.
-//
-// SortedCodes is initialized to an empty (non-nil) slice so callers can assign
-// result.Codes = accessed.SortedCodes without risking a "codes": null JSON
-// regression for empty-touch blocks; the Codes field has no omitempty.
+// collectAccessedState rolls the RecordingState maps into an accessedState.
+// SortedCodes carries only pre-block code reads (rs.GetPreStateCode): a stateless
+// verifier re-derives in-block-created code by replaying the transactions.
 func collectAccessedState(rs *RecordingState, mode witnessMode) *accessedState {
 	out := &accessedState{
 		Addresses:   make(map[common.Address]struct{}),
@@ -1041,15 +1034,10 @@ func collectAccessedState(rs *RecordingState, mode witnessMode) *accessedState {
 	return out
 }
 
-// detectCollapseSiblings runs STEP 1 of witness construction: compute the full
-// commitment for this block against a split reader (commitment from parent state,
-// plain state from end of block) and record every sibling path the trie collapses
-// through. The collected paths are returned so STEP 2 can touch them while building
-// the witness — without those touches, collapsed-sibling data would be missing from
-// the witness and stateless re-execution would diverge from the canonical root.
-//
-// Triggers SeekCommitment #2 (split history reader). Preserves pre-refactor behavior
-// including the lupin012 seekBlockNum != parentNum guard.
+// detectCollapseSiblings computes the block's full commitment against a split reader
+// (commitment from parent state, plain state from block end) and returns the sibling
+// paths the trie collapses through. The witness build must touch them, else collapsed-
+// sibling data is missing and stateless re-execution diverges from the root.
 func detectCollapseSiblings(
 	ctx context.Context,
 	tx kv.TemporalTx,
@@ -1125,13 +1113,9 @@ func detectCollapseSiblings(
 	return siblingPaths, nil
 }
 
-// buildWitnessTrie runs STEP 2 of witness construction: re-seek the commitment
-// against the parent-state reader, touch every accessed key plus the sibling
-// paths collected during collapse detection, then generate the witness trie and
-// RLP-encode it. The pre-state root is verified against expectedParentRoot
-// before the encoded nodes are returned.
-//
-// Triggers SeekCommitment #3 (parent-state reader). Preserves pre-refactor behavior.
+// buildWitnessTrie re-seeks the commitment against the parent-state reader, touches
+// every accessed key plus the collapse-sibling paths, and builds the witness node set
+// on the fly, verifying the pre-state root against expectedParentRoot.
 func buildWitnessTrie(
 	ctx context.Context,
 	tx kv.TemporalTx,
@@ -1161,7 +1145,7 @@ func buildWitnessTrie(
 		}
 	}
 
-	witnessTrie, witnessRoot, err := sdCtx.Witness(ctx, accessed.CodeReads, "debug_executionWitness_witness_construction", produceExclusionProofs)
+	witnessNodes, witnessRoot, err := sdCtx.WitnessNodes(ctx, produceExclusionProofs, "debug_executionWitness_witness_construction")
 	if err != nil {
 		return nil, fmt.Errorf("failed to generate witness: %w", err)
 	}
@@ -1169,11 +1153,7 @@ func buildWitnessTrie(
 		return nil, fmt.Errorf("collapse witness root mismatch: calculated=%x, expected=%x", common.BytesToHash(witnessRoot), expectedParentRoot)
 	}
 
-	allNodes, err := witnessTrie.RLPEncode()
-	if err != nil {
-		return nil, fmt.Errorf("failed to encode trie nodes: %w", err)
-	}
-	for _, node := range allNodes {
+	for _, node := range witnessNodes {
 		encodedNodes = append(encodedNodes, common.Copy(node))
 	}
 	return encodedNodes, nil
