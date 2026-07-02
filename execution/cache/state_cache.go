@@ -18,7 +18,9 @@ package cache
 
 import (
 	"bytes"
+	"fmt"
 	"strings"
+	"sync/atomic"
 
 	"github.com/c2h5oh/datasize"
 
@@ -53,6 +55,12 @@ const (
 // Code uses CodeCache (two-level for deduplication).
 type StateCache struct {
 	caches [kv.DomainLen]Cache
+
+	// warmupsInFlight counts fire-and-forget cache-populating prefetches
+	// (WarmupStarted/WarmupDone). Unwind asserts it is zero: a prefetch put
+	// racing the epoch bump could stamp a dead-fork value with the post-unwind
+	// epoch and have it served as canonical.
+	warmupsInFlight atomic.Int64
 }
 
 // NewStateCache creates a new StateCache with the specified byte capacities.
@@ -179,6 +187,15 @@ func (c *StateCache) putCodeWithHash(addr, code, codeHash []byte, txNum uint64, 
 	}
 }
 
+// HasLiveCode reports whether addr resolves to live code bytes through the
+// code cache's addr→code binding, without touching stats or LRU recency.
+// Prefetchers probe it to skip the keccak+copy of preparing a conditional
+// code put that a live binding would no-op; advisory only.
+func (c *StateCache) HasLiveCode(addr []byte) bool {
+	cc, ok := c.caches[kv.CodeDomain].(*CodeCache)
+	return ok && cc.ContainsLive(addr)
+}
+
 // GetCodeSizeByHash returns the size of code by its Ethereum codeHash
 // without loading the bytes. Returns (0, false) when the size-only layer
 // is not populated for this hash.
@@ -255,9 +272,14 @@ func (c *StateCache) put(domain kv.Domain, key []byte, value []byte, txNum uint6
 	}
 	if overwrite {
 		cache.Put(key, common.Copy(value), txNum)
-	} else {
-		cache.PutIfAbsent(key, common.Copy(value), txNum)
+		return
 	}
+	// Skip the copy a live entry would discard; advisory — PutIfAbsent
+	// re-decides under the key's stripe.
+	if cache.ContainsLive(key) {
+		return
+	}
+	cache.PutIfAbsent(key, common.Copy(value), txNum)
 }
 
 // Delete removes the data for the given domain and key.
@@ -283,13 +305,30 @@ func (c *StateCache) Clear() {
 // GenericCaches and the CodeCache, all layers) bumps an epoch + lowers a floor
 // and drops stale entries lazily on read. This is the sole cache-invalidation
 // path on unwind — the executor never touches the cache during forward execution.
+//
+// Callers must drain any in-flight cache-populating warmup first (see
+// WarmupStarted); the assert converts that convention into a loud failure.
 func (c *StateCache) Unwind(unwindToTxNum uint64) {
+	if dbg.AssertStateCache {
+		if n := c.warmupsInFlight.Load(); n != 0 {
+			panic(fmt.Sprintf("StateCache.Unwind with %d cache-populating warmup(s) in flight — missing drain before the epoch bump", n))
+		}
+	}
 	for _, cache := range c.caches {
 		if cache != nil {
 			cache.Unwind(unwindToTxNum)
 		}
 	}
 }
+
+// WarmupStarted and WarmupDone bracket a fire-and-forget cache-populating
+// prefetch. A prefetch put racing an unwind's epoch bump could stamp a
+// dead-fork value with the post-unwind epoch, so Unwind asserts (under
+// ASSERT_STATE_CACHE) that no warmup is in flight.
+func (c *StateCache) WarmupStarted() { c.warmupsInFlight.Add(1) }
+
+// WarmupDone is the counterpart of WarmupStarted.
+func (c *StateCache) WarmupDone() { c.warmupsInFlight.Add(-1) }
 
 // GetCache returns the cache for the given domain.
 // Returns nil if the domain is not supported.

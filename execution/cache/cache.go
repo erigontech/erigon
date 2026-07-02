@@ -35,6 +35,11 @@ type Cache interface {
 	// already be superseded by an authoritative Put.
 	PutIfAbsent(key []byte, value []byte, txNum uint64)
 
+	// ContainsLive reports whether key has a live (non-stale) entry, without
+	// touching hit/miss counters or LRU recency. A pre-check for conditional
+	// writers to skip preparing a put a live entry would no-op; advisory only.
+	ContainsLive(key []byte) bool
+
 	// Delete removes the data for the given key.
 	Delete(key []byte)
 

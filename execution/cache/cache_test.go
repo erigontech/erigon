@@ -27,6 +27,7 @@ import (
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/crypto"
+	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/db/kv"
 )
 
@@ -878,4 +879,104 @@ func TestDomainCache_PutIfAbsentAtomicWithPut(t *testing.T) {
 		require.True(t, ok)
 		require.Equal(t, fresh, v, "round %d: PutIfAbsent raced past a concurrent Put", round)
 	}
+}
+
+// A Delete racing an update-in-place put must not double-subtract the
+// displaced entry's size: freelru's OnEvict subtracts it for the Remove, and
+// put's update delta subtracts it again unless the two writers share the
+// key's stripe.
+func TestDomainCache_DeleteAtomicWithPut_NoSizeDrift(t *testing.T) {
+	c := NewDomainCacheMode(1*datasize.MB, ModeEvictLRU)
+	addr := makeAddr(1)
+	v1 := []byte("value-one")
+	v2 := []byte("value-two")
+	for round := 0; round < 20000; round++ {
+		c.Put(addr, v1, 10)
+		var wg sync.WaitGroup
+		wg.Add(2)
+		go func() { defer wg.Done(); c.Put(addr, v2, 20) }()
+		go func() { defer wg.Done(); c.Delete(addr) }()
+		wg.Wait()
+		c.Delete(addr)
+		require.Zero(t, c.SizeBytes(), "round %d: size accounting drifted", round)
+	}
+}
+
+// Same invariant for the lazy stale-drop inside GetWithTxNum, the other
+// unstriped Remove path.
+func TestDomainCache_StaleDropAtomicWithPut_NoSizeDrift(t *testing.T) {
+	c := NewDomainCacheMode(1*datasize.MB, ModeEvictLRU)
+	addr := makeAddr(1)
+	v1 := []byte("value-one")
+	v2 := []byte("value-two")
+	for round := 0; round < 20000; round++ {
+		c.Put(addr, v1, 10)
+		c.Unwind(5) // epoch bump makes the entry above stale (txNum 10 >= floor 5)
+		var wg sync.WaitGroup
+		wg.Add(2)
+		go func() { defer wg.Done(); c.Put(addr, v2, 20) }()
+		go func() { defer wg.Done(); c.Get(addr) }()
+		wg.Wait()
+		c.Delete(addr)
+		require.Zero(t, c.SizeBytes(), "round %d: size accounting drifted", round)
+	}
+}
+
+func TestDomainCache_ContainsLive(t *testing.T) {
+	c := NewDomainCacheMode(1*datasize.KB, ModeEvictLRU)
+	addr := makeAddr(1)
+	require.False(t, c.ContainsLive(addr), "absent key")
+
+	c.Put(addr, []byte("v"), 10)
+	require.True(t, c.ContainsLive(addr))
+
+	c.Unwind(5) // entry txNum 10 >= floor 5, superseded epoch → stale
+	require.False(t, c.ContainsLive(addr), "stale entry must not read as live")
+
+	// The probe is passive: the stale entry is left for PutIfAbsent to replace.
+	c.PutIfAbsent(addr, []byte("w"), 4)
+	v, ok := c.Get(addr)
+	require.True(t, ok)
+	assert.Equal(t, []byte("w"), v)
+	require.True(t, c.ContainsLive(addr))
+}
+
+func TestCodeCache_ContainsLive(t *testing.T) {
+	cc := NewCodeCache(1*datasize.MB, 1*datasize.MB)
+	addr := makeAddr(1)
+	code := []byte{0xaa, 1, 2, 3}
+	require.False(t, cc.ContainsLive(addr), "absent addr")
+
+	cc.PutWithCodeHash(addr, code, crypto.Keccak256(code), 10)
+	require.True(t, cc.ContainsLive(addr))
+
+	cc.Unwind(5)
+	require.False(t, cc.ContainsLive(addr), "stale binding must not read as live")
+
+	// A bound addr whose content layer refused the bytes (capacity) is not live.
+	tiny := NewCodeCache(2*datasize.B, 1*datasize.MB)
+	tiny.PutWithCodeHash(addr, code, crypto.Keccak256(code), 10)
+	require.False(t, tiny.ContainsLive(addr), "binding without content bytes is not servable")
+}
+
+// The drain-before-unwind convention (drainReadAhead ordered before every
+// epoch bump) is enforced here: a cache-populating warmup still in flight at
+// Unwind time can stamp a dead-fork value with the post-unwind epoch.
+func TestStateCache_UnwindAssertsWarmupInFlight(t *testing.T) {
+	old := dbg.AssertStateCache
+	dbg.AssertStateCache = true
+	t.Cleanup(func() { dbg.AssertStateCache = old })
+
+	b := 1 * datasize.MB
+	sc := NewStateCache(b, b, b, b)
+	sc.WarmupStarted()
+	require.Panics(t, func() { sc.Unwind(10) }, "epoch bump with a warmup in flight must fail loud")
+	sc.WarmupDone()
+	require.NotPanics(t, func() { sc.Unwind(10) })
+
+	// Without the assert flag the gauge is inert.
+	dbg.AssertStateCache = false
+	sc.WarmupStarted()
+	defer sc.WarmupDone()
+	require.NotPanics(t, func() { sc.Unwind(10) })
 }

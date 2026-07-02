@@ -186,7 +186,7 @@ func (c *GenericCache[T]) GetWithTxNum(key []byte) (T, uint64, bool) {
 	// tx — and must be dropped; >= not > (the surviving block's last txNum is
 	// floor-1, so this never drops a live entry).
 	if c.coh.IsStale(e.txNum, e.epoch) {
-		c.data.Remove(h)
+		c.dropStale(h, key)
 		c.staleEvicted.Add(1)
 		c.misses.Add(1)
 		var zero T
@@ -267,12 +267,39 @@ func (c *GenericCache[T]) put(key []byte, value T, txNum uint64, overwrite bool)
 	c.inserts.Add(1)
 }
 
-// Delete removes the data for the given key.
+// Delete removes the data for the given key. Runs under the key's put stripe:
+// an unstriped Remove racing put's read-modify-write would double-subtract the
+// displaced entry's size (once via OnEvict, once via put's update delta).
 func (c *GenericCache[T]) Delete(key []byte) {
 	h := maphash.Hash(key)
+	mu := &c.putStripes[h&(putStripeCount-1)]
+	mu.Lock()
+	defer mu.Unlock()
 	if existing, ok := c.data.Get(h); ok && bytes.Equal(existing.key, key) {
 		c.data.Remove(h)
 	}
+}
+
+// dropStale removes key's entry under its put stripe, re-checking that it is
+// still the same key's stale entry — a concurrent put may have replaced it
+// with a live one, and Remove must be striped for the same reason Delete is.
+func (c *GenericCache[T]) dropStale(h uint64, key []byte) {
+	mu := &c.putStripes[h&(putStripeCount-1)]
+	mu.Lock()
+	defer mu.Unlock()
+	if e, ok := c.data.Get(h); ok && bytes.Equal(e.key, key) && c.coh.IsStale(e.txNum, e.epoch) {
+		c.data.Remove(h)
+	}
+}
+
+// ContainsLive reports whether key has a live (non-stale) entry, without
+// touching hit/miss counters or LRU recency. Prefetchers probe it to skip the
+// copy work of preparing a conditional put that a live entry would no-op;
+// advisory only — PutIfAbsent re-decides under the key's stripe.
+func (c *GenericCache[T]) ContainsLive(key []byte) bool {
+	h := maphash.Hash(key)
+	e, ok := c.data.Peek(h)
+	return ok && bytes.Equal(e.key, key) && !c.coh.IsStale(e.txNum, e.epoch)
 }
 
 // Clear removes all entries from the cache. It also resets the (epoch,
