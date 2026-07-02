@@ -158,22 +158,25 @@ func (c *StateCache) GetCodeByHash(codeHash []byte) ([]byte, bool) {
 // codeHash-keyed codeHashToCode layer. Callers should prefer this over Put when they
 // have the codeHash from the account record — avoids a redundant keccak.
 func (c *StateCache) PutCodeWithHash(addr, code, codeHash []byte, txNum uint64) {
-	cc, ok := c.caches[kv.CodeDomain].(*CodeCache)
-	if !ok {
-		return
-	}
-	cc.PutWithCodeHash(addr, common.Copy(code), codeHash, txNum)
+	c.putCodeWithHash(addr, code, codeHash, txNum, true)
 }
 
-// PutCodeWithHashIfAbsent is PutCodeWithHash except that a live addr→code
-// binding is kept — for prefetch writers, whose snapshot may already be
-// superseded.
+// PutCodeWithHashIfAbsent is PutCodeWithHash with if-absent binding semantics
+// (see Cache.PutIfAbsent).
 func (c *StateCache) PutCodeWithHashIfAbsent(addr, code, codeHash []byte, txNum uint64) {
+	c.putCodeWithHash(addr, code, codeHash, txNum, false)
+}
+
+func (c *StateCache) putCodeWithHash(addr, code, codeHash []byte, txNum uint64, overwrite bool) {
 	cc, ok := c.caches[kv.CodeDomain].(*CodeCache)
 	if !ok {
 		return
 	}
-	cc.PutWithCodeHashIfAbsent(addr, common.Copy(code), codeHash, txNum)
+	if overwrite {
+		cc.PutWithCodeHash(addr, common.Copy(code), codeHash, txNum)
+	} else {
+		cc.PutWithCodeHashIfAbsent(addr, common.Copy(code), codeHash, txNum)
+	}
 }
 
 // GetCodeSizeByHash returns the size of code by its Ethereum codeHash
@@ -234,19 +237,15 @@ func (c *StateCache) DeleteAddrCodeHash(addr []byte) {
 // Put stores data for the given domain and key, stamped with the txNum the
 // value reflects (for txNum/epoch unwind invalidation).
 func (c *StateCache) Put(domain kv.Domain, key []byte, value []byte, txNum uint64) {
-	cache := c.caches[domain]
-	if cache == nil {
-		return
-	}
-	if domain == kv.CommitmentDomain && bytes.Equal(key, commitmentdb.KeyCommitmentState) {
-		return
-	}
-	cache.Put(key, common.Copy(value), txNum)
+	c.put(domain, key, value, txNum, true)
 }
 
-// PutIfAbsent is Put except that a live entry is left untouched — for prefetch
-// writers, whose snapshot may already be superseded by an authoritative Put.
+// PutIfAbsent is Put with if-absent semantics (see Cache.PutIfAbsent).
 func (c *StateCache) PutIfAbsent(domain kv.Domain, key []byte, value []byte, txNum uint64) {
+	c.put(domain, key, value, txNum, false)
+}
+
+func (c *StateCache) put(domain kv.Domain, key []byte, value []byte, txNum uint64, overwrite bool) {
 	cache := c.caches[domain]
 	if cache == nil {
 		return
@@ -254,7 +253,11 @@ func (c *StateCache) PutIfAbsent(domain kv.Domain, key []byte, value []byte, txN
 	if domain == kv.CommitmentDomain && bytes.Equal(key, commitmentdb.KeyCommitmentState) {
 		return
 	}
-	cache.PutIfAbsent(key, common.Copy(value), txNum)
+	if overwrite {
+		cache.Put(key, common.Copy(value), txNum)
+	} else {
+		cache.PutIfAbsent(key, common.Copy(value), txNum)
+	}
 }
 
 // Delete removes the data for the given domain and key.

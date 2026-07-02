@@ -318,9 +318,8 @@ func (c *CodeCache) Put(addr []byte, code []byte, txNum uint64) {
 	c.putCode(addr, code, [32]byte{}, txNum, true)
 }
 
-// PutIfAbsent is Put except that a live addr→code binding is kept — for
-// prefetch writers, whose snapshot may already be superseded. The
-// content-addressed layers are per-key-immutable and skip live entries anyway.
+// PutIfAbsent implements Cache.PutIfAbsent for the addr→code binding; the
+// content-addressed layers skip live entries regardless.
 func (c *CodeCache) PutIfAbsent(addr []byte, code []byte, txNum uint64) {
 	c.putCode(addr, code, [32]byte{}, txNum, false)
 }
@@ -430,9 +429,8 @@ func (c *CodeCache) PutWithCodeHash(addr []byte, code []byte, codeHash []byte, t
 	c.putWithCodeHash(addr, code, codeHash, txNum, true)
 }
 
-// PutWithCodeHashIfAbsent is PutWithCodeHash except that a live addr→code
-// binding is kept — for prefetch writers, whose snapshot may already be
-// superseded.
+// PutWithCodeHashIfAbsent is PutWithCodeHash with if-absent binding semantics
+// (see Cache.PutIfAbsent).
 func (c *CodeCache) PutWithCodeHashIfAbsent(addr []byte, code []byte, codeHash []byte, txNum uint64) {
 	c.putWithCodeHash(addr, code, codeHash, txNum, false)
 }

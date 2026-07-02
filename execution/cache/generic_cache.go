@@ -204,10 +204,8 @@ func (c *GenericCache[T]) Put(key []byte, value T, txNum uint64) {
 	c.put(key, value, txNum, true)
 }
 
-// PutIfAbsent is Put except that a live entry for key is left untouched (a
-// stale one is replaced). Prefetch writers must use this: they read an older
-// snapshot, so an unconditional Put racing an authoritative one could pin
-// superseded state in the cache.
+// PutIfAbsent implements Cache.PutIfAbsent (live entry kept, stale one
+// replaced).
 func (c *GenericCache[T]) PutIfAbsent(key []byte, value T, txNum uint64) {
 	c.put(key, value, txNum, false)
 }
