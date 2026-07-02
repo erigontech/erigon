@@ -18,22 +18,20 @@ package app
 
 import (
 	"context"
-	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"maps"
 	"os"
 	"path/filepath"
 	"regexp"
-	"runtime"
 	"strconv"
-	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/require"
 	"github.com/urfave/cli/v2"
 
 	"github.com/erigontech/erigon/common/dir"
+	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/execution/tests/testforks"
 	erigoncli "github.com/erigontech/erigon/node/cli"
 )
@@ -41,7 +39,7 @@ import (
 type importFixtureCase struct {
 	LastBlockHash string                     `json:"lastblockhash"`
 	GenesisHeader map[string]json.RawMessage `json:"genesisBlockHeader"`
-	Pre           map[string]json.RawMessage `json:"pre"`
+	Pre           json.RawMessage            `json:"pre"`
 	Blocks        []struct {
 		Rlp string `json:"rlp"`
 	} `json:"blocks"`
@@ -62,8 +60,7 @@ func TestImportReorgUnwindToGenesis(t *testing.T) {
 		t.Skip()
 	}
 
-	root := repoRootDir(t)
-	fixturePath := filepath.Join(root, "execution", "tests", "legacy-tests",
+	fixturePath := filepath.Join("..", "..", "..", "execution", "tests", "legacy-tests",
 		"BlockchainTests", "InvalidBlocks", "bcMultiChainTest", "UncleFromSideChain.json")
 	raw, err := os.ReadFile(fixturePath)
 	require.NoError(t, err)
@@ -117,12 +114,6 @@ func TestImportReorgUnwindToGenesis(t *testing.T) {
 
 func writeImportGenesis(t *testing.T, dir string, tc importFixtureCase) string {
 	t.Helper()
-	alloc := make(map[string]json.RawMessage, len(tc.Pre))
-	for addr, acc := range tc.Pre {
-		alloc[strings.TrimPrefix(addr, "0x")] = acc
-	}
-	allocJSON, err := json.Marshal(alloc)
-	require.NoError(t, err)
 	// Reuse the chain config the in-process fixture tests resolve so the CLI
 	// genesis can't drift from it; the genesis-hash assertion guards drift.
 	configJSON, err := json.Marshal(testforks.Forks["Cancun"])
@@ -132,7 +123,7 @@ func writeImportGenesis(t *testing.T, dir string, tc importFixtureCase) string {
 	// erigon ignores the block-only extras (stateRoot, bloom, ...).
 	genesis := maps.Clone(tc.GenesisHeader)
 	genesis["config"] = configJSON
-	genesis["alloc"] = allocJSON
+	genesis["alloc"] = tc.Pre
 
 	genesisJSON, err := json.Marshal(genesis)
 	require.NoError(t, err)
@@ -145,7 +136,7 @@ func writeImportBlocks(t *testing.T, dir string, tc importFixtureCase) []string 
 	t.Helper()
 	rlpFiles := make([]string, 0, len(tc.Blocks))
 	for i, b := range tc.Blocks {
-		data, err := hex.DecodeString(strings.TrimPrefix(b.Rlp, "0x"))
+		data, err := hexutil.Decode(b.Rlp)
 		require.NoErrorf(t, err, "decode block %d rlp", i+1)
 		p := filepath.Join(dir, fmt.Sprintf("%04d.rlp", i+1))
 		require.NoError(t, os.WriteFile(p, data, 0o644))
@@ -176,20 +167,4 @@ func runErigonCommand(args ...string) error {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	return app.RunContext(ctx, append([]string{"erigon"}, args...))
-}
-
-// repoRootDir walks up from this source file to the module root (the dir with go.mod).
-func repoRootDir(t *testing.T) string {
-	t.Helper()
-	_, file, _, ok := runtime.Caller(0)
-	require.True(t, ok)
-	dir := filepath.Dir(file)
-	for {
-		if _, err := os.Stat(filepath.Join(dir, "go.mod")); err == nil {
-			return dir
-		}
-		parent := filepath.Dir(dir)
-		require.NotEqualf(t, parent, dir, "go.mod not found above %s", file)
-		dir = parent
-	}
 }
