@@ -134,15 +134,16 @@ func (t *testExecTask) Execute(evm *vm.EVM,
 
 			result := ibs.ReadVersion(k.addr, k.path, k.key, version.TxIndex)
 
-			if i == 0 && result.Status() == state.MVReadResultDone {
-				nonce, err := ibs.GetNonce(k.addr)
-				if err != nil {
-					return &exec.TxResult{Err: err}
-				}
-				if int(nonce) != t.nonce {
-					return &exec.TxResult{Err: protocol.ErrExecAbortError{
-						DependencyTxIndex: -1,
-						OriginError:       fmt.Errorf("invalid nonce: got: %d, expected: %d", nonce, t.nonce)}}
+			// op[0] is always a NoncePath read; peek the versionMap value (no
+			// extra recorded read) and abort on a nonce mismatch, matching
+			// main's result.Value() check.
+			if i == 0 {
+				if vm := ibs.VersionMap(); vm != nil {
+					if nonce, _, ok := vm.ReadNonce(k.addr, version.TxIndex); ok && int(nonce) != t.nonce {
+						return &exec.TxResult{Err: protocol.ErrExecAbortError{
+							DependencyTxIndex: -1,
+							OriginError:       fmt.Errorf("invalid nonce: got: %d, expected: %d", nonce, t.nonce)}}
+					}
 				}
 			}
 

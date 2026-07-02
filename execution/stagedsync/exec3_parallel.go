@@ -2536,8 +2536,9 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 
 				// Merge any additional reads/writes produced during finalize (fee calc, post apply, etc)
 				if addReads.Len() > 0 {
-					mergedReads := MergeReadSets(be.blockIO.ReadSet(txVersion.TxIndex), addReads)
-					be.blockIO.RecordReads(txVersion, mergedReads)
+					existing := be.blockIO.ReadSet(txVersion.TxIndex)
+					existing.MergeFrom(addReads)
+					be.blockIO.RecordReads(txVersion, existing)
 				}
 				if !addWrites.IsEmpty() {
 					// Merge finalization writes with existing execution writes.
@@ -2981,10 +2982,6 @@ func (be *blockExecutor) scheduleExecution(ctx context.Context, pe *parallelExec
 
 		be.cntExec++
 	}
-}
-
-func MergeReadSets(a state.ReadSet, b state.ReadSet) state.ReadSet {
-	return a.Merge(b)
 }
 
 func MergeVersionedWrites(prev, next *state.WriteSet) *state.WriteSet {

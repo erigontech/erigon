@@ -265,6 +265,10 @@ func (sdb *IntraBlockState) SetVersionMap(versionMap *VersionMap) {
 	sdb.versionMap = versionMap
 }
 
+func (sdb *IntraBlockState) VersionMap() *VersionMap {
+	return sdb.versionMap
+}
+
 func (sdb *IntraBlockState) IsVersioned() bool {
 	return sdb.versionMap != nil
 }

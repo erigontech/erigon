@@ -420,6 +420,11 @@ func (s ReadSet) Merge(o ReadSet) ReadSet {
 	return out
 }
 
+// MergeFrom merges o into s in place, without allocating a new ReadSet.
+func (s *ReadSet) MergeFrom(o ReadSet) {
+	s.mergeFrom(o)
+}
+
 // TraceReads prints every read in path-major order, prefixed.  Debug only —
 // keeps the per-path iteration inside this package.
 func (s ReadSet) TraceReads(prefix string) {

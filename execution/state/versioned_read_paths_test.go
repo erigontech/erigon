@@ -81,7 +81,7 @@ func TestVersionedRead_B_DeletedStateObjectReturnsDefault(t *testing.T) {
 // ------------------------------------------------------------------
 
 // a prior tx marked the address selfdestructed (in versionMap), then
-// GetCommittedState (commited=true) must return zero immediately.
+// GetCommittedState (committed=true) must return zero immediately.
 func TestVersionedRead_C5_DestructedCommittedReturnsZero(t *testing.T) {
 	t.Parallel()
 	_, tx, domains := NewTestRwTx(t)
@@ -97,13 +97,13 @@ func TestVersionedRead_C5_DestructedCommittedReturnsZero(t *testing.T) {
 	// tx 2 selfdestructed the account
 	mvhm.WriteSelfDestruct(addr, Version{TxIndex: 2, Incarnation: 0}, true, true)
 
-	// Read at tx 5 with commited=true: must return zero, ignoring slot value.
+	// Read at tx 5 with committed=true: must return zero, ignoring slot value.
 	v, err := ibs.GetCommittedState(addr, key)
 	require.NoError(t, err)
 	assert.True(t, v.IsZero(), "committed read past selfdestruct returns zero")
 }
 
-// a prior tx marked the address selfdestructed; non-commited read
+// a prior tx marked the address selfdestructed; non-committed read
 // at a path != CodePath records the SelfDestructPath dependency in the
 // readSet and returns zero.
 func TestVersionedRead_C6_DestructedRecordsDepAndReturnsZero(t *testing.T) {
@@ -119,7 +119,7 @@ func TestVersionedRead_C6_DestructedRecordsDepAndReturnsZero(t *testing.T) {
 
 	bal, err := ibs.GetBalance(addr)
 	require.NoError(t, err)
-	assert.True(t, bal.IsZero(), "non-commited balance read past selfdestruct returns zero")
+	assert.True(t, bal.IsZero(), "non-committed balance read past selfdestruct returns zero")
 
 	// SelfDestructPath dep must be recorded in readSet.
 	_, ok := ibs.versionedReads.getHeader(addr, SelfDestructPath, accounts.NilKey)
@@ -140,7 +140,7 @@ func TestVersionedRead_C4_CodePathBypassesSelfDestruct(t *testing.T) {
 	addr := accounts.InternAddress([20]byte{0xc4})
 	code := []byte{0x60, 0x42, 0x60, 0x00, 0x52, 0x60, 0x20, 0x60, 0x00, 0xf3}
 	mvhm.WriteCode(addr, Version{TxIndex: 2, Incarnation: 0}, code, true)
-	// Selfdestruct at a LATER tx than the code write so the SD doesn't
+	// Selfdestruct at an EARLIER tx than the code write so the SD doesn't
 	// trump the code (the CodePath+SD trump check uses sdres.DepIdx).
 	mvhm.WriteSelfDestruct(addr, Version{TxIndex: 1, Incarnation: 0}, true, true)
 
