@@ -666,6 +666,14 @@ func chainWithDeployedContractAndConfig(t *testing.T, cfg *chain.Config) (*execm
 		Alloc:  types.GenesisAlloc{bankAddress: {Balance: bankFunds}},
 		//Alloc:  types.GenesisAlloc{bankAddress: {Balance: bankFunds, Storage: map[common.Hash]common.Hash{crypto.Keccak256Hash([]byte{0x1}): crypto.Keccak256Hash([]byte{0xf})}}}, // TODO (antonis19)
 	}
+	transferGasLimit := uint64(21000)
+	if chainConfig.AmsterdamTime != nil {
+		// A value transfer that creates the recipient costs 21000 (value-transfer
+		// intrinsic) + 183600 (EIP-2780 NEW_ACCOUNT state gas) = 204600; the block
+		// must budget the state gas for every filler.
+		transferGasLimit = 204_600
+		gspec.GasLimit = 60_000_000
+	}
 	// accounts to fill up MPT
 	_, fillerPublicKeys, err := generatePseudoRandomECDSAKeyPairs(rng, nFillerAccounts)
 	require.NoError(t, err)
@@ -713,7 +721,7 @@ func chainWithDeployedContractAndConfig(t *testing.T, cfg *chain.Config) (*execm
 					CommonTx: types.CommonTx{
 						Nonce:    nonce,
 						To:       &fillerAddress,
-						GasLimit: 21000,
+						GasLimit: transferGasLimit,
 						Value:    *uint256.MustFromBig(transferAmount),
 					},
 					GasPrice: *txFeeCap,
@@ -745,7 +753,7 @@ func chainWithDeployedContractAndConfig(t *testing.T, cfg *chain.Config) (*execm
 					CommonTx: types.CommonTx{
 						Nonce:    nonce,
 						To:       &fillerAddress,
-						GasLimit: 21000,
+						GasLimit: transferGasLimit,
 						Value:    *uint256.MustFromBig(transferAmount),
 					},
 					GasPrice: *txFeeCap,
@@ -761,7 +769,7 @@ func chainWithDeployedContractAndConfig(t *testing.T, cfg *chain.Config) (*execm
 				CommonTx: types.CommonTx{
 					Nonce:    nonce,
 					To:       &receiverAddress,
-					GasLimit: 21000,
+					GasLimit: transferGasLimit,
 					Value:    *uint256.MustFromBig(transferAmount),
 				},
 				GasPrice: *txFeeCap,
@@ -797,6 +805,22 @@ func chainWithDeployedContractAndConfig(t *testing.T, cfg *chain.Config) (*execm
 	exist, err = st.Exist(accounts.InternAddress(contractAddr))
 	require.NoError(t, err)
 	assert.True(t, exist, "Contract should exist at block #2")
+
+	// Confirm the filler transfers actually created their accounts: an
+	// under-budgeted transfer silently OOGs (failed receipt, no panic) and leaves
+	// the MPT unpopulated, which would defeat the point of the fillers.
+	stateReader, err = rpchelper.CreateHistoryStateReader(ctx, tx, 6, 0, rawdbv3.TxNums)
+	require.NoError(t, err)
+	st = state.New(stateReader)
+	createdFillers := 0
+	for _, pk := range fillerPublicKeys {
+		exist, err := st.Exist(accounts.InternAddress(crypto.PubkeyToAddress(*pk)))
+		require.NoError(t, err)
+		if exist {
+			createdFillers++
+		}
+	}
+	require.Equal(t, nFillerAccounts, createdFillers, "all filler transfers should have created their accounts")
 
 	return m, bankAddress, contractAddr, receiverAddress
 }
