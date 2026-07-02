@@ -165,6 +165,17 @@ func (c *StateCache) PutCodeWithHash(addr, code, codeHash []byte, txNum uint64) 
 	cc.PutWithCodeHash(addr, common.Copy(code), codeHash, txNum)
 }
 
+// PutCodeWithHashIfAbsent is PutCodeWithHash except that a live addr→code
+// binding is kept — for prefetch writers, whose snapshot may already be
+// superseded.
+func (c *StateCache) PutCodeWithHashIfAbsent(addr, code, codeHash []byte, txNum uint64) {
+	cc, ok := c.caches[kv.CodeDomain].(*CodeCache)
+	if !ok {
+		return
+	}
+	cc.PutWithCodeHashIfAbsent(addr, common.Copy(code), codeHash, txNum)
+}
+
 // GetCodeSizeByHash returns the size of code by its Ethereum codeHash
 // without loading the bytes. Returns (0, false) when the size-only layer
 // is not populated for this hash.
@@ -231,6 +242,19 @@ func (c *StateCache) Put(domain kv.Domain, key []byte, value []byte, txNum uint6
 		return
 	}
 	cache.Put(key, common.Copy(value), txNum)
+}
+
+// PutIfAbsent is Put except that a live entry is left untouched — for prefetch
+// writers, whose snapshot may already be superseded by an authoritative Put.
+func (c *StateCache) PutIfAbsent(domain kv.Domain, key []byte, value []byte, txNum uint64) {
+	cache := c.caches[domain]
+	if cache == nil {
+		return
+	}
+	if domain == kv.CommitmentDomain && bytes.Equal(key, commitmentdb.KeyCommitmentState) {
+		return
+	}
+	cache.PutIfAbsent(key, common.Copy(value), txNum)
 }
 
 // Delete removes the data for the given domain and key.

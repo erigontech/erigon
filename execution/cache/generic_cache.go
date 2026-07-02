@@ -192,6 +192,18 @@ func (c *GenericCache[T]) GetWithTxNum(key []byte) (T, uint64, bool) {
 // In ModeNoOp inserts that would overflow the byte budget are dropped
 // (and counted via the dropped metric).
 func (c *GenericCache[T]) Put(key []byte, value T, txNum uint64) {
+	c.put(key, value, txNum, true)
+}
+
+// PutIfAbsent is Put except that a live entry for key is left untouched (a
+// stale one is replaced). Prefetch writers must use this: they read an older
+// snapshot, so an unconditional Put racing an authoritative one could pin
+// superseded state in the cache.
+func (c *GenericCache[T]) PutIfAbsent(key []byte, value T, txNum uint64) {
+	c.put(key, value, txNum, false)
+}
+
+func (c *GenericCache[T]) put(key []byte, value T, txNum uint64, overwrite bool) {
 	h := maphash.Hash(key)
 	valBytes := c.sizeFunc(value)
 	newSize := len(key) + valBytes + 24
@@ -203,6 +215,9 @@ func (c *GenericCache[T]) Put(key []byte, value T, txNum uint64) {
 	// avoid an extra allocation; the freshly-decoded value replaces the
 	// old one.
 	if hasExisting && bytes.Equal(existing.key, key) {
+		if !overwrite && !c.coh.IsStale(existing.txNum, existing.epoch) {
+			return
+		}
 		c.data.Add(h, entry[T]{key: existing.key, val: value, size: newSize, txNum: txNum, epoch: ep})
 		c.currentSize.Add(int64(newSize - existing.size))
 		return

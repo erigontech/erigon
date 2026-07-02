@@ -310,7 +310,14 @@ func (c *CodeCache) GetWithTxNum(addr []byte) ([]byte, uint64, bool) {
 func (c *CodeCache) Put(addr []byte, code []byte, txNum uint64) {
 	// No codeHash in hand here, so the entry is left unverified against maphash
 	// collisions. The EVM read path uses PutWithCodeHash, which records it.
-	c.putCode(addr, code, [32]byte{}, txNum)
+	c.putCode(addr, code, [32]byte{}, txNum, true)
+}
+
+// PutIfAbsent is Put except that a live addr→code binding is kept — for
+// prefetch writers, whose snapshot may already be superseded. The
+// content-addressed layers are per-key-immutable and skip live entries anyway.
+func (c *CodeCache) PutIfAbsent(addr []byte, code []byte, txNum uint64) {
+	c.putCode(addr, code, [32]byte{}, txNum, false)
 }
 
 // putCode populates the addr→codeID and codeID→code layers. keyHash is the
@@ -318,14 +325,22 @@ func (c *CodeCache) Put(addr []byte, code []byte, txNum uint64) {
 // a 64-bit maphash collision. Size is accounted only on the goroutine that
 // actually inserts (LoadOrStore is atomic), so concurrent Puts of the same
 // cold code can't both Add and permanently inflate codeSize.
-func (c *CodeCache) putCode(addr []byte, code []byte, keyHash [32]byte, txNum uint64) {
+func (c *CodeCache) putCode(addr []byte, code []byte, keyHash [32]byte, txNum uint64, overwriteAddr bool) {
 	if len(code) == 0 {
 		return
 	}
 	ep := c.coh.Epoch()
 	codeID := maphash.Hash(code)
 
-	c.addrToHash.Add(common.BytesToAddress(addr), versionedAddressID{addrID: codeID, codeHash: keyHash, txNum: txNum, epoch: ep})
+	a := common.BytesToAddress(addr)
+	bindAddr := overwriteAddr
+	if !bindAddr {
+		e, ok := c.addrToHash.Get(a)
+		bindAddr = !ok || c.isStale(e.txNum, e.epoch)
+	}
+	if bindAddr {
+		c.addrToHash.Add(a, versionedAddressID{addrID: codeID, codeHash: keyHash, txNum: txNum, epoch: ep})
+	}
 
 	hashKey := uint64AsBytes(&codeID)
 	entry := codeEntry{code: code, keyHash: keyHash, txNum: txNum, epoch: ep}
@@ -405,6 +420,17 @@ func (c *CodeCache) GetByCodeHash(codeHash []byte) ([]byte, bool) {
 // addr may be empty to populate only codeHashToCode (e.g. when populating from a
 // codehash-only path that hasn't seen the addr yet).
 func (c *CodeCache) PutWithCodeHash(addr []byte, code []byte, codeHash []byte, txNum uint64) {
+	c.putWithCodeHash(addr, code, codeHash, txNum, true)
+}
+
+// PutWithCodeHashIfAbsent is PutWithCodeHash except that a live addr→code
+// binding is kept — for prefetch writers, whose snapshot may already be
+// superseded.
+func (c *CodeCache) PutWithCodeHashIfAbsent(addr []byte, code []byte, codeHash []byte, txNum uint64) {
+	c.putWithCodeHash(addr, code, codeHash, txNum, false)
+}
+
+func (c *CodeCache) putWithCodeHash(addr []byte, code []byte, codeHash []byte, txNum uint64, overwriteAddr bool) {
 	if len(code) == 0 || len(codeHash) == 0 {
 		return
 	}
@@ -412,7 +438,7 @@ func (c *CodeCache) PutWithCodeHash(addr []byte, code []byte, codeHash []byte, t
 	kh := hash32(codeHash)
 
 	if len(addr) > 0 {
-		c.putCode(addr, code, kh, txNum)
+		c.putCode(addr, code, kh, txNum, overwriteAddr)
 	}
 
 	// Populate the size-only layer alongside the bytes layer — every time
