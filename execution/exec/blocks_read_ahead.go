@@ -146,13 +146,15 @@ func (bra *BlockReadAheader) AddHeaderAndBody(ctx context.Context, db kv.RoDB, h
 		if !bra.warming.CompareAndSwap(false, true) {
 			return
 		}
-		// Registered before the goroutine spawns and released before warmWg.Done
-		// (defers run LIFO), so a WaitForWarmup return implies the gauge is back
-		// to zero — StateCache.Unwind asserts on it.
+		// Gauge ordering makes "WaitForWarmup returned ⟹ gauge is zero" hold on
+		// its own: WarmupStarted only after warmWg.Add, so a Wait can't slip
+		// between them and return with the gauge raised; WarmupDone before
+		// warmWg.Done (defers run LIFO), so a Wait can't return before the
+		// gauge drops. StateCache.Unwind asserts on the gauge.
+		bra.warmWg.Add(1)
 		if bra.stateCache != nil {
 			bra.stateCache.WarmupStarted()
 		}
-		bra.warmWg.Add(1)
 		go func() {
 			defer bra.warmWg.Done()
 			if bra.stateCache != nil {
