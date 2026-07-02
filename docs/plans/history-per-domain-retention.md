@@ -22,7 +22,7 @@ Each is also a CLI flag of the same name, CLI overriding the file (`--history.st
 | value | meaning |
 |---|---|
 | `false` / `off` | not generated / not kept |
-| `true` / `keep-all` | keep everything |
+| `true` / `on` / `keep-all` | keep everything |
 | `<blocks>` — `100000` | keep the last N blocks |
 | `<duration>` — `10d`, `2w`, `6mo`, `1y` | keep ~that wall-clock (→ blocks) |
 
