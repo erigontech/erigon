@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/mark3labs/mcp-go/mcp"
+	"github.com/mark3labs/mcp-go/server"
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/common"
@@ -197,6 +198,26 @@ func TestResourceTransactionAnalysisDerivesStatus(t *testing.T) {
 
 			analysis := resourceJSON(t, contents)
 			require.Equal(t, tt.want, analysis["status"])
+		})
+	}
+}
+
+func TestRegisterResourcesPanicsOnMissingHandler(t *testing.T) {
+	tests := []struct {
+		name  string
+		blank func(h *resourceHandlerSet)
+	}{
+		{"resource handler", func(h *resourceHandlerSet) { h.networkStatus = nil }},
+		{"template handler", func(h *resourceHandlerSet) { h.blockSummary = nil }},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			h := (&ErigonMCPServer{}).resourceHandlers()
+			tt.blank(&h)
+			require.Panics(t, func() {
+				registerResources(server.NewMCPServer("test", "0"), h)
+			})
 		})
 	}
 }

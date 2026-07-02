@@ -4,6 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"maps"
+	"slices"
 	"testing"
 
 	"github.com/mark3labs/mcp-go/mcp"
@@ -140,12 +142,8 @@ func TestParseBlockNumberOrHash(t *testing.T) {
 	}
 }
 
-func sortedKeys[V any](m map[string]V) []string {
-	keys := make([]string, 0, len(m))
-	for k := range m {
-		keys = append(keys, k)
-	}
-	return keys
+func mapKeys[V any](m map[string]V) []string {
+	return slices.Collect(maps.Keys(m))
 }
 
 func resourceTemplateURIs(t *testing.T, srv *server.MCPServer) []string {
@@ -172,12 +170,12 @@ func TestEmbeddedAndStandaloneCatalogsMatch(t *testing.T) {
 	embeddedTools := embedded.mcpServer.ListTools()
 	require.Contains(t, embeddedTools, "eth_getStorageValues")
 	delete(embeddedTools, "eth_getStorageValues")
-	require.ElementsMatch(t, sortedKeys(embeddedTools), sortedKeys(standalone.mcpServer.ListTools()))
+	require.ElementsMatch(t, mapKeys(embeddedTools), mapKeys(standalone.mcpServer.ListTools()))
 
-	require.ElementsMatch(t, sortedKeys(embedded.mcpServer.ListPrompts()), sortedKeys(standalone.mcpServer.ListPrompts()))
+	require.ElementsMatch(t, mapKeys(embedded.mcpServer.ListPrompts()), mapKeys(standalone.mcpServer.ListPrompts()))
 	require.NotEmpty(t, embedded.mcpServer.ListPrompts())
 
-	require.ElementsMatch(t, sortedKeys(embedded.mcpServer.ListResources()), sortedKeys(standalone.mcpServer.ListResources()))
+	require.ElementsMatch(t, mapKeys(embedded.mcpServer.ListResources()), mapKeys(standalone.mcpServer.ListResources()))
 	require.NotEmpty(t, embedded.mcpServer.ListResources())
 
 	embeddedTemplates := resourceTemplateURIs(t, embedded.mcpServer)

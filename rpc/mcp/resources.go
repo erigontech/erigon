@@ -3,6 +3,7 @@ package mcp
 import (
 	"context"
 	"fmt"
+	"reflect"
 
 	"github.com/mark3labs/mcp-go/mcp"
 	"github.com/mark3labs/mcp-go/server"
@@ -26,6 +27,13 @@ type resourceHandlerSet struct {
 }
 
 func registerResources(srv *server.MCPServer, h resourceHandlerSet) {
+	hv := reflect.ValueOf(h)
+	for i := range hv.NumField() {
+		if hv.Field(i).IsNil() {
+			panic(fmt.Sprintf("mcp: missing resource handler %s", hv.Type().Field(i).Name))
+		}
+	}
+
 	// Static resources
 	srv.AddResource(
 		mcp.NewResource("erigon://node/info",
