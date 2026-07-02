@@ -291,7 +291,7 @@ var (
 
 // EIP-8282 - The Builder Deposit Addresses
 // Nick's-method derived address from the builder deposit contract deployment transaction.
-var BuilderDepositAddress = accounts.InternAddress(common.HexToAddress("0x0000884d2AA32eAa155F59A2f24eFa73D9008282"))
+var BuilderDepositAddress = accounts.InternAddress(common.HexToAddress("0x00006AE84ed173D4394de5E28F9ED56b28008282"))
 
 // EIP-8282 - The Builder Exit Addresses
 // Nick's-method derived address from the builder exit contract deployment transaction.

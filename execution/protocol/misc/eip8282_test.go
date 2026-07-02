@@ -120,7 +120,7 @@ func TestBuilderContractAddresses(t *testing.T) {
 	t.Parallel()
 
 	require.Equal(t,
-		common.HexToAddress("0x0000884d2AA32eAa155F59A2f24eFa73D9008282"),
+		common.HexToAddress("0x00006AE84ed173D4394de5E28F9ED56b28008282"),
 		params.BuilderDepositAddress.Value(),
 		"BuilderDepositAddress must match EIP-8282 spec")
 
