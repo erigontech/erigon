@@ -383,8 +383,7 @@ func (sd *SharedDomains) flushPendingUpdates(ctx context.Context, tx kv.Temporal
 		return nil
 	}
 
-	defer sd.DetachAccumulatorForGenesisLocked(upd.BlockNum)()
-	// No past changeset found — write into whatever is current (nil for genesis, detached above).
+	// No past changeset found — write into whatever is current.
 	_, err := commitment.ApplyDeferredBranchUpdates(upd.Deferred, runtime.NumCPU(), putBranch)
 	return err
 }
@@ -608,17 +607,6 @@ func (sd *SharedDomains) SwapAccumulatorLocked(acc *changeset.StateChangeSet) (r
 // func that restores the previous one. Callers must hold changesetMu.
 func (sd *SharedDomains) DetachAccumulatorLocked() (restore func()) {
 	return sd.SwapAccumulatorLocked(nil)
-}
-
-// DetachAccumulatorForGenesisLocked detaches the accumulator for block 0 (a
-// no-op otherwise) so genesis commitment writes land in no changeset rather
-// than the next block's, where an unwind to genesis would reverse them.
-// Callers must hold changesetMu.
-func (sd *SharedDomains) DetachAccumulatorForGenesisLocked(blockNum uint64) (restore func()) {
-	if blockNum != 0 {
-		return func() {}
-	}
-	return sd.DetachAccumulatorLocked()
 }
 
 // GetChangesetByBlockNum returns the saved changeset for a given block
