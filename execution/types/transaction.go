@@ -310,6 +310,32 @@ func UnwrapTxPlayloadRlp(blobTxRlp []byte) ([]byte, error) {
 	return blobTxRlp, nil
 }
 
+// marshalTyped writes the canonical EIP-2718 encoding: the type byte followed by the payload.
+func marshalTyped(w io.Writer, txType byte, encodePayload func(w io.Writer, b []byte) error) error {
+	b := rlp.NewEncodingBuf()
+	defer b.Release()
+	b[0] = txType
+	if _, err := w.Write(b[:1]); err != nil {
+		return err
+	}
+	return encodePayload(w, b[:])
+}
+
+// encodeRLPTyped writes the canonical EIP-2718 encoding wrapped into an RLP string.
+func encodeRLPTyped(w io.Writer, txType byte, payloadSize int, encodePayload func(w io.Writer, b []byte) error) error {
+	envelopeSize := 1 + rlp.ListPrefixLen(payloadSize) + payloadSize
+	b := rlp.NewEncodingBuf()
+	defer b.Release()
+	if err := rlp.EncodeStringPrefix(envelopeSize, w, b[:]); err != nil {
+		return err
+	}
+	b[0] = txType
+	if _, err := w.Write(b[:1]); err != nil {
+		return err
+	}
+	return encodePayload(w, b[:])
+}
+
 func MarshalTransactionsBinary(txs Transactions) ([][]byte, error) {
 	var err error
 	var buf bytes.Buffer

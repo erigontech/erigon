@@ -243,24 +243,9 @@ func (tx *AccountAbstractionTransaction) EncodingSize() int {
 
 func (tx *AccountAbstractionTransaction) EncodeRLP(w io.Writer) error {
 	payloadSize, accessListLen, authorizationsLen := tx.payloadSize()
-	envelopSize := 1 + rlp.ListPrefixLen(payloadSize) + payloadSize
-	b := rlp.NewEncodingBuf()
-	defer b.Release()
-	// encode envelope size
-	if err := rlp.EncodeStringPrefix(envelopSize, w, b[:]); err != nil {
-		return err
-	}
-	// encode TxType
-	b[0] = AccountAbstractionTxType
-	if _, err := w.Write(b[:1]); err != nil {
-		return err
-	}
-
-	if err := tx.encodePayload(w, b[:], payloadSize, accessListLen, authorizationsLen); err != nil {
-		return err
-	}
-
-	return nil
+	return encodeRLPTyped(w, AccountAbstractionTxType, payloadSize, func(w io.Writer, b []byte) error {
+		return tx.encodePayload(w, b, payloadSize, accessListLen, authorizationsLen)
+	})
 }
 
 func (tx *AccountAbstractionTransaction) encodePayload(w io.Writer, b []byte, payloadSize, accessListLen, authorizationsLen int) error {
@@ -461,17 +446,9 @@ func (tx *AccountAbstractionTransaction) DecodeRLP(s *rlp.Stream) error {
 
 func (tx *AccountAbstractionTransaction) MarshalBinary(w io.Writer) error {
 	payloadSize, accessListLen, authorizationsLen := tx.payloadSize()
-	b := rlp.NewEncodingBuf()
-	defer b.Release()
-	// encode TxType
-	b[0] = AccountAbstractionTxType
-	if _, err := w.Write(b[:1]); err != nil {
-		return err
-	}
-	if err := tx.encodePayload(w, b[:], payloadSize, accessListLen, authorizationsLen); err != nil {
-		return err
-	}
-	return nil
+	return marshalTyped(w, AccountAbstractionTxType, func(w io.Writer, b []byte) error {
+		return tx.encodePayload(w, b, payloadSize, accessListLen, authorizationsLen)
+	})
 }
 
 func (tx *AccountAbstractionTransaction) PreTransactionGasCost(rules *chain.Rules, hasEIP3860 bool) (uint64, error) {

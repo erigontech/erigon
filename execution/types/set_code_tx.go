@@ -94,17 +94,9 @@ func (tx *SetCodeTransaction) MarshalBinary(w io.Writer) error {
 		return ErrNilToFieldTx
 	}
 	payloadSize, accessListLen, authorizationsLen := tx.payloadSize()
-	b := rlp.NewEncodingBuf()
-	defer b.Release()
-	// encode TxType
-	b[0] = SetCodeTxType
-	if _, err := w.Write(b[:1]); err != nil {
-		return err
-	}
-	if err := tx.encodePayload(w, b[:], payloadSize, accessListLen, authorizationsLen); err != nil {
-		return err
-	}
-	return nil
+	return marshalTyped(w, SetCodeTxType, func(w io.Writer, b []byte) error {
+		return tx.encodePayload(w, b, payloadSize, accessListLen, authorizationsLen)
+	})
 }
 
 func (tx *SetCodeTransaction) AsMessage(s Signer, baseFee *uint256.Int, rules *chain.Rules) (*Message, error) {
@@ -202,20 +194,9 @@ func (tx *SetCodeTransaction) EncodeRLP(w io.Writer) error {
 		return ErrNilToFieldTx
 	}
 	payloadSize, accessListLen, authorizationsLen := tx.payloadSize()
-	envelopSize := 1 + rlp.ListPrefixLen(payloadSize) + payloadSize
-	b := rlp.NewEncodingBuf()
-	defer b.Release()
-	// encode envelope size
-	if err := rlp.EncodeStringPrefix(envelopSize, w, b[:]); err != nil {
-		return err
-	}
-	// encode TxType
-	b[0] = SetCodeTxType
-	if _, err := w.Write(b[:1]); err != nil {
-		return err
-	}
-
-	return tx.encodePayload(w, b[:], payloadSize, accessListLen, authorizationsLen)
+	return encodeRLPTyped(w, SetCodeTxType, payloadSize, func(w io.Writer, b []byte) error {
+		return tx.encodePayload(w, b, payloadSize, accessListLen, authorizationsLen)
+	})
 }
 
 func (tx *SetCodeTransaction) DecodeRLP(s *rlp.Stream) error {

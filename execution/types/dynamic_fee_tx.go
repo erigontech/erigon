@@ -126,17 +126,9 @@ func (tx *DynamicFeeTransaction) WithSignature(signer Signer, sig []byte) (Trans
 // transactions, it returns the type and payload.
 func (tx *DynamicFeeTransaction) MarshalBinary(w io.Writer) error {
 	payloadSize, accessListLen := tx.payloadSize()
-	b := rlp.NewEncodingBuf()
-	defer b.Release()
-	// encode TxType
-	b[0] = DynamicFeeTxType
-	if _, err := w.Write(b[:1]); err != nil {
-		return err
-	}
-	if err := tx.encodePayload(w, b[:], payloadSize, accessListLen); err != nil {
-		return err
-	}
-	return nil
+	return marshalTyped(w, DynamicFeeTxType, func(w io.Writer, b []byte) error {
+		return tx.encodePayload(w, b, payloadSize, accessListLen)
+	})
 }
 
 // encode1559Prefix writes the payload list prefix and the leading fields shared
@@ -185,23 +177,9 @@ func (tx *DynamicFeeTransaction) encodePayload(w io.Writer, b []byte, payloadSiz
 
 func (tx *DynamicFeeTransaction) EncodeRLP(w io.Writer) error {
 	payloadSize, accessListLen := tx.payloadSize()
-	// size of struct prefix and TxType
-	envelopeSize := 1 + rlp.ListPrefixLen(payloadSize) + payloadSize
-	b := rlp.NewEncodingBuf()
-	defer b.Release()
-	// envelope
-	if err := rlp.EncodeStringPrefix(envelopeSize, w, b[:]); err != nil {
-		return err
-	}
-	// encode TxType
-	b[0] = DynamicFeeTxType
-	if _, err := w.Write(b[:1]); err != nil {
-		return err
-	}
-	if err := tx.encodePayload(w, b[:], payloadSize, accessListLen); err != nil {
-		return err
-	}
-	return nil
+	return encodeRLPTyped(w, DynamicFeeTxType, payloadSize, func(w io.Writer, b []byte) error {
+		return tx.encodePayload(w, b, payloadSize, accessListLen)
+	})
 }
 
 // decode1559Prefix reads the payload fields shared by all EIP-1559-style

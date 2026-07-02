@@ -234,23 +234,9 @@ func (stx *BlobTx) EncodeRLP(w io.Writer) error {
 		return ErrNilToFieldTx
 	}
 	payloadSize, accessListLen, blobHashesLen := stx.payloadSize()
-	// size of struct prefix and TxType
-	envelopeSize := 1 + rlp.ListPrefixLen(payloadSize) + payloadSize
-	b := rlp.NewEncodingBuf()
-	defer b.Release()
-	// envelope
-	if err := rlp.EncodeStringPrefix(envelopeSize, w, b[:]); err != nil {
-		return err
-	}
-	// encode TxType
-	b[0] = BlobTxType
-	if _, err := w.Write(b[:1]); err != nil {
-		return err
-	}
-	if err := stx.encodePayload(w, b[:], payloadSize, accessListLen, blobHashesLen); err != nil {
-		return err
-	}
-	return nil
+	return encodeRLPTyped(w, BlobTxType, payloadSize, func(w io.Writer, b []byte) error {
+		return stx.encodePayload(w, b, payloadSize, accessListLen, blobHashesLen)
+	})
 }
 
 func (stx *BlobTx) MarshalBinary(w io.Writer) error {
@@ -258,17 +244,9 @@ func (stx *BlobTx) MarshalBinary(w io.Writer) error {
 		return ErrNilToFieldTx
 	}
 	payloadSize, accessListLen, blobHashesLen := stx.payloadSize()
-	b := rlp.NewEncodingBuf()
-	defer b.Release()
-	// encode TxType
-	b[0] = BlobTxType
-	if _, err := w.Write(b[:1]); err != nil {
-		return err
-	}
-	if err := stx.encodePayload(w, b[:], payloadSize, accessListLen, blobHashesLen); err != nil {
-		return err
-	}
-	return nil
+	return marshalTyped(w, BlobTxType, func(w io.Writer, b []byte) error {
+		return stx.encodePayload(w, b, payloadSize, accessListLen, blobHashesLen)
+	})
 }
 
 func (stx *BlobTx) DecodeRLP(s *rlp.Stream) error {

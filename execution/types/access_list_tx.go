@@ -176,17 +176,9 @@ func encodeAccessList(al AccessList, w io.Writer, b []byte) error {
 // transactions, it returns the type and payload.
 func (tx *AccessListTx) MarshalBinary(w io.Writer) error {
 	payloadSize, accessListLen := tx.payloadSize()
-	b := rlp.NewEncodingBuf()
-	defer b.Release()
-	// encode TxType
-	b[0] = AccessListTxType
-	if _, err := w.Write(b[:1]); err != nil {
-		return err
-	}
-	if err := tx.encodePayload(w, b[:], payloadSize, accessListLen); err != nil {
-		return err
-	}
-	return nil
+	return marshalTyped(w, AccessListTxType, func(w io.Writer, b []byte) error {
+		return tx.encodePayload(w, b, payloadSize, accessListLen)
+	})
 }
 
 func (tx *AccessListTx) encodePayload(w io.Writer, b []byte, payloadSize, accessListLen int) error {
@@ -236,23 +228,9 @@ func (tx *AccessListTx) encodePayload(w io.Writer, b []byte, payloadSize, access
 // EncodeRLP implements rlp.Encoder
 func (tx *AccessListTx) EncodeRLP(w io.Writer) error {
 	payloadSize, accessListLen := tx.payloadSize()
-	// size of struct prefix and TxType
-	envelopeSize := 1 + rlp.ListPrefixLen(payloadSize) + payloadSize
-	b := rlp.NewEncodingBuf()
-	defer b.Release()
-	// envelope
-	if err := rlp.EncodeStringPrefix(envelopeSize, w, b[:]); err != nil {
-		return err
-	}
-	// encode TxType
-	b[0] = AccessListTxType
-	if _, err := w.Write(b[:1]); err != nil {
-		return err
-	}
-	if err := tx.encodePayload(w, b[:], payloadSize, accessListLen); err != nil {
-		return err
-	}
-	return nil
+	return encodeRLPTyped(w, AccessListTxType, payloadSize, func(w io.Writer, b []byte) error {
+		return tx.encodePayload(w, b, payloadSize, accessListLen)
+	})
 }
 
 func decodeAccessList(al *AccessList, s *rlp.Stream) error {

@@ -271,13 +271,7 @@ func (tx *LegacyTx) encodePayload(w io.Writer, b []byte, payloadSize int) error 
 }
 
 func (tx *LegacyTx) EncodeRLP(w io.Writer) error {
-	payloadSize := tx.payloadSize()
-	b := rlp.NewEncodingBuf()
-	defer b.Release()
-	if err := tx.encodePayload(w, b[:], payloadSize); err != nil {
-		return err
-	}
-	return nil
+	return tx.MarshalBinary(w)
 }
 
 func (tx *LegacyTx) DecodeRLP(s *rlp.Stream) error {
