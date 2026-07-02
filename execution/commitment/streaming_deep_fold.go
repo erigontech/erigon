@@ -51,8 +51,12 @@ func unfoldStorageBase(base *HexPatriciaHashed, accPrefix []byte) error {
 	if err != nil {
 		return err
 	}
-	if len(branch) < 4 {
+	if len(branch) == 0 {
 		return errStorageBaseNotBranch
+	}
+	// A stored branch is always >= 4 bytes (touchMap+afterMap); a shorter non-empty read is corrupt, not missing.
+	if len(branch) < 4 {
+		return fmt.Errorf("unfoldStorageBase: corrupt branch record at %x: %d bytes", accPrefix, len(branch))
 	}
 	base.branchBefore[0] = true
 	return base.decodeBranchIntoRow(0, d+1, branch[2:], false)
