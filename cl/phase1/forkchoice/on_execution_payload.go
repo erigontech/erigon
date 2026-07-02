@@ -352,7 +352,7 @@ func (f *ForkChoiceStore) applyEnvelopeLocked(ctx context.Context, signedEnvelop
 	// Get block state for verification.
 	// ProcessExecutionPayloadEnvelope backfills the header root as part of verification,
 	// but we don't want that to affect the canonical block state.
-	blockState, err := f.forkGraph.GetState(beaconBlockRoot, false)
+	blockState, err := f.forkGraph.GetState(beaconBlockRoot, true)
 	if err != nil {
 		return false, fmt.Errorf("OnExecutionPayload: failed to get block state: %w", err)
 	}
@@ -579,7 +579,7 @@ func (f *ForkChoiceStore) applyLocalSelfBuildEnvelopeLocked(ctx context.Context,
 		return false, nil
 	}
 
-	blockState, err := f.forkGraph.GetState(beaconBlockRoot, false)
+	blockState, err := f.forkGraph.GetState(beaconBlockRoot, true)
 	if err != nil {
 		return false, fmt.Errorf("applyLocalSelfBuildEnvelopeLocked: failed to get block state: %w", err)
 	}

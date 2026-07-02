@@ -447,13 +447,23 @@ func applyWithdrawals(s abstract.BeaconState, withdrawals *solid.ListSSZ[*cltype
 	builders := s.GetBuilders()
 	buildersModified := false
 	err := solid.RangeErr[*cltypes.Withdrawal](withdrawals, func(_ int, w *cltypes.Withdrawal, _ int) error {
+		if w == nil {
+			return nil
+		}
 		// [Modified in Gloas:EIP7732]
 		if s.Version() >= clparams.GloasVersion && state.IsBuilderIndex(w.Validator) {
 			builderIndex := state.ConvertValidatorIndexToBuilderIndex(w.Validator)
 			if builders == nil || int(builderIndex) >= builders.Len() {
-				return fmt.Errorf("applyWithdrawals: builder_index %d out of range (builders length %d)", builderIndex, builders.Len())
+				buildersLen := 0
+				if builders != nil {
+					buildersLen = builders.Len()
+				}
+				return fmt.Errorf("applyWithdrawals: builder_index %d out of range (builders length %d)", builderIndex, buildersLen)
 			}
 			builder := builders.Get(int(builderIndex))
+			if builder == nil {
+				return fmt.Errorf("applyWithdrawals: builder_index %d is nil", builderIndex)
+			}
 			// Copy-on-write: create a new Builder to avoid mutating a shared pointer
 			// (ShallowCopy shares *Builder pointers across state copies).
 			newBuilder := *builder

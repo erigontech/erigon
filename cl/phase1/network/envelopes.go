@@ -64,7 +64,7 @@ func RequestEnvelopesFrantically(ctx context.Context, r *rpc.BeaconRpcP2P, roots
 		// protocol but return EOF, wasting the entire 30s timeout budget.
 		if byRootAttempts >= 3 && len(fullBlocks) > 0 && !byRangeAttempted {
 			byRangeAttempted = true
-			requestEnvelopesByRange(ctx, r, fullBlocks, received)
+			requestEnvelopesByRange(ctx, r, fullBlocks, requestedRoots, received)
 			needed = filterReceived(needed, received)
 			if len(needed) == 0 {
 				break
@@ -131,7 +131,7 @@ func filterReceived(needed [][32]byte, received map[common.Hash]*cltypes.SignedE
 	return remaining
 }
 
-func requestEnvelopesByRange(ctx context.Context, r *rpc.BeaconRpcP2P, blocks []*cltypes.SignedBeaconBlock, received map[common.Hash]*cltypes.SignedExecutionPayloadEnvelope) {
+func requestEnvelopesByRange(ctx context.Context, r *rpc.BeaconRpcP2P, blocks []*cltypes.SignedBeaconBlock, requestedRoots map[common.Hash]struct{}, received map[common.Hash]*cltypes.SignedExecutionPayloadEnvelope) {
 	if len(blocks) == 0 {
 		return
 	}
@@ -139,16 +139,6 @@ func requestEnvelopesByRange(ctx context.Context, r *rpc.BeaconRpcP2P, blocks []
 	endSlot := blocks[len(blocks)-1].Block.Slot
 	count := endSlot - startSlot + 1
 	log.Debug("envelope fetch: falling back to by-range", "startSlot", startSlot, "count", count)
-
-	// Build a set of valid block roots from the blocks we actually need envelopes for.
-	validRoots := make(map[common.Hash]struct{}, len(blocks))
-	for _, blk := range blocks {
-		root, err := blk.Block.HashSSZ()
-		if err != nil {
-			continue
-		}
-		validRoots[root] = struct{}{}
-	}
 
 	maxCount := r.MaxRequestPayloads()
 	if maxCount == 0 {
@@ -162,17 +152,6 @@ func requestEnvelopesByRange(ctx context.Context, r *rpc.BeaconRpcP2P, blocks []
 			log.Debug("envelope fetch: by-range error", "err", err)
 			return
 		}
-		for _, env := range envelopes {
-			if env.Message == nil {
-				continue
-			}
-			// Only accept envelopes whose BeaconBlockRoot matches one of the blocks we requested.
-			// A malicious peer could respond with envelopes for arbitrary roots.
-			if _, ok := validRoots[env.Message.BeaconBlockRoot]; !ok {
-				log.Debug("requestEnvelopesByRange: ignoring unsolicited envelope", "root", env.Message.BeaconBlockRoot)
-				continue
-			}
-			received[env.Message.BeaconBlockRoot] = env
-		}
+		acceptEnvelopeResponses(envelopes, requestedRoots, received)
 	}
 }
