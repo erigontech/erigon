@@ -63,10 +63,8 @@ func (ht *HistoryRoTx) retireBeforeStep(cutoff kv.Step) (deleted []string, retir
 }
 
 // RetireOldHistoryFiles retires History+InvertedIndex files entirely below
-// cutoffStep. Commitment and RCache history are skipped: their retention is
-// governed by dedicated flags (--prune.include-commitment-history,
-// --persist.receipts), not by age. Physical deletion is deferred until no
-// reader still pins the retired generation.
+// cutoffStep. Physical deletion is deferred until no reader still pins the
+// retired generation.
 func (a *Aggregator) RetireOldHistoryFiles(ctx context.Context, cutoffStep kv.Step) (retiredCount int, err error) {
 	if cutoffStep == 0 {
 		return 0, nil
@@ -80,6 +78,9 @@ func (a *Aggregator) RetireOldHistoryFiles(ctx context.Context, cutoffStep kv.St
 	var deleted []string
 	var retired []*FilesItem
 	for _, dt := range at.d {
+		// commitment.history and rcache have special cli flags: --prune.include-commitment-history --persist.receipt
+		// if they enabled they are never pruned - it's current logic. we will change it in future PR's - but for now keep them
+		// See: https://github.com/erigontech/erigon/issues/21306 'step 4'
 		if dt.name == kv.CommitmentDomain || dt.name == kv.RCacheDomain {
 			continue
 		}
