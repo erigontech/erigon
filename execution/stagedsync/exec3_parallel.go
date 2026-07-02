@@ -2510,6 +2510,13 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 						if err != nil {
 							return nil, err
 						}
+						// Actually, when we reconstruct prevReceipt from the DB, it does not have any logs.
+						// The logIndexAfterTx we got from the DB is already the index after adding all logs of the previous tx.
+						// So we are setting FirstLogIndexWithinBlock to logIndexAfterTx and keeping prevReceipt.Logs as nil (len is 0).
+						// Because of this, the calculation in CreateNextReceipt:
+						// currentReceipt.FirstLogIndexWithinBlock = prevReceipt.FirstLogIndexWithinBlock + len(prevReceipt.Logs)
+						// becomes logIndexAfterTx + 0, which correctly gives the starting index of the current tx.
+						// So this math works out perfectly without needing to fetch or re-execute the previous tx logs.
 						prevReceipt = &types.Receipt{
 							CumulativeGasUsed:        cumGasUsed,
 							FirstLogIndexWithinBlock: logIndexAfterTx,
