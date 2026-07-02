@@ -1695,7 +1695,7 @@ func doIntegrity(cliCtx *cli.Context) error {
 				logger.Info("[integrity] StateRootVerifyByHistory skipped because commitment history is not enabled on this datadir")
 				return nil
 			}
-			to, err := stateProgress(ctx, db, blockReader.TxnumReader())
+			to, err := stateFilesProgress(ctx, db, blockReader.TxnumReader())
 			if err != nil {
 				return err
 			}
@@ -1758,34 +1758,24 @@ func doIntegrity(cliCtx *cli.Context) error {
 	return nil
 }
 
-// stateProgress returns the latest block number for which state history is available.
-// It considers both snapshot files (EndTxNumMinimax) and MDBX data (Execution stage progress).
-// Use this as the upper bound for state-history integrity commands.
-func stateProgress(ctx context.Context, db kv.TemporalRoDB, txNumsReader rawdbv3.TxNumsReader) (uint64, error) {
-	agg := db.(state.HasAgg).Agg().(*state.Aggregator)
-	aggMax := agg.EndTxNumMinimax()
-	if aggMax == 0 {
-		return 0, nil
-	}
-	roTx, err := db.BeginRo(ctx)
+// stateFilesProgress returns the latest block fully covered by state-history files.
+// Commitment-history checks reconstruct from files only, so they must not run past file coverage.
+func stateFilesProgress(ctx context.Context, db kv.TemporalRoDB, txNumsReader rawdbv3.TxNumsReader) (uint64, error) {
+	roTx, err := db.BeginTemporalRo(ctx)
 	if err != nil {
 		return 0, err
 	}
 	defer roTx.Rollback()
+	aggMax := state.AggTx(roTx).EndTxNumNoCommitment()
+	if aggMax == 0 {
+		return 0, nil
+	}
 	blockNum, err := findBlockNumByTxNum(ctx, roTx, txNumsReader, aggMax)
 	if err != nil {
 		return 0, err
 	}
 	if blockNum > 0 {
 		blockNum-- // FindBlockNum returns the block *containing* aggMax, but the per-block check needs the entire block covered
-	}
-	// Also check execution stage progress — MDBX may have state beyond snapshots
-	execProgress, err := stages.GetStageProgress(roTx, stages.Execution)
-	if err != nil {
-		return blockNum, nil // fall back to snapshot-only progress
-	}
-	if execProgress > blockNum {
-		blockNum = execProgress
 	}
 	return blockNum, nil
 }
@@ -1863,7 +1853,7 @@ func doCheckStateRootByHistory(cliCtx *cli.Context, logger log.Logger) error {
 	from := cliCtx.Uint64("from")
 	to := cliCtx.Uint64("to")
 	if !cliCtx.IsSet("to") {
-		latestBlock, err := stateProgress(ctx, db, blockReader.TxnumReader())
+		latestBlock, err := stateFilesProgress(ctx, db, blockReader.TxnumReader())
 		if err != nil {
 			return err
 		}
