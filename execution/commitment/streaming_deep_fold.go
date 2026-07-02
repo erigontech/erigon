@@ -30,13 +30,11 @@ import (
 	"github.com/erigontech/erigon/execution/commitment/nibbles"
 )
 
-// Seed the base from the real on-disk branch, not a hand-seed, so untouched first-nibble subtrees survive instead of dropping and diverging the root from the sequential trie.
-// errStorageBaseNotBranch signals that the on-disk storage trie has no branch
-// exactly at the account prefix (its top is a deeper extension because the
-// existing slots share a first nibble). The deep parallel storage fold seeds
-// row 0 from that branch, so its absence would drop untouched on-disk siblings
-// from the storage root. Callers fall back to normal streaming recursion.
+// errStorageBaseNotBranch: no on-disk branch exactly at the account prefix (its
+// storage top is a deeper extension); callers fall back to streaming recursion.
 var errStorageBaseNotBranch = errors.New("streaming: storage base has no branch at account prefix")
+
+// Seed the base from the real on-disk branch, not a hand-seed, so untouched first-nibble subtrees survive instead of dropping and diverging the root from the sequential trie.
 
 func unfoldStorageBase(base *HexPatriciaHashed, accPrefix []byte) error {
 	d := int16(len(accPrefix))
@@ -101,10 +99,8 @@ func dfsSubtreeDeep(w *HexPatriciaHashed, node *prefixNode, path []byte, storage
 		if !errors.Is(err, errStorageBaseNotBranch) {
 			return fmt.Errorf("storageRoot: %w", err)
 		}
-		// No on-disk branch exactly at the account prefix: seeding row 0 from the
-		// (absent) branch would drop untouched on-disk siblings living under a
-		// deeper branch. Fall through to normal streaming recursion, which
-		// recovers them via per-key unfolds (the sequential path).
+		// fall through to normal streaming recursion, which recovers the untouched
+		// on-disk siblings via per-key unfolds
 	}
 
 	childIdx := 0

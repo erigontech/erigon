@@ -936,8 +936,7 @@ func TestStreaming_MultiDepthSplitParity(t *testing.T) {
 		require.Equalf(t, seqRoot, root, "multi-depth streaming(workers=%d) root != ModeDirect", w)
 		require.Equalf(t, parRoot, root, "multi-depth streaming(workers=%d) root != ModeParallel", w)
 		requireBranchParity(t, seqMs, ms)
-		// First-commit whale: no persisted branch at the account prefix, so it takes the
-		// streaming-recursion fallback, not the deep fold; root/branch parity above is the check.
+		// First-commit whale takes the streaming-recursion fallback, not the deep fold.
 		sc.Release()
 	}
 }
@@ -1002,8 +1001,7 @@ func TestStreaming_StorageInteriorSplits(t *testing.T) {
 
 		require.Equalf(t, seqRoot, root, "whale storage-interior split(workers=%d) root != sequential", w)
 		requireBranchParity(t, seqMs, ms)
-		// First-commit whale: no persisted branch at the account prefix, so it takes the
-		// streaming-recursion fallback, not the deep fold; root/branch parity above is the check.
+		// First-commit whale takes the streaming-recursion fallback, not the deep fold.
 		sc.Release()
 	}
 }
