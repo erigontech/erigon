@@ -101,6 +101,8 @@ func TestExtractURIParam(t *testing.T) {
 		{"erigon://block/latest/summary", "erigon://block/", "/summary", "latest"},
 		{"erigon://node/info", "erigon://node/", "", "info"},
 		{"erigon://address//summary", "erigon://address/", "/summary", ""},
+		{"erigon://address/0xabc", "erigon://address/", "/summary", ""},
+		{"mainnet://address/0xabc/summary", "erigon://address/", "/summary", ""},
 	}
 	for _, tt := range tests {
 		require.Equal(t, tt.want, extractURIParam(tt.uri, tt.prefix, tt.suffix), "uri=%s", tt.uri)
