@@ -18,6 +18,7 @@ package cache
 
 import (
 	"bytes"
+	"sync"
 	"testing"
 
 	"github.com/c2h5oh/datasize"
@@ -855,4 +856,26 @@ func TestCodeCache_PutWithCodeHashIfAbsent(t *testing.T) {
 	size, ok := cc.GetCodeSizeByCodeHash(staleHash)
 	require.True(t, ok)
 	assert.Equal(t, len(stale), size)
+}
+
+// A conditional put must be atomic w.r.t. a concurrent unconditional Put of
+// the same key: without a shared critical section the conditional writer can
+// check (absent), lose the CPU to the authoritative writer's insert, then
+// clobber it — the prefetch-vs-flush staleness this cache guards against.
+func TestDomainCache_PutIfAbsentAtomicWithPut(t *testing.T) {
+	c := NewDomainCacheMode(1*datasize.MB, ModeEvictLRU)
+	addr := makeAddr(1)
+	fresh := []byte("fresh")
+	stale := []byte("stale")
+	for round := 0; round < 20000; round++ {
+		c.Delete(addr)
+		var wg sync.WaitGroup
+		wg.Add(2)
+		go func() { defer wg.Done(); c.Put(addr, fresh, 20) }()
+		go func() { defer wg.Done(); c.PutIfAbsent(addr, stale, 10) }()
+		wg.Wait()
+		v, ok := c.Get(addr)
+		require.True(t, ok)
+		require.Equal(t, fresh, v, "round %d: PutIfAbsent raced past a concurrent Put", round)
+	}
 }

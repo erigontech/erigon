@@ -17,6 +17,7 @@
 package cache
 
 import (
+	"sync"
 	"sync/atomic"
 	"unsafe"
 
@@ -149,6 +150,10 @@ type CodeCache struct {
 	// an entry is valid iff written in the current epoch OR its txNum is below
 	// the unwind floor. See execution/cache/coherence.
 	coh coherence.Gen
+
+	// addrBindMu serializes addr→code binding writers so PutIfAbsent's
+	// check+bind is atomic w.r.t. a concurrent authoritative rebind.
+	addrBindMu sync.Mutex
 
 	// Stats counters (atomic for concurrent access)
 	addrHits       atomic.Uint64
@@ -333,6 +338,7 @@ func (c *CodeCache) putCode(addr []byte, code []byte, keyHash [32]byte, txNum ui
 	codeID := maphash.Hash(code)
 
 	a := common.BytesToAddress(addr)
+	c.addrBindMu.Lock()
 	bindAddr := overwriteAddr
 	if !bindAddr {
 		e, ok := c.addrToHash.Get(a)
@@ -341,6 +347,7 @@ func (c *CodeCache) putCode(addr []byte, code []byte, keyHash [32]byte, txNum ui
 	if bindAddr {
 		c.addrToHash.Add(a, versionedAddressID{addrID: codeID, codeHash: keyHash, txNum: txNum, epoch: ep})
 	}
+	c.addrBindMu.Unlock()
 
 	hashKey := uint64AsBytes(&codeID)
 	entry := codeEntry{code: code, keyHash: keyHash, txNum: txNum, epoch: ep}

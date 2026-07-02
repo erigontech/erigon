@@ -18,6 +18,7 @@ package cache
 
 import (
 	"bytes"
+	"sync"
 	"sync/atomic"
 
 	"github.com/c2h5oh/datasize"
@@ -28,6 +29,10 @@ import (
 	"github.com/erigontech/erigon/common/maphash"
 	"github.com/erigontech/erigon/execution/cache/coherence"
 )
+
+// putStripeCount sizes the same-key write-serialization stripes; power of two
+// so the stripe index is a mask of the key hash.
+const putStripeCount = 256
 
 // avgBytesPerEntry is the assumption used to translate a byte budget into
 // the entry-count cap that freelru.ShardedLRU is sized against. 256 B
@@ -63,6 +68,10 @@ type GenericCache[T any] struct {
 	// valid iff written in the current epoch OR its txNum is below the unwind
 	// floor. See execution/cache/coherence.
 	coh coherence.Gen
+
+	// putStripes serialize same-key writers so PutIfAbsent's check+insert is
+	// atomic w.r.t. a concurrent Put (freelru offers no conditional insert).
+	putStripes [putStripeCount]sync.Mutex
 
 	hits         atomic.Uint64
 	misses       atomic.Uint64
@@ -208,6 +217,10 @@ func (c *GenericCache[T]) put(key []byte, value T, txNum uint64, overwrite bool)
 	valBytes := c.sizeFunc(value)
 	newSize := len(key) + valBytes + 24
 	ep := c.coh.Epoch()
+
+	mu := &c.putStripes[h&(putStripeCount-1)]
+	mu.Lock()
+	defer mu.Unlock()
 
 	existing, hasExisting := c.data.Get(h)
 
