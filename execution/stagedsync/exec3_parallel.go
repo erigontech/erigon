@@ -2506,7 +2506,7 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 						if rawtemporaldb.ReceiptStoresFirstLogIdx(applyTx) {
 							return nil, fmt.Errorf("parallel execution is not supported on databases with legacy receipt domain schemas (ReceiptStoresFirstLogIdx == true)")
 						}
-						cumGasUsed, _, logIndexAfterTx, err := rawtemporaldb.ReceiptAsOf(applyTx, txVersion.TxNum)
+						cumGasUsed, cumBlobGasUsed, logIndexAfterTx, err := rawtemporaldb.ReceiptAsOf(applyTx, txVersion.TxNum)
 						if err != nil {
 							return nil, err
 						}
@@ -2521,6 +2521,8 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 							CumulativeGasUsed:        cumGasUsed,
 							FirstLogIndexWithinBlock: logIndexAfterTx,
 						}
+						// Initialize cumulative blob gas used so far in this block
+						be.blobGasUsed = cumBlobGasUsed
 					}
 				}
 
