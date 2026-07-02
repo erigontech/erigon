@@ -2387,7 +2387,12 @@ func runBALFoldAheadChangeset(t *testing.T, foldAhead bool) balFoldResult {
 	const windowStart = chainLen - maxReorgDepth
 
 	ctx := t.Context()
-	privKey, err := crypto.GenerateKey()
+	// Deterministic key: fold-off and fold-on must execute the identical chain
+	// (same sender → same trie branches) so the only difference between the two
+	// runs is fold-ahead vs incremental. A random key would give each run a
+	// different address and thus different branch keys, making the cross-mode
+	// changeset comparison meaningless (and flaky).
+	privKey, err := crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f291")
 	require.NoError(t, err)
 	senderAddr := crypto.PubkeyToAddress(privKey.PublicKey)
 	m := execmoduletester.New(t,
