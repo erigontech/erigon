@@ -2265,6 +2265,14 @@ func (p *TxPool) promote(pendingBaseFee uint64, pendingBlobFee uint64, announcem
 	}
 }
 
+// Close releases poolDB when Run never ran to close it; idempotent alongside
+// Run's own deferred close.
+func (p *TxPool) Close() {
+	if p.poolDB != nil {
+		p.poolDB.Close()
+	}
+}
+
 // Run - does:
 // send pending byHash to p2p:
 //   - new byHash

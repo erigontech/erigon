@@ -1524,6 +1524,12 @@ func (s *Ethereum) Stop() error {
 		s.logger.Error("background component error", "err", err)
 	}
 
+	// The pool's Run closes the txpool DB only if the pool was started;
+	// cover never-started backends (the close is idempotent).
+	if s.txPool != nil {
+		s.txPool.Close()
+	}
+
 	// Wait for any in-flight updateForkChoice goroutine to finish. These are
 	// fire-and-forget goroutines that hold DB read transactions; without this
 	// wait, chainDB.Close() can hang in waitTxsAllDoneOnClose.
