@@ -86,10 +86,9 @@ func TestImportReorgUnwindToGenesis(t *testing.T) {
 
 	require.NoError(t, runErigonCommand("init", "--datadir", dataDir, genesisPath))
 
-	// Import returns an error by design: the fixture ends with an intentionally
-	// invalid block (a post-merge uncle). Assert on the canonical head reached,
-	// not the error; a genuine startup failure surfaces as the head never
-	// advancing, with importErr reported in the failure message.
+	// The fixture's next-to-last block is an intentionally invalid post-merge
+	// uncle: multi-file import skips the failed file, imports the final valid
+	// block 4, and returns the retained rejection error.
 	importArgs := append([]string{
 		"--http=false",
 		"--private.api.addr=",
@@ -97,6 +96,7 @@ func TestImportReorgUnwindToGenesis(t *testing.T) {
 		"import", "--datadir", dataDir, "--networkid", "1337",
 	}, rlpFiles...)
 	importErr := runErigonCommand(importArgs...)
+	require.ErrorContains(t, importErr, "uncle")
 
 	// init and import both append to erigon's log; assert on it.
 	logs, err := os.ReadFile(filepath.Join(dataDir, "logs", "erigon.log"))
