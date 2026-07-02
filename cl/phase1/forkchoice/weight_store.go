@@ -52,6 +52,10 @@ type weightStore struct {
 func NewWeightStore(f *ForkChoiceStore) WeightStore {
 	justifiedCheckpoint := f.JustifiedCheckpoint()
 	cs, _ := f.getCheckpointState(justifiedCheckpoint)
+	return newWeightStoreFromCheckpointState(f, cs)
+}
+
+func newWeightStoreFromCheckpointState(f *ForkChoiceStore, cs *checkpointState) WeightStore {
 	return &weightStore{f: f, checkpointState: cs}
 }
 

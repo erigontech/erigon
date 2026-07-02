@@ -333,3 +333,9 @@ func TestGloasWeightTreePruneFinalizedDropsBoundaryAndUnknownRoots(t *testing.T)
 	require.NotContains(t, f.gloasWeightTree.nodes, unknownRoot)
 	require.True(t, f.gloasWeightTree.allDirty)
 }
+
+func TestApplyWeightDeltaDoesNotUnderflow(t *testing.T) {
+	require.Equal(t, uint64(13), applyWeightDelta(10, 3, true))
+	require.Equal(t, uint64(7), applyWeightDelta(10, 3, false))
+	require.Zero(t, applyWeightDelta(3, 10, false))
+}

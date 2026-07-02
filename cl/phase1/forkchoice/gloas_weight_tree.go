@@ -277,11 +277,19 @@ func (t *gloasWeightTree) removeAppliedContribution(validatorIndex uint64) {
 	if vi >= len(t.applied) || !t.applied[vi].set {
 		return
 	}
-	t.addDirectContribution(t.applied[vi].message, -t.applied[vi].contribution)
+	t.subtractDirectContribution(t.applied[vi].message, t.applied[vi].contribution)
 	t.applied[vi] = gloasVoteContribution{}
 }
 
 func (t *gloasWeightTree) addDirectContribution(message LatestMessage, contribution uint64) {
+	t.applyDirectContribution(message, contribution, true)
+}
+
+func (t *gloasWeightTree) subtractDirectContribution(message LatestMessage, contribution uint64) {
+	t.applyDirectContribution(message, contribution, false)
+}
+
+func (t *gloasWeightTree) applyDirectContribution(message LatestMessage, contribution uint64, add bool) {
 	node := t.nodes[message.Root]
 	if node == nil {
 		return
@@ -292,12 +300,22 @@ func (t *gloasWeightTree) addDirectContribution(message LatestMessage, contribut
 	}
 	switch supported.PayloadStatus {
 	case cltypes.PayloadStatusPending:
-		node.directPending += contribution
+		node.directPending = applyWeightDelta(node.directPending, contribution, add)
 	case cltypes.PayloadStatusEmpty:
-		node.directEmpty += contribution
+		node.directEmpty = applyWeightDelta(node.directEmpty, contribution, add)
 	case cltypes.PayloadStatusFull:
-		node.directFull += contribution
+		node.directFull = applyWeightDelta(node.directFull, contribution, add)
 	}
+}
+
+func applyWeightDelta(weight, delta uint64, add bool) uint64 {
+	if add {
+		return weight + delta
+	}
+	if delta > weight {
+		return 0
+	}
+	return weight - delta
 }
 
 func (t *gloasWeightTree) recompute(root common.Hash) {
