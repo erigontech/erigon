@@ -120,26 +120,15 @@ type FilesItem struct {
 	existence            *existence.Filter
 	startTxNum, endTxNum uint64 //[startTxNum, endTxNum)
 
-	// Frozen: file containing Aggregator.stepsInFrozenFile steps. Completely immutable.
-	// Cold: file containing < Aggregator.stepsInFrozenFile steps. Immutable, but can be closed/removed after merge to bigger file.
-	// Hot: Stored in DB. Providing Snapshot-Isolation by CopyOnWrite.
-	frozen   bool         // immutable, don't need atomic
-	refcount atomic.Int32 // only for `frozen=false`
+	refcount atomic.Int32
 
-	// file can be deleted in 2 cases: 1. when `refcount == 0 && canDelete == true` 2. on app startup when `file.isSubsetOfFrozenFile()`
-	// other processes (which also reading files, may have same logic)
+	// Deprecated: only the not-yet-migrated forkable subsystem still uses this (with
+	// refcount); the aggregator reclaims via aggregatorVisible generations (retired + refcnt).
 	canDelete atomic.Bool
 }
 
-func newFilesItemWithSnapConfig(startTxNum, endTxNum uint64, snapConfig *SnapshotConfig) *FilesItem {
-	return newFilesItem(startTxNum, endTxNum, snapConfig.RootNumPerStep, snapConfig.StepsInFrozenFile())
-}
-
-func newFilesItem(startTxNum, endTxNum, stepSize uint64, stepsInFrozenFile uint64) *FilesItem {
-	startStep := startTxNum / stepSize
-	endStep := endTxNum / stepSize
-	frozen := endStep-startStep >= stepsInFrozenFile
-	return &FilesItem{startTxNum: startTxNum, endTxNum: endTxNum, frozen: frozen}
+func newFilesItem(startTxNum, endTxNum uint64) *FilesItem {
+	return &FilesItem{startTxNum: startTxNum, endTxNum: endTxNum}
 }
 
 func (i *FilesItem) Segment() *seg.Decompressor { return i.decompressor }
@@ -258,14 +247,11 @@ func (i *FilesItem) closeFilesAndRemove() {
 	// permanently orphaned.
 	if i.index != nil {
 		i.index.Close()
-		// paranoic-mode on: don't delete frozen files
-		if !i.frozen {
-			if err := dir.RemoveFile(i.index.FilePath()); err != nil {
-				log.Trace("remove after close", "err", err, "file", i.index.FileName())
-			}
-			if err := dir.RemoveFile(i.index.FilePath() + ".torrent"); err != nil {
-				log.Trace("remove after close", "err", err, "file", i.index.FileName())
-			}
+		if err := dir.RemoveFile(i.index.FilePath()); err != nil {
+			log.Trace("remove after close", "err", err, "file", i.index.FileName())
+		}
+		if err := dir.RemoveFile(i.index.FilePath() + ".torrent"); err != nil {
+			log.Trace("remove after close", "err", err, "file", i.index.FileName())
 		}
 		i.index = nil
 	}
@@ -291,14 +277,11 @@ func (i *FilesItem) closeFilesAndRemove() {
 	}
 	if i.decompressor != nil {
 		i.decompressor.Close()
-		// paranoic-mode on: don't delete frozen files
-		if !i.frozen {
-			if err := dir.RemoveFile(i.decompressor.FilePath()); err != nil {
-				log.Trace("remove after close", "err", err, "file", i.decompressor.FileName())
-			}
-			if err := dir.RemoveFile(i.decompressor.FilePath() + ".torrent"); err != nil {
-				log.Trace("remove after close", "err", err, "file", i.decompressor.FileName()+".torrent")
-			}
+		if err := dir.RemoveFile(i.decompressor.FilePath()); err != nil {
+			log.Trace("remove after close", "err", err, "file", i.decompressor.FileName())
+		}
+		if err := dir.RemoveFile(i.decompressor.FilePath() + ".torrent"); err != nil {
+			log.Trace("remove after close", "err", err, "file", i.decompressor.FileName()+".torrent")
 		}
 		i.decompressor = nil
 	}
@@ -306,7 +289,7 @@ func (i *FilesItem) closeFilesAndRemove() {
 
 var filterDirtyFilesReCache sync.Map // pattern string → *regexp.Regexp
 
-func filterDirtyFiles(fileNames []string, stepSize, stepsInFrozenFile uint64, filenameBase, ext string, logger log.Logger) (res []*FilesItem) {
+func filterDirtyFiles(fileNames []string, stepSize uint64, filenameBase, ext string, logger log.Logger) (res []*FilesItem) {
 	pattern := `^v(\d+(?:\.\d+)?)-` + filenameBase + `\.(\d+)-(\d+)\.` + ext + `$`
 	reVal, ok := filterDirtyFilesReCache.Load(pattern)
 	if !ok {
@@ -346,7 +329,7 @@ func filterDirtyFiles(fileNames []string, stepSize, stepsInFrozenFile uint64, fi
 		//   1-2.kv: [8, 16)
 		startTxNum, endTxNum := startStep*stepSize, endStep*stepSize
 
-		var newFile = newFilesItem(startTxNum, endTxNum, stepSize, stepsInFrozenFile)
+		var newFile = newFilesItem(startTxNum, endTxNum)
 		res = append(res, newFile)
 	}
 	return res
