@@ -118,10 +118,11 @@ func TestRegenerateBoundaryStepFile_NonCommitment(t *testing.T) {
 	require.NoError(t, err)
 
 	got := readKV(t, newPath)
-	require.Equal(t, [][2][]byte{
-		{keyA, []byte("alice-anchored-50ETH")},
-		{keyB, []byte("bob-anchored-150ETH")},
-	}, got, "carol must be dropped; alice/bob get the anchored values")
+	require.Len(t, got, 3)
+	require.Equal(t, [2][]byte{keyA, []byte("alice-anchored-50ETH")}, got[0])
+	require.Equal(t, [2][]byte{keyB, []byte("bob-anchored-150ETH")}, got[1])
+	require.Equal(t, keyC, got[2][0])
+	require.Empty(t, got[2][1], "carol becomes an empty tombstone (was in old file, lookup !found)")
 }
 
 // TestRegenerateBoundaryStepFile_Commitment exercises the
@@ -306,10 +307,11 @@ func TestRegenerateBoundaryStepFile_ContentReflectsLastTxNum(t *testing.T) {
 	))
 
 	got := readKV(t, newPath)
-	require.Equal(t, [][2][]byte{
-		{keyKept, []byte("kept-as-of-anchor")},
-		{keySame, []byte("same-value-stable")},
-	}, got, "regen content must be drop+as-of-rewrite per AsOfLookup")
+	require.Len(t, got, 3)
+	require.Equal(t, [2][]byte{keyKept, []byte("kept-as-of-anchor")}, got[0])
+	require.Equal(t, keyDrop, got[1][0])
+	require.Empty(t, got[1][1], "drop-signalled key becomes empty tombstone, not omitted (see tombstone-preservation test)")
+	require.Equal(t, [2][]byte{keySame, []byte("same-value-stable")}, got[2])
 }
 
 // TestRegenerateBoundaryStepFile_TruncatedNameMatchesContent is the
@@ -366,6 +368,56 @@ func TestRegenerateBoundaryStepFile_TruncatedNameMatchesContent(t *testing.T) {
 	// supplied.)
 	require.Contains(t, newKVPath, "272-278", "truncated file name carries the narrower step range")
 	require.NotContains(t, newKVPath, "272-280", "truncated file name must not retain the original wider range")
+}
+
+// TestRegenerateBoundaryStepFile_TombstonePreservedForKeysInOldFile
+// pins the fix for the V→0→V regression: a key present in the old
+// boundary file that was tombstoned (SSTORE→0 in storage) in history
+// at some txN ≤ lastTxNum must land in the new file as an empty
+// tombstone — NOT be dropped. Dropping lets downstream getLatestFromFiles
+// walk newest→oldest, miss the key in the new file, and return the
+// pre-tombstone value from an older .kv, resurrecting stale state.
+//
+// AsOfLookup returns (nil, false) for the tombstoned key — the same
+// signal GetAsOf produces when HistorySeek finds an empty "marker".
+// The regen must translate that into a written empty entry so the
+// new file shadows any stale value in older files.
+func TestRegenerateBoundaryStepFile_TombstonePreservedForKeysInOldFile(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	dir := t.TempDir()
+
+	keyTomb := []byte("slot-tombstoned")
+	keyLive := []byte("slot-live")
+	in := [][2][]byte{
+		{keyTomb, []byte("pre-tombstone-value")},
+		{keyLive, []byte("live-value-stale")},
+	}
+	oldPath := writeKV(t, ctx, dir, "v1.0-storage.272-280.kv", in)
+
+	lookup := func(d kv.Domain, k []byte, ts uint64) ([]byte, bool, error) {
+		switch string(k) {
+		case string(keyTomb):
+			return nil, false, nil
+		case string(keyLive):
+			return []byte("live-value-at-anchor"), true, nil
+		}
+		t.Fatalf("unexpected key: %q", k)
+		return nil, false, nil
+	}
+
+	newPath := oldPath + ".regen"
+	require.NoError(t, RegenerateBoundaryStepFile(
+		ctx, kv.StorageDomain, oldPath, newPath, lookup,
+		108_584_330, seg.CompressNone, nil,
+		dir, log.New(),
+	))
+
+	got := readKV(t, newPath)
+	require.Len(t, got, 2, "tombstoned key must be preserved (not dropped)")
+	require.Equal(t, keyTomb, got[0][0])
+	require.Empty(t, got[0][1], "tombstoned key's value must be empty")
+	require.Equal(t, [2][]byte{keyLive, []byte("live-value-at-anchor")}, got[1])
 }
 
 // TestRegenerateBoundaryStepFile_WritesToNewKVPath verifies that the

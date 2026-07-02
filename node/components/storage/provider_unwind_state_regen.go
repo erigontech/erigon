@@ -113,7 +113,7 @@ func RegenerateBoundaryStepFile(
 
 	var (
 		keyBuf, valBuf []byte
-		kept, dropped  uint64
+		kept           uint64
 		anchorPlanted  bool
 	)
 	for reader.HasNext() {
@@ -140,15 +140,24 @@ func RegenerateBoundaryStepFile(
 			continue
 		}
 
-		// Resolve the value as-of lastTxNum. If absent, the key
-		// didn't exist at the anchor point — drop from output.
+		// Resolve the value as-of lastTxNum. `!found` from AsOfLookup
+		// collapses two cases (GetAsOf treats an empty history marker
+		// as not-found — see db/state/domain.go): (a) key was tombstoned
+		// at some txN ≤ lastTxNum, (b) key was created strictly after
+		// lastTxNum. For a key that IS in the old boundary file, case
+		// (a) requires an empty entry in the new file to shadow the
+		// pre-tombstone value in older .kv files (files have no
+		// concept of deletion — see the exec-stage unwind tombstone
+		// comment in db/state/domain.go). Case (b) is harmless-with-
+		// empty (older files can't have the key either, so the empty
+		// entry just conveys "no value at ts", same as drop). Writing
+		// empty in both cases is strictly safer than dropping.
 		newVal, found, err := lookup(domain, keyBuf, lastTxNum)
 		if err != nil {
 			return fmt.Errorf("AsOfLookup(%s, key, %d): %w", domain, lastTxNum, err)
 		}
 		if !found {
-			dropped++
-			continue
+			newVal = nil
 		}
 
 		if _, err := writer.Write(keyBuf); err != nil {
@@ -175,7 +184,7 @@ func RegenerateBoundaryStepFile(
 	if logger != nil {
 		logger.Info("[storage] mode-B boundary-step regen",
 			"domain", domain, "old", oldKVPath, "new", newKVPath,
-			"kept", kept, "dropped", dropped, "anchor_planted", anchorPlanted)
+			"kept", kept, "anchor_planted", anchorPlanted)
 	}
 
 	return nil
