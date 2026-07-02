@@ -346,6 +346,15 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 		},
 	}
 
+	// Seed erigondb.toml with the first-start commitment regime (--commitment.plainValues)
+	// before genesis-root computation. GenesisToBlock resolves erigondb settings against the
+	// real datadir to configure its in-memory aggregator, which otherwise creates erigondb.toml
+	// with the default regime; SetUpBlockReader's later flag-aware resolve then finds the file
+	// present and drops the flag. Resolving here first makes --commitment.plainValues stick.
+	if _, err := state.ResolveErigonDBSettingsWithRefsDefault(dirs, logger, config.Snapshot.NoDownloader, config.CommitmentRefsFirstStart()); err != nil {
+		return nil, err
+	}
+
 	var chainConfig *chain.Config
 	var genesis *types.Block
 	if err := rawChainDB.Update(context.Background(), func(tx kv.RwTx) error {
