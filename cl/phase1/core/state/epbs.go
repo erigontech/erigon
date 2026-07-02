@@ -231,7 +231,8 @@ func IsBuilderPubkey(s abstract.BeaconState, pubkey common.Bytes48) bool {
 		return false
 	}
 	for i := 0; i < builders.Len(); i++ {
-		if builders.Get(i).Pubkey == pubkey {
+		builder := builders.Get(i)
+		if builder != nil && builder.Pubkey == pubkey {
 			return true
 		}
 	}
@@ -311,7 +312,7 @@ func GetIndexForNewBuilder(s abstract.BeaconState) uint64 {
 	epoch := GetEpochAtSlot(s.BeaconConfig(), s.Slot())
 	for i := 0; i < builders.Len(); i++ {
 		builder := builders.Get(i)
-		if builder.WithdrawableEpoch <= epoch && builder.Balance == 0 {
+		if builder != nil && builder.WithdrawableEpoch <= epoch && builder.Balance == 0 {
 			return uint64(i)
 		}
 	}
@@ -358,7 +359,8 @@ func ApplyDepositForBuilder(s abstract.BeaconState, pubkey common.Bytes48, withd
 	builderIndex := -1
 	if builders != nil {
 		for i := 0; i < builders.Len(); i++ {
-			if builders.Get(i).Pubkey == pubkey {
+			builder := builders.Get(i)
+			if builder != nil && builder.Pubkey == pubkey {
 				builderIndex = i
 				break
 			}
@@ -383,6 +385,9 @@ func ApplyDepositForBuilder(s abstract.BeaconState, pubkey common.Bytes48, withd
 		}
 	} else {
 		builder := builders.Get(builderIndex)
+		if builder == nil {
+			return nil
+		}
 		newBuilder := *builder
 		if amount > math.MaxUint64-newBuilder.Balance {
 			return fmt.Errorf("builder balance overflow: %d + %d", newBuilder.Balance, amount)

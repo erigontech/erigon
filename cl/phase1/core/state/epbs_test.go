@@ -134,6 +134,60 @@ func TestApplyDepositForBuilder_TopUp(t *testing.T) {
 	require.Equal(t, uint64(1e9)+topUpAmount, updatedBuilders.Get(0).Balance)
 }
 
+func TestApplyDepositForBuilderTopUpSkipsNilBuilderEntries(t *testing.T) {
+	cfg := clparams.MainnetBeaconConfig
+
+	s := state2.New(&cfg)
+	builders := solid.NewStaticListSSZ[*cltypes.Builder](64, 73)
+
+	pubkey, creds, _, _ := makeValidBuilderDeposit(t, &cfg)
+	builders.Append(nil)
+	builders.Append(&cltypes.Builder{
+		Pubkey:            pubkey,
+		Version:           creds[0],
+		Balance:           1e9,
+		WithdrawableEpoch: cfg.FarFutureEpoch,
+	})
+	s.SetBuilders(builders)
+
+	require.NoError(t, state2.ApplyDepositForBuilder(s, pubkey, creds, 2e9, common.Bytes96{}, 200))
+
+	require.Nil(t, s.GetBuilders().Get(0))
+	require.Equal(t, uint64(3e9), s.GetBuilders().Get(1).Balance)
+}
+
+func TestApplyDepositForBuilderNewBuilderSkipsNilBuilderEntries(t *testing.T) {
+	cfg := clparams.MainnetBeaconConfig
+
+	s := state2.New(&cfg)
+	builders := solid.NewStaticListSSZ[*cltypes.Builder](64, 73)
+	builders.Append(nil)
+	s.SetBuilders(builders)
+
+	pubkey, creds, amount, sig := makeValidBuilderDeposit(t, &cfg)
+
+	require.NoError(t, state2.ApplyDepositForBuilder(s, pubkey, creds, amount, sig, 200))
+
+	require.Nil(t, s.GetBuilders().Get(0))
+	require.Equal(t, 2, s.GetBuilders().Len())
+	require.Equal(t, pubkey, s.GetBuilders().Get(1).Pubkey)
+	require.Equal(t, amount, s.GetBuilders().Get(1).Balance)
+}
+
+func TestIsBuilderPubkeySkipsNilBuilderEntries(t *testing.T) {
+	cfg := clparams.MainnetBeaconConfig
+
+	s := state2.New(&cfg)
+	builders := solid.NewStaticListSSZ[*cltypes.Builder](64, 73)
+	pubkey := common.Bytes48{0x11}
+	builders.Append(nil)
+	builders.Append(&cltypes.Builder{Pubkey: pubkey})
+	s.SetBuilders(builders)
+
+	require.True(t, state2.IsBuilderPubkey(s, pubkey))
+	require.False(t, state2.IsBuilderPubkey(s, common.Bytes48{0x22}))
+}
+
 // TestApplyDepositForBuilder_InvalidSignature_Ignored verifies that a new
 // builder deposit with an invalid signature is silently ignored.
 func TestApplyDepositForBuilder_InvalidSignature_Ignored(t *testing.T) {
