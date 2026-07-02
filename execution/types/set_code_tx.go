@@ -159,16 +159,7 @@ func (tx *SetCodeTransaction) AsMessage(s Signer, baseFee *uint256.Int, rules *c
 }
 
 func (tx *SetCodeTransaction) Sender(signer Signer) (accounts.Address, error) {
-	if from := tx.from; !from.IsNil() && !from.IsZero() {
-		// Sender address can never be zero in a transaction with a valid signer
-		return from, nil
-	}
-	addr, err := signer.Sender(tx)
-	if err != nil {
-		return accounts.ZeroAddress, err
-	}
-	tx.from = addr
-	return addr, nil
+	return recoverSender(tx, &tx.TransactionMisc, signer)
 }
 
 func (tx *SetCodeTransaction) Hash() common.Hash {

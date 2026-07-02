@@ -105,6 +105,27 @@ type TransactionMisc struct {
 	from accounts.Address
 }
 
+func (tm *TransactionMisc) cachedSender() (sender accounts.Address, ok bool) {
+	s := tm.from
+	if s.IsNil() {
+		return sender, false
+	}
+	return s, true
+}
+
+func recoverSender(txn Transaction, tm *TransactionMisc, signer Signer) (accounts.Address, error) {
+	if from := tm.from; !from.IsNil() && !from.IsZero() {
+		// Sender address can never be zero in a transaction with a valid signer
+		return from, nil
+	}
+	addr, err := signer.Sender(txn)
+	if err != nil {
+		return accounts.ZeroAddress, err
+	}
+	tm.from = addr
+	return addr, nil
+}
+
 // CalcEffectiveGasTip computes the effective gas tip given a transaction's tip/fee caps and a base fee.
 // Shared logic used by all transaction types that implement GetEffectiveGasTip.
 func CalcEffectiveGasTip(baseFee *uint256.Int, getTipCap func() *uint256.Int, getFeeCap func() *uint256.Int) uint256.Int {

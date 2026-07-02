@@ -407,23 +407,6 @@ func (tx *LegacyTx) GetChainID() *uint256.Int {
 	return DeriveChainId(&tx.V)
 }
 
-func (tx *LegacyTx) cachedSender() (sender accounts.Address, ok bool) {
-	s := tx.from
-	if s.IsNil() {
-		return sender, false
-	}
-	return s, true
-}
 func (tx *LegacyTx) Sender(signer Signer) (accounts.Address, error) {
-	if from := tx.from; !from.IsNil() && !from.IsZero() {
-		// Sender address can never be zero in a transaction with a valid signer
-		return from, nil
-	}
-
-	addr, err := signer.Sender(tx)
-	if err != nil {
-		return accounts.ZeroAddress, err
-	}
-	tx.from = addr
-	return addr, nil
+	return recoverSender(tx, &tx.TransactionMisc, signer)
 }

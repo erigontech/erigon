@@ -119,25 +119,8 @@ func (stx *BlobTx) AsMessage(s Signer, baseFee *uint256.Int, rules *chain.Rules)
 	return &msg, nil
 }
 
-func (stx *BlobTx) cachedSender() (sender accounts.Address, ok bool) {
-	s := stx.from
-	if s.IsNil() {
-		return sender, false
-	}
-	return s, true
-}
-
 func (stx *BlobTx) Sender(signer Signer) (accounts.Address, error) {
-	if from := stx.from; !from.IsNil() && !from.IsZero() {
-		// Sender address can never be zero in a transaction with a valid signer
-		return from, nil
-	}
-	addr, err := signer.Sender(stx)
-	if err != nil {
-		return accounts.ZeroAddress, err
-	}
-	stx.from = addr
-	return addr, nil
+	return recoverSender(stx, &stx.TransactionMisc, signer)
 }
 
 func (stx *BlobTx) Hash() common.Hash {
