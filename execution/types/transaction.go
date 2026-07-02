@@ -126,6 +126,18 @@ func recoverSender(txn Transaction, tm *TransactionMisc, signer Signer) (account
 	return addr, nil
 }
 
+func applySignature(signer Signer, txn Transaction, sig []byte, cpy *CommonTx, cpyChainID *uint256.Int) error {
+	r, s, v, err := signer.SignatureValues(txn, sig)
+	if err != nil {
+		return err
+	}
+	cpy.R.Set(r)
+	cpy.S.Set(s)
+	cpy.V.Set(v)
+	*cpyChainID = *signer.ChainID()
+	return nil
+}
+
 // CalcEffectiveGasTip computes the effective gas tip given a transaction's tip/fee caps and a base fee.
 // Shared logic used by all transaction types that implement GetEffectiveGasTip.
 func CalcEffectiveGasTip(baseFee *uint256.Int, getTipCap func() *uint256.Int, getFeeCap func() *uint256.Int) uint256.Int {

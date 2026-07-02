@@ -392,14 +392,9 @@ func (tx *AccessListTx) AsMessage(s Signer, _ *uint256.Int, rules *chain.Rules) 
 
 func (tx *AccessListTx) WithSignature(signer Signer, sig []byte) (Transaction, error) {
 	cpy := tx.copy()
-	r, s, v, err := signer.SignatureValues(tx, sig)
-	if err != nil {
+	if err := applySignature(signer, tx, sig, &cpy.CommonTx, &cpy.ChainID); err != nil {
 		return nil, err
 	}
-	cpy.R.Set(r)
-	cpy.S.Set(s)
-	cpy.V.Set(v)
-	cpy.ChainID = *signer.ChainID()
 	return cpy, nil
 }
 

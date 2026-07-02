@@ -114,14 +114,9 @@ func (tx *DynamicFeeTransaction) payloadSize() (payloadSize int, accessListLen i
 
 func (tx *DynamicFeeTransaction) WithSignature(signer Signer, sig []byte) (Transaction, error) {
 	cpy := tx.copy()
-	r, s, v, err := signer.SignatureValues(tx, sig)
-	if err != nil {
+	if err := applySignature(signer, tx, sig, &cpy.CommonTx, &cpy.ChainID); err != nil {
 		return nil, err
 	}
-	cpy.R.Set(r)
-	cpy.S.Set(s)
-	cpy.V.Set(v)
-	cpy.ChainID = *signer.ChainID()
 	return cpy, nil
 }
 

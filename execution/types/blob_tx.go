@@ -169,14 +169,9 @@ func (stx *BlobTx) SigningHash(chainID *uint256.Int) common.Hash {
 
 func (stx *BlobTx) WithSignature(signer Signer, sig []byte) (Transaction, error) {
 	cpy := stx.copy()
-	r, s, v, err := signer.SignatureValues(stx, sig)
-	if err != nil {
+	if err := applySignature(signer, stx, sig, &cpy.CommonTx, &cpy.ChainID); err != nil {
 		return nil, err
 	}
-	cpy.R.Set(r)
-	cpy.S.Set(s)
-	cpy.V.Set(v)
-	cpy.ChainID = *signer.ChainID()
 	return cpy, nil
 }
 
