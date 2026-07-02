@@ -21,6 +21,7 @@ package types
 
 import (
 	"errors"
+	"fmt"
 	"io"
 
 	"github.com/holiman/uint256"
@@ -203,7 +204,10 @@ func (tx *DynamicFeeTransaction) EncodeRLP(w io.Writer) error {
 	return nil
 }
 
-func (tx *DynamicFeeTransaction) DecodeRLP(s *rlp.Stream) error {
+// decode1559Prefix reads the payload fields shared by all EIP-1559-style
+// payloads, mirroring encode1559Prefix. With strictTo the To field must be a
+// 20-byte address (no contract creation).
+func (tx *DynamicFeeTransaction) decode1559Prefix(s *rlp.Stream, strictTo bool) error {
 	_, err := s.List()
 	if err != nil {
 		return err
@@ -223,7 +227,19 @@ func (tx *DynamicFeeTransaction) DecodeRLP(s *rlp.Stream) error {
 	if tx.GasLimit, err = s.Uint64(); err != nil {
 		return err
 	}
-	if err = DecodeOptionalAddress(&tx.To, s); err != nil {
+	if strictTo {
+		tx.To = &common.Address{}
+		if kind, size, err := s.Kind(); err != nil {
+			return err
+		} else if kind == rlp.Byte {
+			return errors.New("wrong size for To: 1")
+		} else if size != 20 {
+			return fmt.Errorf("wrong size for To: %d", size)
+		}
+		if err = s.ReadBytes(tx.To[:]); err != nil {
+			return err
+		}
+	} else if err = DecodeOptionalAddress(&tx.To, s); err != nil {
 		return err
 	}
 	if err = s.ReadUint256(&tx.Value); err != nil {
@@ -232,12 +248,15 @@ func (tx *DynamicFeeTransaction) DecodeRLP(s *rlp.Stream) error {
 	if tx.Data, err = s.Bytes(); err != nil {
 		return err
 	}
-	// decode AccessList
 	tx.AccessList = AccessList{}
-	if err = decodeAccessList(&tx.AccessList, s); err != nil {
+	return decodeAccessList(&tx.AccessList, s)
+}
+
+func (tx *DynamicFeeTransaction) DecodeRLP(s *rlp.Stream) error {
+	if err := tx.decode1559Prefix(s, false); err != nil {
 		return err
 	}
-	if err = tx.decodeVRS(s); err != nil {
+	if err := tx.decodeVRS(s); err != nil {
 		return err
 	}
 	return s.ListEnd()

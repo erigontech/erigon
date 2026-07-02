@@ -272,60 +272,20 @@ func (stx *BlobTx) MarshalBinary(w io.Writer) error {
 }
 
 func (stx *BlobTx) DecodeRLP(s *rlp.Stream) error {
-	_, err := s.List()
-	if err != nil {
+	if err := stx.decode1559Prefix(s, true); err != nil {
 		return err
 	}
-	if err = s.ReadUint256(&stx.ChainID); err != nil {
+	if err := s.ReadUint256(&stx.MaxFeePerBlobGas); err != nil {
 		return err
 	}
-	if stx.Nonce, err = s.Uint64(); err != nil {
-		return err
-	}
-	if err = s.ReadUint256(&stx.TipCap); err != nil {
-		return err
-	}
-	if err = s.ReadUint256(&stx.FeeCap); err != nil {
-		return err
-	}
-	if stx.GasLimit, err = s.Uint64(); err != nil {
-		return err
-	}
-	stx.To = &common.Address{}
-	if kind, size, err := s.Kind(); err != nil {
-		return err
-	} else if kind == rlp.Byte {
-		return fmt.Errorf("wrong size for To: 1")
-	} else if size != 20 {
-		return fmt.Errorf("wrong size for To: %d", size)
-	}
-	if err = s.ReadBytes(stx.To[:]); err != nil {
-		return err
-	}
-	if err = s.ReadUint256(&stx.Value); err != nil {
-		return err
-	}
-	if stx.Data, err = s.Bytes(); err != nil {
-		return err
-	}
-	// decode AccessList
-	stx.AccessList = AccessList{}
-	if err = decodeAccessList(&stx.AccessList, s); err != nil {
-		return err
-	}
-	// decode MaxFeePerBlobGas
-	if err = s.ReadUint256(&stx.MaxFeePerBlobGas); err != nil {
-		return err
-	}
-	// decode BlobVersionedHashes
 	stx.BlobVersionedHashes = []common.Hash{}
-	if err = decodeBlobVersionedHashes(&stx.BlobVersionedHashes, s); err != nil {
+	if err := decodeBlobVersionedHashes(&stx.BlobVersionedHashes, s); err != nil {
 		return err
 	}
 	if len(stx.BlobVersionedHashes) == 0 {
 		return errors.New("a blob stx must contain at least one blob")
 	}
-	if err = stx.decodeVRS(s); err != nil {
+	if err := stx.decodeVRS(s); err != nil {
 		return err
 	}
 	return s.ListEnd()

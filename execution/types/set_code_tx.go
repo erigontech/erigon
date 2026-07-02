@@ -19,7 +19,6 @@ package types
 import (
 	"bytes"
 	"errors"
-	"fmt"
 	"io"
 
 	"github.com/holiman/uint256"
@@ -220,55 +219,14 @@ func (tx *SetCodeTransaction) EncodeRLP(w io.Writer) error {
 }
 
 func (tx *SetCodeTransaction) DecodeRLP(s *rlp.Stream) error {
-	_, err := s.List()
-	if err != nil {
+	if err := tx.decode1559Prefix(s, true); err != nil {
 		return err
 	}
-	if err = s.ReadUint256(&tx.ChainID); err != nil {
-		return err
-	}
-	if tx.Nonce, err = s.Uint64(); err != nil {
-		return err
-	}
-	if err = s.ReadUint256(&tx.TipCap); err != nil {
-		return err
-	}
-	if err = s.ReadUint256(&tx.FeeCap); err != nil {
-		return err
-	}
-	if tx.GasLimit, err = s.Uint64(); err != nil {
-		return err
-	}
-	tx.To = &common.Address{}
-	if kind, size, err := s.Kind(); err != nil {
-		return err
-	} else if kind == rlp.Byte {
-		return fmt.Errorf("wrong size for To: 1")
-	} else if size != 20 {
-		return fmt.Errorf("wrong size for To: %d", size)
-	}
-	if err = s.ReadBytes(tx.To[:]); err != nil {
-		return err
-	}
-	if err = s.ReadUint256(&tx.Value); err != nil {
-		return err
-	}
-	if tx.Data, err = s.Bytes(); err != nil {
-		return err
-	}
-	// decode AccessList
-	tx.AccessList = AccessList{}
-	if err = decodeAccessList(&tx.AccessList, s); err != nil {
-		return err
-	}
-
-	// decode authorizations
 	tx.Authorizations = make([]Authorization, 0)
-	if err = decodeAuthorizations(&tx.Authorizations, s); err != nil {
+	if err := decodeAuthorizations(&tx.Authorizations, s); err != nil {
 		return err
 	}
-
-	if err = tx.decodeVRS(s); err != nil {
+	if err := tx.decodeVRS(s); err != nil {
 		return err
 	}
 	return s.ListEnd()
