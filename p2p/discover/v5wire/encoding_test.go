@@ -27,6 +27,7 @@ import (
 	"flag"
 	"fmt"
 	"net"
+	"net/netip"
 	"os"
 	"path/filepath"
 	"strings"
@@ -50,6 +51,7 @@ var (
 	testKeyB, _   = crypto.HexToECDSA("66fb62bfbd66b9177a138c1e5cddbe4f7c30c343e94e68df8769459cb1cde628")
 	testEphKey, _ = crypto.HexToECDSA("0288ef00023598499cb6c940146d050d2b1fb914198c327f76aad590bead68b6")
 	testIDnonce   = [16]byte{1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16}
+	testLoopback  = netip.AddrPortFrom(netip.AddrFrom4([4]byte{127, 0, 0, 1}), 0)
 )
 
 // This test checks that the minPacketSize and randomPacketMsgSize constants are well-defined.
@@ -354,7 +356,7 @@ func TestTestVectorsV5(t *testing.T) {
 	var (
 		idA     = enode.PubkeyToIDV4(&testKeyA.PublicKey)
 		idB     = enode.PubkeyToIDV4(&testKeyB.PublicKey)
-		addr    = "127.0.0.1"
+		addr    = testLoopback
 		session = &session{
 			writeKey: hexutil.MustDecode("0x00000000000000000000000000000000"),
 			readKey:  hexutil.MustDecode("0x01010101010101010101010101010101"),
@@ -406,7 +408,7 @@ func TestTestVectorsV5(t *testing.T) {
 			challenge: &challenge0A,
 			prep: func(net *handshakeTest) {
 				// Update challenge.Header.AuthData.
-				net.nodeA.c.Encode(idB, "", &challenge0A, nil)
+				net.nodeA.c.Encode(idB, addr, &challenge0A, nil)
 				net.nodeB.c.sc.storeSentHandshake(idA, addr, &challenge0A)
 			},
 		},
@@ -419,7 +421,7 @@ func TestTestVectorsV5(t *testing.T) {
 			challenge: &challenge1A,
 			prep: func(net *handshakeTest) {
 				// Update challenge data.
-				net.nodeA.c.Encode(idB, "", &challenge1A, nil)
+				net.nodeA.c.Encode(idB, addr, &challenge1A, nil)
 				net.nodeB.c.sc.storeSentHandshake(idA, addr, &challenge1A)
 			},
 		},
@@ -503,7 +505,7 @@ func BenchmarkV5_DecodeHandshakePingSecp256k1(b *testing.B) {
 		challenge = &Whoareyou{Node: net.nodeB.n()}
 		message   = &Ping{ReqID: []byte("reqid")}
 	)
-	enc, _, err := net.nodeA.c.Encode(net.nodeB.id(), "", message, challenge)
+	enc, _, err := net.nodeA.c.Encode(net.nodeB.id(), netip.AddrPort{}, message, challenge)
 	if err != nil {
 		b.Fatal("can't encode handshake packet")
 	}
@@ -512,8 +514,8 @@ func BenchmarkV5_DecodeHandshakePingSecp256k1(b *testing.B) {
 	input := make([]byte, len(enc))
 	for b.Loop() {
 		copy(input, enc)
-		net.nodeB.c.sc.storeSentHandshake(idA, "", challenge)
-		_, _, _, err := net.nodeB.c.Decode(input, "")
+		net.nodeB.c.sc.storeSentHandshake(idA, netip.AddrPort{}, challenge)
+		_, _, _, err := net.nodeB.c.Decode(input, netip.AddrPort{})
 		if err != nil {
 			b.Fatal(err)
 		}
@@ -625,7 +627,7 @@ func (n *handshakeTestNode) expectDecodeErr(t *testing.T, wantErr error, p []byt
 }
 
 func (n *handshakeTestNode) decode(input []byte) (Packet, error) {
-	_, _, p, err := n.c.Decode(input, "127.0.0.1")
+	_, _, p, err := n.c.Decode(input, testLoopback)
 	return p, err
 }
 
@@ -633,8 +635,8 @@ func (n *handshakeTestNode) n() *enode.Node {
 	return n.ln.Node()
 }
 
-func (n *handshakeTestNode) addr() string {
-	return n.ln.Node().IPAddr().String()
+func (n *handshakeTestNode) addr() netip.AddrPort {
+	return netip.AddrPortFrom(n.ln.Node().IPAddr(), 0)
 }
 
 func (n *handshakeTestNode) id() enode.ID {
