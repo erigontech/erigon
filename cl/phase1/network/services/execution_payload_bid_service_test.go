@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
 	"go.uber.org/mock/gomock"
@@ -621,6 +622,96 @@ func TestExecutionPayloadBidServicePendingQueueCapConcurrent(t *testing.T) {
 		return true
 	})
 	require.Equal(t, 5, stored)
+}
+
+func TestExecutionPayloadBidServicePendingExpiry(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	defer ctrl.Finish()
+
+	service, _, _, _, _ := setupExecutionPayloadBidService(t, ctrl)
+
+	msg := newTestSignedExecutionPayloadBid(100, 1, 1000)
+	key := pendingBidKey{builderIndex: 1, slot: 100}
+	service.pendingBids.Store(key, &pendingBidJob{
+		msg:          msg,
+		creationTime: time.Now().Add(-pendingBidExpiry - time.Second), // expired
+	})
+	service.pendingCount.Store(1)
+
+	// Expiry is checked before the slot check, so no ethClock call is expected.
+	service.processPendingBids()
+
+	require.Equal(t, int32(0), service.pendingCount.Load())
+	_, exists := service.pendingBids.Load(key)
+	require.False(t, exists)
+}
+
+func TestExecutionPayloadBidServicePendingStaleSlotDropped(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	defer ctrl.Finish()
+
+	service, _, ethClockMock, _, _ := setupExecutionPayloadBidService(t, ctrl)
+
+	msg := newTestSignedExecutionPayloadBid(100, 1, 1000)
+	key := pendingBidKey{builderIndex: 1, slot: 100}
+	service.pendingBids.Store(key, &pendingBidJob{
+		msg:          msg,
+		creationTime: time.Now(),
+	})
+	service.pendingCount.Store(1)
+
+	// Bid slot 100 is neither current (200) nor next slot → dropped
+	ethClockMock.EXPECT().GetCurrentSlot().Return(uint64(200))
+
+	service.processPendingBids()
+
+	require.Equal(t, int32(0), service.pendingCount.Load())
+	_, exists := service.pendingBids.Load(key)
+	require.False(t, exists)
+}
+
+// TestExecutionPayloadBidServiceLoopProcessesQueuedBid exercises the background
+// loop end-to-end: a bid queued while proposer preferences are missing is
+// picked up and validated once the preferences arrive.
+func TestExecutionPayloadBidServiceLoopProcessesQueuedBid(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	defer ctrl.Finish()
+
+	mockSyncedData := synced_data_mock.NewMockSyncedData(ctrl)
+	ethClockMock := eth_clock.NewMockEthereumClock(ctrl)
+	fcMock := forkchoice_mock.NewForkChoiceStorageMock(t)
+	epbsPool := pool.NewEpbsPool()
+	beaconCfg := clparams.MainnetBeaconConfig
+	beaconCfg.SlotsPerEpoch = 32
+	beaconCfg.SlotsPerHistoricalRoot = 8192
+	beaconCfg.MinSeedLookahead = 1
+	beaconCfg.DomainBeaconBuilder = [4]byte{0x0B, 0x00, 0x00, 0x00}
+
+	msg := newTestSignedExecutionPayloadBid(100, 1, 1000)
+	// Populate forkchoice mock before the service (and its loop goroutine) starts.
+	fcMock.StateAtBlockRootVal[msg.Message.ParentBlockRoot] = newBidParentState(&beaconCfg, testDependentRoot)
+	fcMock.ExecutionPayloadStatusMap[msg.Message.ParentBlockHash] = execution_client.PayloadStatusValidated
+	fcMock.Headers[msg.Message.ParentBlockRoot] = &cltypes.BeaconBlockHeader{}
+
+	ethClockMock.EXPECT().GetCurrentSlot().Return(uint64(100)).AnyTimes()
+	mockSyncedData.EXPECT().ViewHeadState(gomock.Any()).Return(nil).AnyTimes()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+	service := NewExecutionPayloadBidService(ctx, mockSyncedData, fcMock, ethClockMock, &beaconCfg, epbsPool, beaconevents.NewEventEmitter())
+	impl := service.(*executionPayloadBidService)
+
+	// No preferences yet → queued as pending
+	require.NoError(t, service.ProcessMessage(context.Background(), nil, msg))
+	require.Equal(t, int32(1), impl.pendingCount.Load())
+
+	addPreferencesToPool(epbsPool, 100)
+
+	bidKey := pool.HighestBidKey{Slot: 100, ParentBlockHash: msg.Message.ParentBlockHash, ParentBlockRoot: msg.Message.ParentBlockRoot}
+	require.Eventually(t, func() bool {
+		_, found := epbsPool.HighestBids.Get(bidKey)
+		return found && impl.pendingCount.Load() == 0
+	}, 5*time.Second, 10*time.Millisecond)
 }
 
 func TestExecutionPayloadBidServiceDecodeGossipMessage(t *testing.T) {
