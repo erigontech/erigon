@@ -370,11 +370,11 @@ func (cc *ExecutionClientEngine) GetAssembledBlock(ctx context.Context, id []byt
 	// Select Engine API version based on CL state version.
 	switch {
 	case version >= clparams.GloasVersion:
-		return cc.getAssembledBlockV6(ctx, id, version)
+		return cc.getAssembledBlockFromEngine(ctx, id, version, "GetPayloadV6", cc.engine.GetPayloadV6)
 	case version >= clparams.FuluVersion:
-		return cc.getAssembledBlockV5(ctx, id, version)
+		return cc.getAssembledBlockFromEngine(ctx, id, version, "GetPayloadV5", cc.engine.GetPayloadV5)
 	case version >= clparams.ElectraVersion:
-		return cc.getAssembledBlockV4(ctx, id, version)
+		return cc.getAssembledBlockFromEngine(ctx, id, version, "GetPayloadV4", cc.engine.GetPayloadV4)
 	default:
 		return cc.getAssembledBlockV3(ctx, id, version)
 	}
@@ -437,26 +437,10 @@ func (cc *ExecutionClientEngine) getAssembledBlockFromResponse(resp *engine_type
 	return block, resp.BlobsBundle, requestsBundle, blockValue, nil
 }
 
-func (cc *ExecutionClientEngine) getAssembledBlockV4(ctx context.Context, id []byte, version clparams.StateVersion) (*cltypes.Eth1Block, *engine_types.BlobsBundle, *typesproto.RequestsBundle, *big.Int, error) {
-	resp, err := cc.engine.GetPayloadV4(ctx, hexutil.Bytes(id))
+func (cc *ExecutionClientEngine) getAssembledBlockFromEngine(ctx context.Context, id []byte, version clparams.StateVersion, methodName string, getPayload func(context.Context, hexutil.Bytes) (*engine_types.GetPayloadResponse, error)) (*cltypes.Eth1Block, *engine_types.BlobsBundle, *typesproto.RequestsBundle, *big.Int, error) {
+	resp, err := getPayload(ctx, hexutil.Bytes(id))
 	if err != nil {
-		return nil, nil, nil, nil, fmt.Errorf("engine GetPayloadV4 failed: %w", err)
-	}
-	return cc.getAssembledBlockFromResponse(resp, version)
-}
-
-func (cc *ExecutionClientEngine) getAssembledBlockV5(ctx context.Context, id []byte, version clparams.StateVersion) (*cltypes.Eth1Block, *engine_types.BlobsBundle, *typesproto.RequestsBundle, *big.Int, error) {
-	resp, err := cc.engine.GetPayloadV5(ctx, hexutil.Bytes(id))
-	if err != nil {
-		return nil, nil, nil, nil, fmt.Errorf("engine GetPayloadV5 failed: %w", err)
-	}
-	return cc.getAssembledBlockFromResponse(resp, version)
-}
-
-func (cc *ExecutionClientEngine) getAssembledBlockV6(ctx context.Context, id []byte, version clparams.StateVersion) (*cltypes.Eth1Block, *engine_types.BlobsBundle, *typesproto.RequestsBundle, *big.Int, error) {
-	resp, err := cc.engine.GetPayloadV6(ctx, hexutil.Bytes(id))
-	if err != nil {
-		return nil, nil, nil, nil, fmt.Errorf("engine GetPayloadV6 failed: %w", err)
+		return nil, nil, nil, nil, fmt.Errorf("engine %s failed: %w", methodName, err)
 	}
 	return cc.getAssembledBlockFromResponse(resp, version)
 }
