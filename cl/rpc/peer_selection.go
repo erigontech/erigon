@@ -121,7 +121,7 @@ func (c *columnDataPeers) refreshPeers(ctx context.Context) {
 			} else {
 				// get custody indices
 				enodeId := enode.HexID(peer.EnodeId)
-				custodyIndices, err = peerdasutils.GetCustodyColumns(enodeId, *metadata.CustodyGroupCount)
+				custodyIndices, err = peerdasutils.GetCustodyColumns(enodeId, *metadata.CustodyGroupCount, c.beaconConfig)
 				if err != nil {
 					log.Debug("[peerSelector] failed to get custody indices", "peer", pid, "err", err)
 					continue
@@ -202,7 +202,7 @@ func (c *columnDataPeers) pickPeerRoundRobin(
 				// full mask, no need to filter
 				newReq.Append(item)
 			} else {
-				identifier := cltypes.NewDataColumnsByRootIdentifier()
+				identifier := cltypes.NewDataColumnsByRootIdentifier(c.beaconConfig)
 				item.Columns.Range(func(_ int, column uint64, _ int) bool {
 					if peer.mask[column] {
 						identifier.Columns.Append(column)

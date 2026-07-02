@@ -310,7 +310,7 @@ func (d *peerdas) resubscribeGossip() {
 		return
 	}
 	for column := range custodyColumns {
-		subnet := ComputeSubnetForDataColumnSidecar(column)
+		subnet := ComputeSubnetForDataColumnSidecar(column, d.beaconConfig)
 		topicName := gossip.TopicNameDataColumnSidecar(subnet)
 		expiry := time.Unix(0, math.MaxInt64)
 		if err := d.gossipManager.SubscribeWithExpiry(topicName, expiry); err != nil {
@@ -528,7 +528,7 @@ func (d *peerdas) blobsRecoverWorker(ctx context.Context) {
 			}
 			if !exist {
 				blobSize := anyColumnSidecar.Column.Len()
-				sidecar := cltypes.NewDataColumnSidecar()
+				sidecar := cltypes.NewDataColumnSidecar(d.beaconConfig)
 				sidecar.Index = columnIndex
 				sidecar.SignedBlockHeader = anyColumnSidecar.SignedBlockHeader
 				// [Modified in Gloas:EIP7732] GLOAS sidecars don't have KzgCommitmentsInclusionProof and KzgCommitments
@@ -545,7 +545,7 @@ func (d *peerdas) blobsRecoverWorker(ctx context.Context) {
 				// verify the sidecar
 				// [Modified in Gloas:EIP7732] Version-aware verification
 				if isGloas {
-					if !VerifyDataColumnSidecarWithCommitments(sidecar, kzgCommitmentsFromBlock) {
+					if !VerifyDataColumnSidecarWithCommitments(sidecar, kzgCommitmentsFromBlock, d.beaconConfig) {
 						log.Warn("[blobsRecover] failed to verify column sidecar (GLOAS)", "slot", slot, "blockRoot", blockRoot, "column", columnIndex)
 						continue
 					}
@@ -554,7 +554,7 @@ func (d *peerdas) blobsRecoverWorker(ctx context.Context) {
 						continue
 					}
 				} else {
-					if !VerifyDataColumnSidecar(sidecar) {
+					if !VerifyDataColumnSidecar(sidecar, d.beaconConfig) {
 						log.Warn("[blobsRecover] failed to verify column sidecar", "slot", slot, "blockRoot", blockRoot, "column", columnIndex)
 						continue
 					}
@@ -898,7 +898,7 @@ mainloop:
 							log.Debug("failed to get kzg commitments for GLOAS", "err", err, "blockRoot", blockRoot)
 							return
 						}
-						if !VerifyDataColumnSidecarWithCommitments(sidecar, kzgCommitments) {
+						if !VerifyDataColumnSidecarWithCommitments(sidecar, kzgCommitments, d.beaconConfig) {
 							log.Debug("failed to verify column sidecar (GLOAS)", "blockRoot", blockRoot, "columnIndex", sidecar.Index)
 							d.rpc.BanPeer(result.pid)
 							return
@@ -910,7 +910,7 @@ mainloop:
 						}
 					} else {
 						// Fulu: kzg_commitments are in the sidecar
-						if !VerifyDataColumnSidecar(sidecar) {
+						if !VerifyDataColumnSidecar(sidecar, d.beaconConfig) {
 							log.Debug("failed to verify column sidecar", "blockRoot", blockRoot, "columnIndex", sidecar.Index)
 							d.rpc.BanPeer(result.pid)
 							return
@@ -1071,10 +1071,8 @@ func (d *downloadRequest) requestData() *solid.ListSSZ[*cltypes.DataColumnsByRoo
 	d.tableMutex.RLock()
 	defer d.tableMutex.RUnlock()
 	for entry, columns := range d.downloadTable {
-		id := &cltypes.DataColumnsByRootIdentifier{
-			BlockRoot: entry.blockRoot,
-			Columns:   solid.NewUint64ListSSZ(int(d.beaconConfig.NumberOfColumns)),
-		}
+		id := cltypes.NewDataColumnsByRootIdentifier(d.beaconConfig)
+		id.BlockRoot = entry.blockRoot
 		for column := range columns {
 			id.Columns.Append(column)
 		}

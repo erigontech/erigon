@@ -147,7 +147,7 @@ func (b *BeaconRpcP2P) SendColumnSidecarsByRootIdentifierReq(
 
 	ColumnSidecars := []*cltypes.DataColumnSidecar{}
 	for _, data := range responsePacket {
-		columnSidecar := &cltypes.DataColumnSidecar{}
+		columnSidecar := cltypes.NewDataColumnSidecarWithVersion(data.version, b.beaconConfig)
 		if err := columnSidecar.DecodeSSZ(data.raw, int(data.version)); err != nil {
 			return nil, pid, err
 		}
@@ -162,11 +162,9 @@ func (b *BeaconRpcP2P) SendColumnSidecarsByRangeReqV1(
 	start, count uint64,
 	columns []uint64,
 ) ([]*cltypes.DataColumnSidecar, string, error) {
-	req := &cltypes.ColumnSidecarsByRangeRequest{
-		StartSlot: start,
-		Count:     count,
-		Columns:   solid.NewUint64ListSSZ(int(b.beaconConfig.NumberOfColumns)),
-	}
+	req := cltypes.NewColumnSidecarsByRangeRequest(b.beaconConfig)
+	req.StartSlot = start
+	req.Count = count
 	for _, column := range columns {
 		req.Columns.Append(column)
 	}
@@ -182,7 +180,7 @@ func (b *BeaconRpcP2P) SendColumnSidecarsByRangeReqV1(
 
 	ColumnSidecars := []*cltypes.DataColumnSidecar{}
 	for _, data := range responsePacket {
-		columnSidecar := &cltypes.DataColumnSidecar{}
+		columnSidecar := cltypes.NewDataColumnSidecarWithVersion(data.version, b.beaconConfig)
 		if err := columnSidecar.DecodeSSZ(data.raw, int(data.version)); err != nil {
 			return nil, pid, err
 		}

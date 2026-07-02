@@ -32,7 +32,7 @@ func init() {
 }
 
 func TestNewDataColumnSidecar(t *testing.T) {
-	sidecar := cltypes.NewDataColumnSidecar()
+	sidecar := cltypes.NewDataColumnSidecar(&clparams.MainnetBeaconConfig)
 
 	assert.NotNil(t, sidecar.Column, "Column should be initialized")
 	assert.NotNil(t, sidecar.KzgProofs, "KzgProofs should be initialized")
@@ -43,7 +43,7 @@ func TestNewDataColumnSidecar(t *testing.T) {
 }
 
 func TestNewDataColumnSidecarWithVersionFulu(t *testing.T) {
-	sidecar := cltypes.NewDataColumnSidecarWithVersion(clparams.FuluVersion)
+	sidecar := cltypes.NewDataColumnSidecarWithVersion(clparams.FuluVersion, &clparams.MainnetBeaconConfig)
 
 	assert.Equal(t, clparams.FuluVersion, sidecar.Version())
 	assert.NotNil(t, sidecar.Column, "Column should be initialized")
@@ -55,7 +55,7 @@ func TestNewDataColumnSidecarWithVersionFulu(t *testing.T) {
 }
 
 func TestNewDataColumnSidecarWithVersionGloas(t *testing.T) {
-	sidecar := cltypes.NewDataColumnSidecarWithVersion(clparams.GloasVersion)
+	sidecar := cltypes.NewDataColumnSidecarWithVersion(clparams.GloasVersion, &clparams.MainnetBeaconConfig)
 
 	assert.Equal(t, clparams.GloasVersion, sidecar.Version())
 	assert.NotNil(t, sidecar.Column, "Column should be initialized")
@@ -70,7 +70,7 @@ func TestDataColumnSidecarEncodeDecodeFulu(t *testing.T) {
 	require := require.New(t)
 
 	// Create a Fulu sidecar
-	original := cltypes.NewDataColumnSidecarWithVersion(clparams.FuluVersion)
+	original := cltypes.NewDataColumnSidecarWithVersion(clparams.FuluVersion, &clparams.MainnetBeaconConfig)
 	original.Index = 42
 	original.SignedBlockHeader.Header.Slot = 1000
 	original.SignedBlockHeader.Header.ProposerIndex = 123
@@ -80,7 +80,7 @@ func TestDataColumnSidecarEncodeDecodeFulu(t *testing.T) {
 	require.NoError(err)
 
 	// Decode
-	decoded := cltypes.NewDataColumnSidecar()
+	decoded := cltypes.NewDataColumnSidecar(&clparams.MainnetBeaconConfig)
 	err = decoded.DecodeSSZ(encoded, int(clparams.FuluVersion))
 	require.NoError(err)
 
@@ -95,7 +95,7 @@ func TestDataColumnSidecarEncodeDecodeGloas(t *testing.T) {
 	require := require.New(t)
 
 	// Create a Gloas sidecar
-	original := cltypes.NewDataColumnSidecarWithVersion(clparams.GloasVersion)
+	original := cltypes.NewDataColumnSidecarWithVersion(clparams.GloasVersion, &clparams.MainnetBeaconConfig)
 	original.Index = 42
 	original.Slot = 2000
 	original.BeaconBlockRoot = [32]byte{1, 2, 3, 4, 5}
@@ -105,7 +105,7 @@ func TestDataColumnSidecarEncodeDecodeGloas(t *testing.T) {
 	require.NoError(err)
 
 	// Decode
-	decoded := cltypes.NewDataColumnSidecar()
+	decoded := cltypes.NewDataColumnSidecar(&clparams.MainnetBeaconConfig)
 	err = decoded.DecodeSSZ(encoded, int(clparams.GloasVersion))
 	require.NoError(err)
 
@@ -118,11 +118,11 @@ func TestDataColumnSidecarEncodeDecodeGloas(t *testing.T) {
 
 func TestDataColumnSidecarEncodingSizeSSZ(t *testing.T) {
 	// Fulu version should include pre-Gloas fields
-	fuluSidecar := cltypes.NewDataColumnSidecarWithVersion(clparams.FuluVersion)
+	fuluSidecar := cltypes.NewDataColumnSidecarWithVersion(clparams.FuluVersion, &clparams.MainnetBeaconConfig)
 	fuluSize := fuluSidecar.EncodingSizeSSZ()
 
 	// Gloas version should be smaller (no pre-Gloas fields)
-	gloasSidecar := cltypes.NewDataColumnSidecarWithVersion(clparams.GloasVersion)
+	gloasSidecar := cltypes.NewDataColumnSidecarWithVersion(clparams.GloasVersion, &clparams.MainnetBeaconConfig)
 	gloasSize := gloasSidecar.EncodingSizeSSZ()
 
 	// Fulu should include SignedBlockHeader, KzgCommitments, etc.
@@ -131,7 +131,7 @@ func TestDataColumnSidecarEncodingSizeSSZ(t *testing.T) {
 }
 
 func TestDataColumnSidecarClone(t *testing.T) {
-	original := cltypes.NewDataColumnSidecarWithVersion(clparams.FuluVersion)
+	original := cltypes.NewDataColumnSidecarWithVersion(clparams.FuluVersion, &clparams.MainnetBeaconConfig)
 	original.Slot = 1000
 	original.BeaconBlockRoot = [32]byte{1, 2, 3}
 	original.BlockRoot = [32]byte{4, 5, 6}
@@ -150,7 +150,7 @@ func TestDataColumnSidecarClone(t *testing.T) {
 }
 
 func TestDataColumnSidecarStatic(t *testing.T) {
-	sidecar := cltypes.NewDataColumnSidecar()
+	sidecar := cltypes.NewDataColumnSidecar(&clparams.MainnetBeaconConfig)
 	assert.False(t, sidecar.Static(), "DataColumnSidecar should not be static")
 }
 
@@ -158,14 +158,14 @@ func TestDataColumnSidecarHashSSZ(t *testing.T) {
 	require := require.New(t)
 
 	// Fulu version
-	fuluSidecar := cltypes.NewDataColumnSidecarWithVersion(clparams.FuluVersion)
+	fuluSidecar := cltypes.NewDataColumnSidecarWithVersion(clparams.FuluVersion, &clparams.MainnetBeaconConfig)
 	fuluSidecar.Index = 1
 	fuluHash, err := fuluSidecar.HashSSZ()
 	require.NoError(err)
 	assert.NotEqual(t, [32]byte{}, fuluHash)
 
 	// Gloas version
-	gloasSidecar := cltypes.NewDataColumnSidecarWithVersion(clparams.GloasVersion)
+	gloasSidecar := cltypes.NewDataColumnSidecarWithVersion(clparams.GloasVersion, &clparams.MainnetBeaconConfig)
 	gloasSidecar.Index = 1
 	gloasHash, err := gloasSidecar.HashSSZ()
 	require.NoError(err)
