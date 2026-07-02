@@ -85,6 +85,10 @@ type cachePopulatingGetter struct {
 	g        kv.TemporalGetter
 	sc       *cache.StateCache
 	stepSize uint64 // for the read txNum upper bound (last txNum of the read's step)
+	// progress returns the domain's max committed txNum in the read snapshot;
+	// it stamps negative results, whose miss carries no step to derive a
+	// bound from.
+	progress func(kv.Domain) uint64
 }
 
 func (cpg *cachePopulatingGetter) GetLatest(name kv.Domain, k []byte) ([]byte, kv.Step, error) {
@@ -94,12 +98,16 @@ func (cpg *cachePopulatingGetter) GetLatest(name kv.Domain, k []byte) ([]byte, k
 		// committed snapshot, so an unconditional Put racing an FCU flush's
 		// cache-apply could replace the flushed value with the pre-flush one.
 		if name == kv.CodeDomain && len(v) > 0 {
-			// Key the content cache by the code's OWN hash, never a separately
-			// read account codeHash: under parallel/speculative exec that hash
-			// can be skewed or cross-account, and a (hash, code) pair that
-			// doesn't satisfy keccak(code)==hash poisons every account sharing
-			// the hash. keccak(v) makes each entry self-consistent.
-			cpg.sc.PutCodeWithHashIfAbsent(k, v, crypto.Keccak256(v), (uint64(step)+1)*cpg.stepSize-1)
+			// A live binding makes the conditional put a no-op — skip before
+			// paying the keccak+copy below.
+			if !cpg.sc.HasLiveCode(k) {
+				// Key the content cache by the code's OWN hash, never a separately
+				// read account codeHash: under parallel/speculative exec that hash
+				// can be skewed or cross-account, and a (hash, code) pair that
+				// doesn't satisfy keccak(code)==hash poisons every account sharing
+				// the hash. keccak(v) makes each entry self-consistent.
+				cpg.sc.PutCodeWithHashIfAbsent(k, v, crypto.Keccak256(v), (uint64(step)+1)*cpg.stepSize-1)
+			}
 		} else {
 			// Cache including nil/empty results: a probe returning no
 			// bytes is a valid negative answer (missing account, empty
@@ -107,9 +115,15 @@ func (cpg *cachePopulatingGetter) GetLatest(name kv.Domain, k []byte) ([]byte, k
 			// zero-length puts) and caching it lets repeated probes
 			// skip the file accessor stack. Mirrors revm's CacheAccount
 			// { account: None, status: LoadedNotExisting } pattern.
-			// Stamp with an upper bound on the value's write txNum (last txNum
-			// of the step it came from) so unwind invalidation is correct.
-			cpg.sc.PutIfAbsent(name, k, v, (uint64(step)+1)*cpg.stepSize-1)
+			// Stamp with an upper bound on the value's write txNum: the last
+			// txNum of the step it came from, or for a negative — which has no
+			// step — the domain's progress at observation time, so the entry
+			// drops on any unwind instead of outliving the fact it caches.
+			txNum := (uint64(step)+1)*cpg.stepSize - 1
+			if len(v) == 0 {
+				txNum = cpg.progress(name)
+			}
+			cpg.sc.PutIfAbsent(name, k, v, txNum)
 		}
 	}
 	return v, step, err
@@ -132,9 +146,18 @@ func (bra *BlockReadAheader) AddHeaderAndBody(ctx context.Context, db kv.RoDB, h
 		if !bra.warming.CompareAndSwap(false, true) {
 			return
 		}
+		// Registered before the goroutine spawns and released before warmWg.Done
+		// (defers run LIFO), so a WaitForWarmup return implies the gauge is back
+		// to zero — StateCache.Unwind asserts on it.
+		if bra.stateCache != nil {
+			bra.stateCache.WarmupStarted()
+		}
 		bra.warmWg.Add(1)
 		go func() {
 			defer bra.warmWg.Done()
+			if bra.stateCache != nil {
+				defer bra.stateCache.WarmupDone()
+			}
 			bra.warmBody(ctx, db, header, body, 8) // use 8 workers for warming
 		}()
 	}
@@ -229,7 +252,7 @@ func (bra *BlockReadAheader) warmBody(ctx context.Context, db kv.RoDB, header *t
 				}
 				var getter kv.TemporalGetter = ttx
 				if bra.stateCache != nil {
-					getter = &cachePopulatingGetter{g: ttx, sc: bra.stateCache, stepSize: ttx.Debug().StepSize()}
+					getter = &cachePopulatingGetter{g: ttx, sc: bra.stateCache, stepSize: ttx.Debug().StepSize(), progress: ttx.Debug().DomainProgress}
 				}
 				stateReader := state.NewReaderV3(getter)
 
@@ -300,7 +323,7 @@ func (bra *BlockReadAheader) warmBody(ctx context.Context, db kv.RoDB, header *t
 			var getter kv.TemporalGetter = ttx
 			var cpg *cachePopulatingGetter
 			if bra.stateCache != nil {
-				cpg = &cachePopulatingGetter{g: ttx, sc: bra.stateCache, stepSize: ttx.Debug().StepSize()}
+				cpg = &cachePopulatingGetter{g: ttx, sc: bra.stateCache, stepSize: ttx.Debug().StepSize(), progress: ttx.Debug().DomainProgress}
 				getter = cpg
 			}
 			stateReader := state.NewReaderV3(getter)

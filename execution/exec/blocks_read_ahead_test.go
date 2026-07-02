@@ -98,7 +98,7 @@ func TestCachePopulatingGetterWarmsColdKeys(t *testing.T) {
 
 	for _, domain := range []kv.Domain{kv.AccountsDomain, kv.StorageDomain} {
 		sc := newTestStateCache()
-		cpg := &cachePopulatingGetter{g: stubTemporalGetter{v: val}, sc: sc, stepSize: 1_562_500}
+		cpg := &cachePopulatingGetter{g: stubTemporalGetter{v: val}, sc: sc, stepSize: 1_562_500, progress: zeroProgress}
 		_, _, err := cpg.GetLatest(domain, key)
 		require.NoError(t, err)
 		got, ok := sc.Get(domain, key)
@@ -107,7 +107,7 @@ func TestCachePopulatingGetterWarmsColdKeys(t *testing.T) {
 	}
 
 	sc := newTestStateCache()
-	cpg := &cachePopulatingGetter{g: stubTemporalGetter{v: code}, sc: sc, stepSize: 1_562_500}
+	cpg := &cachePopulatingGetter{g: stubTemporalGetter{v: code}, sc: sc, stepSize: 1_562_500, progress: zeroProgress}
 	_, _, err := cpg.GetLatest(kv.CodeDomain, key)
 	require.NoError(t, err)
 	got, ok := sc.Get(kv.CodeDomain, key)
@@ -116,10 +116,51 @@ func TestCachePopulatingGetterWarmsColdKeys(t *testing.T) {
 
 	// Negative results (missing account, empty slot) are cached as nil hits.
 	sc = newTestStateCache()
-	cpg = &cachePopulatingGetter{g: stubTemporalGetter{v: nil}, sc: sc, stepSize: 1_562_500}
+	cpg = &cachePopulatingGetter{g: stubTemporalGetter{v: nil}, sc: sc, stepSize: 1_562_500, progress: zeroProgress}
 	_, _, err = cpg.GetLatest(kv.AccountsDomain, key)
 	require.NoError(t, err)
 	got, ok = sc.Get(kv.AccountsDomain, key)
 	require.True(t, ok)
 	require.Empty(t, got)
 }
+
+// With a live addr binding the prefetch must be a full no-op: not even the
+// content layers may be populated for its (superseded) snapshot code, because
+// the liveness pre-check exists to skip the keccak+copy for that code
+// entirely.
+func TestCachePopulatingGetterSkipsContentForLiveBinding(t *testing.T) {
+	addr := []byte("\x11\x22\x33\x44\x55\x66\x77\x88\x99\xaa\xbb\xcc\xdd\xee\xff\x00\x11\x22\x33\x44")
+	freshCode := []byte{0xaa, 0x01, 0x02, 0x03}
+	staleCode := []byte{0xbb, 0x04, 0x05, 0x06}
+	sc := newTestStateCache()
+	sc.PutCodeWithHash(addr, freshCode, crypto.Keccak256(freshCode), 54)
+	cpg := &cachePopulatingGetter{g: stubTemporalGetter{v: staleCode}, sc: sc, stepSize: 1_562_500, progress: zeroProgress}
+
+	_, _, err := cpg.GetLatest(kv.CodeDomain, addr)
+	require.NoError(t, err)
+
+	_, ok := sc.GetCodeByHash(crypto.Keccak256(staleCode))
+	require.False(t, ok, "live binding: prefetch must not populate content for the snapshot code")
+}
+
+// Negative results are stamped with the domain's progress at observation time,
+// not a synthetic step-0 bound — a synthetic stamp far below any real unwind
+// floor would make the negative immortal.
+func TestCachePopulatingGetterNegativeDropsOnUnwind(t *testing.T) {
+	key := []byte("\x11\x22\x33\x44\x55\x66\x77\x88\x99\xaa\xbb\xcc\xdd\xee\xff\x00\x11\x22\x33\x44")
+	sc := newTestStateCache()
+	cpg := &cachePopulatingGetter{
+		g: stubTemporalGetter{v: nil}, sc: sc, stepSize: 1_562_500,
+		progress: func(kv.Domain) uint64 { return 10_000_000 },
+	}
+	_, _, err := cpg.GetLatest(kv.AccountsDomain, key)
+	require.NoError(t, err)
+	_, ok := sc.Get(kv.AccountsDomain, key)
+	require.True(t, ok)
+
+	sc.Unwind(5_000_000)
+	_, ok = sc.Get(kv.AccountsDomain, key)
+	require.False(t, ok, "a negative observed at txNum 10M must not survive an unwind to 5M")
+}
+
+func zeroProgress(kv.Domain) uint64 { return 0 }
