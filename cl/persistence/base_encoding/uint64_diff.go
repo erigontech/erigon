@@ -25,6 +25,8 @@ import (
 	"sync"
 
 	"github.com/klauspost/compress/zstd"
+
+	"github.com/erigontech/erigon/common/pool"
 )
 
 // make a sync.pool of compressors (zstd)
@@ -41,12 +43,6 @@ var compressorPool = sync.Pool{
 func putComp(v *zstd.Encoder) {
 	v.Reset(nil)
 	compressorPool.Put(v)
-}
-
-var bufferPool = sync.Pool{
-	New: func() any {
-		return &bytes.Buffer{}
-	},
 }
 
 var plainUint64BufferPool = sync.Pool{
@@ -208,9 +204,8 @@ func ComputeCompressedSerializedEffectiveBalancesDiff(w io.Writer, old, new []by
 func ApplyCompressedSerializedUint64ListDiff(in, out []byte, diff []byte, reverse bool) ([]byte, error) {
 	out = out[:0]
 
-	buffer := bufferPool.Get().(*bytes.Buffer)
-	defer bufferPool.Put(buffer)
-	buffer.Reset()
+	buffer := pool.GetBuffer()
+	defer pool.PutBuffer(buffer)
 
 	if _, err := buffer.Write(diff); err != nil {
 		return nil, err
@@ -307,9 +302,8 @@ func ApplyCompressedSerializedValidatorListDiff(in, out []byte, diff []byte, rev
 	}
 	out = out[:len(in)]
 
-	buffer := bufferPool.Get().(*bytes.Buffer)
-	defer bufferPool.Put(buffer)
-	buffer.Reset()
+	buffer := pool.GetBuffer()
+	defer pool.PutBuffer(buffer)
 
 	if _, err := buffer.Write(diff); err != nil {
 		return nil, err

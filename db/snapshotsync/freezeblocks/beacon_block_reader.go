@@ -17,7 +17,6 @@
 package freezeblocks
 
 import (
-	"bytes"
 	"context"
 	"fmt"
 	"sync"
@@ -29,14 +28,11 @@ import (
 	"github.com/erigontech/erigon/cl/persistence/beacon_indicies"
 	"github.com/erigontech/erigon/cl/persistence/format/snapshot_format"
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/pool"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/dbutils"
 	"github.com/erigontech/erigon/execution/types"
 )
-
-var buffersPool = sync.Pool{
-	New: func() any { return &bytes.Buffer{} },
-}
 
 var decompressorPool = sync.Pool{
 	New: func() any {
@@ -135,10 +131,9 @@ func (r *beaconSnapshotReader) ReadBlockBySlot(ctx context.Context, tx kv.Tx, sl
 	}
 
 	// Decompress this thing
-	buffer := buffersPool.Get().(*bytes.Buffer)
-	defer buffersPool.Put(buffer)
+	buffer := pool.GetBuffer()
+	defer pool.PutBuffer(buffer)
 
-	buffer.Reset()
 	buffer.Write(buf)
 	reader := decompressorPool.Get().(*zstd.Decoder)
 	defer decompressorPool.Put(reader)
@@ -197,10 +192,9 @@ func (r *beaconSnapshotReader) ReadBeaconBlockBodyBySlot(ctx context.Context, tx
 	}
 
 	// Decompress this thing
-	buffer := buffersPool.Get().(*bytes.Buffer)
-	defer buffersPool.Put(buffer)
+	buffer := pool.GetBuffer()
+	defer pool.PutBuffer(buffer)
 
-	buffer.Reset()
 	buffer.Write(buf)
 	reader := decompressorPool.Get().(*zstd.Decoder)
 	defer decompressorPool.Put(reader)
@@ -275,10 +269,9 @@ func (r *beaconSnapshotReader) ReadBlockByRoot(ctx context.Context, tx kv.Tx, ro
 		return nil, nil
 	}
 	// Decompress this thing
-	buffer := buffersPool.Get().(*bytes.Buffer)
-	defer buffersPool.Put(buffer)
+	buffer := pool.GetBuffer()
+	defer pool.PutBuffer(buffer)
 
-	buffer.Reset()
 	buffer.Write(buf)
 	reader := decompressorPool.Get().(*zstd.Decoder)
 	defer decompressorPool.Put(reader)

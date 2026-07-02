@@ -32,6 +32,7 @@ import (
 	"github.com/erigontech/erigon/cl/transition/impl/eth2"
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/common/pool"
 	"github.com/erigontech/erigon/db/etl"
 	"github.com/erigontech/erigon/db/kv"
 )
@@ -719,9 +720,8 @@ func antiquateListSSZ[T solid.EncodableHashableSSZ](ctx context.Context, slot ui
 
 func antiquateBytesListDiff(ctx context.Context, key []byte, old, new []byte, collector *etl.Collector, diffFn func(w io.Writer, old, new []byte) error) error {
 	// create a diff
-	diffBuffer := bufferPool.Get().(*bytes.Buffer)
-	defer bufferPool.Put(diffBuffer)
-	diffBuffer.Reset()
+	diffBuffer := pool.GetBuffer()
+	defer pool.PutBuffer(diffBuffer)
 
 	if err := diffFn(diffBuffer, old, new); err != nil {
 		return err

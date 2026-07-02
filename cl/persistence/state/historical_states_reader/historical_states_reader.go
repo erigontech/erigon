@@ -37,14 +37,11 @@ import (
 	"github.com/erigontech/erigon/cl/phase1/core/state/lru"
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/common/pool"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/snapshotsync"
 	"github.com/erigontech/erigon/db/snapshotsync/freezeblocks"
 )
-
-var buffersPool = sync.Pool{
-	New: func() any { return &bytes.Buffer{} },
-}
 
 type HistoricalStatesReader struct {
 	cfg            *clparams.BeaconChainConfig
@@ -572,9 +569,8 @@ func (r *HistoricalStatesReader) reconstructDiffedUint64List(tx kv.Tx, kvGetter 
 		return nil, fmt.Errorf("dump not found for slot %d", freshDumpSlot)
 	}
 
-	buffer := buffersPool.Get().(*bytes.Buffer)
-	defer buffersPool.Put(buffer)
-	buffer.Reset()
+	buffer := pool.GetBuffer()
+	defer pool.PutBuffer(buffer)
 
 	if _, err := buffer.Write(compressed); err != nil {
 		return nil, err
@@ -644,9 +640,8 @@ func (r *HistoricalStatesReader) reconstructBalances(tx kv.Tx, kvGetter state_ac
 	remainder := slot % clparams.SlotsPerDump
 	freshDumpSlot := slot - remainder
 
-	buffer := buffersPool.Get().(*bytes.Buffer)
-	defer buffersPool.Put(buffer)
-	buffer.Reset()
+	buffer := pool.GetBuffer()
+	defer pool.PutBuffer(buffer)
 
 	var compressed []byte
 	currentStageProgress, err := state_accessors.GetStateProcessingProgress(tx)
@@ -1057,9 +1052,8 @@ func ReadQueueSSZ[T solid.EncodableHashableSSZ](kvGetter state_accessors.GetValF
 	remainder := slot % clparams.SlotsPerDump
 	freshDumpSlot := slot - remainder
 
-	buffer := buffersPool.Get().(*bytes.Buffer)
-	defer buffersPool.Put(buffer)
-	buffer.Reset()
+	buffer := pool.GetBuffer()
+	defer pool.PutBuffer(buffer)
 
 	var compressed []byte
 
@@ -1128,9 +1122,8 @@ func ReadRequiredQueueSSZ[T solid.EncodableHashableSSZ](kvGetter state_accessors
 	}
 
 	// Decompress and decode the dump (reuse buffer pool).
-	buffer := buffersPool.Get().(*bytes.Buffer)
-	defer buffersPool.Put(buffer)
-	buffer.Reset()
+	buffer := pool.GetBuffer()
+	defer pool.PutBuffer(buffer)
 
 	if _, err := buffer.Write(compressed); err != nil {
 		return err
@@ -1192,9 +1185,8 @@ func readCompressedSSZ[T interface {
 		return fmt.Errorf("%w: table %s, slot %d", ErrMissingGloasData, table, slot)
 	}
 
-	buffer := buffersPool.Get().(*bytes.Buffer)
-	defer buffersPool.Put(buffer)
-	buffer.Reset()
+	buffer := pool.GetBuffer()
+	defer pool.PutBuffer(buffer)
 
 	if _, err := buffer.Write(compressed); err != nil {
 		return err
