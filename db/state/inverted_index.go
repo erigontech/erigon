@@ -34,7 +34,6 @@ import (
 	"golang.org/x/sync/errgroup"
 
 	"github.com/erigontech/erigon/common"
-	"github.com/erigontech/erigon/common/assert"
 	"github.com/erigontech/erigon/common/background"
 	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/log/v3"
@@ -210,7 +209,7 @@ func (ii *InvertedIndex) scanDirtyFiles(fileNames []string) {
 	if ii.stepSize == 0 {
 		panic("assert: empty `stepSize`")
 	}
-	for _, dirtyFile := range filterDirtyFiles(fileNames, ii.stepSize, ii.stepsInFrozenFile, ii.FilenameBase, "ef", ii.logger) {
+	for _, dirtyFile := range filterDirtyFiles(fileNames, ii.stepSize, ii.FilenameBase, "ef", ii.logger) {
 		if _, has := ii.dirtyFiles.Get(dirtyFile); !has {
 			ii.dirtyFiles.Set(dirtyFile)
 		}
@@ -1107,7 +1106,7 @@ func (ii *InvertedIndex) buildFiles(ctx context.Context, step kv.Step, coll Inve
 		}
 	}()
 
-	if assert.Enable {
+	if dbg.AssertEnabled {
 		if coll.iiPath == "" && reflect.ValueOf(coll.writer).IsNil() {
 			panic("assert: collation is not initialized " + ii.FilenameBase)
 		}
@@ -1197,7 +1196,7 @@ func (ii *InvertedIndex) integrateDirtyFiles(sf InvertedFiles, txNumFrom, txNumT
 	if sf.decomp == nil {
 		return // build was skipped — don't overwrite existing dirty files
 	}
-	fi := newFilesItem(txNumFrom, txNumTo, ii.stepSize, ii.stepsInFrozenFile)
+	fi := newFilesItem(txNumFrom, txNumTo)
 	fi.decompressor = sf.decomp
 	fi.index = sf.index
 	fi.existence = sf.existence

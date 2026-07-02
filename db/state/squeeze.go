@@ -287,7 +287,6 @@ func SqueezeCommitmentFiles(ctx context.Context, at *AggregatorRoTx, logger log.
 				return err
 			}
 			sizeDelta += delta
-			cf.frozen = false
 			cf.closeFilesAndRemove()
 
 			squeezedPath := originalPath + sqExt

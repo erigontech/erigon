@@ -139,7 +139,6 @@ type BlockRetire interface {
 	// target left behind when CancelInFlight interrupted retire
 	// mid-build (.seg written, .torrent not yet produced).
 	CleanOrphanSegsPastTarget(target uint64) ([]string, error)
-	WaitForMerges(ctx context.Context)
 }
 
 type DBEventNotifier interface {

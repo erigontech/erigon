@@ -35,8 +35,8 @@ import (
 	"github.com/c2h5oh/datasize"
 
 	"github.com/erigontech/erigon/common"
-	"github.com/erigontech/erigon/common/assert"
 	"github.com/erigontech/erigon/common/background"
+	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/dir"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/common/mmap"
@@ -986,7 +986,7 @@ func (rs *RecSplit) Build(ctx context.Context) error {
 		}
 	}
 
-	if assert.Enable {
+	if dbg.AssertEnabled {
 		_ = rs.indexW.Flush()
 		rs.indexF.Seek(0, 0)
 		b, _ := io.ReadAll(rs.indexF)

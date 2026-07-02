@@ -534,8 +534,7 @@ func (dt *DomainRoTx) mergeFiles(ctx context.Context, domainFiles, indexFiles, h
 	kvWriter = nil
 	ps.Delete(p)
 
-	valuesIn = newFilesItem(r.values.from, r.values.to, dt.stepSize, dt.stepsInFrozenFile)
-	valuesIn.frozen = false
+	valuesIn = newFilesItem(r.values.from, r.values.to)
 	if valuesIn.decompressor, err = seg.NewDecompressor(kvFilePath); err != nil {
 		return nil, nil, nil, fmt.Errorf("merge %s decompressor [%d-%d]: %w", dt.d.FilenameBase, r.values.from, r.values.to, err)
 	}
@@ -710,7 +709,7 @@ func (iit *InvertedIndexRoTx) mergeFiles(ctx context.Context, files []*FilesItem
 	comp.Close()
 	comp = nil
 
-	outItem = newFilesItem(startTxNum, endTxNum, iit.stepSize, iit.stepsInFrozenFile)
+	outItem = newFilesItem(startTxNum, endTxNum)
 	if outItem.decompressor, err = seg.NewDecompressor(datPath); err != nil {
 		return nil, fmt.Errorf("merge %s decompressor [%d-%d]: %w", iit.ii.FilenameBase, startTxNum, endTxNum, err)
 	}
@@ -888,7 +887,7 @@ func (ht *HistoryRoTx) mergeFiles(ctx context.Context, indexFiles, historyFiles 
 		if index, err = ht.h.openHashMapAccessor(idxPath); err != nil {
 			return nil, nil, fmt.Errorf("open %s idx: %w", ht.h.FilenameBase, err)
 		}
-		historyIn = newFilesItem(r.history.from, r.history.to, ht.stepSize, ht.stepsInFrozenFile)
+		historyIn = newFilesItem(r.history.from, r.history.to)
 		historyIn.decompressor = decomp
 		historyIn.index = index
 
@@ -1002,10 +1001,6 @@ func garbage(dirtyFiles *DirtyFiles, visibleFiles []visibleFile, merged *FilesIt
 	defer iter.Release()
 	for ok := iter.First(); ok; ok = iter.Next() {
 		item := iter.Item()
-		if item.frozen {
-			continue
-		}
-
 		if merged == nil {
 			if hasCoverVisibleFile(visibleFiles, item) {
 				outs = append(outs, item)

@@ -886,6 +886,7 @@ func getGenesis(funds ...*big.Int) initialData {
 				SpuriousDragonBlock:   common.NewUint64(1),
 				ByzantiumBlock:        common.NewUint64(1),
 				ConstantinopleBlock:   common.NewUint64(1),
+				PetersburgBlock:       common.NewUint64(1),
 			},
 			Alloc: allocs,
 		},

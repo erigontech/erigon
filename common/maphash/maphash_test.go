@@ -6,6 +6,107 @@ import (
 	"unique"
 )
 
+func TestShardedLRUBasic(t *testing.T) {
+	l, err := NewShardedLRU[int](1024, 16)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for i := 0; i < 500; i++ {
+		l.Set([]byte{byte(i), byte(i >> 8)}, i)
+	}
+	for i := 0; i < 500; i++ {
+		v, ok := l.Get([]byte{byte(i), byte(i >> 8)})
+		if !ok || v != i {
+			t.Fatalf("Get(%d) = %d,%v want %d,true", i, v, ok, i)
+		}
+	}
+	if _, ok := l.Get([]byte("absent")); ok {
+		t.Fatal("missing key reported present")
+	}
+	if l.Len() != 500 {
+		t.Fatalf("Len = %d want 500", l.Len())
+	}
+
+	l.Delete([]byte{byte(7), 0})
+	if _, ok := l.Get([]byte{byte(7), 0}); ok {
+		t.Fatal("Delete did not remove key")
+	}
+
+	seen := 0
+	l.Range(func(uint64, int) bool { seen++; return true })
+	if seen != 499 {
+		t.Fatalf("Range visited %d want 499", seen)
+	}
+
+	l.Purge()
+	if l.Len() != 0 {
+		t.Fatalf("Len after Purge = %d want 0", l.Len())
+	}
+}
+
+func TestShardedLRUDeleteByHashMatchesRange(t *testing.T) {
+	l, err := NewShardedLRU[int](256, 8)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for i := 0; i < 100; i++ {
+		l.Set([]byte{byte(i)}, i)
+	}
+	l.Range(func(h uint64, v int) bool {
+		if v%2 == 0 {
+			l.DeleteByHash(h)
+		}
+		return true
+	})
+	remaining := 0
+	l.Range(func(_ uint64, v int) bool {
+		if v%2 == 0 {
+			t.Fatalf("even value %d survived DeleteByHash", v)
+		}
+		remaining++
+		return true
+	})
+	if remaining != 50 {
+		t.Fatalf("remaining = %d want 50", remaining)
+	}
+}
+
+func TestShardedLRUConcurrent(t *testing.T) {
+	l, err := NewShardedLRU[int](4096, 64)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var wg sync.WaitGroup
+	for w := 0; w < 32; w++ {
+		wg.Add(1)
+		go func(base int) {
+			defer wg.Done()
+			for i := 0; i < 2000; i++ {
+				k := []byte{byte(base), byte(i), byte(i >> 8)}
+				l.Set(k, base*i)
+				l.Get(k)
+			}
+		}(w)
+	}
+	wg.Wait()
+}
+
+func TestShardedLRUMoreShardsThanSize(t *testing.T) {
+	l, err := NewShardedLRU[int](50, 256)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Shard count capped at size (50) then rounded down to a power of two = 32,
+	// not collapsed to a single shard.
+	if len(l.shards) != 32 {
+		t.Fatalf("shard count = %d want 32", len(l.shards))
+	}
+	l.Set([]byte("k"), 42)
+	if v, ok := l.Get([]byte("k")); !ok || v != 42 {
+		t.Fatalf("Get after Set = %d,%v want 42,true", v, ok)
+	}
+}
+
 func TestSetSeed(t *testing.T) {
 	SetSeed(12345)
 	key := []byte("test")

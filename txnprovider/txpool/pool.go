@@ -36,8 +36,8 @@ import (
 	"github.com/holiman/uint256"
 
 	"github.com/erigontech/erigon/common"
-	"github.com/erigontech/erigon/common/assert"
 	libkzg "github.com/erigontech/erigon/common/crypto/kzg"
+	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/common/u256"
@@ -416,7 +416,7 @@ func (p *TxPool) OnNewBlock(ctx context.Context, stateChanges *remoteproto.State
 		return err
 	}
 
-	if assert.Enable {
+	if dbg.AssertEnabled {
 		for _, txn := range unwindTxns.Txns {
 			if txn.SenderID == 0 {
 				panic("onNewBlock.unwindTxns: senderID can't be zero")
@@ -1494,7 +1494,7 @@ func (p *TxPool) chainDB() (kv.TemporalRoDB, kvcache.Cache) {
 
 func (p *TxPool) addTxns(blockNum uint64, cacheView kvcache.CacheView, senders *sendersBatch,
 	newTxns TxnSlots, pendingBaseFee, pendingBlobFee, blockGasLimit uint64, collect bool, logger log.Logger) (Announcements, []txpoolcfg.DiscardReason, error) {
-	if assert.Enable {
+	if dbg.AssertEnabled {
 		for _, txn := range newTxns.Txns {
 			if txn.SenderID == 0 {
 				panic("senderID can't be zero")
@@ -1559,7 +1559,7 @@ func (p *TxPool) addTxns(blockNum uint64, cacheView kvcache.CacheView, senders *
 // TODO: Looks like a copy of the above
 func (p *TxPool) addTxnsOnNewBlock(blockNum uint64, cacheView kvcache.CacheView, stateChanges *remoteproto.StateChangeBatch,
 	senders *sendersBatch, newTxns TxnSlots, pendingBaseFee uint64, blockGasLimit uint64, logger log.Logger) (Announcements, error) {
-	if assert.Enable {
+	if dbg.AssertEnabled {
 		for _, txn := range newTxns.Txns {
 			if txn.SenderID == 0 {
 				panic("senderID can't be zero")
@@ -1784,7 +1784,7 @@ func (p *TxPool) addLocked(mt *metaTxn, announcements *Announcements) txpoolcfg.
 	p.byHash[hashStr] = mt
 
 	if replaced := p.all.replaceOrInsert(mt, p.logger); replaced != nil {
-		if assert.Enable {
+		if dbg.AssertEnabled {
 			panic("must never happen")
 		}
 	}

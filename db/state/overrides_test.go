@@ -120,7 +120,7 @@ func TestDomainRoTx_substituteFile_NoCoveringRange(t *testing.T) {
 	defer dt.Close()
 
 	// A FilesItem for a range with no live counterpart is rejected.
-	fi := newFilesItem(5*d.stepSize, 6*d.stepSize, d.stepSize, d.stepsInFrozenFile)
+	fi := newFilesItem(5*d.stepSize, 6*d.stepSize)
 	err := dt.substituteFile(fi)
 	require.ErrorContains(t, err, "no live")
 }

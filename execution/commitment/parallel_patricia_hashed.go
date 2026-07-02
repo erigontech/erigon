@@ -24,8 +24,6 @@ import (
 	"runtime"
 	"sync"
 	"sync/atomic"
-
-	"github.com/erigontech/erigon/common/dbg"
 )
 
 // ParallelPatriciaHashed is the trie-side of the parallel commitment pipeline.
@@ -259,16 +257,6 @@ func (p *ParallelPatriciaHashed) Process(
 		return rh, nil
 	}
 
-	var warmuper *Warmuper
-	if warmup.Enabled && dbg.EnvWarmupParallelProcess {
-		if warmup.CtxFactory == nil {
-			warmup.CtxFactory = p.trieCtxFactory
-		}
-		warmuper = NewWarmuper(ctx, warmup)
-		warmuper.Start()
-		defer warmuper.CloseAndWait()
-	}
-
 	rh, mErr := p.processMounted(ctx, updates)
 	if mErr != nil {
 		pu.deferredMu.Lock()
@@ -292,9 +280,6 @@ func (p *ParallelPatriciaHashed) Process(
 	out := make([]byte, len(rh))
 	copy(out, rh)
 	p.rootHash.Store(&out)
-	if warmuper != nil {
-		warmuper.DrainPending()
-	}
 	flushTrieStateRates()
 	return out, nil
 }

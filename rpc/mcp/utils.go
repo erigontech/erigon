@@ -19,9 +19,11 @@ func toJSONText(v any) string {
 	return string(formatted)
 }
 
-// parseBlockNumber parses block number from string
 func parseBlockNumber(s string) (rpc.BlockNumber, error) {
 	var blockNum rpc.BlockNumber
-	err := blockNum.UnmarshalJSON([]byte(`"` + s + `"`))
-	return blockNum, err
+	b, err := json.Marshal(s)
+	if err != nil {
+		return blockNum, err
+	}
+	return blockNum, blockNum.UnmarshalJSON(b)
 }

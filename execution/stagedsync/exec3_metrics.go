@@ -11,7 +11,7 @@ import (
 	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
-	"github.com/erigontech/erigon/db/state/changeset"
+	"github.com/erigontech/erigon/db/state/kvmetrics"
 	"github.com/erigontech/erigon/diagnostics/metrics"
 	"github.com/erigontech/erigon/execution/commitment"
 	"github.com/erigontech/erigon/execution/protocol/rules"
@@ -250,14 +250,14 @@ func resetDomainGauges(ctx context.Context) {
 	}
 }
 
-func updateExecDomainMetrics(metrics *changeset.DomainMetrics, prevMetrics *changeset.DomainMetrics, interval time.Duration,
-	executing bool) *changeset.DomainMetrics {
+func updateExecDomainMetrics(metrics *kvmetrics.DomainMetrics, prevMetrics *kvmetrics.DomainMetrics, interval time.Duration,
+	executing bool) *kvmetrics.DomainMetrics {
 	metrics.RLock()
 	defer metrics.RUnlock()
 
 	if prevMetrics == nil {
-		prevMetrics = &changeset.DomainMetrics{
-			Domains: map[kv.Domain]*changeset.DomainIOMetrics{},
+		prevMetrics = &kvmetrics.DomainMetrics{
+			Domains: map[kv.Domain]*kvmetrics.DomainIOMetrics{},
 		}
 	}
 
@@ -290,7 +290,7 @@ func updateExecDomainMetrics(metrics *changeset.DomainMetrics, prevMetrics *chan
 	prevMetrics.DomainIOMetrics = metrics.DomainIOMetrics
 
 	if accountMetrics, ok := metrics.Domains[kv.AccountsDomain]; ok {
-		var prevAccountMetrics changeset.DomainIOMetrics
+		var prevAccountMetrics kvmetrics.DomainIOMetrics
 
 		if prev, ok := prevMetrics.Domains[kv.AccountsDomain]; ok {
 			prevAccountMetrics = *prev
@@ -327,7 +327,7 @@ func updateExecDomainMetrics(metrics *changeset.DomainMetrics, prevMetrics *chan
 	}
 
 	if storageMetrics, ok := metrics.Domains[kv.StorageDomain]; ok {
-		var prevStorageMetrics changeset.DomainIOMetrics
+		var prevStorageMetrics kvmetrics.DomainIOMetrics
 
 		if prev, ok := prevMetrics.Domains[kv.StorageDomain]; ok {
 			prevStorageMetrics = *prev
@@ -364,7 +364,7 @@ func updateExecDomainMetrics(metrics *changeset.DomainMetrics, prevMetrics *chan
 	}
 
 	if codeMetrics, ok := metrics.Domains[kv.CodeDomain]; ok && executing {
-		var prevCodeMetrics changeset.DomainIOMetrics
+		var prevCodeMetrics kvmetrics.DomainIOMetrics
 
 		if prev, ok := prevMetrics.Domains[kv.CodeDomain]; ok {
 			prevCodeMetrics = *prev
@@ -399,7 +399,7 @@ func updateExecDomainMetrics(metrics *changeset.DomainMetrics, prevMetrics *chan
 	}
 
 	if commitmentMetrics, ok := metrics.Domains[kv.CommitmentDomain]; !executing && ok {
-		var prevCommitmentMetrics changeset.DomainIOMetrics
+		var prevCommitmentMetrics kvmetrics.DomainIOMetrics
 
 		if prev, ok := prevMetrics.Domains[kv.CommitmentDomain]; ok {
 			prevCommitmentMetrics = *prev
@@ -491,7 +491,7 @@ type Progress struct {
 	prevBranchReadCount            uint64
 	prevBranchWriteCount           uint64
 	commitThreshold                uint64
-	prevDomainMetrics              *changeset.DomainMetrics
+	prevDomainMetrics              *kvmetrics.DomainMetrics
 	logPrefix                      string
 	logger                         log.Logger
 }

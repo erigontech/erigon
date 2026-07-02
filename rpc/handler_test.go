@@ -55,6 +55,10 @@ func TestHandlerDoesNotDoubleWriteNull(t *testing.T) {
 			params:   []byte("[5]"),
 			expected: `{"jsonrpc":"2.0","id":1,"result":{"structLogs":{}},"error":{"code":-32000,"message":"id 4"}}`,
 		},
+		"err_with_unclosed_result_object": {
+			params:   []byte("[6]"),
+			expected: `{"jsonrpc":"2.0","id":1,"result":{"structLogs":[]},"error":{"code":-32000,"message":"id 6"}}`,
+		},
 	}
 
 	for name, testParams := range tests {
@@ -93,6 +97,14 @@ func TestHandlerDoesNotDoubleWriteNull(t *testing.T) {
 					stream.WriteEmptyObject()
 					stream.WriteObjectEnd()
 					return errors.New("id 4")
+				}
+				if id == 6 {
+					stream.WriteObjectStart()
+					stream.WriteObjectField("structLogs")
+					stream.WriteEmptyArray()
+					// intentionally leave the result object open: the tracer erroring out
+					// mid-write must not leave the response's "result" object unclosed.
+					return errors.New("id 6")
 				}
 				return nil
 			}

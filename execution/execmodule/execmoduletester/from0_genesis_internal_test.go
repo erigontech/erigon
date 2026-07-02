@@ -145,19 +145,10 @@ func runFromZeroGenesisAllocPreservedAfterResetReExec(t *testing.T) {
 		"BUG #21138: after reset + integration-path re-exec, genesis-allocated balance dropped (mainnet block 46147)")
 }
 
-// reExecViaIntegrationPath drives execution the way cmd/integration/commands/
-// stages.go does: SpawnExecuteBlocksStage one batch per rwtx, committing each
-// with doms.Commit + ClearRam and reusing the SharedDomains. This bypasses the
-// engine API. doms.Commit (not Flush) is load-bearing: it refreshes the
-// aggregator BranchCache to match committed state — Flush leaves it stale and
-// corrupts the next batch's trie root.
-func reExecViaIntegrationPath(t *testing.T, ctx context.Context, emt *ExecModuleTester, toBlock uint64, batchSize datasize.ByteSize, badBlockHalt bool, logger log.Logger) error {
-	t.Helper()
-
-	// The exec stage cfg execmoduletester built sits inside emt.Sync; we
-	// rebuild it with the same arguments so we can invoke
-	// SpawnExecuteBlocksStage directly without coupling to internal stage
-	// indices.
+// setupOfflineExec rebuilds the exec-stage cfg directly (execmoduletester's own
+// copy is buried in emt.Sync) and locks the offline-execution writers like the
+// integration tool does, so periodic snapshot retiring doesn't fight the re-exec.
+func setupOfflineExec(emt *ExecModuleTester, batchSize datasize.ByteSize, badBlockHalt bool) stagedsync.ExecuteBlockCfg {
 	cfg := stagedsync.StageExecuteBlocksCfg(
 		emt.DB,
 		emt.cfg.Prune,
@@ -175,14 +166,24 @@ func reExecViaIntegrationPath(t *testing.T, ctx context.Context, emt *ExecModule
 		false, /*experimentalBAL*/
 		exec.NewBlockReadAheader(),
 	)
-
-	// Lock the offline-execution writers like the integration tool does so
-	// the periodic snapshot retiring doesn't fight us.
 	if agg, ok := emt.DB.(dbstate.HasAgg); ok {
 		if aggT, okT := agg.Agg().(*dbstate.Aggregator); okT {
 			aggT.PresetOfflineExecution()
 		}
 	}
+	return cfg
+}
+
+// reExecViaIntegrationPath drives execution the way cmd/integration/commands/
+// stages.go does: SpawnExecuteBlocksStage one batch per rwtx, committing each
+// with doms.Commit + ClearRam and reusing the SharedDomains. This bypasses the
+// engine API. doms.Commit (not Flush) is load-bearing: it refreshes the
+// aggregator BranchCache to match committed state — Flush leaves it stale and
+// corrupts the next batch's trie root.
+func reExecViaIntegrationPath(t *testing.T, ctx context.Context, emt *ExecModuleTester, toBlock uint64, batchSize datasize.ByteSize, badBlockHalt bool, logger log.Logger) error {
+	t.Helper()
+
+	cfg := setupOfflineExec(emt, batchSize, badBlockHalt)
 
 	doms, err := newReusedDomains(ctx, emt, logger)
 	if err != nil {
@@ -319,4 +320,53 @@ func runBranchCacheCoherentAcrossBatches(t *testing.T) {
 	require.NoError(t,
 		reExecViaIntegrationPath(t, ctx, emt, gen.TopBlock.NumberU64(), 1*datasize.KB, true /*badBlockHalt*/, logger),
 		"re-exec from 0 in tiny batches must reproduce each block's trie root; a stale BranchCache corrupts it")
+}
+
+// TestExec_RestoresCommitmentStateReader checks that an execution batch leaves
+// the commitment state reader as it found it. The exec mode is whatever the
+// suite selects — the serial/parallel CI matrix (and the EXEC3_PARALLEL default)
+// cover both. It bites in parallel: the commitment calculator installs a
+// GetAsOf-based asOfStateReader on the shared context, and leaving it there
+// makes a later foreground SeekCommitment in the offline re-exec path (in-mem
+// history reads disabled) fail with "GetAsOf called on TemporalMemBatch with
+// inMemHistoryReads disabled". Serial installs no custom reader.
+func TestExec_RestoresCommitmentStateReader(t *testing.T) {
+	key, _ := crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f291")
+	keyAddr := crypto.PubkeyToAddress(key.PublicKey)
+	keyFunds := new(big.Int).Mul(big.NewInt(1_000_000), new(big.Int).Exp(big.NewInt(10), big.NewInt(18), nil))
+	gspec := &types.Genesis{
+		Config: chain.TestChainBerlinConfig,
+		Alloc:  types.GenesisAlloc{keyAddr: types.GenesisAccount{Balance: keyFunds}},
+	}
+	emt := New(t, WithGenesisSpec(gspec), WithKey(key))
+
+	signer := types.LatestSignerForChainID(emt.ChainConfig.ChainID)
+	gen, err := blockgen.GenerateChain(emt.ChainConfig, emt.Genesis, emt.Engine, emt.DB, 4, func(i int, b *blockgen.BlockGen) {
+		b.SetCoinbase(common.Address{1})
+		to := common.BytesToAddress([]byte{byte(i + 1), 0xab})
+		tx, txErr := types.SignTx(
+			types.NewTransaction(b.TxNonce(keyAddr), to, uint256.NewInt(1_000_000), params.TxGas, uint256.NewInt(1), nil),
+			*signer, key)
+		require.NoError(t, txErr)
+		b.AddTx(tx)
+	})
+	require.NoError(t, err)
+	require.NoError(t, emt.InsertChain(gen))
+
+	ctx := context.Background()
+	logger := log.New()
+	require.NoError(t, rawdbreset.ResetExec(ctx, emt.DB))
+
+	cfg := setupOfflineExec(emt, emt.cfg.BatchSize, false /*badBlockHalt*/)
+
+	doms, err := newReusedDomains(ctx, emt, logger)
+	require.NoError(t, err)
+	defer doms.Close()
+
+	readerBefore := doms.GetCommitmentContext().StateReader()
+	_, err = execOneBatch(ctx, emt, doms, cfg, gen.TopBlock.NumberU64(), logger)
+	require.NoError(t, err)
+
+	require.Equal(t, readerBefore, doms.GetCommitmentContext().StateReader(),
+		"exec must restore the commitment state reader it found; leaving the parallel calculator's asOfStateReader installed breaks a later foreground SeekCommitment with in-mem history reads disabled")
 }

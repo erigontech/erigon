@@ -25,7 +25,6 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
-	"reflect"
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/crypto"
@@ -91,189 +90,6 @@ func NewInMemoryTrieRLPEncoded(root Node) *Trie {
 		valueNodesRLPEncoded: true,
 	}
 	return trie
-}
-
-// this will merge node2 into node1, returns a boolean mergeNecessary, if it was necessary to replace a child.
-// If not, then the two full nodes are the same so no replacement was necessary
-// This function also performs certain sanity checks which can result in an error if they fail
-func merge2FullNodes(node1, node2 *FullNode) (bool, error) {
-	furtherMergingNeeded := false
-	for i := 0; i < len(node1.Children); i++ {
-		// either both children are hashnodes, or only one of them is, or none of them is.
-		// if both of the two children (of trie1 and trie2) at a certain index are not hashnodes
-		// they must be the same type (e.g. both a FullNode, or both a ShortNode, or both nil) . If this is true for all children then no merge takes place at this level.
-		child1 := node1.Children[i]
-		child2 := node2.Children[i]
-		if hashNode1, ok1 := child1.(*HashNode); ok1 { // child1 is a hashnode
-			if hashNode2, ok2 := child2.(*HashNode); ok2 { //child2 is a hashnode
-				// both are hashnodes
-				if !bytes.Equal(hashNode1.hash, hashNode2.hash) { // sanity check
-					return false, fmt.Errorf("children hashnodes have different hashes: hash1(%x)!=hash2(%x)", hashNode1.hash, hashNode2.hash)
-				}
-			} else if child2 == nil {
-				return false, fmt.Errorf("child of tr2 should not be nil, because child of tr1 is a hashnode")
-			} else { // child2 is not a hashnode, in this case replace the hashnode in tree 1 by child2 which has the expanded node type
-				node1.Children[i] = child2
-			}
-		} else if child1 == nil {
-			if child2 != nil {
-				// sanity check
-				return false, fmt.Errorf("child of first node is nil , but corresponding child of second node is non-nil")
-			}
-		} else { // child1 is not nil and not a hashnode
-			if _, ok2 := child2.(*HashNode); !ok2 { // if child2 is not hashnode, now they are expected to have the same type , if child2 is a hashnode then no changes are necessary to node1
-				if reflect.TypeOf(child1) != reflect.TypeOf(child2) { // sanity check
-					return false, fmt.Errorf("children have different types: %T != %T", child1, child2)
-				} else { // further merging will be needed at the next level
-					furtherMergingNeeded = true
-				}
-			}
-		}
-	}
-	return furtherMergingNeeded, nil
-}
-
-func merge2ShortNodes(node1, node2 *ShortNode) (bool, error) {
-	furtherMergingNeeded := false
-	if !bytes.Equal(node1.Key, node2.Key) { // sanity check
-		return false, fmt.Errorf("mismatch in the short node keys node1.Key(%x)!=node2.Key(%x)", node1.Key, node2.Key)
-	}
-	if hashNode1, ok1 := node1.Val.(*HashNode); ok1 { // node1.Val is a HashNode
-		if hashNode2, ok2 := node2.Val.(*HashNode); ok2 { // node2.Val is a HashNode
-			// both are hashnodes
-			if !bytes.Equal(hashNode1.hash, hashNode2.hash) { // sanity check
-				return false, fmt.Errorf("hashnodes have different hashes: hash1(%x) != hash2(%x)", hashNode1.hash, hashNode2.hash)
-			}
-		} else if node2.Val == nil {
-			return false, fmt.Errorf("node2.Val should not be nil, because node1.Val is a hashnode")
-		} else { // in this case node2.Val is not a HashNode, while node1.Val is a hash node, so replace node1.Val by node2.Val, and the merging is complete
-			node1.Val = node2.Val
-		}
-	} else { // node1.Val is not a hashnode
-		// if node2.Val is not  a hashnode, node2.Val is expected to have the same type as node1.Val, otherwise if it is a hashnode no action is necessary (just ignore the hashnode)
-		if _, ok2 := node2.Val.(*HashNode); !ok2 {
-			if !sameNodeType(node1.Val, node2.Val) { // sanity check
-				return false, fmt.Errorf("node1.Val and node2.Val have different types: %T != %T ", node1.Val, node2.Val)
-			} else {
-				furtherMergingNeeded = true
-			}
-		}
-	}
-	return furtherMergingNeeded, nil
-}
-
-func merge2AccountNodes(node1, node2 *AccountNode) (furtherMergingNeeded bool) {
-	storage1 := node1.Storage
-	storage2 := node2.Storage
-	if storage1 == nil || storage2 == nil { // in this case do nothing, we can use the storage tree of node 1
-		return false
-	}
-	_, isHashNode1 := storage1.(*HashNode) // check if storage1 is a hashnode
-	_, isHashNode2 := storage2.(*HashNode) // check if storage2 is a hashnode
-	if isHashNode1 && !isHashNode2 {       // node2 has the expanded storage trie, so use that instead of the hashnode
-		node1.Storage = storage2
-		return false
-	}
-
-	if !isHashNode1 && !isHashNode2 { // the 2 storage tries need to be merged
-		return true
-	}
-	return false
-}
-
-func merge2Tries(tr1 *Trie, tr2 *Trie) (*Trie, error) {
-	// starting from the roots merge each level
-	rootNode1 := tr1.RootNode
-	rootNode2 := tr2.RootNode
-	mergeComplete := false
-
-	for !mergeComplete {
-		switch node1 := (rootNode1).(type) {
-		case nil:
-			// sanity checks might be good later on
-			return nil, nil
-		case *ShortNode:
-			node2, ok := rootNode2.(*ShortNode)
-			if !ok {
-				return nil, fmt.Errorf("expected *trie.ShortNode in trie 2, but got %T", rootNode2)
-			}
-			furtherMergingNeeded, err := merge2ShortNodes(node1, node2)
-			if err != nil {
-				return nil, err
-			}
-			if furtherMergingNeeded {
-				rootNode1 = node1.Val
-				rootNode2 = node2.Val
-			} else {
-				mergeComplete = true
-			}
-		case *FullNode:
-			node2, ok := rootNode2.(*FullNode)
-			if !ok {
-				return nil, fmt.Errorf("expected *trie.FullNode in trie 2, but got %T", rootNode2)
-			}
-			furthedMergingNeeded, err := merge2FullNodes(node1, node2)
-			if err != nil {
-				return nil, err
-			}
-			if furthedMergingNeeded { // find the next nodes to merge
-				nextRootsFound := false
-				for i := 0; i < len(node1.Children); i++ { // it is guaranteed that we will find a non-nil, non-hashnode
-					childNode1 := node1.Children[i]
-					childNode2 := node2.Children[i]
-					if _, isHashNode := childNode2.(*HashNode); childNode2 != nil && !isHashNode {
-						// update rootNode1, and rootNode2 to merge at the next level at the next iteration
-						rootNode1 = childNode1
-						rootNode2 = childNode2
-						nextRootsFound = true
-						break
-					}
-				}
-				if !nextRootsFound {
-					return nil, errors.New("could not find next node pair to merge")
-				}
-			} else {
-				mergeComplete = true
-			}
-		case *HashNode:
-			return tr2, nil
-		case ValueNode:
-			return tr1, nil
-		case *AccountNode:
-			node2, ok := rootNode2.(*AccountNode)
-			if !ok {
-				return nil, fmt.Errorf("expected *trie.AccountNode in trie 2, but got %T", rootNode2)
-			}
-			furthedMergingNeeded := merge2AccountNodes(node1, node2)
-			if !furthedMergingNeeded {
-				return tr1, nil
-			} else {
-				// need to merge storage trees
-				rootNode1 = node1.Storage
-				rootNode2 = node2.Storage
-			}
-
-		}
-	}
-	return tr1, nil
-}
-func MergeTries(tries []*Trie) (*Trie, error) {
-	if len(tries) == 0 {
-		return nil, nil
-	}
-
-	if len(tries) == 1 {
-		return tries[0], nil
-	}
-
-	resultingTrie := tries[0]
-	for i := 1; i < len(tries); i++ {
-		resultingTrie, err := merge2Tries(resultingTrie, tries[i])
-		if err != nil {
-			return resultingTrie, err
-		}
-	}
-	return resultingTrie, nil
 }
 
 // NewTestRLPTrie treats all the data provided to `Update` function as rlp-encoded.
@@ -1707,6 +1523,11 @@ func decodeAccountNode(val ValueNode, nodeMap map[common.Hash]Node) (*AccountNod
 		Account:     *acc,
 		RootCorrect: true,
 	}
+	// -1 marks a code-bearing proof node whose code isn't in the witness; an
+	// empty-code account must stay 0 so serialization emits no bogus code size.
+	if !acc.IsEmptyCodeHash() {
+		an.CodeSize = codeSizeUncached
+	}
 
 	// If account has non-empty storage root, try to find it in nodeMap
 	if acc.Root != EmptyRoot && acc.Root != (common.Hash{}) {
@@ -1813,10 +1634,6 @@ func resolveHashNodes(node Node, nodeMap map[common.Hash]Node, insideStorageTree
 	default:
 		return n, nil
 	}
-}
-
-func sameNodeType(a, b Node) bool {
-	return reflect.TypeOf(a) == reflect.TypeOf(b)
 }
 
 // GetNode returns the trie node found at the given hex-nibble path,

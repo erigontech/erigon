@@ -138,7 +138,7 @@ func (d *Domain) openDomainFileItemAt(snapDir string, fromStep, toStep kv.Step) 
 		dirEntries = append(dirEntries, e.Name())
 	}
 
-	item := newFilesItem(uint64(fromStep)*d.stepSize, uint64(toStep)*d.stepSize, d.stepSize, d.stepsInFrozenFile)
+	item := newFilesItem(uint64(fromStep)*d.stepSize, uint64(toStep)*d.stepSize)
 
 	kvPath, kvVer, ok, err := version.MatchVersionedFile(d.kvFileNameMask(fromStep, toStep), dirEntries, snapDir)
 	if err != nil {

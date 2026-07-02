@@ -145,7 +145,7 @@ func (f *ProtoForkable) MergeFiles(ctx context.Context, _filesToMerge []visibleF
 		ps.Delete(p)
 	}
 
-	mergedFile = newFilesItemWithSnapConfig(from.Uint64(), to.Uint64(), f.snapCfg)
+	mergedFile = newFilesItem(from.Uint64(), to.Uint64())
 	if mergedFile.decompressor, err = seg.NewDecompressorWithMetadata(segPath, f.snapCfg.HasMetadata); err != nil {
 		return
 	}

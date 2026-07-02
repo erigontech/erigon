@@ -120,12 +120,13 @@ func _GetBlockNumber(ctx context.Context, requireCanonical bool, blockNrOrHash r
 				return 0, common.Hash{}, false, false, err
 			}
 		case rpc.PendingBlockNumber:
-			pendingBlock := filters.LastPendingBlock()
-			if pendingBlock == nil {
-				blockNumber = plainStateBlockNumber
-			} else {
-				return pendingBlock.NumberU64(), pendingBlock.Hash(), false, true, nil
+			if filters != nil {
+				pendingBlock := filters.LastPendingBlock()
+				if pendingBlock != nil {
+					return pendingBlock.NumberU64(), pendingBlock.Hash(), false, true, nil
+				}
 			}
+			blockNumber = plainStateBlockNumber
 		case rpc.LatestExecutedBlockNumber:
 			blockNumber = plainStateBlockNumber
 		default:

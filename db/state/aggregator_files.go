@@ -104,7 +104,7 @@ func (mf MergeResult) FilePaths(relative string) (fPaths []string) {
 		if mf.dHist[id] != nil {
 			fPaths = append(fPaths, mf.dHist[id].FilePaths(relative)...)
 		}
-		if mf.dIdx[id] != nil && mf.dIdx[id].frozen {
+		if mf.dIdx[id] != nil {
 			fPaths = append(fPaths, mf.dIdx[id].FilePaths(relative)...)
 		}
 	}

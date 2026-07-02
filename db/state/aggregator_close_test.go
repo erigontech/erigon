@@ -22,8 +22,10 @@ import (
 	"github.com/c2h5oh/datasize"
 	"github.com/stretchr/testify/require"
 
+	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/datadir"
+	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/dbcfg"
 	"github.com/erigontech/erigon/db/kv/mdbx"
 )
@@ -43,4 +45,34 @@ func TestAggregatorCloseWaitsForBackgroundMerge(t *testing.T) {
 		agg.Close()
 		db.Close()
 	}
+}
+
+// Close releases the cached data held by the commitment BranchCache while
+// keeping the cache object itself usable for a later reopen.
+func TestAggregatorCloseReleasesBranchCache(t *testing.T) {
+	prev := dbg.UseStateCache
+	dbg.SetUseStateCache(true)
+	t.Cleanup(func() { dbg.SetUseStateCache(prev) })
+
+	logger := log.New()
+	dirs := datadir.New(t.TempDir())
+	db := mdbx.New(dbcfg.ChainDB, logger).InMem(t, dirs.Chaindata).GrowthStep(32 * datasize.MB).MapSize(2 * datasize.GB).MustOpen()
+	defer db.Close()
+	agg := NewTest(dirs).StepSize(16).Logger(logger).MustOpen(t.Context(), db)
+	require.NoError(t, agg.OpenFolder())
+
+	cd := agg.d[kv.CommitmentDomain]
+	require.NotNil(t, cd)
+	require.NotNil(t, cd.branchCache, "precondition: BranchCache is set when USE_STATE_CACHE is on")
+
+	prefix := []byte{0x01, 0x02}
+	cd.branchCache.Put(prefix, []byte{0xaa, 0xbb}, 1, 1)
+	_, _, ok := cd.branchCache.Get(prefix)
+	require.True(t, ok, "precondition: entry is cached before Close")
+
+	agg.Close()
+
+	require.NotNil(t, cd.branchCache, "Close keeps the cache object reusable")
+	_, _, ok = cd.branchCache.Get(prefix)
+	require.False(t, ok, "Close must clear the cached branch data")
 }

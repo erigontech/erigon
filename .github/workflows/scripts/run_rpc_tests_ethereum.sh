@@ -39,13 +39,6 @@ DISABLED_TEST_LIST=(
   net_version/test_1.json
   txpool_status/test_1.json
   web3_clientVersion/test_1.json
-  # Temportary disable waiting merge PR #21418
-  eth_simulateV1/test_131.json
-  eth_simulateV1/test_143.json
-  eth_simulateV1/test_169.json
-  eth_simulateV1/test_175.json
-  eth_simulateV1/test_179.json
-  eth_simulateV1/test_196.json
 )
 
 # Transform the array into a comma-separated string

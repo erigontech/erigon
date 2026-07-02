@@ -97,49 +97,47 @@ var (
 	EarliestBlock       = EarliestBlockNumber.AsBlockReference()
 )
 
-// UnmarshalJSON parses the given JSON fragment into a BlockNumber. It supports:
-// - "latest", "earliest", "pending", "safe", or "finalized" as string arguments
-// - the block number
-// Returned errors:
-// - an invalid block number error when the given argument isn't a known strings
-// - an out of range error when the given block number is either too little or too large
+// UnmarshalJSON parses a JSON block number: named tags or 0x-prefixed hex when quoted,
+// bare decimal integer when unquoted. Quoted decimal strings are rejected.
 func (bn *BlockNumber) UnmarshalJSON(data []byte) error {
-	input := strings.TrimSpace(string(data))
+	input := string(data)
+	if input == "null" {
+		*bn = LatestBlockNumber
+		return nil
+	}
+	var blckNum uint64
+	var err error
 	if len(input) >= 2 && input[0] == '"' && input[len(input)-1] == '"' {
 		input = input[1 : len(input)-1]
-	}
-
-	switch input {
-	case "earliest":
-		*bn = EarliestBlockNumber
-		return nil
-	case "latest":
-		*bn = LatestBlockNumber
-		return nil
-	case "pending":
-		*bn = PendingBlockNumber
-		return nil
-	case "safe":
-		*bn = SafeBlockNumber
-		return nil
-	case "finalized":
-		*bn = FinalizedBlockNumber
-		return nil
-	case "latestExecuted":
-		*bn = LatestExecutedBlockNumber
-		return nil
-	case "null":
-		*bn = LatestBlockNumber
-		return nil
-	}
-
-	// Try to parse it as a number
-	blckNum, err := strconv.ParseUint(input, 10, 64)
-	if err != nil {
-		// Now try as a hex number
-		if blckNum, err = hexutil.DecodeUint64(input); err != nil {
-			return err
+		switch input {
+		case "null":
+			*bn = LatestBlockNumber
+			return nil
+		case "earliest":
+			*bn = EarliestBlockNumber
+			return nil
+		case "latest":
+			*bn = LatestBlockNumber
+			return nil
+		case "pending":
+			*bn = PendingBlockNumber
+			return nil
+		case "safe":
+			*bn = SafeBlockNumber
+			return nil
+		case "finalized":
+			*bn = FinalizedBlockNumber
+			return nil
+		case "latestExecuted":
+			*bn = LatestExecutedBlockNumber
+			return nil
 		}
+		blckNum, err = hexutil.DecodeUint64(input)
+	} else {
+		blckNum, err = strconv.ParseUint(input, 10, 64)
+	}
+	if err != nil {
+		return err
 	}
 	if blckNum > math.MaxInt64 {
 		return errors.New("block number larger than int64")

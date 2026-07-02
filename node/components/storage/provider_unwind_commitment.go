@@ -24,7 +24,7 @@ import (
 	"github.com/erigontech/erigon/db/etl"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/rawdbv3"
-	"github.com/erigontech/erigon/db/state/changeset"
+	"github.com/erigontech/erigon/db/state/kvmetrics"
 	"github.com/erigontech/erigon/execution/commitment/commitmentdb"
 )
 
@@ -170,7 +170,7 @@ func (p *Provider) ensureCommitmentAtBlockApply(ctx context.Context, tx kv.Tempo
 	}
 	defer result.Close()
 
-	metrics := &changeset.DomainMetrics{Domains: map[kv.Domain]*changeset.DomainIOMetrics{}}
+	metrics := &kvmetrics.DomainMetrics{Domains: map[kv.Domain]*kvmetrics.DomainIOMetrics{}}
 	mem := tx.Debug().NewMemBatch(metrics)
 	defer mem.Close()
 

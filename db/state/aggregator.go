@@ -27,6 +27,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"slices"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -50,7 +51,7 @@ import (
 	"github.com/erigontech/erigon/db/kv/rawdbv3"
 	"github.com/erigontech/erigon/db/kv/stream"
 	"github.com/erigontech/erigon/db/seg"
-	"github.com/erigontech/erigon/db/state/changeset"
+	"github.com/erigontech/erigon/db/state/kvmetrics"
 	"github.com/erigontech/erigon/db/state/statecfg"
 	"github.com/erigontech/erigon/db/version"
 	"github.com/erigontech/erigon/execution/commitment"
@@ -110,6 +111,13 @@ type Aggregator struct {
 	commitGate sync.RWMutex
 
 	wg sync.WaitGroup // goroutines spawned by Aggregator, to ensure all of them are finish at agg.Close
+
+	// metricsCollector is the process-level KV-read metrics aggregate. Every read
+	// path (exec, commitment, warmup, RPC, engine) hands its finished per-worker
+	// metrics here; one goroutine folds them grouped by source and self-publishes
+	// the source-labelled Prometheus gauges. Aggregator-scoped (process lifetime),
+	// exposed to SharedDomains via the duck-typed kvmetrics.MetricsCollectorProvider.
+	metricsCollector *kvmetrics.Collector
 
 	onFilesChange kv.OnFilesChange
 	onFilesDelete kv.OnFilesChange
@@ -175,13 +183,23 @@ func newAggregator(ctx context.Context, dirs datadir.Dirs, reorgBlockDepth uint6
 		leakDetector:    dbg.NewLeakDetector("agg", dbg.SlowTx()),
 		ps:              background.NewProgressSet(),
 		logger:          logger,
-		workers:         workersCfg{allowEditing: true, merge: 1, collateAndBuild: 1},
+		workers:         workersCfg{merge: 1, collateAndBuild: 1},
 
 		produce: true,
 	}
 	empty := &aggregatorVisible{}
 	a.visible.Store(empty)
 	a.oldestVisible = empty
+
+	// Only when KV-read metrics are enabled, matching every producer (which
+	// no-ops on dbg.KVReadLevelledMetrics). Otherwise the collector's goroutine
+	// and buffered channel are dead weight, and harnesses that build one
+	// Aggregator per fixture (eest blocktests: thousands × workers) accumulate
+	// them until the runner OOMs. All collector access is nil-safe.
+	if dbg.KVReadLevelledMetrics {
+		a.metricsCollector = kvmetrics.NewCollector()
+		a.metricsCollector.Start() // joined by Stop() in Close, NOT via a.wg (a.wg is waited on for background merges before Close)
+	}
 	return a, nil
 }
 
@@ -311,6 +329,21 @@ func (a *Aggregator) Logger() log.Logger        { return a.logger }
 // merge work begins.
 func (a *Aggregator) SetErigondbDomainStepsInFrozenFile(steps uint64) {
 	a.erigondbDomainStepsInFrozenFile = steps
+}
+
+// SetDomainStepsInFrozenFile sets the domain merge cap from a flag spec: empty or
+// "Inf" means unbounded, otherwise a positive integer step count.
+func (a *Aggregator) SetDomainStepsInFrozenFile(spec string) error {
+	v := config3.UnboundedDomainMerge
+	if spec != "" && !strings.EqualFold(spec, "inf") {
+		parsed, err := strconv.ParseUint(spec, 10, 64)
+		if err != nil || parsed == 0 {
+			return fmt.Errorf("invalid domain steps-in-frozen-file %q: must be a positive integer or \"Inf\"", spec)
+		}
+		v = parsed
+	}
+	a.SetErigondbDomainStepsInFrozenFile(v)
+	return nil
 }
 
 func (a *Aggregator) ForTestReplaceKeysInValues(domain kv.Domain, v bool) {
@@ -520,7 +553,7 @@ func (a *Aggregator) DisableInterDomainDependencies() {
 // already refreshed by OpenFolder.
 func (a *Aggregator) Unwind(txN uint64) {
 	if cd := a.d[kv.CommitmentDomain]; cd != nil && cd.branchCache != nil {
-		cd.branchCache.UnwindTo(txN)
+		cd.branchCache.Unwind(txN)
 	}
 }
 
@@ -634,7 +667,15 @@ func (a *Aggregator) Close() {
 	}
 	a.ctxCancel()
 	a.ctxCancel = nil
+	if a.metricsCollector != nil {
+		a.metricsCollector.Stop() // drain buffered samples before wg.Wait joins the goroutine
+	}
 	a.wg.Wait()
+
+	// A closed Aggregator may linger referenced; release the cached branch data eagerly.
+	if cd := a.d[kv.CommitmentDomain]; cd != nil && cd.branchCache != nil {
+		cd.branchCache.Clear()
+	}
 
 	a.dirtyFilesLock.Lock()
 	defer a.dirtyFilesLock.Unlock()
@@ -1244,6 +1285,11 @@ func (a *Aggregator) mergeLoop(ctx context.Context) (err error) {
 		a.logger.Debug("[snapshots] mergeLoop: skipped (mode-B unwind in progress)")
 		return nil
 	}
+
+	// Pin worker counts for the duration of the merge; mergeFiles reads
+	// per-domain CompressorCfg.Workers that ExecV3's Preset* calls would race.
+	a.LockWorkersEditing()
+	defer a.UnlockWorkersEditing()
 
 	// Merge is background operation. It must not crush application.
 	// Convert panic to error.
@@ -2500,13 +2546,13 @@ func (at *AggregatorRoTx) BranchCache() *commitment.BranchCache {
 }
 
 // Unwind delegates to the parent aggregator's cross-cutting unwind
-// step (implements commitment.AggregatorUnwindHandler). Both
-// SharedDomains.Unwind (changeset path) and mode-B Provider.Unwind
-// (past-changeset path) reach the aggregator-lifetime cache
-// invalidations through this surface, so anything added to
-// (*Aggregator).Unwind automatically applies to both.
+// step (implements commitment.AggregatorUnwindHandler).
 func (at *AggregatorRoTx) Unwind(txN uint64) {
 	at.a.Unwind(txN)
+}
+
+func (at *AggregatorRoTx) MetricsCollector() *kvmetrics.Collector {
+	return at.a.metricsCollector
 }
 
 func (at *AggregatorRoTx) Dirs() datadir.Dirs                  { return at.a.dirs }
@@ -2553,23 +2599,23 @@ func (at *AggregatorRoTx) GetLatest(domain kv.Domain, k []byte, tx kv.Tx) (v []b
 	return at.getLatest(domain, k, tx, math.MaxUint64, nil, time.Time{})
 }
 
-func (at *AggregatorRoTx) MeteredGetLatest(domain kv.Domain, k []byte, tx kv.Tx, maxStep kv.Step, metrics *changeset.DomainMetrics, start time.Time) (v []byte, step kv.Step, ok bool, err error) {
+func (at *AggregatorRoTx) MeteredGetLatest(domain kv.Domain, k []byte, tx kv.Tx, maxStep kv.Step, metrics *kvmetrics.DomainMetrics, start time.Time) (v []byte, step kv.Step, ok bool, err error) {
 	return at.getLatest(domain, k, tx, maxStep, metrics, start)
 }
 
 // MeteredGetLatestWithTxN returns the high-water txN alongside (value,
-// step) for tagging BranchCache entries so UnwindTo can evict by
-// watermark. Non-CommitmentDomain reads return txN=0.
-func (at *AggregatorRoTx) MeteredGetLatestWithTxN(domain kv.Domain, k []byte, tx kv.Tx, maxStep kv.Step, metrics *changeset.DomainMetrics, start time.Time) (v []byte, step kv.Step, txN uint64, ok bool, err error) {
+// step) for tagging BranchCache entries so a lazy unwind can drop them by
+// (txN, epoch). Non-CommitmentDomain reads return txN=0.
+func (at *AggregatorRoTx) MeteredGetLatestWithTxN(domain kv.Domain, k []byte, tx kv.Tx, maxStep kv.Step, metrics *kvmetrics.DomainMetrics, start time.Time) (v []byte, step kv.Step, txN uint64, ok bool, err error) {
 	return at.getLatestWithTxN(domain, k, tx, maxStep, metrics, start)
 }
 
-func (at *AggregatorRoTx) getLatest(domain kv.Domain, k []byte, tx kv.Tx, maxStep kv.Step, metrics *changeset.DomainMetrics, start time.Time) (v []byte, step kv.Step, ok bool, err error) {
+func (at *AggregatorRoTx) getLatest(domain kv.Domain, k []byte, tx kv.Tx, maxStep kv.Step, metrics *kvmetrics.DomainMetrics, start time.Time) (v []byte, step kv.Step, ok bool, err error) {
 	v, step, _, ok, err = at.getLatestWithTxN(domain, k, tx, maxStep, metrics, start)
 	return v, step, ok, err
 }
 
-func (at *AggregatorRoTx) getLatestWithTxN(domain kv.Domain, k []byte, tx kv.Tx, maxStep kv.Step, metrics *changeset.DomainMetrics, start time.Time) (v []byte, step kv.Step, txN uint64, ok bool, err error) {
+func (at *AggregatorRoTx) getLatestWithTxN(domain kv.Domain, k []byte, tx kv.Tx, maxStep kv.Step, metrics *kvmetrics.DomainMetrics, start time.Time) (v []byte, step kv.Step, txN uint64, ok bool, err error) {
 	if domain != kv.CommitmentDomain {
 		v, step, ok, err = at.d[domain].getLatest(k, tx, maxStep, metrics, start)
 		return v, step, 0, ok, err

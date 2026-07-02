@@ -7,6 +7,7 @@ import (
 	"net"
 	"os"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -298,7 +299,7 @@ type ipPortAddr struct {
 
 func (a ipPortAddr) Network() string { return "tcp" }
 func (a ipPortAddr) String() string {
-	return net.JoinHostPort(a.IP.String(), fmt.Sprintf("%d", a.Port))
+	return net.JoinHostPort(a.IP.String(), strconv.Itoa(a.Port))
 }
 
 // deriveBlockTipFromMap returns the highest contiguous block whose

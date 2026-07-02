@@ -61,6 +61,7 @@ func TestCreate2Revive(t *testing.T) {
 				SpuriousDragonBlock:   common.NewUint64(1),
 				ByzantiumBlock:        common.NewUint64(1),
 				ConstantinopleBlock:   common.NewUint64(1),
+				PetersburgBlock:       common.NewUint64(1),
 			},
 			Alloc: types.GenesisAlloc{
 				address.Value(): types.GenesisAccount{Balance: funds},
@@ -245,6 +246,7 @@ func TestCreate2Polymorth(t *testing.T) {
 				SpuriousDragonBlock:   common.NewUint64(1),
 				ByzantiumBlock:        common.NewUint64(1),
 				ConstantinopleBlock:   common.NewUint64(1),
+				PetersburgBlock:       common.NewUint64(1),
 			},
 			Alloc: types.GenesisAlloc{
 				address.Value(): types.GenesisAccount{Balance: funds},
@@ -509,6 +511,7 @@ func TestReorgOverSelfDestruct(t *testing.T) {
 				SpuriousDragonBlock:   common.NewUint64(1),
 				ByzantiumBlock:        common.NewUint64(1),
 				ConstantinopleBlock:   common.NewUint64(1),
+				PetersburgBlock:       common.NewUint64(1),
 			},
 			Alloc: types.GenesisAlloc{
 				address.Value(): types.GenesisAccount{Balance: funds},
@@ -672,6 +675,7 @@ func TestReorgOverStateChange(t *testing.T) {
 				SpuriousDragonBlock:   common.NewUint64(1),
 				ByzantiumBlock:        common.NewUint64(1),
 				ConstantinopleBlock:   common.NewUint64(1),
+				PetersburgBlock:       common.NewUint64(1),
 			},
 			Alloc: types.GenesisAlloc{
 				address.Value(): {Balance: funds},
@@ -836,6 +840,7 @@ func TestCreateOnExistingStorage(t *testing.T) {
 				SpuriousDragonBlock:   common.NewUint64(1),
 				ByzantiumBlock:        common.NewUint64(1),
 				ConstantinopleBlock:   common.NewUint64(1),
+				PetersburgBlock:       common.NewUint64(1),
 			},
 			Alloc: types.GenesisAlloc{
 				address.Value(): {Balance: funds},
@@ -1706,6 +1711,7 @@ func TestTxLookupUnwind(t *testing.T) {
 				SpuriousDragonBlock:   common.NewUint64(1),
 				ByzantiumBlock:        common.NewUint64(1),
 				ConstantinopleBlock:   common.NewUint64(1),
+				PetersburgBlock:       common.NewUint64(1),
 			},
 			Alloc: types.GenesisAlloc{
 				address.Value(): types.GenesisAccount{Balance: funds},

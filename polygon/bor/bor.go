@@ -597,15 +597,13 @@ func ValidateHeaderGas(header *types.Header, parent *types.Header, chainConfig *
 	}
 
 	if !chainConfig.IsLondon(header.Number.Uint64()) {
-		// Verify BaseFee not present before EIP-1559 fork.
 		if header.BaseFee != nil {
 			return fmt.Errorf("invalid baseFee before fork: have %d, want <nil>", header.BaseFee)
 		}
-		if err := misc.VerifyGaslimit(parent.GasLimit, header.GasLimit); err != nil {
-			return err
-		}
-	} else if err := misc.VerifyEip1559Header(chainConfig, parent, header, false /*skipGasLimit*/); err != nil {
-		// Verify the header's EIP-1559 attributes.
+	} else if err := misc.VerifyEip1559Header(chainConfig, parent, header); err != nil {
+		return err
+	}
+	if err := misc.VerifyParentGasLimit(chainConfig, parent, header); err != nil {
 		return err
 	}
 
@@ -1328,6 +1326,12 @@ func AddFeeTransferLog(ibs evmtypes.IntraBlockState, sender accounts.Address, co
 
 func (c *Bor) GetPostApplyMessageFunc() evmtypes.PostApplyMessageFunc {
 	return AddFeeTransferLog
+}
+
+func (c *Bor) ValidateBlockPostExecution(chainConfig *chain.Config, header *types.Header,
+	gasUsed, blobGasUsed uint64, checkReceipts, checkBloom bool,
+	receipts types.Receipts, txns types.Transactions, logger log.Logger) error {
+	return rules.DefaultBlockPostValidation(chainConfig, header, gasUsed, blobGasUsed, checkReceipts, checkBloom, receipts, txns, logger)
 }
 
 func (c *Bor) TxDependencies(h *types.Header) [][]int {

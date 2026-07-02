@@ -126,7 +126,7 @@ func TestVerifyEip1559Header_Errors(t *testing.T) {
 
 	// Missing baseFee.
 	missing := &types.Header{Number: *uint256.NewInt(11), GasLimit: 20_000_000}
-	require.ErrorContains(t, VerifyEip1559Header(cfg, parent, missing, true /*skipGasLimit*/), "missing baseFee")
+	require.ErrorContains(t, VerifyEip1559Header(cfg, parent, missing), "missing baseFee")
 
 	// Wrong baseFee.
 	want := CalcBaseFee(cfg, parent)
@@ -135,5 +135,5 @@ func TestVerifyEip1559Header_Errors(t *testing.T) {
 		GasLimit: 20_000_000,
 		BaseFee:  new(uint256.Int).AddUint64(want, 1),
 	}
-	require.ErrorContains(t, VerifyEip1559Header(cfg, parent, wrong, true /*skipGasLimit*/), "invalid baseFee")
+	require.ErrorContains(t, VerifyEip1559Header(cfg, parent, wrong), "invalid baseFee")
 }

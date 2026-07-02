@@ -113,7 +113,7 @@ func (dt *DomainRoTx) findShortenedKey(fullKey []byte, itemGetter *seg.Reader, i
 	if !strings.Contains(item.decompressor.FileName(), dt.d.FilenameBase) {
 		panic(fmt.Sprintf("findShortenedKeyEasier of %s called with merged file %s", dt.d.FilenameBase, item.decompressor.FileName()))
 	}
-	if /*assert.Enable && */ itemGetter.FileName() != item.decompressor.FileName() {
+	if /*dbg.AssertEnabled && */ itemGetter.FileName() != item.decompressor.FileName() {
 		panic(fmt.Sprintf("findShortenedKey of %s itemGetter (%s) is different to item.decompressor (%s)",
 			dt.d.FilenameBase, itemGetter.FileName(), item.decompressor.FileName()))
 	}

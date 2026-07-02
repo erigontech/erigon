@@ -137,7 +137,7 @@ func (m Mode) String() string {
 		fmt.Fprintf(&sb, " --prune.distance=%d", m.History.toValue())
 	}
 	if m.Blocks.toValue() != DefaultMode.Blocks.toValue() {
-		fmt.Fprintf(&sb, " --prune.distance.blocks=%d", m.Blocks.toValue())
+		fmt.Fprintf(&sb, " --prune.distance.blocks=%s", blocksDistanceCLIValue(m.Blocks.toValue()))
 	}
 	return sb.String()
 }

@@ -2,11 +2,6 @@ name: CI Gate
 
 on:
   pull_request:
-    branches:
-      - main
-      - 'release/**'
-      - performance
-      - performance-stable
     types:
       - opened
       - reopened

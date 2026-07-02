@@ -8,7 +8,7 @@ env:
   TEST_TRACKING_TIME_SECONDS: 7200 # 2 hours
   TEST_TOTAL_TIME_SECONDS: 432000   # 5 days
   TEST_CHAIN: "mainnet"
-  BUILDER_IMAGE: "golang:1.25-bookworm"
+  BUILDER_IMAGE: "golang:1.26-bookworm"
   TARGET_BASE_IMAGE: "debian:12-slim"
   APP_REPO: "erigontech/erigon"
   PACKAGE: "github.com/erigontech/erigon"
