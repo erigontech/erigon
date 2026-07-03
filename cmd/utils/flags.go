@@ -1119,7 +1119,7 @@ var (
 	}
 	CommitmentHistoryDistanceFlag = cli.StringFlag{
 		Name:  "prune.commitment-history.distance",
-		Usage: `Keep commitment history only for the latest N blocks, or "keep-all" to keep everything. Older snapshots are skipped at download time. Unset (default) keeps everything. Requires --prune.include-commitment-history.`,
+		Usage: `Keep for the latest N blocks. To keep everything - please use --prune.commitment-history.distance=keep-all. Requires --prune.include-commitment-history.`,
 	}
 	AlwaysGenerateChangesetsFlag = cli.BoolFlag{
 		Name:  "experimental.always-generate-changesets",
