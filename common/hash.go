@@ -103,10 +103,7 @@ func (h *Hash) SetBytes(b []byte) { fixedSetBytes(h[:], b) }
 
 // Generate implements testing/quick.Generator.
 func (h Hash) Generate(rand *rand.Rand, size int) reflect.Value {
-	m := rand.IntN(len(h))
-	for i := len(h) - 1; i > m; i-- {
-		h[i] = byte(rand.Uint32())
-	}
+	fixedGenerate(h[:], rand.IntN, rand.Uint32)
 	return reflect.ValueOf(h)
 }
 

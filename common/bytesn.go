@@ -20,7 +20,6 @@ import (
 	"bytes"
 	"encoding/hex"
 	"fmt"
-	"math/rand"
 )
 
 func fixedFormat(s fmt.State, c rune, typeName string, b []byte) {
@@ -62,9 +61,13 @@ func fixedTerminalString(b []byte) string {
 	return fmt.Sprintf("%x…%x", b[:3], b[len(b)-3:])
 }
 
-func fixedGenerate(rnd *rand.Rand, b []byte) {
-	m := rnd.Intn(len(b))
+// fixedGenerate fills a random-length tail of b with random bytes, the shared
+// body of every fixed-size type's testing/quick Generator. intn and u32 are
+// supplied by the caller so this works with both math/rand and math/rand/v2,
+// whose Rand types differ only in Intn vs IntN.
+func fixedGenerate(b []byte, intn func(int) int, u32 func() uint32) {
+	m := intn(len(b))
 	for i := len(b) - 1; i > m; i-- {
-		b[i] = byte(rnd.Uint32())
+		b[i] = byte(u32())
 	}
 }

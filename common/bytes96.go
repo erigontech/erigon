@@ -62,7 +62,7 @@ func (b *Bytes96) SetBytes(i []byte) { fixedSetBytes(b[:], i) }
 
 // Generate implements testing/quick.Generator.
 func (b Bytes96) Generate(rand *rand.Rand, size int) reflect.Value {
-	fixedGenerate(rand, b[:])
+	fixedGenerate(b[:], rand.Intn, rand.Uint32)
 	return reflect.ValueOf(b)
 }
 
