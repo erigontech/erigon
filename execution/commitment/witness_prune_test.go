@@ -56,7 +56,7 @@ func TestWitnessNodesForKeys_ByHashEquivalence(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			ms := NewMockState(t)
 			hph := NewHexPatriciaHashed(length.Addr, ms, DefaultTrieConfig())
-			hph.SetTrace(false)
+			hph.SetTraceWriter(nil)
 			builder := NewUpdateBuilder()
 			addrs := make([][]byte, 0, tc.accts)
 			for i := 0; i < tc.accts; i++ {
@@ -122,7 +122,7 @@ func TestWitnessNodesForKeys_AbsentSlotStopsAtBlindedChild(t *testing.T) {
 	ctx := context.Background()
 	ms := NewMockState(t)
 	hph := NewHexPatriciaHashed(length.Addr, ms, DefaultTrieConfig())
-	hph.SetTrace(false)
+	hph.SetTraceWriter(nil)
 
 	addrPlain, _ := generateKeyWithHashedPrefix([]byte{0}, length.Addr)
 	addrHex := common.Bytes2Hex(addrPlain)
