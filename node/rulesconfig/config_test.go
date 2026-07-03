@@ -23,10 +23,14 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/holiman/uint256"
+
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/protocol/rules"
 	"github.com/erigontech/erigon/execution/protocol/rules/ethash"
+	"github.com/erigontech/erigon/execution/protocol/rules/ethash/ethashcfg"
+	"github.com/erigontech/erigon/node/nodecfg"
 )
 
 type fakeL2Config struct {
@@ -88,4 +92,18 @@ func TestCreateRulesEngineUnknownL2PanicNamesTheStack(t *testing.T) {
 	require.PanicsWithValue(t, "no L2 rules engine registered for: unregisteredl2", func() {
 		CreateRulesEngineBareBones(context.Background(), chainConfig, log.New())
 	})
+}
+
+func TestCreateRulesEngineL2NotMergeWrapped(t *testing.T) {
+	want := ethash.NewFaker()
+	RegisterL2Engine("ttdl2", func(ctx context.Context, chainConfig *chain.Config, logger log.Logger) rules.Engine {
+		return want
+	})
+	t.Cleanup(func() { unregisterL2Engine("ttdl2") })
+
+	chainConfig := &chain.Config{L2: fakeL2Config{name: "ttdl2"}, TerminalTotalDifficulty: uint256.NewInt(0)}
+	got := CreateRulesEngine(context.Background(), &nodecfg.Config{}, chainConfig, &ethashcfg.Config{PowMode: ethashcfg.ModeFake},
+		true, true, nil, false, log.New(), nil, nil)
+
+	assert.Same(t, want, got)
 }
