@@ -623,6 +623,7 @@ func (te *txExecutor) executeBlocks(ctx context.Context, startBlockNum uint64, m
 			// Per-block committed state cache for parallel workers' GetCommittedState.
 			blockStateCache := state.NewBlockStateCache()
 
+			blockStartTxNum := inputTxNum
 			for txIndex := -1; txIndex <= len(txs); txIndex++ {
 				if inputTxNum > 0 && inputTxNum <= initialTxNum {
 					inputTxNum++
@@ -671,11 +672,12 @@ func (te *txExecutor) executeBlocks(ctx context.Context, startBlockNum uint64, m
 			if blockRequests != nil {
 				select {
 				case blockRequests <- &blockRequest{
-					blockNum:  b.NumberU64(),
-					blockHash: b.Hash(),
-					stateRoot: header.Root,
-					lastTxNum: inputTxNum - 1,
-					bal:       dbBAL,
+					blockNum:   b.NumberU64(),
+					blockHash:  b.Hash(),
+					stateRoot:  header.Root,
+					firstTxNum: blockStartTxNum,
+					lastTxNum:  inputTxNum - 1,
+					bal:        dbBAL,
 				}:
 				case <-ctx.Done():
 					return ctx.Err()

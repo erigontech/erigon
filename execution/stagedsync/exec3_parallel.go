@@ -288,11 +288,11 @@ func (pe *parallelExecutor) execImpl(ctx context.Context, execStage *StageState,
 	// || KeepExecutionProofs`): blocks from the changeset window onward must
 	// compute per-block — otherwise batch-mode dedupes branch updates across
 	// the batch and flushes them all into one block's changeset, which fails
-	// on subsequent reorgs. blockRequests feeds it BAL-declared block requests;
-	// cancelExecLoop lets a fold/root mismatch halt execution eagerly while
-	// teardown stays with execImpl's deferred executorCancel (one cleanup site).
+	// on subsequent reorgs. blockRequests feeds it BAL-declared block requests.
+	// The calculator only publishes results; the apply loop is the sole
+	// cancellation authority (it classifies errors and drives the single unwind).
 	forcePerBlockCompute := pe.cfg.syncCfg.KeepExecutionProofs
-	calculator, err := newCommitmentCalculator(executorContext, pe.rs.Domains(), pe.cfg.db, pe.cfg.chainConfig, pe.logPrefix, pe.logger, forcePerBlockCompute, pe.changesetWindowStart, commitResults, blockRequests, rootResults, pe.cancelExecLoop)
+	calculator, err := newCommitmentCalculator(executorContext, pe.rs.Domains(), pe.cfg.db, pe.cfg.chainConfig, pe.logPrefix, pe.logger, forcePerBlockCompute, pe.changesetWindowStart, commitResults, blockRequests, rootResults)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -1618,11 +1618,14 @@ type blockRequest struct {
 	blockNum  uint64
 	blockHash common.Hash
 	stateRoot common.Hash
-	// lastTxNum is the block's final txNum (block-end system tx). The
-	// calculator needs it to position asOfReader and ComputeCommitment
-	// when folding the block ahead of its blockResult.
-	lastTxNum uint64
-	bal       types.BlockAccessList
+	// firstTxNum/lastTxNum bound the block's txNum range. lastTxNum (the block-end
+	// system tx) positions asOfReader/ComputeCommitment for the fold; the pair lets
+	// the calculator detect a block that crosses a step boundary — such a block is
+	// left to the incremental path, since folding it would need a mid-block
+	// step-boundary checkpoint the atomic fold doesn't emit.
+	firstTxNum uint64
+	lastTxNum  uint64
+	bal        types.BlockAccessList
 }
 
 // calcMode is the commitment calculator's per-block strategy.
