@@ -383,7 +383,35 @@ func (evm *EVM) call(typ OpCode, caller accounts.Address, callerAddress accounts
 
 	// It is allowed to call precompiles, even via delegatecall
 	if isPrecompile {
-		ret, gasRemaining.Regular, err = RunPrecompiledContract(p, input, gasRemaining.Regular, evm.Config().Tracer)
+		if sp, ok := p.(StatefulPrecompile); ok {
+			// CALLCODE/DELEGATECALL run the precompile under the calling
+			// frame's own identity, mirroring the Contract construction below.
+			actingAs := addr
+			frameCaller := caller
+			if typ == CALLCODE || typ == DELEGATECALL {
+				actingAs = caller
+			}
+			if typ == DELEGATECALL {
+				frameCaller = callerAddress
+			}
+			ctx := &PrecompileContext{
+				Self:     addr,
+				ActingAs: actingAs,
+				Caller:   frameCaller,
+				Value:    &value,
+				ReadOnly: evm.readOnly || typ == STATICCALL,
+				Evm:      evm,
+			}
+			entryGas := gasRemaining
+			evm.depth++
+			ret, gasRemaining, err = sp.RunStateful(input, gasRemaining, ctx)
+			evm.depth--
+			// Attribute the precompile's State-dimension spend so the frame
+			// accounting defer and the EIP-8037 revert restore both see it.
+			gasUsed.State = int64(entryGas.State) - int64(gasRemaining.State)
+		} else {
+			ret, gasRemaining.Regular, err = RunPrecompiledContract(p, input, gasRemaining.Regular, evm.Config().Tracer)
+		}
 	} else if len(code) == 0 {
 		// If the account has no code, we can abort here
 		// The depth-check is already done, and precompiles handled above
