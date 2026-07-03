@@ -290,27 +290,10 @@ func (cs *calcState) FlushToUpdates(updates *commitment.Updates) {
 		address := addr.Value()
 		key := string(address[:])
 
-		// Three flavours of "Deleted" writeset, distinguished by whether
-		// the account fields actually became zero:
-		//   1. (Currently unreachable from production writesets — defensive
-		//      only.) SD-of-pre-existing-contract with incarnation > 0
-		//      retained: ApplyWrites' SelfDestructPath case now zeros
-		//      Incarnation along with Balance/Nonce/CodeHash, so SD always
-		//      lands in case 2 below. This branch stays as a safety net for
-		//      hand-built writesets and future ApplyWrites changes that
-		//      might preserve incarnation; if it fires, emit a zero-account
-		//      UPDATE (matches serial's post-DomainDel encoding when the
-		//      serialised account retains a non-zero incarnation).
-		//   2. SD / EIP-161 emptyRemoval: all fields zero (incarnation too).
-		//      Serial's DomainDel removes the leaf. Emit DeleteUpdate.
-		//   3. Deleted-but-not-empty (defense-in-depth): if the writeset
-		//      has SelfDestructPath=true but balance/nonce/code retain
-		//      non-zero values (e.g. OOG-during-CREATE2 with retained
-		//      value transfer per EIP-1014, or any write-ordering race
-		//      where BalancePath arrives before SelfDestructPath), serial
-		//      does NOT remove the leaf — it stays as the actual
-		//      balance-only or fully-populated account. Emit a regular
-		//      UPDATE with the actual values rather than zeroing them.
+		// A "Deleted" account only encodes as serial's leaf-removing DeleteUpdate
+		// when every field is actually zero; a Deleted account that still holds a
+		// non-zero balance/nonce/code (or a retained incarnation) keeps its leaf,
+		// so emit a regular UPDATE with the real values instead.
 		isAllZero := acc.Balance.IsZero() && acc.Nonce == 0 && acc.CodeHash == empty.CodeHash
 		switch {
 		case acc.Deleted && acc.Incarnation > 0 && isAllZero:

@@ -234,7 +234,7 @@ func (so *stateObject) SetState(key accounts.StorageKey, value uint256.Int, forc
 		return false, err
 	}
 
-	// When versionedRead resolves the previous value from a cached read
+	// When versionedReadCore resolves the previous value from a cached read
 	// (ReadSetRead) or from the version map (MapRead), the readStorage
 	// callback is never called and commited stays at its zero-value (false).
 	// In both cases there is no versioned write for this key in the current
@@ -438,7 +438,10 @@ func (so *stateObject) CodeTyped() (accounts.Code, error) {
 	if err != nil {
 		return accounts.Code{}, fmt.Errorf("can't read code for %x: %w", so.Address(), err)
 	}
-	c := accounts.Code{Hash: so.data.CodeHash, Bytes: code}
+	// Recompute the hash from the bytes rather than trusting so.data.CodeHash:
+	// on codeHash-without-code state they disagree, and SetCode's hash comparison
+	// would then wrongly skip a byte-identical re-set that heals the CodeDomain.
+	c := accounts.NewCode(code)
 	so.code = c
 	return c, nil
 }

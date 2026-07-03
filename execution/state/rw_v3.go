@@ -594,7 +594,7 @@ func (c *versionedWriteCollector) UpdateAccountData(address accounts.Address, or
 	// of account fields after SelfDestructPath to distinguish cleanup+recreate
 	// from a pure account deletion.
 	needsCleanup := original.Incarnation > accountCopy.Incarnation
-	// Cross-block reincarnation: in the parallel executor, versionedRead
+	// Cross-block reincarnation: in the parallel executor, versionedReadCore
 	// returns a nil account (Incarnation=0) for addresses self-destructed
 	// in a prior block, so the check above misses the cleanup. Blocks are
 	// processed sequentially, so rs.accounts already has the deleted marker

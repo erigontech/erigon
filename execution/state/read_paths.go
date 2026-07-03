@@ -19,10 +19,8 @@ import (
 )
 
 // codeSizeFromStateObject is the per-stateObject code-size fetch used by
-// readCodeSize.  Mirrors the geth-style pattern: cached so.code first,
-// else a single code read with cache populate.  KV-read levelled metrics
-// are recorded so the legacy versionedRead's instrumentation is
-// preserved.
+// readCodeSize: cached so.code first, else a single code read that populates
+// the cache.
 func codeSizeFromStateObject(sdb *IntraBlockState, so *stateObject, addr accounts.Address) (int, error) {
 	if so == nil || so.deleted {
 		return 0, nil
@@ -569,9 +567,8 @@ func readBalance(s *IntraBlockState, addr accounts.Address) (uint256.Int, ReadSo
 
 // refreshBalance is the in-memory-only variant used by
 // refreshVersionedAccount.  Returns currentBalance on miss; does not
-// perform a storage fallback.  When the core signals recordVR (the
-// legacy readStorage==nil path), records vr with currentBalance as the
-// typed defaultV — matches setVRVal(&vr, defaultV) in legacy.
+// perform a storage fallback.  When the core signals recordVR, records the
+// read with currentBalance as the typed default.
 func refreshBalance(s *IntraBlockState, addr accounts.Address, currentBalance uint256.Int) (uint256.Int, ReadSource, Version, error) {
 	var r readPathResult
 	versionedReadCore(s, addr, BalancePath, accounts.NilKey, false, true, &r)
@@ -747,10 +744,6 @@ func readCode(s *IntraBlockState, addr accounts.Address, commited bool) ([]byte,
 			}
 			v = code
 		}
-		// CodePath never records via setVRVal in the legacy path
-		// (see the readStorage==nil guard in versionedRead) — the
-		// recorder check below mirrors that.  For non-nil readStorage
-		// the original recorded via copyV; we preserve that.
 		if r.recordVR {
 			s.versionedReads.SetCode(addr, VersionedRead[[]byte]{r.hdr, v})
 		}

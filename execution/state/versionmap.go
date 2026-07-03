@@ -594,15 +594,9 @@ func (vm *VersionMap) MarkEstimate(addr accounts.Address, path AccountPath, key 
 	vm.markFlag(addr, path, key, txIdx, FlagEstimate)
 }
 
-func (vm *VersionMap) MarkComplete(addr accounts.Address, path AccountPath, key accounts.StorageKey, txIdx int) {
-	vm.mu.Lock()
-	defer vm.mu.Unlock()
-	vm.markFlag(addr, path, key, txIdx, FlagDone)
-}
-
 // markFlag updates the flag on an existing (addr, path, key, txIdx) cell.
 // Caller must hold vm.mu.Lock(). Panics if no cell is present at txIdx —
-// MarkEstimate/MarkComplete require a prior write.
+// MarkEstimate requires a prior write.
 func (vm *VersionMap) markFlag(addr accounts.Address, path AccountPath, key accounts.StorageKey, txIdx int, flag statusFlag) {
 	e, ok := vm.s[addr]
 	if !ok {
@@ -1069,53 +1063,6 @@ func (vm *VersionMap) ValidateVersion(txIdx int, lastIO *VersionedIO, checkVersi
 		}
 	}
 	return
-}
-
-// done requires the re-read to resolve to a committed (Done) cell, not an
-// Estimate — an Estimate value can still change, so comparing against it is only
-// safe if the caller guarantees no concurrent flush, which we don't assume here.
-func done(res ReadResult, ok bool) bool { return ok && res.Status() == MVReadResultDone }
-
-// valuesEqual compares a read value with a versionMap write value for the
-// same path. Used as a tiebreaker: when the version/source check would
-// invalidate but the actual values match, the read is still valid.
-func valuesEqual(path AccountPath, readVal, writeVal any) bool {
-	if readVal == nil || writeVal == nil {
-		return readVal == nil && writeVal == nil
-	}
-	switch path {
-	case BalancePath:
-		rv, ok1 := readVal.(uint256.Int)
-		wv, ok2 := writeVal.(uint256.Int)
-		return ok1 && ok2 && rv.Eq(&wv)
-	case NoncePath:
-		rv, ok1 := readVal.(uint64)
-		wv, ok2 := writeVal.(uint64)
-		return ok1 && ok2 && rv == wv
-	case IncarnationPath:
-		rv, ok1 := readVal.(uint64)
-		wv, ok2 := writeVal.(uint64)
-		return ok1 && ok2 && rv == wv
-	case CodeHashPath:
-		rv, ok1 := readVal.(accounts.CodeHash)
-		wv, ok2 := writeVal.(accounts.CodeHash)
-		return ok1 && ok2 && rv == wv
-	case AddressPath:
-		// Record-level comparison — both should be *accounts.Account
-		rv, ok1 := readVal.(*accounts.Account)
-		wv, ok2 := writeVal.(*accounts.Account)
-		if !ok1 || !ok2 || rv == nil || wv == nil {
-			return false
-		}
-		return rv.Balance.Eq(&wv.Balance) && rv.Nonce == wv.Nonce &&
-			rv.Incarnation == wv.Incarnation && rv.CodeHash == wv.CodeHash
-	case StoragePath:
-		rv, ok1 := readVal.(uint256.Int)
-		wv, ok2 := writeVal.(uint256.Int)
-		return ok1 && ok2 && rv.Eq(&wv)
-	default:
-		return false
-	}
 }
 
 // WriteCell holds one version of a typed value on a (path, key) cell. The

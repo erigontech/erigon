@@ -1381,7 +1381,7 @@ func (vr *versionedStateReader) ReadAccountData(address accounts.Address) (*acco
 // boundary. Each returns the cell value if a Done OR Dependency (Estimate)
 // write exists at txIndex (a Dependency cell holds the same latest in-block
 // write a Done cell does; finalize reconstruction must consume it, not fall
-// back to the pre-block DB value — #21667), otherwise zero value and ok=false.
+// back to the pre-block DB value), otherwise zero value and ok=false.
 
 func versionedUpdateAddress(vm *VersionMap, addr accounts.Address, txIndex int) (*accounts.Account, bool) {
 	val, res, ok := vm.ReadAddress(addr, txIndex)
@@ -2259,6 +2259,11 @@ func (io *VersionedIO) AsBlockAccessList() types.BlockAccessList {
 				}
 			}
 			for addr := range writes.codeSize {
+				if !addr.IsNil() {
+					ensureAccountState(ac, addr)
+				}
+			}
+			for addr := range writes.address {
 				if !addr.IsNil() {
 					ensureAccountState(ac, addr)
 				}

@@ -226,7 +226,7 @@ func (ch resetObjectChange) dirtied() (accounts.Address, bool) {
 	//
 	// Manifests under parallel-exec when tx1 SD's an address and tx2 hits
 	// CreateAccount / GetOrNewStateObject on the same address — the
-	// versionedRead-synthesised `previous` is non-nil so createObject's
+	// versionedReadCore-synthesised `previous` is non-nil so createObject's
 	// else-branch is taken; with dirtied() returning false the worker's
 	// MakeWriteSet drops the write for the recreated address and the
 	// receipts / state root diverge from serial. See #21138.

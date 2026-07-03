@@ -100,29 +100,6 @@ func TestValueTiebreaker_NoncePath(t *testing.T) {
 	assert.Equal(t, VersionInvalid, valid, "Different nonce should be invalid")
 }
 
-// TestValuesEqual verifies the valuesEqual helper for all path types.
-func TestValuesEqual(t *testing.T) {
-	// BalancePath
-	b1 := uint256.NewInt(100)
-	b2 := uint256.NewInt(100)
-	b3 := uint256.NewInt(200)
-	assert.True(t, valuesEqual(BalancePath, *b1, *b2), "Same balance should be equal")
-	assert.False(t, valuesEqual(BalancePath, *b1, *b3), "Different balance should not be equal")
-
-	// NoncePath
-	assert.True(t, valuesEqual(NoncePath, uint64(5), uint64(5)), "Same nonce")
-	assert.False(t, valuesEqual(NoncePath, uint64(5), uint64(6)), "Different nonce")
-
-	// IncarnationPath
-	assert.True(t, valuesEqual(IncarnationPath, uint64(1), uint64(1)), "Same incarnation")
-	assert.False(t, valuesEqual(IncarnationPath, uint64(1), uint64(2)), "Different incarnation")
-
-	// Nil values
-	assert.True(t, valuesEqual(BalancePath, nil, nil), "Both nil should be equal")
-	assert.False(t, valuesEqual(BalancePath, *b1, nil), "One nil should not be equal")
-	assert.False(t, valuesEqual(BalancePath, nil, *b1), "One nil should not be equal")
-}
-
 // TestVersionedWriteVersion verifies that VersionedWrite entries at
 // txIndex=0 are still reachable. The bug was that finalizeTx appended
 // writes without Version (zero value = txIndex=0), making them only

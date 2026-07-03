@@ -355,7 +355,7 @@ func (sdb *IntraBlockState) HasStorage(addr accounts.Address) (bool, error) {
 	// IncarnationPath is written ONLY by CreateAccount and Selfdestruct —
 	// both operations that clear all storage.  If a prior TX wrote it, the
 	// account was created or destroyed in this block and HasStorage should
-	// return false. Mirrors the StoragePath check in versionedRead.
+	// return false. Mirrors the StoragePath check in versionedReadCore.
 	if sdb.versionMap != nil {
 		if inc, incRes, ok := sdb.versionMap.ReadIncarnation(addr, sdb.txIndex); ok && incRes.Status() == MVReadResultDone {
 			// Record IncarnationPath dependency for validation.
@@ -571,10 +571,10 @@ func (sdb *IntraBlockState) Empty(addr accounts.Address) (empty bool, err error)
 	if account == nil {
 		sdb.touchAccount(addr)
 		// Do NOT call accountRead here: getVersionedAccount already recorded
-		// the AddressPath read (via versionedRead) with Val=nil.  Calling
+		// the AddressPath read (via versionedReadCore) with Val=nil.  Calling
 		// accountRead(&emptyAccount) would overwrite that nil with a non-nil
 		// pointer to an empty Account.  Downstream code (getBalance →
-		// versionedRead for BalancePath → recursive AddressPath lookup) treats
+		// versionedReadCore for BalancePath → recursive AddressPath lookup) treats
 		// non-nil as "account exists", creating a stateObject instead of going
 		// through createObject.  When createObject is skipped, AddressPath is
 		// never written to the version map, and other txs that read this
@@ -583,7 +583,7 @@ func (sdb *IntraBlockState) Empty(addr accounts.Address) (empty bool, err error)
 	// Do not use SelfDestructPath here: a self-destructed account is still
 	// "alive" during the same tx (EIP-6780) and should not appear empty
 	// until end-of-tx cleanup.  Cross-tx destructs are already handled by
-	// getVersionedAccount returning nil (the versionedRead short-circuit
+	// getVersionedAccount returning nil (the versionedReadCore short-circuit
 	// returns default values for all paths when a previous tx destroyed the
 	// account).
 	return account == nil || account.Empty(), nil
@@ -678,7 +678,7 @@ func (sdb *IntraBlockState) getCode(addr accounts.Address, commited bool) ([]byt
 		return nil, nil
 	}
 	// When commited=true (used by ResolveCode for EIP-7702 delegation),
-	// versionedRead skips local versionedWrites and may return a stale
+	// versionedReadCore skips local versionedWrites and may return a stale
 	// ReadSet value. If the CURRENT tx has set this account's code (e.g.,
 	// via EIP-7702 authorization processing), return the dirty code directly.
 	// We must also check hasWrite to ensure the code was set in this tx,
@@ -791,7 +791,7 @@ func (sdb *IntraBlockState) ResolveCode(addr accounts.Address) ([]byte, error) {
 	// committed=false so the tx's own writes (e.g. from EIP-7702 authorization
 	// list) are visible. With committed=true the parallel executor reads stale
 	// delegation code from the version map instead of the current tx's SetCode.
-	// CodePath exemptions in versionedRead already handle SelfDestruct cases.
+	// CodePath exemptions in versionedReadCore already handle SelfDestruct cases.
 	code, err := sdb.getCode(addr, false)
 	// eip-7702
 	if delegation, ok := types.ParseDelegation(code); ok {
@@ -1417,7 +1417,7 @@ func (sdb *IntraBlockState) Selfdestruct(addr accounts.Address) (bool, error) {
 	// NOTE: we intentionally do NOT versionWritten(StoragePath, key, 0) for the
 	// dirty slots here. Pre-Cancun (and for CALL-based SELFDESTRUCT generally)
 	// the account stays alive until end-of-tx, so a re-entry's GetState must
-	// still see the dirty values — and versionedRead consults versionedWrites
+	// still see the dirty values — and versionedReadCore consults versionedWrites
 	// before the stateObject, so a spurious StoragePath=0 here would make those
 	// reads return 0 (wrong gas: SSTORE_SET vs dirty-update, and wrong value).
 	// The parallel commitment calculator gets the per-slot DELETE entries from
@@ -1591,9 +1591,9 @@ func (sdb *IntraBlockState) getStateObject(addr accounts.Address, recordRead boo
 		}
 
 		// Check if a prior tx selfdestructed this account. The AddressPath
-		// versionedRead above returned nil (SelfDestructPath early-exit), but
+		// versionedReadCore above returned nil (SelfDestructPath early-exit), but
 		// stateReader returned a committed value from SharedDomains. Read
-		// SelfDestructPath directly from the versionMap (not via versionedRead
+		// SelfDestructPath directly from the versionMap (not via versionedReadCore
 		// which itself short-circuits on the same flag). Use the same pattern
 		// as CreateAccount (line 1628).
 		if destructed, res, ok := sdb.versionMap.ReadSelfDestruct(addr, sdb.txIndex); ok && res.Status() == MVReadResultDone && destructed {
@@ -1757,14 +1757,14 @@ func (sdb *IntraBlockState) CreateAccount(addr accounts.Address, contractCreatio
 			if !destructed {
 				if so, ok := sdb.stateObjects[addr]; ok && so.selfdestructed {
 					// Accumulated-IBS path (e.g. GenerateChain): stateObjects cache marks the
-					// account as selfdestructed but versionedRead returned false due to the
+					// account as selfdestructed but versionedReadCore returned false due to the
 					// so.deleted early exit.  Reuse the cached stateObject to preserve the
 					// correct selfdestructed flag and accumulated incarnation.
 					previous = so
 				} else if sdb.versionMap != nil {
 					// Fresh-IBS worker path (e.g. InsertChain parallel executor): no stateObjects
 					// cache, but the versionMap may have SelfDestructPath=true from a prior tx.
-					// versionedRead returns false for SelfDestructPath via the early-exit at
+					// versionedReadCore returns false for SelfDestructPath via the early-exit at
 					// lines 459-462 — bypass it here so we correctly set selfdestructed=true.
 					if d, res, ok := sdb.versionMap.ReadSelfDestruct(addr, sdb.txIndex); ok && res.Status() == MVReadResultDone && d {
 						destructed = true
@@ -1851,10 +1851,9 @@ func (sdb *IntraBlockState) CreateAccount(addr accounts.Address, contractCreatio
 	newObj := sdb.createObject(addr, previous)
 	if previous != nil && previous.selfdestructed {
 		// resetObjectChange.dirtied() returns false, so without this the
-		// parallel worker's MakeWriteSet drops the resurrect write
-		// (test_double_kill / EIP-6780 family on the parallel shard, #21260).
-		// Confined to CreateAccount — the GetOrNewStateObject AddBalance path
-		// must NOT mark dirty here (regresses TestSelfDestructReceive).
+		// parallel worker's MakeWriteSet drops the resurrect write. Confined to
+		// CreateAccount — the GetOrNewStateObject AddBalance path must NOT mark
+		// dirty here.
 		sdb.journal.dirty(addr)
 	}
 	if previous != nil && !previous.selfdestructed {

@@ -489,18 +489,19 @@ func (pe *parallelExecutor) execImpl(ctx context.Context, execStage *StageState,
 					txResultBlocks[applyResult.blockNum] = struct{}{}
 					uncommittedGas += applyResult.blockGasUsed
 					uncommittedTransactions++
+					writeCount := applyResult.writes.Count()
 					if dbg.TraceApply && dbg.TraceBlock(applyResult.blockNum) {
 						pe.rs.SetTrace(true)
-						fmt.Println(applyResult.blockNum, "apply", applyResult.txNum, applyResult.writes.Count())
+						fmt.Println(applyResult.blockNum, "apply", applyResult.txNum, writeCount)
 					}
-					blockUpdateCount += applyResult.writes.Count()
+					blockUpdateCount += writeCount
 					// All ApplyStateWrites + ApplyTxIndexes run in the execLoop
 					// (sole sd.mem writer). The apply loop here only collects
 					// accumulator notifications and per-tx counters.
 					if pe.accumulator != nil {
 						pendingAccumulatorWrites = append(pendingAccumulatorWrites, applyResult.writes)
 					}
-					blockApplyCount += applyResult.writes.Count()
+					blockApplyCount += writeCount
 					pe.rs.SetTrace(false)
 				case *blockResult:
 					// Apply loop is the canonical error-emission point for
@@ -3073,13 +3074,6 @@ func normalizeWriteSet(writes *state.WriteSet, vm *state.VersionMap, txIndex int
 		}
 	}
 
-	// Track which addresses have account-level writes vs storage-only writes.
-	// Serial's MakeWriteSet calls UpdateAccountData for every dirty object,
-	// including those with only storage changes. The commitment needs the
-	// full account state for trie computation.
-	hasAccountWrite := make(map[accounts.Address]bool)
-	hasStorageWrite := make(map[accounts.Address]bool)
-
 	for h := range writes.AllHeaders() {
 		// Drop account-field writes for SD'd addresses so applyVersionedWrites
 		// takes the pure-delete branch instead of cleanup-before-recreate; drop
@@ -3153,7 +3147,6 @@ func normalizeWriteSet(writes *state.WriteSet, vm *state.VersionMap, txIndex int
 					}
 				}
 			}
-			hasStorageWrite[h.Address] = true
 			filtered.SetStorage(h.Address, h.Key, sw)
 		case state.BalancePath, state.NoncePath, state.IncarnationPath, state.CodeHashPath:
 			// Account fields: prefer the versionMap's accumulated value; fall
@@ -3178,7 +3171,6 @@ func normalizeWriteSet(writes *state.WriteSet, vm *state.VersionMap, txIndex int
 					}
 				}
 			}
-			hasAccountWrite[h.Address] = true
 		case state.CodePath:
 			if h.Version.Incarnation != incarnation {
 				continue
@@ -3186,7 +3178,6 @@ func normalizeWriteSet(writes *state.WriteSet, vm *state.VersionMap, txIndex int
 			if vw, ok := writes.GetCode(h.Address); ok {
 				filtered.SetCode(h.Address, vw)
 			}
-			hasAccountWrite[h.Address] = true
 		case state.CreateContractPath:
 			if h.Version.Incarnation != incarnation {
 				continue
@@ -3194,7 +3185,6 @@ func normalizeWriteSet(writes *state.WriteSet, vm *state.VersionMap, txIndex int
 			if vw, ok := writes.GetCreateContract(h.Address); ok {
 				filtered.SetCreateContract(h.Address, vw)
 			}
-			hasAccountWrite[h.Address] = true
 		case state.SelfDestructPath:
 			if h.Version.Incarnation != incarnation {
 				continue

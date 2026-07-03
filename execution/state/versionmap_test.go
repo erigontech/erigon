@@ -496,21 +496,6 @@ func TestReadTimeSameLocation(t *testing.T) {
 	}
 }
 
-// TestValuesEqual_StoragePath verifies that valuesEqual handles StoragePath
-// (uint256.Int values) correctly. Without this, storage reads that matched the
-// versionMap value were incorrectly invalidated (falling through to the default
-// case which always returns false), causing livelocks in dense blocks.
-func TestValuesEqual_StoragePath(t *testing.T) {
-	t.Parallel()
-
-	a := *uint256.NewInt(42)
-	b := *uint256.NewInt(42)
-	c := *uint256.NewInt(99)
-
-	require.True(t, valuesEqual(StoragePath, a, b), "same storage values should be equal")
-	require.False(t, valuesEqual(StoragePath, a, c), "different storage values should not be equal")
-}
-
 // TestValidateRead_StoragePath_ValueTiebreaker verifies that when a StoragePath
 // read was from storage (source=StorageRead) but the versionMap now has a Done
 // entry with the SAME value, validation considers it valid (value tiebreaker).
