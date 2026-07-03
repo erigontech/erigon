@@ -3,12 +3,15 @@ package kv
 import (
 	"path/filepath"
 	"strings"
+
+	"github.com/erigontech/erigon/db/version"
 )
 
 type VisibleFile interface {
 	Fullpath() string
 	StartRootNum() uint64
 	EndRootNum() uint64
+	Version() version.Version
 }
 
 type VisibleFiles []VisibleFile

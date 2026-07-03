@@ -30,6 +30,11 @@ type Cache interface {
 	// reflects (used for txNum/epoch unwind invalidation).
 	Put(key []byte, value []byte, txNum uint64)
 
+	// PutIfAbsent is Put except that a live entry for key is left untouched
+	// (a stale one is replaced) — for prefetch writers, whose snapshot may
+	// already be superseded by an authoritative Put.
+	PutIfAbsent(key []byte, value []byte, txNum uint64)
+
 	// Delete removes the data for the given key.
 	Delete(key []byte)
 
