@@ -681,7 +681,7 @@ func (db *MdbxKV) waitTxsAllDoneOnClose() {
 	}
 }
 
-const bgSyncPeriod = 500 * time.Millisecond
+const bgSyncPeriod = 250 * time.Millisecond
 
 // One process-wide goroutine flushes all registered (SafeNoSync) databases, so
 // adding a new db doesn't add a goroutine. The loop copies the registry under
