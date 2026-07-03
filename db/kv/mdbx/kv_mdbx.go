@@ -356,7 +356,7 @@ func (opts MdbxOpts) Open(ctx context.Context) (_ kv.RwDB, err error) {
 		//if err = env.SetSyncBytes(128 * 1024 * 1024); err != nil {
 		//	return nil, err
 		//}
-		if err = env.SetSyncPeriod(time.Second); err != nil {
+		if err = env.SetSyncPeriod(time.Minute); err != nil {
 			return nil, err
 		}
 		if err = env.SetSyncBytes(8 * 1024 * 1024 * 1024); err != nil {
