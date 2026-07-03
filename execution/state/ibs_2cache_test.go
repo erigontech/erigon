@@ -32,8 +32,9 @@ import (
 	"github.com/erigontech/erigon/execution/types/accounts"
 )
 
-// writeIndex builds a lookup map from a WriteSet.
-// Key is (Address, Path, Key); value is the typed Val field.
+// writeIndex builds a lookup map from a WriteSet, keyed by (Path, Key) — the
+// address is not part of the key, so this assumes a single-address WriteSet
+// (use addrWriteIndex for multiple). Value is the typed Val field.
 func writeIndex(writes *WriteSet) map[AccountKey]any {
 	idx := make(map[AccountKey]any)
 	for h := range writes.AllHeaders() {

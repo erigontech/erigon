@@ -3218,6 +3218,11 @@ func normalizeWriteSet(writes *state.WriteSet, vm *state.VersionMap, txIndex int
 			}
 		case state.AddressPath:
 			// AddressPath is record-level — skip for field-level consumers.
+		case state.CodeSizePath:
+			// Code size is derived from the code bytes and isn't a domain field,
+			// so it's intentionally not carried into the calc/apply write set (as
+			// on serial). Cross-tx ReadCodeSize is served from the versionMap,
+			// which the worker populates directly — independent of this pass.
 		}
 	}
 
