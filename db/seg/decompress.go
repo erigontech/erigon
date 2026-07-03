@@ -595,13 +595,17 @@ func (d *Decompressor) GetMetadata() []byte {
 	return d.metadata
 }
 
-// WithReadAhead - Expect read in sequential order. (Hence, pages in the given range can be aggressively read ahead, and may be freed soon after they are accessed.)
-func (d *Decompressor) WithReadAhead(f func() error) error {
+// WithReadAhead reads in sequential order via a separate MADV_SEQUENTIAL mmap, so the shared mmap used by concurrent random readers is unaffected.
+func (d *Decompressor) WithReadAhead(f func(*Getter) error) error {
 	if d == nil || d.mmapHandle1 == nil {
 		return nil
 	}
-	defer d.MadvSequential().DisableReadAhead()
-	return f()
+	v, err := d.OpenSequentialView(true)
+	if err != nil {
+		return err
+	}
+	defer v.Close()
+	return f(v.MakeGetter())
 }
 
 // DisableReadAhead - usage: `defer d.EnableReadAhead().DisableReadAhead()`. Please don't use this funcs without `defer` to avoid leak.
@@ -708,17 +712,27 @@ type SequentialView struct {
 	data        []byte // words data region from the sequential mmap
 }
 
-// OpenSequentialView creates a separate mmap of the same file with MADV_SEQUENTIAL.
-// The caller must call Close when done.
-func (d *Decompressor) OpenSequentialView() (*SequentialView, error) {
+// OpenSequentialView returns a view for a sequential scan of the file. With separateReadahead
+// it creates a second mmap of the same file with MADV_SEQUENTIAL, isolating aggressive readahead
+// (and its deactivate-behind eviction) from the shared mmap used by concurrent random readers;
+// the caller must call Close. Without it the view shares the decompressor's mmap with MADV_NORMAL —
+// used when concurrent random readers of the same file (e.g. commitment dereference) must keep their
+// pages resident; Close is then a no-op.
+func (d *Decompressor) OpenSequentialView(separateReadahead bool) (*SequentialView, error) {
 	if d == nil || d.f == nil {
 		return nil, nil
+	}
+	if !separateReadahead {
+		_ = mmap.MadviseNormal(d.mmapHandle1)
+		return &SequentialView{d: d, data: d.data[d.wordsStart:]}, nil
 	}
 	h1, h2, err := mmap.Mmap(d.f, int(d.size))
 	if err != nil {
 		return nil, err
 	}
-	_ = mmap.MadviseSequential(h1)
+	if dbg.SnapshotMadvSequential {
+		_ = mmap.MadviseSequential(h1)
+	}
 	// d.data is a sub-slice of d.mmapHandle1 starting after file headers
 	// (version, feature flags, metadata). wordsStart is relative to d.data,
 	// so the file offset is: headerSize + wordsStart.
