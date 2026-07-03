@@ -47,6 +47,10 @@ var (
 	computeCommitteeCountPerSlot = subnets.ComputeCommitteeCountPerSlot
 )
 
+func validationEpochRange(headState *state.CachingBeaconState, highestSeenSlot, slotsPerEpoch uint64) (uint64, uint64) {
+	return state.PreviousEpoch(headState), max(state.Epoch(headState), highestSeenSlot/slotsPerEpoch)
+}
+
 type attestationService struct {
 	ctx                    context.Context
 	forkchoiceStore        forkchoice.ForkChoiceStorage
@@ -197,11 +201,10 @@ func (s *attestationService) ProcessMessage(ctx context.Context, subnet *uint64,
 	if err := s.syncedDataManager.ViewHeadState(func(headState *state.CachingBeaconState) error {
 		// If our head state is too far from the attestation epoch, committee
 		// computations will use a stale RANDAO mix and produce wrong results.
-		// Allow current and previous epoch (spec permits both).
-		headEpoch := state.Epoch(headState)
-		if attEpoch != headEpoch && attEpoch != state.PreviousEpoch(headState) {
-			return fmt.Errorf("head epoch %d too far from attestation epoch %d: %w",
-				headEpoch, attEpoch, ErrIgnore)
+		prevEpoch, currEpoch := validationEpochRange(headState, s.forkchoiceStore.HighestSeen(), s.beaconCfg.SlotsPerEpoch)
+		if attEpoch < prevEpoch || attEpoch > currEpoch {
+			return fmt.Errorf("head epoch %d too far from attestation epoch %d (prev=%d, curr=%d): %w",
+				state.Epoch(headState), attEpoch, prevEpoch, currEpoch, ErrIgnore)
 		}
 		// [REJECT] The committee index is within the expected range
 		committeeCount := computeCommitteeCountPerSlot(headState, slot, s.beaconCfg.SlotsPerEpoch)
