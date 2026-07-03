@@ -989,7 +989,7 @@ func (s *RoSnapshots) recalcVisibleFiles(alignMin bool, retired ...retiredSegmen
 		toDelete = s.reclaimRetiredLocked()
 	}()
 
-	closeRetired(toDelete)
+	closeAndRemoveFiles(toDelete)
 }
 
 // acquireVisible pins the current generation. Load and increment are not atomic
@@ -1020,7 +1020,7 @@ func (s *RoSnapshots) reclaimRetired() {
 	s.recalcLock.Lock()
 	toDelete := s.reclaimRetiredLocked()
 	s.recalcLock.Unlock()
-	closeRetired(toDelete)
+	closeAndRemoveFiles(toDelete)
 }
 
 // reclaimRetiredLocked walks generations oldest→newest while their refcnt is 0,
@@ -1037,7 +1037,7 @@ func (s *RoSnapshots) reclaimRetiredLocked() (toDelete []retiredSegment) {
 	return toDelete
 }
 
-func closeRetired(toDelete []retiredSegment) {
+func closeAndRemoveFiles(toDelete []retiredSegment) {
 	for _, r := range toDelete {
 		if r.removeFiles {
 			r.seg.closeAndRemoveFiles()
