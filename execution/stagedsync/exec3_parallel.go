@@ -3024,10 +3024,9 @@ func MergeVersionedWrites(prev, next *state.WriteSet) *state.WriteSet {
 // from the trie (wrong root in TestDeleteRecreateAccount / TestSelfDestructReceive
 // / TestEIP161AccountRemoval, all of which SD a contract whose storage predates
 // the block). Pass nil in unit tests that don't exercise pre-block storage.
-// codePathRecoveryHashMismatch counts times the BAL codePath recovery could not
-// re-emit code because the recovered bytes didn't hash to the emitted codeHash —
-// the recovery is skipped, leaving the codeHash-without-code asymmetry it exists
-// to repair, so the event must not be silent.
+// codePathRecoveryHashMismatch counts BAL codePath recoveries skipped because
+// the recovered bytes didn't hash to the emitted codeHash; surfaced so the skip
+// isn't silent.
 var codePathRecoveryHashMismatch = metrics.GetOrCreateCounter("exec3_codepath_recovery_hash_mismatch")
 
 func normalizeWriteSet(writes *state.WriteSet, vm *state.VersionMap, txIndex int, incarnation int, stateReader state.StateReader, domainStorageKeys func(addr accounts.Address) []accounts.StorageKey, emptyRemoval bool, isAura bool) *state.WriteSet {
@@ -3362,16 +3361,10 @@ func normalizeWriteSet(writes *state.WriteSet, vm *state.VersionMap, txIndex int
 				code = c
 			}
 		}
-		// The codeHash-without-code asymmetry only arises from the SetCode
-		// short-circuit (new code == existing → no CodePath written), since a
-		// regular deploy writes CodePath and CodeHashPath together at the same
-		// incarnation. When the short-circuit fires the emitted codeHash is backed
-		// by either (a) the EIP-7702 designator this re-exec must re-emit, or
-		// (b) already-committed identical bytes (CREATE2 redeploy / unchanged
-		// contract) whose code is already in CodeDomain — benign, re-emitting it
-		// would be an elided DomainPut per modified contract. So recovery is gated
-		// to 7702 designators: that's the only case that leaves uncommitted code
-		// without its CodePath. (Gating also never misattributes a callee's code.)
+		// Gate recovery to 7702 designators: that SetCode short-circuit is the only
+		// one that leaves uncommitted code without a CodePath. A regular deploy
+		// writes CodePath with CodeHashPath; a CREATE2/unchanged redeploy already
+		// has its code in CodeDomain. (Gating also never misattributes callee code.)
 		if _, ok := types.ParseDelegation(code); !ok {
 			continue
 		}

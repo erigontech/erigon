@@ -139,8 +139,7 @@ func (t *testExecTask) Execute(evm *vm.EVM,
 			result := ibs.ReadVersion(k.addr, k.path, k.key, version.TxIndex)
 
 			// op[0] is always a NoncePath read; peek the versionMap value (no
-			// extra recorded read) and abort on a nonce mismatch, matching
-			// main's result.Value() check.
+			// extra recorded read) and abort on a nonce mismatch.
 			if i == 0 {
 				if vm := ibs.VersionMap(); vm != nil {
 					if nonce, _, ok := vm.ReadNonce(k.addr, version.TxIndex); ok && int(nonce) != t.nonce {

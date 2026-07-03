@@ -94,7 +94,7 @@ func (rs *StateV3) applyVersionedWrites(roTx kv.TemporalTx, blockNum, txNum uint
 			storage        []storageItem
 		}
 
-		perAddr := make(map[accounts.Address]*addrState, writes.Count())
+		perAddr := make(map[accounts.Address]*addrState)
 		ensure := func(a accounts.Address) *addrState {
 			d := perAddr[a]
 			if d == nil {
@@ -127,10 +127,6 @@ func (rs *StateV3) applyVersionedWrites(roTx kv.TemporalTx, blockNum, txNum uint
 			d := ensure(a)
 			d.code = vw.Val.Bytes
 			d.codeWritten = true
-			if d.codeHash == nil {
-				ch := vw.Val.Hash
-				d.codeHash = &ch
-			}
 		}
 		for a, vw := range writes.SelfDestructs() {
 			ensure(a).selfDestruct = vw.Val

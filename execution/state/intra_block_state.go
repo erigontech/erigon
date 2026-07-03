@@ -2151,11 +2151,11 @@ func (sdb *IntraBlockState) MakeWriteSet(chainRules *chain.Rules, stateWriter St
 
 	var reverted []accounts.Address
 
-	for addr := range sdb.versionedWrites.addrs() {
+	sdb.versionedWrites.forEachAddr(func(addr accounts.Address) {
 		if _, isDirty := sdb.stateObjectsDirty[addr]; !isDirty {
 			reverted = append(reverted, addr)
 		}
-	}
+	})
 
 	for _, addr := range reverted {
 		sdb.versionMap.DeleteAll(addr, sdb.txIndex)

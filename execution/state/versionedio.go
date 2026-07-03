@@ -955,6 +955,45 @@ func (s *WriteSet) hasAddr(addr accounts.Address) bool {
 	return ok
 }
 
+// forEachAddr calls f for every address with at least one entry, allocating
+// nothing. An address present in several paths is visited once per path, so
+// callers must tolerate repeats (use addrs() when a deduped set is required).
+func (s *WriteSet) forEachAddr(f func(accounts.Address)) {
+	if s == nil {
+		return
+	}
+	for a := range s.address {
+		f(a)
+	}
+	for a := range s.balance {
+		f(a)
+	}
+	for a := range s.nonce {
+		f(a)
+	}
+	for a := range s.incarnation {
+		f(a)
+	}
+	for a := range s.selfDestruct {
+		f(a)
+	}
+	for a := range s.createContract {
+		f(a)
+	}
+	for a := range s.code {
+		f(a)
+	}
+	for a := range s.codeHash {
+		f(a)
+	}
+	for a := range s.codeSize {
+		f(a)
+	}
+	for a := range s.storage {
+		f(a)
+	}
+}
+
 // addrs returns the union of all addresses that have at least one entry.
 // Iteration order across the union is non-deterministic — caller sorts
 // before use if determinism matters.
@@ -2108,7 +2147,13 @@ func (io *VersionedIO) mergeTx(version Version, reads ReadSet, writes *WriteSet,
 		io.accessed = append(io.accessed, make([]AccessSet, n-len(io.accessed))...)
 	}
 	if reads.Len() > 0 {
-		io.inputs[idx] = io.inputs[idx].Merge(versionedReadSet{version.Incarnation, reads})
+		if io.inputs[idx].readSet.Len() == 0 {
+			// Production call sites merge each tx once into an empty slot; hand the
+			// read set over directly (like RecordReads) instead of deep-copying.
+			io.inputs[idx] = versionedReadSet{version.Incarnation, reads}
+		} else {
+			io.inputs[idx] = io.inputs[idx].Merge(versionedReadSet{version.Incarnation, reads})
+		}
 	}
 	if !writes.IsEmpty() {
 		io.outputs[idx] = io.outputs[idx].Merge(writes)
@@ -2239,31 +2284,12 @@ func (io *VersionedIO) AsBlockAccessList() types.BlockAccessList {
 					account.applyWriteStorage(key, w.Val, w.Version.blockAccessIndex())
 				}
 			}
-			// The paths above carry BAL field values; these carry none but still
-			// touch the account, so register the address (EIP-7928 requires every
-			// touched address to appear) — the write pass must be self-sufficient,
-			// not rely on recordWrite* also feeding AccessedAddresses.
-			for addr := range writes.Incarnations() {
-				if !addr.IsNil() {
-					ensureAccountState(ac, addr)
-				}
-			}
-			for addr := range writes.CodeHashes() {
-				if !addr.IsNil() {
-					ensureAccountState(ac, addr)
-				}
-			}
-			for addr := range writes.createContract {
-				if !addr.IsNil() {
-					ensureAccountState(ac, addr)
-				}
-			}
-			for addr := range writes.codeSize {
-				if !addr.IsNil() {
-					ensureAccountState(ac, addr)
-				}
-			}
-			for addr := range writes.address {
+			// EIP-7928 requires every touched address to appear. The value-carrying
+			// paths above register via ensureAccountState; a single sweep over the
+			// full address union covers the rest (incarnation/codeHash/create/
+			// codeSize/address) and can't silently miss a future path — the repeat
+			// ensureAccountState is a harmless get-or-create.
+			for addr := range writes.addrs() {
 				if !addr.IsNil() {
 					ensureAccountState(ac, addr)
 				}
