@@ -59,11 +59,10 @@ func whaleSurvivorCorpus(keepWholeNibble bool) (pk [][]byte, upds []Update, k2 [
 	return pk, upds, k2, u2
 }
 
-// A pooled worker cell that previously held a storage leaf is reused and stamped with an
-// account key. updateCell must shed the stale storage identity, otherwise computeCellHash
-// recomputes the storage root from the stale slot and silently ignores the deep-folded root
-// injected by setAccountStorageRoot.
-func TestDeepFold_AccountStampClearsStaleStorage(t *testing.T) {
+// A deep-folded account whose target cell was reused from a prior storage leaf: setAccountStorageRoot
+// injects the subtree root and must shed the stale storage identity, otherwise computeCellHash
+// recomputes the storage root from the stale slot and ignores the injected root.
+func TestDeepFold_InjectedRootClearsStaleStorage(t *testing.T) {
 	t.Parallel()
 	hph := NewHexPatriciaHashed(length.Addr, NewMockState(t), DefaultTrieConfig())
 
@@ -74,15 +73,12 @@ func TestDeepFold_AccountStampClearsStaleStorage(t *testing.T) {
 	require.True(t, hph.root.loaded.storage(), "precondition: root is flagged storage-loaded")
 
 	acct := common.HexToAddress("0x1234567890abcdef1234567890abcdef12345678")
-	accUpd := Update{Flags: BalanceUpdate | NonceUpdate}
-	accUpd.Balance.SetUint64(42)
-	accUpd.Nonce = 7
-	hph.updateCell(acct[:], KeyToHexNibbleHash(acct[:]), &accUpd)
+	setAccountStorageRoot(hph, KeyToHexNibbleHash(acct[:]), common.HexToHash("0x1234"))
 
 	require.Zerof(t, hph.root.storageAddrLen,
-		"stamping an account key must clear the stale storage plain key (got len=%d)", hph.root.storageAddrLen)
+		"injecting a storage root must clear the stale storage plain key (got len=%d)", hph.root.storageAddrLen)
 	require.Falsef(t, hph.root.loaded.storage(),
-		"stamping an account key must clear the stale storage-loaded flag")
+		"injecting a storage root must clear the stale storage-loaded flag")
 }
 
 // The account leaf hash must be driven by the storage root injected via setAccountStorageRoot,

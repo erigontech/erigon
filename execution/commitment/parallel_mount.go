@@ -249,6 +249,12 @@ func setAccountStorageRoot(w *HexPatriciaHashed, accHash []byte, sr common.Hash)
 	} else {
 		c = &w.grid[w.activeRows-1][accHash[w.currentKeyLen]]
 	}
+	// sr already covers the whole storage subtree, so a stale storage plain key on this cell must
+	// go, or computeCellHash rehashes it as a singleton from the stale slot and discards sr.
+	c.storageAddrLen = 0
+	c.StorageLen = 0
+	c.Flags &^= StorageUpdate
+	c.loaded &^= cellLoadStorage
 	c.hash = sr
 	c.hashLen = 32
 	c.stateHashLen = 0

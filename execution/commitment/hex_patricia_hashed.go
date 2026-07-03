@@ -2188,12 +2188,6 @@ func (hph *HexPatriciaHashed) updateCell(plainKey, hashedKey []byte, u *Update) 
 		copy(cell.accountAddr[:], plainKey)
 
 		cell.CodeHash = empty.CodeHash
-		// An account cell must not keep a stale storage plain key, or computeCellHash rehashes
-		// it as a singleton from the stale slot and drops the injected deep-fold storage root.
-		cell.storageAddrLen = 0
-		cell.StorageLen = 0
-		cell.Flags &^= StorageUpdate
-		cell.loaded &^= cellLoadStorage
 	} else { // set storage key
 		cell.storageAddrLen = int16(len(plainKey))
 		copy(cell.storageAddr[:], plainKey)
