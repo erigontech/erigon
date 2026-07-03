@@ -167,6 +167,12 @@ func unmarshalFakeRegisteredTxJSON(input []byte) (Transaction, error) {
 
 var registerFakeTxTypeOnce sync.Once
 
+func unregisterTxType(id byte) {
+	txTypeRegistryMu.Lock()
+	defer txTypeRegistryMu.Unlock()
+	delete(txTypeRegistry, id)
+}
+
 func registerFakeTxType(t *testing.T) {
 	t.Helper()
 	registerFakeTxTypeOnce.Do(func() {

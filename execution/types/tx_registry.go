@@ -67,12 +67,6 @@ func RegisterTxType(id byte, spec TxTypeSpec) {
 	txTypeRegistry[id] = spec
 }
 
-func unregisterTxType(id byte) {
-	txTypeRegistryMu.Lock()
-	defer txTypeRegistryMu.Unlock()
-	delete(txTypeRegistry, id)
-}
-
 func registeredTxType(id byte) (TxTypeSpec, bool) {
 	txTypeRegistryMu.RLock()
 	defer txTypeRegistryMu.RUnlock()
