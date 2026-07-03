@@ -17,7 +17,10 @@
 package state
 
 import (
+	"context"
+	"sync"
 	"testing"
+	"time"
 
 	"github.com/c2h5oh/datasize"
 	"github.com/stretchr/testify/require"
@@ -43,6 +46,33 @@ func TestAggregatorCloseWaitsForBackgroundMerge(t *testing.T) {
 		require.NoError(t, agg.BuildFiles2(t.Context(), 0, 0, true))
 		agg.wg.Wait()
 		agg.Close()
+		db.Close()
+	}
+}
+
+// MergeLoop is also called from goroutines the aggregator did not spawn (e.g. the
+// node's background-maintenance goroutine), so its wg registration must be ordered
+// against Close's Wait — an unordered Add from zero is WaitGroup reuse, flagged by -race.
+func TestAggregatorCloseVsConcurrentMergeLoop(t *testing.T) {
+	logger := log.New()
+	for range 16 {
+		dirs := datadir.New(t.TempDir())
+		db := mdbx.New(dbcfg.ChainDB, logger).InMem(t, dirs.Chaindata).GrowthStep(32 * datasize.MB).MapSize(2 * datasize.GB).MustOpen()
+		agg := NewTest(dirs).StepSize(16).Logger(logger).MustOpen(t.Context(), db)
+		require.NoError(t, agg.OpenFolder())
+
+		start := make(chan struct{})
+		var loops sync.WaitGroup
+		for i := range 8 {
+			loops.Go(func() {
+				<-start
+				time.Sleep(time.Duration(i) * 250 * time.Microsecond)
+				_ = agg.MergeLoop(context.Background())
+			})
+		}
+		close(start)
+		agg.Close()
+		loops.Wait()
 		db.Close()
 	}
 }

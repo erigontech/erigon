@@ -45,6 +45,10 @@ type ForkableAgg struct {
 
 	wg sync.WaitGroup
 
+	// see Aggregator.closing
+	closing   bool
+	closingMu sync.Mutex
+
 	ps *background.ProgressSet
 
 	leakDetector *dbg.LeakDetector
@@ -218,7 +222,13 @@ func (a *ForkableAgg) WaitForBuildAndMerge(ctx context.Context) chan struct{} {
 }
 
 func (r *ForkableAgg) MergeLoop(ctx context.Context) error {
+	r.closingMu.Lock()
+	if r.closing {
+		r.closingMu.Unlock()
+		return nil
+	}
 	r.wg.Add(1)
+	r.closingMu.Unlock()
 	defer r.wg.Done()
 	return r.mergeLoop(ctx)
 }
@@ -444,6 +454,9 @@ func (r *ForkableAgg) Close() {
 	if r == nil || r.ctxCancel == nil { // invariant: it's safe to call Close multiple times
 		return
 	}
+	r.closingMu.Lock()
+	r.closing = true
+	r.closingMu.Unlock()
 	r.ctxCancel()
 	r.ctxCancel = nil
 	r.wg.Wait()

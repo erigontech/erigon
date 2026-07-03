@@ -4,6 +4,7 @@ import (
 	"context"
 	"math/rand"
 	"runtime"
+	"sync"
 	"testing"
 	"time"
 
@@ -675,5 +676,28 @@ func TestForkableAggCloseWaitsForBackgroundMerge(t *testing.T) {
 	for range 64 {
 		agg.BuildFilesInBackground(RootNum(10))
 		agg.wg.Wait()
+	}
+}
+
+// MergeLoop is also called from goroutines the aggregator did not spawn, so its wg
+// registration must be ordered against Close's Wait — an unordered Add from zero is
+// WaitGroup reuse, flagged by -race.
+func TestForkableAggCloseVsConcurrentMergeLoop(t *testing.T) {
+	for range 16 {
+		dirs, db, logger := setupDb(t)
+		_, header := setupHeader(t, db, logger, dirs)
+
+		agg := NewForkableAgg(t.Context(), dirs, db, logger)
+		agg.RegisterMarkedForkable(header)
+		require.NoError(t, agg.OpenFolder())
+
+		var loops sync.WaitGroup
+		for range 4 {
+			loops.Go(func() {
+				_ = agg.MergeLoop(context.Background())
+			})
+		}
+		agg.Close()
+		loops.Wait()
 	}
 }
