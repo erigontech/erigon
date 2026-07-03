@@ -33,8 +33,8 @@ func newDialError() *net.OpError {
 
 func sequenceOp(attempts *atomic.Int64, errs ...error) func(context.Context) error {
 	return func(context.Context) error {
-		n := attempts.Add(1)
-		if int(n) > len(errs) {
+		n := int(attempts.Add(1))
+		if n > len(errs) {
 			return errs[len(errs)-1]
 		}
 		return errs[n-1]
