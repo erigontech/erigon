@@ -869,11 +869,7 @@ func (s *RoSnapshots) recalcVisibleFiles(alignMin bool, retired ...RetiredSegmen
 		s.idxMax.Store(s.idxAvailability())
 	}()
 
-	var toDelete []RetiredSegment
-	func() {
-		s.dirtyLock.Lock()
-		defer s.dirtyLock.Unlock()
-
+	s.Publish(retired, func() *VisibleFiles {
 		visible := make([]VisibleSegments, snaptype.MaxEnum) // create new pointer - only new readers will see it. old-alive readers will continue use previous pointer
 		maxVisibleBlocks := make([]uint64, 0, len(s.types))
 
@@ -922,11 +918,8 @@ func (s *RoSnapshots) recalcVisibleFiles(alignMin bool, retired ...RetiredSegmen
 			}
 		}
 
-		next := &VisibleFiles{segments: visible, segmentsMax: segmentsMax}
-		toDelete = s.publishLocked(next, retired)
-	}()
-
-	closeAndRemoveFiles(toDelete)
+		return &VisibleFiles{segments: visible, segmentsMax: segmentsMax}
+	})
 }
 
 // FileSet owns a container's DirtySegments and its published visible generations,
@@ -1005,9 +998,7 @@ func closeAndRemoveFiles(toDelete []RetiredSegment) {
 	}
 }
 
-// Init allocates `size` dirty slots (indexed by enum) and an empty visible
-// generation. Callers in other packages that embed FileSet use this instead of
-// touching the unexported fields directly.
+// Init allocates `size` dirty slots (indexed by enum) and an empty visible generation.
 func (f *FileSet) Init(size int) {
 	f.dirty = make([]*btree.BTreeG[*DirtySegment], size)
 	empty := &VisibleFiles{segments: make([]VisibleSegments, size)}
@@ -1024,15 +1015,21 @@ func (f *FileSet) UnlockDirty()                               { f.dirtyLock.Unlo
 // files must pin via AcquireVisible.
 func (f *FileSet) CurrentVisible() *VisibleFiles { return f.visible.Load() }
 
+// NewVisibleFiles builds a generation for Publish; for cross-package embedders
+// that can't construct VisibleFiles directly.
+func NewVisibleFiles(segments []VisibleSegments) *VisibleFiles {
+	return &VisibleFiles{segments: segments}
+}
+
 // Publish builds a new generation via `build` (run under dirtyLock so it sees a
 // consistent dirty set), installs it, hands `retired` to the outgoing generation,
 // and reclaims whatever has drained.
-func (f *FileSet) Publish(retired []RetiredSegment, build func() []VisibleSegments) {
+func (f *FileSet) Publish(retired []RetiredSegment, build func() *VisibleFiles) {
 	var toDelete []RetiredSegment
 	func() {
 		f.dirtyLock.Lock()
 		defer f.dirtyLock.Unlock()
-		toDelete = f.publishLocked(&VisibleFiles{segments: build()}, retired)
+		toDelete = f.publishLocked(build(), retired)
 	}()
 	closeAndRemoveFiles(toDelete)
 }

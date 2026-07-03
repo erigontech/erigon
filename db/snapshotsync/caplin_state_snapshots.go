@@ -461,19 +461,13 @@ func (s *CaplinStateSnapshots) recalcVisibleFiles(retired ...RetiredSegment) {
 		return newVisibleSegments
 	}
 
-	var toDelete []RetiredSegment
-	func() {
-		s.dirtyLock.Lock()
-		defer s.dirtyLock.Unlock()
-
+	s.Publish(retired, func() *VisibleFiles {
 		segments := make([]VisibleSegments, len(s.dirty))
 		for idx, dirtySegments := range s.dirty {
 			segments[idx] = getNewVisibleSegments(dirtySegments)
 		}
-		toDelete = s.publishLocked(&VisibleFiles{segments: segments}, retired)
-	}()
-
-	closeAndRemoveFiles(toDelete)
+		return &VisibleFiles{segments: segments}
+	})
 }
 
 func (s *CaplinStateSnapshots) idxAvailability() uint64 {

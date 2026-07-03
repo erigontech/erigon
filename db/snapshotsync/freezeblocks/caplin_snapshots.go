@@ -297,11 +297,11 @@ func (s *CaplinSnapshots) recalcVisibleFiles(retired ...snapshotsync.RetiredSegm
 		s.idxMax.Store(s.idxAvailability())
 	}()
 
-	s.Publish(retired, func() []snapshotsync.VisibleSegments {
+	s.Publish(retired, func() *snapshotsync.VisibleFiles {
 		segments := make([]snapshotsync.VisibleSegments, snaptype.MaxEnum)
 		segments[snaptype.BeaconBlocks.Enum()] = snapshotsync.RecalcVisibleSegments(s.DirtyFiles()[snaptype.BeaconBlocks.Enum()])
 		segments[snaptype.BlobSidecars.Enum()] = snapshotsync.RecalcVisibleSegments(s.DirtyFiles()[snaptype.BlobSidecars.Enum()])
-		return segments
+		return snapshotsync.NewVisibleFiles(segments)
 	})
 }
 
