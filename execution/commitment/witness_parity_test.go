@@ -31,7 +31,7 @@ func processFreshTrie(t *testing.T, plainKeys [][]byte, updates []Update) (*HexP
 	t.Helper()
 	ms := NewMockState(t)
 	hph := NewHexPatriciaHashed(length.Addr, ms, DefaultTrieConfig())
-	hph.SetTrace(false)
+	hph.SetTraceWriter(nil)
 	require.NoError(t, ms.applyPlainUpdates(plainKeys, updates))
 	toProcess := WrapKeyUpdates(t, ModeDirect, KeyToHexNibbleHash, plainKeys, updates)
 	defer toProcess.Close()
