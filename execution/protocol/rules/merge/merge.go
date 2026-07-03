@@ -467,6 +467,22 @@ func (s *Merge) GetPostApplyMessageFunc() evmtypes.PostApplyMessageFunc {
 	return misc.LogSelfDestructedAccounts // EIP-7708
 }
 
+func (s *Merge) GetStartTxFunc() evmtypes.StartTxFunc {
+	return s.eth1Engine.GetStartTxFunc()
+}
+
+func (s *Merge) GetGasChargingFunc() evmtypes.GasChargingFunc {
+	return s.eth1Engine.GetGasChargingFunc()
+}
+
+func (s *Merge) GetComputeRefundFunc() evmtypes.ComputeRefundFunc {
+	return s.eth1Engine.GetComputeRefundFunc()
+}
+
+func (s *Merge) AmendBlockContext(bc *evmtypes.BlockContext, header *types.Header) {
+	s.eth1Engine.AmendBlockContext(bc, header)
+}
+
 func (s *Merge) ValidateBlockPostExecution(chainConfig *chain.Config, header *types.Header,
 	gasUsed, blobGasUsed uint64, checkReceipts, checkBloom bool,
 	receipts types.Receipts, txns types.Transactions, logger log.Logger) error {

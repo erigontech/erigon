@@ -38,6 +38,9 @@ type BlockContext struct {
 	// GetHash returns the hash corresponding to n
 	GetHash          GetHashFunc
 	PostApplyMessage PostApplyMessageFunc
+	StartTx          StartTxFunc
+	GasCharging      GasChargingFunc
+	ComputeRefund    ComputeRefundFunc
 
 	// Block information
 	Coinbase    accounts.Address // Provides information for COINBASE
@@ -88,6 +91,10 @@ type ExecutionResult struct {
 	// execution but received ETH after the SELFDESTRUCT opcode ran (EIP-7708).
 	// Captured before SoftFinalise clears the journal.
 	SelfDestructedWithBalance []AddressAndBalance
+
+	// L2 is an opaque value the lifecycle hooks may populate (e.g. an L1-fee
+	// split or retryable ticket info); nil unless a hook sets it.
+	L2 any
 }
 
 // Unwrap returns the internal evm error which allows us for further
@@ -131,7 +138,60 @@ type (
 	// PostApplyMessageFunc is an extension point to execute custom logic at the end of core.ApplyMessage.
 	// It's used in Bor for AddFeeTransferLog or in ethereum to clear out the authority code at end of tx.
 	PostApplyMessageFunc func(ibs IntraBlockState, sender accounts.Address, coinbase accounts.Address, result *ExecutionResult, chainRules *chain.Rules)
+
+	// StartTxFunc runs at the very top of TxnExecutor.Execute, before
+	// intrinsic gas or preCheck. When done is true it short-circuits the
+	// whole transition, returning result and err as-is (system/deposit txs).
+	StartTxFunc func(ibs IntraBlockState, msg Message) (done bool, result *ExecutionResult, err error)
+
+	// GasChargingFunc runs once gas has been purchased and split for
+	// execution, letting a chain charge extra cost out of the tx's own gas
+	// budget (via ibs) and redirect the tip recipient. A non-nil error
+	// aborts the transaction before execution starts.
+	GasChargingFunc func(ibs IntraBlockState, msg Message, gasRemaining mdgas.MdGas, intrinsicGas mdgas.IntrinsicGasCalcResult) (adjustedGasRemaining mdgas.MdGas, tipRecipient accounts.Address, err error)
+
+	// ComputeRefundFunc, when non-nil, replaces TxnExecutor's built-in
+	// refund ladder for this tx.
+	ComputeRefundFunc func(gasUsed mdgas.MdGasUsage, imdGas mdgas.MdGas, intrinsicGas mdgas.IntrinsicGasCalcResult, stateRefund uint64, rules *chain.Rules) RefundResult
 )
+
+// RefundResult is what ComputeRefundFunc produces in place of the refund
+// ladder: the final per-tx gas-used values TxnExecutor.Execute needs to
+// charge the block gas pool and pay tips/burn the base fee.
+type RefundResult struct {
+	BlockRegularGasUsed uint64
+	BlockStateGasUsed   uint64
+	TxnGasUsedB4Refunds uint64
+	TxnGasUsed          uint64
+}
+
+// Message is the subset of protocol.Message the lifecycle hooks read; its
+// method set must stay a subset of protocol.Message so that type satisfies
+// this interface structurally without evmtypes importing protocol.
+type Message interface {
+	From() accounts.Address
+	To() accounts.Address
+
+	GasPrice() *uint256.Int
+	FeeCap() *uint256.Int
+	TipCap() *uint256.Int
+	Gas() uint64
+	CheckGas() bool
+	BlobGas() uint64
+	MaxFeePerBlobGas() *uint256.Int
+	Value() *uint256.Int
+
+	Nonce() uint64
+	CheckNonce() bool
+	CheckTransaction() bool
+	Data() []byte
+	AccessList() types.AccessList
+	BlobHashes() []common.Hash
+	Authorizations() []types.Authorization
+
+	IsFree() bool
+	SetIsFree(bool)
+}
 
 type AddressAndBalance struct {
 	Address common.Address
