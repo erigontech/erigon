@@ -1,9 +1,22 @@
 # Item 1 — apply-loop resource authority (batch-cut / fold-orphan fix)
 
-Status: **planned, not implemented.** Deferred behind #22154. Design chosen with Mark:
-**full apply-loop authority** (not the lighter exec-loop catch-up variant). Flush-boundary
-crux **resolved** (2026-07-03): cap the fold-ahead distance rather than partition the
-flush — see "Crux resolved" below. Ready to implement once #22154 lands.
+Status: **orphan correctness fix IMPLEMENTED (stream-based)**; full apply-loop resource
+authority still to do. Flush-boundary crux **resolved** (2026-07-03): cap the fold-ahead
+distance rather than partition the flush — see "Crux resolved" below.
+
+**Implemented (commit `4b7f03a497`):** the orphan bug is fixed via a stream-based
+freeze, NOT a shared variable (Mark: the exec and commit routines must coordinate only
+through the stream, not shared state). On the size cut the exec loop sends a
+`foldFreezeRequest` on `commitResults`; the calculator handles it in-order and stops
+folding (a goroutine-local flag it alone sets/reads); the exec loop then runs one more
+block so state catches up to the ≤1-block-ahead fold, and commits where state and
+commitment agree. Unit test `TestFoldFreeze_StopsFoldAhead`; needs the hive/eest + tip
+gate.
+
+**Still to do:** the fuller design below (move the size estimation into the apply loop,
+`errCleanBatchExit` vs `errDeliberateStop`, remove the exec loop's independent size
+estimation) is an architectural cleanup on top of the correctness fix — not required for
+correctness, kept as the north star.
 
 ## Problem
 
