@@ -19,7 +19,8 @@ package execctx
 import "github.com/erigontech/erigon/execution/commitment"
 
 type sharedDomainOptions struct {
-	trieCfg commitment.TrieConfig
+	trieCfg       commitment.TrieConfig
+	noBranchCache bool
 }
 
 // SharedDomainOption configures NewSharedDomains.
@@ -40,4 +41,14 @@ func WithoutDeferredBranchUpdates() SharedDomainOption {
 // (e.g. genesis) that wire no trie-context factory for the parallel trie.
 func WithSequentialCommitment() SharedDomainOption {
 	return func(o *sharedDomainOptions) { o.trieCfg.Variant = commitment.VariantHexPatriciaTrie }
+}
+
+// WithoutBranchCache leaves the SharedDomains detached from the aggregator-scope
+// BranchCache: commitment branch reads go straight to sd.mem/overlay/MDBX and no
+// read populates the shared cache. Required for SDs that read concurrently with
+// head progression (payload builds, latest-state RPC readers) — the shared cache
+// can be ahead of their snapshot, and their read-fills could shadow fresher
+// canonical entries. SDs serialized with head progression keep the warm cache.
+func WithoutBranchCache() SharedDomainOption {
+	return func(o *sharedDomainOptions) { o.noBranchCache = true }
 }

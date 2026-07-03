@@ -17,6 +17,7 @@
 package execmodule_test
 
 import (
+	"bytes"
 	"context"
 	"crypto/rand"
 	"sync"
@@ -34,10 +35,12 @@ import (
 	"github.com/erigontech/erigon/db/state/execctx"
 	"github.com/erigontech/erigon/execution/builder"
 	"github.com/erigontech/erigon/execution/chain"
+	"github.com/erigontech/erigon/execution/commitment"
 	"github.com/erigontech/erigon/execution/execmodule/execmoduletester"
 	"github.com/erigontech/erigon/execution/protocol/params"
 	"github.com/erigontech/erigon/execution/tests/blockgen"
 	"github.com/erigontech/erigon/execution/types"
+	"github.com/erigontech/erigon/execution/types/accounts"
 	"github.com/erigontech/erigon/txnprovider"
 )
 
@@ -115,26 +118,31 @@ func grindRecipients(t *testing.T, sender common.Address) (a, b, c common.Addres
 	return
 }
 
+func sharedBranchCache(t *testing.T, tx kv.TemporalTx) *commitment.BranchCache {
+	t.Helper()
+	provider, ok := tx.AggTx().(commitment.BranchCacheProvider)
+	require.True(t, ok)
+	bc := provider.BranchCache()
+	require.NotNil(t, bc)
+	return bc
+}
+
 func clearSharedBranchCache(t *testing.T, db kv.TemporalRwDB) {
 	t.Helper()
 	roTx, err := db.BeginTemporalRo(t.Context())
 	require.NoError(t, err)
 	defer roTx.Rollback()
-	sd, err := execctx.NewSharedDomains(t.Context(), roTx, log.New())
-	require.NoError(t, err)
-	defer sd.Close()
-	sd.ClearBranchCache()
+	sharedBranchCache(t, roTx).Clear()
 }
 
 // TestBuilderStaleSnapshotMustNotPoisonBranchCache pins the cache-poisoning
-// mechanism behind https://github.com/erigontech/erigon/issues/22152: a
-// payload build runs outside the exec-module semaphore on its own read
-// snapshot, and its commitment fold read-fills the shared BranchCache. When
-// the build outlives head progression, those read-fills write branches from
-// the older snapshot; once the fresher entries are gone (LRU eviction, or the
-// fill landing after the flush refresh), every later commitment folds the
-// stale branch and the node computes wrong trie roots for valid blocks —
-// two identically-built nodes then disagree at the tip.
+// mechanism: a payload build runs outside the exec-module semaphore on its
+// own read snapshot, and its commitment fold read-fills the shared
+// BranchCache. When the build outlives head progression, those read-fills
+// write branches from the older snapshot; once the fresher entries are gone
+// (LRU eviction, or the fill landing after the flush refresh), every later
+// commitment folds the stale branch and the node computes wrong trie roots
+// for valid blocks — two identically-built nodes then disagree at the tip.
 //
 // The build is parked inside its transaction loop while the chain advances
 // two blocks, the cache is cleared to model the eviction, and the release
@@ -143,7 +151,7 @@ func clearSharedBranchCache(t *testing.T, db kv.TemporalRwDB) {
 // it.
 func TestBuilderStaleSnapshotMustNotPoisonBranchCache(t *testing.T) {
 	prevParallel := dbg.Exec3Parallel
-	dbg.Exec3Parallel = false // serial executor, as in the kurtosis serial job
+	dbg.Exec3Parallel = false
 	t.Cleanup(func() { dbg.Exec3Parallel = prevParallel })
 
 	ctx := t.Context()
@@ -180,6 +188,9 @@ func TestBuilderStaleSnapshotMustNotPoisonBranchCache(t *testing.T) {
 	// shared branch row through the pinned head-1 snapshot.
 	junkTxn, err := types.SignTx(types.NewTransaction(2, addrA, uint256.NewInt(1), params.TxGas, gasPrice, nil), *signer, m.Key)
 	require.NoError(t, err)
+	// The builder drops transactions without a recovered sender; the txpool
+	// normally guarantees it.
+	junkTxn.SetSender(accounts.InternAddress(m.Address))
 	gate := newGateTxnProvider(junkTxn)
 	var parentBeaconBlockRoot common.Hash
 	_, err = rand.Read(parentBeaconBlockRoot[:])
@@ -202,8 +213,69 @@ func TestBuilderStaleSnapshotMustNotPoisonBranchCache(t *testing.T) {
 	clearSharedBranchCache(t, m.DB)
 
 	close(gate.release)
-	_, err = getAssembledBlock(ctx, exec, payloadId)
+	junkBlock, err := getAssembledBlock(ctx, exec, payloadId)
 	require.NoError(t, err)
+	require.Len(t, junkBlock.Transactions(), 1)
 
 	require.NoError(t, insertValidateAndUfc1By1(ctx, exec, chainPack.Blocks[3:4]))
+}
+
+// someBranchKey returns a commitment branch row present in the latest state.
+func someBranchKey(t *testing.T, tx kv.TemporalTx) []byte {
+	t.Helper()
+	it, err := tx.Debug().RangeLatest(kv.CommitmentDomain, nil, nil, 1<<20)
+	require.NoError(t, err)
+	defer it.Close()
+	for it.HasNext() {
+		k, v, err := it.Next()
+		require.NoError(t, err)
+		if !bytes.Equal(k, commitment.KeyCommitmentState) && len(v) > 0 {
+			return bytes.Clone(k)
+		}
+	}
+	t.Fatal("no commitment branch row found")
+	return nil
+}
+
+// TestWithoutBranchCacheNeverTouchesSharedCache pins the WithoutBranchCache
+// contract: reads through such a SharedDomains must not read-fill the shared
+// BranchCache, while a default SharedDomains does.
+func TestWithoutBranchCacheNeverTouchesSharedCache(t *testing.T) {
+	ctx := t.Context()
+	m := execmoduletester.New(t, execmoduletester.WithChainConfig(chain.AllProtocolChanges))
+
+	signer := types.LatestSignerForChainID(m.ChainConfig.ChainID)
+	gasPrice := uint256.NewInt(m.Genesis.BaseFee().Uint64())
+	chainPack, err := blockgen.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 2, func(i int, gen *blockgen.BlockGen) {
+		txn, err := types.SignTx(types.NewTransaction(gen.TxNonce(m.Address), common.Address{0xAA, byte(i)}, uint256.NewInt(10_000), params.TxGas, gasPrice, nil), *signer, m.Key)
+		require.NoError(t, err)
+		gen.AddTx(txn)
+	})
+	require.NoError(t, err)
+	require.NoError(t, insertValidateAndUfc1By1(ctx, m.ExecModule, chainPack.Blocks))
+
+	roTx, err := m.DB.BeginTemporalRo(ctx)
+	require.NoError(t, err)
+	defer roTx.Rollback()
+
+	branchKey := someBranchKey(t, roTx)
+	bc := sharedBranchCache(t, roTx)
+
+	readBranch := func(opts ...execctx.SharedDomainOption) {
+		sd, err := execctx.NewSharedDomains(ctx, roTx, log.New(), opts...)
+		require.NoError(t, err)
+		defer sd.Close()
+		v, _, err := sd.GetLatest(kv.CommitmentDomain, roTx, branchKey)
+		require.NoError(t, err)
+		require.NotEmpty(t, v)
+	}
+
+	bc.Clear()
+	readBranch(execctx.WithoutBranchCache())
+	_, _, ok := bc.Get(branchKey)
+	require.False(t, ok, "detached SharedDomains read-filled the shared BranchCache")
+
+	readBranch()
+	_, _, ok = bc.Get(branchKey)
+	require.True(t, ok, "default SharedDomains should read-fill the shared BranchCache")
 }

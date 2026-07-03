@@ -200,11 +200,11 @@ func NewSharedDomains(ctx context.Context, tx kv.TemporalTx, logger log.Logger, 
 	// aggregator). The duck-typed BranchCacheProvider lookup avoids
 	// importing db/state directly — db/state already imports execctx, so
 	// the reverse import would create a cycle.
-	var branchCache *commitment.BranchCache
-	if p, ok := tx.AggTx().(commitment.BranchCacheProvider); ok {
-		branchCache = p.BranchCache()
+	if !o.noBranchCache {
+		if p, ok := tx.AggTx().(commitment.BranchCacheProvider); ok {
+			sd.branchCache = p.BranchCache()
+		}
 	}
-	sd.branchCache = branchCache
 	if p, ok := tx.AggTx().(kvmetrics.MetricsCollectorProvider); ok {
 		sd.collector = p.MetricsCollector()
 	}
@@ -1018,19 +1018,6 @@ func (sd *SharedDomains) ClearBranchCache() {
 	if sd.branchCache != nil {
 		sd.branchCache.Clear()
 	}
-}
-
-// DetachBranchCache makes this SharedDomains ignore the aggregator-scope
-// BranchCache: commitment branch reads go straight to sd.mem/overlay/MDBX and
-// no read populates the shared cache. Required for SDs whose read snapshot can
-// diverge from the canonical head — notably the payload builder, which runs
-// concurrently with head progression: sharing the cache would let it read
-// branches newer than its snapshot and pollute the cache with stale
-// read-fills. Only sd.branchCache (the read/populate path, domain_shared
-// GetLatest) is consulted, so nil-ing it fully detaches; the canonical SDs
-// keep their warm cache.
-func (sd *SharedDomains) DetachBranchCache() {
-	sd.branchCache = nil
 }
 
 // TemporalDomain satisfaction. Collects no read metrics — see
