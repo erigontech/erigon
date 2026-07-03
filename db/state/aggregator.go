@@ -107,7 +107,7 @@ type Aggregator struct {
 	// openTxs=1). Exposed via CommitGate() for use by any component.
 	commitGate sync.RWMutex
 
-	wg closingWaitGroup // goroutines spawned by Aggregator, to ensure all of them are finish at agg.Close
+	wg closingWaitGroup // goroutines spawned by Aggregator, to ensure all of them are finished at agg.Close
 
 	// metricsCollector is the process-level KV-read metrics aggregate. Every read
 	// path (exec, commitment, warmup, RPC, engine) hands its finished per-worker
