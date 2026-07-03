@@ -120,7 +120,19 @@ func NewBranchCache(tailCapacity int) *BranchCache {
 	if tailCapacity <= 0 {
 		panic(fmt.Sprintf("BranchCache: tailCapacity must be positive, got %d", tailCapacity))
 	}
-	tail, err := maphash.NewShardedLRU[*branchCacheEntry](tailCapacity, branchCacheTailShards)
+	// Ensure each shard holds at least 2 entries so capacity-1 shards never
+	// evict valid entries that arrive in the same shard. branchCacheTailShards
+	// is sized for production (50k+ entries); small capacities (e.g. unit tests)
+	// must use fewer shards to avoid single-slot shards that cause spurious LRU
+	// eviction and intermittent test failures.
+	shards := branchCacheTailShards
+	if maxShards := tailCapacity / 2; maxShards < shards {
+		shards = maxShards
+	}
+	if shards < 1 {
+		shards = 1
+	}
+	tail, err := maphash.NewShardedLRU[*branchCacheEntry](tailCapacity, shards)
 	if err != nil {
 		panic(fmt.Sprintf("BranchCache: NewShardedLRU: %s", err))
 	}
