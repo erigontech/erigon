@@ -1,11 +1,13 @@
-// uint16-text SAIS path: the top level operates on a []uint16 text (alphabet
-// up to textMax), halving text memory bandwidth in the hot induce loops versus
-// the int32 path. Recursion on the reduced string still uses the int32 funcs.
+// uint16-text SAIS path: the top level operates on a []uint16 text (alphabet up to textMax),
+// halving text memory bandwidth in the hot induce loops versus the int32 path. Recursion on the
+// reduced string still uses the int32 funcs.
 //
-// Mirrors sais_32 in sais_inner.go; only the text element type differs.
-
-package sais
-
+// Copied from Go stdlib index/suffixarray (Go 1.24), adapted for uint16 text and mirroring sais_32
+// in sais_inner.go.
+//
+// Copyright 2019 The Go Authors. All rights reserved.
+// Use of this source code is governed by a BSD-style
+// license that can be found in the LICENSE file.
 func sais_16_32(text []uint16, textMax int, sa, tmp []int32) {
 	if len(sa) != len(text) || len(tmp) < textMax {
 		panic("sais: misuse of sais_16_32")
