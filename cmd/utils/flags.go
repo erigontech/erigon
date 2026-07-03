@@ -1117,6 +1117,10 @@ var (
 		Usage:   "Enables blazing fast eth_getProof for executed block",
 		Aliases: []string{"experimental.commitment-history", "prune.experimental.include-commitment-history"},
 	}
+	CommitmentHistoryDistanceFlag = cli.Uint64Flag{
+		Name:  "prune.commitment-history.distance",
+		Usage: "Keep commitment history only for the latest N blocks. Older snapshots are skipped at download time. 0 (default) keeps everything. Requires --prune.include-commitment-history.",
+	}
 	AlwaysGenerateChangesetsFlag = cli.BoolFlag{
 		Name:  "experimental.always-generate-changesets",
 		Usage: "Allows to override changesets generation logic",
@@ -1154,6 +1158,11 @@ var (
 	ErigondbDomainStepsInFrozenFileFlag = cli.StringFlag{
 		Name:  "erigondb.domain.steps-in-frozen-file",
 		Usage: `Override erigondb.toml "steps_in_frozen_file" for the domain merge cap only (history/inverted-index merges are unaffected). Pass a positive integer to set an explicit cap, or "Inf" to leave the domain merge unbounded. Default: unset, meaning the domain uses the same cap as determined by erigondb.toml.`,
+	}
+	CommitmentPlainValuesFlag = cli.BoolFlag{
+		Name:  "commitment.plainValues",
+		Usage: "On first start of a fresh datadir, write commitment values as plain (no shortened key references). Ignored if erigondb.toml already exists.",
+		Value: false,
 	}
 	ExecBatchedIOFlag = cli.BoolFlag{
 		Name:  "exec.batched-io",
@@ -1896,6 +1905,9 @@ func SetEthConfig(ctx *cli.Context, nodeConfig *nodecfg.Config, cfg *ethconfig.C
 	if ctx.Bool(KeepExecutionProofsFlag.Name) {
 		cfg.KeepExecutionProofs = true
 	}
+	if ctx.IsSet(CommitmentHistoryDistanceFlag.Name) && !cfg.KeepExecutionProofs {
+		Fatalf("--%s requires --%s", CommitmentHistoryDistanceFlag.Name, KeepExecutionProofsFlag.Name)
+	}
 
 	if ctx.IsSet(AlwaysGenerateChangesetsFlag.Name) {
 		cfg.AlwaysGenerateChangesets = ctx.Bool(AlwaysGenerateChangesetsFlag.Name)
@@ -2132,6 +2144,17 @@ func SetEthConfig(ctx *cli.Context, nodeConfig *nodecfg.Config, cfg *ethconfig.C
 		}
 		cfg.ErigondbDomainStepsInFrozenFile = &v
 	}
+	cfg.CommitmentPlainValues = CommitmentPlainValuesFromCtx(ctx)
+}
+
+// CommitmentPlainValuesFromCtx returns the parsed --commitment.plainValues override:
+// nil when the flag was not set, otherwise a pointer to its boolean value.
+func CommitmentPlainValuesFromCtx(ctx *cli.Context) *bool {
+	if !ctx.IsSet(CommitmentPlainValuesFlag.Name) {
+		return nil
+	}
+	v := ctx.Bool(CommitmentPlainValuesFlag.Name)
+	return &v
 }
 
 // setDevnetEthConfig configures PoS dev mode (--chain dev): embedded Caplin with

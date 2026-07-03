@@ -23,6 +23,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/c2h5oh/datasize"
@@ -148,6 +149,30 @@ func testDbAndAggregatorv3(tb testing.TB, stepSize uint64) (kv.RwDB, *Aggregator
 	err := agg.OpenFolder()
 	require.NoError(tb, err)
 	return db, agg
+}
+
+// TestReferencesInCommitmentBranchesConcurrent exercises the lock guarding the runtime-mutable
+// commitment flag against the reload-writes-while-merge-reads race; meaningful under -race.
+func TestReferencesInCommitmentBranchesConcurrent(t *testing.T) {
+	t.Parallel()
+	_, agg := testDbAndAggregatorv3(t, 1)
+
+	const iters = 2000
+	var wg sync.WaitGroup
+	wg.Add(2)
+	go func() {
+		defer wg.Done()
+		for i := 0; i < iters; i++ {
+			agg.applyReferencesInCommitmentBranches(i%2 == 0)
+		}
+	}()
+	go func() {
+		defer wg.Done()
+		for i := 0; i < iters; i++ {
+			_ = agg.referencesInCommitmentBranches()
+		}
+	}()
+	wg.Wait()
 }
 
 // generate test data for table tests, containing n; n < 20 keys of length 20 bytes and values of length <= 16 bytes
@@ -600,7 +625,7 @@ func TestAggregator_CommitmentHistoryOnlyMerge(t *testing.T) {
 	// v2.0-storage.0-0.kv was not found".
 	stepSize := uint64(10)
 	_, agg := testDbAndAggregatorv3(t, stepSize)
-	agg.ForTestReplaceKeysInValues(kv.CommitmentDomain, true)
+	agg.ForTestReferencesInCommitmentBranches(kv.CommitmentDomain, true)
 	dirs := agg.Dirs()
 
 	// Accounts/storage/code: all files merged {0,2}, no further merge needed.
@@ -631,6 +656,113 @@ func TestAggregator_CommitmentHistoryOnlyMerge(t *testing.T) {
 		assert.NotContains(t, err.Error(), "failed to create commitment value transformer",
 			"transformer must not be called when values.needMerge=false")
 	}
+}
+
+// TestCommitmentMergeInputsReferenced covers the resolved-inputs predicate that gates merge
+// transformer creation. With the write flag off, this predicate alone decides whether the merge
+// expands referenced inputs (creating the transformer) or takes the plain fast path (no transformer).
+func TestCommitmentMergeInputsReferenced(t *testing.T) {
+	t.Parallel()
+	const stepSize = uint64(10)
+	fi := func(fromStep, toStep uint64, v version.Version) *FilesItem {
+		return &FilesItem{startTxNum: fromStep * stepSize, endTxNum: toStep * stepSize, version: v}
+	}
+	cases := []struct {
+		name   string
+		inputs []*FilesItem
+		want   bool
+	}{
+		{"v2.0 at threshold is referenced", []*FilesItem{fi(0, 2, version.V2_0)}, true},
+		{"v1.0 at threshold is referenced", []*FilesItem{fi(0, 2, version.V1_0)}, true},
+		{"v2.1 at threshold is referenced", []*FilesItem{fi(0, 2, version.V2_1)}, true},
+		{"v2.0 below threshold is plain", []*FilesItem{fi(0, 1, version.V2_0)}, false},
+		{"v2.2 is plain", []*FilesItem{fi(0, 2, version.V2_2)}, false},
+		{"empty inputs", nil, false},
+		{"nil entries skipped", []*FilesItem{nil}, false},
+		{"any referenced input wins", []*FilesItem{fi(0, 2, version.V2_1), fi(2, 4, version.V2_0)}, true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			require.Equal(t, tc.want, commitmentMergeInputsReferenced(tc.inputs, stepSize))
+		})
+	}
+}
+
+// TestCommitmentMergeNeedsTransform covers the barrier gate: the commitment merge blocks on the
+// account/storage merges only when it needs the merged files — to expand referenced inputs or to
+// re-shorten the output. Plain inputs merged without re-shortening (flag off, or flag on below
+// threshold) need neither and must not block.
+func TestCommitmentMergeNeedsTransform(t *testing.T) {
+	t.Parallel()
+	const stepSize = uint64(10)
+	in := func(v version.Version) []*FilesItem {
+		return []*FilesItem{{startTxNum: 0, endTxNum: 2 * stepSize, version: v}}
+	}
+	const fromAbove, toAbove = uint64(0), uint64(20) // 2 steps -> threshold reached
+	const fromBelow, toBelow = uint64(0), uint64(10) // 1 step  -> below threshold
+	cases := []struct {
+		name        string
+		inputs      []*FilesItem
+		refsEnabled bool
+		from, to    uint64
+		want        bool
+	}{
+		{"plain inputs, flag off -> no transform, no block", in(version.V2_2), false, fromAbove, toAbove, false},
+		{"plain inputs, flag on, below threshold -> no transform, no block", in(version.V2_2), true, fromBelow, toBelow, false},
+		{"plain inputs, flag on, at threshold -> reshorten, block", in(version.V2_2), true, fromAbove, toAbove, true},
+		{"referenced input, flag off -> expand, block", in(version.V2_0), false, fromAbove, toAbove, true},
+		{"referenced input, flag on -> block", in(version.V2_0), true, fromAbove, toAbove, true},
+		{"no inputs -> no transform", nil, true, fromBelow, toBelow, false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			require.Equal(t, tc.want, commitmentMergeNeedsTransform(tc.inputs, tc.refsEnabled, stepSize, tc.from, tc.to))
+		})
+	}
+}
+
+// TestCommitmentVisibleFilesReferenced covers the planning-time over-approximation that gates the
+// range-alignment hold. It reads each file's version through the visible-files layer and must
+// report referencing independently of the live write flag (set off here on purpose).
+func TestCommitmentVisibleFilesReferenced(t *testing.T) {
+	check := func(t *testing.T, ver version.Version, want bool) {
+		t.Helper()
+		stepSize := uint64(10)
+		_, agg := testDbAndAggregatorv3(t, stepSize)
+		agg.ForTestReferencesInCommitmentBranches(kv.CommitmentDomain, false)
+		dirs := agg.Dirs()
+		ranges := []testFileRange{{0, 2}}
+		generateAccountsFile(t, dirs, ranges)
+		generateStorageFile(t, dirs, ranges)
+		generateCodeFile(t, dirs, ranges)
+		generateCommitmentFile(t, dirs, ranges)
+		require.NoError(t, agg.OpenFolder())
+
+		// Drive the verdict by version+range: set the version directly on the dirty FilesItem
+		// (visibleFile.Version reads it live through src), independent of the generated file name.
+		var found int
+		agg.d[kv.CommitmentDomain].dirtyFiles.Scan(func(it *FilesItem) bool {
+			it.version = ver
+			found++
+			return true
+		})
+		require.Positive(t, found, "setup must produce a dirty commitment file")
+
+		aggTx := agg.BeginFilesRo()
+		got := aggTx.commitmentVisibleFilesReferenced()
+		aggTx.Close()
+		require.Equal(t, want, got)
+	}
+
+	t.Run("v2.0 at-threshold file reports referencing with flag off", func(t *testing.T) {
+		check(t, version.V2_0, true)
+	})
+	t.Run("v2.1 at-threshold file reports referencing with flag off", func(t *testing.T) {
+		check(t, version.V2_1, true)
+	})
+	t.Run("v2.2 file does not report referencing", func(t *testing.T) {
+		check(t, version.V2_2, false)
+	})
 }
 
 func setupAggSnapRepo(t *testing.T, dirs datadir.Dirs, genRepo func(stepSize uint64, dirs datadir.Dirs) (name string, schema SnapNameSchema)) *SnapshotRepo {

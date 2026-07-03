@@ -118,3 +118,25 @@ func TestCodeCache_ConcurrentDistinctPuts_RespectCap(t *testing.T) {
 	require.GreaterOrEqual(t, cc.codeHashCodeSize.Load(), int64(0),
 		"codeHashToCode size must stay non-negative (no double back-out)")
 }
+
+// Same atomicity requirement for the addr→code binding: a concurrent
+// authoritative Put must win over a conditional prefetch put in every
+// interleaving.
+func TestCodeCache_PutIfAbsentAtomicWithPut(t *testing.T) {
+	cc := NewCodeCache(64*datasize.MB, 16*datasize.MB)
+	addr := make([]byte, 20)
+	addr[0] = 0xcd
+	fresh := []byte{0xaa, 1, 2, 3}
+	stale := []byte{0xbb, 4, 5, 6}
+	for round := 0; round < 20000; round++ {
+		cc.Delete(addr)
+		var wg sync.WaitGroup
+		wg.Add(2)
+		go func() { defer wg.Done(); cc.Put(addr, fresh, 20) }()
+		go func() { defer wg.Done(); cc.PutIfAbsent(addr, stale, 10) }()
+		wg.Wait()
+		v, ok := cc.Get(addr)
+		require.True(t, ok)
+		require.Equal(t, fresh, v, "round %d: PutIfAbsent raced past a concurrent Put", round)
+	}
+}

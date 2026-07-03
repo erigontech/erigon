@@ -179,6 +179,12 @@ func (e *ExecModule) updateForkChoice(ctx context.Context, originalBlockHash, sa
 	})
 	defer cleanupBeforeSemaRelease()
 
+	// Drain any warmup a preceding newPayload spawned: its Puts reflect a
+	// pre-FCU snapshot and must land before this FCU's unwind epoch-bump and
+	// flush cache-apply, not after them (no new warmup starts while we hold
+	// the semaphore).
+	e.drainReadAhead()
+
 	var validationError string
 	type canonicalEntry struct {
 		hash   common.Hash
@@ -410,9 +416,6 @@ func (e *ExecModule) updateForkChoice(ctx context.Context, originalBlockHash, sa
 				}, false)
 			}
 
-			// Drain in-flight warmup before the unwind bumps the cache epoch
-			// (cross-fork contamination — see drainReadAhead).
-			e.drainReadAhead()
 			if err := e.pipelineExecutor.UnwindTo(unwindTarget, stagedsync.ForkChoice, tx); err != nil {
 				return sendForkchoiceErrorWithoutWaiting(e.logger, outcomeCh, err, false)
 			}

@@ -277,7 +277,7 @@ func loadEngineXGroups(path string, re *regexp.Regexp) (map[engineXGroupKey][]en
 // isUnderPreAlloc reports whether any directory component of p is named
 // "pre_alloc" — those are pre-allocation inputs, not test fixtures.
 func isUnderPreAlloc(p string) bool {
-	for _, c := range strings.Split(filepath.ToSlash(p), "/") {
+	for c := range strings.SplitSeq(filepath.ToSlash(p), "/") {
 		if c == "pre_alloc" {
 			return true
 		}
