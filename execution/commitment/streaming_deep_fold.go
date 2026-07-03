@@ -20,6 +20,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"math/bits"
 	"sync"
 
@@ -130,6 +131,19 @@ func foldStorageRoot(ctx context.Context, numWorkers int, newWorker func() (*Hex
 
 	base, releaseBase := newWorker()
 	defer releaseBase()
+
+	// Tag this account's storage-fold workers with its address so one account's
+	// fold can be grepped out of the interleaved parallel trace. Only paid for
+	// when tracing is on (base.traceW mirrors every worker's trace state).
+	var accTag string
+	if base.traceW != nil {
+		accID := node.plainKey
+		if accID == nil {
+			accID = accPrefix
+		}
+		accTag = fmt.Sprintf("[%x] ", accID)
+		base.SetTraceWriter(tracePrefix(base.traceW, accTag))
+	}
 	if err := unfoldStorageBase(base, accPrefix); err != nil {
 		return common.Hash{}, fmt.Errorf("unfold storage root: %w", err)
 	}
@@ -152,6 +166,9 @@ func foldStorageRoot(ctx context.Context, numWorkers int, newWorker func() (*Hex
 				return err
 			}
 			w, release := newWorker()
+			if w.traceW != nil {
+				w.SetTraceWriter(tracePrefix(w.traceW, accTag))
+			}
 			c, err := foldStorageLeaf(gctx, w, base, ni, group)
 			if err == nil {
 				if d := w.TakeDeferredUpdates(); len(d) > 0 {
@@ -251,11 +268,11 @@ func storageRootFromSingleChild(base *HexPatriciaHashed) (cell, error) {
 
 // newDeferredStorageWorker yields a pooled trie worker for a deferring storage fold
 // and a release that returns it to the pool and frees its context.
-func newDeferredStorageWorker(pool *sync.Pool, factory TrieContextFactory, trace bool) (*HexPatriciaHashed, func()) {
+func newDeferredStorageWorker(pool *sync.Pool, factory TrieContextFactory, traceW io.Writer) (*HexPatriciaHashed, func()) {
 	w := pool.Get().(*HexPatriciaHashed)
 	wctx, cleanup := factory()
 	w.ResetContext(wctx)
-	w.SetTrace(trace)
+	w.SetTraceWriter(traceW)
 	w.branchEncoder.setDeferUpdates(true)
 	w.SetLeaveDeferredForCaller(true)
 	return w, func() {

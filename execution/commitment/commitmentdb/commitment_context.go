@@ -7,6 +7,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"io"
 	"runtime"
 	"sync"
 	"sync/atomic"
@@ -43,9 +44,6 @@ type sd interface {
 	// read), tagged with source.
 	MergeMetrics(source kvmetrics.Source, wm *kvmetrics.DomainMetrics)
 	StepSize() uint64
-	Trace() bool
-	CommitmentCapture() bool
-
 	// ProbeReadLayers samples sd.mem, parent.mem and tx-direct (MDBX) for one
 	// key — BranchCache divergence-detection probe. Read-only.
 	ProbeReadLayers(domain kv.Domain, tx kv.TemporalTx, key []byte) (mem, parentMem, mdbx []byte, memOk, parentOk bool)
@@ -64,7 +62,7 @@ type SharedDomainsCommitmentContext struct {
 	patriciaTrie  commitment.Trie
 	variant       commitment.TrieVariant // selected trie engine, for the [commitment] log (updates.Mode() is ModeParallel for both parallel and streaming)
 	justRestored  atomic.Bool            // set to true when commitment trie was just restored from snapshot
-	trace         bool
+	traceW        io.Writer
 	stateReader   StateReader
 	paraTrieDB    kv.TemporalRoDB // DB used for para trie and/or parallel trie warmup
 	// warmupBase holds the construction-time portion of the per-call WarmupConfig.
@@ -170,14 +168,11 @@ func (sdc *SharedDomainsCommitmentContext) SetCustomHistoryStateReader(stateRead
 	sdc.SetStateReader(stateReader)
 }
 
-func (sdc *SharedDomainsCommitmentContext) SetTrace(trace bool) {
-	sdc.trace = trace
-	sdc.patriciaTrie.SetTrace(trace)
-}
-
-// SetCapture enables/disables trie operation capture for diagnosis.
-func (sdc *SharedDomainsCommitmentContext) SetCapture(capture []string) {
-	sdc.patriciaTrie.SetCapture(capture)
+func (sdc *SharedDomainsCommitmentContext) SetTraceWriter(w io.Writer) {
+	// Wrap once so the main and per-worker TrieContexts share one mutex-guarded
+	// writer: concurrent workers trace branch reads/writes without racing.
+	sdc.traceW = commitment.NewSyncWriter(w)
+	sdc.patriciaTrie.SetTraceWriter(sdc.traceW)
 }
 
 // GetUpdates returns the current updates buffer. Used by the commitment
@@ -225,6 +220,7 @@ func (sdc *SharedDomainsCommitmentContext) trieContext(tx kv.TemporalTx, blockNu
 		stepSize: sdc.sharedDomains.StepSize(),
 		txNum:    txNum,
 		blockNum: blockNum,
+		traceW:   sdc.traceW,
 	}
 	if sdc.stateReader != nil {
 		mainTtx.stateReader = sdc.stateReader.CloneForWorker(readCtx, tx)
@@ -244,10 +240,6 @@ func (sdc *SharedDomainsCommitmentContext) Reset() {
 	if !sdc.justRestored.Load() {
 		sdc.patriciaTrie.Reset()
 	}
-}
-
-func (sdc *SharedDomainsCommitmentContext) GetCapture(truncate bool) []string {
-	return sdc.patriciaTrie.GetCapture(truncate)
 }
 
 func (sdc *SharedDomainsCommitmentContext) ClearRam() {
@@ -421,20 +413,16 @@ func (sdc *SharedDomainsCommitmentContext) ComputeCommitment(ctx context.Context
 		}
 		log.Debug("[commitment] processed", "block", blockNum, "txNum", txNum, "keys", common.PrettyCounter(updateCount), "keys/s", common.PrettyCounter(keysPerSec), "mode", sdc.variant, "bufmode", sdc.updates.Mode(), "spent", took, "rootHash", hex.EncodeToString(rootHash))
 	}()
+	// Re-apply the trace writer before any trie operations (including the early-return
+	// RootHash below); GenerateWitness clears it, so it must be restored on each call.
+	sdc.patriciaTrie.SetTraceWriter(sdc.traceW)
+
 	if updateCount == 0 {
 		rootHash, err = sdc.patriciaTrie.RootHash()
 		return rootHash, err
 	}
 
 	// data accessing functions should be set when domain is opened/shared context updated
-
-	sdc.patriciaTrie.SetTrace(sdc.trace)
-	sdc.patriciaTrie.SetTraceDomain(sdc.sharedDomains.Trace())
-	if sdc.sharedDomains.CommitmentCapture() {
-		if sdc.patriciaTrie.GetCapture(false) == nil {
-			sdc.patriciaTrie.SetCapture([]string{})
-		}
-	}
 
 	// Per-ComputeCommitment metrics accumulator for the main (root-fold) reads.
 	// The fold is single-goroutine, so this lock-free accumulator is owned
@@ -626,6 +614,7 @@ func (sdc *SharedDomainsCommitmentContext) trieContextFactory(ctx context.Contex
 			putter:   sdc.sharedDomains.AsPutDel(roTx),
 			stepSize: stepSize,
 			txNum:    txNum,
+			traceW:   sdc.traceW,
 		}
 		if sdc.stateReader != nil {
 			warmupCtx.stateReader = sdc.stateReader.CloneForWorker(workerCtx, roTx)
@@ -672,6 +661,7 @@ func (sdc *SharedDomainsCommitmentContext) concurrentTrieContextFactory(ctx cont
 			stepSize:       stepSize,
 			txNum:          txNum,
 			localCollector: collector,
+			traceW:         sdc.traceW,
 		}
 		if sdc.stateReader != nil {
 			warmupCtx.stateReader = sdc.stateReader.CloneForWorker(workerCtx, roTx)
@@ -887,7 +877,7 @@ func (sdc *SharedDomainsCommitmentContext) restorePatriciaState(value []byte) (u
 		return 0, 0, fmt.Errorf("failed restore state : %w", err)
 	}
 	sdc.justRestored.Store(true) // to prevent double reset
-	if sdc.trace {
+	if sdc.traceW != nil {
 		rootHash, err := hext.RootHash()
 		if err != nil {
 			return 0, 0, fmt.Errorf("failed to get root hash after state restore: %w", err)
@@ -904,7 +894,7 @@ type TrieContext struct {
 	blockNum uint64
 
 	stepSize       uint64
-	trace          bool
+	traceW         io.Writer // nil = disabled; traces branch reads/writes (see [SDC] lines)
 	stateReader    StateReader
 	localCollector *etl.Collector // per-goroutine collector for concurrent PutBranch
 }
@@ -925,6 +915,9 @@ func (sdc *TrieContext) Branch(pref []byte) ([]byte, kv.Step, error) {
 	// underlying state cache / getter aliases shared storage that another goroutine
 	// (concurrent commitment workers) can recycle. Own the bytes at the trie-context
 	// boundary so all downstream consumers are safe.
+	if sdc.traceW != nil {
+		fmt.Fprintf(sdc.traceW, "[SDC] Branch read %x => %x\n", pref, enc)
+	}
 	return common.Copy(enc), step, nil
 }
 
@@ -932,8 +925,8 @@ func (sdc *TrieContext) PutBranch(prefix []byte, data []byte, prevData []byte) e
 	if sdc.stateReader.WithHistory() { // do not store branches if explicitly operate on history
 		return nil
 	}
-	if sdc.trace {
-		fmt.Printf("[SDC] PutBranch: %x: %x\n", prefix, data)
+	if sdc.traceW != nil {
+		fmt.Fprintf(sdc.traceW, "[SDC] PutBranch %x: %x\n", prefix, data)
 	}
 	if sdc.localCollector != nil {
 		return sdc.localCollector.Collect(prefix, data)

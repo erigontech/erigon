@@ -81,7 +81,7 @@ func Test_WitnessTracer_CapturedNodesReconstructRoot(t *testing.T) {
 	ctx := context.Background()
 	ms := NewMockState(t)
 	hph := NewHexPatriciaHashed(length.Addr, ms, DefaultTrieConfig())
-	hph.SetTrace(false)
+	hph.SetTraceWriter(nil)
 	hph.memoizationOff = true
 
 	builder := NewUpdateBuilder()
