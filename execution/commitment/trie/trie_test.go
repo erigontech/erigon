@@ -726,3 +726,29 @@ func TestWitnessPruneOmitsInlinedNodes(t *testing.T) {
 	}
 	require.Equal(t, set(fromTrie), set(fromNodes), "byHash and RLPDecode prune must agree")
 }
+
+// The trie root is force-hashed (Trie.Hash) and referenced by that hash even when its
+// own RLP is <32B, so both prune paths must keep it despite the inline-node filter.
+func TestWitnessPruneKeepsSmallRoot(t *testing.T) {
+	leaf := &ShortNode{Key: []byte{1, 2, 3, 4, 5, 16}, Val: ValueNode([]byte{0x2a})}
+
+	hasher := newHasher(false)
+	rootRLP, err := hasher.hashChildren(leaf, 0)
+	returnHasherToPool(hasher)
+	require.NoError(t, err)
+	require.Less(t, len(rootRLP), 32, "test needs a <32B root")
+
+	provedKeys := [][]byte{{1, 2, 3, 4, 5}}
+
+	tr := New(common.Hash{})
+	tr.RootNode = leaf
+	fromTrie, err := tr.WitnessNodesForKeys(provedKeys)
+	require.NoError(t, err)
+	require.Len(t, fromTrie, 1)
+	require.Equal(t, rootRLP, []byte(fromTrie[0]))
+
+	fromNodes, err := WitnessNodesForKeysFromNodes([][]byte{rootRLP}, provedKeys)
+	require.NoError(t, err)
+	require.Len(t, fromNodes, 1)
+	require.Equal(t, rootRLP, []byte(fromNodes[0]))
+}
