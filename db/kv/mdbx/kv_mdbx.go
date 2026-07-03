@@ -1255,7 +1255,7 @@ func (tx *MdbxTx) Commit() error {
 	if tx.db.opts.metrics {
 		dbLabel := tx.db.opts.label
 		if latency.Sync > 0 {
-			log.Warn("[dbg] latency.Sync > 0", "sync", latency.Sync)
+			log.Warn("[dbg] latency.Sync > 0", "sync", latency.Sync, "db", tx.db.opts.label)
 		}
 		err = RecordSummaries(dbLabel, latency)
 		if err != nil {
