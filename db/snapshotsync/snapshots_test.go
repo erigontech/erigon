@@ -20,6 +20,7 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
+	"sync"
 	"testing"
 	"testing/fstest"
 
@@ -980,12 +981,11 @@ func TestViewPinsGeneration(t *testing.T) {
 	require.Same(oldSrc1, pinned[1].src)
 }
 
-// TestCloseWhatNotInListVsLiveViewDoesNotCrash verifies that closeWhatNotInList
-// does not close a segment that a live View still holds a refcount on. After a
-// merge, integrateMergedDirtyFiles marks old sub-segments canDelete=true and
-// removes them from dirty. A concurrent OpenFolder then calls closeWhatNotInList
-// on those same segments — without the refcount guard (PR #21545), it would nil
-// the decompressor while the View still uses it, causing a panic on View.Close.
+// TestCloseWhatNotInListVsLiveViewDoesNotCrash verifies that a reopen which drops
+// segments a live View still holds does not close them out from under the reader.
+// A covering [0,10000) segment lands on disk and OpenFolder's closeWhatNotInList
+// drops the subsumed 1k sub-segments; because a View still pins that generation,
+// their descriptors are released only once the View drains, so Close must not crash.
 func TestCloseWhatNotInListVsLiveViewDoesNotCrash(t *testing.T) {
 	if testing.Short() {
 		t.Skip()
@@ -1014,33 +1014,150 @@ func TestCloseWhatNotInListVsLiveViewDoesNotCrash(t *testing.T) {
 	// A live reader holds the sub-segments (refcount +1), as a merge's View does.
 	v := s.View()
 
-	// Simulate the merge result: a covering [0,10000) segment lands on disk, and
-	// the now-subsumed 1k sub-segments are marked deletable (integrateMergedDirtyFiles).
+	// A covering [0,10000) segment lands on disk, subsuming the 1k sub-segments.
 	for i, snT := range snaptype2.BlockSnapshotTypes {
 		createTestSegmentFile(t, 0, 10_000, snT.Enum(), dir, verOf(i), logger)
 	}
-	for _, t2 := range s.enums {
-		s.dirty[t2].Walk(func(segs []*DirtySegment) bool {
-			for _, sn := range segs {
-				if sn.To()-sn.From() == 1_000 {
-					sn.canDelete.Store(true)
-				}
-			}
-			return true
-		})
-	}
 
 	// Reopen: NoOverlaps drops the subsumed sub-segments from the list, so
-	// closeWhatNotInList would close them out from under the live View.
+	// closeWhatNotInList retires them while the live View still pins them.
 	require.NoError(s.OpenFolder())
 
 	// Closing the View must not crash.
 	defer func() {
 		if r := recover(); r != nil {
-			t.Fatalf("View.Close crashed (use-after-close of a refcount-held segment): %v", r)
+			t.Fatalf("View.Close crashed (use-after-close of a live-held segment): %v", r)
 		}
 	}()
 	v.Close()
+}
+
+// TestRoSnapshots_BundleRefcountReclamation pins the lock-free reclamation model:
+// a reader pins the whole visible bundle with a single refcount (not per file),
+// and a file retired while a reader is live survives until that reader drains,
+// then is physically removed and the generation chain collapses.
+func TestRoSnapshots_BundleRefcountReclamation(t *testing.T) {
+	if testing.Short() {
+		t.Skip()
+	}
+	logger := log.New()
+	dir, require := t.TempDir(), require.New(t)
+
+	// Ten 1k sub-segments per type covering [0, 10000) — small, non-frozen files.
+	for from := uint64(0); from < 10_000; from += 1_000 {
+		for _, snT := range snaptype2.BlockSnapshotTypes {
+			createTestSegmentFile(t, from, from+1_000, snT.Enum(), dir, version.V1_0, logger)
+		}
+	}
+
+	s := NewRoSnapshots(ethconfig.BlocksFreezing{ChainName: networkname.Mainnet}, dir, snaptype2.BlockSnapshotTypes, true, logger)
+	defer s.Close()
+	require.NoError(s.OpenFolder())
+
+	// A reader pins the bundle exactly once, and never touches per-file refcounts.
+	v := s.View()
+	require.Equal(int32(1), s.visible.Load().refcnt.Load())
+	s.dirty[snaptype2.Headers.Enum()].Walk(func(segs []*DirtySegment) bool {
+		for _, sn := range segs {
+			require.Zero(sn.refcount.Load(), "bundle reader must not pin files individually")
+		}
+		return true
+	})
+
+	// Pick the last visible (non-frozen) Headers file.
+	headers := v.Segments(snaptype2.Headers)
+	require.NotEmpty(headers)
+	victim := headers[len(headers)-1].src
+	require.False(victim.frozen)
+	victimPath := victim.FilePath()
+	require.FileExists(victimPath)
+
+	// Retire it while the reader is live: an older generation still references
+	// it, so the file survives and the chain no longer collapses to one node.
+	require.NoError(s.Delete(victim.FileName()))
+	require.FileExists(victimPath)
+	require.NotEqual(s.visible.Load(), s.oldestVisible, "retired generation still pinned by live reader")
+
+	// Last reader drains → reclaim removes the file and the chain collapses.
+	v.Close()
+	require.NoFileExists(victimPath)
+	require.Equal(s.visible.Load(), s.oldestVisible, "chain must collapse to a single node once drained")
+}
+
+// TestRoTxClose_ReleasesPinWhenTypeEmpty guards against RoTx.Close leaking the
+// generation pin when the requested type has no visible slice. Such a RoTx has a
+// nil Segments slice, and Close must still release the pin (keyed off the pin,
+// not Segments) — otherwise the generation never drains and reclamation wedges.
+func TestRoTxClose_ReleasesPinWhenTypeEmpty(t *testing.T) {
+	logger := log.New()
+	require := require.New(t)
+	dir := t.TempDir()
+
+	// Configure only Headers, then query Bodies: a valid enum with no visible slice.
+	s := NewRoSnapshots(ethconfig.BlocksFreezing{ChainName: networkname.Mainnet}, dir, []snaptype.Type{snaptype2.Headers}, true, logger)
+	defer s.Close()
+	require.Nil(s.visible.Load().segments[snaptype2.Bodies.Enum()], "precondition: Bodies has no visible slice")
+
+	rt := s.ViewType(snaptype2.Bodies)
+	require.Nil(rt.Segments)
+	require.Equal(int32(1), s.visible.Load().refcnt.Load())
+	rt.Close()
+	require.Zero(s.visible.Load().refcnt.Load(), "Close must release the pin even when the type slice is nil")
+}
+
+// TestRoSnapshots_ConcurrentViewsAndRepublish stresses the pin/publish machinery
+// under -race: many readers pin and drain generations while a publisher keeps
+// republishing the visible set. It guards the Load→pin window (a reader must
+// never use a generation being reclaimed) and the generation chain (which must
+// collapse once every reader has drained).
+func TestRoSnapshots_ConcurrentViewsAndRepublish(t *testing.T) {
+	if testing.Short() {
+		t.Skip()
+	}
+	logger := log.New()
+	dir, require := t.TempDir(), require.New(t)
+
+	for from := uint64(0); from < 20_000; from += 1_000 {
+		for _, snT := range snaptype2.BlockSnapshotTypes {
+			createTestSegmentFile(t, from, from+1_000, snT.Enum(), dir, version.V1_0, logger)
+		}
+	}
+	s := NewRoSnapshots(ethconfig.BlocksFreezing{ChainName: networkname.Mainnet}, dir, snaptype2.BlockSnapshotTypes, true, logger)
+	defer s.Close()
+	require.NoError(s.OpenFolder())
+
+	const readers, iters = 8, 300
+	var wg sync.WaitGroup
+	for i := 0; i < readers; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for j := 0; j < iters; j++ {
+				v := s.View()
+				for _, seg := range v.Segments(snaptype2.Headers) {
+					if seg.Src() != nil {
+						_ = seg.Src().FilePath()
+					}
+				}
+				v.Close()
+
+				rt := s.ViewType(snaptype2.Bodies)
+				_ = len(rt.Segments)
+				rt.Close()
+			}
+		}()
+	}
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		for j := 0; j < iters; j++ {
+			s.recalcVisibleFiles(s.alignMin)
+		}
+	}()
+	wg.Wait()
+
+	require.Zero(s.visible.Load().refcnt.Load(), "no reader pins must leak")
+	require.Equal(s.visible.Load(), s.oldestVisible, "chain must collapse once all readers drain")
 }
 
 func createTestIdxFile(t *testing.T, from, to uint64, name snaptype.Enum, dir string, ver snaptype.Version, logger log.Logger) {

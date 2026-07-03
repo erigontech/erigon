@@ -265,7 +265,8 @@ func (m *Merger) Merge(
 }
 
 func (m *Merger) integrateMergedDirtyFiles(snapshots *RoSnapshots, in, out map[snaptype.Enum][]*DirtySegment) {
-	defer snapshots.recalcVisibleFiles(snapshots.alignMin)
+	var retired []retiredSegment
+	defer func() { snapshots.recalcVisibleFiles(snapshots.alignMin, retired...) }()
 
 	snapshots.dirtyLock.Lock()
 	defer snapshots.dirtyLock.Unlock()
@@ -292,7 +293,9 @@ func (m *Merger) integrateMergedDirtyFiles(snapshots *RoSnapshots, in, out map[s
 		}
 	}
 
-	// delete old sub segments
+	// delete old sub segments. `out` can list the same segment twice (a frozen
+	// merge output re-collects the sub-segments it subsumes); Delete reports
+	// existed=false the second time, so each segment is retired exactly once.
 	for enum, delSegs := range out {
 		dirtySegments := snapshots.dirty[enum]
 		inDirtySegments := in[enum]
@@ -309,8 +312,10 @@ func (m *Merger) integrateMergedDirtyFiles(snapshots *RoSnapshots, in, out map[s
 				continue
 			}
 
-			dirtySegments.Delete(delSeg)
-			delSeg.canDelete.Store(true)
+			if _, existed := dirtySegments.Delete(delSeg); !existed {
+				continue
+			}
+			retired = append(retired, retiredSegment{seg: delSeg, removeFiles: !delSeg.frozen})
 		}
 	}
 }
