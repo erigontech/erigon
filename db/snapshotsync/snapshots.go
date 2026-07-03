@@ -534,7 +534,7 @@ type VisibleFiles struct {
 	segments    []VisibleSegments // ordered map `type.Enum()` -> VisibleSegments
 	segmentsMax uint64            // max visible (indexed, non-subsumed, gap-free) segment height across all types
 
-	refcnt  atomic.Int32
+	refcnt  atomic.Int32 // reader pin count (AcquireVisible/ReleaseVisible); lock-free
 	retired []RetiredSegment
 	next    *VisibleFiles
 }
@@ -881,13 +881,14 @@ func (s *RoSnapshots) update(alignMin bool, mutate func(dirtyFiles DirtyFiles) (
 // to a published VisibleFiles generation.
 type DirtyFiles = []*btree.BTreeG[*DirtySegment]
 
-// FileSet owns a container's DirtySegments and its published visible generations,
-// under one lock. Readers pin the current generation via refcnt (read lock-free);
-// mutations to `dirtyFiles` and to the generation chain (publish/reclaim) are serialized
-// by `dirtyLock`. A publisher appends a generation and hands the outgoing one's
-// removed files to `retired`; the last reader to drain a generation reclaims them.
+// FileSet owns a container's dirty segments and its published visible generations.
+// Readers are lock-free: they pin a generation via its refcnt (a single atomic
+// add). Writers — mutations to `dirtyFiles` and the generation chain
+// (publish/reclaim) — are serialized by `dirtyLock`. A publisher appends a
+// generation and hands the outgoing one its removed files via `retired`; the last
+// reader to drain a generation reclaims them.
 type FileSet struct {
-	dirtyLock     sync.Mutex
+	dirtyLock     sync.Mutex // serializes writers (dirtyFiles + generation chain); readers never take it
 	dirtyFiles    DirtyFiles // indexed by enum (blocks) / tableIndex (caplin state)
 	visible       atomic.Pointer[VisibleFiles]
 	oldestVisible *VisibleFiles // chain head (oldest generation still pinned); guarded by dirtyLock
@@ -940,17 +941,6 @@ func (f *FileSet) reclaimRetiredLocked() (toDelete []RetiredSegment) {
 		f.oldestVisible = h.next
 	}
 	return toDelete
-}
-
-// publishLocked installs `next` as the current generation, attaches the caller's
-// removed files to the outgoing one, and returns the files now reclaimable.
-// Must be called under dirtyLock.
-func (f *FileSet) publishLocked(next *VisibleFiles, retired []RetiredSegment) []RetiredSegment {
-	old := f.visible.Load()
-	old.retired = retired
-	old.next = next
-	f.visible.Store(next)
-	return f.reclaimRetiredLocked()
 }
 
 func closeAndRemoveFiles(toDelete []RetiredSegment) {
@@ -1009,7 +999,14 @@ func (f *FileSet) Update(
 		if mutateDirtyFiles != nil {
 			retired, err = mutateDirtyFiles(f.dirtyFiles)
 		}
-		toDelete = f.publishLocked(recalcVisibleFiles(f.dirtyFiles), retired)
+		// Publish the new generation, hand the outgoing one its retired files, and
+		// collect whatever is now reclaimable.
+		next := recalcVisibleFiles(f.dirtyFiles)
+		old := f.visible.Load()
+		old.retired = retired
+		old.next = next
+		f.visible.Store(next)
+		toDelete = f.reclaimRetiredLocked()
 		return err
 	}()
 	closeAndRemoveFiles(toDelete)
@@ -1452,7 +1449,12 @@ func (s *RoSnapshots) BuildMissedIndices(ctx context.Context, logPrefix string, 
 
 	// wait for Downloader service to download all expected snapshots
 	indexWorkers := estimate.IndexSnapshot.Workers()
-	newIdxBuilt, err := s.buildMissedIndices(logPrefix, ctx, dirs, cc, indexWorkers, logger)
+	var newIdxBuilt bool
+	err := s.update(s.alignMin, func(dirtyFiles DirtyFiles) ([]RetiredSegment, error) {
+		var e error
+		newIdxBuilt, e = s.buildMissedIndices(dirtyFiles, logPrefix, ctx, dirs, cc, indexWorkers, logger)
+		return nil, e
+	})
 	if err != nil {
 		return fmt.Errorf("can't build missed indices: %w", err)
 	}
@@ -1522,7 +1524,7 @@ func (s *RoSnapshots) Delete(fileNames ...string) error {
 	})
 }
 
-func (s *RoSnapshots) buildMissedIndices(logPrefix string, ctx context.Context, dirs datadir.Dirs, chainConfig *chain.Config, workers int, logger log.Logger) (newIdxBuilt bool, err error) {
+func (s *RoSnapshots) buildMissedIndices(dirtyFiles DirtyFiles, logPrefix string, ctx context.Context, dirs datadir.Dirs, chainConfig *chain.Config, workers int, logger log.Logger) (newIdxBuilt bool, err error) {
 	if s == nil {
 		return
 	}
@@ -1564,7 +1566,7 @@ func (s *RoSnapshots) buildMissedIndices(logPrefix string, ctx context.Context, 
 	failedIndexes := make(map[string]error, 0)
 
 	for _, t := range s.enums {
-		s.dirtyFiles[t].Walk(func(segs []*DirtySegment) bool {
+		dirtyFiles[t].Walk(func(segs []*DirtySegment) bool {
 			for _, segment := range segs {
 				if segment.IsIndexed() {
 					continue
