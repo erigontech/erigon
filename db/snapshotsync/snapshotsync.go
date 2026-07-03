@@ -392,13 +392,13 @@ func SyncSnapshots(
 		}
 	} else {
 		toBlock := syncCfg.SnapshotDownloadToBlock // exclusive [0, toBlock)
-		toStep := uint64(math.MaxUint64)           // exclusive [0, toStep)
+		toStep := kv.Step(math.MaxUint64)          // exclusive [0, toStep)
 		if !headerchain && toBlock > 0 {
 			toTxNum, err := blockReader.TxnumReader().Min(ctx, tx, syncCfg.SnapshotDownloadToBlock)
 			if err != nil {
 				return err
 			}
-			toStep = toTxNum / stepSize
+			toStep = kv.Step(toTxNum / stepSize)
 			log.Debug(fmt.Sprintf("[%s] filtering", logPrefix), "toBlock", toBlock, "toStep", toStep, "toTxNum", toTxNum)
 			// we downloaded extra seg files during the header chain download (the ones containing the toBlock)
 			// so that we can correctly calculate toTxNum above (now we should delete these)
@@ -558,7 +558,7 @@ func SyncSnapshots(
 	return nil
 }
 
-func filterToBlock(name string, toBlock uint64, toStep uint64, headerchain bool) bool {
+func filterToBlock(name string, toBlock uint64, toStep kv.Step, headerchain bool) bool {
 	if toBlock == 0 {
 		return false // toBlock filtering is not enabled
 	}
@@ -573,7 +573,7 @@ func filterToBlock(name string, toBlock uint64, toStep uint64, headerchain bool)
 		return false // not applicable, caplin files are slot-based
 	}
 	if stateFile {
-		return fileInfo.To > toStep
+		return kv.Step(fileInfo.To) > toStep
 	}
 	if headerchain {
 		// if we are downloading the header chain, we want to download the seg file which contains our toBlock
