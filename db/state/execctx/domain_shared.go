@@ -1022,12 +1022,13 @@ func (sd *SharedDomains) ClearBranchCache() {
 
 // DetachBranchCache makes this SharedDomains ignore the aggregator-scope
 // BranchCache: commitment branch reads go straight to sd.mem/overlay/MDBX and
-// no read populates the shared cache. Used for fork-validation SDs, which read
-// transient fork state — sharing the canonical BranchCache let them read stale
-// committed branches (wrong trie root → INVALID payload) and pollute the cache
-// with fork-transient branches. Only sd.branchCache (the read/populate path,
-// domain_shared GetLatest) is consulted, so nil-ing it fully detaches; the
-// canonical SDs keep their warm cache.
+// no read populates the shared cache. Required for SDs whose read snapshot can
+// diverge from the canonical head — notably the payload builder, which runs
+// concurrently with head progression: sharing the cache would let it read
+// branches newer than its snapshot and pollute the cache with stale
+// read-fills. Only sd.branchCache (the read/populate path, domain_shared
+// GetLatest) is consulted, so nil-ing it fully detaches; the canonical SDs
+// keep their warm cache.
 func (sd *SharedDomains) DetachBranchCache() {
 	sd.branchCache = nil
 }

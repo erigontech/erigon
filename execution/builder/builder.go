@@ -151,6 +151,11 @@ func (b *Builder) Build(param *Parameters, interrupt *atomic.Bool) (result *type
 	}
 	defer sd.Close()
 
+	// The build runs outside the exec-module semaphore on its own read
+	// snapshot: the shared BranchCache can be ahead of that snapshot, and the
+	// build's read-fills could shadow fresher canonical entries.
+	sd.DetachBranchCache()
+
 	if parentSD != nil {
 		sd.SetParent(parentSD)
 	}
