@@ -381,7 +381,7 @@ func CheckJwtSecret(w http.ResponseWriter, r *http.Request, jwtSecret []byte) bo
 	var tokenStr string
 	// Check if JWT signature is correct
 	if auth := r.Header.Get("Authorization"); len(auth) >= 7 && strings.EqualFold(auth[:7], "bearer ") {
-		tokenStr = strings.TrimPrefix(auth, "Bearer ")
+		tokenStr = auth[7:]
 	}
 
 	if len(tokenStr) == 0 {
