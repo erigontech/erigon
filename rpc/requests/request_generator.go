@@ -259,9 +259,10 @@ func retryConnects(ctx context.Context, op func(context.Context) error) error {
 	}
 
 	err := backoff.Retry(attempt, backoff.WithContext(backoff.NewConstantBackOff(time.Second), ctx))
-	// On overall-deadline expiry, report the last dial error rather than the
-	// context error (nil if attempts only ever timed out).
-	if errors.Is(err, context.DeadlineExceeded) {
+	// On overall-deadline expiry, prefer reporting the last dial error. The
+	// ctx.Err() conjunct keeps a permanent error that merely wraps
+	// DeadlineExceeded intact.
+	if lastDialErr != nil && errors.Is(ctx.Err(), context.DeadlineExceeded) && errors.Is(err, context.DeadlineExceeded) {
 		return lastDialErr
 	}
 	return err

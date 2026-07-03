@@ -95,13 +95,22 @@ func TestRetryConnectsParentDeadlineReturnsLastDialError(t *testing.T) {
 	require.ErrorIs(t, err, dialErr)
 }
 
-func TestRetryConnectsParentDeadlineAfterOnlyTimeoutsReturnsNil(t *testing.T) {
+func TestRetryConnectsParentDeadlineAfterOnlyTimeoutsReturnsDeadlineExceeded(t *testing.T) {
 	t.Parallel()
 	ctx, cancel := context.WithTimeout(t.Context(), 1200*time.Millisecond)
 	defer cancel()
 	var attempts atomic.Int64
 	err := retryConnects(ctx, sequenceOp(&attempts, context.DeadlineExceeded))
-	require.NoError(t, err)
+	require.ErrorIs(t, err, context.DeadlineExceeded)
+}
+
+func TestRetryConnectsPermanentErrorWrappingDeadlineExceededNotSwallowed(t *testing.T) {
+	t.Parallel()
+	readErr := &net.OpError{Op: "read", Net: "tcp", Err: errors.New("connection reset")}
+	var attempts atomic.Int64
+	err := retryConnects(t.Context(), sequenceOp(&attempts, errors.Join(readErr, context.DeadlineExceeded)))
+	require.ErrorIs(t, err, readErr)
+	require.EqualValues(t, 1, attempts.Load())
 }
 
 func TestRetryConnectsParentCancel(t *testing.T) {
