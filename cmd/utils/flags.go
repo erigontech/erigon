@@ -1117,7 +1117,7 @@ var (
 		Usage:   "Enables blazing fast eth_getProof for executed block",
 		Aliases: []string{"experimental.commitment-history", "prune.experimental.include-commitment-history"},
 	}
-	CommitmentHistoryOlderFlag = cli.Uint64Flag{
+	CommitmentHistoryDistanceFlag = cli.Uint64Flag{
 		Name:  "prune.commitment-history.distance",
 		Usage: "Keep commitment history only for the latest N blocks. Older snapshots are skipped at download time. 0 (default) keeps everything. Requires --prune.include-commitment-history.",
 	}
@@ -1905,8 +1905,8 @@ func SetEthConfig(ctx *cli.Context, nodeConfig *nodecfg.Config, cfg *ethconfig.C
 	if ctx.Bool(KeepExecutionProofsFlag.Name) {
 		cfg.KeepExecutionProofs = true
 	}
-	if ctx.IsSet(CommitmentHistoryOlderFlag.Name) && !cfg.KeepExecutionProofs {
-		Fatalf("--%s requires --%s", CommitmentHistoryOlderFlag.Name, KeepExecutionProofsFlag.Name)
+	if ctx.IsSet(CommitmentHistoryDistanceFlag.Name) && !cfg.KeepExecutionProofs {
+		Fatalf("--%s requires --%s", CommitmentHistoryDistanceFlag.Name, KeepExecutionProofsFlag.Name)
 	}
 
 	if ctx.IsSet(AlwaysGenerateChangesetsFlag.Name) {
