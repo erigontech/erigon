@@ -75,6 +75,17 @@ func WriteChainConfig(db kv.Putter, hash common.Hash, cfg *chain.Config) error {
 		cfg.BorJSON = borJSON
 	}
 
+	// L2 resolution from L2JSON is owned by the registering L2 package, so
+	// only the raw payload round-trips here; a present L2JSON is the source
+	// of truth and is not clobbered by re-marshalling the resolved value.
+	if cfg.L2 != nil && len(cfg.L2JSON) == 0 {
+		l2JSON, err := jsoniter.ConfigFastest.Marshal(cfg.L2)
+		if err != nil {
+			return fmt.Errorf("failed to JSON encode chain config 'l2': %w", err)
+		}
+		cfg.L2JSON = l2JSON
+	}
+
 	data, err := jsoniter.ConfigFastest.Marshal(cfg)
 	if err != nil {
 		return fmt.Errorf("failed to JSON encode chain config: %w", err)

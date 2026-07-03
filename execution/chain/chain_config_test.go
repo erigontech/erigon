@@ -243,6 +243,9 @@ func TestConfigL2JSONRoundTrip(t *testing.T) {
 
 	resolved := Config{L2: fakeL2{}}
 	a.True(resolved.IsL2())
+
+	var nilCfg *Config
+	a.False(nilCfg.IsL2())
 }
 
 type fakeL2 struct{}

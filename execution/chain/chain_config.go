@@ -147,7 +147,7 @@ func (c *Config) IsEIPDisabled(eip int) bool {
 // IsL2 returns whether this chain config carries L2-chain-specific config,
 // either already resolved (L2) or still opaque (L2JSON).
 func (c *Config) IsL2() bool {
-	return c.L2 != nil || (len(c.L2JSON) > 0 && !bytes.Equal(c.L2JSON, jsonNull))
+	return c != nil && (c.L2 != nil || (len(c.L2JSON) > 0 && !bytes.Equal(c.L2JSON, jsonNull)))
 }
 
 var jsonNull = []byte("null")
