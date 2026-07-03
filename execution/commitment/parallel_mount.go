@@ -18,6 +18,23 @@ var cmtTiming = os.Getenv("ERIGON_CMT_TIMING") == "1"
 // deepStorageThreshold is the touched-slot count above which an account's storage subtree folds concurrently instead of streaming through its worker.
 const deepStorageThreshold = 1_000
 
+// seedRootBase synthesizes a row-0 wall when the on-disk root has no branch, so foldMounted stops
+// at the mount boundary and returns cells excluding the mount nibble for empty and non-empty bases alike.
+func seedRootBase(base *HexPatriciaHashed) {
+	if base.activeRows != 0 {
+		return
+	}
+	base.activeRows = 1
+	base.currentKeyLen = 0
+	base.depths[0] = 1
+	base.touchMap[0] = 0
+	base.afterMap[0] = 0
+	base.branchBefore[0] = false
+	for i := range base.grid[0] {
+		base.grid[0][i].reset()
+	}
+}
+
 // if nibble set is -1 then subtrie is not mounted to the nibble, but limited by depth: eg do not fold mounted trie above depth 63
 func (hph *HexPatriciaHashed) mountTo(root *HexPatriciaHashed, nibble int) {
 	hph.Reset()
@@ -81,6 +98,7 @@ func (p *ParallelPatriciaHashed) processMounted(ctx context.Context, updates *Up
 			return nil, fmt.Errorf("processMounted: unfold root: %w", err)
 		}
 	}
+	seedRootBase(base)
 	if cmtTiming {
 		tUnfolded = time.Now()
 	}
@@ -231,6 +249,12 @@ func setAccountStorageRoot(w *HexPatriciaHashed, accHash []byte, sr common.Hash)
 	} else {
 		c = &w.grid[w.activeRows-1][accHash[w.currentKeyLen]]
 	}
+	// sr already covers the whole storage subtree, so a stale storage plain key on this cell must
+	// go, or computeCellHash rehashes it as a singleton from the stale slot and discards sr.
+	c.storageAddrLen = 0
+	c.StorageLen = 0
+	c.Flags &^= StorageUpdate
+	c.loaded &^= cellLoadStorage
 	c.hash = sr
 	c.hashLen = 32
 	c.stateHashLen = 0

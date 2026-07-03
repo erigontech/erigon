@@ -62,6 +62,56 @@ type witnessTracer interface {
 	onNode(rlp, hash []byte)
 }
 
+// witness captures consensus node bytes as they are hashed during a witness
+// fold pass. With a nil tracer the trie is on the normal commitment path and
+// every method is a no-op. The buffers keep their capacity across pooled reuse,
+// so reset() only detaches the tracer.
+type witness struct {
+	tracer          witnessTracer
+	leafBuf         bytes.Buffer
+	branchBuf       bytes.Buffer
+	leafWriterCache io.Writer // keccak+leafBuf tee, built once per keccak
+}
+
+func (w *witness) active() bool { return w.tracer != nil }
+func (w *witness) reset()       { w.tracer = nil }
+
+// leafWriter tees the keccak stream into leafBuf so the leaf node bytes can be
+// emitted once the hash is read; without a tracer it returns keccak unchanged.
+func (w *witness) leafWriter(keccak io.Writer) io.Writer {
+	if w.tracer == nil {
+		return keccak
+	}
+	w.leafBuf.Reset()
+	if w.leafWriterCache == nil {
+		w.leafWriterCache = io.MultiWriter(keccak, &w.leafBuf)
+	}
+	return w.leafWriterCache
+}
+
+func (w *witness) emitLeaf(hash []byte) {
+	if w.tracer != nil {
+		w.tracer.onNode(w.leafBuf.Bytes(), hash)
+	}
+}
+
+func (w *witness) beginBranch(prefix []byte) {
+	if w.tracer != nil {
+		w.branchBuf.Reset()
+		w.branchBuf.Write(prefix)
+	}
+}
+
+// writeBranch appends a hashed slot; callers gate the hot loop on active() so
+// this stays a bare Write with no per-slot nil check.
+func (w *witness) writeBranch(b []byte) { w.branchBuf.Write(b) }
+
+func (w *witness) emitBranch(hash []byte) {
+	if w.tracer != nil {
+		w.tracer.onNode(w.branchBuf.Bytes(), hash)
+	}
+}
+
 // HexPatriciaHashed implements commitment based on patricia merkle tree with radix 16,
 // with keys pre-hashed by keccak256
 type HexPatriciaHashed struct {
@@ -112,10 +162,7 @@ type HexPatriciaHashed struct {
 	// Used by witness generation to capture paths that need resolution.
 	collapseTracer CollapseTracer
 
-	witnessTracer     witnessTracer
-	witnessLeafBuf    bytes.Buffer
-	witnessLeafWriter io.Writer // keccak+witnessLeafBuf tee, built once while tracing
-	witnessBranchBuf  bytes.Buffer
+	witness witness
 
 	cfg TrieConfig // static config, set at construction
 
@@ -215,7 +262,7 @@ func (hph *HexPatriciaHashed) resetForReuse() {
 	hph.trace = false
 	hph.traceDomain = false
 	hph.collapseTracer = nil
-	hph.witnessTracer = nil
+	hph.witness.reset()
 
 	// flags — reset to zero values; applyConfig will restore from stored cfg
 	hph.memoizationOff = false
@@ -687,14 +734,7 @@ func (hph *HexPatriciaHashed) completeLeafHash(buf []byte, compactLen int, key [
 		writer = hph.auxBuffer
 	} else {
 		hph.keccak.Reset()
-		writer = hph.keccak
-		if hph.witnessTracer != nil {
-			hph.witnessLeafBuf.Reset()
-			if hph.witnessLeafWriter == nil {
-				hph.witnessLeafWriter = io.MultiWriter(hph.keccak, &hph.witnessLeafBuf)
-			}
-			writer = hph.witnessLeafWriter
-		}
+		writer = hph.witness.leafWriter(hph.keccak)
 	}
 	if _, err := writer.Write(lenPrefix[:pl]); err != nil {
 		return nil, err
@@ -726,9 +766,7 @@ func (hph *HexPatriciaHashed) completeLeafHash(buf []byte, compactLen int, key [
 			return nil, err
 		}
 		buf = append(buf, hashBuf[:]...)
-		if hph.witnessTracer != nil {
-			hph.witnessTracer.onNode(hph.witnessLeafBuf.Bytes(), hashBuf[1:])
-		}
+		hph.witness.emitLeaf(hashBuf[1:])
 	}
 	return buf, nil
 }
@@ -806,15 +844,9 @@ func (hph *HexPatriciaHashed) extensionHash(key []byte, hash []byte) (common.Has
 	totalLen := kp + kl + 33
 	var lenPrefix [4]byte
 	pt := rlp.EncodeListPrefixToBuf(totalLen, lenPrefix[:])
+
 	hph.keccak.Reset()
-	var w io.Writer = hph.keccak
-	if hph.witnessTracer != nil {
-		hph.witnessLeafBuf.Reset()
-		if hph.witnessLeafWriter == nil {
-			hph.witnessLeafWriter = io.MultiWriter(hph.keccak, &hph.witnessLeafBuf)
-		}
-		w = hph.witnessLeafWriter
-	}
+	w := hph.witness.leafWriter(hph.keccak)
 	if _, err := w.Write(lenPrefix[:pt]); err != nil {
 		return hashBuf, err
 	}
@@ -844,9 +876,7 @@ func (hph *HexPatriciaHashed) extensionHash(key []byte, hash []byte) (common.Has
 	if _, err := hph.keccak.Read(hashBuf[:]); err != nil {
 		return hashBuf, err
 	}
-	if hph.witnessTracer != nil {
-		hph.witnessTracer.onNode(hph.witnessLeafBuf.Bytes(), hashBuf[:])
-	}
+	hph.witness.emitLeaf(hashBuf[:])
 	return hashBuf, nil
 }
 
@@ -1635,10 +1665,7 @@ func (hph *HexPatriciaHashed) foldBranch(row int, nibble, upDepth, depth int16, 
 	if _, err := hph.keccak2.Write(hph.hashAuxBuffer[:pt]); err != nil {
 		return err
 	}
-	if hph.witnessTracer != nil {
-		hph.witnessBranchBuf.Reset()
-		hph.witnessBranchBuf.Write(hph.hashAuxBuffer[:pt])
-	}
+	hph.witness.beginBranch(hph.hashAuxBuffer[:pt])
 
 	// Single pass: feed keccak2 + extract cellEncodeData
 	cellData, err := hph.hashRow(row, depth)
@@ -1669,9 +1696,7 @@ func (hph *HexPatriciaHashed) foldBranch(row int, nibble, upDepth, depth int16, 
 	if _, err := hph.keccak2.Read(upCell.hash[:]); err != nil {
 		return err
 	}
-	if hph.witnessTracer != nil {
-		hph.witnessTracer.onNode(hph.witnessBranchBuf.Bytes(), upCell.hash[:])
-	}
+	hph.witness.emitBranch(upCell.hash[:])
 	if hph.trace {
 		fmt.Printf("} [%x]\n", upCell.hash[:])
 	}
@@ -1722,7 +1747,7 @@ func (hph *HexPatriciaHashed) feedBranchHashesToKeccak(row int, depth int16, emp
 func (hph *HexPatriciaHashed) hashRow(row int, depth int16) ([16]cellEncodeData, error) {
 	var cellData [16]cellEncodeData
 	b := [...]byte{0x80}
-	capture := hph.witnessTracer != nil
+	capture := hph.witness.active()
 
 	for bitset, lastNib := hph.afterMap[row], 0; ; {
 		if bitset == 0 {
@@ -1732,7 +1757,7 @@ func (hph *HexPatriciaHashed) hashRow(row int, depth int16) ([16]cellEncodeData,
 					return cellData, err
 				}
 				if capture {
-					hph.witnessBranchBuf.Write(b[:])
+					hph.witness.writeBranch(b[:])
 				}
 			}
 			break
@@ -1746,7 +1771,7 @@ func (hph *HexPatriciaHashed) hashRow(row int, depth int16) ([16]cellEncodeData,
 				return cellData, err
 			}
 			if capture {
-				hph.witnessBranchBuf.Write(b[:])
+				hph.witness.writeBranch(b[:])
 			}
 			if hph.trace {
 				fmt.Printf("  %x: empty(%d, %x, depth=%d)\n", i, row, i, depth)
@@ -1807,7 +1832,7 @@ func (hph *HexPatriciaHashed) hashRow(row int, depth int16) ([16]cellEncodeData,
 			return cellData, err
 		}
 		if capture {
-			hph.witnessBranchBuf.Write(cellHash)
+			hph.witness.writeBranch(cellHash)
 		}
 
 		// Extract encoding data
@@ -2317,11 +2342,7 @@ func (hph *HexPatriciaHashed) foldMounted(ctx context.Context, nib int) (cell, e
 		}
 		return hph.root, nil
 	}
-	if hph.trace {
-		fmt.Printf("mount as nibble %02x %s\n", hph.mountedNib, hph.grid[0][hph.mountedNib].String())
-	}
-	// todo potential bug
-	return hph.grid[0][hph.mountedNib], nil
+	return cell{}, fmt.Errorf("foldMounted[%x]: folded past the mount wall to an unrooted base; the base must be seeded with a wall row", hph.mountedNib)
 }
 
 // captureExtensionDivergence materializes the branch behind a folded extension the
@@ -2371,8 +2392,8 @@ func (hph *HexPatriciaHashed) captureExtensionDivergence(hashedKey []byte, set *
 func (hph *HexPatriciaHashed) Witnesses(ctx context.Context, updates *Updates, produceExclusionProofs bool, logPrefix string) (nodes [][]byte, provedKeys [][]byte, rootHash []byte, err error) {
 	hph.memoizationOff = true
 	set := newWitnessNodeSet()
-	hph.witnessTracer = set
-	defer func() { hph.witnessTracer = nil }()
+	hph.witness.tracer = set
+	defer hph.witness.reset()
 
 	provedKeys = make([][]byte, 0, updates.Size())
 	err = updates.HashSort(ctx, nil, func(hashedKey, plainKey []byte, stateUpdate *Update) error {
@@ -2425,7 +2446,7 @@ func (hph *HexPatriciaHashed) Witnesses(ctx context.Context, updates *Updates, p
 			}
 		}
 
-		if hph.currentKeyLen < int16(len(hashedKey)) {
+		if hph.activeRows > 0 && hph.currentKeyLen < int16(len(hashedKey)) {
 			lastNibble := int(hashedKey[hph.currentKeyLen])
 			lastCell := &hph.grid[hph.activeRows-1][lastNibble]
 			if int16(len(hashedKey)) == hph.depths[hph.activeRows-1] && len(hashedKey) != 64 && len(hashedKey) != 128 && lastCell.hashLen > 0 {
