@@ -1,0 +1,44 @@
+name: Cache Warming — Kurtosis CL images
+
+# Populates the base-branch docker-cl-* and docker-buildkit-* image caches that
+# test-kurtosis-assertoor.yml restores. Its warm path is skipped on cache-warming
+# runs, so PR / merge_group runs otherwise never get these caches and pull every
+# third-party image from Docker Hub.
+# GitHub cache scoping makes default-branch caches readable from every PR and merge
+# group, so warming on main/release is enough.
+#
+# Triggers:
+#   - push to a protected branch touching test-kurtosis-assertoor.yml or a kurtosis
+#     .io file -> warm on a version bump
+#   - schedule (daily) -> safety net if LRU-evicted
+#   - workflow_dispatch -> manual (use once to bootstrap)
+#
+# The cache key is derived from the pinned image versions: the kurtosis-infra and
+# eth2-val-tools tags in test-kurtosis-assertoor.yml plus the CL / assertoor tags it
+# reads from the kurtosis .io files — hence the paths filter covers both.
+
+on:
+  push:
+    branches:
+      - main
+      - 'release/**'
+    paths:
+      - '.github/workflows/test-kurtosis-assertoor.yml'
+      - '.github/workflows/kurtosis/**'
+  schedule:
+    - cron: '27 5 * * *'
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  warm:
+    uses: ./.github/workflows/test-kurtosis-assertoor.yml
+    with:
+      cl-images-only: true
+    secrets: inherit

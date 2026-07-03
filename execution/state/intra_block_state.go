@@ -318,8 +318,7 @@ func (sdb *IntraBlockState) HasStorage(addr accounts.Address) (bool, error) {
 	// IncarnationPath is written ONLY by CreateAccount and Selfdestruct —
 	// both operations that clear all storage.  If a prior TX wrote it, the
 	// account was created or destroyed in this block and HasStorage should
-	// return false.  This mirrors the same check in versionedRead for
-	// StoragePath (versionedio.go:660-703).
+	// return false. Mirrors the StoragePath check in versionedRead.
 	if sdb.versionMap != nil {
 		incRes := sdb.versionMap.Read(addr, IncarnationPath, accounts.NilKey, sdb.txIndex)
 		if incRes.Status() == MVReadResultDone {
@@ -339,7 +338,9 @@ func (sdb *IntraBlockState) HasStorage(addr accounts.Address) (bool, error) {
 		}
 	}
 
-	// Otherwise check in the DB
+	// EIP-684 CREATE-collision fall-through: the in-memory checks missed, so ask
+	// the reader — on snapshot-backed storage this is a kv.HasPrefix(StorageDomain)
+	// walk through the .bt index, a validation hot-path cost.
 	result, err := sdb.stateReader.HasStorage(addr)
 	return result, err
 }
@@ -724,7 +725,16 @@ func (sdb *IntraBlockState) GetCodeSize(addr accounts.Address) (int, error) {
 		if stateObject.data.CodeHash.IsEmpty() {
 			return 0, nil
 		}
-		return sdb.stateReader.ReadAccountCodeSize(addr)
+		// Size-only read: ReadAccountCodeSize, not ReadAccountCode. It routes
+		// through the size-only cache layer, and is correct on the Stateless
+		// reader — a size-only witness node has the size but no bytes, so
+		// ReadAccountCode there returns nil (EXTCODESIZE 0) and diverges from
+		// consensus.
+		size, err := sdb.stateReader.ReadAccountCodeSize(addr)
+		if err != nil {
+			return 0, err
+		}
+		return size, nil
 	}
 
 	size, source, _, err := versionedRead(sdb, addr, CodeSizePath, accounts.NilKey, false, 0,
@@ -747,7 +757,12 @@ func (sdb *IntraBlockState) GetCodeSize(addr accounts.Address) (int, error) {
 			if dbg.KVReadLevelledMetrics {
 				readStart = time.Now()
 			}
-			l, err := sdb.stateReader.ReadAccountCodeSize(addr)
+			// Size-only read (see GetCodeSize's non-versioned branch): route
+			// through the size-only layer and stay correct on the Stateless
+			// reader's witness nodes (size known, bytes absent). ReadAccountCode
+			// would return nil there and report EXTCODESIZE 0.
+			l, codeErr := sdb.stateReader.ReadAccountCodeSize(addr)
+			err := codeErr
 			if dbg.KVReadLevelledMetrics {
 				sdb.codeReadDuration += time.Since(readStart)
 				sdb.codeReadCount++
@@ -1891,6 +1906,11 @@ func (sdb *IntraBlockState) CreateAccount(addr accounts.Address, contractCreatio
 			// `previous` so that after a REVERT CommitBlock can still emit
 			// DeleteAccount for it.
 			previous = so
+		} else if so, ok := sdb.stateObjects[addr]; ok {
+			// The serial block builder runs with a version map but does not flush
+			// per-tx writes to it, so a same-block credit on this IBS lives only in
+			// the cache; reuse it as `previous` to keep the balance carry-over below.
+			previous = so
 		}
 	}
 
@@ -2049,8 +2069,15 @@ func (sdb *IntraBlockState) GetRefund() uint64 {
 	return sdb.refund
 }
 
-func updateAccount(EIP161Enabled bool, isAura bool, stateWriter StateWriter, addr accounts.Address, stateObject *stateObject, isDirty bool, trace bool, tracingHooks *tracing.Hooks, useBlockOrigin bool) error {
-	emptyRemoval := EIP161Enabled && stateObject.data.Empty() && (!isAura || addr != params.SystemAddress)
+// EIP161EmptyRemoval reports whether an empty account at addr is removed under
+// EIP-161 (SpuriousDragon). AuRa retains its SystemAddress even when empty, to
+// match the reference implementation.
+func EIP161EmptyRemoval(eip161Enabled, isAura bool, addr accounts.Address) bool {
+	return eip161Enabled && (!isAura || addr != params.SystemAddress)
+}
+
+func updateAccount(eip161Enabled bool, isAura bool, stateWriter StateWriter, addr accounts.Address, stateObject *stateObject, isDirty bool, trace bool, tracingHooks *tracing.Hooks, useBlockOrigin bool) error {
+	emptyRemoval := EIP161EmptyRemoval(eip161Enabled, isAura, addr) && stateObject.data.Empty()
 	if stateObject.selfdestructed || (isDirty && emptyRemoval) {
 		balance := stateObject.Balance()
 		if tracingHooks != nil && tracingHooks.OnBalanceChange != nil && !(&balance).IsZero() && stateObject.selfdestructed {
@@ -2100,8 +2127,8 @@ func updateAccount(EIP161Enabled bool, isAura bool, stateWriter StateWriter, add
 	return nil
 }
 
-func printAccount(EIP161Enabled bool, addr accounts.Address, stateObject *stateObject, isDirty bool) {
-	emptyRemoval := EIP161Enabled && stateObject.data.Empty()
+func printAccount(eip161Enabled bool, isAura bool, addr accounts.Address, stateObject *stateObject, isDirty bool) {
+	emptyRemoval := EIP161EmptyRemoval(eip161Enabled, isAura, addr) && stateObject.data.Empty()
 	if stateObject.selfdestructed || (isDirty && emptyRemoval) {
 		fmt.Printf("delete: %x\n", addr)
 	}
@@ -2137,7 +2164,7 @@ func (sdb *IntraBlockState) FinalizeTx(chainRules *chain.Rules, stateWriter Stat
 			continue
 		}
 
-		if err := updateAccount(chainRules.IsSpuriousDragon, chainRules.IsAura, stateWriter, addr, so, true, sdb.trace, sdb.tracingHooks, false); err != nil {
+		if err := updateAccount(chainRules.IsEIP161Enabled(), chainRules.IsAura, stateWriter, addr, so, true, sdb.trace, sdb.tracingHooks, false); err != nil {
 			return err
 		}
 
@@ -2281,7 +2308,7 @@ func (sdb *IntraBlockState) MakeWriteSet(chainRules *chain.Rules, stateWriter St
 		if dbg.TraceTransactionIO && (sdb.trace || dbg.TraceAccount(addr.Handle())) {
 			fmt.Printf("%d (%d.%d) Update Account %x\n", sdb.blockNum, sdb.txIndex, sdb.version, addr)
 		}
-		if err := updateAccount(chainRules.IsSpuriousDragon, chainRules.IsAura, stateWriter, addr, stateObject, isDirty, sdb.trace, sdb.tracingHooks, true); err != nil {
+		if err := updateAccount(chainRules.IsEIP161Enabled(), chainRules.IsAura, stateWriter, addr, stateObject, isDirty, sdb.trace, sdb.tracingHooks, true); err != nil {
 			return err
 		}
 		// EIP-7928 BAL: when SELFDESTRUCT actually destroys (per EIP-6780,
@@ -2325,13 +2352,12 @@ func (sdb *IntraBlockState) MakeWriteSet(chainRules *chain.Rules, stateWriter St
 	return nil
 }
 
-func (sdb *IntraBlockState) TxIO() *VersionedIO {
-	var io VersionedIO
+// MergeTxIOInto folds the current transaction's recorded reads, writes and
+// accesses into io at the current tx index, without building an intermediate
+// VersionedIO.
+func (sdb *IntraBlockState) MergeTxIOInto(io *VersionedIO) {
 	version := Version{BlockNum: sdb.blockNum, TxIndex: sdb.txIndex, Incarnation: sdb.version}
-	io.RecordReads(version, sdb.versionedReads)
-	io.RecordWrites(version, sdb.VersionedWrites(false))
-	io.RecordAccesses(version, sdb.addressAccess)
-	return &io
+	io.mergeTx(version, sdb.versionedReads, sdb.VersionedWrites(false), sdb.addressAccess)
 }
 
 func (sdb *IntraBlockState) Print(chainRules chain.Rules, all bool) {
@@ -2339,7 +2365,7 @@ func (sdb *IntraBlockState) Print(chainRules chain.Rules, all bool) {
 		_, isDirty := sdb.stateObjectsDirty[addr]
 		_, isDirty2 := sdb.journal.dirties[addr]
 
-		printAccount(chainRules.IsSpuriousDragon, addr, stateObject, all || isDirty || isDirty2)
+		printAccount(chainRules.IsEIP161Enabled(), chainRules.IsAura, addr, stateObject, all || isDirty || isDirty2)
 	}
 }
 

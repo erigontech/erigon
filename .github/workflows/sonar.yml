@@ -23,7 +23,7 @@ jobs:
 
     steps:
       - name: Checkout custom actions
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
         with:
           fetch-depth: 1
 
@@ -37,6 +37,7 @@ jobs:
           submodules: true
           cleanup-space: true
           ramdisk: true
+          cache-namespace: sonar
 
       # The merge queue fast-forwards the target branch to the already-tested
       # merge commit, so the pushed SHA equals a merge-queue run's head SHA and
@@ -119,7 +120,7 @@ jobs:
       - name: Check SonarCloud scanner engine cache
         id: engine-cache
         if: inputs.cache-warming-only && steps.engine.outcome == 'success'
-        uses: actions/cache/restore@v5
+        uses: actions/cache/restore@v6
         with:
           path: ~/.sonar/cache
           key: sonar-scanner-engine|${{ steps.engine.outputs.sha256 }}
@@ -141,7 +142,7 @@ jobs:
 
       - name: Save SonarCloud scanner engine cache
         if: inputs.cache-warming-only && steps.engine-download.outcome == 'success'
-        uses: actions/cache/save@v5
+        uses: actions/cache/save@v6
         with:
           path: ~/.sonar/cache
           key: sonar-scanner-engine|${{ steps.engine.outputs.sha256 }}
@@ -163,7 +164,7 @@ jobs:
       # base-branch push) falls back to downloading plus the retry below.
       - name: Restore SonarCloud scanner engine cache
         if: "!inputs.cache-warming-only && github.event_name != 'merge_group'"
-        uses: actions/cache/restore@v5
+        uses: actions/cache/restore@v6
         with:
           path: ~/.sonar/cache
           key: sonar-scanner-engine|

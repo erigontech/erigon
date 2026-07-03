@@ -35,8 +35,8 @@ import (
 	"github.com/c2h5oh/datasize"
 
 	"github.com/erigontech/erigon/common"
-	"github.com/erigontech/erigon/common/assert"
 	"github.com/erigontech/erigon/common/background"
+	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/dir"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/common/mmap"
@@ -57,9 +57,9 @@ const MaxLeafSize = 24
 // ExistenceFilterVersion selects the existence-filter format written for new index files.
 //
 //	0 = byte-array of first-bytes (legacy, no FuseFilter)
-//	1 = BinaryFuse[uint8] — monolithic FuseFilter (current default)
-//	2 = BinaryFuse[uint8] sharded by keyHash>>56 (256 shards; reduces build-time RAM 256×)
-const ExistenceFilterVersion version.DataStructureVersion = 1
+//	1 = BinaryFuse[uint8] — monolithic FuseFilter
+//	2 = BinaryFuse[uint8] sharded by keyHash>>56 (256 shards; reduces build-time RAM 256×; current default)
+const ExistenceFilterVersion version.DataStructureVersion = 2
 
 func newExistenceFilterWriter(filePath string, v version.DataStructureVersion) (v1 *fusefilter.WriterOffHeap, v2 *fusefilter.WriterSharded, err error) {
 	if v == 2 {
@@ -279,7 +279,7 @@ func NewRecSplit(args RecSplitArgs, logger log.Logger) (*RecSplit, error) {
 	} else {
 		rs.salt = *args.Salt
 	}
-	rs.bucketCollector = etl.NewCollectorWithAllocator(RecSplitLogPrefix+" "+fname, rs.tmpDir, etl.LargeSortableBuffers, logger)
+	rs.bucketCollector = etl.NewCollectorWithAllocator(RecSplitLogPrefix+" "+fname, rs.tmpDir, etl.SmallSortableBuffers, logger)
 	rs.bucketCollector.SortAndFlushInBackground(rs.workers > 1)
 	rs.bucketCollector.LogLvl(log.LvlDebug)
 	var err error
@@ -515,10 +515,15 @@ func computeGolombRice(m uint16, table []uint32, leafSize, primaryAggrBound, sec
 // spills data onto disk to accommodate that. The key gets copied by the collector, therefore
 // the slice underlying key is not getting accessed by RecSplit after this invocation.
 func (rs *RecSplit) AddKey(key []byte, offset uint64) error {
+	hi, lo := murmur3.Sum128WithSeed(key, rs.salt)
+	return rs.addHashedKey(hi, lo, offset)
+}
+
+// addHashedKey adds a key whose murmur3 halves have already been computed with rs.salt.
+func (rs *RecSplit) addHashedKey(hi, lo, offset uint64) error {
 	if rs.built {
 		return errors.New("cannot add keys after perfect hash function had been built")
 	}
-	hi, lo := murmur3.Sum128WithSeed(key, rs.salt)
 	bucketIdx := uint32(remap(hi, rs.bucketCount))
 	binary.BigEndian.PutUint32(rs.bucketKeyBuf[:], bucketIdx)
 	binary.BigEndian.PutUint64(rs.bucketKeyBuf[4:], lo)
@@ -544,12 +549,9 @@ func (rs *RecSplit) AddKey(key []byte, offset uint64) error {
 		if err := rs.bucketCollector.Collect(rs.bucketKeyBuf[:], rs.numBuf[:]); err != nil {
 			return err
 		}
-		if rs.lessFalsePositives {
-			if rs.dataStructureVersion == 0 {
-				//1 byte from each hashed key
-				if err := rs.existenceWV0.WriteByte(byte(hi)); err != nil {
-					return err
-				}
+		if rs.lessFalsePositives && rs.dataStructureVersion == 0 {
+			if err := rs.existenceWV0.WriteByte(byte(hi)); err != nil {
+				return err
 			}
 		}
 	} else {
@@ -984,7 +986,7 @@ func (rs *RecSplit) Build(ctx context.Context) error {
 		}
 	}
 
-	if assert.Enable {
+	if dbg.AssertEnabled {
 		_ = rs.indexW.Flush()
 		rs.indexF.Seek(0, 0)
 		b, _ := io.ReadAll(rs.indexF)

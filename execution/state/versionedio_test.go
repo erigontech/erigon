@@ -1336,3 +1336,182 @@ func TestGetVersionedAccount_SameTxMetamorphicRecreate_ReturnsAccount(t *testing
 	require.Equal(t, uint64(2), account.Incarnation,
 		"the re-created account's Incarnation should reflect the CREATE2 (not the pre-SD value)")
 }
+
+// TestAsBlockAccessList_SelfdestructedAccountRecordsBalanceToZero verifies the
+// EIP-7928 rule for in-transaction SELFDESTRUCT: an account destroyed within a
+// transaction that had a positive pre-transaction balance MUST record a balance
+// change to zero — even when a later same-tx transfer (which burns with the
+// account at end of tx) leaves a non-zero value as the tx's final balance write.
+func TestAsBlockAccessList_SelfdestructedAccountRecordsBalanceToZero(t *testing.T) {
+	t.Parallel()
+	addr := accounts.InternAddress(common.HexToAddress("0x9e1989c1ba17e9b8fdae0b5d43a2b0c676a2070f"))
+	io := NewVersionedIO(1)
+	readSets := ReadSet{}
+	readSets.Set(VersionedRead{
+		Address: addr,
+		Path:    BalancePath,
+		Val:     *uint256.NewInt(100000),
+	})
+	io.RecordReads(Version{TxIndex: 0}, readSets)
+	io.RecordWrites(Version{TxIndex: 0}, VersionedWrites{
+		&VersionedWrite{
+			Address: addr,
+			Path:    BalancePath,
+			Version: Version{TxIndex: 0},
+			Val:     *uint256.NewInt(1),
+		},
+		&VersionedWrite{
+			Address: addr,
+			Path:    SelfDestructPath,
+			Version: Version{TxIndex: 0},
+			Val:     true,
+		},
+	})
+	bal := io.AsBlockAccessList()
+	require.Len(t, bal, 1)
+	require.Equal(t, addr, bal[0].Address)
+	require.Len(t, bal[0].BalanceChanges, 1,
+		"destroyed account with positive pre-tx balance must record a balance change to zero")
+	require.Equal(t, uint32(1), bal[0].BalanceChanges[0].Index)
+	require.True(t, bal[0].BalanceChanges[0].Value.IsZero(),
+		"recorded post-balance must be zero for an account destroyed in-tx")
+}
+
+// TestAsBlockAccessList_SelfdestructedZeroPreBalanceNoBalanceChange verifies the
+// EIP-7928 counterpart rule: same-tx SELFDESTRUCT of an account with a zero
+// pre-transaction balance must NOT produce a balance change entry.
+func TestAsBlockAccessList_SelfdestructedZeroPreBalanceNoBalanceChange(t *testing.T) {
+	t.Parallel()
+	addr := accounts.InternAddress(common.HexToAddress("0x2222"))
+	io := NewVersionedIO(1)
+	readSets := ReadSet{}
+	readSets.Set(VersionedRead{
+		Address: addr,
+		Path:    BalancePath,
+		Val:     *uint256.NewInt(0),
+	})
+	io.RecordReads(Version{TxIndex: 0}, readSets)
+	io.RecordWrites(Version{TxIndex: 0}, VersionedWrites{
+		&VersionedWrite{
+			Address: addr,
+			Path:    BalancePath,
+			Version: Version{TxIndex: 0},
+			Val:     *uint256.NewInt(1),
+		},
+		&VersionedWrite{
+			Address: addr,
+			Path:    SelfDestructPath,
+			Version: Version{TxIndex: 0},
+			Val:     true,
+		},
+	})
+	bal := io.AsBlockAccessList()
+	require.Len(t, bal, 1)
+	require.Equal(t, addr, bal[0].Address)
+	require.Empty(t, bal[0].BalanceChanges,
+		"destroyed account with zero pre-tx balance must not record a balance change")
+}
+
+func TestEIP161EmptyRemoval(t *testing.T) {
+	userAddr := accounts.InternAddress(common.HexToAddress("0x1111"))
+
+	tests := []struct {
+		name          string
+		eip161Enabled bool
+		isAura        bool
+		addr          accounts.Address
+		want          bool
+	}{
+		{"pre-spurious-dragon user", false, false, userAddr, false},
+		{"pre-spurious-dragon aura system address", false, true, params.SystemAddress, false},
+		{"non-aura user", true, false, userAddr, true},
+		{"non-aura system address removed", true, false, params.SystemAddress, true},
+		{"aura user", true, true, userAddr, true},
+		{"aura system address retained", true, true, params.SystemAddress, false},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			require.Equal(t, tc.want, EIP161EmptyRemoval(tc.eip161Enabled, tc.isAura, tc.addr))
+		})
+	}
+}
+
+// TestVersionedIO_mergeTxEquivalentToMerge asserts that folding per-tx IO into
+// an accumulator via mergeTx matches repeated Merge channel by channel (reads,
+// writes, accesses) and as a whole BAL — including the begin-system tx at index
+// -1 and two txs touching the same index.
+func TestVersionedIO_mergeTxEquivalentToMerge(t *testing.T) {
+	t.Parallel()
+
+	addrs := []accounts.Address{
+		accounts.InternAddress(common.HexToAddress("0x1111")),
+		accounts.InternAddress(common.HexToAddress("0x2222")),
+		accounts.InternAddress(common.HexToAddress("0x3333")),
+	}
+	slots := []accounts.StorageKey{
+		accounts.InternKey(common.HexToHash("0x01")),
+		accounts.InternKey(common.HexToHash("0x02")),
+	}
+	type txIO struct {
+		txIdx int
+		inc   int
+		addr  accounts.Address
+		slot  accounts.StorageKey
+		val   uint64
+	}
+	// A StoragePath read on a slot the tx does not write surfaces in the BAL as
+	// a StorageRead, so a dropped read also changes the hash; a balance read
+	// would contribute no BAL field.
+	reads := func(x txIO) ReadSet {
+		rs := ReadSet{}
+		rs.Set(VersionedRead{Address: x.addr, Path: StoragePath, Key: x.slot, Version: Version{TxIndex: x.txIdx, Incarnation: x.inc}, Val: *uint256.NewInt(x.val)})
+		return rs
+	}
+	writes := func(x txIO) VersionedWrites {
+		return VersionedWrites{
+			&VersionedWrite{Address: x.addr, Path: BalancePath, Version: Version{TxIndex: x.txIdx, Incarnation: x.inc}, Val: *uint256.NewInt(x.val + 1)},
+		}
+	}
+	accesses := func(x txIO) AccessSet { return AccessSet{x.addr: &accessOptions{}} }
+
+	txs := []txIO{
+		{-1, 0, addrs[0], slots[0], 5}, // begin-system tx (TxIndex -1)
+		{0, 0, addrs[0], slots[0], 10},
+		{1, 0, addrs[1], slots[0], 20},
+		{2, 1, addrs[2], slots[0], 30},
+		{2, 2, addrs[0], slots[1], 40}, // same index, higher incarnation: merge-into-existing
+	}
+
+	// Oracle: build a single-tx VersionedIO per tx and fold via repeated Merge.
+	merged := &VersionedIO{}
+	for _, x := range txs {
+		v := Version{TxIndex: x.txIdx, Incarnation: x.inc}
+		io := &VersionedIO{}
+		io.RecordReads(v, reads(x))
+		io.RecordWrites(v, writes(x))
+		io.RecordAccesses(v, accesses(x))
+		merged = merged.Merge(io)
+	}
+
+	fused := &VersionedIO{}
+	for _, x := range txs {
+		fused.mergeTx(Version{TxIndex: x.txIdx, Incarnation: x.inc}, reads(x), writes(x), accesses(x))
+	}
+
+	require.Equal(t, merged.Len(), fused.Len(), "Len mismatch")
+	require.Equal(t, merged.AsBlockAccessList().Hash(), fused.AsBlockAccessList().Hash(),
+		"mergeTx must produce a BAL identical to repeated Merge")
+
+	// The BAL hash does not surface a dropped access (a non-system access adds
+	// no BAL field), so compare every channel at every index directly: a mergeTx
+	// that overwrote instead of merged a slot passes the hash check but fails here.
+	for i := -1; i < merged.Len()-1; i++ {
+		require.Equal(t, merged.ReadSet(i), fused.ReadSet(i), "reads differ at tx %d", i)
+		require.Equal(t, merged.ReadSetIncarnation(i), fused.ReadSetIncarnation(i), "incarnation differs at tx %d", i)
+		require.ElementsMatch(t, merged.WriteSet(i), fused.WriteSet(i), "writes differ at tx %d", i)
+		require.Equal(t, merged.AccessedAddresses(i), fused.AccessedAddresses(i), "accesses differ at tx %d", i)
+	}
+
+	require.True(t, len(fused.inputs) == len(fused.outputs) && len(fused.outputs) == len(fused.accessed),
+		"mergeTx must keep inputs/outputs/accessed equal length")
+}

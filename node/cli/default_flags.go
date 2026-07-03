@@ -261,11 +261,13 @@ var DefaultFlags = []cli.Flag{
 
 	&utils.GDBMeFlag,
 
-	&utils.ExperimentalConcurrentCommitmentFlag,
+	&utils.ExperimentalParallelCommitmentFlag,
+	&utils.ExperimentalStreamingCommitmentFlag,
 
 	&utils.MCPDisableFlag,
 	&utils.MCPAddrFlag,
 	&utils.MCPPortFlag,
 
 	&utils.ErigondbDomainStepsInFrozenFileFlag,
+	&utils.CommitmentPlainValuesFlag,
 }

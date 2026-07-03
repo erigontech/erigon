@@ -53,6 +53,7 @@ import (
 	"github.com/erigontech/erigon/db/snaptype"
 	dbstate "github.com/erigontech/erigon/db/state"
 	"github.com/erigontech/erigon/execution/builder"
+	"github.com/erigontech/erigon/execution/cache"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/exec"
 	"github.com/erigontech/erigon/execution/execmodule"
@@ -349,6 +350,12 @@ func WithFcuBackgroundPrune() Option {
 	}
 }
 
+func WithSentryProtocol(protocol uint) Option {
+	return func(opts *options) {
+		opts.sentryProtocol = protocol
+	}
+}
+
 type options struct {
 	stepSize                 *uint64
 	experimentalBAL          bool
@@ -362,6 +369,7 @@ type options struct {
 	fcuBackgroundCommit      bool
 	fcuBackgroundPrune       bool
 	alwaysGenerateChangesets *bool
+	sentryProtocol           uint
 }
 
 func applyOptions(opts []Option) options {
@@ -372,6 +380,7 @@ func applyOptions(opts []Option) options {
 		pruneMode:       &defaultPruneMode,
 		chainConfig:     chain.TestChainBerlinConfig,
 		experimentalBAL: false,
+		sentryProtocol:  direct.ETH68,
 	}
 	for _, o := range opts {
 		o(&opt)
@@ -536,7 +545,7 @@ func New(tb testing.TB, opts ...Option) *ExecModuleTester {
 
 	mock.Address = crypto.PubkeyToAddress(mock.Key.PublicKey)
 
-	mock.SentryClient, err = direct.NewSentryClientDirect(direct.ETH68, mock, nil)
+	mock.SentryClient, err = direct.NewSentryClientDirect(opt.sentryProtocol, mock, nil)
 	require.NoError(tb, err)
 	sentries := []sentryproto.SentryClient{mock.SentryClient}
 
@@ -719,6 +728,9 @@ func New(tb testing.TB, opts ...Option) *ExecModuleTester {
 		hook,
 		accum,
 		mock.StateCache,
+		// Small per-instance domain cache: the harness builds one ExecModule per
+		// fixture, so production-size caches would allocate hundreds of MB each.
+		cache.NewStateCache(1*datasize.MB, 1*datasize.MB, 1*datasize.MB, 1*datasize.MB),
 		logger,
 		engine,
 		cfg.Sync,
@@ -798,7 +810,7 @@ func (emt *ExecModuleTester) insertPoSBlocks(chain *blockgen.ChainPack) error {
 		insertedBlocks[chain.Blocks[i].NumberU64()] = struct{}{}
 	}
 
-	if err := wr.InsertBlocksAndWait(emt.Ctx, chain.Blocks, chain.BlockAccessLists); err != nil {
+	if err := wr.InsertBlocks(emt.Ctx, chain.Blocks, chain.BlockAccessLists); err != nil {
 		return err
 	}
 

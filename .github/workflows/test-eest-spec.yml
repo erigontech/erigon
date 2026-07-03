@@ -3,6 +3,11 @@ name: EEST spec tests
 on:
   workflow_dispatch:
   workflow_call:
+    inputs:
+      cache-warming-only:
+        description: "Build the evm binaries only; skip fixture runs (for cache warming runs)"
+        type: boolean
+        default: false
 
 defaults:
   run:
@@ -19,11 +24,20 @@ jobs:
     outputs:
       matrix: ${{ steps.load.outputs.matrix }}
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 1
+      # Warming runs replace the shard matrix with one build per cache class;
+      # the -race suffix routes build-cache-extra-key below.
       - id: load
-        run: echo "matrix=$(yq -o=json -I=0 '.' tools/eest-spec-shards.yml)" >> "$GITHUB_OUTPUT"
+        env:
+          CACHE_WARMING_ONLY: ${{ inputs.cache-warming-only }}
+        run: |
+          if [ "$CACHE_WARMING_ONLY" = "true" ]; then
+            echo 'matrix=[{"shard":"build","target":"evm"},{"shard":"build-race","target":"evm.race"}]' >> "$GITHUB_OUTPUT"
+          else
+            echo "matrix=$(yq -o=json -I=0 '.' tools/eest-spec-shards.yml)" >> "$GITHUB_OUTPUT"
+          fi
 
   eest-spec-tests:
     needs: load-matrix
@@ -46,7 +60,7 @@ jobs:
         run: echo "Runner $RUNNER_NAME"
 
       - name: Checkout custom actions
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
         with:
           fetch-depth: 1
 
@@ -54,9 +68,12 @@ jobs:
         id: erigon
         with:
           submodules: false
-          cleanup-space: true
-          ramdisk: true
-          build-cache-extra-key: eest-spec-${{ matrix.shard }}
+          cleanup-space: ${{ !inputs.cache-warming-only }}
+          ramdisk: ${{ !inputs.cache-warming-only }}
+          cache-namespace: test-eest-spec
+          # All non-race shards build the same evm binary and all race shards the
+          # same evm.race, so the cache splits by class rather than by shard.
+          build-cache-extra-key: eest-spec${{ contains(matrix.shard, '-race') && '-race' || '' }}
 
       # Restore-only: PR / merge_group runs never SAVE, so they don't mint a
       # per-ref ~1.6GB duplicate every run. The base-branch (main) entry is
@@ -64,11 +81,13 @@ jobs:
       # readable from every PR. A miss here self-heals (tools/test-fixtures.sh
       # re-downloads), and the warmer repopulates main.
       - name: Restore EEST tarballs
-        uses: actions/cache/restore@v5
+        if: '!inputs.cache-warming-only'
+        uses: actions/cache/restore@v6
         with:
-          # Only the .tar.gz files are cached; tools/test-fixtures.sh re-extracts
-          # them each run. cl_mainnet is intentionally excluded (owned by
-          # test-integration-caplin.yml's separate cache).
+          # Only the .tar.gz files are cached; each shard re-extracts just the
+          # fixture set it needs (tools/run-eest-spec-test.sh). cl_mainnet is
+          # intentionally excluded (owned by test-integration-caplin.yml's
+          # separate cache).
           path: |
             test-fixtures-cache/eest_stable.tar.gz
             test-fixtures-cache/eest_devnet.tar.gz
@@ -79,10 +98,17 @@ jobs:
             test-fixtures-eest-${{ runner.os }}-
 
       - name: Run eest-spec-${{ matrix.shard }}
+        if: '!inputs.cache-warming-only'
         env:
           EEST_SPEC_MAX_FAILURES: ${{ matrix.max-allowed-failures }}
           EEST_SPEC_WORKERS: ${{ matrix.workers }}
         run: make eest-spec-${{ matrix.shard }}
+
+      - name: Build evm binary (cache warming)
+        if: inputs.cache-warming-only
+        env:
+          TARGET: ${{ matrix.target }}
+        run: make "$TARGET"
 
       - uses: ./.github/actions/cleanup-erigon
         if: always()
