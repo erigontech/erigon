@@ -83,7 +83,7 @@ func NewCaplinSnapshots(cfg ethconfig.BlocksFreezing, beaconCfg *clparams.Beacon
 	c.Init(snaptype.MaxEnum)
 	c.DirtyFiles()[snaptype.BeaconBlocks.Enum()] = btree.NewBTreeGOptions[*snapshotsync.DirtySegment](snapshotsync.DirtySegmentLess, btree.Options{Degree: 128, NoLocks: false})
 	c.DirtyFiles()[snaptype.BlobSidecars.Enum()] = btree.NewBTreeGOptions[*snapshotsync.DirtySegment](snapshotsync.DirtySegmentLess, btree.Options{Degree: 128, NoLocks: false})
-	c.recalcVisibleFiles()
+	c.recalcVisibleFiles(nil)
 	return c
 }
 
@@ -143,23 +143,27 @@ func (s *CaplinSnapshots) Close() {
 		return
 	}
 	var retired []snapshotsync.RetiredSegment
-	defer func() { s.recalcVisibleFiles(retired...) }()
-	s.LockDirty()
-	defer s.UnlockDirty()
-
-	retired = s.CloseWhatNotInList(nil)
+	defer func() { s.recalcVisibleFiles(retired) }()
+	_ = s.WithDirtyLock(func() error {
+		retired = s.CloseWhatNotInList(nil)
+		return nil
+	})
 }
 
 // OpenList stops on optimistic=false, continue opening files on optimistic=true
 func (s *CaplinSnapshots) OpenList(fileNames []string, optimistic bool) error {
 	var retired []snapshotsync.RetiredSegment
-	defer func() { s.recalcVisibleFiles(retired...) }()
+	defer func() { s.recalcVisibleFiles(retired) }()
 
-	s.LockDirty()
-	defer s.UnlockDirty()
+	return s.WithDirtyLock(func() error {
+		retired = s.CloseWhatNotInList(fileNames)
+		return s.openSegments(fileNames, optimistic)
+	})
+}
 
-	retired = s.CloseWhatNotInList(fileNames)
-
+// openSegments opens every file in fileNames into the dirty set. Must be called
+// under the dirty lock.
+func (s *CaplinSnapshots) openSegments(fileNames []string, optimistic bool) error {
 	// Get idx files for efficient index file lookups
 	idxFiles, err := snaptype.IdxFiles(s.dir)
 	if err != nil {
@@ -292,7 +296,7 @@ Loop:
 	return nil
 }
 
-func (s *CaplinSnapshots) recalcVisibleFiles(retired ...snapshotsync.RetiredSegment) {
+func (s *CaplinSnapshots) recalcVisibleFiles(retired []snapshotsync.RetiredSegment) {
 	defer func() {
 		s.idxMax.Store(s.idxAvailability())
 	}()
@@ -306,7 +310,9 @@ func (s *CaplinSnapshots) recalcVisibleFiles(retired ...snapshotsync.RetiredSegm
 }
 
 func (s *CaplinSnapshots) idxAvailability() uint64 {
-	segs := s.CurrentVisible().Segments(snaptype.BeaconBlocks.Enum())
+	view := s.View()
+	defer view.Close()
+	segs := view.BeaconBlocks()
 	if len(segs) == 0 {
 		return 0
 	}
@@ -738,8 +744,10 @@ func (s *CaplinSnapshots) FrozenBlobs() uint64 {
 	if s.beaconCfg.DenebForkEpoch == math.MaxUint64 {
 		return 0
 	}
+	view := s.View()
+	defer view.Close()
 	ret := uint64(0)
-	for _, seg := range s.CurrentVisible().Segments(snaptype.BlobSidecars.Enum()) {
+	for _, seg := range view.BlobSidecars() {
 		ret = max(ret, seg.To())
 	}
 

@@ -632,7 +632,7 @@ func newRoSnapshots(cfg ethconfig.BlocksFreezing, snapDir string, types []snapty
 		s.segmentsMinByType[t] = u
 	}
 
-	s.recalcVisibleFiles(s.alignMin)
+	s.recalcVisibleFiles(s.alignMin, nil)
 	return s
 }
 
@@ -864,7 +864,7 @@ func RecalcVisibleSegments(dirtySegments *btree.BTreeG[*DirtySegment]) []*Visibl
 // recalcVisibleFiles publishes a fresh visible generation built from the current
 // dirty set. `retired` are files removed from `dirty` by the caller; they are
 // attached to the outgoing generation and reclaimed once it drains.
-func (s *RoSnapshots) recalcVisibleFiles(alignMin bool, retired ...RetiredSegment) {
+func (s *RoSnapshots) recalcVisibleFiles(alignMin bool, retired []RetiredSegment) {
 	defer func() {
 		s.idxMax.Store(s.idxAvailability())
 	}()
@@ -1007,13 +1007,14 @@ func (f *FileSet) Init(size int) {
 }
 
 func (f *FileSet) DirtyFiles() []*btree.BTreeG[*DirtySegment] { return f.dirty }
-func (f *FileSet) LockDirty()                                 { f.dirtyLock.Lock() }
-func (f *FileSet) UnlockDirty()                               { f.dirtyLock.Unlock() }
 
-// CurrentVisible returns the published generation without pinning it. Only for
-// stat-style reads that tolerate a concurrent republish; readers that dereference
-// files must pin via AcquireVisible.
-func (f *FileSet) CurrentVisible() *VisibleFiles { return f.visible.Load() }
+// WithDirtyLock runs fn while holding the dirty write lock, so cross-package
+// embedders mutate `dirty` under the lock without handling a raw mutex.
+func (f *FileSet) WithDirtyLock(fn func() error) error {
+	f.dirtyLock.Lock()
+	defer f.dirtyLock.Unlock()
+	return fn()
+}
 
 // NewVisibleFiles builds a generation for Publish; for cross-package embedders
 // that can't construct VisibleFiles directly.
@@ -1146,7 +1147,7 @@ func (s *RoSnapshots) OpenFiles() (list []string) {
 // OpenList stops on optimistic=false, continue opening files on optimistic=true
 func (s *RoSnapshots) OpenList(fileNames []string, optimistic bool) error {
 	var retired []RetiredSegment
-	defer func() { s.recalcVisibleFiles(s.alignMin, retired...) }()
+	defer func() { s.recalcVisibleFiles(s.alignMin, retired) }()
 
 	s.dirtyLock.Lock()
 	defer s.dirtyLock.Unlock()
@@ -1170,7 +1171,7 @@ func (s *RoSnapshots) InitSegments(fileNames []string) error {
 		return err
 	}
 
-	s.recalcVisibleFiles(s.alignMin, retired...)
+	s.recalcVisibleFiles(s.alignMin, retired)
 	wasReady := s.segmentsReady.Swap(true)
 	if !wasReady {
 		if s.downloadReady.Load() {
@@ -1364,7 +1365,7 @@ func (s *RoSnapshots) OpenFolder() error {
 	}()
 	// Publish (and reclaim the CloseWhatNotInList drops) even on error, otherwise
 	// segments removed from `dirty` are never handed to a generation and leak.
-	s.recalcVisibleFiles(s.alignMin, retired...)
+	s.recalcVisibleFiles(s.alignMin, retired)
 	if err != nil {
 		return fmt.Errorf("OpenFolder: %w", err)
 	}
@@ -1379,7 +1380,7 @@ func (s *RoSnapshots) OpenFolder() error {
 }
 
 func (s *RoSnapshots) OpenSegments(types []snaptype.Type, alignMin bool) error {
-	defer s.recalcVisibleFiles(alignMin)
+	defer s.recalcVisibleFiles(alignMin, nil)
 
 	s.dirtyLock.Lock()
 	defer s.dirtyLock.Unlock()
@@ -1409,7 +1410,7 @@ func (s *RoSnapshots) Close() {
 		return
 	}
 	var retired []RetiredSegment
-	defer func() { s.recalcVisibleFiles(s.alignMin, retired...) }()
+	defer func() { s.recalcVisibleFiles(s.alignMin, retired) }()
 	s.dirtyLock.Lock()
 	defer s.dirtyLock.Unlock()
 
@@ -1607,7 +1608,7 @@ func (s *RoSnapshots) Delete(fileNames ...string) error {
 	}
 
 	var retired []RetiredSegment
-	defer func() { s.recalcVisibleFiles(s.alignMin, retired...) }()
+	defer func() { s.recalcVisibleFiles(s.alignMin, retired) }()
 	for _, fileName := range fileNames {
 		delSeg, err := s.delete(fileName)
 		if err != nil {

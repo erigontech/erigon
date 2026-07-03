@@ -1145,7 +1145,7 @@ func TestRoSnapshots_ConcurrentViewsAndRepublish(t *testing.T) {
 	go func() {
 		defer wg.Done()
 		for j := 0; j < iters; j++ {
-			s.recalcVisibleFiles(s.alignMin)
+			s.recalcVisibleFiles(s.alignMin, nil)
 		}
 	}()
 	wg.Wait()

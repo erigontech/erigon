@@ -266,7 +266,7 @@ func (m *Merger) Merge(
 
 func (m *Merger) integrateMergedDirtyFiles(snapshots *RoSnapshots, in, out map[snaptype.Enum][]*DirtySegment) {
 	var retired []RetiredSegment
-	defer func() { snapshots.recalcVisibleFiles(snapshots.alignMin, retired...) }()
+	defer func() { snapshots.recalcVisibleFiles(snapshots.alignMin, retired) }()
 
 	snapshots.dirtyLock.Lock()
 	defer snapshots.dirtyLock.Unlock()

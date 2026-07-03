@@ -54,7 +54,7 @@ func TestCaplinStateSnapshots_BundleRefcount(t *testing.T) {
 
 	// A republish publishes a new generation; the live View must keep the one it
 	// pinned, and the retired generation stays until the reader drains.
-	c.recalcVisibleFiles()
+	c.recalcVisibleFiles(nil)
 	require.NotSame(pinned, c.visible.Load(), "recalc must publish a new generation")
 	require.Same(pinned, v.visible, "view keeps its pinned generation")
 	require.NotSame(c.visible.Load(), c.oldestVisible, "retired generation still pinned by reader")

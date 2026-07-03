@@ -207,7 +207,7 @@ func NewCaplinStateSnapshots(cfg ethconfig.BlocksFreezing, beaconCfg *clparams.B
 	empty := &VisibleFiles{}
 	c.visible.Store(empty)
 	c.oldestVisible = empty
-	c.recalcVisibleFiles()
+	c.recalcVisibleFiles(nil)
 	return c
 }
 
@@ -276,7 +276,7 @@ func (s *CaplinStateSnapshots) Close() {
 		return
 	}
 	var retired []RetiredSegment
-	defer func() { s.recalcVisibleFiles(retired...) }()
+	defer func() { s.recalcVisibleFiles(retired) }()
 	s.dirtyLock.Lock()
 	defer s.dirtyLock.Unlock()
 
@@ -298,7 +298,7 @@ func (s *CaplinStateSnapshots) openSegIfNeed(sn *DirtySegment, filepath string) 
 // OpenList stops on optimistic=false, continue opening files on optimistic=true
 func (s *CaplinStateSnapshots) OpenList(fileNames []string, optimistic bool) error {
 	var retired []RetiredSegment
-	defer func() { s.recalcVisibleFiles(retired...) }()
+	defer func() { s.recalcVisibleFiles(retired) }()
 
 	s.dirtyLock.Lock()
 	defer s.dirtyLock.Unlock()
@@ -433,7 +433,7 @@ func isIndexed(s *DirtySegment) bool {
 	return true
 }
 
-func (s *CaplinStateSnapshots) recalcVisibleFiles(retired ...RetiredSegment) {
+func (s *CaplinStateSnapshots) recalcVisibleFiles(retired []RetiredSegment) {
 	defer func() {
 		s.idxMax.Store(s.idxAvailability())
 		s.indicesReady.Store(true)
