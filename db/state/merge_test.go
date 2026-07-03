@@ -115,6 +115,43 @@ func TestDomainRoTx_findMergeRange(t *testing.T) {
 
 }
 
+// TestHistoryStaticFilesInRange_DetectsGapInSourceFiles pins that a gap in
+// source files must reject the merge, not silently produce a shorter,
+// mislabeled result.
+func TestHistoryStaticFilesInRange_DetectsGapInSourceFiles(t *testing.T) {
+	t.Parallel()
+
+	d := emptyTestDomain(t, 1)
+	h := d.History
+	h.InvertedIndex.Accessors = 0
+	h.Accessors = 0
+
+	// gap: nothing covers [1,2) even though the claimed merge range is [0,3)
+	h.scanDirtyFiles([]string{
+		"v1.0-accounts.0-1.v",
+		"v1.0-accounts.2-3.v",
+	})
+	h.dirtyFiles.Scan(func(item *FilesItem) bool {
+		item.decompressor = &seg.Decompressor{}
+		return true
+	})
+	h.InvertedIndex.scanDirtyFiles([]string{
+		"v1.0-accounts.0-1.ef",
+		"v1.0-accounts.2-3.ef",
+	})
+	h.InvertedIndex.dirtyFiles.Scan(func(item *FilesItem) bool {
+		item.decompressor = &seg.Decompressor{}
+		return true
+	})
+
+	hc := h.beginForTests()
+	defer hc.Close()
+
+	r := NewHistoryRanges(*NewMergeRange("accounts", true, 0, 3), MergeRange{})
+	_, _, err := hc.staticFilesInRange(r)
+	require.Error(t, err, "staticFilesInRange must reject a merge range with a gap in source files")
+}
+
 func emptyTestInvertedIndex(t testing.TB, aggStep uint64) *InvertedIndex {
 	t.Helper()
 	salt := uint32(1)
