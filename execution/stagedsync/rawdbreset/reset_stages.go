@@ -235,7 +235,6 @@ var stateHistoryBuckets = []string{
 	kv.TblPruningProgress,
 	kv.TblPruningValsProg,
 	kv.ChangeSets3,
-	kv.BlockAccessList,
 }
 
 func clearStageProgress(tx kv.RwTx, stagesList ...stages.SyncStage) error {
