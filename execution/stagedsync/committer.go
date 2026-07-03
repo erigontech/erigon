@@ -441,20 +441,11 @@ func (cc *commitmentCalculator) handleBlockRequest(ctx context.Context, req *blo
 		cc.hasFirstBlock = true
 	}
 	mode := calcModeIncremental
-	if len(req.bal) > 0 && !dbg.IgnoreBAL && dbg.BALDrivenCommitment && !cc.blockCrossesStepBoundary(req) {
+	if len(req.bal) > 0 && !dbg.IgnoreBAL && dbg.BALDrivenCommitment {
 		mode = calcModeBALDriven
 	}
 	cc.pending[req.blockNum] = &pendingBlock{req: req, mode: mode}
 	cc.maybeFoldAhead(ctx, req.blockNum)
-}
-
-// blockCrossesStepBoundary reports whether the block spans more than one step.
-// Such a block is left to the incremental path: an unfrozen step boundary inside
-// it needs a mid-block commitment checkpoint, which the block-atomic BAL fold
-// doesn't emit — folding it would regress the domain's latest [state]/branches.
-func (cc *commitmentCalculator) blockCrossesStepBoundary(req *blockRequest) bool {
-	ss := cc.doms.StepSize()
-	return ss > 0 && req.firstTxNum/ss != req.lastTxNum/ss
 }
 
 // foldGateOpen reports whether block n's BAL fold can run: block n-1's
@@ -511,12 +502,20 @@ func (cc *commitmentCalculator) foldBlockFromBAL(ctx context.Context, pb *pendin
 		StateRoot: req.stateRoot,
 		lastTxNum: req.lastTxNum,
 	}
-	reader := &asOfStateReader{sd: cc.doms, roTx: cc.roTx, txNum: req.lastTxNum + 1}
-	balState := newCalcState(reader, cc.logger, cc.logPrefix)
 	// EIP-161 empty-removal inputs, matching normalizeWriteSet on the exec path.
 	// IsEIP161Enabled (not IsSpuriousDragon) so a chain with EIP-161 in disabledEIPs
 	// keeps empty leaves in the fold exactly as exec does.
 	emptyRemoval := req.blockNum != 0 && cc.chainConfig.IsEIP161Enabled(req.blockNum)
+	// A block straddling an unfrozen step edge must leave a commitment checkpoint
+	// at that edge (else the step's commitment .kv lags its account/storage .kv).
+	// The per-tx BAL lets the fold checkpoint mid-block, so a straddling block
+	// stays on the fold path instead of dropping to the incremental one.
+	if err := cc.foldStepCheckpoints(ctx, req, emptyRemoval); err != nil {
+		cc.fail(ctx, br, err)
+		return
+	}
+	reader := &asOfStateReader{sd: cc.doms, roTx: cc.roTx, txNum: req.lastTxNum + 1}
+	balState := newCalcState(reader, cc.logger, cc.logPrefix)
 	balState.LoadFromBAL(req.bal, emptyRemoval, cc.chainConfig.Aura != nil)
 	if err := balState.LazyLoadErr(); err != nil {
 		cc.fail(ctx, br, fmt.Errorf("BAL-driven lazy-load: %w", err))
@@ -553,6 +552,43 @@ func (cc *commitmentCalculator) foldBlockFromBAL(ctx context.Context, pb *pendin
 	if !dbg.BALShadowCompute {
 		cc.publish(ctx, commitmentResult{blockNum: req.blockNum, blockHash: req.blockHash, txNum: req.lastTxNum, rootHash: rh})
 	}
+}
+
+// foldStepCheckpoints emits a commitment checkpoint at each unfrozen step edge
+// interior to the block (edge < block-end txNum), folding the per-tx BAL up to
+// that edge. Without it a block straddling a step edge would leave the step's
+// commitment .kv lagging its account/storage .kv. The BAL index of a txNum is
+// txNum-firstTxNum (blockAccessIndex == TxIndex+1 and txNum == firstTxNum+
+// TxIndex+1), so folding changes at index ≤ edge-firstTxNum is the state as of
+// the edge. computeRootFromUpdates saves the checkpoint (ComputeCommitmentLocked
+// with saveStateAfter); the returned root is discarded — there is no header to
+// verify mid-block. Runs before the block-end fold so that builds on it.
+func (cc *commitmentCalculator) foldStepCheckpoints(ctx context.Context, req *blockRequest, emptyRemoval bool) error {
+	ss := cc.doms.StepSize()
+	if ss == 0 {
+		return nil
+	}
+	for edge := ((req.firstTxNum/ss)+1)*ss - 1; edge < req.lastTxNum; edge += ss {
+		if !cc.doms.IsUnfrozenStepEdge(cc.roTx, edge) {
+			continue
+		}
+		reader := &asOfStateReader{sd: cc.doms, roTx: cc.roTx, txNum: edge + 1}
+		balState := newCalcState(reader, cc.logger, cc.logPrefix)
+		balState.LoadFromBALUpTo(req.bal, uint32(edge-req.firstTxNum), emptyRemoval, cc.chainConfig.Aura != nil)
+		if err := balState.LazyLoadErr(); err != nil {
+			return fmt.Errorf("BAL-driven step-checkpoint lazy-load at txNum %d: %w", edge, err)
+		}
+		balUpdates := cc.updates.NewEmpty()
+		if balUpdates.Mode() != commitment.ModeParallel {
+			balUpdates.SetMode(commitment.ModeUpdate)
+		}
+		balState.FlushToUpdates(balUpdates)
+		stepBr := &blockResult{BlockNum: req.blockNum, BlockHash: req.blockHash, lastTxNum: edge}
+		if _, err := cc.computeRootFromUpdates(ctx, targetOf(stepBr), balUpdates, reader); err != nil {
+			return fmt.Errorf("BAL-driven step-checkpoint compute at txNum %d: %w", edge, err)
+		}
+	}
+	return nil
 }
 
 // computeRootFromUpdates installs an explicit updates buffer + reader on the
