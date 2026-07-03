@@ -64,8 +64,8 @@ type InvertedIndex struct {
 	stepsInFrozenFile uint64 // starting from this number of steps, the file is considered frozen
 
 	// dirtyFiles is the list of ALL files (un-indexed, garbage, merged-into-bigger-one, …);
-	// the garbage-free visible view (an iiVisible snapshot) is published via
-	// Aggregator.visible. See fileSet for the dirty↔visible model.
+	// its garbage-free visible view is an iiVisible snapshot. See fileSet for the
+	// dirty↔visible model.
 	dirtyFiles *DirtyFiles
 
 	logger log.Logger

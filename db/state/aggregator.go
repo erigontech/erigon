@@ -78,7 +78,7 @@ type Aggregator struct {
 
 	reorgBlockDepth uint64
 
-	fileSet // dirtyFilesLock + the published visible-file generations
+	fileSet // dirtyFilesLock + every field it guards (the published visible-file generations)
 
 	// commitmentRefsMu guards the runtime-mutable commitment ReferencesInCommitmentBranches
 	// flag: ReloadErigonDBSettings writes it while background merges read it.
@@ -233,8 +233,10 @@ func (a *Aggregator) RegisterDomain(cfg statecfg.DomainCfg, salt *uint32, dirs d
 	if err != nil {
 		return err
 	}
-	a.d[cfg.Name].salt.Store(salt)
+	d := a.d[cfg.Name]
+	d.salt.Store(salt)
 	a.AddDependencyBtwnHistoryII(cfg.Name)
+	a.dirty = append(a.dirty, d.dirtyFiles, d.History.dirtyFiles, d.History.InvertedIndex.dirtyFiles)
 	return nil
 }
 
@@ -255,6 +257,7 @@ func (a *Aggregator) RegisterII(cfg statecfg.InvIdxCfg, salt *uint32, dirs datad
 	}
 	a.iis[a.iisCount] = ii
 	a.iisCount++
+	a.dirty = append(a.dirty, ii.dirtyFiles)
 	return nil
 }
 
@@ -804,13 +807,8 @@ func (a *Aggregator) LS() {
 
 	a.dirtyFilesLock.Lock()
 	defer a.dirtyFilesLock.Unlock()
-	for _, d := range a.d {
-		doLS(d.dirtyFiles)
-		doLS(d.History.dirtyFiles)
-		doLS(d.History.InvertedIndex.dirtyFiles)
-	}
-	for _, d := range a.standaloneIIs() {
-		doLS(d.dirtyFiles)
+	for _, df := range a.dirty {
+		doLS(df)
 	}
 	a.logger.Info("[agg] total", "words", stats.Words, "dictOnDisk", common.ByteCount(stats.Dict), "dictMem", common.ByteCount(stats.DictMem))
 }
@@ -1774,19 +1772,21 @@ func (a *Aggregator) dirtyFilesEndTxNumMinimax() uint64 {
 	return m
 }
 
-// fileSet is the aggregator-wide file-visibility state: the lock guarding every
-// per-entity DirtyFiles tree, and the immutable chain of visible generations
-// derived from them.
+// fileSet groups the aggregator's file-visibility state under one lock:
+// dirtyFilesLock plus the fields it guards — the atomically-published chain of
+// visible generations. The per-entity dirtyFiles trees (Domain/History/
+// InvertedIndex) are guarded by this same lock; they live in those leaf types
+// rather than here only because that is where the files physically sit.
 //
-// Each Domain/History/InvertedIndex keeps a `dirtyFiles` tree — the list of ALL
-// files, including un-indexed, garbage, and merged-into-bigger-one. The visible
-// view (no garbage, no overlaps, no un-indexed files) is computed by
-// recalcVisibleFiles into an immutable aggregatorVisible snapshot and published
-// atomically via `visible`; BeginFilesRo opens zero-copy readers against it.
-// Merge/prune retire superseded files onto the outgoing generation; the last
-// reader to drain a generation reclaims them (oldest-first along the chain).
+// recalcVisibleFiles computes the garbage-free visible view into an immutable
+// aggregatorVisible snapshot published atomically via `visible`; BeginFilesRo
+// opens zero-copy readers against it. See aggregatorVisible for how retired
+// files are reclaimed.
 type fileSet struct {
 	dirtyFilesLock sync.Mutex
+	// dirty is every entity's dirtyFiles tree, registered at RegisterDomain/RegisterII,
+	// so uniform all-dirty sweeps go through fileSet instead of re-walking the entity graph.
+	dirty []*DirtyFiles
 	// visible is CoW, updated only by recalcVisibleFiles (readers take no lock and
 	// instead load it atomically).
 	visible atomic.Pointer[aggregatorVisible]
@@ -2662,26 +2662,16 @@ func (at *AggregatorRoTx) DisableReadAhead() {
 func (a *Aggregator) MadvNormal() *Aggregator {
 	a.dirtyFilesLock.Lock()
 	defer a.dirtyFilesLock.Unlock()
-	for _, d := range a.d {
-		d.dirtyFiles.MadvNormal()
-		d.History.dirtyFiles.MadvNormal()
-		d.History.InvertedIndex.dirtyFiles.MadvNormal()
-	}
-	for _, ii := range a.standaloneIIs() {
-		ii.dirtyFiles.MadvNormal()
+	for _, df := range a.dirty {
+		df.MadvNormal()
 	}
 	return a
 }
 func (a *Aggregator) DisableReadAhead() {
 	a.dirtyFilesLock.Lock()
 	defer a.dirtyFilesLock.Unlock()
-	for _, d := range a.d {
-		d.dirtyFiles.DisableReadAhead()
-		d.History.dirtyFiles.DisableReadAhead()
-		d.History.InvertedIndex.dirtyFiles.DisableReadAhead()
-	}
-	for _, ii := range a.standaloneIIs() {
-		ii.dirtyFiles.DisableReadAhead()
+	for _, df := range a.dirty {
+		df.DisableReadAhead()
 	}
 }
 

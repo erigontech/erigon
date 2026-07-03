@@ -80,8 +80,8 @@ type Domain struct {
 	//  - .kvei - key -> existence (bloom filter)
 
 	// dirtyFiles is the list of ALL files (un-indexed, garbage, merged-into-bigger-one, …);
-	// the garbage-free visible view (a domainVisible snapshot) is published via
-	// Aggregator.visible. See fileSet for the dirty↔visible model.
+	// its garbage-free visible view is a domainVisible snapshot. See fileSet for the
+	// dirty↔visible model.
 	dirtyFiles *DirtyFiles
 
 	checker *DependencyIntegrityChecker
