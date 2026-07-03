@@ -248,10 +248,7 @@ type DirtySegment struct {
 	segType snaptype.Type
 	version snaptype.Version
 
-	frozen   bool
-	refcount atomic.Int32
-
-	canDelete atomic.Bool
+	frozen bool
 
 	// only caplin state
 	filePath string
@@ -433,16 +430,12 @@ func (s *DirtySegment) OpenIdxIfNeed(dir string, optimistic bool, dirEntries []s
 		return nil
 	}
 
-	if s.refcount.Load() == 0 {
-		err = s.openIdx(dir, dirEntries)
-
-		if err != nil {
-			if !errors.Is(err, os.ErrNotExist) {
-				if optimistic {
-					log.Warn("[snapshots] open index", "err", err)
-				} else {
-					return err
-				}
+	if err = s.openIdx(dir, dirEntries); err != nil {
+		if !errors.Is(err, os.ErrNotExist) {
+			if optimistic {
+				log.Warn("[snapshots] open index", "err", err)
+			} else {
+				return err
 			}
 		}
 	}
@@ -496,65 +489,24 @@ func (s *DirtySegment) openIdx(dir string, dirEntries []string) (err error) {
 
 type VisibleSegments []*VisibleSegment
 
-func (s VisibleSegments) BeginRo() *RoTx {
-	for _, seg := range s {
-		if seg.src == nil {
-			continue
-		}
-		if seg.src.frozen {
-			continue
-		}
-		seg.src.refcount.Add(1)
-	}
-	return &RoTx{Segments: s}
-}
-
+// RoTx pins a visible generation for the lifetime of a read. Close releases the
+// pin (Segments may be nil for a type with no visible files, yet the pin was
+// still taken, so release is keyed off `snaps`/`visible`, not `Segments`).
 type RoTx struct {
 	Segments VisibleSegments
 
-	// Set when this RoTx pins a RoSnapshots generation (bundle-refcount model):
-	// Close releases the generation. When nil, Close uses the per-file refcount
-	// path still used by the Caplin snapshot containers.
 	snaps   *RoSnapshots
-	visible *snapshotVisible
+	visible *VisibleFiles
 }
 
 func (s *RoTx) Close() {
-	if s == nil {
+	if s == nil || s.snaps == nil {
 		return
 	}
-
-	// Bundle-pinned (RoSnapshots): release the generation keyed off the pin, not
-	// Segments — the per-type slice can be nil (a type with no visible files) yet
-	// the pin was still taken.
-	if s.snaps != nil {
-		snaps, vis := s.snaps, s.visible
-		s.snaps, s.visible, s.Segments = nil, nil, nil
-		if vis != nil {
-			snaps.releaseVisible(vis)
-		}
-		return
-	}
-
-	if s.Segments == nil {
-		return
-	}
-	segs := s.Segments
-	s.Segments = nil
-	for i := range segs {
-		src := segs[i].src
-		if src == nil {
-			continue
-		}
-		if src.frozen {
-			continue
-		}
-
-		refCnt := src.refcount.Add(-1)
-
-		if refCnt == 0 && src.canDelete.Load() {
-			src.closeAndRemoveFiles()
-		}
+	snaps, vis := s.snaps, s.visible
+	s.snaps, s.visible, s.Segments = nil, nil, nil
+	if vis != nil {
+		snaps.ReleaseVisible(vis)
 	}
 }
 
@@ -570,7 +522,7 @@ type RoSnapshots struct {
 	types []snaptype.Type //immutable
 	enums []snaptype.Enum //immutable
 
-	fileSet // dirty segments + published visible generations, under one lock
+	FileSet // dirty segments + published visible generations, under one lock
 
 	dir               string
 	segmentsMinByType map[snaptype.Enum]*atomic.Uint64 // min block number per segment type
@@ -616,29 +568,32 @@ func (s *RoSnapshots) isInProgress(enum snaptype.Enum, from, to uint64) bool {
 	return ok
 }
 
-// snapshotVisible is an immutable generation of the visible files. A reader pins
+// VisibleFiles is an immutable generation of the visible files. A reader pins
 // one generation via refcnt (a single atomic add, not one per file). A producer
 // publishes a new generation and hands the files it removed to the outgoing
 // generation's `retired` set; the last reader to drain a generation reclaims
 // those files, walking `next` oldest→newest.
-type snapshotVisible struct {
+type VisibleFiles struct {
 	segments    []VisibleSegments // ordered map `type.Enum()` -> VisibleSegments
 	segmentsMax uint64            // max visible (indexed, non-subsumed, gap-free) segment height across all types
 
 	refcnt  atomic.Int32
-	retired []retiredSegment
-	next    *snapshotVisible
+	retired []RetiredSegment
+	next    *VisibleFiles
 }
 
-// retiredSegment is a file that left the visible set. removeFiles distinguishes a
+// RetiredSegment is a file that left the visible set. removeFiles distinguishes a
 // real deletion (merge/prune: close fds and delete from disk) from a reopen drop
 // (close fds only; the file stays on disk because it is leaving memory, not being
 // deleted). Reclamation is deferred until every generation that could still be
 // reading the file has drained.
-type retiredSegment struct {
+type RetiredSegment struct {
 	seg         *DirtySegment
 	removeFiles bool
 }
+
+// Segments returns the visible files of one type in this generation.
+func (v *VisibleFiles) Segments(enum snaptype.Enum) VisibleSegments { return v.segments[enum] }
 
 // NewRoSnapshots - opens all snapshots. But to simplify everything:
 //   - it opens snapshots only on App start and immutable after
@@ -660,7 +615,7 @@ func newRoSnapshots(cfg ethconfig.BlocksFreezing, snapDir string, types []snapty
 	snCfg := snapcfg.KnownCfgOrDevnet(cfg.ChainName)
 	s := &RoSnapshots{dir: snapDir, cfg: cfg, snCfg: snCfg, logger: logger,
 		types: types, enums: enums,
-		fileSet:           fileSet{dirty: make([]*btree.BTreeG[*DirtySegment], snaptype.MaxEnum)},
+		FileSet:           FileSet{dirty: make([]*btree.BTreeG[*DirtySegment], snaptype.MaxEnum)},
 		alignMin:          alignMin,
 		operators:         map[snaptype.Enum]*retireOperators{},
 		segmentsMinByType: make(map[snaptype.Enum]*atomic.Uint64),
@@ -668,7 +623,7 @@ func newRoSnapshots(cfg ethconfig.BlocksFreezing, snapDir string, types []snapty
 	for _, snapType := range types {
 		s.dirty[snapType.Enum()] = btree.NewBTreeGOptions[*DirtySegment](DirtySegmentLess, btree.Options{Degree: 128, NoLocks: false})
 	}
-	s.visible.Store(&snapshotVisible{segments: make([]VisibleSegments, snaptype.MaxEnum)})
+	s.visible.Store(&VisibleFiles{segments: make([]VisibleSegments, snaptype.MaxEnum)})
 	s.oldestVisible = s.visible.Load()
 
 	for _, t := range s.enums {
@@ -853,9 +808,6 @@ func RecalcVisibleSegments(dirtySegments *btree.BTreeG[*DirtySegment]) []*Visibl
 	newVisibleSegments := make([]*VisibleSegment, 0, dirtySegments.Len())
 	dirtySegments.Walk(func(segments []*DirtySegment) bool {
 		for _, sn := range segments {
-			if sn.canDelete.Load() {
-				continue
-			}
 			if !sn.IsIndexed() {
 				continue
 			}
@@ -912,12 +864,12 @@ func RecalcVisibleSegments(dirtySegments *btree.BTreeG[*DirtySegment]) []*Visibl
 // recalcVisibleFiles publishes a fresh visible generation built from the current
 // dirty set. `retired` are files removed from `dirty` by the caller; they are
 // attached to the outgoing generation and reclaimed once it drains.
-func (s *RoSnapshots) recalcVisibleFiles(alignMin bool, retired ...retiredSegment) {
+func (s *RoSnapshots) recalcVisibleFiles(alignMin bool, retired ...RetiredSegment) {
 	defer func() {
 		s.idxMax.Store(s.idxAvailability())
 	}()
 
-	var toDelete []retiredSegment
+	var toDelete []RetiredSegment
 	func() {
 		s.dirtyLock.Lock()
 		defer s.dirtyLock.Unlock()
@@ -970,29 +922,29 @@ func (s *RoSnapshots) recalcVisibleFiles(alignMin bool, retired ...retiredSegmen
 			}
 		}
 
-		next := &snapshotVisible{segments: visible, segmentsMax: segmentsMax}
+		next := &VisibleFiles{segments: visible, segmentsMax: segmentsMax}
 		toDelete = s.publishLocked(next, retired)
 	}()
 
 	closeAndRemoveFiles(toDelete)
 }
 
-// fileSet owns a container's DirtySegments and its published visible generations,
+// FileSet owns a container's DirtySegments and its published visible generations,
 // under one lock. Readers pin the current generation via refcnt (read lock-free);
 // mutations to `dirty` and to the generation chain (publish/reclaim) are serialized
 // by `dirtyLock`. A publisher appends a generation and hands the outgoing one's
 // removed files to `retired`; the last reader to drain a generation reclaims them.
-type fileSet struct {
+type FileSet struct {
 	dirtyLock     sync.RWMutex
 	dirty         []*btree.BTreeG[*DirtySegment] // indexed by enum (blocks) / tableIndex (caplin state)
-	visible       atomic.Pointer[snapshotVisible]
-	oldestVisible *snapshotVisible // chain head (oldest generation still pinned); guarded by dirtyLock
+	visible       atomic.Pointer[VisibleFiles]
+	oldestVisible *VisibleFiles // chain head (oldest generation still pinned); guarded by dirtyLock
 }
 
-// acquireVisible pins the current generation. Load and increment are not atomic
+// AcquireVisible pins the current generation. Load and increment are not atomic
 // together, so re-validate: if the generation was superseded between the two, the
 // pin landed on a draining generation — drop it and retry (hazard-pointer style).
-func (f *fileSet) acquireVisible() *snapshotVisible {
+func (f *FileSet) AcquireVisible() *VisibleFiles {
 	// Hazard pointer concept: https://github.com/facebook/folly/blob/main/folly/synchronization/Hazptr.h#L27C5-L27C22
 	for {
 		v := f.visible.Load()
@@ -1000,18 +952,18 @@ func (f *fileSet) acquireVisible() *snapshotVisible {
 		if f.visible.Load() == v {
 			return v
 		}
-		f.releaseVisible(v)
+		f.ReleaseVisible(v)
 	}
 }
 
-// releaseVisible drops a pin taken by acquireVisible; the last reader reclaims.
-func (f *fileSet) releaseVisible(v *snapshotVisible) {
+// ReleaseVisible drops a pin taken by AcquireVisible; the last reader reclaims.
+func (f *FileSet) ReleaseVisible(v *VisibleFiles) {
 	if v.refcnt.Add(-1) == 0 {
 		f.reclaimRetired()
 	}
 }
 
-func (f *fileSet) reclaimRetired() {
+func (f *FileSet) reclaimRetired() {
 	f.dirtyLock.Lock()
 	toDelete := f.reclaimRetiredLocked()
 	f.dirtyLock.Unlock()
@@ -1022,7 +974,7 @@ func (f *fileSet) reclaimRetired() {
 // collecting their retired files. When the head's refcnt is 0 every older
 // generation is already gone, so its retired files have no other live holder.
 // Must be called under dirtyLock; the returned files are reclaimed outside it.
-func (f *fileSet) reclaimRetiredLocked() (toDelete []retiredSegment) {
+func (f *FileSet) reclaimRetiredLocked() (toDelete []RetiredSegment) {
 	cur := f.visible.Load()
 	for h := f.oldestVisible; h != cur && h.refcnt.Load() == 0; h = h.next {
 		toDelete = append(toDelete, h.retired...)
@@ -1035,7 +987,7 @@ func (f *fileSet) reclaimRetiredLocked() (toDelete []retiredSegment) {
 // publishLocked installs `next` as the current generation, attaches the caller's
 // removed files to the outgoing one, and returns the files now reclaimable.
 // Must be called under dirtyLock.
-func (f *fileSet) publishLocked(next *snapshotVisible, retired []retiredSegment) []retiredSegment {
+func (f *FileSet) publishLocked(next *VisibleFiles, retired []RetiredSegment) []RetiredSegment {
 	old := f.visible.Load()
 	old.retired = retired
 	old.next = next
@@ -1043,7 +995,7 @@ func (f *fileSet) publishLocked(next *snapshotVisible, retired []retiredSegment)
 	return f.reclaimRetiredLocked()
 }
 
-func closeAndRemoveFiles(toDelete []retiredSegment) {
+func closeAndRemoveFiles(toDelete []RetiredSegment) {
 	for _, r := range toDelete {
 		if r.removeFiles {
 			r.seg.closeAndRemoveFiles()
@@ -1051,6 +1003,38 @@ func closeAndRemoveFiles(toDelete []retiredSegment) {
 			r.seg.close()
 		}
 	}
+}
+
+// Init allocates `size` dirty slots (indexed by enum) and an empty visible
+// generation. Callers in other packages that embed FileSet use this instead of
+// touching the unexported fields directly.
+func (f *FileSet) Init(size int) {
+	f.dirty = make([]*btree.BTreeG[*DirtySegment], size)
+	empty := &VisibleFiles{segments: make([]VisibleSegments, size)}
+	f.visible.Store(empty)
+	f.oldestVisible = empty
+}
+
+func (f *FileSet) DirtyFiles() []*btree.BTreeG[*DirtySegment] { return f.dirty }
+func (f *FileSet) LockDirty()                                 { f.dirtyLock.Lock() }
+func (f *FileSet) UnlockDirty()                               { f.dirtyLock.Unlock() }
+
+// CurrentVisible returns the published generation without pinning it. Only for
+// stat-style reads that tolerate a concurrent republish; readers that dereference
+// files must pin via AcquireVisible.
+func (f *FileSet) CurrentVisible() *VisibleFiles { return f.visible.Load() }
+
+// Publish builds a new generation via `build` (run under dirtyLock so it sees a
+// consistent dirty set), installs it, hands `retired` to the outgoing generation,
+// and reclaims whatever has drained.
+func (f *FileSet) Publish(retired []RetiredSegment, build func() []VisibleSegments) {
+	var toDelete []RetiredSegment
+	func() {
+		f.dirtyLock.Lock()
+		defer f.dirtyLock.Unlock()
+		toDelete = f.publishLocked(&VisibleFiles{segments: build()}, retired)
+	}()
+	closeAndRemoveFiles(toDelete)
 }
 
 // minimax of existing indices
@@ -1164,13 +1148,13 @@ func (s *RoSnapshots) OpenFiles() (list []string) {
 
 // OpenList stops on optimistic=false, continue opening files on optimistic=true
 func (s *RoSnapshots) OpenList(fileNames []string, optimistic bool) error {
-	var retired []retiredSegment
+	var retired []RetiredSegment
 	defer func() { s.recalcVisibleFiles(s.alignMin, retired...) }()
 
 	s.dirtyLock.Lock()
 	defer s.dirtyLock.Unlock()
 
-	retired = s.closeWhatNotInList(fileNames)
+	retired = s.CloseWhatNotInList(fileNames)
 	if err := s.openSegments(fileNames, true, optimistic); err != nil {
 		return err
 	}
@@ -1178,12 +1162,12 @@ func (s *RoSnapshots) OpenList(fileNames []string, optimistic bool) error {
 }
 
 func (s *RoSnapshots) InitSegments(fileNames []string) error {
-	var retired []retiredSegment
+	var retired []RetiredSegment
 	if err := func() error {
 		s.dirtyLock.Lock()
 		defer s.dirtyLock.Unlock()
 
-		retired = s.closeWhatNotInList(fileNames)
+		retired = s.CloseWhatNotInList(fileNames)
 		return s.openSegments(fileNames, false, true)
 	}(); err != nil {
 		return err
@@ -1363,7 +1347,7 @@ func (s *RoSnapshots) Ranges(align bool) []Range {
 
 func (s *RoSnapshots) OptimisticalyOpenFolder() { _ = s.OpenFolder() }
 func (s *RoSnapshots) OpenFolder() error {
-	var retired []retiredSegment
+	var retired []RetiredSegment
 	err := func() error {
 		s.dirtyLock.Lock()
 		defer s.dirtyLock.Unlock()
@@ -1378,10 +1362,10 @@ func (s *RoSnapshots) OpenFolder() error {
 			_, fName := filepath.Split(f.Path)
 			list = append(list, fName)
 		}
-		retired = s.closeWhatNotInList(list)
+		retired = s.CloseWhatNotInList(list)
 		return s.openSegments(list, true, false)
 	}()
-	// Publish (and reclaim the closeWhatNotInList drops) even on error, otherwise
+	// Publish (and reclaim the CloseWhatNotInList drops) even on error, otherwise
 	// segments removed from `dirty` are never handed to a generation and leak.
 	s.recalcVisibleFiles(s.alignMin, retired...)
 	if err != nil {
@@ -1414,7 +1398,7 @@ func (s *RoSnapshots) OpenSegments(types []snaptype.Type, alignMin bool) error {
 		list = append(list, fName)
 	}
 
-	// Do not call closeWhatNotInList(list) here. list only contains segments of the
+	// Do not call CloseWhatNotInList(list) here. list only contains segments of the
 	// requested types; calling it would close all other types (e.g. Transactions) from dirty.
 	// Stale entries for the requested types are cleaned by the next OpenFolder call.
 	if err := s.openSegments(list, true, false); err != nil {
@@ -1427,21 +1411,21 @@ func (s *RoSnapshots) Close() {
 	if s == nil {
 		return
 	}
-	var retired []retiredSegment
+	var retired []RetiredSegment
 	defer func() { s.recalcVisibleFiles(s.alignMin, retired...) }()
 	s.dirtyLock.Lock()
 	defer s.dirtyLock.Unlock()
 
-	retired = s.closeWhatNotInList(nil)
+	retired = s.CloseWhatNotInList(nil)
 }
 
-// closeWhatNotInList removes from `dirty` every segment whose file is not in l
+// CloseWhatNotInList removes from `dirty` every segment whose file is not in l
 // and returns them as close-only retirements: the fds are released once the last
 // reader that could see them drains, but the files stay on disk (they are leaving
 // memory on reopen, not being deleted). An unopened (nil-Decompressor) segment is
 // always dropped — a later reopen re-creates it, so keeping it would only leave a
 // duplicate. Must be called under dirtyLock.
-func (f *fileSet) closeWhatNotInList(l []string) (removed []retiredSegment) {
+func (f *FileSet) CloseWhatNotInList(l []string) (removed []RetiredSegment) {
 	protectFiles := make(map[string]struct{}, len(l))
 	for _, name := range l {
 		protectFiles[name] = struct{}{}
@@ -1464,7 +1448,7 @@ func (f *fileSet) closeWhatNotInList(l []string) (removed []retiredSegment) {
 		})
 		for _, delSeg := range toDrop {
 			dirtyFiles.Delete(delSeg)
-			removed = append(removed, retiredSegment{seg: delSeg})
+			removed = append(removed, RetiredSegment{seg: delSeg})
 		}
 	}
 	return removed
@@ -1491,7 +1475,7 @@ func (s *RoSnapshots) RemoveOverlaps(onDelete func(l []string) error) error {
 		keepNames = append(keepNames, info.Name())
 	}
 	s.dirtyLock.Lock()
-	dropped := s.closeWhatNotInList(keepNames)
+	dropped := s.CloseWhatNotInList(keepNames)
 	s.dirtyLock.Unlock()
 	for _, r := range dropped {
 		r.seg.close()
@@ -1625,7 +1609,7 @@ func (s *RoSnapshots) Delete(fileNames ...string) error {
 		return nil
 	}
 
-	var retired []retiredSegment
+	var retired []RetiredSegment
 	defer func() { s.recalcVisibleFiles(s.alignMin, retired...) }()
 	for _, fileName := range fileNames {
 		delSeg, err := s.delete(fileName)
@@ -1633,7 +1617,7 @@ func (s *RoSnapshots) Delete(fileNames ...string) error {
 			return fmt.Errorf("can't delete file: %w", err)
 		}
 		if delSeg != nil {
-			retired = append(retired, retiredSegment{seg: delSeg, removeFiles: !delSeg.frozen})
+			retired = append(retired, RetiredSegment{seg: delSeg, removeFiles: !delSeg.frozen})
 		}
 	}
 	return nil
@@ -1767,20 +1751,20 @@ func (s *RoSnapshots) PrintDebug() {
 
 type View struct {
 	s           *RoSnapshots
-	visible     *snapshotVisible // pinned generation; released in Close
+	visible     *VisibleFiles // pinned generation; released in Close
 	baseSegType snaptype.Type
 }
 
 func (s *RoSnapshots) View() *View {
 	// Transactions is the last segment to be processed, so it's the most reliable.
-	return &View{s: s, visible: s.acquireVisible(), baseSegType: snaptype2.Transactions}
+	return &View{s: s, visible: s.AcquireVisible(), baseSegType: snaptype2.Transactions}
 }
 
 func (v *View) Close() {
 	if v == nil || v.s == nil {
 		return
 	}
-	v.s.releaseVisible(v.visible)
+	v.s.ReleaseVisible(v.visible)
 	v.s, v.visible = nil, nil
 }
 
@@ -1793,7 +1777,7 @@ func (s *View) WithBaseSegType(t snaptype.Type) *View {
 var noop = func() {}
 
 func (s *RoSnapshots) ViewType(t snaptype.Type) *RoTx {
-	v := s.acquireVisible()
+	v := s.AcquireVisible()
 	return &RoTx{Segments: v.segments[t.Enum()], snaps: s, visible: v}
 }
 

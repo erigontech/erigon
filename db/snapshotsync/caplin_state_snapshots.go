@@ -144,7 +144,7 @@ type CaplinStateSnapshots struct {
 
 	Salt uint32
 
-	fileSet                   // dirty segments + published visible generations, under one lock
+	FileSet                   // dirty segments + published visible generations, under one lock
 	tableIndex map[string]int // table name -> index into dirty/segments; immutable after init
 
 	snapshotTypes SnapshotTypes
@@ -204,7 +204,7 @@ func NewCaplinStateSnapshots(cfg ethconfig.BlocksFreezing, beaconCfg *clparams.B
 
 	c := &CaplinStateSnapshots{snapshotTypes: snapshotTypes, dir: dirs.SnapCaplin, tmpdir: dirs.Tmp, cfg: cfg, tableIndex: tableIndex, logger: logger, beaconCfg: beaconCfg}
 	c.dirty = dirty
-	empty := &snapshotVisible{}
+	empty := &VisibleFiles{}
 	c.visible.Store(empty)
 	c.oldestVisible = empty
 	c.recalcVisibleFiles()
@@ -275,12 +275,12 @@ func (s *CaplinStateSnapshots) Close() {
 	if s == nil {
 		return
 	}
-	var retired []retiredSegment
+	var retired []RetiredSegment
 	defer func() { s.recalcVisibleFiles(retired...) }()
 	s.dirtyLock.Lock()
 	defer s.dirtyLock.Unlock()
 
-	retired = s.closeWhatNotInList(nil)
+	retired = s.CloseWhatNotInList(nil)
 }
 
 func (s *CaplinStateSnapshots) openSegIfNeed(sn *DirtySegment, filepath string) error {
@@ -297,13 +297,13 @@ func (s *CaplinStateSnapshots) openSegIfNeed(sn *DirtySegment, filepath string) 
 
 // OpenList stops on optimistic=false, continue opening files on optimistic=true
 func (s *CaplinStateSnapshots) OpenList(fileNames []string, optimistic bool) error {
-	var retired []retiredSegment
+	var retired []RetiredSegment
 	defer func() { s.recalcVisibleFiles(retired...) }()
 
 	s.dirtyLock.Lock()
 	defer s.dirtyLock.Unlock()
 
-	retired = s.closeWhatNotInList(fileNames)
+	retired = s.CloseWhatNotInList(fileNames)
 	var segmentsMax uint64
 	var segmentsMaxSet bool
 Loop:
@@ -433,7 +433,7 @@ func isIndexed(s *DirtySegment) bool {
 	return true
 }
 
-func (s *CaplinStateSnapshots) recalcVisibleFiles(retired ...retiredSegment) {
+func (s *CaplinStateSnapshots) recalcVisibleFiles(retired ...RetiredSegment) {
 	defer func() {
 		s.idxMax.Store(s.idxAvailability())
 		s.indicesReady.Store(true)
@@ -443,9 +443,6 @@ func (s *CaplinStateSnapshots) recalcVisibleFiles(retired ...retiredSegment) {
 		newVisibleSegments := make([]*VisibleSegment, 0, dirtySegments.Len())
 		dirtySegments.Walk(func(segments []*DirtySegment) bool {
 			for _, sn := range segments {
-				if sn.canDelete.Load() {
-					continue
-				}
 				if !isIndexed(sn) {
 					continue
 				}
@@ -464,7 +461,7 @@ func (s *CaplinStateSnapshots) recalcVisibleFiles(retired ...retiredSegment) {
 		return newVisibleSegments
 	}
 
-	var toDelete []retiredSegment
+	var toDelete []RetiredSegment
 	func() {
 		s.dirtyLock.Lock()
 		defer s.dirtyLock.Unlock()
@@ -473,7 +470,7 @@ func (s *CaplinStateSnapshots) recalcVisibleFiles(retired ...retiredSegment) {
 		for idx, dirtySegments := range s.dirty {
 			segments[idx] = getNewVisibleSegments(dirtySegments)
 		}
-		toDelete = s.publishLocked(&snapshotVisible{segments: segments}, retired)
+		toDelete = s.publishLocked(&VisibleFiles{segments: segments}, retired)
 	}()
 
 	closeAndRemoveFiles(toDelete)
@@ -520,21 +517,21 @@ func (s *CaplinStateSnapshots) OpenFolder() error {
 
 type CaplinStateView struct {
 	s       *CaplinStateSnapshots
-	visible *snapshotVisible // pinned generation; released in Close
+	visible *VisibleFiles // pinned generation; released in Close
 }
 
 func (s *CaplinStateSnapshots) View() *CaplinStateView {
 	if s == nil {
 		return nil
 	}
-	return &CaplinStateView{s: s, visible: s.acquireVisible()}
+	return &CaplinStateView{s: s, visible: s.AcquireVisible()}
 }
 
 func (v *CaplinStateView) Close() {
 	if v == nil || v.s == nil {
 		return
 	}
-	v.s.releaseVisible(v.visible)
+	v.s.ReleaseVisible(v.visible)
 	v.s, v.visible = nil, nil
 }
 

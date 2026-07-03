@@ -265,7 +265,7 @@ func (m *Merger) Merge(
 }
 
 func (m *Merger) integrateMergedDirtyFiles(snapshots *RoSnapshots, in, out map[snaptype.Enum][]*DirtySegment) {
-	var retired []retiredSegment
+	var retired []RetiredSegment
 	defer func() { snapshots.recalcVisibleFiles(snapshots.alignMin, retired...) }()
 
 	snapshots.dirtyLock.Lock()
@@ -315,7 +315,7 @@ func (m *Merger) integrateMergedDirtyFiles(snapshots *RoSnapshots, in, out map[s
 			if _, existed := dirtySegments.Delete(delSeg); !existed {
 				continue
 			}
-			retired = append(retired, retiredSegment{seg: delSeg, removeFiles: !delSeg.frozen})
+			retired = append(retired, RetiredSegment{seg: delSeg, removeFiles: !delSeg.frozen})
 		}
 	}
 }

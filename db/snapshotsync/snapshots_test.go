@@ -225,8 +225,8 @@ func TestMergeSnapshots(t *testing.T) {
 		Ranges := merger.FindMergeRanges(s.Ranges(false), s.SegmentsMax())
 		require.Len(Ranges, 3)
 		// NOTE: TestMergeSnapshots calls Merge with doIndex=false.
-		// Since the merged segment is not indexed, RecalcVisibleSegments will not promote it
-		// and the subsegments marked canDelete=true will also be skipped, causing visible
+		// Since the merged segment is not indexed, RecalcVisibleSegments will not promote it,
+		// and the merge already removed the subsumed sub-segments from dirty, causing visible
 		// segments to drop to 0 until BuildMissedIndices/OpenFolder runs. This is expected
 		// for doIndex=false merges and is only done in this test to skip redundant index rebuilding.
 		err := merger.Merge(t.Context(), s, snaptype2.BlockSnapshotTypes, Ranges, s.Dir(), false, nil, nil)
@@ -983,7 +983,7 @@ func TestViewPinsGeneration(t *testing.T) {
 
 // TestCloseWhatNotInListVsLiveViewDoesNotCrash verifies that a reopen which drops
 // segments a live View still holds does not close them out from under the reader.
-// A covering [0,10000) segment lands on disk and OpenFolder's closeWhatNotInList
+// A covering [0,10000) segment lands on disk and OpenFolder's CloseWhatNotInList
 // drops the subsumed 1k sub-segments; because a View still pins that generation,
 // their descriptors are released only once the View drains, so Close must not crash.
 func TestCloseWhatNotInListVsLiveViewDoesNotCrash(t *testing.T) {
@@ -1011,7 +1011,7 @@ func TestCloseWhatNotInListVsLiveViewDoesNotCrash(t *testing.T) {
 	defer s.Close()
 	require.NoError(s.OpenFolder())
 
-	// A live reader holds the sub-segments (refcount +1), as a merge's View does.
+	// A live reader pins the current bundle, as a merge's View does.
 	v := s.View()
 
 	// A covering [0,10000) segment lands on disk, subsuming the 1k sub-segments.
@@ -1020,7 +1020,7 @@ func TestCloseWhatNotInListVsLiveViewDoesNotCrash(t *testing.T) {
 	}
 
 	// Reopen: NoOverlaps drops the subsumed sub-segments from the list, so
-	// closeWhatNotInList retires them while the live View still pins them.
+	// CloseWhatNotInList retires them while the live View still pins them.
 	require.NoError(s.OpenFolder())
 
 	// Closing the View must not crash.
@@ -1054,15 +1054,9 @@ func TestRoSnapshots_BundleRefcountReclamation(t *testing.T) {
 	defer s.Close()
 	require.NoError(s.OpenFolder())
 
-	// A reader pins the bundle exactly once, and never touches per-file refcounts.
+	// A reader pins the bundle exactly once.
 	v := s.View()
 	require.Equal(int32(1), s.visible.Load().refcnt.Load())
-	s.dirty[snaptype2.Headers.Enum()].Walk(func(segs []*DirtySegment) bool {
-		for _, sn := range segs {
-			require.Zero(sn.refcount.Load(), "bundle reader must not pin files individually")
-		}
-		return true
-	})
 
 	// Pick the last visible (non-frozen) Headers file.
 	headers := v.Segments(snaptype2.Headers)
@@ -1160,7 +1154,7 @@ func TestRoSnapshots_ConcurrentViewsAndRepublish(t *testing.T) {
 	require.Equal(s.visible.Load(), s.oldestVisible, "chain must collapse once all readers drain")
 }
 
-// TestCloseWhatNotInList_DropsUnopenedSegment pins the unified fileSet behavior:
+// TestCloseWhatNotInList_DropsUnopenedSegment pins the unified FileSet behavior:
 // an unopened (nil-Decompressor) segment is always dropped, even when its name is
 // in the keep-list — a later reopen re-creates it, so keeping it would only leave
 // a duplicate.
@@ -1175,10 +1169,10 @@ func TestCloseWhatNotInList_DropsUnopenedSegment(t *testing.T) {
 	s.dirty[snaptype2.Headers.Enum()].Set(sn)
 
 	s.dirtyLock.Lock()
-	removed := s.closeWhatNotInList([]string{sn.FileName()}) // its name IS in the keep-list
+	removed := s.CloseWhatNotInList([]string{sn.FileName()}) // its name IS in the keep-list
 	s.dirtyLock.Unlock()
 
-	require.Contains(removed, retiredSegment{seg: sn}, "unopened segment must be dropped even when kept-by-name")
+	require.Contains(removed, RetiredSegment{seg: sn}, "unopened segment must be dropped even when kept-by-name")
 	_, stillInDirty := s.dirty[snaptype2.Headers.Enum()].Get(sn)
 	require.False(stillInDirty)
 }
