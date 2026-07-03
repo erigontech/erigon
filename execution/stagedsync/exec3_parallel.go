@@ -576,7 +576,7 @@ func (pe *parallelExecutor) execImpl(ctx context.Context, execStage *StageState,
 
 					}
 
-					if applyResult.BlockNum > 0 && !execStage.CurrentSyncCycle.IsInitialCycle && applyResult.Header != nil {
+					if applyResult.BlockNum > 0 && !applyResult.isPartial && !execStage.CurrentSyncCycle.IsInitialCycle && applyResult.Header != nil {
 						pe.cfg.notifications.RecentReceipts.Add(applyResult.Receipts, applyResult.Txs, applyResult.Header)
 					}
 
@@ -1546,10 +1546,11 @@ type execTask struct {
 
 type execResult struct {
 	*exec.TxResult
-	writes state.VersionedWrites
+	writes                state.VersionedWrites
+	cumulativeBlobGasUsed uint64
 }
 
-func (result *execResult) finalize(prevReceipt *types.Receipt, engine rules.Engine, vm *state.VersionMap, stateReader state.StateReader, stateWriter state.StateWriter) (*types.Receipt, state.ReadSet, state.VersionedWrites, error) {
+func (result *execResult) finalize(cumulativeGasUsed uint64, firstLogIndex uint32, engine rules.Engine, vm *state.VersionMap, stateReader state.StateReader, stateWriter state.StateWriter) (*types.Receipt, state.ReadSet, state.VersionedWrites, error) {
 	task, ok := result.Task.(*taskVersion)
 
 	if !ok {
@@ -1591,7 +1592,7 @@ func (result *execResult) finalize(prevReceipt *types.Receipt, engine rules.Engi
 		return result.finalizeSystemTx(task, txTask, rules, vm, stateReader, stateWriter)
 	}
 
-	return result.finalizeTx(task, txTask, prevReceipt, engine, vm, stateReader)
+	return result.finalizeTx(task, txTask, cumulativeGasUsed, firstLogIndex, engine, vm, stateReader)
 }
 
 // finalizeSystemTx handles block-end and system TXs (txIndex < 0) via full
@@ -1827,7 +1828,8 @@ func (result *execResult) calcFees(
 func (result *execResult) finalizeTx(
 	task *taskVersion,
 	txTask *exec.TxTask,
-	prevReceipt *types.Receipt,
+	cumulativeGasUsed uint64,
+	firstLogIndex uint32,
 	engine rules.Engine,
 	vm *state.VersionMap,
 	stateReader state.StateReader,
@@ -1840,10 +1842,11 @@ func (result *execResult) finalizeTx(
 		return nil, nil, nil, err
 	}
 
-	receipt, err := result.CreateNextReceipt(prevReceipt)
+	receipt, err := result.CreateReceipt(task.Version().TxIndex, cumulativeGasUsed+result.ExecutionResult.ReceiptGasUsed, firstLogIndex)
 	if err != nil {
 		return nil, nil, nil, err
 	}
+	result.Receipt = receipt
 	return receipt, nil, nil, nil
 }
 
@@ -2229,7 +2232,7 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 	}
 
 	tx := task.index
-	be.results[tx] = &execResult{res, nil}
+	be.results[tx] = &execResult{TxResult: res}
 	if res.Err != nil {
 		if execErr, ok := res.Err.(protocol.ErrExecAbortError); ok {
 			if res.Version().Incarnation > len(be.tasks) {
@@ -2495,33 +2498,21 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 
 				be.finalizedResults[tx] = txResult
 
-				var prevReceipt *types.Receipt
-				if txVersion.TxIndex > 0 {
-					if tx > 0 {
-						if prev := be.finalizedResults[tx-1]; prev != nil {
-							prevReceipt = prev.Receipt
+				var cumulativeGasUsed uint64
+				var firstLogIndex uint32
+				if txVersion.TxIndex > 0 && !txTask.IsBlockEnd() {
+					if tx > 0 && be.tasks[tx-1].Task.Version().TxIndex >= 0 {
+						if prev := be.finalizedResults[tx-1].Receipt; prev != nil {
+							cumulativeGasUsed = prev.CumulativeGasUsed
+							firstLogIndex = prev.FirstLogIndexWithinBlock + uint32(len(prev.Logs))
 						}
-					}
-					if prevReceipt == nil {
-						if rawtemporaldb.ReceiptStoresFirstLogIdx(applyTx) {
-							return nil, fmt.Errorf("parallel execution is not supported on databases with legacy receipt domain schemas (ReceiptStoresFirstLogIdx == true)")
-						}
+					} else {
 						cumGasUsed, cumBlobGasUsed, logIndexAfterTx, err := rawtemporaldb.ReceiptAsOf(applyTx, txVersion.TxNum)
 						if err != nil {
 							return nil, err
 						}
-						// Actually, when we reconstruct prevReceipt from the DB, it does not have any logs.
-						// The logIndexAfterTx we got from the DB is already the index after adding all logs of the previous tx.
-						// So we are setting FirstLogIndexWithinBlock to logIndexAfterTx and keeping prevReceipt.Logs as nil (len is 0).
-						// Because of this, the calculation in CreateNextReceipt:
-						// currentReceipt.FirstLogIndexWithinBlock = prevReceipt.FirstLogIndexWithinBlock + len(prevReceipt.Logs)
-						// becomes logIndexAfterTx + 0, which correctly gives the starting index of the current tx.
-						// So this math works out perfectly without needing to fetch or re-execute the previous tx logs.
-						prevReceipt = &types.Receipt{
-							CumulativeGasUsed:        cumGasUsed,
-							FirstLogIndexWithinBlock: logIndexAfterTx,
-						}
-						// Initialize cumulative blob gas used so far in this block
+						cumulativeGasUsed = cumGasUsed
+						firstLogIndex = logIndexAfterTx
 						be.blobGasUsed = cumBlobGasUsed
 					}
 				}
@@ -2563,7 +2554,7 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 
 				collector := state.NewVersionedWriteCollector(pe.rs)
 
-				_, addReads, finalizeWrites, err := txResult.finalize(prevReceipt, pe.cfg.engine, be.versionMap, stateReader, collector)
+				_, addReads, finalizeWrites, err := txResult.finalize(cumulativeGasUsed, firstLogIndex, pe.cfg.engine, be.versionMap, stateReader, collector)
 				if err != nil {
 					return nil, err
 				}
@@ -2662,6 +2653,7 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 				// the publish loop from seeing a later incarnation if
 				// be.results[tx] is overwritten by a concurrent worker.
 				be.finalizedResults[tx] = txResult
+				txResult.cumulativeBlobGasUsed = be.blobGasUsed
 				be.publishTasks.pushPending(tx)
 			}
 		} else {
@@ -2712,7 +2704,7 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 				traceTos:              map[accounts.Address]struct{}{},
 				txNum:                 task.Version().TxNum,
 				rules:                 task.Rules(),
-				cumulativeBlobGasUsed: be.blobGasUsed,
+				cumulativeBlobGasUsed: result.cumulativeBlobGasUsed,
 			}
 
 			if tx := result.Tx(); tx != nil {
@@ -2763,7 +2755,7 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 			// exec loop, on the SAME goroutine that owns sd.mem mutations.
 			// Doing this in the apply loop instead used to race with the next
 			// tx / block-end ApplyStateWrites on SharedDomains.mem.
-			if err := pe.rs.ApplyTxIndexes(applyTx, applyResult.txNum, applyResult.receipt, applyResult.blobGasUsed,
+			if err := pe.rs.ApplyTxIndexes(applyTx, applyResult.txNum, applyResult.receipt, applyResult.cumulativeBlobGasUsed,
 				applyResult.logs, applyResult.traceFroms, applyResult.traceTos); err != nil {
 				return nil, fmt.Errorf("ApplyTxIndexes block=%d txNum=%d: %w", applyResult.blockNum, applyResult.txNum, err)
 			}
