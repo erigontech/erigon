@@ -18,6 +18,7 @@ package cache
 
 import (
 	"bytes"
+	"sync"
 	"sync/atomic"
 
 	"github.com/c2h5oh/datasize"
@@ -28,6 +29,10 @@ import (
 	"github.com/erigontech/erigon/common/maphash"
 	"github.com/erigontech/erigon/execution/cache/coherence"
 )
+
+// putStripeCount sizes the same-key write-serialization stripes; power of two
+// so the stripe index is a mask of the key hash.
+const putStripeCount = 256
 
 // avgBytesPerEntry is the assumption used to translate a byte budget into
 // the entry-count cap that freelru.ShardedLRU is sized against. 256 B
@@ -63,6 +68,10 @@ type GenericCache[T any] struct {
 	// valid iff written in the current epoch OR its txNum is below the unwind
 	// floor. See execution/cache/coherence.
 	coh coherence.Gen
+
+	// putStripes serialize same-key writers so PutIfAbsent's check+insert is
+	// atomic w.r.t. a concurrent Put (freelru offers no conditional insert).
+	putStripes [putStripeCount]sync.Mutex
 
 	hits         atomic.Uint64
 	misses       atomic.Uint64
@@ -195,10 +204,24 @@ func (c *GenericCache[T]) GetWithTxNum(key []byte) (T, uint64, bool) {
 // In ModeNoOp inserts that would overflow the byte budget are dropped
 // (and counted via the dropped metric).
 func (c *GenericCache[T]) Put(key []byte, value T, txNum uint64) {
+	c.put(key, value, txNum, true)
+}
+
+// PutIfAbsent implements Cache.PutIfAbsent (live entry kept, stale one
+// replaced).
+func (c *GenericCache[T]) PutIfAbsent(key []byte, value T, txNum uint64) {
+	c.put(key, value, txNum, false)
+}
+
+func (c *GenericCache[T]) put(key []byte, value T, txNum uint64, overwrite bool) {
 	h := maphash.Hash(key)
 	valBytes := c.sizeFunc(value)
 	newSize := len(key) + valBytes + 24
 	ep := c.coh.Epoch()
+
+	mu := &c.putStripes[h&(putStripeCount-1)]
+	mu.Lock()
+	defer mu.Unlock()
 
 	existing, hasExisting := c.data.Get(h)
 
@@ -206,6 +229,9 @@ func (c *GenericCache[T]) Put(key []byte, value T, txNum uint64) {
 	// avoid an extra allocation; the freshly-decoded value replaces the
 	// old one.
 	if hasExisting && bytes.Equal(existing.key, key) {
+		if !overwrite && !c.coh.IsStale(existing.txNum, existing.epoch) {
+			return
+		}
 		c.data.Add(h, entry[T]{key: existing.key, val: value, size: newSize, txNum: txNum, epoch: ep})
 		c.currentSize.Add(int64(newSize - existing.size))
 		return

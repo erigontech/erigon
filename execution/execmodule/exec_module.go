@@ -385,8 +385,9 @@ func (e *ExecModule) canonicalHash(ctx context.Context, tx kv.Tx, blockNumber ui
 // warmBody is fire-and-forget and populates the shared state/branch caches; if
 // it is still running when an unwind bumps the cache epoch, it can Put a
 // pre-unwind (dead-fork) value stamped with the post-unwind epoch — IsStale then
-// returns false and the stale value is served as canonical (wrong root). Call
-// before every UnwindTo that invalidates the cache.
+// returns false and the stale value is served as canonical (wrong root). A
+// laggard Put can likewise land after a flush's cache-apply and pin the
+// pre-flush snapshot. Call before any unwind epoch-bump or flush cache-apply.
 func (e *ExecModule) drainReadAhead() {
 	if e.readAheader == nil {
 		return
