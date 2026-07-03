@@ -1254,6 +1254,9 @@ func (tx *MdbxTx) Commit() error {
 
 	if tx.db.opts.metrics {
 		dbLabel := tx.db.opts.label
+		if latency.Sync > 0 {
+			log.Warn("[dbg] latency.Sync > 0", "sync", latency.Sync)
+		}
 		err = RecordSummaries(dbLabel, latency)
 		if err != nil {
 			tx.db.opts.log.Error("failed to record mdbx summaries", "err", err)
@@ -1264,9 +1267,6 @@ func (tx *MdbxTx) Commit() error {
 	// investigating GC / openTxs behavior. Gated behind the same env var so
 	// production runs don't get a log line per chaindata commit.
 	if mdbxTraceTx && tx.db.opts.label == dbcfg.ChainDB {
-		if latency.Sync > 0 {
-			log.Warn("[dbg] latency.Sync > 0", "sync", latency.Sync)
-		}
 		openTxs := tx.db.txsCount
 		tx.db.opts.log.Info("[mdbx] commit",
 			"whole", latency.Whole,
