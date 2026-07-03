@@ -3,7 +3,9 @@
 
 Run: python3 .github/workflows/scripts/render_rpc_summary.test.py
 """
+import contextlib
 import importlib.util
+import io
 import json
 import os
 import sys
@@ -33,6 +35,18 @@ def write(tmp, rel, content):
     os.makedirs(os.path.dirname(p), exist_ok=True)
     with open(p, "w", encoding="utf-8") as fh:
         fh.write(content)
+
+
+def run_main(argv):
+    old_argv = sys.argv
+    sys.argv = ["render_rpc_summary.py"] + argv
+    buf = io.StringIO()
+    try:
+        with contextlib.redirect_stdout(buf):
+            mod.main()
+    finally:
+        sys.argv = old_argv
+    return buf.getvalue()
 
 
 def check(name, cond):
@@ -124,10 +138,72 @@ def case_missing_dir():
     check("missing-dir: still shows badge", "❌ failure" in out)
 
 
+ATTEMPTS_LOG = (
+    "\nAttempt 1\n"
+    "Latest batch 1/5 (50 tests)\n"
+    "sync on latest block number failed  nodes not synced, testingNode=25427041 referenceNode=25427045\n"
+    "\nAttempt 2\n"
+    "Latest batch 1/5 (50 tests)\n"
+    "0187. http  ::debug_traceBlockByNumber/test_42.json  failed: diff mismatch\n"
+    "0189. http  ::debug_traceBlockByNumber/test_44.json  failed: diff mismatch\n"
+    "Latest batch 1/5 had failures, stopping\n"
+    "\nAttempt 3\n"
+    "Latest batch 1/5 (50 tests)\n"
+    "Latest batch 5/5 (17 tests)\n"
+)
+
+
+def case_attempts_multi():
+    with tempfile.TemporaryDirectory() as tmp:
+        write(tmp, "results/test_report.json", report(0, []))
+        write(tmp, "output.log", ATTEMPTS_LOG)
+        out = render(tmp, result="success")
+        check("attempts: section present", "## Attempts" in out)
+        check("attempts: attempt 1 sync failed", "| 1 | ❌ sync failed |" in out)
+        check("attempts: attempt 2 counts failures", "| 2 | ❌ 2 failing tests |" in out)
+        check("attempts: attempt 3 passed", "| 3 | ✅ passed |" in out)
+
+
+def case_attempts_single_hidden():
+    with tempfile.TemporaryDirectory() as tmp:
+        write(tmp, "results/test_report.json", report(0, []))
+        write(tmp, "output.log", "\nAttempt 1\nLatest batch 1/5 (50 tests)\n")
+        out = render(tmp, result="success")
+        check("attempts/single: no section for one attempt", "## Attempts" not in out)
+
+
+def case_attempts_final_failed_reconciled():
+    # Final attempt has no recognizable failure markers, but the run failed
+    # (e.g. crash/timeout) — the last row must not read as passed.
+    log = "\nAttempt 1\n0187. http ::x/test.json failed: diff mismatch\n\nAttempt 2\nLatest batch 1/5 (50 tests)\n"
+    with tempfile.TemporaryDirectory() as tmp:
+        write(tmp, "output.log", log)
+        out = render(tmp, result="failure")
+        check("attempts/reconcile: final not shown as passed", "| 2 | ✅ passed |" not in out)
+        check("attempts/reconcile: final marked failed", "| 2 | ❌ failed |" in out)
+
+
+def case_success_report_with_failed_count():
+    # result=success but the report's summary still counts failures and lists none:
+    # must not claim all-passed (Copilot review).
+    with tempfile.TemporaryDirectory() as tmp:
+        write(tmp, "results/test_report.json", report(2, []))
+        out = render(tmp, result="success")
+        check("success+failedcount: no false all-passed", "All executed tests passed" not in out)
+
+
+def case_main_setup_failure_message():
+    out = run_main(["--result-dir", "", "--workflow", "QA - RPC", "--chain", "mainnet", "--result", "failure"])
+    check("main/setup: setup-failure note", "failed before any test produced results" in out)
+    check("main/setup: failure badge", "❌ failure" in out)
+
+
 def main():
     for fn in (case_report_all_passed, case_report_failures, case_no_report_with_log,
                case_setup_failure, case_unknown_result_no_false_pass, case_malformed_json_shape,
-               case_empty_log, case_missing_dir):
+               case_empty_log, case_missing_dir, case_attempts_multi, case_attempts_single_hidden,
+               case_attempts_final_failed_reconciled, case_success_report_with_failed_count,
+               case_main_setup_failure_message):
         fn()
     print(f"\n{passed} passed, {failed} failed")
     return 1 if failed else 0

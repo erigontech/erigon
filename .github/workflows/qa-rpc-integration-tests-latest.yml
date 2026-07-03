@@ -215,7 +215,7 @@ jobs:
           fi
 
       - name: Generate Summary
-        if: always() && steps.test_step.outputs.test_executed == 'true'
+        if: always()
         run: |
           # Render structured results (which tests failed + overall stats) into the
           # run summary page. The reporter never fails the job and always prints
@@ -224,7 +224,7 @@ jobs:
             --result-dir "${{ env.TEST_RESULT_DIR }}" \
             --workflow "${{ github.workflow }}" \
             --chain "${{ env.CHAIN }}" \
-            --result "${{ steps.test_step.outputs.TEST_RESULT }}")
+            --result "${{ steps.test_step.outputs.TEST_RESULT || job.status }}")
           printf '%s\n' "$SUMMARY"
           printf '%s\n' "$SUMMARY" >> "$GITHUB_STEP_SUMMARY"
           mkdir -p "${{ env.TEST_RESULT_DIR }}" 2>/dev/null && printf '%s\n' "$SUMMARY" > "${{ env.TEST_RESULT_DIR }}/summary.md" || true

@@ -4,14 +4,18 @@
 Reads the structured report the rpc-tests runner writes
 (``results/test_report.json``) into Markdown: a result badge, a stats table, and
 a table of failed tests. With no report, falls back to the badge plus a
-size-capped ``output.log`` tail. No console-text parsing, so a runner
-output-format change cannot make it show a wrong result. The verdict always
-comes from ``--result`` (the test step's exit code); the script never fails the
-job and always prints something.
+size-capped ``output.log`` tail. The pass/fail verdict always comes from
+``--result`` (the job/test-step exit code) and the structured report — never
+from parsing console text — so a runner output-format change cannot make it show
+a wrong result. The one log-derived section, ``Attempts``, is informational
+retry history and never changes the verdict. The script never fails the job and
+always prints something, including when the run died during setup before any
+test ran.
 """
 import argparse
 import json
 import os
+import re
 import sys
 
 STEP_SUMMARY_CAP = 900 * 1024
@@ -19,6 +23,8 @@ LOG_TAIL_MAX_BYTES = 100 * 1024
 ERROR_MSG_MAXLEN = 240
 MAX_FAILURES = 200
 LOG_TAIL_LINES = 200
+ATTEMPTS_SCAN_MAX_BYTES = 8 * 1024 * 1024
+ATTEMPT_RE = re.compile(r"^Attempt\s+(\d+)\s*$")
 
 
 def badge(result):
@@ -53,6 +59,40 @@ def read_log_tail(path, max_lines, max_bytes):
     return "\n".join(lines[-max_lines:]), clipped
 
 
+def summarize_attempts(log_path):
+    """Classify each ``Attempt N`` retry block the test runner writes to
+    output.log. The suite retries up to a limit, rerunning every test; only the
+    last attempt's counts reach ``test_report.json``, so earlier-attempt
+    failures live only in the log — and the log tail keeps the *end*, dropping
+    them. This scans the whole log so the retry history survives. Informational
+    only: the pass/fail verdict never comes from here.
+    """
+    try:
+        with open(log_path, "rb") as fh:
+            data = fh.read(ATTEMPTS_SCAN_MAX_BYTES)
+    except OSError:
+        return []
+    lines = data.decode("utf-8", errors="replace").replace("\r\n", "\n").replace("\r", "\n").split("\n")
+    marks = []
+    for i, line in enumerate(lines):
+        m = ATTEMPT_RE.match(line)
+        if m:
+            marks.append((i, m.group(1)))
+    attempts = []
+    for idx, (start, n) in enumerate(marks):
+        end = marks[idx + 1][0] if idx + 1 < len(marks) else len(lines)
+        block = "\n".join(lines[start + 1:end]).lower()
+        fails = block.count("failed:")
+        if "not synced" in block or "sync on latest block number failed" in block:
+            status = "❌ sync failed"
+        elif fails:
+            status = f"❌ {fails} failing test{'s' if fails != 1 else ''}"
+        else:
+            status = "✅ passed"
+        attempts.append((n, status))
+    return attempts
+
+
 def render(args):
     out = [f"# {args.workflow}" + (f" — {args.title_suffix}" if args.title_suffix else ""), ""]
     meta = ([f"**Chain:** {args.chain}"] if args.chain else []) + [f"**Result:** {badge(args.result)}"]
@@ -60,6 +100,16 @@ def render(args):
 
     report_path = os.path.join(args.result_dir, "results", "test_report.json")
     log_path = os.path.join(args.result_dir, "output.log")
+
+    attempts = summarize_attempts(log_path)
+    if len(attempts) > 1:
+        if (args.result or "").lower() != "success" and attempts[-1][1] == "✅ passed":
+            attempts[-1] = (attempts[-1][0], "❌ failed")
+        out += ["## Attempts", "",
+                "> Each attempt reruns the full suite; the result above is the final attempt.", "",
+                "| Attempt | Outcome |", "| ---: | --- |"]
+        out += [f"| {n} | {s} |" for n, s in attempts]
+        out.append("")
 
     report = None
     if os.path.isfile(report_path):
@@ -107,7 +157,7 @@ def render(args):
             out.append("")
             if len(failed) > MAX_FAILURES:
                 out += [f"> …and {len(failed) - MAX_FAILURES} more — see the `test-results` artifact.", ""]
-        elif (args.result or "").lower() == "success":
+        elif (args.result or "").lower() == "success" and not summary.get("failed_tests"):
             out += ["✅ All executed tests passed.", ""]
     else:
         out += ["## No structured report", "",
@@ -148,10 +198,13 @@ def main():
 
     try:
         if not args.result_dir or not os.path.isdir(args.result_dir):
-            sys.stdout.write(
-                f"# {args.workflow}\n\n**Result:** {badge(args.result)}\n\n"
-                f"> ⚠️ Result directory `{args.result_dir}` not found — no artifacts to summarize.\n"
-            )
+            if (args.result or "").lower() == "failure":
+                note = ("> ⚠️ The run failed before any test produced results — it likely died during "
+                        "setup (build, migrations, or sync). See the step logs and the `test-results` artifact.")
+            else:
+                note = f"> ⚠️ Result directory `{args.result_dir}` not found — no artifacts to summarize."
+            chain = f"**Chain:** {args.chain}  |  " if args.chain else ""
+            sys.stdout.write(f"# {args.workflow}\n\n{chain}**Result:** {badge(args.result)}\n\n{note}\n")
             return 0
         sys.stdout.write(render(args))
     except Exception as exc:  # never fail the job because of the reporter
