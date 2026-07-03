@@ -134,6 +134,11 @@ func (t *Trie) WitnessNodesForKeys(hexKeys [][]byte) ([][]byte, error) {
 		if err != nil {
 			return err
 		}
+		// A node whose RLP is <32B is inlined into its parent and never referenced by
+		// hash, so it must not be emitted as a standalone witness node.
+		if len(rlp) < 32 {
+			return nil
+		}
 		if _, ok := seen[string(rlp)]; ok {
 			return nil
 		}
@@ -230,6 +235,9 @@ func WitnessNodesForKeysFromNodes(nodes, hexKeys [][]byte) ([][]byte, error) {
 				return err
 			}
 			rlp = hashed
+		}
+		if len(rlp) < 32 {
+			return nil
 		}
 		if _, ok := seen[string(rlp)]; ok {
 			return nil

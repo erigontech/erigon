@@ -654,3 +654,75 @@ func TestRLPEncodeDecodeWithAccountsAndStorage(t *testing.T) {
 	}
 
 }
+
+// The witness prune paths (WitnessNodesForKeys and WitnessNodesForKeysFromNodes, the
+// serializer debug_executionWitness uses) must omit inlined (<32B) nodes and stay
+// equivalent. A node whose RLP is <32 bytes is inlined into its parent and never
+// referenced by hash, so it must not appear as a standalone witness node. This pins a
+// storage trie whose branch inlines two 31-byte leaves (55 remaining nibbles + 1-byte
+// value each): the prune must emit the branch but not the two leaves.
+func TestWitnessPruneOmitsInlinedNodes(t *testing.T) {
+	stateTrie := newEmpty()
+
+	contractAddr := common.HexToAddress("0x2222222222222222222222222222222222222222")
+	contract := &accounts.Account{
+		Nonce:    7,
+		Balance:  *uint256.NewInt(5),
+		Root:     EmptyRoot,
+		CodeHash: accounts.InternCodeHash(crypto.Keccak256Hash([]byte{0x60, 0x00})),
+	}
+	stateTrie.UpdateAccount(crypto.Keccak256(contractAddr[:]), contract)
+
+	contractHash := crypto.Keccak256Hash(contractAddr[:])
+	slotA := make([]byte, 32)
+	slotB := make([]byte, 32)
+	slotA[4] = 0x10
+	slotB[4] = 0x20
+	for i := 5; i < 32; i++ {
+		slotA[i] = byte(i)
+		slotB[i] = byte(0xff - i)
+	}
+	keyA := append(append([]byte{}, contractHash[:]...), slotA...)
+	keyB := append(append([]byte{}, contractHash[:]...), slotB...)
+	stateTrie.Update(keyA, []byte{0x01})
+	stateTrie.Update(keyB, []byte{0x02})
+	_ = stateTrie.Hash()
+
+	toNibbles := func(b []byte) []byte {
+		out := make([]byte, 0, len(b)*2)
+		for _, x := range b {
+			out = append(out, x>>4, x&0x0f)
+		}
+		return out
+	}
+	provedKeys := [][]byte{toNibbles(keyA), toNibbles(keyB)}
+
+	full, err := stateTrie.RLPEncode()
+	require.NoError(t, err)
+
+	// Production always prunes a trie decoded from the captured node bytes (branches
+	// are FullNodes there), so walk RLPDecode(full), not the Update-built trie.
+	wt, err := RLPDecode(full)
+	require.NoError(t, err)
+	fromTrie, err := wt.WitnessNodesForKeys(provedKeys)
+	require.NoError(t, err)
+	require.NotEmpty(t, fromTrie)
+	fromNodes, err := WitnessNodesForKeysFromNodes(full, provedKeys)
+	require.NoError(t, err)
+
+	for i, n := range fromTrie {
+		require.GreaterOrEqualf(t, len(n), 32, "WitnessNodesForKeys node %d len %d (<32B)", i, len(n))
+	}
+	for i, n := range fromNodes {
+		require.GreaterOrEqualf(t, len(n), 32, "WitnessNodesForKeysFromNodes node %d len %d (<32B)", i, len(n))
+	}
+
+	set := func(ns [][]byte) map[string]struct{} {
+		m := make(map[string]struct{}, len(ns))
+		for _, n := range ns {
+			m[string(n)] = struct{}{}
+		}
+		return m
+	}
+	require.Equal(t, set(fromTrie), set(fromNodes), "byHash and RLPDecode prune must agree")
+}
