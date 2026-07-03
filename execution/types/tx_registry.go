@@ -19,6 +19,8 @@ package types
 import (
 	"fmt"
 	"sync"
+
+	"github.com/erigontech/erigon/execution/types/accounts"
 )
 
 // TxTypeSpec describes an externally registered transaction type's decode
@@ -29,6 +31,10 @@ type TxTypeSpec struct {
 	// UnmarshalJSON may be nil for types not submittable over JSON-RPC;
 	// JSON decoding then rejects the type id as unknown.
 	UnmarshalJSON func([]byte) (Transaction, error)
+	// Sender resolves the transaction's sender with the caller's signer; it
+	// must be self-contained and never call back into the signer's own
+	// dispatch. Nil means sender recovery rejects the type.
+	Sender func(txn Transaction, sg Signer) (accounts.Address, error)
 }
 
 var (

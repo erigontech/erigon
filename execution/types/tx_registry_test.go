@@ -173,6 +173,9 @@ func registerFakeTxType(t *testing.T) {
 		RegisterTxType(fakeRegisteredTxType, TxTypeSpec{
 			New:           func() Transaction { return &fakeRegisteredTx{} },
 			UnmarshalJSON: unmarshalFakeRegisteredTxJSON,
+			Sender: func(txn Transaction, _ Signer) (accounts.Address, error) {
+				return txn.(*fakeRegisteredTx).sender, nil
+			},
 		})
 	})
 }
@@ -217,6 +220,43 @@ func TestRegisteredTxTypeSenderResolution(t *testing.T) {
 	got, err := signer.SenderWithContext(nil, tx)
 	require.NoError(t, err)
 	require.Equal(t, want, got)
+}
+
+type fakeSenderlessTx struct{ fakeRegisteredTx }
+
+func (f *fakeSenderlessTx) Type() byte { return 0x7c }
+
+func TestRegisteredTxTypeWithoutSenderFacetUnsupported(t *testing.T) {
+	RegisterTxType(0x7c, TxTypeSpec{New: func() Transaction { return &fakeSenderlessTx{} }})
+	t.Cleanup(func() { unregisterTxType(0x7c) })
+
+	tx := &fakeSenderlessTx{}
+	_, err := Signer{}.SenderWithContext(nil, tx)
+	require.ErrorIs(t, err, ErrTxTypeNotSupported)
+}
+
+func TestRegisteredTxTypeSignatureValuesDecodeSig(t *testing.T) {
+	registerFakeTxType(t)
+
+	sig := make([]byte, 65)
+	for i := range 64 {
+		sig[i] = byte(i + 1)
+	}
+	sig[64] = 1
+
+	sg := *LatestSignerForChainID(uint256.NewInt(1))
+	r, s, v, err := sg.SignatureValues(&fakeRegisteredTx{}, sig)
+	require.NoError(t, err)
+	require.Equal(t, new(uint256.Int).SetBytes(sig[:32]), r)
+	require.Equal(t, new(uint256.Int).SetBytes(sig[32:64]), s)
+	require.Equal(t, uint256.NewInt(1), v)
+}
+
+func TestRegisteredTxTypeJSONTypeAliasing(t *testing.T) {
+	registerFakeTxType(t)
+
+	_, err := UnmarshalTransactionFromJSON([]byte(`{"type":"0x17e","nonce":"0x1"}`))
+	require.Error(t, err, "an out-of-range type value must not alias onto a registered byte id")
 }
 
 func TestRegisterTxTypeCollisions(t *testing.T) {
