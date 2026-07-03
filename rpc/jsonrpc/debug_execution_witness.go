@@ -584,6 +584,116 @@ func resolveWitnessMode(modeParam *string) (witnessMode, error) {
 	}
 }
 
+// buildAccessedState re-executes a block against a recording historical-state reader
+// and rolls the recorded accesses into an accessedState. The returned accessedBlockHashes
+// are the block numbers the BLOCKHASH opcode resolved during execution.
+func (api *BaseAPI) buildAccessedState(
+	ctx context.Context,
+	tx kv.TemporalTx,
+	block *types.Block,
+	chainConfig *chain.Config,
+	engine rules.EngineReader,
+	firstTxNumInBlock uint64,
+	mode witnessMode,
+) (accessed *accessedState, accessedBlockHashes []uint64, err error) {
+	blockNum := block.NumberU64()
+
+	// Create a state reader at the parent block state using the exact txnum
+	var stateReader state.StateReader = state.NewHistoryReaderV3(tx, firstTxNumInBlock)
+
+	// Create a combined recording state (reader + writer with in-memory overlay)
+	recordingState := NewRecordingState(stateReader)
+	recordingState.SetAccountsToTrace([]common.Address{
+		// Add addresses to trace here, e.g.:
+		// common.HexToAddress("0x8863786beBE8eB9659DF00b49f8f1eeEc7e2C8c1"),
+	})
+
+	// Create the in-block state with the recording state as reader
+	ibs := state.New(recordingState)
+
+	// Get header for block context
+	header := block.Header()
+
+	// Create EVM block context
+	blockCtx := transactions.NewEVMBlockContext(engine, header, true /* requireCanonical */, tx, api._blockReader, chainConfig)
+	blockRules := blockCtx.Rules(chainConfig)
+	signer := types.MakeSigner(chainConfig, blockNum, header.Time)
+
+	// Track accessed block hashes for BLOCKHASH opcode
+	originalGetHash := blockCtx.GetHash
+	blockCtx.GetHash = func(n uint64) (common.Hash, error) {
+		accessedBlockHashes = append(accessedBlockHashes, n)
+		return originalGetHash(n)
+	}
+
+	// Run block initialization (e.g. EIP-2935 blockhash contract, EIP-4788 beacon root)
+	fullEngine, ok := engine.(rules.Engine)
+	if !ok {
+		return nil, nil, fmt.Errorf("engine does not support full rules.Engine interface")
+	}
+	chainReader := consensuschain.NewReader(chainConfig, tx, api._blockReader, log.Root())
+	systemCallCustom := func(contract accounts.Address, data []byte, ibState *state.IntraBlockState, hdr *types.Header, constCall bool) ([]byte, error) {
+		return protocol.SysCallContract(contract, data, chainConfig, ibState, hdr, fullEngine, constCall, vm.Config{})
+	}
+	if err = fullEngine.Initialize(chainConfig, chainReader, header, ibs, systemCallCustom, log.Root(), nil); err != nil {
+		return nil, nil, fmt.Errorf("failed to initialize block: %w", err)
+	}
+	if err = ibs.FinalizeTx(blockRules, recordingState); err != nil {
+		return nil, nil, fmt.Errorf("failed to finalize engine.Initialize tx: %w", err)
+	}
+
+	// Execute all transactions in the block
+	for txIndex, txn := range block.Transactions() {
+		msg, err := txn.AsMessage(*signer, header.BaseFee, blockRules)
+		if err != nil {
+			return nil, nil, fmt.Errorf("failed to convert tx %d to message: %w", txIndex, err)
+		}
+
+		txCtx := protocol.NewEVMTxContext(msg)
+		evm := vm.NewEVM(blockCtx, txCtx, ibs, chainConfig, vm.Config{})
+
+		gp := new(protocol.GasPool).AddGas(header.GasLimit).AddBlobGas(chainConfig.GetMaxBlobGasPerBlock(header.Time))
+		ibs.SetTxContext(blockNum, txIndex)
+
+		_, err = protocol.ApplyMessage(evm, msg, gp, true /* refunds */, false /* gasBailout */, engine)
+		// A user tx that accesses the system address via an opcode keeps it in the
+		// witness; the per-tx access set captures this even on state-cache hits.
+		if acc := ibs.AccessedAddresses(); acc != nil {
+			if _, ok := acc[params.SystemAddress]; ok {
+				recordingState.MarkSystemAddrTouchedInTx()
+			}
+		}
+		if err != nil {
+			return nil, nil, fmt.Errorf("failed to apply tx %d: %w", txIndex, err)
+		}
+
+		if err = ibs.FinalizeTx(blockRules, recordingState); err != nil {
+			return nil, nil, fmt.Errorf("failed to finalize tx %d: %w", txIndex, err)
+		}
+	}
+
+	syscall := func(contract accounts.Address, data []byte) ([]byte, error) {
+		return protocol.SysCallContract(contract, data, chainConfig, ibs, header, fullEngine, false /* constCall */, vm.Config{})
+	}
+
+	// Collect logs accumulated during transaction execution into a synthetic receipt
+	// so that Finalize can parse EIP-6110 deposit requests from them.
+	// Finalize only uses receipt.Logs from each receipt — it doesn't read Status, GasUsed, CumulativeGasUsed, or any other field. It just concatenates all logs
+	// into a flat slice and passes them to ParseDepositLogs.
+	allLogs := ibs.Logs()
+	receipts := types.Receipts{&types.Receipt{Logs: allLogs}}
+
+	if _, err = fullEngine.Finalize(chainConfig, types.CopyHeader(header), ibs, block.Uncles(), receipts, block.Withdrawals(), chainReader, syscall, false /* skipReceiptsEval */, log.Root()); err != nil {
+		return nil, nil, fmt.Errorf("failed to finalize block: %w", err)
+	}
+
+	if err = ibs.CommitBlock(blockRules, recordingState); err != nil {
+		return nil, nil, fmt.Errorf("failed to commit block: %w", err)
+	}
+
+	return collectAccessedState(recordingState, mode), accessedBlockHashes, nil
+}
+
 // ExecutionWitness implements debug_executionWitness.
 // It executes a block using a historical state reader, records all state accesses
 // (accounts, storage, code), and builds merkle proofs for the accessed keys.
@@ -624,101 +734,10 @@ func (api *DebugAPIImpl) ExecutionWitness(ctx context.Context, blockNrOrHash rpc
 
 	engine := api.engine()
 
-	// Create a state reader at the parent block state using the exact txnum
-	var stateReader state.StateReader = state.NewHistoryReaderV3(tx, firstTxNumInBlock)
-
-	// Create a combined recording state (reader + writer with in-memory overlay)
-	recordingState := NewRecordingState(stateReader)
-	recordingState.SetAccountsToTrace([]common.Address{
-		// Add addresses to trace here, e.g.:
-		// common.HexToAddress("0x8863786beBE8eB9659DF00b49f8f1eeEc7e2C8c1"),
-	})
-
-	// Create the in-block state with the recording state as reader
-	ibs := state.New(recordingState)
-
-	// Get header for block context
-	header := block.Header()
-
-	// Create EVM block context
-	blockCtx := transactions.NewEVMBlockContext(engine, header, true /* requireCanonical */, tx, api._blockReader, chainConfig)
-	blockRules := blockCtx.Rules(chainConfig)
-	signer := types.MakeSigner(chainConfig, blockNum, header.Time)
-
-	// Track accessed block hashes for BLOCKHASH opcode
-	var accessedBlockHashes []uint64
-	originalGetHash := blockCtx.GetHash
-	blockCtx.GetHash = func(n uint64) (common.Hash, error) {
-		accessedBlockHashes = append(accessedBlockHashes, n)
-		return originalGetHash(n)
+	accessed, accessedBlockHashes, err := api.buildAccessedState(ctx, tx, block, chainConfig, engine, firstTxNumInBlock, resolvedMode)
+	if err != nil {
+		return nil, err
 	}
-
-	// Run block initialization (e.g. EIP-2935 blockhash contract, EIP-4788 beacon root)
-	fullEngine, ok := engine.(rules.Engine)
-	if !ok {
-		return nil, fmt.Errorf("engine does not support full rules.Engine interface")
-	}
-	chainReader := consensuschain.NewReader(chainConfig, tx, api._blockReader, log.Root())
-	systemCallCustom := func(contract accounts.Address, data []byte, ibState *state.IntraBlockState, hdr *types.Header, constCall bool) ([]byte, error) {
-		return protocol.SysCallContract(contract, data, chainConfig, ibState, hdr, fullEngine, constCall, vm.Config{})
-	}
-	if err = fullEngine.Initialize(chainConfig, chainReader, header, ibs, systemCallCustom, log.Root(), nil); err != nil {
-		return nil, fmt.Errorf("failed to initialize block: %w", err)
-	}
-	if err = ibs.FinalizeTx(blockRules, recordingState); err != nil {
-		return nil, fmt.Errorf("failed to finalize engine.Initialize tx: %w", err)
-	}
-
-	// Execute all transactions in the block
-	for txIndex, txn := range block.Transactions() {
-		msg, err := txn.AsMessage(*signer, header.BaseFee, blockRules)
-		if err != nil {
-			return nil, fmt.Errorf("failed to convert tx %d to message: %w", txIndex, err)
-		}
-
-		txCtx := protocol.NewEVMTxContext(msg)
-		evm := vm.NewEVM(blockCtx, txCtx, ibs, chainConfig, vm.Config{})
-
-		gp := new(protocol.GasPool).AddGas(header.GasLimit).AddBlobGas(chainConfig.GetMaxBlobGasPerBlock(header.Time))
-		ibs.SetTxContext(blockNum, txIndex)
-
-		_, err = protocol.ApplyMessage(evm, msg, gp, true /* refunds */, false /* gasBailout */, engine)
-		// A user tx that accesses the system address via an opcode keeps it in the
-		// witness; the per-tx access set captures this even on state-cache hits.
-		if acc := ibs.AccessedAddresses(); acc != nil {
-			if _, ok := acc[params.SystemAddress]; ok {
-				recordingState.MarkSystemAddrTouchedInTx()
-			}
-		}
-		if err != nil {
-			return nil, fmt.Errorf("failed to apply tx %d: %w", txIndex, err)
-		}
-
-		if err = ibs.FinalizeTx(blockRules, recordingState); err != nil {
-			return nil, fmt.Errorf("failed to finalize tx %d: %w", txIndex, err)
-		}
-	}
-
-	syscall := func(contract accounts.Address, data []byte) ([]byte, error) {
-		return protocol.SysCallContract(contract, data, chainConfig, ibs, header, fullEngine, false /* constCall */, vm.Config{})
-	}
-
-	// Collect logs accumulated during transaction execution into a synthetic receipt
-	// so that Finalize can parse EIP-6110 deposit requests from them.
-	// Finalize only uses receipt.Logs from each receipt — it doesn't read Status, GasUsed, CumulativeGasUsed, or any other field. It just concatenates all logs
-	// into a flat slice and passes them to ParseDepositLogs.
-	allLogs := ibs.Logs()
-	receipts := types.Receipts{&types.Receipt{Logs: allLogs}}
-
-	if _, err = fullEngine.Finalize(chainConfig, types.CopyHeader(header), ibs, block.Uncles(), receipts, block.Withdrawals(), chainReader, syscall, false /* skipReceiptsEval */, log.Root()); err != nil {
-		return nil, fmt.Errorf("failed to finalize block: %w", err)
-	}
-
-	if err = ibs.CommitBlock(blockRules, recordingState); err != nil {
-		return nil, fmt.Errorf("failed to commit block: %w", err)
-	}
-
-	accessed := collectAccessedState(recordingState, resolvedMode)
 
 	result := &ExecutionWitnessResult{
 		State:          []hexutil.Bytes{},
@@ -783,6 +802,10 @@ func (api *DebugAPIImpl) ExecutionWitness(ctx context.Context, blockNrOrHash rpc
 	result.Headers = headers
 	result.headerByNumber = byNumber
 
+	fullEngine, ok := engine.(rules.Engine)
+	if !ok {
+		return nil, fmt.Errorf("engine does not support full rules.Engine interface")
+	}
 	if err := api.verifyWitnessStateless(ctx, tx, result, block, fullEngine); err != nil {
 		return nil, err
 	}
@@ -819,6 +842,7 @@ type accessedState struct {
 	CodeAddrs   map[common.Address]struct{}
 	SortedCodes []hexutil.Bytes
 	CodeReads   map[common.Hash]witnesstypes.CodeWithHash
+	Deleted     map[common.Address]struct{}
 }
 
 // isEmpty reports whether no accounts, storage slots, or code addresses were touched.
@@ -878,16 +902,9 @@ func (a *accessedState) touchAll(sdCtx *commitmentdb.SharedDomainsCommitmentCont
 	}
 }
 
-// collectAccessedState rolls the RecordingState read/write maps and the three
-// code-tracking maps into a single accessedState. SortedCodes is sourced from
-// rs.GetPreStateCode() (pre-block reads only): the witness must carry the
-// bytecode that existed at the start of the block, not code created in-block.
-// A stateless verifier re-derives in-block-created code by replaying the
-// transactions, so emitting it would be redundant over-inclusion.
-//
-// SortedCodes is initialized to an empty (non-nil) slice so callers can assign
-// result.Codes = accessed.SortedCodes without risking a "codes": null JSON
-// regression for empty-touch blocks; the Codes field has no omitempty.
+// collectAccessedState rolls the RecordingState maps into an accessedState.
+// SortedCodes carries only pre-block code reads (rs.GetPreStateCode): a stateless
+// verifier re-derives in-block-created code by replaying the transactions.
 func collectAccessedState(rs *RecordingState, mode witnessMode) *accessedState {
 	out := &accessedState{
 		Addresses:   make(map[common.Address]struct{}),
@@ -896,6 +913,10 @@ func collectAccessedState(rs *RecordingState, mode witnessMode) *accessedState {
 		SortedCodes: []hexutil.Bytes{},
 		WitnessKeys: []hexutil.Bytes{},
 		CodeReads:   make(map[common.Hash]witnesstypes.CodeWithHash),
+		Deleted:     make(map[common.Address]struct{}),
+	}
+	for addr := range rs.DeletedAccounts {
+		out.Deleted[addr] = struct{}{}
 	}
 
 	readAddresses, readStorageKeys := rs.GetAccessedKeys()
@@ -1041,15 +1062,10 @@ func collectAccessedState(rs *RecordingState, mode witnessMode) *accessedState {
 	return out
 }
 
-// detectCollapseSiblings runs STEP 1 of witness construction: compute the full
-// commitment for this block against a split reader (commitment from parent state,
-// plain state from end of block) and record every sibling path the trie collapses
-// through. The collected paths are returned so STEP 2 can touch them while building
-// the witness — without those touches, collapsed-sibling data would be missing from
-// the witness and stateless re-execution would diverge from the canonical root.
-//
-// Triggers SeekCommitment #2 (split history reader). Preserves pre-refactor behavior
-// including the lupin012 seekBlockNum != parentNum guard.
+// detectCollapseSiblings computes the block's full commitment against a split reader
+// (commitment from parent state, plain state from block end) and returns the sibling
+// paths the trie collapses through. The witness build must touch them, else collapsed-
+// sibling data is missing and stateless re-execution diverges from the root.
 func detectCollapseSiblings(
 	ctx context.Context,
 	tx kv.TemporalTx,
@@ -1125,13 +1141,9 @@ func detectCollapseSiblings(
 	return siblingPaths, nil
 }
 
-// buildWitnessTrie runs STEP 2 of witness construction: re-seek the commitment
-// against the parent-state reader, touch every accessed key plus the sibling
-// paths collected during collapse detection, then generate the witness trie and
-// RLP-encode it. The pre-state root is verified against expectedParentRoot
-// before the encoded nodes are returned.
-//
-// Triggers SeekCommitment #3 (parent-state reader). Preserves pre-refactor behavior.
+// buildWitnessTrie re-seeks the commitment against the parent-state reader, touches
+// every accessed key plus the collapse-sibling paths, and builds the witness node set
+// on the fly, verifying the pre-state root against expectedParentRoot.
 func buildWitnessTrie(
 	ctx context.Context,
 	tx kv.TemporalTx,
@@ -1161,7 +1173,7 @@ func buildWitnessTrie(
 		}
 	}
 
-	witnessTrie, witnessRoot, err := sdCtx.Witness(ctx, accessed.CodeReads, "debug_executionWitness_witness_construction", produceExclusionProofs)
+	witnessNodes, witnessRoot, err := sdCtx.WitnessNodes(ctx, produceExclusionProofs, "debug_executionWitness_witness_construction")
 	if err != nil {
 		return nil, fmt.Errorf("failed to generate witness: %w", err)
 	}
@@ -1169,11 +1181,7 @@ func buildWitnessTrie(
 		return nil, fmt.Errorf("collapse witness root mismatch: calculated=%x, expected=%x", common.BytesToHash(witnessRoot), expectedParentRoot)
 	}
 
-	allNodes, err := witnessTrie.RLPEncode()
-	if err != nil {
-		return nil, fmt.Errorf("failed to encode trie nodes: %w", err)
-	}
-	for _, node := range allNodes {
+	for _, node := range witnessNodes {
 		encodedNodes = append(encodedNodes, common.Copy(node))
 	}
 	return encodedNodes, nil
@@ -1233,7 +1241,7 @@ func (api *DebugAPIImpl) resolveWitnessBlock(
 // pre-state and resolve BLOCKHASH lookups. The headers form a contiguous chain
 // from the parent back to the oldest block reached via the BLOCKHASH opcode, so
 // each header can be validated against the next one's parentHash.
-func (api *DebugAPIImpl) collectAccessedHeaders(
+func (api *BaseAPI) collectAccessedHeaders(
 	ctx context.Context,
 	tx kv.TemporalTx,
 	parentNum uint64,
@@ -1360,119 +1368,6 @@ func checkWitnessKeysComplete(usedAddrs map[common.Address]struct{}, usedSlots m
 		suffix = fmt.Sprintf(" (+%d more)", len(missing)-maxListed)
 	}
 	return fmt.Errorf("witness keys[] incomplete: %d preimage(s) for leaves present in state[] missing: %v%s", len(missing), listed, suffix)
-}
-
-// buildExpectedPostState queries the actual state DB to build expected post-state for verification.
-func (api *DebugAPIImpl) buildExpectedPostState(
-	ctx context.Context,
-	tx kv.TemporalTx,
-	blockNum uint64,
-	block *types.Block,
-	readAddresses, writeAddresses []common.Address,
-	readStorageKeys, writeStorageKeys map[common.Address][]common.Hash,
-) (map[common.Address]*accounts.Account, map[common.Address]map[common.Hash]uint256.Int, error) {
-	expectedState := make(map[common.Address]*accounts.Account)
-	expectedStorage := make(map[common.Address]map[common.Hash]uint256.Int)
-
-	// Create commitment context for accurate storage roots (since they are not stored explicitly).
-	// Witness/proof generation requires the sequential HexPatriciaHashed; force it.
-	postDomains, err := execctx.NewSharedDomains(ctx, tx, log.New(), execctx.WithoutDeferredBranchUpdates(), execctx.WithSequentialCommitment())
-	if err != nil {
-		return nil, nil, fmt.Errorf("failed to create post-state domains: %w", err)
-	}
-	defer postDomains.Close()
-	postSdCtx := postDomains.GetCommitmentContext()
-
-	// Set up to read state at current block (after execution)
-	latestBlock, err := rpchelper.GetLatestBlockNumber(tx)
-	if err != nil {
-		return nil, nil, fmt.Errorf("failed to get latest block: %w", err)
-	}
-	if blockNum < latestBlock {
-		// Get first txnum of blockNum+1 to ensure correct state root
-		lastTxnInBlock, err := api._txNumReader.Min(ctx, tx, blockNum+1)
-		if err != nil {
-			return nil, nil, fmt.Errorf("failed to get last txn in block: %w", err)
-		}
-		postSdCtx.SetHistoryStateReader(tx, lastTxnInBlock)
-		if _, _, err := postDomains.SeekCommitment(ctx, tx); err != nil {
-			return nil, nil, fmt.Errorf("failed to seek commitment: %w", err)
-		}
-	}
-
-	// Touch all modified accounts and storage keys for the post-state trie
-	for _, addr := range writeAddresses {
-		postSdCtx.TouchKey(kv.AccountsDomain, string(addr[:]), nil)
-	}
-	for addr, keys := range writeStorageKeys {
-		for _, key := range keys {
-			storageKey := string(append(addr[:], key[:]...))
-			postSdCtx.TouchKey(kv.StorageDomain, storageKey, nil)
-		}
-	}
-
-	// Generate the trie with correct storage roots
-	postTrie, postRoot, err := postSdCtx.Witness(ctx, nil, "debug_executionWitness_postState", false)
-	if err != nil {
-		return nil, nil, fmt.Errorf("failed to generate post-state trie: %w", err)
-	}
-
-	// Verify the post-state root matches the block's state root
-	blockRoot := block.Root()
-	if !bytes.Equal(postRoot, blockRoot[:]) {
-		// only warn, so we can see comparison later
-		fmt.Printf("Warning: post-state trie root %x doesn't match block root %x\n", postRoot, block.Root())
-	}
-
-	// Read account data from the post-state trie (with correct storage roots)
-	// Include both read and write addresses
-	for _, addr := range readAddresses {
-		addrHash := crypto.Keccak256(addr[:])
-		acc, _ := postTrie.GetAccount(addrHash)
-		expectedState[addr] = acc
-	}
-	for _, addr := range writeAddresses {
-		addrHash := crypto.Keccak256(addr[:])
-		acc, _ := postTrie.GetAccount(addrHash)
-		expectedState[addr] = acc
-	}
-
-	// Read storage values from the state reader
-	currentBlockNum := rpc.BlockNumber(blockNum)
-	currentNrOrHash := rpc.BlockNumberOrHash{BlockNumber: &currentBlockNum}
-	postStateReader, err := rpchelper.CreateStateReader(ctx, tx, api._blockReader, currentNrOrHash, 0, api.filters, api.stateCache, api._txNumReader)
-	if err != nil {
-		return nil, nil, fmt.Errorf("failed to create postStateReader: %w", err)
-	}
-	// Include both read and write storage keys
-	for addr, keys := range readStorageKeys {
-		if expectedStorage[addr] == nil {
-			expectedStorage[addr] = make(map[common.Hash]uint256.Int)
-		}
-		for _, key := range keys {
-			storageKey := accounts.InternKey(key)
-			val, _, err := postStateReader.ReadAccountStorage(accounts.InternAddress(addr), storageKey)
-			if err != nil {
-				return nil, nil, fmt.Errorf("failed to read expected storage in post state: %x key %x: %w", addr, key, err)
-			}
-			expectedStorage[addr][key] = val
-		}
-	}
-	for addr, keys := range writeStorageKeys {
-		if expectedStorage[addr] == nil {
-			expectedStorage[addr] = make(map[common.Hash]uint256.Int)
-		}
-		for _, key := range keys {
-			storageKey := accounts.InternKey(key)
-			val, _, err := postStateReader.ReadAccountStorage(accounts.InternAddress(addr), storageKey)
-			if err != nil {
-				return nil, nil, fmt.Errorf("failed to read expected storage in post state: %x key %x: %w", addr, key, err)
-			}
-			expectedStorage[addr][key] = val
-		}
-	}
-
-	return expectedState, expectedStorage, nil
 }
 
 // witnessStateless is a StateReader/StateWriter implementation that operates on a witness trie.
