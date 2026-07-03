@@ -18,7 +18,6 @@ package state
 
 import (
 	"bytes"
-	"encoding/binary"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -27,6 +26,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/db/version"
 	"github.com/erigontech/erigon/execution/commitment/commitmentdb"
 	"github.com/erigontech/erigon/execution/commitment/nibbles"
 )
@@ -41,47 +41,6 @@ func hexCompact(nibs ...byte) []byte {
 // v2Key emits a V2 canonical key for the supplied nibbles.
 func v2Key(nibs ...byte) []byte {
 	return nibbles.EncodeKeyV2(nibs)
-}
-
-// branchWithAccountKey returns a minimal valid BranchData containing exactly one
-// fieldAccountAddr cell at nibble 0 with the supplied bytes as the plain-key
-// payload. The varint length prefix uses a single byte (so keys must be < 128B).
-//
-// Layout: [touchMap=0x0001 BE][afterMap=0x0001 BE][fields=0x02][varint(len)][keyBytes]
-// fieldAccountAddr = 2 (see execution/commitment/commitment.go:180).
-func branchWithAccountKey(keyBytes []byte) []byte {
-	require := func(cond bool, msg string) {
-		if !cond {
-			panic(msg)
-		}
-	}
-	require(len(keyBytes) < 128, "branchWithAccountKey: keyBytes must fit single-byte varint")
-	var buf bytes.Buffer
-	var hdr [4]byte
-	binary.BigEndian.PutUint16(hdr[0:], 0x0001) // touchMap: nibble 0
-	binary.BigEndian.PutUint16(hdr[2:], 0x0001) // afterMap: nibble 0
-	buf.Write(hdr[:])
-	buf.WriteByte(0x02)                // fields = fieldAccountAddr
-	buf.WriteByte(byte(len(keyBytes))) // varint length (single-byte form for len < 128)
-	buf.Write(keyBytes)
-	return buf.Bytes()
-}
-
-// branchWithStorageKey is the storage-side variant of branchWithAccountKey.
-// fieldStorageAddr = 4 (commitment.go:181).
-func branchWithStorageKey(keyBytes []byte) []byte {
-	if len(keyBytes) >= 128 {
-		panic("branchWithStorageKey: keyBytes must fit single-byte varint")
-	}
-	var buf bytes.Buffer
-	var hdr [4]byte
-	binary.BigEndian.PutUint16(hdr[0:], 0x0001)
-	binary.BigEndian.PutUint16(hdr[2:], 0x0001)
-	buf.Write(hdr[:])
-	buf.WriteByte(0x04)
-	buf.WriteByte(byte(len(keyBytes)))
-	buf.Write(keyBytes)
-	return buf.Bytes()
 }
 
 func TestDetectKeyEncoding_AllV1(t *testing.T) {
@@ -159,65 +118,6 @@ func TestDetectKeyEncoding_KnownAmbiguous(t *testing.T) {
 	require.True(t, v2,
 		"detector classifies ambiguous V1 file as V2 — known limitation, "+
 			"documented in detectKeyEncoding godoc")
-}
-
-func TestDetectSqueezeState_AllSqueezed(t *testing.T) {
-	// All embedded plain-key fields are short (4-byte file offsets).
-	samples := []sampledPair{
-		{k: []byte("key1"), v: branchWithAccountKey([]byte{0x01, 0x02, 0x03, 0x04})},
-		{k: []byte("key2"), v: branchWithAccountKey([]byte{0x05, 0x06, 0x07})},
-		{k: []byte("key3"), v: branchWithStorageKey([]byte{0x08, 0x09})},
-	}
-	squeezed, err := detectSqueezeState(samples)
-	require.NoError(t, err)
-	require.True(t, squeezed)
-}
-
-func TestDetectSqueezeState_AllUnsqueezed(t *testing.T) {
-	addr20 := bytes.Repeat([]byte{0xaa}, 20)
-	addr52 := bytes.Repeat([]byte{0xbb}, 52)
-	samples := []sampledPair{
-		{k: []byte("key1"), v: branchWithAccountKey(addr20)},
-		{k: []byte("key2"), v: branchWithAccountKey(addr20)},
-		{k: []byte("key3"), v: branchWithStorageKey(addr52)},
-	}
-	squeezed, err := detectSqueezeState(samples)
-	require.NoError(t, err)
-	require.False(t, squeezed)
-}
-
-func TestDetectSqueezeState_PartialSqueezed(t *testing.T) {
-	// One short key among full-length keys — decisive squeezed signal.
-	addr20 := bytes.Repeat([]byte{0xcc}, 20)
-	samples := []sampledPair{
-		{k: []byte("key1"), v: branchWithAccountKey(addr20)},
-		{k: []byte("key2"), v: branchWithAccountKey(addr20)},
-		{k: []byte("key3"), v: branchWithAccountKey([]byte{0x01, 0x02, 0x03})}, // short
-		{k: []byte("key4"), v: branchWithAccountKey(addr20)},
-	}
-	squeezed, err := detectSqueezeState(samples)
-	require.NoError(t, err)
-	require.True(t, squeezed)
-}
-
-func TestDetectSqueezeState_StateKeysOnly(t *testing.T) {
-	samples := []sampledPair{
-		{k: commitmentdb.KeyCommitmentState, v: []byte{0x01, 0x02, 0x03}},
-		{k: commitmentdb.KeyCommitmentState, v: nil},
-	}
-	_, err := detectSqueezeState(samples)
-	require.ErrorIs(t, err, errNoNonStateSamples)
-}
-
-func TestDetectSqueezeState_EmptyValuesSkipped(t *testing.T) {
-	addr20 := bytes.Repeat([]byte{0xdd}, 20)
-	samples := []sampledPair{
-		{k: []byte("key1"), v: nil}, // skipped (empty value)
-		{k: []byte("key2"), v: branchWithAccountKey(addr20)},
-	}
-	squeezed, err := detectSqueezeState(samples)
-	require.NoError(t, err)
-	require.False(t, squeezed)
 }
 
 // nibblePaths covers the keyXform fixtures: a handful of distinct nibble paths
@@ -333,9 +233,10 @@ type fakeVisibleFile struct {
 	end   uint64
 }
 
-func (f fakeVisibleFile) Fullpath() string     { return f.path }
-func (f fakeVisibleFile) StartRootNum() uint64 { return f.start }
-func (f fakeVisibleFile) EndRootNum() uint64   { return f.end }
+func (f fakeVisibleFile) Fullpath() string         { return f.path }
+func (f fakeVisibleFile) StartRootNum() uint64     { return f.start }
+func (f fakeVisibleFile) EndRootNum() uint64       { return f.end }
+func (f fakeVisibleFile) Version() version.Version { return version.V1_0 }
 
 // preflightTestStepSize matches the unit step used in these tests: each input
 // "file" spans one step, so StartRootNum=N maps to step range [N, N+1).
