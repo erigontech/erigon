@@ -17,6 +17,7 @@
 package backup
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"maps"
@@ -291,6 +292,9 @@ func chunkBounds(tx kv.RwTx, table string, size uint64) (bounds [][]byte, err er
 	}
 	if took := time.Since(started); took > 5*time.Second {
 		log.Debug("[clear] DistributeCursors", "table", table, "chunks", chunks, "took", took)
+	}
+	for i := range bounds { // DistributeCursors returns tx-owned zero-copy keys; a same-tx DeleteRange rebalances the pages they point into, invalidating them
+		bounds[i] = bytes.Clone(bounds[i])
 	}
 	return bounds, nil
 }
