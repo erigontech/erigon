@@ -178,7 +178,20 @@ func (f *ForkChoiceStore) isUnequivocating(validatorIndex uint64) bool {
 func (f *ForkChoiceStore) setUnequivocating(validatorIndex uint64) {
 	index := int(validatorIndex) / 8
 	if index >= len(f.equivocatingIndicies) {
-		f.equivocatingIndicies = common.EnsureEnoughSize(f.equivocatingIndicies, index+1)
+		if index < cap(f.equivocatingIndicies) {
+			f.equivocatingIndicies = f.equivocatingIndicies[:index+1]
+		} else {
+			nextCap := cap(f.equivocatingIndicies)
+			if nextCap == 0 {
+				nextCap = 1
+			}
+			for nextCap <= index {
+				nextCap *= 2
+			}
+			next := make([]byte, index+1, nextCap)
+			copy(next, f.equivocatingIndicies)
+			f.equivocatingIndicies = next
+		}
 	}
 	subIndex := int(validatorIndex) % 8
 	f.equivocatingIndicies[index] |= 1 << uint(subIndex)

@@ -42,6 +42,11 @@ type gloasWeightNode struct {
 	fullWeight    uint64
 }
 
+type gloasWeightStackItem struct {
+	root    common.Hash
+	visited bool
+}
+
 type gloasWeightTree struct {
 	f *ForkChoiceStore
 
@@ -60,6 +65,7 @@ type gloasWeightTree struct {
 	topologySeen map[common.Hash]struct{}
 	weightSeen   map[common.Hash]struct{}
 	stack        []common.Hash
+	weightStack  []gloasWeightStackItem
 }
 
 func newGloasWeightTree(f *ForkChoiceStore) *gloasWeightTree {
@@ -336,21 +342,33 @@ func (t *gloasWeightTree) recompute(root common.Hash) {
 	} else {
 		clear(t.weightSeen)
 	}
-	var walk func(common.Hash)
-	walk = func(current common.Hash) {
-		if _, ok := t.weightSeen[current]; ok {
-			return
-		}
-		t.weightSeen[current] = struct{}{}
-		node := t.nodes[current]
+	t.weightStack = append(t.weightStack[:0], gloasWeightStackItem{root: root})
+	for len(t.weightStack) > 0 {
+		item := t.weightStack[len(t.weightStack)-1]
+		t.weightStack = t.weightStack[:len(t.weightStack)-1]
+		node := t.nodes[item.root]
 		if node == nil {
-			return
+			continue
+		}
+		if !item.visited {
+			if _, ok := t.weightSeen[item.root]; ok {
+				continue
+			}
+			t.weightSeen[item.root] = struct{}{}
+			t.weightStack = append(t.weightStack, gloasWeightStackItem{root: item.root, visited: true})
+			for i := len(node.children) - 1; i >= 0; i-- {
+				child := node.children[i]
+				if _, ok := t.weightSeen[child]; ok {
+					continue
+				}
+				t.weightStack = append(t.weightStack, gloasWeightStackItem{root: child})
+			}
+			continue
 		}
 		node.pendingWeight = node.directPending + node.directEmpty + node.directFull
 		node.emptyWeight = node.directEmpty
 		node.fullWeight = node.directFull
 		for _, child := range node.children {
-			walk(child)
 			childNode := t.nodes[child]
 			if childNode == nil {
 				continue
@@ -364,7 +382,6 @@ func (t *gloasWeightTree) recompute(root common.Hash) {
 			}
 		}
 	}
-	walk(root)
 }
 
 func (t *gloasWeightTree) GetWeight(node ForkChoiceNode) uint64 {

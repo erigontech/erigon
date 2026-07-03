@@ -17,6 +17,7 @@
 package forkchoice
 
 import (
+	"encoding/binary"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -73,6 +74,16 @@ func TestEquivocationAfterBaselineDirtiesWeightTree(t *testing.T) {
 
 	require.True(t, f.isUnequivocating(4))
 	require.Contains(t, f.gloasWeightTree.dirty, uint64(4))
+}
+
+func TestSetUnequivocatingGrowsAmortized(t *testing.T) {
+	f := newGloasWeightTreeTestStore()
+
+	f.setUnequivocating(16)
+
+	require.True(t, f.isUnequivocating(16))
+	require.Len(t, f.equivocatingIndicies, 3)
+	require.Greater(t, cap(f.equivocatingIndicies), len(f.equivocatingIndicies))
 }
 
 func TestGloasMarksDirtyWeightTree(t *testing.T) {
@@ -310,6 +321,44 @@ func TestGloasWeightTreeNilCheckpointStateReturnsZero(t *testing.T) {
 
 	require.Zero(t, tree.GetAttestationScore(node))
 	require.Zero(t, tree.GetWeight(node))
+}
+
+func TestGloasWeightTreeRecomputeDeepChain(t *testing.T) {
+	f := newGloasWeightTreeTestStore()
+	tree := f.gloasWeightTree
+	const depth = 10_000
+
+	root := testRoot(1)
+	current := root
+	for i := uint64(1); i <= depth; i++ {
+		next := testRoot(i + 1)
+		node := tree.nodes[current]
+		if node == nil {
+			node = &gloasWeightNode{}
+			tree.nodes[current] = node
+		}
+		node.children = []common.Hash{next}
+		node.directPending = 1
+		child := tree.nodes[next]
+		if child == nil {
+			child = &gloasWeightNode{}
+			tree.nodes[next] = child
+		}
+		child.parentPayloadStatus = cltypes.PayloadStatusFull
+		child.directPending = 1
+		current = next
+	}
+
+	tree.recompute(root)
+
+	require.Equal(t, uint64(depth+1), tree.nodes[root].pendingWeight)
+	require.Equal(t, uint64(depth), tree.nodes[root].fullWeight)
+}
+
+func testRoot(i uint64) common.Hash {
+	var root common.Hash
+	binary.BigEndian.PutUint64(root[24:], i)
+	return root
 }
 
 func TestGloasWeightTreeIgnoresStaleChildEdges(t *testing.T) {

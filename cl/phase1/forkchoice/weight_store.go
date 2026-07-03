@@ -136,7 +136,7 @@ func (w *weightStore) GetAttestationScore(node ForkChoiceNode) uint64 {
 // countableVote returns the validator's latest message and balance when the vote
 // counts toward fork-choice weights: inside the justified registry's bounds,
 // active, not slashed, not equivocating, with a non-empty message and balance.
-// The delta tree, the full scan, and computeVotes must all share this filter.
+// Every weight consumer must share this filter.
 func (f *ForkChoiceStore) countableVote(cs *checkpointState, validatorIndex int) (LatestMessage, uint64, bool) {
 	if validatorIndex >= cs.validatorSetSize || validatorIndex >= len(cs.balances) {
 		return LatestMessage{}, 0, false
