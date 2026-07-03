@@ -100,7 +100,7 @@ jobs:
           repositories: "erigon"
 
       - name: Checkout base branch
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
         with:
           ref: ${{ steps.determine.outputs.base_branch }}
           token: ${{ steps.app_token.outputs.token }}

@@ -37,7 +37,6 @@ import (
 	"github.com/erigontech/erigon/db/services"
 	"github.com/erigontech/erigon/db/snaptype"
 	dbstate "github.com/erigontech/erigon/db/state"
-	"github.com/erigontech/erigon/diagnostics/diaglib"
 	"github.com/erigontech/erigon/execution/stagedsync/stages"
 	"github.com/erigontech/erigon/execution/types"
 )
@@ -277,7 +276,6 @@ func Reset(ctx context.Context, db kv.RwDB, stagesList ...stages.SyncStage) erro
 }
 
 func FillDBFromSnapshots(logPrefix string, ctx context.Context, tx kv.RwTx, dirs datadir.Dirs, blockReader services.FullBlockReader, logger log.Logger) error {
-	startTime := time.Now()
 	blocksAvailable := blockReader.FrozenBlocks()
 	logEvery := time.NewTicker(20 * time.Second)
 	defer logEvery.Stop()
@@ -344,14 +342,6 @@ func FillDBFromSnapshots(logPrefix string, ctx context.Context, tx kv.RwTx, dirs
 				case <-ctx.Done():
 					return ctx.Err()
 				case <-logEvery.C:
-					diaglib.Send(diaglib.SnapshotFillDBStageUpdate{
-						Stage: diaglib.SnapshotFillDBStage{
-							StageName: string(stage),
-							Current:   header.Number.Uint64(),
-							Total:     blocksAvailable,
-						},
-						TimeElapsed: time.Since(startTime).Seconds(),
-					})
 					logger.Info(fmt.Sprintf("[%s] Total difficulty index: %s/%s", logPrefix,
 						common.PrettyCounter(header.Number.Uint64()), common.PrettyCounter(blockReader.FrozenBlocks())))
 				default:
@@ -386,14 +376,6 @@ func FillDBFromSnapshots(logPrefix string, ctx context.Context, tx kv.RwTx, dirs
 				case <-ctx.Done():
 					return ctx.Err()
 				case <-logEvery.C:
-					diaglib.Send(diaglib.SnapshotFillDBStageUpdate{
-						Stage: diaglib.SnapshotFillDBStage{
-							StageName: string(stage),
-							Current:   blockNum,
-							Total:     blocksAvailable,
-						},
-						TimeElapsed: time.Since(startTime).Seconds(),
-					})
 					logger.Info(fmt.Sprintf("[%s] MaxTxNums index: %s/%s", logPrefix, common.PrettyCounter(blockNum), common.PrettyCounter(blockReader.FrozenBlocks())))
 				default:
 				}
@@ -424,16 +406,6 @@ func FillDBFromSnapshots(logPrefix string, ctx context.Context, tx kv.RwTx, dirs
 					return err
 				}
 			}
-
-		default:
-			diaglib.Send(diaglib.SnapshotFillDBStageUpdate{
-				Stage: diaglib.SnapshotFillDBStage{
-					StageName: string(stage),
-					Current:   blocksAvailable, // as we are done with other stages
-					Total:     blocksAvailable,
-				},
-				TimeElapsed: time.Since(startTime).Seconds(),
-			})
 		}
 	}
 	return nil

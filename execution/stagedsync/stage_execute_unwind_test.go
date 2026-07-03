@@ -20,6 +20,7 @@ import (
 	"context"
 	"testing"
 
+	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/common"
@@ -30,40 +31,22 @@ import (
 	"github.com/erigontech/erigon/db/kv/mdbx"
 	"github.com/erigontech/erigon/db/kv/rawdbv3"
 	"github.com/erigontech/erigon/db/kv/temporal"
+	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/db/snapshotsync/freezeblocks"
 	dbstate "github.com/erigontech/erigon/db/state"
 	"github.com/erigontech/erigon/db/state/changeset"
 	"github.com/erigontech/erigon/db/state/execctx"
 	"github.com/erigontech/erigon/execution/chain/networkname"
 	"github.com/erigontech/erigon/execution/stagedsync/stages"
+	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/node/ethconfig"
 )
 
-// TestUnwindExecutionStage_PrunesUncommittedOverlayWrite is a regression test
-// for the Hoodi block-3004265 gas-used mismatch (originally found on
-// release/3.4, same gap on main).
-//
-// Repro of the original chain of events:
-//
-//  1. In serial batch execution, block 3004265 tx19 does a first-time SSTORE to
-//     ca5daf64 slot0. That write lands in the in-RAM SharedDomains /
-//     TemporalMemBatch overlay (stamped with tx19's txNum) but the block then
-//     fails its post-execution gas check, so its step is never committed.
-//  2. The executor schedules UnwindTo(3004264). Because 3004265 was never
-//     committed, the committed execution-stage progress (s.BlockNumber) sits at
-//     or below the unwind point, so UnwindExecutionStage hit the
-//     `u.UnwindPoint >= s.BlockNumber` early return and skipped unwindExec3 —
-//     i.e. it never called sd.Unwind, so the overlay prune added by #20625
-//     (which only runs from unwindExec3) never executed.
-//  3. The same overlay is reused across the unwind→retry loop inside one
-//     sync.Run, so on retry the storage read returned tx19's own stale
-//     first-write (…a3a34) instead of the committed 0. The contract took the
-//     "already initialised" branch, skipped an SSTORE_SET (20000 gas), the block
-//     came up exactly 21045 gas short, and the node spun in an unwind/retry loop.
-//
-// Before the fix, step 2's early return leaves the overlay untouched, so the
-// failed block's write is still visible after the unwind — this test asserts it
-// is gone, while a write at/below the unwind point survives (no over-pruning).
+// Pins that the unwind early-return (u.UnwindPoint >= s.BlockNumber) prunes
+// uncommitted overlay writes above committed progress (s.BlockNumber) — the
+// whole (s.BlockNumber, u.UnwindPoint] range re-executes since u.Done is skipped,
+// so those writes must go too, not just ones above u.UnwindPoint — while a write
+// at/below committed progress survives (no over-pruning).
 func TestUnwindExecutionStage_PrunesUncommittedOverlayWrite(t *testing.T) {
 	t.Parallel()
 
@@ -109,9 +92,11 @@ func TestUnwindExecutionStage_PrunesUncommittedOverlayWrite(t *testing.T) {
 		unwindPoint    = uint64(7) // = failedBlock-1; >= committedBlock => disk no-op
 		failedBlock    = uint64(8) // block whose post-exec gas check failed mid-batch
 	)
-	boundaryTxNum, err := br.TxnumReader().Min(ctx, tx, unwindPoint+1)
+	// The early-return prunes from Min(s.BlockNumber+1) = Min(committedBlock+1),
+	// the first re-executed txNum — verify that boundary (not unwindPoint+1).
+	pruneFloorTxNum, err := br.TxnumReader().Min(ctx, tx, committedBlock+1)
 	require.NoError(t, err)
-	require.Equal(t, failedBlock*perBlock, boundaryTxNum, "sanity: Min(failedBlock) == first txNum of failedBlock")
+	require.Equal(t, (committedBlock+1)*perBlock, pruneFloorTxNum, "sanity: prune floor == first txNum of committedBlock+1")
 
 	// staleKey mirrors ca5daf64 slot0: first-written by failedBlock's tx19 at a
 	// txNum strictly above the unwind boundary — must be pruned on unwind.
@@ -122,25 +107,37 @@ func TestUnwindExecutionStage_PrunesUncommittedOverlayWrite(t *testing.T) {
 	staleVal := staleValHash[:]
 	const staleTxNum = failedBlock*perBlock + 5 // inside failedBlock, above the boundary
 
-	// keepKey is written by a block at/below the unwind point — must survive.
-	keepAddr := common.HexToAddress("0x00000000000000000000000000000000000000aa")
-	keepSlot := common.Hash{31: 0x01}
+	// reexecKey is written by a block in (committedBlock, unwindPoint] — i.e.
+	// above committed progress. The early return skips u.Done, so progress stays
+	// at committedBlock and this block re-executes; its overlay write must be
+	// pruned, even though it's at/below the unwind point.
+	reexecAddr := common.HexToAddress("0x00000000000000000000000000000000000000aa")
+	reexecSlot := common.Hash{31: 0x01}
+	reexecKey := append(append([]byte{}, reexecAddr[:]...), reexecSlot[:]...)
+	reexecVal := []byte{0xbe, 0xef}
+	const reexecTxNum = unwindPoint * perBlock // inside the unwind-target block (block 7 > committed 5)
+
+	// keepKey is written at/below committed progress — committed state, must survive.
+	keepAddr := common.HexToAddress("0x00000000000000000000000000000000000000bb")
+	keepSlot := common.Hash{31: 0x02}
 	keepKey := append(append([]byte{}, keepAddr[:]...), keepSlot[:]...)
-	keepVal := []byte{0xbe, 0xef}
-	const keepTxNum = unwindPoint * perBlock // inside the unwind-target block
+	keepVal := []byte{0xca, 0xfe}
+	const keepTxNum = committedBlock*perBlock + 3 // inside the committed block
 
 	doms.SetTxNum(keepTxNum)
 	require.NoError(t, doms.DomainPut(kv.StorageDomain, tx, keepKey, keepVal, keepTxNum, nil))
+	doms.SetTxNum(reexecTxNum)
+	require.NoError(t, doms.DomainPut(kv.StorageDomain, tx, reexecKey, reexecVal, reexecTxNum, nil))
 	doms.SetTxNum(staleTxNum)
 	require.NoError(t, doms.DomainPut(kv.StorageDomain, tx, staleKey, staleVal, staleTxNum, nil))
 
-	// Sanity: both visible through the overlay before the unwind.
+	// Sanity: all visible through the overlay before the unwind.
 	got, _, err := doms.GetLatest(kv.StorageDomain, tx, staleKey)
 	require.NoError(t, err)
 	require.Equal(t, staleVal, got, "precondition: stale write must be visible pre-unwind")
-	got, _, err = doms.GetLatest(kv.StorageDomain, tx, keepKey)
+	got, _, err = doms.GetLatest(kv.StorageDomain, tx, reexecKey)
 	require.NoError(t, err)
-	require.Equal(t, keepVal, got, "precondition: keep write must be visible pre-unwind")
+	require.Equal(t, reexecVal, got, "precondition: re-exec-range write must be visible pre-unwind")
 
 	cfg := ExecuteBlockCfg{blockReader: br}
 	s := &StageState{ID: stages.Execution, BlockNumber: committedBlock}
@@ -154,12 +151,106 @@ func TestUnwindExecutionStage_PrunesUncommittedOverlayWrite(t *testing.T) {
 	got, _, err = doms.GetLatest(kv.StorageDomain, tx, staleKey)
 	require.NoError(t, err)
 	require.Empty(t, got,
-		"after Unwind to block %d, the overlay must not return failedBlock(%d) tx write %x (got %x): "+
-			"UnwindExecutionStage skipped the overlay prune on the no-op-disk-unwind path",
-		unwindPoint, failedBlock, staleVal, got)
+		"after Unwind, the overlay must not return failedBlock(%d) tx write %x (got %x)",
+		failedBlock, staleVal, got)
 
-	// A write at/below the unwind point must be untouched (no over-pruning).
+	// A write in (committedBlock, unwindPoint] re-executes too, so it must also
+	// be pruned — the prune floor is s.BlockNumber+1, not u.UnwindPoint+1.
+	got, _, err = doms.GetLatest(kv.StorageDomain, tx, reexecKey)
+	require.NoError(t, err)
+	require.Empty(t, got,
+		"after Unwind, the overlay must not return the re-exec-range write at block %d (got %x): "+
+			"prune floor must be s.BlockNumber+1, not u.UnwindPoint+1",
+		unwindPoint, got)
+
+	// A write at/below committed progress is committed state — must survive.
 	got, _, err = doms.GetLatest(kv.StorageDomain, tx, keepKey)
 	require.NoError(t, err)
-	require.Equal(t, keepVal, got, "write at/below the unwind point must survive the prune")
+	require.Equal(t, keepVal, got, "write at/below committed progress must survive the prune")
+}
+
+func makeHeader(number uint64, root common.Hash) *types.Header {
+	return &types.Header{
+		Number:     *uint256.NewInt(number),
+		Root:       root,
+		Difficulty: *uint256.NewInt(1),
+	}
+}
+
+// TestFindExecutedDiffsetAtHeight_FallsBackAfterCanonicalReorg pins the unwind diffset
+// lookup. After a reorg clears the canonical hash for the unwound range, a lookup keyed
+// on the canonical hash misses; without the fallback to the stored header the diffset is
+// never found, the unwind silently no-ops, and the unwound block's state survives as
+// phantom data.
+func TestFindExecutedDiffsetAtHeight_FallsBackAfterCanonicalReorg(t *testing.T) {
+	t.Parallel()
+
+	logger := log.New()
+	dirs := datadir.New(t.TempDir())
+	rawDb := mdbx.New(dbcfg.ChainDB, logger).InMem(t, dirs.Chaindata).MustOpen()
+	t.Cleanup(rawDb.Close)
+
+	agg, err := dbstate.NewTest(dirs).StepSize(16).Logger(logger).Open(context.Background(), rawDb)
+	require.NoError(t, err)
+	t.Cleanup(agg.Close)
+
+	db, err := temporal.New(rawDb, agg)
+	require.NoError(t, err)
+
+	// Block reader backed only by MDBX — the unwind range is at the tip, above any
+	// frozen snapshot boundary, so no snapshots are needed.
+	snaps := freezeblocks.NewRoSnapshots(ethconfig.BlocksFreezing{ChainName: networkname.Mainnet}, dirs.Snap, logger)
+	t.Cleanup(snaps.Close)
+	br := freezeblocks.NewBlockReader(snaps, nil)
+
+	ctx := context.Background()
+	tx, err := db.BeginTemporalRw(ctx)
+	require.NoError(t, err)
+	defer tx.Rollback()
+
+	doms, err := execctx.NewSharedDomains(ctx, tx, logger)
+	require.NoError(t, err)
+	defer doms.Close()
+
+	const height = uint64(10)
+	hOld := makeHeader(height, common.Hash{0x01})
+	require.NoError(t, rawdb.WriteHeader(tx, hOld))
+
+	// Diffset is stored under hOld — the block actually executed at this height.
+	addr := common.Address{0xde, 0xad}
+	cs := &changeset.StateChangeSet{}
+	cs.Diffs[kv.AccountsDomain].DomainUpdate(addr[:], kv.Step(0), nil)
+	require.NoError(t, changeset.WriteDiffSet(tx, height, hOld.Hash(), cs))
+
+	// Phase 1: hOld is canonical → direct hit under the canonical hash.
+	require.NoError(t, rawdb.WriteCanonicalHash(tx, hOld.Hash(), height))
+	diffs, executed, found, err := findExecutedDiffsetAtHeight(ctx, tx, br, doms, height)
+	require.NoError(t, err)
+	require.True(t, found, "diffset must be found when the canonical hash matches the stored hash")
+	require.Equal(t, hOld.Hash(), executed, "executedHash must be hOld when canonical points at hOld")
+	require.NotEmpty(t, diffs[kv.AccountsDomain], "AccountsDomain diff list must be non-empty")
+
+	// Phase 2: a reorg clears the canonical hash for the unwound range. A canonical-hash
+	// lookup now misses (the pre-fix failure mode); the diffset must still be located by
+	// falling back to the stored header.
+	require.NoError(t, rawdb.TruncateCanonicalHash(tx, height, false))
+	_, canonOk, err := br.CanonicalHash(ctx, tx, height)
+	require.NoError(t, err)
+	require.False(t, canonOk, "sanity: canonical hash must be cleared at the unwound height — the pre-fix lookup keys on this and misses")
+
+	diffs, executed, found, err = findExecutedDiffsetAtHeight(ctx, tx, br, doms, height)
+	require.NoError(t, err)
+	require.True(t, found, "diffset must be located via the stored-header fallback after the canonical hash was cleared")
+	require.Equal(t, hOld.Hash(), executed, "executedHash must remain hOld (the actually-executed block) after the canonical flip")
+	require.NotEmpty(t, diffs[kv.AccountsDomain], "AccountsDomain diff list must survive the fallback")
+
+	// Phase 3: a height whose canonical header has no stored diffset — found must be
+	// false (no spurious match, no error).
+	const heightEmpty = uint64(11)
+	hEmpty := makeHeader(heightEmpty, common.Hash{0x03})
+	require.NoError(t, rawdb.WriteHeader(tx, hEmpty))
+	require.NoError(t, rawdb.WriteCanonicalHash(tx, hEmpty.Hash(), heightEmpty))
+	_, _, found, err = findExecutedDiffsetAtHeight(ctx, tx, br, doms, heightEmpty)
+	require.NoError(t, err)
+	require.False(t, found, "must report not-found when no diffset is stored at this height")
 }

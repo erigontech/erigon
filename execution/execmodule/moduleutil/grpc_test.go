@@ -115,6 +115,19 @@ func TestBlockRpcConversion(t *testing.T) {
 	require.Nil(deep.Equal(testBlockRaw, roundTripBody))
 }
 
+func BenchmarkBlockRpcConversion(b *testing.B) {
+	testBlock := makeBlock(50, 2, 3)
+	b.ReportAllocs()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		rpcBlock := ConvertBlockToRPC(testBlock)
+		_, err := ConvertRawBlockBodyFromRpc(rpcBlock.Body)
+		if err != nil {
+			b.Fatal(err)
+		}
+	}
+}
+
 func TestBigIntConversion(t *testing.T) {
 	t.Parallel()
 	require := require.New(t)
