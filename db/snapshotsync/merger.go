@@ -343,17 +343,17 @@ func (m *Merger) merge(ctx context.Context, v *View, toMerge []*DirtySegment, ta
 
 	w := seg.NewWriter(f, seg.CompressKeys|seg.CompressVals)
 	for _, d := range cList {
-		if err := d.WithReadAhead(func() error {
-			g := d.MakeGetter()
-			for g.HasNext() {
-				word, _ = g.Next(word[:0])
-				if _, err := w.Write(word); err != nil {
-					return err
-				}
-			}
-			return nil
-		}); err != nil {
+		view, err := d.OpenSequentialView(true)
+		if err != nil {
 			return nil, err
+		}
+		defer view.Close()
+		g := view.MakeGetter()
+		for g.HasNext() {
+			word, _ = g.Next(word[:0])
+			if _, err := w.Write(word); err != nil {
+				return nil, err
+			}
 		}
 	}
 	if f.Count() != expectedTotal {

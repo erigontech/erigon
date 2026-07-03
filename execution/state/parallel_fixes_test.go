@@ -397,6 +397,55 @@ func TestBlockStateCacheWriteAccountUpdatesCurrent(t *testing.T) {
 	assert.Equal(t, enc2, current, "GetCurrentAccount should return the latest write")
 }
 
+// Pins that a second DeleteAccount in the same block is a writeLog no-op —
+// Flush must emit exactly one DomainDel per address (matching serial's IBS
+// short-circuit). Without this dedup the redundant nil-history entry feeds
+// into commitment-cache step keys and produces a non-deterministic state
+// root between parallel-exec nodes validating each other's blocks.
+func TestBlockStateCacheDeleteAccount_IdempotentInBlock(t *testing.T) {
+	cache := NewBlockStateCache()
+	addr := accounts.InternAddress([20]byte{0x77})
+
+	cache.DeleteAccount(addr, 1)
+	cache.DeleteAccount(addr, 2)
+
+	deletes := 0
+	for i := range cache.writeLog {
+		if cache.writeLog[i].kind == bcOpDeleteAccount && cache.writeLog[i].addr == addr {
+			deletes++
+		}
+	}
+	assert.Equal(t, 1, deletes, "second DeleteAccount in the same block must not append a second writeLog entry")
+
+	enc, present := cache.GetCurrentAccount(addr)
+	assert.True(t, present, "current view must still report addr as present-and-empty")
+	assert.Nil(t, enc, "current view value must remain nil")
+}
+
+// Pins the recreate-then-redelete pattern: an intervening WriteAccount
+// resets the dedup so the next DeleteAccount IS recorded — only the
+// "no write in between" duplicate is collapsed.
+func TestBlockStateCacheDeleteAccount_RecreateThenDeleteRecords(t *testing.T) {
+	cache := NewBlockStateCache()
+	addr := accounts.InternAddress([20]byte{0x88})
+
+	acc := accounts.NewAccount()
+	acc.Balance = *uint256.NewInt(1)
+	enc := accounts.SerialiseV3(&acc)
+
+	cache.DeleteAccount(addr, 1)
+	cache.WriteAccount(addr, enc, 2)
+	cache.DeleteAccount(addr, 3)
+
+	deletes := 0
+	for i := range cache.writeLog {
+		if cache.writeLog[i].kind == bcOpDeleteAccount && cache.writeLog[i].addr == addr {
+			deletes++
+		}
+	}
+	assert.Equal(t, 2, deletes, "delete after recreate must be recorded; only no-op duplicates are collapsed")
+}
+
 // TestSelfDestructKeepsDirtyStorageReadableSameTx verifies that after an
 // account self-destructs (versionMap active), a subsequent same-tx GetState
 // still returns the dirty value written before the SELFDESTRUCT. Pre-Cancun

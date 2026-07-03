@@ -20,12 +20,11 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"math/bits"
 	"runtime"
 	"sync"
 	"sync/atomic"
-
-	"github.com/erigontech/erigon/common/dbg"
 )
 
 // ParallelPatriciaHashed is the trie-side of the parallel commitment pipeline.
@@ -154,31 +153,80 @@ func (p *ParallelPatriciaHashed) SetStreamingCommitter(sc *StreamingCommitter) {
 	}
 }
 
-func (p *ParallelPatriciaHashed) SetTrace(b bool) {
-	if p.template != nil {
-		p.template.SetTrace(b)
-	}
-	if p.streaming != nil {
-		p.streaming.SetTrace(b)
-	}
+// syncWriter serializes concurrent trace writes from the root template and the
+// streaming/mount fold workers onto one underlying io.Writer.
+type syncWriter struct {
+	mu sync.Mutex
+	w  io.Writer
 }
 
-func (p *ParallelPatriciaHashed) SetTraceDomain(b bool) {
-	if p.template != nil {
-		p.template.SetTraceDomain(b)
-	}
-}
-
-func (p *ParallelPatriciaHashed) GetCapture(truncate bool) []string {
-	if p.template == nil {
+// NewSyncWriter wraps w so concurrent trace writes are serialized. It is
+// idempotent (a *syncWriter is returned unchanged) and returns nil for nil,
+// so the same guarded writer can be shared across the template and streaming
+// committer without stacking mutexes.
+func NewSyncWriter(w io.Writer) io.Writer {
+	if w == nil {
 		return nil
 	}
-	return p.template.GetCapture(truncate)
+	if _, ok := w.(*syncWriter); ok {
+		return w
+	}
+	return &syncWriter{w: w}
 }
 
-func (p *ParallelPatriciaHashed) SetCapture(capture []string) {
+func (sw *syncWriter) Write(p []byte) (int, error) {
+	sw.mu.Lock()
+	defer sw.mu.Unlock()
+	return sw.w.Write(p)
+}
+
+// prefixWriter tags each line with a fixed prefix and forwards the whole tagged
+// chunk to w in one Write, so a worker's trace lines stay attributable and never
+// interleave mid-line when multiplexed onto a shared writer.
+type prefixWriter struct {
+	w      io.Writer
+	prefix []byte
+}
+
+func (pw *prefixWriter) Write(p []byte) (int, error) {
+	buf := make([]byte, 0, len(p)+len(pw.prefix)*2)
+	buf = append(buf, pw.prefix...)
+	for i := 0; i < len(p); i++ {
+		buf = append(buf, p[i])
+		if p[i] == '\n' && i != len(p)-1 { // re-tag interior lines, not a trailing newline
+			buf = append(buf, pw.prefix...)
+		}
+	}
+	n, err := pw.w.Write(buf)
+	if err != nil {
+		return 0, err
+	}
+	if n < len(buf) {
+		return 0, io.ErrShortWrite
+	}
+	return len(p), nil
+}
+
+// tracePrefix wraps w so a fold worker's trace lines are tagged with prefix.
+// Returns nil (tracing disabled) when w is nil, so callers keep the cheap
+// `traceW != nil` guard. w should be the shared syncWriter.
+func tracePrefix(w io.Writer, prefix string) io.Writer {
+	if w == nil {
+		return nil
+	}
+	return &prefixWriter{w: w, prefix: []byte(prefix)}
+}
+
+// SetTraceWriter routes trace output to w (nil disables tracing). The writer is
+// wrapped once in a mutex-guarded syncWriter shared with the template and the
+// streaming committer, whose fold workers fan it out to their per-goroutine tries.
+func (p *ParallelPatriciaHashed) SetTraceWriter(w io.Writer) {
+	tw := NewSyncWriter(w)
 	if p.template != nil {
-		p.template.SetCapture(capture)
+		p.template.SetTraceWriter(tw)
+	}
+	if p.streaming != nil {
+		p.streaming.SetTraceWriter(tw)
 	}
 }
 
@@ -259,16 +307,6 @@ func (p *ParallelPatriciaHashed) Process(
 		return rh, nil
 	}
 
-	var warmuper *Warmuper
-	if warmup.Enabled && dbg.EnvWarmupParallelProcess {
-		if warmup.CtxFactory == nil {
-			warmup.CtxFactory = p.trieCtxFactory
-		}
-		warmuper = NewWarmuper(ctx, warmup)
-		warmuper.Start()
-		defer warmuper.CloseAndWait()
-	}
-
 	rh, mErr := p.processMounted(ctx, updates)
 	if mErr != nil {
 		pu.deferredMu.Lock()
@@ -292,9 +330,6 @@ func (p *ParallelPatriciaHashed) Process(
 	out := make([]byte, len(rh))
 	copy(out, rh)
 	p.rootHash.Store(&out)
-	if warmuper != nil {
-		warmuper.DrainPending()
-	}
 	flushTrieStateRates()
 	return out, nil
 }

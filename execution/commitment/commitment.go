@@ -22,9 +22,10 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
+	"io"
 	"math/bits"
+	"reflect"
 	"slices"
-	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -93,12 +94,8 @@ type Trie interface {
 	// RootHash produces root hash of the trie
 	RootHash() (hash []byte, err error)
 
-	// Makes trie more verbose
-	SetTrace(bool)
-	// Trace domain writes only (no filding etc)
-	SetTraceDomain(bool)
-	SetCapture(capture []string)
-	GetCapture(truncate bool) []string
+	// SetTraceWriter sets the trace writer; nil disables tracing
+	SetTraceWriter(io.Writer)
 	EnableCsvMetrics(filePathPrefix string)
 
 	// Variant returns commitment trie variant
@@ -142,21 +139,14 @@ type TrieVariant string
 
 const (
 	// VariantHexPatriciaTrie used as default commitment approach
-	VariantHexPatriciaTrie       TrieVariant = "hex-patricia-hashed"
-	VariantConcurrentHexPatricia TrieVariant = "hex-concurrent-patricia-hashed"
-	VariantParallelHexPatricia   TrieVariant = "hex-parallel-patricia-hashed"
-	VariantStreamingHexPatricia  TrieVariant = "hex-streaming-patricia-hashed"
+	VariantHexPatriciaTrie      TrieVariant = "hex-patricia-hashed"
+	VariantParallelHexPatricia  TrieVariant = "hex-parallel-patricia-hashed"
+	VariantStreamingHexPatricia TrieVariant = "hex-streaming-patricia-hashed"
 )
 
 // InitializeTrieAndUpdates constructs the trie + updates buffer from cfg.
 func InitializeTrieAndUpdates(mode Mode, tmpdir string, cfg TrieConfig) (Trie, *Updates) {
 	switch cfg.Variant {
-	case VariantConcurrentHexPatricia:
-		root := NewHexPatriciaHashed(length.Addr, nil, cfg)
-		trie := NewConcurrentPatriciaHashed(root, nil)
-		tree := NewUpdates(mode, tmpdir, KeyToHexNibbleHash)
-		// tree.SetConcurrentCommitment(true) // first run always sequential
-		return trie, tree
 	case VariantParallelHexPatricia:
 		// ParallelPatriciaHashed requires ModeParallel to allocate the prefix-trie state it reads.
 		trie := NewParallelPatriciaHashed(nil, length.Addr, cfg)
@@ -800,6 +790,25 @@ func (branchData BranchData) String() string {
 	return sb.String()
 }
 
+var errShortenedKeyFound = errors.New("shortened key found")
+
+// HasShortenedKeys reports whether the branch carries any shortened (referenced) key — a key
+// field whose length is not length.Addr (account) / length.Addr+length.Hash (storage), i.e. a
+// varint file offset. A malformed branch reports true: treat as referenced, never under-report.
+func (branchData BranchData) HasShortenedKeys() bool {
+	_, err := branchData.ReplacePlainKeys(nil, func(key []byte, isStorage bool) ([]byte, error) {
+		if isStorage {
+			if len(key) != length.Addr+length.Hash {
+				return nil, errShortenedKeyFound
+			}
+		} else if len(key) != length.Addr {
+			return nil, errShortenedKeyFound
+		}
+		return nil, nil
+	})
+	return err != nil
+}
+
 // if fn returns nil, the original key will be kept from branchData.
 // Uses span-based lazy copy: unchanged regions of branchData are copied in bulk
 // only when a key actually changes. When no keys change, returns branchData as-is
@@ -1243,8 +1252,6 @@ func (m *BranchMerger) Merge(branch1 BranchData, branch2 BranchData) (BranchData
 func ParseTrieVariant(s string) TrieVariant {
 	var trieVariant TrieVariant
 	switch s {
-	case "hex-parallel":
-		trieVariant = VariantConcurrentHexPatricia
 	case "parallel":
 		trieVariant = VariantParallelHexPatricia
 	case "hex":
@@ -1376,7 +1383,7 @@ func DecodeBranchAndCollectStat(key, branch []byte, tv TrieVariant) *BranchStat 
 			}
 			if c.extLen > 0 {
 				switch tv {
-				case VariantHexPatriciaTrie, VariantConcurrentHexPatricia:
+				case VariantHexPatriciaTrie:
 					stat.ExtSize += uint64(c.extLen)
 				}
 				stat.ExtCount++
@@ -1449,9 +1456,6 @@ type Updates struct {
 	mode    Mode
 	tmpdir  string
 
-	sortPerNibble bool // if true, use nibbles collectors instead of etl (all-in-one)
-	nibbles       [16]*etl.Collector
-
 	// parallel holds the prefix trie of touched hashed keys; nil outside ModeParallel.
 	parallel *parallelUpdate
 
@@ -1465,6 +1469,12 @@ type Updates struct {
 	arenas   [arenaRingSize][]byte
 	curArena int
 	gen      uint64
+
+	// addrCache reuses the nibblized keccak(addr) prefix across a run of storage
+	// keys sharing one address (whale storage). Enabled only when hasher is the
+	// nibblizing hasher whose key layout the reuse assumes (addrCacheReuse).
+	addrCache      addrHashCache
+	addrCacheReuse bool
 }
 
 // arenaRingSize is how many byte arenas HashSort cycles; raising it only adds memory headroom, never affects correctness.
@@ -1503,20 +1513,30 @@ func (t *Updates) arenaEnsureCap(c int) {
 	}
 }
 
-// Should be called right after updates initialisation. Otherwise could lost some data
-func (t *Updates) SetConcurrentCommitment(b bool) {
-	t.sortPerNibble = b
-	t.initCollector()
-}
-
-// IsConcurrentCommitment reports whether the configuration allows concurrent commitment processing.
+// IsConcurrentCommitment reports whether commitment runs in the parallel mode.
 func (t *Updates) IsConcurrentCommitment() bool {
-	return t.mode == ModeParallel || t.sortPerNibble
+	return t.mode == ModeParallel
 }
 
 type keyHasher func(key []byte) []byte
 
 func keyHasherNoop(key []byte) []byte { return key }
+
+// hasherReusesAddrPrefix reports whether h is the nibblizing hasher whose key
+// layout keyToHexNibbleHashCached assumes; only then may the address-prefix
+// cache be used in place of h.
+func hasherReusesAddrPrefix(h keyHasher) bool {
+	return reflect.ValueOf(h).Pointer() == reflect.ValueOf(KeyToHexNibbleHash).Pointer()
+}
+
+// hashKey nibblizes key, reusing the cached address prefix for a run of storage
+// keys sharing one address when the configured hasher permits it.
+func (t *Updates) hashKey(key []byte) []byte {
+	if t.addrCacheReuse {
+		return keyToHexNibbleHashCached(key, &t.addrCache)
+	}
+	return t.hasher(key)
+}
 
 // NewEmpty creates a fresh Updates matching the receiver. The streaming sink must
 // carry over, or a buffer rotated mid-stream silently computes a stale root.
@@ -1529,9 +1549,10 @@ func (t *Updates) NewEmpty() *Updates {
 
 func NewUpdates(m Mode, tmpdir string, hasher keyHasher) *Updates {
 	t := &Updates{
-		hasher: hasher,
-		tmpdir: tmpdir,
-		mode:   m,
+		hasher:         hasher,
+		tmpdir:         tmpdir,
+		mode:           m,
+		addrCacheReuse: hasherReusesAddrPrefix(hasher),
 	}
 	switch t.mode {
 	case ModeDirect:
@@ -1572,23 +1593,6 @@ func (t *Updates) SetMode(m Mode) {
 }
 
 func (t *Updates) initCollector() {
-	if t.sortPerNibble {
-		for i := 0; i < len(t.nibbles); i++ {
-			if t.nibbles[i] != nil {
-				t.nibbles[i].Close()
-				t.nibbles[i] = nil
-			}
-
-			t.nibbles[i] = etl.NewCollectorWithAllocator("commitment.nibble."+strconv.Itoa(i), t.tmpdir, etl.SmallSortableBuffers, log.Root().New("update-tree")).LogLvl(log.LvlDebug)
-			t.nibbles[i].SortAndFlushInBackground(true)
-		}
-		if t.etl != nil {
-			t.etl.Close()
-			t.etl = nil
-		}
-		return
-	}
-
 	if t.etl != nil {
 		t.etl.Close()
 		t.etl = nil
@@ -1642,7 +1646,7 @@ func (t *Updates) TouchPlainKey(key string, val []byte, fn func(c *KeyUpdate, va
 		} else {
 			pivot := &KeyUpdate{
 				plainKey:  key,
-				hashedKey: t.hasher(common.ToBytesZeroCopy(key)),
+				hashedKey: t.hashKey(common.ToBytesZeroCopy(key)),
 				update:    new(Update),
 			}
 			fn(pivot, val)
@@ -1652,14 +1656,9 @@ func (t *Updates) TouchPlainKey(key string, val []byte, fn func(c *KeyUpdate, va
 	case ModeDirect:
 		if _, ok := t.keys[key]; !ok {
 			keyBytes := common.ToBytesZeroCopy(key)
-			hashedKey := t.hasher(keyBytes)
+			hashedKey := t.hashKey(keyBytes)
 
-			var err error
-			if !t.sortPerNibble {
-				err = t.etl.Collect(hashedKey, keyBytes)
-			} else {
-				err = t.nibbles[hashedKey[0]].Collect(hashedKey, keyBytes)
-			}
+			err := t.etl.Collect(hashedKey, keyBytes)
 			if err != nil {
 				log.Warn("failed to collect updated key", "key", key, "err", err)
 			}
@@ -1668,7 +1667,7 @@ func (t *Updates) TouchPlainKey(key string, val []byte, fn func(c *KeyUpdate, va
 	case ModeParallel:
 		if _, ok := t.keys[key]; !ok {
 			keyBytes := common.ToBytesZeroCopy(key)
-			hashedKey := t.hasher(keyBytes)
+			hashedKey := t.hashKey(keyBytes)
 			ik := t.parallel.internKey(keyBytes)
 			t.parallel.Insert(hashedKey, ik, nil)
 			if t.streaming && t.streamer != nil {
@@ -1719,7 +1718,7 @@ func (t *Updates) TouchPlainKeyDirect(key string, update *Update) {
 		} else {
 			pivot := &KeyUpdate{
 				plainKey:  key,
-				hashedKey: t.hasher(common.ToBytesZeroCopy(key)),
+				hashedKey: t.hashKey(common.ToBytesZeroCopy(key)),
 				update:    new(Update),
 			}
 			*pivot.update = *update
@@ -1729,14 +1728,9 @@ func (t *Updates) TouchPlainKeyDirect(key string, update *Update) {
 	case ModeDirect:
 		if _, ok := t.keys[key]; !ok {
 			keyBytes := common.ToBytesZeroCopy(key)
-			hashedKey := t.hasher(keyBytes)
+			hashedKey := t.hashKey(keyBytes)
 
-			var err error
-			if !t.sortPerNibble {
-				err = t.etl.Collect(hashedKey, keyBytes)
-			} else {
-				err = t.nibbles[hashedKey[0]].Collect(hashedKey, keyBytes)
-			}
+			err := t.etl.Collect(hashedKey, keyBytes)
 			if err != nil {
 				log.Warn("failed to collect updated key", "key", key, "err", err)
 			}
@@ -1744,7 +1738,7 @@ func (t *Updates) TouchPlainKeyDirect(key string, update *Update) {
 		}
 	case ModeParallel:
 		keyBytes := common.ToBytesZeroCopy(key)
-		hashedKey := t.hasher(keyBytes)
+		hashedKey := t.hashKey(keyBytes)
 		// Carry the value so the fold uses it directly instead of re-reading ctx, which lags cc.state.
 		u := new(Update)
 		*u = *update
@@ -1771,12 +1765,7 @@ func (t *Updates) TouchHashedKey(hashedKey []byte) {
 		// No extra copy needed before etl.Collect: see Collector.Collect — it copies k and v internally.
 		dedupKey := string(hashedKey)
 		if _, ok := t.keys[dedupKey]; !ok {
-			var err error
-			if !t.sortPerNibble {
-				err = t.etl.Collect(hashedKey, []byte{})
-			} else {
-				err = t.nibbles[hashedKey[0]].Collect(hashedKey, []byte{})
-			}
+			err := t.etl.Collect(hashedKey, []byte{})
 			if err != nil {
 				log.Warn("failed to collect hashed key", "hashedKey", fmt.Sprintf("%x", hashedKey), "err", err)
 			}
@@ -1864,13 +1853,6 @@ func (t *Updates) Close() {
 	}
 	if t.etl != nil {
 		t.etl.Close()
-	}
-	if t.sortPerNibble {
-		for i := 0; i < len(t.nibbles); i++ {
-			if t.nibbles[i] != nil {
-				t.nibbles[i].Close()
-			}
-		}
 	}
 	if t.parallel != nil {
 		t.parallel.Close()
@@ -2083,6 +2065,7 @@ func (t *Updates) Reset() {
 	}
 	t.curArena = 0
 	t.gen = 0
+	t.addrCache.reset()
 }
 
 type KeyUpdate struct {

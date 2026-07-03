@@ -155,7 +155,7 @@ func Fuzz_AggregatorV3_Merge(f *testing.F) {
 
 func Fuzz_AggregatorV3_MergeValTransform(f *testing.F) {
 	db, agg := testFuzzDbAndAggregatorv3(f, 10)
-	agg.ForTestReplaceKeysInValues(kv.CommitmentDomain, true)
+	agg.ForTestReferencesInCommitmentBranches(kv.CommitmentDomain, true)
 
 	rwTx, err := db.BeginTemporalRw(f.Context())
 	require.NoError(f, err)

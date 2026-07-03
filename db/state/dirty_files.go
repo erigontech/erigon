@@ -120,26 +120,17 @@ type FilesItem struct {
 	existence            *existence.Filter
 	startTxNum, endTxNum uint64 //[startTxNum, endTxNum)
 
-	// Frozen: file containing Aggregator.stepsInFrozenFile steps. Completely immutable.
-	// Cold: file containing < Aggregator.stepsInFrozenFile steps. Immutable, but can be closed/removed after merge to bigger file.
-	// Hot: Stored in DB. Providing Snapshot-Isolation by CopyOnWrite.
-	frozen   bool         // immutable, don't need atomic
-	refcount atomic.Int32 // only for `frozen=false`
+	// version is the file's parsed on-disk version, used as a per-file regime marker.
+	version  version.Version
+	refcount atomic.Int32
 
-	// file can be deleted in 2 cases: 1. when `refcount == 0 && canDelete == true` 2. on app startup when `file.isSubsetOfFrozenFile()`
-	// other processes (which also reading files, may have same logic)
+	// Deprecated: only the not-yet-migrated forkable subsystem still uses this (with
+	// refcount); the aggregator reclaims via aggregatorVisible generations (retired + refcnt).
 	canDelete atomic.Bool
 }
 
-func newFilesItemWithSnapConfig(startTxNum, endTxNum uint64, snapConfig *SnapshotConfig) *FilesItem {
-	return newFilesItem(startTxNum, endTxNum, snapConfig.RootNumPerStep, snapConfig.StepsInFrozenFile())
-}
-
-func newFilesItem(startTxNum, endTxNum, stepSize uint64, stepsInFrozenFile uint64) *FilesItem {
-	startStep := startTxNum / stepSize
-	endStep := endTxNum / stepSize
-	frozen := endStep-startStep >= stepsInFrozenFile
-	return &FilesItem{startTxNum: startTxNum, endTxNum: endTxNum, frozen: frozen}
+func newFilesItem(startTxNum, endTxNum uint64) *FilesItem {
+	return &FilesItem{startTxNum: startTxNum, endTxNum: endTxNum}
 }
 
 func (i *FilesItem) Segment() *seg.Decompressor { return i.decompressor }
@@ -258,14 +249,11 @@ func (i *FilesItem) closeFilesAndRemove() {
 	// permanently orphaned.
 	if i.index != nil {
 		i.index.Close()
-		// paranoic-mode on: don't delete frozen files
-		if !i.frozen {
-			if err := dir.RemoveFile(i.index.FilePath()); err != nil {
-				log.Trace("remove after close", "err", err, "file", i.index.FileName())
-			}
-			if err := dir.RemoveFile(i.index.FilePath() + ".torrent"); err != nil {
-				log.Trace("remove after close", "err", err, "file", i.index.FileName())
-			}
+		if err := dir.RemoveFile(i.index.FilePath()); err != nil {
+			log.Trace("remove after close", "err", err, "file", i.index.FileName())
+		}
+		if err := dir.RemoveFile(i.index.FilePath() + ".torrent"); err != nil {
+			log.Trace("remove after close", "err", err, "file", i.index.FileName())
 		}
 		i.index = nil
 	}
@@ -291,14 +279,11 @@ func (i *FilesItem) closeFilesAndRemove() {
 	}
 	if i.decompressor != nil {
 		i.decompressor.Close()
-		// paranoic-mode on: don't delete frozen files
-		if !i.frozen {
-			if err := dir.RemoveFile(i.decompressor.FilePath()); err != nil {
-				log.Trace("remove after close", "err", err, "file", i.decompressor.FileName())
-			}
-			if err := dir.RemoveFile(i.decompressor.FilePath() + ".torrent"); err != nil {
-				log.Trace("remove after close", "err", err, "file", i.decompressor.FileName()+".torrent")
-			}
+		if err := dir.RemoveFile(i.decompressor.FilePath()); err != nil {
+			log.Trace("remove after close", "err", err, "file", i.decompressor.FileName())
+		}
+		if err := dir.RemoveFile(i.decompressor.FilePath() + ".torrent"); err != nil {
+			log.Trace("remove after close", "err", err, "file", i.decompressor.FileName()+".torrent")
 		}
 		i.decompressor = nil
 	}
@@ -306,7 +291,7 @@ func (i *FilesItem) closeFilesAndRemove() {
 
 var filterDirtyFilesReCache sync.Map // pattern string → *regexp.Regexp
 
-func filterDirtyFiles(fileNames []string, stepSize, stepsInFrozenFile uint64, filenameBase, ext string, logger log.Logger) (res []*FilesItem) {
+func filterDirtyFiles(fileNames []string, stepSize uint64, filenameBase, ext string, logger log.Logger) (res []*FilesItem) {
 	pattern := `^v(\d+(?:\.\d+)?)-` + filenameBase + `\.(\d+)-(\d+)\.` + ext + `$`
 	reVal, ok := filterDirtyFilesReCache.Load(pattern)
 	if !ok {
@@ -346,27 +331,45 @@ func filterDirtyFiles(fileNames []string, stepSize, stepsInFrozenFile uint64, fi
 		//   1-2.kv: [8, 16)
 		startTxNum, endTxNum := startStep*stepSize, endStep*stepSize
 
-		var newFile = newFilesItem(startTxNum, endTxNum, stepSize, stepsInFrozenFile)
+		var newFile = newFilesItem(startTxNum, endTxNum)
 		res = append(res, newFile)
 	}
 	return res
 }
 
-// retireMergeFiles removes garbage files from dirtyFiles and returns them so the
-// caller can attach them to the outgoing visible generation. Physical deletion
-// (closeFilesAndRemove) is the reclaimer's job once that generation drains — so
-// readers still pinning these files are never surprised. Returns outs unchanged.
-func retireMergeFiles(dirtyFiles *DirtyFiles, outs []*FilesItem, filenameBase string, logger log.Logger) []*FilesItem {
+// retireReason identifies why a file was removed from dirtyFiles.
+type retireReason int
+
+const (
+	retireReasonMerged retireReason = iota + 1
+	retireReasonAged
+)
+
+func (r retireReason) String() string {
+	switch r {
+	case retireReasonMerged:
+		return "merged"
+	case retireReasonAged:
+		return "aged"
+	default:
+		return "unknown"
+	}
+}
+
+// retire removes outs from dirtyFiles; the caller still owns outs and must
+// attach it to the outgoing visible generation itself. Physical deletion
+// (closeFilesAndRemove) happens once the last reader of that generation closes
+// — so readers still pinning these files are never surprised.
+func retire(dirtyFiles *DirtyFiles, outs []*FilesItem, filenameBase string, reason retireReason, logger log.Logger) {
 	for _, out := range outs {
 		if out == nil {
 			panic("must not happen: " + filenameBase)
 		}
 		dirtyFiles.Delete(out)
 		if filenameBase == traceFileLife && out.decompressor != nil {
-			logger.Warn("[agg.dbg] retireMergeFiles: retire", "f", out.decompressor.FileName())
+			logger.Warn("[agg.dbg] retire", "f", out.decompressor.FileName(), "reason", reason)
 		}
 	}
-	return outs
 }
 
 func (d *Domain) openDirtyFiles(dirEntries []string) (err error) {
@@ -393,6 +396,7 @@ func (d *Domain) openDirtyFiles(dirEntries []string) (err error) {
 
 			fName := filepath.Base(fPath)
 			d.FileVersion.DataKV.MustSupport(fileVer, fName)
+			item.version = fileVer
 
 			if item.decompressor, err = seg.NewDecompressor(fPath); err != nil {
 				if errors.Is(err, &seg.ErrCompressedFileCorrupted{}) {
@@ -612,6 +616,10 @@ type visibleFile struct {
 
 func (i visibleFile) Fullpath() string {
 	return i.src.decompressor.FilePath()
+}
+
+func (i visibleFile) Version() version.Version {
+	return i.src.version
 }
 
 func (i visibleFile) StartRootNum() uint64 {
