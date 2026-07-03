@@ -235,3 +235,22 @@ func TestSignatureValuesError(t *testing.T) {
 		}
 	}()
 }
+
+func TestMakeSignerFromRulesBhilaiFold(t *testing.T) {
+	t.Parallel()
+	rules := &chain.Rules{
+		ChainID:          uint256.NewInt(137),
+		IsHomestead:      true,
+		IsSpuriousDragon: true,
+		IsBerlin:         true,
+		IsLondon:         true,
+		IsShanghai:       true,
+		IsCancun:         true,
+		IsBhilai:         true,
+		IsPrague:         true, // BlockContext.Rules folds Bhilai into IsPrague
+	}
+	signer := MakeSignerFromRules(uint256.NewInt(137), rules)
+	assert.False(t, signer.blob, "Bhilai does not enable blob transactions")
+	assert.True(t, signer.setCode)
+	assert.True(t, signer.dynamicFee)
+}

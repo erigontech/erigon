@@ -110,19 +110,21 @@ func MakeSignerFromRules(chainID *uint256.Int, rules *chain.Rules) *Signer {
 		}
 		signer.unprotected = true
 		switch {
-		case rules.IsPrague:
-			signer.protected = true
-			signer.accessList = true
-			signer.dynamicFee = true
-			signer.blob = true
-			signer.setCode = true
-			signer.chainID.Set(&chainId)
-			signer.chainIDMul.Lsh(&chainId, 1) // ×2
+		// Bhilai before Prague: Rules construction folds Bhilai into IsPrague,
+		// and the Bhilai tier does not enable blob transactions.
 		case rules.IsBhilai:
 			signer.protected = true
 			signer.accessList = true
 			signer.dynamicFee = true
 			signer.blob = false
+			signer.setCode = true
+			signer.chainID.Set(&chainId)
+			signer.chainIDMul.Lsh(&chainId, 1) // ×2
+		case rules.IsPrague:
+			signer.protected = true
+			signer.accessList = true
+			signer.dynamicFee = true
+			signer.blob = true
 			signer.setCode = true
 			signer.chainID.Set(&chainId)
 			signer.chainIDMul.Lsh(&chainId, 1) // ×2
