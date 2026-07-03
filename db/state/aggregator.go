@@ -78,14 +78,11 @@ type Aggregator struct {
 
 	reorgBlockDepth uint64
 
-	dirtyFilesLock sync.Mutex
+	fileSet // dirtyFilesLock + the published visible-file generations
+
 	// commitmentRefsMu guards the runtime-mutable commitment ReferencesInCommitmentBranches
 	// flag: ReloadErigonDBSettings writes it while background merges read it.
-	commitmentRefsMu sync.RWMutex
-	// visible is CoW field updated only by `recalcVisibleFiles`.
-	visible atomic.Pointer[aggregatorVisible]
-	// oldestVisible head of linked-list of visibleFiles objects (oldest still-have-reader object). Mutated only under dirtyFilesLock.
-	oldestVisible     *aggregatorVisible
+	commitmentRefsMu  sync.RWMutex
 	snapshotBuildSema *semaphore.Weighted
 
 	disableHistory bool
@@ -1777,12 +1774,31 @@ func (a *Aggregator) dirtyFilesEndTxNumMinimax() uint64 {
 	return m
 }
 
-// aggregatorVisible immutable visible-for-application files (no gaps, no overlaps, indexed)
-// See also
+// fileSet is the aggregator-wide file-visibility state: the lock guarding every
+// per-entity DirtyFiles tree, and the immutable chain of visible generations
+// derived from them.
 //
-// new reader: refcnt++
-// new end: refcnt++
-// FilesDelete flow: Merge/Prune can mark old files as "ready for delete". Then last reader traversing linked-list of aggregatorVisible objects and perform real FileDelete
+// Each Domain/History/InvertedIndex keeps a `dirtyFiles` tree — the list of ALL
+// files, including un-indexed, garbage, and merged-into-bigger-one. The visible
+// view (no garbage, no overlaps, no un-indexed files) is computed by
+// recalcVisibleFiles into an immutable aggregatorVisible snapshot and published
+// atomically via `visible`; BeginFilesRo opens zero-copy readers against it.
+// Merge/prune retire superseded files onto the outgoing generation; the last
+// reader to drain a generation reclaims them (oldest-first along the chain).
+type fileSet struct {
+	dirtyFilesLock sync.Mutex
+	// visible is CoW, updated only by recalcVisibleFiles (readers take no lock and
+	// instead load it atomically).
+	visible atomic.Pointer[aggregatorVisible]
+	// oldestVisible is the chain head (oldest generation still pinned by a reader);
+	// mutated only under dirtyFilesLock.
+	oldestVisible *aggregatorVisible
+}
+
+// aggregatorVisible is one immutable generation of visible-for-application files
+// (no gaps, no overlaps, indexed). Readers pin it via refcnt; Merge/Prune mark
+// superseded files "ready for delete" and the last reader draining a generation
+// performs the real FileDelete, walking the oldest→newest linked list.
 // See: docs/plans/20260525-lockfree-file-reclamation-spec.md
 type aggregatorVisible struct {
 	d            [kv.DomainLen]*domainVisible

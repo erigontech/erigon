@@ -79,13 +79,9 @@ type Domain struct {
 	//  - .bt - key -> offset index
 	//  - .kvei - key -> existence (bloom filter)
 
-	// dirtyFiles - list of ALL files - including: un-indexed-yet, garbage, merged-into-bigger-one, ...
-	// thread-safe, but maybe need 1 RWLock for all trees in Aggregator
-	//
-	// The visible view (derivative of dirtyFiles, without garbage: no `canDelete=true`,
-	// no overlaps, no un-indexed files) is computed by Aggregator into an immutable
-	// domainVisible snapshot and published atomically via Aggregator.visible.
-	// BeginFilesRo opens readers against that snapshot in zero-copy way.
+	// dirtyFiles is the list of ALL files (un-indexed, garbage, merged-into-bigger-one, …);
+	// the garbage-free visible view (a domainVisible snapshot) is published via
+	// Aggregator.visible. See fileSet for the dirty↔visible model.
 	dirtyFiles *DirtyFiles
 
 	checker *DependencyIntegrityChecker
