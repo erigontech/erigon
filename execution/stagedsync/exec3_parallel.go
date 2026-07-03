@@ -3355,7 +3355,7 @@ func normalizeWriteSet(writes *state.WriteSet, vm *state.VersionMap, txIndex int
 		// via stateReader.
 		var code []byte
 		if c, _, ok := vm.ReadCode(addr, txIndex+1); ok {
-			code = c
+			code = c.Bytes
 		}
 		if len(code) == 0 && stateReader != nil {
 			if c, err := stateReader.ReadAccountCode(addr); err == nil {

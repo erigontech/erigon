@@ -1418,7 +1418,7 @@ func versionedUpdateIncarnation(vm *VersionMap, addr accounts.Address, txIndex i
 func versionedUpdateCode(vm *VersionMap, addr accounts.Address, txIndex int) ([]byte, bool) {
 	val, res, ok := vm.ReadCode(addr, txIndex)
 	if ok && res.Status() != MVReadResultNone {
-		return val, true
+		return val.Bytes, true
 	}
 	return nil, false
 }

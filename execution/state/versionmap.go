@@ -100,7 +100,7 @@ type AddressEntry struct {
 	Balance        *btree.Map[int, *WriteCell[uint256.Int]]
 	Nonce          *btree.Map[int, *WriteCell[uint64]]
 	Incarnation    *btree.Map[int, *WriteCell[uint64]]
-	Code           *btree.Map[int, *WriteCell[[]byte]]
+	Code           *btree.Map[int, *WriteCell[accounts.Code]]
 	CodeHash       *btree.Map[int, *WriteCell[accounts.CodeHash]]
 	CodeSize       *btree.Map[int, *WriteCell[int]]
 	CreateContract *btree.Map[int, *WriteCell[bool]]
@@ -206,7 +206,7 @@ func (vm *VersionMap) WriteChanges(changes []*types.AccountChanges) {
 			vm.WriteNonce(accountChanges.Address, Version{TxIndex: int(nonceChange.Index) - 1}, nonceChange.Value, true)
 		}
 		for _, codeChange := range accountChanges.CodeChanges {
-			vm.WriteCode(accountChanges.Address, Version{TxIndex: int(codeChange.Index) - 1}, codeChange.Bytecode, true)
+			vm.WriteCode(accountChanges.Address, Version{TxIndex: int(codeChange.Index) - 1}, accounts.NewCode(codeChange.Bytecode), true)
 		}
 	}
 }
@@ -250,7 +250,7 @@ func (vm *VersionMap) WriteIncarnation(addr accounts.Address, v Version, value u
 	e.Incarnation = putCell(e.Incarnation, addr, IncarnationPath, v.TxIndex, v.Incarnation, flagFor(complete), value, getCellIncarnation)
 }
 
-func (vm *VersionMap) WriteCode(addr accounts.Address, v Version, value []byte, complete bool) {
+func (vm *VersionMap) WriteCode(addr accounts.Address, v Version, value accounts.Code, complete bool) {
 	vm.mu.Lock()
 	defer vm.mu.Unlock()
 	e := vm.entryOrCreate(addr)
@@ -371,8 +371,8 @@ func (vm *VersionMap) ReadIncarnation(addr accounts.Address, txIdx int) (uint64,
 	return readFloor(vm, addr, txIdx, func(e *AddressEntry) *btree.Map[int, *WriteCell[uint64]] { return e.Incarnation })
 }
 
-func (vm *VersionMap) ReadCode(addr accounts.Address, txIdx int) ([]byte, ReadResult, bool) {
-	return readFloor(vm, addr, txIdx, func(e *AddressEntry) *btree.Map[int, *WriteCell[[]byte]] { return e.Code })
+func (vm *VersionMap) ReadCode(addr accounts.Address, txIdx int) (accounts.Code, ReadResult, bool) {
+	return readFloor(vm, addr, txIdx, func(e *AddressEntry) *btree.Map[int, *WriteCell[accounts.Code]] { return e.Code })
 }
 
 func (vm *VersionMap) ReadCodeHash(addr accounts.Address, txIdx int) (accounts.CodeHash, ReadResult, bool) {
@@ -469,7 +469,7 @@ func (vm *VersionMap) LatestTxIndex(addr accounts.Address, path AccountPath, key
 		}
 	case CodePath:
 		if e.Code != nil {
-			e.Code.Descend(txIdxLimit, func(k int, _ *WriteCell[[]byte]) bool { fk = k; return false })
+			e.Code.Descend(txIdxLimit, func(k int, _ *WriteCell[accounts.Code]) bool { fk = k; return false })
 		}
 	case CodeHashPath:
 		if e.CodeHash != nil {
@@ -563,7 +563,7 @@ func (vm *VersionMap) FlushVersionedWrites(writes *WriteSet, complete bool, trac
 	}
 	for addr, vw := range writes.code {
 		e := vm.entryOrCreate(addr)
-		e.Code = putCell(e.Code, addr, CodePath, vw.Version.TxIndex, vw.Version.Incarnation, flag, vw.Val.Bytes, getCellCode)
+		e.Code = putCell(e.Code, addr, CodePath, vw.Version.TxIndex, vw.Version.Incarnation, flag, vw.Val, getCellCode)
 	}
 	for addr, vw := range writes.codeHash {
 		e := vm.entryOrCreate(addr)
@@ -1095,7 +1095,7 @@ var (
 	cellPoolBalance        = sync.Pool{New: func() any { return &WriteCell[uint256.Int]{} }}
 	cellPoolNonce          = sync.Pool{New: func() any { return &WriteCell[uint64]{} }}
 	cellPoolIncarnation    = sync.Pool{New: func() any { return &WriteCell[uint64]{} }}
-	cellPoolCode           = sync.Pool{New: func() any { return &WriteCell[[]byte]{} }}
+	cellPoolCode           = sync.Pool{New: func() any { return &WriteCell[accounts.Code]{} }}
 	cellPoolCodeHash       = sync.Pool{New: func() any { return &WriteCell[accounts.CodeHash]{} }}
 	cellPoolCodeSize       = sync.Pool{New: func() any { return &WriteCell[int]{} }}
 	cellPoolCreateContract = sync.Pool{New: func() any { return &WriteCell[bool]{} }}
@@ -1116,7 +1116,7 @@ func getCellNonce() *WriteCell[uint64] { return cellPoolNonce.Get().(*WriteCell[
 func getCellIncarnation() *WriteCell[uint64] {
 	return cellPoolIncarnation.Get().(*WriteCell[uint64])
 }
-func getCellCode() *WriteCell[[]byte] { return cellPoolCode.Get().(*WriteCell[[]byte]) }
+func getCellCode() *WriteCell[accounts.Code] { return cellPoolCode.Get().(*WriteCell[accounts.Code]) }
 func getCellCodeHash() *WriteCell[accounts.CodeHash] {
 	return cellPoolCodeHash.Get().(*WriteCell[accounts.CodeHash])
 }
@@ -1138,8 +1138,8 @@ func releaseCellSelfDestruct(c *WriteCell[bool])   { cellPoolSelfDestruct.Put(c)
 func releaseCellBalance(c *WriteCell[uint256.Int]) { cellPoolBalance.Put(c) }
 func releaseCellNonce(c *WriteCell[uint64])        { cellPoolNonce.Put(c) }
 func releaseCellIncarnation(c *WriteCell[uint64])  { cellPoolIncarnation.Put(c) }
-func releaseCellCode(c *WriteCell[[]byte]) {
-	c.Value = nil // unpin bytecode
+func releaseCellCode(c *WriteCell[accounts.Code]) {
+	c.Value = accounts.Code{} // unpin bytecode
 	cellPoolCode.Put(c)
 }
 func releaseCellCodeHash(c *WriteCell[accounts.CodeHash]) { cellPoolCodeHash.Put(c) }

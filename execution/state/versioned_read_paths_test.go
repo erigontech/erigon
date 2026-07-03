@@ -137,7 +137,7 @@ func TestVersionedRead_C4_CodePathBypassesSelfDestruct(t *testing.T) {
 
 	addr := accounts.InternAddress([20]byte{0xc4})
 	code := []byte{0x60, 0x42, 0x60, 0x00, 0x52, 0x60, 0x20, 0x60, 0x00, 0xf3}
-	mvhm.WriteCode(addr, Version{TxIndex: 2, Incarnation: 0}, code, true)
+	mvhm.WriteCode(addr, Version{TxIndex: 2, Incarnation: 0}, accounts.NewCode(code), true)
 	// Selfdestruct at an EARLIER tx than the code write so the SD doesn't
 	// trump the code (the CodePath+SD trump check uses sdres.DepIdx).
 	mvhm.WriteSelfDestruct(addr, Version{TxIndex: 1, Incarnation: 0}, true, true)
@@ -276,7 +276,7 @@ func TestVersionedRead_E3a_CodePathTrumpedBySelfDestruct(t *testing.T) {
 	addr := accounts.InternAddress([20]byte{0xe3})
 	code := []byte{0xfe, 0xfe}
 	// Code at tx 2; SelfDestruct at tx 3 (strictly later → trumps code).
-	mvhm.WriteCode(addr, Version{TxIndex: 2, Incarnation: 0}, code, true)
+	mvhm.WriteCode(addr, Version{TxIndex: 2, Incarnation: 0}, accounts.NewCode(code), true)
 	mvhm.WriteSelfDestruct(addr, Version{TxIndex: 3, Incarnation: 0}, true, true)
 
 	got, err := ibs.GetCode(addr)

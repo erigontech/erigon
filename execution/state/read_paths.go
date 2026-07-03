@@ -247,7 +247,9 @@ func versionedReadCore(s *IntraBlockState, addr accounts.Address, path AccountPa
 	case IncarnationPath:
 		r.mapIncarnationVal, res, _ = s.versionMap.ReadIncarnation(addr, s.txIndex)
 	case CodePath:
-		r.mapCodeVal, res, _ = s.versionMap.ReadCode(addr, s.txIndex)
+		var mc accounts.Code
+		mc, res, _ = s.versionMap.ReadCode(addr, s.txIndex)
+		r.mapCodeVal = mc.Bytes
 	case CodeHashPath:
 		r.mapCodeHashVal, res, _ = s.versionMap.ReadCodeHash(addr, s.txIndex)
 	case CodeSizePath:

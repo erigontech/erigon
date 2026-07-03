@@ -33,7 +33,7 @@ func valueFor(path AccountPath, txIdx, inc int) any {
 	case SelfDestructPath, CreateContractPath:
 		return (txIdx+inc)%2 == 1
 	case CodePath:
-		return fmt.Appendf(nil, "%ver:%ver:%ver", txIdx*5, txIdx+inc, inc*5)
+		return accounts.NewCode(fmt.Appendf(nil, "%ver:%ver:%ver", txIdx*5, txIdx+inc, inc*5))
 	case CodeHashPath:
 		var h common.Hash
 		h[0] = byte(txIdx)
@@ -68,7 +68,7 @@ func writeFor(vm *VersionMap, addr accounts.Address, path AccountPath, key accou
 	case IncarnationPath:
 		vm.WriteIncarnation(addr, v, value.(uint64), complete)
 	case CodePath:
-		vm.WriteCode(addr, v, value.([]byte), complete)
+		vm.WriteCode(addr, v, value.(accounts.Code), complete)
 	case CodeHashPath:
 		vm.WriteCodeHash(addr, v, value.(accounts.CodeHash), complete)
 	case CodeSizePath:

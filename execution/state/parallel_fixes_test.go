@@ -203,15 +203,17 @@ func TestCodeReadFromVersionMap(t *testing.T) {
 	delegationCode := []byte{0xef, 0x01, 0x00, 0x01, 0x02, 0x03, 0x04, 0x05,
 		0x06, 0x07, 0x08, 0x09, 0x0a, 0x0b, 0x0c, 0x0d,
 		0x0e, 0x0f, 0x10, 0x11, 0x12, 0x13, 0x14}
-	vm.WriteCode(addr, Version{TxIndex: 5, Incarnation: 0}, delegationCode, true)
+	vm.WriteCode(addr, Version{TxIndex: 5, Incarnation: 0}, accounts.NewCode(delegationCode), true)
 
 	// Read at txIndex=10 should find the code
 	code, rr, ok := vm.ReadCode(addr, 10)
 	require.Equal(t, MVReadResultDone, rr.Status(), "Should find CodePath entry")
 
 	require.True(t, ok, "Code cell should exist")
-	assert.Equal(t, delegationCode, code, "Code should match")
-	assert.Equal(t, byte(0xef), code[0], "Should have EIP-7702 prefix")
+	assert.Equal(t, delegationCode, code.Bytes, "Code should match")
+	assert.Equal(t, byte(0xef), code.Bytes[0], "Should have EIP-7702 prefix")
+	assert.Equal(t, accounts.NewCode(delegationCode).Hash, code.Hash,
+		"hash must survive the versionMap round-trip, not be stripped")
 
 	// Read at txIndex=3 should NOT find it (before the write)
 	_, rr, _ = vm.ReadCode(addr, 3)

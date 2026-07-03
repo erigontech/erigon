@@ -20,6 +20,7 @@
 package state
 
 import (
+	"bytes"
 	"fmt"
 	"io"
 	"maps"
@@ -410,13 +411,7 @@ func (so *stateObject) CodeTyped() (accounts.Code, error) {
 	// entries from prior TXs (e.g. EIP-7702 SetCode). The versionMap has the
 	// synthetic code but the domain/stateReader does not.
 	if so.db.versionMap != nil {
-		if code, rr, ok := so.db.versionMap.ReadCode(so.address, so.db.txIndex); ok && rr.Status() == MVReadResultDone {
-			// Recompute the hash from the map's bytes: pairing them with the
-			// object's (possibly stale) data.CodeHash would violate
-			// Hash==Keccak(Bytes) and let SetCode's hash comparison skip a real
-			// code change (e.g. an EIP-7702 re-delegation back to a prior target,
-			// whose CodePath the BAL pre-populates without a CodeHashPath).
-			c := accounts.NewCode(code)
+		if c, rr, ok := so.db.versionMap.ReadCode(so.address, so.db.txIndex); ok && rr.Status() == MVReadResultDone {
 			so.code = c
 			return c, nil
 		}
@@ -438,10 +433,16 @@ func (so *stateObject) CodeTyped() (accounts.Code, error) {
 	if err != nil {
 		return accounts.Code{}, fmt.Errorf("can't read code for %x: %w", so.Address(), err)
 	}
-	// Recompute the hash from the bytes rather than trusting so.data.CodeHash:
-	// on codeHash-without-code state they disagree, and SetCode's hash comparison
-	// would then wrongly skip a byte-identical re-set that heals the CodeDomain.
-	c := accounts.NewCode(code)
+	// Trust the committed (CodeHash, bytes) pair rather than re-hashing on every
+	// load; the only case they disagree is codeHash-without-code state (empty
+	// bytes, non-empty hash), reported honestly as empty so SetCode's compare
+	// still heals it.
+	var c accounts.Code
+	if len(code) == 0 {
+		c = accounts.EmptyCode
+	} else {
+		c = accounts.Code{Hash: so.data.CodeHash, Bytes: code}
+	}
 	so.code = c
 	return c, nil
 }
@@ -452,7 +453,9 @@ func (so *stateObject) SetCode(code accounts.Code, wasCommited bool, reason trac
 		return false, err
 	}
 
-	if prev.Hash == code.Hash {
+	// bytes.Equal confirm guards the codeHash-without-code case: a matching hash
+	// against empty prev bytes must still heal the CodeDomain, not skip.
+	if prev.Hash == code.Hash && bytes.Equal(prev.Bytes, code.Bytes) {
 		return false, nil
 	}
 

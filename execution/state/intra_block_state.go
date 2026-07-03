@@ -2384,7 +2384,7 @@ func (sdb *IntraBlockState) accountRead(addr accounts.Address, account *accounts
 			// A read satisfied by this tx's own earlier write carries no
 			// cross-tx dependency; recording it would make the validator
 			// (floored below the tx's own writes) return None and wrongly
-			// invalidate the tx (issue #21319).
+			// invalidate the tx.
 			return
 		}
 		data := *account
