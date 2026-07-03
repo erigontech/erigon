@@ -989,13 +989,16 @@ func (s *RoSnapshots) recalcVisibleFiles(alignMin bool, retired ...retiredSegmen
 		toDelete = s.reclaimRetiredLocked()
 	}()
 
-	reclaimRetired(toDelete)
+	closeRetired(toDelete)
 }
 
 // acquireVisible pins the current generation. Load and increment are not atomic
 // together, so re-validate: if the generation was superseded between the two, the
 // pin landed on a draining generation — drop it and retry (hazard-pointer style).
 func (s *RoSnapshots) acquireVisible() *snapshotVisible {
+	// Load+Increment: is not atomic operation. Means: between them "existing last reader may End" (and close files)
+	// Means: must check that latest view didn't change
+	// Hazard pointer concept: https://github.com/facebook/folly/blob/main/folly/synchronization/Hazptr.h#L27C5-L27C22
 	for {
 		v := s.visible.Load()
 		v.refcnt.Add(1)
@@ -1008,23 +1011,16 @@ func (s *RoSnapshots) acquireVisible() *snapshotVisible {
 
 // releaseVisible drops a pin taken by acquireVisible; the last reader reclaims.
 func (s *RoSnapshots) releaseVisible(v *snapshotVisible) {
-	n := v.refcnt.Add(-1)
-	if n > 0 {
-		return
+	if v.refcnt.Add(-1) == 0 {
+		s.reclaimRetired()
 	}
-	if n < 0 {
-		panic("snapshotVisible refcnt underflow: a View/RoTx was closed more than once")
-	}
-	// A still-current generation has no retired files and no successor, so there
-	// is nothing to reclaim — skip the lock. Older drained generations are picked
-	// up when their own pin drops or at the next publish.
-	if s.visible.Load() == v {
-		return
-	}
+}
+
+func (s *RoSnapshots) reclaimRetired() {
 	s.recalcLock.Lock()
 	toDelete := s.reclaimRetiredLocked()
 	s.recalcLock.Unlock()
-	reclaimRetired(toDelete)
+	closeRetired(toDelete)
 }
 
 // reclaimRetiredLocked walks generations oldest→newest while their refcnt is 0,
@@ -1041,7 +1037,7 @@ func (s *RoSnapshots) reclaimRetiredLocked() (toDelete []retiredSegment) {
 	return toDelete
 }
 
-func reclaimRetired(toDelete []retiredSegment) {
+func closeRetired(toDelete []retiredSegment) {
 	for _, r := range toDelete {
 		if r.removeFiles {
 			r.seg.closeAndRemoveFiles()
