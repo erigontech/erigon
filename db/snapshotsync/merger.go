@@ -265,15 +265,19 @@ func (m *Merger) Merge(
 }
 
 func (m *Merger) integrateMergedDirtyFiles(snapshots *RoSnapshots, in, out map[snaptype.Enum][]*DirtySegment) {
-	var retired []RetiredSegment
-	defer func() { snapshots.recalcVisibleFiles(snapshots.alignMin, retired) }()
+	_ = snapshots.update(snapshots.alignMin, func(dirtyFiles DirtyFiles) ([]RetiredSegment, error) {
+		return m.integrateMergedDirtyFilesLocked(dirtyFiles, in, out), nil
+	})
+}
 
-	snapshots.dirtyLock.Lock()
-	defer snapshots.dirtyLock.Unlock()
+// integrateMergedDirtyFilesLocked applies a merge result to `dirtyFiles` and returns
+// the sub-segments it retired. Must run under the dirty lock — Update guarantees this.
+func (m *Merger) integrateMergedDirtyFilesLocked(dirtyFiles DirtyFiles, in, out map[snaptype.Enum][]*DirtySegment) []RetiredSegment {
+	var retired []RetiredSegment
 
 	// add new segments
 	for enum, newSegs := range in {
-		dirtySegments := snapshots.dirty[enum]
+		dirtySegments := dirtyFiles[enum]
 		for _, newSeg := range newSegs {
 			dirtySegments.Set(newSeg)
 			if newSeg.frozen {
@@ -297,7 +301,7 @@ func (m *Merger) integrateMergedDirtyFiles(snapshots *RoSnapshots, in, out map[s
 	// merge output re-collects the sub-segments it subsumes); Delete reports
 	// existed=false the second time, so each segment is retired exactly once.
 	for enum, delSegs := range out {
-		dirtySegments := snapshots.dirty[enum]
+		dirtySegments := dirtyFiles[enum]
 		inDirtySegments := in[enum]
 
 		for _, delSeg := range delSegs {
@@ -318,6 +322,7 @@ func (m *Merger) integrateMergedDirtyFiles(snapshots *RoSnapshots, in, out map[s
 			retired = append(retired, RetiredSegment{seg: delSeg, removeFiles: !delSeg.frozen})
 		}
 	}
+	return retired
 }
 
 func (m *Merger) merge(ctx context.Context, v *View, toMerge []*DirtySegment, targetFile snaptype.FileInfo, snapDir string, logEvery *time.Ticker) (*DirtySegment, error) {

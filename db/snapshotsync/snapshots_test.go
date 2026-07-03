@@ -226,7 +226,7 @@ func TestMergeSnapshots(t *testing.T) {
 		require.Len(Ranges, 3)
 		// NOTE: TestMergeSnapshots calls Merge with doIndex=false.
 		// Since the merged segment is not indexed, RecalcVisibleSegments will not promote it,
-		// and the merge already removed the subsumed sub-segments from dirty, causing visible
+		// and the merge already removed the subsumed sub-segments from dirtyFiles, causing visible
 		// segments to drop to 0 until BuildMissedIndices/OpenFolder runs. This is expected
 		// for doIndex=false merges and is only done in this test to skip redundant index rebuilding.
 		err := merger.Merge(t.Context(), s, snaptype2.BlockSnapshotTypes, Ranges, s.Dir(), false, nil, nil)
@@ -834,9 +834,9 @@ func TestCalculateVisibleSegments(t *testing.T) {
 		require.Len(s.visible.Load().segments[snaptype2.Enums.Bodies], 5)
 		require.Len(s.visible.Load().segments[snaptype2.Enums.Transactions], 5)
 
-		require.Equal(7, s.dirty[snaptype2.Enums.Headers].Len())
-		require.Equal(6, s.dirty[snaptype2.Enums.Bodies].Len())
-		require.Equal(5, s.dirty[snaptype2.Enums.Transactions].Len())
+		require.Equal(7, s.dirtyFiles[snaptype2.Enums.Headers].Len())
+		require.Equal(6, s.dirtyFiles[snaptype2.Enums.Bodies].Len())
+		require.Equal(5, s.dirtyFiles[snaptype2.Enums.Transactions].Len())
 	}
 
 	// gap in transactions: [5*500_000 - 6*500_000]
@@ -851,10 +851,10 @@ func TestCalculateVisibleSegments(t *testing.T) {
 		require.Len(s.visible.Load().segments[snaptype2.Enums.Bodies], 5)
 		require.Len(s.visible.Load().segments[snaptype2.Enums.Transactions], 5)
 
-		// dirty retains gapped files; visible is still filtered by RecalcVisibleSegments.
-		require.Equal(7, s.dirty[snaptype2.Enums.Headers].Len())
-		require.Equal(6, s.dirty[snaptype2.Enums.Bodies].Len())
-		require.Equal(6, s.dirty[snaptype2.Enums.Transactions].Len())
+		// dirtyFiles retains gapped files; visible is still filtered by RecalcVisibleSegments.
+		require.Equal(7, s.dirtyFiles[snaptype2.Enums.Headers].Len())
+		require.Equal(6, s.dirtyFiles[snaptype2.Enums.Bodies].Len())
+		require.Equal(6, s.dirtyFiles[snaptype2.Enums.Transactions].Len())
 	}
 
 	// overlap in transactions: [4*500_000 - 4.5*500_000]
@@ -869,10 +869,10 @@ func TestCalculateVisibleSegments(t *testing.T) {
 		require.Len(s.visible.Load().segments[snaptype2.Enums.Bodies], 5)
 		require.Len(s.visible.Load().segments[snaptype2.Enums.Transactions], 5)
 
-		// dirty retains overlapping files; visible is still filtered by RecalcVisibleSegments.
-		require.Equal(7, s.dirty[snaptype2.Enums.Headers].Len())
-		require.Equal(6, s.dirty[snaptype2.Enums.Bodies].Len())
-		require.Equal(7, s.dirty[snaptype2.Enums.Transactions].Len())
+		// dirtyFiles retains overlapping files; visible is still filtered by RecalcVisibleSegments.
+		require.Equal(7, s.dirtyFiles[snaptype2.Enums.Headers].Len())
+		require.Equal(6, s.dirtyFiles[snaptype2.Enums.Bodies].Len())
+		require.Equal(7, s.dirtyFiles[snaptype2.Enums.Transactions].Len())
 	}
 }
 
@@ -902,7 +902,7 @@ func TestCalculateVisibleSegmentsWhenGapsInIdx(t *testing.T) {
 	require.Equal(500_000-1, int(idx))
 
 	require.Len(s.visible.Load().segments[snaptype2.Enums.Headers], 1)
-	require.Equal(3, s.dirty[snaptype2.Enums.Headers].Len())
+	require.Equal(3, s.dirtyFiles[snaptype2.Enums.Headers].Len())
 }
 
 func TestSegmentsMaxDerivedFromVisible(t *testing.T) {
@@ -928,7 +928,7 @@ func TestSegmentsMaxDerivedFromVisible(t *testing.T) {
 	require.Equal(uint64(1_500_000-1), s.SegmentsMax())
 
 	// Regression: an unindexed trailing .seg would previously advance
-	// segmentsMax because it was set from dirty files in openSegments.
+	// segmentsMax because it was set from dirtyFiles files in openSegments.
 	// Now it must not, because it never becomes visible.
 	createFile(1_500_000, 2_000_000, snaptype2.Headers)
 	missingIdx := filepath.Join(dir, snaptype.IdxFileName(version.V1_0, 1_500_000, 2_000_000, snaptype2.Headers.Name()))
@@ -1145,7 +1145,7 @@ func TestRoSnapshots_ConcurrentViewsAndRepublish(t *testing.T) {
 	go func() {
 		defer wg.Done()
 		for j := 0; j < iters; j++ {
-			s.recalcVisibleFiles(s.alignMin, nil)
+			_ = s.update(s.alignMin, nil)
 		}
 	}()
 	wg.Wait()
@@ -1166,14 +1166,14 @@ func TestCloseWhatNotInList_DropsUnopenedSegment(t *testing.T) {
 
 	sn := NewDirtySegment(snaptype2.Headers, version.V1_0, 0, 1_000, false)
 	require.Nil(sn.Decompressor)
-	s.dirty[snaptype2.Headers.Enum()].Set(sn)
+	s.dirtyFiles[snaptype2.Headers.Enum()].Set(sn)
 
 	s.dirtyLock.Lock()
-	removed := s.CloseWhatNotInList([]string{sn.FileName()}) // its name IS in the keep-list
+	removed := CloseWhatNotInList(s.dirtyFiles, []string{sn.FileName()}) // its name IS in the keep-list
 	s.dirtyLock.Unlock()
 
 	require.Contains(removed, RetiredSegment{seg: sn}, "unopened segment must be dropped even when kept-by-name")
-	_, stillInDirty := s.dirty[snaptype2.Headers.Enum()].Get(sn)
+	_, stillInDirty := s.dirtyFiles[snaptype2.Headers.Enum()].Get(sn)
 	require.False(stillInDirty)
 }
 
@@ -1234,10 +1234,10 @@ func TestOpenFolderPromotesCovering(t *testing.T) {
 
 	require.NoError(s.OpenFolder())
 	// Here, we verify that all files (both subsegments and unindexed covering segments)
-	// are loaded into dirty, but only indexed segments are visible.
-	require.Equal(3, s.dirty[snaptype2.Enums.Transactions].Len())
-	require.Equal(2, s.dirty[snaptype2.Enums.Headers].Len())
-	require.Equal(2, s.dirty[snaptype2.Enums.Bodies].Len())
+	// are loaded into dirtyFiles, but only indexed segments are visible.
+	require.Equal(3, s.dirtyFiles[snaptype2.Enums.Transactions].Len())
+	require.Equal(2, s.dirtyFiles[snaptype2.Enums.Headers].Len())
+	require.Equal(2, s.dirtyFiles[snaptype2.Enums.Bodies].Len())
 
 	visibleTxn := s.visible.Load().segments[snaptype2.Enums.Transactions]
 	require.Len(visibleTxn, 2)
@@ -1259,7 +1259,7 @@ func TestOpenFolderPromotesCovering(t *testing.T) {
 }
 
 // TestOverlapNoTruncation checks that having a fully indexed covering segment
-// alongside its subsegments (both present in the dirty list) does not trigger
+// alongside its subsegments (both present in the dirtyFiles list) does not trigger
 // gap/overlap protection for the next contiguous segment. Previously, the subsegments
 // were appended after the covering segment in the visible list, causing the gap detector
 // to truncate the entire remainder of the visible chain (fixes issue #21472).

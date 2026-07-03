@@ -196,18 +196,13 @@ func NewCaplinStateSnapshots(cfg ethconfig.BlocksFreezing, beaconCfg *clparams.B
 	}
 	sort.Strings(names)
 	tableIndex := make(map[string]int, len(names))
-	dirty := make([]*btree.BTreeG[*DirtySegment], len(names))
 	for i, name := range names {
 		tableIndex[name] = i
-		dirty[i] = btree.NewBTreeGOptions[*DirtySegment](DirtySegmentLess, btree.Options{Degree: 128, NoLocks: false})
 	}
 
 	c := &CaplinStateSnapshots{snapshotTypes: snapshotTypes, dir: dirs.SnapCaplin, tmpdir: dirs.Tmp, cfg: cfg, tableIndex: tableIndex, logger: logger, beaconCfg: beaconCfg}
-	c.dirty = dirty
-	empty := &VisibleFiles{}
-	c.visible.Store(empty)
-	c.oldestVisible = empty
-	c.recalcVisibleFiles(nil)
+	c.Init(len(names))
+	_ = c.update(nil)
 	return c
 }
 
@@ -275,12 +270,9 @@ func (s *CaplinStateSnapshots) Close() {
 	if s == nil {
 		return
 	}
-	var retired []RetiredSegment
-	defer func() { s.recalcVisibleFiles(retired) }()
-	s.dirtyLock.Lock()
-	defer s.dirtyLock.Unlock()
-
-	retired = s.CloseWhatNotInList(nil)
+	_ = s.update(func(dirtyFiles DirtyFiles) ([]RetiredSegment, error) {
+		return CloseWhatNotInList(dirtyFiles, nil), nil
+	})
 }
 
 func (s *CaplinStateSnapshots) openSegIfNeed(sn *DirtySegment, filepath string) error {
@@ -297,13 +289,14 @@ func (s *CaplinStateSnapshots) openSegIfNeed(sn *DirtySegment, filepath string) 
 
 // OpenList stops on optimistic=false, continue opening files on optimistic=true
 func (s *CaplinStateSnapshots) OpenList(fileNames []string, optimistic bool) error {
-	var retired []RetiredSegment
-	defer func() { s.recalcVisibleFiles(retired) }()
+	return s.update(func(dirtyFiles DirtyFiles) ([]RetiredSegment, error) {
+		retired := CloseWhatNotInList(dirtyFiles, fileNames)
+		return retired, s.openSegments(dirtyFiles, fileNames, optimistic)
+	})
+}
 
-	s.dirtyLock.Lock()
-	defer s.dirtyLock.Unlock()
-
-	retired = s.CloseWhatNotInList(fileNames)
+// openSegments opens fileNames into dirtyFiles. Must run under the dirty lock.
+func (s *CaplinStateSnapshots) openSegments(dirtyFiles DirtyFiles, fileNames []string, optimistic bool) error {
 	var segmentsMax uint64
 	var segmentsMaxSet bool
 Loop:
@@ -318,7 +311,7 @@ Loop:
 		if !ok {
 			continue
 		}
-		dirtySegments := s.dirty[idx]
+		dirtySegments := dirtyFiles[idx]
 		filePath := filepath.Join(s.dir, fName)
 		dirtySegments.Walk(func(segments []*DirtySegment) bool {
 			for _, sn2 := range segments {
@@ -433,41 +426,45 @@ func isIndexed(s *DirtySegment) bool {
 	return true
 }
 
-func (s *CaplinStateSnapshots) recalcVisibleFiles(retired []RetiredSegment) {
-	defer func() {
-		s.idxMax.Store(s.idxAvailability())
-		s.indicesReady.Store(true)
-	}()
-
-	getNewVisibleSegments := func(dirtySegments *btree.BTreeG[*DirtySegment]) []*VisibleSegment {
-		newVisibleSegments := make([]*VisibleSegment, 0, dirtySegments.Len())
-		dirtySegments.Walk(func(segments []*DirtySegment) bool {
-			for _, sn := range segments {
-				if !isIndexed(sn) {
-					continue
-				}
-				for len(newVisibleSegments) > 0 && newVisibleSegments[len(newVisibleSegments)-1].src.isSubSetOf(sn) {
-					newVisibleSegments[len(newVisibleSegments)-1].src = nil
-					newVisibleSegments = newVisibleSegments[:len(newVisibleSegments)-1]
-				}
-				newVisibleSegments = append(newVisibleSegments, &VisibleSegment{
-					Range:   sn.Range,
-					segType: sn.segType,
-					src:     sn,
-				})
+func caplinStateVisibleSegments(dirtySegments *btree.BTreeG[*DirtySegment]) []*VisibleSegment {
+	newVisibleSegments := make([]*VisibleSegment, 0, dirtySegments.Len())
+	dirtySegments.Walk(func(segments []*DirtySegment) bool {
+		for _, sn := range segments {
+			if !isIndexed(sn) {
+				continue
 			}
-			return true
-		})
-		return newVisibleSegments
-	}
-
-	s.Publish(retired, func() *VisibleFiles {
-		segments := make([]VisibleSegments, len(s.dirty))
-		for idx, dirtySegments := range s.dirty {
-			segments[idx] = getNewVisibleSegments(dirtySegments)
+			for len(newVisibleSegments) > 0 && newVisibleSegments[len(newVisibleSegments)-1].src.isSubSetOf(sn) {
+				newVisibleSegments[len(newVisibleSegments)-1].src = nil
+				newVisibleSegments = newVisibleSegments[:len(newVisibleSegments)-1]
+			}
+			newVisibleSegments = append(newVisibleSegments, &VisibleSegment{
+				Range:   sn.Range,
+				segType: sn.segType,
+				src:     sn,
+			})
 		}
-		return &VisibleFiles{segments: segments}
+		return true
 	})
+	return newVisibleSegments
+}
+
+// buildVisible builds a fresh visible generation from the current dirty set. Must
+// run under the dirty lock — Update guarantees this.
+func (s *CaplinStateSnapshots) buildVisible(dirtyFiles DirtyFiles) *VisibleFiles {
+	segments := make([]VisibleSegments, len(dirtyFiles))
+	for idx, dirtySegments := range dirtyFiles {
+		segments[idx] = caplinStateVisibleSegments(dirtySegments)
+	}
+	return &VisibleFiles{segments: segments}
+}
+
+// reopen mutates `dirtyFiles` via mutate and republishes the visible set atomically
+// (single lock), then refreshes idxMax.
+func (s *CaplinStateSnapshots) update(mutate func(dirtyFiles DirtyFiles) ([]RetiredSegment, error)) error {
+	err := s.Update(mutate, s.buildVisible)
+	s.idxMax.Store(s.idxAvailability())
+	s.indicesReady.Store(true)
+	return err
 }
 
 func (s *CaplinStateSnapshots) idxAvailability() uint64 {
@@ -704,7 +701,7 @@ func (s *CaplinStateSnapshots) BuildMissingIndices(ctx context.Context, logger l
 
 	noneDone := true
 
-	for _, filesTree := range s.dirty {
+	for _, filesTree := range s.dirtyFiles {
 		files := filesTree.Items()
 		for _, df := range files {
 			if df.Decompressor == nil {

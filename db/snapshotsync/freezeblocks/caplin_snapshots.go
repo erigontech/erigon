@@ -28,7 +28,6 @@ import (
 	"time"
 
 	"github.com/klauspost/compress/zstd"
-	"github.com/tidwall/btree"
 
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
@@ -81,9 +80,7 @@ func NewCaplinSnapshots(cfg ethconfig.BlocksFreezing, beaconCfg *clparams.Beacon
 	}
 	c := &CaplinSnapshots{dir: dirs.Snap, tmpdir: dirs.Tmp, cfg: cfg, logger: logger, beaconCfg: beaconCfg}
 	c.Init(snaptype.MaxEnum)
-	c.DirtyFiles()[snaptype.BeaconBlocks.Enum()] = btree.NewBTreeGOptions[*snapshotsync.DirtySegment](snapshotsync.DirtySegmentLess, btree.Options{Degree: 128, NoLocks: false})
-	c.DirtyFiles()[snaptype.BlobSidecars.Enum()] = btree.NewBTreeGOptions[*snapshotsync.DirtySegment](snapshotsync.DirtySegmentLess, btree.Options{Degree: 128, NoLocks: false})
-	c.recalcVisibleFiles(nil)
+	_ = c.update(nil)
 	return c
 }
 
@@ -142,28 +139,22 @@ func (s *CaplinSnapshots) Close() {
 	if s == nil {
 		return
 	}
-	var retired []snapshotsync.RetiredSegment
-	defer func() { s.recalcVisibleFiles(retired) }()
-	_ = s.WithDirtyLock(func() error {
-		retired = s.CloseWhatNotInList(nil)
-		return nil
+	_ = s.update(func(dirtyFiles snapshotsync.DirtyFiles) ([]snapshotsync.RetiredSegment, error) {
+		return snapshotsync.CloseWhatNotInList(dirtyFiles, nil), nil
 	})
 }
 
 // OpenList stops on optimistic=false, continue opening files on optimistic=true
 func (s *CaplinSnapshots) OpenList(fileNames []string, optimistic bool) error {
-	var retired []snapshotsync.RetiredSegment
-	defer func() { s.recalcVisibleFiles(retired) }()
-
-	return s.WithDirtyLock(func() error {
-		retired = s.CloseWhatNotInList(fileNames)
-		return s.openSegments(fileNames, optimistic)
+	return s.update(func(dirtyFiles snapshotsync.DirtyFiles) ([]snapshotsync.RetiredSegment, error) {
+		retired := snapshotsync.CloseWhatNotInList(dirtyFiles, fileNames)
+		return retired, s.openSegments(dirtyFiles, fileNames, optimistic)
 	})
 }
 
 // openSegments opens every file in fileNames into the dirty set. Must be called
 // under the dirty lock.
-func (s *CaplinSnapshots) openSegments(fileNames []string, optimistic bool) error {
+func (s *CaplinSnapshots) openSegments(dirtyFiles snapshotsync.DirtyFiles, fileNames []string, optimistic bool) error {
 	// Get idx files for efficient index file lookups
 	idxFiles, err := snaptype.IdxFiles(s.dir)
 	if err != nil {
@@ -187,7 +178,7 @@ Loop:
 		case snaptype.CaplinEnums.BeaconBlocks:
 			var sn *snapshotsync.DirtySegment
 			var exists bool
-			s.DirtyFiles()[snaptype.BeaconBlocks.Enum()].Walk(func(segments []*snapshotsync.DirtySegment) bool {
+			dirtyFiles[snaptype.BeaconBlocks.Enum()].Walk(func(segments []*snapshotsync.DirtySegment) bool {
 				for _, sn2 := range segments {
 					if sn2.Decompressor == nil { // it's ok if some segment was not able to open
 						continue
@@ -226,7 +217,7 @@ Loop:
 			if !exists {
 				// it's possible to iterate over .seg file even if you don't have index
 				// then make segment available even if index open may fail
-				s.DirtyFiles()[snaptype.BeaconBlocks.Enum()].Set(sn)
+				dirtyFiles[snaptype.BeaconBlocks.Enum()].Set(sn)
 			}
 			if err := sn.OpenIdxIfNeed(s.dir, optimistic, dirEntries); err != nil {
 				return err
@@ -243,7 +234,7 @@ Loop:
 		case snaptype.CaplinEnums.BlobSidecars:
 			var sn *snapshotsync.DirtySegment
 			var exists bool
-			s.DirtyFiles()[snaptype.BlobSidecars.Enum()].Walk(func(segments []*snapshotsync.DirtySegment) bool {
+			dirtyFiles[snaptype.BlobSidecars.Enum()].Walk(func(segments []*snapshotsync.DirtySegment) bool {
 				for _, sn2 := range segments {
 					if sn2.Decompressor == nil { // it's ok if some segment was not able to open
 						continue
@@ -282,7 +273,7 @@ Loop:
 			if !exists {
 				// it's possible to iterate over .seg file even if you don't have index
 				// then make segment available even if index open may fail
-				s.DirtyFiles()[snaptype.BlobSidecars.Enum()].Set(sn)
+				dirtyFiles[snaptype.BlobSidecars.Enum()].Set(sn)
 			}
 			if err := sn.OpenIdxIfNeed(s.dir, optimistic, dirEntries); err != nil {
 				return err
@@ -296,17 +287,21 @@ Loop:
 	return nil
 }
 
-func (s *CaplinSnapshots) recalcVisibleFiles(retired []snapshotsync.RetiredSegment) {
-	defer func() {
-		s.idxMax.Store(s.idxAvailability())
-	}()
+// buildVisible builds a fresh visible generation from the current dirty set. Must
+// run under the dirty lock — Update guarantees this.
+func (s *CaplinSnapshots) buildVisible(dirtyFiles snapshotsync.DirtyFiles) *snapshotsync.VisibleFiles {
+	segments := make([]snapshotsync.VisibleSegments, snaptype.MaxEnum)
+	segments[snaptype.BeaconBlocks.Enum()] = snapshotsync.RecalcVisibleSegments(dirtyFiles[snaptype.BeaconBlocks.Enum()])
+	segments[snaptype.BlobSidecars.Enum()] = snapshotsync.RecalcVisibleSegments(dirtyFiles[snaptype.BlobSidecars.Enum()])
+	return snapshotsync.NewVisibleFiles(segments)
+}
 
-	s.Publish(retired, func() *snapshotsync.VisibleFiles {
-		segments := make([]snapshotsync.VisibleSegments, snaptype.MaxEnum)
-		segments[snaptype.BeaconBlocks.Enum()] = snapshotsync.RecalcVisibleSegments(s.DirtyFiles()[snaptype.BeaconBlocks.Enum()])
-		segments[snaptype.BlobSidecars.Enum()] = snapshotsync.RecalcVisibleSegments(s.DirtyFiles()[snaptype.BlobSidecars.Enum()])
-		return snapshotsync.NewVisibleFiles(segments)
-	})
+// reopen mutates `dirtyFiles` via mutate and republishes the visible set atomically
+// (single lock), then refreshes idxMax.
+func (s *CaplinSnapshots) update(mutate func(dirtyFiles snapshotsync.DirtyFiles) ([]snapshotsync.RetiredSegment, error)) error {
+	err := s.Update(mutate, s.buildVisible)
+	s.idxMax.Store(s.idxAvailability())
+	return err
 }
 
 func (s *CaplinSnapshots) idxAvailability() uint64 {
