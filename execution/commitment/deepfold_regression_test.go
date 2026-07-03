@@ -17,6 +17,8 @@
 package commitment
 
 import (
+	"context"
+	"encoding/hex"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -212,4 +214,50 @@ func TestDeepFold_LeafSurvivorCollapse(t *testing.T) {
 	for _, w := range []int{1, 4, 8} {
 		requireAllEnginesParity(t, k1, u1, wk2, wu2, w)
 	}
+}
+
+// Guards the default (sequential) path against the deep-fold storage reset leaking into it: a
+// persistent trie (as a real node carries across blocks) with a singleton account re-touched
+// account-only in block 2 must keep its storage slot. Its root must equal a fresh trie built
+// with the new account value plus the same slot. Cross-engine parity is blind to this because a
+// shared updateCell bug drops the slot in every engine identically.
+func TestSingletonAccountOnlyRetouchKeepsStorage(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	a := hex.EncodeToString(findAddressForNibble(3, 4242))
+	loc := "00000000000000000000000000000000000000000000000000000000000000aa"
+	val := "00000000000000000000000000000000000000000000000000000000cafebabe"
+
+	ms := NewMockState(t)
+	tr := NewHexPatriciaHashed(length.Addr, ms, DefaultTrieConfig())
+
+	ub1 := NewUpdateBuilder().Balance(a, 100)
+	ub1.Storage(a, loc, val)
+	k1, u1 := ub1.Build()
+	require.NoError(t, ms.applyPlainUpdates(k1, u1))
+	ut1 := WrapKeyUpdates(t, ModeDirect, KeyToHexNibbleHash, k1, u1)
+	_, err := tr.Process(ctx, ut1, "", nil, WarmupConfig{})
+	require.NoError(t, err)
+	ut1.Close()
+
+	k2, u2 := NewUpdateBuilder().Balance(a, 200).Build()
+	require.NoError(t, ms.applyPlainUpdates(k2, u2))
+	ut2 := WrapKeyUpdates(t, ModeDirect, KeyToHexNibbleHash, k2, u2)
+	got, err := tr.Process(ctx, ut2, "", nil, WarmupConfig{})
+	require.NoError(t, err)
+	got = common.Copy(got)
+	ut2.Close()
+
+	msr := NewMockState(t)
+	trr := NewHexPatriciaHashed(length.Addr, msr, DefaultTrieConfig())
+	ubr := NewUpdateBuilder().Balance(a, 200)
+	ubr.Storage(a, loc, val)
+	kr, ur := ubr.Build()
+	require.NoError(t, msr.applyPlainUpdates(kr, ur))
+	utr := WrapKeyUpdates(t, ModeDirect, KeyToHexNibbleHash, kr, ur)
+	want, err := trr.Process(ctx, utr, "", nil, WarmupConfig{})
+	require.NoError(t, err)
+	utr.Close()
+
+	require.Equal(t, want, got, "account-only re-touch dropped the singleton's storage slot")
 }
