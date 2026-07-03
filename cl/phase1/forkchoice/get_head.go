@@ -63,7 +63,11 @@ func (f *ForkChoiceStore) computeVotes(justifiedCheckpoint solid.Checkpoint, che
 			startIdx = gen.Intn(sampleBasis)
 			step = sampleBasis + gen.Intn(sampleFactor)
 		}
-		for validatorIndex := startIdx; validatorIndex < f.latestMessages.latestMessagesCount(); validatorIndex += step {
+		count := f.latestMessages.latestMessagesCount()
+		if validatorCount := auxilliaryState.ValidatorSet().Length(); validatorCount < count {
+			count = validatorCount
+		}
+		for validatorIndex := startIdx; validatorIndex < count; validatorIndex += step {
 			message, _ := f.latestMessages.get(validatorIndex)
 			v := auxilliaryState.ValidatorSet().Get(validatorIndex)
 			if !v.Active(justifiedCheckpoint.Epoch) || v.Slashed() {

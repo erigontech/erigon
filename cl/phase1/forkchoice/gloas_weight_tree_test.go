@@ -128,6 +128,22 @@ func TestComputeVotesSkipsMessagesBeyondJustifiedRegistry(t *testing.T) {
 	require.Empty(t, votes)
 }
 
+// Same guarantee for the auxiliary-state branch: ValidatorSet.Get panics on
+// out-of-bounds indices, so vote counting must not walk past the registry.
+func TestComputeVotesAuxStateSkipsMessagesBeyondValidatorSet(t *testing.T) {
+	f := buildExAnteStore(t)
+	s, err := f.GetStateAtBlockRoot(f.ProposerBoostRoot(), true)
+	require.NoError(t, err)
+	require.NotNil(t, s)
+	justified := f.justifiedCheckpoint.Load().(solid.Checkpoint)
+
+	f.latestMessages.set(s.ValidatorLength(), LatestMessage{Root: common.HexToHash("0x01"), Slot: 5})
+
+	votes := f.computeVotes(justified, nil, s)
+
+	require.NotNil(t, votes)
+}
+
 func decodeDiffBlock(t *testing.T, enc []byte) (*cltypes.SignedBeaconBlock, common.Hash) {
 	t.Helper()
 	b := cltypes.NewSignedBeaconBlock(&clparams.MainnetBeaconConfig, clparams.DenebVersion)
