@@ -2502,9 +2502,9 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 				var firstLogIndex uint32
 				if txVersion.TxIndex > 0 && !txTask.IsBlockEnd() {
 					if tx > 0 && be.tasks[tx-1].Task.Version().TxIndex >= 0 {
-						if prev := be.finalizedResults[tx-1].Receipt; prev != nil {
-							cumulativeGasUsed = prev.CumulativeGasUsed
-							firstLogIndex = prev.FirstLogIndexWithinBlock + uint32(len(prev.Logs))
+						if prevRes := be.finalizedResults[tx-1]; prevRes != nil && prevRes.Receipt != nil {
+							cumulativeGasUsed = prevRes.Receipt.CumulativeGasUsed
+							firstLogIndex = prevRes.Receipt.FirstLogIndexWithinBlock + uint32(len(prevRes.Receipt.Logs))
 						}
 					} else {
 						cumGasUsed, cumBlobGasUsed, logIndexAfterTx, err := rawtemporaldb.ReceiptAsOf(applyTx, txVersion.TxNum)
