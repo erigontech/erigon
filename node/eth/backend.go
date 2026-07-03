@@ -346,6 +346,15 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 		},
 	}
 
+	// Seed erigondb.toml with the first-start commitment regime (--commitment.plainValues)
+	// before genesis-root computation. On a legacy datadir GenesisToBlock resolves erigondb
+	// settings against the real dir and would create erigondb.toml with the default regime,
+	// which the later flag-aware resolve in SetUpBlockReader then reads as pre-existing and
+	// drops the flag. Seeding here first makes --commitment.plainValues stick.
+	if _, err := state.ResolveErigonDBSettingsWithRefsDefault(dirs, logger, config.Snapshot.NoDownloader, config.CommitmentRefsFirstStart()); err != nil {
+		return nil, err
+	}
+
 	var chainConfig *chain.Config
 	var genesis *types.Block
 	if err := rawChainDB.Update(context.Background(), func(tx kv.RwTx) error {
@@ -1298,7 +1307,7 @@ func SetUpBlockReader(ctx context.Context, db kv.RwDB, dirs datadir.Dirs, snConf
 		return nil, nil, nil, nil, nil, nil, nil, err
 	}
 
-	erigonDBSettings, err := state.ResolveErigonDBSettings(dirs, logger, snConfig.Snapshot.NoDownloader)
+	erigonDBSettings, err := state.ResolveErigonDBSettingsWithRefsDefault(dirs, logger, snConfig.Snapshot.NoDownloader, snConfig.CommitmentRefsFirstStart())
 	if err != nil {
 		return nil, nil, nil, nil, nil, nil, nil, err
 	}
