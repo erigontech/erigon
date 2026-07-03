@@ -1835,14 +1835,7 @@ func (a *Aggregator) recalcVisibleFiles(retired []*FilesItem) {
 	}
 	next.minimaxTxNum = next.stateMinimaxTxNum()
 
-	old := a.visible.Load()
-	old.retired = retired
-	old.next = next
-	a.visible.Store(next)
-
-	// `recalcVisibleFiles` is rare background operation under `dirtyFilesLock`
-	// it's good idea to delete files here, then hot reader-Close path will more likely be lock-free
-	closeAndRemoveFiles(a.reclaimRetiredLocked())
+	a.publish(next, retired)
 }
 
 // stateMinimaxTxNum returns min(EndTxNum) across kv.StateDomains. Mirrors
@@ -2408,6 +2401,8 @@ type AggregatorRoTx struct {
 	_leakID uint64 // set only if TRACE_AGG=true
 }
 
+// acquireVisibleFiles pins the current visible generation for a reader. Hot path:
+// lock-free (atomic load + refcnt bump, re-validated against a concurrent swap).
 func (fs *fileSet) acquireVisibleFiles() (v *aggregatorVisible) {
 	// Load+Increment: is not atomic operation. Means: between them "existing last reader may End" (and close files)
 	// Means: must check that latest view didn't change
@@ -2423,7 +2418,10 @@ func (fs *fileSet) acquireVisibleFiles() (v *aggregatorVisible) {
 	return v
 }
 
-// releaseVisibleFiles drops a pin taken by acquireVisibleFiles. Last reader: delete files
+// releaseVisibleFiles drops a reader's pin. Hot path: lock-free in the common
+// case — just a refcnt decrement. Only the last reader of an already-retired
+// generation reclaims under dirtyFilesLock, which is rare because publish
+// reclaims eagerly, so drained generations are usually already gone.
 func (fs *fileSet) releaseVisibleFiles(v *aggregatorVisible) {
 	if v.refcnt.Add(-1) == 0 {
 		fs.reclaimRetired()
@@ -2447,6 +2445,23 @@ func (fs *fileSet) reclaimRetired() {
 	toDelete := fs.reclaimRetiredLocked()
 	fs.dirtyFilesLock.Unlock()
 	closeAndRemoveFiles(toDelete)
+}
+
+// publish installs a freshly-built visible generation: it attaches retired files
+// to the outgoing generation, swaps in next, and reclaims any generation no
+// reader still pins. Caller holds dirtyFilesLock; next must already be built.
+//
+// Slow and NOT for the hot path — it holds dirtyFilesLock and may delete files.
+// Call it only from rare background events (e.g. the end of a file merge/prune),
+// never per read. acquire/releaseVisibleFiles are the lock-free hot-path pair.
+func (fs *fileSet) publish(next *aggregatorVisible, retired []*FilesItem) {
+	old := fs.visible.Load()
+	old.retired = retired
+	old.next = next
+	fs.visible.Store(next)
+
+	// rare, under dirtyFilesLock: deleting here keeps the hot reader-Close path lock-free
+	closeAndRemoveFiles(fs.reclaimRetiredLocked())
 }
 
 func closeAndRemoveFiles(files []*FilesItem) {
