@@ -19,7 +19,6 @@ package state
 import (
 	"bytes"
 	"context"
-	"encoding/binary"
 	"errors"
 	"fmt"
 	"os"
@@ -39,7 +38,6 @@ import (
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/seg"
 	"github.com/erigontech/erigon/db/state/statecfg"
-	"github.com/erigontech/erigon/execution/commitment"
 	"github.com/erigontech/erigon/execution/commitment/commitmentdb"
 	"github.com/erigontech/erigon/execution/commitment/nibbles"
 )
@@ -116,50 +114,9 @@ func detectKeyEncoding(samples []sampledPair) (bool, error) {
 	return true, nil
 }
 
-// detectSqueezeState votes squeezed vs unsqueezed by looking for any embedded
-// plain-key field shorter than binary.MaxVarintLen64 (10 bytes) in the sampled
-// BranchData values. Real plain keys are exactly 20 bytes (account address) or
-// 52 bytes (address + storage slot); a single field with length < 10 proves
-// the value was squeezed (varint file offset). Asymmetric on purpose — one
-// short field is decisive, "unsqueezed" requires every sampled plain-key
-// field to be ≥ 10 bytes.
-//
-// Parse failures on a single BranchData are not decisive; the caller may
-// have sampled a malformed or empty branch (unlikely in practice). The
-// detector skips such samples and votes on what remains; zero usable
-// non-state samples returns errNoNonStateSamples.
-func detectSqueezeState(samples []sampledPair) (bool, error) {
-	sawAny := false
-	for _, p := range samples {
-		if bytes.Equal(p.k, commitmentdb.KeyCommitmentState) {
-			continue
-		}
-		if len(p.v) == 0 {
-			continue
-		}
-		short := false
-		_, err := commitment.BranchData(p.v).ReplacePlainKeys(nil, func(key []byte, isStorage bool) ([]byte, error) {
-			if len(key) < binary.MaxVarintLen64 {
-				short = true
-			}
-			return nil, nil
-		})
-		if err != nil {
-			continue
-		}
-		sawAny = true
-		if short {
-			return true, nil
-		}
-	}
-	if !sawAny {
-		return false, errNoNonStateSamples
-	}
-	return false, nil
-}
-
 // detectFileState reads `samples` distributed (k, v) pairs from the commitment
-// file and runs both detectors. Uses BT ordinal lookup when available (constant
+// file to vote the key encoding (V1/V2), and derives the squeeze (referenced)
+// state from the file version. Uses BT ordinal lookup when available (constant
 // per-sample cost regardless of file size); falls back to stride-skip on a
 // sequential seg.Reader if the file has no BT index.
 //
@@ -189,10 +146,9 @@ func detectFileState(at *AggregatorRoTx, file VisibleFile, samples int) (fileSta
 	if err != nil {
 		return fileState{}, fmt.Errorf("detectFileState: %q: key-encoding vote: %w", file.Fullpath(), err)
 	}
-	squeezed, err := detectSqueezeState(pairs)
-	if err != nil {
-		return fileState{}, fmt.Errorf("detectFileState: %q: squeeze-state vote: %w", file.Fullpath(), err)
-	}
+	// Squeeze (referenced) state follows the version gate, like the live read path: referenced iff
+	// the file version is below the plain ceiling and its range reaches the threshold. No sampling.
+	squeezed := CommitmentBranchReferenced(file.Version(), at.StepSize(), file.StartRootNum(), file.EndRootNum())
 	return fileState{keysV2: keysV2, squeezed: squeezed}, nil
 }
 
@@ -328,7 +284,7 @@ func buildValueTransformer(
 			srcPath, errRangeMatch, stepFrom, stepTo, err)
 	}
 	if !detectedSqueezed && targetSqueezed {
-		vt, err := commitmentRo.commitmentValTransformDomain(rng, accounts, storage, af, sf)
+		vt, err := commitmentRo.commitmentValTransformDomain(rng, accounts, storage, af, sf, true)
 		if err != nil {
 			return nil, fmt.Errorf("buildValueTransformer unsqueezed→squeezed: %w", err)
 		}
@@ -659,6 +615,12 @@ func ConvertCommitmentFiles(ctx context.Context, at *AggregatorRoTx, opts Conver
 		logger.Info("[commitment_convert] no commitment files to convert")
 		return nil
 	}
+
+	// Output .kv version encodes the squeeze target for the version-gated reader (v2.1 squeezed,
+	// v2.2 plain); set once for the run so phase 1 writes and phase 2 discovery agree, then restore.
+	prevRefs := at.a.referencesInCommitmentBranches()
+	at.a.applyReferencesInCommitmentBranches(opts.TargetSqueeze)
+	defer at.a.applyReferencesInCommitmentBranches(prevRefs)
 
 	dirs := at.Dirs()
 	rebuildDir := filepath.Join(dirs.Snap, "rebuild", "domain")
