@@ -24,24 +24,32 @@ defect, not a trade-off.
 
 It unfolds the root branch once, then mounts a worker per touched top-level
 nibble that folds that child's subtree into a single cell concurrently, and
-re-folds the merged root row on the main goroutine — the *mount/fold* model of
-`ConcurrentPatriciaHashed`, driven from the touched-key prefix trie instead of
-per-nibble ETL collectors.
+re-folds the merged root row on the main goroutine — a *mount/fold* model driven
+from the touched-key prefix trie.
 
-The fold is **single-level**: one worker per touched root nibble (≤ 16). A whole
-child subtree — for example one account's entire storage — folds on a single
-worker; nested mounting that would parallelise within a subtree is future work
-(§11).
+The top level mounts one worker per touched root nibble (≤ 16). A second level
+handles the case where the work concentrates inside one subtree: when
+a worker reaches a *big-storage account* (> `deepStorageThreshold` touched storage
+keys across ≥ 2 first-storage nibbles) it folds that account's storage subtree
+concurrently — one worker per touched first-storage nibble — instead of streaming
+it serially. This *deep storage fold* (§4.1.1) is the same mount/fold primitive
+applied one level down. Splitting deeper than the first storage nibble is future
+work (§11).
 
 ## 2. Preliminaries *(informative)*
 
 `HexPatriciaHashed` keeps a `grid[128][16]cell` (one row per nibble depth) and a
-`currentKey`. Per sorted batch it unfolds down to the next key (loading branches
+`currentKey`. Account keys occupy depths 0–64 (the leaf carries the storage root);
+storage keys continue to depths 64–128. The same unfold/apply/fold codepath drives
+both — there is no separate storage trie. Per sorted batch it unfolds down to the
+next key (loading branches
 from the `PatriciaContext`), applies the update, and folds completed rows upward,
 hashing each branch and writing it via `PatriciaContext.PutBranch`; the final fold
 to row 0 yields the root. A branch hash mixes **every present nibble** of the
 branch, not only the touched ones — the property §4 must preserve under
-partitioning, here by unfolding the shared root row from the DB before mounting.
+partitioning, by unfolding any row a fold collapses from the DB first: the shared
+root row before mounting, and a whale's storage-root row before the deep fold
+(§4.1.1).
 
 ## 3. Data structures
 
@@ -84,22 +92,24 @@ is guarded by `deferredMu` (`appendDeferred`).
 ### 3.3 `ParallelPatriciaHashed` (`parallel_patricia_hashed.go`)
 
 Holds a configuration/base `template *HexPatriciaHashed`, a `sync.Pool` of worker
-tries, a `TrieContextFactory`, `numWorkers`, the published `rootHash`, and — for
-the deferred path — a `leaveDeferredForCaller` flag with a `deferredForCaller`
-hand-off slice. The `template` doubles as the **mount base** during `Process`: it
-is unfolded to the root branch, the workers' folded cells are dropped into its row
-0, and it folds the merged root. (Outside `Process` it exposes
-ctx/cache/metrics/trace configuration only.)
+tries, a `TrieContextFactory`, the `cfg TrieConfig` and `accountKeyLen` used to mint
+pooled workers, `numWorkers`, the published `rootHash`, and — for the deferred path
+— a `leaveDeferredForCaller` flag with a `deferredForCaller` hand-off slice. An
+optional `streaming *StreamingCommitter`: when set, `Process` delegates to it
+(`processStreaming`, §10) and the mount path below is not used. The `template`
+doubles as the **mount base** during `Process`: it is unfolded to the root branch,
+the workers' folded cells are dropped into its row 0, and it folds the merged root.
+(Outside `Process` it exposes ctx/cache/metrics/trace configuration only.)
 
 ## 4. Pipeline
 
 | phase | site | action |
 | --- | --- | --- |
 | 1. Touch | `Updates.TouchPlainKey` (ModeParallel) | insert each hashed key into the prefix trie, carrying its `plainKey`/`update` on the terminating node; no ETL collectors are used |
-| 2. Mount + fold | `processMounted`, concurrent | unfold the base to the root branch; mount a worker per touched root nibble; each folds its child subtree into a cell; drop the cells back into the base row and fold the merged root |
+| 2. Mount + fold | `processMounted`, concurrent | unfold the base to the root branch; mount a worker per touched root nibble; each folds its child subtree into a cell (a big-storage account's storage folds concurrently, §4.1.1); drop the cells back into the base row and fold the merged root |
 | 3. Commit | `Process` end | apply (or hand off) the merged deferred branch updates; publish the root |
 
-### 4.1 Phase 2 — Mount and fold (`processMounted`, `dfsSubtree`)
+### 4.1 Phase 2 — Mount and fold (`processMounted`, `dfsSubtreeDeep`)
 
 1. **Unfold the base.** `processMounted` unfolds `template` down to the root
    branch (`needUnfolding`/`unfold` on the zero prefix), loading the on-disk root
@@ -111,17 +121,24 @@ ctx/cache/metrics/trace configuration only.)
    `*HexPatriciaHashed`, calls `mountTo(base, nibble)` — inheriting a copy of the
    base's unfolded grid and sharing the base root cell read-only — and binds it to
    a fresh factory `PatriciaContext` with deferred branch writes enabled.
-3. **Build.** `dfsSubtree(child, [nibble]+child.ext)` walks the nibble's subtree in
-   nibble-ascending order. At each terminating node it reconstructs the full hashed
-   key, reads the `plainKey`/`update` off the node, and calls
+3. **Build.** `dfsSubtreeDeep(child, [nibble]+child.ext)` walks the nibble's subtree
+   in nibble-ascending order. At each terminating node it reconstructs the full
+   hashed key, reads the `plainKey`/`update` off the node, and calls
    `followAndUpdate`. A node MUST emit its own key **before** descending to its
    children, so an account at depth 64 precedes its storage keys — the sorted order
    the fold state machine requires (I4). A terminating node with a nil `plainKey`
    and no children is unsupported and MUST raise an error rather than be skipped.
-4. **Fold the mount.** `foldMounted(nibble)` folds the worker's subtree into a
-   single cell at the nibble's child depth, stopping before it would absorb the
-   shared base root row. The worker's deferred branch updates are appended to the
-   shared accumulator and the worker is returned to the pool.
+   When a node is a *big-storage account* (`isDeepStorageAccount`: depth 64, plain
+   key set, ≥ 2 first-storage nibbles, `subtreeCount > deepStorageThreshold`) the
+   walk does **not** descend into its storage children: it computes the storage root
+   via the deep storage fold (§4.1.1) and injects it into the account leaf
+   (`setAccountStorageRoot`).
+4. **Fold the mount.** `foldMounted(nibble)` folds the worker's subtree upward,
+   stopping when it reaches `mountWall` — the depth `mountTo` records as
+   `split-depth + 1`, so the top-level mount stops at depth 1, before it would absorb
+   the shared base root row — and returns `grid[0][nibble]`. The worker's deferred
+   branch updates are appended to the shared accumulator and the worker is returned
+   to the pool.
 5. **Merge and fold root.** On the main goroutine, after `errgroup.Wait`, each
    folded cell is dropped into `base.grid[0][nibble]` (stripping the leading nibble
    a hash-only sub-branch carries in its extension) and the touch/after maps are
@@ -132,6 +149,39 @@ Workers share the base root cell read-only and each inherit an independent copy 
 the unfolded grid; only the main goroutine mutates the base after `Wait`. There is
 no fold-time barrier and no cross-worker synchronisation beyond the deferred-update
 mutex.
+
+### 4.1.1 Deep storage fold (`foldStorageRoot`, `streaming_deep_fold.go`)
+
+A big-storage account's storage subtree (a "whale") would otherwise fold serially on
+its top-nibble worker. `foldStorageRoot` folds it concurrently, applying the §4.1
+mount/fold model one level down at depth 64. It runs the same primitives
+(`mountTo`/`foldMounted`/`followAndUpdate`) and is shared verbatim by the streaming
+variant (§10).
+
+1. **Unfold the storage-root branch.** `unfoldStorageBase(base, accHash[:64])` seeds a
+   base worker by reading the account's on-disk storage-root branch
+   (`branchFromCacheOrDB` + `decodeBranchIntoRow` — the same decode the account unfold
+   `unfoldBranchNode` uses, entered manually at depth 64 instead of by recursive
+   descent). This is I2 applied at depth 64:
+   untouched on-disk first-storage-nibble siblings MUST be present before the storage
+   root is folded, or they are dropped and the storage root — hence the state root —
+   diverges (see I2).
+2. **Fold per first-storage nibble.** One errgroup worker per touched first-storage
+   nibble: `foldStorageLeaf` mounts the shared base at that nibble (`mountWall = 65`),
+   streams the nibble's sorted slots, and `foldMounted` returns the depth-65 child
+   cell. Workers defer their branch writes into the shared accumulator. They own
+   disjoint storage prefixes, so concurrent reads of the shared base are race-free.
+3. **Aggregate.** `aggregateMountedStorageRoot` overlays the folded child cells onto
+   the unfolded base row (setting/clearing each touched present bit, leaving untouched
+   on-disk siblings intact) and folds once to the account's storage-root cell.
+4. **Inject.** `setAccountStorageRoot` writes that hash into the account leaf
+   (`cell.hash`, `hashLen = 32`); `computeCellHash` uses it as the storageRoot for an
+   account whose storage cell was not streamed, so the leaf hashes identically to the
+   serial path. The DFS then skips the account's storage children.
+
+Below `deepStorageThreshold`, or with storage in a single first nibble, the account
+streams inline as in §4.1 — the per-account setup cost (a pooled worker, a fresh
+context, the storage-root unfold) only pays off for genuinely large storage.
 
 ### 4.2 Phase 3 — Commit and root publication
 
@@ -156,9 +206,11 @@ primary enforcement of I1.
 - **I1 — Equal root.** The published root equals the sequential root for every
   input (R1).
 - **I2 — Untouched-nibble preservation.** Because a branch hash mixes all present
-  nibbles, the shared root row MUST be unfolded from `ctx.Branch` before mounting,
-  so untouched on-disk siblings are present in `grid[0]` when the merged root is
-  folded; workers write only their own touched subtree.
+  nibbles, every branch row a fold collapses MUST first be unfolded from `ctx.Branch`
+  so untouched on-disk siblings are present. This holds at two depths: the shared
+  root row before mounting (`processMounted`), and each big-storage account's
+  storage-root branch before the deep fold (`unfoldStorageBase`, §4.1.1). Dropping
+  either unfold drops untouched siblings and diverges the root.
 - **I3 — `plainKey` follows the split.** `prefixTrie.Insert` MUST route a
   terminator's `plainKey` to the correct node across path-compression splits (§3.1).
   A misroute is a wrong DB read and a diverged root.
@@ -173,6 +225,11 @@ primary enforcement of I1.
   base root cell read-only; the merged base row is folded only on the main
   goroutine after `errgroup.Wait`, so concurrent structure/`plainKey` reads and the
   final fold are race-free.
+- **I7 — Deep fold equals inline stream.** For a big-storage account, the storage
+  root from `foldStorageRoot` injected via `setAccountStorageRoot` MUST equal the
+  root the serial inline stream would produce. Its per-first-nibble workers own
+  disjoint storage prefixes, share the unfolded storage base read-only, and each
+  defers its own branch writes (I5).
 
 ## 6. Integration contract
 
@@ -211,10 +268,9 @@ substitution of the as-of reader is validated at runtime by the block-root check
 
 | parameter | default | effect |
 | --- | --- | --- |
-| `--experimental.parallel-commitment` | off | selects `VariantParallelHexPatricia`; takes precedence over `--experimental.concurrent-commitment` (`execctx.PickTrieVariant`) |
-| `--experimental.streaming-commitment` | off | selects `VariantStreamingHexPatricia` (`StreamingCommitter`); takes precedence over both `--experimental.parallel-commitment` and `--experimental.concurrent-commitment` |
-| `ERIGON_WARMUP_PARALLEL_PROCESS` | off (env) | opt-in branch-cache prefetch inside the parallel/streaming `Process`; intended for measurement |
-| `deepStorageThreshold` | 1000 | touched-slot count above which an account's storage subtree folds concurrently (split at the first storage nibble); mitigates the whale bottleneck of §11 |
+| `--experimental.parallel-commitment` | off | selects `VariantParallelHexPatricia` (`execctx.PickTrieVariant`) |
+| `--experimental.streaming-commitment` | off | selects `VariantStreamingHexPatricia` (`StreamingCommitter`); takes precedence over `--experimental.parallel-commitment` |
+| `deepStorageThreshold` | 1000 | compile-time const (not a runtime flag): per-account touched-storage-key count above which the storage subtree folds concurrently (§4.1.1); mitigates the whale bottleneck of §11 |
 | `numWorkers` | `runtime.NumCPU()` | worker-pool size and errgroup limit; override via `SetNumWorkers` |
 
 ## 8. Failure modes
@@ -222,7 +278,7 @@ substitution of the as-of reader is validated at runtime by the block-root check
 | condition | behaviour |
 | --- | --- |
 | empty update set | return the template's existing root (matches the sequential no-op) |
-| base root carries an extension (`root.ext != 0`) | return an error — not yet supported by the single-level mount |
+| base root carries an extension (`root.ext != 0`) | return an error — not yet supported by the mount path |
 | terminating node with nil `plainKey` and no children | return an error (only reachable via a hashed-only `TouchHashedKey`; that path is not wired for the parallel trie) |
 | deferred apply failure (inline path) | discard the staged root; never surface an unpersisted root |
 | worker error mid-fold | cancel the group; return pooled deferred entries |
@@ -239,26 +295,21 @@ substitution of the as-of reader is validated at runtime by the block-root check
 
 ## 10. Relationship to the other variants *(informative)*
 
-All three implement `commitment.Trie` and produce the same root; they differ only
+Both implement `commitment.Trie` and produce the same root; they differ only
 in scheduling.
 
-| | `HexPatriciaHashed` | `ConcurrentPatriciaHashed` | `ParallelPatriciaHashed` |
-| --- | --- | --- | --- |
-| flag | (default) | `--experimental.concurrent-commitment` | `--experimental.parallel-commitment` |
-| `Updates` mode | `ModeDirect` / `ModeUpdate` | `ModeDirect` + `sortPerNibble` | `ModeParallel` |
-| parallel unit | none | one goroutine per top nibble (≤16) | one worker per **touched** top nibble (≤16) |
-| split granularity | none | fixed 16-way at depth 1 | touched top nibbles at depth 1 (single-level) |
-| merge | single bottom-up fold | per-mount fold under `rootMu` | per-mount cells dropped into the base row, single root fold |
-| branch writes | inline | inline (per mount) | deferred, applied once or handed to the caller |
-| key delivery | one sorted stream | 16 per-nibble ETL collectors | prefix trie carrying `plainKey`/`update` |
-| applicability | always | only when the top node is a wide branch (`CanDoConcurrentNext`) | any shape with `root.ext == 0` |
+| | `HexPatriciaHashed` | `ParallelPatriciaHashed` |
+| --- | --- | --- |
+| flag | (default) | `--experimental.parallel-commitment` |
+| `Updates` mode | `ModeDirect` / `ModeUpdate` | `ModeParallel` |
+| parallel unit | none | one worker per **touched** top nibble (≤16), plus one per first-storage nibble inside a big-storage account |
+| split granularity | none | touched top nibbles at depth 1, and first-storage nibbles at depth 64 for big-storage accounts (§4.1.1) |
+| merge | single bottom-up fold | per-mount cells dropped into the base row, single root fold |
+| branch writes | inline | deferred, applied once or handed to the caller |
+| key delivery | one sorted stream | prefix trie carrying `plainKey`/`update` |
+| applicability | always | any shape with `root.ext == 0` |
 
-`ParallelPatriciaHashed` is the mount/fold model of `ConcurrentPatriciaHashed`
-applied only to the nibbles actually touched and fed from the prefix trie;
-`ConcurrentPatriciaHashed` is the only consumer of the 16 per-nibble ETL
-collectors, which ModeParallel does not allocate.
-
-A fourth variant, `StreamingCommitter` (`--experimental.streaming-commitment` →
+A third variant, `StreamingCommitter` (`--experimental.streaming-commitment` →
 `VariantStreamingHexPatricia`), layers on this one rather than replacing it: it
 reuses the same prefix trie and fold engine and upholds R1 identically. It differs
 only in *when* the fold runs — touched keys are re-folded per top-nibble split in a
@@ -268,32 +319,39 @@ set, never a persistent per-split hph mutated by touches — that would break th
 monotonic `followAndUpdate` contract). It uses the `streaming` flag on `Updates`
 (not a new `Mode`).
 
-Big-storage accounts run a streaming-local deep walk (`dfsDeepLocal`) instead of
-calling the parallel path's deep fold — `parallel_mount.go` is left untouched for
-isolation. See `execution/commitment/streaming_commitment.go`.
+Big-storage accounts take the **same** deep storage fold (§4.1.1): each split's
+`foldSplit` runs `dfsSubtreeDeep` with `foldStorageRoot`, shared verbatim from
+`streaming_deep_fold.go` — the deep-fold logic is not duplicated. See
+`execution/commitment/streaming_commitment.go`.
 
 ## 11. Performance characteristics *(informative)*
 
-The fold is single-level: parallelism is bounded by the number of **touched** root
-nibbles (≤ 16) and, within each, by the cost of folding that child's whole subtree
-on one worker. Batches whose work concentrates inside one subtree — for example a
-single "whale" account with hundreds of thousands of storage slots — used to fold
-serially on one worker; accounts above `deepStorageThreshold` touched slots now
-fold their storage subtree concurrently (one worker per first storage nibble).
-Splitting deeper than the first storage nibble is future work. The benchmark `MockState`
-serializes reads on a shared lock and therefore under-reports the parallel speedup
-relative to production's independent per-worker MDBX readers. These figures are for
-inspection, not a CI gate.
+Top-level parallelism is bounded by the number of **touched** root nibbles (≤ 16);
+within a big-storage account the deep fold (§4.1.1) adds a second level bounded by
+its touched first-storage nibbles (≤ 16), so a single "whale" account with hundreds
+of thousands of storage slots folds across up to 16 workers instead of one.
+
+At `numWorkers = NumCPU` the parallel commitment is effectively core-bound: worker
+budget beyond NumCPU buys little, and lowering `deepStorageThreshold` to detach
+medium accounts costs more in per-account setup (a pooled worker, a fresh context,
+the storage-root unfold) than the extra split saves. Splitting deeper than the first
+storage nibble, and detaching storage below the whale threshold, are not currently
+worthwhile.
+
+The benchmark `MockState` serializes reads on a shared lock and therefore
+under-reports the parallel speedup relative to production's independent per-worker
+MDBX readers; figures are for inspection, not a CI gate.
 
 ## 12. Source map
 
 | file | contents |
 | --- | --- |
-| `execution/commitment/parallel_patricia_hashed.go` | `ParallelPatriciaHashed`, `Process`, `dfsSubtree`, deferred apply and hand-off |
-| `execution/commitment/parallel_mount.go` | `processMounted` — unfold, per-nibble mount/fold, merged root fold |
+| `execution/commitment/parallel_patricia_hashed.go` | `ParallelPatriciaHashed`, `Process` (routes to `processStreaming` when a committer is set), `dfsSubtree`, deferred apply and hand-off |
+| `execution/commitment/parallel_mount.go` | `processMounted` — unfold, per-nibble mount/fold via `dfsSubtreeDeep`, merged root fold; `mountTo`; `setAccountStorageRoot`; `deepStorageThreshold` |
+| `execution/commitment/streaming_deep_fold.go` | the deep storage fold shared by the parallel and streaming paths: `dfsSubtreeDeep`, `isDeepStorageAccount`, `foldStorageRoot`, `unfoldStorageBase`, `foldStorageLeaf`, `aggregateMountedStorageRoot` |
+| `execution/commitment/hex_patricia_hashed.go` | sequential engine; `foldMounted` and the `mountWall` stop used by both fold levels |
 | `execution/commitment/parallel_update.go` | `parallelUpdate`, `plainKeyArena`, `Insert`/deferred accumulation |
 | `execution/commitment/prefix_trie.go` | path-compressed prefix trie + slab arena; `Insert` `plainKey` placement |
-| `execution/commitment/hex_concurrent_patricia_hashed.go` | `mountTo`/`foldMounted` mount primitives, shared with `ConcurrentPatriciaHashed` |
 | `execution/commitment/commitment.go` | `Updates` (ModeParallel carries keys in the prefix trie), `InitializeTrieAndUpdates` |
 | `execution/commitment/commitmentdb/commitment_context.go` | wires ModeParallel and caller-deferred updates into `ComputeCommitment` |
 | `execution/stagedsync/committer.go` | parallel-exec commitment calculator; keeps the ModeParallel buffer, serves values via the as-of reader |

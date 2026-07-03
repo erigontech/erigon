@@ -287,7 +287,6 @@ func SqueezeCommitmentFiles(ctx context.Context, at *AggregatorRoTx, logger log.
 				return err
 			}
 			sizeDelta += delta
-			cf.frozen = false
 			cf.closeFilesAndRemove()
 
 			squeezedPath := originalPath + sqExt
@@ -1005,15 +1004,12 @@ func RebuildCommitmentFiles(ctx context.Context, rwDb kv.TemporalRwDB, txNumsRea
 
 		streaming := statecfg.ExperimentalStreamingCommitment
 		parallel := statecfg.ExperimentalParallelCommitment
-		concurrent := statecfg.ExperimentalConcurrentCommitment
 		trieVariant := commitment.VariantHexPatriciaTrie
 		switch {
 		case streaming:
 			trieVariant = commitment.VariantStreamingHexPatricia
 		case parallel:
 			trieVariant = commitment.VariantParallelHexPatricia
-		case concurrent:
-			trieVariant = commitment.VariantConcurrentHexPatricia
 		}
 
 		for shardFrom < lastShard { // recreate this file range 1+ steps
@@ -1049,7 +1045,7 @@ func RebuildCommitmentFiles(ctx context.Context, rwDb kv.TemporalRwDB, txNumsRea
 			domains.SetTxNum(lastTxnumInShard - 1)
 			currentTxNum := lastTxnumInShard - 1
 			domains.GetCommitmentCtx().SetStateReader(commitmentdb.NewFilesOnlyStateReader(rwTx, lastTxnumInShard-1))
-			if concurrent || parallel || streaming {
+			if parallel || streaming {
 				domains.EnableParaTrieDB(rwDb)
 			}
 

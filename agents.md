@@ -132,7 +132,7 @@ A comment may be warranted for: a non-obvious invariant the types don't enforce;
 
 When a comment is genuinely required, it MUST be:
 
-- **One sentence; rarely two; never a paragraph.** No bulleted lists inside `//`. No multi-section block comments with `// Concurrency:` / `// Why:` / `// How to apply:` sub-headings. If the explanation doesn't fit in two sentences, the rest belongs in the commit message, the PR description, or a design doc — not in source, where it goes stale.
+- **Concise, but err on the side of clarity.** Most comments fit in a sentence or two; keep an extra sentence when cutting it would cost understanding, and cut it when it only adds length — two clear sentences beat both a cryptic one-liner and a six-line essay. An explanation that needs sub-headings (`// Concurrency:` / `// Why:`) or bullet lists to stay organized has outgrown source: put the full story in the commit message, the PR description, or a design doc, and keep the distilled why in the code.
 - **High-level, not scenario-specific.** Explain the invariant or gotcha in general terms. Don't walk through specific call sites, sequences of operations, or particular situations a reader could find with `grep`. The right level of abstraction is "what must remain true," not "what happened to me last Tuesday."
 - **Free of forensic detail.** Strip dates (`// found on 2026-05-21`), devnet/branch names (`// seen on bal-devnet-7`), PR/issue/review references (`// flagged in #21314 round-4 review`), incident anecdotes, and "used by X, Y, Z" callsite lists. That history belongs in the commit message and PR description, where it survives intact; in source it rots, misleads later readers, and bloats the file.
 - **Not a restatement of the code.** If a reader could delete the comment without losing information, delete it. Standard Go idioms and well-known library behavior don't need annotation.
@@ -168,7 +168,7 @@ Function docstrings follow the same rule: a one-line summary, plus param/return 
 
 `// TODO` notes are only acceptable with a linked tracking issue and an owner. Better: file the issue and don't add the TODO; or fix it now.
 
-**For automated agents specifically:** previous iterations of this guidance were not enough — agents kept producing multi-paragraph block comments enumerating call sites and incident history. Treat the rules above as hard limits. If you catch yourself writing a third sentence in a comment, stop and either delete it, condense to one sentence, or move the content into the commit message.
+**For automated agents specifically:** previous iterations of this guidance were not enough — agents kept producing multi-paragraph block comments enumerating call sites and incident history. The forensic-detail and scenario rules above are hard limits; length is a judgment call with clarity as the tiebreaker. When a comment grows, look at what the growth is made of: call-site inventories and incident history move to the commit message; a sentence that saves the reader a wrong guess stays.
 
 ## Pull Requests & Workflows
 

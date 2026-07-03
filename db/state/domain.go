@@ -48,7 +48,7 @@ import (
 	"github.com/erigontech/erigon/db/kv/stream"
 	"github.com/erigontech/erigon/db/recsplit"
 	"github.com/erigontech/erigon/db/seg"
-	"github.com/erigontech/erigon/db/state/changeset"
+	"github.com/erigontech/erigon/db/state/kvmetrics"
 	"github.com/erigontech/erigon/db/state/statecfg"
 	"github.com/erigontech/erigon/db/version"
 	"github.com/erigontech/erigon/diagnostics/metrics"
@@ -353,10 +353,8 @@ func (d *Domain) scanDirtyFiles(fileNames []string) (garbageFiles []*FilesItem) 
 	if d.FilenameBase == "" {
 		panic("assert: empty `filenameBase`")
 	}
-	l := filterDirtyFiles(fileNames, d.stepSize, d.stepsInFrozenFile, d.FilenameBase, "kv", d.logger)
+	l := filterDirtyFiles(fileNames, d.stepSize, d.FilenameBase, "kv", d.logger)
 	for _, dirtyFile := range l {
-		dirtyFile.frozen = false
-
 		if _, has := d.dirtyFiles.Get(dirtyFile); !has {
 			d.dirtyFiles.Set(dirtyFile)
 		}
@@ -1287,8 +1285,7 @@ func (d *Domain) integrateDirtyFiles(sf StaticFiles, txNumFrom, txNumTo uint64) 
 
 	d.History.integrateDirtyFiles(sf.HistoryFiles, txNumFrom, txNumTo)
 
-	fi := newFilesItem(txNumFrom, txNumTo, d.stepSize, d.stepsInFrozenFile)
-	fi.frozen = false
+	fi := newFilesItem(txNumFrom, txNumTo)
 	fi.decompressor = sf.valuesDecomp
 	fi.index = sf.valuesIdx
 	fi.bindex = sf.valuesBt
@@ -1369,8 +1366,13 @@ func (dt *DomainRoTx) unwind(ctx context.Context, rwTx kv.RwTx, step, txNumUnwin
 			}
 		}
 
-		// nil = different step, skip; []byte{} = absent previously, write empty tombstone
-		if value != nil {
+		// A key changed at several steps in the range has one diff per step, sorted
+		// by key then descending step; only the lowest step's value is the value at
+		// txNumUnwindTo. Restore once, on the last (lowest-step) diff — else the
+		// DupSort table keeps several dups at unwindStep and getLatestFromDb returns
+		// the smallest. nil = different step, skip; []byte{} = absent, write tombstone.
+		lastForKey := i+1 == len(domainDiffs) || domainDiffs[i+1].Key[:len(domainDiffs[i+1].Key)-8] != keyStr[:len(keyStr)-8]
+		if value != nil && lastForKey {
 			if err := valsCursor.Put(fullKey, append(unwindStepBytes, value...)); err != nil {
 				return err
 			}
@@ -1692,7 +1694,7 @@ func (dt *DomainRoTx) GetLatest(key []byte, roTx kv.Tx) ([]byte, kv.Step, bool, 
 	return dt.getLatest(key, roTx, math.MaxInt64, nil, time.Time{})
 }
 
-func (dt *DomainRoTx) getLatest(key []byte, roTx kv.Tx, maxStep kv.Step, metrics *changeset.DomainMetrics, start time.Time) ([]byte, kv.Step, bool, error) {
+func (dt *DomainRoTx) getLatest(key []byte, roTx kv.Tx, maxStep kv.Step, metrics *kvmetrics.DomainMetrics, start time.Time) ([]byte, kv.Step, bool, error) {
 	if dt.d.Disable {
 		return nil, 0, false, nil
 	}

@@ -154,6 +154,36 @@ func overlayPruneToTxNum(ctx context.Context, cfg ExecuteBlockCfg, tx kv.Tx, com
 	return cfg.blockReader.TxnumReader().Max(ctx, tx, committedBlock)
 }
 
+// findExecutedDiffsetAtHeight returns the diffset of the block executed at currentBlock.
+// When no canonical hash is recorded at that height (e.g. the block is no longer canonical
+// after a reorg) it falls back to the stored header.
+func findExecutedDiffsetAtHeight(ctx context.Context, rwTx kv.TemporalRwTx, br services.FullBlockReader, doms *execctx.SharedDomains, currentBlock uint64) (diffSet [kv.DomainLen][]kv.DomainEntryDiff, executedHash common.Hash, found bool, err error) {
+	executedHash, ok, err := br.CanonicalHash(ctx, rwTx, currentBlock)
+	if err != nil {
+		return diffSet, common.Hash{}, false, err
+	}
+	if !ok {
+		// we may have executed blocks which are not in the canonical chain
+		nonCanonicalHeaders, err := rawdb.ReadHeadersByNumber(rwTx, currentBlock)
+		if err != nil {
+			return diffSet, common.Hash{}, false, err
+		}
+		switch {
+		case len(nonCanonicalHeaders) == 0:
+			return diffSet, common.Hash{}, false, fmt.Errorf("can't find diffsets for: %d", currentBlock)
+		case len(nonCanonicalHeaders) == 1:
+			executedHash = nonCanonicalHeaders[0].Hash()
+		default:
+			return diffSet, common.Hash{}, false, fmt.Errorf("diffsets ambiguous for: %d, have %d headers", currentBlock, len(nonCanonicalHeaders))
+		}
+	}
+	diffSet, found, err = doms.GetDiffset(rwTx, executedHash, currentBlock)
+	if err != nil {
+		return diffSet, common.Hash{}, false, err
+	}
+	return diffSet, executedHash, found, nil
+}
+
 func unwindExec3(u *UnwindState, s *StageState, doms *execctx.SharedDomains, rwTx kv.TemporalRwTx, ctx context.Context, cfg ExecuteBlockCfg, accumulator *shards.Accumulator, logger log.Logger) (err error) {
 	br := cfg.blockReader
 
@@ -167,28 +197,11 @@ func unwindExec3(u *UnwindState, s *StageState, doms *execctx.SharedDomains, rwT
 	t := time.Now()
 	var changeSet *[kv.DomainLen][]kv.DomainEntryDiff
 	for currentBlock := u.CurrentBlockNumber; currentBlock > u.UnwindPoint; currentBlock-- {
-		currentHash, ok, err := br.CanonicalHash(ctx, rwTx, currentBlock)
+		currentKeys, executedHash, found, err := findExecutedDiffsetAtHeight(ctx, rwTx, br, doms, currentBlock)
 		if err != nil {
 			return err
 		}
-		if !ok {
-			// we may have executed blocks which are not in the canonical chain
-			nonCanonicalHeaders, err := rawdb.ReadHeadersByNumber(rwTx, currentBlock)
-			if err != nil {
-				return err
-			}
-			switch {
-			case len(nonCanonicalHeaders) == 0:
-				return fmt.Errorf("can't find diffsets for: %d", currentBlock)
-			case len(nonCanonicalHeaders) == 1:
-				currentHash = nonCanonicalHeaders[0].Hash()
-			default:
-				return fmt.Errorf("diffsets ambiguous for: %d, have %d headers", currentBlock, len(nonCanonicalHeaders))
-			}
-		}
-		var currentKeys [kv.DomainLen][]kv.DomainEntryDiff
-		currentKeys, ok, err = doms.GetDiffset(rwTx, currentHash, currentBlock)
-		if !ok {
+		if !found {
 			if changeSet == nil {
 				// this handles the edge case where we're traversing backwards from
 				// the current block and we've not found the first diff yet it just
@@ -198,10 +211,7 @@ func unwindExec3(u *UnwindState, s *StageState, doms *execctx.SharedDomains, rwT
 				// all previous blocks
 				continue
 			}
-			return fmt.Errorf("domains.GetDiffset(%d, %s): not found", currentBlock, currentHash)
-		}
-		if err != nil {
-			return err
+			return fmt.Errorf("domains.GetDiffset(%d, %s): not found", currentBlock, executedHash)
 		}
 		if changeSet == nil {
 			changeSet = &currentKeys
@@ -211,23 +221,13 @@ func unwindExec3(u *UnwindState, s *StageState, doms *execctx.SharedDomains, rwT
 			}
 		}
 	}
-	// Get the hash of the last executed block (the tip we're unwinding from)
-	// so RevertWithDiffset can detect if the cache was modified by a rolled-back tx.
+	// Get the hash of the last executed block (the tip we're unwinding from).
 	lastExecHash, _, err := br.CanonicalHash(ctx, rwTx, u.CurrentBlockNumber)
 	if err != nil {
 		lastExecHash = common.Hash{}
 	}
 	if err := unwindExec3State(ctx, doms, rwTx, u.UnwindPoint, txNum, accumulator, changeSet, lastExecHash, logger); err != nil {
 		return fmt.Errorf("unwindExec3State(%d->%d): %w, took %s", s.BlockNumber, u.UnwindPoint, err, time.Since(t))
-	}
-	// Surgically evict keys touched by the unwound blocks from the state cache.
-	// Keys not in the diffset remain cached (they weren't modified by the unwound range).
-	if stateCache := doms.GetStateCache(); stateCache != nil && changeSet != nil {
-		unwindTargetHash, _, err := br.CanonicalHash(ctx, rwTx, u.UnwindPoint)
-		if err != nil {
-			unwindTargetHash = common.Hash{}
-		}
-		stateCache.RevertWithDiffset(changeSet, lastExecHash, unwindTargetHash)
 	}
 	if err := rawdb.DeleteNewerEpochs(rwTx, u.UnwindPoint+1); err != nil {
 		return fmt.Errorf("delete newer epochs: %w", err)
@@ -399,74 +399,83 @@ func SpawnExecuteBlocksStage(s *StageState, u Unwinder, doms *execctx.SharedDoma
 
 func UnwindExecutionStage(u *UnwindState, s *StageState, doms *execctx.SharedDomains, rwTx kv.TemporalRwTx, ctx context.Context, cfg ExecuteBlockCfg, logger log.Logger) (err error) {
 	//fmt.Printf("unwind: %d -> %d\n", u.CurrentBlockNumber, u.UnwindPoint)
-
-	// Discard deferred commitment updates from the previous (failed) execution;
-	// otherwise the next ComputeCommitment flushes stale branch data. Runs on both
-	// unwind paths (the pre-refactor early return skipped it on the no-op path).
-	doms.ResetPendingUpdates()
-
-	if u.UnwindPoint < s.BlockNumber {
-		// Execution committed past the unwind point: roll the committed blocks back
-		// on disk (unwindExec3 also prunes the in-RAM overlay), and u.Done lowers the
-		// stage progress so re-execution resumes from u.UnwindPoint+1.
-		logger.Info(fmt.Sprintf("[%s] Unwind Execution", u.LogPrefix()), "from", s.BlockNumber, "to", u.UnwindPoint)
-
-		unwindToLimit, ok, err := rawtemporaldb.CanUnwindBeforeBlockNum(u.UnwindPoint, rwTx)
-		if err != nil {
-			return err
-		}
-		if !ok {
-			return fmt.Errorf("%w: %d < %d", ErrTooDeepUnwind, u.UnwindPoint, unwindToLimit)
-		}
-
-		var accumulator *shards.Accumulator
-		if cfg.stateStream && s.BlockNumber-u.UnwindPoint < stateStreamLimit {
-			accumulator = cfg.notifications.Accumulator
-
-			hash, ok, err := cfg.blockReader.CanonicalHash(ctx, rwTx, u.UnwindPoint)
-			if err != nil {
-				return fmt.Errorf("read canonical hash of unwind point: %w", err)
-			}
-			if !ok {
-				return fmt.Errorf("canonical hash not found %d", u.UnwindPoint)
-			}
-			header, err := cfg.blockReader.HeaderByHash(ctx, rwTx, hash)
-			if err != nil {
-				return fmt.Errorf("read canonical header of unwind point: %w", err)
-			}
-			if header == nil {
-				return fmt.Errorf("canonical header for unwind point not found: %s", hash)
-			}
-			txs, err := cfg.blockReader.RawTransactions(ctx, rwTx, u.UnwindPoint, s.BlockNumber)
-			if err != nil {
-				return err
-			}
-			accumulator.StartChange(header, txs, true)
-		}
-
-		if err := unwindExec3(u, s, doms, rwTx, ctx, cfg, accumulator, logger); err != nil {
-			return err
-		}
-
-		if err = u.Done(rwTx); err != nil {
-			return err
-		}
-	} else {
-		// Nothing above the unwind point was committed, so there's no disk rollback
-		// and u.Done must NOT run — it would raise stage progress to u.UnwindPoint and
-		// mark uncommitted blocks executed. Re-execution resumes from the committed
-		// block, so prune the in-RAM overlay to the last committed txNum.
+	if u.UnwindPoint >= s.BlockNumber {
+		// MDBX has nothing above u.UnwindPoint to roll back here, but the in-RAM
+		// overlay (reused across the unwind→retry loop) can still hold uncommitted
+		// writes for blocks above it — e.g. a block that failed its post-execution
+		// gas check before its step was flushed. This early return skips u.Done, so
+		// committed progress stays at s.BlockNumber and the whole
+		// (s.BlockNumber, u.UnwindPoint] range re-executes from there; prune the
+		// overlay to the last committed txNum, Max(s.BlockNumber), so no re-executed
+		// block re-reads its own uncommitted write.
 		committedTxNum, err := overlayPruneToTxNum(ctx, cfg, rwTx, s.BlockNumber)
 		if err != nil {
 			return err
 		}
+		resumeTxNum, err := cfg.blockReader.TxnumReader().Min(ctx, rwTx, s.BlockNumber+1)
+		if err != nil {
+			return err
+		}
+		// NB: do NOT ResetPendingUpdates / SeekCommitment here — the overlay and its
+		// deferred commitment updates are reused by the in-loop re-execution, so
+		// discarding them strands the commitment context and stalls the next block.
 		doms.Unwind(committedTxNum, nil)
+		doms.SetTxNum(resumeTxNum)
+		return nil
 	}
 
-	// Re-establish doms' position at the committed state for re-execution.
-	_, _, err = doms.SeekCommitment(ctx, rwTx)
+	logger.Info(fmt.Sprintf("[%s] Unwind Execution", u.LogPrefix()), "from", s.BlockNumber, "to", u.UnwindPoint)
+
+	// Discard any pending deferred commitment updates from the previous
+	// (failed) execution. If left in place, the next ComputeCommitment
+	// would flush stale branch data that doesn't match the unwound state.
+	doms.ResetPendingUpdates()
+
+	unwindToLimit, ok, err := rawtemporaldb.CanUnwindBeforeBlockNum(u.UnwindPoint, rwTx)
 	if err != nil {
 		return err
+	}
+	if !ok {
+		return fmt.Errorf("%w: %d < %d", ErrTooDeepUnwind, u.UnwindPoint, unwindToLimit)
+	}
+
+	var accumulator *shards.Accumulator
+	if cfg.stateStream && s.BlockNumber-u.UnwindPoint < stateStreamLimit {
+		accumulator = cfg.notifications.Accumulator
+
+		hash, ok, err := cfg.blockReader.CanonicalHash(ctx, rwTx, u.UnwindPoint)
+		if err != nil {
+			return fmt.Errorf("read canonical hash of unwind point: %w", err)
+		}
+		if !ok {
+			return fmt.Errorf("canonical hash not found %d", u.UnwindPoint)
+		}
+		header, err := cfg.blockReader.HeaderByHash(ctx, rwTx, hash)
+		if err != nil {
+			return fmt.Errorf("read canonical header of unwind point: %w", err)
+		}
+		if header == nil {
+			return fmt.Errorf("canonical header for unwind point not found: %s", hash)
+		}
+		txs, err := cfg.blockReader.RawTransactions(ctx, rwTx, u.UnwindPoint, s.BlockNumber)
+		if err != nil {
+			return err
+		}
+		accumulator.StartChange(header, txs, true)
+	}
+
+	if err := unwindExec3(u, s, doms, rwTx, ctx, cfg, accumulator, logger); err != nil {
+		return err
+	}
+
+	if err = u.Done(rwTx); err != nil {
+		return err
+	}
+
+	// Restore doms' internal commitment state to the unwound tip; a failure here
+	// leaves doms inconsistent for the next re-execution, so surface it.
+	if _, _, err = doms.SeekCommitment(ctx, rwTx); err != nil {
+		return fmt.Errorf("unwind: SeekCommitment after disk unwind: %w", err)
 	}
 	//dumpPlainStateDebug(tx, nil)
 	return nil
