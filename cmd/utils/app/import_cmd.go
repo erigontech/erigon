@@ -45,6 +45,7 @@ import (
 	"github.com/erigontech/erigon/execution/rlp"
 	"github.com/erigontech/erigon/execution/tests/blockgen"
 	"github.com/erigontech/erigon/execution/types"
+	erigoncli "github.com/erigontech/erigon/node/cli"
 	"github.com/erigontech/erigon/node/debug"
 	"github.com/erigontech/erigon/node/eth"
 	"github.com/erigontech/erigon/node/gointerfaces/remoteproto"
@@ -90,6 +91,10 @@ func importChain(ctx context.Context, cliCtx *cli.Command) error {
 		utils.NoDownloaderFlag.Name:      "true",
 		utils.ExternalConsensusFlag.Name: "true",
 		utils.MCPDisableFlag.Name:        "true",
+		utils.TxPoolDisableFlag.Name:     "true",
+		utils.HTTPEnabledFlag.Name:       "false",
+		erigoncli.PrivateApiAddr.Name:    "",
+		utils.AuthRpcPort.Name:           "0", // no disable flag; 0 binds an ephemeral port
 	} {
 		if err := cliCtx.Set(flag, value); err != nil {
 			return fmt.Errorf("importChain: set %s=%s: %w", flag, value, err)
@@ -105,8 +110,13 @@ func importChain(ctx context.Context, cliCtx *cli.Command) error {
 	if err != nil {
 		return err
 	}
+	// p2p has no disable flag; a one-shot import needs no peers.
+	nodeCfg.DisableSentry = true
 
 	ethCfg := node.NewEthConfigUrfave(ctx, cliCtx, nodeCfg, logger)
+	// Skip the ~2s KZG warmup: Stop waits it out on exit, and kzg.Ctx()
+	// lazy-inits if a block actually needs the trusted setup.
+	ethCfg.WarmupKzgCtxOnInit = false
 	stack := makeConfigNode(ctx, nodeCfg, logger)
 	defer stack.Close()
 
@@ -114,6 +124,10 @@ func importChain(ctx context.Context, cliCtx *cli.Command) error {
 	if err != nil {
 		return err
 	}
+	// The stack is never Start()ed, so the deferred stack.Close() skips
+	// lifecycle Stop — stop the backend explicitly to close chaindata on exit.
+	defer ethereum.Stop()
+
 	err = ethereum.Init(stack, ethCfg, ethCfg.Genesis.Config)
 	if err != nil {
 		return err
