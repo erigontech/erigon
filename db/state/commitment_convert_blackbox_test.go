@@ -205,12 +205,12 @@ func TestConvertCommitmentFile_V1ToV1_Squeeze(t *testing.T) {
 	if testing.Short() {
 		t.Skip()
 	}
-	// Build fixtures with ReplaceKeysInValues=false so the on-disk files start
+	// Build fixtures with ReferencesInCommitmentBranches=false so the on-disk files start
 	// unsqueezed. Then flip the config flag to true before running the converter
 	// so commitmentValTransformDomain's inner guard lets the squeeze fire.
 	cfg := &testAggConfig{stepSize: 10, disableCommitmentBranchTransform: true}
 	db, agg := testDbAggregatorWithFiles(t, cfg)
-	agg.ForTestReplaceKeysInValues(kv.CommitmentDomain, true)
+	agg.ForTestReferencesInCommitmentBranches(kv.CommitmentDomain, true)
 
 	rwTx, err := db.BeginTemporalRw(context.Background())
 	require.NoError(t, err)
@@ -228,9 +228,8 @@ func TestConvertCommitmentFile_V1ToV1_Squeeze(t *testing.T) {
 	require.NotEmpty(t, newKVPath)
 
 	// Squeezed values contain at least one embedded plain-key field shorter than
-	// binary.MaxVarintLen64 (10 bytes) — the marker the read-side detector
-	// (detectSqueezeState) keys off. Walk every non-state branch in the new
-	// file and assert at least one such short field exists.
+	// 10 bytes (a varint file offset, vs a 20- or 52-byte plain key). Walk every
+	// non-state branch in the new file and assert at least one such short field exists.
 	newKeys, newVals := readKVFile(t, agg, newKVPath)
 	require.NotEmpty(t, newVals)
 	foundShort := false
@@ -363,7 +362,7 @@ func TestConvertCommitmentFiles_FullFlow(t *testing.T) {
 	// runtime flag is false. Flip it on so TargetSqueeze:true actually fires —
 	// otherwise the orchestrator silently no-ops on the squeeze axis and the
 	// "root unchanged" assertion below holds trivially.
-	agg.ForTestReplaceKeysInValues(kv.CommitmentDomain, true)
+	agg.ForTestReferencesInCommitmentBranches(kv.CommitmentDomain, true)
 
 	// Compute the commitment root via the pre-conversion files.
 	rootBefore := computeCommitmentRoot(t, db)
@@ -390,7 +389,7 @@ func TestConvertCommitmentFiles_FullFlow(t *testing.T) {
 	// Verify the squeeze actually fired: at least one promoted file must
 	// contain a sub-10B embedded plain-key field. Without this check the
 	// "root unchanged" assertion below would also pass when the value codec
-	// silently no-oped (e.g. ReplaceKeysInValues=false in the fixture).
+	// silently no-oped (e.g. ReferencesInCommitmentBranches=false in the fixture).
 	newKVsForSqueezeCheck, gErr := filepath.Glob(filepath.Join(snapDir, "*-commitment.*.kv"))
 	require.NoError(t, gErr)
 	require.NotEmpty(t, newKVsForSqueezeCheck)
@@ -516,10 +515,10 @@ func TestConvertCommitmentFiles_RoundTripComposed(t *testing.T) {
 	}
 	cfg := &testAggConfig{stepSize: 10, disableCommitmentBranchTransform: true}
 	db, agg := testDbAggregatorWithFiles(t, cfg)
-	// Enable ReplaceKeysInValues so the squeeze axis actually fires in both
+	// Enable ReferencesInCommitmentBranches so the squeeze axis actually fires in both
 	// directions; without it the squeeze→unsqueezed leg of the round-trip is
 	// a silent no-op and byte equality holds for the wrong reason.
-	agg.ForTestReplaceKeysInValues(kv.CommitmentDomain, true)
+	agg.ForTestReferencesInCommitmentBranches(kv.CommitmentDomain, true)
 
 	snapDir := agg.Dirs().SnapDomain
 	origFiles := snapshotCommitmentFiles(t, snapDir)
