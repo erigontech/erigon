@@ -424,6 +424,35 @@ func (t *attestationTestSuite) TestAttestationProcessMessageRejectsNextEpochBefo
 	t.Require().Contains(err.Error(), "too far from attestation epoch")
 }
 
+func (t *attestationTestSuite) TestAttestationProcessMessageRejectsBeyondNextEpochDespiteForkchoiceHavingSeenIt() {
+	beyondNextEpochSlot := mockSlot + 2*mockSlotsPerEpoch
+	beyondNextEpoch := mockEpoch + 2
+	beyondNextEpochAttData := *attData
+	beyondNextEpochAttData.Slot = beyondNextEpochSlot
+	beyondNextEpochAttData.Source.Epoch = beyondNextEpoch - 1
+	beyondNextEpochAttData.Target.Epoch = beyondNextEpoch
+	beyondNextEpochAtt := *att
+	beyondNextEpochAtt.Data = &beyondNextEpochAttData
+
+	computeCommitteeCountPerSlot = func(_ abstract.BeaconStateReader, _, _ uint64) uint64 {
+		return 8
+	}
+	computeSubnetForAttestation = func(_, _, _, _, _ uint64) uint64 {
+		return 1
+	}
+	t.ethClock.EXPECT().GetEpochAtSlot(beyondNextEpochSlot).Return(beyondNextEpoch).Times(1)
+	t.ethClock.EXPECT().GetCurrentSlot().Return(beyondNextEpochSlot).Times(1)
+	t.mockForkChoice.HighestSeenVal = beyondNextEpochSlot
+
+	err := t.attService.ProcessMessage(context.Background(), common.NewUint64(1), &AttestationForGossip{
+		Attestation:      &beyondNextEpochAtt,
+		ImmediateProcess: true,
+	})
+
+	t.Require().Error(err)
+	t.Require().Contains(err.Error(), "too far from attestation epoch")
+}
+
 func (t *attestationTestSuite) TestGloasAttestationIndexValidation() {
 	// Override beacon config to enable Gloas version
 	gloasConfig := &clparams.BeaconChainConfig{

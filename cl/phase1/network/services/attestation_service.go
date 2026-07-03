@@ -48,7 +48,12 @@ var (
 )
 
 func validationEpochRange(headState *state.CachingBeaconState, highestSeenSlot, slotsPerEpoch uint64) (uint64, uint64) {
-	return state.PreviousEpoch(headState), max(state.Epoch(headState), highestSeenSlot/slotsPerEpoch)
+	headEpoch := state.Epoch(headState)
+	currEpoch := headEpoch
+	if highestSeenSlot/slotsPerEpoch > headEpoch {
+		currEpoch = headEpoch + 1
+	}
+	return state.PreviousEpoch(headState), currEpoch
 }
 
 type attestationService struct {
