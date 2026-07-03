@@ -20,6 +20,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"math/bits"
 	"runtime"
 	"sync"
@@ -101,10 +102,10 @@ type StreamingCommitter struct {
 	rootPresent bool
 	rootValid   bool
 
-	trace bool
+	traceW io.Writer
 }
 
-func (sc *StreamingCommitter) SetTrace(b bool) { sc.trace = b }
+func (sc *StreamingCommitter) SetTraceWriter(w io.Writer) { sc.traceW = NewSyncWriter(w) }
 
 // NewStreamingCommitter constructs a StreamingCommitter ready to accept touches.
 func NewStreamingCommitter(ctxFactory TrieContextFactory, accountKeyLen int16, cfg TrieConfig) *StreamingCommitter {
@@ -325,7 +326,7 @@ func (sc *StreamingCommitter) newBaseTrie() (*HexPatriciaHashed, func()) {
 	base := NewHexPatriciaHashed(sc.accountKeyLen, nil, sc.cfg)
 	bctx, bclean := sc.trieCtxFactory()
 	base.ResetContext(bctx)
-	base.SetTrace(sc.trace)
+	base.SetTraceWriter(sc.traceW)
 	base.branchEncoder.setDeferUpdates(true)
 	base.SetLeaveDeferredForCaller(true)
 	return base, func() {
@@ -522,7 +523,11 @@ func (sc *StreamingCommitter) markQueued(s *splitState, nib byte) {
 func (sc *StreamingCommitter) foldKeys(nib byte, keys []touchedKey) (cell, []*DeferredBranchUpdate, bool, error) {
 	w := sc.workerPool.Get().(*HexPatriciaHashed)
 	w.mountTo(sc.base, int(nib))
-	w.SetTrace(sc.trace)
+	if sc.traceW != nil {
+		w.SetTraceWriter(tracePrefix(sc.traceW, fmt.Sprintf("[fold %x] ", nib)))
+	} else {
+		w.SetTraceWriter(nil)
+	}
 	rctx, cleanup := sc.trieCtxFactory()
 	if cleanup != nil {
 		defer cleanup()
@@ -697,7 +702,11 @@ func (sc *StreamingCommitter) foldSplit(ctx context.Context, base *HexPatriciaHa
 	ni := s.prefix[0]
 	w := sc.workerPool.Get().(*HexPatriciaHashed)
 	w.mountTo(base, int(ni))
-	w.SetTrace(sc.trace)
+	if sc.traceW != nil {
+		w.SetTraceWriter(tracePrefix(sc.traceW, fmt.Sprintf("[split %x] ", ni)))
+	} else {
+		w.SetTraceWriter(nil)
+	}
 	wctx, cleanup := sc.trieCtxFactory()
 	if cleanup != nil {
 		defer cleanup()
@@ -759,7 +768,7 @@ func (sc *StreamingCommitter) DeepLocalFolds() uint64 { return sc.deepLocalFolds
 // newStorageWorker sources a concurrent-storage-fold worker; disjoint subtree
 // prefixes keep a mid-fold self-flush from racing another fold's writes.
 func (sc *StreamingCommitter) newStorageWorker() (*HexPatriciaHashed, func()) {
-	return newDeferredStorageWorker(&sc.workerPool, sc.trieCtxFactory, sc.trace)
+	return newDeferredStorageWorker(&sc.workerPool, sc.trieCtxFactory, sc.traceW)
 }
 
 // dropSplitDeferred returns every split's staged deferred branch updates to the pool.
