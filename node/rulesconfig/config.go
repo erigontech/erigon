@@ -40,58 +40,80 @@ import (
 	"github.com/erigontech/erigon/polygon/heimdall"
 )
 
+// L2EngineFactory builds an L2 stack's rules engine for a chain configured
+// with that stack's L2Config. Registered by the L2 package at init time and
+// consulted by CreateRulesEngine before the built-in type switch.
+type L2EngineFactory func(ctx context.Context, chainConfig *chain.Config, logger log.Logger) rules.Engine
+
+var l2EngineFactories = map[string]L2EngineFactory{}
+
+// RegisterL2Engine registers an L2 stack's rules-engine factory under its
+// L2Config.Name(). Panics if name is already registered.
+func RegisterL2Engine(name string, factory L2EngineFactory) {
+	if _, exists := l2EngineFactories[name]; exists {
+		panic("L2 rules engine already registered: " + name)
+	}
+	l2EngineFactories[name] = factory
+}
+
 func CreateRulesEngine(ctx context.Context, nodeConfig *nodecfg.Config, chainConfig *chain.Config, config any, noVerify bool,
 	withoutHeimdall bool, blockReader services.FullBlockReader, readonly bool,
 	logger log.Logger, polygonBridge *bridge.Service, heimdallService *heimdall.Service,
 ) rules.Engine {
 	var eng rules.Engine
 
-	switch consensusCfg := config.(type) {
-	case *ethashcfg.Config:
-		switch consensusCfg.PowMode {
-		case ethashcfg.ModeFake:
-			logger.Warn("Ethash used in fake mode")
-			eng = ethash.NewFaker()
-		case ethashcfg.ModeTest:
-			logger.Warn("Ethash used in test mode")
-			eng = ethash.NewTester(noVerify)
-		case ethashcfg.ModeShared:
-			logger.Warn("Ethash used in shared mode")
-			eng = ethash.NewShared()
-		default:
-			eng = ethash.New(ethashcfg.Config{
-				CachesInMem:      consensusCfg.CachesInMem,
-				CachesLockMmap:   consensusCfg.CachesLockMmap,
-				DatasetDir:       consensusCfg.DatasetDir,
-				DatasetsInMem:    consensusCfg.DatasetsInMem,
-				DatasetsOnDisk:   consensusCfg.DatasetsOnDisk,
-				DatasetsLockMmap: consensusCfg.DatasetsLockMmap,
-			}, noVerify)
+	if chainConfig.L2 != nil {
+		if factory, ok := l2EngineFactories[chainConfig.L2.Name()]; ok {
+			eng = factory(ctx, chainConfig, logger)
 		}
-	case *chain.AuRaConfig:
-		if chainConfig.Aura != nil {
-			var err error
-			var db kv.RwDB
-
-			db, err = node.OpenDatabase(ctx, nodeConfig, dbcfg.ConsensusDB, "aura", readonly, logger)
-
-			if err != nil {
-				panic(err)
+	} else {
+		switch consensusCfg := config.(type) {
+		case *ethashcfg.Config:
+			switch consensusCfg.PowMode {
+			case ethashcfg.ModeFake:
+				logger.Warn("Ethash used in fake mode")
+				eng = ethash.NewFaker()
+			case ethashcfg.ModeTest:
+				logger.Warn("Ethash used in test mode")
+				eng = ethash.NewTester(noVerify)
+			case ethashcfg.ModeShared:
+				logger.Warn("Ethash used in shared mode")
+				eng = ethash.NewShared()
+			default:
+				eng = ethash.New(ethashcfg.Config{
+					CachesInMem:      consensusCfg.CachesInMem,
+					CachesLockMmap:   consensusCfg.CachesLockMmap,
+					DatasetDir:       consensusCfg.DatasetDir,
+					DatasetsInMem:    consensusCfg.DatasetsInMem,
+					DatasetsOnDisk:   consensusCfg.DatasetsOnDisk,
+					DatasetsLockMmap: consensusCfg.DatasetsLockMmap,
+				}, noVerify)
 			}
+		case *chain.AuRaConfig:
+			if chainConfig.Aura != nil {
+				var err error
+				var db kv.RwDB
 
-			eng, err = aura.NewAuRa(chainConfig.Aura, db)
-			if err != nil {
-				panic(err)
+				db, err = node.OpenDatabase(ctx, nodeConfig, dbcfg.ConsensusDB, "aura", readonly, logger)
+
+				if err != nil {
+					panic(err)
+				}
+
+				eng, err = aura.NewAuRa(chainConfig.Aura, db)
+				if err != nil {
+					panic(err)
+				}
 			}
-		}
-	case *borcfg.BorConfig:
-		// If Matic bor consensus is requested, set it up
-		// In order to pass the ethereum transaction tests, we need to set the burn contract which is in the bor config
-		// Then, bor != nil will also be enabled for ethash. Only enable Bor for real if there is a validator contract present.
-		if chainConfig.Bor != nil && consensusCfg.ValidatorContract != "" {
-			stateReceiver := bor.NewStateReceiver(consensusCfg.StateReceiverContractAddress())
-			spanner := bor.NewChainSpanner(borabi.ValidatorSetContractABI(), chainConfig, withoutHeimdall, logger)
-			eng = bor.New(chainConfig, blockReader, spanner, stateReceiver, logger, polygonBridge, heimdallService)
+		case *borcfg.BorConfig:
+			// If Matic bor consensus is requested, set it up
+			// In order to pass the ethereum transaction tests, we need to set the burn contract which is in the bor config
+			// Then, bor != nil will also be enabled for ethash. Only enable Bor for real if there is a validator contract present.
+			if chainConfig.Bor != nil && consensusCfg.ValidatorContract != "" {
+				stateReceiver := bor.NewStateReceiver(consensusCfg.StateReceiverContractAddress())
+				spanner := bor.NewChainSpanner(borabi.ValidatorSetContractABI(), chainConfig, withoutHeimdall, logger)
+				eng = bor.New(chainConfig, blockReader, spanner, stateReceiver, logger, polygonBridge, heimdallService)
+			}
 		}
 	}
 
@@ -113,6 +135,8 @@ func CreateRulesEngineBareBones(ctx context.Context, chainConfig *chain.Config, 
 		consensusConfig = chainConfig.Aura
 	} else if chainConfig.Bor != nil {
 		consensusConfig = chainConfig.Bor
+	} else if chainConfig.L2 != nil {
+		consensusConfig = chainConfig.L2
 	} else {
 		var ethashCfg ethashcfg.Config
 		ethashCfg.PowMode = ethashcfg.ModeFake
