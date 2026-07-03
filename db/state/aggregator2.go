@@ -10,6 +10,8 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/c2h5oh/datasize"
+
 	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/config3"
@@ -30,11 +32,12 @@ type AggOpts struct { //nolint:gocritic
 
 	referencesInCommitmentBranches *bool // nil = leave global schema default untouched
 
-	genSaltIfNeed      bool
-	sanityOldNaming    bool // prevent start directory with old file names
-	disableFsync       bool // for tests speed
-	disableHistory     bool // for temp/inmem aggregator instances
-	disableBranchCache bool // for one-shot aggregators with no cross-block reuse (e.g. genesis)
+	genSaltIfNeed         bool
+	sanityOldNaming       bool              // prevent start directory with old file names
+	disableFsync          bool              // for tests speed
+	disableHistory        bool              // for temp/inmem aggregator instances
+	disableBranchCache    bool              // for one-shot aggregators with no cross-block reuse (e.g. genesis)
+	branchCacheTailBudget datasize.ByteSize // 0 = production default; smaller caps the tail footprint for many-instance test aggregators
 }
 
 func New(dirs datadir.Dirs) AggOpts { //nolint:gocritic
@@ -48,8 +51,15 @@ func New(dirs datadir.Dirs) AggOpts { //nolint:gocritic
 	}
 }
 
+// TestBranchCacheTailBudget caps the BranchCache LRU tail for test aggregators.
+// Tests create many short-lived aggregators, so the production-sized tail would
+// dominate memory; a small budget keeps the cache (and its static resident
+// trunk) fully functional while the tail stays cheap — test workloads don't
+// rely on tail retention.
+const TestBranchCacheTailBudget = 256 * datasize.KB
+
 func NewTest(dirs datadir.Dirs) AggOpts { //nolint:gocritic
-	return New(dirs).DisableFsync().GenSaltIfNeed(true).ReorgBlockDepth(0).StepSize(config3.DefaultStepSize).StepsInFrozenFile(config3.DefaultStepsInFrozenFile)
+	return New(dirs).DisableFsync().GenSaltIfNeed(true).ReorgBlockDepth(0).StepSize(config3.DefaultStepSize).StepsInFrozenFile(config3.DefaultStepsInFrozenFile).BranchCacheTailBudget(TestBranchCacheTailBudget)
 }
 
 func (opts AggOpts) Open(ctx context.Context, db kv.RoDB) (*Aggregator, error) { //nolint:gocritic
@@ -76,6 +86,7 @@ func (opts AggOpts) Open(ctx context.Context, db kv.RoDB) (*Aggregator, error) {
 
 	a.disableHistory = opts.disableHistory
 	a.branchCacheDisabled = opts.disableBranchCache
+	a.branchCacheTailBudget = opts.branchCacheTailBudget
 	a.disableFsync = opts.disableFsync
 
 	a.savedSalt = salt
@@ -125,6 +136,10 @@ func (opts AggOpts) DisableFsync() AggOpts        { opts.disableFsync = true; re
 func (opts AggOpts) DisableHistory() AggOpts      { opts.disableHistory = true; return opts } //nolint:gocritic
 func (opts AggOpts) DisableBranchCache() AggOpts { //nolint:gocritic
 	opts.disableBranchCache = true
+	return opts
+}
+func (opts AggOpts) BranchCacheTailBudget(b datasize.ByteSize) AggOpts { //nolint:gocritic
+	opts.branchCacheTailBudget = b
 	return opts
 }
 func (opts AggOpts) SanityOldNaming() AggOpts { //nolint:gocritic

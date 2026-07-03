@@ -33,6 +33,8 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/c2h5oh/datasize"
+
 	"github.com/erigontech/erigon/db/kv/prune"
 
 	"golang.org/x/sync/errgroup"
@@ -88,9 +90,10 @@ type Aggregator struct {
 	oldestVisible     *aggregatorVisible
 	snapshotBuildSema *semaphore.Weighted
 
-	disableHistory      bool
-	branchCacheDisabled bool
-	workers             workersCfg
+	disableHistory        bool
+	branchCacheDisabled   bool
+	branchCacheTailBudget datasize.ByteSize
+	workers               workersCfg
 
 	// To keep DB small - need move data to small files ASAP.
 	// It means goroutine which creating small files - can't be locked by merge or indexing.
@@ -417,7 +420,11 @@ func (a *Aggregator) ConfigureDomains() error {
 	// opt out (e.g. one-shot genesis processing has no cross-block reuse).
 	if dbg.UseStateCache && !a.branchCacheDisabled {
 		if cd := a.d[kv.CommitmentDomain]; cd != nil && cd.branchCache == nil {
-			cd.branchCache = commitment.NewBranchCache(commitment.DefaultBranchCacheTailCapacity)
+			tailCap := commitment.DefaultBranchCacheTailCapacity
+			if a.branchCacheTailBudget > 0 {
+				tailCap = commitment.TailCapacityForBudget(a.branchCacheTailBudget)
+			}
+			cd.branchCache = commitment.NewBranchCache(tailCap)
 		}
 	}
 

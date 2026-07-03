@@ -22,6 +22,7 @@ import (
 	"os"
 	"sync/atomic"
 
+	"github.com/c2h5oh/datasize"
 	"github.com/elastic/go-freelru"
 
 	"github.com/erigontech/erigon/common/log/v3"
@@ -205,6 +206,23 @@ func (t *trunk) slot(path []byte) *atomic.Pointer[branchCacheEntry] {
 // explicit capacity is given. ~50k entries × ~500 bytes = ~25 MB
 // at typical mainnet branch sizes.
 const DefaultBranchCacheTailCapacity = 50000
+
+// avgBranchEntryBytes is the assumed resident size of one cached branch
+// (payload plus freelru/element overhead). Used to translate a byte budget
+// into a tail entry count.
+const avgBranchEntryBytes = 512
+
+// TailCapacityForBudget converts a byte budget into a tail entry count, flooring
+// at branchCacheTailShards so every shard keeps at least one slot. Lets callers
+// that create many caches (e.g. per-test aggregators) cap the tail's resident
+// footprint while keeping the static resident trunk fully functional.
+func TailCapacityForBudget(budget datasize.ByteSize) int {
+	n := int(uint64(budget) / avgBranchEntryBytes)
+	if n < branchCacheTailShards {
+		n = branchCacheTailShards
+	}
+	return n
+}
 
 // BranchCacheProvider exposes the long-lived BranchCache attached to the
 // commitment domain. Implemented by *db/state.AggregatorRoTx (via duck
