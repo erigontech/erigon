@@ -90,6 +90,36 @@ func TestDecompressSkip(t *testing.T) {
 	require.Equal(t, 16, int(offset))
 }
 
+func TestOpenSequentialView(t *testing.T) {
+	d := prepareLoremDict(t)
+	defer d.Close()
+
+	var want [][]byte
+	g := d.MakeGetter()
+	for g.HasNext() {
+		w, _ := g.Next(nil)
+		want = append(want, w)
+	}
+
+	readAll := func(separateReadahead bool) [][]byte {
+		v, err := d.OpenSequentialView(separateReadahead)
+		require.NoError(t, err)
+		defer v.Close()
+		var got [][]byte
+		vg := v.MakeGetter()
+		for vg.HasNext() {
+			w, _ := vg.Next(nil)
+			got = append(got, w)
+		}
+		return got
+	}
+
+	require.Equal(t, want, readAll(true), "separate MADV_SEQUENTIAL mmap view")
+	require.Equal(t, want, readAll(false), "shared mmap view (MADV_NORMAL)")
+	// the shared view's Close must be a no-op on the decompressor's mmap: a subsequent read still works
+	require.Equal(t, want, readAll(true))
+}
+
 func TestDecompressMatchOK(t *testing.T) {
 	loremStrings := append(strings.Split(rmNewLine(lorem), " "), "") // including emtpy string - to trigger corner cases
 	d := prepareLoremDict(t)

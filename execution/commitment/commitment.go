@@ -22,7 +22,9 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
+	"io"
 	"math/bits"
+	"reflect"
 	"slices"
 	"strings"
 	"sync"
@@ -92,12 +94,8 @@ type Trie interface {
 	// RootHash produces root hash of the trie
 	RootHash() (hash []byte, err error)
 
-	// Makes trie more verbose
-	SetTrace(bool)
-	// Trace domain writes only (no filding etc)
-	SetTraceDomain(bool)
-	SetCapture(capture []string)
-	GetCapture(truncate bool) []string
+	// SetTraceWriter sets the trace writer; nil disables tracing
+	SetTraceWriter(io.Writer)
 	EnableCsvMetrics(filePathPrefix string)
 
 	// Variant returns commitment trie variant
@@ -792,6 +790,25 @@ func (branchData BranchData) String() string {
 	return sb.String()
 }
 
+var errShortenedKeyFound = errors.New("shortened key found")
+
+// HasShortenedKeys reports whether the branch carries any shortened (referenced) key — a key
+// field whose length is not length.Addr (account) / length.Addr+length.Hash (storage), i.e. a
+// varint file offset. A malformed branch reports true: treat as referenced, never under-report.
+func (branchData BranchData) HasShortenedKeys() bool {
+	_, err := branchData.ReplacePlainKeys(nil, func(key []byte, isStorage bool) ([]byte, error) {
+		if isStorage {
+			if len(key) != length.Addr+length.Hash {
+				return nil, errShortenedKeyFound
+			}
+		} else if len(key) != length.Addr {
+			return nil, errShortenedKeyFound
+		}
+		return nil, nil
+	})
+	return err != nil
+}
+
 // if fn returns nil, the original key will be kept from branchData.
 // Uses span-based lazy copy: unchanged regions of branchData are copied in bulk
 // only when a key actually changes. When no keys change, returns branchData as-is
@@ -1452,6 +1469,12 @@ type Updates struct {
 	arenas   [arenaRingSize][]byte
 	curArena int
 	gen      uint64
+
+	// addrCache reuses the nibblized keccak(addr) prefix across a run of storage
+	// keys sharing one address (whale storage). Enabled only when hasher is the
+	// nibblizing hasher whose key layout the reuse assumes (addrCacheReuse).
+	addrCache      addrHashCache
+	addrCacheReuse bool
 }
 
 // arenaRingSize is how many byte arenas HashSort cycles; raising it only adds memory headroom, never affects correctness.
@@ -1499,6 +1522,22 @@ type keyHasher func(key []byte) []byte
 
 func keyHasherNoop(key []byte) []byte { return key }
 
+// hasherReusesAddrPrefix reports whether h is the nibblizing hasher whose key
+// layout keyToHexNibbleHashCached assumes; only then may the address-prefix
+// cache be used in place of h.
+func hasherReusesAddrPrefix(h keyHasher) bool {
+	return reflect.ValueOf(h).Pointer() == reflect.ValueOf(KeyToHexNibbleHash).Pointer()
+}
+
+// hashKey nibblizes key, reusing the cached address prefix for a run of storage
+// keys sharing one address when the configured hasher permits it.
+func (t *Updates) hashKey(key []byte) []byte {
+	if t.addrCacheReuse {
+		return keyToHexNibbleHashCached(key, &t.addrCache)
+	}
+	return t.hasher(key)
+}
+
 // NewEmpty creates a fresh Updates matching the receiver. The streaming sink must
 // carry over, or a buffer rotated mid-stream silently computes a stale root.
 func (t *Updates) NewEmpty() *Updates {
@@ -1510,9 +1549,10 @@ func (t *Updates) NewEmpty() *Updates {
 
 func NewUpdates(m Mode, tmpdir string, hasher keyHasher) *Updates {
 	t := &Updates{
-		hasher: hasher,
-		tmpdir: tmpdir,
-		mode:   m,
+		hasher:         hasher,
+		tmpdir:         tmpdir,
+		mode:           m,
+		addrCacheReuse: hasherReusesAddrPrefix(hasher),
 	}
 	switch t.mode {
 	case ModeDirect:
@@ -1606,7 +1646,7 @@ func (t *Updates) TouchPlainKey(key string, val []byte, fn func(c *KeyUpdate, va
 		} else {
 			pivot := &KeyUpdate{
 				plainKey:  key,
-				hashedKey: t.hasher(common.ToBytesZeroCopy(key)),
+				hashedKey: t.hashKey(common.ToBytesZeroCopy(key)),
 				update:    new(Update),
 			}
 			fn(pivot, val)
@@ -1616,7 +1656,7 @@ func (t *Updates) TouchPlainKey(key string, val []byte, fn func(c *KeyUpdate, va
 	case ModeDirect:
 		if _, ok := t.keys[key]; !ok {
 			keyBytes := common.ToBytesZeroCopy(key)
-			hashedKey := t.hasher(keyBytes)
+			hashedKey := t.hashKey(keyBytes)
 
 			err := t.etl.Collect(hashedKey, keyBytes)
 			if err != nil {
@@ -1627,7 +1667,7 @@ func (t *Updates) TouchPlainKey(key string, val []byte, fn func(c *KeyUpdate, va
 	case ModeParallel:
 		if _, ok := t.keys[key]; !ok {
 			keyBytes := common.ToBytesZeroCopy(key)
-			hashedKey := t.hasher(keyBytes)
+			hashedKey := t.hashKey(keyBytes)
 			ik := t.parallel.internKey(keyBytes)
 			t.parallel.Insert(hashedKey, ik, nil)
 			if t.streaming && t.streamer != nil {
@@ -1678,7 +1718,7 @@ func (t *Updates) TouchPlainKeyDirect(key string, update *Update) {
 		} else {
 			pivot := &KeyUpdate{
 				plainKey:  key,
-				hashedKey: t.hasher(common.ToBytesZeroCopy(key)),
+				hashedKey: t.hashKey(common.ToBytesZeroCopy(key)),
 				update:    new(Update),
 			}
 			*pivot.update = *update
@@ -1688,7 +1728,7 @@ func (t *Updates) TouchPlainKeyDirect(key string, update *Update) {
 	case ModeDirect:
 		if _, ok := t.keys[key]; !ok {
 			keyBytes := common.ToBytesZeroCopy(key)
-			hashedKey := t.hasher(keyBytes)
+			hashedKey := t.hashKey(keyBytes)
 
 			err := t.etl.Collect(hashedKey, keyBytes)
 			if err != nil {
@@ -1698,7 +1738,7 @@ func (t *Updates) TouchPlainKeyDirect(key string, update *Update) {
 		}
 	case ModeParallel:
 		keyBytes := common.ToBytesZeroCopy(key)
-		hashedKey := t.hasher(keyBytes)
+		hashedKey := t.hashKey(keyBytes)
 		// Carry the value so the fold uses it directly instead of re-reading ctx, which lags cc.state.
 		u := new(Update)
 		*u = *update
@@ -2025,6 +2065,7 @@ func (t *Updates) Reset() {
 	}
 	t.curArena = 0
 	t.gen = 0
+	t.addrCache.reset()
 }
 
 type KeyUpdate struct {
