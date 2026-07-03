@@ -394,6 +394,7 @@ func (se *serialExecutor) executeBlock(ctx context.Context, tasks []exec.Task, i
 				// prior receipts so Finalize receives the full receipt set for requests
 				// hash computation (deposit extraction from logs). See #20452.
 				finalizeReceipts := blockReceipts
+				priorComplete := startTxIndex == 0
 				if startTxIndex > 0 && len(txTask.Txs) > 0 {
 					firstTask := tasks[0].(*exec.TxTask)
 					blockStartTxNum := firstTask.TxNum - uint64(firstTask.TxIndex)
@@ -410,6 +411,8 @@ func (se *serialExecutor) executeBlock(ctx context.Context, tasks []exec.Task, i
 							"block", txTask.BlockNumber(), "startTxIndex", startTxIndex, "err", priorErr)
 					} else {
 						finalizeReceipts = append(priorReceipts, blockReceipts...)
+						receipts.DeriveFields(finalizeReceipts, txTask.BlockHash())
+						priorComplete = true
 					}
 				}
 
@@ -421,8 +424,8 @@ func (se *serialExecutor) executeBlock(ctx context.Context, tasks []exec.Task, i
 					return fmt.Errorf("%w, txnIdx=%d, %w", rules.ErrInvalidBlock, txTask.TxIndex, err)
 				}
 
-				if startTxIndex == 0 && !isInitialCycle {
-					se.cfg.notifications.RecentReceipts.Add(blockReceipts, txTask.Txs, txTask.Header)
+				if priorComplete && !isInitialCycle {
+					se.cfg.notifications.RecentReceipts.Add(finalizeReceipts, txTask.Txs, txTask.Header)
 				}
 				checkBloom := !se.cfg.vmConfig.StatelessExec && !se.cfg.vmConfig.NoReceipts
 				checkReceipts := checkBloom && se.cfg.chainConfig.IsByzantium(txTask.BlockNumber())
@@ -454,10 +457,13 @@ func (se *serialExecutor) executeBlock(ctx context.Context, tasks []exec.Task, i
 					}
 				} else if txTask.TxIndex > 0 {
 					// reconstruct receipt from previous receipt values
-					cumGasUsed, _, logIndexAfterTx, err := rawtemporaldb.ReceiptAsOf(se.applyTx, txTask.TxNum)
+					cumGasUsed, cumBlobGasUsed, logIndexAfterTx, err := rawtemporaldb.ReceiptAsOf(se.applyTx, txTask.TxNum)
 					if err != nil {
 						return err
 					}
+					// This tx's own blob gas was accumulated above; fold in the
+					// pre-resume cumulative so ApplyTxIndexes persists correct values.
+					se.blobGasUsed += cumBlobGasUsed
 					receipt, err = result.CreateReceipt(txTask.TxIndex, cumGasUsed+result.ExecutionResult.ReceiptGasUsed, logIndexAfterTx)
 					if err != nil {
 						return err

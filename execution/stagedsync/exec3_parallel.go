@@ -31,6 +31,7 @@ import (
 	"github.com/erigontech/erigon/execution/exec"
 	"github.com/erigontech/erigon/execution/protocol"
 	"github.com/erigontech/erigon/execution/protocol/rules"
+	"github.com/erigontech/erigon/execution/receipts"
 	"github.com/erigontech/erigon/execution/state"
 	"github.com/erigontech/erigon/execution/tests/chaos_monkey"
 	"github.com/erigontech/erigon/execution/tracing"
@@ -576,7 +577,7 @@ func (pe *parallelExecutor) execImpl(ctx context.Context, execStage *StageState,
 
 					}
 
-					if applyResult.BlockNum > 0 && !applyResult.isPartial && !execStage.CurrentSyncCycle.IsInitialCycle && applyResult.Header != nil {
+					if applyResult.BlockNum > 0 && applyResult.receiptsComplete && !execStage.CurrentSyncCycle.IsInitialCycle && applyResult.Header != nil {
 						pe.cfg.notifications.RecentReceipts.Add(applyResult.Receipts, applyResult.Txs, applyResult.Header)
 					}
 
@@ -1499,27 +1500,28 @@ func (pe *parallelExecutor) wait(ctx context.Context) error {
 type applyResult any
 
 type blockResult struct {
-	BlockNum        uint64
-	BlockTime       uint64
-	BlockHash       common.Hash
-	ParentHash      common.Hash
-	StateRoot       common.Hash
-	Err             error
-	BlockGasUsed    uint64
-	BlobGasUsed     uint64
-	lastTxNum       uint64
-	complete        bool
-	isPartial       bool
-	ApplyCount      int
-	TxIO            *state.VersionedIO
-	Receipts        types.Receipts
-	Stats           map[int]ExecutionStat
-	Deps            *state.DAG
-	AllDeps         map[int]map[int]bool
-	Exhausted       *ErrLoopExhausted
-	Header          *types.Header      // for accumulator.StartChange in apply loop
-	Txs             types.Transactions // for accumulator.StartChange in apply loop
-	blockStateCache *state.BlockStateCache
+	BlockNum         uint64
+	BlockTime        uint64
+	BlockHash        common.Hash
+	ParentHash       common.Hash
+	StateRoot        common.Hash
+	Err              error
+	BlockGasUsed     uint64
+	BlobGasUsed      uint64
+	lastTxNum        uint64
+	complete         bool
+	isPartial        bool
+	receiptsComplete bool
+	ApplyCount       int
+	TxIO             *state.VersionedIO
+	Receipts         types.Receipts
+	Stats            map[int]ExecutionStat
+	Deps             *state.DAG
+	AllDeps          map[int]map[int]bool
+	Exhausted        *ErrLoopExhausted
+	Header           *types.Header      // for accumulator.StartChange in apply loop
+	Txs              types.Transactions // for accumulator.StartChange in apply loop
+	blockStateCache  *state.BlockStateCache
 }
 
 type txResult struct {
@@ -1527,7 +1529,6 @@ type txResult struct {
 	blockHash             common.Hash
 	txNum                 uint64
 	blockGasUsed          int64
-	blobGasUsed           uint64
 	cumulativeBlobGasUsed uint64
 	receipt               *types.Receipt
 	logs                  []*types.Log
@@ -2500,12 +2501,21 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 
 				var cumulativeGasUsed uint64
 				var firstLogIndex uint32
-				if txVersion.TxIndex > 0 && !txTask.IsBlockEnd() {
-					if tx > 0 && be.tasks[tx-1].Task.Version().TxIndex >= 0 {
-						if prevRes := be.finalizedResults[tx-1]; prevRes != nil && prevRes.Receipt != nil {
-							cumulativeGasUsed = prevRes.Receipt.CumulativeGasUsed
-							firstLogIndex = prevRes.Receipt.FirstLogIndexWithinBlock + uint32(len(prevRes.Receipt.Logs))
+				// Receipt offsets only exist for real chain txs — finalize()
+				// skips receipt creation for other task types (tests), whose
+				// results legitimately carry no receipt.
+				_, isChainTx := txTask.(*exec.TxTask)
+				if isChainTx && txVersion.TxIndex > 0 && !txTask.IsBlockEnd() {
+					if tx > 0 {
+						// In-order finalization guarantees the previous regular tx
+						// already has its receipt; a miss means corrupted offsets
+						// would be persisted, so fail loudly instead.
+						prevRes := be.finalizedResults[tx-1]
+						if prevRes == nil || prevRes.Receipt == nil {
+							return nil, fmt.Errorf("parallel exec: missing finalized receipt for tx %d in block %d", tx-1, be.blockNum)
 						}
+						cumulativeGasUsed = prevRes.Receipt.CumulativeGasUsed
+						firstLogIndex = prevRes.Receipt.FirstLogIndexWithinBlock + uint32(len(prevRes.Receipt.Logs))
 					} else {
 						cumGasUsed, cumBlobGasUsed, logIndexAfterTx, err := rawtemporaldb.ReceiptAsOf(applyTx, txVersion.TxNum)
 						if err != nil {
@@ -2707,10 +2717,6 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 				cumulativeBlobGasUsed: result.cumulativeBlobGasUsed,
 			}
 
-			if tx := result.Tx(); tx != nil {
-				applyResult.blobGasUsed = tx.GetBlobGas()
-			}
-
 			if result.Receipt != nil {
 				// EIP-8037 / EIP-7778: block-level gas is max(cum regular,
 				// cum state) — NOT sum of per-tx receipt gas. Receipt gas
@@ -2780,10 +2786,10 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 
 		txTask := be.tasks[len(be.tasks)-1].Task
 
-		var receipts types.Receipts
+		var blockReceipts types.Receipts
 		for _, txResult := range be.results {
 			if receipt := txResult.Receipt; receipt != nil {
-				receipts = append(receipts, receipt)
+				blockReceipts = append(blockReceipts, receipt)
 			}
 		}
 
@@ -2792,6 +2798,36 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 		if tt, ok := txTask.(*exec.TxTask); ok {
 			header = tt.Header
 			txs = tt.Txs
+		}
+
+		// Resumed (partial) blocks: re-derive receipts of the prefix txs that ran
+		// in an earlier batch — post-Prague Finalize extracts EIP-6110 deposit
+		// requests from all receipt logs, and the notification cache must not see
+		// a tail-only set. Mirrors the serial executor.
+		receiptsComplete := !isPartial
+		if isPartial && be.blockNum > 0 && header != nil {
+			startTxIndex := be.tasks[0].Version().TxIndex
+			if startTxIndex > 0 && len(txs) > 0 {
+				blockStartTxNum := be.tasks[0].Version().TxNum - uint64(startTxIndex)
+				priorIbs := state.New(state.NewHistoryReaderV3(applyTx, blockStartTxNum))
+				priorGp := protocol.NewGasPool(header.GasLimit, pe.cfg.chainConfig.GetMaxBlobGasPerBlock(header.Time))
+				getHeader := func(hash common.Hash, number uint64) (*types.Header, error) {
+					return pe.cfg.blockReader.Header(ctx, applyTx, hash, number)
+				}
+				priorReceipts, priorErr := receipts.DerivePriorReceipts(ctx, pe.cfg.chainConfig, pe.cfg.engine,
+					header, txs, startTxIndex, blockStartTxNum, applyTx, priorIbs, priorGp, getHeader)
+				priorIbs.Release(true)
+				if priorErr != nil {
+					pe.logger.Warn(fmt.Sprintf("[%s] failed to reconstruct prior receipts for partial block", pe.logPrefix),
+						"block", be.blockNum, "startTxIndex", startTxIndex, "err", priorErr)
+				} else {
+					blockReceipts = append(priorReceipts, blockReceipts...)
+					receipts.DeriveFields(blockReceipts, be.blockHash)
+					receiptsComplete = true
+				}
+			} else if startTxIndex == 0 {
+				receiptsComplete = true
+			}
 		}
 
 		// Block finalize: run engine.Finalize + MakeWriteSet on the producer
@@ -2851,7 +2887,7 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 
 				chainReader := consensuschain.NewReader(pe.cfg.chainConfig, applyTx, pe.cfg.blockReader, pe.logger)
 				if _, err := pe.cfg.engine.Finalize(
-					pe.cfg.chainConfig, types.CopyHeader(tt.Header), ibs, tt.Uncles, receipts,
+					pe.cfg.chainConfig, types.CopyHeader(tt.Header), ibs, tt.Uncles, blockReceipts,
 					tt.Withdrawals, chainReader, syscall, false, pe.logger); err != nil {
 					return be.invalidBlockResult(fmt.Errorf("%w: can't finalize block %d: %v", rules.ErrInvalidBlock, be.blockNum, err)), nil
 				}
@@ -2910,26 +2946,27 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 		}
 
 		be.result = &blockResult{
-			BlockNum:        be.blockNum,
-			BlockTime:       txTask.BlockTime(),
-			BlockHash:       txTask.BlockHash(),
-			ParentHash:      txTask.ParentHash(),
-			StateRoot:       txTask.BlockRoot(),
-			BlockGasUsed:    be.blockGasUsed,
-			BlobGasUsed:     be.blobGasUsed,
-			lastTxNum:       txTask.Version().TxNum,
-			complete:        true,
-			isPartial:       isPartial,
-			ApplyCount:      be.applyCount,
-			TxIO:            be.blockIO,
-			Receipts:        receipts,
-			Stats:           be.stats,
-			Deps:            &deps,
-			AllDeps:         allDeps,
-			Exhausted:       be.exhausted,
-			Header:          header,
-			Txs:             txs,
-			blockStateCache: be.blockStateCache,
+			BlockNum:         be.blockNum,
+			BlockTime:        txTask.BlockTime(),
+			BlockHash:        txTask.BlockHash(),
+			ParentHash:       txTask.ParentHash(),
+			StateRoot:        txTask.BlockRoot(),
+			BlockGasUsed:     be.blockGasUsed,
+			BlobGasUsed:      be.blobGasUsed,
+			lastTxNum:        txTask.Version().TxNum,
+			complete:         true,
+			isPartial:        isPartial,
+			ApplyCount:       be.applyCount,
+			TxIO:             be.blockIO,
+			Receipts:         blockReceipts,
+			receiptsComplete: receiptsComplete,
+			Stats:            be.stats,
+			Deps:             &deps,
+			AllDeps:          allDeps,
+			Exhausted:        be.exhausted,
+			Header:           header,
+			Txs:              txs,
+			blockStateCache:  be.blockStateCache,
 		}
 		return be.result, nil
 	}
