@@ -1060,6 +1060,23 @@ type InvertedFiles struct {
 	existence *existence.Filter
 }
 
+// FilePaths returns the on-disk paths of every underlying file in
+// this InvertedFiles, made relative to basePath (paths returned as-is
+// when a Rel conversion fails). Skips nil components.
+func (sf InvertedFiles) FilePaths(basePath string) []string {
+	var out []string
+	if sf.decomp != nil {
+		out = append(out, relPath(sf.decomp.FilePath(), basePath))
+	}
+	if sf.index != nil {
+		out = append(out, relPath(sf.index.FilePath(), basePath))
+	}
+	if sf.existence != nil {
+		out = append(out, relPath(sf.existence.FilePath, basePath))
+	}
+	return out
+}
+
 func (sf InvertedFiles) CleanupOnError() {
 	if sf.decomp != nil {
 		sf.decomp.Close()

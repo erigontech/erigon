@@ -350,6 +350,54 @@ func (m *MissedAccessorIIFiles) IsEmpty() bool {
 	return m.files.IsEmpty()
 }
 
+// FilePaths returns the on-disk paths of every parent file whose
+// accessors are missing (across every accessor type), made relative
+// to basePath. Feeds BuildMissedAccessors's NotifyOnFilesChange
+// contract: post-build the callback receives the paths so the
+// lifecycle driver can re-inspect them and advance their state now
+// that accessors exist.
+func (m *MissedAccessorAggFiles) FilePaths(basePath string) []string {
+	var out []string
+	if m == nil {
+		return out
+	}
+	for _, d := range m.domain {
+		if d == nil {
+			continue
+		}
+		for _, items := range d.files {
+			for _, it := range items {
+				out = append(out, it.FilePaths(basePath)...)
+			}
+		}
+		if d.history != nil {
+			for _, items := range d.history.files {
+				for _, it := range items {
+					out = append(out, it.FilePaths(basePath)...)
+				}
+			}
+			if d.history.ii != nil {
+				for _, items := range d.history.ii.files {
+					for _, it := range items {
+						out = append(out, it.FilePaths(basePath)...)
+					}
+				}
+			}
+		}
+	}
+	for _, ii := range m.ii {
+		if ii == nil {
+			continue
+		}
+		for _, items := range ii.files {
+			for _, it := range items {
+				out = append(out, it.FilePaths(basePath)...)
+			}
+		}
+	}
+	return out
+}
+
 func (at *AggregatorRoTx) DbgDomain(idx kv.Domain) *DomainRoTx         { return at.d[idx] }
 func (at *AggregatorRoTx) DbgII(idx kv.InvertedIdx) *InvertedIndexRoTx { return at.searchII(idx) }
 func (at *AggregatorRoTx) searchII(idx kv.InvertedIdx) *InvertedIndexRoTx {

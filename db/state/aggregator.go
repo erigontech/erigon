@@ -304,11 +304,22 @@ func (a *Aggregator) OnFilesChange(onChange, onDel kv.OnFilesChange) {
 }
 
 // NotifyOnFilesChange fires the registered onChange callback with the
-// given names. nil-safe when no callback has been registered.
+// given names. Panics if names is nil or empty — the notification
+// contract requires the CREATOR of the on-disk file(s) to hand the
+// paths to the callback so Inventory can register them synchronously.
+// A silent nil fire orphans files on disk (they never enter Inventory,
+// downstream consumers miss them). All in-tree callers now derive
+// names from the built/merged files (StaticFiles.FilePaths /
+// MergeResult.FilePaths); the panic guards against future silent
+// regressions. nil-safe only in the "no callback registered" sense.
 func (a *Aggregator) NotifyOnFilesChange(names []string) {
-	if a.onFilesChange != nil {
-		a.onFilesChange(names)
+	if a.onFilesChange == nil {
+		return
 	}
+	if len(names) == 0 {
+		panic("NotifyOnFilesChange: empty names — Inventory is authoritative, every notification must carry the paths of the files it announces")
+	}
+	a.onFilesChange(names)
 }
 
 // NotifyOnFilesDelete fires the registered onDelete callback. nil-safe.
@@ -888,7 +899,13 @@ func (a *Aggregator) BuildMissedAccessors(ctx context.Context, workers int) erro
 
 	missedFilesItems := rotx.FilesWithMissedAccessors()
 	if !missedFilesItems.IsEmpty() {
-		defer a.NotifyOnFilesChange(nil)
+		// Notify with the parent-file paths whose accessors we're
+		// about to (re)build. Post-build the lifecycle driver
+		// re-inspects them and advances their state now that
+		// accessors exist. Inventory is authoritative: silent nil
+		// fires here would leave the driver blind to the state
+		// transition. Deferred so it fires after OpenFolder below.
+		defer a.NotifyOnFilesChange(missedFilesItems.FilePaths(a.dirs.Snap))
 	}
 
 	startIndexingTime := time.Now()
@@ -937,6 +954,22 @@ type AggV3StaticFiles struct {
 	ivfs [kv.StandaloneIdxLen]InvertedFiles
 }
 
+// FilePaths returns the on-disk paths of every underlying file across
+// all domains and standalone inverted indices in this AggV3StaticFiles,
+// made relative to basePath. Feeds the NotifyOnFilesChange contract:
+// every file written to disk by a buildFiles step must land in the
+// notification so Inventory registers it synchronously.
+func (sf AggV3StaticFiles) FilePaths(basePath string) []string {
+	out := make([]string, 0, len(sf.d)+len(sf.ivfs))
+	for _, d := range sf.d {
+		out = append(out, d.FilePaths(basePath)...)
+	}
+	for _, ivf := range sf.ivfs {
+		out = append(out, ivf.FilePaths(basePath)...)
+	}
+	return out
+}
+
 // CleanupOnError - call it on collation fail. It's closing all files
 func (sf AggV3StaticFiles) CleanupOnError() {
 	for _, d := range sf.d {
@@ -945,6 +978,19 @@ func (sf AggV3StaticFiles) CleanupOnError() {
 	for _, ivf := range sf.ivfs {
 		ivf.CleanupOnError()
 	}
+}
+
+// relPath returns filePath made relative to basePath. Returns filePath
+// unchanged when basePath is empty or when filepath.Rel fails.
+func relPath(filePath, basePath string) string {
+	if basePath == "" {
+		return filePath
+	}
+	rel, err := filepath.Rel(basePath, filePath)
+	if err != nil {
+		return filePath
+	}
+	return rel
 }
 
 var errStepNotReady = errors.New("step not ready")
@@ -1217,7 +1263,8 @@ func (a *Aggregator) BuildFiles2(ctx context.Context, fromStep, toStep kv.Step, 
 				a.logger.Warn("[snapshots] buildFilesInBackground", "err", err)
 				panic(err)
 			}
-			a.NotifyOnFilesChange(nil)
+			// Notification already fired inside buildFiles →
+			// IntegrateDirtyFiles with the step's built file paths.
 		}
 
 		if doMerge {
@@ -1328,7 +1375,12 @@ func (a *Aggregator) mergeLoop(ctx context.Context) (err error) {
 }
 
 func (a *Aggregator) IntegrateDirtyFiles(sf *AggV3StaticFiles, txNumFrom, txNumTo uint64) {
-	defer a.NotifyOnFilesChange(nil) //TODO: add relative file paths
+	// Inventory is authoritative: every file created on disk MUST land
+	// in the OnFilesChange notification so downstream consumers (V2
+	// chain.toml publish, mode-B trim/regen, straddle detection)
+	// register it synchronously. A nil fire silently orphaned state
+	// files — live-caught 2026-07-02 iter 3 mode_b @30k hoodi.
+	defer a.NotifyOnFilesChange(sf.FilePaths(a.dirs.Snap))
 
 	a.dirtyFilesLock.Lock()
 	defer a.dirtyFilesLock.Unlock()
@@ -2362,7 +2414,8 @@ func (a *Aggregator) buildFilesInBackground(txNum uint64, doMerge bool) chan str
 				a.logger.Warn("[snapshots] buildFilesInBackground", "err", err)
 				break
 			}
-			a.NotifyOnFilesChange(nil)
+			// Notification already fired inside buildFiles →
+			// IntegrateDirtyFiles with the step's built file paths.
 		}
 		if !doMerge {
 			return

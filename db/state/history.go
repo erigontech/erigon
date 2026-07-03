@@ -721,6 +721,28 @@ type HistoryFiles struct {
 	efExistence     *existence.Filter
 }
 
+// FilePaths returns the on-disk paths of every underlying file in this
+// HistoryFiles, made relative to basePath. Skips nil components.
+func (sf HistoryFiles) FilePaths(basePath string) []string {
+	var out []string
+	if sf.historyDecomp != nil {
+		out = append(out, relPath(sf.historyDecomp.FilePath(), basePath))
+	}
+	if sf.historyIdx != nil {
+		out = append(out, relPath(sf.historyIdx.FilePath(), basePath))
+	}
+	if sf.efHistoryDecomp != nil {
+		out = append(out, relPath(sf.efHistoryDecomp.FilePath(), basePath))
+	}
+	if sf.efHistoryIdx != nil {
+		out = append(out, relPath(sf.efHistoryIdx.FilePath(), basePath))
+	}
+	if sf.efExistence != nil {
+		out = append(out, relPath(sf.efExistence.FilePath, basePath))
+	}
+	return out
+}
+
 func (sf HistoryFiles) CleanupOnError() {
 	if sf.historyDecomp != nil {
 		sf.historyDecomp.Close()

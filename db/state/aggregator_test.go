@@ -594,6 +594,58 @@ func TestAggregator_BuildFilesInBackground_SkippedWhenUnwindInProgress(t *testin
 	}
 }
 
+// TestAggregator_NotifyOnFilesChange_CarriesBuiltFileNames pins the
+// contract that after BuildFiles/IntegrateDirtyFiles produces a new
+// step file, the OnFilesChange callback MUST receive the file names
+// (not nil). Inventory is authoritative: every file created on disk
+// must be registered in Inventory synchronously via this notification.
+// A nil fire silently drops the file from Inventory, breaking
+// downstream consumers (V2 chain.toml publish, mode-B trim/regen,
+// straddle detection). Live-caught 2026-07-02 iter 3 mode_b @30k hoodi
+// (v2.0-storage.284-285.kv landed on disk but never in Inventory →
+// state_hits=0 in collectFilesPastBlock → coverage gap at step 283 →
+// receiptHash mismatch post-unwind).
+func TestAggregator_NotifyOnFilesChange_CarriesBuiltFileNames(t *testing.T) {
+	t.Parallel()
+	const stepSize = uint64(10)
+	db, agg := testDbAndAggregatorv3(t, stepSize)
+
+	var got [][]string
+	agg.OnFilesChange(func(names []string) {
+		got = append(got, append([]string(nil), names...))
+	}, nil)
+
+	// Seed enough history that BuildFiles produces step-0 file.
+	putHistoryKey(t, db, agg.d[kv.AccountsDomain].History.KeysTable, 1, []byte("k0"))
+	putHistoryKey(t, db, agg.d[kv.AccountsDomain].History.KeysTable, 11, []byte("k1"))
+
+	require.NoError(t, agg.BuildFiles(2*stepSize))
+
+	// At least one notification must carry non-empty file names.
+	// The file names must include the step-0 accounts .kv produced by
+	// the build.
+	var haveNames bool
+	var sawAccountsKV bool
+	for _, batch := range got {
+		if len(batch) > 0 {
+			haveNames = true
+		}
+		for _, n := range batch {
+			if strings.Contains(n, "-accounts.0-") && strings.HasSuffix(n, ".kv") {
+				sawAccountsKV = true
+			}
+		}
+	}
+	require.True(t, haveNames,
+		"OnFilesChange fired %d times but every call had nil/empty names; "+
+			"IntegrateDirtyFiles must pass the built file paths so Inventory can register them",
+		len(got))
+	require.True(t, sawAccountsKV,
+		"OnFilesChange notifications did not include the built accounts step-0 .kv file; "+
+			"got batches=%v",
+		got)
+}
+
 // TestAggregator_BuildFiles_EmptyStepOK verifies the corollary: on a fresh
 // datadir (no pre-existing snapshot files) where MDBX happens to have no
 // history at step 0 but does at a later step, the aggregator is allowed to

@@ -881,6 +881,27 @@ type StaticFiles struct {
 	existenceFilter *existence.Filter
 }
 
+// FilePaths returns the on-disk paths of every underlying file in this
+// StaticFiles (domain values + embedded history), made relative to
+// basePath. Skips nil components.
+func (sf StaticFiles) FilePaths(basePath string) []string {
+	var out []string
+	if sf.valuesDecomp != nil {
+		out = append(out, relPath(sf.valuesDecomp.FilePath(), basePath))
+	}
+	if sf.valuesIdx != nil {
+		out = append(out, relPath(sf.valuesIdx.FilePath(), basePath))
+	}
+	if sf.valuesBt != nil {
+		out = append(out, relPath(sf.valuesBt.FilePath(), basePath))
+	}
+	if sf.existenceFilter != nil {
+		out = append(out, relPath(sf.existenceFilter.FilePath, basePath))
+	}
+	out = append(out, sf.HistoryFiles.FilePaths(basePath)...)
+	return out
+}
+
 // CleanupOnError - call it on collation fail. It closing all files
 func (sf StaticFiles) CleanupOnError() {
 	if sf.valuesDecomp != nil {
