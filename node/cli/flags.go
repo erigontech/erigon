@@ -389,6 +389,17 @@ func cobraStringValueOrDefault(f *pflag.FlagSet, name, fallback string) string {
 	return v
 }
 
+func cobraUint64ValueOrDefault(f *pflag.FlagSet, name string, fallback uint64) uint64 {
+	if f.Lookup(name) == nil {
+		return fallback
+	}
+	v, err := f.GetUint64(name)
+	if err != nil {
+		utils.Fatalf("failed to read --%s: %v", name, err)
+	}
+	return v
+}
+
 func cobraBoolValueOrDefault(f *pflag.FlagSet, name string, fallback bool) bool {
 	if f.Lookup(name) == nil {
 		return fallback

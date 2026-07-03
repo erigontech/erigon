@@ -192,13 +192,9 @@ func FromCli(pruneMode string, distanceHistory, distanceBlocks, commitmentHistor
 	return mode, nil
 }
 
-// Validate flags a finite commitment-history window wider than state-history
-// retention: commitment history older than --prune.distance cannot serve
-// eth_getProof (which needs state history), so the excess is wasted. Unbounded
-// (keep-all) commitment history is exempt on purpose — it is the default for
-// every named mode and a deliberate "keep everything" choice, indistinguishable
-// from an unset flag, not a mistyped bound. An unlimited or history-expiry state
-// mode likewise has no bound to check against.
+// Validate rejects a finite commitment-history window wider than state-history
+// retention: commitment history older than --prune.distance can't serve
+// eth_getProof, so the excess is wasted. Unbounded windows impose no bound.
 func (m Mode) Validate() error {
 	commitmentHistory := commitmentHistoryOrDefault(m.CommitmentHistory)
 	if !commitmentHistory.Enabled() || m.History == nil || !m.History.Enabled() {

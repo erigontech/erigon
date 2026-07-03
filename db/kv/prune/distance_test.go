@@ -99,35 +99,6 @@ func TestParseHistoryDistance(t *testing.T) {
 	}
 }
 
-func TestParseCommitmentHistoryDistance(t *testing.T) {
-	cases := []struct {
-		in      string
-		want    uint64
-		wantErr bool
-	}{
-		{in: "", want: 0},
-		{in: "100000", want: 100_000},
-		{in: "keep-all", want: uint64(KeepAllBlocksPruneMode)},
-		{in: "Keep-All", want: uint64(KeepAllBlocksPruneMode)},
-		{in: "0x186a0", want: 100_000},
-		// keep-post-merge is block-only; everything else is invalid.
-		{in: "keep-post-merge", wantErr: true},
-		{in: "all", wantErr: true},
-		{in: "garbage", wantErr: true},
-	}
-	for _, tc := range cases {
-		t.Run(tc.in, func(t *testing.T) {
-			got, err := ParseCommitmentHistoryDistance(tc.in)
-			if tc.wantErr {
-				require.Error(t, err)
-				return
-			}
-			require.NoError(t, err)
-			assert.Equal(t, tc.want, got)
-		})
-	}
-}
-
 func TestBlocksDistanceCLIValue(t *testing.T) {
 	assert.Equal(t, "keep-post-merge", blocksDistanceCLIValue(uint64(KeepPostMergeBlocksPruneMode)))
 	assert.Equal(t, "keep-all", blocksDistanceCLIValue(uint64(KeepAllBlocksPruneMode)))

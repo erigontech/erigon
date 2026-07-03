@@ -60,22 +60,6 @@ func ParseHistoryDistance(s string) (uint64, error) {
 	}
 }
 
-// ParseCommitmentHistoryDistance parses a --prune.commitment-history.distance
-// value. It accepts a decimal block count, the "keep-all" alias (keep all
-// commitment history, the default), or an empty string (returns 0, meaning
-// unset). Like --prune.distance, the block-only "keep-post-merge" policy is
-// rejected: chain history-expiry has no meaning for commitment history.
-func ParseCommitmentHistoryDistance(s string) (uint64, error) {
-	switch normalizeDistanceAlias(s) {
-	case "":
-		return 0, nil
-	case "keep-all":
-		return uint64(KeepAllBlocksPruneMode), nil
-	default:
-		return parseDistanceNumber(s, "--prune.commitment-history.distance", historyDistanceAliasHint)
-	}
-}
-
 func normalizeDistanceAlias(s string) string {
 	return strings.ToLower(strings.TrimSpace(s))
 }
