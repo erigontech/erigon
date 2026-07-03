@@ -760,7 +760,7 @@ func (db *MdbxKV) backgroundSyncOnce() {
 	}
 	defer tx.Rollback()
 
-	if err := db.env.Sync(false, false); err != nil {
+	if err := db.env.SyncPoll(); err != nil {
 		db.log.Warn("[db] background sync", "label", db.opts.label, "err", err)
 	}
 	if took := time.Since(t); took > 10*time.Millisecond {
