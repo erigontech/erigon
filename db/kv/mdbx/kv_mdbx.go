@@ -730,7 +730,6 @@ func backgroundSyncLoop() {
 }
 
 func (db *MdbxKV) backgroundSyncOnce() {
-	return
 	// env.Sync -> mdbx_env_sync_ex. Flush the environment data buffers to disk.
 	//
 	// Unless the environment was opened with no-sync flags (MDBX_NOMETASYNC,
