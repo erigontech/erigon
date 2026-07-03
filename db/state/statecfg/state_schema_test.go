@@ -1,4 +1,4 @@
-// Copyright 2024 The Erigon Authors
+// Copyright 2026 The Erigon Authors
 // This file is part of Erigon.
 //
 // Erigon is free software: you can redistribute it and/or modify
@@ -14,8 +14,17 @@
 // You should have received a copy of the GNU Lesser General Public License
 // along with Erigon. If not, see <http://www.gnu.org/licenses/>.
 
-//go:build !assert
+package statecfg
 
-package assert
+import (
+	"testing"
 
-const Enable = false
+	"github.com/stretchr/testify/assert"
+
+	"github.com/erigontech/erigon/db/config3"
+)
+
+func TestCommitmentReferencesDefault(t *testing.T) {
+	assert.True(t, config3.DefaultReferencesInCommitmentBranches)
+	assert.Equal(t, config3.DefaultReferencesInCommitmentBranches, Schema.CommitmentDomain.ReferencesInCommitmentBranches)
+}

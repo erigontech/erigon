@@ -17,6 +17,7 @@
 package commitment
 
 import (
+	"bytes"
 	"context"
 	"encoding/binary"
 	"encoding/hex"
@@ -98,28 +99,14 @@ func TestParallelPatriciaHashedSkeletonPlumbing(t *testing.T) {
 		assert.Equal(t, 1, called)
 	})
 
-	t.Run("SetTraceFlags", func(t *testing.T) {
+	t.Run("SetTraceWriter", func(t *testing.T) {
 		p := NewParallelPatriciaHashed(nil, length.Addr, DefaultTrieConfig())
 
-		p.SetTrace(true)
-		assert.True(t, p.template.trace)
-		p.SetTrace(false)
-		assert.False(t, p.template.trace)
-
-		p.SetTraceDomain(true)
-		assert.True(t, p.template.traceDomain)
-		p.SetTraceDomain(false)
-		assert.False(t, p.template.traceDomain)
-	})
-
-	t.Run("CaptureRoundTrip", func(t *testing.T) {
-		p := NewParallelPatriciaHashed(nil, length.Addr, DefaultTrieConfig())
-
-		capture := []string{"alpha", "beta"}
-		p.SetCapture(capture)
-		assert.Equal(t, capture, p.GetCapture(false), "GetCapture returns the set capture without truncation")
-		assert.Equal(t, capture, p.GetCapture(true), "truncating GetCapture returns the previous capture")
-		assert.Nil(t, p.GetCapture(false), "capture cleared after truncate")
+		var buf bytes.Buffer
+		p.SetTraceWriter(&buf)
+		assert.NotNil(t, p.template.traceW, "trace writer fanned out to template")
+		p.SetTraceWriter(nil)
+		assert.Nil(t, p.template.traceW, "nil writer disables tracing on template")
 	})
 
 	t.Run("EnableCsvMetricsNoPanic", func(t *testing.T) {
@@ -149,10 +136,9 @@ func TestParallelPatriciaHashedSkeletonRelease(t *testing.T) {
 	require.NotPanics(t, func() { p.Release() })
 
 	require.NotPanics(t, func() {
-		p.SetTrace(true)
-		p.SetTraceDomain(true)
-		p.SetCapture(nil)
-		_ = p.GetCapture(false)
+		var buf bytes.Buffer
+		p.SetTraceWriter(&buf)
+		p.SetTraceWriter(nil)
 		p.EnableCsvMetrics("")
 		p.ResetContext(nil)
 	})

@@ -45,7 +45,7 @@ func benchWitnessTrie(b *testing.B) (*HexPatriciaHashed, [][]byte) {
 	b.Helper()
 	ms := NewMockState(b)
 	hph := NewHexPatriciaHashed(length.Addr, ms, DefaultTrieConfig())
-	hph.SetTrace(false)
+	hph.SetTraceWriter(nil)
 	accounts := buildWitnessCorpus(b, ms, hph, 128, 4)
 	return hph, accounts[:16]
 }

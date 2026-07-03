@@ -7,13 +7,13 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"io"
 	"runtime"
 	"sync"
 	"sync/atomic"
 	"time"
 
 	"github.com/erigontech/erigon/common"
-	"github.com/erigontech/erigon/common/assert"
 	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/empty"
@@ -21,6 +21,7 @@ import (
 	"github.com/erigontech/erigon/db/etl"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/rawdbv3"
+	"github.com/erigontech/erigon/db/state/kvmetrics"
 	"github.com/erigontech/erigon/diagnostics/metrics"
 	"github.com/erigontech/erigon/execution/commitment"
 	"github.com/erigontech/erigon/execution/commitment/nibbles"
@@ -38,9 +39,21 @@ type sd interface {
 	SetTxNum(blockNum uint64)
 	AsGetter(tx kv.TemporalTx) kv.TemporalGetter
 	AsPutDel(tx kv.TemporalTx) kv.TemporalPutDel
+	// MergeMetrics hands a finished worker's lock-free metrics accumulator to
+	// the per-batch aggregate and the process-level collector (once, not per
+	// read), tagged with source.
+	MergeMetrics(source kvmetrics.Source, wm *kvmetrics.DomainMetrics)
 	StepSize() uint64
-	Trace() bool
-	CommitmentCapture() bool
+	// ProbeReadLayers samples sd.mem, parent.mem and tx-direct (MDBX) for one
+	// key — BranchCache divergence-detection probe. Read-only.
+	ProbeReadLayers(domain kv.Domain, tx kv.TemporalTx, key []byte) (mem, parentMem, mdbx []byte, memOk, parentOk bool)
+
+	// Metrics exposes the per-SD DomainMetrics so callers can read
+	// per-domain (cache, db, file) read counters. Used by the
+	// cache-fp log line to break the aggregate `files=N` count down
+	// per domain (Storage value loads vs Commitment branch reads
+	// vs Account loads).
+	Metrics() *kvmetrics.DomainMetrics
 }
 
 type SharedDomainsCommitmentContext struct {
@@ -49,7 +62,7 @@ type SharedDomainsCommitmentContext struct {
 	patriciaTrie  commitment.Trie
 	variant       commitment.TrieVariant // selected trie engine, for the [commitment] log (updates.Mode() is ModeParallel for both parallel and streaming)
 	justRestored  atomic.Bool            // set to true when commitment trie was just restored from snapshot
-	trace         bool
+	traceW        io.Writer
 	stateReader   StateReader
 	paraTrieDB    kv.TemporalRoDB // DB used for para trie and/or parallel trie warmup
 	// warmupBase holds the construction-time portion of the per-call WarmupConfig.
@@ -69,6 +82,12 @@ type SharedDomainsCommitmentContext struct {
 // SetStateReader can be used to set a custom state reader (otherwise the default one is set in SharedDomainsCommitmentContext.trieContext).
 func (sdc *SharedDomainsCommitmentContext) SetStateReader(stateReader StateReader) {
 	sdc.stateReader = stateReader
+}
+
+// StateReader returns the currently installed custom state reader, or nil when
+// none is set (trieContext then builds the default latest-state reader).
+func (sdc *SharedDomainsCommitmentContext) StateReader() StateReader {
+	return sdc.stateReader
 }
 
 func (sdc *SharedDomainsCommitmentContext) EnableParaTrieDB(db kv.TemporalRoDB) {
@@ -149,14 +168,11 @@ func (sdc *SharedDomainsCommitmentContext) SetCustomHistoryStateReader(stateRead
 	sdc.SetStateReader(stateReader)
 }
 
-func (sdc *SharedDomainsCommitmentContext) SetTrace(trace bool) {
-	sdc.trace = trace
-	sdc.patriciaTrie.SetTrace(trace)
-}
-
-// SetCapture enables/disables trie operation capture for diagnosis.
-func (sdc *SharedDomainsCommitmentContext) SetCapture(capture []string) {
-	sdc.patriciaTrie.SetCapture(capture)
+func (sdc *SharedDomainsCommitmentContext) SetTraceWriter(w io.Writer) {
+	// Wrap once so the main and per-worker TrieContexts share one mutex-guarded
+	// writer: concurrent workers trace branch reads/writes without racing.
+	sdc.traceW = commitment.NewSyncWriter(w)
+	sdc.patriciaTrie.SetTraceWriter(sdc.traceW)
 }
 
 // GetUpdates returns the current updates buffer. Used by the commitment
@@ -193,18 +209,23 @@ func NewSharedDomainsCommitmentContext(sd sd, mode commitment.Mode, tmpDir strin
 	return ctx
 }
 
-func (sdc *SharedDomainsCommitmentContext) trieContext(tx kv.TemporalTx, blockNum, txNum uint64) *TrieContext {
+// trieContext builds the main (root-fold) trie read context. readCtx carries
+// the per-ComputeCommitment lock-free metrics accumulator (nil-value => no
+// metrics); the main fold is single-goroutine so it owns that accumulator
+// exclusively. Warmup/concurrent-mount readers get their own via the factories.
+func (sdc *SharedDomainsCommitmentContext) trieContext(tx kv.TemporalTx, blockNum, txNum uint64, readCtx context.Context) *TrieContext {
 	mainTtx := &TrieContext{
 		getter:   sdc.sharedDomains.AsGetter(tx),
 		putter:   sdc.sharedDomains.AsPutDel(tx),
 		stepSize: sdc.sharedDomains.StepSize(),
 		txNum:    txNum,
 		blockNum: blockNum,
+		traceW:   sdc.traceW,
 	}
 	if sdc.stateReader != nil {
-		mainTtx.stateReader = sdc.stateReader.Clone(tx)
+		mainTtx.stateReader = sdc.stateReader.CloneForWorker(readCtx, tx)
 	} else {
-		mainTtx.stateReader = NewLatestStateReader(tx, sdc.sharedDomains)
+		mainTtx.stateReader = NewLatestStateReaderForWorker(readCtx, tx, sdc.sharedDomains)
 	}
 	sdc.patriciaTrie.ResetContext(mainTtx)
 	return mainTtx
@@ -219,10 +240,6 @@ func (sdc *SharedDomainsCommitmentContext) Reset() {
 	if !sdc.justRestored.Load() {
 		sdc.patriciaTrie.Reset()
 	}
-}
-
-func (sdc *SharedDomainsCommitmentContext) GetCapture(truncate bool) []string {
-	return sdc.patriciaTrie.GetCapture(truncate)
 }
 
 func (sdc *SharedDomainsCommitmentContext) ClearRam() {
@@ -396,6 +413,10 @@ func (sdc *SharedDomainsCommitmentContext) ComputeCommitment(ctx context.Context
 		}
 		log.Debug("[commitment] processed", "block", blockNum, "txNum", txNum, "keys", common.PrettyCounter(updateCount), "keys/s", common.PrettyCounter(keysPerSec), "mode", sdc.variant, "bufmode", sdc.updates.Mode(), "spent", took, "rootHash", hex.EncodeToString(rootHash))
 	}()
+	// Re-apply the trace writer before any trie operations (including the early-return
+	// RootHash below); GenerateWitness clears it, so it must be restored on each call.
+	sdc.patriciaTrie.SetTraceWriter(sdc.traceW)
+
 	if updateCount == 0 {
 		rootHash, err = sdc.patriciaTrie.RootHash()
 		return rootHash, err
@@ -403,15 +424,15 @@ func (sdc *SharedDomainsCommitmentContext) ComputeCommitment(ctx context.Context
 
 	// data accessing functions should be set when domain is opened/shared context updated
 
-	sdc.patriciaTrie.SetTrace(sdc.trace)
-	sdc.patriciaTrie.SetTraceDomain(sdc.sharedDomains.Trace())
-	if sdc.sharedDomains.CommitmentCapture() {
-		if sdc.patriciaTrie.GetCapture(false) == nil {
-			sdc.patriciaTrie.SetCapture([]string{})
-		}
-	}
+	// Per-ComputeCommitment metrics accumulator for the main (root-fold) reads.
+	// The fold is single-goroutine, so this lock-free accumulator is owned
+	// exclusively here; merged into the shared metrics when commitment finishes.
+	// Warmup/concurrent-mount workers accumulate + merge independently.
+	commitMetrics := kvmetrics.NewDomainMetrics()
+	defer sdc.sharedDomains.MergeMetrics(kvmetrics.SourceCommitment, commitMetrics)
+	readCtx := kvmetrics.ContextWithMetrics(ctx, commitMetrics)
 
-	trieContext := sdc.trieContext(tx, blockNum, txNum)
+	trieContext := sdc.trieContext(tx, blockNum, txNum, readCtx)
 
 	// If trie trace is configured, wrap the context with a recorder.
 	// Block-targeted: when TrieTraceBlock is set, only record that specific block.
@@ -580,18 +601,28 @@ func (sdc *SharedDomainsCommitmentContext) trieContextFactory(ctx context.Contex
 		if err != nil {
 			return &errorTrieContext{err: err}, func() {}
 		}
+		// Warmup workers run concurrently with the main commitment goroutine.
+		// Each gets its own lock-free metrics accumulator carried in a per-worker
+		// context, so reads neither share metrics state with the main goroutine
+		// (a data race) nor take the global metrics write lock (the prior hard
+		// serialization point). The accumulator is folded into the shared metrics
+		// once at teardown.
+		wm := kvmetrics.NewDomainMetrics()
+		workerCtx := kvmetrics.ContextWithMetrics(ctx, wm)
 		warmupCtx := &TrieContext{
 			getter:   sdc.sharedDomains.AsGetter(roTx),
 			putter:   sdc.sharedDomains.AsPutDel(roTx),
 			stepSize: stepSize,
 			txNum:    txNum,
+			traceW:   sdc.traceW,
 		}
 		if sdc.stateReader != nil {
-			warmupCtx.stateReader = sdc.stateReader.Clone(roTx)
+			warmupCtx.stateReader = sdc.stateReader.CloneForWorker(workerCtx, roTx)
 		} else {
-			warmupCtx.stateReader = NewLatestStateReader(roTx, sdc.sharedDomains)
+			warmupCtx.stateReader = NewLatestStateReaderForWorker(workerCtx, roTx, sdc.sharedDomains)
 		}
 		cleanup := func() {
+			sdc.sharedDomains.MergeMetrics(kvmetrics.SourceWarmup, wm)
 			roTx.Rollback()
 		}
 		return warmupCtx, cleanup
@@ -619,19 +650,26 @@ func (sdc *SharedDomainsCommitmentContext) concurrentTrieContextFactory(ctx cont
 		collectors = append(collectors, collector)
 		mu.Unlock()
 
+		// Concurrent mounts run in parallel; each gets its own lock-free metrics
+		// accumulator via a per-worker context so they don't share metrics state
+		// (a race) or take the global metrics lock. Folded in at teardown.
+		wm := kvmetrics.NewDomainMetrics()
+		workerCtx := kvmetrics.ContextWithMetrics(ctx, wm)
 		warmupCtx := &TrieContext{
 			getter:         sdc.sharedDomains.AsGetter(roTx),
 			putter:         sdc.sharedDomains.AsPutDel(roTx),
 			stepSize:       stepSize,
 			txNum:          txNum,
 			localCollector: collector,
+			traceW:         sdc.traceW,
 		}
 		if sdc.stateReader != nil {
-			warmupCtx.stateReader = sdc.stateReader.Clone(roTx)
+			warmupCtx.stateReader = sdc.stateReader.CloneForWorker(workerCtx, roTx)
 		} else {
-			warmupCtx.stateReader = NewLatestStateReader(roTx, sdc.sharedDomains)
+			warmupCtx.stateReader = NewLatestStateReaderForWorker(workerCtx, roTx, sdc.sharedDomains)
 		}
 		cleanup := func() {
+			sdc.sharedDomains.MergeMetrics(kvmetrics.SourceWarmup, wm)
 			roTx.Rollback()
 		}
 		return warmupCtx, cleanup
@@ -709,7 +747,7 @@ func (sdc *SharedDomainsCommitmentContext) LatestCommitmentState(trieContext *Tr
 // SeekCommitment searches for last encoded state from DomainCommitted
 // and if state found, sets it up to current domain
 func (sdc *SharedDomainsCommitmentContext) SeekCommitment(ctx context.Context, tx kv.TemporalTx) (txNum, blockNum uint64, err error) {
-	trieContext := sdc.trieContext(tx, 0, 0) // blockNum/txNum not yet known; trieContext only used for reading here
+	trieContext := sdc.trieContext(tx, 0, 0, ctx) // blockNum/txNum not yet known; trieContext only used for reading here
 
 	_, _, state, err := sdc.LatestCommitmentState(trieContext)
 	if err != nil {
@@ -832,14 +870,14 @@ func (sdc *SharedDomainsCommitmentContext) restorePatriciaState(value []byte) (u
 		hext = ppht.RootTrie()
 	}
 	if hext == nil {
-		return 0, 0, errors.New("commitment trie not available")
+		return 0, 0, errors.New("unsupported trie variant: state restore requires a hex patricia trie")
 	}
 
 	if err := hext.SetState(cs.trieState); err != nil {
 		return 0, 0, fmt.Errorf("failed restore state : %w", err)
 	}
 	sdc.justRestored.Store(true) // to prevent double reset
-	if sdc.trace {
+	if sdc.traceW != nil {
 		rootHash, err := hext.RootHash()
 		if err != nil {
 			return 0, 0, fmt.Errorf("failed to get root hash after state restore: %w", err)
@@ -856,7 +894,7 @@ type TrieContext struct {
 	blockNum uint64
 
 	stepSize       uint64
-	trace          bool
+	traceW         io.Writer // nil = disabled; traces branch reads/writes (see [SDC] lines)
 	stateReader    StateReader
 	localCollector *etl.Collector // per-goroutine collector for concurrent PutBranch
 }
@@ -877,6 +915,9 @@ func (sdc *TrieContext) Branch(pref []byte) ([]byte, kv.Step, error) {
 	// underlying state cache / getter aliases shared storage that another goroutine
 	// (concurrent commitment workers) can recycle. Own the bytes at the trie-context
 	// boundary so all downstream consumers are safe.
+	if sdc.traceW != nil {
+		fmt.Fprintf(sdc.traceW, "[SDC] Branch read %x => %x\n", pref, enc)
+	}
 	return common.Copy(enc), step, nil
 }
 
@@ -884,8 +925,8 @@ func (sdc *TrieContext) PutBranch(prefix []byte, data []byte, prevData []byte) e
 	if sdc.stateReader.WithHistory() { // do not store branches if explicitly operate on history
 		return nil
 	}
-	if sdc.trace {
-		fmt.Printf("[SDC] PutBranch: %x: %x\n", prefix, data)
+	if sdc.traceW != nil {
+		fmt.Fprintf(sdc.traceW, "[SDC] PutBranch %x: %x\n", prefix, data)
 	}
 	if sdc.localCollector != nil {
 		return sdc.localCollector.Collect(prefix, data)
@@ -929,7 +970,7 @@ func (sdc *TrieContext) Account(plainKey []byte) (u *commitment.Update, err erro
 		u.CodeHash = acc.CodeHash.Value()
 	}
 
-	if assert.Enable { // verify code hash from account encoding matches stored code
+	if dbg.AssertEnabled { // verify code hash from account encoding matches stored code
 		code, _, err := sdc.readDomain(kv.CodeDomain, plainKey)
 		if err != nil {
 			return nil, err

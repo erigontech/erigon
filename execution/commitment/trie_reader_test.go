@@ -384,7 +384,7 @@ func TestTrieReader_RoundTripWithHPH(t *testing.T) {
 
 	// Use real 20-byte account addresses (accountKeyLen = length.Addr).
 	hph := NewHexPatriciaHashed(int16(length.Addr), ms, DefaultTrieConfig())
-	hph.SetTrace(false)
+	hph.SetTraceWriter(nil)
 
 	// Build updates: several accounts with balance/nonce, plus storage.
 	plainKeys, updates := NewUpdateBuilder().
@@ -457,7 +457,7 @@ func TestTrieReader_RoundTripWithHPH_ManyAccounts(t *testing.T) {
 	ms := NewMockState(t)
 
 	hph := NewHexPatriciaHashed(int16(length.Addr), ms, DefaultTrieConfig())
-	hph.SetTrace(false)
+	hph.SetTraceWriter(nil)
 
 	// Generate 100 accounts with distinct addresses.
 	ub := NewUpdateBuilder()

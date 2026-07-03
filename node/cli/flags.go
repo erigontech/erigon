@@ -82,13 +82,13 @@ var (
 				minimal: Keep only latest state`,
 		Value: "full",
 	}
-	PruneDistanceFlag = cli.Uint64Flag{
+	PruneDistanceFlag = cli.StringFlag{
 		Name:  "prune.distance",
-		Usage: `Keep state history for the latest N blocks (default: everything)`,
+		Usage: `Keep state history for the latest N blocks, or "keep-all" to keep everything. If unset, retention follows --prune.mode`,
 	}
-	PruneBlocksDistanceFlag = cli.Uint64Flag{
+	PruneBlocksDistanceFlag = cli.StringFlag{
 		Name:  "prune.distance.blocks",
-		Usage: `Keep block history for the latest N blocks (default: everything)`,
+		Usage: `Keep block history for the latest N blocks, or a named policy: "keep-post-merge" (prune pre-merge blocks only) or "keep-all" (keep every block). If unset, retention follows --prune.mode`,
 	}
 	StateStreamDisableFlag = cli.BoolFlag{
 		Name:  "state.stream.disable",
@@ -231,8 +231,14 @@ func applyRemainingEthFlags(ctx *cli.Context, cfg *ethconfig.Config, logger log.
 	}
 	_ = chainId
 
-	blockDistance := ctx.Uint64(PruneBlocksDistanceFlag.Name)
-	distance := ctx.Uint64(PruneDistanceFlag.Name)
+	blockDistance, err := prune.ParseBlocksDistance(ctx.String(PruneBlocksDistanceFlag.Name))
+	if err != nil {
+		utils.Fatalf("%v", err)
+	}
+	distance, err := prune.ParseHistoryDistance(ctx.String(PruneDistanceFlag.Name))
+	if err != nil {
+		utils.Fatalf("%v", err)
+	}
 
 	// check if the prune.mode flag is not set to archive
 	persistenceReceiptsV2 := ctx.String(PruneModeFlag.Name) != prune.ArchiveMode.String()
@@ -320,8 +326,14 @@ func applyRemainingEthFlags(ctx *cli.Context, cfg *ethconfig.Config, logger log.
 
 func ApplyFlagsForEthConfigCobra(f *pflag.FlagSet, cfg *ethconfig.Config) {
 	pruneMode := cobraStringValueOrDefault(f, PruneModeFlag.Name, PruneModeFlag.Value)
-	pruneBlockDistance := cobraUint64ValueOrDefault(f, PruneBlocksDistanceFlag.Name, PruneBlocksDistanceFlag.Value)
-	pruneDistance := cobraUint64ValueOrDefault(f, PruneDistanceFlag.Name, PruneDistanceFlag.Value)
+	pruneBlockDistance, err := prune.ParseBlocksDistance(cobraStringValueOrDefault(f, PruneBlocksDistanceFlag.Name, PruneBlocksDistanceFlag.Value))
+	if err != nil {
+		utils.Fatalf("%v", err)
+	}
+	pruneDistance, err := prune.ParseHistoryDistance(cobraStringValueOrDefault(f, PruneDistanceFlag.Name, PruneDistanceFlag.Value))
+	if err != nil {
+		utils.Fatalf("%v", err)
+	}
 
 	mode, err := prune.FromCli(pruneMode, pruneDistance, pruneBlockDistance)
 	if err != nil {
@@ -360,17 +372,6 @@ func cobraStringValueOrDefault(f *pflag.FlagSet, name, fallback string) string {
 		return fallback
 	}
 	v, err := f.GetString(name)
-	if err != nil {
-		utils.Fatalf("failed to read --%s: %v", name, err)
-	}
-	return v
-}
-
-func cobraUint64ValueOrDefault(f *pflag.FlagSet, name string, fallback uint64) uint64 {
-	if f.Lookup(name) == nil {
-		return fallback
-	}
-	v, err := f.GetUint64(name)
 	if err != nil {
 		utils.Fatalf("failed to read --%s: %v", name, err)
 	}

@@ -1,4 +1,4 @@
-// Copyright 2024 The Erigon Authors
+// Copyright 2026 The Erigon Authors
 // This file is part of Erigon.
 //
 // Erigon is free software: you can redistribute it and/or modify
@@ -14,8 +14,27 @@
 // You should have received a copy of the GNU Lesser General Public License
 // along with Erigon. If not, see <http://www.gnu.org/licenses/>.
 
-//go:build assert
+package cache
 
-package assert
+// Mode selects what GenericCache does when an insert would overflow capacity.
+//
+// ModeEvictLRU (default) drops the least-recently-used entry, matching the
+// other state caches in the tree. ModeNoOp keeps the historical "first writers
+// win" behaviour — once full, new keys are dropped (counted via a metric) —
+// and exists only as a diagnostic baseline for the regression bench.
+type Mode uint8
 
-const Enable = true
+const (
+	ModeEvictLRU Mode = iota
+	ModeNoOp
+)
+
+func (m Mode) String() string {
+	switch m {
+	case ModeEvictLRU:
+		return "evict"
+	case ModeNoOp:
+		return "noop"
+	}
+	return "unknown"
+}
