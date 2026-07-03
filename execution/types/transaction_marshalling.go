@@ -255,6 +255,9 @@ func UnmarshalTransactionFromJSON(input []byte) (Transaction, error) {
 		}
 		return tx, nil
 	default:
+		if spec, ok := registeredTxType(byte(txType)); ok {
+			return spec.UnmarshalJSON(input)
+		}
 		return nil, fmt.Errorf("unknown transaction type: %v", txType)
 	}
 }

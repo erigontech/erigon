@@ -290,6 +290,9 @@ func (sg Signer) SenderWithContext(context *secp256k1.Context, txn Transaction) 
 	case *AccountAbstractionTransaction:
 		return txn.Sender(Signer{})
 	default:
+		if _, ok := registeredTxType(txn.Type()); ok {
+			return txn.Sender(Signer{})
+		}
 		return accounts.NilAddress, ErrTxTypeNotSupported
 	}
 	return recoverPlain(context, txn.SigningHash(signChainID), R, S, &V, !sg.malleable)
@@ -322,6 +325,10 @@ func (sg Signer) SignatureValues(txn Transaction, sig []byte) (R, S, V *uint256.
 			return nil, nil, nil, err
 		}
 	default:
+		if _, ok := registeredTxType(txn.Type()); ok {
+			v, r, s := txn.RawSignatureValues()
+			return r, s, v, nil
+		}
 		return nil, nil, nil, ErrTxTypeNotSupported
 	}
 	return R, S, V, nil
