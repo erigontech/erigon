@@ -117,7 +117,7 @@ func canSnapshotBePruned(name string) bool {
 func buildBlackListForPruning(
 	pruneMode prune.Mode,
 	cc *chain.Config,
-	stepPrune, minCommitmentHistoryStep, minBlockToDownload, blockPrune uint64,
+	historyStepPrune, minCommitmentHistoryStep kv.Step, minBlockToDownload, blockPrune uint64,
 	preverified snapcfg.Preverified,
 ) (map[string]struct{}, error) {
 
@@ -151,14 +151,14 @@ func buildBlackListForPruning(
 			}
 			// Commitment-history filter runs independently of History pruning so
 			// commitment-only configs still skip old commitment segments.
-			if commitmentHistoryEnabled && isStateHistory(name) && strings.Contains(name, kv.CommitmentDomain.String()) && minCommitmentHistoryStep >= res.To {
+			if commitmentHistoryEnabled && isStateHistory(name) && strings.Contains(name, kv.CommitmentDomain.String()) && minCommitmentHistoryStep >= kv.Step(res.To) {
 				blackList[name] = struct{}{}
 				continue
 			}
 			if !historyEnabled {
 				continue
 			}
-			if stepPrune < res.To {
+			if historyStepPrune < kv.Step(res.To) {
 				continue
 			}
 			blackList[name] = struct{}{}
@@ -196,11 +196,11 @@ type blockReader interface {
 	TxnumReader() rawdbv3.TxNumsReader
 }
 
-func stepAtTxNum(txNum, stepSize uint64) uint64 {
+func stepAtTxNum(txNum, stepSize uint64) kv.Step {
 	if txNum < stepSize-1 {
 		return 0
 	}
-	return (txNum - (stepSize - 1)) / stepSize
+	return kv.Step((txNum - (stepSize - 1)) / stepSize)
 }
 
 func getMinimumBlocksToDownload(
@@ -208,7 +208,7 @@ func getMinimumBlocksToDownload(
 	blockReader blockReader,
 	maxStateStep, stepSize uint64,
 	stateHistoryPruneTo, commitmentHistoryPruneTo uint64,
-) (minBlockToDownload, minHistoryStep, minCommitmentHistoryStep uint64, err error) {
+) (minBlockToDownload uint64, minHistoryStep, minCommitmentHistoryStep kv.Step, err error) {
 	started := time.Now()
 	var iterations int64
 	defer func() {
@@ -219,8 +219,8 @@ func getMinimumBlocksToDownload(
 	}()
 	frozenBlocks := blockReader.Snapshots().SegmentsMax()
 	minToDownload := uint64(math.MaxUint64)
-	minHistoryStep = uint64(math.MaxUint32)
-	minCommitmentHistoryStep = uint64(math.MaxUint32)
+	minHistoryStep = kv.Step(math.MaxUint32)
+	minCommitmentHistoryStep = kv.Step(math.MaxUint32)
 	stateTxNum := maxStateStep * stepSize
 	if err := blockReader.IterateFrozenBodies(func(blockNum, baseTxNum, txAmount uint64) error {
 		if iterations%1e6 == 0 {
@@ -447,7 +447,6 @@ func SyncSnapshots(
 		blockPrune, historyPrune := computeBlocksToPrune(blockReader, prune)
 		blackListForPruning := make(map[string]struct{})
 		wantToPrune := downloadFilteringApplies(prune, cc)
-
 		if !headerchain && wantToPrune {
 			maxStateStep, err := getMaxStepRangeInSnapshots(preverifiedBlockSnapshots)
 			if err != nil {
