@@ -194,17 +194,13 @@ func (r *ReadAhead) warm(ctx context.Context, db RoDB, table string, from, to []
 			return err
 		}
 		defer it.Close()
-		for n := 0; it.HasNext(); n++ {
-			k, v, err := it.Next()
+		n := 0
+		for it.HasNext() {
+			_, _, err := it.Next()
 			if err != nil {
 				return err
 			}
-			if len(v) > 0 {
-				_, _ = v[0], v[len(v)-1] // fault the value page into the OS cache
-			}
-			if len(k) > 0 {
-				_, _ = k[0], k[len(k)-1]
-			}
+			n++
 			if n%128 == 0 && ctx.Err() != nil {
 				return ctx.Err()
 			}
