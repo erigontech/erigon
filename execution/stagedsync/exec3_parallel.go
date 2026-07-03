@@ -2343,20 +2343,10 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 			prevWrites := be.blockIO.WriteSet(txVersion.TxIndex)
 			hasWriteChange := res.TxOut.HasNewWrite(prevWrites)
 
-			// Remove entries that were previously written but are no longer written
-			cmpMap := map[accounts.Address]map[state.AccountKey]struct{}{}
-
-			for h := range res.TxOut.AllHeaders() {
-				keys, ok := cmpMap[h.Address]
-				if !ok {
-					keys = map[state.AccountKey]struct{}{}
-					cmpMap[h.Address] = keys
-				}
-				keys[state.AccountKey{Path: h.Path, Key: h.Key}] = struct{}{}
-			}
-
+			// Remove entries that were previously written but are no longer
+			// written — res.TxOut.Has answers membership directly, no cmp map.
 			for h := range prevWrites.AllHeaders() {
-				if _, ok := cmpMap[h.Address][state.AccountKey{Path: h.Path, Key: h.Key}]; !ok {
+				if !res.TxOut.Has(h) {
 					hasWriteChange = true
 					be.versionMap.Delete(h.Address, h.Path, h.Key, txVersion.TxIndex, true)
 				}
@@ -3147,7 +3137,7 @@ func normalizeWriteSet(writes *state.WriteSet, vm *state.VersionMap, txIndex int
 				// misses it. Narrower than an IncarnationPath probe: pure
 				// CREATE (no prior SD=true) doesn't wipe pre-existing storage,
 				// so its same-value SSTOREs still no-op against pre-block.
-				if vm.AnyDoneBoolWriteEquals(h.Address, state.SelfDestructPath, accounts.NilKey, txIndex-1, true) {
+				if vm.AnyDoneSelfDestructEquals(h.Address, txIndex-1, true) {
 					if writeVal.IsZero() {
 						continue
 					}

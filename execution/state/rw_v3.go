@@ -28,7 +28,6 @@ import (
 	"github.com/tidwall/btree"
 
 	"github.com/erigontech/erigon/common"
-	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
@@ -95,51 +94,54 @@ func (rs *StateV3) applyVersionedWrites(roTx kv.TemporalTx, blockNum, txNum uint
 			storage        []storageItem
 		}
 
-		perAddr := make(map[accounts.Address]*addrState)
-		for h := range writes.AllHeaders() {
-			d := perAddr[h.Address]
+		perAddr := make(map[accounts.Address]*addrState, writes.Count())
+		ensure := func(a accounts.Address) *addrState {
+			d := perAddr[a]
 			if d == nil {
 				d = &addrState{}
-				perAddr[h.Address] = d
+				perAddr[a] = d
 			}
-			switch h.Path {
-			case BalancePath:
-				if vw, ok := writes.GetBalance(h.Address); ok {
-					v := vw.Val
-					d.balance = &v
-				}
-			case NoncePath:
-				if vw, ok := writes.GetNonce(h.Address); ok {
-					v := vw.Val
-					d.nonce = &v
-				}
-			case IncarnationPath:
-				if vw, ok := writes.GetIncarnation(h.Address); ok {
-					v := vw.Val
-					d.incarnation = &v
-				}
-			case CodeHashPath:
-				if vw, ok := writes.GetCodeHash(h.Address); ok {
-					v := vw.Val
-					d.codeHash = &v
-				}
-			case CodePath:
-				if vw, ok := writes.GetCode(h.Address); ok {
-					d.code = vw.Val.Bytes
-					d.codeWritten = true
-				}
-			case SelfDestructPath:
-				if vw, ok := writes.GetSelfDestruct(h.Address); ok {
-					d.selfDestruct = vw.Val
-				}
-			case CreateContractPath:
-				if vw, ok := writes.GetCreateContract(h.Address); ok {
-					d.createContract = vw.Val
-				}
-			case StoragePath:
-				if vw, ok := writes.GetStorage(h.Address, h.Key); ok {
-					d.storage = append(d.storage, storageItem{h.Key, vw.Val})
-				}
+			return d
+		}
+		// Range the typed collections directly rather than AllHeaders()+GetX —
+		// the header walk plus a second per-value map probe is strictly more work.
+		for a, vw := range writes.Balances() {
+			v := vw.Val
+			ensure(a).balance = &v
+		}
+		for a, vw := range writes.Nonces() {
+			v := vw.Val
+			ensure(a).nonce = &v
+		}
+		for a, vw := range writes.Incarnations() {
+			v := vw.Val
+			ensure(a).incarnation = &v
+		}
+		// CodeHashes before Codes: an explicit CodeHashPath write wins; a code
+		// write only supplies the hash when no explicit one was recorded.
+		for a, vw := range writes.CodeHashes() {
+			v := vw.Val
+			ensure(a).codeHash = &v
+		}
+		for a, vw := range writes.Codes() {
+			d := ensure(a)
+			d.code = vw.Val.Bytes
+			d.codeWritten = true
+			if d.codeHash == nil {
+				ch := vw.Val.Hash
+				d.codeHash = &ch
+			}
+		}
+		for a, vw := range writes.SelfDestructs() {
+			ensure(a).selfDestruct = vw.Val
+		}
+		for a, vw := range writes.createContract {
+			ensure(a).createContract = vw.Val
+		}
+		for a, byKey := range writes.Storages() {
+			d := ensure(a)
+			for k, vw := range byKey {
+				d.storage = append(d.storage, storageItem{k, vw.Val})
 			}
 		}
 
@@ -240,8 +242,8 @@ func (rs *StateV3) applyVersionedWrites(roTx kv.TemporalTx, blockNum, txNum uint
 				}
 				if d.codeHash != nil {
 					acc.CodeHash = *d.codeHash
-				} else if d.code != nil {
-					acc.CodeHash = accounts.InternCodeHash(crypto.Keccak256Hash(d.code))
+				} else if d.codeWritten {
+					acc.CodeHash = accounts.NewCode(d.code).Hash
 				}
 				if dbg.TraceApply && (rs.trace.Load() || dbg.TraceAccount(addr.Handle())) {
 					fmt.Printf("%d apply:put account: %x balance:%d,nonce:%d,codehash:%x\n", blockNum, addr, &acc.Balance, acc.Nonce, acc.CodeHash)

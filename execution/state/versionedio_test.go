@@ -1348,11 +1348,10 @@ func TestEIP161EmptyRemoval(t *testing.T) {
 	}
 }
 
-// TestVersionedUpdates_EstimateCellConsumed pins #21667: finalize
-// reconstruction must consume an in-block subfield write that sits in an
-// Estimate (Dependency) cell, not fall back to the stale pre-block value. The
-// per-path versionedUpdate helpers must gate on != MVReadResultNone (Done OR
-// Dependency), like versionedUpdateAddress and main's generic versionedUpdate;
+// TestVersionedUpdates_EstimateCellConsumed pins that finalize reconstruction
+// consumes an in-block subfield write sitting in an Estimate (Dependency) cell
+// rather than falling back to the stale pre-block value. The per-path
+// versionedUpdate helpers must gate on != MVReadResultNone (Done OR Dependency);
 // gating on == MVReadResultDone drops the Estimate cell and reads stale state,
 // diverging balance/nonce/codeHash/storage and the trie root.
 func TestVersionedUpdates_EstimateCellConsumed(t *testing.T) {

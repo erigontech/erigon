@@ -47,8 +47,8 @@ func TestValueTiebreaker_BalancePath(t *testing.T) {
 	// Validate a read from txIndex=10 that read the SAME value from storage
 	readVal := *balance // Same value
 
-	valid := vm.validateRead(10, addr, BalancePath, accounts.NilKey, StorageRead, Version{TxIndex: UnknownDep},
-		readVal, // value tiebreaker
+	valid := validateRead(vm, 10, addr, BalancePath, accounts.NilKey, StorageRead, Version{TxIndex: UnknownDep},
+		readVal, liveBalance, eqUint256, // value tiebreaker
 		func(rv, wv Version) VersionValidity { return VersionValid },
 		false, "")
 
@@ -68,8 +68,8 @@ func TestValueTiebreaker_DifferentBalance(t *testing.T) {
 	// Validate a read that got balance=500 from storage (stale)
 	readVal := *uint256.NewInt(500)
 
-	valid := vm.validateRead(10, addr, BalancePath, accounts.NilKey, StorageRead, Version{TxIndex: UnknownDep},
-		readVal,
+	valid := validateRead(vm, 10, addr, BalancePath, accounts.NilKey, StorageRead, Version{TxIndex: UnknownDep},
+		readVal, liveBalance, eqUint256,
 		func(rv, wv Version) VersionValidity { return VersionValid },
 		false, "")
 
@@ -86,15 +86,15 @@ func TestValueTiebreaker_NoncePath(t *testing.T) {
 	vm.WriteNonce(addr, Version{TxIndex: 5, Incarnation: 0}, uint64(42), true)
 
 	// Same nonce from storage → valid
-	valid := vm.validateRead(10, addr, NoncePath, accounts.NilKey, StorageRead, Version{TxIndex: UnknownDep},
-		uint64(42),
+	valid := validateRead(vm, 10, addr, NoncePath, accounts.NilKey, StorageRead, Version{TxIndex: UnknownDep},
+		uint64(42), liveNonce, eqUint64,
 		func(rv, wv Version) VersionValidity { return VersionValid },
 		false, "")
 	assert.Equal(t, VersionValid, valid, "Same nonce should be valid")
 
 	// Different nonce → invalid
-	valid = vm.validateRead(10, addr, NoncePath, accounts.NilKey, StorageRead, Version{TxIndex: UnknownDep},
-		uint64(41),
+	valid = validateRead(vm, 10, addr, NoncePath, accounts.NilKey, StorageRead, Version{TxIndex: UnknownDep},
+		uint64(41), liveNonce, eqUint64,
 		func(rv, wv Version) VersionValidity { return VersionValid },
 		false, "")
 	assert.Equal(t, VersionInvalid, valid, "Different nonce should be invalid")

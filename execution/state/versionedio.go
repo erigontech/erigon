@@ -1577,11 +1577,6 @@ func (vr versionedStateReader) ReadAccountIncarnation(address accounts.Address) 
 	return 0, nil
 }
 
-// NewAccountFieldWriteFromMap returns a typed *VersionedWrite[T] populated
-// from a successful versionMap read at (addr, path, txIdx), or nil if no
-// Done write is present. Used by parallel finalize paths that need to
-// reconstruct the post-tx value for an account field missing from a tx's
-// output write set.
 // SetAccountFieldFromMap resolves an account field from the version map and
 // sets it into out, returning whether a Done value was found.
 func SetAccountFieldFromMap(out *WriteSet, vm *VersionMap, addr accounts.Address, path AccountPath, ver Version, txIdx int) bool {
@@ -1786,40 +1781,43 @@ func (s *WriteSet) hasHeader(h WriteHeader) bool {
 	return false
 }
 
+// copyFrom merges src into s, value-copying each VersionedWrite so the result
+// shares no *VersionedWrite with src — the in-place recordWrite mutators would
+// otherwise make either side observe the other's later edits.
 func (s *WriteSet) copyFrom(src *WriteSet) {
 	if src == nil {
 		return
 	}
 	for a, vw := range src.address {
-		s.SetAddress(a, vw)
+		s.SetAddress(a, cloneVW(vw))
 	}
 	for a, vw := range src.balance {
-		s.SetBalance(a, vw)
+		s.SetBalance(a, cloneVW(vw))
 	}
 	for a, vw := range src.nonce {
-		s.SetNonce(a, vw)
+		s.SetNonce(a, cloneVW(vw))
 	}
 	for a, vw := range src.incarnation {
-		s.SetIncarnation(a, vw)
+		s.SetIncarnation(a, cloneVW(vw))
 	}
 	for a, vw := range src.selfDestruct {
-		s.SetSelfDestruct(a, vw)
+		s.SetSelfDestruct(a, cloneVW(vw))
 	}
 	for a, vw := range src.createContract {
-		s.SetCreateContract(a, vw)
+		s.SetCreateContract(a, cloneVW(vw))
 	}
 	for a, vw := range src.code {
-		s.SetCode(a, vw)
+		s.SetCode(a, cloneVW(vw))
 	}
 	for a, vw := range src.codeHash {
-		s.SetCodeHash(a, vw)
+		s.SetCodeHash(a, cloneVW(vw))
 	}
 	for a, vw := range src.codeSize {
-		s.SetCodeSize(a, vw)
+		s.SetCodeSize(a, cloneVW(vw))
 	}
 	for a, inner := range src.storage {
 		for key, vw := range inner {
-			s.SetStorage(a, key, vw)
+			s.SetStorage(a, key, cloneVW(vw))
 		}
 	}
 }
@@ -2239,6 +2237,30 @@ func (io *VersionedIO) AsBlockAccessList() types.BlockAccessList {
 				account := ensureAccountState(ac, addr)
 				for key, w := range byKey {
 					account.applyWriteStorage(key, w.Val, w.Version.blockAccessIndex())
+				}
+			}
+			// The paths above carry BAL field values; these carry none but still
+			// touch the account, so register the address (EIP-7928 requires every
+			// touched address to appear) — the write pass must be self-sufficient,
+			// not rely on recordWrite* also feeding AccessedAddresses.
+			for addr := range writes.Incarnations() {
+				if !addr.IsNil() {
+					ensureAccountState(ac, addr)
+				}
+			}
+			for addr := range writes.CodeHashes() {
+				if !addr.IsNil() {
+					ensureAccountState(ac, addr)
+				}
+			}
+			for addr := range writes.createContract {
+				if !addr.IsNil() {
+					ensureAccountState(ac, addr)
+				}
+			}
+			for addr := range writes.codeSize {
+				if !addr.IsNil() {
+					ensureAccountState(ac, addr)
 				}
 			}
 		}

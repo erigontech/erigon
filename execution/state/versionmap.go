@@ -496,22 +496,17 @@ func (vm *VersionMap) LatestTxIndex(addr accounts.Address, path AccountPath, key
 	return fk, true
 }
 
-// AnyDoneBoolWriteEquals reports whether any Done write at TxIdx ≤
-// txIdxLimit has data == target. Detects a prior in-block
+// AnyDoneSelfDestructEquals reports whether any Done SelfDestruct write at
+// TxIdx ≤ txIdxLimit has value == target. Detects a prior in-block
 // SelfDestructPath=true write that a later revival flipped back to false
 // — a case Read alone (latest-only) misses.
-func (vm *VersionMap) AnyDoneBoolWriteEquals(addr accounts.Address, path AccountPath, key accounts.StorageKey, txIdxLimit int, target bool) bool {
+func (vm *VersionMap) AnyDoneSelfDestructEquals(addr accounts.Address, txIdxLimit int, target bool) bool {
 	if vm == nil {
 		return false
-	}
-	if path != SelfDestructPath {
-		panic("AnyDoneBoolWriteEquals: only SelfDestructPath is supported")
 	}
 	vm.mu.RLock()
 	defer vm.mu.RUnlock()
 
-	// vio typed model: SelfDestructPath is the only bool path; read its
-	// per-address typed cells directly (mirrors ReadSelfDestruct).
 	e, present := vm.s[addr]
 	if !present || e.SelfDestruct == nil {
 		return false
@@ -810,11 +805,55 @@ const (
 	VersionTooEarly
 )
 
-func (vm *VersionMap) validateRead(txIndex int, addr accounts.Address, path AccountPath, key accounts.StorageKey, source ReadSource, version Version,
-	readVal any,
+// validateRead validates one typed read. The recorded value stays typed T and is
+// never boxed into `any`: readLive fetches the live version-map value for the
+// same path and eq compares them for the rare value tiebreaker. The recursive
+// cross-path core (validateReadImpl) is value-less — it probes other paths of
+// other types, so it cannot itself be generic over T.
+func validateRead[T any](vm *VersionMap, txIndex int, addr accounts.Address, path AccountPath, key accounts.StorageKey, source ReadSource, version Version,
+	readVal T,
+	readLive func(*VersionMap, accounts.Address, accounts.StorageKey, int) (T, ReadResult, bool),
+	eq func(a, b T) bool,
 	checkVersion func(readVersion, writeVersion Version) VersionValidity,
 	traceInvalid bool, tracePrefix string) VersionValidity {
-	return vm.validateReadImpl(txIndex, addr, path, key, source, version, readVal, checkVersion, traceInvalid, tracePrefix, false)
+	// One typed read supplies BOTH the status (for the version check) and the
+	// live value (for the rare tiebreaker) — no second lookup, no boxing. The
+	// tiebreaker branch in validateReadImpl only fires when rr is Done, so eq
+	// compares against the value that came with rr.
+	live, rr, ok := readLive(vm, addr, key, txIndex)
+	matchesLive := func() bool { return ok && eq(readVal, live) }
+	return vm.validateReadImpl(txIndex, addr, path, key, source, version, rr, matchesLive, checkVersion, traceInvalid, tracePrefix, false)
+}
+
+// Typed live-value readers (uniform signature so validateRead can thread them
+// generically) and equality helpers for the value tiebreaker.
+func liveBalance(vm *VersionMap, a accounts.Address, _ accounts.StorageKey, tx int) (uint256.Int, ReadResult, bool) {
+	return vm.ReadBalance(a, tx)
+}
+func liveNonce(vm *VersionMap, a accounts.Address, _ accounts.StorageKey, tx int) (uint64, ReadResult, bool) {
+	return vm.ReadNonce(a, tx)
+}
+func liveIncarnation(vm *VersionMap, a accounts.Address, _ accounts.StorageKey, tx int) (uint64, ReadResult, bool) {
+	return vm.ReadIncarnation(a, tx)
+}
+func liveCodeHash(vm *VersionMap, a accounts.Address, _ accounts.StorageKey, tx int) (accounts.CodeHash, ReadResult, bool) {
+	return vm.ReadCodeHash(a, tx)
+}
+func liveAddress(vm *VersionMap, a accounts.Address, _ accounts.StorageKey, tx int) (*accounts.Account, ReadResult, bool) {
+	return vm.ReadAddress(a, tx)
+}
+func liveStorage(vm *VersionMap, a accounts.Address, k accounts.StorageKey, tx int) (uint256.Int, ReadResult, bool) {
+	return vm.ReadStorage(a, k, tx)
+}
+
+func eqUint256(a, b uint256.Int) bool { return a.Eq(&b) }
+func eqUint64(a, b uint64) bool       { return a == b }
+func eqCodeHash(a, b accounts.CodeHash) bool {
+	return a == b
+}
+func eqAccount(a, b *accounts.Account) bool {
+	return a != nil && b != nil && a.Balance.Eq(&b.Balance) && a.Nonce == b.Nonce &&
+		a.Incarnation == b.Incarnation && a.CodeHash == b.CodeHash
 }
 
 // validateReadImpl is validateRead with a recursive flag: the cross-validate
@@ -822,15 +861,12 @@ func (vm *VersionMap) validateRead(txIndex int, addr accounts.Address, path Acco
 // so they can be distinguished from a top-level read — a synthetic probe carries
 // no recorded value of its own and must not invalidate on a bare Done entry.
 func (vm *VersionMap) validateReadImpl(txIndex int, addr accounts.Address, path AccountPath, key accounts.StorageKey, source ReadSource, version Version,
-	readVal any,
+	rr ReadResult,
+	matchesLive func() bool,
 	checkVersion func(readVersion, writeVersion Version) VersionValidity,
 	traceInvalid bool, tracePrefix string, recursive bool) VersionValidity {
 
 	valid := VersionValid
-
-	// Status-only read (no value box); the value is needed only in the rare
-	// value-tiebreaker below, where liveValueEquals does a boxed Read.
-	rr := vm.ReadStatus(addr, path, key, txIndex)
 	switch rr.Status() {
 	case MVReadResultDone:
 		if source != MapRead {
@@ -849,14 +885,15 @@ func (vm *VersionMap) validateReadImpl(txIndex int, addr accounts.Address, path 
 			isBALPrePopulatedPath := path == BalancePath || path == NoncePath ||
 				path == CodePath || path == StoragePath
 			if !vm.HasBAL || !isBALPrePopulatedPath {
-				if recursive && readVal == nil {
+				if recursive && matchesLive == nil {
 					// Synthetic cross-validate probe (no recorded value of its
 					// own) — the outer entry's validation covers it. Without this
 					// guard a recursive AddressPath/SelfDestructPath probe that
 					// lands on a Done cell would over-invalidate.
-				} else if readVal != nil && liveValueEquals(vm, addr, path, key, txIndex, readVal) {
+				} else if matchesLive != nil && matchesLive() {
 					// Value tiebreaker: a Done entry now exists where the read
 					// saw storage, but it holds the same value — read stays valid.
+					// Evaluated typed by the caller; no boxing.
 				} else {
 					valid = VersionInvalid
 				}
@@ -895,7 +932,7 @@ func (vm *VersionMap) validateReadImpl(txIndex int, addr accounts.Address, path 
 			// AddressPath (its source/version), so validate it against AddressPath
 			// at that version.
 			valid = vm.validateReadImpl(txIndex, addr, AddressPath, accounts.StorageKey{}, source,
-				version, nil, checkVersion, traceInvalid, tracePrefix, true)
+				version, vm.ReadStatus(addr, AddressPath, accounts.StorageKey{}, txIndex), nil, checkVersion, traceInvalid, tracePrefix, true)
 		} else if source != StorageRead {
 			valid = VersionInvalid
 		} else {
@@ -906,16 +943,16 @@ func (vm *VersionMap) validateReadImpl(txIndex int, addr accounts.Address, path 
 				// any property (code, storage slots, balance, nonce, etc.).
 				if path != AddressPath && path != SelfDestructPath {
 					if valid = vm.validateReadImpl(txIndex, addr, AddressPath, accounts.StorageKey{}, source,
-						version, nil, checkVersion, traceInvalid, tracePrefix, true); valid == VersionValid {
+						version, vm.ReadStatus(addr, AddressPath, accounts.StorageKey{}, txIndex), nil, checkVersion, traceInvalid, tracePrefix, true); valid == VersionValid {
 						valid = vm.validateReadImpl(txIndex, addr, SelfDestructPath, accounts.StorageKey{}, source,
-							version, nil, checkVersion, traceInvalid, tracePrefix, true)
+							version, vm.ReadStatus(addr, SelfDestructPath, accounts.StorageKey{}, txIndex), nil, checkVersion, traceInvalid, tracePrefix, true)
 					} else {
 						vm.validateReadImpl(txIndex, addr, SelfDestructPath, accounts.StorageKey{}, source,
-							version, nil, checkVersion, traceInvalid, tracePrefix, true)
+							version, vm.ReadStatus(addr, SelfDestructPath, accounts.StorageKey{}, txIndex), nil, checkVersion, traceInvalid, tracePrefix, true)
 					}
 				} else if path == AddressPath {
 					valid = vm.validateReadImpl(txIndex, addr, SelfDestructPath, accounts.StorageKey{}, source,
-						version, nil, checkVersion, traceInvalid, tracePrefix, true)
+						version, vm.ReadStatus(addr, SelfDestructPath, accounts.StorageKey{}, txIndex), nil, checkVersion, traceInvalid, tracePrefix, true)
 
 					// A prior tx re-creating this account makes a nil AddressPath
 					// storage read stale; IncarnationPath is the specific signal
@@ -961,97 +998,83 @@ func (vm *VersionMap) validateReadImpl(txIndex int, addr accounts.Address, path 
 // ValidateVersion check if transaction's readSet is still valid based on the current multi-versioned memory
 func (vm *VersionMap) ValidateVersion(txIdx int, lastIO *VersionedIO, checkVersion func(readVersion, writeVersion Version) VersionValidity, traceInvalid bool, tracePrefix string) (valid VersionValidity) {
 	rs := lastIO.ReadSet(txIdx)
-	check := func(addr accounts.Address, path AccountPath, key accounts.StorageKey, hdr ReadHeader, val any) bool {
-		valid = vm.validateRead(txIdx, addr, path, key, hdr.Source, hdr.Version,
-			val, checkVersion, traceInvalid, tracePrefix)
-		return valid == VersionValid
+	valid = VersionValid
+	// ok checks one validity result, latching valid; ok==false stops the scan.
+	ok := func(v VersionValidity) bool { valid = v; return v == VersionValid }
+	// noValueRead validates a path whose recorded value carries no tiebreaker
+	// (self-destruct / create-contract / code / code-size): the version/status
+	// check is authoritative. One ReadStatus, no value comparison.
+	noValueRead := func(addr accounts.Address, path AccountPath, key accounts.StorageKey, hdr ReadHeader) VersionValidity {
+		return vm.validateReadImpl(txIdx, addr, path, key, hdr.Source, hdr.Version,
+			vm.ReadStatus(addr, path, key, txIdx), nil, checkVersion, traceInvalid, tracePrefix, false)
 	}
+
+	// Value paths go through the generic validateRead so the recorded value stays
+	// typed (never boxed) and the single typed read supplies both status and the
+	// tiebreaker value.
 	for a, tr := range rs.address {
-		var acc *accounts.Account
+		var rv *accounts.Account
 		if tr.Val != nil {
-			acc = tr.Val.Account()
+			rv = tr.Val.Account()
 		}
-		if !check(a, AddressPath, accounts.NilKey, tr.ReadHeader, acc) {
+		if !ok(validateRead(vm, txIdx, a, AddressPath, accounts.NilKey, tr.Source, tr.Version, rv, liveAddress, eqAccount, checkVersion, traceInvalid, tracePrefix)) {
 			return
 		}
 	}
 	for a, tr := range rs.balance {
-		if !check(a, BalancePath, accounts.NilKey, tr.ReadHeader, tr.Val) {
+		if !ok(validateRead(vm, txIdx, a, BalancePath, accounts.NilKey, tr.Source, tr.Version, tr.Val, liveBalance, eqUint256, checkVersion, traceInvalid, tracePrefix)) {
 			return
 		}
 	}
 	for a, tr := range rs.nonce {
-		if !check(a, NoncePath, accounts.NilKey, tr.ReadHeader, tr.Val) {
+		if !ok(validateRead(vm, txIdx, a, NoncePath, accounts.NilKey, tr.Source, tr.Version, tr.Val, liveNonce, eqUint64, checkVersion, traceInvalid, tracePrefix)) {
 			return
 		}
 	}
 	for a, tr := range rs.incarnation {
-		if !check(a, IncarnationPath, accounts.NilKey, tr.ReadHeader, tr.Val) {
-			return
-		}
-	}
-	for a, tr := range rs.selfDestruct {
-		if !check(a, SelfDestructPath, accounts.NilKey, tr.ReadHeader, tr.Val) {
-			return
-		}
-	}
-	for a, tr := range rs.createContract {
-		if !check(a, CreateContractPath, accounts.NilKey, tr.ReadHeader, tr.Val) {
-			return
-		}
-	}
-	for a, tr := range rs.code {
-		if !check(a, CodePath, accounts.NilKey, tr.ReadHeader, tr.Val) {
+		if !ok(validateRead(vm, txIdx, a, IncarnationPath, accounts.NilKey, tr.Source, tr.Version, tr.Val, liveIncarnation, eqUint64, checkVersion, traceInvalid, tracePrefix)) {
 			return
 		}
 	}
 	for a, tr := range rs.codeHash {
-		if !check(a, CodeHashPath, accounts.NilKey, tr.ReadHeader, tr.Val) {
-			return
-		}
-	}
-	for a, tr := range rs.codeSize {
-		if !check(a, CodeSizePath, accounts.NilKey, tr.ReadHeader, tr.Val) {
+		if !ok(validateRead(vm, txIdx, a, CodeHashPath, accounts.NilKey, tr.Source, tr.Version, tr.Val, liveCodeHash, eqCodeHash, checkVersion, traceInvalid, tracePrefix)) {
 			return
 		}
 	}
 	for a, inner := range rs.storage {
 		for k, tr := range inner {
-			if !check(a, StoragePath, k, tr.ReadHeader, tr.Val) {
+			if !ok(validateRead(vm, txIdx, a, StoragePath, k, tr.Source, tr.Version, tr.Val, liveStorage, eqUint256, checkVersion, traceInvalid, tracePrefix)) {
 				return
 			}
+		}
+	}
+	for a, tr := range rs.selfDestruct {
+		if !ok(noValueRead(a, SelfDestructPath, accounts.NilKey, tr.ReadHeader)) {
+			return
+		}
+	}
+	for a, tr := range rs.createContract {
+		if !ok(noValueRead(a, CreateContractPath, accounts.NilKey, tr.ReadHeader)) {
+			return
+		}
+	}
+	for a, tr := range rs.code {
+		if !ok(noValueRead(a, CodePath, accounts.NilKey, tr.ReadHeader)) {
+			return
+		}
+	}
+	for a, tr := range rs.codeSize {
+		if !ok(noValueRead(a, CodeSizePath, accounts.NilKey, tr.ReadHeader)) {
+			return
 		}
 	}
 	return
 }
 
-// liveValueEquals reports whether the live versionMap value for (addr,path,key)
-// equals readVal — the validator tiebreaker when a Done cell exists where the
-// read saw storage but holds the same value, so the read stays valid.
-func liveValueEquals(vm *VersionMap, addr accounts.Address, path AccountPath, key accounts.StorageKey, txIdx int, readVal any) bool {
-	switch path {
-	case BalancePath:
-		v, _, ok := vm.ReadBalance(addr, txIdx)
-		return ok && valuesEqual(path, readVal, v)
-	case NoncePath:
-		v, _, ok := vm.ReadNonce(addr, txIdx)
-		return ok && valuesEqual(path, readVal, v)
-	case IncarnationPath:
-		v, _, ok := vm.ReadIncarnation(addr, txIdx)
-		return ok && valuesEqual(path, readVal, v)
-	case CodeHashPath:
-		v, _, ok := vm.ReadCodeHash(addr, txIdx)
-		return ok && valuesEqual(path, readVal, v)
-	case AddressPath:
-		v, _, ok := vm.ReadAddress(addr, txIdx)
-		return ok && valuesEqual(path, readVal, v)
-	case StoragePath:
-		v, _, ok := vm.ReadStorage(addr, key, txIdx)
-		return ok && valuesEqual(path, readVal, v)
-	default:
-		return false
-	}
-}
+// done requires the re-read to resolve to a committed (Done) cell, not an
+// Estimate — an Estimate value can still change, so comparing against it is only
+// safe if the caller guarantees no concurrent flush, which we don't assume here.
+func done(res ReadResult, ok bool) bool { return ok && res.Status() == MVReadResultDone }
 
 // valuesEqual compares a read value with a versionMap write value for the
 // same path. Used as a tiebreaker: when the version/source check would
