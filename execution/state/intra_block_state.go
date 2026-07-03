@@ -282,39 +282,7 @@ func (sdb *IntraBlockState) SetTrace(trace bool) {
 }
 
 func (sdb *IntraBlockState) hasWrite(addr accounts.Address, path AccountPath, key accounts.StorageKey) bool {
-	switch path {
-	case AddressPath:
-		_, ok := sdb.versionedWrites.GetAddress(addr)
-		return ok
-	case BalancePath:
-		_, ok := sdb.versionedWrites.GetBalance(addr)
-		return ok
-	case NoncePath:
-		_, ok := sdb.versionedWrites.GetNonce(addr)
-		return ok
-	case IncarnationPath:
-		_, ok := sdb.versionedWrites.GetIncarnation(addr)
-		return ok
-	case SelfDestructPath:
-		_, ok := sdb.versionedWrites.GetSelfDestruct(addr)
-		return ok
-	case CreateContractPath:
-		_, ok := sdb.versionedWrites.GetCreateContract(addr)
-		return ok
-	case CodePath:
-		_, ok := sdb.versionedWrites.GetCode(addr)
-		return ok
-	case CodeHashPath:
-		_, ok := sdb.versionedWrites.GetCodeHash(addr)
-		return ok
-	case CodeSizePath:
-		_, ok := sdb.versionedWrites.GetCodeSize(addr)
-		return ok
-	case StoragePath:
-		_, ok := sdb.versionedWrites.GetStorage(addr, key)
-		return ok
-	}
-	return false
+	return sdb.versionedWrites.Has(WriteHeader{Address: addr, Path: path, Key: key})
 }
 
 func (sdb *IntraBlockState) HasStorage(addr accounts.Address) (bool, error) {

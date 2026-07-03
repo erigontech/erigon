@@ -846,8 +846,7 @@ func eqCodeHash(a, b accounts.CodeHash) bool {
 	return a == b
 }
 func eqAccount(a, b *accounts.Account) bool {
-	return a != nil && b != nil && a.Balance.Eq(&b.Balance) && a.Nonce == b.Nonce &&
-		a.Incarnation == b.Incarnation && a.CodeHash == b.CodeHash
+	return a != nil && b != nil && a.Equals(b)
 }
 
 // validateReadImpl is validateRead with a recursive flag: the cross-validate

@@ -883,42 +883,11 @@ func refreshCodeHash(s *IntraBlockState, addr accounts.Address, currentHash acco
 	return currentHash, r.source, r.version, nil
 }
 
-// readState reads a storage slot.
+// readState reads a storage slot; it is readStateForSet without the
+// SetState-only "clean" bool.
 func readState(s *IntraBlockState, addr accounts.Address, key accounts.StorageKey) (uint256.Int, ReadSource, Version, error) {
-	var r readPathResult
-	versionedReadCore(s, addr, StoragePath, key, false, false, &r)
-	if r.err != nil {
-		return uint256.Int{}, r.source, r.version, r.err
-	}
-	switch r.outcome {
-	case outcomeWriteSetHit:
-		return r.vwStorage.Val, r.source, r.version, nil
-	case outcomeReadSetHit:
-		tr, _ := s.versionedReads.GetStorage(addr, key)
-		return tr.Val, r.source, r.version, nil
-	case outcomeMapDone:
-		v := r.mapStorageVal
-		if r.recordVR {
-			s.versionedReads.SetStorage(addr, key, VersionedRead[uint256.Int]{r.hdr, v})
-		}
-		return v, r.source, r.version, nil
-	case outcomeStorageRead:
-		var v uint256.Int
-		if r.so != nil && !r.so.deleted {
-			v, _ = r.so.GetState(key)
-		}
-		if r.recordVR {
-			s.versionedReads.SetStorage(addr, key, VersionedRead[uint256.Int]{r.hdr, v})
-		}
-		return v, r.source, r.version, nil
-	case outcomeLegacyStorage:
-		if r.so == nil || r.so.deleted {
-			return uint256.Int{}, StorageRead, UnknownVersion, nil
-		}
-		v, _ := r.so.GetState(key)
-		return v, StorageRead, UnknownVersion, nil
-	}
-	return uint256.Int{}, r.source, r.version, nil
+	v, source, version, _, err := readStateForSet(s, addr, key)
+	return v, source, version, err
 }
 
 // readStateForSet is the SetState-specific variant.  Returns the
