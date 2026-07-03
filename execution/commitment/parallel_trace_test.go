@@ -18,60 +18,69 @@ package commitment
 
 import (
 	"bytes"
-	"context"
 	"fmt"
+	"io"
+	"regexp"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/stretchr/testify/require"
-
-	"github.com/erigontech/erigon/common/length"
 )
 
-// A whale's deep storage fold runs across concurrent workers; its trace lines
-// must all be tagged with the parent account address so one account's fold can
-// be grepped out of the interleaved parallel output.
-func TestParallelTrace_WhaleTaggedByParentAddress(t *testing.T) {
+// tracePrefix tags each line (including interior lines) with its prefix and
+// leaves the final trailing newline alone.
+func TestTracePrefix_TagsWholeLines(t *testing.T) {
 	t.Parallel()
-
-	pk, upds := buildWhaleCorpus(bigAccountWhale(deepStorageThreshold * 2))
-
-	// whale = the account address shared by the most storage keys.
-	counts := map[string]int{}
-	for _, k := range pk {
-		if len(k) == length.Addr+length.Hash {
-			counts[string(k[:length.Addr])]++
-		}
-	}
-	whale, best := "", 0
-	for a, n := range counts {
-		if n > best {
-			whale, best = a, n
-		}
-	}
-	require.Greater(t, best, deepStorageThreshold, "corpus must contain a deep-storage whale")
-	whaleTag := fmt.Sprintf("[%x] ", whale)
-
-	ms := NewMockState(t)
-	ms.SetConcurrentCommitment(true)
-	require.NoError(t, ms.applyPlainUpdates(pk, upds))
-	pph := NewParallelPatriciaHashed(mockTrieCtxFactory(ms), length.Addr, DefaultTrieConfig())
-	pph.SetNumWorkers(4)
-	pph.ResetContext(ms)
-
 	var buf bytes.Buffer
-	pph.SetTraceWriter(&buf)
-	u := WrapKeyUpdates(t, ModeParallel, KeyToHexNibbleHash, pk, upds)
-	_, err := pph.Process(context.Background(), u, "", nil, WarmupConfig{})
-	require.NoError(t, err)
-	u.Close()
-	pph.Release()
+	w := tracePrefix(&buf, "[dead] ")
+	fmt.Fprint(w, "one\n")
+	fmt.Fprint(w, "multi\nline\n")
+	require.Equal(t, "[dead] one\n[dead] multi\n[dead] line\n", buf.String())
+}
 
-	out := buf.String()
-	require.Positive(t, strings.Count(out, whaleTag), "whale fold lines must be tagged with the parent account address")
+func TestTracePrefix_NilDisables(t *testing.T) {
+	t.Parallel()
+	require.Nil(t, tracePrefix(nil, "[x] "))
+}
 
-	// Every tagged occurrence must sit at the start of a line (attributable, not
-	// mid-line noise), and the tag must never split a fold line.
-	require.True(t, strings.HasPrefix(out, whaleTag) || strings.Contains(out, "\n"+whaleTag),
-		"address tag must prefix whole lines")
+// Concurrent fold workers (the parallel/streaming trie) each own a prefixWriter
+// over one shared syncWriter; every emitted line must stay whole and carry its
+// worker tag — never interleaved or corrupted mid-line.
+func TestSyncWriter_ConcurrentLinesStayAttributed(t *testing.T) {
+	t.Parallel()
+	var buf bytes.Buffer
+	shared := NewSyncWriter(&buf)
+
+	var wg sync.WaitGroup
+	for g := 0; g < 8; g++ {
+		w := tracePrefix(shared, fmt.Sprintf("[%x] ", g))
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for i := 0; i < 250; i++ {
+				fmt.Fprintf(w, "step %d\n", i)
+			}
+		}()
+	}
+	wg.Wait()
+
+	line := regexp.MustCompile(`^\[[0-9a-f]\] step \d+$`)
+	lines := strings.Split(strings.TrimRight(buf.String(), "\n"), "\n")
+	require.Len(t, lines, 8*250)
+	for _, ln := range lines {
+		require.Regexp(t, line, ln, "concurrent trace line was interleaved or lost its tag")
+	}
+}
+
+type shortWriter struct{}
+
+func (shortWriter) Write(p []byte) (int, error) { return len(p) - 1, nil }
+
+// prefixWriter must not silently accept a short underlying write.
+func TestPrefixWriter_ShortWrite(t *testing.T) {
+	t.Parallel()
+	pw := &prefixWriter{w: shortWriter{}, prefix: []byte("[x] ")}
+	_, err := pw.Write([]byte("hello\n"))
+	require.ErrorIs(t, err, io.ErrShortWrite)
 }
