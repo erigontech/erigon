@@ -124,6 +124,9 @@ func checkReadable(d *seg.Decompressor, fc seg.FileCompression) (err error) {
 	}()
 	r := seg.NewReader(d.MakeGetter(), fc)
 	r.Reset(0)
+	// buf must stay a private heap scratch: Next may return an mmap-backed slice
+	// for an uncompressed word, so feeding its return back as the next buffer
+	// would make Next memmove into read-only mmap → SIGBUS on mixed-compression files.
 	buf := make([]byte, 0, 4096)
 	for i := 0; i < checkReadableMaxWords && r.HasNext(); i++ {
 		_, _ = r.Next(buf[:0])

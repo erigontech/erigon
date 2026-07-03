@@ -61,7 +61,7 @@ func ParseFileCompression(s string) (FileCompression, error) {
 	case "kv", "keys+vals":
 		return CompressKeys | CompressVals, nil
 	default:
-		return CompressNone, fmt.Errorf("unknown file compression %q (want: none, k, v, kv)", s)
+		return CompressNone, fmt.Errorf("unknown file compression %q (want: none, k|keys, v|vals, kv|keys+vals)", s)
 	}
 }
 
