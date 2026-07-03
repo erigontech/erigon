@@ -18,17 +18,23 @@ package types
 
 import (
 	"fmt"
+	"sync"
 )
 
 // TxTypeSpec describes an externally registered transaction type's decode
 // facets. It is consulted only from the default arm of the built-in type
 // switches, so an unregistered id keeps today's behavior unchanged.
 type TxTypeSpec struct {
-	New           func() Transaction
+	New func() Transaction
+	// UnmarshalJSON may be nil for types not submittable over JSON-RPC;
+	// JSON decoding then rejects the type id as unknown.
 	UnmarshalJSON func([]byte) (Transaction, error)
 }
 
-var txTypeRegistry = map[byte]TxTypeSpec{}
+var (
+	txTypeRegistryMu sync.RWMutex
+	txTypeRegistry   = map[byte]TxTypeSpec{}
+)
 
 // RegisterTxType registers spec for id. It panics if id collides with a
 // built-in transaction type, lies outside the EIP-2718 typed-envelope range,
@@ -47,13 +53,23 @@ func RegisterTxType(id byte, spec TxTypeSpec) {
 	if spec.New == nil {
 		panic("types: RegisterTxType: spec.New is nil")
 	}
+	txTypeRegistryMu.Lock()
+	defer txTypeRegistryMu.Unlock()
 	if _, ok := txTypeRegistry[id]; ok {
 		panic(fmt.Sprintf("types: RegisterTxType: %d already registered", id))
 	}
 	txTypeRegistry[id] = spec
 }
 
+func unregisterTxType(id byte) {
+	txTypeRegistryMu.Lock()
+	defer txTypeRegistryMu.Unlock()
+	delete(txTypeRegistry, id)
+}
+
 func registeredTxType(id byte) (TxTypeSpec, bool) {
+	txTypeRegistryMu.RLock()
+	defer txTypeRegistryMu.RUnlock()
 	spec, ok := txTypeRegistry[id]
 	return spec, ok
 }

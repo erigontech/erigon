@@ -249,3 +249,11 @@ func TestUnregisteredTxTypeStillUnsupported(t *testing.T) {
 	require.Error(t, err)
 	require.False(t, errors.Is(err, ErrTxTypeNotSupported))
 }
+
+func TestRegisteredTxTypeNilJSONDecoder(t *testing.T) {
+	RegisterTxType(0x7d, TxTypeSpec{New: func() Transaction { return &fakeRegisteredTx{} }})
+	t.Cleanup(func() { unregisterTxType(0x7d) })
+
+	_, err := UnmarshalTransactionFromJSON([]byte(`{"type":"0x7d"}`))
+	require.Error(t, err)
+}
