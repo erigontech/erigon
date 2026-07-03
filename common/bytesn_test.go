@@ -75,4 +75,18 @@ func TestBytesNSetBytes(t *testing.T) {
 			check(t, b[:], seq(n))
 		}
 	})
+	t.Run("Hash", func(t *testing.T) {
+		for _, n := range []int{20, 32, 40} {
+			var h Hash
+			h.SetBytes(seq(n))
+			check(t, h[:], seq(n))
+		}
+	})
+	t.Run("Address", func(t *testing.T) {
+		for _, n := range []int{12, 20, 28} {
+			var a Address
+			a.SetBytes(seq(n))
+			check(t, a[:], seq(n))
+		}
+	})
 }

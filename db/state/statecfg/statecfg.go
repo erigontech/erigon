@@ -16,15 +16,17 @@ type DomainCfg struct {
 	ValuesTable string    // bucket to store domain values; key -> inverted_step + values (Dupsort)
 	LargeValues bool
 
-	// replaceKeysInValues allows to replace commitment branch values with shorter keys.
-	// for commitment domain only
-	ReplaceKeysInValues bool
+	// Write shortened key references in commitment branch values; commitment domain only.
+	ReferencesInCommitmentBranches bool
 
 	ExistenceFilter ExistenceFilterMode
 
 	BuildAccessorsWorkers int // parallel workers for building .kvi accessors (recsplit)
 
 	FileVersion DomainVersionTypes
+
+	// KVWriteVersion derives the version stamped on a new .kv file from live config; nil => DataKV.Current.
+	KVWriteVersion func(*DomainCfg) version.Version
 }
 
 func (d DomainCfg) Tables() []string {
