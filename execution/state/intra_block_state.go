@@ -1187,6 +1187,17 @@ func (sdb *IntraBlockState) refreshVersionedAccount(addr accounts.Address, readA
 		}
 	}
 
+	// A sub-field overlay (e.g. a pre-populated BalancePath) superseded the
+	// account-record read; reconcile the recorded read with it so a later
+	// record flush can't churn the AddressPath version into a spurious
+	// validation conflict.
+	if account != readAccount {
+		if rd, ok := sdb.versionedReads[addr][AccountKey{Path: AddressPath}]; ok {
+			rd.Val = account
+			sdb.versionedReads.Set(rd)
+		}
+	}
+
 	return account, source, version, nil
 }
 

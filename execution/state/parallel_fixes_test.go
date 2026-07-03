@@ -122,6 +122,55 @@ func TestValuesEqual(t *testing.T) {
 	assert.False(t, valuesEqual(BalancePath, nil, *b1), "One nil should not be equal")
 }
 
+// TestAddressRecordReadReconciledWithSupersedingBalance reproduces the
+// coinbase over-invalidation storm. A tx reads an account record (AddressPath)
+// that floors to an early flushed version, while a later pre-populated
+// BalancePath (the BAL fee credit) supersedes the balance.
+// refreshVersionedAccount overlays the superseding balance onto the account
+// the tx uses — but the read recorded in the readSet kept the stale snapshot,
+// so a later account-record flush churned the AddressPath version and
+// validation spuriously invalidated the read.
+func TestAddressRecordReadReconciledWithSupersedingBalance(t *testing.T) {
+	mvhm := NewVersionMap(nil)
+	addr := accounts.InternAddress([20]byte{0xf9, 0x7e, 0x18, 0x0c})
+
+	// Account record flushed at tx 1 (balance 100).
+	acc := &accounts.Account{Balance: *uint256.NewInt(100)}
+	mvhm.Write(addr, AddressPath, accounts.NilKey, Version{TxIndex: 1}, acc, true)
+	// Later pre-populated balance (BAL fee credit) at tx 2 (balance 200).
+	mvhm.Write(addr, BalancePath, accounts.NilKey, Version{TxIndex: 2}, *uint256.NewInt(200), true)
+
+	ibs := NewWithVersionMap(&emptyReader{}, mvhm)
+	ibs.txIndex = 4
+
+	// Account-record read (e.g. a STATICCALL / existence probe).
+	so, err := ibs.getStateObject(addr, true)
+	require.NoError(t, err)
+	require.NotNil(t, so)
+	assert.Equal(t, *uint256.NewInt(200), so.data.Balance, "tx must see the superseding balance")
+
+	rd, ok := ibs.versionedReads[addr][AccountKey{Path: AddressPath}]
+	require.True(t, ok, "AddressPath read must be recorded")
+	recordedAcc, ok := rd.Val.(*accounts.Account)
+	require.True(t, ok)
+	assert.Equal(t, *uint256.NewInt(200), recordedAcc.Balance,
+		"recorded AddressPath read should reflect the superseding BalancePath, not the stale snapshot")
+
+	// Apply-flush writes the up-to-date record at tx 3 (balance 200).
+	acc2 := &accounts.Account{Balance: *uint256.NewInt(200)}
+	mvhm.Write(addr, AddressPath, accounts.NilKey, Version{TxIndex: 3}, acc2, true)
+
+	// Validation of the recorded read must stay valid (no re-execution).
+	valid := mvhm.validateRead(4, addr, AddressPath, accounts.NilKey, rd.Source, rd.Version, rd.Val,
+		func(rv, wv Version) VersionValidity {
+			if rv == wv {
+				return VersionValid
+			}
+			return VersionInvalid
+		}, false, "")
+	assert.Equal(t, VersionValid, valid, "record read must stay valid after the later record flush")
+}
+
 // TestVersionedWriteVersion verifies that VersionedWrite entries at
 // txIndex=0 are still reachable. The bug was that finalizeTx appended
 // writes without Version (zero value = txIndex=0), making them only
