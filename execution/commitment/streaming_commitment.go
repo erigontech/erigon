@@ -522,7 +522,11 @@ func (sc *StreamingCommitter) markQueued(s *splitState, nib byte) {
 func (sc *StreamingCommitter) foldKeys(nib byte, keys []touchedKey) (cell, []*DeferredBranchUpdate, bool, error) {
 	w := sc.workerPool.Get().(*HexPatriciaHashed)
 	w.mountTo(sc.base, int(nib))
-	w.SetTraceWriter(tracePrefix(sc.traceW, fmt.Sprintf("[fold %x] ", nib)))
+	if sc.traceW != nil {
+		w.SetTraceWriter(tracePrefix(sc.traceW, fmt.Sprintf("[fold %x] ", nib)))
+	} else {
+		w.SetTraceWriter(nil)
+	}
 	rctx, cleanup := sc.trieCtxFactory()
 	if cleanup != nil {
 		defer cleanup()
@@ -704,7 +708,11 @@ func (sc *StreamingCommitter) foldSplit(ctx context.Context, base *HexPatriciaHa
 	ni := s.prefix[0]
 	w := sc.workerPool.Get().(*HexPatriciaHashed)
 	w.mountTo(base, int(ni))
-	w.SetTraceWriter(tracePrefix(sc.traceW, fmt.Sprintf("[split %x] ", ni)))
+	if sc.traceW != nil {
+		w.SetTraceWriter(tracePrefix(sc.traceW, fmt.Sprintf("[split %x] ", ni)))
+	} else {
+		w.SetTraceWriter(nil)
+	}
 	wctx, cleanup := sc.trieCtxFactory()
 	if cleanup != nil {
 		defer cleanup()

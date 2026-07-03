@@ -197,8 +197,12 @@ func (pw *prefixWriter) Write(p []byte) (int, error) {
 			buf = append(buf, pw.prefix...)
 		}
 	}
-	if _, err := pw.w.Write(buf); err != nil {
+	n, err := pw.w.Write(buf)
+	if err != nil {
 		return 0, err
+	}
+	if n < len(buf) {
+		return 0, io.ErrShortWrite
 	}
 	return len(p), nil
 }

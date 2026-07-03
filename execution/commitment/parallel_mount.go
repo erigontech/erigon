@@ -101,8 +101,10 @@ func (p *ParallelPatriciaHashed) processMounted(ctx context.Context, updates *Up
 		g.Go(func() error {
 			w := p.workerPool.Get().(*HexPatriciaHashed)
 			w.mountTo(base, ni)
-			if p.template != nil {
+			if p.template != nil && p.template.traceW != nil {
 				w.traceW = tracePrefix(p.template.traceW, fmt.Sprintf("[mnt %x] ", ni))
+			} else {
+				w.traceW = nil
 			}
 			wctx, cleanup := p.trieCtxFactory()
 			if cleanup != nil {

@@ -1781,7 +1781,8 @@ func TestSetTraceWriter_NilWriterSafe(t *testing.T) {
 	ms := NewMockState(t)
 	hph := NewHexPatriciaHashed(1, ms, DefaultTrieConfig())
 
-	// nil writer disables tracing; this guards against a nil-deref on the trace path.
+	// A nil writer must be safe on the trace path (no nil-deref); this exercises
+	// Process with tracing disabled.
 	hph.SetTraceWriter(nil)
 
 	plainKeys, updates := NewUpdateBuilder().

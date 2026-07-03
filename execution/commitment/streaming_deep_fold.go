@@ -116,17 +116,19 @@ func dfsSubtreeDeep(w *HexPatriciaHashed, node *prefixNode, path []byte, storage
 func foldStorageRoot(ctx context.Context, numWorkers int, newWorker func() (*HexPatriciaHashed, func()), pu *parallelUpdate, node *prefixNode, path []byte) (common.Hash, error) {
 	accPrefix := append([]byte(nil), path...)
 
-	// Tag this account's storage-fold workers with its address so one account's
-	// fold can be grepped out of the interleaved parallel trace.
-	accID := node.plainKey
-	if accID == nil {
-		accID = accPrefix
-	}
-	accTag := fmt.Sprintf("[%x] ", accID)
-
 	base, releaseBase := newWorker()
 	defer releaseBase()
+
+	// Tag this account's storage-fold workers with its address so one account's
+	// fold can be grepped out of the interleaved parallel trace. Only paid for
+	// when tracing is on (base.traceW mirrors every worker's trace state).
+	var accTag string
 	if base.traceW != nil {
+		accID := node.plainKey
+		if accID == nil {
+			accID = accPrefix
+		}
+		accTag = fmt.Sprintf("[%x] ", accID)
 		base.SetTraceWriter(tracePrefix(base.traceW, accTag))
 	}
 	if err := unfoldStorageBase(base, accPrefix); err != nil {
