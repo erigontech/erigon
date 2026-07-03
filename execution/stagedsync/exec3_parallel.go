@@ -850,6 +850,28 @@ func (pe *parallelExecutor) triggerBatchCommitment(ctx context.Context) {
 	}
 }
 
+// freezeCommitmentFold tells the calculator (in-order on the commitResults
+// stream) to stop folding ahead — sent when the exec loop cuts the batch, so
+// commitment cannot advance past the block execution will stop at. Same
+// closed-channel-race handling as triggerBatchCommitment.
+func (pe *parallelExecutor) freezeCommitmentFold(ctx context.Context) {
+	if pe.commitResultsCh == nil {
+		return
+	}
+	defer func() {
+		if rec := recover(); rec != nil {
+			if e, ok := rec.(runtime.Error); ok && strings.Contains(e.Error(), "send on closed channel") {
+				return
+			}
+			panic(rec)
+		}
+	}()
+	select {
+	case pe.commitResultsCh <- &foldFreezeRequest{}:
+	case <-ctx.Done():
+	}
+}
+
 func (pe *parallelExecutor) LogComplete(stepsInDb float64) {
 	pe.progress.LogComplete(pe.rs.StateV3, pe, stepsInDb)
 	if domainMetrics := pe.domains().LogMetrics(); len(domainMetrics) > 0 {
@@ -902,6 +924,12 @@ func (pe *parallelExecutor) execLoop(ctx context.Context) (err error) {
 	pe.RLock()
 	applyTx := pe.applyTx
 	pe.RUnlock()
+
+	// sizeCutPending: the batch hit its size limit and the fold has been frozen;
+	// execute one more block so state catches up to any block the fold already
+	// computed ahead, then commit at a consistent boundary. Exec-loop-local; the
+	// exec and commit routines coordinate only through the commitResults stream.
+	sizeCutPending := false
 
 	for {
 		err := func() error {
@@ -1106,7 +1134,22 @@ func (pe *parallelExecutor) execLoop(ctx context.Context) (err error) {
 					pe.reachedMaxBlock.Store(true)
 					pe.triggerBatchCommitment(ctx)
 					return nil
-				case execLoopExitSizeLimit, execLoopExitExhausted, execLoopExitStopAfter:
+				case execLoopExitSizeLimit:
+					// First hit: freeze the fold and execute one more block, so state
+					// catches up to any block the fold already computed ahead; commit
+					// on the next iteration at a boundary where state and commitment
+					// agree (else commitment persists ahead of state → orphan → wrong
+					// root on restart). If there is no next block (dispatch exhausted
+					// or at maxBlockNum), there is nothing folded past here — commit
+					// now. The fold is ≤1 ahead, so at most one extra block executes.
+					if !sizeCutPending && blockResult.Exhausted == nil && blockResult.BlockNum < pe.maxBlockNum {
+						pe.freezeCommitmentFold(ctx)
+						sizeCutPending = true
+						break
+					}
+					pe.triggerBatchCommitment(ctx)
+					return nil
+				case execLoopExitExhausted, execLoopExitStopAfter:
 					pe.triggerBatchCommitment(ctx)
 					return nil
 				}

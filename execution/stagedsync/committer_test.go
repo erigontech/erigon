@@ -226,3 +226,28 @@ func TestHandleBlockRequest_EmptyBALFallsToIncremental(t *testing.T) {
 			"incremental mode; folding it would compute the parent root and "+
 			"fail an otherwise-valid block with ErrWrongTrieRoot")
 }
+
+// TestFoldFreeze_StopsFoldAhead pins the orphan guard: a foldFreezeRequest on
+// the commitResults stream (the exec loop's batch-cut signal) must stop the
+// calculator folding any further block ahead — otherwise commitment would
+// advance past the state exec stops at. Exercised via the stream, not a shared
+// flag, matching how the exec and commit routines coordinate.
+func TestFoldFreeze_StopsFoldAhead(t *testing.T) {
+	defer func(prev bool) { dbg.BALDrivenCommitment = prev }(dbg.BALDrivenCommitment)
+	dbg.BALDrivenCommitment = true
+
+	cc := &commitmentCalculator{
+		pending: map[uint64]*pendingBlock{
+			5: {req: &blockRequest{blockNum: 5, bal: make(types.BlockAccessList, 1)}, mode: calcModeBALDriven},
+		},
+		foldedAhead:   map[uint64]bool{},
+		balRoots:      map[uint64][]byte{},
+		hasFirstBlock: true,
+		firstBlockNum: 5, // gate open for block 5 without a prior blockResult
+	}
+
+	cc.handleMessage(context.Background(), &foldFreezeRequest{}) // stream sentinel freezes the fold
+	cc.maybeFoldAhead(context.Background(), 5)                   // must return before foldBlockFromBAL
+
+	assert.False(t, cc.foldedAhead[5], "a frozen fold must not fold ahead")
+}

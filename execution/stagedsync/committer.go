@@ -36,6 +36,14 @@ type commitmentResult struct {
 // the calculator sees it, all prior touches have been accumulated.
 type commitComputeRequest struct{}
 
+// foldFreezeRequest is sent through the commitResults channel when the exec loop
+// cuts the batch. It flows in-order with the blockResult stream, so by the time
+// the calculator sees it the fold has advanced exactly as far as the blocks exec
+// sent — and it must fold no further, so commitment cannot outrun the state exec
+// will stop at (an orphan → wrong root on restart). Stream-carried rather than a
+// shared flag: the exec and commit routines coordinate only through the stream.
+type foldFreezeRequest struct{}
+
 // pendingBlock is a blockRequest the calculator has received but not yet
 // computed, together with the mode selected for it.
 type pendingBlock struct {
@@ -156,6 +164,12 @@ type commitmentCalculator struct {
 	// was missing (eth/71 backfill is best-effort) and so never advanced it.
 	lastFoldedBlock uint64
 	hasFolded       bool
+
+	// foldFrozen stops all further fold-ahead. Set only by this goroutine on a
+	// foldFreezeRequest from the exec loop (the batch-cut signal), and read only
+	// here in maybeFoldAhead — so it needs no synchronisation, and the exec and
+	// commit routines still coordinate purely through the stream.
+	foldFrozen bool
 
 	// forcePerBlockCompute overrides dbg.BatchCommitments and triggers a
 	// ComputeCommitment at every block boundary. Mirrors serial's
@@ -413,6 +427,12 @@ func (cc *commitmentCalculator) handleMessage(ctx context.Context, msg applyResu
 		delete(cc.balRoots, r.BlockNum)
 		cc.maybeFoldAhead(ctx, r.BlockNum+1)
 
+	case *foldFreezeRequest:
+		// Batch cut: stop folding ahead so commitment can't advance past the
+		// state exec will stop at. In-order after the blockResults exec sent, so
+		// the fold has gone exactly as far as those allowed and no further.
+		cc.foldFrozen = true
+
 	case *commitComputeRequest:
 		// Explicit compute signal from the apply loop at batch boundary.
 		if cc.shouldComputeOnRequest() {
@@ -475,6 +495,9 @@ func (cc *commitmentCalculator) foldGateOpen(n uint64) bool {
 func (cc *commitmentCalculator) maybeFoldAhead(ctx context.Context, n uint64) {
 	pb, ok := cc.pending[n]
 	if !ok || pb.mode != calcModeBALDriven || cc.foldedAhead[n] {
+		return
+	}
+	if cc.foldFrozen {
 		return
 	}
 	if cc.ownsChangeset(n) {
