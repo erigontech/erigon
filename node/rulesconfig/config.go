@@ -18,6 +18,7 @@ package rulesconfig
 
 import (
 	"context"
+	"sync"
 
 	"github.com/davecgh/go-spew/spew"
 
@@ -45,15 +46,40 @@ import (
 // consulted by CreateRulesEngine before the built-in type switch.
 type L2EngineFunc func(ctx context.Context, chainConfig *chain.Config, logger log.Logger) rules.Engine
 
-var l2Engines = map[string]L2EngineFunc{}
+var (
+	l2EnginesMu sync.RWMutex
+	l2Engines   = map[string]L2EngineFunc{}
+)
 
 // RegisterL2Engine registers an L2 stack's rules-engine constructor under its
-// L2Config.Name(). Panics if name is already registered.
+// L2Config.Name(). Panics on an empty name, a nil constructor, or a name that
+// is already registered — all programming errors caught at init time.
 func RegisterL2Engine(name string, newEngine L2EngineFunc) {
+	if name == "" {
+		panic("rulesconfig: RegisterL2Engine: empty name")
+	}
+	if newEngine == nil {
+		panic("rulesconfig: RegisterL2Engine: nil constructor for " + name)
+	}
+	l2EnginesMu.Lock()
+	defer l2EnginesMu.Unlock()
 	if _, exists := l2Engines[name]; exists {
 		panic("L2 rules engine already registered: " + name)
 	}
 	l2Engines[name] = newEngine
+}
+
+func unregisterL2Engine(name string) {
+	l2EnginesMu.Lock()
+	defer l2EnginesMu.Unlock()
+	delete(l2Engines, name)
+}
+
+func l2Engine(name string) (L2EngineFunc, bool) {
+	l2EnginesMu.RLock()
+	defer l2EnginesMu.RUnlock()
+	newEngine, ok := l2Engines[name]
+	return newEngine, ok
 }
 
 func CreateRulesEngine(ctx context.Context, nodeConfig *nodecfg.Config, chainConfig *chain.Config, config any, noVerify bool,
@@ -63,9 +89,11 @@ func CreateRulesEngine(ctx context.Context, nodeConfig *nodecfg.Config, chainCon
 	var eng rules.Engine
 
 	if chainConfig.L2 != nil {
-		if newEngine, ok := l2Engines[chainConfig.L2.Name()]; ok {
-			eng = newEngine(ctx, chainConfig, logger)
+		newEngine, ok := l2Engine(chainConfig.L2.Name())
+		if !ok {
+			panic("no L2 rules engine registered for: " + chainConfig.L2.Name())
 		}
+		eng = newEngine(ctx, chainConfig, logger)
 	} else {
 		switch consensusCfg := config.(type) {
 		case *ethashcfg.Config:

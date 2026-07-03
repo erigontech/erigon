@@ -42,6 +42,7 @@ func TestRegisterL2EngineAndCreateRulesEngineBareBones(t *testing.T) {
 	RegisterL2Engine("testl2", func(ctx context.Context, chainConfig *chain.Config, logger log.Logger) rules.Engine {
 		return want
 	})
+	t.Cleanup(func() { unregisterL2Engine("testl2") })
 
 	chainConfig := &chain.Config{L2: fakeL2Config{name: "testl2"}}
 	got := CreateRulesEngineBareBones(context.Background(), chainConfig, log.New())
@@ -53,6 +54,7 @@ func TestRegisterL2EngineDuplicatePanics(t *testing.T) {
 	RegisterL2Engine("duptest", func(ctx context.Context, chainConfig *chain.Config, logger log.Logger) rules.Engine {
 		return ethash.NewFaker()
 	})
+	t.Cleanup(func() { unregisterL2Engine("duptest") })
 
 	assert.Panics(t, func() {
 		RegisterL2Engine("duptest", func(ctx context.Context, chainConfig *chain.Config, logger log.Logger) rules.Engine {
@@ -65,6 +67,25 @@ func TestCreateRulesEngineUnknownL2Panics(t *testing.T) {
 	chainConfig := &chain.Config{L2: fakeL2Config{name: "unregisteredl2"}}
 
 	require.Panics(t, func() {
+		CreateRulesEngineBareBones(context.Background(), chainConfig, log.New())
+	})
+}
+
+func TestRegisterL2EngineRejectsBadInput(t *testing.T) {
+	assert.Panics(t, func() {
+		RegisterL2Engine("", func(ctx context.Context, chainConfig *chain.Config, logger log.Logger) rules.Engine {
+			return ethash.NewFaker()
+		})
+	})
+	assert.Panics(t, func() {
+		RegisterL2Engine("nilfunc", nil)
+	})
+}
+
+func TestCreateRulesEngineUnknownL2PanicNamesTheStack(t *testing.T) {
+	chainConfig := &chain.Config{L2: fakeL2Config{name: "unregisteredl2"}}
+
+	require.PanicsWithValue(t, "no L2 rules engine registered for: unregisteredl2", func() {
 		CreateRulesEngineBareBones(context.Background(), chainConfig, log.New())
 	})
 }
