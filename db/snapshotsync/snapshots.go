@@ -570,12 +570,7 @@ type RoSnapshots struct {
 	types []snaptype.Type //immutable
 	enums []snaptype.Enum //immutable
 
-	dirtyLock  sync.RWMutex                   // guards `dirty` field
-	dirty      []*btree.BTreeG[*DirtySegment] // ordered map `type.Enum()` -> DirtySegments
-	visible    atomic.Pointer[snapshotVisible]
-	recalcLock sync.Mutex // serializes recalcVisibleFiles publishers
-
-	oldestVisible *snapshotVisible // chain head (oldest generation still pinned); guarded by recalcLock
+	fileSet // dirty segments + published visible generations, under one lock
 
 	dir               string
 	segmentsMinByType map[snaptype.Enum]*atomic.Uint64 // min block number per segment type
@@ -665,7 +660,7 @@ func newRoSnapshots(cfg ethconfig.BlocksFreezing, snapDir string, types []snapty
 	snCfg := snapcfg.KnownCfgOrDevnet(cfg.ChainName)
 	s := &RoSnapshots{dir: snapDir, cfg: cfg, snCfg: snCfg, logger: logger,
 		types: types, enums: enums,
-		dirty:             make([]*btree.BTreeG[*DirtySegment], snaptype.MaxEnum),
+		fileSet:           fileSet{dirty: make([]*btree.BTreeG[*DirtySegment], snaptype.MaxEnum)},
 		alignMin:          alignMin,
 		operators:         map[snaptype.Enum]*retireOperators{},
 		segmentsMinByType: make(map[snaptype.Enum]*atomic.Uint64),
@@ -924,11 +919,8 @@ func (s *RoSnapshots) recalcVisibleFiles(alignMin bool, retired ...retiredSegmen
 
 	var toDelete []retiredSegment
 	func() {
-		s.recalcLock.Lock()
-		defer s.recalcLock.Unlock()
-
-		s.dirtyLock.RLock()
-		defer s.dirtyLock.RUnlock()
+		s.dirtyLock.Lock()
+		defer s.dirtyLock.Unlock()
 
 		visible := make([]VisibleSegments, snaptype.MaxEnum) // create new pointer - only new readers will see it. old-alive readers will continue use previous pointer
 		maxVisibleBlocks := make([]uint64, 0, len(s.types))
@@ -979,62 +971,76 @@ func (s *RoSnapshots) recalcVisibleFiles(alignMin bool, retired ...retiredSegmen
 		}
 
 		next := &snapshotVisible{segments: visible, segmentsMax: segmentsMax}
-		old := s.visible.Load()
-		old.retired = retired
-		old.next = next
-		s.visible.Store(next)
-
-		// This publish may have just superseded an already-drained generation;
-		// reclaim it now rather than waiting for the next reader to drop a pin.
-		toDelete = s.reclaimRetiredLocked()
+		toDelete = s.publishLocked(next, retired)
 	}()
 
 	closeAndRemoveFiles(toDelete)
 }
 
+// fileSet owns a container's DirtySegments and its published visible generations,
+// under one lock. Readers pin the current generation via refcnt (read lock-free);
+// mutations to `dirty` and to the generation chain (publish/reclaim) are serialized
+// by `dirtyLock`. A publisher appends a generation and hands the outgoing one's
+// removed files to `retired`; the last reader to drain a generation reclaims them.
+type fileSet struct {
+	dirtyLock     sync.RWMutex
+	dirty         []*btree.BTreeG[*DirtySegment] // indexed by enum (blocks) / tableIndex (caplin state)
+	visible       atomic.Pointer[snapshotVisible]
+	oldestVisible *snapshotVisible // chain head (oldest generation still pinned); guarded by dirtyLock
+}
+
 // acquireVisible pins the current generation. Load and increment are not atomic
 // together, so re-validate: if the generation was superseded between the two, the
 // pin landed on a draining generation — drop it and retry (hazard-pointer style).
-func (s *RoSnapshots) acquireVisible() *snapshotVisible {
-	// Load+Increment: is not atomic operation. Means: between them "existing last reader may End" (and close files)
-	// Means: must check that latest view didn't change
+func (f *fileSet) acquireVisible() *snapshotVisible {
 	// Hazard pointer concept: https://github.com/facebook/folly/blob/main/folly/synchronization/Hazptr.h#L27C5-L27C22
 	for {
-		v := s.visible.Load()
+		v := f.visible.Load()
 		v.refcnt.Add(1)
-		if s.visible.Load() == v {
+		if f.visible.Load() == v {
 			return v
 		}
-		s.releaseVisible(v)
+		f.releaseVisible(v)
 	}
 }
 
 // releaseVisible drops a pin taken by acquireVisible; the last reader reclaims.
-func (s *RoSnapshots) releaseVisible(v *snapshotVisible) {
+func (f *fileSet) releaseVisible(v *snapshotVisible) {
 	if v.refcnt.Add(-1) == 0 {
-		s.reclaimRetired()
+		f.reclaimRetired()
 	}
 }
 
-func (s *RoSnapshots) reclaimRetired() {
-	s.recalcLock.Lock()
-	toDelete := s.reclaimRetiredLocked()
-	s.recalcLock.Unlock()
+func (f *fileSet) reclaimRetired() {
+	f.dirtyLock.Lock()
+	toDelete := f.reclaimRetiredLocked()
+	f.dirtyLock.Unlock()
 	closeAndRemoveFiles(toDelete)
 }
 
 // reclaimRetiredLocked walks generations oldest→newest while their refcnt is 0,
 // collecting their retired files. When the head's refcnt is 0 every older
 // generation is already gone, so its retired files have no other live holder.
-// Must be called under recalcLock; the returned files are reclaimed outside it.
-func (s *RoSnapshots) reclaimRetiredLocked() (toDelete []retiredSegment) {
-	cur := s.visible.Load()
-	for h := s.oldestVisible; h != cur && h.refcnt.Load() == 0; h = h.next {
+// Must be called under dirtyLock; the returned files are reclaimed outside it.
+func (f *fileSet) reclaimRetiredLocked() (toDelete []retiredSegment) {
+	cur := f.visible.Load()
+	for h := f.oldestVisible; h != cur && h.refcnt.Load() == 0; h = h.next {
 		toDelete = append(toDelete, h.retired...)
 		h.retired = nil
-		s.oldestVisible = h.next
+		f.oldestVisible = h.next
 	}
 	return toDelete
+}
+
+// publishLocked installs `next` as the current generation, attaches the caller's
+// removed files to the outgoing one, and returns the files now reclaimable.
+// Must be called under dirtyLock.
+func (f *fileSet) publishLocked(next *snapshotVisible, retired []retiredSegment) []retiredSegment {
+	old := f.visible.Load()
+	old.retired = retired
+	old.next = next
+	f.visible.Store(next)
+	return f.reclaimRetiredLocked()
 }
 
 func closeAndRemoveFiles(toDelete []retiredSegment) {
@@ -1432,19 +1438,25 @@ func (s *RoSnapshots) Close() {
 // closeWhatNotInList removes from `dirty` every segment whose file is not in l
 // and returns them as close-only retirements: the fds are released once the last
 // reader that could see them drains, but the files stay on disk (they are leaving
-// memory on reopen, not being deleted). Must be called under dirtyLock.
-func (s *RoSnapshots) closeWhatNotInList(l []string) (removed []retiredSegment) {
+// memory on reopen, not being deleted). An unopened (nil-Decompressor) segment is
+// always dropped — a later reopen re-creates it, so keeping it would only leave a
+// duplicate. Must be called under dirtyLock.
+func (f *fileSet) closeWhatNotInList(l []string) (removed []retiredSegment) {
 	protectFiles := make(map[string]struct{}, len(l))
-	for _, f := range l {
-		protectFiles[f] = struct{}{}
+	for _, name := range l {
+		protectFiles[name] = struct{}{}
 	}
-	for _, t := range s.enums {
-		dirtyFiles := s.dirty[t]
+	for _, dirtyFiles := range f.dirty {
+		if dirtyFiles == nil { // RoSnapshots leaves nil slots for unused enums
+			continue
+		}
 		var toDrop []*DirtySegment
 		dirtyFiles.Walk(func(segs []*DirtySegment) bool {
 			for _, seg := range segs {
-				if _, ok := protectFiles[seg.FileName()]; ok {
-					continue
+				if seg.Decompressor != nil {
+					if _, ok := protectFiles[seg.FileName()]; ok {
+						continue
+					}
 				}
 				toDrop = append(toDrop, seg)
 			}

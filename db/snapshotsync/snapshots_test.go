@@ -1160,6 +1160,29 @@ func TestRoSnapshots_ConcurrentViewsAndRepublish(t *testing.T) {
 	require.Equal(s.visible.Load(), s.oldestVisible, "chain must collapse once all readers drain")
 }
 
+// TestCloseWhatNotInList_DropsUnopenedSegment pins the unified fileSet behavior:
+// an unopened (nil-Decompressor) segment is always dropped, even when its name is
+// in the keep-list — a later reopen re-creates it, so keeping it would only leave
+// a duplicate.
+func TestCloseWhatNotInList_DropsUnopenedSegment(t *testing.T) {
+	logger := log.New()
+	require := require.New(t)
+	s := NewRoSnapshots(ethconfig.BlocksFreezing{ChainName: networkname.Mainnet}, t.TempDir(), snaptype2.BlockSnapshotTypes, true, logger)
+	defer s.Close()
+
+	sn := NewDirtySegment(snaptype2.Headers, version.V1_0, 0, 1_000, false)
+	require.Nil(sn.Decompressor)
+	s.dirty[snaptype2.Headers.Enum()].Set(sn)
+
+	s.dirtyLock.Lock()
+	removed := s.closeWhatNotInList([]string{sn.FileName()}) // its name IS in the keep-list
+	s.dirtyLock.Unlock()
+
+	require.Contains(removed, retiredSegment{seg: sn}, "unopened segment must be dropped even when kept-by-name")
+	_, stillInDirty := s.dirty[snaptype2.Headers.Enum()].Get(sn)
+	require.False(stillInDirty)
+}
+
 func createTestIdxFile(t *testing.T, from, to uint64, name snaptype.Enum, dir string, ver snaptype.Version, logger log.Logger) {
 	idx, err := recsplit.NewRecSplit(recsplit.RecSplitArgs{
 		KeyCount:   1,

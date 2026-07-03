@@ -79,9 +79,6 @@ type Aggregator struct {
 	reorgBlockDepth uint64
 
 	dirtyFilesLock sync.Mutex
-	// commitmentRefsMu guards the runtime-mutable commitment ReferencesInCommitmentBranches
-	// flag: ReloadErigonDBSettings writes it while background merges read it.
-	commitmentRefsMu sync.RWMutex
 	// visible is CoW field updated only by `recalcVisibleFiles`.
 	visible atomic.Pointer[aggregatorVisible]
 	// oldestVisible head of linked-list of visibleFiles objects (oldest still-have-reader object). Mutated only under dirtyFilesLock.
@@ -134,6 +131,10 @@ type Aggregator struct {
 	savedSalt              *uint32
 	disableFsync           bool
 	commitmentRefsOverride *bool
+
+	// commitmentRefsMu guards the runtime-mutable commitment ReferencesInCommitmentBranches
+	// flag: ReloadErigonDBSettings writes it while background merges read it.
+	commitmentRefsMu sync.RWMutex
 }
 
 func newAggregator(ctx context.Context, dirs datadir.Dirs, reorgBlockDepth uint64, db kv.RoDB, logger log.Logger) (*Aggregator, error) {
