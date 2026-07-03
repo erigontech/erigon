@@ -72,40 +72,43 @@ func (a *Aggregator) RetireOldHistoryFiles(ctx context.Context, cutoffStep kv.St
 	at := a.BeginFilesRo()
 	defer at.Close()
 
-	a.dirtyFilesLock.Lock()
-	defer a.dirtyFilesLock.Unlock()
-
 	var deleted []string
 	var retired []*FilesItem
-	for _, dt := range at.d {
-		// commitment.history and rcache have special cli flags: --prune.include-commitment-history --persist.receipt
-		// if they enabled they are never pruned - it's current logic. we will change it in future PR's - but for now keep them
-		// See: https://github.com/erigontech/erigon/issues/21306 'step 4'
-		if dt.name == kv.CommitmentDomain || dt.name == kv.RCacheDomain {
-			continue
+	if err = a.Update(func(_ []*DirtyFiles) ([]*FilesItem, error) {
+		for _, dt := range at.d {
+			// commitment.history and rcache have special cli flags: --prune.include-commitment-history --persist.receipt
+			// if they enabled they are never pruned - it's current logic. we will change it in future PR's - but for now keep them
+			// See: https://github.com/erigontech/erigon/issues/21306 'step 4'
+			if dt.name == kv.CommitmentDomain || dt.name == kv.RCacheDomain {
+				continue
+			}
+			if dt.d.Disable || dt.d.SnapshotsDisabled || dt.d.HistoryDisabled {
+				continue
+			}
+			names, r := dt.ht.retireBeforeStep(cutoffStep)
+			deleted = append(deleted, names...)
+			retired = append(retired, r...)
 		}
-		if dt.d.Disable || dt.d.SnapshotsDisabled || dt.d.HistoryDisabled {
-			continue
+		for _, iit := range at.standaloneIIs() {
+			if iit.ii.Disable {
+				continue
+			}
+			names, r := iit.retireBeforeStep(cutoffStep)
+			deleted = append(deleted, names...)
+			retired = append(retired, r...)
 		}
-		names, r := dt.ht.retireBeforeStep(cutoffStep)
-		deleted = append(deleted, names...)
-		retired = append(retired, r...)
-	}
-	for _, iit := range at.standaloneIIs() {
-		if iit.ii.Disable {
-			continue
+		if len(retired) == 0 {
+			return nil, nil
 		}
-		names, r := iit.retireBeforeStep(cutoffStep)
-		deleted = append(deleted, names...)
-		retired = append(retired, r...)
+		a.onFilesDelete(deleted)
+		return retired, nil
+	}, a.recalcVisibleFiles); err != nil {
+		return 0, err
 	}
 
 	if len(retired) == 0 {
 		return 0, nil
 	}
-
-	a.onFilesDelete(deleted)
-	a.recalcVisibleFiles(retired)
 
 	mxRetiredHistoryFiles.AddInt(len(retired))
 	a.logger.Info("[snapshots] retired old history files", "removed", len(retired), "cutoffStep", cutoffStep)

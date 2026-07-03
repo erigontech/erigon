@@ -836,9 +836,7 @@ func RebuildCommitmentFilesWithHistory(ctx context.Context, rwDb kv.TemporalRwDB
 	}
 	logger.Info("[rebuild_commitment_history] squeeze starting")
 
-	a.dirtyFilesLock.Lock()
-	a.recalcVisibleFiles(nil)
-	a.dirtyFilesLock.Unlock()
+	_ = a.Update(nil, a.recalcVisibleFiles)
 
 	// Check if account files exist - squeeze requires them for ReferencesInCommitmentBranches
 	actx := a.BeginFilesRo()
@@ -1082,9 +1080,7 @@ func RebuildCommitmentFiles(ctx context.Context, rwDb kv.TemporalRwDB, txNumsRea
 			domains.Close()
 
 			// make new file visible for all aggregator transactions
-			a.dirtyFilesLock.Lock()
-			a.recalcVisibleFiles(nil)
-			a.dirtyFilesLock.Unlock()
+			_ = a.Update(nil, a.recalcVisibleFiles)
 			rwTx.Rollback()
 
 			if shardTo+shardStepsSize > lastShard && shardStepsSize > 1 {
@@ -1133,9 +1129,7 @@ func RebuildCommitmentFiles(ctx context.Context, rwDb kv.TemporalRwDB, txNumsRea
 		return latestRoot, nil
 	}
 	logger.Info("[squeeze] starting")
-	a.dirtyFilesLock.Lock()
-	a.recalcVisibleFiles(nil)
-	a.dirtyFilesLock.Unlock()
+	_ = a.Update(nil, a.recalcVisibleFiles)
 
 	logger.Info(fmt.Sprintf("[squeeze] latest root %x", latestRoot))
 	a.ForTestReferencesInCommitmentBranches(kv.CommitmentDomain, true)

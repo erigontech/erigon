@@ -38,22 +38,21 @@ func (a *Aggregator) DebugBeginDirtyFilesRo() *aggDirtyFilesRoTx {
 		domain: make([]*domainDirtyFilesRoTx, len(a.d)),
 	}
 
-	a.dirtyFilesLock.Lock()
-	defer a.dirtyFilesLock.Unlock()
-	// Pin the current generation (load+increment suffices — we hold dirtyFilesLock,
-	// so no publish can race us). The pin protects every dirty file captured below,
-	// even ones absent from the visible set: such a file can only be retired at a
-	// generation >= this, and oldest-first reclaim won't delete it until Close.
-	ac.visible = a.visible.Load()
-	ac.visible.refcnt.Add(1)
-	for i, d := range a.d {
-		ac.domain[i] = d.DebugBeginDirtyFilesRo()
-	}
-
-	for i := 0; i < a.iisCount; i++ {
-		ac.ii[i] = a.iis[i].DebugBeginDirtyFilesRo()
-	}
-
+	// The pin protects every dirty file captured below, even ones absent from the
+	// visible set: such a file can only be retired at a generation >= this, and
+	// oldest-first reclaim won't delete it until Close. Load+increment suffices
+	// because Update holds dirtyFilesLock, so no publish can race the pin.
+	_ = a.Update(func(_ []*DirtyFiles) ([]*FilesItem, error) {
+		ac.visible = a.visible.Load()
+		ac.visible.refcnt.Add(1)
+		for i, d := range a.d {
+			ac.domain[i] = d.DebugBeginDirtyFilesRo()
+		}
+		for i := 0; i < a.iisCount; i++ {
+			ac.ii[i] = a.iis[i].DebugBeginDirtyFilesRo()
+		}
+		return nil, nil
+	}, nil)
 	return ac
 }
 
