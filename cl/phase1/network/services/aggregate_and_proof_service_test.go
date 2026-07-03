@@ -177,6 +177,48 @@ func TestAggregateAndProofInvalidCommittee(t *testing.T) {
 	require.Error(t, aggService.ProcessMessage(context.Background(), nil, agg))
 }
 
+func TestAggregateAndProofAllowsNextEpochWhenForkchoiceHasSeenIt(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	defer ctrl.Finish()
+
+	agg, s := getAggregateAndProofAndState(t)
+	nextEpochSlot := s.Slot() + clparams.MainnetBeaconConfig.SlotsPerEpoch
+	nextEpoch := nextEpochSlot / clparams.MainnetBeaconConfig.SlotsPerEpoch
+	agg.SignedAggregateAndProof.Message.Aggregate.Data.Slot = nextEpochSlot
+	agg.SignedAggregateAndProof.Message.Aggregate.Data.Source.Epoch = nextEpoch - 1
+	agg.SignedAggregateAndProof.Message.Aggregate.Data.Target.Epoch = nextEpoch
+
+	aggService, sd, fcu := setupAggregateAndProofTest(t)
+	sd.OnHeadState(s)
+	fcu.HighestSeenVal = nextEpochSlot
+
+	err := aggService.ProcessMessage(context.Background(), nil, agg)
+	if err != nil {
+		require.NotContains(t, err.Error(), "too far from aggregate epoch")
+		require.NotContains(t, err.Error(), "epoch is not in previous or current epoch")
+	}
+}
+
+func TestAggregateAndProofRejectsNextEpochBeforeForkchoiceHasSeenIt(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	defer ctrl.Finish()
+
+	agg, s := getAggregateAndProofAndState(t)
+	nextEpochSlot := s.Slot() + clparams.MainnetBeaconConfig.SlotsPerEpoch
+	nextEpoch := nextEpochSlot / clparams.MainnetBeaconConfig.SlotsPerEpoch
+	agg.SignedAggregateAndProof.Message.Aggregate.Data.Slot = nextEpochSlot
+	agg.SignedAggregateAndProof.Message.Aggregate.Data.Source.Epoch = nextEpoch - 1
+	agg.SignedAggregateAndProof.Message.Aggregate.Data.Target.Epoch = nextEpoch
+
+	aggService, sd, fcu := setupAggregateAndProofTest(t)
+	sd.OnHeadState(s)
+	fcu.HighestSeenVal = s.Slot()
+
+	err := aggService.ProcessMessage(context.Background(), nil, agg)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "epoch is not in previous or current epoch")
+}
+
 func TestAggregateAndProofAncestorMissing(t *testing.T) {
 	ctrl := gomock.NewController(t)
 	defer ctrl.Finish()
