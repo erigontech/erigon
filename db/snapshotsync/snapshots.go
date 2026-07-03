@@ -1025,28 +1025,6 @@ func (s *RoSnapshots) Files() (list []string) {
 	return
 }
 
-func (s *RoSnapshots) InitSegments(fileNames []string) error {
-	if err := func() error {
-		s.dirtyLock.Lock()
-		defer s.dirtyLock.Unlock()
-
-		s.closeWhatNotInList(fileNames)
-		return s.openSegments(fileNames, false, true)
-	}(); err != nil {
-		return err
-	}
-
-	s.recalcVisibleFiles(s.alignMin)
-	wasReady := s.segmentsReady.Swap(true)
-	if !wasReady {
-		if s.downloadReady.Load() {
-			s.ready.Set()
-		}
-	}
-
-	return nil
-}
-
 // AllTypedSegments returns the raw, unfiltered list of segment files on disk
 // that match the given types. No overlap or gap removal is applied.
 func AllTypedSegments(dir string, types []snaptype.Type) (res []snaptype.FileInfo, err error) {
