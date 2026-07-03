@@ -41,14 +41,25 @@ func (f *ForkChoiceStore) queueEmit(emit func()) {
 	f.queuedEmits = append(f.queuedEmits, emit)
 }
 
-// emitQueuedEvents runs queued event sends. Call after releasing f.mu.
-func (f *ForkChoiceStore) emitQueuedEvents() {
+func (f *ForkChoiceStore) queuePrune(slot uint64) {
+	f.queuedPrunes = append(f.queuedPrunes, slot)
+}
+
+// drainQueuedWork runs queued event sends and prunes. Call after releasing f.mu.
+func (f *ForkChoiceStore) drainQueuedWork() {
 	f.mu.Lock()
 	emits := f.queuedEmits
+	prunes := f.queuedPrunes
 	f.queuedEmits = nil
+	f.queuedPrunes = nil
 	f.mu.Unlock()
 	for _, emit := range emits {
 		emit()
+	}
+	for _, pruneSlot := range prunes {
+		if err := f.forkGraph.Prune(pruneSlot); err != nil {
+			log.Warn("Failed to prune fork graph", "pruneSlot", pruneSlot, "err", err)
+		}
 	}
 }
 
@@ -149,7 +160,7 @@ func (f *ForkChoiceStore) onNewFinalized(newFinalized solid.Checkpoint) {
 	// Guard against uint64 underflow during the first 3 epochs after genesis.
 	if newFinalized.Epoch > 3 {
 		slotToPrune := ((newFinalized.Epoch - 3) * f.beaconCfg.SlotsPerEpoch) - 1
-		f.forkGraph.Prune(slotToPrune)
+		f.queuePrune(slotToPrune)
 	}
 }
 

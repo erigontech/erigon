@@ -24,6 +24,7 @@ import (
 
 	"github.com/erigontech/erigon/cl/beacon/beaconevents"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
+	"github.com/erigontech/erigon/cl/phase1/forkchoice/fork_graph"
 )
 
 // A stalled /eth/v1/events subscriber must not wedge fork choice: the finalized
@@ -76,6 +77,75 @@ func TestFinalizedCheckpointEmittedOutsideLock(t *testing.T) {
 	case <-time.After(10 * time.Second):
 		t.Fatal("stalled subscriber never received the event")
 	}
+	select {
+	case <-tickDone:
+	case <-time.After(10 * time.Second):
+		t.Fatal("OnTick did not finish")
+	}
+}
+
+type blockingPruneForkGraph struct {
+	fork_graph.ForkGraph
+	started chan uint64
+	release chan struct{}
+}
+
+func (g *blockingPruneForkGraph) Prune(slot uint64) error {
+	g.started <- slot
+	<-g.release
+	return nil
+}
+
+func TestForkGraphPruneRunsOutsideLock(t *testing.T) {
+	f := buildExAnteStore(t)
+	base := f.forkGraph
+	pruneGraph := &blockingPruneForkGraph{
+		ForkGraph: base,
+		started:   make(chan uint64, 1),
+		release:   make(chan struct{}),
+	}
+	f.forkGraph = pruneGraph
+	released := false
+	defer func() {
+		if !released {
+			close(pruneGraph.release)
+		}
+		f.forkGraph = base
+	}()
+
+	_, root := decodeDiffBlock(t, diffBlockc2Enc)
+	promoted := solid.Checkpoint{Epoch: 4, Root: root}
+	f.unrealizedJustifiedCheckpoint.Store(promoted)
+	f.unrealizedFinalizedCheckpoint.Store(promoted)
+	f.highestSeen.Store(f.beaconCfg.SlotsPerEpoch * promoted.Epoch)
+
+	tickDone := make(chan struct{})
+	go func() {
+		f.OnTick(promoted.Epoch * f.beaconCfg.SlotsPerEpoch * f.beaconCfg.SecondsPerSlot)
+		close(tickDone)
+	}()
+
+	select {
+	case <-pruneGraph.started:
+	case <-time.After(10 * time.Second):
+		t.Fatal("fork graph prune did not start")
+	}
+
+	lockFree := make(chan struct{})
+	go func() {
+		f.mu.Lock()
+		_ = f.headHash
+		f.mu.Unlock()
+		close(lockFree)
+	}()
+	select {
+	case <-lockFree:
+	case <-time.After(10 * time.Second):
+		t.Fatal("f.mu is held while fork graph prune is blocked")
+	}
+
+	close(pruneGraph.release)
+	released = true
 	select {
 	case <-tickDone:
 	case <-time.After(10 * time.Second):

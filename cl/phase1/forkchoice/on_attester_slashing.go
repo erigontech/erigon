@@ -34,7 +34,7 @@ func (f *ForkChoiceStore) OnAttesterSlashing(attesterSlashing *cltypes.AttesterS
 		return nil
 	}
 	f.mu.Lock()
-	defer f.emitQueuedEvents()
+	defer f.drainQueuedWork()
 	defer f.mu.Unlock()
 
 	if f.syncedDataManager.Syncing() {

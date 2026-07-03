@@ -56,5 +56,5 @@ func (f *ForkChoiceStore) onTickPerSlot(time uint64) {
 		}
 	}
 	f.mu.Unlock()
-	f.emitQueuedEvents()
+	f.drainQueuedWork()
 }
