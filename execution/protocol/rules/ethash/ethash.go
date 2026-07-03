@@ -609,6 +609,20 @@ func (ethash *Ethash) GetPostApplyMessageFunc() evmtypes.PostApplyMessageFunc {
 	return nil
 }
 
+func (ethash *Ethash) GetStartTxFunc() evmtypes.StartTxFunc {
+	return nil
+}
+
+func (ethash *Ethash) GetGasChargingFunc() evmtypes.GasChargingFunc {
+	return nil
+}
+
+func (ethash *Ethash) GetComputeRefundFunc() evmtypes.ComputeRefundFunc {
+	return nil
+}
+
+func (ethash *Ethash) AmendBlockContext(bc *evmtypes.BlockContext, header *types.Header) {}
+
 func (c *Ethash) TxDependencies(h *types.Header) [][]int {
 	return nil
 }

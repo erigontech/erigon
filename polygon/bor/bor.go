@@ -1328,6 +1328,20 @@ func (c *Bor) GetPostApplyMessageFunc() evmtypes.PostApplyMessageFunc {
 	return AddFeeTransferLog
 }
 
+func (c *Bor) GetStartTxFunc() evmtypes.StartTxFunc {
+	return nil
+}
+
+func (c *Bor) GetGasChargingFunc() evmtypes.GasChargingFunc {
+	return nil
+}
+
+func (c *Bor) GetComputeRefundFunc() evmtypes.ComputeRefundFunc {
+	return nil
+}
+
+func (c *Bor) AmendBlockContext(bc *evmtypes.BlockContext, header *types.Header) {}
+
 func (c *Bor) ValidateBlockPostExecution(chainConfig *chain.Config, header *types.Header,
 	gasUsed, blobGasUsed uint64, checkReceipts, checkBloom bool,
 	receipts types.Receipts, txns types.Transactions, logger log.Logger) error {

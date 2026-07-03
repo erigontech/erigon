@@ -1148,6 +1148,38 @@ func (e *remoteRulesEngine) GetPostApplyMessageFunc() evmtypes.PostApplyMessageF
 	return e.engine.GetPostApplyMessageFunc()
 }
 
+func (e *remoteRulesEngine) GetStartTxFunc() evmtypes.StartTxFunc {
+	if err := e.validateEngineReady(); err != nil {
+		panic(err)
+	}
+
+	return e.engine.GetStartTxFunc()
+}
+
+func (e *remoteRulesEngine) GetGasChargingFunc() evmtypes.GasChargingFunc {
+	if err := e.validateEngineReady(); err != nil {
+		panic(err)
+	}
+
+	return e.engine.GetGasChargingFunc()
+}
+
+func (e *remoteRulesEngine) GetComputeRefundFunc() evmtypes.ComputeRefundFunc {
+	if err := e.validateEngineReady(); err != nil {
+		panic(err)
+	}
+
+	return e.engine.GetComputeRefundFunc()
+}
+
+func (e *remoteRulesEngine) AmendBlockContext(bc *evmtypes.BlockContext, header *types.Header) {
+	if err := e.validateEngineReady(); err != nil {
+		panic(err)
+	}
+
+	e.engine.AmendBlockContext(bc, header)
+}
+
 func (e *remoteRulesEngine) ValidateBlockPostExecution(chainConfig *chain.Config, header *types.Header,
 	gasUsed, blobGasUsed uint64, checkReceipts, checkBloom bool,
 	receipts types.Receipts, txns types.Transactions, logger log.Logger) error {

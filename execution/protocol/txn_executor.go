@@ -480,6 +480,12 @@ func (st *TxnExecutor) Execute(refunds bool, gasBailout bool) (result *evmtypes.
 		}()
 	}
 
+	if hook := st.evm.Context.StartTx; hook != nil {
+		if done, result, hookErr := hook(st.state, st.msg); done {
+			return result, hookErr
+		}
+	}
+
 	coinbase := st.evm.Context.Coinbase
 	senderInitBalance, err := st.state.GetBalance(st.msg.From())
 	if err != nil {
@@ -561,6 +567,17 @@ func (st *TxnExecutor) Execute(refunds bool, gasBailout bool) (result *evmtypes.
 		st.gasRemaining.State += stateIgasRefund
 	}
 
+	if hook := st.evm.Context.GasCharging; hook != nil {
+		adjustedGasRemaining, tipRecipient, hookErr := hook(st.state, st.msg, st.gasRemaining, intrinsicGasResult)
+		if hookErr != nil {
+			return nil, hookErr
+		}
+		st.gasRemaining = adjustedGasRemaining
+		if !tipRecipient.IsNil() {
+			coinbase = tipRecipient
+		}
+	}
+
 	if t := st.evm.Config().Tracer; t != nil && t.OnGasChange != nil {
 		t.OnGasChange(st.msg.Gas(), st.gasRemaining.Total(), tracing.GasChangeTxIntrinsicGas)
 	}
@@ -607,27 +624,35 @@ func (st *TxnExecutor) Execute(refunds bool, gasBailout bool) (result *evmtypes.
 	}
 
 	if refunds && !gasBailout {
-		refundQuotient := params.RefundQuotient
-		if rules.IsLondon {
-			refundQuotient = params.RefundQuotientEIP3529
-		}
-		if rules.IsAmsterdam {
-			combined := gasUsed.PlusIntrinsic(imdGas)
-			st.blockStateGasUsed = combined.StateClamped()
-			st.blockRegularGasUsed = max(combined.Regular, intrinsicGasResult.FloorGasCost)
-			st.txnGasUsedB4Refunds = combined.Total()
-			refund := min(st.txnGasUsedB4Refunds/refundQuotient, st.state.GetRefund())
-			st.txnGasUsed = max(intrinsicGasResult.FloorGasCost, st.txnGasUsedB4Refunds-refund)
-		} else if rules.IsPrague {
-			st.txnGasUsedB4Refunds = imdGas.Regular + gasUsed.Regular
-			refund := min(st.txnGasUsedB4Refunds/refundQuotient, st.state.GetRefund())
-			st.txnGasUsed = max(intrinsicGasResult.FloorGasCost, st.txnGasUsedB4Refunds-refund)
-			st.blockRegularGasUsed = st.txnGasUsed
+		if hook := st.evm.Context.ComputeRefund; hook != nil {
+			rr := hook(gasUsed, imdGas, intrinsicGasResult, st.state.GetRefund(), rules)
+			st.blockRegularGasUsed = rr.BlockRegularGasUsed
+			st.blockStateGasUsed = rr.BlockStateGasUsed
+			st.txnGasUsedB4Refunds = rr.TxnGasUsedB4Refunds
+			st.txnGasUsed = rr.TxnGasUsed
 		} else {
-			st.txnGasUsedB4Refunds = imdGas.Regular + gasUsed.Regular
-			refund := min(st.txnGasUsedB4Refunds/refundQuotient, st.state.GetRefund())
-			st.txnGasUsed = st.txnGasUsedB4Refunds - refund
-			st.blockRegularGasUsed = st.txnGasUsed
+			refundQuotient := params.RefundQuotient
+			if rules.IsLondon {
+				refundQuotient = params.RefundQuotientEIP3529
+			}
+			if rules.IsAmsterdam {
+				combined := gasUsed.PlusIntrinsic(imdGas)
+				st.blockStateGasUsed = combined.StateClamped()
+				st.blockRegularGasUsed = max(combined.Regular, intrinsicGasResult.FloorGasCost)
+				st.txnGasUsedB4Refunds = combined.Total()
+				refund := min(st.txnGasUsedB4Refunds/refundQuotient, st.state.GetRefund())
+				st.txnGasUsed = max(intrinsicGasResult.FloorGasCost, st.txnGasUsedB4Refunds-refund)
+			} else if rules.IsPrague {
+				st.txnGasUsedB4Refunds = imdGas.Regular + gasUsed.Regular
+				refund := min(st.txnGasUsedB4Refunds/refundQuotient, st.state.GetRefund())
+				st.txnGasUsed = max(intrinsicGasResult.FloorGasCost, st.txnGasUsedB4Refunds-refund)
+				st.blockRegularGasUsed = st.txnGasUsed
+			} else {
+				st.txnGasUsedB4Refunds = imdGas.Regular + gasUsed.Regular
+				refund := min(st.txnGasUsedB4Refunds/refundQuotient, st.state.GetRefund())
+				st.txnGasUsed = st.txnGasUsedB4Refunds - refund
+				st.blockRegularGasUsed = st.txnGasUsed
+			}
 		}
 		st.refundGas()
 	} else if rules.IsAmsterdam {
