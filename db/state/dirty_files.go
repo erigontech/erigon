@@ -120,6 +120,8 @@ type FilesItem struct {
 	existence            *existence.Filter
 	startTxNum, endTxNum uint64 //[startTxNum, endTxNum)
 
+	// version is the file's parsed on-disk version, used as a per-file regime marker.
+	version  version.Version
 	refcount atomic.Int32
 
 	// Deprecated: only the not-yet-migrated forkable subsystem still uses this (with
@@ -335,21 +337,39 @@ func filterDirtyFiles(fileNames []string, stepSize uint64, filenameBase, ext str
 	return res
 }
 
-// retireMergeFiles removes garbage files from dirtyFiles and returns them so the
-// caller can attach them to the outgoing visible generation. Physical deletion
-// (closeFilesAndRemove) is the reclaimer's job once that generation drains — so
-// readers still pinning these files are never surprised. Returns outs unchanged.
-func retireMergeFiles(dirtyFiles *DirtyFiles, outs []*FilesItem, filenameBase string, logger log.Logger) []*FilesItem {
+// retireReason identifies why a file was removed from dirtyFiles.
+type retireReason int
+
+const (
+	retireReasonMerged retireReason = iota + 1
+	retireReasonAged
+)
+
+func (r retireReason) String() string {
+	switch r {
+	case retireReasonMerged:
+		return "merged"
+	case retireReasonAged:
+		return "aged"
+	default:
+		return "unknown"
+	}
+}
+
+// retire removes outs from dirtyFiles; the caller still owns outs and must
+// attach it to the outgoing visible generation itself. Physical deletion
+// (closeFilesAndRemove) happens once the last reader of that generation closes
+// — so readers still pinning these files are never surprised.
+func retire(dirtyFiles *DirtyFiles, outs []*FilesItem, filenameBase string, reason retireReason, logger log.Logger) {
 	for _, out := range outs {
 		if out == nil {
 			panic("must not happen: " + filenameBase)
 		}
 		dirtyFiles.Delete(out)
 		if filenameBase == traceFileLife && out.decompressor != nil {
-			logger.Warn("[agg.dbg] retireMergeFiles: retire", "f", out.decompressor.FileName())
+			logger.Warn("[agg.dbg] retire", "f", out.decompressor.FileName(), "reason", reason)
 		}
 	}
-	return outs
 }
 
 func (d *Domain) openDirtyFiles(dirEntries []string) (err error) {
@@ -376,6 +396,7 @@ func (d *Domain) openDirtyFiles(dirEntries []string) (err error) {
 
 			fName := filepath.Base(fPath)
 			d.FileVersion.DataKV.MustSupport(fileVer, fName)
+			item.version = fileVer
 
 			if item.decompressor, err = seg.NewDecompressor(fPath); err != nil {
 				if errors.Is(err, &seg.ErrCompressedFileCorrupted{}) {
@@ -595,6 +616,10 @@ type visibleFile struct {
 
 func (i visibleFile) Fullpath() string {
 	return i.src.decompressor.FilePath()
+}
+
+func (i visibleFile) Version() version.Version {
+	return i.src.version
 }
 
 func (i visibleFile) StartRootNum() uint64 {
