@@ -39,127 +39,98 @@ var ErrInvalidChainId = errors.New("invalid chain id for signer")
 
 // MakeSigner returns a Signer based on the given chain config and block number.
 func MakeSigner(config *chain.Config, blockNumber uint64, blockTime uint64) *Signer {
-	var signer Signer
-
-	if config != nil {
-		var chainId uint256.Int
-		if config.ChainID != nil {
-			chainId.Set(config.ChainID)
-		}
-		signer.unprotected = true
-		switch {
-		case config.IsPrague(blockTime):
-			signer.protected = true
-			signer.accessList = true
-			signer.dynamicFee = true
-			signer.blob = true
-			signer.setCode = true
-			signer.chainID.Set(&chainId)
-			signer.chainIDMul.Lsh(&chainId, 1) // ×2
-		case config.IsBhilai(blockNumber):
-			signer.protected = true
-			signer.accessList = true
-			signer.dynamicFee = true
-			signer.blob = false
-			signer.setCode = true
-			signer.chainID.Set(&chainId)
-			signer.chainIDMul.Lsh(&chainId, 1) // ×2
-		case config.IsCancun(blockTime):
-			// All transaction types are still supported
-			signer.protected = true
-			signer.accessList = true
-			signer.dynamicFee = true
-			signer.blob = true
-			signer.chainID.Set(&chainId)
-			signer.chainIDMul.Lsh(&chainId, 1) // ×2
-		case config.IsLondon(blockNumber):
-			signer.protected = true
-			signer.accessList = true
-			signer.dynamicFee = true
-			signer.chainID.Set(&chainId)
-			signer.chainIDMul.Lsh(&chainId, 1) // ×2
-		case config.IsBerlin(blockNumber):
-			signer.protected = true
-			signer.accessList = true
-			signer.chainID.Set(&chainId)
-			signer.chainIDMul.Lsh(&chainId, 1) // ×2
-		case config.IsSpuriousDragon(blockNumber):
-			signer.protected = true
-			signer.chainID.Set(&chainId)
-			signer.chainIDMul.Lsh(&chainId, 1) // ×2
-		case config.IsHomestead(blockNumber):
-		default:
-			// Only allow malleable transactions in Frontier
-			signer.malleable = true
-		}
+	if config == nil {
+		return &Signer{}
 	}
-	return &signer
+	prague := config.IsPrague(blockTime)
+	return makeSigner(config.ChainID, signerForks{
+		prague:         prague,
+		bhilai:         config.IsBhilai(blockNumber) && !prague,
+		cancun:         config.IsCancun(blockTime),
+		london:         config.IsLondon(blockNumber),
+		berlin:         config.IsBerlin(blockNumber),
+		spuriousDragon: config.IsSpuriousDragon(blockNumber),
+		homestead:      config.IsHomestead(blockNumber),
+	})
 }
 
 // MakeSignerFromRules returns a Signer derived from an already-resolved Rules
-// instead of raw block number/time. The capability cascade mirrors
-// MakeSigner's, with Bhilai tested before Prague because Rules construction
-// folds Bhilai into IsPrague and the Bhilai tier does not enable blob
-// transactions. When chainID is nil, rules.ChainID is used.
+// instead of raw block number/time. Bhilai wins over Prague because Rules
+// construction folds Bhilai into IsPrague and the Bhilai tier does not enable
+// blob transactions. When chainID is nil, rules.ChainID is used.
 func MakeSignerFromRules(chainID *uint256.Int, rules *chain.Rules) *Signer {
-	var signer Signer
+	if rules == nil {
+		return &Signer{}
+	}
+	if chainID == nil {
+		chainID = rules.ChainID
+	}
+	return makeSigner(chainID, signerForks{
+		prague:         rules.IsPrague,
+		bhilai:         rules.IsBhilai,
+		cancun:         rules.IsCancun,
+		london:         rules.IsLondon,
+		berlin:         rules.IsBerlin,
+		spuriousDragon: rules.IsSpuriousDragon,
+		homestead:      rules.IsHomestead,
+	})
+}
 
-	if rules != nil {
-		if chainID == nil {
-			chainID = rules.ChainID
-		}
-		var chainId uint256.Int
-		if chainID != nil {
-			chainId.Set(chainID)
-		}
-		signer.unprotected = true
-		switch {
-		// Bhilai before Prague: Rules construction folds Bhilai into IsPrague,
-		// and the Bhilai tier does not enable blob transactions.
-		case rules.IsBhilai:
-			signer.protected = true
-			signer.accessList = true
-			signer.dynamicFee = true
-			signer.blob = false
-			signer.setCode = true
-			signer.chainID.Set(&chainId)
-			signer.chainIDMul.Lsh(&chainId, 1) // ×2
-		case rules.IsPrague:
-			signer.protected = true
-			signer.accessList = true
-			signer.dynamicFee = true
-			signer.blob = true
-			signer.setCode = true
-			signer.chainID.Set(&chainId)
-			signer.chainIDMul.Lsh(&chainId, 1) // ×2
-		case rules.IsCancun:
-			// All transaction types are still supported
-			signer.protected = true
-			signer.accessList = true
-			signer.dynamicFee = true
-			signer.blob = true
-			signer.chainID.Set(&chainId)
-			signer.chainIDMul.Lsh(&chainId, 1) // ×2
-		case rules.IsLondon:
-			signer.protected = true
-			signer.accessList = true
-			signer.dynamicFee = true
-			signer.chainID.Set(&chainId)
-			signer.chainIDMul.Lsh(&chainId, 1) // ×2
-		case rules.IsBerlin:
-			signer.protected = true
-			signer.accessList = true
-			signer.chainID.Set(&chainId)
-			signer.chainIDMul.Lsh(&chainId, 1) // ×2
-		case rules.IsSpuriousDragon:
-			signer.protected = true
-			signer.chainID.Set(&chainId)
-			signer.chainIDMul.Lsh(&chainId, 1) // ×2
-		case rules.IsHomestead:
-		default:
-			// Only allow malleable transactions in Frontier
-			signer.malleable = true
-		}
+type signerForks struct {
+	prague, bhilai, cancun, london, berlin, spuriousDragon, homestead bool
+}
+
+func makeSigner(chainID *uint256.Int, forks signerForks) *Signer {
+	var signer Signer
+	var chainId uint256.Int
+	if chainID != nil {
+		chainId.Set(chainID)
+	}
+	signer.unprotected = true
+	switch {
+	case forks.bhilai:
+		signer.protected = true
+		signer.accessList = true
+		signer.dynamicFee = true
+		signer.blob = false
+		signer.setCode = true
+		signer.chainID.Set(&chainId)
+		signer.chainIDMul.Lsh(&chainId, 1) // ×2
+	case forks.prague:
+		signer.protected = true
+		signer.accessList = true
+		signer.dynamicFee = true
+		signer.blob = true
+		signer.setCode = true
+		signer.chainID.Set(&chainId)
+		signer.chainIDMul.Lsh(&chainId, 1) // ×2
+	case forks.cancun:
+		// All transaction types are still supported
+		signer.protected = true
+		signer.accessList = true
+		signer.dynamicFee = true
+		signer.blob = true
+		signer.chainID.Set(&chainId)
+		signer.chainIDMul.Lsh(&chainId, 1) // ×2
+	case forks.london:
+		signer.protected = true
+		signer.accessList = true
+		signer.dynamicFee = true
+		signer.chainID.Set(&chainId)
+		signer.chainIDMul.Lsh(&chainId, 1) // ×2
+	case forks.berlin:
+		signer.protected = true
+		signer.accessList = true
+		signer.chainID.Set(&chainId)
+		signer.chainIDMul.Lsh(&chainId, 1) // ×2
+	case forks.spuriousDragon:
+		signer.protected = true
+		signer.chainID.Set(&chainId)
+		signer.chainIDMul.Lsh(&chainId, 1) // ×2
+	case forks.homestead:
+	default:
+		// Only allow malleable transactions in Frontier
+		signer.malleable = true
 	}
 	return &signer
 }
