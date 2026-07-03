@@ -44,6 +44,7 @@ var DefaultFlags = []cli.Flag{
 	&PruneBlocksDistanceFlag,
 	&PruneModeFlag,
 	&utils.KeepExecutionProofsFlag,
+	&utils.CommitmentHistoryDistanceFlag,
 	&utils.FcuTimeoutFlag,
 	&utils.FcuBackgroundPruneFlag,
 	&utils.FcuBackgroundCommitFlag,
@@ -269,4 +270,5 @@ var DefaultFlags = []cli.Flag{
 	&utils.MCPPortFlag,
 
 	&utils.ErigondbDomainStepsInFrozenFileFlag,
+	&utils.CommitmentPlainValuesFlag,
 }
