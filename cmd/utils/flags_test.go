@@ -281,3 +281,27 @@ func TestExecPerfFlags_OverrideDbg(t *testing.T) {
 		require.True(t, dbg.NoBackgroundMaintenance())
 	})
 }
+
+func TestCommitmentPlainValuesFromCtx(t *testing.T) {
+	parse := func(args ...string) *bool {
+		var got *bool
+		app := cli.NewApp()
+		app.Flags = []cli.Flag{&CommitmentPlainValuesFlag}
+		app.Action = func(ctx *cli.Context) error {
+			got = CommitmentPlainValuesFromCtx(ctx)
+			return nil
+		}
+		require.NoError(t, app.Run(append([]string{"test"}, args...)))
+		return got
+	}
+
+	require.Nil(t, parse(), "unset => nil")
+
+	gotTrue := parse("--commitment.plainValues")
+	require.NotNil(t, gotTrue)
+	require.True(t, *gotTrue)
+
+	gotFalse := parse("--commitment.plainValues=false")
+	require.NotNil(t, gotFalse)
+	require.False(t, *gotFalse)
+}

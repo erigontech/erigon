@@ -101,10 +101,8 @@ type SharedDomains struct {
 
 	logger log.Logger
 
-	txNum             uint64
-	currentStep       kv.Step
-	trace             bool //nolint
-	commitmentCapture bool
+	txNum       uint64
+	currentStep kv.Step
 	// disableInlineTouchKey when true, DomainPut skips the TouchKey call.
 	// Used when the commitment calculator goroutine owns the Updates buffer
 	// and feeds touches via TouchPlainKeyDirect from the fan-out channel.
@@ -191,8 +189,7 @@ func NewSharedDomains(ctx context.Context, tx kv.TemporalTx, logger log.Logger, 
 	trieCfg := o.trieCfg
 
 	sd := &SharedDomains{
-		logger: logger,
-		//trace:   true,
+		logger:   logger,
 		metrics:  kvmetrics.DomainMetrics{Domains: map[kv.Domain]*kvmetrics.DomainIOMetrics{}},
 		stepSize: tx.Debug().StepSize(),
 	}
@@ -672,14 +669,6 @@ func (sd *SharedDomains) Unwind(txNumUnwindTo uint64, changeset *[kv.DomainLen][
 	}
 }
 
-func (sd *SharedDomains) Trace() bool {
-	return sd.trace
-}
-
-func (sd *SharedDomains) CommitmentCapture() bool {
-	return sd.commitmentCapture
-}
-
 func (sd *SharedDomains) GetMemBatch() kv.TemporalMemBatch { return sd.mem }
 func (sd *SharedDomains) SetInMemHistoryReads(v bool)      { sd.mem.SetInMemHistoryReads(v) }
 func (sd *SharedDomains) InMemHistoryReads() bool          { return sd.mem.InMemHistoryReads() }
@@ -834,12 +823,6 @@ func (sd *SharedDomains) SetDisableInlineTouchKey(disable bool) {
 // InlineTouchKeyDisabled returns true when inline TouchKey is disabled.
 func (sd *SharedDomains) InlineTouchKeyDisabled() bool {
 	return sd.disableInlineTouchKey
-}
-
-func (sd *SharedDomains) SetTrace(b, capture bool) []string {
-	sd.trace = b
-	sd.commitmentCapture = capture
-	return sd.sdCtx.GetCapture(true)
 }
 
 func (sd *SharedDomains) HasPrefix(domain kv.Domain, prefix []byte, roTx kv.Tx) ([]byte, []byte, bool, error) {

@@ -656,7 +656,7 @@ func TestAggregatorV3_MergeValTransform(t *testing.T) {
 	require.NoError(t, err)
 	defer rwTx.Rollback()
 
-	agg.ForTestReplaceKeysInValues(kv.CommitmentDomain, true)
+	agg.ForTestReferencesInCommitmentBranches(kv.CommitmentDomain, true)
 
 	domains, err := execctx.NewSharedDomains(t.Context(), rwTx, log.New())
 	require.NoError(t, err)
@@ -812,7 +812,6 @@ func generateSharedDomainsUpdates(t *testing.T, domains *execctx.SharedDomains, 
 			usedKeys[k] = struct{}{}
 		}
 		if txNum%commitEvery == 0 {
-			// domains.SetTrace(true)
 			stateRootHash, err := domains.ComputeCommitment(t.Context(), tx, true, txNum/commitEvery, txNum, "", nil)
 			require.NoErrorf(t, err, "txNum=%d", txNum)
 			_ = stateRootHash
