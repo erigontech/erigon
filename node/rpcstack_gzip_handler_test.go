@@ -27,6 +27,8 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/erigontech/erigon/common/pool"
 )
 
 // decompressGzip reads a gzip-compressed body and returns the raw bytes.
@@ -155,7 +157,7 @@ func TestGzipHandlerStatusStreaming(t *testing.T) {
 
 // TestGzipHandlerLargeBody verifies that a response body larger than
 // gzPoolBufCap (1 MiB) is compressed correctly. This exercises the pool-cap
-// path: the oversized buffer must not be returned to gzBufPool.
+// path: the oversized buffer must not be returned to the shared buffer pool.
 func TestGzipHandlerLargeBody(t *testing.T) {
 	body := bytes.Repeat([]byte("x"), gzPoolBufCap+1)
 	handler := newGzipHandler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -173,8 +175,7 @@ func TestGzipHandlerLargeBody(t *testing.T) {
 // mode and that buffered bytes are drained into the gzip writer.
 func TestGzipResponseWriterFlushActivatesStreaming(t *testing.T) {
 	rec := httptest.NewRecorder()
-	buf := gzBufPool.Get().(*bytes.Buffer)
-	buf.Reset()
+	buf := pool.GetBuffer()
 	grw := &gzipResponseWriter{buf: buf, ResponseWriter: rec}
 
 	// Write into the buffer before activating streaming.
@@ -192,23 +193,4 @@ func TestGzipResponseWriterFlushActivatesStreaming(t *testing.T) {
 
 	got := decompressGzip(t, rec.Body)
 	assert.Equal(t, []byte("pre-flush post-flush"), got)
-}
-
-// TestGzipBufPoolCapThreshold verifies that the cap guard does not return
-// an oversized buffer to gzBufPool.
-func TestGzipBufPoolCapThreshold(t *testing.T) {
-	buf := gzBufPool.Get().(*bytes.Buffer)
-	buf.Grow(gzPoolBufCap + 1)
-	require.Greater(t, buf.Cap(), gzPoolBufCap)
-
-	// Simulate the handler's cap check: large buffer is NOT returned.
-	if buf.Cap() <= gzPoolBufCap {
-		gzBufPool.Put(buf)
-	}
-
-	// Any buffer obtained from the pool now must be within the cap limit.
-	fresh := gzBufPool.Get().(*bytes.Buffer)
-	defer gzBufPool.Put(fresh)
-	assert.LessOrEqual(t, fresh.Cap(), gzPoolBufCap,
-		"pool must not contain a buffer larger than gzPoolBufCap")
 }
