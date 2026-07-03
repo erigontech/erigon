@@ -43,11 +43,7 @@ type ForkableAgg struct {
 	ctx       context.Context
 	ctxCancel context.CancelFunc
 
-	wg sync.WaitGroup
-
-	// see Aggregator.closing
-	closing   bool
-	closingMu sync.Mutex
+	wg closingWaitGroup
 
 	ps *background.ProgressSet
 
@@ -163,10 +159,15 @@ func (r *ForkableAgg) BuildFilesInBackground(num RootNum) chan struct{} {
 		return fin
 	}
 
+	if !r.wg.TryAdd() {
+		r.buildingFiles.Store(false)
+		close(fin)
+		return fin
+	}
+
 	built := true
 	var err error
 
-	r.wg.Add(1)
 	go func() {
 		defer r.wg.Done()
 		defer r.buildingFiles.Store(false)
@@ -222,13 +223,9 @@ func (a *ForkableAgg) WaitForBuildAndMerge(ctx context.Context) chan struct{} {
 }
 
 func (r *ForkableAgg) MergeLoop(ctx context.Context) error {
-	r.closingMu.Lock()
-	if r.closing {
-		r.closingMu.Unlock()
+	if !r.wg.TryAdd() {
 		return nil
 	}
-	r.wg.Add(1)
-	r.closingMu.Unlock()
 	defer r.wg.Done()
 	return r.mergeLoop(ctx)
 }
@@ -451,14 +448,13 @@ func (r *ForkableAgg) buildFile(ctx context.Context, to RootNum) (built bool, er
 }
 
 func (r *ForkableAgg) Close() {
-	if r == nil || r.ctxCancel == nil { // invariant: it's safe to call Close multiple times
+	if r == nil {
 		return
 	}
-	r.closingMu.Lock()
-	r.closing = true
-	r.closingMu.Unlock()
+	if !r.wg.BeginClose() { // invariant: it's safe to call Close multiple times, even concurrently
+		return
+	}
 	r.ctxCancel()
-	r.ctxCancel = nil
 	r.wg.Wait()
 
 	r.dirtyFilesLock.Lock()

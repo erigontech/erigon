@@ -679,9 +679,7 @@ func TestForkableAggCloseWaitsForBackgroundMerge(t *testing.T) {
 	}
 }
 
-// MergeLoop is also called from goroutines the aggregator did not spawn, so its wg
-// registration must be ordered against Close's Wait — an unordered Add from zero is
-// WaitGroup reuse, flagged by -race.
+// ForkableAgg twin of TestAggregatorCloseVsConcurrentMergeLoop.
 func TestForkableAggCloseVsConcurrentMergeLoop(t *testing.T) {
 	for range 16 {
 		dirs, db, logger := setupDb(t)
@@ -699,5 +697,54 @@ func TestForkableAggCloseVsConcurrentMergeLoop(t *testing.T) {
 		}
 		agg.Close()
 		loops.Wait()
+	}
+}
+
+// ForkableAgg twin of TestAggregatorCloseVsConcurrentBuildFilesInBackground.
+func TestForkableAggCloseVsConcurrentBuildFilesInBackground(t *testing.T) {
+	for range 4 {
+		dirs, db, logger := setupDb(t)
+		_, header := setupHeader(t, db, logger, dirs)
+
+		agg := NewForkableAgg(t.Context(), dirs, db, logger)
+		agg.RegisterMarkedForkable(header)
+		require.NoError(t, agg.OpenFolder())
+
+		fins := make(chan chan struct{}, 4)
+		var loops sync.WaitGroup
+		for range 4 {
+			loops.Go(func() {
+				fins <- agg.BuildFilesInBackground(RootNum(10))
+			})
+		}
+		agg.Close()
+		loops.Wait()
+		close(fins)
+		for fin := range fins {
+			<-fin
+		}
+	}
+}
+
+// ForkableAgg twin of TestAggregatorConcurrentClose.
+func TestForkableAggConcurrentClose(t *testing.T) {
+	for range 4 {
+		dirs, db, logger := setupDb(t)
+		_, header := setupHeader(t, db, logger, dirs)
+
+		agg := NewForkableAgg(t.Context(), dirs, db, logger)
+		agg.RegisterMarkedForkable(header)
+		require.NoError(t, agg.OpenFolder())
+
+		start := make(chan struct{})
+		var closes sync.WaitGroup
+		for range 4 {
+			closes.Go(func() {
+				<-start
+				agg.Close()
+			})
+		}
+		close(start)
+		closes.Wait()
 	}
 }
