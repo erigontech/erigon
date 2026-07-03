@@ -94,7 +94,7 @@ func (r *CommitmentReplay) ComputeCustomCommitmentFromStateHistory(
 	}
 	defer ttx.Rollback()
 
-	tsd, err := execctx.NewSharedDomains(ctx, ttx, r.logger, execctx.WithoutDeferredBranchUpdates(), execctx.WithSequentialCommitment())
+	tsd, err := execctx.NewSharedDomains(ctx, ttx, r.logger, execctx.WithoutDeferredBranchUpdates(), execctx.WithoutBranchCache(), execctx.WithSequentialCommitment())
 	if err != nil {
 		return nil, err
 	}

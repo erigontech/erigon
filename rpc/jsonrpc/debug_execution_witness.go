@@ -750,7 +750,7 @@ func (api *DebugAPIImpl) ExecutionWitness(ctx context.Context, blockNrOrHash rpc
 	// Use the proof infrastructure from the commitment context.
 	// Witness generation requires the sequential HexPatriciaHashed (Witness()
 	// type-asserts it); the parallel trie cannot serve it.
-	domains, err := execctx.NewSharedDomains(ctx, tx, log.New(), execctx.WithoutDeferredBranchUpdates(), execctx.WithSequentialCommitment())
+	domains, err := execctx.NewSharedDomains(ctx, tx, log.New(), execctx.WithoutDeferredBranchUpdates(), execctx.WithoutBranchCache(), execctx.WithSequentialCommitment())
 	if err != nil {
 		return nil, err
 	}
