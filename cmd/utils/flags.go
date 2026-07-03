@@ -1118,7 +1118,7 @@ var (
 		Aliases: []string{"experimental.commitment-history", "prune.experimental.include-commitment-history"},
 	}
 	CommitmentHistoryOlderFlag = cli.Uint64Flag{
-		Name:  "prune.commitment-history.older",
+		Name:  "prune.commitment-history.distance",
 		Usage: "Keep commitment history only for the latest N blocks. Older snapshots are skipped at download time. 0 (default) keeps everything. Requires --prune.include-commitment-history.",
 	}
 	AlwaysGenerateChangesetsFlag = cli.BoolFlag{
