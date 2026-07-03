@@ -144,19 +144,36 @@ func RegenerateBoundaryStepFile(
 		// collapses two cases (GetAsOf treats an empty history marker
 		// as not-found — see db/state/domain.go): (a) key was tombstoned
 		// at some txN ≤ lastTxNum, (b) key was created strictly after
-		// lastTxNum. For a key that IS in the old boundary file, case
-		// (a) requires an empty entry in the new file to shadow the
-		// pre-tombstone value in older .kv files (files have no
-		// concept of deletion — see the exec-stage unwind tombstone
-		// comment in db/state/domain.go). Case (b) is harmless-with-
-		// empty (older files can't have the key either, so the empty
-		// entry just conveys "no value at ts", same as drop). Writing
-		// empty in both cases is strictly safer than dropping.
+		// lastTxNum.
+		//
+		// Handling depends on domain semantics:
+		//
+		//   - Value-domains (storage, accounts, code, receipt): the
+		//     stored value type treats empty as "no value" — a valid
+		//     tombstone. Writing (K, empty) in the regen shadows any
+		//     stale pre-tombstone value in older .kv files (files have
+		//     no concept of deletion — see the exec-stage unwind
+		//     tombstone comment in db/state/domain.go). Case (b) is
+		//     harmless-with-empty (older files can't have the key
+		//     either, so the empty entry conveys "no value at ts",
+		//     same as drop).
+		//
+		//   - Commitment domain: values are trie-branch blobs; empty
+		//     branch data is INVALID and trips
+		//     hex_patricia_hashed.unfoldBranchNode's "empty branch
+		//     data during unfold" error. Drop the key instead —
+		//     downstream reads walk older files to find the true
+		//     branch data, which is what the trie needs. Live-caught
+		//     2026-07-03 iter 3 mode_b @30k after empty-tombstone
+		//     landed for commitment keys.
 		newVal, found, err := lookup(domain, keyBuf, lastTxNum)
 		if err != nil {
 			return fmt.Errorf("AsOfLookup(%s, key, %d): %w", domain, lastTxNum, err)
 		}
 		if !found {
+			if domain == kv.CommitmentDomain {
+				continue
+			}
 			newVal = nil
 		}
 
