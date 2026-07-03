@@ -515,8 +515,8 @@ type RoTx struct {
 	// Set when this RoTx pins a RoSnapshots generation (bundle-refcount model):
 	// Close releases the generation. When nil, Close uses the per-file refcount
 	// path still used by the Caplin snapshot containers.
-	snaps *RoSnapshots
-	vis   *snapshotVisible
+	snaps   *RoSnapshots
+	visible *snapshotVisible
 }
 
 func (s *RoTx) Close() {
@@ -528,8 +528,8 @@ func (s *RoTx) Close() {
 	// Segments — the per-type slice can be nil (a type with no visible files) yet
 	// the pin was still taken.
 	if s.snaps != nil {
-		snaps, vis := s.snaps, s.vis
-		s.snaps, s.vis, s.Segments = nil, nil, nil
+		snaps, vis := s.snaps, s.visible
+		s.snaps, s.visible, s.Segments = nil, nil, nil
 		if vis != nil {
 			snaps.releaseVisible(vis)
 		}
@@ -810,7 +810,7 @@ func (s *RoSnapshots) DisableReadAhead() *RoSnapshots {
 	defer v.Close()
 
 	for _, t := range s.enums {
-		for _, sn := range v.sn.segments[t] {
+		for _, sn := range v.visible.segments[t] {
 			sn.src.DisableReadAhead()
 		}
 	}
@@ -822,7 +822,7 @@ func (s *RoSnapshots) EnableReadAhead() *RoSnapshots {
 	defer v.Close()
 
 	for _, t := range s.enums {
-		for _, sn := range v.sn.segments[t] {
+		for _, sn := range v.visible.segments[t] {
 			sn.src.MadvSequential()
 		}
 	}
@@ -834,7 +834,7 @@ func (s *RoSnapshots) MadvNormal() *RoSnapshots {
 	defer v.Close()
 
 	for _, t := range s.enums {
-		for _, sn := range v.sn.segments[t] {
+		for _, sn := range v.visible.segments[t] {
 			sn.src.MadvNormal()
 		}
 	}
@@ -847,7 +847,7 @@ func (s *RoSnapshots) EnableMadvWillNeed() *RoSnapshots {
 	defer v.Close()
 
 	for _, t := range s.enums {
-		for _, sn := range v.sn.segments[t] {
+		for _, sn := range v.visible.segments[t] {
 			sn.src.MadvWillNeed()
 		}
 	}
@@ -1115,7 +1115,7 @@ func (s *RoSnapshots) Ls() {
 
 	var stats seg.Stats
 	for _, t := range s.enums {
-		for _, sn := range view.sn.segments[t] {
+		for _, sn := range view.visible.segments[t] {
 			if sn.src == nil || sn.src.Decompressor == nil {
 				continue
 			}
@@ -1131,7 +1131,7 @@ func (s *RoSnapshots) Files() (list []string) {
 	view := s.View()
 	defer view.Close()
 	for _, t := range s.enums {
-		for _, seg := range view.sn.segments[t] {
+		for _, seg := range view.visible.segments[t] {
 			list = append(list, seg.src.FileName())
 		}
 	}
@@ -1759,21 +1759,21 @@ func (s *RoSnapshots) PrintDebug() {
 
 type View struct {
 	s           *RoSnapshots
-	sn          *snapshotVisible // pinned generation; released in Close
+	visible     *snapshotVisible // pinned generation; released in Close
 	baseSegType snaptype.Type
 }
 
 func (s *RoSnapshots) View() *View {
 	// Transactions is the last segment to be processed, so it's the most reliable.
-	return &View{s: s, sn: s.acquireVisible(), baseSegType: snaptype2.Transactions}
+	return &View{s: s, visible: s.acquireVisible(), baseSegType: snaptype2.Transactions}
 }
 
 func (v *View) Close() {
 	if v == nil || v.s == nil {
 		return
 	}
-	v.s.releaseVisible(v.sn)
-	v.s, v.sn = nil, nil
+	v.s.releaseVisible(v.visible)
+	v.s, v.visible = nil, nil
 }
 
 func (s *View) WithBaseSegType(t snaptype.Type) *View {
@@ -1786,7 +1786,7 @@ var noop = func() {}
 
 func (s *RoSnapshots) ViewType(t snaptype.Type) *RoTx {
 	v := s.acquireVisible()
-	return &RoTx{Segments: v.segments[t.Enum()], snaps: s, vis: v}
+	return &RoTx{Segments: v.segments[t.Enum()], snaps: s, visible: v}
 }
 
 func (s *RoSnapshots) ViewSingleFile(t snaptype.Type, blockNum uint64) (segment *VisibleSegment, ok bool, close func()) {
@@ -1803,11 +1803,11 @@ func (s *RoSnapshots) ViewSingleFile(t snaptype.Type, blockNum uint64) (segment 
 }
 
 func (v *View) Segments(t snaptype.Type) []*VisibleSegment {
-	return v.sn.segments[t.Enum()]
+	return v.visible.segments[t.Enum()]
 }
 
 func (v *View) Segment(t snaptype.Type, blockNum uint64) (*VisibleSegment, bool) {
-	for _, seg := range v.sn.segments[t.Enum()] {
+	for _, seg := range v.visible.segments[t.Enum()] {
 		if !(blockNum >= seg.from && blockNum < seg.to) {
 			continue
 		}
