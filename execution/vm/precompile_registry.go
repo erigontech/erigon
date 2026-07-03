@@ -19,8 +19,8 @@ package vm
 import (
 	"fmt"
 	"maps"
+	"slices"
 	"sync"
-	"sync/atomic"
 
 	"github.com/holiman/uint256"
 
@@ -32,17 +32,12 @@ import (
 // PrecompilesFunc builds a chain's precompile overlay for the given resolved
 // Rules. Its output must depend only on Rules.L2Version — the merged result
 // is cached per (chainID, base fork tier, L2Version), so keying on anything
-// else (including L1 fork booleans) would serve a stale set on a cache hit.
-// L1-fork variation belongs to the built-in base sets; an L2 gating an entry
-// on an L1 fork encodes that into its own L2Version ladder. Registration is
-// init-time; the cache holds one entry per distinct key, so it stays
-// upgrade-ladder-sized.
+// else would serve a stale set on a cache hit.
 type PrecompilesFunc func(rules *chain.Rules) PrecompiledContracts
 
 var (
-	registryMu  sync.Mutex
-	providers   atomic.Pointer[map[uint64]PrecompilesFunc]
-	mergedMu    sync.RWMutex
+	registryMu  sync.RWMutex
+	providers   = map[uint64]PrecompilesFunc{}
 	mergedCache = map[precompileCacheKey]*mergedPrecompileSet{}
 )
 
@@ -60,18 +55,10 @@ func RegisterPrecompiles(chainID uint64, f PrecompilesFunc) {
 	}
 	registryMu.Lock()
 	defer registryMu.Unlock()
-	cur := providers.Load()
-	if cur != nil {
-		if _, exists := (*cur)[chainID]; exists {
-			panic(fmt.Sprintf("vm: RegisterPrecompiles: chain ID %d already registered", chainID))
-		}
+	if _, exists := providers[chainID]; exists {
+		panic(fmt.Sprintf("vm: RegisterPrecompiles: chain ID %d already registered", chainID))
 	}
-	next := map[uint64]PrecompilesFunc{}
-	if cur != nil {
-		maps.Copy(next, *cur)
-	}
-	next[chainID] = f
-	providers.Store(&next)
+	providers[chainID] = f
 }
 
 // UnregisterPrecompiles removes a chain's provider and its cached merged
@@ -79,15 +66,7 @@ func RegisterPrecompiles(chainID uint64, f PrecompilesFunc) {
 func UnregisterPrecompiles(chainID uint64) {
 	registryMu.Lock()
 	defer registryMu.Unlock()
-	cur := providers.Load()
-	if cur == nil {
-		return
-	}
-	next := maps.Clone(*cur)
-	delete(next, chainID)
-	providers.Store(&next)
-	mergedMu.Lock()
-	defer mergedMu.Unlock()
+	delete(providers, chainID)
 	for k := range mergedCache {
 		if k.chainID == chainID {
 			delete(mergedCache, k)
@@ -116,11 +95,9 @@ func rulesChainID(rules *chain.Rules) uint64 {
 }
 
 func lookupProvider(chainID uint64) (PrecompilesFunc, bool) {
-	cur := providers.Load()
-	if cur == nil {
-		return nil, false
-	}
-	f, ok := (*cur)[chainID]
+	registryMu.RLock()
+	defer registryMu.RUnlock()
+	f, ok := providers[chainID]
 	return f, ok
 }
 
@@ -129,23 +106,19 @@ func lookupProvider(chainID uint64) (PrecompilesFunc, bool) {
 func mergedSetFor(rules *chain.Rules, base PrecompiledContracts, fork forkTier, chainID uint64, provider PrecompilesFunc) *mergedPrecompileSet {
 	key := precompileCacheKey{chainID: chainID, fork: fork, l2Version: rules.L2Version}
 
-	mergedMu.RLock()
+	registryMu.RLock()
 	if set, ok := mergedCache[key]; ok {
-		mergedMu.RUnlock()
+		registryMu.RUnlock()
 		return set
 	}
-	mergedMu.RUnlock()
+	registryMu.RUnlock()
 
 	contracts := maps.Clone(base)
 	maps.Copy(contracts, provider(rules))
-	addresses := make([]accounts.Address, 0, len(contracts))
-	for addr := range contracts {
-		addresses = append(addresses, addr)
-	}
-	set := &mergedPrecompileSet{contracts: contracts, addresses: addresses}
+	set := &mergedPrecompileSet{contracts: contracts, addresses: slices.Collect(maps.Keys(contracts))}
 
-	mergedMu.Lock()
-	defer mergedMu.Unlock()
+	registryMu.Lock()
+	defer registryMu.Unlock()
 	if existing, ok := mergedCache[key]; ok {
 		return existing
 	}

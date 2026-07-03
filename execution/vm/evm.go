@@ -41,11 +41,44 @@ import (
 	"github.com/erigontech/erigon/execution/vm/evmtypes"
 )
 
+// frameIdentity resolves the address a frame acts as and its caller for the
+// given call type: CALLCODE and DELEGATECALL run foreign code under the
+// calling frame's own identity.
+func frameIdentity(typ OpCode, caller, callerAddress, addr accounts.Address) (self, frameCaller accounts.Address) {
+	switch typ {
+	case CALLCODE:
+		return caller, caller
+	case DELEGATECALL:
+		return caller, callerAddress
+	default:
+		return addr, caller
+	}
+}
+
+// enterFrame applies the per-frame depth and read-only protocol shared by
+// the interpreter and the stateful-precompile dispatch, so nested calls
+// inherit static protection either way.
+func (evm *EVM) enterFrame(readOnly bool) (exitFrame func()) {
+	restoreReadonly := readOnly && !evm.readOnly
+	if restoreReadonly {
+		evm.readOnly = true
+	}
+	// Increment the call depth which is restricted to 1024
+	evm.depth++
+	return func() {
+		evm.depth--
+		if restoreReadonly {
+			evm.readOnly = false
+		}
+	}
+}
+
 func (evm *EVM) precompile(addr accounts.Address) (PrecompiledContract, bool) {
-	// Precompiled contracts can be overridden, otherwise determine the active set based on chain rules
+	// Precompiled contracts can be overridden, otherwise use the set resolved
+	// once per block from the chain rules.
 	precompiles := evm.precompiles
 	if precompiles == nil {
-		precompiles = Precompiles(evm.chainRules)
+		precompiles = evm.chainPrecompiles
 	}
 	p, ok := precompiles[addr]
 	return p, ok
@@ -87,7 +120,8 @@ type EVM struct {
 	// applied in opCall*.
 	callGasTemp uint64
 	// optional overridden set of precompiled contracts
-	precompiles PrecompiledContracts
+	precompiles      PrecompiledContracts
+	chainPrecompiles PrecompiledContracts
 
 	hasher    keccak.KeccakState // Keccak256 hasher instance shared across opcodes
 	hasherBuf common.Hash        // Keccak256 hasher result array shared across opcodes
@@ -114,6 +148,7 @@ func NewEVM(blockCtx evmtypes.BlockContext, txCtx evmtypes.TxContext, ibs *state
 		chainRules:      blockCtx.Rules(chainConfig),
 	}
 	evm.jt = jumpTable(evm.chainRules, vmConfig)
+	evm.chainPrecompiles = Precompiles(evm.chainRules)
 
 	return evm
 }
@@ -143,6 +178,7 @@ func (evm *EVM) ResetBetweenBlocks(blockCtx evmtypes.BlockContext, txCtx evmtype
 	evm.depth = 0
 	evm.returnData = nil
 	evm.jt = jumpTable(chainRules, vmConfig)
+	evm.chainPrecompiles = Precompiles(chainRules)
 
 	// ensure the evm is reset to be used again
 	evm.abort.Store(false)
@@ -384,16 +420,7 @@ func (evm *EVM) call(typ OpCode, caller accounts.Address, callerAddress accounts
 	// It is allowed to call precompiles, even via delegatecall
 	if isPrecompile {
 		if sp, ok := p.(StatefulPrecompile); ok {
-			// CALLCODE/DELEGATECALL run the precompile under the calling
-			// frame's own identity, mirroring the Contract construction below.
-			actingAs := addr
-			frameCaller := caller
-			if typ == CALLCODE || typ == DELEGATECALL {
-				actingAs = caller
-			}
-			if typ == DELEGATECALL {
-				frameCaller = callerAddress
-			}
+			actingAs, frameCaller := frameIdentity(typ, caller, callerAddress, addr)
 			ctx := &PrecompileContext{
 				Self:     addr,
 				ActingAs: actingAs,
@@ -403,9 +430,9 @@ func (evm *EVM) call(typ OpCode, caller accounts.Address, callerAddress accounts
 				Evm:      evm,
 			}
 			entryGas := gasRemaining
-			evm.depth++
+			exitFrame := evm.enterFrame(ctx.ReadOnly)
 			ret, gasRemaining, err = sp.RunStateful(input, gasRemaining, ctx)
-			evm.depth--
+			exitFrame()
 			// Attribute the precompile's State-dimension spend so the frame
 			// accounting defer and the EIP-8037 revert restore both see it.
 			gasUsed.State = int64(entryGas.State) - int64(gasRemaining.State)
@@ -424,31 +451,13 @@ func (evm *EVM) call(typ OpCode, caller accounts.Address, callerAddress accounts
 		if err != nil {
 			return nil, mdgas.MdGas{}, mdgas.MdGasUsage{}, fmt.Errorf("%w: %w", ErrIntraBlockStateFailed, err)
 		}
-		var contract Contract
-		if typ == CALLCODE {
-			contract = Contract{
-				caller:   caller,
-				addr:     caller,
-				value:    value,
-				Code:     code,
-				CodeHash: codeHash,
-			}
-		} else if typ == DELEGATECALL {
-			contract = Contract{
-				caller:   callerAddress,
-				addr:     caller,
-				value:    value,
-				Code:     code,
-				CodeHash: codeHash,
-			}
-		} else {
-			contract = Contract{
-				caller:   caller,
-				addr:     addr,
-				value:    value,
-				Code:     code,
-				CodeHash: codeHash,
-			}
+		self, frameCaller := frameIdentity(typ, caller, callerAddress, addr)
+		contract := Contract{
+			caller:   frameCaller,
+			addr:     self,
+			value:    value,
+			Code:     code,
+			CodeHash: codeHash,
 		}
 		readOnly := false
 		if typ == STATICCALL {

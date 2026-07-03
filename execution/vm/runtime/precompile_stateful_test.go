@@ -226,3 +226,37 @@ func TestStatefulPrecompileStateGasAttribution(t *testing.T) {
 	require.Equal(t, int64(40), gasUsed.State, "State consumption must be attributed to the State dimension")
 	require.Equal(t, uint64(100), gasUsed.Regular, "Regular usage must not absorb the State spend")
 }
+
+type nestedCallStatefulPrecompile struct {
+	target accounts.Address
+}
+
+func (nestedCallStatefulPrecompile) RequiredGas([]byte) uint64  { return 0 }
+func (nestedCallStatefulPrecompile) Run([]byte) ([]byte, error) { return nil, nil }
+func (nestedCallStatefulPrecompile) Name() string               { return "NESTED" }
+
+func (p nestedCallStatefulPrecompile) RunStateful(_ []byte, gas mdgas.MdGas, ctx *vm.PrecompileContext) ([]byte, mdgas.MdGas, error) {
+	_, remaining, _, err := ctx.Evm.Call(ctx.Caller, p.target, nil, gas, uint256.Int{}, false)
+	return nil, remaining, err
+}
+
+// TestStatefulPrecompileStaticContextInherited pins that a nested call made
+// through ctx.Evm from inside a STATICCALL'd precompile keeps write
+// protection, like nested bytecode frames do.
+func TestStatefulPrecompileStaticContextInherited(t *testing.T) {
+	const chainID = 900405
+	precompileAddr := accounts.InternAddress(common.BytesToAddress([]byte{0x8c}))
+	storeAddr := accounts.InternAddress(common.HexToAddress("0x5570"))
+	vm.RegisterPrecompiles(chainID, func(*chain.Rules) vm.PrecompiledContracts {
+		return vm.PrecompiledContracts{precompileAddr: nestedCallStatefulPrecompile{target: storeAddr}}
+	})
+	t.Cleanup(func() { vm.UnregisterPrecompiles(chainID) })
+
+	cfg := newStatefulTestConfig(t, chainID)
+	vmenv := prepareStatefulCall(t, cfg, precompileAddr)
+	require.NoError(t, cfg.State.CreateAccount(storeAddr, true))
+	require.NoError(t, cfg.State.SetCode(storeAddr, []byte{0x60, 0x01, 0x60, 0x01, 0x55, 0x00}, tracing.CodeChangeUnspecified)) // PUSH1 1 PUSH1 1 SSTORE STOP
+
+	_, _, _, err := vmenv.StaticCall(cfg.Origin, precompileAddr, nil, mdgas.MdGas{Regular: 1_000_000})
+	require.ErrorIs(t, err, vm.ErrWriteProtection)
+}
