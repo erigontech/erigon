@@ -40,20 +40,20 @@ import (
 	"github.com/erigontech/erigon/polygon/heimdall"
 )
 
-// L2EngineFactory builds an L2 stack's rules engine for a chain configured
+// L2EngineFunc builds an L2 stack's rules engine for a chain configured
 // with that stack's L2Config. Registered by the L2 package at init time and
 // consulted by CreateRulesEngine before the built-in type switch.
-type L2EngineFactory func(ctx context.Context, chainConfig *chain.Config, logger log.Logger) rules.Engine
+type L2EngineFunc func(ctx context.Context, chainConfig *chain.Config, logger log.Logger) rules.Engine
 
-var l2EngineFactories = map[string]L2EngineFactory{}
+var l2Engines = map[string]L2EngineFunc{}
 
-// RegisterL2Engine registers an L2 stack's rules-engine factory under its
+// RegisterL2Engine registers an L2 stack's rules-engine constructor under its
 // L2Config.Name(). Panics if name is already registered.
-func RegisterL2Engine(name string, factory L2EngineFactory) {
-	if _, exists := l2EngineFactories[name]; exists {
+func RegisterL2Engine(name string, newEngine L2EngineFunc) {
+	if _, exists := l2Engines[name]; exists {
 		panic("L2 rules engine already registered: " + name)
 	}
-	l2EngineFactories[name] = factory
+	l2Engines[name] = newEngine
 }
 
 func CreateRulesEngine(ctx context.Context, nodeConfig *nodecfg.Config, chainConfig *chain.Config, config any, noVerify bool,
@@ -63,8 +63,8 @@ func CreateRulesEngine(ctx context.Context, nodeConfig *nodecfg.Config, chainCon
 	var eng rules.Engine
 
 	if chainConfig.L2 != nil {
-		if factory, ok := l2EngineFactories[chainConfig.L2.Name()]; ok {
-			eng = factory(ctx, chainConfig, logger)
+		if newEngine, ok := l2Engines[chainConfig.L2.Name()]; ok {
+			eng = newEngine(ctx, chainConfig, logger)
 		}
 	} else {
 		switch consensusCfg := config.(type) {
