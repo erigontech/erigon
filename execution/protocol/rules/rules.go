@@ -138,8 +138,8 @@ type EngineReader interface {
 	GetPostApplyMessageFunc() evmtypes.PostApplyMessageFunc
 
 	// GetStartTxFunc returns the hook consulted at the very top of
-	// TxnExecutor.Execute, before intrinsic gas or preCheck. A non-nil
-	// result short-circuits the whole transition (system/deposit txs).
+	// TxnExecutor.Execute, before intrinsic gas or preCheck. Returning
+	// done=true short-circuits the whole transition (system/deposit txs).
 	GetStartTxFunc() evmtypes.StartTxFunc
 
 	// GetGasChargingFunc returns the hook consulted once gas has been

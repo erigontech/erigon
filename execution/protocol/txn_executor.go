@@ -482,6 +482,9 @@ func (st *TxnExecutor) Execute(refunds bool, gasBailout bool) (result *evmtypes.
 
 	if hook := st.evm.Context.StartTx; hook != nil {
 		if done, result, hookErr := hook(st.state, st.msg); done {
+			if result == nil && hookErr == nil {
+				return nil, fmt.Errorf("%w: StartTx hook short-circuited with neither result nor error", ErrTxnExecutionFailed)
+			}
 			return result, hookErr
 		}
 	}
@@ -626,6 +629,9 @@ func (st *TxnExecutor) Execute(refunds bool, gasBailout bool) (result *evmtypes.
 	if refunds && !gasBailout {
 		if hook := st.evm.Context.ComputeRefund; hook != nil {
 			rr := hook(gasUsed, imdGas, intrinsicGasResult, st.state.GetRefund(), rules)
+			if rr.TxnGasUsed > st.msg.Gas() {
+				return nil, fmt.Errorf("%w: ComputeRefund hook claims %d gas used, above the tx limit %d", ErrTxnExecutionFailed, rr.TxnGasUsed, st.msg.Gas())
+			}
 			st.blockRegularGasUsed = rr.BlockRegularGasUsed
 			st.blockStateGasUsed = rr.BlockStateGasUsed
 			st.txnGasUsedB4Refunds = rr.TxnGasUsedB4Refunds

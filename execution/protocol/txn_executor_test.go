@@ -299,7 +299,7 @@ func TestPreCheckErrorOrdering_GasBeforeFeeCap(t *testing.T) {
 	})
 }
 
-// TestStartTxHook_ShortCircuits verifies that a non-nil StartTx result skips
+// TestStartTxHook_ShortCircuits verifies that done=true from StartTx skips
 // the whole transition — preCheck never runs, so the block gas pool is
 // untouched and Execute returns the hook's result and error verbatim.
 func TestStartTxHook_ShortCircuits(t *testing.T) {
@@ -420,4 +420,59 @@ func TestNilHooks_GoldenPathUnchanged(t *testing.T) {
 	require.NotNil(t, result)
 	require.Less(t, gp.Gas(), uint64(blockGasLimit),
 		"gas pool must be debited for a valid transaction")
+}
+
+// TestStartTxHook_NilResultIsError pins the hook contract: done=true must
+// come with a result or an error, never neither.
+func TestStartTxHook_NilResultIsError(t *testing.T) {
+	t.Parallel()
+
+	const blockGasLimit = 30_000_000
+	sender := accounts.InternAddress(common.HexToAddress("0x1111111111111111111111111111111111111111"))
+	recipient := accounts.InternAddress(common.HexToAddress("0x2222222222222222222222222222222222222222"))
+
+	ibs := state.New(state.NewNoopReader())
+	blockCtx := evmtypes.BlockContext{
+		CanTransfer: CanTransfer,
+		Transfer:    misc.Transfer,
+		GasLimit:    blockGasLimit,
+		StartTx: func(_ evmtypes.IntraBlockState, _ evmtypes.Message) (bool, *evmtypes.ExecutionResult, error) {
+			return true, nil, nil
+		},
+	}
+	evm := vm.NewEVM(blockCtx, evmtypes.TxContext{}, ibs, chain.TestChainOsakaConfig, vm.Config{NoBaseFee: true})
+	msg := newSimpleTransferMsg(sender, recipient, 100_000, true)
+
+	_, err := NewTxnExecutor(evm, msg, new(GasPool).AddGas(blockGasLimit)).Execute(true, false)
+	require.Error(t, err)
+}
+
+// TestComputeRefundHook_GasUsedAboveLimitIsError pins that a refund override
+// claiming more gas used than the tx's limit is rejected instead of
+// underflowing the sender refund in refundGas.
+func TestComputeRefundHook_GasUsedAboveLimitIsError(t *testing.T) {
+	t.Parallel()
+
+	const blockGasLimit = 30_000_000
+	sender := accounts.InternAddress(common.HexToAddress("0x1111111111111111111111111111111111111111"))
+	recipient := accounts.InternAddress(common.HexToAddress("0x2222222222222222222222222222222222222222"))
+
+	ibs := state.New(state.NewNoopReader())
+	blockCtx := evmtypes.BlockContext{
+		CanTransfer: CanTransfer,
+		Transfer:    misc.Transfer,
+		GasLimit:    blockGasLimit,
+		ComputeRefund: func(_ mdgas.MdGasUsage, _ mdgas.MdGas, _ mdgas.IntrinsicGasCalcResult, _ uint64, _ *chain.Rules) evmtypes.RefundResult {
+			return evmtypes.RefundResult{
+				BlockRegularGasUsed: 200_000,
+				TxnGasUsedB4Refunds: 200_000,
+				TxnGasUsed:          200_000, // above the 100k tx gas limit
+			}
+		},
+	}
+	evm := vm.NewEVM(blockCtx, evmtypes.TxContext{}, ibs, chain.TestChainOsakaConfig, vm.Config{NoBaseFee: true})
+	msg := newSimpleTransferMsg(sender, recipient, 100_000, true)
+
+	_, err := NewTxnExecutor(evm, msg, new(GasPool).AddGas(blockGasLimit)).Execute(true, false)
+	require.Error(t, err)
 }
