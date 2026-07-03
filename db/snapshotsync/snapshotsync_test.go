@@ -23,6 +23,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 
+	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/prune"
 	"github.com/erigontech/erigon/db/services"
 	"github.com/erigontech/erigon/db/snapcfg"
@@ -348,8 +349,8 @@ func TestGetMinimumBlocksToDownload_TwoCutoffs(t *testing.T) {
 	}
 	assert.Equal(t, uint64(100), minBlock)
 	// step(10_000) = (10_000-99)/100 = 99 ; step(30_000) = (30_000-99)/100 = 299.
-	assert.Equal(t, uint64(99), historyStep)
-	assert.Equal(t, uint64(299), commitmentStep)
+	assert.Equal(t, kv.Step(99), historyStep)
+	assert.Equal(t, kv.Step(299), commitmentStep)
 }
 
 // TestGetMinimumBlocksToDownload_MinBlock pins the minBlockToDownload computation and
@@ -372,6 +373,6 @@ func TestGetMinimumBlocksToDownload_MinBlock(t *testing.T) {
 	}
 	assert.Equal(t, uint64(100), minBlock)
 	// step(20_000) = (20_000-99)/100 = 199.
-	assert.Equal(t, uint64(199), historyStep)
-	assert.Equal(t, uint64(199), commitmentStep)
+	assert.Equal(t, kv.Step(199), historyStep)
+	assert.Equal(t, kv.Step(199), commitmentStep)
 }
