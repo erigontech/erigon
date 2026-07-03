@@ -542,12 +542,17 @@ func setEmbeddedRpcDaemon(ctx *cli.Command, cfg *nodecfg.Config, logger log.Logg
 // read-only interface to the database
 func setPrivateApi(ctx *cli.Command, cfg *nodecfg.Config) {
 	cfg.PrivateApiAddr = ctx.String(PrivateApiAddr.Name)
-	cfg.PrivateApiRateLimit = uint32(ctx.Int(PrivateApiRateLimit.Name))
-	maxRateLimit := uint32(kv.ReadersLimit - 128) // leave some readers for P2P
-	if cfg.PrivateApiRateLimit > maxRateLimit {
+	rateLimit := ctx.Int(PrivateApiRateLimit.Name)
+	maxRateLimit := int(kv.ReadersLimit - 128) // leave some readers for P2P
+	switch {
+	case rateLimit < 0:
+		log.Warn("private.api.ratelimit cannot be negative", "force", 0)
+		rateLimit = 0
+	case rateLimit > maxRateLimit:
 		log.Warn("private.api.ratelimit is too big", "force", maxRateLimit)
-		cfg.PrivateApiRateLimit = maxRateLimit
+		rateLimit = maxRateLimit
 	}
+	cfg.PrivateApiRateLimit = uint32(rateLimit)
 	if ctx.Bool(utils.TLSFlag.Name) {
 		certFile := ctx.String(utils.TLSCertFlag.Name)
 		keyFile := ctx.String(utils.TLSKeyFlag.Name)

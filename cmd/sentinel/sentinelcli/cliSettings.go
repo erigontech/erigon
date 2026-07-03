@@ -50,9 +50,12 @@ func SetupSentinelCli(ctx *cli.Command) (*SentinelCliCfg, error) {
 	cfg.Addr = ctx.String(sentinelflags.SentinelDiscoveryAddr.Name)
 	cfg.ServerTcpPort = uint(ctx.Uint(sentinelflags.SentinelTcpPort.Name))
 
-	if lvl, err := log.LvlFromString(ctx.String(logging.LogVerbosityFlag.Name)); err == nil {
-		cfg.LogLvl = uint(lvl)
+	verbosity := ctx.String(logging.LogVerbosityFlag.Name)
+	lvl, err := logging.GetLogLevel(verbosity)
+	if err != nil {
+		return nil, fmt.Errorf("invalid --%s value %q: %w", logging.LogVerbosityFlag.Name, verbosity, err)
 	}
+	cfg.LogLvl = uint(lvl)
 	if cfg.LogLvl == uint(log.LvlInfo) || cfg.LogLvl == 0 {
 		cfg.LogLvl = uint(log.LvlDebug)
 	}
