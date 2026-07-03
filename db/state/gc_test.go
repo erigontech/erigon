@@ -114,6 +114,49 @@ func TestAggregatorRetireDeferredWhileDebugPins(t *testing.T) {
 	mustExist(t, subset01, false)
 }
 
+// TestAggregatorRetireNotReclaimedByYoungerReader pins the oldest-reader
+// watermark: files retired while reader1 pins generation vf0 must NOT be deleted
+// when reader2 — opened on a strictly newer generation (vf2) — closes. Only
+// reader1's Close, as the oldest pin, may release them. Without the watermark,
+// reader2.Close would delete files reader1 can still see (use-after-close).
+func TestAggregatorRetireNotReclaimedByYoungerReader(t *testing.T) {
+	_, agg := testDbAndAggregatorv3(t, uint64(10))
+	generateAllDomainsOverlap(t, agg)
+
+	subset01 := filepath.Join(agg.Dirs().SnapHistory, "v1.0-accounts.0-1.v")
+	subset12 := filepath.Join(agg.Dirs().SnapHistory, "v1.0-accounts.1-2.v")
+	mustExist(t, subset01, true)
+	mustExist(t, subset12, true)
+
+	// reader1 pins vf0 (the overlaps are still in its generation's dirtyFiles).
+	reader1 := agg.BeginFilesRo()
+
+	// Retire the overlaps: they attach to vf0 and a new generation vf1 is published.
+	require.NoError(t, agg.RemoveOverlapsAfterMerge(t.Context()))
+	mustExist(t, subset01, true) // deferred — reader1 still pins vf0
+	mustExist(t, subset12, true)
+
+	// Publish vf2 so reader2 pins a generation strictly newer than vf0 (which owns
+	// the retired set). recalcVisibleFiles reclaims what it can — nothing, since
+	// reader1 still pins the oldest generation.
+	agg.dirtyFilesLock.Lock()
+	agg.recalcVisibleFiles(nil)
+	agg.dirtyFilesLock.Unlock()
+	mustExist(t, subset01, true)
+
+	// reader2 opens on vf2 and closes. Its Close walks from the oldest generation
+	// (vf0, still pinned by reader1) and must stop there — reclaiming nothing.
+	reader2 := agg.BeginFilesRo()
+	reader2.Close()
+	mustExist(t, subset01, true) // younger reader's Close must not delete reader1's files
+	mustExist(t, subset12, true)
+
+	// Only the oldest pin dropping releases them.
+	reader1.Close()
+	mustExist(t, subset01, false)
+	mustExist(t, subset12, false)
+}
+
 // TestAggregatorReclaimConcurrent stresses BeginFilesRo/Close against a
 // concurrent retirement under the race detector: no double-free / use-after-free
 // of FilesItem regardless of how Close and reclamation interleave.
