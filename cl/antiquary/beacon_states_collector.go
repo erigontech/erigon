@@ -32,7 +32,6 @@ import (
 	"github.com/erigontech/erigon/cl/transition/impl/eth2"
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/log/v3"
-	"github.com/erigontech/erigon/common/pool"
 	"github.com/erigontech/erigon/db/etl"
 	"github.com/erigontech/erigon/db/kv"
 )
@@ -520,11 +519,11 @@ func (i *beaconStatesCollector) collectStateEvents(slot uint64, events *state_ac
 }
 
 func (i *beaconStatesCollector) collectBalancesDiffs(ctx context.Context, slot uint64, old, new []byte) error {
-	return antiquateBytesListDiff(ctx, base_encoding.Encode64ToBytes4(slot), old, new, i.balancesCollector, base_encoding.ComputeCompressedSerializedUint64ListDiff)
+	return antiquateBytesListDiff(ctx, base_encoding.Encode64ToBytes4(slot), old, new, i.buf, i.balancesCollector, base_encoding.ComputeCompressedSerializedUint64ListDiff)
 }
 
 func (i *beaconStatesCollector) collectEffectiveBalancesDiffs(ctx context.Context, slot uint64, oldValidatorSetSSZ, newValidatorSetSSZ []byte) error {
-	return antiquateBytesListDiff(ctx, base_encoding.Encode64ToBytes4(slot), oldValidatorSetSSZ, newValidatorSetSSZ, i.effectiveBalanceCollector, base_encoding.ComputeCompressedSerializedEffectiveBalancesDiff)
+	return antiquateBytesListDiff(ctx, base_encoding.Encode64ToBytes4(slot), oldValidatorSetSSZ, newValidatorSetSSZ, i.buf, i.effectiveBalanceCollector, base_encoding.ComputeCompressedSerializedEffectiveBalancesDiff)
 }
 
 func (i *beaconStatesCollector) collectInactivityScores(slot uint64, inactivityScores []byte) error {
@@ -718,14 +717,13 @@ func antiquateListSSZ[T solid.EncodableHashableSSZ](ctx context.Context, slot ui
 	return collector.Collect(base_encoding.Encode64ToBytes4(roundedSlot), buffer.Bytes())
 }
 
-func antiquateBytesListDiff(ctx context.Context, key []byte, old, new []byte, collector *etl.Collector, diffFn func(w io.Writer, old, new []byte) error) error {
-	// create a diff
-	diffBuffer := pool.GetBuffer()
-	defer pool.PutBuffer(diffBuffer)
+func antiquateBytesListDiff(ctx context.Context, key []byte, old, new []byte, buffer *bytes.Buffer, collector *etl.Collector, diffFn func(w io.Writer, old, new []byte) error) error {
+	buffer.Reset()
 
-	if err := diffFn(diffBuffer, old, new); err != nil {
+	// create a diff
+	if err := diffFn(buffer, old, new); err != nil {
 		return err
 	}
 
-	return collector.Collect(key, diffBuffer.Bytes())
+	return collector.Collect(key, buffer.Bytes())
 }

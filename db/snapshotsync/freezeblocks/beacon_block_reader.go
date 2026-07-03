@@ -17,6 +17,7 @@
 package freezeblocks
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"sync"
@@ -28,7 +29,6 @@ import (
 	"github.com/erigontech/erigon/cl/persistence/beacon_indicies"
 	"github.com/erigontech/erigon/cl/persistence/format/snapshot_format"
 	"github.com/erigontech/erigon/common"
-	"github.com/erigontech/erigon/common/pool"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/dbutils"
 	"github.com/erigontech/erigon/execution/types"
@@ -131,15 +131,11 @@ func (r *beaconSnapshotReader) ReadBlockBySlot(ctx context.Context, tx kv.Tx, sl
 	}
 
 	// Decompress this thing
-	buffer := pool.GetBuffer()
-	defer pool.PutBuffer(buffer)
-
-	buffer.Write(buf)
 	reader := decompressorPool.Get().(*zstd.Decoder)
 	defer decompressorPool.Put(reader)
-	reader.Reset(buffer)
+	reader.Reset(bytes.NewReader(buf))
 
-	// Use pooled buffers and readers to avoid allocations.
+	// Use pooled readers to avoid allocations.
 	return snapshot_format.ReadBlockFromSnapshot(reader, r.eth1Getter, r.cfg)
 }
 
@@ -192,15 +188,11 @@ func (r *beaconSnapshotReader) ReadBeaconBlockBodyBySlot(ctx context.Context, tx
 	}
 
 	// Decompress this thing
-	buffer := pool.GetBuffer()
-	defer pool.PutBuffer(buffer)
-
-	buffer.Write(buf)
 	reader := decompressorPool.Get().(*zstd.Decoder)
 	defer decompressorPool.Put(reader)
-	reader.Reset(buffer)
+	reader.Reset(bytes.NewReader(buf))
 
-	// Use pooled buffers and readers to avoid allocations.
+	// Use pooled readers to avoid allocations.
 	return snapshot_format.ReadBeaconBlockBodyFromSnapshot(reader, r.cfg)
 }
 
@@ -269,15 +261,11 @@ func (r *beaconSnapshotReader) ReadBlockByRoot(ctx context.Context, tx kv.Tx, ro
 		return nil, nil
 	}
 	// Decompress this thing
-	buffer := pool.GetBuffer()
-	defer pool.PutBuffer(buffer)
-
-	buffer.Write(buf)
 	reader := decompressorPool.Get().(*zstd.Decoder)
 	defer decompressorPool.Put(reader)
-	reader.Reset(buffer)
+	reader.Reset(bytes.NewReader(buf))
 
-	// Use pooled buffers and readers to avoid allocations.
+	// Use pooled readers to avoid allocations.
 	return snapshot_format.ReadBlockFromSnapshot(reader, r.eth1Getter, r.cfg)
 }
 
@@ -308,6 +296,5 @@ func (r *beaconSnapshotReader) ReadHeaderByRoot(ctx context.Context, tx kv.Tx, r
 	}
 
 	h, _, _, err := r.sn.ReadHeader(*slot, tx)
-	// Use pooled buffers and readers to avoid allocations.
 	return h, err
 }
