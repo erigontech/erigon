@@ -346,6 +346,7 @@ func (opts MdbxOpts) Open(ctx context.Context) (_ kv.RwDB, err error) {
 	}
 
 	bgSync := opts.HasFlag(mdbx.SafeNoSync)
+	log.Warn("[dbg] startup", "db", opts.label, "bgSync", bgSync)
 	if bgSync {
 		// Drive checkpoints off the hot path: disable threshold/time-based auto-sync
 		// so writer commits stay cheap, and let the background goroutine force syncs.
