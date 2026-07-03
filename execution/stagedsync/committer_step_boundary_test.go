@@ -26,6 +26,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/length"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/datadir"
@@ -37,9 +38,11 @@ import (
 	dbstate "github.com/erigontech/erigon/db/state"
 	"github.com/erigontech/erigon/db/state/changeset"
 	"github.com/erigontech/erigon/db/state/execctx"
+	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/commitment"
 	"github.com/erigontech/erigon/execution/commitment/commitmentdb"
 	"github.com/erigontech/erigon/execution/state"
+	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/accounts"
 )
 
@@ -567,4 +570,84 @@ func setupStepTest(t *testing.T) (kv.TemporalRwDB, kv.TemporalRwTx, *execctx.Sha
 	require.NoError(t, err)
 	t.Cleanup(doms.Close)
 	return db, tx, doms
+}
+
+// TestFold_StepBoundaryCheckpointMidBlock pins the batch-end-in-BAL behaviour:
+// a BAL-driven fold of a block straddling an unfrozen step edge must leave a
+// commitment checkpoint at that edge (as of the edge txNum), so the step's
+// commitment .kv stays consistent with its account/storage .kv — the same
+// invariant the incremental path holds, now met by the fold itself rather than
+// by dropping the block to the incremental path.
+func TestFold_StepBoundaryCheckpointMidBlock(t *testing.T) {
+	defer func(p bool) { dbg.BALDrivenCommitment = p }(dbg.BALDrivenCommitment)
+	defer func(p bool) { dbg.IgnoreBAL = p }(dbg.IgnoreBAL)
+	dbg.BALDrivenCommitment = true
+	dbg.IgnoreBAL = false
+
+	ctx := context.Background()
+	logger := log.New()
+	const firstTxNum = uint64(11) // block 2 starts at 11 (block 1 was txNums 1..10)
+	const lastTxNum = uint64(20)
+	const edgeTxNum = uint64(15) // (txNum+1)%16 == 0, interior to [11,20]
+
+	db, tx, doms := setupStepTest(t)
+
+	in := make(chan applyResult, 64)
+	out := make(chan commitmentResult, 64)
+	cc, err := newCommitmentCalculator(ctx, doms, db, &chain.Config{}, "test", logger, false, 1<<62, in, nil, out)
+	require.NoError(t, err)
+	defer cc.Stop()
+	// Make block 2 the batch's first block so the fold gate opens with no prior
+	// blockResult, and the fold runs synchronously from handleBlockRequest.
+	cc.hasFirstBlock = true
+	cc.firstBlockNum = 2
+
+	rnd := rand.New(rand.NewSource(42))
+	accountValues := map[string][]byte{}
+	var bList types.BlockAccessList
+	for txNum := firstTxNum; txNum <= lastTxNum; txNum++ {
+		addrBytes := make([]byte, length.Addr)
+		rnd.Read(addrBytes)
+		balV := *uint256.NewInt(txNum * 1000)
+		acc := accounts.Account{Nonce: txNum, Balance: balV, CodeHash: accounts.EmptyCodeHash}
+		buf := accounts.SerialiseV3(&acc)
+		require.NoError(t, doms.DomainPut(kv.AccountsDomain, tx, addrBytes, buf, txNum, nil))
+		if txNum <= edgeTxNum {
+			accountValues[string(addrBytes)] = buf
+		}
+		idx := uint32(txNum - firstTxNum) // BAL index == txNum - firstTxNum
+		bList = append(bList, &types.AccountChanges{
+			Address:        accounts.InternAddress([20]byte(addrBytes)),
+			BalanceChanges: []*types.BalanceChange{{Index: idx, Value: balV}},
+			NonceChanges:   []*types.NonceChange{{Index: idx, Value: txNum}},
+		})
+	}
+
+	// Drive the fold. The block-end stateRoot is a dummy: the step checkpoints are
+	// written before the block-end root check, so a mismatch there still exercises
+	// the mid-block checkpoint under test (we assert on the checkpoint, not on the
+	// fold verifying the block-end root).
+	cc.handleBlockRequest(ctx, &blockRequest{
+		blockNum:   2,
+		firstTxNum: firstTxNum,
+		lastTxNum:  lastTxNum,
+		stateRoot:  common.Hash{0xde, 0xad},
+		bal:        bList,
+	})
+
+	require.NoError(t, doms.Flush(ctx, tx))
+
+	// As of just past the edge, the latest commitment checkpoint must be the one
+	// the fold wrote at the step edge — not the pre-block-2 checkpoint. Without
+	// foldStepCheckpoints the fold would write only the block-end (txNum 20)
+	// checkpoint and this as-of read would miss the edge.
+	blob, ok, err := doms.GetAsOf(kv.CommitmentDomain, commitmentdb.KeyCommitmentState, edgeTxNum+1)
+	require.NoError(t, err)
+	require.True(t, ok)
+	require.GreaterOrEqual(t, len(blob), 16)
+	gotTx, gotBlock := commitmentdb.DecodeTxBlockNums(blob)
+	require.Equal(t, edgeTxNum, gotTx, "fold must checkpoint commitment at the mid-block step edge (txNum 15)")
+	require.Equal(t, uint64(2), gotBlock, "the checkpoint sits inside the straddling block 2")
+
+	requireBranchesConsistentWithAccounts(t, doms, tx, accountValues)
 }
