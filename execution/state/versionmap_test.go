@@ -667,16 +667,20 @@ func TestValidateRead_SDStaleness_RevivalKeepsReadValid(t *testing.T) {
 
 // TestVersionedWritePoolReuse_NoStaleFields guards the *VersionedWrite[T] pool
 // invariant: getVW* returns a recycled cell that may still hold a prior write's
-// contents, so the record path MUST wholesale-overwrite it. recordWrite* does
-// `vw.WriteHeader = WriteHeader{...}` (a full struct literal, which zeroes every
-// field it omits) plus `vw.Val = …`. This test poisons every field of a recycled
-// cell and applies that exact assignment, asserting nothing from the prior write
-// survives — including Key/Reason, which a balance write omits and which a
-// field-by-field assignment would leak.
+// contents, so the record path MUST wholesale-overwrite it. It drives the
+// production recorder (recordWriteBalance → getVWBalance) after seeding the pool
+// with a fully-poisoned cell, asserting nothing from the prior write survives —
+// including Key/Reason, which a balance write omits and which a field-by-field
+// assignment would leak. Not parallel: it seeds the process-global vwPoolBalance,
+// so it must run without a concurrent pool user.
 func TestVersionedWritePoolReuse_NoStaleFields(t *testing.T) {
-	t.Parallel()
+	_, tx, domains := NewTestRwTx(t)
+	vm := NewVersionMap(nil)
+	ibs := NewWithVersionMap(NewReaderV3(domains.AsGetter(tx)), vm)
+	ibs.SetTxContext(0, 3)
 
-	recycled := &VersionedWrite[uint256.Int]{
+	// Seed the pool so the recorder's getVWBalance hands back a poisoned cell.
+	vwPoolBalance.Put(&VersionedWrite[uint256.Int]{
 		WriteHeader: WriteHeader{
 			Address: getAddress(1),
 			Path:    NoncePath,
@@ -685,20 +689,19 @@ func TestVersionedWritePoolReuse_NoStaleFields(t *testing.T) {
 			Reason:  tracing.BalanceChangeReason(0xab),
 		},
 		Val: *uint256.NewInt(0xdead),
-	}
+	})
 
 	addr := getAddress(2)
 	want := *uint256.NewInt(42)
-	ver := Version{TxIndex: 3, Incarnation: 1}
-	recycled.WriteHeader = WriteHeader{Address: addr, Path: BalancePath, Version: ver}
-	recycled.Val = want
+	ibs.recordWriteBalance(addr, want)
 
-	require.Equal(t, addr, recycled.Address, "Address must not retain the recycled value")
-	require.Equal(t, BalancePath, recycled.Path, "Path must not retain the recycled value")
-	require.Equal(t, accounts.StorageKey{}, recycled.Key, "Key must reset to zero (BalancePath has no key)")
-	require.Equal(t, ver, recycled.Version, "Version must not retain the recycled value")
-	require.Equal(t, tracing.BalanceChangeReason(0), recycled.Reason, "Reason must reset to zero")
-	require.True(t, recycled.Val.Eq(&want), "Val must not retain the recycled value")
+	vw, ok := ibs.versionedWrites.GetBalance(addr)
+	require.True(t, ok, "recordWriteBalance must record a balance write")
+	require.Equal(t, addr, vw.Address, "Address must not retain the recycled value")
+	require.Equal(t, BalancePath, vw.Path, "Path must not retain the recycled value")
+	require.Equal(t, accounts.StorageKey{}, vw.Key, "Key must reset to zero (BalancePath has no key)")
+	require.Equal(t, tracing.BalanceChangeReason(0), vw.Reason, "Reason must reset to zero")
+	require.True(t, vw.Val.Eq(&want), "Val must not retain the recycled value")
 }
 
 // TestBALPrePop_SameSenderTxs_NoConflicts ports the same-sender BAL
