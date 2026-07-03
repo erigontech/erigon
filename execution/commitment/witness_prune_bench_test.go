@@ -36,7 +36,7 @@ func benchCapturedSuperset(b *testing.B, accts, slots, touch int) (full, provedK
 	ctx := context.Background()
 	ms := NewMockState(b)
 	hph := NewHexPatriciaHashed(length.Addr, ms, DefaultTrieConfig())
-	hph.SetTrace(false)
+	hph.SetTraceWriter(nil)
 	builder := NewUpdateBuilder()
 	addrs := make([][]byte, 0, accts)
 	for i := 0; i < accts; i++ {
@@ -98,7 +98,7 @@ func BenchmarkBranchWitnessTotal(b *testing.B) {
 	ctx := context.Background()
 	ms := NewMockState(b)
 	hph := NewHexPatriciaHashed(length.Addr, ms, DefaultTrieConfig())
-	hph.SetTrace(false)
+	hph.SetTraceWriter(nil)
 	builder := NewUpdateBuilder()
 	addrs := make([][]byte, 0, 512)
 	for i := 0; i < 512; i++ {
@@ -160,7 +160,7 @@ func BenchmarkWitnessCapture(b *testing.B) {
 	ctx := context.Background()
 	ms := NewMockState(b)
 	hph := NewHexPatriciaHashed(length.Addr, ms, DefaultTrieConfig())
-	hph.SetTrace(false)
+	hph.SetTraceWriter(nil)
 	builder := NewUpdateBuilder()
 	addrs := make([][]byte, 0, 512)
 	for i := 0; i < 512; i++ {
