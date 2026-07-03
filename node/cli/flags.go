@@ -400,6 +400,17 @@ func cobraBoolValueOrDefault(f *pflag.FlagSet, name string, fallback bool) bool 
 	return v
 }
 
+func cobraUint64ValueOrDefault(f *pflag.FlagSet, name string, fallback uint64) uint64 {
+	if f.Lookup(name) == nil {
+		return fallback
+	}
+	v, err := f.GetUint64(name)
+	if err != nil {
+		utils.Fatalf("failed to read --%s: %v", name, err)
+	}
+	return v
+}
+
 func ApplyFlagsForNodeConfig(ctx *cli.Context, cfg *nodecfg.Config, logger log.Logger) {
 	setPrivateApi(ctx, cfg)
 	setEmbeddedRpcDaemon(ctx, cfg, logger)
