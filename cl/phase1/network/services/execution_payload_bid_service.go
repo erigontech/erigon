@@ -330,27 +330,9 @@ func (s *executionPayloadBidService) bidValidationState(parentState *state.Cachi
 
 func (s *executionPayloadBidService) validateBuilderBid(msg *cltypes.SignedExecutionPayloadBid, validationState *state.CachingBeaconState) error {
 	bid := msg.Message
-	builderIndex := bid.BuilderIndex
-	if !state.IsActiveBuilder(validationState, builderIndex) {
-		return fmt.Errorf("builder %d is not active", builderIndex)
-	}
-	if !state.CanBuilderCoverBid(validationState, builderIndex, bid.Value) {
-		return fmt.Errorf("%w: builder %d cannot cover bid value %d", ErrIgnore, builderIndex, bid.Value)
-	}
-
-	builders := validationState.GetBuilders()
-	if builders == nil {
-		return fmt.Errorf("builders list not available")
-	}
-	if builderIndex >= uint64(builders.Len()) {
-		return fmt.Errorf("builder index %d out of range (max: %d)", builderIndex, builders.Len())
-	}
-	builder := builders.Get(int(builderIndex))
-	if builder == nil {
-		return fmt.Errorf("builder %d not found", builderIndex)
-	}
-	if builder.Version != s.beaconCfg.PayloadBuilderVersion {
-		return fmt.Errorf("builder %d has unsupported version %d", builderIndex, builder.Version)
+	builder, err := s.validateBuilderAvailability(bid, validationState)
+	if err != nil {
+		return err
 	}
 
 	epoch := state.GetEpochAtSlot(s.beaconCfg, bid.Slot)
@@ -370,6 +352,34 @@ func (s *executionPayloadBidService) validateBuilderBid(msg *cltypes.SignedExecu
 		return fmt.Errorf("invalid builder signature")
 	}
 	return nil
+}
+
+func (s *executionPayloadBidService) validateBuilderAvailability(
+	bid *cltypes.ExecutionPayloadBid,
+	validationState *state.CachingBeaconState,
+) (*cltypes.Builder, error) {
+	builderIndex := bid.BuilderIndex
+	builders := validationState.GetBuilders()
+	if builders == nil {
+		return nil, fmt.Errorf("builders list not available")
+	}
+	if builderIndex >= uint64(builders.Len()) {
+		return nil, fmt.Errorf("builder index %d out of range (max: %d)", builderIndex, builders.Len())
+	}
+	builder := builders.Get(int(builderIndex))
+	if builder == nil {
+		return nil, fmt.Errorf("builder %d not found", builderIndex)
+	}
+	if builder.Version != s.beaconCfg.PayloadBuilderVersion {
+		return nil, fmt.Errorf("builder %d has unsupported version %d", builderIndex, builder.Version)
+	}
+	if !state.IsActiveBuilder(validationState, builderIndex) {
+		return nil, fmt.Errorf("builder %d is not active", builderIndex)
+	}
+	if !state.CanBuilderCoverBid(validationState, builderIndex, bid.Value) {
+		return nil, fmt.Errorf("%w: builder %d cannot cover bid value %d", ErrIgnore, builderIndex, bid.Value)
+	}
+	return builder, nil
 }
 
 // queuePendingBid adds a bid to the pending queue for later processing when preferences arrive.
