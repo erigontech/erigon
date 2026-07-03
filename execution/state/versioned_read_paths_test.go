@@ -11,11 +11,9 @@ import (
 	"github.com/erigontech/erigon/execution/types/accounts"
 )
 
-// These tests pin the observable behavior of versionedRead[T] across the
-// ~25 distinct branches in its body so that a planned restructure (split
-// into a non-generic core + per-path read* wrappers) can be validated
-// against an identical surface. Each test maps to one of the branch
-// labels enumerated in project_versionedread_refactor_plan.md.
+// These tests pin the observable behavior of the versioned read across its
+// distinct branches (non-generic core + per-path read* wrappers) so a
+// restructure can be validated against an identical surface.
 
 // ------------------------------------------------------------------
 // Section A: versionMap == nil (legacy / serial path)
@@ -168,6 +166,49 @@ func TestVersionedRead_C1_RevivalViaBalance(t *testing.T) {
 	bal, err := ibs.GetBalance(addr)
 	require.NoError(t, err)
 	assert.Equal(t, *revivedBalance, bal, "balance after revival must be the revived value, not zero")
+}
+
+// Regression for the refresh* wrappers' missing outcomeReturnZero case: after a
+// self-destruct, the per-field refresh (refreshBalance/refreshNonce/
+// refreshIncarnation/refreshCodeHash, used by refreshVersionedAccount to rebuild
+// an account) must return the typed ZERO, not the caller's stale pre-destruct
+// value. Returning the stale value gives the rebuilt account a phantom pre-SD
+// codeHash/balance, so the codeHash-change check compares the stale value
+// against itself and validation never catches the divergence — a silent wrong
+// state root.
+func TestVersionedRead_C7_RefreshReturnsZeroPastSelfDestruct(t *testing.T) {
+	t.Parallel()
+
+	r := &refreshReader{
+		account: &accounts.Account{
+			Balance:     *uint256.NewInt(1234),
+			Nonce:       7,
+			Incarnation: 3,
+			CodeHash:    accounts.InternCodeHash([32]byte{0xab}),
+		},
+	}
+	mvhm := NewVersionMap(nil)
+	ibs := NewWithVersionMap(r, mvhm)
+	ibs.SetTxContext(1, 5)
+
+	addr := accounts.InternAddress([20]byte{0xc7})
+	mvhm.WriteSelfDestruct(addr, Version{TxIndex: 2, Incarnation: 0}, true, true)
+
+	bal, _, _, err := refreshBalance(ibs, addr, *uint256.NewInt(1234))
+	require.NoError(t, err)
+	assert.True(t, bal.IsZero(), "refreshBalance past SD must return zero, not the stale 1234")
+
+	nonce, _, _, err := refreshNonce(ibs, addr, 7)
+	require.NoError(t, err)
+	assert.Zero(t, nonce, "refreshNonce past SD must return zero, not the stale 7")
+
+	inc, _, _, err := refreshIncarnation(ibs, addr, 3)
+	require.NoError(t, err)
+	assert.Zero(t, inc, "refreshIncarnation past SD must return zero, not the stale 3")
+
+	ch, _, _, err := refreshCodeHash(ibs, addr, accounts.InternCodeHash([32]byte{0xab}))
+	require.NoError(t, err)
+	assert.Equal(t, accounts.NilCodeHash, ch, "refreshCodeHash past SD must return the zero codeHash, not the phantom 0xab")
 }
 
 // ------------------------------------------------------------------

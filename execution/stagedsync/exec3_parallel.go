@@ -3015,6 +3015,12 @@ func MergeVersionedWrites(prev, next *state.WriteSet) *state.WriteSet {
 // from the trie (wrong root in TestDeleteRecreateAccount / TestSelfDestructReceive
 // / TestEIP161AccountRemoval, all of which SD a contract whose storage predates
 // the block). Pass nil in unit tests that don't exercise pre-block storage.
+// codePathRecoveryHashMismatch counts times the BAL codePath recovery could not
+// re-emit code because the recovered bytes didn't hash to the emitted codeHash —
+// the recovery is skipped, leaving the codeHash-without-code asymmetry it exists
+// to repair, so the event must not be silent.
+var codePathRecoveryHashMismatch = metrics.GetOrCreateCounter("exec3_codepath_recovery_hash_mismatch")
+
 func normalizeWriteSet(writes *state.WriteSet, vm *state.VersionMap, txIndex int, incarnation int, stateReader state.StateReader, domainStorageKeys func(addr accounts.Address) []accounts.StorageKey, emptyRemoval bool, isAura bool) *state.WriteSet {
 	filtered := &state.WriteSet{}
 	if writes == nil {
@@ -3371,6 +3377,11 @@ func normalizeWriteSet(writes *state.WriteSet, vm *state.VersionMap, txIndex int
 		// when they hash to it, else we'd persist code that mismatches its hash.
 		recovered := accounts.NewCode(code)
 		if recovered.Hash.Value() != h.Value() {
+			// Cannot repair: re-emitting would persist code mismatching its hash.
+			// Skipping leaves codeHash-without-code, so signal rather than hide it.
+			codePathRecoveryHashMismatch.Inc()
+			log.Warn("[exec3] BAL codePath recovery skipped: recovered bytes do not hash to emitted codeHash",
+				"addr", addr, "txIndex", txIndex, "emittedHash", h.Value(), "recoveredHash", recovered.Hash.Value())
 			continue
 		}
 		filtered.SetCode(addr, &state.VersionedWrite[accounts.Code]{

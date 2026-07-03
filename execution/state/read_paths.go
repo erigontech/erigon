@@ -23,16 +23,16 @@ import (
 // else a single code read with cache populate.  KV-read levelled metrics
 // are recorded so the legacy versionedRead's instrumentation is
 // preserved.
-func codeSizeFromStateObject(sdb *IntraBlockState, so *stateObject, addr accounts.Address) int {
+func codeSizeFromStateObject(sdb *IntraBlockState, so *stateObject, addr accounts.Address) (int, error) {
 	if so == nil || so.deleted {
-		return 0
+		return 0, nil
 	}
 	if so.code.Bytes != nil {
 		sdb.callCodeAccessHook(addr, so.code.Bytes)
-		return so.code.Len()
+		return so.code.Len(), nil
 	}
 	if so.data.CodeHash.IsEmpty() {
-		return 0
+		return 0, nil
 	}
 	if dbg.TraceDomainIO || (dbg.TraceTransactionIO && (sdb.trace || dbg.TraceAccount(addr.Handle()))) {
 		sdb.stateReader.SetTrace(true, fmt.Sprintf("%d (%d.%d)", sdb.blockNum, sdb.txIndex, sdb.version))
@@ -44,13 +44,13 @@ func codeSizeFromStateObject(sdb *IntraBlockState, so *stateObject, addr account
 	// Size-only read for Stateless-witness correctness (see GetCodeSize): a
 	// witness node has the size but not the bytes, so ReadAccountCode returns
 	// nil there and reports EXTCODESIZE 0.
-	size, _ := sdb.stateReader.ReadAccountCodeSize(addr)
+	size, err := sdb.stateReader.ReadAccountCodeSize(addr)
 	if dbg.KVReadLevelledMetrics {
 		sdb.codeReadDuration += time.Since(readStart)
 		sdb.codeReadCount++
 	}
 	sdb.stateReader.SetTrace(false, "")
-	return size
+	return size, err
 }
 
 // versionedReadCore runs the type-independent part of a versionMap-aware read —
@@ -126,12 +126,9 @@ type readPathResult struct {
 // result.  See readPathOutcome for the outcome enumeration.
 //
 // skipStorage=true: do not attempt a storage-read fallback when the
-// in-memory tiers miss.  This is the analogue of the legacy
-// `readStorage==nil` branch and is used by:
-//   - refresh* wrappers, which want the caller's defaultV on miss
-//   - readAccount* (AddressPath), which never resolves via getStateObject
-//     because getStateObject itself recurses back into versionedReadCore
-//     via getVersionedAccount → readAccount.
+// in-memory tiers miss — the caller resolves the value itself (refresh*
+// wrappers return their defaultV; AddressPath reads avoid recursing back
+// through getStateObject).
 //
 // versionedReadCore writes its discriminated result into *r (caller
 // allocates on the stack).  This avoids a ~256-byte return-value copy
@@ -589,6 +586,11 @@ func refreshBalance(s *IntraBlockState, addr accounts.Address, currentBalance ui
 		return tr.Val, r.source, r.version, nil
 	case outcomeMapDone:
 		return r.mapBalanceVal, r.source, r.version, nil
+	case outcomeReturnZero:
+		// Account was self-destructed (or not present): return the zero value,
+		// NOT the caller's stale pre-destruct balance. outcomeReturnDefault below
+		// keeps the current value; only this branch must zero it.
+		return uint256.Int{}, r.source, r.version, nil
 	}
 	if r.recordVR {
 		s.versionedReads.SetBalance(addr, VersionedRead[uint256.Int]{r.hdr, currentBalance})
@@ -647,6 +649,8 @@ func refreshNonce(s *IntraBlockState, addr accounts.Address, currentNonce uint64
 		return tr.Val, r.source, r.version, nil
 	case outcomeMapDone:
 		return r.mapNonceVal, r.source, r.version, nil
+	case outcomeReturnZero:
+		return 0, r.source, r.version, nil
 	}
 	if r.recordVR {
 		s.versionedReads.SetNonce(addr, VersionedRead[uint64]{r.hdr, currentNonce})
@@ -705,6 +709,8 @@ func refreshIncarnation(s *IntraBlockState, addr accounts.Address, currentIncarn
 		return tr.Val, r.source, r.version, nil
 	case outcomeMapDone:
 		return r.mapIncarnationVal, r.source, r.version, nil
+	case outcomeReturnZero:
+		return 0, r.source, r.version, nil
 	}
 	if r.recordVR {
 		s.versionedReads.SetIncarnation(addr, VersionedRead[uint64]{r.hdr, currentIncarnation})
@@ -803,13 +809,19 @@ func readCodeSize(s *IntraBlockState, addr accounts.Address) (int, ReadSource, V
 		// CodeSizePath delegates to the per-stateObject code-size
 		// pattern: prefer cached so.code length, else load full code
 		// once (geth-style) and populate so.code.
-		v := codeSizeFromStateObject(s, r.so, addr)
+		v, err := codeSizeFromStateObject(s, r.so, addr)
+		if err != nil {
+			return 0, r.source, r.version, err
+		}
 		if r.recordVR {
 			s.versionedReads.SetCodeSize(addr, VersionedRead[int]{r.hdr, v})
 		}
 		return v, r.source, r.version, nil
 	case outcomeLegacyStorage:
-		v := codeSizeFromStateObject(s, r.so, addr)
+		v, err := codeSizeFromStateObject(s, r.so, addr)
+		if err != nil {
+			return 0, StorageRead, UnknownVersion, err
+		}
 		return v, StorageRead, UnknownVersion, nil
 	}
 	return 0, r.source, r.version, nil
@@ -869,6 +881,8 @@ func refreshCodeHash(s *IntraBlockState, addr accounts.Address, currentHash acco
 		return tr.Val, r.source, r.version, nil
 	case outcomeMapDone:
 		return r.mapCodeHashVal, r.source, r.version, nil
+	case outcomeReturnZero:
+		return accounts.NilCodeHash, r.source, r.version, nil
 	}
 	if r.recordVR {
 		s.versionedReads.SetCodeHash(addr, VersionedRead[accounts.CodeHash]{r.hdr, currentHash})

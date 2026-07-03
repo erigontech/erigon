@@ -253,7 +253,7 @@ func (ch selfdestructChange) revert(s *IntraBlockState) error {
 				if trace {
 					if v, ok := s.versionedWrites.GetSelfDestruct(ch.account); ok {
 						sd := v.Val
-						fmt.Printf("%s WRT Revert %x: %v -> %v\n", tracePrefix, ch.account, sd, &ch.prev)
+						fmt.Printf("%s WRT Revert %x: %v -> %v\n", tracePrefix, ch.account, sd, ch.prev)
 					}
 					if v, ok := s.versionedWrites.GetBalance(ch.account); ok {
 						val := v.Val
@@ -266,7 +266,7 @@ func (ch selfdestructChange) revert(s *IntraBlockState) error {
 				if v, ok := s.versionedWrites.GetSelfDestruct(ch.account); ok {
 					if trace {
 						sd := v.Val
-						fmt.Printf("%s WRT Revert %x: %v -> %v\n", tracePrefix, ch.account, sd, &ch.prev)
+						fmt.Printf("%s WRT Revert %x: %v -> %v\n", tracePrefix, ch.account, sd, ch.prev)
 					}
 					s.versionedWrites.updateSelfDestruct(ch.account, ch.prev)
 				}
@@ -375,7 +375,7 @@ func (ch nonceChange) revert(s *IntraBlockState) error {
 	var tracePrefix string
 	if trace {
 		tracePrefix = fmt.Sprintf("%d (%d.%d)", s.blockNum, s.txIndex, s.version)
-		fmt.Printf("%s Revert Nonce %x: %d, prev: %d, orig: %d, commited: %v\n", tracePrefix, ch.account, obj.data.Nonce, &ch.prev, obj.original.Nonce, ch.wasCommited)
+		fmt.Printf("%s Revert Nonce %x: %d, prev: %d, orig: %d, commited: %v\n", tracePrefix, ch.account, obj.data.Nonce, ch.prev, obj.original.Nonce, ch.wasCommited)
 	}
 	obj.setNonce(ch.prev)
 	if s.versionMap != nil {

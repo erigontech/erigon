@@ -509,11 +509,12 @@ func (s ReadSet) eachHeader(yield func(ReadHeader) bool) {
 // path, optional storage key, tx-version and balance-change reason.
 // Shared across every per-path write via embedding in VersionedWrite[T].
 type WriteHeader struct {
-	Address accounts.Address
-	Path    AccountPath
-	Key     accounts.StorageKey
-	Version Version
-	Reason  tracing.BalanceChangeReason
+	Address     accounts.Address
+	Path        AccountPath
+	Key         accounts.StorageKey
+	Version     Version
+	Reason      tracing.BalanceChangeReason
+	NonceReason tracing.NonceChangeReason
 }
 
 func (h WriteHeader) String() string {
@@ -1076,19 +1077,6 @@ func (s *WriteSet) AllHeaders() iter.Seq[WriteHeader] {
 	}
 }
 
-func (s *WriteSet) delAddr(addr accounts.Address) {
-	delete(s.address, addr)
-	delete(s.balance, addr)
-	delete(s.nonce, addr)
-	delete(s.incarnation, addr)
-	delete(s.selfDestruct, addr)
-	delete(s.createContract, addr)
-	delete(s.code, addr)
-	delete(s.codeHash, addr)
-	delete(s.codeSize, addr)
-	delete(s.storage, addr)
-}
-
 // ReleaseAndReset returns every *VersionedWrite[T] held by the set to its
 // typed sync.Pool, then returns the per-path maps to their map-pools.
 // Called at tx-finalize so both the VW values and the map buckets cycle
@@ -1401,14 +1389,6 @@ func versionedUpdateAddress(vm *VersionMap, addr accounts.Address, txIndex int) 
 		return val, true
 	}
 	return nil, false
-}
-
-func versionedUpdateSelfDestruct(vm *VersionMap, addr accounts.Address, txIndex int) (bool, bool) {
-	val, res, ok := vm.ReadSelfDestruct(addr, txIndex)
-	if ok && res.Status() != MVReadResultNone {
-		return val, true
-	}
-	return false, false
 }
 
 func versionedUpdateBalance(vm *VersionMap, addr accounts.Address, txIndex int) (uint256.Int, bool) {

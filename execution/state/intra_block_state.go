@@ -512,20 +512,6 @@ func (sdb *IntraBlockState) SubRefund(gas uint64) error {
 	return nil
 }
 
-func (sdb *IntraBlockState) AddStateRefund(gas uint64) {
-	sdb.journal.append(refundChange{prev: sdb.refund})
-	sdb.refund += gas
-}
-
-func (sdb *IntraBlockState) SubStateRefund(gas uint64) error {
-	sdb.journal.append(refundChange{prev: sdb.refund})
-	if gas > sdb.refund {
-		return errors.New("state refund counter below zero")
-	}
-	sdb.refund -= gas
-	return nil
-}
-
 // Exist reports whether the given account address exists in the state.
 // Notably this also returns true for self destructed accounts.
 func (sdb *IntraBlockState) Exist(addr accounts.Address) (exists bool, err error) {
@@ -1216,7 +1202,7 @@ func (sdb *IntraBlockState) SetNonce(addr accounts.Address, nonce uint64, reason
 	}
 
 	stateObject.SetNonce(nonce, !sdb.hasWrite(addr, NoncePath, accounts.NilKey), reason)
-	sdb.recordWriteNonce(addr, stateObject.Nonce())
+	sdb.recordWriteNonce(addr, stateObject.Nonce(), reason)
 	return nil
 }
 
@@ -1314,22 +1300,6 @@ func (sdb *IntraBlockState) Incarnation() int {
 
 // DESCRIBED: docs/programmers_guide/guide.md#address---identifier-of-an-account
 func (sdb *IntraBlockState) SetState(addr accounts.Address, key accounts.StorageKey, value uint256.Int) error {
-	return sdb.setState(addr, key, value, false)
-}
-
-// FlushSlotCacheWrite flushes a single slot-cache cell back into IBS at the
-// outermost EVM-frame return.  Equivalent to SetState — produces the full
-// storageChange journal entry, fires the OnStorageChange tracer hook, and
-// records versionWritten (MarkAddressAccess + parallel-execution write set).
-// The cache exists to batch and skip the journal/versionMap work *during*
-// EVM execution; correctness paths post-EVM (eth_call snapshot/revert,
-// gas estimation, FinalizeTx, parallel exec conflict detection) require
-// the full SetState side-effects, so we apply them once per cell here.
-//
-// NOTE: this path makes the OnStorageChange tracer fire at flush time
-// instead of at each SSTORE PC.  Tracer-at-opcode is a follow-up
-// (per-opcode tracing refactor).
-func (sdb *IntraBlockState) FlushSlotCacheWrite(addr accounts.Address, key accounts.StorageKey, value uint256.Int) error {
 	return sdb.setState(addr, key, value, false)
 }
 
@@ -2222,7 +2192,7 @@ func (sdb *IntraBlockState) MakeWriteSet(chainRules *chain.Rules, stateWriter St
 
 	for _, addr := range reverted {
 		sdb.versionMap.DeleteAll(addr, sdb.txIndex)
-		sdb.versionedWrites.delAddr(addr)
+		sdb.versionedWrites.deleteAddr(addr)
 	}
 
 	// Invalidate journal because reverting across transactions is not allowed.
@@ -2443,6 +2413,13 @@ func (sdb *IntraBlockState) AccessedAddresses() AccessSet {
 func (sdb *IntraBlockState) accountRead(addr accounts.Address, account *accounts.Account, source ReadSource, version Version) {
 	if sdb.versionMap != nil {
 		sdb.MarkAddressAccess(addr, true)
+		if source == WriteSetRead {
+			// A read satisfied by this tx's own earlier write carries no
+			// cross-tx dependency; recording it would make the validator
+			// (floored below the tx's own writes) return None and wrongly
+			// invalidate the tx (issue #21319).
+			return
+		}
 		data := *account
 		// Demote a sub-field MapRead promotion when AddressPath itself has no cell,
 		// or the validator non-converges on its recursive AddressPath check.
@@ -2487,7 +2464,7 @@ func (sdb *IntraBlockState) recordWriteBalance(addr accounts.Address, val uint25
 	traceWrite(sdb, vw)
 }
 
-func (sdb *IntraBlockState) recordWriteNonce(addr accounts.Address, val uint64) {
+func (sdb *IntraBlockState) recordWriteNonce(addr accounts.Address, val uint64, reason tracing.NonceChangeReason) {
 	sdb.MarkAddressAccess(addr, true)
 	if sdb.versionMap == nil {
 		return
@@ -2495,11 +2472,12 @@ func (sdb *IntraBlockState) recordWriteNonce(addr accounts.Address, val uint64) 
 	if vw, ok := sdb.versionedWrites.GetNonce(addr); ok {
 		vw.Version = sdb.Version()
 		vw.Val = val
+		vw.NonceReason = reason
 		traceWrite(sdb, vw)
 		return
 	}
 	vw := getVWNonce()
-	vw.WriteHeader = WriteHeader{Address: addr, Path: NoncePath, Version: sdb.Version()}
+	vw.WriteHeader = WriteHeader{Address: addr, Path: NoncePath, Version: sdb.Version(), NonceReason: reason}
 	vw.Val = val
 	sdb.versionedWrites.SetNonce(addr, vw)
 	traceWrite(sdb, vw)
@@ -2931,7 +2909,7 @@ func (sdb *IntraBlockState) ApplyVersionedWrites(writes *WriteSet) error {
 			if !ok {
 				continue
 			}
-			if err := sdb.SetNonce(addr, vw.Val, tracing.NonceChangeUnspecified); err != nil {
+			if err := sdb.SetNonce(addr, vw.Val, hdr.NonceReason); err != nil {
 				return err
 			}
 		case IncarnationPath:

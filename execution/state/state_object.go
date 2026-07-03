@@ -411,7 +411,12 @@ func (so *stateObject) CodeTyped() (accounts.Code, error) {
 	// synthetic code but the domain/stateReader does not.
 	if so.db.versionMap != nil {
 		if code, rr, ok := so.db.versionMap.ReadCode(so.address, so.db.txIndex); ok && rr.Status() == MVReadResultDone {
-			c := accounts.Code{Hash: so.data.CodeHash, Bytes: code}
+			// Recompute the hash from the map's bytes: pairing them with the
+			// object's (possibly stale) data.CodeHash would violate
+			// Hash==Keccak(Bytes) and let SetCode's hash comparison skip a real
+			// code change (e.g. an EIP-7702 re-delegation back to a prior target,
+			// whose CodePath the BAL pre-populates without a CodeHashPath).
+			c := accounts.NewCode(code)
 			so.code = c
 			return c, nil
 		}
