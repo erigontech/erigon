@@ -158,7 +158,9 @@ type ForkChoiceStore struct {
 	beaconCfg      *clparams.BeaconChainConfig
 
 	emitters *beaconevents.EventEmitter
-	synced   atomic.Bool
+	// event sends queued under f.mu, emitted after release (see queueEmit)
+	queuedEmits []func()
+	synced      atomic.Bool
 
 	ethClock                eth_clock.EthereumClock
 	optimisticStore         optimistic.OptimisticStore

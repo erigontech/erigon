@@ -34,6 +34,7 @@ func (f *ForkChoiceStore) OnAttesterSlashing(attesterSlashing *cltypes.AttesterS
 		return nil
 	}
 	f.mu.Lock()
+	defer f.emitQueuedEvents()
 	defer f.mu.Unlock()
 
 	if f.syncedDataManager.Syncing() {
@@ -107,9 +108,8 @@ func (f *ForkChoiceStore) onProcessAttesterSlashing(attesterSlashing *cltypes.At
 	}
 
 	var anySlashed bool
-	trackGloasWeights := f.trackGloasWeights()
 	for _, index := range solid.IntersectionOfSortedSets(attestation1.AttestingIndices, attestation2.AttestingIndices) {
-		f.setUnequivocating(index, trackGloasWeights)
+		f.setUnequivocating(index)
 		if !anySlashed {
 			v, err := s.ValidatorForValidatorIndex(int(index))
 			if err != nil {
@@ -122,7 +122,7 @@ func (f *ForkChoiceStore) onProcessAttesterSlashing(attesterSlashing *cltypes.At
 	}
 	if anySlashed {
 		f.operationsPool.AttesterSlashingsPool.Insert(pool.ComputeKeyForAttesterSlashing(attesterSlashing), attesterSlashing)
-		f.emitters.Operation().SendAttesterSlashing(attesterSlashing)
+		f.queueEmit(func() { f.emitters.Operation().SendAttesterSlashing(attesterSlashing) })
 	}
 	return nil
 }

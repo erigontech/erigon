@@ -59,25 +59,17 @@ func TestPreGloasDoesNotDirtyGloasWeightTree(t *testing.T) {
 func TestPreGloasEquivocationDoesNotDirtyGloasWeightTree(t *testing.T) {
 	f := newGloasWeightTreeTestStore()
 
-	f.setUnequivocating(4, f.trackGloasWeights())
+	f.setUnequivocating(4)
 
 	require.True(t, f.isUnequivocating(4))
 	require.Empty(t, f.gloasWeightTree.dirty)
 }
 
-func TestGloasEpochEquivocationDirtiesWeightTree(t *testing.T) {
+func TestEquivocationAfterBaselineDirtiesWeightTree(t *testing.T) {
 	f := newGloasWeightTreeTestStore()
-	cfg := *f.beaconCfg
-	cfg.AltairForkEpoch = 0
-	cfg.BellatrixForkEpoch = 0
-	cfg.CapellaForkEpoch = 0
-	cfg.DenebForkEpoch = 0
-	cfg.ElectraForkEpoch = 0
-	cfg.FuluForkEpoch = 0
-	cfg.GloasForkEpoch = 0
-	f.beaconCfg = &cfg
+	f.gloasWeightTree.state = &checkpointState{}
 
-	f.setUnequivocating(4, f.trackGloasWeights())
+	f.setUnequivocating(4)
 
 	require.True(t, f.isUnequivocating(4))
 	require.Contains(t, f.gloasWeightTree.dirty, uint64(4))
@@ -85,6 +77,7 @@ func TestGloasEpochEquivocationDirtiesWeightTree(t *testing.T) {
 
 func TestGloasMarksDirtyWeightTree(t *testing.T) {
 	f := newGloasWeightTreeTestStore()
+	f.gloasWeightTree.state = &checkpointState{}
 
 	att := &solid.Attestation{
 		Data: &solid.AttestationData{
@@ -98,6 +91,41 @@ func TestGloasMarksDirtyWeightTree(t *testing.T) {
 	require.Contains(t, f.gloasWeightTree.dirty, uint64(1))
 	require.Contains(t, f.gloasWeightTree.dirty, uint64(2))
 	require.Contains(t, f.gloasWeightTree.dirty, uint64(3))
+}
+
+// Before the first prepare there is no applied baseline to delta against, so
+// marks are dropped; the first prepare's full rebuild covers every validator.
+func TestGloasMarksBeforeBaselineAreDropped(t *testing.T) {
+	f := newGloasWeightTreeTestStore()
+
+	att := &solid.Attestation{
+		Data: &solid.AttestationData{
+			Slot:            64,
+			BeaconBlockRoot: common.HexToHash("0xbeef"),
+			Target:          solid.Checkpoint{Epoch: 2, Root: common.HexToHash("0xaaaa")},
+		},
+	}
+	f.updateLatestMessagesGloas(att, []uint64{1, 2, 3})
+
+	require.Empty(t, f.gloasWeightTree.dirty)
+}
+
+// Latest messages can outgrow the justified checkpoint's validator registry;
+// vote counting must skip those indices instead of panicking.
+func TestComputeVotesSkipsMessagesBeyondJustifiedRegistry(t *testing.T) {
+	f := newGloasWeightTreeTestStore()
+	f.proposerBoostRoot.Store(common.Hash{})
+	f.latestMessages.set(20, LatestMessage{Root: common.HexToHash("0x01"), Slot: 5})
+	cs := &checkpointState{
+		validatorSetSize: 1,
+		actives:          make([]byte, 1),
+		slasheds:         make([]byte, 1),
+		balances:         []uint64{32_000_000_000},
+	}
+
+	votes := f.computeVotes(solid.Checkpoint{}, cs, nil)
+
+	require.Empty(t, votes)
 }
 
 func decodeDiffBlock(t *testing.T, enc []byte) (*cltypes.SignedBeaconBlock, common.Hash) {
@@ -181,7 +209,8 @@ func TestGloasWeightTreeEquivocationDeltaMatchesFullScan(t *testing.T) {
 	}
 	require.True(t, found)
 
-	f.setUnequivocating(validatorIndex, true)
+	f.setUnequivocating(validatorIndex)
+	require.Contains(t, f.gloasWeightTree.dirty, validatorIndex)
 	tree = f.gloasWeightTree.prepare(justified, cs)
 
 	require.Equal(t, NewWeightStore(f).GetAttestationScore(node), tree.GetAttestationScore(node))
@@ -210,8 +239,8 @@ func TestGloasWeightTreeFirstPrepareIncludesPreReadyEquivocation(t *testing.T) {
 	}
 	require.True(t, found)
 
-	f.setUnequivocating(validatorIndex, true)
-	require.Contains(t, f.gloasWeightTree.dirty, validatorIndex)
+	f.setUnequivocating(validatorIndex)
+	require.Empty(t, f.gloasWeightTree.dirty)
 
 	tree := f.gloasWeightTree.prepare(justified, cs)
 
@@ -306,7 +335,7 @@ func TestGloasWeightTreeTracksVotesForMissingRoots(t *testing.T) {
 	}
 	require.True(t, found)
 
-	f.setLatestMessage(validatorIndex, LatestMessage{Root: missingRoot}, false)
+	f.setLatestMessage(validatorIndex, LatestMessage{Root: missingRoot})
 	f.gloasWeightTree.applied = growGloasContributions(f.gloasWeightTree.applied, int(validatorIndex)+1)
 	f.gloasWeightTree.allDirty = false
 	delete(f.gloasWeightTree.nodes, missingRoot)
@@ -349,15 +378,16 @@ func TestGloasWeightTreeClearsMissingRootVoteWhenValidatorMovesAway(t *testing.T
 	}
 	require.True(t, found)
 
-	f.setLatestMessage(validatorIndex, LatestMessage{Root: missingRoot}, false)
+	f.gloasWeightTree.state = cs
+	f.setLatestMessage(validatorIndex, LatestMessage{Root: missingRoot})
 	f.gloasWeightTree.applied = growGloasContributions(f.gloasWeightTree.applied, int(validatorIndex)+1)
 	f.gloasWeightTree.allDirty = false
+	f.gloasWeightTree.dirty = make(map[uint64]struct{})
 	f.gloasWeightTree.addValidatorContribution(validatorIndex, cs)
 	require.Contains(t, f.gloasWeightTree.missingRootVotes[missingRoot], validatorIndex)
 
-	f.setLatestMessage(validatorIndex, LatestMessage{Root: liveRoot}, false)
-	f.gloasWeightTree.markDirty(validatorIndex)
-	f.gloasWeightTree.nodes[liveRoot] = &gloasWeightNode{root: liveRoot}
+	f.setLatestMessage(validatorIndex, LatestMessage{Root: liveRoot})
+	f.gloasWeightTree.nodes[liveRoot] = &gloasWeightNode{}
 	f.gloasWeightTree.applyDirtyValidators(cs)
 
 	require.NotContains(t, f.gloasWeightTree.missingRootVotes, missingRoot)
@@ -410,7 +440,7 @@ func TestGloasWeightTreePruneFinalizedDropsBoundaryAndUnknownRoots(t *testing.T)
 	require.Contains(t, f.gloasWeightTree.nodes, rootC2)
 
 	unknownRoot := common.HexToHash("0xdeadbeef")
-	f.gloasWeightTree.nodes[unknownRoot] = &gloasWeightNode{root: unknownRoot}
+	f.gloasWeightTree.nodes[unknownRoot] = &gloasWeightNode{}
 
 	f.gloasWeightTree.pruneFinalized(header.Slot)
 

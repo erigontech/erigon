@@ -34,6 +34,24 @@ func (f *ForkChoiceStore) Slot() uint64 {
 	return f.beaconCfg.GenesisSlot + ((f.time.Load() - f.genesisTime) / f.beaconCfg.SecondsPerSlot)
 }
 
+// queueEmit defers an event send until after f.mu is released: Feed.Send blocks
+// until every subscriber accepts the event, so a stalled subscriber must not be
+// able to wedge the store. Callers hold f.mu.
+func (f *ForkChoiceStore) queueEmit(emit func()) {
+	f.queuedEmits = append(f.queuedEmits, emit)
+}
+
+// emitQueuedEvents runs queued event sends. Call after releasing f.mu.
+func (f *ForkChoiceStore) emitQueuedEvents() {
+	f.mu.Lock()
+	emits := f.queuedEmits
+	f.queuedEmits = nil
+	f.mu.Unlock()
+	for _, emit := range emits {
+		emit()
+	}
+}
+
 // updateCheckpoints updates the justified and finalized checkpoints if new checkpoints have higher epochs.
 func (f *ForkChoiceStore) updateCheckpoints(justifiedCheckpoint, finalizedCheckpoint solid.Checkpoint) {
 	if justifiedCheckpoint.Epoch > f.justifiedCheckpoint.Load().(solid.Checkpoint).Epoch {
@@ -43,19 +61,19 @@ func (f *ForkChoiceStore) updateCheckpoints(justifiedCheckpoint, finalizedCheckp
 		f.onNewFinalized(finalizedCheckpoint)
 		f.finalizedCheckpoint.Store(finalizedCheckpoint)
 
-		// prepare and send the finalized checkpoint event
 		blockRoot := finalizedCheckpoint.Root
 		blockHeader, ok := f.forkGraph.GetHeader(blockRoot)
 		if !ok {
 			log.Warn("Finalized block header not found", "blockRoot", blockRoot)
 			return
 		}
-		f.emitters.State().SendFinalizedCheckpoint(&beaconevents.FinalizedCheckpointData{
+		data := &beaconevents.FinalizedCheckpointData{
 			Block:               finalizedCheckpoint.Root,
 			Epoch:               finalizedCheckpoint.Epoch,
 			State:               blockHeader.Root,
 			ExecutionOptimistic: false,
-		})
+		}
+		f.queueEmit(func() { f.emitters.State().SendFinalizedCheckpoint(data) })
 	}
 }
 

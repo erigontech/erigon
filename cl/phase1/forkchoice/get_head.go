@@ -81,20 +81,11 @@ func (f *ForkChoiceStore) computeVotes(justifiedCheckpoint solid.Checkpoint, che
 		}
 	} else {
 		for validatorIndex := 0; validatorIndex < f.latestMessages.latestMessagesCount(); validatorIndex++ {
-			message, _ := f.latestMessages.get(validatorIndex)
-			if message == (LatestMessage{}) {
+			message, balance, ok := f.countableVote(checkpointState, validatorIndex)
+			if !ok {
 				continue
 			}
-			if !readFromBitset(checkpointState.actives, validatorIndex) || readFromBitset(checkpointState.slasheds, validatorIndex) {
-				continue
-			}
-			if _, hasLatestMessage := f.getLatestMessage(uint64(validatorIndex)); !hasLatestMessage {
-				continue
-			}
-			if f.isUnequivocating(uint64(validatorIndex)) {
-				continue
-			}
-			votes[message.Root] += checkpointState.balances[validatorIndex]
+			votes[message.Root] += balance
 		}
 		boostRoot := f.proposerBoostRoot.Load().(common.Hash)
 		if boostRoot != (common.Hash{}) {

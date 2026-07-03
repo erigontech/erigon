@@ -91,6 +91,7 @@ func collectOnBlockLatencyToUnixTime(ethClock eth_clock.EthereumClock, slot, cur
 func (f *ForkChoiceStore) OnBlock(ctx context.Context, block *cltypes.SignedBeaconBlock, newPayload, fullValidation, checkDataAvaiability bool) error {
 	f.mu.Lock()
 	unlocked := false
+	defer f.emitQueuedEvents()
 	defer func() {
 		if !unlocked {
 			f.mu.Unlock()
@@ -449,11 +450,12 @@ func (f *ForkChoiceStore) OnBlock(ctx context.Context, block *cltypes.SignedBeac
 	if blockEpoch < currentEpoch {
 		f.updateCheckpoints(postPullupJustified, postPullupFinalized)
 	}
-	f.emitters.State().SendBlock(&beaconevents.BlockData{
+	blockData := &beaconevents.BlockData{
 		Slot:                block.Block.Slot,
 		Block:               blockRoot,
 		ExecutionOptimistic: f.optimisticStore.IsOptimistic(blockRoot),
-	})
+	}
+	f.queueEmit(func() { f.emitters.State().SendBlock(blockData) })
 
 	if !isVerifiedExecutionPayload {
 		log.Debug("OnBlock", "elapsed", time.Since(start), "slot", block.Block.Slot)
@@ -470,6 +472,7 @@ func (f *ForkChoiceStore) OnBlock(ctx context.Context, block *cltypes.SignedBeac
 	// Release lock (via defer) before writing DB indices for the applied envelope.
 	unlocked = true
 	f.mu.Unlock()
+	f.emitQueuedEvents()
 
 	// Write execution payload envelope indices outside f.mu to avoid deadlock
 	// with postForkchoiceOperations (which holds MDBX tx then needs f.mu.RLock).

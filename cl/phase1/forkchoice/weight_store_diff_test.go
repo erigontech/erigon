@@ -265,7 +265,7 @@ func TestGloasWeightTreeDeltaMatchesFullScan(t *testing.T) {
 			Root:           target,
 			Slot:           hdr.Slot + 1,
 			PayloadPresent: n%2 == 0,
-		}, true)
+		})
 	}
 	tree = f.gloasWeightTree.prepare(justified, cs)
 

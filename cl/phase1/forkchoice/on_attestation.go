@@ -151,12 +151,9 @@ func (f *ForkChoiceStore) verifyAttestationWithState(
 	return attestationIndicies, nil
 }
 
-func (f *ForkChoiceStore) setLatestMessage(index uint64, message LatestMessage, trackGloasWeights bool) {
+func (f *ForkChoiceStore) setLatestMessage(index uint64, message LatestMessage) {
 	f.latestMessages.set(int(index), message)
-
-	if trackGloasWeights && f.gloasWeightTree != nil {
-		f.gloasWeightTree.markDirty(index)
-	}
+	f.gloasWeightTree.markDirty(index)
 }
 
 func (f *ForkChoiceStore) trackGloasWeights() bool {
@@ -178,16 +175,14 @@ func (f *ForkChoiceStore) isUnequivocating(validatorIndex uint64) bool {
 	return f.equivocatingIndicies[index]&(1<<uint(subIndex)) != 0
 }
 
-func (f *ForkChoiceStore) setUnequivocating(validatorIndex uint64, trackGloasWeights bool) {
+func (f *ForkChoiceStore) setUnequivocating(validatorIndex uint64) {
 	index := int(validatorIndex) / 8
 	if index >= len(f.equivocatingIndicies) {
 		f.equivocatingIndicies = common.EnsureEnoughSize(f.equivocatingIndicies, index+1)
 	}
 	subIndex := int(validatorIndex) % 8
 	f.equivocatingIndicies[index] |= 1 << uint(subIndex)
-	if trackGloasWeights && f.gloasWeightTree != nil {
-		f.gloasWeightTree.markDirty(validatorIndex)
-	}
+	f.gloasWeightTree.markDirty(validatorIndex)
 }
 
 func (f *ForkChoiceStore) updateLatestMessages(
@@ -219,7 +214,7 @@ func (f *ForkChoiceStore) updateLatestMessagesPreGloas(
 				Epoch: target.Epoch,
 				Root:  beaconBlockRoot,
 				Slot:  slot, // Set slot for GLOAS compatibility at fork boundary
-			}, false)
+			})
 		}
 	}
 }
@@ -245,7 +240,7 @@ func (f *ForkChoiceStore) updateLatestMessagesGloas(
 				Slot:           slot,
 				Root:           beaconBlockRoot,
 				PayloadPresent: payloadPresent,
-			}, true)
+			})
 		}
 	}
 }

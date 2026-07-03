@@ -30,8 +30,6 @@ type gloasVoteContribution struct {
 }
 
 type gloasWeightNode struct {
-	root                common.Hash
-	parent              common.Hash
 	parentPayloadStatus cltypes.PayloadStatus
 	children            []common.Hash
 
@@ -53,7 +51,6 @@ type gloasWeightTree struct {
 	allDirty   bool
 	checkpoint solid.Checkpoint
 	state      *checkpointState
-	ready      bool
 
 	missingRootVotes map[common.Hash]map[uint64]struct{}
 
@@ -74,8 +71,11 @@ func newGloasWeightTree(f *ForkChoiceStore) *gloasWeightTree {
 	}
 }
 
+// markDirty records a validator whose vote changed since the last prepare.
+// Without an applied baseline (t.state == nil) there is no delta to maintain:
+// marks are dropped and the next prepare's full rebuild covers every validator.
 func (t *gloasWeightTree) markDirty(validatorIndex uint64) {
-	if t == nil {
+	if t == nil || t.state == nil {
 		return
 	}
 	t.dirty[validatorIndex] = struct{}{}
@@ -98,12 +98,8 @@ func (t *gloasWeightTree) prepare(justified solid.Checkpoint, cs *checkpointStat
 		t.allDirty = true
 		return t
 	}
-	if t.state != nil && t.state != cs {
-		t.allDirty = true
-	}
-	if !t.ready || t.checkpoint != justified {
+	if t.state != cs || t.checkpoint != justified {
 		t.checkpoint = justified
-		t.ready = true
 		t.allDirty = true
 	}
 	t.state = cs
@@ -134,61 +130,43 @@ func (t *gloasWeightTree) ensureTopology(root common.Hash) {
 
 		node, ok := t.nodes[current]
 		if !ok {
-			node = &gloasWeightNode{root: current, parentPayloadStatus: cltypes.PayloadStatusPending}
+			node = &gloasWeightNode{parentPayloadStatus: cltypes.PayloadStatusPending}
 			t.nodes[current] = node
 			t.markMissingRootDirty(current)
 		}
 
-		t.filterLiveChildren(current, node)
-		for _, child := range node.children {
+		parentBlock, hasParentBlock := t.f.forkGraph.GetBlock(current)
+		liveCount := 0
+		for _, child := range t.f.children(current) {
+			if _, hasHeader := t.f.forkGraph.GetHeader(child); !hasHeader {
+				continue
+			}
+			block, hasBlock := t.f.forkGraph.GetBlock(child)
+			if !hasBlock || block == nil {
+				continue
+			}
+			if liveCount < len(node.children) {
+				node.children[liveCount] = child
+			} else {
+				node.children = append(node.children, child)
+			}
+			liveCount++
+
 			childNode, ok := t.nodes[child]
 			if !ok {
-				childNode = &gloasWeightNode{root: child}
+				childNode = &gloasWeightNode{}
 				t.nodes[child] = childNode
 				t.markMissingRootDirty(child)
 			}
-			block, ok := t.f.forkGraph.GetBlock(child)
-			if !ok || block == nil {
-				continue
+			if !hasParentBlock || parentBlock == nil {
+				childNode.parentPayloadStatus = cltypes.PayloadStatusEmpty
+			} else {
+				childNode.parentPayloadStatus = parentPayloadStatusFromBids(parentBlock, block.Block)
 			}
-			parentPayloadStatus := t.f.getParentPayloadStatus(block.Block)
-			if childNode.parent != current {
-				childNode.parent = current
-			}
-			childNode.parentPayloadStatus = parentPayloadStatus
 			t.stack = append(t.stack, child)
 		}
-	}
-}
-
-func (t *gloasWeightTree) filterLiveChildren(root common.Hash, node *gloasWeightNode) bool {
-	children := t.f.children(root)
-	liveCount := 0
-	changed := false
-	for _, child := range children {
-		if _, hasHeader := t.f.forkGraph.GetHeader(child); !hasHeader {
-			continue
-		}
-		block, hasBlock := t.f.forkGraph.GetBlock(child)
-		if !hasBlock || block == nil {
-			continue
-		}
-		if liveCount >= len(node.children) {
-			node.children = append(node.children, child)
-			changed = true
-		} else {
-			if node.children[liveCount] != child {
-				changed = true
-			}
-			node.children[liveCount] = child
-		}
-		liveCount++
-	}
-	if liveCount != len(node.children) {
-		changed = true
 		node.children = node.children[:liveCount]
 	}
-	return changed
 }
 
 func (t *gloasWeightTree) rebuildDirectWeights(cs *checkpointState) {
@@ -249,18 +227,8 @@ func growGloasContributions(applied []gloasVoteContribution, size int) []gloasVo
 
 func (t *gloasWeightTree) addValidatorContribution(validatorIndex uint64, cs *checkpointState) {
 	vi := int(validatorIndex)
-	if vi >= cs.validatorSetSize || vi >= len(cs.balances) {
-		return
-	}
-	if !readFromBitset(cs.actives, vi) || readFromBitset(cs.slasheds, vi) || t.f.isUnequivocating(validatorIndex) {
-		return
-	}
-	message, has := t.f.latestMessages.get(vi)
-	if !has || message == (LatestMessage{}) {
-		return
-	}
-	contribution := cs.balances[vi]
-	if contribution == 0 {
+	message, contribution, ok := t.f.countableVote(cs, vi)
+	if !ok {
 		return
 	}
 	direct := false
@@ -347,7 +315,7 @@ func (t *gloasWeightTree) markMissingRootDirty(root common.Hash) {
 		return
 	}
 	for validatorIndex := range votes {
-		t.markDirty(validatorIndex)
+		t.dirty[validatorIndex] = struct{}{}
 	}
 	delete(t.missingRootVotes, root)
 }
@@ -437,14 +405,21 @@ func (t *gloasWeightTree) ShouldApplyProposerBoost() bool {
 		t.boost = false
 		return false
 	}
-	fullScan := newWeightStoreFromCheckpointState(t.f, t.state)
 	t.boost = t.f.shouldApplyProposerBoostGloasWith(proposerBoostRoot, func(root common.Hash) bool {
-		return t.f.isHeadWeakWith(root, t.state, func(root common.Hash) uint64 {
-			return fullScan.GetAttestationScore(ForkChoiceNode{Root: root, PayloadStatus: cltypes.PayloadStatusPending})
-		})
+		return t.f.isHeadWeakWith(root, t.state, t.headWeight)
 	})
 	t.boostKnown = true
 	return t.boost
+}
+
+// headWeight serves the prepared tree's O(1) aggregate for roots reached by the
+// last topology walk and falls back to a full scan for roots outside the current
+// justified subtree, whose tree aggregates may be stale.
+func (t *gloasWeightTree) headWeight(root common.Hash) uint64 {
+	if _, inSubtree := t.topologySeen[root]; inSubtree {
+		return t.GetAttestationScore(ForkChoiceNode{Root: root, PayloadStatus: cltypes.PayloadStatusPending})
+	}
+	return pendingAttestationScore(newWeightStoreFromCheckpointState(t.f, t.state))(root)
 }
 
 func (t *gloasWeightTree) pruneFinalized(finalizedSlot uint64) {

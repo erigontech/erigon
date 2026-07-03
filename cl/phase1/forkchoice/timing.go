@@ -279,12 +279,15 @@ func (f *ForkChoiceStore) isHeadWeak(root common.Hash) bool {
 		return f.weights[root]
 	}
 	if f.beaconCfg.GetCurrentStateVersion(currentEpoch) >= clparams.GloasVersion {
-		ws := newWeightStoreFromCheckpointState(f, checkpointState)
-		headWeight = func(root common.Hash) uint64 {
-			return ws.GetAttestationScore(ForkChoiceNode{Root: root, PayloadStatus: cltypes.PayloadStatusPending})
-		}
+		headWeight = pendingAttestationScore(newWeightStoreFromCheckpointState(f, checkpointState))
 	}
 	return f.isHeadWeakWith(root, checkpointState, headWeight)
+}
+
+func pendingAttestationScore(ws WeightStore) func(common.Hash) uint64 {
+	return func(root common.Hash) uint64 {
+		return ws.GetAttestationScore(ForkChoiceNode{Root: root, PayloadStatus: cltypes.PayloadStatusPending})
+	}
 }
 
 func (f *ForkChoiceStore) isHeadWeakWith(root common.Hash, checkpointState *checkpointState, headWeight func(common.Hash) uint64) bool {

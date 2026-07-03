@@ -19,7 +19,6 @@ package forkchoice
 import (
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
-	"github.com/erigontech/erigon/cl/phase1/core/state"
 	"github.com/erigontech/erigon/common"
 )
 
@@ -59,6 +58,20 @@ func newWeightStoreFromCheckpointState(f *ForkChoiceStore, cs *checkpointState) 
 	return &weightStore{f: f, checkpointState: cs}
 }
 
+// getWeight returns the weight for a ForkChoiceNode.
+// [New in Gloas:EIP7732]
+//
+// From spec:
+//
+//	if node.payload_status == PAYLOAD_STATUS_PENDING or
+//	   store.blocks[node.root].slot + 1 != get_current_slot(store):
+//	    # calculate weight
+//	    return attestation_score + proposer_score
+//	else:
+//	    return Gwei(0)
+//
+// So: PENDING OR not-previous-slot → calculate weight
+// NOT PENDING AND is-previous-slot → return 0
 func getWeight(store WeightStore, f *ForkChoiceStore, node ForkChoiceNode) uint64 {
 	if f.isPreviousSlotPayloadDecision(node) {
 		return 0
@@ -93,20 +106,6 @@ func getProposerScore(f *ForkChoiceStore, cs *checkpointState) uint64 {
 	return (committeeWeight * f.beaconCfg.ProposerScoreBoost) / 100
 }
 
-// GetWeight returns the weight for a ForkChoiceNode.
-// [New in Gloas:EIP7732]
-//
-// From spec:
-//
-//	if node.payload_status == PAYLOAD_STATUS_PENDING or
-//	   store.blocks[node.root].slot + 1 != get_current_slot(store):
-//	    # calculate weight
-//	    return attestation_score + proposer_score
-//	else:
-//	    return Gwei(0)
-//
-// So: PENDING OR not-previous-slot → calculate weight
-// NOT PENDING AND is-previous-slot → return 0
 func (w *weightStore) GetWeight(node ForkChoiceNode) uint64 {
 	return getWeight(w, w.f, node)
 }
@@ -122,29 +121,39 @@ func (w *weightStore) GetAttestationScore(node ForkChoiceNode) uint64 {
 
 	var score uint64
 	for validatorIndex := 0; validatorIndex < checkpointState.validatorSetSize; validatorIndex++ {
-		// Check if validator is active and not slashed
-		if !readFromBitset(checkpointState.actives, validatorIndex) ||
-			readFromBitset(checkpointState.slasheds, validatorIndex) {
+		message, balance, ok := w.f.countableVote(checkpointState, validatorIndex)
+		if !ok {
 			continue
 		}
-
-		// Check if validator has a latest message
-		message, hasMessage := w.f.latestMessages.get(validatorIndex)
-		if !hasMessage || message == (LatestMessage{}) {
-			continue
-		}
-
-		// Check if validator is not equivocating
-		if w.f.isUnequivocating(uint64(validatorIndex)) {
-			continue
-		}
-
 		if w.f.isAncestor(w.f.getSupportedNode(message), node) {
-			score += checkpointState.balances[validatorIndex]
+			score += balance
 		}
 	}
 
 	return score
+}
+
+// countableVote returns the validator's latest message and balance when the vote
+// counts toward fork-choice weights: inside the justified registry's bounds,
+// active, not slashed, not equivocating, with a non-empty message and balance.
+// The delta tree, the full scan, and computeVotes must all share this filter.
+func (f *ForkChoiceStore) countableVote(cs *checkpointState, validatorIndex int) (LatestMessage, uint64, bool) {
+	if validatorIndex >= cs.validatorSetSize || validatorIndex >= len(cs.balances) {
+		return LatestMessage{}, 0, false
+	}
+	if !readFromBitset(cs.actives, validatorIndex) || readFromBitset(cs.slasheds, validatorIndex) ||
+		f.isUnequivocating(uint64(validatorIndex)) {
+		return LatestMessage{}, 0, false
+	}
+	message, has := f.latestMessages.get(validatorIndex)
+	if !has || message == (LatestMessage{}) {
+		return LatestMessage{}, 0, false
+	}
+	balance := cs.balances[validatorIndex]
+	if balance == 0 {
+		return LatestMessage{}, 0, false
+	}
+	return message, balance, true
 }
 
 // GetProposerScore returns the proposer boost score.
@@ -182,29 +191,4 @@ func (w *weightStore) ShouldApplyProposerBoost() bool {
 
 	// [New in Gloas:EIP7732] Full spec logic
 	return w.f.shouldApplyProposerBoostGloas(proposerBoostRoot)
-}
-
-// WeightStoreReader provides read-only access to weight calculations.
-// This is useful for external consumers that only need to query weights.
-type WeightStoreReader interface {
-	GetWeight(node ForkChoiceNode) uint64
-}
-
-// ComputeWeightsWithAuxState computes weights for all blocks using an auxiliary state.
-// This is used during head selection when we have a cached state available.
-// [New in Gloas:EIP7732] Uses WeightStore for weight calculation.
-func (f *ForkChoiceStore) ComputeWeightsWithAuxState(auxState *state.CachingBeaconState) map[common.Hash]uint64 {
-	ws := NewWeightStore(f)
-	weights := make(map[common.Hash]uint64)
-
-	// Iterate through all heads and compute weights
-	for head := range f.headSet {
-		node := ForkChoiceNode{
-			Root:          head,
-			PayloadStatus: cltypes.PayloadStatusPending, // Will be determined inside GetWeight
-		}
-		weights[head] = ws.GetWeight(node)
-	}
-
-	return weights
 }
