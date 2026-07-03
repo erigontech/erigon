@@ -96,6 +96,43 @@ func TestAllActiveSnapshotsConcurrentWithWrites(t *testing.T) {
 	}
 }
 
+// TestAllActiveSnapshotsRaceWithAddNewSeedableFile pins that AddNewSeedableFile mutates
+// torrentsByName without holding d.lock, so it data-races allActiveSnapshots' iteration
+// under -race even though the read side takes d.lock.RLock — an RLock cannot exclude a
+// writer that holds no lock. The locked download paths make this invisible; the seed path
+// does not.
+func TestAllActiveSnapshotsRaceWithAddNewSeedableFile(t *testing.T) {
+	test := newDownloaderTest(t)
+	d := test.downloader
+	ctx := t.Context()
+
+	var wg sync.WaitGroup
+	stop := make(chan struct{})
+
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		for {
+			select {
+			case <-stop:
+				return
+			default:
+				d.allActiveSnapshots()
+			}
+		}
+	}()
+	defer func() {
+		close(stop)
+		wg.Wait()
+	}()
+
+	for i := range 64 {
+		name := fmt.Sprintf("v1-%06d-%06d-headers.seg", i, i+1)
+		require.NoError(t, os.WriteFile(filepath.Join(test.dirs.Snap, name), nil, 0o644))
+		require.NoError(t, d.AddNewSeedableFile(ctx, name))
+	}
+}
+
 func TestChangeInfoHashOfSameFile(t *testing.T) {
 	ctx := t.Context()
 	require := require.New(t)

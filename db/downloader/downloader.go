@@ -761,7 +761,11 @@ func (d *Downloader) AddNewSeedableFile(ctx context.Context, name string) error 
 		return fmt.Errorf("building metainfo for new seedable file: %w", err)
 	}
 	// The above BuildTorrentIfNeed should put the metainfo in the right place for name.
+	// Hold d.lock across the torrentsByName mutation like the download add paths do, so
+	// it cannot race allActiveSnapshots' iteration (which holds only RLock).
+	d.lock.Lock()
 	_, _, err = d.addCompleteTorrent(name)
+	d.lock.Unlock()
 	if err != nil {
 		return fmt.Errorf("adding torrent: %w", err)
 	}
