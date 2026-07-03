@@ -416,6 +416,12 @@ func commitmentHistoryOrDefault(b BlockAmount) BlockAmount {
 	return b
 }
 
+// CommitmentHistoryAmount returns the commitment-history retention, treating an
+// unset (nil) field as keep-all so callers can query it without a nil check.
+func (m Mode) CommitmentHistoryAmount() BlockAmount {
+	return commitmentHistoryOrDefault(m.CommitmentHistory)
+}
+
 func overwriteStoredMode(db kv.GetPut, pm Mode) error {
 	if err := writeBlockAmount(db, kv.PruneHistory, pm.History); err != nil {
 		return err

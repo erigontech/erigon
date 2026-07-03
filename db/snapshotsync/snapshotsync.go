@@ -296,7 +296,7 @@ func computeBlocksToPrune(blockReader blockReader, p prune.Mode) (blocksToPrune 
 // chain-history-expiry for blocks. The KeepPostMergeBlocksPruneMode + MergeHeight
 // branch covers that.
 func downloadFilteringApplies(pruneMode prune.Mode, cc *chain.Config) bool {
-	if pruneMode.History.Enabled() || pruneMode.Blocks.Enabled() || pruneMode.CommitmentHistory.Enabled() {
+	if pruneMode.History.Enabled() || pruneMode.Blocks.Enabled() || pruneMode.CommitmentHistoryAmount().Enabled() {
 		return true
 	}
 	return pruneMode.Blocks == prune.KeepPostMergeBlocksPruneMode && cc != nil && cc.MergeHeight != nil
@@ -452,7 +452,7 @@ func SyncSnapshots(
 			if err != nil {
 				return err
 			}
-			commitmentHistoryPrune := prune.CommitmentHistory.PruneTo(frozenBlocks)
+			commitmentHistoryPrune := prune.CommitmentHistoryAmount().PruneTo(frozenBlocks)
 			minBlockToDownload, minHistoryStep, minCommitmentHistoryStep, err := getMinimumBlocksToDownload(
 				ctx, blockReader, maxStateStep, stepSize, historyPrune, commitmentHistoryPrune)
 			if err != nil {
@@ -460,7 +460,7 @@ func SyncSnapshots(
 			}
 			// Commitment-history filtering is opt-in; a zero step disables it in
 			// buildBlackListForPruning, so clear it when the window is unbounded.
-			if !prune.CommitmentHistory.Enabled() {
+			if !prune.CommitmentHistoryAmount().Enabled() {
 				minCommitmentHistoryStep = 0
 			} else if minCommitmentHistoryStep > 0 {
 				log.Info(fmt.Sprintf("[%s] Filtering old commitment-history segments", logPrefix),
