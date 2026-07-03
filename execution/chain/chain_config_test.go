@@ -17,6 +17,7 @@
 package chain
 
 import (
+	"encoding/json"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -223,6 +224,18 @@ func TestBlobParameterInactiveHardfork(t *testing.T) {
 	assert.Equal(t, uint64(6), c.GetTargetBlobsPerBlock(time))
 	assert.Equal(t, uint64(9), c.GetMaxBlobsPerBlock(time))
 	assert.Equal(t, uint64(5007716), c.GetBlobGasPriceUpdateFraction(time))
+}
+
+func TestConfigL2JSONRoundTrip(t *testing.T) {
+	var c Config
+	require := assert.New(t)
+	require.NoError(json.Unmarshal([]byte(`{"chainId":1,"l2":{"name":"testl2","foo":1}}`), &c))
+	require.JSONEq(`{"name":"testl2","foo":1}`, string(c.L2JSON))
+	require.True(c.IsL2())
+
+	var noL2 Config
+	require.NoError(json.Unmarshal([]byte(`{"chainId":1}`), &noL2))
+	require.False(noL2.IsL2())
 }
 
 func TestBlobParameterDencunAndPectraAtGenesis(t *testing.T) {
