@@ -1264,6 +1264,9 @@ func (tx *MdbxTx) Commit() error {
 	// investigating GC / openTxs behavior. Gated behind the same env var so
 	// production runs don't get a log line per chaindata commit.
 	if mdbxTraceTx && tx.db.opts.label == dbcfg.ChainDB {
+		if latency.Sync > 0 {
+			log.Warn("[dbg] latency.Sync > 0", "sync", latency.Sync)
+		}
 		openTxs := tx.db.txsCount
 		tx.db.opts.log.Info("[mdbx] commit",
 			"whole", latency.Whole,
