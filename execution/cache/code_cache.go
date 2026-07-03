@@ -156,6 +156,13 @@ type CodeCache struct {
 	// check+bind is atomic w.r.t. a concurrent authoritative rebind.
 	addrBindMu sync.Mutex
 
+	// putStripes serializes putContent's membership-check + size-account +
+	// insert per key hash: freelru has no LoadOrStore, so without this two
+	// concurrent Puts of the same cold code both miss the check and both add to
+	// the byte counter while only one entry survives, drifting the stat upward.
+	// Striped by key so distinct keys still put in parallel.
+	putStripes [256]sync.Mutex
+
 	// Stats counters (atomic for concurrent access)
 	addrHits       atomic.Uint64
 	addrMisses     atomic.Uint64
@@ -195,7 +202,10 @@ func putContent[T any](
 	coh *coherence.Gen,
 	counter *atomic.Int64,
 	keyCost int64,
+	stripe *sync.Mutex,
 ) {
+	stripe.Lock()
+	defer stripe.Unlock()
 	if existing, ok := lru.Get(h); ok {
 		if txNum, epoch := stamp(existing); !coh.IsStale(txNum, epoch) {
 			return
@@ -361,7 +371,7 @@ func (c *CodeCache) putCode(addr []byte, code []byte, keyHash [32]byte, txNum ui
 	entry := codeEntry{code: code, keyHash: keyHash, txNum: txNum, epoch: ep}
 	// freelru keyed by the codeID (maphash of code) directly; 8-byte key cost.
 	putContent(c.hashToCode, codeID, entry, codeEntryStamp, codeEntryCodeLen,
-		&c.coh, &c.codeSize, 8)
+		&c.coh, &c.codeSize, 8, &c.putStripes[uint8(codeID)])
 }
 
 // GetAddrCodeHash returns the Ethereum codeHash for addr if cached. Lets
@@ -460,8 +470,9 @@ func (c *CodeCache) putWithCodeHash(addr []byte, code []byte, codeHash []byte, t
 
 	entry := codeEntry{code: code, keyHash: kh, txNum: txNum, epoch: ep}
 	// freelru keyed by maphash(codeHash); 32-byte key cost.
-	putContent(c.codeHashToCode, maphash.Hash(codeHash), entry, codeEntryStamp, codeEntryCodeLen,
-		&c.coh, &c.codeHashCodeSize, int64(len(codeHash)))
+	hcc := maphash.Hash(codeHash)
+	putContent(c.codeHashToCode, hcc, entry, codeEntryStamp, codeEntryCodeLen,
+		&c.coh, &c.codeHashCodeSize, int64(len(codeHash)), &c.putStripes[uint8(hcc)])
 }
 
 // GetCodeSizeByCodeHash retrieves the size (in bytes) of a contract by its
@@ -502,8 +513,9 @@ func (c *CodeCache) PutCodeSizeByCodeHash(codeHash []byte, size int, txNum uint6
 	kh := hash32(codeHash)
 	entry := codeSizeEntry{size: size, keyHash: kh, txNum: txNum, epoch: ep}
 	// Entry-counted layer: each entry costs 1 against the entry cap.
-	putContent(c.codeSizeByCodeHash, maphash.Hash(codeHash), entry, codeSizeEntryStamp, zeroCost,
-		&c.coh, &c.codeSizeEntries, 1)
+	hcs := maphash.Hash(codeHash)
+	putContent(c.codeSizeByCodeHash, hcs, entry, codeSizeEntryStamp, zeroCost,
+		&c.coh, &c.codeSizeEntries, 1, &c.putStripes[uint8(hcs)])
 }
 
 // Delete removes the address → code mapping for addr.
