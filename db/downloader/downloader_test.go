@@ -96,12 +96,11 @@ func TestAllActiveSnapshotsConcurrentWithWrites(t *testing.T) {
 	}
 }
 
-// TestAllActiveSnapshotsRaceWithAddNewSeedableFile pins that AddNewSeedableFile mutates
-// torrentsByName without holding d.lock, so it data-races allActiveSnapshots' iteration
-// under -race even though the read side takes d.lock.RLock — an RLock cannot exclude a
-// writer that holds no lock. The locked download paths make this invisible; the seed path
-// does not.
-func TestAllActiveSnapshotsRaceWithAddNewSeedableFile(t *testing.T) {
+// TestAddNewSeedableFileConcurrentWithAllActiveSnapshots pins that AddNewSeedableFile's
+// torrentsByName mutation holds d.lock, so it does not race allActiveSnapshots' iteration.
+// Without the lock the map write and the RLock'd read report a data race under -race — an
+// RLock cannot exclude a writer that holds no lock.
+func TestAddNewSeedableFileConcurrentWithAllActiveSnapshots(t *testing.T) {
 	test := newDownloaderTest(t)
 	d := test.downloader
 	ctx := t.Context()
