@@ -254,3 +254,9 @@ func TestMakeSignerFromRulesBhilaiFold(t *testing.T) {
 	assert.True(t, signer.setCode)
 	assert.True(t, signer.dynamicFee)
 }
+
+func TestMakeSignerFromRulesNilChainID(t *testing.T) {
+	t.Parallel()
+	rules := &chain.Rules{ChainID: uint256.NewInt(42161), IsHomestead: true, IsSpuriousDragon: true, IsBerlin: true, IsLondon: true}
+	assert.Equal(t, MakeSignerFromRules(uint256.NewInt(42161), rules), MakeSignerFromRules(nil, rules))
+}

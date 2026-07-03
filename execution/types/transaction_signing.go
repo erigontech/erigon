@@ -97,13 +97,17 @@ func MakeSigner(config *chain.Config, blockNumber uint64, blockTime uint64) *Sig
 }
 
 // MakeSignerFromRules returns a Signer derived from an already-resolved Rules
-// instead of raw block number/time, so chains whose forks (including L2
-// version ladders) are gated through Rules get the same signer capability
-// gating as MakeSigner.
+// instead of raw block number/time. The capability cascade mirrors
+// MakeSigner's, with Bhilai tested before Prague because Rules construction
+// folds Bhilai into IsPrague and the Bhilai tier does not enable blob
+// transactions. When chainID is nil, rules.ChainID is used.
 func MakeSignerFromRules(chainID *uint256.Int, rules *chain.Rules) *Signer {
 	var signer Signer
 
 	if rules != nil {
+		if chainID == nil {
+			chainID = rules.ChainID
+		}
 		var chainId uint256.Int
 		if chainID != nil {
 			chainId.Set(chainID)
