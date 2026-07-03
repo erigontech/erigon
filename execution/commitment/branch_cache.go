@@ -149,25 +149,29 @@ type branchCacheEntry struct {
 type MissCallback func(prefix []byte)
 
 // trunk is a resident, lock-free fixed-array tier shared by both tries: the
-// accountTrunk holds account-trie branches at nibble depths 1-4 (d4 allocated,
-// deep nil); each per-contract storageTrunk holds storage branches at storage
+// accountTrunk holds account-trie branches at nibble depths 1-4 (d4 lazily
+// allocated, deep nil); each per-contract storageTrunk holds storage branches at storage
 // depths 0-3 with depth 4+ in deep (d4 nil, deep allocated). Slots are
 // atomic.Pointer: under the single-writer-per-prefix invariant readers/writers
 // take no mutex (just an atomic load/store per slot); only deep (a maphash.Map)
 // locks.
 type trunk struct {
-	d0   atomic.Pointer[branchCacheEntry]
-	d1   [16]atomic.Pointer[branchCacheEntry]
-	d2   [256]atomic.Pointer[branchCacheEntry]
-	d3   [4096]atomic.Pointer[branchCacheEntry]
-	d4   *[65536]atomic.Pointer[branchCacheEntry]
+	d0 atomic.Pointer[branchCacheEntry]
+	d1 [16]atomic.Pointer[branchCacheEntry]
+	d2 [256]atomic.Pointer[branchCacheEntry]
+	d3 [4096]atomic.Pointer[branchCacheEntry]
+	// d4 (the 65536-entry depth-4 array, ~512KB) is allocated lazily on the
+	// first depth-4 write: prod has one process-wide cache so eager alloc is
+	// cheap, but tests spin up thousands of ephemeral aggregators whose tries
+	// rarely reach depth 4, so eager alloc there is pure churn.
+	d4   atomic.Pointer[[65536]atomic.Pointer[branchCacheEntry]]
 	deep *maphash.Map[*branchCacheEntry]
 }
 
 // newAccountTrunk builds the global account trunk: dense depth-4 fixed array,
 // no deep overflow (account depth 5+ uses the LRU tail).
 func newAccountTrunk() *trunk {
-	return &trunk{d4: &[65536]atomic.Pointer[branchCacheEntry]{}}
+	return &trunk{}
 }
 
 // newStorageTrunk builds a per-contract storage trunk: deep overflow for
@@ -190,8 +194,8 @@ func (t *trunk) slot(path []byte) *atomic.Pointer[branchCacheEntry] {
 	case 3:
 		return &t.d3[uint16(path[0])<<8|uint16(path[1])<<4|uint16(path[2])]
 	case 4:
-		if t.d4 != nil {
-			return &t.d4[uint32(path[0])<<12|uint32(path[1])<<8|uint32(path[2])<<4|uint32(path[3])]
+		if d4 := t.d4.Load(); d4 != nil {
+			return &d4[uint32(path[0])<<12|uint32(path[1])<<8|uint32(path[2])<<4|uint32(path[3])]
 		}
 	}
 	return nil
@@ -248,7 +252,7 @@ func NewBranchCache(tailCapacity int) *BranchCache {
 // trunk, or depth >= 5 (served by the LRU tail). The compact-hex prefix maps
 // directly to an array index, no hashing. Bit 4 of byte 0 is the odd-length
 // flag; the low nibble of byte 0 is the first nibble when odd.
-func (c *BranchCache) trunkSlot(prefix []byte) *atomic.Pointer[branchCacheEntry] {
+func (c *BranchCache) trunkSlot(prefix []byte, forWrite bool) *atomic.Pointer[branchCacheEntry] {
 	if c.trunkDisabled {
 		return nil
 	}
@@ -264,7 +268,17 @@ func (c *BranchCache) trunkSlot(prefix []byte) *atomic.Pointer[branchCacheEntry]
 		return &c.accountTrunk.d3[uint16(prefix[0]&0x0f)<<8|uint16(prefix[1])] // 3 nibbles
 	case 3:
 		if prefix[0]&0x10 == 0 { // 4 nibbles
-			return &c.accountTrunk.d4[uint16(prefix[1])<<8|uint16(prefix[2])]
+			d4 := c.accountTrunk.d4.Load()
+			if d4 == nil {
+				if !forWrite {
+					return nil
+				}
+				d4 = &[65536]atomic.Pointer[branchCacheEntry]{}
+				if !c.accountTrunk.d4.CompareAndSwap(nil, d4) {
+					d4 = c.accountTrunk.d4.Load() // lost the race; use the winner
+				}
+			}
+			return &d4[uint16(prefix[1])<<8|uint16(prefix[2])]
 		}
 		// 5 nibbles (odd, 3 bytes) -> LRU tail
 	}
@@ -334,8 +348,10 @@ func (c *BranchCache) clearTrunk() {
 	for i := range t.d3 {
 		t.d3[i].Store(nil)
 	}
-	for i := range t.d4 {
-		t.d4[i].Store(nil)
+	if d4 := t.d4.Load(); d4 != nil {
+		for i := range d4 {
+			d4[i].Store(nil)
+		}
 	}
 }
 
@@ -376,7 +392,7 @@ func (c *BranchCache) lookup(prefix []byte) (*branchCacheEntry, bool) {
 	}
 	// Resident account trunk (fixed arrays, depths 1-4). Disjoint from the
 	// storage trunks (depth >= 64) and tail, so a miss here is genuine.
-	if slot := c.trunkSlot(prefix); slot != nil {
+	if slot := c.trunkSlot(prefix, false); slot != nil {
 		if entry := slot.Load(); entry != nil {
 			c.trunkHits.Add(1)
 			return entry, true
@@ -416,7 +432,7 @@ func (c *BranchCache) store(prefix []byte, entry *branchCacheEntry) {
 		c.root.Store(entry)
 		return
 	}
-	if slot := c.trunkSlot(prefix); slot != nil {
+	if slot := c.trunkSlot(prefix, true); slot != nil {
 		slot.Store(entry)
 		return
 	}
@@ -533,7 +549,7 @@ func (c *BranchCache) Invalidate(prefix []byte) {
 		c.root.Store(nil)
 		return
 	}
-	if slot := c.trunkSlot(prefix); slot != nil {
+	if slot := c.trunkSlot(prefix, false); slot != nil {
 		slot.Store(nil)
 		return
 	}
