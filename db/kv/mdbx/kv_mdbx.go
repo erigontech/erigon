@@ -754,17 +754,17 @@ func (db *MdbxKV) backgroundSyncOnce() {
 	// otherwise. MDBX_BUSY means the environment is used by other thread and
 	// nonblock=true.
 
-	t := time.Now()
 	tx, err := db.BeginRw(context.Background())
 	if err != nil {
 		return
 	}
 	defer tx.Rollback()
 
+	t := time.Now()
 	if err := db.env.SyncPoll(); err != nil {
 		db.log.Warn("[db] background sync", "label", db.opts.label, "err", err)
 	}
-	if took := time.Since(t); took > 10*time.Millisecond {
+	if took := time.Since(t); took > 1*time.Millisecond {
 		db.log.Warn("[db] background sync", "label", db.opts.label, "took", took)
 	}
 }
