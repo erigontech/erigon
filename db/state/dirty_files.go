@@ -120,6 +120,8 @@ type FilesItem struct {
 	existence            *existence.Filter
 	startTxNum, endTxNum uint64 //[startTxNum, endTxNum)
 
+	// version is the file's parsed on-disk version, used as a per-file regime marker.
+	version  version.Version
 	refcount atomic.Int32
 
 	// Deprecated: only the not-yet-migrated forkable subsystem still uses this (with
@@ -394,6 +396,7 @@ func (d *Domain) openDirtyFiles(dirEntries []string) (err error) {
 
 			fName := filepath.Base(fPath)
 			d.FileVersion.DataKV.MustSupport(fileVer, fName)
+			item.version = fileVer
 
 			if item.decompressor, err = seg.NewDecompressor(fPath); err != nil {
 				if errors.Is(err, &seg.ErrCompressedFileCorrupted{}) {
@@ -613,6 +616,10 @@ type visibleFile struct {
 
 func (i visibleFile) Fullpath() string {
 	return i.src.decompressor.FilePath()
+}
+
+func (i visibleFile) Version() version.Version {
+	return i.src.version
 }
 
 func (i visibleFile) StartRootNum() uint64 {
