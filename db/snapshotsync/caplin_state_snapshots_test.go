@@ -39,10 +39,10 @@ func newTestCaplinStateSnapshots(t *testing.T) *CaplinStateSnapshots {
 	)
 }
 
-// TestCaplinStateSnapshots_BundleRefcount pins the migrated reclamation model: a
-// View pins the whole visible bundle with a single refcount and keeps reading its
-// pinned generation across a concurrent republish (snapshot isolation the old
-// live-map read lacked); the generation chain collapses once the reader drains.
+// TestCaplinStateSnapshots_BundleRefcount pins the reclamation invariants: a View
+// pins the whole visible bundle with a single refcount and keeps reading its
+// pinned generation across a concurrent republish (snapshot isolation); the
+// generation chain collapses once the reader drains.
 func TestCaplinStateSnapshots_BundleRefcount(t *testing.T) {
 	require := require.New(t)
 	c := newTestCaplinStateSnapshots(t)
