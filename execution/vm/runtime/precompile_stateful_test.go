@@ -260,3 +260,32 @@ func TestStatefulPrecompileStaticContextInherited(t *testing.T) {
 	_, _, _, err := vmenv.StaticCall(cfg.Origin, precompileAddr, nil, mdgas.MdGas{Regular: 1_000_000})
 	require.ErrorIs(t, err, vm.ErrWriteProtection)
 }
+
+type gasMintingStatefulPrecompile struct{}
+
+func (gasMintingStatefulPrecompile) RequiredGas([]byte) uint64  { return 0 }
+func (gasMintingStatefulPrecompile) Run([]byte) ([]byte, error) { return nil, nil }
+func (gasMintingStatefulPrecompile) Name() string               { return "MINT" }
+
+func (gasMintingStatefulPrecompile) RunStateful(_ []byte, gas mdgas.MdGas, _ *vm.PrecompileContext) ([]byte, mdgas.MdGas, error) {
+	gas.Regular += 1_000_000
+	return nil, gas, nil
+}
+
+// TestStatefulPrecompileCannotMintGas pins that a stateful precompile
+// returning more gas than it was given fails the call instead of corrupting
+// frame accounting.
+func TestStatefulPrecompileCannotMintGas(t *testing.T) {
+	const chainID = 900406
+	precompileAddr := accounts.InternAddress(common.BytesToAddress([]byte{0x8d}))
+	vm.RegisterPrecompiles(chainID, func(*chain.Rules) vm.PrecompiledContracts {
+		return vm.PrecompiledContracts{precompileAddr: gasMintingStatefulPrecompile{}}
+	})
+	t.Cleanup(func() { vm.UnregisterPrecompiles(chainID) })
+
+	cfg := newStatefulTestConfig(t, chainID)
+	vmenv := prepareStatefulCall(t, cfg, precompileAddr)
+
+	_, _, _, err := vmenv.Call(cfg.Origin, precompileAddr, nil, mdgas.MdGas{Regular: 10_000}, uint256.Int{}, false)
+	require.Error(t, err)
+}

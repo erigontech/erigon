@@ -421,11 +421,12 @@ func (evm *EVM) call(typ OpCode, caller accounts.Address, callerAddress accounts
 	if isPrecompile {
 		if sp, ok := p.(StatefulPrecompile); ok {
 			actingAs, frameCaller := frameIdentity(typ, caller, callerAddress, addr)
+			callValue := value
 			ctx := &PrecompileContext{
 				Self:     addr,
 				ActingAs: actingAs,
 				Caller:   frameCaller,
-				Value:    &value,
+				Value:    &callValue,
 				ReadOnly: evm.readOnly || typ == STATICCALL,
 				Evm:      evm,
 			}
@@ -433,6 +434,10 @@ func (evm *EVM) call(typ OpCode, caller accounts.Address, callerAddress accounts
 			exitFrame := evm.enterFrame(ctx.ReadOnly)
 			ret, gasRemaining, err = sp.RunStateful(input, gasRemaining, ctx)
 			exitFrame()
+			if gasRemaining.Regular > entryGas.Regular || gasRemaining.State > entryGas.State {
+				ret, gasRemaining = nil, mdgas.MdGas{}
+				err = fmt.Errorf("stateful precompile %s returned more gas than supplied", sp.Name())
+			}
 			// Attribute the precompile's State-dimension spend so the frame
 			// accounting defer and the EIP-8037 revert restore both see it.
 			gasUsed.State = int64(entryGas.State) - int64(gasRemaining.State)
