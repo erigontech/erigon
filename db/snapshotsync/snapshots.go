@@ -934,9 +934,13 @@ type FileSet struct {
 	oldestVisible *VisibleFiles // chain head (oldest generation still pinned); guarded by dirtyLock
 }
 
-// AcquireVisible pins the current generation. Load and increment are not atomic
-// together, so re-validate: if the generation was superseded between the two, the
-// pin landed on a draining generation — drop it and retry (hazard-pointer style).
+// AcquireVisible pins the current visible generation for reading. Fast and
+// lock-free (one atomic add pins the whole bundle, not per file) — the hot-path
+// reader entry point, paired with ReleaseVisible; Publish is the slow writer side.
+//
+// Load and increment are not atomic together, so re-validate: if the generation
+// was superseded between the two, the pin landed on a draining generation — drop
+// it and retry (hazard-pointer style).
 func (f *FileSet) AcquireVisible() *VisibleFiles {
 	// Hazard pointer concept: https://github.com/facebook/folly/blob/main/folly/synchronization/Hazptr.h#L27C5-L27C22
 	for {
@@ -949,7 +953,9 @@ func (f *FileSet) AcquireVisible() *VisibleFiles {
 	}
 }
 
-// ReleaseVisible drops a pin taken by AcquireVisible; the last reader reclaims.
+// ReleaseVisible drops a pin taken by AcquireVisible. Lock-free on the hot-path;
+// only the last reader of a superseded generation pays the reclaim, closing that
+// generation's retired files.
 func (f *FileSet) ReleaseVisible(v *VisibleFiles) {
 	if v.refcnt.Add(-1) == 0 {
 		f.reclaimRetired()
@@ -1022,9 +1028,13 @@ func NewVisibleFiles(segments []VisibleSegments) *VisibleFiles {
 	return &VisibleFiles{segments: segments}
 }
 
-// Publish builds a new generation via `build` (run under dirtyLock so it sees a
-// consistent dirty set), installs it, hands `retired` to the outgoing generation,
-// and reclaims whatever has drained.
+// Publish installs a new visible generation. Slow: it takes the dirty write lock
+// and rebuilds the generation, so call it only from rare background events
+// (opening/closing snapshots, end of a merge or retire) — never on a read
+// hot-path, where readers pin the current generation lock-free via AcquireVisible.
+//
+// `build` runs under the lock so it sees a consistent dirty set; `retired` is
+// handed to the outgoing generation and reclaimed once it drains.
 func (f *FileSet) Publish(retired []RetiredSegment, build func() *VisibleFiles) {
 	var toDelete []RetiredSegment
 	func() {
