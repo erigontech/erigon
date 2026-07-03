@@ -75,6 +75,6 @@ Per-datadir settings that travel with a snapshot set rather than the binary, res
 |-------|---------|
 | `step_size` | txs per step |
 | `steps_in_frozen_file` | steps merged into a frozen (immutable) file |
-| `references_in_commitment_branches` | whether new commitment merges write referenced (short-key, `v2.0`) `.kv` files; absent → default `true` |
+| `references_in_commitment_branches` | whether new commitment merges write referenced (short-key, `v2.1`) `.kv` files; absent → default `true` |
 
-`references_in_commitment_branches` governs *writes* only. Reads are version-aware (a commitment `.kv` is referenced iff its version `< v2.1` and its range ≥ the referencing threshold), so flipping the flag on a populated datadir stays correct in both directions and old referenced files convert to plain lazily through merges. To publish plain (`v2.1`) snapshots, a producer sets it `false` before running merges (see the `erigondb-sync-integration-test-plan` skill).
+`references_in_commitment_branches` governs *writes* only. Reads are version-aware (a commitment `.kv` is referenced iff its version `< v2.2` and its range ≥ the referencing threshold), so flipping the flag on a populated datadir stays correct in both directions and old referenced files convert to plain lazily through merges. To publish plain (`v2.2`) snapshots, a producer sets it `false` before running merges (see the `erigondb-sync-integration-test-plan` skill).

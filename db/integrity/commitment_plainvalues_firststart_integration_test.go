@@ -34,7 +34,7 @@ import (
 
 // TestFirstStartPlainValuesRegime bootstraps a fresh datadir, resolves erigondb.toml through the
 // --commitment.plainValues first-start override, and asserts the merged commitment .kv lands in the
-// matching version regime (plain => v2.1, referenced => v2.0) and passes the regime-aware integrity
+// matching version regime (plain => v2.2, referenced => v2.1) and passes the regime-aware integrity
 // checks — i.e. the flag's chosen regime flows resolver -> settings -> schema -> merge.
 func TestFirstStartPlainValuesRegime(t *testing.T) {
 	t.Run("plain", func(t *testing.T) {

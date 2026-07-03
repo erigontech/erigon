@@ -347,10 +347,10 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 	}
 
 	// Seed erigondb.toml with the first-start commitment regime (--commitment.plainValues)
-	// before genesis-root computation. GenesisToBlock resolves erigondb settings against the
-	// real datadir to configure its in-memory aggregator, which otherwise creates erigondb.toml
-	// with the default regime; SetUpBlockReader's later flag-aware resolve then finds the file
-	// present and drops the flag. Resolving here first makes --commitment.plainValues stick.
+	// before genesis-root computation. On a legacy datadir GenesisToBlock resolves erigondb
+	// settings against the real dir and would create erigondb.toml with the default regime,
+	// which the later flag-aware resolve in SetUpBlockReader then reads as pre-existing and
+	// drops the flag. Seeding here first makes --commitment.plainValues stick.
 	if _, err := state.ResolveErigonDBSettingsWithRefsDefault(dirs, logger, config.Snapshot.NoDownloader, config.CommitmentRefsFirstStart()); err != nil {
 		return nil, err
 	}

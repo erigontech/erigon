@@ -226,7 +226,7 @@ func SqueezeCommitmentFiles(ctx context.Context, at *AggregatorRoTx, logger log.
 
 			originalPath := cf.decompressor.FilePath()
 			// The squeeze re-references the file, so stamp the output with the flag-derived write
-			// version (v2.0) rather than reusing the input name, which may be a plain v2.1 file
+			// version (v2.1) rather than reusing the input name, which may be a plain v2.2 file
 			// written during a flag-off rebuild window.
 			targetPath := commitment.d.kvNewFilePath(kv.Step(r.from/stepSize), kv.Step(r.to/stepSize))
 			squeezedTmpPath := targetPath + sqExt + ".tmp"
