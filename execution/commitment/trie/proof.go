@@ -112,13 +112,95 @@ func (t *Trie) Prove(key []byte, fromLevel int, storage bool) ([][]byte, error) 
 			}
 		case ValueNode:
 			tn = nil
-		case HashNode:
+		case HashNode, *HashNode:
 			return nil, fmt.Errorf("encountered hashNode unexpectedly, key %x, fromLevel %d", key, fromLevel)
 		default:
 			panic(fmt.Sprintf("%T: invalid node: %v", tn, tn))
 		}
 	}
 	return proof, nil
+}
+
+// WitnessNodesForKeys returns the deduplicated proof nodes (root first) on the paths
+// to the given hex-nibble keys — the lean node set a strict verifier needs. Descent is
+// driven by remaining key length, so mixed-length account (64) and storage (128) keys work.
+func (t *Trie) WitnessNodesForKeys(hexKeys [][]byte) ([][]byte, error) {
+	hasher := newHasher(t.valueNodesRLPEncoded)
+	defer returnHasherToPool(hasher)
+	seen := make(map[string]struct{})
+	var out [][]byte
+	add := func(n Node) error {
+		rlp, err := hasher.hashChildren(n, 0)
+		if err != nil {
+			return err
+		}
+		if _, ok := seen[string(rlp)]; ok {
+			return nil
+		}
+		c := common.Copy(rlp)
+		// c is appended to out and never mutated, so alias it as the set key
+		// instead of allocating a second copy of the same bytes.
+		seen[common.ToStringZeroCopy(c)] = struct{}{}
+		out = append(out, c)
+		return nil
+	}
+	addIfStructural := func(n Node) error {
+		switch n.(type) {
+		case *FullNode, *ShortNode:
+			return add(n)
+		}
+		return nil
+	}
+	for _, key := range hexKeys {
+		tn := t.RootNode
+		k := key
+		for tn != nil {
+			switch n := tn.(type) {
+			case *ShortNode:
+				if err := add(n); err != nil {
+					return nil, err
+				}
+				nKey := n.Key
+				if len(nKey) > 0 && nKey[len(nKey)-1] == 16 {
+					nKey = nKey[:len(nKey)-1]
+				}
+				if len(k) < len(nKey) || !bytes.Equal(nKey, k[:len(nKey)]) {
+					// Key diverges inside this extension: include the node behind it so a
+					// strict verifier can descend the exclusion/collapse branch.
+					if err := addIfStructural(n.Val); err != nil {
+						return nil, err
+					}
+					tn = nil
+				} else {
+					tn = n.Val
+					k = k[len(nKey):]
+				}
+			case *FullNode:
+				if err := add(n); err != nil {
+					return nil, err
+				}
+				if len(k) == 0 {
+					tn = nil
+				} else {
+					tn = n.Children[k[0]]
+					k = k[1:]
+				}
+			case *AccountNode:
+				if len(k) == 0 {
+					tn = nil
+				} else {
+					tn = n.Storage
+				}
+			case ValueNode:
+				tn = nil
+			case HashNode, *HashNode:
+				tn = nil
+			default:
+				return nil, fmt.Errorf("witness: invalid node %T on key %x", tn, key)
+			}
+		}
+	}
+	return out, nil
 }
 
 func decodeRef(buf []byte) (Node, []byte, error) {
