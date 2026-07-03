@@ -2408,44 +2408,44 @@ type AggregatorRoTx struct {
 	_leakID uint64 // set only if TRACE_AGG=true
 }
 
-func (a *Aggregator) acquireVisibleFiles() (v *aggregatorVisible) {
+func (fs *fileSet) acquireVisibleFiles() (v *aggregatorVisible) {
 	// Load+Increment: is not atomic operation. Means: between them "existing last reader may End" (and close files)
 	// Means: must check that latest view didn't change
 	// Hazard pointer concept: https://github.com/facebook/folly/blob/main/folly/synchronization/Hazptr.h#L27C5-L27C22
 	for {
-		v = a.visible.Load()
+		v = fs.visible.Load()
 		v.refcnt.Add(1)
-		if a.visible.Load() == v {
+		if fs.visible.Load() == v {
 			break
 		}
-		a.releaseVisibleFiles(v) // mis-pinned a superseded generation; drop and retry
+		fs.releaseVisibleFiles(v) // mis-pinned a superseded generation; drop and retry
 	}
 	return v
 }
 
 // releaseVisibleFiles drops a pin taken by acquireVisibleFiles. Last reader: delete files
-func (a *Aggregator) releaseVisibleFiles(v *aggregatorVisible) {
+func (fs *fileSet) releaseVisibleFiles(v *aggregatorVisible) {
 	if v.refcnt.Add(-1) == 0 {
-		a.reclaimRetired()
+		fs.reclaimRetired()
 	}
 }
 
 // reclaimRetiredLocked oldest-first traverse linked-list of visibleFiles objects while `refcnt == 0`
 // collecting retired files for physical delete. Physical delete happen out of `dirtyFilesLock`
-func (a *Aggregator) reclaimRetiredLocked() (toDelete []*FilesItem) {
-	cur := a.visible.Load()
-	for h := a.oldestVisible; h != cur && h.refcnt.Load() == 0; h = h.next {
+func (fs *fileSet) reclaimRetiredLocked() (toDelete []*FilesItem) {
+	cur := fs.visible.Load()
+	for h := fs.oldestVisible; h != cur && h.refcnt.Load() == 0; h = h.next {
 		toDelete = append(toDelete, h.retired...)
 		h.retired = nil
-		a.oldestVisible = h.next
+		fs.oldestVisible = h.next
 	}
 	return toDelete
 }
 
-func (a *Aggregator) reclaimRetired() {
-	a.dirtyFilesLock.Lock()
-	toDelete := a.reclaimRetiredLocked()
-	a.dirtyFilesLock.Unlock()
+func (fs *fileSet) reclaimRetired() {
+	fs.dirtyFilesLock.Lock()
+	toDelete := fs.reclaimRetiredLocked()
+	fs.dirtyFilesLock.Unlock()
 	closeAndRemoveFiles(toDelete)
 }
 
