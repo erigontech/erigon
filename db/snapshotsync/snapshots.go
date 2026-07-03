@@ -494,6 +494,8 @@ func (s *DirtySegment) openIdx(dir string, dirEntries []string) (err error) {
 	return nil
 }
 
+type DirtyFiles = []*btree.BTreeG[*DirtySegment]
+
 type VisibleSegments []*VisibleSegment
 
 func (s VisibleSegments) BeginRo() *RoTx {
@@ -551,8 +553,8 @@ type RoSnapshots struct {
 	types []snaptype.Type //immutable
 	enums []snaptype.Enum //immutable
 
-	dirtyLock  sync.RWMutex                   // guards `dirty` field
-	dirty      []*btree.BTreeG[*DirtySegment] // ordered map `type.Enum()` -> DirtySegments
+	dirtyLock  sync.RWMutex // guards `dirty` field
+	dirty      DirtyFiles   // ordered map `type.Enum()` -> DirtySegments
 	visible    atomic.Pointer[snapshotVisible]
 	recalcLock sync.Mutex // serializes recalcVisibleFiles publishers
 
@@ -625,7 +627,7 @@ func newRoSnapshots(cfg ethconfig.BlocksFreezing, snapDir string, types []snapty
 	snCfg := snapcfg.KnownCfgOrDevnet(cfg.ChainName)
 	s := &RoSnapshots{dir: snapDir, cfg: cfg, snCfg: snCfg, logger: logger,
 		types: types, enums: enums,
-		dirty:             make([]*btree.BTreeG[*DirtySegment], snaptype.MaxEnum),
+		dirty:             make(DirtyFiles, snaptype.MaxEnum),
 		alignMin:          alignMin,
 		operators:         map[snaptype.Enum]*retireOperators{},
 		segmentsMinByType: make(map[snaptype.Enum]*atomic.Uint64),
@@ -813,8 +815,8 @@ func (s *RoSnapshots) EnableMadvWillNeed() *RoSnapshots {
 	return s
 }
 
-func RecalcVisibleSegments(dirtySegments *btree.BTreeG[*DirtySegment]) []*VisibleSegment {
-	newVisibleSegments := make([]*VisibleSegment, 0, dirtySegments.Len())
+func RecalcVisibleSegments(dirtySegments *btree.BTreeG[*DirtySegment]) VisibleSegments {
+	newVisibleSegments := make(VisibleSegments, 0, dirtySegments.Len())
 	dirtySegments.Walk(func(segments []*DirtySegment) bool {
 		for _, sn := range segments {
 			if sn.canDelete.Load() {
@@ -904,7 +906,7 @@ func (s *RoSnapshots) recalcVisibleFiles(alignMin bool) {
 		minMaxVisibleBlock := slices.Min(maxVisibleBlocks)
 		for _, t := range s.enums {
 			if minMaxVisibleBlock == 0 {
-				visible[t] = []*VisibleSegment{}
+				visible[t] = VisibleSegments{}
 			} else {
 				visibleSegmentsOfType := visible[t]
 				for i, seg := range visibleSegmentsOfType {
@@ -1688,7 +1690,7 @@ func (s *RoSnapshots) ViewSingleFile(t snaptype.Type, blockNum uint64) (segment 
 	return nil, false, noop
 }
 
-func (v *View) Segments(t snaptype.Type) []*VisibleSegment {
+func (v *View) Segments(t snaptype.Type) VisibleSegments {
 	return v.segments[t.Enum()].Segments
 }
 
