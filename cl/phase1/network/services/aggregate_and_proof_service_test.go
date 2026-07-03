@@ -219,6 +219,26 @@ func TestAggregateAndProofRejectsNextEpochBeforeForkchoiceHasSeenIt(t *testing.T
 	require.Contains(t, err.Error(), "epoch is not in previous or current epoch")
 }
 
+func TestAggregateAndProofRejectsBeyondNextEpochDespiteForkchoiceHavingSeenIt(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	defer ctrl.Finish()
+
+	agg, s := getAggregateAndProofAndState(t)
+	beyondNextEpochSlot := s.Slot() + 2*clparams.MainnetBeaconConfig.SlotsPerEpoch
+	beyondNextEpoch := beyondNextEpochSlot / clparams.MainnetBeaconConfig.SlotsPerEpoch
+	agg.SignedAggregateAndProof.Message.Aggregate.Data.Slot = beyondNextEpochSlot
+	agg.SignedAggregateAndProof.Message.Aggregate.Data.Source.Epoch = beyondNextEpoch - 1
+	agg.SignedAggregateAndProof.Message.Aggregate.Data.Target.Epoch = beyondNextEpoch
+
+	aggService, sd, fcu := setupAggregateAndProofTest(t)
+	sd.OnHeadState(s)
+	fcu.HighestSeenVal = beyondNextEpochSlot
+
+	err := aggService.ProcessMessage(context.Background(), nil, agg)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "epoch is not in previous or current epoch")
+}
+
 func TestAggregateAndProofAncestorMissing(t *testing.T) {
 	ctrl := gomock.NewController(t)
 	defer ctrl.Finish()
