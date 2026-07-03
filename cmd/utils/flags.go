@@ -1117,9 +1117,9 @@ var (
 		Usage:   "Enables blazing fast eth_getProof for executed block",
 		Aliases: []string{"experimental.commitment-history", "prune.experimental.include-commitment-history"},
 	}
-	CommitmentHistoryDistanceFlag = cli.Uint64Flag{
+	CommitmentHistoryDistanceFlag = cli.StringFlag{
 		Name:  "prune.commitment-history.distance",
-		Usage: "Keep commitment history only for the latest N blocks. Older snapshots are skipped at download time. 0 (default) keeps everything. Requires --prune.include-commitment-history.",
+		Usage: `Keep commitment history only for the latest N blocks, or "keep-all" to keep everything. Older snapshots are skipped at download time. Unset (default) keeps everything. Requires --prune.include-commitment-history.`,
 	}
 	AlwaysGenerateChangesetsFlag = cli.BoolFlag{
 		Name:  "experimental.always-generate-changesets",

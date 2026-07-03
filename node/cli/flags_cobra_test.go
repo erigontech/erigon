@@ -22,6 +22,7 @@ import (
 	"github.com/spf13/pflag"
 	"github.com/stretchr/testify/require"
 
+	"github.com/erigontech/erigon/cmd/utils"
 	"github.com/erigontech/erigon/db/kv/prune"
 	"github.com/erigontech/erigon/node/ethconfig"
 )
@@ -77,6 +78,30 @@ func TestApplyFlagsForEthConfigCobra_BlocksDistanceValues(t *testing.T) {
 			cfg := &ethconfig.Config{}
 			ApplyFlagsForEthConfigCobra(flags, cfg)
 			require.Equal(t, tc.want, cfg.Prune.Blocks)
+		})
+	}
+}
+
+func TestApplyFlagsForEthConfigCobra_CommitmentHistoryDistanceValues(t *testing.T) {
+	cases := []struct {
+		name string
+		flag string
+		want prune.BlockAmount
+	}{
+		{name: "alias keep-all", flag: "keep-all", want: prune.KeepAllBlocksPruneMode},
+		{name: "finite numeric", flag: "100000", want: prune.Distance(100_000)},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			flags := pflag.NewFlagSet("test", pflag.ContinueOnError)
+			flags.String(PruneModeFlag.Name, PruneModeFlag.Value, PruneModeFlag.Usage)
+			flags.String(utils.CommitmentHistoryDistanceFlag.Name, utils.CommitmentHistoryDistanceFlag.Value, utils.CommitmentHistoryDistanceFlag.Usage)
+			require.NoError(t, flags.Set(PruneModeFlag.Name, "archive"))
+			require.NoError(t, flags.Set(utils.CommitmentHistoryDistanceFlag.Name, tc.flag))
+
+			cfg := &ethconfig.Config{}
+			ApplyFlagsForEthConfigCobra(flags, cfg)
+			require.Equal(t, tc.want, cfg.Prune.CommitmentHistory)
 		})
 	}
 }

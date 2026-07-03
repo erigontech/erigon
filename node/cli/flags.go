@@ -252,7 +252,10 @@ func applyRemainingEthFlags(ctx *cli.Context, cfg *ethconfig.Config, logger log.
 		cfg.PersistReceiptsCacheV2 = true
 	}
 
-	commitmentHistoryOlder := ctx.Uint64(utils.CommitmentHistoryDistanceFlag.Name)
+	commitmentHistoryOlder, err := prune.ParseCommitmentHistoryDistance(ctx.String(utils.CommitmentHistoryDistanceFlag.Name))
+	if err != nil {
+		utils.Fatalf("%v", err)
+	}
 	mode, err := prune.FromCli(ctx.String(PruneModeFlag.Name), distance, blockDistance, commitmentHistoryOlder)
 	if err != nil {
 		utils.Fatalf(fmt.Sprintf("error while parsing mode: %v", err))
@@ -340,7 +343,10 @@ func ApplyFlagsForEthConfigCobra(f *pflag.FlagSet, cfg *ethconfig.Config) {
 		utils.Fatalf("%v", err)
 	}
 
-	commitmentHistoryOlder := cobraUint64ValueOrDefault(f, utils.CommitmentHistoryDistanceFlag.Name, 0)
+	commitmentHistoryOlder, err := prune.ParseCommitmentHistoryDistance(cobraStringValueOrDefault(f, utils.CommitmentHistoryDistanceFlag.Name, ""))
+	if err != nil {
+		utils.Fatalf("%v", err)
+	}
 
 	mode, err := prune.FromCli(pruneMode, pruneDistance, pruneBlockDistance, commitmentHistoryOlder)
 	if err != nil {
@@ -394,17 +400,6 @@ func cobraBoolValueOrDefault(f *pflag.FlagSet, name string, fallback bool) bool 
 		return fallback
 	}
 	v, err := f.GetBool(name)
-	if err != nil {
-		utils.Fatalf("failed to read --%s: %v", name, err)
-	}
-	return v
-}
-
-func cobraUint64ValueOrDefault(f *pflag.FlagSet, name string, fallback uint64) uint64 {
-	if f.Lookup(name) == nil {
-		return fallback
-	}
-	v, err := f.GetUint64(name)
 	if err != nil {
 		utils.Fatalf("failed to read --%s: %v", name, err)
 	}
