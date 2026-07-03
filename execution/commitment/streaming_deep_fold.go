@@ -30,7 +30,12 @@ import (
 	"github.com/erigontech/erigon/execution/commitment/nibbles"
 )
 
+// errStorageBaseNotBranch: no on-disk branch exactly at the account prefix (its
+// storage top is a deeper extension); callers fall back to streaming recursion.
+var errStorageBaseNotBranch = errors.New("streaming: storage base has no branch at account prefix")
+
 // Seed the base from the real on-disk branch, not a hand-seed, so untouched first-nibble subtrees survive instead of dropping and diverging the root from the sequential trie.
+
 func unfoldStorageBase(base *HexPatriciaHashed, accPrefix []byte) error {
 	d := int16(len(accPrefix))
 	copy(base.currentKey[:], accPrefix)
@@ -46,8 +51,12 @@ func unfoldStorageBase(base *HexPatriciaHashed, accPrefix []byte) error {
 	if err != nil {
 		return err
 	}
+	if len(branch) == 0 {
+		return errStorageBaseNotBranch
+	}
+	// A stored branch is always >= 4 bytes (touchMap+afterMap); a shorter non-empty read is corrupt, not missing.
 	if len(branch) < 4 {
-		return nil
+		return fmt.Errorf("unfoldStorageBase: corrupt branch record at %x: %d bytes", accPrefix, len(branch))
 	}
 	base.branchBefore[0] = true
 	return base.decodeBranchIntoRow(0, d+1, branch[2:], false)
@@ -87,11 +96,15 @@ func dfsSubtreeDeep(w *HexPatriciaHashed, node *prefixNode, path []byte, storage
 
 	if isDeepStorageAccount(node, len(path)) {
 		sr, err := storageRoot(node, path)
-		if err != nil {
+		if err == nil {
+			setAccountStorageRoot(w, path, sr)
+			return nil
+		}
+		if !errors.Is(err, errStorageBaseNotBranch) {
 			return fmt.Errorf("storageRoot: %w", err)
 		}
-		setAccountStorageRoot(w, path, sr)
-		return nil
+		// fall through to normal streaming recursion, which recovers the untouched
+		// on-disk siblings via per-key unfolds
 	}
 
 	childIdx := 0
