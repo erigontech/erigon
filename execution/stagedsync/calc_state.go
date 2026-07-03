@@ -2,6 +2,7 @@ package stagedsync
 
 import (
 	"fmt"
+	"math"
 
 	"github.com/holiman/uint256"
 
@@ -338,6 +339,26 @@ func finalChange[T any](changes []T) (T, bool) {
 	return changes[len(changes)-1], true
 }
 
+// hasTxIndex is the BAL change-element constraint: every change
+// (*BalanceChange/*NonceChange/*CodeChange/*StorageChange) carries the tx index
+// within the block at which it was written.
+type hasTxIndex interface{ GetIndex() uint32 }
+
+// finalChangeUpTo returns the latest change whose tx index is ≤ maxTxIndex — the
+// field's value as of that point in the block, for a mid-block (step-boundary)
+// checkpoint fold. Indices are strictly increasing (BlockAccessList.Validate), so
+// a reverse scan stops at the first in-range element. maxTxIndex == MaxUint32
+// makes this equivalent to finalChange (whole block).
+func finalChangeUpTo[T hasTxIndex](changes []T, maxTxIndex uint32) (T, bool) {
+	for i := len(changes) - 1; i >= 0; i-- {
+		if changes[i].GetIndex() <= maxTxIndex {
+			return changes[i], true
+		}
+	}
+	var zero T
+	return zero, false
+}
+
 // LoadFromBAL populates calcState from an EIP-7928 Block Access List rather
 // than the per-tx VersionedWrites stream: it takes each field's block-end value
 // and feeds the existing ApplyWrites. The BAL carries no deletion marker, so an
@@ -346,26 +367,35 @@ func finalChange[T any](changes []T) (T, bool) {
 // merged, a touched all-zero account is marked Deleted so FlushToUpdates removes
 // its leaf instead of writing a zero-valued one. Storage reads are ignored.
 func (cs *calcState) LoadFromBAL(bal types.BlockAccessList, emptyRemoval, isAura bool) {
+	cs.LoadFromBALUpTo(bal, math.MaxUint32, emptyRemoval, isAura)
+}
+
+// LoadFromBALUpTo is LoadFromBAL restricted to changes at tx index ≤ maxTxIndex,
+// i.e. the state as of that point within the block. Used to fold a block up to a
+// mid-block step boundary (checkpoint) from the same per-tx BAL, then fold the
+// remainder — the BAL carries every change's tx index, so no re-execution is
+// needed. maxTxIndex == math.MaxUint32 is the whole block (== LoadFromBAL).
+func (cs *calcState) LoadFromBALUpTo(bal types.BlockAccessList, maxTxIndex uint32, emptyRemoval, isAura bool) {
 	var writes state.VersionedWrites
 	for _, ac := range bal {
 		addr := ac.Address
-		if bc, ok := finalChange(ac.BalanceChanges); ok {
+		if bc, ok := finalChangeUpTo(ac.BalanceChanges, maxTxIndex); ok {
 			writes = append(writes, &state.VersionedWrite{
 				Address: addr, Path: state.BalancePath, Val: bc.Value,
 			})
 		}
-		if nc, ok := finalChange(ac.NonceChanges); ok {
+		if nc, ok := finalChangeUpTo(ac.NonceChanges, maxTxIndex); ok {
 			writes = append(writes, &state.VersionedWrite{
 				Address: addr, Path: state.NoncePath, Val: nc.Value,
 			})
 		}
-		if cc, ok := finalChange(ac.CodeChanges); ok {
+		if cc, ok := finalChangeUpTo(ac.CodeChanges, maxTxIndex); ok {
 			writes = append(writes, &state.VersionedWrite{
 				Address: addr, Path: state.CodePath, Val: cc.Bytecode,
 			})
 		}
 		for _, sc := range ac.StorageChanges {
-			if chg, ok := finalChange(sc.Changes); ok {
+			if chg, ok := finalChangeUpTo(sc.Changes, maxTxIndex); ok {
 				writes = append(writes, &state.VersionedWrite{
 					Address: addr, Path: state.StoragePath, Key: sc.Slot, Val: chg.Value,
 				})

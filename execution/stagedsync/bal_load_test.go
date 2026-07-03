@@ -54,6 +54,43 @@ func TestFinalChange(t *testing.T) {
 	assert.Equal(t, uint64(90), ascending.Value.Uint64())
 }
 
+// finalChangeUpTo returns the field's value as of a mid-block tx index — the
+// primitive that lets the fold checkpoint at a step boundary from the per-tx BAL.
+func TestFinalChangeUpTo(t *testing.T) {
+	t.Parallel()
+
+	changes := []*types.BalanceChange{
+		{Index: 0, Value: *uint256.NewInt(10)},
+		{Index: 2, Value: *uint256.NewInt(20)},
+		{Index: 9, Value: *uint256.NewInt(90)},
+	}
+
+	if _, ok := finalChangeUpTo([]*types.BalanceChange{{Index: 5, Value: *uint256.NewInt(1)}}, 4); ok {
+		t.Fatal("ceiling below the only change must return ok=false")
+	}
+
+	// Exactly at, and between, change indices → latest change ≤ ceiling.
+	at2, ok := finalChangeUpTo(changes, 2)
+	require.True(t, ok)
+	assert.Equal(t, uint64(20), at2.Value.Uint64(), "ceiling==Index returns that change")
+
+	between, ok := finalChangeUpTo(changes, 5)
+	require.True(t, ok)
+	assert.Equal(t, uint64(20), between.Value.Uint64(), "ceiling between changes returns the earlier one")
+
+	// At/above the last index → whole-block value (== finalChange).
+	whole, ok := finalChangeUpTo(changes, 9)
+	require.True(t, ok)
+	assert.Equal(t, uint64(90), whole.Value.Uint64())
+	all, ok := finalChangeUpTo(changes, ^uint32(0))
+	require.True(t, ok)
+	assert.Equal(t, uint64(90), all.Value.Uint64(), "MaxUint32 ceiling == finalChange")
+
+	if _, ok := finalChangeUpTo([]*types.BalanceChange(nil), 100); ok {
+		t.Fatal("finalChangeUpTo on an empty list returned ok=true")
+	}
+}
+
 // TestLoadFromBAL_MatchesApplyWrites is a differential test:
 // loading calcState from a BAL must produce exactly the same accumulated
 // state as feeding the equivalent per-tx VersionedWrites stream through
