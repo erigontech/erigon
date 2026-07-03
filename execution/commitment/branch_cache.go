@@ -92,6 +92,12 @@ type BranchCache struct {
 	tailCap uint32
 	tailMu  sync.Mutex
 
+	// maxDepth is the resident trunk depth for this cache (both the account trunk
+	// and every pinned storage trunk), chosen from the active-instance count at
+	// construction. closed guards the single paired active-count decrement.
+	maxDepth uint8
+	closed   atomic.Bool
+
 	// trunkDisabled (env BRANCH_CACHE_TRUNK_DISABLE) routes depth-1-4 account
 	// branches back to the LRU tail instead of the resident account trunk — a
 	// runtime A/B switch to isolate whether the resident trunk is the source
@@ -174,6 +180,13 @@ type trunk struct {
 	d3   atomic.Pointer[[4096]atomic.Pointer[branchCacheEntry]]
 	d4   atomic.Pointer[[65536]atomic.Pointer[branchCacheEntry]]
 	deep *maphash.Map[*branchCacheEntry]
+
+	// maxDepth caps which dense tiers this trunk will allocate: branches deeper
+	// than it route to deep (storage) or the LRU tail (account) instead. Set from
+	// the active-BranchCache count so a process with a few caches (production)
+	// keeps the full depth-4 residency while one with many (the test suite) keeps
+	// each trunk shallow. d0/d1 are always resident (tiny, always reached).
+	maxDepth uint8
 }
 
 func (t *trunk) d2For(forWrite bool) *[256]atomic.Pointer[branchCacheEntry] {
@@ -194,7 +207,7 @@ func (t *trunk) d3For(forWrite bool) *[4096]atomic.Pointer[branchCacheEntry] {
 	if p := t.d3.Load(); p != nil {
 		return p
 	}
-	if !forWrite {
+	if !forWrite || t.maxDepth < 3 {
 		return nil
 	}
 	p := &[4096]atomic.Pointer[branchCacheEntry]{}
@@ -208,7 +221,7 @@ func (t *trunk) d4For(forWrite bool) *[65536]atomic.Pointer[branchCacheEntry] {
 	if p := t.d4.Load(); p != nil {
 		return p
 	}
-	if !forWrite {
+	if !forWrite || t.maxDepth < 4 {
 		return nil
 	}
 	p := &[65536]atomic.Pointer[branchCacheEntry]{}
@@ -218,16 +231,36 @@ func (t *trunk) d4For(forWrite bool) *[65536]atomic.Pointer[branchCacheEntry] {
 	return p
 }
 
-// newAccountTrunk builds the global account trunk: dense depth-4 fixed array,
-// no deep overflow (account depth 5+ uses the LRU tail).
-func newAccountTrunk() *trunk {
-	return &trunk{}
+// newAccountTrunk builds the global account trunk: dense fixed arrays up to
+// maxDepth, no deep overflow (account depth past the resident tiers uses the
+// LRU tail).
+func newAccountTrunk(maxDepth uint8) *trunk {
+	return &trunk{maxDepth: maxDepth}
 }
 
 // newStorageTrunk builds a per-contract storage trunk: deep overflow for
-// storage depth 4+, no depth-4 fixed array.
-func newStorageTrunk() *trunk {
-	return &trunk{deep: maphash.NewMap[*branchCacheEntry]()}
+// storage depth past the resident tiers, no depth-4 fixed array.
+func newStorageTrunk(maxDepth uint8) *trunk {
+	return &trunk{maxDepth: maxDepth, deep: maphash.NewMap[*branchCacheEntry]()}
+}
+
+// Adaptive trunk depth: a process with a handful of BranchCaches (production)
+// keeps full depth-4 residency; one that spins up many (the test suite) keeps
+// each trunk shallow so their fixed-array tiers don't sum past the memory
+// envelope. Depth is chosen once per cache from the live instance count.
+const (
+	trunkDepthFull              = 4
+	trunkDepthShallow           = 2
+	trunkInstanceDepthThreshold = 10
+)
+
+var activeBranchCaches atomic.Int64
+
+func adaptiveTrunkDepth(active int64) uint8 {
+	if active <= trunkInstanceDepthThreshold {
+		return trunkDepthFull
+	}
+	return trunkDepthShallow
 }
 
 // slot returns the fixed-array slot for a nibble path of length 0-3 (and length
@@ -283,16 +316,26 @@ func NewBranchCache(tailCapacity int) *BranchCache {
 	if tailCapacity <= 0 {
 		panic(fmt.Sprintf("BranchCache: tailCapacity must be positive, got %d", tailCapacity))
 	}
+	maxDepth := adaptiveTrunkDepth(activeBranchCaches.Add(1))
 	bc := &BranchCache{
 		tailCap:       uint32(tailCapacity),
-		accountTrunk:  newAccountTrunk(),
+		maxDepth:      maxDepth,
+		accountTrunk:  newAccountTrunk(maxDepth),
 		trunkDisabled: os.Getenv("BRANCH_CACHE_TRUNK_DISABLE") != "",
 	}
 	// Before any unwind every entry's txN is at/below the floor, so the epoch
 	// check never strands a valid entry.
 	bc.coh.Init()
-	log.Info("[branch-cache] init", "trunkEnabled", !bc.trunkDisabled, "tailCap", tailCapacity)
+	log.Info("[branch-cache] init", "trunkEnabled", !bc.trunkDisabled, "tailCap", tailCapacity, "trunkDepth", maxDepth)
 	return bc
+}
+
+// Close drops this cache from the active-instance count so later BranchCaches
+// size their trunk depth against real concurrency. Idempotent.
+func (c *BranchCache) Close() {
+	if c.closed.CompareAndSwap(false, true) {
+		activeBranchCaches.Add(-1)
+	}
 }
 
 // tailForWrite returns the LRU tail, allocating it on first use so a cache whose
@@ -384,7 +427,7 @@ func (c *BranchCache) storageRoute(prefix []byte, create bool) (st *trunk, acct 
 	if !create {
 		return nil, packed, stor, false
 	}
-	st = newStorageTrunk()
+	st = newStorageTrunk(c.maxDepth)
 	c.pinnedForWrite().Set(packed, st)
 	return st, packed, stor, true
 }

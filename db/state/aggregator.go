@@ -632,9 +632,12 @@ func (a *Aggregator) Close() {
 	}
 	a.wg.Wait()
 
-	// A closed Aggregator may linger referenced; release the cached branch data eagerly.
+	// A closed Aggregator may linger referenced; release the cached branch data
+	// eagerly and drop this cache from the active-instance count so later
+	// BranchCaches size their trunk depth against real concurrency.
 	if cd := a.d[kv.CommitmentDomain]; cd != nil && cd.branchCache != nil {
 		cd.branchCache.Clear()
+		cd.branchCache.Close()
 	}
 
 	a.dirtyFilesLock.Lock()

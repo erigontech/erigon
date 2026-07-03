@@ -26,6 +26,7 @@ import (
 	lru "github.com/hashicorp/golang-lru/v2"
 
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/cachebudget"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/common/maphash"
 	"github.com/erigontech/erigon/execution/cache/coherence"
@@ -175,6 +176,11 @@ type CodeCache struct {
 
 	addrCapacityB datasize.ByteSize // capacity in bytes
 	codeCapacityB datasize.ByteSize // capacity in bytes
+
+	// reservedBytes is what NewCodeCache took from the shared envelope; closed
+	// guards the single paired Release so a double Close can't over-return it.
+	reservedBytes int64
+	closed        atomic.Bool
 }
 
 // isStale reports whether an entry stamped (txNum, epoch) reflects dead-fork
@@ -238,6 +244,11 @@ func NewCodeCache(codeCapacityBytes, addrCapacityBytes datasize.ByteSize) *CodeC
 	if err != nil {
 		panic(err)
 	}
+	// Account the code-residency budget in the shared envelope so the code cache
+	// draws down the same pool as the state caches. Take is unconditional (the
+	// code slot array is modest and the cache must never be born unusable);
+	// returned by Close.
+	cachebudget.Global.Take(int64(codeCapacityBytes))
 	// Byte budget → entry-count cap for the two bytes layers; the size-only
 	// layer is entry-counted directly. Floor at 1 so tiny (test) budgets still
 	// construct a valid, evicting LRU.
@@ -267,6 +278,7 @@ func NewCodeCache(codeCapacityBytes, addrCapacityBytes datasize.ByteSize) *CodeC
 		codeSizeCapEntries: DefaultCodeSizeCacheEntries,
 		addrCapacityB:      addrCapacityBytes,
 		codeCapacityB:      codeCapacityBytes,
+		reservedBytes:      int64(codeCapacityBytes),
 	}
 	// OnEvict fires on capacity-driven LRU eviction and on explicit Remove, so
 	// the byte/entry counters follow residency without a separate scan.
@@ -535,6 +547,13 @@ func (c *CodeCache) Clear() {
 	c.codeHashCodeSize.Store(0)
 	c.codeSizeEntries.Store(0)
 	c.coh.Init()
+}
+
+// Close returns this cache's reservation to the shared envelope. Idempotent.
+func (c *CodeCache) Close() {
+	if c.closed.CompareAndSwap(false, true) {
+		cachebudget.Global.Release(c.reservedBytes)
+	}
 }
 
 // Unwind invalidates entries reflecting dead-fork state. Code deployed on the

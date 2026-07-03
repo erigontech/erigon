@@ -85,21 +85,13 @@ func stateCacheModeFromEnv() Mode {
 	}
 }
 
-// newDomainCacheBytes constructs a DomainCache where the entry-count cap
-// is derived from the byte budget using the supplied per-domain avg.
+// newDomainCacheBytes constructs a DomainCache whose growth ceiling is derived
+// from the byte budget using the supplied per-domain avg. It jump-grows from a
+// small start into the shared envelope on demand, so a domain with a small
+// working set (a test fixture) never pre-commits the full budget.
 func newDomainCacheBytes(capacityBytes datasize.ByteSize, avgBytes uint32, mode Mode) *DomainCache {
-	capacityEntries := uint32(uint64(capacityBytes) / uint64(avgBytes))
-	if capacityEntries < 1024 {
-		capacityEntries = 1024
-	}
-	// Absolute safety ceiling on the eagerly-allocated slot array; must stay
-	// above the configured byte budgets' entry counts (Account 1 GB / ~96 B ≈
-	// 11.2M) or it silently caps residency below the budget.
-	if capacityEntries > 1<<24 {
-		capacityEntries = 1 << 24
-	}
 	return &DomainCache{
-		GenericCache: newGenericCacheEntries(capacityBytes, capacityEntries, func(v []byte) int { return len(v) }, mode),
+		GenericCache: NewGenericCacheWithAvg(capacityBytes, avgBytes, func(v []byte) int { return len(v) }, mode),
 	}
 }
 
@@ -273,6 +265,16 @@ func (c *StateCache) Clear() {
 	for _, cache := range c.caches {
 		if cache != nil {
 			cache.Clear()
+		}
+	}
+}
+
+// Close releases every sub-cache's slot in the shared memory envelope so later
+// caches size against real concurrency. Idempotent.
+func (c *StateCache) Close() {
+	for _, cache := range c.caches {
+		if cache != nil {
+			cache.Close()
 		}
 	}
 }

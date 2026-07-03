@@ -23,7 +23,7 @@ import (
 
 	"github.com/elastic/go-freelru"
 
-	"github.com/erigontech/erigon/common/estimate"
+	"github.com/erigontech/erigon/common/cachebudget"
 )
 
 const (
@@ -37,45 +37,9 @@ const (
 	tailEntryBytes = 512
 )
 
-// tailBudget caps the total resident memory of every BranchCache LRU tail in the
-// process to a fraction of the memory actually available (system RAM, cgroup
-// limit, or GOMEMLIMIT — whichever is lowest). A single production cache draws
-// the whole budget and grows to its full cap; a process that spins up thousands
-// of ephemeral caches (the execution-test suite) has them share the budget, so
-// each stays small — with no test-specific code.
-type tailBudget struct {
-	limit int64
-	used  atomic.Int64
-}
-
-var globalTailBudget = &tailBudget{limit: int64(estimate.TotalMemory() / tailBudgetDivisor)}
-
-// tailBudgetDivisor keeps the whole-process tail budget to a small fraction of
-// available memory; the tail is a cache, so undersizing only costs hit rate.
-const tailBudgetDivisor = 32
-
-// reserve grabs n bytes if the budget has room, returning false when full.
-func (b *tailBudget) reserve(n int64) bool {
-	for {
-		used := b.used.Load()
-		if used+n > b.limit {
-			return false
-		}
-		if b.used.CompareAndSwap(used, used+n) {
-			return true
-		}
-	}
-}
-
-func (b *tailBudget) release(n int64) {
-	if n > 0 {
-		b.used.Add(-n)
-	}
-}
-
 // tailLRU is the BranchCache LRU tail. It wraps a sharded freelru that is
 // jump-resized (allocate larger, copy the live entries over) as it fills,
-// bounded by the shared tailBudget and a per-cache max. Reads and writes take no
+// bounded by the shared cachebudget envelope and a per-cache max. Reads and writes take no
 // tail-level lock — they load the current freelru atomically and rely on its own
 // per-shard locking; the resize mutex is held only during the rare grow. A write
 // racing a resize may land in the freelru about to be replaced and be dropped,
@@ -96,7 +60,7 @@ func newTailLRU(maxCapacity uint32) *tailLRU {
 	}
 	t := &tailLRU{maxCap: maxCapacity}
 	t.reserved = int64(start) * tailEntryBytes
-	globalTailBudget.reserve(t.reserved) // initial slice is small; take it unconditionally
+	cachebudget.Global.Take(t.reserved) // initial slice is small; take it unconditionally
 	t.curCap = start
 	t.cur.Store(newTailShards(start))
 	return t
@@ -140,7 +104,7 @@ func (t *tailLRU) maybeGrow() {
 		newCap = t.maxCap
 	}
 	delta := int64(newCap-t.curCap) * tailEntryBytes
-	if !globalTailBudget.reserve(delta) {
+	if !cachebudget.Global.Reserve(delta) {
 		return
 	}
 	next := newTailShards(newCap)
@@ -167,7 +131,7 @@ func (t *tailLRU) reset() {
 	if start > t.maxCap {
 		start = t.maxCap
 	}
-	globalTailBudget.release(t.reserved - int64(start)*tailEntryBytes)
+	cachebudget.Global.Release(t.reserved - int64(start)*tailEntryBytes)
 	t.reserved = int64(start) * tailEntryBytes
 	t.curCap = start
 	t.cur.Store(newTailShards(start))
