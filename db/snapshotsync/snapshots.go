@@ -1025,41 +1025,6 @@ func (s *RoSnapshots) Files() (list []string) {
 	return
 }
 
-func (s *RoSnapshots) OpenFiles() (list []string) {
-	s.dirtyLock.RLock()
-	defer s.dirtyLock.RUnlock()
-
-	log.Warn("[dbg] OpenFiles")
-	defer log.Warn("[dbg] OpenFiles end")
-	for _, t := range s.types {
-		s.dirty[t.Enum()].Walk(func(segs []*DirtySegment) bool {
-			for _, seg := range segs {
-				if seg.Decompressor == nil {
-					continue
-				}
-				list = append(list, seg.FilePath())
-			}
-			return true
-		})
-	}
-
-	return list
-}
-
-// OpenList stops on optimistic=false, continue opening files on optimistic=true
-func (s *RoSnapshots) OpenList(fileNames []string, optimistic bool) error {
-	defer s.recalcVisibleFiles(s.alignMin)
-
-	s.dirtyLock.Lock()
-	defer s.dirtyLock.Unlock()
-
-	s.closeWhatNotInList(fileNames)
-	if err := s.openSegments(fileNames, true, optimistic); err != nil {
-		return err
-	}
-	return nil
-}
-
 func (s *RoSnapshots) InitSegments(fileNames []string) error {
 	if err := func() error {
 		s.dirtyLock.Lock()
@@ -1080,42 +1045,6 @@ func (s *RoSnapshots) InitSegments(fileNames []string) error {
 	}
 
 	return nil
-}
-
-func TypedSegments(dir string, types []snaptype.Type, allowGaps bool) (res []snaptype.FileInfo, missingSnapshots []Range, err error) {
-	list, err := snaptype.Segments(dir)
-
-	if err != nil {
-		return nil, missingSnapshots, err
-	}
-
-	for _, segType := range types {
-		{
-			var l []snaptype.FileInfo
-			var m []Range
-			for _, f := range list {
-				if f.Type.Enum() != segType.Enum() {
-					continue
-				}
-				l = append(l, f)
-			}
-
-			if allowGaps {
-				l = NoOverlaps(l)
-			} else {
-				l, m = NoGaps(NoOverlaps(l))
-			}
-
-			if len(m) > 0 {
-				lst := m[len(m)-1]
-				log.Debug("[snapshots] see gap", "type", segType, "from", lst.from)
-			}
-			res = append(res, l...)
-
-			missingSnapshots = append(missingSnapshots, m...)
-		}
-	}
-	return res, missingSnapshots, nil
 }
 
 // AllTypedSegments returns the raw, unfiltered list of segment files on disk
