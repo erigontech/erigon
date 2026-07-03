@@ -26,7 +26,6 @@ import (
 	"github.com/spf13/afero"
 
 	"github.com/erigontech/erigon/cl/beacon/beacon_router_configuration"
-	"github.com/erigontech/erigon/cl/beacon/beaconevents"
 	"github.com/erigontech/erigon/cl/beacon/synced_data"
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
@@ -136,14 +135,13 @@ type forkGraphDisk struct {
 	sszSnappyReader *snappy.Reader
 
 	rcfg       beacon_router_configuration.RouterConfiguration
-	emitter    *beaconevents.EventEmitter
 	syncedData synced_data.SyncedData
 
 	stateDumpLock sync.Mutex
 }
 
 // Initialize fork graph with a new state.
-func NewForkGraphDisk(anchorState *state.CachingBeaconState, syncedData synced_data.SyncedData, aferoFs afero.Fs, rcfg beacon_router_configuration.RouterConfiguration, emitter *beaconevents.EventEmitter) ForkGraph {
+func NewForkGraphDisk(anchorState *state.CachingBeaconState, syncedData synced_data.SyncedData, aferoFs afero.Fs, rcfg beacon_router_configuration.RouterConfiguration) ForkGraph {
 	farthestExtendingPath := make(map[common.Hash]bool)
 	anchorRoot, err := anchorState.BlockRoot()
 	if err != nil {
@@ -195,7 +193,6 @@ func NewForkGraphDisk(anchorState *state.CachingBeaconState, syncedData synced_d
 		anchorSlot:  anchorState.Slot(),
 		anchorRoot:  anchorRoot,
 		rcfg:        rcfg,
-		emitter:     emitter,
 		syncedData:  syncedData,
 	}
 	f.lowestAvailableBlock.Store(anchorState.Slot())
@@ -287,6 +284,9 @@ func (f *forkGraphDisk) AddChainSegment(signedBlock *cltypes.SignedBeaconBlock, 
 		if err != nil {
 			log.Debug("Could not create light client update", "err", err)
 		} else {
+			// The caller emits the corresponding light client events: fork graph
+			// methods run under the fork choice store's lock, where event sends
+			// must not happen (a stalled subscriber would wedge the store).
 			f.newestLightClientUpdate.Store(lcUpdate)
 			period := f.beaconCfg.SyncCommitteePeriod(newState.Slot())
 			_, hasPeriod := f.lightClientUpdates.Load(period)
@@ -294,25 +294,6 @@ func (f *forkGraphDisk) AddChainSegment(signedBlock *cltypes.SignedBeaconBlock, 
 				log.Info("Adding light client update", "period", period)
 				f.lightClientUpdates.Store(period, lcUpdate)
 			}
-			// light client events
-			f.emitter.State().SendLightClientFinalityUpdate(&beaconevents.LightClientFinalityUpdateData{
-				Version: block.Version().String(),
-				Data: cltypes.LightClientFinalityUpdate{
-					AttestedHeader:  lcUpdate.AttestedHeader,
-					FinalizedHeader: lcUpdate.FinalizedHeader,
-					FinalityBranch:  lcUpdate.FinalityBranch,
-					SyncAggregate:   lcUpdate.SyncAggregate,
-					SignatureSlot:   lcUpdate.SignatureSlot,
-				},
-			})
-			f.emitter.State().SendLightClientOptimisticUpdate(&beaconevents.LightClientOptimisticUpdateData{
-				Version: block.Version().String(),
-				Data: cltypes.LightClientOptimisticUpdate{
-					AttestedHeader: lcUpdate.AttestedHeader,
-					SyncAggregate:  lcUpdate.SyncAggregate,
-					SignatureSlot:  lcUpdate.SignatureSlot,
-				},
-			})
 		}
 	}
 

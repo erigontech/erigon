@@ -280,7 +280,9 @@ func (f *ForkChoiceStore) OnBlock(ctx context.Context, block *cltypes.SignedBeac
 	// not via a separate execution_payload_state. We still validate that the parent's
 	// payload was received (store.payloads check) via validateParentPayloadPath above.
 
+	lcUpdateBefore := f.forkGraph.NewestLightClientUpdate()
 	lastProcessedState, status, err := f.forkGraph.AddChainSegment(block, fullValidation)
+	f.queueLightClientEvents(lcUpdateBefore, block.Version().String())
 	if err != nil {
 		return err
 	}
@@ -486,6 +488,36 @@ func (f *ForkChoiceStore) OnBlock(ctx context.Context, block *cltypes.SignedBeac
 	}
 
 	return nil
+}
+
+// queueLightClientEvents emits the light client events for an update stored by
+// AddChainSegment. The fork graph runs under f.mu and must not send events
+// itself, so OnBlock detects a freshly stored update and queues the sends.
+func (f *ForkChoiceStore) queueLightClientEvents(before *cltypes.LightClientUpdate, version string) {
+	lcUpdate := f.forkGraph.NewestLightClientUpdate()
+	if lcUpdate == nil || lcUpdate == before {
+		return
+	}
+	f.queueEmit(func() {
+		f.emitters.State().SendLightClientFinalityUpdate(&beaconevents.LightClientFinalityUpdateData{
+			Version: version,
+			Data: cltypes.LightClientFinalityUpdate{
+				AttestedHeader:  lcUpdate.AttestedHeader,
+				FinalizedHeader: lcUpdate.FinalizedHeader,
+				FinalityBranch:  lcUpdate.FinalityBranch,
+				SyncAggregate:   lcUpdate.SyncAggregate,
+				SignatureSlot:   lcUpdate.SignatureSlot,
+			},
+		})
+		f.emitters.State().SendLightClientOptimisticUpdate(&beaconevents.LightClientOptimisticUpdateData{
+			Version: version,
+			Data: cltypes.LightClientOptimisticUpdate{
+				AttestedHeader: lcUpdate.AttestedHeader,
+				SyncAggregate:  lcUpdate.SyncAggregate,
+				SignatureSlot:  lcUpdate.SignatureSlot,
+			},
+		})
+	})
 }
 
 func (f *ForkChoiceStore) isDataAvailable(ctx context.Context, slot uint64, blockRoot common.Hash, blobKzgCommitments *solid.ListSSZ[*cltypes.KZGCommitment]) error {
