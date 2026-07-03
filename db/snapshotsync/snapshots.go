@@ -756,8 +756,8 @@ func (s *RoSnapshots) EnableMadvWillNeed() *RoSnapshots {
 	return s
 }
 
-func RecalcVisibleSegments(dirtySegments *btree.BTreeG[*DirtySegment]) []*VisibleSegment {
-	newVisibleSegments := make([]*VisibleSegment, 0, dirtySegments.Len())
+func RecalcVisibleSegments(dirtySegments *btree.BTreeG[*DirtySegment]) VisibleSegments {
+	newVisibleSegments := make(VisibleSegments, 0, dirtySegments.Len())
 	dirtySegments.Walk(func(segments []*DirtySegment) bool {
 		for _, sn := range segments {
 			if !sn.IsIndexed() {
@@ -836,7 +836,7 @@ func (s *RoSnapshots) buildVisible(dirtyFiles DirtyFiles, alignMin bool) *Visibl
 		minMaxVisibleBlock := slices.Min(maxVisibleBlocks)
 		for _, t := range s.enums {
 			if minMaxVisibleBlock == 0 {
-				visible[t] = []*VisibleSegment{}
+				visible[t] = VisibleSegments{}
 			} else {
 				visibleSegmentsOfType := visible[t]
 				for i, seg := range visibleSegmentsOfType {
@@ -1099,42 +1099,6 @@ func (s *RoSnapshots) Files() (list []string) {
 	}
 
 	return
-}
-
-func TypedSegments(dir string, types []snaptype.Type, allowGaps bool) (res []snaptype.FileInfo, missingSnapshots []Range, err error) {
-	list, err := snaptype.Segments(dir)
-
-	if err != nil {
-		return nil, missingSnapshots, err
-	}
-
-	for _, segType := range types {
-		{
-			var l []snaptype.FileInfo
-			var m []Range
-			for _, f := range list {
-				if f.Type.Enum() != segType.Enum() {
-					continue
-				}
-				l = append(l, f)
-			}
-
-			if allowGaps {
-				l = NoOverlaps(l)
-			} else {
-				l, m = NoGaps(NoOverlaps(l))
-			}
-
-			if len(m) > 0 {
-				lst := m[len(m)-1]
-				log.Debug("[snapshots] see gap", "type", segType, "from", lst.from)
-			}
-			res = append(res, l...)
-
-			missingSnapshots = append(missingSnapshots, m...)
-		}
-	}
-	return res, missingSnapshots, nil
 }
 
 // AllTypedSegments returns the raw, unfiltered list of segment files on disk
@@ -1674,7 +1638,7 @@ func (s *RoSnapshots) ViewSingleFile(t snaptype.Type, blockNum uint64) (segment 
 	return nil, false, noop
 }
 
-func (v *View) Segments(t snaptype.Type) []*VisibleSegment {
+func (v *View) Segments(t snaptype.Type) VisibleSegments {
 	return v.visible.segments[t.Enum()]
 }
 
