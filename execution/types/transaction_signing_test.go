@@ -24,9 +24,11 @@ import (
 	"testing"
 
 	"github.com/holiman/uint256"
+	"github.com/stretchr/testify/assert"
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/crypto"
+	"github.com/erigontech/erigon/execution/chain"
 )
 
 func TestEIP1559Signing(t *testing.T) {
@@ -162,6 +164,50 @@ func TestChainId(t *testing.T) {
 	_, err = txn.Sender(*LatestSignerForChainID(uint256.NewInt(1)))
 	if err != nil {
 		t.Error("expected no error")
+	}
+}
+
+// TestMakeSignerFromRulesEquivalence pins MakeSignerFromRules to the same
+// signer capabilities as MakeSigner at every signature-relevant fork
+// boundary (Homestead, Spurious Dragon, Berlin, London, Cancun, Prague).
+func TestMakeSignerFromRulesEquivalence(t *testing.T) {
+	t.Parallel()
+
+	c := &chain.Config{
+		ChainID:             uint256.NewInt(1),
+		HomesteadBlock:      common.NewUint64(0),
+		SpuriousDragonBlock: common.NewUint64(10),
+		BerlinBlock:         common.NewUint64(20),
+		LondonBlock:         common.NewUint64(30),
+		CancunTime:          common.NewUint64(100),
+		PragueTime:          common.NewUint64(200),
+	}
+
+	cases := []struct{ num, time uint64 }{
+		{0, 0},
+		{10, 0},
+		{20, 0},
+		{30, 0},
+		{30, 99},
+		{30, 100},
+		{30, 200},
+	}
+
+	for _, tc := range cases {
+		rules := &chain.Rules{
+			ChainID:          c.ChainID,
+			IsHomestead:      c.IsHomestead(tc.num),
+			IsSpuriousDragon: c.IsSpuriousDragon(tc.num),
+			IsBerlin:         c.IsBerlin(tc.num),
+			IsLondon:         c.IsLondon(tc.num),
+			IsCancun:         c.IsCancun(tc.time),
+			IsBhilai:         c.IsBhilai(tc.num),
+			IsPrague:         c.IsPrague(tc.time),
+		}
+
+		want := MakeSigner(c, tc.num, tc.time)
+		got := MakeSignerFromRules(c.ChainID, rules)
+		assert.Equal(t, *want, *got, "block %d time %d", tc.num, tc.time)
 	}
 }
 

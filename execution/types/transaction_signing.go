@@ -96,6 +96,68 @@ func MakeSigner(config *chain.Config, blockNumber uint64, blockTime uint64) *Sig
 	return &signer
 }
 
+// MakeSignerFromRules returns a Signer derived from an already-resolved Rules
+// instead of raw block number/time, so chains whose forks (including L2
+// version ladders) are gated through Rules get the same signer capability
+// gating as MakeSigner.
+func MakeSignerFromRules(chainID *uint256.Int, rules *chain.Rules) *Signer {
+	var signer Signer
+
+	if rules != nil {
+		var chainId uint256.Int
+		if chainID != nil {
+			chainId.Set(chainID)
+		}
+		signer.unprotected = true
+		switch {
+		case rules.IsPrague:
+			signer.protected = true
+			signer.accessList = true
+			signer.dynamicFee = true
+			signer.blob = true
+			signer.setCode = true
+			signer.chainID.Set(&chainId)
+			signer.chainIDMul.Lsh(&chainId, 1) // ×2
+		case rules.IsBhilai:
+			signer.protected = true
+			signer.accessList = true
+			signer.dynamicFee = true
+			signer.blob = false
+			signer.setCode = true
+			signer.chainID.Set(&chainId)
+			signer.chainIDMul.Lsh(&chainId, 1) // ×2
+		case rules.IsCancun:
+			// All transaction types are still supported
+			signer.protected = true
+			signer.accessList = true
+			signer.dynamicFee = true
+			signer.blob = true
+			signer.chainID.Set(&chainId)
+			signer.chainIDMul.Lsh(&chainId, 1) // ×2
+		case rules.IsLondon:
+			signer.protected = true
+			signer.accessList = true
+			signer.dynamicFee = true
+			signer.chainID.Set(&chainId)
+			signer.chainIDMul.Lsh(&chainId, 1) // ×2
+		case rules.IsBerlin:
+			signer.protected = true
+			signer.accessList = true
+			signer.chainID.Set(&chainId)
+			signer.chainIDMul.Lsh(&chainId, 1) // ×2
+		case rules.IsSpuriousDragon:
+			signer.protected = true
+			signer.chainID.Set(&chainId)
+			signer.chainIDMul.Lsh(&chainId, 1) // ×2
+		case rules.IsHomestead:
+		default:
+			// Only allow malleable transactions in Frontier
+			signer.malleable = true
+		}
+	}
+	return &signer
+}
+
 func MakeFrontierSigner() *Signer {
 	var signer Signer
 	signer.malleable = true
