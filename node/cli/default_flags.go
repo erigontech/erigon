@@ -44,6 +44,7 @@ var DefaultFlags = []cli.Flag{
 	&PruneBlocksDistanceFlag,
 	&PruneModeFlag,
 	&utils.KeepExecutionProofsFlag,
+	&utils.CommitmentHistoryDistanceFlag,
 	&utils.FcuTimeoutFlag,
 	&utils.FcuBackgroundPruneFlag,
 	&utils.FcuBackgroundCommitFlag,
