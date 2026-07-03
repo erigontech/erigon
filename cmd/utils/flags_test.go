@@ -285,13 +285,14 @@ func TestExecPerfFlags_OverrideDbg(t *testing.T) {
 func TestCommitmentPlainValuesFromCtx(t *testing.T) {
 	parse := func(args ...string) *bool {
 		var got *bool
-		app := cli.NewApp()
-		app.Flags = []cli.Flag{&CommitmentPlainValuesFlag}
-		app.Action = func(ctx *cli.Context) error {
-			got = CommitmentPlainValuesFromCtx(ctx)
-			return nil
+		app := &cli.Command{
+			Flags: []cli.Flag{&CommitmentPlainValuesFlag},
+			Action: func(ctx context.Context, cmd *cli.Command) error {
+				got = CommitmentPlainValuesFromCtx(cmd)
+				return nil
+			},
 		}
-		require.NoError(t, app.Run(append([]string{"test"}, args...)))
+		require.NoError(t, app.Run(context.Background(), append([]string{"test"}, args...)))
 		return got
 	}
 

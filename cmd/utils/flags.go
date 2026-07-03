@@ -2143,7 +2143,7 @@ func SetEthConfig(nodeCtx context.Context, ctx *cli.Command, nodeConfig *nodecfg
 
 // CommitmentPlainValuesFromCtx returns the parsed --commitment.plainValues override:
 // nil when the flag was not set, otherwise a pointer to its boolean value.
-func CommitmentPlainValuesFromCtx(ctx *cli.Context) *bool {
+func CommitmentPlainValuesFromCtx(ctx *cli.Command) *bool {
 	if !ctx.IsSet(CommitmentPlainValuesFlag.Name) {
 		return nil
 	}
