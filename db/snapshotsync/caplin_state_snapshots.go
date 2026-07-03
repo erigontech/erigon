@@ -458,7 +458,7 @@ func (s *CaplinStateSnapshots) buildVisible(dirtyFiles DirtyFiles) *VisibleFiles
 	return &VisibleFiles{segments: segments}
 }
 
-// reopen mutates `dirtyFiles` via mutate and republishes the visible set atomically
+// update mutates `dirtyFiles` via mutate and republishes the visible set atomically
 // (single lock), then refreshes idxMax.
 func (s *CaplinStateSnapshots) update(mutate func(dirtyFiles DirtyFiles) ([]RetiredSegment, error)) error {
 	err := s.Update(mutate, s.buildVisible)

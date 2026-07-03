@@ -296,7 +296,7 @@ func (s *CaplinSnapshots) buildVisible(dirtyFiles snapshotsync.DirtyFiles) *snap
 	return snapshotsync.NewVisibleFiles(segments)
 }
 
-// reopen mutates `dirtyFiles` via mutate and republishes the visible set atomically
+// update mutates `dirtyFiles` via mutate and republishes the visible set atomically
 // (single lock), then refreshes idxMax.
 func (s *CaplinSnapshots) update(mutate func(dirtyFiles snapshotsync.DirtyFiles) ([]snapshotsync.RetiredSegment, error)) error {
 	err := s.Update(mutate, s.buildVisible)

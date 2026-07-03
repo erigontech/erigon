@@ -965,8 +965,6 @@ func (f *FileSet) Init(size int) {
 	f.oldestVisible = empty
 }
 
-func (f *FileSet) DirtyFiles() DirtyFiles { return f.dirtyFiles }
-
 // NewVisibleFiles builds a generation for Update; for cross-package embedders
 // that can't construct VisibleFiles directly.
 func NewVisibleFiles(segments []VisibleSegments) *VisibleFiles {
@@ -1336,7 +1334,7 @@ func CloseWhatNotInList(dirtyFiles DirtyFiles, l []string) (removed []RetiredSeg
 		protectFiles[name] = struct{}{}
 	}
 	for _, dirtyFilesOfType := range dirtyFiles {
-		if dirtyFilesOfType == nil { // RoSnapshots leaves nil slots for unused enums
+		if dirtyFilesOfType == nil { // defensive: skip any unallocated slot
 			continue
 		}
 		var toDrop []*DirtySegment
@@ -1371,9 +1369,10 @@ func (s *RoSnapshots) RemoveOverlaps(onDelete func(l []string) error) error {
 		toRemove = append(toRemove, info.Path)
 	}
 
-	// Drop the overlaps from memory and republish without them before deleting from
-	// disk (to avoid Windows mmap file-locking). update retires them through the
-	// reader-drain reclaimer, so a concurrent reader is never cut off mid-read.
+	// Republish without the overlaps first, so no reader is cut off mid-read. update
+	// retires them close-only (fds released once the outgoing generation drains), then
+	// removeOldFiles deletes from disk — which on Windows can fail while a reader still
+	// pins that generation, leaving the file for the next pass.
 	keepNames := make([]string, 0, len(keepSegments))
 	for _, info := range keepSegments {
 		keepNames = append(keepNames, info.Name())
