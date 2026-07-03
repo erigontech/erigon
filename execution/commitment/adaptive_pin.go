@@ -154,6 +154,10 @@ func (c *AdaptivePinController) onCacheMiss(prefix []byte) {
 	if !ok {
 		return
 	}
+	if v, ok := c.misses.Load(hash); ok {
+		v.(*atomic.Uint64).Add(1)
+		return
+	}
 	v, _ := c.misses.LoadOrStore(hash, new(atomic.Uint64))
 	v.(*atomic.Uint64).Add(1)
 }
@@ -251,8 +255,7 @@ func (c *AdaptivePinController) snapshotMisses() map[[32]byte]uint64 {
 	out := make(map[[32]byte]uint64)
 	c.misses.Range(func(k, v any) bool {
 		hash := k.([32]byte)
-		n := v.(*atomic.Uint64).Swap(0)
-		if n > 0 {
+		if n := v.(*atomic.Uint64).Swap(0); n > 0 {
 			out[hash] = n
 		}
 		return true

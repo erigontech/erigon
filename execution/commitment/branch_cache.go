@@ -20,10 +20,8 @@ import (
 	"bytes"
 	"fmt"
 	"os"
+	"sync"
 	"sync/atomic"
-
-	"github.com/c2h5oh/datasize"
-	"github.com/elastic/go-freelru"
 
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/common/maphash"
@@ -79,12 +77,20 @@ type BranchCache struct {
 	// but still honor the (txN, epoch) unwind model. Lookup checks this tier
 	// between the account trunk and the tail. pinnedEntries counts filled
 	// storage slots across all storageTrunks.
-	pinned        *maphash.Map[*trunk]
+	// Allocated on the first pin (via pinnedForWrite): a cache that never pins a
+	// contract — the common case for short-lived caches over shallow tries —
+	// never pays for the (min 32-bucket) concurrent map.
+	pinned        atomic.Pointer[maphash.Map[*trunk]]
+	pinnedMu      sync.Mutex
 	pinnedEntries atomic.Int64
 
-	// LRU tail — bounded entries, evicts oldest when full. freelru.ShardedLRU
-	// keyed by the maphash of the prefix (single-alloc, thread-safe per shard).
-	tail *freelru.ShardedLRU[uint64, *branchCacheEntry]
+	// LRU tail — the memory-adaptive spill tier for prefixes past the resident
+	// trunk. Allocated on the first tail insert and jump-grown toward tailCap only
+	// as demand and the shared memory budget allow (see tailLRU), so a cache over
+	// a shallow trie or in a memory-constrained process stays small.
+	tail    atomic.Pointer[tailLRU]
+	tailCap uint32
+	tailMu  sync.Mutex
 
 	// trunkDisabled (env BRANCH_CACHE_TRUNK_DISABLE) routes depth-1-4 account
 	// branches back to the LRU tail instead of the resident account trunk — a
@@ -156,17 +162,60 @@ type MissCallback func(prefix []byte)
 // atomic.Pointer: under the single-writer-per-prefix invariant readers/writers
 // take no mutex (just an atomic load/store per slot); only deep (a maphash.Map)
 // locks.
+// The depth tiers d2/d3/d4 are allocated lazily on the first write at that
+// depth. A process-wide production cache fills every tier once; the many
+// short-lived caches a test suite spins up over shallow tries never reach the
+// deeper tiers, so eager allocation of the dense arrays (d3 32KB, d4 512KB) is
+// pure churn there. d0/d1 are tiny and always reached, so they stay inline.
 type trunk struct {
-	d0 atomic.Pointer[branchCacheEntry]
-	d1 [16]atomic.Pointer[branchCacheEntry]
-	d2 [256]atomic.Pointer[branchCacheEntry]
-	d3 [4096]atomic.Pointer[branchCacheEntry]
-	// d4 (the 65536-entry depth-4 array, ~512KB) is allocated lazily on the
-	// first depth-4 write: prod has one process-wide cache so eager alloc is
-	// cheap, but tests spin up thousands of ephemeral aggregators whose tries
-	// rarely reach depth 4, so eager alloc there is pure churn.
+	d0   atomic.Pointer[branchCacheEntry]
+	d1   [16]atomic.Pointer[branchCacheEntry]
+	d2   atomic.Pointer[[256]atomic.Pointer[branchCacheEntry]]
+	d3   atomic.Pointer[[4096]atomic.Pointer[branchCacheEntry]]
 	d4   atomic.Pointer[[65536]atomic.Pointer[branchCacheEntry]]
 	deep *maphash.Map[*branchCacheEntry]
+}
+
+func (t *trunk) d2For(forWrite bool) *[256]atomic.Pointer[branchCacheEntry] {
+	if p := t.d2.Load(); p != nil {
+		return p
+	}
+	if !forWrite {
+		return nil
+	}
+	p := &[256]atomic.Pointer[branchCacheEntry]{}
+	if !t.d2.CompareAndSwap(nil, p) {
+		p = t.d2.Load()
+	}
+	return p
+}
+
+func (t *trunk) d3For(forWrite bool) *[4096]atomic.Pointer[branchCacheEntry] {
+	if p := t.d3.Load(); p != nil {
+		return p
+	}
+	if !forWrite {
+		return nil
+	}
+	p := &[4096]atomic.Pointer[branchCacheEntry]{}
+	if !t.d3.CompareAndSwap(nil, p) {
+		p = t.d3.Load()
+	}
+	return p
+}
+
+func (t *trunk) d4For(forWrite bool) *[65536]atomic.Pointer[branchCacheEntry] {
+	if p := t.d4.Load(); p != nil {
+		return p
+	}
+	if !forWrite {
+		return nil
+	}
+	p := &[65536]atomic.Pointer[branchCacheEntry]{}
+	if !t.d4.CompareAndSwap(nil, p) {
+		p = t.d4.Load()
+	}
+	return p
 }
 
 // newAccountTrunk builds the global account trunk: dense depth-4 fixed array,
@@ -184,18 +233,22 @@ func newStorageTrunk() *trunk {
 // slot returns the fixed-array slot for a nibble path of length 0-3 (and length
 // 4 when the depth-4 array is present, i.e. the account trunk), or nil when the
 // path is deeper — the caller then uses deep (storage) or the tail (account).
-func (t *trunk) slot(path []byte) *atomic.Pointer[branchCacheEntry] {
+func (t *trunk) slot(path []byte, forWrite bool) *atomic.Pointer[branchCacheEntry] {
 	switch len(path) {
 	case 0:
 		return &t.d0
 	case 1:
 		return &t.d1[path[0]]
 	case 2:
-		return &t.d2[uint16(path[0])<<4|uint16(path[1])]
+		if d2 := t.d2For(forWrite); d2 != nil {
+			return &d2[uint16(path[0])<<4|uint16(path[1])]
+		}
 	case 3:
-		return &t.d3[uint16(path[0])<<8|uint16(path[1])<<4|uint16(path[2])]
+		if d3 := t.d3For(forWrite); d3 != nil {
+			return &d3[uint16(path[0])<<8|uint16(path[1])<<4|uint16(path[2])]
+		}
 	case 4:
-		if d4 := t.d4.Load(); d4 != nil {
+		if d4 := t.d4For(forWrite); d4 != nil {
 			return &d4[uint32(path[0])<<12|uint32(path[1])<<8|uint32(path[2])<<4|uint32(path[3])]
 		}
 	}
@@ -206,23 +259,6 @@ func (t *trunk) slot(path []byte) *atomic.Pointer[branchCacheEntry] {
 // explicit capacity is given. ~50k entries × ~500 bytes = ~25 MB
 // at typical mainnet branch sizes.
 const DefaultBranchCacheTailCapacity = 50000
-
-// avgBranchEntryBytes is the assumed resident size of one cached branch
-// (payload plus freelru/element overhead). Used to translate a byte budget
-// into a tail entry count.
-const avgBranchEntryBytes = 512
-
-// TailCapacityForBudget converts a byte budget into a tail entry count, flooring
-// at branchCacheTailShards so every shard keeps at least one slot. Lets callers
-// that create many caches (e.g. per-test aggregators) cap the tail's resident
-// footprint while keeping the static resident trunk fully functional.
-func TailCapacityForBudget(budget datasize.ByteSize) int {
-	n := int(uint64(budget) / avgBranchEntryBytes)
-	if n < branchCacheTailShards {
-		n = branchCacheTailShards
-	}
-	return n
-}
 
 // BranchCacheProvider exposes the long-lived BranchCache attached to the
 // commitment domain. Implemented by *db/state.AggregatorRoTx (via duck
@@ -247,15 +283,9 @@ func NewBranchCache(tailCapacity int) *BranchCache {
 	if tailCapacity <= 0 {
 		panic(fmt.Sprintf("BranchCache: tailCapacity must be positive, got %d", tailCapacity))
 	}
-	tailCap := uint32(tailCapacity)
-	tail, err := freelru.NewShardedWithSize[uint64, *branchCacheEntry](branchCacheTailShards, tailCap, tailCap+tailCap/4, u64ident)
-	if err != nil {
-		panic(fmt.Sprintf("BranchCache: NewShardedWithSize: %s", err))
-	}
 	bc := &BranchCache{
-		tail:          tail,
+		tailCap:       uint32(tailCapacity),
 		accountTrunk:  newAccountTrunk(),
-		pinned:        maphash.NewMap[*trunk](),
 		trunkDisabled: os.Getenv("BRANCH_CACHE_TRUNK_DISABLE") != "",
 	}
 	// Before any unwind every entry's txN is at/below the floor, so the epoch
@@ -263,6 +293,31 @@ func NewBranchCache(tailCapacity int) *BranchCache {
 	bc.coh.Init()
 	log.Info("[branch-cache] init", "trunkEnabled", !bc.trunkDisabled, "tailCap", tailCapacity)
 	return bc
+}
+
+// tailForWrite returns the LRU tail, allocating it on first use so a cache whose
+// tries never spill past the resident trunk pays nothing for it.
+func (c *BranchCache) tailForWrite() *tailLRU {
+	if t := c.tail.Load(); t != nil {
+		return t
+	}
+	c.tailMu.Lock()
+	defer c.tailMu.Unlock()
+	if t := c.tail.Load(); t != nil {
+		return t
+	}
+	t := newTailLRU(c.tailCap)
+	c.tail.Store(t)
+	return t
+}
+
+// tailLen reports the number of resident tail entries, or 0 if the tail has not
+// been allocated yet.
+func (c *BranchCache) tailLen() int {
+	if t := c.tail.Load(); t != nil {
+		return t.Len()
+	}
+	return 0
 }
 
 // trunkSlot returns the resident account-trunk slot for an account-trie branch
@@ -281,22 +336,21 @@ func (c *BranchCache) trunkSlot(prefix []byte, forWrite bool) *atomic.Pointer[br
 		}
 	case 2:
 		if prefix[0]&0x10 == 0 { // 2 nibbles
-			return &c.accountTrunk.d2[prefix[1]]
+			if d2 := c.accountTrunk.d2For(forWrite); d2 != nil {
+				return &d2[prefix[1]]
+			}
+			return nil
 		}
-		return &c.accountTrunk.d3[uint16(prefix[0]&0x0f)<<8|uint16(prefix[1])] // 3 nibbles
+		if d3 := c.accountTrunk.d3For(forWrite); d3 != nil { // 3 nibbles
+			return &d3[uint16(prefix[0]&0x0f)<<8|uint16(prefix[1])]
+		}
+		return nil
 	case 3:
 		if prefix[0]&0x10 == 0 { // 4 nibbles
-			d4 := c.accountTrunk.d4.Load()
-			if d4 == nil {
-				if !forWrite {
-					return nil
-				}
-				d4 = &[65536]atomic.Pointer[branchCacheEntry]{}
-				if !c.accountTrunk.d4.CompareAndSwap(nil, d4) {
-					d4 = c.accountTrunk.d4.Load() // lost the race; use the winner
-				}
+			if d4 := c.accountTrunk.d4For(forWrite); d4 != nil {
+				return &d4[uint16(prefix[1])<<8|uint16(prefix[2])]
 			}
-			return &d4[uint16(prefix[1])<<8|uint16(prefix[2])]
+			return nil
 		}
 		// 5 nibbles (odd, 3 bytes) -> LRU tail
 	}
@@ -322,32 +376,51 @@ func (c *BranchCache) storageRoute(prefix []byte, create bool) (st *trunk, acct 
 		packed[i] = nib[2*i]<<4 | nib[2*i+1]
 	}
 	stor = nib[64:]
-	st, found := c.pinned.Get(packed)
-	if !found {
-		if !create {
-			return nil, packed, stor, false
+	if p := c.pinned.Load(); p != nil {
+		if st, found := p.Get(packed); found {
+			return st, packed, stor, true
 		}
-		st = newStorageTrunk()
-		c.pinned.Set(packed, st)
 	}
+	if !create {
+		return nil, packed, stor, false
+	}
+	st = newStorageTrunk()
+	c.pinnedForWrite().Set(packed, st)
 	return st, packed, stor, true
 }
 
-// ContractHashFromPrefix extracts the 32-byte contract (account) hash from a
-// storage-trunk prefix (compact-hex of >= 64 account nibbles + storage
-// nibbles). ok=false for non-storage prefixes. Used by the residency layer to
-// attribute per-contract miss pressure.
+// pinnedForWrite returns the pinned-contract map, allocating it on first pin.
+func (c *BranchCache) pinnedForWrite() *maphash.Map[*trunk] {
+	if p := c.pinned.Load(); p != nil {
+		return p
+	}
+	c.pinnedMu.Lock()
+	defer c.pinnedMu.Unlock()
+	if p := c.pinned.Load(); p != nil {
+		return p
+	}
+	p := maphash.NewMap[*trunk]()
+	c.pinned.Store(p)
+	return p
+}
+
+// ContractHashFromPrefix extracts the 32-byte contract (account) hash — keccak
+// of the address — from a storage-trunk prefix (compact-hex of >= 64 account
+// nibbles + storage nibbles). ok=false for non-storage prefixes. On the
+// per-miss hot path, so it decodes the leading 64 nibbles straight out of the
+// compact bytes rather than materializing the full hex expansion.
 func ContractHashFromPrefix(prefix []byte) (hash [32]byte, ok bool) {
 	if len(prefix) < 33 {
 		return hash, false
 	}
-	nib := nibbles.CompactToHex(prefix)
-	if len(nib) < 64 {
-		return hash, false
+	if prefix[0]&0x10 != 0 { // odd: first nibble is the low nibble of byte 0
+		for i := 0; i < 32; i++ {
+			hash[i] = prefix[i]&0x0f<<4 | prefix[i+1]>>4
+		}
+		return hash, true
 	}
-	for i := 0; i < 32; i++ {
-		hash[i] = nib[2*i]<<4 | nib[2*i+1]
-	}
+	// even: the account-hash bytes are stored whole starting at byte 1
+	copy(hash[:], prefix[1:33])
 	return hash, true
 }
 
@@ -360,11 +433,15 @@ func (c *BranchCache) clearTrunk() {
 	for i := range t.d1 {
 		t.d1[i].Store(nil)
 	}
-	for i := range t.d2 {
-		t.d2[i].Store(nil)
+	if d2 := t.d2.Load(); d2 != nil {
+		for i := range d2 {
+			d2[i].Store(nil)
+		}
 	}
-	for i := range t.d3 {
-		t.d3[i].Store(nil)
+	if d3 := t.d3.Load(); d3 != nil {
+		for i := range d3 {
+			d3[i].Store(nil)
+		}
 	}
 	if d4 := t.d4.Load(); d4 != nil {
 		for i := range d4 {
@@ -424,7 +501,7 @@ func (c *BranchCache) lookup(prefix []byte) (*branchCacheEntry, bool) {
 	// pinned hit/miss stats; account-trie and tail-only prefixes are excluded.
 	if st, _, stor, ok := c.storageRoute(prefix, false); ok {
 		var entry *branchCacheEntry
-		if slot := st.slot(stor); slot != nil {
+		if slot := st.slot(stor, false); slot != nil {
 			entry = slot.Load()
 		} else {
 			entry, _ = st.deep.Get(prefix)
@@ -435,7 +512,13 @@ func (c *BranchCache) lookup(prefix []byte) (*branchCacheEntry, bool) {
 		}
 		c.pinnedMisses.Add(1)
 	}
-	entry, ok := c.tail.Get(maphash.Hash(prefix))
+	tail := c.tail.Load()
+	if tail == nil {
+		c.tailMisses.Add(1)
+		c.fireOnMiss(prefix)
+		return nil, false
+	}
+	entry, ok := tail.Get(maphash.Hash(prefix))
 	if !ok {
 		c.tailMisses.Add(1)
 		c.fireOnMiss(prefix)
@@ -457,7 +540,7 @@ func (c *BranchCache) store(prefix []byte, entry *branchCacheEntry) {
 	// Keep a prefix already pinned in a storage trunk in place across the
 	// per-block invalidate+Put refresh rather than dropping it to the tail.
 	if st, _, stor, ok := c.storageRoute(prefix, false); ok {
-		if slot := st.slot(stor); slot != nil {
+		if slot := st.slot(stor, false); slot != nil {
 			if slot.Load() != nil {
 				slot.Store(entry)
 				return
@@ -467,7 +550,7 @@ func (c *BranchCache) store(prefix []byte, entry *branchCacheEntry) {
 			return
 		}
 	}
-	c.tail.Add(maphash.Hash(prefix), entry)
+	c.tailForWrite().Add(maphash.Hash(prefix), entry)
 }
 
 // PinEntry inserts or replaces a pinned cache entry for prefix in its contract's
@@ -483,10 +566,10 @@ func (c *BranchCache) PinEntry(prefix []byte, data []byte, step, txN uint64) {
 	entry := &branchCacheEntry{data: dataCopy, step: step, txN: txN, epoch: c.coh.Epoch()}
 	st, _, stor, ok := c.storageRoute(prefix, true)
 	if !ok {
-		c.tail.Add(maphash.Hash(prefix), entry)
+		c.tailForWrite().Add(maphash.Hash(prefix), entry)
 		return
 	}
-	if slot := st.slot(stor); slot != nil {
+	if slot := st.slot(stor, true); slot != nil {
 		if slot.Load() == nil {
 			c.pinnedEntries.Add(1)
 		}
@@ -572,7 +655,7 @@ func (c *BranchCache) Invalidate(prefix []byte) {
 		return
 	}
 	if st, _, stor, ok := c.storageRoute(prefix, false); ok {
-		if slot := st.slot(stor); slot != nil {
+		if slot := st.slot(stor, false); slot != nil {
 			if slot.Swap(nil) != nil {
 				c.pinnedEntries.Add(-1)
 			}
@@ -581,7 +664,9 @@ func (c *BranchCache) Invalidate(prefix []byte) {
 			c.pinnedEntries.Add(-1)
 		}
 	}
-	c.tail.Remove(maphash.Hash(prefix))
+	if tail := c.tail.Load(); tail != nil {
+		tail.Remove(maphash.Hash(prefix))
+	}
 }
 
 // Unwind invalidates entries that reflect dead-fork state. unwindToTxN is the
@@ -602,9 +687,11 @@ func (c *BranchCache) Unwind(unwindToTxN uint64) {
 func (c *BranchCache) Clear() {
 	c.root.Store(nil)
 	c.clearTrunk()
-	c.pinned = maphash.NewMap[*trunk]()
+	c.pinned.Store(nil)
 	c.pinnedEntries.Store(0)
-	c.tail.Purge()
+	if tail := c.tail.Load(); tail != nil {
+		tail.reset()
+	}
 	c.rootHits.Store(0)
 	c.rootMisses.Store(0)
 	c.trunkHits.Store(0)
@@ -639,7 +726,7 @@ func (c *BranchCache) Stats() string {
 		rh, rm, pct(rh, rm),
 		kh, km, pct(kh, km),
 		ph, pm, pct(ph, pm), int(c.pinnedEntries.Load()),
-		th, tm, pct(th, tm), c.tail.Len(),
+		th, tm, pct(th, tm), c.tailLen(),
 		float64(bb)/1024/1024, c.staleEvicted.Load(),
 	)
 }

@@ -124,7 +124,7 @@ func TestBranchCache_RootSurvivesEvictionPressure(t *testing.T) {
 	require.Equal(t, []byte("ROOT-PERSISTS"), got)
 
 	// Tail at capacity (10), not 100
-	require.LessOrEqual(t, c.tail.Len(), 10, "tail should respect LRU capacity")
+	require.LessOrEqual(t, c.tailLen(), 10, "tail should respect LRU capacity")
 }
 
 // TestBranchCache_Invalidate removes entries from both tiers.
