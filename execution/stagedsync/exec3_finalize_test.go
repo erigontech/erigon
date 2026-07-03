@@ -1609,6 +1609,145 @@ func TestNormalizeWriteSet_CodePathRecoveredFromStateReader(t *testing.T) {
 	assert.Equal(t, designator, gotCode.Val.Bytes, "recovered code is the committed designator")
 }
 
+// Characterization tests below pin normalizeWriteSet branches that were only
+// covered end-to-end (execmodule), ahead of a planned loop-rationalization
+// refactor. They assert current behavior; a refactor must keep them green.
+
+// Metamorphic same-tx SELFDESTRUCT-then-CREATE2: the final SelfDestructPath is
+// false (account ends alive), so the address is NOT treated as self-destructed
+// and its recreate-time field writes survive — no delete, no storage cascade.
+func TestNormalizeWriteSet_MetamorphicSameTxRecreateKeepsWrites(t *testing.T) {
+	vm := state.NewVersionMap(nil)
+	addr := accounts.InternAddress([20]byte{0x30})
+
+	ws := newWS().
+		selfDestruct(addr, state.Version{TxIndex: 1, Incarnation: 0}, false). // ended alive
+		bal(addr, state.Version{TxIndex: 1, Incarnation: 0}, *uint256.NewInt(500)).
+		nonce(addr, state.Version{TxIndex: 1, Incarnation: 0}, 1).
+		build()
+	vm.FlushVersionedWrites(ws, true, "")
+
+	result := normalizeWriteSet(ws, vm, 1, 0, nil, nil, true, false)
+
+	assert.Equal(t, 0, countPath(result, state.SelfDestructPath), "SelfDestructPath=false is not emitted")
+	assert.Equal(t, 0, countPath(result, state.StoragePath), "no storage-delete cascade for an alive account")
+	b, ok := result.GetBalance(addr)
+	require.True(t, ok, "recreate balance must survive")
+	assert.Equal(t, *uint256.NewInt(500), b.Val)
+	n, ok := result.GetNonce(addr)
+	require.True(t, ok, "recreate nonce must survive")
+	assert.Equal(t, uint64(1), n.Val)
+}
+
+// A SelfDestructPath=true from a NON-validated incarnation must not mark the
+// address self-destructed: the validated incarnation's field writes survive and
+// no delete/cascade is emitted.
+func TestNormalizeWriteSet_StaleIncarnationSelfDestructIgnored(t *testing.T) {
+	vm := state.NewVersionMap(nil)
+	addr := accounts.InternAddress([20]byte{0x31})
+
+	ws := newWS().
+		selfDestruct(addr, state.Version{TxIndex: 5, Incarnation: 0}, true). // stale incarnation
+		bal(addr, state.Version{TxIndex: 5, Incarnation: 1}, *uint256.NewInt(300)).
+		build()
+	vm.FlushVersionedWrites(ws, true, "")
+
+	result := normalizeWriteSet(ws, vm, 5, 1, nil, nil, true, false)
+
+	assert.Equal(t, 0, countPath(result, state.SelfDestructPath), "stale-incarnation SD must not be emitted")
+	b, ok := result.GetBalance(addr)
+	require.True(t, ok, "validated-incarnation balance must survive (not dropped as SD)")
+	assert.Equal(t, *uint256.NewInt(300), b.Val)
+}
+
+// History-scan no-op: after an earlier tx self-destructed the address (even if a
+// later tx revived it, so the latest SelfDestructPath is false), a post-SD write
+// of zero is dropped because the SD cascade already fixed the baseline at zero.
+func TestNormalizeWriteSet_PostSelfDestructZeroStorageDroppedViaHistory(t *testing.T) {
+	vm := state.NewVersionMap(nil)
+	addr := accounts.InternAddress([20]byte{0x32})
+	slot := accounts.InternKey([32]byte{0x01})
+
+	// tx2 destructs, tx3 revives → latest SelfDestructPath is false, but history
+	// carries a Done true at tx2.
+	vm.FlushVersionedWrites(newWS().selfDestruct(addr, state.Version{TxIndex: 2, Incarnation: 0}, true).build(), true, "")
+	vm.FlushVersionedWrites(newWS().selfDestruct(addr, state.Version{TxIndex: 3, Incarnation: 0}, false).build(), true, "")
+	reader := newMapStateReader()
+
+	zeroWrite := newWS().stor(addr, slot, state.Version{TxIndex: 5, Incarnation: 0}, uint256.Int{}).build()
+	dropped := normalizeWriteSet(zeroWrite, vm, 5, 0, reader, nil, true, false)
+	assert.Equal(t, 0, countPath(dropped, state.StoragePath), "post-SD zero write is a no-op against the zero baseline")
+
+	// Control: a non-zero post-SD write is a real change and survives.
+	nonZero := newWS().stor(addr, slot, state.Version{TxIndex: 5, Incarnation: 0}, *uint256.NewInt(77)).build()
+	kept := normalizeWriteSet(nonZero, vm, 5, 0, reader, nil, true, false)
+	s, ok := kept.GetStorage(addr, slot)
+	require.True(t, ok, "non-zero post-SD write must survive")
+	assert.Equal(t, *uint256.NewInt(77), s.Val)
+}
+
+// Backfill after an earlier-tx self-destruct: when THIS tx re-creates via
+// CREATE(2) (CreateContractPath=true), the missing account fields are the
+// post-destruction zero defaults — NOT the stale pre-SD nonce/codeHash still in
+// the versionMap. A value-transfer resurrect (no CreateContractPath) instead
+// inherits the pre-SD fields via the map's last-write-wins chain.
+func TestNormalizeWriteSet_SelfDestructEarlierThenCreateContractZeroesFields(t *testing.T) {
+	vm := state.NewVersionMap(nil)
+	addr := accounts.InternAddress([20]byte{0x33})
+	staleHash := accounts.InternCodeHash(common.HexToHash("0x11223344"))
+
+	// Pre-SD stale fields, then a self-destruct that is the latest SD state.
+	vm.FlushVersionedWrites(newWS().
+		nonce(addr, state.Version{TxIndex: 1, Incarnation: 0}, 9).
+		codeHash(addr, state.Version{TxIndex: 1, Incarnation: 0}, staleHash).
+		build(), true, "")
+	vm.FlushVersionedWrites(newWS().selfDestruct(addr, state.Version{TxIndex: 2, Incarnation: 0}, true).build(), true, "")
+
+	// tx5 re-creates via CREATE2 and funds it (balance keeps the account
+	// non-empty so EIP-161 doesn't delete it and the zeroed fields are visible).
+	created := newWS().
+		createContract(addr, state.Version{TxIndex: 5, Incarnation: 0}, true).
+		bal(addr, state.Version{TxIndex: 5, Incarnation: 0}, *uint256.NewInt(100)).
+		build()
+	res := normalizeWriteSet(created, vm, 5, 0, nil, nil, true, false)
+	n, ok := res.GetNonce(addr)
+	require.True(t, ok)
+	assert.Equal(t, uint64(0), n.Val, "CREATE2 after SD gets zero nonce, not the stale pre-SD 9")
+	ch, ok := res.GetCodeHash(addr)
+	require.True(t, ok)
+	assert.Equal(t, accounts.EmptyCodeHash, ch.Val, "CREATE2 after SD gets empty codeHash, not the stale pre-SD hash")
+
+	// Control: value-transfer resurrect (no CreateContractPath) inherits pre-SD
+	// fields from the versionMap.
+	resurrect := newWS().bal(addr, state.Version{TxIndex: 5, Incarnation: 0}, *uint256.NewInt(100)).build()
+	res2 := normalizeWriteSet(resurrect, vm, 5, 0, nil, nil, true, false)
+	n2, ok := res2.GetNonce(addr)
+	require.True(t, ok)
+	assert.Equal(t, uint64(9), n2.Val, "value-transfer resurrect inherits the pre-SD nonce")
+}
+
+// Storage no-op detected via the stateReader's pre-block value (no prior in-block
+// write in the versionMap and no self-destruct history): a write-back of the
+// pre-block value is dropped; a different value survives.
+func TestNormalizeWriteSet_StorageNoOpViaStateReaderPreBlock(t *testing.T) {
+	vm := state.NewVersionMap(nil)
+	addr := accounts.InternAddress([20]byte{0x34})
+	slot := accounts.InternKey([32]byte{0x01})
+
+	reader := newMapStateReader()
+	reader.storage[addr] = map[accounts.StorageKey]uint256.Int{slot: *uint256.NewInt(100)}
+
+	sameVal := newWS().stor(addr, slot, state.Version{TxIndex: 1, Incarnation: 0}, *uint256.NewInt(100)).build()
+	dropped := normalizeWriteSet(sameVal, vm, 1, 0, reader, nil, true, false)
+	assert.Equal(t, 0, countPath(dropped, state.StoragePath), "write-back of the pre-block value is a no-op")
+
+	diffVal := newWS().stor(addr, slot, state.Version{TxIndex: 1, Incarnation: 0}, *uint256.NewInt(200)).build()
+	kept := normalizeWriteSet(diffVal, vm, 1, 0, reader, nil, true, false)
+	s, ok := kept.GetStorage(addr, slot)
+	require.True(t, ok, "a changed value must survive")
+	assert.Equal(t, *uint256.NewInt(200), s.Val)
+}
+
 // TestCalcFees_EmitsAddressPathForCoinbase pins the fix for the mainnet
 // block 25151825 tx 31 +25k gas bug. Background:
 //
