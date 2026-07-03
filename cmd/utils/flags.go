@@ -1091,9 +1091,20 @@ var (
 		Name:  "polygon.wit-protocol",
 		Usage: "Enable WIT protocol for stateless witness data exchange (auto-enabled for Bor chains)",
 	}
-	ExperimentalConcurrentCommitmentFlag = cli.BoolFlag{
-		Name:  "experimental.concurrent-commitment",
-		Usage: "EXPERIMENTAL: enables concurrent trie for commitment",
+	// ExperimentalParallelCommitmentFlag selects ParallelPatriciaHashed
+	// (ModeParallel) for commitment computation. Default off; flip to compare
+	// root hashes against a sequential sync before enabling broadly.
+	ExperimentalParallelCommitmentFlag = cli.BoolFlag{
+		Name:  "experimental.parallel-commitment",
+		Usage: "EXPERIMENTAL: enables fully parallel trie for commitment (ParallelPatriciaHashed).",
+		Value: false,
+	}
+	// ExperimentalStreamingCommitmentFlag selects the StreamingCommitter, which
+	// overlaps commitment fold work with block execution. Default off; takes
+	// precedence over the parallel flag when set.
+	ExperimentalStreamingCommitmentFlag = cli.BoolFlag{
+		Name:  "experimental.streaming-commitment",
+		Usage: "EXPERIMENTAL: enables streaming trie for commitment (StreamingCommitter, overlaps folding with execution). Takes precedence over --experimental.parallel-commitment if set.",
 		Value: false,
 	}
 	GDBMeFlag = cli.BoolFlag{
@@ -1143,6 +1154,11 @@ var (
 	ErigondbDomainStepsInFrozenFileFlag = cli.StringFlag{
 		Name:  "erigondb.domain.steps-in-frozen-file",
 		Usage: `Override erigondb.toml "steps_in_frozen_file" for the domain merge cap only (history/inverted-index merges are unaffected). Pass a positive integer to set an explicit cap, or "Inf" to leave the domain merge unbounded. Default: unset, meaning the domain uses the same cap as determined by erigondb.toml.`,
+	}
+	CommitmentPlainValuesFlag = cli.BoolFlag{
+		Name:  "commitment.plainValues",
+		Usage: "On first start of a fresh datadir, write commitment values as plain (no shortened key references). Ignored if erigondb.toml already exists.",
+		Value: false,
 	}
 	ExecBatchedIOFlag = cli.BoolFlag{
 		Name:  "exec.batched-io",
@@ -1958,8 +1974,12 @@ func SetEthConfig(ctx *cli.Context, nodeConfig *nodecfg.Config, cfg *ethconfig.C
 	cfg.AllowAA = ctx.Bool(AAFlag.Name)
 	cfg.Ethstats = ctx.String(EthStatsURLFlag.Name)
 
-	if ctx.Bool(ExperimentalConcurrentCommitmentFlag.Name) {
-		cfg.ExperimentalConcurrentCommitment = true
+	if ctx.Bool(ExperimentalParallelCommitmentFlag.Name) {
+		cfg.ExperimentalParallelCommitment = true
+	}
+
+	if ctx.Bool(ExperimentalStreamingCommitmentFlag.Name) {
+		cfg.ExperimentalStreamingCommitment = true
 	}
 
 	cfg.FcuTimeout = ctx.Duration(FcuTimeoutFlag.Name)
@@ -2117,6 +2137,17 @@ func SetEthConfig(ctx *cli.Context, nodeConfig *nodecfg.Config, cfg *ethconfig.C
 		}
 		cfg.ErigondbDomainStepsInFrozenFile = &v
 	}
+	cfg.CommitmentPlainValues = CommitmentPlainValuesFromCtx(ctx)
+}
+
+// CommitmentPlainValuesFromCtx returns the parsed --commitment.plainValues override:
+// nil when the flag was not set, otherwise a pointer to its boolean value.
+func CommitmentPlainValuesFromCtx(ctx *cli.Context) *bool {
+	if !ctx.IsSet(CommitmentPlainValuesFlag.Name) {
+		return nil
+	}
+	v := ctx.Bool(CommitmentPlainValuesFlag.Name)
+	return &v
 }
 
 // setDevnetEthConfig configures PoS dev mode (--chain dev): embedded Caplin with

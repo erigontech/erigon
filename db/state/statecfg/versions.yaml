@@ -1,13 +1,13 @@
 accounts:
     domain:
         bt:
-            current: v1.1
+            current: v2.0
             min: v1.0
         kv:
             current: v2.0
             min: v1.0
         kvei:
-            current: v1.1
+            current: v1.2
             min: v1.0
     hist:
         v:
@@ -34,13 +34,13 @@ bodies:
 code:
     domain:
         bt:
-            current: v1.1
+            current: v2.0
             min: v1.0
         kv:
             current: v2.0
             min: v1.0
         kvei:
-            current: v1.1
+            current: v1.2
             min: v1.0
     hist:
         v:
@@ -59,7 +59,7 @@ code:
 commitment:
     domain:
         kv:
-            current: v2.1
+            current: v2.2
             min: v1.0
         kvi:
             current: v2.1
@@ -105,14 +105,14 @@ logtopics:
 rcache:
     domain:
         kv:
-            current: v3.0
+            current: v3.1
             min: v1.0
         kvi:
             current: v2.0
             min: v1.0
     hist:
         v:
-            current: v3.0
+            current: v3.1
             min: v1.0
         vi:
             current: v1.1
@@ -127,13 +127,13 @@ rcache:
 receipt:
     domain:
         bt:
-            current: v1.2
+            current: v2.0
             min: v1.0
         kv:
             current: v3.0
             min: v1.0
         kvei:
-            current: v1.2
+            current: v1.3
             min: v1.0
     hist:
         v:
@@ -152,13 +152,13 @@ receipt:
 storage:
     domain:
         bt:
-            current: v1.1
+            current: v2.0
             min: v1.0
         kv:
             current: v2.0
             min: v1.0
         kvei:
-            current: v1.1
+            current: v1.2
             min: v1.0
     hist:
         v:

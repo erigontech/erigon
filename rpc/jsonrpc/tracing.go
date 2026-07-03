@@ -67,12 +67,10 @@ func (api *DebugAPIImpl) traceBlock(ctx context.Context, blockNrOrHash rpc.Block
 	}
 
 	if (blockNrOrHash.BlockHash == nil && hash == common.Hash{}) {
-		stream.WriteNil()
 		return fmt.Errorf("block #%d not found", *blockNrOrHash.BlockNumber)
 	}
 
 	if blockNumber == 0 {
-		stream.WriteNil()
 		return fmt.Errorf("genesis is not traceable")
 	}
 
@@ -88,7 +86,6 @@ func (api *DebugAPIImpl) traceBlock(ctx context.Context, blockNrOrHash rpc.Block
 		return err
 	}
 	if block == nil {
-		stream.WriteNil()
 		return fmt.Errorf("invalid arguments; block with hash %x not found", hash)
 	}
 
@@ -152,6 +149,7 @@ func (api *DebugAPIImpl) traceBlock(ctx context.Context, blockNrOrHash rpc.Block
 	}
 
 	var gasUsed uint64
+	inner := jsonstream.NewLazyFieldStream(stream, "result", true)
 	for txnIndex, txn := range txns {
 		isBorStateSyncTxn := borStateSyncTxn == txn
 		var txnHash common.Hash
@@ -164,14 +162,14 @@ func (api *DebugAPIImpl) traceBlock(ctx context.Context, blockNrOrHash rpc.Block
 		stream.WriteObjectStart()
 		stream.WriteObjectField("txHash")
 		stream.WriteString(txnHash.Hex())
-		stream.WriteMore()
-		stream.WriteObjectField("result")
 		select {
 		default:
 		case <-ctx.Done():
 			return ctx.Err()
 		}
 		ibs.SetTxContext(blockCtx.BlockNumber, txnIndex)
+
+		inner.ResetField()
 
 		if isBorStateSyncTxn {
 			var stateSyncEvents []*types.Message
@@ -190,7 +188,7 @@ func (api *DebugAPIImpl) traceBlock(ctx context.Context, blockNrOrHash rpc.Block
 				block.NumberU64(),
 				block.Time(),
 				blockCtx,
-				stream,
+				inner,
 				api.evmCallTimeout,
 				stateSyncEvents,
 				txnIndex,
@@ -199,8 +197,6 @@ func (api *DebugAPIImpl) traceBlock(ctx context.Context, blockNrOrHash rpc.Block
 		} else {
 			msg, asMessageErr := txn.AsMessage(*signer, block.BaseFee(), rules)
 			if asMessageErr != nil {
-				// Fail closed here because tracing needs a valid Message-derived sender/fee context.
-				stream.WriteNil()
 				err = fmt.Errorf("convert transaction %s to message: %w", txnHash, asMessageErr)
 			} else {
 				txCtx := evmtypes.TxContext{
@@ -211,7 +207,7 @@ func (api *DebugAPIImpl) traceBlock(ctx context.Context, blockNrOrHash rpc.Block
 				}
 
 				var _gasUsed uint64
-				_gasUsed, err = transactions.TraceTx(ctx, engine, txn, msg, blockCtx, txCtx, &block.Header().Number, block.Hash(), txnIndex, ibs, config, chainConfig, stream, api.evmCallTimeout, precompiles)
+				_gasUsed, err = transactions.TraceTx(ctx, engine, txn, msg, blockCtx, txCtx, &block.Header().Number, block.Hash(), txnIndex, ibs, config, chainConfig, inner, api.evmCallTimeout, precompiles)
 				gasUsed += _gasUsed
 			}
 		}
@@ -219,8 +215,8 @@ func (api *DebugAPIImpl) traceBlock(ctx context.Context, blockNrOrHash rpc.Block
 			err = ibs.FinalizeTx(rules, state.NewNoopWriter())
 		}
 
-		// if we have an error we want to output valid json for it before continuing after clearing down potential writes to the stream
 		if err != nil {
+			inner.CloseIfOpen()
 			stream.WriteMore()
 			rpc.HandleError(err, stream)
 		}
@@ -290,7 +286,6 @@ func (api *DebugAPIImpl) TraceTransaction(ctx context.Context, hash common.Hash,
 	}
 
 	if blockNum == 0 {
-		stream.WriteNil()
 		return fmt.Errorf("genesis is not traceable")
 	}
 
@@ -319,12 +314,10 @@ func (api *DebugAPIImpl) TraceTransaction(ctx context.Context, hash common.Hash,
 			return err
 		}
 		if txNumMin+1 > txNum {
-			stream.WriteNil()
 			return fmt.Errorf("uint underflow txnums error txNum: %d, txNumMin: %d, blockNum: %d", txNum, txNumMin, blockNum)
 		}
 		txnIndex = int(txNum - txNumMin - 1)
 		if txnIndex >= block.Transactions().Len() {
-			stream.WriteNil()
 			return fmt.Errorf("transaction %#x not found", hash)
 		}
 	}
@@ -511,7 +504,6 @@ func (api *DebugAPIImpl) TraceCallMany(ctx context.Context, bundles []Bundle, si
 		return err
 	}
 	if len(bundles) == 0 {
-		stream.WriteNil()
 		return errors.New("empty bundles")
 	}
 	empty := true
@@ -522,7 +514,6 @@ func (api *DebugAPIImpl) TraceCallMany(ctx context.Context, bundles []Bundle, si
 	}
 
 	if empty {
-		stream.WriteNil()
 		return errors.New("empty bundles")
 	}
 
@@ -544,7 +535,6 @@ func (api *DebugAPIImpl) TraceCallMany(ctx context.Context, bundles []Bundle, si
 		return err
 	}
 	if header == nil {
-		stream.WriteNil()
 		return fmt.Errorf("block %d(%x) not found", blockNum, hash)
 	}
 

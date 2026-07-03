@@ -304,6 +304,16 @@ test-bench: override GO_FLAGS += -run=^$$ -bench=. -benchtime=1x -short -timeout
 test-bench:
 	$(GOTEST)
 
+## fuzz PKG=<pkg> FUZZ=<FuzzName> [FUZZTIME=60s]:  run one Go fuzz target (see docs/fuzzing.md)
+.PHONY: fuzz
+fuzz:
+	@if [ -z "$(FUZZ)" ] || [ -z "$(PKG)" ]; then \
+		echo "usage: make fuzz PKG=<pkg> FUZZ=<FuzzName> [FUZZTIME=60s]"; \
+		echo "   e.g. make fuzz PKG=./db/seg FUZZ=FuzzCompress FUZZTIME=30s"; \
+		exit 2; \
+	fi
+	$(GO) test $(PKG) -run '^$$' -fuzz '^$(FUZZ)$$' -fuzztime $(or $(FUZZTIME),60s)
+
 test-all-race: override GO_FLAGS := -timeout $(default_test_race_timeout) $(GO_FLAGS) -race
 test-all-race: test-filtered
 
@@ -484,7 +494,7 @@ $(GOBINREL):
 
 $(GOBINREL)/protoc: | $(GOBINREL)
 	$(eval PROTOC_TMP := $(shell mktemp -d))
-	curl -sSL https://github.com/protocolbuffers/protobuf/releases/download/v35.0/protoc-35.0-$(PROTOC_OS)-$(ARCH).zip -o "$(PROTOC_TMP)/protoc.zip"
+	curl -sSL https://github.com/protocolbuffers/protobuf/releases/download/v35.1/protoc-35.1-$(PROTOC_OS)-$(ARCH).zip -o "$(PROTOC_TMP)/protoc.zip"
 	cd "$(PROTOC_TMP)" && unzip protoc.zip
 	cp "$(PROTOC_TMP)/bin/protoc" "$(GOBIN)"
 	mkdir -p "$(PROTOC_INCLUDE)"

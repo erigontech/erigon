@@ -8,7 +8,7 @@ participants:
     el_extra_params: ["--experimental.bal"]
     use_separate_vc: true
     vc_type: lighthouse
-    vc_image: ethpandaops/lighthouse:glamsterdam-devnet-4
+    vc_image: ethpandaops/lighthouse:glamsterdam-devnet-5
     count: 1
 global_log_level: 'debug'
 network_params:

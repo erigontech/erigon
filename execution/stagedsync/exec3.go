@@ -197,12 +197,6 @@ func ExecV3(ctx context.Context,
 
 	doms.EnableParaTrieDB(cfg.db)
 	doms.EnableTrieWarmup(true)
-	// Short-term: keep the trie warmuper's value cache off on the parallel
-	// path. The warmuper reads paraTrieDB (persisted state), so during a
-	// multi-block uncommitted batch (fork validation) it caches values stale
-	// w.r.t. sd.mem and feeds them to the trie, producing wrong roots. The
-	// page-cache warmer above is unaffected; the full fix lands separately.
-	doms.EnableWarmupCache(!isApplyingBlocks && !parallel)
 	doms.SetDeferCommitmentUpdates(false)
 	// Enable deferred commitment updates for fork validation and parallel initial sync.
 	// Deferred updates batch commitment calculations to block boundaries rather than
@@ -588,13 +582,6 @@ func (te *txExecutor) executeBlocks(ctx context.Context, startBlockNum uint64, m
 				return fmt.Errorf("nil block %d", blockNum)
 			}
 			go warmTxsHashes(b)
-
-			// Bug 2 fix from commit 43a64a0b66 (parallel executor: fix two cache bugs):
-			// validate stateCache entries against this block's parent hash so stale
-			// values from a prior fork-validation are cleared before reads.
-			if stateCache := te.doms.GetStateCache(); stateCache != nil {
-				stateCache.ValidateAndPrepare(b.ParentHash(), b.Hash())
-			}
 
 			var dbBAL types.BlockAccessList
 			// Read BAL through blockTx (overlay or execRoTx) — do NOT open

@@ -1148,6 +1148,15 @@ func (e *remoteRulesEngine) GetPostApplyMessageFunc() evmtypes.PostApplyMessageF
 	return e.engine.GetPostApplyMessageFunc()
 }
 
+func (e *remoteRulesEngine) ValidateBlockPostExecution(chainConfig *chain.Config, header *types.Header,
+	gasUsed, blobGasUsed uint64, checkReceipts, checkBloom bool,
+	receipts types.Receipts, txns types.Transactions, logger log.Logger) error {
+	if err := e.validateEngineReady(); err != nil {
+		return err
+	}
+	return e.engine.ValidateBlockPostExecution(chainConfig, header, gasUsed, blobGasUsed, checkReceipts, checkBloom, receipts, txns, logger)
+}
+
 func (e *remoteRulesEngine) VerifyHeader(_ rules.ChainHeaderReader, _ *types.Header, _ bool) error {
 	panic("remoteRulesEngine.VerifyHeader not supported")
 }
