@@ -23,6 +23,7 @@ import (
 	"sync"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/require"
@@ -206,7 +207,11 @@ func TestBuilderStaleSnapshotMustNotPoisonBranchCache(t *testing.T) {
 		CustomTxnProvider:     gate,
 	})
 	require.NoError(t, err)
-	<-gate.entered
+	select {
+	case <-gate.entered:
+	case <-time.After(time.Minute):
+		t.Fatal("build did not reach its transaction loop")
+	}
 
 	require.NoError(t, insertValidateAndUfc1By1(ctx, exec, chainPack.Blocks[1:3]))
 
