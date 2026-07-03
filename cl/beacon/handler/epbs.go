@@ -41,7 +41,6 @@ import (
 )
 
 const maxProposerPreferencesRequestItems = 2048
-const maxPTCDutiesRequestItems = 2048
 const maxEpbsJSONSize = 1 << 20
 const maxExecutionPayloadEnvelopeRequestSize = int64(execparams.MaxRlpBlockSize) * 4
 
@@ -51,7 +50,7 @@ func maxSignedExecutionPayloadBidSSZSize() int64 {
 
 func maxPayloadAttestationMessagesSSZSize(cfg *clparams.BeaconChainConfig) int64 {
 	msgSize := (&cltypes.PayloadAttestationMessage{Data: new(cltypes.PayloadAttestationData)}).EncodingSizeSSZ()
-	return int64(cfg.MaxPayloadAttestations) * int64(msgSize)
+	return int64(cfg.PtcSize) * int64(msgSize)
 }
 
 // ---- PTC Duties ----
@@ -87,10 +86,6 @@ func (a *ApiHandler) PostEthV1ValidatorDutiesPtc(w http.ResponseWriter, r *http.
 	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, maxEpbsJSONSize)).Decode(&idxsStr); err != nil {
 		return nil, beaconhttp.NewEndpointError(http.StatusBadRequest,
 			fmt.Errorf("invalid request body: %w", err))
-	}
-	if len(idxsStr) > maxPTCDutiesRequestItems {
-		return nil, beaconhttp.NewEndpointError(http.StatusBadRequest,
-			fmt.Errorf("too many validator indices: %d > %d", len(idxsStr), maxPTCDutiesRequestItems))
 	}
 	validatorIndices := make([]uint64, 0, len(idxsStr))
 	for _, s := range idxsStr {

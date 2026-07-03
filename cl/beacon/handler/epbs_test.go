@@ -53,7 +53,7 @@ func TestPostPayloadAttestationsRejectsNullMessage(t *testing.T) {
 func TestPostPayloadAttestationsRejectsOversizedSSZ(t *testing.T) {
 	_, _, _, _, _, handler, _, _, _, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), true)
 	msgSize := (&cltypes.PayloadAttestationMessage{Data: new(cltypes.PayloadAttestationData)}).EncodingSizeSSZ()
-	maxSize := int(handler.beaconChainCfg.MaxPayloadAttestations) * msgSize
+	maxSize := int(handler.beaconChainCfg.PtcSize) * msgSize
 
 	request := httptest.NewRequest(http.MethodPost, "/eth/v1/beacon/pool/payload_attestations", strings.NewReader(strings.Repeat("\x00", maxSize+1)))
 	request.Header.Set("Content-Type", "application/octet-stream")
@@ -62,6 +62,24 @@ func TestPostPayloadAttestationsRejectsOversizedSSZ(t *testing.T) {
 	handler.PostEthV1BeaconPoolPayloadAttestations(recorder, request)
 
 	require.Equal(t, http.StatusBadRequest, recorder.Code, recorder.Body.String())
+}
+
+func TestPostPayloadAttestationsAcceptsMoreThanBlockAggregateLimitSSZ(t *testing.T) {
+	_, _, _, _, _, handler, _, _, _, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), true)
+	msg := &cltypes.PayloadAttestationMessage{
+		Data: new(cltypes.PayloadAttestationData),
+	}
+	encoded, err := msg.EncodeSSZ(nil)
+	require.NoError(t, err)
+	body := strings.Repeat(string(encoded), int(handler.beaconChainCfg.MaxPayloadAttestations)+1)
+
+	request := httptest.NewRequest(http.MethodPost, "/eth/v1/beacon/pool/payload_attestations", strings.NewReader(body))
+	request.Header.Set("Content-Type", "application/octet-stream")
+	recorder := httptest.NewRecorder()
+
+	handler.PostEthV1BeaconPoolPayloadAttestations(recorder, request)
+
+	require.Equal(t, http.StatusOK, recorder.Code, recorder.Body.String())
 }
 
 func TestPostPayloadAttestationsAcceptsSSZContentTypeParameters(t *testing.T) {
@@ -95,21 +113,20 @@ func TestPostExecutionPayloadEnvelopeReturnsForkchoiceError(t *testing.T) {
 	require.Contains(t, recorder.Body.String(), "invalid execution payload")
 }
 
-func TestPostPtcDutiesRejectsTooManyValidators(t *testing.T) {
+func TestPostPtcDutiesDoesNotCapValidatorCount(t *testing.T) {
 	_, _, _, _, _, handler, _, _, _, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), true)
 	handler.beaconChainCfg.GloasForkEpoch = 0
-	indices := make([]string, maxPTCDutiesRequestItems+1)
+	indices := make([]string, 2049)
 	for i := range indices {
 		indices[i] = `"1"`
 	}
-	request := httptest.NewRequest(http.MethodPost, "/eth/v1/validator/duties/ptc/0", strings.NewReader("["+strings.Join(indices, ",")+"]"))
+	request := httptest.NewRequest(http.MethodPost, "/eth/v1/validator/duties/ptc/5", strings.NewReader("["+strings.Join(indices, ",")+"]"))
 	rctx := chi.NewRouteContext()
-	rctx.URLParams.Add("epoch", "0")
+	rctx.URLParams.Add("epoch", "5")
 	request = request.WithContext(context.WithValue(request.Context(), chi.RouteCtxKey, rctx))
 
 	_, err := handler.PostEthV1ValidatorDutiesPtc(httptest.NewRecorder(), request)
-	require.Error(t, err)
-	require.Contains(t, err.Error(), "too many validator indices")
+	require.NoError(t, err)
 }
 
 func TestPostExecutionPayloadBidAcceptsSSZ(t *testing.T) {

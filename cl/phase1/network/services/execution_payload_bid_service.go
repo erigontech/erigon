@@ -171,7 +171,7 @@ func (s *executionPayloadBidService) ProcessMessage(ctx context.Context, _ *uint
 			s.queuePendingBid(msg)
 			log.Trace("Queued execution payload bid waiting for dependencies",
 				"slot", slot, "builderIndex", builderIndex, "err", err)
-			return nil
+			return fmt.Errorf("%w: %v", ErrIgnore, err)
 		}
 		return err
 	}
@@ -180,17 +180,25 @@ func (s *executionPayloadBidService) ProcessMessage(ctx context.Context, _ *uint
 		s.queuePendingBid(msg)
 		log.Trace("Queued execution payload bid waiting for proposer preferences",
 			"slot", slot, "builderIndex", builderIndex)
-		return nil
+		return fmt.Errorf("%w: proposer preferences not available", ErrIgnore)
 	}
 
-	return s.validateAndStoreBid(msg, preferences)
+	if err := s.validateAndStoreBid(msg, preferences); err != nil {
+		if errors.Is(err, errBidDependencyUnavailable) {
+			s.queuePendingBid(msg)
+			log.Trace("Queued execution payload bid waiting for dependencies",
+				"slot", slot, "builderIndex", builderIndex, "err", err)
+			return fmt.Errorf("%w: %v", ErrIgnore, err)
+		}
+		return err
+	}
+	return nil
 }
 
 func (s *executionPayloadBidService) matchingProposerPreferences(msg *cltypes.SignedExecutionPayloadBid) (*cltypes.SignedProposerPreferences, bool, error) {
 	bid := msg.Message
-	parentState, err := s.forkchoiceStore.GetStateAtBlockRoot(bid.ParentBlockRoot, false)
-	if err != nil || parentState == nil {
-		return nil, false, fmt.Errorf("%w: state for parent_block_root %v not available", errBidDependencyUnavailable, bid.ParentBlockRoot)
+	if _, ok := s.forkchoiceStore.GetHeader(bid.ParentBlockRoot); !ok {
+		return nil, false, fmt.Errorf("%w: parent_block_root %v not available", errBidDependencyUnavailable, bid.ParentBlockRoot)
 	}
 	proposalEpoch := state.GetEpochAtSlot(s.beaconCfg, bid.Slot)
 	dependentRoot := s.shufflingDependentRoot(bid.ParentBlockRoot, proposalEpoch)
@@ -483,16 +491,20 @@ func (s *executionPayloadBidService) processPendingBids() {
 			return true // Preferences still not here, keep waiting
 		}
 
-		// Preferences arrived, remove from pending and process.
-		s.pendingBids.Delete(pendingKey)
-		s.pendingCount.Add(-1)
-
 		if err := s.validateAndStoreBid(job.msg, preferences); err != nil {
+			if errors.Is(err, errBidDependencyUnavailable) {
+				return true
+			}
+			s.pendingBids.Delete(pendingKey)
+			s.pendingCount.Add(-1)
 			log.Trace("Failed to process pending execution payload bid",
 				"slot", pendingKey.slot,
 				"builderIndex", pendingKey.builderIndex,
 				"err", err)
+			return true
 		}
+		s.pendingBids.Delete(pendingKey)
+		s.pendingCount.Add(-1)
 		return true
 	})
 }

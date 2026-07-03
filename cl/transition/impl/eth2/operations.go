@@ -1228,6 +1228,7 @@ func (I *impl) processAttestationPostAltair(
 	var payment *cltypes.BuilderPendingPayment
 	var paymentIndex int
 	var isSameSlot bool
+	var paymentWeightDelta uint64
 	if s.Version() >= clparams.GloasVersion {
 		slotsPerEpoch := beaconConfig.SlotsPerEpoch
 		if isCurrentEpoch {
@@ -1269,18 +1270,17 @@ func (I *impl) processAttestationPostAltair(
 			willSetNewFlag = true // [New in Gloas:EIP7732]
 		}
 
-		// [New in Gloas:EIP7732] Accumulate payment weight for same-slot attestations
 		if s.Version() >= clparams.GloasVersion &&
 			willSetNewFlag &&
 			isSameSlot &&
 			payment != nil && payment.Withdrawal != nil && payment.Withdrawal.Amount > 0 {
-			payment = payment.Clone().(*cltypes.BuilderPendingPayment)
-			payment.Weight += val
+			paymentWeightDelta += val
 		}
 	}
 
-	// [New in Gloas:EIP7732] Write back updated payment weight
-	if s.Version() >= clparams.GloasVersion && payment != nil {
+	if s.Version() >= clparams.GloasVersion && payment != nil && paymentWeightDelta > 0 {
+		payment = payment.Clone().(*cltypes.BuilderPendingPayment)
+		payment.Weight += paymentWeightDelta
 		payments := s.GetBuilderPendingPayments()
 		payments.Set(paymentIndex, payment)
 		s.SetBuilderPendingPayments(payments)

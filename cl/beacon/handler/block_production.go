@@ -2313,28 +2313,19 @@ func (a *ApiHandler) findBestAttestationsForBlockProduction(
 	return ret
 }
 
-// aggregatePayloadAttestations collects PTC votes from the pool for the parent
-// block, groups them by PayloadAttestationData, aggregates BLS signatures and
-// builds aggregation_bits indexed against the parent slot's PTC committee.
-// Returns up to MaxPayloadAttestations sorted by weight (most votes first).
-// [New in Gloas:EIP7732]
 func (a *ApiHandler) aggregatePayloadAttestations(
 	baseState *state.CachingBeaconState,
 	parentSlot uint64,
 	parentRoot common.Hash,
 ) *solid.ListSSZ[*cltypes.PayloadAttestation] {
-	maxPA := int(a.beaconChainCfg.MaxPayloadAttestations)
-	ptcSize := int(a.beaconChainCfg.PtcSize)
 	result := solid.NewStaticListSSZ[*cltypes.PayloadAttestation](
-		maxPA,
+		int(a.beaconChainCfg.MaxPayloadAttestations),
 		cltypes.PayloadAttestationSSZSizeWithPtcSize(a.beaconChainCfg.PtcSize),
 	)
-
 	if a.epbsPool == nil {
 		return result
 	}
 
-	// 1. Collect matching messages from pool (parent slot, parent root).
 	var msgs []*cltypes.PayloadAttestationMessage
 	for _, key := range a.epbsPool.PayloadAttestations.Keys() {
 		if key.Slot != parentSlot {
@@ -2353,106 +2344,12 @@ func (a *ApiHandler) aggregatePayloadAttestations(
 		return result
 	}
 
-	// 2. Get the PTC committee for the parent slot.
-	ptc, err := baseState.GetPTC(parentSlot)
+	aggregated, err := aggregatePayloadAttestationMessages(a.beaconChainCfg, baseState, msgs)
 	if err != nil {
-		log.Warn("BlockProduction: failed to get PTC for payload attestations", "slot", parentSlot, "err", err)
+		log.Warn("BlockProduction: failed to aggregate payload attestations", "slot", parentSlot, "err", err)
 		return result
 	}
-
-	validatorToPTCPositions := payloadAttestationPTCPositions(ptc)
-
-	// 3. Group messages by identical PayloadAttestationData.
-	type dataKey struct {
-		BeaconBlockRoot   common.Hash
-		Slot              uint64
-		PayloadPresent    bool
-		BlobDataAvailable bool
-	}
-	type group struct {
-		data *cltypes.PayloadAttestationData
-		// PTC-index -> signature bytes
-		sigs map[int][]byte
-	}
-	groups := make(map[dataKey]*group)
-
-	for _, msg := range msgs {
-		ptcPositions, ok := validatorToPTCPositions[msg.ValidatorIndex]
-		if !ok {
-			// Validator not in PTC for this slot; skip.
-			continue
-		}
-		dk := dataKey{
-			BeaconBlockRoot:   msg.Data.BeaconBlockRoot,
-			Slot:              msg.Data.Slot,
-			PayloadPresent:    msg.Data.PayloadPresent,
-			BlobDataAvailable: msg.Data.BlobDataAvailable,
-		}
-		g, exists := groups[dk]
-		if !exists {
-			g = &group{
-				data: msg.Data,
-				sigs: make(map[int][]byte),
-			}
-			groups[dk] = g
-		}
-		for _, ptcIdx := range ptcPositions {
-			if _, dup := g.sigs[ptcIdx]; !dup {
-				g.sigs[ptcIdx] = msg.Signature[:]
-			}
-		}
-	}
-
-	// 4. Build PayloadAttestation for each group.
-	type candidate struct {
-		att    *cltypes.PayloadAttestation
-		weight int // number of set bits
-	}
-	candidates := make([]candidate, 0, len(groups))
-
-	for _, g := range groups {
-		bits := solid.NewBitVector(ptcSize)
-		sigBytes := make([][]byte, 0, len(g.sigs))
-
-		for ptcIdx, sig := range g.sigs {
-			if err := bits.SetBitAt(ptcIdx, true); err != nil {
-				log.Warn("BlockProduction: failed to set PTC bit", "ptcIdx", ptcIdx, "err", err)
-				continue
-			}
-			sigCopy := make([]byte, len(sig))
-			copy(sigCopy, sig)
-			sigBytes = append(sigBytes, sigCopy)
-		}
-		if len(sigBytes) == 0 {
-			continue
-		}
-
-		aggSig, err := bls.AggregateSignatures(sigBytes)
-		if err != nil {
-			log.Warn("BlockProduction: failed to aggregate PTC signatures", "err", err)
-			continue
-		}
-		var sig96 common.Bytes96
-		copy(sig96[:], aggSig)
-
-		att := &cltypes.PayloadAttestation{
-			AggregationBits: bits,
-			Data:            g.data,
-			Signature:       sig96,
-		}
-		candidates = append(candidates, candidate{att: att, weight: len(g.sigs)})
-	}
-
-	// 5. Sort by weight descending.
-	sort.Slice(candidates, func(i, j int) bool {
-		return candidates[i].weight > candidates[j].weight
-	})
-
-	// 6. Take up to MaxPayloadAttestations.
-	for i := 0; i < len(candidates) && result.Len() < maxPA; i++ {
-		result.Append(candidates[i].att)
-	}
-	return result
+	return aggregated
 }
 
 // computeAttestationReward computes the reward for a specific attestation.
