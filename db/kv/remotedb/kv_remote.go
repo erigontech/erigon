@@ -198,7 +198,8 @@ func (db *DB) BuildMissedAccessors(_ context.Context, _ int) error { panic("not 
 func (db *DB) EnableReadAhead() kv.TemporalDebugDB                 { panic("not implemented") }
 func (db *DB) DisableReadAhead()                                   { panic("not implemented") }
 func (db *DB) Files() []string                                     { panic("not implemented") }
-func (db *DB) MergeLoop(ctx context.Context) error                 { panic("not implemented") }
+func (db *DB) MergeLoop(ctx context.Context) error { panic("not implemented") }
+func (db *DB) GoMergeLoop(ctx context.Context)     { panic("not implemented") }
 func (db *DB) BeginTemporalRo(ctx context.Context) (kv.TemporalTx, error) {
 	t, err := db.BeginRo(ctx) //nolint:gocritic
 	if err != nil {

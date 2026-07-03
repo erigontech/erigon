@@ -515,6 +515,10 @@ type TemporalDebugDB interface {
 
 	Files() []string
 	MergeLoop(ctx context.Context) error
+	// GoMergeLoop starts the merge loop in a background goroutine, registering
+	// it with the aggregator's WaitGroup before the goroutine is scheduled to
+	// avoid a data race with Close().
+	GoMergeLoop(ctx context.Context)
 }
 
 // FlushConfig holds optional behaviour for TemporalMemBatch.Flush, populated by

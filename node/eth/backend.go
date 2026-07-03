@@ -1129,11 +1129,11 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 	}
 
 	if !dbg.NoBackgroundMaintenance() {
-		go func() {
-			if err := temporalDb.Debug().MergeLoop(ctx); err != nil {
-				logger.Error("snapashot merge loop error", "err", err)
-			}
-		}()
+		// GoMergeLoop registers the goroutine with the aggregator's WaitGroup
+		// before the goroutine is scheduled, avoiding a data race where
+		// Aggregator.Close() can call wg.Wait() before the goroutine calls
+		// wg.Add(1) from inside its own body.
+		temporalDb.Debug().GoMergeLoop(ctx)
 	}
 
 	return backend, nil

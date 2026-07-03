@@ -718,6 +718,15 @@ func (db *DB) MergeLoop(ctx context.Context) error {
 	return db.stateFiles.MergeLoop(ctx)
 }
 
+// GoMergeLoop starts the merge loop in a background goroutine. It registers
+// the goroutine with the aggregator's WaitGroup before the goroutine is
+// scheduled, eliminating the data race between Aggregator.Close() (which calls
+// wg.Wait()) and a lazily-started MergeLoop goroutine (which would otherwise
+// call wg.Add(1) inside the goroutine body).
+func (db *DB) GoMergeLoop(ctx context.Context) {
+	db.stateFiles.GoMergeLoop(ctx)
+}
+
 func (tx *Tx) DomainFiles(domain ...kv.Domain) kv.VisibleFiles {
 	return tx.aggtx.DomainFiles(domain...)
 }
