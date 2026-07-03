@@ -154,7 +154,7 @@ func (m Mode) String() string {
 func modeEquals(a, b Mode) bool {
 	return a.History.toValue() == b.History.toValue() &&
 		a.Blocks.toValue() == b.Blocks.toValue() &&
-		a.CommitmentHistory.toValue() == b.CommitmentHistory.toValue()
+		commitmentHistoryOrDefault(a.CommitmentHistory).toValue() == commitmentHistoryOrDefault(b.CommitmentHistory).toValue()
 }
 
 func appendCommitmentHistory(sb *strings.Builder, m Mode) {

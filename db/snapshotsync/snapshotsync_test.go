@@ -327,9 +327,9 @@ func TestBuildBlackListForPruning_CommitmentHistoryDisabled(t *testing.T) {
 	}
 }
 
-// TestGetMinimumBlocksToDownload_MultiCutoff verifies the generalized single
-// pass returns correct parallel steps for two independent cutoffs.
-func TestGetMinimumBlocksToDownload_MultiCutoff(t *testing.T) {
+// TestGetMinimumBlocksToDownload_TwoCutoffs verifies the single pass resolves the
+// history and commitment-history cutoffs to their respective steps independently.
+func TestGetMinimumBlocksToDownload_TwoCutoffs(t *testing.T) {
 	const stepSize = 100
 	// blockNum -> baseTxNum. step(baseTxNum) = floor((baseTxNum-(stepSize-1))/stepSize).
 	br := &fakeBlockReader{
@@ -342,19 +342,19 @@ func TestGetMinimumBlocksToDownload_MultiCutoff(t *testing.T) {
 	}
 	// maxStateStep=150 → stateTxNum=15_000. Only block 100 (baseTxNum 10_000) is
 	// below the cutoff, so minToDownload=1000-100=900 and minBlock=1000-900=100.
-	minBlock, steps, err := getMinimumBlocksToDownload(context.Background(), br, 150, []uint64{100, 300}, stepSize)
+	minBlock, historyStep, commitmentStep, err := getMinimumBlocksToDownload(context.Background(), br, 150, stepSize, 100, 300)
 	if err != nil {
 		t.Fatal(err)
 	}
 	assert.Equal(t, uint64(100), minBlock)
 	// step(10_000) = (10_000-99)/100 = 99 ; step(30_000) = (30_000-99)/100 = 299.
-	assert.Equal(t, []uint64{99, 299}, steps)
+	assert.Equal(t, uint64(99), historyStep)
+	assert.Equal(t, uint64(299), commitmentStep)
 }
 
-// TestGetMinimumBlocksToDownload_SingleCutoffMatchesLegacy pins the Part-B
-// minBlockToDownload computation and the single-cutoff step, mirroring the
-// pre-refactor contract.
-func TestGetMinimumBlocksToDownload_SingleCutoff(t *testing.T) {
+// TestGetMinimumBlocksToDownload_MinBlock pins the minBlockToDownload computation and
+// the per-cutoff step against a smaller frozen range.
+func TestGetMinimumBlocksToDownload_MinBlock(t *testing.T) {
 	const stepSize = 100
 	br := &fakeBlockReader{
 		frozenMax: 300,
@@ -366,10 +366,12 @@ func TestGetMinimumBlocksToDownload_SingleCutoff(t *testing.T) {
 	}
 	// maxStateStep=150 → stateTxNum=15_000. Only block 100 (baseTxNum 10_000) is
 	// below the cutoff, so minToDownload=300-100=200 and minBlock=300-200=100.
-	minBlock, steps, err := getMinimumBlocksToDownload(context.Background(), br, 150, []uint64{200}, stepSize)
+	minBlock, historyStep, commitmentStep, err := getMinimumBlocksToDownload(context.Background(), br, 150, stepSize, 200, 200)
 	if err != nil {
 		t.Fatal(err)
 	}
 	assert.Equal(t, uint64(100), minBlock)
-	assert.Equal(t, []uint64{199}, steps) // step(20_000) = (20_000-99)/100 = 199
+	// step(20_000) = (20_000-99)/100 = 199.
+	assert.Equal(t, uint64(199), historyStep)
+	assert.Equal(t, uint64(199), commitmentStep)
 }

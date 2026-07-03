@@ -196,17 +196,19 @@ type blockReader interface {
 	TxnumReader() rawdbv3.TxNumsReader
 }
 
-// getMinimumBlocksToDownload walks the frozen bodies once and computes, per
-// requested cutoff in pruneToBlocks, the minimum state step to download
-// (returned in minStateSteps, parallel to pruneToBlocks), plus the overall
-// minimum number of blocks to download.
+func stepAtTxNum(txNum, stepSize uint64) uint64 {
+	if txNum < stepSize-1 {
+		return 0
+	}
+	return (txNum - (stepSize - 1)) / stepSize
+}
+
 func getMinimumBlocksToDownload(
 	ctx context.Context,
 	blockReader blockReader,
-	maxStateStep uint64,
-	pruneToBlocks []uint64,
-	stepSize uint64,
-) (minBlockToDownload uint64, minStateSteps []uint64, err error) {
+	maxStateStep, stepSize uint64,
+	stateHistoryPruneTo, commitmentHistoryPruneTo uint64,
+) (minBlockToDownload, minHistoryStep, minCommitmentHistoryStep uint64, err error) {
 	started := time.Now()
 	var iterations int64
 	defer func() {
@@ -217,10 +219,8 @@ func getMinimumBlocksToDownload(
 	}()
 	frozenBlocks := blockReader.Snapshots().SegmentsMax()
 	minToDownload := uint64(math.MaxUint64)
-	minStateSteps = make([]uint64, len(pruneToBlocks))
-	for i := range minStateSteps {
-		minStateSteps[i] = uint64(math.MaxUint32)
-	}
+	minHistoryStep = uint64(math.MaxUint32)
+	minCommitmentHistoryStep = uint64(math.MaxUint32)
 	stateTxNum := maxStateStep * stepSize
 	if err := blockReader.IterateFrozenBodies(func(blockNum, baseTxNum, txAmount uint64) error {
 		if iterations%1e6 == 0 {
@@ -229,14 +229,11 @@ func getMinimumBlocksToDownload(
 			}
 		}
 		iterations++
-		for i, pruneTo := range pruneToBlocks {
-			if blockNum == pruneTo {
-				if baseTxNum < (stepSize - 1) {
-					minStateSteps[i] = 0
-				} else {
-					minStateSteps[i] = (baseTxNum - (stepSize - 1)) / stepSize
-				}
-			}
+		if blockNum == stateHistoryPruneTo {
+			minHistoryStep = stepAtTxNum(baseTxNum, stepSize)
+		}
+		if blockNum == commitmentHistoryPruneTo {
+			minCommitmentHistoryStep = stepAtTxNum(baseTxNum, stepSize)
 		}
 		if stateTxNum <= baseTxNum { // only consider the block if it
 			return nil
@@ -250,10 +247,10 @@ func getMinimumBlocksToDownload(
 		}
 		return nil
 	}); err != nil {
-		return 0, nil, err
+		return 0, 0, 0, err
 	}
 
-	return frozenBlocks - minToDownload, minStateSteps, nil
+	return frozenBlocks - minToDownload, minHistoryStep, minCommitmentHistoryStep, nil
 }
 
 func getMaxStepRangeInSnapshots(preverified snapcfg.Preverified) (uint64, error) {
@@ -448,7 +445,6 @@ func SyncSnapshots(
 		downloadRequest := make([]services.DownloadRequest, 0, len(preverifiedBlockSnapshots.Items))
 
 		blockPrune, historyPrune := computeBlocksToPrune(blockReader, prune)
-		commitmentHistoryPrune := prune.CommitmentHistory.PruneTo(frozenBlocks)
 		blackListForPruning := make(map[string]struct{})
 		wantToPrune := downloadFilteringApplies(prune, cc)
 
@@ -457,22 +453,23 @@ func SyncSnapshots(
 			if err != nil {
 				return err
 			}
-			minBlockToDownload, minSteps, err := getMinimumBlocksToDownload(ctx, blockReader, maxStateStep, []uint64{historyPrune, commitmentHistoryPrune}, stepSize)
+			commitmentHistoryPrune := prune.CommitmentHistory.PruneTo(frozenBlocks)
+			minBlockToDownload, minHistoryStep, minCommitmentHistoryStep, err := getMinimumBlocksToDownload(
+				ctx, blockReader, maxStateStep, stepSize, historyPrune, commitmentHistoryPrune)
 			if err != nil {
 				return err
 			}
-			minStepToDownload := minSteps[0]
-			var minCommitmentHistoryStep uint64
-			if prune.CommitmentHistory.Enabled() {
-				minCommitmentHistoryStep = minSteps[1]
-				if minCommitmentHistoryStep > 0 {
-					log.Info(fmt.Sprintf("[%s] Filtering old commitment-history segments", logPrefix),
-						"pruneToBlock", commitmentHistoryPrune,
-						"minStep", minCommitmentHistoryStep)
-				}
+			// Commitment-history filtering is opt-in; a zero step disables it in
+			// buildBlackListForPruning, so clear it when the window is unbounded.
+			if !prune.CommitmentHistory.Enabled() {
+				minCommitmentHistoryStep = 0
+			} else if minCommitmentHistoryStep > 0 {
+				log.Info(fmt.Sprintf("[%s] Filtering old commitment-history segments", logPrefix),
+					"pruneToBlock", commitmentHistoryPrune,
+					"minStep", minCommitmentHistoryStep)
 			}
 
-			blackListForPruning, err = buildBlackListForPruning(prune, cc, minStepToDownload, minCommitmentHistoryStep, minBlockToDownload, blockPrune, preverifiedBlockSnapshots)
+			blackListForPruning, err = buildBlackListForPruning(prune, cc, minHistoryStep, minCommitmentHistoryStep, minBlockToDownload, blockPrune, preverifiedBlockSnapshots)
 			if err != nil {
 				return err
 			}
