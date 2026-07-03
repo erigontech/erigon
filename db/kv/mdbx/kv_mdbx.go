@@ -753,13 +753,6 @@ func (db *MdbxKV) backgroundSyncOnce() {
 	// Returns MDBX_RESULT_TRUE when there was no data pending for flush to disk, 0
 	// otherwise. MDBX_BUSY means the environment is used by other thread and
 	// nonblock=true.
-
-	tx, err := db.BeginRw(context.Background())
-	if err != nil {
-		return
-	}
-	defer tx.Rollback()
-
 	t := time.Now()
 	if err := db.env.SyncPoll(); err != nil {
 		db.log.Warn("[db] background sync", "label", db.opts.label, "err", err)
