@@ -755,12 +755,8 @@ func doDiffTorrentHashes(ctx context.Context, local map[string]string) error {
 	return nil
 }
 
-func StartGrpc(snServer *downloader.GrpcServer, addr string, creds *credentials.TransportCredentials, logger log.Logger) (*grpc.Server, error) {
-	var transportCredentials credentials.TransportCredentials
-	if creds != nil {
-		transportCredentials = *creds
-	}
-	grpcServer := grpcutil.NewServerWithOpts(transportCredentials)
+func StartGrpc(snServer *downloader.GrpcServer, addr string, creds credentials.TransportCredentials, logger log.Logger) (*grpc.Server, error) {
+	grpcServer := grpcutil.NewServerWithOpts(creds)
 	if snServer != nil {
 		downloaderproto.RegisterDownloaderServer(grpcServer, snServer)
 	}

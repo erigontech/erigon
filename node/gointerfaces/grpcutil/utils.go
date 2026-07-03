@@ -73,7 +73,7 @@ func TLS(tlsCACert, tlsCertFile, tlsKeyFile string) (credentials.TransportCreden
 }
 
 func NewServer(rateLimit uint32, creds credentials.TransportCredentials) *grpc.Server {
-	return NewServerWithOpts(creds, grpc.MaxConcurrentStreams(rateLimit)) // to force clients reduce concurrency level
+	return NewServerWithOpts(creds, grpc.MaxConcurrentStreams(rateLimit)) // to force clients to reduce concurrency level
 }
 
 func NewServerWithOpts(creds credentials.TransportCredentials, extraOpts ...grpc.ServerOption) *grpc.Server {

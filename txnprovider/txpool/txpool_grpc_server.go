@@ -317,12 +317,8 @@ func (s *GrpcServer) Nonce(ctx context.Context, in *txpoolproto.NonceRequest) (*
 // NewSlotsStreams - it's safe to use this class as non-pointer
 type NewSlotsStreams = grpcutil.StreamBroadcaster[txpoolproto.OnAddReply]
 
-func StartGrpc(txPoolServer txpoolproto.TxpoolServer, miningServer txpoolproto.MiningServer, addr string, creds *credentials.TransportCredentials, logger log.Logger) (*grpc.Server, error) {
-	var transportCredentials credentials.TransportCredentials
-	if creds != nil {
-		transportCredentials = *creds
-	}
-	grpcServer := grpcutil.NewServerWithOpts(transportCredentials,
+func StartGrpc(txPoolServer txpoolproto.TxpoolServer, miningServer txpoolproto.MiningServer, addr string, creds credentials.TransportCredentials, logger log.Logger) (*grpc.Server, error) {
+	grpcServer := grpcutil.NewServerWithOpts(creds,
 		grpc.ReadBufferSize(0),  // reduce buffers to save mem
 		grpc.WriteBufferSize(0), // reduce buffers to save mem
 	)
@@ -333,7 +329,7 @@ func StartGrpc(txPoolServer txpoolproto.TxpoolServer, miningServer txpoolproto.M
 		txpoolproto.RegisterMiningServer(grpcServer, miningServer)
 	}
 
-	if err := grpcutil.StartServer(grpcServer, addr, true, logger, "private RPC server fail"); err != nil {
+	if err := grpcutil.StartServer(grpcServer, addr, true, logger, "txpool gRPC server fail"); err != nil {
 		return nil, err
 	}
 	logger.Info("Started gRPC server", "on", addr)
