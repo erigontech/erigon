@@ -8,194 +8,181 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// TestKeyToHexNibbleHashWithCache_Correctness verifies that the cached variant
-// produces byte-identical output to the uncached KeyToHexNibbleHash for
-// account keys, storage keys, and whale storage patterns.
-func TestKeyToHexNibbleHashWithCache_Correctness(t *testing.T) {
+// TestKeyToHexNibbleHashCached_MatchesUncached verifies the cached variant is
+// byte-identical to KeyToHexNibbleHash regardless of key type or ordering — a
+// cache hit and a cache miss must both reproduce the uncached result.
+func TestKeyToHexNibbleHashCached_MatchesUncached(t *testing.T) {
 	t.Parallel()
 
-	cache := make(map[[20]byte][64]byte)
-
-	// Account keys (len <= 20)
 	t.Run("account_keys", func(t *testing.T) {
+		var c addrHashCache
 		for i := 0; i < 100; i++ {
 			addr := make([]byte, length.Addr)
 			addr[0] = byte(i)
 			addr[19] = byte(i * 7)
-			got := KeyToHexNibbleHashWithCache(addr, cache)
-			want := KeyToHexNibbleHash(addr)
-			assert.Equal(t, want, got, "account key %d mismatch", i)
+			assert.Equal(t, KeyToHexNibbleHash(addr), keyToHexNibbleHashCached(addr, &c), "account key %d", i)
 		}
 	})
 
-	// Storage keys (len > 20) — various addresses and slots
 	t.Run("storage_keys", func(t *testing.T) {
+		var c addrHashCache
 		for i := 0; i < 100; i++ {
-			key := make([]byte, 52) // 20 addr + 32 slot
-			key[0] = byte(i % 30)   // some address reuse
+			key := make([]byte, 52)
+			key[0] = byte(i % 30)
 			key[19] = byte(i)
-			key[20] = byte(i) // slot
+			key[20] = byte(i)
 			key[51] = byte(i * 3)
-			got := KeyToHexNibbleHashWithCache(key, cache)
-			want := KeyToHexNibbleHash(key)
-			assert.Equal(t, want, got, "storage key %d mismatch", i)
+			assert.Equal(t, KeyToHexNibbleHash(key), keyToHexNibbleHashCached(key, &c), "storage key %d", i)
 		}
 	})
 
-	// Whale storage: one address, many slots — primary target of the optimization
+	// Whale: one address, many slots — the reuse target.
 	t.Run("whale_storage", func(t *testing.T) {
-		whaleCache := make(map[[20]byte][64]byte)
+		var c addrHashCache
 		addr := make([]byte, length.Addr)
-		addr[0] = 0xDE
-		addr[1] = 0xAD
-		addr[19] = 0xBE
-
+		addr[0], addr[1], addr[19] = 0xDE, 0xAD, 0xBE
 		for slot := 0; slot < 1000; slot++ {
 			key := make([]byte, 52)
 			copy(key[:20], addr)
 			key[20] = byte(slot >> 8)
 			key[51] = byte(slot)
-
-			got := KeyToHexNibbleHashWithCache(key, whaleCache)
-			want := KeyToHexNibbleHash(key)
-			assert.Equal(t, want, got, "whale storage slot %d mismatch", slot)
-
-			// First slot populates cache; subsequent should hit
-			if slot == 0 {
-				require.Len(t, whaleCache, 1, "cache should have exactly 1 entry after first slot")
-			}
+			assert.Equal(t, KeyToHexNibbleHash(key), keyToHexNibbleHashCached(key, &c), "whale slot %d", slot)
 		}
-		// Only 1 addr cached despite 1000 calls
-		assert.Equal(t, 1, len(whaleCache), "whale cache should have exactly 1 entry")
 	})
 
-	// Mixed: 50 addresses × 50 slots each
-	t.Run("mixed_keys", func(t *testing.T) {
-		cache2 := make(map[[20]byte][64]byte)
-		for a := 0; a < 50; a++ {
-			for s := 0; s < 50; s++ {
-				key := make([]byte, 52)
-				key[0] = byte(a)
-				key[19] = byte(a * 3)
-				key[20] = byte(s >> 8)
-				key[51] = byte(s)
+	// Account/storage interleaving forces cache misses and address changes;
+	// the cache must never leak a stale prefix across an address change.
+	t.Run("interleaved", func(t *testing.T) {
+		var c addrHashCache
+		for i := 0; i < 200; i++ {
+			addr := make([]byte, length.Addr)
+			addr[0] = byte(i % 4) // only 4 distinct addresses, non-consecutive
+			addr[19] = byte(i % 4)
+			assert.Equal(t, KeyToHexNibbleHash(addr), keyToHexNibbleHashCached(addr, &c), "acct %d", i)
 
-				got := KeyToHexNibbleHashWithCache(key, cache2)
-				want := KeyToHexNibbleHash(key)
-				assert.Equal(t, want, got, "mixed addr=%d slot=%d mismatch", a, s)
-			}
+			key := make([]byte, 52)
+			copy(key[:20], addr)
+			key[20] = byte(i)
+			key[51] = byte(i)
+			assert.Equal(t, KeyToHexNibbleHash(key), keyToHexNibbleHashCached(key, &c), "storage %d", i)
 		}
-		assert.Equal(t, 50, len(cache2), "should cache exactly 50 unique addresses")
 	})
+}
+
+// TestAddrHashCache_ReuseAndInvalidation pins the cache state transitions the
+// reuse depends on: populated on first storage slot, retained across same-addr
+// slots, replaced on an address change, cleared by reset.
+func TestAddrHashCache_ReuseAndInvalidation(t *testing.T) {
+	t.Parallel()
+	var c addrHashCache
+	require.False(t, c.valid)
+
+	mkKey := func(addrByte, slot byte) []byte {
+		key := make([]byte, 52)
+		key[0] = addrByte
+		key[51] = slot
+		return key
+	}
+
+	keyToHexNibbleHashCached(mkKey(0xAA, 0), &c)
+	require.True(t, c.valid)
+	require.Equal(t, byte(0xAA), c.addr[0])
+	firstNibs := c.nibs
+
+	// Same address, different slot: prefix retained unchanged.
+	keyToHexNibbleHashCached(mkKey(0xAA, 1), &c)
+	require.Equal(t, firstNibs, c.nibs)
+
+	// Different address: prefix replaced.
+	keyToHexNibbleHashCached(mkKey(0xBB, 0), &c)
+	require.Equal(t, byte(0xBB), c.addr[0])
+	require.NotEqual(t, firstNibs, c.nibs)
+
+	// Account key does not touch the cache.
+	acctBefore := c.addr
+	keyToHexNibbleHashCached(make([]byte, length.Addr), &c)
+	require.Equal(t, acctBefore, c.addr)
+
+	c.reset()
+	require.False(t, c.valid)
+}
+
+// TestUpdatesHashKey_MatchesHasher verifies hashKey reproduces the configured
+// hasher across every mode that hashes plain keys.
+func TestUpdatesHashKey_MatchesHasher(t *testing.T) {
+	t.Parallel()
+	keys := [][]byte{
+		{0x01, 0x02},
+		make([]byte, length.Addr),
+		func() []byte { k := make([]byte, 52); k[0], k[51] = 0x11, 0x22; return k }(),
+	}
+	for _, mode := range []Mode{ModeDirect, ModeUpdate, ModeParallel} {
+		u := NewUpdates(mode, t.TempDir(), KeyToHexNibbleHash)
+		require.True(t, u.addrCacheReuse, "cache must be enabled for the nibblizing hasher")
+		for _, k := range keys {
+			assert.Equal(t, KeyToHexNibbleHash(k), u.hashKey(k), "mode=%d key=%x", mode, k)
+		}
+	}
+}
+
+func TestHasherReusesAddrPrefix(t *testing.T) {
+	t.Parallel()
+	assert.True(t, hasherReusesAddrPrefix(KeyToHexNibbleHash))
+	assert.False(t, hasherReusesAddrPrefix(keyHasherNoop))
+}
+
+func benchKeys(numAddr, slotsPer int) [][]byte {
+	keys := make([][]byte, 0, numAddr*slotsPer)
+	for a := 0; a < numAddr; a++ {
+		for s := 0; s < slotsPer; s++ {
+			k := make([]byte, 52)
+			k[0] = byte(a)
+			k[1] = byte(a >> 8)
+			k[19] = byte(a * 7)
+			k[20] = byte(s >> 8)
+			k[51] = byte(s)
+			keys = append(keys, k)
+		}
+	}
+	return keys
+}
+
+var benchWorkloads = []struct {
+	name    string
+	numAddr int
+	slots   int
+}{
+	{"whale_1x1000", 1, 1000},
+	{"spread5_5x200", 5, 200},
+	{"spread100_100x10", 100, 10},
+	{"scatter1000_1000x1", 1000, 1},
 }
 
 func Benchmark_KeyNibbleHash_NoCache(b *testing.B) {
-	// Whale storage: 1 addr × 1000 slots
-	keys := make([][]byte, 1000)
-	addr := []byte{0xDE, 0xAD, 0xBE, 0xEF, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06,
-		0x07, 0x08, 0x09, 0x0A, 0x0B, 0x0C, 0x0D, 0x0E, 0x0F, 0x10}
-	for i := range keys {
-		keys[i] = make([]byte, 52)
-		copy(keys[i][:20], addr)
-		keys[i][20] = byte(i >> 8)
-		keys[i][51] = byte(i)
-	}
-
-	b.ResetTimer()
-	b.ReportAllocs()
-	for i := 0; i < b.N; i++ {
-		for _, key := range keys {
-			_ = KeyToHexNibbleHash(key)
-		}
+	for _, w := range benchWorkloads {
+		keys := benchKeys(w.numAddr, w.slots)
+		b.Run(w.name, func(b *testing.B) {
+			b.ReportAllocs()
+			for i := 0; i < b.N; i++ {
+				for _, k := range keys {
+					_ = KeyToHexNibbleHash(k)
+				}
+			}
+		})
 	}
 }
 
-func Benchmark_KeyNibbleHash_WithCache_Whale(b *testing.B) {
-	// Whale storage: 1 addr × 1000 slots
-	keys := make([][]byte, 1000)
-	addr := []byte{0xDE, 0xAD, 0xBE, 0xEF, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06,
-		0x07, 0x08, 0x09, 0x0A, 0x0B, 0x0C, 0x0D, 0x0E, 0x0F, 0x10}
-	for i := range keys {
-		keys[i] = make([]byte, 52)
-		copy(keys[i][:20], addr)
-		keys[i][20] = byte(i >> 8)
-		keys[i][51] = byte(i)
-	}
-	cache := make(map[[20]byte][64]byte)
-
-	b.ResetTimer()
-	b.ReportAllocs()
-	for i := 0; i < b.N; i++ {
-		for _, key := range keys {
-			_ = KeyToHexNibbleHashWithCache(key, cache)
-		}
-	}
-}
-
-func Benchmark_KeyNibbleHash_WithCache_Spread5(b *testing.B) {
-	// 5 addresses × 200 slots each
-	keys := make([][]byte, 1000)
-	for i := range keys {
-		keys[i] = make([]byte, 52)
-		addrIdx := byte(i / 200)
-		slotIdx := i % 200
-		keys[i][0] = addrIdx
-		keys[i][19] = addrIdx * 7
-		keys[i][20] = byte(slotIdx >> 8)
-		keys[i][51] = byte(slotIdx)
-	}
-	cache := make(map[[20]byte][64]byte)
-
-	b.ResetTimer()
-	b.ReportAllocs()
-	for i := 0; i < b.N; i++ {
-		for _, key := range keys {
-			_ = KeyToHexNibbleHashWithCache(key, cache)
-		}
-	}
-}
-
-func Benchmark_KeyNibbleHash_WithCache_Spread100(b *testing.B) {
-	// 100 addresses × 10 slots each
-	keys := make([][]byte, 1000)
-	for i := range keys {
-		keys[i] = make([]byte, 52)
-		addrIdx := byte(i / 10)
-		slotIdx := i % 10
-		keys[i][0] = addrIdx
-		keys[i][19] = addrIdx * 3
-		keys[i][20] = byte(slotIdx >> 8)
-		keys[i][51] = byte(slotIdx)
-	}
-	cache := make(map[[20]byte][64]byte)
-
-	b.ResetTimer()
-	b.ReportAllocs()
-	for i := 0; i < b.N; i++ {
-		for _, key := range keys {
-			_ = KeyToHexNibbleHashWithCache(key, cache)
-		}
-	}
-}
-
-func Benchmark_KeyNibbleHash_NoCache_Spread100(b *testing.B) {
-	// 100 addresses × 10 slots each — baseline
-	keys := make([][]byte, 1000)
-	for i := range keys {
-		keys[i] = make([]byte, 52)
-		addrIdx := byte(i / 10)
-		slotIdx := i % 10
-		keys[i][0] = addrIdx
-		keys[i][19] = addrIdx * 3
-		keys[i][20] = byte(slotIdx >> 8)
-		keys[i][51] = byte(slotIdx)
-	}
-
-	b.ResetTimer()
-	b.ReportAllocs()
-	for i := 0; i < b.N; i++ {
-		for _, key := range keys {
-			_ = KeyToHexNibbleHash(key)
-		}
+func Benchmark_KeyNibbleHash_Cached(b *testing.B) {
+	for _, w := range benchWorkloads {
+		keys := benchKeys(w.numAddr, w.slots)
+		b.Run(w.name, func(b *testing.B) {
+			b.ReportAllocs()
+			for i := 0; i < b.N; i++ {
+				var c addrHashCache
+				for _, k := range keys {
+					_ = keyToHexNibbleHashCached(k, &c)
+				}
+			}
+		})
 	}
 }

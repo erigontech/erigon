@@ -23,6 +23,7 @@ import (
 	"errors"
 	"fmt"
 	"math/bits"
+	"reflect"
 	"slices"
 	"strings"
 	"sync"
@@ -1453,10 +1454,11 @@ type Updates struct {
 	curArena int
 	gen      uint64
 
-	// addrNibblesCache caches nibblized keccak(addr) for storage keys, avoiding
-	// redundant hashing when one address has many dirty storage slots (whale storage).
-	// Keyed by 20-byte address, value is the 64 nibbles of the address hash.
-	addrNibblesCache map[[20]byte][64]byte
+	// addrCache reuses the nibblized keccak(addr) prefix across a run of storage
+	// keys sharing one address (whale storage). Enabled only when hasher is the
+	// nibblizing hasher whose key layout the reuse assumes (addrCacheReuse).
+	addrCache      addrHashCache
+	addrCacheReuse bool
 }
 
 // arenaRingSize is how many byte arenas HashSort cycles; raising it only adds memory headroom, never affects correctness.
@@ -1504,6 +1506,22 @@ type keyHasher func(key []byte) []byte
 
 func keyHasherNoop(key []byte) []byte { return key }
 
+// hasherReusesAddrPrefix reports whether h is the nibblizing hasher whose key
+// layout keyToHexNibbleHashCached assumes; only then may the address-prefix
+// cache be used in place of h.
+func hasherReusesAddrPrefix(h keyHasher) bool {
+	return reflect.ValueOf(h).Pointer() == reflect.ValueOf(KeyToHexNibbleHash).Pointer()
+}
+
+// hashKey nibblizes key, reusing the cached address prefix for a run of storage
+// keys sharing one address when the configured hasher permits it.
+func (t *Updates) hashKey(key []byte) []byte {
+	if t.addrCacheReuse {
+		return keyToHexNibbleHashCached(key, &t.addrCache)
+	}
+	return t.hasher(key)
+}
+
 // NewEmpty creates a fresh Updates matching the receiver. The streaming sink must
 // carry over, or a buffer rotated mid-stream silently computes a stale root.
 func (t *Updates) NewEmpty() *Updates {
@@ -1515,9 +1533,10 @@ func (t *Updates) NewEmpty() *Updates {
 
 func NewUpdates(m Mode, tmpdir string, hasher keyHasher) *Updates {
 	t := &Updates{
-		hasher: hasher,
-		tmpdir: tmpdir,
-		mode:   m,
+		hasher:         hasher,
+		tmpdir:         tmpdir,
+		mode:           m,
+		addrCacheReuse: hasherReusesAddrPrefix(hasher),
 	}
 	switch t.mode {
 	case ModeDirect:
@@ -1529,7 +1548,6 @@ func NewUpdates(m Mode, tmpdir string, hasher keyHasher) *Updates {
 	case ModeParallel:
 		t.keys = make(map[string]struct{})
 		t.parallel = newParallelUpdate()
-		t.addrNibblesCache = make(map[[20]byte][64]byte)
 	}
 	return t
 }
@@ -1612,7 +1630,7 @@ func (t *Updates) TouchPlainKey(key string, val []byte, fn func(c *KeyUpdate, va
 		} else {
 			pivot := &KeyUpdate{
 				plainKey:  key,
-				hashedKey: t.hasher(common.ToBytesZeroCopy(key)),
+				hashedKey: t.hashKey(common.ToBytesZeroCopy(key)),
 				update:    new(Update),
 			}
 			fn(pivot, val)
@@ -1622,7 +1640,7 @@ func (t *Updates) TouchPlainKey(key string, val []byte, fn func(c *KeyUpdate, va
 	case ModeDirect:
 		if _, ok := t.keys[key]; !ok {
 			keyBytes := common.ToBytesZeroCopy(key)
-			hashedKey := t.hasher(keyBytes)
+			hashedKey := t.hashKey(keyBytes)
 
 			err := t.etl.Collect(hashedKey, keyBytes)
 			if err != nil {
@@ -1633,7 +1651,7 @@ func (t *Updates) TouchPlainKey(key string, val []byte, fn func(c *KeyUpdate, va
 	case ModeParallel:
 		if _, ok := t.keys[key]; !ok {
 			keyBytes := common.ToBytesZeroCopy(key)
-			hashedKey := t.hasher(keyBytes)
+			hashedKey := t.hashKey(keyBytes)
 			ik := t.parallel.internKey(keyBytes)
 			t.parallel.Insert(hashedKey, ik, nil)
 			if t.streaming && t.streamer != nil {
@@ -1684,7 +1702,7 @@ func (t *Updates) TouchPlainKeyDirect(key string, update *Update) {
 		} else {
 			pivot := &KeyUpdate{
 				plainKey:  key,
-				hashedKey: t.hasher(common.ToBytesZeroCopy(key)),
+				hashedKey: t.hashKey(common.ToBytesZeroCopy(key)),
 				update:    new(Update),
 			}
 			*pivot.update = *update
@@ -1694,7 +1712,7 @@ func (t *Updates) TouchPlainKeyDirect(key string, update *Update) {
 	case ModeDirect:
 		if _, ok := t.keys[key]; !ok {
 			keyBytes := common.ToBytesZeroCopy(key)
-			hashedKey := t.hasher(keyBytes)
+			hashedKey := t.hashKey(keyBytes)
 
 			err := t.etl.Collect(hashedKey, keyBytes)
 			if err != nil {
@@ -1704,12 +1722,7 @@ func (t *Updates) TouchPlainKeyDirect(key string, update *Update) {
 		}
 	case ModeParallel:
 		keyBytes := common.ToBytesZeroCopy(key)
-		var hashedKey []byte
-		if t.addrNibblesCache != nil {
-			hashedKey = KeyToHexNibbleHashWithCache(keyBytes, t.addrNibblesCache)
-		} else {
-			hashedKey = t.hasher(keyBytes)
-		}
+		hashedKey := t.hashKey(keyBytes)
 		// Carry the value so the fold uses it directly instead of re-reading ctx, which lags cc.state.
 		u := new(Update)
 		*u = *update
@@ -2036,6 +2049,7 @@ func (t *Updates) Reset() {
 	}
 	t.curArena = 0
 	t.gen = 0
+	t.addrCache.reset()
 }
 
 type KeyUpdate struct {
