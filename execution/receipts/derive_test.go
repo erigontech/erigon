@@ -45,3 +45,22 @@ func TestDeriveFieldsSetsBloom(t *testing.T) {
 	assert.Equal(t, blockHash, withLogs.BlockHash)
 	assert.Equal(t, blockHash, noLogs.BlockHash)
 }
+
+// Replay-produced receipts arrive with Bloom already computed; DeriveFields
+// must reuse it instead of hashing the same logs again.
+func TestDeriveFieldsPreservesExistingBloom(t *testing.T) {
+	var preset types.Bloom
+	preset[0] = 0x80
+	preset[types.BloomByteLength-1] = 0x01
+	withPresetBloom := &types.Receipt{
+		Bloom: preset,
+		Logs: []*types.Log{{
+			Address: common.HexToAddress("0x01"),
+			Topics:  []common.Hash{common.HexToHash("0x02")},
+		}},
+	}
+
+	DeriveFields(types.Receipts{withPresetBloom}, common.HexToHash("0xabc"))
+
+	assert.Equal(t, preset, withPresetBloom.Bloom)
+}

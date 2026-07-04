@@ -57,6 +57,13 @@ func MarshalReceipt(
 		from, _ = txn.Sender(*signer)
 	}
 
+	// Receipts from replay or cache reads arrive with Bloom populated; hash
+	// the logs only when a source left it unset.
+	logsBloom := receipt.Bloom
+	if logsBloom.IsEmpty() && len(receipt.Logs) > 0 {
+		logsBloom = types.CreateBloom(types.Receipts{receipt})
+	}
+
 	var logsToMarshal any
 
 	if withBlockTimestamp {
@@ -89,7 +96,7 @@ func MarshalReceipt(
 		"cumulativeGasUsed": hexutil.Uint64(receipt.CumulativeGasUsed),
 		"contractAddress":   nil,
 		"logs":              logsToMarshal,
-		"logsBloom":         types.CreateBloom(types.Receipts{receipt}),
+		"logsBloom":         logsBloom,
 	}
 
 	if !chainConfig.IsLondon(header.Number.Uint64()) {
