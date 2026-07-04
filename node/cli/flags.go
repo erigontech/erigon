@@ -252,9 +252,14 @@ func applyRemainingEthFlags(ctx *cli.Context, cfg *ethconfig.Config, logger log.
 		cfg.PersistReceiptsCacheV2 = true
 	}
 
-	mode, err := prune.FromCli(ctx.String(PruneModeFlag.Name), distance, blockDistance)
+	commitmentHistoryOlder := ctx.Uint64(utils.CommitmentHistoryDistanceFlag.Name)
+	mode, err := prune.FromCli(ctx.String(PruneModeFlag.Name), distance, blockDistance, commitmentHistoryOlder)
 	if err != nil {
 		utils.Fatalf(fmt.Sprintf("error while parsing mode: %v", err))
+	}
+
+	if err := mode.Validate(); err != nil {
+		utils.Fatalf("%v", err)
 	}
 
 	cfg.Prune = mode
@@ -335,9 +340,15 @@ func ApplyFlagsForEthConfigCobra(f *pflag.FlagSet, cfg *ethconfig.Config) {
 		utils.Fatalf("%v", err)
 	}
 
-	mode, err := prune.FromCli(pruneMode, pruneDistance, pruneBlockDistance)
+	commitmentHistoryOlder := cobraUint64ValueOrDefault(f, utils.CommitmentHistoryDistanceFlag.Name, 0)
+
+	mode, err := prune.FromCli(pruneMode, pruneDistance, pruneBlockDistance, commitmentHistoryOlder)
 	if err != nil {
 		utils.Fatalf(fmt.Sprintf("error while parsing mode: %v", err))
+	}
+
+	if err := mode.Validate(); err != nil {
+		utils.Fatalf("%v", err)
 	}
 
 	cfg.Prune = mode
@@ -372,6 +383,17 @@ func cobraStringValueOrDefault(f *pflag.FlagSet, name, fallback string) string {
 		return fallback
 	}
 	v, err := f.GetString(name)
+	if err != nil {
+		utils.Fatalf("failed to read --%s: %v", name, err)
+	}
+	return v
+}
+
+func cobraUint64ValueOrDefault(f *pflag.FlagSet, name string, fallback uint64) uint64 {
+	if f.Lookup(name) == nil {
+		return fallback
+	}
+	v, err := f.GetUint64(name)
 	if err != nil {
 		utils.Fatalf("failed to read --%s: %v", name, err)
 	}
