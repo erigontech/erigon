@@ -153,6 +153,47 @@ Both depend on the mid-block step checkpoint being expressible from a fold, whic
 same storage-model concern as the flush-boundary crux above. Until then the eager
 fold-gate stands.
 
+## Unified shutdown model — ALL exits through one cancel-with-cause flow (agreed 2026-07-04)
+
+The cancel processing grew ad hoc: exec self-decides size/max/exhausted (via
+`execLoopShouldExit` + `triggerBatchCommitment`), while the apply loop only cancels
+for a deferred wrong-root (`deliberateCancel(errDeliberateStop)`); channel-close is
+exec-owned (`closeApplyChannels`, commitResults→applyResults). The first orphan fix
+made it worse by adding a *size* decision + a channel-freeze sentinel to exec.
+
+Target: **one coordinator, one flow.** The apply/results loop is the sole coordinator.
+It consumes every blockResult (state frontier E, `Exhausted`, `BlockNum` vs maxBlockNum)
+and every commit result (fold frontier F) and can read `sizeEst`, so it detects every
+stop condition and issues exactly one `cancelExecLoop(cause)`:
+
+| condition          | cause                                   | commit boundary | stage return       |
+|--------------------|-----------------------------------------|-----------------|--------------------|
+| reached maxBlock   | `stop{block:maxBlk, kind:done}`         | maxBlk          | `nil`              |
+| dispatch exhausted | `stop{block:E,      kind:more}`         | E               | `ErrLoopExhausted` |
+| size over budget   | `stop{block:max(E,F), kind:more}`       | max(E,F)        | `ErrLoopExhausted` |
+| wrong root         | `stop{block:fail.block, kind:bad, err}` | (unwind)        | `fail.err` + unwind|
+
+Everything else is purely reactive to the cause:
+- **Exec**: remove `execLoopShouldExit` and the size/max/exhausted self-stop; exec
+  produces until cancelled, then uses the *existing* `ctx.Done` drain (forward completed
+  blockResults, then `closeApplyChannels` in the existing commit→apply order). `M` from
+  the cause bounds how far it forwards.
+- **Calculator**: wind down to `M` from `context.Cause` (cap fold at M), drain `cc.in`,
+  close `rootResults`. Delete the channel-freeze (`foldFreezeRequest`, `freezeCommitmentFold`,
+  `foldFrozen`, exec `sizeCutPending`/"+1").
+- **`execLoopExitCheck` + the stage return value derive ONLY from `context.Cause`** — no
+  per-path special-casing; `stop{kind:done}`→nil, `kind:more`→ErrLoopExhausted,
+  `kind:bad`→fail.err+unwind.
+
+Invariants preserved: channel-close stays exec-owned + ordered (commitResults then
+applyResults); "apply exits when applyResults closes" holds (apply cancels, exec drains
++ closes, apply drains + commits). The one race to fix: `sendResult`'s
+`select { applyResults<-r ; <-ctx.Done() }` must let the data arm win for a clean
+`stop` so block M reaches apply (for `kind:bad` either arm is fine).
+
+Consensus-critical (batch boundary + shutdown): must clear hive engine-api + eest-devnet
+(BAL) + a mainnet-tip restart gate before merge.
+
 ## Why not the lighter variant
 
 The low-risk alternative (keep the cut in the exec loop, but defer honoring it while
