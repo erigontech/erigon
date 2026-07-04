@@ -331,7 +331,6 @@ Loop:
 				// segType: f.Type, Unsupported
 				version:  f.Version,
 				Range:    Range{f.From, f.To},
-				frozen:   true,
 				filePath: filePath,
 			}
 		}
@@ -449,7 +448,7 @@ func caplinStateVisibleSegments(dirtySegments *btree.BTreeG[*DirtySegment]) []*V
 }
 
 // buildVisible builds a fresh visible generation from the current dirty set. Must
-// run under the dirty lock — UpdateFiles guarantees this.
+// run under the dirty lock — Mutate guarantees this.
 func (s *CaplinStateSnapshots) buildVisible(dirtyFiles DirtyFiles) *VisibleFiles {
 	segments := make([]VisibleSegments, len(dirtyFiles))
 	for idx, dirtySegments := range dirtyFiles {
@@ -461,7 +460,7 @@ func (s *CaplinStateSnapshots) buildVisible(dirtyFiles DirtyFiles) *VisibleFiles
 // update mutates `dirtyFiles` via mutate and republishes the visible set atomically
 // (single lock), then refreshes idxMax.
 func (s *CaplinStateSnapshots) update(mutate func(dirtyFiles DirtyFiles) ([]RetiredSegment, error)) error {
-	err := s.UpdateFiles(mutate, s.buildVisible)
+	err := s.Mutate(mutate, s.buildVisible)
 	s.idxMax.Store(s.idxAvailability())
 	s.indicesReady.Store(true)
 	return err

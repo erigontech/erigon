@@ -1062,7 +1062,7 @@ func TestRoSnapshots_BundleRefcountReclamation(t *testing.T) {
 	headers := v.Segments(snaptype2.Headers)
 	require.NotEmpty(headers)
 	victim := headers[len(headers)-1].src
-	require.False(victim.frozen)
+	require.False(victim.isFrozen(s.snCfg))
 	victimPath := victim.FilePath()
 	require.FileExists(victimPath)
 
@@ -1164,7 +1164,7 @@ func TestCloseWhatNotInList_DropsUnopenedSegment(t *testing.T) {
 	s := NewRoSnapshots(ethconfig.BlocksFreezing{ChainName: networkname.Mainnet}, t.TempDir(), snaptype2.BlockSnapshotTypes, true, logger)
 	defer s.Close()
 
-	sn := NewDirtySegment(snaptype2.Headers, version.V1_0, 0, 1_000, false)
+	sn := NewDirtySegment(snaptype2.Headers, version.V1_0, 0, 1_000)
 	require.Nil(sn.Decompressor)
 	s.dirtyFiles[snaptype2.Headers.Enum()].Set(sn)
 

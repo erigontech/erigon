@@ -195,8 +195,7 @@ Loop:
 				sn = snapshotsync.NewDirtySegment(
 					snaptype.BeaconBlocks,
 					f.Version,
-					f.From, f.To,
-					true)
+					f.From, f.To)
 			}
 			if err := sn.Open(s.dir); err != nil {
 				if errors.Is(err, os.ErrNotExist) {
@@ -251,8 +250,7 @@ Loop:
 				sn = snapshotsync.NewDirtySegment(
 					snaptype.BlobSidecars,
 					f.Version,
-					f.From, f.To,
-					true)
+					f.From, f.To)
 			}
 			if err := sn.Open(s.dir); err != nil {
 				if errors.Is(err, os.ErrNotExist) {
@@ -288,7 +286,7 @@ Loop:
 }
 
 // buildVisible builds a fresh visible generation from the current dirty set. Must
-// run under the dirty lock — UpdateFiles guarantees this.
+// run under the dirty lock — Mutate guarantees this.
 func (s *CaplinSnapshots) buildVisible(dirtyFiles snapshotsync.DirtyFiles) *snapshotsync.VisibleFiles {
 	segments := make([]snapshotsync.VisibleSegments, snaptype.MaxEnum)
 	segments[snaptype.BeaconBlocks.Enum()] = snapshotsync.RecalcVisibleSegments(dirtyFiles[snaptype.BeaconBlocks.Enum()])
@@ -299,7 +297,7 @@ func (s *CaplinSnapshots) buildVisible(dirtyFiles snapshotsync.DirtyFiles) *snap
 // update mutates `dirtyFiles` via mutate and republishes the visible set atomically
 // (single lock), then refreshes idxMax.
 func (s *CaplinSnapshots) update(mutate func(dirtyFiles snapshotsync.DirtyFiles) ([]snapshotsync.RetiredSegment, error)) error {
-	err := s.UpdateFiles(mutate, s.buildVisible)
+	err := s.Mutate(mutate, s.buildVisible)
 	s.idxMax.Store(s.idxAvailability())
 	return err
 }

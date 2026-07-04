@@ -205,18 +205,15 @@ type DirtySegment struct {
 	segType snaptype.Type
 	version snaptype.Version
 
-	frozen bool
-
 	// only caplin state
 	filePath string
 }
 
-func NewDirtySegment(segType snaptype.Type, version snaptype.Version, from uint64, to uint64, frozen bool) *DirtySegment {
+func NewDirtySegment(segType snaptype.Type, version snaptype.Version, from uint64, to uint64) *DirtySegment {
 	return &DirtySegment{
 		segType: segType,
 		version: version,
 		Range:   Range{from, to},
-		frozen:  frozen,
 	}
 }
 
@@ -328,6 +325,10 @@ func (s *DirtySegment) FilePaths(basePath string) (relativePaths []string) {
 
 func (s *DirtySegment) FileInfo(dir string) snaptype.FileInfo {
 	return s.Type().FileInfoByMask(dir, s.from, s.to)
+}
+
+func (s *DirtySegment) isFrozen(snCfg *snapcfg.Cfg) bool {
+	return snCfg.IsFrozen(s.segType.Enum(), s.from, s.to)
 }
 
 func (s *DirtySegment) GetRange() (from, to uint64) { return s.from, s.to }
@@ -817,7 +818,7 @@ func RecalcVisibleSegments(dirtySegments *btree.BTreeG[*DirtySegment]) VisibleSe
 }
 
 // buildVisible builds a fresh visible generation from the current dirty set. Must
-// run under the dirty lock — UpdateFiles guarantees this.
+// run under the dirty lock — Mutate guarantees this.
 func (s *RoSnapshots) buildVisible(dirtyFiles DirtyFiles, alignMin bool) *VisibleFiles {
 	visible := make([]VisibleSegments, snaptype.MaxEnum) // create new pointer - only new readers will see it. old-alive readers will continue use previous pointer
 	maxVisibleBlocks := make([]uint64, 0, len(s.types))
@@ -873,13 +874,13 @@ func (s *RoSnapshots) buildVisible(dirtyFiles DirtyFiles, alignMin bool) *Visibl
 // update mutates `dirtyFiles` via mutate and republishes the visible set atomically
 // (single lock), then refreshes idxMax.
 func (s *RoSnapshots) update(alignMin bool, mutate func(dirtyFiles DirtyFiles) ([]RetiredSegment, error)) error {
-	err := s.UpdateFiles(mutate, func(dirtyFiles DirtyFiles) *VisibleFiles { return s.buildVisible(dirtyFiles, alignMin) })
+	err := s.Mutate(mutate, func(dirtyFiles DirtyFiles) *VisibleFiles { return s.buildVisible(dirtyFiles, alignMin) })
 	s.idxMax.Store(s.idxAvailability())
 	return err
 }
 
 // DirtyFiles is the mutable set of dirty segments, one btree per type (indexed by
-// enum for blocks, tableIndex for caplin state). UpdateFiles hands it to its mutate
+// enum for blocks, tableIndex for caplin state). Mutate hands it to its mutate
 // callback so mutations happen under the dirty lock. It is the mutable counterpart
 // to a published VisibleFiles generation.
 type DirtyFiles = []*btree.BTreeG[*DirtySegment]
@@ -968,26 +969,25 @@ func (f *FileSet) InitFiles(size int) {
 	f.oldestVisible = empty
 }
 
-// NewVisibleFiles builds a generation for UpdateFiles; for cross-package embedders
+// NewVisibleFiles builds a generation for Mutate; for cross-package embedders
 // that can't construct VisibleFiles directly.
 func NewVisibleFiles(segments []VisibleSegments) *VisibleFiles {
 	return &VisibleFiles{segments: segments}
 }
 
-// UpdateFiles mutates `dirtyFiles` and republishes the visible set under a SINGLE
-// dirty-lock acquisition, so the change and its matching republish are atomic — no
-// reader or concurrent writer ever observes `dirtyFiles` changed but `visible`
-// stale. `mutateDirtyFiles` changes `dirtyFiles` and returns the files it removed
-// (nil to just republish from the current `dirtyFiles`); `recalcVisibleFiles`
-// produces the new generation from the mutated `dirtyFiles` and always runs (even
-// if `mutateDirtyFiles` errors) so removed files are handed to a generation and
-// never leak. Retired files are reclaimed outside the lock; `mutateDirtyFiles`'s
-// error is returned.
+// Mutate changes `dirtyFiles` and republishes the visible set under a single mutex
+// lock, so no reader or concurrent writer ever sees `dirtyFiles` changed but
+// `visible` stale. `mutateDirtyFiles` returns the files it removed (nil to just
+// republish from the current `dirtyFiles`); `recalcVisibleFiles` produces the new
+// generation from the mutated `dirtyFiles` and always runs (even if
+// `mutateDirtyFiles` errors) so removed files are handed to a generation and never
+// leak. Retired files are reclaimed outside the lock; `mutateDirtyFiles`'s error is
+// returned.
 //
 // Slow: holds the write lock across the rebuild. Call only from rare background
 // events (opening/closing snapshots, end of a merge or retire) — never on a read
 // hot-path, where readers pin lock-free via AcquireVisible.
-func (f *FileSet) UpdateFiles(
+func (f *FileSet) Mutate(
 	mutateDirtyFiles func(dirtyFiles DirtyFiles) ([]RetiredSegment, error),
 	recalcVisibleFiles func(dirtyFiles DirtyFiles) *VisibleFiles,
 ) error {
@@ -1015,7 +1015,7 @@ func (f *FileSet) UpdateFiles(
 }
 
 // WithDirtyFiles runs fn under the dirty lock, handing it the dirty set for
-// read-only inspection. The read-only counterpart to UpdateFiles — use UpdateFiles when the
+// read-only inspection. The read-only counterpart to Mutate — use Mutate when the
 // dirty set is mutated, since that also republishes the visible generation.
 func (f *FileSet) WithDirtyFiles(fn func(dirtyFiles DirtyFiles)) {
 	f.dirtyLock.Lock()
@@ -1179,7 +1179,7 @@ func (s *RoSnapshots) openSegments(dirtyFiles DirtyFiles, fileNames []string, op
 		})
 
 		if !exists {
-			sn = &DirtySegment{segType: f.Type, version: f.Version, Range: Range{f.From, f.To}, frozen: s.snCfg.IsFrozen(f)}
+			sn = &DirtySegment{segType: f.Type, version: f.Version, Range: Range{f.From, f.To}}
 		}
 
 		if open {
@@ -1231,7 +1231,7 @@ func (s *RoSnapshots) Ranges(align bool) []Range {
 
 func (s *RoSnapshots) OptimisticalyOpenFolder() { _ = s.OpenFolder() }
 func (s *RoSnapshots) OpenFolder() error {
-	// UpdateFiles republishes even on error, so segments removed from `dirtyFiles` are
+	// Mutate republishes even on error, so segments removed from `dirtyFiles` are
 	// always handed to a generation and never leak.
 	err := s.update(s.alignMin, func(dirtyFiles DirtyFiles) ([]RetiredSegment, error) {
 		files, err := AllTypedSegments(s.dir, s.Types())
@@ -1293,7 +1293,7 @@ func (s *RoSnapshots) Close() {
 // reader that could see them drains, but the files stay on disk (they are leaving
 // memory on reopen, not being deleted). An unopened (nil-Decompressor) segment is
 // always dropped — a later reopen re-creates it, so keeping it would only leave a
-// duplicate. Must be called under dirtyLock — UpdateFiles hands `dirtyFiles` to its mutate
+// duplicate. Must be called under dirtyLock — Mutate hands `dirtyFiles` to its mutate
 // callback for exactly this.
 func CloseWhatNotInList(dirtyFiles DirtyFiles, l []string) (removed []RetiredSegment) {
 	protectFiles := make(map[string]struct{}, len(l))
@@ -1433,7 +1433,7 @@ func (s *RoSnapshots) BuildMissedIndices(ctx context.Context, logPrefix string, 
 }
 
 // deleteLocked removes fileName from `dirtyFiles` and returns the dropped segment (nil
-// if not present). Must run under the dirty lock — UpdateFiles guarantees this.
+// if not present). Must run under the dirty lock — Mutate guarantees this.
 func (s *RoSnapshots) deleteLocked(dirtyFiles DirtyFiles, fileName string) *DirtySegment {
 	var delSeg *DirtySegment
 	var dirtySegments *btree.BTreeG[*DirtySegment]
@@ -1478,7 +1478,7 @@ func (s *RoSnapshots) Delete(fileNames ...string) error {
 		var retired []RetiredSegment
 		for _, fileName := range fileNames {
 			if delSeg := s.deleteLocked(dirtyFiles, fileName); delSeg != nil {
-				retired = append(retired, RetiredSegment{seg: delSeg, removeFiles: !delSeg.frozen})
+				retired = append(retired, RetiredSegment{seg: delSeg, removeFiles: !delSeg.isFrozen(s.snCfg)})
 			}
 		}
 		return retired, nil

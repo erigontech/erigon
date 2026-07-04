@@ -271,7 +271,7 @@ func (m *Merger) integrateMergedDirtyFiles(snapshots *RoSnapshots, in, out map[s
 }
 
 // integrateMergedDirtyFilesLocked applies a merge result to `dirtyFiles` and returns
-// the sub-segments it retired. Must run under the dirty lock — UpdateFiles guarantees this.
+// the sub-segments it retired. Must run under the dirty lock — Mutate guarantees this.
 func (m *Merger) integrateMergedDirtyFilesLocked(dirtyFiles DirtyFiles, in, out map[snaptype.Enum][]*DirtySegment) []RetiredSegment {
 	var retired []RetiredSegment
 
@@ -280,10 +280,10 @@ func (m *Merger) integrateMergedDirtyFilesLocked(dirtyFiles DirtyFiles, in, out 
 		dirtySegments := dirtyFiles[enum]
 		for _, newSeg := range newSegs {
 			dirtySegments.Set(newSeg)
-			if newSeg.frozen {
+			if newSeg.isFrozen(m.snCfg) {
 				dirtySegments.Walk(func(items []*DirtySegment) bool {
 					for _, item := range items {
-						if item.frozen || item.to > newSeg.to {
+						if item.isFrozen(m.snCfg) || item.to > newSeg.to {
 							continue
 						}
 						if out[enum] == nil {
@@ -319,7 +319,7 @@ func (m *Merger) integrateMergedDirtyFilesLocked(dirtyFiles DirtyFiles, in, out 
 			if _, existed := dirtySegments.Delete(delSeg); !existed {
 				continue
 			}
-			retired = append(retired, RetiredSegment{seg: delSeg, removeFiles: !delSeg.frozen})
+			retired = append(retired, RetiredSegment{seg: delSeg, removeFiles: !delSeg.isFrozen(m.snCfg)})
 		}
 	}
 	return retired
@@ -375,7 +375,6 @@ func (m *Merger) merge(ctx context.Context, v *View, toMerge []*DirtySegment, ta
 		segType: targetFile.Type,
 		version: targetFile.Version,
 		Range:   Range{targetFile.From, targetFile.To},
-		frozen:  m.snCfg.IsFrozen(targetFile),
 	}
 
 	err = sn.Open(snapDir)
