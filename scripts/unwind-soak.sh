@@ -228,6 +228,21 @@ scenario_test() {
         return
     fi
     pre_head=$(hex_to_dec "$pre_head_hex")
+    # ANCHOR_BLOCK overrides pre_head with a fixed reference so each iter
+    # unwinds from the same block across runs, removing chain-tip landing
+    # as a source of variance. The actual live head may be past ANCHOR
+    # (from forward re-exec + chain-tip advance) — setHead is called with
+    # target = ANCHOR - depth regardless, giving deterministic trie shape.
+    if [[ -n "${ANCHOR_BLOCK:-}" && "$ANCHOR_BLOCK" -gt 0 ]]; then
+        if [[ $pre_head -lt $ANCHOR_BLOCK ]]; then
+            echo "iter $iter $phase: ABORT — current head=$pre_head below ANCHOR_BLOCK=$ANCHOR_BLOCK"
+            echo "$iter,$phase,,$pre_head,,0,0,abort:head-below-anchor" >> "$OUT"
+            PHASE_RC=1
+            OVERALL_RC=1
+            return
+        fi
+        pre_head=$ANCHOR_BLOCK
+    fi
     target=$((pre_head - depth))
     if [[ $target -lt 1 ]]; then
         echo "iter $iter $phase: ABORT — target $target below 1 (pre_head=$pre_head depth=$depth)"
