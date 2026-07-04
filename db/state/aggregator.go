@@ -78,7 +78,7 @@ type Aggregator struct {
 
 	reorgBlockDepth uint64
 
-	lifetime // dirtyFilesLock + every field it guards (the published visible-file generations)
+	Lifetime // dirtyFilesLock + every field it guards (the published visible-file generations)
 
 	// commitmentRefsMu guards the runtime-mutable commitment ReferencesInCommitmentBranches
 	// flag: ReloadErigonDBSettings writes it while background merges read it.
@@ -109,7 +109,7 @@ type Aggregator struct {
 	// metricsCollector is the process-level KV-read metrics aggregate. Every read
 	// path (exec, commitment, warmup, RPC, engine) hands its finished per-worker
 	// metrics here; one goroutine folds them grouped by source and self-publishes
-	// the source-labelled Prometheus gauges. Aggregator-scoped (process lifetime),
+	// the source-labelled Prometheus gauges. Aggregator-scoped (process Lifetime),
 	// exposed to SharedDomains via the duck-typed kvmetrics.MetricsCollectorProvider.
 	metricsCollector *kvmetrics.Collector
 
@@ -1779,7 +1779,7 @@ type aggregatorVisible struct {
 // recalcVisibleFiles builds a fresh immutable aggregatorVisible bundle from the
 // current dirty state via the per-entity calcVisibleFiles helpers. It is the biz
 // adapter — it walks the typed entity graph — so it stays on Aggregator. Caller
-// holds dirtyFilesLock; pass it to lifetime.Recalc as the recalc callback, which
+// holds dirtyFilesLock; pass it to Lifetime.Recalc as the recalc callback, which
 // installs the returned generation.
 func (a *Aggregator) recalcVisibleFiles() *aggregatorVisible {
 	toTxNum := a.dirtyFilesEndTxNumMinimax()
@@ -2366,7 +2366,7 @@ type AggregatorRoTx struct {
 	_leakID uint64 // set only if TRACE_AGG=true
 }
 
-// lifetime groups the aggregator's file-visibility state under one lock:
+// Lifetime groups the aggregator's file-visibility state under one lock:
 // dirtyFilesLock plus the fields it guards — the atomically-published chain of
 // visible generations. The per-entity dirtyFiles trees (Domain/History/
 // InvertedIndex) are guarded by this same lock; they live in those leaf types
@@ -2376,10 +2376,10 @@ type AggregatorRoTx struct {
 // aggregatorVisible snapshot published atomically via `visible`; BeginFilesRo
 // opens zero-copy readers against it. See aggregatorVisible for how retired
 // files are reclaimed.
-type lifetime struct {
+type Lifetime struct {
 	dirtyFilesLock sync.Mutex
 	// dirty is every entity's dirtyFiles tree, registered at RegisterDomain/RegisterII,
-	// so uniform all-dirty sweeps go through lifetime instead of re-walking the entity graph.
+	// so uniform all-dirty sweeps go through Lifetime instead of re-walking the entity graph.
 	dirty []*DirtyFiles
 	// visible is CoW, updated only by recalcVisibleFiles (readers take no lock and
 	// instead load it atomically).
@@ -2391,7 +2391,7 @@ type lifetime struct {
 
 // Acquire pins the current visible generation for a reader. Hot path:
 // lock-free (atomic load + refcnt bump, re-validated against a concurrent swap).
-func (fs *lifetime) Acquire() (v *aggregatorVisible) {
+func (fs *Lifetime) Acquire() (v *aggregatorVisible) {
 	// Load+Increment: is not atomic operation. Means: between them "existing last reader may End" (and close files)
 	// Means: must check that latest view didn't change
 	// Hazard pointer concept: https://github.com/facebook/folly/blob/main/folly/synchronization/Hazptr.h#L27C5-L27C22
@@ -2410,7 +2410,7 @@ func (fs *lifetime) Acquire() (v *aggregatorVisible) {
 // case — just a refcnt decrement. Only the last reader of an already-retired
 // generation reclaims under dirtyFilesLock, which is rare because publish
 // reclaims eagerly, so drained generations are usually already gone.
-func (fs *lifetime) Release(v *aggregatorVisible) {
+func (fs *Lifetime) Release(v *aggregatorVisible) {
 	if v.refcnt.Add(-1) == 0 {
 		fs.reclaimRetired()
 	}
@@ -2418,7 +2418,7 @@ func (fs *lifetime) Release(v *aggregatorVisible) {
 
 // reclaimRetiredLocked oldest-first traverse linked-list of visibleFiles objects while `refcnt == 0`
 // collecting retired files for physical delete. Physical delete happen out of `dirtyFilesLock`
-func (fs *lifetime) reclaimRetiredLocked() (toDelete []*FilesItem) {
+func (fs *Lifetime) reclaimRetiredLocked() (toDelete []*FilesItem) {
 	cur := fs.visible.Load()
 	for h := fs.oldestVisible; h != cur && h.refcnt.Load() == 0; h = h.next {
 		toDelete = append(toDelete, h.retired...)
@@ -2428,7 +2428,7 @@ func (fs *lifetime) reclaimRetiredLocked() (toDelete []*FilesItem) {
 	return toDelete
 }
 
-func (fs *lifetime) reclaimRetired() {
+func (fs *Lifetime) reclaimRetired() {
 	fs.dirtyFilesLock.Lock()
 	toDelete := fs.reclaimRetiredLocked()
 	fs.dirtyFilesLock.Unlock()
@@ -2440,7 +2440,7 @@ func (fs *lifetime) reclaimRetired() {
 //
 // Slow, background-only: holds internal mutex. Call from rare background events:
 // buildNewFiles/merge/prune. For readers use: acquire/releaselock-free methods
-func (fs *lifetime) Recalc(
+func (fs *Lifetime) Recalc(
 	mutateDirtyFiles func(dirty []*DirtyFiles) (retired []*FilesItem, err error),
 	recalcVisibleFiles func() *aggregatorVisible,
 ) error {

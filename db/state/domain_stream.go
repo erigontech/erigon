@@ -448,7 +448,7 @@ func (hi *DomainLatestIterFile) Next() ([]byte, []byte, error) {
 
 // debugIteratePrefix iterates over key-value pairs of the storage domain that start with given prefix
 //
-// k and v lifetime is bounded by the lifetime of the iterator
+// k and v Lifetime is bounded by the Lifetime of the iterator
 func (dt *DomainRoTx) debugIteratePrefixLatest(prefix []byte, ramIter btree2.MapIter[string, []dataWithTxNum], it func(k []byte, v []byte) (cont bool, err error), roTx kv.Tx) error {
 	// Implementation:
 	//     File endTxNum  = last txNum of file step

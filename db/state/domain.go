@@ -80,7 +80,7 @@ type Domain struct {
 	//  - .kvei - key -> existence (bloom filter)
 
 	// dirtyFiles is the list of ALL files (un-indexed, garbage, merged-into-bigger-one, …);
-	// its garbage-free visible view is a domainVisible snapshot. See lifetime for the
+	// its garbage-free visible view is a domainVisible snapshot. See Lifetime for the
 	// dirty↔visible model.
 	dirtyFiles *DirtyFiles
 
