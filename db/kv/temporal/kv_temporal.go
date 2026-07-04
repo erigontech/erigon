@@ -718,6 +718,10 @@ func (db *DB) MergeLoop(ctx context.Context) error {
 	return db.stateFiles.MergeLoop(ctx)
 }
 
+func (db *DB) StartMergeLoopBackground(ctx context.Context, onErr func(error)) {
+	db.stateFiles.StartMergeLoopBackground(ctx, onErr)
+}
+
 func (tx *Tx) DomainFiles(domain ...kv.Domain) kv.VisibleFiles {
 	return tx.aggtx.DomainFiles(domain...)
 }

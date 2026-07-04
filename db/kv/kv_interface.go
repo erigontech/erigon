@@ -515,6 +515,10 @@ type TemporalDebugDB interface {
 
 	Files() []string
 	MergeLoop(ctx context.Context) error
+	// StartMergeLoopBackground spawns a background merge goroutine and registers
+	// it with the aggregator's WaitGroup before launching it, so that Close/
+	// wg.Wait cannot observe a zero count before the goroutine has started.
+	StartMergeLoopBackground(ctx context.Context, onErr func(error))
 }
 
 // FlushConfig holds optional behaviour for TemporalMemBatch.Flush, populated by

@@ -1230,6 +1230,21 @@ func (a *Aggregator) MergeLoop(ctx context.Context) error {
 	return a.mergeLoop(ctx)
 }
 
+// StartMergeLoopBackground spawns a background goroutine that runs MergeLoop.
+// It calls wg.Add(1) synchronously before launching the goroutine, so that a
+// concurrent Close/wg.Wait can never observe a zero count before the merge
+// goroutine has registered itself. The caller should use this instead of
+// manually wrapping MergeLoop in a goroutine to avoid the wg.Add/wg.Wait race.
+func (a *Aggregator) StartMergeLoopBackground(ctx context.Context, onErr func(error)) {
+	a.wg.Add(1)
+	go func() {
+		defer a.wg.Done()
+		if err := a.mergeLoop(ctx); err != nil && onErr != nil {
+			onErr(err)
+		}
+	}()
+}
+
 func (a *Aggregator) mergeLoop(ctx context.Context) (err error) {
 	if dbg.NoMerge() || !a.mergingFiles.CompareAndSwap(false, true) {
 		return nil // currently merging or merge is prohibited
