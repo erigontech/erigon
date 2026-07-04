@@ -42,7 +42,7 @@ func (a *Aggregator) DebugBeginDirtyFilesRo() *aggDirtyFilesRoTx {
 	// visible set: such a file can only be retired at a generation >= this, and
 	// oldest-first reclaim won't delete it until Close. Load+increment suffices
 	// because Update holds dirtyFilesLock, so no publish can race the pin.
-	_ = a.Update(func(_ []*DirtyFiles) ([]*FilesItem, error) {
+	_ = a.Recalc(func(_ []*DirtyFiles) ([]*FilesItem, error) {
 		ac.visible = a.visible.Load()
 		ac.visible.refcnt.Add(1)
 		for i, d := range a.d {
@@ -140,7 +140,7 @@ func (ac *aggDirtyFilesRoTx) Close() {
 
 	// Release the pinned generation; if it was the last reader, reclaim any files
 	// retired (by a concurrent merge) while we held it.
-	agg.releaseVisibleFiles(ac.visible)
+	agg.Release(ac.visible)
 	ac.visible = nil
 }
 

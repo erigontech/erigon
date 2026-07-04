@@ -74,7 +74,7 @@ func (a *Aggregator) RetireOldHistoryFiles(ctx context.Context, cutoffStep kv.St
 
 	var deleted []string
 	var retired []*FilesItem
-	if err = a.Update(func(_ []*DirtyFiles) ([]*FilesItem, error) {
+	if err = a.Recalc(func(_ []*DirtyFiles) ([]*FilesItem, error) {
 		for _, dt := range at.d {
 			// commitment.history and rcache have special cli flags: --prune.include-commitment-history --persist.receipt
 			// if they enabled they are never pruned - it's current logic. we will change it in future PR's - but for now keep them
