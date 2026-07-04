@@ -79,7 +79,7 @@ func NewCaplinSnapshots(cfg ethconfig.BlocksFreezing, beaconCfg *clparams.Beacon
 		log.Debug("[dbg] NewCaplinSnapshots created with empty ChainName", "stack", dbg.Stack())
 	}
 	c := &CaplinSnapshots{dir: dirs.Snap, tmpdir: dirs.Tmp, cfg: cfg, logger: logger, beaconCfg: beaconCfg}
-	c.Init(snaptype.MaxEnum)
+	c.InitFiles(snaptype.MaxEnum)
 	_ = c.update(nil)
 	return c
 }
@@ -288,7 +288,7 @@ Loop:
 }
 
 // buildVisible builds a fresh visible generation from the current dirty set. Must
-// run under the dirty lock — Update guarantees this.
+// run under the dirty lock — UpdateFiles guarantees this.
 func (s *CaplinSnapshots) buildVisible(dirtyFiles snapshotsync.DirtyFiles) *snapshotsync.VisibleFiles {
 	segments := make([]snapshotsync.VisibleSegments, snaptype.MaxEnum)
 	segments[snaptype.BeaconBlocks.Enum()] = snapshotsync.RecalcVisibleSegments(dirtyFiles[snaptype.BeaconBlocks.Enum()])
@@ -299,7 +299,7 @@ func (s *CaplinSnapshots) buildVisible(dirtyFiles snapshotsync.DirtyFiles) *snap
 // update mutates `dirtyFiles` via mutate and republishes the visible set atomically
 // (single lock), then refreshes idxMax.
 func (s *CaplinSnapshots) update(mutate func(dirtyFiles snapshotsync.DirtyFiles) ([]snapshotsync.RetiredSegment, error)) error {
-	err := s.Update(mutate, s.buildVisible)
+	err := s.UpdateFiles(mutate, s.buildVisible)
 	s.idxMax.Store(s.idxAvailability())
 	return err
 }

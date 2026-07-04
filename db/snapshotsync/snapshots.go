@@ -374,6 +374,9 @@ func (s *DirtySegment) closeAndRemoveFiles() {
 		toRemove := make([]string, 0, 1+len(s.indexes))
 		toRemove = append(toRemove, s.FilePath())
 		for _, index := range s.indexes {
+			if index == nil {
+				continue
+			}
 			toRemove = append(toRemove, index.FilePath())
 		}
 		s.closeIdx()
@@ -576,7 +579,7 @@ func newRoSnapshots(cfg ethconfig.BlocksFreezing, snapDir string, types []snapty
 		operators:         map[snaptype.Enum]*retireOperators{},
 		segmentsMinByType: make(map[snaptype.Enum]*atomic.Uint64),
 	}
-	s.Init(snaptype.MaxEnum)
+	s.InitFiles(snaptype.MaxEnum)
 
 	for _, t := range s.enums {
 		u := &atomic.Uint64{}
@@ -814,7 +817,7 @@ func RecalcVisibleSegments(dirtySegments *btree.BTreeG[*DirtySegment]) VisibleSe
 }
 
 // buildVisible builds a fresh visible generation from the current dirty set. Must
-// run under the dirty lock — Update guarantees this.
+// run under the dirty lock — UpdateFiles guarantees this.
 func (s *RoSnapshots) buildVisible(dirtyFiles DirtyFiles, alignMin bool) *VisibleFiles {
 	visible := make([]VisibleSegments, snaptype.MaxEnum) // create new pointer - only new readers will see it. old-alive readers will continue use previous pointer
 	maxVisibleBlocks := make([]uint64, 0, len(s.types))
@@ -870,13 +873,13 @@ func (s *RoSnapshots) buildVisible(dirtyFiles DirtyFiles, alignMin bool) *Visibl
 // update mutates `dirtyFiles` via mutate and republishes the visible set atomically
 // (single lock), then refreshes idxMax.
 func (s *RoSnapshots) update(alignMin bool, mutate func(dirtyFiles DirtyFiles) ([]RetiredSegment, error)) error {
-	err := s.Update(mutate, func(dirtyFiles DirtyFiles) *VisibleFiles { return s.buildVisible(dirtyFiles, alignMin) })
+	err := s.UpdateFiles(mutate, func(dirtyFiles DirtyFiles) *VisibleFiles { return s.buildVisible(dirtyFiles, alignMin) })
 	s.idxMax.Store(s.idxAvailability())
 	return err
 }
 
 // DirtyFiles is the mutable set of dirty segments, one btree per type (indexed by
-// enum for blocks, tableIndex for caplin state). Update hands it to its mutate
+// enum for blocks, tableIndex for caplin state). UpdateFiles hands it to its mutate
 // callback so mutations happen under the dirty lock. It is the mutable counterpart
 // to a published VisibleFiles generation.
 type DirtyFiles = []*btree.BTreeG[*DirtySegment]
@@ -953,9 +956,9 @@ func closeAndRemoveFiles(toDelete []RetiredSegment) {
 	}
 }
 
-// Init fills a FileSet with `size` dirty slots, a btree per slot, and an empty
+// InitFiles fills a FileSet with `size` dirty slots, a btree per slot, and an empty
 // generation. In place, not returned: FileSet holds a sync.Mutex.
-func (f *FileSet) Init(size int) {
+func (f *FileSet) InitFiles(size int) {
 	f.dirtyFiles = make(DirtyFiles, size)
 	for i := range f.dirtyFiles {
 		f.dirtyFiles[i] = btree.NewBTreeGOptions[*DirtySegment](DirtySegmentLess, btree.Options{Degree: 128, NoLocks: false})
@@ -965,13 +968,13 @@ func (f *FileSet) Init(size int) {
 	f.oldestVisible = empty
 }
 
-// NewVisibleFiles builds a generation for Update; for cross-package embedders
+// NewVisibleFiles builds a generation for UpdateFiles; for cross-package embedders
 // that can't construct VisibleFiles directly.
 func NewVisibleFiles(segments []VisibleSegments) *VisibleFiles {
 	return &VisibleFiles{segments: segments}
 }
 
-// Update mutates `dirtyFiles` and republishes the visible set under a SINGLE
+// UpdateFiles mutates `dirtyFiles` and republishes the visible set under a SINGLE
 // dirty-lock acquisition, so the change and its matching republish are atomic — no
 // reader or concurrent writer ever observes `dirtyFiles` changed but `visible`
 // stale. `mutateDirtyFiles` changes `dirtyFiles` and returns the files it removed
@@ -984,7 +987,7 @@ func NewVisibleFiles(segments []VisibleSegments) *VisibleFiles {
 // Slow: holds the write lock across the rebuild. Call only from rare background
 // events (opening/closing snapshots, end of a merge or retire) — never on a read
 // hot-path, where readers pin lock-free via AcquireVisible.
-func (f *FileSet) Update(
+func (f *FileSet) UpdateFiles(
 	mutateDirtyFiles func(dirtyFiles DirtyFiles) ([]RetiredSegment, error),
 	recalcVisibleFiles func(dirtyFiles DirtyFiles) *VisibleFiles,
 ) error {
@@ -1012,7 +1015,7 @@ func (f *FileSet) Update(
 }
 
 // WithDirtyFiles runs fn under the dirty lock, handing it the dirty set for
-// read-only inspection. The read-only counterpart to Update — use Update when the
+// read-only inspection. The read-only counterpart to UpdateFiles — use UpdateFiles when the
 // dirty set is mutated, since that also republishes the visible generation.
 func (f *FileSet) WithDirtyFiles(fn func(dirtyFiles DirtyFiles)) {
 	f.dirtyLock.Lock()
@@ -1228,7 +1231,7 @@ func (s *RoSnapshots) Ranges(align bool) []Range {
 
 func (s *RoSnapshots) OptimisticalyOpenFolder() { _ = s.OpenFolder() }
 func (s *RoSnapshots) OpenFolder() error {
-	// Update republishes even on error, so segments removed from `dirtyFiles` are
+	// UpdateFiles republishes even on error, so segments removed from `dirtyFiles` are
 	// always handed to a generation and never leak.
 	err := s.update(s.alignMin, func(dirtyFiles DirtyFiles) ([]RetiredSegment, error) {
 		files, err := AllTypedSegments(s.dir, s.Types())
@@ -1290,7 +1293,7 @@ func (s *RoSnapshots) Close() {
 // reader that could see them drains, but the files stay on disk (they are leaving
 // memory on reopen, not being deleted). An unopened (nil-Decompressor) segment is
 // always dropped — a later reopen re-creates it, so keeping it would only leave a
-// duplicate. Must be called under dirtyLock — Update hands `dirtyFiles` to its mutate
+// duplicate. Must be called under dirtyLock — UpdateFiles hands `dirtyFiles` to its mutate
 // callback for exactly this.
 func CloseWhatNotInList(dirtyFiles DirtyFiles, l []string) (removed []RetiredSegment) {
 	protectFiles := make(map[string]struct{}, len(l))
@@ -1333,10 +1336,10 @@ func (s *RoSnapshots) RemoveOverlaps(onDelete func(l []string) error) error {
 		toRemove = append(toRemove, info.Path)
 	}
 
-	// Republish without the overlaps first, so no reader is cut off mid-read. update
-	// retires them close-only (fds released once the outgoing generation drains), then
-	// removeOldFiles deletes from disk — which on Windows can fail while a reader still
-	// pins that generation, leaving the file for the next pass.
+	// Republish without the overlaps so no reader is cut off mid-read. Segments are
+	// retired close-only; removeOldFiles below deletes the overlap files from disk —
+	// not the reclaimer, because the drop-from-memory set (everything not in
+	// keepNames) is broader than the overlaps that should actually be deleted.
 	keepNames := make([]string, 0, len(keepSegments))
 	for _, info := range keepSegments {
 		keepNames = append(keepNames, info.Name())
@@ -1412,12 +1415,7 @@ func (s *RoSnapshots) BuildMissedIndices(ctx context.Context, logPrefix string, 
 
 	// wait for Downloader service to download all expected snapshots
 	indexWorkers := estimate.IndexSnapshot.Workers()
-	var newIdxBuilt bool
-	err := s.update(s.alignMin, func(dirtyFiles DirtyFiles) ([]RetiredSegment, error) {
-		var e error
-		newIdxBuilt, e = s.buildMissedIndices(dirtyFiles, logPrefix, ctx, dirs, cc, indexWorkers, logger)
-		return nil, e
-	})
+	newIdxBuilt, err := s.buildMissedIndices(logPrefix, ctx, dirs, cc, indexWorkers, logger)
 	if err != nil {
 		return fmt.Errorf("can't build missed indices: %w", err)
 	}
@@ -1435,7 +1433,7 @@ func (s *RoSnapshots) BuildMissedIndices(ctx context.Context, logPrefix string, 
 }
 
 // deleteLocked removes fileName from `dirtyFiles` and returns the dropped segment (nil
-// if not present). Must run under the dirty lock — Update guarantees this.
+// if not present). Must run under the dirty lock — UpdateFiles guarantees this.
 func (s *RoSnapshots) deleteLocked(dirtyFiles DirtyFiles, fileName string) *DirtySegment {
 	var delSeg *DirtySegment
 	var dirtySegments *btree.BTreeG[*DirtySegment]
@@ -1487,7 +1485,7 @@ func (s *RoSnapshots) Delete(fileNames ...string) error {
 	})
 }
 
-func (s *RoSnapshots) buildMissedIndices(dirtyFiles DirtyFiles, logPrefix string, ctx context.Context, dirs datadir.Dirs, chainConfig *chain.Config, workers int, logger log.Logger) (newIdxBuilt bool, err error) {
+func (s *RoSnapshots) buildMissedIndices(logPrefix string, ctx context.Context, dirs datadir.Dirs, chainConfig *chain.Config, workers int, logger log.Logger) (newIdxBuilt bool, err error) {
 	if s == nil {
 		return
 	}
@@ -1528,44 +1526,48 @@ func (s *RoSnapshots) buildMissedIndices(dirtyFiles DirtyFiles, logPrefix string
 	var fmu sync.Mutex
 	failedIndexes := make(map[string]error, 0)
 
-	for _, t := range s.enums {
-		dirtyFiles[t].Walk(func(segs []*DirtySegment) bool {
-			for _, segment := range segs {
-				if segment.IsIndexed() {
-					continue
-				}
-				// Skip if a merge/dump/another recovery is already building this
-				// (type, range); otherwise claim it so we don't double-build.
-				from, to := segment.From(), segment.To()
-				if !s.TryAcquireRange(t, from, to) {
-					continue
-				}
-				info := segment.FileInfo(dir)
-
-				newIdxBuilt = true
-
-				segment.closeIdx()
-
-				indexBuilder := s.IndexBuilder(t.Type())
-
-				g.Go(func() error {
-					defer s.ReleaseRange(t, from, to)
-					p := &background.Progress{}
-					ps.Add(p)
-					defer notifySegmentIndexingFinished(info.Name())
-					defer ps.Delete(p)
-					if err := t.BuildIndexes(gCtx, info, indexBuilder, chainConfig, tmpDir, p, log.LvlInfo, logger); err != nil {
-						// unsuccessful indexing should allow other indexing to finish
-						fmu.Lock()
-						failedIndexes[info.Name()] = err
-						fmu.Unlock()
+	// Enumerate the unindexed segments under the dirty lock (a quick spawn loop); the
+	// actual index build runs after, outside the lock, so it never blocks writers.
+	s.WithDirtyFiles(func(dirtyFiles DirtyFiles) {
+		for _, t := range s.enums {
+			dirtyFiles[t].Walk(func(segs []*DirtySegment) bool {
+				for _, segment := range segs {
+					if segment.IsIndexed() {
+						continue
 					}
-					return nil
-				})
-			}
-			return true
-		})
-	}
+					// Skip if a merge/dump/another recovery is already building this
+					// (type, range); otherwise claim it so we don't double-build.
+					from, to := segment.From(), segment.To()
+					if !s.TryAcquireRange(t, from, to) {
+						continue
+					}
+					info := segment.FileInfo(dir)
+
+					newIdxBuilt = true
+
+					segment.closeIdx()
+
+					indexBuilder := s.IndexBuilder(t.Type())
+
+					g.Go(func() error {
+						defer s.ReleaseRange(t, from, to)
+						p := &background.Progress{}
+						ps.Add(p)
+						defer notifySegmentIndexingFinished(info.Name())
+						defer ps.Delete(p)
+						if err := t.BuildIndexes(gCtx, info, indexBuilder, chainConfig, tmpDir, p, log.LvlInfo, logger); err != nil {
+							// unsuccessful indexing should allow other indexing to finish
+							fmu.Lock()
+							failedIndexes[info.Name()] = err
+							fmu.Unlock()
+						}
+						return nil
+					})
+				}
+				return true
+			})
+		}
+	})
 
 	var ie error
 

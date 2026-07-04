@@ -271,7 +271,7 @@ func (m *Merger) integrateMergedDirtyFiles(snapshots *RoSnapshots, in, out map[s
 }
 
 // integrateMergedDirtyFilesLocked applies a merge result to `dirtyFiles` and returns
-// the sub-segments it retired. Must run under the dirty lock — Update guarantees this.
+// the sub-segments it retired. Must run under the dirty lock — UpdateFiles guarantees this.
 func (m *Merger) integrateMergedDirtyFilesLocked(dirtyFiles DirtyFiles, in, out map[snaptype.Enum][]*DirtySegment) []RetiredSegment {
 	var retired []RetiredSegment
 

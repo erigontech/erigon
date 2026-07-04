@@ -201,7 +201,7 @@ func NewCaplinStateSnapshots(cfg ethconfig.BlocksFreezing, beaconCfg *clparams.B
 	}
 
 	c := &CaplinStateSnapshots{snapshotTypes: snapshotTypes, dir: dirs.SnapCaplin, tmpdir: dirs.Tmp, cfg: cfg, tableIndex: tableIndex, logger: logger, beaconCfg: beaconCfg}
-	c.Init(len(names))
+	c.InitFiles(len(names))
 	_ = c.update(nil)
 	return c
 }
@@ -449,7 +449,7 @@ func caplinStateVisibleSegments(dirtySegments *btree.BTreeG[*DirtySegment]) []*V
 }
 
 // buildVisible builds a fresh visible generation from the current dirty set. Must
-// run under the dirty lock — Update guarantees this.
+// run under the dirty lock — UpdateFiles guarantees this.
 func (s *CaplinStateSnapshots) buildVisible(dirtyFiles DirtyFiles) *VisibleFiles {
 	segments := make([]VisibleSegments, len(dirtyFiles))
 	for idx, dirtySegments := range dirtyFiles {
@@ -461,7 +461,7 @@ func (s *CaplinStateSnapshots) buildVisible(dirtyFiles DirtyFiles) *VisibleFiles
 // update mutates `dirtyFiles` via mutate and republishes the visible set atomically
 // (single lock), then refreshes idxMax.
 func (s *CaplinStateSnapshots) update(mutate func(dirtyFiles DirtyFiles) ([]RetiredSegment, error)) error {
-	err := s.Update(mutate, s.buildVisible)
+	err := s.UpdateFiles(mutate, s.buildVisible)
 	s.idxMax.Store(s.idxAvailability())
 	s.indicesReady.Store(true)
 	return err
