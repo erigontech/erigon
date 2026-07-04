@@ -102,7 +102,12 @@ func (a *Aggregator) RetireOldHistoryFiles(ctx context.Context, cutoffStep kv.St
 		}
 		a.onFilesDelete(deleted)
 		return retired, nil
-	}, a.recalcVisibleFiles); err != nil {
+	}, func() *aggregatorVisible {
+		if len(retired) == 0 { // nothing aged out: skip the no-op republish
+			return nil
+		}
+		return a.recalcVisibleFiles()
+	}); err != nil {
 		return 0, err
 	}
 

@@ -2462,11 +2462,14 @@ func (fs *fileSet) Update(
 		if recalcVisibleFiles != nil {
 			// Publish the new generation, hand the outgoing one its retired files,
 			// and collect whatever is now reclaimable (deleted after unlock).
-			next := recalcVisibleFiles()
-			old := fs.visible.Load()
-			old.retired = retired
-			old.next = next
-			fs.visible.Store(next)
+			// recalcVisibleFiles may return nil to decline publishing when nothing
+			// changed (mutateDirtyFiles must then have retired nothing).
+			if next := recalcVisibleFiles(); next != nil {
+				old := fs.visible.Load()
+				old.retired = retired
+				old.next = next
+				fs.visible.Store(next)
+			}
 		}
 		toDelete = fs.reclaimRetiredLocked()
 		return nil
