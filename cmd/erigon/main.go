@@ -88,6 +88,15 @@ func runErigon(cliCtx *cli.Context) (err error) {
 		return err
 	}
 
+	// node.New can take tens of seconds; an interrupt during it cancels the CLI
+	// context but doesn't unwind the in-progress build. Abort here instead of
+	// proceeding to serve a node the user already asked to shut down.
+	if cliCtx.Context.Err() != nil {
+		logger.Info("Interrupted during startup, shutting down")
+		ethNode.Close()
+		return nil
+	}
+
 	//diagnostics.Setup(cliCtx, ethNode, metricsMux, pprofMux)
 
 	err = ethNode.Serve()
