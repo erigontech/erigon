@@ -3,15 +3,16 @@ package helper
 import (
 	"context"
 	"encoding/json"
+	"fmt"
+	"io"
 	"net/http"
-	"strconv"
 	"strings"
 	"time"
 
 	"github.com/holiman/uint256"
 
-	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/crypto"
+	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/node/direct"
 	"github.com/erigontech/erigon/node/gointerfaces"
@@ -44,6 +45,69 @@ func NewP2P(adminRPC string) *p2pClient {
 	}
 }
 
+type NodeInfo struct {
+	Enode      string
+	NetworkID  uint64
+	Difficulty *uint256.Int
+	Genesis    [32]byte
+}
+
+// FetchNodeInfo queries admin_nodeInfo and returns the node's identity. It errors
+// unless the response is a well-formed, ready erigon node (valid enode and a
+// 32-byte genesis hash), so callers can tell a real node apart from an unrelated
+// service that merely happens to answer on the same port.
+func FetchNodeInfo(adminRPC string) (NodeInfo, error) {
+	r, err := http.Post(adminRPC, "application/json", strings.NewReader(
+		`{"jsonrpc":"2.0","method":"admin_nodeInfo","params":[],"id":1}`,
+	))
+	if err != nil {
+		return NodeInfo{}, err
+	}
+	defer r.Body.Close()
+	return parseNodeInfo(r.Body)
+}
+
+func parseNodeInfo(body io.Reader) (NodeInfo, error) {
+	var resp struct {
+		Result struct {
+			Enode     string `json:"enode"`
+			Protocols struct {
+				Eth struct {
+					Genesis    string `json:"genesis"`
+					Network    int    `json:"network"`
+					Difficulty int    `json:"difficulty"`
+				} `json:"eth"`
+			} `json:"protocols"`
+		} `json:"result"`
+	}
+	if err := json.NewDecoder(body).Decode(&resp); err != nil {
+		return NodeInfo{}, err
+	}
+
+	eth := resp.Result.Protocols.Eth
+	genesis, err := hexutil.FromHexWithValidation(eth.Genesis)
+	if err != nil {
+		return NodeInfo{}, fmt.Errorf("admin_nodeInfo returned invalid genesis %q: %w", eth.Genesis, err)
+	}
+	if len(genesis) != 32 {
+		return NodeInfo{}, fmt.Errorf("admin_nodeInfo returned genesis of %d bytes, want 32", len(genesis))
+	}
+	if resp.Result.Enode == "" {
+		return NodeInfo{}, fmt.Errorf("admin_nodeInfo returned empty enode")
+	}
+
+	difficulty := eth.Difficulty
+	if difficulty < 0 {
+		difficulty = 0
+	}
+	return NodeInfo{
+		Enode:      resp.Result.Enode,
+		NetworkID:  uint64(eth.Network),
+		Difficulty: uint256.NewInt(uint64(difficulty)),
+		Genesis:    [32]byte(genesis),
+	}, nil
+}
+
 func (p *p2pClient) Connect() (<-chan TxMessage, <-chan error, error) {
 	privateKey, err := crypto.GenerateKey()
 	if err != nil {
@@ -62,32 +126,12 @@ func (p *p2pClient) Connect() (<-chan TxMessage, <-chan error, error) {
 		PrivateKey:      privateKey,
 	}
 
-	r, err := http.Post(p.adminRPC, "application/json", strings.NewReader(
-		`{"jsonrpc":"2.0","method":"admin_nodeInfo","params":[],"id":1}`,
-	))
+	info, err := FetchNodeInfo(p.adminRPC)
 	if err != nil {
 		return nil, nil, err
 	}
-	defer r.Body.Close()
 
-	var resp struct {
-		Result struct {
-			Enode     string `json:"enode"`
-			Protocols struct {
-				Eth struct {
-					Genesis    string `json:"genesis"`
-					Network    int    `json:"network"`
-					Difficulty int    `json:"difficulty"`
-				} `json:"eth"`
-			} `json:"protocols"`
-		} `json:"result"`
-	}
-
-	if err := json.NewDecoder(r.Body).Decode(&resp); err != nil {
-		return nil, nil, err
-	}
-
-	if cfg.StaticNodes, err = enode.ParseNodesFromURLs([]string{resp.Result.Enode}); err != nil {
+	if cfg.StaticNodes, err = enode.ParseNodesFromURLs([]string{info.Enode}); err != nil {
 		return nil, nil, err
 	}
 
@@ -103,15 +147,11 @@ func (p *p2pClient) Connect() (<-chan TxMessage, <-chan error, error) {
 	}
 
 	_, err = sentryClient.SetStatus(context.TODO(), &sentryproto.StatusData{
-		NetworkId:       uint64(resp.Result.Protocols.Eth.Network),
-		TotalDifficulty: gointerfaces.ConvertUint256IntToH256(uint256.MustFromDecimal(strconv.Itoa(resp.Result.Protocols.Eth.Difficulty))),
-		BestHash: gointerfaces.ConvertHashToH256(
-			[32]byte(common.FromHex(resp.Result.Protocols.Eth.Genesis)),
-		),
+		NetworkId:       info.NetworkID,
+		TotalDifficulty: gointerfaces.ConvertUint256IntToH256(info.Difficulty),
+		BestHash:        gointerfaces.ConvertHashToH256(info.Genesis),
 		ForkData: &sentryproto.Forks{
-			Genesis: gointerfaces.ConvertHashToH256(
-				[32]byte(common.FromHex(resp.Result.Protocols.Eth.Genesis)),
-			),
+			Genesis: gointerfaces.ConvertHashToH256(info.Genesis),
 		},
 	})
 	if err != nil {

@@ -18,7 +18,6 @@ package tests
 
 import (
 	"fmt"
-	"net"
 	"testing"
 	"time"
 
@@ -52,19 +51,20 @@ var (
 //
 // This test sends transaction to node1 RPC which means they are local for node1
 // P2P helper is binded to node1 port, that's why we measure performance of local txs processing
-func skipIfNodeUnreachable(t *testing.T, addrs ...string) {
+func skipUnlessErigonNodes(t *testing.T, addrs ...string) {
 	t.Helper()
 	for _, addr := range addrs {
-		conn, err := net.DialTimeout("tcp", addr, 300*time.Millisecond)
-		if err != nil {
-			t.Skipf("requires a running node at %s: %v", addr, err)
+		// A bare TCP dial only proves the port is open; during a full `go test ./...`
+		// run an unrelated service can hold it. Probe admin_nodeInfo so the benchmark
+		// runs only against a real, ready erigon node and skips otherwise.
+		if _, err := helper.FetchNodeInfo(fmt.Sprintf("http://%s/", addr)); err != nil {
+			t.Skipf("requires a running erigon node at %s: %v", addr, err)
 		}
-		_ = conn.Close()
 	}
 }
 
 func TestSimpleLocalTxThroughputBenchmark(t *testing.T) {
-	skipIfNodeUnreachable(t, rpcAddressNode1)
+	skipUnlessErigonNodes(t, rpcAddressNode1)
 
 	txToSendCount := 15000
 	measureAtEvery := 1000
@@ -141,7 +141,7 @@ func TestSimpleLocalTxThroughputBenchmark(t *testing.T) {
 // This test sends transaction to node1 RPC which means they are local for node1
 // P2P helper is binded to node1 port, that's why we measure performance of local txs processing
 func TestSimpleLocalTxLatencyBenchmark(t *testing.T) {
-	skipIfNodeUnreachable(t, rpcAddressNode1)
+	skipUnlessErigonNodes(t, rpcAddressNode1)
 
 	txToSendCount := 1000
 
@@ -205,7 +205,7 @@ func TestSimpleLocalTxLatencyBenchmark(t *testing.T) {
 // This test sends transaction to node2 RPC which means they are remote for node1 and local for node2
 // P2P helper is binded to node1 port, that's why we measure performance of remote txs processing
 func TestSimpleRemoteTxThroughputBenchmark(t *testing.T) {
-	skipIfNodeUnreachable(t, rpcAddressNode1, rpcAddressNode2)
+	skipUnlessErigonNodes(t, rpcAddressNode1, rpcAddressNode2)
 
 	nonce := 0
 
@@ -293,7 +293,7 @@ func TestSimpleRemoteTxThroughputBenchmark(t *testing.T) {
 // This test sends transaction to node2 RPC which means they are remote for node1 and local for node2
 // P2P helper is binded to node1 port, that's why we measure performance of remote txs processing
 func TestSimpleRemoteTxLatencyBenchmark(t *testing.T) {
-	skipIfNodeUnreachable(t, rpcAddressNode1, rpcAddressNode2)
+	skipUnlessErigonNodes(t, rpcAddressNode1, rpcAddressNode2)
 
 	txToSendCount := 100
 
