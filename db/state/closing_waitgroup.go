@@ -19,17 +19,16 @@ package state
 import "sync"
 
 // closingWaitGroup is a sync.WaitGroup with a close latch. A goroutine the owner
-// did not spawn must register via TryAdd, which refuses once RunClose has latched;
+// did not spawn must register via TryAdd, which refuses once BeginClose has latched;
 // this keeps its Add from racing Wait on a zero counter (WaitGroup reuse). The
 // WaitGroup is a named field, not embedded, so no bare Add can bypass the latch.
 type closingWaitGroup struct {
-	wg        sync.WaitGroup
-	mu        sync.Mutex
-	closing   bool
-	closeOnce sync.Once
+	wg      sync.WaitGroup
+	mu      sync.Mutex
+	closing bool
 }
 
-// TryAdd registers the caller on the group unless RunClose has latched.
+// TryAdd registers the caller on the group unless BeginClose has latched.
 func (g *closingWaitGroup) TryAdd() bool {
 	g.mu.Lock()
 	defer g.mu.Unlock()
@@ -49,14 +48,15 @@ func (g *closingWaitGroup) Done() { g.wg.Done() }
 
 func (g *closingWaitGroup) Wait() { g.wg.Wait() }
 
-// RunClose latches the group closed and runs teardown exactly once; concurrent
-// and later callers block until that first teardown returns. Latching before
-// teardown makes every TryAdd either ordered before teardown's Wait or refused.
-func (g *closingWaitGroup) RunClose(teardown func()) {
-	g.closeOnce.Do(func() {
-		g.mu.Lock()
-		g.closing = true
-		g.mu.Unlock()
-		teardown()
-	})
+// BeginClose latches the group closed, returning false if it was already latched
+// so Close is idempotent. Latching before Close's Wait makes every TryAdd either
+// register before Wait or get refused.
+func (g *closingWaitGroup) BeginClose() bool {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	if g.closing {
+		return false
+	}
+	g.closing = true
+	return true
 }
