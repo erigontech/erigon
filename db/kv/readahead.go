@@ -186,7 +186,29 @@ func (r *ReadAhead) waitTurn(ctx context.Context, idx int, ahead int64) bool {
 	}
 }
 
-// warm reads [from,to) so the OS faults each key/value page into cache.
+// osPageBytes strides a value one page at a time; 4KiB faults every OS page on
+// any platform (16KiB-page systems just get a few redundant hits).
+const osPageBytes = 4096
+
+// warmupSink must consume the bytes read during warmup: with the result
+// discarded, the compiler dead-code-eliminates the value loads and no page is
+// ever faulted in. An atomic keeps the loads live and is race-free across workers.
+var warmupSink atomic.Uint64
+
+// touchValue faults every OS page backing v into cache, folding one byte per
+// page into sink. Keys and inline values are already faulted by the b-tree
+// traversal that yielded them; only large (overflow-page) values need this.
+func touchValue(sink byte, v []byte) byte {
+	for off := 0; off < len(v); off += osPageBytes {
+		sink ^= v[off]
+	}
+	if n := len(v); n > 0 {
+		sink ^= v[n-1]
+	}
+	return sink
+}
+
+// warm reads [from,to) so the OS faults each value page into cache.
 func (r *ReadAhead) warm(ctx context.Context, db RoDB, table string, from, to []byte) {
 	_ = db.View(ctx, func(tx Tx) error {
 		it, err := tx.Range(table, from, to, order.Asc, -1)
@@ -194,12 +216,15 @@ func (r *ReadAhead) warm(ctx context.Context, db RoDB, table string, from, to []
 			return err
 		}
 		defer it.Close()
+		var sink byte
+		defer func() { warmupSink.Add(uint64(sink)) }()
 		n := 0
 		for it.HasNext() {
-			_, _, err := it.Next()
+			_, v, err := it.Next()
 			if err != nil {
 				return err
 			}
+			sink = touchValue(sink, v)
 			n++
 			if n%128 == 0 && ctx.Err() != nil {
 				return ctx.Err()

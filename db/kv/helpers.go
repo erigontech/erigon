@@ -204,10 +204,13 @@ func ReadAheadDeprecated(ctx context.Context, db RoDB, progress *atomic.Bool, ta
 			}
 			defer c.Close()
 
-			for k, _, err := c.Seek(from); k != nil && amount > 0; k, _, err = c.Next() {
+			var sink byte
+			defer func() { warmupSink.Add(uint64(sink)) }()
+			for k, v, err := c.Seek(from); k != nil && amount > 0; k, v, err = c.Next() {
 				if err != nil {
 					return err
 				}
+				sink = touchValue(sink, v)
 				amount--
 				select {
 				case <-ctx.Done():

@@ -17,6 +17,7 @@
 package temporal
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -410,14 +411,16 @@ func (tx *RwTx) DeleteRange(table string, from, to []byte) (uint64, error) {
 		if err != nil {
 			return 0, err
 		}
-		keys = append(keys, k)
+		keys = append(keys, bytes.Clone(k)) // Range yields zero-copy keys, invalid after Next()
 	}
+	var deleted uint64
 	for _, k := range keys {
 		if err := tx.RwTx.Delete(table, k); err != nil {
-			return uint64(len(keys)), err
+			return deleted, err
 		}
+		deleted++
 	}
-	return uint64(len(keys)), nil
+	return deleted, nil
 }
 
 func (tx *RwTx) LockDBInRam() error {
