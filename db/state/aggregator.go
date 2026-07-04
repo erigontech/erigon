@@ -2159,7 +2159,9 @@ func (a *Aggregator) buildFilesInBackground(txNum uint64, doMerge bool) chan str
 		if a.snapshotBuildSema != nil {
 			//we are inside own goroutine - it's fine to block here
 			if err := a.snapshotBuildSema.Acquire(a.ctx, 1); err != nil { //TODO: not sure if this ctx is correct
-				a.logger.Warn("[snapshots] buildFilesInBackground", "err", err)
+				if !errors.Is(err, context.Canceled) && !errors.Is(err, common.ErrStopped) {
+					a.logger.Warn("[snapshots] buildFilesInBackground", "err", err)
+				}
 				close(fin)
 				return //nolint
 			}
