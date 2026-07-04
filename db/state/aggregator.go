@@ -619,25 +619,24 @@ func (a *Aggregator) WaitForFiles() {
 
 func (a *Aggregator) Close() {
 	a.WaitForFiles()
-	if !a.wg.BeginClose() { // invariant: it's safe to call Close multiple times, even concurrently
-		return
-	}
-	defer a.wg.MarkClosed()
-	a.ctxCancel()
-	if a.metricsCollector != nil {
-		a.metricsCollector.Stop() // drain buffered samples before wg.Wait joins the goroutine
-	}
-	a.wg.Wait()
+	// RunClose makes this safe to call multiple times, even concurrently.
+	a.wg.RunClose(func() {
+		a.ctxCancel()
+		if a.metricsCollector != nil {
+			a.metricsCollector.Stop() // drain buffered samples before wg.Wait joins the goroutine
+		}
+		a.wg.Wait()
 
-	// A closed Aggregator may linger referenced; release the cached branch data eagerly.
-	if cd := a.d[kv.CommitmentDomain]; cd != nil && cd.branchCache != nil {
-		cd.branchCache.Clear()
-	}
+		// A closed Aggregator may linger referenced; release the cached branch data eagerly.
+		if cd := a.d[kv.CommitmentDomain]; cd != nil && cd.branchCache != nil {
+			cd.branchCache.Clear()
+		}
 
-	a.dirtyFilesLock.Lock()
-	defer a.dirtyFilesLock.Unlock()
-	a.closeDirtyFiles()
-	a.recalcVisibleFiles(nil)
+		a.dirtyFilesLock.Lock()
+		defer a.dirtyFilesLock.Unlock()
+		a.closeDirtyFiles()
+		a.recalcVisibleFiles(nil)
+	})
 }
 
 func (a *Aggregator) closeDirtyFiles() {

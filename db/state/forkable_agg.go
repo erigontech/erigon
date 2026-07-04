@@ -451,17 +451,16 @@ func (r *ForkableAgg) Close() {
 	if r == nil {
 		return
 	}
-	if !r.wg.BeginClose() { // invariant: it's safe to call Close multiple times, even concurrently
-		return
-	}
-	defer r.wg.MarkClosed()
-	r.ctxCancel()
-	r.wg.Wait()
+	// RunClose makes this safe to call multiple times, even concurrently.
+	r.wg.RunClose(func() {
+		r.ctxCancel()
+		r.wg.Wait()
 
-	r.dirtyFilesLock.Lock()
-	defer r.dirtyFilesLock.Unlock()
-	r.closeDirtyFiles()
-	r.recalcVisibleFiles()
+		r.dirtyFilesLock.Lock()
+		defer r.dirtyFilesLock.Unlock()
+		r.closeDirtyFiles()
+		r.recalcVisibleFiles()
+	})
 }
 
 func (r *ForkableAgg) closeDirtyFiles() {

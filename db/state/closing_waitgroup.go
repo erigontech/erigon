@@ -19,17 +19,17 @@ package state
 import "sync"
 
 // closingWaitGroup is a sync.WaitGroup with a close latch. A goroutine the owner
-// did not spawn must register via TryAdd, which refuses once BeginClose latches;
+// did not spawn must register via TryAdd, which refuses once RunClose has latched;
 // this keeps its Add from racing Wait on a zero counter (WaitGroup reuse). The
 // WaitGroup is a named field, not embedded, so no bare Add can bypass the latch.
 type closingWaitGroup struct {
-	wg      sync.WaitGroup
-	mu      sync.Mutex
-	closing bool
-	closed  chan struct{}
+	wg        sync.WaitGroup
+	mu        sync.Mutex
+	closing   bool
+	closeOnce sync.Once
 }
 
-// TryAdd registers the caller on the group unless BeginClose has latched.
+// TryAdd registers the caller on the group unless RunClose has latched.
 func (g *closingWaitGroup) TryAdd() bool {
 	g.mu.Lock()
 	defer g.mu.Unlock()
@@ -49,23 +49,14 @@ func (g *closingWaitGroup) Done() { g.wg.Done() }
 
 func (g *closingWaitGroup) Wait() { g.wg.Wait() }
 
-// BeginClose latches the group closed and reports whether this call is the one
-// that must run teardown. Callers that lose the latch block until the winner
-// calls MarkClosed, so Close blocks until teardown is complete for every caller.
-func (g *closingWaitGroup) BeginClose() bool {
-	g.mu.Lock()
-	if g.closing {
-		closed := g.closed
+// RunClose latches the group closed and runs teardown exactly once; concurrent
+// and later callers block until that first teardown returns. Latching before
+// teardown makes every TryAdd either ordered before teardown's Wait or refused.
+func (g *closingWaitGroup) RunClose(teardown func()) {
+	g.closeOnce.Do(func() {
+		g.mu.Lock()
+		g.closing = true
 		g.mu.Unlock()
-		<-closed
-		return false
-	}
-	g.closing = true
-	g.closed = make(chan struct{})
-	g.mu.Unlock()
-	return true
+		teardown()
+	})
 }
-
-// MarkClosed releases callers blocked in BeginClose; the caller that won the
-// latch must call it exactly once, once teardown is complete.
-func (g *closingWaitGroup) MarkClosed() { close(g.closed) }
