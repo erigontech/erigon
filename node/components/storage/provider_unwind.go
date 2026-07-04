@@ -220,7 +220,7 @@ func (p *Provider) unwindFinalize(ctx context.Context, tx kv.TemporalRwTx, toBlo
 	if err != nil {
 		return fmt.Errorf("storage.Provider.Unwind: lookup lastTxNum: %w", err)
 	}
-	pendingRegen, err := p.regenerateBoundaryStepFiles(ctx, tx, toBlock, lastTxNum, recompute.encodedTrieState)
+	pendingRegen, err := p.regenerateBoundaryStepFiles(ctx, tx, toBlock, lastTxNum, recompute)
 	if err != nil {
 		return fmt.Errorf("storage.Provider.Unwind: regenerate boundary-step files: %w", err)
 	}
