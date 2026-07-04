@@ -63,12 +63,11 @@ func validateBundles(bundles []Bundle) error {
 }
 
 // setupEVMTimeout cancels the EVM held by the returned pointer once timeout elapses (or
-// ctx is cancelled), and returns the deadline-carrying context. Callers recreating the
-// EVM in a loop must Store the new instance so the cancellation always hits the current
-// one. The returned cleanup must be deferred.
-func setupEVMTimeout(ctx context.Context, evm *vm.EVM, timeout time.Duration) (context.Context, *atomic.Pointer[vm.EVM], func()) {
+// ctx is cancelled), and returns the deadline-carrying context. Callers must Store the
+// EVM once created — and again whenever it is recreated — so the cancellation always
+// hits the current instance. The returned cleanup must be deferred.
+func setupEVMTimeout(ctx context.Context, timeout time.Duration) (context.Context, *atomic.Pointer[vm.EVM], func()) {
 	evmPtr := &atomic.Pointer[vm.EVM]{}
-	evmPtr.Store(evm)
 
 	var cancel context.CancelFunc
 	if timeout > 0 {
@@ -77,7 +76,11 @@ func setupEVMTimeout(ctx context.Context, evm *vm.EVM, timeout time.Duration) (c
 		ctx, cancel = context.WithCancel(ctx)
 	}
 
-	stop := context.AfterFunc(ctx, func() { evmPtr.Load().Cancel() })
+	stop := context.AfterFunc(ctx, func() {
+		if evm := evmPtr.Load(); evm != nil {
+			evm.Cancel()
+		}
+	})
 	return ctx, evmPtr, func() {
 		stop()
 		cancel()
@@ -158,23 +161,24 @@ func (api *APIImpl) CallMany(ctx context.Context, bundles []Bundle, simulateCont
 		return nil, fmt.Errorf("block %d(%x) not found", blockNum, hash)
 	}
 
-	getHash := transactions.MakeBlockHashProvider(ctx, tx, api._blockReader, overrideBlockHash)
-
-	blockCtx = protocol.NewEVMBlockContext(header, getHash, api.engine(), accounts.NilAddress /* author */, chainConfig)
-
-	// Get a new instance of the EVM
-	evm = vm.NewEVM(blockCtx, txCtx, st, chainConfig, vm.Config{})
-	signer := types.MakeSigner(chainConfig, blockNum, blockCtx.Time)
-	rules := evm.ChainRules()
-
 	timeout := api.evmCallTimeout
 
 	if timeoutMilliSecondsPtr != nil && *timeoutMilliSecondsPtr > 0 {
 		timeout = time.Duration(*timeoutMilliSecondsPtr) * time.Millisecond
 	}
 
-	_, evmPtr, cleanup := setupEVMTimeout(ctx, evm, timeout)
+	ctx, evmPtr, cleanup := setupEVMTimeout(ctx, timeout)
 	defer cleanup()
+
+	getHash := transactions.MakeBlockHashProvider(ctx, tx, api._blockReader, overrideBlockHash)
+
+	blockCtx = protocol.NewEVMBlockContext(header, getHash, api.engine(), accounts.NilAddress /* author */, chainConfig)
+
+	// Get a new instance of the EVM
+	evm = vm.NewEVM(blockCtx, txCtx, st, chainConfig, vm.Config{})
+	evmPtr.Store(evm)
+	signer := types.MakeSigner(chainConfig, blockNum, blockCtx.Time)
+	rules := evm.ChainRules()
 
 	// Setup the gas pool (also for unmetered requests)
 	// and apply the message.

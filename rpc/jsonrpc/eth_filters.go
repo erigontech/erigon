@@ -180,11 +180,11 @@ func subscribeRPC[T any](ctx context.Context, apiFilters *rpchelper.Filters, sub
 		for {
 			select {
 			case item, ok := <-ch:
-				notify(emit, item)
 				if !ok {
 					log.Warn(closedWarn)
 					return
 				}
+				notify(emit, item)
 			case <-rpcSub.Err():
 				return
 			}

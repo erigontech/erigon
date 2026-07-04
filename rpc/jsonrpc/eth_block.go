@@ -148,8 +148,9 @@ func (api *APIImpl) CallBundle(ctx context.Context, txHashes []common.Hash, stat
 	}
 	timeout := time.Millisecond * time.Duration(timeoutMilliSeconds)
 
-	_, evmPtr, cleanup := setupEVMTimeout(ctx, evm, timeout)
+	_, evmPtr, cleanup := setupEVMTimeout(ctx, timeout)
 	defer cleanup()
+	evmPtr.Store(evm)
 
 	// Setup the gas pool (also for unmetered requests)
 	// and apply the message.

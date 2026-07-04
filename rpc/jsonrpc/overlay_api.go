@@ -454,6 +454,10 @@ func (api *OverlayAPIImpl) replayBlock(ctx context.Context, blockNum uint64, sta
 		return nil, fmt.Errorf("block %d(%x) not found", blockNum, hash)
 	}
 
+	timeout := api.OverlayReplayBlockTimeout
+	ctx, evmPtr, cleanup := setupEVMTimeout(ctx, timeout)
+	defer cleanup()
+
 	getHash := transactions.MakeBlockHashProvider(ctx, tx, api._blockReader, overrideBlockHash)
 
 	blockCtx = protocol.NewEVMBlockContext(header, getHash, api.engine(), accounts.NilAddress, chainConfig)
@@ -461,15 +465,11 @@ func (api *OverlayAPIImpl) replayBlock(ctx context.Context, blockNum uint64, sta
 	signer := types.MakeSigner(chainConfig, blockNum, blockCtx.Time)
 	rules := blockCtx.Rules(chainConfig)
 
-	timeout := api.OverlayReplayBlockTimeout
-
 	// Setup the gas pool (also for unmetered requests)
 	// and apply the message.
 	gp := new(protocol.GasPool).AddGas(math.MaxUint64).AddBlobGas(math.MaxUint64)
 	evm = vm.NewEVM(blockCtx, evmtypes.TxContext{}, statedb, chainConfig, vm.Config{})
-
-	ctx, _, cleanup := setupEVMTimeout(ctx, evm, timeout)
-	defer cleanup()
+	evmPtr.Store(evm)
 	receipts, err := api.getReceipts(ctx, tx, block)
 	if err != nil {
 		return nil, err
