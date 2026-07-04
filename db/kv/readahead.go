@@ -210,7 +210,7 @@ func touchValue(sink byte, v []byte) byte {
 
 // warm reads [from,to) so the OS faults each value page into cache.
 func (r *ReadAhead) warm(ctx context.Context, db RoDB, table string, from, to []byte) {
-	_ = db.View(ctx, func(tx Tx) error {
+	err := db.View(ctx, func(tx Tx) error {
 		it, err := tx.Range(table, from, to, order.Asc, -1)
 		if err != nil {
 			return err
@@ -232,6 +232,9 @@ func (r *ReadAhead) warm(ctx context.Context, db RoDB, table string, from, to []
 		}
 		return nil
 	})
+	if err != nil && ctx.Err() == nil { // best-effort warmup, but a real DB error shouldn't vanish
+		log.Warn("["+r.label+"] warmup failed", "table", table, "err", err)
+	}
 }
 
 // SetPos reports the consumer's position so prefetchers throttle to a bounded
