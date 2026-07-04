@@ -88,18 +88,24 @@ func (api *BaseAPI) getReceiptsWithBor(ctx context.Context, tx kv.TemporalTx, ch
 	if chainConfig.Bor == nil {
 		return receipts, nil, nil
 	}
-	events, err := api.bridgeReader.Events(ctx, block.Hash(), block.NumberU64())
-	if err != nil {
-		return nil, nil, err
-	}
-	if len(events) == 0 {
-		return receipts, nil, nil
-	}
-	borReceipt, err := api.borReceiptGenerator.GenerateBorReceipt(ctx, tx, block, events, chainConfig)
+	borReceipt, err := api.borReceiptForBlock(ctx, tx, chainConfig, block)
 	if err != nil {
 		return nil, nil, err
 	}
 	return receipts, borReceipt, nil
+}
+
+// borReceiptForBlock returns the synthetic bor receipt for the block's state sync
+// events, or nil when the block has none.
+func (api *BaseAPI) borReceiptForBlock(ctx context.Context, tx kv.TemporalTx, chainConfig *chain.Config, block *types.Block) (*types.Receipt, error) {
+	events, err := api.bridgeReader.Events(ctx, block.Hash(), block.NumberU64())
+	if err != nil {
+		return nil, err
+	}
+	if len(events) == 0 {
+		return nil, nil
+	}
+	return api.borReceiptGenerator.GenerateBorReceipt(ctx, tx, block, events, chainConfig)
 }
 
 func (api *BaseAPI) getReceipt(ctx context.Context, cc *chain.Config, tx kv.TemporalTx, header *types.Header, txn types.Transaction, index int, txNum uint64, postState *receipts.PostStateInfo) (*types.Receipt, error) {
@@ -132,7 +138,6 @@ func (api *BaseAPI) resolveLogsRange(ctx context.Context, tx kv.Tx, crit filters
 		return num, num, nil
 	}
 
-	// Convert the RPC block numbers into internal representations
 	latest, _, _, err := rpchelper.GetBlockNumber(ctx, rpc.BlockNumberOrHashWithNumber(rpc.LatestExecutedBlockNumber), tx, api._blockReader, nil)
 	if err != nil {
 		return 0, 0, err
@@ -578,18 +583,12 @@ func (api *APIImpl) GetTransactionReceipt(ctx context.Context, txnHash common.Ha
 			return nil, nil // not error, see https://github.com/erigontech/erigon/issues/1645
 		}
 
-		events, err := api.bridgeReader.Events(ctx, block.Hash(), blockNum)
+		borReceipt, err := api.borReceiptForBlock(ctx, tx, chainConfig, block)
 		if err != nil {
 			return nil, err
 		}
-
-		if len(events) == 0 {
+		if borReceipt == nil {
 			return nil, errors.New("tx not found")
-		}
-
-		borReceipt, err := api.borReceiptGenerator.GenerateBorReceipt(ctx, tx, block, events, chainConfig)
-		if err != nil {
-			return nil, err
 		}
 
 		return ethutils.MarshalReceipt(borReceipt, bortypes.NewBorTransaction(), chainConfig, block.HeaderNoCopy(), txnHash, false, false), nil

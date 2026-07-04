@@ -20,6 +20,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"math/big"
 
 	"github.com/RoaringBitmap/roaring/v2"
 
@@ -85,24 +86,28 @@ func logRangeLatestOnly(tx kv.Tx, crit filters.FilterCriteria) (begin, end uint6
 	if err != nil {
 		return 0, 0, err
 	}
-
-	begin = 0
-	if crit.FromBlock != nil {
-		if crit.FromBlock.Sign() >= 0 {
-			begin = crit.FromBlock.Uint64()
-		} else if !crit.FromBlock.IsInt64() || crit.FromBlock.Int64() != int64(rpc.LatestBlockNumber) {
-			return 0, 0, &rpc.CustomError{Message: fmt.Sprintf("negative value for FromBlock: %v", crit.FromBlock), Code: rpc.ErrCodeInvalidParams}
-		}
+	begin, err = resolveLogBound(crit.FromBlock, 0, "FromBlock")
+	if err != nil {
+		return 0, 0, err
 	}
-	end = latest
-	if crit.ToBlock != nil {
-		if crit.ToBlock.Sign() >= 0 {
-			end = crit.ToBlock.Uint64()
-		} else if !crit.ToBlock.IsInt64() || crit.ToBlock.Int64() != int64(rpc.LatestBlockNumber) {
-			return 0, 0, &rpc.CustomError{Message: fmt.Sprintf("negative value for ToBlock: %v", crit.ToBlock), Code: rpc.ErrCodeInvalidParams}
-		}
+	end, err = resolveLogBound(crit.ToBlock, latest, "ToBlock")
+	if err != nil {
+		return 0, 0, err
 	}
 	return begin, end, nil
+}
+
+func resolveLogBound(bound *big.Int, def uint64, name string) (uint64, error) {
+	switch {
+	case bound == nil:
+		return def, nil
+	case bound.Sign() >= 0:
+		return bound.Uint64(), nil
+	case bound.IsInt64() && bound.Int64() == int64(rpc.LatestBlockNumber):
+		return def, nil
+	default:
+		return 0, &rpc.CustomError{Message: fmt.Sprintf("negative value for %s: %v", name, bound), Code: rpc.ErrCodeInvalidParams}
+	}
 }
 
 // GetLogs implements erigon_getLogs. Returns an array of logs matching a given filter object.

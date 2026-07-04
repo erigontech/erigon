@@ -154,8 +154,9 @@ func (api *APIImpl) GetFilterLogs(_ context.Context, index string) ([]*types.Log
 // subscribeRPC runs the shared subscription skeleton: guard checks, subscription
 // creation, and a goroutine that pumps items from the filter channel into notify until
 // the channel closes or the client goes away. subscribe is called inside the goroutine
-// and must return the item channel plus an unsubscribe func.
-func subscribeRPC[T any](ctx context.Context, apiFilters *rpchelper.Filters, subscribe func() (<-chan T, func()), notify func(notifier rpc.Notifier, rpcSub *rpc.Subscription, item T), closedWarn string) (*rpc.Subscription, error) {
+// and must return the item channel plus an unsubscribe func. notify receives an emit
+// func that sends a payload to the client, logging on failure.
+func subscribeRPC[T any](ctx context.Context, apiFilters *rpchelper.Filters, subscribe func() (<-chan T, func()), notify func(emit func(payload any), item T), closedWarn string) (*rpc.Subscription, error) {
 	if apiFilters == nil {
 		return &rpc.Subscription{}, rpc.ErrNotificationsUnsupported
 	}
@@ -171,10 +172,15 @@ func subscribeRPC[T any](ctx context.Context, apiFilters *rpchelper.Filters, sub
 		ch, unsubscribe := subscribe()
 		defer unsubscribe()
 
+		emit := func(payload any) {
+			if err := notifier.Notify(rpcSub.ID, payload); err != nil {
+				log.Warn("[rpc] error while notifying subscription", "err", err)
+			}
+		}
 		for {
 			select {
 			case item, ok := <-ch:
-				notify(notifier, rpcSub, item)
+				notify(emit, item)
 				if !ok {
 					log.Warn(closedWarn)
 					return
@@ -195,12 +201,9 @@ func (api *APIImpl) NewHeads(ctx context.Context) (*rpc.Subscription, error) {
 			headers, id := api.filters.SubscribeNewHeads(32)
 			return headers, func() { api.filters.UnsubscribeHeads(id) }
 		},
-		func(notifier rpc.Notifier, rpcSub *rpc.Subscription, h *types.Header) {
+		func(emit func(payload any), h *types.Header) {
 			if h != nil {
-				err := notifier.Notify(rpcSub.ID, h)
-				if err != nil {
-					log.Warn("[rpc] error while notifying subscription", "err", err)
-				}
+				emit(h)
 			}
 		},
 		"[rpc] new heads channel was closed")
@@ -222,18 +225,13 @@ func (api *APIImpl) subscribePendingTransactions(ctx context.Context, chanSize i
 			txsCh, id := api.filters.SubscribePendingTxs(chanSize)
 			return txsCh, func() { api.filters.UnsubscribePendingTxs(id) }
 		},
-		func(notifier rpc.Notifier, rpcSub *rpc.Subscription, txs []types.Transaction) {
+		func(emit func(payload any), txs []types.Transaction) {
 			for _, t := range txs {
 				if t != nil {
-					var err error
 					if fullTx {
-						err = notifier.Notify(rpcSub.ID, newRPCPendingTransaction(t, nil, nil))
+						emit(newRPCPendingTransaction(t, nil, nil))
 					} else {
-						err = notifier.Notify(rpcSub.ID, t.Hash())
-					}
-
-					if err != nil {
-						log.Warn("[rpc] error while notifying subscription", "err", err)
+						emit(t.Hash())
 					}
 				}
 			}
@@ -248,12 +246,9 @@ func (api *APIImpl) Logs(ctx context.Context, crit filters.FilterCriteria) (*rpc
 			logs, id := api.filters.SubscribeLogs(api.SubscribeLogsChannelSize, crit)
 			return logs, func() { api.filters.UnsubscribeLogs(id) }
 		},
-		func(notifier rpc.Notifier, rpcSub *rpc.Subscription, h *types.Log) {
+		func(emit func(payload any), h *types.Log) {
 			if h != nil {
-				err := notifier.Notify(rpcSub.ID, h)
-				if err != nil {
-					log.Warn("[rpc] error while notifying subscription", "err", err)
-				}
+				emit(h)
 			}
 		},
 		"[rpc] log channel was closed")
@@ -266,13 +261,10 @@ func (api *APIImpl) TransactionReceipts(ctx context.Context, crit filters.Receip
 			receipts, id := api.filters.SubscribeReceipts(api.SubscribeLogsChannelSize, crit)
 			return receipts, func() { api.filters.UnsubscribeReceipts(id) }
 		},
-		func(notifier rpc.Notifier, rpcSub *rpc.Subscription, protoReceipt *remoteproto.SubscribeReceiptsReply) {
+		func(emit func(payload any), protoReceipt *remoteproto.SubscribeReceiptsReply) {
 			if protoReceipt != nil {
 				receipt := ethutils.MarshalSubscribeReceipt(protoReceipt)
-				err := notifier.Notify(rpcSub.ID, []map[string]any{receipt})
-				if err != nil {
-					log.Warn("[rpc] error while notifying subscription", "err", err)
-				}
+				emit([]map[string]any{receipt})
 			}
 		},
 		"[rpc] receipts channel was closed")
