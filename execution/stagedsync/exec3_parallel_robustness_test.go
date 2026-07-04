@@ -469,18 +469,26 @@ func TestApplyLoopPartialBatchReturnsErrLoopExhausted(t *testing.T) {
 		isOK        bool
 	}
 
-	run := func(txResultBlocks, appliedBlocks map[uint64]struct{}, reachedMaxBlock bool, lastBlockResult, maxBlockNum, startBlockNum uint64) result {
-		// The decision tree (mirroring exec3_parallel.go's
-		// applyResults-close branch in execErr's anonymous func around
-		// line 355 — keep these branches in sync with the production
-		// sequence):
+	run := func(txResultBlocks, appliedBlocks map[uint64]struct{}, sc *stopCause, lastBlockResult, maxBlockNum, startBlockNum uint64) result {
+		// The decision tree (mirroring exec3_parallel.go's applyResults-close
+		// branch in execErr's anonymous func — keep these branches in sync with
+		// the production sequence): missing check → stopCause kind → maxBlock
+		// fallback → ErrLoopExhausted.
 		if missing := applyLoopMissingBlocks(txResultBlocks, appliedBlocks); len(missing) > 0 {
 			return result{
 				err:       errors.New("invalid block: missing blocks"),
 				isInvalid: true,
 			}
 		}
-		if reachedMaxBlock {
+		if sc != nil {
+			switch sc.kind {
+			case stopReachedMax:
+				return result{isOK: true}
+			case stopMoreWork:
+				return result{err: &ErrLoopExhausted{From: startBlockNum, To: lastBlockResult, Reason: "block batch is full"}, isExhausted: true}
+			}
+		}
+		if lastBlockResult >= maxBlockNum {
 			return result{isOK: true}
 		}
 		return result{
@@ -498,7 +506,7 @@ func TestApplyLoopPartialBatchReturnsErrLoopExhausted(t *testing.T) {
 	}
 
 	t.Run("partial batch, size-limit hit — exhausted (the regression case)", func(t *testing.T) {
-		got := run(mkSet(1, 2, 3, 4, 5), mkSet(1, 2, 3, 4, 5), false, 5, 200, 1)
+		got := run(mkSet(1, 2, 3, 4, 5), mkSet(1, 2, 3, 4, 5), &stopCause{kind: stopMoreWork}, 5, 200, 1)
 		if !got.isExhausted {
 			t.Fatalf("expected ErrLoopExhausted, got: %+v", got)
 		}
@@ -508,7 +516,7 @@ func TestApplyLoopPartialBatchReturnsErrLoopExhausted(t *testing.T) {
 	})
 
 	t.Run("full batch, max reached — clean nil", func(t *testing.T) {
-		got := run(mkSet(1, 2, 3), mkSet(1, 2, 3), true, 3, 3, 1)
+		got := run(mkSet(1, 2, 3), mkSet(1, 2, 3), &stopCause{kind: stopReachedMax}, 3, 3, 1)
 		if !got.isOK {
 			t.Fatalf("expected clean nil, got: %+v", got)
 		}
@@ -516,14 +524,14 @@ func TestApplyLoopPartialBatchReturnsErrLoopExhausted(t *testing.T) {
 
 	t.Run("genuine silent failure mid-batch — InvalidBlock", func(t *testing.T) {
 		// Block 3 had tx-results but no blockResult. Real bug — must surface.
-		got := run(mkSet(1, 2, 3), mkSet(1, 2), false, 2, 5, 1)
+		got := run(mkSet(1, 2, 3), mkSet(1, 2), nil, 2, 5, 1)
 		if !got.isInvalid {
 			t.Fatalf("expected InvalidBlock error, got: %+v", got)
 		}
 	})
 
 	t.Run("partial batch with single block — exhausted", func(t *testing.T) {
-		got := run(mkSet(1), mkSet(1), false, 1, 200, 1)
+		got := run(mkSet(1), mkSet(1), &stopCause{kind: stopMoreWork}, 1, 200, 1)
 		if !got.isExhausted {
 			t.Fatalf("expected ErrLoopExhausted, got: %+v", got)
 		}
@@ -1047,16 +1055,16 @@ func TestApplyLoopCloseBranchSurfacesDeferredRootBeforeMissing(t *testing.T) {
 	})
 }
 
-// TestExecLoopExitCheckDeliberateStop verifies that a ctx cancelled with
-// errDeliberateStop suppresses the pending-block ErrInvalidBlock noise.
+// TestExecLoopExitCheckDeliberateStop verifies that a ctx cancelled with a
+// stopCause suppresses the pending-block ErrInvalidBlock noise.
 func TestExecLoopExitCheckDeliberateStop(t *testing.T) {
-	t.Run("pending blocks but deliberate-stop cause returns nil", func(t *testing.T) {
+	t.Run("pending blocks but stopCause returns nil", func(t *testing.T) {
 		pe := &parallelExecutor{}
 		pe.blockExecutors = map[uint64]*blockExecutor{3: {}, 7: {}}
 		ctx, cancel := context.WithCancelCause(context.Background())
-		cancel(errDeliberateStop)
+		cancel(&stopCause{block: 7, kind: stopBadBlock, err: errors.New("wrong root")})
 		if err := pe.execLoopExitCheck(ctx, "post-cancel-drain"); err != nil {
-			t.Fatalf("deliberate-stop cause must suppress pending-block error, got: %v", err)
+			t.Fatalf("stopCause must suppress pending-block error, got: %v", err)
 		}
 	})
 
@@ -1074,6 +1082,38 @@ func TestExecLoopExitCheckDeliberateStop(t *testing.T) {
 		cancel(errors.New("shutdown"))
 		err := pe.execLoopExitCheck(ctx, "non-deliberate-cancel")
 		require.ErrorIs(t, err, rules.ErrInvalidBlock, "unrelated cancel cause must not suppress the silent-miss error")
+	})
+}
+
+// TestStopCausePropagation pins the mechanism the unified shutdown rests on: a
+// stopCause published on a context is readable via stopCauseOf, survives a child
+// context (as coordCtx does through errgroup.WithContext), and is distinguished
+// from an unrelated cancel cause.
+func TestStopCausePropagation(t *testing.T) {
+	t.Run("round-trips through a child context", func(t *testing.T) {
+		parent, cancel := context.WithCancelCause(context.Background())
+		child, childCancel := context.WithCancel(parent)
+		defer childCancel()
+		cancel(&stopCause{block: 42, kind: stopReachedMax})
+
+		sc, ok := stopCauseOf(child)
+		require.True(t, ok, "stopCause must be visible through the child context")
+		require.Equal(t, uint64(42), sc.block)
+		require.Equal(t, stopReachedMax, sc.kind)
+	})
+
+	t.Run("no cause before cancel", func(t *testing.T) {
+		ctx, cancel := context.WithCancelCause(context.Background())
+		defer cancel(nil)
+		_, ok := stopCauseOf(ctx)
+		require.False(t, ok, "an un-cancelled context carries no stopCause")
+	})
+
+	t.Run("unrelated cause is not a stopCause", func(t *testing.T) {
+		ctx, cancel := context.WithCancelCause(context.Background())
+		cancel(errors.New("shutdown"))
+		_, ok := stopCauseOf(ctx)
+		require.False(t, ok, "a plain cancel cause must not read as a stopCause")
 	})
 }
 

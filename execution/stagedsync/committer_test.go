@@ -227,16 +227,19 @@ func TestHandleBlockRequest_EmptyBALFallsToIncremental(t *testing.T) {
 			"fail an otherwise-valid block with ErrWrongTrieRoot")
 }
 
-// TestFoldFreeze_StopsFoldAhead pins the orphan guard: a foldFreezeRequest on
-// the commitResults stream (the exec loop's batch-cut signal) must stop the
-// calculator folding any further block ahead — otherwise commitment would
-// advance past the state exec stops at. Exercised via the stream, not a shared
-// flag, matching how the exec and commit routines coordinate.
-func TestFoldFreeze_StopsFoldAhead(t *testing.T) {
+// TestFoldCap_StopsFoldAhead pins the orphan guard: once the shared executor
+// context carries a stopCause, the calculator must not fold any block past the
+// coalesce block M — otherwise commitment would advance past the state exec
+// stops at. The signal is read from the context cause, not a shared flag.
+func TestFoldCap_StopsFoldAhead(t *testing.T) {
 	defer func(prev bool) { dbg.BALDrivenCommitment = prev }(dbg.BALDrivenCommitment)
 	dbg.BALDrivenCommitment = true
 
+	signalCtx, cancel := context.WithCancelCause(context.Background())
+	defer cancel(nil)
+
 	cc := &commitmentCalculator{
+		signalCtx: signalCtx,
 		pending: map[uint64]*pendingBlock{
 			5: {req: &blockRequest{blockNum: 5, bal: make(types.BlockAccessList, 1)}, mode: calcModeBALDriven},
 		},
@@ -246,8 +249,9 @@ func TestFoldFreeze_StopsFoldAhead(t *testing.T) {
 		firstBlockNum: 5, // gate open for block 5 without a prior blockResult
 	}
 
-	cc.handleMessage(context.Background(), &foldFreezeRequest{}) // stream sentinel freezes the fold
-	cc.maybeFoldAhead(context.Background(), 5)                   // must return before foldBlockFromBAL
+	// Coalesce block M=4: block 5 is past M and must not fold.
+	cancel(&stopCause{block: 4, kind: stopMoreWork})
+	cc.maybeFoldAhead(context.Background(), 5) // must return before foldBlockFromBAL
 
-	assert.False(t, cc.foldedAhead[5], "a frozen fold must not fold ahead")
+	assert.False(t, cc.foldedAhead[5], "a fold past the coalesce block M must not run")
 }

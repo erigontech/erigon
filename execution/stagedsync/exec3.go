@@ -811,7 +811,7 @@ func computeAndCheckCommitmentV3(ctx context.Context, header *types.Header, appl
 //     the historical reasoning.
 //
 // blockNum != maxBlockNum guards against marking the goal block as
-// exhausted — the goal block already triggers a clean reachedMaxBlock
+// exhausted — the goal block already triggers a clean stopReachedMax
 // exit and shouldn't be relabeled as "more work pending".
 //
 // Pure function so the precedence is unit-testable. See

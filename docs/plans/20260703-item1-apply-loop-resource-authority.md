@@ -153,7 +153,53 @@ Both depend on the mid-block step checkpoint being expressible from a fold, whic
 same storage-model concern as the flush-boundary crux above. Until then the eager
 fold-gate stands.
 
-## Unified shutdown model — ALL exits through one cancel-with-cause flow (agreed 2026-07-04)
+## Unified shutdown model — IMPLEMENTED 2026-07-04
+
+Built as one atomic change. The cancel-with-cause is a **signal**, not a blunt
+abort: each goroutine reads the cause and decides how to wind down (Mark: "the
+calculator can decide when to stop — abort immediately, or keep going until it
+gets to the end then stop"). Two constraints shaped the implementation:
+
+- **A clean-stop cancel must not abort in-flight commitment.** The trie fold bails
+  on `ctx.Err()` (`hex_patricia_hashed.go` `foldMounted`) and the calculator's
+  publish drops on `ctx.Done`. So the calculator runs its roTx/compute/publish on
+  the **parent (work) context** and reads the stopCause from the **executor
+  (signal) context** — a signal cancel caps its fold-ahead at M but never aborts a
+  block it is mid-computing. (`newCommitmentCalculator(workCtx, signalCtx, …)`,
+  `cc.signalCtx`, `maybeFoldAhead` reads `stopCauseOf(cc.signalCtx)`.)
+- **Workers get their own inner context (Mark's inner/outer scoping).** The OCC
+  pool runs on `workersCtx = WithCancel(execLoopCtx)` — a child of the exec loop's
+  (outer) context. The exec loop, as controller, halts them via `cancelWorkers`;
+  its exit path (`defer pe.cancelWorkers()` + teardown) guarantees they can't
+  outlive it. Publishing a stopCause no longer has to conflate "signal" with
+  "stop the workers."
+
+Mechanics:
+- `stopCause{block M, kind}` + `stopCauseOf(ctx)` (errors.As) replace
+  `errDeliberateStop`, the `reachedMaxBlock` atomic, and the `foldFreezeRequest`
+  channel. `kind`: stopReachedMax→nil, stopMoreWork→ErrLoopExhausted,
+  stopBadBlock→fail.err+unwind.
+- The exec loop publishes the cause **before `sendResult(blockResult(M))`** on a
+  terminal stop — the side-channel cancel lacks the old in-order property, so
+  publish-before-send is what stops the calculator opening the fold gate for M+1.
+  Size cut still catches up: first over-budget block defers (produce one more),
+  successor is terminal.
+- `sendResult` + `triggerBatchCommitment` are **data-arm-first**: after the cause
+  is published the coord ctx is cancelled, but blockResult(M) / the batch
+  commitComputeRequest must still be delivered while the buffer has room.
+- The apply loop derives its return from `stopCauseOf(executorContext)`, keeping
+  the `fail`/unwind machinery for stopBadBlock and a maxBlock fallback for the
+  cause-less exit paths (fork-validation drain via execLoopExitCheck; real
+  shutdown).
+
+Tests: `TestFoldCap_StopsFoldAhead` (fold capped at M via cause),
+`TestStopCausePropagation` (cause round-trips through a child ctx),
+`TestApplyLoopPartialBatchReturnsErrLoopExhausted` (cause→return mapping),
+`TestExecLoopExitCheckDeliberateStop` (stopCause suppresses pending-block noise).
+Still needs the hive engine-api + eest-devnet(BAL) + mainnet-tip mid-batch-cut
+restart gate before merge (consensus-critical).
+
+### Original agreed sketch (2026-07-04)
 
 The cancel processing grew ad hoc: exec self-decides size/max/exhausted (via
 `execLoopShouldExit` + `triggerBatchCommitment`), while the apply loop only cancels

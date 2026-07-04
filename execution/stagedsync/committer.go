@@ -36,14 +36,6 @@ type commitmentResult struct {
 // the calculator sees it, all prior touches have been accumulated.
 type commitComputeRequest struct{}
 
-// foldFreezeRequest is sent through the commitResults channel when the exec loop
-// cuts the batch. It flows in-order with the blockResult stream, so by the time
-// the calculator sees it the fold has advanced exactly as far as the blocks exec
-// sent — and it must fold no further, so commitment cannot outrun the state exec
-// will stop at (an orphan → wrong root on restart). Stream-carried rather than a
-// shared flag: the exec and commit routines coordinate only through the stream.
-type foldFreezeRequest struct{}
-
 // pendingBlock is a blockRequest the calculator has received but not yet
 // computed, together with the mode selected for it.
 type pendingBlock struct {
@@ -165,11 +157,11 @@ type commitmentCalculator struct {
 	lastFoldedBlock uint64
 	hasFolded       bool
 
-	// foldFrozen stops all further fold-ahead. Set only by this goroutine on a
-	// foldFreezeRequest from the exec loop (the batch-cut signal), and read only
-	// here in maybeFoldAhead — so it needs no synchronisation, and the exec and
-	// commit routines still coordinate purely through the stream.
-	foldFrozen bool
+	// signalCtx is the shared executor context carrying the stopCause. The
+	// calculator reads it (never its own compute ctx) to cap fold-ahead at the
+	// batch's coalesce block M — compute/publish run on the separate uncancelled
+	// workCtx so a clean-stop cancel never aborts an in-flight commitment.
+	signalCtx context.Context
 
 	// forcePerBlockCompute overrides dbg.BatchCommitments and triggers a
 	// ComputeCommitment at every block boundary. Mirrors serial's
@@ -195,7 +187,8 @@ type commitmentCalculator struct {
 }
 
 func newCommitmentCalculator(
-	ctx context.Context,
+	workCtx context.Context,
+	signalCtx context.Context,
 	doms *execctx.SharedDomains,
 	db kv.TemporalRoDB,
 	chainConfig *chain.Config,
@@ -217,7 +210,7 @@ func newCommitmentCalculator(
 
 	// Open a persistent read-only TX for lazy-loading state from the domain.
 	// This lives for the calculator's lifetime, like worker TX handles.
-	roTx, err := db.BeginTemporalRo(ctx) //nolint:gocritic
+	roTx, err := db.BeginTemporalRo(workCtx) //nolint:gocritic
 	if err != nil {
 		return nil, fmt.Errorf("commitmentCalculator: open roTx: %w", err)
 	}
@@ -245,6 +238,7 @@ func newCommitmentCalculator(
 		state:                newCalcState(asOfReader, logger, logPrefix),
 		asOfReader:           asOfReader,
 		roTx:                 roTx,
+		signalCtx:            signalCtx,
 		in:                   in,
 		blockRequests:        blockRequests,
 		out:                  out,
@@ -433,12 +427,6 @@ func (cc *commitmentCalculator) handleMessage(ctx context.Context, msg applyResu
 		delete(cc.balRoots, r.BlockNum)
 		cc.maybeFoldAhead(ctx, r.BlockNum+1)
 
-	case *foldFreezeRequest:
-		// Batch cut: stop folding ahead so commitment can't advance past the
-		// state exec will stop at. In-order after the blockResults exec sent, so
-		// the fold has gone exactly as far as those allowed and no further.
-		cc.foldFrozen = true
-
 	case *commitComputeRequest:
 		// Explicit compute signal from the apply loop at batch boundary.
 		if cc.shouldComputeOnRequest() {
@@ -503,7 +491,11 @@ func (cc *commitmentCalculator) maybeFoldAhead(ctx context.Context, n uint64) {
 	if !ok || pb.mode != calcModeBALDriven || cc.foldedAhead[n] {
 		return
 	}
-	if cc.foldFrozen {
+	// Batch cut: the shared executor context carries the coalesce block M. Fold
+	// no further than M so commitment cannot outrun the state exec will stop at
+	// (an orphan → wrong root on restart). Read the signal context, never the
+	// compute ctx — compute must still finish blocks up to M.
+	if sc, stopping := stopCauseOf(cc.signalCtx); stopping && n > sc.block {
 		return
 	}
 	if cc.ownsChangeset(n) {
