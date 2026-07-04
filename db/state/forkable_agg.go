@@ -182,12 +182,13 @@ func (r *ForkableAgg) BuildFilesInBackground(num RootNum) chan struct{} {
 			}
 		}
 
-		r.wg.AddFromRegistered()
+		if !r.wg.TryAdd() {
+			close(fin)
+			return
+		}
 		go func() {
 			defer r.wg.Done()
-			defer func() {
-				close(fin)
-			}()
+			defer close(fin)
 			if err := r.mergeLoop(r.ctx); err != nil {
 				if errors.Is(err, context.Canceled) || errors.Is(err, common.ErrStopped) {
 					r.logger.Debug("[fork_agg] MergeLoop cancelled/stopped", "err", err)
@@ -380,10 +381,7 @@ func (r *ForkableAgg) buildFile(ctx context.Context, to RootNum) (built bool, er
 
 	firstRootNumNotInFiles := tx.AlignedMaxRootNum()
 	r.loop(func(p *ProtoForkable) error {
-		r.wg.AddFromRegistered()
 		g.Go(func() error {
-			defer r.wg.Done()
-
 			fromRootNum := firstRootNumNotInFiles
 			if p.unaligned {
 				fromRootNum = tx.MaxRootNum(p.id)

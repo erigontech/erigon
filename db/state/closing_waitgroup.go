@@ -18,10 +18,10 @@ package state
 
 import "sync"
 
-// closingWaitGroup is a sync.WaitGroup with a close latch. A goroutine the owner
-// did not spawn must register via TryAdd, which refuses once BeginClose has latched;
-// this keeps its Add from racing Wait on a zero counter (WaitGroup reuse). The
-// WaitGroup is a named field, not embedded, so no bare Add can bypass the latch.
+// closingWaitGroup is a sync.WaitGroup with a close latch. Every goroutine
+// registers via TryAdd, which refuses once BeginClose has latched, so an Add
+// can't race Wait on a zero counter (WaitGroup reuse). The WaitGroup is a named
+// field, not embedded, so no bare Add can bypass the latch.
 type closingWaitGroup struct {
 	wg      sync.WaitGroup
 	mu      sync.Mutex
@@ -38,11 +38,6 @@ func (g *closingWaitGroup) TryAdd() bool {
 	g.wg.Add(1)
 	return true
 }
-
-// AddFromRegistered registers a goroutine spawned from one already registered on
-// the group. The parent's outstanding count keeps Wait from returning, so this
-// Add can't race it and needs no latch check — unlike TryAdd.
-func (g *closingWaitGroup) AddFromRegistered() { g.wg.Add(1) }
 
 func (g *closingWaitGroup) Done() { g.wg.Done() }
 

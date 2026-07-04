@@ -1022,10 +1022,7 @@ func (a *Aggregator) buildFiles(ctx context.Context, step kv.Step) error {
 
 	for _, dc := range domainColls {
 		dc := dc
-		a.wg.AddFromRegistered()
 		g.Go(func() error {
-			defer a.wg.Done()
-
 			sf, err := dc.d.buildFiles(ctx, step, dc.collation, a.ps)
 			dc.collation.Close()
 			if err != nil {
@@ -1043,10 +1040,7 @@ func (a *Aggregator) buildFiles(ctx context.Context, step kv.Step) error {
 	}
 	for _, ic := range iiColls {
 		ic := ic
-		a.wg.AddFromRegistered()
 		g.Go(func() error {
-			defer a.wg.Done()
-
 			sf, err := ic.ii.buildFiles(ctx, step, ic.collation, a.ps)
 			if err != nil {
 				sf.CleanupOnError()
@@ -1179,8 +1173,7 @@ func (a *Aggregator) BuildFiles2(ctx context.Context, fromStep, toStep kv.Step, 
 			a.onFilesChange(nil)
 		}
 
-		if doMerge {
-			a.wg.AddFromRegistered()
+		if doMerge && a.wg.TryAdd() {
 			go func() {
 				defer a.wg.Done()
 				if err := a.mergeLoop(ctx); err != nil {
@@ -2303,11 +2296,10 @@ func (a *Aggregator) buildFilesInBackground(txNum uint64, doMerge bool) chan str
 			}
 			a.onFilesChange(nil)
 		}
-		if !doMerge {
+		if !doMerge || !a.wg.TryAdd() {
 			close(fin)
 			return
 		}
-		a.wg.AddFromRegistered()
 		go func() {
 			defer a.wg.Done()
 			defer close(fin)
