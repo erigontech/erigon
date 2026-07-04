@@ -2724,7 +2724,7 @@ func doBlkTxNum(ctx context.Context, cliCtx *cli.Command) error {
 }
 
 func doDiff(ctx context.Context, cliCtx *cli.Command) error {
-	log.Info("staring")
+	log.Info("starting")
 	defer log.Info("Done")
 	srcF, dstF := cliCtx.String("src"), cliCtx.String("dst")
 	src, err := seg.NewDecompressor(srcF)

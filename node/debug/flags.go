@@ -73,7 +73,7 @@ var (
 		Usage: "Prometheus HTTP server listening interface",
 		Value: "127.0.0.1",
 	}
-	metricsPortFlag = cli.IntFlag{
+	metricsPortFlag = cli.UintFlag{
 		Name:  "metrics.port",
 		Value: 6061,
 	}
@@ -81,7 +81,7 @@ var (
 		Name:  "pprof",
 		Usage: "Enable the pprof HTTP server",
 	}
-	pprofPortFlag = cli.IntFlag{
+	pprofPortFlag = cli.UintFlag{
 		Name:  "pprof.port",
 		Usage: "pprof HTTP server listening port",
 		Value: 6060,
@@ -178,7 +178,7 @@ func SetupCobra(cmd *cobra.Command, filePrefix string) log.Logger {
 		log.Error("failed setting config flags from yaml/toml file", "err", err)
 		panic(err)
 	}
-	pprofPort, err := flags.GetInt(pprofPortFlag.Name)
+	pprofPort, err := flags.GetUint(pprofPortFlag.Name)
 	if err != nil {
 		log.Error("failed setting config flags from yaml/toml file", "err", err)
 		panic(err)
@@ -194,7 +194,7 @@ func SetupCobra(cmd *cobra.Command, filePrefix string) log.Logger {
 		log.Error("failed setting config flags from yaml/toml file", "err", err)
 		panic(err)
 	}
-	metricsPort, err := flags.GetInt(metricsPortFlag.Name)
+	metricsPort, err := flags.GetUint(metricsPortFlag.Name)
 	if err != nil {
 		log.Error("failed setting config flags from yaml/toml file", "err", err)
 		panic(err)
@@ -279,7 +279,7 @@ func Setup(nodeCtx context.Context, ctx *cli.Command, rootLogger bool) (log.Logg
 
 	if pprofEnabled {
 		pprofHost := ctx.String(pprofAddrFlag.Name)
-		pprofPort := ctx.Int(pprofPortFlag.Name)
+		pprofPort := ctx.Uint(pprofPortFlag.Name)
 		address := fmt.Sprintf("%s:%d", pprofHost, pprofPort)
 		if (address == metricsAddress) && metricsEnabled {
 			metricsMux = StartPProf(address, metricsMux)
@@ -328,7 +328,7 @@ func Setup(nodeCtx context.Context, ctx *cli.Command, rootLogger bool) (log.Logg
 
 // MetricsListenAddress builds the host:port the standalone metrics server binds to.
 func MetricsListenAddress(ctx *cli.Command) string {
-	return fmt.Sprintf("%s:%d", ctx.String(metricsAddrFlag.Name), ctx.Int(metricsPortFlag.Name))
+	return fmt.Sprintf("%s:%d", ctx.String(metricsAddrFlag.Name), ctx.Uint(metricsPortFlag.Name))
 }
 
 // SetupSimple is like Setup but only returns the logger, discarding the tracer and muxes.
