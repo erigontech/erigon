@@ -18,7 +18,6 @@ package storage
 
 import (
 	"context"
-	"encoding/hex"
 	"os"
 	"path/filepath"
 	"testing"
@@ -112,7 +111,7 @@ func TestRegenerateBoundaryStepFile_NonCommitment(t *testing.T) {
 
 	newPath := oldPath + ".regen"
 	err := RegenerateBoundaryStepFile(
-		ctx, kv.AccountsDomain, oldPath, "", newPath, lookup,
+		ctx, kv.AccountsDomain, oldPath, newPath, lookup,
 		103_848_485, seg.CompressNone, nil,
 		dir, log.New(),
 	)
@@ -126,6 +125,43 @@ func TestRegenerateBoundaryStepFile_NonCommitment(t *testing.T) {
 	require.Empty(t, got[2][1], "carol becomes an empty tombstone (was in old file, lookup !found)")
 }
 
+// TestRegenerateBoundaryStepFile_Commitment exercises the
+// commitment-domain path: KeyCommitmentState is REPLACED with the
+// supplied anchor blob regardless of what was in the old file; other
+// keys go through the as-of lookup.
+func TestRegenerateBoundaryStepFile_Commitment(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	dir := t.TempDir()
+
+	branchKey := []byte("branch-deadbeef")
+	in := [][2][]byte{
+		{branchKey, []byte("stale-branch-rh-A")},
+		{commitmentdb.KeyCommitmentState, []byte("stale-commitment-state-at-block-2912403")},
+	}
+	oldPath := writeKV(t, ctx, dir, "v2.0-commitment.264-266.kv", in)
+
+	lookup := func(d kv.Domain, k []byte, ts uint64) ([]byte, bool, error) {
+		require.Equal(t, kv.CommitmentDomain, d)
+		return []byte("branch-rh-at-anchor"), true, nil
+	}
+
+	anchor := []byte("encoded-anchor-blockNum-2910208-txNum-103848485-trieState")
+	newPath := oldPath + ".regen"
+	err := RegenerateBoundaryStepFile(
+		ctx, kv.CommitmentDomain, oldPath, newPath, lookup,
+		103_848_485, seg.CompressNone, anchor,
+		dir, log.New(),
+	)
+	require.NoError(t, err)
+
+	got := readKV(t, newPath)
+	require.Equal(t, [][2][]byte{
+		{branchKey, []byte("branch-rh-at-anchor")},
+		{commitmentdb.KeyCommitmentState, anchor},
+	}, got, "branch is re-resolved; KeyCommitmentState gets the anchor blob unconditionally")
+}
+
 func TestRegenerateBoundaryStepFile_CommitmentRequiresAnchor(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
@@ -134,28 +170,12 @@ func TestRegenerateBoundaryStepFile_CommitmentRequiresAnchor(t *testing.T) {
 	oldPath := writeKV(t, ctx, dir, "v2.0-commitment.264-266.kv", nil)
 
 	err := RegenerateBoundaryStepFile(
-		ctx, kv.CommitmentDomain, oldPath, oldPath, oldPath+".regen",
+		ctx, kv.CommitmentDomain, oldPath, oldPath+".regen",
 		func(kv.Domain, []byte, uint64) ([]byte, bool, error) { return nil, false, nil },
 		0, seg.CompressNone, nil /* anchor */, dir, log.New(),
 	)
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "commitmentAnchor required")
-}
-
-func TestRegenerateBoundaryStepFile_CommitmentRequiresBaseline(t *testing.T) {
-	t.Parallel()
-	ctx := context.Background()
-	dir := t.TempDir()
-
-	oldPath := writeKV(t, ctx, dir, "v2.0-commitment.264-266.kv", nil)
-
-	err := RegenerateBoundaryStepFile(
-		ctx, kv.CommitmentDomain, oldPath, "" /* baseline */, oldPath+".regen",
-		func(kv.Domain, []byte, uint64) ([]byte, bool, error) { return nil, false, nil },
-		0, seg.CompressNone, []byte("anchor"), dir, log.New(),
-	)
-	require.Error(t, err)
-	require.Contains(t, err.Error(), "baselineKVPath required")
 }
 
 func TestRegenerateBoundaryStepFile_NonCommitmentRejectsAnchor(t *testing.T) {
@@ -166,7 +186,7 @@ func TestRegenerateBoundaryStepFile_NonCommitmentRejectsAnchor(t *testing.T) {
 	oldPath := writeKV(t, ctx, dir, "v1.0-accounts.264-266.kv", nil)
 
 	err := RegenerateBoundaryStepFile(
-		ctx, kv.AccountsDomain, oldPath, "", oldPath+".regen",
+		ctx, kv.AccountsDomain, oldPath, oldPath+".regen",
 		func(kv.Domain, []byte, uint64) ([]byte, bool, error) { return nil, false, nil },
 		0, seg.CompressNone, []byte("anchor"), dir, log.New(),
 	)
@@ -179,12 +199,14 @@ func TestRegenerateBoundaryStepFile_CommitmentWithoutKeyCommitmentStateErrors(t 
 	ctx := context.Background()
 	dir := t.TempDir()
 
-	baselinePath := writeKV(t, ctx, dir, "v2.0-commitment.264-266.kv", [][2][]byte{
+	// Commitment .kv that's missing KeyCommitmentState entirely —
+	// shouldn't happen in production but defensible to detect.
+	oldPath := writeKV(t, ctx, dir, "v2.0-commitment.264-266.kv", [][2][]byte{
 		{[]byte("branch-only-no-anchor"), []byte("value")},
 	})
 
 	err := RegenerateBoundaryStepFile(
-		ctx, kv.CommitmentDomain, baselinePath, baselinePath, baselinePath+".regen",
+		ctx, kv.CommitmentDomain, oldPath, oldPath+".regen",
 		func(kv.Domain, []byte, uint64) ([]byte, bool, error) {
 			return []byte("v"), true, nil
 		},
@@ -279,7 +301,7 @@ func TestRegenerateBoundaryStepFile_ContentReflectsLastTxNum(t *testing.T) {
 
 	newPath := oldPath + ".regen"
 	require.NoError(t, RegenerateBoundaryStepFile(
-		ctx, kv.AccountsDomain, oldPath, "", newPath, lookup,
+		ctx, kv.AccountsDomain, oldPath, newPath, lookup,
 		anchor, seg.CompressNone, nil,
 		dir, log.New(),
 	))
@@ -325,7 +347,7 @@ func TestRegenerateBoundaryStepFile_TruncatedNameMatchesContent(t *testing.T) {
 	}
 
 	require.NoError(t, RegenerateBoundaryStepFile(
-		ctx, kv.AccountsDomain, oldPath, "", newKVPath, lookup,
+		ctx, kv.AccountsDomain, oldPath, newKVPath, lookup,
 		108_584_330, seg.CompressNone, nil,
 		dir, log.New(),
 	))
@@ -348,73 +370,43 @@ func TestRegenerateBoundaryStepFile_TruncatedNameMatchesContent(t *testing.T) {
 	require.NotContains(t, newKVPath, "272-280", "truncated file name must not retain the original wider range")
 }
 
-// TestRegenerateBoundaryStepFile_CommitmentSourcesFromBaseline pins
-// the fix for the post-lastTxNum sub-tree hash contamination confirmed
-// on the hoodi 30k mode-B unwind: comparing the pre-fix regen file
-// against the baseline showed 165,294 shared keys with divergent
-// sub-tree hashes — one confirmed example is the branch key below,
-// carrying the ERC-20 address 0x4d38bd670764c49cce1e59eeaebd05974760acbd
-// whose slot 0x35 was written multiple times in blocks post-lastTxNum.
-//
-// The correct source for the regenerated boundary file is the
-// baseline .kv (endStep ≤ maxStep, the same file RecomputeAtTxNumWithoutSD
-// uses as its trie starting point). Baseline branches are at
-// end-of-baseline-step state; for a key K unchanged in
-// (baseline, lastTxNum], baseline's V equals K's at-lastTxNum V. For
-// keys touched in that range, Apply's collector wrote at-lastTxNum
-// branches to MDBX at txN=lastTxNum, and the reader picks MDBX over
-// the file.
-//
-// Predicted output at each key: baseline-existing branches survive
-// verbatim, straddler-only branches are dropped (they didn't exist
-// at lastTxNum), the anchor blob replaces KeyCommitmentState.
-func TestRegenerateBoundaryStepFile_CommitmentSourcesFromBaseline(t *testing.T) {
+// TestRegenerateBoundaryStepFile_CommitmentPreservesOnNotFound pins
+// the commitment-specific !found handling. GetAsOf(CommitmentDomain,
+// ...) short-circuits to (nil, false, nil) whenever the history layer
+// doesn't hit a value — commitment has HistoryDisabled=true. !found
+// there is NOT a tombstone signal, so neither drop nor write-empty is
+// correct: dropping loses branches the trie fold needs, empty trips
+// unfoldBranchNode. Preserve the old file's value.
+func TestRegenerateBoundaryStepFile_CommitmentPreservesOnNotFound(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
 	dir := t.TempDir()
 
-	// Real hex from the 2026-07-04 file-diff: nibble prefix 1c86…
-	// leading to the ERC-20 at 0x4d38bd670764c49cce1e59eeaebd05974760acbd.
-	keyBranchShared, err := hex.DecodeString("1c864e62c56da10bb137131400d7f3fde59b3ab352933a76e8d58711762f15d0b890")
-	require.NoError(t, err)
-	baselineBranchVal := []byte("baseline-branch-CORRECT-at-lastTxNum")
-	straddlerStaleBranchVal := []byte("straddler-branch-STALE-post-lastTxNum")
-
-	keyBranchBaselineOnly := []byte("branch-only-at-baseline")
-	keyBranchStraddlerOnly := []byte("branch-created-post-lastTxNum")
-
-	baselineIn := [][2][]byte{
-		{keyBranchBaselineOnly, []byte("baseline-only-hash")},
-		{keyBranchShared, baselineBranchVal},
-		{commitmentdb.KeyCommitmentState, []byte("baseline-state")},
+	keyBranch := []byte("branch-deadbeef")
+	branchVal := []byte("pre-anchor-branch-blob")
+	in := [][2][]byte{
+		{keyBranch, branchVal},
+		{commitmentdb.KeyCommitmentState, []byte("pre-anchor-state")},
 	}
-	baselinePath := writeKV(t, ctx, dir, "v2.1-commitment.272-280.kv", baselineIn)
-
-	straddlerIn := [][2][]byte{
-		{keyBranchShared, straddlerStaleBranchVal},
-		{keyBranchStraddlerOnly, []byte("post-lastTxNum-only-hash")},
-		{commitmentdb.KeyCommitmentState, []byte("straddler-state")},
-	}
-	straddlerPath := writeKV(t, ctx, dir, "v2.1-commitment.280-286.kv", straddlerIn)
+	oldPath := writeKV(t, ctx, dir, "v2.0-commitment.264-266.kv", in)
 
 	lookup := func(d kv.Domain, k []byte, ts uint64) ([]byte, bool, error) {
 		return nil, false, nil
 	}
 
-	anchor := []byte("anchor-at-lastTxNum")
-	newPath := straddlerPath + ".regen"
+	anchor := []byte("anchor-blob")
+	newPath := oldPath + ".regen"
 	require.NoError(t, RegenerateBoundaryStepFile(
-		ctx, kv.CommitmentDomain, straddlerPath, baselinePath, newPath, lookup,
+		ctx, kv.CommitmentDomain, oldPath, newPath, lookup,
 		108_584_330, seg.CompressNone, anchor,
 		dir, log.New(),
 	))
 
 	got := readKV(t, newPath)
 	require.Equal(t, [][2][]byte{
-		{keyBranchBaselineOnly, []byte("baseline-only-hash")},
-		{keyBranchShared, baselineBranchVal},
+		{keyBranch, branchVal},
 		{commitmentdb.KeyCommitmentState, anchor},
-	}, got, "commitment regen must source from baseline; straddler's stale post-lastTxNum values must NOT survive")
+	}, got, "commitment !found must PRESERVE the old file value; anchor still gets replaced")
 }
 
 // TestRegenerateBoundaryStepFile_TombstonePreservedForKeysInOldFile
@@ -455,7 +447,7 @@ func TestRegenerateBoundaryStepFile_TombstonePreservedForKeysInOldFile(t *testin
 
 	newPath := oldPath + ".regen"
 	require.NoError(t, RegenerateBoundaryStepFile(
-		ctx, kv.StorageDomain, oldPath, "", newPath, lookup,
+		ctx, kv.StorageDomain, oldPath, newPath, lookup,
 		108_584_330, seg.CompressNone, nil,
 		dir, log.New(),
 	))
@@ -490,7 +482,7 @@ func TestRegenerateBoundaryStepFile_WritesToNewKVPath(t *testing.T) {
 	}
 
 	require.NoError(t, RegenerateBoundaryStepFile(
-		ctx, kv.AccountsDomain, oldPath, "", newKVPath, lookup,
+		ctx, kv.AccountsDomain, oldPath, newKVPath, lookup,
 		108_584_330, seg.CompressNone, nil,
 		dir, log.New(),
 	))
