@@ -37,7 +37,7 @@ import (
 	shuttercmd "github.com/erigontech/erigon/txnprovider/shutter/cmd"
 )
 
-// MakeApp creates a cli application (based on `github.com/urlfave/cli` package).
+// MakeApp creates a cli application (based on `github.com/urfave/cli` package).
 // The application exits when `action` returns.
 // Parameters:
 // * action: the main function for the application. receives `*cli.Command` with parsed command-line flags.
