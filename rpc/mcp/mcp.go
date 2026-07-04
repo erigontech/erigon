@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"os"
 	"strings"
+	"time"
 
 	"github.com/mark3labs/mcp-go/mcp"
 	"github.com/mark3labs/mcp-go/server"
@@ -30,7 +31,7 @@ const Version = "0.0.2"
 type MCPTransport interface {
 	Serve() error
 	ServeContext(ctx context.Context) error
-	ServeSSE(addr string) error
+	ServeSSE(ctx context.Context, addr string) error
 }
 
 // ErigonMCPServer wraps Erigon APIs with MCP server capabilities.
@@ -955,8 +956,8 @@ func (e *ErigonMCPServer) ServeContext(ctx context.Context) error {
 	return s.Listen(ctx, os.Stdin, os.Stdout)
 }
 
-// ServeSSE starts MCP server with SSE transport
-func (e *ErigonMCPServer) ServeSSE(addr string) (err error) {
+// ServeSSE starts MCP server with SSE transport, shutting it down when ctx is cancelled.
+func (e *ErigonMCPServer) ServeSSE(ctx context.Context, addr string) error {
 	// Apply NonBlockingAcquire so BeginRo fails fast (ErrServerOverloaded)
 	// instead of blocking the SSE handler goroutine indefinitely when all DB
 	// read slots are held by a concurrent write/ETL transaction. The HTTP RPC
@@ -966,14 +967,30 @@ func (e *ErigonMCPServer) ServeSSE(addr string) (err error) {
 			return kv.WithNonBlockingAcquire(ctx)
 		}),
 	)
+	return serveSSE(ctx, sse, addr)
+}
 
-	defer func() {
-		if r := recover(); r != nil {
-			log.Error("[MCP]: recovered from panic:", "panic", r)
-
-			err = fmt.Errorf("mcp sse server panicked: %v", r)
-		}
+// serveSSE runs the SSE server until ctx is cancelled, then shuts it down.
+// mcp-go's SSEServer.Start takes no ctx and blocks in Accept, so without this
+// the server goroutine leaks on shutdown.
+func serveSSE(ctx context.Context, sse *server.SSEServer, addr string) error {
+	errCh := make(chan error, 1)
+	go func() {
+		defer func() {
+			if r := recover(); r != nil {
+				log.Error("[MCP] recovered from panic", "panic", r)
+				errCh <- fmt.Errorf("mcp sse server panicked: %v", r)
+			}
+		}()
+		errCh <- sse.Start(addr)
 	}()
 
-	return sse.Start(addr)
+	select {
+	case <-ctx.Done():
+		shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		return sse.Shutdown(shutdownCtx)
+	case err := <-errCh:
+		return err
+	}
 }

@@ -801,9 +801,9 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 	if config.MCPAddress != "" {
 		go func() {
 			logger.Info("serve MCP on", "addr", config.MCPAddress)
-			mcpErr := mcpServer.ServeSSE(config.MCPAddress)
+			mcpErr := mcpServer.ServeSSE(ctx, config.MCPAddress)
 			if mcpErr != nil {
-				logger.Error("mcpServer.ServeSSE", "err", err)
+				logger.Error("mcpServer.ServeSSE", "err", mcpErr)
 				return
 			}
 		}()

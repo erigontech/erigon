@@ -27,7 +27,6 @@ import (
 	"github.com/mark3labs/mcp-go/mcp"
 	"github.com/mark3labs/mcp-go/server"
 
-	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/rpc"
 )
 
@@ -1113,16 +1112,8 @@ func (s *StandaloneMCPServer) ServeContext(ctx context.Context) error {
 	return stdio.Listen(ctx, os.Stdin, os.Stdout)
 }
 
-// ServeSSE starts the MCP server with SSE transport on the given address.
-func (s *StandaloneMCPServer) ServeSSE(addr string) (err error) {
-	sse := server.NewSSEServer(s.mcpServer)
-
-	defer func() {
-		if r := recover(); r != nil {
-			log.Error("[MCP] recovered from panic", "panic", r)
-			err = fmt.Errorf("mcp sse server panicked: %v", r)
-		}
-	}()
-
-	return sse.Start(addr)
+// ServeSSE starts the MCP server with SSE transport on the given address,
+// shutting it down when ctx is cancelled.
+func (s *StandaloneMCPServer) ServeSSE(ctx context.Context, addr string) error {
+	return serveSSE(ctx, server.NewSSEServer(s.mcpServer), addr)
 }
