@@ -74,7 +74,7 @@ func (a *Aggregator) RetireOldHistoryFiles(ctx context.Context, cutoffStep kv.St
 
 	var deleted []string
 	var retired ReclaimableFiles
-	if err = a.Recalc(func() (ReclaimableFiles, error) {
+	if err = a.UpdateDirtyFiles(func() (ReclaimableFiles, bool, error) {
 		for _, dt := range at.d {
 			// commitment.history and rcache have special cli flags: --prune.include-commitment-history --persist.receipt
 			// if they enabled they are never pruned - it's current logic. we will change it in future PR's - but for now keep them
@@ -97,16 +97,7 @@ func (a *Aggregator) RetireOldHistoryFiles(ctx context.Context, cutoffStep kv.St
 			deleted = append(deleted, names...)
 			retired = append(retired, r...)
 		}
-		if len(retired) == 0 {
-			return nil, nil
-		}
-		a.onFilesDelete(deleted)
-		return retired, nil
-	}, func() *aggregatorVisible {
-		if len(retired) == 0 { // nothing aged out: skip the no-op republish
-			return nil
-		}
-		return a.recalcVisibleFiles()
+		return retired, len(retired) > 0, nil // removal-only: publish iff it retired something
 	}); err != nil {
 		return 0, err
 	}
@@ -115,6 +106,7 @@ func (a *Aggregator) RetireOldHistoryFiles(ctx context.Context, cutoffStep kv.St
 		return 0, nil
 	}
 
+	a.onFilesDelete(deleted)
 	mxRetiredHistoryFiles.AddInt(len(retired))
 	a.logger.Info("[snapshots] retired old history files", "removed", len(retired), "cutoffStep", cutoffStep)
 	return len(retired), nil

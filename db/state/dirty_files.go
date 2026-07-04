@@ -90,6 +90,13 @@ func (df *DirtyFiles) CloseIf(predicate func(*FilesItem) bool) {
 	}
 }
 
+func (df *DirtyFiles) MadvNormal() {
+	df.Scan(func(f *FilesItem) bool { f.MadvNormal(); return true })
+}
+func (df *DirtyFiles) DisableReadAhead() {
+	df.Scan(func(f *FilesItem) bool { f.DisableReadAhead(); return true })
+}
+
 func (df *DirtyFiles) EndTxNumMax() uint64 {
 	if max, ok := df.Max(); ok {
 		return max.endTxNum

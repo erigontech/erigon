@@ -25,100 +25,84 @@ import (
 )
 
 // Instantiated with plain scalars (no file types) to keep the package honestly
-// biz-logic-free: V=int payload, R=int retired.
+// biz-logic-free: visibleFile=int payload, dirtyFile=int retired.
 type testLifetime = Lifetime[int, int]
 
-func newTestLifetime() (lt *testLifetime, reclaimed *[]int) {
+// newTestLifetime's stored recalc publishes *toPublish, so a test controls each
+// published value by setting it before UpdateDirtyFiles.
+func newTestLifetime() (lt *testLifetime, reclaimed *[]int, toPublish *int) {
 	lt = &testLifetime{}
 	reclaimed = &[]int{}
-	lt.Init(func(r []int) { *reclaimed = append(*reclaimed, r...) })
-	return lt, reclaimed
+	toPublish = new(int)
+	lt.Init(
+		func(r []int) { *reclaimed = append(*reclaimed, r...) },
+		func() *int { return toPublish },
+	)
+	return lt, reclaimed, toPublish
 }
 
-func publish(t *testing.T, lt *testLifetime, value int, retired ...int) {
+func publish(t *testing.T, lt *testLifetime, toPublish *int, value int, retired ...int) {
 	t.Helper()
-	require.NoError(t, lt.Recalc(
-		func() ([]int, error) { return retired, nil },
-		func() *int { return &value },
-	))
+	*toPublish = value
+	require.NoError(t, lt.UpdateDirtyFiles(func() ([]int, bool, error) { return retired, true, nil }))
 }
 
 func TestLifetime_AcquireSeesLatestPublish(t *testing.T) {
-	lt, _ := newTestLifetime()
+	lt, _, tp := newTestLifetime()
 
 	v := lt.Acquire()
 	require.Equal(t, 0, v.Value) // initial empty generation
 	lt.Release(v)
 
-	publish(t, lt, 42)
+	publish(t, lt, tp, 42)
 	v = lt.Acquire()
 	require.Equal(t, 42, v.Value)
 	lt.Release(v)
 }
 
 func TestLifetime_ReclaimsRetiredWhenNoReaderPins(t *testing.T) {
-	lt, reclaimed := newTestLifetime()
+	lt, reclaimed, tp := newTestLifetime()
 
-	publish(t, lt, 1, 10, 11) // supersedes the empty gen; nobody pinned it
+	publish(t, lt, tp, 1, 10, 11) // supersedes the empty gen; nobody pinned it
 	require.Equal(t, []int{10, 11}, *reclaimed)
 }
 
 func TestLifetime_DefersReclaimUntilReaderDrains(t *testing.T) {
-	lt, reclaimed := newTestLifetime()
+	lt, reclaimed, tp := newTestLifetime()
 
-	pinned := lt.Acquire() // pins the empty generation
-	publish(t, lt, 1, 10)  // retire 10 against the still-pinned generation
+	pinned := lt.Acquire()    // pins the empty generation
+	publish(t, lt, tp, 1, 10) // retire 10 against the still-pinned generation
 	require.Empty(t, *reclaimed)
 
 	lt.Release(pinned) // last reader drains → now reclaimable
 	require.Equal(t, []int{10}, *reclaimed)
 }
 
-func TestLifetime_RecalcNilDeclinesPublish(t *testing.T) {
-	lt, reclaimed := newTestLifetime()
-	publish(t, lt, 7)
+func TestLifetime_MutatePublishFlagControlsPublish(t *testing.T) {
+	lt, _, tp := newTestLifetime()
+	publish(t, lt, tp, 7)
 	before := lt.Visible()
 
-	require.NoError(t, lt.Recalc(
-		func() ([]int, error) { return nil, nil },
-		func() *int { return nil }, // decline publishing
-	))
+	// publish=false → no new generation, same view
+	*tp = 8
+	require.NoError(t, lt.UpdateDirtyFiles(func() ([]int, bool, error) { return nil, false, nil }))
 	require.Same(t, before, lt.Visible())
-	require.Empty(t, *reclaimed)
+	require.Equal(t, 7, *lt.Visible())
+
+	// publish=true → publishes the pending value
+	require.NoError(t, lt.UpdateDirtyFiles(func() ([]int, bool, error) { return []int{10}, true, nil }))
+	require.NotSame(t, before, lt.Visible())
+	require.Equal(t, 8, *lt.Visible())
 }
 
-func TestLifetime_MutateOnlyDoesNotPublish(t *testing.T) {
-	lt, _ := newTestLifetime()
+func TestLifetime_SlowReadDirtyFilesRunsUnderLockWithoutPublishing(t *testing.T) {
+	lt, _, _ := newTestLifetime()
 	before := lt.Visible()
 
-	mutated := false
-	require.NoError(t, lt.Recalc(
-		func() ([]int, error) { mutated = true; return nil, nil },
-		nil, // no publish
-	))
-	require.True(t, mutated)
+	ran := false
+	lt.SlowReadDirtyFiles(func() { ran = true })
+	require.True(t, ran)
 	require.Same(t, before, lt.Visible())
-}
-
-// intStore is a slice-backed Dirty[int] — keeps the test free of any real
-// container type, proving Lifetime only needs the structural Scan.
-type intStore []int
-
-func (s intStore) Scan(iter func(item int) bool) {
-	for _, v := range s {
-		if !iter(v) {
-			return
-		}
-	}
-}
-
-func TestLifetime_ForEachDirtyItemSweepsAllStores(t *testing.T) {
-	lt, _ := newTestLifetime()
-	lt.RegisterDirty(intStore{1, 2}, intStore{3})
-
-	var seen []int
-	lt.ForEachDirtyItem(func(item int) { seen = append(seen, item) })
-	require.Equal(t, []int{1, 2, 3}, seen)
 }
 
 // Exercises Acquire's load-then-validate retry loop against concurrent publishes
@@ -126,7 +110,8 @@ func TestLifetime_ForEachDirtyItemSweepsAllStores(t *testing.T) {
 func TestLifetime_ConcurrentReadersAndPublish(t *testing.T) {
 	lt := &Lifetime[int, int]{}
 	var reclaimedCount atomic.Int64
-	lt.Init(func(r []int) { reclaimedCount.Add(int64(len(r))) })
+	toPublish := new(int)
+	lt.Init(func(r []int) { reclaimedCount.Add(int64(len(r))) }, func() *int { return toPublish })
 
 	var wg sync.WaitGroup
 	stop := make(chan struct{})
@@ -149,7 +134,7 @@ func TestLifetime_ConcurrentReadersAndPublish(t *testing.T) {
 
 	const publishes = 1000
 	for i := 1; i <= publishes; i++ {
-		publish(t, lt, i, i)
+		publish(t, lt, toPublish, i, i)
 	}
 	close(stop)
 	wg.Wait()
