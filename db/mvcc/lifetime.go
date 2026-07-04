@@ -15,15 +15,15 @@
 // along with Erigon. If not, see <http://www.gnu.org/licenses/>.
 
 // Package mvcc provides Lifetime: a lock-free-read, single-writer container that
-// publishes immutable versions of a value and reclaims a superseded version's
-// payload once no reader still pins it. Readers pin the current version and read
-// without locking (RCU-style publication, reference-counted reclamation); only
-// the writer takes the lock, and only on rare background events.
+// publishes immutable generations of a value and reclaims a superseded
+// generation's payload once no reader still pins it. Readers pin the current
+// generation and read without locking (RCU-style publication, reference-counted
+// reclamation); only the writer takes the lock, and only on rare background events.
 //
 // It is biz-logic-free: it never inspects the values it carries. Callers supply
-// the type parameters V (the published payload) and R (both the dirty items it
-// sweeps and a superseded version's retired payload, freed once drained) plus a
-// reclaim callback.
+// the type parameters visibleFile (the published payload) and dirtyFile (both
+// the dirty items it sweeps and a superseded version's retired payload, freed
+// once drained) plus a reclaim callback.
 package mvcc
 
 import (
@@ -31,72 +31,72 @@ import (
 	"sync/atomic"
 )
 
-// Dirty is a mutable collection of R that Lifetime sweeps under its lock
+// Dirty is a mutable collection of dirtyFile that Lifetime sweeps under its lock
 // (RegisterDirty + ForEachDirtyItem). The structural Scan requirement is
-// satisfied by e.g. *btree2.BTreeG[R], so Lifetime holds the registry without
-// depending on any container type.
-type Dirty[R any] interface {
-	Scan(iter func(item R) bool)
+// satisfied by e.g. *btree2.BTreeG[dirtyFile], so Lifetime holds the registry
+// without depending on any container type.
+type Dirty[dirtyFile any] interface {
+	Scan(iter func(item dirtyFile) bool)
 }
 
-// Version is one immutable, published generation. Its V payload lives inline
+// Generation is one immutable, published snapshot of the payload. It lives inline
 // (one allocation per publish); readers pin it via Lifetime.Acquire so it stays
-// alive while they read. Once a newer Version supersedes it and its last reader
-// drains, its retired R payload is reclaimed.
-type Version[V, R any] struct {
-	Value V
+// alive while they read. Once a newer Generation supersedes it and its last reader
+// drains, its retired dirtyFile payload is reclaimed.
+type Generation[visibleFile, dirtyFile any] struct {
+	Value visibleFile
 
-	refcnt  atomic.Int32   // live readers
-	retired []R            // payload to reclaim once drained
-	next    *Version[V, R] // oldest→newest link (set under lock)
+	refcnt  atomic.Int32                        // live readers
+	retired []dirtyFile                         // payload to reclaim once drained
+	next    *Generation[visibleFile, dirtyFile] // oldest→newest link (set under lock)
 }
 
-// Lifetime publishes immutable Versions under a single writer lock and lets
-// readers pin the current one without locking. When a superseded Version's last
+// Lifetime publishes immutable Generations under a single writer lock and lets
+// readers pin the current one without locking. When a superseded Generation's last
 // reader drains, its retired payload is handed to the reclaim callback, out of
 // the lock. It also owns the dirty registry guarded by the same lock.
-type Lifetime[V, R any] struct {
+type Lifetime[visibleFile, dirtyFile any] struct {
 	lock    sync.Mutex
-	dirty   []Dirty[R]
-	visible atomic.Pointer[Version[V, R]]
-	oldest  *Version[V, R] // chain head; mutated only under lock
-	reclaim func([]R)
+	dirty   []Dirty[dirtyFile]
+	visible atomic.Pointer[Generation[visibleFile, dirtyFile]]
+	oldest  *Generation[visibleFile, dirtyFile] // chain head; mutated only under lock
+	reclaim func([]dirtyFile)
 }
 
 // Init installs the reclaim callback and publishes an initial zero-value
-// Version. Call once before any Acquire.
-func (lt *Lifetime[V, R]) Init(reclaim func([]R)) {
+// Generation. Call once before any Acquire.
+func (lt *Lifetime[visibleFile, dirtyFile]) Init(reclaim func([]dirtyFile)) {
 	lt.reclaim = reclaim
-	v := &Version[V, R]{}
+	v := &Generation[visibleFile, dirtyFile]{}
 	lt.visible.Store(v)
 	lt.oldest = v
 }
 
 // RegisterDirty adds mutable collections to the lock-guarded dirty registry.
 // Not safe to call concurrently with Recalc/ForEachDirtyItem.
-func (lt *Lifetime[V, R]) RegisterDirty(stores ...Dirty[R]) {
+func (lt *Lifetime[visibleFile, dirtyFile]) RegisterDirty(stores ...Dirty[dirtyFile]) {
 	lt.dirty = append(lt.dirty, stores...)
 }
 
 // ForEachDirtyItem calls fn for every item in every registered dirty collection,
 // under the writer lock. Slow, background-only (uniform all-dirty sweeps).
-func (lt *Lifetime[V, R]) ForEachDirtyItem(fn func(item R)) {
+func (lt *Lifetime[visibleFile, dirtyFile]) ForEachDirtyItem(fn func(item dirtyFile)) {
 	lt.lock.Lock()
 	defer lt.lock.Unlock()
 	for _, store := range lt.dirty {
-		store.Scan(func(item R) bool { fn(item); return true })
+		store.Scan(func(item dirtyFile) bool { fn(item); return true })
 	}
 }
 
 // Visible returns the current published payload, unpinned: safe only for
 // lock-free reads of immutable fields, never retain it across a publish.
-func (lt *Lifetime[V, R]) Visible() *V {
+func (lt *Lifetime[visibleFile, dirtyFile]) Visible() *visibleFile {
 	return &lt.visible.Load().Value
 }
 
-// Acquire pins the current Version for a reader. Hot path: lock-free (atomic
+// Acquire pins the current Generation for a reader. Hot path: lock-free (atomic
 // load + refcnt bump, re-validated against a concurrent publish).
-func (lt *Lifetime[V, R]) Acquire() *Version[V, R] {
+func (lt *Lifetime[visibleFile, dirtyFile]) Acquire() *Generation[visibleFile, dirtyFile] {
 	// Load+increment is not atomic: between them the last reader of v may drain
 	// and reclaim it. So re-load and retry if a publish swapped visible.
 	// Hazard-pointer concept: https://github.com/facebook/folly/blob/main/folly/synchronization/Hazptr.h
@@ -111,8 +111,8 @@ func (lt *Lifetime[V, R]) Acquire() *Version[V, R] {
 }
 
 // Release drops a reader's pin. Hot path: lock-free unless this is the last
-// reader of an already-superseded Version, which then reclaims under the lock.
-func (lt *Lifetime[V, R]) Release(v *Version[V, R]) {
+// reader of an already-superseded Generation, which then reclaims under the lock.
+func (lt *Lifetime[visibleFile, dirtyFile]) Release(v *Generation[visibleFile, dirtyFile]) {
 	if v.refcnt.Add(-1) == 0 {
 		lt.reclaimRetired()
 	}
@@ -124,18 +124,18 @@ func (lt *Lifetime[V, R]) Release(v *Version[V, R]) {
 // Acquire/Release/Visible.
 //
 // mutate runs under the lock and returns the files the publish retires; recalc
-// returns the new payload to publish (wrapped into a Version here), or nil to
+// returns the new payload to publish (wrapped into a Generation here), or nil to
 // decline publishing (mutate must then have retired nothing).
-func (lt *Lifetime[V, R]) Recalc(
-	mutate func() (retired []R, err error),
-	recalc func() *V,
+func (lt *Lifetime[visibleFile, dirtyFile]) Recalc(
+	mutate func() (retired []dirtyFile, err error),
+	recalc func() *visibleFile,
 ) error {
-	var toDelete []R
+	var toDelete []dirtyFile
 	err := func() error {
 		lt.lock.Lock()
 		defer lt.lock.Unlock()
 
-		var retired []R
+		var retired []dirtyFile
 		if mutate != nil {
 			var err error
 			if retired, err = mutate(); err != nil {
@@ -146,7 +146,7 @@ func (lt *Lifetime[V, R]) Recalc(
 			// Publish the new generation, hand the outgoing one its retired
 			// payload, and collect whatever is now reclaimable (freed after unlock).
 			if v := recalc(); v != nil {
-				next := &Version[V, R]{Value: *v}
+				next := &Generation[visibleFile, dirtyFile]{Value: *v}
 				old := lt.visible.Load()
 				old.retired = retired
 				old.next = next
@@ -162,7 +162,7 @@ func (lt *Lifetime[V, R]) Recalc(
 
 // reclaimRetiredLocked walks the oldest→newest chain while refcnt == 0,
 // collecting drained generations' retired payloads for reclamation out of lock.
-func (lt *Lifetime[V, R]) reclaimRetiredLocked() (toDelete []R) {
+func (lt *Lifetime[visibleFile, dirtyFile]) reclaimRetiredLocked() (toDelete []dirtyFile) {
 	cur := lt.visible.Load()
 	for h := lt.oldest; h != cur && h.refcnt.Load() == 0; h = h.next {
 		toDelete = append(toDelete, h.retired...)
@@ -172,14 +172,14 @@ func (lt *Lifetime[V, R]) reclaimRetiredLocked() (toDelete []R) {
 	return toDelete
 }
 
-func (lt *Lifetime[V, R]) reclaimRetired() {
+func (lt *Lifetime[visibleFile, dirtyFile]) reclaimRetired() {
 	lt.lock.Lock()
 	toDelete := lt.reclaimRetiredLocked()
 	lt.lock.Unlock()
 	lt.runReclaim(toDelete)
 }
 
-func (lt *Lifetime[V, R]) runReclaim(toDelete []R) {
+func (lt *Lifetime[visibleFile, dirtyFile]) runReclaim(toDelete []dirtyFile) {
 	if len(toDelete) > 0 && lt.reclaim != nil {
 		lt.reclaim(toDelete)
 	}

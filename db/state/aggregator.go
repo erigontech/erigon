@@ -1766,7 +1766,7 @@ type aggregatorVisible struct {
 
 // visibleGen is one reader-pinnable published generation: an aggregatorVisible
 // payload (inline) plus mvcc reclamation bookkeeping. *FilesItem is retired.
-type visibleGen = mvcc.Version[aggregatorVisible, *FilesItem]
+type visibleGen = mvcc.Generation[aggregatorVisible, *FilesItem]
 
 // recalcVisibleFiles builds a fresh immutable aggregatorVisible bundle from the
 // current dirty state via the per-entity calcVisibleFiles helpers. It is the biz
