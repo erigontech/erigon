@@ -143,12 +143,14 @@ func DeriveBlockReceipts(
 	return DeriveForRange(ctx, cfg, engine, header, txns, 0, len(txns), ibs, gp, getHeader)
 }
 
-// DeriveFields populates BlockHash and FirstLogIndexWithinBlock on each receipt.
-// ApplyTransactionWithEVM sets most receipt fields, but BlockHash and the
-// per-receipt first-log-index need a second pass once all receipts are known.
+// DeriveFields populates BlockHash, FirstLogIndexWithinBlock, and Bloom on
+// each receipt. ApplyTransactionWithEVM sets most receipt fields, but the
+// first-log-index needs a second pass once all receipts are known, and
+// finalize-produced or cache-read receipts arrive without a bloom.
 func DeriveFields(receipts types.Receipts, blockHash common.Hash) {
 	for i, receipt := range receipts {
 		receipt.BlockHash = blockHash
+		receipt.Bloom = types.CreateBloom(types.Receipts{receipt})
 		if len(receipt.Logs) > 0 {
 			receipt.FirstLogIndexWithinBlock = uint32(receipt.Logs[0].Index)
 		} else if i > 0 {

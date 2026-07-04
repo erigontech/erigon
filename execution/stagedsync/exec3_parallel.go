@@ -2800,33 +2800,23 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 			txs = tt.Txs
 		}
 
-		// Resumed (partial) blocks: re-derive receipts of the prefix txs that ran
-		// in an earlier batch — post-Prague Finalize extracts EIP-6110 deposit
-		// requests from all receipt logs, and the notification cache must not see
-		// a tail-only set. Mirrors the serial executor.
 		receiptsComplete := !isPartial
 		if isPartial && be.blockNum > 0 && header != nil {
 			startTxIndex := be.tasks[0].Version().TxIndex
+			receiptsComplete = startTxIndex == 0
 			if startTxIndex > 0 && len(txs) > 0 {
 				blockStartTxNum := be.tasks[0].Version().TxNum - uint64(startTxIndex)
-				priorIbs := state.New(state.NewHistoryReaderV3(applyTx, blockStartTxNum))
-				priorGp := protocol.NewGasPool(header.GasLimit, pe.cfg.chainConfig.GetMaxBlobGasPerBlock(header.Time))
-				getHeader := func(hash common.Hash, number uint64) (*types.Header, error) {
-					return pe.cfg.blockReader.Header(ctx, applyTx, hash, number)
+				priorReceipts, err := pe.reconstructPriorReceipts(ctx, applyTx, header, txs, startTxIndex, blockStartTxNum)
+				if err != nil {
+					return nil, err
 				}
-				priorReceipts, priorErr := receipts.DerivePriorReceipts(ctx, pe.cfg.chainConfig, pe.cfg.engine,
-					header, txs, startTxIndex, blockStartTxNum, applyTx, priorIbs, priorGp, getHeader)
-				priorIbs.Release(true)
-				if priorErr != nil {
-					pe.logger.Warn(fmt.Sprintf("[%s] failed to reconstruct prior receipts for partial block", pe.logPrefix),
-						"block", be.blockNum, "startTxIndex", startTxIndex, "err", priorErr)
-				} else {
-					blockReceipts = append(priorReceipts, blockReceipts...)
-					receipts.DeriveFields(blockReceipts, be.blockHash)
-					receiptsComplete = true
-				}
-			} else if startTxIndex == 0 {
+				blockReceipts = append(priorReceipts, blockReceipts...)
 				receiptsComplete = true
+			}
+			// The post-exec validator, which fills receipt blooms for full
+			// blocks, skips partial ones — complete the published set here.
+			if receiptsComplete {
+				receipts.DeriveFields(blockReceipts, be.blockHash)
 			}
 		}
 
