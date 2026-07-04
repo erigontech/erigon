@@ -56,7 +56,7 @@ type History struct {
 	//  .vi - txNum+key -> offset in .v
 
 	// dirtyFiles is the list of ALL files (un-indexed, garbage, merged-into-bigger-one, …);
-	// it has a garbage-free visible view. See Lifetime for the dirty↔visible model.
+	// it has a garbage-free visible view. See mvcc.Lifetime for the dirty↔visible model.
 	dirtyFiles *DirtyFiles
 
 	// _testBuildVIHook - test-only: called with the recsplit before the build loop in buildVI

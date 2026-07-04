@@ -10,7 +10,7 @@ import (
 
 type aggDirtyFilesRoTx struct {
 	agg     *Aggregator
-	visible *aggregatorVisible
+	visible *visibleGen
 	domain  []*domainDirtyFilesRoTx
 	ii      [kv.StandaloneIdxLen]*iiDirtyFilesRoTx
 }
@@ -40,11 +40,10 @@ func (a *Aggregator) DebugBeginDirtyFilesRo() *aggDirtyFilesRoTx {
 
 	// The pin protects every dirty file captured below, even ones absent from the
 	// visible set: such a file can only be retired at a generation >= this, and
-	// oldest-first reclaim won't delete it until Close. Load+increment suffices
-	// because Update holds dirtyFilesLock, so no publish can race the pin.
-	_ = a.Recalc(func(_ []*DirtyFiles) ([]*FilesItem, error) {
-		ac.visible = a.visible.Load()
-		ac.visible.refcnt.Add(1)
+	// oldest-first reclaim won't delete it until Close. Pinning and capturing under
+	// Recalc's lock keeps the pin consistent with the dirty-file snapshot.
+	_ = a.Recalc(func() (ReclaimableFiles, error) {
+		ac.visible = a.Acquire()
 		for i, d := range a.d {
 			ac.domain[i] = d.DebugBeginDirtyFilesRo()
 		}

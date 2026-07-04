@@ -23,7 +23,7 @@ import (
 )
 
 // entirelyBeforeStep returns dirty files entirely below cutoff step.
-func entirelyBeforeStep(dirtyFiles *DirtyFiles, stepSize uint64, cutoff kv.Step) (outs []*FilesItem) {
+func entirelyBeforeStep(dirtyFiles *DirtyFiles, stepSize uint64, cutoff kv.Step) (outs ReclaimableFiles) {
 	iter := dirtyFiles.Iter()
 	defer iter.Release()
 	for ok := iter.First(); ok; ok = iter.Next() {
@@ -36,7 +36,7 @@ func entirelyBeforeStep(dirtyFiles *DirtyFiles, stepSize uint64, cutoff kv.Step)
 }
 
 // retireBeforeStep removes .ef/.efi dirty files entirely below cutoff.
-func (iit *InvertedIndexRoTx) retireBeforeStep(cutoff kv.Step) (deleted []string, retired []*FilesItem) {
+func (iit *InvertedIndexRoTx) retireBeforeStep(cutoff kv.Step) (deleted []string, retired ReclaimableFiles) {
 	outs := entirelyBeforeStep(iit.ii.dirtyFiles, iit.stepSize, cutoff)
 	for _, out := range outs {
 		deleted = append(deleted, out.FilePaths(iit.ii.dirs.Snap)...)
@@ -48,7 +48,7 @@ func (iit *InvertedIndexRoTx) retireBeforeStep(cutoff kv.Step) (deleted []string
 
 // retireBeforeStep removes History (.v) and its InvertedIndex (.ef) files
 // together, so the two never diverge.
-func (ht *HistoryRoTx) retireBeforeStep(cutoff kv.Step) (deleted []string, retired []*FilesItem) {
+func (ht *HistoryRoTx) retireBeforeStep(cutoff kv.Step) (deleted []string, retired ReclaimableFiles) {
 	iNames, iRetired := ht.iit.retireBeforeStep(cutoff)
 	deleted = append(deleted, iNames...)
 	retired = append(retired, iRetired...)
@@ -73,8 +73,8 @@ func (a *Aggregator) RetireOldHistoryFiles(ctx context.Context, cutoffStep kv.St
 	defer at.Close()
 
 	var deleted []string
-	var retired []*FilesItem
-	if err = a.Recalc(func(_ []*DirtyFiles) ([]*FilesItem, error) {
+	var retired ReclaimableFiles
+	if err = a.Recalc(func() (ReclaimableFiles, error) {
 		for _, dt := range at.d {
 			// commitment.history and rcache have special cli flags: --prune.include-commitment-history --persist.receipt
 			// if they enabled they are never pruned - it's current logic. we will change it in future PR's - but for now keep them

@@ -56,6 +56,11 @@ type DirtyFiles struct {
 	btree2.BTreeG[*FilesItem]
 }
 
+// ReclaimableFiles is the flat-array form of dirty files: the *FilesItem a
+// publish supersedes, handed to mvcc.Lifetime as its retired payload and freed
+// once no reader still pins the generation that retired them.
+type ReclaimableFiles = []*FilesItem
+
 func newDirtyFiles() *DirtyFiles {
 	return &DirtyFiles{*btree2.NewBTreeGOptions(filesItemLess, btree2.Options{Degree: 128, NoLocks: false})}
 }
@@ -83,16 +88,6 @@ func (df *DirtyFiles) CloseIf(predicate func(*FilesItem) bool) {
 		df.Delete(item)
 		item.closeFiles()
 	}
-}
-
-func (df *DirtyFiles) MadvNormal() {
-	df.Scan(func(f *FilesItem) bool { f.MadvNormal(); return true })
-}
-func (df *DirtyFiles) DisableReadAhead() {
-	df.Scan(func(f *FilesItem) bool { f.DisableReadAhead(); return true })
-}
-func (df *DirtyFiles) EnableReadAhead() {
-	df.Scan(func(f *FilesItem) bool { f.EnableReadAhead(); return true })
 }
 
 func (df *DirtyFiles) EndTxNumMax() uint64 {
