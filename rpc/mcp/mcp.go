@@ -962,18 +962,21 @@ func (e *ErigonMCPServer) ServeSSE(ctx context.Context, addr string) error {
 	// instead of blocking the SSE handler goroutine indefinitely when all DB
 	// read slots are held by a concurrent write/ETL transaction. The HTTP RPC
 	// layer sets the same flag in node/rpcstack.go.
-	sse := server.NewSSEServer(e.mcpServer,
+	return serveSSE(ctx, e.mcpServer, addr,
 		server.WithSSEContextFunc(func(ctx context.Context, _ *http.Request) context.Context {
 			return kv.WithNonBlockingAcquire(ctx)
 		}),
 	)
-	return serveSSE(ctx, sse, addr)
 }
 
 // serveSSE runs the SSE server until ctx is cancelled, then shuts it down.
-// mcp-go's SSEServer.Start takes no ctx and blocks in Accept, so without this
-// the server goroutine leaks on shutdown.
-func serveSSE(ctx context.Context, sse *server.SSEServer, addr string) error {
+// mcp-go's SSEServer.Start takes no ctx and blocks in Accept. The http.Server is
+// pre-created (WithHTTPServer) so a Shutdown that races ahead of Start still
+// targets it — otherwise Start's lazily-created server makes an early Shutdown a
+// no-op and the goroutine leaks in Accept.
+func serveSSE(ctx context.Context, mcpServer *server.MCPServer, addr string, opts ...server.SSEOption) error {
+	opts = append(opts, server.WithHTTPServer(&http.Server{Addr: addr}))
+	sse := server.NewSSEServer(mcpServer, opts...)
 	errCh := make(chan error, 1)
 	go func() {
 		defer func() {

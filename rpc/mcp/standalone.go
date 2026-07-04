@@ -1115,5 +1115,5 @@ func (s *StandaloneMCPServer) ServeContext(ctx context.Context) error {
 // ServeSSE starts the MCP server with SSE transport on the given address,
 // shutting it down when ctx is cancelled.
 func (s *StandaloneMCPServer) ServeSSE(ctx context.Context, addr string) error {
-	return serveSSE(ctx, server.NewSSEServer(s.mcpServer), addr)
+	return serveSSE(ctx, s.mcpServer, addr)
 }
