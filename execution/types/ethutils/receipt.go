@@ -57,8 +57,8 @@ func MarshalReceipt(
 		from, _ = txn.Sender(*signer)
 	}
 
-	// Receipts from replay or cache reads arrive with Bloom populated; hash
-	// the logs only when a source left it unset.
+	// Reuse a Bloom the receipt's source already computed; hash the logs only
+	// when it was left unset (e.g. cache reads that skip bloom derivation).
 	logsBloom := receipt.Bloom
 	if logsBloom.IsEmpty() && len(receipt.Logs) > 0 {
 		logsBloom = types.CreateBloom(types.Receipts{receipt})
