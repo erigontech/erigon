@@ -97,10 +97,11 @@ func (lt *Lifetime[visibleFiles, dirtyFile]) Release(v *Generation[visibleFiles,
 	}
 }
 
-// SlowReadDirtyFiles runs fn under the writer lock without publishing — for a
-// consistent read or sweep of dirty state. fn iterates the caller's own dirty
-// files; Lifetime only lends the lock. Slow, background-only — it contends with
-// publishes; readers on the hot path must use the lock-free Acquire/Release.
+// SlowReadDirtyFiles runs fn under the writer lock. Lifetime holds no dirty state
+// of its own, so this merely lends its lock for a consistent read or sweep of the
+// caller's dirty files — which the publish path mutates under this same lock.
+// Slow, background-only: it contends with publishes, so hot-path readers must use
+// the lock-free Acquire/Release instead.
 func (lt *Lifetime[visibleFiles, dirtyFile]) SlowReadDirtyFiles(fn func()) {
 	lt.lock.Lock()
 	defer lt.lock.Unlock()
@@ -114,7 +115,7 @@ func (lt *Lifetime[visibleFiles, dirtyFile]) SlowReadDirtyFiles(fn func()) {
 // nothing; anything additive must publish). nil mutate republishes.
 //
 // Slow, background-only: for reads use the lock-free Acquire/Release/Visible; to
-// mutate under the lock without publishing, use SlowReadDirtyFiles.
+// run under the lock without publishing, use SlowReadDirtyFiles.
 func (lt *Lifetime[visibleFiles, dirtyFile]) UpdateDirtyFiles(mutate func() (retired []dirtyFile, publish bool, err error)) error {
 	var toDelete []dirtyFile
 	err := func() error {
