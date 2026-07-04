@@ -125,7 +125,6 @@ func calcDifficulty(config *chain.Config, number, currentTime, parentTime uint64
 		uncleHash = empty.UncleHash
 	}
 	parent := &types.Header{
-		ParentHash: common.Hash{},
 		UncleHash:  uncleHash,
 		Difficulty: parentDifficulty,
 		Time:       parentTime,

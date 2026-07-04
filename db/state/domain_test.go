@@ -730,7 +730,7 @@ func collateAndMerge(t *testing.T, tx kv.RwTx, d *Domain, txs uint64) {
 				return true
 			}
 			valuesOuts, indexOuts, historyOuts := domainRoTx.staticFilesInRange(r)
-			valuesIn, indexIn, historyIn, err := domainRoTx.mergeFiles(ctx, valuesOuts, indexOuts, historyOuts, r, nil, background.NewProgressSet())
+			valuesIn, indexIn, historyIn, err := domainRoTx.mergeFiles(ctx, valuesOuts, indexOuts, historyOuts, r, nil, true, background.NewProgressSet())
 			require.NoError(t, err)
 			//if valuesIn != nil && valuesIn.decompressor != nil {
 			//fmt.Printf("merge: %s\n", valuesIn.decompressor.FileName())
@@ -769,7 +769,7 @@ func collateAndMergeOnceWithScanPrune(t *testing.T, d *Domain, tx kv.RwTx, step 
 				return true
 			}
 			valuesOuts, indexOuts, historyOuts := domainRoTx.staticFilesInRange(r)
-			valuesIn, indexIn, historyIn, err := domainRoTx.mergeFiles(ctx, valuesOuts, indexOuts, historyOuts, r, nil, background.NewProgressSet())
+			valuesIn, indexIn, historyIn, err := domainRoTx.mergeFiles(ctx, valuesOuts, indexOuts, historyOuts, r, nil, true, background.NewProgressSet())
 			require.NoError(t, err)
 
 			d.integrateMergedDirtyFiles(valuesIn, indexIn, historyIn)
@@ -806,7 +806,7 @@ func collateAndMergeOnce(t *testing.T, d *Domain, tx kv.RwTx, step kv.Step, prun
 			break
 		}
 		valuesOuts, indexOuts, historyOuts := domainRoTx.staticFilesInRange(r)
-		valuesIn, indexIn, historyIn, err := domainRoTx.mergeFiles(ctx, valuesOuts, indexOuts, historyOuts, r, nil, background.NewProgressSet())
+		valuesIn, indexIn, historyIn, err := domainRoTx.mergeFiles(ctx, valuesOuts, indexOuts, historyOuts, r, nil, true, background.NewProgressSet())
 		require.NoError(t, err)
 
 		d.integrateMergedDirtyFiles(valuesIn, indexIn, historyIn)
@@ -857,6 +857,46 @@ func TestDomain_ScanFiles(t *testing.T) {
 
 	// Check the history
 	checkHistory(t, db, d, txs)
+}
+
+func TestCommitmentKvWriteVersion(t *testing.T) {
+	t.Parallel()
+	logger := log.New()
+	_, d := testDbAndDomainOfStep(t, statecfg.Schema.CommitmentDomain, 16, logger)
+
+	d.ReferencesInCommitmentBranches = true
+	require.Equal(t, version.V2_1, d.kvWriteVersion())
+	require.Contains(t, d.kvNewFilePath(0, 1), "v2.1-commitment.0-1.kv")
+
+	d.ReferencesInCommitmentBranches = false
+	require.Equal(t, version.V2_2, d.kvWriteVersion())
+	require.Contains(t, d.kvNewFilePath(0, 1), "v2.2-commitment.0-1.kv")
+}
+
+func TestNonCommitmentKvWriteVersionUsesCurrent(t *testing.T) {
+	t.Parallel()
+	logger := log.New()
+	_, d := testDbAndDomainOfStep(t, statecfg.Schema.AccountsDomain, 16, logger)
+	require.Equal(t, d.FileVersion.DataKV.Current, d.kvWriteVersion())
+	require.Contains(t, d.kvNewFilePath(0, 1), d.FileVersion.DataKV.Current.String()+"-accounts.0-1.kv")
+}
+
+func TestCommitmentKvVersionAcceptance(t *testing.T) {
+	t.Parallel()
+	vers := statecfg.Schema.CommitmentDomain.FileVersion.DataKV
+	require.True(t, vers.Supports(version.V2_0))
+	require.True(t, vers.Supports(version.V2_1))
+	require.True(t, vers.Supports(version.V2_2))
+	// A newer minor within the same major is a content-only, backward-readable change.
+	require.True(t, vers.Supports(version.Version{Major: 2, Minor: 3}))
+	// A newer major changes read logic and is rejected.
+	require.False(t, vers.Supports(version.Version{Major: 3, Minor: 0}))
+
+	require.NotPanics(t, func() { vers.MustSupport(version.V2_0, "v2.0-commitment.0-1.kv") })
+	require.NotPanics(t, func() { vers.MustSupport(version.V2_1, "v2.1-commitment.0-1.kv") })
+	require.NotPanics(t, func() { vers.MustSupport(version.V2_2, "v2.2-commitment.0-1.kv") })
+	require.NotPanics(t, func() { vers.MustSupport(version.Version{Major: 2, Minor: 3}, "v2.3-commitment.0-1.kv") })
+	require.Panics(t, func() { vers.MustSupport(version.Version{Major: 3, Minor: 0}, "v3.0-commitment.0-1.kv") })
 }
 
 func TestDomainRoTx_CursorParentCheck(t *testing.T) {
@@ -1661,7 +1701,7 @@ func TestDomainContext_getFromFiles(t *testing.T) {
 		ranges := domainRoTx.findMergeRange(txFrom, txTo, txTo)
 		vl, il, hl := domainRoTx.staticFilesInRange(ranges)
 
-		dv, di, dh, err := domainRoTx.mergeFiles(ctx, vl, il, hl, ranges, nil, ps)
+		dv, di, dh, err := domainRoTx.mergeFiles(ctx, vl, il, hl, ranges, nil, true, ps)
 		require.NoError(t, err)
 
 		d.integrateMergedDirtyFiles(dv, di, dh)
@@ -3545,7 +3585,7 @@ func collateAndMergeWithCollisionRetry(t *testing.T, tx kv.RwTx, d *Domain, txs 
 	r := domainRoTx.findMergeRange(d.dirtyFilesEndTxNumMinimax(), d.dirtyFilesEndTxNumMinimax(), d.dirtyFilesEndTxNumMinimax())
 	if r.values.needMerge {
 		valuesOuts, indexOuts, historyOuts := domainRoTx.staticFilesInRange(r)
-		valuesIn, indexIn, historyIn, err := domainRoTx.mergeFiles(ctx, valuesOuts, indexOuts, historyOuts, r, nil, background.NewProgressSet())
+		valuesIn, indexIn, historyIn, err := domainRoTx.mergeFiles(ctx, valuesOuts, indexOuts, historyOuts, r, nil, true, background.NewProgressSet())
 		require.NoError(t, err)
 		d.integrateMergedDirtyFiles(valuesIn, indexIn, historyIn)
 	}

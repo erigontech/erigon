@@ -39,6 +39,50 @@ func KeyToHexNibbleHash(key []byte) []byte {
 	return nibblized
 }
 
+// expandNibbles writes each byte of src as two nibbles (src[i] -> dst[2i], dst[2i+1]).
+// src and dst must not overlap.
+func expandNibbles(src, dst []byte) {
+	_ = dst[len(src)*2-1] // bounds-check elimination
+	for i, b := range src {
+		dst[i*2] = (b >> 4) & 0xf
+		dst[i*2+1] = b & 0xf
+	}
+}
+
+// addrHashCache memoizes the nibblized keccak(addr) prefix of the most recent
+// storage key's address, so a run of slots under one address (whale storage)
+// reuses the 64-nibble prefix instead of re-hashing the address. keccak(addr)
+// is immutable, so a hit is always correct and a miss simply recomputes.
+type addrHashCache struct {
+	addr  [20]byte
+	nibs  [64]byte
+	valid bool
+}
+
+func (c *addrHashCache) reset() { c.valid = false }
+
+// keyToHexNibbleHashCached returns the same bytes as KeyToHexNibbleHash, reusing
+// c's cached address prefix across consecutive storage keys that share an address.
+func keyToHexNibbleHashCached(key []byte, c *addrHashCache) []byte {
+	if len(key) <= length.Addr { // account key: no reusable prefix
+		return KeyToHexNibbleHash(key)
+	}
+	nibblized := make([]byte, 128)
+	addr := [20]byte(key[:length.Addr])
+	if c.valid && c.addr == addr {
+		copy(nibblized[:64], c.nibs[:])
+	} else {
+		h := keccak.Sum256(key[:length.Addr])
+		expandNibbles(h[:], nibblized[:64])
+		c.addr = addr
+		copy(c.nibs[:], nibblized[:64])
+		c.valid = true
+	}
+	h := keccak.Sum256(key[length.Addr:])
+	expandNibbles(h[:], nibblized[64:])
+	return nibblized
+}
+
 func KeyToNibblizedHash(key []byte) []byte {
 	nibblized := make([]byte, 64) // nibblized hash
 	hashed := nibblized[32:]
