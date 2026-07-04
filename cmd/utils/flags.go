@@ -667,10 +667,10 @@ var (
 		Usage: "Enable stand-alone metrics HTTP server listening interface",
 		Value: metrics.DefaultConfig.HTTP,
 	}
-	MetricsPortFlag = cli.IntFlag{
+	MetricsPortFlag = cli.UintFlag{
 		Name:  "metrics.port",
 		Usage: "Metrics HTTP server listening port",
-		Value: metrics.DefaultConfig.Port,
+		Value: uint(metrics.DefaultConfig.Port),
 	}
 
 	SnapKeepBlocksFlag = cli.BoolFlag{
