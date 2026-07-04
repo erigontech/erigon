@@ -128,9 +128,15 @@ func (b *bigValue) String() string {
 }
 
 // GlobalBig returns the value of a BigFlag from the global flag set. It never
-// returns nil so callers can dereference the result unconditionally.
+// returns nil so callers can dereference the result unconditionally. It panics
+// when name is not a registered flag, so a misspelled name fails loudly instead
+// of silently reading as zero.
 func GlobalBig(cmd *cli.Command, name string) *big.Int {
-	if v, ok := cmd.Value(name).(*big.Int); ok && v != nil {
+	val := cmd.Value(name)
+	if val == nil {
+		panic(fmt.Sprintf("GlobalBig: no flag registered under name %q", name))
+	}
+	if v, ok := val.(*big.Int); ok && v != nil {
 		return v
 	}
 	return new(big.Int)

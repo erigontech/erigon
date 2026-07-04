@@ -1079,7 +1079,7 @@ var (
 		Name:  "polygon.pos.ssf",
 		Usage: "Enabling Polygon PoS Single Slot Finality",
 	}
-	PolygonPosSingleSlotFinalityBlockAtFlag = cli.Int64Flag{
+	PolygonPosSingleSlotFinalityBlockAtFlag = cli.Uint64Flag{
 		Name:  "polygon.pos.ssf.block",
 		Usage: "Enabling Polygon PoS Single Slot Finality since block",
 	}
@@ -1733,7 +1733,7 @@ func setBorConfig(ctx *cli.Command, cfg *ethconfig.Config, nodeConfig *nodecfg.C
 	}
 
 	cfg.PolygonPosSingleSlotFinality = ctx.Bool(PolygonPosSingleSlotFinalityFlag.Name)
-	cfg.PolygonPosSingleSlotFinalityBlockAt = uint64(ctx.Int64(PolygonPosSingleSlotFinalityBlockAtFlag.Name))
+	cfg.PolygonPosSingleSlotFinalityBlockAt = ctx.Uint64(PolygonPosSingleSlotFinalityBlockAtFlag.Name)
 }
 
 func setBuilder(ctx *cli.Command, cfg *buildercfg.BuilderConfig) {
