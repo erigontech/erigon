@@ -2304,6 +2304,7 @@ func (a *Aggregator) buildFilesInBackground(txNum uint64, doMerge bool) chan str
 			a.onFilesChange(nil)
 		}
 		if !doMerge {
+			close(fin)
 			return
 		}
 		a.wg.AddFromRegistered()
