@@ -344,7 +344,13 @@ func (cc *commitmentCalculator) handleMessage(ctx context.Context, msg applyResu
 			cc.state.ApplyWrites(r.writes)
 		}
 
-		if cc.doms.IsUnfrozenStepEdge(cc.roTx, r.txNum) {
+		// A folded-ahead block already emitted its interior step checkpoints from
+		// the BAL (foldStepCheckpoints), computed while the domain sat exactly at
+		// each edge. Re-checkpointing here from the partially-accumulated cc.state
+		// on an already-advanced domain would let the last writer win and leave the
+		// step's commitment .kv inconsistent — so only the incremental path (which
+		// owns the checkpoint for non-folded blocks) runs the hook.
+		if !cc.foldedAhead[r.blockNum] && cc.doms.IsUnfrozenStepEdge(cc.roTx, r.txNum) {
 			cc.computeStepBoundary(ctx, &blockResult{BlockNum: r.blockNum, BlockHash: r.blockHash, lastTxNum: r.txNum})
 		}
 
