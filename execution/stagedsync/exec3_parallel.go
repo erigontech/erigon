@@ -2512,7 +2512,7 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 						// would be persisted, so fail loudly instead.
 						prevRes := be.finalizedResults[tx-1]
 						if prevRes == nil || prevRes.Receipt == nil {
-							return nil, fmt.Errorf("parallel exec: missing finalized receipt for tx %d in block %d", tx-1, be.blockNum)
+							return nil, fmt.Errorf("parallel exec: missing finalized receipt for tx %d (task %d) in block %d", txVersion.TxIndex-1, tx-1, be.blockNum)
 						}
 						cumulativeGasUsed = prevRes.Receipt.CumulativeGasUsed
 						firstLogIndex = prevRes.Receipt.FirstLogIndexWithinBlock + uint32(len(prevRes.Receipt.Logs))

@@ -1695,6 +1695,8 @@ func TestParallelFinalizeMissingPrevReceiptErrors(t *testing.T) {
 	}
 
 	res, err := be.nextResult(context.Background(), pe, txResult1, roTx)
-	assert.ErrorContains(err, "missing finalized receipt")
+	// The message must name the block-level tx index (prev tx = TxIndex 1),
+	// not the batch-local task index (0).
+	assert.ErrorContains(err, "missing finalized receipt for tx 1")
 	assert.Nil(res)
 }
