@@ -104,7 +104,7 @@ type Aggregator struct {
 	// openTxs=1). Exposed via CommitGate() for use by any component.
 	commitGate sync.RWMutex
 
-	wg sync.WaitGroup // goroutines spawned by Aggregator, to ensure all of them are finish at agg.Close
+	wg closingWaitGroup // goroutines spawned by Aggregator, to ensure all of them are finished at agg.Close
 
 	// metricsCollector is the process-level KV-read metrics aggregate. Every read
 	// path (exec, commitment, warmup, RPC, engine) hands its finished per-worker
@@ -620,11 +620,10 @@ func (a *Aggregator) WaitForFiles() {
 
 func (a *Aggregator) Close() {
 	a.WaitForFiles()
-	if a.ctxCancel == nil { // invariant: it's safe to call Close multiple times
+	if !a.wg.BeginClose() { // idempotent: safe to call Close multiple times
 		return
 	}
 	a.ctxCancel()
-	a.ctxCancel = nil
 	if a.metricsCollector != nil {
 		a.metricsCollector.Stop() // drain buffered samples before wg.Wait joins the goroutine
 	}
@@ -1024,10 +1023,7 @@ func (a *Aggregator) buildFiles(ctx context.Context, step kv.Step) error {
 
 	for _, dc := range domainColls {
 		dc := dc
-		a.wg.Add(1)
 		g.Go(func() error {
-			defer a.wg.Done()
-
 			sf, err := dc.d.buildFiles(ctx, step, dc.collation, a.ps)
 			dc.collation.Close()
 			if err != nil {
@@ -1045,10 +1041,7 @@ func (a *Aggregator) buildFiles(ctx context.Context, step kv.Step) error {
 	}
 	for _, ic := range iiColls {
 		ic := ic
-		a.wg.Add(1)
 		g.Go(func() error {
-			defer a.wg.Done()
-
 			sf, err := ic.ii.buildFiles(ctx, step, ic.collation, a.ps)
 			if err != nil {
 				sf.CleanupOnError()
@@ -1157,7 +1150,10 @@ func (a *Aggregator) BuildFiles2(ctx context.Context, fromStep, toStep kv.Step, 
 	if ok := a.buildingFiles.CompareAndSwap(false, true); !ok {
 		return nil
 	}
-	a.wg.Add(1)
+	if !a.wg.TryAdd() {
+		a.buildingFiles.Store(false)
+		return nil
+	}
 	go func() {
 		defer a.wg.Done()
 		defer a.buildingFiles.Store(false)
@@ -1178,8 +1174,7 @@ func (a *Aggregator) BuildFiles2(ctx context.Context, fromStep, toStep kv.Step, 
 			a.onFilesChange(nil)
 		}
 
-		if doMerge {
-			a.wg.Add(1)
+		if doMerge && a.wg.TryAdd() {
 			go func() {
 				defer a.wg.Done()
 				if err := a.mergeLoop(ctx); err != nil {
@@ -1226,7 +1221,9 @@ func (a *Aggregator) RemoveOverlapsAfterMerge(ctx context.Context) (err error) {
 }
 
 func (a *Aggregator) MergeLoop(ctx context.Context) error {
-	a.wg.Add(1)
+	if !a.wg.TryAdd() {
+		return nil
+	}
 	defer a.wg.Done()
 	return a.mergeLoop(ctx)
 }
@@ -2153,9 +2150,14 @@ func (a *Aggregator) buildFilesInBackground(txNum uint64, doMerge bool) chan str
 		return fin
 	}
 
+	if !a.wg.TryAdd() {
+		a.buildingFiles.Store(false)
+		close(fin)
+		return fin
+	}
+
 	step := kv.Step(a.EndTxNumMinimax() / a.StepSize())
 
-	a.wg.Add(1)
 	go func() {
 		defer a.wg.Done()
 		defer a.buildingFiles.Store(false)
@@ -2295,10 +2297,10 @@ func (a *Aggregator) buildFilesInBackground(txNum uint64, doMerge bool) chan str
 			}
 			a.onFilesChange(nil)
 		}
-		if !doMerge {
+		if !doMerge || !a.wg.TryAdd() {
+			close(fin)
 			return
 		}
-		a.wg.Add(1)
 		go func() {
 			defer a.wg.Done()
 			defer close(fin)
