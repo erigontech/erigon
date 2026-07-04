@@ -887,12 +887,16 @@ func TestCommitmentKvVersionAcceptance(t *testing.T) {
 	require.True(t, vers.Supports(version.V2_0))
 	require.True(t, vers.Supports(version.V2_1))
 	require.True(t, vers.Supports(version.V2_2))
-	require.False(t, vers.Supports(version.Version{Major: 2, Minor: 3}))
+	// A newer minor within the same major is a content-only, backward-readable change.
+	require.True(t, vers.Supports(version.Version{Major: 2, Minor: 3}))
+	// A newer major changes read logic and is rejected.
+	require.False(t, vers.Supports(version.Version{Major: 3, Minor: 0}))
 
 	require.NotPanics(t, func() { vers.MustSupport(version.V2_0, "v2.0-commitment.0-1.kv") })
 	require.NotPanics(t, func() { vers.MustSupport(version.V2_1, "v2.1-commitment.0-1.kv") })
 	require.NotPanics(t, func() { vers.MustSupport(version.V2_2, "v2.2-commitment.0-1.kv") })
-	require.Panics(t, func() { vers.MustSupport(version.Version{Major: 2, Minor: 3}, "v2.3-commitment.0-1.kv") })
+	require.NotPanics(t, func() { vers.MustSupport(version.Version{Major: 2, Minor: 3}, "v2.3-commitment.0-1.kv") })
+	require.Panics(t, func() { vers.MustSupport(version.Version{Major: 3, Minor: 0}, "v3.0-commitment.0-1.kv") })
 }
 
 func TestDomainRoTx_CursorParentCheck(t *testing.T) {
