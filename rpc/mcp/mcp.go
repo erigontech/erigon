@@ -969,14 +969,13 @@ func (e *ErigonMCPServer) ServeSSE(ctx context.Context, addr string) error {
 	)
 }
 
-// serveSSE runs the SSE server until ctx is cancelled, then shuts it down.
-// mcp-go's SSEServer.Start takes no ctx and blocks in Accept. The http.Server is
-// pre-created (WithHTTPServer) so a Shutdown that races ahead of Start still
-// targets it — otherwise Start's lazily-created server makes an early Shutdown a
-// no-op and the goroutine leaks in Accept.
+// serveSSE runs the SSE server until ctx is cancelled. The http.Server is
+// pre-created so a Shutdown racing ahead of Start targets it instead of leaking
+// Start in Accept; it must carry Handler: sse because Start wires the handler
+// only on a server it creates itself.
 func serveSSE(ctx context.Context, mcpServer *server.MCPServer, addr string, opts ...server.SSEOption) error {
-	opts = append(opts, server.WithHTTPServer(&http.Server{Addr: addr}))
 	sse := server.NewSSEServer(mcpServer, opts...)
+	server.WithHTTPServer(&http.Server{Addr: addr, Handler: sse})(sse)
 	errCh := make(chan error, 1)
 	go func() {
 		defer func() {
