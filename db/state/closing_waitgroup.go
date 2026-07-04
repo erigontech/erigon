@@ -22,6 +22,12 @@ import "sync"
 // registers via TryAdd, which refuses once BeginClose has latched, so an Add
 // can't race Wait on a zero counter (WaitGroup reuse). The WaitGroup is a named
 // field, not embedded, so no bare Add can bypass the latch.
+//
+// Race-safety note: BeginClose adds a sentinel (+1) to the WaitGroup under the
+// mutex, guaranteeing the counter is >= 1 when the caller subsequently calls
+// Wait(). This prevents the data race between sync.WaitGroup.Add(1) (from a
+// concurrent TryAdd) and sync.WaitGroup.Wait() that would otherwise occur when
+// the counter is zero at the moment Wait starts.
 type closingWaitGroup struct {
 	wg      sync.WaitGroup
 	mu      sync.Mutex
@@ -41,11 +47,17 @@ func (g *closingWaitGroup) TryAdd() bool {
 
 func (g *closingWaitGroup) Done() { g.wg.Done() }
 
-func (g *closingWaitGroup) Wait() { g.wg.Wait() }
+// Wait releases the sentinel added by BeginClose and then waits for all
+// goroutines registered via TryAdd to finish. Must only be called after
+// BeginClose has returned true.
+func (g *closingWaitGroup) Wait() {
+	g.wg.Done() // release the sentinel added by BeginClose
+	g.wg.Wait()
+}
 
 // BeginClose latches the group closed, returning false if it was already latched
-// so Close is idempotent. Latching before Close's Wait makes every TryAdd either
-// register before Wait or get refused.
+// so Close is idempotent. It adds a sentinel to the WaitGroup under the mutex
+// so that Wait() is never called on a zero counter concurrently with a TryAdd.
 func (g *closingWaitGroup) BeginClose() bool {
 	g.mu.Lock()
 	defer g.mu.Unlock()
@@ -53,5 +65,6 @@ func (g *closingWaitGroup) BeginClose() bool {
 		return false
 	}
 	g.closing = true
+	g.wg.Add(1) // sentinel: prevents Add-after-Wait race in Wait()
 	return true
 }
