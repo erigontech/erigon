@@ -560,7 +560,7 @@ func (a *Aggregator) openFolder() error {
 		return err
 	}
 
-	eg := &errgroup.Group{}
+	eg, ctx := errgroup.WithContext(a.ctx)
 	for _, d := range a.d {
 		if d.Disable {
 			continue
@@ -568,12 +568,7 @@ func (a *Aggregator) openFolder() error {
 
 		d := d
 		eg.Go(func() error {
-			select {
-			case <-a.ctx.Done():
-				return a.ctx.Err()
-			default:
-			}
-			return d.openFolder(scanDirsRes)
+			return d.openFolder(ctx, scanDirsRes)
 		})
 	}
 	for _, ii := range a.standaloneIIs() {
@@ -581,7 +576,7 @@ func (a *Aggregator) openFolder() error {
 			continue
 		}
 		ii := ii
-		eg.Go(func() error { return ii.openFolder(scanDirsRes) })
+		eg.Go(func() error { return ii.openFolder(ctx, scanDirsRes) })
 	}
 	if err := eg.Wait(); err != nil {
 		return fmt.Errorf("openFolder: %w", err)
