@@ -110,10 +110,6 @@ func (api *TraceAPIImpl) Transaction(ctx context.Context, txHash common.Hash, ga
 		return nil, err
 	}
 
-	if isBorStateSyncTxn {
-		txIndex = -1
-	}
-
 	bn := hexutil.Uint64(blockNumber)
 	hash := header.Hash()
 	signer := types.MakeSigner(chainConfig, blockNumber, header.Time)

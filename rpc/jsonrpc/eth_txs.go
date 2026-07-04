@@ -49,18 +49,9 @@ func (api *APIImpl) GetTransactionByHash(ctx context.Context, txnHash common.Has
 	}
 
 	// https://www.quicknode.com/docs/ethereum/eth_getTransactionByHash
-	blockNum, txNum, ok, err := api.txnLookup(ctx, tx, txnHash)
+	blockNum, txNum, isBorStateSyncTx, ok, err := api.txnLookupWithBorFallback(ctx, tx, txnHash, chainConfig)
 	if err != nil {
 		return nil, err
-	}
-
-	// Private API returns 0 if transaction is not found.
-	isBorStateSyncTx := blockNum == 0 && chainConfig.Bor != nil
-	if isBorStateSyncTx {
-		blockNum, ok, err = api.bridgeReader.EventTxnLookup(ctx, txnHash)
-		if err != nil {
-			return nil, err
-		}
 	}
 	if ok {
 		err = api.BaseAPI.checkPruneBlocks(ctx, tx, blockNum)

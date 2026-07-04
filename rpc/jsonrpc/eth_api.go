@@ -260,15 +260,18 @@ func (api *BaseAPI) txnLookupWithBorFallback(ctx context.Context, tx kv.Tx, txnH
 	return blockNum, txNum, true, true, nil
 }
 
-// txnIndexInBlock derives the in-block txn index from a global txNum. For bor state sync
-// txns txNum comes from a missed lookup, so the consistency check is skipped and the
-// returned index is meaningless.
+// txnIndexInBlock derives the in-block txn index from a global txNum. Bor state sync
+// txns are not part of the block body, so they yield the -1 sentinel and the consistency
+// check is skipped (their txNum comes from a missed lookup).
 func (api *BaseAPI) txnIndexInBlock(ctx context.Context, tx kv.Tx, blockNum, txNum uint64, isBorStateSyncTxn bool) (int, error) {
 	txNumMin, err := api._txNumReader.Min(ctx, tx, blockNum)
 	if err != nil {
 		return 0, err
 	}
-	if txNumMin+1 > txNum && !isBorStateSyncTxn {
+	if isBorStateSyncTxn {
+		return -1, nil
+	}
+	if txNumMin+1 > txNum {
 		return 0, fmt.Errorf("uint underflow txnums error txNum: %d, txNumMin: %d, blockNum: %d", txNum, txNumMin, blockNum)
 	}
 	return int(txNum - txNumMin - 1), nil

@@ -24,6 +24,7 @@ import (
 	"math/big"
 	"strconv"
 	"testing"
+	"time"
 
 	"github.com/holiman/uint256"
 	jsoniter "github.com/json-iterator/go"
@@ -38,12 +39,30 @@ import (
 	"github.com/erigontech/erigon/execution/abi/bind/backends"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/types"
+	"github.com/erigontech/erigon/execution/vm"
+	"github.com/erigontech/erigon/execution/vm/evmtypes"
 	"github.com/erigontech/erigon/rpc"
 	"github.com/erigontech/erigon/rpc/ethapi"
 	"github.com/erigontech/erigon/rpc/jsonrpc/contracts"
 	"github.com/erigontech/erigon/rpc/jsonstream"
 	"github.com/erigontech/erigon/rpc/rpccfg"
 )
+
+// Pins that an EVM stored after the deadline has already fired is still cancelled.
+func TestSetupEVMTimeoutCancelsEVMStoredAfterExpiry(t *testing.T) {
+	parent, cancelParent := context.WithCancel(context.Background())
+	cancelParent()
+
+	_, storeEVM, cleanup := setupEVMTimeout(parent, time.Hour)
+	defer cleanup()
+
+	// let the one-shot AfterFunc fire before any EVM is registered
+	time.Sleep(50 * time.Millisecond)
+
+	evm := vm.NewEVM(evmtypes.BlockContext{}, evmtypes.TxContext{}, nil, chain.AllProtocolChanges, vm.Config{})
+	storeEVM(evm)
+	require.True(t, evm.Cancelled())
+}
 
 func TestCallManyEmptyBundles(t *testing.T) {
 	m, _, _ := rpcdaemontest.CreateTestExecModule(t)

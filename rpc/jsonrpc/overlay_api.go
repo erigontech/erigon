@@ -455,7 +455,7 @@ func (api *OverlayAPIImpl) replayBlock(ctx context.Context, blockNum uint64, sta
 	}
 
 	timeout := api.OverlayReplayBlockTimeout
-	ctx, evmPtr, cleanup := setupEVMTimeout(ctx, timeout)
+	ctx, storeEVM, cleanup := setupEVMTimeout(ctx, timeout)
 	defer cleanup()
 
 	getHash := transactions.MakeBlockHashProvider(ctx, tx, api._blockReader, overrideBlockHash)
@@ -469,7 +469,7 @@ func (api *OverlayAPIImpl) replayBlock(ctx context.Context, blockNum uint64, sta
 	// and apply the message.
 	gp := new(protocol.GasPool).AddGas(math.MaxUint64).AddBlobGas(math.MaxUint64)
 	evm = vm.NewEVM(blockCtx, evmtypes.TxContext{}, statedb, chainConfig, vm.Config{})
-	evmPtr.Store(evm)
+	storeEVM(evm)
 	receipts, err := api.getReceipts(ctx, tx, block)
 	if err != nil {
 		return nil, err

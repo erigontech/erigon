@@ -918,10 +918,6 @@ func (api *TraceAPIImpl) ReplayTransaction(ctx context.Context, txHash common.Ha
 		return nil, err
 	}
 
-	if isBorStateSyncTxn {
-		txnIndex = -1
-	}
-
 	signer := types.MakeSigner(chainConfig, blockNum, header.Time)
 	// Returns an array of trace arrays, one trace array for each transaction
 	trace, err := api.callTransaction(ctx, tx, header, traceTypes, txnIndex, *gasBailOut, signer, chainConfig, traceConfig)
@@ -1133,18 +1129,8 @@ func (api *TraceAPIImpl) Call(ctx context.Context, args TraceCallParam, traceTyp
 
 	ibs := state.New(stateReader)
 
-	// Setup context so it may be cancelled the call has completed
-	// or, in case of unmetered gas, setup a context with a timeout.
-	var cancel context.CancelFunc
-	if api.evmCallTimeout > 0 {
-		ctx, cancel = context.WithTimeout(ctx, api.evmCallTimeout)
-	} else {
-		ctx, cancel = context.WithCancel(ctx)
-	}
-
-	// Make sure the context is cancelled when the call has completed
-	// this makes sure resources are cleaned up.
-	defer cancel()
+	_, storeEVM, cleanup := setupEVMTimeout(ctx, api.evmCallTimeout)
+	defer cleanup()
 
 	traceResult := &TraceCallResult{Trace: []*ParityTrace{}}
 	var traceTypeTrace, traceTypeStateDiff, traceTypeVmTrace bool
@@ -1210,9 +1196,7 @@ func (api *TraceAPIImpl) Call(ctx context.Context, args TraceCallParam, traceTyp
 	if precompiles != nil {
 		evm.SetPrecompiles(precompiles)
 	}
-
-	stop := context.AfterFunc(ctx, evm.Cancel)
-	defer stop()
+	storeEVM(evm)
 
 	gp := new(protocol.GasPool).AddGas(msg.Gas()).AddBlobGas(msg.BlobGas())
 	var execResult *evmtypes.ExecutionResult
@@ -1832,13 +1816,8 @@ func (api *TraceAPIImpl) RawTransaction(ctx context.Context, encodedTx hexutil.B
 		return nil, err
 	}
 
-	var cancel context.CancelFunc
-	if api.evmCallTimeout > 0 {
-		ctx, cancel = context.WithTimeout(ctx, api.evmCallTimeout)
-	} else {
-		ctx, cancel = context.WithCancel(ctx)
-	}
-	defer cancel()
+	_, storeEVM, cleanup := setupEVMTimeout(ctx, api.evmCallTimeout)
+	defer cleanup()
 
 	traceResult := &TraceCallResult{Trace: []*ParityTrace{}}
 	var traceTypeTrace, traceTypeStateDiff, traceTypeVmTrace bool
@@ -1889,9 +1868,7 @@ func (api *TraceAPIImpl) RawTransaction(ctx context.Context, encodedTx hexutil.B
 	blockCtx.MaxGasLimit = true
 
 	evm := vm.NewEVM(blockCtx, txCtx, ibs, chainConfig, vm.Config{Tracer: ot.Tracer().Hooks})
-
-	stop := context.AfterFunc(ctx, evm.Cancel)
-	defer stop()
+	storeEVM(evm)
 
 	gp := new(protocol.GasPool).AddGas(msg.Gas()).AddBlobGas(msg.BlobGas())
 	var execResult *evmtypes.ExecutionResult

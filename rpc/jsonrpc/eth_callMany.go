@@ -51,9 +51,6 @@ type StateContext struct {
 }
 
 func validateBundles(bundles []Bundle) error {
-	if len(bundles) == 0 {
-		return errors.New("empty bundles")
-	}
 	for _, bundle := range bundles {
 		if len(bundle.Transactions) != 0 {
 			return nil
@@ -62,11 +59,12 @@ func validateBundles(bundles []Bundle) error {
 	return errors.New("empty bundles")
 }
 
-// setupEVMTimeout cancels the EVM held by the returned pointer once timeout elapses (or
-// ctx is cancelled), and returns the deadline-carrying context. Callers must Store the
-// EVM once created — and again whenever it is recreated — so the cancellation always
-// hits the current instance. The returned cleanup must be deferred.
-func setupEVMTimeout(ctx context.Context, timeout time.Duration) (context.Context, *atomic.Pointer[vm.EVM], func()) {
+// setupEVMTimeout cancels the EVM registered via the returned store func once timeout
+// elapses (or ctx is cancelled), and returns the deadline-carrying context. Callers must
+// store the EVM once created — and again whenever it is recreated — so cancellation
+// always hits the current instance, even when it fires before the EVM exists. The
+// returned cleanup must be deferred.
+func setupEVMTimeout(ctx context.Context, timeout time.Duration) (context.Context, func(*vm.EVM), func()) {
 	evmPtr := &atomic.Pointer[vm.EVM]{}
 
 	var cancel context.CancelFunc
@@ -81,7 +79,13 @@ func setupEVMTimeout(ctx context.Context, timeout time.Duration) (context.Contex
 			evm.Cancel()
 		}
 	})
-	return ctx, evmPtr, func() {
+	store := func(evm *vm.EVM) {
+		evmPtr.Store(evm)
+		if ctx.Err() != nil {
+			evm.Cancel()
+		}
+	}
+	return ctx, store, func() {
 		stop()
 		cancel()
 	}
@@ -167,7 +171,7 @@ func (api *APIImpl) CallMany(ctx context.Context, bundles []Bundle, simulateCont
 		timeout = time.Duration(*timeoutMilliSecondsPtr) * time.Millisecond
 	}
 
-	ctx, evmPtr, cleanup := setupEVMTimeout(ctx, timeout)
+	ctx, storeEVM, cleanup := setupEVMTimeout(ctx, timeout)
 	defer cleanup()
 
 	getHash := transactions.MakeBlockHashProvider(ctx, tx, api._blockReader, overrideBlockHash)
@@ -176,7 +180,7 @@ func (api *APIImpl) CallMany(ctx context.Context, bundles []Bundle, simulateCont
 
 	// Get a new instance of the EVM
 	evm = vm.NewEVM(blockCtx, txCtx, st, chainConfig, vm.Config{})
-	evmPtr.Store(evm)
+	storeEVM(evm)
 	signer := types.MakeSigner(chainConfig, blockNum, blockCtx.Time)
 	rules := evm.ChainRules()
 
@@ -191,7 +195,7 @@ func (api *APIImpl) CallMany(ctx context.Context, bundles []Bundle, simulateCont
 		}
 		txCtx = protocol.NewEVMTxContext(msg)
 		evm = vm.NewEVM(blockCtx, txCtx, evm.IntraBlockState(), chainConfig, vm.Config{})
-		evmPtr.Store(evm)
+		storeEVM(evm)
 		// Execute the transaction message
 		_, err = protocol.ApplyMessage(evm, msg, gp, true /* refunds */, false /* gasBailout */, api.engine())
 		if err != nil {
@@ -230,7 +234,7 @@ func (api *APIImpl) CallMany(ctx context.Context, bundles []Bundle, simulateCont
 			}
 			txCtx = protocol.NewEVMTxContext(msg)
 			evm = vm.NewEVM(blockCtx, txCtx, evm.IntraBlockState(), chainConfig, vm.Config{})
-			evmPtr.Store(evm)
+			storeEVM(evm)
 			result, err := protocol.ApplyMessage(evm, msg, gp, true /* refunds */, false /* gasBailout */, api.engine())
 			if err != nil {
 				return nil, err

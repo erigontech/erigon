@@ -148,9 +148,9 @@ func (api *APIImpl) CallBundle(ctx context.Context, txHashes []common.Hash, stat
 	}
 	timeout := time.Millisecond * time.Duration(timeoutMilliSeconds)
 
-	_, evmPtr, cleanup := setupEVMTimeout(ctx, timeout)
+	_, storeEVM, cleanup := setupEVMTimeout(ctx, timeout)
 	defer cleanup()
-	evmPtr.Store(evm)
+	storeEVM(evm)
 
 	// Setup the gas pool (also for unmetered requests)
 	// and apply the message.
@@ -169,7 +169,7 @@ func (api *APIImpl) CallBundle(ctx context.Context, txHashes []common.Hash, stat
 		msg.SetCheckGas(false)
 		// Recreate EVM with the correct txCtx for this transaction
 		evm = vm.NewEVM(blockCtx, protocol.NewEVMTxContext(msg), ibs, chainConfig, vm.Config{})
-		evmPtr.Store(evm)
+		storeEVM(evm)
 		// Execute the transaction message
 		result, err := protocol.ApplyMessage(evm, msg, gp, true /* refunds */, false /* gasBailout */, engine)
 		if err != nil {
