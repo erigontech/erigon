@@ -679,7 +679,9 @@ func TestForkableAggCloseWaitsForBackgroundMerge(t *testing.T) {
 	}
 }
 
-// ForkableAgg twin of TestAggregatorCloseVsConcurrentMergeLoop.
+// ForkableAgg twin of TestAggregatorCloseVsConcurrentMergeLoop. Unlike the
+// Aggregator twins it can't run t.Parallel: setup registers into the global
+// forkable Registry, whose reads aren't lock-guarded, so parallel setups race.
 func TestForkableAggCloseVsConcurrentMergeLoop(t *testing.T) {
 	for range 16 {
 		dirs, db, logger := setupDb(t)
@@ -689,18 +691,23 @@ func TestForkableAggCloseVsConcurrentMergeLoop(t *testing.T) {
 		agg.RegisterMarkedForkable(header)
 		require.NoError(t, agg.OpenFolder())
 
+		start := make(chan struct{})
 		var loops sync.WaitGroup
-		for range 4 {
+		for i := range 8 {
 			loops.Go(func() {
+				<-start
+				time.Sleep(time.Duration(i) * 250 * time.Microsecond)
 				_ = agg.MergeLoop(context.Background())
 			})
 		}
+		close(start)
 		agg.Close()
 		loops.Wait()
 	}
 }
 
 // ForkableAgg twin of TestAggregatorCloseVsConcurrentBuildFilesInBackground.
+// Not t.Parallel: see TestForkableAggCloseVsConcurrentMergeLoop.
 func TestForkableAggCloseVsConcurrentBuildFilesInBackground(t *testing.T) {
 	for range 4 {
 		dirs, db, logger := setupDb(t)
@@ -710,13 +717,17 @@ func TestForkableAggCloseVsConcurrentBuildFilesInBackground(t *testing.T) {
 		agg.RegisterMarkedForkable(header)
 		require.NoError(t, agg.OpenFolder())
 
-		fins := make(chan chan struct{}, 4)
+		start := make(chan struct{})
+		fins := make(chan chan struct{}, 8)
 		var loops sync.WaitGroup
-		for range 4 {
+		for i := range 8 {
 			loops.Go(func() {
+				<-start
+				time.Sleep(time.Duration(i) * 250 * time.Microsecond)
 				fins <- agg.BuildFilesInBackground(RootNum(10))
 			})
 		}
+		close(start)
 		agg.Close()
 		loops.Wait()
 		close(fins)
@@ -727,6 +738,7 @@ func TestForkableAggCloseVsConcurrentBuildFilesInBackground(t *testing.T) {
 }
 
 // ForkableAgg twin of TestAggregatorConcurrentClose.
+// Not t.Parallel: see TestForkableAggCloseVsConcurrentMergeLoop.
 func TestForkableAggConcurrentClose(t *testing.T) {
 	for range 4 {
 		dirs, db, logger := setupDb(t)

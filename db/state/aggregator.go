@@ -622,6 +622,7 @@ func (a *Aggregator) Close() {
 	if !a.wg.BeginClose() { // invariant: it's safe to call Close multiple times, even concurrently
 		return
 	}
+	defer a.wg.MarkClosed()
 	a.ctxCancel()
 	if a.metricsCollector != nil {
 		a.metricsCollector.Stop() // drain buffered samples before wg.Wait joins the goroutine
@@ -1022,7 +1023,7 @@ func (a *Aggregator) buildFiles(ctx context.Context, step kv.Step) error {
 
 	for _, dc := range domainColls {
 		dc := dc
-		a.wg.Add(1)
+		a.wg.AddFromRegistered()
 		g.Go(func() error {
 			defer a.wg.Done()
 
@@ -1043,7 +1044,7 @@ func (a *Aggregator) buildFiles(ctx context.Context, step kv.Step) error {
 	}
 	for _, ic := range iiColls {
 		ic := ic
-		a.wg.Add(1)
+		a.wg.AddFromRegistered()
 		g.Go(func() error {
 			defer a.wg.Done()
 
@@ -1180,7 +1181,7 @@ func (a *Aggregator) BuildFiles2(ctx context.Context, fromStep, toStep kv.Step, 
 		}
 
 		if doMerge {
-			a.wg.Add(1)
+			a.wg.AddFromRegistered()
 			go func() {
 				defer a.wg.Done()
 				if err := a.mergeLoop(ctx); err != nil {
@@ -2306,7 +2307,7 @@ func (a *Aggregator) buildFilesInBackground(txNum uint64, doMerge bool) chan str
 		if !doMerge {
 			return
 		}
-		a.wg.Add(1)
+		a.wg.AddFromRegistered()
 		go func() {
 			defer a.wg.Done()
 			defer close(fin)

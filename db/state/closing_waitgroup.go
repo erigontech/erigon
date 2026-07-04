@@ -18,34 +18,54 @@ package state
 
 import "sync"
 
-// closingWaitGroup is a sync.WaitGroup with a close latch: TryAdd refuses to
-// register once BeginClose has run, so an Add from a goroutine the owner did not
-// spawn can't race Wait (WaitGroup reuse). Plain Add remains for goroutines
-// spawned from an already-registered one, whose Add can't observe a zero counter.
+// closingWaitGroup is a sync.WaitGroup with a close latch. A goroutine the owner
+// did not spawn must register via TryAdd, which refuses once BeginClose latches;
+// this keeps its Add from racing Wait on a zero counter (WaitGroup reuse). The
+// WaitGroup is a named field, not embedded, so no bare Add can bypass the latch.
 type closingWaitGroup struct {
-	sync.WaitGroup
+	wg      sync.WaitGroup
 	mu      sync.Mutex
 	closing bool
+	closed  chan struct{}
 }
 
-// TryAdd registers the caller on the WaitGroup unless BeginClose has run.
+// TryAdd registers the caller on the group unless BeginClose has latched.
 func (g *closingWaitGroup) TryAdd() bool {
 	g.mu.Lock()
 	defer g.mu.Unlock()
 	if g.closing {
 		return false
 	}
-	g.WaitGroup.Add(1)
+	g.wg.Add(1)
 	return true
 }
 
-// BeginClose latches the group closed; reports whether this call did the latching.
+// AddFromRegistered registers a goroutine spawned from one already registered on
+// the group. The parent's outstanding count keeps Wait from returning, so this
+// Add can't race it and needs no latch check — unlike TryAdd.
+func (g *closingWaitGroup) AddFromRegistered() { g.wg.Add(1) }
+
+func (g *closingWaitGroup) Done() { g.wg.Done() }
+
+func (g *closingWaitGroup) Wait() { g.wg.Wait() }
+
+// BeginClose latches the group closed and reports whether this call is the one
+// that must run teardown. Callers that lose the latch block until the winner
+// calls MarkClosed, so Close blocks until teardown is complete for every caller.
 func (g *closingWaitGroup) BeginClose() bool {
 	g.mu.Lock()
-	defer g.mu.Unlock()
 	if g.closing {
+		closed := g.closed
+		g.mu.Unlock()
+		<-closed
 		return false
 	}
 	g.closing = true
+	g.closed = make(chan struct{})
+	g.mu.Unlock()
 	return true
 }
+
+// MarkClosed releases callers blocked in BeginClose; the caller that won the
+// latch must call it exactly once, once teardown is complete.
+func (g *closingWaitGroup) MarkClosed() { close(g.closed) }

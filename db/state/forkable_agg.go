@@ -182,7 +182,7 @@ func (r *ForkableAgg) BuildFilesInBackground(num RootNum) chan struct{} {
 			}
 		}
 
-		r.wg.Add(1)
+		r.wg.AddFromRegistered()
 		go func() {
 			defer r.wg.Done()
 			defer func() {
@@ -380,7 +380,7 @@ func (r *ForkableAgg) buildFile(ctx context.Context, to RootNum) (built bool, er
 
 	firstRootNumNotInFiles := tx.AlignedMaxRootNum()
 	r.loop(func(p *ProtoForkable) error {
-		r.wg.Add(1)
+		r.wg.AddFromRegistered()
 		g.Go(func() error {
 			defer r.wg.Done()
 
@@ -454,6 +454,7 @@ func (r *ForkableAgg) Close() {
 	if !r.wg.BeginClose() { // invariant: it's safe to call Close multiple times, even concurrently
 		return
 	}
+	defer r.wg.MarkClosed()
 	r.ctxCancel()
 	r.wg.Wait()
 

@@ -125,13 +125,12 @@ func TestAggregatorCloseVsConcurrentBuildFiles2(t *testing.T) {
 			loops.Go(func() {
 				<-start
 				time.Sleep(time.Duration(i) * 250 * time.Microsecond)
-				_ = agg.BuildFiles2(context.Background(), 0, 0, false)
+				_ = agg.BuildFiles2(context.Background(), 0, 0, true)
 			})
 		}
 		close(start)
 		agg.Close()
 		loops.Wait()
-		agg.wg.Wait()
 		db.Close()
 	}
 }
