@@ -266,10 +266,12 @@ func (m *Merger) Merge(
 
 func (m *Merger) integrateMergedDirtyFiles(snapshots *RoSnapshots, in, out map[snaptype.Enum][]*DirtySegment) {
 	var retired []*DirtySegment
-	defer func() { snapshots.recalcVisibleFiles(snapshots.alignMin, retired) }()
 
 	snapshots.dirtyLock.Lock()
 	defer snapshots.dirtyLock.Unlock()
+	// Publish under the same lock so the dirty mutation and the bundle publish are one
+	// atomic step (no window for a concurrent open to re-adopt a just-retired file).
+	defer func() { snapshots.recalcVisibleFilesLocked(snapshots.alignMin, retired) }()
 
 	// add new segments
 	for enum, newSegs := range in {
