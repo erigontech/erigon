@@ -1134,8 +1134,9 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 		// Without this, there is a data race between the goroutine reading
 		// Aggregator fields (in wg.TryAdd) and Close() writing them after
 		// wg.Wait() returns.
+		sentryCtx := backend.sentryCtx
 		backend.bgComponentsEg.Go(func() error {
-			if err := temporalDb.Debug().MergeLoop(ctx); err != nil && !errors.Is(err, context.Canceled) {
+			if err := temporalDb.Debug().MergeLoop(sentryCtx); err != nil && !errors.Is(err, context.Canceled) {
 				logger.Error("snapshot merge loop error", "err", err)
 			}
 			return nil
