@@ -1055,6 +1055,40 @@ func TestGetRawTransaction(t *testing.T) {
 	require.True(testedOnce, "Test flow didn't touch the target flow")
 }
 
+func TestGetRawReceipts(t *testing.T) {
+	m, _, _ := rpcdaemontest.CreateTestExecModule(t)
+	api := NewPrivateDebugAPI(newBaseApiForTest(m), m.DB, nil, 5000000, false)
+	ctx := context.Background()
+
+	require := require.New(t)
+	tx, err := m.DB.BeginTemporalRo(ctx)
+	require.NoError(err)
+	defer tx.Rollback()
+	number := *rawdb.ReadCurrentBlockNumber(tx)
+
+	testedNonEmpty := false
+	for i := uint64(0); i <= number; i++ {
+		block, err := api.blockByNumberWithSenders(ctx, tx, i)
+		require.NoError(err)
+		receipts, err := api.getReceipts(ctx, tx, block)
+		require.NoError(err)
+		expected := make([]hexutil.Bytes, len(receipts))
+		for j, receipt := range receipts {
+			b, err := receipt.MarshalBinary()
+			require.NoError(err)
+			expected[j] = b
+		}
+
+		raw, err := api.GetRawReceipts(ctx, rpc.BlockNumberOrHashWithNumber(rpc.BlockNumber(i)))
+		require.NoError(err)
+		require.Equal(expected, raw)
+		if len(raw) > 0 {
+			testedNonEmpty = true
+		}
+	}
+	require.True(testedNonEmpty, "test chain has no receipts")
+}
+
 func TestExecutionWitness(t *testing.T) {
 	// Enable historical commitment schema so the test aggregator maintains per-block history.
 	previousSchema := statecfg.Schema
