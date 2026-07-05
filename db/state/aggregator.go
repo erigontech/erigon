@@ -450,7 +450,7 @@ func (a *Aggregator) AddDependencyBtwnDomains(dependency kv.Domain, dependent kv
 
 	a.checker.AddDependency(FromDomain(dependency), &DependentInfo{
 		entity:      FromDomain(dependent),
-		filesGetter: func() *DirtyFiles { return dd.dirtyFiles },
+		filesGetter: dd.dirtyFilesGetter(),
 		accessors:   dd.Accessors,
 	})
 	a.d[dependency].SetChecker(a.checker)
@@ -471,11 +471,9 @@ func (a *Aggregator) AddDependencyBtwnHistoryII(domain kv.Domain) {
 	h := dd.History
 	ue := FromII(dd.InvertedIndex.InvIdxCfg.Name)
 	a.checker.AddDependency(ue, &DependentInfo{
-		entity: ue,
-		filesGetter: func() *DirtyFiles {
-			return h.dirtyFiles
-		},
-		accessors: h.Accessors,
+		entity:      ue,
+		filesGetter: h.dirtyFilesGetter(),
+		accessors:   h.Accessors,
 	})
 	h.InvertedIndex.SetChecker(a.checker)
 }
@@ -780,27 +778,20 @@ func (a *Aggregator) Files() []string {
 }
 func (a *Aggregator) LS() {
 	var stats seg.Stats
-	doLS := func(dirtyFiles *DirtyFiles) {
-		iter := dirtyFiles.Iter()
-		defer iter.Release()
-		for ok := iter.First(); ok; ok = iter.Next() {
-			item := iter.Item()
-			if item.decompressor == nil {
-				continue
-			}
-			a.logger.Info("[agg] ", "f", item.decompressor.FileName(), "words", item.decompressor.Count(), "dictOnDisk", common.ByteCount(item.decompressor.SerializedTotalDictSize()), "dictMem", common.ByteCount(item.decompressor.DictMemSize()))
-			stats.Add(item.decompressor)
+	logItem := func(item *FilesItem) {
+		if item.decompressor == nil {
+			return
 		}
+		a.logger.Info("[agg] ", "f", item.decompressor.FileName(), "words", item.decompressor.Count(), "dictOnDisk", common.ByteCount(item.decompressor.SerializedTotalDictSize()), "dictMem", common.ByteCount(item.decompressor.DictMemSize()))
+		stats.Add(item.decompressor)
 	}
 
 	a.SlowReadDirtyFiles(func() {
 		for _, d := range a.d {
-			doLS(d.dirtyFiles)
-			doLS(d.History.dirtyFiles)
-			doLS(d.History.InvertedIndex.dirtyFiles)
+			d.forEachDirtyFile(logItem)
 		}
 		for _, ii := range a.standaloneIIs() {
-			doLS(ii.dirtyFiles)
+			ii.forEachDirtyFile(logItem)
 		}
 	})
 	a.logger.Info("[agg] total", "words", stats.Words, "dictOnDisk", common.ByteCount(stats.Dict), "dictMem", common.ByteCount(stats.DictMem))
@@ -1705,10 +1696,10 @@ func (a *Aggregator) CollateAndPrune(ctx context.Context, db kv.TemporalRwDB, pr
 }
 func (a *Aggregator) FilesAmount() (res []int) {
 	for _, d := range a.d {
-		res = append(res, d.dirtyFiles.Len())
+		res = append(res, d.dirtyFilesLen())
 	}
 	for _, ii := range a.standaloneIIs() {
-		res = append(res, ii.dirtyFiles.Len())
+		res = append(res, ii.dirtyFilesLen())
 	}
 	return res
 }
@@ -2597,12 +2588,10 @@ func (at *AggregatorRoTx) DisableReadAhead() {
 func (a *Aggregator) MadvNormal() *Aggregator {
 	a.SlowReadDirtyFiles(func() {
 		for _, d := range a.d {
-			d.dirtyFiles.MadvNormal()
-			d.History.dirtyFiles.MadvNormal()
-			d.History.InvertedIndex.dirtyFiles.MadvNormal()
+			d.madvNormalDirtyFiles()
 		}
 		for _, ii := range a.standaloneIIs() {
-			ii.dirtyFiles.MadvNormal()
+			ii.madvNormalDirtyFiles()
 		}
 	})
 	return a
@@ -2610,12 +2599,10 @@ func (a *Aggregator) MadvNormal() *Aggregator {
 func (a *Aggregator) DisableReadAhead() {
 	a.SlowReadDirtyFiles(func() {
 		for _, d := range a.d {
-			d.dirtyFiles.DisableReadAhead()
-			d.History.dirtyFiles.DisableReadAhead()
-			d.History.InvertedIndex.dirtyFiles.DisableReadAhead()
+			d.disableReadAheadDirtyFiles()
 		}
 		for _, ii := range a.standaloneIIs() {
-			ii.dirtyFiles.DisableReadAhead()
+			ii.disableReadAheadDirtyFiles()
 		}
 	})
 }

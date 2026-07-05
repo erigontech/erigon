@@ -47,6 +47,11 @@ type Generation[visibleFiles, dirtyFile any] struct {
 // readers pin the current one without locking. When a superseded Generation's last
 // reader releases it (refcnt reaches 0), its retired payload is handed to
 // closeAndPhysicalRemove, out of the lock.
+//
+// RCU:
+// - Read the current version,
+// - Copy it and mutate the copy (so in-flight readers keep seeing a stable old snapshot),
+// - Update the pointer to publish the new copy atomically; free the old one later.
 type Lifetime[visibleFiles, dirtyFile any] struct {
 	lock                   sync.Mutex
 	visible                atomic.Pointer[Generation[visibleFiles, dirtyFile]]

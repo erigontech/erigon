@@ -353,6 +353,30 @@ func (d *Domain) closeFilesAfterStep(lowerBound kv.Step) {
 	d.History.InvertedIndex.dirtyFiles.CloseIf(pred)
 }
 
+func (d *Domain) madvNormalDirtyFiles() {
+	d.dirtyFiles.MadvNormal()
+	d.History.dirtyFiles.MadvNormal()
+	d.History.InvertedIndex.dirtyFiles.MadvNormal()
+}
+
+func (d *Domain) disableReadAheadDirtyFiles() {
+	d.dirtyFiles.DisableReadAhead()
+	d.History.dirtyFiles.DisableReadAhead()
+	d.History.InvertedIndex.dirtyFiles.DisableReadAhead()
+}
+
+func (d *Domain) dirtyFilesLen() int { return d.dirtyFiles.Len() }
+
+func (d *Domain) dirtyFilesGetter() DirtyFilesGetter {
+	return func() *DirtyFiles { return d.dirtyFiles }
+}
+
+func (d *Domain) forEachDirtyFile(fn func(*FilesItem)) {
+	d.dirtyFiles.Scan(func(item *FilesItem) bool { fn(item); return true })
+	d.History.dirtyFiles.Scan(func(item *FilesItem) bool { fn(item); return true })
+	d.History.InvertedIndex.dirtyFiles.Scan(func(item *FilesItem) bool { fn(item); return true })
+}
+
 func (d *Domain) scanDirtyFiles(fileNames []string) (garbageFiles []*FilesItem) {
 	if d.FilenameBase == "" {
 		panic("assert: empty `filenameBase`")

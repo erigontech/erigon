@@ -155,6 +155,10 @@ func (h *History) closeWhatNotInList(fNames []string) {
 	closeWhatNotInList(h.dirtyFiles, fNames)
 }
 
+func (h *History) dirtyFilesGetter() DirtyFilesGetter {
+	return func() *DirtyFiles { return h.dirtyFiles }
+}
+
 func (h *History) Tables() []string { return append(h.InvertedIndex.Tables(), h.ValuesTable) }
 
 func (h *History) Close() {

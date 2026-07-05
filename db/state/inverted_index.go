@@ -289,6 +289,14 @@ func (ii *InvertedIndex) closeWhatNotInList(fNames []string) {
 	closeWhatNotInList(ii.dirtyFiles, fNames)
 }
 
+func (ii *InvertedIndex) madvNormalDirtyFiles()       { ii.dirtyFiles.MadvNormal() }
+func (ii *InvertedIndex) disableReadAheadDirtyFiles() { ii.dirtyFiles.DisableReadAhead() }
+func (ii *InvertedIndex) dirtyFilesLen() int          { return ii.dirtyFiles.Len() }
+
+func (ii *InvertedIndex) forEachDirtyFile(fn func(*FilesItem)) {
+	ii.dirtyFiles.Scan(func(item *FilesItem) bool { fn(item); return true })
+}
+
 func (ii *InvertedIndex) Tables() []string { return []string{ii.KeysTable, ii.ValuesTable} }
 
 func (ii *InvertedIndex) Close() {
