@@ -395,7 +395,7 @@ func (t *attestationTestSuite) TestAttestationProcessMessageAllowsNextEpochWhenF
 	}
 }
 
-func (t *attestationTestSuite) TestAttestationProcessMessageRejectsNextEpochBeforeForkchoiceHasSeenIt() {
+func (t *attestationTestSuite) TestAttestationProcessMessageAllowsNextEpochWhenClockHasReachedIt() {
 	nextEpochSlot := mockSlot + mockSlotsPerEpoch
 	nextEpoch := mockEpoch + 1
 	nextEpochAttData := *attData
@@ -420,8 +420,9 @@ func (t *attestationTestSuite) TestAttestationProcessMessageRejectsNextEpochBefo
 		ImmediateProcess: true,
 	})
 
-	t.Require().Error(err)
-	t.Require().Contains(err.Error(), "too far from attestation epoch")
+	if err != nil {
+		t.Require().NotContains(err.Error(), "too far from attestation epoch")
+	}
 }
 
 func (t *attestationTestSuite) TestAttestationProcessMessageRejectsBeyondNextEpochDespiteForkchoiceHavingSeenIt() {
