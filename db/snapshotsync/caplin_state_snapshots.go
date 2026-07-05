@@ -144,7 +144,7 @@ type CaplinStateSnapshots struct {
 
 	Salt uint32
 
-	FileSet                   // dirty segments + published visible generations, under one lock
+	Lifecycle                 // dirty segments + published visible generations, under one lock
 	tableIndex map[string]int // table name -> index into dirty/segments; immutable after init
 
 	snapshotTypes SnapshotTypes
@@ -201,7 +201,7 @@ func NewCaplinStateSnapshots(cfg ethconfig.BlocksFreezing, beaconCfg *clparams.B
 	}
 
 	c := &CaplinStateSnapshots{snapshotTypes: snapshotTypes, dir: dirs.SnapCaplin, tmpdir: dirs.Tmp, cfg: cfg, tableIndex: tableIndex, logger: logger, beaconCfg: beaconCfg}
-	c.InitFiles(len(names))
+	c.InitFiles(len(names), c.recalcVisibleFiles)
 	_ = c.update(nil)
 	return c
 }
@@ -447,9 +447,9 @@ func caplinStateVisibleSegments(dirtySegments *btree.BTreeG[*DirtySegment]) []*V
 	return newVisibleSegments
 }
 
-// buildVisible builds a fresh visible generation from the current dirty set. Must
+// recalcVisibleFiles builds a fresh visible generation from the current dirty set. Must
 // run under the dirty lock — Mutate guarantees this.
-func (s *CaplinStateSnapshots) buildVisible(dirtyFiles DirtyFiles) *VisibleFiles {
+func (s *CaplinStateSnapshots) recalcVisibleFiles(dirtyFiles DirtyFiles) *VisibleFiles {
 	segments := make([]VisibleSegments, len(dirtyFiles))
 	for idx, dirtySegments := range dirtyFiles {
 		segments[idx] = caplinStateVisibleSegments(dirtySegments)
@@ -460,7 +460,7 @@ func (s *CaplinStateSnapshots) buildVisible(dirtyFiles DirtyFiles) *VisibleFiles
 // update mutates `dirtyFiles` via mutate and republishes the visible set atomically
 // (single lock), then refreshes idxMax.
 func (s *CaplinStateSnapshots) update(mutate func(dirtyFiles DirtyFiles) ([]RetiredSegment, error)) error {
-	err := s.Mutate(mutate, s.buildVisible)
+	err := s.Mutate(mutate)
 	s.idxMax.Store(s.idxAvailability())
 	s.indicesReady.Store(true)
 	return err

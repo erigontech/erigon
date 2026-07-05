@@ -1145,7 +1145,7 @@ func TestRoSnapshots_ConcurrentViewsAndRepublish(t *testing.T) {
 	go func() {
 		defer wg.Done()
 		for j := 0; j < iters; j++ {
-			_ = s.update(s.alignMin, nil)
+			_ = s.update(nil)
 		}
 	}()
 	wg.Wait()
@@ -1154,7 +1154,7 @@ func TestRoSnapshots_ConcurrentViewsAndRepublish(t *testing.T) {
 	require.Equal(s.visible.Load(), s.oldestVisible, "chain must collapse once all readers drain")
 }
 
-// TestCloseWhatNotInList_DropsUnopenedSegment pins the unified FileSet behavior:
+// TestCloseWhatNotInList_DropsUnopenedSegment pins the unified Lifecycle behavior:
 // an unopened (nil-Decompressor) segment is always dropped, even when its name is
 // in the keep-list — a later reopen re-creates it, so keeping it would only leave
 // a duplicate.

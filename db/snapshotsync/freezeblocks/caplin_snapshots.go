@@ -57,7 +57,7 @@ var sidecarSSZSize = (&cltypes.BlobSidecar{}).EncodingSizeSSZ()
 type CaplinSnapshots struct {
 	Salt uint32
 
-	snapshotsync.FileSet // dirty segments + published visible generations, under one lock
+	snapshotsync.Lifecycle // dirty segments + published visible generations, under one lock
 
 	dir         string
 	tmpdir      string
@@ -79,7 +79,7 @@ func NewCaplinSnapshots(cfg ethconfig.BlocksFreezing, beaconCfg *clparams.Beacon
 		log.Debug("[dbg] NewCaplinSnapshots created with empty ChainName", "stack", dbg.Stack())
 	}
 	c := &CaplinSnapshots{dir: dirs.Snap, tmpdir: dirs.Tmp, cfg: cfg, logger: logger, beaconCfg: beaconCfg}
-	c.InitFiles(snaptype.MaxEnum)
+	c.InitFiles(snaptype.MaxEnum, c.recalcVisibleFiles)
 	_ = c.update(nil)
 	return c
 }
@@ -285,9 +285,9 @@ Loop:
 	return nil
 }
 
-// buildVisible builds a fresh visible generation from the current dirty set. Must
+// recalcVisibleFiles builds a fresh visible generation from the current dirty set. Must
 // run under the dirty lock — Mutate guarantees this.
-func (s *CaplinSnapshots) buildVisible(dirtyFiles snapshotsync.DirtyFiles) *snapshotsync.VisibleFiles {
+func (s *CaplinSnapshots) recalcVisibleFiles(dirtyFiles snapshotsync.DirtyFiles) *snapshotsync.VisibleFiles {
 	segments := make([]snapshotsync.VisibleSegments, snaptype.MaxEnum)
 	segments[snaptype.BeaconBlocks.Enum()] = snapshotsync.RecalcVisibleSegments(dirtyFiles[snaptype.BeaconBlocks.Enum()])
 	segments[snaptype.BlobSidecars.Enum()] = snapshotsync.RecalcVisibleSegments(dirtyFiles[snaptype.BlobSidecars.Enum()])
@@ -297,7 +297,7 @@ func (s *CaplinSnapshots) buildVisible(dirtyFiles snapshotsync.DirtyFiles) *snap
 // update mutates `dirtyFiles` via mutate and republishes the visible set atomically
 // (single lock), then refreshes idxMax.
 func (s *CaplinSnapshots) update(mutate func(dirtyFiles snapshotsync.DirtyFiles) ([]snapshotsync.RetiredSegment, error)) error {
-	err := s.Mutate(mutate, s.buildVisible)
+	err := s.Mutate(mutate)
 	s.idxMax.Store(s.idxAvailability())
 	return err
 }

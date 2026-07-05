@@ -265,7 +265,7 @@ func (m *Merger) Merge(
 }
 
 func (m *Merger) integrateMergedDirtyFiles(snapshots *RoSnapshots, in, out map[snaptype.Enum][]*DirtySegment) {
-	_ = snapshots.update(snapshots.alignMin, func(dirtyFiles DirtyFiles) ([]RetiredSegment, error) {
+	_ = snapshots.update(func(dirtyFiles DirtyFiles) ([]RetiredSegment, error) {
 		return m.integrateMergedDirtyFilesLocked(dirtyFiles, in, out), nil
 	})
 }
