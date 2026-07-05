@@ -100,7 +100,7 @@ func TestRetireOldHistoryFiles_RetiresFrozenFileEntirelyBelowCutoff(t *testing.T
 	// pin the current generation to assert deferred (not immediate) deletion
 	at := agg.BeginFilesRo()
 
-	n, err := agg.RetireOldHistoryFiles(t.Context(), HistoryRetireCutoffs{Default: kv.Step(2)})
+	n, err := agg.RetireOldHistoryFiles(t.Context(), HistoryRetireCutoffs{Default: 2 * stepSize})
 	require.NoError(t, err)
 	require.Positive(t, n)
 
@@ -161,7 +161,7 @@ func TestRetireOldHistoryFiles_RetiresCommitmentAtOwnCutoff(t *testing.T) {
 
 	_, err := agg.RetireOldHistoryFiles(t.Context(), HistoryRetireCutoffs{
 		Default:   0,
-		PerDomain: map[kv.Domain]kv.Step{kv.CommitmentDomain: kv.Step(2)},
+		PerDomain: map[kv.Domain]uint64{kv.CommitmentDomain: 2 * stepSize},
 	})
 	require.NoError(t, err)
 	require.Equal(t, 1, commitmentHist.dirtyFiles.Len(), "commitment {0,2} below its cutoff must be retired, {2,3} kept")
@@ -181,8 +181,8 @@ func TestRetireOldHistoryFiles_KeepsDomainWhenCutoffZero(t *testing.T) {
 	commitmentHist := agg.d[kv.CommitmentDomain].History
 
 	_, err := agg.RetireOldHistoryFiles(t.Context(), HistoryRetireCutoffs{
-		Default:   kv.Step(2),
-		PerDomain: map[kv.Domain]kv.Step{kv.CommitmentDomain: 0},
+		Default:   2 * stepSize,
+		PerDomain: map[kv.Domain]uint64{kv.CommitmentDomain: 0},
 	})
 	require.NoError(t, err)
 	require.Equal(t, 2, commitmentHist.dirtyFiles.Len(), "0 override must keep commitment even when Default covers it")
@@ -204,7 +204,7 @@ func TestRetireOldHistoryFiles_StandaloneII(t *testing.T) {
 	mustExist(t, recentIdx, true)
 
 	at := agg.BeginFilesRo()
-	n, err := agg.RetireOldHistoryFiles(t.Context(), HistoryRetireCutoffs{Default: kv.Step(2)})
+	n, err := agg.RetireOldHistoryFiles(t.Context(), HistoryRetireCutoffs{Default: 2 * stepSize})
 	require.NoError(t, err)
 	require.Positive(t, n)
 	at.Close()
@@ -242,7 +242,7 @@ func TestRetireOldHistoryFiles_ReclaimConcurrent(t *testing.T) {
 		}()
 	}
 
-	_, err := agg.RetireOldHistoryFiles(t.Context(), HistoryRetireCutoffs{Default: kv.Step(2)})
+	_, err := agg.RetireOldHistoryFiles(t.Context(), HistoryRetireCutoffs{Default: 2 * stepSize})
 	require.NoError(t, err)
 	close(stop)
 	wg.Wait()
