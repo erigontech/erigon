@@ -100,7 +100,7 @@ func TestRegenerateBoundaryStepFile_NonCommitment(t *testing.T) {
 
 	newPath := oldPath + ".regen"
 	err := RegenerateBoundaryStepFile(
-		ctx, kv.AccountsDomain, oldPath, "", newPath, lookup, nil,
+		ctx, kv.AccountsDomain, oldPath, "", newPath, lookup, nil, IdentityBranchExpander(),
 		103_848_485, seg.CompressNone, nil,
 		dir, log.New(),
 	)
@@ -170,7 +170,7 @@ func TestRegenerateBoundaryStepFile_CommitmentMergesBaselineWithBranches(t *test
 	anchor := []byte("anchor-at-lastTxNum")
 	newPath := straddlerPath + ".regen"
 	require.NoError(t, RegenerateBoundaryStepFile(
-		ctx, kv.CommitmentDomain, straddlerPath, baselinePath, newPath, nil, branches,
+		ctx, kv.CommitmentDomain, straddlerPath, baselinePath, newPath, nil, branches, IdentityBranchExpander(),
 		108_584_330, seg.CompressNone, anchor,
 		dir, log.New(),
 	))
@@ -199,7 +199,7 @@ func TestRegenerateBoundaryStepFile_CommitmentRequiresAnchor(t *testing.T) {
 
 	err := RegenerateBoundaryStepFile(
 		ctx, kv.CommitmentDomain, oldPath, oldPath, oldPath+".regen",
-		nil, nil, 0, seg.CompressNone, nil /* anchor */, dir, log.New(),
+		nil, nil, IdentityBranchExpander(), 0, seg.CompressNone, nil /* anchor */, dir, log.New(),
 	)
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "commitmentAnchor required")
@@ -214,7 +214,7 @@ func TestRegenerateBoundaryStepFile_CommitmentRequiresBaseline(t *testing.T) {
 
 	err := RegenerateBoundaryStepFile(
 		ctx, kv.CommitmentDomain, oldPath, "" /* baseline */, oldPath+".regen",
-		nil, nil, 0, seg.CompressNone, []byte("anchor"), dir, log.New(),
+		nil, nil, IdentityBranchExpander(), 0, seg.CompressNone, []byte("anchor"), dir, log.New(),
 	)
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "baselineKVPath required")
@@ -229,7 +229,7 @@ func TestRegenerateBoundaryStepFile_NonCommitmentRejectsAnchor(t *testing.T) {
 
 	err := RegenerateBoundaryStepFile(
 		ctx, kv.AccountsDomain, oldPath, "", oldPath+".regen",
-		func(kv.Domain, []byte, uint64) ([]byte, bool, error) { return nil, false, nil }, nil,
+		func(kv.Domain, []byte, uint64) ([]byte, bool, error) { return nil, false, nil }, nil, IdentityBranchExpander(),
 		0, seg.CompressNone, []byte("anchor"), dir, log.New(),
 	)
 	require.Error(t, err)
@@ -249,7 +249,7 @@ func TestRegenerateBoundaryStepFile_CommitmentWithoutKeyCommitmentStateErrors(t 
 
 	err := RegenerateBoundaryStepFile(
 		ctx, kv.CommitmentDomain, baselinePath, baselinePath, baselinePath+".regen",
-		nil, nil, 103_848_485, seg.CompressNone, []byte("anchor"), dir, log.New(),
+		nil, nil, IdentityBranchExpander(), 103_848_485, seg.CompressNone, []byte("anchor"), dir, log.New(),
 	)
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "no KeyCommitmentState")
@@ -311,7 +311,7 @@ func TestRegenerateBoundaryStepFile_ContentReflectsLastTxNum(t *testing.T) {
 
 	newPath := oldPath + ".regen"
 	require.NoError(t, RegenerateBoundaryStepFile(
-		ctx, kv.AccountsDomain, oldPath, "", newPath, lookup, nil,
+		ctx, kv.AccountsDomain, oldPath, "", newPath, lookup, nil, IdentityBranchExpander(),
 		anchor, seg.CompressNone, nil,
 		dir, log.New(),
 	))
@@ -342,7 +342,7 @@ func TestRegenerateBoundaryStepFile_TruncatedNameMatchesContent(t *testing.T) {
 	}
 
 	require.NoError(t, RegenerateBoundaryStepFile(
-		ctx, kv.AccountsDomain, oldPath, "", newKVPath, lookup, nil,
+		ctx, kv.AccountsDomain, oldPath, "", newKVPath, lookup, nil, IdentityBranchExpander(),
 		108_584_330, seg.CompressNone, nil,
 		dir, log.New(),
 	))
@@ -384,7 +384,7 @@ func TestRegenerateBoundaryStepFile_TombstonePreservedForKeysInOldFile(t *testin
 
 	newPath := oldPath + ".regen"
 	require.NoError(t, RegenerateBoundaryStepFile(
-		ctx, kv.StorageDomain, oldPath, "", newPath, lookup, nil,
+		ctx, kv.StorageDomain, oldPath, "", newPath, lookup, nil, IdentityBranchExpander(),
 		108_584_330, seg.CompressNone, nil,
 		dir, log.New(),
 	))
@@ -411,7 +411,7 @@ func TestRegenerateBoundaryStepFile_WritesToNewKVPath(t *testing.T) {
 	}
 
 	require.NoError(t, RegenerateBoundaryStepFile(
-		ctx, kv.AccountsDomain, oldPath, "", newKVPath, lookup, nil,
+		ctx, kv.AccountsDomain, oldPath, "", newKVPath, lookup, nil, IdentityBranchExpander(),
 		108_584_330, seg.CompressNone, nil,
 		dir, log.New(),
 	))

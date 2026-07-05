@@ -21,6 +21,8 @@ import (
 	"fmt"
 	"path/filepath"
 
+	dbstate "github.com/erigontech/erigon/db/state"
+
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/seg"
 	"github.com/erigontech/erigon/execution/commitment/commitmentdb"
@@ -128,9 +130,27 @@ func (p *Provider) regenerateBoundaryStepFiles(
 	// point. Its branches are at end-of-baseline-step, which — for
 	// keys unchanged in (baseline, lastTxNum] — equals at-lastTxNum.
 	maxStep := kv.Step((lastTxNum + 1) / stepSize)
-	baselineCommitmentPath, err := p.locateCommitmentBaselineFile(maxStep)
+	baselineCommitmentPath, baselineFromStep, baselineToStep, err := p.locateCommitmentBaselineFile(maxStep)
 	if err != nil {
 		return nil, fmt.Errorf("locate commitment baseline: %w", err)
+	}
+
+	// Commitment-branch expander: dereferences shortened key refs in
+	// baseline V's against the accounts+storage files at the baseline
+	// commitment file's [startTxNum, endTxNum). Opened once, reused
+	// per V, Closed at end. When p.Aggregator isn't a *dbstate.Aggregator
+	// (harness mock) we substitute an identity expander — mocks have
+	// no real files under them so ref-encoded V's can't exist.
+	var commitmentExpander CommitmentBranchExpander = IdentityBranchExpander()
+	if baselineCommitmentPath != "" {
+		if concrete, ok := p.Aggregator.(*dbstate.Aggregator); ok {
+			exp, expErr := dbstate.NewCommitmentBranchExpander(concrete, baselineFromStep*stepSize, baselineToStep*stepSize)
+			if expErr != nil {
+				return nil, fmt.Errorf("open commitment branch expander for [%d, %d): %w", baselineFromStep*stepSize, baselineToStep*stepSize, expErr)
+			}
+			commitmentExpander = exp
+			defer commitmentExpander.Close()
+		}
 	}
 
 	// Encode the commitment anchor once — every regen of the
@@ -232,12 +252,14 @@ func (p *Provider) regenerateBoundaryStepFiles(
 
 			baselinePath := ""
 			var branchProvider CommitmentBranchProvider
+			var expander CommitmentBranchExpander
 			if kvDomain == kv.CommitmentDomain {
 				baselinePath = baselineCommitmentPath
 				branchProvider = branches
+				expander = commitmentExpander
 			}
 			if err := RegenerateBoundaryStepFile(
-				ctx, kvDomain, oldPath, baselinePath, regenPath, lookup, branchProvider, lastTxNum,
+				ctx, kvDomain, oldPath, baselinePath, regenPath, lookup, branchProvider, expander, lastTxNum,
 				compression, anchor, p.snapTmpDir, p.logger,
 			); err != nil {
 				return nil, fmt.Errorf("regen %s boundary-step file %s: %w", sd, fileEntry.Name, err)
@@ -257,12 +279,39 @@ func (p *Provider) regenerateBoundaryStepFiles(
 	return &pendingRegenState{pairs: pairs, removals: removals}, nil
 }
 
+// commitmentInFileTerritory reports whether any local commitment .kv
+// covers step S = lastTxNum / stepSize. When true, the unwind target
+// lives inside a step already retired to a file: the state set at
+// lastTxNum must be materialised INTO that file (via merge-walked
+// regen) and MDBX for that step stays empty. When false, the target
+// lives in a step not yet retired — MDBX carries the state set and
+// no commitment file needs to be regenerated. The clean model treats
+// these as mutually exclusive, single-source physical placements of
+// the same logical state set.
+func (p *Provider) commitmentInFileTerritory(lastTxNum, stepSize uint64) bool {
+	if stepSize == 0 {
+		return false
+	}
+	step := lastTxNum / stepSize
+	for _, e := range p.Inventory.AllDomainFiles(snapshot.DomainCommitment) {
+		if e.Kind != snapshot.KindKV {
+			continue
+		}
+		if e.FromStep <= step && step < e.ToStep {
+			return true
+		}
+	}
+	return false
+}
+
 // locateCommitmentBaselineFile picks the commitment .kv whose ToStep
 // is the largest value ≤ maxStep — the same file
 // RecomputeAtTxNumWithoutSD selects via GetLatestFromFilesUpToStep.
-// Returns "" (no error) when no candidate exists (fresh chain with
+// Returns ("", 0, 0, nil) when no candidate exists (fresh chain with
 // no retired commitment files); callers must handle that case.
-func (p *Provider) locateCommitmentBaselineFile(maxStep kv.Step) (string, error) {
+// The FromStep / ToStep of the picked file are returned alongside the
+// path so callers can compute its txnum range for expander wiring.
+func (p *Provider) locateCommitmentBaselineFile(maxStep kv.Step) (string, uint64, uint64, error) {
 	var best *snapshot.FileEntry
 	for _, e := range p.Inventory.AllDomainFiles(snapshot.DomainCommitment) {
 		if e.Kind != snapshot.KindKV {
@@ -276,9 +325,9 @@ func (p *Provider) locateCommitmentBaselineFile(maxStep kv.Step) (string, error)
 		}
 	}
 	if best == nil {
-		return "", nil
+		return "", 0, 0, nil
 	}
-	return snapshot.ResolveExistingPath(p.snapDir, best.Name), nil
+	return snapshot.ResolveExistingPath(p.snapDir, best.Name), best.FromStep, best.ToStep, nil
 }
 
 // branchesAsProvider adapts the recompute's sorted []branchPair to
