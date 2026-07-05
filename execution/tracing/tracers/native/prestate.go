@@ -58,23 +58,11 @@ type account struct {
 }
 
 func (a *account) exists() bool {
-	if a.Nonce > 0 || a.CodeHash != nil || (a.Balance != nil && a.Balance.Sign() != 0) {
-		return true
-	}
-	return hasNonZeroStorage(a.Storage)
+	return a.Nonce > 0 || a.CodeHash != nil || len(a.Storage) > 0 || (a.Balance != nil && a.Balance.Sign() != 0)
 }
 
 func isZeroHash(h common.Hash) bool {
 	return h == (common.Hash{})
-}
-
-func hasNonZeroStorage(storage map[common.Hash]common.Hash) bool {
-	for _, v := range storage {
-		if !isZeroHash(v) {
-			return true
-		}
-	}
-	return false
 }
 
 type accountMarshaling struct {

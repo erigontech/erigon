@@ -83,53 +83,6 @@ func TestPrestateTracerDiffModeDeletedAccount(t *testing.T) {
 	require.Equal(t, common.Hash{}, *post.CodeHash, "deleted account must have zero codeHash")
 }
 
-// TestPrestateTracerOnTxEndStorageFiltering verifies the Geth-compatible
-// behavior that zero-valued storage slots are indistinguishable from
-// never-written slots: an account is excluded from the prestate output
-// (when IncludeEmpty is false, the default) unless it has at least one
-// non-zero slot.
-func TestPrestateTracerOnTxEndStorageFiltering(t *testing.T) {
-	addr := accounts.InternAddress(common.HexToAddress("0x2c2cacb9c409924cc307889b2529c1979d7fc26a"))
-
-	tests := []struct {
-		name    string
-		storage map[common.Hash]common.Hash
-		keep    bool
-	}{
-		{
-			name: "all zero storage excluded",
-			storage: map[common.Hash]common.Hash{
-				common.HexToHash("0x0c"): {},
-				common.HexToHash("0x05cec18fbf12f8c1b7904ed9136f4c58cd3291539370f020cebefb602c19e3a9"): {},
-			},
-			keep: false,
-		},
-		{
-			name: "non-zero storage kept",
-			storage: map[common.Hash]common.Hash{
-				common.HexToHash("0x0c"): common.HexToHash("0x01"),
-			},
-			keep: true,
-		},
-	}
-
-	for _, tc := range tests {
-		t.Run(tc.name, func(t *testing.T) {
-			tr := newTestPrestateTracer(prestateTracerConfig{})
-
-			tr.pre[addr] = &account{
-				Balance: big.NewInt(0),
-				Storage: tc.storage,
-			}
-
-			tr.OnTxEnd(nil, nil)
-
-			_, ok := tr.pre[addr]
-			require.Equal(t, tc.keep, ok)
-		})
-	}
-}
-
 // TestPrestateTracerDiffModeCodelessUnchanged verifies that a codeless account
 // with no state changes does NOT appear in the post state (no false positive).
 func TestPrestateTracerDiffModeCodelessUnchanged(t *testing.T) {
