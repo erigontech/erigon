@@ -42,6 +42,9 @@ func NewExecutionRequests(cfg *clparams.BeaconChainConfig) *ExecutionRequests {
 }
 
 func NewExecutionRequestsWithVersion(cfg *clparams.BeaconChainConfig, version clparams.StateVersion) *ExecutionRequests {
+	if cfg == nil {
+		panic("execution requests beacon config is nil")
+	}
 	e := &ExecutionRequests{cfg: cfg, version: version}
 	e.ensureLists()
 	return e
@@ -56,7 +59,7 @@ func (e *ExecutionRequests) effectiveVersion() clparams.StateVersion {
 
 func (e *ExecutionRequests) ensureLists() {
 	if e.cfg == nil {
-		e.cfg = &clparams.MainnetBeaconConfig
+		panic("execution requests beacon config is nil")
 	}
 	if e.Deposits == nil {
 		e.Deposits = solid.NewStaticListSSZ[*solid.DepositRequest](int(e.cfg.MaxDepositRequestsPerPayload), solid.SizeDepositRequest)

@@ -371,6 +371,7 @@ func ApplyDepositForBuilder(s abstract.BeaconState, pubkey common.Bytes48, withd
 		// New builder: verify deposit signature (proof of possession)
 		valid, err := IsValidDepositSignature(s.BeaconConfig(), pubkey, withdrawalCredentials, amount, signature)
 		if err != nil {
+			log.Debug("invalid builder deposit signature", "err", err)
 			return nil
 		}
 		if valid {

@@ -99,6 +99,30 @@ func TestPostPayloadAttestationsAcceptsSSZContentTypeParameters(t *testing.T) {
 	require.Equal(t, http.StatusOK, recorder.Code, recorder.Body.String())
 }
 
+func TestPostPayloadAttestationsRejectsMalformedContentType(t *testing.T) {
+	_, _, _, _, _, handler, _, _, _, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), true)
+
+	request := httptest.NewRequest(http.MethodPost, "/eth/v1/beacon/pool/payload_attestations", strings.NewReader(`[]`))
+	request.Header.Set("Content-Type", "application/octet-stream; bad")
+	recorder := httptest.NewRecorder()
+
+	handler.PostEthV1BeaconPoolPayloadAttestations(recorder, request)
+
+	require.Equal(t, http.StatusUnsupportedMediaType, recorder.Code, recorder.Body.String())
+}
+
+func TestPostPayloadAttestationsRejectsUnsupportedContentType(t *testing.T) {
+	_, _, _, _, _, handler, _, _, _, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), true)
+
+	request := httptest.NewRequest(http.MethodPost, "/eth/v1/beacon/pool/payload_attestations", strings.NewReader(`[]`))
+	request.Header.Set("Content-Type", "text/plain")
+	recorder := httptest.NewRecorder()
+
+	handler.PostEthV1BeaconPoolPayloadAttestations(recorder, request)
+
+	require.Equal(t, http.StatusUnsupportedMediaType, recorder.Code, recorder.Body.String())
+}
+
 func TestPostExecutionPayloadEnvelopeReturnsForkchoiceError(t *testing.T) {
 	_, _, _, _, _, handler, _, _, fcu, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), true)
 	fcu.OnExecutionPayloadErr = errors.New("invalid execution payload")
@@ -272,11 +296,37 @@ func TestAggregatePayloadAttestationMessagesSkipsMalformedSignatureGroup(t *test
 	require.Equal(t, []int{1}, attestations.Get(0).AggregationBits.GetOnIndices())
 }
 
+func TestAggregatePayloadAttestationMessagesSkipsUnavailablePTC(t *testing.T) {
+	cfg := clparams.MainnetBeaconConfig
+	cfg.PtcSize = 2
+	cfg.MaxPayloadAttestations = 2
+	ptc := fixedPTCProvider{
+		ptc: map[uint64][]uint64{12: {10, 11}},
+		err: map[uint64]error{13: errors.New("ptc unavailable")},
+	}
+	goodRoot := common.HexToHash("0x1111")
+	skipped := newTestPayloadAttestationMessage(t, 10, common.HexToHash("0x2222"))
+	skipped.Data.Slot = 13
+
+	attestations, err := aggregatePayloadAttestationMessages(&cfg, ptc, []*cltypes.PayloadAttestationMessage{
+		skipped,
+		newTestPayloadAttestationMessage(t, 10, goodRoot),
+	})
+
+	require.NoError(t, err)
+	require.Equal(t, 1, attestations.Len())
+	require.Equal(t, goodRoot, attestations.Get(0).Data.BeaconBlockRoot)
+}
+
 type fixedPTCProvider struct {
 	ptc map[uint64][]uint64
+	err map[uint64]error
 }
 
 func (p fixedPTCProvider) GetPTC(slot uint64) ([]uint64, error) {
+	if err := p.err[slot]; err != nil {
+		return nil, err
+	}
 	return p.ptc[slot], nil
 }
 

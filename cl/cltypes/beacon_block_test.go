@@ -365,6 +365,15 @@ func TestExecutionRequestsZeroValueIsPreGloas(t *testing.T) {
 	require.Equal(t, constructedRoot, zeroRoot)
 }
 
+func TestExecutionRequestsNilConfigPanics(t *testing.T) {
+	require.Panics(t, func() {
+		_ = NewExecutionRequests(nil)
+	})
+	require.Panics(t, func() {
+		_, _ = (&ExecutionRequests{}).HashSSZ()
+	})
+}
+
 func TestExecutionRequestsCloneCopiesLists(t *testing.T) {
 	cfg := clparams.MainnetBeaconConfig
 	requests := NewExecutionRequestsWithVersion(&cfg, clparams.GloasVersion)

@@ -53,6 +53,21 @@ func maxPayloadAttestationMessagesSSZSize(cfg *clparams.BeaconChainConfig) int64
 	return int64(cfg.PtcSize) * int64(msgSize)
 }
 
+func requestContentType(r *http.Request) (string, error) {
+	contentTypeHeader := r.Header.Get("Content-Type")
+	if contentTypeHeader == "" {
+		return "application/json", nil
+	}
+	contentType, _, err := mime.ParseMediaType(contentTypeHeader)
+	if err != nil {
+		return "", fmt.Errorf("unsupported content type: %s", contentTypeHeader)
+	}
+	if contentType == "" {
+		return "application/json", nil
+	}
+	return contentType, nil
+}
+
 // ---- PTC Duties ----
 
 // ptcDutyResponse represents a single PTC duty assignment.
@@ -247,11 +262,15 @@ func (a *ApiHandler) GetEthV1BeaconPoolPayloadAttestations(w http.ResponseWriter
 	}
 
 	if err := a.syncedData.ViewHeadState(func(s *state.CachingBeaconState) error {
-		var err error
-		results, err = aggregatePayloadAttestationMessages(a.beaconChainCfg, s, messages)
+		aggregated, err := aggregatePayloadAttestationMessages(a.beaconChainCfg, s, messages)
+		if err != nil {
+			return err
+		}
+		results = aggregated
 		return err
 	}); err != nil {
-		return nil, err
+		a.logger.Debug("[Beacon REST] failed to aggregate payload attestations", "err", err)
+		return newBeaconResponse(results).WithVersion(clparams.GloasVersion), nil
 	}
 
 	return newBeaconResponse(results).WithVersion(clparams.GloasVersion), nil
@@ -288,10 +307,14 @@ func aggregatePayloadAttestationMessages(
 		if !ok {
 			ptc, err := ptcProvider.GetPTC(msg.Data.Slot)
 			if err != nil {
-				return nil, err
+				ptcBySlot[msg.Data.Slot] = nil
+				continue
 			}
 			validatorToPTCPositions = payloadAttestationPTCPositions(ptc)
 			ptcBySlot[msg.Data.Slot] = validatorToPTCPositions
+		}
+		if validatorToPTCPositions == nil {
+			continue
 		}
 		ptcPositions, ok := validatorToPTCPositions[msg.ValidatorIndex]
 		if !ok {
@@ -395,9 +418,10 @@ func payloadAttestationPTCPositions(ptc []uint64) map[uint64][]int {
 func (a *ApiHandler) PostEthV1BeaconPoolPayloadAttestations(w http.ResponseWriter, r *http.Request) {
 	var req []*cltypes.PayloadAttestationMessage
 
-	contentType, _, err := mime.ParseMediaType(r.Header.Get("Content-Type"))
-	if err != nil || contentType == "" {
-		contentType = "application/json"
+	contentType, err := requestContentType(r)
+	if err != nil {
+		beaconhttp.NewEndpointError(http.StatusUnsupportedMediaType, err).WriteTo(w)
+		return
 	}
 
 	switch contentType {
@@ -428,12 +452,15 @@ func (a *ApiHandler) PostEthV1BeaconPoolPayloadAttestations(w http.ResponseWrite
 			}
 			req = append(req, msg)
 		}
-	default:
-		// application/json or any other content type: use JSON decoding
+	case "application/json":
 		if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, maxEpbsJSONSize)).Decode(&req); err != nil {
 			beaconhttp.NewEndpointError(http.StatusBadRequest, err).WriteTo(w)
 			return
 		}
+	default:
+		beaconhttp.NewEndpointError(http.StatusUnsupportedMediaType,
+			fmt.Errorf("unsupported content type: %s", r.Header.Get("Content-Type"))).WriteTo(w)
+		return
 	}
 
 	failures := []poolingFailure{}
@@ -550,9 +577,10 @@ func (a *ApiHandler) PostEthV1ValidatorProposerPreferences(w http.ResponseWriter
 }
 
 func decodeProposerPreferencesRequest(w http.ResponseWriter, r *http.Request) ([]*cltypes.SignedProposerPreferences, bool) {
-	contentType, _, err := mime.ParseMediaType(r.Header.Get("Content-Type"))
-	if err != nil || contentType == "" {
-		contentType = "application/json"
+	contentType, err := requestContentType(r)
+	if err != nil {
+		beaconhttp.NewEndpointError(http.StatusUnsupportedMediaType, err).WriteTo(w)
+		return nil, false
 	}
 	msgSize := (&cltypes.SignedProposerPreferences{Message: new(cltypes.ProposerPreferences)}).EncodingSizeSSZ()
 	maxBodySize := int64(maxProposerPreferencesRequestItems * msgSize * 4)
@@ -580,7 +608,7 @@ func decodeProposerPreferencesRequest(w http.ResponseWriter, r *http.Request) ([
 			reqs = append(reqs, req)
 		}
 		return reqs, true
-	default:
+	case "application/json":
 		body, err := io.ReadAll(http.MaxBytesReader(w, r.Body, maxBodySize))
 		if err != nil {
 			beaconhttp.NewEndpointError(http.StatusBadRequest, err).WriteTo(w)
@@ -596,6 +624,10 @@ func decodeProposerPreferencesRequest(w http.ResponseWriter, r *http.Request) ([
 			return nil, false
 		}
 		return []*cltypes.SignedProposerPreferences{req}, true
+	default:
+		beaconhttp.NewEndpointError(http.StatusUnsupportedMediaType,
+			fmt.Errorf("unsupported content type: %s", r.Header.Get("Content-Type"))).WriteTo(w)
+		return nil, false
 	}
 }
 
@@ -695,18 +727,10 @@ func (a *ApiHandler) PostEthV1BeaconExecutionPayloadEnvelope(w http.ResponseWrit
 		Message: cltypes.NewExecutionPayloadEnvelope(a.beaconChainCfg),
 	}
 
-	contentTypeHeader := r.Header.Get("Content-Type")
-	contentType := ""
-	if contentTypeHeader == "" {
-		contentType = "application/json"
-	} else {
-		var err error
-		contentType, _, err = mime.ParseMediaType(contentTypeHeader)
-		if err != nil {
-			beaconhttp.NewEndpointError(http.StatusUnsupportedMediaType,
-				fmt.Errorf("unsupported content type: %s", contentTypeHeader)).WriteTo(w)
-			return
-		}
+	contentType, err := requestContentType(r)
+	if err != nil {
+		beaconhttp.NewEndpointError(http.StatusUnsupportedMediaType, err).WriteTo(w)
+		return
 	}
 	switch contentType {
 	case "application/json":
@@ -769,18 +793,10 @@ func (a *ApiHandler) PostEthV1BeaconExecutionPayloadEnvelope(w http.ResponseWrit
 // [New in Gloas:EIP7732]
 func (a *ApiHandler) PostEthV1BeaconExecutionPayloadBid(w http.ResponseWriter, r *http.Request) {
 	req := new(cltypes.SignedExecutionPayloadBid)
-	contentTypeHeader := r.Header.Get("Content-Type")
-	contentType := ""
-	if contentTypeHeader == "" {
-		contentType = "application/json"
-	} else {
-		var err error
-		contentType, _, err = mime.ParseMediaType(contentTypeHeader)
-		if err != nil {
-			beaconhttp.NewEndpointError(http.StatusUnsupportedMediaType,
-				fmt.Errorf("unsupported content type: %s", contentTypeHeader)).WriteTo(w)
-			return
-		}
+	contentType, err := requestContentType(r)
+	if err != nil {
+		beaconhttp.NewEndpointError(http.StatusUnsupportedMediaType, err).WriteTo(w)
+		return
 	}
 	switch contentType {
 	case "application/json":

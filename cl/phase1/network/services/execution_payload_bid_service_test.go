@@ -48,16 +48,19 @@ func setupExecutionPayloadBidService(t *testing.T, ctrl *gomock.Controller) (
 
 	seenCache, err := lru.New[seenBidKey, struct{}]("seen_bids_test", seenBidCacheSize)
 	require.NoError(t, err)
+	validationStateCache, err := lru.New[bidValidationStateKey, *bidValidationStateEntry]("bid_validation_states_test", bidValidationStateCacheSize)
+	require.NoError(t, err)
 
 	service := &executionPayloadBidService{
-		syncedDataManager: mockSyncedData,
-		forkchoiceStore:   fcMock,
-		ethClock:          ethClockMock,
-		beaconCfg:         &beaconCfg,
-		epbsPool:          epbsPool,
-		emitters:          beaconevents.NewEventEmitter(),
-		seenCache:         seenCache,
-		pendingCond:       sync.NewCond(&sync.Mutex{}),
+		syncedDataManager:    mockSyncedData,
+		forkchoiceStore:      fcMock,
+		ethClock:             ethClockMock,
+		beaconCfg:            &beaconCfg,
+		epbsPool:             epbsPool,
+		emitters:             beaconevents.NewEventEmitter(),
+		seenCache:            seenCache,
+		validationStateCache: validationStateCache,
+		pendingCond:          sync.NewCond(&sync.Mutex{}),
 	}
 
 	return service, mockSyncedData, ethClockMock, fcMock, epbsPool
@@ -373,6 +376,22 @@ func TestExecutionPayloadBidServiceUsesDependentRootFromForkchoiceStore(t *testi
 	require.True(t, found)
 }
 
+func TestExecutionPayloadBidServiceRejectsEarlyEpochDependentRootLookup(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	defer ctrl.Finish()
+
+	service, _, ethClockMock, fcMock, _ := setupExecutionPayloadBidService(t, ctrl)
+	msg := newTestSignedExecutionPayloadBid(1, 1, 1000)
+	fcMock.Headers[msg.Message.ParentBlockRoot] = &cltypes.BeaconBlockHeader{}
+
+	ethClockMock.EXPECT().GetCurrentSlot().Return(uint64(1))
+
+	err := service.ProcessMessage(context.Background(), nil, msg)
+	require.Error(t, err)
+	require.True(t, errors.Is(err, ErrIgnore))
+	require.Contains(t, err.Error(), "cannot compute proposer dependent root")
+}
+
 func TestExecutionPayloadBidServiceGasLimitIncompatible(t *testing.T) {
 	ctrl := gomock.NewController(t)
 	defer ctrl.Finish()
@@ -632,7 +651,7 @@ func TestExecutionPayloadBidServicePendingQueueCap(t *testing.T) {
 	require.False(t, exists)
 }
 
-func TestExecutionPayloadBidServicePendingQueueAllowsDistinctBidsForSameBuilderSlot(t *testing.T) {
+func TestExecutionPayloadBidServicePendingQueueDedupsSameBuilderSlot(t *testing.T) {
 	ctrl := gomock.NewController(t)
 	defer ctrl.Finish()
 
@@ -645,11 +664,9 @@ func TestExecutionPayloadBidServicePendingQueueAllowsDistinctBidsForSameBuilderS
 	service.queuePendingBid(first)
 	service.queuePendingBid(second)
 
-	require.Equal(t, int32(2), service.pendingCount.Load())
+	require.Equal(t, int32(1), service.pendingCount.Load())
 	_, firstExists := service.pendingBids.Load(pendingBidKeyFor(first))
-	_, secondExists := service.pendingBids.Load(pendingBidKeyFor(second))
 	require.True(t, firstExists)
-	require.True(t, secondExists)
 }
 
 func TestExecutionPayloadBidServicePendingQueueCapConcurrent(t *testing.T) {

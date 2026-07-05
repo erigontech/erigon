@@ -49,12 +49,8 @@ type seenBidKey struct {
 
 // pendingBidKey tracks bids waiting for proposer preferences.
 type pendingBidKey struct {
-	builderIndex    uint64
-	slot            uint64
-	parentBlockHash common.Hash
-	parentBlockRoot common.Hash
-	blockHash       common.Hash
-	signature       common.Bytes96
+	builderIndex uint64
+	slot         uint64
 }
 
 // pendingBidJob represents a pending bid waiting for proposer preferences to arrive.
@@ -63,16 +59,27 @@ type pendingBidJob struct {
 	creationTime time.Time
 }
 
+type bidValidationStateKey struct {
+	parentBlockRoot common.Hash
+	slot            uint64
+}
+
+type bidValidationStateEntry struct {
+	mu    sync.Mutex
+	state *state.CachingBeaconState
+}
+
 var errBidDependencyUnavailable = fmt.Errorf("%w: bid dependency unavailable", ErrIgnore)
 
 const (
 	// seenBidCacheSize: multiple builders can bid per slot.
 	// With clock disparity we may see bids for ~2 slots.
 	// 256 builders * 2 slots = 512 provides safety margin.
-	seenBidCacheSize        = 512
-	pendingBidExpiry        = 12 * time.Second // 1 slot
-	pendingBidCheckInterval = 100 * time.Millisecond
-	maxPendingBids          = 1024
+	seenBidCacheSize            = 512
+	pendingBidExpiry            = 12 * time.Second // 1 slot
+	pendingBidCheckInterval     = 100 * time.Millisecond
+	maxPendingBids              = 1024
+	bidValidationStateCacheSize = 4
 )
 
 type executionPayloadBidService struct {
@@ -83,7 +90,9 @@ type executionPayloadBidService struct {
 	epbsPool          *pool.EpbsPool
 	emitters          *beaconevents.EventEmitter
 
-	seenCache *lru.Cache[seenBidKey, struct{}]
+	seenCache            *lru.Cache[seenBidKey, struct{}]
+	validationStateMu    sync.Mutex
+	validationStateCache *lru.Cache[bidValidationStateKey, *bidValidationStateEntry]
 
 	// Pending bids waiting for proposer preferences
 	pendingBids  sync.Map // pendingBidKey -> *pendingBidJob
@@ -106,15 +115,20 @@ func NewExecutionPayloadBidService(
 	if err != nil {
 		panic(err)
 	}
+	validationStateCache, err := lru.New[bidValidationStateKey, *bidValidationStateEntry]("execution_payload_bid_validation_states", bidValidationStateCacheSize)
+	if err != nil {
+		panic(err)
+	}
 	s := &executionPayloadBidService{
-		syncedDataManager: syncedDataManager,
-		forkchoiceStore:   forkchoiceStore,
-		ethClock:          ethClock,
-		beaconCfg:         beaconCfg,
-		epbsPool:          epbsPool,
-		emitters:          emitters,
-		seenCache:         seenCache,
-		pendingCond:       sync.NewCond(&sync.Mutex{}),
+		syncedDataManager:    syncedDataManager,
+		forkchoiceStore:      forkchoiceStore,
+		ethClock:             ethClock,
+		beaconCfg:            beaconCfg,
+		epbsPool:             epbsPool,
+		emitters:             emitters,
+		seenCache:            seenCache,
+		validationStateCache: validationStateCache,
+		pendingCond:          sync.NewCond(&sync.Mutex{}),
 	}
 	go s.loop(ctx)
 	return s
@@ -201,20 +215,23 @@ func (s *executionPayloadBidService) matchingProposerPreferences(msg *cltypes.Si
 		return nil, false, fmt.Errorf("%w: parent_block_root %v not available", errBidDependencyUnavailable, bid.ParentBlockRoot)
 	}
 	proposalEpoch := state.GetEpochAtSlot(s.beaconCfg, bid.Slot)
-	dependentRoot := s.shufflingDependentRoot(bid.ParentBlockRoot, proposalEpoch)
-	if proposalEpoch > s.beaconCfg.MinSeedLookahead && dependentRoot == (common.Hash{}) {
+	dependentRoot, err := s.shufflingDependentRoot(bid.ParentBlockRoot, proposalEpoch)
+	if err != nil {
+		return nil, false, err
+	}
+	if dependentRoot == (common.Hash{}) {
 		return nil, false, fmt.Errorf("%w: failed to compute proposer dependent root", ErrIgnore)
 	}
 	preferences, ok := s.epbsPool.GetPreference(bid.Slot, dependentRoot)
 	return preferences, ok, nil
 }
 
-func (s *executionPayloadBidService) shufflingDependentRoot(root common.Hash, epoch uint64) common.Hash {
+func (s *executionPayloadBidService) shufflingDependentRoot(root common.Hash, epoch uint64) (common.Hash, error) {
 	if epoch <= s.beaconCfg.MinSeedLookahead {
-		return common.Hash{}
+		return common.Hash{}, fmt.Errorf("%w: cannot compute proposer dependent root for epoch %d before or at min seed lookahead %d", ErrIgnore, epoch, s.beaconCfg.MinSeedLookahead)
 	}
 	dependentSlot := (epoch-s.beaconCfg.MinSeedLookahead)*s.beaconCfg.SlotsPerEpoch - 1
-	return s.forkchoiceStore.Ancestor(root, dependentSlot).Root
+	return s.forkchoiceStore.Ancestor(root, dependentSlot).Root, nil
 }
 
 func (s *executionPayloadBidService) validateBidStateless(bid *cltypes.ExecutionPayloadBid) error {
@@ -259,15 +276,30 @@ func (s *executionPayloadBidService) validateAndStoreBid(
 	if err != nil || parentState == nil {
 		return fmt.Errorf("%w: state for parent_block_root %v not available", errBidDependencyUnavailable, bid.ParentBlockRoot)
 	}
-	validationState, err := s.bidValidationState(parentState, slot)
+	validationStateEntry, err := s.bidValidationState(bid.ParentBlockRoot, parentState, slot)
 	if err != nil {
 		return fmt.Errorf("bid validation failed: %w", err)
 	}
+	validationStateEntry.mu.Lock()
+	validationState := validationStateEntry.state
 	if bid.PrevRandao != validationState.GetRandaoMixes(state.Epoch(validationState)) {
+		validationStateEntry.mu.Unlock()
 		return fmt.Errorf("bid prev_randao does not match parent state randao mix")
 	}
 
-	if err := s.validateBuilderBid(msg, validationState); err != nil {
+	builder, err := s.validateBuilderAvailability(bid, validationState)
+	if err != nil {
+		validationStateEntry.mu.Unlock()
+		return fmt.Errorf("bid validation failed: %w", err)
+	}
+	builderPubkey := builder.Pubkey
+	epoch := state.GetEpochAtSlot(s.beaconCfg, bid.Slot)
+	domain, err := validationState.GetDomain(s.beaconCfg.DomainBeaconBuilder, epoch)
+	validationStateEntry.mu.Unlock()
+	if err != nil {
+		return fmt.Errorf("bid validation failed: failed to get domain: %w", err)
+	}
+	if err := validateBuilderBidSignature(msg, domain, builderPubkey); err != nil {
 		return fmt.Errorf("bid validation failed: %w", err)
 	}
 
@@ -311,40 +343,58 @@ func (s *executionPayloadBidService) validateAndStoreBid(
 	return nil
 }
 
-func (s *executionPayloadBidService) bidValidationState(parentState *state.CachingBeaconState, bidSlot uint64) (*state.CachingBeaconState, error) {
+func (s *executionPayloadBidService) bidValidationState(parentBlockRoot common.Hash, parentState *state.CachingBeaconState, bidSlot uint64) (*bidValidationStateEntry, error) {
+	cacheKey := bidValidationStateKey{parentBlockRoot: parentBlockRoot, slot: bidSlot}
+	s.validationStateMu.Lock()
+	entry, ok := s.validationStateCache.Get(cacheKey)
+	if !ok {
+		entry = &bidValidationStateEntry{}
+		s.validationStateCache.Add(cacheKey, entry)
+	}
+	s.validationStateMu.Unlock()
+
+	entry.mu.Lock()
+	defer entry.mu.Unlock()
+	if entry.state != nil {
+		return entry, nil
+	}
+
 	if parentState.Slot() > bidSlot {
+		s.removeBidValidationState(cacheKey, entry)
 		return nil, fmt.Errorf("parent state slot %d is after bid slot %d", parentState.Slot(), bidSlot)
 	}
 	validationState, err := parentState.Copy()
 	if err != nil {
+		s.removeBidValidationState(cacheKey, entry)
 		return nil, err
 	}
 	if parentState.Slot() == bidSlot {
-		return validationState, nil
+		entry.state = validationState
+		return entry, nil
 	}
 	if err := transition.DefaultMachine.ProcessSlots(validationState, bidSlot); err != nil {
+		s.removeBidValidationState(cacheKey, entry)
 		return nil, err
 	}
-	return validationState, nil
+	entry.state = validationState
+	return entry, nil
 }
 
-func (s *executionPayloadBidService) validateBuilderBid(msg *cltypes.SignedExecutionPayloadBid, validationState *state.CachingBeaconState) error {
-	bid := msg.Message
-	builder, err := s.validateBuilderAvailability(bid, validationState)
-	if err != nil {
-		return err
+func (s *executionPayloadBidService) removeBidValidationState(cacheKey bidValidationStateKey, entry *bidValidationStateEntry) {
+	s.validationStateMu.Lock()
+	defer s.validationStateMu.Unlock()
+	current, ok := s.validationStateCache.Get(cacheKey)
+	if ok && current == entry {
+		s.validationStateCache.Remove(cacheKey)
 	}
+}
 
-	epoch := state.GetEpochAtSlot(s.beaconCfg, bid.Slot)
-	domain, err := validationState.GetDomain(s.beaconCfg.DomainBeaconBuilder, epoch)
-	if err != nil {
-		return fmt.Errorf("failed to get domain: %w", err)
-	}
-	signingRoot, err := computeSigningRoot(bid, domain)
+func validateBuilderBidSignature(msg *cltypes.SignedExecutionPayloadBid, domain []byte, builderPubkey common.Bytes48) error {
+	signingRoot, err := computeSigningRoot(msg.Message, domain)
 	if err != nil {
 		return fmt.Errorf("failed to compute signing root: %w", err)
 	}
-	valid, err := blsVerify(msg.Signature[:], signingRoot[:], builder.Pubkey[:])
+	valid, err := blsVerify(msg.Signature[:], signingRoot[:], builderPubkey[:])
 	if err != nil {
 		return fmt.Errorf("signature verification error: %w", err)
 	}
@@ -405,12 +455,8 @@ func (s *executionPayloadBidService) queuePendingBid(msg *cltypes.SignedExecutio
 
 func pendingBidKeyFor(msg *cltypes.SignedExecutionPayloadBid) pendingBidKey {
 	return pendingBidKey{
-		builderIndex:    msg.Message.BuilderIndex,
-		slot:            msg.Message.Slot,
-		parentBlockHash: msg.Message.ParentBlockHash,
-		parentBlockRoot: msg.Message.ParentBlockRoot,
-		blockHash:       msg.Message.BlockHash,
-		signature:       msg.Signature,
+		builderIndex: msg.Message.BuilderIndex,
+		slot:         msg.Message.Slot,
 	}
 }
 
