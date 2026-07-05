@@ -261,19 +261,44 @@ func (a *ApiHandler) GetEthV1BeaconPoolPayloadAttestations(w http.ResponseWriter
 		return newBeaconResponse(results).WithVersion(clparams.GloasVersion), nil
 	}
 
+	ptcProvider := payloadAttestationPTCMap{}
 	if err := a.syncedData.ViewHeadState(func(s *state.CachingBeaconState) error {
-		aggregated, err := aggregatePayloadAttestationMessages(a.beaconChainCfg, s, messages)
-		if err != nil {
-			return err
-		}
-		results = aggregated
-		return err
+		ptcProvider = snapshotPayloadAttestationPTCs(s, messages)
+		return nil
 	}); err != nil {
 		a.logger.Debug("[Beacon REST] failed to aggregate payload attestations", "err", err)
 		return newBeaconResponse(results).WithVersion(clparams.GloasVersion), nil
 	}
+	aggregated, err := aggregatePayloadAttestationMessages(a.beaconChainCfg, ptcProvider, messages)
+	if err != nil {
+		a.logger.Debug("[Beacon REST] failed to aggregate payload attestations", "err", err)
+		return newBeaconResponse(results).WithVersion(clparams.GloasVersion), nil
+	}
+	results = aggregated
 
 	return newBeaconResponse(results).WithVersion(clparams.GloasVersion), nil
+}
+
+func snapshotPayloadAttestationPTCs(
+	ptcProvider payloadAttestationPTCProvider,
+	messages []*cltypes.PayloadAttestationMessage,
+) payloadAttestationPTCMap {
+	slots := map[uint64]struct{}{}
+	for _, msg := range messages {
+		if msg == nil || msg.Data == nil {
+			continue
+		}
+		slots[msg.Data.Slot] = struct{}{}
+	}
+	out := make(payloadAttestationPTCMap, len(slots))
+	for slot := range slots {
+		ptc, err := ptcProvider.GetPTC(slot)
+		if err != nil {
+			continue
+		}
+		out[slot] = append([]uint64(nil), ptc...)
+	}
+	return out
 }
 
 func aggregatePayloadAttestationMessages(
@@ -401,6 +426,16 @@ func aggregatePayloadAttestationMessages(
 
 type payloadAttestationPTCProvider interface {
 	GetPTC(slot uint64) ([]uint64, error)
+}
+
+type payloadAttestationPTCMap map[uint64][]uint64
+
+func (m payloadAttestationPTCMap) GetPTC(slot uint64) ([]uint64, error) {
+	ptc, ok := m[slot]
+	if !ok {
+		return nil, fmt.Errorf("ptc unavailable for slot %d", slot)
+	}
+	return ptc, nil
 }
 
 func payloadAttestationPTCPositions(ptc []uint64) map[uint64][]int {

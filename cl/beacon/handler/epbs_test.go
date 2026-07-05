@@ -318,6 +318,30 @@ func TestAggregatePayloadAttestationMessagesSkipsUnavailablePTC(t *testing.T) {
 	require.Equal(t, goodRoot, attestations.Get(0).Data.BeaconBlockRoot)
 }
 
+func TestSnapshotPayloadAttestationPTCsCopiesMessageSlots(t *testing.T) {
+	source := []uint64{10, 11}
+	provider := fixedPTCProvider{
+		ptc: map[uint64][]uint64{
+			12: source,
+			13: {20, 21},
+		},
+	}
+	msg := newTestPayloadAttestationMessage(t, 10, common.Hash{})
+
+	snapshot := snapshotPayloadAttestationPTCs(provider, []*cltypes.PayloadAttestationMessage{
+		nil,
+		&cltypes.PayloadAttestationMessage{Data: nil},
+		msg,
+	})
+
+	source[0] = 99
+	ptc, err := snapshot.GetPTC(12)
+	require.NoError(t, err)
+	require.Equal(t, []uint64{10, 11}, ptc)
+	_, err = snapshot.GetPTC(13)
+	require.Error(t, err)
+}
+
 type fixedPTCProvider struct {
 	ptc map[uint64][]uint64
 	err map[uint64]error
