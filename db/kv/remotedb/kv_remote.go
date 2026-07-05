@@ -245,11 +245,14 @@ func (db *DB) UpdateNosync(ctx context.Context, f func(tx kv.RwTx) error) (err e
 
 func (tx *tx) NewMemBatch(ioMetrics any) kv.TemporalMemBatch { panic("not implemented") }
 
-func (tx *tx) AggTx() any                                      { panic("not implemented") }
-func (tx *tx) Debug() kv.TemporalDebugTx                       { return kv.TemporalDebugTx(tx) }
-func (tx *tx) FreezeInfo() kv.FreezeInfo                       { panic("not implemented") }
-func (tx *tx) AllForkableIds() (ids []kv.ForkableId)           { panic("not implemented") }
-func (tx *tx) StepsInFiles(entitySet ...kv.Domain) kv.Step     { panic("not implemented") }
+func (tx *tx) AggTx() any                                  { panic("not implemented") }
+func (tx *tx) Debug() kv.TemporalDebugTx                   { return kv.TemporalDebugTx(tx) }
+func (tx *tx) FreezeInfo() kv.FreezeInfo                   { panic("not implemented") }
+func (tx *tx) AllForkableIds() (ids []kv.ForkableId)       { panic("not implemented") }
+func (tx *tx) StepsInFiles(entitySet ...kv.Domain) kv.Step { panic("not implemented") }
+func (tx *tx) Retire(ctx context.Context, cutoffs kv.RetireCutoffs) (int, error) {
+	panic("not implemented")
+}
 func (tx *tx) DomainFiles(domain ...kv.Domain) kv.VisibleFiles { panic("not implemented") }
 func (tx *tx) DomainProgress(domain kv.Domain) uint64          { panic("not implemented") }
 func (tx *tx) GetLatestFromDB(domain kv.Domain, k []byte) (v []byte, step kv.Step, found bool, err error) {

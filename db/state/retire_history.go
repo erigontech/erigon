@@ -18,9 +18,6 @@ package state
 
 import (
 	"context"
-	"fmt"
-	"slices"
-	"strings"
 
 	"github.com/erigontech/erigon/db/kv"
 )
@@ -65,54 +62,10 @@ func (ht *HistoryRoTx) retireBeforeStep(cutoff kv.Step) (deleted []string, retir
 	return deleted, retired
 }
 
-// HistoryRetireCutoffs is the txNum below which frozen files are retired, per
-// domain (PerDomain, falling back to Default for other domains and standalone
-// indices); a 0 cutoff keeps the entity. The aggregator floors each txNum to its
-// file step internally (same as FilesItem.StepRange), so callers stay in txNum —
-// the block↔txNum boundary's unit — and never touch step sharding.
-type HistoryRetireCutoffs struct {
-	Default   uint64
-	PerDomain map[kv.Domain]uint64
-}
-
-func (c HistoryRetireCutoffs) forDomain(name kv.Domain) uint64 {
-	if txNum, ok := c.PerDomain[name]; ok {
-		return txNum
-	}
-	return c.Default
-}
-
-// IsNoop reports whether every cutoff is 0, so nothing would be retired.
-func (c HistoryRetireCutoffs) IsNoop() bool {
-	if c.Default != 0 {
-		return false
-	}
-	for _, txNum := range c.PerDomain {
-		if txNum != 0 {
-			return false
-		}
-	}
-	return true
-}
-
-func (c HistoryRetireCutoffs) String() string {
-	names := make([]kv.Domain, 0, len(c.PerDomain))
-	for name := range c.PerDomain {
-		names = append(names, name)
-	}
-	slices.Sort(names)
-
-	var sb strings.Builder
-	fmt.Fprintf(&sb, "default=%d", c.Default)
-	for _, name := range names {
-		fmt.Fprintf(&sb, " %s=%d", name, c.PerDomain[name])
-	}
-	return sb.String()
-}
-
-// RetireOldHistoryFiles retires History+InvertedIndex files entirely below their
-// cutoff; physical deletion is deferred until no reader pins the retired generation.
-func (a *Aggregator) RetireOldHistoryFiles(ctx context.Context, cutoffs HistoryRetireCutoffs) (retiredCount int, err error) {
+// Retire retires History+InvertedIndex files entirely below their
+// cutoff (a per-domain txNum, floored here to the file step so callers stay in
+// txNum); physical deletion is deferred until no reader pins the retired generation.
+func (a *Aggregator) Retire(ctx context.Context, cutoffs kv.RetireCutoffs) (retiredCount int, err error) {
 	if cutoffs.IsNoop() {
 		return 0, nil
 	}
@@ -128,7 +81,11 @@ func (a *Aggregator) RetireOldHistoryFiles(ctx context.Context, cutoffs HistoryR
 		if dt.d.Disable || dt.d.SnapshotsDisabled || dt.d.HistoryDisabled {
 			continue
 		}
-		cutoffStep := kv.Step(cutoffs.forDomain(dt.name) / dt.stepSize)
+		cutoffTxNum := cutoffs.Default
+		if txNum, ok := cutoffs.PerDomain[dt.name]; ok {
+			cutoffTxNum = txNum
+		}
+		cutoffStep := kv.Step(cutoffTxNum / dt.stepSize)
 		if cutoffStep == 0 {
 			continue
 		}

@@ -498,6 +498,9 @@ type TemporalDebugTx interface {
 	DomainProgress(domain Domain) (txNum uint64)
 	IIProgress(name InvertedIdx) (txNum uint64)
 	StepSize() uint64
+	// Retire retires frozen history files entirely below their
+	// per-domain cutoff (deferred deletion).
+	Retire(ctx context.Context, cutoffs RetireCutoffs) (retiredCount int, err error)
 	Dirs() datadir.Dirs
 	AllForkableIds() []ForkableId
 

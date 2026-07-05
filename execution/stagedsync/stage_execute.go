@@ -476,7 +476,7 @@ func UnwindExecutionStage(u *UnwindState, s *StageState, doms *execctx.SharedDom
 	return nil
 }
 
-func PruneExecutionStage(ctx context.Context, s *PruneState, tx kv.RwTx, cfg ExecuteBlockCfg, timeout time.Duration, logger log.Logger) (err error) {
+func PruneExecutionStage(ctx context.Context, s *PruneState, tx kv.TemporalRwTx, cfg ExecuteBlockCfg, timeout time.Duration, logger log.Logger) (err error) {
 	if dbg.NoPrune() {
 		return s.Done(tx)
 	}
@@ -584,24 +584,23 @@ func PruneExecutionStage(ctx context.Context, s *PruneState, tx kv.RwTx, cfg Exe
 		}
 	}
 
-	agg := cfg.db.(state.HasAgg).Agg().(*state.Aggregator)
-	mxExecStepsInDB.Set(rawdbhelpers.IdxStepsCountV3(tx, agg.StepSize()) * 100)
+	mxExecStepsInDB.Set(rawdbhelpers.IdxStepsCountV3(tx, tx.Debug().StepSize()) * 100)
 
-	cutoffs, cutoffOk, err := historyRetireCutoffs(ctx, tx, cfg.blockReader, cfg.prune, s.ForwardProgress)
+	cutoffs, err := historyRetireCutoffs(ctx, tx, cfg.blockReader, cfg.prune, s.ForwardProgress)
 	if err != nil {
 		return err
 	}
-	if cutoffOk {
+	if !cutoffs.IsNoop() {
 		if pruneTimeout := remainingPruneTimeout(); pruneTimeout > 0 {
 			logger.Debug(fmt.Sprintf("[%s] history file retirement", s.LogPrefix()), "cutoffs", cutoffs)
-			if _, err := agg.RetireOldHistoryFiles(ctx, cutoffs); err != nil {
+			if _, err := tx.Debug().Retire(ctx, cutoffs); err != nil {
 				return err
 			}
 		}
 	}
 
 	if pruneTimeout := remainingPruneTimeout(); pruneTimeout > 0 {
-		if _, err := tx.(kv.TemporalRwTx).PruneSmallBatches(ctx, pruneTimeout); err != nil {
+		if _, err := tx.PruneSmallBatches(ctx, pruneTimeout); err != nil {
 			return err
 		}
 	}
@@ -622,24 +621,23 @@ func PruneExecutionStage(ctx context.Context, s *PruneState, tx kv.RwTx, cfg Exe
 // historyRetireCutoffs maps the prune mode to per-domain retirement cutoffs, in
 // txNum — the aggregator floors each to its file step. CommitmentDomain uses its
 // own --prune.commitment-history.distance window.
-func historyRetireCutoffs(ctx context.Context, tx kv.Tx, blockReader services.FullBlockReader, pm prune.Mode, forwardProgress uint64) (cutoffs state.HistoryRetireCutoffs, ok bool, err error) {
+func historyRetireCutoffs(ctx context.Context, tx kv.Tx, blockReader services.FullBlockReader, pm prune.Mode, forwardProgress uint64) (cutoffs kv.RetireCutoffs, err error) {
 	historyTxNum, err := blockAmountRetireCutoffTxNum(ctx, tx, blockReader, pm.History, forwardProgress)
 	if err != nil {
-		return state.HistoryRetireCutoffs{}, false, err
+		return kv.RetireCutoffs{}, err
 	}
 	commitmentTxNum, err := blockAmountRetireCutoffTxNum(ctx, tx, blockReader, pm.CommitmentHistoryAmount(), forwardProgress)
 	if err != nil {
-		return state.HistoryRetireCutoffs{}, false, err
+		return kv.RetireCutoffs{}, err
 	}
 	rcacheTxNum := historyTxNum // TODO: in future PR add cli flag to manage rcache distance
-	cutoffs = state.HistoryRetireCutoffs{
+	return kv.RetireCutoffs{
 		Default: historyTxNum,
 		PerDomain: map[kv.Domain]uint64{
 			kv.CommitmentDomain: commitmentTxNum,
 			kv.RCacheDomain:     rcacheTxNum,
 		},
-	}
-	return cutoffs, !cutoffs.IsNoop(), nil
+	}, nil
 }
 
 // blockAmountRetireCutoffTxNum resolves a retention window to the txNum below
