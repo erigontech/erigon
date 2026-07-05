@@ -25,8 +25,8 @@ import (
 )
 
 // Instantiated with plain scalars (no file types) to keep the package honestly
-// biz-logic-free: visibleFile=int payload, dirtyFile=int retired.
-type testLifetime = Lifetime[int, int]
+// biz-logic-free: visibleFiles=int payload, dirtyFiles=int source, dirtyFile=int retired.
+type testLifetime = Lifetime[int, int, int]
 
 // newTestLifetime's stored recalc publishes *toPublish, so a test controls each
 // published value by setting it before UpdateDirtyFiles.
@@ -35,8 +35,9 @@ func newTestLifetime() (lt *testLifetime, reclaimed *[]int, toPublish *int) {
 	reclaimed = &[]int{}
 	toPublish = new(int)
 	lt.Init(
+		0,
 		func(r []int) { *reclaimed = append(*reclaimed, r...) },
-		func() *int { return toPublish },
+		func(int) *int { return toPublish },
 	)
 	return lt, reclaimed, toPublish
 }
@@ -108,10 +109,10 @@ func TestLifetime_SlowReadDirtyFilesRunsUnderLockWithoutPublishing(t *testing.T)
 // Exercises Acquire's load-then-validate retry loop against concurrent publishes
 // (run with -race).
 func TestLifetime_ConcurrentReadersAndPublish(t *testing.T) {
-	lt := &Lifetime[int, int]{}
+	lt := &Lifetime[int, int, int]{}
 	var reclaimedCount atomic.Int64
 	toPublish := new(int)
-	lt.Init(func(r []int) { reclaimedCount.Add(int64(len(r))) }, func() *int { return toPublish })
+	lt.Init(0, func(r []int) { reclaimedCount.Add(int64(len(r))) }, func(int) *int { return toPublish })
 
 	var wg sync.WaitGroup
 	stop := make(chan struct{})

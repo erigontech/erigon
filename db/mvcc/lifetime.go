@@ -21,9 +21,10 @@
 // reclamation); only the writer takes the lock, and only on rare background events.
 //
 // It is biz-logic-free: it never inspects the values it carries. Callers supply
-// the type parameters visibleFiles (the published payload) and dirtyFile (a
-// superseded version's retired payload, freed once no reader pins the version)
-// plus a closeAndPhysicalRemove callback.
+// the type parameters visibleFiles (the published payload), dirtyFiles (the source
+// state recalcVisibleFiles reads to build each payload) and dirtyFile (a superseded
+// version's retired payload, freed once no reader pins the version) plus a
+// closeAndPhysicalRemove callback.
 package mvcc
 
 import (
@@ -52,22 +53,25 @@ type Generation[visibleFiles, dirtyFile any] struct {
 // - Read the current version,
 // - Copy it and mutate the copy (so in-flight readers keep seeing a stable old snapshot),
 // - Update the pointer to publish the new copy atomically; free the old one later.
-type Lifetime[visibleFiles, dirtyFile any] struct {
+type Lifetime[visibleFiles, dirtyFiles, dirtyFile any] struct {
 	lock                   sync.Mutex
 	visible                atomic.Pointer[Generation[visibleFiles, dirtyFile]]
 	oldest                 *Generation[visibleFiles, dirtyFile] // chain head; mutated only under lock
+	dirty                  dirtyFiles                           // source state recalcVisibleFiles reads to build each payload
 	closeAndPhysicalRemove func([]dirtyFile)
-	recalcVisibleFiles     func() *visibleFiles // builds the payload each publish installs
+	recalcVisibleFiles     func(dirtyFiles) *visibleFiles // builds the payload each publish installs
 }
 
-// Init installs the callbacks — closeAndPhysicalRemove reclaims a superseded
+// Init stores dirty (the source state passed to recalcVisibleFiles on each publish)
+// and installs the callbacks — closeAndPhysicalRemove reclaims a superseded
 // generation's retired files once no reader pins it, recalcVisibleFiles builds
 // the payload each publish installs — and publishes an initial zero-value
 // Generation. Both callbacks are required. Call once before any Acquire.
-func (lt *Lifetime[visibleFiles, dirtyFile]) Init(closeAndPhysicalRemove func([]dirtyFile), recalcVisibleFiles func() *visibleFiles) {
+func (lt *Lifetime[visibleFiles, dirtyFiles, dirtyFile]) Init(dirty dirtyFiles, closeAndPhysicalRemove func([]dirtyFile), recalcVisibleFiles func(dirtyFiles) *visibleFiles) {
 	if closeAndPhysicalRemove == nil || recalcVisibleFiles == nil {
 		panic("mvcc.Lifetime.Init: closeAndPhysicalRemove and recalcVisibleFiles must be non-nil")
 	}
+	lt.dirty = dirty
 	lt.closeAndPhysicalRemove = closeAndPhysicalRemove
 	lt.recalcVisibleFiles = recalcVisibleFiles
 	v := &Generation[visibleFiles, dirtyFile]{}
@@ -77,13 +81,13 @@ func (lt *Lifetime[visibleFiles, dirtyFile]) Init(closeAndPhysicalRemove func([]
 
 // Visible returns the current published payload, unpinned: safe only for
 // lock-free reads of immutable fields, never retain it across a publish.
-func (lt *Lifetime[visibleFiles, dirtyFile]) Visible() *visibleFiles {
+func (lt *Lifetime[visibleFiles, dirtyFiles, dirtyFile]) Visible() *visibleFiles {
 	return &lt.visible.Load().Value
 }
 
 // Acquire pins the current Generation for a reader. Hot path: lock-free (atomic
 // load + refcnt bump, re-validated against a concurrent publish).
-func (lt *Lifetime[visibleFiles, dirtyFile]) Acquire() *Generation[visibleFiles, dirtyFile] {
+func (lt *Lifetime[visibleFiles, dirtyFiles, dirtyFile]) Acquire() *Generation[visibleFiles, dirtyFile] {
 	// Load+increment is not atomic: between them the last reader of v may release
 	// it (refcnt to 0) and reclaim it. So re-load and retry if a publish swapped visible.
 	// Hazard-pointer concept: https://github.com/facebook/folly/blob/main/folly/synchronization/Hazptr.h
@@ -99,7 +103,7 @@ func (lt *Lifetime[visibleFiles, dirtyFile]) Acquire() *Generation[visibleFiles,
 
 // Release drops a reader's pin. Hot path: lock-free unless this is the last
 // reader of an already-superseded Generation, which then reclaims under the lock.
-func (lt *Lifetime[visibleFiles, dirtyFile]) Release(v *Generation[visibleFiles, dirtyFile]) {
+func (lt *Lifetime[visibleFiles, dirtyFiles, dirtyFile]) Release(v *Generation[visibleFiles, dirtyFile]) {
 	if v.refcnt.Add(-1) != 0 {
 		return
 	}
@@ -114,7 +118,7 @@ func (lt *Lifetime[visibleFiles, dirtyFile]) Release(v *Generation[visibleFiles,
 // caller's dirty files — which the publish path mutates under this same lock.
 // Slow, background-only: it contends with publishes, so hot-path readers must use
 // the lock-free Acquire/Release instead.
-func (lt *Lifetime[visibleFiles, dirtyFile]) SlowReadDirtyFiles(fn func()) {
+func (lt *Lifetime[visibleFiles, dirtyFiles, dirtyFile]) SlowReadDirtyFiles(fn func()) {
 	lt.lock.Lock()
 	defer lt.lock.Unlock()
 	fn()
@@ -128,7 +132,7 @@ func (lt *Lifetime[visibleFiles, dirtyFile]) SlowReadDirtyFiles(fn func()) {
 //
 // Slow, background-only: for reads use the lock-free Acquire/Release/Visible; to
 // run under the lock without publishing, use SlowReadDirtyFiles.
-func (lt *Lifetime[visibleFiles, dirtyFile]) UpdateDirtyFiles(mutate func() (retired []dirtyFile, publish bool, err error)) error {
+func (lt *Lifetime[visibleFiles, dirtyFiles, dirtyFile]) UpdateDirtyFiles(mutate func() (retired []dirtyFile, publish bool, err error)) error {
 	var toDelete []dirtyFile
 	err := func() error {
 		lt.lock.Lock()
@@ -145,7 +149,7 @@ func (lt *Lifetime[visibleFiles, dirtyFile]) UpdateDirtyFiles(mutate func() (ret
 		if publish {
 			// Publish the new generation, hand the outgoing one its retired payload,
 			// and collect whatever is now reclaimable (freed after unlock).
-			next := &Generation[visibleFiles, dirtyFile]{Value: *lt.recalcVisibleFiles()}
+			next := &Generation[visibleFiles, dirtyFile]{Value: *lt.recalcVisibleFiles(lt.dirty)}
 			old := lt.visible.Load()
 			old.retired = retired
 			old.next = next
@@ -163,7 +167,7 @@ func (lt *Lifetime[visibleFiles, dirtyFile]) UpdateDirtyFiles(mutate func() (ret
 // is a safety rule, not just chain bookkeeping: a file retired at one generation may
 // still be present in an older, still-pinned generation's visible set, so it is unsafe
 // to remove until every older generation has drained.
-func (lt *Lifetime[visibleFiles, dirtyFile]) reclaimRetiredLocked() (toDelete []dirtyFile) {
+func (lt *Lifetime[visibleFiles, dirtyFiles, dirtyFile]) reclaimRetiredLocked() (toDelete []dirtyFile) {
 	cur := lt.visible.Load()
 	for h := lt.oldest; h != cur && h.refcnt.Load() == 0; h = h.next {
 		toDelete = append(toDelete, h.retired...)
@@ -173,7 +177,7 @@ func (lt *Lifetime[visibleFiles, dirtyFile]) reclaimRetiredLocked() (toDelete []
 	return toDelete
 }
 
-func (lt *Lifetime[visibleFiles, dirtyFile]) runReclaim(toDelete []dirtyFile) {
+func (lt *Lifetime[visibleFiles, dirtyFiles, dirtyFile]) runReclaim(toDelete []dirtyFile) {
 	if len(toDelete) > 0 {
 		lt.closeAndPhysicalRemove(toDelete)
 	}

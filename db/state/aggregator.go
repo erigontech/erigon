@@ -79,11 +79,14 @@ type Aggregator struct {
 
 	reorgBlockDepth uint64
 
-	// Lifetime owns the writer lock and every field it guards: the dirtyFiles
-	// registry (each entity's tree, registered at RegisterDomain/RegisterII) and
-	// the atomically-published chain of visible-file generations. *FilesItem is
+	// dirty bundles each entity's dirty-file tree, filled at RegisterDomain/RegisterII.
+	// Lifetime stores a pointer to it and passes it to recalcVisibleFiles per publish.
+	dirty aggregatorDirty
+
+	// Lifetime owns the writer lock and every field it guards: the dirty bundle above
+	// and the atomically-published chain of visible-file generations. *FilesItem is
 	// both the dirty item it sweeps and what a superseded generation retires.
-	mvcc.Lifetime[aggregatorVisible, *FilesItem]
+	mvcc.Lifetime[aggregatorVisible, *aggregatorDirty, *FilesItem]
 
 	// commitmentRefsMu guards the runtime-mutable commitment ReferencesInCommitmentBranches
 	// flag: ReloadErigonDBSettings writes it while background merges read it.
@@ -155,7 +158,7 @@ func newAggregator(ctx context.Context, dirs datadir.Dirs, reorgBlockDepth uint6
 
 		produce: true,
 	}
-	a.Lifetime.Init(closeAndRemoveFiles, a.recalcVisibleFiles)
+	a.Lifetime.Init(&a.dirty, closeAndRemoveFiles, a.recalcVisibleFiles)
 
 	// Only when KV-read metrics are enabled, matching every producer (which
 	// no-ops on dbg.KVReadLevelledMetrics). Otherwise the collector's goroutine
@@ -238,6 +241,7 @@ func (a *Aggregator) RegisterDomain(cfg statecfg.DomainCfg, salt *uint32, dirs d
 	}
 	d := a.d[cfg.Name]
 	d.salt.Store(salt)
+	a.dirty.d[cfg.Name] = d.dirtyBundle()
 	a.AddDependencyBtwnHistoryII(cfg.Name)
 	return nil
 }
@@ -257,6 +261,7 @@ func (a *Aggregator) RegisterII(cfg statecfg.InvIdxCfg, salt *uint32, dirs datad
 	if a.iisCount >= kv.StandaloneIdxLen {
 		return fmt.Errorf("too many standalone inverted indices: max %d", kv.StandaloneIdxLen)
 	}
+	a.dirty.iis[a.iisCount] = ii.dirtyFiles
 	a.iis[a.iisCount] = ii
 	a.iisCount++
 	return nil
@@ -1767,25 +1772,32 @@ type aggregatorVisible struct {
 	minimaxTxNum uint64                          // min of domain file EndTxNum across kv.StateDomains
 }
 
+// aggregatorDirty bundles each entity's dirty-file tree. Its btree pointers are
+// stable (created once per entity), so it is filled at RegisterDomain/RegisterII
+// and stored in mvcc.Lifetime, which passes it to recalcVisibleFiles per publish.
+type aggregatorDirty struct {
+	d   [kv.DomainLen]domainDirty
+	iis [kv.StandaloneIdxLen]*DirtyFiles
+}
+
 // recalcVisibleFiles builds a fresh immutable aggregatorVisible bundle from the
-// current dirty state via the per-entity calcVisibleFiles helpers. It is the biz
-// adapter — it walks the typed entity graph — so it stays on Aggregator. Caller
-// holds the lock; pass it to mvcc.Lifetime.Recalc as the recalc callback, which
-// wraps the returned bundle into a version and publishes it.
-func (a *Aggregator) recalcVisibleFiles() *aggregatorVisible {
+// dirty bundle via the per-entity calcVisibleFiles helpers. It is the biz adapter
+// — it walks the typed entity graph — so it stays on Aggregator. mvcc.Lifetime
+// stores the dirty bundle and passes it here on each publish, under the lock.
+func (a *Aggregator) recalcVisibleFiles(dirty *aggregatorDirty) *aggregatorVisible {
 	toTxNum := a.dirtyFilesEndTxNumMinimax()
 	next := &aggregatorVisible{}
 	for id, d := range a.d {
 		if d == nil {
 			continue
 		}
-		next.d[id], next.dh[id], next.dhii[id] = d.calcVisibleFiles(toTxNum)
+		next.d[id], next.dh[id], next.dhii[id] = d.calcVisibleFiles(dirty.d[id], toTxNum)
 	}
 	for id, ii := range a.standaloneIIs() {
 		if ii == nil {
 			continue
 		}
-		next.iis[id] = ii.calcVisibleFiles(toTxNum)
+		next.iis[id] = ii.calcVisibleFiles(dirty.iis[id], toTxNum)
 	}
 	next.minimaxTxNum = next.stateMinimaxTxNum()
 	return next
