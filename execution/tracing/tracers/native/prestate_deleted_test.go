@@ -83,6 +83,28 @@ func TestPrestateTracerDiffModeDeletedAccount(t *testing.T) {
 	require.Equal(t, common.Hash{}, *post.CodeHash, "deleted account must have zero codeHash")
 }
 
+// TestPrestateTracerOnTxEndExcludesAccountEmptyBeforeStorageTouched verifies the
+// Geth-compatible behavior that an account which was empty before the tx stays
+// excluded from the prestate even if its storage got read (e.g. a virgin SLOAD)
+// during the tx: emptiness is decided at first lookup, not re-derived afterward.
+func TestPrestateTracerOnTxEndExcludesAccountEmptyBeforeStorageTouched(t *testing.T) {
+	addr := accounts.InternAddress(common.HexToAddress("0x0000000000000000000000000000000000004242"))
+	otherAddr := accounts.InternAddress(common.HexToAddress("0x0000000000000000000000000000000000009999"))
+
+	tr := newTestPrestateTracer(prestateTracerConfig{})
+	tr.env = &tracing.VMContext{
+		IntraBlockState: &postTxIBS{deletedAddr: otherAddr}, // addr reads as empty: zero balance/nonce, no code
+	}
+
+	tr.lookupAccount(addr)
+	tr.lookupStorage(addr, common.HexToHash("0x01"))
+
+	tr.OnTxEnd(nil, nil)
+
+	_, ok := tr.pre[addr]
+	require.False(t, ok, "account empty before the tx must be excluded even though its storage was read during the tx")
+}
+
 // TestPrestateTracerDiffModeCodelessUnchanged verifies that a codeless account
 // with no state changes does NOT appear in the post state (no false positive).
 func TestPrestateTracerDiffModeCodelessUnchanged(t *testing.T) {

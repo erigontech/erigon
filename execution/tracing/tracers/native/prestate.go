@@ -55,6 +55,10 @@ type account struct {
 	CodeHash *common.Hash                `json:"codeHash,omitempty"`
 	Nonce    uint64                      `json:"nonce,omitempty"`
 	Storage  map[common.Hash]common.Hash `json:"storage,omitempty"`
+	// empty records whether the account existed before the tx, decided at first
+	// lookup (before Storage is populated by SLOAD/SSTORE) so that later reads of
+	// its own storage during the tx don't retroactively make it look non-empty.
+	empty bool
 }
 
 func (a *account) exists() bool {
@@ -123,21 +127,6 @@ func newPrestateTracer(ctx *tracers.Context, cfg json.RawMessage) (*tracers.Trac
 		GetResult: t.GetResult,
 		Stop:      t.Stop,
 	}, nil
-}
-
-// CaptureEnd is called after the call finishes to finalize the tracing.
-func (t *prestateTracer) CaptureEnd(output []byte, gasUsed uint64, err error) {
-	if t.config.DiffMode {
-		return
-	}
-
-	if t.create {
-		// Keep existing account prior to contract creation at that address
-		if s := t.pre[t.to]; s != nil && !s.exists() {
-			// Exclude newly created contract.
-			delete(t.pre, t.to)
-		}
-	}
 }
 
 // ExitHook is invoked when the processing of a message ends.
@@ -273,8 +262,8 @@ func (t *prestateTracer) OnTxEnd(receipt *types.Receipt, err error) {
 	if t.config.IncludeEmpty {
 		return
 	}
-	for addr := range t.pre {
-		if s := t.pre[addr]; s != nil && !s.exists() {
+	for addr, s := range t.pre {
+		if s.empty {
 			delete(t.pre, addr)
 		}
 	}
@@ -405,6 +394,9 @@ func (t *prestateTracer) lookupAccount(addr accounts.Address) {
 		codeHash := crypto.HashData(code)
 		acc.CodeHash = &codeHash
 	}
+	// The emptiness check must run before Storage is populated below, so that
+	// slots read later via SLOAD/SSTORE don't retroactively count as prestate.
+	acc.empty = !acc.exists()
 	// The code must be fetched first for the emptiness check.
 	if t.config.DisableCode {
 		acc.Code = nil
