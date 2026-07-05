@@ -65,17 +65,19 @@ func (ht *HistoryRoTx) retireBeforeStep(cutoff kv.Step) (deleted []string, retir
 	return deleted, retired
 }
 
-// HistoryRetireCutoffs is the step below which frozen files are retired, per
+// HistoryRetireCutoffs is the txNum below which frozen files are retired, per
 // domain (PerDomain, falling back to Default for other domains and standalone
-// indices); a 0 cutoff keeps the entity.
+// indices); a 0 cutoff keeps the entity. The aggregator floors each txNum to its
+// file step internally (same as FilesItem.StepRange), so callers stay in txNum —
+// the block↔txNum boundary's unit — and never touch step sharding.
 type HistoryRetireCutoffs struct {
-	Default   kv.Step
-	PerDomain map[kv.Domain]kv.Step
+	Default   uint64
+	PerDomain map[kv.Domain]uint64
 }
 
-func (c HistoryRetireCutoffs) forDomain(name kv.Domain) kv.Step {
-	if step, ok := c.PerDomain[name]; ok {
-		return step
+func (c HistoryRetireCutoffs) forDomain(name kv.Domain) uint64 {
+	if txNum, ok := c.PerDomain[name]; ok {
+		return txNum
 	}
 	return c.Default
 }
@@ -85,8 +87,8 @@ func (c HistoryRetireCutoffs) IsNoop() bool {
 	if c.Default != 0 {
 		return false
 	}
-	for _, step := range c.PerDomain {
-		if step != 0 {
+	for _, txNum := range c.PerDomain {
+		if txNum != 0 {
 			return false
 		}
 	}
@@ -126,7 +128,7 @@ func (a *Aggregator) RetireOldHistoryFiles(ctx context.Context, cutoffs HistoryR
 		if dt.d.Disable || dt.d.SnapshotsDisabled || dt.d.HistoryDisabled {
 			continue
 		}
-		cutoffStep := cutoffs.forDomain(dt.name)
+		cutoffStep := kv.Step(cutoffs.forDomain(dt.name) / dt.stepSize)
 		if cutoffStep == 0 {
 			continue
 		}
@@ -135,10 +137,14 @@ func (a *Aggregator) RetireOldHistoryFiles(ctx context.Context, cutoffs HistoryR
 		retired = append(retired, r...)
 	}
 	for _, iit := range at.standaloneIIs() {
-		if iit.ii.Disable || cutoffs.Default == 0 {
+		if iit.ii.Disable {
 			continue
 		}
-		names, r := iit.retireBeforeStep(cutoffs.Default)
+		cutoffStep := kv.Step(cutoffs.Default / iit.stepSize)
+		if cutoffStep == 0 {
+			continue
+		}
+		names, r := iit.retireBeforeStep(cutoffStep)
 		deleted = append(deleted, names...)
 		retired = append(retired, r...)
 	}
