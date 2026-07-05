@@ -102,8 +102,8 @@ func (df *DirtyFiles) EndTxNumMax() uint64 {
 	return 0
 }
 
-// updateMinimax: callers use 0 as "not set yet".
-func (df *DirtyFiles) updateMinimax(current uint64) uint64 {
+// endTxNumMinimax: callers use 0 as "not set yet".
+func (df *DirtyFiles) endTxNumMinimax(current uint64) uint64 {
 	if max, ok := df.Max(); ok {
 		if current == 0 {
 			return max.endTxNum
