@@ -225,7 +225,8 @@ func (a *aggregateAndProofServiceImpl) ProcessMessage(
 		// [IGNORE] the epoch of aggregate.data.slot is either the current or previous epoch
 		// When the head state lags behind (solo validator / genesis start), use the
 		// highest seen slot to widen the accepted epoch window.
-		prevEpoch, currEpoch := validationEpochRange(headState, a.forkchoiceStore.HighestSeen(), a.beaconCfg.SlotsPerEpoch)
+		highestSeen := a.forkchoiceStore.HighestSeen()
+		prevEpoch, currEpoch := validationEpochRange(headState, highestSeen, highestSeen, a.beaconCfg.SlotsPerEpoch)
 		if epoch < prevEpoch || epoch > currEpoch {
 			return fmt.Errorf("%w: epoch is not in previous or current epoch: %d (prev=%d, curr=%d)", ErrIgnore, epoch, prevEpoch, currEpoch)
 		}

@@ -47,10 +47,13 @@ var (
 	computeCommitteeCountPerSlot = subnets.ComputeCommitteeCountPerSlot
 )
 
-func validationEpochRange(headState *state.CachingBeaconState, highestSeenSlot, slotsPerEpoch uint64) (uint64, uint64) {
+func validationEpochRange(headState *state.CachingBeaconState, highestSeenSlot, currentSlot, slotsPerEpoch uint64) (uint64, uint64) {
 	headEpoch := state.Epoch(headState)
 	currEpoch := headEpoch
-	if highestSeenSlot/slotsPerEpoch > headEpoch {
+	if currentSlot < highestSeenSlot {
+		currentSlot = highestSeenSlot
+	}
+	if currentSlot/slotsPerEpoch > headEpoch {
 		currEpoch = headEpoch + 1
 	}
 	return state.PreviousEpoch(headState), currEpoch
@@ -206,7 +209,7 @@ func (s *attestationService) ProcessMessage(ctx context.Context, subnet *uint64,
 	if err := s.syncedDataManager.ViewHeadState(func(headState *state.CachingBeaconState) error {
 		// If our head state is too far from the attestation epoch, committee
 		// computations will use a stale RANDAO mix and produce wrong results.
-		prevEpoch, currEpoch := validationEpochRange(headState, s.forkchoiceStore.HighestSeen(), s.beaconCfg.SlotsPerEpoch)
+		prevEpoch, currEpoch := validationEpochRange(headState, s.forkchoiceStore.HighestSeen(), currentSlot, s.beaconCfg.SlotsPerEpoch)
 		if attEpoch < prevEpoch || attEpoch > currEpoch {
 			return fmt.Errorf("head epoch %d too far from attestation epoch %d (prev=%d, curr=%d): %w",
 				state.Epoch(headState), attEpoch, prevEpoch, currEpoch, ErrIgnore)
