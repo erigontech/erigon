@@ -455,9 +455,6 @@ func (s *CaplinStateSnapshots) recalcVisibleFiles() {
 		newVisibleSegments := make(VisibleSegments, 0, dirtySegments.Len())
 		dirtySegments.Walk(func(segments []*DirtySegment) bool {
 			for _, sn := range segments {
-				if sn.canDelete.Load() {
-					continue
-				}
 				if !isIndexed(sn) {
 					continue
 				}
