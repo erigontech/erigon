@@ -226,7 +226,11 @@ func growGloasContributions(applied []gloasVoteContribution, size int) []gloasVo
 	if len(applied) >= size {
 		return applied
 	}
-	next := make([]gloasVoteContribution, size)
+	nextCap := cap(applied) * 2
+	if nextCap < size {
+		nextCap = size
+	}
+	next := make([]gloasVoteContribution, size, nextCap)
 	copy(next, applied)
 	return next
 }

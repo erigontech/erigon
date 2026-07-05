@@ -176,6 +176,8 @@ func (f *ForkChoiceStore) isUnequivocating(validatorIndex uint64) bool {
 }
 
 func (f *ForkChoiceStore) setUnequivocating(validatorIndex uint64) {
+	f.headHash = common.Hash{}
+	f.headPayloadStatus = cltypes.PayloadStatusPending
 	index := int(validatorIndex) / 8
 	if index >= len(f.equivocatingIndicies) {
 		if index < cap(f.equivocatingIndicies) {

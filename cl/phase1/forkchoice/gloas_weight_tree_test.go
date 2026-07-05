@@ -76,6 +76,17 @@ func TestEquivocationAfterBaselineDirtiesWeightTree(t *testing.T) {
 	require.Contains(t, f.gloasWeightTree.dirty, uint64(4))
 }
 
+func TestSetUnequivocatingInvalidatesHeadCache(t *testing.T) {
+	f := newGloasWeightTreeTestStore()
+	f.headHash = common.HexToHash("0xbeef")
+	f.headPayloadStatus = cltypes.PayloadStatusFull
+
+	f.setUnequivocating(4)
+
+	require.Equal(t, common.Hash{}, f.headHash)
+	require.Equal(t, cltypes.PayloadStatusPending, f.headPayloadStatus)
+}
+
 func TestSetUnequivocatingGrowsAmortized(t *testing.T) {
 	f := newGloasWeightTreeTestStore()
 
@@ -84,6 +95,20 @@ func TestSetUnequivocatingGrowsAmortized(t *testing.T) {
 	require.True(t, f.isUnequivocating(16))
 	require.Len(t, f.equivocatingIndicies, 3)
 	require.Greater(t, cap(f.equivocatingIndicies), len(f.equivocatingIndicies))
+}
+
+func TestGrowGloasContributionsGrowsAmortized(t *testing.T) {
+	applied := growGloasContributions(nil, 1)
+	require.Len(t, applied, 1)
+	require.Equal(t, 1, cap(applied))
+
+	applied = growGloasContributions(applied, 2)
+	require.Len(t, applied, 2)
+	require.Equal(t, 2, cap(applied))
+
+	applied = growGloasContributions(applied, 3)
+	require.Len(t, applied, 3)
+	require.Greater(t, cap(applied), len(applied))
 }
 
 func TestGloasMarksDirtyWeightTree(t *testing.T) {
