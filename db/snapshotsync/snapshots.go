@@ -465,10 +465,8 @@ func (s VisibleSegments) BeginRo() *RoTx {
 
 type RoTx struct {
 	Segments VisibleSegments
-	// release drops the bundle-level pin taken by the owning store. It is set only
-	// on standalone RoTx (ViewType/ViewSingleFile); the per-type children built
-	// inside a View are non-owning (release == nil) and their pin is dropped once
-	// by View.Close.
+	// release drops the pin for a standalone RoTx (ViewType/ViewSingleFile). nil for the
+	// per-type children inside a View, whose single pin is dropped by View.Close.
 	release func()
 }
 
@@ -500,11 +498,8 @@ type RoSnapshots struct {
 	dirty     DirtyFiles   // ordered map `type.Enum()` -> DirtySegments
 	visible   atomic.Pointer[snapshotVisible]
 
-	// oldestVisible is the chain head: the oldest generation still pinned by a reader.
-	// Physical file deletion walks the oldest->newest chain from here, reclaiming a
-	// generation's retired files once its refcnt hits 0. Mutated only under dirtyLock,
-	// so dirty mutation and bundle publish stay one atomic step (as the Aggregator's
-	// single dirtyFilesLock does).
+	// oldestVisible is the chain head: reclamation walks oldest->newest from here,
+	// deleting a generation's retired files once its refcnt hits 0. Mutated under dirtyLock.
 	oldestVisible *snapshotVisible
 
 	dir               string
@@ -557,7 +552,7 @@ type snapshotVisible struct {
 
 	refcnt  atomic.Int32     // live readers pinning this generation
 	retired []*DirtySegment  // segments this generation is the last to reference; unlinked on head-drain
-	next    *snapshotVisible // oldest->newest chain link (set under reclaimLock)
+	next    *snapshotVisible // oldest->newest chain link (set under dirtyLock)
 }
 
 // NewRoSnapshots - opens all snapshots. But to simplify everything:
@@ -599,7 +594,7 @@ func newRoSnapshots(cfg ethconfig.BlocksFreezing, snapDir string, types []snapty
 	}
 
 	s.dirtyLock.Lock()
-	s.recalcVisibleFilesLocked(s.alignMin, nil)
+	s.recalcVisibleFiles(s.alignMin, nil)
 	s.dirtyLock.Unlock()
 	return s
 }
@@ -829,32 +824,15 @@ func RecalcVisibleSegments(dirtySegments *btree.BTreeG[*DirtySegment]) VisibleSe
 	return newVisibleSegments
 }
 
-// recalcVisibleFilesLocked publishes a fresh immutable bundle built from the current
-// dirty files. retired lists segments removed from dirty during the outgoing bundle's
-// tenure (the generation this bundle is the last to reference); they are attached to the
-// outgoing bundle and physically deleted only once every reader pinning it (or an older
-// generation) has drained. Pass nil when no segment left the visible set.
-//
-// Must be called with dirtyLock held, so a caller's dirty mutation and this publish are
-// one atomic step (the Aggregator's single-lock invariant). Physical delete of drained
-// generations runs here under the lock; the hot reader-Close path deletes off-lock.
-func (s *RoSnapshots) recalcVisibleFilesLocked(alignMin bool, retired []*DirtySegment) {
+// recalcVisibleFiles publishes a fresh visible bundle from dirty and retires `retired`
+// (segments removed from dirty during the outgoing bundle's tenure): they are unlinked
+// only once every reader pinning that generation has drained. Must be called with
+// dirtyLock held, so the caller's dirty mutation and this publish are one atomic step.
+func (s *RoSnapshots) recalcVisibleFiles(alignMin bool, retired []*DirtySegment) {
 	defer func() {
 		s.idxMax.Store(s.idxAvailability())
 	}()
 
-	next := s.buildVisibleLocked(alignMin)
-
-	old := s.visible.Load()
-	old.retired = retired
-	old.next = next
-	s.visible.Store(next)
-	closeAndRemoveSegments(s.reclaimRetiredLocked())
-}
-
-// buildVisibleLocked assembles the next immutable visible bundle from dirty. Must be
-// called with dirtyLock held.
-func (s *RoSnapshots) buildVisibleLocked(alignMin bool) *snapshotVisible {
 	visible := make([]VisibleSegments, snaptype.MaxEnum) // create new pointer - only new readers will see it. old-alive readers will continue use previous pointer
 	maxVisibleBlocks := make([]uint64, 0, len(s.types))
 
@@ -870,7 +848,7 @@ func (s *RoSnapshots) buildVisibleLocked(alignMin bool) *snapshotVisible {
 		}
 	}
 
-	if alignMin && len(maxVisibleBlocks) > 0 {
+	if alignMin {
 		// all types must have the same height
 		minMaxVisibleBlock := slices.Min(maxVisibleBlocks)
 		for _, t := range s.enums {
@@ -903,12 +881,20 @@ func (s *RoSnapshots) buildVisibleLocked(alignMin bool) *snapshotVisible {
 		}
 	}
 
-	return &snapshotVisible{segments: visible, segmentsMax: segmentsMax}
+	next := &snapshotVisible{segments: visible, segmentsMax: segmentsMax}
+	old := s.visible.Load()
+	old.retired = retired
+	old.next = next
+	s.visible.Store(next)
+
+	// `recalcVisibleFiles` is rare background operation under `dirtyFilesLock`
+	// it's good idea to delete files here, then hot reader-Close path will more likely be lock-free
+	closeAndRemoveSegments(s.reclaimRetiredLocked())
 }
 
-// acquireVisible pins the current generation. Load and increment are not atomic
-// together, so after incrementing we re-check that the generation is still current;
-// if it was superseded mid-pin we drop the stale pin and retry (hazard-pointer style).
+// acquireVisible pins the current generation. Load and increment are not atomic together,
+// so after incrementing we re-check the generation is still current; if superseded mid-pin
+// we drop the stale pin and retry (hazard-pointer style).
 func (s *RoSnapshots) acquireVisible() *snapshotVisible {
 	for {
 		v := s.visible.Load()
@@ -1175,7 +1161,7 @@ func (s *RoSnapshots) OpenFolder() error {
 		defer s.dirtyLock.Unlock()
 		// Publish under the same lock (and even on error), else the detached segments leak:
 		// removed from dirty, never closed, never reclaimed.
-		defer func() { s.recalcVisibleFilesLocked(s.alignMin, retired) }()
+		defer func() { s.recalcVisibleFiles(s.alignMin, retired) }()
 
 		files, err := AllTypedSegments(s.dir, s.Types())
 		if err != nil {
@@ -1208,7 +1194,7 @@ func (s *RoSnapshots) OpenFolder() error {
 func (s *RoSnapshots) OpenSegments(types []snaptype.Type, alignMin bool) error {
 	s.dirtyLock.Lock()
 	defer s.dirtyLock.Unlock()
-	defer s.recalcVisibleFilesLocked(alignMin, nil)
+	defer s.recalcVisibleFiles(alignMin, nil)
 
 	files, err := AllTypedSegments(s.dir, types)
 
@@ -1236,7 +1222,7 @@ func (s *RoSnapshots) Close() {
 	}
 	s.dirtyLock.Lock()
 	defer s.dirtyLock.Unlock()
-	defer s.recalcVisibleFilesLocked(s.alignMin, nil)
+	defer s.recalcVisibleFiles(s.alignMin, nil)
 
 	detached := s.detachNotInList(nil)
 	// Close fds only when no reader still pins the current generation; closing a segment
@@ -1283,45 +1269,7 @@ func (s *RoSnapshots) detachNotInList(protect []string) []*DirtySegment {
 	return detached
 }
 
-// referencedFileNamesLocked returns the base names of every file still referenced by a
-// DirtySegment: one in dirty, one pending reclamation in any live generation, or one in
-// `extra`. RemoveOverlaps treats an overlap file referenced by none of these as a true
-// orphan safe to unlink immediately; everything referenced is unlinked by reclamation at
-// the reader watermark. Must be called with dirtyLock held.
-func (s *RoSnapshots) referencedFileNamesLocked(extra []*DirtySegment) map[string]struct{} {
-	names := make(map[string]struct{})
-	add := func(sn *DirtySegment) {
-		for _, p := range sn.FilePaths(s.dir) {
-			names[filepath.Base(p)] = struct{}{}
-		}
-	}
-	for _, t := range s.enums {
-		s.dirty[t].Walk(func(segs []*DirtySegment) bool {
-			for _, sn := range segs {
-				add(sn)
-			}
-			return true
-		})
-	}
-	for h := s.oldestVisible; h != nil; h = h.next {
-		for _, sn := range h.retired {
-			add(sn)
-		}
-	}
-	for _, sn := range extra {
-		add(sn)
-	}
-	return names
-}
-
 func (s *RoSnapshots) RemoveOverlaps(onDelete func(l []string) error) error {
-	// Pin the current generation so the retirement below is physically unlinked at v.Close
-	// (off-lock) rather than under dirtyLock — mirroring the Aggregator's cleanAfterMerge:
-	// recalc's reclaim finds this generation still pinned and skips it, and v.Close drops
-	// the pin. If another reader also holds it, deletion defers to the true watermark.
-	v := s.View()
-	defer v.Close()
-
 	list, err := snaptype.Segments(s.dir)
 	if err != nil {
 		return err
@@ -1333,46 +1281,22 @@ func (s *RoSnapshots) RemoveOverlaps(onDelete func(l []string) error) error {
 		keepNames = append(keepNames, info.Name())
 	}
 
-	// Detach the subsumed segments and publish under one lock, so the dirty mutation and
-	// the bundle publish are one atomic step (no window for a concurrent open to re-adopt
-	// a just-retired file). Also record which files are still referenced: an overlap file
-	// is safe to unlink directly only if NO DirtySegment references it — not one in dirty,
-	// and not one pending reclamation in a live generation (a prior merge/prune may have
-	// retired a file whose reader hasn't drained, so it's still on disk and mmap'd). Match
-	// by base name; version masks make absolute-path equality fragile.
-	var protected map[string]struct{}
-	func() {
-		s.dirtyLock.Lock()
-		defer s.dirtyLock.Unlock()
-		retired := s.detachNotInList(keepNames)
-		protected = s.referencedFileNamesLocked(retired)
-		s.recalcVisibleFilesLocked(s.alignMin, retired)
-	}()
-
-	//it's possible that .seg was removed but .idx not (kill between deletes, etc...)
-	idxList, err := snaptype.IdxFiles(s.dir)
-	if err != nil {
-		return err
-	}
-	_, accessorsToRemove := findOverlaps(idxList)
-
-	allRemoved := make([]string, 0, len(segmentsToRemove)+len(accessorsToRemove))
-	var orphans []string
-	classify := func(info snaptype.FileInfo) {
-		allRemoved = append(allRemoved, info.Path)
-		if _, ok := protected[info.Name()]; !ok {
-			orphans = append(orphans, info.Path)
-		}
-	}
-	for _, info := range segmentsToRemove {
-		classify(info)
-	}
-	for _, info := range accessorsToRemove {
-		classify(info)
-	}
-
+	// Notify the seeder before deletion. Includes idx overlaps whose .seg is already gone
+	// (kill between deletes): those have no DirtySegment, so reclamation can't reach them.
 	if onDelete != nil {
-		relativePaths, err := toRelativePaths(s.dir, allRemoved)
+		idxList, err := snaptype.IdxFiles(s.dir)
+		if err != nil {
+			return err
+		}
+		_, accessorsToRemove := findOverlaps(idxList)
+		toRemove := make([]string, 0, len(segmentsToRemove)+len(accessorsToRemove))
+		for _, info := range segmentsToRemove {
+			toRemove = append(toRemove, info.Path)
+		}
+		for _, info := range accessorsToRemove {
+			toRemove = append(toRemove, info.Path)
+		}
+		relativePaths, err := toRelativePaths(s.dir, toRemove)
 		if err != nil {
 			return err
 		}
@@ -1381,7 +1305,18 @@ func (s *RoSnapshots) RemoveOverlaps(onDelete func(l []string) error) error {
 		}
 	}
 
-	removeOldFiles(orphans)
+	// Retire the subsumed segments. The pin taken here mirrors the Aggregator's
+	// cleanAfterMerge: recalc's reclaim skips the generation it holds, and v.Close drops
+	// the pin so the actual unlink (of each segment's .seg + indexes) happens off-lock —
+	// or defers to the true watermark if another reader still holds the generation.
+	v := s.View()
+	defer v.Close()
+	func() {
+		s.dirtyLock.Lock()
+		defer s.dirtyLock.Unlock()
+		retired := s.detachNotInList(keepNames)
+		s.recalcVisibleFiles(s.alignMin, retired)
+	}()
 
 	// remove .tmp files
 	//TODO: it may remove Caplin's useful .tmp files - re-think. Keep it here for backward-compatibility for now.
@@ -1443,10 +1378,10 @@ func (s *RoSnapshots) BuildMissedIndices(ctx context.Context, logPrefix string, 
 	return nil
 }
 
-// deleteLocked removes the named segment from dirty and returns it (nil if not found) so
+// delete removes the named segment from dirty and returns it (nil if not found) so
 // the caller can retire it. Physical unlink happens later, at the reader watermark. Must
 // be called with dirtyLock held.
-func (s *RoSnapshots) deleteLocked(fileName string) *DirtySegment {
+func (s *RoSnapshots) delete(fileName string) *DirtySegment {
 	var delSeg *DirtySegment
 	var dirtySegments *btree.BTreeG[*DirtySegment]
 
@@ -1492,11 +1427,11 @@ func (s *RoSnapshots) Delete(fileNames ...string) error {
 
 	var retired []*DirtySegment
 	for _, fileName := range fileNames {
-		if sn := s.deleteLocked(fileName); sn != nil {
+		if sn := s.delete(fileName); sn != nil {
 			retired = append(retired, sn)
 		}
 	}
-	s.recalcVisibleFilesLocked(s.alignMin, retired)
+	s.recalcVisibleFiles(s.alignMin, retired)
 	return nil
 }
 

@@ -124,7 +124,7 @@ func TestRemoveOverlapsProtectsPendingRetired(t *testing.T) {
 	for _, sn := range subs {
 		s.dirty[sn.Type().Enum()].Delete(sn)
 	}
-	s.recalcVisibleFilesLocked(s.alignMin, subs) // retire subs to the current generation
+	s.recalcVisibleFiles(s.alignMin, subs) // retire subs to the current generation
 	s.dirtyLock.Unlock()
 
 	subPath := filepath.Join(dir, snaptype.SegmentFileName(version.V1_0, 0, 1_000, snaptype2.Headers.Enum()))
