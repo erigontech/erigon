@@ -18,6 +18,9 @@ package state
 
 import (
 	"context"
+	"fmt"
+	"slices"
+	"strings"
 
 	"github.com/erigontech/erigon/db/kv"
 )
@@ -90,6 +93,21 @@ func (c HistoryRetireCutoffs) IsNoop() bool {
 	return true
 }
 
+func (c HistoryRetireCutoffs) String() string {
+	names := make([]kv.Domain, 0, len(c.PerDomain))
+	for name := range c.PerDomain {
+		names = append(names, name)
+	}
+	slices.Sort(names)
+
+	var sb strings.Builder
+	fmt.Fprintf(&sb, "default=%d", c.Default)
+	for _, name := range names {
+		fmt.Fprintf(&sb, " %s=%d", name, c.PerDomain[name])
+	}
+	return sb.String()
+}
+
 // RetireOldHistoryFiles retires History+InvertedIndex files entirely below their
 // cutoff; physical deletion is deferred until no reader pins the retired generation.
 func (a *Aggregator) RetireOldHistoryFiles(ctx context.Context, cutoffs HistoryRetireCutoffs) (retiredCount int, err error) {
@@ -133,6 +151,6 @@ func (a *Aggregator) RetireOldHistoryFiles(ctx context.Context, cutoffs HistoryR
 	a.recalcVisibleFiles(retired)
 
 	mxRetiredHistoryFiles.AddInt(len(retired))
-	a.logger.Info("[snapshots] retired old history files", "removed", len(retired), "defaultStep", cutoffs.Default)
+	a.logger.Info("[snapshots] retired old history files", "removed", len(retired), "cutoffs", cutoffs)
 	return len(retired), nil
 }

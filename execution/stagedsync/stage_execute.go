@@ -593,7 +593,7 @@ func PruneExecutionStage(ctx context.Context, s *PruneState, tx kv.RwTx, cfg Exe
 	}
 	if cutoffOk {
 		if pruneTimeout := remainingPruneTimeout(); pruneTimeout > 0 {
-			logger.Debug(fmt.Sprintf("[%s] history file retirement", s.LogPrefix()), "defaultStep", cutoffs.Default, "commitmentStep", cutoffs.PerDomain[kv.CommitmentDomain])
+			logger.Debug(fmt.Sprintf("[%s] history file retirement", s.LogPrefix()), "cutoffs", cutoffs)
 			if _, err := agg.RetireOldHistoryFiles(ctx, cutoffs); err != nil {
 				return err
 			}
@@ -631,11 +631,12 @@ func historyRetireCutoffs(ctx context.Context, tx kv.Tx, blockReader services.Fu
 	if err != nil {
 		return state.HistoryRetireCutoffs{}, false, err
 	}
+	rcacheStep := historyStep
 	cutoffs = state.HistoryRetireCutoffs{
 		Default: historyStep,
 		PerDomain: map[kv.Domain]kv.Step{
 			kv.CommitmentDomain: commitmentStep,
-			kv.RCacheDomain:     0,
+			kv.RCacheDomain:     rcacheStep,
 		},
 	}
 	return cutoffs, !cutoffs.IsNoop(), nil
