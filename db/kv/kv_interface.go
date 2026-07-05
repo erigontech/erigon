@@ -19,6 +19,9 @@ package kv
 import (
 	"context"
 	"errors"
+	"fmt"
+	"slices"
+	"strings"
 	"sync"
 	"time"
 	"unsafe"
@@ -784,4 +787,45 @@ type Closer interface {
 type OnFilesChange func(frozenFileNames []string)
 type SnapshotNotifier interface {
 	OnFilesChange(onChange OnFilesChange, onDelete OnFilesChange)
+}
+
+// RetireCutoffs is the txNum below which frozen history files are retired,
+// per domain (PerDomain, falling back to Default for other domains and standalone
+// indices); a 0 cutoff keeps the entity. The aggregator floors each txNum to its
+// file step — callers stay in txNum, the block↔txNum boundary's unit.
+type RetireCutoffs struct {
+	Default   uint64
+	PerDomain map[Domain]uint64
+}
+
+// IsNoop reports whether every cutoff is 0, so nothing would be retired.
+func (c RetireCutoffs) IsNoop() bool {
+	if c.Default != 0 {
+		return false
+	}
+	for _, txNum := range c.PerDomain {
+		if txNum != 0 {
+			return false
+		}
+	}
+	return true
+}
+
+// String renders the cutoffs in steps (txNum/stepSize) for readable logs.
+func (c RetireCutoffs) String(stepSize uint64) string {
+	if stepSize == 0 {
+		stepSize = 1
+	}
+	names := make([]Domain, 0, len(c.PerDomain))
+	for name := range c.PerDomain {
+		names = append(names, name)
+	}
+	slices.Sort(names)
+
+	var sb strings.Builder
+	fmt.Fprintf(&sb, "default=%d", Step(c.Default/stepSize))
+	for _, name := range names {
+		fmt.Fprintf(&sb, " %s=%d", name, Step(c.PerDomain[name]/stepSize))
+	}
+	return sb.String()
 }

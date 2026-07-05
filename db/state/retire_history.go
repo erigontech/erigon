@@ -114,6 +114,6 @@ func (a *Aggregator) Retire(ctx context.Context, cutoffs kv.RetireCutoffs) (reti
 	a.recalcVisibleFiles(retired)
 
 	mxRetiredHistoryFiles.AddInt(len(retired))
-	a.logger.Info("[snapshots] retired old history files", "removed", len(retired), "cutoffs", cutoffs)
+	a.logger.Info("[snapshots] retired old history files", "removed", len(retired), "cutoffs", cutoffs.String(a.StepSize()))
 	return len(retired), nil
 }
