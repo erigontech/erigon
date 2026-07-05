@@ -813,9 +813,6 @@ func (c RetireCutoffs) IsNoop() bool {
 
 // String renders the cutoffs in steps (txNum/stepSize) for readable logs.
 func (c RetireCutoffs) String(stepSize uint64) string {
-	if stepSize == 0 {
-		stepSize = 1
-	}
 	names := make([]Domain, 0, len(c.PerDomain))
 	for name := range c.PerDomain {
 		names = append(names, name)

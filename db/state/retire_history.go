@@ -62,9 +62,8 @@ func (ht *HistoryRoTx) retireBeforeStep(cutoff kv.Step) (deleted []string, retir
 	return deleted, retired
 }
 
-// Retire retires History+InvertedIndex files entirely below their
-// cutoff (a per-domain txNum, floored here to the file step so callers stay in
-// txNum); physical deletion is deferred until no reader pins the retired generation.
+// Retire retires History+InvertedIndex files entirely below their per-domain
+// cutoff; physical deletion is deferred until no reader pins the retired generation.
 func (a *Aggregator) Retire(ctx context.Context, cutoffs kv.RetireCutoffs) (retiredCount int, err error) {
 	if cutoffs.IsNoop() {
 		return 0, nil
