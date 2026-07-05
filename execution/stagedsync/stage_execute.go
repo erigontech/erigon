@@ -631,7 +631,7 @@ func historyRetireCutoffs(ctx context.Context, tx kv.Tx, blockReader services.Fu
 	if err != nil {
 		return state.HistoryRetireCutoffs{}, false, err
 	}
-	rcacheStep := historyStep
+	rcacheStep := historyStep // TODO: in future PR add cli flag to manage rcache distance
 	cutoffs = state.HistoryRetireCutoffs{
 		Default: historyStep,
 		PerDomain: map[kv.Domain]kv.Step{
