@@ -20,6 +20,7 @@ require (
 	github.com/99designs/gqlgen v0.17.89
 	github.com/FastFilter/xorfilter v0.5.1
 	github.com/Masterminds/sprig/v3 v3.2.3
+	github.com/OffchainLabs/go-bitfield v0.0.0-20260504143531-5cbb6d0f5f2e
 	github.com/RoaringBitmap/roaring/v2 v2.18.2
 	github.com/alecthomas/kong v1.15.0
 	github.com/anacrolix/envpprof v1.5.0
@@ -87,8 +88,7 @@ require (
 	github.com/pion/stun/v3 v3.1.5
 	github.com/prometheus/client_golang v1.23.2
 	github.com/prometheus/client_model v0.6.2
-	github.com/prysmaticlabs/go-bitfield v0.0.0-20240618144021-706c95b2dd15
-	github.com/prysmaticlabs/gohashtree v0.0.4-beta
+	github.com/prysmaticlabs/gohashtree v0.0.5-beta
 	github.com/puzpuzpuz/xsync/v4 v4.5.0
 	github.com/quasilyte/go-ruleguard/dsl v0.3.23
 	github.com/quic-go/quic-go v0.59.1
