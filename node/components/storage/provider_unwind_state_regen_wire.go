@@ -107,7 +107,7 @@ func (p *Provider) regenerateBoundaryStepFiles(
 	ctx context.Context,
 	tx kv.TemporalRwTx,
 	toBlock, lastTxNum uint64,
-	recompute *commitmentRecomputeResult,
+	encodedTrieState []byte,
 ) (*pendingRegenState, error) {
 	if p.Aggregator == nil {
 		return nil, nil // tests / tools without an Aggregator skip cleanly
@@ -115,36 +115,19 @@ func (p *Provider) regenerateBoundaryStepFiles(
 	if p.Inventory == nil {
 		return nil, nil
 	}
-	if recompute == nil {
-		return nil, fmt.Errorf("regenerateBoundaryStepFiles: nil recompute result")
-	}
 	stepSize := p.Aggregator.StepSize()
 	if stepSize == 0 {
 		return nil, fmt.Errorf("aggregator StepSize() == 0")
 	}
 	stepBoundary := (lastTxNum / stepSize) + 1
-	// Baseline commitment file: largest endStep ≤ maxStep, the same
-	// file RecomputeAtTxNumWithoutSD selected as its trie starting
-	// point. Its branches are at end-of-baseline-step, which — for
-	// keys unchanged in (baseline, lastTxNum] — equals at-lastTxNum.
-	maxStep := kv.Step((lastTxNum + 1) / stepSize)
-	baselineCommitmentPath, err := p.locateCommitmentBaselineFile(maxStep)
-	if err != nil {
-		return nil, fmt.Errorf("locate commitment baseline: %w", err)
-	}
 
 	// Encode the commitment anchor once — every regen of the
 	// commitment domain plants the same blob.
-	commitmentState := commitmentdb.NewCommitmentState(lastTxNum, toBlock, recompute.encodedTrieState)
+	commitmentState := commitmentdb.NewCommitmentState(lastTxNum, toBlock, encodedTrieState)
 	commitmentAnchor, err := commitmentState.Encode()
 	if err != nil {
 		return nil, fmt.Errorf("encode commitment anchor: %w", err)
 	}
-
-	// Touched-branches stream from the recompute — sorted by K by
-	// construction. Regen's commitment path merge-walks this against
-	// the baseline .kv to emit at-lastTxNum content per key.
-	branches := branchesAsProvider(recompute.branches)
 
 	// tx.GetAsOf (not tx.HistorySeek) so the lookup falls through to
 	// GetLatest when history has no change at or after ts. For a key
@@ -230,14 +213,8 @@ func (p *Provider) regenerateBoundaryStepFiles(
 			finalPath := filepath.Join(filepath.Dir(oldPath), truncatedBaseName)
 			regenPath := finalPath + ".regen"
 
-			baselinePath := ""
-			var branchProvider CommitmentBranchProvider
-			if kvDomain == kv.CommitmentDomain {
-				baselinePath = baselineCommitmentPath
-				branchProvider = branches
-			}
 			if err := RegenerateBoundaryStepFile(
-				ctx, kvDomain, oldPath, baselinePath, regenPath, lookup, branchProvider, lastTxNum,
+				ctx, kvDomain, oldPath, regenPath, lookup, lastTxNum,
 				compression, anchor, p.snapTmpDir, p.logger,
 			); err != nil {
 				return nil, fmt.Errorf("regen %s boundary-step file %s: %w", sd, fileEntry.Name, err)
@@ -255,48 +232,6 @@ func (p *Provider) regenerateBoundaryStepFiles(
 		return nil, nil
 	}
 	return &pendingRegenState{pairs: pairs, removals: removals}, nil
-}
-
-// locateCommitmentBaselineFile picks the commitment .kv whose ToStep
-// is the largest value ≤ maxStep — the same file
-// RecomputeAtTxNumWithoutSD selects via GetLatestFromFilesUpToStep.
-// Returns "" (no error) when no candidate exists (fresh chain with
-// no retired commitment files); callers must handle that case.
-func (p *Provider) locateCommitmentBaselineFile(maxStep kv.Step) (string, error) {
-	var best *snapshot.FileEntry
-	for _, e := range p.Inventory.AllDomainFiles(snapshot.DomainCommitment) {
-		if e.Kind != snapshot.KindKV {
-			continue
-		}
-		if kv.Step(e.ToStep) > maxStep {
-			continue
-		}
-		if best == nil || e.ToStep > best.ToStep {
-			best = e
-		}
-	}
-	if best == nil {
-		return "", nil
-	}
-	return snapshot.ResolveExistingPath(p.snapDir, best.Name), nil
-}
-
-// branchesAsProvider adapts the recompute's sorted []branchPair to
-// the CommitmentBranchProvider iface RegenerateBoundaryStepFile
-// consumes.
-func branchesAsProvider(pairs []branchPair) CommitmentBranchProvider {
-	if len(pairs) == 0 {
-		return &SortedBranchPairs{}
-	}
-	sbp := &SortedBranchPairs{
-		Keys: make([][]byte, len(pairs)),
-		Vals: make([][]byte, len(pairs)),
-	}
-	for i, p := range pairs {
-		sbp.Keys[i] = p.K
-		sbp.Vals[i] = p.V
-	}
-	return sbp
 }
 
 // boundaryStepFileForDomain returns the FileEntry for the .kv file

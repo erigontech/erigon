@@ -17,65 +17,36 @@
 package storage
 
 import (
-	"bytes"
 	"context"
 	"fmt"
-	"sort"
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/db/etl"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/rawdbv3"
+	"github.com/erigontech/erigon/db/state/kvmetrics"
 	"github.com/erigontech/erigon/execution/commitment/commitmentdb"
 )
 
-// branchPair is one (K, V) entry from the recompute's PutBranch
-// collector — a commitment branch valid at lastTxNum. Slice is
-// sorted by K so regen can merge-walk it against the baseline .kv.
-type branchPair struct {
-	K []byte
-	V []byte
-}
-
 // commitmentRecomputeResult is the in-memory output of mode B's
 // compute phase: the recomputed root + encoded trie state at
-// lastTxNum, plus the branches trie.Process emitted (sorted by K).
-// The regen phase merge-walks these against the baseline commitment
-// .kv to produce a self-coherent at-lastTxNum boundary file — no
-// separate MDBX-write of branches is performed (the wipe leaves the
-// boundary step's commitment MDBX empty by design).
+// lastTxNum, plus the branch collector the trie's Process emitted.
+// Drained by ensureCommitmentAtBlockApply after the boundary-step
+// shadow wipe.
 type commitmentRecomputeResult struct {
 	lastTxNum        uint64
 	encodedTrieState []byte
-	branches         []branchPair
+	branches         *etl.Collector // caller must Close
 }
 
-// Close is a no-op now that branches live in an in-memory slice;
-// kept for API stability so existing defer sites don't need to be
-// touched.
-func (r *commitmentRecomputeResult) Close() {}
-
-// drainCollectorSorted materialises an etl.Collector into a sorted
-// []branchPair. The collector's own Load emits in key-sorted order,
-// so append + assert-sorted is enough; we sort defensively in case a
-// future Collector implementation changes.
-func drainCollectorSorted(c *etl.Collector) ([]branchPair, error) {
-	if c == nil {
-		return nil, nil
+// Close drains/releases the underlying collector. Safe to call when
+// branches is nil (e.g. on the error path of Compute).
+func (r *commitmentRecomputeResult) Close() {
+	if r == nil || r.branches == nil {
+		return
 	}
-	defer c.Close()
-	out := make([]branchPair, 0, 1024)
-	if err := c.Load(nil, "", func(k, v []byte, _ etl.CurrentTableReader, _ etl.LoadNextFunc) error {
-		out = append(out, branchPair{
-			K: append([]byte(nil), k...),
-			V: append([]byte(nil), v...),
-		})
-		return nil
-	}, etl.TransformArgs{}); err != nil {
-		return nil, fmt.Errorf("drain branches collector: %w", err)
-	}
-	sort.Slice(out, func(i, j int) bool { return bytes.Compare(out[i].K, out[j].K) < 0 })
-	return out, nil
+	r.branches.Close()
+	r.branches = nil
 }
 
 // ensureCommitmentAtBlock is mode-B sub-op #3 — anchor the commitment
@@ -160,45 +131,79 @@ func (p *Provider) ensureCommitmentAtBlockCompute(ctx context.Context, tx kv.Tem
 	tmpDir := p.snapDir
 	root, encodedTrieState, baselineTxNum, branches, err := commitmentdb.RecomputeAtTxNumWithoutSD(ctx, tx, tmpDir, lastTxNum, stepBoundary, stepSize)
 	if err != nil {
+		// ErrHistoryGap from the primitive doesn't carry ToBlock —
+		// patch it in (caller-side context) so setHeadModeB's retry
+		// loop can run a focused historic re-exec.
 		if gap, ok := commitmentdb.IsHistoryGap(err); ok {
 			gap.ToBlock = toBlock
 			return nil, gap
 		}
 		return nil, fmt.Errorf("RecomputeAtTxNumWithoutSD(toBlock=%d, lastTxNum=%d, stepBoundary=%d): %w", toBlock, lastTxNum, stepBoundary, err)
 	}
-	// Materialise the collector into a sorted slice up front so both
-	// consumers (regen file merge-walk + any diagnostic loggers) can
-	// iterate it. The collector's own Load emits sorted, so this is a
-	// straight append; drainCollectorSorted sorts defensively.
-	branchPairs, drainErr := drainCollectorSorted(branches)
-	if drainErr != nil {
-		return nil, fmt.Errorf("drain collector after recompute (toBlock=%d): %w", toBlock, drainErr)
-	}
 	if common.Hash(root) != header.Root {
+		if branches != nil {
+			branches.Close()
+		}
 		return nil, fmt.Errorf("recomputed root %x does not match header stateRoot %x at block %d (baselineTxNum=%d)", root, header.Root, toBlock, baselineTxNum)
 	}
 	return &commitmentRecomputeResult{
 		lastTxNum:        lastTxNum,
 		encodedTrieState: encodedTrieState,
-		branches:         branchPairs,
+		branches:         branches,
 	}, nil
 }
 
-// ensureCommitmentAtBlockApply is a NO-OP for MDBX writes. The
-// recompute's branches are written INTO the regen commitment .kv
-// (via the merge-walk in regenerateBoundaryStepFiles), not into
-// MDBX. The wipe leaves MDBX empty at stepContaining(lastTxNum) for
-// commitment, and it stays empty until forward re-exec after unwind.
+// ensureCommitmentAtBlockApply drains the branch collector from the
+// Compute phase + writes the new commitment entries into the writable
+// shadow at lastTxNum. Must run AFTER the boundary-step wipe in
+// WipeWritableShadowPast so the writes go in clean (no orphan dups).
 //
-// Kept as a stub so callers don't need to be rewired and the two
-// mode-B code paths (primary + wipe-first re-exec) still express the
-// intent "commitment-anchor is now applied".
+// Uses TemporalMemBatch (a lightweight memctx) — SD's constructor
+// seeks commitment and trips the behind-commitment guard against the
+// over-step file. The memctx writes directly through the
+// domain-writer chain.
+//
+// Always closes result.branches (success or error).
 func (p *Provider) ensureCommitmentAtBlockApply(ctx context.Context, tx kv.TemporalRwTx, toBlock uint64, result *commitmentRecomputeResult) error {
 	if result == nil {
 		return fmt.Errorf("ensureCommitmentAtBlockApply: nil result")
 	}
+	defer result.Close()
+
+	metrics := &kvmetrics.DomainMetrics{Domains: map[kv.Domain]*kvmetrics.DomainIOMetrics{}}
+	mem := tx.Debug().NewMemBatch(metrics)
+	defer mem.Close()
+
+	// Drain the branch collector into the writable shadow. Each
+	// branch is written at txnum=lastTxNum (step=stepContaining).
+	// The preceding boundary-step wipe removed any stale forward-
+	// exec branches at the same step, so these go in clean.
+	branchCount := 0
+	if result.branches != nil {
+		if err := result.branches.Load(nil, "", func(k, v []byte, _ etl.CurrentTableReader, _ etl.LoadNextFunc) error {
+			branchCount++
+			return mem.DomainPut(kv.CommitmentDomain, string(k), v, result.lastTxNum, nil)
+		}, etl.TransformArgs{}); err != nil {
+			return fmt.Errorf("drain branches collector: %w", err)
+		}
+	}
+
+	// Write the new commitment-state record (the full encoded trie
+	// state) at lastTxNum. Future ensureCommitmentAtBlock /
+	// SD.SeekCommitment uses this to restore the trie.
+	cs := commitmentdb.NewCommitmentState(result.lastTxNum, toBlock, result.encodedTrieState)
+	encoded, err := cs.Encode()
+	if err != nil {
+		return fmt.Errorf("encode commitment state: %w", err)
+	}
+	if err := mem.DomainPut(kv.CommitmentDomain, string(commitmentdb.KeyCommitmentState), encoded, result.lastTxNum, nil); err != nil {
+		return fmt.Errorf("memctx DomainPut(CommitmentDomain, KeyCommitmentState): %w", err)
+	}
+	if err := mem.Flush(ctx, tx); err != nil {
+		return fmt.Errorf("memctx Flush: %w", err)
+	}
 	if p.logger != nil {
-		p.logger.Info("[storage] Provider.Unwind: commitment-anchor deferred to regen file", "toBlock", toBlock, "lastTxNum", result.lastTxNum, "branches", len(result.branches))
+		p.logger.Info("[storage] Provider.Unwind: commitment-anchor applied", "toBlock", toBlock, "lastTxNum", result.lastTxNum, "branches", branchCount)
 	}
 	return nil
 }
