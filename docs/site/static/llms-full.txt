@@ -4121,7 +4121,7 @@ Flags:
       --rpc.txfeecap float                          Sets a cap on transaction fee (in ether) that can be sent via the RPC APIs (0 = no cap) (default 1)
       --socket.enabled                              Enable IPC server
       --socket.url string                           IPC server listening url. prefix supported are tcp, unix (default "unix:///var/run/erigon.sock")
-      --state.cache string                          Amount of data to store in the version-keyed StateCache (an equally-sized code cache is budgeted on top). Set 0 to disable entry retention while preserving snapshot-consistent reads (default "0MB")
+      --state.cache string                          Amount of data to store in the version-keyed StateCache (an equally-sized code cache is budgeted on top). Set 0 to disable entry retention while preserving snapshot-consistent reads (default "128MB")
       --tls.cacert string                           CA certificate for client side TLS handshake for GRPC
       --tls.cert string                             certificate for client side TLS handshake for GRPC
       --tls.key string                              key file for client side TLS handshake for GRPC
