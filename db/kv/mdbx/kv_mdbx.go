@@ -893,7 +893,8 @@ const maxDistributeCursors = 4096
 
 // DistributeCursors partitions bucket into n approximately equal-count key
 // ranges using mdbx's b-tree distribution. Fast on db >> RAM: it touches only
-// the b-tree branch nodes. Returned keys are valid until tx end.
+// the b-tree branch nodes. Interior boundaries point into tx-owned pages — clone
+// them before any same-tx write (a range-delete invalidates them).
 func (tx *MdbxTx) DistributeCursors(table string, from []byte, n int) ([][]byte, error) {
 	if n <= 1 {
 		return [][]byte{from, nil}, nil

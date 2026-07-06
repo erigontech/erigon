@@ -188,12 +188,9 @@ func backupTable(ctx context.Context, src kv.RoDB, srcTx kv.Tx, dst kv.RwDB, tab
 	return i, nil
 }
 
-// ClearTables empties each table on the caller's tx — atomic with the caller's
-// other writes and, unlike a self-owned writer, safe to call inside an open
-// write tx. With WARMUP_TABLE_WORKERS>0 it deletes in count-balanced chunks
-// while db drives read-only read-ahead that warms pages just ahead of the
-// delete cursor (the source of the speedup on tables >> RAM); unset (the
-// default) it falls back to a plain one-shot table clear.
+// ClearTables empties each table on the caller's open write tx — atomic with the
+// caller's other writes, and safe inside an open writer (a self-owned writer
+// would deadlock, since MDBX serializes writers). db drives optional read-ahead only.
 func ClearTables(ctx context.Context, db kv.RoDB, tx kv.RwTx, tables ...string) error {
 	for _, table := range tables {
 		if err := clearTable(ctx, db, tx, table); err != nil {

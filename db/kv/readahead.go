@@ -35,7 +35,8 @@ import (
 type DBWithDistributionSupport interface {
 	// DistributeCursors partitions table into n approximately equal-count key
 	// ranges using mdbx's b-tree distribution. Fast on Table >> RAM: it touches
-	// only the b-tree branch nodes. Returned keys are valid until tx end.
+	// only the b-tree branch nodes. Interior boundaries are tx-owned — clone them
+	// before any same-tx write (see DistributeBounds).
 	DistributeCursors(table string, from []byte, n int) ([][]byte, error)
 }
 
@@ -115,6 +116,7 @@ func NewReadAhead(ctx context.Context, db RoDB, table string, cfg ReadAheadCfg) 
 
 func (r *ReadAhead) run(ctx context.Context, db RoDB, table string, bounds [][]byte, tableSize uint64, workers int) {
 	defer close(r.done)
+	defer r.cancel() // release the child ctx + its watcher goroutine even if the caller forgets Close
 	r.bounds.Store(&bounds)
 
 	// ~1GB window from the actual mean chunk size, so it stays ~1GB even when
