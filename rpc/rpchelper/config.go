@@ -18,8 +18,8 @@ package rpchelper
 
 import "time"
 
-// DefaultFilterTimeout is the default eviction timeout; 0 disables eviction.
-const DefaultFilterTimeout time.Duration = 0
+// DefaultFilterTimeout matches geth's deadline for evicting idle filters; 0 disables eviction.
+const DefaultFilterTimeout = 5 * time.Minute
 
 // FiltersConfig defines the configuration settings for RPC subscription filters.
 // Each field represents a limit on the number of respective items that can be stored per subscription.
@@ -30,7 +30,7 @@ type FiltersConfig struct {
 	RpcSubscriptionFiltersMaxTxs       int           // Maximum number of transactions to store per subscription. Default: 10000
 	RpcSubscriptionFiltersMaxAddresses int           // Maximum number of addresses per subscription to filter logs by. Default: 0 (no limit)
 	RpcSubscriptionFiltersMaxTopics    int           // Maximum number of topics per subscription to filter logs by. Default: 0 (no limit)
-	RpcSubscriptionFiltersTimeout      time.Duration // Timeout before idle filters are evicted. Default: 0 (no eviction)
+	RpcSubscriptionFiltersTimeout      time.Duration // Timeout before idle filters are evicted. Default: 5m; 0 disables eviction
 }
 
 // DefaultFiltersConfig defines the default settings for filter configurations.
