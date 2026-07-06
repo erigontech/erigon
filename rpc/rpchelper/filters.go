@@ -654,15 +654,16 @@ func (ff *Filters) unsubscribePendingTxsInternal(id PendingTxsSubID) bool {
 }
 
 // SubscribeReceipts subscribes to transaction receipts and returns a channel to receive the receipts
-// and a subscription ID to manage the subscription.
-func (ff *Filters) SubscribeReceipts(size int, criteria filters.ReceiptsFilterCriteria) (<-chan *remoteproto.SubscribeReceiptsReply, ReceiptsSubID) {
+// and a subscription ID to manage the subscription. When the remote filter update fails, no subscription
+// is installed and the error is returned.
+func (ff *Filters) SubscribeReceipts(size int, criteria filters.ReceiptsFilterCriteria) (<-chan *remoteproto.SubscribeReceiptsReply, ReceiptsSubID, error) {
 	sub := newChanSub[*remoteproto.SubscribeReceiptsReply](size, "")
 	id := ff.receiptsSubs.insertReceiptsFilter(sub, criteria.TransactionHashes, ff.config.RpcSubscriptionFiltersMaxLogs)
 	if err := ff.sendReceiptsFilterUpdate(); err != nil {
-		ff.logger.Warn("Could not update remote receipts filter", "err", err)
 		ff.receiptsSubs.removeReceiptsFilter(id)
+		return nil, "", fmt.Errorf("could not update remote receipts filter: %w", err)
 	}
-	return sub.ch, id
+	return sub.ch, id, nil
 }
 
 // UnsubscribeReceipts unsubscribes from transaction receipts using the given subscription ID.
@@ -697,8 +698,9 @@ func (ff *Filters) sendReceiptsFilterUpdate() error {
 }
 
 // SubscribeLogs subscribes to logs using the specified filter criteria and returns a channel to receive the logs
-// and a subscription ID to manage the subscription.
-func (ff *Filters) SubscribeLogs(size int, criteria filters.FilterCriteria, protocol SubProtocol) (<-chan *types.Log, LogsSubID) {
+// and a subscription ID to manage the subscription. When the remote filter update fails, no subscription is
+// installed and the error is returned.
+func (ff *Filters) SubscribeLogs(size int, criteria filters.FilterCriteria, protocol SubProtocol) (<-chan *types.Log, LogsSubID, error) {
 	sub := newChanSub[*types.Log](size, protocol)
 	id, f := ff.logsSubs.insertLogsFilter(sub)
 
@@ -764,14 +766,13 @@ func (ff *Filters) SubscribeLogs(size int, criteria filters.FilterCriteria, prot
 	loaded := ff.loadLogsRequester()
 	if loaded != nil {
 		if err := loaded.(func(*remoteproto.LogsFilterRequest) error)(lfr); err != nil {
-			ff.logger.Warn("Could not update remote logs filter", "err", err)
 			ff.logsSubs.removeLogsFilter(id)
-			return sub.ch, id
+			return nil, "", fmt.Errorf("could not update remote logs filter: %w", err)
 		}
 	}
 
 	ff.registerSubscription(SubscriptionID(id), FilterTypeLogs, sub)
-	return sub.ch, id
+	return sub.ch, id, nil
 }
 
 // loadLogsRequester loads the current logs requester and returns it.

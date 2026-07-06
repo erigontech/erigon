@@ -144,7 +144,7 @@ func TestLogsSubscribeAndUnsubscribe_WithoutConcurrentMapIssue(t *testing.T) {
 	for i := 0; i < 1000; i++ {
 		wg.Add(1)
 		go func(idx int) {
-			_, id := ff.SubscribeLogs(32, crit, "")
+			_, id, _ := ff.SubscribeLogs(32, crit, "")
 			defer func() {
 				time.Sleep(100 * time.Nanosecond)
 				ff.UnsubscribeLogs(id)

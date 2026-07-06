@@ -94,7 +94,7 @@ func TestEthSubscribeReceipts(t *testing.T) {
 	}
 	ff := rpchelper.New(ctx, rpchelper.DefaultFiltersConfig, backend, nil, nil, onNewSnapshot, m.Log, nil)
 	subscriptionReadyWg.Wait()
-	newReceipts, id := ff.SubscribeReceipts(16, filters.ReceiptsFilterCriteria{
+	newReceipts, id, _ := ff.SubscribeReceipts(16, filters.ReceiptsFilterCriteria{
 		TransactionHashes: []common.Hash{},
 	})
 	defer ff.UnsubscribeReceipts(id)

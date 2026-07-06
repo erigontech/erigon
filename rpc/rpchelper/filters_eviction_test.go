@@ -54,7 +54,8 @@ func TestEvictStaleSubscriptionsRemovesIdleFilters(t *testing.T) {
 
 	headsCh, headsID := f.SubscribeNewHeads(8, ProtocolHTTP)
 	txsCh, txsID := f.SubscribePendingTxs(8, ProtocolHTTP)
-	logsCh, logsID := f.SubscribeLogs(8, filters.FilterCriteria{}, ProtocolHTTP)
+	logsCh, logsID, err := f.SubscribeLogs(8, filters.FilterCriteria{}, ProtocolHTTP)
+	require.NoError(t, err)
 
 	headsSub, ok := f.headsSubs.Get(headsID)
 	require.True(t, ok)
@@ -143,7 +144,8 @@ func TestAddAfterUnsubscribeDoesNotOrphanStore(t *testing.T) {
 		require.False(t, ok)
 	})
 	t.Run("logs", func(t *testing.T) {
-		_, id := f.SubscribeLogs(8, filters.FilterCriteria{}, ProtocolHTTP)
+		_, id, err := f.SubscribeLogs(8, filters.FilterCriteria{}, ProtocolHTTP)
+		require.NoError(t, err)
 		require.True(t, f.UnsubscribeLogs(id))
 		require.False(t, f.hasTrackedSub(SubscriptionID(id)))
 		f.AddLogs(id, &types.Log{})
@@ -163,7 +165,8 @@ func TestLogsEvictionBatchesRemoteFilterUpdate(t *testing.T) {
 
 	ids := make([]LogsSubID, 0, 3)
 	for range 3 {
-		_, id := f.SubscribeLogs(8, filters.FilterCriteria{}, ProtocolHTTP)
+		_, id, err := f.SubscribeLogs(8, filters.FilterCriteria{}, ProtocolHTTP)
+		require.NoError(t, err)
 		lf, ok := f.logsSubs.logsFilters.Get(id)
 		require.True(t, ok)
 		backdateSub(t, lf.sender, 2*time.Hour)
