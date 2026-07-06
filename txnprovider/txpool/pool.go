@@ -477,7 +477,6 @@ func (p *TxPool) processRemoteTxns(ctx context.Context) (err error) {
 		}
 	}()
 
-	log.Warn("[dbg.pool] process remote transactions", "len(p.unprocessedRemoteTxns.Txns)", len(p.unprocessedRemoteTxns.Txns))
 	defer processBatchTxnsTimer.ObserveDuration(time.Now())
 	coreDB, cache := p.chainDB()
 	coreTx, err := coreDB.BeginTemporalRo(ctx)
