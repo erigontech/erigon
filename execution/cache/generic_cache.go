@@ -71,10 +71,11 @@ type GenericCache[T any] struct {
 	// envelope; a step the envelope can't fund stops the growth (freelru then
 	// evicts within the current size). A cache with a small working set never
 	// grows past startCap, so it costs a few KB regardless of its configured
-	// budget. resizeMu guards curCap/reservedBytes and the resize itself.
+	// budget. resizeMu serialises the resize and guards reservedBytes; curCap is
+	// atomic because the put fast-path reads it outside resizeMu.
 	startCap      uint32
 	maxCap        uint32
-	curCap        uint32
+	curCap        atomic.Uint32
 	avgEntryBytes int64 // per-domain byte estimate; maps slot count ↔ envelope bytes
 	resizeMu      sync.Mutex
 	reservedBytes int64
@@ -166,12 +167,12 @@ func newGenericCacheEntries[T any](capacityBytes datasize.ByteSize, capacityEntr
 	c := &GenericCache[T]{
 		capacityB:     capacityBytes,
 		startCap:      capacityEntries,
-		curCap:        capacityEntries,
 		maxCap:        capacityEntries,
 		avgEntryBytes: avgBytesPerEntry,
 		mode:          mode,
 		sizeFunc:      sizeFunc,
 	}
+	c.curCap.Store(capacityEntries)
 	// Before any unwind every entry predates the (nonexistent) floor, so all
 	// reads are valid; the floor only drops once an unwind happens.
 	c.coh.Init()
@@ -201,14 +202,15 @@ func (c *GenericCache[T]) maybeGrow() {
 	defer c.resizeMu.Unlock()
 
 	old := c.data.Load()
-	if c.curCap >= c.maxCap || old.Len() < int(c.curCap) {
+	curCap := c.curCap.Load()
+	if curCap >= c.maxCap || old.Len() < int(curCap) {
 		return
 	}
-	newCap := c.curCap * genericCacheGrowFactor
+	newCap := curCap * genericCacheGrowFactor
 	if newCap > c.maxCap {
 		newCap = c.maxCap
 	}
-	delta := int64(newCap-c.curCap) * c.avgEntryBytes
+	delta := int64(newCap-curCap) * c.avgEntryBytes
 	if !cachebudget.Global.Reserve(delta) {
 		return
 	}
@@ -219,7 +221,7 @@ func (c *GenericCache[T]) maybeGrow() {
 		}
 	}
 	c.data.Store(next)
-	c.curCap = newCap
+	c.curCap.Store(newCap)
 	c.reservedBytes += delta
 }
 
@@ -341,7 +343,7 @@ func (c *GenericCache[T]) put(key []byte, value T, txNum uint64, overwrite bool)
 
 	// ModeEvictLRU: grow toward the ceiling before inserting into a full LRU, so a
 	// busy cache expands into its budget rather than evicting at the start size.
-	if c.mode != ModeNoOp && lru.Len() >= int(c.curCap) && c.curCap < c.maxCap {
+	if curCap := c.curCap.Load(); c.mode != ModeNoOp && lru.Len() >= int(curCap) && curCap < c.maxCap {
 		c.maybeGrow()
 		lru = c.data.Load()
 	}
@@ -396,7 +398,7 @@ func (c *GenericCache[T]) Clear() {
 		cachebudget.Global.Release(c.reservedBytes - int64(c.startCap)*c.avgEntryBytes)
 		c.reservedBytes = int64(c.startCap) * c.avgEntryBytes
 	}
-	c.curCap = c.startCap
+	c.curCap.Store(c.startCap)
 	c.data.Store(c.newShards(c.startCap))
 }
 

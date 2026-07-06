@@ -44,7 +44,7 @@ type growLRU[V any] struct {
 	maxCap   uint32
 
 	resizeMu sync.Mutex
-	curCap   uint32
+	curCap   atomic.Uint32
 	reserved int64
 	closed   bool
 }
@@ -66,7 +66,8 @@ func newGrowLRU[V any](maxBytes datasize.ByteSize, avgBytes uint32, onEvict func
 	if start > maxCap {
 		start = maxCap
 	}
-	g := &growLRU[V]{onEvict: onEvict, avgBytes: int64(avgBytes), startCap: start, maxCap: maxCap, curCap: start}
+	g := &growLRU[V]{onEvict: onEvict, avgBytes: int64(avgBytes), startCap: start, maxCap: maxCap}
+	g.curCap.Store(start)
 	g.reserved = int64(start) * g.avgBytes
 	cachebudget.Global.Take(g.reserved)
 	g.cur.Store(g.newShards(start))
@@ -88,7 +89,7 @@ func (g *growLRU[V]) Get(key uint64) (V, bool) { return g.cur.Load().Get(key) }
 
 func (g *growLRU[V]) Add(key uint64, value V) {
 	lru := g.cur.Load()
-	if lru.Len() >= int(g.curCap) && g.curCap < g.maxCap {
+	if curCap := g.curCap.Load(); lru.Len() >= int(curCap) && curCap < g.maxCap {
 		g.maybeGrow()
 		lru = g.cur.Load()
 	}
@@ -99,14 +100,15 @@ func (g *growLRU[V]) maybeGrow() {
 	g.resizeMu.Lock()
 	defer g.resizeMu.Unlock()
 	old := g.cur.Load()
-	if g.curCap >= g.maxCap || old.Len() < int(g.curCap) {
+	curCap := g.curCap.Load()
+	if curCap >= g.maxCap || old.Len() < int(curCap) {
 		return
 	}
-	newCap := g.curCap * genericCacheGrowFactor
+	newCap := curCap * genericCacheGrowFactor
 	if newCap > g.maxCap {
 		newCap = g.maxCap
 	}
-	delta := int64(newCap-g.curCap) * g.avgBytes
+	delta := int64(newCap-curCap) * g.avgBytes
 	if !cachebudget.Global.Reserve(delta) {
 		return
 	}
@@ -117,7 +119,7 @@ func (g *growLRU[V]) maybeGrow() {
 		}
 	}
 	g.cur.Store(next)
-	g.curCap = newCap
+	g.curCap.Store(newCap)
 	g.reserved += delta
 }
 
@@ -131,7 +133,7 @@ func (g *growLRU[V]) Purge() {
 	defer g.resizeMu.Unlock()
 	cachebudget.Global.Release(g.reserved - int64(g.startCap)*g.avgBytes)
 	g.reserved = int64(g.startCap) * g.avgBytes
-	g.curCap = g.startCap
+	g.curCap.Store(g.startCap)
 	g.cur.Store(g.newShards(g.startCap))
 }
 
