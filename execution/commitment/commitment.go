@@ -965,6 +965,9 @@ func (branchData BranchData) ReplacePlainKeys(newData []byte, fn func(key []byte
 // touch - whether this child has been modified or deleted in this branchData (corresponding bit in touchMap is set)
 // after - whether after this branchData application, the child is present in the tree or not (corresponding bit in afterMap is set)
 func (branchData BranchData) IsComplete() bool {
+	if len(branchData) < 4 {
+		return false
+	}
 	touchMap := binary.BigEndian.Uint16(branchData[0:])
 	afterMap := binary.BigEndian.Uint16(branchData[2:])
 	return ^touchMap&afterMap == 0
