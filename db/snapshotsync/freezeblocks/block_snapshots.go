@@ -34,6 +34,7 @@ import (
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/background"
+	"github.com/erigontech/erigon/common/concurrent"
 	"github.com/erigontech/erigon/common/dbg"
 	dir2 "github.com/erigontech/erigon/common/dir"
 	"github.com/erigontech/erigon/common/estimate"
@@ -162,6 +163,12 @@ type BlockRetire struct {
 	heimdallStore         heimdall.Store
 	bridgeStore           bridge.Store
 	borDataNotReadyBefore time.Time
+
+	// wg joins the background goroutine spawned by RetireBlocksInBackground so
+	// Close can wait for an in-flight retire before the DB/snapshots are torn down.
+	wg     concurrent.ClosingWaitGroup
+	ctx    context.Context
+	stopFn context.CancelFunc
 }
 
 func NewBlockRetire(
@@ -199,6 +206,7 @@ func NewBlockRetire(
 		bridgeStore:           bridgeStore,
 		borDataNotReadyBefore: time.Now(),
 	}
+	r.ctx, r.stopFn = context.WithCancel(context.Background())
 	r.workers.Store(int32(compressWorkers))
 	return r
 }
@@ -431,10 +439,21 @@ func (br *BlockRetire) RetireBlocksInBackground(
 	if !br.working.CompareAndSwap(false, true) {
 		return false
 	}
+	if !br.wg.TryAdd() { // refused once Close has latched
+		br.working.Store(false)
+		return false
+	}
 
 	go func() {
+		defer br.wg.Done()
 		defer onDone()
 		defer br.working.Store(false)
+
+		// Cancel this retire when either the caller's ctx or Close (br.ctx) fires.
+		ctx, cancel := context.WithCancel(ctx)
+		defer cancel()
+		stopOnClose := context.AfterFunc(br.ctx, cancel)
+		defer stopOnClose()
 
 		if br.snBuildAllowed != nil {
 			//we are inside own goroutine - it's fine to block here
@@ -468,6 +487,16 @@ func (br *BlockRetire) RetireBlocksInBackground(
 	}()
 
 	return true
+}
+
+// Close cancels any in-flight background retire and waits for it to finish, so
+// callers can safely tear down the DB and snapshots afterwards. Idempotent.
+func (br *BlockRetire) Close() {
+	if !br.wg.BeginClose() {
+		return
+	}
+	br.stopFn()
+	br.wg.Wait()
 }
 
 func (br *BlockRetire) RetireBlocks(

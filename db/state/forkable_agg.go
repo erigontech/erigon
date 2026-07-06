@@ -13,6 +13,7 @@ import (
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/background"
+	"github.com/erigontech/erigon/common/concurrent"
 	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/datadir"
@@ -43,7 +44,7 @@ type ForkableAgg struct {
 	ctx       context.Context
 	ctxCancel context.CancelFunc
 
-	wg closingWaitGroup
+	wg concurrent.ClosingWaitGroup
 
 	ps *background.ProgressSet
 

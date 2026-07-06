@@ -184,3 +184,11 @@ func (p *Provider) Initialize(deps Deps) error {
 
 	return nil
 }
+
+// Close drains the block-retire background goroutine so its in-flight DB read
+// transactions and snapshot writes finish before the caller tears down the DB.
+func (p *Provider) Close() {
+	if p.BlockRetire != nil {
+		p.BlockRetire.Close()
+	}
+}

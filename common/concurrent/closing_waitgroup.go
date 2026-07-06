@@ -14,22 +14,22 @@
 // You should have received a copy of the GNU Lesser General Public License
 // along with Erigon. If not, see <http://www.gnu.org/licenses/>.
 
-package state
+package concurrent
 
 import "sync"
 
-// closingWaitGroup is a sync.WaitGroup with a close latch. Every goroutine
+// ClosingWaitGroup is a sync.WaitGroup with a close latch. Every goroutine
 // registers via TryAdd, which refuses once BeginClose has latched, so an Add
 // can't race Wait on a zero counter (WaitGroup reuse). The WaitGroup is a named
 // field, not embedded, so no bare Add can bypass the latch.
-type closingWaitGroup struct {
+type ClosingWaitGroup struct {
 	wg      sync.WaitGroup
 	mu      sync.Mutex
 	closing bool
 }
 
 // TryAdd registers the caller on the group unless BeginClose has latched.
-func (g *closingWaitGroup) TryAdd() bool {
+func (g *ClosingWaitGroup) TryAdd() bool {
 	g.mu.Lock()
 	defer g.mu.Unlock()
 	if g.closing {
@@ -39,14 +39,14 @@ func (g *closingWaitGroup) TryAdd() bool {
 	return true
 }
 
-func (g *closingWaitGroup) Done() { g.wg.Done() }
+func (g *ClosingWaitGroup) Done() { g.wg.Done() }
 
-func (g *closingWaitGroup) Wait() { g.wg.Wait() }
+func (g *ClosingWaitGroup) Wait() { g.wg.Wait() }
 
 // BeginClose latches the group closed, returning false if it was already latched
 // so Close is idempotent. Latching before Close's Wait makes every TryAdd either
 // register before Wait or get refused.
-func (g *closingWaitGroup) BeginClose() bool {
+func (g *ClosingWaitGroup) BeginClose() bool {
 	g.mu.Lock()
 	defer g.mu.Unlock()
 	if g.closing {
