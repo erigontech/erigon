@@ -21,7 +21,6 @@ import (
 	"errors"
 
 	"github.com/erigontech/erigon/common"
-	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/accounts"
 	"github.com/erigontech/erigon/polygon/heimdall"
@@ -57,14 +56,12 @@ func (api *BorImpl) GetSnapshot(number *rpc.BlockNumber) (*Snapshot, error) {
 	}
 	defer tx.Rollback()
 
-	overlayTx := api.filters.WithOverlay(tx)
 	// Retrieve the requested block number (or current if none requested)
-	var header *types.Header
-	if number == nil || *number == rpc.LatestBlockNumber {
-		header = rawdb.ReadCurrentHeader(overlayTx)
-	} else {
-		header, _ = api.headerByNumber(ctx, *number, tx)
+	blockNr := rpc.LatestBlockNumber
+	if number != nil {
+		blockNr = *number
 	}
+	header, _ := api.headerByNumber(ctx, blockNr, tx)
 	// Ensure we have an actually valid block
 	if header == nil {
 		return nil, errUnknownBlock
@@ -162,14 +159,12 @@ func (api *BorImpl) GetSigners(number *rpc.BlockNumber) ([]common.Address, error
 	}
 	defer tx.Rollback()
 
-	overlayTx := api.filters.WithOverlay(tx)
 	// Retrieve the requested block number (or current if none requested)
-	var header *types.Header
-	if number == nil || *number == rpc.LatestBlockNumber {
-		header = rawdb.ReadCurrentHeader(overlayTx)
-	} else {
-		header, _ = api.headerByNumber(ctx, *number, tx)
+	blockNr := rpc.LatestBlockNumber
+	if number != nil {
+		blockNr = *number
 	}
+	header, _ := api.headerByNumber(ctx, blockNr, tx)
 	// Ensure we have an actually valid block
 	if header == nil {
 		return nil, errUnknownBlock
@@ -303,23 +298,13 @@ func (api *BorImpl) GetSnapshotProposer(blockNrOrHash *rpc.BlockNumberOrHash) (c
 	}
 	defer tx.Rollback()
 
-	overlayTx := api.filters.WithOverlay(tx)
 	var header *types.Header
-	//nolint:nestif
 	if blockNrOrHash == nil {
-		header = rawdb.ReadCurrentHeader(overlayTx)
-	} else {
-		if blockNr, ok := blockNrOrHash.Number(); ok {
-			if blockNr == rpc.LatestBlockNumber {
-				header = rawdb.ReadCurrentHeader(overlayTx)
-			} else {
-				header, err = api.headerByNumber(ctx, blockNr, tx)
-			}
-		} else {
-			if blockHash, ok := blockNrOrHash.Hash(); ok {
-				header, err = api.headerByHash(ctx, blockHash, tx)
-			}
-		}
+		header, err = api.headerByNumber(ctx, rpc.LatestBlockNumber, tx)
+	} else if blockNr, ok := blockNrOrHash.Number(); ok {
+		header, err = api.headerByNumber(ctx, blockNr, tx)
+	} else if blockHash, ok := blockNrOrHash.Hash(); ok {
+		header, err = api.headerByHash(ctx, blockHash, tx)
 	}
 
 	if header == nil || err != nil {
@@ -342,23 +327,14 @@ func (api *BorImpl) GetSnapshotProposerSequence(blockNrOrHash *rpc.BlockNumberOr
 	}
 	defer tx.Rollback()
 
-	overlayTx := api.filters.WithOverlay(tx)
 	// Retrieve the requested block number (or current if none requested)
 	var header *types.Header
 	if blockNrOrHash == nil {
-		header = rawdb.ReadCurrentHeader(overlayTx)
-	} else {
-		if blockNr, ok := blockNrOrHash.Number(); ok {
-			if blockNr == rpc.LatestBlockNumber {
-				header = rawdb.ReadCurrentHeader(overlayTx)
-			} else {
-				header, err = api.headerByNumber(ctx, blockNr, tx)
-			}
-		} else {
-			if blockHash, ok := blockNrOrHash.Hash(); ok {
-				header, err = api.headerByHash(ctx, blockHash, tx)
-			}
-		}
+		header, err = api.headerByNumber(ctx, rpc.LatestBlockNumber, tx)
+	} else if blockNr, ok := blockNrOrHash.Number(); ok {
+		header, err = api.headerByNumber(ctx, blockNr, tx)
+	} else if blockHash, ok := blockNrOrHash.Hash(); ok {
+		header, err = api.headerByHash(ctx, blockHash, tx)
 	}
 
 	// Ensure we have an actually valid block

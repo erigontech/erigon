@@ -32,6 +32,7 @@ import (
 	"github.com/cenkalti/backoff/v4"
 	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/require"
+	"google.golang.org/grpc"
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/crypto"
@@ -52,6 +53,7 @@ import (
 	"github.com/erigontech/erigon/execution/state/contracts"
 	"github.com/erigontech/erigon/execution/tests/blockgen"
 	"github.com/erigontech/erigon/execution/types"
+	"github.com/erigontech/erigon/node/gointerfaces/remoteproto"
 	"github.com/erigontech/erigon/node/gointerfaces/txpoolproto"
 )
 
@@ -1321,6 +1323,56 @@ func TestAssembleBlockAmsterdamForkTransition(t *testing.T) {
 	require.NoError(t, err)
 }
 
+// TestStateChangeVersionMatchesCommitted pins the contract the Coherent kvcache
+// relies on: the StateVersionId announced in a state-change batch equals the
+// PlainStateVersion a committed read tx observes once that batch's commit lands.
+// If they diverge, version-keyed cache roots never match any reader.
+func TestStateChangeVersionMatchesCommitted(t *testing.T) {
+	for _, mode := range []struct {
+		name string
+		opts []execmoduletester.Option
+	}{
+		{name: "fg-commit"},
+		{name: "bg-commit", opts: []execmoduletester.Option{execmoduletester.WithFcuBackgroundCommit()}},
+	} {
+		t.Run(mode.name, func(t *testing.T) {
+			ctx := t.Context()
+			m := execmoduletester.New(t, mode.opts...)
+			exec := m.ExecModule
+
+			streamCtx, cancel := context.WithCancel(ctx)
+			defer cancel()
+			stream, err := m.StateChangesClient().StateChanges(streamCtx, &remoteproto.StateChangeRequest{}, grpc.WaitForReady(true))
+			require.NoError(t, err)
+
+			chainPack, err := blockgen.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 3, nil)
+			require.NoError(t, err)
+			require.NoError(t, insertValidateAndUfc1By1(ctx, exec, chainPack.Blocks))
+
+			topBlock := chainPack.TopBlock.NumberU64()
+			var lastAnnounced uint64
+			for found := false; !found; {
+				batch, err := stream.Recv()
+				require.NoError(t, err)
+				for _, cb := range batch.ChangeBatch {
+					if cb.Direction == remoteproto.Direction_FORWARD && cb.BlockHeight == topBlock {
+						lastAnnounced = batch.StateVersionId
+						found = true
+					}
+				}
+			}
+
+			exec.WaitIdle(ctx)
+			var committed uint64
+			require.NoError(t, m.DB.View(ctx, func(tx kv.Tx) error {
+				committed, err = rawdb.GetStateVersion(tx)
+				return err
+			}))
+			require.Equal(t, committed, lastAnnounced, "announced StateVersionId must equal committed PlainStateVersion")
+		})
+	}
+}
+
 // TestNotificationDispatchForegroundCommit verifies that after FCU returns
 // Success with the default foreground commit path:
 // 1. Header notifications have been dispatched (subscribers receive them)
@@ -1364,8 +1416,9 @@ func TestNotificationDispatchForegroundCommit(t *testing.T) {
 // (see updateForkChoice / runPostForkchoice): the bg goroutine releases
 // the semaphore only after Flush+Commit, so FCU N+1 always reads the
 // committed state of FCU N. This test exercises one genesis → block 1
-// transition; multi-block coverage lives in TestNotificationDispatchForegroundCommit
-// and the integration suites.
+// transition; multi-block bg-commit coverage lives in
+// TestReorgBackAndForwardIntoCanonicalChain (bg-commit mode) and
+// TestInsertBlocksWithBatchedFCU_BadBlockRecovery_Background.
 func TestNotificationDispatchBackgroundCommit(t *testing.T) {
 	m := execmoduletester.New(t, execmoduletester.WithFcuBackgroundCommit())
 

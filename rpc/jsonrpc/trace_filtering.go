@@ -346,6 +346,9 @@ func (api *TraceAPIImpl) Filter(ctx context.Context, req TraceFilterRequest, gas
 		if err != nil {
 			return err
 		}
+		if headNumber == nil {
+			return errors.New("current header number not found")
+		}
 		toBlock = *headNumber
 	} else {
 		toBlock, _, _, err = rpchelper.GetBlockNumber(ctx, *req.ToBlock, dbtx, api._blockReader, nil)

@@ -53,7 +53,7 @@ import (
 // an implementation defined in another package (e.g. execmodule.Dispatcher)
 // without creating a circular import.
 type NotificationSender interface {
-	Dispatch(ctx context.Context, tx kv.Tx, accumulator *shards.Accumulator, recentReceipts *shards.RecentReceipts, finishProgressBefore, finishProgressAfter uint64, prevUnwindPoint *uint64) error
+	Dispatch(ctx context.Context, tx kv.Tx, accumulator *shards.Accumulator, recentReceipts *shards.RecentReceipts, finishProgressBefore, finishProgressAfter uint64, prevUnwindPoint *uint64, preCommit bool) error
 }
 
 type Hook struct {
@@ -121,8 +121,8 @@ func (h *Hook) BeforeRun(tx kv.Tx, inSync bool) error {
 }
 
 // SendNotifications dispatches all pending notifications (state changes,
-// headers, logs, receipts) via the Dispatcher. The tx is the data source —
-// either the SD's blockOverlay (pre-commit) or a committed DB tx.
+// headers, logs, receipts) via the Dispatcher. The tx must be a committed DB
+// tx (pre-commit overlay dispatch goes through the Dispatcher directly).
 //
 // All call sites follow the same pattern:
 //
@@ -146,6 +146,7 @@ func (h *Hook) SendNotifications(tx kv.Tx, finishProgressBefore uint64) error {
 		finishProgressBefore,
 		finishStageAfterSync,
 		h.sync.PrevUnwindPoint(),
+		false,
 	)
 }
 

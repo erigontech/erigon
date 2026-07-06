@@ -61,7 +61,9 @@ func (api *DebugAPIImpl) traceBlock(ctx context.Context, blockNrOrHash rpc.Block
 	}
 	defer tx.Rollback()
 
-	blockNumber, hash, _, err := rpchelper.GetCanonicalBlockNumber(ctx, blockNrOrHash, tx, api._blockReader, api.filters)
+	// nil filters: resolve on the committed view — the replay below reads
+	// temporal data through the same plain tx (see rpchelper.GetBlockNumber).
+	blockNumber, hash, _, err := rpchelper.GetCanonicalBlockNumber(ctx, blockNrOrHash, tx, api._blockReader, nil)
 	if err != nil {
 		return err
 	}

@@ -137,7 +137,7 @@ func RootCommand() (*cobra.Command, *httpcfg.HttpCfg) {
 	rootCmd.PersistentFlags().BoolVar(&cfg.GethCompatibility, "rpc.gethcompat", false, "Enables Geth-compatible storage iteration order for debug_storageRangeAt (sorted by keccak256 hash). Disabled by default for performance.")
 	rootCmd.PersistentFlags().StringVar(&cfg.TxPoolApiAddr, "txpool.api.addr", "", "txpool api network address, for example: 127.0.0.1:9090 (default: use value of --private.api.addr)")
 
-	rootCmd.PersistentFlags().StringVar(&stateCacheStr, "state.cache", "128MB", "Amount of data to store in the version-keyed StateCache. Set 0 to fall back to a non-versioned last-block cache")
+	rootCmd.PersistentFlags().StringVar(&stateCacheStr, "state.cache", "128MB", "Amount of data to store in the version-keyed StateCache (an equally-sized code cache is budgeted on top). Set 0 to fall back to a non-versioned last-block cache")
 	rootCmd.PersistentFlags().BoolVar(&cfg.GRPCServerEnabled, "grpc", false, "Enable GRPC server")
 	rootCmd.PersistentFlags().StringVar(&cfg.GRPCListenAddress, "grpc.addr", nodecfg.DefaultGRPCHost, "GRPC server listening interface")
 	rootCmd.PersistentFlags().IntVar(&cfg.GRPCPort, "grpc.port", nodecfg.DefaultGRPCPort, "GRPC server listening port")

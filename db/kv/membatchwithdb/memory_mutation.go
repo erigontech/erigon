@@ -29,8 +29,6 @@ import (
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
-	"github.com/erigontech/erigon/db/kv/dbcfg"
-	"github.com/erigontech/erigon/db/kv/mdbx"
 	"github.com/erigontech/erigon/db/kv/order"
 	"github.com/erigontech/erigon/db/kv/stream"
 )
@@ -75,36 +73,6 @@ func NewMemoryBatch(tx kv.TemporalTx, tmpDir string, logger log.Logger) (*Memory
 		db:             tx,
 		memDb:          memDB,
 		memTx:          mem,
-		deletedEntries: make(map[string]map[string]struct{}),
-		deletedDups:    map[string]map[string]map[string]struct{}{},
-		clearedTables:  make(map[string]struct{}),
-	}, nil
-}
-
-// NewMemoryBatchMDBX creates an MDBX-backed in-memory batch. The MDBX write
-// transaction pins the goroutine to an OS thread via runtime.LockOSThread(),
-// so this variant must not be held across goroutine migrations.
-func NewMemoryBatchMDBX(tx kv.TemporalTx, tmpDir string, logger log.Logger) (mm *MemoryMutation, err error) {
-	tmpDB := mdbx.New(dbcfg.TemporaryDB, logger).InMem(nil, tmpDir).GrowthStep(64 * datasize.MB).MapSize(512 * datasize.GB).MustOpen()
-	defer func() {
-		if err != nil {
-			tmpDB.Close()
-		}
-	}()
-	memTx, err := tmpDB.BeginRw(context.Background()) // nolint:gocritic
-	if err != nil {
-		return nil, fmt.Errorf("NewMemoryBatchMDBX: begin tx: %w", err)
-	}
-	if err = initSequences(tx, memTx); err != nil {
-		memTx.Rollback()
-		return nil, fmt.Errorf("NewMemoryBatchMDBX: init sequences: %w", err)
-	}
-
-	return &MemoryMutation{
-		mu:             &sync.RWMutex{},
-		db:             tx,
-		memDb:          tmpDB,
-		memTx:          memTx,
 		deletedEntries: make(map[string]map[string]struct{}),
 		deletedDups:    map[string]map[string]map[string]struct{}{},
 		clearedTables:  make(map[string]struct{}),
@@ -1053,11 +1021,11 @@ func (m *MemoryMutation) NewReadView(tx kv.Tx) kv.TemporalTx {
 // *MemoryMutation. Used by NewTemporalReadView which needs to embed it.
 func (m *MemoryMutation) newReadViewMut(tx kv.Tx) *MemoryMutation {
 	// Read views stay safe under a concurrent parent Close only because the
-	// pure-Go memStore's Rollback/Close are no-ops on its data; an MDBX-backed
+	// pure-Go memStore's Rollback/Close are no-ops on its data; a real-DB-backed
 	// memTx would invalidate cursors mid-iteration. Relaxing this assertion
 	// requires refcount/drain logic at the parent's Close.
 	if _, ok := m.memTx.(*memStore); !ok {
-		panic(fmt.Sprintf("MemoryMutation.newReadViewMut: shared-tx read views require pure-Go memStore backing; got %T (use NewMemoryBatch, not NewMemoryBatchMDBX)", m.memTx))
+		panic(fmt.Sprintf("MemoryMutation.newReadViewMut: shared-tx read views require pure-Go memStore backing; got %T (use NewMemoryBatch)", m.memTx))
 	}
 	var dbTx kv.TemporalTx
 	if t, ok := tx.(kv.TemporalTx); ok {

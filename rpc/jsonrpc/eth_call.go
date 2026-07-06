@@ -423,7 +423,9 @@ func (api *APIImpl) GetProof(ctx context.Context, address common.Address, storag
 	}
 	defer roTx.Rollback()
 
-	requestedBlockNr, _, _, err := rpchelper.GetCanonicalBlockNumber(ctx, blockNrOrHash, roTx, api._blockReader, api.filters)
+	// nil filters: resolve on the committed view — getProof gates on and reads
+	// the same plain roTx (see rpchelper.GetBlockNumber).
+	requestedBlockNr, _, _, err := rpchelper.GetCanonicalBlockNumber(ctx, blockNrOrHash, roTx, api._blockReader, nil)
 	if err != nil {
 		return nil, err
 	} else if requestedBlockNr == 0 {
@@ -649,7 +651,9 @@ func (api *BaseAPI) getWitness(ctx context.Context, db kv.TemporalRoDB, blockNrO
 	}
 	defer tx.Rollback()
 
-	blockNr, hash, _, err := rpchelper.GetCanonicalBlockNumber(ctx, blockNrOrHash, tx, api._blockReader, api.filters) // DoCall cannot be executed on non-canonical blocks
+	// nil filters: resolve on the committed view — the witness computation reads
+	// temporal data through the same plain tx (see rpchelper.GetBlockNumber).
+	blockNr, hash, _, err := rpchelper.GetCanonicalBlockNumber(ctx, blockNrOrHash, tx, api._blockReader, nil) // DoCall cannot be executed on non-canonical blocks
 	if err != nil {
 		return nil, err
 	}

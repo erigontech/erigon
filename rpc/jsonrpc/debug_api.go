@@ -139,7 +139,9 @@ func (api *DebugAPIImpl) StorageRangeAt(ctx context.Context, blockHash common.Ha
 	}
 
 	blockNrOrHash := rpc.BlockNumberOrHashWithHash(blockHash, true)
-	blockNumber, _, _, err := rpchelper.GetCanonicalBlockNumber(ctx, blockNrOrHash, tx, api._blockReader, api.filters)
+	// nil filters: resolve on the committed view — the storage-range scan reads
+	// temporal data through the same plain tx (see rpchelper.GetBlockNumber).
+	blockNumber, _, _, err := rpchelper.GetCanonicalBlockNumber(ctx, blockNrOrHash, tx, api._blockReader, nil)
 	if err != nil {
 		if errors.As(err, &rpc.BlockNotFoundErr{}) {
 			return StorageRangeResult{}, nil
@@ -234,7 +236,9 @@ func (api *DebugAPIImpl) AccountRange(ctx context.Context, blockNrOrHash rpc.Blo
 		}
 
 	} else if _, ok := blockNrOrHash.Hash(); ok {
-		bn, _, _, err2 := rpchelper.GetCanonicalBlockNumber(ctx, blockNrOrHash, tx, api._blockReader, api.filters)
+		// nil filters: resolve on the committed view — the dumper reads temporal
+		// data through the same plain tx (see rpchelper.GetBlockNumber).
+		bn, _, _, err2 := rpchelper.GetCanonicalBlockNumber(ctx, blockNrOrHash, tx, api._blockReader, nil)
 		if err2 != nil {
 			return state.IteratorDump{}, err2
 		}
@@ -633,7 +637,7 @@ func (api *DebugAPIImpl) GetRawHeader(ctx context.Context, blockNrOrHash rpc.Blo
 		}
 		return nil, err
 	}
-	header, err := api._blockReader.Header(ctx, tx, h, n)
+	header, err := api._blockReader.Header(ctx, api.filters.WithOverlay(tx), h, n)
 	if err != nil {
 		return nil, err
 	}

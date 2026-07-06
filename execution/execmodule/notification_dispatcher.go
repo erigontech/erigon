@@ -79,6 +79,7 @@ func NewDispatcher(
 //   - finishProgressBefore: Finish stage progress before the sync run
 //   - finishProgressAfter: Finish stage progress after the sync run
 //   - prevUnwindPoint: previous unwind point from the pipeline (may be nil)
+//   - preCommit: tx is an overlay whose flush+commit has not happened yet
 func (d *Dispatcher) Dispatch(
 	ctx context.Context,
 	tx kv.Tx,
@@ -87,6 +88,7 @@ func (d *Dispatcher) Dispatch(
 	finishProgressBefore uint64,
 	finishProgressAfter uint64,
 	prevUnwindPoint *uint64,
+	preCommit bool,
 ) error {
 	// Update the accumulator with the current plain state version so downstream
 	// consumers (e.g. state cache) know state has moved on.
@@ -94,6 +96,12 @@ func (d *Dispatcher) Dispatch(
 		plainStateVersion, err := rawdb.GetStateVersion(tx)
 		if err != nil {
 			return err
+		}
+		if preCommit {
+			// The flush that follows bumps PlainStateVersion exactly once
+			// (TemporalMemBatch.flushLocked); announce the post-commit value so
+			// version-keyed caches match what committed readers will observe.
+			plainStateVersion++
 		}
 		accumulator.SetStateID(plainStateVersion)
 	}

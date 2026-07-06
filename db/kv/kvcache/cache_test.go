@@ -169,6 +169,84 @@ func TestEviction(t *testing.T) {
 	require.Equal(int(cfg.CacheSize.Bytes()), c.stateEvict.Size())
 }
 
+// A request whose cache view outlives KeepViews state-version advances (e.g. a
+// long eth_call) must fall back to its own tx snapshot, not error out.
+func TestViewSurvivesRootEviction(t *testing.T) {
+	require, ctx := require.New(t), t.Context()
+	cfg := DefaultCoherentConfig
+	cfg.NewBlockWait = 0
+	c := New(cfg)
+
+	db := temporaltest.NewTestDB(t, datadir.New(t.TempDir()))
+	k1 := [20]byte{1}
+
+	err := db.ViewTemporal(ctx, func(tx kv.TemporalTx) error {
+		cacheView, err := c.View(ctx, tx)
+		require.NoError(err)
+		view := cacheView.(*CoherentView)
+
+		for i := uint64(1); i <= cfg.KeepViews+2; i++ {
+			c.OnNewBlock(&remoteproto.StateChangeBatch{StateVersionId: view.stateVersionID + i})
+		}
+		_, rootAlive := c.roots[view.stateVersionID]
+		require.False(rootAlive, "root must be evicted for this test to be meaningful")
+
+		v, err := c.Get(k1[:], tx, view.stateVersionID)
+		require.NoError(err)
+		require.Empty(v)
+
+		code, err := c.GetCode(k1[:], tx, view.stateVersionID)
+		require.NoError(err)
+		require.Empty(code)
+		return nil
+	})
+	require.NoError(err)
+}
+
+// Reads through a view whose version is not the latest (pre-commit window, or
+// no state-change stream at all) bypass eviction accounting, so they must not
+// grow the root either — otherwise memory is unbounded.
+func TestNonLatestViewReadsAreNotCached(t *testing.T) {
+	require, ctx := require.New(t), t.Context()
+	cfg := DefaultCoherentConfig
+	cfg.NewBlockWait = 0
+	c := New(cfg)
+
+	db := temporaltest.NewTestDB(t, datadir.New(t.TempDir()))
+	k1 := [20]byte{1}
+	acc := accounts.Account{Nonce: 1, Balance: *uint256.NewInt(11), CodeHash: accounts.EmptyCodeHash}
+	accEnc := accounts.SerialiseV3(&acc)
+
+	err := db.UpdateTemporal(ctx, func(tx kv.TemporalRwTx) error {
+		d, err := execctx.NewSharedDomains(ctx, tx, log.New())
+		if err != nil {
+			return err
+		}
+		defer d.Close()
+		if err := d.DomainPut(kv.AccountsDomain, tx, k1[:], accEnc, 0, nil); err != nil {
+			return err
+		}
+		return d.Flush(ctx, tx)
+	})
+	require.NoError(err)
+
+	err = db.ViewTemporal(ctx, func(tx kv.TemporalTx) error {
+		cacheView, err := c.View(ctx, tx)
+		require.NoError(err)
+		view := cacheView.(*CoherentView)
+		require.NotEqual(c.latestStateVersionID, view.stateVersionID)
+
+		v, err := c.Get(k1[:], tx, view.stateVersionID)
+		require.NoError(err)
+		require.Equal(accEnc, v)
+
+		require.Zero(c.roots[view.stateVersionID].cache.Len())
+		require.Zero(c.stateEvict.Len())
+		return nil
+	})
+	require.NoError(err)
+}
+
 func TestAPI(t *testing.T) {
 	require := require.New(t)
 

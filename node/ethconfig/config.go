@@ -115,9 +115,8 @@ var Defaults = Config{
 	FcuBackgroundPrune: true,
 	// FcuBackgroundCommit returns the FCU response before the MDBX commit
 	// lands; the commit runs in a background goroutine and successive FCUs are
-	// serialized by the ExecModule semaphore. Until the SD-aware temporal view
-	// (https://github.com/erigontech/erigon/issues/21314) lands, "latest" state
-	// reads can lag the announced head by one block for the commit's duration.
+	// serialized by the ExecModule semaphore. "Latest" state reads can lag the
+	// announced head by one block for the commit's duration.
 	FcuBackgroundCommit: false,
 	ExperimentalBAL:     false,
 	WarmupKzgCtxOnInit:  true,

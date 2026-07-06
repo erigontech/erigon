@@ -367,7 +367,10 @@ func (c *Coherent) View(ctx context.Context, tx kv.TemporalTx) (CacheView, error
 	}
 }
 
-func (c *Coherent) getFromCache(k []byte, id uint64, domain kv.Domain) (*Element, *CoherentRoot, error) {
+// getFromCache returns a nil root when the view's root was already evicted
+// (the view outlived KeepViews version advances): the caller then reads
+// through its own tx snapshot without caching.
+func (c *Coherent) getFromCache(k []byte, id uint64, domain kv.Domain) (*Element, *CoherentRoot) {
 	// using the full lock here rather than RLock as RLock causes a lot of calls to runtime.usleep degrading
 	// performance under load
 	c.lock.Lock()
@@ -375,7 +378,7 @@ func (c *Coherent) getFromCache(k []byte, id uint64, domain kv.Domain) (*Element
 
 	r, ok := c.roots[id]
 	if !ok {
-		return nil, r, fmt.Errorf("too old ViewID: %d, latestStateVersionID=%d", id, c.latestStateVersionID)
+		return nil, nil
 	}
 	isLatest := c.latestStateVersionID == id
 
@@ -388,17 +391,13 @@ func (c *Coherent) getFromCache(k []byte, id uint64, domain kv.Domain) (*Element
 	if it != nil && isLatest {
 		c.stateEvict.MoveToFront(it)
 	}
-	return it, r, nil
+	return it, r
 }
 func (c *Coherent) Get(k []byte, tx kv.TemporalTx, id uint64) (v []byte, err error) {
 	//TODO: Get must accept from user Domain parameter
-	it, r, err := c.getFromCache(k, id, kv.AccountsDomain)
-	if err != nil {
-		return nil, err
-	}
+	it, r := c.getFromCache(k, id, kv.AccountsDomain)
 
 	if it != nil {
-		//fmt.Printf("from cache:  %#x,%x\n", k, it.(*Element).V)
 		c.hits.Inc()
 		return it.V, nil
 	}
@@ -416,7 +415,9 @@ func (c *Coherent) Get(k []byte, tx kv.TemporalTx, id uint64) (v []byte, err err
 	if len(v) == 0 {
 		return v, nil
 	}
-	//fmt.Printf("from db: %#x,%x\n", k, v)
+	if r == nil {
+		return v, nil
+	}
 	c.lock.Lock()
 
 	defer c.lock.Unlock()
@@ -426,13 +427,9 @@ func (c *Coherent) Get(k []byte, tx kv.TemporalTx, id uint64) (v []byte, err err
 }
 
 func (c *Coherent) GetCode(k []byte, tx kv.TemporalTx, id uint64) (v []byte, err error) {
-	it, r, err := c.getFromCache(k, id, kv.CodeDomain)
-	if err != nil {
-		return nil, err
-	}
+	it, r := c.getFromCache(k, id, kv.CodeDomain)
 
 	if it != nil {
-		//fmt.Printf("from cache:  %#x,%x\n", k, it.(*Element).V)
 		c.codeHits.Inc()
 		return it.V, nil
 	}
@@ -442,7 +439,9 @@ func (c *Coherent) GetCode(k []byte, tx kv.TemporalTx, id uint64) (v []byte, err
 	if err != nil {
 		return nil, err
 	}
-	//fmt.Printf("from db: %#x,%x\n", k, v)
+	if r == nil {
+		return v, nil
+	}
 
 	c.lock.Lock()
 	defer c.lock.Unlock()
@@ -466,11 +465,13 @@ func (c *Coherent) removeOldestCode(r *CoherentRoot) {
 func (c *Coherent) add(k, v []byte, r *CoherentRoot, id uint64) *Element {
 	it := &Element{K: k, V: v}
 
-	replaced, _ := r.cache.Set(it)
+	// Non-latest roots bypass eviction accounting, so growing them would be
+	// unbounded (e.g. with no state-change stream feeding OnNewBlock); the
+	// caller's tx read is authoritative for its snapshot, skip caching.
 	if c.latestStateVersionID != id {
-		//fmt.Printf("add to non-last viewID: %d<%d\n", c.latestViewID, id)
 		return it
 	}
+	replaced, _ := r.cache.Set(it)
 	if replaced != nil {
 		c.stateEvict.Remove(replaced)
 	}
@@ -485,11 +486,11 @@ func (c *Coherent) add(k, v []byte, r *CoherentRoot, id uint64) *Element {
 }
 func (c *Coherent) addCode(k, v []byte, r *CoherentRoot, id uint64) *Element {
 	it := &Element{K: k, V: v}
-	replaced, _ := r.codeCache.Set(it)
+	// see add
 	if c.latestStateVersionID != id {
-		//fmt.Printf("add to non-last viewID: %d<%d\n", c.latestViewID, id)
 		return it
 	}
+	replaced, _ := r.codeCache.Set(it)
 	if replaced != nil {
 		c.codeEvict.Remove(replaced)
 	}
