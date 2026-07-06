@@ -167,7 +167,12 @@ type HexPatriciaHashed struct {
 	//processing metrics
 	metrics       *Metrics
 	depthsToTxNum [129]uint64 // endTxNum of file with branch data for that depth
-	hadToLoadL    map[uint64]skipStat
+
+	// lastUpdateCellWasEmpty reports whether the most recent updateCell stamped a key
+	// into an empty cell — i.e. the key is absent from the pre-state trie, so nothing
+	// can exist on disk beneath it.
+	lastUpdateCellWasEmpty bool
+	hadToLoadL             map[uint64]skipStat
 }
 
 // Clones current trie state to allow concurrent processing.
@@ -2173,6 +2178,7 @@ func (hph *HexPatriciaHashed) updateCell(plainKey, hashedKey []byte, u *Update) 
 		}
 
 		hph.deleteCell(hashedKey)
+		hph.lastUpdateCellWasEmpty = false
 		return nil
 	}
 
@@ -2193,6 +2199,7 @@ func (hph *HexPatriciaHashed) updateCell(plainKey, hashedKey []byte, u *Update) 
 			fmt.Fprintf(hph.traceW, "updateCell setting (%d, %x, depth=%d)\n", row, nibble, depth)
 		}
 	}
+	hph.lastUpdateCellWasEmpty = cell.IsEmpty()
 	if cell.hashedExtLen == 0 {
 		copy(cell.hashedExtension[:], hashedKey[depth:])
 		cell.hashedExtLen = int16(len(hashedKey)) - depth
