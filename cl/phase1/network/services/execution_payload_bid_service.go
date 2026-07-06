@@ -357,7 +357,7 @@ func (s *executionPayloadBidService) bidValidationState(parentBlockRoot common.H
 
 	// Fetch the parent state only on a cache miss; holding entry.mu also
 	// dedups concurrent fetches for the same (parent, slot).
-	parentState, err := s.forkchoiceStore.GetStateAtBlockRoot(parentBlockRoot, false)
+	parentState, err := s.forkchoiceStore.GetStateAtBlockRoot(parentBlockRoot, true)
 	if err != nil || parentState == nil {
 		s.removeBidValidationState(cacheKey, entry)
 		return nil, fmt.Errorf("%w: state for parent_block_root %v not available", errBidDependencyUnavailable, parentBlockRoot)
@@ -366,11 +366,7 @@ func (s *executionPayloadBidService) bidValidationState(parentBlockRoot common.H
 		s.removeBidValidationState(cacheKey, entry)
 		return nil, fmt.Errorf("parent state slot %d is after bid slot %d", parentState.Slot(), bidSlot)
 	}
-	validationState, err := parentState.Copy()
-	if err != nil {
-		s.removeBidValidationState(cacheKey, entry)
-		return nil, err
-	}
+	validationState := parentState
 	if parentState.Slot() == bidSlot {
 		entry.state = validationState
 		return entry, nil

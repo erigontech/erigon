@@ -74,6 +74,15 @@ func TestSSZRESTRequestCodecsRoundTrip(t *testing.T) {
 	}
 }
 
+func TestSSZRESTBeaconChainConfigPrefersRuntimeConfig(t *testing.T) {
+	cfg := clparams.MainnetBeaconConfig
+	cfg.BuilderDepositRequestType = 0x7a
+	srv := NewEngineServer(log.New(), &chain.Config{ChainName: "mainnet"}, nil, nil, false, true, false, false, nil, nil, 0, 0)
+	srv.SetBeaconChainConfig(&cfg)
+
+	require.Same(t, &cfg, srv.beaconChainConfig())
+}
+
 func encodeEmptyNewPayloadRequest(version clparams.StateVersion) ([]byte, error) {
 	return encodeNewPayloadRequest(version, engine_types.NewExecutionPayloadSSZ(version), solid.NewHashList(sszMaxBlobHashes), common.Hash{}, &solid.TransactionsSSZ{})
 }

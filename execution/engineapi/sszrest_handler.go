@@ -30,6 +30,9 @@ func (e *EngineServer) SSZRESTHandler() http.Handler {
 }
 
 func (e *EngineServer) beaconChainConfig() *clparams.BeaconChainConfig {
+	if cfg := e.beaconCfg.Load(); cfg != nil {
+		return cfg
+	}
 	if e.config != nil {
 		if _, cfg, _, err := clparams.GetConfigsByNetworkName(e.config.ChainName); err == nil {
 			return cfg

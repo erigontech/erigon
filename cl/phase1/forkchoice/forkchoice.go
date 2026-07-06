@@ -614,10 +614,8 @@ func (f *ForkChoiceStore) AnchorRoot() common.Hash {
 }
 
 func (f *ForkChoiceStore) GetStateAtBlockRoot(blockRoot common.Hash, alwaysCopy bool) (*state2.CachingBeaconState, error) {
-	if !alwaysCopy {
-		f.mu.RLock()
-		defer f.mu.RUnlock()
-	}
+	f.mu.RLock()
+	defer f.mu.RUnlock()
 	return f.forkGraph.GetState(blockRoot, alwaysCopy)
 }
 
