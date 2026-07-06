@@ -57,16 +57,11 @@ func (f *ForkChoiceStore) computeVotes(justifiedCheckpoint solid.Checkpoint, che
 	// make an rng generator
 	gen := rand.New(rand.NewSource(time.Now().UnixNano()))
 	if auxilliaryState != nil {
-		startIdx := 0
-		step := 1
-		if f.probabilisticHeadGetter {
-			startIdx = gen.Intn(sampleBasis)
-			step = sampleBasis + gen.Intn(sampleFactor)
-		}
 		count := f.latestMessages.latestMessagesCount()
 		if validatorCount := auxilliaryState.ValidatorSet().Length(); validatorCount < count {
 			count = validatorCount
 		}
+		startIdx, step := voteSampleBounds(count, f.probabilisticHeadGetter, gen)
 		for validatorIndex := startIdx; validatorIndex < count; validatorIndex += step {
 			message, _ := f.latestMessages.get(validatorIndex)
 			v := auxilliaryState.ValidatorSet().Get(validatorIndex)
@@ -99,6 +94,13 @@ func (f *ForkChoiceStore) computeVotes(justifiedCheckpoint solid.Checkpoint, che
 	}
 
 	return votes
+}
+
+func voteSampleBounds(count int, probabilistic bool, gen *rand.Rand) (int, int) {
+	if !probabilistic || count == 0 {
+		return 0, 1
+	}
+	return gen.Intn(count), sampleBasis + gen.Intn(sampleFactor)
 }
 
 // GetHead returns the head of the fork choice store.

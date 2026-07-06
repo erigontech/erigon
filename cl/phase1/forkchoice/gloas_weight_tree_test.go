@@ -18,6 +18,7 @@ package forkchoice
 
 import (
 	"encoding/binary"
+	"math/rand"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -25,6 +26,7 @@ import (
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
+	state2 "github.com/erigontech/erigon/cl/phase1/core/state"
 	"github.com/erigontech/erigon/cl/utils"
 	"github.com/erigontech/erigon/common"
 )
@@ -178,6 +180,39 @@ func TestComputeVotesAuxStateSkipsMessagesBeyondValidatorSet(t *testing.T) {
 	votes := f.computeVotes(justified, nil, s)
 
 	require.NotNil(t, votes)
+}
+
+func TestVoteSampleBoundsUsesClampedCount(t *testing.T) {
+	startIdx, step := voteSampleBounds(0, true, rand.New(rand.NewSource(0)))
+	require.Equal(t, 0, startIdx)
+	require.Equal(t, 1, step)
+
+	for count := 1; count < sampleBasis; count++ {
+		startIdx, step = voteSampleBounds(count, true, rand.New(rand.NewSource(int64(count))))
+
+		require.GreaterOrEqual(t, startIdx, 0)
+		require.Less(t, startIdx, count)
+		require.GreaterOrEqual(t, step, sampleBasis)
+	}
+}
+
+func TestComputeVotesProbabilisticAuxStateUsesClampedCount(t *testing.T) {
+	f := newGloasWeightTreeTestStore()
+	f.probabilisticHeadGetter = true
+	f.proposerBoostRoot.Store(common.Hash{})
+	root := common.HexToHash("0x01")
+	f.latestMessages.set(0, LatestMessage{Root: root, Slot: 5})
+
+	s := state2.New(&clparams.MainnetBeaconConfig)
+	v := solid.NewValidator()
+	v.SetActivationEpoch(0)
+	v.SetExitEpoch(clparams.MainnetBeaconConfig.FarFutureEpoch)
+	v.SetEffectiveBalance(32_000_000_000)
+	s.AddValidator(v, 32_000_000_000)
+
+	votes := f.computeVotes(solid.Checkpoint{}, nil, s)
+
+	require.Equal(t, uint64(32_000_000_000), votes[root])
 }
 
 func decodeDiffBlock(t *testing.T, enc []byte) (*cltypes.SignedBeaconBlock, common.Hash) {
