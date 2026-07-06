@@ -71,7 +71,7 @@ var readDomains = &cobra.Command{
 	Args:      cobra.ArbitraryArgs,
 	Run: func(cmd *cobra.Command, args []string) {
 		logger := debug.SetupCobra(cmd, "integration")
-		ctx, _ := common.RootContext()
+		ctx := cmd.Context()
 		cfg := &nodecfg.DefaultConfig
 		utils.SetNodeConfigCobra(cmd, cfg)
 		ethConfig := &ethconfig.Defaults

@@ -1,9 +1,19 @@
 package mcp
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
+	"maps"
+	"net"
+	"net/http"
+	"slices"
 	"testing"
+	"time"
+
+	"github.com/mark3labs/mcp-go/mcp"
+	"github.com/mark3labs/mcp-go/server"
+	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/rpc"
 )
@@ -133,6 +143,86 @@ func TestParseBlockNumberOrHash(t *testing.T) {
 			t.Errorf("parseBlockNumberOrHash(%q) returned JSON syntax error, want semantic error: %v", input, err)
 		}
 	}
+}
+
+func mapKeys[V any](m map[string]V) []string {
+	return slices.Collect(maps.Keys(m))
+}
+
+func resourceTemplateURIs(t *testing.T, srv *server.MCPServer) []string {
+	t.Helper()
+	resp := srv.HandleMessage(context.Background(), []byte(`{"jsonrpc":"2.0","id":1,"method":"resources/templates/list"}`))
+	jsonResp, ok := resp.(mcp.JSONRPCResponse)
+	require.True(t, ok, "unexpected response type %T", resp)
+	result, ok := jsonResp.Result.(mcp.ListResourceTemplatesResult)
+	require.True(t, ok, "unexpected result type %T", jsonResp.Result)
+	uris := make([]string, 0, len(result.ResourceTemplates))
+	for _, tmpl := range result.ResourceTemplates {
+		uris = append(uris, tmpl.URITemplate.Raw())
+	}
+	return uris
+}
+
+// TestEmbeddedAndStandaloneCatalogsMatch guards against the two servers
+// drifting apart: they must expose the same tools (embedded additionally has
+// eth_getStorageValues), prompts, resources, and resource templates.
+func TestEmbeddedAndStandaloneCatalogsMatch(t *testing.T) {
+	embedded := NewErigonMCPServer(nil, nil, nil, "")
+	standalone := NewStandaloneMCPServer(nil, "")
+
+	embeddedTools := embedded.mcpServer.ListTools()
+	require.Contains(t, embeddedTools, "eth_getStorageValues")
+	delete(embeddedTools, "eth_getStorageValues")
+	require.ElementsMatch(t, mapKeys(embeddedTools), mapKeys(standalone.mcpServer.ListTools()))
+
+	require.ElementsMatch(t, mapKeys(embedded.mcpServer.ListPrompts()), mapKeys(standalone.mcpServer.ListPrompts()))
+	require.NotEmpty(t, embedded.mcpServer.ListPrompts())
+
+	require.ElementsMatch(t, mapKeys(embedded.mcpServer.ListResources()), mapKeys(standalone.mcpServer.ListResources()))
+	require.NotEmpty(t, embedded.mcpServer.ListResources())
+
+	embeddedTemplates := resourceTemplateURIs(t, embedded.mcpServer)
+	require.ElementsMatch(t, embeddedTemplates, resourceTemplateURIs(t, standalone.mcpServer))
+	require.NotEmpty(t, embeddedTemplates)
+}
+
+// Start wires the SSE handler only on a server it creates itself, so serveSSE's
+// pre-created server must carry Handler: sse or every MCP request 404s.
+func TestServeSSEHandlerWired(t *testing.T) {
+	addr := freeAddr(t)
+	srv := NewStandaloneMCPServer(nil, "")
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	done := make(chan error, 1)
+	go func() { done <- serveSSE(ctx, srv.mcpServer, addr) }()
+
+	client := &http.Client{Timeout: 2 * time.Second}
+	var resp *http.Response
+	var err error
+	for i := 0; i < 100; i++ {
+		resp, err = client.Get("http://" + addr + "/sse")
+		if err == nil {
+			break
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	require.NoError(t, err)
+	defer resp.Body.Close()
+	require.NotEqual(t, http.StatusNotFound, resp.StatusCode, "SSE endpoint not served — handler not wired")
+	require.Equal(t, "text/event-stream", resp.Header.Get("Content-Type"))
+
+	cancel()
+	require.NoError(t, <-done)
+}
+
+func freeAddr(t *testing.T) string {
+	t.Helper()
+	l, err := net.Listen("tcp", "127.0.0.1:0")
+	require.NoError(t, err)
+	addr := l.Addr().String()
+	require.NoError(t, l.Close())
+	return addr
 }
 
 func TestMCPServerCreation(t *testing.T) {
