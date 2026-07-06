@@ -140,8 +140,8 @@ func (p *ParallelPatriciaHashed) processMounted(ctx context.Context, updates *Up
 			path := make([]byte, 0, 144)
 			path = append(path, byte(ni))
 			path = append(path, ch.ext...)
-			buildErr := dfsSubtreeDeep(w, ch, path, func(n *prefixNode, pth []byte) (common.Hash, error) {
-				return foldStorageRoot(gctx, p.numWorkers, p.newStorageWorker, pu, n, pth)
+			buildErr := dfsSubtreeDeep(w, ch, path, func(n *prefixNode, pth []byte, accountFresh bool) (common.Hash, error) {
+				return foldStorageRoot(gctx, p.numWorkers, p.newStorageWorker, pu, n, pth, accountFresh)
 			})
 			if buildErr != nil {
 				w.resetForReuse()
