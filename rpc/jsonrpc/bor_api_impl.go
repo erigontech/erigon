@@ -100,23 +100,12 @@ func (api *BorImpl) GetAuthor(blockNrOrHash *rpc.BlockNumberOrHash) (accounts.Ad
 
 	// Retrieve the requested block number (or current if none requested)
 	var header *types.Header
-
-	//nolint:nestif
 	if blockNrOrHash == nil {
-		overlayTx := api.filters.WithOverlay(tx)
-		latestBlockNum, err2 := rpchelper.GetLatestBlockNumber(overlayTx)
-		if err2 != nil {
-			return accounts.NilAddress, err2
-		}
-		header, err = api._blockReader.HeaderByNumber(ctx, overlayTx, latestBlockNum)
-	} else {
-		if blockNr, ok := blockNrOrHash.Number(); ok {
-			header, err = api._blockReader.HeaderByNumber(ctx, tx, uint64(blockNr))
-		} else {
-			if blockHash, ok := blockNrOrHash.Hash(); ok {
-				header, err = api._blockReader.HeaderByHash(ctx, tx, blockHash)
-			}
-		}
+		header, err = api.headerByNumber(ctx, rpc.LatestBlockNumber, tx)
+	} else if blockNr, ok := blockNrOrHash.Number(); ok {
+		header, err = api.headerByNumber(ctx, blockNr, tx)
+	} else if blockHash, ok := blockNrOrHash.Hash(); ok {
+		header, err = api.headerByHash(ctx, blockHash, tx)
 	}
 
 	// Ensure we have an actually valid block and return its snapshot
