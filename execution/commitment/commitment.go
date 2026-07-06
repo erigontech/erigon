@@ -480,71 +480,51 @@ func ApplyDeferredBranchUpdates(
 		return written, nil
 	}
 
-	// Pipeline: workers encode in parallel, results sent to channel, main goroutine writes sequentially.
-	type result struct {
-		upd *DeferredBranchUpdate
-		err error
-	}
-	// Size channels to actual batch length, not the 50K max.
-	resultCh := make(chan result, len(deferred))
-	workCh := make(chan *DeferredBranchUpdate, len(deferred))
-
-	// Start workers with pooled encoders/mergers.
+	// Workers encode disjoint index ranges in place; per-item channel handoff costs more
+	// than the encoding itself, so the write pass below stays sequential over the slice.
+	chunk := (len(deferred) + numWorkers - 1) / numWorkers
+	errs := make([]error, numWorkers)
 	var wg sync.WaitGroup
-	for i := 0; i < numWorkers; i++ {
+	for w := 0; w < numWorkers; w++ {
+		lo := w * chunk
+		hi := min(lo+chunk, len(deferred))
+		if lo >= hi {
+			break
+		}
 		wg.Add(1)
-		go func() {
+		go func(w, lo, hi int) {
 			defer wg.Done()
 			encoder := workerEncoderPool.Get().(*BranchEncoder)
 			merger := workerMergerPool.Get().(*BranchMerger)
 			defer workerEncoderPool.Put(encoder)
 			defer workerMergerPool.Put(merger)
-
-			for upd := range workCh {
-				err := encodeDeferredUpdate(upd, encoder, merger)
-				resultCh <- result{upd: upd, err: err}
+			for i := lo; i < hi; i++ {
+				if err := encodeDeferredUpdate(deferred[i], encoder, merger); err != nil {
+					errs[w] = err
+					return
+				}
 			}
-		}()
+		}(w, lo, hi)
+	}
+	wg.Wait()
+	for _, err := range errs {
+		if err != nil {
+			return 0, err
+		}
 	}
 
-	// Close resultCh when all workers are done
-	go func() {
-		wg.Wait()
-		close(resultCh)
-	}()
-
-	// Send work in background
-	go func() {
-		for _, upd := range deferred {
-			workCh <- upd
-		}
-		close(workCh)
-	}()
-
-	// Process results as they come in - write to storage immediately
-	var firstErr error
 	var written int
-	for res := range resultCh {
-		if res.err != nil {
-			if firstErr == nil {
-				firstErr = res.err
-			}
-			continue
-		}
-		if res.upd.encoded == nil {
+	for _, upd := range deferred {
+		if upd.encoded == nil {
 			continue // skip unchanged
 		}
-		if firstErr != nil {
-			continue // drain channel but don't write after error
-		}
-		if err := putBranch(res.upd.prefix, res.upd.encoded, res.upd.prev); err != nil {
-			firstErr = err
-			continue
+		if err := putBranch(upd.prefix, upd.encoded, upd.prev); err != nil {
+			return written, err
 		}
 		written++
 	}
 	mxTrieBranchesUpdated.AddInt(written)
-	return written, firstErr
+	return written, nil
 }
 
 func (be *BranchEncoder) setMetrics(metrics *Metrics) {
