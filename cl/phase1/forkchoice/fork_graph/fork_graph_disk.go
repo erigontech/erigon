@@ -593,7 +593,14 @@ func (f *forkGraphDisk) Prune(pruneSlot uint64) (err error) {
 	f.currentIndicies.prune(pruneSlot / f.beaconCfg.SlotsPerEpoch)
 	f.previousIndicies.prune(pruneSlot / f.beaconCfg.SlotsPerEpoch)
 
-	f.lowestAvailableBlock.Store(pruneSlot + 1)
+	// Prune runs without the fork choice lock, so concurrent (or stale queued)
+	// calls may arrive out of order: only ever raise the marker.
+	for {
+		lowest := f.lowestAvailableBlock.Load()
+		if pruneSlot+1 <= lowest || f.lowestAvailableBlock.CompareAndSwap(lowest, pruneSlot+1) {
+			break
+		}
+	}
 	for _, root := range oldRoots {
 		f.badBlocks.Delete(root)
 		f.blocks.Delete(root)

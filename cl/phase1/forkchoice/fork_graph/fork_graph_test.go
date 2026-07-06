@@ -27,6 +27,7 @@ import (
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/utils"
+	"github.com/erigontech/erigon/common"
 	"github.com/stretchr/testify/require"
 )
 
@@ -65,4 +66,24 @@ func TestForkGraphInDisk(t *testing.T) {
 	_, status, err = graph.AddChainSegment(blockB, true)
 	require.NoError(t, err)
 	require.Equal(t, PreValidated, status)
+}
+
+// A prune for an already-covered slot (e.g. from a concurrent lock-free drain)
+// must not move the lowest-available marker backward past deleted data.
+func TestPruneKeepsLowestAvailableBlockMonotonic(t *testing.T) {
+	f := &forkGraphDisk{fs: afero.NewMemMapFs(), beaconCfg: &clparams.MainnetBeaconConfig}
+	addBlockWithState := func(slot uint64, root common.Hash) {
+		b := cltypes.NewSignedBeaconBlock(&clparams.MainnetBeaconConfig, clparams.DenebVersion)
+		b.Block.Slot = slot
+		f.blocks.Store(root, b)
+		require.NoError(t, afero.WriteFile(f.fs, getBeaconStateFilename(root), []byte{1}, 0o644))
+	}
+	addBlockWithState(100, common.Hash{1})
+	addBlockWithState(200, common.Hash{2})
+
+	require.NoError(t, f.Prune(150))
+	require.Equal(t, uint64(151), f.LowestAvailableSlot())
+
+	require.NoError(t, f.Prune(120))
+	require.Equal(t, uint64(151), f.LowestAvailableSlot())
 }

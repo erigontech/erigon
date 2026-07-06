@@ -41,6 +41,8 @@ func (f *ForkChoiceStore) onTickPerSlot(time uint64) {
 		return
 	}
 	f.mu.Lock()
+	defer f.drainQueuedWork()
+	defer f.mu.Unlock()
 	f.headHash = common.Hash{}
 	f.headPayloadStatus = cltypes.PayloadStatusPending
 	f.proposerBoostRoot.Store(common.Hash{})
@@ -55,6 +57,4 @@ func (f *ForkChoiceStore) onTickPerSlot(time uint64) {
 			f.updateCheckpoints(f.unrealizedJustifiedCheckpoint.Load().(solid.Checkpoint), f.unrealizedFinalizedCheckpoint.Load().(solid.Checkpoint))
 		}
 	}
-	f.mu.Unlock()
-	f.drainQueuedWork()
 }
