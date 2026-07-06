@@ -73,9 +73,8 @@ func (api *ParityAPIImpl) ListStorageKeys(ctx context.Context, account common.Ad
 		return nil, errors.New("acc not found")
 	}
 
-	overlayTx := api.filters.WithTemporalOverlay(tx)
-	bn := rawdb.ReadCurrentBlockNumber(overlayTx)
-	minTxNum, err := api._txNumReader.Min(ctx, overlayTx, *bn)
+	bn := rawdb.ReadCurrentBlockNumber(tx)
+	minTxNum, err := api._txNumReader.Min(ctx, tx, *bn)
 	if err != nil {
 		return nil, err
 	}
@@ -85,7 +84,7 @@ func (api *ParityAPIImpl) ListStorageKeys(ctx context.Context, account common.Ad
 		from = append(from, *offset...)
 	}
 	to, _ := kv.NextSubtree(account[:])
-	r, err := overlayTx.RangeAsOf(kv.StorageDomain, from, to, minTxNum, order.Asc, quantity)
+	r, err := tx.RangeAsOf(kv.StorageDomain, from, to, minTxNum, order.Asc, quantity)
 	if err != nil {
 		return nil, err
 	}
