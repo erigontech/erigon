@@ -43,6 +43,20 @@ func (g *ClosingWaitGroup) Done() { g.wg.Done() }
 
 func (g *ClosingWaitGroup) Wait() { g.wg.Wait() }
 
+// Go runs f in a new goroutine registered on the group, unless BeginClose has
+// latched — then f does not run and Go returns false. Mirrors
+// sync.WaitGroup.Go with the close latch.
+func (g *ClosingWaitGroup) Go(f func()) bool {
+	if !g.TryAdd() {
+		return false
+	}
+	go func() {
+		defer g.Done()
+		f()
+	}()
+	return true
+}
+
 // BeginClose latches the group closed, returning false if it was already latched
 // so Close is idempotent. Latching before Close's Wait makes every TryAdd either
 // register before Wait or get refused.

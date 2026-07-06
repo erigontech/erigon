@@ -45,6 +45,23 @@ func TestClosingWaitGroup_TryAddRefusedAfterClose(t *testing.T) {
 	}
 }
 
+func TestClosingWaitGroup_Go(t *testing.T) {
+	var g ClosingWaitGroup
+	var ran atomic.Bool
+	if !g.Go(func() { ran.Store(true) }) {
+		t.Fatal("Go before close should start the goroutine")
+	}
+
+	g.BeginClose()
+	g.Wait()
+	if !ran.Load() {
+		t.Fatal("Wait should join the goroutine started by Go")
+	}
+	if g.Go(func() { t.Error("f must not run after BeginClose") }) {
+		t.Fatal("Go after BeginClose should be refused")
+	}
+}
+
 // Wait must not return until every registered goroutine has called Done — this
 // is the join guarantee Close relies on before tearing down shared resources.
 func TestClosingWaitGroup_WaitJoinsInFlight(t *testing.T) {

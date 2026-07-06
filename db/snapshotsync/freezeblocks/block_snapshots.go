@@ -172,6 +172,7 @@ type BlockRetire struct {
 }
 
 func NewBlockRetire(
+	ctx context.Context,
 	compressWorkers int,
 	dirs datadir.Dirs,
 	blockReader services.FullBlockReader,
@@ -206,7 +207,7 @@ func NewBlockRetire(
 		bridgeStore:           bridgeStore,
 		borDataNotReadyBefore: time.Now(),
 	}
-	r.ctx, r.stopFn = context.WithCancel(context.Background())
+	r.ctx, r.stopFn = context.WithCancel(ctx)
 	r.workers.Store(int32(compressWorkers))
 	return r
 }
@@ -439,13 +440,8 @@ func (br *BlockRetire) RetireBlocksInBackground(
 	if !br.working.CompareAndSwap(false, true) {
 		return false
 	}
-	if !br.wg.TryAdd() { // refused once Close has latched
-		br.working.Store(false)
-		return false
-	}
 
-	go func() {
-		defer br.wg.Done()
+	started := br.wg.Go(func() {
 		defer onDone()
 		defer br.working.Store(false)
 
@@ -484,7 +480,11 @@ func (br *BlockRetire) RetireBlocksInBackground(
 			br.logger.Error("[snapshots] retire blocks", "err", err)
 			return
 		}
-	}()
+	})
+	if !started { // Close has latched; no retire was started
+		br.working.Store(false)
+		return false
+	}
 
 	return true
 }
