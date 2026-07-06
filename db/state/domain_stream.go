@@ -111,7 +111,9 @@ type DomainLatestIterFile struct {
 
 	limit       int
 	largeVals   bool
-	filesOnly   bool // when true, iterate only over .kv files, ignoring MDBX
+	indirect    bool      // seqID-indexed layout: DB cursor walks the keys table, value dereferenced by seqID
+	valsByIDC   kv.Cursor // values cursor for the indirect layout (seqID -> value)
+	filesOnly   bool      // when true, iterate only over .kv files, ignoring MDBX
 	from, to    []byte
 	orderAscend order.By
 
@@ -124,12 +126,25 @@ type DomainLatestIterFile struct {
 }
 
 func (hi *DomainLatestIterFile) Close() {
+	if hi.valsByIDC != nil {
+		hi.valsByIDC.Close()
+		hi.valsByIDC = nil
+	}
 	if hi.h == nil {
 		return
 	}
 	for hi.h.Len() > 0 {
 		hi.closeCursorItem(heap.Pop(hi.h).(*CursorItem))
 	}
+}
+
+// valByID dereferences a seqID to its value for the indirect layout.
+func (hi *DomainLatestIterFile) valByID(seqID []byte) ([]byte, error) {
+	if binary.BigEndian.Uint64(seqID) == deletionSeqID {
+		return nil, nil
+	}
+	_, v, err := hi.valsByIDC.SeekExact(seqID)
+	return v, err
 }
 
 func (hi *DomainLatestIterFile) closeCursorItem(item *CursorItem) {
@@ -163,6 +178,7 @@ func (hi *DomainLatestIterFile) init(domainRoTx *DomainRoTx) error {
 	//     DB endTxNum    = 16, because db has step 2, and first txNum of step 2 is 16.
 	//     RAM endTxNum   = 17, because current tcurrent txNum is 17
 	hi.largeVals = domainRoTx.d.LargeValues
+	hi.indirect = domainRoTx.d.KeysTable != ""
 	hi.filesEndTxNum = domainRoTx.files.EndTxNum()
 	heap.Init(hi.h)
 	var key, value []byte
@@ -220,6 +236,46 @@ func (hi *DomainLatestIterFile) init(domainRoTx *DomainRoTx) error {
 }
 
 func (hi *DomainLatestIterFile) initCursorOnDB(domainRoTx *DomainRoTx) error {
+	if domainRoTx.d.KeysTable != "" {
+		keysCursor, err := hi.roTx.CursorDupSort(domainRoTx.d.KeysTable) //nolint:gocritic
+		if err != nil {
+			return err
+		}
+		valsByIDC, err := hi.roTx.Cursor(domainRoTx.d.ValuesTable) //nolint:gocritic // closed in hi.Close()
+		if err != nil {
+			keysCursor.Close()
+			return err
+		}
+		hi.valsByIDC = valsByIDC
+		var pushed bool
+		defer func() {
+			if !pushed {
+				keysCursor.Close()
+			}
+		}()
+		key, dup, err := keysCursor.Seek(hi.from)
+		if err != nil {
+			return err
+		}
+		for key != nil && (hi.to == nil || bytes.Compare(key, hi.to) < 0) {
+			step := ^binary.BigEndian.Uint64(dup[:8])
+			endTxNum := step * domainRoTx.d.stepSize
+			if endTxNum >= hi.filesEndTxNum {
+				val, err := hi.valByID(dup[8:16])
+				if err != nil {
+					return err
+				}
+				heap.Push(hi.h, &CursorItem{t: DB_CURSOR, key: common.Copy(key), val: common.Copy(val), cDup: keysCursor, endTxNum: endTxNum, reverse: true})
+				pushed = true
+				break
+			}
+			key, dup, err = keysCursor.NextNoDup()
+			if err != nil {
+				return err
+			}
+		}
+		return nil
+	}
 	if domainRoTx.d.LargeValues {
 		valsCursor, err := hi.roTx.Cursor(domainRoTx.d.ValuesTable) //nolint:gocritic
 		if err != nil {
@@ -328,6 +384,39 @@ func (hi *DomainLatestIterFile) advanceLargeValsDBCursor(ci1 *CursorItem) error 
 	return nil
 }
 
+func (hi *DomainLatestIterFile) advanceIndirectDBCursor(ci1 *CursorItem) error {
+	var pushed bool
+	defer func() {
+		if !pushed {
+			hi.closeCursorItem(ci1)
+		}
+	}()
+	for {
+		k, dup, err := ci1.cDup.NextNoDup()
+		if err != nil {
+			return err
+		}
+		if len(k) == 0 || !(hi.to == nil || bytes.Compare(k, hi.to) < 0) {
+			break
+		}
+		step := ^binary.BigEndian.Uint64(dup[:8])
+		endTxNum := step * hi.aggStep
+		if endTxNum >= hi.filesEndTxNum {
+			val, err := hi.valByID(dup[8:16])
+			if err != nil {
+				return err
+			}
+			ci1.key = common.Copy(k)
+			ci1.endTxNum = endTxNum
+			ci1.val = common.Copy(val)
+			heap.Push(hi.h, ci1)
+			pushed = true
+			break
+		}
+	}
+	return nil
+}
+
 func (hi *DomainLatestIterFile) advanceDupSortDBCursor(ci1 *CursorItem) error {
 	var pushed bool
 	defer func() {
@@ -394,7 +483,11 @@ func (hi *DomainLatestIterFile) advanceInFiles() error {
 					}
 				}
 			case DB_CURSOR:
-				if hi.largeVals {
+				if hi.indirect {
+					if err := hi.advanceIndirectDBCursor(ci1); err != nil {
+						return err
+					}
+				} else if hi.largeVals {
 					if err := hi.advanceLargeValsDBCursor(ci1); err != nil {
 						return err
 					}
