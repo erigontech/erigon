@@ -657,7 +657,7 @@ func New(tb testing.TB, opts ...Option) *ExecModuleTester {
 		logger,
 	)
 
-	blockRetire := freezeblocks.NewBlockRetire(tb.Context(), 1, dirs, mock.BlockReader, blockWriter, mock.DB, nil, nil, mock.ChainConfig, &cfg, mock.Notifications.Events, nil, logger)
+	blockRetire := freezeblocks.NewBlockRetire(mock.Ctx, 1, dirs, mock.BlockReader, blockWriter, mock.DB, nil, nil, mock.ChainConfig, &cfg, mock.Notifications.Events, nil, logger)
 	mock.blockRetire = blockRetire
 	mock.Sync = stagedsync.New(
 		cfg.Sync,
