@@ -265,6 +265,13 @@ func TestRegisteredTxTypeJSONTypeAliasing(t *testing.T) {
 	require.Error(t, err, "an out-of-range type value must not alias onto a registered byte id")
 }
 
+func TestJSONBuiltinTypeAliasing(t *testing.T) {
+	// byte(0x100) == 0x00 would alias an out-of-range type onto LegacyTxType;
+	// it must be rejected as unknown rather than silently decoded as legacy.
+	_, err := UnmarshalTransactionFromJSON([]byte(`{"type":"0x100","nonce":"0x1"}`))
+	require.ErrorContains(t, err, "unknown transaction type")
+}
+
 func TestRegisterTxTypeCollisions(t *testing.T) {
 	builtinSpec := TxTypeSpec{New: func() Transaction { return &LegacyTx{} }}
 

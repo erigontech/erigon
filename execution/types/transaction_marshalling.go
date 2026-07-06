@@ -223,6 +223,9 @@ func UnmarshalTransactionFromJSON(input []byte) (Transaction, error) {
 			return nil, err
 		}
 	}
+	if txType > 0xff {
+		return nil, fmt.Errorf("unknown transaction type: %v", txType)
+	}
 	switch byte(txType) {
 	case LegacyTxType:
 		tx := &LegacyTx{}
