@@ -56,36 +56,16 @@ func TestWitnessNodesForKeys_ByHashEquivalence(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			ms := NewMockState(t)
 			hph := NewHexPatriciaHashed(length.Addr, ms, DefaultTrieConfig())
-			hph.SetTrace(false)
-			builder := NewUpdateBuilder()
-			addrs := make([][]byte, 0, tc.accts)
-			for i := 0; i < tc.accts; i++ {
-				a, _ := generateKeyWithHashedPrefix(nil, length.Addr)
-				addrs = append(addrs, a)
-				builder.Balance(common.Bytes2Hex(a), uint64(i+1))
-				for j := 0; j < tc.slots; j++ {
-					slot := common.FromHex(fmt.Sprintf("%064x", j+1))
-					builder.Storage(common.Bytes2Hex(a), common.Bytes2Hex(slot), common.Bytes2Hex(slot))
-				}
-			}
-			plainKeys, updates := builder.Build()
-			require.NoError(t, ms.applyPlainUpdates(plainKeys, updates))
-			toProcess := WrapKeyUpdates(t, ModeDirect, KeyToHexNibbleHash, plainKeys, updates)
-			defer toProcess.Close()
-			_, err := hph.Process(ctx, toProcess, "", nil, WarmupConfig{})
-			require.NoError(t, err)
+			hph.SetTraceWriter(nil)
+			addrs := buildWitnessCorpus(t, ms, hph, tc.accts, tc.slots)
 
 			toWitness := NewUpdates(ModeDirect, "", KeyToHexNibbleHash)
 			defer toWitness.Close()
-			for _, a := range addrs[:tc.touch] {
-				toWitness.TouchPlainKey(string(a), nil, toWitness.TouchAccount)
-				if tc.touchStorage {
-					for j := 0; j < tc.slots; j++ {
-						slot := common.FromHex(fmt.Sprintf("%064x", j+1))
-						toWitness.TouchPlainKey(string(storageKey(a, slot)), nil, toWitness.TouchStorage)
-					}
-				}
+			touchSlots := 0
+			if tc.touchStorage {
+				touchSlots = tc.slots
 			}
+			touchAccountsSlots(toWitness, addrs[:tc.touch], touchSlots)
 			full, provedKeys, _, err := hph.Witnesses(ctx, toWitness, tc.exclude, "")
 			require.NoError(t, err)
 
@@ -122,7 +102,7 @@ func TestWitnessNodesForKeys_AbsentSlotStopsAtBlindedChild(t *testing.T) {
 	ctx := context.Background()
 	ms := NewMockState(t)
 	hph := NewHexPatriciaHashed(length.Addr, ms, DefaultTrieConfig())
-	hph.SetTrace(false)
+	hph.SetTraceWriter(nil)
 
 	addrPlain, _ := generateKeyWithHashedPrefix([]byte{0}, length.Addr)
 	addrHex := common.Bytes2Hex(addrPlain)
@@ -134,11 +114,7 @@ func TestWitnessNodesForKeys_AbsentSlotStopsAtBlindedChild(t *testing.T) {
 		builder.Storage(addrHex, common.Bytes2Hex(slotPlain), fmt.Sprintf("%064x", n+1))
 	}
 	plainKeys, updates := builder.Build()
-	require.NoError(t, ms.applyPlainUpdates(plainKeys, updates))
-	toProcess := WrapKeyUpdates(t, ModeDirect, KeyToHexNibbleHash, plainKeys, updates)
-	defer toProcess.Close()
-	_, err := hph.Process(ctx, toProcess, "", nil, WarmupConfig{})
-	require.NoError(t, err)
+	processBatch(t, ms, hph, plainKeys, updates)
 
 	absentSlot, _ := generateKeyWithHashedPrefix([]byte{1}, length.Hash)
 
