@@ -29,6 +29,7 @@ import (
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/hexutil"
+	"github.com/erigontech/erigon/db/kv/kvcache"
 	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/db/state/execctx"
 	"github.com/erigontech/erigon/execution/chain"
@@ -40,7 +41,6 @@ import (
 	"github.com/erigontech/erigon/node/gointerfaces/txpoolproto"
 	"github.com/erigontech/erigon/node/shards"
 	"github.com/erigontech/erigon/rpc"
-	"github.com/erigontech/erigon/rpc/rpccfg"
 	"github.com/erigontech/erigon/rpc/rpchelper"
 )
 
@@ -94,8 +94,7 @@ func newOverlayAheadTestAPI(t *testing.T) (base *BaseAPI, m *execmoduletester.Ex
 	}
 	hash := overlayHeader.Hash()
 	overlay := doms.BlockOverlay()
-	// Minimal subset of what InsertBlocks/updateForkChoice write in production
-	// (execution/execmodule/inserters.go, execution/execmodule/forkchoice.go):
+	// Minimal subset of what InsertBlocks/updateForkChoice write in production,
 	// enough for the reader paths under test to resolve this header as current.
 	require.NoError(t, rawdb.WriteHeader(overlay, overlayHeader))
 	require.NoError(t, rawdb.WriteHeadHeaderHash(overlay, hash))
@@ -105,7 +104,8 @@ func newOverlayAheadTestAPI(t *testing.T) (base *BaseAPI, m *execmoduletester.Ex
 	events := shards.NewEvents()
 	events.PublishOverlay(doms)
 	filters := rpchelper.New(ctx, rpchelper.DefaultFiltersConfig, nil, nil, nil, func() {}, m.Log, events)
-	base = NewBaseApi(filters, m.StateCache, m.BlockReader, false, rpccfg.DefaultEvmCallTimeout, m.Engine, m.Dirs, nil, 0, 0)
+	stateCache := kvcache.New(kvcache.DefaultCoherentConfig)
+	base = newBaseApiWithFiltersForTest(filters, stateCache, m)
 
 	return base, m, overlayHeader
 }
