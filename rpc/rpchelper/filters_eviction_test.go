@@ -18,12 +18,14 @@ package rpchelper
 
 import (
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/node/gointerfaces/remoteproto"
 	"github.com/erigontech/erigon/rpc/filters"
 )
 
@@ -104,6 +106,34 @@ func TestEvictStaleSubscriptionsSkipsWebSocketSubscriptions(t *testing.T) {
 	f.evictStaleSubscriptions(time.Nanosecond)
 
 	require.True(t, f.HasHeadsSubscription(id))
+}
+
+func TestLogsEvictionBatchesRemoteFilterUpdate(t *testing.T) {
+	f := newTestFilters(t)
+
+	var updates atomic.Int32
+	f.logsRequestor.Store(func(*remoteproto.LogsFilterRequest) error {
+		updates.Add(1)
+		return nil
+	})
+
+	ids := make([]LogsSubID, 0, 3)
+	for range 3 {
+		_, id := f.SubscribeLogs(8, filters.FilterCriteria{})
+		f.TrackSubscription(SubscriptionID(id), FilterTypeLogs, ProtocolHTTP)
+		lf, ok := f.logsSubs.logsFilters.Get(id)
+		require.True(t, ok)
+		backdateSub(t, lf.sender, 2*time.Hour)
+		ids = append(ids, id)
+	}
+
+	updates.Store(0) // SubscribeLogs issues its own updates; count only eviction's
+	f.evictStaleSubscriptions(time.Hour)
+
+	for _, id := range ids {
+		require.False(t, f.HasSubscription(id))
+	}
+	require.EqualValues(t, 1, updates.Load())
 }
 
 func TestConcurrentTouchAndEviction(t *testing.T) {

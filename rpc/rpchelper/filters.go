@@ -397,12 +397,18 @@ func (ff *Filters) evictStaleSubscriptions(timeout time.Duration) {
 			continue
 		}
 		protocol := filter.sender.Protocol()
-		if ff.unsubscribeLogsInternal(id) {
-			logsEvicted++
-			ff.logger.Info("[rpc] [filters] evicted idle logs filter", "id", id, "protocol", protocol, "timeout", timeout)
-			ff.decrementMetrics(FilterTypeLogs, protocol)
-			getReapedCounter(string(FilterTypeLogs)).Inc()
+		if !ff.logsSubs.removeLogsFilter(id) {
+			continue
 		}
+		ff.deleteLogStore(id)
+		logsEvicted++
+		ff.logger.Info("[rpc] [filters] evicted idle logs filter", "id", id, "protocol", protocol, "timeout", timeout)
+		ff.decrementMetrics(FilterTypeLogs, protocol)
+		getReapedCounter(string(FilterTypeLogs)).Inc()
+	}
+	// One remote update covers every logs filter removed this cycle.
+	if logsEvicted > 0 {
+		ff.updateRemoteLogsFilter()
 	}
 
 	// Log summary at DEBUG level
@@ -899,33 +905,35 @@ func (ff *Filters) UnsubscribeLogs(id LogsSubID) bool {
 // unsubscribeLogsInternal performs the actual unsubscription without updating metrics.
 // Used by eviction to avoid double-counting.
 func (ff *Filters) unsubscribeLogsInternal(id LogsSubID) bool {
-	isDeleted := ff.logsSubs.removeLogsFilter(id)
-	if !isDeleted {
+	if !ff.logsSubs.removeLogsFilter(id) {
 		return false
 	}
-	// if any filters in the aggregate need all addresses or all topics then the request to the central
-	// log subscription needs to honour this
+	// The local filter has been removed; the log store and metric must be released
+	// regardless of whether the remote-filter update succeeds. A failed remote update
+	// only means the upstream will keep sending logs we'll now discard — it does not
+	// reanimate the local subscription.
+	ff.updateRemoteLogsFilter()
+	ff.deleteLogStore(id)
+	return true
+}
+
+// updateRemoteLogsFilter pushes the aggregated filter state to the remote log source.
+// If any filters in the aggregate need all addresses or all topics then the request to
+// the central log subscription needs to honour this.
+func (ff *Filters) updateRemoteLogsFilter() {
 	lfr := ff.logsSubs.createFilterRequest()
-
 	addresses, topics := ff.logsSubs.getAggMaps()
-
 	for addr := range addresses {
 		lfr.Addresses = append(lfr.Addresses, gointerfaces.ConvertAddressToH160(addr))
 	}
 	for topic := range topics {
 		lfr.Topics = append(lfr.Topics, gointerfaces.ConvertHashToH256(topic))
 	}
-	// The local filter has been removed; the log store and metric must be released
-	// regardless of whether the remote-filter update succeeds. A failed remote update
-	// only means the upstream will keep sending logs we'll now discard — it does not
-	// reanimate the local subscription.
 	if loaded := ff.loadLogsRequester(); loaded != nil {
 		if err := loaded.(func(*remoteproto.LogsFilterRequest) error)(lfr); err != nil {
 			ff.logger.Warn("Could not update remote logs filter", "err", err)
 		}
 	}
-	ff.deleteLogStore(id)
-	return true
 }
 
 // deleteLogStore deletes the log store associated with the given subscription ID.
