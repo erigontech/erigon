@@ -370,30 +370,26 @@ func TestRegenerateBoundaryStepFile_TruncatedNameMatchesContent(t *testing.T) {
 	require.NotContains(t, newKVPath, "272-280", "truncated file name must not retain the original wider range")
 }
 
-// TestRegenerateBoundaryStepFile_CommitmentDropsOnNotFound pins the
-// domain-specific carve-out: for the commitment domain, a key whose
-// AsOfLookup returns !found MUST be dropped (not written as an empty
-// tombstone). Commitment values are trie-branch blobs; an empty entry
-// in a .kv file trips hex_patricia_hashed.unfoldBranchNode's "empty
-// branch data during unfold" error. Value-domain tombstones are safe
-// (empty = zero value); trie-domain tombstones are not (empty =
-// invalid data). Live-caught 2026-07-03 iter 3 mode_b @30k after the
-// blanket write-empty-on-!found landed.
-func TestRegenerateBoundaryStepFile_CommitmentDropsOnNotFound(t *testing.T) {
+// TestRegenerateBoundaryStepFile_CommitmentPreservesOnNotFound pins
+// the commitment-specific !found handling. GetAsOf(CommitmentDomain,
+// ...) short-circuits to (nil, false, nil) whenever the history layer
+// doesn't hit a value — commitment has HistoryDisabled=true. !found
+// there is NOT a tombstone signal, so neither drop nor write-empty is
+// correct: dropping loses branches the trie fold needs, empty trips
+// unfoldBranchNode. Preserve the old file's value.
+func TestRegenerateBoundaryStepFile_CommitmentPreservesOnNotFound(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
 	dir := t.TempDir()
 
 	keyBranch := []byte("branch-deadbeef")
+	branchVal := []byte("pre-anchor-branch-blob")
 	in := [][2][]byte{
-		{keyBranch, []byte("pre-anchor-branch-blob")},
+		{keyBranch, branchVal},
 		{commitmentdb.KeyCommitmentState, []byte("pre-anchor-state")},
 	}
 	oldPath := writeKV(t, ctx, dir, "v2.0-commitment.264-266.kv", in)
 
-	// Simulate the tombstone-shape !found: lookup for keyBranch returns
-	// (nil, false, nil) — same signal GetAsOf produces when history has
-	// an empty marker for the key.
 	lookup := func(d kv.Domain, k []byte, ts uint64) ([]byte, bool, error) {
 		return nil, false, nil
 	}
@@ -408,9 +404,9 @@ func TestRegenerateBoundaryStepFile_CommitmentDropsOnNotFound(t *testing.T) {
 
 	got := readKV(t, newPath)
 	require.Equal(t, [][2][]byte{
+		{keyBranch, branchVal},
 		{commitmentdb.KeyCommitmentState, anchor},
-	}, got, "commitment branch keys returning !found must be DROPPED from the new file, not written as (K, empty). "+
-		"Empty commitment-branch entries are invalid data that trip the trie's unfold path.")
+	}, got, "commitment !found must PRESERVE the old file value; anchor still gets replaced")
 }
 
 // TestRegenerateBoundaryStepFile_TombstonePreservedForKeysInOldFile
