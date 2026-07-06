@@ -359,6 +359,9 @@ func (s *DirtySegment) closeSeg() {
 
 func (s *DirtySegment) closeIdx() {
 	for _, index := range s.indexes {
+		if index == nil {
+			continue
+		}
 		index.Close()
 	}
 
