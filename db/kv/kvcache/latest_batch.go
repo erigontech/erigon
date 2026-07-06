@@ -26,25 +26,28 @@ import (
 	"github.com/erigontech/erigon/node/gointerfaces/remoteproto"
 )
 
-// SimpleCache is a minimal cache for in-process use. It does not track versions
-// — it simply remembers account data from the most recent OnNewBlock batch so
-// that callers (e.g. the txpool) see the correct nonce/balance even when their
-// read-only DB transaction was opened before the data was committed to the
-// database. The map is replaced on every OnNewBlock call, so memory stays
-// proportional to one batch (~400 addresses per 60 M-gas block).
-type SimpleCache struct {
+// LatestBatchCache serves the most recent announced state-change batch on top
+// of the caller's tx — freshness over snapshot-consistency, with staleness
+// bounded to one batch by FCU serialization (contrast Coherent, which keys
+// entries by state version so readers stay consistent with their own
+// snapshot). It does not track versions: the map remembers account data from
+// the latest OnNewBlock batch so that callers (e.g. the txpool) see the
+// announced nonce/balance even when their read-only DB transaction was opened
+// before that data was committed. The map is replaced on every batch, so
+// memory stays proportional to one batch (~400 addresses per 60 M-gas block).
+type LatestBatchCache struct {
 	mu       sync.RWMutex
 	accounts map[common.Address][]byte // address → latest serialised account
 }
 
-var _ Cache = (*SimpleCache)(nil)    // compile-time interface check
-var _ CacheView = (*SimpleView)(nil) // compile-time interface check
+var _ Cache = (*LatestBatchCache)(nil)    // compile-time interface check
+var _ CacheView = (*LatestBatchView)(nil) // compile-time interface check
 
-func NewSimple() *SimpleCache { return &SimpleCache{} }
-func (c *SimpleCache) View(_ context.Context, tx kv.TemporalTx) (CacheView, error) {
-	return &SimpleView{cache: c, tx: tx}, nil
+func NewLatestBatchCache() *LatestBatchCache { return &LatestBatchCache{} }
+func (c *LatestBatchCache) View(_ context.Context, tx kv.TemporalTx) (CacheView, error) {
+	return &LatestBatchView{cache: c, tx: tx}, nil
 }
-func (c *SimpleCache) OnNewBlock(sc *remoteproto.StateChangeBatch) {
+func (c *LatestBatchCache) OnNewBlock(sc *remoteproto.StateChangeBatch) {
 	if sc == nil {
 		return
 	}
@@ -70,13 +73,13 @@ func (c *SimpleCache) OnNewBlock(sc *remoteproto.StateChangeBatch) {
 		}
 	}
 }
-func (c *SimpleCache) Evict() int { return 0 }
-func (c *SimpleCache) Len() int {
+func (c *LatestBatchCache) Evict() int { return 0 }
+func (c *LatestBatchCache) Len() int {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
 	return len(c.accounts)
 }
-func (c *SimpleCache) Get(k []byte, tx kv.TemporalTx, id uint64) ([]byte, error) {
+func (c *LatestBatchCache) Get(k []byte, tx kv.TemporalTx, id uint64) ([]byte, error) {
 	// Check the in-memory account cache first (populated by OnNewBlock).
 	if len(k) == 20 {
 		c.mu.RLock()
@@ -91,25 +94,27 @@ func (c *SimpleCache) Get(k []byte, tx kv.TemporalTx, id uint64) ([]byte, error)
 	v, _, err := tx.GetLatest(kv.StorageDomain, k)
 	return v, err
 }
-func (c *SimpleCache) GetCode(k []byte, tx kv.TemporalTx, id uint64) ([]byte, error) {
+func (c *LatestBatchCache) GetCode(k []byte, tx kv.TemporalTx, id uint64) ([]byte, error) {
 	v, _, err := tx.GetLatest(kv.CodeDomain, k)
 	return v, err
 }
-func (c *SimpleCache) ValidateCurrentRoot(_ context.Context, _ kv.TemporalTx) (*CacheValidationResult, error) {
+func (c *LatestBatchCache) ValidateCurrentRoot(_ context.Context, _ kv.TemporalTx) (*CacheValidationResult, error) {
 	return &CacheValidationResult{Enabled: false}, nil
 }
 
-type SimpleView struct {
-	cache *SimpleCache
+type LatestBatchView struct {
+	cache *LatestBatchCache
 	tx    kv.TemporalTx
 }
 
-func (c *SimpleView) Get(k []byte) ([]byte, error) { return c.cache.Get(k, c.tx, 0) }
-func (c *SimpleView) GetAsOf(key []byte, ts uint64) (v []byte, ok bool, err error) {
+func (c *LatestBatchView) Get(k []byte) ([]byte, error) { return c.cache.Get(k, c.tx, 0) }
+
+// The cache holds latest-state only, so historical reads always fall through.
+func (c *LatestBatchView) GetAsOf(key []byte, ts uint64) (v []byte, ok bool, err error) {
 	return nil, false, nil
 }
-func (c *SimpleView) GetCode(k []byte) ([]byte, error) { return c.cache.GetCode(k, c.tx, 0) }
-func (c *SimpleView) HasStorage(address common.Address) (bool, error) {
+func (c *LatestBatchView) GetCode(k []byte) ([]byte, error) { return c.cache.GetCode(k, c.tx, 0) }
+func (c *LatestBatchView) HasStorage(address common.Address) (bool, error) {
 	_, _, hasStorage, err := c.tx.HasPrefix(kv.StorageDomain, address[:])
 	return hasStorage, err
 }
