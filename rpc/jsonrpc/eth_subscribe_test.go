@@ -62,7 +62,7 @@ func TestEthSubscribe(t *testing.T) {
 	}
 	ff := rpchelper.New(ctx, rpchelper.DefaultFiltersConfig, backend, nil, nil, onNewSnapshot, m.Log, nil)
 	subscriptionReadyWg.Wait() // This is needed *before* inserting the blocks, which sends NEW_HEADER events
-	newHeads, id := ff.SubscribeNewHeads(16)
+	newHeads, id := ff.SubscribeNewHeads(16, "")
 	defer ff.UnsubscribeHeads(id)
 	highestSeenHeader := chain.TopBlock.NumberU64()
 	err = m.InsertChain(chain)

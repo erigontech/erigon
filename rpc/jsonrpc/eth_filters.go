@@ -35,8 +35,7 @@ func (api *APIImpl) NewPendingTransactionFilter(_ context.Context) (string, erro
 	if api.filters == nil {
 		return "", rpc.ErrNotificationsUnsupported
 	}
-	txsCh, id := api.filters.SubscribePendingTxs(32)
-	api.filters.TrackSubscription(rpchelper.SubscriptionID(id), rpchelper.FilterTypePendingTxs, rpchelper.ProtocolHTTP)
+	txsCh, id := api.filters.SubscribePendingTxs(32, rpchelper.ProtocolHTTP)
 	go func() {
 		for txs := range txsCh {
 			api.filters.AddPendingTxs(id, txs)
@@ -50,8 +49,7 @@ func (api *APIImpl) NewBlockFilter(_ context.Context) (string, error) {
 	if api.filters == nil {
 		return "", rpc.ErrNotificationsUnsupported
 	}
-	ch, id := api.filters.SubscribeNewHeads(32)
-	api.filters.TrackSubscription(rpchelper.SubscriptionID(id), rpchelper.FilterTypeHeads, rpchelper.ProtocolHTTP)
+	ch, id := api.filters.SubscribeNewHeads(32, rpchelper.ProtocolHTTP)
 	go func() {
 		for block := range ch {
 			api.filters.AddPendingBlock(id, block)
@@ -65,8 +63,7 @@ func (api *APIImpl) NewFilter(_ context.Context, crit filters.FilterCriteria) (s
 	if api.filters == nil {
 		return "", rpc.ErrNotificationsUnsupported
 	}
-	logs, id := api.filters.SubscribeLogs(256, crit)
-	api.filters.TrackSubscription(rpchelper.SubscriptionID(id), rpchelper.FilterTypeLogs, rpchelper.ProtocolHTTP)
+	logs, id := api.filters.SubscribeLogs(256, crit, rpchelper.ProtocolHTTP)
 	go func() {
 		for lg := range logs {
 			api.filters.AddLogs(id, lg)
@@ -104,18 +101,18 @@ func (api *APIImpl) GetFilterChanges(_ context.Context, index string) ([]any, er
 	stub := make([]any, 0)
 	// remove 0x
 	cutIndex := strings.TrimPrefix(index, "0x")
-	// The Touch probe identifies the id's type and resets the eviction deadline on
-	// every poll — even when no data is buffered — so an actively-polling client on
-	// a quiet chain is never evicted.
-	switch {
-	case api.filters.TouchSubscription(rpchelper.SubscriptionID(cutIndex), rpchelper.FilterTypeHeads):
+	ft, ok := api.filters.TouchSubscription(rpchelper.SubscriptionID(cutIndex))
+	if !ok {
+		return nil, rpc.ErrFilterNotFound
+	}
+	switch ft {
+	case rpchelper.FilterTypeHeads:
 		if blocks, ok := api.filters.ReadPendingBlocks(rpchelper.HeadsSubID(cutIndex)); ok {
 			for _, v := range blocks {
 				stub = append(stub, v.Hash())
 			}
 		}
-		return stub, nil
-	case api.filters.TouchSubscription(rpchelper.SubscriptionID(cutIndex), rpchelper.FilterTypePendingTxs):
+	case rpchelper.FilterTypePendingTxs:
 		if txs, ok := api.filters.ReadPendingTxs(rpchelper.PendingTxsSubID(cutIndex)); ok {
 			for _, batch := range txs {
 				for _, txn := range batch {
@@ -123,17 +120,14 @@ func (api *APIImpl) GetFilterChanges(_ context.Context, index string) ([]any, er
 				}
 			}
 		}
-		return stub, nil
-	case api.filters.TouchSubscription(rpchelper.SubscriptionID(cutIndex), rpchelper.FilterTypeLogs):
+	case rpchelper.FilterTypeLogs:
 		if logs, ok := api.filters.ReadLogs(rpchelper.LogsSubID(cutIndex)); ok {
 			for _, v := range logs {
 				stub = append(stub, v)
 			}
 		}
-		return stub, nil
-	default:
-		return nil, rpc.ErrFilterNotFound
 	}
+	return stub, nil
 }
 
 // GetFilterLogs implements eth_getFilterLogs.
@@ -144,7 +138,7 @@ func (api *APIImpl) GetFilterLogs(_ context.Context, index string) ([]*types.Log
 		return nil, rpc.ErrNotificationsUnsupported
 	}
 	cutIndex := strings.TrimPrefix(index, "0x")
-	if !api.filters.TouchSubscription(rpchelper.SubscriptionID(cutIndex), rpchelper.FilterTypeLogs) {
+	if ft, ok := api.filters.TouchSubscription(rpchelper.SubscriptionID(cutIndex)); !ok || ft != rpchelper.FilterTypeLogs {
 		return nil, rpc.ErrFilterNotFound
 	}
 	if logs, ok := api.filters.ReadLogs(rpchelper.LogsSubID(cutIndex)); ok {
@@ -200,8 +194,7 @@ func subscribeRPC[T any](ctx context.Context, apiFilters *rpchelper.Filters, sub
 func (api *APIImpl) NewHeads(ctx context.Context) (*rpc.Subscription, error) {
 	return subscribeRPC(ctx, api.filters,
 		func() (<-chan *types.Header, func()) {
-			headers, id := api.filters.SubscribeNewHeads(32)
-			api.filters.SetSubscriptionProtocol(rpchelper.SubscriptionID(id), rpchelper.FilterTypeHeads, rpchelper.ProtocolWS)
+			headers, id := api.filters.SubscribeNewHeads(32, rpchelper.ProtocolWS)
 			return headers, func() { api.filters.UnsubscribeHeads(id) }
 		},
 		func(emit func(payload any), h *types.Header) {
@@ -225,8 +218,7 @@ func (api *APIImpl) NewPendingTransactionsWithBody(ctx context.Context) (*rpc.Su
 func (api *APIImpl) subscribePendingTransactions(ctx context.Context, chanSize int, fullTx bool) (*rpc.Subscription, error) {
 	return subscribeRPC(ctx, api.filters,
 		func() (<-chan []types.Transaction, func()) {
-			txsCh, id := api.filters.SubscribePendingTxs(chanSize)
-			api.filters.SetSubscriptionProtocol(rpchelper.SubscriptionID(id), rpchelper.FilterTypePendingTxs, rpchelper.ProtocolWS)
+			txsCh, id := api.filters.SubscribePendingTxs(chanSize, rpchelper.ProtocolWS)
 			return txsCh, func() { api.filters.UnsubscribePendingTxs(id) }
 		},
 		func(emit func(payload any), txs []types.Transaction) {
@@ -247,8 +239,7 @@ func (api *APIImpl) subscribePendingTransactions(ctx context.Context, chanSize i
 func (api *APIImpl) Logs(ctx context.Context, crit filters.FilterCriteria) (*rpc.Subscription, error) {
 	return subscribeRPC(ctx, api.filters,
 		func() (<-chan *types.Log, func()) {
-			logs, id := api.filters.SubscribeLogs(api.SubscribeLogsChannelSize, crit)
-			api.filters.SetSubscriptionProtocol(rpchelper.SubscriptionID(id), rpchelper.FilterTypeLogs, rpchelper.ProtocolWS)
+			logs, id := api.filters.SubscribeLogs(api.SubscribeLogsChannelSize, crit, rpchelper.ProtocolWS)
 			return logs, func() { api.filters.UnsubscribeLogs(id) }
 		},
 		func(emit func(payload any), h *types.Log) {

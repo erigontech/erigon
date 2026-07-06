@@ -21,41 +21,55 @@ import (
 	"time"
 )
 
+// SubProtocol says how a subscription is consumed and thereby its lifecycle: HTTP
+// polling filters are subject to timeout eviction, WS subscriptions end with their
+// connection, and the empty value marks internal subscriptions that are neither
+// evicted nor counted in metrics.
+type SubProtocol string
+
+const (
+	ProtocolHTTP SubProtocol = "http"
+	ProtocolWS   SubProtocol = "ws"
+)
+
 // a simple interface for subscriptions for rpc helper
 type Sub[T any] interface {
 	Send(T)
 	Close()
-	CloseIfIdle(timeout time.Duration) bool // Close and report true when idle longer than timeout
 	SubTracker
 }
 
-// SubTracker is the element-type-independent tracking surface of a subscription,
+// SubTracker is the element-type-independent surface of a subscription,
 // used for timeout-based eviction and metrics.
 type SubTracker interface {
-	Touch()                      // Reset last access time (for HTTP polling filters)
-	SetProtocol(protocol string) // Set protocol label for metrics
-	EnableTimeout()              // Enable timeout tracking (HTTP only)
-	Protocol() string            // Get protocol label for metrics
+	Touch()                                 // reset the eviction deadline (HTTP polling filters)
+	CloseIfIdle(timeout time.Duration) bool // close and report true when idle longer than timeout
+	Protocol() SubProtocol
 }
 
 type chan_sub[T any] struct {
-	lock     sync.Mutex // protects all fields of this struct
+	lock     sync.Mutex // protects all mutable fields of this struct
 	ch       chan T
 	closed   bool
-	protocol string
+	protocol SubProtocol // immutable after construction
 	// lastAccess is the last poll time for timeout eviction; zero means no
 	// timeout tracking (push subscriptions die with their connection instead).
 	lastAccess time.Time
 }
 
 // newChanSub - buffered channel
-func newChanSub[T any](size int) *chan_sub[T] {
+func newChanSub[T any](size int, protocol SubProtocol) *chan_sub[T] {
 	if size < 8 { // set min size to 8
 		size = 8
 	}
-	return &chan_sub[T]{
-		ch: make(chan T, size),
+	s := &chan_sub[T]{
+		ch:       make(chan T, size),
+		protocol: protocol,
 	}
+	if protocol == ProtocolHTTP {
+		s.lastAccess = time.Now()
+	}
+	return s
 }
 func (s *chan_sub[T]) Send(x T) {
 	s.lock.Lock()
@@ -84,23 +98,8 @@ func (s *chan_sub[T]) closeLocked() {
 	close(s.ch)
 }
 
-// SetProtocol sets the protocol label for metrics tracking.
-func (s *chan_sub[T]) SetProtocol(protocol string) {
-	s.lock.Lock()
-	defer s.lock.Unlock()
-	s.protocol = protocol
-}
-
-// EnableTimeout enables timeout tracking for this subscription (HTTP polling filters).
-// For WebSocket subscriptions, don't call this - they will never be evicted.
-func (s *chan_sub[T]) EnableTimeout() {
-	s.lock.Lock()
-	defer s.lock.Unlock()
-	s.lastAccess = time.Now()
-}
-
 // Touch resets the last access time, preventing timeout eviction.
-// Only effective if EnableTimeout was called.
+// A no-op unless the subscription is tracked for eviction.
 func (s *chan_sub[T]) Touch() {
 	s.lock.Lock()
 	defer s.lock.Unlock()
@@ -123,9 +122,6 @@ func (s *chan_sub[T]) CloseIfIdle(timeout time.Duration) bool {
 	return true
 }
 
-// Protocol returns the protocol label for metrics. Returns "" if SetProtocol was never called.
-func (s *chan_sub[T]) Protocol() string {
-	s.lock.Lock()
-	defer s.lock.Unlock()
+func (s *chan_sub[T]) Protocol() SubProtocol {
 	return s.protocol
 }

@@ -84,7 +84,7 @@ func TestFilters_SingleSubscription_OnlyTopicsSubscribedAreBroadcast(t *testing.
 		Topics:    [][]common.Hash{{subbedTopic}},
 	}
 
-	outChan, _ := f.SubscribeLogs(10, criteria)
+	outChan, _ := f.SubscribeLogs(10, criteria, "")
 
 	// now create a log for some other topic and distribute it
 	log := createLog()
@@ -118,7 +118,7 @@ func TestFilters_SingleSubscription_EmptyTopicsInCriteria_OnlyTopicsSubscribedAr
 		Topics:    [][]common.Hash{{nilTopic, subbedTopic, nilTopic}},
 	}
 
-	outChan, _ := f.SubscribeLogs(10, criteria)
+	outChan, _ := f.SubscribeLogs(10, criteria, "")
 
 	// now create a log for some other topic and distribute it
 	log := createLog()
@@ -151,7 +151,7 @@ func TestFilters_SingleSubscription_TopicPositionWildcardIsPreserved(t *testing.
 		Topics:    [][]common.Hash{{topic0}, nil, {topic2}},
 	}
 
-	outChan, _ := f.SubscribeLogs(10, criteria)
+	outChan, _ := f.SubscribeLogs(10, criteria, "")
 
 	matchingLog := createLog()
 	matchingLog.Topics = []*typesproto.H256{
@@ -188,7 +188,7 @@ func TestFilters_SingleSubscription_WildcardOnlyTopicRowMatches(t *testing.T) {
 		Topics:    [][]common.Hash{nil},
 	}
 
-	outChan, _ := f.SubscribeLogs(10, criteria)
+	outChan, _ := f.SubscribeLogs(10, criteria, "")
 
 	log1 := createLog()
 	f.OnNewLogs(log1)
@@ -218,8 +218,8 @@ func TestFilters_TwoSubscriptionsWithDifferentCriteria(t *testing.T) {
 		Topics:    [][]common.Hash{{topic1}},
 	}
 
-	chan1, _ := f.SubscribeLogs(256, criteria1)
-	chan2, _ := f.SubscribeLogs(256, criteria2)
+	chan1, _ := f.SubscribeLogs(256, criteria1, "")
+	chan2, _ := f.SubscribeLogs(256, criteria2, "")
 	// now create a log for some other topic and distribute it
 	log := createLog()
 
@@ -263,9 +263,9 @@ func TestFilters_ThreeSubscriptionsWithDifferentCriteria(t *testing.T) {
 		Topics:    [][]common.Hash{},
 	}
 
-	chan1, _ := f.SubscribeLogs(256, criteria1)
-	chan2, _ := f.SubscribeLogs(256, criteria2)
-	chan3, _ := f.SubscribeLogs(256, criteria3)
+	chan1, _ := f.SubscribeLogs(256, criteria1, "")
+	chan2, _ := f.SubscribeLogs(256, criteria2, "")
+	chan3, _ := f.SubscribeLogs(256, criteria3, "")
 
 	// now create a log for some other topic and distribute it
 	log := createLog()
@@ -332,7 +332,7 @@ func TestFilters_SubscribeLogsGeneratesCorrectLogFilterRequest(t *testing.T) {
 		Addresses: []common.Address{},
 		Topics:    [][]common.Hash{},
 	}
-	_, id1 := f.SubscribeLogs(1, criteria1)
+	_, id1 := f.SubscribeLogs(1, criteria1, "")
 
 	// request should have all addresses and topics enabled
 	if lastFilterRequest.AllAddresses == false {
@@ -347,7 +347,7 @@ func TestFilters_SubscribeLogsGeneratesCorrectLogFilterRequest(t *testing.T) {
 		Addresses: []common.Address{address1},
 		Topics:    [][]common.Hash{},
 	}
-	_, id2 := f.SubscribeLogs(1, criteria2)
+	_, id2 := f.SubscribeLogs(1, criteria2, "")
 
 	// request should have all addresses and all topics still and the new address
 	if lastFilterRequest.AllAddresses == false {
@@ -365,7 +365,7 @@ func TestFilters_SubscribeLogsGeneratesCorrectLogFilterRequest(t *testing.T) {
 		Addresses: []common.Address{},
 		Topics:    [][]common.Hash{{topic1}},
 	}
-	_, id3 := f.SubscribeLogs(1, criteria3)
+	_, id3 := f.SubscribeLogs(1, criteria3, "")
 
 	// request should have all addresses and all topics as well as the previous address and new topic
 	if lastFilterRequest.AllAddresses == false {
@@ -450,7 +450,7 @@ func TestFilters_AddLogs(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			config := FiltersConfig{RpcSubscriptionFiltersMaxLogs: tt.maxLogs}
 			f := New(t.Context(), config, nil, nil, nil, func() {}, log.New(), nil)
-			_, logID := f.SubscribeLogs(8, filters.FilterCriteria{})
+			_, logID := f.SubscribeLogs(8, filters.FilterCriteria{}, "")
 			logEntry := &types.Log{Address: common.HexToAddress("095e7baea6a6c7c4c2dfeb977efac326af552d87")}
 
 			for i := 0; i < tt.numToAdd; i++ {
@@ -484,7 +484,7 @@ func TestFilters_AddPendingBlocks(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			config := FiltersConfig{RpcSubscriptionFiltersMaxHeaders: tt.maxHeaders}
 			f := New(t.Context(), config, nil, nil, nil, func() {}, log.New(), nil)
-			_, blockID := f.SubscribeNewHeads(8)
+			_, blockID := f.SubscribeNewHeads(8, "")
 			header := &types.Header{}
 
 			for i := 0; i < tt.numToAdd; i++ {
@@ -519,7 +519,7 @@ func TestFilters_AddPendingTxs(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			config := FiltersConfig{RpcSubscriptionFiltersMaxTxs: tt.maxTxs}
 			f := New(t.Context(), config, nil, nil, nil, func() {}, log.New(), nil)
-			_, txID := f.SubscribePendingTxs(8)
+			_, txID := f.SubscribePendingTxs(8, "")
 			var txn types.Transaction = types.NewTransaction(0, common.HexToAddress("095e7baea6a6c7c4c2dfeb977efac326af552d87"), uint256.NewInt(10), 50000, uint256.NewInt(10), nil)
 			txn, _ = txn.WithSignature(*types.LatestSignerForChainID(nil), common.Hex2Bytes("9bea4c4daac7c7c52e093e6a4c35dbbcf8856f1af7b059ba20253e70848d094f8a8fae537ce25ed8cb5af9adac3f141af69bd515bd2ba031522df09b97dd72b100"))
 

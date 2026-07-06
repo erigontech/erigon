@@ -44,15 +44,17 @@ func backdateSub[T any](t *testing.T, sub Sub[T], age time.Duration) {
 	cs.lock.Unlock()
 }
 
+func (ff *Filters) hasTrackedSub(id SubscriptionID) bool {
+	_, ok := ff.trackedSubs.Get(id)
+	return ok
+}
+
 func TestEvictStaleSubscriptionsRemovesIdleFilters(t *testing.T) {
 	f := newTestFilters(t)
 
-	headsCh, headsID := f.SubscribeNewHeads(8)
-	f.TrackSubscription(SubscriptionID(headsID), FilterTypeHeads, ProtocolHTTP)
-	txsCh, txsID := f.SubscribePendingTxs(8)
-	f.TrackSubscription(SubscriptionID(txsID), FilterTypePendingTxs, ProtocolHTTP)
-	logsCh, logsID := f.SubscribeLogs(8, filters.FilterCriteria{})
-	f.TrackSubscription(SubscriptionID(logsID), FilterTypeLogs, ProtocolHTTP)
+	headsCh, headsID := f.SubscribeNewHeads(8, ProtocolHTTP)
+	txsCh, txsID := f.SubscribePendingTxs(8, ProtocolHTTP)
+	logsCh, logsID := f.SubscribeLogs(8, filters.FilterCriteria{}, ProtocolHTTP)
 
 	headsSub, ok := f.headsSubs.Get(headsID)
 	require.True(t, ok)
@@ -66,9 +68,15 @@ func TestEvictStaleSubscriptionsRemovesIdleFilters(t *testing.T) {
 
 	f.evictStaleSubscriptions(time.Hour)
 
-	require.False(t, f.HasHeadsSubscription(headsID))
-	require.False(t, f.HasPendingTxsSubscription(txsID))
-	require.False(t, f.HasSubscription(logsID))
+	_, ok = f.headsSubs.Get(headsID)
+	require.False(t, ok)
+	_, ok = f.pendingTxsSubs.Get(txsID)
+	require.False(t, ok)
+	_, ok = f.logsSubs.logsFilters.Get(logsID)
+	require.False(t, ok)
+	require.False(t, f.hasTrackedSub(SubscriptionID(headsID)))
+	require.False(t, f.hasTrackedSub(SubscriptionID(txsID)))
+	require.False(t, f.hasTrackedSub(SubscriptionID(logsID)))
 
 	_, open := <-headsCh
 	require.False(t, open)
@@ -81,10 +89,8 @@ func TestEvictStaleSubscriptionsRemovesIdleFilters(t *testing.T) {
 func TestTouchSubscriptionPreventsEviction(t *testing.T) {
 	f := newTestFilters(t)
 
-	_, touchedID := f.SubscribePendingTxs(8)
-	f.TrackSubscription(SubscriptionID(touchedID), FilterTypePendingTxs, ProtocolHTTP)
-	_, idleID := f.SubscribePendingTxs(8)
-	f.TrackSubscription(SubscriptionID(idleID), FilterTypePendingTxs, ProtocolHTTP)
+	_, touchedID := f.SubscribePendingTxs(8, ProtocolHTTP)
+	_, idleID := f.SubscribePendingTxs(8, ProtocolHTTP)
 
 	for _, id := range []PendingTxsSubID{touchedID, idleID} {
 		sub, ok := f.pendingTxsSubs.Get(id)
@@ -92,22 +98,26 @@ func TestTouchSubscriptionPreventsEviction(t *testing.T) {
 		backdateSub(t, sub, 2*time.Hour)
 	}
 
-	f.TouchSubscription(SubscriptionID(touchedID), FilterTypePendingTxs)
+	ft, ok := f.TouchSubscription(SubscriptionID(touchedID))
+	require.True(t, ok)
+	require.Equal(t, FilterTypePendingTxs, ft)
 	f.evictStaleSubscriptions(time.Hour)
 
-	require.True(t, f.HasPendingTxsSubscription(touchedID))
-	require.False(t, f.HasPendingTxsSubscription(idleID))
+	_, ok = f.pendingTxsSubs.Get(touchedID)
+	require.True(t, ok)
+	_, ok = f.pendingTxsSubs.Get(idleID)
+	require.False(t, ok)
 }
 
 func TestEvictStaleSubscriptionsSkipsWebSocketSubscriptions(t *testing.T) {
 	f := newTestFilters(t)
 
-	_, id := f.SubscribeNewHeads(8)
-	f.SetSubscriptionProtocol(SubscriptionID(id), FilterTypeHeads, ProtocolWS)
+	_, id := f.SubscribeNewHeads(8, ProtocolWS)
 
 	f.evictStaleSubscriptions(time.Nanosecond)
 
-	require.True(t, f.HasHeadsSubscription(id))
+	_, ok := f.headsSubs.Get(id)
+	require.True(t, ok)
 }
 
 // A forwarding goroutine can drain channel-buffered items after its subscription is
@@ -117,22 +127,25 @@ func TestAddAfterUnsubscribeDoesNotOrphanStore(t *testing.T) {
 	f := newTestFilters(t)
 
 	t.Run("heads", func(t *testing.T) {
-		_, id := f.SubscribeNewHeads(8)
+		_, id := f.SubscribeNewHeads(8, ProtocolHTTP)
 		require.True(t, f.UnsubscribeHeads(id))
+		require.False(t, f.hasTrackedSub(SubscriptionID(id)))
 		f.AddPendingBlock(id, &types.Header{})
 		_, ok := f.pendingHeadsStores.Get(id)
 		require.False(t, ok)
 	})
 	t.Run("pendingTxs", func(t *testing.T) {
-		_, id := f.SubscribePendingTxs(8)
+		_, id := f.SubscribePendingTxs(8, ProtocolHTTP)
 		require.True(t, f.UnsubscribePendingTxs(id))
+		require.False(t, f.hasTrackedSub(SubscriptionID(id)))
 		f.AddPendingTxs(id, []types.Transaction{})
 		_, ok := f.pendingTxsStores.Get(id)
 		require.False(t, ok)
 	})
 	t.Run("logs", func(t *testing.T) {
-		_, id := f.SubscribeLogs(8, filters.FilterCriteria{})
+		_, id := f.SubscribeLogs(8, filters.FilterCriteria{}, ProtocolHTTP)
 		require.True(t, f.UnsubscribeLogs(id))
+		require.False(t, f.hasTrackedSub(SubscriptionID(id)))
 		f.AddLogs(id, &types.Log{})
 		_, ok := f.logsStores.Get(id)
 		require.False(t, ok)
@@ -150,8 +163,7 @@ func TestLogsEvictionBatchesRemoteFilterUpdate(t *testing.T) {
 
 	ids := make([]LogsSubID, 0, 3)
 	for range 3 {
-		_, id := f.SubscribeLogs(8, filters.FilterCriteria{})
-		f.TrackSubscription(SubscriptionID(id), FilterTypeLogs, ProtocolHTTP)
+		_, id := f.SubscribeLogs(8, filters.FilterCriteria{}, ProtocolHTTP)
 		lf, ok := f.logsSubs.logsFilters.Get(id)
 		require.True(t, ok)
 		backdateSub(t, lf.sender, 2*time.Hour)
@@ -162,7 +174,8 @@ func TestLogsEvictionBatchesRemoteFilterUpdate(t *testing.T) {
 	f.evictStaleSubscriptions(time.Hour)
 
 	for _, id := range ids {
-		require.False(t, f.HasSubscription(id))
+		_, ok := f.logsSubs.logsFilters.Get(id)
+		require.False(t, ok)
 	}
 	require.EqualValues(t, 1, updates.Load())
 }
@@ -170,8 +183,7 @@ func TestLogsEvictionBatchesRemoteFilterUpdate(t *testing.T) {
 func TestConcurrentTouchAndEviction(t *testing.T) {
 	f := newTestFilters(t)
 
-	_, id := f.SubscribePendingTxs(8)
-	f.TrackSubscription(SubscriptionID(id), FilterTypePendingTxs, ProtocolHTTP)
+	_, id := f.SubscribePendingTxs(8, ProtocolHTTP)
 
 	stop := make(chan struct{})
 	var wg sync.WaitGroup
@@ -183,7 +195,7 @@ func TestConcurrentTouchAndEviction(t *testing.T) {
 			case <-stop:
 				return
 			default:
-				f.TouchSubscription(SubscriptionID(id), FilterTypePendingTxs)
+				f.TouchSubscription(SubscriptionID(id))
 				runtime.Gosched()
 			}
 		}
@@ -197,5 +209,6 @@ func TestConcurrentTouchAndEviction(t *testing.T) {
 	close(stop)
 	wg.Wait()
 
-	require.True(t, f.HasPendingTxsSubscription(id))
+	_, ok := f.pendingTxsSubs.Get(id)
+	require.True(t, ok)
 }
