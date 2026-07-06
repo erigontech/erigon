@@ -494,6 +494,7 @@ func (p *TxPool) processRemoteTxns(ctx context.Context) (err error) {
 
 	l := len(p.unprocessedRemoteTxns.Txns)
 	if l == 0 {
+		p.hasUnprocessedRemoteTxns.Store(false)
 		return nil
 	}
 
