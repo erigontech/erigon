@@ -209,7 +209,7 @@ var (
 	}
 	RpcSubscriptionFiltersTimeoutFlag = cli.DurationFlag{
 		Name:  "rpc.subscription.filters.timeout",
-		Usage: "Timeout before idle filters are evicted. Set to 0 to disable eviction.",
+		Usage: "Timeout before idle filters are evicted. Defaults to 5m; set to 0 to disable eviction.",
 		Value: rpchelper.DefaultFiltersConfig.RpcSubscriptionFiltersTimeout,
 	}
 )
