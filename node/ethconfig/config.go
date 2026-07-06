@@ -118,7 +118,7 @@ var Defaults = Config{
 	// serialized by the ExecModule semaphore. Until the SD-aware temporal view
 	// (https://github.com/erigontech/erigon/issues/21314) lands, "latest" state
 	// reads can lag the announced head by one block for the commit's duration.
-	FcuBackgroundCommit: true,
+	FcuBackgroundCommit: false,
 	ExperimentalBAL:     false,
 	WarmupKzgCtxOnInit:  true,
 }
