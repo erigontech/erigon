@@ -236,7 +236,11 @@ func (sg Signer) SenderWithContext(context *secp256k1.Context, txn Transaction) 
 			if !sg.protected {
 				return accounts.NilAddress, fmt.Errorf("protected txn is not supported by signer %s", sg)
 			}
-			if !DeriveChainId(&t.V).Eq(&sg.chainID) {
+			chainID, err := DeriveChainId(&t.V)
+			if err != nil {
+				return accounts.NilAddress, err
+			}
+			if !chainID.Eq(&sg.chainID) {
 				return accounts.NilAddress, ErrInvalidChainId
 			}
 			V.Sub(&t.V, &sg.chainIDMul)
@@ -384,15 +388,20 @@ func recoverPlain(context *secp256k1.Context, sighash common.Hash, R, S, Vb *uin
 	return accounts.InternAddress(addr), nil
 }
 
-// deriveChainID derives the chain id from the given v parameter
-func DeriveChainId(v *uint256.Int) *uint256.Int {
+// DeriveChainId derives the chain id from a legacy transaction's v value.
+// Valid v is 27/28 (pre-EIP-155, chain id 0) or >= 35 (EIP-155); a smaller
+// value would underflow, so it is rejected as an invalid signature value.
+func DeriveChainId(v *uint256.Int) (*uint256.Int, error) {
 	if v.IsUint64() {
 		v := v.Uint64()
 		if v == 27 || v == 28 {
-			return new(uint256.Int)
+			return new(uint256.Int), nil
 		}
-		return new(uint256.Int).SetUint64((v - 35) / 2)
+		if v < 35 {
+			return nil, ErrInvalidSig
+		}
+		return new(uint256.Int).SetUint64((v - 35) / 2), nil
 	}
 	r := new(uint256.Int).Sub(v, &u256.Num35)
-	return r.Rsh(r, 1) // ÷2
+	return r.Rsh(r, 1), nil // ÷2
 }

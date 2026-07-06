@@ -320,8 +320,11 @@ func sanityCheckSignature(v *uint256.Int, r *uint256.Int, s *uint256.Int, maybeP
 
 	var plainV byte
 	if isProtectedV(v) {
-		chainID := DeriveChainId(v).Uint64()
-		plainV = byte(v.Uint64() - 35 - 2*chainID)
+		chainID, err := DeriveChainId(v)
+		if err != nil {
+			return err
+		}
+		plainV = byte(v.Uint64() - 35 - 2*chainID.Uint64())
 	} else if maybeProtected {
 		// Only EIP-155 signatures can be optionally protected. Since
 		// we determined this v value is not protected, it must be a
