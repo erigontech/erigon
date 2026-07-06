@@ -23,6 +23,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net"
 	"os"
 	"strings"
 	"time"
@@ -33,9 +34,13 @@ import (
 	"google.golang.org/grpc/backoff"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/credentials"
+	"google.golang.org/grpc/health"
+	"google.golang.org/grpc/health/grpc_health_v1"
 	"google.golang.org/grpc/keepalive"
 	"google.golang.org/grpc/reflection"
 	"google.golang.org/grpc/status"
+
+	"github.com/erigontech/erigon/common/log/v3"
 )
 
 func TLS(tlsCACert, tlsCertFile, tlsKeyFile string) (credentials.TransportCredentials, error) {
@@ -68,40 +73,53 @@ func TLS(tlsCACert, tlsCertFile, tlsKeyFile string) (credentials.TransportCreden
 }
 
 func NewServer(rateLimit uint32, creds credentials.TransportCredentials) *grpc.Server {
-	var (
-		streamInterceptors = make([]grpc.StreamServerInterceptor, 0, 1)
-		unaryInterceptors  = make([]grpc.UnaryServerInterceptor, 0, 1)
-	)
-	streamInterceptors = append(streamInterceptors, recovery.StreamServerInterceptor())
-	unaryInterceptors = append(unaryInterceptors, recovery.UnaryServerInterceptor())
+	return NewServerWithOpts(creds, grpc.MaxConcurrentStreams(rateLimit)) // to force clients to reduce concurrency level
+}
 
-	//if metrics.Enabled {
-	//	streamInterceptors = append(streamInterceptors, grpc_prometheus.StreamServerInterceptor)
-	//	unaryInterceptors = append(unaryInterceptors, grpc_prometheus.UnaryServerInterceptor)
-	//}
-
-	//cpus := uint32(runtime.GOMAXPROCS(-1))
+func NewServerWithOpts(creds credentials.TransportCredentials, extraOpts ...grpc.ServerOption) *grpc.Server {
 	opts := []grpc.ServerOption{
-		//grpc.NumStreamWorkers(cpus), // reduce amount of goroutines
-		grpc.MaxConcurrentStreams(rateLimit), // to force clients reduce concurrency level
-		// Don't drop the connection, settings accordign to this comment on GitHub
+		// Don't drop the connection, settings according to this comment on GitHub
 		// https://github.com/grpc/grpc-go/issues/3171#issuecomment-552796779
 		grpc.KeepaliveEnforcementPolicy(keepalive.EnforcementPolicy{
 			MinTime:             10 * time.Second,
 			PermitWithoutStream: true,
 		}),
-		grpc.ChainStreamInterceptor(streamInterceptors...),
-		grpc.ChainUnaryInterceptor(unaryInterceptors...),
-		grpc.Creds(creds),
+		grpc.ChainStreamInterceptor(recovery.StreamServerInterceptor()),
+		grpc.ChainUnaryInterceptor(recovery.UnaryServerInterceptor()),
 	}
+	if creds != nil {
+		opts = append(opts, grpc.Creds(creds))
+	}
+	opts = append(opts, extraOpts...)
+
 	grpcServer := grpc.NewServer(opts...)
 	reflection.Register(grpcServer)
-
-	//if metrics.Enabled {
-	//	grpc_prometheus.Register(grpcServer)
-	//}
-
 	return grpcServer
+}
+
+func StartServer(srv *grpc.Server, addr string, healthCheck bool, logger log.Logger, serveErrMsg string) error {
+	lis, err := net.Listen("tcp", addr)
+	if err != nil {
+		return fmt.Errorf("could not create listener: %w, addr=%s", err, addr)
+	}
+	StartServerOnListener(srv, lis, healthCheck, logger, serveErrMsg)
+	return nil
+}
+
+func StartServerOnListener(srv *grpc.Server, lis net.Listener, healthCheck bool, logger log.Logger, serveErrMsg string) {
+	var healthServer *health.Server
+	if healthCheck {
+		healthServer = health.NewServer()
+		grpc_health_v1.RegisterHealthServer(srv, healthServer)
+	}
+	go func() {
+		if healthServer != nil {
+			defer healthServer.Shutdown()
+		}
+		if err := srv.Serve(lis); err != nil {
+			logger.Error(serveErrMsg, "err", err)
+		}
+	}()
 }
 
 func Connect(creds credentials.TransportCredentials, dialAddress string) (*grpc.ClientConn, error) {

@@ -85,6 +85,44 @@ func findAddressForNibble(targetNibble int, seed int) []byte {
 	panic(fmt.Sprintf("findAddressForNibble(nibble=%d, seed=%d): exceeded %d iterations", targetNibble, seed, maxAddrSearchIters))
 }
 
+// findAddressForHexPrefix brute-force searches for a 20-byte address whose keccak256
+// hashed-key nibbles start with the given nibble prefix (each entry in [0,15]). seed
+// separates search spaces. Used to force accounts to share a multi-nibble hashed prefix
+// (e.g. an extension-topped subtree under one root nibble).
+func findAddressForHexPrefix(nibblePrefix []byte, seed int) []byte {
+	for i, n := range nibblePrefix {
+		if n > 0xf {
+			panic(fmt.Sprintf("findAddressForHexPrefix: nibble %d at %d out of range [0,15]", n, i))
+		}
+	}
+	var addr [20]byte
+	counter := uint64(seed)*2_654_435_761 + 1
+	for iter := 0; iter < maxAddrSearchIters; iter++ {
+		binary.BigEndian.PutUint64(addr[:8], counter)
+		h := crypto.Keccak256(addr[:])
+		match := true
+		for i, n := range nibblePrefix {
+			var hn byte
+			if i%2 == 0 {
+				hn = h[i/2] >> 4
+			} else {
+				hn = h[i/2] & 0xf
+			}
+			if hn != n {
+				match = false
+				break
+			}
+		}
+		if match {
+			result := make([]byte, 20)
+			copy(result, addr[:])
+			return result
+		}
+		counter++
+	}
+	panic(fmt.Sprintf("findAddressForHexPrefix(%v, seed=%d): exceeded %d iterations", nibblePrefix, seed, maxAddrSearchIters))
+}
+
 // mockTrieCtxFactory returns a TrieContextFactory that always returns the
 // given MockState and a no-op cleanup.
 func mockTrieCtxFactory(ms *MockState) TrieContextFactory {

@@ -149,6 +149,7 @@ func (api *DebugAPIImpl) traceBlock(ctx context.Context, blockNrOrHash rpc.Block
 	}
 
 	var gasUsed uint64
+	inner := jsonstream.NewLazyFieldStream(stream, "result", true)
 	for txnIndex, txn := range txns {
 		isBorStateSyncTxn := borStateSyncTxn == txn
 		var txnHash common.Hash
@@ -161,14 +162,14 @@ func (api *DebugAPIImpl) traceBlock(ctx context.Context, blockNrOrHash rpc.Block
 		stream.WriteObjectStart()
 		stream.WriteObjectField("txHash")
 		stream.WriteString(txnHash.Hex())
-		stream.WriteMore()
-		stream.WriteObjectField("result")
 		select {
 		default:
 		case <-ctx.Done():
 			return ctx.Err()
 		}
 		ibs.SetTxContext(blockCtx.BlockNumber, txnIndex)
+
+		inner.ResetField()
 
 		if isBorStateSyncTxn {
 			var stateSyncEvents []*types.Message
@@ -187,7 +188,7 @@ func (api *DebugAPIImpl) traceBlock(ctx context.Context, blockNrOrHash rpc.Block
 				block.NumberU64(),
 				block.Time(),
 				blockCtx,
-				stream,
+				inner,
 				api.evmCallTimeout,
 				stateSyncEvents,
 				txnIndex,
@@ -196,8 +197,6 @@ func (api *DebugAPIImpl) traceBlock(ctx context.Context, blockNrOrHash rpc.Block
 		} else {
 			msg, asMessageErr := txn.AsMessage(*signer, block.BaseFee(), rules)
 			if asMessageErr != nil {
-				// Fail closed here because tracing needs a valid Message-derived sender/fee context.
-				stream.WriteNil()
 				err = fmt.Errorf("convert transaction %s to message: %w", txnHash, asMessageErr)
 			} else {
 				txCtx := evmtypes.TxContext{
@@ -208,7 +207,7 @@ func (api *DebugAPIImpl) traceBlock(ctx context.Context, blockNrOrHash rpc.Block
 				}
 
 				var _gasUsed uint64
-				_gasUsed, err = transactions.TraceTx(ctx, engine, txn, msg, blockCtx, txCtx, &block.Header().Number, block.Hash(), txnIndex, ibs, config, chainConfig, stream, api.evmCallTimeout, precompiles)
+				_gasUsed, err = transactions.TraceTx(ctx, engine, txn, msg, blockCtx, txCtx, &block.Header().Number, block.Hash(), txnIndex, ibs, config, chainConfig, inner, api.evmCallTimeout, precompiles)
 				gasUsed += _gasUsed
 			}
 		}
@@ -216,8 +215,8 @@ func (api *DebugAPIImpl) traceBlock(ctx context.Context, blockNrOrHash rpc.Block
 			err = ibs.FinalizeTx(rules, state.NewNoopWriter())
 		}
 
-		// if we have an error we want to output valid json for it before continuing after clearing down potential writes to the stream
 		if err != nil {
+			inner.CloseIfOpen()
 			stream.WriteMore()
 			rpc.HandleError(err, stream)
 		}
@@ -259,31 +258,16 @@ func (api *DebugAPIImpl) TraceTransaction(ctx context.Context, hash common.Hash,
 		return err
 	}
 	// Retrieve the transaction and assemble its EVM context
-	var isBorStateSyncTxn bool
-	blockNum, txNum, ok, err := api.txnLookup(ctx, tx, hash)
+	blockNum, txNum, isBorStateSyncTxn, ok, err := api.txnLookupWithBorFallback(ctx, tx, hash, chainConfig)
 	if err != nil {
 		return err
 	}
-
 	if !ok {
-		if chainConfig.Bor == nil {
-			return fmt.Errorf("transaction not found")
-		}
-
-		// otherwise this may be a bor state sync transaction - check
-		blockNum, ok, err = api.bridgeReader.EventTxnLookup(ctx, hash)
-		if err != nil {
-			return err
-		}
-		if !ok {
-			return fmt.Errorf("transaction not found")
-		}
-		if config == nil || config.BorTraceEnabled == nil || !*config.BorTraceEnabled {
-			stream.WriteEmptyArray() // matches maticnetwork/bor API behaviour for consistency
-			return nil
-		}
-
-		isBorStateSyncTxn = true
+		return fmt.Errorf("transaction not found")
+	}
+	if isBorStateSyncTxn && (config == nil || config.BorTraceEnabled == nil || !*config.BorTraceEnabled) {
+		stream.WriteEmptyArray() // matches maticnetwork/bor API behaviour for consistency
+		return nil
 	}
 
 	if blockNum == 0 {
@@ -310,14 +294,10 @@ func (api *DebugAPIImpl) TraceTransaction(ctx context.Context, hash common.Hash,
 		// bor state sync txn is appended at the end of the block
 		txnIndex = block.Transactions().Len()
 	} else {
-		txNumMin, err := api._txNumReader.Min(ctx, tx, blockNum)
+		txnIndex, err = api.txnIndexInBlock(ctx, tx, blockNum, txNum, false)
 		if err != nil {
 			return err
 		}
-		if txNumMin+1 > txNum {
-			return fmt.Errorf("uint underflow txnums error txNum: %d, txNumMin: %d, blockNum: %d", txNum, txNumMin, blockNum)
-		}
-		txnIndex = int(txNum - txNumMin - 1)
 		if txnIndex >= block.Transactions().Len() {
 			return fmt.Errorf("transaction %#x not found", hash)
 		}
@@ -504,18 +484,8 @@ func (api *DebugAPIImpl) TraceCallMany(ctx context.Context, bundles []Bundle, si
 	if err != nil {
 		return err
 	}
-	if len(bundles) == 0 {
-		return errors.New("empty bundles")
-	}
-	empty := true
-	for _, bundle := range bundles {
-		if len(bundle.Transactions) != 0 {
-			empty = false
-		}
-	}
-
-	if empty {
-		return errors.New("empty bundles")
+	if err := validateBundles(bundles); err != nil {
+		return err
 	}
 
 	defer func(start time.Time) { log.Trace("Tracing CallMany finished", "runtime", time.Since(start)) }(time.Now())
@@ -563,17 +533,7 @@ func (api *DebugAPIImpl) TraceCallMany(ctx context.Context, bundles []Bundle, si
 
 	ibs := state.New(stateReader)
 
-	getHash := func(i uint64) (common.Hash, error) {
-		if hash, ok := overrideBlockHash[i]; ok {
-			return hash, nil
-		}
-		hash, ok, err := api._blockReader.CanonicalHash(ctx, tx, i)
-		if err != nil || !ok {
-			log.Debug("Can't get block hash by number", "number", i, "only-canonical", true, "err", err, "ok", ok)
-			return common.Hash{}, err
-		}
-		return hash, nil
-	}
+	getHash := transactions.MakeBlockHashProvider(ctx, tx, api._blockReader, overrideBlockHash)
 
 	blockCtx = protocol.NewEVMBlockContext(header, getHash, api.engine(), accounts.NilAddress /* author */, chainConfig)
 	// Apply global block overrides as the baseline for all bundles.

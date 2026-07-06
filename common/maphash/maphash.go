@@ -45,10 +45,25 @@ func (m *Map[V]) Set(key []byte, value V) {
 	m.m.Store(h, value)
 }
 
+// LoadOrStore atomically returns the existing value (loaded=true) or stores and
+// returns value (loaded=false). Size/count accounting must act only on !loaded.
+func (m *Map[V]) LoadOrStore(key []byte, value V) (actual V, loaded bool) {
+	h := Hash(key)
+	return m.m.LoadOrStore(h, value)
+}
+
 // Delete removes a key from the map.
 func (m *Map[V]) Delete(key []byte) {
 	h := Hash(key)
 	m.m.Delete(h)
+}
+
+// LoadAndDelete atomically deletes the key, returning the previous value.
+// loaded is true only for the caller that removed it, so size/count accounting
+// must act only on loaded.
+func (m *Map[V]) LoadAndDelete(key []byte) (value V, loaded bool) {
+	h := Hash(key)
+	return m.m.LoadAndDelete(h)
 }
 
 // Len returns the number of entries in the map.
@@ -59,6 +74,24 @@ func (m *Map[V]) Len() int {
 // Clear removes all entries from the map.
 func (m *Map[V]) Clear() {
 	m.m.Clear()
+}
+
+// Range iterates over every (hash, value) pair. Iteration order is
+// unspecified. Return false from fn to stop early. Concurrent
+// modification during Range is permitted by the underlying xsync.Map.
+//
+// The original byte-key is not recoverable — Set hashes-and-discards.
+// Pair with DeleteByHash to evict entries discovered via Range.
+func (m *Map[V]) Range(fn func(hash uint64, v V) bool) {
+	m.m.Range(func(key uint64, value V) bool {
+		return fn(key, value)
+	})
+}
+
+// DeleteByHash removes the entry under the pre-computed hash. Use
+// alongside Range when the byte-key is unknown.
+func (m *Map[V]) DeleteByHash(hash uint64) {
+	m.m.Delete(hash)
 }
 
 // NonConcurrentMap is a non-thread-safe map that uses maphash to hash []byte keys.
@@ -119,6 +152,13 @@ func NewLRU[V any](size int) (*LRU[V], error) {
 func (l *LRU[V]) Get(key []byte) (V, bool) {
 	h := Hash(key)
 	return l.cache.Get(h)
+}
+
+// Peek returns the value for key without updating its LRU recency. Use for
+// diagnostic reads that must not perturb eviction order.
+func (l *LRU[V]) Peek(key []byte) (V, bool) {
+	h := Hash(key)
+	return l.cache.Peek(h)
 }
 
 // Set stores a value with the given key.
