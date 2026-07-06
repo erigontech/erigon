@@ -3111,6 +3111,7 @@ func openSnaps(ctx context.Context, cfg ethconfig.BlocksFreezing, dirs datadir.D
 		defer res.BorSnaps.Close()
 		defer res.CaplinSnaps.Close()
 		defer res.Aggregator.Close()
+		defer res.BlockRetire.Close() // LIFO: drain the retire before agg/snaps close
 	}
 	err = chainDB.View(ctx, func(tx kv.Tx) error {
 		ac := res.Aggregator.BeginFilesRo()

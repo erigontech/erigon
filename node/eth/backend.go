@@ -1570,8 +1570,7 @@ func (s *Ethereum) Stop() error {
 		}
 	}
 
-	// Drain the block-retire background goroutine; it holds DB read transactions
-	// and writes snapshot files, both of which must finish before chainDB.Close.
+	// Drain the in-flight block retire before chainDB.Close.
 	if s.components != nil && s.components.Storage != nil {
 		s.components.Storage.Close()
 	}

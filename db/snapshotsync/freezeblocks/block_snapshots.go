@@ -164,7 +164,7 @@ type BlockRetire struct {
 	bridgeStore           bridge.Store
 	borDataNotReadyBefore time.Time
 
-	// background joins the background goroutines at Close
+	// Close cancels the in-flight retire (ctx/stopFn) and waits for it (background).
 	background concurrent.ClosingWaitGroup
 	ctx        context.Context
 	stopFn     context.CancelFunc
@@ -444,7 +444,7 @@ func (br *BlockRetire) RetireBlocksInBackground(
 		defer onDone()
 		defer br.working.Store(false)
 
-		// Cancel this retire when either the caller's ctx or Close (br.ctx) fires.
+		// Cancel on either the caller's ctx or Close (br.ctx).
 		ctx, cancel := context.WithCancel(ctx)
 		defer cancel()
 		stopOnClose := context.AfterFunc(br.ctx, cancel)
@@ -488,8 +488,8 @@ func (br *BlockRetire) RetireBlocksInBackground(
 	return true
 }
 
-// Close cancels any in-flight background retire and waits for it to finish, so
-// callers can safely tear down the DB and snapshots afterwards. Idempotent.
+// Close cancels the in-flight background retire and waits for it, so the DB and
+// snapshots can be torn down safely afterwards. Idempotent.
 func (br *BlockRetire) Close() {
 	if !br.background.BeginClose() {
 		return
