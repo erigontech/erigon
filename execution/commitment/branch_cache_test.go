@@ -316,6 +316,12 @@ func TestBranchCache_SmallTailKeepsCollidingKeys(t *testing.T) {
 	}
 	require.NotNil(t, k2, "no colliding key pair found for this seed")
 
+	// Re-check under the seed in effect now: both keys must still land in the
+	// same pre-cap shard, so a seed change between derivation and use can't
+	// silently turn this into a non-colliding (always-green) scenario.
+	require.Equal(t, maphash.Hash(k1)&uint64(n-1), maphash.Hash(k2)&uint64(n-1),
+		"derived keys must still collide under the current seed")
+
 	c := NewBranchCache(tailCapacity)
 	c.Put(k1, []byte("v1"), 0, 1)
 	c.Put(k2, []byte("v2"), 0, 1)

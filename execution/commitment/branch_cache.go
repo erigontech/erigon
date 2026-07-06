@@ -120,9 +120,9 @@ func NewBranchCache(tailCapacity int) *BranchCache {
 	if tailCapacity <= 0 {
 		panic(fmt.Sprintf("BranchCache: tailCapacity must be positive, got %d", tailCapacity))
 	}
-	// Cap shards so every shard holds at least 2 entries. branchCacheTailShards
-	// is sized for the production tail (50k+); a small tail would otherwise get
-	// single-entry shards that evict a valid entry when two keys collide.
+	// Cap shards so a tail of >=2 entries never splits into single-entry shards
+	// that evict a valid entry when two keys collide. branchCacheTailShards is
+	// sized for the production tail (50k+); only small tails hit this cap.
 	shards := branchCacheTailShards
 	if maxShards := tailCapacity / 2; maxShards < shards {
 		shards = maxShards
