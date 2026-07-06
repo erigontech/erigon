@@ -441,7 +441,7 @@ func (br *BlockRetire) RetireBlocksInBackground(
 		return false
 	}
 
-	started := br.wg.Go(func() {
+	started := br.wg.TryGo(func() {
 		defer onDone()
 		defer br.working.Store(false)
 

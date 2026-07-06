@@ -108,7 +108,8 @@ type Aggregator struct {
 	// openTxs=1). Exposed via CommitGate() for use by any component.
 	commitGate sync.RWMutex
 
-	background concurrent.ClosingWaitGroup // background goroutines
+	background         concurrent.ClosingWaitGroup // background goroutines
+	backgroundProgress *background.ProgressSet     // progress of background goroutines
 
 	// metricsCollector is the process-level KV-read metrics aggregate. Every read
 	// path (exec, commitment, warmup, RPC, engine) hands its finished per-worker
@@ -119,8 +120,6 @@ type Aggregator struct {
 
 	onFilesChange kv.OnFilesChange
 	onFilesDelete kv.OnFilesChange
-
-	backgroundProgress *background.ProgressSet // progress of background goroutines
 
 	// next fields are set only if agg.doTraceCtx is true. can enable by env: TRACE_AGG=true
 	leakDetector *dbg.LeakDetector

@@ -43,10 +43,10 @@ func (g *ClosingWaitGroup) Done() { g.wg.Done() }
 
 func (g *ClosingWaitGroup) Wait() { g.wg.Wait() }
 
-// Go runs f in a new goroutine registered on the group, unless BeginClose has
-// latched — then f does not run and Go returns false. Mirrors
-// sync.WaitGroup.Go with the close latch.
-func (g *ClosingWaitGroup) Go(f func()) bool {
+// TryGo runs f in a new goroutine registered on the group, unless BeginClose has
+// latched — then f does not run and TryGo returns false. Like sync.WaitGroup.Go
+// with the close latch, and a bool so callers can roll back on refusal.
+func (g *ClosingWaitGroup) TryGo(f func()) bool {
 	if !g.TryAdd() {
 		return false
 	}

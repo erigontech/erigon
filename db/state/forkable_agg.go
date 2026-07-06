@@ -163,7 +163,7 @@ func (r *ForkableAgg) BuildFilesInBackground(num RootNum) chan struct{} {
 	built := true
 	var err error
 
-	if !r.wg.Go(func() {
+	started := r.wg.TryGo(func() {
 		defer r.buildingFiles.Store(false)
 		for built {
 			built, err = r.buildFile(r.ctx, num)
@@ -176,7 +176,7 @@ func (r *ForkableAgg) BuildFilesInBackground(num RootNum) chan struct{} {
 			}
 		}
 
-		if !r.wg.Go(func() {
+		merged := r.wg.TryGo(func() {
 			defer close(fin)
 			if err := r.mergeLoop(r.ctx); err != nil {
 				if errors.Is(err, context.Canceled) || errors.Is(err, common.ErrStopped) {
@@ -185,11 +185,13 @@ func (r *ForkableAgg) BuildFilesInBackground(num RootNum) chan struct{} {
 				}
 				r.logger.Warn("[fork_agg] merge", "err", err)
 			}
-		}) {
+		})
+		if !merged {
 			close(fin)
 			return
 		}
-	}) {
+	})
+	if !started {
 		r.buildingFiles.Store(false)
 		close(fin)
 	}
