@@ -2411,7 +2411,7 @@ func (sdb *IntraBlockState) accountRead(addr accounts.Address, account *accounts
 // path: a repeat write to the same (addr[,key]) reuses the existing
 // *VersionedWrite[T] in place (no alloc, no map churn).  Only the first
 // write per (addr[,key]) per tx hits getVW* + SetX.  WriteSet.ReleaseAndReset
-// (called from ResetVersionedIO at tx-finalize) returns every VW to its pool.
+// returns every VW to its pool.
 
 func (sdb *IntraBlockState) recordWriteBalance(addr accounts.Address, val uint256.Int) {
 	sdb.MarkAddressAccess(addr, true)

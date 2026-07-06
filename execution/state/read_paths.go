@@ -571,10 +571,9 @@ func readBalance(s *IntraBlockState, addr accounts.Address) (uint256.Int, ReadSo
 	}
 }
 
-// refreshBalance is the in-memory-only variant used by
-// refreshVersionedAccount.  Returns currentBalance on miss; does not
-// perform a storage fallback.  When the core signals recordVR, records the
-// read with currentBalance as the typed default.
+// refreshBalance is the in-memory-only variant: returns currentBalance on
+// miss and does not perform a storage fallback.  When the core signals
+// recordVR, records the read with currentBalance as the typed default.
 func refreshBalance(s *IntraBlockState, addr accounts.Address, currentBalance uint256.Int) (uint256.Int, ReadSource, Version, error) {
 	var r readPathResult
 	versionedReadCore(s, addr, BalancePath, accounts.NilKey, false, true, &r)
