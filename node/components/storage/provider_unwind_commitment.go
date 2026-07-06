@@ -26,7 +26,6 @@ import (
 	"github.com/erigontech/erigon/db/etl"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/rawdbv3"
-	"github.com/erigontech/erigon/db/state/kvmetrics"
 	"github.com/erigontech/erigon/execution/commitment/commitmentdb"
 )
 
@@ -185,53 +184,21 @@ func (p *Provider) ensureCommitmentAtBlockCompute(ctx context.Context, tx kv.Tem
 	}, nil
 }
 
-// ensureCommitmentAtBlockApply writes the recomputed commitment
-// branches + KeyCommitmentState anchor into MDBX at step=stepContaining
-// (lastTxNum), txnum=lastTxNum. Must run AFTER WipeWritableShadowPast's
-// whole-step commitment clear so the writes go in without orphan dups.
+// ensureCommitmentAtBlockApply is a NO-OP for MDBX writes. The
+// recompute's branches are written INTO the regen commitment .kv
+// (via the merge-walk in regenerateBoundaryStepFiles), not into
+// MDBX. The wipe leaves MDBX empty at stepContaining(lastTxNum) for
+// commitment, and it stays empty until forward re-exec after unwind.
 //
-// The parallel merge-walk regen (regenerateBoundaryStepFiles for the
-// commitment domain) also produces a self-coherent at-lastTxNum .kv
-// when a straddler file exists — files with endStep past stepBoundary
-// get truncated to endStep=stepBoundary, with baseline + branches
-// merged inside. That covers the "reader picks a wider straddler file
-// over MDBX" case (the 2026-07-04 iter 3 mode_b @30k wrong-trie-root).
-//
-// MDBX carries the writes for the case where NO straddler file exists
-// (all commitment files end at endStep ≤ maxStep). Without a straddler,
-// regenerateBoundaryStepFiles doesn't fire for commitment — so if MDBX
-// didn't hold the anchor, SeekCommitment would fall back to the baseline
-// file's KeyCommitmentState (encoding an earlier txnum) and forward
-// exec would try to replay txns already applied in-state (nonce-too-low
-// or wrong-state). Live-caught 2026-07-04 iter 1 mode_a depth 50.
+// Kept as a stub so callers don't need to be rewired and the two
+// mode-B code paths (primary + wipe-first re-exec) still express the
+// intent "commitment-anchor is now applied".
 func (p *Provider) ensureCommitmentAtBlockApply(ctx context.Context, tx kv.TemporalRwTx, toBlock uint64, result *commitmentRecomputeResult) error {
 	if result == nil {
 		return fmt.Errorf("ensureCommitmentAtBlockApply: nil result")
 	}
-
-	metrics := &kvmetrics.DomainMetrics{Domains: map[kv.Domain]*kvmetrics.DomainIOMetrics{}}
-	mem := tx.Debug().NewMemBatch(metrics)
-	defer mem.Close()
-
-	for _, bp := range result.branches {
-		if err := mem.DomainPut(kv.CommitmentDomain, string(bp.K), bp.V, result.lastTxNum, nil); err != nil {
-			return fmt.Errorf("memctx DomainPut(CommitmentDomain, branch): %w", err)
-		}
-	}
-
-	cs := commitmentdb.NewCommitmentState(result.lastTxNum, toBlock, result.encodedTrieState)
-	encoded, err := cs.Encode()
-	if err != nil {
-		return fmt.Errorf("encode commitment state: %w", err)
-	}
-	if err := mem.DomainPut(kv.CommitmentDomain, string(commitmentdb.KeyCommitmentState), encoded, result.lastTxNum, nil); err != nil {
-		return fmt.Errorf("memctx DomainPut(CommitmentDomain, KeyCommitmentState): %w", err)
-	}
-	if err := mem.Flush(ctx, tx); err != nil {
-		return fmt.Errorf("memctx Flush: %w", err)
-	}
 	if p.logger != nil {
-		p.logger.Info("[storage] Provider.Unwind: commitment-anchor applied", "toBlock", toBlock, "lastTxNum", result.lastTxNum, "branches", len(result.branches))
+		p.logger.Info("[storage] Provider.Unwind: commitment-anchor deferred to regen file", "toBlock", toBlock, "lastTxNum", result.lastTxNum, "branches", len(result.branches))
 	}
 	return nil
 }
