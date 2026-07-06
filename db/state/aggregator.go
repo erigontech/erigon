@@ -108,7 +108,7 @@ type Aggregator struct {
 	// openTxs=1). Exposed via CommitGate() for use by any component.
 	commitGate sync.RWMutex
 
-	wg concurrent.ClosingWaitGroup // goroutines spawned by Aggregator, to ensure all of them are finished at agg.Close
+	background concurrent.ClosingWaitGroup // background goroutines
 
 	// metricsCollector is the process-level KV-read metrics aggregate. Every read
 	// path (exec, commitment, warmup, RPC, engine) hands its finished per-worker
@@ -120,7 +120,7 @@ type Aggregator struct {
 	onFilesChange kv.OnFilesChange
 	onFilesDelete kv.OnFilesChange
 
-	ps *background.ProgressSet
+	backgroundProgress *background.ProgressSet // progress of background goroutines
 
 	// next fields are set only if agg.doTraceCtx is true. can enable by env: TRACE_AGG=true
 	leakDetector *dbg.LeakDetector
@@ -140,17 +140,17 @@ type Aggregator struct {
 func newAggregator(ctx context.Context, dirs datadir.Dirs, reorgBlockDepth uint64, db kv.RoDB, logger log.Logger) (*Aggregator, error) {
 	ctx, ctxCancel := context.WithCancel(ctx)
 	a := &Aggregator{
-		ctx:             ctx,
-		ctxCancel:       ctxCancel,
-		onFilesChange:   func(frozenFileNames []string) {},
-		onFilesDelete:   func(frozenFileNames []string) {},
-		dirs:            dirs,
-		reorgBlockDepth: reorgBlockDepth,
-		db:              db,
-		leakDetector:    dbg.NewLeakDetector("agg", dbg.SlowTx()),
-		ps:              background.NewProgressSet(),
-		logger:          logger,
-		workers:         workersCfg{merge: 1, collateAndBuild: 1},
+		ctx:                ctx,
+		ctxCancel:          ctxCancel,
+		onFilesChange:      func(frozenFileNames []string) {},
+		onFilesDelete:      func(frozenFileNames []string) {},
+		dirs:               dirs,
+		reorgBlockDepth:    reorgBlockDepth,
+		db:                 db,
+		leakDetector:       dbg.NewLeakDetector("agg", dbg.SlowTx()),
+		backgroundProgress: background.NewProgressSet(),
+		logger:             logger,
+		workers:            workersCfg{merge: 1, collateAndBuild: 1},
 
 		produce: true,
 	}
@@ -615,14 +615,14 @@ func (a *Aggregator) WaitForFiles() {
 
 func (a *Aggregator) Close() {
 	a.WaitForFiles()
-	if !a.wg.BeginClose() { // idempotent: safe to call Close multiple times
+	if !a.background.BeginClose() { // idempotent: safe to call Close multiple times
 		return
 	}
 	a.ctxCancel()
 	if a.metricsCollector != nil {
 		a.metricsCollector.Stop() // drain buffered samples before wg.Wait joins the goroutine
 	}
-	a.wg.Wait()
+	a.background.Wait()
 
 	// A closed Aggregator may linger referenced; release the cached branch data eagerly.
 	if cd := a.d[kv.CommitmentDomain]; cd != nil && cd.branchCache != nil {
@@ -758,8 +758,8 @@ func (a *Aggregator) HasBackgroundFilesBuild2() bool {
 	return a.buildingFiles.Load() || a.mergingFiles.Load()
 }
 
-func (a *Aggregator) HasBackgroundFilesBuild() bool { return a.ps.Has() }
-func (a *Aggregator) BackgroundProgress() string    { return a.ps.String() }
+func (a *Aggregator) HasBackgroundFilesBuild() bool { return a.backgroundProgress.Has() }
+func (a *Aggregator) BackgroundProgress() string    { return a.backgroundProgress.String() }
 
 type VisibleFile = kv.VisibleFile
 type VisibleFiles = kv.VisibleFiles
@@ -1019,7 +1019,7 @@ func (a *Aggregator) buildFiles(ctx context.Context, step kv.Step) error {
 	for _, dc := range domainColls {
 		dc := dc
 		g.Go(func() error {
-			sf, err := dc.d.buildFiles(ctx, step, dc.collation, a.ps)
+			sf, err := dc.d.buildFiles(ctx, step, dc.collation, a.backgroundProgress)
 			dc.collation.Close()
 			if err != nil {
 				sf.CleanupOnError()
@@ -1037,7 +1037,7 @@ func (a *Aggregator) buildFiles(ctx context.Context, step kv.Step) error {
 	for _, ic := range iiColls {
 		ic := ic
 		g.Go(func() error {
-			sf, err := ic.ii.buildFiles(ctx, step, ic.collation, a.ps)
+			sf, err := ic.ii.buildFiles(ctx, step, ic.collation, a.backgroundProgress)
 			if err != nil {
 				sf.CleanupOnError()
 				return err
@@ -1145,7 +1145,7 @@ func (a *Aggregator) BuildFiles2(ctx context.Context, fromStep, toStep kv.Step, 
 	if ok := a.buildingFiles.CompareAndSwap(false, true); !ok {
 		return nil
 	}
-	if !a.wg.Go(func() {
+	started := a.background.TryGo(func() {
 		defer a.buildingFiles.Store(false)
 		if toStep > fromStep {
 			log.Info("[agg] build", "fromStep", fromStep, "toStep", toStep)
@@ -1165,13 +1165,14 @@ func (a *Aggregator) BuildFiles2(ctx context.Context, fromStep, toStep kv.Step, 
 		}
 
 		if doMerge {
-			a.wg.Go(func() {
+			a.background.TryGo(func() {
 				if err := a.mergeLoop(ctx); err != nil {
 					panic(err)
 				}
 			})
 		}
-	}) {
+	})
+	if !started {
 		a.buildingFiles.Store(false)
 	}
 	return nil
@@ -1212,10 +1213,10 @@ func (a *Aggregator) RemoveOverlapsAfterMerge(ctx context.Context) (err error) {
 }
 
 func (a *Aggregator) MergeLoop(ctx context.Context) error {
-	if !a.wg.TryAdd() {
+	if !a.background.TryAdd() {
 		return nil
 	}
-	defer a.wg.Done()
+	defer a.background.Done()
 	return a.mergeLoop(ctx)
 }
 
@@ -1985,7 +1986,7 @@ func (at *AggregatorRoTx) mergeFiles(ctx context.Context, files *FilesForMerge, 
 				}
 			}
 
-			mf.d[id], mf.dIdx[id], mf.dHist[id], err = at.d[id].mergeFiles(ctx, files.d[id], files.dIdx[id], files.dHist[id], r.domain[id], vt, seqReadahead, at.a.ps)
+			mf.d[id], mf.dIdx[id], mf.dHist[id], err = at.d[id].mergeFiles(ctx, files.d[id], files.dIdx[id], files.dHist[id], r.domain[id], vt, seqReadahead, at.a.backgroundProgress)
 			if needCommitmentTransform {
 				if kid == kv.AccountsDomain || kid == kv.StorageDomain {
 					accStorageMerged.Done()
@@ -2007,7 +2008,7 @@ func (at *AggregatorRoTx) mergeFiles(ctx context.Context, files *FilesForMerge, 
 		rng := rng
 		g.Go(func() error {
 			var err error
-			mf.iis[id], err = at.iis[id].mergeFiles(ctx, files.ii[id], rng.from, rng.to, at.a.ps)
+			mf.iis[id], err = at.iis[id].mergeFiles(ctx, files.ii[id], rng.from, rng.to, at.a.backgroundProgress)
 			return err
 		})
 	}
@@ -2143,7 +2144,7 @@ func (a *Aggregator) buildFilesInBackground(txNum uint64, doMerge bool) chan str
 
 	step := kv.Step(a.EndTxNumMinimax() / a.StepSize())
 
-	if !a.wg.Go(func() {
+	started := a.background.TryGo(func() {
 		defer a.buildingFiles.Store(false)
 
 		if a.snapshotBuildSema != nil {
@@ -2283,7 +2284,11 @@ func (a *Aggregator) buildFilesInBackground(txNum uint64, doMerge bool) chan str
 			}
 			a.onFilesChange(nil)
 		}
-		if !doMerge || !a.wg.Go(func() {
+		if !doMerge {
+			close(fin)
+			return
+		}
+		merged := a.background.TryGo(func() {
 			defer close(fin)
 			if err := a.mergeLoop(a.ctx); err != nil {
 				if errors.Is(err, context.Canceled) || errors.Is(err, common.ErrStopped) {
@@ -2291,11 +2296,13 @@ func (a *Aggregator) buildFilesInBackground(txNum uint64, doMerge bool) chan str
 				}
 				a.logger.Warn("[snapshots] merge", "err", err)
 			}
-		}) {
+		})
+		if !merged {
 			close(fin)
 			return
 		}
-	}) {
+	})
+	if !started {
 		a.buildingFiles.Store(false)
 		close(fin)
 	}

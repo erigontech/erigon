@@ -45,20 +45,20 @@ func TestClosingWaitGroup_TryAddRefusedAfterClose(t *testing.T) {
 	}
 }
 
-func TestClosingWaitGroup_Go(t *testing.T) {
+func TestClosingWaitGroup_TryGo(t *testing.T) {
 	var g ClosingWaitGroup
 	var ran atomic.Bool
-	if !g.Go(func() { ran.Store(true) }) {
-		t.Fatal("Go before close should start the goroutine")
+	if !g.TryGo(func() { ran.Store(true) }) {
+		t.Fatal("TryGo before close should start the goroutine")
 	}
 
 	g.BeginClose()
 	g.Wait()
 	if !ran.Load() {
-		t.Fatal("Wait should join the goroutine started by Go")
+		t.Fatal("Wait should join the goroutine started by TryGo")
 	}
-	if g.Go(func() { t.Error("f must not run after BeginClose") }) {
-		t.Fatal("Go after BeginClose should be refused")
+	if g.TryGo(func() { t.Error("f must not run after BeginClose") }) {
+		t.Fatal("TryGo after BeginClose should be refused")
 	}
 }
 

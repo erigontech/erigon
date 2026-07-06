@@ -44,7 +44,7 @@ func TestAggregatorCloseWaitsForBackgroundMerge(t *testing.T) {
 		require.NoError(t, agg.OpenFolder())
 
 		require.NoError(t, agg.BuildFiles2(t.Context(), 0, 0, true))
-		agg.wg.Wait()
+		agg.background.Wait()
 		agg.Close()
 		db.Close()
 	}
