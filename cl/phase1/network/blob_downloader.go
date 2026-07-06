@@ -39,7 +39,6 @@ const (
 	blobLogInterval             = 30 * time.Second
 	blobBackfillWarningInterval = 4 * time.Minute
 	blocksBatchSize             = uint64(8)
-	maxIterations               = uint64(32)
 	minPeersForBlobDownload     = 16
 	// bounds a fulu block's column recovery; columns past the custody window are
 	// unfetchable and would otherwise block forever.
@@ -304,9 +303,6 @@ func (b *BlobHistoryDownloader) collectIncompleteBlocks(currentSlot, targetSlot 
 
 	batch = make([]*cltypes.SignedBeaconBlock, 0, blocksBatchSize)
 	for ; visited < blocksBatchSize; visited++ {
-		if visited >= maxIterations {
-			break
-		}
 		if currentSlot < visited || currentSlot-visited < targetSlot {
 			break
 		}
@@ -356,15 +352,15 @@ func (b *BlobHistoryDownloader) processBatch(batch []*cltypes.SignedBeaconBlock)
 		}
 	}
 	if len(denebBlocks) > 0 {
-		b.recoverDenebBlobs(batch)
+		b.recoverDenebBlobs(denebBlocks)
 	}
 	if len(fuluBlocks) > 0 {
 		b.recoverFuluColumns(fuluBlocks)
 	}
 }
 
-func (b *BlobHistoryDownloader) recoverDenebBlobs(batch []*cltypes.SignedBeaconBlock) {
-	req, err := BlobsIdentifiersFromBlocks(batch, b.beaconCfg)
+func (b *BlobHistoryDownloader) recoverDenebBlobs(blocks []*cltypes.SignedBeaconBlock) {
+	req, err := BlobsIdentifiersFromBlocks(blocks, b.beaconCfg)
 	if err != nil {
 		b.logger.Debug("[BlobHistoryDownloader] Error generating blob identifiers", "err", err)
 		return
@@ -376,7 +372,7 @@ func (b *BlobHistoryDownloader) recoverDenebBlobs(batch []*cltypes.SignedBeaconB
 	}
 	_, _, err = blob_storage.VerifyAgainstIdentifiersAndInsertIntoTheBlobStore(b.ctx, b.blobStorage, req, blobs.Responses, func(header *cltypes.SignedBeaconBlockHeader) error {
 		// The block is preverified so just check that the signature is correct against the block
-		for _, block := range batch {
+		for _, block := range blocks {
 			if block.Block.Slot != header.Header.Slot {
 				continue
 			}

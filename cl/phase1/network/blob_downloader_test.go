@@ -40,6 +40,7 @@ func (s staticPeerDasGetter) GetPeerDas() das.PeerDas { return s.pd }
 // blob backfill cannot hang forever holding the index read tx.
 func TestBlobHistoryDownloaderFuluColumnRecoveryIsBounded(t *testing.T) {
 	ctrl := gomock.NewController(t)
+	defer ctrl.Finish()
 	peerDas := mock_services.NewMockPeerDas(ctrl)
 	peerDas.EXPECT().
 		DownloadColumnsAndRecoverBlobs(gomock.Any(), gomock.Any()).
