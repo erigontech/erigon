@@ -41,9 +41,8 @@ const (
 	blocksBatchSize             = uint64(8)
 	maxIterations               = uint64(32)
 	minPeersForBlobDownload     = 16
-	// blobColumnBackfillTimeout bounds a single fulu block's PeerDAS column
-	// recovery. Historical columns beyond the network custody window are served
-	// by no peer, so without a bound the recovery blocks forever.
+	// bounds a fulu block's column recovery; columns past the custody window are
+	// unfetchable and would otherwise block forever.
 	blobColumnBackfillTimeout = 30 * time.Second
 )
 
@@ -251,10 +250,6 @@ func (b *BlobHistoryDownloader) downloadOnce(shouldLog bool) error {
 		if err != nil {
 			return err
 		}
-		// Always make forward progress. A batch that can't be completed (e.g. PeerDAS
-		// columns for historical fulu blocks that no peer still serves) must not rebuild
-		// at the same slot forever; max(visited,1) also guards the pre-Deneb visited==0 case.
-		nextSlot := currentSlot - max(visited, 1)
 
 		if len(batch) > 0 {
 			select {
@@ -272,7 +267,14 @@ func (b *BlobHistoryDownloader) downloadOnce(shouldLog bool) error {
 			b.processBatch(batch)
 			b.highestBackfilledSlot.Store(currentSlot)
 		}
-		currentSlot = nextSlot
+
+		// Always advance so an uncompletable batch can't rebuild at the same slot forever;
+		// step>=1 guarantees progress and the floor check avoids uint64 underflow.
+		step := max(visited, 1)
+		if currentSlot < targetSlot+step {
+			break
+		}
+		currentSlot -= step
 	}
 
 	if shouldLog {
@@ -291,10 +293,8 @@ func (b *BlobHistoryDownloader) downloadOnce(shouldLog bool) error {
 	return nil
 }
 
-// collectIncompleteBlocks reads up to blocksBatchSize blocks backwards from
-// currentSlot and returns those (Deneb+) still missing blobs, plus how many slots
-// were scanned. The index tx is opened and released here so it never spans the
-// subsequent network download.
+// collectIncompleteBlocks scans backwards from currentSlot for Deneb+ blocks still
+// missing blobs. Its read tx is released before the caller's network download.
 func (b *BlobHistoryDownloader) collectIncompleteBlocks(currentSlot, targetSlot uint64) (batch []*cltypes.SignedBeaconBlock, visited uint64, err error) {
 	tx, err := b.indiciesDB.BeginRo(b.ctx)
 	if err != nil {
@@ -307,7 +307,7 @@ func (b *BlobHistoryDownloader) collectIncompleteBlocks(currentSlot, targetSlot 
 		if visited >= maxIterations {
 			break
 		}
-		if currentSlot-visited < targetSlot {
+		if currentSlot < visited || currentSlot-visited < targetSlot {
 			break
 		}
 		block, err := b.blockReader.ReadBeaconBlockBodyBySlot(b.ctx, tx, currentSlot-visited)
@@ -343,10 +343,8 @@ func (b *BlobHistoryDownloader) collectIncompleteBlocks(currentSlot, targetSlot 
 	return batch, visited, nil
 }
 
-// processBatch best-effort recovers blobs for the batch: Deneb blocks via
-// blobs-by-root, Fulu blocks via PeerDAS column recovery. It never blocks the
-// caller's forward progress — failures are logged and the block is retried on a
-// later pass.
+// processBatch best-effort recovers each block's blobs: Deneb by-root, Fulu from
+// PeerDAS columns.
 func (b *BlobHistoryDownloader) processBatch(batch []*cltypes.SignedBeaconBlock) {
 	fuluBlocks := make([]*cltypes.SignedBeaconBlock, 0, len(batch))
 	denebBlocks := make([]*cltypes.SignedBeaconBlock, 0, len(batch))
@@ -390,14 +388,14 @@ func (b *BlobHistoryDownloader) recoverDenebBlobs(batch []*cltypes.SignedBeaconB
 		return errors.New("block not in batch")
 	})
 	if err != nil {
-		b.rpc.BanPeer(blobs.Peer)
+		// Best-effort backfill: log and move on rather than banning a peer from the
+		// shared live-sync pool for a historical-blob verification miss.
 		b.logger.Warn("[BlobHistoryDownloader] Error verifying blobs", "err", err)
 	}
 }
 
-// recoverFuluColumns recovers blobs from PeerDAS data columns for each fulu block,
-// bounding every attempt so a column no peer still serves (older than the network
-// custody window) cannot block the backfill indefinitely.
+// recoverFuluColumns recovers blobs from PeerDAS columns, bounding each attempt so
+// columns no peer still serves can't block the backfill indefinitely.
 func (b *BlobHistoryDownloader) recoverFuluColumns(blocks []*cltypes.SignedBeaconBlock) {
 	peerDas := b.peerDasGetter.GetPeerDas()
 	for _, block := range blocks {
