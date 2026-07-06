@@ -256,7 +256,7 @@ func retry(ctx context.Context, op func(context.Context) error, isRecoverableErr
 			return lastErr
 		}
 
-		err = nil
+		err = fmt.Errorf("connect timed out after all retry attempts: %w", context.DeadlineExceeded)
 	}
 
 	delayTimer := time.NewTimer(delay)
