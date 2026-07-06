@@ -46,17 +46,10 @@ func isCommitmentStateKey(prefix []byte) bool {
 }
 
 // BranchCache stores commitment-trie branch data: a bounded LRU tail plus a
-// single never-evicted slot for the root branch (a length-0 / no-key prefix).
-// Aggregator-scope (one instance per Domain), pulled via BranchCacheProvider and
-// plumbed to the trie through InitializeTrieAndUpdates. It is a passive store —
-// the trie walker/encoder drive all reads and writes; the cache never fetches
-// state itself.
-//
-// Concurrency: the LRU tail and the atomic-pointer root slot make any mix of
-// concurrent Get/Put/Invalidate mechanically safe, but the cache does not
-// coordinate writers — callers must ensure a single writer per prefix
-// (last-Put-wins otherwise); add any such coordination at the orchestrator, not
-// by locking the cache.
+// never-evicted root slot, aggregator-scope and passive (the trie drives all
+// reads/writes). Concurrent Get/Put/Invalidate are mechanically safe, but the
+// cache does not coordinate writers — callers must ensure a single writer per
+// prefix, coordinated at the orchestrator, not by locking the cache.
 type BranchCache struct {
 	// Root tier — single slot for the root branch (always hottest, always
 	// present). Atomic-pointer access so no lock is needed for the hot
