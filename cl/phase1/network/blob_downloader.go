@@ -41,6 +41,10 @@ const (
 	blocksBatchSize             = uint64(8)
 	maxIterations               = uint64(32)
 	minPeersForBlobDownload     = 16
+	// blobColumnBackfillTimeout bounds a single fulu block's PeerDAS column
+	// recovery. Historical columns beyond the network custody window are served
+	// by no peer, so without a bound the recovery blocks forever.
+	blobColumnBackfillTimeout = 30 * time.Second
 )
 
 // SyncedChecker is an interface to check if the forkchoice is synced
@@ -77,6 +81,8 @@ type BlobHistoryDownloader struct {
 	archiveBlobs bool
 	// immediateBlobsBackfilling indicates whether to backfill blobs immediately
 	immediateBlobsBackfilling bool
+	// columnBackfillTimeout bounds each fulu block's PeerDAS column recovery
+	columnBackfillTimeout time.Duration
 
 	running           atomic.Bool
 	backfillCompleted atomic.Bool
@@ -117,6 +123,7 @@ func NewBlobHistoryDownloader(
 		targetSlot:                targetSlot,
 		archiveBlobs:              archiveBlobs,
 		immediateBlobsBackfilling: immediateBlobsBackfilling,
+		columnBackfillTimeout:     blobColumnBackfillTimeout,
 		logger:                    logger,
 	}
 }
@@ -210,12 +217,6 @@ func (b *BlobHistoryDownloader) downloadOnce(shouldLog bool) error {
 		return nil
 	}
 
-	tx, err := b.indiciesDB.BeginRo(b.ctx)
-	if err != nil {
-		return err
-	}
-	defer tx.Rollback()
-
 	logInterval := time.NewTicker(blobLogInterval)
 	defer logInterval.Stop()
 
@@ -246,120 +247,32 @@ func (b *BlobHistoryDownloader) downloadOnce(shouldLog bool) error {
 			continue
 		}
 
-		batch := make([]*cltypes.SignedBeaconBlock, 0, blocksBatchSize)
-		visited := uint64(0)
-		for ; visited < blocksBatchSize; visited++ {
-			if visited >= maxIterations {
-				break
-			}
-			if currentSlot-visited < targetSlot {
-				break
-			}
-			block, err := b.blockReader.ReadBeaconBlockBodyBySlot(b.ctx, tx, currentSlot-visited)
-			if err != nil {
-				return err
-			}
-			if block == nil {
-				continue
-			}
-			if block.Version() < clparams.DenebVersion {
-				break
-			}
-			blockRoot, err := block.Block.HashSSZ()
-			if err != nil {
-				return err
-			}
-			blobsCount, err := b.blobStorage.KzgCommitmentsCount(b.ctx, blockRoot)
-			if err != nil {
-				return err
-			}
-			commitments := block.Block.Body.GetBlobKzgCommitments()
-			if commitments == nil {
-				// For GLOAS, nil means SignedExecutionPayloadBid is absent — unexpected for a valid block.
-				// For pre-GLOAS this should not happen on Deneb+.
-				b.logger.Warn("[BlobHistoryDownloader] skipping block with nil kzg commitments", "slot", block.Block.Slot, "version", block.Version())
-				continue
-			}
-			if commitments.Len() == int(blobsCount) {
-				continue
-			}
-			batch = append(batch, block)
+		batch, visited, err := b.collectIncompleteBlocks(currentSlot, targetSlot)
+		if err != nil {
+			return err
 		}
-		if len(batch) == 0 {
-			currentSlot -= visited
-			continue
-		}
+		// Always make forward progress. A batch that can't be completed (e.g. PeerDAS
+		// columns for historical fulu blocks that no peer still serves) must not rebuild
+		// at the same slot forever; max(visited,1) also guards the pre-Deneb visited==0 case.
+		nextSlot := currentSlot - max(visited, 1)
 
-		select {
-		case <-b.ctx.Done():
-			return b.ctx.Err()
-		case <-logInterval.C:
-			if !shouldLog {
-				continue
-			}
-			blkSec := float64(prevLogSlot-currentSlot) / time.Since(prevTime).Seconds()
-			blkSecStr := fmt.Sprintf("%.1f", blkSec)
-			prevLogSlot = currentSlot
-			prevTime = time.Now()
-
-			b.logger.Info("[BlobHistoryDownloader] Downloading blobs backwards", "slot", currentSlot, "blks/sec", blkSecStr)
-		default:
-		}
-
-		// Generate the request
-		fuluBlocks := []*cltypes.SignedBeaconBlock{}
-		denebBlocks := []*cltypes.SignedBeaconBlock{}
-		for _, block := range batch {
-			if block.Version() >= clparams.FuluVersion {
-				fuluBlocks = append(fuluBlocks, block)
-			} else {
-				denebBlocks = append(denebBlocks, block)
-			}
-		}
-
-		if len(denebBlocks) > 0 {
-			req, err := BlobsIdentifiersFromBlocks(batch, b.beaconCfg)
-			if err != nil {
-				b.logger.Debug("[BlobHistoryDownloader] Error generating blob identifiers", "err", err)
-				continue
-			}
-			// Request the blobs
-			blobs, err := RequestBlobsFrantically(b.ctx, b.rpc, req)
-			if err != nil {
-				b.logger.Debug("[BlobHistoryDownloader] Error requesting blobs", "err", err)
-				continue
-			}
-			_, _, err = blob_storage.VerifyAgainstIdentifiersAndInsertIntoTheBlobStore(b.ctx, b.blobStorage, req, blobs.Responses, func(header *cltypes.SignedBeaconBlockHeader) error {
-				// The block is preverified so just check that the signature is correct against the block
-				for _, block := range batch {
-					if block.Block.Slot != header.Header.Slot {
-						continue
-					}
-					if block.Signature != header.Signature {
-						return errors.New("signature mismatch between blob and stored block")
-					}
-					return nil
+		if len(batch) > 0 {
+			select {
+			case <-b.ctx.Done():
+				return b.ctx.Err()
+			case <-logInterval.C:
+				if shouldLog {
+					blkSec := float64(prevLogSlot-currentSlot) / time.Since(prevTime).Seconds()
+					prevLogSlot = currentSlot
+					prevTime = time.Now()
+					b.logger.Info("[BlobHistoryDownloader] Downloading blobs backwards", "slot", currentSlot, "blks/sec", fmt.Sprintf("%.1f", blkSec))
 				}
-				return errors.New("block not in batch")
-			})
-			if err != nil {
-				b.rpc.BanPeer(blobs.Peer)
-				b.logger.Warn("[BlobHistoryDownloader] Error verifying blobs", "err", err)
-				continue
+			default:
 			}
+			b.processBatch(batch)
+			b.highestBackfilledSlot.Store(currentSlot)
 		}
-		if len(fuluBlocks) > 0 {
-			peerDas := b.peerDasGetter.GetPeerDas()
-			for _, block := range fuluBlocks {
-				// [Modified in Gloas:EIP7732] Use ColumnSyncableSignedBlock interface
-				if err := peerDas.DownloadColumnsAndRecoverBlobs(b.ctx, []cltypes.ColumnSyncableSignedBlock{block}); err != nil {
-					b.logger.Warn("[BlobHistoryDownloader] Error recovering blobs from block", "err", err, "slot", block.GetSlot())
-				}
-			}
-		}
-
-		// Update highest backfilled slot
-		b.highestBackfilledSlot.Store(currentSlot)
+		currentSlot = nextSlot
 	}
 
 	if shouldLog {
@@ -376,4 +289,123 @@ func (b *BlobHistoryDownloader) downloadOnce(shouldLog bool) error {
 	}
 
 	return nil
+}
+
+// collectIncompleteBlocks reads up to blocksBatchSize blocks backwards from
+// currentSlot and returns those (Deneb+) still missing blobs, plus how many slots
+// were scanned. The index tx is opened and released here so it never spans the
+// subsequent network download.
+func (b *BlobHistoryDownloader) collectIncompleteBlocks(currentSlot, targetSlot uint64) (batch []*cltypes.SignedBeaconBlock, visited uint64, err error) {
+	tx, err := b.indiciesDB.BeginRo(b.ctx)
+	if err != nil {
+		return nil, 0, err
+	}
+	defer tx.Rollback()
+
+	batch = make([]*cltypes.SignedBeaconBlock, 0, blocksBatchSize)
+	for ; visited < blocksBatchSize; visited++ {
+		if visited >= maxIterations {
+			break
+		}
+		if currentSlot-visited < targetSlot {
+			break
+		}
+		block, err := b.blockReader.ReadBeaconBlockBodyBySlot(b.ctx, tx, currentSlot-visited)
+		if err != nil {
+			return nil, 0, err
+		}
+		if block == nil {
+			continue
+		}
+		if block.Version() < clparams.DenebVersion {
+			break
+		}
+		blockRoot, err := block.Block.HashSSZ()
+		if err != nil {
+			return nil, 0, err
+		}
+		blobsCount, err := b.blobStorage.KzgCommitmentsCount(b.ctx, blockRoot)
+		if err != nil {
+			return nil, 0, err
+		}
+		commitments := block.Block.Body.GetBlobKzgCommitments()
+		if commitments == nil {
+			// For GLOAS, nil means SignedExecutionPayloadBid is absent — unexpected for a valid block.
+			// For pre-GLOAS this should not happen on Deneb+.
+			b.logger.Warn("[BlobHistoryDownloader] skipping block with nil kzg commitments", "slot", block.Block.Slot, "version", block.Version())
+			continue
+		}
+		if commitments.Len() == int(blobsCount) {
+			continue
+		}
+		batch = append(batch, block)
+	}
+	return batch, visited, nil
+}
+
+// processBatch best-effort recovers blobs for the batch: Deneb blocks via
+// blobs-by-root, Fulu blocks via PeerDAS column recovery. It never blocks the
+// caller's forward progress — failures are logged and the block is retried on a
+// later pass.
+func (b *BlobHistoryDownloader) processBatch(batch []*cltypes.SignedBeaconBlock) {
+	fuluBlocks := make([]*cltypes.SignedBeaconBlock, 0, len(batch))
+	denebBlocks := make([]*cltypes.SignedBeaconBlock, 0, len(batch))
+	for _, block := range batch {
+		if block.Version() >= clparams.FuluVersion {
+			fuluBlocks = append(fuluBlocks, block)
+		} else {
+			denebBlocks = append(denebBlocks, block)
+		}
+	}
+	if len(denebBlocks) > 0 {
+		b.recoverDenebBlobs(batch)
+	}
+	if len(fuluBlocks) > 0 {
+		b.recoverFuluColumns(fuluBlocks)
+	}
+}
+
+func (b *BlobHistoryDownloader) recoverDenebBlobs(batch []*cltypes.SignedBeaconBlock) {
+	req, err := BlobsIdentifiersFromBlocks(batch, b.beaconCfg)
+	if err != nil {
+		b.logger.Debug("[BlobHistoryDownloader] Error generating blob identifiers", "err", err)
+		return
+	}
+	blobs, err := RequestBlobsFrantically(b.ctx, b.rpc, req)
+	if err != nil {
+		b.logger.Debug("[BlobHistoryDownloader] Error requesting blobs", "err", err)
+		return
+	}
+	_, _, err = blob_storage.VerifyAgainstIdentifiersAndInsertIntoTheBlobStore(b.ctx, b.blobStorage, req, blobs.Responses, func(header *cltypes.SignedBeaconBlockHeader) error {
+		// The block is preverified so just check that the signature is correct against the block
+		for _, block := range batch {
+			if block.Block.Slot != header.Header.Slot {
+				continue
+			}
+			if block.Signature != header.Signature {
+				return errors.New("signature mismatch between blob and stored block")
+			}
+			return nil
+		}
+		return errors.New("block not in batch")
+	})
+	if err != nil {
+		b.rpc.BanPeer(blobs.Peer)
+		b.logger.Warn("[BlobHistoryDownloader] Error verifying blobs", "err", err)
+	}
+}
+
+// recoverFuluColumns recovers blobs from PeerDAS data columns for each fulu block,
+// bounding every attempt so a column no peer still serves (older than the network
+// custody window) cannot block the backfill indefinitely.
+func (b *BlobHistoryDownloader) recoverFuluColumns(blocks []*cltypes.SignedBeaconBlock) {
+	peerDas := b.peerDasGetter.GetPeerDas()
+	for _, block := range blocks {
+		// [Modified in Gloas:EIP7732] Use ColumnSyncableSignedBlock interface
+		ctx, cancel := context.WithTimeout(b.ctx, b.columnBackfillTimeout)
+		if err := peerDas.DownloadColumnsAndRecoverBlobs(ctx, []cltypes.ColumnSyncableSignedBlock{block}); err != nil {
+			b.logger.Warn("[BlobHistoryDownloader] Error recovering blobs from block", "err", err, "slot", block.GetSlot())
+		}
+		cancel()
+	}
 }
