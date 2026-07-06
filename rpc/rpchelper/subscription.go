@@ -18,7 +18,6 @@ package rpchelper
 
 import (
 	"sync"
-	"sync/atomic"
 	"time"
 )
 
@@ -30,21 +29,18 @@ type Sub[T any] interface {
 	Touch()                                 // Reset last access time (for HTTP polling filters)
 	SetProtocol(protocol string)            // Set protocol label for metrics
 	EnableTimeout()                         // Enable timeout tracking (HTTP only)
-	ShouldEvict(timeout time.Duration) bool // Check if subscription should be evicted
+	CloseIfIdle(timeout time.Duration) bool // Close and report true when idle longer than timeout
 	Protocol() string                       // Get protocol label for metrics
 }
 
 type chan_sub[T any] struct {
-	lock   sync.Mutex // protects ch and closed fields
-	ch     chan T
-	closed bool
-
-	// protocol is published once via SetProtocol and read concurrently by the eviction loop.
-	// atomic.Pointer keeps the write/read ordered without a lock.
-	protocol atomic.Pointer[string]
-	// lastAccess tracks last poll time for timeout eviction (atomic for concurrent Touch/ShouldEvict)
-	// lastAccess == 0 means no timeout tracking (WebSocket subscriptions)
-	lastAccess atomic.Int64
+	lock     sync.Mutex // protects all fields of this struct
+	ch       chan T
+	closed   bool
+	protocol string
+	// lastAccess is the last poll time for timeout eviction; zero means no
+	// timeout tracking (push subscriptions die with their connection instead).
+	lastAccess time.Time
 }
 
 // newChanSub - buffered channel
@@ -68,14 +64,14 @@ func (s *chan_sub[T]) Send(x T) {
 	}
 }
 
-// Close is safe to call concurrently and idempotent — the eviction loop and a
-// client-initiated unsubscribe can both reach Close for the same subscription.
-// The s.closed guard prevents the double channel close panic; the
-// unsubscribe*Internal funcs guard the matching metrics decrement via the
-// SyncMap.Delete result so the gauge is decremented at most once.
+// Close is idempotent and safe to call concurrently with Send and CloseIfIdle.
 func (s *chan_sub[T]) Close() {
 	s.lock.Lock()
 	defer s.lock.Unlock()
+	s.closeLocked()
+}
+
+func (s *chan_sub[T]) closeLocked() {
 	if s.closed {
 		return
 	}
@@ -84,39 +80,47 @@ func (s *chan_sub[T]) Close() {
 }
 
 // SetProtocol sets the protocol label for metrics tracking.
-// Safe to call concurrently with Protocol(); intended to be called once at subscription setup.
 func (s *chan_sub[T]) SetProtocol(protocol string) {
-	s.protocol.Store(&protocol)
+	s.lock.Lock()
+	defer s.lock.Unlock()
+	s.protocol = protocol
 }
 
 // EnableTimeout enables timeout tracking for this subscription (HTTP polling filters).
 // For WebSocket subscriptions, don't call this - they will never be evicted.
 func (s *chan_sub[T]) EnableTimeout() {
-	s.lastAccess.Store(time.Now().UnixNano())
+	s.lock.Lock()
+	defer s.lock.Unlock()
+	s.lastAccess = time.Now()
 }
 
 // Touch resets the last access time, preventing timeout eviction.
 // Only effective if EnableTimeout was called.
 func (s *chan_sub[T]) Touch() {
-	if s.lastAccess.Load() != 0 {
-		s.lastAccess.Store(time.Now().UnixNano())
+	s.lock.Lock()
+	defer s.lock.Unlock()
+	if !s.lastAccess.IsZero() && !s.closed {
+		s.lastAccess = time.Now()
 	}
 }
 
-// ShouldEvict returns true if the subscription has not been accessed within the timeout.
-// Returns false if tracking is not enabled (lastAccess == 0).
-func (s *chan_sub[T]) ShouldEvict(timeout time.Duration) bool {
-	last := s.lastAccess.Load()
-	if last == 0 {
-		return false // No tracking, never evict (WebSocket)
+// CloseIfIdle closes the subscription and reports true when timeout tracking is
+// enabled and the last access is older than timeout. Deciding and closing under
+// the same lock Touch uses guarantees a subscription touched within the timeout
+// is never evicted.
+func (s *chan_sub[T]) CloseIfIdle(timeout time.Duration) bool {
+	s.lock.Lock()
+	defer s.lock.Unlock()
+	if s.closed || s.lastAccess.IsZero() || time.Since(s.lastAccess) <= timeout {
+		return false
 	}
-	return time.Since(time.Unix(0, last)) > timeout
+	s.closeLocked()
+	return true
 }
 
 // Protocol returns the protocol label for metrics. Returns "" if SetProtocol was never called.
 func (s *chan_sub[T]) Protocol() string {
-	if p := s.protocol.Load(); p != nil {
-		return *p
-	}
-	return ""
+	s.lock.Lock()
+	defer s.lock.Unlock()
+	return s.protocol
 }

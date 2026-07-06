@@ -115,10 +115,17 @@ func New(ctx context.Context, config FiltersConfig, ethBackend ApiBackend, txPoo
 
 	// Start the timeout loop for filter eviction if timeout is configured
 	if config.RpcSubscriptionFiltersTimeout > 0 {
+		// Check more frequently than the timeout to ensure timely eviction, with a
+		// 1s floor: time.NewTicker panics on non-positive intervals and a
+		// sub-second sweep would burn CPU for no practical benefit.
+		checkInterval := config.RpcSubscriptionFiltersTimeout / 2
+		if checkInterval < time.Second {
+			checkInterval = time.Second
+		}
 		logger.Info("[rpc] [filters] starting timeout loop for idle filter eviction",
 			"timeout", config.RpcSubscriptionFiltersTimeout,
-			"checkInterval", config.RpcSubscriptionFiltersTimeout/2)
-		go ff.timeoutLoop(ctx, config.RpcSubscriptionFiltersTimeout)
+			"checkInterval", checkInterval)
+		go ff.timeoutLoop(ctx, config.RpcSubscriptionFiltersTimeout, checkInterval)
 	} else {
 		logger.Info("[rpc] [filters] timeout-based filter eviction disabled")
 	}
@@ -307,19 +314,9 @@ func (ff *Filters) LastPendingBlock() *types.Block {
 
 // timeoutLoop runs periodically and evicts subscriptions that have not been polled within the timeout duration.
 // This prevents unbounded accumulation of idle subscriptions and matches geth's behavior.
-func (ff *Filters) timeoutLoop(ctx context.Context, timeout time.Duration) {
-	// Check more frequently than the timeout to ensure timely eviction.
-	// Floor at 1s so a sub-2s timeout doesn't produce a zero or sub-second
-	// interval (time.NewTicker panics on non-positive durations and a tight
-	// loop would burn CPU for no practical benefit).
-	checkInterval := timeout / 2
-	if checkInterval < time.Second {
-		checkInterval = time.Second
-	}
+func (ff *Filters) timeoutLoop(ctx context.Context, timeout, checkInterval time.Duration) {
 	ticker := time.NewTicker(checkInterval)
 	defer ticker.Stop()
-
-	ff.logger.Debug("[rpc] [filters] timeout loop started", "timeout", timeout, "checkInterval", checkInterval)
 
 	for {
 		select {
@@ -333,88 +330,78 @@ func (ff *Filters) timeoutLoop(ctx context.Context, timeout time.Duration) {
 	}
 }
 
-// evictStaleFilters removes filters that haven't been accessed within the timeout duration.
+// evictStaleSubscriptions removes filters that haven't been accessed within the timeout duration.
 // It iterates the existing subscription maps and checks each subscription's embedded tracking.
+// CloseIfIdle decides staleness and closes in one atomic step, so a concurrent Touch either
+// lands before it (the subscription survives) or finds the subscription already closed;
+// the map delete and metrics follow after the Range to avoid mutating during iteration.
 func (ff *Filters) evictStaleSubscriptions(timeout time.Duration) {
 	var headsChecked, txsChecked, logsChecked int
 	var headsEvicted, txsEvicted, logsEvicted int
 
-	// Collect expired heads subscriptions
 	var headsToEvict []HeadsSubID
 	ff.headsSubs.Range(func(id HeadsSubID, sub Sub[*types.Header]) error {
 		headsChecked++
-		if sub.ShouldEvict(timeout) {
-			ff.logger.Trace("[rpc] [filters] heads filter marked for eviction", "id", id, "protocol", sub.Protocol())
+		if sub.CloseIfIdle(timeout) {
 			headsToEvict = append(headsToEvict, id)
 		}
 		return nil
 	})
 	for _, id := range headsToEvict {
-		if sub, ok := ff.headsSubs.Get(id); ok {
-			// Re-check ShouldEvict: a client may have called TouchSubscription between phase 1 and phase 2.
-			// This shrinks the TOCTOU window but does not eliminate it; an unavoidable race remains
-			// between this check and unsubscribeHeadsInternal, but the timeout is on the order of minutes
-			// so the practical impact is bounded.
-			if !sub.ShouldEvict(timeout) {
-				continue
-			}
-			protocol := sub.Protocol()
-			if ff.unsubscribeHeadsInternal(id) {
-				headsEvicted++
-				ff.logger.Info("[rpc] [filters] evicted idle heads filter", "id", id, "protocol", protocol, "timeout", timeout)
-				ff.decrementMetrics(FilterTypeHeads, protocol)
-				getReapedCounter(string(FilterTypeHeads)).Inc()
-			}
+		sub, ok := ff.headsSubs.Get(id)
+		if !ok {
+			continue
+		}
+		protocol := sub.Protocol()
+		if ff.unsubscribeHeadsInternal(id) {
+			headsEvicted++
+			ff.logger.Info("[rpc] [filters] evicted idle heads filter", "id", id, "protocol", protocol, "timeout", timeout)
+			ff.decrementMetrics(FilterTypeHeads, protocol)
+			getReapedCounter(string(FilterTypeHeads)).Inc()
 		}
 	}
 
-	// Collect expired pending txs subscriptions
 	var txsToEvict []PendingTxsSubID
 	ff.pendingTxsSubs.Range(func(id PendingTxsSubID, sub Sub[[]types.Transaction]) error {
 		txsChecked++
-		if sub.ShouldEvict(timeout) {
-			ff.logger.Trace("[rpc] [filters] pending txs filter marked for eviction", "id", id, "protocol", sub.Protocol())
+		if sub.CloseIfIdle(timeout) {
 			txsToEvict = append(txsToEvict, id)
 		}
 		return nil
 	})
 	for _, id := range txsToEvict {
-		if sub, ok := ff.pendingTxsSubs.Get(id); ok {
-			if !sub.ShouldEvict(timeout) {
-				continue
-			}
-			protocol := sub.Protocol()
-			if ff.unsubscribePendingTxsInternal(id) {
-				txsEvicted++
-				ff.logger.Info("[rpc] [filters] evicted idle pending txs filter", "id", id, "protocol", protocol, "timeout", timeout)
-				ff.decrementMetrics(FilterTypePendingTxs, protocol)
-				getReapedCounter(string(FilterTypePendingTxs)).Inc()
-			}
+		sub, ok := ff.pendingTxsSubs.Get(id)
+		if !ok {
+			continue
+		}
+		protocol := sub.Protocol()
+		if ff.unsubscribePendingTxsInternal(id) {
+			txsEvicted++
+			ff.logger.Info("[rpc] [filters] evicted idle pending txs filter", "id", id, "protocol", protocol, "timeout", timeout)
+			ff.decrementMetrics(FilterTypePendingTxs, protocol)
+			getReapedCounter(string(FilterTypePendingTxs)).Inc()
 		}
 	}
 
-	// Collect expired logs filter subscriptions
 	var logsToEvict []LogsSubID
 	ff.logsSubs.logsFilters.Range(func(id LogsSubID, filter *LogsFilter) error {
 		logsChecked++
-		if filter.sender != nil && filter.sender.ShouldEvict(timeout) {
-			ff.logger.Trace("[rpc] [filters] logs filter marked for eviction", "id", id, "protocol", filter.sender.Protocol())
+		if filter.sender != nil && filter.sender.CloseIfIdle(timeout) {
 			logsToEvict = append(logsToEvict, id)
 		}
 		return nil
 	})
 	for _, id := range logsToEvict {
-		if filter, ok := ff.logsSubs.logsFilters.Get(id); ok && filter.sender != nil {
-			if !filter.sender.ShouldEvict(timeout) {
-				continue
-			}
-			protocol := filter.sender.Protocol()
-			if ff.unsubscribeLogsInternal(id) {
-				logsEvicted++
-				ff.logger.Info("[rpc] [filters] evicted idle logs filter", "id", id, "protocol", protocol, "timeout", timeout)
-				ff.decrementMetrics(FilterTypeLogs, protocol)
-				getReapedCounter(string(FilterTypeLogs)).Inc()
-			}
+		filter, ok := ff.logsSubs.logsFilters.Get(id)
+		if !ok || filter.sender == nil {
+			continue
+		}
+		protocol := filter.sender.Protocol()
+		if ff.unsubscribeLogsInternal(id) {
+			logsEvicted++
+			ff.logger.Info("[rpc] [filters] evicted idle logs filter", "id", id, "protocol", protocol, "timeout", timeout)
+			ff.decrementMetrics(FilterTypeLogs, protocol)
+			getReapedCounter(string(FilterTypeLogs)).Inc()
 		}
 	}
 
