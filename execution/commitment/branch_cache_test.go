@@ -271,6 +271,23 @@ func TestBranchCache_ShardedTailUnwindAcrossShards(t *testing.T) {
 	}
 }
 
+// TestBranchCache_SmallTailKeepsCollidingKeys pins the shard-capacity floor: a
+// small tail (as used by unit tests) must never let two distinct keys evict
+// each other while it is far from full. The pre-cap 64-shard split of a
+// 100-entry tail left single-entry shards, so two keys hashing to one dropped a
+// valid entry via LRU overflow instead of by design. Scanning many pairs trips
+// a reverted cap regardless of the process hash seed; the fix makes it green
+// deterministically (every shard holds >= 2).
+func TestBranchCache_SmallTailKeepsCollidingKeys(t *testing.T) {
+	for i := 0; i < 4096; i++ {
+		c := NewBranchCache(100)
+		c.Put([]byte{0xa0, byte(i), byte(i >> 8)}, []byte("v1"), 0, 1)
+		c.Put([]byte{0xb1, byte(i), byte(i >> 8)}, []byte("v2"), 0, 1)
+		require.Equal(t, 2, c.tail.Len(),
+			"both keys must survive in a 100-entry tail (i=%d): a single-entry shard evicted one", i)
+	}
+}
+
 // TestBranchCache_BaselineFootprint pins that a freshly constructed cache is
 // cheap. One is allocated per aggregator and may linger after Close, so an
 // empty cache must not carry a multi-megabyte fixed backing for its LRU tail.
