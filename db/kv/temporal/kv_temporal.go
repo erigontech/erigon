@@ -398,24 +398,25 @@ func (tx *RwTx) DeleteRange(table string, from, to []byte) (uint64, error) {
 	if dr, ok := tx.RwTx.(kv.HasDeleteRange); ok {
 		return dr.DeleteRange(table, from, to)
 	}
-	// Backend has no native range-delete: emulate it so callers can rely on
-	// temporal.RwTx always satisfying kv.HasDeleteRange.
-	it, err := tx.RwTx.Range(table, from, to, order.Asc, kv.Unlim)
+	// Fallback for a temporal backend without native range-delete. None exists
+	// today (every temporal backend is mdbx), so this is a correctness safety
+	// net, not a hot path. Whole-table delete is the shape callers actually use
+	// — take the cheap native clear; stream the rest via a cursor rather than
+	// buffering the whole range in RAM.
+	if from == nil && to == nil {
+		return 0, tx.RwTx.ClearTable(table)
+	}
+	c, err := tx.RwTx.RwCursor(table)
 	if err != nil {
 		return 0, err
 	}
-	defer it.Close()
-	var keys [][]byte
-	for it.HasNext() {
-		k, _, err := it.Next()
-		if err != nil {
-			return 0, err
-		}
-		keys = append(keys, bytes.Clone(k)) // Range yields zero-copy keys, invalid after Next()
-	}
+	defer c.Close()
 	var deleted uint64
-	for _, k := range keys {
-		if err := tx.RwTx.Delete(table, k); err != nil {
+	for k, _, err := c.Seek(from); k != nil && (to == nil || bytes.Compare(k, to) < 0); k, _, err = c.Next() {
+		if err != nil {
+			return deleted, err
+		}
+		if err := c.DeleteCurrent(); err != nil {
 			return deleted, err
 		}
 		deleted++

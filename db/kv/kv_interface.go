@@ -622,10 +622,10 @@ type HasSpaceDirty interface {
 	SpaceDirty() (uint64, uint64, error)
 }
 
-// HasDeleteRange is implemented by backends offering a native bulk range-delete
-// (mdbx cuts whole B-tree pages/branches out at once, far faster than per-key
-// deletion). The range is [from, to); to==nil deletes through the last key.
-// Returns the number of keys removed.
+// HasDeleteRange deletes all keys in [from, to) (to==nil deletes through the
+// last key) and returns the number removed. mdbx implements it as a native bulk
+// B-tree cut — far faster than per-key deletion; other backends may emulate it
+// by iterating, so hot-path callers should prefer the mdbx-backed tx.
 type HasDeleteRange interface {
 	DeleteRange(table string, from, to []byte) (uint64, error)
 }

@@ -190,7 +190,6 @@ var snapshotCommand = cli.Command{
 			Flags: joinFlags([]cli.Flag{
 				&utils.DataDirFlag,
 				&utils.ErigondbDomainStepsInFrozenFileFlag,
-				&utils.AlwaysGenerateChangesetsFlag,
 			}),
 		},
 		{

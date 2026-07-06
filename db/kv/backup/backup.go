@@ -179,30 +179,18 @@ func backupTable(ctx context.Context, src kv.RoDB, srcTx kv.Tx, dst kv.RwDB, tab
 		}
 	}
 
-	// TODO: Unwind doesn't need to decrement the auto-increment sequence — it's
-	// not exposed to users and not part of consensus, so we could switch to
-	// mdbx's native Sequence.
-
-	// migrate bucket sequences to native mdbx implementation
-	//currentID, err := srcTx.Sequence(name, 0)
-	//if err != nil {
-	//	return err
-	//}
-	//_, err = dstTx.Sequence(name, currentID)
-	//if err != nil {
-	//	return err
-	//}
 	if err2 := dstTx.Commit(); err2 != nil {
 		return 0, err2
 	}
 	return i, nil
 }
 
-// ClearTables empties each table with mdbx's native bulk range-delete on the
-// caller's tx — atomic with the caller's other writes and, unlike a self-owned
-// writer, safe to call inside an open write tx. db only drives read-only
-// read-ahead that warms pages just ahead of the chunked delete cursor when
-// WARMUP_TABLE_WORKERS>0, which is where the speed comes from.
+// ClearTables empties each table on the caller's tx — atomic with the caller's
+// other writes and, unlike a self-owned writer, safe to call inside an open
+// write tx. With WARMUP_TABLE_WORKERS>0 it deletes in count-balanced chunks
+// while db drives read-only read-ahead that warms pages just ahead of the
+// delete cursor (the source of the speedup on tables >> RAM); unset (the
+// default) it falls back to a plain one-shot table clear.
 func ClearTables(ctx context.Context, db kv.RoDB, tx kv.RwTx, tables ...string) error {
 	for _, table := range tables {
 		if err := clearTable(ctx, db, tx, table); err != nil {
@@ -213,8 +201,15 @@ func ClearTables(ctx context.Context, db kv.RoDB, tx kv.RwTx, tables ...string) 
 }
 
 func clearTable(ctx context.Context, db kv.RoDB, tx kv.RwTx, table string) error {
+	workers := int(dbg.WarmupTableWorkers)
+	if workers == 0 {
+		// Default path (warmup off): plain clear, identical to pre-warmup behaviour.
+		// Chunked range-delete only pays off when paired with read-ahead.
+		return tx.ClearTable(table)
+	}
+
 	dr, ok := tx.(kv.HasDeleteRange)
-	if !ok { // backend has no native range-delete: drop the whole table
+	if !ok { // backend has no range-delete: drop the whole table
 		return tx.ClearTable(table)
 	}
 
@@ -233,11 +228,10 @@ func clearTable(ctx context.Context, db kv.RoDB, tx kv.RwTx, table string) error
 		return err
 	}
 
-	var ra *kv.ReadAhead
-	if workers := int(dbg.WarmupTableWorkers); workers > 0 {
-		ra = kv.NewReadAhead(ctx, db, table, nil, workers)
-		ra.SetLogLevel(log.LvlDebug) // [clear] already logs progress; keep read-ahead quiet
-	}
+	// Reuse the boundaries we just computed instead of making read-ahead walk
+	// the b-tree distribution a second time on its own read tx.
+	ra := kv.NewReadAheadFromBounds(ctx, db, table, bounds, workers)
+	ra.SetLogLevel(log.LvlDebug) // [clear] already logs progress; keep read-ahead quiet
 	defer ra.Close()
 
 	logEvery := time.NewTicker(20 * time.Second)
@@ -283,8 +277,7 @@ func chunkBounds(tx kv.RwTx, table string, size uint64) (bounds [][]byte, err er
 	if !ok {
 		return nil, nil
 	}
-	const clearChunkSize = 32 * datasize.MB
-	chunks := size / clearChunkSize.Bytes()
+	chunks := size / kv.WarmupChunkSize.Bytes()
 	started := time.Now()
 	bounds, err = s.DistributeCursors(table, nil, int(chunks))
 	if err != nil {

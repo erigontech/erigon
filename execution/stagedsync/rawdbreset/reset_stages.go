@@ -177,12 +177,12 @@ func ResetExec(ctx context.Context, db kv.TemporalRwDB) error {
 
 	if err := db.Update(ctx, func(tx kv.RwTx) error {
 		if err := clearStageProgress(tx, stages.Execution); err != nil {
-			return err
+			return fmt.Errorf("clearing Execution stage progress: %w", err)
 		}
 		// corner case: state files may be ahead of block files - so, can't use SharedDomains here. just leave progress as 0.
 		return backup.ClearTables(ctx, db, tx, cleanupList...)
 	}); err != nil {
-		return fmt.Errorf("clearing exec state tables: %w", err)
+		return err
 	}
 
 	// Wiping the commitment table makes branchCache entries stale; drop it so it repopulates from the wiped table.

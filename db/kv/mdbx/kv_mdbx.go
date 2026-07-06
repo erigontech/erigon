@@ -29,6 +29,7 @@ import (
 	"slices"
 	"sync"
 	"sync/atomic"
+	"syscall"
 	"testing"
 	"time"
 	"unsafe"
@@ -941,11 +942,18 @@ func (tx *MdbxTx) DistributeCursors(table string, from []byte, n int) ([][]byte,
 
 	keys := make([][]byte, 0, n)
 	for _, c := range cursors {
-		// An unset surplus cursor (range held fewer positions than n) reports
-		// GetCurrent as NotFound or ENODATA; either way the set cursors are a
-		// leading prefix, so stop at the first one that isn't positioned.
 		k, _, err := c.Get(nil, nil, mdbx.GetCurrent)
-		if err != nil || len(k) == 0 {
+		if err != nil {
+			// An unset surplus cursor (range held fewer positions than n) reports
+			// GetCurrent as NotFound or ENODATA; either way the set cursors are a
+			// leading prefix, so stop at the first one that isn't positioned. Any
+			// other error is a real fault and must not be masked as "unset".
+			if mdbx.IsNotFound(err) || mdbx.IsErrnoSys(err, syscall.ENODATA) {
+				break
+			}
+			return nil, err
+		}
+		if len(k) == 0 {
 			break
 		}
 		keys = append(keys, k)
