@@ -194,6 +194,14 @@ func TestVoteSampleBoundsUsesClampedCount(t *testing.T) {
 		require.Less(t, startIdx, count)
 		require.GreaterOrEqual(t, step, sampleBasis)
 	}
+
+	for count := sampleBasis; count < sampleBasis*3; count++ {
+		startIdx, step = voteSampleBounds(count, true, rand.New(rand.NewSource(int64(count))))
+
+		require.GreaterOrEqual(t, startIdx, 0)
+		require.Less(t, startIdx, sampleBasis)
+		require.GreaterOrEqual(t, step, sampleBasis)
+	}
 }
 
 func TestComputeVotesProbabilisticAuxStateUsesClampedCount(t *testing.T) {

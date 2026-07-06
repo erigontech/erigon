@@ -100,7 +100,11 @@ func voteSampleBounds(count int, probabilistic bool, gen *rand.Rand) (int, int) 
 	if !probabilistic || count == 0 {
 		return 0, 1
 	}
-	return gen.Intn(count), sampleBasis + gen.Intn(sampleFactor)
+	startLimit := sampleBasis
+	if count < startLimit {
+		startLimit = count
+	}
+	return gen.Intn(startLimit), sampleBasis + gen.Intn(sampleFactor)
 }
 
 // GetHead returns the head of the fork choice store.
