@@ -164,8 +164,7 @@ type BlockRetire struct {
 	bridgeStore           bridge.Store
 	borDataNotReadyBefore time.Time
 
-	// background joins the background goroutine spawned by RetireBlocksInBackground so
-	// Close can wait for an in-flight retire before the DB/snapshots are torn down.
+	// background joins the background goroutines at Close
 	background concurrent.ClosingWaitGroup
 	ctx        context.Context
 	stopFn     context.CancelFunc
