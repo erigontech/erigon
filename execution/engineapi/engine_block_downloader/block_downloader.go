@@ -233,6 +233,19 @@ func (e *EngineBlockDownloader) execDownloadedBatch(ctx context.Context, block *
 	if err != nil {
 		return err
 	}
+	// A background FCU commit briefly holds the exec semaphore; wait it out
+	// instead of failing the batch.
+	for status == execmodule.ExecutionStatusBusy {
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(50 * time.Millisecond):
+		}
+		status, _, lastValidHash, err = e.chainRW.ValidateChain(ctx, block.Hash(), block.NumberU64())
+		if err != nil {
+			return err
+		}
+	}
 	switch status {
 	case execmodule.ExecutionStatusBadBlock:
 		e.ReportBadHeader(block.Hash(), lastValidHash)
@@ -256,6 +269,17 @@ func (e *EngineBlockDownloader) execDownloadedBatch(ctx context.Context, block *
 	fcuStatus, _, lastValidHash, err := e.chainRW.UpdateForkChoice(ctx, block.Hash(), common.Hash{}, common.Hash{}, 0)
 	if err != nil {
 		return err
+	}
+	for fcuStatus == execmodule.ExecutionStatusBusy {
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(50 * time.Millisecond):
+		}
+		fcuStatus, _, lastValidHash, err = e.chainRW.UpdateForkChoice(ctx, block.Hash(), common.Hash{}, common.Hash{}, 0)
+		if err != nil {
+			return err
+		}
 	}
 	if fcuStatus != execmodule.ExecutionStatusSuccess {
 		return fmt.Errorf(
