@@ -17,7 +17,6 @@
 package temporal
 
 import (
-	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -398,37 +397,9 @@ func (tx *RwTx) DeleteRange(table string, from, to []byte) (uint64, error) {
 	if dr, ok := tx.RwTx.(kv.HasDeleteRange); ok {
 		return dr.DeleteRange(table, from, to)
 	}
-	// Fallback for a temporal backend without native range-delete. None exists
-	// today (every temporal backend is mdbx), so this is a correctness safety
-	// net, not a hot path. Whole-table delete is the shape callers actually use
-	// — take the cheap native clear; stream the rest via a cursor rather than
-	// buffering the whole range in RAM.
-	if from == nil && to == nil {
-		cnt, err := tx.RwTx.Count(table)
-		if err != nil {
-			return 0, err
-		}
-		if err := tx.RwTx.ClearTable(table); err != nil {
-			return 0, err
-		}
-		return cnt, nil
-	}
-	c, err := tx.RwTx.RwCursor(table)
-	if err != nil {
-		return 0, err
-	}
-	defer c.Close()
-	var deleted uint64
-	for k, _, err := c.Seek(from); k != nil && (to == nil || bytes.Compare(k, to) < 0); k, _, err = c.Next() {
-		if err != nil {
-			return deleted, err
-		}
-		if err := c.DeleteCurrent(); err != nil {
-			return deleted, err
-		}
-		deleted++
-	}
-	return deleted, nil
+	// No non-mdbx temporal backend exists (mdbx's native range-delete is used
+	// above); fail loud rather than carry an unexercised, DupSort-unsafe emulation.
+	return 0, fmt.Errorf("DeleteRange not supported by %T", tx.RwTx)
 }
 
 func (tx *RwTx) LockDBInRam() error {

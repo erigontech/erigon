@@ -17,7 +17,6 @@
 package backup
 
 import (
-	"bytes"
 	"context"
 	"fmt"
 	"maps"
@@ -118,10 +117,15 @@ func backupTable(ctx context.Context, src kv.RoDB, srcTx kv.Tx, dst kv.RwDB, tab
 
 	// Parallel read-ahead: keep a bounded band of pages warm just ahead of the
 	// copy cursor (cold page faults are slow; one reader can't saturate nvme).
-	// No-op unless WARMUP_TABLE_WORKERS is set.
+	// No-op unless WARMUP_TABLE_WORKERS is set. Warms values too — the copy reads them.
 	var ra *kv.ReadAhead
 	if workers := int(dbg.WarmupTableWorkers); workers > 0 && total > 0 {
-		ra = kv.NewReadAhead(ctx, src, table, nil, workers)
+		bounds, _, err := kv.DistributeBounds(srcTx, table)
+		if err != nil {
+			logger.Warn("[mdbx_to_mdbx] read-ahead disabled", "table", table, "err", err)
+		} else {
+			ra = kv.NewReadAhead(ctx, src, table, kv.ReadAheadCfg{Bounds: bounds, TableSize: size, Workers: workers, LogLvl: log.LvlInfo, WarmValues: true})
+		}
 	}
 	defer ra.Close()
 
@@ -202,9 +206,8 @@ func ClearTables(ctx context.Context, db kv.RoDB, tx kv.RwTx, tables ...string) 
 
 func clearTable(ctx context.Context, db kv.RoDB, tx kv.RwTx, table string) error {
 	workers := int(dbg.WarmupTableWorkers)
-	if workers == 0 {
-		// Default path (warmup off): plain clear, identical to pre-warmup behaviour.
-		// Chunked range-delete only pays off when paired with read-ahead.
+	if workers == 0 { // chunked range-delete only pays off paired with read-ahead
+		log.Info("[clear]", "table", table)
 		return tx.ClearTable(table)
 	}
 
@@ -213,25 +216,18 @@ func clearTable(ctx context.Context, db kv.RoDB, tx kv.RwTx, table string) error
 		return tx.ClearTable(table)
 	}
 
-	size, err := tx.BucketSize(table)
+	bounds, size, err := kv.DistributeBounds(tx, table)
 	if err != nil {
 		return err
 	}
 	log.Info("[clear]", "table", table, "size", common.ByteCount(size))
-
-	bounds, err := chunkBounds(tx, table, size)
-	if err != nil {
-		return err
-	}
-	if len(bounds) < 2 { // backend can't count-split: clear in one shot
-		_, err := dr.DeleteRange(table, nil, nil)
-		return err
+	if len(bounds) < 2 { // under one chunk (or can't count-split): native drop beats distribute+warm+counted-delete
+		return tx.ClearTable(table)
 	}
 
-	// Reuse the boundaries we just computed instead of making read-ahead walk
-	// the b-tree distribution a second time on its own read tx.
-	ra := kv.NewReadAheadFromBounds(ctx, db, table, bounds, workers)
-	ra.SetLogLevel(log.LvlDebug) // [clear] already logs progress; keep read-ahead quiet
+	// db drives read-only read-ahead over the same boundaries; keys-only, since
+	// range-delete cuts from the leaf and never reads overflow value pages.
+	ra := kv.NewReadAhead(ctx, db, table, kv.ReadAheadCfg{Bounds: bounds, TableSize: size, Workers: workers, LogLvl: log.LvlDebug})
 	defer ra.Close()
 
 	logEvery := time.NewTicker(20 * time.Second)
@@ -268,26 +264,4 @@ func clearTable(ctx context.Context, db kv.RoDB, tx kv.RwTx, table string) error
 		}
 	}
 	return nil
-}
-
-// chunkBounds splits table into count-balanced ranges and returns the cloned
-// boundaries (nil if the backend can't count-split).
-func chunkBounds(tx kv.RwTx, table string, size uint64) (bounds [][]byte, err error) {
-	s, ok := tx.(kv.DBWithDistributionSupport)
-	if !ok {
-		return nil, nil
-	}
-	chunks := size / kv.WarmupChunkSize.Bytes()
-	started := time.Now()
-	bounds, err = s.DistributeCursors(table, nil, int(chunks))
-	if err != nil {
-		return nil, err
-	}
-	if took := time.Since(started); took > 5*time.Second {
-		log.Debug("[clear] DistributeCursors", "table", table, "chunks", chunks, "took", took)
-	}
-	for i := range bounds { // DistributeCursors returns tx-owned zero-copy keys; a same-tx DeleteRange rebalances the pages they point into, invalidating them
-		bounds[i] = bytes.Clone(bounds[i])
-	}
-	return bounds, nil
 }

@@ -29,7 +29,6 @@ import (
 	"slices"
 	"sync"
 	"sync/atomic"
-	"syscall"
 	"testing"
 	"time"
 	"unsafe"
@@ -906,27 +905,31 @@ func (tx *MdbxTx) DistributeCursors(table string, from []byte, n int) ([][]byte,
 		return nil, err
 	}
 	defer firstC.Close()
-	first := rawCursor(firstC)
+	var fk []byte
 	if from == nil {
-		_, _, err = first.Get(nil, nil, mdbx.First)
+		fk, _, err = firstC.First()
 	} else {
-		_, _, err = first.Get(from, nil, mdbx.SetRange)
+		fk, _, err = firstC.Seek(from)
 	}
 	if err != nil {
-		if mdbx.IsNotFound(err) {
-			return [][]byte{from, nil}, nil
-		}
 		return nil, err
 	}
+	if fk == nil { // empty table, or `from` is past the last key
+		return [][]byte{from, nil}, nil
+	}
 
+	// Keep the kv.Cursor wrappers, not just the raw handles: reading each
+	// cursor's position through Cursor.Current normalizes the not-found/EOF
+	// signal, so we don't have to match platform-specific mdbx error codes.
+	wrappers := make([]kv.Cursor, n)
 	cursors := make([]*mdbx.Cursor, n)
-	for i := range cursors {
+	for i := range wrappers {
 		cw, err := tx.Cursor(table)
 		if err != nil {
 			return nil, err
 		}
 		defer cw.Close()
-		cursors[i] = rawCursor(cw)
+		wrappers[i], cursors[i] = cw, rawCursor(cw)
 	}
 
 	// Distribute at the lowest branch level (Depth-2), not the leaves: keeps the
@@ -936,30 +939,32 @@ func (tx *MdbxTx) DistributeCursors(table string, from []byte, n int) ([][]byte,
 	if st, err := tx.BucketStat(table); err == nil && st.Depth > 2 {
 		deepness = st.Depth - 2
 	}
-	if _, err := mdbx.DistributeCursors(first, nil, cursors, deepness); err != nil {
+	// allSet is false when the range held fewer positions than n: the surplus
+	// cursors are left at EOF and their Current call reports a platform-specific
+	// error we must treat as "end of the set prefix" rather than propagate.
+	allSet, err := mdbx.DistributeCursors(rawCursor(firstC), nil, cursors, deepness)
+	if err != nil {
 		return nil, err
 	}
 
 	keys := make([][]byte, 0, n)
-	for _, c := range cursors {
-		k, _, err := c.Get(nil, nil, mdbx.GetCurrent)
+	for _, cw := range wrappers {
+		k, _, err := cw.Current()
 		if err != nil {
-			// An unset surplus cursor (range held fewer positions than n) reports
-			// GetCurrent as NotFound or ENODATA; either way the set cursors are a
-			// leading prefix, so stop at the first one that isn't positioned. Any
-			// other error is a real fault and must not be masked as "unset".
-			if mdbx.IsNotFound(err) || mdbx.IsErrnoSys(err, syscall.ENODATA) {
+			if !allSet { // unset surplus cursor: set cursors are a leading prefix, stop here
 				break
 			}
-			return nil, err
+			return nil, err // every cursor was set, so this is a real fault
 		}
-		if len(k) == 0 {
+		if k == nil {
 			break
 		}
 		keys = append(keys, k)
 	}
-	if len(keys) > 0 {
-		keys = keys[:len(keys)-1] // last cursor pins to the table's last key; nil closes the final range
+	if allSet && len(keys) > 0 {
+		// The last cursor pins the table's last key; nil closes the final range.
+		// When !allSet the last set cursor is a genuine interior boundary — keep it.
+		keys = keys[:len(keys)-1]
 	}
 
 	bounds := make([][]byte, 0, len(keys)+2)

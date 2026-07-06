@@ -99,6 +99,30 @@ func TestClearTablesWarmupOff(t *testing.T) {
 	require.Zero(t, tableCount(t, db))
 }
 
+// TestClearTablesWarmupOnSmallTable exercises the warmup-on path for a table
+// under one chunk: it must skip distribution/read-ahead and fall back to the
+// native drop, still leaving the table empty.
+func TestClearTablesWarmupOnSmallTable(t *testing.T) {
+	withWarmupWorkers(t, 4)
+
+	db := newWriteMapDB(t)
+	require.NoError(t, db.Update(t.Context(), func(tx kv.RwTx) error {
+		c, err := tx.RwCursor(testTable)
+		require.NoError(t, err)
+		defer c.Close()
+		for i := 0; i < 1000; i++ {
+			require.NoError(t, c.Append(u64Key(uint64(i)), []byte{1}))
+		}
+		return nil
+	}))
+	require.Less(t, tableSize(t, db), 32*datasize.MB.Bytes(), "table must be under one chunk")
+
+	require.NoError(t, db.Update(t.Context(), func(tx kv.RwTx) error {
+		return ClearTables(t.Context(), db, tx, testTable)
+	}))
+	require.Zero(t, tableCount(t, db))
+}
+
 // TestClearTablesMultiChunkWriteMap clears a table large enough to split into
 // several 32MB chunks with warmup enabled, so ClearTables walks its full chunked
 // range-delete path. Every row must be gone — a stale-bounds regression would
