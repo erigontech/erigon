@@ -509,7 +509,6 @@ type TemporalDebugDB interface {
 	InvertedIdxTables(names ...InvertedIdx) []string
 	ForkableTables(names ...ForkableId) []string
 	BuildMissedAccessors(ctx context.Context, workers int) error
-	ReloadFiles() error
 	EnableReadAhead() TemporalDebugDB
 	DisableReadAhead()
 

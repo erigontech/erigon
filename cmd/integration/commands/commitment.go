@@ -187,7 +187,7 @@ Examples:
   integration commitment branch --datadir /path/to/datadir  # reads root (empty prefix)`,
 	Run: func(cmd *cobra.Command, args []string) {
 		logger := debug.SetupCobra(cmd, "integration")
-		ctx, _ := common.RootContext()
+		ctx := cmd.Context()
 
 		prefix, err := commitment.PrefixStringToNibbles(branchPrefixFlag)
 		if err != nil {
@@ -599,7 +599,7 @@ Examples:
   integration commitment bench-lookup --datadir /path/to/datadir --seed 12345`,
 	Run: func(cmd *cobra.Command, args []string) {
 		logger := debug.SetupCobra(cmd, "integration")
-		ctx, _ := common.RootContext()
+		ctx := cmd.Context()
 
 		if err := benchLookup(ctx, logger); err != nil {
 			if !errors.Is(err, context.Canceled) {
@@ -623,7 +623,7 @@ Examples:
   integration commitment bench-history-lookup --datadir /path/to/datadir --prefix aa --seed 12345`,
 	Run: func(cmd *cobra.Command, args []string) {
 		logger := debug.SetupCobra(cmd, "integration")
-		ctx, _ := common.RootContext()
+		ctx := cmd.Context()
 
 		if err := benchHistoryLookup(ctx, logger); err != nil {
 			if !errors.Is(err, context.Canceled) {

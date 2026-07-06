@@ -140,6 +140,18 @@ func (p *Provider) initDownloader(ctx context.Context) (downloaderproto.Download
 	return dl.DirectGrpcServerClient(bittorrentServer), nil
 }
 
+// AddTorrentsFromDisk adds completed on-disk torrents via the local downloader.
+// It is a no-op returning (0, nil) when no local downloader is present — a remote
+// or disabled downloader, or one already closed during shutdown. Guards against
+// the shutdown race where this fires after Close() has nil'd p.Downloader.
+func (p *Provider) AddTorrentsFromDisk(ctx context.Context) (incompleteTorrents int, err error) {
+	d := p.Downloader
+	if d == nil {
+		return 0, nil
+	}
+	return d.AddTorrentsFromDisk(ctx)
+}
+
 // Close shuts down the downloader. Safe to call multiple times.
 func (p *Provider) Close() {
 	if p.Downloader != nil {
