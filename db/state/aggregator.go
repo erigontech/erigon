@@ -97,7 +97,6 @@ type Aggregator struct {
 	buildingFiles atomic.Bool
 	mergingFiles  atomic.Bool
 
-	//warmupWorking          atomic.Bool
 	ctx       context.Context
 	ctxCancel context.CancelFunc
 
