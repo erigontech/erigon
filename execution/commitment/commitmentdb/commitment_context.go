@@ -17,6 +17,7 @@ import (
 	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/empty"
+	"github.com/erigontech/erigon/common/length"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/etl"
 	"github.com/erigontech/erigon/db/kv"
@@ -293,8 +294,17 @@ func (sdc *SharedDomainsCommitmentContext) TouchKeyWrite(d kv.Domain, key string
 	if dbg.TraceTouchKey {
 		fmt.Printf("TOUCHKEYWRITE %s key=%x val=%x\n", d, key, val)
 	}
+	// The fold classifies keys by LENGTH (accounts length.Addr, storage
+	// length.Addr+length.Hash) regardless of the domain the caller wrote to.
+	// A carried update must agree with that classification or it lands in a
+	// differently-typed cell and corrupts the trie; any mismatched write
+	// degrades to the marker/re-read path, which resolves by length.
 	switch d {
 	case kv.AccountsDomain:
+		if len(key) != length.Addr {
+			sdc.updates.TouchPlainKey(key, val, sdc.updates.TouchAccount)
+			return
+		}
 		u, err := commitment.NewCarriedAccountUpdate(val)
 		if err != nil {
 			sdc.updates.TouchPlainKey(key, val, sdc.updates.TouchAccount)
@@ -302,6 +312,10 @@ func (sdc *SharedDomainsCommitmentContext) TouchKeyWrite(d kv.Domain, key string
 		}
 		sdc.updates.TouchPlainKeyDirect(key, u)
 	case kv.StorageDomain:
+		if len(key) != length.Addr+length.Hash {
+			sdc.updates.TouchPlainKey(key, val, sdc.updates.TouchStorage)
+			return
+		}
 		sdc.updates.TouchPlainKeyDirect(key, commitment.NewCarriedStorageUpdate(val))
 	case kv.CodeDomain:
 		// The leaf's code hash comes from the account record, so a code write
