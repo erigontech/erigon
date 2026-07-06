@@ -140,6 +140,7 @@ type HexPatriciaHashed struct {
 	ctx           PatriciaContext
 	hashAuxBuffer [128]byte     // buffer to compute cell hash or write hash-related things
 	cellHashBuf   common.Hash   // shared scratch buffer for hashKey calls (avoids per-cell allocation)
+	leafHashBuf   [33]byte      // shared scratch for leaf hash prefixing (avoids per-leaf escape)
 	auxBuffer     *bytes.Buffer // auxiliary buffer used during branch updates encoding
 	branchEncoder *BranchEncoder
 
@@ -761,13 +762,12 @@ func (hph *HexPatriciaHashed) completeLeafHash(buf []byte, compactLen int, key [
 	if canEmbed {
 		buf = hph.auxBuffer.Bytes()
 	} else {
-		var hashBuf [33]byte
-		hashBuf[0] = 0x80 + length.Hash
-		if _, err := hph.keccak.Read(hashBuf[1:]); err != nil {
+		hph.leafHashBuf[0] = 0x80 + length.Hash
+		if _, err := hph.keccak.Read(hph.leafHashBuf[1:]); err != nil {
 			return nil, err
 		}
-		buf = append(buf, hashBuf[:]...)
-		hph.witness.emitLeaf(hashBuf[1:])
+		buf = append(buf, hph.leafHashBuf[:]...)
+		hph.witness.emitLeaf(hph.leafHashBuf[1:])
 	}
 	return buf, nil
 }
