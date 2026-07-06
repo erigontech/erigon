@@ -17,18 +17,26 @@ DOCKER_BINARIES ?= "erigon"
 GIT_COMMIT ?= $(shell git rev-list -1 HEAD)
 SHORT_COMMIT := $(shell echo $(GIT_COMMIT) | cut -c 1-8)
 GIT_BRANCH ?= $(shell git rev-parse --abbrev-ref HEAD)
-GIT_TAG    ?= $(shell git describe --tags '--match=*.*.*' --abbrev=7 --dirty)
 
-# Use git tag value for "release/" branches only. Otherwise it make no sense.
-ifeq (,$(findstring release/,$(GIT_BRANCH)))
-  GIT_TAG	:= .
-endif
+# GIT_TAG is the exact release tag at HEAD (e.g. v3.5.0) when building from a
+# tagged release, and empty otherwise. It is build provenance only; the
+# advertised version comes from db/version (see NodeVersion). Earlier this used
+# `git describe`, which on an untagged branch anchored to an unrelated older
+# tag and produced a misleading value. The grep allowlist keeps untrusted tag
+# names (git refs permit shell metacharacters) out of the -ldflags shell line.
+# Override via the environment.
+GIT_TAG    ?= $(shell git tag --points-at HEAD --list 'v*' 2>/dev/null | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.]+)?$$' | head -n 1)
 
 ERIGON_USER ?= erigon
 # if using volume-mounting data dir, then must exist on host OS
 DOCKER_UID ?= $(shell id -u)
 DOCKER_GID ?= $(shell id -g)
 DOCKER_TAG ?= erigontech/erigon:latest
+
+# check_tools: parse-time guard for tools used in $(shell ...) := variables;
+# fails with a clear message instead of a raw "command not found".
+# $(1) = space-separated tool names, $(2) = feature name shown in the error.
+check_tools = $(foreach t,$(1),$(if $(shell command -v $(t) 2>/dev/null),,$(error $(2): required tool '$(t)' not found in PATH)))
 
 # Variables below for building on host OS, and are ignored for docker
 #
@@ -189,7 +197,6 @@ COMMANDS += txpool
 COMMANDS += evm
 COMMANDS += caplin
 COMMANDS += snapshots
-COMMANDS += diag
 COMMANDS += mcp
 
 # build each command using %.cmd rule
@@ -257,31 +264,55 @@ test-fixtures-cl:
 test-fixtures-eest:
 	tools/test-fixtures.sh test-fixtures.json test-fixtures-cache eest_stable eest_devnet eest_benchmark
 
-# EEST spec tests: run cmd/evm runners (statetest, blocktest, enginextest)
+## test-fixtures-zkevm:                download & extract only the zkevm execution-witness tarball (eest_zkevm)
+.PHONY: test-fixtures-zkevm
+test-fixtures-zkevm:
+	tools/test-fixtures.sh test-fixtures.json test-fixtures-cache eest_zkevm
+
+# EEST spec tests: run cmd/evm runners (statetest, blocktest, enginextest, zkevmtest)
 # against EEST fixtures. The shard list, workers, and failure budgets live in
-# tools/eest-spec-shards.json (single source of truth shared with
+# tools/eest-spec-shards.yml (single source of truth shared with
 # .github/workflows/test-eest-spec.yml's load-matrix job and
 # tools/run-eest-spec-test.sh's runtime lookup). Shards whose names contain
-# "-race-" dispatch through the race-instrumented evm.race binary so race
-# coverage works without polluting the non-race shards.
-EEST_SPEC_RACE_SHARDS := $(shell jq -r '.[].shard | select(test("-race-"))' tools/eest-spec-shards.json)
-EEST_SPEC_SHARDS      := $(shell jq -r '.[].shard | select(test("-race-") | not)' tools/eest-spec-shards.json)
-
-.PHONY: $(addprefix eest-spec-,$(EEST_SPEC_SHARDS)) $(addprefix eest-spec-,$(EEST_SPEC_RACE_SHARDS)) evm.race
-
+# "-race" dispatch through the race-instrumented evm.race binary so race
+# coverage works without polluting the non-race shards. Each shard provisions
+# only its own fixture set (via tools/run-eest-spec-test.sh); all corpora
+# together are 20G+ extracted and don't fit on the smaller CI runner disks.
+.PHONY: evm.race
 evm.race:
 	$(GO_BUILD_ENV) $(GO) build -race $(GO_FLAGS) -tags $(BUILD_TAGS) -o $(GOBIN)/evm.race ./cmd/evm
 
-$(addprefix eest-spec-,$(EEST_SPEC_SHARDS)): eest-spec-%: test-fixtures-eest evm
+# Parse the shard list only when an eest-spec-* goal is requested, so unrelated
+# targets (e.g. `make erigon`) neither require yq/jq nor pay the parse cost.
+ifneq ($(filter eest-spec-%,$(MAKECMDGOALS)),)
+$(call check_tools,yq jq,eest-spec targets)
+
+EEST_SPEC_RACE_SHARDS := $(shell yq -o=json '.' tools/eest-spec-shards.yml | jq -r '.[].shard | select(test("-race"))')
+EEST_SPEC_SHARDS      := $(shell yq -o=json '.' tools/eest-spec-shards.yml | jq -r '.[].shard | select(test("-race") | not)')
+
+.PHONY: $(addprefix eest-spec-,$(EEST_SPEC_SHARDS)) $(addprefix eest-spec-,$(EEST_SPEC_RACE_SHARDS))
+
+$(addprefix eest-spec-,$(EEST_SPEC_SHARDS)): eest-spec-%: evm
 	@bash tools/run-eest-spec-test.sh "$*"
 
-$(addprefix eest-spec-,$(EEST_SPEC_RACE_SHARDS)): eest-spec-%: test-fixtures-eest evm.race
+$(addprefix eest-spec-,$(EEST_SPEC_RACE_SHARDS)): eest-spec-%: evm.race
 	@EVM_BIN=$(GOBIN)/evm.race bash tools/run-eest-spec-test.sh "$*"
+endif
 
 ## test-bench:                         check the benchmarks compile and run
 test-bench: override GO_FLAGS += -run=^$$ -bench=. -benchtime=1x -short -timeout=5m
 test-bench:
 	$(GOTEST)
+
+## fuzz PKG=<pkg> FUZZ=<FuzzName> [FUZZTIME=60s]:  run one Go fuzz target (see docs/fuzzing.md)
+.PHONY: fuzz
+fuzz:
+	@if [ -z "$(FUZZ)" ] || [ -z "$(PKG)" ]; then \
+		echo "usage: make fuzz PKG=<pkg> FUZZ=<FuzzName> [FUZZTIME=60s]"; \
+		echo "   e.g. make fuzz PKG=./db/seg FUZZ=FuzzCompress FUZZTIME=30s"; \
+		exit 2; \
+	fi
+	$(GO) test $(PKG) -run '^$$' -fuzz '^$(FUZZ)$$' -fuzztime $(or $(FUZZTIME),60s)
 
 test-all-race: override GO_FLAGS := -timeout $(default_test_race_timeout) $(GO_FLAGS) -race
 test-all-race: test-filtered
@@ -463,7 +494,7 @@ $(GOBINREL):
 
 $(GOBINREL)/protoc: | $(GOBINREL)
 	$(eval PROTOC_TMP := $(shell mktemp -d))
-	curl -sSL https://github.com/protocolbuffers/protobuf/releases/download/v33.1/protoc-33.1-$(PROTOC_OS)-$(ARCH).zip -o "$(PROTOC_TMP)/protoc.zip"
+	curl -sSL https://github.com/protocolbuffers/protobuf/releases/download/v35.1/protoc-35.1-$(PROTOC_OS)-$(ARCH).zip -o "$(PROTOC_TMP)/protoc.zip"
 	cd "$(PROTOC_TMP)" && unzip protoc.zip
 	cp "$(PROTOC_TMP)/bin/protoc" "$(GOBIN)"
 	mkdir -p "$(PROTOC_INCLUDE)"

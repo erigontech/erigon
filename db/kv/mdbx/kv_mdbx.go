@@ -185,7 +185,7 @@ func (opts MdbxOpts) InMem(tb testing.TB, tmpDir string) MdbxOpts {
 
 var ErrDBDoesNotExists = errors.New("can't create database - because opening in `Accede` mode. probably another (main) process can create it")
 
-func (opts MdbxOpts) Open(ctx context.Context) (kv.RwDB, error) {
+func (opts MdbxOpts) Open(ctx context.Context) (_ kv.RwDB, err error) {
 	if dbg.DirtySpace() > 0 {
 		opts = opts.DirtySpace(dbg.DirtySpace()) //nolint
 	}
@@ -221,6 +221,11 @@ func (opts MdbxOpts) Open(ctx context.Context) (kv.RwDB, error) {
 	if err != nil {
 		return nil, err
 	}
+	defer func() {
+		if err != nil {
+			env.Close()
+		}
+	}()
 	if opts.label == dbcfg.ChainDB && opts.verbosity != -1 {
 		err = env.SetDebug(mdbx.LogLvl(opts.verbosity), mdbx.DbgDoNotChange, mdbx.LoggerDoNotChange) // temporary disable error, because it works if call it 1 time, but returns error if call it twice in same process (what often happening in tests)
 		if err != nil {
@@ -342,14 +347,12 @@ func (opts MdbxOpts) Open(ctx context.Context) (kv.RwDB, error) {
 
 	if opts.HasFlag(mdbx.SafeNoSync) && opts.syncPeriod != 0 {
 		if err = env.SetSyncPeriod(opts.syncPeriod); err != nil {
-			env.Close()
 			return nil, err
 		}
 	}
 
 	if opts.HasFlag(mdbx.SafeNoSync) && opts.syncBytes != nil {
 		if err = env.SetSyncBytes(uint(opts.syncBytes.Bytes())); err != nil {
-			env.Close()
 			return nil, err
 		}
 	}

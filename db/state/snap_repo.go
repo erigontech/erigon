@@ -434,7 +434,7 @@ func (f *SnapshotRepo) loadDirtyFiles(aps []string) {
 			f.logger.Trace("can't parse file name", "file", ap)
 			continue
 		}
-		dirtyFile := newFilesItemWithSnapConfig(fileInfo.From, fileInfo.To, f.cfg)
+		dirtyFile := newFilesItem(fileInfo.From, fileInfo.To)
 
 		if _, has := f.dirtyFiles.Get(dirtyFile); !has {
 			f.dirtyFiles.Set(dirtyFile)

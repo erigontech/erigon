@@ -17,7 +17,7 @@
 package cli
 
 import (
-	"github.com/urfave/cli/v2"
+	"github.com/urfave/cli/v3"
 
 	"github.com/erigontech/erigon/cmd/utils"
 )
@@ -44,6 +44,7 @@ var DefaultFlags = []cli.Flag{
 	&PruneBlocksDistanceFlag,
 	&PruneModeFlag,
 	&utils.KeepExecutionProofsFlag,
+	&utils.CommitmentHistoryDistanceFlag,
 	&utils.FcuTimeoutFlag,
 	&utils.FcuBackgroundPruneFlag,
 	&utils.FcuBackgroundCommitFlag,
@@ -98,6 +99,7 @@ var DefaultFlags = []cli.Flag{
 	&utils.RpcGethCompatFlag,
 	&utils.RpcGasCapFlag,
 	&utils.RpcBlockRangeLimit,
+	&utils.RpcGetLogsMaxResults,
 	&utils.RpcBatchLimit,
 	&utils.RpcReturnDataLimit,
 	&utils.AllowUnprotectedTxs,
@@ -128,6 +130,7 @@ var DefaultFlags = []cli.Flag{
 	&utils.SnapStateStopFlag,
 	&utils.SnapSkipStateSnapshotDownloadFlag,
 	&utils.SnapP2PManifestFlag,
+	&utils.SnapChainTomlURLFlag,
 	&utils.SnapDownloadToBlockFlag,
 	&utils.DbPageSizeFlag,
 	&utils.DbSizeLimitFlag,
@@ -144,7 +147,6 @@ var DefaultFlags = []cli.Flag{
 	&utils.TorrentVerbosityFlag,
 	&utils.ListenPortFlag,
 	&utils.P2pProtocolVersionFlag,
-	&utils.P2pProtocolAllowedPorts,
 	&utils.NATFlag,
 	&utils.NoDiscoverFlag,
 	&utils.DiscoveryV4Flag,
@@ -261,11 +263,13 @@ var DefaultFlags = []cli.Flag{
 
 	&utils.GDBMeFlag,
 
-	&utils.ExperimentalConcurrentCommitmentFlag,
+	&utils.ExperimentalParallelCommitmentFlag,
+	&utils.ExperimentalStreamingCommitmentFlag,
 
 	&utils.MCPDisableFlag,
 	&utils.MCPAddrFlag,
 	&utils.MCPPortFlag,
 
 	&utils.ErigondbDomainStepsInFrozenFileFlag,
+	&utils.CommitmentPlainValuesFlag,
 }

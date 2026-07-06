@@ -245,7 +245,6 @@ func subscribeToStateChangesLoop(ctx context.Context, client StateChangesClient,
 		for {
 			select {
 			case <-ctx.Done():
-				log.Warn("[rpcdaemon subscribeToStateChanges] ctx done", "err", ctx.Err())
 				return
 			default:
 			}
@@ -257,6 +256,9 @@ func subscribeToStateChangesLoop(ctx context.Context, client StateChangesClient,
 					if err == nil {
 						continue
 					}
+				}
+				if errors.Is(err, context.Canceled) {
+					return
 				}
 				log.Warn("[rpcdaemon subscribeToStateChanges]", "err", err)
 			}
@@ -1147,6 +1149,15 @@ func (e *remoteRulesEngine) GetPostApplyMessageFunc() evmtypes.PostApplyMessageF
 	}
 
 	return e.engine.GetPostApplyMessageFunc()
+}
+
+func (e *remoteRulesEngine) ValidateBlockPostExecution(chainConfig *chain.Config, header *types.Header,
+	gasUsed, blobGasUsed uint64, checkReceipts, checkBloom bool,
+	receipts types.Receipts, txns types.Transactions, logger log.Logger) error {
+	if err := e.validateEngineReady(); err != nil {
+		return err
+	}
+	return e.engine.ValidateBlockPostExecution(chainConfig, header, gasUsed, blobGasUsed, checkReceipts, checkBloom, receipts, txns, logger)
 }
 
 func (e *remoteRulesEngine) VerifyHeader(_ rules.ChainHeaderReader, _ *types.Header, _ bool) error {

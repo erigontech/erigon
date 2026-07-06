@@ -147,7 +147,7 @@ func (a *ProtoForkable) BuildFile(ctx context.Context, from, to RootNum, db kv.R
 		return nil, false, err
 	}
 
-	df := newFilesItemWithSnapConfig(uint64(calcFrom), uint64(calcTo), cfg)
+	df := newFilesItem(uint64(calcFrom), uint64(calcTo))
 	df.decompressor = valuesDecomp
 
 	indexes, err := a.BuildIndexes(ctx, df.decompressor, calcFrom, calcTo, ps)
@@ -257,10 +257,7 @@ type ProtoForkableTx struct {
 func (a *ProtoForkable) BeginFilesRo() *ProtoForkableTx {
 	visibleFiles := a.snaps.visibleFiles()
 	for i := range visibleFiles {
-		src := visibleFiles[i].src
-		if !src.frozen {
-			src.refcount.Add(1)
-		}
+		visibleFiles[i].src.refcount.Add(1)
 	}
 
 	return &ProtoForkableTx{
@@ -280,9 +277,7 @@ func (a *ProtoForkable) DebugBeginDirtyFilesRo() *forkableDirtyFilesRoTx {
 	for ok := iter.First(); ok; ok = iter.Next() {
 		item := iter.Item()
 		files = append(files, item)
-		if !item.frozen {
-			item.refcount.Add(1)
-		}
+		item.refcount.Add(1)
 	}
 	return &forkableDirtyFilesRoTx{
 		p:     a,
@@ -326,7 +321,7 @@ func (a *ProtoForkableTx) Close() {
 	a.files = nil
 	for i := range files {
 		src := files[i].src
-		if src == nil || src.frozen {
+		if src == nil {
 			continue
 		}
 		refCnt := src.refcount.Add(-1)
@@ -349,7 +344,7 @@ func (a *ProtoForkableTx) StatelessIdxReader(i int) *recsplit.IndexReader {
 
 	r := a.readers[i]
 	if r == nil {
-		r = a.files[i].src.index.GetReaderFromPool()
+		r = a.files[i].src.index.Reader()
 		a.readers[i] = r
 	}
 

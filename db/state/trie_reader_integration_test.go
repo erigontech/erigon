@@ -47,7 +47,7 @@ func TestTrieReader_IntegrationWithRealData(t *testing.T) {
 	totalTxs := uint64(stepSize * totalSteps)
 
 	db, agg := testDbAndAggregatorv3(t, stepSize)
-	agg.ForTestReplaceKeysInValues(kv.CommitmentDomain, false)
+	agg.ForTestReferencesInCommitmentBranches(kv.CommitmentDomain, false)
 
 	ctx := t.Context()
 	rwTx, err := db.BeginTemporalRw(ctx)
@@ -95,7 +95,7 @@ func TestTrieReader_IntegrationWithRealData(t *testing.T) {
 			rh, err := domains.ComputeCommitment(ctx, rwTx, true, blockNum, txNum, "", nil)
 			require.NoError(t, err)
 			require.NotEmpty(t, rh)
-			require.NotEqual(t, empty.RootHash.Bytes(), rh)
+			require.NotEqual(t, empty.RootHash[:], rh)
 			require.NoError(t, domains.Flush(ctx, rwTx))
 			require.NoError(t, rawdbv3.TxNums.Append(rwTx, blockNum, txNum))
 			blockNum++

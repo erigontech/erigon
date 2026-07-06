@@ -15,15 +15,20 @@ import (
 	"github.com/erigontech/erigon/cmd/rpcdaemon/graphql/graph/model"
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/hexutil"
-	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/rpc"
-	ethapi "github.com/erigontech/erigon/rpc/ethapi"
 	"github.com/erigontech/erigon/rpc/filters"
 )
 
 // Storage is the resolver for the storage field.
 func (r *accountResolver) Storage(ctx context.Context, obj *model.Account, slot string) (string, error) {
-	panic("not implemented: Storage - storage")
+	if !common.IsHexAddress(obj.Address) {
+		return "", fmt.Errorf("invalid account address: %s", obj.Address)
+	}
+	if len(slot) != 66 || slot[:2] != "0x" {
+		return "", fmt.Errorf("slot must be a 0x-prefixed 32-byte hex string, got %q", slot)
+	}
+	addr := common.HexToAddress(obj.Address)
+	return r.GraphQLAPI.GetAccountStorage(ctx, addr, slot, rpc.BlockNumber(obj.BlockNum))
 }
 
 // TransactionAt is the resolver for the transactionAt field.
@@ -79,7 +84,11 @@ func (r *blockResolver) Call(ctx context.Context, obj *model.Block, data model.C
 
 // EstimateGas is the resolver for the estimateGas field.
 func (r *blockResolver) EstimateGas(ctx context.Context, obj *model.Block, data model.CallData) (uint64, error) {
-	panic("not implemented: EstimateGas - estimateGas")
+	args, err := callDataToArgs(data)
+	if err != nil {
+		return 0, err
+	}
+	return r.GraphQLAPI.EstimateGas(ctx, rpc.BlockNumber(obj.Number), args)
 }
 
 // SendRawTransaction is the resolver for the sendRawTransaction field.
@@ -93,6 +102,52 @@ func (r *mutationResolver) SendRawTransaction(ctx context.Context, data string) 
 		return "", err
 	}
 	return hash.Hex(), nil
+}
+
+// Account is the resolver for the account field.
+func (r *pendingResolver) Account(ctx context.Context, obj *model.Pending, address string) (*model.Account, error) {
+	if !common.IsHexAddress(address) {
+		return nil, fmt.Errorf("invalid address %q", address)
+	}
+	addr := common.HexToAddress(address)
+	balance, nonce, code, err := r.GraphQLAPI.GetAccountInfo(ctx, addr, rpc.PendingBlockNumber)
+	if err != nil {
+		return nil, err
+	}
+	pendingBlockNum := rpc.PendingBlockNumber
+	return &model.Account{
+		Address:          strings.ToLower(address),
+		Balance:          balance,
+		TransactionCount: nonce,
+		Code:             code,
+		BlockNum:         uint64(pendingBlockNum),
+	}, nil
+}
+
+// Call is the resolver for the call field.
+func (r *pendingResolver) Call(ctx context.Context, obj *model.Pending, data model.CallData) (*model.CallResult, error) {
+	args, err := callDataToArgs(data)
+	if err != nil {
+		return nil, err
+	}
+	res, err := r.GraphQLAPI.Call(ctx, rpc.PendingBlockNumber, args)
+	if err != nil {
+		return nil, err
+	}
+	return &model.CallResult{
+		Data:    hexutil.Encode(res.Data),
+		GasUsed: res.GasUsed,
+		Status:  res.Status,
+	}, nil
+}
+
+// EstimateGas is the resolver for the estimateGas field.
+func (r *pendingResolver) EstimateGas(ctx context.Context, obj *model.Pending, data model.CallData) (uint64, error) {
+	args, err := callDataToArgs(data)
+	if err != nil {
+		return 0, err
+	}
+	return r.GraphQLAPI.EstimateGas(ctx, rpc.PendingBlockNumber, args)
 }
 
 // Block is the resolver for the block field.
@@ -183,7 +238,22 @@ func (r *queryResolver) Blocks(ctx context.Context, from uint64, to *uint64) ([]
 
 // Pending is the resolver for the pending field.
 func (r *queryResolver) Pending(ctx context.Context) (*model.Pending, error) {
-	panic("not implemented: Pending - pending")
+	txns, err := r.GraphQLAPI.GetPendingTransactions(ctx)
+	if err != nil {
+		return nil, err
+	}
+	transactions := make([]*model.Transaction, 0, len(txns))
+	for _, txn := range txns {
+		transactions = append(transactions, &model.Transaction{
+			Nonce: hexutil.EncodeUint64(txn.GetNonce()),
+			Gas:   txn.GetGasLimit(),
+			Hash:  txn.Hash().Hex(),
+		})
+	}
+	return &model.Pending{
+		TransactionCount: uint64(len(txns)),
+		Transactions:     transactions,
+	}, nil
 }
 
 // Transaction is the resolver for the transaction field.
@@ -245,7 +315,7 @@ func (r *queryResolver) Logs(ctx context.Context, filter model.FilterCriteria) (
 
 // GasPrice is the resolver for the gasPrice field.
 func (r *queryResolver) GasPrice(ctx context.Context) (string, error) {
-	panic("not implemented: GasPrice - gasPrice")
+	return r.GraphQLAPI.GasPrice(ctx)
 }
 
 // MaxPriorityFeePerGas is the resolver for the maxPriorityFeePerGas field.
@@ -290,6 +360,9 @@ func (r *Resolver) Block() BlockResolver { return &blockResolver{r} }
 // Mutation returns MutationResolver implementation.
 func (r *Resolver) Mutation() MutationResolver { return &mutationResolver{r} }
 
+// Pending returns PendingResolver implementation.
+func (r *Resolver) Pending() PendingResolver { return &pendingResolver{r} }
+
 // Query returns QueryResolver implementation.
 func (r *Resolver) Query() QueryResolver { return &queryResolver{r} }
 
@@ -299,118 +372,7 @@ func (r *Resolver) Transaction() TransactionResolver { return &transactionResolv
 type accountResolver struct{ *Resolver }
 type blockResolver struct{ *Resolver }
 type mutationResolver struct{ *Resolver }
+type pendingResolver struct{ *Resolver }
 type queryResolver struct{ *Resolver }
 type transactionResolver struct{ *Resolver }
 
-func addressesFromModel(addrs []string) ([]common.Address, error) {
-	result := make([]common.Address, 0, len(addrs))
-	for _, a := range addrs {
-		if !common.IsHexAddress(a) {
-			return nil, fmt.Errorf("invalid address: %s", a)
-		}
-		result = append(result, common.HexToAddress(a))
-	}
-	return result, nil
-}
-
-func topicsFromModel(topicSets [][]string) ([][]common.Hash, error) {
-	result := make([][]common.Hash, len(topicSets))
-	for i, set := range topicSets {
-		result[i] = make([]common.Hash, 0, len(set))
-		for _, t := range set {
-			b, err := hexutil.Decode(t)
-			if err != nil {
-				return nil, fmt.Errorf("invalid topic %s: %w", t, err)
-			}
-			result[i] = append(result[i], common.BytesToHash(b))
-		}
-	}
-	return result, nil
-}
-
-func rpcLogsToModel(logs types.RPCLogs) []*model.Log {
-	result := make([]*model.Log, 0, len(logs))
-	for _, l := range logs {
-		ml := &model.Log{
-			Index: uint64(l.Index),
-			Data:  hexutil.Encode(l.Data),
-		}
-		ml.Account = &model.Account{
-			Address:  strings.ToLower(l.Address.Hex()),
-			BlockNum: uint64(l.BlockNumber),
-		}
-		ml.Topics = make([]string, len(l.Topics))
-		for i, t := range l.Topics {
-			ml.Topics[i] = t.Hex()
-		}
-		ml.Transaction = &model.Transaction{
-			Hash: l.TxHash.Hex(),
-			Block: &model.Block{
-				Number: uint64(l.BlockNumber),
-				Hash:   l.BlockHash.Hex(),
-			},
-		}
-		result = append(result, ml)
-	}
-	return result
-}
-
-func decodeOptionalAddress(s *string, fieldName string) (*common.Address, error) {
-	if s == nil {
-		return nil, nil
-	}
-	if !common.IsHexAddress(*s) {
-		return nil, fmt.Errorf("invalid %s address: %s", fieldName, *s)
-	}
-	addr := common.HexToAddress(*s)
-	return &addr, nil
-}
-
-func decodeOptionalBig(s *string, fieldName string) (*hexutil.Big, error) {
-	if s == nil {
-		return nil, nil
-	}
-	b, err := hexutil.DecodeBig(*s)
-	if err != nil {
-		return nil, fmt.Errorf("invalid %s: %w", fieldName, err)
-	}
-	return (*hexutil.Big)(b), nil
-}
-
-func callDataToArgs(data model.CallData) (ethapi.CallArgs, error) {
-	var (
-		args ethapi.CallArgs
-		err  error
-	)
-	if args.From, err = decodeOptionalAddress(data.From, "from"); err != nil {
-		return args, err
-	}
-	if args.To, err = decodeOptionalAddress(data.To, "to"); err != nil {
-		return args, err
-	}
-	if data.Gas != nil {
-		gas := hexutil.Uint64(*data.Gas)
-		args.Gas = &gas
-	}
-	if args.GasPrice, err = decodeOptionalBig(data.GasPrice, "gasPrice"); err != nil {
-		return args, err
-	}
-	if args.MaxFeePerGas, err = decodeOptionalBig(data.MaxFeePerGas, "maxFeePerGas"); err != nil {
-		return args, err
-	}
-	if args.MaxPriorityFeePerGas, err = decodeOptionalBig(data.MaxPriorityFeePerGas, "maxPriorityFeePerGas"); err != nil {
-		return args, err
-	}
-	if args.Value, err = decodeOptionalBig(data.Value, "value"); err != nil {
-		return args, err
-	}
-	if data.Data != nil {
-		b, err := hexutil.Decode(*data.Data)
-		if err != nil {
-			return args, fmt.Errorf("invalid data: %w", err)
-		}
-		input := hexutil.Bytes(b)
-		args.Input = &input
-	}
-	return args, nil
-}

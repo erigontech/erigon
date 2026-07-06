@@ -25,16 +25,16 @@ import (
 	"fmt"
 	"math/big"
 
-	ethereum "github.com/erigontech/erigon"
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/common/length"
+	"github.com/erigontech/erigon/execution/abi/bind"
 	"github.com/erigontech/erigon/rpc"
 )
 
 // FilterCriteria represents a request to create a new filter.
-// Same as ethereum.FilterQuery but with UnmarshalJSON() method.
-type FilterCriteria ethereum.FilterQuery
+// Same as bind.FilterQuery but with UnmarshalJSON() method.
+type FilterCriteria bind.FilterQuery
 
 type LogFilterOptions struct {
 	LogCount          uint64 `json:"logCount,omitempty"`
@@ -292,7 +292,7 @@ func (api *PublicFilterAPI) Logs(ctx context.Context, crit FilterCriteria) (*rpc
 		matchedLogs = make(chan []*types.Log)
 	)
 
-	logsSub, err := api.events.SubscribeLogs(ethereum.FilterQuery(crit), matchedLogs)
+	logsSub, err := api.events.SubscribeLogs(bind.FilterQuery(crit), matchedLogs)
 	if err != nil {
 		return nil, err
 	}
@@ -335,7 +335,7 @@ func (api *PublicFilterAPI) Logs(ctx context.Context, crit FilterCriteria) (*rpc
 // https://eth.wiki/json-rpc/API#eth_newfilter
 func (api *PublicFilterAPI) NewFilter(crit FilterCriteria) (rpc.ID, error) {
 	logs := make(chan []*types.Log)
-	logsSub, err := api.events.SubscribeLogs(ethereum.FilterQuery(crit), logs)
+	logsSub, err := api.events.SubscribeLogs(bind.FilterQuery(crit), logs)
 	if err != nil {
 		return rpc.ID(""), err
 	}

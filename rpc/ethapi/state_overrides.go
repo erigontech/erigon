@@ -17,9 +17,12 @@
 package ethapi
 
 import (
+	"bytes"
 	"errors"
 	"fmt"
 	"math/big"
+	"slices"
+	"sort"
 
 	"github.com/holiman/uint256"
 
@@ -32,8 +35,9 @@ import (
 
 type StateOverrides map[accounts.Address]Account
 
-func (so *StateOverrides) override(ibs *state.IntraBlockState) error {
-	for addr, account := range *so {
+func (so *StateOverrides) override(ibs *state.IntraBlockState, addrs []accounts.Address) error {
+	for _, addr := range addrs {
+		account := (*so)[addr]
 		// Override account nonce.
 		if account.Nonce != nil {
 			if err := ibs.SetNonce(addr, uint64(*account.Nonce), tracing.NonceChangeUnspecified); err != nil {
@@ -63,7 +67,7 @@ func (so *StateOverrides) override(ibs *state.IntraBlockState) error {
 		if account.State != nil {
 			intState := map[accounts.StorageKey]uint256.Int{}
 			for key, value := range *account.State {
-				intValue := *new(uint256.Int).SetBytes32(value.Bytes())
+				intValue := *new(uint256.Int).SetBytes32(value[:])
 				intState[accounts.InternKey(key)] = intValue
 			}
 			if err := ibs.SetStorage(addr, intState); err != nil {
@@ -73,7 +77,7 @@ func (so *StateOverrides) override(ibs *state.IntraBlockState) error {
 		// Apply state diff into specified accounts.
 		if account.StateDiff != nil {
 			for key, value := range *account.StateDiff {
-				intValue := *new(uint256.Int).SetBytes32(value.Bytes())
+				intValue := *new(uint256.Int).SetBytes32(value[:])
 				if err := ibs.SetState(addr, accounts.InternKey(key), intValue); err != nil {
 					return err
 				}
@@ -85,13 +89,28 @@ func (so *StateOverrides) override(ibs *state.IntraBlockState) error {
 }
 
 func (so *StateOverrides) Override(ibs *state.IntraBlockState, precompiles vm.PrecompiledContracts, rules *chain.Rules) error {
-	err := so.override(ibs)
+	if precompiles == nil {
+		precompiles = make(vm.PrecompiledContracts)
+	}
+	// Sort addresses for deterministic iteration order across both loops (map iteration is random in Go).
+	addrs := make([]accounts.Address, 0, len(*so))
+	for addr := range *so {
+		addrs = append(addrs, addr)
+	}
+	sort.Slice(addrs, func(i, j int) bool {
+		ai, aj := addrs[i].Value(), addrs[j].Value()
+		return bytes.Compare(ai[:], aj[:]) < 0
+	})
+
+	err := so.override(ibs, addrs)
 	if err != nil {
 		return err
 	}
+
 	// Tracks destinations of precompiles that were moved.
 	dirtyAddresses := make(map[accounts.Address]struct{})
-	for addr, account := range *so {
+	for _, addr := range addrs {
+		account := (*so)[addr]
 		// If a precompile was moved to this address already, it can't be overridden.
 		if _, ok := dirtyAddresses[addr]; ok {
 			return fmt.Errorf("account %s has already been overridden by a precompile", addr)
@@ -126,8 +145,8 @@ func (so *StateOverrides) Override(ibs *state.IntraBlockState, precompiles vm.Pr
 	// detection in multi-block eth_simulateV1 when a prior simulated block
 	// deployed a contract at the overridden address.
 	// State overrides are simulation-only mutations and must not trigger
-	// consensus rules like EIP-161.
+	// EIP-161 empty-account clearing.
 	noEIP161Rules := *rules
-	noEIP161Rules.IsSpuriousDragon = false
+	noEIP161Rules.DisabledEIPs = append(slices.Clone(rules.DisabledEIPs), 161)
 	return ibs.FinalizeTx(&noEIP161Rules, state.NewNoopWriter())
 }

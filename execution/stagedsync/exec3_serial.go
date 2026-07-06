@@ -82,8 +82,6 @@ func (se *serialExecutor) exec(ctx context.Context, execStage *StageState, u Unw
 			"initialCycle", initialCycle, "isForkValidation", se.isForkValidation)
 	}
 
-	stateCache := se.doms.GetStateCache()
-
 	for ; blockNum <= maxBlockNum; blockNum++ {
 		shouldGenerateChangesets := shouldGenerateChangeSets(se.cfg, blockNum, maxBlockNum)
 		changeSet := &changeset.StateChangeSet{}
@@ -113,10 +111,6 @@ func (se *serialExecutor) exec(ctx context.Context, execStage *StageState, u Unw
 			return nil, rwTx, fmt.Errorf("nil block %d", blockNum)
 		}
 		go warmTxsHashes(b)
-
-		if stateCache != nil {
-			stateCache.ValidateAndPrepare(b.ParentHash(), b.Hash())
-		}
 
 		txs := b.Transactions()
 		header := b.HeaderNoCopy()
@@ -186,13 +180,16 @@ func (se *serialExecutor) exec(ctx context.Context, execStage *StageState, u Unw
 		}
 
 		if !dbg.BatchCommitments || shouldGenerateChangesets || se.cfg.syncCfg.KeepExecutionProofs {
-			if dbg.TraceBlock(blockNum) {
+			traceBlk := dbg.TraceBlock(blockNum)
+			if traceBlk {
 				fmt.Println(blockNum, "Commitment")
-				se.doms.SetTrace(true, false)
+				se.doms.GetCommitmentCtx().SetTraceWriter(os.Stderr)
 			}
 			// Warmup is enabled via EnableTrieWarmup at executor init
 			rh, err := se.doms.ComputeCommitment(ctx, se.applyTx, true, blockNum, inputTxNum-1, se.logPrefix, nil)
-			se.doms.SetTrace(false, false)
+			if traceBlk {
+				se.doms.GetCommitmentCtx().SetTraceWriter(nil)
+			}
 
 			if err != nil {
 				return nil, rwTx, err
@@ -203,8 +200,8 @@ func (se *serialExecutor) exec(ctx context.Context, execStage *StageState, u Unw
 			}
 			se.doms.SetChangesetAccumulator(nil)
 
-			if !bytes.Equal(rh, header.Root.Bytes()) {
-				se.logger.Error(fmt.Sprintf("[%s] Wrong trie root of block %d: %x, expected (from header): %x. Block hash: %x", se.logPrefix, header.Number.Uint64(), rh, header.Root.Bytes(), header.Hash()))
+			if !bytes.Equal(rh, header.Root[:]) {
+				se.logger.Error(fmt.Sprintf("[%s] Wrong trie root of block %d: %x, expected (from header): %x. Block hash: %x", se.logPrefix, header.Number.Uint64(), rh, header.Root[:], header.Hash()))
 				return b.HeaderNoCopy(), rwTx, fmt.Errorf("%w, block=%d", ErrWrongTrieRoot, blockNum)
 			}
 		}
@@ -257,8 +254,8 @@ func (se *serialExecutor) exec(ctx context.Context, execStage *StageState, u Unw
 				"txNum", inputTxNum,
 				"commitment", times.ComputeCommitment,
 			)
-			stateCache.PrintStatsAndReset()
-			if isBatchFull {
+			se.doms.PrintCacheStats()
+			if isBatchFull && blockNum != maxBlockNum {
 				return b.HeaderNoCopy(), rwTx, &ErrLoopExhausted{From: startBlockNum, To: blockNum, Reason: "block batch is full"}
 			}
 		}
@@ -279,7 +276,7 @@ func (se *serialExecutor) exec(ctx context.Context, execStage *StageState, u Unw
 			}
 		}
 	}
-	stateCache.PrintStatsAndReset()
+	se.doms.PrintCacheStats()
 
 	return b.HeaderNoCopy(), rwTx, nil
 }
@@ -434,7 +431,7 @@ func (se *serialExecutor) executeBlock(ctx context.Context, tasks []exec.Task, i
 					//Disable check for genesis. Maybe need somehow improve it in future - to satisfy TestExecutionSpec
 					// Block gas = max(regular, state). Pre-Amsterdam: blockStateGasUsed is 0.
 					blockGasUsed := max(se.blockGasUsed, se.blockStateGasUsed)
-					if err := protocol.BlockPostValidation(blockGasUsed, se.blobGasUsed, checkReceipts, checkBloom, blockReceipts, txTask.Header, txTask.Txs, se.cfg.chainConfig, se.logger); err != nil {
+					if err := validateBlockPostExecution(se.cfg.engine, se.cfg.chainConfig, txTask.Header, blockGasUsed, se.blobGasUsed, checkReceipts, checkBloom, blockReceipts, txTask.Txs, se.logger); err != nil {
 						return fmt.Errorf("%w, txnIdx=%d, %w", rules.ErrInvalidBlock, txTask.TxIndex, err) //same as in stage_exec.go
 					}
 				}
@@ -461,7 +458,7 @@ func (se *serialExecutor) executeBlock(ctx context.Context, tasks []exec.Task, i
 					if err != nil {
 						return err
 					}
-					receipt, err = result.CreateReceipt(int(txTask.TxNum), cumGasUsed+result.ExecutionResult.ReceiptGasUsed, logIndexAfterTx)
+					receipt, err = result.CreateReceipt(txTask.TxIndex, cumGasUsed+result.ExecutionResult.ReceiptGasUsed, logIndexAfterTx)
 					if err != nil {
 						return err
 					}
@@ -494,9 +491,6 @@ func (se *serialExecutor) executeBlock(ctx context.Context, tasks []exec.Task, i
 			}
 			se.logger.Warn(fmt.Sprintf("[%s] Execution failed", se.logPrefix),
 				"block", txTask.BlockNumber(), "txNum", txTask.TxNum, "header-hash", txTask.Header.Hash().String(), "err", err, "isForkValidation", se.isForkValidation)
-			if se.cfg.hd != nil && se.cfg.hd.POSSync() && errors.Is(err, rules.ErrInvalidBlock) {
-				se.cfg.hd.ReportBadHeaderPoS(txTask.Header.Hash(), txTask.Header.ParentHash)
-			}
 			if se.cfg.badBlockHalt {
 				return false, err
 			}

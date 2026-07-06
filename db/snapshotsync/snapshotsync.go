@@ -103,17 +103,39 @@ func canSnapshotBePruned(name string) bool {
 	return (isStateHistory(name) || strings.Contains(name, "transactions")) && !strings.Contains(name, "rcache")
 }
 
+// buildBlackListForPruning returns the set of preverified snapshot names that
+// should be skipped at download time according to pruneMode:
+//   - state history files (idx/history/accessor): blacklisted when stepPrune
+//     reaches their To and pruneMode.History is enabled.
+//   - commitment-domain state history files: additionally blacklisted when
+//     minCommitmentHistoryStep >= their To, independent of pruneMode.History.
+//   - transaction segments: blacklisted by distance when pruneMode.Blocks is a
+//     finite Distance (res.To <= blockPrune), or by chain history-expiry when
+//     pruneMode.Blocks is KeepPostMergeBlocksPruneMode and cc has MergeHeight set
+//     (cc.IsPreMerge(res.From)). KeepAllBlocksPruneMode leaves tx segments alone.
+//   - bodies, headers, rcache, domain files: never blacklisted here.
 func buildBlackListForPruning(
-	pruneMode bool,
-	stepPrune, minBlockToDownload, blockPrune uint64,
+	pruneMode prune.Mode,
+	cc *chain.Config,
+	historyStepPrune, minCommitmentHistoryStep kv.Step, minBlockToDownload, blockPrune uint64,
 	preverified snapcfg.Preverified,
 ) (map[string]struct{}, error) {
 
 	blackList := make(map[string]struct{})
-	if !pruneMode {
+
+	historyEnabled := pruneMode.History.Enabled()
+	blocksEnabled := pruneMode.Blocks.Enabled()
+	commitmentHistoryEnabled := minCommitmentHistoryStep > 0
+	applyChainHistoryExpiry := pruneMode.Blocks == prune.KeepPostMergeBlocksPruneMode && cc != nil && cc.MergeHeight != nil
+
+	if !historyEnabled && !blocksEnabled && !commitmentHistoryEnabled && !applyChainHistoryExpiry {
 		return blackList, nil
 	}
-	blockPrune = adjustBlockPrune(blockPrune, minBlockToDownload)
+
+	if blocksEnabled {
+		blockPrune = adjustBlockPrune(blockPrune, minBlockToDownload)
+	}
+
 	for _, p := range preverified.Items {
 		name := p.Name
 		// Don't prune unprunable files
@@ -127,21 +149,37 @@ func buildBlackListForPruning(
 			if !ok {
 				return blackList, errors.New("invalid state snapshot name")
 			}
-			if stepPrune < res.To {
+			// Commitment-history filter runs independently of History pruning so
+			// commitment-only configs still skip old commitment segments.
+			if commitmentHistoryEnabled && isStateHistory(name) && strings.Contains(name, kv.CommitmentDomain.String()) && minCommitmentHistoryStep >= kv.Step(res.To) {
+				blackList[name] = struct{}{}
+				continue
+			}
+			if !historyEnabled {
+				continue
+			}
+			if historyStepPrune < kv.Step(res.To) {
 				continue
 			}
 			blackList[name] = struct{}{}
-		} else {
-			// e.g 'v1.0-000000-000100-beaconblocks.seg'
-			// parse "from" (000000) and "to" (000100) from the name. 100 is 100'000 blocks
-			res, _, ok := snaptype.ParseFileName("", name)
-			if !ok {
-				continue
+			continue
+		}
+		// Block segment (transactions only — canSnapshotBePruned filters bodies/headers/rcache).
+		// e.g 'v1.0-000000-000100-transactions.seg'
+		// parse "from" (000000) and "to" (000100) from the name. 100 is 100'000 blocks
+		res, _, ok := snaptype.ParseFileName("", name)
+		if !ok {
+			continue
+		}
+		switch {
+		case blocksEnabled:
+			if blockPrune >= res.To {
+				blackList[name] = struct{}{}
 			}
-			if blockPrune < res.To {
-				continue
+		case applyChainHistoryExpiry:
+			if cc.IsPreMerge(res.From) {
+				blackList[name] = struct{}{}
 			}
-			blackList[name] = struct{}{}
 		}
 	}
 
@@ -158,14 +196,19 @@ type blockReader interface {
 	TxnumReader() rawdbv3.TxNumsReader
 }
 
-// getMinimumBlocksToDownload - get the minimum number of blocks to download
+func stepAtTxNum(txNum, stepSize uint64) kv.Step {
+	if txNum < stepSize-1 {
+		return 0
+	}
+	return kv.Step((txNum - (stepSize - 1)) / stepSize)
+}
+
 func getMinimumBlocksToDownload(
 	ctx context.Context,
 	blockReader blockReader,
-	maxStateStep uint64,
-	historyPruneTo uint64,
-	stepSize uint64,
-) (minBlockToDownload uint64, minStateStepToDownload uint64, err error) {
+	maxStateStep, stepSize uint64,
+	stateHistoryPruneTo, commitmentHistoryPruneTo uint64,
+) (minBlockToDownload uint64, minHistoryStep, minCommitmentHistoryStep kv.Step, err error) {
 	started := time.Now()
 	var iterations int64
 	defer func() {
@@ -176,7 +219,8 @@ func getMinimumBlocksToDownload(
 	}()
 	frozenBlocks := blockReader.Snapshots().SegmentsMax()
 	minToDownload := uint64(math.MaxUint64)
-	minStateStepToDownload = uint64(math.MaxUint32)
+	minHistoryStep = kv.Step(math.MaxUint32)
+	minCommitmentHistoryStep = kv.Step(math.MaxUint32)
 	stateTxNum := maxStateStep * stepSize
 	if err := blockReader.IterateFrozenBodies(func(blockNum, baseTxNum, txAmount uint64) error {
 		if iterations%1e6 == 0 {
@@ -185,11 +229,11 @@ func getMinimumBlocksToDownload(
 			}
 		}
 		iterations++
-		if blockNum == historyPruneTo {
-			minStateStepToDownload = (baseTxNum - (stepSize - 1)) / stepSize
-			if baseTxNum < (stepSize - 1) {
-				minStateStepToDownload = 0
-			}
+		if blockNum == stateHistoryPruneTo {
+			minHistoryStep = stepAtTxNum(baseTxNum, stepSize)
+		}
+		if blockNum == commitmentHistoryPruneTo {
+			minCommitmentHistoryStep = stepAtTxNum(baseTxNum, stepSize)
 		}
 		if stateTxNum <= baseTxNum { // only consider the block if it
 			return nil
@@ -203,11 +247,10 @@ func getMinimumBlocksToDownload(
 		}
 		return nil
 	}); err != nil {
-		return 0, 0, err
+		return 0, 0, 0, err
 	}
 
-	// return the minimum number of blocks to download and the minimum step.
-	return frozenBlocks - minToDownload, minStateStepToDownload, nil
+	return frozenBlocks - minToDownload, minHistoryStep, minCommitmentHistoryStep, nil
 }
 
 func getMaxStepRangeInSnapshots(preverified snapcfg.Preverified) (uint64, error) {
@@ -240,32 +283,64 @@ func computeBlocksToPrune(blockReader blockReader, p prune.Mode) (blocksToPrune 
 	return p.Blocks.PruneTo(frozenBlocks), p.History.PruneTo(frozenBlocks)
 }
 
-// isTransactionsSegmentExpired - check if the transactions segment is expired according to whichever history expiry policy we use.
-func isTransactionsSegmentExpired(cc *chain.Config, pruneMode prune.Mode, p snapcfg.PreverifiedItem) bool {
-	// History expiry is the default.
-	if pruneMode.Blocks != prune.DefaultBlocksPruneMode {
-		return false
+// downloadFilteringApplies reports whether buildBlackListForPruning would
+// produce any blacklist entries for pruneMode + chain. Mirrors the function's
+// own early-return predicate so the (slow) getMinimumBlocksToDownload call
+// is skipped for modes where no filtering happens. Notably, an
+// operator-supplied hybrid like
+//
+//	--prune.mode=archive --prune.distance.blocks=18446744073709551615
+//
+// produces {Blocks: KeepPostMergeBlocksPruneMode, History: KeepPostMergeBlocksPruneMode}
+// — neither field's Enabled() is true, but the operator opted into
+// chain-history-expiry for blocks. The KeepPostMergeBlocksPruneMode + MergeHeight
+// branch covers that.
+func downloadFilteringApplies(pruneMode prune.Mode, cc *chain.Config) bool {
+	if pruneMode.History.Enabled() || pruneMode.Blocks.Enabled() || pruneMode.CommitmentHistoryAmount().Enabled() {
+		return true
 	}
-
-	// We use the pre-merge data policy.
-	s, _, ok := snaptype.ParseFileName("", p.Name)
-	if !ok {
-		return false
-	}
-	return cc.IsPreMerge(s.From)
+	return pruneMode.Blocks == prune.KeepPostMergeBlocksPruneMode && cc != nil && cc.MergeHeight != nil
 }
 
-// isReceiptsSegmentExpired - check if the receipts segment is expired according to whichever history expiry policy we use.
+// blocksRetentionCutoff returns the block height below which block-data
+// segments (transactions and receipt-related state) are considered expired
+// under pruneMode:
+//   - finite Distance (full/minimal): head - distance, the EIP-8252-style
+//     window.
+//   - KeepPostMergeBlocksPruneMode with a chain MergeHeight: the merge height
+//     (chain history-expiry policy — pre-merge data is expired).
+//   - Otherwise (KeepAllBlocksPruneMode, or KeepPostMergeBlocksPruneMode without a
+//     merge height): 0, meaning "nothing is expired".
+//
+// Both the transaction-segment blacklist and the receipts-segment filter use
+// this to pick their cutoff in a consistent way.
+func blocksRetentionCutoff(pruneMode prune.Mode, cc *chain.Config, head uint64) uint64 {
+	switch pruneMode.Blocks {
+	case prune.KeepAllBlocksPruneMode:
+		return 0
+	case prune.KeepPostMergeBlocksPruneMode:
+		if cc != nil && cc.MergeHeight != nil {
+			return *cc.MergeHeight
+		}
+		return 0
+	default:
+		return pruneMode.Blocks.PruneTo(head)
+	}
+}
+
+// isReceiptsSegmentPruned reports whether a receipt-related preverified
+// segment (rcache, logaddrs, logtopics) should be skipped at download time.
+// It mirrors buildBlackListForPruning's per-mode handling for tx segments,
+// but operates on block height (converted to txNum/step) because receipts
+// are step-aligned in storage.
 func isReceiptsSegmentPruned(ctx context.Context, tx kv.RwTx, txNumsReader rawdbv3.TxNumsReader, cc *chain.Config, pruneMode prune.Mode, head uint64, p snapcfg.PreverifiedItem, stepSize uint64) bool {
 	if strings.Contains(p.Name, "domain") {
 		return false // domain snapshots are never pruned
 	}
-	pruneHeight := pruneMode.Blocks.PruneTo(head) // if a receipt is below this height, it is pruned
-	if pruneMode.Blocks == prune.DefaultBlocksPruneMode && cc.MergeHeight != nil {
-		pruneHeight = *cc.MergeHeight
+	pruneHeight := blocksRetentionCutoff(pruneMode, cc, head)
+	if pruneHeight == 0 {
+		return false
 	}
-
-	// We use the pre-merge data policy.
 	s, _, ok := snaptype.ParseFileName("", p.Name)
 	if !ok {
 		return false
@@ -317,13 +392,13 @@ func SyncSnapshots(
 		}
 	} else {
 		toBlock := syncCfg.SnapshotDownloadToBlock // exclusive [0, toBlock)
-		toStep := uint64(math.MaxUint64)           // exclusive [0, toStep)
+		toStep := kv.Step(math.MaxUint64)          // exclusive [0, toStep)
 		if !headerchain && toBlock > 0 {
 			toTxNum, err := blockReader.TxnumReader().Min(ctx, tx, syncCfg.SnapshotDownloadToBlock)
 			if err != nil {
 				return err
 			}
-			toStep = toTxNum / stepSize
+			toStep = kv.Step(toTxNum / stepSize)
 			log.Debug(fmt.Sprintf("[%s] filtering", logPrefix), "toBlock", toBlock, "toStep", toStep, "toTxNum", toTxNum)
 			// we downloaded extra seg files during the header chain download (the ones containing the toBlock)
 			// so that we can correctly calculate toTxNum above (now we should delete these)
@@ -347,7 +422,7 @@ func SyncSnapshots(
 			}
 			// re-open headers and bodies with alignMin=false after deletes,
 			// otherwise no headers/bodies will be visible since transactions are not downloaded yet
-			err = blockReader.Snapshots().OpenSegments([]snaptype.Type{snaptype2.Headers, snaptype2.Bodies}, true, false)
+			err = blockReader.Snapshots().OpenSegments([]snaptype.Type{snaptype2.Headers, snaptype2.Bodies}, false)
 			if err != nil {
 				return fmt.Errorf("error opening segments after to block filter deletion: %w", err)
 			}
@@ -371,18 +446,29 @@ func SyncSnapshots(
 
 		blockPrune, historyPrune := computeBlocksToPrune(blockReader, prune)
 		blackListForPruning := make(map[string]struct{})
-		wantToPrune := prune.Blocks.Enabled() || prune.History.Enabled()
+		wantToPrune := downloadFilteringApplies(prune, cc)
 		if !headerchain && wantToPrune {
 			maxStateStep, err := getMaxStepRangeInSnapshots(preverifiedBlockSnapshots)
 			if err != nil {
 				return err
 			}
-			minBlockToDownload, minStepToDownload, err := getMinimumBlocksToDownload(ctx, blockReader, maxStateStep, historyPrune, stepSize)
+			commitmentHistoryPrune := prune.CommitmentHistoryAmount().PruneTo(frozenBlocks)
+			minBlockToDownload, minHistoryStep, minCommitmentHistoryStep, err := getMinimumBlocksToDownload(
+				ctx, blockReader, maxStateStep, stepSize, historyPrune, commitmentHistoryPrune)
 			if err != nil {
 				return err
 			}
+			// Commitment-history filtering is opt-in; a zero step disables it in
+			// buildBlackListForPruning, so clear it when the window is unbounded.
+			if !prune.CommitmentHistoryAmount().Enabled() {
+				minCommitmentHistoryStep = 0
+			} else if minCommitmentHistoryStep > 0 {
+				log.Info(fmt.Sprintf("[%s] Filtering old commitment-history segments", logPrefix),
+					"pruneToBlock", commitmentHistoryPrune,
+					"minStep", minCommitmentHistoryStep)
+			}
 
-			blackListForPruning, err = buildBlackListForPruning(wantToPrune, minStepToDownload, minBlockToDownload, blockPrune, preverifiedBlockSnapshots)
+			blackListForPruning, err = buildBlackListForPruning(prune, cc, minHistoryStep, minCommitmentHistoryStep, minBlockToDownload, blockPrune, preverifiedBlockSnapshots)
 			if err != nil {
 				return err
 			}
@@ -420,10 +506,6 @@ func SyncSnapshots(
 			}
 
 			if !syncCfg.PersistReceiptsCacheV2 && isStateSnapshot(p.Name) && strings.Contains(p.Name, kv.RCacheDomain.String()) {
-				continue
-			}
-
-			if strings.Contains(p.Name, "transactions") && isTransactionsSegmentExpired(cc, prune, p) {
 				continue
 			}
 
@@ -476,7 +558,7 @@ func SyncSnapshots(
 	return nil
 }
 
-func filterToBlock(name string, toBlock uint64, toStep uint64, headerchain bool) bool {
+func filterToBlock(name string, toBlock uint64, toStep kv.Step, headerchain bool) bool {
 	if toBlock == 0 {
 		return false // toBlock filtering is not enabled
 	}
@@ -491,7 +573,7 @@ func filterToBlock(name string, toBlock uint64, toStep uint64, headerchain bool)
 		return false // not applicable, caplin files are slot-based
 	}
 	if stateFile {
-		return fileInfo.To > toStep
+		return kv.Step(fileInfo.To) > toStep
 	}
 	if headerchain {
 		// if we are downloading the header chain, we want to download the seg file which contains our toBlock

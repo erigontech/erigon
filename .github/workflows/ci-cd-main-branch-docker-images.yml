@@ -39,7 +39,7 @@ jobs:
           rm -drf $(pwd)/*
 
       - name: Fast checkout git repository, git ref ${{ inputs.checkout_ref == '' && github.ref_name || inputs.checkout_ref }}
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
         with:
           repository: ${{ env.APP_REPO }}
           fetch-depth: 1
@@ -66,7 +66,7 @@ jobs:
               export tag_name='docker_pectra';
               export keep_images=5;
               export latest_suffix='';
-              export binaries="erigon caplin diag downloader evm hack integration rpcdaemon rpctest sentinel sentry state txpool"
+              export binaries="erigon caplin downloader evm hack integration rpcdaemon rpctest sentinel sentry state txpool"
               ;;
             * )
               # use last string after last slash '/' by default if branch contains slash:
@@ -97,7 +97,7 @@ jobs:
           password: ${{ secrets.DOCKERHUB_PUSH_TOKEN }}
 
       - name: Set up QEMU
-        uses: docker/setup-qemu-action@v4
+        uses: docker/setup-qemu-action@v4.2.0
 
       - name: Set up Docker Buildx
         id: docker-buildx

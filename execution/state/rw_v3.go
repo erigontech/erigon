@@ -42,12 +42,11 @@ import (
 )
 
 type StateV3 struct {
-	domains                    *execctx.SharedDomains
-	logger                     log.Logger
-	persistReceiptsCacheV2     bool
-	txNum                      uint64
-	trace                      atomic.Bool
-	skipStepBoundaryCommitment bool
+	domains                *execctx.SharedDomains
+	logger                 log.Logger
+	persistReceiptsCacheV2 bool
+	txNum                  uint64
+	trace                  atomic.Bool
 }
 
 func NewStateV3(domains *execctx.SharedDomains, persistReceiptsCacheV2 bool, logger log.Logger) *StateV3 {
@@ -230,7 +229,7 @@ func (rs *StateV3) applyVersionedWrites(roTx kv.TemporalTx, blockNum, txNum uint
 					acc.CodeHash = accounts.InternCodeHash(crypto.Keccak256Hash(d.code))
 				}
 				if dbg.TraceApply && (rs.trace.Load() || dbg.TraceAccount(addr.Handle())) {
-					fmt.Printf("%d apply:put account: %x balance:%d,nonce:%d,codehash:%x\n", blockNum, addr, &acc.Balance, acc.Nonce, acc.CodeHash)
+					fmt.Printf("%d apply:put account: %x balance:%s,nonce:%d,codehash:%x\n", blockNum, addr, acc.Balance.String(), acc.Nonce, acc.CodeHash)
 				}
 				enc := accounts.SerialiseV3(&acc)
 				if blockCache != nil {
@@ -285,7 +284,7 @@ func (rs *StateV3) applyVersionedWrites(roTx kv.TemporalTx, blockNum, txNum uint
 					}
 				} else {
 					if dbg.TraceApply && (rs.trace.Load() || dbg.TraceAccount(addr.Handle())) {
-						fmt.Printf("%d apply:put storage: %x %x %x\n", blockNum, addr, item.key, &item.value)
+						fmt.Printf("%d apply:put storage: %x %x %s\n", blockNum, addr, item.key, item.value.Hex()[2:])
 					}
 					if blockCache != nil {
 						blockCache.WriteStorage(addr, item.key, v, txNum)
@@ -303,7 +302,6 @@ func (rs *StateV3) applyVersionedWrites(roTx kv.TemporalTx, blockNum, txNum uint
 	}
 
 	var acc accounts.Account
-	emptyRemoval := rules.IsSpuriousDragon
 	for addr, increase := range balanceIncreases {
 		addrValue := addr.Value()
 		// Read current account — from blockCache if available, otherwise domain.
@@ -333,7 +331,7 @@ func (rs *StateV3) applyVersionedWrites(roTx kv.TemporalTx, blockNum, txNum uint
 			}
 		}
 		acc.Balance.Add(&acc.Balance, &increase)
-		if emptyRemoval && acc.Nonce == 0 && acc.Balance.IsZero() && acc.IsEmptyCodeHash() {
+		if EIP161EmptyRemoval(rules.IsEIP161Enabled(), rules.IsAura, addr) && acc.Nonce == 0 && acc.Balance.IsZero() && acc.IsEmptyCodeHash() {
 			if blockCache != nil {
 				blockCache.DeleteAccount(addr, txNum)
 				if !domains.InlineTouchKeyDisabled() {
@@ -366,7 +364,7 @@ func (rs *StateV3) applyVersionedWrites(roTx kv.TemporalTx, blockNum, txNum uint
 // TouchKey is called for per-TX commitment tracking. The cache is flushed to
 // SharedDomains at block boundary. When blockCache is nil (serial executor),
 // writes go directly to SharedDomains via DomainPut.
-func (rs *StateV3) ApplyStateWrites(ctx context.Context,
+func (rs *StateV3) ApplyStateWrites(_ context.Context,
 	roTx kv.TemporalTx,
 	blockNum uint64,
 	txNum uint64,
@@ -381,22 +379,8 @@ func (rs *StateV3) ApplyStateWrites(ctx context.Context,
 	if err := rs.applyVersionedWrites(roTx, blockNum, txNum, writes, balanceIncreases, rules, blockCache); err != nil {
 		return fmt.Errorf("StateV3.ApplyStateWrites: %w", err)
 	}
-	// Compute commitment at step boundaries — must follow state writes.
-	// Skip when the commitment calculator goroutine is active (it owns
-	// the Updates buffer and handles all commitment computation).
-	// Also skip if the step is already frozen (nothing to commit).
-	stepSize := rs.domains.StepSize()
-	if (txNum+1)%stepSize == 0 && !dbg.DiscardCommitment() && !rs.domains.InlineTouchKeyDisabled() && !rs.skipStepBoundaryCommitment {
-		step := txNum / stepSize
-		lastFrozenStep := uint64(roTx.StepsInFiles(kv.CommitmentDomain))
-		if step >= lastFrozenStep {
-			_, err := rs.domains.ComputeCommitment(ctx, roTx, true, blockNum, txNum,
-				fmt.Sprintf("applying step %d", step), nil)
-			if err != nil {
-				return fmt.Errorf("StateV3.ApplyStateWrites: step boundary: %w", err)
-			}
-		}
-	}
+	// Step-boundary commitment is computed by the explicit CommitStepBoundary
+	// call (serial) or the commitment calculator (parallel), not here.
 	return nil
 }
 
@@ -427,7 +411,7 @@ func (rs *StateV3) ApplyTxIndexes(
 // contain a commitment state at each step end, even when the boundary falls
 // mid-block.
 func (rs *StateV3) CommitStepBoundary(ctx context.Context, roTx kv.TemporalTx, blockNum, txNum uint64) error {
-	if (txNum+1)%rs.domains.StepSize() == 0 && !dbg.DiscardCommitment() && !rs.domains.InlineTouchKeyDisabled() && !rs.skipStepBoundaryCommitment {
+	if rs.domains.IsUnfrozenStepEdge(roTx, txNum) && !rs.domains.InlineTouchKeyDisabled() {
 		_, err := rs.domains.ComputeCommitment(ctx, roTx, true, blockNum, txNum,
 			fmt.Sprintf("applying step %d", txNum/rs.domains.StepSize()), nil)
 		if err != nil {
@@ -435,13 +419,6 @@ func (rs *StateV3) CommitStepBoundary(ctx context.Context, roTx kv.TemporalTx, b
 		}
 	}
 	return nil
-}
-
-// SetSkipStepBoundaryCommitment disables step-boundary commitment computation.
-// Used by the parallel executor where step-boundary commitment would clear
-// the Updates buffer mid-batch, corrupting the batch-end commitment.
-func (rs *StateV3) SetSkipStepBoundaryCommitment(skip bool) {
-	rs.skipStepBoundaryCommitment = skip
 }
 
 func (rs *StateV3) applyLogsAndTraces4(tx kv.TemporalTx, txNum uint64, receipt *types.Receipt, cummulativeBlobGas uint64, logs []*types.Log, traceFroms map[accounts.Address]struct{}, traceTos map[accounts.Address]struct{}, historyExecution bool, skipReceiptCache bool) error {
@@ -743,7 +720,11 @@ func (c *LightCollector) UpdateAccountData(address accounts.Address, original, a
 	if accountCopy.Nonce != original.Nonce {
 		c.writes = append(c.writes, &VersionedWrite{Address: address, Path: NoncePath, Val: accountCopy.Nonce})
 	}
-	if accountCopy.Incarnation != original.Incarnation {
+	// Emit only on up-revs. A value-transfer to a same-block SD'd address
+	// leaves newObj.Incarnation at 0 while original carries the prior
+	// block's value; emitting the down-rev would clobber the SD-side
+	// IncarnationPath cell and break a same-block CREATE2's prevInc.
+	if accountCopy.Incarnation > original.Incarnation {
 		c.writes = append(c.writes, &VersionedWrite{Address: address, Path: IncarnationPath, Val: accountCopy.Incarnation})
 	}
 	if accountCopy.CodeHash != original.CodeHash {
@@ -892,7 +873,7 @@ func (w *Writer) PrevAndDels() (map[string][]byte, map[string]*accounts.Account,
 
 func (w *Writer) UpdateAccountData(address accounts.Address, original, account *accounts.Account) error {
 	if w.trace {
-		fmt.Printf("Writer: acc %x: {Balance: %d, Nonce: %d, Inc: %d, CodeHash: %x}\n", address, &account.Balance, account.Nonce, account.Incarnation, account.CodeHash)
+		fmt.Printf("Writer: acc %x: {Balance: %s, Nonce: %d, Inc: %d, CodeHash: %x}\n", address, account.Balance.String(), account.Nonce, account.Incarnation, account.CodeHash)
 	}
 	addressValue := address.Value()
 	if original.Incarnation > account.Incarnation {
@@ -1202,6 +1183,12 @@ func (c *BlockStateCache) DeleteAccount(addr accounts.Address, txNum uint64) {
 	// Mark deleted in the current view so subsequent in-block reads / puts
 	// see the destruction immediately. nil (not absent) so GetCurrentAccount
 	// reports "present but empty" rather than falling back to committed state.
+	if v, present := c.currentAccounts[addr]; present && v == nil {
+		// Already deleted by an earlier tx in this block — match serial's
+		// IBS short-circuit so Flush emits a single DomainDel per address.
+		c.mu.Unlock()
+		return
+	}
 	c.currentAccounts[addr] = nil
 	delete(c.currentCode, addr)
 	delete(c.currentStorage, addr)
@@ -1483,7 +1470,7 @@ func (r *ReaderV3) readAccountData(address accounts.Address) ([]byte, *accounts.
 		return nil, nil, err
 	}
 	if r.trace {
-		fmt.Printf("%sReadAccountData [%x] => [nonce: %d, balance: %d, codeHash: %x], txNum: %d\n", r.tracePrefix, address, acc.Nonce, &acc.Balance, acc.CodeHash, r.txNum)
+		fmt.Printf("%sReadAccountData [%x] => [nonce: %d, balance: %s, codeHash: %x], txNum: %d\n", r.tracePrefix, address, acc.Nonce, acc.Balance.String(), acc.CodeHash, r.txNum)
 	}
 	return enc, &acc, nil
 }
@@ -1519,7 +1506,7 @@ func (r *ReaderV3) ReadAccountStorage(address accounts.Address, key accounts.Sto
 		if enc == nil {
 			fmt.Printf("%sReadAccountStorage [%x %x] => [empty], txNum: %d, stack: %s\n", r.tracePrefix, address, key, r.txNum, dbg.Stack())
 		} else {
-			fmt.Printf("%sReadAccountStorage [%x %x] => [%x], txNum: %d, stack: %s\n", r.tracePrefix, address, key, &res, r.txNum, dbg.Stack())
+			fmt.Printf("%sReadAccountStorage [%x %x] => [%s], txNum: %d, stack: %s\n", r.tracePrefix, address, key, res.Hex()[2:], r.txNum, dbg.Stack())
 		}
 	}
 
@@ -1531,7 +1518,17 @@ func (r *ReaderV3) ReadAccountCode(address accounts.Address) ([]byte, error) {
 	if !address.IsNil() {
 		addressValue = address.Value()
 	}
-	enc, _, err := r.getter.GetLatest(kv.CodeDomain, addressValue[:])
+	// Pure read: prefer the content-addressed fast path (addr → codeHash →
+	// cached bytes, no per-address CodeDomain read) when the getter offers it.
+	// This is a getter, never a setter — it must not feed a DomainPut prevVal,
+	// so it does not use the addr-keyed GetLatest the write path relies on.
+	var enc []byte
+	var err error
+	if cg, ok := r.getter.(codeGetter); ok {
+		enc, _, err = cg.GetCode(addressValue[:], r.txNum)
+	} else {
+		enc, _, err = r.getter.GetLatest(kv.CodeDomain, addressValue[:])
+	}
 	if err != nil {
 		return nil, err
 	}
@@ -1542,10 +1539,35 @@ func (r *ReaderV3) ReadAccountCode(address accounts.Address) ([]byte, error) {
 	return enc, nil
 }
 
+// codeGetter is the type-asserted fast-path interface for full-code reads
+// (EXTCODECOPY / CALL / ReadAccountCode). Implemented by execctx.temporalGetter;
+// callers fall back to GetLatest otherwise. Read-only: never used to resolve a
+// DomainPut prevVal (setters resolve prevVal via the addr-keyed GetLatest).
+type codeGetter interface {
+	GetCode(addr []byte, txNum uint64) ([]byte, bool, error)
+}
+
+// codeSizeGetter is the type-asserted fast-path interface for callers
+// that only need the length of the code (EXTCODESIZE / EXTCODEHASH).
+// Implemented by execctx.temporalGetter; fallback to GetLatest otherwise.
+type codeSizeGetter interface {
+	GetCodeSize(addr []byte, txNum uint64) (int, bool, error)
+}
+
 func (r *ReaderV3) ReadAccountCodeSize(address accounts.Address) (int, error) {
 	var addressValue common.Address
 	if !address.IsNil() {
 		addressValue = address.Value()
+	}
+	if sg, ok := r.getter.(codeSizeGetter); ok {
+		size, _, err := sg.GetCodeSize(addressValue[:], r.txNum)
+		if err != nil {
+			return 0, err
+		}
+		if r.trace {
+			fmt.Printf("%sReadAccountCodeSize (sz) [%x] => [%d], txNum: %d\n", r.tracePrefix, addressValue, size, r.txNum)
+		}
+		return size, nil
 	}
 	enc, _, err := r.getter.GetLatest(kv.CodeDomain, addressValue[:])
 	if err != nil {
@@ -1630,7 +1652,7 @@ func (r *bufferedReader) ReadAccountData(address accounts.Address) (*accounts.Ac
 			return nil, nil
 		}
 		if r.reader.Trace() {
-			fmt.Printf("%sReadAccountData (buf)[%x] => [nonce: %d, balance: %d, codeHash: %x]\n", r.reader.TracePrefix(), address, data.Nonce, &data.Balance, data.CodeHash)
+			fmt.Printf("%sReadAccountData (buf)[%x] => [nonce: %d, balance: %s, codeHash: %x]\n", r.reader.TracePrefix(), address, data.Nonce, data.Balance.String(), data.CodeHash)
 		}
 
 		result := *data
@@ -1678,7 +1700,7 @@ func (r *bufferedReader) ReadAccountStorage(address accounts.Address, key accoun
 
 			if ok {
 				if r.reader.Trace() {
-					fmt.Printf("%sReadAccountStorage (buf)[%x %x] => [%x]\n", r.reader.TracePrefix(), address, key, &item.value)
+					fmt.Printf("%sReadAccountStorage (buf)[%x %x] => [%s]\n", r.reader.TracePrefix(), address, key, item.value.Hex()[2:])
 				}
 				r.bufferedState.accountsMutex.RUnlock()
 				return item.value, true, nil

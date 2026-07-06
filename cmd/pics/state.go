@@ -86,17 +86,14 @@ import (
 }*/
 
 var bucketLabels = map[string]string{
-	kv.Headers:                  "Headers",
-	kv.HeaderCanonical:          "Canonical headers",
-	kv.HeaderTD:                 "Headers TD",
-	kv.BlockBody:                "Block Bodies",
-	kv.HeaderNumber:             "Header Numbers",
-	kv.TxLookup:                 "Transaction Index",
-	kv.SyncStageProgress:        "Sync Progress",
-	kv.PlainState:               "Plain State",
-	kv.HashedAccountsDeprecated: "Hashed Accounts",
-	kv.HashedStorageDeprecated:  "Hashed Storage",
-	kv.Senders:                  "Transaction Senders",
+	kv.Headers:           "Headers",
+	kv.HeaderCanonical:   "Canonical headers",
+	kv.HeaderTD:          "Headers TD",
+	kv.BlockBody:         "Block Bodies",
+	kv.HeaderNumber:      "Header Numbers",
+	kv.TxLookup:          "Transaction Index",
+	kv.SyncStageProgress: "Sync Progress",
+	kv.Senders:           "Transaction Senders",
 }
 
 /*dbutils.PlainContractCode,

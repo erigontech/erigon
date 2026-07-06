@@ -192,7 +192,11 @@ type ExecModule struct {
 	blockReader services.FullBlockReader
 
 	// MDBX database
-	db               kv.TemporalRwDB // main database
+	db kv.TemporalRwDB // main database
+	// semaphore is the module's single mutual-exclusion domain: it guards the
+	// pipeline Sync and all FCU state. Ops either TryAcquire and report Busy
+	// (retried by the CL) or block, and the background FCU commit/prune
+	// goroutines inherit the semaphore, releasing it only when their work is done.
 	semaphore        *semaphore.Weighted
 	forkValidator    *ForkValidator
 	pipelineExecutor *PipelineExecutor
@@ -217,8 +221,10 @@ type ExecModule struct {
 	fcuBackgroundPrune      bool
 	fcuBackgroundCommit     bool
 	onlySnapDownloadOnStart bool
-	// metrics for average mgas/sec
-	avgMgasSec float64
+	nextForkActivated       bool
+	// gas-weighted EWMA: accumulate gas and time separately so near-empty blocks don't skew the average
+	accumGasMgas float64
+	accumTimeSec float64
 
 	lock           sync.RWMutex
 	currentContext *execctx.SharedDomains
@@ -244,6 +250,7 @@ func NewExecModule(
 	hook *stageloop.Hook,
 	accum *Accumulation,
 	stateCache *Cache,
+	domainStateCache *cache.StateCache,
 	logger log.Logger,
 	engine rules.Engine,
 	syncCfg ethconfig.Sync,
@@ -253,7 +260,14 @@ func NewExecModule(
 	readAheader *exec.BlockReadAheader,
 	stopNode func() error,
 ) *ExecModule {
-	domainCache := cache.NewDefaultStateCache()
+	// Production passes nil → full-size default cache. Test/CLI harnesses pass a
+	// small cache so building one ExecModule per fixture doesn't allocate
+	// hundreds of MB of LRU tables each (which stalled the parallel eest
+	// blocktest). Per-instance, so it never mutates the process-wide default.
+	domainCache := domainStateCache
+	if domainCache == nil {
+		domainCache = cache.NewDefaultStateCache()
+	}
 	forkValidator := newForkValidator(ctx, currentBlockNumber, pipelineExecutor, blockReader, syncCfg.MaxReorgDepth)
 
 	em := &ExecModule{
@@ -279,6 +293,13 @@ func NewExecModule(
 		stopNode:                stopNode,
 	}
 
+	// Wire the process-global state cache into the read-ahead so its
+	// prefetches populate the same hashmap that SharedDomains.GetLatest
+	// probes on the EVM hot path. Reth's "same hashmap" pattern.
+	if readAheader != nil {
+		readAheader.SetStateCache(domainCache)
+	}
+
 	if stateCache != nil {
 		stateCache.execModule = em
 	}
@@ -292,6 +313,19 @@ func (e *ExecModule) WaitIdle(ctx context.Context) {
 		return // context cancelled — best effort
 	}
 	e.semaphore.Release(1)
+}
+
+// closeModuleContext closes and clears e.currentContext. The nil swap happens
+// under e.lock first, so getters holding the read lock (beginOverlayOrRo) can
+// never obtain a SharedDomains that is about to be closed.
+func (e *ExecModule) closeModuleContext() {
+	e.lock.Lock()
+	old := e.currentContext
+	e.currentContext = nil
+	e.lock.Unlock()
+	if old != nil {
+		old.Close()
+	}
 }
 
 // ForkValidator returns the fork validator owned by this module.
@@ -345,6 +379,24 @@ func (e *ExecModule) canonicalHash(ctx context.Context, tx kv.Tx, blockNumber ui
 	return canonical, nil
 }
 
+// drainReadAhead blocks until any in-flight block-assembly warmup finishes.
+// warmBody is fire-and-forget and populates the shared state/branch caches; if
+// it is still running when an unwind bumps the cache epoch, it can Put a
+// pre-unwind (dead-fork) value stamped with the post-unwind epoch — IsStale then
+// returns false and the stale value is served as canonical (wrong root). A
+// laggard Put can likewise land after a flush's cache-apply and pin the
+// pre-flush snapshot. Call before any unwind epoch-bump or flush cache-apply.
+func (e *ExecModule) drainReadAhead() {
+	if e.readAheader == nil {
+		return
+	}
+	ctx := e.bacgroundCtx
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	e.readAheader.WaitForWarmup(ctx)
+}
+
 func (e *ExecModule) unwindToCommonCanonical(sd *execctx.SharedDomains, tx kv.TemporalRwTx, header *types.Header) error {
 	currentHeader := header
 	for isCanonical, err := e.isCanonicalHash(e.bacgroundCtx, tx, currentHeader.Hash()); !isCanonical && err == nil; isCanonical, err = e.isCanonicalHash(e.bacgroundCtx, tx, currentHeader.Hash()) {
@@ -373,6 +425,7 @@ func (e *ExecModule) unwindToCommonCanonical(sd *execctx.SharedDomains, tx kv.Te
 		return err
 	}
 
+	e.drainReadAhead()
 	if err := e.pipelineExecutor.UnwindTo(unwindPoint, stagedsync.ExecUnwind, tx); err != nil {
 		return err
 	}
@@ -382,7 +435,20 @@ func (e *ExecModule) unwindToCommonCanonical(sd *execctx.SharedDomains, tx kv.Te
 	return nil
 }
 
+const nextForkBanner = `
+:'######:::'##::::::::::'###::::'##::::'##::'######::'########:'########:'########::'########:::::'###::::'##::::'##:
+'##... ##:: ##:::::::::'## ##::: ###::'###:'##... ##:... ##..:: ##.....:: ##.... ##: ##.... ##:::'## ##::: ###::'###:
+ ##:::..::: ##::::::::'##:. ##:: ####'####: ##:::..::::: ##:::: ##::::::: ##:::: ##: ##:::: ##::'##:. ##:: ####'####:
+ ##::'####: ##:::::::'##:::. ##: ## ### ##:. ######::::: ##:::: ######::: ########:: ##:::: ##:'##:::. ##: ## ### ##:
+ ##::: ##:: ##::::::: #########: ##. #: ##::..... ##:::: ##:::: ##...:::: ##.. ##::: ##:::: ##: #########: ##. #: ##:
+ ##::: ##:: ##::::::: ##.... ##: ##:.:: ##:'##::: ##:::: ##:::: ##::::::: ##::. ##:: ##:::: ##: ##.... ##: ##:.:: ##:
+. ######::: ########: ##:::: ##: ##:::: ##:. ######::::: ##:::: ########: ##:::. ##: ########:: ##:::: ##: ##:::: ##:
+:......::::........::..:::::..::..:::::..:::......::::::..:::::........::..:::::..::........:::..:::::..::..:::::..::
+=============================================== GLAMSTERDAM ACTIVATED ===============================================
+`
+
 func (e *ExecModule) ValidateChain(ctx context.Context, blockHash common.Hash, blockNumber uint64) (ValidationResult, error) {
+	defer validateChainDuration.ObserveDuration(time.Now())
 	if !e.semaphore.TryAcquire(1) {
 		e.logger.Trace("ethereumExecutionModule.ValidateChain: ExecutionStatus_Busy")
 		return ValidationResult{
@@ -484,6 +550,11 @@ func (e *ExecModule) ValidateChain(ctx context.Context, blockHash common.Hash, b
 	}
 	var tx kv.TemporalRwTx = doms.BlockOverlay()
 
+	// Chain to the canonical generation so head-extending reads and fork unwind sets resolve via the parent link.
+	if e.currentContext != nil {
+		doms.SetParent(e.currentContext)
+	}
+
 	// Flush block overlay data (headers, bodies, TDs from InsertBlocks) into
 	// the validation overlay so unwindToCommonCanonical and ValidatePayload —
 	// and the parallel exec goroutine via NewReadView — see this block data.
@@ -510,11 +581,11 @@ func (e *ExecModule) ValidateChain(ctx context.Context, blockHash common.Hash, b
 		return ValidationResult{}, criticalError
 	}
 
-	// Clear state cache on invalid block
-	isInvalid := status == engine_types.InvalidStatus || status == engine_types.InvalidBlockHashStatus || validationError != nil
-	if e.stateCache != nil && isInvalid {
-		e.stateCache.ClearWithHash(header.ParentHash)
-	}
+	// No cache invalidation needed on an invalid payload: the state cache is
+	// populated only at flush (committed, fork-agnostic state) and this
+	// validation path never flushes, so a rejected payload leaves nothing
+	// fork-specific in the cache. Reads during validation only add canonical
+	// committed bytes. (Cache invalidation happens solely on unwind.)
 
 	// Validation tx is the SD's BlockOverlay; defer doms.Close() above handles
 	// its rollback. By design we do not persist validation-run writes — there
@@ -552,6 +623,11 @@ func (e *ExecModule) ValidateChain(ctx context.Context, blockHash common.Hash, b
 			return ValidationResult{}, err
 		}
 	}
+	if !e.nextForkActivated && validationStatus == ExecutionStatusSuccess && e.config.IsAmsterdam(header.Time) {
+		e.nextForkActivated = true
+		e.logger.Info(nextForkBanner)
+	}
+
 	result := ValidationResult{
 		ValidationStatus: validationStatus,
 		LatestValidHash:  lvh,

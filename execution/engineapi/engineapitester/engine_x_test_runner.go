@@ -30,6 +30,7 @@ import (
 	"github.com/c2h5oh/datasize"
 	"github.com/holiman/uint256"
 	"github.com/jinzhu/copier"
+	jsoniter "github.com/json-iterator/go"
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/dir"
@@ -62,7 +63,7 @@ func NewEngineXTestRunner(ctx context.Context, logger log.Logger, preAllocsDir s
 			return err
 		}
 		var preAlloc PreAlloc
-		err = json.Unmarshal(b, &preAlloc)
+		err = jsoniter.ConfigFastest.Unmarshal(b, &preAlloc)
 		if err != nil {
 			return err
 		}
@@ -95,14 +96,21 @@ func WithRequestProfileHook(hook RequestProfileHook) EngineXTestRunnerOption {
 	}
 }
 
+func WithWarmupKzgCtxOnInit(warmup bool) EngineXTestRunnerOption {
+	return func(r *EngineXTestRunner) {
+		r.warmupKzgCtxOnInit = warmup
+	}
+}
+
 type EngineXTestRunner struct {
-	ctx         context.Context
-	logger      log.Logger
-	preAllocs   map[PreAllocHash]*PreAlloc
-	mu          sync.Mutex
-	testers     map[Fork]map[PreAllocHash]testerEntry
-	wg          sync.WaitGroup
-	profileHook RequestProfileHook
+	ctx                context.Context
+	logger             log.Logger
+	preAllocs          map[PreAllocHash]*PreAlloc
+	mu                 sync.Mutex
+	testers            map[Fork]map[PreAllocHash]testerEntry
+	wg                 sync.WaitGroup
+	profileHook        RequestProfileHook
+	warmupKzgCtxOnInit bool
 }
 
 // RequestProfileHook is invoked immediately before each engine API request the
@@ -289,7 +297,7 @@ func (extr *EngineXTestRunner) createTester(fork Fork, preAllocHash PreAllocHash
 		return testerEntry{}, fmt.Errorf("pre_alloc %s not found", preAllocHash)
 	}
 	var forkConfigCopy chain.Config
-	err := copier.Copy(&forkConfigCopy, forkConfig)
+	err := copier.CopyWithOption(&forkConfigCopy, forkConfig, copier.Option{DeepCopy: true})
 	if err != nil {
 		return testerEntry{}, err
 	}
@@ -335,10 +343,9 @@ func (extr *EngineXTestRunner) createTester(fork Fork, preAllocHash PreAllocHash
 		Genesis:                &genesis,
 		NoEmptyBlock1:          true,
 		EngineApiClientTimeout: &engineApiClientTimeout,
-		// benchmark fixtures at 150M-gas peak ~2.75GB SizeEstimate
-		BatchSize: 4 * datasize.GB,
 		EthConfigTweaker: func(config *ethconfig.Config) {
 			config.MaxReorgDepth = 512
+			config.WarmupKzgCtxOnInit = extr.warmupKzgCtxOnInit
 		},
 		DisableTxPool: true,
 		DisableSentry: true,

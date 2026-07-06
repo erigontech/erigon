@@ -77,7 +77,6 @@ func InitMiner(
 		P2P: p2p.Config{
 			ListenAddr:      ":0",
 			ProtocolVersion: []uint{direct.ETH68},
-			AllowedPorts:    []uint{0},
 			NoDiscovery:     true,
 			NoDial:          true,
 			MaxPeers:        1,

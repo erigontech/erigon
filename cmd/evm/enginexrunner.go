@@ -30,7 +30,7 @@ import (
 	"sync"
 
 	"github.com/felixge/fgprof"
-	"github.com/urfave/cli/v2"
+	"github.com/urfave/cli/v3"
 
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/execution/engineapi/engineapitester"
@@ -85,7 +85,7 @@ type engineXGroupKey struct {
 	hash engineapitester.PreAllocHash
 }
 
-func engineXTestCmd(cliCtx *cli.Context) error {
+func engineXTestCmd(ctx context.Context, cliCtx *cli.Command) error {
 	if cliCtx.Int(VerbosityFlag.Name) > 0 {
 		log.Root().SetHandler(log.LvlFilterHandler(log.Lvl(cliCtx.Int(VerbosityFlag.Name)), log.StderrHandler))
 	} else {
@@ -117,7 +117,7 @@ func engineXTestCmd(cliCtx *cli.Context) error {
 		return fmt.Errorf("--pprof.cpu/--fgprof require --workers=1 (got %d)", workers)
 	}
 
-	ctx, cancel := context.WithCancel(cliCtx.Context)
+	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 
 	groups, totalTests, err := loadEngineXGroups(path, re)
@@ -134,7 +134,10 @@ func engineXTestCmd(cliCtx *cli.Context) error {
 		return nil
 	}
 
-	var runnerOpts []engineapitester.EngineXTestRunnerOption
+	runnerOpts := []engineapitester.EngineXTestRunnerOption{
+		// needed for benchmarks, to reproduce real-life node startup
+		engineapitester.WithWarmupKzgCtxOnInit(true),
+	}
 	if profilingEnabled {
 		if cpuProfileDir != "" {
 			err := os.MkdirAll(cpuProfileDir, 0o755)
@@ -274,7 +277,7 @@ func loadEngineXGroups(path string, re *regexp.Regexp) (map[engineXGroupKey][]en
 // isUnderPreAlloc reports whether any directory component of p is named
 // "pre_alloc" — those are pre-allocation inputs, not test fixtures.
 func isUnderPreAlloc(p string) bool {
-	for _, c := range strings.Split(filepath.ToSlash(p), "/") {
+	for c := range strings.SplitSeq(filepath.ToSlash(p), "/") {
 		if c == "pre_alloc" {
 			return true
 		}

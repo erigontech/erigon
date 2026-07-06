@@ -639,48 +639,120 @@ func (m *MemoryMutation) Flush(ctx context.Context, tx kv.RwTx) error {
 		default:
 		}
 		if isTablePurelyDupsort(bucket) {
-			if err := func() error {
-				cbucket, err := m.memTx.CursorDupSort(bucket)
-				if err != nil {
-					return err
-				}
-				defer cbucket.Close()
-				dbCursor, err := tx.RwCursorDupSort(bucket)
-				if err != nil {
-					return err
-				}
-				defer dbCursor.Close()
-				for k, v, err := cbucket.First(); k != nil; k, v, err = cbucket.Next() {
-					if err != nil {
-						return err
-					}
-					if err := dbCursor.Put(k, v); err != nil {
-						return err
-					}
-				}
-				return nil
-			}(); err != nil {
+			if err := flushDupsortBucket(m.memTx, tx, bucket); err != nil {
 				return err
 			}
 		} else {
-			if err := func() error {
-				cbucket, err := m.memTx.Cursor(bucket)
-				if err != nil {
-					return err
-				}
-				defer cbucket.Close()
-				for k, v, err := cbucket.First(); k != nil; k, v, err = cbucket.Next() {
-					if err != nil {
-						return err
-					}
-					if err := tx.Put(bucket, k, v); err != nil {
-						return err
-					}
-				}
-				return nil
-			}(); err != nil {
+			if err := flushPlainBucket(m.memTx, tx, bucket); err != nil {
 				return err
 			}
+		}
+	}
+	return nil
+}
+
+// flushPlainBucket copies all keys from the in-memory bucket to the destination
+// transaction. When the destination's largest existing key is strictly less than
+// the source's smallest key — the common case for canonical chain advance, where
+// the overlay accumulates writes for new blocks above the committed tip — we use
+// Append rather than Put, which skips MDBX's per-key B-tree search.
+//
+// Falling back to Put for the mixed case (overlay rewrites a key already present
+// in the destination, e.g. SyncStageProgress or HeadBlockHash) keeps behaviour
+// identical for unwinds and re-issued FCUs.
+func flushPlainBucket(memTx kv.Tx, tx kv.RwTx, bucket string) error {
+	srcCursor, err := memTx.Cursor(bucket)
+	if err != nil {
+		return err
+	}
+	defer srcCursor.Close()
+
+	k, v, err := srcCursor.First()
+	if err != nil {
+		return err
+	}
+	if k == nil {
+		return nil
+	}
+
+	dstCursor, err := tx.RwCursor(bucket)
+	if err != nil {
+		return err
+	}
+	defer dstCursor.Close()
+
+	dstLastKey, _, err := dstCursor.Last()
+	if err != nil {
+		return err
+	}
+	canAppend := dstLastKey == nil || bytes.Compare(k, dstLastKey) > 0
+
+	for ; k != nil; k, v, err = srcCursor.Next() {
+		if err != nil {
+			return err
+		}
+		if canAppend {
+			if err := dstCursor.Append(k, v); err != nil {
+				return err
+			}
+		} else {
+			if err := tx.Put(bucket, k, v); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
+// flushDupsortBucket copies a DupSort bucket. We conservatively use AppendDup
+// only when the destination is empty and fall back to Put otherwise. AppendDup
+// itself does not require global key monotonicity — MDBX only enforces that
+// the new value is greater than the last existing dup for the same key — but
+// reasoning about that precondition over an arbitrary overlay+destination mix
+// is subtle, so we keep the optimization narrow. Extending it to the
+// srcFirstKey > dstLastKey case is a possible follow-up.
+func flushDupsortBucket(memTx kv.Tx, tx kv.RwTx, bucket string) error {
+	srcCursor, err := memTx.CursorDupSort(bucket)
+	if err != nil {
+		return err
+	}
+	defer srcCursor.Close()
+
+	k, v, err := srcCursor.First()
+	if err != nil {
+		return err
+	}
+	if k == nil {
+		return nil
+	}
+
+	dstCursor, err := tx.RwCursorDupSort(bucket)
+	if err != nil {
+		return err
+	}
+	defer dstCursor.Close()
+
+	dstLastKey, _, err := dstCursor.Last()
+	if err != nil {
+		return err
+	}
+	if dstLastKey == nil {
+		for ; k != nil; k, v, err = srcCursor.Next() {
+			if err != nil {
+				return err
+			}
+			if err := dstCursor.AppendDup(k, v); err != nil {
+				return err
+			}
+		}
+		return nil
+	}
+	for ; k != nil; k, v, err = srcCursor.Next() {
+		if err != nil {
+			return err
+		}
+		if err := dstCursor.Put(k, v); err != nil {
+			return err
 		}
 	}
 	return nil

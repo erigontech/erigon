@@ -21,6 +21,7 @@ import (
 	"context"
 	"encoding/binary"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"io/fs"
 	"math"
@@ -145,7 +146,7 @@ func TestDomain_OpenFolder(t *testing.T) {
 
 	scanDirsRes, err := scanDirs(d.dirs)
 	require.NoError(t, err)
-	err = d.openFolder(scanDirsRes)
+	err = d.openFolder(t.Context(), scanDirsRes)
 	require.NoError(t, err)
 	d.Close()
 }
@@ -292,6 +293,77 @@ func testCollationBuild(t *testing.T, compressDomainVals bool) {
 		//	require.Equal(t, words[i+1], string(w))
 		//}
 	}
+}
+
+// TestDumpStepRangeToPath verifies the dstDir + integrate=false escape hatch on
+// dumpStepRangeOnDisk's body: the .kv plus accessor outputs land in the override
+// directory and the aggregator's view (Domain.dirtyFiles) is not mutated.
+func TestDumpStepRangeToPath(t *testing.T) {
+	if testing.Short() {
+		t.Skip()
+	}
+	t.Parallel()
+
+	logger := log.New()
+	db, d := testDbAndDomainOfStep(t, statecfg.Schema.AccountsDomain, 16, logger)
+	ctx := context.Background()
+
+	tx, err := db.BeginRw(ctx)
+	require.NoError(t, err)
+	defer tx.Rollback()
+
+	domainRoTx := d.beginForTests()
+	defer domainRoTx.Close()
+	writer := domainRoTx.NewWriter()
+	defer writer.Close()
+
+	require.NoError(t, writer.PutWithPrev([]byte("k1"), []byte("v1"), 2, nil))
+	require.NoError(t, writer.PutWithPrev([]byte("k2"), []byte("v2"), 3, nil))
+
+	// Snapshot dirtyFiles count before invoking; integrate=false must leave it unchanged.
+	countDirty := func() int {
+		n := 0
+		d.dirtyFiles.Walk(func(items []*FilesItem) bool {
+			n += len(items)
+			return true
+		})
+		return n
+	}
+	beforeDirty := countDirty()
+
+	dstDir := t.TempDir()
+	batch := &TemporalMemBatch{}
+	batch.domainWriters[d.Name] = writer
+
+	require.NoError(t, d.dumpStepRangeToPath(ctx, 0, 1, batch, nil, dstDir, false))
+
+	// .kv must land in dstDir, not in d.dirs.SnapDomain.
+	expectedKV := d.kvNewFilePathIn(dstDir, 0, 1)
+	gotKV, errStat := os.Stat(expectedKV)
+	require.NoError(t, errStat, "expected .kv at %s", expectedKV)
+	require.False(t, gotKV.IsDir())
+
+	// .bt (commitment/account domain has BTree accessor) must also land in dstDir.
+	if d.Accessors.Has(statecfg.AccessorBTree) {
+		btPath := d.kvBtAccessorNewFilePathIn(dstDir, 0, 1)
+		_, err := os.Stat(btPath)
+		require.NoError(t, err, "expected .bt at %s", btPath)
+	}
+	if d.Accessors.Has(statecfg.AccessorHashMap) {
+		kviPath := d.kviAccessorNewFilePathIn(dstDir, 0, 1)
+		_, err := os.Stat(kviPath)
+		require.NoError(t, err, "expected .kvi at %s", kviPath)
+	}
+
+	// SnapDomain must be free of the new step file because integrate=false skips
+	// integrateDirtyFiles and dstDir overrides the write path.
+	snapKV := d.kvNewFilePath(0, 1)
+	_, err = os.Stat(snapKV)
+	require.Truef(t, errors.Is(err, fs.ErrNotExist),
+		"unexpected file in SnapDomain at %s (err=%v)", snapKV, err)
+
+	// dirtyFiles count is unchanged: integrate=false skips integration.
+	require.Equal(t, beforeDirty, countDirty(), "dirtyFiles must not grow when integrate=false")
 }
 
 func TestDomain_AfterPrune(t *testing.T) {
@@ -468,7 +540,7 @@ func checkHistory(t *testing.T, db kv.RwDB, d *Domain, txs uint64) {
 
 	// Structural invariants: no duplicates, monotonic txNums, index-history consistency, etc.
 	checkHistoryProperties(t, domainRoTx.ht)
-	// Domain file invariants: key-count, accessor presence, frozen flag, sort order, alignment, bloom.
+	// Domain file invariants: key-count, accessor presence, sort order, alignment, bloom.
 	checkDomainFileProperties(t, domainRoTx)
 }
 
@@ -477,7 +549,6 @@ func checkDomainFileProperties(t *testing.T, dt *DomainRoTx) {
 	t.Helper()
 	checkDomainFileKeyCountConsistency(t, dt)
 	checkDomainFileAccessorsPresent(t, dt)
-	checkDomainFileFrozenFlagConsistency(t, dt)
 	checkDomainFileSortedKeyOrder(t, dt)
 	checkDomainHistoryRangeAlignment(t, dt)
 	checkDomainExistenceFilterNoFalseNegatives(t, dt)
@@ -527,20 +598,6 @@ func checkDomainFileAccessorsPresent(t *testing.T, dt *DomainRoTx) {
 				"file %d [%d-%d): AccessorExistence configured but existence is nil",
 				i, f.startTxNum, f.endTxNum)
 		}
-	}
-}
-
-// checkDomainFileFrozenFlagConsistency verifies (property 7):
-// file.frozen == (endStep - startStep >= stepsInFrozenFile).
-func checkDomainFileFrozenFlagConsistency(t *testing.T, dt *DomainRoTx) {
-	t.Helper()
-	for i, f := range dt.files {
-		startStep := f.startTxNum / dt.stepSize
-		endStep := f.endTxNum / dt.stepSize
-		expectedFrozen := (endStep - startStep) >= dt.stepsInFrozenFile
-		require.Equal(t, expectedFrozen, f.src.frozen,
-			"file %d [%d-%d): frozen=%v but expected frozen=%v (steps=%d, stepsInFrozenFile=%d)",
-			i, f.startTxNum, f.endTxNum, f.src.frozen, expectedFrozen, endStep-startStep, dt.stepsInFrozenFile)
 	}
 }
 
@@ -673,7 +730,7 @@ func collateAndMerge(t *testing.T, tx kv.RwTx, d *Domain, txs uint64) {
 				return true
 			}
 			valuesOuts, indexOuts, historyOuts := domainRoTx.staticFilesInRange(r)
-			valuesIn, indexIn, historyIn, err := domainRoTx.mergeFiles(ctx, valuesOuts, indexOuts, historyOuts, r, nil, background.NewProgressSet())
+			valuesIn, indexIn, historyIn, err := domainRoTx.mergeFiles(ctx, valuesOuts, indexOuts, historyOuts, r, nil, true, background.NewProgressSet())
 			require.NoError(t, err)
 			//if valuesIn != nil && valuesIn.decompressor != nil {
 			//fmt.Printf("merge: %s\n", valuesIn.decompressor.FileName())
@@ -712,7 +769,7 @@ func collateAndMergeOnceWithScanPrune(t *testing.T, d *Domain, tx kv.RwTx, step 
 				return true
 			}
 			valuesOuts, indexOuts, historyOuts := domainRoTx.staticFilesInRange(r)
-			valuesIn, indexIn, historyIn, err := domainRoTx.mergeFiles(ctx, valuesOuts, indexOuts, historyOuts, r, nil, background.NewProgressSet())
+			valuesIn, indexIn, historyIn, err := domainRoTx.mergeFiles(ctx, valuesOuts, indexOuts, historyOuts, r, nil, true, background.NewProgressSet())
 			require.NoError(t, err)
 
 			d.integrateMergedDirtyFiles(valuesIn, indexIn, historyIn)
@@ -749,7 +806,7 @@ func collateAndMergeOnce(t *testing.T, d *Domain, tx kv.RwTx, step kv.Step, prun
 			break
 		}
 		valuesOuts, indexOuts, historyOuts := domainRoTx.staticFilesInRange(r)
-		valuesIn, indexIn, historyIn, err := domainRoTx.mergeFiles(ctx, valuesOuts, indexOuts, historyOuts, r, nil, background.NewProgressSet())
+		valuesIn, indexIn, historyIn, err := domainRoTx.mergeFiles(ctx, valuesOuts, indexOuts, historyOuts, r, nil, true, background.NewProgressSet())
 		require.NoError(t, err)
 
 		d.integrateMergedDirtyFiles(valuesIn, indexIn, historyIn)
@@ -796,10 +853,50 @@ func TestDomain_ScanFiles(t *testing.T) {
 	d.closeWhatNotInList([]string{})
 	scanDirsRes, err := scanDirs(d.dirs)
 	require.NoError(t, err)
-	require.NoError(t, d.openFolder(scanDirsRes))
+	require.NoError(t, d.openFolder(t.Context(), scanDirsRes))
 
 	// Check the history
 	checkHistory(t, db, d, txs)
+}
+
+func TestCommitmentKvWriteVersion(t *testing.T) {
+	t.Parallel()
+	logger := log.New()
+	_, d := testDbAndDomainOfStep(t, statecfg.Schema.CommitmentDomain, 16, logger)
+
+	d.ReferencesInCommitmentBranches = true
+	require.Equal(t, version.V2_1, d.kvWriteVersion())
+	require.Contains(t, d.kvNewFilePath(0, 1), "v2.1-commitment.0-1.kv")
+
+	d.ReferencesInCommitmentBranches = false
+	require.Equal(t, version.V2_2, d.kvWriteVersion())
+	require.Contains(t, d.kvNewFilePath(0, 1), "v2.2-commitment.0-1.kv")
+}
+
+func TestNonCommitmentKvWriteVersionUsesCurrent(t *testing.T) {
+	t.Parallel()
+	logger := log.New()
+	_, d := testDbAndDomainOfStep(t, statecfg.Schema.AccountsDomain, 16, logger)
+	require.Equal(t, d.FileVersion.DataKV.Current, d.kvWriteVersion())
+	require.Contains(t, d.kvNewFilePath(0, 1), d.FileVersion.DataKV.Current.String()+"-accounts.0-1.kv")
+}
+
+func TestCommitmentKvVersionAcceptance(t *testing.T) {
+	t.Parallel()
+	vers := statecfg.Schema.CommitmentDomain.FileVersion.DataKV
+	require.True(t, vers.Supports(version.V2_0))
+	require.True(t, vers.Supports(version.V2_1))
+	require.True(t, vers.Supports(version.V2_2))
+	// A newer minor within the same major is a content-only, backward-readable change.
+	require.True(t, vers.Supports(version.Version{Major: 2, Minor: 3}))
+	// A newer major changes read logic and is rejected.
+	require.False(t, vers.Supports(version.Version{Major: 3, Minor: 0}))
+
+	require.NotPanics(t, func() { vers.MustSupport(version.V2_0, "v2.0-commitment.0-1.kv") })
+	require.NotPanics(t, func() { vers.MustSupport(version.V2_1, "v2.1-commitment.0-1.kv") })
+	require.NotPanics(t, func() { vers.MustSupport(version.V2_2, "v2.2-commitment.0-1.kv") })
+	require.NotPanics(t, func() { vers.MustSupport(version.Version{Major: 2, Minor: 3}, "v2.3-commitment.0-1.kv") })
+	require.Panics(t, func() { vers.MustSupport(version.Version{Major: 3, Minor: 0}, "v3.0-commitment.0-1.kv") })
 }
 
 func TestDomainRoTx_CursorParentCheck(t *testing.T) {
@@ -1342,7 +1439,7 @@ func TestDomain_OpenFilesWithDeletions(t *testing.T) {
 
 	scanDirsRes, err := scanDirs(dom.dirs)
 	require.NoError(t, err)
-	err = dom.openFolder(scanDirsRes)
+	err = dom.openFolder(t.Context(), scanDirsRes)
 
 	require.NoError(t, err)
 
@@ -1604,7 +1701,7 @@ func TestDomainContext_getFromFiles(t *testing.T) {
 		ranges := domainRoTx.findMergeRange(txFrom, txTo, txTo)
 		vl, il, hl := domainRoTx.staticFilesInRange(ranges)
 
-		dv, di, dh, err := domainRoTx.mergeFiles(ctx, vl, il, hl, ranges, nil, ps)
+		dv, di, dh, err := domainRoTx.mergeFiles(ctx, vl, il, hl, ranges, nil, true, ps)
 		require.NoError(t, err)
 
 		d.integrateMergedDirtyFiles(dv, di, dh)
@@ -3488,7 +3585,7 @@ func collateAndMergeWithCollisionRetry(t *testing.T, tx kv.RwTx, d *Domain, txs 
 	r := domainRoTx.findMergeRange(d.dirtyFilesEndTxNumMinimax(), d.dirtyFilesEndTxNumMinimax(), d.dirtyFilesEndTxNumMinimax())
 	if r.values.needMerge {
 		valuesOuts, indexOuts, historyOuts := domainRoTx.staticFilesInRange(r)
-		valuesIn, indexIn, historyIn, err := domainRoTx.mergeFiles(ctx, valuesOuts, indexOuts, historyOuts, r, nil, background.NewProgressSet())
+		valuesIn, indexIn, historyIn, err := domainRoTx.mergeFiles(ctx, valuesOuts, indexOuts, historyOuts, r, nil, true, background.NewProgressSet())
 		require.NoError(t, err)
 		d.integrateMergedDirtyFiles(valuesIn, indexIn, historyIn)
 	}

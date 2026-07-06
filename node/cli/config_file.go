@@ -25,11 +25,11 @@ import (
 	"strings"
 
 	"github.com/pelletier/go-toml/v2"
-	"github.com/urfave/cli/v2"
-	"gopkg.in/yaml.v2"
+	"github.com/urfave/cli/v3"
+	"gopkg.in/yaml.v3"
 )
 
-func SetFlagsFromConfigFile(ctx *cli.Context, filePath string) error {
+func SetFlagsFromConfigFile(cmd *cli.Command, filePath string) error {
 	fileExtension := filepath.Ext(filePath)
 
 	fileConfig := make(map[string]any)
@@ -63,19 +63,19 @@ func SetFlagsFromConfigFile(ctx *cli.Context, filePath string) error {
 
 	// sets global flags to value in yaml/toml file
 	for key, value := range flat {
-		if !ctx.IsSet(key) {
+		if !cmd.IsSet(key) {
 			if reflect.ValueOf(value).Kind() == reflect.Slice {
 				sliceInterface := value.([]any)
 				s := make([]string, len(sliceInterface))
 				for i, v := range sliceInterface {
 					s[i] = fmt.Sprintf("%v", v)
 				}
-				err := ctx.Set(key, strings.Join(s, ","))
+				err := cmd.Set(key, strings.Join(s, ","))
 				if err != nil {
 					return fmt.Errorf("failed setting %s flag with values=%s error=%s", key, s, err)
 				}
 			} else {
-				err := ctx.Set(key, fmt.Sprintf("%v", value))
+				err := cmd.Set(key, fmt.Sprintf("%v", value))
 				if err != nil {
 					return fmt.Errorf("failed setting %s flag with value=%v error=%s", key, value, err)
 
@@ -101,25 +101,9 @@ func flattenConfig(m map[string]any, prefix string) map[string]any {
 			for fk, fv := range flattenConfig(nested, key) {
 				result[fk] = fv
 			}
-		} else if nested, ok := v.(map[any]any); ok {
-			// gopkg.in/yaml.v2 unmarshals maps as map[interface{}]interface{}
-			converted := convertYAMLMap(nested)
-			for fk, fv := range flattenConfig(converted, key) {
-				result[fk] = fv
-			}
 		} else {
 			result[key] = v
 		}
-	}
-	return result
-}
-
-// convertYAMLMap converts a map[any]any (produced by gopkg.in/yaml.v2) to
-// map[string]any so it can be processed uniformly.
-func convertYAMLMap(m map[any]any) map[string]any {
-	result := make(map[string]any, len(m))
-	for k, v := range m {
-		result[fmt.Sprintf("%v", k)] = v
 	}
 	return result
 }

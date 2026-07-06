@@ -255,8 +255,9 @@ func Bench1(erigonURL, gethURL string, needCompare bool, fullTest bool, blockFro
 			}
 			fmt.Printf("Done blocks %d-%d, modified accounts: %d\n", prevBn, bn, len(mag.Result))
 
-			page := common.Hash{}.Bytes()
-			pageGeth := common.Hash{}.Bytes()
+			zeroAddr := common.Address{}
+			page := zeroAddr[:]
+			pageGeth := zeroAddr[:]
 
 			var accRangeErigon map[common.Address]state.DumpAccount
 			var accRangeGeth map[common.Address]state.DumpAccount

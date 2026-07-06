@@ -39,12 +39,12 @@ import (
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/common/dbg"
+	"github.com/erigontech/erigon/common/event"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/common/mclock"
 	"github.com/erigontech/erigon/p2p/discover"
 	"github.com/erigontech/erigon/p2p/enode"
 	"github.com/erigontech/erigon/p2p/enr"
-	"github.com/erigontech/erigon/p2p/event"
 	"github.com/erigontech/erigon/p2p/nat"
 	"github.com/erigontech/erigon/p2p/netutil"
 )
@@ -323,14 +323,13 @@ func (srv *Server) Self() (ln *enode.Node) {
 // It blocks until all active connections have been closed.
 func (srv *Server) Stop() {
 	srv.lock.Lock()
-	if !srv.running.Load() {
+	if !srv.running.CompareAndSwap(true, false) {
 		if srv.nodedb != nil {
 			srv.nodedb.Close()
 		}
 		srv.lock.Unlock()
 		return
 	}
-	srv.running.Store(false)
 	srv.quitFunc()
 	if srv.listener != nil {
 		// this unblocks listener Accept
@@ -368,12 +367,19 @@ func (s *sharedUDPConn) Close() error {
 
 // Start starts running the server.
 // Servers can not be re-used after stopping.
-func (srv *Server) Start(ctx context.Context, logger log.Logger) error {
+func (srv *Server) Start(ctx context.Context, logger log.Logger) (err error) {
 	if srv.running.Load() {
 		return errors.New("server already running")
 	}
 	srv.lock.Lock()
 	defer srv.lock.Unlock()
+
+	srv.running.Store(true)
+	defer func() {
+		if err != nil {
+			srv.running.Store(false)
+		}
+	}()
 
 	srv.logger = logger
 	if srv.clock == nil {
@@ -419,8 +425,8 @@ func (srv *Server) Start(ctx context.Context, logger log.Logger) error {
 	}
 	srv.logger.Info("Setup P2P discovery", "v4", srv.discv4 != nil, "v5", srv.discv5 != nil)
 	srv.setupDialScheduler()
+	srv.startListenLoop(srv.quitCtx)
 
-	srv.running.Store(true)
 	srv.loopWG.Add(1)
 	go srv.run()
 	return nil
@@ -466,6 +472,22 @@ func (srv *Server) setupLocalNode() error {
 		ip, _ := srv.NAT.ExternalIP()
 		srv.localnode.SetStaticIP(ip)
 		srv.updateLocalNodeStaticAddrCache()
+	case nat.STUN:
+		// STUN-discovered IPs can change while running, so keep re-resolving.
+		tracker := &externalIPTracker{
+			nat: srv.NAT,
+			set: func(ip net.IP) {
+				srv.localnode.SetStaticIP(ip)
+				srv.updateLocalNodeStaticAddrCache()
+			},
+			logger: srv.logger,
+		}
+		srv.loopWG.Add(1)
+		go func() {
+			defer dbg.LogPanic()
+			defer srv.loopWG.Done()
+			tracker.run(srv.quit, externalIPRefreshInterval)
+		}()
 	default:
 		// Ask the router about the IP. This takes a while and blocks startup,
 		// do it in the background.
@@ -662,14 +684,19 @@ func (srv *Server) setupListening(ctx context.Context) error {
 			}()
 		}
 	}
+	return nil
+}
 
+func (srv *Server) startListenLoop(ctx context.Context) {
+	if srv.listener == nil {
+		return
+	}
 	srv.loopWG.Add(1)
 	go func() {
 		defer dbg.LogPanic()
 		defer srv.loopWG.Done()
 		srv.listenLoop(ctx)
 	}()
-	return nil
 }
 
 // doPeerOp runs fn on the main loop.
