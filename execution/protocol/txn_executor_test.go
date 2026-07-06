@@ -447,6 +447,34 @@ func TestStartTxHook_NilResultIsError(t *testing.T) {
 	require.Error(t, err)
 }
 
+// TestGasChargingHook_RaisesGasAboveBudgetIsError pins that a GasCharging
+// override handing back more gas than the pre-hook budget is rejected instead
+// of letting the EVM run past the tx limit and underflow refundGas.
+func TestGasChargingHook_RaisesGasAboveBudgetIsError(t *testing.T) {
+	t.Parallel()
+
+	const blockGasLimit = 30_000_000
+	sender := accounts.InternAddress(common.HexToAddress("0x1111111111111111111111111111111111111111"))
+	recipient := accounts.InternAddress(common.HexToAddress("0x2222222222222222222222222222222222222222"))
+
+	ibs := state.New(state.NewNoopReader())
+	blockCtx := evmtypes.BlockContext{
+		CanTransfer: CanTransfer,
+		Transfer:    misc.Transfer,
+		GasLimit:    blockGasLimit,
+		GasCharging: func(_ evmtypes.IntraBlockState, _ evmtypes.Message, gasRemaining mdgas.MdGas, _ mdgas.IntrinsicGasCalcResult) (mdgas.MdGas, accounts.Address, error) {
+			raised := gasRemaining
+			raised.Regular += 1_000_000
+			return raised, accounts.NilAddress, nil
+		},
+	}
+	evm := vm.NewEVM(blockCtx, evmtypes.TxContext{}, ibs, chain.TestChainOsakaConfig, vm.Config{NoBaseFee: true})
+	msg := newSimpleTransferMsg(sender, recipient, 100_000, true)
+
+	_, err := NewTxnExecutor(evm, msg, new(GasPool).AddGas(blockGasLimit)).Execute(true, false)
+	require.Error(t, err)
+}
+
 // TestComputeRefundHook_GasUsedAboveLimitIsError pins that a refund override
 // claiming more gas used than the tx's limit is rejected instead of
 // underflowing the sender refund in refundGas.

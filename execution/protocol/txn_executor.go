@@ -575,6 +575,9 @@ func (st *TxnExecutor) Execute(refunds bool, gasBailout bool) (result *evmtypes.
 		if hookErr != nil {
 			return nil, hookErr
 		}
+		if adjustedGasRemaining.Regular > st.gasRemaining.Regular || adjustedGasRemaining.State > st.gasRemaining.State {
+			return nil, fmt.Errorf("%w: GasCharging hook raised gas above the tx budget (regular %d->%d, state %d->%d)", ErrTxnExecutionFailed, st.gasRemaining.Regular, adjustedGasRemaining.Regular, st.gasRemaining.State, adjustedGasRemaining.State)
+		}
 		st.gasRemaining = adjustedGasRemaining
 		if !tipRecipient.IsNil() {
 			coinbase = tipRecipient
