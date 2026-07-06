@@ -280,9 +280,7 @@ func (f *ForkChoiceStore) OnBlock(ctx context.Context, block *cltypes.SignedBeac
 	// not via a separate execution_payload_state. We still validate that the parent's
 	// payload was received (store.payloads check) via validateParentPayloadPath above.
 
-	lcUpdateBefore := f.forkGraph.NewestLightClientUpdate()
-	lastProcessedState, status, err := f.forkGraph.AddChainSegment(block, fullValidation)
-	f.queueLightClientEvents(lcUpdateBefore, block.Version().String())
+	lastProcessedState, status, err := f.addChainSegmentAndQueueLightClientEvents(block, fullValidation)
 	if err != nil {
 		return err
 	}
@@ -488,6 +486,16 @@ func (f *ForkChoiceStore) OnBlock(ctx context.Context, block *cltypes.SignedBeac
 	}
 
 	return nil
+}
+
+func (f *ForkChoiceStore) addChainSegmentAndQueueLightClientEvents(block *cltypes.SignedBeaconBlock, fullValidation bool) (*state.CachingBeaconState, fork_graph.ChainSegmentInsertionResult, error) {
+	lcUpdateBefore := f.forkGraph.NewestLightClientUpdate()
+	lastProcessedState, status, err := f.forkGraph.AddChainSegment(block, fullValidation)
+	if err != nil {
+		return nil, status, err
+	}
+	f.queueLightClientEvents(lcUpdateBefore, block.Version().String())
+	return lastProcessedState, status, nil
 }
 
 // queueLightClientEvents emits the light client events for an update stored by
