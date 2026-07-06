@@ -137,8 +137,14 @@ func TestHashSort_WarmupArenaNoRace(t *testing.T) {
 		require.EqualValues(t, numKeys, ut.Size())
 
 		ctx := context.Background()
-		// Large per-level stall keeps the straggler in-flight across the arena reset.
-		warmuper := testWarmuper(ctx, slowCtxFactory(2*time.Millisecond), 4)
+		warmuper := NewWarmuper(ctx, WarmupConfig{
+			Enabled: true,
+			// Large per-level stall keeps the straggler in-flight across the arena reset.
+			CtxFactory: slowCtxFactory(2 * time.Millisecond),
+			NumWorkers: 4,
+			MaxDepth:   64,
+			LogPrefix:  "test",
+		})
 		warmuper.Start()
 
 		visited := 0
@@ -194,7 +200,13 @@ func TestHashSort_WarmupLap(t *testing.T) {
 		require.EqualValues(t, numKeys, ut.Size())
 
 		ctx := context.Background()
-		warmuper := testWarmuper(ctx, slowCtxFactory(2*time.Millisecond), 4)
+		warmuper := NewWarmuper(ctx, WarmupConfig{
+			Enabled:    true,
+			CtxFactory: slowCtxFactory(2 * time.Millisecond),
+			NumWorkers: 4,
+			MaxDepth:   64,
+			LogPrefix:  "test",
+		})
 		warmuper.Start()
 
 		visited := 0
@@ -243,7 +255,13 @@ func TestHashSort_WaitBufferFreeErrorKeepsArenaInvariant(t *testing.T) {
 		defer cancel()
 		entered := make(chan struct{}, 1)
 		release := make(chan struct{})
-		warmuper := testWarmuper(ctx, gatedStragglerFactory(entered, release), 4)
+		warmuper := NewWarmuper(ctx, WarmupConfig{
+			Enabled:    true,
+			CtxFactory: gatedStragglerFactory(entered, release),
+			NumWorkers: 4,
+			MaxDepth:   64,
+			LogPrefix:  "test",
+		})
 		warmuper.Start()
 		defer warmuper.CloseAndWait()
 		defer close(release)
@@ -319,7 +337,13 @@ func TestWarmuper_WaitBufferFree_BlocksUntilStragglerDone(t *testing.T) {
 
 	entered := make(chan struct{})
 	release := make(chan struct{})
-	warmuper := testWarmuper(context.Background(), gatedCtxFactory(entered, release), 1)
+	warmuper := NewWarmuper(context.Background(), WarmupConfig{
+		Enabled:    true,
+		CtxFactory: gatedCtxFactory(entered, release),
+		NumWorkers: 1,
+		MaxDepth:   64,
+		LogPrefix:  "test",
+	})
 	warmuper.Start()
 	defer func() { require.NoError(t, warmuper.Wait()) }()
 
@@ -357,7 +381,13 @@ func TestWarmuper_WaitBufferFree_UnblocksOnCancel(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	entered := make(chan struct{})
 	release := make(chan struct{})
-	warmuper := testWarmuper(ctx, gatedCtxFactory(entered, release), 1)
+	warmuper := NewWarmuper(ctx, WarmupConfig{
+		Enabled:    true,
+		CtxFactory: gatedCtxFactory(entered, release),
+		NumWorkers: 1,
+		MaxDepth:   64,
+		LogPrefix:  "test",
+	})
 	warmuper.Start()
 	defer warmuper.CloseAndWait()
 	defer close(release)
@@ -390,7 +420,13 @@ func TestWarmuper_WaitBufferFree_UnblocksOnCancel(t *testing.T) {
 func TestWarmuper_WaitBufferFree_FastPath(t *testing.T) {
 	t.Parallel()
 
-	warmuper := testWarmuper(context.Background(), noopCtxFactory, 1)
+	warmuper := NewWarmuper(context.Background(), WarmupConfig{
+		Enabled:    true,
+		CtxFactory: noopCtxFactory,
+		NumWorkers: 1,
+		MaxDepth:   64,
+		LogPrefix:  "test",
+	})
 	warmuper.Start()
 	defer func() { require.NoError(t, warmuper.Wait()) }()
 
@@ -409,7 +445,13 @@ func TestWarmuper_WaitBufferFree_FastPath(t *testing.T) {
 
 func TestBranchData_MergeHexBranches2(t *testing.T) {
 	t.Parallel()
-	row, bm, enc := encodeCellRow(t, 16)
+	row, bm := generateCellRow(t, 16)
+
+	be := NewBranchEncoder(1024)
+	cellData := generateCellEncodeDataRow(t, row, bm)
+	enc, err := be.EncodeBranch(bm, bm, bm, &cellData)
+
+	require.NoError(t, err)
 	require.NotEmpty(t, enc)
 	t.Logf("enc [%d] %x\n", len(enc), enc)
 
@@ -446,7 +488,11 @@ func TestBranchData_ChildCount(t *testing.T) {
 	require.Equal(t, 0, BranchData{0xff, 0xff, 0x00}.ChildCount(), "buffer shorter than 4 bytes has no afterMap")
 
 	for _, size := range []int{1, 2, 5, 16} {
-		_, bm, enc := encodeCellRow(t, size)
+		row, bm := generateCellRow(t, size)
+		cellData := generateCellEncodeDataRow(t, row, bm)
+		be := NewBranchEncoder(1024)
+		enc, err := be.EncodeBranch(bm, bm, bm, &cellData)
+		require.NoError(t, err)
 		require.Equal(t, size, bits.OnesCount16(bm))
 		require.Equal(t, size, enc.ChildCount(), "ChildCount must equal the number of afterMap children")
 	}
@@ -499,7 +545,12 @@ func TestDecodeBranchWithLeafHashes(t *testing.T) {
 func TestBranchData_ReplacePlainKeys(t *testing.T) {
 	t.Parallel()
 
-	_, _, enc := encodeCellRow(t, 16)
+	row, bm := generateCellRow(t, 16)
+
+	be := NewBranchEncoder(1024)
+	cellData := generateCellEncodeDataRow(t, row, bm)
+	enc, err := be.EncodeBranch(bm, bm, bm, &cellData)
+	require.NoError(t, err)
 
 	original := common.Copy(enc)
 
@@ -540,7 +591,12 @@ func TestBranchData_ReplacePlainKeys(t *testing.T) {
 func TestBranchData_ReplacePlainKeys_WithEmpty(t *testing.T) {
 	t.Parallel()
 
-	_, _, enc := encodeCellRow(t, 16)
+	row, bm := generateCellRow(t, 16)
+
+	be := NewBranchEncoder(1024)
+	cellData := generateCellEncodeDataRow(t, row, bm)
+	enc, err := be.EncodeBranch(bm, bm, bm, &cellData)
+	require.NoError(t, err)
 
 	original := common.Copy(enc)
 
@@ -583,7 +639,11 @@ func TestBranchData_ReplacePlainKeys_WithEmpty(t *testing.T) {
 func TestBranchData_ReplacePlainKeys_PartialChange(t *testing.T) {
 	t.Parallel()
 
-	_, _, enc := encodeCellRow(t, 16)
+	row, bm := generateCellRow(t, 16)
+	be := NewBranchEncoder(1024)
+	cellData := generateCellEncodeDataRow(t, row, bm)
+	enc, err := be.EncodeBranch(bm, bm, bm, &cellData)
+	require.NoError(t, err)
 
 	original := common.Copy(enc)
 
@@ -696,7 +756,14 @@ func TestUpdates_TouchPlainKey(t *testing.T) {
 	require.EqualValues(t, len(uniqUpds), sz)
 
 	ctx := context.Background()
-	warmuper := testWarmuper(ctx, noopCtxFactory, 2)
+	cfg := WarmupConfig{
+		Enabled:    true,
+		CtxFactory: noopCtxFactory,
+		NumWorkers: 2,
+		MaxDepth:   64,
+		LogPrefix:  "test",
+	}
+	warmuper := NewWarmuper(ctx, cfg)
 	warmuper.Start()
 
 	i := 0
@@ -714,7 +781,14 @@ func TestUpdates_TouchPlainKey(t *testing.T) {
 	require.NoError(t, err)
 
 	// Create a new warmuper for the second test
-	warmuper2 := testWarmuper(ctx, noopCtxFactory, 2)
+	cfg2 := WarmupConfig{
+		Enabled:    true,
+		CtxFactory: noopCtxFactory,
+		NumWorkers: 2,
+		MaxDepth:   64,
+		LogPrefix:  "test",
+	}
+	warmuper2 := NewWarmuper(ctx, cfg2)
 	warmuper2.Start()
 
 	i = 0

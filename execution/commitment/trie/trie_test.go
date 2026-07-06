@@ -43,30 +43,6 @@ func newEmpty() *Trie {
 	return New(common.Hash{})
 }
 
-// testAccount builds an account with the given nonce and balance, defaulting Root to
-// EmptyRoot and CodeHash to EmptyCodeHash; opts override the remaining fields.
-func testAccount(nonce uint64, balance uint256.Int, opts ...func(*accounts.Account)) *accounts.Account {
-	acc := accounts.NewAccount()
-	acc.Nonce = nonce
-	acc.Balance = balance
-	for _, o := range opts {
-		o(&acc)
-	}
-	return &acc
-}
-
-func withIncarnation(inc uint64) func(*accounts.Account) {
-	return func(a *accounts.Account) { a.Incarnation = inc }
-}
-
-func withRoot(root common.Hash) func(*accounts.Account) {
-	return func(a *accounts.Account) { a.Root = root }
-}
-
-func withCodeHash(codeHash common.Hash) func(*accounts.Account) {
-	return func(a *accounts.Account) { a.CodeHash = accounts.InternCodeHash(codeHash) }
-}
-
 func TestEmptyTrie(t *testing.T) {
 	var trie Trie
 	res := trie.Hash()
@@ -186,7 +162,7 @@ const (
 )
 
 func runRandTest(rt randTest) bool {
-	tr := newEmpty()
+	tr := New(common.Hash{})
 	values := make(map[string]string) // tracks content of the trie
 
 	for i, step := range rt {
@@ -213,7 +189,7 @@ func runRandTest(rt randTest) bool {
 		case opItercheckhash:
 			// FIXME: restore for Erigon
 			/*
-				checktr := newEmpty()
+				checktr := New(common.Hash{})
 				it := NewIterator(tr.NodeIterator(nil))
 				for it.Next() {
 					checktr.Update(it.Key, it.Value)
@@ -280,13 +256,13 @@ func TestDeepHash(t *testing.T) {
 		{{"key1", "value1"}, {"key2", "value2"}, {"\xffek3", "value3"}},
 	}
 	for i, keyVals := range testdata {
-		trie := newEmpty()
+		trie := New(common.Hash{})
 		for _, keyVal := range keyVals {
 			trie.Update([]byte(keyVal.key), []byte(keyVal.value))
 		}
 		hash1 := trie.Hash()
 
-		prefixTrie := newEmpty()
+		prefixTrie := New(common.Hash{})
 		prefixTrie.UpdateAccount([]byte(prefix), &acc)
 		for _, keyVal := range keyVals {
 			// Add a prefix to every key
@@ -342,15 +318,10 @@ func insertAccountWithCode(t *testing.T, trie *Trie, random *rand.Rand, address 
 	return acc
 }
 
-// newCodeTrie returns the common prologue for the TestCodeNode* tests: an empty trie, a
-// zero-seeded RNG, and the address at index 0.
-func newCodeTrie(t *testing.T) (*Trie, *rand.Rand, [20]byte) {
-	t.Helper()
-	return newEmpty(), rand.New(rand.NewSource(0)), getAddressForIndex(0)
-}
-
 func TestCodeNodeValid(t *testing.T) {
-	trie, random, _ := newCodeTrie(t)
+	trie := newEmpty()
+
+	random := rand.New(rand.NewSource(0))
 
 	numberOfAccounts := 20
 
@@ -372,8 +343,9 @@ func TestCodeNodeValid(t *testing.T) {
 }
 
 func TestCodeNodeUpdateNotExisting(t *testing.T) {
-	trie, random, address := newCodeTrie(t)
-	insertAccountWithCode(t, trie, random, address, genRandomByteArrayOfLen(128))
+	trie := newEmpty()
+	random := rand.New(rand.NewSource(0))
+	insertAccountWithCode(t, trie, random, getAddressForIndex(0), genRandomByteArrayOfLen(128))
 
 	nonExistingAddress := getAddressForIndex(9999)
 	codeValue2 := genRandomByteArrayOfLen(128)
@@ -383,8 +355,9 @@ func TestCodeNodeUpdateNotExisting(t *testing.T) {
 }
 
 func TestCodeNodeGetNotExistingAccount(t *testing.T) {
-	trie, random, address := newCodeTrie(t)
-	insertAccountWithCode(t, trie, random, address, genRandomByteArrayOfLen(128))
+	trie := newEmpty()
+	random := rand.New(rand.NewSource(0))
+	insertAccountWithCode(t, trie, random, getAddressForIndex(0), genRandomByteArrayOfLen(128))
 
 	nonExistingAddress := getAddressForIndex(9999)
 
@@ -394,7 +367,9 @@ func TestCodeNodeGetNotExistingAccount(t *testing.T) {
 }
 
 func TestCodeNodeGetHashedAccount(t *testing.T) {
-	trie, _, address := newCodeTrie(t)
+	trie := newEmpty()
+
+	address := getAddressForIndex(0)
 
 	fakeAccount := genRandomByteArrayOfLen(50)
 	fakeAccountHash := common.BytesToHash(crypto.Keccak256(fakeAccount))
@@ -409,7 +384,9 @@ func TestCodeNodeGetHashedAccount(t *testing.T) {
 }
 
 func TestCodeNodeGetExistingAccountNoCodeNotEmpty(t *testing.T) {
-	trie, random, address := newCodeTrie(t)
+	trie := newEmpty()
+	random := rand.New(rand.NewSource(0))
+	address := getAddressForIndex(0)
 
 	acc := randomAccountWithCode(random, genRandomByteArrayOfLen(128))
 	trie.UpdateAccount(crypto.Keccak256(address[:]), &acc)
@@ -420,7 +397,9 @@ func TestCodeNodeGetExistingAccountNoCodeNotEmpty(t *testing.T) {
 }
 
 func TestCodeNodeGetExistingAccountEmptyCode(t *testing.T) {
-	trie, random, address := newCodeTrie(t)
+	trie := newEmpty()
+	random := rand.New(rand.NewSource(0))
+	address := getAddressForIndex(0)
 
 	acc := randomAccountWithCode(random, nil)
 	trie.UpdateAccount(crypto.Keccak256(address[:]), &acc)
@@ -431,7 +410,9 @@ func TestCodeNodeGetExistingAccountEmptyCode(t *testing.T) {
 }
 
 func TestCodeNodeWrongHash(t *testing.T) {
-	trie, random, address := newCodeTrie(t)
+	trie := newEmpty()
+	random := rand.New(rand.NewSource(0))
+	address := getAddressForIndex(0)
 
 	acc := randomAccountWithCode(random, genRandomByteArrayOfLen(128))
 	trie.UpdateAccount(crypto.Keccak256(address[:]), &acc)
@@ -442,7 +423,9 @@ func TestCodeNodeWrongHash(t *testing.T) {
 }
 
 func TestCodeNodeUpdateAccountAndCodeValidHash(t *testing.T) {
-	trie, random, address := newCodeTrie(t)
+	trie := newEmpty()
+	random := rand.New(rand.NewSource(0))
+	address := getAddressForIndex(0)
 
 	acc := insertAccountWithCode(t, trie, random, address, genRandomByteArrayOfLen(128))
 
@@ -455,7 +438,9 @@ func TestCodeNodeUpdateAccountAndCodeValidHash(t *testing.T) {
 }
 
 func TestCodeNodeUpdateAccountAndCodeInvalidHash(t *testing.T) {
-	trie, random, address := newCodeTrie(t)
+	trie := newEmpty()
+	random := rand.New(rand.NewSource(0))
+	address := getAddressForIndex(0)
 
 	acc := insertAccountWithCode(t, trie, random, address, genRandomByteArrayOfLen(128))
 
@@ -469,7 +454,9 @@ func TestCodeNodeUpdateAccountAndCodeInvalidHash(t *testing.T) {
 }
 
 func TestCodeNodeUpdateAccountChangeCodeHash(t *testing.T) {
-	trie, random, address := newCodeTrie(t)
+	trie := newEmpty()
+	random := rand.New(rand.NewSource(0))
+	address := getAddressForIndex(0)
 
 	acc := insertAccountWithCode(t, trie, random, address, genRandomByteArrayOfLen(128))
 
@@ -483,7 +470,9 @@ func TestCodeNodeUpdateAccountChangeCodeHash(t *testing.T) {
 }
 
 func TestCodeNodeUpdateAccountNoChangeCodeHash(t *testing.T) {
-	trie, random, address := newCodeTrie(t)
+	trie := newEmpty()
+	random := rand.New(rand.NewSource(0))
+	address := getAddressForIndex(0)
 
 	codeValue1 := genRandomByteArrayOfLen(128)
 	acc := insertAccountWithCode(t, trie, random, address, codeValue1)
@@ -551,12 +540,30 @@ func TestRLPEncodeDecodeWithAccountsAndStorage(t *testing.T) {
 
 	// Create accounts
 	testAccounts := []*accounts.Account{
-		testAccount(1, *uint256.NewInt(1000000000000000000)), // 1 ETH
-		testAccount(42, *uint256.NewInt(10000000000000000000), // 10 ETH
-			withCodeHash(crypto.Keccak256Hash([]byte{0x60, 0x80, 0x60, 0x40}))),
-		testAccount(0, *uint256.NewInt(0)),
-		testAccount(999, *uint256.NewInt(0xffffffffffffffff),
-			withCodeHash(crypto.Keccak256Hash([]byte("contract code")))),
+		{
+			Nonce:    1,
+			Balance:  *uint256.NewInt(1000000000000000000), // 1 ETH
+			Root:     EmptyRoot,
+			CodeHash: accounts.EmptyCodeHash,
+		},
+		{
+			Nonce:    42,
+			Balance:  *uint256.NewInt(10000000000000000000), // 10 ETH
+			Root:     EmptyRoot,                             // Will be updated when storage is added
+			CodeHash: accounts.InternCodeHash(crypto.Keccak256Hash([]byte{0x60, 0x80, 0x60, 0x40})),
+		},
+		{
+			Nonce:    0,
+			Balance:  *uint256.NewInt(0),
+			Root:     EmptyRoot,
+			CodeHash: accounts.EmptyCodeHash,
+		},
+		{
+			Nonce:    999,
+			Balance:  *uint256.NewInt(0xffffffffffffffff),
+			Root:     EmptyRoot,
+			CodeHash: accounts.InternCodeHash(crypto.Keccak256Hash([]byte("contract code"))),
+		},
 	}
 
 	// Insert accounts using UpdateAccount (creates AccountNode entries)
@@ -646,102 +653,4 @@ func TestRLPEncodeDecodeWithAccountsAndStorage(t *testing.T) {
 		require.EqualValues(t, testAccounts[i], acc)
 	}
 
-}
-
-// The witness prune paths (WitnessNodesForKeys and WitnessNodesForKeysFromNodes, the
-// serializer debug_executionWitness uses) must omit inlined (<32B) nodes and stay
-// equivalent. A node whose RLP is <32 bytes is inlined into its parent and never
-// referenced by hash, so it must not appear as a standalone witness node. This pins a
-// storage trie whose branch inlines two 31-byte leaves (55 remaining nibbles + 1-byte
-// value each): the prune must emit the branch but not the two leaves.
-func TestWitnessPruneOmitsInlinedNodes(t *testing.T) {
-	stateTrie := newEmpty()
-
-	contractAddr := common.HexToAddress("0x2222222222222222222222222222222222222222")
-	contract := &accounts.Account{
-		Nonce:    7,
-		Balance:  *uint256.NewInt(5),
-		Root:     EmptyRoot,
-		CodeHash: accounts.InternCodeHash(crypto.Keccak256Hash([]byte{0x60, 0x00})),
-	}
-	stateTrie.UpdateAccount(crypto.Keccak256(contractAddr[:]), contract)
-
-	contractHash := crypto.Keccak256Hash(contractAddr[:])
-	slotA := make([]byte, 32)
-	slotB := make([]byte, 32)
-	slotA[4] = 0x10
-	slotB[4] = 0x20
-	for i := 5; i < 32; i++ {
-		slotA[i] = byte(i)
-		slotB[i] = byte(0xff - i)
-	}
-	keyA := append(append([]byte{}, contractHash[:]...), slotA...)
-	keyB := append(append([]byte{}, contractHash[:]...), slotB...)
-	stateTrie.Update(keyA, []byte{0x01})
-	stateTrie.Update(keyB, []byte{0x02})
-	_ = stateTrie.Hash()
-
-	toNibbles := func(b []byte) []byte {
-		out := make([]byte, 0, len(b)*2)
-		for _, x := range b {
-			out = append(out, x>>4, x&0x0f)
-		}
-		return out
-	}
-	provedKeys := [][]byte{toNibbles(keyA), toNibbles(keyB)}
-
-	full, err := stateTrie.RLPEncode()
-	require.NoError(t, err)
-
-	// Production always prunes a trie decoded from the captured node bytes (branches
-	// are FullNodes there), so walk RLPDecode(full), not the Update-built trie.
-	wt, err := RLPDecode(full)
-	require.NoError(t, err)
-	fromTrie, err := wt.WitnessNodesForKeys(provedKeys)
-	require.NoError(t, err)
-	require.NotEmpty(t, fromTrie)
-	fromNodes, err := WitnessNodesForKeysFromNodes(full, provedKeys)
-	require.NoError(t, err)
-
-	for i, n := range fromTrie {
-		require.GreaterOrEqualf(t, len(n), 32, "WitnessNodesForKeys node %d len %d (<32B)", i, len(n))
-	}
-	for i, n := range fromNodes {
-		require.GreaterOrEqualf(t, len(n), 32, "WitnessNodesForKeysFromNodes node %d len %d (<32B)", i, len(n))
-	}
-
-	set := func(ns [][]byte) map[string]struct{} {
-		m := make(map[string]struct{}, len(ns))
-		for _, n := range ns {
-			m[string(n)] = struct{}{}
-		}
-		return m
-	}
-	require.Equal(t, set(fromTrie), set(fromNodes), "byHash and RLPDecode prune must agree")
-}
-
-// The trie root is force-hashed (Trie.Hash) and referenced by that hash even when its
-// own RLP is <32B, so both prune paths must keep it despite the inline-node filter.
-func TestWitnessPruneKeepsSmallRoot(t *testing.T) {
-	leaf := &ShortNode{Key: []byte{1, 2, 3, 4, 5, 16}, Val: ValueNode([]byte{0x2a})}
-
-	hasher := newHasher(false)
-	rootRLP, err := hasher.hashChildren(leaf, 0)
-	returnHasherToPool(hasher)
-	require.NoError(t, err)
-	require.Less(t, len(rootRLP), 32, "test needs a <32B root")
-
-	provedKeys := [][]byte{{1, 2, 3, 4, 5}}
-
-	tr := New(common.Hash{})
-	tr.RootNode = leaf
-	fromTrie, err := tr.WitnessNodesForKeys(provedKeys)
-	require.NoError(t, err)
-	require.Len(t, fromTrie, 1)
-	require.Equal(t, rootRLP, []byte(fromTrie[0]))
-
-	fromNodes, err := WitnessNodesForKeysFromNodes([][]byte{rootRLP}, provedKeys)
-	require.NoError(t, err)
-	require.Len(t, fromNodes, 1)
-	require.Equal(t, rootRLP, []byte(fromNodes[0]))
 }

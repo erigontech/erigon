@@ -24,6 +24,7 @@ import (
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/common/u256"
+	"github.com/erigontech/erigon/execution/types/accounts"
 )
 
 // A contract touched for its account fields only (no storage slot accessed) keeps a
@@ -33,7 +34,12 @@ import (
 func TestExtractWitness_RetainedAccountBlindedStorage(t *testing.T) {
 	tr := newEmpty()
 	addrHash := crypto.Keccak256(common.FromHex("0x00112233445566778899aabbccddeeff00112233"))
-	acc := testAccount(1, u256.N100, withRoot(common.BytesToHash([]byte("non-empty storage root"))))
+	acc := &accounts.Account{
+		Nonce:    1,
+		Balance:  u256.N100,
+		Root:     common.BytesToHash([]byte("non-empty storage root")),
+		CodeHash: accounts.InternCodeHash(emptyState),
+	}
 	tr.UpdateAccount(addrHash, acc)
 
 	sn, ok := tr.RootNode.(*ShortNode)

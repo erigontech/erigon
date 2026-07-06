@@ -26,7 +26,7 @@ import (
 	"context"
 	"net/http"
 
-	"github.com/urfave/cli/v3"
+	"github.com/urfave/cli/v2"
 
 	"github.com/erigontech/erigon/cmd/utils"
 	"github.com/erigontech/erigon/common/log/v3"
@@ -80,7 +80,7 @@ type Params struct {
 	CustomBuckets kv.TableCfg
 }
 
-func NewNodConfigUrfave(ctx *cli.Command, debugMux *http.ServeMux, logger log.Logger) (*nodecfg.Config, error) {
+func NewNodConfigUrfave(ctx *cli.Context, debugMux *http.ServeMux, logger log.Logger) (*nodecfg.Config, error) {
 	// If we're running a known preset, log it for convenience.
 	chain := ctx.String(utils.ChainFlag.Name)
 	switch chain {
@@ -123,14 +123,14 @@ func NewNodConfigUrfave(ctx *cli.Command, debugMux *http.ServeMux, logger log.Lo
 	return nodeConfig, nil
 }
 
-func NewEthConfigUrfave(nodeCtx context.Context, ctx *cli.Command, nodeConfig *nodecfg.Config, logger log.Logger) *ethconfig.Config {
+func NewEthConfigUrfave(ctx *cli.Context, nodeConfig *nodecfg.Config, logger log.Logger) *ethconfig.Config {
 	ethConfig := ethconfig.Defaults // Needs to be a copy, not pointer
-	erigoncli.BuildEthConfig(nodeCtx, ctx, nodeConfig, &ethConfig, logger)
+	erigoncli.BuildEthConfig(ctx, nodeConfig, &ethConfig, logger)
 	return &ethConfig
 }
 
 // New creates a new `ErigonNode`.
-// * ctx - `*cli.Command` from the main function. Necessary to be able to configure the node based on the command-line flags
+// * ctx - `*cli.Context` from the main function. Necessary to be able to configure the node based on the command-line flags
 // * sync - `stagedsync.StagedSync`, an instance of staged sync, setup just as needed.
 // * optionalParams - additional parameters for running a node.
 func New(

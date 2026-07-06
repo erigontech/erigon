@@ -12,7 +12,6 @@ linters:
     - gochecksumtype
     - gocritic
     - gosmopolitan
-    - modernize
     - nilnesserr
     - prealloc
     - reassign
@@ -89,25 +88,6 @@ linters:
           rules: rules.go
         underef:
           skipRecvDeref: true
-    modernize:
-      disable: # each disabled analyzer has an existing backlog; enable it once its findings are cleared
-        - any
-        - atomictypes
-        - forvar
-        - mapsloop
-        - minmax
-        - omitzero
-        - rangeint
-        - reflecttypefor
-        - slicesbackward
-        - slicescontains
-        - slicessort
-        - stditerators
-        - stringsbuilder
-        - stringscut
-        - stringscutprefix
-        - testingcontext
-        - waitgroupgo
     govet:
       enable:
         - nilness

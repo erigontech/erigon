@@ -31,7 +31,7 @@ import (
 	"path/filepath"
 
 	"github.com/holiman/uint256"
-	"github.com/urfave/cli/v3"
+	"github.com/urfave/cli/v2"
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/crypto"
@@ -99,7 +99,7 @@ type input struct {
 	Txs   []*txWithKey       `json:"txs,omitempty"`
 }
 
-func Main(_ context.Context, ctx *cli.Command) error {
+func Main(ctx *cli.Context) error {
 	log.Root().SetHandler(log.LvlFilterHandler(log.LvlInfo, log.StderrHandler))
 	var (
 		err     error
@@ -634,7 +634,7 @@ func saveFile(baseDir, filename string, data any) error {
 
 // dispatchOutput writes the output data to either stderr or stdout, or to the specified
 // files
-func dispatchOutput(ctx *cli.Command, baseDir string, result *protocol.EphemeralExecResult, alloc Alloc, body hexutil.Bytes) error {
+func dispatchOutput(ctx *cli.Context, baseDir string, result *protocol.EphemeralExecResult, alloc Alloc, body hexutil.Bytes) error {
 	stdOutObject := make(map[string]any)
 	stdErrObject := make(map[string]any)
 	dispatch := func(baseDir, fName, name string, obj any) error {

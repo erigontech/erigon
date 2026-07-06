@@ -136,7 +136,7 @@ func printSample(t *testing.T, iter int) {
 }
 
 func procStatusKb(s, key string) int {
-	for line := range strings.SplitSeq(s, "\n") {
+	for _, line := range strings.Split(s, "\n") {
 		if !strings.HasPrefix(line, key) {
 			continue
 		}

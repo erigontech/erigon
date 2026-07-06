@@ -3,7 +3,7 @@ package app
 import (
 	"runtime"
 
-	"github.com/urfave/cli/v3"
+	"github.com/urfave/cli/v2"
 )
 
 var (

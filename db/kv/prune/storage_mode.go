@@ -31,36 +31,31 @@ import (
 
 var (
 	ArchiveMode = Mode{
-		Initialised:       true,
-		History:           Distance(math.MaxUint64),
-		Blocks:            KeepAllBlocksPruneMode,
-		CommitmentHistory: KeepAllBlocksPruneMode,
+		Initialised: true,
+		History:     Distance(math.MaxUint64),
+		Blocks:      KeepAllBlocksPruneMode,
 	}
 	FullMode = Mode{
-		Initialised:       true,
-		Blocks:            Distance(config3.DefaultPruneDistance),
-		History:           Distance(config3.DefaultPruneDistance),
-		CommitmentHistory: KeepAllBlocksPruneMode,
+		Initialised: true,
+		Blocks:      Distance(config3.DefaultPruneDistance),
+		History:     Distance(config3.DefaultPruneDistance),
 	}
 	BlocksMode = Mode{
-		Initialised:       true,
-		Blocks:            KeepAllBlocksPruneMode,
-		History:           Distance(config3.DefaultPruneDistance),
-		CommitmentHistory: KeepAllBlocksPruneMode,
+		Initialised: true,
+		Blocks:      KeepAllBlocksPruneMode,
+		History:     Distance(config3.DefaultPruneDistance),
 	}
 	MinimalMode = Mode{
-		Initialised:       true,
-		Blocks:            Distance(config3.MinimalPruneDistance),
-		History:           Distance(config3.MinimalPruneDistance),
-		CommitmentHistory: KeepAllBlocksPruneMode,
+		Initialised: true,
+		Blocks:      Distance(config3.MinimalPruneDistance),
+		History:     Distance(config3.MinimalPruneDistance),
 	}
 
 	DefaultMode = ArchiveMode
 	MockMode    = Mode{
-		Initialised:       true,
-		History:           Distance(math.MaxUint64),
-		Blocks:            Distance(math.MaxUint64),
-		CommitmentHistory: KeepAllBlocksPruneMode,
+		Initialised: true,
+		History:     Distance(math.MaxUint64),
+		Blocks:      Distance(math.MaxUint64),
 	}
 
 	ErrUnknownPruneMode = fmt.Errorf("--prune.mode must be one of %s, %s, %s, %s", fullModeStr, archiveModeStr, minimalModeStr, blockModeStr)
@@ -74,10 +69,9 @@ const (
 )
 
 type Mode struct {
-	Initialised       bool // Set when the values are initialised (not default)
-	History           BlockAmount
-	Blocks            BlockAmount
-	CommitmentHistory BlockAmount
+	Initialised bool // Set when the values are initialised (not default)
+	History     BlockAmount
+	Blocks      BlockAmount
 }
 
 // String renders m in the shape an operator would type on the CLI: the named
@@ -120,7 +114,6 @@ func (m Mode) String() string {
 		if m.History.toValue() != FullMode.History.toValue() {
 			fmt.Fprintf(&sb, " --prune.distance=%d", m.History.toValue())
 		}
-		appendCommitmentHistory(&sb, m)
 		return sb.String()
 	}
 	if m.Blocks == KeepAllBlocksPruneMode && m.History.Enabled() {
@@ -131,7 +124,6 @@ func (m Mode) String() string {
 		if m.History.toValue() != BlocksMode.History.toValue() {
 			fmt.Fprintf(&sb, " --prune.distance=%d", m.History.toValue())
 		}
-		appendCommitmentHistory(&sb, m)
 		return sb.String()
 	}
 
@@ -147,23 +139,14 @@ func (m Mode) String() string {
 	if m.Blocks.toValue() != DefaultMode.Blocks.toValue() {
 		fmt.Fprintf(&sb, " --prune.distance.blocks=%s", blocksDistanceCLIValue(m.Blocks.toValue()))
 	}
-	appendCommitmentHistory(&sb, m)
 	return sb.String()
 }
 
 func modeEquals(a, b Mode) bool {
-	return a.History.toValue() == b.History.toValue() &&
-		a.Blocks.toValue() == b.Blocks.toValue() &&
-		commitmentHistoryOrDefault(a.CommitmentHistory).toValue() == commitmentHistoryOrDefault(b.CommitmentHistory).toValue()
+	return a.History.toValue() == b.History.toValue() && a.Blocks.toValue() == b.Blocks.toValue()
 }
 
-func appendCommitmentHistory(sb *strings.Builder, m Mode) {
-	if m.CommitmentHistory != nil && m.CommitmentHistory.toValue() != KeepAllBlocksPruneMode.toValue() {
-		fmt.Fprintf(sb, " --prune.commitment-history.older=%d", m.CommitmentHistory.toValue())
-	}
-}
-
-func FromCli(pruneMode string, distanceHistory, distanceBlocks, commitmentHistoryOlder uint64) (Mode, error) {
+func FromCli(pruneMode string, distanceHistory, distanceBlocks uint64) (Mode, error) {
 	var mode Mode
 	switch pruneMode {
 	case archiveModeStr, "":
@@ -184,26 +167,7 @@ func FromCli(pruneMode string, distanceHistory, distanceBlocks, commitmentHistor
 	if distanceBlocks > 0 {
 		mode.Blocks = Distance(distanceBlocks)
 	}
-	// 0 (or unset) means unlimited: keep the named-mode default rather than
-	// Distance(0), which would mean "keep nothing".
-	if commitmentHistoryOlder > 0 {
-		mode.CommitmentHistory = Distance(commitmentHistoryOlder)
-	}
 	return mode, nil
-}
-
-// Validate rejects a finite commitment-history window wider than state-history
-// retention: commitment history older than --prune.distance can't serve
-// eth_getProof, so the excess is wasted. Unbounded windows impose no bound.
-func (m Mode) Validate() error {
-	commitmentHistory := commitmentHistoryOrDefault(m.CommitmentHistory)
-	if !commitmentHistory.Enabled() || m.History == nil || !m.History.Enabled() {
-		return nil
-	}
-	if commitment, history := commitmentHistory.toValue(), m.History.toValue(); commitment > history {
-		return fmt.Errorf("--prune.commitment-history.older=%d exceeds --prune.distance=%d; commitment history older than state-history retention cannot serve eth_getProof", commitment, history)
-	}
-	return nil
 }
 
 func Get(db kv.Getter) (Mode, error) {
@@ -224,14 +188,6 @@ func Get(db kv.Getter) (Mode, error) {
 	}
 	if blockAmount != nil {
 		prune.Blocks = blockAmount
-	}
-
-	blockAmount, err = get(db, kv.PruneCommitmentHistory)
-	if err != nil {
-		return prune, err
-	}
-	if blockAmount != nil {
-		prune.CommitmentHistory = blockAmount
 	}
 
 	return prune, nil
@@ -277,12 +233,6 @@ func (p Distance) PruneTo(stageHead uint64) uint64 {
 
 // EnsureNotChanged - prohibit change some configs after node creation. prohibit from human mistakes
 func EnsureNotChanged(tx kv.GetPut, pruneMode Mode) (Mode, error) {
-	if pruneMode.Initialised {
-		pruneMode.CommitmentHistory = commitmentHistoryOrDefault(pruneMode.CommitmentHistory)
-		if err := pruneMode.Validate(); err != nil {
-			return pruneMode, err
-		}
-	}
 	if err := setIfNotExist(tx, pruneMode); err != nil {
 		return pruneMode, err
 	}
@@ -343,30 +293,14 @@ func EnsureNotChanged(tx kv.GetPut, pruneMode Mode) (Mode, error) {
 // even after the auto-upgrade has rewritten the persisted value. Any
 // transition involving KeepAllBlocksPruneMode remains a mode-shape change.
 func isRetentionWindowChange(persisted, requested Mode) bool {
-	if persisted.History == requested.History &&
-		persisted.Blocks == requested.Blocks &&
-		persisted.CommitmentHistory == requested.CommitmentHistory {
+	if persisted.History == requested.History && persisted.Blocks == requested.Blocks {
 		return false
 	}
 	historyOK := persisted.History == requested.History ||
 		(isFiniteDistance(persisted.History) && isFiniteDistance(requested.History))
 	blocksOK := persisted.Blocks == requested.Blocks ||
 		(isBlocksRetentionPolicy(persisted.Blocks) && isBlocksRetentionPolicy(requested.Blocks))
-	commitmentOK := persisted.CommitmentHistory == requested.CommitmentHistory ||
-		(isCommitmentHistoryRetentionPolicy(persisted.CommitmentHistory) && isCommitmentHistoryRetentionPolicy(requested.CommitmentHistory))
-	return historyOK && blocksOK && commitmentOK
-}
-
-// isCommitmentHistoryRetentionPolicy reports whether b expresses a
-// commitment-history retention policy the shim will let operators move between.
-// Finite Distance values and KeepAllBlocksPruneMode both qualify: unlike Blocks,
-// bounded↔unlimited is accepted in both directions (widening is equivalent to
-// widening --prune.distance). KeepPostMergeBlocksPruneMode is meaningless here.
-func isCommitmentHistoryRetentionPolicy(b BlockAmount) bool {
-	if b == KeepAllBlocksPruneMode {
-		return true
-	}
-	return isFiniteDistance(b)
+	return historyOK && blocksOK
 }
 
 // isBlocksRetentionPolicy reports whether b expresses a block-data retention
@@ -404,30 +338,11 @@ func writeBlockAmount(db kv.GetPut, key []byte, b BlockAmount) error {
 	return db.Put(kv.DatabaseInfo, keyType(key), b.dbType())
 }
 
-// commitmentHistoryOrDefault treats an unset CommitmentHistory as keep-all, the
-// value every production constructor (FromCli, Get, named modes) already fills
-// in; it guards the persistence layer against a nil BlockAmount.
-func commitmentHistoryOrDefault(b BlockAmount) BlockAmount {
-	if b == nil {
-		return KeepAllBlocksPruneMode
-	}
-	return b
-}
-
-// CommitmentHistoryAmount returns the commitment-history retention, treating an
-// unset (nil) field as keep-all so callers can query it without a nil check.
-func (m Mode) CommitmentHistoryAmount() BlockAmount {
-	return commitmentHistoryOrDefault(m.CommitmentHistory)
-}
-
 func overwriteStoredMode(db kv.GetPut, pm Mode) error {
 	if err := writeBlockAmount(db, kv.PruneHistory, pm.History); err != nil {
 		return err
 	}
-	if err := writeBlockAmount(db, kv.PruneBlocks, pm.Blocks); err != nil {
-		return err
-	}
-	return writeBlockAmount(db, kv.PruneCommitmentHistory, commitmentHistoryOrDefault(pm.CommitmentHistory))
+	return writeBlockAmount(db, kv.PruneBlocks, pm.Blocks)
 }
 
 func setIfNotExist(db kv.GetPut, pm Mode) error {
@@ -437,10 +352,7 @@ func setIfNotExist(db kv.GetPut, pm Mode) error {
 	if err := setOnEmpty(db, kv.PruneHistory, pm.History); err != nil {
 		return err
 	}
-	if err := setOnEmpty(db, kv.PruneBlocks, pm.Blocks); err != nil {
-		return err
-	}
-	return setOnEmpty(db, kv.PruneCommitmentHistory, commitmentHistoryOrDefault(pm.CommitmentHistory))
+	return setOnEmpty(db, kv.PruneBlocks, pm.Blocks)
 }
 
 func createBlockAmount(pruneType []byte, v []byte) (BlockAmount, error) {

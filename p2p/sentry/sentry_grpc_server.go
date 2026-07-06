@@ -40,6 +40,8 @@ import (
 	"golang.org/x/sync/errgroup"
 	"golang.org/x/time/rate"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/health"
+	"google.golang.org/grpc/health/grpc_health_v1"
 	"google.golang.org/protobuf/types/known/emptypb"
 
 	"github.com/erigontech/erigon/common"
@@ -885,7 +887,20 @@ func grpcSentryServer(ctx context.Context, sentryAddr string, ss *GrpcServer, he
 	}
 	grpcServer := grpcutil.NewServer(100, nil)
 	sentryproto.RegisterSentryServer(grpcServer, ss)
-	grpcutil.StartServerOnListener(grpcServer, lis, healthCheck, ss.logger, "Sentry gRPC server fail")
+	var healthServer *health.Server
+	if healthCheck {
+		healthServer = health.NewServer()
+		grpc_health_v1.RegisterHealthServer(grpcServer, healthServer)
+	}
+
+	go func() {
+		if healthCheck {
+			defer healthServer.Shutdown()
+		}
+		if err1 := grpcServer.Serve(lis); err1 != nil {
+			ss.logger.Error("Sentry gRPC server fail", "err", err1)
+		}
+	}()
 	return grpcServer, nil
 }
 

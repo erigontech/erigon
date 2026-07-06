@@ -801,9 +801,9 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 	if config.MCPAddress != "" {
 		go func() {
 			logger.Info("serve MCP on", "addr", config.MCPAddress)
-			mcpErr := mcpServer.ServeSSE(ctx, config.MCPAddress)
+			mcpErr := mcpServer.ServeSSE(config.MCPAddress)
 			if mcpErr != nil {
-				logger.Error("mcpServer.ServeSSE", "err", mcpErr)
+				logger.Error("mcpServer.ServeSSE", "err", err)
 				return
 			}
 		}()
@@ -1129,17 +1129,11 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 	}
 
 	if !dbg.NoBackgroundMaintenance() {
-		// Track the MergeLoop goroutine in bgComponentsEg so that Stop() →
-		// bgComponentsEg.Wait() waits for it to exit before chainDB.Close().
-		// Without this, there is a data race between the goroutine reading
-		// Aggregator fields (in wg.TryAdd) and Close() writing them after
-		// wg.Wait() returns.
-		backend.bgComponentsEg.Go(func() error {
-			if err := temporalDb.Debug().MergeLoop(ctx); err != nil && !errors.Is(err, context.Canceled) {
-				logger.Error("snapshot merge loop error", "err", err)
+		go func() {
+			if err := temporalDb.Debug().MergeLoop(ctx); err != nil {
+				logger.Error("snapashot merge loop error", "err", err)
 			}
-			return nil
-		})
+		}()
 	}
 
 	return backend, nil

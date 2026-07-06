@@ -21,12 +21,11 @@
 package main
 
 import (
-	"context"
 	"fmt"
 	"math/big"
 	"os"
 
-	"github.com/urfave/cli/v3"
+	"github.com/urfave/cli/v2"
 
 	"github.com/erigontech/erigon/cmd/evm/internal/t8ntool"
 	"github.com/erigontech/erigon/cmd/utils/flags"
@@ -214,7 +213,7 @@ func init() {
 }
 
 func main() {
-	if err := app.Run(context.Background(), os.Args); err != nil {
+	if err := app.Run(os.Args); err != nil {
 		code := 1
 		if ec, ok := err.(*t8ntool.NumberedError); ok {
 			code = ec.ExitCode()

@@ -125,21 +125,21 @@ func (h *History) openHashMapAccessor(fPath string) (*recsplit.Index, error) {
 // It's ok if some files was open earlier.
 // If some file already open: noop.
 // If some file already open but not in provided list: close and remove from `files` field.
-func (h *History) openList(ctx context.Context, idxFiles, histNames, accessorFiles []string) error {
-	if err := h.InvertedIndex.openList(ctx, idxFiles, accessorFiles); err != nil {
+func (h *History) openList(idxFiles, histNames, accessorFiles []string) error {
+	if err := h.InvertedIndex.openList(idxFiles, accessorFiles); err != nil {
 		return err
 	}
 
 	h.closeWhatNotInList(histNames)
 	h.scanDirtyFiles(histNames)
-	if err := h.openDirtyFiles(ctx, histNames, accessorFiles); err != nil {
+	if err := h.openDirtyFiles(histNames, accessorFiles); err != nil {
 		return fmt.Errorf("History(%s).openList: %w", h.FilenameBase, err)
 	}
 	return nil
 }
 
-func (h *History) openFolder(ctx context.Context, scanDirsRes *ScanDirsResult) error {
-	return h.openList(ctx, scanDirsRes.iiFiles, scanDirsRes.historyFiles, scanDirsRes.accessorFiles)
+func (h *History) openFolder(scanDirsRes *ScanDirsResult) error {
+	return h.openList(scanDirsRes.iiFiles, scanDirsRes.historyFiles, scanDirsRes.accessorFiles)
 }
 
 func (h *History) scanDirtyFiles(fileNames []string) {
@@ -352,13 +352,13 @@ func (h *History) BuildMissedAccessors(ctx context.Context, g *errgroup.Group, p
 	}
 }
 
-func (h *History) Scan(ctx context.Context, toTxNum uint64) error {
+func (h *History) Scan(toTxNum uint64) error {
 	scanResult, err := scanDirs(h.dirs)
 	if err != nil {
 		return err
 	}
 
-	if err := h.openFolder(ctx, scanResult); err != nil {
+	if err := h.openFolder(scanResult); err != nil {
 		return err
 	}
 

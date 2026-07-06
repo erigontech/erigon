@@ -20,13 +20,12 @@
 package main
 
 import (
-	"context"
 	"errors"
 	"fmt"
 	"os"
 	"strings"
 
-	"github.com/urfave/cli/v3"
+	"github.com/urfave/cli/v2"
 
 	"github.com/erigontech/erigon/execution/vm/asm"
 )
@@ -38,7 +37,7 @@ var disasmCommand = cli.Command{
 	ArgsUsage: "<file>",
 }
 
-func disasmCmd(_ context.Context, ctx *cli.Command) error {
+func disasmCmd(ctx *cli.Context) error {
 	var in string
 	switch {
 	case len(ctx.Args().First()) > 0:

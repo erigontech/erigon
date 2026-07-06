@@ -18,13 +18,12 @@ package cli
 
 import (
 	"bytes"
-	"context"
 	"errors"
 	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/require"
-	"github.com/urfave/cli/v3"
+	"github.com/urfave/cli/v2"
 )
 
 // TestOnUsageErrorHandler verifies that the custom OnUsageError handler
@@ -37,10 +36,12 @@ func TestOnUsageErrorHandler(t *testing.T) {
 	var stderr bytes.Buffer
 	app.ErrWriter = &stderr
 
+	// Create a test context
+	ctx := cli.NewContext(app, nil, nil)
 	testErr := errors.New("flag parsing error")
 
 	// Call the OnUsageError handler directly
-	returnedErr := app.OnUsageError(context.Background(), app, testErr, false)
+	returnedErr := app.OnUsageError(ctx, testErr, false)
 
 	// The handler should return cli.Exit with code 1
 	var exitErr cli.ExitCoder
@@ -75,16 +76,16 @@ func TestHelpFlagStillWorks(t *testing.T) {
 	app.Writer = &stdout
 
 	// Override ExitErrHandler to prevent actual exit during test
-	app.ExitErrHandler = func(_ context.Context, cmd *cli.Command, err error) {
+	app.ExitErrHandler = func(ctx *cli.Context, err error) {
 		// Do nothing - don't exit in tests
 	}
 
-	app.Action = func(_ context.Context, cmd *cli.Command) error {
+	app.Action = func(ctx *cli.Context) error {
 		return nil
 	}
 
 	// Run the app with --help flag
-	err := app.Run(context.Background(), []string{"test-app", "--help"})
+	err := app.Run([]string{"test-app", "--help"})
 
 	// The app should NOT return an error for --help
 	require.NoError(t, err)

@@ -5,13 +5,11 @@ import (
 	"fmt"
 
 	"github.com/mark3labs/mcp-go/mcp"
-	"github.com/mark3labs/mcp-go/server"
 )
 
-// registerPrompts registers the prompts shared by the embedded and standalone
-// servers.
-func registerPrompts(srv *server.MCPServer) {
-	srv.AddPrompt(mcp.NewPrompt("analyze_transaction",
+// registerPrompts registers all MCP prompts
+func (e *ErigonMCPServer) registerPrompts() {
+	e.mcpServer.AddPrompt(mcp.NewPrompt("analyze_transaction",
 		mcp.WithPromptDescription("Analyze a transaction"),
 		mcp.WithArgument("txHash", mcp.ArgumentDescription("Transaction hash"), mcp.RequiredArgument())),
 		func(ctx context.Context, req mcp.GetPromptRequest) (*mcp.GetPromptResult, error) {
@@ -27,7 +25,7 @@ func registerPrompts(srv *server.MCPServer) {
 			}, nil
 		})
 
-	srv.AddPrompt(mcp.NewPrompt("investigate_address",
+	e.mcpServer.AddPrompt(mcp.NewPrompt("investigate_address",
 		mcp.WithPromptDescription("Investigate an address"),
 		mcp.WithArgument("address", mcp.ArgumentDescription("Address"), mcp.RequiredArgument())),
 		func(ctx context.Context, req mcp.GetPromptRequest) (*mcp.GetPromptResult, error) {
@@ -43,7 +41,7 @@ func registerPrompts(srv *server.MCPServer) {
 			}, nil
 		})
 
-	srv.AddPrompt(mcp.NewPrompt("analyze_block",
+	e.mcpServer.AddPrompt(mcp.NewPrompt("analyze_block",
 		mcp.WithPromptDescription("Analyze a block"),
 		mcp.WithArgument("blockNumber", mcp.ArgumentDescription("Block number"), mcp.RequiredArgument())),
 		func(ctx context.Context, req mcp.GetPromptRequest) (*mcp.GetPromptResult, error) {
@@ -59,7 +57,7 @@ func registerPrompts(srv *server.MCPServer) {
 			}, nil
 		})
 
-	srv.AddPrompt(mcp.NewPrompt("gas_analysis",
+	e.mcpServer.AddPrompt(mcp.NewPrompt("gas_analysis",
 		mcp.WithPromptDescription("Analyze gas prices")),
 		func(ctx context.Context, req mcp.GetPromptRequest) (*mcp.GetPromptResult, error) {
 			return &mcp.GetPromptResult{
@@ -74,7 +72,7 @@ func registerPrompts(srv *server.MCPServer) {
 			}, nil
 		})
 
-	srv.AddPrompt(mcp.NewPrompt("debug_logs",
+	e.mcpServer.AddPrompt(mcp.NewPrompt("debug_logs",
 		mcp.WithPromptDescription("Debug issues using Erigon logs"),
 		mcp.WithArgument("issue", mcp.ArgumentDescription("Issue description (optional)"))),
 		func(ctx context.Context, req mcp.GetPromptRequest) (*mcp.GetPromptResult, error) {
@@ -107,7 +105,7 @@ func registerPrompts(srv *server.MCPServer) {
 			}, nil
 		})
 
-	srv.AddPrompt(mcp.NewPrompt("torrent_status",
+	e.mcpServer.AddPrompt(mcp.NewPrompt("torrent_status",
 		mcp.WithPromptDescription("Check torrent/snapshot download status")),
 		func(ctx context.Context, req mcp.GetPromptRequest) (*mcp.GetPromptResult, error) {
 			return &mcp.GetPromptResult{
@@ -126,7 +124,7 @@ func registerPrompts(srv *server.MCPServer) {
 			}, nil
 		})
 
-	srv.AddPrompt(mcp.NewPrompt("sync_analysis",
+	e.mcpServer.AddPrompt(mcp.NewPrompt("sync_analysis",
 		mcp.WithPromptDescription("Analyze Erigon sync status and performance")),
 		func(ctx context.Context, req mcp.GetPromptRequest) (*mcp.GetPromptResult, error) {
 			return &mcp.GetPromptResult{

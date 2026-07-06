@@ -74,7 +74,7 @@ var historyCmd = &cobra.Command{
 	Use: "history",
 }
 
-func openHistory(ctx context.Context, dirs datadir.Dirs, domainName string, scanToStep uint64, logger log.Logger) (*state.History, *state.ErigonDBSettings, error) {
+func openHistory(dirs datadir.Dirs, domainName string, scanToStep uint64, logger log.Logger) (*state.History, *state.ErigonDBSettings, error) {
 	settings, err := state.ResolveErigonDBSettings(dirs, logger, false)
 	if err != nil {
 		return nil, nil, fmt.Errorf("resolve erigondb settings: %w", err)
@@ -93,7 +93,7 @@ func openHistory(ctx context.Context, dirs datadir.Dirs, domainName string, scan
 	if err != nil {
 		return nil, nil, fmt.Errorf("init history: %w", err)
 	}
-	history.Scan(ctx, scanToStep*settings.StepSize)
+	history.Scan(scanToStep * settings.StepSize)
 	return history, settings, nil
 }
 
@@ -109,7 +109,7 @@ var printCmd = &cobra.Command{
 		}
 		defer l.Unlock()
 
-		history, settings, err := openHistory(cmd.Context(), dirs, historyDomain, toStep, logger)
+		history, settings, err := openHistory(dirs, historyDomain, toStep, logger)
 		if err != nil {
 			logger.Error("Failed to open history", "error", err)
 			return
@@ -153,7 +153,7 @@ var distributionCmd = &cobra.Command{
 		}
 		defer l.Unlock()
 
-		history, settings, err := openHistory(cmd.Context(), dirs, historyDomain, toStep, logger)
+		history, settings, err := openHistory(dirs, historyDomain, toStep, logger)
 		if err != nil {
 			logger.Error("Failed to open history", "error", err)
 			return
@@ -241,7 +241,7 @@ var rebuildCmd = &cobra.Command{
 		}
 		defer l.Unlock()
 
-		history, settings, err := openHistory(cmd.Context(), dirs, historyDomain, toStep, logger)
+		history, settings, err := openHistory(dirs, historyDomain, toStep, logger)
 		if err != nil {
 			logger.Error("Failed to open history", "error", err)
 			return

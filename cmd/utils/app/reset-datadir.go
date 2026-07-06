@@ -1,13 +1,12 @@
 package app
 
 import (
-	"context"
 	"errors"
 	"fmt"
 	"os"
 
 	g "github.com/anacrolix/generics"
-	"github.com/urfave/cli/v3"
+	"github.com/urfave/cli/v2"
 
 	"github.com/erigontech/erigon/common/dir"
 	"github.com/erigontech/erigon/db/datadir/reset"
@@ -43,7 +42,7 @@ var (
 // Checks if a value was explicitly set in the given CLI command context or any of its parents. In
 // urfave/cli@v2, you must check the lineage to see if a flag was set in any context. It may be
 // different in v3.
-func isSetLineage(cliCtx *cli.Command, flagName string) bool {
+func isSetLineage(cliCtx *cli.Context, flagName string) bool {
 	for _, ctx := range cliCtx.Lineage() {
 		if ctx.IsSet(flagName) {
 			return true
@@ -52,19 +51,19 @@ func isSetLineage(cliCtx *cli.Command, flagName string) bool {
 	return false
 }
 
-func resetCliAction(ctx context.Context, cliCtx *cli.Command) (err error) {
+func resetCliAction(cliCtx *cli.Context) (err error) {
 	// This is set up in snapshots cli.Command.Before.
 	logger := log.Root()
-	removeLocal := cliCtx.Bool(removeLocalFlag.Name)
-	dryRun := cliCtx.Bool(dryRunFlag.Name)
+	removeLocal := removeLocalFlag.Get(cliCtx)
+	dryRun := dryRunFlag.Get(cliCtx)
 	dataDirPath := cliCtx.String(utils.DataDirFlag.Name)
 	logger.Info("resetting datadir", "path", dataDirPath)
 
 	dirs := datadir.Open(dataDirPath)
 
-	configChainName, chainNameErr := getChainNameFromChainData(ctx, cliCtx, logger, dirs.Chaindata)
+	configChainName, chainNameErr := getChainNameFromChainData(cliCtx, logger, dirs.Chaindata)
 
-	chainName := cliCtx.String(utils.ChainFlag.Name)
+	chainName := utils.ChainFlag.Get(cliCtx)
 	// Check the lineage, we don't want to use the mainnet default, but due to how urfave/cli@v2
 	// works we shouldn't randomly re-add the chain flag in the current command context.
 	if isSetLineage(cliCtx, utils.ChainFlag.Name) {
@@ -91,7 +90,7 @@ func resetCliAction(ctx context.Context, cliCtx *cli.Command) (err error) {
 	}
 	defer unlock()
 
-	err = snapcfg.LoadPreverified(ctx, cliCtx.String(PreverifiedFlag.Name), &dirs, chainName, "")
+	err = snapcfg.LoadPreverified(cliCtx.Context, PreverifiedFlag.Get(cliCtx), &dirs, chainName, "")
 	if err != nil {
 		return
 	}
@@ -145,11 +144,12 @@ func resetCliAction(ctx context.Context, cliCtx *cli.Command) (err error) {
 	return
 }
 
-func getChainNameFromChainData(ctx context.Context, cliCtx *cli.Command, logger log.Logger, chainDataDir string) (_ g.Option[string], err error) {
+func getChainNameFromChainData(cliCtx *cli.Context, logger log.Logger, chainDataDir string) (_ g.Option[string], err error) {
 	_, err = os.Stat(chainDataDir)
 	if err != nil {
 		return
 	}
+	ctx := cliCtx.Context
 	var db kv.RoDB
 	db, err = mdbx.New(dbcfg.ChainDB, logger).Path(chainDataDir).Accede(true).Readonly(true).Open(ctx)
 	if err != nil {

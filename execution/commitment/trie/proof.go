@@ -134,12 +134,6 @@ func (t *Trie) WitnessNodesForKeys(hexKeys [][]byte) ([][]byte, error) {
 		if err != nil {
 			return err
 		}
-		// A node whose RLP is <32B is inlined into its parent and never referenced by
-		// hash, so it must not be emitted as a standalone witness node. The root is the
-		// exception: Trie.Hash force-hashes it, so it is referenced by hash even when short.
-		if len(rlp) < 32 && n != t.RootNode {
-			return nil
-		}
 		if _, ok := seen[string(rlp)]; ok {
 			return nil
 		}
@@ -236,11 +230,6 @@ func WitnessNodesForKeysFromNodes(nodes, hexKeys [][]byte) ([][]byte, error) {
 				return err
 			}
 			rlp = hashed
-		}
-		// <32B nodes are inlined in their parent; only the root stays referenced by
-		// hash (Trie.Hash force-hashes it) and must be kept even when short.
-		if len(rlp) < 32 && crypto.Keccak256Hash(rlp) != rootHash {
-			return nil
 		}
 		if _, ok := seen[string(rlp)]; ok {
 			return nil

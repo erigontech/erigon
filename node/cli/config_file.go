@@ -25,11 +25,11 @@ import (
 	"strings"
 
 	"github.com/pelletier/go-toml/v2"
-	"github.com/urfave/cli/v3"
+	"github.com/urfave/cli/v2"
 	"gopkg.in/yaml.v3"
 )
 
-func SetFlagsFromConfigFile(cmd *cli.Command, filePath string) error {
+func SetFlagsFromConfigFile(ctx *cli.Context, filePath string) error {
 	fileExtension := filepath.Ext(filePath)
 
 	fileConfig := make(map[string]any)
@@ -63,19 +63,19 @@ func SetFlagsFromConfigFile(cmd *cli.Command, filePath string) error {
 
 	// sets global flags to value in yaml/toml file
 	for key, value := range flat {
-		if !cmd.IsSet(key) {
+		if !ctx.IsSet(key) {
 			if reflect.ValueOf(value).Kind() == reflect.Slice {
 				sliceInterface := value.([]any)
 				s := make([]string, len(sliceInterface))
 				for i, v := range sliceInterface {
 					s[i] = fmt.Sprintf("%v", v)
 				}
-				err := cmd.Set(key, strings.Join(s, ","))
+				err := ctx.Set(key, strings.Join(s, ","))
 				if err != nil {
 					return fmt.Errorf("failed setting %s flag with values=%s error=%s", key, s, err)
 				}
 			} else {
-				err := cmd.Set(key, fmt.Sprintf("%v", value))
+				err := ctx.Set(key, fmt.Sprintf("%v", value))
 				if err != nil {
 					return fmt.Errorf("failed setting %s flag with value=%v error=%s", key, value, err)
 

@@ -699,16 +699,26 @@ func (api *DebugAPIImpl) GetRawReceipts(ctx context.Context, blockNrOrHash rpc.B
 	if block == nil {
 		return nil, nil
 	}
+	receipts, err := api.getReceipts(ctx, tx, block)
+	if err != nil {
+		return nil, err
+	}
 	chainConfig, err := api.chainConfig(ctx, tx)
 	if err != nil {
 		return nil, err
 	}
-	receipts, borReceipt, err := api.getReceiptsWithBor(ctx, tx, chainConfig, block)
-	if err != nil {
-		return nil, err
-	}
-	if borReceipt != nil {
-		receipts = append(receipts, borReceipt)
+	if chainConfig.Bor != nil {
+		events, err := api.bridgeReader.Events(ctx, block.Hash(), blockNum)
+		if err != nil {
+			return nil, err
+		}
+		if len(events) != 0 {
+			borReceipt, err := api.borReceiptGenerator.GenerateBorReceipt(ctx, tx, block, events, chainConfig)
+			if err != nil {
+				return nil, err
+			}
+			receipts = append(receipts, borReceipt)
+		}
 	}
 
 	result := make([]hexutil.Bytes, len(receipts))
@@ -797,12 +807,18 @@ func (api *DebugAPIImpl) GetRawTransaction(ctx context.Context, txnHash common.H
 		}
 	}
 
-	txnIndex, err := api.txnIndexInBlock(ctx, tx, blockNum, txNum, isBorStateSyncTx)
+	txNumMin, err := api._txNumReader.Min(ctx, tx, blockNum)
 	if err != nil {
 		return nil, err
 	}
 
-	txn, err := api._txnReader.TxnByIdxInBlock(ctx, tx, blockNum, txnIndex)
+	if txNumMin+1 > txNum && !isBorStateSyncTx {
+		return nil, fmt.Errorf("uint underflow txnums error txNum: %d, txNumMin: %d, blockNum: %d", txNum, txNumMin, blockNum)
+	}
+
+	var txnIndex = txNum - txNumMin - 1
+
+	txn, err := api._txnReader.TxnByIdxInBlock(ctx, tx, blockNum, int(txnIndex))
 	if err != nil {
 		return nil, err
 	}

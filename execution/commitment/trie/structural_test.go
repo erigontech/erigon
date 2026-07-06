@@ -66,33 +66,6 @@ func genStructStepsOver(t *testing.T, hb *HashBuilder, retain func([]byte) bool,
 	require.NoError(t, err, "final GenStructStep")
 }
 
-// stepExpectation is one expected emitted step: the hex key and its hasHash/hasTree bitmasks.
-type stepExpectation struct {
-	keyHex  []byte
-	hasHash uint16
-	hasTree uint16
-}
-
-// expectingCollector returns a HashCollector that counts emitted steps (those with a non-zero
-// hasHash or hasTree) into *count and asserts each against steps in order; extra steps beyond
-// len(steps) are counted but not asserted, so callers keep their own final count check.
-func expectingCollector(t *testing.T, count *int, steps []stepExpectation) HashCollector {
-	return func(keyHex []byte, hasState, hasTree, hasHash uint16, hashes, rootHash []byte) error {
-		if hasHash == 0 && hasTree == 0 {
-			return nil
-		}
-		*count++
-		if *count <= len(steps) {
-			s := steps[*count-1]
-			require.Equal(t, s.keyHex, keyHex)
-			require.Equal(t, s.hasHash, hasHash)
-			require.Equal(t, s.hasTree, hasTree)
-			require.NotNil(t, hashes)
-		}
-		return nil
-	}
-}
-
 // genHashedKeys produces n sorted 8-byte keys derived from keccak hashes of a counter.
 func genHashedKeys(n uint32) []string {
 	keys := make([]string, 0, n)
@@ -107,7 +80,7 @@ func genHashedKeys(n uint32) []string {
 
 func TestV2HashBuilding(t *testing.T) {
 	keys := genHashedKeys(100000)
-	tr := newEmpty()
+	tr := New(common.Hash{})
 	valueLong := []byte("VALUE123985903485903489043859043859043859048590485904385903485940385439058934058439058439058439058940385904358904385438809348908345")
 	valueShort := []byte("VAL")
 	valueOf := func(i int) []byte {
@@ -138,7 +111,7 @@ func TestV2HashBuilding(t *testing.T) {
 
 func TestV2Resolution(t *testing.T) {
 	keys := genHashedKeys(100000)
-	tr := newEmpty()
+	tr := New(common.Hash{})
 	value := []byte("VALUE123985903485903489043859043859043859048590485904385903485940385439058934058439058439058439058940385904358904385438809348908345")
 	for _, key := range keys {
 		tr.Update([]byte(key), value)
@@ -165,7 +138,7 @@ func TestV2Resolution(t *testing.T) {
 		return &GenStructStepLeafData{rlp.RlpSerializableBytes(value)}
 	}, nil)
 
-	tr1 := newEmpty()
+	tr1 := New(common.Hash{})
 	tr1.RootNode = hb.root()
 	builtHash := hb.rootHash()
 	if trieHash != builtHash {
@@ -205,7 +178,7 @@ func TestEmbeddedStorage(t *testing.T) {
 	locationKey3 := append(append([]byte{}, addrHash...), crypto.Keccak256(location3[:])...)
 	var keys = []string{string(locationKey1), string(locationKey2), string(locationKey3)}
 	slices.Sort(keys)
-	tr := newEmpty()
+	tr := New(common.Hash{})
 	valueShort := []byte("VAL")
 	for _, key := range keys {
 		tr.Update([]byte(key)[length.Hash:], valueShort)
@@ -299,12 +272,36 @@ func TestAccountsOnly(t *testing.T) {
 		{k: common.FromHex("200c6a21510692d70d47860a1bbd432c801d1860bfbbe6856756ad4c062ba601"), v: common.FromHex("01")},
 	}
 	i := 0
-	hc := expectingCollector(t, &i, []stepExpectation{
-		{common.FromHex("0100000002"), 0b10000000000, 0b000},
-		{common.FromHex("01000000"), 0b1000000100, 0b100},
-		{common.FromHex("01"), 0b100, 0b001},
-		{common.FromHex(""), 0b10, 0b10},
-	})
+	hc := func(keyHex []byte, hasState, hasTree, hasHash uint16, hashes, rootHash []byte) error {
+		if hasHash == 0 && hasTree == 0 {
+			return nil
+		}
+		i++
+		switch i {
+		case 1:
+			require.Equal(t, common.FromHex("0100000002"), keyHex)
+			require.Equal(t, uint16(0b10000000000), hasHash)
+			require.Equal(t, uint16(0b000), hasTree)
+			require.NotNil(t, hashes)
+		case 2:
+			require.Equal(t, common.FromHex("01000000"), keyHex)
+			require.Equal(t, uint16(0b1000000100), hasHash)
+			require.Equal(t, uint16(0b100), hasTree)
+			require.NotNil(t, hashes)
+		case 3:
+			require.Equal(t, common.FromHex("01"), keyHex)
+			require.Equal(t, uint16(0b100), hasHash)
+			require.Equal(t, uint16(0b001), hasTree)
+			require.NotNil(t, hashes)
+		case 4:
+			require.Equal(t, common.FromHex(""), keyHex)
+			require.Equal(t, uint16(0b10), hasHash)
+			require.Equal(t, uint16(0b10), hasTree)
+			require.NotNil(t, hashes)
+		}
+
+		return nil
+	}
 
 	hb := NewHashBuilder(false)
 	hexKeys := make([][]byte, len(keys))
@@ -334,15 +331,51 @@ func TestBranchesOnly(t *testing.T) {
 		{k: common.FromHex("0201"), hasTree: false},
 	}
 	i := 0
-	hc := expectingCollector(t, &i, []stepExpectation{
-		{common.FromHex("0100000002000a"), 0b11000, 0b1000},
-		{common.FromHex("0100000002"), 0b100000000000, 0b1},
-		{common.FromHex("0100000009"), 0b10, 0b0},
-		{common.FromHex("01000000"), 0b11000000100, 0b01000000100},
-		{common.FromHex("01020000"), 0b110000000000, 0b0},
-		{common.FromHex("01"), 0b10, 0b101},
-		{common.FromHex(""), 0b10, 0b10},
-	})
+	hc := func(keyHex []byte, hasState, hasTree, hasHash uint16, hashes, rootHash []byte) error {
+		if hasHash == 0 && hasTree == 0 {
+			return nil
+		}
+		i++
+		switch i {
+		case 1:
+			require.Equal(t, common.FromHex("0100000002000a"), keyHex)
+			require.Equal(t, uint16(0b11000), hasHash)
+			require.Equal(t, uint16(0b1000), hasTree)
+			require.NotNil(t, hashes)
+		case 2:
+			require.Equal(t, common.FromHex("0100000002"), keyHex)
+			require.Equal(t, uint16(0b100000000000), hasHash)
+			require.Equal(t, uint16(0b1), hasTree)
+			require.NotNil(t, hashes)
+		case 3:
+			require.Equal(t, common.FromHex("0100000009"), keyHex)
+			require.Equal(t, uint16(0b10), hasHash)
+			require.Equal(t, uint16(0b0), hasTree)
+			require.NotNil(t, hashes)
+		case 4:
+			require.Equal(t, common.FromHex("01000000"), keyHex)
+			require.Equal(t, uint16(0b11000000100), hasHash)
+			require.Equal(t, uint16(0b01000000100), hasTree)
+			require.NotNil(t, hashes)
+		case 5:
+			require.Equal(t, common.FromHex("01020000"), keyHex)
+			require.Equal(t, uint16(0b110000000000), hasHash)
+			require.Equal(t, uint16(0b0), hasTree)
+			require.NotNil(t, hashes)
+		case 6:
+			require.Equal(t, common.FromHex("01"), keyHex)
+			require.Equal(t, uint16(0b10), hasHash)
+			require.Equal(t, uint16(0b101), hasTree)
+			require.NotNil(t, hashes)
+		case 7:
+			require.Equal(t, common.FromHex(""), keyHex)
+			require.Equal(t, uint16(0b10), hasHash)
+			require.Equal(t, uint16(0b10), hasTree)
+			require.NotNil(t, hashes)
+		}
+
+		return nil
+	}
 
 	hb := NewHashBuilder(false)
 	// keys are already nibblized; the hash data attached to the step whose curr is keys[i]
@@ -387,9 +420,21 @@ func TestStorageOnly(t *testing.T) {
 		},
 	}
 	i := 0
-	hc := expectingCollector(t, &i, []stepExpectation{
-		{common.FromHex("05000000"), 0b100, 0b0},
-	})
+	hc := func(keyHex []byte, hasState, hasTree, hasHash uint16, hashes, rootHash []byte) error {
+		if hasHash == 0 && hasTree == 0 {
+			return nil
+		}
+		i++
+		switch i {
+		case 1:
+			require.Equal(t, common.FromHex("05000000"), keyHex)
+			require.Equal(t, uint16(0b100), hasHash)
+			require.Equal(t, uint16(0b0), hasTree)
+			require.NotNil(t, hashes)
+		}
+
+		return nil
+	}
 
 	hb := NewHashBuilder(false)
 	hexKeys := make([][]byte, len(keys))
@@ -421,10 +466,26 @@ func TestStorageWithoutBranchNodeInRoot(t *testing.T) {
 		},
 	}
 	var i int
-	hc := expectingCollector(t, &i, []stepExpectation{
-		{common.FromHex("0500000002"), 0b10000011, 0b1},
-		{common.FromHex(""), 0b0, 0b100000},
-	})
+	hc := func(keyHex []byte, hasState, hasTree, hasHash uint16, hashes, rootHash []byte) error {
+		if hasHash == 0 && hasTree == 0 {
+			return nil
+		}
+		i++
+		switch i {
+		case 1:
+			require.Equal(t, common.FromHex("0500000002"), keyHex)
+			require.Equal(t, uint16(0b10000011), hasHash)
+			require.Equal(t, uint16(0b1), hasTree)
+			require.NotNil(t, hashes)
+		case 2:
+			require.Equal(t, common.FromHex(""), keyHex)
+			require.Equal(t, uint16(0b0), hasHash)
+			require.Equal(t, uint16(0b100000), hasTree)
+			require.NotNil(t, hashes)
+		}
+
+		return nil
+	}
 
 	hb := NewHashBuilder(false)
 	hexKeys := make([][]byte, len(keys))
