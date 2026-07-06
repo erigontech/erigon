@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"os"
 	"strings"
+	"time"
 
 	"github.com/mark3labs/mcp-go/mcp"
 	"github.com/mark3labs/mcp-go/server"
@@ -30,7 +31,7 @@ const Version = "0.0.2"
 type MCPTransport interface {
 	Serve() error
 	ServeContext(ctx context.Context) error
-	ServeSSE(addr string) error
+	ServeSSE(ctx context.Context, addr string) error
 }
 
 // ErigonMCPServer wraps Erigon APIs with MCP server capabilities.
@@ -955,25 +956,43 @@ func (e *ErigonMCPServer) ServeContext(ctx context.Context) error {
 	return s.Listen(ctx, os.Stdin, os.Stdout)
 }
 
-// ServeSSE starts MCP server with SSE transport
-func (e *ErigonMCPServer) ServeSSE(addr string) (err error) {
+// ServeSSE starts MCP server with SSE transport, shutting it down when ctx is cancelled.
+func (e *ErigonMCPServer) ServeSSE(ctx context.Context, addr string) error {
 	// Apply NonBlockingAcquire so BeginRo fails fast (ErrServerOverloaded)
 	// instead of blocking the SSE handler goroutine indefinitely when all DB
 	// read slots are held by a concurrent write/ETL transaction. The HTTP RPC
 	// layer sets the same flag in node/rpcstack.go.
-	sse := server.NewSSEServer(e.mcpServer,
+	return serveSSE(ctx, e.mcpServer, addr,
 		server.WithSSEContextFunc(func(ctx context.Context, _ *http.Request) context.Context {
 			return kv.WithNonBlockingAcquire(ctx)
 		}),
 	)
+}
 
-	defer func() {
-		if r := recover(); r != nil {
-			log.Error("[MCP]: recovered from panic:", "panic", r)
-
-			err = fmt.Errorf("mcp sse server panicked: %v", r)
-		}
+// serveSSE runs the SSE server until ctx is cancelled. The http.Server is
+// pre-created so a Shutdown racing ahead of Start targets it instead of leaking
+// Start in Accept; it must carry Handler: sse because Start wires the handler
+// only on a server it creates itself.
+func serveSSE(ctx context.Context, mcpServer *server.MCPServer, addr string, opts ...server.SSEOption) error {
+	sse := server.NewSSEServer(mcpServer, opts...)
+	server.WithHTTPServer(&http.Server{Addr: addr, Handler: sse})(sse)
+	errCh := make(chan error, 1)
+	go func() {
+		defer func() {
+			if r := recover(); r != nil {
+				log.Error("[MCP] recovered from panic", "panic", r)
+				errCh <- fmt.Errorf("mcp sse server panicked: %v", r)
+			}
+		}()
+		errCh <- sse.Start(addr)
 	}()
 
-	return sse.Start(addr)
+	select {
+	case <-ctx.Done():
+		shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		return sse.Shutdown(shutdownCtx)
+	case err := <-errCh:
+		return err
+	}
 }

@@ -103,7 +103,7 @@ require (
 	github.com/thomaso-mirodin/intmath v0.0.0-20160323211736-5dc6d854e46e
 	github.com/tidwall/btree v1.8.1
 	github.com/ugorji/go/codec v1.2.13
-	github.com/urfave/cli/v2 v2.27.7
+	github.com/urfave/cli/v3 v3.10.1
 	github.com/valyala/fastjson v1.6.10
 	github.com/vektah/gqlparser/v2 v2.5.33
 	github.com/xsleonard/go-merkle v1.1.0
@@ -117,7 +117,7 @@ require (
 	golang.org/x/sys v0.46.0
 	golang.org/x/text v0.38.0
 	golang.org/x/time v0.15.0
-	golang.org/x/tools v0.46.0
+	golang.org/x/tools v0.47.0
 	google.golang.org/grpc v1.81.1
 	google.golang.org/protobuf v1.36.11
 	gopkg.in/natefinch/lumberjack.v2 v2.2.1
@@ -203,7 +203,6 @@ require (
 	github.com/clipperhouse/uax29/v2 v2.7.0 // indirect
 	github.com/containerd/log v0.1.0 // indirect
 	github.com/coreos/go-systemd/v22 v22.5.0 // indirect
-	github.com/cpuguy83/go-md2man/v2 v2.0.7 // indirect
 	github.com/curioswitch/go-reassign v0.3.0 // indirect
 	github.com/daixiang0/gci v0.13.7 // indirect
 	github.com/dave/dst v0.27.3 // indirect
@@ -378,7 +377,6 @@ require (
 	github.com/rivo/uniseg v0.4.7 // indirect
 	github.com/rogpeppe/go-internal v1.14.1 // indirect
 	github.com/rs/dnscache v0.0.0-20211102005908-e0241e321417 // indirect
-	github.com/russross/blackfriday/v2 v2.1.0 // indirect
 	github.com/ryancurrah/gomodguard v1.4.1 // indirect
 	github.com/ryancurrah/gomodguard/v2 v2.1.3 // indirect
 	github.com/ryanrolds/sqlclosecheck v0.6.0 // indirect
@@ -411,13 +409,11 @@ require (
 	github.com/tommy-muehle/go-mnd/v2 v2.5.1 // indirect
 	github.com/ultraware/funlen v0.2.0 // indirect
 	github.com/ultraware/whitespace v0.2.0 // indirect
-	github.com/urfave/cli/v3 v3.7.0 // indirect
 	github.com/uudashr/gocognit v1.2.1 // indirect
 	github.com/uudashr/iface v1.4.2 // indirect
 	github.com/wlynxg/anet v0.0.5 // indirect
 	github.com/xen0n/gosmopolitan v1.3.0 // indirect
 	github.com/xo/terminfo v0.0.0-20220910002029-abceb7e1c41e // indirect
-	github.com/xrash/smetrics v0.0.0-20240521201337-686a1a2994c1 // indirect
 	github.com/yagipy/maintidx v1.0.0 // indirect
 	github.com/yeya24/promlinter v0.3.0 // indirect
 	github.com/ykadowak/zerologlint v0.1.5 // indirect
@@ -440,7 +436,7 @@ require (
 	go.yaml.in/yaml/v3 v3.0.4 // indirect
 	golang.org/x/exp/typeparams v0.0.0-20260611194520-c48552f49976 // indirect
 	golang.org/x/mod v0.37.0 // indirect
-	golang.org/x/telemetry v0.0.0-20260618151639-a6991f1c6803 // indirect
+	golang.org/x/telemetry v0.0.0-20260625142307-59b4966ccb57 // indirect
 	google.golang.org/genproto/googleapis/api v0.0.0-20260226221140-a57be14db171 // indirect
 	google.golang.org/genproto/googleapis/rpc v0.0.0-20260226221140-a57be14db171 // indirect
 	google.golang.org/grpc/cmd/protoc-gen-go-grpc v1.6.2 // indirect

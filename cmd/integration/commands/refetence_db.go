@@ -48,7 +48,7 @@ var stateBuckets = []string{
 var cmdMdbxTopDup = &cobra.Command{
 	Use: "mdbx_top_dup",
 	Run: func(cmd *cobra.Command, args []string) {
-		ctx, _ := common.RootContext()
+		ctx := cmd.Context()
 		logger := debug.SetupCobra(cmd, "integration")
 		err := mdbxTopDup(ctx, chaindata, bucket, logger)
 		if err != nil {
@@ -63,7 +63,7 @@ var cmdCompareBucket = &cobra.Command{
 	Use:   "compare_bucket",
 	Short: "compare bucket to the same bucket in '--chaindata.reference'",
 	Run: func(cmd *cobra.Command, args []string) {
-		ctx, _ := common.RootContext()
+		ctx := cmd.Context()
 		logger := debug.SetupCobra(cmd, "integration")
 		if referenceChaindata == "" {
 			referenceChaindata = chaindata + "-copy"
@@ -82,7 +82,7 @@ var cmdCompareStates = &cobra.Command{
 	Use:   "compare_states",
 	Short: "compare state buckets to buckets in '--chaindata.reference'",
 	Run: func(cmd *cobra.Command, args []string) {
-		ctx, _ := common.RootContext()
+		ctx := cmd.Context()
 		logger := debug.SetupCobra(cmd, "integration")
 		if referenceChaindata == "" {
 			referenceChaindata = chaindata + "-copy"
@@ -101,7 +101,7 @@ var cmdMdbxToMdbx = &cobra.Command{
 	Use:   "mdbx_to_mdbx",
 	Short: "copy data from '--chaindata' to '--chaindata.to'",
 	Run: func(cmd *cobra.Command, args []string) {
-		ctx, _ := common.RootContext()
+		ctx := cmd.Context()
 		logger := debug.SetupCobra(cmd, "integration")
 		from, to := backup.OpenPair(chaindata, toChaindata, dbcfg.ChainDB, 0, logger)
 		err := backup.Kv2kv(ctx, from, to, nil, logger)
@@ -118,7 +118,7 @@ var cmdFToMdbx = &cobra.Command{
 	Use:   "f_to_mdbx",
 	Short: "copy data from '--chaindata' to '--chaindata.to'",
 	Run: func(cmd *cobra.Command, args []string) {
-		ctx, _ := common.RootContext()
+		ctx := cmd.Context()
 		logger := debug.SetupCobra(cmd, "integration")
 		err := fToMdbx(ctx, logger, toChaindata)
 		if err != nil && !errors.Is(err, context.Canceled) {
