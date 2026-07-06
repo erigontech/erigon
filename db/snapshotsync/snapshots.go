@@ -359,6 +359,9 @@ func (s *DirtySegment) closeSeg() {
 
 func (s *DirtySegment) closeIdx() {
 	for _, index := range s.indexes {
+		if index == nil {
+			continue
+		}
 		index.Close()
 	}
 
@@ -377,6 +380,9 @@ func (s *DirtySegment) closeAndRemoveFiles() {
 		toRemove := make([]string, 0, 1+len(s.indexes))
 		toRemove = append(toRemove, s.FilePath())
 		for _, index := range s.indexes {
+			if index == nil {
+				continue
+			}
 			toRemove = append(toRemove, index.FilePath())
 		}
 		s.closeIdx()
