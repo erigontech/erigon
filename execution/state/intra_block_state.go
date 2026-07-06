@@ -1110,7 +1110,19 @@ func (sdb *IntraBlockState) getVersionedAccount(addr accounts.Address, readStora
 		}
 	}
 
-	return sdb.refreshVersionedAccount(addr, readAccount, source, version)
+	refreshed, refreshedSource, refreshedVersion, err := sdb.refreshVersionedAccount(addr, readAccount, source, version)
+	// A sub-field overlay (e.g. a pre-populated BalancePath) superseded the
+	// account-record read; reconcile the recorded read with it so a later record
+	// re-stamp can't churn the AddressPath version into a spurious invalidation.
+	// Only on this clean load path — getStateObject's cached-object refresh
+	// passes the tx's own (uncommitted) data, which must not ride into the read.
+	if err == nil && refreshed != readAccount {
+		if rd, ok := sdb.versionedReads[addr][AccountKey{Path: AddressPath}]; ok {
+			rd.Val = refreshed
+			sdb.versionedReads.Set(rd)
+		}
+	}
+	return refreshed, refreshedSource, refreshedVersion, err
 }
 
 func (sdb *IntraBlockState) refreshVersionedAccount(addr accounts.Address, readAccount *accounts.Account, readSource ReadSource, readVersion Version) (*accounts.Account, ReadSource, Version, error) {
@@ -1199,17 +1211,6 @@ func (sdb *IntraBlockState) refreshVersionedAccount(addr accounts.Address, readA
 		version = cversion
 		if csource != source {
 			source = csource
-		}
-	}
-
-	// A sub-field overlay (e.g. a pre-populated BalancePath) superseded the
-	// account-record read; reconcile the recorded read with it so a later
-	// record flush can't churn the AddressPath version into a spurious
-	// validation conflict.
-	if account != readAccount {
-		if rd, ok := sdb.versionedReads[addr][AccountKey{Path: AddressPath}]; ok {
-			rd.Val = account
-			sdb.versionedReads.Set(rd)
 		}
 	}
 

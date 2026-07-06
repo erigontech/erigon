@@ -120,6 +120,36 @@ func TestValuesEqual(t *testing.T) {
 	assert.True(t, valuesEqual(BalancePath, nil, nil), "Both nil should be equal")
 	assert.False(t, valuesEqual(BalancePath, *b1, nil), "One nil should not be equal")
 	assert.False(t, valuesEqual(BalancePath, nil, *b1), "One nil should not be equal")
+
+	// CodePath (review R2: was dead — default:false — so code readers never relaxed)
+	code := []byte{0x60, 0x00, 0x56}
+	assert.True(t, valuesEqual(CodePath, code, []byte{0x60, 0x00, 0x56}), "Same code should be equal")
+	assert.False(t, valuesEqual(CodePath, code, []byte{0x60, 0x01}), "Different code should not be equal")
+}
+
+// TestFoldedSubfieldRead_RelaxesOnUnchangedField (review R1): a sub-field read
+// with no dedicated cell folds onto AddressPath; when calcFees re-stamps the
+// AddressPath cell (new incarnation/balance, same code hash), the folded read
+// must relax on the unchanged field instead of version-only re-invalidating —
+// e.g. EXTCODEHASH(block.coinbase) on every fee-paying tx.
+func TestFoldedSubfieldRead_RelaxesOnUnchangedField(t *testing.T) {
+	vm := NewVersionMap(nil)
+	addr := accounts.InternAddress([20]byte{0xf9, 0x7e, 0x18, 0x0c})
+	ch := accounts.EmptyCodeHash
+	acc5 := &accounts.Account{Balance: *uint256.NewInt(100), CodeHash: ch}
+	acc10 := &accounts.Account{Balance: *uint256.NewInt(200), CodeHash: ch} // fee re-stamp, same code hash
+	vm.Write(addr, AddressPath, accounts.NilKey, Version{TxIndex: 5}, acc5, true)
+	vm.Write(addr, AddressPath, accounts.NilKey, Version{TxIndex: 10}, acc10, true)
+	// No CodeHashPath cell → a code-hash read at tx 11 folds onto AddressPath at
+	// its recorded version (5), which floors to the re-stamped tx-10 cell.
+	ck := func(rv, wv Version) VersionValidity {
+		if rv == wv {
+			return VersionValid
+		}
+		return VersionInvalid
+	}
+	valid := vm.validateRead(11, addr, CodeHashPath, accounts.NilKey, MapRead, Version{TxIndex: 5}, ch, ck, false, "")
+	assert.Equal(t, VersionValid, valid, "folded code-hash read must relax when the record's code hash is unchanged")
 }
 
 // TestAddressRecordReadReconciledWithSupersedingBalance reproduces the
@@ -160,15 +190,48 @@ func TestAddressRecordReadReconciledWithSupersedingBalance(t *testing.T) {
 	acc2 := &accounts.Account{Balance: *uint256.NewInt(200)}
 	mvhm.Write(addr, AddressPath, accounts.NilKey, Version{TxIndex: 3}, acc2, true)
 
-	// Validation of the recorded read must stay valid (no re-execution).
-	valid := mvhm.validateRead(4, addr, AddressPath, accounts.NilKey, rd.Source, rd.Version, rd.Val,
-		func(rv, wv Version) VersionValidity {
-			if rv == wv {
-				return VersionValid
-			}
-			return VersionInvalid
-		}, false, "")
+	// Validation must stay valid (no re-execution) — via ValidateVersion so the
+	// read-set iteration is exercised too (review F).
+	io := NewVersionedIO(5)
+	io.RecordReads(Version{TxIndex: 4, Incarnation: 0}, ibs.VersionedReads())
+	checkVersionEqual := func(rv, wv Version) VersionValidity {
+		if rv == wv {
+			return VersionValid
+		}
+		return VersionInvalid
+	}
+	valid := mvhm.ValidateVersion(4, io, checkVersionEqual, false, "")
 	assert.Equal(t, VersionValid, valid, "record read must stay valid after the later record flush")
+}
+
+// TestCachedRefreshDoesNotReconcileRecordedRead (review A): the recorded-read
+// reconciliation must fire only from the clean getVersionedAccount load path,
+// not from getStateObject's cached-object refresh — which passes the tx's own
+// (possibly later-reverted) data. Otherwise the recorded read stops meaning
+// "what was read".
+func TestCachedRefreshDoesNotReconcileRecordedRead(t *testing.T) {
+	mvhm := NewVersionMap(nil)
+	addr := accounts.InternAddress([20]byte{0x0c, 0x0b})
+	acc := &accounts.Account{Balance: *uint256.NewInt(100)}
+	mvhm.Write(addr, AddressPath, accounts.NilKey, Version{TxIndex: 1}, acc, true)
+	mvhm.Write(addr, BalancePath, accounts.NilKey, Version{TxIndex: 2}, *uint256.NewInt(200), true) // superseding → triggers overlay copy
+
+	ibs := NewWithVersionMap(&emptyReader{}, mvhm)
+	ibs.txIndex = 5
+	original := &accounts.Account{Balance: *uint256.NewInt(100)}
+	ibs.versionedReads = ReadSet{}
+	ibs.versionedReads.Set(VersionedRead{Address: addr, Path: AddressPath, Key: accounts.NilKey, Source: MapRead, Version: Version{TxIndex: 1}, Val: original})
+
+	// Simulate getStateObject's cached-object refresh: live &so.data, UnknownVersion.
+	live := &accounts.Account{Balance: *uint256.NewInt(100)}
+	_, _, _, err := ibs.refreshVersionedAccount(addr, live, StorageRead, UnknownVersion)
+	require.NoError(t, err)
+
+	rd := ibs.versionedReads[addr][AccountKey{Path: AddressPath}]
+	got, ok := rd.Val.(*accounts.Account)
+	require.True(t, ok)
+	assert.Equal(t, *uint256.NewInt(100), got.Balance,
+		"cached-refresh must not overwrite the recorded read with the overlaid value")
 }
 
 // TestVersionedWriteVersion verifies that VersionedWrite entries at

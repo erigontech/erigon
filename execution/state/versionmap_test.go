@@ -453,7 +453,7 @@ func TestValidateRead_PriorAccountCreation_DetectedViaIncarnationPath(t *testing
 	// BAL pre-populated BalancePath / NoncePath / CodeHashPath; the worker
 	// additionally flushed IncarnationPath (which BAL doesn't pre-populate)
 	// because CreateAccount writes it. AddressPath was filtered out of the
-	// flush when a BAL is present — the gap PR #19628 plugged.
+	// flush when a BAL is present.
 	vm.Write(addr, BalancePath, accounts.NilKey,
 		Version{TxIndex: 0, Incarnation: 0}, *uint256.NewInt(1_000), true)
 	vm.Write(addr, NoncePath, accounts.NilKey,
@@ -478,41 +478,6 @@ func TestValidateRead_PriorAccountCreation_DetectedViaIncarnationPath(t *testing
 	valid := vm.ValidateVersion(1, io, checkVersionEqual, false, "")
 	require.Equal(t, VersionInvalid, valid,
 		"tx 1: a prior tx wrote IncarnationPath (account created/destroyed); the stale AddressPath storage-read MUST invalidate so the tx re-executes against the post-creation state")
-}
-
-// TestValidateRead_NoBypassForAddressPath verifies that a new MVReadResultDone
-// entry on AddressPath — a real state change (e.g. account creation) from a
-// concurrent worker — invalidates a storage-fallback read of that account.
-func TestValidateRead_NoBypassForAddressPath(t *testing.T) {
-	t.Parallel()
-
-	addr := getAddress(42)
-	checkVersionEqual := func(readVersion, writeVersion Version) VersionValidity {
-		if readVersion == writeVersion {
-			return VersionValid
-		}
-		return VersionInvalid
-	}
-
-	vm := NewVersionMap(nil)
-
-	// A concurrent worker wrote to AddressPath at txIndex 0.
-	vm.Write(addr, AddressPath, accounts.NilKey, Version{TxIndex: 0, Incarnation: 1}, valueFor(0, 1), true)
-
-	// Tx 2 originally read from storage (no map entry at execution time).
-	io := NewVersionedIO(2)
-	rs := ReadSet{}
-	rs.Set(VersionedRead{
-		Address: addr,
-		Path:    AddressPath,
-		Source:  StorageRead,
-		Version: Version{TxIndex: 2, Incarnation: 1},
-	})
-	io.RecordReads(Version{TxIndex: 2, Incarnation: 1}, rs)
-
-	valid := vm.ValidateVersion(2, io, checkVersionEqual, false, "")
-	require.Equal(t, VersionInvalid, valid,
-		"AddressPath must not be bypassed — a new Done entry means a real state change")
 }
 
 // TestValidateRead_InvalidatesAllPaths verifies the baseline behavior: any

@@ -1,6 +1,7 @@
 package state
 
 import (
+	"bytes"
 	"errors"
 	"fmt"
 	"sync"
@@ -428,7 +429,7 @@ func (vm *VersionMap) validateReadImpl(txIndex int, addr accounts.Address, path 
 		if source != MapRead {
 			if recursive && readVal == nil {
 				// Synthetic probe — outer entry's own validation covers it.
-			} else if readVal != nil && rr.Value() != nil && valuesEqual(path, readVal, rr.Value()) {
+			} else if valueUnchanged(path, readVal, rr.Value()) {
 				// Value tiebreaker: a Done entry now exists where the read
 				// saw storage, but it holds the same value — read stays valid.
 			} else {
@@ -440,7 +441,7 @@ func (vm *VersionMap) validateReadImpl(txIndex int, addr accounts.Address, path 
 			// provably unchanged — the coinbase fee tip-credit re-stamps the
 			// balance cell at a new incarnation with the same value, which
 			// version-only validation would wrongly treat as a conflict.
-			if valid != VersionValid && readVal != nil && rr.Value() != nil && valuesEqual(path, readVal, rr.Value()) {
+			if valid != VersionValid && valueUnchanged(path, readVal, rr.Value()) {
 				valid = VersionValid
 			}
 		}
@@ -485,6 +486,17 @@ func (vm *VersionMap) validateReadImpl(txIndex int, addr accounts.Address, path 
 			// AddressPath at the recorded version still holds.
 			valid = vm.validateReadImpl(txIndex, addr, AddressPath, accounts.StorageKey{}, source,
 				version, nil, checkVersion, traceInvalid, tracePrefix, true)
+			// Relax a folded sub-field read whose AddressPath cell was re-stamped
+			// (calcFees re-stamps coinbase/burnt records every fee-paying tx) but
+			// whose field is unchanged — the version-only fold would otherwise
+			// re-invalidate on every re-stamp, e.g. EXTCODEHASH(block.coinbase).
+			if valid != VersionValid {
+				if arr := vm.Read(addr, AddressPath, accounts.NilKey, txIndex); arr.Status() == MVReadResultDone {
+					if acc, ok := arr.Value().(*accounts.Account); ok && subfieldUnchanged(path, readVal, acc) {
+						valid = VersionValid
+					}
+				}
+			}
 		} else if source != StorageRead {
 			valid = VersionInvalid
 		} else {
@@ -506,7 +518,7 @@ func (vm *VersionMap) validateReadImpl(txIndex int, addr accounts.Address, path 
 					// IncarnationPath is the specific signal that a prior tx
 					// created or destroyed this account — it's never written by
 					// UpdateAccountData — so a Done entry there invalidates this
-					// stale storage-fallback read. SelfDestructPath is checked first.
+					// stale storage-fallback read.
 					valid = vm.validateReadImpl(txIndex, addr, SelfDestructPath, accounts.StorageKey{}, source,
 						version, nil, checkVersion, traceInvalid, tracePrefix, true)
 					if valid == VersionValid {
@@ -583,6 +595,10 @@ func valuesEqual(path AccountPath, readVal, writeVal any) bool {
 		rv, ok1 := readVal.(accounts.CodeHash)
 		wv, ok2 := writeVal.(accounts.CodeHash)
 		return ok1 && ok2 && rv == wv
+	case CodePath:
+		rv, ok1 := readVal.([]byte)
+		wv, ok2 := writeVal.([]byte)
+		return ok1 && ok2 && bytes.Equal(rv, wv)
 	case AddressPath:
 		// Record-level comparison — both should be *accounts.Account
 		rv, ok1 := readVal.(*accounts.Account)
@@ -596,6 +612,39 @@ func valuesEqual(path AccountPath, readVal, writeVal any) bool {
 		rv, ok1 := readVal.(uint256.Int)
 		wv, ok2 := writeVal.(uint256.Int)
 		return ok1 && ok2 && rv.Eq(&wv)
+	default:
+		return false
+	}
+}
+
+// valueUnchanged reports whether a recorded read value provably equals the
+// current versionMap value for the same path. The nil-guards are load-bearing:
+// valuesEqual returns true for nil/nil, which is not a "value unchanged" signal.
+func valueUnchanged(path AccountPath, readVal, writeVal any) bool {
+	return readVal != nil && writeVal != nil && valuesEqual(path, readVal, writeVal)
+}
+
+// subfieldUnchanged reports whether a folded sub-field read value equals the
+// corresponding field of an account record. Used to relax a folded sub-field
+// read whose AddressPath cell was re-stamped (e.g. by calcFees) while the field
+// itself is unchanged.
+func subfieldUnchanged(path AccountPath, readVal any, acc *accounts.Account) bool {
+	if readVal == nil || acc == nil {
+		return false
+	}
+	switch path {
+	case BalancePath:
+		v, ok := readVal.(uint256.Int)
+		return ok && v.Eq(&acc.Balance)
+	case NoncePath:
+		v, ok := readVal.(uint64)
+		return ok && v == acc.Nonce
+	case IncarnationPath:
+		v, ok := readVal.(uint64)
+		return ok && v == acc.Incarnation
+	case CodeHashPath:
+		v, ok := readVal.(accounts.CodeHash)
+		return ok && v == acc.CodeHash
 	default:
 		return false
 	}
