@@ -74,7 +74,6 @@ func RegenerateBoundaryStepFile(
 	ctx context.Context,
 	domain kv.Domain,
 	oldKVPath string,
-	baselineKVPath string,
 	newKVPath string,
 	lookup AsOfLookup,
 	lastTxNum uint64,
@@ -89,9 +88,6 @@ func RegenerateBoundaryStepFile(
 	if domain != kv.CommitmentDomain && commitmentAnchor != nil {
 		return fmt.Errorf("RegenerateBoundaryStepFile(%s): commitmentAnchor must be nil for non-commitment domains", domain)
 	}
-	if domain == kv.CommitmentDomain && baselineKVPath == "" {
-		return fmt.Errorf("RegenerateBoundaryStepFile(commitment): baselineKVPath required")
-	}
 	if lookup == nil {
 		return fmt.Errorf("RegenerateBoundaryStepFile: lookup is required")
 	}
@@ -99,14 +95,9 @@ func RegenerateBoundaryStepFile(
 		return fmt.Errorf("RegenerateBoundaryStepFile: newKVPath is required")
 	}
 
-	sourcePath := oldKVPath
-	if domain == kv.CommitmentDomain {
-		sourcePath = baselineKVPath
-	}
-
-	oldDecomp, err := seg.NewDecompressor(sourcePath)
+	oldDecomp, err := seg.NewDecompressor(oldKVPath)
 	if err != nil {
-		return fmt.Errorf("open source %s: %w", sourcePath, err)
+		return fmt.Errorf("open old %s: %w", oldKVPath, err)
 	}
 	defer oldDecomp.Close()
 
@@ -128,51 +119,45 @@ func RegenerateBoundaryStepFile(
 	for reader.HasNext() {
 		keyBuf, _ = reader.Next(keyBuf[:0])
 		if !reader.HasNext() {
-			return fmt.Errorf("malformed %s: trailing key with no value", sourcePath)
+			return fmt.Errorf("malformed %s: trailing key with no value", oldKVPath)
 		}
 		valBuf, _ = reader.Next(valBuf[:0])
 
-		// Commitment-domain: iterating the baseline file (endStep ≤
-		// maxStep). Baseline branches are at end-of-baseline-step
-		// state — for keys unchanged in (baseline, lastTxNum] that's
-		// exactly the at-lastTxNum branch value. Apply's collector
-		// wrote at-lastTxNum branches to MDBX for touched keys; the
-		// reader picks MDBX over the file for those. Baseline's V is
-		// preserved verbatim; KeyCommitmentState is replaced with
-		// the supplied anchor blob.
-		if domain == kv.CommitmentDomain {
-			if bytes.Equal(keyBuf, commitmentdb.KeyCommitmentState) {
-				if _, err := writer.Write(keyBuf); err != nil {
-					return fmt.Errorf("write KeyCommitmentState key: %w", err)
-				}
-				if _, err := writer.Write(commitmentAnchor); err != nil {
-					return fmt.Errorf("write KeyCommitmentState anchor: %w", err)
-				}
-				anchorPlanted = true
-				kept++
-				continue
-			}
+		// Commitment-domain special case: KeyCommitmentState is the
+		// anchor record. Always plant the supplied anchor blob —
+		// regardless of what the old file held — because mode-B's
+		// whole point is to make this record reflect the unwind
+		// target.
+		if domain == kv.CommitmentDomain && bytes.Equal(keyBuf, commitmentdb.KeyCommitmentState) {
 			if _, err := writer.Write(keyBuf); err != nil {
-				return fmt.Errorf("write key: %w", err)
+				return fmt.Errorf("write KeyCommitmentState key: %w", err)
 			}
-			if _, err := writer.Write(valBuf); err != nil {
-				return fmt.Errorf("write value: %w", err)
+			if _, err := writer.Write(commitmentAnchor); err != nil {
+				return fmt.Errorf("write KeyCommitmentState anchor: %w", err)
 			}
+			anchorPlanted = true
 			kept++
 			continue
 		}
 
-		// Value-domains: iterate the straddler (oldKVPath) and rewrite
-		// each key's value via as-of lookup. !found is a tombstone
-		// (history has an empty marker at or before lastTxNum); write
-		// (K, empty) so older files don't leak stale pre-tombstone
-		// values.
+		// !found from AsOfLookup is domain-dependent. Value-domains
+		// (storage/accounts/code/receipt) have history; !found is a
+		// tombstone → write (K, empty) so older files don't leak stale
+		// pre-tombstone values. Commitment has HistoryDisabled=true and
+		// GetAsOf short-circuits to (nil, false) — !found there is a
+		// no-history signal, NOT a tombstone. Empty commitment branch
+		// data trips unfoldBranchNode; dropping loses branch data the
+		// step-boundary fold needs. Preserve the old file's value.
 		newVal, found, err := lookup(domain, keyBuf, lastTxNum)
 		if err != nil {
 			return fmt.Errorf("AsOfLookup(%s, key, %d): %w", domain, lastTxNum, err)
 		}
 		if !found {
-			newVal = nil
+			if domain == kv.CommitmentDomain {
+				newVal = valBuf
+			} else {
+				newVal = nil
+			}
 		}
 
 		if _, err := writer.Write(keyBuf); err != nil {
@@ -184,8 +169,12 @@ func RegenerateBoundaryStepFile(
 		kept++
 	}
 
+	// Commitment files MUST end up with a KeyCommitmentState record.
+	// If the old file didn't have one (shouldn't happen in practice
+	// but is defensible to detect) we'd silently emit a file the
+	// chain can't seek a commitment from. Make that loud.
 	if domain == kv.CommitmentDomain && !anchorPlanted {
-		return fmt.Errorf("RegenerateBoundaryStepFile(commitment): baseline file %s had no KeyCommitmentState entry; regen would produce a commitment file with no anchor", sourcePath)
+		return fmt.Errorf("RegenerateBoundaryStepFile(commitment): old file %s had no KeyCommitmentState entry; regen would produce a commitment file with no anchor", oldKVPath)
 	}
 
 	if err := comp.Compress(); err != nil {
@@ -194,7 +183,7 @@ func RegenerateBoundaryStepFile(
 
 	if logger != nil {
 		logger.Info("[storage] mode-B boundary-step regen",
-			"domain", domain, "source", sourcePath, "new", newKVPath,
+			"domain", domain, "old", oldKVPath, "new", newKVPath,
 			"kept", kept, "anchor_planted", anchorPlanted)
 	}
 
