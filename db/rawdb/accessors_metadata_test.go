@@ -46,3 +46,16 @@ func TestChainConfigL2JSONRoundTrip(t *testing.T) {
 	require.JSONEq(t, `{"stack":"testl2"}`, string(got.L2JSON))
 	require.True(t, got.IsL2())
 }
+
+func TestChainConfigL2JSONNullBackfill(t *testing.T) {
+	_, tx := memdb.NewTestTx(t)
+	hash := common.Hash{2}
+
+	cfg := &chain.Config{L2JSON: []byte("null"), L2: &testL2Config{Stack: "testl2"}}
+	require.NoError(t, WriteChainConfig(tx, hash, cfg))
+
+	got, err := ReadChainConfig(tx, hash)
+	require.NoError(t, err)
+	require.JSONEq(t, `{"stack":"testl2"}`, string(got.L2JSON))
+	require.True(t, got.IsL2())
+}
