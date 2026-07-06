@@ -26,6 +26,7 @@ import (
 	"maps"
 	"math/big"
 	"math/bits"
+	"slices"
 
 	"github.com/consensys/gnark-crypto/ecc"
 	bls12381 "github.com/consensys/gnark-crypto/ecc/bls12-381"
@@ -68,27 +69,66 @@ func ActivePrecompiledContracts(chainRules *chain.Rules) PrecompiledContracts {
 	return maps.Clone(Precompiles(chainRules))
 }
 
-func Precompiles(chainRules *chain.Rules) PrecompiledContracts {
+// forkTier indexes forkSets. It is derived from chainRules by the single
+// switch in forkTierFor, so the contracts map and the address list
+// for a fork can never drift apart the way two independent switches could.
+type forkTier int8
+
+const (
+	forkHomestead forkTier = iota
+	forkByzantium
+	forkIstanbul
+	forkBerlin
+	forkCancun
+	forkNapoli
+	forkBhilai
+	forkPrague
+	forkOsaka
+	forkTierCount
+)
+
+type forkSet struct {
+	contracts PrecompiledContracts
+	addresses []accounts.Address
+}
+
+var forkSets [forkTierCount]forkSet
+
+func forkTierFor(chainRules *chain.Rules) forkTier {
 	switch {
 	case chainRules.IsOsaka:
-		return PrecompiledContractsOsaka
+		return forkOsaka
 	case chainRules.IsBhilai:
-		return PrecompiledContractsBhilai
+		return forkBhilai
 	case chainRules.IsPrague:
-		return PrecompiledContractsPrague
+		return forkPrague
 	case chainRules.IsNapoli:
-		return PrecompiledContractsNapoli
+		return forkNapoli
 	case chainRules.IsCancun:
-		return PrecompiledContractsCancun
+		return forkCancun
 	case chainRules.IsBerlin:
-		return PrecompiledContractsBerlin
+		return forkBerlin
 	case chainRules.IsIstanbul:
-		return PrecompiledContractsIstanbul
+		return forkIstanbul
 	case chainRules.IsByzantium:
-		return PrecompiledContractsByzantium
+		return forkByzantium
 	default:
-		return PrecompiledContractsHomestead
+		return forkHomestead
 	}
+}
+
+// Precompiles returns the fork-selected built-in precompiles for chainRules,
+// overlaid with any provider registered via RegisterPrecompiles for
+// chainRules.ChainID. With no registered provider it returns the built-in
+// map exactly as before.
+func Precompiles(chainRules *chain.Rules) PrecompiledContracts {
+	fork := forkTierFor(chainRules)
+	chainID := rulesChainID(chainRules)
+	provider, ok := lookupProvider(chainID)
+	if !ok {
+		return forkSets[fork].contracts
+	}
+	return mergedSetFor(chainRules, forkSets[fork].contracts, fork, chainID, provider).contracts
 }
 
 // PrecompiledContractsHomestead contains the default set of pre-compiled Ethereum
@@ -228,70 +268,32 @@ var PrecompiledContractsOsaka = PrecompiledContracts{
 	accounts.InternAddress(common.BytesToAddress([]byte{0x01, 0x00})): &p256Verify{eip7951: true},
 }
 
-var (
-	PrecompiledAddressesOsaka     []accounts.Address
-	PrecompiledAddressesPrague    []accounts.Address
-	PrecompiledAddressesNapoli    []accounts.Address
-	PrecompiledAddressesBhilai    []accounts.Address
-	PrecompiledAddressesCancun    []accounts.Address
-	PrecompiledAddressesBerlin    []accounts.Address
-	PrecompiledAddressesIstanbul  []accounts.Address
-	PrecompiledAddressesByzantium []accounts.Address
-	PrecompiledAddressesHomestead []accounts.Address
-)
-
 func init() {
-	for k := range PrecompiledContractsHomestead {
-		PrecompiledAddressesHomestead = append(PrecompiledAddressesHomestead, k)
-	}
-	for k := range PrecompiledContractsByzantium {
-		PrecompiledAddressesByzantium = append(PrecompiledAddressesByzantium, k)
-	}
-	for k := range PrecompiledContractsIstanbul {
-		PrecompiledAddressesIstanbul = append(PrecompiledAddressesIstanbul, k)
-	}
-	for k := range PrecompiledContractsBerlin {
-		PrecompiledAddressesBerlin = append(PrecompiledAddressesBerlin, k)
-	}
-	for k := range PrecompiledContractsCancun {
-		PrecompiledAddressesCancun = append(PrecompiledAddressesCancun, k)
-	}
-	for k := range PrecompiledContractsNapoli {
-		PrecompiledAddressesNapoli = append(PrecompiledAddressesNapoli, k)
-	}
-	for k := range PrecompiledContractsBhilai {
-		PrecompiledAddressesBhilai = append(PrecompiledAddressesBhilai, k)
-	}
-	for k := range PrecompiledContractsPrague {
-		PrecompiledAddressesPrague = append(PrecompiledAddressesPrague, k)
-	}
-	for k := range PrecompiledContractsOsaka {
-		PrecompiledAddressesOsaka = append(PrecompiledAddressesOsaka, k)
+	for tier, contracts := range map[forkTier]PrecompiledContracts{
+		forkHomestead: PrecompiledContractsHomestead,
+		forkByzantium: PrecompiledContractsByzantium,
+		forkIstanbul:  PrecompiledContractsIstanbul,
+		forkBerlin:    PrecompiledContractsBerlin,
+		forkCancun:    PrecompiledContractsCancun,
+		forkNapoli:    PrecompiledContractsNapoli,
+		forkBhilai:    PrecompiledContractsBhilai,
+		forkPrague:    PrecompiledContractsPrague,
+		forkOsaka:     PrecompiledContractsOsaka,
+	} {
+		forkSets[tier] = forkSet{contracts, slices.Collect(maps.Keys(contracts))}
 	}
 }
 
-// ActivePrecompiles returns the precompiles enabled with the current configuration.
+// ActivePrecompiles returns the precompiles enabled with the current
+// configuration, reflecting any provider registered for rules.ChainID.
 func ActivePrecompiles(rules *chain.Rules) []accounts.Address {
-	switch {
-	case rules.IsOsaka:
-		return PrecompiledAddressesOsaka
-	case rules.IsBhilai:
-		return PrecompiledAddressesBhilai
-	case rules.IsPrague:
-		return PrecompiledAddressesPrague
-	case rules.IsNapoli:
-		return PrecompiledAddressesNapoli
-	case rules.IsCancun:
-		return PrecompiledAddressesCancun
-	case rules.IsBerlin:
-		return PrecompiledAddressesBerlin
-	case rules.IsIstanbul:
-		return PrecompiledAddressesIstanbul
-	case rules.IsByzantium:
-		return PrecompiledAddressesByzantium
-	default:
-		return PrecompiledAddressesHomestead
+	fork := forkTierFor(rules)
+	chainID := rulesChainID(rules)
+	provider, ok := lookupProvider(chainID)
+	if !ok {
+		return forkSets[fork].addresses
 	}
+	return mergedSetFor(rules, forkSets[fork].contracts, fork, chainID, provider).addresses
 }
 
 // RunPrecompiledContract runs and evaluates the output of a precompiled contract.

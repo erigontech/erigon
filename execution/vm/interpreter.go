@@ -404,16 +404,9 @@ func (evm *EVM) Run(contract Contract, gas mdgas.MdGas, input []byte, readOnly b
 		txIndex, txIncarnation int
 	)
 
-	// Make sure the readOnly is only set if we aren't in readOnly yet.
-	// This makes also sure that the readOnly flag isn't removed for child calls.
-	restoreReadonly := readOnly && !evm.readOnly
-	if restoreReadonly {
-		evm.readOnly = true
-	}
-	// Increment the call depth which is restricted to 1024
-	evm.depth++
+	exitFrame := evm.enterFrame(readOnly)
 	defer func() {
-		// first: capture data/memory/state/depth/etc... then clenup them
+		// first: capture data/memory/state/depth/etc... then cleanup them
 		if debug && err != nil {
 			if !logged && tracer.OnOpcode != nil {
 				tracer.OnOpcode(pcCopy, byte(op), gasCopy, cost, callContext, evm.returnData, evm.depth, VMErrorFromErr(err))
@@ -430,10 +423,7 @@ func (evm *EVM) Run(contract Contract, gas mdgas.MdGas, input []byte, readOnly b
 		gasUsed.State = callContext.frameStateUsed
 		// this function must execute _after_: the `CaptureState` needs the stacks before
 		callContext.put()
-		if restoreReadonly {
-			evm.readOnly = false
-		}
-		evm.depth--
+		exitFrame()
 	}()
 
 	// The Interpreter main run loop (contextual). This loop runs until either an
