@@ -18,6 +18,7 @@ package jsonrpc
 
 import (
 	"math/rand"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -241,6 +242,38 @@ func TestNewPendingTransactionIncludesFrom(t *testing.T) {
 
 	rpcTx := newRPCPendingTransaction(tx, nil, nil)
 	require.Equal(t, m.Address, rpcTx.From)
+}
+
+func TestPendingTxsFilterChangesReturnsAllBatches(t *testing.T) {
+	m := execmoduletester.New(t)
+	ctx, conn := rpcdaemontest.CreateTestGrpcConn(t, m)
+	mining := txpoolproto.NewMiningClient(conn)
+	ff := rpchelper.New(ctx, rpchelper.DefaultFiltersConfig, nil, nil, mining, func() {}, m.Log, nil)
+	stateCache := kvcache.New(kvcache.DefaultCoherentConfig)
+	api := newEthApiForTest(newBaseApiWithFiltersForTest(ff, stateCache, m), m.DB, nil, nil)
+
+	ptf, err := api.NewPendingTransactionFilter(ctx)
+	require.NoError(t, err)
+	id := rpchelper.PendingTxsSubID(strings.TrimPrefix(ptf, "0x"))
+
+	signer := types.LatestSignerForChainID(m.ChainConfig.ChainID)
+	makeTx := func(nonce uint64) types.Transaction {
+		tx, err := types.SignTx(
+			types.NewTransaction(nonce, m.Address, uint256.NewInt(1), params.TxGas, uint256.NewInt(1), nil),
+			*signer,
+			m.Key,
+		)
+		require.NoError(t, err)
+		return tx
+	}
+	tx0, tx1, tx2 := makeTx(0), makeTx(1), makeTx(2)
+
+	ff.AddPendingTxs(id, []types.Transaction{tx0, tx1})
+	ff.AddPendingTxs(id, []types.Transaction{tx2})
+
+	changes, err := api.GetFilterChanges(ctx, ptf)
+	require.NoError(t, err)
+	require.Equal(t, []any{tx0.Hash(), tx1.Hash(), tx2.Hash()}, changes)
 }
 
 func TestGetFilterChangesReturnsFilterNotFoundForUnknownID(t *testing.T) {

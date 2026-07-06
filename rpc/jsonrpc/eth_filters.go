@@ -119,9 +119,11 @@ func (api *APIImpl) GetFilterChanges(_ context.Context, index string) ([]any, er
 		return stub, nil
 	case api.filters.HasPendingTxsSubscription(rpchelper.PendingTxsSubID(cutIndex)):
 		api.filters.TouchSubscription(rpchelper.SubscriptionID(cutIndex), rpchelper.FilterTypePendingTxs)
-		if txs, ok := api.filters.ReadPendingTxs(rpchelper.PendingTxsSubID(cutIndex)); ok && len(txs) > 0 {
-			for _, txn := range txs[0] {
-				stub = append(stub, txn.Hash())
+		if txs, ok := api.filters.ReadPendingTxs(rpchelper.PendingTxsSubID(cutIndex)); ok {
+			for _, batch := range txs {
+				for _, txn := range batch {
+					stub = append(stub, txn.Hash())
+				}
 			}
 		}
 		return stub, nil
