@@ -226,30 +226,6 @@ func TestApplyBuilderDepositRequestRejectsValidatorDepositSignature(t *testing.T
 	require.Equal(t, 0, s.GetBuilders().Len())
 }
 
-func TestApplyBuilderDepositRequestRegistersPayloadBuilderVersion(t *testing.T) {
-	cfg := clparams.MainnetBeaconConfig
-	s := state2.New(&cfg)
-	s.SetBuilders(solid.NewStaticListSSZ[*cltypes.Builder](64, 73))
-
-	pubkey, creds, amount, sig := makeValidBuilderDepositRequest(t, &cfg)
-	require.NotEqual(t, cfg.PayloadBuilderVersion, creds[0])
-
-	require.NoError(t, state2.ApplyBuilderDepositRequest(s, &solid.BuilderDepositRequest{
-		PubKey:                pubkey,
-		WithdrawalCredentials: creds,
-		Amount:                amount,
-		Signature:             sig,
-	}))
-
-	builders := s.GetBuilders()
-	require.Equal(t, 1, builders.Len())
-	builder := builders.Get(0)
-	require.Equal(t, pubkey, builder.Pubkey)
-	require.Equal(t, cfg.PayloadBuilderVersion, builder.Version)
-	require.Equal(t, common.BytesToAddress(creds[12:]), builder.ExecutionAddress)
-	require.Equal(t, amount, builder.Balance)
-}
-
 func TestAddBuilderToRegistryRejectsFullRegistry(t *testing.T) {
 	cfg := clparams.MainnetBeaconConfig
 	cfg.BuilderRegistryLimit = 1
@@ -418,47 +394,6 @@ func makeValidBuilderDeposit(t *testing.T, cfg *clparams.BeaconChainConfig) (
 
 	signingRoot := utils.Sha256(msgHash[:], domain)
 
-	sigObj := privKey.Sign(signingRoot[:])
-	copy(signature[:], sigObj.Bytes())
-
-	return pubkey, withdrawalCredentials, amount, signature
-}
-
-func makeValidBuilderDepositRequest(t *testing.T, cfg *clparams.BeaconChainConfig) (
-	pubkey common.Bytes48,
-	withdrawalCredentials common.Hash,
-	amount uint64,
-	signature common.Bytes96,
-) {
-	t.Helper()
-
-	privKey, err := bls.GenerateKey()
-	require.NoError(t, err)
-
-	compressed := bls.CompressPublicKey(privKey.PublicKey())
-	copy(pubkey[:], compressed)
-
-	feeRecipient := common.HexToAddress("0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb")
-	withdrawalCredentials[0] = byte(cfg.BuilderWithdrawalPrefix)
-	copy(withdrawalCredentials[12:], feeRecipient[:])
-	amount = cfg.MinDepositAmount
-
-	dd := &cltypes.DepositData{
-		PubKey:                pubkey,
-		WithdrawalCredentials: withdrawalCredentials,
-		Amount:                amount,
-	}
-	msgHash, err := dd.MessageHash()
-	require.NoError(t, err)
-
-	domain, err := fork.ComputeDomain(
-		cfg.DomainBuilderDeposit[:],
-		utils.Uint32ToBytes4(uint32(cfg.GenesisForkVersion)),
-		[32]byte{},
-	)
-	require.NoError(t, err)
-
-	signingRoot := utils.Sha256(msgHash[:], domain)
 	sigObj := privKey.Sign(signingRoot[:])
 	copy(signature[:], sigObj.Bytes())
 

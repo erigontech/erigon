@@ -421,7 +421,7 @@ func ApplyBuilderDepositRequest(s abstract.BeaconState, request *solid.BuilderDe
 		return AddBuilderToRegistry(
 			s,
 			request.PubKey,
-			s.BeaconConfig().PayloadBuilderVersion,
+			request.WithdrawalCredentials[0],
 			common.BytesToAddress(request.WithdrawalCredentials[12:]),
 			request.Amount,
 			s.Slot(),
