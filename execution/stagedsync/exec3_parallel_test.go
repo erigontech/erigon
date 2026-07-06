@@ -18,9 +18,11 @@ import (
 	"github.com/erigontech/erigon/common/dir"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/datadir"
+	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/dbcfg"
 	"github.com/erigontech/erigon/db/kv/mdbx"
 	"github.com/erigontech/erigon/db/kv/temporal"
+	"github.com/erigontech/erigon/db/rawdb/rawtemporaldb"
 	dbstate "github.com/erigontech/erigon/db/state"
 	"github.com/erigontech/erigon/db/state/execctx"
 	"github.com/erigontech/erigon/execution/chain"
@@ -29,10 +31,12 @@ import (
 	"github.com/erigontech/erigon/execution/exec"
 	"github.com/erigontech/erigon/execution/protocol"
 	"github.com/erigontech/erigon/execution/protocol/rules"
+	"github.com/erigontech/erigon/execution/protocol/rules/ethash"
 	"github.com/erigontech/erigon/execution/state"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/accounts"
 	"github.com/erigontech/erigon/execution/vm"
+	"github.com/erigontech/erigon/execution/vm/evmtypes"
 )
 
 type OpType int
@@ -534,7 +538,7 @@ func runParallel(tb testing.TB, tasks []exec.Task, validation propertyCheck, met
 	assert.NoError(tb, err, "error occur during parallel init")
 	assert.NoError(tb, executorContext.Err(), "error occur during parallel init")
 
-	defer executorCancel()
+	defer executorCancel(nil)
 
 	for _, task := range tasks {
 		task := task.(*testExecTask)
@@ -653,7 +657,7 @@ func runParallelGetMetadata(tb testing.TB, tasks []exec.Task, validation propert
 	}
 
 	executorContext, executorCancel, err := pe.run(context.Background())
-	defer executorCancel()
+	defer executorCancel(nil)
 	assert.NoError(tb, err, "error occur during parallel init")
 
 	for _, task := range tasks {
@@ -693,7 +697,7 @@ func runProfileAndExecute(tb testing.TB, tasks []exec.Task, validation propertyC
 	chainSpec, _ := chainspec.ChainSpecByName(networkname.Mainnet)
 
 	// newExecutor creates a fresh domains/state/executor on the shared DB.
-	newExecutor := func() (*parallelExecutor, context.Context, context.CancelFunc, func()) {
+	newExecutor := func() (*parallelExecutor, context.Context, context.CancelCauseFunc, func()) {
 		tx, err := db.BeginTemporalRo(context.Background()) //nolint:gocritic
 		assert.NoError(tb, err)
 		domains, err := execctx.NewSharedDomains(context.Background(), tx, log.New())
@@ -713,7 +717,7 @@ func runProfileAndExecute(tb testing.TB, tasks []exec.Task, validation propertyC
 		assert.NoError(tb, err, "error during parallel init")
 
 		cleanup := func() {
-			executorCancel()
+			executorCancel(nil)
 			domains.Close()
 			tx.Rollback()
 		}
@@ -1348,4 +1352,132 @@ func BenchmarkDexScenarioWithMetadata(b *testing.B) {
 	}
 
 	testExecutorCombWithMetadata(b, totalTxs, numReads, numWrites, numNonIO, taskRunner, logger)
+}
+
+func TestParallelResumeBoundaryAndNotifications(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip()
+	}
+	assert := assert.New(t)
+	logger := log.New()
+	tmpDir, err := os.MkdirTemp("", "erigon-parallel-test-*")
+	assert.NoError(err)
+	defer dir.RemoveAll(tmpDir)
+
+	dirs := datadir.New(tmpDir)
+	rawDb := mdbx.New(dbcfg.ChainDB, logger).InMem(t, dirs.Chaindata).MustOpen()
+	defer rawDb.Close()
+
+	agg, err := dbstate.NewTest(dirs).StepSize(16).Logger(logger).Open(context.Background(), rawDb)
+	assert.NoError(err)
+	defer agg.Close()
+
+	db, err := temporal.New(rawDb, agg)
+	assert.NoError(err)
+
+	// Write mock receipt for transaction 0 in the database at txNum = 1
+	err = db.UpdateTemporal(context.Background(), func(rwTx kv.TemporalRwTx) error {
+		domains, err := execctx.NewSharedDomains(context.Background(), rwTx, logger)
+		if err != nil {
+			return err
+		}
+		defer domains.Close()
+		putter := domains.AsPutDel(rwTx)
+		if err := rawtemporaldb.AppendReceipt(putter, 5, 21000, 12000, 1); err != nil {
+			return err
+		}
+		return domains.Flush(context.Background(), rwTx)
+	})
+	assert.NoError(err)
+
+	chainSpec, _ := chainspec.ChainSpecByName(networkname.Mainnet)
+
+	signedTx := signSelfSendTx(t, 0, 0, 1, 21000, chainSpec.Config, 0)
+
+	// Create a task list that resumes mid-block
+	// First task has TxIndex = 1 (not -1/0), so isPartial will be true
+	txTask := &exec.TxTask{
+		Header: &types.Header{
+			Number: *uint256.NewInt(1),
+		},
+		TxNum:   2,
+		TxIndex: 1,
+		Config:  chainSpec.Config,
+		Txs: []types.Transaction{
+			signedTx,
+			signedTx,
+		},
+	}
+
+	// Open read transaction for execution
+	roTx, err := db.BeginTemporalRo(context.Background())
+	assert.NoError(err)
+	defer roTx.Rollback()
+
+	domains, err := execctx.NewSharedDomains(context.Background(), roTx, logger)
+	assert.NoError(err)
+	defer domains.Close()
+
+	pe := &parallelExecutor{
+		txExecutor: txExecutor{
+			cfg: ExecuteBlockCfg{
+				chainConfig: chainSpec.Config,
+				db:          db,
+				engine:      ethash.NewFaker(),
+			},
+			doms:   domains,
+			rs:     state.NewStateV3Buffered(state.NewStateV3(domains, false, logger)),
+			logger: logger,
+		},
+		workerCount: runtime.NumCPU() - 1,
+	}
+
+	gasPool := new(protocol.GasPool).AddGas(10_000_000)
+
+	// Run nextResult
+	be := newBlockExec(0, common.Hash{}, gasPool, nil, make(chan applyResult, 1), nil, false, nil)
+	eTask := &execTask{
+		Task:  txTask,
+		index: 0,
+	}
+	be.tasks = []*execTask{eTask}
+	be.results = []*execResult{nil}
+	be.execTasks.inProgress = []int{0}
+	be.validateTasks.inProgress = []int{0}
+	be.publishTasks.pending = []int{0}
+
+	tVersion := &taskVersion{
+		execTask: eTask,
+		version: state.Version{
+			BlockNum:    0,
+			TxIndex:     1,
+			Incarnation: 1,
+			TxNum:       2,
+		},
+	}
+
+	// Populate a mock test result in be.results[0]
+	txResult := &exec.TxResult{
+		Task: tVersion,
+		ExecutionResult: evmtypes.ExecutionResult{
+			ReceiptGasUsed: 10000,
+		},
+	}
+	be.results[0] = &execResult{TxResult: txResult}
+
+	// execute nextResult sequentially
+	res, err := be.nextResult(context.Background(), pe, txResult, roTx)
+	assert.NoError(err)
+	assert.NotNil(res)
+
+	// Verify that the fallback database query ran and set the correct offset values:
+	// cumulativeGasUsed should be cumGasUsed (21000) + current receipt gas used (10000) = 31000
+	// firstLogIndex should be logIndexAfterTx from DB = 5
+	assert.NotNil(txResult.Receipt)
+	assert.Equal(uint64(31000), txResult.Receipt.CumulativeGasUsed)
+	assert.Equal(uint32(5), txResult.Receipt.FirstLogIndexWithinBlock)
+	assert.Equal(uint64(12000), be.blobGasUsed)
+
+	// Verify notification behavior: since it's a partial block, it should be marked as partial
+	assert.True(res.isPartial)
 }

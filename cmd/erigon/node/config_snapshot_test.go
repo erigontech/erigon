@@ -17,11 +17,12 @@
 package node
 
 import (
+	"context"
 	"encoding/json"
 	"testing"
 
 	"github.com/stretchr/testify/require"
-	"github.com/urfave/cli/v2"
+	"github.com/urfave/cli/v3"
 
 	erigoncli "github.com/erigontech/erigon/node/cli"
 	"github.com/erigontech/erigon/node/ethconfig"
@@ -36,18 +37,18 @@ func buildEthConfig(t *testing.T, args []string) *ethconfig.Config {
 	t.Helper()
 
 	var result *ethconfig.Config
-	app := cli.NewApp()
+	app := &cli.Command{}
 	app.Flags = erigoncli.DefaultFlags
-	app.Action = func(ctx *cli.Context) error {
+	app.Action = func(nodeCtx context.Context, ctx *cli.Command) error {
 		logger := log.Root()
 		nodeCfg := &nodecfg.Config{}
 		nodeCfg.Dirs.DataDir = t.TempDir()
 		ethCfg := ethconfig.Defaults
-		erigoncli.BuildEthConfig(ctx, nodeCfg, &ethCfg, logger)
+		erigoncli.BuildEthConfig(nodeCtx, ctx, nodeCfg, &ethCfg, logger)
 		result = &ethCfg
 		return nil
 	}
-	require.NoError(t, app.Run(append([]string{"erigon"}, args...)))
+	require.NoError(t, app.Run(context.Background(), append([]string{"erigon"}, args...)))
 	require.NotNil(t, result)
 	return result
 }
@@ -68,9 +69,8 @@ type configSnapshot struct {
 	ExecWorkerCount int    `json:"exec_worker_count"`
 
 	// Feature flags
-	ExperimentalBAL                  bool `json:"experimental_bal"`
-	KeepExecutionProofs              bool `json:"keep_execution_proofs"`
-	ExperimentalConcurrentCommitment bool `json:"experimental_concurrent_commitment"`
+	ExperimentalBAL     bool `json:"experimental_bal"`
+	KeepExecutionProofs bool `json:"keep_execution_proofs"`
 
 	// Snapshot config
 	SnapKeepBlocks bool `json:"snap_keep_blocks"`
@@ -85,24 +85,23 @@ type configSnapshot struct {
 
 func snapshotConfig(cfg *ethconfig.Config) configSnapshot {
 	return configSnapshot{
-		NetworkID:                        cfg.NetworkID,
-		StateStream:                      cfg.StateStream,
-		InternalCL:                       cfg.InternalCL,
-		RPCGasCap:                        cfg.RPCGasCap,
-		RPCTxFeeCap:                      cfg.RPCTxFeeCap,
-		LoopThrottle:                     cfg.Sync.LoopThrottle.String(),
-		BreakAfterStage:                  cfg.Sync.BreakAfterStage,
-		LoopBlockLimit:                   cfg.Sync.LoopBlockLimit,
-		ExecWorkerCount:                  cfg.Sync.ExecWorkerCount,
-		ExperimentalBAL:                  cfg.ExperimentalBAL,
-		KeepExecutionProofs:              cfg.Sync.KeepExecutionProofs,
-		ExperimentalConcurrentCommitment: cfg.Sync.ExperimentalConcurrentCommitment,
-		SnapKeepBlocks:                   cfg.Snapshot.KeepBlocks,
-		SnapProduceE2:                    cfg.Snapshot.ProduceE2,
-		SnapProduceE3:                    cfg.Snapshot.ProduceE3,
-		NoDownloader:                     cfg.Snapshot.NoDownloader,
-		HeimdallURL:                      cfg.HeimdallURL,
-		WithoutHeimdall:                  cfg.WithoutHeimdall,
+		NetworkID:           cfg.NetworkID,
+		StateStream:         cfg.StateStream,
+		InternalCL:          cfg.InternalCL,
+		RPCGasCap:           cfg.RPCGasCap,
+		RPCTxFeeCap:         cfg.RPCTxFeeCap,
+		LoopThrottle:        cfg.Sync.LoopThrottle.String(),
+		BreakAfterStage:     cfg.Sync.BreakAfterStage,
+		LoopBlockLimit:      cfg.Sync.LoopBlockLimit,
+		ExecWorkerCount:     cfg.Sync.ExecWorkerCount,
+		ExperimentalBAL:     cfg.ExperimentalBAL,
+		KeepExecutionProofs: cfg.Sync.KeepExecutionProofs,
+		SnapKeepBlocks:      cfg.Snapshot.KeepBlocks,
+		SnapProduceE2:       cfg.Snapshot.ProduceE2,
+		SnapProduceE3:       cfg.Snapshot.ProduceE3,
+		NoDownloader:        cfg.Snapshot.NoDownloader,
+		HeimdallURL:         cfg.HeimdallURL,
+		WithoutHeimdall:     cfg.WithoutHeimdall,
 	}
 }
 

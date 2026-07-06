@@ -125,6 +125,7 @@ type EthAPI interface {
 	SendTransaction(_ context.Context, txObject any) (common.Hash, error)
 	Sign(ctx context.Context, _ common.Address, _ hexutil.Bytes) (hexutil.Bytes, error)
 	SignTransaction(_ context.Context, txObject any) (common.Hash, error)
+	FillTransaction(ctx context.Context, args ethapi.CallArgs) (*ethapi.SignTransactionResult, error)
 	GetProof(ctx context.Context, address common.Address, storageKeys []hexutil.Bytes, blockNr *rpc.BlockNumberOrHash) (*accounts.AccProofResult, error)
 	CreateAccessList(ctx context.Context, args ethapi.CallArgs, blockNrOrHash *rpc.BlockNumberOrHash, overrides *ethapi2.StateOverrides, optimizeGas *bool) (*accessListResult, error)
 
@@ -236,6 +237,44 @@ func (api *BaseAPI) engine() rules.EngineReader {
 func (api *BaseAPI) txnLookup(ctx context.Context, tx kv.Tx, txnHash common.Hash) (blockNum uint64, txNum uint64, ok bool, err error) {
 	overlayTx := api.filters.WithOverlay(tx)
 	return api._txnReader.TxnLookup(ctx, overlayTx, txnHash)
+}
+
+func (api *BaseAPI) txnLookupWithBorFallback(ctx context.Context, tx kv.Tx, txnHash common.Hash, chainConfig *chain.Config) (blockNum uint64, txNum uint64, isBorStateSyncTxn bool, ok bool, err error) {
+	blockNum, txNum, ok, err = api.txnLookup(ctx, tx, txnHash)
+	if err != nil {
+		return 0, 0, false, false, err
+	}
+	if ok {
+		return blockNum, txNum, false, true, nil
+	}
+	if chainConfig.Bor == nil {
+		return 0, 0, false, false, nil
+	}
+	blockNum, ok, err = api.bridgeReader.EventTxnLookup(ctx, txnHash)
+	if err != nil {
+		return 0, 0, false, false, err
+	}
+	if !ok {
+		return 0, 0, false, false, nil
+	}
+	return blockNum, txNum, true, true, nil
+}
+
+// txnIndexInBlock derives the in-block txn index from a global txNum. Bor state sync
+// txns are not part of the block body, so they yield the -1 sentinel and the consistency
+// check is skipped (their txNum comes from a missed lookup).
+func (api *BaseAPI) txnIndexInBlock(ctx context.Context, tx kv.Tx, blockNum, txNum uint64, isBorStateSyncTxn bool) (int, error) {
+	txNumMin, err := api._txNumReader.Min(ctx, tx, blockNum)
+	if err != nil {
+		return 0, err
+	}
+	if isBorStateSyncTxn {
+		return -1, nil
+	}
+	if txNumMin+1 > txNum {
+		return 0, fmt.Errorf("uint underflow txnums error txNum: %d, txNumMin: %d, blockNum: %d", txNum, txNumMin, blockNum)
+	}
+	return int(txNum - txNumMin - 1), nil
 }
 
 func (api *BaseAPI) blockByNumberWithSenders(ctx context.Context, tx kv.Tx, number uint64) (*types.Block, error) {

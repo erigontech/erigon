@@ -4,12 +4,17 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/common/dir"
+	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/seg"
+	"github.com/erigontech/erigon/db/state/statecfg"
+	"github.com/erigontech/erigon/db/version"
 )
 
 func TestStepRange(t *testing.T) {
@@ -97,4 +102,92 @@ func TestFileItemWithMissedAccessor(t *testing.T) {
 	fileItems := fileItemsWithMissedAccessors(df.Items(), aggStep, accessorFor)
 	require.Len(t, fileItems, 1)
 	require.Equal(t, f3, fileItems[0])
+}
+
+func TestVisibleFileVersion(t *testing.T) {
+	t.Parallel()
+	vf := visibleFile{src: &FilesItem{version: version.V2_1}}
+	require.Equal(t, version.V2_1, vf.Version())
+}
+
+// openDirtyFiles must accept a mixed-version file set (v1.0/v2.0/v2.1) without tripping the
+// MustSupport version-acceptance check, opening one dirty item per range from disk.
+func TestOpenDirtyFilesAcceptsMixedVersions(t *testing.T) {
+	t.Parallel()
+	logger := log.New()
+	_, d := testDbAndDomainOfStep(t, statecfg.Schema.AccountsDomain, 16, logger)
+	// Bump this (accounts) domain's read ceiling to v2.1 so the mixed-version fixtures open without
+	// tripping MustSupport; unrelated to commitment-domain versioning.
+	d.FileVersion.DataKV = version.Versions{Current: version.V2_1, MinSupported: version.V1_0}
+
+	tmp := t.TempDir()
+	cases := []struct {
+		name string
+		rng  string
+	}{
+		{"v1.0-accounts.0-1.kv", "0-1"},
+		{"v2.0-accounts.1-2.kv", "1-2"},
+		{"v2.1-accounts.2-3.kv", "2-3"},
+	}
+	fileNames := make([]string, 0, len(cases))
+	for _, c := range cases {
+		writeTestKVFile(t, filepath.Join(d.dirs.SnapDomain, c.name), tmp, logger)
+		fileNames = append(fileNames, c.name)
+	}
+
+	d.scanDirtyFiles(fileNames)
+	require.NoError(t, d.openDirtyFiles(t.Context(), fileNames))
+
+	opened := make(map[string]bool)
+	d.dirtyFiles.Scan(func(it *FilesItem) bool {
+		from, to := it.StepRange(d.stepSize)
+		require.NotNil(t, it.decompressor, "dirty file %d-%d must be opened", from, to)
+		opened[fmt.Sprintf("%d-%d", from, to)] = true
+		return true
+	})
+
+	for _, c := range cases {
+		require.True(t, opened[c.rng], "range %s must open from %s", c.rng, c.name)
+	}
+}
+
+// Two same-range commitment files of different versions collapse to one dirty item
+// resolved to the highest version (v2.1); the lower v2.0 twin is left on disk, never opened.
+func TestOpenDirtyFilesSameRangePrefersNewestVersion(t *testing.T) {
+	t.Parallel()
+	for _, order := range [][]string{
+		{"v2.0-commitment.0-2.kv", "v2.1-commitment.0-2.kv"},
+		{"v2.1-commitment.0-2.kv", "v2.0-commitment.0-2.kv"},
+	} {
+		t.Run(strings.Join(order, ","), func(t *testing.T) {
+			logger := log.New()
+			_, d := testDbAndDomainOfStep(t, statecfg.Schema.CommitmentDomain, 16, logger)
+			tmp := t.TempDir()
+			for _, name := range order {
+				writeTestKVFile(t, filepath.Join(d.dirs.SnapDomain, name), tmp, logger)
+			}
+
+			d.scanDirtyFiles(order)
+			require.NoError(t, d.openDirtyFiles(t.Context(), order))
+
+			require.Equal(t, 1, d.dirtyFiles.Len(), "same-range duplicate must collapse to one dirty file")
+			var opened *FilesItem
+			d.dirtyFiles.Scan(func(it *FilesItem) bool { opened = it; return true })
+			require.NotNil(t, opened)
+			require.Equal(t, "v2.1-commitment.0-2.kv", filepath.Base(opened.decompressor.FilePath()), "newest version wins")
+
+			_, err := os.Stat(filepath.Join(d.dirs.SnapDomain, "v2.0-commitment.0-2.kv"))
+			require.NoError(t, err, "lower-version twin stays on disk, just unopened")
+		})
+	}
+}
+
+func writeTestKVFile(t *testing.T, path, tmp string, logger log.Logger) {
+	t.Helper()
+	comp, err := seg.NewCompressor(t.Context(), "test", path, tmp, seg.DefaultCfg, log.LvlDebug, logger)
+	require.NoError(t, err)
+	defer comp.Close()
+	require.NoError(t, comp.AddWord([]byte("k")))
+	require.NoError(t, comp.AddWord([]byte("v")))
+	require.NoError(t, comp.Compress())
 }
