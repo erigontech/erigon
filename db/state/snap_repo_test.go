@@ -161,7 +161,7 @@ func TestIntegrateDirtyFile(t *testing.T) {
 	err := repo.OpenFolder()
 	require.NoError(t, err)
 
-	filesItem := newFilesItemWithSnapConfig(0, 1024, repo.cfg)
+	filesItem := newFilesItem(0, 1024)
 	filename, _ := repo.schema.DataFile(version.V1_0, 0, 1024)
 	comp, err := seg.NewCompressor(t.Context(), t.Name(), filename, dirs.Tmp, seg.DefaultCfg, log.LvlDebug, log.New())
 	require.NoError(t, err)
@@ -495,7 +495,7 @@ func TestRecalcVisibleFilesAfterMerge(t *testing.T) {
 		items := repo.FilesInRange(mr, vf) // vf passed should ideally from rotx, but doesn't matter here
 		require.Len(t, items, nFilesInRange)
 
-		merged := newFilesItemWithSnapConfig(mr.from, mr.to, repo.cfg)
+		merged := newFilesItem(mr.from, mr.to)
 		repo.IntegrateDirtyFile(merged)
 		dirEntries, err := filesFromDir(repo.schema.DataDirectory())
 		require.NoError(t, err)
@@ -713,7 +713,8 @@ func populateFiles(t *testing.T, dirs datadir.Dirs, schema SnapNameSchema, allFi
 			defer dir.RemoveFile(sampleFile)
 
 			r := seg.NewReader(seg3.MakeGetter(), seg.CompressNone)
-			bti, err := btindex.CreateBtreeIndexWithDecompressor(filename, 128, r, uint32(1), background.NewProgressSet(), dirs.Tmp, log.New(), true, statecfg.AccessorBTree|statecfg.AccessorExistence)
+			kveiFile := strings.TrimSuffix(filename, ".bt") + ".kvei"
+			bti, err := btindex.CreateBtreeIndexWithDecompressor(filename, kveiFile, 128, r, uint32(1), background.NewProgressSet(), dirs.Tmp, log.New(), true, statecfg.AccessorBTree|statecfg.AccessorExistence)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -728,7 +729,7 @@ func populateFiles(t *testing.T, dirs datadir.Dirs, schema SnapNameSchema, allFi
 		}
 
 		if strings.HasSuffix(filename, ".kvei") {
-			filter, err := existence.NewFilter(0, filename, false)
+			filter, err := existence.NewFilter(0, filename)
 			require.NoError(t, err)
 			defer filter.Close()
 			filter.DisableFsync()

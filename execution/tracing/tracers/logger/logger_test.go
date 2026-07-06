@@ -20,6 +20,8 @@
 package logger
 
 import (
+	"bytes"
+	"encoding/json"
 	"math/big"
 	"testing"
 
@@ -30,6 +32,7 @@ import (
 	"github.com/erigontech/erigon/execution/protocol/mdgas"
 	"github.com/erigontech/erigon/execution/protocol/params"
 	"github.com/erigontech/erigon/execution/state"
+	"github.com/erigontech/erigon/execution/tracing"
 	"github.com/erigontech/erigon/execution/types/accounts"
 	"github.com/erigontech/erigon/execution/vm"
 	"github.com/erigontech/erigon/execution/vm/evmtypes"
@@ -76,6 +79,23 @@ func TestStoreCapture(t *testing.T) {
 	exp := common.BigToHash(big.NewInt(1))
 	if logger.storage[contract.Address()][index] != exp {
 		t.Errorf("expected %x, got %x", exp, logger.storage[contract.Address()][index])
+	}
+}
+
+func TestJSONLoggerOnSystemCallStartSetsEnv(t *testing.T) {
+	var buf bytes.Buffer
+	logger := NewJSONLogger(nil, &buf)
+	logger.OnSystemCallStartV2(&tracing.VMContext{IntraBlockState: &mockIBS{}})
+
+	scope := &mockOpContext{}
+	logger.OnOpcode(0, byte(vm.STOP), 100, 0, scope, nil, 0, nil)
+
+	var entry map[string]json.RawMessage
+	if err := json.Unmarshal(bytes.TrimSpace(buf.Bytes()), &entry); err != nil {
+		t.Fatalf("failed to decode json logger output: %v", err)
+	}
+	if _, ok := entry["refund"]; !ok {
+		t.Fatal("expected json logger to emit opcode output after system call start")
 	}
 }
 

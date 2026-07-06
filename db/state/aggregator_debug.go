@@ -9,9 +9,10 @@ import (
 )
 
 type aggDirtyFilesRoTx struct {
-	agg    *Aggregator
-	domain []*domainDirtyFilesRoTx
-	ii     [kv.StandaloneIdxLen]*iiDirtyFilesRoTx
+	agg     *Aggregator
+	visible *aggregatorVisible
+	domain  []*domainDirtyFilesRoTx
+	ii      [kv.StandaloneIdxLen]*iiDirtyFilesRoTx
 }
 
 type domainDirtyFilesRoTx struct {
@@ -39,6 +40,12 @@ func (a *Aggregator) DebugBeginDirtyFilesRo() *aggDirtyFilesRoTx {
 
 	a.dirtyFilesLock.Lock()
 	defer a.dirtyFilesLock.Unlock()
+	// Pin the current generation (load+increment suffices — we hold dirtyFilesLock,
+	// so no publish can race us). The pin protects every dirty file captured below,
+	// even ones absent from the visible set: such a file can only be retired at a
+	// generation >= this, and oldest-first reclaim won't delete it until Close.
+	ac.visible = a.visible.Load()
+	ac.visible.refcnt.Add(1)
 	for i, d := range a.d {
 		ac.domain[i] = d.DebugBeginDirtyFilesRo()
 	}
@@ -117,6 +124,7 @@ func (ac *aggDirtyFilesRoTx) Close() {
 	if ac.agg == nil {
 		return
 	}
+	agg := ac.agg
 	for _, d := range ac.domain {
 		d.Close()
 	}
@@ -130,6 +138,11 @@ func (ac *aggDirtyFilesRoTx) Close() {
 	ac.agg = nil
 	ac.domain = nil
 	ac.ii = [kv.StandaloneIdxLen]*iiDirtyFilesRoTx{}
+
+	// Release the pinned generation; if it was the last reader, reclaim any files
+	// retired (by a concurrent merge) while we held it.
+	agg.releaseVisibleFiles(ac.visible)
+	ac.visible = nil
 }
 
 func (d *Domain) DebugBeginDirtyFilesRo() *domainDirtyFilesRoTx {
@@ -137,9 +150,7 @@ func (d *Domain) DebugBeginDirtyFilesRo() *domainDirtyFilesRoTx {
 	iter := d.dirtyFiles.Iter()
 	defer iter.Release()
 	for ok := iter.First(); ok; ok = iter.Next() {
-		item := iter.Item()
-		files = append(files, item)
-		item.refcount.Add(1)
+		files = append(files, iter.Item())
 	}
 	return &domainDirtyFilesRoTx{
 		d:       d,
@@ -163,12 +174,6 @@ func (d *domainDirtyFilesRoTx) Close() {
 		return
 	}
 	d.history.Close()
-	for _, item := range d.files {
-		refCnt := item.refcount.Add(-1)
-		if refCnt == 0 && item.canDelete.Load() {
-			item.closeFilesAndRemove()
-		}
-	}
 	d.files = nil
 	d.d = nil
 }
@@ -178,9 +183,7 @@ func (h *History) DebugBeginDirtyFilesRo() *historyDirtyFilesRoTx {
 	iter := h.dirtyFiles.Iter()
 	defer iter.Release()
 	for ok := iter.First(); ok; ok = iter.Next() {
-		item := iter.Item()
-		files = append(files, item)
-		item.refcount.Add(1)
+		files = append(files, iter.Item())
 	}
 	return &historyDirtyFilesRoTx{
 		h:     h,
@@ -203,12 +206,6 @@ func (f *historyDirtyFilesRoTx) Close() {
 		return
 	}
 	f.ii.Close()
-	for _, item := range f.files {
-		refCnt := item.refcount.Add(-1)
-		if refCnt == 0 && item.canDelete.Load() {
-			item.closeFilesAndRemove()
-		}
-	}
 	f.files = nil
 	f.h = nil
 }
@@ -218,9 +215,7 @@ func (ii *InvertedIndex) DebugBeginDirtyFilesRo() *iiDirtyFilesRoTx {
 	iter := ii.dirtyFiles.Iter()
 	defer iter.Release()
 	for ok := iter.First(); ok; ok = iter.Next() {
-		item := iter.Item()
-		files = append(files, item)
-		item.refcount.Add(1)
+		files = append(files, iter.Item())
 	}
 	return &iiDirtyFilesRoTx{
 		ii:    ii,
@@ -239,12 +234,6 @@ func (f *iiDirtyFilesRoTx) filesWithMissedAccessors(dl dirListing) (mf *MissedAc
 func (f *iiDirtyFilesRoTx) Close() {
 	if f.ii == nil {
 		return
-	}
-	for _, item := range f.files {
-		refCnt := item.refcount.Add(-1)
-		if refCnt == 0 && item.canDelete.Load() {
-			item.closeFilesAndRemove()
-		}
 	}
 	f.files = nil
 	f.ii = nil

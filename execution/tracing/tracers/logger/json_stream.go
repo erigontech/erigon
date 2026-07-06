@@ -66,14 +66,19 @@ func NewJsonStreamLogger(cfg *LogConfig, ctx context.Context, stream jsonstream.
 func (l *JsonStreamLogger) Tracer() *tracers.Tracer {
 	return &tracers.Tracer{
 		Hooks: &tracing.Hooks{
-			OnTxStart: l.OnTxStart,
-			OnExit:    l.OnExit,
-			OnOpcode:  l.OnOpcode,
+			OnTxStart:           l.OnTxStart,
+			OnSystemCallStartV2: l.OnSystemCallStartV2,
+			OnExit:              l.OnExit,
+			OnOpcode:            l.OnOpcode,
 		},
 	}
 }
 
 func (l *JsonStreamLogger) OnTxStart(env *tracing.VMContext, tx types.Transaction, from accounts.Address) {
+	l.env = env
+}
+
+func (l *JsonStreamLogger) OnSystemCallStartV2(env *tracing.VMContext) {
 	l.env = env
 }
 
@@ -197,7 +202,7 @@ func (l *JsonStreamLogger) OnOpcode(pc uint64, typ byte, gas, cost uint64, scope
 		}
 		l.stream.WriteArrayEnd()
 	}
-	if l.cfg.EnableMemory {
+	if l.cfg.EnableMemory && len(memory) > 0 {
 		l.stream.WriteMore()
 		l.stream.WriteObjectField("memory")
 		l.stream.WriteArrayStart()

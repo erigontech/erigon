@@ -200,7 +200,7 @@ func (ethash *Ethash) VerifyUncle(chain rules.ChainHeaderReader, header *types.H
 	return ethash.verifyHeader(chain, uncle, ancestors[uncle.ParentHash], true, seal)
 }
 
-func VerifyHeaderBasics(chain rules.ChainHeaderReader, header, parent *types.Header, checkTimestamp, skipGasLimit bool) error {
+func VerifyHeaderBasics(chain rules.ChainHeaderReader, header, parent *types.Header, checkTimestamp bool) error {
 	// Ensure that the header's extra-data section is of a reasonable size
 	if uint64(len(header.Extra)) > params.MaximumExtraDataSize {
 		return fmt.Errorf("extra-data too long: %d > %d", len(header.Extra), params.MaximumExtraDataSize)
@@ -223,19 +223,11 @@ func VerifyHeaderBasics(chain rules.ChainHeaderReader, header, parent *types.Hea
 	if header.GasUsed > header.GasLimit {
 		return fmt.Errorf("invalid gasUsed: have %d, gasLimit %d", header.GasUsed, header.GasLimit)
 	}
-	// Verify the block's gas usage and (if applicable) verify the base fee.
 	if !chain.Config().IsLondon(header.Number.Uint64()) {
-		// Verify BaseFee not present before EIP-1559 fork.
 		if header.BaseFee != nil {
 			return fmt.Errorf("invalid baseFee before fork: have %d, expected 'nil'", header.BaseFee)
 		}
-		if !skipGasLimit {
-			if err := misc.VerifyGaslimit(parent.GasLimit, header.GasLimit); err != nil {
-				return err
-			}
-		}
-	} else if err := misc.VerifyEip1559Header(chain.Config(), parent, header, skipGasLimit); err != nil {
-		// Verify the header's EIP-1559 attributes.
+	} else if err := misc.VerifyEip1559Header(chain.Config(), parent, header); err != nil {
 		return err
 	}
 
@@ -275,7 +267,10 @@ func VerifyHeaderBasics(chain rules.ChainHeaderReader, header, parent *types.Hea
 // stock Ethereum ethash engine.
 // See YP section 4.3.4. "Block Header Validity"
 func (ethash *Ethash) verifyHeader(chain rules.ChainHeaderReader, header, parent *types.Header, uncle bool, seal bool) error {
-	if err := VerifyHeaderBasics(chain, header, parent, !uncle /*checkTimestamp*/, false /*skipGasLimit*/); err != nil {
+	if err := VerifyHeaderBasics(chain, header, parent, !uncle /*checkTimestamp*/); err != nil {
+		return err
+	}
+	if err := misc.VerifyParentGasLimit(chain.Config(), parent, header); err != nil {
 		return err
 	}
 	// Verify the block's difficulty based on its timestamp and parent's difficulty
@@ -354,6 +349,7 @@ func (ethash *Ethash) verifySeal(header *types.Header, fulldag bool) error { //n
 	}
 	// Recompute the digest and PoW values
 	number := header.Number.Uint64()
+	sealHash := ethash.SealHash(header)
 
 	var (
 		digest []byte
@@ -363,7 +359,7 @@ func (ethash *Ethash) verifySeal(header *types.Header, fulldag bool) error { //n
 	if fulldag {
 		dataset := ethash.dataset(number, true)
 		if dataset.generated() {
-			digest, result = hashimotoFull(dataset.dataset, ethash.SealHash(header).Bytes(), header.Nonce.Uint64())
+			digest, result = hashimotoFull(dataset.dataset, sealHash[:], header.Nonce.Uint64())
 
 			// Datasets are unmapped in a finalizer. Ensure that the dataset stays alive
 			// until after the call to hashimotoFull so it's not unmapped while being used.
@@ -381,7 +377,7 @@ func (ethash *Ethash) verifySeal(header *types.Header, fulldag bool) error { //n
 		if ethash.config.PowMode == ethashcfg.ModeTest {
 			size = 32 * 1024
 		}
-		digest, result = hashimotoLight(size, cache.cache, ethash.SealHash(header).Bytes(), header.Nonce.Uint64())
+		digest, result = hashimotoLight(size, cache.cache, sealHash[:], header.Nonce.Uint64())
 
 		// Caches are unmapped in a finalizer. Ensure that the cache stays alive
 		// until after the call to hashimotoLight so it's not unmapped while being used.
@@ -444,6 +440,12 @@ func (ethash *Ethash) FinalizeAndAssemble(chainConfig *chain.Config, header *typ
 	}
 	// Header seems complete, assemble into a block and return
 	return types.NewBlock(header, txs, uncles, r, withdrawals), nil, nil
+}
+
+func (ethash *Ethash) ValidateBlockPostExecution(chainConfig *chain.Config, header *types.Header,
+	gasUsed, blobGasUsed uint64, checkReceipts, checkBloom bool,
+	receipts types.Receipts, txns types.Transactions, logger log.Logger) error {
+	return rules.DefaultBlockPostValidation(chainConfig, header, gasUsed, blobGasUsed, checkReceipts, checkBloom, receipts, txns, logger)
 }
 
 // SealHash returns the hash of a block prior to it being sealed.

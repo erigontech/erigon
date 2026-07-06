@@ -26,7 +26,6 @@ import (
 	"github.com/cenkalti/backoff/v4"
 	"github.com/holiman/uint256"
 	"github.com/jinzhu/copier"
-	"google.golang.org/grpc"
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/empty"
@@ -38,8 +37,6 @@ import (
 	enginetypes "github.com/erigontech/erigon/execution/engineapi/engine_types"
 	"github.com/erigontech/erigon/execution/protocol/rules/merge"
 	"github.com/erigontech/erigon/execution/types"
-	"github.com/erigontech/erigon/node/gointerfaces/remoteproto"
-	"github.com/erigontech/erigon/txnprovider/shutter"
 )
 
 type MockClOption func(*MockCl)
@@ -55,22 +52,18 @@ type MockCl struct {
 	engineApiClient       *engineapi.JsonRpcClient
 	suggestedFeeRecipient common.Address
 	genesis               common.Hash
+	genesisGasLimit       uint64
 	state                 *MockClState
-	blockListener         *shutter.BlockListener
 	chainConfig           *chain.Config
 }
 
-type stateChangesClient interface {
-	StateChanges(ctx context.Context, in *remoteproto.StateChangeRequest, opts ...grpc.CallOption) (remoteproto.KV_StateChangesClient, error)
-}
-
-func NewMockCl(ctx context.Context, logger log.Logger, elClient *engineapi.JsonRpcClient, stateChangesClient stateChangesClient, genesis *types.Block, chainConfig *chain.Config, opts ...MockClOption) *MockCl {
+func NewMockCl(logger log.Logger, elClient *engineapi.JsonRpcClient, genesis *types.Block, chainConfig *chain.Config, opts ...MockClOption) *MockCl {
 	mcl := &MockCl{
 		logger:                logger,
 		engineApiClient:       elClient,
-		blockListener:         shutter.NewBlockListener(logger, stateChangesClient),
 		suggestedFeeRecipient: genesis.Coinbase(),
 		genesis:               genesis.Hash(),
+		genesisGasLimit:       genesis.GasLimit(),
 		chainConfig:           chainConfig,
 		state: &MockClState{
 			ParentElBlock:     genesis.Hash(),
@@ -82,7 +75,6 @@ func NewMockCl(ctx context.Context, logger log.Logger, elClient *engineapi.JsonR
 	for _, opt := range opts {
 		opt(mcl)
 	}
-	go mcl.blockListener.Run(ctx)
 	return mcl
 }
 
@@ -92,11 +84,6 @@ func (cl *MockCl) BuildCanonicalBlock(ctx context.Context, opts ...BlockBuilding
 	if err != nil {
 		return nil, fmt.Errorf("build new payload failed: %w", err)
 	}
-	lastBlock := make(chan uint64)
-	unregisterObserver := cl.blockListener.RegisterObserver(func(e shutter.BlockEvent) {
-		lastBlock <- e.LatestBlockNum
-	})
-	defer unregisterObserver()
 	status, err := cl.InsertNewPayload(ctx, clPayload)
 	if err != nil {
 		return nil, fmt.Errorf("insert new payload failed: %w", err)
@@ -108,15 +95,13 @@ func (cl *MockCl) BuildCanonicalBlock(ctx context.Context, opts ...BlockBuilding
 	if err != nil {
 		return nil, fmt.Errorf("update fork choice failed: %w", err)
 	}
-	// wait for the block t be published (note: we could just poll the rpc layer
-	// if we want to remove the internal api dependency)
-	<-lastBlock
 	return clPayload, nil
 }
 
-// BuildNewPayload builds a new payload on top of the lastNode canonical block. To help with testing forking, the parent
-// block can be overridden by passing an option.
-func (cl *MockCl) BuildNewPayload(ctx context.Context, opts ...BlockBuildingOption) (*MockClPayload, error) {
+// StartBuilding issues a block-building forkChoiceUpdated on top of the lastNode canonical block (the
+// parent can be overridden via an option) and returns the resulting payload id and the payload
+// attributes used. It is the first half of BuildNewPayload.
+func (cl *MockCl) StartBuilding(ctx context.Context, opts ...BlockBuildingOption) (hexutil.Bytes, enginetypes.PayloadAttributes, error) {
 	options := cl.applyBlockBuildingOptions(opts...)
 	forkChoiceState := enginetypes.ForkChoiceState{
 		HeadHash:           cl.state.ParentElBlock,
@@ -134,7 +119,7 @@ func (cl *MockCl) BuildNewPayload(ctx context.Context, opts ...BlockBuildingOpti
 		cl.logger.Debug("[mock-cl] waiting until", "time", timestamp, "duration", waitDuration)
 		err := common.Sleep(ctx, waitDuration)
 		if err != nil {
-			return nil, fmt.Errorf("build new payload: wait error: %w", err)
+			return nil, enginetypes.PayloadAttributes{}, fmt.Errorf("start building: wait error: %w", err)
 		}
 	}
 	parentBeaconBlockRoot := common.BigToHash(cl.state.ParentClBlockRoot)
@@ -152,6 +137,8 @@ func (cl *MockCl) BuildNewPayload(ctx context.Context, opts ...BlockBuildingOpti
 	}
 	if cl.chainConfig.AmsterdamTime != nil {
 		payloadAttributes.SlotNumber = (*hexutil.Uint64)(&slotNumber)
+		targetGasLimit := hexutil.Uint64(cl.genesisGasLimit)
+		payloadAttributes.TargetGasLimit = &targetGasLimit
 	}
 	cl.logger.Debug("[mock-cl] building block", "timestamp", timestamp)
 	// start the block building process
@@ -170,29 +157,46 @@ func (cl *MockCl) BuildNewPayload(ctx context.Context, opts ...BlockBuildingOpti
 			return r, r.PayloadStatus.Status, err
 		})
 	if err != nil {
-		return nil, fmt.Errorf("build new payload: fcu error: %w", err)
+		return nil, enginetypes.PayloadAttributes{}, fmt.Errorf("start building: fcu error: %w", err)
 	}
 	if fcuRes.PayloadStatus.Status != enginetypes.ValidStatus {
-		return nil, fmt.Errorf("payload status of block building fcu is not valid: %s", fcuRes.PayloadStatus.Status)
+		return nil, enginetypes.PayloadAttributes{}, fmt.Errorf("payload status of block building fcu is not valid: %s", fcuRes.PayloadStatus.Status)
 	}
-	// get the newly built block
-	newPayload, err := RetryEngine(ctx, []enginetypes.EngineStatus{enginetypes.SyncingStatus}, []error{&engine_helpers.UnknownPayloadErr},
+	if fcuRes.PayloadId == nil {
+		return nil, enginetypes.PayloadAttributes{}, fmt.Errorf("forkchoiceUpdated for block building returned no payload id")
+	}
+	return *fcuRes.PayloadId, payloadAttributes, nil
+}
+
+// GetBuiltPayload fetches the payload being built under the given id using the fork-appropriate
+// engine_getPayload version. It is the second half of BuildNewPayload.
+func (cl *MockCl) GetBuiltPayload(ctx context.Context, payloadId hexutil.Bytes) (*enginetypes.GetPayloadResponse, error) {
+	return RetryEngine(ctx, []enginetypes.EngineStatus{enginetypes.SyncingStatus}, []error{&engine_helpers.UnknownPayloadErr},
 		func() (*enginetypes.GetPayloadResponse, enginetypes.EngineStatus, error) {
 			var r *enginetypes.GetPayloadResponse
 			var err error
 			if cl.chainConfig.AmsterdamTime != nil {
-				r, err = cl.engineApiClient.GetPayloadV6(ctx, *fcuRes.PayloadId)
+				r, err = cl.engineApiClient.GetPayloadV6(ctx, payloadId)
 			} else if cl.chainConfig.OsakaTime != nil {
-				r, err = cl.engineApiClient.GetPayloadV5(ctx, *fcuRes.PayloadId)
+				r, err = cl.engineApiClient.GetPayloadV5(ctx, payloadId)
 			} else {
-				r, err = cl.engineApiClient.GetPayloadV4(ctx, *fcuRes.PayloadId)
+				r, err = cl.engineApiClient.GetPayloadV4(ctx, payloadId)
 			}
 			if err != nil {
 				return nil, "", err
 			}
 			return r, "", err
 		})
+}
 
+// BuildNewPayload builds a new payload on top of the lastNode canonical block. To help with testing forking, the parent
+// block can be overridden by passing an option.
+func (cl *MockCl) BuildNewPayload(ctx context.Context, opts ...BlockBuildingOption) (*MockClPayload, error) {
+	payloadId, payloadAttributes, err := cl.StartBuilding(ctx, opts...)
+	if err != nil {
+		return nil, err
+	}
+	newPayload, err := cl.GetBuiltPayload(ctx, payloadId)
 	if err != nil {
 		return nil, fmt.Errorf("build new payload: get payload error: %w", err)
 	}
@@ -324,9 +328,9 @@ func RetryEngine[T any](ctx context.Context, retryStatuses []enginetypes.EngineS
 	// Honour the caller's deadline if it has one (test contexts carry
 	// the -timeout flag). Without this, slow CI environments — especially
 	// -race + GOMAXPROCS<=2 on the 4-vCPU GHA runner — hit the cap on
-	// high-mgas blocks (TestInvalidReceiptHashHighMgas) before the engine
-	// returns Valid. Absent any caller deadline, cap at 30 min so a stuck
-	// engine still fails the test rather than hanging.
+	// high-mgas blocks before the engine returns Valid. Absent any caller
+	// deadline, cap at 30 min so a stuck engine still fails the test
+	// rather than hanging.
 	if _, ok := ctx.Deadline(); !ok {
 		var cancel context.CancelFunc
 		ctx, cancel = context.WithTimeout(ctx, 30*time.Minute)

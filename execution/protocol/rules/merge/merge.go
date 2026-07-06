@@ -323,7 +323,10 @@ func (s *Merge) verifyHeader(chain rules.ChainHeaderReader, header, parent *type
 		return errInvalidUncleHash
 	}
 
-	if err := misc.VerifyEip1559Header(chain.Config(), parent, header, false); err != nil {
+	if err := misc.VerifyEip1559Header(chain.Config(), parent, header); err != nil {
+		return err
+	}
+	if err := misc.VerifyParentGasLimit(chain.Config(), parent, header); err != nil {
 		return err
 	}
 
@@ -419,15 +422,30 @@ func (s *Merge) Initialize(config *chain.Config, chain rules.ChainHeaderReader, 
 		}
 		if parent.Time < *config.BalancerTime { // first Balancer HF block
 			for address, rewrittenCode := range config.BalancerRewriteBytecode {
-				state.SetCode(accounts.InternAddress(address), rewrittenCode)
+				state.SetCode(accounts.InternAddress(address), rewrittenCode, tracing.CodeChangeUnspecified)
 			}
 		}
 	}
 
 	if config.IsCancun(header.Time) && header.ParentBeaconBlockRoot != nil {
+		// Only allocate VMContext when a tracer is attached; this avoids a
+		// heap allocation on every Cancun block during normal (un-traced) import.
+		var vmContext *tracing.VMContext
+		if tracer != nil {
+			random := header.MixDigest
+			// GasPrice is intentionally zero — system calls have no gas price.
+			vmContext = &tracing.VMContext{
+				Coinbase:        accounts.InternAddress(header.Coinbase),
+				BlockNumber:     header.Number.Uint64(),
+				Time:            header.Time,
+				Random:          &random,
+				ChainConfig:     config,
+				IntraBlockState: state,
+			}
+		}
 		misc.ApplyBeaconRootEip4788(header.ParentBeaconBlockRoot, func(addr accounts.Address, data []byte) ([]byte, error) {
 			return syscall(addr, data, state, header, false /* constCall */)
-		}, tracer)
+		}, tracer, vmContext)
 	}
 	if config.IsPrague(header.Time) {
 		if err := misc.StoreBlockHashesEip2935(header, state); err != nil {
@@ -447,6 +465,12 @@ func (s *Merge) GetTransferFunc() evmtypes.TransferFunc {
 
 func (s *Merge) GetPostApplyMessageFunc() evmtypes.PostApplyMessageFunc {
 	return misc.LogSelfDestructedAccounts // EIP-7708
+}
+
+func (s *Merge) ValidateBlockPostExecution(chainConfig *chain.Config, header *types.Header,
+	gasUsed, blobGasUsed uint64, checkReceipts, checkBloom bool,
+	receipts types.Receipts, txns types.Transactions, logger log.Logger) error {
+	return rules.DefaultBlockPostValidation(chainConfig, header, gasUsed, blobGasUsed, checkReceipts, checkBloom, receipts, txns, logger)
 }
 
 func (s *Merge) Close() error {

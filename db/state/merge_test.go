@@ -115,6 +115,43 @@ func TestDomainRoTx_findMergeRange(t *testing.T) {
 
 }
 
+// TestHistoryStaticFilesInRange_DetectsGapInSourceFiles pins that a gap in
+// source files must reject the merge, not silently produce a shorter,
+// mislabeled result.
+func TestHistoryStaticFilesInRange_DetectsGapInSourceFiles(t *testing.T) {
+	t.Parallel()
+
+	d := emptyTestDomain(t, 1)
+	h := d.History
+	h.InvertedIndex.Accessors = 0
+	h.Accessors = 0
+
+	// gap: nothing covers [1,2) even though the claimed merge range is [0,3)
+	h.scanDirtyFiles([]string{
+		"v1.0-accounts.0-1.v",
+		"v1.0-accounts.2-3.v",
+	})
+	h.dirtyFiles.Scan(func(item *FilesItem) bool {
+		item.decompressor = &seg.Decompressor{}
+		return true
+	})
+	h.InvertedIndex.scanDirtyFiles([]string{
+		"v1.0-accounts.0-1.ef",
+		"v1.0-accounts.2-3.ef",
+	})
+	h.InvertedIndex.dirtyFiles.Scan(func(item *FilesItem) bool {
+		item.decompressor = &seg.Decompressor{}
+		return true
+	})
+
+	hc := h.beginForTests()
+	defer hc.Close()
+
+	r := NewHistoryRanges(*NewMergeRange("accounts", true, 0, 3), MergeRange{})
+	_, _, err := hc.staticFilesInRange(r)
+	require.Error(t, err, "staticFilesInRange must reject a merge range with a gap in source files")
+}
+
 func emptyTestInvertedIndex(t testing.TB, aggStep uint64) *InvertedIndex {
 	t.Helper()
 	salt := uint32(1)
@@ -971,8 +1008,6 @@ func TestFindMergeRangeInFiles(t *testing.T) {
 }
 
 func Test_mergeEliasFano(t *testing.T) {
-	t.Skip()
-
 	firstList := []int{1, 298164, 298163, 13, 298160, 298159}
 	slices.Sort(firstList)
 	uniq := make(map[int]struct{})
@@ -992,7 +1027,7 @@ func Test_mergeEliasFano(t *testing.T) {
 	}
 
 	secondList := []int{
-		1, 644951, 644995, 682653, 13,
+		644951, 644995, 682653,
 		644988, 644987, 644946, 644994,
 		644942, 644945, 644941, 644940,
 		644939, 644938, 644792, 644787}
@@ -1020,17 +1055,17 @@ func Test_mergeEliasFano(t *testing.T) {
 	require.NoError(t, err)
 	menc := mergedSeq.AppendBytes(nil)
 
-	merged, _ := eliasfano32.ReadEliasFano(menc)
+	var merged multiencseq.SequenceReader
+	merged.Reset(0, menc)
 	require.EqualValues(t, len(uniq), merged.Count())
-	require.Equal(t, merged.Count(), eliasfano32.Count(menc))
 	mergedLists := append(firstList, secondList...)
 	slices.Sort(mergedLists)
 	require.EqualValues(t, mergedLists[len(mergedLists)-1], merged.Max())
-	require.Equal(t, merged.Max(), eliasfano32.Max(menc))
 
-	mit := merged.Iterator()
+	mit := merged.Iterator(0)
 	for mit.HasNext() {
-		v, _ := mit.Next()
+		v, err := mit.Next()
+		require.NoError(t, err)
 		require.Contains(t, mergedLists, int(v))
 	}
 }
@@ -1048,7 +1083,7 @@ func TestCommitmentValTransformDomainPanicsWithNeedMergeFalse(t *testing.T) {
 	defer dc.Close()
 
 	require.Panics(t, func() {
-		dc.commitmentValTransformDomain(MergeRange{needMerge: false}, dc, dc, nil, nil)
+		dc.commitmentValTransformDomain(MergeRange{needMerge: false}, dc, dc, nil, nil, false)
 	})
 }
 

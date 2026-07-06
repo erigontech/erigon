@@ -45,27 +45,32 @@ var (
 	MadvNormalByDefault   = dbg.EnvBool("FUSE_MADV_NORMAL", false)
 )
 
-func NewReader(filePath string) (*Reader, error) {
+func NewReader(filePath string) (_ *Reader, err error) {
 	f, err := os.Open(filePath)
 	if err != nil {
 		return nil, err
 	}
+	defer func() {
+		if err != nil {
+			_ = f.Close() //nolint
+		}
+	}()
 	st, err := f.Stat()
 	if err != nil {
-		_ = f.Close() //nolint
 		return nil, err
 	}
 	sz := int(st.Size())
-	var content []byte
 	m, err := mmap.MapRegion(f, sz, mmap.RDONLY, 0, 0)
 	if err != nil {
-		_ = f.Close() //nolint
 		return nil, err
 	}
-	content = m
-
+	defer func() {
+		if err != nil {
+			_ = m.Unmap() //nolint
+		}
+	}()
 	_, fileName := filepath.Split(filePath)
-	r, _, err := NewReaderOnBytes(content, fileName)
+	r, _, err := NewReaderOnBytes(m, fileName)
 	if err != nil {
 		return nil, err
 	}
@@ -180,6 +185,14 @@ func (r *Reader) MadvNormal() {
 		panic(err)
 	}
 }
+func (r *Reader) MadvRandom() {
+	if r == nil || r.f == nil || r.m == nil || len(r.m) == 0 || r.keepInMem {
+		return
+	}
+	if err := mm.MadviseRandom(r.m); err != nil {
+		panic(err)
+	}
+}
 func (r *Reader) FileName() string           { return r.fileName }
 func (r *Reader) ContainsHash(v uint64) bool { return r.inner.Contains(v) }
 func (r *Reader) Close() {
@@ -202,27 +215,33 @@ type ReaderSharded struct {
 	shards    [256]Reader
 }
 
-func NewReaderSharded(filePath string) (*ReaderSharded, error) {
+func NewReaderSharded(filePath string) (_ *ReaderSharded, err error) {
 	f, err := os.Open(filePath)
 	if err != nil {
 		return nil, err
 	}
+	defer func() {
+		if err != nil {
+			_ = f.Close() //nolint
+		}
+	}()
 	st, err := f.Stat()
 	if err != nil {
-		_ = f.Close() //nolint
 		return nil, err
 	}
 	sz := int(st.Size())
 	m, err := mmap.MapRegion(f, sz, mmap.RDONLY, 0, 0)
 	if err != nil {
-		_ = f.Close() //nolint
 		return nil, err
 	}
+	defer func() {
+		if err != nil {
+			_ = m.Unmap() //nolint
+		}
+	}()
 	_, fileName := filepath.Split(filePath)
 	r, _, err := NewReaderShardedOnBytes(m, fileName)
 	if err != nil {
-		_ = m.Unmap() //nolint
-		_ = f.Close() //nolint
 		return nil, err
 	}
 	r.f = f
@@ -297,13 +316,8 @@ func (r *ReaderSharded) ContainsHash(v uint64) bool {
 	return s.ContainsHash(v)
 }
 
-// ForceInMem clones the entire mmap region into anonymous heap memory in a
-// single allocation, then re-points each shard's Fingerprints slice into the
-// clone at the same byte offset. Avoids 256 separate allocations.
+// ForceInMem clones each shard's fingerprints into anonymous heap memory.
 func (r *ReaderSharded) ForceInMem() datasize.ByteSize {
-	if len(r.m) == 0 {
-		return 0
-	}
 	var res datasize.ByteSize
 	for i := range r.shards {
 		res += r.shards[i].ForceInMem()
@@ -328,6 +342,14 @@ func (r *ReaderSharded) MadvNormal() {
 		return
 	}
 	if err := mm.MadviseNormal(r.m); err != nil {
+		panic(err)
+	}
+}
+func (r *ReaderSharded) MadvRandom() {
+	if r == nil || len(r.m) == 0 || r.keepInMem {
+		return
+	}
+	if err := mm.MadviseRandom(r.m); err != nil {
 		panic(err)
 	}
 }

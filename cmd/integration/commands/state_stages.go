@@ -28,7 +28,6 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/erigontech/erigon/cmd/utils"
-	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/fromdb"
@@ -64,7 +63,7 @@ Examples:
 	Example: "go run ./cmd/integration state_stages --datadir=... --verbosity=3 --unwind=100 --unwind.every=100000 --block=2000000",
 	Run: func(cmd *cobra.Command, args []string) {
 		logger := debug.SetupCobra(cmd, "integration")
-		ctx, _ := common.RootContext()
+		ctx := cmd.Context()
 		cfg := &nodecfg.DefaultConfig
 		utils.SetNodeConfigCobra(cmd, cfg)
 		ethConfig := &ethconfig.Defaults
@@ -105,7 +104,7 @@ var loopExecCmd = &cobra.Command{
 	Use: "loop_exec",
 	Run: func(cmd *cobra.Command, args []string) {
 		logger := debug.SetupCobra(cmd, "integration")
-		ctx, _ := common.RootContext()
+		ctx := cmd.Context()
 		db, err := openDB(dbCfg(dbcfg.ChainDB, chaindata), true, chain, logger)
 		if err != nil {
 			logger.Error("Opening DB", "error", err)
@@ -169,7 +168,7 @@ func syncBySmallSteps(db kv.TemporalRwDB, builderConfig buildercfg.BuilderConfig
 	if err != nil {
 		return err
 	}
-	defer sd.Close()
+	defer func() { sd.Close() }() // closes whichever SD is current after the commit loop swaps it
 	sd.SetInMemHistoryReads(false)
 
 	var batchSize datasize.ByteSize
@@ -184,7 +183,7 @@ func syncBySmallSteps(db kv.TemporalRwDB, builderConfig buildercfg.BuilderConfig
 	}
 
 	br, _ := blocksIO(db, logger1)
-	execCfg := stagedsync.StageExecuteBlocksCfg(db, pm, batchSize, chainConfig, engine, vmConfig, notifications, false, true, dirs, br, nil, spec.Genesis, syncCfg, false, exec.NewBlockReadAheader())
+	execCfg := stagedsync.StageExecuteBlocksCfg(db, pm, batchSize, chainConfig, engine, vmConfig, notifications, false, true, dirs, br, spec.Genesis, syncCfg, false, exec.NewBlockReadAheader())
 
 	execUntilFunc := func(execToBlock uint64) stagedsync.ExecFunc {
 		return func(badBlockUnwind bool, s *stagedsync.StageState, unwinder stagedsync.Unwinder, doms *execctx.SharedDomains, rwTx kv.TemporalRwTx, logger log.Logger) error {
@@ -283,18 +282,20 @@ func syncBySmallSteps(db kv.TemporalRwDB, builderConfig buildercfg.BuilderConfig
 				return err
 			}
 
-			if err = sd.Flush(ctx, tx); err != nil {
+			if err = sd.Commit(ctx, tx); err != nil {
 				return err
 			}
-			sd.ClearRam(true)
-			if err = tx.Commit(); err != nil {
-				return err
-			}
+			sd.Close()
 
 			if tx, err = db.BeginTemporalRw(ctx); err != nil {
 				return err
 			}
 			defer tx.Rollback()
+			// Fresh SD: a committed SD is never reused.
+			if sd, err = execctx.NewSharedDomains(ctx, tx, logger1); err != nil {
+				return err
+			}
+			sd.SetInMemHistoryReads(false)
 		}
 
 		//receiptsInDB := rawdb.ReadReceiptsByNumber(tx, progress(tx, stages.Execution)+1)
@@ -370,7 +371,7 @@ func loopExec(db kv.TemporalRwDB, ctx context.Context, unwind uint64, logger log
 	initialCycle := false
 	br, _ := blocksIO(db, logger)
 	notifications := shards.NewNotifications(nil)
-	cfg := stagedsync.StageExecuteBlocksCfg(db, pm, batchSize, chainConfig, engine, vmConfig, notifications, false, true, dirs, br, nil, spec.Genesis, syncCfg, false, exec.NewBlockReadAheader())
+	cfg := stagedsync.StageExecuteBlocksCfg(db, pm, batchSize, chainConfig, engine, vmConfig, notifications, false, true, dirs, br, spec.Genesis, syncCfg, false, exec.NewBlockReadAheader())
 
 	// set block limit of execute stage
 	sync.MockExecFunc(stages.Execution, func(badBlockUnwind bool, stageState *stagedsync.StageState, unwinder stagedsync.Unwinder, sd *execctx.SharedDomains, tx kv.TemporalRwTx, logger log.Logger) error {

@@ -226,7 +226,9 @@ func (db *DB) UpdateNosync(ctx context.Context, f func(tx kv.RwTx) error) error 
 }
 
 func (db *DB) Close() {
-	//db.stateFiles.Close()
+	if db.stateFiles != nil {
+		db.stateFiles.Close()
+	}
 	db.RwDB.Close()
 	for _, forkagg := range db.forkaggs {
 		forkagg.Close()
@@ -684,7 +686,6 @@ func (db *DB) ForkableTables(names ...kv.ForkableId) (tables []string) {
 	}
 	return
 }
-func (db *DB) ReloadFiles() error { return db.stateFiles.ReloadFiles() }
 func (db *DB) BuildMissedAccessors(ctx context.Context, workers int) (err error) {
 	if err = db.stateFiles.BuildMissedAccessors(ctx, workers); err != nil {
 		return

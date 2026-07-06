@@ -122,7 +122,7 @@ func TestCall(t *testing.T) {
 		byte(vm.PUSH1), 32,
 		byte(vm.PUSH1), 0,
 		byte(vm.RETURN),
-	})
+	}, tracing.CodeChangeUnspecified)
 
 	ret, _, err := Call(address, nil, &Config{State: state})
 	if err != nil {
@@ -189,7 +189,7 @@ func benchmarkEVM_Create(b *testing.B, code string) {
 	)
 
 	statedb.CreateAccount(sender, true)
-	statedb.SetCode(receiver, common.FromHex(code))
+	statedb.SetCode(receiver, common.FromHex(code), tracing.CodeChangeUnspecified)
 	runtimeConfig := Config{
 		Origin:      sender,
 		State:       statedb,
@@ -203,6 +203,7 @@ func benchmarkEVM_Create(b *testing.B, code string) {
 			HomesteadBlock:        common.NewUint64(0),
 			ByzantiumBlock:        common.NewUint64(0),
 			ConstantinopleBlock:   common.NewUint64(0),
+			PetersburgBlock:       common.NewUint64(0),
 			TangerineWhistleBlock: common.NewUint64(0),
 			SpuriousDragonBlock:   common.NewUint64(0),
 		},
@@ -257,7 +258,7 @@ func BenchmarkEVM_RETURN(b *testing.B) {
 			b.ReportAllocs()
 
 			contractCode := returnContract(n)
-			statedb.SetCode(contractAddr, contractCode)
+			statedb.SetCode(contractAddr, contractCode, tracing.CodeChangeUnspecified)
 
 			for b.Loop() {
 				ret, _, err := Call(contractAddr, []byte{}, &Config{State: statedb})
@@ -458,7 +459,7 @@ func benchmarkNonModifyingCode(gas mdgas.MdGas, code []byte, name string, tracer
 	eoa := accounts.InternAddress(common.HexToAddress("E0"))
 	{
 		cfg.State.CreateAccount(eoa, true)
-		cfg.State.SetNonce(eoa, 100)
+		cfg.State.SetNonce(eoa, 100, tracing.NonceChangeUnspecified)
 	}
 	reverting := accounts.InternAddress(common.HexToAddress("EE"))
 	{
@@ -467,12 +468,12 @@ func benchmarkNonModifyingCode(gas mdgas.MdGas, code []byte, name string, tracer
 			byte(vm.PUSH1), 0x00,
 			byte(vm.PUSH1), 0x00,
 			byte(vm.REVERT),
-		})
+		}, tracing.CodeChangeUnspecified)
 	}
 
 	//cfg.State.CreateAccount(cfg.Origin)
 	// set the receiver's (the executing contract) code for execution.
-	cfg.State.SetCode(destination, code)
+	cfg.State.SetCode(destination, code, tracing.CodeChangeUnspecified)
 	vmenv.Call(sender, destination, nil, gas, cfg.Value, false /* bailout */) // nolint:errcheck
 
 	b.Run(name, func(b *testing.B) {
@@ -697,7 +698,7 @@ func BenchmarkEVM_SWAP1(b *testing.B) {
 
 	b.Run("10k", func(b *testing.B) {
 		contractCode := swapContract(10_000)
-		state.SetCode(contractAddr, contractCode)
+		state.SetCode(contractAddr, contractCode, tracing.CodeChangeUnspecified)
 
 		for b.Loop() {
 			_, _, err := Call(contractAddr, []byte{}, &Config{State: state})
@@ -737,7 +738,7 @@ func TestCreate2CollisionWithEIP7702Delegation(t *testing.T) {
 	delegationTarget := common.HexToAddress("0xdead")
 	delegationCode := types.AddressToDelegation(accounts.InternAddress(delegationTarget))
 	statedb.CreateAccount(delegatedAddr, true)
-	statedb.SetCode(delegatedAddr, delegationCode)
+	statedb.SetCode(delegatedAddr, delegationCode, tracing.CodeChangeUnspecified)
 
 	// Build a factory contract that executes CREATE2 with the initcode and salt=0.
 	// The factory is placed at factoryAddr.
@@ -747,7 +748,7 @@ func TestCreate2CollisionWithEIP7702Delegation(t *testing.T) {
 	factory.Push(0).Op(vm.SSTORE)
 
 	statedb.CreateAccount(accounts.InternAddress(factoryAddr), true)
-	statedb.SetCode(accounts.InternAddress(factoryAddr), factory.Bytes())
+	statedb.SetCode(accounts.InternAddress(factoryAddr), factory.Bytes(), tracing.CodeChangeUnspecified)
 
 	cfg := &Config{
 		State:  statedb,
@@ -806,7 +807,7 @@ func TestCreateCollisionWithEIP7702Delegation(t *testing.T) {
 	delegationTarget := common.HexToAddress("0xdead")
 	delegationCode := types.AddressToDelegation(accounts.InternAddress(delegationTarget))
 	statedb.CreateAccount(delegatedAddr, true)
-	statedb.SetCode(delegatedAddr, delegationCode)
+	statedb.SetCode(delegatedAddr, delegationCode, tracing.CodeChangeUnspecified)
 
 	// Build a factory that executes CREATE with the initcode.
 	factory := program.New()
@@ -818,7 +819,7 @@ func TestCreateCollisionWithEIP7702Delegation(t *testing.T) {
 	factory.Push(0).Op(vm.SSTORE) // store result in slot 0
 
 	statedb.CreateAccount(factoryAcct, true)
-	statedb.SetCode(factoryAcct, factory.Bytes())
+	statedb.SetCode(factoryAcct, factory.Bytes(), tracing.CodeChangeUnspecified)
 
 	cfg := &Config{
 		State:  statedb,
@@ -900,7 +901,7 @@ func TestGasTracingNoUnderflowOnStateGas(t *testing.T) {
 //   - SYSTEM_ADDRESS was touched and exists after the call (positive check on the
 //     caller-side empty-account creation for Gnosis/AuRa; see PR 5645, Issue 18276).
 //   - SYSTEM_ADDRESS remains an empty account after the call.
-//   - SYSTEM_ADDRESS is absent from the BAL produced by the call's TxIO.
+//   - SYSTEM_ADDRESS is absent from the BAL produced by the call's tx IO.
 //   - No balance-change tracer events fire for SYSTEM_ADDRESS as a result of
 //     the zero-value transfer path.
 func TestSystemCallZeroValueSkipsTransferChecks(t *testing.T) {
@@ -922,7 +923,7 @@ func TestSystemCallZeroValueSkipsTransferChecks(t *testing.T) {
 		byte(vm.PUSH1), 32,
 		byte(vm.PUSH1), 0,
 		byte(vm.RETURN),
-	})
+	}, tracing.CodeChangeUnspecified)
 
 	// Track balance-change events on SYSTEM_ADDRESS.
 	type balChange struct {
@@ -979,7 +980,9 @@ func TestSystemCallZeroValueSkipsTransferChecks(t *testing.T) {
 
 	// The call-level BAL must not include SYSTEM_ADDRESS when the syscall only
 	// performs the sender-side touch and no actual account access.
-	bal := statedb.TxIO().AsBlockAccessList()
+	var io state.VersionedIO
+	statedb.MergeTxIOInto(&io)
+	bal := io.AsBlockAccessList()
 	for _, accountChanges := range bal {
 		require.NotEqual(t, systemAddr, accountChanges.Address,
 			"SYSTEM_ADDRESS should be absent from the BAL after a zero-value syscall")

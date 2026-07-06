@@ -93,10 +93,6 @@ func NewRoSnapshots(cfg ethconfig.BlocksFreezing, snapDir string, logger log.Log
 // transaction_hash  -> transactions_segment_offset
 // transaction_hash  -> block_number
 
-func Segments(dir string, minBlock uint64) (res []snaptype.FileInfo, missingSnapshots []snapshotsync.Range, err error) {
-	return snapshotsync.TypedSegments(dir, snaptype2.BlockSnapshotTypes, true)
-}
-
 func SegmentsCaplin(dir string, minBlock uint64) (res []snaptype.FileInfo, missingSnapshots []snapshotsync.Range, err error) {
 	list, err := snaptype.Segments(dir)
 	if err != nil {
@@ -142,8 +138,9 @@ func chooseSegmentEnd(from, to uint64, snapType snaptype.Enum, snCfg *snapcfg.Cf
 }
 
 type BlockRetire struct {
-	maxScheduledBlock atomic.Uint64
-	working           atomic.Bool
+	maxScheduledBlock  atomic.Uint64
+	working            atomic.Bool
+	lastRetireGapStart atomic.Uint64
 
 	// shared semaphore with AggregatorV3 to allow only one type of snapshot building at a time
 	snBuildAllowed *semaphore.Weighted
@@ -271,10 +268,20 @@ func (br *BlockRetire) dbHasEnoughDataForBlocksRetire(ctx context.Context) (bool
 		if !ok {
 			return nil
 		}
-		lastInFiles := br.snapshots().SegmentsMax() + 1
-		haveGap = lastInFiles < firstInDB
+		nextBlockInSnapshots := br.snapshots().SegmentsMax() + 1
+		haveGap = nextBlockInSnapshots < firstInDB
 		if haveGap {
-			log.Debug("[snapshots] not enough blocks in db to create snapshots", "lastInFiles", lastInFiles, " firstBlockInDB", firstInDB, "recommendations", "it's ok to ignore this message. can fix by: downloading more files `rm datadir/snapshots/prohibit_new_downloads.lock datdir/snapshots/snapshots-lock.json`, or downloading old blocks to db `integration stage_headers --reset`")
+			// Log once per unique gap: Swap stores firstInDB and returns the previous
+			// value. If it matches, we already logged for this exact gap — skip.
+			if br.lastRetireGapStart.Swap(firstInDB) != firstInDB {
+				br.logger.Debug("skipping block snapshot retirement: db does not contain the next block after snapshots",
+					"nextBlockInSnapshots", nextBlockInSnapshots,
+					"firstBlockInDB", firstInDB,
+					"gapBlocks", firstInDB-nextBlockInSnapshots,
+					"recommendation", "retirement will resume once matching snapshots are downloaded or the gap is covered")
+			}
+		} else {
+			br.lastRetireGapStart.Store(0)
 		}
 		return nil
 	}); err != nil {
@@ -310,7 +317,7 @@ func (br *BlockRetire) retireBlocks(
 		logger.Log(lvl, "[snapshots] Retire Blocks", "range",
 			fmt.Sprintf("%s-%s", common.PrettyCounter(blockFrom), common.PrettyCounter(blockTo)))
 		// in future we will do it in background
-		if err := DumpBlocks(ctx, blockFrom, blockTo, br.chainConfig, tmpDir, snapshots.Dir(), db, int(workers), lvl, logger, blockReader, br.snCfg); err != nil {
+		if err := DumpBlocks(ctx, blockFrom, blockTo, br.chainConfig, tmpDir, snapshots.Dir(), db, int(workers), lvl, logger, blockReader, br.snCfg, &snapshots.RoSnapshots); err != nil {
 			return ok, fmt.Errorf("DumpBlocks: %w", err)
 		}
 
@@ -377,44 +384,31 @@ func (br *BlockRetire) PruneAncientBlocks(tx kv.RwTx, limit int, timeout time.Du
 	}
 
 	t := time.Now()
-	frozenBlocks := br.blockReader.FrozenBlocks()
-	isBor := br.chainConfig.Bor != nil
+
+	// PruneBlocks/PruneHeimdall delete the whole [from, to) range capped at limit in a
+	// single cursor pass; the sync loop re-enters each cycle, so no inner loop is needed.
+	if canDeleteTo := CanDeleteTo(currentProgress, br.blockReader.FrozenBlocks()); canDeleteTo > 0 {
+		if deleted, err = br.blockWriter.PruneBlocks(context.Background(), tx, canDeleteTo, limit); err != nil {
+			return deleted, err
+		}
+	}
 
 	var deletedBorBlocks int
-	for i := 0; i < limit; i++ {
-		if time.Since(t) > timeout {
-			break
-		}
-		if canDeleteTo := CanDeleteTo(currentProgress, frozenBlocks); canDeleteTo > 0 {
-			deletedBlocks, err := br.blockWriter.PruneBlocks(context.Background(), tx, canDeleteTo, 1)
-			if err != nil {
-				return deleted, err
-			}
-			deleted += deletedBlocks
-		}
-
-		if !isBor {
-			continue
-		}
-
-		frozenBlocks := br.blockReader.FrozenBorBlocks(true)
-
-		if canDeleteTo := CanDeleteTo(currentProgress, frozenBlocks); canDeleteTo > 0 {
-			// PruneBorBlocks - [1, to) old blocks after moving it to snapshots.
-
-			_deletedBorBlocks, err := func() (deleted int, err error) {
+	if br.chainConfig.Bor != nil {
+		if canDeleteTo := CanDeleteTo(currentProgress, br.blockReader.FrozenBorBlocks(true)); canDeleteTo > 0 {
+			deletedBorBlocks, err = func() (int, error) {
 				defer mxPruneTookBor.ObserveDuration(time.Now())
 
 				return bordb.PruneHeimdall(context.Background(),
-					br.heimdallStore, br.bridgeStore, nil, canDeleteTo, 1)
+					br.heimdallStore, br.bridgeStore, nil, canDeleteTo, limit)
 			}()
-			deletedBorBlocks += _deletedBorBlocks
 			if err != nil {
 				return deleted, err
 			}
 		}
 	}
-	if deleted > 0 {
+
+	if deleted > 0 || deletedBorBlocks > 0 {
 		br.logger.Debug("[snapshots] Prune Blocks", "deleted", deleted, "deletedBorBlocks", deletedBorBlocks, "took", time.Since(t))
 	}
 
@@ -445,7 +439,9 @@ func (br *BlockRetire) RetireBlocksInBackground(
 		if br.snBuildAllowed != nil {
 			//we are inside own goroutine - it's fine to block here
 			if err := br.snBuildAllowed.Acquire(ctx, 1); err != nil {
-				br.logger.Warn("[snapshots] retire blocks", "err", err)
+				if !errors.Is(err, context.Canceled) && !errors.Is(err, common.ErrStopped) {
+					br.logger.Warn("[snapshots] retire blocks", "err", err)
+				}
 				return
 			}
 			defer br.snBuildAllowed.Release(1)
@@ -457,7 +453,15 @@ func (br *BlockRetire) RetireBlocksInBackground(
 			br.logger.Debug("[snapshots] bor data is not ready to be retired", "nextAttemptAt", br.borDataNotReadyBefore)
 			return
 		}
+		if errors.Is(err, snapshotsync.ErrRangeBuildInProgress) {
+			br.logger.Debug("[snapshots] retire blocks: deferred to in-flight build", "err", err)
+			return
+		}
 		if err != nil {
+			if errors.Is(err, context.Canceled) || errors.Is(err, common.ErrStopped) {
+				br.logger.Debug("[snapshots] retire blocks canceled", "err", err)
+				return
+			}
 			br.logger.Error("[snapshots] retire blocks", "err", err)
 			return
 		}
@@ -576,10 +580,10 @@ func (br *BlockRetire) DisableReadAhead() {
 	}
 }
 
-func DumpBlocks(ctx context.Context, blockFrom, blockTo uint64, chainConfig *chain.Config, tmpDir, snapDir string, chainDB kv.RoDB, workers int, lvl log.Lvl, logger log.Logger, blockReader services.FullBlockReader, snCfg *snapcfg.Cfg) error {
+func DumpBlocks(ctx context.Context, blockFrom, blockTo uint64, chainConfig *chain.Config, tmpDir, snapDir string, chainDB kv.RoDB, workers int, lvl log.Lvl, logger log.Logger, blockReader services.FullBlockReader, snCfg *snapcfg.Cfg, inProgress *snapshotsync.RoSnapshots) error {
 	firstTxNum := blockReader.FirstTxnNumNotInSnapshots()
 	for i := blockFrom; i < blockTo; i = chooseSegmentEnd(i, blockTo, snaptype2.Enums.Headers, snCfg) {
-		lastTxNum, err := dumpBlocksRange(ctx, i, chooseSegmentEnd(i, blockTo, snaptype2.Enums.Headers, snCfg), tmpDir, snapDir, firstTxNum, chainDB, chainConfig, workers, lvl, logger)
+		lastTxNum, err := dumpBlocksRange(ctx, i, chooseSegmentEnd(i, blockTo, snaptype2.Enums.Headers, snCfg), tmpDir, snapDir, firstTxNum, chainDB, chainConfig, workers, lvl, logger, inProgress)
 		if err != nil {
 			return err
 		}
@@ -588,7 +592,7 @@ func DumpBlocks(ctx context.Context, blockFrom, blockTo uint64, chainConfig *cha
 	return nil
 }
 
-func dumpBlocksRange(ctx context.Context, blockFrom, blockTo uint64, tmpDir, snapDir string, firstTxNum uint64, chainDB kv.RoDB, chainConfig *chain.Config, workers int, lvl log.Lvl, logger log.Logger) (lastTxNum uint64, err error) {
+func dumpBlocksRange(ctx context.Context, blockFrom, blockTo uint64, tmpDir, snapDir string, firstTxNum uint64, chainDB kv.RoDB, chainConfig *chain.Config, workers int, lvl log.Lvl, logger log.Logger, inProgress *snapshotsync.RoSnapshots) (lastTxNum uint64, err error) {
 	logEvery := time.NewTicker(20 * time.Second)
 	defer logEvery.Stop()
 
@@ -599,16 +603,16 @@ func dumpBlocksRange(ctx context.Context, blockFrom, blockTo uint64, tmpDir, sna
 	}
 
 	if _, err = dumpRange(ctx, snaptype2.Headers.FileInfo(snapDir, blockFrom, blockTo),
-		DumpHeaders, nil, chainDB, chainConfig, tmpDir, workers, lvl, logger); err != nil {
+		DumpHeaders, nil, chainDB, chainConfig, tmpDir, workers, lvl, logger, inProgress); err != nil {
 		return 0, err
 	}
 
 	if lastTxNum, err = dumpRange(ctx, snaptype2.Bodies.FileInfo(snapDir, blockFrom, blockTo),
-		DumpBodies, func(context.Context) uint64 { return firstTxNum }, chainDB, chainConfig, tmpDir, workers, lvl, logger); err != nil {
+		DumpBodies, func(context.Context) uint64 { return firstTxNum }, chainDB, chainConfig, tmpDir, workers, lvl, logger, inProgress); err != nil {
 		return lastTxNum, err
 	}
 	if _, err = dumpRange(ctx, snaptype2.Transactions.FileInfo(snapDir, blockFrom, blockTo),
-		DumpTxs, func(context.Context) uint64 { return firstTxNum }, chainDB, chainConfig, tmpDir, workers, lvl, logger); err != nil {
+		DumpTxs, func(context.Context) uint64 { return firstTxNum }, chainDB, chainConfig, tmpDir, workers, lvl, logger, inProgress); err != nil {
 		return lastTxNum, err
 	}
 
@@ -629,7 +633,15 @@ var BlockCompressCfg = seg.Cfg{
 	Workers:              1,
 }
 
-func dumpRange(ctx context.Context, f snaptype.FileInfo, dumper dumpFunc, firstKey firstKeyGetter, chainDB kv.RoDB, chainConfig *chain.Config, tmpDir string, workers int, lvl log.Lvl, logger log.Logger) (uint64, error) {
+func dumpRange(ctx context.Context, f snaptype.FileInfo, dumper dumpFunc, firstKey firstKeyGetter, chainDB kv.RoDB, chainConfig *chain.Config, tmpDir string, workers int, lvl log.Lvl, logger log.Logger, inProgress *snapshotsync.RoSnapshots) (uint64, error) {
+	// Claim this (type, range) so a concurrent OpenFolder doesn't pick up the
+	// .seg before its index is built and race our BuildIndexes below.
+	if inProgress != nil {
+		if !inProgress.TryAcquireRange(f.Type.Enum(), f.From, f.To) {
+			return 0, fmt.Errorf("dump %s: %w", f.Name(), snapshotsync.ErrRangeBuildInProgress)
+		}
+		defer inProgress.ReleaseRange(f.Type.Enum(), f.From, f.To)
+	}
 	var lastKeyValue uint64
 
 	compressCfg := BlockCompressCfg
@@ -1045,13 +1057,14 @@ func ForEachHeader(ctx context.Context, s *RoSnapshots, walker func(header *type
 	view := s.View()
 	defer view.Close()
 
+	// header is hoisted: walker must not retain &header beyond its callback.
+	var header types.Header
+
 	for _, sn := range view.Headers() {
-		if err := sn.Src().WithReadAhead(func() error {
-			g := sn.Src().MakeGetter()
+		if err := sn.Src().WithReadAhead(func(g *seg.Getter) error {
 			for i := 0; g.HasNext(); i++ {
 				word, _ = g.Next(word[:0])
-				var header types.Header
-				if err := rlp.DecodeBytes(word[1:], &header); err != nil {
+				if err := types.DecodeHeader(word[1:], &header); err != nil {
 					return fmt.Errorf("%w, file=%s, record=%d", err, sn.Src().FileName(), i)
 				}
 				if err := walker(&header); err != nil {

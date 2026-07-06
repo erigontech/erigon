@@ -376,7 +376,9 @@ func GenesisToBlock(tb testing.TB, g *types.Genesis, dirs datadir.Dirs, logger l
 	}
 	defer tx.Rollback()
 
-	sd, err := execctx.NewSharedDomains(ctx, tx, logger)
+	// Genesis is a one-shot commitment over an empty DB; the parallel trie has no
+	// context factory wired here, so use the sequential trie (identical root).
+	sd, err := execctx.NewSharedDomains(ctx, tx, logger, execctx.WithSequentialCommitment())
 	if err != nil {
 		return nil, nil, err
 	}
@@ -429,17 +431,17 @@ func ComputeGenesisCommitment(ctx context.Context, g *types.Genesis, tx kv.Tempo
 		if err != nil {
 			return nil, nil, err
 		}
-		err = statedb.SetCode(address, account.Code)
+		err = statedb.SetCode(address, account.Code, tracing.CodeChangeGenesis)
 		if err != nil {
 			return nil, nil, err
 		}
-		err = statedb.SetNonce(address, account.Nonce)
+		err = statedb.SetNonce(address, account.Nonce, tracing.NonceChangeGenesis)
 		if err != nil {
 			return nil, nil, err
 		}
 		var slotVal uint256.Int
 		for key, value := range account.Storage {
-			slotVal.SetBytes(value.Bytes())
+			slotVal.SetBytes(value[:])
 			err = statedb.SetState(address, accounts.InternKey(key), slotVal)
 			if err != nil {
 				return nil, nil, err
@@ -580,7 +582,7 @@ func sortedAllocKeys(m types.GenesisAlloc) []string {
 	keys := make([]string, len(m))
 	i := 0
 	for k := range m {
-		keys[i] = string(k.Bytes())
+		keys[i] = string(k[:])
 		i++
 	}
 	slices.Sort(keys)

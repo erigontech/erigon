@@ -246,6 +246,253 @@ func TestMVHashMapBasics(t *testing.T) {
 	require.Equal(t, valueFor(10, 2), res.value)
 }
 
+// TestBALPrePop_SameSenderTxs_NoConflicts simulates an EIP-7928 BAL where N
+// transactions from the same sender each write BalancePath and NoncePath, and
+// fees accrue to a single coinbase. With the BAL pre-populated into the
+// VersionMap at FlagDone, every parallel worker should read the correct
+// floor-N-1 value for BalancePath/NoncePath via the btree, and validation
+// should produce zero conflicts.
+//
+// Worker reads simulated per tx K (K = 0..N-1):
+//   - sender.AddressPath:   StorageRead at UnknownVersion (BAL doesn't
+//     pre-populate AddressPath, so versionedRead with readStorage=nil falls
+//     through to storage).
+//   - sender.BalancePath:   MapRead at (K-1, 0) for K>=1 (btree floor hit),
+//     StorageRead at UnknownVersion for K=0.
+//   - sender.NoncePath:     same shape as BalancePath.
+//   - coinbase.AddressPath: StorageRead at UnknownVersion.
+//   - coinbase.BalancePath: same shape as sender.BalancePath.
+//
+// This test reproduces the BAL retry storm seen on the point_evaluation
+// benchmark: with the current validateRead BalancePath cross-check on the
+// AddressPath MVReadResultNone branch, every tx K>=1 is invalidated solely
+// because BAL has a BalancePath entry below K, even though the underlying
+// AddressPath read from storage is unchanged.
+func TestBALPrePop_SameSenderTxs_NoConflicts(t *testing.T) {
+	t.Parallel()
+
+	sender := getAddress(7)
+	coinbase := getAddress(8)
+	const numTxs = 9
+
+	checkVersionEqual := func(readVersion, writeVersion Version) VersionValidity {
+		if readVersion == writeVersion {
+			return VersionValid
+		}
+		return VersionInvalid
+	}
+
+	vm := NewVersionMap(nil)
+	vm.HasBAL = true
+
+	for i := 0; i < numTxs; i++ {
+		vm.Write(sender, BalancePath, accounts.NilKey,
+			Version{TxIndex: i, Incarnation: 0}, *uint256.NewInt(uint64(1000 - i)), true)
+		vm.Write(sender, NoncePath, accounts.NilKey,
+			Version{TxIndex: i, Incarnation: 0}, uint64(i+1), true)
+		vm.Write(coinbase, BalancePath, accounts.NilKey,
+			Version{TxIndex: i, Incarnation: 0}, *uint256.NewInt(uint64((i + 1) * 50)), true)
+	}
+
+	sourceFor := func(r ReadResult) ReadSource {
+		if r.Status() == MVReadResultDone {
+			return MapRead
+		}
+		return StorageRead
+	}
+
+	io := NewVersionedIO(numTxs)
+	for txIdx := 0; txIdx < numTxs; txIdx++ {
+		rs := ReadSet{}
+		rs.Set(VersionedRead{
+			Address: sender, Path: AddressPath, Source: StorageRead, Version: UnknownVersion,
+		})
+		balRes := vm.Read(sender, BalancePath, accounts.NilKey, txIdx)
+		rs.Set(VersionedRead{
+			Address: sender, Path: BalancePath,
+			Source:  sourceFor(balRes),
+			Version: balRes.Version(),
+			Val:     balRes.Value(),
+		})
+		nonceRes := vm.Read(sender, NoncePath, accounts.NilKey, txIdx)
+		rs.Set(VersionedRead{
+			Address: sender, Path: NoncePath,
+			Source:  sourceFor(nonceRes),
+			Version: nonceRes.Version(),
+			Val:     nonceRes.Value(),
+		})
+		rs.Set(VersionedRead{
+			Address: coinbase, Path: AddressPath, Source: StorageRead, Version: UnknownVersion,
+		})
+		cbBalRes := vm.Read(coinbase, BalancePath, accounts.NilKey, txIdx)
+		rs.Set(VersionedRead{
+			Address: coinbase, Path: BalancePath,
+			Source:  sourceFor(cbBalRes),
+			Version: cbBalRes.Version(),
+			Val:     cbBalRes.Value(),
+		})
+		io.RecordReads(Version{TxIndex: txIdx, Incarnation: 0}, rs)
+	}
+
+	for txIdx := 0; txIdx < numTxs; txIdx++ {
+		valid := vm.ValidateVersion(txIdx, io, checkVersionEqual, false, "")
+		require.Equal(t, VersionValid, valid,
+			"tx %d: BAL-pre-populated reads should validate without conflicts; got %s", txIdx, valid)
+	}
+}
+
+// TestNoBAL_SameSenderTxs_DetectsConflicts is the safety counterpart of
+// TestBALPrePop_SameSenderTxs_NoConflicts: when no BAL is supplied, removing
+// the BalancePath cross-check from validateRead's AddressPath MVReadResultNone
+// branch must NOT silently break the existing same-sender conflict-detection
+// path (which now relies entirely on the MVReadResultDone arm's
+// !vm.HasBAL || !isBALPrePopulatedPath gate + value-tiebreaker).
+//
+// Setup: 9 concurrent workers each read sender.BalancePath / sender.NoncePath
+// from storage at UnknownVersion (vm has no entries yet). Then tx 0 commits
+// and flushes BalancePath=V0, NoncePath=N0 at TxIndex=0. The other 8 txs'
+// recorded StorageReads now conflict with the newly-Done vm entries (their
+// recorded values differ from V0/N0), so each must invalidate.
+//
+// Without this guarantee, parallel execution of same-sender txs without BAL
+// would commit stale balances/nonces — silently corrupting the chain.
+func TestNoBAL_SameSenderTxs_DetectsConflicts(t *testing.T) {
+	t.Parallel()
+
+	sender := getAddress(11)
+	const numTxs = 9
+
+	checkVersionEqual := func(readVersion, writeVersion Version) VersionValidity {
+		if readVersion == writeVersion {
+			return VersionValid
+		}
+		return VersionInvalid
+	}
+
+	vm := NewVersionMap(nil)
+	require.False(t, vm.HasBAL, "test exercises the no-BAL path")
+
+	// Phase 1: 9 concurrent workers each read the sender's pre-block state
+	// from storage (vm has no entries). Each records a (BalancePath,
+	// StorageRead, UnknownVersion) read with the original storage value, and
+	// the same for NoncePath. AddressPath also goes via the storage-fallback
+	// path in production but isn't relevant to the conflict here.
+	origBalance := *uint256.NewInt(1_000_000)
+	origNonce := uint64(42)
+	io := NewVersionedIO(numTxs)
+	for txIdx := 0; txIdx < numTxs; txIdx++ {
+		rs := ReadSet{}
+		rs.Set(VersionedRead{
+			Address: sender, Path: BalancePath,
+			Source: StorageRead, Version: UnknownVersion,
+			Val: origBalance,
+		})
+		rs.Set(VersionedRead{
+			Address: sender, Path: NoncePath,
+			Source: StorageRead, Version: UnknownVersion,
+			Val: origNonce,
+		})
+		rs.Set(VersionedRead{
+			Address: sender, Path: AddressPath,
+			Source: StorageRead, Version: UnknownVersion,
+		})
+		io.RecordReads(Version{TxIndex: txIdx, Incarnation: 0}, rs)
+	}
+
+	// Phase 2: tx 0 finishes execution and flushes its writes. It debits
+	// gas (balance changes) and increments the nonce.
+	postBalance := *uint256.NewInt(900_000)
+	postNonce := origNonce + 1
+	vm.FlushVersionedWrites(VersionedWrites{
+		{Address: sender, Path: BalancePath, Version: Version{TxIndex: 0, Incarnation: 0}, Val: postBalance},
+		{Address: sender, Path: NoncePath, Version: Version{TxIndex: 0, Incarnation: 0}, Val: postNonce},
+	}, true, "")
+
+	// Phase 3: tx 0 itself revalidates clean — its recorded reads are all
+	// (StorageRead, UnknownVersion) and vm.Read at txIdx=0 returns
+	// MVReadResultNone (no prior writes at TxIdx < 0), which goes through
+	// the StorageRead-valid branch.
+	require.Equal(t, VersionValid, vm.ValidateVersion(0, io, checkVersionEqual, false, ""),
+		"tx 0 should validate (no prior writes to conflict with)")
+
+	// Phase 4: every other same-sender tx must invalidate. vm.Read at
+	// txIdx=K for K>=1 now returns Done at (0, 0) for BalancePath/NoncePath;
+	// the recorded StorageRead values differ from the post-flush values, so
+	// the value-tiebreaker fails and validation returns Invalid.
+	for txIdx := 1; txIdx < numTxs; txIdx++ {
+		valid := vm.ValidateVersion(txIdx, io, checkVersionEqual, false, "")
+		require.Equal(t, VersionInvalid, valid,
+			"tx %d: recorded StorageRead of sender.BalancePath conflicts with tx 0's flushed Done; got %s", txIdx, valid)
+	}
+}
+
+// TestValidateRead_PriorAccountCreation_DetectedViaIncarnationPath reproduces
+// the bug originally fixed by PR #19628 (and patched in #19656): when a prior
+// tx creates an account and a later same-block tx speculatively reads the
+// account as non-existent (AddressPath = StorageRead → nil), the stale read
+// must be invalidated.
+//
+// Under HasBAL + parallel exec, the worker's AddressPath write is filtered
+// out of the per-tx flush (the BAL doesn't list AddressPath, so normalize
+// drops it), so the AddressPath MVReadResultDone branch can't catch the
+// staleness on its own. PRs #19628/#19656 used BalancePath as the cross-check
+// signal — wrong, because BalancePath also fires for ordinary
+// UpdateAccountData on a pre-existing account and for BAL pre-population of
+// any balance-changing tx. That caused the same-sender BAL retry storm we
+// dropped the cross-check to fix.
+//
+// The CORRECT signal is IncarnationPath: it's written only by CreateAccount
+// and SelfDestruct (never by UpdateAccountData, never by BAL pre-pop). This
+// test asserts that when IncarnationPath has a Done entry at a prior txIdx,
+// a same-block AddressPath/StorageRead is invalidated.
+//
+// Status: red until validateRead grows an IncarnationPath cross-check in the
+// path == AddressPath / MVReadResultNone arm.
+func TestValidateRead_PriorAccountCreation_DetectedViaIncarnationPath(t *testing.T) {
+	t.Parallel()
+
+	addr := getAddress(99)
+	checkVersionEqual := func(readVersion, writeVersion Version) VersionValidity {
+		if readVersion == writeVersion {
+			return VersionValid
+		}
+		return VersionInvalid
+	}
+
+	vm := NewVersionMap(nil)
+	vm.HasBAL = true
+
+	// Simulate the post-flush state after tx 0 creates the account. The
+	// BAL pre-populated BalancePath / NoncePath / CodeHashPath; the worker
+	// additionally flushed IncarnationPath (which BAL doesn't pre-populate)
+	// because CreateAccount writes it. AddressPath was filtered out of the
+	// flush under HasBAL — that's the gap PR #19628 was trying to plug.
+	vm.Write(addr, BalancePath, accounts.NilKey,
+		Version{TxIndex: 0, Incarnation: 0}, *uint256.NewInt(1_000), true)
+	vm.Write(addr, NoncePath, accounts.NilKey,
+		Version{TxIndex: 0, Incarnation: 0}, uint64(0), true)
+	vm.Write(addr, IncarnationPath, accounts.NilKey,
+		Version{TxIndex: 0, Incarnation: 0}, uint64(1), true)
+
+	// Tx 1 speculatively read AddressPath at exec time — vm had no
+	// AddressPath entry, so versionedRead's storage-fallback path
+	// recorded (StorageRead, UnknownVersion) with the pre-block storage
+	// value (nil, since the account didn't exist before this block).
+	io := NewVersionedIO(2)
+	rs := ReadSet{}
+	rs.Set(VersionedRead{
+		Address: addr,
+		Path:    AddressPath,
+		Source:  StorageRead,
+		Version: UnknownVersion,
+	})
+	io.RecordReads(Version{TxIndex: 1, Incarnation: 0}, rs)
+
+	valid := vm.ValidateVersion(1, io, checkVersionEqual, false, "")
+	require.Equal(t, VersionInvalid, valid,
+		"tx 1: a prior tx wrote IncarnationPath (account created/destroyed); the stale AddressPath storage-read MUST invalidate so the tx re-executes against the post-creation state")
+}
+
 // TestValidateRead_HasBAL_NoBypassForAddressPath verifies that when HasBAL is
 // true, AddressPath is NOT bypassed — a new MVReadResultDone entry on
 // AddressPath means a real state change (e.g. account creation) from a
@@ -535,4 +782,90 @@ func TestFlushEstimate_ValidTxNotMarkedEstimate(t *testing.T) {
 	require.Equal(t, MVReadResultDependency, res2.Status(),
 		"invalid TX flush should produce Estimate entries")
 	require.Equal(t, 7, res2.DepIdx())
+}
+
+// TestValidateRead_SDStaleness_InvalidatesPreDestructRead verifies the
+// SD-staleness cross-check: a MapRead that is version-consistent on its own
+// path must still be invalidated when a later tx self-destructed the account
+// (with no subsequent revival). The serial path returns zero via the SD-zero
+// short-circuit, so the read predates the destruct and is stale.
+func TestValidateRead_SDStaleness_InvalidatesPreDestructRead(t *testing.T) {
+	t.Parallel()
+
+	addr := getAddress(77)
+	checkVersionEqual := func(readVersion, writeVersion Version) VersionValidity {
+		if readVersion == writeVersion {
+			return VersionValid
+		}
+		return VersionInvalid
+	}
+
+	vm := NewVersionMap(nil)
+
+	// tx 0 wrote the account's balance; tx 2 self-destructed it.
+	vm.Write(addr, BalancePath, accounts.NilKey,
+		Version{TxIndex: 0, Incarnation: 0}, *uint256.NewInt(1_000), true)
+	vm.Write(addr, SelfDestructPath, accounts.NilKey,
+		Version{TxIndex: 2, Incarnation: 0}, true, true)
+
+	// tx 5 read BalancePath as a MapRead at (0,0) — version-consistent on
+	// BalancePath alone, but stale because tx 2's destruct came after.
+	io := NewVersionedIO(5)
+	rs := ReadSet{}
+	rs.Set(VersionedRead{
+		Address: addr,
+		Path:    BalancePath,
+		Source:  MapRead,
+		Version: Version{TxIndex: 0, Incarnation: 0},
+		Val:     *uint256.NewInt(1_000),
+	})
+	io.RecordReads(Version{TxIndex: 5, Incarnation: 0}, rs)
+
+	valid := vm.ValidateVersion(5, io, checkVersionEqual, false, "")
+	require.Equal(t, VersionInvalid, valid,
+		"tx 5: a later tx self-destructed the account with no revival — the pre-destruct BalancePath read must invalidate")
+}
+
+// TestValidateRead_SDStaleness_RevivalKeepsReadValid verifies the revival
+// exemption of the SD-staleness check: when a tx after the destruct writes
+// BalancePath/NoncePath/CodeHashPath (re-creating the account), the read is
+// not stale and stays valid.
+func TestValidateRead_SDStaleness_RevivalKeepsReadValid(t *testing.T) {
+	t.Parallel()
+
+	addr := getAddress(78)
+	checkVersionEqual := func(readVersion, writeVersion Version) VersionValidity {
+		if readVersion == writeVersion {
+			return VersionValid
+		}
+		return VersionInvalid
+	}
+
+	vm := NewVersionMap(nil)
+
+	// tx 0 wrote balance; tx 2 self-destructed; tx 3 revived the account by
+	// writing NoncePath (a non-SelfDestruct write at a higher TxIndex).
+	vm.Write(addr, BalancePath, accounts.NilKey,
+		Version{TxIndex: 0, Incarnation: 0}, *uint256.NewInt(1_000), true)
+	vm.Write(addr, SelfDestructPath, accounts.NilKey,
+		Version{TxIndex: 2, Incarnation: 0}, true, true)
+	vm.Write(addr, NoncePath, accounts.NilKey,
+		Version{TxIndex: 3, Incarnation: 0}, uint64(1), true)
+
+	// tx 5 read BalancePath as a MapRead at (0,0). The destruct is followed
+	// by a revival, so the read is not stale.
+	io := NewVersionedIO(5)
+	rs := ReadSet{}
+	rs.Set(VersionedRead{
+		Address: addr,
+		Path:    BalancePath,
+		Source:  MapRead,
+		Version: Version{TxIndex: 0, Incarnation: 0},
+		Val:     *uint256.NewInt(1_000),
+	})
+	io.RecordReads(Version{TxIndex: 5, Incarnation: 0}, rs)
+
+	valid := vm.ValidateVersion(5, io, checkVersionEqual, false, "")
+	require.Equal(t, VersionValid, valid,
+		"tx 5: a revival write after the destruct re-creates the account — the BalancePath read stays valid")
 }

@@ -26,6 +26,7 @@ import (
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/hexutil"
+	"github.com/erigontech/erigon/common/length"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/order"
@@ -66,7 +67,7 @@ type PrivateDebugAPI interface {
 	GetRawReceipts(ctx context.Context, blockNrOrHash rpc.BlockNumberOrHash) ([]hexutil.Bytes, error)
 	GetBadBlocks(ctx context.Context) ([]map[string]any, error)
 	GetRawTransaction(ctx context.Context, hash common.Hash) (hexutil.Bytes, error)
-	ExecutionWitness(ctx context.Context, blockNrOrHash rpc.BlockNumberOrHash) (*ExecutionWitnessResult, error)
+	ExecutionWitness(ctx context.Context, blockNrOrHash rpc.BlockNumberOrHash, mode *string) (*ExecutionWitnessResult, error)
 	SetHead(ctx context.Context, number hexutil.Uint64) error
 	FreeOSMemory()
 	SetGCPercent(v int) int
@@ -166,14 +167,14 @@ func (api *DebugAPIImpl) StorageRangeAt(ctx context.Context, blockHash common.Ha
 // - []byte, which was used in Erigon.
 // Deprecation of []byte format: The []byte format is now deprecated and will be removed in a future release.
 //
-// New optional parameter incompletes: This parameter has been added for compatibility with Geth. It is currently not supported when set to true(as its functionality is specific to the Geth protocol).
+// The incompletes parameter is accepted but ignored: Erigon always returns complete accounts.
 //
 // Note: Geth returns all accounts at the given block starting from `start`, where `start` is a
 // keccak256(address) hash. Geth can seek directly to that position in the Merkle Patricia Trie
 // since the trie is natively indexed by keccak256. In Erigon, accounts are stored by raw address
 // (flat storage), so to match Geth's behaviour we would need to compute keccak256 for every account
 // in order to find the one matching `start` — which is too expensive for production use.
-// As a result, Erigon treats `start` as a raw address and iteration order differs from Geth.
+// As a result, Erigon treats `start` as a raw address (20 bytes) or address prefix (1–19 bytes).
 func (api *DebugAPIImpl) AccountRange(ctx context.Context, blockNrOrHash rpc.BlockNumberOrHash, start any, maxResults int, excludeCode, excludeStorage bool, optional_incompletes *bool) (state.IteratorDump, error) {
 	var startBytes []byte
 
@@ -200,16 +201,13 @@ func (api *DebugAPIImpl) AccountRange(ctx context.Context, blockNrOrHash rpc.Blo
 		return state.IteratorDump{}, fmt.Errorf("invalid type for start parameter: %T", v)
 	}
 
-	var incompletes bool
-
-	if optional_incompletes == nil {
-		incompletes = false
-	} else {
-		incompletes = *optional_incompletes
-	}
-
-	if incompletes {
-		return state.IteratorDump{}, fmt.Errorf("not supported incompletes = true")
+	switch {
+	case len(startBytes) == 0:
+		return state.IteratorDump{}, fmt.Errorf("empty start key is not supported: pass a 20-byte address or an address prefix (1–19 bytes)")
+	case len(startBytes) == length.Hash:
+		return state.IteratorDump{}, fmt.Errorf("32-byte start key is not supported: Geth treats this as a keccak256 address hash; Erigon iterates by raw address — pass a 20-byte address or an address prefix (1–19 bytes)")
+	case len(startBytes) > length.Addr:
+		return state.IteratorDump{}, fmt.Errorf("start key must be at most 20 bytes; got %d", len(startBytes))
 	}
 
 	tx, err := api.db.BeginTemporalRo(ctx)
@@ -261,8 +259,10 @@ func (api *DebugAPIImpl) AccountRange(ctx context.Context, blockNrOrHash rpc.Blo
 		}
 	}
 
+	var startAddr common.Address
+	copy(startAddr[:], startBytes)
 	dumper := state.NewDumper(tx, api._blockReader.TxnumReader(), blockNumber)
-	res, err := dumper.IteratorDump(excludeCode, excludeStorage, common.BytesToAddress(startBytes), maxResults)
+	res, err := dumper.IteratorDump(excludeCode, excludeStorage, startAddr, maxResults)
 	if err != nil {
 		return state.IteratorDump{}, err
 	}
@@ -701,26 +701,16 @@ func (api *DebugAPIImpl) GetRawReceipts(ctx context.Context, blockNrOrHash rpc.B
 	if block == nil {
 		return nil, nil
 	}
-	receipts, err := api.getReceipts(ctx, tx, block)
-	if err != nil {
-		return nil, err
-	}
 	chainConfig, err := api.chainConfig(ctx, tx)
 	if err != nil {
 		return nil, err
 	}
-	if chainConfig.Bor != nil {
-		events, err := api.bridgeReader.Events(ctx, block.Hash(), blockNum)
-		if err != nil {
-			return nil, err
-		}
-		if len(events) != 0 {
-			borReceipt, err := api.borReceiptGenerator.GenerateBorReceipt(ctx, tx, block, events, chainConfig)
-			if err != nil {
-				return nil, err
-			}
-			receipts = append(receipts, borReceipt)
-		}
+	receipts, borReceipt, err := api.getReceiptsWithBor(ctx, tx, chainConfig, block)
+	if err != nil {
+		return nil, err
+	}
+	if borReceipt != nil {
+		receipts = append(receipts, borReceipt)
 	}
 
 	result := make([]hexutil.Bytes, len(receipts))
@@ -809,18 +799,12 @@ func (api *DebugAPIImpl) GetRawTransaction(ctx context.Context, txnHash common.H
 		}
 	}
 
-	txNumMin, err := api._txNumReader.Min(ctx, tx, blockNum)
+	txnIndex, err := api.txnIndexInBlock(ctx, tx, blockNum, txNum, isBorStateSyncTx)
 	if err != nil {
 		return nil, err
 	}
 
-	if txNumMin+1 > txNum && !isBorStateSyncTx {
-		return nil, fmt.Errorf("uint underflow txnums error txNum: %d, txNumMin: %d, blockNum: %d", txNum, txNumMin, blockNum)
-	}
-
-	var txnIndex = txNum - txNumMin - 1
-
-	txn, err := api._txnReader.TxnByIdxInBlock(ctx, tx, blockNum, int(txnIndex))
+	txn, err := api._txnReader.TxnByIdxInBlock(ctx, tx, blockNum, txnIndex)
 	if err != nil {
 		return nil, err
 	}

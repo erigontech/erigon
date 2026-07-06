@@ -222,8 +222,13 @@ func AnswerGetBlockAccessListsQuery(db kv.Tx, query GetBlockAccessListsPacket, b
 	return bals
 }
 
+// Using a struct keeps the ReceiptsGetter interface stable when new options are added.
+type ReceiptsOpts struct {
+	CommitmentHistoryEnabled bool
+}
+
 type ReceiptsGetter interface {
-	GetReceipts(ctx context.Context, cfg *chain.Config, tx kv.TemporalTx, block *types.Block) (types.Receipts, error)
+	GetReceipts(ctx context.Context, cfg *chain.Config, tx kv.TemporalTx, block *types.Block, opts ReceiptsOpts) (types.Receipts, error)
 	GetCachedReceipts(ctx context.Context, blockHash common.Hash) (types.Receipts, bool)
 }
 
@@ -372,37 +377,44 @@ func AnswerGetReceiptsQuery(ctx context.Context, cfg *chain.Config, receiptsGett
 		pendingIndex = cached.PendingIndex
 	}
 
+	// Only read the flag when there is work to do; full cache hits skip this DB lookup.
+	var receiptsOpts ReceiptsOpts
+	if pendingIndex < len(query) {
+		var err error
+		receiptsOpts.CommitmentHistoryEnabled, _, err = rawdb.ReadDBCommitmentHistoryEnabled(db)
+		if err != nil {
+			return nil, false, err
+		}
+	}
+
 	for lookups := pendingIndex; lookups < len(query); lookups++ {
 		hash := query[lookups]
 		if numBytes >= softResponseLimit || len(receipts) >= maxReceiptsServe ||
 			lookups >= 2*maxReceiptsServe {
-			break
+			return receipts, false, nil
 		}
-		number, _ := br.HeaderNumber(context.Background(), db, hash)
+		// The response carries one receipt list per requested block in request
+		// order, so a block we cannot serve ends the response at that block.
+		number, err := br.HeaderNumber(ctx, db, hash)
+		if err != nil {
+			return nil, false, err
+		}
 		if number == nil {
-			return nil, false, nil
+			return receipts, false, nil
 		}
-		b, _, err := br.BlockWithSenders(context.Background(), db, hash, *number)
+		b, _, err := br.BlockWithSenders(ctx, db, hash, *number)
 		if err != nil {
 			return nil, false, err
 		}
 		if b == nil {
-			return nil, false, nil
+			return receipts, false, nil
 		}
-
-		results, err := receiptsGetter.GetReceipts(ctx, cfg, db, b)
+		results, err := receiptsGetter.GetReceipts(ctx, cfg, db, b, receiptsOpts)
 		if err != nil {
 			return nil, false, err
 		}
-
-		if results == nil {
-			header, err := rawdb.ReadHeaderByHash(db, hash)
-			if err != nil {
-				return nil, false, err
-			}
-			if header == nil || header.ReceiptHash != empty.RootHash {
-				continue
-			}
+		if results == nil && b.HeaderNoCopy().ReceiptHash != empty.RootHash {
+			return receipts, false, nil
 		}
 
 		// For the first block, skip receipts before firstBlockReceiptIndex (eth/70)

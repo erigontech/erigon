@@ -21,6 +21,7 @@ import (
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/execution/chain"
+	"github.com/erigontech/erigon/execution/protocol/mdgas"
 	"github.com/erigontech/erigon/execution/tracing"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/accounts"
@@ -65,13 +66,14 @@ type TxContext struct {
 // ExecutionResult includes all output after executing given evm
 // message no matter the execution itself is successful or not.
 type ExecutionResult struct {
-	ReceiptGasUsed       uint64 // Gas used by the transaction with refunds (what the user pays) - see EIP-7778
-	BlockRegularGasUsed  uint64 // Per-tx regular gas for block-level accounting (pre-Amsterdam: same as block gas)
-	BlockStateGasUsed    uint64 // Per-tx state gas for block-level Bottleneck (EIP-8037)
-	MaxGasUsed           uint64 // Gas used by the transaction before refunds
-	Err                  error  // Any error encountered during the execution(listed in core/vm/errors.go)
-	Reverted             bool   // Whether the execution was aborted by `REVERT`
-	ReturnData           []byte // Returned data from evm(function result or data supplied with revert opcode)
+	ReceiptGasUsed       uint64                       // Gas used by the transaction with refunds (what the user pays) - see EIP-7778
+	BlockRegularGasUsed  uint64                       // Per-tx regular gas for block-level accounting (pre-Amsterdam: same as block gas)
+	BlockStateGasUsed    uint64                       // Per-tx state gas for block-level Bottleneck (EIP-8037)
+	MaxGasUsed           uint64                       // Gas used by the transaction before refunds
+	IntrinsicGas         mdgas.IntrinsicGasCalcResult // Intrinsic gas computed pre-execution. Plumbed so block-pool inclusion checks at finalize time can reuse the value via protocol.InclusionContributionsWithIgas instead of recomputing IntrinsicGas per tx.
+	Err                  error                        // Any error encountered during the execution(listed in core/vm/errors.go)
+	Reverted             bool                         // Whether the execution was aborted by `REVERT`
+	ReturnData           []byte                       // Returned data from evm(function result or data supplied with revert opcode)
 	SenderInitBalance    uint256.Int
 	CoinbaseInitBalance  uint256.Int
 	FeeTipped            uint256.Int

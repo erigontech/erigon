@@ -32,7 +32,7 @@ import (
 	"time"
 
 	"github.com/holiman/uint256"
-	"github.com/urfave/cli/v2"
+	"github.com/urfave/cli/v3"
 
 	"github.com/erigontech/erigon/cmd/evm/internal/compiler"
 	"github.com/erigontech/erigon/cmd/utils"
@@ -49,6 +49,7 @@ import (
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/state"
 	"github.com/erigontech/erigon/execution/state/genesiswrite"
+	"github.com/erigontech/erigon/execution/tracing"
 	"github.com/erigontech/erigon/execution/tracing/tracers"
 	"github.com/erigontech/erigon/execution/tracing/tracers/logger"
 	"github.com/erigontech/erigon/execution/types"
@@ -143,7 +144,7 @@ func timedExec(bench bool, execFunc func() ([]byte, uint64, error)) (output []by
 	return output, stats, err
 }
 
-func runCmd(ctx *cli.Context) error {
+func runCmd(_ context.Context, ctx *cli.Command) error {
 	machineFriendlyOutput := ctx.Bool(MachineFlag.Name)
 	if machineFriendlyOutput {
 		log.Root().SetHandler(log.DiscardHandler())
@@ -319,7 +320,7 @@ func runCmd(ctx *cli.Context) error {
 		}
 	} else {
 		if len(code) > 0 {
-			statedb.SetCode(receiver, code)
+			statedb.SetCode(receiver, code, tracing.CodeChangeUnspecified)
 		}
 		execFunc = func() ([]byte, uint64, error) {
 			output, gasLeft, err := runtime.Call(receiver, input, &runtimeConfig)

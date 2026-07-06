@@ -145,7 +145,7 @@ func Execute(code, input []byte, cfg *Config, tempdir string) ([]byte, *state.In
 	cfg.State.Prepare(rules, cfg.Origin, cfg.Coinbase, address, vm.ActivePrecompiles(rules), nil, nil)
 	cfg.State.CreateAccount(address, true)
 	// set the receiver's (the executing contract) code for execution.
-	cfg.State.SetCode(address, code)
+	cfg.State.SetCode(address, code, tracing.CodeChangeUnspecified)
 	// Call the code with the given configuration.
 	if cfg.EVMConfig.Tracer != nil && cfg.EVMConfig.Tracer.OnTxStart != nil {
 		cfg.EVMConfig.Tracer.OnTxStart(&tracing.VMContext{IntraBlockState: cfg.State}, nil, accounts.ZeroAddress)

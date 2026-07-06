@@ -22,9 +22,10 @@ import (
 
 	"github.com/holiman/uint256"
 
-	ethereum "github.com/erigontech/erigon"
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/event"
 	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/execution/abi/bind"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/rpc"
 	"github.com/erigontech/erigon/rpc/requests"
@@ -44,7 +45,7 @@ func (b JsonRpcBackend) CodeAt(ctx context.Context, contract common.Address, blo
 	return b.client.GetCode(contract, rpc.BlockReference(BlockNumArg(blockNum)))
 }
 
-func (b JsonRpcBackend) CallContract(ctx context.Context, call ethereum.CallMsg, blockNum *uint256.Int) ([]byte, error) {
+func (b JsonRpcBackend) CallContract(ctx context.Context, call bind.CallMsg, blockNum *uint256.Int) ([]byte, error) {
 	return b.client.Call(CallArgsFromCallMsg(call), rpc.BlockReference(BlockNumArg(blockNum)), nil)
 }
 
@@ -78,7 +79,7 @@ func (b JsonRpcBackend) SuggestGasPrice(ctx context.Context) (*big.Int, error) {
 	return b.client.GasPrice()
 }
 
-func (b JsonRpcBackend) EstimateGas(ctx context.Context, call ethereum.CallMsg) (uint64, error) {
+func (b JsonRpcBackend) EstimateGas(ctx context.Context, call bind.CallMsg) (uint64, error) {
 	return b.client.EstimateGas(call, requests.BlockNumbers.Pending)
 }
 
@@ -87,10 +88,10 @@ func (b JsonRpcBackend) SendTransaction(ctx context.Context, txn types.Transacti
 	return err
 }
 
-func (b JsonRpcBackend) FilterLogs(ctx context.Context, query ethereum.FilterQuery) ([]types.Log, error) {
+func (b JsonRpcBackend) FilterLogs(ctx context.Context, query bind.FilterQuery) ([]types.Log, error) {
 	return b.client.FilterLogs(ctx, query)
 }
 
-func (b JsonRpcBackend) SubscribeFilterLogs(ctx context.Context, query ethereum.FilterQuery, ch chan<- types.Log) (ethereum.Subscription, error) {
+func (b JsonRpcBackend) SubscribeFilterLogs(ctx context.Context, query bind.FilterQuery, ch chan<- types.Log) (event.Subscription, error) {
 	return b.client.SubscribeFilterLogs(ctx, query, ch)
 }

@@ -118,7 +118,7 @@ func (wi *StorageHashWriteItem) Less(than btree.Item) bool {
 
 func (shi *StorageHashItem) Less(than btree.Item) bool {
 	i := than.(*StorageHashItem)
-	c := bytes.Compare(shi.addrHash.Bytes(), i.addrHash.Bytes())
+	c := bytes.Compare(shi.addrHash[:], i.addrHash[:])
 	if c != 0 {
 		return c < 0
 	}
@@ -613,7 +613,7 @@ func (sc *StateCache) StorageHashesSeek(addrHash common.Hash, incarnation uint64
 	var cur *StorageHashItem
 	seek := &StorageHashItem{}
 	id := id(seek)
-	seek.addrHash.SetBytes(addrHash.Bytes())
+	seek.addrHash.SetBytes(addrHash[:])
 	seek.incarnation = incarnation
 	seek.locHashPrefix = prefix
 	sc.readWrites[id].AscendGreaterOrEqual(seek, func(i btree.Item) bool {

@@ -509,12 +509,34 @@ type TemporalDebugDB interface {
 	InvertedIdxTables(names ...InvertedIdx) []string
 	ForkableTables(names ...ForkableId) []string
 	BuildMissedAccessors(ctx context.Context, workers int) error
-	ReloadFiles() error
 	EnableReadAhead() TemporalDebugDB
 	DisableReadAhead()
 
 	Files() []string
 	MergeLoop(ctx context.Context) error
+}
+
+// FlushConfig holds optional behaviour for TemporalMemBatch.Flush, populated by
+// FlushOption values.
+type FlushConfig struct {
+	// DomainCallbacks, if set for a domain, is invoked per (key,value,step,txNum)
+	// tuple during Flush so a downstream cache (e.g. the BranchCache) can stay in
+	// sync. txNum is the value's write txNum, for tx-precise unwind invalidation.
+	DomainCallbacks map[Domain]func(k []byte, v []byte, step Step, txNum uint64)
+}
+
+// FlushOption configures a TemporalMemBatch.Flush call.
+type FlushOption func(*FlushConfig)
+
+// WithFlushCallback registers cb to receive every (key, value, step, txNum)
+// tuple of the given domain during Flush.
+func WithFlushCallback(domain Domain, cb func(k []byte, v []byte, step Step, txNum uint64)) FlushOption {
+	return func(c *FlushConfig) {
+		if c.DomainCallbacks == nil {
+			c.DomainCallbacks = make(map[Domain]func(k []byte, v []byte, step Step, txNum uint64))
+		}
+		c.DomainCallbacks[domain] = cb
+	}
 }
 
 type TemporalMemBatch interface {
@@ -529,7 +551,7 @@ type TemporalMemBatch interface {
 	HasPrefix(domain Domain, prefix []byte, roTx Tx) ([]byte, []byte, bool, error)
 	HasPrefixInRAM(domain Domain, prefix []byte) bool
 	SizeEstimate() uint64
-	Flush(ctx context.Context, tx RwTx) error
+	Flush(ctx context.Context, tx RwTx, opts ...FlushOption) error
 	Close()
 	PutForkable(id ForkableId, num Num, v []byte) error
 	DiscardWrites(domain Domain)

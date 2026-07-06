@@ -80,11 +80,12 @@ GLOAS_FORK_VERSION: 0x80000038
 GLOAS_FORK_EPOCH: 1
 
 # GLOAS-specific
+PAYLOAD_DUE_BPS: 7500
 MAX_PAYLOAD_ATTESTATIONS: 4
 BUILDER_REGISTRY_LIMIT: 1099511627776
 BUILDER_PENDING_WITHDRAWALS_LIMIT: 1048576
 MAX_BUILDERS_PER_WITHDRAWALS_SWEEP: 16384
-MIN_BUILDER_WITHDRAWABILITY_DELAY: 64
+MIN_BUILDER_WITHDRAWABILITY_DELAY: 8192
 `
 	dir := t.TempDir()
 	configPath := filepath.Join(dir, "config.yaml")
@@ -107,9 +108,10 @@ MIN_BUILDER_WITHDRAWABILITY_DELAY: 64
 	require.NotEqual(t, uint64(math.MaxUint64), beaconCfg.GloasForkEpoch)
 
 	// Verify GLOAS-specific parameters.
+	require.Equal(t, uint64(7500), beaconCfg.PayloadDueBps)
 	require.Equal(t, uint64(4), beaconCfg.MaxPayloadAttestations)
 	require.Equal(t, uint64(1099511627776), beaconCfg.BuilderRegistryLimit)
-	require.Equal(t, uint64(64), beaconCfg.MinBuilderWithdrawabilityDelay)
+	require.Equal(t, uint64(8192), beaconCfg.MinBuilderWithdrawabilityDelay)
 
 	// Verify MinSeedLookahead is 1 (inherited from mainnet defaults or overridden).
 	require.Equal(t, uint64(1), beaconCfg.MinSeedLookahead)
@@ -124,4 +126,50 @@ MIN_BUILDER_WITHDRAWABILITY_DELAY: 64
 	require.Equal(t, FuluVersion, beaconCfg.GetCurrentStateVersion(0))
 	require.Equal(t, GloasVersion, beaconCfg.GetCurrentStateVersion(1))
 	require.Equal(t, GloasVersion, beaconCfg.GetCurrentStateVersion(100))
+}
+
+// TestCustomConfigUnsetForksAreFarFuture verifies that fork epochs omitted from a
+// custom config default to far-future, like other clients, rather than inheriting
+// the finite epochs of the mainnet base config.
+func TestCustomConfigUnsetForksAreFarFuture(t *testing.T) {
+	yamlContent := `
+PRESET_BASE: minimal
+ALTAIR_FORK_EPOCH: 0
+BELLATRIX_FORK_EPOCH: 0
+CAPELLA_FORK_EPOCH: 0
+DENEB_FORK_EPOCH: 0
+ELECTRA_FORK_EPOCH: 100000000
+`
+	dir := t.TempDir()
+	configPath := filepath.Join(dir, "config.yaml")
+	require.NoError(t, os.WriteFile(configPath, []byte(yamlContent), 0644))
+
+	beaconCfg, _, err := CustomConfig(configPath)
+	require.NoError(t, err)
+
+	// Explicitly-set forks are preserved.
+	require.Equal(t, uint64(0), beaconCfg.DenebForkEpoch)
+	require.Equal(t, uint64(100000000), beaconCfg.ElectraForkEpoch)
+	// Omitted forks are far-future, not the inherited mainnet epoch (Fulu=411392).
+	require.Equal(t, uint64(math.MaxUint64), beaconCfg.FuluForkEpoch)
+	require.Equal(t, uint64(math.MaxUint64), beaconCfg.GloasForkEpoch)
+}
+
+func TestMaxBlobsPerBlockUpperBound(t *testing.T) {
+	// The max is taken across the base fields and every BlobSchedule entry, not just the
+	// last (highest-epoch) one — here the peak (48) sits in the middle of the schedule.
+	cfg := &BeaconChainConfig{
+		MaxBlobsPerBlock:        6,
+		MaxBlobsPerBlockElectra: 9,
+		BlobSchedule: []BlobParameters{
+			{Epoch: 100, MaxBlobsPerBlock: 12},
+			{Epoch: 200, MaxBlobsPerBlock: 48},
+			{Epoch: 300, MaxBlobsPerBlock: 24},
+		},
+	}
+	require.EqualValues(t, 48, cfg.MaxBlobsPerBlockUpperBound())
+
+	// With no schedule it falls back to the larger of the base limits.
+	noSchedule := &BeaconChainConfig{MaxBlobsPerBlock: 6, MaxBlobsPerBlockElectra: 9}
+	require.EqualValues(t, 9, noSchedule.MaxBlobsPerBlockUpperBound())
 }
