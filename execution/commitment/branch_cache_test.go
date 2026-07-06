@@ -22,6 +22,8 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/require"
+
+	"github.com/erigontech/erigon/common/maphash"
 )
 
 // TestBranchCache_RootPinning verifies the root branch lands in the pinned
@@ -271,21 +273,54 @@ func TestBranchCache_ShardedTailUnwindAcrossShards(t *testing.T) {
 	}
 }
 
-// TestBranchCache_SmallTailKeepsCollidingKeys pins the shard-capacity floor: a
-// small tail (as used by unit tests) must never let two distinct keys evict
-// each other while it is far from full. The pre-cap 64-shard split of a
-// 100-entry tail left single-entry shards, so two keys hashing to one dropped a
-// valid entry via LRU overflow instead of by design. Scanning many pairs trips
-// a reverted cap regardless of the process hash seed; the fix makes it green
-// deterministically (every shard holds >= 2).
+// TestBranchCache_SmallTailKeepsCollidingKeys pins the shard-capacity floor:
+// two distinct keys that hash into the same tail shard must coexist in a small
+// (unit-test-sized) tail. Before the shards<=tailCapacity/2 cap, a 100-entry
+// tail split into 64 shards with a single entry each in the upper range, so a
+// colliding pair evicted one via LRU overflow. The pair is built for the
+// current process seed against maphash's documented low-bits/power-of-two
+// sharding, so the check is deterministic both ways: green with the cap, red
+// without it.
 func TestBranchCache_SmallTailKeepsCollidingKeys(t *testing.T) {
-	for i := 0; i < 4096; i++ {
-		c := NewBranchCache(100)
-		c.Put([]byte{0xa0, byte(i), byte(i >> 8)}, []byte("v1"), 0, 1)
-		c.Put([]byte{0xb1, byte(i), byte(i >> 8)}, []byte("v2"), 0, 1)
-		require.Equal(t, 2, c.tail.Len(),
-			"both keys must survive in a 100-entry tail (i=%d): a single-entry shard evicted one", i)
+	const tailCapacity = 100
+
+	// Reconstruct the pre-cap layout NewShardedLRU(tailCapacity,
+	// branchCacheTailShards) builds: the requested count is capped to
+	// tailCapacity, rounded down to a power of two n, and the last tailCapacity%n
+	// shards hold a single entry (base = tailCapacity/n). Pick two keys landing
+	// in one such shard.
+	requested := branchCacheTailShards
+	if requested > tailCapacity {
+		requested = tailCapacity
 	}
+	n := 1
+	for n*2 <= requested {
+		n *= 2
+	}
+	require.Equal(t, 1, tailCapacity/n, "precondition: pre-cap layout must have single-entry shards")
+	firstSingleSlotShard := uint64(tailCapacity % n)
+
+	seen := make(map[uint64][]byte)
+	var k1, k2 []byte
+	for i := 0; i < 1<<16 && k2 == nil; i++ {
+		k := []byte{0xa0, byte(i), byte(i >> 8)}
+		shard := maphash.Hash(k) & uint64(n-1)
+		if shard < firstSingleSlotShard {
+			continue
+		}
+		if prev, ok := seen[shard]; ok {
+			k1, k2 = prev, k
+		} else {
+			seen[shard] = k
+		}
+	}
+	require.NotNil(t, k2, "no colliding key pair found for this seed")
+
+	c := NewBranchCache(tailCapacity)
+	c.Put(k1, []byte("v1"), 0, 1)
+	c.Put(k2, []byte("v2"), 0, 1)
+	require.Equal(t, 2, c.tail.Len(),
+		"colliding keys share a pre-cap single-entry shard; the cap must keep both")
 }
 
 // TestBranchCache_BaselineFootprint pins that a freshly constructed cache is
