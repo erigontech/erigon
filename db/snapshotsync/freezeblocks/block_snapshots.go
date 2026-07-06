@@ -164,11 +164,11 @@ type BlockRetire struct {
 	bridgeStore           bridge.Store
 	borDataNotReadyBefore time.Time
 
-	// wg joins the background goroutine spawned by RetireBlocksInBackground so
+	// background joins the background goroutine spawned by RetireBlocksInBackground so
 	// Close can wait for an in-flight retire before the DB/snapshots are torn down.
-	wg     concurrent.ClosingWaitGroup
-	ctx    context.Context
-	stopFn context.CancelFunc
+	background concurrent.ClosingWaitGroup
+	ctx        context.Context
+	stopFn     context.CancelFunc
 }
 
 func NewBlockRetire(
@@ -441,7 +441,7 @@ func (br *BlockRetire) RetireBlocksInBackground(
 		return false
 	}
 
-	started := br.wg.TryGo(func() {
+	started := br.background.TryGo(func() {
 		defer onDone()
 		defer br.working.Store(false)
 
@@ -492,11 +492,11 @@ func (br *BlockRetire) RetireBlocksInBackground(
 // Close cancels any in-flight background retire and waits for it to finish, so
 // callers can safely tear down the DB and snapshots afterwards. Idempotent.
 func (br *BlockRetire) Close() {
-	if !br.wg.BeginClose() {
+	if !br.background.BeginClose() {
 		return
 	}
 	br.stopFn()
-	br.wg.Wait()
+	br.background.Wait()
 }
 
 func (br *BlockRetire) RetireBlocks(
