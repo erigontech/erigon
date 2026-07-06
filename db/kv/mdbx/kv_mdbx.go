@@ -918,9 +918,8 @@ func (tx *MdbxTx) DistributeCursors(table string, from []byte, n int) ([][]byte,
 		return [][]byte{from, nil}, nil
 	}
 
-	// Keep the kv.Cursor wrappers, not just the raw handles: reading each
-	// cursor's position through Cursor.Current normalizes the not-found/EOF
-	// signal, so we don't have to match platform-specific mdbx error codes.
+	// Read positions through kv.Cursor.Current: it normalizes the not-found/EOF
+	// signal, sparing us platform-specific mdbx error codes.
 	wrappers := make([]kv.Cursor, n)
 	cursors := make([]*mdbx.Cursor, n)
 	for i := range wrappers {
@@ -939,9 +938,8 @@ func (tx *MdbxTx) DistributeCursors(table string, from []byte, n int) ([][]byte,
 	if st, err := tx.BucketStat(table); err == nil && st.Depth > 2 {
 		deepness = st.Depth - 2
 	}
-	// allSet is false when the range held fewer positions than n: the surplus
-	// cursors are left at EOF and their Current call reports a platform-specific
-	// error we must treat as "end of the set prefix" rather than propagate.
+	// allSet is false when the range had fewer positions than n: surplus cursors
+	// are left at EOF, so a Current error below is end-of-prefix, not a fault.
 	allSet, err := mdbx.DistributeCursors(rawCursor(firstC), nil, cursors, deepness)
 	if err != nil {
 		return nil, err
@@ -951,10 +949,10 @@ func (tx *MdbxTx) DistributeCursors(table string, from []byte, n int) ([][]byte,
 	for _, cw := range wrappers {
 		k, _, err := cw.Current()
 		if err != nil {
-			if !allSet { // unset surplus cursor: set cursors are a leading prefix, stop here
+			if !allSet { // unset surplus cursor ends the set prefix
 				break
 			}
-			return nil, err // every cursor was set, so this is a real fault
+			return nil, err
 		}
 		if k == nil {
 			break
@@ -962,9 +960,7 @@ func (tx *MdbxTx) DistributeCursors(table string, from []byte, n int) ([][]byte,
 		keys = append(keys, k)
 	}
 	if allSet && len(keys) > 0 {
-		// The last cursor pins the table's last key; nil closes the final range.
-		// When !allSet the last set cursor is a genuine interior boundary — keep it.
-		keys = keys[:len(keys)-1]
+		keys = keys[:len(keys)-1] // last cursor pins the table's last key; nil closes the final range
 	}
 
 	bounds := make([][]byte, 0, len(keys)+2)

@@ -46,28 +46,26 @@ const WarmupChunkSize = 32 * datasize.MB
 
 const readAheadLabel = "read-ahead"
 
-// DistributeBounds returns count-balanced ~WarmupChunkSize chunk boundaries for
-// table — cloned so they survive later tx mutations — plus the table size (which
-// sizes ReadAhead's window). Returns nil bounds when the table is under one chunk
-// or the engine can't count-split; a real distribution error is returned so the
-// caller can surface it rather than silently skip warmup.
+// DistributeBounds returns cloned count-balanced ~WarmupChunkSize boundaries for
+// table plus its size. Bounds are nil when under one chunk or the engine can't
+// count-split. Cloning lets them outlive later same-tx mutations.
 func DistributeBounds(tx Tx, table string) (bounds [][]byte, size uint64, err error) {
 	s, ok := tx.(DBWithDistributionSupport)
-	if !ok { // engine can't count-split (e.g. memdb): nothing to chunk or warm
+	if !ok { // e.g. memdb: nothing to chunk or warm
 		return nil, 0, nil
 	}
 	size, err = tx.BucketSize(table)
 	if err != nil {
 		return nil, 0, err
 	}
-	if size < WarmupChunkSize.Bytes() { // single chunk: nothing to distribute
+	if size < WarmupChunkSize.Bytes() {
 		return nil, size, nil
 	}
 	b, err := s.DistributeCursors(table, nil, int(size/WarmupChunkSize.Bytes()))
 	if err != nil {
 		return nil, size, err
 	}
-	bounds = make([][]byte, len(b)) // interior keys are zero-copy, valid only until tx end
+	bounds = make([][]byte, len(b))
 	for i, k := range b {
 		bounds[i] = bytes.Clone(k)
 	}
@@ -80,7 +78,7 @@ type ReadAheadCfg struct {
 	TableSize  uint64   // sizes the ~1GB ahead-window in chunks
 	Workers    int
 	LogLvl     log.Lvl
-	WarmValues bool // also fault overflow value pages (copy path); false warms leaf pages only (clear path)
+	WarmValues bool // fault value pages too (copy path); false = leaf pages only (clear path)
 }
 
 // ReadAhead keeps a bounded window of pages warm just ahead of a forward table scan
@@ -96,9 +94,9 @@ type ReadAhead struct {
 	warmValues    bool
 }
 
-// NewReadAhead starts background prefetchers warming a ~1GB window of cfg.Bounds
-// just ahead of the consumer. Call SetPos as the consumer advances and Close when
-// done. Returns nil (a valid no-op *ReadAhead) when db is nil or there's <1 chunk.
+// NewReadAhead warms a ~1GB window of cfg.Bounds just ahead of the consumer. Call
+// SetPos as it advances and Close when done. Returns nil (a no-op) when db is nil
+// or there's <1 chunk.
 func NewReadAhead(ctx context.Context, db RoDB, table string, cfg ReadAheadCfg) *ReadAhead {
 	if db == nil || len(cfg.Bounds) < 2 {
 		return nil // Close/SetPos are nil-safe
@@ -119,14 +117,12 @@ func (r *ReadAhead) run(ctx context.Context, db RoDB, table string, bounds [][]b
 	defer close(r.done)
 	r.bounds.Store(&bounds)
 
-	// Keep ~1GB warm ahead of the consumer, derived from the actual mean chunk
-	// size so the window stays ~1GB even when a huge table (past the 4096-cursor
-	// cap) produces chunks larger than WarmupChunkSize. Never below 1.
+	// ~1GB window from the actual mean chunk size, so it stays ~1GB even when
+	// huge tables (past the cursor cap) have chunks bigger than WarmupChunkSize.
 	const aheadBytes = 1 * datasize.GB
 	nChunks := int64(len(bounds) - 1)
 	ahead := max(int64(aheadBytes.Bytes())*nChunks/int64(max(tableSize, 1)), 1)
-	// More workers than the window can hold would only park, so cap the pool.
-	limit := min(workers, int(ahead)+1)
+	limit := min(workers, int(ahead)+1) // extra workers would only park
 
 	// wake workers parked in waitTurn when ctx is cancelled, so Close() doesn't hang
 	go func() {
@@ -163,7 +159,7 @@ func (r *ReadAhead) run(ctx context.Context, db RoDB, table string, bounds [][]b
 			turn := r.waitTurn(ctx, idx, ahead) // parked here until the consumer is close enough
 			idle.Add(-1)
 			if !turn { // consumer already passed it, or ctx cancelled
-				doneChunks.Add(1) // count skipped chunks too, so progress tracks the consumer instead of reading as stalled
+				doneChunks.Add(1) // count skips too, so progress tracks the consumer
 				return nil
 			}
 			warming.Add(1)
@@ -177,10 +173,9 @@ func (r *ReadAhead) run(ctx context.Context, db RoDB, table string, bounds [][]b
 	close(logDone)
 }
 
-// waitTurn blocks until chunk idx is within `ahead` of the consumer; returns
-// false if the consumer already passed it or ctx was cancelled. It parks on a
-// condition variable (woken by SetPos when the consumer advances, or by Close)
-// rather than polling a timer.
+// waitTurn blocks until chunk idx is within `ahead` of the consumer; returns false
+// if the consumer passed it or ctx was cancelled. Parks on a cond var (woken by
+// SetPos/Close), not a poll.
 func (r *ReadAhead) waitTurn(ctx context.Context, idx int, ahead int64) bool {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -221,10 +216,9 @@ func touchValue(sink byte, v []byte) byte {
 	return sink
 }
 
-// warm scans [from,to) so the OS faults the pages it touches into cache. The
-// scan itself faults the leaf pages holding keys; when warmValues is set it also
-// touches each value so overflow pages fault in (the copy path needs them, the
-// range-delete path — which only cuts from the leaf — does not).
+// warm scans [from,to) to fault its pages into cache. The scan faults leaf pages;
+// warmValues also touches values so overflow pages fault in (copy needs them,
+// range-delete doesn't).
 func (r *ReadAhead) warm(ctx context.Context, db RoDB, table string, from, to []byte) {
 	err := db.View(ctx, func(tx Tx) error {
 		it, err := tx.Range(table, from, to, order.Asc, Unlim)

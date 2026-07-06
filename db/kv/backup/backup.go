@@ -115,9 +115,8 @@ func backupTable(ctx context.Context, src kv.RoDB, srcTx kv.Tx, dst kv.RwDB, tab
 		logger.Info("[mdbx_to_mdbx] copying", "table", table, "rows", common.PrettyCounter(total), "size", common.ByteCount(size))
 	}
 
-	// Parallel read-ahead: keep a bounded band of pages warm just ahead of the
-	// copy cursor (cold page faults are slow; one reader can't saturate nvme).
-	// No-op unless WARMUP_TABLE_WORKERS is set. Warms values too — the copy reads them.
+	// Read-ahead warms pages (values too — the copy reads them) just ahead of the
+	// copy cursor. No-op unless WARMUP_TABLE_WORKERS is set.
 	var ra *kv.ReadAhead
 	if workers := int(dbg.WarmupTableWorkers); workers > 0 && total > 0 {
 		bounds, _, err := kv.DistributeBounds(srcTx, table)
@@ -221,12 +220,11 @@ func clearTable(ctx context.Context, db kv.RoDB, tx kv.RwTx, table string) error
 		return err
 	}
 	log.Info("[clear]", "table", table, "size", common.ByteCount(size))
-	if len(bounds) < 2 { // under one chunk (or can't count-split): native drop beats distribute+warm+counted-delete
+	if len(bounds) < 2 { // under one chunk: native drop is cheaper
 		return tx.ClearTable(table)
 	}
 
-	// db drives read-only read-ahead over the same boundaries; keys-only, since
-	// range-delete cuts from the leaf and never reads overflow value pages.
+	// read-ahead over the same boundaries; keys-only — range-delete never reads values
 	ra := kv.NewReadAhead(ctx, db, table, kv.ReadAheadCfg{Bounds: bounds, TableSize: size, Workers: workers, LogLvl: log.LvlDebug})
 	defer ra.Close()
 
