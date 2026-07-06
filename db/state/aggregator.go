@@ -1145,12 +1145,7 @@ func (a *Aggregator) BuildFiles2(ctx context.Context, fromStep, toStep kv.Step, 
 	if ok := a.buildingFiles.CompareAndSwap(false, true); !ok {
 		return nil
 	}
-	if !a.wg.TryAdd() {
-		a.buildingFiles.Store(false)
-		return nil
-	}
-	go func() {
-		defer a.wg.Done()
+	if !a.wg.Go(func() {
 		defer a.buildingFiles.Store(false)
 		if toStep > fromStep {
 			log.Info("[agg] build", "fromStep", fromStep, "toStep", toStep)
@@ -1169,15 +1164,16 @@ func (a *Aggregator) BuildFiles2(ctx context.Context, fromStep, toStep kv.Step, 
 			a.onFilesChange(nil)
 		}
 
-		if doMerge && a.wg.TryAdd() {
-			go func() {
-				defer a.wg.Done()
+		if doMerge {
+			a.wg.Go(func() {
 				if err := a.mergeLoop(ctx); err != nil {
 					panic(err)
 				}
-			}()
+			})
 		}
-	}()
+	}) {
+		a.buildingFiles.Store(false)
+	}
 	return nil
 }
 
@@ -2145,16 +2141,9 @@ func (a *Aggregator) buildFilesInBackground(txNum uint64, doMerge bool) chan str
 		return fin
 	}
 
-	if !a.wg.TryAdd() {
-		a.buildingFiles.Store(false)
-		close(fin)
-		return fin
-	}
-
 	step := kv.Step(a.EndTxNumMinimax() / a.StepSize())
 
-	go func() {
-		defer a.wg.Done()
+	if !a.wg.Go(func() {
 		defer a.buildingFiles.Store(false)
 
 		if a.snapshotBuildSema != nil {
@@ -2294,12 +2283,7 @@ func (a *Aggregator) buildFilesInBackground(txNum uint64, doMerge bool) chan str
 			}
 			a.onFilesChange(nil)
 		}
-		if !doMerge || !a.wg.TryAdd() {
-			close(fin)
-			return
-		}
-		go func() {
-			defer a.wg.Done()
+		if !doMerge || !a.wg.Go(func() {
 			defer close(fin)
 			if err := a.mergeLoop(a.ctx); err != nil {
 				if errors.Is(err, context.Canceled) || errors.Is(err, common.ErrStopped) {
@@ -2307,8 +2291,14 @@ func (a *Aggregator) buildFilesInBackground(txNum uint64, doMerge bool) chan str
 				}
 				a.logger.Warn("[snapshots] merge", "err", err)
 			}
-		}()
-	}()
+		}) {
+			close(fin)
+			return
+		}
+	}) {
+		a.buildingFiles.Store(false)
+		close(fin)
+	}
 	return fin
 }
 
