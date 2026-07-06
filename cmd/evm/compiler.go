@@ -20,12 +20,11 @@
 package main
 
 import (
-	"context"
 	"errors"
 	"fmt"
 	"os"
 
-	"github.com/urfave/cli/v3"
+	"github.com/urfave/cli/v2"
 
 	"github.com/erigontech/erigon/cmd/evm/internal/compiler"
 )
@@ -37,7 +36,7 @@ var compileCommand = cli.Command{
 	ArgsUsage: "<file>",
 }
 
-func compileCmd(_ context.Context, ctx *cli.Command) error {
+func compileCmd(ctx *cli.Context) error {
 	debug := ctx.Bool(DebugFlag.Name)
 
 	if len(ctx.Args().First()) == 0 {

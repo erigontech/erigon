@@ -186,20 +186,20 @@ func filesFromDir(dir string) ([]string, error) {
 	return filtered, nil
 }
 
-func (ii *InvertedIndex) openList(ctx context.Context, fNames, accessorFiles []string) error {
+func (ii *InvertedIndex) openList(fNames, accessorFiles []string) error {
 	ii.closeWhatNotInList(fNames)
 	ii.scanDirtyFiles(fNames)
-	if err := ii.openDirtyFiles(ctx, fNames, accessorFiles); err != nil {
+	if err := ii.openDirtyFiles(fNames, accessorFiles); err != nil {
 		return fmt.Errorf("InvertedIndex(%s).openDirtyFiles: %w", ii.FilenameBase, err)
 	}
 	return nil
 }
 
-func (ii *InvertedIndex) openFolder(ctx context.Context, r *ScanDirsResult) error {
+func (ii *InvertedIndex) openFolder(r *ScanDirsResult) error {
 	if ii.Disable {
 		return nil
 	}
-	return ii.openList(ctx, r.iiFiles, r.accessorFiles)
+	return ii.openList(r.iiFiles, r.accessorFiles)
 }
 
 func (ii *InvertedIndex) scanDirtyFiles(fileNames []string) {

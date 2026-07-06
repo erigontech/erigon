@@ -40,7 +40,7 @@ func HistoryCheckNoSystemTxs(ctx context.Context, db kv.TemporalRwDB, blockReade
 	count := atomic.Uint64{}
 	logEvery := time.NewTicker(20 * time.Second)
 	defer logEvery.Stop()
-	g, ctx := errgroup.WithContext(ctx)
+	g := &errgroup.Group{}
 	g.SetLimit(estimate.AlmostAllCPUs())
 
 	skipForPerf := 11

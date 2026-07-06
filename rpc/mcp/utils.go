@@ -3,7 +3,6 @@ package mcp
 import (
 	"encoding/json"
 	"fmt"
-	"strings"
 
 	"github.com/erigontech/erigon/rpc"
 )
@@ -27,20 +26,4 @@ func parseBlockNumber(s string) (rpc.BlockNumber, error) {
 		return blockNum, err
 	}
 	return blockNum, blockNum.UnmarshalJSON(b)
-}
-
-// extractURIParam extracts a path parameter from an MCP resource template URI.
-// For example, given URI "erigon://address/0xABC/summary" and template prefix
-// "erigon://address/" with suffix "/summary", it returns "0xABC". It returns
-// "" if the URI does not match the prefix and suffix.
-func extractURIParam(uri, prefix, suffix string) string {
-	s, ok := strings.CutPrefix(uri, prefix)
-	if !ok {
-		return ""
-	}
-	s, ok = strings.CutSuffix(s, suffix)
-	if !ok {
-		return ""
-	}
-	return s
 }

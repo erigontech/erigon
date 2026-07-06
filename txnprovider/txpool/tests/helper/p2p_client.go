@@ -3,7 +3,6 @@ package helper
 import (
 	"context"
 	"encoding/json"
-	"fmt"
 	"net/http"
 	"strconv"
 	"strings"
@@ -103,16 +102,16 @@ func (p *p2pClient) Connect() (<-chan TxMessage, <-chan error, error) {
 		return nil, nil, err
 	}
 
-	genesis := common.FromHex(resp.Result.Protocols.Eth.Genesis)
-	if len(genesis) != 32 {
-		return nil, nil, fmt.Errorf("admin_nodeInfo returned genesis of length %d, want 32 (%q)", len(genesis), resp.Result.Protocols.Eth.Genesis)
-	}
 	_, err = sentryClient.SetStatus(context.TODO(), &sentryproto.StatusData{
 		NetworkId:       uint64(resp.Result.Protocols.Eth.Network),
 		TotalDifficulty: gointerfaces.ConvertUint256IntToH256(uint256.MustFromDecimal(strconv.Itoa(resp.Result.Protocols.Eth.Difficulty))),
-		BestHash:        gointerfaces.ConvertHashToH256([32]byte(genesis)),
+		BestHash: gointerfaces.ConvertHashToH256(
+			[32]byte(common.FromHex(resp.Result.Protocols.Eth.Genesis)),
+		),
 		ForkData: &sentryproto.Forks{
-			Genesis: gointerfaces.ConvertHashToH256([32]byte(genesis)),
+			Genesis: gointerfaces.ConvertHashToH256(
+				[32]byte(common.FromHex(resp.Result.Protocols.Eth.Genesis)),
+			),
 		},
 	})
 	if err != nil {

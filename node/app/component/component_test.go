@@ -23,7 +23,7 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/require"
-	"github.com/urfave/cli/v3"
+	"github.com/urfave/cli/v2"
 	"go.uber.org/mock/gomock"
 
 	liblog "github.com/erigontech/erigon/common/log/v3"

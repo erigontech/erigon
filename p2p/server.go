@@ -323,13 +323,14 @@ func (srv *Server) Self() (ln *enode.Node) {
 // It blocks until all active connections have been closed.
 func (srv *Server) Stop() {
 	srv.lock.Lock()
-	if !srv.running.CompareAndSwap(true, false) {
+	if !srv.running.Load() {
 		if srv.nodedb != nil {
 			srv.nodedb.Close()
 		}
 		srv.lock.Unlock()
 		return
 	}
+	srv.running.Store(false)
 	srv.quitFunc()
 	if srv.listener != nil {
 		// this unblocks listener Accept

@@ -136,7 +136,7 @@ func TestOpenDirtyFilesAcceptsMixedVersions(t *testing.T) {
 	}
 
 	d.scanDirtyFiles(fileNames)
-	require.NoError(t, d.openDirtyFiles(t.Context(), fileNames))
+	require.NoError(t, d.openDirtyFiles(fileNames))
 
 	opened := make(map[string]bool)
 	d.dirtyFiles.Scan(func(it *FilesItem) bool {
@@ -168,7 +168,7 @@ func TestOpenDirtyFilesSameRangePrefersNewestVersion(t *testing.T) {
 			}
 
 			d.scanDirtyFiles(order)
-			require.NoError(t, d.openDirtyFiles(t.Context(), order))
+			require.NoError(t, d.openDirtyFiles(order))
 
 			require.Equal(t, 1, d.dirtyFiles.Len(), "same-range duplicate must collapse to one dirty file")
 			var opened *FilesItem

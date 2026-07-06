@@ -44,36 +44,6 @@ func newBaseApiWithFiltersForTest(f *rpchelper.Filters, stateCache *kvcache.Cohe
 	return NewBaseApi(f, stateCache, m.BlockReader, false, rpccfg.DefaultEvmCallTimeout, m.Engine, m.Dirs, nil, 0, 0)
 }
 
-func TestSubscriptionsRequireFiltersAndNotifier(t *testing.T) {
-	m := execmoduletester.New(t)
-	ctx, conn := rpcdaemontest.CreateTestGrpcConn(t, m)
-	mining := txpoolproto.NewMiningClient(conn)
-	ff := rpchelper.New(ctx, rpchelper.DefaultFiltersConfig, nil, nil, mining, func() {}, m.Log, nil)
-	stateCache := kvcache.New(kvcache.DefaultCoherentConfig)
-
-	apis := map[string]*APIImpl{
-		"withFilters": newEthApiForTest(newBaseApiWithFiltersForTest(ff, stateCache, m), m.DB, nil, nil),
-		"nilFilters":  newEthApiForTest(newBaseApiForTest(m), m.DB, nil, nil),
-	}
-	for apiName, api := range apis {
-		// ctx carries no rpc notifier, so every subscription method must refuse
-		subscriptions := map[string]func() (*rpc.Subscription, error){
-			"newHeads":                       func() (*rpc.Subscription, error) { return api.NewHeads(ctx) },
-			"newPendingTransactions":         func() (*rpc.Subscription, error) { return api.NewPendingTransactions(ctx, nil) },
-			"newPendingTransactionsWithBody": func() (*rpc.Subscription, error) { return api.NewPendingTransactionsWithBody(ctx) },
-			"logs":                           func() (*rpc.Subscription, error) { return api.Logs(ctx, filters.FilterCriteria{}) },
-			"transactionReceipts": func() (*rpc.Subscription, error) {
-				return api.TransactionReceipts(ctx, filters.ReceiptsFilterCriteria{})
-			},
-		}
-		for name, subscribe := range subscriptions {
-			sub, err := subscribe()
-			require.ErrorIs(t, err, rpc.ErrNotificationsUnsupported, "%s/%s", apiName, name)
-			require.Equal(t, &rpc.Subscription{}, sub, "%s/%s", apiName, name)
-		}
-	}
-}
-
 func TestNewFilters(t *testing.T) {
 	if testing.Short() {
 		t.Skip("slow test")

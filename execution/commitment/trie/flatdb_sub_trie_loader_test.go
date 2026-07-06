@@ -31,7 +31,7 @@ import (
 func TestCreateLoadingPrefixes(t *testing.T) {
 	assert := assert.New(t)
 
-	tr := newEmpty()
+	tr := New(common.Hash{})
 	kAcc1 := common.FromHex("0001cf1ce0664746d39af9f6db99dc3370282f1d9d48df7f804b7e6499558c83")
 	kInc := make([]byte, 8)
 	binary.BigEndian.PutUint64(kInc, uint64(1))

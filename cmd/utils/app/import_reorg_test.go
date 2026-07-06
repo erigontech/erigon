@@ -26,7 +26,7 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/require"
-	"github.com/urfave/cli/v3"
+	"github.com/urfave/cli/v2"
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/hexutil"
@@ -185,9 +185,9 @@ func writeImportBlocks(t *testing.T, dir string, tc importFixtureCase) []string 
 // ExitErrHandler makes a failing command return its error instead of calling
 // os.Exit, so import's expected invalid-block error is observable.
 func runErigonCommand(args ...string) error {
-	app := MakeApp("erigon", func(context.Context, *cli.Command) error { return nil }, erigoncli.DefaultFlags)
-	app.ExitErrHandler = func(context.Context, *cli.Command, error) {}
+	app := MakeApp("erigon", func(*cli.Context) error { return nil }, erigoncli.DefaultFlags)
+	app.ExitErrHandler = func(*cli.Context, error) {}
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	return app.Run(ctx, append([]string{"erigon"}, args...))
+	return app.RunContext(ctx, append([]string{"erigon"}, args...))
 }

@@ -244,6 +244,7 @@ func subscribeToStateChangesLoop(ctx context.Context, client StateChangesClient,
 		for {
 			select {
 			case <-ctx.Done():
+				log.Warn("[rpcdaemon subscribeToStateChanges] ctx done", "err", ctx.Err())
 				return
 			default:
 			}
@@ -255,9 +256,6 @@ func subscribeToStateChangesLoop(ctx context.Context, client StateChangesClient,
 					if err == nil {
 						continue
 					}
-				}
-				if errors.Is(err, context.Canceled) {
-					return
 				}
 				log.Warn("[rpcdaemon subscribeToStateChanges]", "err", err)
 			}

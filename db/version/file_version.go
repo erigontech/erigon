@@ -186,22 +186,12 @@ func (v Versions) String() string {
 }
 
 func (v Versions) Supports(ver Version) bool {
-	if ver.Less(v.MinSupported) {
-		return false
-	}
-	// A minor bump only changes a file's content, not how it is read, so a newer
-	// minor within a supported major stays readable; only a newer major changes
-	// read logic and must be rejected.
-	if ver.Major == v.Current.Major {
-		return true
-	}
-	return ver.LessOrEqual(v.Current)
+	return ver.GreaterOrEqual(v.MinSupported) && ver.LessOrEqual(v.Current)
 }
 
 var mustSupportLogOnce sync.Once
 
-// MustSupport panics if ver is unsupported: older than MinSupported, or a newer
-// major than Current (a newer minor within a supported major is allowed).
+// MustSupport panics if ver is outside [MinSupported, Current].
 func (v Versions) MustSupport(ver Version, filename string) {
 	if v.Supports(ver) {
 		return
@@ -214,8 +204,8 @@ func (v Versions) MustSupport(ver Version, filename string) {
 		)
 	} else {
 		msg = fmt.Sprintf(
-			"Snapshot file is newer than this Erigon build supports: file=%s, highest_supported=v%d.x. To fix, either upgrade Erigon to a newer release, or align snapshots by command: `erigon snapshots reset --datadir $DATADIR --chain $CHAIN`",
-			filename, v.Current.Major,
+			"Snapshot file is newer than this Erigon build supports: file=%s, highest_supported=<%s. To fix, either upgrade Erigon to a newer release, or align snapshots by command: `erigon snapshots reset --datadir $DATADIR --chain $CHAIN`",
+			filename, v.Current,
 		)
 	}
 	mustSupportLogOnce.Do(func() { log.Error(msg) })

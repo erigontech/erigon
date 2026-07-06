@@ -21,7 +21,7 @@ import (
 	"fmt"
 	"math"
 
-	"github.com/urfave/cli/v3"
+	"github.com/urfave/cli/v2"
 
 	"github.com/erigontech/erigon/cmd/utils"
 	"github.com/erigontech/erigon/common/log/v3"
@@ -48,8 +48,9 @@ var backtestCommitmentCommand = cli.Command{
 		&cli.Uint64Flag{Name: "metrics-top-n", Usage: "override the number of top blocks to show in the overview metrics page"},
 		&cli.Uint64Flag{Name: "metrics-page-size", Usage: "override the number of blocks to show in the detailed block range metrics page"},
 	}),
-	Action: func(ctx context.Context, cliCtx *cli.Command) error {
-		logger, err := debug.SetupSimple(ctx, cliCtx, true /* root logger */)
+	Action: func(cliCtx *cli.Context) error {
+		ctx := cliCtx.Context
+		logger, err := debug.SetupSimple(cliCtx, true /* root logger */)
 		if err != nil {
 			panic(fmt.Errorf("backtest-commitment: could not setup logger: %w", err))
 		}
@@ -83,15 +84,15 @@ var backtestCommitmentCommand = cli.Command{
 		}
 		return nil
 	},
-	Commands: []*cli.Command{
+	Subcommands: []*cli.Command{
 		{
 			Name: "compare-runs",
 			Flags: joinFlags([]cli.Flag{
 				&cli.StringSliceFlag{Name: "run-output-dirs", Required: true, Usage: "comma separated list of directories containing output of backtest-commitment runs to compare"},
 				&cli.StringFlag{Name: "output-dir", Required: true, Usage: "directory to store comparison.html file"},
 			}),
-			Action: func(ctx context.Context, cliCtx *cli.Command) error {
-				logger, err := debug.SetupSimple(ctx, cliCtx, true /* root logger */)
+			Action: func(cliCtx *cli.Context) error {
+				logger, err := debug.SetupSimple(cliCtx, true /* root logger */)
 				if err != nil {
 					panic(fmt.Errorf("backtest-commitment: compare-runs: could not setup logger: %w", err))
 				}

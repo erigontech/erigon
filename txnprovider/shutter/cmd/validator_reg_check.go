@@ -22,7 +22,7 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/urfave/cli/v3"
+	"github.com/urfave/cli/v2"
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/log/v3"
@@ -31,7 +31,7 @@ import (
 	"github.com/erigontech/erigon/txnprovider/shutter/shuttercfg"
 )
 
-func registerValidatorRegCheckCmd(app *cli.Command) {
+func registerValidatorRegCheckCmd(app *cli.App) {
 	app.Commands = append(app.Commands, &cli.Command{
 		Name:  "shutter-validator-reg-check",
 		Usage: "check if the provided validators are registered with shutter",
@@ -52,7 +52,8 @@ func registerValidatorRegCheckCmd(app *cli.Command) {
 				Required: true,
 			},
 		},
-		Action: func(ctx context.Context, cliCtx *cli.Command) error {
+		Action: func(cliCtx *cli.Context) error {
+			ctx := cliCtx.Context
 			chain := cliCtx.String("chain")
 			elUrl := cliCtx.String("el-url")
 			validatorInfoFile := cliCtx.String("validator-info-file")

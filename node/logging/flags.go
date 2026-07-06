@@ -17,7 +17,7 @@
 package logging
 
 import (
-	"github.com/urfave/cli/v3"
+	"github.com/urfave/cli/v2"
 
 	"github.com/erigontech/erigon/common/log/v3"
 )

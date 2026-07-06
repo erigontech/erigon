@@ -907,7 +907,7 @@ func loadRestoreManifest(path string) ([]string, bool, error) {
 		return nil, false, fmt.Errorf("[commitment_convert] restore: read manifest %s: %w", path, err)
 	}
 	var out []string
-	for line := range strings.SplitSeq(strings.TrimSpace(string(data)), "\n") {
+	for _, line := range strings.Split(strings.TrimSpace(string(data)), "\n") {
 		if line == "" {
 			continue
 		}

@@ -22,7 +22,7 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/urfave/cli/v3"
+	"github.com/urfave/cli/v2"
 
 	cli2 "github.com/erigontech/erigon/node/cli"
 
@@ -49,13 +49,13 @@ func main() {
 
 	app.UsageText = app.Name + ` [command] [flags]`
 
-	app.Action = func(ctx context.Context, cmd *cli.Command) error {
-		if cmd.Args().Present() {
+	app.Action = func(context *cli.Context) error {
+		if context.Args().Present() {
 			goodNames := make([]string, 0, len(app.VisibleCommands()))
 			for _, c := range app.VisibleCommands() {
 				goodNames = append(goodNames, c.Name)
 			}
-			_, _ = fmt.Fprintf(os.Stderr, "Command '%s' not found. Available commands: %s\n", cmd.Args().First(), goodNames)
+			_, _ = fmt.Fprintf(os.Stderr, "Command '%s' not found. Available commands: %s\n", context.Args().First(), goodNames)
 			return cli.Exit("", 1) // Exit with error code but no additional output
 		}
 
@@ -63,34 +63,36 @@ func main() {
 	}
 
 	for _, command := range app.Commands {
-		command.Before = func(ctx context.Context, cmd *cli.Command) (context.Context, error) {
+		command.Before = func(ctx *cli.Context) error {
 			debug.RaiseFdLimit()
 
-			logger, err := setupLogger(cmd)
+			logger, err := setupLogger(ctx)
 
 			if err != nil {
-				return ctx, err
+				return err
 			}
 
-			ctx, cancel := context.WithCancel(ctx)
+			var cancel context.CancelFunc
+
+			ctx.Context, cancel = context.WithCancel(ctx.Context) //nolint
 
 			// setup periodic logging and prometheus updates
-			go mem.LogMemStats(ctx, logger)
-			go disk.UpdateDiskStats(ctx, logger)
+			go mem.LogMemStats(ctx.Context, logger)
+			go disk.UpdateDiskStats(ctx.Context, logger)
 
 			go handleTerminationSignals(cancel, logger)
 
-			return ctx, nil
+			return nil
 		}
 	}
 
-	if err := app.Run(context.Background(), os.Args); err != nil {
+	if err := app.Run(os.Args); err != nil {
 		_, _ = fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
 	}
 }
 
-func setupLogger(ctx *cli.Command) (log.Logger, error) {
+func setupLogger(ctx *cli.Context) (log.Logger, error) {
 	dataDir := ctx.String(utils.DataDirFlag.Name)
 
 	if len(dataDir) > 0 {
@@ -101,7 +103,7 @@ func setupLogger(ctx *cli.Command) (log.Logger, error) {
 		}
 	}
 
-	logger := logging.SetupLoggerCtx("snapshots-"+ctx.Name, ctx, log.LvlError, log.LvlInfo, false)
+	logger := logging.SetupLoggerCtx("snapshots-"+ctx.Command.Name, ctx, log.LvlError, log.LvlInfo, false)
 
 	return logger, nil
 }

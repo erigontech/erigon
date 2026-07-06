@@ -20,39 +20,38 @@
 package cli
 
 import (
-	"context"
 	"fmt"
-	"io"
 	"os"
 	"path/filepath"
 
-	"github.com/urfave/cli/v3"
+	"github.com/urfave/cli/v2"
 
 	"github.com/erigontech/erigon/db/version"
 )
 
 // NewApp creates an app with sane defaults.
-func NewApp(desc string) *cli.Command {
-	app := &cli.Command{}
+func NewApp(desc string) *cli.App {
+	app := cli.NewApp()
 	app.Name = filepath.Base(os.Args[0])
 	app.Version = version.VersionWithCommit(version.GitCommit)
 	app.Usage = desc
-	app.EnableShellCompletion = true
+	app.EnableBashCompletion = true
 
 	app.Suggest = true
 
 	// Only show usage if explicitly requested via --help
-	app.OnUsageError = func(ctx context.Context, cmd *cli.Command, err error, isSubcommand bool) error {
+	app.OnUsageError = func(ctx *cli.Context, err error, isSubcommand bool) error {
 		// Print the error but not the usage
-		root := cmd.Root()
-		fmt.Fprintf(errWriter(root), "Error: %v\n", err)
-		fmt.Fprintf(errWriter(root), "Run '%s --help' for usage.\n", root.Name)
+		if ctx != nil && ctx.App != nil {
+			fmt.Fprintf(ctx.App.ErrWriter, "Error: %v\n", err)
+			fmt.Fprintf(ctx.App.ErrWriter, "Run '%s --help' for usage.\n", ctx.App.Name)
+		}
 		// Return cli.Exit to signal we've handled the error
 		return cli.Exit("", 1)
 	}
 
 	// Configure exit error handler to prevent additional output
-	app.ExitErrHandler = func(ctx context.Context, cmd *cli.Command, err error) {
+	app.ExitErrHandler = func(ctx *cli.Context, err error) {
 		if err == nil {
 			return
 		}
@@ -62,18 +61,11 @@ func NewApp(desc string) *cli.Command {
 		} else {
 			// For other errors, print them and exit
 			if err.Error() != "" {
-				fmt.Fprintf(errWriter(cmd.Root()), "Error: %v\n", err)
+				fmt.Fprintf(ctx.App.ErrWriter, "Error: %v\n", err)
 			}
 			cli.OsExiter(1)
 		}
 	}
 
 	return app
-}
-
-func errWriter(cmd *cli.Command) io.Writer {
-	if cmd.ErrWriter != nil {
-		return cmd.ErrWriter
-	}
-	return os.Stderr
 }

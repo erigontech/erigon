@@ -28,6 +28,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/erigontech/erigon/cmd/utils"
+	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/fromdb"
@@ -63,7 +64,7 @@ Examples:
 	Example: "go run ./cmd/integration state_stages --datadir=... --verbosity=3 --unwind=100 --unwind.every=100000 --block=2000000",
 	Run: func(cmd *cobra.Command, args []string) {
 		logger := debug.SetupCobra(cmd, "integration")
-		ctx := cmd.Context()
+		ctx, _ := common.RootContext()
 		cfg := &nodecfg.DefaultConfig
 		utils.SetNodeConfigCobra(cmd, cfg)
 		ethConfig := &ethconfig.Defaults
@@ -104,7 +105,7 @@ var loopExecCmd = &cobra.Command{
 	Use: "loop_exec",
 	Run: func(cmd *cobra.Command, args []string) {
 		logger := debug.SetupCobra(cmd, "integration")
-		ctx := cmd.Context()
+		ctx, _ := common.RootContext()
 		db, err := openDB(dbCfg(dbcfg.ChainDB, chaindata), true, chain, logger)
 		if err != nil {
 			logger.Error("Opening DB", "error", err)

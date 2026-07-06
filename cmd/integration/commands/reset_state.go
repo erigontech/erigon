@@ -26,6 +26,7 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/backup"
@@ -52,7 +53,7 @@ var cmdResetState = &cobra.Command{
 			logger.Error("Opening DB", "error", err)
 			return
 		}
-		ctx := cmd.Context()
+		ctx, _ := common.RootContext()
 		defer db.Close()
 
 		sn, borSn, _, _, _, _, err := allSnapshots(ctx, db, logger)
@@ -96,7 +97,7 @@ var cmdClearBadBlocks = &cobra.Command{
 	Short: "Clear table with bad block hashes to allow to process this blocks one more time",
 	RunE: func(cmd *cobra.Command, args []string) error {
 		logger := debug.SetupCobra(cmd, "integration")
-		ctx := cmd.Context()
+		ctx, _ := common.RootContext()
 		db, err := openDB(dbCfg(dbcfg.ChainDB, chaindata), true, chain, logger)
 		if err != nil {
 			logger.Error("Opening DB", "error", err)

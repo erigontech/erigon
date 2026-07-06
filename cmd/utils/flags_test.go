@@ -21,13 +21,12 @@
 package utils
 
 import (
-	"context"
 	"reflect"
 	"testing"
 
 	"github.com/spf13/cobra"
 	"github.com/stretchr/testify/require"
-	"github.com/urfave/cli/v3"
+	"github.com/urfave/cli/v2"
 
 	"github.com/erigontech/erigon/common/dbg"
 )
@@ -89,22 +88,6 @@ func TestCobraFlags_BoolDefaultsArePreserved(t *testing.T) {
 	require.False(t, gotFalse)
 }
 
-// A user-set --rpc.gascap must reach the config, not silently collapse to 0
-// (= infinite cap). rpc.gascap is registered as a UintFlag, so the accessor
-// behind RpcGasCap must be ctx.Uint; under urfave/cli v3 a mismatched read
-// yields 0.
-func TestRpcGasCap_UserValuePreserved(t *testing.T) {
-	// urfave/cli v3 flags carry parse state, so use a fresh copy per run.
-	gasCap := RpcGasCapFlag
-	app := &cli.Command{Flags: []cli.Flag{&gasCap}}
-	app.Action = func(_ context.Context, cmd *cli.Command) error {
-		require.True(t, cmd.IsSet(RpcGasCapFlag.Name))
-		require.Equal(t, uint64(30_000_000), RpcGasCap(cmd))
-		return nil
-	}
-	require.NoError(t, app.Run(context.Background(), []string{"erigon", "--rpc.gascap=30000000"}))
-}
-
 func TestResolveChainName(t *testing.T) {
 	tests := []struct {
 		name string
@@ -123,17 +106,13 @@ func TestResolveChainName(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			// urfave/cli v3 flags carry parse state (hasBeenSet), so use fresh
-			// instances per run instead of the shared package-global flags.
-			chainFlag := ChainFlag
-			networkIdFlag := NetworkIdFlag
-			app := &cli.Command{}
-			app.Flags = []cli.Flag{&chainFlag, &networkIdFlag}
-			app.Action = func(_ context.Context, ctx *cli.Command) error {
+			app := cli.NewApp()
+			app.Flags = []cli.Flag{&ChainFlag, &NetworkIdFlag}
+			app.Action = func(ctx *cli.Context) error {
 				require.Equal(t, tt.want, resolveChainName(ctx))
 				return nil
 			}
-			require.NoError(t, app.Run(context.Background(), append([]string{"test"}, tt.args...)))
+			require.NoError(t, app.Run(append([]string{"test"}, tt.args...)))
 		})
 	}
 }
@@ -160,7 +139,7 @@ func TestExecPerfFlags_OverrideDbg(t *testing.T) {
 		dbg.SetNoBackgroundMaintenance(origNoBackgroundMaintenance)
 	})
 
-	apply := func(_ context.Context, ctx *cli.Command) error {
+	apply := func(ctx *cli.Context) error {
 		if ctx.IsSet(ExecBatchedIOFlag.Name) {
 			v := ctx.Bool(ExecBatchedIOFlag.Name)
 			dbg.SetReadAhead(v)
@@ -188,17 +167,13 @@ func TestExecPerfFlags_OverrideDbg(t *testing.T) {
 	}
 
 	run := func(args ...string) {
-		// Fresh flag instances per run (v3 flags carry parse state across Run calls).
-		batchedIO, stateCache, workers := ExecBatchedIOFlag, ExecStateCacheFlag, ExecWorkersFlag
-		serial, noMerge, noPrune := ExecSerialFlag, ExecNoMergeFlag, ExecNoPruneFlag
-		noBgMaint := ExecNoBackgroundMaintenanceFlag
-		app := &cli.Command{}
+		app := cli.NewApp()
 		app.Flags = []cli.Flag{
-			&batchedIO, &stateCache, &workers,
-			&serial, &noMerge, &noPrune, &noBgMaint,
+			&ExecBatchedIOFlag, &ExecStateCacheFlag, &ExecWorkersFlag,
+			&ExecSerialFlag, &ExecNoMergeFlag, &ExecNoPruneFlag, &ExecNoBackgroundMaintenanceFlag,
 		}
 		app.Action = apply
-		require.NoError(t, app.Run(context.Background(), append([]string{"test"}, args...)))
+		require.NoError(t, app.Run(append([]string{"test"}, args...)))
 	}
 
 	t.Run("no flags set leaves dbg untouched", func(t *testing.T) {
@@ -285,14 +260,13 @@ func TestExecPerfFlags_OverrideDbg(t *testing.T) {
 func TestCommitmentPlainValuesFromCtx(t *testing.T) {
 	parse := func(args ...string) *bool {
 		var got *bool
-		app := &cli.Command{
-			Flags: []cli.Flag{&CommitmentPlainValuesFlag},
-			Action: func(ctx context.Context, cmd *cli.Command) error {
-				got = CommitmentPlainValuesFromCtx(cmd)
-				return nil
-			},
+		app := cli.NewApp()
+		app.Flags = []cli.Flag{&CommitmentPlainValuesFlag}
+		app.Action = func(ctx *cli.Context) error {
+			got = CommitmentPlainValuesFromCtx(ctx)
+			return nil
 		}
-		require.NoError(t, app.Run(context.Background(), append([]string{"test"}, args...)))
+		require.NoError(t, app.Run(append([]string{"test"}, args...)))
 		return got
 	}
 

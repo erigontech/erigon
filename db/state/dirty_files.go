@@ -17,7 +17,6 @@
 package state
 
 import (
-	"context"
 	"errors"
 	"fmt"
 	"os"
@@ -373,16 +372,10 @@ func retire(dirtyFiles *DirtyFiles, outs []*FilesItem, filenameBase string, reas
 	}
 }
 
-func (d *Domain) openDirtyFiles(ctx context.Context, dirEntries []string) (err error) {
+func (d *Domain) openDirtyFiles(dirEntries []string) (err error) {
 	var invalidFileItems []*FilesItem
 	iter := d.dirtyFiles.Iter()
 	for ok := iter.First(); ok; ok = iter.Next() {
-		select {
-		case <-ctx.Done():
-			iter.Release()
-			return ctx.Err()
-		default:
-		}
 		item := iter.Item()
 		fromStep, toStep := item.StepRange(d.stepSize)
 		if item.decompressor == nil {
@@ -473,16 +466,10 @@ func (d *Domain) openDirtyFiles(ctx context.Context, dirEntries []string) (err e
 	return nil
 }
 
-func (h *History) openDirtyFiles(ctx context.Context, dataEntries, accessorEntries []string) error {
+func (h *History) openDirtyFiles(dataEntries, accessorEntries []string) error {
 	var invalidFileItems []*FilesItem
 	iter := h.dirtyFiles.Iter()
 	for ok := iter.First(); ok; ok = iter.Next() {
-		select {
-		case <-ctx.Done():
-			iter.Release()
-			return ctx.Err()
-		default:
-		}
 		item := iter.Item()
 		fromStep, toStep := item.StepRange(h.stepSize)
 		if item.decompressor == nil {
@@ -552,16 +539,10 @@ func (h *History) openDirtyFiles(ctx context.Context, dataEntries, accessorEntri
 	return nil
 }
 
-func (ii *InvertedIndex) openDirtyFiles(ctx context.Context, dataEntries, accessorEntries []string) error {
+func (ii *InvertedIndex) openDirtyFiles(dataEntries, accessorEntries []string) error {
 	var invalidFileItems []*FilesItem
 	iter := ii.dirtyFiles.Iter()
 	for ok := iter.First(); ok; ok = iter.Next() {
-		select {
-		case <-ctx.Done():
-			iter.Release()
-			return ctx.Err()
-		default:
-		}
 		item := iter.Item()
 		fromStep, toStep := item.StepRange(ii.stepSize)
 		if item.decompressor == nil {

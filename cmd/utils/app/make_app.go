@@ -22,7 +22,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/urfave/cli/v3"
+	"github.com/urfave/cli/v2"
 
 	enode "github.com/erigontech/erigon/cmd/erigon/node"
 	"github.com/erigontech/erigon/cmd/utils"
@@ -37,48 +37,49 @@ import (
 	shuttercmd "github.com/erigontech/erigon/txnprovider/shutter/cmd"
 )
 
-// MakeApp creates a cli application (based on `github.com/urfave/cli` package).
+// MakeApp creates a cli application (based on `github.com/urlfave/cli` package).
 // The application exits when `action` returns.
 // Parameters:
-// * action: the main function for the application. receives `*cli.Command` with parsed command-line flags.
+// * action: the main function for the application. receives `*cli.Context` with parsed command-line flags.
 // * cliFlags: the list of flags `cli.Flag` that the app should set and parse. By default, use `DefaultFlags()`. If you want to specify your own flag, use `append(DefaultFlags(), myFlag)` for this parameter.
-func MakeApp(name string, action cli.ActionFunc, cliFlags []cli.Flag) *cli.Command {
+func MakeApp(name string, action cli.ActionFunc, cliFlags []cli.Flag) *cli.App {
 	app := cli2.NewApp("erigon")
 	app.Name = name
 	app.UsageText = app.Name + ` [command] [flags]`
-	app.Action = func(ctx context.Context, cmd *cli.Command) error {
+	app.Action = func(context *cli.Context) error {
 		// handle case: unknown sub-command
-		if cmd.Args().Present() {
+		if context.Args().Present() {
 			goodNames := make([]string, 0, len(app.VisibleCommands()))
 			for _, c := range app.VisibleCommands() {
 				goodNames = append(goodNames, c.Name)
 			}
-			log.Error(fmt.Sprintf("Command '%s' not found. Available commands: %s", cmd.Args().First(), goodNames))
+			log.Error(fmt.Sprintf("Command '%s' not found. Available commands: %s", context.Args().First(), goodNames))
 			return cli.Exit("", 1) // Exit with error code but no additional output
 		}
 
 		// handle case: config flag
-		configFilePath := cmd.String(utils.ConfigFlag.Name)
+		configFilePath := context.String(utils.ConfigFlag.Name)
 		if configFilePath != "" {
-			if err := cli2.SetFlagsFromConfigFile(cmd, configFilePath); err != nil {
+			if err := cli2.SetFlagsFromConfigFile(context, configFilePath); err != nil {
 				log.Error("failed setting config flags from yaml/toml file", "err", err)
 				return err
 			}
 		}
 
 		// run default action
-		return action(ctx, cmd)
+		return action(context)
 	}
 
-	app.Before = func(ctx context.Context, cmd *cli.Command) (context.Context, error) {
-		ctx, cancel := context.WithCancel(ctx)
+	app.Before = func(c *cli.Context) error {
+		var cancel context.CancelFunc
+		c.Context, cancel = context.WithCancel(c.Context)
 		go debug.ListenSignals(cancel, log.Root())
-		return ctx, nil
+		return nil
 	}
 
 	app.Flags = appFlags(cliFlags)
 
-	app.After = func(ctx context.Context, cmd *cli.Command) error {
+	app.After = func(ctx *cli.Context) error {
 		debug.Exit()
 		return nil
 	}
@@ -132,23 +133,23 @@ func appFlags(cliFlags []cli.Flag) []cli.Flag {
 //
 // This function may become unnecessary when https://github.com/urfave/cli/pull/1245 is merged.
 func MigrateFlags(action cli.ActionFunc) cli.ActionFunc {
-	return func(ctx context.Context, cmd *cli.Command) error {
-		doMigrateFlags(cmd)
-		return action(ctx, cmd)
+	return func(ctx *cli.Context) error {
+		doMigrateFlags(ctx)
+		return action(ctx)
 	}
 }
 
-func doMigrateFlags(cmd *cli.Command) {
+func doMigrateFlags(ctx *cli.Context) {
 	// Figure out if there are any aliases of commands. If there are, we want
 	// to ignore them when iterating over the flags.
 	var aliases = make(map[string]bool)
-	for _, fl := range cmd.Flags {
+	for _, fl := range ctx.Command.Flags {
 		for _, alias := range fl.Names()[1:] {
 			aliases[alias] = true
 		}
 	}
-	for _, name := range cmd.FlagNames() {
-		for _, parent := range cmd.Lineage()[1:] {
+	for _, name := range ctx.FlagNames() {
+		for _, parent := range ctx.Lineage()[1:] {
 			if parent.IsSet(name) {
 				// When iterating across the lineage, we will be served both
 				// the 'canon' and alias formats of all commands. In most cases,
@@ -163,9 +164,9 @@ func doMigrateFlags(cmd *cli.Command) {
 				// "alfa, beta, gamma" instead of "[alfa beta gamma]", in order
 				// for the backing StringSlice to parse it properly.
 				if result := parent.StringSlice(name); len(result) > 0 {
-					_ = cmd.Set(name, strings.Join(result, ","))
+					ctx.Set(name, strings.Join(result, ","))
 				} else {
-					_ = cmd.Set(name, parent.String(name))
+					ctx.Set(name, parent.String(name))
 				}
 				break
 			}
@@ -173,7 +174,7 @@ func doMigrateFlags(cmd *cli.Command) {
 	}
 }
 
-func NewNodeConfig(ctx *cli.Command, logger log.Logger) (*nodecfg.Config, error) {
+func NewNodeConfig(ctx *cli.Context, logger log.Logger) (*nodecfg.Config, error) {
 	nodeConfig, err := enode.NewNodConfigUrfave(ctx, nil, logger)
 	if err != nil {
 		return nil, err
@@ -196,12 +197,12 @@ func NewNodeConfig(ctx *cli.Command, logger log.Logger) (*nodecfg.Config, error)
 	return nodeConfig, nil
 }
 
-func MakeNodeWithDefaultConfig(ctx context.Context, cliCtx *cli.Command, logger log.Logger) (*node.Node, error) {
+func MakeNodeWithDefaultConfig(cliCtx *cli.Context, logger log.Logger) (*node.Node, error) {
 	conf, err := NewNodeConfig(cliCtx, logger)
 	if err != nil {
 		return nil, err
 	}
-	return makeConfigNode(ctx, conf, logger), nil
+	return makeConfigNode(cliCtx.Context, conf, logger), nil
 }
 
 func makeConfigNode(ctx context.Context, config *nodecfg.Config, logger log.Logger) *node.Node {

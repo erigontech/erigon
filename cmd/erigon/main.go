@@ -18,11 +18,10 @@ package main
 
 import (
 	"cmp"
-	"context"
 	"fmt"
 	"os"
 
-	"github.com/urfave/cli/v3"
+	"github.com/urfave/cli/v2"
 
 	"github.com/erigontech/erigon/common"
 
@@ -41,7 +40,7 @@ func main() {
 	var err error
 	common.WithProfilersMain(func() {
 		app := erigonapp.MakeApp("erigon", runErigon, erigoncli.DefaultFlags)
-		err = app.Run(context.Background(), os.Args)
+		err = app.Run(os.Args)
 		if err != nil {
 			_, printErr := fmt.Fprintln(os.Stderr, err)
 			if printErr != nil {
@@ -54,13 +53,13 @@ func main() {
 	}
 }
 
-func runErigon(ctx context.Context, cliCtx *cli.Command) (err error) {
-	logger, tracer, metricsMux, pprofMux, err := debug.Setup(ctx, cliCtx, true /* rootLogger */)
+func runErigon(cliCtx *cli.Context) (err error) {
+	logger, tracer, metricsMux, pprofMux, err := debug.Setup(cliCtx, true /* rootLogger */)
 	if err != nil {
 		return
 	}
 
-	syscheck.CheckKernelAllocationHints(ctx, logger)
+	syscheck.CheckKernelAllocationHints(cliCtx.Context, logger)
 
 	debugMux := cmp.Or(metricsMux, pprofMux)
 
@@ -81,9 +80,9 @@ func runErigon(ctx context.Context, cliCtx *cli.Command) (err error) {
 		return err
 	}
 
-	ethCfg := node.NewEthConfigUrfave(ctx, cliCtx, nodeCfg, logger)
+	ethCfg := node.NewEthConfigUrfave(cliCtx, nodeCfg, logger)
 
-	ethNode, err := node.New(ctx, nodeCfg, ethCfg, logger, tracer)
+	ethNode, err := node.New(cliCtx.Context, nodeCfg, ethCfg, logger, tracer)
 	if err != nil {
 		log.Error("Erigon startup", "err", err)
 		return err

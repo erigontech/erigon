@@ -18,6 +18,7 @@ package commitment
 
 import (
 	"bytes"
+	"context"
 	"fmt"
 	"testing"
 
@@ -380,6 +381,7 @@ func TestTrieReader_EmptyKey(t *testing.T) {
 func TestTrieReader_RoundTripWithHPH(t *testing.T) {
 	t.Parallel()
 
+	ctx := context.Background()
 	ms := NewMockState(t)
 
 	// Use real 20-byte account addresses (accountKeyLen = length.Addr).
@@ -404,7 +406,14 @@ func TestTrieReader_RoundTripWithHPH(t *testing.T) {
 			"0000000000000000000000000000000000000000000000000000000000000003", "ff").
 		Build()
 
-	rootHash := processBatch(t, ms, hph, plainKeys, updates)
+	upds := WrapKeyUpdates(t, ModeDirect, KeyToHexNibbleHash, plainKeys, updates)
+	defer upds.Close()
+
+	err := ms.applyPlainUpdates(plainKeys, updates)
+	require.NoError(t, err)
+
+	rootHash, err := hph.Process(ctx, upds, "", nil, WarmupConfig{})
+	require.NoError(t, err)
 	require.NotEmpty(t, rootHash)
 
 	t.Logf("rootHash: %x, branches stored: %d", rootHash, len(ms.cm))
@@ -454,6 +463,7 @@ func TestTrieReader_RoundTripWithHPH(t *testing.T) {
 func TestTrieReader_RoundTripWithHPH_ManyAccounts(t *testing.T) {
 	t.Parallel()
 
+	ctx := context.Background()
 	ms := NewMockState(t)
 
 	hph := NewHexPatriciaHashed(int16(length.Addr), ms, DefaultTrieConfig())
@@ -468,7 +478,14 @@ func TestTrieReader_RoundTripWithHPH_ManyAccounts(t *testing.T) {
 	}
 
 	plainKeys, updates := ub.Build()
-	rootHash := processBatch(t, ms, hph, plainKeys, updates)
+	upds := WrapKeyUpdates(t, ModeDirect, KeyToHexNibbleHash, plainKeys, updates)
+	defer upds.Close()
+
+	err := ms.applyPlainUpdates(plainKeys, updates)
+	require.NoError(t, err)
+
+	rootHash, err := hph.Process(ctx, upds, "", nil, WarmupConfig{})
+	require.NoError(t, err)
 	require.NotEmpty(t, rootHash)
 
 	t.Logf("rootHash: %x, branches: %d, accounts: %d", rootHash, len(ms.cm), len(plainKeys))

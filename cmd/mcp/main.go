@@ -180,7 +180,7 @@ func serve(ctx context.Context, srv mcpserver.MCPTransport, transport, sseAddr s
 		return srv.ServeContext(ctx)
 	case "sse":
 		logger.Info("[MCP] Starting SSE transport", "addr", sseAddr)
-		return srv.ServeSSE(ctx, sseAddr)
+		return srv.ServeSSE(sseAddr)
 	default:
 		return fmt.Errorf("unknown transport: %s (use 'stdio' or 'sse')", transport)
 	}

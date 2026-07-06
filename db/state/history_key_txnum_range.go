@@ -105,10 +105,13 @@ type HistoryKeyTxNumIterFiles struct {
 	startTxNum uint64
 	endTxNum   int
 
-	err   error
-	limit int
+	k, kBackup []byte
+	txNum      uint64
+	err        error
+	limit      int
 
 	curKey    []byte
+	curIdxVal []byte
 	curSeq    multiencseq.SequenceReader
 	curTxIter multiencseq.SequenceIterator
 	hasIter   bool
@@ -140,8 +143,7 @@ func (hi *HistoryKeyTxNumIterFiles) advance() error {
 		}
 
 		top := hi.h[0]
-		hi.curKey = top.key
-		idxVal := top.val
+		key, idxVal := top.key, top.val
 
 		if top.g.HasNext() {
 			top.key, _ = top.g.Next(nil)
@@ -155,7 +157,11 @@ func (hi *HistoryKeyTxNumIterFiles) advance() error {
 			heap.Pop(&hi.h)
 		}
 
-		hi.curSeq.Reset(top.startTxNum, idxVal)
+		// Clone: segment reader reuses buffers
+		hi.curKey = append(hi.curKey[:0], key...)
+		hi.curIdxVal = append(hi.curIdxVal[:0], idxVal...)
+
+		hi.curSeq.Reset(top.startTxNum, hi.curIdxVal)
 		hi.curTxIter.Reset(&hi.curSeq, int(hi.startTxNum))
 		hi.hasIter = true
 	}
@@ -170,11 +176,15 @@ func (hi *HistoryKeyTxNumIterFiles) Next() ([]byte, uint64, error) {
 		return nil, 0, hi.err
 	}
 	hi.limit--
-	k, txNum := hi.nextKey, hi.nextTxNum
+	hi.k = append(hi.k[:0], hi.nextKey...)
+	hi.txNum = hi.nextTxNum
+
+	// Satisfy iter.Duo Invariant 2 for key buffer
+	hi.k, hi.kBackup = hi.kBackup, hi.k
 	if err := hi.advance(); err != nil {
 		return nil, 0, err
 	}
-	return k, txNum, nil
+	return hi.kBackup, hi.txNum, nil
 }
 
 // HistoryKeyTxNumIterDB emits (key, txNum) for every txNum at which a key changed in the DB.
@@ -191,6 +201,8 @@ type HistoryKeyTxNumIterDB struct {
 
 	nextKey   []byte
 	nextTxNum uint64
+	k         []byte
+	txNum     uint64
 	err       error
 }
 
@@ -357,9 +369,9 @@ func (hi *HistoryKeyTxNumIterDB) Next() ([]byte, uint64, error) {
 		return nil, 0, hi.err
 	}
 	hi.limit--
-	k, txNum := hi.nextKey, hi.nextTxNum
+	hi.k, hi.txNum = hi.nextKey, hi.nextTxNum
 	if err := hi.advance(); err != nil {
 		return nil, 0, err
 	}
-	return k, txNum, nil
+	return hi.k, hi.txNum, nil
 }

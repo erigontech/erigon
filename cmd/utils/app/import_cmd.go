@@ -29,7 +29,7 @@ import (
 	"time"
 
 	"github.com/holiman/uint256"
-	"github.com/urfave/cli/v3"
+	"github.com/urfave/cli/v2"
 	"google.golang.org/grpc"
 
 	"github.com/erigontech/erigon/cmd/erigon/node"
@@ -76,7 +76,7 @@ If only one file is used, import error will result in failure. If several files 
 processing will proceed even if an individual RLP-file import failure occurs.`,
 }
 
-func importChain(ctx context.Context, cliCtx *cli.Command) error {
+func importChain(cliCtx *cli.Context) error {
 	if cliCtx.NArg() < 1 {
 		utils.Fatalf("This command requires an argument.")
 	}
@@ -101,7 +101,7 @@ func importChain(ctx context.Context, cliCtx *cli.Command) error {
 		}
 	}
 
-	logger, tracer, _, _, err := debug.Setup(ctx, cliCtx, true /* rootLogger */)
+	logger, tracer, _, _, err := debug.Setup(cliCtx, true /* rootLogger */)
 	if err != nil {
 		return err
 	}
@@ -113,14 +113,14 @@ func importChain(ctx context.Context, cliCtx *cli.Command) error {
 	// p2p has no disable flag; a one-shot import needs no peers.
 	nodeCfg.DisableSentry = true
 
-	ethCfg := node.NewEthConfigUrfave(ctx, cliCtx, nodeCfg, logger)
+	ethCfg := node.NewEthConfigUrfave(cliCtx, nodeCfg, logger)
 	// Skip the ~2s KZG warmup: Stop waits it out on exit, and kzg.Ctx()
 	// lazy-inits if a block actually needs the trusted setup.
 	ethCfg.WarmupKzgCtxOnInit = false
-	stack := makeConfigNode(ctx, nodeCfg, logger)
+	stack := makeConfigNode(cliCtx.Context, nodeCfg, logger)
 	defer stack.Close()
 
-	ethereum, err := eth.New(ctx, stack, ethCfg, logger, tracer)
+	ethereum, err := eth.New(cliCtx.Context, stack, ethCfg, logger, tracer)
 	if err != nil {
 		return err
 	}

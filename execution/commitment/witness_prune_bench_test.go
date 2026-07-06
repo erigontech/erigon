@@ -18,10 +18,12 @@ package commitment
 
 import (
 	"context"
+	"fmt"
 	"testing"
 
 	"github.com/stretchr/testify/require"
 
+	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/length"
 	"github.com/erigontech/erigon/execution/commitment/trie"
 )
@@ -35,12 +37,33 @@ func benchCapturedSuperset(b *testing.B, accts, slots, touch int) (full, provedK
 	ms := NewMockState(b)
 	hph := NewHexPatriciaHashed(length.Addr, ms, DefaultTrieConfig())
 	hph.SetTraceWriter(nil)
-	addrs := buildWitnessCorpus(b, ms, hph, accts, slots)
+	builder := NewUpdateBuilder()
+	addrs := make([][]byte, 0, accts)
+	for i := 0; i < accts; i++ {
+		a, _ := generateKeyWithHashedPrefix(nil, length.Addr)
+		addrs = append(addrs, a)
+		builder.Balance(common.Bytes2Hex(a), uint64(i+1))
+		for j := 0; j < slots; j++ {
+			slot := common.FromHex(fmt.Sprintf("%064x", j+1))
+			builder.Storage(common.Bytes2Hex(a), common.Bytes2Hex(slot), common.Bytes2Hex(slot))
+		}
+	}
+	plainKeys, updates := builder.Build()
+	require.NoError(b, ms.applyPlainUpdates(plainKeys, updates))
+	toProcess := WrapKeyUpdates(b, ModeDirect, KeyToHexNibbleHash, plainKeys, updates)
+	defer toProcess.Close()
+	_, err := hph.Process(ctx, toProcess, "", nil, WarmupConfig{})
+	require.NoError(b, err)
 
 	toWitness := NewUpdates(ModeDirect, "", KeyToHexNibbleHash)
 	defer toWitness.Close()
-	touchAccountsSlots(toWitness, addrs[:touch], slots)
-	var err error
+	for _, a := range addrs[:touch] {
+		toWitness.TouchPlainKey(string(a), nil, toWitness.TouchAccount)
+		for j := 0; j < slots; j++ {
+			slot := common.FromHex(fmt.Sprintf("%064x", j+1))
+			toWitness.TouchPlainKey(string(storageKey(a, slot)), nil, toWitness.TouchStorage)
+		}
+	}
 	full, provedKeys, root, err = hph.Witnesses(ctx, toWitness, true, "")
 	require.NoError(b, err)
 	return full, provedKeys, root
@@ -76,13 +99,35 @@ func BenchmarkBranchWitnessTotal(b *testing.B) {
 	ms := NewMockState(b)
 	hph := NewHexPatriciaHashed(length.Addr, ms, DefaultTrieConfig())
 	hph.SetTraceWriter(nil)
-	addrs := buildWitnessCorpus(b, ms, hph, 512, 8)
+	builder := NewUpdateBuilder()
+	addrs := make([][]byte, 0, 512)
+	for i := 0; i < 512; i++ {
+		a, _ := generateKeyWithHashedPrefix(nil, length.Addr)
+		addrs = append(addrs, a)
+		builder.Balance(common.Bytes2Hex(a), uint64(i+1))
+		for j := 0; j < 8; j++ {
+			slot := common.FromHex(fmt.Sprintf("%064x", j+1))
+			builder.Storage(common.Bytes2Hex(a), common.Bytes2Hex(slot), common.Bytes2Hex(slot))
+		}
+	}
+	plainKeys, updates := builder.Build()
+	require.NoError(b, ms.applyPlainUpdates(plainKeys, updates))
+	toProcess := WrapKeyUpdates(b, ModeDirect, KeyToHexNibbleHash, plainKeys, updates)
+	defer toProcess.Close()
+	_, err := hph.Process(ctx, toProcess, "", nil, WarmupConfig{})
+	require.NoError(b, err)
 
 	b.ReportAllocs()
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		toWitness := NewUpdates(ModeDirect, "", KeyToHexNibbleHash)
-		touchAccountsSlots(toWitness, addrs[:32], 8)
+		for _, a := range addrs[:32] {
+			toWitness.TouchPlainKey(string(a), nil, toWitness.TouchAccount)
+			for j := 0; j < 8; j++ {
+				slot := common.FromHex(fmt.Sprintf("%064x", j+1))
+				toWitness.TouchPlainKey(string(storageKey(a, slot)), nil, toWitness.TouchStorage)
+			}
+		}
 		full, provedKeys, _, err := hph.Witnesses(ctx, toWitness, true, "")
 		toWitness.Close()
 		require.NoError(b, err)
@@ -116,12 +161,30 @@ func BenchmarkWitnessCapture(b *testing.B) {
 	ms := NewMockState(b)
 	hph := NewHexPatriciaHashed(length.Addr, ms, DefaultTrieConfig())
 	hph.SetTraceWriter(nil)
-	addrs := buildWitnessCorpus(b, ms, hph, 512, 8)
+	builder := NewUpdateBuilder()
+	addrs := make([][]byte, 0, 512)
+	for i := 0; i < 512; i++ {
+		a, _ := generateKeyWithHashedPrefix(nil, length.Addr)
+		addrs = append(addrs, a)
+		builder.Balance(common.Bytes2Hex(a), uint64(i+1))
+		for j := 0; j < 8; j++ {
+			slot := common.FromHex(fmt.Sprintf("%064x", j+1))
+			builder.Storage(common.Bytes2Hex(a), common.Bytes2Hex(slot), common.Bytes2Hex(slot))
+		}
+	}
+	plainKeys, updates := builder.Build()
+	require.NoError(b, ms.applyPlainUpdates(plainKeys, updates))
+	toProcess := WrapKeyUpdates(b, ModeDirect, KeyToHexNibbleHash, plainKeys, updates)
+	defer toProcess.Close()
+	_, err := hph.Process(ctx, toProcess, "", nil, WarmupConfig{})
+	require.NoError(b, err)
 	b.ReportAllocs()
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		toWitness := NewUpdates(ModeDirect, "", KeyToHexNibbleHash)
-		touchAccountsSlots(toWitness, addrs[:32], 0)
+		for _, a := range addrs[:32] {
+			toWitness.TouchPlainKey(string(a), nil, toWitness.TouchAccount)
+		}
 		_, _, _, err := hph.Witnesses(ctx, toWitness, true, "")
 		toWitness.Close()
 		require.NoError(b, err)

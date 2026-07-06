@@ -17,12 +17,11 @@
 package node
 
 import (
-	"context"
 	"encoding/json"
 	"testing"
 
 	"github.com/stretchr/testify/require"
-	"github.com/urfave/cli/v3"
+	"github.com/urfave/cli/v2"
 
 	erigoncli "github.com/erigontech/erigon/node/cli"
 	"github.com/erigontech/erigon/node/ethconfig"
@@ -37,18 +36,18 @@ func buildEthConfig(t *testing.T, args []string) *ethconfig.Config {
 	t.Helper()
 
 	var result *ethconfig.Config
-	app := &cli.Command{}
+	app := cli.NewApp()
 	app.Flags = erigoncli.DefaultFlags
-	app.Action = func(nodeCtx context.Context, ctx *cli.Command) error {
+	app.Action = func(ctx *cli.Context) error {
 		logger := log.Root()
 		nodeCfg := &nodecfg.Config{}
 		nodeCfg.Dirs.DataDir = t.TempDir()
 		ethCfg := ethconfig.Defaults
-		erigoncli.BuildEthConfig(nodeCtx, ctx, nodeCfg, &ethCfg, logger)
+		erigoncli.BuildEthConfig(ctx, nodeCfg, &ethCfg, logger)
 		result = &ethCfg
 		return nil
 	}
-	require.NoError(t, app.Run(context.Background(), append([]string{"erigon"}, args...)))
+	require.NoError(t, app.Run(append([]string{"erigon"}, args...)))
 	require.NotNil(t, result)
 	return result
 }

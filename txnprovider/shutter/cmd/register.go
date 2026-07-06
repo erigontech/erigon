@@ -17,9 +17,9 @@
 package cmd
 
 import (
-	"github.com/urfave/cli/v3"
+	"github.com/urfave/cli/v2"
 )
 
-func RegisterCmds(app *cli.Command) {
+func RegisterCmds(app *cli.App) {
 	registerValidatorRegCheckCmd(app)
 }
