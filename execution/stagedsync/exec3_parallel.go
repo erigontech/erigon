@@ -18,6 +18,7 @@ import (
 	"golang.org/x/sync/errgroup"
 
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/consensuschain"
@@ -3451,15 +3452,18 @@ func normalizeWriteSet(writes state.VersionedWrites, vm *state.VersionMap, txInd
 		}
 	}
 
-	// CodePath must travel with CodeHashPath: the case above and the fill loop
-	// recover an account's codeHash but not its code, so a validated writeset
-	// lacking a fresh CodePath (e.g. a re-executing 7702 tx whose SetCode
-	// short-circuited) would persist a codeHash with no code. Recover the code
-	// (versionMap, else stateReader post-state) and re-emit CodePath, bounded to
-	// 7702 designators so unchanged contract code isn't re-emitted. Forward-only:
-	// it can't repair codeHash-no-code already collated into snapshots.
-	codeInOutput := make(map[accounts.Address]bool)
-	codeHashInOutput := make(map[accounts.Address]accounts.CodeHash)
+	// CodePath must travel with CodeHashPath; gated on raw-writeset
+	// CodePath/CodeHashPath presence to skip the fill-missing-loop case where
+	// the code is already in CodeDomain.
+	codeAddrInRaw := make(map[accounts.Address]bool, len(writes))
+	for _, w := range writes {
+		switch w.Path {
+		case state.CodePath, state.CodeHashPath:
+			codeAddrInRaw[w.Address] = true
+		}
+	}
+	codeInOutput := make(map[accounts.Address]bool, len(filtered))
+	codeHashInOutput := make(map[accounts.Address]accounts.CodeHash, len(filtered))
 	for _, w := range filtered {
 		switch w.Path {
 		case state.CodePath:
@@ -3470,40 +3474,9 @@ func normalizeWriteSet(writes state.VersionedWrites, vm *state.VersionMap, txInd
 			}
 		}
 	}
-	for addr, h := range codeHashInOutput {
-		if h.IsEmpty() || codeInOutput[addr] || sdSet[addr] {
-			continue
-		}
-		// Recover the code whose hash this tx emitted. Prefer the versionMap
-		// (this batch's writes); on the SetCode short-circuit path — a
-		// re-executing 7702 delegation whose code equals the already-committed
-		// designator, so the validated incarnation writes no CodePath and the
-		// prior incarnation's versionMap entry was invalidated on re-exec — the
-		// versionMap holds nothing for this tx, so fall back to the post-state
-		// via stateReader.
-		var code []byte
-		if rr := vm.Read(addr, state.CodePath, accounts.NilKey, txIndex+1); rr.Status() == state.MVReadResultDone {
-			if c, ok := rr.Value().([]byte); ok {
-				code = c
-			}
-		}
-		if len(code) == 0 && stateReader != nil {
-			if c, err := stateReader.ReadAccountCode(addr); err == nil {
-				code = c
-			}
-		}
-		// The codeHash-without-code asymmetry only arises from the SetCode
-		// short-circuit (new code == existing → no CodePath written), since a
-		// regular deploy writes CodePath and CodeHashPath together at the same
-		// incarnation. When the short-circuit fires the emitted codeHash is backed
-		// by either (a) the EIP-7702 designator this re-exec must re-emit, or
-		// (b) already-committed identical bytes (CREATE2 redeploy / unchanged
-		// contract) whose code is already in CodeDomain — benign, re-emitting it
-		// would be an elided DomainPut per modified contract. So recovery is gated
-		// to 7702 designators: that's the only case that leaves uncommitted code
-		// without its CodePath. (Gating also never misattributes a callee's code.)
-		if _, ok := types.ParseDelegation(code); !ok {
-			continue
+	emit := func(addr accounts.Address, code []byte, want accounts.CodeHash) bool {
+		if crypto.Keccak256Hash(code) != want.Value() {
+			return false
 		}
 		filtered = append(filtered, &state.VersionedWrite{
 			Address: addr,
@@ -3511,6 +3484,26 @@ func normalizeWriteSet(writes state.VersionedWrites, vm *state.VersionMap, txInd
 			Val:     code,
 			Version: state.Version{TxIndex: txIndex, Incarnation: incarnation},
 		})
+		log.Debug("[codepath-recovery] re-emitted dropped CodePath",
+			"addr", addr.Value(), "txIndex", txIndex, "incarnation", incarnation)
+		return true
+	}
+	for addr, h := range codeHashInOutput {
+		if h.IsEmpty() || codeInOutput[addr] || sdSet[addr] || !codeAddrInRaw[addr] {
+			continue
+		}
+		if rr := vm.Read(addr, state.CodePath, accounts.NilKey, txIndex+1); rr.Status() == state.MVReadResultDone {
+			if c, ok := rr.Value().([]byte); ok && len(c) > 0 && emit(addr, c, h) {
+				continue
+			}
+		}
+		if stateReader != nil {
+			if c, err := stateReader.ReadAccountCode(addr); err == nil {
+				if _, ok := types.ParseDelegation(c); ok {
+					emit(addr, c, h)
+				}
+			}
+		}
 	}
 
 	// EIP-161 empty account removal: if an account has Balance=0, Nonce=0,
