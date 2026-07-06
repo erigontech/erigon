@@ -186,6 +186,62 @@ func TestStateRoundTrip_DeleteCollapseToSingleNibble(t *testing.T) {
 	requireRestartParity(t, []engineBatch{{k1, u1}, {k2, u2}, {k3, u3}}, kc, uc)
 }
 
+// A sole account is a LEAF at the root — no hash, no extension, only the plain key. Its
+// navigation path must be re-derived on restore, or the wall probe sees an unfoldable
+// root and the next block's insert under a different first nibble overwrites the leaf.
+func TestStateRoundTrip_LeafRootNewNibbleInsert(t *testing.T) {
+	t.Parallel()
+	a := addrHex(findAddressForNibble(3, 4242))
+	b := addrHex(findAddressForNibble(7, 777))
+	loc := hex.EncodeToString(slotHashBytes(9))
+
+	ub1 := NewUpdateBuilder().Balance(a, 100)
+	ub1.Storage(a, loc, "abcd")
+	k1, u1 := ub1.Build()
+	k2, u2 := NewUpdateBuilder().Balance(b, 200).Build()
+
+	ubc := NewUpdateBuilder().Balance(a, 100).Balance(b, 200)
+	ubc.Storage(a, loc, "abcd")
+	kc, uc := ubc.Build()
+
+	requireRestartParity(t, []engineBatch{{k1, u1}, {k2, u2}}, kc, uc)
+}
+
+// A state blob written before propagate folds marked the root present carries
+// rootPresent=false for a non-empty root; restoring it must repair the flag instead of
+// letting the next unfold treat the carried subtree as deleted.
+func TestSetState_RepairsLegacyRootPresent(t *testing.T) {
+	t.Parallel()
+	k1, u1, k2, u2, kc, uc := singleNibbleCorpus()
+	oracle, _ := engineRoot(t, modeSeq, 0, kc, uc)
+
+	ms := NewMockState(t)
+	tr := NewHexPatriciaHashed(length.Addr, ms, DefaultTrieConfig())
+	require.NoError(t, ms.applyPlainUpdates(k1, u1))
+	ut1 := WrapKeyUpdates(t, ModeDirect, KeyToHexNibbleHash, k1, u1)
+	processRoot(t, tr, ut1)
+	ut1.Close()
+	blob, err := tr.EncodeCurrentState(nil)
+	require.NoError(t, err)
+	tr.Release()
+
+	var s state
+	require.NoError(t, s.Decode(blob))
+	s.RootTouched = true
+	s.RootPresent = false
+	legacy, err := s.Encode(nil)
+	require.NoError(t, err)
+
+	tr2 := NewHexPatriciaHashed(length.Addr, ms, DefaultTrieConfig())
+	defer tr2.Release()
+	require.NoError(t, tr2.SetState(legacy))
+	require.NoError(t, ms.applyPlainUpdates(k2, u2))
+	ut2 := WrapKeyUpdates(t, ModeDirect, KeyToHexNibbleHash, k2, u2)
+	defer ut2.Close()
+	got := processRoot(t, tr2, ut2)
+	require.Equal(t, oracle, got, "legacy rootPresent=false blob dropped the carried state")
+}
+
 // Restoring the template AFTER a scheduler already built its base must not fold against
 // the stale base: the changed seed drops it so Process rebuilds from the restored root.
 func TestStateRoundTrip_SeedAfterSchedulerStart(t *testing.T) {
@@ -214,6 +270,65 @@ func TestStateRoundTrip_SeedAfterSchedulerStart(t *testing.T) {
 	got, err := sc.Process(context.Background())
 	require.NoError(t, err)
 	require.Equal(t, oracle, got, "seed arriving after StartScheduler was folded against the stale base")
+}
+
+// A background fold completed against the previous seed's base must not be stitched after
+// the seed changes: SeedRootFrom invalidates folded splits so Process re-folds them.
+func TestStateRoundTrip_SeedChangeInvalidatesFoldedSplits(t *testing.T) {
+	t.Parallel()
+	var addrs []string
+	for i := 0; i < 6; i++ {
+		addrs = append(addrs, addrHex(findAddressForNibble(7, 500+i)))
+	}
+	ub1 := NewUpdateBuilder()
+	for i, a := range addrs {
+		ub1.Balance(a, uint64(100+i))
+	}
+	k1, u1 := ub1.Build()
+
+	ub2 := NewUpdateBuilder().Balance(addrs[0], 9100).Balance(addrs[1], 9200).
+		Balance(addrHex(findAddressForNibble(7, 5100)), 51).Balance(addrHex(findAddressForNibble(7, 5200)), 52)
+	k2, u2 := ub2.Build()
+
+	ubc := NewUpdateBuilder().Balance(addrs[0], 9100).Balance(addrs[1], 9200)
+	for i, a := range addrs[2:] {
+		ubc.Balance(a, uint64(102+i))
+	}
+	ubc.Balance(addrHex(findAddressForNibble(7, 5100)), 51).Balance(addrHex(findAddressForNibble(7, 5200)), 52)
+	kc, uc := ubc.Build()
+	oracle, _ := engineRoot(t, modeSeq, 0, kc, uc)
+
+	ms := NewMockState(t)
+	ms.SetConcurrentCommitment(true)
+	_, blob := processModeBatchState(t, ms, modeStreaming, 4, k1, u1, nil)
+
+	require.NoError(t, ms.applyPlainUpdates(k2, u2))
+	sc := NewStreamingCommitter(mockTrieCtxFactory(ms), length.Addr, DefaultTrieConfig())
+	defer sc.Release()
+	sc.SetNumWorkers(4)
+	require.NoError(t, sc.StartScheduler(context.Background()))
+	for _, k := range k2 {
+		sc.TouchKey(KeyToHexNibbleHash(k), k, nil)
+	}
+	// fold the touched split against the scheduler's unseeded base, synchronously, leaving
+	// it in the reusable folded state a background fold would produce
+	sc.foldSplitBg(7)
+	sc.trieMu.RLock()
+	s := sc.splits[byte(7)]
+	sc.trieMu.RUnlock()
+	require.NotNil(t, s)
+	s.mu.Lock()
+	require.True(t, s.reusable(), "precondition: split folded against the stale base")
+	s.mu.Unlock()
+
+	tmpl := NewHexPatriciaHashed(length.Addr, ms, DefaultTrieConfig())
+	defer tmpl.Release()
+	require.NoError(t, tmpl.SetState(blob))
+	sc.SeedRootFrom(tmpl)
+
+	got, err := sc.Process(context.Background())
+	require.NoError(t, err)
+	require.Equal(t, oracle, got, "a split folded against the stale base was stitched after the seed changed")
 }
 
 // A fresh trie with NO carried state blob must still bootstrap from the on-disk branch

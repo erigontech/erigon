@@ -317,6 +317,18 @@ func (sc *StreamingCommitter) SeedRootFrom(tmpl *HexPatriciaHashed) {
 		sc.Stop()
 		sc.releaseBase()
 	}
+	// Splits folded against the previous seed's base are stale; drop their cells and
+	// deferred updates so Process re-folds them against the reseeded base.
+	for _, s := range sc.splits {
+		s.mu.Lock()
+		s.folded = false
+		s.dirty = true
+		for _, upd := range s.deferred {
+			putDeferredUpdate(upd)
+		}
+		s.deferred = nil
+		s.mu.Unlock()
+	}
 }
 
 // PromoteRootInto copies the most recently folded root cell and flags into tmpl,

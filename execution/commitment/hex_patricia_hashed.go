@@ -3038,7 +3038,19 @@ func (hph *HexPatriciaHashed) SetState(buf []byte) error {
 			return err
 		}
 		hph.root.setFromUpdate(update)
-		//hph.root.deriveHashedKeys(0, hph.keccak, hph.accountKeyLen)
+	}
+	// A leaf root's navigation path is derivable but not reliably persisted: without it a
+	// wall probe sees an unfoldable root and the mount paths overwrite the leaf in place.
+	if hph.root.accountAddrLen > 0 || hph.root.storageAddrLen > 0 {
+		hph.root.hashedExtLen = 0
+		if err := hph.root.deriveHashedKeys(0, hph.keccak, hph.accountKeyLen, hph.cellHashBuf[:]); err != nil {
+			return err
+		}
+	}
+	// Blobs written before propagate folds set rootPresent carry false for non-empty
+	// roots; a non-empty root is present by definition.
+	if !hph.root.IsEmpty() {
+		hph.rootPresent = true
 	}
 
 	return nil
