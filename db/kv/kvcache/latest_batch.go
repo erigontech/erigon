@@ -73,7 +73,6 @@ func (c *LatestBatchCache) OnNewBlock(sc *remoteproto.StateChangeBatch) {
 		}
 	}
 }
-func (c *LatestBatchCache) Evict() int { return 0 }
 func (c *LatestBatchCache) Len() int {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
