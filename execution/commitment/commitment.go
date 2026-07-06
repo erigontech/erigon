@@ -1419,6 +1419,7 @@ type Updates struct {
 	direct         []KeyUpdate
 	directBytes    int
 	directMemLimit int
+	directUpdates  updateSlab
 
 	// streaming (ModeParallel only) forwards every touched key to streamer.
 	streaming bool
@@ -1582,6 +1583,39 @@ func plainKeyBytes(pk string) []byte {
 // directMemLimit accounting.
 const carriedUpdateSize = 128
 
+const updateSlabChunk = 2048
+
+// updateSlab bump-allocates Updates from fixed chunks: addresses stay stable,
+// the pointer-free chunks add no GC scan work, and reset keeps the first chunk
+// so steady-state collection allocates nothing.
+type updateSlab struct {
+	chunks   [][]Update
+	chunkIdx int
+	next     int
+}
+
+func (s *updateSlab) alloc() *Update {
+	if s.chunkIdx >= len(s.chunks) {
+		s.chunks = append(s.chunks, make([]Update, updateSlabChunk))
+	}
+	c := s.chunks[s.chunkIdx]
+	u := &c[s.next]
+	s.next++
+	if s.next == len(c) {
+		s.chunkIdx++
+		s.next = 0
+	}
+	*u = Update{}
+	return u
+}
+
+func (s *updateSlab) reset() {
+	if len(s.chunks) > 1 {
+		s.chunks = s.chunks[:1]
+	}
+	s.chunkIdx, s.next = 0, 0
+}
+
 // collectDirect records one ModeDirect touch and returns the entry's index into
 // direct, or -1 when the batch lives in the etl collector. hashedKey and plainKey
 // must be immutable: both are retained until HashSort consumes the batch. update
@@ -1612,7 +1646,7 @@ func (t *Updates) collectDirect(hashedKey []byte, plainKey string, update *Updat
 func (t *Updates) carryDirect(key string, update *Update) {
 	idx, ok := t.keys[key]
 	if !ok {
-		u := new(Update)
+		u := t.directUpdates.alloc()
 		*u = *update
 		t.keys[key] = t.collectDirect(t.hashKey(common.ToBytesZeroCopy(key)), key, u)
 		return
@@ -1622,7 +1656,7 @@ func (t *Updates) carryDirect(key string, update *Update) {
 	}
 	e := &t.direct[idx]
 	if e.update == nil {
-		e.update = new(Update)
+		e.update = t.directUpdates.alloc()
 		t.directBytes += carriedUpdateSize
 	}
 	*e.update = *update
@@ -1664,6 +1698,7 @@ func (t *Updates) spillDirect() {
 		}
 	}
 	t.direct, t.directBytes = nil, 0
+	t.directUpdates.reset()
 }
 
 func (t *Updates) Mode() Mode { return t.mode }
@@ -1946,6 +1981,7 @@ func (t *Updates) Close() {
 		t.etl = nil
 	}
 	t.direct, t.directBytes = nil, 0
+	t.directUpdates = updateSlab{}
 	if t.parallel != nil {
 		t.parallel.Close()
 		t.parallel = nil
@@ -1996,6 +2032,7 @@ func (t *Updates) hashSortDirectInMem(ctx context.Context, warmuper *Warmuper, f
 	clear(t.direct)
 	t.direct = t.direct[:0]
 	t.directBytes = 0
+	t.directUpdates.reset()
 	return nil
 }
 
@@ -2192,6 +2229,7 @@ func (t *Updates) Reset() {
 		clear(t.direct)
 		t.direct = t.direct[:0]
 		t.directBytes = 0
+		t.directUpdates.reset()
 	case ModeUpdate:
 		t.tree.Clear(true)
 		clear(t.treeIdx)
