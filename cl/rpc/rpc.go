@@ -89,10 +89,7 @@ func NewBeaconRpcP2P(ctx context.Context, sentinel sentinelproto.SentinelClient,
 }
 
 func (b *BeaconRpcP2P) MaxRequestPayloads() uint64 {
-	if b.beaconConfig.MaxRequestPayloads != 0 {
-		return b.beaconConfig.MaxRequestPayloads
-	}
-	return b.beaconConfig.MaxRequestBlocksDeneb
+	return b.beaconConfig.MaxRequestPayloadsLimit()
 }
 
 func (b *BeaconRpcP2P) sendBlocksRequest(ctx context.Context, topic string, reqData []byte, maxResponseBytes uint64) ([]*cltypes.SignedBeaconBlock, string, error) {

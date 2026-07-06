@@ -30,13 +30,6 @@ import (
 	"github.com/erigontech/erigon/common/log/v3"
 )
 
-func maxRequestPayloads(cfg *clparams.BeaconChainConfig) uint64 {
-	if cfg.MaxRequestPayloads != 0 {
-		return cfg.MaxRequestPayloads
-	}
-	return cfg.MaxRequestBlocksDeneb
-}
-
 // executionPayloadEnvelopesByRangeHandler handles the ExecutionPayloadEnvelopesByRange v1 req/resp protocol.
 // [New in Gloas:EIP7732]
 func (c *ConsensusHandlers) executionPayloadEnvelopesByRangeHandler(s network.Stream) error {
@@ -52,7 +45,7 @@ func (c *ConsensusHandlers) executionPayloadEnvelopesByRangeHandler(s network.St
 		return err
 	}
 
-	maxPayloads := maxRequestPayloads(c.beaconConfig)
+	maxPayloads := c.beaconConfig.MaxRequestPayloadsLimit()
 	if maxPayloads == 0 {
 		return errors.New("MAX_REQUEST_PAYLOADS is zero")
 	}
@@ -155,7 +148,7 @@ func (c *ConsensusHandlers) executionPayloadEnvelopesByRootHandler(s network.Str
 		return nil
 	}
 
-	maxPayloads := maxRequestPayloads(c.beaconConfig)
+	maxPayloads := c.beaconConfig.MaxRequestPayloadsLimit()
 	if maxPayloads == 0 {
 		return errors.New("MAX_REQUEST_PAYLOADS is zero")
 	}

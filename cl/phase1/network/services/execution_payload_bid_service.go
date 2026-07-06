@@ -272,11 +272,7 @@ func (s *executionPayloadBidService) validateAndStoreBid(
 	if slot <= parentHeader.Slot {
 		return fmt.Errorf("bid slot %d is not greater than parent block slot %d", slot, parentHeader.Slot)
 	}
-	parentState, err := s.forkchoiceStore.GetStateAtBlockRoot(bid.ParentBlockRoot, false)
-	if err != nil || parentState == nil {
-		return fmt.Errorf("%w: state for parent_block_root %v not available", errBidDependencyUnavailable, bid.ParentBlockRoot)
-	}
-	validationStateEntry, err := s.bidValidationState(bid.ParentBlockRoot, parentState, slot)
+	validationStateEntry, err := s.bidValidationState(bid.ParentBlockRoot, slot)
 	if err != nil {
 		return fmt.Errorf("bid validation failed: %w", err)
 	}
@@ -343,7 +339,7 @@ func (s *executionPayloadBidService) validateAndStoreBid(
 	return nil
 }
 
-func (s *executionPayloadBidService) bidValidationState(parentBlockRoot common.Hash, parentState *state.CachingBeaconState, bidSlot uint64) (*bidValidationStateEntry, error) {
+func (s *executionPayloadBidService) bidValidationState(parentBlockRoot common.Hash, bidSlot uint64) (*bidValidationStateEntry, error) {
 	cacheKey := bidValidationStateKey{parentBlockRoot: parentBlockRoot, slot: bidSlot}
 	s.validationStateMu.Lock()
 	entry, ok := s.validationStateCache.Get(cacheKey)
@@ -359,6 +355,13 @@ func (s *executionPayloadBidService) bidValidationState(parentBlockRoot common.H
 		return entry, nil
 	}
 
+	// Fetch the parent state only on a cache miss; holding entry.mu also
+	// dedups concurrent fetches for the same (parent, slot).
+	parentState, err := s.forkchoiceStore.GetStateAtBlockRoot(parentBlockRoot, false)
+	if err != nil || parentState == nil {
+		s.removeBidValidationState(cacheKey, entry)
+		return nil, fmt.Errorf("%w: state for parent_block_root %v not available", errBidDependencyUnavailable, parentBlockRoot)
+	}
 	if parentState.Slot() > bidSlot {
 		s.removeBidValidationState(cacheKey, entry)
 		return nil, fmt.Errorf("parent state slot %d is after bid slot %d", parentState.Slot(), bidSlot)

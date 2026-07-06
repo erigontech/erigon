@@ -287,7 +287,7 @@ func TestExecutionRequestsFromListDecodesGloasBuilderRequests(t *testing.T) {
 	encodedExit, err := builderExit.EncodeSSZ(nil)
 	require.NoError(t, err)
 
-	requests, err := executionRequestsFromList([]hexutil.Bytes{
+	requests, err := executionRequestsFromList(&clparams.MainnetBeaconConfig, []hexutil.Bytes{
 		append(hexutil.Bytes{types.BuilderDepositRequestType}, encodedDeposit...),
 		append(hexutil.Bytes{types.BuilderExitRequestType}, encodedExit...),
 	}, clparams.GloasVersion)
@@ -333,7 +333,7 @@ func TestExecutionRequestsFromListRejectsInvalidOrdering(t *testing.T) {
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			_, err := executionRequestsFromList(tc.requests, clparams.GloasVersion)
+			_, err := executionRequestsFromList(&clparams.MainnetBeaconConfig, tc.requests, clparams.GloasVersion)
 			require.Error(t, err)
 		})
 	}
@@ -347,7 +347,7 @@ func TestEncodeGetPayloadResponseIgnoresExecutionRequestsBeforeElectra(t *testin
 				ExecutionRequests: []hexutil.Bytes{{0xff, 0x00}},
 			}
 
-			_, err := encodeGetPayloadResponse(resp, version)
+			_, err := encodeGetPayloadResponse(&clparams.MainnetBeaconConfig, resp, version)
 			require.NoError(t, err)
 		})
 	}

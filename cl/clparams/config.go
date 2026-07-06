@@ -407,6 +407,15 @@ func (b *BeaconChainConfig) MinSlotsForBlobsSidecarsRequest() uint64 {
 	return b.MinEpochsForBlobSidecarsRequests * b.SlotsPerEpoch
 }
 
+// MaxRequestPayloadsLimit falls back to MAX_REQUEST_BLOCKS_DENEB for configs
+// predating MAX_REQUEST_PAYLOADS.
+func (b *BeaconChainConfig) MaxRequestPayloadsLimit() uint64 {
+	if b.MaxRequestPayloads != 0 {
+		return b.MaxRequestPayloads
+	}
+	return b.MaxRequestBlocksDeneb
+}
+
 type ConfigDurationSec time.Duration
 
 func (d *ConfigDurationSec) MarshalJSON() ([]byte, error) {

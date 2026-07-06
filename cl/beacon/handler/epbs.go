@@ -37,6 +37,7 @@ import (
 	"github.com/erigontech/erigon/cl/pool"
 	"github.com/erigontech/erigon/cl/utils/bls"
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/length"
 	execparams "github.com/erigontech/erigon/execution/protocol/params"
 )
 
@@ -45,7 +46,8 @@ const maxEpbsJSONSize = 1 << 20
 const maxExecutionPayloadEnvelopeRequestSize = int64(execparams.MaxRlpBlockSize) * 4
 
 func maxSignedExecutionPayloadBidSSZSize() int64 {
-	return int64(4 + 224 + cltypes.MaxBlobsCommittmentsPerBlock*48 + 96)
+	emptyBidSize := (&cltypes.SignedExecutionPayloadBid{Message: &cltypes.ExecutionPayloadBid{}}).EncodingSizeSSZ()
+	return int64(emptyBidSize + cltypes.MaxBlobsCommittmentsPerBlock*length.Bytes48)
 }
 
 func maxPayloadAttestationMessagesSSZSize(cfg *clparams.BeaconChainConfig) int64 {

@@ -34,8 +34,6 @@ const (
 	sszCellsPerExtBlob        = 128
 )
 
-var mainnetBeaconCfg = &clparams.MainnetBeaconConfig
-
 func hashListValues(l solid.HashListSSZ) []common.Hash {
 	if l == nil {
 		return nil
@@ -241,7 +239,7 @@ func newBlobsBundleSSZ(b *engine_types.BlobsBundle, version clparams.StateVersio
 	return b
 }
 
-func encodeGetPayloadResponse(resp *engine_types.GetPayloadResponse, version clparams.StateVersion) ([]byte, error) {
+func encodeGetPayloadResponse(cfg *clparams.BeaconChainConfig, resp *engine_types.GetPayloadResponse, version clparams.StateVersion) ([]byte, error) {
 	payload := resp.ExecutionPayload
 	payload.SSZVersion = version
 	blockValue := blockValueHash(resp.BlockValue)
@@ -252,7 +250,7 @@ func encodeGetPayloadResponse(resp *engine_types.GetPayloadResponse, version clp
 	case clparams.DenebVersion:
 		return ssz2.MarshalSSZ(nil, payload, blockValue[:], blobsBundle, resp.ShouldOverrideBuilder)
 	default:
-		executionRequests, err := executionRequestsFromList(resp.ExecutionRequests, version)
+		executionRequests, err := executionRequestsFromList(cfg, resp.ExecutionRequests, version)
 		if err != nil {
 			return nil, err
 		}
@@ -260,8 +258,8 @@ func encodeGetPayloadResponse(resp *engine_types.GetPayloadResponse, version clp
 	}
 }
 
-func executionRequestsFromList(requests []hexutil.Bytes, version clparams.StateVersion) (*cltypes.ExecutionRequests, error) {
-	return cltypes.DecodeExecutionRequestsList(mainnetBeaconCfg, requests, version)
+func executionRequestsFromList(cfg *clparams.BeaconChainConfig, requests []hexutil.Bytes, version clparams.StateVersion) (*cltypes.ExecutionRequests, error) {
+	return cltypes.DecodeExecutionRequestsList(cfg, requests, version)
 }
 
 func encodeGetBlobsV1Response(blobs []*engine_types.BlobAndProofV1) ([]byte, error) {

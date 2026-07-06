@@ -241,59 +241,34 @@ func IsBuilderPubkey(s abstract.BeaconState, pubkey common.Bytes48) bool {
 
 // IsValidDepositSignature validates a validator deposit signature.
 func IsValidDepositSignature(cfg *clparams.BeaconChainConfig, pubkey common.Bytes48, withdrawalCredentials common.Hash, amount uint64, signature common.Bytes96) (bool, error) {
+	return isValidDepositSignatureForDomain(cfg, cfg.DomainDeposit, pubkey, withdrawalCredentials, amount, signature)
+}
+
+func IsValidBuilderDepositSignature(cfg *clparams.BeaconChainConfig, request *solid.BuilderDepositRequest) (bool, error) {
+	return isValidDepositSignatureForDomain(cfg, cfg.DomainBuilderDeposit, request.PubKey, request.WithdrawalCredentials, request.Amount, request.Signature)
+}
+
+func isValidDepositSignatureForDomain(cfg *clparams.BeaconChainConfig, domainType [4]byte, pubkey common.Bytes48, withdrawalCredentials common.Hash, amount uint64, signature common.Bytes96) (bool, error) {
 	domain, err := fork.ComputeDomain(
-		cfg.DomainDeposit[:],
+		domainType[:],
 		utils.Uint32ToBytes4(uint32(cfg.GenesisForkVersion)),
 		[32]byte{},
 	)
 	if err != nil {
 		return false, err
 	}
-
-	// Create deposit data for hashing
 	depositData := &cltypes.DepositData{
 		PubKey:                pubkey,
 		WithdrawalCredentials: withdrawalCredentials,
 		Amount:                amount,
 		Signature:             signature,
 	}
-
 	depositMessageRoot, err := depositData.MessageHash()
 	if err != nil {
 		return false, err
 	}
-
 	signedRoot := utils.Sha256(depositMessageRoot[:], domain)
-
-	// Verify BLS signature
 	valid, err := bls.Verify(signature[:], signedRoot[:], pubkey[:])
-	if err != nil {
-		return false, err
-	}
-	return valid, nil
-}
-
-func IsValidBuilderDepositSignature(cfg *clparams.BeaconChainConfig, request *solid.BuilderDepositRequest) (bool, error) {
-	domain, err := fork.ComputeDomain(
-		cfg.DomainBuilderDeposit[:],
-		utils.Uint32ToBytes4(uint32(cfg.GenesisForkVersion)),
-		[32]byte{},
-	)
-	if err != nil {
-		return false, err
-	}
-	depositData := &cltypes.DepositData{
-		PubKey:                request.PubKey,
-		WithdrawalCredentials: request.WithdrawalCredentials,
-		Amount:                request.Amount,
-		Signature:             request.Signature,
-	}
-	depositMessageRoot, err := depositData.MessageHash()
-	if err != nil {
-		return false, err
-	}
-	signedRoot := utils.Sha256(depositMessageRoot[:], domain)
-	valid, err := bls.Verify(request.Signature[:], signedRoot[:], request.PubKey[:])
 	if err != nil {
 		return false, err
 	}
