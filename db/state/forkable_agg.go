@@ -535,12 +535,12 @@ func (r *ForkableAgg) BuildMissedAccessors(ctx context.Context, workers int) err
 ////
 
 func (r *ForkableAgg) openFolder() error {
-	eg := &errgroup.Group{}
+	eg, ctx := errgroup.WithContext(r.ctx)
 	r.loop(func(p *ProtoForkable) error {
 		eg.Go(func() error {
 			select {
-			case <-r.ctx.Done():
-				return r.ctx.Err()
+			case <-ctx.Done():
+				return ctx.Err()
 			default:
 			}
 			return p.snaps.OpenFolder()
