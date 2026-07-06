@@ -251,7 +251,7 @@ func (tx *tx) FreezeInfo() kv.FreezeInfo                   { panic("not implemen
 func (tx *tx) AllForkableIds() (ids []kv.ForkableId)       { panic("not implemented") }
 func (tx *tx) StepsInFiles(entitySet ...kv.Domain) kv.Step { panic("not implemented") }
 func (tx *tx) Retire(ctx context.Context, cutoffs kv.RetireCutoffs) (int, error) {
-	panic("not implemented")
+	return 0, errors.New("remote db provider doesn't support .Retire method")
 }
 func (tx *tx) DomainFiles(domain ...kv.Domain) kv.VisibleFiles { panic("not implemented") }
 func (tx *tx) DomainProgress(domain kv.Domain) uint64          { panic("not implemented") }

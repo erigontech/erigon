@@ -81,7 +81,7 @@ func TestRetireCutoffs_ConvertsBlockDistanceToTxNum(t *testing.T) {
 		require.False(t, cutoffs.IsNoop())
 		require.Equal(t, uint64(200), cutoffs.Default)
 		require.Equal(t, uint64(0), cutoffs.PerDomain[kv.CommitmentDomain], "keep-all commitment -> no cutoff")
-		require.Equal(t, uint64(200), cutoffs.PerDomain[kv.RCacheDomain], "receipts follow the history window")
+		require.Equal(t, uint64(200), cutoffs.PerDomain[kv.RCacheDomain], "rcache follows the history window")
 	})
 
 	t.Run("finite history + finite commitment -> independent cutoffs", func(t *testing.T) {
