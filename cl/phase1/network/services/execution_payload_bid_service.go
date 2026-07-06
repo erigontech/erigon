@@ -80,6 +80,7 @@ const (
 	pendingBidCheckInterval     = 100 * time.Millisecond
 	maxPendingBids              = 1024
 	bidValidationStateCacheSize = 4
+	bidValidationStateTTLSlots  = 2
 )
 
 type executionPayloadBidService struct {
@@ -92,7 +93,7 @@ type executionPayloadBidService struct {
 
 	seenCache            *lru.Cache[seenBidKey, struct{}]
 	validationStateMu    sync.Mutex
-	validationStateCache *lru.Cache[bidValidationStateKey, *bidValidationStateEntry]
+	validationStateCache *lru.CacheWithTTL[bidValidationStateKey, *bidValidationStateEntry]
 
 	// Pending bids waiting for proposer preferences
 	pendingBids  sync.Map // pendingBidKey -> *pendingBidJob
@@ -115,10 +116,11 @@ func NewExecutionPayloadBidService(
 	if err != nil {
 		panic(err)
 	}
-	validationStateCache, err := lru.New[bidValidationStateKey, *bidValidationStateEntry]("execution_payload_bid_validation_states", bidValidationStateCacheSize)
-	if err != nil {
-		panic(err)
-	}
+	validationStateCache := lru.NewWithTTL[bidValidationStateKey, *bidValidationStateEntry](
+		"execution_payload_bid_validation_states",
+		bidValidationStateCacheSize,
+		bidValidationStateCacheTTL(beaconCfg),
+	)
 	s := &executionPayloadBidService{
 		syncedDataManager:    syncedDataManager,
 		forkchoiceStore:      forkchoiceStore,
@@ -178,6 +180,9 @@ func (s *executionPayloadBidService) ProcessMessage(ctx context.Context, _ *uint
 	if err := s.validateBidStateless(bid); err != nil {
 		return err
 	}
+	if err := s.validateHighestBid(bid); err != nil {
+		return err
+	}
 
 	preferences, ok, err := s.matchingProposerPreferences(msg)
 	if err != nil {
@@ -185,7 +190,7 @@ func (s *executionPayloadBidService) ProcessMessage(ctx context.Context, _ *uint
 			s.queuePendingBid(msg)
 			log.Trace("Queued execution payload bid waiting for dependencies",
 				"slot", slot, "builderIndex", builderIndex, "err", err)
-			return fmt.Errorf("%w: %v", ErrIgnore, err)
+			return fmt.Errorf("%w: %w: %v", ErrIgnore, ErrBidQueued, err)
 		}
 		return err
 	}
@@ -194,7 +199,7 @@ func (s *executionPayloadBidService) ProcessMessage(ctx context.Context, _ *uint
 		s.queuePendingBid(msg)
 		log.Trace("Queued execution payload bid waiting for proposer preferences",
 			"slot", slot, "builderIndex", builderIndex)
-		return fmt.Errorf("%w: proposer preferences not available", ErrIgnore)
+		return fmt.Errorf("%w: %w: proposer preferences not available", ErrIgnore, ErrBidQueued)
 	}
 
 	if err := s.validateAndStoreBid(msg, preferences); err != nil {
@@ -202,7 +207,7 @@ func (s *executionPayloadBidService) ProcessMessage(ctx context.Context, _ *uint
 			s.queuePendingBid(msg)
 			log.Trace("Queued execution payload bid waiting for dependencies",
 				"slot", slot, "builderIndex", builderIndex, "err", err)
-			return fmt.Errorf("%w: %v", ErrIgnore, err)
+			return fmt.Errorf("%w: %w: %v", ErrIgnore, ErrBidQueued, err)
 		}
 		return err
 	}
@@ -247,6 +252,14 @@ func (s *executionPayloadBidService) validateBidStateless(bid *cltypes.Execution
 	return nil
 }
 
+func bidValidationStateCacheTTL(beaconCfg *clparams.BeaconChainConfig) time.Duration {
+	secondsPerSlot := uint64(12)
+	if beaconCfg != nil && beaconCfg.SecondsPerSlot != 0 {
+		secondsPerSlot = beaconCfg.SecondsPerSlot
+	}
+	return time.Duration(secondsPerSlot*bidValidationStateTTLSlots) * time.Second
+}
+
 // validateAndStoreBid performs all remaining validation checks after preferences are confirmed.
 func (s *executionPayloadBidService) validateAndStoreBid(
 	msg *cltypes.SignedExecutionPayloadBid,
@@ -271,6 +284,9 @@ func (s *executionPayloadBidService) validateAndStoreBid(
 	}
 	if slot <= parentHeader.Slot {
 		return fmt.Errorf("bid slot %d is not greater than parent block slot %d", slot, parentHeader.Slot)
+	}
+	if err := s.validateHighestBid(bid); err != nil {
+		return err
 	}
 	validationStateEntry, err := s.bidValidationState(bid.ParentBlockRoot, slot)
 	if err != nil {
@@ -313,18 +329,14 @@ func (s *executionPayloadBidService) validateAndStoreBid(
 		}
 	}
 
-	// [IGNORE] Highest bid check: only accept if this is the highest value bid for (slot, parentBlockHash, parentBlockRoot)
-	bidKey := pool.HighestBidKey{Slot: slot, ParentBlockHash: bid.ParentBlockHash, ParentBlockRoot: bid.ParentBlockRoot}
-	if existing, found := s.epbsPool.HighestBids.Get(bidKey); found {
-		if bid.Value <= existing.Message.Value {
-			return fmt.Errorf("%w: bid value %d is not higher than existing %d for slot %d",
-				ErrIgnore, bid.Value, existing.Message.Value, slot)
-		}
+	if err := s.validateHighestBid(bid); err != nil {
+		return err
 	}
 
 	// All checks passed — mark as seen and store
 	seenKey := seenBidKey{builderIndex: builderIndex, slot: slot}
 	s.seenCache.Add(seenKey, struct{}{})
+	bidKey := pool.HighestBidKey{Slot: slot, ParentBlockHash: bid.ParentBlockHash, ParentBlockRoot: bid.ParentBlockRoot}
 	s.epbsPool.HighestBids.Add(bidKey, msg)
 
 	// Emit SSE event for execution_payload_bid [New in Gloas:EIP7732]
@@ -336,6 +348,19 @@ func (s *executionPayloadBidService) validateAndStoreBid(
 		"value", bid.Value,
 		"parentBlockHash", bid.ParentBlockHash)
 
+	return nil
+}
+
+func (s *executionPayloadBidService) validateHighestBid(bid *cltypes.ExecutionPayloadBid) error {
+	bidKey := pool.HighestBidKey{Slot: bid.Slot, ParentBlockHash: bid.ParentBlockHash, ParentBlockRoot: bid.ParentBlockRoot}
+	existing, found := s.epbsPool.HighestBids.Get(bidKey)
+	if !found || existing == nil || existing.Message == nil {
+		return nil
+	}
+	if bid.Value <= existing.Message.Value {
+		return fmt.Errorf("%w: bid value %d is not higher than existing %d for slot %d",
+			ErrIgnore, bid.Value, existing.Message.Value, bid.Slot)
+	}
 	return nil
 }
 

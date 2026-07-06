@@ -48,8 +48,11 @@ func setupExecutionPayloadBidService(t *testing.T, ctrl *gomock.Controller) (
 
 	seenCache, err := lru.New[seenBidKey, struct{}]("seen_bids_test", seenBidCacheSize)
 	require.NoError(t, err)
-	validationStateCache, err := lru.New[bidValidationStateKey, *bidValidationStateEntry]("bid_validation_states_test", bidValidationStateCacheSize)
-	require.NoError(t, err)
+	validationStateCache := lru.NewWithTTL[bidValidationStateKey, *bidValidationStateEntry](
+		"bid_validation_states_test",
+		bidValidationStateCacheSize,
+		bidValidationStateCacheTTL(&beaconCfg),
+	)
 
 	service := &executionPayloadBidService{
 		syncedDataManager:    mockSyncedData,
@@ -558,6 +561,28 @@ func TestExecutionPayloadBidServiceHighestBid(t *testing.T) {
 	stored, found = epbsPool.HighestBids.Get(bidKey)
 	require.True(t, found)
 	require.Equal(t, uint64(2000), stored.Message.Value)
+}
+
+func TestExecutionPayloadBidServiceRejectsLowerBidBeforeStateFetch(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	defer ctrl.Finish()
+
+	service, _, ethClockMock, fcMock, epbsPool := setupExecutionPayloadBidService(t, ctrl)
+
+	msg := newTestSignedExecutionPayloadBid(100, 3, 500)
+	existing := newTestSignedExecutionPayloadBid(100, 1, 2000)
+	bidKey := pool.HighestBidKey{Slot: msg.Message.Slot, ParentBlockHash: msg.Message.ParentBlockHash, ParentBlockRoot: msg.Message.ParentBlockRoot}
+	epbsPool.HighestBids.Add(bidKey, existing)
+
+	delete(fcMock.StateAtBlockRootVal, msg.Message.ParentBlockRoot)
+
+	ethClockMock.EXPECT().GetCurrentSlot().Return(uint64(100))
+	err := service.ProcessMessage(context.Background(), nil, msg)
+	require.Error(t, err)
+	require.True(t, errors.Is(err, ErrIgnore))
+	require.Contains(t, err.Error(), "not higher than existing")
+	require.Zero(t, service.validationStateCache.Len())
+	require.Equal(t, int32(0), service.pendingCount.Load())
 }
 
 func TestExecutionPayloadBidServiceDifferentParentHashes(t *testing.T) {

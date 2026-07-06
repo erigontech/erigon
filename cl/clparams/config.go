@@ -35,6 +35,7 @@ import (
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/execution/chain/networkname"
 	chainspec "github.com/erigontech/erigon/execution/chain/spec"
+	executiontypes "github.com/erigontech/erigon/execution/types"
 )
 
 var LatestStateFileName = "latest.ssz_snappy"
@@ -760,6 +761,34 @@ func (b *BeaconChainConfig) SyncCommitteeAggregationBitsSize() int {
 	return int(b.SyncCommitteeSize) / int(b.SyncCommitteeSubnetCount) / 8
 }
 
+func (b *BeaconChainConfig) ValidateExecutionRequestTypeConstants() error {
+	expected := []struct {
+		name string
+		got  ConfigByte
+		want byte
+		fork uint64
+	}{
+		{name: "DEPOSIT_REQUEST_TYPE", got: b.DepositRequestType, want: executiontypes.DepositRequestType, fork: b.ElectraForkEpoch},
+		{name: "WITHDRAWAL_REQUEST_TYPE", got: b.WithdrawalRequestType, want: executiontypes.WithdrawalRequestType, fork: b.ElectraForkEpoch},
+		{name: "CONSOLIDATION_REQUEST_TYPE", got: b.ConsolidationRequestType, want: executiontypes.ConsolidationRequestType, fork: b.ElectraForkEpoch},
+		{name: "BUILDER_DEPOSIT_REQUEST_TYPE", got: b.BuilderDepositRequestType, want: executiontypes.BuilderDepositRequestType, fork: b.GloasForkEpoch},
+		{name: "BUILDER_EXIT_REQUEST_TYPE", got: b.BuilderExitRequestType, want: executiontypes.BuilderExitRequestType, fork: b.GloasForkEpoch},
+	}
+	for _, item := range expected {
+		active := item.fork != b.FarFutureEpoch
+		if item.fork == b.ElectraForkEpoch && b.GloasForkEpoch != b.FarFutureEpoch {
+			active = true
+		}
+		if !active {
+			continue
+		}
+		if byte(item.got) != item.want {
+			return fmt.Errorf("%s mismatch: beacon config has %#x, execution layer uses %#x", item.name, byte(item.got), item.want)
+		}
+	}
+	return nil
+}
+
 func (b *BeaconChainConfig) RoundSlotToVotePeriod(slot uint64) uint64 {
 	p := b.SlotsPerEpoch * b.EpochsPerEth1VotingPeriod
 	return slot - (slot % p)
@@ -1148,6 +1177,9 @@ func CustomConfig(configFile string) (BeaconChainConfig, NetworkConfig, error) {
 	}
 
 	beaconCfg.InitializeForkSchedule()
+	if err := beaconCfg.ValidateExecutionRequestTypeConstants(); err != nil {
+		return BeaconChainConfig{}, NetworkConfig{}, err
+	}
 
 	// setup network config
 	if err := yaml.Unmarshal(b, &networkConfig); err != nil {

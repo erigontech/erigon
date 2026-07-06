@@ -34,6 +34,7 @@ import (
 	"github.com/erigontech/erigon/cl/gossip"
 	"github.com/erigontech/erigon/cl/phase1/core/state"
 	"github.com/erigontech/erigon/cl/phase1/forkchoice"
+	clservices "github.com/erigontech/erigon/cl/phase1/network/services"
 	"github.com/erigontech/erigon/cl/pool"
 	"github.com/erigontech/erigon/cl/utils/bls"
 	"github.com/erigontech/erigon/common"
@@ -864,8 +865,11 @@ func (a *ApiHandler) PostEthV1BeaconExecutionPayloadBid(w http.ResponseWriter, r
 	// Validate via the bid service (checks signature, slot timing, proposer preferences, etc.)
 	if a.executionPayloadBidService != nil {
 		if err := a.executionPayloadBidService.ProcessMessage(r.Context(), nil, req); err != nil {
-			beaconhttp.NewEndpointError(http.StatusBadRequest, err).WriteTo(w)
-			return
+			if !errors.Is(err, clservices.ErrBidQueued) {
+				beaconhttp.NewEndpointError(http.StatusBadRequest, err).WriteTo(w)
+				return
+			}
+			a.logger.Debug("[Beacon REST] queued execution payload bid", "err", err)
 		}
 	}
 

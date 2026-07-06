@@ -20,6 +20,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -27,10 +28,13 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	"github.com/stretchr/testify/require"
+	"go.uber.org/mock/gomock"
 
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
+	"github.com/erigontech/erigon/cl/phase1/network/services"
+	mock_services "github.com/erigontech/erigon/cl/phase1/network/services/mock_services"
 	"github.com/erigontech/erigon/cl/pool"
 	"github.com/erigontech/erigon/cl/utils/bls"
 	"github.com/erigontech/erigon/common"
@@ -168,6 +172,54 @@ func TestPostExecutionPayloadBidAcceptsSSZ(t *testing.T) {
 	handler.PostEthV1BeaconExecutionPayloadBid(recorder, request)
 
 	require.Equal(t, http.StatusOK, recorder.Code, recorder.Body.String())
+}
+
+func TestPostExecutionPayloadBidAcceptsQueuedBid(t *testing.T) {
+	_, _, _, _, _, handler, _, _, _, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), true)
+	ctrl := gomock.NewController(t)
+	defer ctrl.Finish()
+
+	bidService := mock_services.NewMockExecutionPayloadBidService(ctrl)
+	bidService.EXPECT().ProcessMessage(gomock.Any(), gomock.Nil(), gomock.Any()).Return(fmt.Errorf("%w: %w", services.ErrIgnore, services.ErrBidQueued))
+	handler.executionPayloadBidService = bidService
+
+	bid := &cltypes.SignedExecutionPayloadBid{
+		Message: newTestExecutionPayloadBid(12, 3, 1000),
+	}
+	body, err := bid.EncodeSSZ(nil)
+	require.NoError(t, err)
+
+	request := httptest.NewRequest(http.MethodPost, "/eth/v1/beacon/execution_payload_bid", strings.NewReader(string(body)))
+	request.Header.Set("Content-Type", "application/octet-stream")
+	recorder := httptest.NewRecorder()
+
+	handler.PostEthV1BeaconExecutionPayloadBid(recorder, request)
+
+	require.Equal(t, http.StatusOK, recorder.Code, recorder.Body.String())
+}
+
+func TestPostExecutionPayloadBidRejectsHardIgnore(t *testing.T) {
+	_, _, _, _, _, handler, _, _, _, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), true)
+	ctrl := gomock.NewController(t)
+	defer ctrl.Finish()
+
+	bidService := mock_services.NewMockExecutionPayloadBidService(ctrl)
+	bidService.EXPECT().ProcessMessage(gomock.Any(), gomock.Nil(), gomock.Any()).Return(services.ErrIgnore)
+	handler.executionPayloadBidService = bidService
+
+	bid := &cltypes.SignedExecutionPayloadBid{
+		Message: newTestExecutionPayloadBid(12, 3, 1000),
+	}
+	body, err := bid.EncodeSSZ(nil)
+	require.NoError(t, err)
+
+	request := httptest.NewRequest(http.MethodPost, "/eth/v1/beacon/execution_payload_bid", strings.NewReader(string(body)))
+	request.Header.Set("Content-Type", "application/octet-stream")
+	recorder := httptest.NewRecorder()
+
+	handler.PostEthV1BeaconExecutionPayloadBid(recorder, request)
+
+	require.Equal(t, http.StatusBadRequest, recorder.Code, recorder.Body.String())
 }
 
 func TestPostExecutionPayloadBidRejectsOversizedSSZ(t *testing.T) {
