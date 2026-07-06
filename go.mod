@@ -83,7 +83,7 @@ require (
 	github.com/multiformats/go-multiaddr v0.16.1
 	github.com/nyaosorg/go-windows-shortcut v0.0.0-20220529122037-8b0c89bca4c4
 	github.com/pbnjay/memory v0.0.0-20210728143218-7b4eea64cf58
-	github.com/pelletier/go-toml/v2 v2.4.2
+	github.com/pelletier/go-toml/v2 v2.4.3
 	github.com/pion/stun/v3 v3.1.5
 	github.com/prometheus/client_golang v1.23.2
 	github.com/prometheus/client_model v0.6.2
