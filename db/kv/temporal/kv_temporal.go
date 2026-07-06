@@ -404,7 +404,14 @@ func (tx *RwTx) DeleteRange(table string, from, to []byte) (uint64, error) {
 	// — take the cheap native clear; stream the rest via a cursor rather than
 	// buffering the whole range in RAM.
 	if from == nil && to == nil {
-		return 0, tx.RwTx.ClearTable(table)
+		cnt, err := tx.RwTx.Count(table)
+		if err != nil {
+			return 0, err
+		}
+		if err := tx.RwTx.ClearTable(table); err != nil {
+			return 0, err
+		}
+		return cnt, nil
 	}
 	c, err := tx.RwTx.RwCursor(table)
 	if err != nil {
