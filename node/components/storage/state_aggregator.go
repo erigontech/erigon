@@ -22,17 +22,7 @@ import (
 
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/seg"
-	"github.com/erigontech/erigon/execution/commitment"
 )
-
-// CommitmentBranchExpander is the interface storage's mode-B commitment regen
-// needs from the aggregator: open once per baseline file range, Expand per V,
-// Close at end. *db/state.CommitmentBranchExpander satisfies this; a mock can
-// return an identity expander that leaves branches unchanged.
-type CommitmentBranchExpander interface {
-	Expand(branch commitment.BranchData) (commitment.BranchData, error)
-	Close()
-}
 
 // StateAggregator is the subset of db/state.Aggregator that the storage
 // Provider depends on. Depending on this interface rather than the concrete
@@ -87,19 +77,3 @@ type StateAggregator interface {
 	// build/merge goroutines exit, or the timeout elapses.
 	WaitForBuildAndMergeQuiescence(timeout time.Duration) error
 }
-
-// identityBranchExpander is used when the aggregator is a mock (harness
-// stub) that has no real commitment files — refs can't appear in the
-// synthetic V's, so passing them through unchanged is correct.
-type identityBranchExpander struct{}
-
-func (identityBranchExpander) Expand(b commitment.BranchData) (commitment.BranchData, error) {
-	return b, nil
-}
-func (identityBranchExpander) Close() {}
-
-// IdentityBranchExpander returns an expander that returns each V unchanged.
-// Callers that fail to obtain a real expander (e.g. mock aggregator, or a
-// baseline path that turned out empty) can substitute this to keep the
-// regen pipeline uniform.
-func IdentityBranchExpander() CommitmentBranchExpander { return identityBranchExpander{} }

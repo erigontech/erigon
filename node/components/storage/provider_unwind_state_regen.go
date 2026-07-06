@@ -26,7 +26,6 @@ import (
 
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/seg"
-	"github.com/erigontech/erigon/execution/commitment"
 	"github.com/erigontech/erigon/execution/commitment/commitmentdb"
 )
 
@@ -104,7 +103,6 @@ func RegenerateBoundaryStepFile(
 	newKVPath string,
 	lookup AsOfLookup,
 	branches CommitmentBranchProvider,
-	expander CommitmentBranchExpander,
 	lastTxNum uint64,
 	compression seg.FileCompression,
 	commitmentAnchor []byte,
@@ -136,10 +134,7 @@ func RegenerateBoundaryStepFile(
 	writer := seg.NewWriter(comp, compression)
 
 	if domain == kv.CommitmentDomain {
-		if expander == nil {
-			return fmt.Errorf("RegenerateBoundaryStepFile(commitment): CommitmentBranchExpander required")
-		}
-		kept, err := regenerateCommitmentBoundary(baselineKVPath, writer, compression, branches, expander, commitmentAnchor)
+		kept, err := regenerateCommitmentBoundary(baselineKVPath, writer, compression, branches, commitmentAnchor)
 		if err != nil {
 			return err
 		}
@@ -238,7 +233,6 @@ func regenerateCommitmentBoundary(
 	writer *seg.Writer,
 	compression seg.FileCompression,
 	branches CommitmentBranchProvider,
-	expander CommitmentBranchExpander,
 	anchor []byte,
 ) (uint64, error) {
 	baselineDecomp, err := seg.NewDecompressor(baselinePath)
@@ -280,36 +274,11 @@ func regenerateCommitmentBoundary(
 		kept          uint64
 		anchorPlanted bool
 	)
-	// emitBaseline writes a (K, V) pair sourced from the baseline .kv,
-	// expanding any shortened key refs in V to full plain keys via the
-	// expander so the regen output is uniformly full-plain-key. Fails
-	// hard on an unresolvable ref — a partial file would silently
-	// break future reads.
-	emitBaseline := func(k, v []byte) error {
+	emit := func(k, v []byte) error {
 		if bytes.Equal(k, commitmentdb.KeyCommitmentState) {
 			v = anchor
 			anchorPlanted = true
-		} else if len(v) > 0 {
-			expanded, err := expander.Expand(commitment.BranchData(v))
-			if err != nil {
-				return fmt.Errorf("expand baseline branch key=%x: %w", k, err)
-			}
-			v = expanded
 		}
-		if _, err := writer.Write(k); err != nil {
-			return fmt.Errorf("write key: %w", err)
-		}
-		if _, err := writer.Write(v); err != nil {
-			return fmt.Errorf("write value: %w", err)
-		}
-		kept++
-		return nil
-	}
-	// emitBranch writes a (K, V) pair sourced from the recompute's
-	// PutBranch collector. Process emits full-plain-key form, so no
-	// expansion is needed. KeyCommitmentState never appears in the
-	// collector (Process emits branches, not the anchor record).
-	emitBranch := func(k, v []byte) error {
 		if _, err := writer.Write(k); err != nil {
 			return fmt.Errorf("write key: %w", err)
 		}
@@ -323,14 +292,14 @@ func regenerateCommitmentBoundary(
 	for baseHas || branchHas {
 		switch {
 		case !branchHas:
-			if err := emitBaseline(baseKey, baseVal); err != nil {
+			if err := emit(baseKey, baseVal); err != nil {
 				return 0, err
 			}
 			if err := advance(); err != nil {
 				return 0, err
 			}
 		case !baseHas:
-			if err := emitBranch(branches.KeyAt(branchIdx), branches.ValueAt(branchIdx)); err != nil {
+			if err := emit(branches.KeyAt(branchIdx), branches.ValueAt(branchIdx)); err != nil {
 				return 0, err
 			}
 			branchIdx++
@@ -339,22 +308,21 @@ func regenerateCommitmentBoundary(
 			cmp := bytes.Compare(baseKey, branches.KeyAt(branchIdx))
 			switch {
 			case cmp < 0:
-				if err := emitBaseline(baseKey, baseVal); err != nil {
+				if err := emit(baseKey, baseVal); err != nil {
 					return 0, err
 				}
 				if err := advance(); err != nil {
 					return 0, err
 				}
 			case cmp > 0:
-				if err := emitBranch(branches.KeyAt(branchIdx), branches.ValueAt(branchIdx)); err != nil {
+				if err := emit(branches.KeyAt(branchIdx), branches.ValueAt(branchIdx)); err != nil {
 					return 0, err
 				}
 				branchIdx++
 				branchHas = branchIdx < branchLen
 			default:
-				// Both have the key: touched-branch V wins (recompute
-				// refolded the sub-tree). No expansion needed on branch V.
-				if err := emitBranch(branches.KeyAt(branchIdx), branches.ValueAt(branchIdx)); err != nil {
+				// Both have the key: touched-branch value wins.
+				if err := emit(branches.KeyAt(branchIdx), branches.ValueAt(branchIdx)); err != nil {
 					return 0, err
 				}
 				branchIdx++

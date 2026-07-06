@@ -190,19 +190,12 @@ func (p *Provider) Unwind(ctx context.Context, toBlock uint64, opts UnwindOpts) 
 		return fmt.Errorf("storage.Provider.Unwind: db-reset: %w", err)
 	}
 
-	// 5. Apply the recompute result to MDBX ONLY when lastTxNum's step
-	// is NOT covered by any local commitment .kv (MDBX territory).
-	// When a file covers the step (file territory), the merge-walked
-	// commitment regen in unwindFinalize materialises the state set
-	// into that file directly, and MDBX for that step stays empty by
-	// design (clean single-source-per-step model).
-	if p.Aggregator != nil && !p.commitmentInFileTerritory(recompute.lastTxNum, p.Aggregator.StepSize()) {
-		if err := p.ensureCommitmentAtBlockApply(ctx, opts.Tx, toBlock, recompute); err != nil {
-			return fmt.Errorf("storage.Provider.Unwind: commitment-anchor apply: %w", err)
-		}
-	} else if p.logger != nil {
-		p.logger.Info("[storage] Provider.Unwind: commitment in file territory, skipping MDBX apply (regen owns the state set)",
-			"toBlock", toBlock, "lastTxNum", recompute.lastTxNum)
+	// 5. Apply the recompute result. Drains the branch collector +
+	//    writes KeyCommitmentState into the now-cleaned writable
+	//    shadow. The wipe's whole-step commitment clear (in step 3+4)
+	//    guarantees these writes land without orphan dups.
+	if err := p.ensureCommitmentAtBlockApply(ctx, opts.Tx, toBlock, recompute); err != nil {
+		return fmt.Errorf("storage.Provider.Unwind: commitment-anchor apply: %w", err)
 	}
 
 	return p.unwindFinalize(ctx, opts.Tx, toBlock, recompute)
