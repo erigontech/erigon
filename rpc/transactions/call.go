@@ -156,7 +156,7 @@ func MakeBlockHashProvider(ctx context.Context, tx kv.Getter, reader services.Ca
 		}
 		blockHash, ok, err := reader.CanonicalHash(ctx, tx, blockNum)
 		if err != nil || !ok {
-			log.Error("[evm] canonical hash not found", "blockNum", blockNum, "ok", ok, "err", err)
+			log.Debug("[evm] canonical hash not found", "blockNum", blockNum, "ok", ok, "err", err)
 		}
 		return blockHash, err
 	}
