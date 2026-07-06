@@ -70,7 +70,7 @@ func ActivePrecompiledContracts(chainRules *chain.Rules) PrecompiledContracts {
 }
 
 // forkTier indexes forkSets. It is derived from chainRules by the single
-// switch in precompilesForFork, so the contracts map and the address list
+// switch in forkTierFor, so the contracts map and the address list
 // for a fork can never drift apart the way two independent switches could.
 type forkTier int8
 

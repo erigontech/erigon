@@ -431,9 +431,10 @@ func (evm *EVM) call(typ OpCode, caller accounts.Address, callerAddress accounts
 				Evm:      evm,
 			}
 			entryGas := gasRemaining
-			exitFrame := evm.enterFrame(ctx.ReadOnly)
-			ret, gasRemaining, err = sp.RunStateful(input, gasRemaining, ctx)
-			exitFrame()
+			func() {
+				defer evm.enterFrame(ctx.ReadOnly)()
+				ret, gasRemaining, err = sp.RunStateful(input, gasRemaining, ctx)
+			}()
 			if gasRemaining.Regular > entryGas.Regular || gasRemaining.State > entryGas.State {
 				ret, gasRemaining = nil, mdgas.MdGas{}
 				err = fmt.Errorf("stateful precompile %s returned more gas than supplied", sp.Name())

@@ -406,7 +406,7 @@ func (evm *EVM) Run(contract Contract, gas mdgas.MdGas, input []byte, readOnly b
 
 	exitFrame := evm.enterFrame(readOnly)
 	defer func() {
-		// first: capture data/memory/state/depth/etc... then clenup them
+		// first: capture data/memory/state/depth/etc... then cleanup them
 		if debug && err != nil {
 			if !logged && tracer.OnOpcode != nil {
 				tracer.OnOpcode(pcCopy, byte(op), gasCopy, cost, callContext, evm.returnData, evm.depth, VMErrorFromErr(err))
