@@ -17,6 +17,7 @@
 package rpchelper
 
 import (
+	"runtime"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -183,6 +184,7 @@ func TestConcurrentTouchAndEviction(t *testing.T) {
 				return
 			default:
 				f.TouchSubscription(SubscriptionID(id), FilterTypePendingTxs)
+				runtime.Gosched()
 			}
 		}
 	}()
@@ -190,6 +192,7 @@ func TestConcurrentTouchAndEviction(t *testing.T) {
 	deadline := time.Now().Add(200 * time.Millisecond)
 	for time.Now().Before(deadline) {
 		f.evictStaleSubscriptions(50 * time.Millisecond)
+		runtime.Gosched()
 	}
 	close(stop)
 	wg.Wait()

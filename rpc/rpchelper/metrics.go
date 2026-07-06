@@ -48,7 +48,7 @@ var (
 )
 
 // getSubscriptionCounter returns a counter for subscription lifecycle events.
-// pattern: subscriptions_{event}_total{{filter="{filterType}",protocol="{protocol}"}}
+// pattern: subscriptions_<event>_total{filter="<filterType>",protocol="<protocol>"}
 func getSubscriptionCounter(event, filterType, protocol string) metrics.Counter {
 	return metrics.GetOrCreateCounter(
 		`subscriptions_` + event + `_total{filter="` + filterType + `",protocol="` + protocol + `"}`,
