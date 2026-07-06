@@ -120,6 +120,17 @@ func (p *Provider) regenerateBoundaryStepFiles(
 		return nil, fmt.Errorf("aggregator StepSize() == 0")
 	}
 	stepBoundary := (lastTxNum / stepSize) + 1
+	// Commitment domain has HistoryDisabled=true, so GetAsOf can't
+	// reconstruct at-lastTxNum values. Sourcing the regen from the
+	// straddler file leaks post-lastTxNum sub-tree hashes into the
+	// trie fold. Instead source from the baseline commitment file —
+	// the largest-endStep file with endStep ≤ maxStep, same file the
+	// recompute uses. maxStep matches ensureCommitmentAtBlockCompute.
+	maxStep := kv.Step((lastTxNum + 1) / stepSize)
+	baselineCommitmentPath, err := p.locateCommitmentBaselineFile(maxStep)
+	if err != nil {
+		return nil, fmt.Errorf("locate commitment baseline: %w", err)
+	}
 
 	// Encode the commitment anchor once — every regen of the
 	// commitment domain plants the same blob.
@@ -213,8 +224,12 @@ func (p *Provider) regenerateBoundaryStepFiles(
 			finalPath := filepath.Join(filepath.Dir(oldPath), truncatedBaseName)
 			regenPath := finalPath + ".regen"
 
+			baselinePath := ""
+			if kvDomain == kv.CommitmentDomain {
+				baselinePath = baselineCommitmentPath
+			}
 			if err := RegenerateBoundaryStepFile(
-				ctx, kvDomain, oldPath, regenPath, lookup, lastTxNum,
+				ctx, kvDomain, oldPath, baselinePath, regenPath, lookup, lastTxNum,
 				compression, anchor, p.snapTmpDir, p.logger,
 			); err != nil {
 				return nil, fmt.Errorf("regen %s boundary-step file %s: %w", sd, fileEntry.Name, err)
@@ -232,6 +247,30 @@ func (p *Provider) regenerateBoundaryStepFiles(
 		return nil, nil
 	}
 	return &pendingRegenState{pairs: pairs, removals: removals}, nil
+}
+
+// locateCommitmentBaselineFile picks the commitment .kv whose ToStep
+// is the largest value ≤ maxStep — the same file
+// RecomputeAtTxNumWithoutSD selects via GetLatestFromFilesUpToStep.
+// Returns "" (no error) when no candidate exists (fresh chain with
+// no retired commitment files); callers must handle that case.
+func (p *Provider) locateCommitmentBaselineFile(maxStep kv.Step) (string, error) {
+	var best *snapshot.FileEntry
+	for _, e := range p.Inventory.AllDomainFiles(snapshot.DomainCommitment) {
+		if e.Kind != snapshot.KindKV {
+			continue
+		}
+		if kv.Step(e.ToStep) > maxStep {
+			continue
+		}
+		if best == nil || e.ToStep > best.ToStep {
+			best = e
+		}
+	}
+	if best == nil {
+		return "", nil
+	}
+	return snapshot.ResolveExistingPath(p.snapDir, best.Name), nil
 }
 
 // boundaryStepFileForDomain returns the FileEntry for the .kv file
