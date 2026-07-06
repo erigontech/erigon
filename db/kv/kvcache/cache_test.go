@@ -25,7 +25,6 @@ import (
 	"testing"
 	"time"
 
-	keccak "github.com/erigontech/fastkeccak"
 	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/require"
 
@@ -167,6 +166,102 @@ func TestEviction(t *testing.T) {
 	})
 	require.Equal(c.roots[c.latestStateVersionID].cache.Len(), c.stateEvict.Len())
 	require.Equal(int(cfg.CacheSize.Bytes()), c.stateEvict.Size())
+}
+
+// Canonical roots must start from their own batch only: the state-change
+// producers do not announce every mutation (e.g. account deletions), so
+// entries inherited from the previous root could stay stale forever.
+func TestCanonicalRootsStartFresh(t *testing.T) {
+	require := require.New(t)
+	cfg := DefaultCoherentConfig
+	cfg.NewBlockWait = 0
+	c := New(cfg)
+
+	k1 := [20]byte{1}
+	c.OnNewBlock(&remoteproto.StateChangeBatch{
+		StateVersionId: 2,
+		ChangeBatch: []*remoteproto.StateChange{{
+			Direction: remoteproto.Direction_FORWARD,
+			Changes: []*remoteproto.AccountChange{{
+				Action:  remoteproto.Action_UPSERT,
+				Address: gointerfaces.ConvertAddressToH160(k1),
+				Data:    []byte{1},
+			}},
+		}},
+	})
+	require.Equal(1, c.roots[2].cache.Len())
+
+	c.OnNewBlock(&remoteproto.StateChangeBatch{StateVersionId: 3})
+	require.True(c.roots[3].isCanonical)
+	require.Zero(c.roots[3].cache.Len())
+}
+
+// Batch-fed storage entries must be stored under the key shape readers use:
+// address+location (see state.CachedReader3.ReadAccountStorage).
+func TestOnNewBlockStorageKeysMatchReaders(t *testing.T) {
+	require, ctx := require.New(t), t.Context()
+	cfg := DefaultCoherentConfig
+	cfg.NewBlockWait = 0
+	c := New(cfg)
+	db := temporaltest.NewTestDB(t, datadir.New(t.TempDir()))
+
+	addr, loc := [20]byte{1}, [32]byte{2}
+	c.OnNewBlock(&remoteproto.StateChangeBatch{
+		StateVersionId: 2,
+		ChangeBatch: []*remoteproto.StateChange{{
+			Direction: remoteproto.Direction_FORWARD,
+			Changes: []*remoteproto.AccountChange{{
+				Action:  remoteproto.Action_STORAGE,
+				Address: gointerfaces.ConvertAddressToH160(addr),
+				StorageChanges: []*remoteproto.StorageChange{{
+					Location: gointerfaces.ConvertHashToH256(loc),
+					Data:     []byte{42},
+				}},
+			}},
+		}},
+	})
+
+	err := db.ViewTemporal(ctx, func(tx kv.TemporalTx) error {
+		k := append(addr[:], loc[:]...)
+		v, err := c.Get(k, tx, 2)
+		require.NoError(err)
+		require.Equal([]byte{42}, v)
+		return nil
+	})
+	require.NoError(err)
+}
+
+// Batch-fed code entries must be stored under the key shape readers use:
+// the account address, which is the E3 CodeDomain key
+// (see state.CachedReader3.ReadAccountCode).
+func TestOnNewBlockCodeKeysMatchReaders(t *testing.T) {
+	require, ctx := require.New(t), t.Context()
+	cfg := DefaultCoherentConfig
+	cfg.NewBlockWait = 0
+	c := New(cfg)
+	db := temporaltest.NewTestDB(t, datadir.New(t.TempDir()))
+
+	addr := [20]byte{1}
+	code := []byte{0x60, 0x60}
+	c.OnNewBlock(&remoteproto.StateChangeBatch{
+		StateVersionId: 2,
+		ChangeBatch: []*remoteproto.StateChange{{
+			Direction: remoteproto.Direction_FORWARD,
+			Changes: []*remoteproto.AccountChange{{
+				Action:  remoteproto.Action_CODE,
+				Address: gointerfaces.ConvertAddressToH160(addr),
+				Code:    code,
+			}},
+		}},
+	})
+
+	err := db.ViewTemporal(ctx, func(tx kv.TemporalTx) error {
+		v, err := c.GetCode(addr[:], tx, 2)
+		require.NoError(err)
+		require.Equal(code, v)
+		return nil
+	})
+	require.NoError(err)
 }
 
 // A request whose cache view outlives KeepViews state-version advances (e.g. a
@@ -539,57 +634,6 @@ func TestAPI(t *testing.T) {
 	case <-ctx.Done():
 		t.Error("Test timed out waiting for goroutines to complete")
 	}
-}
-
-func TestOnNewBlockCodeHashKey(t *testing.T) {
-	require := require.New(t)
-	cfg := DefaultCoherentConfig
-	cfg.NewBlockWait = 0
-	c := New(cfg)
-
-	code := []byte{0x01, 0x02, 0x03, 0x04}
-	addr := common.Address{0xAA}
-
-	batch := &remoteproto.StateChangeBatch{
-		StateVersionId: 1,
-		ChangeBatch: []*remoteproto.StateChange{
-			{
-				Direction: remoteproto.Direction_FORWARD,
-				Changes: []*remoteproto.AccountChange{
-					{
-						Action:  remoteproto.Action_CODE,
-						Address: gointerfaces.ConvertAddressToH160(addr),
-						Code:    code,
-					},
-				},
-			},
-		},
-	}
-
-	c.OnNewBlock(batch)
-
-	c.lock.Lock()
-	defer c.lock.Unlock()
-
-	require.NotNil(c.latestStateView)
-	require.Equal(uint64(1), c.latestStateVersionID)
-
-	var elems []*Element
-	c.latestStateView.codeCache.Walk(func(items []*Element) bool {
-		if len(items) > 0 {
-			elems = append(elems, items...)
-		}
-		return true
-	})
-
-	require.Len(elems, 1)
-
-	h := keccak.NewFastKeccak()
-	h.Write(code)
-	expectedKey := h.Sum(nil)
-
-	require.Equal(expectedKey, elems[0].K)
-	require.Equal(code, elems[0].V)
 }
 
 func TestCode(t *testing.T) {

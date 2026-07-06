@@ -20,16 +20,13 @@ import (
 	"bytes"
 
 	"context"
-	"encoding/binary"
 	"fmt"
-	"hash"
 
 	"sync"
 	"sync/atomic"
 	"time"
 
 	"github.com/c2h5oh/datasize"
-	keccak "github.com/erigontech/fastkeccak"
 	btree2 "github.com/tidwall/btree"
 
 	"github.com/erigontech/erigon/common"
@@ -66,24 +63,19 @@ type CacheView interface {
 // provide "Serializable Isolation Level" semantic: all data form consistent db view at moment
 // when read transaction started, read data are immutable until end of read transaction, reader can't see newer updates
 //
-// Every time a new state change comes, we do the following:
-// - Check that prevBlockHeight and prevBlockHash match what is the top values we have, and if they don't we
-// invalidate the cache, because we missed some messages and cannot consider the cache coherent anymore.
-// - Clone the cache pointer (such that the previous pointer is still accessible, but new one shared the content with it),
-// apply state updates to the cloned cache pointer and save under the new identified made from blockHeight and blockHash.
-// - If there is a conditional variable corresponding to the identifier, remove it from the map and notify conditional
-// variable, waking up the read-only transaction waiting on it.
+// Roots are keyed by PlainStateVersion. OnNewBlock creates the canonical root
+// for the announced version from that batch's changes alone; a reader whose
+// version has no root yet waits up to NewBlockWait for the batch, then
+// proceeds uncached. On a cache miss the reader consults its own transaction
+// and, when its version is the latest known one, inserts the result for other
+// same-version readers.
 //
-// On the other hand, whenever we have a cache miss (by looking at the top cache), we do the following:
-// - Once read the current block height and block hash (canonical) from underlying db transaction
-// - Construct the identifier from the current block height and block hash
-// - Look for the constructed identifier in the cache. If the identifier is found, use the corresponding
-// cache in conjunction with this read-only transaction (it will be consistent with it). If the identifier is
-// not found, it means that the transaction has been committed in Erigon, but the state update has not
-// arrived yet (as shown in the picture on the right). Insert conditional variable for this identifier and wait on
-// it until either cache with the given identifier appears, or timeout (indicating that the cache update
-// mechanism is broken and cache is likely invalidated).
-//
+// A canonical root deliberately does not inherit entries from its predecessor:
+// the state-change producers do not announce every mutation (see
+// https://github.com/erigontech/erigon/issues/22276), so carried entries could
+// go stale with no later batch to correct them. Fresh roots bound any producer
+// gap to one version — and a missed batch only costs cache warmth, never
+// coherency, because the version gap simply leaves that root unfed.
 
 // Pair.Value == nil - is a marker of absense key in db
 
@@ -93,16 +85,13 @@ type CacheView interface {
 // - CacheView is always coherent with given db transaction -
 //
 // Rules of set view.isCanonical value:
-//   - method View can't parent.Clone() - because parent view is not coherent with current kv.Tx
-//   - only OnNewBlock method may do parent.Clone() and apply StateChanges to create coherent view of kv.Tx
-//   - parent.Clone() can't be called if parent.isCanonical=false
-//   - only OnNewBlock method can set view.isCanonical=true
+//   - only OnNewBlock method can set view.isCanonical=true (from StateChanges)
+//   - roots created by View (readers ahead of their batch) stay non-canonical
 //
 // Rules of filling cache.stateEvict:
 //   - changes in Canonical View SHOULD reflect in stateEvict
 //   - changes in Non-Canonical View SHOULD NOT reflect in stateEvict
 type Coherent struct {
-	hasher               hash.Hash
 	codeEvictLen         metrics.Gauge
 	codeKeys             metrics.Gauge
 	keys                 metrics.Gauge
@@ -142,6 +131,9 @@ type CoherentView struct {
 func (c *CoherentView) Get(k []byte) ([]byte, error) {
 	return c.cache.Get(k, c.tx, c.stateVersionID)
 }
+
+// GetAsOf satisfies the optional capability rpchelper.CreateHistoryCachedStateReader
+// asserts; the cache holds latest-state only, so historical reads always fall through.
 func (c *CoherentView) GetAsOf(key []byte, ts uint64) (v []byte, ok bool, err error) {
 	return nil, false, nil
 }
@@ -198,7 +190,6 @@ func New(cfg CoherentConfig) *Coherent {
 		roots:        map[uint64]*CoherentRoot{},
 		stateEvict:   &ThreadSafeEvictionList{l: NewList()},
 		codeEvict:    &ThreadSafeEvictionList{l: NewList()},
-		hasher:       keccak.NewFastKeccak(),
 		cfg:          cfg,
 		miss:         metrics.GetOrCreateCounter(fmt.Sprintf(`cache_total{result="miss",name="%s"}`, cfg.MetricsLabel)),
 		hits:         metrics.GetOrCreateCounter(fmt.Sprintf(`cache_total{result="hit",name="%s"}`, cfg.MetricsLabel)),
@@ -244,31 +235,29 @@ func (c *Coherent) advanceRoot(stateVersionID uint64) (r *CoherentRoot) {
 		c.roots[stateVersionID] = r
 	}
 
-	if prevView, ok := c.roots[stateVersionID-1]; ok && prevView.isCanonical {
-		//log.Info("advance: clone", "from", viewID-1, "to", viewID)
-		r.cache = prevView.cache.Copy()
-		r.codeCache = prevView.codeCache.Copy()
+	// No carry-over from the previous canonical root: the state-change
+	// producers don't announce every mutation (account deletions, code on
+	// unwind — https://github.com/erigontech/erigon/issues/22276), so
+	// inherited entries could stay stale forever. Fresh roots bound any
+	// producer gap to one version.
+	c.stateEvict.Init()
+	c.codeEvict.Init()
+	if r.cache == nil {
+		r.cache = btree2.NewBTreeG(Less)
+		r.codeCache = btree2.NewBTreeG(Less)
 	} else {
-		c.stateEvict.Init()
-		c.codeEvict.Init()
-		if r.cache == nil {
-			//log.Info("advance: new", "to", viewID)
-			r.cache = btree2.NewBTreeG(Less)
-			r.codeCache = btree2.NewBTreeG(Less)
-		} else {
-			r.cache.Walk(func(items []*Element) bool {
-				for _, i := range items {
-					c.stateEvict.PushFront(i)
-				}
-				return true
-			})
-			r.codeCache.Walk(func(items []*Element) bool {
-				for _, i := range items {
-					c.codeEvict.PushFront(i)
-				}
-				return true
-			})
-		}
+		r.cache.Walk(func(items []*Element) bool {
+			for _, i := range items {
+				c.stateEvict.PushFront(i)
+			}
+			return true
+		})
+		r.codeCache.Walk(func(items []*Element) bool {
+			for _, i := range items {
+				c.codeEvict.PushFront(i)
+			}
+			return true
+		})
 	}
 	r.isCanonical = true
 
@@ -292,40 +281,31 @@ func (c *Coherent) OnNewBlock(stateChanges *remoteproto.StateChangeBatch) {
 
 	for _, sc := range stateChanges.ChangeBatch {
 		for i := range sc.Changes {
+			// Code and storage keys must match what readers look up: code is
+			// keyed by account address (the E3 CodeDomain key) and storage by
+			// address+location — see state.CachedReader3.
+			addr := gointerfaces.ConvertH160toAddress(sc.Changes[i].Address)
 			switch sc.Changes[i].Action {
 			case remoteproto.Action_UPSERT:
-				addr := gointerfaces.ConvertH160toAddress(sc.Changes[i].Address)
-				v := sc.Changes[i].Data
-				c.add(addr[:], v, r, id)
+				c.add(addr[:], sc.Changes[i].Data, r, id)
 			case remoteproto.Action_UPSERT_CODE:
-				addr := gointerfaces.ConvertH160toAddress(sc.Changes[i].Address)
-				v := sc.Changes[i].Data
-				c.add(addr[:], v, r, id)
-				c.hasher.Reset()
-				c.hasher.Write(sc.Changes[i].Code)
-				k := c.hasher.Sum(nil)
-				c.addCode(k, sc.Changes[i].Code, r, id)
+				c.add(addr[:], sc.Changes[i].Data, r, id)
+				c.addCode(addr[:], sc.Changes[i].Code, r, id)
 			case remoteproto.Action_REMOVE:
-				addr := gointerfaces.ConvertH160toAddress(sc.Changes[i].Address)
 				c.add(addr[:], nil, r, id)
 			case remoteproto.Action_STORAGE:
 				//skip, will check later
 			case remoteproto.Action_CODE:
-				c.hasher.Reset()
-				c.hasher.Write(sc.Changes[i].Code)
-				k := c.hasher.Sum(nil)
-				c.addCode(k, sc.Changes[i].Code, r, id)
+				c.addCode(addr[:], sc.Changes[i].Code, r, id)
 			default:
 				panic("not implemented yet")
 			}
 			if c.cfg.WithStorage && len(sc.Changes[i].StorageChanges) > 0 {
-				addr := gointerfaces.ConvertH160toAddress(sc.Changes[i].Address)
 				for _, change := range sc.Changes[i].StorageChanges {
 					loc := gointerfaces.ConvertH256ToHash(change.Location)
-					k := make([]byte, 20+8+32)
+					k := make([]byte, 20+32)
 					copy(k, addr[:])
-					binary.BigEndian.PutUint64(k[20:], sc.Changes[i].Incarnation)
-					copy(k[20+8:], loc[:])
+					copy(k[20:], loc[:])
 					c.add(k, change.Data, r, id)
 				}
 			}
