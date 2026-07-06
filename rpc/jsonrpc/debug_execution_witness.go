@@ -1113,8 +1113,7 @@ func (api *DebugAPIImpl) buildExpectedPostState(
 	postSdCtx.SetDeferBranchUpdates(false)
 
 	// Set up to read state at current block (after execution).
-	// Stay on the committed view: the branch below reads txnums and seeks
-	// commitment against plain tx, so latestBlock must agree with that view.
+	// Committed view: the txnum/commitment reads below use the same plain tx.
 	latestBlock, err := rpchelper.GetLatestBlockNumber(tx)
 	if err != nil {
 		return nil, nil, fmt.Errorf("failed to get latest block: %w", err)

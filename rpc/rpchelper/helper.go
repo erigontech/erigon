@@ -57,6 +57,15 @@ func CheckBlockExecuted(tx kv.Tx, blockNumber uint64) error {
 	return nil
 }
 
+// GetBlockNumber resolves a block number, hash, or tag ("latest", "safe",
+// "finalized", "pending") to a concrete block number and hash.
+//
+// filters controls which view tags resolve against. Pass the API's Filters to
+// resolve through the block overlay, which includes a head whose commit is
+// still in flight. Pass nil to resolve purely on the committed view of tx —
+// required when the caller then scans data through the same plain tx, so the
+// bounds and the scan agree; "pending" then falls back to the latest executed
+// block.
 func GetBlockNumber(ctx context.Context, blockNrOrHash rpc.BlockNumberOrHash, tx kv.Tx, br services.FullBlockReader, filters *Filters) (uint64, common.Hash, bool, error) {
 	bn, bh, latest, found, err := _GetBlockNumber(ctx, blockNrOrHash.RequireCanonical, blockNrOrHash, tx, br, filters)
 	if err != nil {
@@ -120,11 +129,7 @@ func _GetBlockNumber(ctx context.Context, requireCanonical bool, blockNrOrHash r
 				return 0, common.Hash{}, false, false, err
 			}
 		case rpc.PendingBlockNumber:
-			// filters may be nil here: callers that intentionally disable
-			// overlay-aware resolution (log-range scans against committed tx)
-			// pass nil. Treat that as "no pending block known" and fall back
-			// to plainStateBlockNumber — same as when filters is set but has
-			// no pending block.
+			// nil filters (committed-view resolution) = no pending block known.
 			if filters != nil {
 				if pendingBlock := filters.LastPendingBlock(); pendingBlock != nil {
 					return pendingBlock.NumberU64(), pendingBlock.Hash(), false, true, nil

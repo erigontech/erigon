@@ -895,19 +895,8 @@ func (ff *Filters) LatestSD() *execctx.SharedDomains {
 // tx for data not in the overlay.
 // Safe to call on a nil receiver.
 //
-// Concurrency: the returned view stays safe to use even if the FCU bg-commit
-// goroutine concurrently closes the published SD (the typical lifecycle —
-// PublishOverlay(SD) → reader acquires view → reader uses view → bg goroutine
-// PublishOverlay(nil) + SD.Close → reader continues for some time → caller's
-// tx.Rollback). This is load-bearing on (a) the BlockOverlay being backed by
-// a pure-Go memStore whose Rollback/Close are no-ops on the in-memory data
-// (see MemoryMutation.Rollback and memory_store.go) and (b) the view holding
-// its own backing tx (the caller's tx, not the SD's). Both invariants are
-// asserted at view-construction time in MemoryMutation.newReadViewMut. Do
-// not relax either without adding refcount/drain logic to SharedDomains.Close.
-//
-// The standard tx lifecycle still applies: views must not be used after the
-// CALLER'S tx is rolled back.
+// The view stays readable if the publisher closes the SD concurrently (see
+// MemoryMutation.newReadViewMut); it must not outlive the caller's tx.
 func (ff *Filters) WithOverlay(tx kv.Tx) kv.Tx {
 	if ff == nil {
 		return tx

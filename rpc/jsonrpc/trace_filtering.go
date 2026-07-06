@@ -329,10 +329,8 @@ func (api *TraceAPIImpl) Filter(ctx context.Context, req TraceFilterRequest, gas
 	var fromBlock uint64
 	var toBlock uint64
 	var err error
-	// filterV3 below scans receipts/logs against dbtx; resolve every block tag
-	// on the same committed view so the upper bound and the scan agree. Routing
-	// "latest"/"safe"/"finalized" through api.filters would land on a block
-	// whose receipts are not yet committed during the bg-commit window.
+	// nil filters: resolve tags on the committed view filterV3 scans
+	// (see rpchelper.GetBlockNumber).
 	if req.FromBlock == nil {
 		fromBlock = 0
 	} else {

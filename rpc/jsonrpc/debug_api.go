@@ -105,11 +105,8 @@ func (api *DebugAPIImpl) SetHead(ctx context.Context, number hexutil.Uint64) err
 	}
 	defer tx.Rollback()
 
-	// Read head through the overlay so a no-op debug_setHead(N) issued during
-	// the bg-commit window (when the overlay says N but MDBX is still at N-1)
-	// doesn't false-positive "block N is in the future". The guard is a pure
-	// number comparison and SetHead itself runs through ethBackend on the
-	// committed DB after the bg goroutine releases the FCU semaphore.
+	// Overlay-aware head, so setHead(N) isn't rejected as future while N's
+	// commit is still in flight.
 	currentHead, err := rpchelper.GetLatestBlockNumber(api.filters.WithOverlay(tx))
 	if err != nil {
 		return err

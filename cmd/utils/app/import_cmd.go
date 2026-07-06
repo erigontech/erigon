@@ -413,13 +413,8 @@ func InsertChain(ethereum *eth.Ethereum, chain *blockgen.ChainPack, setHead bool
 		}
 	}
 
-	// Under FcuBackgroundCommit the FCU returns Success before the MDBX
-	// commit lands; the bg goroutine writes Headers, BlockHash, HeadBlockHash
-	// etc. from the overlay. Open the RW tx below only after that bg
-	// goroutine has released the FCU semaphore, otherwise our WriteHeadBlockHash
-	// can commit before the overlay flush — leaving HeadBlockHash pointing at
-	// a header not yet in MDBX, which crashes the next startup in
-	// BlockReader.CurrentBlock.
+	// Wait for the FCU background commit so HeadBlockHash can't land in MDBX
+	// ahead of the header it points to.
 	ethereum.ExecutionModule().WaitIdle(ethereum.SentryCtx())
 
 	return ethereum.ChainDB().Update(ethereum.SentryCtx(), func(tx kv.RwTx) error {

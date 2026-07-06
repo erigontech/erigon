@@ -589,11 +589,8 @@ func getBeginEnd(ctx context.Context, tx kv.Tx, api *OverlayAPIImpl, crit filter
 		begin = num
 		end = num
 	} else {
-		// Resolve block tags on the committed view: the caller scans logs/
-		// receipts against the same tx (and the MaxUint32 cap below also reads
-		// `latest` from plain tx), so all references must agree. Passing
-		// api.filters would route "latest" through the SD overlay during the
-		// bg-commit window, landing on N while the scan and caps are at N-1.
+		// nil filters: resolve tags on the committed view the caller scans
+		// (see rpchelper.GetBlockNumber).
 		latest, _, _, err := rpchelper.GetBlockNumber(ctx, rpc.BlockNumberOrHashWithNumber(rpc.LatestExecutedBlockNumber), tx, api._blockReader, nil)
 		if err != nil {
 			return 0, 0, err
@@ -632,8 +629,7 @@ func getBeginEnd(ctx context.Context, tx kv.Tx, api *OverlayAPIImpl, crit filter
 		return 0, 0, fmt.Errorf("end (%d) < begin (%d)", end, begin)
 	}
 	if end > roaring.MaxUint32 {
-		// Stay on the committed view: the caller scans logs/receipts against
-		// the same tx, so the upper bound must agree with what the scan can see.
+		// Committed view: must agree with the scan.
 		latest, err := rpchelper.GetLatestBlockNumber(tx)
 		if err != nil {
 			return 0, 0, err

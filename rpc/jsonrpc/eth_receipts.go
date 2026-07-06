@@ -123,13 +123,8 @@ func (api *APIImpl) GetLogs(ctx context.Context, crit filters.FilterCriteria) (t
 		begin = num
 		end = num
 	} else {
-		// Resolve block tags on the committed view: getLogsV3 scans logs against
-		// the plain tx and the begin > latest / end > latest guards below compare
-		// against `latest` resolved here, so all three must agree. Passing
-		// api.filters would route "latest"/"safe"/"finalized" through the SD
-		// overlay during the bg-commit window, leaving begin or end at N while
-		// `latest` and the scan are still at N-1 — the range check would then
-		// false-positive errBlockRangeIntoFuture.
+		// nil filters: resolve tags on the committed view the log scan reads
+		// (see rpchelper.GetBlockNumber).
 		latest, _, _, err := rpchelper.GetBlockNumber(ctx, rpc.BlockNumberOrHashWithNumber(rpc.LatestExecutedBlockNumber), tx, api._blockReader, nil)
 		if err != nil {
 			return nil, err
@@ -175,9 +170,7 @@ func (api *APIImpl) GetLogs(ctx context.Context, crit filters.FilterCriteria) (t
 		return nil, &rpc.CustomError{Message: errInvalidBlockRange, Code: rpc.ErrCodeInvalidParams}
 	}
 	if end > roaring.MaxUint32 {
-		// Stay on the committed view: the GetLatestExecutedBlockNumber guard
-		// below uses plain tx, and getLogsV3 scans logs against the same tx,
-		// so the latest cap must agree with both.
+		// Committed view: must agree with the scan below.
 		latest, err := rpchelper.GetLatestBlockNumber(tx)
 		if err != nil {
 			return nil, err

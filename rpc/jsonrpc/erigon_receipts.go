@@ -97,8 +97,7 @@ func (api *ErigonImpl) GetLogs(ctx context.Context, crit filters.FilterCriteria)
 		end = header.Number.Uint64()
 
 	} else {
-		// Stay on the committed view: getLogsV3 scans logs against the same tx,
-		// so the latest cap and the scan must agree.
+		// Committed view: must agree with the log scan below.
 		latest, err := rpchelper.GetLatestBlockNumber(tx)
 		if err != nil {
 			return nil, err
@@ -193,7 +192,7 @@ func (api *ErigonImpl) GetLatestLogs(ctx context.Context, crit filters.FilterCri
 		begin = header.Number.Uint64()
 		end = header.Number.Uint64()
 	} else {
-		// Stay on the committed view: getLogsV3 scans against the same tx.
+		// Committed view: must agree with the log scan below.
 		latest, err := rpchelper.GetLatestBlockNumber(tx)
 		if err != nil {
 			return nil, err

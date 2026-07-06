@@ -94,10 +94,8 @@ func (api *ErigonImpl) GetBlockByTimestamp(ctx context.Context, timeStamp rpc.Ti
 
 	uintTimestamp := timeStamp.TurnIntoUint64()
 
-	// Route every block-table read (head, binary search, final block lookup)
-	// through the overlay so all bounds and reads agree on a single view
-	// during the bg-commit window. Only block tables are consulted — no
-	// SD-temporal reads — so overlay-aware is fully consistent here.
+	// Everything here is a block-table read, so one overlay view keeps the
+	// head, the search bounds, and the lookups consistent.
 	overlayTx := api.filters.WithOverlay(tx)
 	currentHeader := rawdb.ReadCurrentHeader(overlayTx)
 	if currentHeader == nil {

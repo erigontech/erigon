@@ -73,17 +73,9 @@ func (api *APIImpl) Call(ctx context.Context, args ethapi2.CallArgs, requestedBl
 	}
 	defer roTx.Rollback()
 
-	// Use the block overlay if available so block-tag resolution and header/body
-	// reads see uncommitted data from the pre-commit overlay.
-	//
-	// Note: BlockOverlayTemporalTx wraps *table* reads (canonical hashes,
-	// headers, stage progress) but its temporal methods (GetLatest, GetAsOf,
-	// RangeAsOf, HistorySeek) delegate to the underlying roTx — the SD's domain
-	// mem batch is not exposed. During the bg-commit window (FcuBackgroundCommit),
-	// "latest" resolves to block N via the overlay tables, but state reads
-	// evaluate against block N-1's committed domain state. This is a bounded
-	// staleness (~50ms), not a divergence; the proper SD-aware temporal view is
-	// tracked in https://github.com/erigontech/erigon/issues/21314.
+	// The overlay exposes block tables only: "latest" resolves to the
+	// pre-commit head while temporal state reads still see the last committed
+	// block (see ethconfig.Defaults.FcuBackgroundCommit).
 	var tx kv.TemporalTx = roTx
 	if api.filters != nil {
 		if sd := api.filters.LatestSD(); sd != nil {
@@ -476,10 +468,7 @@ func (api *APIImpl) getProof(ctx context.Context, roTx kv.TemporalTx, address co
 	sdCtx := domains.GetCommitmentContext()
 	sdCtx.SetDeferBranchUpdates(false)
 
-	// Stay on the committed view: the downstream proof computation reads
-	// txnums, history, and state through roTx + the SD without consulting
-	// the overlay, so latestBlock must match that view to keep the guard
-	// consistent.
+	// Committed view: the proof computation below reads the same plain roTx.
 	latestBlock, err := rpchelper.GetLatestBlockNumber(roTx)
 	if err != nil {
 		return nil, err
@@ -687,8 +676,7 @@ func (api *BaseAPI) getWitness(ctx context.Context, db kv.TemporalRoDB, blockNrO
 		return nil, fmt.Errorf("transaction index out of bounds: %d", txIndex)
 	}
 
-	// Stay on the committed view: regenerateHash / the witness rewind below
-	// operate against roTx without overlay awareness.
+	// Committed view: the witness rewind below reads the same plain roTx.
 	latestBlock, err := rpchelper.GetLatestBlockNumber(roTx)
 	if err != nil {
 		return nil, err
