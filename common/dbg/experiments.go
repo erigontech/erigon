@@ -117,6 +117,7 @@ var (
 	UseTxDependencies     = EnvBool("USE_TX_DEPENDENCIES", false)
 	UseStateCache         = EnvBool("USE_STATE_CACHE", true)
 	AssertStateCache      = EnvBool("ASSERT_STATE_CACHE", false)
+	AssertCarriedUpdates  = EnvBool("ASSERT_CARRIED_UPDATES", false)
 	ReadAhead             = EnvBool("READ_AHEAD", true)
 
 	BorValidateHeaderTime = EnvBool("BOR_VALIDATE_HEADER_TIME", true)

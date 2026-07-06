@@ -116,6 +116,7 @@ func Benchmark_Commitment_1MWhales(b *testing.B) {
 	slices.Sort(workers)
 	workers = slices.Compact(workers)
 	b.Run("ModeDirect", func(b *testing.B) { runDirectBench(b, pk, updates) })
+	b.Run("ModeDirect-carried", func(b *testing.B) { runDirectCarriedBench(b, pk, updates) })
 	for _, w := range workers {
 		b.Run(fmt.Sprintf("ModeParallel-w%d", w), func(b *testing.B) { runParallelBench(b, pk, updates, w) })
 	}
@@ -380,6 +381,30 @@ func Benchmark_StreamingOverlap(b *testing.B) {
 	}
 }
 
+// runDirectCarriedBench mirrors runDirectBench with value-carrying touches: the
+// updates delivered to the fold are the post-apply state, so followAndUpdate
+// skips the per-key re-read.
+func runDirectCarriedBench(b *testing.B, pk [][]byte, updates []Update) {
+	ctx := context.Background()
+	b.ReportAllocs()
+	for b.Loop() {
+		b.StopTimer()
+		ms := NewMockState(b)
+		require.NoError(b, ms.applyPlainUpdates(pk, updates))
+		hph := NewHexPatriciaHashed(length.Addr, ms, DefaultTrieConfig())
+		upds := NewUpdates(ModeDirect, b.TempDir(), KeyToHexNibbleHash)
+		touchCarriedFromState(b, upds, ms, pk, length.Addr)
+		b.StartTimer()
+
+		_, err := hph.Process(ctx, upds, "", nil, WarmupConfig{})
+
+		b.StopTimer()
+		require.NoError(b, err)
+		upds.Close()
+		b.StartTimer()
+	}
+}
+
 func Benchmark_DeepStorageWhale(b *testing.B) {
 	for _, slots := range []int{750_000} {
 		addr, accHash, accNib, accUpd, pk, upds, groups := whaleByNibble(slots)
@@ -398,6 +423,9 @@ func Benchmark_DeepStorageWhale(b *testing.B) {
 					upd.Close()
 					b.StartTimer()
 				}
+			})
+			b.Run("Sequential-carried", func(b *testing.B) {
+				runDirectCarriedBench(b, pk, upds)
 			})
 			for _, parallel := range []bool{false, true} {
 				name := "ConcurrentStorage-serial"

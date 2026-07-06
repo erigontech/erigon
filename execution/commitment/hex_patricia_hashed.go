@@ -2265,6 +2265,49 @@ func (hph *HexPatriciaHashed) unfoldKeyPath(hashedKey, plainKey []byte) error {
 	return nil
 }
 
+// assertCarriedUpdate re-reads plainKey and requires the carried update to match
+// the read on every leaf-effective field; a divergence means a producer carried
+// stale or partial state. Only meaningful where the fold-time read is
+// authoritative (serial ModeDirect): the parallel calculator deliberately
+// carries values its lagging reader cannot reproduce.
+func (hph *HexPatriciaHashed) assertCarriedUpdate(plainKey []byte, carried *Update) error {
+	var read *Update
+	var err error
+	if int16(len(plainKey)) == hph.accountKeyLen {
+		read, err = hph.accountFromCacheOrDB(plainKey)
+	} else {
+		read, err = hph.storageFromCacheOrDB(plainKey)
+	}
+	if err != nil {
+		return fmt.Errorf("carried-update assert: re-read of %x failed: %w", plainKey, err)
+	}
+	if carried.Deleted() != read.Deleted() {
+		return fmt.Errorf("carried-update assert: key %x carried deleted=%v read deleted=%v", plainKey, carried.Deleted(), read.Deleted())
+	}
+	if carried.Deleted() {
+		return nil
+	}
+	if int16(len(plainKey)) == hph.accountKeyLen {
+		carriedCode, readCode := empty.CodeHash, empty.CodeHash
+		if carried.Flags&CodeUpdate != 0 {
+			carriedCode = carried.CodeHash
+		}
+		if read.Flags&CodeUpdate != 0 {
+			readCode = read.CodeHash
+		}
+		if carried.Nonce != read.Nonce || !carried.Balance.Eq(&read.Balance) || carriedCode != readCode {
+			return fmt.Errorf("carried-update assert: key %x carried {nonce %d balance %s code %x} read {nonce %d balance %s code %x}",
+				plainKey, carried.Nonce, carried.Balance.String(), carriedCode, read.Nonce, read.Balance.String(), readCode)
+		}
+		return nil
+	}
+	if carried.StorageLen != read.StorageLen || !bytes.Equal(carried.Storage[:carried.StorageLen], read.Storage[:read.StorageLen]) {
+		return fmt.Errorf("carried-update assert: key %x carried storage %x read %x",
+			plainKey, carried.Storage[:carried.StorageLen], read.Storage[:read.StorageLen])
+	}
+	return nil
+}
+
 func (hph *HexPatriciaHashed) followAndUpdate(hashedKey, plainKey []byte, stateUpdate *Update) (err error) {
 	//if hph.traceW != nil {
 	// fmt.Fprintf(hph.traceW, "mnt: %0x current: %x path %x\n", hph.mountedNib, hph.currentKey[:hph.currentKeyLen], hashedKey)
@@ -2301,6 +2344,10 @@ func (hph *HexPatriciaHashed) followAndUpdate(hashedKey, plainKey []byte, stateU
 			if err != nil {
 				return fmt.Errorf("GetStorage for key %x failed: %w", plainKey, err)
 			}
+		}
+	} else if dbg.AssertCarriedUpdates {
+		if err := hph.assertCarriedUpdate(plainKey, stateUpdate); err != nil {
+			return err
 		}
 	}
 	hph.updateCell(plainKey, hashedKey, stateUpdate)
