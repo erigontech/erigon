@@ -104,21 +104,18 @@ func (api *APIImpl) GetFilterChanges(_ context.Context, index string) ([]any, er
 	stub := make([]any, 0)
 	// remove 0x
 	cutIndex := strings.TrimPrefix(index, "0x")
-	// Identify which subscription type the id belongs to, touch it to reset the
-	// eviction deadline, then probe the store. Touch must happen on every poll
-	// — not only when there is buffered data — otherwise an actively-polling
-	// client whose chain is quiet would be evicted.
+	// The Touch probe identifies the id's type and resets the eviction deadline on
+	// every poll — even when no data is buffered — so an actively-polling client on
+	// a quiet chain is never evicted.
 	switch {
-	case api.filters.HasHeadsSubscription(rpchelper.HeadsSubID(cutIndex)):
-		api.filters.TouchSubscription(rpchelper.SubscriptionID(cutIndex), rpchelper.FilterTypeHeads)
+	case api.filters.TouchSubscription(rpchelper.SubscriptionID(cutIndex), rpchelper.FilterTypeHeads):
 		if blocks, ok := api.filters.ReadPendingBlocks(rpchelper.HeadsSubID(cutIndex)); ok {
 			for _, v := range blocks {
 				stub = append(stub, v.Hash())
 			}
 		}
 		return stub, nil
-	case api.filters.HasPendingTxsSubscription(rpchelper.PendingTxsSubID(cutIndex)):
-		api.filters.TouchSubscription(rpchelper.SubscriptionID(cutIndex), rpchelper.FilterTypePendingTxs)
+	case api.filters.TouchSubscription(rpchelper.SubscriptionID(cutIndex), rpchelper.FilterTypePendingTxs):
 		if txs, ok := api.filters.ReadPendingTxs(rpchelper.PendingTxsSubID(cutIndex)); ok {
 			for _, batch := range txs {
 				for _, txn := range batch {
@@ -127,8 +124,7 @@ func (api *APIImpl) GetFilterChanges(_ context.Context, index string) ([]any, er
 			}
 		}
 		return stub, nil
-	case api.filters.HasSubscription(rpchelper.LogsSubID(cutIndex)):
-		api.filters.TouchSubscription(rpchelper.SubscriptionID(cutIndex), rpchelper.FilterTypeLogs)
+	case api.filters.TouchSubscription(rpchelper.SubscriptionID(cutIndex), rpchelper.FilterTypeLogs):
 		if logs, ok := api.filters.ReadLogs(rpchelper.LogsSubID(cutIndex)); ok {
 			for _, v := range logs {
 				stub = append(stub, v)
@@ -148,11 +144,9 @@ func (api *APIImpl) GetFilterLogs(_ context.Context, index string) ([]*types.Log
 		return nil, rpc.ErrNotificationsUnsupported
 	}
 	cutIndex := strings.TrimPrefix(index, "0x")
-	if found := api.filters.HasSubscription(rpchelper.LogsSubID(cutIndex)); !found {
+	if !api.filters.TouchSubscription(rpchelper.SubscriptionID(cutIndex), rpchelper.FilterTypeLogs) {
 		return nil, rpc.ErrFilterNotFound
 	}
-	// Reset the filter deadline since it was just accessed
-	api.filters.TouchSubscription(rpchelper.SubscriptionID(cutIndex), rpchelper.FilterTypeLogs)
 	if logs, ok := api.filters.ReadLogs(rpchelper.LogsSubID(cutIndex)); ok {
 		return logs, nil
 	}

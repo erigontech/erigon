@@ -25,6 +25,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/node/gointerfaces/remoteproto"
 	"github.com/erigontech/erigon/rpc/filters"
 )
@@ -106,6 +107,35 @@ func TestEvictStaleSubscriptionsSkipsWebSocketSubscriptions(t *testing.T) {
 	f.evictStaleSubscriptions(time.Nanosecond)
 
 	require.True(t, f.HasHeadsSubscription(id))
+}
+
+// A forwarding goroutine can drain channel-buffered items after its subscription is
+// unsubscribed or evicted; such late writes must not recreate the per-filter store,
+// which would be unreachable (reads are gated on the subscription) and leak forever.
+func TestAddAfterUnsubscribeDoesNotOrphanStore(t *testing.T) {
+	f := newTestFilters(t)
+
+	t.Run("heads", func(t *testing.T) {
+		_, id := f.SubscribeNewHeads(8)
+		require.True(t, f.UnsubscribeHeads(id))
+		f.AddPendingBlock(id, &types.Header{})
+		_, ok := f.pendingHeadsStores.Get(id)
+		require.False(t, ok)
+	})
+	t.Run("pendingTxs", func(t *testing.T) {
+		_, id := f.SubscribePendingTxs(8)
+		require.True(t, f.UnsubscribePendingTxs(id))
+		f.AddPendingTxs(id, []types.Transaction{})
+		_, ok := f.pendingTxsStores.Get(id)
+		require.False(t, ok)
+	})
+	t.Run("logs", func(t *testing.T) {
+		_, id := f.SubscribeLogs(8, filters.FilterCriteria{})
+		require.True(t, f.UnsubscribeLogs(id))
+		f.AddLogs(id, &types.Log{})
+		_, ok := f.logsStores.Get(id)
+		require.False(t, ok)
+	})
 }
 
 func TestLogsEvictionBatchesRemoteFilterUpdate(t *testing.T) {

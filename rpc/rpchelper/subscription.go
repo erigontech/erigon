@@ -25,12 +25,17 @@ import (
 type Sub[T any] interface {
 	Send(T)
 	Close()
-	// Tracking methods for timeout-based eviction and metrics
-	Touch()                                 // Reset last access time (for HTTP polling filters)
-	SetProtocol(protocol string)            // Set protocol label for metrics
-	EnableTimeout()                         // Enable timeout tracking (HTTP only)
 	CloseIfIdle(timeout time.Duration) bool // Close and report true when idle longer than timeout
-	Protocol() string                       // Get protocol label for metrics
+	SubTracker
+}
+
+// SubTracker is the element-type-independent tracking surface of a subscription,
+// used for timeout-based eviction and metrics.
+type SubTracker interface {
+	Touch()                      // Reset last access time (for HTTP polling filters)
+	SetProtocol(protocol string) // Set protocol label for metrics
+	EnableTimeout()              // Enable timeout tracking (HTTP only)
+	Protocol() string            // Get protocol label for metrics
 }
 
 type chan_sub[T any] struct {
