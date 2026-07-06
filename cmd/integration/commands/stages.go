@@ -827,6 +827,12 @@ func stageExec(db kv.TemporalRwDB, ctx context.Context, logger log.Logger) error
 			}
 		}
 
+		// Collate completed steps to files as execution progresses. The serial
+		// executor triggers this implicitly; the parallel executor does not, so
+		// without this the parallel path accumulates every step in the DB and a
+		// later offline finalize becomes an O(n^2) full-DB scan per step.
+		agg.BuildFilesInBackground(agg.EndTxNumMinimax() + agg.StepSize())
+
 		if execProgress, err = stages.GetStageProgress(tx, stages.Execution); err != nil {
 			return err
 		}
