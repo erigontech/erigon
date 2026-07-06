@@ -131,6 +131,7 @@ func TestHashSort_WarmupArenaNoRace(t *testing.T) {
 
 	forEachMode(t, func(t *testing.T, mode Mode) {
 		ut := NewUpdates(mode, t.TempDir(), keyHasherNoop)
+		forceDirectSpill(ut) // these tests pin the arena/etl path
 		for _, k := range genNibbleKeys(numKeys, keyLen) {
 			ut.TouchPlainKey(string(k), []byte("v"), ut.TouchStorage)
 		}
@@ -162,6 +163,7 @@ func TestHashSort_NilWarmuper(t *testing.T) {
 
 	forEachMode(t, func(t *testing.T, mode Mode) {
 		ut := NewUpdates(mode, t.TempDir(), keyHasherNoop)
+		forceDirectSpill(ut) // these tests pin the arena/etl path
 		for _, k := range genNibbleKeys(numKeys, keyLen) {
 			ut.TouchPlainKey(string(k), []byte("v"), ut.TouchStorage)
 		}
@@ -188,6 +190,7 @@ func TestHashSort_WarmupLap(t *testing.T) {
 
 	forEachMode(t, func(t *testing.T, mode Mode) {
 		ut := NewUpdates(mode, t.TempDir(), keyHasherNoop)
+		forceDirectSpill(ut) // these tests pin the arena/etl path
 		for _, k := range genNibbleKeys(numKeys, keyLen) {
 			ut.TouchPlainKey(string(k), []byte("v"), ut.TouchStorage)
 		}
@@ -235,6 +238,7 @@ func TestHashSort_WaitBufferFreeErrorKeepsArenaInvariant(t *testing.T) {
 
 	forEachMode(t, func(t *testing.T, mode Mode) {
 		ut := NewUpdates(mode, t.TempDir(), keyHasherNoop)
+		forceDirectSpill(ut) // these tests pin the arena/etl path
 		for _, k := range genNibbleKeys(numKeys, keyLen) {
 			ut.TouchPlainKey(string(k), []byte("v"), ut.TouchStorage)
 		}

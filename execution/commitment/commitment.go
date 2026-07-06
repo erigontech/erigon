@@ -1411,6 +1411,13 @@ type Updates struct {
 	// parallel holds the prefix trie of touched hashed keys; nil outside ModeParallel.
 	parallel *parallelUpdate
 
+	// direct accumulates ModeDirect touches in insertion order; once directBytes
+	// crosses directMemLimit the entries are replayed into an etl collector and
+	// collection continues there (etl != nil marks the spilled state).
+	direct         []KeyUpdate
+	directBytes    int
+	directMemLimit int
+
 	// streaming (ModeParallel only) forwards every touched key to streamer.
 	streaming bool
 	streamer  streamingSink
@@ -1505,11 +1512,11 @@ func NewUpdates(m Mode, tmpdir string, hasher keyHasher) *Updates {
 		tmpdir:         tmpdir,
 		mode:           m,
 		addrCacheReuse: hasherReusesAddrPrefix(hasher),
+		directMemLimit: defaultDirectMemLimit,
 	}
 	switch t.mode {
 	case ModeDirect:
 		t.keys = make(map[string]struct{})
-		t.initCollector()
 	case ModeUpdate:
 		t.tree = btree.NewG(64, keyUpdateLessFn)
 		t.treeIdx = make(map[string]*KeyUpdate)
@@ -1526,7 +1533,6 @@ func (t *Updates) SetMode(m Mode) {
 	case ModeDirect:
 		if t.keys == nil {
 			t.keys = make(map[string]struct{})
-			t.initCollector()
 		}
 	case ModeUpdate:
 		if t.tree == nil {
@@ -1551,6 +1557,51 @@ func (t *Updates) initCollector() {
 	}
 	t.etl = etl.NewCollectorWithAllocator("commitment", t.tmpdir, etl.SmallSortableBuffers, log.Root().New("update-tree")).LogLvl(log.LvlDebug)
 	t.etl.SortAndFlushInBackground(true)
+}
+
+// defaultDirectMemLimit bounds the in-memory ModeDirect collection; batches
+// beyond it (shard rebuilds, extreme sync batches) spill to the etl collector.
+const defaultDirectMemLimit = 512 << 20
+
+// directEntryOverhead approximates per-entry bookkeeping (KeyUpdate header +
+// slice growth) on top of the key bytes when accounting against directMemLimit.
+const directEntryOverhead = 48
+
+// plainKeyBytes converts a stored plain key for delivery, keeping the empty
+// value non-nil the way the etl collector delivers hashed-only touches.
+func plainKeyBytes(pk string) []byte {
+	if len(pk) == 0 {
+		return []byte{}
+	}
+	return common.ToBytesZeroCopy(pk)
+}
+
+// collectDirect records one ModeDirect touch. hashedKey and plainKey must be
+// immutable: both are retained until HashSort consumes the batch.
+func (t *Updates) collectDirect(hashedKey []byte, plainKey string) {
+	if t.etl != nil {
+		if err := t.etl.Collect(hashedKey, plainKeyBytes(plainKey)); err != nil {
+			log.Warn("failed to collect updated key", "key", fmt.Sprintf("%x", plainKey), "err", err)
+		}
+		return
+	}
+	t.direct = append(t.direct, KeyUpdate{hashedKey: hashedKey, plainKey: plainKey})
+	t.directBytes += len(hashedKey) + len(plainKey) + directEntryOverhead
+	if t.directBytes >= t.directMemLimit {
+		t.spillDirect()
+	}
+}
+
+// spillDirect replays the in-memory entries into a fresh collector in insertion
+// order, preserving the stable-sort tiebreak for duplicate hashed keys.
+func (t *Updates) spillDirect() {
+	t.initCollector()
+	for i := range t.direct {
+		if err := t.etl.Collect(t.direct[i].hashedKey, plainKeyBytes(t.direct[i].plainKey)); err != nil {
+			log.Warn("failed to collect updated key", "key", fmt.Sprintf("%x", t.direct[i].plainKey), "err", err)
+		}
+	}
+	t.direct, t.directBytes = nil, 0
 }
 
 func (t *Updates) Mode() Mode { return t.mode }
@@ -1607,13 +1658,7 @@ func (t *Updates) TouchPlainKey(key string, val []byte, fn func(c *KeyUpdate, va
 		}
 	case ModeDirect:
 		if _, ok := t.keys[key]; !ok {
-			keyBytes := common.ToBytesZeroCopy(key)
-			hashedKey := t.hashKey(keyBytes)
-
-			err := t.etl.Collect(hashedKey, keyBytes)
-			if err != nil {
-				log.Warn("failed to collect updated key", "key", key, "err", err)
-			}
+			t.collectDirect(t.hashKey(common.ToBytesZeroCopy(key)), key)
 			t.keys[key] = struct{}{}
 		}
 	case ModeParallel:
@@ -1679,13 +1724,7 @@ func (t *Updates) TouchPlainKeyDirect(key string, update *Update) {
 		}
 	case ModeDirect:
 		if _, ok := t.keys[key]; !ok {
-			keyBytes := common.ToBytesZeroCopy(key)
-			hashedKey := t.hashKey(keyBytes)
-
-			err := t.etl.Collect(hashedKey, keyBytes)
-			if err != nil {
-				log.Warn("failed to collect updated key", "key", key, "err", err)
-			}
+			t.collectDirect(t.hashKey(common.ToBytesZeroCopy(key)), key)
 			t.keys[key] = struct{}{}
 		}
 	case ModeParallel:
@@ -1713,14 +1752,10 @@ func (t *Updates) TouchHashedKey(hashedKey []byte) {
 		if len(hashedKey) == 0 {
 			return
 		}
-		// string(hashedKey) copies the bytes, so dedupKey is safe even if the caller reuses the slice.
-		// No extra copy needed before etl.Collect: see Collector.Collect — it copies k and v internally.
+		// string(hashedKey) copies the bytes, so the retained key is safe even if the caller reuses the slice.
 		dedupKey := string(hashedKey)
 		if _, ok := t.keys[dedupKey]; !ok {
-			err := t.etl.Collect(hashedKey, []byte{})
-			if err != nil {
-				log.Warn("failed to collect hashed key", "hashedKey", fmt.Sprintf("%x", hashedKey), "err", err)
-			}
+			t.collectDirect(common.ToBytesZeroCopy(dedupKey), "")
 			t.keys[dedupKey] = struct{}{}
 		}
 	case ModeParallel:
@@ -1805,7 +1840,9 @@ func (t *Updates) Close() {
 	}
 	if t.etl != nil {
 		t.etl.Close()
+		t.etl = nil
 	}
+	t.direct, t.directBytes = nil, 0
 	if t.parallel != nil {
 		t.parallel.Close()
 		t.parallel = nil
@@ -1813,6 +1850,51 @@ func (t *Updates) Close() {
 }
 
 const hashSortBatchSize = 10_000
+
+// hashSortDirectInMem consumes the in-memory ModeDirect collection: a stable
+// sort by hashedKey (preserving touch order for duplicate hashed keys, like the
+// etl collector does), then warmup + fn per batch. Entry memory is stable for
+// the whole call, so no arena ring or WaitBufferFree gating is needed; gen and
+// curArena are deliberately left untouched for the arena-based paths.
+func (t *Updates) hashSortDirectInMem(ctx context.Context, warmuper *Warmuper, fn func(hk, pk []byte, update *Update) error) error {
+	slices.SortStableFunc(t.direct, func(a, b KeyUpdate) int {
+		return bytes.Compare(a.hashedKey, b.hashedKey)
+	})
+
+	var prevKey []byte
+	for start := 0; start < len(t.direct); start += hashSortBatchSize {
+		batch := t.direct[start:min(start+hashSortBatchSize, len(t.direct))]
+		if warmuper != nil {
+			for i := range batch {
+				hk := batch[i].hashedKey
+				startDepth := 0
+				minLen := min(len(prevKey), len(hk))
+				for startDepth < minLen && prevKey[startDepth] == hk[startDepth] {
+					startDepth++
+				}
+				warmuper.WarmKey(hk, startDepth, t.gen)
+				prevKey = hk
+			}
+		}
+		for i := range batch {
+			select {
+			case <-ctx.Done():
+				return ctx.Err()
+			default:
+			}
+			if err := fn(batch[i].hashedKey, plainKeyBytes(batch[i].plainKey), nil); err != nil {
+				return err
+			}
+		}
+	}
+
+	// Zero consumed entries so retained hashedKey slices don't outlive the batch
+	// past the truncation (in-flight warmup items hold their own references).
+	clear(t.direct)
+	t.direct = t.direct[:0]
+	t.directBytes = 0
+	return nil
+}
 
 // HashSort sorts and applies fn to each key-value pair in the order of hashed keys.
 // Keys are processed in batches of 10k to control memory usage.
@@ -1824,6 +1906,9 @@ func (t *Updates) HashSort(ctx context.Context, warmuper *Warmuper, fn func(hk, 
 	switch t.mode {
 	case ModeDirect:
 		clear(t.keys)
+		if t.etl == nil {
+			return t.hashSortDirectInMem(ctx, warmuper, fn)
+		}
 
 		t.batchSlab = t.batchSlab[:0]
 		if warmuper != nil {
@@ -1898,7 +1983,8 @@ func (t *Updates) HashSort(ctx context.Context, warmuper *Warmuper, fn func(hk, 
 			}
 		}
 
-		t.initCollector()
+		t.etl.Close()
+		t.etl = nil
 
 	case ModeUpdate:
 		t.batchSlab = t.batchSlab[:0]
@@ -1996,7 +2082,13 @@ func (t *Updates) Reset() {
 		} else {
 			clear(t.keys)
 		}
-		t.initCollector()
+		if t.etl != nil {
+			t.etl.Close()
+			t.etl = nil
+		}
+		clear(t.direct)
+		t.direct = t.direct[:0]
+		t.directBytes = 0
 	case ModeUpdate:
 		t.tree.Clear(true)
 		clear(t.treeIdx)
