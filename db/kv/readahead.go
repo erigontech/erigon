@@ -51,13 +51,13 @@ const readAheadLabel = "read-ahead"
 // table plus its size. Bounds are nil when under one chunk or the engine can't
 // count-split. Cloning lets them outlive later same-tx mutations.
 func DistributeBounds(tx Tx, table string) (bounds [][]byte, size uint64, err error) {
-	s, ok := tx.(DBWithDistributionSupport)
-	if !ok { // e.g. memdb: nothing to chunk or warm
-		return nil, 0, nil
-	}
 	size, err = tx.BucketSize(table)
 	if err != nil {
 		return nil, 0, err
+	}
+	s, ok := tx.(DBWithDistributionSupport)
+	if !ok { // engine can't count-split
+		return nil, size, nil
 	}
 	if size < WarmupChunkSize.Bytes() {
 		return nil, size, nil
