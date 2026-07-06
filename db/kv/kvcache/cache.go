@@ -369,7 +369,11 @@ func (c *Coherent) getFromCache(k []byte, id uint64, domain kv.Domain) (*Element
 		it, _ = r.cache.Get(&Element{K: k})
 	}
 	if it != nil && isLatest {
-		c.stateEvict.MoveToFront(it)
+		if domain == kv.CodeDomain {
+			c.codeEvict.MoveToFront(it)
+		} else {
+			c.stateEvict.MoveToFront(it)
+		}
 	}
 	return it, r
 }

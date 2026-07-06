@@ -264,6 +264,36 @@ func TestOnNewBlockCodeKeysMatchReaders(t *testing.T) {
 	require.NoError(err)
 }
 
+// A cache hit on the code domain must refresh the entry's position in the
+// code eviction list — otherwise hot code is evicted in insertion order.
+func TestCodeHitRefreshesCodeEvictLRU(t *testing.T) {
+	require, ctx := require.New(t), t.Context()
+	cfg := DefaultCoherentConfig
+	cfg.NewBlockWait = 0
+	c := New(cfg)
+	db := temporaltest.NewTestDB(t, datadir.New(t.TempDir()))
+
+	addr1, addr2 := [20]byte{1}, [20]byte{2}
+	c.OnNewBlock(&remoteproto.StateChangeBatch{
+		StateVersionId: 2,
+		ChangeBatch: []*remoteproto.StateChange{{
+			Direction: remoteproto.Direction_FORWARD,
+			Changes: []*remoteproto.AccountChange{
+				{Action: remoteproto.Action_CODE, Address: gointerfaces.ConvertAddressToH160(addr1), Code: []byte{1}},
+				{Action: remoteproto.Action_CODE, Address: gointerfaces.ConvertAddressToH160(addr2), Code: []byte{2}},
+			},
+		}},
+	})
+	require.Equal(addr1[:], c.codeEvict.Oldest().K)
+
+	err := db.ViewTemporal(ctx, func(tx kv.TemporalTx) error {
+		_, err := c.GetCode(addr1[:], tx, 2)
+		return err
+	})
+	require.NoError(err)
+	require.Equal(addr2[:], c.codeEvict.Oldest().K)
+}
+
 // A request whose cache view outlives KeepViews state-version advances (e.g. a
 // long eth_call) must fall back to its own tx snapshot, not error out.
 func TestViewSurvivesRootEviction(t *testing.T) {
