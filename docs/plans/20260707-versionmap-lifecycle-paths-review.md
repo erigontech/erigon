@@ -61,12 +61,17 @@ interdependence is implemented as **scattered cross-checks**, not one model:
 - Enum order (versionmap.go:50-55): SelfDestructPath **before** BalancePath so `updateWrite`
   zeroes the same-tx balance — a load-bearing processing order.
 
-**Internal inconsistency (concrete):** "revived" is computed three different ways —
-`validateReadImpl` uses a `{Balance,Nonce,CodeHash}` write `> destructTxIndex`;
-`getVersionedAccount` uses `AddressPath >= destructTxIndex` OR `{Balance,Nonce,CodeHash} >`;
-`versionedStateReader` uses `AddressPath >=`. Three sites, three revival definitions
-(`>=` vs `>`, with/without AddressPath). This is the accretion — each was added to fix one
-parallel-vs-serial bug in one path.
+**Internal inconsistency (concrete — a 2-vs-1, not three ways).** The two *readers* agree
+exactly: `getVersionedAccount:987-1004` and `versionedStateReader.ReadAccountData:1352-1369`
+both compute revived as `AddressPath >= destructTx` **OR** `{Balance,Nonce,CodeHash} > destructTx`.
+The *validator* `validateReadImpl:907` computes it as `{Balance,Nonce,CodeHash} > destructTx`
+only — it **omits the `AddressPath >=` arm**. The gap bites precisely in the same-tx
+metamorphic SD+CREATE2 case: a revival that re-writes AddressPath (and CodeHash) at the
+*same* txIdx as the destruct is caught by the readers' `AddressPath >=` but missed by the
+validator's strict `>` (CodeHash written *at* destructTx fails `> destructTx`). Readers then
+surface the revived account while the validator marks the read invalid → the divergence to
+characterize (is it benign conservative re-exec, or a spurious-abort/correctness issue?).
+This is the accretion — each arm added to fix one parallel-vs-serial bug in one path.
 
 **Two distinct kinds of redundancy** (don't conflate them):
 1. *Lifecycle redundancy* — `CreateContractPath` appears mostly in exclusion lists
@@ -84,9 +89,10 @@ parallel-vs-serial bug in one path.
 versionedio_test.go, versioned_read_paths_test.go, parallel_fixes_test.go (path-level) +
 the SD/recreate suite (state/database_test.go, tests/statedb_chain_test.go,
 tests/blockchain_test.go). Three **gaps** — the invariants to pin *before* touching anything:
-1. No single test pins that all three revival sites (`validateReadImpl:907`,
-   `getVersionedAccount:987`, `versionedStateReader:1352`) agree on the same lifecycle verdict
-   — the exact consistency the rationalization must not break. (First test to add.)
+1. No single test pins the three revival sites (`getVersionedAccount:987`,
+   `versionedStateReader:1352`, `validateReadImpl:907`) against one lifecycle verdict — in
+   particular the readers-vs-validator `AddressPath >=` gap in same-tx metamorphic revival.
+   The exact consistency the rationalization must not break. (First test to add.)
 2. No test exercises whether the code-trio's value-vs-noValue split (`CodeHashPath` value,
    `CodePath`/`CodeSizePath` version-only) can produce divergent validity for one code write.
 3. No test isolates `CreateContractPath`'s contribution — needed to justify "exclude as
