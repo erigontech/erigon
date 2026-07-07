@@ -434,7 +434,7 @@ func (api *BaseAPI) checkPruneField(tx kv.Tx, block uint64, field func(*prune.Mo
 	if !amount.Enabled() {
 		return nil
 	}
-	latest, err := rpchelper.GetLatestBlockNumber(tx)
+	latest, err := rpchelper.GetLatestBlockNumber(api.filters.WithOverlay(tx))
 	if err != nil {
 		return err
 	}

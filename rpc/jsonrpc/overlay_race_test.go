@@ -30,6 +30,7 @@ import (
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/db/kv/kvcache"
+	"github.com/erigontech/erigon/db/kv/prune"
 	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/db/state/execctx"
 	"github.com/erigontech/erigon/execution/chain"
@@ -100,6 +101,7 @@ func newOverlayAheadTestAPI(t *testing.T) (base *BaseAPI, m *execmoduletester.Ex
 	require.NoError(t, rawdb.WriteHeadHeaderHash(overlay, hash))
 	require.NoError(t, rawdb.WriteCanonicalHash(overlay, hash, overlayNumber))
 	require.NoError(t, rawdb.WriteBody(overlay, hash, overlayNumber, &types.Body{}))
+	rawdb.WriteForkchoiceHead(overlay, hash)
 
 	events := shards.NewEvents()
 	events.PublishOverlay(doms)
@@ -225,4 +227,34 @@ func TestTxPoolContentFrom_UsesOverlayHead(t *testing.T) {
 	require.NotNil(t, got)
 	require.Equal(t, overlayHeader.BaseFee.ToBig(), got.GasPrice.ToInt(),
 		"pending tx gas price must be derived from the overlay head's base fee, not the stale MDBX head")
+}
+
+// TestCheckPruneHistory_SeesOverlayHead pins that pruning-availability checks
+// resolve "latest" through the block overlay: once the in-flight head pushes
+// the prune boundary forward by one block, a request for the block that just
+// became prunable must be rejected, not silently allowed through on a stale
+// MDBX-only view of the head.
+func TestCheckPruneHistory_SeesOverlayHead(t *testing.T) {
+	t.Parallel()
+	const pruneDistance = 3
+	base, m, _ := newOverlayAheadTestAPI(t)
+
+	pruneMode := prune.Mode{Initialised: true, History: prune.Distance(pruneDistance), Blocks: prune.KeepPostMergeBlocksPruneMode}
+	rwTx, err := m.DB.BeginTemporalRw(m.Ctx)
+	require.NoError(t, err)
+	defer rwTx.Rollback()
+	_, err = prune.EnsureNotChanged(rwTx, pruneMode)
+	require.NoError(t, err)
+	require.NoError(t, rwTx.Commit())
+
+	requestTx, err := m.DB.BeginTemporalRo(m.Ctx)
+	require.NoError(t, err)
+	defer requestTx.Rollback()
+
+	// PruneTo(overlayRaceChainSize) == overlayRaceChainSize-pruneDistance == 2. Taking the
+	// overlay head (overlayRaceChainSize+1) into account instead, PruneTo == 3, so block 2
+	// must be rejected as pruned; against the stale MDBX head it would wrongly pass.
+	prunedBlock := uint64(overlayRaceChainSize - pruneDistance)
+	err = base.checkPruneHistory(m.Ctx, requestTx, prunedBlock)
+	require.Error(t, err, "block %d must be reported as pruned once the overlay head is taken into account", prunedBlock)
 }
