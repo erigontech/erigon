@@ -18,6 +18,7 @@ package commitment
 
 import (
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -283,4 +284,31 @@ func TestBranchCache_Unwind_FrozenSurvives(t *testing.T) {
 	c.Unwind(50)
 	_, _, ok := c.Get(key)
 	require.True(t, ok, "frozen txN=0 entry must survive any positive-txN unwind")
+}
+
+// TestBranchCache_ConcurrentTailGrow drives concurrent tail Puts well past the
+// 512-entry start capacity so maybeGrow runs under contention. It regresses the
+// data race where Add read tailLRU.curCap unsynchronized while maybeGrow/reset
+// wrote it under resizeMu. Must be run under -race to be meaningful.
+func TestBranchCache_ConcurrentTailGrow(t *testing.T) {
+	c := NewBranchCache(4096) // max >> 512 start, so the tail actually grows
+
+	const (
+		workers   = 8
+		perWorker = 2000 // 16k distinct deep keys >> 512 → forces maybeGrow
+	)
+	var wg sync.WaitGroup
+	for w := 0; w < workers; w++ {
+		wg.Add(1)
+		go func(w int) {
+			defer wg.Done()
+			for i := 0; i < perWorker; i++ {
+				// odd flag (0x10) + 3 bytes → 7 nibbles → tail; unique per (w,i).
+				key := []byte{0x10, byte(w), byte(i), byte(i >> 8)}
+				c.Put(key, []byte{byte(i)}, 0, 100)
+				c.Get(key)
+			}
+		}(w)
+	}
+	wg.Wait()
 }

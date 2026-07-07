@@ -343,7 +343,7 @@ func (c *GenericCache[T]) put(key []byte, value T, txNum uint64, overwrite bool)
 
 	// ModeEvictLRU: grow toward the ceiling before inserting into a full LRU, so a
 	// busy cache expands into its budget rather than evicting at the start size.
-	if curCap := c.curCap.Load(); c.mode != ModeNoOp && lru.Len() >= int(curCap) && curCap < c.maxCap {
+	if curCap := c.curCap.Load(); c.mode != ModeNoOp && curCap < c.maxCap && lru.Len() >= int(curCap) {
 		c.maybeGrow()
 		lru = c.data.Load()
 	}

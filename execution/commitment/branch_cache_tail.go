@@ -49,7 +49,7 @@ type tailLRU struct {
 	maxCap uint32
 
 	resizeMu sync.Mutex
-	curCap   uint32
+	curCap   atomic.Uint32
 	reserved int64
 }
 
@@ -61,7 +61,7 @@ func newTailLRU(maxCapacity uint32) *tailLRU {
 	t := &tailLRU{maxCap: maxCapacity}
 	t.reserved = int64(start) * tailEntryBytes
 	cachebudget.Global.Take(t.reserved) // initial slice is small; take it unconditionally
-	t.curCap = start
+	t.curCap.Store(start)
 	t.cur.Store(newTailShards(start))
 	return t
 }
@@ -81,7 +81,9 @@ func (t *tailLRU) Get(key uint64) (*branchCacheEntry, bool) {
 
 func (t *tailLRU) Add(key uint64, entry *branchCacheEntry) {
 	lru := t.cur.Load()
-	if lru.Len() >= int(t.curCap) {
+	// curCap < maxCap first: a fully-grown tail can never grow, so it must not
+	// pay lru.Len()'s per-shard locks on every insert.
+	if curCap := t.curCap.Load(); curCap < t.maxCap && lru.Len() >= int(curCap) {
 		t.maybeGrow()
 		lru = t.cur.Load()
 	}
@@ -96,14 +98,15 @@ func (t *tailLRU) maybeGrow() {
 	defer t.resizeMu.Unlock()
 
 	old := t.cur.Load()
-	if t.curCap >= t.maxCap || old.Len() < int(t.curCap) {
+	curCap := t.curCap.Load()
+	if curCap >= t.maxCap || old.Len() < int(curCap) {
 		return
 	}
-	newCap := t.curCap * tailGrowFactor
+	newCap := curCap * tailGrowFactor
 	if newCap > t.maxCap {
 		newCap = t.maxCap
 	}
-	delta := int64(newCap-t.curCap) * tailEntryBytes
+	delta := int64(newCap-curCap) * tailEntryBytes
 	if !cachebudget.Global.Reserve(delta) {
 		return
 	}
@@ -114,7 +117,7 @@ func (t *tailLRU) maybeGrow() {
 		}
 	}
 	t.cur.Store(next)
-	t.curCap = newCap
+	t.curCap.Store(newCap)
 	t.reserved += delta
 }
 
@@ -133,7 +136,7 @@ func (t *tailLRU) reset() {
 	}
 	cachebudget.Global.Release(t.reserved - int64(start)*tailEntryBytes)
 	t.reserved = int64(start) * tailEntryBytes
-	t.curCap = start
+	t.curCap.Store(start)
 	t.cur.Store(newTailShards(start))
 }
 

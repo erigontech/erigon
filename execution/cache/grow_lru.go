@@ -89,7 +89,7 @@ func (g *growLRU[V]) Get(key uint64) (V, bool) { return g.cur.Load().Get(key) }
 
 func (g *growLRU[V]) Add(key uint64, value V) {
 	lru := g.cur.Load()
-	if curCap := g.curCap.Load(); lru.Len() >= int(curCap) && curCap < g.maxCap {
+	if curCap := g.curCap.Load(); curCap < g.maxCap && lru.Len() >= int(curCap) {
 		g.maybeGrow()
 		lru = g.cur.Load()
 	}

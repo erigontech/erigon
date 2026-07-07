@@ -1,6 +1,23 @@
+// Copyright 2026 The Erigon Authors
+// This file is part of Erigon.
+//
+// Erigon is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Erigon is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
+
 package cache
 
 import (
+	"bytes"
 	"sync/atomic"
 
 	"github.com/maypok86/otter/v2"
@@ -67,6 +84,9 @@ func (s *CodeStore) GetByHash(tx kv.Getter, codeHash []byte) ([]byte, bool) {
 		s.misses.Add(1)
 		return nil, false
 	}
+	// GetOne returns mmap-backed memory that must not outlive the tx; the otter
+	// tier is process-lifetime, so copy before caching/returning (kv contract).
+	code = bytes.Clone(code)
 	s.mem.Set(key, code)
 	s.tableHits.Add(1)
 	return code, true
@@ -121,13 +141,9 @@ func (s *CodeStore) Evict(tx kv.RwTx) error {
 	}
 	defer c.Close()
 	target := int64(s.tableCapBytes / 10 * 9)
-	for s.tableSizeBytes.Load() > target {
-		k, v, err := c.Next()
+	for k, v, err := c.First(); k != nil && s.tableSizeBytes.Load() > target; k, v, err = c.Next() {
 		if err != nil {
 			return err
-		}
-		if k == nil {
-			break
 		}
 		if err := c.DeleteCurrent(); err != nil {
 			return err
