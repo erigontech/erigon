@@ -123,7 +123,7 @@ func SqueezeCommitmentFiles(ctx context.Context, at *AggregatorRoTx, logger log.
 	stepSize := at.StepSize()
 	dirs := at.Dirs()
 
-	commitmentUseReferencedBranches := at.a.Cfg(kv.CommitmentDomain).ReplaceKeysInValues
+	commitmentUseReferencedBranches := at.a.referencesInCommitmentBranches()
 	if !commitmentUseReferencedBranches {
 		return nil
 	}
@@ -225,7 +225,11 @@ func SqueezeCommitmentFiles(ctx context.Context, at *AggregatorRoTx, logger log.
 				"progress", fmt.Sprintf("%d/%d", ri+1, len(ranges)), "compress_cfg", commitment.d.CompressCfg, "compress", compression)
 
 			originalPath := cf.decompressor.FilePath()
-			squeezedTmpPath := originalPath + sqExt + ".tmp"
+			// The squeeze re-references the file, so stamp the output with the flag-derived write
+			// version (v2.1) rather than reusing the input name, which may be a plain v2.2 file
+			// written during a flag-off rebuild window.
+			targetPath := commitment.d.kvNewFilePath(kv.Step(r.from/stepSize), kv.Step(r.to/stepSize))
+			squeezedTmpPath := targetPath + sqExt + ".tmp"
 
 			squeezedCompr, err := seg.NewCompressor(ctx, "squeeze", squeezedTmpPath, dirs.Tmp,
 				commitment.d.CompressCfg, log.LvlInfo, commitment.d.logger)
@@ -239,7 +243,7 @@ func SqueezeCommitmentFiles(ctx context.Context, at *AggregatorRoTx, logger log.
 			reader.Reset(0)
 
 			rng := MergeRange{needMerge: true, from: af.startTxNum, to: af.endTxNum}
-			vt, err := commitment.commitmentValTransformDomain(rng, accounts, storage, af, sf)
+			vt, err := commitment.commitmentValTransformDomain(rng, accounts, storage, af, sf, at.a.referencesInCommitmentBranches())
 			if err != nil {
 				return fmt.Errorf("failed to create commitment value transformer: %w", err)
 			}
@@ -289,7 +293,7 @@ func SqueezeCommitmentFiles(ctx context.Context, at *AggregatorRoTx, logger log.
 			sizeDelta += delta
 			cf.closeFilesAndRemove()
 
-			squeezedPath := originalPath + sqExt
+			squeezedPath := targetPath + sqExt
 			if err = os.Rename(squeezedTmpPath, squeezedPath); err != nil {
 				return err
 			}
@@ -323,8 +327,8 @@ func SqueezeCommitmentFiles(ctx context.Context, at *AggregatorRoTx, logger log.
 // to full plain keys by looking them up in the supplied account and storage domain files.
 //
 // This is the read-side counterpart of commitmentValTransformDomain. It assumes the caller has
-// already checked the prerequisites (non-empty branch, not KeyCommitmentState, ReplaceKeysInValues
-// enabled, threshold-reached range): expansion is unconditional. The caller is also responsible
+// already checked the prerequisites (non-empty branch, not KeyCommitmentState, and the input file
+// is referenced per the per-file version gate): expansion is unconditional. The caller is also responsible
 // for emitting per-key debug metrics; this function intentionally does not so that offline tools
 // like the commitment converter can reuse it without coupling to read-path observability.
 //
@@ -393,7 +397,7 @@ func CheckCommitmentForPrint(ctx context.Context, rwDb kv.TemporalRwDB) (string,
 	}
 	var s strings.Builder
 	s.WriteString(fmt.Sprintf("[commitment] Latest: blockNum: %d txNum: %d latestRootHash: %x\n", latestBlock, latestTx, rootHash))
-	s.WriteString(fmt.Sprintf("[commitment] stepSize %d, ReplaceKeysInValues enabled %t\n", rwTx.Debug().StepSize(), a.Cfg(kv.CommitmentDomain).ReplaceKeysInValues))
+	s.WriteString(fmt.Sprintf("[commitment] stepSize %d, ReferencesInCommitmentBranches enabled %t\n", rwTx.Debug().StepSize(), a.referencesInCommitmentBranches()))
 	return s.String(), nil
 }
 
@@ -490,8 +494,14 @@ func RebuildCommitmentFilesWithHistory(ctx context.Context, rwDb kv.TemporalRwDB
 	defer rwDb.Debug().EnableReadAhead().DisableReadAhead()
 	a.DisableInterDomainDependencies()
 
-	// Disable ReplaceKeysInValues before main loop; will be re-enabled for squeeze pass
-	a.ForTestReplaceKeysInValues(kv.CommitmentDomain, false)
+	// Capture the resolved flag before we temporarily flip it off for the rebuild loop;
+	// the squeeze gate below uses the captured value, not process-global schema state.
+	wantsReferencesInBranches := a.referencesInCommitmentBranches()
+	// Restore the live flag on exit so the internal rebuild/squeeze toggles below don't leak out.
+	defer a.ForTestReferencesInCommitmentBranches(kv.CommitmentDomain, wantsReferencesInBranches)
+
+	// Disable ReferencesInCommitmentBranches before main loop; will be re-enabled for squeeze pass
+	a.ForTestReferencesInCommitmentBranches(kv.CommitmentDomain, false)
 
 	// Determine block range to process
 	var execProgress uint64
@@ -820,8 +830,8 @@ func RebuildCommitmentFilesWithHistory(ctx context.Context, rwDb kv.TemporalRwDB
 		}
 	}
 
-	// Squeeze pass: re-compress commitment files with ReplaceKeysInValues
-	if !squeeze && !statecfg.Schema.CommitmentDomain.ReplaceKeysInValues {
+	// Squeeze pass: re-compress commitment files with ReferencesInCommitmentBranches
+	if !squeeze && !wantsReferencesInBranches {
 		return latestRoot, nil
 	}
 	logger.Info("[rebuild_commitment_history] squeeze starting")
@@ -830,7 +840,7 @@ func RebuildCommitmentFilesWithHistory(ctx context.Context, rwDb kv.TemporalRwDB
 	a.recalcVisibleFiles(nil)
 	a.dirtyFilesLock.Unlock()
 
-	// Check if account files exist - squeeze requires them for ReplaceKeysInValues
+	// Check if account files exist - squeeze requires them for ReferencesInCommitmentBranches
 	actx := a.BeginFilesRo()
 	hasAccountFiles := len(actx.d[kv.AccountsDomain].files) > 0
 	if !hasAccountFiles {
@@ -840,7 +850,7 @@ func RebuildCommitmentFilesWithHistory(ctx context.Context, rwDb kv.TemporalRwDB
 	}
 	defer actx.Close()
 
-	a.ForTestReplaceKeysInValues(kv.CommitmentDomain, true)
+	a.ForTestReferencesInCommitmentBranches(kv.CommitmentDomain, true)
 
 	if err = SqueezeCommitmentFiles(ctx, actx, logger); err != nil {
 		logger.Warn("[rebuild_commitment_history] squeeze failed", "err", err)
@@ -870,12 +880,18 @@ func RebuildCommitmentFiles(ctx context.Context, rwDb kv.TemporalRwDB, txNumsRea
 	// different visibleFiles
 	a.DisableAllDependencies()
 
-	// Disable ReplaceKeysInValues during rebuild. The merge loop after each range would
+	// Capture the resolved flag before we temporarily flip it off for the rebuild loop;
+	// the squeeze gate below uses the captured value, not process-global schema state.
+	wantsReferencesInBranches := a.referencesInCommitmentBranches()
+	// Restore the live flag on exit so the internal rebuild/squeeze toggles below don't leak out.
+	defer a.ForTestReferencesInCommitmentBranches(kv.CommitmentDomain, wantsReferencesInBranches)
+
+	// Disable ReferencesInCommitmentBranches during rebuild. The merge loop after each range would
 	// otherwise shorten keys in commitment branch data, embedding file-range references
 	// (e.g. storage.0-16) that become stale once those files are merged into larger ranges
 	// (storage.0-32). The squeeze pass at the end re-enables this flag and applies the
 	// shortening in one shot when all files are finalized.
-	a.ForTestReplaceKeysInValues(kv.CommitmentDomain, false)
+	a.ForTestReferencesInCommitmentBranches(kv.CommitmentDomain, false)
 
 	acRo := a.BeginFilesRo() // this tx is used to read existing domain files and closed in the end
 	defer acRo.Close()
@@ -1113,7 +1129,7 @@ func RebuildCommitmentFiles(ctx context.Context, rwDb kv.TemporalRwDB, txNumsRea
 
 	acRo.Close()
 
-	if !squeeze {
+	if !squeeze && !wantsReferencesInBranches {
 		return latestRoot, nil
 	}
 	logger.Info("[squeeze] starting")
@@ -1122,7 +1138,7 @@ func RebuildCommitmentFiles(ctx context.Context, rwDb kv.TemporalRwDB, txNumsRea
 	a.dirtyFilesLock.Unlock()
 
 	logger.Info(fmt.Sprintf("[squeeze] latest root %x", latestRoot))
-	a.ForTestReplaceKeysInValues(kv.CommitmentDomain, squeeze)
+	a.ForTestReferencesInCommitmentBranches(kv.CommitmentDomain, true)
 
 	actx := a.BeginFilesRo()
 	defer actx.Close()

@@ -22,7 +22,7 @@ import (
 	"os"
 
 	"github.com/c2h5oh/datasize"
-	"github.com/urfave/cli/v2"
+	"github.com/urfave/cli/v3"
 	"golang.org/x/sync/semaphore"
 
 	"github.com/erigontech/erigon/cl/beacon/beacon_router_configuration"
@@ -44,7 +44,7 @@ import (
 
 func main() {
 	app := app.MakeApp("caplin", runCaplinNode, append(caplinflags.CliFlags, sentinelflags.CliFlags...))
-	if err := app.Run(os.Args); err != nil {
+	if err := app.Run(context.Background(), os.Args); err != nil {
 		_, printErr := fmt.Fprintln(os.Stderr, err)
 		if printErr != nil {
 			log.Warn("Fprintln error", "err", printErr)
@@ -53,13 +53,13 @@ func main() {
 	}
 }
 
-func runCaplinNode(cliCtx *cli.Context) error {
+func runCaplinNode(ctx context.Context, cliCtx *cli.Command) error {
 	cfg, err := caplincli.SetupCaplinCli(cliCtx)
 	if err != nil {
 		log.Error("[Phase1] Could not initialize caplin", "err", err)
 		return err
 	}
-	if _, err := debug.SetupSimple(cliCtx, true /* root logger */); err != nil {
+	if _, err := debug.SetupSimple(ctx, cliCtx, true /* root logger */); err != nil {
 		return err
 	}
 	rcfg := beacon_router_configuration.RouterConfiguration{
@@ -80,11 +80,11 @@ func runCaplinNode(cliCtx *cli.Context) error {
 	log.Info("[Phase1] Running Caplin")
 
 	// setup periodic logging and prometheus updates
-	go mem.LogMemStats(cliCtx.Context, log.Root())
-	go disk.UpdateDiskStats(cliCtx.Context, log.Root())
+	go mem.LogMemStats(ctx, log.Root())
+	go disk.UpdateDiskStats(ctx, log.Root())
 
 	// Either start from genesis or a checkpoint
-	ctx, cn := context.WithCancel(cliCtx.Context)
+	ctx, cn := context.WithCancel(ctx)
 	defer cn()
 
 	var executionEngine execution_client.ExecutionEngine
