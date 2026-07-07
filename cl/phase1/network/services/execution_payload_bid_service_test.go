@@ -563,6 +563,26 @@ func TestExecutionPayloadBidServiceHighestBid(t *testing.T) {
 	require.Equal(t, uint64(2000), stored.Message.Value)
 }
 
+func TestExecutionPayloadBidServiceStoreValidBidDoesNotOverwriteHigherBid(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	defer ctrl.Finish()
+
+	service, _, _, _, epbsPool := setupExecutionPayloadBidService(t, ctrl)
+	high := newTestSignedExecutionPayloadBid(100, 1, 2000)
+	low := newTestSignedExecutionPayloadBid(100, 2, 500)
+
+	require.NoError(t, service.storeValidBid(high))
+	err := service.storeValidBid(low)
+	require.Error(t, err)
+	require.True(t, errors.Is(err, ErrIgnore))
+
+	bidKey := pool.HighestBidKey{Slot: 100, ParentBlockHash: high.Message.ParentBlockHash, ParentBlockRoot: high.Message.ParentBlockRoot}
+	stored, found := epbsPool.HighestBids.Get(bidKey)
+	require.True(t, found)
+	require.Equal(t, high, stored)
+	require.False(t, service.seenCache.Contains(seenBidKey{builderIndex: 2, slot: 100}))
+}
+
 func TestExecutionPayloadBidServiceRejectsLowerBidBeforeStateFetch(t *testing.T) {
 	ctrl := gomock.NewController(t)
 	defer ctrl.Finish()
@@ -676,7 +696,7 @@ func TestExecutionPayloadBidServicePendingQueueCap(t *testing.T) {
 	require.False(t, exists)
 }
 
-func TestExecutionPayloadBidServicePendingQueueDedupsSameBuilderSlot(t *testing.T) {
+func TestExecutionPayloadBidServicePendingQueueKeepsDistinctSameBuilderSlot(t *testing.T) {
 	ctrl := gomock.NewController(t)
 	defer ctrl.Finish()
 
@@ -689,9 +709,35 @@ func TestExecutionPayloadBidServicePendingQueueDedupsSameBuilderSlot(t *testing.
 	service.queuePendingBid(first)
 	service.queuePendingBid(second)
 
-	require.Equal(t, int32(1), service.pendingCount.Load())
-	_, firstExists := service.pendingBids.Load(pendingBidKeyFor(first))
+	require.Equal(t, int32(2), service.pendingCount.Load())
+	stored, firstExists := service.pendingBids.Load(pendingBidKeyFor(first))
 	require.True(t, firstExists)
+	require.Same(t, first, stored.(*pendingBidJob).msg)
+	stored, secondExists := service.pendingBids.Load(pendingBidKeyFor(second))
+	require.True(t, secondExists)
+	require.Same(t, second, stored.(*pendingBidJob).msg)
+}
+
+func TestExecutionPayloadBidServiceDeletePendingBidDoesNotRemoveOtherSameBuilderSlot(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	defer ctrl.Finish()
+
+	service, _, _, _, _ := setupExecutionPayloadBidService(t, ctrl)
+	first := newTestSignedExecutionPayloadBid(100, 1, 1000)
+	second := newTestSignedExecutionPayloadBid(100, 1, 2000)
+
+	service.queuePendingBid(first)
+	firstKey := pendingBidKeyFor(first)
+	firstJob, exists := service.pendingBids.Load(firstKey)
+	require.True(t, exists)
+
+	service.queuePendingBid(second)
+	require.True(t, service.deletePendingBid(firstKey, firstJob.(*pendingBidJob)))
+	require.Equal(t, int32(1), service.pendingCount.Load())
+
+	current, exists := service.pendingBids.Load(pendingBidKeyFor(second))
+	require.True(t, exists)
+	require.Same(t, second, current.(*pendingBidJob).msg)
 }
 
 func TestExecutionPayloadBidServicePendingQueueCapConcurrent(t *testing.T) {

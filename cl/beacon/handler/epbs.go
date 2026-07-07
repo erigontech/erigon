@@ -515,6 +515,9 @@ func (a *ApiHandler) PostEthV1BeaconPoolPayloadAttestations(w http.ResponseWrite
 		// and delegates to forkchoice.OnPayloadAttestationMessage for signature + PTC checks)
 		if a.payloadAttestationService != nil {
 			if err := a.payloadAttestationService.ProcessMessage(r.Context(), nil, msg); err != nil {
+				if errors.Is(err, clservices.ErrAttestationQueued) {
+					continue
+				}
 				failures = append(failures, poolingFailure{
 					Index:   i,
 					Message: err.Error(),

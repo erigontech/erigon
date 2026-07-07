@@ -103,6 +103,30 @@ func TestPostPayloadAttestationsAcceptsSSZContentTypeParameters(t *testing.T) {
 	require.Equal(t, http.StatusOK, recorder.Code, recorder.Body.String())
 }
 
+func TestPostPayloadAttestationsAcceptsQueuedWithoutPooling(t *testing.T) {
+	_, _, _, _, _, handler, _, _, _, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), true)
+	ctrl := gomock.NewController(t)
+	defer ctrl.Finish()
+
+	msg := newTestPayloadAttestationMessage(t, 12, common.HexToHash("0x1234"))
+	attestationService := mock_services.NewMockPayloadAttestationService(ctrl)
+	attestationService.EXPECT().ProcessMessage(gomock.Any(), gomock.Nil(), gomock.Any()).Return(fmt.Errorf("%w: %w", services.ErrIgnore, services.ErrAttestationQueued))
+	handler.payloadAttestationService = attestationService
+	handler.epbsPool = pool.NewEpbsPool()
+
+	body, err := json.Marshal([]*cltypes.PayloadAttestationMessage{msg})
+	require.NoError(t, err)
+	request := httptest.NewRequest(http.MethodPost, "/eth/v1/beacon/pool/payload_attestations", strings.NewReader(string(body)))
+	request.Header.Set("Content-Type", "application/json")
+	recorder := httptest.NewRecorder()
+
+	handler.PostEthV1BeaconPoolPayloadAttestations(recorder, request)
+
+	require.Equal(t, http.StatusOK, recorder.Code, recorder.Body.String())
+	_, found := handler.epbsPool.PayloadAttestations.Get(pool.PayloadAttestationKey{Slot: msg.Data.Slot, ValidatorIndex: msg.ValidatorIndex})
+	require.False(t, found)
+}
+
 func TestPostPayloadAttestationsRejectsMalformedContentType(t *testing.T) {
 	_, _, _, _, _, handler, _, _, _, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), true)
 
