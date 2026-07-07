@@ -685,6 +685,26 @@ func insertValidateAndUfc1By1(ctx context.Context, exec *execmodule.ExecModule, 
 	return nil
 }
 
+// insertAndUfcBatched inserts all blocks and drives a single FCU to the top,
+// so the whole batch executes under one forkchoice run.
+func insertAndUfcBatched(ctx context.Context, exec *execmodule.ExecModule, blocks []*types.Block) error {
+	ir, err := insertBlocks(ctx, exec, blocks)
+	if err != nil {
+		return err
+	}
+	if ir != execmodule.ExecutionStatusSuccess {
+		return fmt.Errorf("unexpected insertBlocks status: %s", ir)
+	}
+	ur, err := updateForkChoice(ctx, exec, blocks[len(blocks)-1].Header())
+	if err != nil {
+		return err
+	}
+	if ur.Status != execmodule.ExecutionStatusSuccess {
+		return fmt.Errorf("unexpected updateForkChoice status: %s", ur.Status)
+	}
+	return nil
+}
+
 func assembleBlock(ctx context.Context, exec *execmodule.ExecModule, params *builder.Parameters) (uint64, error) {
 	return retryBusy(ctx, func() (uint64, bool, error) {
 		r, err := exec.AssembleBlock(ctx, params)
@@ -1335,41 +1355,53 @@ func TestStateChangeVersionMatchesCommitted(t *testing.T) {
 		{name: "fg-commit"},
 		{name: "bg-commit", opts: []execmoduletester.Option{execmoduletester.WithFcuBackgroundCommit()}},
 	} {
-		t.Run(mode.name, func(t *testing.T) {
-			ctx := t.Context()
-			m := execmoduletester.New(t, mode.opts...)
-			exec := m.ExecModule
+		// 1by1 flushes once per block; batched executes all blocks under one
+		// FCU and crosses the initial-cycle threshold, so mid-FCU CommitCycle
+		// commits bump the version before the single announce.
+		for _, ins := range []struct {
+			name   string
+			blocks int
+			insert func(context.Context, *execmodule.ExecModule, []*types.Block) error
+		}{
+			{name: "1by1", blocks: 3, insert: insertValidateAndUfc1By1},
+			{name: "batched", blocks: 20, insert: insertAndUfcBatched},
+		} {
+			t.Run(mode.name+"/"+ins.name, func(t *testing.T) {
+				ctx := t.Context()
+				m := execmoduletester.New(t, mode.opts...)
+				exec := m.ExecModule
 
-			streamCtx, cancel := context.WithCancel(ctx)
-			defer cancel()
-			stream, err := m.StateChangesClient().StateChanges(streamCtx, &remoteproto.StateChangeRequest{}, grpc.WaitForReady(true))
-			require.NoError(t, err)
-
-			chainPack, err := blockgen.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 3, nil)
-			require.NoError(t, err)
-			require.NoError(t, insertValidateAndUfc1By1(ctx, exec, chainPack.Blocks))
-
-			topBlock := chainPack.TopBlock.NumberU64()
-			var lastAnnounced uint64
-			for found := false; !found; {
-				batch, err := stream.Recv()
+				streamCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
+				defer cancel()
+				stream, err := m.StateChangesClient().StateChanges(streamCtx, &remoteproto.StateChangeRequest{}, grpc.WaitForReady(true))
 				require.NoError(t, err)
-				for _, cb := range batch.ChangeBatch {
-					if cb.Direction == remoteproto.Direction_FORWARD && cb.BlockHeight == topBlock {
-						lastAnnounced = batch.StateVersionId
-						found = true
+
+				chainPack, err := blockgen.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, ins.blocks, nil)
+				require.NoError(t, err)
+				require.NoError(t, ins.insert(ctx, exec, chainPack.Blocks))
+
+				topBlock := chainPack.TopBlock.NumberU64()
+				var lastAnnounced uint64
+				for found := false; !found; {
+					batch, err := stream.Recv()
+					require.NoError(t, err)
+					for _, cb := range batch.ChangeBatch {
+						if cb.Direction == remoteproto.Direction_FORWARD && cb.BlockHeight == topBlock {
+							lastAnnounced = batch.StateVersionId
+							found = true
+						}
 					}
 				}
-			}
 
-			exec.WaitIdle(ctx)
-			var committed uint64
-			require.NoError(t, m.DB.View(ctx, func(tx kv.Tx) error {
-				committed, err = rawdb.GetStateVersion(tx)
-				return err
-			}))
-			require.Equal(t, committed, lastAnnounced, "announced StateVersionId must equal committed PlainStateVersion")
-		})
+				exec.WaitIdle(ctx)
+				var committed uint64
+				require.NoError(t, m.DB.View(ctx, func(tx kv.Tx) error {
+					committed, err = rawdb.GetStateVersion(tx)
+					return err
+				}))
+				require.Equal(t, committed, lastAnnounced, "announced StateVersionId must equal committed PlainStateVersion")
+			})
+		}
 	}
 }
 

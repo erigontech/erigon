@@ -562,31 +562,33 @@ func (api *DebugAPIImpl) AccountAt(ctx context.Context, blockHash common.Hash, t
 	}
 	defer tx.Rollback()
 
-	header, err := api.headerByHash(ctx, blockHash, tx)
+	// Committed view: the canonical-hash check and GetAsOf reads below use the
+	// same plain tx (an overlay-resolved head would have no committed history).
+	blockNumber, err := api._blockReader.HeaderNumber(ctx, tx, blockHash)
 	if err != nil {
 		return &AccountResult{}, err
 	}
-	if header == nil {
+	if blockNumber == nil {
 		return nil, nil // not error, see https://github.com/erigontech/erigon/issues/1645
 	}
-	canonicalHash, ok, err := api._blockReader.CanonicalHash(ctx, tx, header.Number.Uint64())
+	canonicalHash, ok, err := api._blockReader.CanonicalHash(ctx, tx, *blockNumber)
 	if err != nil {
 		return nil, err
 	}
 	if !ok {
-		return nil, fmt.Errorf("canonical hash not found %d", header.Number.Uint64())
+		return nil, fmt.Errorf("canonical hash not found %d", *blockNumber)
 	}
 	isCanonical := canonicalHash == blockHash
 	if !isCanonical {
 		return nil, errors.New("block hash is not canonical")
 	}
 
-	err = api.BaseAPI.checkPruneHistory(ctx, tx, header.Number.Uint64())
+	err = api.BaseAPI.checkPruneHistory(ctx, tx, *blockNumber)
 	if err != nil {
 		return nil, err
 	}
 
-	minTxNum, err := api._txNumReader.Min(ctx, tx, header.Number.Uint64())
+	minTxNum, err := api._txNumReader.Min(ctx, tx, *blockNumber)
 	if err != nil {
 		return nil, err
 	}

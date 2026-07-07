@@ -98,6 +98,7 @@ func newOverlayAheadTestAPI(t *testing.T) (base *BaseAPI, m *execmoduletester.Ex
 	// enough for the reader paths under test to resolve this header as current.
 	require.NoError(t, rawdb.WriteHeader(overlay, overlayHeader))
 	require.NoError(t, rawdb.WriteHeadHeaderHash(overlay, hash))
+	rawdb.WriteForkchoiceHead(overlay, hash)
 	require.NoError(t, rawdb.WriteCanonicalHash(overlay, hash, overlayNumber))
 	require.NoError(t, rawdb.WriteBody(overlay, hash, overlayNumber, &types.Body{}))
 
@@ -209,6 +210,39 @@ func TestTxPoolContent_UsesOverlayHead(t *testing.T) {
 	require.NotNil(t, got)
 	require.Equal(t, overlayHeader.BaseFee.ToBig(), got.GasPrice.ToInt(),
 		"pending tx gas price must be derived from the overlay head's base fee, not the stale MDBX head")
+}
+
+// TestGetBlockTransactionCountByHash_SeesOverlayHead pins that the by-hash
+// count resolves the overlay head exactly like its by-number twin: the same
+// in-flight block must be visible through both, not null through one of them.
+func TestGetBlockTransactionCountByHash_SeesOverlayHead(t *testing.T) {
+	t.Parallel()
+	base, m, overlayHeader := newOverlayAheadTestAPI(t)
+	api := newEthApiForTest(base, m.DB, nil, nil)
+
+	byNumber, err := api.GetBlockTransactionCountByNumber(m.Ctx, rpc.BlockNumber(overlayHeader.Number.Uint64()))
+	require.NoError(t, err)
+	require.NotNil(t, byNumber)
+
+	byHash, err := api.GetBlockTransactionCountByHash(m.Ctx, overlayHeader.Hash())
+	require.NoError(t, err)
+	require.NotNil(t, byHash, "by-hash count must see the overlay head the by-number count sees")
+	require.Equal(t, *byNumber, *byHash)
+}
+
+// TestDebugAccountAt_OverlayHeadHash_CommittedView pins that debug_accountAt
+// resolves the block hash on the committed view: its GetAsOf history reads can
+// only see committed data, so an overlay-published head must read as an
+// unknown block (null) — not resolve to a header whose canonical-hash check
+// then fails.
+func TestDebugAccountAt_OverlayHeadHash_CommittedView(t *testing.T) {
+	t.Parallel()
+	base, m, overlayHeader := newOverlayAheadTestAPI(t)
+	api := NewPrivateDebugAPI(base, m.DB, nil, 0, false)
+
+	result, err := api.AccountAt(m.Ctx, overlayHeader.Hash(), 0, m.Address)
+	require.NoError(t, err, "an in-flight (uncommitted) head hash must read as unknown, not error")
+	require.Nil(t, result)
 }
 
 // TestTxPoolContentFrom_UsesOverlayHead pins that txpool_contentFrom reads the
