@@ -136,9 +136,8 @@ func Fuzz_ProcessUpdates_ArbitraryUpdateCount2(f *testing.F) {
 		hph := NewHexPatriciaHashed(length.Addr, ms, DefaultTrieConfig())
 		hphAnother := NewHexPatriciaHashed(length.Addr, ms2, DefaultTrieConfig())
 
-		trace := false
-		hph.SetTrace(trace)
-		hphAnother.SetTrace(trace)
+		hph.SetTraceWriter(nil)
+		hphAnother.SetTraceWriter(nil)
 
 		for i := 0; i < len(plainKeys); i++ {
 			err := ms.applyPlainUpdates(plainKeys[i:i+1], updates[i:i+1])
