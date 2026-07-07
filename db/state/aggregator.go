@@ -949,6 +949,7 @@ func (a *Aggregator) buildFiles(ctx context.Context, step kv.Step) error {
 	g.SetLimit(a.workers.getCollateAndBuild())
 
 	ac := a.BeginFilesRo()
+	defer ac.Close()
 	for id, d := range a.d {
 		if d.Disable {
 			continue
