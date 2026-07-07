@@ -205,5 +205,14 @@ Findings from the state-field enumeration:
   are the *outcome* of a consistent lifecycle model, validated against the above.
 
 ## Perf baseline (before any change)
-`perf_results/rebaseline-postmerge-21536-100M-serial.csv` (merged binary vs B0). Micro-bench
-`BenchmarkWarmExtCodeHash` = 471 ns/op, 408 B, 7 allocs (Empty()+GetCodeHash warm path).
+`perf_results/rebaseline-postmerge-21536-100M-serial.csv` (merged binary vs B0).
+
+**Micro-bench caveat (corrected 2026-07-07):** `BenchmarkWarmExtCodeHash` (~471 ns/op, 408 B,
+7 allocs) does **not** exercise `refreshVersionedAccount`. With only field cells and an empty
+reader, `readAccount` returns nil and `Empty()` short-circuits on the absent path
+(`getVersionedAccount` returns before the refresh). Reproducing the warm-refresh path in a
+unit bench needs a populated reader/domains, not just versionMap cells — verified: writing
+AddressPath alone still reads empty. **The 20× warm-extcodehash gap must be profiled/measured
+on the benchmarkoor cell** (per the perf skill), not this micro-bench. The refresh/SD-probe
+over-work is real in the cell but small in absolute isolation; a production change to the hot
+OCC read path is not justified by the micro-bench and must be gated on a benchmarkoor A/B.

@@ -123,12 +123,14 @@ func BenchmarkVersionedExecReads(b *testing.B) {
 	}
 }
 
-// BenchmarkWarmExtCodeHash reproduces the warm EXTCODEHASH opcode pattern
-// (Empty() then GetCodeHash()) that the warm-extcodehash benchmarkoor cell — the
-// 20x peer-gap outlier — hammers. Empty() falls through to getVersionedAccount →
-// refreshVersionedAccount (a 4-field refresh incl. the unused incarnation, each
-// field re-probing SelfDestruct under the versionMap RWMutex), so this pins the
-// over-refresh + per-read-probe cost the parallel warm path pays per opcode.
+// BenchmarkWarmExtCodeHash drives the Empty()+GetCodeHash opcode pattern. NOTE:
+// it does NOT reproduce the warm-extcodehash benchmarkoor cell's refresh path —
+// with only field cells and an empty reader, readAccount returns nil and Empty()
+// short-circuits on the absent path (getVersionedAccount returns before
+// refreshVersionedAccount). Making it hit refresh needs a populated reader, not
+// just versionMap cells; the real warm-refresh + SelfDestruct-probe cost of the
+// 20x outlier must be measured on the benchmarkoor cell (per the perf skill),
+// not here. Retained as an absent/existence-read + SD-probe alloc baseline.
 func BenchmarkWarmExtCodeHash(b *testing.B) {
 	_, tx, domains := NewTestRwTx(b)
 	mvhm := NewVersionMap(nil)
