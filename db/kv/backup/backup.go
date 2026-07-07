@@ -235,7 +235,7 @@ func clearTable(ctx context.Context, db kv.RoDB, tx kv.RwTx, table string) error
 		ra.SetPos(bounds[i])
 		t := time.Now()
 		n, err := dr.DeleteRange(table, bounds[i], bounds[i+1])
-		if took := time.Since(t); took > 10*time.Millisecond {
+		if took := time.Since(t); took > 500*time.Millisecond {
 			log.Warn("[mdbx_to_mdbx] delete", "table", table, "took", took)
 		}
 		if err != nil {
