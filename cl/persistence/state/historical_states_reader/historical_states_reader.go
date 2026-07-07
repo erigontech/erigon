@@ -416,7 +416,7 @@ func (r *HistoricalStatesReader) readHistoryHashVector(tx kv.Tx, kvGetter state_
 			return err
 		}
 		if len(v) != 32 {
-			return fmt.Errorf("invalid key %x", key)
+			return fmt.Errorf("%w: table %s slot %d (%d bytes)", ErrMissingHistoryVectorData, table, i, len(v))
 		}
 		currKeySlot = i
 		out.Set(int(currKeySlot%size), common.BytesToHash(v))
@@ -1175,6 +1175,13 @@ func ReadRequiredQueueSSZ[T solid.EncodableHashableSSZ](kvGetter state_accessors
 // yet re-indexed the affected slots. The caller should trigger re-antiquation
 // rather than proceeding with zero-valued fields.
 var ErrMissingGloasData = errors.New("missing GLOAS snapshot data (re-antiquation required)")
+
+// ErrMissingHistoryVectorData is returned when a dense block_roots/state_roots
+// history slot has a missing or short snapshot entry. Per process_slot these
+// vectors are filled every slot (never empty), so an empty entry is a frozen
+// data gap, not valid state — the caller must re-antiquate past it rather than
+// fabricate a root.
+var ErrMissingHistoryVectorData = errors.New("missing block/state root history (re-antiquation required)")
 
 // readCompressedSSZ reads a zstd-compressed SSZ value from the given table at the given slot,
 // decompresses it and decodes it into `out`. Used for per-slot GLOAS fields.
