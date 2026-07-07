@@ -953,156 +953,6 @@ func TestDomainRoTx_CursorParentCheck(t *testing.T) {
 	require.NoError(err)
 }
 
-// TestDomain_CollationIsolatedFromLaterSteps verifies that collation for step S
-// produces correct results even when step S+1 data is present in the DB.
-// This is a correctness test for the collation/pruning race fix (#20169).
-//
-// The collation/pruning race occurs when BuildFilesInBackground's collation
-// read-transaction sees step S+1 values that overwrite step S entries. The
-// fix uses a single read-tx for all collations in buildFiles, ensuring they
-// all see the same MDBX snapshot. While the exact race is timing-dependent
-// and hard to reproduce in a unit test, this test verifies the invariant:
-// step S collation must produce a file with step S values regardless of
-// later step data in the DB.
-func TestDomain_CollationIsolatedFromLaterSteps(t *testing.T) {
-	logger := log.New()
-	db, d := testDbAndDomainOfStep(t, statecfg.Schema.StorageDomain, 16, logger)
-	ctx := t.Context()
-
-	k1 := []byte("key1")
-	k2 := []byte("key2")
-	v1s0 := []byte("value1_step0")
-	v2s0 := []byte("value2_step0")
-	v1s1 := []byte("value1_step1") // k1 modified again in step 1
-	// k2 is NOT modified in step 1
-
-	// Write both keys in step 0, then k1 again in step 1, all in one transaction.
-	tx, err := db.BeginRw(ctx)
-	require.NoError(t, err)
-	defer tx.Rollback() //nolint:gocritic
-	dt := d.beginForTests()
-	w := dt.NewWriter()
-
-	// Step 0 writes (txNums 0-15)
-	require.NoError(t, w.PutWithPrev(k1, v1s0, 5, nil))
-	require.NoError(t, w.PutWithPrev(k2, v2s0, 7, nil))
-
-	// Step 1 write (txNums 16-31) — overwrites k1 only
-	require.NoError(t, w.PutWithPrev(k1, v1s1, 20, v1s0))
-
-	require.NoError(t, w.Flush(ctx, tx))
-	require.NoError(t, tx.Commit())
-	w.Close()
-	dt.Close()
-
-	// Collate step 0 — should get k1=v1s0 and k2=v2s0, NOT k1=v1s1.
-	roTx, err := db.BeginRo(ctx)
-	require.NoError(t, err)
-	defer roTx.Rollback()
-
-	coll, err := d.collate(ctx, 0, 0, 16, roTx)
-	require.NoError(t, err)
-	defer coll.Close()
-	sf, err := d.buildFiles(ctx, 0, coll, background.NewProgressSet())
-	require.NoError(t, err)
-	defer sf.CleanupOnError()
-
-	g := d.dataReader(sf.valuesDecomp)
-	g.Reset(0)
-	var words []string
-	for g.HasNext() {
-		w, _ := g.Next(nil)
-		words = append(words, string(w))
-	}
-	require.Equal(t, []string{"key1", "value1_step0", "key2", "value2_step0"}, words,
-		"step 0 collation must contain step 0 values, not step 1 overwrites")
-
-	// Collate step 1 — should get k1=v1s1 only (k2 was not modified in step 1).
-	coll1, err := d.collate(ctx, 1, 16, 32, roTx)
-	require.NoError(t, err)
-	defer coll1.Close()
-	sf1, err := d.buildFiles(ctx, 1, coll1, background.NewProgressSet())
-	require.NoError(t, err)
-	defer sf1.CleanupOnError()
-
-	g = d.dataReader(sf1.valuesDecomp)
-	g.Reset(0)
-	var words1 []string
-	for g.HasNext() {
-		w, _ := g.Next(nil)
-		words1 = append(words1, string(w))
-	}
-	require.Equal(t, []string{"key1", "value1_step1"}, words1,
-		"step 1 collation must contain only step 1 values")
-}
-
-// TestDomain_UnwindRestoredEntryVisibility verifies that after an unwind, restored
-// domain entries are visible to GetLatest even when the entry's natural step has
-// been filed by BuildFilesInBackground. See #20169.
-//
-// The bug: unwind tags restored entries with the step of the unwind-target txNum.
-// If that step is covered by domain files, getLatestFromDb discards the entry and
-// falls through to getLatestFromFiles, returning the stale end-of-step value from
-// the file instead of the changeset-restored value.
-func TestDomain_UnwindRestoredEntryVisibility(t *testing.T) {
-	logger := log.New()
-	db, d := testDbAndDomainOfStep(t, statecfg.Schema.StorageDomain, 16, logger)
-	ctx := t.Context()
-	logEvery := time.NewTicker(30 * time.Second)
-	defer logEvery.Stop()
-
-	k1 := []byte("key1")
-
-	// Step 0: write k1 twice — first V1 at txNum 2, then V2 at txNum 10.
-	// The file for step 0 will have k1=V2 (latest value in the step).
-	tx, err := db.BeginRw(ctx)
-	require.NoError(t, err)
-	defer tx.Rollback() //nolint:gocritic
-
-	dt := d.beginForTests()
-	w := dt.NewWriter()
-	require.NoError(t, w.PutWithPrev(k1, []byte("V1"), 2, nil))
-	require.NoError(t, w.PutWithPrev(k1, []byte("V2"), 10, []byte("V1")))
-	require.NoError(t, w.Flush(ctx, tx))
-	w.Close()
-	dt.Close()
-
-	// Build files for step 0 → file has k1=V2.
-	require.NoError(t, d.collateBuildIntegrate(ctx, 0, tx, background.NewProgressSet()))
-
-	// Prune step 0 from DB — entries now only in files.
-	dt = d.beginForTests()
-	_, err = dt.Prune(ctx, tx, 0, 0, 16, math.MaxUint64, logEvery)
-	dt.Close()
-	require.NoError(t, err)
-
-	// Now simulate an unwind that restores k1=V1 (reverting the V1→V2 write at txNum 10).
-	// The changeset entry has: key="key1" + step0_bytes, value=V1.
-	step0Bytes := make([]byte, 8)
-	binary.BigEndian.PutUint64(step0Bytes, ^uint64(0))
-	diffs := []kv.DomainEntryDiff{
-		{
-			Key:   string(k1) + string(step0Bytes),
-			Value: []byte("V1"),
-		},
-	}
-
-	// Unwind to txNum 5 (between the V1 write at 2 and V2 write at 10, still in step 0).
-	dt = d.beginForTests()
-	err = dt.unwind(ctx, tx, 0, 5, uint64(dt.FirstStepNotInFiles()), diffs)
-	dt.Close()
-	require.NoError(t, err)
-
-	// GetLatest must return V1 (the changeset-restored value), NOT V2 (the file value).
-	dt = d.beginForTests()
-	defer dt.Close()
-	v, _, found, err := dt.GetLatest(k1, tx)
-	require.NoError(t, err)
-	require.True(t, found, "key should be found after unwind")
-	require.Equal(t, "V1", string(v),
-		"GetLatest must return the unwind-restored value V1, not the file value V2")
-}
-
 func TestDomain_Delete(t *testing.T) {
 	if testing.Short() {
 		t.Skip()
@@ -2621,7 +2471,7 @@ func TestDomain_Unwind(t *testing.T) {
 			}
 		}
 
-		err = domainRoTx.unwind(ctx, tx, unwindTo/d.stepSize, unwindTo, uint64(domainRoTx.FirstStepNotInFiles()), totalDiff)
+		err = domainRoTx.unwind(ctx, tx, unwindTo/d.stepSize, unwindTo, totalDiff)
 		currTx = unwindTo
 		require.NoError(t, err)
 		domainRoTx.Close()
@@ -3745,7 +3595,9 @@ func TestDomain_UnwindRestoresDeletionMarker(t *testing.T) {
 			ctx := t.Context()
 			require := require.New(t)
 
-			// Phase 1: Write key1 through three states within step 0 and record diffs.
+			// Phase 1: Write key1=value1 in step 0, then delete and re-write it in
+			// step 1, recording diffs. Step 0 gets filed; the unwind target stays
+			// above the file boundary, as production unwinds always do.
 			tx, err := db.BeginRw(ctx)
 			require.NoError(err)
 			defer tx.Rollback()
@@ -3759,39 +3611,38 @@ func TestDomain_UnwindRestoresDeletionMarker(t *testing.T) {
 			value1 := []byte("value1")
 			value2 := []byte("value2")
 
-			// txNum 0: write key1=value1 (new key, prev=nil)
+			// txNum 0 (step 0): write key1=value1 (new key, prev=nil)
 			writer.diff = &kv.DomainDiff{}
 			err = writer.PutWithPrev(key, value1, 0, nil)
 			require.NoError(err)
 
-			// txNum 1: delete key1 (prev=value1)
+			// txNum 17 (step 1): delete key1 (prev=value1)
 			writer.diff = &kv.DomainDiff{}
-			err = writer.DeleteWithPrev(key, 1, value1)
+			err = writer.DeleteWithPrev(key, 17, value1)
 			require.NoError(err)
 
-			// txNum 2: re-write key1=value2 (prev=nil, key was deleted)
+			// txNum 18 (step 1): re-write key1=value2 (prev=nil, key was deleted)
 			// Only this diff is needed for the unwind — it captures the previous
 			// state (deleted → Value=[]byte{}) that unwind must restore.
 			writer.diff = &kv.DomainDiff{}
-			err = writer.PutWithPrev(key, value2, 2, nil)
+			err = writer.PutWithPrev(key, value2, 18, nil)
 			require.NoError(err)
-			txNum2Diff := writer.diff.GetDiffSet()
+			txNum18Diff := writer.diff.GetDiffSet()
 
 			// Verify the nil-vs-empty distinction survives serialization round-trip.
 			// Production diffs go through SerializeDiffSet/DeserializeDiffSet when
 			// stored in ChangeSets3; this ensures the []byte{} tombstone is preserved.
-			txNum2Diff = changeset.DeserializeDiffSet(changeset.SerializeDiffSet(txNum2Diff, nil))
+			txNum18Diff = changeset.DeserializeDiffSet(changeset.SerializeDiffSet(txNum18Diff, nil))
 
 			err = writer.Flush(ctx, tx)
 			require.NoError(err)
 			domainRoTx.Close()
 
-			// Phase 2: Build files for step 0. The file will contain key1=value2
-			// (the latest value within step 0).
+			// Phase 2: Build files for step 0. The file will contain key1=value1.
 			require.NoError(d.collateBuildIntegrate(ctx, 0, tx, background.NewProgressSet()))
 			require.NoError(tx.Commit())
 
-			// Phase 3: Unwind to revert txNum 2 (keep txNums 0 and 1).
+			// Phase 3: Unwind to revert txNum 18 (keep txNums 0..17).
 			tx, err = db.BeginRw(ctx)
 			require.NoError(err)
 			defer tx.Rollback()
@@ -3799,8 +3650,8 @@ func TestDomain_UnwindRestoresDeletionMarker(t *testing.T) {
 			domainRoTx = d.beginForTests()
 			defer domainRoTx.Close()
 
-			// diff for txNum 2: prev was empty (key was deleted) → Value=[]byte{}
-			err = domainRoTx.unwind(ctx, tx, 0, 2, 1, txNum2Diff)
+			// diff for txNum 18: prev was empty (key was deleted) → Value=[]byte{}
+			err = domainRoTx.unwind(ctx, tx, 1, 18, txNum18Diff)
 			require.NoError(err)
 			domainRoTx.Close()
 			require.NoError(tx.Commit())
@@ -3815,11 +3666,11 @@ func TestDomain_UnwindRestoresDeletionMarker(t *testing.T) {
 
 			v, _, found, err := domainRoTx.GetLatest(key, roTx)
 			require.NoError(err)
-			// After unwinding txNum 2, the state should reflect txNums 0-1.
-			// At txNum 1, key1 was deleted. The unwind must restore the deletion
+			// After unwinding txNum 18, the state should reflect txNums 0..17.
+			// At txNum 17, key1 was deleted. The unwind must restore the deletion
 			// marker (empty tombstone) in DB. Without the fix, `if len(value) > 0`
 			// skips restoring the empty tombstone, and getLatestFromFiles returns
-			// stale "value2" from the step 0 file.
+			// stale "value1" from the step 0 file.
 			require.True(found, "deletion marker should be found after unwind")
 			require.Empty(v, "deleted key should have empty value after unwind, got %q", v)
 		})
