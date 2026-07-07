@@ -1080,34 +1080,8 @@ func (sdb *IntraBlockState) versionedAccountBase(addr accounts.Address, readStor
 		// stale nonce/codeHash flows through refreshVersionedAccount (which
 		// only overwrites fields a versionMap cell exists for), so Empty()
 		// returns false and the EVM misses CallNewAccountGas.
-		if destructed, sdRes, _ := sdb.versionMap.ReadSelfDestruct(addr, sdb.txIndex); sdRes.Status() == MVReadResultDone && destructed {
-			destructTxIndex := sdRes.DepIdx()
-			revivalLimit := sdb.txIndex - 1
-			revived := false
-			// Same-tx re-creation (metamorphic SD+CREATE2): both
-			// SelfDestructPath and AddressPath are written at the SAME
-			// TxIdx, so >= (not strict >) is needed on AddressPath.
-			if hi, ok := sdb.versionMap.LatestTxIndex(addr, AddressPath, accounts.NilKey, revivalLimit); ok && hi >= destructTxIndex {
-				revived = true
-			}
-			if !revived {
-				if hi, ok := sdb.versionMap.LatestTxIndex(addr, BalancePath, accounts.NilKey, revivalLimit); ok && hi > destructTxIndex {
-					revived = true
-				}
-			}
-			if !revived {
-				if hi, ok := sdb.versionMap.LatestTxIndex(addr, NoncePath, accounts.NilKey, revivalLimit); ok && hi > destructTxIndex {
-					revived = true
-				}
-			}
-			if !revived {
-				if hi, ok := sdb.versionMap.LatestTxIndex(addr, CodeHashPath, accounts.NilKey, revivalLimit); ok && hi > destructTxIndex {
-					revived = true
-				}
-			}
-			if !revived {
-				return nil, StorageRead, UnknownVersion, nil
-			}
+		if destroyed, _, revived := sdb.versionMap.AccountLifecycle(addr, sdb.txIndex); destroyed && !revived {
+			return nil, StorageRead, UnknownVersion, nil
 		}
 	}
 

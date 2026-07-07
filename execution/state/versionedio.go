@@ -1343,34 +1343,8 @@ func (vr *versionedStateReader) ReadAccountData(address accounts.Address) (*acco
 		// stays 0 → empty-account prune); a later TX that tips the same
 		// coinbase re-creates it, and we must surface the re-created
 		// account so finalize accumulates the prior cumulative value.
-		if destructed, res, ok := vr.versionMap.ReadSelfDestruct(address, vr.txIndex); ok && res.Status() == MVReadResultDone {
-			if destructed {
-				destructTxIndex := res.DepIdx()
-				revived := false
-				revivalLimit := vr.txIndex - 1
-				// AddressPath uses >= to catch same-tx metamorphic SD+CREATE2; subfields use >.
-				if hi, ok := vr.versionMap.LatestTxIndex(address, AddressPath, accounts.NilKey, revivalLimit); ok && hi >= destructTxIndex {
-					revived = true
-				}
-				if !revived {
-					if hi, ok := vr.versionMap.LatestTxIndex(address, BalancePath, accounts.NilKey, revivalLimit); ok && hi > destructTxIndex {
-						revived = true
-					}
-				}
-				if !revived {
-					if hi, ok := vr.versionMap.LatestTxIndex(address, NoncePath, accounts.NilKey, revivalLimit); ok && hi > destructTxIndex {
-						revived = true
-					}
-				}
-				if !revived {
-					if hi, ok := vr.versionMap.LatestTxIndex(address, CodeHashPath, accounts.NilKey, revivalLimit); ok && hi > destructTxIndex {
-						revived = true
-					}
-				}
-				if !revived {
-					return nil, nil
-				}
-			}
+		if destroyed, _, revived := vr.versionMap.AccountLifecycle(address, vr.txIndex); destroyed && !revived {
+			return nil, nil
 		}
 		if acc, ok := versionedUpdateAddress(vr.versionMap, address, vr.txIndex); ok && acc != nil {
 			updated := vr.applyVersionedUpdates(address, *acc)
