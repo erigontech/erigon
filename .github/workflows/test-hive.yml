@@ -268,7 +268,7 @@ jobs:
 
       - name: Check for failures
         run: |
-          if grep -q "failed" hive/failed.log; then
+          if [ -f hive/failed.log ] && grep -q "failed" hive/failed.log; then
             echo "One or more tests failed."
             exit 1
           fi
