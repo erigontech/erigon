@@ -176,17 +176,9 @@ func encodeAccessList(al AccessList, w io.Writer, b []byte) error {
 // transactions, it returns the type and payload.
 func (tx *AccessListTx) MarshalBinary(w io.Writer) error {
 	payloadSize, accessListLen := tx.payloadSize()
-	b := rlp.NewEncodingBuf()
-	defer b.Release()
-	// encode TxType
-	b[0] = AccessListTxType
-	if _, err := w.Write(b[:1]); err != nil {
-		return err
-	}
-	if err := tx.encodePayload(w, b[:], payloadSize, accessListLen); err != nil {
-		return err
-	}
-	return nil
+	return marshalTyped(w, AccessListTxType, func(w io.Writer, b []byte) error {
+		return tx.encodePayload(w, b, payloadSize, accessListLen)
+	})
 }
 
 func (tx *AccessListTx) encodePayload(w io.Writer, b []byte, payloadSize, accessListLen int) error {
@@ -230,42 +222,15 @@ func (tx *AccessListTx) encodePayload(w io.Writer, b []byte, payloadSize, access
 	if err := encodeAccessList(tx.AccessList, w, b); err != nil {
 		return err
 	}
-	// encode V
-	if err := rlp.EncodeUint256(tx.V, w, b); err != nil {
-		return err
-	}
-	// encode R
-	if err := rlp.EncodeUint256(tx.R, w, b); err != nil {
-		return err
-	}
-	// encode S
-	if err := rlp.EncodeUint256(tx.S, w, b); err != nil {
-		return err
-	}
-	return nil
-
+	return tx.encodeVRS(w, b)
 }
 
 // EncodeRLP implements rlp.Encoder
 func (tx *AccessListTx) EncodeRLP(w io.Writer) error {
 	payloadSize, accessListLen := tx.payloadSize()
-	// size of struct prefix and TxType
-	envelopeSize := 1 + rlp.ListPrefixLen(payloadSize) + payloadSize
-	b := rlp.NewEncodingBuf()
-	defer b.Release()
-	// envelope
-	if err := rlp.EncodeStringPrefix(envelopeSize, w, b[:]); err != nil {
-		return err
-	}
-	// encode TxType
-	b[0] = AccessListTxType
-	if _, err := w.Write(b[:1]); err != nil {
-		return err
-	}
-	if err := tx.encodePayload(w, b[:], payloadSize, accessListLen); err != nil {
-		return err
-	}
-	return nil
+	return encodeRLPTyped(w, AccessListTxType, payloadSize, func(w io.Writer, b []byte) error {
+		return tx.encodePayload(w, b, payloadSize, accessListLen)
+	})
 }
 
 func decodeAccessList(al *AccessList, s *rlp.Stream) error {
@@ -392,14 +357,9 @@ func (tx *AccessListTx) AsMessage(s Signer, _ *uint256.Int, rules *chain.Rules) 
 
 func (tx *AccessListTx) WithSignature(signer Signer, sig []byte) (Transaction, error) {
 	cpy := tx.copy()
-	r, s, v, err := signer.SignatureValues(tx, sig)
-	if err != nil {
+	if err := applySignature(signer, tx, sig, &cpy.CommonTx, &cpy.ChainID); err != nil {
 		return nil, err
 	}
-	cpy.R.Set(r)
-	cpy.S.Set(s)
-	cpy.V.Set(v)
-	cpy.ChainID = *signer.ChainID()
 	return cpy, nil
 }
 
@@ -452,25 +412,6 @@ func (tx *AccessListTx) GetChainID() *uint256.Int {
 	return &tx.ChainID
 }
 
-func (tx *AccessListTx) cachedSender() (sender accounts.Address, ok bool) {
-	s := tx.from
-	if s.IsNil() {
-		return sender, false
-	}
-	return s, true
-}
-
 func (tx *AccessListTx) Sender(signer Signer) (accounts.Address, error) {
-	if from := tx.from; !from.IsNil() {
-		if !from.IsZero() { // Sender address can never be zero in a transaction with a valid signer
-			return from, nil
-		}
-	}
-
-	addr, err := signer.Sender(tx)
-	if err != nil {
-		return accounts.ZeroAddress, err
-	}
-	tx.from = addr
-	return addr, nil
+	return recoverSender(tx, &tx.TransactionMisc, signer)
 }

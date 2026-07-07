@@ -107,6 +107,26 @@ func (ct *CommonTx) GetBlobHashes() []common.Hash {
 	return []common.Hash{}
 }
 
+func (ct *CommonTx) encodeVRS(w io.Writer, b []byte) error {
+	if err := rlp.EncodeUint256(ct.V, w, b); err != nil {
+		return err
+	}
+	if err := rlp.EncodeUint256(ct.R, w, b); err != nil {
+		return err
+	}
+	return rlp.EncodeUint256(ct.S, w, b)
+}
+
+func (ct *CommonTx) decodeVRS(s *rlp.Stream) error {
+	if err := s.ReadUint256(&ct.V); err != nil {
+		return err
+	}
+	if err := s.ReadUint256(&ct.R); err != nil {
+		return err
+	}
+	return s.ReadUint256(&ct.S)
+}
+
 // LegacyTx is the transaction data of regular Ethereum transactions.
 type LegacyTx struct {
 	CommonTx
@@ -247,27 +267,11 @@ func (tx *LegacyTx) encodePayload(w io.Writer, b []byte, payloadSize int) error 
 	if err := rlp.EncodeString(tx.Data, w, b); err != nil {
 		return err
 	}
-	if err := rlp.EncodeUint256(tx.V, w, b); err != nil {
-		return err
-	}
-	if err := rlp.EncodeUint256(tx.R, w, b); err != nil {
-		return err
-	}
-	if err := rlp.EncodeUint256(tx.S, w, b); err != nil {
-		return err
-	}
-	return nil
-
+	return tx.encodeVRS(w, b)
 }
 
 func (tx *LegacyTx) EncodeRLP(w io.Writer) error {
-	payloadSize := tx.payloadSize()
-	b := rlp.NewEncodingBuf()
-	defer b.Release()
-	if err := tx.encodePayload(w, b[:], payloadSize); err != nil {
-		return err
-	}
-	return nil
+	return tx.MarshalBinary(w)
 }
 
 func (tx *LegacyTx) DecodeRLP(s *rlp.Stream) error {
@@ -407,23 +411,6 @@ func (tx *LegacyTx) GetChainID() *uint256.Int {
 	return DeriveChainId(&tx.V)
 }
 
-func (tx *LegacyTx) cachedSender() (sender accounts.Address, ok bool) {
-	s := tx.from
-	if s.IsNil() {
-		return sender, false
-	}
-	return s, true
-}
 func (tx *LegacyTx) Sender(signer Signer) (accounts.Address, error) {
-	if from := tx.from; !from.IsNil() && !from.IsZero() {
-		// Sender address can never be zero in a transaction with a valid signer
-		return from, nil
-	}
-
-	addr, err := signer.Sender(tx)
-	if err != nil {
-		return accounts.ZeroAddress, err
-	}
-	tx.from = addr
-	return addr, nil
+	return recoverSender(tx, &tx.TransactionMisc, signer)
 }

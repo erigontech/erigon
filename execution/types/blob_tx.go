@@ -119,25 +119,8 @@ func (stx *BlobTx) AsMessage(s Signer, baseFee *uint256.Int, rules *chain.Rules)
 	return &msg, nil
 }
 
-func (stx *BlobTx) cachedSender() (sender accounts.Address, ok bool) {
-	s := stx.from
-	if s.IsNil() {
-		return sender, false
-	}
-	return s, true
-}
-
 func (stx *BlobTx) Sender(signer Signer) (accounts.Address, error) {
-	if from := stx.from; !from.IsNil() && !from.IsZero() {
-		// Sender address can never be zero in a transaction with a valid signer
-		return from, nil
-	}
-	addr, err := signer.Sender(stx)
-	if err != nil {
-		return accounts.ZeroAddress, err
-	}
-	stx.from = addr
-	return addr, nil
+	return recoverSender(stx, &stx.TransactionMisc, signer)
 }
 
 func (stx *BlobTx) Hash() common.Hash {
@@ -186,14 +169,9 @@ func (stx *BlobTx) SigningHash(chainID *uint256.Int) common.Hash {
 
 func (stx *BlobTx) WithSignature(signer Signer, sig []byte) (Transaction, error) {
 	cpy := stx.copy()
-	r, s, v, err := signer.SignatureValues(stx, sig)
-	if err != nil {
+	if err := applySignature(signer, stx, sig, &cpy.CommonTx, &cpy.ChainID); err != nil {
 		return nil, err
 	}
-	cpy.R.Set(r)
-	cpy.S.Set(s)
-	cpy.V.Set(v)
-	cpy.ChainID = *signer.ChainID()
 	return cpy, nil
 }
 
@@ -236,75 +214,19 @@ func encodeBlobVersionedHashes(hashes []common.Hash, w io.Writer, b []byte) erro
 }
 
 func (stx *BlobTx) encodePayload(w io.Writer, b []byte, payloadSize, accessListLen, blobHashesLen int) error {
-	// prefix
-	if err := rlp.EncodeListPrefix(payloadSize, w, b); err != nil {
+	if err := stx.encode1559Prefix(w, b, payloadSize, accessListLen); err != nil {
 		return err
 	}
-	// encode ChainID
-	if err := rlp.EncodeUint256(stx.ChainID, w, b); err != nil {
-		return err
-	}
-	// encode Nonce
-	if err := rlp.EncodeU64(stx.Nonce, w, b); err != nil {
-		return err
-	}
-	// encode MaxPriorityFeePerGas
-	if err := rlp.EncodeUint256(stx.TipCap, w, b); err != nil {
-		return err
-	}
-	// encode MaxFeePerGas
-	if err := rlp.EncodeUint256(stx.FeeCap, w, b); err != nil {
-		return err
-	}
-	// encode GasLimit
-	if err := rlp.EncodeU64(stx.GasLimit, w, b); err != nil {
-		return err
-	}
-	// encode To
-	if err := EncodeOptionalAddress(stx.To, w, b); err != nil {
-		return err
-	}
-	// encode Value
-	if err := rlp.EncodeUint256(stx.Value, w, b); err != nil {
-		return err
-	}
-	// encode Data
-	if err := rlp.EncodeString(stx.Data, w, b); err != nil {
-		return err
-	}
-	// prefix
-	if err := rlp.EncodeListPrefix(accessListLen, w, b); err != nil {
-		return err
-	}
-	// encode AccessList
-	if err := encodeAccessList(stx.AccessList, w, b); err != nil {
-		return err
-	}
-	// encode MaxFeePerBlobGas
 	if err := rlp.EncodeUint256(stx.MaxFeePerBlobGas, w, b); err != nil {
 		return err
 	}
-	// prefix
 	if err := rlp.EncodeListPrefix(blobHashesLen, w, b); err != nil {
 		return err
 	}
-	// encode BlobVersionedHashes
 	if err := encodeBlobVersionedHashes(stx.BlobVersionedHashes, w, b); err != nil {
 		return err
 	}
-	// encode V
-	if err := rlp.EncodeUint256(stx.V, w, b); err != nil {
-		return err
-	}
-	// encode R
-	if err := rlp.EncodeUint256(stx.R, w, b); err != nil {
-		return err
-	}
-	// encode S
-	if err := rlp.EncodeUint256(stx.S, w, b); err != nil {
-		return err
-	}
-	return nil
+	return stx.encodeVRS(w, b)
 }
 
 func (stx *BlobTx) EncodeRLP(w io.Writer) error {
@@ -312,23 +234,9 @@ func (stx *BlobTx) EncodeRLP(w io.Writer) error {
 		return ErrNilToFieldTx
 	}
 	payloadSize, accessListLen, blobHashesLen := stx.payloadSize()
-	// size of struct prefix and TxType
-	envelopeSize := 1 + rlp.ListPrefixLen(payloadSize) + payloadSize
-	b := rlp.NewEncodingBuf()
-	defer b.Release()
-	// envelope
-	if err := rlp.EncodeStringPrefix(envelopeSize, w, b[:]); err != nil {
-		return err
-	}
-	// encode TxType
-	b[0] = BlobTxType
-	if _, err := w.Write(b[:1]); err != nil {
-		return err
-	}
-	if err := stx.encodePayload(w, b[:], payloadSize, accessListLen, blobHashesLen); err != nil {
-		return err
-	}
-	return nil
+	return encodeRLPTyped(w, BlobTxType, payloadSize, func(w io.Writer, b []byte) error {
+		return stx.encodePayload(w, b, payloadSize, accessListLen, blobHashesLen)
+	})
 }
 
 func (stx *BlobTx) MarshalBinary(w io.Writer) error {
@@ -336,81 +244,26 @@ func (stx *BlobTx) MarshalBinary(w io.Writer) error {
 		return ErrNilToFieldTx
 	}
 	payloadSize, accessListLen, blobHashesLen := stx.payloadSize()
-	b := rlp.NewEncodingBuf()
-	defer b.Release()
-	// encode TxType
-	b[0] = BlobTxType
-	if _, err := w.Write(b[:1]); err != nil {
-		return err
-	}
-	if err := stx.encodePayload(w, b[:], payloadSize, accessListLen, blobHashesLen); err != nil {
-		return err
-	}
-	return nil
+	return marshalTyped(w, BlobTxType, func(w io.Writer, b []byte) error {
+		return stx.encodePayload(w, b, payloadSize, accessListLen, blobHashesLen)
+	})
 }
 
 func (stx *BlobTx) DecodeRLP(s *rlp.Stream) error {
-	_, err := s.List()
-	if err != nil {
+	if err := stx.decode1559Prefix(s, true); err != nil {
 		return err
 	}
-	if err = s.ReadUint256(&stx.ChainID); err != nil {
+	if err := s.ReadUint256(&stx.MaxFeePerBlobGas); err != nil {
 		return err
 	}
-	if stx.Nonce, err = s.Uint64(); err != nil {
-		return err
-	}
-	if err = s.ReadUint256(&stx.TipCap); err != nil {
-		return err
-	}
-	if err = s.ReadUint256(&stx.FeeCap); err != nil {
-		return err
-	}
-	if stx.GasLimit, err = s.Uint64(); err != nil {
-		return err
-	}
-	stx.To = &common.Address{}
-	if kind, size, err := s.Kind(); err != nil {
-		return err
-	} else if kind == rlp.Byte {
-		return fmt.Errorf("wrong size for To: 1")
-	} else if size != 20 {
-		return fmt.Errorf("wrong size for To: %d", size)
-	}
-	if err = s.ReadBytes(stx.To[:]); err != nil {
-		return err
-	}
-	if err = s.ReadUint256(&stx.Value); err != nil {
-		return err
-	}
-	if stx.Data, err = s.Bytes(); err != nil {
-		return err
-	}
-	// decode AccessList
-	stx.AccessList = AccessList{}
-	if err = decodeAccessList(&stx.AccessList, s); err != nil {
-		return err
-	}
-	// decode MaxFeePerBlobGas
-	if err = s.ReadUint256(&stx.MaxFeePerBlobGas); err != nil {
-		return err
-	}
-	// decode BlobVersionedHashes
 	stx.BlobVersionedHashes = []common.Hash{}
-	if err = decodeBlobVersionedHashes(&stx.BlobVersionedHashes, s); err != nil {
+	if err := decodeBlobVersionedHashes(&stx.BlobVersionedHashes, s); err != nil {
 		return err
 	}
 	if len(stx.BlobVersionedHashes) == 0 {
 		return errors.New("a blob stx must contain at least one blob")
 	}
-	// decode V
-	if err = s.ReadUint256(&stx.V); err != nil {
-		return err
-	}
-	if err = s.ReadUint256(&stx.R); err != nil {
-		return err
-	}
-	if err = s.ReadUint256(&stx.S); err != nil {
+	if err := stx.decodeVRS(s); err != nil {
 		return err
 	}
 	return s.ListEnd()

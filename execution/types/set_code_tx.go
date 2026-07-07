@@ -19,7 +19,6 @@ package types
 import (
 	"bytes"
 	"errors"
-	"fmt"
 	"io"
 
 	"github.com/holiman/uint256"
@@ -84,15 +83,9 @@ func (tx *SetCodeTransaction) payloadSize() (payloadSize, accessListLen, authori
 
 func (tx *SetCodeTransaction) WithSignature(signer Signer, sig []byte) (Transaction, error) {
 	cpy := tx.copy()
-	r, s, v, err := signer.SignatureValues(tx, sig)
-	if err != nil {
+	if err := applySignature(signer, tx, sig, &cpy.CommonTx, &cpy.ChainID); err != nil {
 		return nil, err
 	}
-
-	cpy.R.Set(r)
-	cpy.S.Set(s)
-	cpy.V.Set(v)
-	cpy.ChainID = *signer.ChainID()
 	return cpy, nil
 }
 
@@ -101,17 +94,9 @@ func (tx *SetCodeTransaction) MarshalBinary(w io.Writer) error {
 		return ErrNilToFieldTx
 	}
 	payloadSize, accessListLen, authorizationsLen := tx.payloadSize()
-	b := rlp.NewEncodingBuf()
-	defer b.Release()
-	// encode TxType
-	b[0] = SetCodeTxType
-	if _, err := w.Write(b[:1]); err != nil {
-		return err
-	}
-	if err := tx.encodePayload(w, b[:], payloadSize, accessListLen, authorizationsLen); err != nil {
-		return err
-	}
-	return nil
+	return marshalTyped(w, SetCodeTxType, func(w io.Writer, b []byte) error {
+		return tx.encodePayload(w, b, payloadSize, accessListLen, authorizationsLen)
+	})
 }
 
 func (tx *SetCodeTransaction) AsMessage(s Signer, baseFee *uint256.Int, rules *chain.Rules) (*Message, error) {
@@ -159,16 +144,7 @@ func (tx *SetCodeTransaction) AsMessage(s Signer, baseFee *uint256.Int, rules *c
 }
 
 func (tx *SetCodeTransaction) Sender(signer Signer) (accounts.Address, error) {
-	if from := tx.from; !from.IsNil() && !from.IsZero() {
-		// Sender address can never be zero in a transaction with a valid signer
-		return from, nil
-	}
-	addr, err := signer.Sender(tx)
-	if err != nil {
-		return accounts.ZeroAddress, err
-	}
-	tx.from = addr
-	return addr, nil
+	return recoverSender(tx, &tx.TransactionMisc, signer)
 }
 
 func (tx *SetCodeTransaction) Hash() common.Hash {
@@ -218,151 +194,36 @@ func (tx *SetCodeTransaction) EncodeRLP(w io.Writer) error {
 		return ErrNilToFieldTx
 	}
 	payloadSize, accessListLen, authorizationsLen := tx.payloadSize()
-	envelopSize := 1 + rlp.ListPrefixLen(payloadSize) + payloadSize
-	b := rlp.NewEncodingBuf()
-	defer b.Release()
-	// encode envelope size
-	if err := rlp.EncodeStringPrefix(envelopSize, w, b[:]); err != nil {
-		return err
-	}
-	// encode TxType
-	b[0] = SetCodeTxType
-	if _, err := w.Write(b[:1]); err != nil {
-		return err
-	}
-
-	return tx.encodePayload(w, b[:], payloadSize, accessListLen, authorizationsLen)
+	return encodeRLPTyped(w, SetCodeTxType, payloadSize, func(w io.Writer, b []byte) error {
+		return tx.encodePayload(w, b, payloadSize, accessListLen, authorizationsLen)
+	})
 }
 
 func (tx *SetCodeTransaction) DecodeRLP(s *rlp.Stream) error {
-	_, err := s.List()
-	if err != nil {
+	if err := tx.decode1559Prefix(s, true); err != nil {
 		return err
 	}
-	if err = s.ReadUint256(&tx.ChainID); err != nil {
-		return err
-	}
-	if tx.Nonce, err = s.Uint64(); err != nil {
-		return err
-	}
-	if err = s.ReadUint256(&tx.TipCap); err != nil {
-		return err
-	}
-	if err = s.ReadUint256(&tx.FeeCap); err != nil {
-		return err
-	}
-	if tx.GasLimit, err = s.Uint64(); err != nil {
-		return err
-	}
-	tx.To = &common.Address{}
-	if kind, size, err := s.Kind(); err != nil {
-		return err
-	} else if kind == rlp.Byte {
-		return fmt.Errorf("wrong size for To: 1")
-	} else if size != 20 {
-		return fmt.Errorf("wrong size for To: %d", size)
-	}
-	if err = s.ReadBytes(tx.To[:]); err != nil {
-		return err
-	}
-	if err = s.ReadUint256(&tx.Value); err != nil {
-		return err
-	}
-	if tx.Data, err = s.Bytes(); err != nil {
-		return err
-	}
-	// decode AccessList
-	tx.AccessList = AccessList{}
-	if err = decodeAccessList(&tx.AccessList, s); err != nil {
-		return err
-	}
-
-	// decode authorizations
 	tx.Authorizations = make([]Authorization, 0)
-	if err = decodeAuthorizations(&tx.Authorizations, s); err != nil {
+	if err := decodeAuthorizations(&tx.Authorizations, s); err != nil {
 		return err
 	}
-
-	// decode V
-	if err = s.ReadUint256(&tx.V); err != nil {
-		return err
-	}
-	if err = s.ReadUint256(&tx.R); err != nil {
-		return err
-	}
-	if err = s.ReadUint256(&tx.S); err != nil {
+	if err := tx.decodeVRS(s); err != nil {
 		return err
 	}
 	return s.ListEnd()
 }
 
 func (tx *SetCodeTransaction) encodePayload(w io.Writer, b []byte, payloadSize, accessListLen, authorizationsLen int) error {
-	// prefix
-	if err := rlp.EncodeListPrefix(payloadSize, w, b); err != nil {
+	if err := tx.encode1559Prefix(w, b, payloadSize, accessListLen); err != nil {
 		return err
 	}
-	// encode ChainID
-	if err := rlp.EncodeUint256(tx.ChainID, w, b); err != nil {
-		return err
-	}
-	// encode Nonce
-	if err := rlp.EncodeU64(tx.Nonce, w, b); err != nil {
-		return err
-	}
-	// encode MaxPriorityFeePerGas
-	if err := rlp.EncodeUint256(tx.TipCap, w, b); err != nil {
-		return err
-	}
-	// encode MaxFeePerGas
-	if err := rlp.EncodeUint256(tx.FeeCap, w, b); err != nil {
-		return err
-	}
-	// encode GasLimit
-	if err := rlp.EncodeU64(tx.GasLimit, w, b); err != nil {
-		return err
-	}
-	// encode To
-	if err := EncodeOptionalAddress(tx.To, w, b); err != nil {
-		return err
-	}
-	// encode Value
-	if err := rlp.EncodeUint256(tx.Value, w, b); err != nil {
-		return err
-	}
-	// encode Data
-	if err := rlp.EncodeString(tx.Data, w, b); err != nil {
-		return err
-	}
-	// prefix
-	if err := rlp.EncodeListPrefix(accessListLen, w, b); err != nil {
-		return err
-	}
-	// encode AccessList
-	if err := encodeAccessList(tx.AccessList, w, b); err != nil {
-		return err
-	}
-	// prefix
 	if err := rlp.EncodeListPrefix(authorizationsLen, w, b); err != nil {
 		return err
 	}
-	// encode Authorizations
 	if err := encodeAuthorizations(tx.Authorizations, w, b); err != nil {
 		return err
 	}
-	// encode V
-	if err := rlp.EncodeUint256(tx.V, w, b); err != nil {
-		return err
-	}
-	// encode R
-	if err := rlp.EncodeUint256(tx.R, w, b); err != nil {
-		return err
-	}
-	// encode S
-	if err := rlp.EncodeUint256(tx.S, w, b); err != nil {
-		return err
-	}
-	return nil
-
+	return tx.encodeVRS(w, b)
 }
 
 // ParseDelegation tries to parse the address from a delegation slice.
