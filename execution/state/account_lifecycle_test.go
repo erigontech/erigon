@@ -100,3 +100,49 @@ func TestAccountLifecycle(t *testing.T) {
 		require.False(t, revived, "a same-tx SD-zero balance write is not a revival; only AddressPath uses >=")
 	})
 }
+
+// accountLifecycle layers the tx's own field-level SelfDestruct write over the
+// versionMap floor, without the stateObject. Pin the layering: own write wins
+// (true after same-tx SD, false after same-tx recreate); else the floor verdict.
+func TestAccountLifecycle_LayersOwnTxWrites(t *testing.T) {
+	_, tx, domains := NewTestRwTx(t)
+
+	newIBS := func() (*IntraBlockState, *VersionMap) {
+		vm := NewVersionMap(nil)
+		ibs := NewWithVersionMap(NewReaderV3(domains.AsGetter(tx)), vm)
+		ibs.SetTxContext(0, 5)
+		return ibs, vm
+	}
+	ownSD := func(ibs *IntraBlockState, addr accounts.Address, val bool) {
+		ibs.versionedWrites.SetSelfDestruct(addr, &VersionedWrite[bool]{
+			WriteHeader: WriteHeader{Address: addr, Path: SelfDestructPath, Version: Version{TxIndex: 5}}, Val: val})
+		ibs.journal.dirties[addr] = 1
+	}
+
+	t.Run("own-tx SD wins over floor", func(t *testing.T) {
+		ibs, _ := newIBS()
+		a := getAddress(1)
+		ownSD(ibs, a, true)
+		require.True(t, ibs.accountLifecycle(a))
+	})
+	t.Run("own-tx recreate (SD=false) wins", func(t *testing.T) {
+		ibs, vm := newIBS()
+		a := getAddress(2)
+		writeFor(vm, a, SelfDestructPath, accounts.NilKey, Version{TxIndex: 2}, true, true) // floor says destroyed
+		ownSD(ibs, a, false)                                                                // own recreate
+		require.False(t, ibs.accountLifecycle(a), "own recreate must override the floor destruct")
+	})
+	t.Run("no own write -> floor destroyed-no-revival", func(t *testing.T) {
+		ibs, vm := newIBS()
+		a := getAddress(3)
+		writeFor(vm, a, SelfDestructPath, accounts.NilKey, Version{TxIndex: 2}, true, true)
+		require.True(t, ibs.accountLifecycle(a))
+	})
+	t.Run("no own write -> floor revived", func(t *testing.T) {
+		ibs, vm := newIBS()
+		a := getAddress(4)
+		writeFor(vm, a, SelfDestructPath, accounts.NilKey, Version{TxIndex: 2}, true, true)
+		writeFor(vm, a, BalancePath, accounts.NilKey, Version{TxIndex: 3}, *uint256.NewInt(1), true)
+		require.False(t, ibs.accountLifecycle(a))
+	})
+}

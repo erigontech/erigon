@@ -2686,6 +2686,22 @@ func traceWrite[T any](sdb *IntraBlockState, vw *VersionedWrite[T]) {
 
 // versionedWriteSelfDestruct returns the SelfDestructPath write for addr
 // in the dirty per-tx write set, if any.
+// accountLifecycle returns the complete self-destruct verdict for the current
+// tx, layering the tx's own field-level SelfDestruct write over the versionMap
+// floor — the account-level analogue of what versionedReadCore does per field.
+// It consults the read/write collections and the versionMap only, never the
+// stateObject (whose deleted flag is a redundant cache of the own SelfDestruct
+// write). An own-tx SelfDestruct write is authoritative (newest): true after a
+// same-tx SD, false after a same-tx recreate. With no own write, the floor's
+// destroyed-and-not-revived verdict applies.
+func (sdb *IntraBlockState) accountLifecycle(addr accounts.Address) (destroyed bool) {
+	if own, ok := sdb.versionedWriteSelfDestruct(addr); ok {
+		return own
+	}
+	d, _, revived := sdb.versionMap.AccountLifecycle(addr, sdb.txIndex)
+	return d && !revived
+}
+
 func (sdb *IntraBlockState) versionedWriteSelfDestruct(addr accounts.Address) (bool, bool) {
 	if sdb.versionMap == nil {
 		return false, false
