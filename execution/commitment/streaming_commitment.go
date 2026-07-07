@@ -719,8 +719,8 @@ func (sc *StreamingCommitter) foldSplit(ctx context.Context, base *HexPatriciaHa
 	path := make([]byte, 0, 144)
 	path = append(path, ni)
 	path = append(path, child.ext...)
-	deepStorageRoot := func(n *prefixNode, pth []byte) (common.Hash, error) {
-		sr, err := foldStorageRoot(ctx, sc.numWorkers, sc.newStorageWorker, &pu, n, pth)
+	deepStorageRoot := func(n *prefixNode, pth []byte, accountFresh bool) (common.Hash, error) {
+		sr, err := foldStorageRoot(ctx, sc.numWorkers, sc.newStorageWorker, &pu, n, pth, accountFresh)
 		if err == nil {
 			sc.deepLocalFolds.Add(1)
 		}
@@ -833,9 +833,7 @@ func applyDeferredGuarded(ctx PatriciaContext, deferred []*DeferredBranchUpdate,
 		return err
 	}
 
-	encoder := workerEncoderPool.Get().(*BranchEncoder)
 	merger := workerMergerPool.Get().(*BranchMerger)
-	defer workerEncoderPool.Put(encoder)
 	defer workerMergerPool.Put(merger)
 
 	applied := make(map[string][]byte, len(deferred))
@@ -853,7 +851,7 @@ func applyDeferredGuarded(ctx PatriciaContext, deferred []*DeferredBranchUpdate,
 			}
 			upd.prev = common.Copy(prev)
 		}
-		if err := encodeDeferredUpdate(upd, encoder, merger); err != nil {
+		if err := mergeDeferredUpdate(upd, merger); err != nil {
 			return err
 		}
 		if upd.encoded == nil {

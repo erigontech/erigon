@@ -228,15 +228,30 @@ func TestBlobParameterInactiveHardfork(t *testing.T) {
 
 func TestConfigL2JSONRoundTrip(t *testing.T) {
 	var c Config
-	require := assert.New(t)
-	require.NoError(json.Unmarshal([]byte(`{"chainId":1,"l2":{"name":"testl2","foo":1}}`), &c))
-	require.JSONEq(`{"name":"testl2","foo":1}`, string(c.L2JSON))
-	require.True(c.IsL2())
+	a := assert.New(t)
+	a.NoError(json.Unmarshal([]byte(`{"chainId":1,"l2":{"name":"testl2","foo":1}}`), &c))
+	a.JSONEq(`{"name":"testl2","foo":1}`, string(c.L2JSON))
+	a.True(c.IsL2())
 
 	var noL2 Config
-	require.NoError(json.Unmarshal([]byte(`{"chainId":1}`), &noL2))
-	require.False(noL2.IsL2())
+	a.NoError(json.Unmarshal([]byte(`{"chainId":1}`), &noL2))
+	a.False(noL2.IsL2())
+
+	var nullL2 Config
+	a.NoError(json.Unmarshal([]byte(`{"chainId":1,"l2":null}`), &nullL2))
+	a.False(nullL2.IsL2())
+
+	resolved := Config{L2: fakeL2{}}
+	a.True(resolved.IsL2())
+
+	var nilCfg *Config
+	a.False(nilCfg.IsL2())
 }
+
+type fakeL2 struct{}
+
+func (fakeL2) Name() string                                                 { return "fake" }
+func (fakeL2) ResolveRules(l2Version, blockNum, blockTime uint64, r *Rules) {}
 
 func TestBlobParameterDencunAndPectraAtGenesis(t *testing.T) {
 	var c Config

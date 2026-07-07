@@ -26,6 +26,7 @@ rules:
       - qa-rpc-performance-tests.yml
       - qa-snap-download.yml
       - qa-stage-exec.yml
+      - qa-sync-from-scratch-full-node.yml
       - qa-sync-from-scratch-minimal-node.yml
       - qa-sync-from-scratch.yml
       - qa-sync-with-externalcl.yml
