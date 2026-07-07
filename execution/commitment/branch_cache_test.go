@@ -291,6 +291,7 @@ func TestBranchCache_Unwind_FrozenSurvives(t *testing.T) {
 // and that invalidating it doesn't evict real entries.
 func TestBranchCache_StateKeyNeverCached(t *testing.T) {
 	c := NewBranchCache(100)
+	defer c.Close()
 
 	c.Put(KeyCommitmentState, []byte("checkpoint"), 1, 1)
 	_, _, ok := c.Get(KeyCommitmentState)
@@ -340,6 +341,7 @@ func TestBranchCache_ShardedTailUnwindAcrossShards(t *testing.T) {
 // wrote it under resizeMu. Must be run under -race to be meaningful.
 func TestBranchCache_ConcurrentTailGrow(t *testing.T) {
 	c := NewBranchCache(4096) // max >> 512 start, so the tail actually grows
+	defer c.Close()
 
 	const (
 		workers   = 8

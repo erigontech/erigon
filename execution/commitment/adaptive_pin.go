@@ -399,5 +399,3 @@ func (c *AdaptivePinController) warnf(msg string, kv ...any) {
 		c.logger.Warn(msg, kv...)
 	}
 }
-
-var _ = context.Background // reserved for cancellation of in-flight preloads

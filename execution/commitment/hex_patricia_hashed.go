@@ -954,7 +954,6 @@ func (hph *HexPatriciaHashed) witnessComputeCellHashWithStorage(cell *cell, dept
 		} else {
 			if !cell.loaded.storage() {
 				hph.metrics.StorageLoad(cell.storageAddr[:cell.storageAddrLen])
-				diskLoadStorage.Add(1)
 				update, err := hph.storageFromCacheOrDB(cell.storageAddr[:cell.storageAddrLen])
 				if err != nil {
 					return nil, storageRootHashIsSet, nil, err
@@ -1040,7 +1039,6 @@ func (hph *HexPatriciaHashed) witnessComputeCellHashWithStorage(cell *cell, dept
 			}
 			// storage root update or extension update could invalidate older stateHash, so we need to reload state
 			hph.metrics.AccountLoad(cell.accountAddr[:cell.accountAddrLen])
-			diskLoadAccount.Add(1)
 			update, err := hph.accountFromCacheOrDB(cell.accountAddr[:cell.accountAddrLen])
 			if err != nil {
 				return nil, storageRootHashIsSet, storageRootHash[:], err
@@ -1193,7 +1191,6 @@ func (hph *HexPatriciaHashed) computeCellHash(cell *cell, depth int16, buf []byt
 			}
 			// storage root update or extension update could invalidate older stateHash, so we need to reload state
 			hph.metrics.AccountLoad(cell.accountAddr[:cell.accountAddrLen])
-			diskLoadAccount.Add(1)
 			update, err := hph.accountFromCacheOrDB(cell.accountAddr[:cell.accountAddrLen])
 			if err != nil {
 				return nil, err
@@ -1569,11 +1566,9 @@ func (hph *HexPatriciaHashed) needFolding(hashedKey []byte) bool {
 // Process-cumulative trie-compute counters feeding the KVReadLevelledMetrics
 // "skip ratio"/"reset ratio" Debug log at the end of ComputeCommitment.
 var (
-	hadToLoad       atomic.Uint64
-	skippedLoad     atomic.Uint64
-	hadToReset      atomic.Uint64
-	diskLoadStorage atomic.Uint64
-	diskLoadAccount atomic.Uint64
+	hadToLoad   atomic.Uint64
+	skippedLoad atomic.Uint64
+	hadToReset  atomic.Uint64
 )
 
 var (

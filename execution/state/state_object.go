@@ -416,7 +416,6 @@ func (so *stateObject) CodeTyped() (accounts.Code, error) {
 			return c, nil
 		}
 	}
-
 	if dbg.TraceDomainIO || (dbg.TraceTransactionIO && (so.db.trace || dbg.TraceAccount(so.address.Handle()))) {
 		so.db.stateReader.SetTrace(true, fmt.Sprintf("%d (%d.%d)", so.db.blockNum, so.db.txIndex, so.db.version))
 	}

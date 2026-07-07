@@ -141,16 +141,17 @@ func (s *CodeStore) Evict(tx kv.RwTx) error {
 	}
 	defer c.Close()
 	target := int64(s.tableCapBytes / 10 * 9)
-	for k, v, err := c.First(); k != nil && s.tableSizeBytes.Load() > target; k, v, err = c.Next() {
-		if err != nil {
-			return err
-		}
-		if err := c.DeleteCurrent(); err != nil {
-			return err
+	// Check err after the loop, not inside: a cursor error returns k=nil, which
+	// exits the k!=nil condition before any in-body check runs.
+	k, v, err := c.First()
+	for k != nil && s.tableSizeBytes.Load() > target {
+		if derr := c.DeleteCurrent(); derr != nil {
+			return derr
 		}
 		s.tableSizeBytes.Add(-int64(len(k) + len(v)))
+		k, v, err = c.Next()
 	}
-	return nil
+	return err
 }
 
 // sumTableBytes returns the total key+value byte size of TblCodeCache, in the
@@ -162,11 +163,10 @@ func sumTableBytes(tx kv.RwTx) (int64, error) {
 	}
 	defer c.Close()
 	var total int64
-	for k, v, err := c.First(); k != nil; k, v, err = c.Next() {
-		if err != nil {
-			return 0, err
-		}
+	k, v, err := c.First()
+	for k != nil {
 		total += int64(len(k) + len(v))
+		k, v, err = c.Next()
 	}
-	return total, nil
+	return total, err
 }

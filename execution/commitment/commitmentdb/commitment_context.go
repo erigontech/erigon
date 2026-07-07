@@ -44,9 +44,6 @@ type sd interface {
 	// read), tagged with source.
 	MergeMetrics(source kvmetrics.Source, wm *kvmetrics.DomainMetrics)
 	StepSize() uint64
-	// ProbeReadLayers samples sd.mem, parent.mem and tx-direct (MDBX) for one
-	// key — BranchCache divergence-detection probe. Read-only.
-	ProbeReadLayers(domain kv.Domain, tx kv.TemporalTx, key []byte) (mem, parentMem, mdbx []byte, memOk, parentOk bool)
 
 	// Metrics exposes the per-SD DomainMetrics so callers can read
 	// per-domain (cache, db, file) read counters. Used by the
@@ -220,8 +217,6 @@ func (sdc *SharedDomainsCommitmentContext) trieContext(tx kv.TemporalTx, blockNu
 		stepSize: sdc.sharedDomains.StepSize(),
 		txNum:    txNum,
 		blockNum: blockNum,
-		probeSd:  sdc.sharedDomains,
-		probeTx:  tx,
 		traceW:   sdc.traceW,
 	}
 	if sdc.stateReader != nil {
@@ -899,10 +894,6 @@ type TrieContext struct {
 	traceW         io.Writer // nil = disabled; traces branch reads/writes (see [SDC] lines)
 	stateReader    StateReader
 	localCollector *etl.Collector // per-goroutine collector for concurrent PutBranch
-
-	// Diagnostics-only — both nil for read-only / test contexts.
-	probeSd sd
-	probeTx kv.TemporalTx
 }
 
 // NewTrieContextRo creates a read-only TrieContext suitable for TrieReader lookups.
@@ -925,22 +916,6 @@ func (sdc *TrieContext) Branch(pref []byte) ([]byte, kv.Step, error) {
 		fmt.Fprintf(sdc.traceW, "[SDC] Branch read %x => %x\n", pref, enc)
 	}
 	return common.Copy(enc), step, nil
-}
-
-// ProbeStateLayers samples sd.mem, parent.mem and tx-direct (MDBX) for one
-// key — divergence diagnostics. Returns empty / not-ok when constructed
-// without a probe-capable SharedDomains (e.g. NewTrieContextRo).
-func (sdc *TrieContext) ProbeStateLayers(domain kv.Domain, key []byte) (mem, parentMem, mdbx []byte, memOk, parentOk bool) {
-	if sdc.probeSd == nil {
-		return
-	}
-	return sdc.probeSd.ProbeReadLayers(domain, sdc.probeTx, key)
-}
-
-// SiteIdentity tags cache entries with the SD lineage that produced them so
-// divergence diagnostics can tell parent-SD writes from fork-SD writes.
-func (sdc *TrieContext) SiteIdentity() string {
-	return fmt.Sprintf("sd=%p", sdc.probeSd)
 }
 
 func (sdc *TrieContext) PutBranch(prefix []byte, data []byte, prevData []byte) error {

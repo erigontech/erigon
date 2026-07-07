@@ -757,31 +757,6 @@ func (sd *SharedDomains) PrintCacheStats() {
 	}
 }
 
-// ProbeReadLayers samples each independent state layer (this SD's mem,
-// the parent SD's mem, and direct MDBX via tx.GetLatest) and returns
-// the bytes from each. Read-only, intended for divergence-detection
-// diagnostics — pinpoints which layer holds bytes that disagree with
-// the BranchCache. Bytes are copied so the caller can hold them past
-// tx lifetime.
-func (sd *SharedDomains) ProbeReadLayers(domain kv.Domain, tx kv.TemporalTx, key []byte) (mem, parentMem, mdbx []byte, memOk, parentOk bool) {
-	if v, _, ok := sd.mem.GetLatest(domain, key); ok {
-		memOk = true
-		mem = append([]byte(nil), v...)
-	}
-	if sd.parent != nil {
-		if v, _, ok := sd.parent.mem.GetLatest(domain, key); ok {
-			parentOk = true
-			parentMem = append([]byte(nil), v...)
-		}
-	}
-	if tx != nil {
-		if v, _, err := tx.GetLatest(domain, key); err == nil {
-			mdbx = append([]byte(nil), v...)
-		}
-	}
-	return
-}
-
 func (sd *SharedDomains) ClearRam(resetCommitment bool) {
 	// When the commitment calculator goroutine owns the Updates buffer,
 	// skip ClearRam on the commitment context to avoid concurrent btree access.
@@ -1109,18 +1084,6 @@ func (sd *SharedDomains) Commit(ctx context.Context, tx kv.RwTx, validate ...fun
 		}
 	}
 	return nil
-}
-
-// ClearBranchCache empties the aggregator-scope commitment BranchCache.
-// Use after operations that mutate commitment state outside the normal
-// sd.Flush callback path — notably SetHead unwind, which truncates
-// commitment domain history but does not re-write all the keys whose
-// cached values are now stale. Without this call, the next FCU sees
-// the pre-unwind KeyCommitmentState and trips ErrBehindCommitment.
-func (sd *SharedDomains) ClearBranchCache() {
-	if sd.branchCache != nil {
-		sd.branchCache.Clear()
-	}
 }
 
 // DetachBranchCache makes this SharedDomains ignore the aggregator-scope
