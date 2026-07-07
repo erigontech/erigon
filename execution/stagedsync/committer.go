@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"math"
 	"runtime/pprof"
 	"sync"
 	"sync/atomic"
@@ -443,16 +444,21 @@ func (cc *commitmentCalculator) handleMessage(ctx context.Context, msg applyResu
 // BALDrivenCommitment is set, else incremental — then tries to fold the
 // block ahead of its result stream (maybeFoldAhead).
 func (cc *commitmentCalculator) handleBlockRequest(ctx context.Context, req *blockRequest) {
+	// Record the batch's first block before the drop-guard: if blockResult(n) is
+	// consumed before blockRequest(n) (the in/reqs select has no cross-channel
+	// ordering), a dropped first request must still set firstBlockNum to n rather
+	// than leave n+1 to claim it — else foldGateOpen and the contiguity guard are
+	// both bypassed via n == firstBlockNum and n+1 folds on a baseline missing n.
+	if !cc.hasFirstBlock {
+		cc.firstBlockNum = req.blockNum
+		cc.hasFirstBlock = true
+	}
 	// Drop a request whose block result was already processed: re-inserting
 	// pending[n] would let a late fold read a trie that has since advanced (batch
 	// boundary, step checkpoint, per-block compute), poisoning a valid block, and
 	// would leak pending/foldedAhead/balRoots (retaining the decoded BAL).
 	if cc.hasSeenBlockResult && req.blockNum <= cc.lastBlockResultSeen {
 		return
-	}
-	if !cc.hasFirstBlock {
-		cc.firstBlockNum = req.blockNum
-		cc.hasFirstBlock = true
 	}
 	mode := calcModeIncremental
 	if len(req.bal) > 0 && !dbg.IgnoreBAL && dbg.BALDrivenCommitment {
@@ -535,25 +541,9 @@ func (cc *commitmentCalculator) foldBlockFromBAL(ctx context.Context, pb *pendin
 		cc.fail(ctx, br, err)
 		return
 	}
-	reader := &asOfStateReader{sd: cc.doms, roTx: cc.roTx, txNum: req.lastTxNum + 1}
-	balState := newCalcState(reader, cc.logger, cc.logPrefix)
-	balState.LoadFromBAL(req.bal, emptyRemoval, cc.chainConfig.Aura != nil)
-	if err := balState.LazyLoadErr(); err != nil {
-		cc.fail(ctx, br, fmt.Errorf("BAL-driven lazy-load: %w", err))
-		return
-	}
-	balUpdates := cc.updates.NewEmpty()
-	// Match the calculator's constructor: only ModeDirect needs upgrading to
-	// ModeUpdate to carry the fold's BAL-sourced values; ModeParallel already
-	// carries them (and ParallelPatriciaHashed rejects any other mode).
-	if balUpdates.Mode() != commitment.ModeParallel {
-		balUpdates.SetMode(commitment.ModeUpdate)
-	}
-	balState.FlushToUpdates(balUpdates)
-
-	rh, err := cc.computeRootFromUpdates(ctx, targetOf(br), balUpdates, reader)
+	rh, err := cc.foldBALToRoot(ctx, req, math.MaxUint32, emptyRemoval, targetOf(br))
 	if err != nil {
-		cc.fail(ctx, br, fmt.Errorf("BAL-driven compute: %w", err))
+		cc.fail(ctx, br, fmt.Errorf("BAL-driven fold block %d: %w", req.blockNum, err))
 		return
 	}
 	if !bytes.Equal(rh, req.stateRoot[:]) {
@@ -593,23 +583,33 @@ func (cc *commitmentCalculator) foldStepCheckpoints(ctx context.Context, req *bl
 		if !cc.doms.IsUnfrozenStepEdge(cc.roTx, edge) {
 			continue
 		}
-		reader := &asOfStateReader{sd: cc.doms, roTx: cc.roTx, txNum: edge + 1}
-		balState := newCalcState(reader, cc.logger, cc.logPrefix)
-		balState.LoadFromBALUpTo(req.bal, uint32(edge-req.firstTxNum), emptyRemoval, cc.chainConfig.Aura != nil)
-		if err := balState.LazyLoadErr(); err != nil {
-			return fmt.Errorf("BAL-driven step-checkpoint lazy-load at txNum %d: %w", edge, err)
-		}
-		balUpdates := cc.updates.NewEmpty()
-		if balUpdates.Mode() != commitment.ModeParallel {
-			balUpdates.SetMode(commitment.ModeUpdate)
-		}
-		balState.FlushToUpdates(balUpdates)
 		stepBr := &blockResult{BlockNum: req.blockNum, BlockHash: req.blockHash, lastTxNum: edge}
-		if _, err := cc.computeRootFromUpdates(ctx, targetOf(stepBr), balUpdates, reader); err != nil {
-			return fmt.Errorf("BAL-driven step-checkpoint compute at txNum %d: %w", edge, err)
+		if _, err := cc.foldBALToRoot(ctx, req, uint32(edge-req.firstTxNum), emptyRemoval, targetOf(stepBr)); err != nil {
+			return fmt.Errorf("BAL-driven step-checkpoint at txNum %d: %w", edge, err)
 		}
 	}
 	return nil
+}
+
+// foldBALToRoot builds a calcState from the BAL restricted to maxTxIndex,
+// flushes it to a fresh updates buffer, and computes the root at t. Shared by
+// the block-end fold and the mid-block step checkpoints so the two can't drift.
+func (cc *commitmentCalculator) foldBALToRoot(ctx context.Context, req *blockRequest, maxTxIndex uint32, emptyRemoval bool, t commitTarget) ([]byte, error) {
+	reader := &asOfStateReader{sd: cc.doms, roTx: cc.roTx, txNum: t.lastTxNum + 1}
+	balState := newCalcState(reader, cc.logger, cc.logPrefix)
+	balState.LoadFromBALUpTo(req.bal, maxTxIndex, emptyRemoval, cc.chainConfig.Aura != nil)
+	if err := balState.LazyLoadErr(); err != nil {
+		return nil, fmt.Errorf("lazy-load: %w", err)
+	}
+	balUpdates := cc.updates.NewEmpty()
+	// Match the calculator's constructor: only ModeDirect needs upgrading to
+	// ModeUpdate to carry the fold's BAL-sourced values; ModeParallel already
+	// carries them (and ParallelPatriciaHashed rejects any other mode).
+	if balUpdates.Mode() != commitment.ModeParallel {
+		balUpdates.SetMode(commitment.ModeUpdate)
+	}
+	balState.FlushToUpdates(balUpdates)
+	return cc.computeRootFromUpdates(ctx, t, balUpdates, reader)
 }
 
 // computeRootFromUpdates installs an explicit updates buffer + reader on the
@@ -659,8 +659,7 @@ func (cc *commitmentCalculator) shadowCrossCheck(ctx context.Context, r *blockRe
 // fail publishes a calculator error. It does NOT cancel execution: the apply
 // loop is the sole cancellation authority — it classifies the published error
 // (deferring a fold-ahead wrong-root until the block's own exec verdict) and
-// drives the single UnwindTo. Cancelling here raced publish (dropping the error
-// ~half the time) and produced a second unwind that bad-marked a valid block.
+// drives the single UnwindTo.
 func (cc *commitmentCalculator) fail(ctx context.Context, br *blockResult, err error) {
 	if cc.logger != nil {
 		cc.logger.Error("["+cc.logPrefix+"] commitmentCalculator: reporting failure", "block", br.BlockNum, "err", err)

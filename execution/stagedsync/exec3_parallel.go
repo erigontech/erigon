@@ -88,16 +88,16 @@ type parallelExecutor struct {
 	execWorkers []*exec.Worker
 	stopWorkers func()
 	waitWorkers func()
-	// cancelExecLoop publishes the stopCause on the shared coordination context.
-	// It is a SIGNAL, not an abort: the exec loop, calculator and apply loop read
-	// the cause and each decides how to wind down. It does not stop the workers —
-	// that is cancelWorkers, owned by the exec loop, so the controlling goroutine
-	// decides when workers halt.
+	// cancelExecLoop publishes the stopCause on the coordination context
+	// (execLoopCtx). It is a SIGNAL that the exec loop, calculator and apply loop
+	// each read to decide how to wind down. It cancels execLoopCtx and therefore
+	// its child workersCtx too, but every publish site is ordered after the exec
+	// loop has produced everything up to the coalesce block, so it never aborts an
+	// in-flight block mid-work.
 	cancelExecLoop context.CancelCauseFunc
-	// cancelWorkers stops the OCC worker pool. The workers run on their own
-	// context (a sibling of the coordination context), so publishing a stopCause
-	// never aborts an in-flight block — the exec loop calls this explicitly once
-	// it has produced everything up to the coalesce block.
+	// cancelWorkers stops the OCC worker pool via workersCtx (a child of the
+	// coordination context). It is the explicit, ordered halt the exec loop calls
+	// once it has produced everything up to the coalesce block.
 	cancelWorkers  context.CancelFunc
 	in             *exec.QueueWithRetry
 	rws            *exec.ResultsQueue
@@ -1040,7 +1040,7 @@ func (pe *parallelExecutor) execLoop(ctx context.Context) (err error) {
 						pe.RUnlock()
 						if exists {
 							pe.lastExecutedBlockNum.Store(int64(blockResult.BlockNum))
-							if err := blockExecutor.sendResult(ctx, blockResult); err != nil {
+							if err := blockExecutor.sendResult(ctx, blockResult, false); err != nil {
 								return err
 							}
 							// See main exec-loop path: invalid blockResult is
@@ -1143,7 +1143,10 @@ func (pe *parallelExecutor) execLoop(ctx context.Context) (err error) {
 					case execLoopExitMaxReached, execLoopExitExhausted, execLoopExitStopAfter:
 						terminal = true
 					case execLoopExitSizeLimit:
-						if !sizeCutPending && blockResult.Exhausted == nil && blockResult.BlockNum < pe.maxBlockNum {
+						// Catch-up only matters when a block may have been folded ahead;
+						// with BAL-driven commitment off nothing folds, so cut at the
+						// budget exactly like main instead of running one extra block.
+						if dbg.BALDrivenCommitment && !sizeCutPending && blockResult.Exhausted == nil && blockResult.BlockNum < pe.maxBlockNum {
 							startCatchup = true
 						} else {
 							terminal = true
@@ -1158,7 +1161,9 @@ func (pe *parallelExecutor) execLoop(ctx context.Context) (err error) {
 					}
 				}
 
-				if err := blockExecutor.sendResult(ctx, blockResult); err != nil {
+				// mustDeliver: a terminal stop may have just published the stopCause
+				// (cancelling ctx); blockResult(M) must still reach the apply loop.
+				if err := blockExecutor.sendResult(ctx, blockResult, terminal); err != nil {
 					return err
 				}
 				pe.clearChangesetAccumulator()
@@ -2328,7 +2333,7 @@ type blockExecutor struct {
 // sendResult fans out an applyResult to both the apply loop and
 // the commitment calculator. Blocks if either channel is full.
 // Channels may be closed by executeBlocks — recover from panic.
-func (be *blockExecutor) sendResult(ctx context.Context, r applyResult) (err error) {
+func (be *blockExecutor) sendResult(ctx context.Context, r applyResult, mustDeliver bool) (err error) {
 	defer func() {
 		// "send on closed channel" panics here are benign — executeBlocks
 		// finished and closed applyResults/commitResults during batch
@@ -2341,11 +2346,22 @@ func (be *blockExecutor) sendResult(ctx context.Context, r applyResult) (err err
 			panic(rec)
 		}
 	}()
-	// Data-arm-first on both channels: a terminal stop cancels the coordination
-	// ctx just before blockResult(M) is sent, but M must still reach the apply
-	// loop (validation + progress) and the calculator (compute). Deliver while the
-	// buffer has room; only honour ctx.Done if the buffer is full (avoids a
-	// deadlock when the consumer is truly gone).
+	// mustDeliver (the terminal stop): the coordination ctx is already cancelled
+	// by the stopCause published just before this send, but blockResult(M) MUST
+	// still reach the apply loop (validation + progress) and the calculator — a
+	// dropped M surfaces as a spurious ErrInvalidBlock. Both consumers are alive
+	// and draining, so block unconditionally rather than honour ctx.Done; a
+	// closed channel (batch shutdown) is caught by the recover above.
+	if mustDeliver {
+		be.applyResults <- r
+		if be.commitResults != nil {
+			be.commitResults <- r
+		}
+		return nil
+	}
+	// Data-arm-first on both channels: deliver while the buffer has room; only
+	// honour ctx.Done if the buffer is full (avoids a deadlock when the consumer
+	// is truly gone).
 	select {
 	case be.applyResults <- r:
 	default:
@@ -2922,7 +2938,7 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 				return nil, fmt.Errorf("ApplyTxIndexes block=%d txNum=%d: %w", applyResult.blockNum, applyResult.txNum, err)
 			}
 
-			if err := be.sendResult(ctx, &applyResult); err != nil {
+			if err := be.sendResult(ctx, &applyResult, false); err != nil {
 				return nil, err
 			}
 		}
@@ -3081,7 +3097,7 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 				traceTos:              lastResult.TraceTos,
 				cumulativeBlobGasUsed: be.blobGasUsed,
 				isFinalize:            true,
-			}); err != nil {
+			}, false); err != nil {
 				return nil, err
 			}
 		}

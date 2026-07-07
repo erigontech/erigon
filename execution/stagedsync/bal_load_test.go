@@ -17,6 +17,7 @@
 package stagedsync
 
 import (
+	"math"
 	"testing"
 
 	"github.com/holiman/uint256"
@@ -35,21 +36,21 @@ import (
 func TestFinalChange(t *testing.T) {
 	t.Parallel()
 
-	if _, ok := finalChange([]*types.BalanceChange(nil)); ok {
-		t.Fatal("finalChange on an empty list returned ok=true")
+	if _, ok := finalChangeUpTo([]*types.BalanceChange(nil), math.MaxUint32); ok {
+		t.Fatal("finalChangeUpTo on an empty list returned ok=true")
 	}
 
-	single, ok := finalChange([]*types.BalanceChange{
+	single, ok := finalChangeUpTo([]*types.BalanceChange{
 		{Index: 7, Value: *uint256.NewInt(70)},
-	})
+	}, math.MaxUint32)
 	require.True(t, ok)
 	assert.Equal(t, uint64(70), single.Value.Uint64())
 
-	ascending, ok := finalChange([]*types.BalanceChange{
+	ascending, ok := finalChangeUpTo([]*types.BalanceChange{
 		{Index: 0, Value: *uint256.NewInt(10)},
 		{Index: 2, Value: *uint256.NewInt(20)},
 		{Index: 9, Value: *uint256.NewInt(90)},
-	})
+	}, math.MaxUint32)
 	require.True(t, ok)
 	assert.Equal(t, uint64(90), ascending.Value.Uint64())
 }

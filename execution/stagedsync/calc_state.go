@@ -280,17 +280,6 @@ func (cs *calcState) deleteStorageSubtree(addr accounts.Address) {
 	}
 }
 
-// finalChange returns the block-end change from a BAL per-field / per-slot
-// list — the last element, since BlockAccessList.Validate enforces
-// strictly-increasing tx indices. Returns (zero, false) for an empty list.
-func finalChange[T any](changes []T) (T, bool) {
-	if len(changes) == 0 {
-		var zero T
-		return zero, false
-	}
-	return changes[len(changes)-1], true
-}
-
 // hasTxIndex is the BAL change-element constraint: every change
 // (*BalanceChange/*NonceChange/*CodeChange/*StorageChange) carries the tx index
 // within the block at which it was written.
@@ -300,7 +289,7 @@ type hasTxIndex interface{ GetIndex() uint32 }
 // field's value as of that point in the block, for a mid-block (step-boundary)
 // checkpoint fold. Indices are strictly increasing (BlockAccessList.Validate), so
 // a reverse scan stops at the first in-range element. maxTxIndex == MaxUint32
-// makes this equivalent to finalChange (whole block).
+// selects the block-end value (the whole block).
 func finalChangeUpTo[T hasTxIndex](changes []T, maxTxIndex uint32) (T, bool) {
 	for i := len(changes) - 1; i >= 0; i-- {
 		if changes[i].GetIndex() <= maxTxIndex {
