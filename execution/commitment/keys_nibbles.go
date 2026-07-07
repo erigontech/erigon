@@ -71,7 +71,8 @@ func keyToHexNibbleHashCached(key []byte, c *addrHashCache) []byte {
 }
 
 // keyToHexNibbleHashCachedInto is keyToHexNibbleHashCached writing into dst,
-// which must be sized 64 for account keys and 128 for storage keys.
+// which needs capacity for the encoded key: 64 bytes for account keys, 128 for
+// storage keys; a larger buffer is fine.
 func keyToHexNibbleHashCachedInto(key []byte, c *addrHashCache, dst []byte) []byte {
 	if len(key) <= length.Addr {
 		h := keccak.Sum256(key)
