@@ -89,13 +89,7 @@ func u64identity(k uint64) uint32 { return uint32(k) }
 // capacity. mode selects ModeEvictLRU (default in this tree) or ModeNoOp
 // (kept for diagnostic baselines).
 func NewGenericCache[T any](capacityBytes datasize.ByteSize, sizeFunc func(T) int, mode Mode) *GenericCache[T] {
-	capacityEntries := uint32(uint64(capacityBytes) / avgBytesPerEntry)
-	if capacityEntries < 1024 {
-		capacityEntries = 1024
-	}
-	if capacityEntries > 1<<22 {
-		capacityEntries = 1 << 22
-	}
+	capacityEntries := min(max(uint32(uint64(capacityBytes)/avgBytesPerEntry), 1024), 1<<22)
 	return newGenericCacheEntries(capacityBytes, capacityEntries, sizeFunc, mode)
 }
 
