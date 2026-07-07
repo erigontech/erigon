@@ -105,6 +105,25 @@ type TransactionMisc struct {
 	from accounts.Address
 }
 
+// The sender-cache trio is promoted from the embedding type when it doesn't
+// define its own; cachedSender being unexported, this is what lets a
+// transaction type outside this package satisfy the Transaction interface.
+func (t *TransactionMisc) cachedSender() (sender accounts.Address, ok bool) {
+	s := t.from
+	if s.IsNil() {
+		return sender, false
+	}
+	return s, true
+}
+
+func (t *TransactionMisc) GetSender() (accounts.Address, bool) {
+	return t.cachedSender()
+}
+
+func (t *TransactionMisc) SetSender(addr accounts.Address) {
+	t.from = addr
+}
+
 // CalcEffectiveGasTip computes the effective gas tip given a transaction's tip/fee caps and a base fee.
 // Shared logic used by all transaction types that implement GetEffectiveGasTip.
 func CalcEffectiveGasTip(baseFee *uint256.Int, getTipCap func() *uint256.Int, getFeeCap func() *uint256.Int) uint256.Int {
@@ -236,6 +255,10 @@ func UnmarshalTransactionFromBinary(data []byte, blobTxnsAreWrappedWithBlobs boo
 	case AccountAbstractionTxType:
 		t = &AccountAbstractionTransaction{}
 	default:
+		if spec, ok := registeredTxType(data[0]); ok {
+			t = spec.New()
+			break
+		}
 		if data[0] >= 0x80 {
 			// txn is type legacy which is RLP encoded
 			return DecodeTransaction(data)
