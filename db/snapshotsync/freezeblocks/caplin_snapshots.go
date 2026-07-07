@@ -345,8 +345,7 @@ func (s *CaplinSnapshots) closeWhatNotInList(l []string) {
 			if sn.Decompressor == nil {
 				continue
 			}
-			_, name := filepath.Split(sn.FilePath())
-			if _, ok := protectFiles[name]; ok {
+			if _, ok := protectFiles[sn.FileName()]; ok {
 				continue
 			}
 			toClose = append(toClose, sn)
@@ -364,8 +363,7 @@ func (s *CaplinSnapshots) closeWhatNotInList(l []string) {
 			if sn.Decompressor == nil {
 				continue
 			}
-			_, name := filepath.Split(sn.FilePath())
-			if _, ok := protectFiles[name]; ok {
+			if _, ok := protectFiles[sn.FileName()]; ok {
 				continue
 			}
 			toClose = append(toClose, sn)
