@@ -235,10 +235,14 @@ func buildChurnChain(
 	eat engineapitester.EngineApiTester,
 	pokes int,
 	seed func(k int) int64,
+	tweakOpts ...func(*bind.TransactOpts),
 ) (payloads []*engineapitester.MockClPayload, addr common.Address, churn *contracts.StateChurn, sums []*big.Int) {
 	transactOpts, err := bind.NewKeyedTransactorWithChainID(eat.CoinbaseKey, eat.ChainId())
 	require.NoError(t, err)
 	transactOpts.GasLimit = params.MaxTxnGasLimit
+	for _, tweak := range tweakOpts {
+		tweak(transactOpts)
+	}
 
 	addr, deployTxn, churn, err := contracts.DeployStateChurn(transactOpts, eat.ContractBackend)
 	require.NoError(t, err)
@@ -313,6 +317,7 @@ func buildRecordedChurnChain(
 	tweak func(*ethconfig.Config),
 	pokes int,
 	seed func(k int) int64,
+	tweakOpts ...func(*bind.TransactOpts),
 ) (payloads []*engineapitester.MockClPayload, addr common.Address, ref *big.Int) {
 	eat, err := engineapitester.InitialiseEngineApiTester(ctx, engineapitester.EngineApiTesterInitArgs{
 		Logger: logger, DataDir: t.TempDir(), Genesis: genesis, CoinbaseKey: coinbaseKey, EthConfigTweaker: tweak,
@@ -321,7 +326,7 @@ func buildRecordedChurnChain(
 	t.Cleanup(func() { require.NoError(t, eat.Close()) })
 	eat.Run(t, func(ctx context.Context, t *testing.T, eat engineapitester.EngineApiTester) {
 		var sums []*big.Int
-		payloads, addr, _, sums = buildChurnChain(ctx, t, eat, pokes, seed)
+		payloads, addr, _, sums = buildChurnChain(ctx, t, eat, pokes, seed, tweakOpts...)
 		ref = sums[len(sums)-1]
 	})
 	require.NoError(t, eat.Close())

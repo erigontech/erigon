@@ -136,3 +136,81 @@ func TestEngineApiUnwindAcrossDomainStepBoundaries(t *testing.T) {
 		churnAndAssert(ctx, t, eat, churn, 4, func(k int) int64 { return int64(1_000 + k) })
 	})
 }
+
+// TestEngineApiUnwindToSnapshotBoundaryPreservesDeletedSlots unwinds to just
+// above the visible snapshot-file boundary, after pruning has evacuated the
+// filed range from MDBX. Post-unwind reads of the churned slots must then
+// resolve through the snapshot files — the state the shallower unwind of
+// TestEngineApiUnwindAcrossDomainStepBoundaries never reaches because MDBX
+// still holds every pre-range value there. Any domain read path that
+// mishandles file-resident values or deletion markers surfaces here.
+func TestEngineApiUnwindToSnapshotBoundaryPreservesDeletedSlots(t *testing.T) {
+	ctx := t.Context()
+	logger := testlog.Logger(t, log.LvlError)
+	dataDir := t.TempDir()
+	snapDir := filepath.Join(dataDir, "snapshots")
+	require.NoError(t, os.MkdirAll(snapDir, 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(snapDir, "erigondb.toml"),
+		[]byte("step_size = 32\nsteps_in_frozen_file = 256\n"), 0o644))
+
+	genesis, coinbaseKey, err := engineapitester.DefaultEngineApiTesterGenesis()
+	require.NoError(t, err)
+	eat, err := engineapitester.InitialiseEngineApiTester(ctx, engineapitester.EngineApiTesterInitArgs{
+		Logger:      logger,
+		DataDir:     dataDir,
+		Genesis:     genesis,
+		CoinbaseKey: coinbaseKey,
+		EthConfigTweaker: func(c *ethconfig.Config) {
+			c.Snapshot.ProduceE3 = true
+			c.AlwaysGenerateChangesets = true
+			c.MaxReorgDepth = 400 // the boundary sits deep below the tip
+		},
+	})
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, eat.Close()) })
+
+	eat.Run(t, func(ctx context.Context, t *testing.T, eat engineapitester.EngineApiTester) {
+		const pokes = 300
+		payloads, _, churn, sums := buildChurnChain(ctx, t, eat, pokes, func(k int) int64 { return int64(k) })
+		tip := uint64(2 + pokes)
+
+		waitForDomainFilesSettled(ctx, t, eat.StateAgg)
+		// The last background build may have finished after the final forkchoice,
+		// so no prune pass has evacuated the freshly filed range from MDBX yet —
+		// and lingering MDBX entries (including original deletion tombstones)
+		// would shadow the file reads this test is about. A few more forkchoice
+		// cycles let the foreground collate+prune catch up.
+		extraPayloads, extraSums := churnAndAssert(ctx, t, eat, churn, 6, func(k int) int64 { return int64(9_000 + k) })
+		payloads = append(payloads, extraPayloads...)
+		sums = append(sums, extraSums...)
+		tip += 6
+		<-eat.StateAgg.WaitForBuildAndMerge(ctx)
+		boundaryTxNum := eat.StateAgg.EndTxNumMinimax()
+		t.Logf("domain files settled: %v, boundary txNum: %d", eat.StateAgg.FilesAmount(), boundaryTxNum)
+
+		// Locate the first block fully above the visible-files boundary. Each
+		// block spans len(txs)+2 txNums (block-begin + txns + block-end); the
+		// +2 slack below absorbs the genesis anchoring.
+		cum := uint64(2) // genesis
+		cum += 2         // block 1, the tester's initial empty block
+		target := uint64(0)
+		for i, p := range payloads {
+			cum += uint64(len(p.ExecutionPayload.Transactions)) + 2
+			if cum > boundaryTxNum {
+				target = uint64(i) + 2 // payloads[i] is height i+2
+				break
+			}
+		}
+		require.NotZero(t, target, "no block above the files boundary — files cover the whole chain?")
+		target += 2 // slack for the genesis/system-txn anchoring above
+		require.Greater(t, target, uint64(2), "target must stay above the deploy block")
+		require.Less(t, target, tip, "target must be a real unwind")
+		t.Logf("unwinding to block %d (tip %d, depth %d)", target, tip, tip-target)
+
+		require.NoError(t, eat.MockCl.UpdateForkChoice(ctx, payloads[target-2]))
+		assertChurnState(ctx, t, eat, churn, payloads[target-2], sums[target-2])
+
+		// Keep churning: every poke re-reads its ring slots from MDBX+files.
+		churnAndAssert(ctx, t, eat, churn, 4, func(k int) int64 { return int64(5_000 + k) })
+	})
+}

@@ -132,3 +132,69 @@ func TestEngineApiReorgWithPruningInterference(t *testing.T) {
 		churnAndAssert(ctx, t, eat, churn, 4, func(k int) int64 { return int64(4_000 + k) })
 	})
 }
+
+// TestEngineApiUnwindBeyondRetainedChangesetsRejectedCleanly runs without
+// AlwaysGenerateChangesets, so once churn history is collated into snapshot
+// files the changesets an unwind would need are pruned away. A forkchoice to
+// a block below what is still unwindable must then be rejected loudly — a
+// silently partial unwind would leave phantom state — while a shallow unwind
+// and continued churn keep working on the same node.
+func TestEngineApiUnwindBeyondRetainedChangesetsRejectedCleanly(t *testing.T) {
+	ctx := t.Context()
+	logger := testlog.Logger(t, log.LvlError)
+	dataDir := t.TempDir()
+	snapDir := filepath.Join(dataDir, "snapshots")
+	require.NoError(t, os.MkdirAll(snapDir, 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(snapDir, "erigondb.toml"),
+		[]byte("step_size = 32\nsteps_in_frozen_file = 256\n"), 0o644))
+
+	genesis, coinbaseKey, err := engineapitester.DefaultEngineApiTesterGenesis()
+	require.NoError(t, err)
+	eat, err := engineapitester.InitialiseEngineApiTester(ctx, engineapitester.EngineApiTesterInitArgs{
+		Logger:      logger,
+		DataDir:     dataDir,
+		Genesis:     genesis,
+		CoinbaseKey: coinbaseKey,
+		EthConfigTweaker: func(c *ethconfig.Config) {
+			c.Snapshot.ProduceE3 = true
+			c.MaxReorgDepth = 400 // deeper than the rejection target: the changeset check must fire, not the depth cap
+		},
+	})
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, eat.Close()) })
+
+	eat.Run(t, func(ctx context.Context, t *testing.T, eat engineapitester.EngineApiTester) {
+		const pokes = 300
+		payloads, _, churn, sums := buildChurnChain(ctx, t, eat, pokes, func(k int) int64 { return int64(k) })
+		tip := uint64(2 + pokes)
+
+		waitForDomainFilesSettled(ctx, t, eat.StateAgg)
+		t.Logf("domain files settled: %v", eat.StateAgg.FilesAmount())
+
+		// A shallow unwind at the tip must still work.
+		shallow := tip - 8
+		require.NoError(t, eat.MockCl.UpdateForkChoice(ctx, payloads[shallow-2]))
+		assertChurnState(ctx, t, eat, churn, payloads[shallow-2], sums[shallow-2])
+		for h := shallow + 1; h <= tip; h++ {
+			status, err := eat.MockCl.InsertNewPayload(ctx, payloads[h-2])
+			require.NoError(t, err)
+			require.Equalf(t, enginetypes.ValidStatus, status.Status, "re-insert of block %d while redoing", h)
+		}
+		require.NoError(t, eat.MockCl.UpdateForkChoice(ctx, payloads[tip-2]))
+		assertChurnState(ctx, t, eat, churn, payloads[tip-2], sums[tip-2])
+
+		// Deep below what remains unwindable: must fail loudly, not silently
+		// no-op or partially apply.
+		deep := uint64(20)
+		deepErr := eat.MockCl.UpdateForkChoice(ctx, payloads[deep-2])
+		require.Errorf(t, deepErr, "unwind to block %d must be rejected once its history is gone", deep)
+		t.Logf("deep unwind to %d rejected: %v", deep, deepErr)
+
+		// The head must remain restorable and the state readable and correct.
+		// Block production after this rejection is still broken (the
+		// SeekCommitment wedge, https://github.com/erigontech/erigon/issues/22301),
+		// so this test stops at the read-side contract.
+		require.NoError(t, eat.MockCl.UpdateForkChoice(ctx, payloads[tip-2]))
+		assertChurnState(ctx, t, eat, churn, payloads[tip-2], sums[tip-2])
+	})
+}
