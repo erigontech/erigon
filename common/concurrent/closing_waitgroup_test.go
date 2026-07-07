@@ -70,15 +70,36 @@ func TestClosingWaitGroup_WaitJoinsInFlight(t *testing.T) {
 		t.Fatal("TryAdd should succeed")
 	}
 
+	release := make(chan struct{})
 	var doneRan atomic.Bool
 	go func() {
-		time.Sleep(50 * time.Millisecond)
+		<-release
 		doneRan.Store(true)
 		g.Done()
 	}()
 
 	g.BeginClose()
-	g.Wait()
+
+	waited := make(chan struct{})
+	go func() {
+		g.Wait()
+		close(waited)
+	}()
+
+	// The goroutine is in-flight (Done not yet called), so Wait must still block.
+	select {
+	case <-waited:
+		t.Fatal("Wait returned before the in-flight goroutine called Done")
+	case <-time.After(20 * time.Millisecond):
+	}
+
+	close(release)
+
+	select {
+	case <-waited:
+	case <-time.After(time.Second):
+		t.Fatal("Wait did not return after Done")
+	}
 	if !doneRan.Load() {
 		t.Fatal("Wait returned before the in-flight goroutine finished")
 	}
