@@ -209,6 +209,28 @@ func TestUpdatesModeDirect_CarriedDroppedOnSpill(t *testing.T) {
 	require.Nil(t, got[k2])
 }
 
+// TestUpdatesModeDirect_UpgradePastLimitSpills pins that upgrading a marker to a
+// carried value respects directMemLimit: the added carriedUpdateSize must trip
+// the same spill collectDirect does, or the in-memory cap is silently defeated.
+func TestUpdatesModeDirect_UpgradePastLimitSpills(t *testing.T) {
+	t.Parallel()
+
+	ut := NewUpdates(ModeDirect, t.TempDir(), KeyToHexNibbleHash)
+	k := string(make([]byte, 20))
+	ut.TouchPlainKey(k, nil, ut.TouchAccount) // marker only: no carried value yet
+	require.Nil(t, ut.etl, "a lone marker under the limit must not spill")
+
+	// Leave room for the marker but not for the carried value it is about to gain.
+	ut.directMemLimit = ut.directBytes + 1
+
+	u, err := NewCarriedAccountUpdate(serializedAccount(1, 10, common.Hash{}))
+	require.NoError(t, err)
+	ut.TouchPlainKeyDirect(k, u) // upgrade adds carriedUpdateSize, crossing the cap
+
+	require.NotNil(t, ut.etl, "upgrading a marker past directMemLimit must spill")
+	require.Zero(t, ut.directBytes, "spill resets the in-memory byte counter")
+}
+
 // TestUpdatesModeDirect_DropCarriedValues pins the staleness hook: after
 // DropCarriedValues (unwind / state-reader swap), every entry delivers nil so the
 // fold re-reads current state.

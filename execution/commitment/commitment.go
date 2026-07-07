@@ -1626,6 +1626,11 @@ func (t *Updates) carryDirect(key string, update *Update) {
 		t.directBytes += carriedUpdateSize
 	}
 	*e.update = *update
+	// Upgrading a marker grows directBytes, so honor the same spill threshold as
+	// collectDirect; otherwise a marker-heavy batch upgraded in place blows the cap.
+	if t.directBytes >= t.directMemLimit {
+		t.spillDirect()
+	}
 }
 
 // TouchPlainKeyDropCarried marks key as touched in ModeDirect while dropping any
