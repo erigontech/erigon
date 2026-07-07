@@ -169,6 +169,36 @@ Findings from the state-field enumeration:
   *not* in the whole-account refresh (they have their own read paths), confirming the refresh
   is a partial, Empty-oriented reconstruction, not a true whole-account load.
 
+## Primary question: where does the parallel hierarchy use the IBS stateObject?
+
+The goal is to make the parallel-path stateObject **redundant**, so `so.data` never needs to
+be kept in sync with the versionMap cells — at which point `refreshVersionedAccount` (the sync)
+and the `stateObjects` cache can be dropped from the parallel path entirely. Map of the
+remaining touchpoints (versionMap != nil):
+
+- **Reads — already off the stateObject.** Every getter (`GetBalance/GetNonce/GetCode/
+  GetCodeHash/GetCodeSize/GetState`) has a `versionMap == nil` serial branch (stateObject) and
+  a parallel branch that goes straight to `readX`/`versionedReadCore`. `Empty`/`Exist` were the
+  last stragglers — moved onto per-field reads in Phase 1. **Nothing on the parallel read path
+  needs the stateObject.**
+- **Writes — still materialize it, but the value doesn't come from it.** `AddBalance/
+  SubBalance/SetNonce/SetCode/SetState/SelfDestruct` call `GetOrNewStateObject` (→
+  `getStateObject` → `getVersionedAccount` → `refreshVersionedAccount`: the sync), mutate
+  `so.data`, then `recordWrite*`. But the *input* to the write already comes from the versionMap
+  (`prev` in `SubBalance` is `getBalance`, a direct versionMap read), and the *output* is carried
+  by `recordWrite*` into the versioned write-set. The `so.data` mutation has **no parallel
+  reader**.
+- **The only remaining parallel consumers of `so.data`** are therefore: (a) `getStateObject`'s
+  own refresh-sync (self-referential — needed only to feed the mutation), and (b) the
+  **journal / RevertToSnapshot**, which snapshots and restores `so.data` for intra-tx revert.
+
+**Path to redundancy (Phase 2):** the write value is already sourced from the versionMap and
+recorded into the write-set independently of `so.data`, so the one load-bearing use is
+intra-tx revert. Move revert onto the versioned write-set/journal (not `so.data`); then
+`GetOrNewStateObject`'s materialization + `refreshVersionedAccount` sync are dead on the
+parallel path and can be removed, taking their reads/locks/allocs with them. (Matches the
+staged plan: the hard part is moving intra-tx revert/journal off `so.data`.)
+
 ## Follow-on: versionMap RWMutex strategy (deferred)
 
 Profiling the warm-extcodehash cell focused on `sub:exec-worker` shows `VersionMap.mu`'s
