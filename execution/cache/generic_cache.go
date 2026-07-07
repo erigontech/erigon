@@ -25,6 +25,7 @@ import (
 	"github.com/elastic/go-freelru"
 
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/cachebudget"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/common/maphash"
 	"github.com/erigontech/erigon/execution/cache/coherence"
@@ -58,11 +59,35 @@ type entry[T any] struct {
 // GenericCache is a sharded, LRU-evicting bounded cache for key-value
 // data. Eviction mode is fixed at construction (see policy.go).
 type GenericCache[T any] struct {
-	data            *freelru.ShardedLRU[uint64, entry[T]]
-	capacityB       datasize.ByteSize
-	capacityEntries uint32 // freelru's slot cap; ModeNoOp refuses inserts at this count
-	currentSize     atomic.Int64
-	mode            Mode
+	// data is the sharded LRU, replaced wholesale on a jump-grow. Load it once per
+	// operation; a write racing a resize may land in the LRU about to be replaced
+	// and be dropped — a benign miss (the value is re-read from the domain).
+	data      atomic.Pointer[freelru.ShardedLRU[uint64, entry[T]]]
+	capacityB datasize.ByteSize
+	mode      Mode
+
+	// Jump-grow: the LRU starts at startCap slots and resizes ×genericCacheGrowFactor
+	// toward maxCap as it fills, reserving each step's bytes from the shared
+	// envelope; a step the envelope can't fund stops the growth (freelru then
+	// evicts within the current size). A cache with a small working set never
+	// grows past startCap, so it costs a few KB regardless of its configured
+	// budget. resizeMu serialises the resize and guards reservedBytes; curCap is
+	// atomic because the put fast-path reads it outside resizeMu.
+	startCap      uint32
+	maxCap        uint32
+	curCap        atomic.Uint32
+	avgEntryBytes int64 // per-domain byte estimate; maps slot count ↔ envelope bytes
+	resizeMu      sync.Mutex
+	reservedBytes int64
+
+	currentSize atomic.Int64
+
+	// enveloped is set only when the cache draws from the shared envelope (via
+	// NewGenericCache); closed guards the single paired Release, so neither a test
+	// cache built with an explicit fixed size nor a double Close mis-accounts the
+	// envelope.
+	enveloped bool
+	closed    atomic.Bool
 
 	// coh is the shared (epoch, floor) unwind-coherence primitive: an entry is
 	// valid iff written in the current epoch OR its txNum is below the unwind
@@ -85,48 +110,119 @@ type GenericCache[T any] struct {
 
 func u64identity(k uint64) uint32 { return uint32(k) }
 
-// NewGenericCache creates a new GenericCache with the specified byte
-// capacity. mode selects ModeEvictLRU (default in this tree) or ModeNoOp
-// (kept for diagnostic baselines).
+const (
+	// genericCacheStartCapacity is the slot count a jump-grow cache is born with.
+	// A cache whose working set never exceeds it (a test fixture) stays this small
+	// regardless of its configured byte budget.
+	genericCacheStartCapacity = 1024
+	genericCacheGrowFactor    = 4
+)
+
+// NewGenericCache creates a jump-grow cache with the specified byte capacity as
+// its growth ceiling, using the generic per-entry estimate. mode selects
+// ModeEvictLRU (default in this tree) or ModeNoOp (diagnostic baseline).
 func NewGenericCache[T any](capacityBytes datasize.ByteSize, sizeFunc func(T) int, mode Mode) *GenericCache[T] {
-	capacityEntries := uint32(uint64(capacityBytes) / avgBytesPerEntry)
-	if capacityEntries < 1024 {
-		capacityEntries = 1024
-	}
-	if capacityEntries > 1<<22 {
-		capacityEntries = 1 << 22
-	}
-	return newGenericCacheEntries(capacityBytes, capacityEntries, sizeFunc, mode)
+	return NewGenericCacheWithAvg(capacityBytes, avgBytesPerEntry, sizeFunc, mode)
 }
 
-// newGenericCacheEntries builds a cache against an explicit entry-count
-// cap. Used by tests that want to exercise eviction with small capacities;
-// production constructs via NewGenericCache.
+// NewGenericCacheWithAvg is NewGenericCache with an explicit per-domain average
+// entry size, so the byte-budget ceiling and the envelope accounting reflect the
+// domain's real entry cost (accounts ≈ 96 B, storage ≈ 88 B) rather than the
+// generic default. It starts small and jump-grows toward the ceiling on demand,
+// funding each step from the shared envelope.
+func NewGenericCacheWithAvg[T any](capacityBytes datasize.ByteSize, avgBytes uint32, sizeFunc func(T) int, mode Mode) *GenericCache[T] {
+	if avgBytes == 0 {
+		avgBytes = avgBytesPerEntry
+	}
+	maxCap := uint32(uint64(capacityBytes) / uint64(avgBytes))
+	if maxCap < genericCacheStartCapacity {
+		maxCap = genericCacheStartCapacity
+	}
+	// Absolute safety ceiling on the slot array.
+	if maxCap > 1<<24 {
+		maxCap = 1 << 24
+	}
+	start := uint32(genericCacheStartCapacity)
+	if start > maxCap {
+		start = maxCap
+	}
+	c := newGenericCacheEntries[T](capacityBytes, start, sizeFunc, mode)
+	c.maxCap = maxCap
+	c.avgEntryBytes = int64(avgBytes)
+	c.enveloped = true
+	// The initial slot array is small; take it unconditionally so no cache is
+	// born unable to hold anything.
+	c.reservedBytes = int64(start) * c.avgEntryBytes
+	cachebudget.Global.Take(c.reservedBytes)
+	return c
+}
+
+// newGenericCacheEntries builds a cache against an explicit fixed entry-count
+// cap (no jump-grow, no envelope). Used by tests that want to exercise eviction
+// with small capacities; production constructs via NewGenericCache.
 func newGenericCacheEntries[T any](capacityBytes datasize.ByteSize, capacityEntries uint32, sizeFunc func(T) int, mode Mode) *GenericCache[T] {
 	if capacityEntries == 0 {
 		capacityEntries = 1
 	}
-	lru, err := freelru.NewSharded[uint64, entry[T]](capacityEntries, u64identity)
-	if err != nil {
-		panic(err)
-	}
 	c := &GenericCache[T]{
-		data:            lru,
-		capacityB:       capacityBytes,
-		capacityEntries: capacityEntries,
-		mode:            mode,
-		sizeFunc:        sizeFunc,
+		capacityB:     capacityBytes,
+		startCap:      capacityEntries,
+		maxCap:        capacityEntries,
+		avgEntryBytes: avgBytesPerEntry,
+		mode:          mode,
+		sizeFunc:      sizeFunc,
 	}
+	c.curCap.Store(capacityEntries)
 	// Before any unwind every entry predates the (nonexistent) floor, so all
 	// reads are valid; the floor only drops once an unwind happens.
 	c.coh.Init()
-	// OnEvict fires for capacity-driven LRU eviction (ModeEvictLRU) and
-	// for explicit Remove(). In both cases we want currentSize to follow.
+	c.data.Store(c.newShards(capacityEntries))
+	return c
+}
+
+// newShards builds a sharded LRU of the given capacity with this cache's evict
+// callback wired, so currentSize follows capacity-driven eviction and Remove.
+func (c *GenericCache[T]) newShards(capacity uint32) *freelru.ShardedLRU[uint64, entry[T]] {
+	lru, err := freelru.NewSharded[uint64, entry[T]](capacity, u64identity)
+	if err != nil {
+		panic(err)
+	}
 	lru.SetOnEvict(func(_ uint64, e entry[T]) {
 		c.currentSize.Add(-int64(e.size))
 		c.evictions.Add(1)
 	})
-	return c
+	return lru
+}
+
+// maybeGrow jump-resizes the LRU one step larger when it is full, the ceiling
+// hasn't been reached, and the shared envelope can fund the step. Otherwise the
+// LRU keeps its size and freelru evicts within it. Called with no lock held.
+func (c *GenericCache[T]) maybeGrow() {
+	c.resizeMu.Lock()
+	defer c.resizeMu.Unlock()
+
+	old := c.data.Load()
+	curCap := c.curCap.Load()
+	if curCap >= c.maxCap || old.Len() < int(curCap) {
+		return
+	}
+	newCap := curCap * genericCacheGrowFactor
+	if newCap > c.maxCap {
+		newCap = c.maxCap
+	}
+	delta := int64(newCap-curCap) * c.avgEntryBytes
+	if !cachebudget.Global.Reserve(delta) {
+		return
+	}
+	next := c.newShards(newCap)
+	for _, k := range old.Keys() {
+		if v, ok := old.Get(k); ok {
+			next.Add(k, v)
+		}
+	}
+	c.data.Store(next)
+	c.curCap.Store(newCap)
+	c.reservedBytes += delta
 }
 
 // DomainCache wraps GenericCache[[]byte] to implement the Cache interface.
@@ -171,7 +267,8 @@ func (c *GenericCache[T]) Get(key []byte) (T, bool) {
 // maxStep — the same coherence the BranchCache read applies for commitment.
 func (c *GenericCache[T]) GetWithTxNum(key []byte) (T, uint64, bool) {
 	h := maphash.Hash(key)
-	e, ok := c.data.Get(h)
+	lru := c.data.Load()
+	e, ok := lru.Get(h)
 	if !ok || !bytes.Equal(e.key, key) {
 		c.misses.Add(1)
 		var zero T
@@ -186,7 +283,7 @@ func (c *GenericCache[T]) GetWithTxNum(key []byte) (T, uint64, bool) {
 	// tx — and must be dropped; >= not > (the surviving block's last txNum is
 	// floor-1, so this never drops a live entry).
 	if c.coh.IsStale(e.txNum, e.epoch) {
-		c.data.Remove(h)
+		lru.Remove(h)
 		c.staleEvicted.Add(1)
 		c.misses.Add(1)
 		var zero T
@@ -220,7 +317,8 @@ func (c *GenericCache[T]) put(key []byte, value T, txNum uint64, overwrite bool)
 	mu.Lock()
 	defer mu.Unlock()
 
-	existing, hasExisting := c.data.Get(h)
+	lru := c.data.Load()
+	existing, hasExisting := lru.Get(h)
 
 	// Existing key — update in place. Reuse the stored key buffer to
 	// avoid an extra allocation; the freshly-decoded value replaces the
@@ -229,7 +327,7 @@ func (c *GenericCache[T]) put(key []byte, value T, txNum uint64, overwrite bool)
 		if !overwrite && !c.coh.IsStale(existing.txNum, existing.epoch) {
 			return
 		}
-		c.data.Add(h, entry[T]{key: existing.key, val: value, size: newSize, txNum: txNum, epoch: ep})
+		lru.Add(h, entry[T]{key: existing.key, val: value, size: newSize, txNum: txNum, epoch: ep})
 		c.currentSize.Add(int64(newSize - existing.size))
 		return
 	}
@@ -237,10 +335,17 @@ func (c *GenericCache[T]) put(key []byte, value T, txNum uint64, overwrite bool)
 	if c.mode == ModeNoOp {
 		// Refuse once full by either bound — freelru would otherwise evict at the
 		// entry-count cap, which ModeNoOp ("drop new keys when full") must not do.
-		if c.currentSize.Load()+int64(newSize) > int64(c.capacityB) || c.data.Len() >= int(c.capacityEntries) {
+		if c.currentSize.Load()+int64(newSize) > int64(c.capacityB) || lru.Len() >= int(c.maxCap) {
 			c.dropped.Add(1)
 			return
 		}
+	}
+
+	// ModeEvictLRU: grow toward the ceiling before inserting into a full LRU, so a
+	// busy cache expands into its budget rather than evicting at the start size.
+	if curCap := c.curCap.Load(); c.mode != ModeNoOp && curCap < c.maxCap && lru.Len() >= int(curCap) {
+		c.maybeGrow()
+		lru = c.data.Load()
 	}
 	// In ModeEvictLRU the byte budget is enforced through the entry-count cap,
 	// not a separate currentSize check: capacityEntries is derived from
@@ -262,7 +367,7 @@ func (c *GenericCache[T]) put(key []byte, value T, txNum uint64, overwrite bool)
 		c.currentSize.Add(-int64(existing.size))
 	}
 	keyCopy := common.Copy(key)
-	c.data.Add(h, entry[T]{key: keyCopy, val: value, size: newSize, txNum: txNum, epoch: ep})
+	lru.Add(h, entry[T]{key: keyCopy, val: value, size: newSize, txNum: txNum, epoch: ep})
 	c.currentSize.Add(int64(newSize))
 	c.inserts.Add(1)
 }
@@ -270,8 +375,9 @@ func (c *GenericCache[T]) put(key []byte, value T, txNum uint64, overwrite bool)
 // Delete removes the data for the given key.
 func (c *GenericCache[T]) Delete(key []byte) {
 	h := maphash.Hash(key)
-	if existing, ok := c.data.Get(h); ok && bytes.Equal(existing.key, key) {
-		c.data.Remove(h)
+	lru := c.data.Load()
+	if existing, ok := lru.Get(h); ok && bytes.Equal(existing.key, key) {
+		lru.Remove(h)
 	}
 }
 
@@ -281,9 +387,31 @@ func (c *GenericCache[T]) Delete(key []byte) {
 // serviceable. Mirrors CodeCache.Clear (which already did this — the two had
 // drifted).
 func (c *GenericCache[T]) Clear() {
-	c.data.Purge()
 	c.currentSize.Store(0)
 	c.coh.Init()
+	// Shrink back to the start size and return the grown budget to the envelope,
+	// keeping the cache adaptive across fork-validation/reset (it regrows on
+	// demand). A no-op Purge would leave the grown slot array resident.
+	c.resizeMu.Lock()
+	defer c.resizeMu.Unlock()
+	if c.enveloped {
+		cachebudget.Global.Release(c.reservedBytes - int64(c.startCap)*c.avgEntryBytes)
+		c.reservedBytes = int64(c.startCap) * c.avgEntryBytes
+	}
+	c.curCap.Store(c.startCap)
+	c.data.Store(c.newShards(c.startCap))
+}
+
+// Close returns this cache's envelope reservation so later caches can grow into
+// the freed budget. Idempotent.
+func (c *GenericCache[T]) Close() {
+	if c.enveloped && c.closed.CompareAndSwap(false, true) {
+		c.resizeMu.Lock()
+		reserved := c.reservedBytes
+		c.reservedBytes = 0
+		c.resizeMu.Unlock()
+		cachebudget.Global.Release(reserved)
+	}
 }
 
 // Unwind invalidates entries that reflect dead-fork state. unwindToTxNum is the
@@ -296,7 +424,7 @@ func (c *GenericCache[T]) Unwind(unwindToTxNum uint64) {
 
 // Len returns the number of entries in the cache.
 func (c *GenericCache[T]) Len() int {
-	return int(c.data.Len())
+	return c.data.Load().Len()
 }
 
 // SizeBytes returns the current size of the cache in bytes.
@@ -329,7 +457,7 @@ func (c *GenericCache[T]) PrintStatsAndReset(name string) {
 		"hits", hits, "misses", misses, "hit_rate", hitRate,
 		"inserts", inserts, "evictions", evictions, "dropped", dropped,
 		"stale_evicted", staleEvicted, "epoch", c.coh.Epoch(),
-		"entries", c.data.Len(), "size_mb", sizeBytes/(1024*1024),
+		"entries", c.data.Load().Len(), "size_mb", sizeBytes/(1024*1024),
 		"capacity_mb", int64(c.capacityB/datasize.MB), "usage_pct", usagePct,
 	)
 }
