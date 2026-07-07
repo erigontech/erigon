@@ -143,3 +143,12 @@ func (t *tailLRU) reset() {
 func (t *tailLRU) Len() int {
 	return t.cur.Load().Len()
 }
+
+// Close returns the tail's envelope reservation. Call once (BranchCache.Close
+// guards against double-release with its closed CAS).
+func (t *tailLRU) Close() {
+	t.resizeMu.Lock()
+	defer t.resizeMu.Unlock()
+	cachebudget.Global.Release(t.reserved)
+	t.reserved = 0
+}

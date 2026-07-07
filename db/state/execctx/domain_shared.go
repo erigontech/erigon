@@ -1001,10 +1001,8 @@ func (sd *SharedDomains) Commit(ctx context.Context, tx kv.RwTx, validate ...fun
 	if err := runValidate(); err != nil {
 		return err
 	}
-	// Adaptive controller hook: decide promotions/demotions from this batch's
-	// miss pressure using the in-flight (pre-Commit) tx so commitment reads see
-	// the just-flushed bytes. Runs before Commit because the tx is finalized
-	// after; the coherence floor evicts pins from a rolled-back batch.
+	// Adaptive pin promotions/demotions run on the in-flight (pre-Commit) tx so
+	// the preload sees the just-flushed bytes.
 	if sd.adaptivePinController != nil {
 		if ttx, ok := tx.(kv.TemporalTx); ok {
 			reader := func(prefix []byte) ([]byte, uint64, bool, error) {

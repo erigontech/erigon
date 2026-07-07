@@ -418,7 +418,7 @@ func (a *Aggregator) ConfigureDomains() error {
 	if dbg.UseStateCache && !a.branchCacheDisabled {
 		if cd := a.d[kv.CommitmentDomain]; cd != nil && cd.branchCache == nil {
 			cd.branchCache = commitment.NewBranchCache(commitment.DefaultBranchCacheTailCapacity)
-			if !dbg.EnvBool("DISABLE_ADAPTIVE_PIN", false) {
+			if !dbg.DisableAdaptivePin {
 				cd.adaptivePinController = commitment.NewAdaptivePinController(
 					cd.branchCache, commitment.DefaultAdaptivePinControllerConfig(), a.logger)
 			}

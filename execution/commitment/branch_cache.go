@@ -111,9 +111,6 @@ type BranchCache struct {
 	// contract; nil hot path is one atomic load + nil check.
 	onMiss atomic.Pointer[MissCallback]
 
-	// preloadClaimed gates the one-shot residency preload trigger.
-	preloadClaimed atomic.Bool
-
 	// last-published pinned counter snapshots — PublishMetrics emits the delta
 	// since the previous publish so the Prometheus counters track per-Flush
 	// activity, not snapshot absolutes.
@@ -326,7 +323,7 @@ func NewBranchCache(tailCapacity int) *BranchCache {
 	// Before any unwind every entry's txN is at/below the floor, so the epoch
 	// check never strands a valid entry.
 	bc.coh.Init()
-	log.Info("[branch-cache] init", "trunkEnabled", !bc.trunkDisabled, "tailCap", tailCapacity, "trunkDepth", maxDepth)
+	log.Debug("[branch-cache] init", "trunkEnabled", !bc.trunkDisabled, "tailCap", tailCapacity, "trunkDepth", maxDepth)
 	return bc
 }
 
@@ -334,6 +331,9 @@ func NewBranchCache(tailCapacity int) *BranchCache {
 // size their trunk depth against real concurrency. Idempotent.
 func (c *BranchCache) Close() {
 	if c.closed.CompareAndSwap(false, true) {
+		if t := c.tail.Load(); t != nil {
+			t.Close()
+		}
 		activeBranchCaches.Add(-1)
 	}
 }
@@ -635,18 +635,6 @@ func (c *BranchCache) PinnedCount() int {
 	return int(c.pinnedEntries.Load())
 }
 
-// PinnedStats returns the pinned-tier hit/miss/entries counters.
-func (c *BranchCache) PinnedStats() (hits, misses uint64, entries int) {
-	return c.pinnedHits.Load(), c.pinnedMisses.Load(), int(c.pinnedEntries.Load())
-}
-
-// TryClaimPreload returns true exactly once per cache lifetime — the residency
-// preload trigger uses it so the preload runs once regardless of how many
-// SharedDomains instances are constructed.
-func (c *BranchCache) TryClaimPreload() bool {
-	return c.preloadClaimed.CompareAndSwap(false, true)
-}
-
 // Get retrieves branch data from the cache. Returns the canonical encoded
 // bytes (with the leading 2-byte touch-map prefix) plus the on-disk file
 // step the bytes came from (0 if not tracked).
@@ -746,6 +734,10 @@ func (c *BranchCache) Clear() {
 	c.trunkMisses.Store(0)
 	c.pinnedHits.Store(0)
 	c.pinnedMisses.Store(0)
+	// Reset the publish watermarks too, else the next PublishMetrics computes a
+	// wrapped (huge) delta against the pre-Clear counter.
+	c.lastPublishedPinnedHits.Store(0)
+	c.lastPublishedPinnedMisses.Store(0)
 	c.tailHits.Store(0)
 	c.tailMisses.Store(0)
 	c.bytesServed.Store(0)

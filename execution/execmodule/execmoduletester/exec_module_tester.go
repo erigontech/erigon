@@ -722,10 +722,8 @@ func New(tb testing.TB, opts ...Option) *ExecModuleTester {
 		RecentReceipts: mock.Notifications.RecentReceipts,
 	}
 	// Per-instance domain cache, held on the tester so Close releases its
-	// envelope reservation. The production default is safe here: the caches
-	// jump-grow from a small start into the shared envelope on demand, so a
-	// fixture with a small working set stays small regardless of the configured
-	// budget — no hand-tuned test size, same code path as production.
+	// envelope reservation. Uses the production default — the caches jump-grow on
+	// demand, so a small-working-set fixture stays small.
 	mock.domainCache = cache.NewDefaultStateCache()
 	mock.ExecModule = execmodule.NewExecModule(
 		ctx,

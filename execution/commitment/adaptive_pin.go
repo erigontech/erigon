@@ -236,6 +236,7 @@ func (c *AdaptivePinController) OnBlockComplete(ctx context.Context, txNum uint6
 		mxAdaptiveDemoted.AddUint64(uint64(demoted))
 	}
 	mxAdaptiveActive.SetUint64(uint64(len(c.states)))
+	c.cache.PublishMetrics()
 
 	if c.logger != nil && (promoted+extended+demoted > 0 || len(c.states) > 0) {
 		c.logger.Info("[adaptive-pin]",
@@ -350,16 +351,6 @@ func (c *AdaptivePinController) runExtensionLocked(
 	state.preload.pinTxNum = txNum
 	_, _, err := state.preload.Run(stepBudget, reader, c.cache, c.logger)
 	return err
-}
-
-func (c *AdaptivePinController) PromotedContracts() [][32]byte {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	out := make([][32]byte, 0, len(c.states))
-	for h := range c.states {
-		out = append(out, h)
-	}
-	return out
 }
 
 func pickPromotionCandidates(misses map[[32]byte]uint64, threshold uint64, maxN int) [][32]byte {
