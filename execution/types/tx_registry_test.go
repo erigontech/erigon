@@ -21,7 +21,6 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
-	"sync"
 	"testing"
 
 	"github.com/holiman/uint256"
@@ -165,8 +164,6 @@ func unmarshalFakeRegisteredTxJSON(input []byte) (Transaction, error) {
 	return &fakeRegisteredTx{Nonce: uint64(dec.Nonce), Data: dec.Data}, nil
 }
 
-var registerFakeTxTypeOnce sync.Once
-
 func unregisterTxType(id byte) {
 	txTypeRegistryMu.Lock()
 	defer txTypeRegistryMu.Unlock()
@@ -175,15 +172,17 @@ func unregisterTxType(id byte) {
 
 func registerFakeTxType(t *testing.T) {
 	t.Helper()
-	registerFakeTxTypeOnce.Do(func() {
-		RegisterTxType(fakeRegisteredTxType, TxTypeSpec{
-			New:           func() Transaction { return &fakeRegisteredTx{} },
-			UnmarshalJSON: unmarshalFakeRegisteredTxJSON,
-			Sender: func(txn Transaction, _ Signer) (accounts.Address, error) {
-				return txn.(*fakeRegisteredTx).sender, nil
-			},
-		})
+	if _, ok := registeredTxType(fakeRegisteredTxType); ok {
+		return
+	}
+	RegisterTxType(fakeRegisteredTxType, TxTypeSpec{
+		New:           func() Transaction { return &fakeRegisteredTx{} },
+		UnmarshalJSON: unmarshalFakeRegisteredTxJSON,
+		Sender: func(txn Transaction, _ Signer) (accounts.Address, error) {
+			return txn.(*fakeRegisteredTx).sender, nil
+		},
 	})
+	t.Cleanup(func() { unregisterTxType(fakeRegisteredTxType) })
 }
 
 func TestRegisteredTxTypeBinaryRoundTrip(t *testing.T) {
