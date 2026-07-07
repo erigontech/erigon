@@ -124,3 +124,31 @@ func TestRetryConnectsParentCancel(t *testing.T) {
 	err := retryConnects(ctx, sequenceOp(&attempts, newDialError()))
 	require.ErrorIs(t, err, context.Canceled)
 }
+
+// TestRetryConnectsOverallDeadlineDoesNotClobberPermanentError pins that on
+// overall-deadline expiry the last dial error replaces only the context's own
+// deadline error, never a permanent error that merely wraps DeadlineExceeded.
+func TestRetryConnectsOverallDeadlineDoesNotClobberPermanentError(t *testing.T) {
+	t.Parallel()
+	// Deadline lands after the first 1s backoff (so a second attempt runs) but
+	// within the per-attempt window (so the second op observes it via its ctx).
+	ctx, cancel := context.WithTimeout(t.Context(), 1400*time.Millisecond)
+	defer cancel()
+
+	dialErr := newDialError()
+	readErr := &net.OpError{Op: "read", Net: "tcp", Err: errors.New("connection reset")}
+	permanentErr := errors.Join(readErr, context.DeadlineExceeded)
+	var attempts atomic.Int64
+	op := func(opctx context.Context) error {
+		if attempts.Add(1) == 1 {
+			return dialErr // recoverable → recorded as lastDialErr
+		}
+		<-opctx.Done() // let the overall deadline expire before returning
+		return permanentErr
+	}
+
+	err := retryConnects(ctx, op)
+	require.EqualValues(t, 2, attempts.Load())
+	require.ErrorIs(t, err, readErr)
+	require.NotErrorIs(t, err, dialErr)
+}
