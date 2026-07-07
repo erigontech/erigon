@@ -17,6 +17,7 @@
 package chain
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"math"
@@ -123,6 +124,12 @@ type Config struct {
 	Bor     BorConfig       `json:"-"`
 	BorJSON json.RawMessage `json:"bor,omitempty"`
 
+	// L2 carries opaque L2-chain-specific config. L2JSON is decoded from the
+	// chainspec JSON verbatim; the registering L2 package unmarshals it into
+	// L2 at spec-registration time, same contract as BorJSON/Bor.
+	L2     L2Config        `json:"-"`
+	L2JSON json.RawMessage `json:"l2,omitempty"`
+
 	// DisabledEIPs lists EIPs that are disabled for this chain, even when
 	// their parent fork is active. Used for devnets where the reference
 	// client doesn't yet implement certain EIPs (e.g. [7708, 7778, 7928]).
@@ -136,6 +143,14 @@ type Config struct {
 func (c *Config) IsEIPDisabled(eip int) bool {
 	return slices.Contains(c.DisabledEIPs, eip)
 }
+
+// IsL2 returns whether this chain config carries L2-chain-specific config,
+// either already resolved (L2) or still opaque (L2JSON).
+func (c *Config) IsL2() bool {
+	return c != nil && (c.L2 != nil || (len(c.L2JSON) > 0 && !bytes.Equal(c.L2JSON, jsonNull)))
+}
+
+var jsonNull = []byte("null")
 
 var (
 	TestChainAuraConfig = &Config{
@@ -240,6 +255,14 @@ type BorConfig interface {
 	CalculateSprintNumber(number uint64) uint64
 	CalculateSprintLength(number uint64) uint64
 	CalculateCoinbase(number uint64) accounts.Address
+}
+
+// L2Config is the resolved implementation of an L2 stack's chain-specific
+// config, registered by the L2 package at spec-registration time.
+type L2Config interface {
+	// Name returns the short identifier of the L2 stack (e.g. used to select
+	// a registered rules engine).
+	Name() string
 }
 
 func timestampToTime(unixSec uint64) *time.Time {

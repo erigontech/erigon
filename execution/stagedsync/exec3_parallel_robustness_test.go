@@ -958,15 +958,9 @@ func TestApplyLoopFlush_InvalidTxWritesAreEstimate(t *testing.T) {
 	const invalidTxInc = 0
 	phantomVal := *uint256.NewInt(0xaabb)
 
-	invalidTxWrites := state.VersionedWrites{
-		{
-			Address: addr,
-			Path:    state.StoragePath,
-			Key:     slot,
-			Version: state.Version{TxIndex: invalidTxIdx, Incarnation: invalidTxInc},
-			Val:     phantomVal,
-		},
-	}
+	invalidTxWrites := newWS().
+		stor(addr, slot, state.Version{TxIndex: invalidTxIdx, Incarnation: invalidTxInc}, phantomVal).
+		build()
 
 	// Drive the production flush-decision helper end-to-end.
 	valid := false  // validity == VersionInvalid
@@ -981,7 +975,7 @@ func TestApplyLoopFlush_InvalidTxWritesAreEstimate(t *testing.T) {
 	// Downstream tx=16 reads the slot — this is the read that committed
 	// phantom state in the bug.
 	const downstreamTxIdx = 16
-	res := vm.Read(addr, state.StoragePath, slot, downstreamTxIdx)
+	_, res, _ := vm.ReadStorage(addr, slot, downstreamTxIdx)
 
 	// MVReadResultDependency: the validator will treat any read of this cell
 	// as VersionInvalid, forcing the reader to re-execute. This is correct
