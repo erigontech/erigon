@@ -88,12 +88,12 @@ jobs:
           python3 $ERIGON_QA_PATH/test_system/qa-tests/uploads/upload_test_results.py \
             --repo erigon \
             --commit $(git rev-parse HEAD) \
-            --branch ${{ github.ref_name }} \
+            --branch "$GITHUB_REF_NAME" \
             --test_name sync-from-scratch-minimal-node \
             --chain $CHAIN \
-            --runner ${{ runner.name }} \
+            --runner "$RUNNER_NAME" \
             --outcome $TEST_RESULT \
-            --result_file ${{ github.workspace }}/result-$CHAIN.json
+            --result_file "$GITHUB_WORKSPACE/result-$CHAIN.json"
 
       - name: Upload test results
         if: ${{ always() && steps.test_step.outputs.test_executed == 'true' }}
@@ -128,7 +128,7 @@ jobs:
           # du -sB1 = actual disk blocks used, in bytes (NOT --apparent-size).
           BYTES=$(du -sB1 "$ERIGON_DATA_DIR" | awk '{print $1}')
           echo "Disk usage for $CHAIN minimal: ${BYTES} bytes"
-          echo "$BYTES" > ${{ github.workspace }}/disk-usage-${{ env.CHAIN }}-minimal.txt
+          echo "$BYTES" > "$GITHUB_WORKSPACE/disk-usage-$CHAIN-minimal.txt"
 
       - name: Upload disk usage
         if: ${{ always() && steps.test_step.outputs.test_executed == 'true' }}
