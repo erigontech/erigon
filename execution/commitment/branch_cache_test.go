@@ -286,6 +286,54 @@ func TestBranchCache_Unwind_FrozenSurvives(t *testing.T) {
 	require.True(t, ok, "frozen txN=0 entry must survive any positive-txN unwind")
 }
 
+// TestBranchCache_StateKeyNeverCached pins that the commitment checkpoint key is
+// never served or stored (serving a stale checkpoint corrupts the trie root),
+// and that invalidating it doesn't evict real entries.
+func TestBranchCache_StateKeyNeverCached(t *testing.T) {
+	c := NewBranchCache(100)
+
+	c.Put(KeyCommitmentState, []byte("checkpoint"), 1, 1)
+	_, _, ok := c.Get(KeyCommitmentState)
+	require.False(t, ok, "state key must never be served from the cache")
+	require.Equal(t, 0, c.tailLen(), "state key must not occupy a tail slot")
+
+	deepKey := []byte{0x12, 0x34}
+	c.Put(deepKey, []byte("d"), 0, 0)
+	c.Invalidate(KeyCommitmentState)
+	got, _, ok := c.Get(deepKey)
+	require.True(t, ok, "invalidating the state key must not evict real entries")
+	require.Equal(t, []byte("d"), got)
+}
+
+// TestBranchCache_ShardedTailUnwindAcrossShards verifies the lazy (epoch+floor)
+// unwind drops exactly the entries at/above the floor across all tail shards.
+func TestBranchCache_ShardedTailUnwindAcrossShards(t *testing.T) {
+	c := NewBranchCache(DefaultBranchCacheTailCapacity)
+	defer c.Close()
+
+	// Stay within the tail's start capacity so the entries can't LRU-evict: the
+	// tail only jump-grows when the shared cachebudget has room, which a full
+	// test run may have consumed — this test asserts the unwind floor, not growth.
+	const n = 64
+	const watermark = 32
+	for i := 0; i < n; i++ {
+		prefix := []byte{0x01, byte(i), byte(i >> 8)}
+		c.Put(prefix, []byte{byte(i)}, 0, uint64(i))
+	}
+
+	c.Unwind(watermark)
+
+	for i := 0; i < n; i++ {
+		prefix := []byte{0x01, byte(i), byte(i >> 8)}
+		_, _, ok := c.Get(prefix)
+		if uint64(i) >= watermark {
+			require.False(t, ok, "entry txN=%d must be dropped by floor=%d", i, watermark)
+		} else {
+			require.True(t, ok, "entry txN=%d must survive floor=%d", i, watermark)
+		}
+	}
+}
+
 // TestBranchCache_ConcurrentTailGrow drives concurrent tail Puts well past the
 // 512-entry start capacity so maybeGrow runs under contention. It regresses the
 // data race where Add read tailLRU.curCap unsynchronized while maybeGrow/reset
