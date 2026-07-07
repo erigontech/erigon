@@ -58,7 +58,7 @@ func newNetChangeNotifier(logger log.Logger) netChangeNotifier {
 		done:    make(chan struct{}),
 		stopped: make(chan struct{}),
 	}
-	go n.loop()
+	go n.loop(logger)
 	return n
 }
 
@@ -72,7 +72,7 @@ func (n *routeNotifier) Close() error {
 	return nil
 }
 
-func (n *routeNotifier) loop() {
+func (n *routeNotifier) loop(logger log.Logger) {
 	defer close(n.stopped)
 	defer func() { _ = unix.Close(n.fd) }()
 
@@ -89,6 +89,7 @@ func (n *routeNotifier) loop() {
 			if errors.Is(err, unix.EAGAIN) || errors.Is(err, unix.EINTR) {
 				continue
 			}
+			logger.Debug("p2p: route read failed, disabling event-driven external IP refresh", "err", err)
 			return
 		}
 		if nr <= 0 {

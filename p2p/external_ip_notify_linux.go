@@ -66,7 +66,7 @@ func newNetChangeNotifier(logger log.Logger) netChangeNotifier {
 		done:    make(chan struct{}),
 		stopped: make(chan struct{}),
 	}
-	go n.loop()
+	go n.loop(logger)
 	return n
 }
 
@@ -80,7 +80,7 @@ func (n *netlinkNotifier) Close() error {
 	return nil
 }
 
-func (n *netlinkNotifier) loop() {
+func (n *netlinkNotifier) loop(logger log.Logger) {
 	defer close(n.stopped)
 	defer func() { _ = unix.Close(n.fd) }()
 
@@ -97,6 +97,7 @@ func (n *netlinkNotifier) loop() {
 			if errors.Is(err, unix.EAGAIN) || errors.Is(err, unix.EINTR) {
 				continue
 			}
+			logger.Debug("p2p: netlink read failed, disabling event-driven external IP refresh", "err", err)
 			return
 		}
 		if nr < unix.NLMSG_HDRLEN {
