@@ -18,6 +18,7 @@ package cache
 
 import (
 	"bytes"
+	"sync"
 	"testing"
 
 	"github.com/c2h5oh/datasize"
@@ -25,6 +26,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/db/kv"
 )
 
@@ -770,4 +772,110 @@ func TestUnwind_FloorOnlyMovesDown(t *testing.T) {
 
 	_, ok := c.Get(k)
 	assert.False(t, ok, "deeper unwind's floor must not be raised by a later shallower one")
+}
+
+func TestDomainCache_PutIfAbsent(t *testing.T) {
+	c := NewDomainCacheMode(1*datasize.KB, ModeEvictLRU)
+	addr := makeAddr(1)
+	fresh := []byte("fresh")
+	stale := []byte("stale")
+
+	// Absent → inserts.
+	c.PutIfAbsent(addr, stale, 10)
+	v, ok := c.Get(addr)
+	require.True(t, ok)
+	assert.Equal(t, stale, v)
+
+	// Live entry → left untouched.
+	c.Put(addr, fresh, 20)
+	c.PutIfAbsent(addr, stale, 10)
+	v, ok = c.Get(addr)
+	require.True(t, ok)
+	assert.Equal(t, fresh, v, "PutIfAbsent must not replace a live entry")
+
+	// Entry below the unwind floor survives the unwind and still blocks PutIfAbsent.
+	low := makeAddr(2)
+	c.Put(low, fresh, 3)
+	c.Unwind(5)
+	c.PutIfAbsent(low, stale, 4)
+	v, ok = c.Get(low)
+	require.True(t, ok)
+	assert.Equal(t, fresh, v)
+
+	// Stale entry (at/above the floor, superseded epoch) → replaced.
+	c.PutIfAbsent(addr, stale, 10) // addr's entry was stamped txNum 20 >= floor 5
+	v, ok = c.Get(addr)
+	require.True(t, ok)
+	assert.Equal(t, stale, v, "PutIfAbsent must replace a stale entry")
+}
+
+func TestCodeCache_PutIfAbsentKeepsLiveAddrBinding(t *testing.T) {
+	cc := NewCodeCache(1*datasize.MB, 1*datasize.MB)
+	addr := makeAddr(1)
+	fresh := []byte{0xaa, 1, 2, 3}
+	stale := []byte{0xbb, 4, 5, 6}
+
+	cc.PutIfAbsent(addr, stale, 10)
+	v, ok := cc.Get(addr)
+	require.True(t, ok)
+	assert.Equal(t, stale, v)
+
+	cc.Put(addr, fresh, 20)
+	cc.PutIfAbsent(addr, stale, 10)
+	v, ok = cc.Get(addr)
+	require.True(t, ok)
+	assert.Equal(t, fresh, v, "PutIfAbsent must not rebind a live addr entry")
+
+	// After an unwind marks the binding stale, PutIfAbsent may rebind.
+	cc.Unwind(5)
+	cc.PutIfAbsent(addr, stale, 4)
+	v, ok = cc.Get(addr)
+	require.True(t, ok)
+	assert.Equal(t, stale, v)
+}
+
+func TestCodeCache_PutWithCodeHashIfAbsent(t *testing.T) {
+	cc := NewCodeCache(1*datasize.MB, 1*datasize.MB)
+	addr := makeAddr(1)
+	fresh := []byte{0xaa, 1, 2, 3}
+	stale := []byte{0xbb, 4, 5, 6}
+	freshHash := crypto.Keccak256(fresh)
+	staleHash := crypto.Keccak256(stale)
+
+	cc.PutWithCodeHash(addr, fresh, freshHash, 20)
+	cc.PutWithCodeHashIfAbsent(addr, stale, staleHash, 10)
+
+	v, ok := cc.Get(addr)
+	require.True(t, ok)
+	assert.Equal(t, fresh, v, "addr must stay bound to the fresher code")
+
+	// The content-addressed layers are per-key-immutable and still populated.
+	v, ok = cc.GetByCodeHash(staleHash)
+	require.True(t, ok)
+	assert.Equal(t, stale, v)
+	size, ok := cc.GetCodeSizeByCodeHash(staleHash)
+	require.True(t, ok)
+	assert.Equal(t, len(stale), size)
+}
+
+// A conditional put must be atomic w.r.t. a concurrent unconditional Put of
+// the same key: without a shared critical section the conditional writer can
+// check (absent), lose the CPU to the authoritative writer's insert, then
+// clobber it — the prefetch-vs-flush staleness this cache guards against.
+func TestDomainCache_PutIfAbsentAtomicWithPut(t *testing.T) {
+	c := NewDomainCacheMode(1*datasize.MB, ModeEvictLRU)
+	addr := makeAddr(1)
+	fresh := []byte("fresh")
+	stale := []byte("stale")
+	for round := 0; round < 20000; round++ {
+		c.Delete(addr)
+		var wg sync.WaitGroup
+		wg.Add(2)
+		go func() { defer wg.Done(); c.Put(addr, fresh, 20) }()
+		go func() { defer wg.Done(); c.PutIfAbsent(addr, stale, 10) }()
+		wg.Wait()
+		v, ok := c.Get(addr)
+		require.True(t, ok)
+		require.Equal(t, fresh, v, "round %d: PutIfAbsent raced past a concurrent Put", round)
+	}
 }

@@ -125,6 +125,16 @@ func (b *Bloom) UnmarshalText(input []byte) error {
 	return hexutil.UnmarshalFixedText("Bloom", input, b[:])
 }
 
+// MergedBloom ORs the per-receipt blooms together. Cheaper than CreateBloom
+// when every receipt already carries its Bloom — callers must ensure that.
+func (rs Receipts) MergedBloom() Bloom {
+	var bin Bloom
+	for _, receipt := range rs {
+		bin.Or(&receipt.Bloom)
+	}
+	return bin
+}
+
 func CreateBloom(receipts Receipts) Bloom {
 	var (
 		bin Bloom
