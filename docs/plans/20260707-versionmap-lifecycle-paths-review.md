@@ -106,8 +106,10 @@ tests/blockchain_test.go). Three **gaps** — the invariants to pin *before* tou
    `versionedStateReader:1352`, `validateReadImpl:907`) against one lifecycle verdict — in
    particular the readers-vs-validator `AddressPath >=` gap in same-tx metamorphic revival.
    The exact consistency the rationalization must not break. (First test to add.)
-2. No test exercises whether the code-trio's value-vs-noValue split (`CodeHashPath` value,
-   `CodePath`/`CodeSizePath` version-only) can produce divergent validity for one code write.
+2. Code-trio value-vs-noValue split — **traced and pinned** (code_trio_validation_test.go):
+   the divergence is reachable only for a StorageRead-sourced collision (not MapRead) and is
+   benign (CodeHash tiebreaker keeps a still-matching cold read valid; Code/CodeSize are
+   conservatively invalidated). It is an intentional read-cost optimization, not a bug.
 3. `CreateContractPath` contribution — **traced and pinned** (create_contract_path_test.go):
    contract creation records it, a plain account creation does not. The trace concluded it is
    *not* redundant (distinct apply-side storage-clear role), so it is not a removal candidate;
@@ -146,13 +148,16 @@ Findings from the state-field enumeration:
   code bytes. So — unlike `CreateContractPath` — this redundancy is *intentional and load-
   bearing on the read side*; the rationalization should preserve the three read entry points
   but can unify how a *write* stamps them (one code-write → one lifecycle bump).
-- **Validation-class asymmetry.** `CodeHashPath` is a **value path** (carries a tiebreaker,
-  so a same-value re-write keeps a read valid) but `CodePath`/`CodeSizePath` are
-  **noValueRead** (version/status authoritative). Since the trio always co-writes, a
-  CodeHash value-tiebreak "read stays valid" can disagree with the Code/CodeSize
-  version-only verdict for the *same underlying code write*. Whether that divergence is
-  reachable is a coverage question (add a test), not an obvious bug — the CodeHash tiebreak
-  is the strictly-more-permissive one.
+- **Validation-class asymmetry (traced, pinned in code_trio_validation_test.go).**
+  `CodeHashPath` is a **value path** (tiebreaker) but `CodePath`/`CodeSizePath` are
+  **noValueRead**. The split is observable **only for a StorageRead-sourced read** — a cold
+  read that saw no VM entry at exec time but now collides with a concurrent Done flush. For a
+  MapRead the tiebreaker is bypassed (validateReadImpl:894 uses `checkVersion` for every
+  path), so map reads show no asymmetry. In the StorageRead collision (no BAL) a still-matching
+  CodeHash read survives via the tiebreaker while the co-written Code/CodeSize reads invalidate.
+  The divergence is **benign** — the hash is unchanged so the read is accurate; the version/
+  status checks are conservative, never wrong — and it is exactly what lets an EXTCODEHASH-only
+  tx skip a re-execution on such a collision. Not a bug: an intentional read-cost optimization.
 - **`CodeHashPath` double role.** It is written both in the code trio *and* alone by
   `createObject` (1664) to invalidate a stale pre-create `GetCodeHash`. That second write is
   a lifecycle signal riding a state-field path — the one place a state field does lifecycle
