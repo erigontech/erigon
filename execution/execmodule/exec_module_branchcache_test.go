@@ -37,6 +37,7 @@ import (
 	"github.com/erigontech/erigon/execution/builder"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/commitment"
+	"github.com/erigontech/erigon/execution/commitment/nibbles"
 	"github.com/erigontech/erigon/execution/execmodule/execmoduletester"
 	"github.com/erigontech/erigon/execution/protocol/params"
 	"github.com/erigontech/erigon/execution/tests/blockgen"
@@ -136,6 +137,18 @@ func clearSharedBranchCache(t *testing.T, db kv.TemporalRwDB) {
 	sharedBranchCache(t, roTx).Clear()
 }
 
+// latestBranchRow returns the committed value of one commitment branch row.
+func latestBranchRow(t *testing.T, db kv.TemporalRwDB, key []byte) []byte {
+	t.Helper()
+	roTx, err := db.BeginTemporalRo(t.Context())
+	require.NoError(t, err)
+	defer roTx.Rollback()
+	v, _, err := roTx.GetLatest(kv.CommitmentDomain, key)
+	require.NoError(t, err)
+	require.NotEmpty(t, v, "commitment branch row missing")
+	return bytes.Clone(v)
+}
+
 // TestBuilderStaleSnapshotMustNotPoisonBranchCache pins the cache-poisoning
 // mechanism: a payload build runs outside the exec-module semaphore on its
 // own read snapshot, and its commitment fold read-fills the shared
@@ -184,6 +197,14 @@ func TestBuilderStaleSnapshotMustNotPoisonBranchCache(t *testing.T) {
 
 	require.NoError(t, insertValidateAndUfc1By1(ctx, exec, chainPack.Blocks[:1]))
 
+	// The row shared by A and B is the depth-1 commitment branch at their common
+	// first hashed nibble. Asserting how blocks 2 and 3 touch it makes
+	// grindRecipients' isolation self-checking and pins the staleness the repro
+	// needs: the head-1 row the build reads must differ from the head-3 row
+	// block 4 folds.
+	abBranchKey := nibbles.HexToCompact([]byte{keccakNibble0(addrA)})
+	rowAfterBlock1 := latestBranchRow(t, m.DB, abBranchKey)
+
 	// Junk build on head 1, parked before it pulls transactions. Its transfer
 	// to A makes the eventual commitment fold walk A's path, reading the
 	// shared branch row through the pinned head-1 snapshot.
@@ -213,7 +234,13 @@ func TestBuilderStaleSnapshotMustNotPoisonBranchCache(t *testing.T) {
 		t.Fatal("build did not reach its transaction loop")
 	}
 
-	require.NoError(t, insertValidateAndUfc1By1(ctx, exec, chainPack.Blocks[1:3]))
+	require.NoError(t, insertValidateAndUfc1By1(ctx, exec, chainPack.Blocks[1:2]))
+	rowAfterBlock2 := latestBranchRow(t, m.DB, abBranchKey)
+	require.NotEqual(t, rowAfterBlock1, rowAfterBlock2, "block 2 (transfer to A) must rewrite the shared branch row")
+
+	require.NoError(t, insertValidateAndUfc1By1(ctx, exec, chainPack.Blocks[2:3]))
+	rowAfterBlock3 := latestBranchRow(t, m.DB, abBranchKey)
+	require.Equal(t, rowAfterBlock2, rowAfterBlock3, "block 3 (transfer to C) must leave the shared branch row untouched")
 
 	clearSharedBranchCache(t, m.DB)
 
