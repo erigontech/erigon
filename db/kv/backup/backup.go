@@ -233,7 +233,11 @@ func clearTable(ctx context.Context, db kv.RoDB, tx kv.RwTx, table string) error
 	var deleted, lastDeleted uint64
 	for i := 0; i+1 < len(bounds); i++ {
 		ra.SetPos(bounds[i])
+		t := time.Now()
 		n, err := dr.DeleteRange(table, bounds[i], bounds[i+1])
+		if took := time.Since(t); took > 10*time.Millisecond {
+			log.Warn("[mdbx_to_mdbx] delete", "table", table, "took", took)
+		}
 		if err != nil {
 			return err
 		}
