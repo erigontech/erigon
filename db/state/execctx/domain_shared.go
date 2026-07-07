@@ -458,19 +458,6 @@ func (gt *temporalGetter) StepsInFiles(entitySet ...kv.Domain) kv.Step {
 	return gt.tx.StepsInFiles(entitySet...)
 }
 
-type unmarkedPutter struct {
-	sd         *SharedDomains
-	forkableId kv.ForkableId
-}
-
-func (sd *SharedDomains) AsUnmarkedPutter(id kv.ForkableId) kv.UnmarkedPutter {
-	return &unmarkedPutter{sd, id}
-}
-
-func (up *unmarkedPutter) Put(num kv.Num, v []byte) error {
-	return up.sd.mem.PutForkable(up.forkableId, num, v)
-}
-
 func (sd *SharedDomains) AsGetter(tx kv.TemporalTx) kv.TemporalGetter {
 	return &temporalGetter{sd: sd, tx: tx}
 }
