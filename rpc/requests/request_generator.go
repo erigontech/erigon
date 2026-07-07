@@ -255,8 +255,10 @@ func retry(ctx context.Context, op func(context.Context) error, isRecoverableErr
 		if lastErr != nil {
 			return lastErr
 		}
-
-		err = nil
+		// Keep err as context.DeadlineExceeded — previously this set
+		// err = nil, which caused the overall-deadline path to return nil
+		// when every attempt only ever timed out (no dial refusal),
+		// making the caller think the connection succeeded.
 	}
 
 	delayTimer := time.NewTimer(delay)
