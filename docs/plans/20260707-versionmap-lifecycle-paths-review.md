@@ -68,19 +68,29 @@ interdependence is implemented as **scattered cross-checks**, not one model:
 (`>=` vs `>`, with/without AddressPath). This is the accretion — each was added to fix one
 parallel-vs-serial bug in one path.
 
-**Redundancy candidate:** `CreateContractPath` appears mostly in exclusion lists
-(versionmap.go:901) and `noValueRead` (versionmap.go:1050) with no clear distinct
-contribution vs `IncarnationPath` (both signal "re-created"). `IncarnationPath` *is* load-
-bearing and distinct (validateReadImpl:950-958 uses it precisely because BalancePath
-"overfires for every gas payer"). AddressPath (existence) and SelfDestructPath (destruction)
-are clearly non-redundant.
+**Two distinct kinds of redundancy** (don't conflate them):
+1. *Lifecycle redundancy* — `CreateContractPath` appears mostly in exclusion lists
+   (versionmap.go:901) and `noValueRead` (versionmap.go:1050) with no clear distinct
+   contribution vs `IncarnationPath` (both signal "re-created"). `IncarnationPath` *is* load-
+   bearing and distinct (validateReadImpl:950-958 uses it precisely because BalancePath
+   "overfires for every gas payer"). AddressPath (existence) and SelfDestructPath
+   (destruction) are clearly non-redundant. → `CreateContractPath` is the removal candidate.
+2. *Code-family redundancy* — `CodePath`/`CodeHashPath`/`CodeSizePath` co-write as a trio
+   (one code change bumps all three) but are kept separate as a **read-cost** optimization
+   (answer EXTCODEHASH/EXTCODESIZE without loading bytes). This one is intentional and stays;
+   the lever is unifying the *write* stamp, not removing a path. See the state-field section.
 
 **Test coverage:** the individual scenarios are covered — versionmap_test.go,
 versionedio_test.go, versioned_read_paths_test.go, parallel_fixes_test.go (path-level) +
 the SD/recreate suite (state/database_test.go, tests/statedb_chain_test.go,
-tests/blockchain_test.go). The **gap**: no single test pins that all three revival sites
-agree on the same lifecycle verdict — which is exactly the consistency the rationalization
-must not break, and the invariant to add before touching it.
+tests/blockchain_test.go). Three **gaps** — the invariants to pin *before* touching anything:
+1. No single test pins that all three revival sites (`validateReadImpl:907`,
+   `getVersionedAccount:987`, `versionedStateReader:1352`) agree on the same lifecycle verdict
+   — the exact consistency the rationalization must not break. (First test to add.)
+2. No test exercises whether the code-trio's value-vs-noValue split (`CodeHashPath` value,
+   `CodePath`/`CodeSizePath` version-only) can produce divergent validity for one code write.
+3. No test isolates `CreateContractPath`'s contribution — needed to justify "exclude as
+   redundant" (the redundancy trace) before removal.
 
 **Direction:** replace the scattered independent-field cross-checks with **one authoritative
 lifecycle resolver** (`account lifecycle @ txIndex → {exists, destroyedAt, recreatedAt}`)
@@ -88,6 +98,50 @@ that reads, `Empty`/`Exist`, and validation all consult with a single consistent
 definition. That (a) removes the three-way inconsistency, and (b) removes the per-read
 over-work (each read/Empty re-deriving lifecycle via ad-hoc probes → the profiled 25%/19%),
 with the no-regression suite as the gate.
+
+## The six state-field paths (enumeration — the rest of the picture)
+
+Beyond the four lifecycle paths, the map carries six real state fields. Enumerating each
+one's write sites, read function, validation class and revival participation exposes a
+**second, different kind of redundancy** (the code trio) and a validation-class asymmetry
+the lifecycle review must not disturb.
+
+| path | writers (intra_block_state.go) | read fn | in-mem refresh | validation class | revival participant |
+|---|---|---|---|---|---|
+| `BalancePath` | AddBalance/SubBalance/SetBalance (906/930), transfer (1141/1157), SD-zero (1383), create (1853) — **every gas payer** | `readBalance` | `refreshBalance` | **value** (`liveBalance`/`eqUint256`) | yes (revival probe 907) |
+| `NoncePath` | SetNonce (1173) | `readNonce` | `refreshNonce` | **value** (`liveNonce`/`eqUint64`) | yes (revival probe 907) |
+| `CodePath` | SetCode trio (1231), finalise trio (2914) | `readCode` | `refreshCode` | **noValue** (status only) | no (excluded at 901) |
+| `CodeHashPath` | SetCode trio (1232), finalise trio (2915), **create alone (1664)** | `readCodeHash` | `refreshCodeHash` | **value** (`liveCodeHash`/`eqCodeHash`) | yes (revival probe 907) |
+| `CodeSizePath` | SetCode trio (1233), finalise trio (2916) | `readCodeSize` | — (none) | **noValue** (status only) | no |
+| `StoragePath` | SetState (1293), SD/create clear (2014/2147) | `readState` | — (per-key) | **value** (`liveStorage`/`eqUint256`) | via AddressPath+SelfDestruct cross-validate (929-945) |
+
+Findings from the state-field enumeration:
+
+- **Code-family redundancy (a real, distinct redundancy).** `CodePath`, `CodeHashPath`,
+  `CodeSizePath` are *always written as a trio* (1231-1233, 2914-2916) — one code change
+  bumps all three. As lifecycle/versioning signals they are redundant (the hash alone
+  identifies the code; size is derivable from bytes). They are kept separate purely as a
+  **read-cost optimization**: EXTCODEHASH / EXTCODESIZE must answer without loading the full
+  code bytes. So — unlike `CreateContractPath` — this redundancy is *intentional and load-
+  bearing on the read side*; the rationalization should preserve the three read entry points
+  but can unify how a *write* stamps them (one code-write → one lifecycle bump).
+- **Validation-class asymmetry.** `CodeHashPath` is a **value path** (carries a tiebreaker,
+  so a same-value re-write keeps a read valid) but `CodePath`/`CodeSizePath` are
+  **noValueRead** (version/status authoritative). Since the trio always co-writes, a
+  CodeHash value-tiebreak "read stays valid" can disagree with the Code/CodeSize
+  version-only verdict for the *same underlying code write*. Whether that divergence is
+  reachable is a coverage question (add a test), not an obvious bug — the CodeHash tiebreak
+  is the strictly-more-permissive one.
+- **`CodeHashPath` double role.** It is written both in the code trio *and* alone by
+  `createObject` (1664) to invalidate a stale pre-create `GetCodeHash`. That second write is
+  a lifecycle signal riding a state-field path — the one place a state field does lifecycle
+  work, and a candidate to fold into the lifecycle resolver.
+- **`refreshVersionedAccount` refreshes exactly {Balance, Nonce, Incarnation, CodeHash}**
+  (1019/1039/1059/1079), each taking the max version. These are precisely the value/revival
+  paths minus Storage. `Empty()` needs only Balance/Nonce/CodeHash; Incarnation is refreshed
+  but unused by Empty — the profiled waste. CodeSize/Code/SelfDestruct/CreateContract are
+  *not* in the whole-account refresh (they have their own read paths), confirming the refresh
+  is a partial, Empty-oriented reconstruction, not a true whole-account load.
 
 ## Internal-consistency questions to resolve (the review)
 
