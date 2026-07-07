@@ -109,7 +109,7 @@ type Compressor struct {
 	Cfg
 	ctx              context.Context
 	wg               *sync.WaitGroup
-	superstrings     chan []byte
+	superstrings     chan []uint16
 	uncompressedFile *RawWordsFile
 	tmpDir           string // temporary directory to use for ETL when building dictionary
 	logPrefix        string
@@ -117,11 +117,11 @@ type Compressor struct {
 	outputFileName   string
 	outputFile       string // File where to output the dictionary and compressed data
 	suffixCollectors []*etl.Collector
-	// Buffer for "superstring" - transformation of superstrings where each byte of a word, say b,
-	// is turned into 2 bytes, 0x01 and b, and two zero bytes 0x00 0x00 are inserted after each word
-	// this is needed for using ordinary (one string) suffix sorting algorithm instead of a generalised (many superstrings) suffix
-	// sorting algorithm
-	superstring       []byte
+	// Buffer for "superstring" - one uint16 symbol per cell so an ordinary (single-string)
+	// suffix sort handles the generalised (many-words) case: a real byte b maps to b+1 and a
+	// word boundary to 0, so boundaries sort before any real byte and a real 0x00 stays
+	// distinct from a separator.
+	superstring       []uint16
 	scannedBytes      int
 	superstringLimit  int
 	wordsCount        uint64
@@ -161,7 +161,7 @@ func NewCompressor(ctx context.Context, logPrefix, outputFile, tmpDir string, cf
 	}
 
 	// Collector for dictionary superstrings (sorted by their score)
-	superstrings := make(chan []byte, workers*2)
+	superstrings := make(chan []uint16, workers*2)
 	wg := &sync.WaitGroup{}
 	wg.Add(workers)
 	suffixCollectors := make([]*etl.Collector, workers)
@@ -231,7 +231,7 @@ func (c *Compressor) ReadFrom(g *Getter) error {
 	return nil
 }
 
-var superStringsPool = sync.Pool{New: func() any { return make([]byte, 0, superstringLimit) }}
+var superStringsPool = sync.Pool{New: func() any { return make([]uint16, 0, superstringLimit/2) }}
 
 func (c *Compressor) AddWord(word []byte) error {
 	c.wordsCount++
@@ -246,9 +246,9 @@ func (c *Compressor) AddWord(word []byte) error {
 	c.advanceScan(2*len(word) + 2)
 	if c.sampledSuperstring() {
 		for _, a := range word {
-			c.superstring = append(c.superstring, 1, a)
+			c.superstring = append(c.superstring, uint16(a)+1)
 		}
-		c.superstring = append(c.superstring, 0, 0)
+		c.superstring = append(c.superstring, 0) // word boundary
 	}
 
 	c.uncompressedBytes += len(word)
@@ -268,7 +268,7 @@ func (c *Compressor) advanceScan(l int) {
 
 	if len(c.superstring) > 0 {
 		c.superstrings <- c.superstring
-		c.superstring = superStringsPool.Get().([]byte)[:0]
+		c.superstring = superStringsPool.Get().([]uint16)[:0]
 	}
 	c.superstringCount++
 	c.scannedBytes = 0

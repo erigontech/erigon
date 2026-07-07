@@ -59,8 +59,8 @@ var sidecarSSZSize = (&cltypes.BlobSidecar{}).EncodingSizeSSZ()
 type CaplinSnapshots struct {
 	Salt uint32
 
-	dirtyLock sync.RWMutex                                // guards `dirty` field
-	dirty     []*btree.BTreeG[*snapshotsync.DirtySegment] // ordered map `type.Enum()` -> DirtySegments
+	dirtyLock sync.RWMutex            // guards `dirty` field
+	dirty     snapshotsync.DirtyFiles // ordered map `type.Enum()` -> DirtySegments
 
 	visibleLock sync.RWMutex                   // guards  `visible` field
 	visible     []snapshotsync.VisibleSegments // ordered map `type.Enum()` -> VisbileSegments
@@ -85,7 +85,7 @@ func NewCaplinSnapshots(cfg ethconfig.BlocksFreezing, beaconCfg *clparams.Beacon
 		log.Debug("[dbg] NewCaplinSnapshots created with empty ChainName", "stack", dbg.Stack())
 	}
 	c := &CaplinSnapshots{dir: dirs.Snap, tmpdir: dirs.Tmp, cfg: cfg, logger: logger, beaconCfg: beaconCfg,
-		dirty:   make([]*btree.BTreeG[*snapshotsync.DirtySegment], snaptype.MaxEnum),
+		dirty:   make(snapshotsync.DirtyFiles, snaptype.MaxEnum),
 		visible: make([]snapshotsync.VisibleSegments, snaptype.MaxEnum),
 	}
 	c.dirty[snaptype.BeaconBlocks.Enum()] = btree.NewBTreeGOptions[*snapshotsync.DirtySegment](snapshotsync.DirtySegmentLess, btree.Options{Degree: 128, NoLocks: false})

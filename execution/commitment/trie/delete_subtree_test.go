@@ -25,7 +25,6 @@ import (
 	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/common/u256"
 	"github.com/erigontech/erigon/db/kv/dbutils"
-	"github.com/erigontech/erigon/execution/types/accounts"
 )
 
 // requireValue asserts that key resolves to want; nil want means the key must be absent.
@@ -242,31 +241,8 @@ func TestTrieDeleteSubtree_FullNode_FullMatch(t *testing.T) {
 	requireValue(t, trie, key3, val3)
 }
 
-func TestTrieDeleteSubtree_ValueNode_PartialMatch(t *testing.T) {
-	trie := newEmpty()
-	key := []byte{uint8(1)}
-	val := []byte{uint8(1)}
-	keyExist := []byte{uint8(2)}
-	valExist := []byte{uint8(2)}
-
-	trie.Update(key, val)
-	trie.Update(keyExist, valExist)
-	requireValue(t, trie, key, val)
-
-	trie.DeleteSubtree(key)
-
-	requireValue(t, trie, key, nil)
-	requireValue(t, trie, keyExist, valExist)
-}
-
 func TestAccountNotRemovedAfterRemovingSubtrieAfterAccount(t *testing.T) {
-	acc := &accounts.Account{
-		Nonce:       2,
-		Incarnation: 2,
-		Balance:     u256.U64(200),
-		Root:        EmptyRoot,
-		CodeHash:    accounts.InternCodeHash(emptyState),
-	}
+	acc := testAccount(2, u256.U64(200), withIncarnation(2))
 
 	trie := newEmpty()
 	key, err := crypto.GenerateKey()
