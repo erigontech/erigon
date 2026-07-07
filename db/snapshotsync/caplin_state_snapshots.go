@@ -335,7 +335,7 @@ func (s *CaplinStateSnapshots) OpenList(fileNames []string, optimistic bool) err
 			}
 		}
 		if err := s.openSegIfNeed(sn, filePath); err != nil {
-			_, stop, failErr := ClassifyOpenErr(err, optimistic)
+			stop, failErr := ClassifyOpenErr(err, optimistic)
 			if failErr != nil {
 				return failErr
 			}
@@ -524,7 +524,9 @@ func (s *CaplinStateSnapshots) closeWhatNotInList(l []string) {
 
 	for _, dirtySegments := range s.dirty {
 		closeAndDropNotProtected(dirtySegments, protectFiles, func(sn *DirtySegment) string {
-			_, name := filepath.Split(sn.FilePath())
+			// sn.filePath, not the promoted Decompressor.FilePath(): the field is
+			// set for every tree member, incl. stubs whose Decompressor is nil.
+			_, name := filepath.Split(sn.filePath)
 			return name
 		})
 	}

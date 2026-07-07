@@ -1181,7 +1181,7 @@ func (s *RoSnapshots) openSegments(fileNames []string, open bool, optimistic boo
 
 		if open {
 			if err := sn.Open(s.dir); err != nil {
-				_, stop, failErr := ClassifyOpenErr(err, optimistic)
+				stop, failErr := ClassifyOpenErr(err, optimistic)
 				if failErr != nil {
 					return failErr
 				}
@@ -1354,18 +1354,16 @@ func findOpenSegment(tree *btree.BTreeG[*DirtySegment], match func(*DirtySegment
 }
 
 // ClassifyOpenErr says how a snapshot-listing loop proceeds after a segment
-// open error: skip just this file, stop the whole listing, or fail hard.
-func ClassifyOpenErr(err error, optimistic bool) (skip, stop bool, failErr error) {
+// open error: stop the whole listing (stop), fail hard (failErr), or, when
+// neither, skip just this file.
+func ClassifyOpenErr(err error, optimistic bool) (stop bool, failErr error) {
 	if errors.Is(err, os.ErrNotExist) {
-		if optimistic {
-			return true, false, nil
-		}
-		return false, true, nil
+		return !optimistic, nil
 	}
 	if optimistic {
-		return true, false, nil
+		return false, nil
 	}
-	return false, false, err
+	return false, err
 }
 
 func (s *RoSnapshots) RemoveOverlaps(onDelete func(l []string) error) error {

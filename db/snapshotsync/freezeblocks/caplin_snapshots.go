@@ -196,7 +196,7 @@ func (s *CaplinSnapshots) OpenList(fileNames []string, optimistic bool) error {
 			sn = snapshotsync.NewDirtySegment(f.Type, f.Version, f.From, f.To, true)
 		}
 		if err := sn.Open(s.dir); err != nil {
-			_, stop, failErr := snapshotsync.ClassifyOpenErr(err, optimistic)
+			stop, failErr := snapshotsync.ClassifyOpenErr(err, optimistic)
 			if failErr != nil {
 				return failErr
 			}
