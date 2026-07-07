@@ -30,7 +30,6 @@ import (
 	"strings"
 	"sync"
 	"sync/atomic"
-	"testing"
 	"time"
 
 	keccak "github.com/erigontech/fastkeccak"
@@ -2346,7 +2345,7 @@ func (hph *HexPatriciaHashed) followAndUpdate(hashedKey, plainKey []byte, stateU
 				return fmt.Errorf("GetStorage for key %x failed: %w", plainKey, err)
 			}
 		}
-	} else if testing.Testing() {
+	} else if dbg.AssertCarriedUpdates {
 		if err := hph.assertCarriedUpdate(plainKey, stateUpdate); err != nil {
 			return err
 		}
