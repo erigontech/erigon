@@ -161,6 +161,9 @@ def case_attempts_multi():
         check("attempts: section present", "## Attempts" in out)
         check("attempts: attempt 1 sync failed", "| 1 | ❌ sync failed |" in out)
         check("attempts: attempt 2 counts failures", "| 2 | ❌ 2 failing tests |" in out)
+        check("attempts: attempt 2 names failing tests",
+              "`http  ::debug_traceBlockByNumber/test_42.json`" in out
+              and "`http  ::debug_traceBlockByNumber/test_44.json`" in out)
         check("attempts: attempt 3 passed", "| 3 | ✅ passed |" in out)
 
 
