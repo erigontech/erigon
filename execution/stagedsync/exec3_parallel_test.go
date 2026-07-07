@@ -62,7 +62,7 @@ type testExecTask struct {
 	ctx          context.Context
 	ops          []Op
 	readMap      state.ReadSet
-	writeMap     state.WriteSet
+	writeMap     *state.WriteSet
 	sender       accounts.Address
 	nonce        int
 	dependencies []int
@@ -91,7 +91,7 @@ func NewTestExecTask(txIdx int, ops []Op, sender accounts.Address, nonce int) *t
 		ctx:          context.Background(),
 		ops:          ops,
 		readMap:      state.ReadSet{},
-		writeMap:     state.WriteSet{},
+		writeMap:     &state.WriteSet{},
 		sender:       sender,
 		nonce:        nonce,
 		dependencies: []int{},
@@ -123,7 +123,7 @@ func (t *testExecTask) Execute(evm *vm.EVM,
 	version := t.Version()
 
 	t.readMap = state.ReadSet{}
-	t.writeMap = state.WriteSet{}
+	t.writeMap = &state.WriteSet{}
 
 	dep := -1
 
@@ -132,19 +132,23 @@ func (t *testExecTask) Execute(evm *vm.EVM,
 
 		switch op.opType {
 		case readType:
-			if _, ok := t.writeMap[k.addr][state.AccountKey{Path: k.path, Key: k.key}]; ok {
+			if t.writeMap.Has(state.WriteHeader{Address: k.addr, Path: k.path, Key: k.key}) {
 				sleepWithContext(t.ctx, op.duration) //nolint:errcheck
 				continue
 			}
 
 			result := ibs.ReadVersion(k.addr, k.path, k.key, version.TxIndex)
 
-			val := result.Value()
-
-			if i == 0 && val != nil && (val.(int) != t.nonce) {
-				return &exec.TxResult{Err: protocol.ErrExecAbortError{
-					DependencyTxIndex: -1,
-					OriginError:       fmt.Errorf("invalid nonce: got: %d, expected: %d", val.(int), t.nonce)}}
+			// op[0] is always a NoncePath read; peek the versionMap value (no
+			// extra recorded read) and abort on a nonce mismatch.
+			if i == 0 {
+				if vm := ibs.VersionMap(); vm != nil {
+					if nonce, _, ok := vm.ReadNonce(k.addr, version.TxIndex); ok && int(nonce) != t.nonce {
+						return &exec.TxResult{Err: protocol.ErrExecAbortError{
+							DependencyTxIndex: -1,
+							OriginError:       fmt.Errorf("invalid nonce: got: %d, expected: %d", nonce, t.nonce)}}
+					}
+				}
 			}
 
 			if result.Status() == state.MVReadResultDependency {
@@ -163,9 +167,9 @@ func (t *testExecTask) Execute(evm *vm.EVM,
 
 			sleepWithContext(t.ctx, op.duration) //nolint:errcheck
 
-			t.readMap.Set(state.VersionedRead{Address: k.addr, Path: k.path, Key: k.key, Source: readKind, Version: state.Version{TxIndex: result.DepIdx(), Incarnation: result.Incarnation()}})
+			t.readMap.SetHeader(k.addr, k.path, k.key, state.ReadHeader{Source: readKind, Version: state.Version{TxIndex: result.DepIdx(), Incarnation: result.Incarnation()}})
 		case writeType:
-			t.writeMap.Set(state.VersionedWrite{Address: k.addr, Path: k.path, Key: k.key, Version: version, Val: op.val})
+			testWriteSetInt(t.writeMap, k.addr, k.path, k.key, version, op.val)
 		case otherType:
 			sleepWithContext(t.ctx, op.duration) //nolint:errcheck
 		default:
@@ -180,15 +184,8 @@ func (t *testExecTask) Execute(evm *vm.EVM,
 	return &exec.TxResult{}
 }
 
-func (t *testExecTask) VersionedWrites(_ *state.IntraBlockState) state.VersionedWrites {
-	writes := make(state.VersionedWrites, 0, t.writeMap.Len())
-
-	t.writeMap.Scan(func(v *state.VersionedWrite) bool {
-		writes = append(writes, v)
-		return true
-	})
-
-	return writes
+func (t *testExecTask) VersionedWrites(_ *state.IntraBlockState) *state.WriteSet {
+	return t.writeMap
 }
 
 func (t *testExecTask) VersionedReads(_ *state.IntraBlockState) state.ReadSet {
@@ -1235,13 +1232,12 @@ func dexPostValidation(pe *parallelExecutor) error {
 		if blockStatus.validateTasks.maxComplete() == len(blockStatus.tasks) {
 			for i, inputs := range blockStatus.result.TxIO.Inputs() {
 				var err error
-				inputs.Scan(func(input *state.VersionedRead) bool {
-					if input.Version.TxIndex != i-1 {
-						err = fmt.Errorf("Blk %d, Tx %d should depend on tx %d, but it actually depends on %d", blockNum, i, i-1, input.Version.TxIndex)
-						return false
+				for hdr := range inputs.AllHeaders() {
+					if hdr.Version.TxIndex != i-1 {
+						err = fmt.Errorf("Blk %d, Tx %d should depend on tx %d, but it actually depends on %d", blockNum, i, i-1, hdr.Version.TxIndex)
+						break
 					}
-					return true
-				})
+				}
 				if err != nil {
 					return err
 				}

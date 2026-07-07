@@ -91,12 +91,12 @@ func (api *ErigonImpl) GetBlockByTimestamp(ctx context.Context, timeStamp rpc.Ti
 		return nil, err
 	}
 	defer tx.Rollback()
-
-	uintTimestamp := timeStamp.TurnIntoUint64()
-
 	// Everything here is a block-table read, so one overlay view keeps the
 	// head, the search bounds, and the lookups consistent.
 	overlayTx := api.filters.WithOverlay(tx)
+
+	uintTimestamp := timeStamp.TurnIntoUint64()
+
 	currentHeader := rawdb.ReadCurrentHeader(overlayTx)
 	if currentHeader == nil {
 		return nil, errors.New("current header not found")
