@@ -193,6 +193,8 @@ func FillStaticValidatorsTableIfNeeded(ctx context.Context, logger log.Logger, s
 	return true, nil
 }
 
+const stateAntiquaryMaxSlotsPerCommit uint64 = 4 * clparams.SlotsPerDump
+
 func (s *Antiquary) IncrementBeaconState(ctx context.Context, to uint64) error {
 
 	// Check if you need to fill the static validators table
@@ -208,7 +210,7 @@ func (s *Antiquary) IncrementBeaconState(ctx context.Context, to uint64) error {
 	defer tx.Rollback()
 
 	// maps which validators changes
-	var changedValidators sync.Map
+	changedValidators := &sync.Map{}
 
 	if refilledStaticValidators {
 		s.validatorsTable.ForEach(func(validatorIndex uint64, validator *state_accessors.StaticValidator) bool {
@@ -349,7 +351,54 @@ func (s *Antiquary) IncrementBeaconState(ctx context.Context, to uint64) error {
 
 	startLoop := time.Now()
 
+	commitBatch := func() error {
+		rwTx, err := s.mainDB.BeginRw(ctx)
+		if err != nil {
+			return err
+		}
+		defer rwTx.Rollback()
+		if err := stateAntiquaryCollector.flush(ctx, rwTx); err != nil {
+			return err
+		}
+		if err := state_accessors.SetStateProcessingProgress(rwTx, s.currentState.Slot()); err != nil {
+			return err
+		}
+		s.validatorsTable.SetSlot(s.currentState.Slot())
+		buf := &bytes.Buffer{}
+		var writeErr error
+		s.validatorsTable.ForEach(func(validatorIndex uint64, validator *state_accessors.StaticValidator) bool {
+			if _, ok := changedValidators.Load(validatorIndex); !ok {
+				return true
+			}
+			buf.Reset()
+			if writeErr = validator.WriteTo(buf); writeErr != nil {
+				return false
+			}
+			if writeErr = rwTx.Put(kv.StaticValidators, base_encoding.Encode64ToBytes4(validatorIndex), common.Copy(buf.Bytes())); writeErr != nil {
+				return false
+			}
+			return true
+		})
+		if writeErr != nil {
+			return writeErr
+		}
+		return rwTx.Commit()
+	}
+	lastCommitSlot := slot
+
 	for ; slot < to && startLoop.Add(timeBeforeCommit).After(time.Now()); slot++ {
+		// Bound each mdbx commit: once maxSlotsPerCommit slots have accumulated,
+		// flush + commit them and start a fresh collector, so no single commit
+		// carries a huge retired-page list.
+		if slot-lastCommitSlot >= s.maxSlotsPerCommit {
+			if err := commitBatch(); err != nil {
+				return err
+			}
+			stateAntiquaryCollector.close()
+			stateAntiquaryCollector = newBeaconStatesCollector(s.cfg, s.dirs.Tmp, s.logger)
+			changedValidators = &sync.Map{}
+			lastCommitSlot = slot
+		}
 		slashingOccurred = false // Set this to false at the beginning of each slot.
 
 		isDumpSlot := slot%clparams.SlotsPerDump == 0
@@ -527,42 +576,9 @@ func (s *Antiquary) IncrementBeaconState(ctx context.Context, to uint64) error {
 	log.Debug("Finished beacon state iteration", "elapsed", time.Since(start))
 
 	log.Log(logLvl, "Stopped Caplin to load states")
-	rwTx, err := s.mainDB.BeginRw(ctx)
-	if err != nil {
-		return err
-	}
-	defer rwTx.Rollback()
-
 	start = time.Now()
-	// We now need to store the state
-	if err := stateAntiquaryCollector.flush(ctx, rwTx); err != nil {
-		return err
-	}
-
-	if err := state_accessors.SetStateProcessingProgress(rwTx, s.currentState.Slot()); err != nil {
-		return err
-	}
-
-	s.validatorsTable.SetSlot(s.currentState.Slot())
-
-	buf := &bytes.Buffer{}
-	s.validatorsTable.ForEach(func(validatorIndex uint64, validator *state_accessors.StaticValidator) bool {
-		if _, ok := changedValidators.Load(validatorIndex); !ok {
-			return true
-		}
-		buf.Reset()
-		if err = validator.WriteTo(buf); err != nil {
-			return false
-		}
-		if err = rwTx.Put(kv.StaticValidators, base_encoding.Encode64ToBytes4(validatorIndex), common.Copy(buf.Bytes())); err != nil {
-			return false
-		}
-		return true
-	})
-	if err != nil {
-		return err
-	}
-	if err := rwTx.Commit(); err != nil {
+	// Flush + commit the remaining slots since the last in-loop commit.
+	if err := commitBatch(); err != nil {
 		return err
 	}
 	endTime := time.Since(start)

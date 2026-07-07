@@ -65,6 +65,10 @@ type Antiquary struct {
 	// set to nil
 	currentState *state.CachingBeaconState
 	balances32   []byte
+	// maxSlotsPerCommit bounds how many slots the antiquary accumulates into one
+	// mdbx transaction. A very large commit overflows libmdbx's gc_fill_returned
+	// while serializing the transaction's retired-page list; bounding it avoids that.
+	maxSlotsPerCommit uint64
 }
 
 func NewAntiquary(ctx context.Context, blobStorage blob_storage.BlobStorage, genesisState *state.CachingBeaconState, validatorsTable *state_accessors.StaticValidatorTable, cfg *clparams.BeaconChainConfig, dirs datadir.Dirs, downloaderClient downloader.Client, mainDB kv.RwDB, stateSn *snapshotsync.CaplinStateSnapshots, sn *freezeblocks.CaplinSnapshots, reader freezeblocks.BeaconSnapshotReader, syncedData synced_data.SyncedData, logger log.Logger, states, blocks, blobs, snapgen bool, snBuildSema *semaphore.Weighted) *Antiquary {
@@ -93,6 +97,8 @@ func NewAntiquary(ctx context.Context, blobStorage blob_storage.BlobStorage, gen
 		snapgen:         snapgen,
 		stateSn:         stateSn,
 		syncedData:      syncedData,
+
+		maxSlotsPerCommit: stateAntiquaryMaxSlotsPerCommit,
 	}
 }
 
