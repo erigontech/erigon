@@ -169,6 +169,28 @@ Findings from the state-field enumeration:
   *not* in the whole-account refresh (they have their own read paths), confirming the refresh
   is a partial, Empty-oriented reconstruction, not a true whole-account load.
 
+## Follow-on: versionMap RWMutex strategy (deferred)
+
+Profiling the warm-extcodehash cell focused on `sub:exec-worker` shows `VersionMap.mu`'s
+`sync.RWMutex` `readerCount` atomic as the top non-GC cost (`atomic.(*Int32).Add` 19% flat,
+~73% from `RLock`): 6 workers reading the map concurrently ping-pong one counter cache line.
+The RLock can't be elided (it guards concurrent btree mutation), only acquired less often.
+
+The shipped SD-probe memo removes ~80% of the SelfDestruct-probe locks. The remaining
+per-field `ReadX` acquisitions are the follow-on target, via one of:
+- **Batched read** — one `RLock` + one `vm.s[addr]` lookup for all account fields in a refresh
+  (transparent semantics; also cuts redundant map lookups).
+- **Sharding `VersionMap.mu`** by address hash — spreads the atomic across cache lines.
+
+**The load-bearing open question (the reason it's deferred):** `FlushVersionedWrites` takes
+one lock and writes all of a tx's paths atomically; its doc claims that atomicity prevents a
+reader seeing a partial flush (AddressPath but not the same-tx CodePath), which could make BAL
+hashes non-deterministic. **But** OCC validation runs in the verification thread on the same
+tx's read-set — a read that observed a partial flush should be caught there and re-executed,
+so the atomic-flush guarantee may not actually be required. Confirming this (with care) is the
+prerequisite for sharding, and it also relaxes the batched-read design. Do not weaken the
+flush lock without pinning that OCC-catches-partial-reads invariant as a test first.
+
 ## Internal-consistency questions to resolve (the review)
 
 1. **Existence vs re-creation vs create-flag overlap.** AddressPath (exists), IncarnationPath
