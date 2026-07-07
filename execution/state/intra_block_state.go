@@ -517,13 +517,14 @@ func (sdb *IntraBlockState) Exist(addr accounts.Address) (exists bool, err error
 		return s != nil && !s.deleted, nil
 	}
 
-	readAccount, _, _, err := sdb.getVersionedAccount(addr, true)
+	// Existence needs only the base record + self-destruct gate, not the
+	// per-field overlay, so skip refreshVersionedAccount.
+	// Same-tx self-destruct: the account is still alive (EIP-6780).
+	// Cross-tx self-destruct: versionedAccountBase returns nil.
+	readAccount, _, _, err := sdb.versionedAccountBase(addr, true)
 	if err != nil {
 		return false, err
 	}
-
-	// Same-tx self-destruct: the account is still alive (EIP-6780).
-	// Cross-tx self-destruct: getVersionedAccount returns nil.
 	return readAccount != nil, nil
 }
 
@@ -549,13 +550,17 @@ func (sdb *IntraBlockState) Empty(addr accounts.Address) (empty bool, err error)
 		return so == nil || so.deleted || so.data.Empty(), nil
 	}
 
-	account, _, _, err := sdb.getVersionedAccount(addr, true)
+	// Existence + the self-destruct/revival gate, without reconstructing the
+	// whole account: the EIP-161 verdict needs only the current balance, nonce
+	// and code hash, read per-field below (short-circuiting), so the
+	// refreshVersionedAccount overlay + account allocation are avoided.
+	account, _, _, err := sdb.versionedAccountBase(addr, true)
 	if err != nil {
 		return false, err
 	}
 	if account == nil {
 		sdb.touchAccount(addr)
-		// Do NOT call accountRead here: getVersionedAccount already recorded
+		// Do NOT call accountRead here: versionedAccountBase already recorded
 		// the AddressPath read (via versionedReadCore) with Val=nil.  Calling
 		// accountRead(&emptyAccount) would overwrite that nil with a non-nil
 		// pointer to an empty Account.  Downstream code (getBalance →
@@ -564,14 +569,32 @@ func (sdb *IntraBlockState) Empty(addr accounts.Address) (empty bool, err error)
 		// through createObject.  When createObject is skipped, AddressPath is
 		// never written to the version map, and other txs that read this
 		// address miss the conflict during validation.
+		return true, nil
 	}
-	// Do not use SelfDestructPath here: a self-destructed account is still
-	// "alive" during the same tx (EIP-6780) and should not appear empty
-	// until end-of-tx cleanup.  Cross-tx destructs are already handled by
-	// getVersionedAccount returning nil (the versionedReadCore short-circuit
-	// returns default values for all paths when a previous tx destroyed the
-	// account).
-	return account == nil || account.Empty(), nil
+
+	// EIP-161 emptiness from the current (overlaid) field values. Per-field
+	// refresh reads apply the same self-destruct gate as the whole-account path:
+	// a self-destructed account is still "alive" during the same tx (EIP-6780),
+	// while a cross-tx destruct already made versionedAccountBase return nil.
+	balance, _, _, err := refreshBalance(sdb, addr, account.Balance)
+	if err != nil {
+		return false, err
+	}
+	if !balance.IsZero() {
+		return false, nil
+	}
+	nonce, _, _, err := refreshNonce(sdb, addr, account.Nonce)
+	if err != nil {
+		return false, err
+	}
+	if nonce != 0 {
+		return false, nil
+	}
+	codeHash, _, _, err := refreshCodeHash(sdb, addr, account.CodeHash)
+	if err != nil {
+		return false, err
+	}
+	return codeHash == accounts.EmptyCodeHash, nil
 }
 
 // GetBalance retrieves the balance from the given address or 0 if object not found
@@ -973,7 +996,24 @@ func (sdb *IntraBlockState) readSelfDestructMemo(addr accounts.Address) (bool, R
 	return destructed, res, ok
 }
 
+// getVersionedAccount returns the account reconstructed from the base record
+// plus the versionMap field overlays. Whole-account consumers (stateObject
+// construction) need the reconstructed record; field-oriented callers
+// (GetBalance/Empty/Exist) read what they need without it.
 func (sdb *IntraBlockState) getVersionedAccount(addr accounts.Address, readStorage bool) (*accounts.Account, ReadSource, Version, error) {
+	readAccount, source, version, err := sdb.versionedAccountBase(addr, readStorage)
+	if err != nil || readAccount == nil {
+		return readAccount, source, version, err
+	}
+	return sdb.refreshVersionedAccount(addr, readAccount, source, version)
+}
+
+// versionedAccountBase resolves account existence via the AddressPath read (and
+// storage fallback), applying the self-destruct/revival gate, but does NOT
+// overlay the per-field versionMap cells. It returns nil when the account is
+// absent or was destroyed with no revival. The AddressPath read it performs
+// records the nil-read that OCC uses to detect create/absent conflicts.
+func (sdb *IntraBlockState) versionedAccountBase(addr accounts.Address, readStorage bool) (*accounts.Account, ReadSource, Version, error) {
 	if sdb.versionMap == nil {
 		return nil, UnknownSource, UnknownVersion, nil
 	}
@@ -1042,7 +1082,7 @@ func (sdb *IntraBlockState) getVersionedAccount(addr accounts.Address, readStora
 		}
 	}
 
-	return sdb.refreshVersionedAccount(addr, readAccount, source, version)
+	return readAccount, source, version, nil
 }
 
 func (sdb *IntraBlockState) refreshVersionedAccount(addr accounts.Address, readAccount *accounts.Account, readSource ReadSource, readVersion Version) (*accounts.Account, ReadSource, Version, error) {
