@@ -190,6 +190,7 @@ func TestEngineApiForkBounceStateChurn(t *testing.T) {
 		require.Equal(t, canonAddr, sideAddr, "contract must deploy at the same address on both chains")
 		canonTip := canonPayloads[len(canonPayloads)-1]
 		sideTip := sidePayloads[len(sidePayloads)-1]
+		require.NotEqual(t, canonTip.ExecutionPayload.BlockHash, sideTip.ExecutionPayload.BlockHash, "the two chains must genuinely differ at the tip")
 		churn, err := contracts.NewStateChurn(canonAddr, eat.ContractBackend)
 		require.NoError(t, err)
 
@@ -283,8 +284,9 @@ func churnAndAssert(
 	coinbaseAddr := crypto.PubkeyToAddress(eat.CoinbaseKey.PublicKey)
 	for k := 0; k < pokes; k++ {
 		// Pin the nonce to the head state: the txpool's own pending-nonce view
-		// can be stale right after a reorg/restart (re-injected dead-fork txns),
-		// and submission is retried while the pool digests the head change.
+		// can be stale right after a reorg/restart (re-injected dead-fork txns,
+		// https://github.com/erigontech/erigon/issues/22299), and submission is
+		// retried while the pool digests the head change.
 		nonce, err := eat.RpcApiClient.GetTransactionCount(coinbaseAddr, rpc.LatestBlock)
 		require.NoError(t, err)
 		transactOpts.Nonce = nonce
@@ -292,6 +294,9 @@ func churnAndAssert(
 		require.Eventually(t, func() bool {
 			var err error
 			txn, err = churn.Poke(transactOpts, big.NewInt(seed(k)))
+			if err != nil {
+				t.Logf("poke %d submission retry: %v", k, err)
+			}
 			return err == nil
 		}, 30*time.Second, 100*time.Millisecond, "poke submission did not settle")
 		block, err := eat.MockCl.BuildCanonicalBlock(ctx)

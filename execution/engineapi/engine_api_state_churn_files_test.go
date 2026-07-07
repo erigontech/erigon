@@ -55,14 +55,22 @@ func waitForDomainFilesSettled(ctx context.Context, t *testing.T, agg *state.Agg
 	<-agg.WaitForBuildAndMerge(ctx)
 }
 
-func TestEngineApiUnwindAcrossDomainStepBoundaries(t *testing.T) {
-	ctx := t.Context()
-	logger := testlog.Logger(t, log.LvlError)
+// newSmallStepDataDir returns a datadir whose erigondb.toml shrinks domain
+// steps so that snapshot files build within a few hundred test blocks.
+func newSmallStepDataDir(t *testing.T) string {
+	t.Helper()
 	dataDir := t.TempDir()
 	snapDir := filepath.Join(dataDir, "snapshots")
 	require.NoError(t, os.MkdirAll(snapDir, 0o755))
 	require.NoError(t, os.WriteFile(filepath.Join(snapDir, "erigondb.toml"),
 		[]byte("step_size = 32\nsteps_in_frozen_file = 256\n"), 0o644))
+	return dataDir
+}
+
+func TestEngineApiUnwindAcrossDomainStepBoundaries(t *testing.T) {
+	ctx := t.Context()
+	logger := testlog.Logger(t, log.LvlError)
+	dataDir := newSmallStepDataDir(t)
 
 	genesis, coinbaseKey, err := engineapitester.DefaultEngineApiTesterGenesis()
 	require.NoError(t, err)
@@ -147,11 +155,7 @@ func TestEngineApiUnwindAcrossDomainStepBoundaries(t *testing.T) {
 func TestEngineApiUnwindToSnapshotBoundaryPreservesDeletedSlots(t *testing.T) {
 	ctx := t.Context()
 	logger := testlog.Logger(t, log.LvlError)
-	dataDir := t.TempDir()
-	snapDir := filepath.Join(dataDir, "snapshots")
-	require.NoError(t, os.MkdirAll(snapDir, 0o755))
-	require.NoError(t, os.WriteFile(filepath.Join(snapDir, "erigondb.toml"),
-		[]byte("step_size = 32\nsteps_in_frozen_file = 256\n"), 0o644))
+	dataDir := newSmallStepDataDir(t)
 
 	genesis, coinbaseKey, err := engineapitester.DefaultEngineApiTesterGenesis()
 	require.NoError(t, err)

@@ -18,8 +18,6 @@ package engineapi_test
 
 import (
 	"context"
-	"os"
-	"path/filepath"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -42,11 +40,7 @@ import (
 func TestEngineApiReorgWithPruningInterference(t *testing.T) {
 	ctx := t.Context()
 	logger := testlog.Logger(t, log.LvlError)
-	dataDir := t.TempDir()
-	snapDir := filepath.Join(dataDir, "snapshots")
-	require.NoError(t, os.MkdirAll(snapDir, 0o755))
-	require.NoError(t, os.WriteFile(filepath.Join(snapDir, "erigondb.toml"),
-		[]byte("step_size = 32\nsteps_in_frozen_file = 256\n"), 0o644))
+	dataDir := newSmallStepDataDir(t)
 
 	// Standard prune modes use distances in the 100k+ block range and would
 	// never delete anything at test scale, so shrink the distance to make
@@ -142,11 +136,7 @@ func TestEngineApiReorgWithPruningInterference(t *testing.T) {
 func TestEngineApiUnwindBeyondRetainedChangesetsRejectedCleanly(t *testing.T) {
 	ctx := t.Context()
 	logger := testlog.Logger(t, log.LvlError)
-	dataDir := t.TempDir()
-	snapDir := filepath.Join(dataDir, "snapshots")
-	require.NoError(t, os.MkdirAll(snapDir, 0o755))
-	require.NoError(t, os.WriteFile(filepath.Join(snapDir, "erigondb.toml"),
-		[]byte("step_size = 32\nsteps_in_frozen_file = 256\n"), 0o644))
+	dataDir := newSmallStepDataDir(t)
 
 	genesis, coinbaseKey, err := engineapitester.DefaultEngineApiTesterGenesis()
 	require.NoError(t, err)

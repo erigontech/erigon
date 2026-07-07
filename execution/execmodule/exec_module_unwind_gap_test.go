@@ -23,6 +23,7 @@ import (
 	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/require"
 
+	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/execution/chain"
@@ -97,7 +98,11 @@ func TestUpdateForkChoiceBadBlockMidBatchThenRecovery(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, execmodule.ExecutionStatusBadBlock, res.Status, "tampered block must be rejected")
 	t.Logf("bad-tip FCU: latestValidHash=%s (block10=%s block11=%s)", res.LatestValidHash, chainPack.Blocks[committedTo-1].Hash(), block11.Hash())
-	require.NotEqual(t, block12Bad.Hash(), res.LatestValidHash, "the tampered block itself can never be the latest valid hash")
+	// The module conservatively reports the last committed block (10), not the
+	// deepest valid block of the failed batch (11) — accept either, never the
+	// tampered block or anything outside its valid ancestry.
+	require.Contains(t, []common.Hash{chainPack.Blocks[committedTo-1].Hash(), block11.Hash()}, res.LatestValidHash,
+		"latest valid hash must be a valid ancestor of the rejected tip")
 
 	// The CL's recovery move: switch to the untampered block 12 at the same
 	// height. This only works if block 11 was not wrongly marked bad by the
@@ -131,6 +136,7 @@ func TestUpdateForkChoiceBadBlockMidBatchThenRecovery(t *testing.T) {
 	res, err = updateForkChoice(ctx, m.ExecModule, block13Bad.Header())
 	require.NoError(t, err)
 	require.Equal(t, execmodule.ExecutionStatusBadBlock, res.Status, "tampered first-of-batch block must be rejected")
+	require.Equal(t, block12.Hash(), res.LatestValidHash, "latest valid hash must be the bad block's parent, the committed head")
 
 	insRes, err = insertBlocks(ctx, m.ExecModule, []*types.Block{block13})
 	require.NoError(t, err)
@@ -157,14 +163,14 @@ func TestUpdateForkChoiceBadBlockMidBatchThenRecovery(t *testing.T) {
 	require.Equal(t, uint64(chainLen), acc.Nonce, "sender must have executed exactly one txn per block")
 }
 
-// TestUpdateForkChoiceBadBlockMidLongBatchOverlayRetry drives one FCU over a
-// long never-validated segment whose tail block is tampered — the devp2p
+// TestUpdateForkChoiceBadBlockAtLongBatchTailThenRecovery drives one FCU over
+// a long never-validated segment whose tail block is tampered — the devp2p
 // catch-up shape of the same failure. The valid segment blocks executed into
 // the same sync run as the failing tail; none of their effects may survive
 // the failed forkchoice, or the recovery below (the untampered sibling at the
 // bad height, then one more block) re-reads stale writes and is wrongly
 // condemned.
-func TestUpdateForkChoiceBadBlockMidLongBatchOverlayRetry(t *testing.T) {
+func TestUpdateForkChoiceBadBlockAtLongBatchTailThenRecovery(t *testing.T) {
 	ctx := t.Context()
 	privKey, err := crypto.GenerateKey()
 	require.NoError(t, err)
@@ -207,6 +213,12 @@ func TestUpdateForkChoiceBadBlockMidLongBatchOverlayRetry(t *testing.T) {
 	require.Equal(t, execmodule.ExecutionStatusBadBlock, res.Status, "tampered segment tip must be rejected")
 	t.Logf("bad-tip FCU: latestValidHash=%s (committed=%s lastGood=%s)",
 		res.LatestValidHash, chainPack.Blocks[committedTo-1].Hash(), chainPack.Blocks[badHeight-2].Hash())
+	validAncestors := make([]common.Hash, 0, badHeight-committedTo)
+	for _, b := range chainPack.Blocks[committedTo-1 : badHeight-1] {
+		validAncestors = append(validAncestors, b.Hash())
+	}
+	require.Contains(t, validAncestors, res.LatestValidHash,
+		"latest valid hash must be a valid ancestor of the rejected tip")
 
 	// Recovery via the untampered sibling at the bad height, then one more
 	// block on top: only possible if the valid segment blocks were not
