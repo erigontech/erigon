@@ -100,6 +100,13 @@ func (p *ParallelPatriciaHashed) TakeDeferredUpdates() []*DeferredBranchUpdate {
 }
 
 // RootTrie exposes the configuration template only; it must not be used as live root state.
+// AdoptRootTrie replaces the template trie with one that already carries state
+// (e.g. restored before the variant upgrade), the same slot state restore
+// targets; the previous trie must no longer be used.
+func (p *ParallelPatriciaHashed) AdoptRootTrie(root *HexPatriciaHashed) {
+	p.template = root
+}
+
 func (p *ParallelPatriciaHashed) RootTrie() *HexPatriciaHashed {
 	return p.template
 }

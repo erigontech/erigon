@@ -74,6 +74,11 @@ type SharedDomainsCommitmentContext struct {
 	deferCommitmentUpdates bool
 	// pendingUpdate stores a single deferred branch update to be flushed at the next ComputeCommitment call.
 	pendingUpdate *commitment.PendingCommitmentUpdate
+
+	// pendingVariant holds a parallel/streaming trie selection that waits for
+	// EnableParaTrieDB: those variants need the DB-backed TrieContextFactory.
+	pendingVariant commitment.TrieVariant
+	pendingCfg     commitment.TrieConfig
 }
 
 // SetStateReader can be used to set a custom state reader (otherwise the default one is set in SharedDomainsCommitmentContext.trieContext).
@@ -89,6 +94,30 @@ func (sdc *SharedDomainsCommitmentContext) StateReader() StateReader {
 
 func (sdc *SharedDomainsCommitmentContext) EnableParaTrieDB(db kv.TemporalRoDB) {
 	sdc.paraTrieDB = db
+	if sdc.pendingVariant == "" {
+		return
+	}
+	if sdc.updates.Size() != 0 {
+		panic("EnableParaTrieDB after touches: keys collected on the sequential buffer would be dropped")
+	}
+	prev, ok := sdc.patriciaTrie.(*commitment.HexPatriciaHashed)
+	if !ok {
+		panic("pending trie upgrade expects the sequential trie")
+	}
+	cfg := sdc.pendingCfg
+	cfg.Variant = sdc.pendingVariant
+	sdc.updates.Close()
+	sdc.patriciaTrie, sdc.updates = commitment.InitializeTrieAndUpdates(commitment.ModeDirect, sdc.tmpDir, cfg)
+	if ppht, ok := sdc.patriciaTrie.(*commitment.ParallelPatriciaHashed); ok {
+		// State may already be restored (SeekCommitment can run before the DB
+		// is wired); adopting the trie carries it over losslessly.
+		ppht.AdoptRootTrie(prev)
+	}
+	sdc.variant = sdc.pendingVariant
+	sdc.pendingVariant = ""
+	if sdc.traceW != nil {
+		sdc.patriciaTrie.SetTraceWriter(sdc.traceW)
+	}
 }
 
 // EnableTrieWarmup enables parallel warmup of MDBX page cache during commitment.
@@ -196,11 +225,21 @@ func NewSharedDomainsCommitmentContext(sd sd, mode commitment.Mode, tmpDir strin
 	ctx := &SharedDomainsCommitmentContext{
 		sharedDomains: sd,
 		tmpDir:        tmpDir,
-		variant:       variant,
+		variant:       commitment.VariantHexPatriciaTrie,
 		warmupBase: commitment.WarmupConfig{
 			Enabled:    cfg.EnableTrieWarmup,
 			NumWorkers: cfg.WarmupNumWorkersOrDefault(),
 		},
+	}
+	// The parallel and streaming tries need a per-worker TrieContextFactory that
+	// only DB-backed consumers can provide (via EnableParaTrieDB). Start on the
+	// sequential trie and upgrade when the DB arrives, so context holders that
+	// never wire one (RPC, integrity, tests) keep working under a global variant
+	// selection.
+	if variant == commitment.VariantParallelHexPatricia || variant == commitment.VariantStreamingHexPatricia {
+		ctx.pendingVariant = variant
+		cfg.Variant = commitment.VariantHexPatriciaTrie
+		ctx.pendingCfg = cfg
 	}
 	ctx.patriciaTrie, ctx.updates = commitment.InitializeTrieAndUpdates(mode, tmpDir, cfg)
 	return ctx
