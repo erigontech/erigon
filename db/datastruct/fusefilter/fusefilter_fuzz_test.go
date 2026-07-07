@@ -79,6 +79,12 @@ func FuzzReaderShardedOnBytes(f *testing.F) {
 // false-negative rate, by construction). Keys are derived deterministically
 // from the fuzz inputs so the seed corpus shrinks naturally.
 //
+// The round-trip is done fully in memory (BuildTo → NewReaderShardedOnBytes):
+// exercising the on-disk Build/open/mmap plumbing per iteration adds only I/O
+// latency, which under a loaded runner lets a single execution stall long
+// enough to trip the fuzzing engine's shutdown deadline. The file path is
+// covered by the unit tests.
+//
 // Run with:
 //
 //	go test -run=^$ -fuzz=FuzzWriterRoundTrip -fuzztime=30s ./db/datastruct/fusefilter/
@@ -96,13 +102,11 @@ func FuzzWriterRoundTrip(f *testing.F) {
 			n = 8192
 		}
 
-		dir := t.TempDir()
-		fp := filepath.Join(dir, "f")
-		w, err := NewWriterSharded(fp)
+		w, err := NewWriterSharded(filepath.Join(t.TempDir(), "f"))
 		if err != nil {
 			t.Fatal(err)
 		}
-		w.DisableFsync()
+		defer w.Close()
 
 		// Cheap deterministic key stream: splitmix64.
 		x := seed
@@ -118,16 +122,16 @@ func FuzzWriterRoundTrip(f *testing.F) {
 				t.Fatal(err)
 			}
 		}
-		if err := w.Build(); err != nil {
+
+		var buf bytes.Buffer
+		if _, err := w.BuildTo(&buf); err != nil {
 			t.Fatal(err)
 		}
-		w.Close()
 
-		r, err := NewReaderSharded(fp)
+		r, _, err := NewReaderShardedOnBytes(buf.Bytes(), "fuzz")
 		if err != nil {
 			t.Fatal(err)
 		}
-		defer r.Close()
 		for _, k := range keys {
 			if !r.ContainsHash(k) {
 				t.Fatalf("seed=%d n=%d: ContainsHash(%d) = false (xorfilter must have 0%% FN rate)", seed, n, k)

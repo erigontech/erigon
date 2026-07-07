@@ -12,7 +12,7 @@ import (
 	"strings"
 
 	"github.com/pelletier/go-toml/v2"
-	"github.com/urfave/cli/v2"
+	"github.com/urfave/cli/v3"
 
 	"github.com/erigontech/erigon/common/dir"
 	"github.com/erigontech/erigon/common/log/v3"
@@ -30,7 +30,7 @@ type stepRebasePlan struct {
 	settings  state.ErigonDBSettings
 }
 
-func stepRebase(cliCtx *cli.Context) error {
+func stepRebase(ctx context.Context, cliCtx *cli.Command) error {
 	logger := log.Root()
 	dirs := datadir.Open(cliCtx.String("datadir"))
 	settings, err := state.ResolveErigonDBSettings(dirs, logger, true)
@@ -64,7 +64,7 @@ func stepRebase(cliCtx *cli.Context) error {
 	if answer != "y" && answer != "yes" {
 		return fmt.Errorf("aborted by user")
 	}
-	return applyStepRebasePlan(cliCtx.Context, dirs, plan, logger)
+	return applyStepRebasePlan(ctx, dirs, plan, logger)
 }
 
 func buildStepRebasePlan(dirs datadir.Dirs, settings *state.ErigonDBSettings, newStepSize uint64, keepBlocks bool, logger log.Logger) (stepRebasePlan, error) {

@@ -640,11 +640,9 @@ func GenerateChain(config *chain.Config, parent *types.Block, engine rules.Engin
 		ibs := state.New(stateReader)
 		if dbg.TraceBlock(uint64(i)) {
 			ibs.SetTrace(true)
-			domains.SetTrace(true, false)
 		}
 		block, receipt, balBytes, err := genblock(i, parent, ibs, stateReader, stateWriter)
 		ibs.SetTrace(false)
-		domains.SetTrace(false, false)
 		if err != nil {
 			return nil, fmt.Errorf("generating block %d: %w", i, err)
 		}
