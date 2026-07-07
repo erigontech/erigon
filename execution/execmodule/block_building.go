@@ -44,6 +44,8 @@ func (e *ExecModule) evictOldBuilders() {
 
 	// remove old builders so that at most MaxBuilders - 1 remain
 	for i := 0; i <= len(e.builders)-engine_helpers.MaxBuilders; i++ {
+		bldr := e.builders[ids[i]]
+		go bldr.Stop()
 		delete(e.builders, ids[i])
 	}
 }
