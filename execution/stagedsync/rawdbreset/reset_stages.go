@@ -180,7 +180,10 @@ func ResetExec(ctx context.Context, db kv.TemporalRwDB) error {
 			return fmt.Errorf("clearing Execution stage progress: %w", err)
 		}
 		// corner case: state files may be ahead of block files - so, can't use SharedDomains here. just leave progress as 0.
-		return backup.ClearTables(ctx, db, tx, cleanupList...)
+		if err := backup.ClearTables(ctx, db, tx, cleanupList...); err != nil {
+			return fmt.Errorf("reset exec state tables: %w", err)
+		}
+		return nil
 	}); err != nil {
 		return err
 	}

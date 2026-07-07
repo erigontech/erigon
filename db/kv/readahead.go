@@ -19,17 +19,14 @@ package kv
 import (
 	"bytes"
 	"context"
-	"fmt"
 	"sort"
 	"sync"
 	"sync/atomic"
-	"time"
 
 	"github.com/c2h5oh/datasize"
 	"golang.org/x/sync/errgroup"
 
 	"github.com/erigontech/erigon/common/log/v3"
-	"github.com/erigontech/erigon/db/kv/order"
 )
 
 type DBWithDistributionSupport interface {
@@ -78,7 +75,6 @@ type ReadAheadCfg struct {
 	Bounds     [][]byte // count-balanced boundaries (already cloned)
 	TableSize  uint64   // sizes the ~1GB ahead-window in chunks
 	Workers    int
-	LogLvl     log.Lvl
 	WarmValues bool // fault value pages too (copy path); false = leaf pages only (clear path)
 }
 
@@ -87,9 +83,8 @@ type ReadAhead struct {
 	mu       sync.Mutex
 	turnCond *sync.Cond // broadcast when the consumer advances (SetPos) or ctx is cancelled
 
-	bounds        atomic.Pointer[[][]byte]
-	consumerChunk atomic.Int64
-	logLvl        atomic.Int32
+	consumerChunk int64    // guarded by mu
+	bounds        [][]byte // set once before run() starts; read-only afterward
 	cancel        context.CancelFunc
 	done          chan struct{}
 	warmValues    bool
@@ -107,9 +102,8 @@ func NewReadAhead(ctx context.Context, db RoDB, table string, cfg ReadAheadCfg) 
 		workers = 1
 	}
 	ctx, cancel := context.WithCancel(ctx)
-	r := &ReadAhead{cancel: cancel, done: make(chan struct{}), warmValues: cfg.WarmValues}
+	r := &ReadAhead{cancel: cancel, done: make(chan struct{}), warmValues: cfg.WarmValues, bounds: cfg.Bounds}
 	r.turnCond = sync.NewCond(&r.mu)
-	r.logLvl.Store(int32(cfg.LogLvl))
 	go r.run(ctx, db, table, cfg.Bounds, cfg.TableSize, workers)
 	return r
 }
@@ -117,7 +111,6 @@ func NewReadAhead(ctx context.Context, db RoDB, table string, cfg ReadAheadCfg) 
 func (r *ReadAhead) run(ctx context.Context, db RoDB, table string, bounds [][]byte, tableSize uint64, workers int) {
 	defer close(r.done)
 	defer r.cancel() // release the child ctx + its watcher goroutine even if the caller forgets Close
-	r.bounds.Store(&bounds)
 
 	// ~1GB window from the actual mean chunk size, so it stays ~1GB even when
 	// huge tables (past the cursor cap) have chunks bigger than WarmupChunkSize.
@@ -134,45 +127,17 @@ func (r *ReadAhead) run(ctx context.Context, db RoDB, table string, bounds [][]b
 		r.mu.Unlock()
 	}()
 
-	var doneChunks, warming, idle atomic.Int64
-
-	// log from a dedicated goroutine: a worker logging after its own warming.Add(-1) would never count itself
-	logDone := make(chan struct{})
-	go func() {
-		logEvery := time.NewTicker(20 * time.Second)
-		defer logEvery.Stop()
-		for {
-			select {
-			case <-logDone:
-				return
-			case <-ctx.Done():
-				return
-			case <-logEvery.C:
-				log.Log(log.Lvl(r.logLvl.Load()), "["+readAheadLabel+"]", "table", table, "progress", fmt.Sprintf("%d/%d", doneChunks.Load(), len(bounds)-1), "warming", warming.Load(), "idle", idle.Load(), "workers", limit)
-			}
-		}
-	}()
-
 	var g errgroup.Group // not WithContext: one chunk's read error must not cancel the rest
 	g.SetLimit(limit)
 	for idx := 0; idx+1 < len(bounds) && ctx.Err() == nil; idx++ {
 		g.Go(func() error {
-			idle.Add(1)
-			turn := r.waitTurn(ctx, idx, ahead) // parked here until the consumer is close enough
-			idle.Add(-1)
-			if !turn { // consumer already passed it, or ctx cancelled
-				doneChunks.Add(1) // count skips too, so progress tracks the consumer
-				return nil
+			if r.waitTurn(ctx, idx, ahead) { // parks until the consumer is close enough
+				r.warm(ctx, db, table, bounds[idx], bounds[idx+1])
 			}
-			warming.Add(1)
-			r.warm(ctx, db, table, bounds[idx], bounds[idx+1])
-			warming.Add(-1)
-			doneChunks.Add(1)
 			return nil
 		})
 	}
 	_ = g.Wait()
-	close(logDone)
 }
 
 // waitTurn blocks until chunk idx is within `ahead` of the consumer; returns false
@@ -185,11 +150,10 @@ func (r *ReadAhead) waitTurn(ctx context.Context, idx int, ahead int64) bool {
 		if ctx.Err() != nil {
 			return false
 		}
-		cc := r.consumerChunk.Load()
 		switch {
-		case int64(idx) < cc:
+		case int64(idx) < r.consumerChunk:
 			return false // consumer already passed this chunk - don't warm behind it
-		case int64(idx) <= cc+ahead:
+		case int64(idx) <= r.consumerChunk+ahead:
 			return true
 		}
 		r.turnCond.Wait()
@@ -218,26 +182,35 @@ func touchValue(sink byte, v []byte) byte {
 	return sink
 }
 
-// warm scans [from,to) to fault its pages into cache. The scan faults leaf pages;
-// warmValues also touches values so overflow pages fault in (copy needs them,
-// range-delete doesn't).
+// maxWarmBytesPerChunk bounds how much one warm() call faults, so a dup-heavy
+// DupSort chunk (one key with a multi-GB dup run — key-granular bounds can't
+// split it) doesn't fault the whole table into cache at once.
+const maxWarmBytesPerChunk = 1 * datasize.GB
+
+// warm scans [from,to) with a raw cursor (one cgo Get per key) to fault its pages
+// into cache — leaf pages always, plus overflow value pages when warmValues is
+// set (the copy path reads values; range-delete doesn't).
 func (r *ReadAhead) warm(ctx context.Context, db RoDB, table string, from, to []byte) {
 	err := db.View(ctx, func(tx Tx) error {
-		it, err := tx.Range(table, from, to, order.Asc, Unlim)
+		c, err := tx.Cursor(table)
 		if err != nil {
 			return err
 		}
-		defer it.Close()
+		defer c.Close()
 		var sink byte
 		defer func() { warmupSink.Add(uint64(sink)) }()
+		var faulted uint64
 		n := 0
-		for it.HasNext() {
-			_, v, err := it.Next()
+		for k, v, err := c.Seek(from); k != nil && (to == nil || bytes.Compare(k, to) < 0); k, v, err = c.Next() {
 			if err != nil {
 				return err
 			}
 			if r.warmValues {
 				sink = touchValue(sink, v)
+			}
+			faulted += uint64(len(k)) + uint64(len(v))
+			if faulted >= maxWarmBytesPerChunk.Bytes() {
+				break
 			}
 			n++
 			if n%128 == 0 && ctx.Err() != nil {
@@ -257,20 +230,16 @@ func (r *ReadAhead) SetPos(key []byte) {
 	if r == nil {
 		return
 	}
-	p := r.bounds.Load()
-	if p == nil {
-		return
-	}
-	bounds := *p
-	idx := sort.Search(len(bounds)-1, func(i int) bool {
-		b := bounds[i+1]
+	idx := sort.Search(len(r.bounds)-1, func(i int) bool {
+		b := r.bounds[i+1]
 		return b == nil || bytes.Compare(b, key) > 0
 	})
-	if r.consumerChunk.Swap(int64(idx)) != int64(idx) { // only wake parked workers when the window actually moves
-		r.mu.Lock()
+	r.mu.Lock()
+	if int64(idx) != r.consumerChunk { // only wake parked workers when the window actually moves
+		r.consumerChunk = int64(idx)
 		r.turnCond.Broadcast()
-		r.mu.Unlock()
 	}
+	r.mu.Unlock()
 }
 
 // Close stops the prefetchers and waits for their read txs to be released.

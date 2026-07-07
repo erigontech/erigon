@@ -123,7 +123,7 @@ func backupTable(ctx context.Context, src kv.RoDB, srcTx kv.Tx, dst kv.RwDB, tab
 		if err != nil {
 			logger.Warn("[mdbx_to_mdbx] read-ahead disabled", "table", table, "err", err)
 		} else {
-			ra = kv.NewReadAhead(ctx, src, table, kv.ReadAheadCfg{Bounds: bounds, TableSize: size, Workers: workers, LogLvl: log.LvlInfo, WarmValues: true})
+			ra = kv.NewReadAhead(ctx, src, table, kv.ReadAheadCfg{Bounds: bounds, TableSize: size, Workers: workers, WarmValues: true})
 		}
 	}
 	defer ra.Close()
@@ -217,12 +217,12 @@ func clearTable(ctx context.Context, db kv.RoDB, tx kv.RwTx, table string) error
 		return err
 	}
 	log.Info("[clear]", "table", table, "size", common.ByteCount(size))
-	if len(bounds) < 2 { // under one chunk: native drop is cheaper
+	if len(bounds) <= 2 { // one chunk ([nil,nil]): native drop beats distribute+warm+whole-table DeleteRange
 		return tx.ClearTable(table)
 	}
 
 	// read-ahead over the same boundaries; keys-only — range-delete never reads values
-	ra := kv.NewReadAhead(ctx, db, table, kv.ReadAheadCfg{Bounds: bounds, TableSize: size, Workers: workers, LogLvl: log.LvlDebug})
+	ra := kv.NewReadAhead(ctx, db, table, kv.ReadAheadCfg{Bounds: bounds, TableSize: size, Workers: workers})
 	defer ra.Close()
 
 	logEvery := time.NewTicker(20 * time.Second)
@@ -243,12 +243,12 @@ func clearTable(ctx context.Context, db kv.RoDB, tx kv.RwTx, table string) error
 		case <-ctx.Done():
 			return ctx.Err()
 		case <-logEvery.C:
-			now := time.Now()
-			secs := now.Sub(lastLog).Seconds()
 			remaining, err := tx.BucketSize(table)
 			if err != nil {
-				return err
+				continue // a failed progress read shouldn't abort the clear
 			}
+			now := time.Now()
+			secs := now.Sub(lastLog).Seconds()
 			log.Info("[clear]", "table", table,
 				"speed", common.ByteCount(uint64(float64(lastSize-remaining)/secs))+"/s",
 				"keys", common.PrettyCounter(uint64(float64(deleted-lastDeleted)/secs))+"/s",

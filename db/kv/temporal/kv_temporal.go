@@ -332,19 +332,20 @@ func (tx *Tx) LockDBInRam() error {
 	return nil
 }
 
-// DistributeCursors forwards to the underlying engine; returns a single [from,nil) range if it has no distribution support.
+// DistributeCursors forwards to the underlying mdbx engine. Like DeleteRange, it
+// fails loud on a non-mdbx inner rather than silently degrading (none exists today).
 func (tx *Tx) DistributeCursors(table string, from []byte, n int) ([][]byte, error) {
 	if s, ok := tx.Tx.(kv.DBWithDistributionSupport); ok {
 		return s.DistributeCursors(table, from, n)
 	}
-	return [][]byte{from, nil}, nil
+	return nil, fmt.Errorf("DistributeCursors not supported by %T", tx.Tx)
 }
 
 func (tx *RwTx) DistributeCursors(table string, from []byte, n int) ([][]byte, error) {
 	if s, ok := tx.RwTx.(kv.DBWithDistributionSupport); ok {
 		return s.DistributeCursors(table, from, n)
 	}
-	return [][]byte{from, nil}, nil
+	return nil, fmt.Errorf("DistributeCursors not supported by %T", tx.RwTx)
 }
 
 func (tx *Tx) Apply(ctx context.Context, f func(tx kv.Tx) error) error {

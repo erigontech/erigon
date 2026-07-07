@@ -18,7 +18,6 @@ package mdbx
 
 import (
 	"bytes"
-	"encoding/binary"
 	"testing"
 
 	"github.com/c2h5oh/datasize"
@@ -30,12 +29,6 @@ import (
 )
 
 const deleteRangeTable = "T"
-
-func u64Key(i uint64) []byte {
-	k := make([]byte, 8)
-	binary.BigEndian.PutUint64(k, i)
-	return k
-}
 
 // newFilledDB returns a WriteMap DB (the production default: freed pages are
 // recycled in place, which is what makes stale bounds dangerous) filled with
@@ -52,7 +45,7 @@ func newFilledDB(t *testing.T, n int) kv.RwDB {
 		require.NoError(t, err)
 		defer c.Close()
 		for i := 0; i < n; i++ {
-			require.NoError(t, c.Append(u64Key(uint64(i)), []byte{1}))
+			require.NoError(t, c.Append(u64tob(uint64(i)), []byte{1}))
 		}
 		return nil
 	}))
@@ -83,10 +76,10 @@ func TestMdbxDeleteRange(t *testing.T) {
 
 	t.Run("half-open [from,to)", func(t *testing.T) {
 		db := newFilledDB(t, 1000)
-		require.EqualValues(t, 500, deleteRange(t, db, u64Key(200), u64Key(700)))
+		require.EqualValues(t, 500, deleteRange(t, db, u64tob(200), u64tob(700)))
 		require.EqualValues(t, 500, countTable(t, db))
 		require.NoError(t, db.View(t.Context(), func(tx kv.Tx) error {
-			has := func(i uint64) bool { v, _ := tx.GetOne(deleteRangeTable, u64Key(i)); return v != nil }
+			has := func(i uint64) bool { v, _ := tx.GetOne(deleteRangeTable, u64tob(i)); return v != nil }
 			require.True(t, has(199))  // just below the range: kept
 			require.False(t, has(200)) // inclusive lower bound: gone
 			require.False(t, has(699)) // just below upper bound: gone
@@ -97,13 +90,13 @@ func TestMdbxDeleteRange(t *testing.T) {
 
 	t.Run("to==nil deletes through the last key", func(t *testing.T) {
 		db := newFilledDB(t, 1000)
-		require.EqualValues(t, 100, deleteRange(t, db, u64Key(900), nil))
+		require.EqualValues(t, 100, deleteRange(t, db, u64tob(900), nil))
 		require.EqualValues(t, 900, countTable(t, db))
 	})
 
 	t.Run("from==nil deletes from the first key", func(t *testing.T) {
 		db := newFilledDB(t, 1000)
-		require.EqualValues(t, 300, deleteRange(t, db, nil, u64Key(300)))
+		require.EqualValues(t, 300, deleteRange(t, db, nil, u64tob(300)))
 		require.EqualValues(t, 700, countTable(t, db))
 	})
 
@@ -115,13 +108,13 @@ func TestMdbxDeleteRange(t *testing.T) {
 
 	t.Run("reversed range deletes nothing", func(t *testing.T) {
 		db := newFilledDB(t, 1000)
-		require.Zero(t, deleteRange(t, db, u64Key(700), u64Key(200)))
+		require.Zero(t, deleteRange(t, db, u64tob(700), u64tob(200)))
 		require.EqualValues(t, 1000, countTable(t, db))
 	})
 
 	t.Run("from past the last key deletes nothing", func(t *testing.T) {
 		db := newFilledDB(t, 1000)
-		require.Zero(t, deleteRange(t, db, u64Key(5000), nil))
+		require.Zero(t, deleteRange(t, db, u64tob(5000), nil))
 		require.EqualValues(t, 1000, countTable(t, db))
 	})
 }
@@ -152,6 +145,77 @@ func TestChunkedDeleteRangeCoversAllKeys(t *testing.T) {
 			deleted += m
 		}
 		require.EqualValues(t, n, deleted)
+		return nil
+	}))
+	require.Zero(t, countTable(t, db))
+}
+
+func newFilledDupSortDB(t *testing.T, keys, dupsPerKey int) kv.RwDB {
+	t.Helper()
+	db := New(dbcfg.ChainDB, log.New()).InMem(t, t.TempDir()).WriteMap(true).WithTableCfg(func(_ kv.TableCfg) kv.TableCfg {
+		return kv.TableCfg{deleteRangeTable: kv.TableCfgItem{Flags: kv.DupSort}}
+	}).MapSize(512 * datasize.MB).MustOpen()
+	t.Cleanup(db.Close)
+
+	require.NoError(t, db.Update(t.Context(), func(tx kv.RwTx) error {
+		c, err := tx.RwCursorDupSort(deleteRangeTable)
+		require.NoError(t, err)
+		defer c.Close()
+		for i := 0; i < keys; i++ {
+			for d := 0; d < dupsPerKey; d++ {
+				require.NoError(t, c.AppendDup(u64tob(uint64(i)), u64tob(uint64(d))))
+			}
+		}
+		return nil
+	}))
+	return db
+}
+
+// TestMdbxDeleteRangeDupSort pins that native range-delete removes every dup of
+// each key in [from,to) and counts (key,value) pairs, not distinct keys.
+func TestMdbxDeleteRangeDupSort(t *testing.T) {
+	const keys, dups = 1000, 8
+	db := newFilledDupSortDB(t, keys, dups)
+
+	require.NoError(t, db.Update(t.Context(), func(tx kv.RwTx) error {
+		n, err := tx.(kv.HasDeleteRange).DeleteRange(deleteRangeTable, u64tob(200), u64tob(700))
+		require.NoError(t, err)
+		require.EqualValues(t, 500*dups, n) // every dup of keys 200..699
+		return nil
+	}))
+	require.EqualValues(t, 500*dups, countTable(t, db))
+	require.NoError(t, db.View(t.Context(), func(tx kv.Tx) error {
+		has := func(i uint64) bool { v, _ := tx.GetOne(deleteRangeTable, u64tob(i)); return v != nil }
+		require.True(t, has(199))  // dups kept
+		require.False(t, has(200)) // all dups gone
+		require.False(t, has(699))
+		require.True(t, has(700))
+		return nil
+	}))
+}
+
+// TestChunkedDeleteRangeDupSortCoversAllKeys is the DupSort analogue of
+// TestChunkedDeleteRangeCoversAllKeys: chunked range-delete over count-balanced
+// bounds must remove every (key,dup) with no gaps — the shape ResetExec clears.
+func TestChunkedDeleteRangeDupSortCoversAllKeys(t *testing.T) {
+	const keys, dups = 50_000, 8
+	db := newFilledDupSortDB(t, keys, dups)
+
+	require.NoError(t, db.Update(t.Context(), func(tx kv.RwTx) error {
+		bounds, err := tx.(kv.DBWithDistributionSupport).DistributeCursors(deleteRangeTable, nil, 256)
+		require.NoError(t, err)
+		require.Greater(t, len(bounds), 2, "dupsort table must split into multiple chunks")
+		for i := range bounds {
+			bounds[i] = bytes.Clone(bounds[i])
+		}
+		dr := tx.(kv.HasDeleteRange)
+		var deleted uint64
+		for i := 0; i+1 < len(bounds); i++ {
+			m, err := dr.DeleteRange(deleteRangeTable, bounds[i], bounds[i+1])
+			require.NoError(t, err)
+			deleted += m
+		}
+		require.EqualValues(t, keys*dups, deleted)
 		return nil
 	}))
 	require.Zero(t, countTable(t, db))

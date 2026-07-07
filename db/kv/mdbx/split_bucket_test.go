@@ -173,3 +173,59 @@ func TestSplitBucketByCountFewerPositions(t *testing.T) {
 		return nil
 	}))
 }
+
+// TestSplitBucketByCountDupSortSkew proves DistributeCursors splits a DupSort
+// table at MAIN-KEY granularity: distribution runs at deepness Depth-2 (branch
+// level, above the per-key dup subtrees) so it never faults cold leaves on a
+// table >> RAM, but the price is that it cannot balance a skewed table — one hot
+// key with a large dup run lands entirely in a single chunk. Coverage stays
+// exact; only balance suffers. Splitting within a key's dups would need
+// deepness = full height + dup height, i.e. faulting the leaves this avoids.
+func TestSplitBucketByCountDupSortSkew(t *testing.T) {
+	const table, coldKeys, hotDups = "T", 1000, 200_000
+	db := New(dbcfg.ChainDB, log.New()).InMem(t, t.TempDir()).WithTableCfg(func(_ kv.TableCfg) kv.TableCfg {
+		return kv.TableCfg{table: kv.TableCfgItem{Flags: kv.DupSort}}
+	}).MapSize(512 * datasize.MB).MustOpen()
+	t.Cleanup(db.Close)
+
+	require.NoError(t, db.Update(t.Context(), func(tx kv.RwTx) error {
+		c, err := tx.RwCursorDupSort(table)
+		require.NoError(t, err)
+		defer c.Close()
+		key, val := make([]byte, 8), make([]byte, 8)
+		for d := 0; d < hotDups; d++ { // key 0 is hot: many dups
+			binary.BigEndian.PutUint64(val, uint64(d))
+			require.NoError(t, c.AppendDup(key, val))
+		}
+		binary.BigEndian.PutUint64(val, 0)
+		for i := 1; i <= coldKeys; i++ { // keys 1..coldKeys: one value each
+			binary.BigEndian.PutUint64(key, uint64(i))
+			require.NoError(t, c.AppendDup(key, val))
+		}
+		return nil
+	}))
+
+	require.NoError(t, db.View(t.Context(), func(tx kv.Tx) error {
+		bounds, err := tx.(kv.DBWithDistributionSupport).DistributeCursors(table, nil, 64)
+		require.NoError(t, err)
+
+		total, maxChunk := 0, 0
+		for i := 0; i+1 < len(bounds); i++ {
+			it, err := tx.Range(table, bounds[i], bounds[i+1], order.Asc, -1)
+			require.NoError(t, err)
+			cnt := 0
+			for it.HasNext() {
+				_, _, err := it.Next()
+				require.NoError(t, err)
+				cnt++
+			}
+			it.Close()
+			total += cnt
+			maxChunk = max(maxChunk, cnt)
+		}
+		require.Equal(t, hotDups+coldKeys, total, "coverage must be exact: every (key,dup) once")
+		require.GreaterOrEqual(t, maxChunk, hotDups, "hot key's dups are not split across chunks")
+		t.Logf("skewed dupsort: %d chunks, largest holds %d/%d items (no intra-key split)", len(bounds)-1, maxChunk, total)
+		return nil
+	}))
+}
