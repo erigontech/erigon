@@ -207,6 +207,11 @@ var (
 		Usage: "Maximum number of topics per subscription to filter logs by.",
 		Value: rpchelper.DefaultFiltersConfig.RpcSubscriptionFiltersMaxTopics,
 	}
+	RpcSubscriptionFiltersTimeoutFlag = cli.DurationFlag{
+		Name:  "rpc.subscription.filters.timeout",
+		Usage: "Timeout before idle filters are evicted. Defaults to 5m; set to 0 to disable eviction.",
+		Value: rpchelper.DefaultFiltersConfig.RpcSubscriptionFiltersTimeout,
+	}
 )
 
 // BuildEthConfig applies all CLI flags to the ethconfig.Config. This is the single
@@ -490,6 +495,7 @@ func setEmbeddedRpcDaemon(ctx *cli.Command, cfg *nodecfg.Config, logger log.Logg
 			RpcSubscriptionFiltersMaxTxs:       ctx.Int(RpcSubscriptionFiltersMaxTxsFlag.Name),
 			RpcSubscriptionFiltersMaxAddresses: ctx.Int(RpcSubscriptionFiltersMaxAddressesFlag.Name),
 			RpcSubscriptionFiltersMaxTopics:    ctx.Int(RpcSubscriptionFiltersMaxTopicsFlag.Name),
+			RpcSubscriptionFiltersTimeout:      ctx.Duration(RpcSubscriptionFiltersTimeoutFlag.Name),
 		},
 		Gascap:              utils.RpcGasCap(ctx),
 		BlockRangeLimit:     ctx.Int(utils.RpcBlockRangeLimit.Name),
