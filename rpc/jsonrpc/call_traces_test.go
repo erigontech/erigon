@@ -36,6 +36,7 @@ import (
 	"github.com/erigontech/erigon/execution/tracing/tracers/config"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/rpc"
+	"github.com/erigontech/erigon/rpc/ethapi"
 	"github.com/erigontech/erigon/rpc/jsonstream"
 )
 
@@ -349,4 +350,32 @@ func TestFilterBlockOverridesOtherFieldsAffectOpcodes(t *testing.T) {
 			require.Contains(t, string(stream.Buffer()), hexutil.Bytes(tc.expected).String())
 		})
 	}
+}
+
+// TestFilterRejectedBlockOverrideReturnsError checks that trace_filter
+// reports a rejected BlockOverrides field (here BeaconRoot, which Override
+// always rejects) as a normal RPC error instead of leaving lastRules unset
+// for the block's remaining transactions.
+func TestFilterRejectedBlockOverrideReturnsError(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow test")
+	}
+
+	c := newBaseFeeTestChain(t, chain.AllProtocolChanges)
+	api := c.traceAPI()
+
+	n := rpc.BlockNumber(0)
+	traceReq := TraceFilterRequest{
+		FromBlock: &rpc.BlockNumberOrHash{BlockNumber: &n},
+		ToBlock:   &rpc.BlockNumberOrHash{BlockNumber: &n},
+	}
+
+	beaconRoot := common.HexToHash("0x01")
+	s := jsoniter.ConfigDefault.BorrowStream(nil)
+	defer jsoniter.ConfigDefault.ReturnStream(s)
+	stream := jsonstream.Wrap(s)
+	err := api.Filter(context.Background(), traceReq, new(bool), &config.TraceConfig{
+		BlockOverrides: &ethapi.BlockOverrides{BeaconRoot: &beaconRoot},
+	}, stream)
+	require.Error(t, err)
 }

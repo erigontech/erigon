@@ -367,6 +367,10 @@ func (api *TraceAPIImpl) Filter(ctx context.Context, req TraceFilterRequest, gas
 		return err
 	}
 
+	if err := overrideBlockContext(traceConfig, &evmtypes.BlockContext{}); err != nil {
+		return err
+	}
+
 	return api.filterV3(ctx, dbtx, fromBlock, toBlock, req, stream, *gasBailOut, traceConfig)
 }
 
@@ -479,15 +483,7 @@ func (api *TraceAPIImpl) filterV3(ctx context.Context, dbtx kv.TemporalTx, fromB
 			lastSigner = types.MakeSigner(chainConfig, blockNum, lastHeader.Time)
 			blockCtx := transactions.NewEVMBlockContext(engine, lastHeader, true /* requireCanonical */, dbtx, api._blockReader, chainConfig)
 			if err := overrideBlockContext(traceConfig, &blockCtx); err != nil {
-				if first {
-					first = false
-				} else {
-					stream.WriteMore()
-				}
-				stream.WriteObjectStart()
-				rpc.HandleError(err, stream)
-				stream.WriteObjectEnd()
-				continue
+				return err
 			}
 			lastRules = blockCtx.Rules(chainConfig)
 			lastBaseFee = blockCtx.BaseFee
@@ -628,15 +624,7 @@ func (api *TraceAPIImpl) filterV3(ctx context.Context, dbtx kv.TemporalTx, fromB
 
 		blockCtx := transactions.NewEVMBlockContext(engine, lastHeader, true /* requireCanonical */, dbtx, api._blockReader, chainConfig)
 		if err := overrideBlockContext(traceConfig, &blockCtx); err != nil {
-			if first {
-				first = false
-			} else {
-				stream.WriteMore()
-			}
-			stream.WriteObjectStart()
-			rpc.HandleError(err, stream)
-			stream.WriteObjectEnd()
-			continue
+			return err
 		}
 		evmTxCtx := protocol.NewEVMTxContext(msg)
 		evm := vm.NewEVM(blockCtx, evmTxCtx, ibs, chainConfig, vmConfig)
