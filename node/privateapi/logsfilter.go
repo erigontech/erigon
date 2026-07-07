@@ -25,6 +25,7 @@ import (
 	"github.com/erigontech/erigon/execution/notifications"
 	"github.com/erigontech/erigon/node/gointerfaces"
 	"github.com/erigontech/erigon/node/gointerfaces/remoteproto"
+	"github.com/erigontech/erigon/node/gointerfaces/remoteproto/filterack"
 	"github.com/erigontech/erigon/node/gointerfaces/typesproto"
 	"github.com/erigontech/erigon/node/shards"
 )
@@ -159,6 +160,9 @@ func (a *LogsFilterAggregator) subscribeLogs(server remoteproto.ETHBACKEND_Subsc
 	var recvErr error
 	for filterReq, recvErr = server.Recv(); recvErr == nil; filterReq, recvErr = server.Recv() {
 		a.updateLogsFilter(filter, filterReq)
+		if err := server.Send(filterack.LogsReply()); err != nil {
+			return fmt.Errorf("sending log filter applied ack: %w", err)
+		}
 	}
 	if recvErr != io.EOF { // termination
 		return fmt.Errorf("receiving log filter request: %w", recvErr)

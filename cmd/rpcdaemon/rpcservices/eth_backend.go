@@ -268,7 +268,34 @@ func (back *RemoteBackend) SubscribeLogs(ctx context.Context, onNewLogs func(rep
 		}
 		return err
 	}
-	requestor.Store(subscription.Send)
+	if requestor != nil {
+		requestor.Store(subscription.Send)
+	}
+	for {
+		logs, err := subscription.Recv()
+		if errors.Is(err, io.EOF) {
+			log.Info("rpcdaemon: the logs subscription channel was closed")
+			break
+		}
+		if err != nil {
+			return err
+		}
+		onNewLogs(logs)
+	}
+	return nil
+}
+
+func (back *RemoteBackend) SubscribeLogsOnReady(ctx context.Context, onNewLogs func(reply *remoteproto.SubscribeLogsReply), onReady func(func(*remoteproto.LogsFilterRequest) error)) error {
+	subscription, err := back.remoteEthBackend.SubscribeLogs(ctx, grpc.WaitForReady(true))
+	if err != nil {
+		if s, ok := status.FromError(err); ok {
+			return errors.New(s.Message())
+		}
+		return err
+	}
+	if onReady != nil {
+		go onReady(subscription.Send)
+	}
 	for {
 		logs, err := subscription.Recv()
 		if errors.Is(err, io.EOF) {
@@ -292,7 +319,7 @@ func (back *RemoteBackend) SubscribeReceipts(ctx context.Context, onNewReceipts 
 		return err
 	}
 	if onReady != nil {
-		onReady(subscription.Send)
+		go onReady(subscription.Send)
 	}
 	for {
 		receipts, err := subscription.Recv()

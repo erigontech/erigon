@@ -30,6 +30,7 @@ import (
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/node/gointerfaces"
 	"github.com/erigontech/erigon/node/gointerfaces/remoteproto"
+	"github.com/erigontech/erigon/node/gointerfaces/remoteproto/filterack"
 	"github.com/erigontech/erigon/node/gointerfaces/typesproto"
 	"github.com/erigontech/erigon/node/shards"
 )
@@ -51,6 +52,7 @@ func init() {
 type testServer struct {
 	received         chan *remoteproto.LogsFilterRequest
 	receiveCompleted chan struct{}
+	acks             int
 	sent             []*remoteproto.SubscribeLogsReply
 	sendErr          error
 	sendCalls        int
@@ -83,14 +85,23 @@ func newFailingTestServer(ctx context.Context) *failingTestServer {
 
 func (ts *testServer) Send(m *remoteproto.SubscribeLogsReply) error {
 	ts.sendCalls++
+	if filterack.IsLogsReply(m) {
+		ts.acks++
+		return nil
+	}
 	if ts.sendErr != nil {
 		return ts.sendErr
 	}
 	ts.sent = append(ts.sent, m)
+
 	return nil
 }
 
-func (ts *failingTestServer) Send(*remoteproto.SubscribeLogsReply) error {
+func (ts *failingTestServer) Send(m *remoteproto.SubscribeLogsReply) error {
+	if filterack.IsLogsReply(m) {
+		ts.acks++
+		return nil
+	}
 	return errors.New("send failed")
 }
 
@@ -276,6 +287,31 @@ func TestLogsFilter_AddressFilter_OnlyAllowsThatAddressThrough(t *testing.T) {
 	_ = agg.distributeLogs([]*notifications.LogNotification{lg})
 	if len(srv.sent) != 1 {
 		t.Error("expected the log to be distributed as the address matched")
+	}
+}
+
+func TestLogsFilter_UpdateSignalsApplied(t *testing.T) {
+	events := shards.NewEvents()
+	agg := NewLogsFilterAggregator(events)
+
+	ctx := t.Context()
+	srv := newTestServer(ctx)
+	srv.received <- &remoteproto.LogsFilterRequest{
+		AllAddresses: true,
+		AllTopics:    true,
+	}
+
+	go func() {
+		err := agg.subscribeLogs(srv)
+		if err != nil {
+			t.Error(err)
+		}
+	}()
+
+	<-srv.receiveCompleted
+
+	if srv.acks != 1 {
+		t.Fatalf("expected 1 logs filter applied ack, got %d", srv.acks)
 	}
 }
 
