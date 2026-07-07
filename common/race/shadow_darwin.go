@@ -16,17 +16,13 @@
 
 //go:build race && darwin
 
-// Package race pre-maps TSAN shadow for the Go heap address window on
-// darwin. The kernel can place large file mappings (mdbx, snapshots)
-// between Go heap arenas: the runtime's racecalladdr filter accepts such
-// addresses (it checks one coarse [racearenastart, racearenaend) interval)
-// but shadow is mapped per arena only, so the first instrumented read
-// faults inside __tsan_read ("fatal error: runtime: split stack overflow").
-// TSAN's own __tsan_map_shadow cannot repair this — Go-mode MapShadow
-// tracks a monotonic mapped-shadow interval and silently skips interior
-// requests — so at init this package fills every unmapped gap in the
-// window's shadow (shadow = app*2 + 0x2000_0000_0000) with zeroed
-// MAP_FIXED mappings, leaving existing arena shadow untouched.
+// Package race provides the Enabled constant and, on darwin, a workaround
+// for https://go.dev/issue/80292: file mappings that the kernel places
+// between Go heap arenas have no TSAN shadow, so the first instrumented
+// access kills the runtime ("fatal error: runtime: split stack overflow").
+// At init this package pre-maps zeroed shadow over every hole in the heap
+// window's shadow range — data shadow only, so Go atomics on such mappings
+// would still fault on unmapped meta shadow.
 package race
 
 /*
@@ -35,10 +31,6 @@ package race
 #include <stdint.h>
 #include <sys/mman.h>
 #include <unistd.h>
-
-static const uint64_t kShadowBeg = 0x200000000000ull;
-
-static uint64_t mem_to_shadow(uint64_t addr) { return addr*2 + kShadowBeg; }
 
 static int shadow_is_mapped(uint64_t shadow_addr) {
 	mach_vm_address_t q = shadow_addr;
@@ -55,15 +47,15 @@ static int shadow_is_mapped(uint64_t shadow_addr) {
 }
 
 // map_shadow_holes mmaps zeroed shadow into the unmapped gaps of the shadow
-// range for app range [abeg, aend), leaving already-mapped shadow untouched.
-static int map_shadow_holes(uint64_t abeg, uint64_t aend) {
+// range [sbeg, send), leaving already-mapped shadow untouched.
+static int map_shadow_holes(uint64_t sbeg, uint64_t send) {
 	long page = sysconf(_SC_PAGESIZE);
 	if (page <= 0) {
 		return -1;
 	}
 	uint64_t mask = ~(uint64_t)(page - 1);
-	uint64_t sbeg = mem_to_shadow(abeg) & mask;
-	uint64_t send = (mem_to_shadow(aend) + page - 1) & mask;
+	sbeg &= mask;
+	send = (send + page - 1) & mask;
 	uint64_t addr = sbeg;
 	while (addr < send) {
 		mach_vm_address_t q = addr;
@@ -114,7 +106,8 @@ func init() {
 		fmt.Fprintln(os.Stderr, "race: TSAN shadow layout self-check failed; not pre-mapping shadow for the heap window")
 		return
 	}
-	enabled = C.map_shadow_holes(C.uint64_t(heapWindowBeg), C.uint64_t(heapWindowEnd)) == 0
+	sbeg, send := mem2shadow(heapWindowBeg), mem2shadow(heapWindowEnd)
+	enabled = C.map_shadow_holes(C.uint64_t(sbeg), C.uint64_t(send)) == 0
 	if !enabled {
 		fmt.Fprintln(os.Stderr, "race: pre-mapping TSAN shadow for the heap window failed")
 	}

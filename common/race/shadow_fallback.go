@@ -16,6 +16,6 @@
 
 //go:build !race || !darwin
 
-// Package race pre-maps TSAN shadow for the Go heap address window on
-// darwin race builds; see shadow_darwin.go. No-op elsewhere.
+// Package race provides the Enabled constant and, on darwin race builds, a
+// workaround for https://go.dev/issue/80292; see shadow_darwin.go.
 package race
