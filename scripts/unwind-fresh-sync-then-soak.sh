@@ -115,46 +115,6 @@ echo "  launched pid=$!"
 # post-unwind head and the gap blocks weren't in snapshots. See
 # memory pin 2026-06-14-gate1-soak-architectural-fixes (bug 6).
 LIVE_TIP_FORWARD="${LIVE_TIP_FORWARD:-10000}"
-# ANCHOR_BLOCK mode: skip live-tip stagnation gate; wait until head
-# reaches the anchor block, then hand off to unwind-soak.sh which
-# treats ANCHOR_BLOCK as the fixed pre_head across all iters. Removes
-# chain-tip landing as a source of variance across runs.
-if [[ -n "${ANCHOR_BLOCK:-}" && "$ANCHOR_BLOCK" -gt 0 ]]; then
-    stage "Phase 3: wait until head reaches ANCHOR_BLOCK=$ANCHOR_BLOCK"
-    SYNC_HARD_DEADLINE_SEC="${SYNC_HARD_DEADLINE_SEC:-14400}"
-    anchor_wait_deadline=$(( $(date +%s) + SYNC_HARD_DEADLINE_SEC ))
-    while [[ $(date +%s) -lt $anchor_wait_deadline ]]; do
-        h_hex=$(eth_block_number)
-        if [[ "$h_hex" == "null" || -z "$h_hex" ]]; then
-            sleep 5
-            continue
-        fi
-        head=$(hex_to_dec "$h_hex")
-        echo "  $(date -u +%H:%M:%S) head=$head anchor=$ANCHOR_BLOCK"
-        if [[ $head -ge $ANCHOR_BLOCK ]]; then
-            echo "  head reached anchor: head=$head anchor=$ANCHOR_BLOCK"
-            break
-        fi
-        sleep 30
-    done
-    if [[ $(date +%s) -ge $anchor_wait_deadline ]]; then
-        echo "FAIL: head did not reach ANCHOR_BLOCK=$ANCHOR_BLOCK within ${SYNC_HARD_DEADLINE_SEC}s"
-        exit 1
-    fi
-    stage "Phase 4: run soak (iter=$ITER depths=$DEPTHS anchor=$ANCHOR_BLOCK)"
-    SOAK_OUT="/tmp/unwind-fresh-then-soak-$(date -u +%Y-%m-%dT%H%M%S).csv"
-    SOAK_DRIVER_LOG="/tmp/unwind-fresh-then-soak-driver.log"
-    set -o pipefail
-    ANCHOR_BLOCK="$ANCHOR_BLOCK" "$SOAK_CMD" --rpc "$RPC" --log "$LOG" --iter "$ITER" \
-        --depths "$DEPTHS" --snap-dir "$SNAP_DIR" --out "$SOAK_OUT" \
-        2>&1 | tee "$SOAK_DRIVER_LOG"
-    SOAK_RC=${PIPESTATUS[0]}
-    set +o pipefail
-    stage "Result"
-    echo "soak rc=$SOAK_RC csv=$SOAK_OUT driver=$SOAK_DRIVER_LOG"
-    exit "$SOAK_RC"
-fi
-
 stage "Phase 3: wait for live tip (stagnation gate: stall=${SYNC_STAGNATION_POLL_LIMIT:-10} polls; need head > bootstrap_floor + ${LIVE_TIP_FORWARD})"
 prev_head=0
 bootstrap_floor=0
