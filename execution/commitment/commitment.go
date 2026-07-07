@@ -1645,8 +1645,9 @@ func (t *Updates) TouchPlainKeyDropCarried(key string) {
 		t.keys[key] = t.collectDirect(t.hashKey(common.ToBytesZeroCopy(key)), key, nil)
 		return
 	}
-	if t.etl == nil && idx >= 0 {
+	if t.etl == nil && idx >= 0 && t.direct[idx].update != nil {
 		t.direct[idx].update = nil
+		t.directBytes -= carriedUpdateSize
 	}
 }
 
@@ -1655,7 +1656,10 @@ func (t *Updates) TouchPlainKeyDropCarried(key string) {
 // (unwind, state-reader swap).
 func (t *Updates) DropCarriedValues() {
 	for i := range t.direct {
-		t.direct[i].update = nil
+		if t.direct[i].update != nil {
+			t.direct[i].update = nil
+			t.directBytes -= carriedUpdateSize
+		}
 	}
 }
 

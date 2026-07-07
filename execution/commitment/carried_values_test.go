@@ -231,6 +231,37 @@ func TestUpdatesModeDirect_UpgradePastLimitSpills(t *testing.T) {
 	require.Zero(t, ut.directBytes, "spill resets the in-memory byte counter")
 }
 
+// TestUpdatesModeDirect_DropReleasesDirectBytes pins that dropping a carried
+// value gives its carriedUpdateSize back to the directMemLimit accounting;
+// otherwise the counter stays inflated and forces premature spills.
+func TestUpdatesModeDirect_DropReleasesDirectBytes(t *testing.T) {
+	t.Parallel()
+
+	u, err := NewCarriedAccountUpdate(serializedAccount(1, 10, common.Hash{}))
+	require.NoError(t, err)
+	k := string(make([]byte, 20))
+
+	t.Run("TouchPlainKeyDropCarried", func(t *testing.T) {
+		ut := NewUpdates(ModeDirect, t.TempDir(), KeyToHexNibbleHash)
+		ut.TouchPlainKeyDirect(k, u)
+		before := ut.directBytes
+		ut.TouchPlainKeyDropCarried(k)
+		require.Equal(t, before-carriedUpdateSize, ut.directBytes)
+		ut.TouchPlainKeyDropCarried(k) // idempotent: no double subtraction
+		require.Equal(t, before-carriedUpdateSize, ut.directBytes)
+	})
+
+	t.Run("DropCarriedValues", func(t *testing.T) {
+		ut := NewUpdates(ModeDirect, t.TempDir(), KeyToHexNibbleHash)
+		ut.TouchPlainKeyDirect(k, u)
+		before := ut.directBytes
+		ut.DropCarriedValues()
+		require.Equal(t, before-carriedUpdateSize, ut.directBytes)
+		ut.DropCarriedValues() // idempotent
+		require.Equal(t, before-carriedUpdateSize, ut.directBytes)
+	})
+}
+
 // TestUpdatesModeDirect_DropCarriedValues pins the staleness hook: after
 // DropCarriedValues (unwind / state-reader swap), every entry delivers nil so the
 // fold re-reads current state.
