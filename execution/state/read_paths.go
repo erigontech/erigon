@@ -155,7 +155,7 @@ func versionedReadCore(s *IntraBlockState, addr accounts.Address, path AccountPa
 		// When the in-memory deletion reflects a prior tx's selfdestruct, surface
 		// the SD version rather than UnknownVersion, so synthetic CreateAccount read
 		// records match later SD-zero-path reads and don't force a version conflict.
-		if destructed, sdRes, ok := s.versionMap.ReadSelfDestruct(addr, s.txIndex); ok && sdRes.Status() == MVReadResultDone && destructed {
+		if destructed, sdRes, ok := s.readSelfDestructMemo(addr); ok && sdRes.Status() == MVReadResultDone && destructed {
 			sdVer := Version{TxIndex: sdRes.DepIdx(), Incarnation: sdRes.Incarnation()}
 			if !commited {
 				s.versionedReads.SetSelfDestruct(addr, VersionedRead[bool]{
@@ -175,7 +175,7 @@ func versionedReadCore(s *IntraBlockState, addr accounts.Address, path AccountPa
 	}
 
 	var destructedVersion Version
-	if destructed, sdRes, ok := s.versionMap.ReadSelfDestruct(addr, s.txIndex); ok && sdRes.Status() == MVReadResultDone && destructed {
+	if destructed, sdRes, ok := s.readSelfDestructMemo(addr); ok && sdRes.Status() == MVReadResultDone && destructed {
 		destructTxIndex := sdRes.DepIdx()
 		// A tx's own same-tx write to this path is returned directly: it always
 		// observes its own write, even after a prior tx's self-destruct.

@@ -201,6 +201,22 @@ type IntraBlockState struct {
 	codeReadCount       int64
 	version             int
 	dep                 int
+
+	// Per-attempt memo of the shared-versionMap SelfDestruct probe. The probe
+	// (read_paths.go) fires on every versionedReadCore call but reads only
+	// prior-tx SD writes — stable within one execution attempt — so a warm
+	// multi-field refresh repeats the same locked read. sdProbeEpoch is bumped
+	// on every Reset/SetTxContext, discarding the memo across txs and
+	// re-executions without a per-tx map clear.
+	sdProbe      map[accounts.Address]sdProbeEntry
+	sdProbeEpoch uint64
+}
+
+type sdProbeEntry struct {
+	epoch      uint64
+	res        ReadResult
+	destructed bool
+	ok         bool
 }
 
 // Create a new state from a given trie
@@ -360,6 +376,7 @@ func (sdb *IntraBlockState) Reset() {
 	sdb.revisions = sdb.revisions.put()
 	sdb.refund = uint64(0)
 	sdb.txIndex = 0
+	sdb.sdProbeEpoch++
 	sdb.logSize = 0
 	sdb.accessList.Reset()
 	sdb.transientStorage = newTransientStorage()
@@ -937,6 +954,23 @@ func (sdb *IntraBlockState) TouchAccount(addr accounts.Address) error {
 	}
 
 	return nil
+}
+
+// readSelfDestructMemo returns the shared-versionMap SelfDestruct probe for the
+// current execution attempt, caching it so a warm multi-field read does not
+// re-acquire the versionMap RWMutex per field. The probe reads only prior-tx SD
+// writes; the tx's own SelfDestruct lives in versionedWrites and is consulted
+// separately, so the memoized value is stable for the attempt.
+func (sdb *IntraBlockState) readSelfDestructMemo(addr accounts.Address) (bool, ReadResult, bool) {
+	if e, hit := sdb.sdProbe[addr]; hit && e.epoch == sdb.sdProbeEpoch {
+		return e.destructed, e.res, e.ok
+	}
+	destructed, res, ok := sdb.versionMap.ReadSelfDestruct(addr, sdb.txIndex)
+	if sdb.sdProbe == nil {
+		sdb.sdProbe = make(map[accounts.Address]sdProbeEntry, 8)
+	}
+	sdb.sdProbe[addr] = sdProbeEntry{epoch: sdb.sdProbeEpoch, res: res, destructed: destructed, ok: ok}
+	return destructed, res, ok
 }
 
 func (sdb *IntraBlockState) getVersionedAccount(addr accounts.Address, readStorage bool) (*accounts.Account, ReadSource, Version, error) {
@@ -2200,6 +2234,7 @@ func (sdb *IntraBlockState) SetTxContext(bn uint64, ti int) {
 	*/
 	sdb.txIndex = ti
 	sdb.blockNum = bn
+	sdb.sdProbeEpoch++
 }
 
 // no not lock
