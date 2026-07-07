@@ -88,23 +88,19 @@ func (n *addrChangeNotifier) loop(logger log.Logger) {
 		}
 
 		s, err := windows.WaitForMultipleObjects([]windows.Handle{n.cancelEvent, notifyEvent}, false, windows.INFINITE)
-		if err != nil {
-			logger.Debug("p2p: address-change wait failed", "err", err)
+		// Only an address change (second handle) continues the loop; a Close
+		// cancel (first handle), an error, or any unexpected result tears down
+		// the pending notification and stops.
+		if err != nil || s != windows.WAIT_OBJECT_0+1 {
+			if err != nil {
+				logger.Debug("p2p: address-change wait failed", "err", err)
+			}
 			procCancelIPChange.Call(uintptr(unsafe.Pointer(overlapped)))
 			return
 		}
-		switch s {
-		case windows.WAIT_OBJECT_0: // cancelled by Close
-			procCancelIPChange.Call(uintptr(unsafe.Pointer(overlapped)))
-			return
-		case windows.WAIT_OBJECT_0 + 1: // address changed
-			select {
-			case n.events <- struct{}{}:
-			default:
-			}
+		select {
+		case n.events <- struct{}{}:
 		default:
-			procCancelIPChange.Call(uintptr(unsafe.Pointer(overlapped)))
-			return
 		}
 	}
 }
