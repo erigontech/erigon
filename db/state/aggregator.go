@@ -88,8 +88,9 @@ type Aggregator struct {
 	oldestVisible     *aggregatorVisible
 	snapshotBuildSema *semaphore.Weighted
 
-	disableHistory bool
-	workers        workersCfg
+	disableHistory      bool
+	branchCacheDisabled bool
+	workers             workersCfg
 
 	// To keep DB small - need move data to small files ASAP.
 	// It means goroutine which creating small files - can't be locked by merge or indexing.
@@ -411,10 +412,16 @@ func (a *Aggregator) ConfigureDomains() error {
 	}
 	a.configured = true
 
-	// Attach the aggregator-lifetime BranchCache to the commitment domain; gated by USE_STATE_CACHE, nil = disabled.
-	if dbg.UseStateCache {
+	// Attach the aggregator-lifetime BranchCache to the commitment domain; gated
+	// by USE_STATE_CACHE, nil = disabled. Skipped for ephemeral aggregators that
+	// opt out (e.g. one-shot genesis processing has no cross-block reuse).
+	if dbg.UseStateCache && !a.branchCacheDisabled {
 		if cd := a.d[kv.CommitmentDomain]; cd != nil && cd.branchCache == nil {
 			cd.branchCache = commitment.NewBranchCache(commitment.DefaultBranchCacheTailCapacity)
+			if !dbg.DisableAdaptivePin {
+				cd.adaptivePinController = commitment.NewAdaptivePinController(
+					cd.branchCache, commitment.DefaultAdaptivePinControllerConfig(), a.logger)
+			}
 		}
 	}
 
@@ -623,9 +630,12 @@ func (a *Aggregator) Close() {
 	}
 	a.wg.Wait()
 
-	// A closed Aggregator may linger referenced; release the cached branch data eagerly.
+	// A closed Aggregator may linger referenced; release the cached branch data
+	// eagerly and drop this cache from the active-instance count so later
+	// BranchCaches size their trunk depth against real concurrency.
 	if cd := a.d[kv.CommitmentDomain]; cd != nil && cd.branchCache != nil {
 		cd.branchCache.Clear()
+		cd.branchCache.Close()
 	}
 
 	a.dirtyFilesLock.Lock()
@@ -1710,6 +1720,8 @@ func (a *Aggregator) CollateAndPrune(ctx context.Context, db kv.TemporalRwDB, pr
 	return nil
 }
 func (a *Aggregator) FilesAmount() (res []int) {
+	a.dirtyFilesLock.Lock()
+	defer a.dirtyFilesLock.Unlock()
 	for _, d := range a.d {
 		res = append(res, d.dirtyFiles.Len())
 	}
@@ -2475,6 +2487,15 @@ func (at *AggregatorRoTx) BranchCache() *commitment.BranchCache {
 		return nil
 	}
 	return at.d[kv.CommitmentDomain].d.branchCache
+}
+
+// AdaptivePinController attached to the commitment domain (implements
+// commitment.AdaptivePinControllerProvider).
+func (at *AggregatorRoTx) AdaptivePinController() *commitment.AdaptivePinController {
+	if at.d[kv.CommitmentDomain] == nil {
+		return nil
+	}
+	return at.d[kv.CommitmentDomain].d.adaptivePinController
 }
 
 // MetricsCollector exposes the aggregator-scope KV-read metrics collector,
