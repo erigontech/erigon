@@ -2,6 +2,27 @@
 
 ### Breaking Changes
 
+#### `--persist.receipts`: historical receipts cache now off by default in all prune modes
+
+The historical ("fat") receipts cache is no longer enabled by default on non-archive nodes. Previously `--persist.receipts` defaulted on for every prune mode except `archive`; it now defaults off everywhere. The consensus layer was the consumer that justified retaining these receipts on pruned nodes, and it no longer needs them ([#21617](https://github.com/erigontech/erigon/issues/21617)).
+
+**What changed:**
+
+| `--prune.mode` | Persist historical receipts — before | after |
+|---|---|---|
+| `archive` | off | off |
+| `full` | on | off |
+| `blocks` | on | off |
+| `minimal` | on | off |
+
+Receipts and logs stay available within a node's retention window regardless: without the cache they are re-executed on demand from state history, so `eth_getLogs` and `eth_getBlockReceipts` keep working, at higher latency.
+
+**Migration:** existing datadirs are unaffected — `--persist.receipts` is recorded at datadir creation and the stored value wins, so a node already syncing with the cache keeps it. Only newly-created `full`/`minimal`/`blocks` datadirs start without it; pass `--persist.receipts` on a fresh datadir to opt back in.
+
+(#22296) — by @yperbasis
+
+---
+
 #### JSON-RPC: block-number strings must use the `0x` hex format
 
 Quoted decimal strings (e.g., `"3"`) are no longer accepted as block-number
