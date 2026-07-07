@@ -83,20 +83,22 @@ func isDeepStorageAccount(node *prefixNode, depth int) bool {
 
 // dfsSubtreeDeep walks node's subtree applying each key to w, but at a big-storage
 // account it injects storageRoot's result instead of streaming the slots.
-func dfsSubtreeDeep(w *HexPatriciaHashed, node *prefixNode, path []byte, storageRoot func(node *prefixNode, path []byte) (common.Hash, error)) error {
+func dfsSubtreeDeep(w *HexPatriciaHashed, node *prefixNode, path []byte, storageRoot func(node *prefixNode, path []byte, accountFresh bool) (common.Hash, error)) error {
 	if node == nil {
 		return nil
 	}
+	accountFresh := false
 	if node.plainKey != nil {
 		if err := w.followAndUpdate(path, node.plainKey, node.update); err != nil {
 			return err
 		}
+		accountFresh = w.lastUpdateCellWasEmpty
 	} else if node.bitmap == 0 {
 		return errors.New("commitment: trie leaf without a plainKey")
 	}
 
 	if isDeepStorageAccount(node, len(path)) {
-		sr, err := storageRoot(node, path)
+		sr, err := storageRoot(node, path, accountFresh)
 		if err == nil {
 			setAccountStorageRoot(w, path, sr)
 			return nil
@@ -126,7 +128,7 @@ func dfsSubtreeDeep(w *HexPatriciaHashed, node *prefixNode, path []byte, storage
 }
 
 // Storage-root analogue of the account mount fold: parallelize a whale's storage by first nibble.
-func foldStorageRoot(ctx context.Context, numWorkers int, newWorker func() (*HexPatriciaHashed, func()), pu *parallelUpdate, node *prefixNode, path []byte) (common.Hash, error) {
+func foldStorageRoot(ctx context.Context, numWorkers int, newWorker func() (*HexPatriciaHashed, func()), pu *parallelUpdate, node *prefixNode, path []byte, accountFresh bool) (common.Hash, error) {
 	accPrefix := append([]byte(nil), path...)
 
 	base, releaseBase := newWorker()
@@ -145,7 +147,11 @@ func foldStorageRoot(ctx context.Context, numWorkers int, newWorker func() (*Hex
 		base.SetTraceWriter(tracePrefix(base.traceW, accTag))
 	}
 	if err := unfoldStorageBase(base, accPrefix); err != nil {
-		return common.Hash{}, fmt.Errorf("unfold storage root: %w", err)
+		// A fresh account proves nothing exists on disk beneath accPrefix, so the reset
+		// (empty) wall rows unfoldStorageBase left behind are the correct seed.
+		if !accountFresh || !errors.Is(err, errStorageBaseNotBranch) {
+			return common.Hash{}, fmt.Errorf("unfold storage root: %w", err)
+		}
 	}
 
 	var children [16]cell
