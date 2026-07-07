@@ -53,9 +53,6 @@ type AdaptivePinController struct {
 
 	mu     sync.Mutex
 	states map[[32]byte]*adaptiveContractState
-
-	parallelResolverFactory ParallelResolverFactory
-	dbBranchesProvider      DbBranchesProvider
 }
 
 // ParallelResolverFactory builds a fresh BatchBranchResolver for one
@@ -138,15 +135,10 @@ func (c *AdaptivePinController) Bind() {
 	c.cache.SetMissCallback(c.onCacheMiss)
 }
 
-// SetParallelMode switches promote/extend to the wave-BFS parallel preload.
-// Either argument may be nil to clear; with factory==nil the controller uses
-// the serial-BFS CommitmentReader path. Already-promoted contracts keep
-// their existing serial/parallel state until next demote.
-func (c *AdaptivePinController) SetParallelMode(factory ParallelResolverFactory, provider DbBranchesProvider) {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	c.parallelResolverFactory = factory
-	c.dbBranchesProvider = provider
+// PerContractBudgetBytes is the per-contract pin ceiling; a dbBranches provider
+// need never gather more than this since the preload can't pin beyond it.
+func (c *AdaptivePinController) PerContractBudgetBytes() int {
+	return c.cfg.PerContractMaxBudgetBytes
 }
 
 func (c *AdaptivePinController) onCacheMiss(prefix []byte) {
@@ -165,7 +157,12 @@ func (c *AdaptivePinController) onCacheMiss(prefix []byte) {
 // OnBlockComplete consumes the per-block miss snapshot and decides
 // promotions, extensions, and demotions. Synchronous — preloads run
 // inline so the new pin set is available for the next block's reads.
-func (c *AdaptivePinController) OnBlockComplete(ctx context.Context, txNum uint64, reader CommitmentReader) {
+//
+// The controller is aggregator-scoped (one owner across SharedDomains) so pin
+// residency ages by block-access recency, not SD binds; the tx-scoped reader/
+// factory/provider are therefore passed per call rather than stored, and c.mu
+// serializes concurrent callers.
+func (c *AdaptivePinController) OnBlockComplete(ctx context.Context, txNum uint64, reader CommitmentReader, factory ParallelResolverFactory, provider DbBranchesProvider) {
 	misses := c.snapshotMisses()
 
 	c.mu.Lock()
@@ -174,8 +171,8 @@ func (c *AdaptivePinController) OnBlockComplete(ctx context.Context, txNum uint6
 	// One factory call per block, shared across all contracts. nil falls back to serial.
 	var parallelResolve BatchBranchResolver
 	var releaseParallel func()
-	if c.parallelResolverFactory != nil {
-		r, release, err := c.parallelResolverFactory()
+	if factory != nil {
+		r, release, err := factory()
 		if err != nil {
 			c.warnf("[adaptive-pin] parallel resolver factory failed, falling back to serial", "err", err, "txNum", txNum)
 		} else {
@@ -200,7 +197,7 @@ func (c *AdaptivePinController) OnBlockComplete(ctx context.Context, txNum uint6
 				if step > remaining {
 					step = remaining
 				}
-				if err := c.runExtensionLocked(ctx, state, step, parallelResolve, reader); err != nil {
+				if err := c.runExtensionLocked(ctx, state, txNum, step, parallelResolve, reader, provider); err != nil {
 					c.warnf("[adaptive-pin] extend failed", "hash", hex.EncodeToString(hash[:]), "err", err)
 				} else {
 					extended++
@@ -219,7 +216,7 @@ func (c *AdaptivePinController) OnBlockComplete(ctx context.Context, txNum uint6
 	if len(misses) > 0 && len(c.states) < c.cfg.MaxPromotedContracts {
 		candidates := pickPromotionCandidates(misses, c.cfg.PromoteThresholdMisses, c.cfg.MaxPromotedContracts-len(c.states))
 		for _, hash := range candidates {
-			state, err := c.promoteLocked(ctx, hash, txNum, parallelResolve, reader)
+			state, err := c.promoteLocked(ctx, hash, txNum, parallelResolve, reader, provider)
 			if err != nil {
 				c.warnf("[adaptive-pin] initial-view failed", "hash", hex.EncodeToString(hash[:]), "err", err)
 				continue
@@ -284,15 +281,17 @@ func (c *AdaptivePinController) promoteLocked(
 	txNum uint64,
 	parallelResolve BatchBranchResolver,
 	reader CommitmentReader,
+	provider DbBranchesProvider,
 ) (*adaptiveContractState, error) {
 	if parallelResolve != nil {
 		p, err := NewContractTrunkPreloadParallel(hash[:])
 		if err != nil {
 			return nil, err
 		}
+		p.pinTxNum = txNum
 		var dbBranches map[string][]byte
-		if c.dbBranchesProvider != nil {
-			dbBranches = c.dbBranchesProvider(hash[:])
+		if provider != nil {
+			dbBranches = provider(hash[:])
 		}
 		if _, _, err := p.Run(c.cfg.InitialViewBudgetBytes, dbBranches, parallelResolve, c.cache, c.logger); err != nil {
 			for _, prefix := range p.PinnedPrefixes() {
@@ -310,6 +309,7 @@ func (c *AdaptivePinController) promoteLocked(
 	if err != nil {
 		return nil, err
 	}
+	p.pinTxNum = txNum
 	if _, _, err := p.Run(c.cfg.InitialViewBudgetBytes, reader, c.cache, c.logger); err != nil {
 		for _, prefix := range p.PinnedPrefixes() {
 			c.cache.Invalidate(prefix)
@@ -329,21 +329,25 @@ func (c *AdaptivePinController) promoteLocked(
 func (c *AdaptivePinController) runExtensionLocked(
 	ctx context.Context,
 	state *adaptiveContractState,
+	txNum uint64,
 	stepBudget int,
 	parallelResolve BatchBranchResolver,
 	reader CommitmentReader,
+	provider DbBranchesProvider,
 ) error {
 	if state.parallel != nil {
 		if parallelResolve == nil {
 			return nil
 		}
 		var dbBranches map[string][]byte
-		if c.dbBranchesProvider != nil {
-			dbBranches = c.dbBranchesProvider(state.contractHash[:])
+		if provider != nil {
+			dbBranches = provider(state.contractHash[:])
 		}
+		state.parallel.pinTxNum = txNum
 		_, _, err := state.parallel.Run(stepBudget, dbBranches, parallelResolve, c.cache, c.logger)
 		return err
 	}
+	state.preload.pinTxNum = txNum
 	_, _, err := state.preload.Run(stepBudget, reader, c.cache, c.logger)
 	return err
 }

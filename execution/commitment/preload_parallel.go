@@ -71,6 +71,10 @@ type ContractTrunkPreloadParallel struct {
 	usedBytes       int
 	maxDepthReached int
 	dbHitsPinned    int
+	// pinTxNum stamps pinned entries with the head txNum they were read at, so a
+	// later unwind below that point evicts them via the BranchCache floor (a
+	// txN=0 pin would escape it and be served stale after a deep unwind).
+	pinTxNum uint64
 }
 
 // NewContractTrunkPreloadParallel seeds a preload at depth 64 (storage subtree root).
@@ -119,7 +123,7 @@ func (p *ContractTrunkPreloadParallel) Run(
 			budgetHit = true
 			return false
 		}
-		cache.PinEntry(pk.key, v, 0, 0)
+		cache.PinEntry(pk.key, v, 0, p.pinTxNum)
 		kc := make([]byte, len(pk.key))
 		copy(kc, pk.key)
 		p.pinnedPrefixes = append(p.pinnedPrefixes, kc)

@@ -217,12 +217,10 @@ func NewSharedDomains(ctx context.Context, tx kv.TemporalTx, logger log.Logger, 
 	}
 	sd.sdCtx = commitmentdb.NewSharedDomainsCommitmentContext(sd, commitment.ModeDirect, tx.Debug().Dirs().Tmp, trieCfg)
 
-	if branchCache != nil && !dbg.EnvBool("DISABLE_ADAPTIVE_PIN", false) {
-		sd.adaptivePinController = commitment.NewAdaptivePinController(
-			branchCache,
-			commitment.DefaultAdaptivePinControllerConfig(),
-			logger,
-		)
+	// The pin controller is aggregator-scoped (co-located with branchCache) so pin
+	// residency ages by block-access recency across all SharedDomains, not per-SD.
+	if p, ok := tx.AggTx().(commitment.AdaptivePinControllerProvider); ok {
+		sd.adaptivePinController = p.AdaptivePinController()
 	}
 
 	_, blockNum, err := sd.SeekCommitment(ctx, tx)
@@ -1041,24 +1039,34 @@ func (sd *SharedDomains) Commit(ctx context.Context, tx kv.RwTx, validate ...fun
 				}
 				defer c.Close()
 				evenFrom, evenTo, oddFrom, oddTo := commitment.ContractTrunkKeyRanges(commitment.ContractNibbles(contractHash))
+				// Bound the scan by the per-contract pin ceiling — the preload can't
+				// pin more than that, so gathering further is pure waste on the
+				// Commit path. A nil `to` (all-0xff prefix) means scan to the range's
+				// natural end, not stop immediately.
+				budget := sd.adaptivePinController.PerContractBudgetBytes()
+				scanned := 0
 				scan := func(from, to []byte) {
-					for k, v, err := c.Seek(from); k != nil && err == nil; k, v, err = c.NextNoDup() {
-						if bytes.Compare(k, to) >= 0 {
+					for k, v, err := c.Seek(from); k != nil; k, v, err = c.NextNoDup() {
+						if err != nil {
+							return // best-effort residency hint: keep what was gathered
+						}
+						if to != nil && bytes.Compare(k, to) >= 0 {
 							return
 						}
 						if len(v) < 8 {
 							continue
 						}
 						m[string(common.Copy(k))] = common.Copy(v[8:])
+						if scanned += len(k) + len(v); scanned >= budget {
+							return
+						}
 					}
 				}
 				scan(evenFrom, evenTo)
 				scan(oddFrom, oddTo)
 				return m
 			}
-			sd.adaptivePinController.SetParallelMode(factory, provider)
-			sd.adaptivePinController.OnBlockComplete(ctx, sd.txNum, reader)
-			sd.adaptivePinController.SetParallelMode(nil, nil)
+			sd.adaptivePinController.OnBlockComplete(ctx, sd.txNum, reader, factory, provider)
 		}
 	}
 	if err := tx.Commit(); err != nil {

@@ -39,6 +39,10 @@ type ContractTrunkPreload struct {
 	pinned          int
 	usedBytes       int
 	maxDepthReached int
+	// pinTxNum stamps pinned entries with the head txNum they were read at, so a
+	// later unwind below that point evicts them via the BranchCache floor (a
+	// txN=0 pin would escape it and be served stale after a deep unwind).
+	pinTxNum uint64
 }
 
 // NewContractTrunkPreload seeds a preload state at depth 64 (storage
@@ -98,7 +102,7 @@ func (p *ContractTrunkPreload) Run(
 			break
 		}
 
-		cache.PinEntry(prefix, v, step, 0)
+		cache.PinEntry(prefix, v, step, p.pinTxNum)
 		// HexToCompact may alias a reused buffer; copy for a stable Invalidate handle.
 		prefixCopy := make([]byte, len(prefix))
 		copy(prefixCopy, prefix)

@@ -299,6 +299,13 @@ type BranchCacheProvider interface {
 	BranchCache() *BranchCache
 }
 
+// AdaptivePinControllerProvider exposes the aggregator-lifetime pin controller
+// co-located with the BranchCache, duck-typed for the same reason (avoids a
+// db/state import cycle). Returning nil means adaptive pinning is disabled.
+type AdaptivePinControllerProvider interface {
+	AdaptivePinController() *AdaptivePinController
+}
+
 // branchCacheTailShards splits the LRU tail into independently-locked shards so
 // concurrent commitment mounts / warmup workers don't serialize on one mutex.
 const branchCacheTailShards = 256
@@ -401,6 +408,11 @@ func (c *BranchCache) trunkSlot(prefix []byte, forWrite bool) *atomic.Pointer[br
 // 32-byte packed account hash (the map key).
 func (c *BranchCache) storageRoute(prefix []byte, create bool) (st *trunk, acct []byte, stor []byte, ok bool) {
 	if len(prefix) < 33 {
+		return nil, nil, nil, false
+	}
+	// Nothing pinned and not creating: skip the CompactToHex + packed-key alloc
+	// that every >=64-nibble read would otherwise pay before finding no pins.
+	if !create && c.pinned.Load() == nil {
 		return nil, nil, nil, false
 	}
 	nib := nibbles.CompactToHex(prefix)
