@@ -182,11 +182,6 @@ func touchValue(sink byte, v []byte) byte {
 	return sink
 }
 
-// maxWarmBytesPerChunk bounds how much one warm() call faults, so a dup-heavy
-// DupSort chunk (one key with a multi-GB dup run — key-granular bounds can't
-// split it) doesn't fault the whole table into cache at once.
-const maxWarmBytesPerChunk = 1 * datasize.GB
-
 // warm scans [from,to) with a raw cursor (one cgo Get per key) to fault its pages
 // into cache — leaf pages always, plus overflow value pages when warmValues is
 // set (the copy path reads values; range-delete doesn't).
@@ -199,7 +194,6 @@ func (r *ReadAhead) warm(ctx context.Context, db RoDB, table string, from, to []
 		defer c.Close()
 		var sink byte
 		defer func() { warmupSink.Add(uint64(sink)) }()
-		var faulted uint64
 		n := 0
 		for k, v, err := c.Seek(from); k != nil && (to == nil || bytes.Compare(k, to) < 0); k, v, err = c.Next() {
 			if err != nil {
@@ -207,10 +201,6 @@ func (r *ReadAhead) warm(ctx context.Context, db RoDB, table string, from, to []
 			}
 			if r.warmValues {
 				sink = touchValue(sink, v)
-			}
-			faulted += uint64(len(k)) + uint64(len(v))
-			if faulted >= maxWarmBytesPerChunk.Bytes() {
-				break
 			}
 			n++
 			if n%128 == 0 && ctx.Err() != nil {
