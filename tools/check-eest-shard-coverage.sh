@@ -39,7 +39,7 @@ done
 # Live regexes, one "shard=regex" per line, parsed from the shard definitions.
 race_regexes() {
 	awk '
-		/blocktests-stable-race-[a-z-]+\)/ { n=$0; sub(/.*blocktests-stable-race-/,"",n); sub(/\).*/,"",n) }
+		/blocktests-stable-race-[a-z0-9-]+\)/ { n=$0; sub(/.*blocktests-stable-race-/,"",n); sub(/\).*/,"",n) }
 		n!="" && /--run/ { r=$0; sub(/.*--run '\''/,"",r); sub(/'\''.*/,"",r); print n"="r; n="" }
 	' "$runner"
 }
@@ -53,6 +53,10 @@ hive_consume_engine_regexes() {
 check_partition() {
 	local title="$1" index="$2" format="$3" idprefix="$4" regexes="$5"
 	echo "==== partition: $title (format=$format) ===="
+	if [[ -z "${regexes//[[:space:]]/}" ]]; then
+		echo "  ERROR: no shard regexes parsed for $title — the scrape returned empty (shard rename / label or quoting change?)" >&2
+		return 1
+	fi
 	printf '%s\n' "$regexes" | sed 's/^/  regex  /'
 	jq -r --arg f "$format" '.test_cases | map(select(.format==$f)) | group_by(.fork)[] | "\(.[0].fork)\t\(length)"' "$index" \
 	| awk -v idprefix="$idprefix" '
@@ -68,6 +72,7 @@ check_partition() {
 			print "  --- per-shard totals ---"
 			for (s in tot) printf "  %-18s %7d\n", s, tot[s]
 			printf "  total=%d  gaps=%d  overlaps=%d\n", total, gaps+0, overlaps+0
+			if (total == 0) { print "  ERROR: no forks found for this format — index format labels changed?" > "/dev/stderr"; exit 1 }
 			if (gaps || overlaps) exit 1
 		}
 	' <(printf '%s\n' "$regexes") -
@@ -95,8 +100,16 @@ check_hive_eip_filter() {
 	# completeness: every EIP module under those target dir(s) must be in the filter
 	local tdirs corpus missing d n
 	tdirs=$(sort -u "$targets")
+	if [[ -z "${tdirs//[[:space:]]/}" ]]; then
+		echo "  ERROR: no target fork dir derived from filter EIPs (fixture id path format changed?)" >&2
+		rm -f "$ids" "$targets"; return 1
+	fi
 	echo "  target source-fork dir(s): $(printf '%s ' $tdirs)"
 	corpus=$(for d in $tdirs; do grep -oE "^${d}eip[0-9]+" "$ids"; done | grep -oE '[0-9]+' | sort -u)
+	if [[ -z "${corpus//[[:space:]]/}" ]]; then
+		echo "  ERROR: no EIP modules found under target dir(s)" >&2
+		rm -f "$ids" "$targets"; return 1
+	fi
 	missing=$(comm -23 <(printf '%s\n' $corpus) <(printf '%s\n' $filter))
 	if [[ -n "$missing" ]]; then
 		for e in $missing; do
