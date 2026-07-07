@@ -258,8 +258,10 @@ The following table shows the current implementation status of Erigon's RPC daem
 | eth_gasPrice                               | Yes     |                                                       |
 | eth_maxPriorityFeePerGas                   | Yes     |                                                       |
 | eth_feeHistory                             | Yes     |                                                       |
+| eth_baseFee                                | Yes     |                                                       |
 | eth_blobBaseFee                            | Yes     |                                                       |
 | eth_config                                 | Yes     | EIP-7910                                              |
+| eth_capabilities                           | Yes     | execution-apis#755                                    |
 |                                            |         |                                                       |
 | eth_getBlockByHash                         | Yes     |                                                       |
 | eth_getBlockByNumber                       | Yes     |                                                       |
@@ -308,6 +310,7 @@ The following table shows the current implementation status of Erigon's RPC daem
 | eth_sendTransaction                        | -       | not yet implemented                                   |
 | eth_sign                                   | No      | deprecated                                            |
 | eth_signTransaction                        | -       | not yet implemented                                   |
+| eth_fillTransaction                        | Yes     | Blob sidecar generation (KZG commitments/proofs from raw blobs) not yet supported |
 |                                            |         |                                                       |
 | eth_getProof                               | Yes     | Limited to last 100000 blocks                         |
 |                                            |         |                                                       |

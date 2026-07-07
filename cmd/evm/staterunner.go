@@ -28,13 +28,14 @@ import (
 	"regexp"
 	"sync"
 
-	"github.com/urfave/cli/v2"
+	"github.com/urfave/cli/v3"
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/dir"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv/temporal/temporaltest"
+	"github.com/erigontech/erigon/db/state/execctx"
 	"github.com/erigontech/erigon/execution/tests/testutil"
 	"github.com/erigontech/erigon/execution/tracing/tracers/logger"
 	"github.com/erigontech/erigon/execution/vm"
@@ -60,7 +61,7 @@ var stateTestCommand = cli.Command{
 	},
 }
 
-func stateTestCmd(ctx *cli.Context) error {
+func stateTestCmd(_ context.Context, ctx *cli.Command) error {
 	machineFriendlyOutput := ctx.Bool(MachineFlag.Name)
 	if machineFriendlyOutput {
 		log.Root().SetHandler(log.DiscardHandler())
@@ -113,7 +114,7 @@ func stateTestCmd(ctx *cli.Context) error {
 	return nil
 }
 
-func runStateTestsParallel(ctx *cli.Context, cfg vm.Config, files []string, workers uint64) ([]testResult, error) {
+func runStateTestsParallel(ctx *cli.Command, cfg vm.Config, files []string, workers uint64) ([]testResult, error) {
 	if workers == 1 {
 		results := make([]testResult, 0, len(files)*4) // pre-allocate
 		for _, fname := range files {
@@ -176,7 +177,7 @@ func runStateTestsParallel(ctx *cli.Context, cfg vm.Config, files []string, work
 }
 
 // runStateTest loads the state-test given by fname, and executes the test.
-func runStateTest(ctx *cli.Context, cfg vm.Config, fname string) ([]testResult, error) {
+func runStateTest(ctx *cli.Command, cfg vm.Config, fname string) ([]testResult, error) {
 	src, err := os.ReadFile(fname)
 	if err != nil {
 		return nil, err
@@ -224,7 +225,15 @@ func runStateTest(ctx *cli.Context, cfg vm.Config, fname string) ([]testResult, 
 				}
 				defer tx.Rollback()
 
-				statedb, root, err := test.Run(nil, tx, st, cfg, dirs)
+				// Per-subtest SD: closed without Flush so its writes never enter the branch cache.
+				sd, err := execctx.NewSharedDomains(context.Background(), tx, log.New())
+				if err != nil {
+					result.Pass, result.Error = false, err.Error()
+					return
+				}
+				defer sd.Close()
+
+				statedb, root, err := test.Run(nil, sd, tx, st, cfg, dirs)
 				if err != nil {
 					result.Pass, result.Error = false, err.Error()
 				}
@@ -232,14 +241,15 @@ func runStateTest(ctx *cli.Context, cfg vm.Config, fname string) ([]testResult, 
 					h := common.Hash(root)
 					result.Root = &h
 					if emitStateRoot {
-						if _, printErr := fmt.Fprintf(os.Stderr, "{\"stateRoot\": \"%#x\"}\n", h.Bytes()); printErr != nil {
+						if _, printErr := fmt.Fprintf(os.Stderr, "{\"stateRoot\": \"%#x\"}\n", h[:]); printErr != nil {
 							log.Warn("Failed to write to stderr", "err", printErr)
 						}
 					}
 				}
 				if bench {
+					// Reuse the subtest's tx+sd: a second concurrent rwtx on the same env would deadlock.
 					_, stats, _ := timedExec(true, func() ([]byte, uint64, error) {
-						_, _, gasUsed, _ := test.RunNoVerify(nil, tx, st, cfg, dirs)
+						_, _, gasUsed, _ := test.RunNoVerify(nil, sd, tx, st, cfg, dirs)
 						return nil, gasUsed, nil
 					})
 					result.Stats = &stats

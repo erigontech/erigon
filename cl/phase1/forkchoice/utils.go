@@ -34,6 +34,35 @@ func (f *ForkChoiceStore) Slot() uint64 {
 	return f.beaconCfg.GenesisSlot + ((f.time.Load() - f.genesisTime) / f.beaconCfg.SecondsPerSlot)
 }
 
+// queueEmit defers an event send until after f.mu is released: Feed.Send blocks
+// until every subscriber accepts the event, so a stalled subscriber must not be
+// able to wedge the store. Callers hold f.mu.
+func (f *ForkChoiceStore) queueEmit(emit func()) {
+	f.queuedEmits = append(f.queuedEmits, emit)
+}
+
+func (f *ForkChoiceStore) queuePrune(slot uint64) {
+	f.queuedPrunes = append(f.queuedPrunes, slot)
+}
+
+// drainQueuedWork runs queued event sends and prunes. Call after releasing f.mu.
+func (f *ForkChoiceStore) drainQueuedWork() {
+	f.mu.Lock()
+	emits := f.queuedEmits
+	prunes := f.queuedPrunes
+	f.queuedEmits = nil
+	f.queuedPrunes = nil
+	f.mu.Unlock()
+	for _, emit := range emits {
+		emit()
+	}
+	for _, pruneSlot := range prunes {
+		if err := f.forkGraph.Prune(pruneSlot); err != nil {
+			log.Warn("Failed to prune fork graph", "pruneSlot", pruneSlot, "err", err)
+		}
+	}
+}
+
 // updateCheckpoints updates the justified and finalized checkpoints if new checkpoints have higher epochs.
 func (f *ForkChoiceStore) updateCheckpoints(justifiedCheckpoint, finalizedCheckpoint solid.Checkpoint) {
 	if justifiedCheckpoint.Epoch > f.justifiedCheckpoint.Load().(solid.Checkpoint).Epoch {
@@ -43,19 +72,19 @@ func (f *ForkChoiceStore) updateCheckpoints(justifiedCheckpoint, finalizedCheckp
 		f.onNewFinalized(finalizedCheckpoint)
 		f.finalizedCheckpoint.Store(finalizedCheckpoint)
 
-		// prepare and send the finalized checkpoint event
 		blockRoot := finalizedCheckpoint.Root
 		blockHeader, ok := f.forkGraph.GetHeader(blockRoot)
 		if !ok {
 			log.Warn("Finalized block header not found", "blockRoot", blockRoot)
 			return
 		}
-		f.emitters.State().SendFinalizedCheckpoint(&beaconevents.FinalizedCheckpointData{
+		data := &beaconevents.FinalizedCheckpointData{
 			Block:               finalizedCheckpoint.Root,
 			Epoch:               finalizedCheckpoint.Epoch,
 			State:               blockHeader.Root,
 			ExecutionOptimistic: false,
-		})
+		}
+		f.queueEmit(func() { f.emitters.State().SendFinalizedCheckpoint(data) })
 	}
 }
 
@@ -105,6 +134,9 @@ func (f *ForkChoiceStore) onNewFinalized(newFinalized solid.Checkpoint) {
 		}
 		return true
 	})
+	if f.gloasWeightTree != nil {
+		f.gloasWeightTree.pruneFinalized(finalizedSlot)
+	}
 	// Clean up GLOAS-specific payload votes for finalized blocks.
 	// Note: envelope files are cleaned up in forkGraph.Prune().
 	if newFinalized.Epoch >= f.beaconCfg.GloasForkEpoch {
@@ -128,7 +160,7 @@ func (f *ForkChoiceStore) onNewFinalized(newFinalized solid.Checkpoint) {
 	// Guard against uint64 underflow during the first 3 epochs after genesis.
 	if newFinalized.Epoch > 3 {
 		slotToPrune := ((newFinalized.Epoch - 3) * f.beaconCfg.SlotsPerEpoch) - 1
-		f.forkGraph.Prune(slotToPrune)
+		f.queuePrune(slotToPrune)
 	}
 }
 
@@ -157,46 +189,43 @@ func (f *ForkChoiceStore) computeSlotsSinceEpochStart(slot uint64) uint64 {
 	return slot - f.computeStartSlotAtEpoch(f.computeEpochAtSlot(slot))
 }
 
-// Ancestor returns the ancestor to the given root.
-// [Modified in Gloas:EIP7732] Returns ForkChoiceNode with payload status.
-// Spec: if block.slot <= slot (block is at or before the target), return PENDING.
-// Otherwise traverse up and return get_parent_payload_status for the found ancestor.
-func (f *ForkChoiceStore) Ancestor(root common.Hash, slot uint64) ForkChoiceNode {
-	header, has := f.forkGraph.GetHeader(root)
+func (f *ForkChoiceStore) getAncestor(node ForkChoiceNode, slot uint64) ForkChoiceNode {
+	header, has := f.forkGraph.GetHeader(node.Root)
 	if !has {
 		return ForkChoiceNode{Root: common.Hash{}, PayloadStatus: cltypes.PayloadStatusPending}
 	}
 
-	// Spec: if block.slot <= slot, return (root, PENDING)
 	if header.Slot <= slot {
-		return ForkChoiceNode{Root: root, PayloadStatus: cltypes.PayloadStatusPending}
+		return node
 	}
 
-	// Traverse up: find the ancestor block whose parent is at or before the target slot.
-	// This mirrors the spec's "while parent.slot > slot" loop, tracking the child (block)
-	// so we can call get_parent_payload_status(block) at the end.
-	childRoot := root
-	for header.Slot > slot {
-		childRoot = root
-		root = header.ParentRoot
-		header, has = f.forkGraph.GetHeader(header.ParentRoot)
-		if !has {
+	for {
+		block, hasBlock := f.forkGraph.GetBlock(node.Root)
+		if !hasBlock || block == nil {
 			return ForkChoiceNode{Root: common.Hash{}, PayloadStatus: cltypes.PayloadStatusPending}
 		}
+		parent := ForkChoiceNode{
+			Root:          block.Block.ParentRoot,
+			PayloadStatus: f.getParentPayloadStatus(block.Block),
+		}
+		parentHeader, hasParent := f.forkGraph.GetHeader(parent.Root)
+		if !hasParent {
+			return ForkChoiceNode{Root: common.Hash{}, PayloadStatus: cltypes.PayloadStatusPending}
+		}
+		if parentHeader.Slot <= slot {
+			return parent
+		}
+		node = parent
 	}
+}
 
-	// root is now the ancestor at or before the target slot.
-	// childRoot is the block whose parent_root == root (i.e. "block" in the spec).
-	// Spec: return ForkChoiceNode(root=block.parent_root, payload_status=get_parent_payload_status(store, block))
-	payloadStatus := cltypes.PayloadStatusPending
-	if block, hasBlock := f.forkGraph.GetBlock(childRoot); hasBlock && block != nil {
-		payloadStatus = f.getParentPayloadStatus(block.Block)
-	}
-
-	return ForkChoiceNode{
+// Ancestor returns the ancestor to the given root.
+// [Modified in Gloas:EIP7732] Returns ForkChoiceNode with payload status.
+func (f *ForkChoiceStore) Ancestor(root common.Hash, slot uint64) ForkChoiceNode {
+	return f.getAncestor(ForkChoiceNode{
 		Root:          root,
-		PayloadStatus: payloadStatus,
-	}
+		PayloadStatus: cltypes.PayloadStatusPending,
+	}, slot)
 }
 
 // getCheckpointState computes and caches checkpoint states.

@@ -20,7 +20,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"sync/atomic"
 	"time"
 
 	"github.com/erigontech/erigon/common"
@@ -75,14 +74,10 @@ func (api *APIImpl) CallBundle(ctx context.Context, txHashes []common.Hash, stat
 			return nil, err
 		}
 
-		txNumMin, err := api._txNumReader.Min(ctx, tx, blockNumber)
+		txnIndex, err := api.txnIndexInBlock(ctx, tx, blockNumber, txNum, false)
 		if err != nil {
 			return nil, err
 		}
-		if txNumMin+1 > txNum {
-			return nil, fmt.Errorf("uint underflow txnums error txNum: %d, txNumMin: %d, blockNum: %d", txNum, txNumMin, blockNumber)
-		}
-		txnIndex := int(txNum - txNumMin - 1)
 		txn, err := api._txnReader.TxnByIdxInBlock(ctx, tx, blockNumber, txnIndex)
 		if err != nil {
 			return nil, err
@@ -147,30 +142,15 @@ func (api *APIImpl) CallBundle(ctx context.Context, txHashes []common.Hash, stat
 	// Get a new instance of the EVM
 	evm := vm.NewEVM(blockCtx, txCtx, ibs, chainConfig, vm.Config{})
 
-	// evmPtr is updated atomically each time evm is recreated in the loop,
-	// so the AfterFunc callback always cancels the current instance.
-	var evmPtr atomic.Pointer[vm.EVM]
-	evmPtr.Store(evm)
-
 	timeoutMilliSeconds := int64(5000)
 	if timeoutMilliSecondsPtr != nil {
 		timeoutMilliSeconds = *timeoutMilliSecondsPtr
 	}
 	timeout := time.Millisecond * time.Duration(timeoutMilliSeconds)
-	// Setup context so it may be cancelled the call has completed
-	// or, in case of unmetered gas, setup a context with a timeout.
-	var cancel context.CancelFunc
-	if timeout > 0 {
-		ctx, cancel = context.WithTimeout(ctx, timeout)
-	} else {
-		ctx, cancel = context.WithCancel(ctx)
-	}
-	// Make sure the context is cancelled when the call has completed
-	// this makes sure resources are cleaned up.
-	defer cancel()
 
-	stop := context.AfterFunc(ctx, func() { evmPtr.Load().Cancel() })
-	defer stop()
+	_, storeEVM, cleanup := setupEVMTimeout(ctx, timeout)
+	defer cleanup()
+	storeEVM(evm)
 
 	// Setup the gas pool (also for unmetered requests)
 	// and apply the message.
@@ -189,7 +169,7 @@ func (api *APIImpl) CallBundle(ctx context.Context, txHashes []common.Hash, stat
 		msg.SetCheckGas(false)
 		// Recreate EVM with the correct txCtx for this transaction
 		evm = vm.NewEVM(blockCtx, protocol.NewEVMTxContext(msg), ibs, chainConfig, vm.Config{})
-		evmPtr.Store(evm)
+		storeEVM(evm)
 		// Execute the transaction message
 		result, err := protocol.ApplyMessage(evm, msg, gp, true /* refunds */, false /* gasBailout */, engine)
 		if err != nil {
@@ -202,12 +182,12 @@ func (api *APIImpl) CallBundle(ctx context.Context, txHashes []common.Hash, stat
 			return nil, err
 		}
 
-		txHash := txn.Hash().String()
+		txHash := txn.Hash()
 		jsonResult := map[string]any{
-			"txHash":  txHash,
+			"txHash":  txHash.String(),
 			"gasUsed": result.ReceiptGasUsed,
 		}
-		bundleHash.Write(txn.Hash().Bytes())
+		bundleHash.Write(txHash[:])
 		if result.Err != nil {
 			jsonResult["error"] = result.Err.Error()
 		} else {
@@ -245,7 +225,7 @@ func (api *APIImpl) GetBlockByNumber(ctx context.Context, number rpc.BlockNumber
 			}
 			return nil, err
 		}
-		if err = api.BaseAPI.checkPruneHistory(ctx, tx, blockNum); err != nil {
+		if err = api.BaseAPI.checkPruneBlocks(ctx, tx, blockNum); err != nil {
 			return nil, err
 		}
 		b, err = api.blockByNumber(ctx, rpc.BlockNumber(blockNum), tx)
@@ -307,7 +287,7 @@ func (api *APIImpl) GetBlockByHash(ctx context.Context, numberOrHash rpc.BlockNu
 		return nil, nil
 	}
 
-	err = api.BaseAPI.checkPruneHistory(ctx, tx, blockNumber)
+	err = api.BaseAPI.checkPruneBlocks(ctx, tx, blockNumber)
 	if err != nil {
 		return nil, err
 	}
@@ -371,7 +351,7 @@ func (api *APIImpl) GetBlockTransactionCountByNumber(ctx context.Context, blockN
 		return nil, err
 	}
 
-	err = api.BaseAPI.checkPruneHistory(ctx, tx, blockNum)
+	err = api.BaseAPI.checkPruneBlocks(ctx, tx, blockNum)
 	if err != nil {
 		return nil, err
 	}
@@ -426,7 +406,7 @@ func (api *APIImpl) GetBlockTransactionCountByHash(ctx context.Context, blockHas
 		return nil, nil
 	}
 
-	err = api.BaseAPI.checkPruneHistory(ctx, tx, blockNum)
+	err = api.BaseAPI.checkPruneBlocks(ctx, tx, blockNum)
 	if err != nil {
 		return nil, err
 	}

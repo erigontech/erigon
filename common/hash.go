@@ -19,7 +19,6 @@ package common
 import (
 	"bytes"
 	"database/sql/driver"
-	"encoding/hex"
 	"fmt"
 	"math/big"
 	"math/rand/v2"
@@ -63,9 +62,6 @@ func (h Hash) Cmp(other Hash) int {
 	return bytes.Compare(h[:], other[:])
 }
 
-// Bytes gets the byte representation of the underlying hash.
-func (h Hash) Bytes() []byte { return h[:] }
-
 // Big converts a hash to a big integer.
 func (h Hash) Big() *big.Int { return new(big.Int).SetBytes(h[:]) }
 
@@ -74,9 +70,7 @@ func (h Hash) Hex() string { return hexutil.Encode(h[:]) }
 
 // TerminalString implements log.TerminalStringer, formatting a string for console
 // output during logging.
-func (h Hash) TerminalString() string {
-	return fmt.Sprintf("%x…%x", h[:3], h[29:])
-}
+func (h Hash) TerminalString() string { return fixedTerminalString(h[:]) }
 
 // String implements the stringer interface and is used also by the logger when
 // doing full logging into a file.
@@ -86,33 +80,7 @@ func (h Hash) String() string {
 
 // Format implements fmt.Formatter.
 // Hash supports the %v, %s, %v, %x, %X and %d format verbs.
-func (h Hash) Format(s fmt.State, c rune) {
-	hexb := make([]byte, 2+len(h)*2)
-	copy(hexb, "0x")
-	hex.Encode(hexb[2:], h[:])
-
-	switch c {
-	case 'x', 'X':
-		if !s.Flag('#') {
-			hexb = hexb[2:]
-		}
-		if c == 'X' {
-			hexb = bytes.ToUpper(hexb)
-		}
-		fallthrough
-	case 'v', 's':
-		s.Write(hexb)
-	case 'q':
-		q := []byte{'"'}
-		s.Write(q)
-		s.Write(hexb)
-		s.Write(q)
-	case 'd':
-		fmt.Fprint(s, ([len(h)]byte)(h))
-	default:
-		fmt.Fprintf(s, "%%!%c(hash=%x)", c, h)
-	}
-}
+func (h Hash) Format(s fmt.State, c rune) { fixedFormat(s, c, "hash", h[:]) }
 
 // UnmarshalText parses a hash in hex syntax.
 func (h *Hash) UnmarshalText(input []byte) error {
@@ -131,20 +99,11 @@ func (h Hash) MarshalText() ([]byte, error) {
 
 // SetBytes sets the hash to the value of b.
 // If b is larger than len(h), b will be cropped from the left.
-func (h *Hash) SetBytes(b []byte) {
-	if len(b) > len(h) {
-		b = b[len(b)-length.Hash:]
-	}
-
-	copy(h[length.Hash-len(b):], b)
-}
+func (h *Hash) SetBytes(b []byte) { fixedSetBytes(h[:], b) }
 
 // Generate implements testing/quick.Generator.
 func (h Hash) Generate(rand *rand.Rand, size int) reflect.Value {
-	m := rand.IntN(len(h))
-	for i := len(h) - 1; i > m; i-- {
-		h[i] = byte(rand.Uint32())
-	}
+	fixedGenerate(h[:], rand.IntN, rand.Uint32)
 	return reflect.ValueOf(h)
 }
 

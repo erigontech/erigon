@@ -167,6 +167,37 @@ func (m *Merger) Merge(
 		return nil
 	}
 
+	// Claim every (type, range) we're about to produce before writing any file,
+	// so openers skip the not-yet-indexed output and no other builder races us.
+	// A range we can't fully claim is being built elsewhere — skip it this pass.
+	claimed := make([]Range, 0, len(mergeRanges))
+	defer func() {
+		for _, r := range claimed {
+			for _, t := range snapTypes {
+				snapshots.ReleaseRange(t.Enum(), r.From(), r.To())
+			}
+		}
+	}()
+	for _, r := range mergeRanges {
+		ok := true
+		for i, t := range snapTypes {
+			if !snapshots.TryAcquireRange(t.Enum(), r.From(), r.To()) {
+				for _, t2 := range snapTypes[:i] {
+					snapshots.ReleaseRange(t2.Enum(), r.From(), r.To())
+				}
+				ok = false
+				break
+			}
+		}
+		if ok {
+			claimed = append(claimed, r)
+		}
+	}
+	if len(claimed) == 0 {
+		return nil
+	}
+	mergeRanges = claimed
+
 	logEvery := time.NewTicker(30 * time.Second)
 	defer logEvery.Stop()
 
@@ -311,17 +342,17 @@ func (m *Merger) merge(ctx context.Context, v *View, toMerge []*DirtySegment, ta
 	m.logger.Debug("[snapshots] merge", "file", targetFile.Name())
 
 	for _, d := range cList {
-		if err := d.WithReadAhead(func() error {
-			g := d.MakeGetter()
-			for g.HasNext() {
-				word, _ = g.Next(word[:0])
-				if err := f.AddWord(word); err != nil {
-					return err
-				}
-			}
-			return nil
-		}); err != nil {
+		view, err := d.OpenSequentialView(true)
+		if err != nil {
 			return nil, err
+		}
+		defer view.Close()
+		g := view.MakeGetter()
+		for g.HasNext() {
+			word, _ = g.Next(word[:0])
+			if err := f.AddWord(word); err != nil {
+				return nil, err
+			}
 		}
 	}
 	if f.Count() != expectedTotal {

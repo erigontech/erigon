@@ -29,7 +29,6 @@ import (
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/common/log/v3"
-	"github.com/erigontech/erigon/execution/protocol/mdgas"
 	"github.com/erigontech/erigon/execution/protocol/misc"
 	"github.com/erigontech/erigon/execution/protocol/params"
 	"github.com/erigontech/erigon/execution/tracing"
@@ -691,7 +690,7 @@ func opBlockhash(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error
 			arg.Clear()
 			return pc, nil, err
 		}
-		arg.SetBytes(hash.Bytes())
+		arg.SetBytes(hash[:])
 	} else {
 		arg.Clear()
 	}
@@ -736,7 +735,7 @@ func opDifficulty(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, erro
 	var v uint256.Int
 	if evm.Context.PrevRanDao != nil {
 		// EIP-4399: Supplant DIFFICULTY opcode with PREVRANDAO
-		v.SetBytes32(evm.Context.PrevRanDao.Bytes())
+		v.SetBytes32(evm.Context.PrevRanDao[:])
 	} else {
 		v = evm.Context.Difficulty
 	}
@@ -984,9 +983,6 @@ func opSwap16(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) {
 }
 
 func opCreate(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) {
-	if evm.readOnly {
-		return pc, nil, ErrWriteProtection
-	}
 	var (
 		value  = scope.Stack.pop()
 		offset = scope.Stack.pop()
@@ -1009,9 +1005,6 @@ func stCreate(_ uint64, scope *CallContext) string {
 }
 
 func opCreate2(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) {
-	if evm.readOnly {
-		return pc, nil, ErrWriteProtection
-	}
 	var (
 		endowment    = scope.Stack.pop()
 		offset, size = scope.Stack.pop(), scope.Stack.pop()
@@ -1023,15 +1016,6 @@ func opCreate2(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) 
 
 // execCreate is the shared implementation for opCreate (salt == nil) and opCreate2 (salt != nil).
 func execCreate(pc uint64, evm *EVM, scope *CallContext, value uint256.Int, input []byte, salt *uint256.Int) (uint64, []byte, error) {
-	if evm.ChainRules().IsAmsterdam {
-		// EIP-8037: charge state gas for account creation after the static-context
-		// check so that it is not consumed on early failures where no state is
-		// created (per execution-specs#2608).
-		if !scope.useMdGas(params.StateGasNewAccount, mdgas.StateGas, evm.Config().Tracer, tracing.GasChangeIgnored) {
-			return pc, nil, ErrOutOfGas
-		}
-	}
-
 	gas := scope.Gas()
 	if evm.ChainRules().IsTangerineWhistle {
 		gas.Regular -= gas.Regular / 64
@@ -1045,6 +1029,7 @@ func execCreate(pc uint64, evm *EVM, scope *CallContext, value uint256.Int, inpu
 	scope.stateGas = 0 // pass reservoir to child via callGas; restoreChildGas returns it
 
 	res, addr, returnGas, childUsed, suberr := evm.Create(scope.Contract.Address(), input, gas, value, salt, false)
+	scope.Contract.selfBalanceCached = false
 
 	// Push item on the stack based on the returned error. If the ruleset is
 	// homestead we must check for CodeStoreOutOfGasError (homestead only
@@ -1145,6 +1130,7 @@ func opCall(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) {
 	if evm.chainRules.IsAmsterdam && err == nil {
 		scope.frameStateUsed += childUsed.State
 	}
+	scope.Contract.selfBalanceCached = false
 	evm.returnData = ret
 	return pc, ret, nil
 }
@@ -1193,6 +1179,7 @@ func opCallCode(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error)
 	if evm.chainRules.IsAmsterdam && err == nil {
 		scope.frameStateUsed += childUsed.State
 	}
+	scope.Contract.selfBalanceCached = false
 	evm.returnData = ret
 	return pc, ret, nil
 }
@@ -1237,6 +1224,7 @@ func opDelegateCall(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, er
 	if evm.chainRules.IsAmsterdam && err == nil {
 		scope.frameStateUsed += childUsed.State
 	}
+	scope.Contract.selfBalanceCached = false
 	evm.returnData = ret
 	return pc, ret, nil
 }

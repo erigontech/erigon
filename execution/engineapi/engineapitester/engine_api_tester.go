@@ -40,6 +40,7 @@ import (
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv/dbcfg"
+	"github.com/erigontech/erigon/db/state"
 	"github.com/erigontech/erigon/execution/builder/buildercfg"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/chain/networkname"
@@ -271,7 +272,6 @@ func InitialiseEngineApiTester(ctx context.Context, args EngineApiTesterInitArgs
 			NoDiscovery:     true,
 			NoDial:          true,
 			ProtocolVersion: []uint{direct.ETH68},
-			AllowedPorts:    []uint{0},
 			PrivateKey:      nodeKey,
 		},
 		MdbxDBSizeLimit: mdbxDBSizeLimit,
@@ -294,9 +294,9 @@ func InitialiseEngineApiTester(ctx context.Context, args EngineApiTesterInitArgs
 		},
 		BatchSize:             512 * datasize.MB,
 		KeepStoredChainConfig: true,
-	}
-	if args.BatchSize > 0 {
-		ethConfig.BatchSize = args.BatchSize
+		// Small per-instance state cache: one ExecModule is built per fixture,
+		// so the full production cache would exhaust memory across the corpus.
+		StateCacheBudget: 1 * datasize.MB,
 	}
 	if args.EthConfigTweaker != nil {
 		args.EthConfigTweaker(&ethConfig)
@@ -372,9 +372,9 @@ func InitialiseEngineApiTester(ctx context.Context, args EngineApiTesterInitArgs
 	}
 	var mockCl *MockCl
 	if args.MockClState != nil {
-		mockCl = NewMockCl(ctx, logger, engineApiClient, ethBackend.StateDiffClient(), genesisBlock, args.Genesis.Config, WithMockClState(args.MockClState))
+		mockCl = NewMockCl(logger, engineApiClient, genesisBlock, args.Genesis.Config, WithMockClState(args.MockClState))
 	} else {
-		mockCl = NewMockCl(ctx, logger, engineApiClient, ethBackend.StateDiffClient(), genesisBlock, args.Genesis.Config)
+		mockCl = NewMockCl(logger, engineApiClient, genesisBlock, args.Genesis.Config)
 	}
 	if !args.NoEmptyBlock1 {
 		// build 1 empty block before proceeding to properly initialise everything
@@ -387,12 +387,19 @@ func InitialiseEngineApiTester(ctx context.Context, args EngineApiTesterInitArgs
 	// must be appended last) — that way ctx-watching background goroutines
 	// see Done before downstream resources (DB, node) are torn down.
 	addCleanup(func() error { cancel(); return nil })
+	var stateAgg *state.Aggregator
+	if aggHolder, ok := ethBackend.ChainDB().(state.HasAgg); ok {
+		stateAgg, _ = aggHolder.Agg().(*state.Aggregator)
+	}
 	success = true
 	return EngineApiTester{
 		GenesisBlock:         genesisBlock,
 		CoinbaseKey:          args.CoinbaseKey,
 		ChainConfig:          genesis.Config,
 		EngineApiClient:      engineApiClient,
+		JsonRpcUrl:           "http://" + rpcDaemonHttpUrl,
+		EngineApiUrl:         engineApiUrl,
+		JwtSecret:            jwtSecret,
 		RpcApiClient:         rpcApiClient,
 		ContractBackend:      contractBackend,
 		MockCl:               mockCl,
@@ -400,6 +407,7 @@ func InitialiseEngineApiTester(ctx context.Context, args EngineApiTesterInitArgs
 		TxnInclusionVerifier: NewTxnInclusionVerifier(rpcApiClient),
 		Node:                 ethNode,
 		NodeKey:              nodeKey,
+		StateAgg:             stateAgg,
 		cleanup:              cleanup,
 	}, nil
 }
@@ -410,7 +418,6 @@ type EngineApiTesterInitArgs struct {
 	Genesis                *types.Genesis
 	CoinbaseKey            *ecdsa.PrivateKey
 	EthConfigTweaker       func(*ethconfig.Config)
-	BatchSize              datasize.ByteSize
 	MockClState            *MockClState
 	NoEmptyBlock1          bool
 	EngineApiClientTimeout *time.Duration
@@ -424,6 +431,9 @@ type EngineApiTester struct {
 	CoinbaseKey          *ecdsa.PrivateKey
 	ChainConfig          *chain.Config
 	EngineApiClient      *engineapi.JsonRpcClient
+	JsonRpcUrl           string
+	EngineApiUrl         string
+	JwtSecret            []byte
 	RpcApiClient         requests.RequestGenerator
 	ContractBackend      contracts.JsonRpcBackend
 	MockCl               *MockCl
@@ -431,6 +441,7 @@ type EngineApiTester struct {
 	TxnInclusionVerifier TxnInclusionVerifier
 	Node                 *node.Node
 	NodeKey              *ecdsa.PrivateKey
+	StateAgg             *state.Aggregator
 	cleanup              *cleanupHandle
 }
 

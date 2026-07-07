@@ -88,7 +88,7 @@ type ApiHandler struct {
 	sentinel             sentinelproto.SentinelClient
 	blobStoage           blob_storage.BlobStorage
 	columnStorage        blob_storage.DataColumnStorage
-	caplinSnapshots      *freezeblocks.CaplinSnapshots
+	caplinSnapshots      caplinBlobSnapshotReader
 	caplinStateSnapshots *snapshotsync.CaplinStateSnapshots
 
 	peerDas das.PeerDas
@@ -190,6 +190,10 @@ func NewApiHandler(
 	if err != nil {
 		panic(err)
 	}
+	var blobSnapshots caplinBlobSnapshotReader
+	if caplinSnapshots != nil {
+		blobSnapshots = caplinSnapshots
+	}
 
 	slotWaitedForAttestationProduction, err := lru.New[uint64, struct{}]("slotWaitedForAttestationProduction", 1024)
 	if err != nil {
@@ -228,7 +232,7 @@ func NewApiHandler(
 		emitters:                         emitters,
 		blobStoage:                       blobStoage,
 		columnStorage:                    columnStorage,
-		caplinSnapshots:                  caplinSnapshots,
+		caplinSnapshots:                  blobSnapshots,
 		attestationProducer:              attestationProducer,
 		blobBundles:                      blobBundles,
 		engine:                           engine,
@@ -352,7 +356,9 @@ func (a *ApiHandler) init() {
 					r.Get("/blob_sidecars/{block_id}", beaconhttp.HandleEndpointFunc(a.GetEthV1BeaconBlobSidecars))
 					// [New in Gloas:EIP7732]
 					r.Get("/execution_payload_envelope/{block_id}", beaconhttp.HandleEndpointFunc(a.GetEthV1BeaconExecutionPayloadEnvelope))
+					r.Get("/execution_payload_envelopes/{block_id}", beaconhttp.HandleEndpointFunc(a.GetEthV1BeaconExecutionPayloadEnvelope))
 					r.Post("/execution_payload_envelope", a.PostEthV1BeaconExecutionPayloadEnvelope)
+					r.Post("/execution_payload_envelopes", a.PostEthV1BeaconExecutionPayloadEnvelope)
 					r.Post("/execution_payload_bid", a.PostEthV1BeaconExecutionPayloadBid)
 					r.Route("/states", func(r chi.Router) {
 						r.Route("/{state_id}", func(r chi.Router) {
@@ -397,8 +403,10 @@ func (a *ApiHandler) init() {
 					r.Post("/liveness/{epoch}", beaconhttp.HandleEndpointFunc(a.liveness))
 					// [New in Gloas:EIP7732]
 					r.Get("/payload_attestation_data/{slot}", beaconhttp.HandleEndpointFunc(a.GetEthV1ValidatorPayloadAttestationData))
+					r.Post("/proposer_preferences", a.PostEthV1ValidatorProposerPreferences)
 					r.Get("/execution_payload_bid/{slot}/{builder_index}", beaconhttp.HandleEndpointFunc(a.GetEthV1ValidatorExecutionPayloadBid))
 					r.Get("/execution_payload_envelope/{slot}/{builder_index}", beaconhttp.HandleEndpointFunc(a.GetEthV1ValidatorExecutionPayloadEnvelope))
+					r.Get("/execution_payload_envelopes/{slot}", beaconhttp.HandleEndpointFunc(a.GetEthV1ValidatorExecutionPayloadEnvelopeBySlot))
 					if a.routerCfg.Builder {
 						r.Post("/register_validator", beaconhttp.HandleEndpointFunc(a.PostEthV1BuilderRegisterValidator))
 					}
@@ -435,6 +443,9 @@ func (a *ApiHandler) init() {
 			}
 			if a.routerCfg.Validator {
 				r.Route("/validator", func(r chi.Router) {
+					r.Route("/duties", func(r chi.Router) {
+						r.Get("/proposer/{epoch}", beaconhttp.HandleEndpointFunc(a.getDutiesProposerV2))
+					})
 					r.Get("/blocks/{slot}", beaconhttp.HandleEndpointFunc(a.GetEthV3ValidatorBlock)) // deprecate
 					r.Get("/aggregate_attestation", beaconhttp.HandleEndpointFunc(a.GetEthV2ValidatorAggregateAttestation))
 					r.Post("/aggregate_and_proofs", a.PostEthV1ValidatorAggregatesAndProof) // reuse

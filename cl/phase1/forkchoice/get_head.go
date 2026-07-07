@@ -57,13 +57,12 @@ func (f *ForkChoiceStore) computeVotes(justifiedCheckpoint solid.Checkpoint, che
 	// make an rng generator
 	gen := rand.New(rand.NewSource(time.Now().UnixNano()))
 	if auxilliaryState != nil {
-		startIdx := 0
-		step := 1
-		if f.probabilisticHeadGetter {
-			startIdx = gen.Intn(sampleBasis)
-			step = sampleBasis + gen.Intn(sampleFactor)
+		count := f.latestMessages.latestMessagesCount()
+		if validatorCount := auxilliaryState.ValidatorSet().Length(); validatorCount < count {
+			count = validatorCount
 		}
-		for validatorIndex := startIdx; validatorIndex < f.latestMessages.latestMessagesCount(); validatorIndex += step {
+		startIdx, step := voteSampleBounds(count, f.probabilisticHeadGetter, gen)
+		for validatorIndex := startIdx; validatorIndex < count; validatorIndex += step {
 			message, _ := f.latestMessages.get(validatorIndex)
 			v := auxilliaryState.ValidatorSet().Get(validatorIndex)
 			if !v.Active(justifiedCheckpoint.Epoch) || v.Slashed() {
@@ -81,20 +80,11 @@ func (f *ForkChoiceStore) computeVotes(justifiedCheckpoint solid.Checkpoint, che
 		}
 	} else {
 		for validatorIndex := 0; validatorIndex < f.latestMessages.latestMessagesCount(); validatorIndex++ {
-			message, _ := f.latestMessages.get(validatorIndex)
-			if message == (LatestMessage{}) {
+			message, balance, ok := f.countableVote(checkpointState, validatorIndex)
+			if !ok {
 				continue
 			}
-			if !readFromBitset(checkpointState.actives, validatorIndex) || readFromBitset(checkpointState.slasheds, validatorIndex) {
-				continue
-			}
-			if _, hasLatestMessage := f.getLatestMessage(uint64(validatorIndex)); !hasLatestMessage {
-				continue
-			}
-			if f.isUnequivocating(uint64(validatorIndex)) {
-				continue
-			}
-			votes[message.Root] += checkpointState.balances[validatorIndex]
+			votes[message.Root] += balance
 		}
 		boostRoot := f.proposerBoostRoot.Load().(common.Hash)
 		if boostRoot != (common.Hash{}) {
@@ -106,13 +96,25 @@ func (f *ForkChoiceStore) computeVotes(justifiedCheckpoint solid.Checkpoint, che
 	return votes
 }
 
+func voteSampleBounds(count int, probabilistic bool, gen *rand.Rand) (int, int) {
+	if !probabilistic || count == 0 {
+		return 0, 1
+	}
+	startLimit := sampleBasis
+	if count < startLimit {
+		startLimit = count
+	}
+	return gen.Intn(startLimit), sampleBasis + gen.Intn(sampleFactor)
+}
+
 // GetHead returns the head of the fork choice store.
 // Dispatches to GLOAS or pre-GLOAS implementation based on current epoch.
 func (f *ForkChoiceStore) GetHead(auxilliaryState *state.CachingBeaconState) (common.Hash, uint64, error) {
 	f.mu.RLock()
 	if f.headHash != (common.Hash{}) {
+		headHash, headSlot := f.headHash, f.headSlot
 		f.mu.RUnlock()
-		return f.headHash, f.headSlot, nil
+		return headHash, headSlot, nil
 	}
 	f.mu.RUnlock()
 
@@ -146,13 +148,45 @@ func (f *ForkChoiceStore) GetHeadPayloadStatus() cltypes.PayloadStatus {
 // getHeadGloas returns the head using GLOAS fork choice rules.
 // [New in Gloas:EIP7732]
 func (f *ForkChoiceStore) getHeadGloas() (common.Hash, uint64, error) {
-	f.mu.Lock()
-	defer f.mu.Unlock()
+	for {
+		justifiedCheckpoint := f.justifiedCheckpoint.Load().(solid.Checkpoint)
+		// Fetch the checkpoint state before acquiring f.mu (it can read from disk);
+		// a nil state degrades to zero attestation weight, as before.
+		cs, _ := f.getCheckpointState(justifiedCheckpoint)
 
-	justifiedCheckpoint := f.justifiedCheckpoint.Load().(solid.Checkpoint)
+		f.mu.Lock()
+		if f.justifiedCheckpoint.Load().(solid.Checkpoint) != justifiedCheckpoint {
+			f.mu.Unlock()
+			continue
+		}
+		defer f.mu.Unlock()
 
+		head, slot, err := f.computeHeadGloasWithAnchorFallback(justifiedCheckpoint, cs)
+		if err != nil {
+			return common.Hash{}, 0, err
+		}
+		f.headHash = head.Root
+		f.headSlot = slot
+		f.headPayloadStatus = head.PayloadStatus
+		return f.headHash, f.headSlot, nil
+	}
+}
+
+func (f *ForkChoiceStore) computeHeadGloasWithAnchorFallback(justifiedCheckpoint solid.Checkpoint, cs *checkpointState) (ForkChoiceNode, uint64, error) {
+	if _, hasJustified := f.forkGraph.GetHeader(justifiedCheckpoint.Root); !hasJustified {
+		log.Debug("GetHead: justified root not in fork graph, using anchor as head",
+			"justifiedRoot", justifiedCheckpoint.Root)
+		return ForkChoiceNode{
+			Root:          f.forkGraph.AnchorRoot(),
+			PayloadStatus: cltypes.PayloadStatusPending,
+		}, f.forkGraph.AnchorSlot(), nil
+	}
+	return f.computeHeadGloas(justifiedCheckpoint, cs)
+}
+
+func (f *ForkChoiceStore) computeHeadGloas(justifiedCheckpoint solid.Checkpoint, cs *checkpointState) (ForkChoiceNode, uint64, error) {
 	// Get filtered block tree
-	blocks := f.getFilteredBlockTree(justifiedCheckpoint.Root)
+	blocks := f.getFilteredBlockTree(justifiedCheckpoint.Root, justifiedCheckpoint)
 
 	// Start from justified checkpoint with PENDING status
 	head := ForkChoiceNode{
@@ -160,8 +194,7 @@ func (f *ForkChoiceStore) getHeadGloas() (common.Hash, uint64, error) {
 		PayloadStatus: cltypes.PayloadStatusPending,
 	}
 
-	// Get weight store for weight calculation
-	ws := f.GetWeightStore()
+	ws := f.gloasWeightTree.prepare(justifiedCheckpoint, cs)
 
 	for {
 		children := f.getNodeChildren(head, blocks)
@@ -169,12 +202,9 @@ func (f *ForkChoiceStore) getHeadGloas() (common.Hash, uint64, error) {
 			// No children, head is the result
 			header, hasHeader := f.forkGraph.GetHeader(head.Root)
 			if !hasHeader {
-				return common.Hash{}, 0, errors.New("no slot for head is stored")
+				return ForkChoiceNode{}, 0, errors.New("no slot for head is stored")
 			}
-			f.headHash = head.Root
-			f.headSlot = header.Slot
-			f.headPayloadStatus = head.PayloadStatus
-			return f.headHash, f.headSlot, nil
+			return head, header.Slot, nil
 		}
 
 		// Find best child: max(children, key=(weight, root, tiebreaker))
@@ -233,7 +263,7 @@ func (f *ForkChoiceStore) getHead(auxilliaryState *state.CachingBeaconState) (co
 
 	// Retrieve att
 	f.headHash = justifiedCheckpoint.Root
-	blocks := f.getFilteredBlockTree(f.headHash)
+	blocks := f.getFilteredBlockTree(f.headHash, justifiedCheckpoint)
 	// Do a simple scan to determine the fork votes.
 	votes := f.computeVotes(justifiedCheckpoint, justificationState, auxilliaryState)
 	// Account for weights on each head fork
@@ -287,32 +317,31 @@ func (f *ForkChoiceStore) getHead(auxilliaryState *state.CachingBeaconState) (co
 }
 
 // getFilteredBlockTree filters out dumb blocks.
-func (f *ForkChoiceStore) getFilteredBlockTree(base common.Hash) map[common.Hash]*cltypes.BeaconBlockHeader {
+func (f *ForkChoiceStore) getFilteredBlockTree(base common.Hash, justifiedCheckpoint solid.Checkpoint) map[common.Hash]*cltypes.BeaconBlockHeader {
 	blocks := make(map[common.Hash]*cltypes.BeaconBlockHeader)
 	// Snapshot the store epoch once for the whole walk: OnTick updates f.time
 	// without holding f.mu, so calling f.Slot() per-leaf can mix epochs across
 	// leaves around a slot boundary.
 	currentEpoch := f.computeEpochAtSlot(f.Slot())
-	f.getFilterBlockTree(base, blocks, currentEpoch)
+	f.getFilterBlockTree(base, blocks, currentEpoch, justifiedCheckpoint)
 	return blocks
 }
 
 // getFilterBlockTree recursively traverses the block tree to identify viable blocks.
 // It takes a block hash and a map of viable blocks as input parameters, and returns a boolean value indicating
 // whether the current block is viable.
-func (f *ForkChoiceStore) getFilterBlockTree(blockRoot common.Hash, blocks map[common.Hash]*cltypes.BeaconBlockHeader, currentEpoch uint64) bool {
+func (f *ForkChoiceStore) getFilterBlockTree(blockRoot common.Hash, blocks map[common.Hash]*cltypes.BeaconBlockHeader, currentEpoch uint64, justifiedCheckpoint solid.Checkpoint) bool {
 	header, has := f.forkGraph.GetHeader(blockRoot)
 	if !has {
 		return false
 	}
 	finalizedCheckpoint := f.finalizedCheckpoint.Load().(solid.Checkpoint)
-	justifiedCheckpoint := f.justifiedCheckpoint.Load().(solid.Checkpoint)
 	children := f.children(blockRoot)
 	// If there are children iterate down recursively and see which branches are viable.
 	if len(children) > 0 {
 		isAnyViable := false
 		for _, child := range children {
-			if f.getFilterBlockTree(child, blocks, currentEpoch) {
+			if f.getFilterBlockTree(child, blocks, currentEpoch, justifiedCheckpoint) {
 				isAnyViable = true
 			}
 		}

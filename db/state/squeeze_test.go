@@ -1,6 +1,8 @@
 package state_test
 
 import (
+	"bytes"
+	"context"
 	"crypto/sha256"
 	"encoding/binary"
 	"fmt"
@@ -28,6 +30,7 @@ import (
 	"github.com/erigontech/erigon/db/kv/mdbx"
 	"github.com/erigontech/erigon/db/kv/rawdbv3"
 	"github.com/erigontech/erigon/db/kv/temporal"
+	"github.com/erigontech/erigon/db/seg"
 	"github.com/erigontech/erigon/db/state"
 	"github.com/erigontech/erigon/db/state/changeset"
 	"github.com/erigontech/erigon/db/state/execctx"
@@ -152,7 +155,7 @@ func testAgg(tb testing.TB, db kv.RwDB, dirs datadir.Dirs, aggStep uint64, logge
 func testDbAggregatorWithNoFiles(tb testing.TB, txCount int, cfg *testAggConfig) (kv.TemporalRwDB, *state.Aggregator) {
 	tb.Helper()
 	db, agg := testDbAndAggregatorv3(tb, cfg.stepSize)
-	agg.ForTestReplaceKeysInValues(kv.CommitmentDomain, !cfg.disableCommitmentBranchTransform)
+	agg.ForTestReferencesInCommitmentBranches(kv.CommitmentDomain, !cfg.disableCommitmentBranchTransform)
 
 	ctx := tb.Context()
 
@@ -227,7 +230,7 @@ func TestAggregator_SqueezeCommitment(t *testing.T) {
 	domains.Close()
 
 	// now do the squeeze
-	agg.ForTestReplaceKeysInValues(kv.CommitmentDomain, true)
+	agg.ForTestReferencesInCommitmentBranches(kv.CommitmentDomain, true)
 	err = state.SqueezeCommitmentFiles(t.Context(), state.AggTx(rwTx), log.New())
 	require.NoError(t, err)
 
@@ -260,7 +263,82 @@ func TestAggregator_SqueezeCommitment(t *testing.T) {
 	require.NoError(t, err)
 	require.NotEmpty(t, root)
 	require.Equal(t, latestRoot, root)
-	require.NotEqual(t, empty.RootHash.Bytes(), root)
+	require.NotEqual(t, empty.RootHash[:], root)
+}
+
+// TestExpandShortenedKeysInBranch_ReadPath drives the read path through squeezed commitment files
+// and asserts that the returned BranchData has plain keys (20-byte account, 52-byte storage),
+// and validates. This exercises ExpandShortenedKeysInBranch via the public read-path API
+// (DebugGetLatestFromFiles → replaceShortenedKeysInBranch → ExpandShortenedKeysInBranch).
+func TestExpandShortenedKeysInBranch_ReadPath(t *testing.T) {
+	if testing.Short() {
+		t.Skip()
+	}
+
+	cfgd := &testAggConfig{stepSize: 10, disableCommitmentBranchTransform: false}
+	db, agg := testDbAggregatorWithFiles(t, cfgd)
+	_ = agg
+
+	rwTx, err := db.BeginTemporalRw(context.Background())
+	require.NoError(t, err)
+	defer rwTx.Rollback()
+
+	at := state.AggTx(rwTx)
+
+	// Walk every commitment file. For each non-state key, read latest from files —
+	// the returned value goes through replaceShortenedKeysInBranch → ExpandShortenedKeysInBranch.
+	// Any embedded plain-key field must be exactly 20 bytes (account) or 52 bytes (addr+slot).
+	totalChecked := 0
+	for _, vf := range at.Files(kv.CommitmentDomain) {
+		decomp, err := seg.NewDecompressor(vf.Fullpath())
+		require.NoError(t, err)
+		defer decomp.Close()
+		reader := seg.NewReader(decomp.MakeGetter(), agg.Cfg(kv.CommitmentDomain).Compression)
+		reader.Reset(0)
+
+		for reader.HasNext() {
+			k, _ := reader.Next(nil)
+			require.True(t, reader.HasNext(), "value missing for key in %s", vf.Fullpath())
+			_, _ = reader.Next(nil)
+
+			if bytes.Equal(k, commitmentdb.KeyCommitmentState) {
+				continue
+			}
+
+			// Read via the read path; for commitment domain this expands shortened keys.
+			v, ok, _, _, err := at.DebugGetLatestFromFiles(kv.CommitmentDomain, k, math.MaxUint64)
+			require.NoError(t, err)
+			if !ok {
+				continue
+			}
+			require.NotEmpty(t, v)
+
+			expanded := commitment.BranchData(v)
+			require.NoError(t, expanded.Validate(k),
+				"expanded BranchData failed Validate for key %x in %s", k, vf.Fullpath())
+
+			// Walk embedded plain-key fields and assert each is full-length.
+			_, err = expanded.ReplacePlainKeys(nil, func(key []byte, isStorage bool) ([]byte, error) {
+				if isStorage {
+					require.Equal(t, length.Addr+length.Hash, len(key),
+						"expanded storage key length %d (expected %d) for branch %x in %s",
+						len(key), length.Addr+length.Hash, k, vf.Fullpath())
+				} else {
+					require.Equal(t, length.Addr, len(key),
+						"expanded account key length %d (expected %d) for branch %x in %s",
+						len(key), length.Addr, k, vf.Fullpath())
+				}
+				return nil, nil
+			})
+			require.NoError(t, err)
+			totalChecked++
+		}
+
+		if totalChecked > 0 {
+			break // one file with at least one non-state branch is enough
+		}
+	}
+	require.Greater(t, totalChecked, 0, "no non-state branches found across squeezed commitment files")
 }
 
 func TestAggregator_RebuildCommitmentBasedOnFiles(t *testing.T) {
@@ -332,7 +410,7 @@ func TestAggregator_RebuildCommitmentBasedOnFiles(t *testing.T) {
 	finalRoot, err := state.RebuildCommitmentFiles(ctx, db, &rawdbv3.TxNums, log.New(), true)
 	require.NoError(t, err)
 	require.NotEmpty(t, finalRoot)
-	require.NotEqual(t, empty.RootHash.Bytes(), finalRoot)
+	require.NotEqual(t, empty.RootHash[:], finalRoot)
 
 	require.Equal(t, rootInFiles, finalRoot)
 }
@@ -595,7 +673,7 @@ func TestGenerateCommitmentRebuildData(t *testing.T) {
 	t.Logf("Keys: accounts=%d storage=%d code=%d total=%d", numAccounts, totalStorage, totalCode, totalKeys)
 
 	db, agg, dirs := testDbAndAggregatorForLargeData(t, stepSize, persistentDir)
-	agg.ForTestReplaceKeysInValues(kv.CommitmentDomain, false)
+	agg.ForTestReferencesInCommitmentBranches(kv.CommitmentDomain, false)
 
 	ctx := t.Context()
 
@@ -716,7 +794,7 @@ func TestGenerateCommitmentRebuildData(t *testing.T) {
 
 	// Validate
 	require.NotEmpty(t, lastRoot, "final root must be non-empty")
-	require.NotEqual(t, empty.RootHash.Bytes(), lastRoot, "final root must differ from empty trie root")
+	require.NotEqual(t, empty.RootHash[:], lastRoot, "final root must differ from empty trie root")
 
 	t.Logf("Done. Final root: %x", lastRoot)
 	t.Logf("Output datadir: %s", dirs.DataDir)

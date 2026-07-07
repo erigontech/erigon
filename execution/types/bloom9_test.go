@@ -145,6 +145,7 @@ func BenchmarkCreateBloom(b *testing.B) {
 		NewContractCreation(1, one, 1, one, nil),
 		NewTransaction(2, common.HexToAddress("0x2"), two, 2, two, nil),
 	}
+	postState := common.Hash{2}
 	var rSmall = Receipts{
 		&Receipt{
 			Status:            ReceiptStatusFailed,
@@ -158,7 +159,7 @@ func BenchmarkCreateBloom(b *testing.B) {
 			GasUsed:         1,
 		},
 		&Receipt{
-			PostState:         common.Hash{2}.Bytes(),
+			PostState:         postState[:],
 			CumulativeGasUsed: 3,
 			Logs: []*Log{
 				{Address: common.BytesToAddress([]byte{0x22})},
@@ -223,6 +224,31 @@ func BenchmarkCreateBloom(b *testing.B) {
 			b.Errorf("Got %x, exp %x", got, exp)
 		}
 	})
+}
+
+func TestReceiptsMergedBloom(t *testing.T) {
+	t.Parallel()
+	receipts := Receipts{
+		{Logs: Logs{
+			{Address: common.HexToAddress("0x1111111111111111111111111111111111111111"), Topics: []common.Hash{common.HexToHash("0x01"), common.HexToHash("0x02")}},
+			{Address: common.HexToAddress("0x2222222222222222222222222222222222222222"), Topics: []common.Hash{common.HexToHash("0x03")}},
+		}},
+		{Logs: Logs{
+			{Address: common.HexToAddress("0x3333333333333333333333333333333333333333"), Topics: []common.Hash{common.HexToHash("0x04")}},
+		}},
+		{},
+	}
+	for _, r := range receipts {
+		r.Bloom = CreateBloom(Receipts{r})
+	}
+
+	merged := receipts.MergedBloom()
+	if merged.IsEmpty() {
+		t.Fatal("expected non-empty merged bloom")
+	}
+	if want := CreateBloom(receipts); merged != want {
+		t.Fatalf("merged bloom mismatch: got %x, want %x", merged, want)
+	}
 }
 
 func TestIsEmpty(t *testing.T) {
