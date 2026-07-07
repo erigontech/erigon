@@ -458,6 +458,9 @@ func (s *CaplinStateSnapshots) recalcVisibleFiles() {
 				if !isIndexed(sn) {
 					continue
 				}
+				if n := len(newVisibleSegments); n > 0 && sn.isSubSetOf(newVisibleSegments[n-1].src) {
+					continue
+				}
 				for len(newVisibleSegments) > 0 && newVisibleSegments[len(newVisibleSegments)-1].src.isSubSetOf(sn) {
 					newVisibleSegments[len(newVisibleSegments)-1].src = nil
 					newVisibleSegments = newVisibleSegments[:len(newVisibleSegments)-1]
@@ -480,6 +483,58 @@ func (s *CaplinStateSnapshots) recalcVisibleFiles() {
 		s.visible.Store(k, getNewVisibleSegments(s.dirty[k.(string)]))
 		return true
 	})
+}
+
+// RemoveOverlaps deletes state segment files that are fully covered by a larger
+// indexed segment of the same type, so the on-disk publishable check stops flagging
+// them as overlapping. Offline maintenance only: it munmaps and unlinks files, so no
+// CaplinStateView may be open concurrently.
+func (s *CaplinStateSnapshots) RemoveOverlaps() error {
+	if s == nil {
+		return nil
+	}
+	s.dirtySegmentsLock.Lock()
+
+	var toRemove []*DirtySegment
+	for _, dirtySegments := range s.dirty {
+		var indexed []*DirtySegment
+		dirtySegments.Walk(func(segments []*DirtySegment) bool {
+			for _, sn := range segments {
+				if isIndexed(sn) {
+					indexed = append(indexed, sn)
+				}
+			}
+			return true
+		})
+
+		var rm []*DirtySegment
+		dirtySegments.Walk(func(segments []*DirtySegment) bool {
+			for _, sn := range segments {
+				for _, sup := range indexed {
+					if sn != sup && sn.isSubSetOf(sup) {
+						rm = append(rm, sn)
+						break
+					}
+				}
+			}
+			return true
+		})
+
+		for _, sn := range rm {
+			dirtySegments.Delete(sn)
+		}
+		toRemove = append(toRemove, rm...)
+	}
+
+	s.dirtySegmentsLock.Unlock()
+
+	s.recalcVisibleFiles()
+
+	for _, sn := range toRemove {
+		s.logger.Info("[caplin-state] removing overlapped segment", "file", sn.FileName())
+		sn.closeAndRemoveFiles()
+	}
+	return nil
 }
 
 func (s *CaplinStateSnapshots) idxAvailability() uint64 {
