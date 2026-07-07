@@ -267,10 +267,11 @@ func (b *BlobHistoryDownloader) downloadOnce(shouldLog bool) error {
 			b.highestBackfilledSlot.Store(currentSlot)
 		}
 
-		// Always advance so an uncompletable batch can't rebuild at the same slot forever;
-		// step>=1 guarantees progress and the floor check avoids uint64 underflow.
+		// Always advance so an uncompletable batch can't rebuild at the same slot forever.
+		// step>=1 guarantees progress; stop once the distance left to the floor is below one
+		// step. The loop guard keeps currentSlot>=targetSlot, so neither subtraction underflows.
 		step := max(visited, 1)
-		if currentSlot < targetSlot+step {
+		if currentSlot-targetSlot < step {
 			break
 		}
 		currentSlot -= step
@@ -397,9 +398,10 @@ func (b *BlobHistoryDownloader) recoverFuluColumns(blocks []*cltypes.SignedBeaco
 	for _, block := range blocks {
 		// [Modified in Gloas:EIP7732] Use ColumnSyncableSignedBlock interface
 		ctx, cancel := context.WithTimeout(b.ctx, b.columnBackfillTimeout)
-		if err := peerDas.DownloadColumnsAndRecoverBlobs(ctx, []cltypes.ColumnSyncableSignedBlock{block}); err != nil {
+		err := peerDas.DownloadColumnsAndRecoverBlobs(ctx, []cltypes.ColumnSyncableSignedBlock{block})
+		cancel()
+		if err != nil {
 			b.logger.Warn("[BlobHistoryDownloader] Error recovering blobs from block", "err", err, "slot", block.GetSlot())
 		}
-		cancel()
 	}
 }
