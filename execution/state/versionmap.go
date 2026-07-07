@@ -496,6 +496,36 @@ func (vm *VersionMap) LatestTxIndex(addr accounts.Address, path AccountPath, key
 	return fk, true
 }
 
+// AccountLifecycle resolves an account's self-destruct/revival verdict at txIdx
+// from the synthetic lifecycle paths, using a single revival definition that all
+// consumers share (readers, validation, and the create decision) so they cannot
+// diverge. destroyed reports a Done SelfDestruct write at TxIdx ≤ txIdx with
+// value true; destroyedAt is that write's TxIndex. revived reports a re-creation
+// strictly after the destruct and before txIdx: AddressPath ≥ destroyedAt
+// (catches same-tx metamorphic SD+CREATE2, where both land at the same TxIdx) or
+// any of {Balance,Nonce,CodeHash} > destroyedAt. A destroyed-and-not-revived
+// account reads as gone.
+func (vm *VersionMap) AccountLifecycle(addr accounts.Address, txIdx int) (destroyed bool, destroyedAt int, revived bool) {
+	if vm == nil {
+		return false, 0, false
+	}
+	d, sdRes, ok := vm.ReadSelfDestruct(addr, txIdx)
+	if !ok || sdRes.Status() != MVReadResultDone || !d {
+		return false, 0, false
+	}
+	destroyedAt = sdRes.DepIdx()
+	revivalLimit := txIdx - 1
+	if hi, ok := vm.LatestTxIndex(addr, AddressPath, accounts.NilKey, revivalLimit); ok && hi >= destroyedAt {
+		return true, destroyedAt, true
+	}
+	for _, p := range [...]AccountPath{BalancePath, NoncePath, CodeHashPath} {
+		if hi, ok := vm.LatestTxIndex(addr, p, accounts.NilKey, revivalLimit); ok && hi > destroyedAt {
+			return true, destroyedAt, true
+		}
+	}
+	return true, destroyedAt, false
+}
+
 // AnyDoneSelfDestructEquals reports whether any Done SelfDestruct write at
 // TxIdx ≤ txIdxLimit has value == target. Detects a prior in-block
 // SelfDestructPath=true write that a later revival flipped back to false
