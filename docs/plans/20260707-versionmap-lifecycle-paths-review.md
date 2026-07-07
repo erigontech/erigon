@@ -83,12 +83,16 @@ arm is safe **only because of that co-write** — a fragile, load-bearing invari
 rationalization must keep (or make the AddressPath arm explicit at the validator).
 
 **Two distinct kinds of redundancy** (don't conflate them):
-1. *Lifecycle redundancy* — `CreateContractPath` appears mostly in exclusion lists
-   (versionmap.go:901) and `noValueRead` (versionmap.go:1050) with no clear distinct
-   contribution vs `IncarnationPath` (both signal "re-created"). `IncarnationPath` *is* load-
-   bearing and distinct (validateReadImpl:950-958 uses it precisely because BalancePath
-   "overfires for every gas payer"). AddressPath (existence) and SelfDestructPath
-   (destruction) are clearly non-redundant. → `CreateContractPath` is the removal candidate.
+1. *Lifecycle redundancy — traced, and the candidate cleared.* `CreateContractPath` looked
+   redundant vs `IncarnationPath` in the *validation* path (it only appears in exclusion lists,
+   versionmap.go:901, and `noValueRead`, versionmap.go:1050). But the trace (gap 3) shows it is
+   **not** redundant: it carries a distinct signal consumed on the **apply** side —
+   `rw_v3.go:206` uses `d.createContract` to `DomainDelPrefix(StorageDomain)`, clearing stale
+   storage before re-creation (mirroring `Writer.CreateContract`), and it marks contract
+   creation so a newly-deployed empty contract is not pruned (intra_block_state.go:1835). It is
+   contract-specific (a plain account create does not set it), whereas `IncarnationPath` is the
+   read-validation revival discriminator (validateReadImpl:950-958, distinct because
+   BalancePath "overfires for every gas payer"). All four lifecycle paths are non-redundant.
 2. *Code-family redundancy* — `CodePath`/`CodeHashPath`/`CodeSizePath` co-write as a trio
    (one code change bumps all three) but are kept separate as a **read-cost** optimization
    (answer EXTCODEHASH/EXTCODESIZE without loading bytes). This one is intentional and stays;
@@ -104,8 +108,10 @@ tests/blockchain_test.go). Three **gaps** — the invariants to pin *before* tou
    The exact consistency the rationalization must not break. (First test to add.)
 2. No test exercises whether the code-trio's value-vs-noValue split (`CodeHashPath` value,
    `CodePath`/`CodeSizePath` version-only) can produce divergent validity for one code write.
-3. No test isolates `CreateContractPath`'s contribution — needed to justify "exclude as
-   redundant" (the redundancy trace) before removal.
+3. `CreateContractPath` contribution — **traced and pinned** (create_contract_path_test.go):
+   contract creation records it, a plain account creation does not. The trace concluded it is
+   *not* redundant (distinct apply-side storage-clear role), so it is not a removal candidate;
+   the test guards against a "fold into IncarnationPath" simplification dropping the signal.
 
 **Direction:** replace the scattered independent-field cross-checks with **one authoritative
 lifecycle resolver** (`account lifecycle @ txIndex → {exists, destroyedAt, recreatedAt}`)
