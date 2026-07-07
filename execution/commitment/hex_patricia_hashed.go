@@ -30,6 +30,7 @@ import (
 	"strings"
 	"sync"
 	"sync/atomic"
+	"testing"
 	"time"
 
 	keccak "github.com/erigontech/fastkeccak"
@@ -2265,10 +2266,6 @@ func (hph *HexPatriciaHashed) unfoldKeyPath(hashedKey, plainKey []byte) error {
 	return nil
 }
 
-// assertCarriedUpdates enables the fold-time carried-update re-read check.
-// Off in production; the commitment tests turn it on.
-var assertCarriedUpdates bool
-
 // assertCarriedUpdate re-reads plainKey and requires the carried update to match
 // the read on every leaf-effective field; a divergence means a producer carried
 // stale or partial state. Only meaningful where the fold-time read is
@@ -2349,7 +2346,7 @@ func (hph *HexPatriciaHashed) followAndUpdate(hashedKey, plainKey []byte, stateU
 				return fmt.Errorf("GetStorage for key %x failed: %w", plainKey, err)
 			}
 		}
-	} else if assertCarriedUpdates {
+	} else if testing.Testing() {
 		if err := hph.assertCarriedUpdate(plainKey, stateUpdate); err != nil {
 			return err
 		}

@@ -12,10 +12,6 @@ import (
 	"github.com/erigontech/erigon/execution/types/accounts"
 )
 
-// Exercise the fold-time carried-update re-read check across the whole
-// commitment test suite (production leaves it off).
-func init() { assertCarriedUpdates = true }
-
 func serializedAccount(nonce uint64, balance uint64, codeHash common.Hash) []byte {
 	acc := accounts.Account{Nonce: nonce, Balance: *uint256.NewInt(balance), CodeHash: accounts.InternCodeHash(codeHash)}
 	return accounts.SerialiseV3(&acc)
