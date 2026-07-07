@@ -1764,7 +1764,10 @@ func (sd *SharedDomains) touchChangedKeys(tx kv.TemporalTx, d kv.Domain, fromTxN
 			return changes, err
 		}
 		if !sd.disableInlineTouchKey {
-			sd.GetCommitmentContext().TouchKeyWrite(d, string(k), nil)
+			// Read-marker touch: nil here means "resolve through the state
+			// reader at fold time", never "deleted" — this replays history,
+			// it does not write.
+			sd.GetCommitmentContext().TouchKey(d, string(k), nil)
 		}
 		changes++
 	}
