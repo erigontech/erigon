@@ -1,13 +1,13 @@
 package state
 
 import (
+	"github.com/erigontech/erigon/execution/tracing"
 	"testing"
 
 	"github.com/erigontech/erigon/common/crypto"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/erigontech/erigon/execution/tracing"
 	"github.com/erigontech/erigon/execution/types/accounts"
 )
 
@@ -93,9 +93,8 @@ func TestSetCodeParallel_RevertToOriginalBug(t *testing.T) {
 	vm.FlushVersionedWrites(writes88, true, "")
 
 	// Verify TX 88 wrote empty code hash to versionMap
-	rr := vm.Read(addr, CodeHashPath, accounts.NilKey, 89)
+	ch, rr, ok := vm.ReadCodeHash(addr, 89)
 	require.Equal(t, MVReadResultDone, rr.Status(), "TX 88 should have written CodeHashPath")
-	ch, ok := rr.Value().(accounts.CodeHash)
 	require.True(t, ok)
 	assert.Equal(t, accounts.EmptyCodeHash, ch, "TX 88 should have written EmptyCodeHash")
 
@@ -120,13 +119,7 @@ func TestSetCodeParallel_RevertToOriginalBug(t *testing.T) {
 
 	// Also verify that the versionedWrites contain the CodePath entry.
 	writes90 := ibs90.VersionedWrites(false)
-	hasCodeWrite := false
-	for _, w := range writes90 {
-		if w.Address == addr && w.Path == CodePath {
-			hasCodeWrite = true
-			break
-		}
-	}
+	_, hasCodeWrite := writes90.GetCode(addr)
 	assert.True(t, hasCodeWrite,
 		"TX 90 should have a CodePath write in versionedWrites (the revert-to-original optimisation should NOT have fired)")
 }

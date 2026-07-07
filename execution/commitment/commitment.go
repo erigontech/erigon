@@ -1829,15 +1829,19 @@ func (t *Updates) TouchPlainKey(key string, val []byte, fn func(c *KeyUpdate, va
 			t.keys[key] = t.collectDirect(t.hashKeyRetained(common.ToBytesZeroCopy(key)), key, nil)
 		}
 	case ModeParallel:
+		// The dedup map only guards plain-key interning: every touch reaches the prefix
+		// trie and the streamer, so a same-block re-touch invalidates any eager fold of
+		// its split instead of leaving it stale.
+		keyBytes := common.ToBytesZeroCopy(key)
+		hashedKey := t.hashKeyTransient(keyBytes)
+		ik := keyBytes
 		if _, ok := t.keys[key]; !ok {
-			keyBytes := common.ToBytesZeroCopy(key)
-			hashedKey := t.hashKeyTransient(keyBytes)
-			ik := t.parallel.internKey(keyBytes)
-			t.parallel.Insert(hashedKey, ik, nil)
-			if t.streaming && t.streamer != nil {
-				t.streamer.TouchKey(hashedKey, ik, nil)
-			}
+			ik = t.parallel.internKey(keyBytes)
 			t.keys[key] = -1
+		}
+		t.parallel.Insert(hashedKey, ik, nil)
+		if t.streaming && t.streamer != nil {
+			t.streamer.TouchKey(hashedKey, ik, nil)
 		}
 	default:
 	}
@@ -2285,6 +2289,18 @@ func (t *Updates) HashSort(ctx context.Context, warmuper *Warmuper, fn func(hk, 
 		return nil
 	}
 	return nil
+}
+
+// consumeParallel drops the folded ModeParallel collection so the next block starts
+// empty — the ModeParallel counterpart of HashSort consuming ModeDirect/ModeUpdate.
+func (t *Updates) consumeParallel() {
+	if t.mode != ModeParallel {
+		return
+	}
+	clear(t.keys)
+	if t.parallel != nil {
+		t.parallel.Reset()
+	}
 }
 
 // Reset clears all updates
