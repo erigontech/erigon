@@ -122,3 +122,42 @@ func BenchmarkVersionedExecReads(b *testing.B) {
 		sinkU256 = s
 	}
 }
+
+// BenchmarkWarmExtCodeHash reproduces the warm EXTCODEHASH opcode pattern
+// (Empty() then GetCodeHash()) that the warm-extcodehash benchmarkoor cell — the
+// 20x peer-gap outlier — hammers. Empty() falls through to getVersionedAccount →
+// refreshVersionedAccount (a 4-field refresh incl. the unused incarnation, each
+// field re-probing SelfDestruct under the versionMap RWMutex), so this pins the
+// over-refresh + per-read-probe cost the parallel warm path pays per opcode.
+func BenchmarkWarmExtCodeHash(b *testing.B) {
+	_, tx, domains := NewTestRwTx(b)
+	mvhm := NewVersionMap(nil)
+
+	const nAddrs = 64
+	addrs := make([]accounts.Address, nAddrs)
+	for i := range addrs {
+		var a [20]byte
+		a[0], a[1] = byte(i), byte(i>>8)
+		addrs[i] = accounts.InternAddress(a)
+		mvhm.WriteBalance(addrs[i], Version{TxIndex: 0}, *uint256.NewInt(uint64(1000 + i)), true)
+		mvhm.WriteNonce(addrs[i], Version{TxIndex: 0}, uint64(i), true)
+		mvhm.WriteCodeHash(addrs[i], Version{TxIndex: 0}, accounts.InternCodeHash(common.BytesToHash([]byte{0xaa, byte(i)})), true)
+	}
+
+	reader := NewReaderV3(domains.AsGetter(tx))
+	ibs := NewWithVersionMap(reader, mvhm)
+
+	b.ReportAllocs()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		ibs.Reset()
+		ibs.SetTxContext(1, 100)
+		a := addrs[i%nAddrs]
+		empty, _ := ibs.Empty(a)
+		sinkBool = empty
+		if !empty {
+			h, _ := ibs.GetCodeHash(a)
+			sinkHash = h
+		}
+	}
+}
