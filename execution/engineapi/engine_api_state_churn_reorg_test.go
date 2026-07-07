@@ -18,6 +18,7 @@ package engineapi_test
 
 import (
 	"context"
+	"crypto/ecdsa"
 	"math/big"
 	"testing"
 	"time"
@@ -25,6 +26,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/common/testlog"
 	"github.com/erigontech/erigon/execution/abi/bind"
@@ -32,6 +34,7 @@ import (
 	"github.com/erigontech/erigon/execution/engineapi/engineapitester"
 	"github.com/erigontech/erigon/execution/protocol/params"
 	"github.com/erigontech/erigon/execution/state/contracts"
+	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/node/ethconfig"
 	"github.com/erigontech/erigon/rpc"
 )
@@ -111,40 +114,13 @@ func TestEngineApiReorgToSideChainSwitchesStateChurn(t *testing.T) {
 	const forkPoke = 6 // pokes [0,forkPoke) are shared; [forkPoke,totalPokes) diverge
 	tweak := func(config *ethconfig.Config) { config.MaxReorgDepth = stateChurnReorgDepthBudget }
 
-	var canonPayloads []*engineapitester.MockClPayload
-	var canonAddr common.Address
-	var canonRef *big.Int
-	eatCanon, err := engineapitester.InitialiseEngineApiTester(ctx, engineapitester.EngineApiTesterInitArgs{
-		Logger: logger, DataDir: t.TempDir(), Genesis: sharedGenesis, CoinbaseKey: coinbaseKey, EthConfigTweaker: tweak,
+	canonPayloads, canonAddr, canonRef := buildRecordedChurnChain(ctx, t, logger, sharedGenesis, coinbaseKey, tweak, totalPokes, func(k int) int64 { return int64(k) })
+	sidePayloads, sideAddr, sideRef := buildRecordedChurnChain(ctx, t, logger, sharedGenesis, coinbaseKey, tweak, totalPokes, func(k int) int64 {
+		if k < forkPoke {
+			return int64(k)
+		}
+		return int64(k) + 1_000_000
 	})
-	require.NoError(t, err)
-	t.Cleanup(func() { require.NoError(t, eatCanon.Close()) })
-	eatCanon.Run(t, func(ctx context.Context, t *testing.T, eat engineapitester.EngineApiTester) {
-		var sums []*big.Int
-		canonPayloads, canonAddr, _, sums = buildChurnChain(ctx, t, eat, totalPokes, func(k int) int64 { return int64(k) })
-		canonRef = sums[len(sums)-1]
-	})
-	require.NoError(t, eatCanon.Close()) // free the canon node; only its recorded payloads are needed below
-
-	var sidePayloads []*engineapitester.MockClPayload
-	var sideAddr common.Address
-	var sideRef *big.Int
-	eatSide, err := engineapitester.InitialiseEngineApiTester(ctx, engineapitester.EngineApiTesterInitArgs{
-		Logger: logger, DataDir: t.TempDir(), Genesis: sharedGenesis, CoinbaseKey: coinbaseKey, EthConfigTweaker: tweak,
-	})
-	require.NoError(t, err)
-	t.Cleanup(func() { require.NoError(t, eatSide.Close()) })
-	eatSide.Run(t, func(ctx context.Context, t *testing.T, eat engineapitester.EngineApiTester) {
-		var sums []*big.Int
-		sidePayloads, sideAddr, _, sums = buildChurnChain(ctx, t, eat, totalPokes, func(k int) int64 {
-			if k < forkPoke {
-				return int64(k)
-			}
-			return int64(k) + 1_000_000
-		})
-		sideRef = sums[len(sums)-1]
-	})
-	require.NoError(t, eatSide.Close()) // free the side node; only its recorded payloads are needed below
 
 	eatVictim, err := engineapitester.InitialiseEngineApiTester(ctx, engineapitester.EngineApiTesterInitArgs{
 		Logger: logger, DataDir: t.TempDir(), Genesis: sharedGenesis, CoinbaseKey: coinbaseKey, EthConfigTweaker: tweak,
@@ -178,6 +154,73 @@ func TestEngineApiReorgToSideChainSwitchesStateChurn(t *testing.T) {
 		}
 		require.NoError(t, eat.MockCl.UpdateForkChoice(ctx, sideTip))
 		assertChurnState(ctx, t, eat, churn, sideTip, sideRef)
+	})
+}
+
+// TestEngineApiForkBounceStateChurn bounces a node between two competing
+// churn forks — canonical → side → canonical → side — asserting the full
+// churn state after every switch, and then keeps building on the final fork.
+// Each bounce unwinds and re-executes the same height range under the
+// opposite fork's hashes, so per-block data keyed only by height (diffsets,
+// commitment changesets, caches) that survives from the losing fork corrupts
+// the winner.
+func TestEngineApiForkBounceStateChurn(t *testing.T) {
+	ctx := t.Context()
+	logger := testlog.Logger(t, log.LvlDebug)
+	sharedGenesis, coinbaseKey, err := engineapitester.DefaultEngineApiTesterGenesis()
+	require.NoError(t, err)
+	const totalPokes = 12
+	const forkPoke = 6
+	tweak := func(config *ethconfig.Config) { config.MaxReorgDepth = stateChurnReorgDepthBudget }
+
+	canonPayloads, canonAddr, canonRef := buildRecordedChurnChain(ctx, t, logger, sharedGenesis, coinbaseKey, tweak, totalPokes, func(k int) int64 { return int64(k) })
+	sidePayloads, sideAddr, sideRef := buildRecordedChurnChain(ctx, t, logger, sharedGenesis, coinbaseKey, tweak, totalPokes, func(k int) int64 {
+		if k < forkPoke {
+			return int64(k)
+		}
+		return int64(k) + 1_000_000
+	})
+
+	eat, err := engineapitester.InitialiseEngineApiTester(ctx, engineapitester.EngineApiTesterInitArgs{
+		Logger: logger, DataDir: t.TempDir(), Genesis: sharedGenesis, CoinbaseKey: coinbaseKey, EthConfigTweaker: tweak,
+	})
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, eat.Close()) })
+	eat.Run(t, func(ctx context.Context, t *testing.T, eat engineapitester.EngineApiTester) {
+		require.Equal(t, canonAddr, sideAddr, "contract must deploy at the same address on both chains")
+		canonTip := canonPayloads[len(canonPayloads)-1]
+		sideTip := sidePayloads[len(sidePayloads)-1]
+		churn, err := contracts.NewStateChurn(canonAddr, eat.ContractBackend)
+		require.NoError(t, err)
+
+		for _, payload := range canonPayloads {
+			status, err := eat.MockCl.InsertNewPayload(ctx, payload)
+			require.NoError(t, err)
+			require.Equal(t, enginetypes.ValidStatus, status.Status)
+		}
+		for i := forkPoke + 1; i < len(sidePayloads); i++ {
+			status, err := eat.MockCl.InsertNewPayload(ctx, sidePayloads[i])
+			require.NoError(t, err)
+			require.Equalf(t, enginetypes.ValidStatus, status.Status, "insert of side suffix payload %d", i)
+		}
+
+		bounces := []struct {
+			name string
+			tip  *engineapitester.MockClPayload
+			ref  *big.Int
+		}{
+			{"canon", canonTip, canonRef},
+			{"side", sideTip, sideRef},
+			{"back to canon", canonTip, canonRef},
+			{"back to side", sideTip, sideRef},
+		}
+		for _, b := range bounces {
+			require.NoErrorf(t, eat.MockCl.UpdateForkChoice(ctx, b.tip), "fcu bounce to %s", b.name)
+			assertChurnState(ctx, t, eat, churn, b.tip, b.ref)
+		}
+
+		// The final fork must remain fully usable: keep churning on top of it.
+		churnAndAssert(ctx, t, eat, churn, 3, func(k int) int64 { return int64(2_000 + k) })
 	})
 }
 
@@ -215,6 +258,74 @@ func buildChurnChain(
 		sums = append(sums, recordChurnSum(ctx, t, churn))
 	}
 	return payloads, addr, churn, sums
+}
+
+// churnAndAssert applies pokes one block at a time on the tester's current
+// head, asserting the full churn invariant after every block. A poke reads its
+// slots before writing, so any stale value left behind by a preceding
+// unwind/reorg/restart/prune makes the transaction revert or the invariant
+// trip right here.
+func churnAndAssert(
+	ctx context.Context,
+	t *testing.T,
+	eat engineapitester.EngineApiTester,
+	churn *contracts.StateChurn,
+	pokes int,
+	seed func(k int) int64,
+) (payloads []*engineapitester.MockClPayload, sums []*big.Int) {
+	transactOpts, err := bind.NewKeyedTransactorWithChainID(eat.CoinbaseKey, eat.ChainId())
+	require.NoError(t, err)
+	transactOpts.GasLimit = params.MaxTxnGasLimit
+	coinbaseAddr := crypto.PubkeyToAddress(eat.CoinbaseKey.PublicKey)
+	for k := 0; k < pokes; k++ {
+		// Pin the nonce to the head state: the txpool's own pending-nonce view
+		// can be stale right after a reorg/restart (re-injected dead-fork txns),
+		// and submission is retried while the pool digests the head change.
+		nonce, err := eat.RpcApiClient.GetTransactionCount(coinbaseAddr, rpc.LatestBlock)
+		require.NoError(t, err)
+		transactOpts.Nonce = nonce
+		var txn types.Transaction
+		require.Eventually(t, func() bool {
+			var err error
+			txn, err = churn.Poke(transactOpts, big.NewInt(seed(k)))
+			return err == nil
+		}, 30*time.Second, 100*time.Millisecond, "poke submission did not settle")
+		block, err := eat.MockCl.BuildCanonicalBlock(ctx)
+		require.NoError(t, err)
+		require.NoError(t, eat.TxnInclusionVerifier.VerifyTxnsInclusion(ctx, block.ExecutionPayload, txn.Hash()))
+		sum := recordChurnSum(ctx, t, churn)
+		assertChurnState(ctx, t, eat, churn, block, sum)
+		payloads = append(payloads, block)
+		sums = append(sums, sum)
+	}
+	return payloads, sums
+}
+
+// buildRecordedChurnChain builds a churn chain on a throwaway node and returns
+// its payloads, contract address and final trackedSum. The node is closed
+// before returning; only the recorded payloads are needed by the caller.
+func buildRecordedChurnChain(
+	ctx context.Context,
+	t *testing.T,
+	logger log.Logger,
+	genesis *types.Genesis,
+	coinbaseKey *ecdsa.PrivateKey,
+	tweak func(*ethconfig.Config),
+	pokes int,
+	seed func(k int) int64,
+) (payloads []*engineapitester.MockClPayload, addr common.Address, ref *big.Int) {
+	eat, err := engineapitester.InitialiseEngineApiTester(ctx, engineapitester.EngineApiTesterInitArgs{
+		Logger: logger, DataDir: t.TempDir(), Genesis: genesis, CoinbaseKey: coinbaseKey, EthConfigTweaker: tweak,
+	})
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, eat.Close()) })
+	eat.Run(t, func(ctx context.Context, t *testing.T, eat engineapitester.EngineApiTester) {
+		var sums []*big.Int
+		payloads, addr, _, sums = buildChurnChain(ctx, t, eat, pokes, seed)
+		ref = sums[len(sums)-1]
+	})
+	require.NoError(t, eat.Close())
+	return payloads, addr, ref
 }
 
 // recordChurnSum reads and returns the contract's live trackedSum. poke reverts

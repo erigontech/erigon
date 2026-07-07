@@ -18,6 +18,7 @@ package engineapi_test
 
 import (
 	"context"
+	"math/big"
 	"os"
 	"path/filepath"
 	"testing"
@@ -25,10 +26,12 @@ import (
 
 	"github.com/stretchr/testify/require"
 
+	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/common/testlog"
 	"github.com/erigontech/erigon/db/state"
 	"github.com/erigontech/erigon/execution/engineapi/engineapitester"
+	"github.com/erigontech/erigon/execution/state/contracts"
 	"github.com/erigontech/erigon/node/ethconfig"
 )
 
@@ -77,10 +80,14 @@ func TestEngineApiUnwindAcrossDomainStepBoundaries(t *testing.T) {
 	require.NoError(t, err)
 	t.Cleanup(func() { require.NoError(t, eat.Close()) })
 
+	var churnAddr common.Address
+	var targetPayload *engineapitester.MockClPayload
+	var targetSum *big.Int
 	eat.Run(t, func(ctx context.Context, t *testing.T, eat engineapitester.EngineApiTester) {
 		const pokes = 300
-		payloads, _, churn, sums := buildChurnChain(ctx, t, eat, pokes, func(k int) int64 { return int64(k) })
+		payloads, addr, churn, sums := buildChurnChain(ctx, t, eat, pokes, func(k int) int64 { return int64(k) })
 		tip := uint64(2 + pokes)
+		churnAddr = addr
 
 		waitForDomainFilesSettled(ctx, t, eat.StateAgg)
 		t.Logf("domain files settled: %v", eat.StateAgg.FilesAmount())
@@ -93,5 +100,39 @@ func TestEngineApiUnwindAcrossDomainStepBoundaries(t *testing.T) {
 		target := tip - 60
 		require.NoError(t, eat.MockCl.UpdateForkChoice(ctx, payloads[target-2]))
 		assertChurnState(ctx, t, eat, churn, payloads[target-2], sums[target-2])
+		targetPayload = payloads[target-2]
+		targetSum = sums[target-2]
+	})
+
+	// Restart the node on the same datadir. The unwind's correctness must be
+	// durable: the in-RAM overlay and unwind-changeset that could mask a wrong
+	// MDBX/files state die with the process, so the restarted node reads what
+	// was actually persisted. A deletion whose tombstone was lost by the unwind
+	// resurrects here as a stale value from the snapshot files.
+	mockClState := eat.MockCl.State()
+	require.NoError(t, eat.Close())
+	eat2, err := engineapitester.InitialiseEngineApiTester(ctx, engineapitester.EngineApiTesterInitArgs{
+		Logger:      logger,
+		DataDir:     dataDir,
+		Genesis:     genesis,
+		CoinbaseKey: coinbaseKey,
+		EthConfigTweaker: func(c *ethconfig.Config) {
+			c.Snapshot.ProduceE3 = true
+			c.AlwaysGenerateChangesets = true
+			c.MaxReorgDepth = 90
+		},
+		MockClState:   mockClState,
+		NoEmptyBlock1: true,
+	})
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, eat2.Close()) })
+	eat2.Run(t, func(ctx context.Context, t *testing.T, eat engineapitester.EngineApiTester) {
+		churn, err := contracts.NewStateChurn(churnAddr, eat.ContractBackend)
+		require.NoError(t, err)
+		assertChurnState(ctx, t, eat, churn, targetPayload, targetSum)
+		// Keep churning across the restarted node: each poke re-reads its ring
+		// slots from the persisted state, so a resurrected or missing value
+		// reverts the transaction or trips the in-EVM check.
+		churnAndAssert(ctx, t, eat, churn, 4, func(k int) int64 { return int64(1_000 + k) })
 	})
 }
