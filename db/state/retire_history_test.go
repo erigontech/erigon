@@ -72,10 +72,10 @@ func generateStandaloneIIFile(t *testing.T, name kv.InvertedIdx, dirs datadir.Di
 	populateFiles2(t, dirs, repo, ranges)
 }
 
-// TestRetireOldHistoryFiles_RetiresFrozenFileEntirelyBelowCutoff pins that a
+// TestRetire_RetiresFrozenFileEntirelyBelowCutoff pins that a
 // frozen file entirely below cutoff is retired (deferred until readers
 // drain), while one still at/after cutoff is kept.
-func TestRetireOldHistoryFiles_RetiresFrozenFileEntirelyBelowCutoff(t *testing.T) {
+func TestRetire_RetiresFrozenFileEntirelyBelowCutoff(t *testing.T) {
 	stepSize, stepsInFrozenFile := uint64(10), uint64(2)
 	agg := testDbAndAggregatorSmallFrozen(t, stepSize, stepsInFrozenFile)
 
@@ -100,7 +100,7 @@ func TestRetireOldHistoryFiles_RetiresFrozenFileEntirelyBelowCutoff(t *testing.T
 	// pin the current generation to assert deferred (not immediate) deletion
 	at := agg.BeginFilesRo()
 
-	n, err := agg.RetireOldHistoryFiles(t.Context(), kv.Step(2), 0)
+	n, err := agg.Retire(t.Context(), kv.RetireCutoffs{Default: 2 * stepSize})
 	require.NoError(t, err)
 	require.Positive(t, n)
 
@@ -138,45 +138,75 @@ func TestEntirelyBeforeStep_BoundaryStraddlingFileKept(t *testing.T) {
 	require.Len(t, outsAfterBoundaryMoves, 1)
 }
 
-// TestRetireOldHistoryFiles_SkipsCommitmentDomain is a regression guard for
-// the id-based CommitmentDomain skip in RetireOldHistoryFiles.
-func TestRetireOldHistoryFiles_SkipsCommitmentDomain(t *testing.T) {
+// enableCommitmentHistory un-skips the CommitmentDomain history guard for one
+// test aggregator (production does this via statecfg.EnableHistoricalCommitment).
+func enableCommitmentHistory(agg *Aggregator) {
+	cd := agg.d[kv.CommitmentDomain]
+	cd.SnapshotsDisabled = false
+	cd.HistoryDisabled = false
+}
+
+// TestRetire_RetiresCommitmentAtOwnCutoff pins commitment retirement
+// at its own cutoff, independent of Default (0 here).
+func TestRetire_RetiresCommitmentAtOwnCutoff(t *testing.T) {
 	stepSize, stepsInFrozenFile := uint64(10), uint64(2)
 	agg := testDbAndAggregatorSmallFrozen(t, stepSize, stepsInFrozenFile)
 
-	commitmentHist := agg.d[kv.CommitmentDomain].History
-	old := newFilesItem(0, 2*stepSize)
-	commitmentHist.dirtyFiles.Set(old)
+	generateCommitmentHistoryAndIndexFiles(t, agg.Dirs(), []testFileRange{{0, 2}, {2, 3}})
+	require.NoError(t, agg.OpenFolder())
+	enableCommitmentHistory(agg)
 
-	_, err := agg.RetireOldHistoryFiles(t.Context(), kv.Step(2), 0)
+	commitmentHist := agg.d[kv.CommitmentDomain].History
+	require.Equal(t, 2, commitmentHist.dirtyFiles.Len())
+
+	_, err := agg.Retire(t.Context(), kv.RetireCutoffs{
+		Default:   0,
+		PerDomain: map[kv.Domain]uint64{kv.CommitmentDomain: 2 * stepSize},
+	})
 	require.NoError(t, err)
-	require.Equal(t, 1, commitmentHist.dirtyFiles.Len(), "CommitmentDomain history file must not be retired at the general cutoff")
+	require.Equal(t, 1, commitmentHist.dirtyFiles.Len(), "commitment {0,2} below its cutoff must be retired, {2,3} kept")
 }
 
-// TestRetireOldHistoryFiles_CommitmentCutoff exercises the commitment-specific
-// cutoff: with general history unbounded (cutoffStep 0) but a commitment cutoff
-// set, only commitment history below the cutoff is retired.
-func TestRetireOldHistoryFiles_CommitmentCutoff(t *testing.T) {
+// TestRetire_KeepsDomainWhenCutoffZero pins the 0-override: a
+// per-domain cutoff of 0 keeps the domain even when Default would cover it (how
+// commitment keep-all and the RCacheDomain skip are expressed).
+func TestRetire_KeepsDomainWhenCutoffZero(t *testing.T) {
 	stepSize, stepsInFrozenFile := uint64(10), uint64(2)
 	agg := testDbAndAggregatorSmallFrozen(t, stepSize, stepsInFrozenFile)
-	// commitment history is opt-in (--prune.include-commitment-history); enable it
-	// on this instance so the retirement guard doesn't skip it.
-	agg.d[kv.CommitmentDomain].HistoryDisabled = false
-	agg.d[kv.CommitmentDomain].SnapshotsDisabled = false
+
+	generateCommitmentHistoryAndIndexFiles(t, agg.Dirs(), []testFileRange{{0, 2}, {2, 3}})
+	require.NoError(t, agg.OpenFolder())
+	enableCommitmentHistory(agg)
 
 	commitmentHist := agg.d[kv.CommitmentDomain].History
-	commitmentHist.dirtyFiles.Set(newFilesItem(0, 2*stepSize))          // steps [0,2) — below cutoff
-	commitmentHist.dirtyFiles.Set(newFilesItem(2*stepSize, 3*stepSize)) // steps [2,3) — above cutoff
 
-	n, err := agg.RetireOldHistoryFiles(t.Context(), 0, kv.Step(2))
+	_, err := agg.Retire(t.Context(), kv.RetireCutoffs{
+		Default:   2 * stepSize,
+		PerDomain: map[kv.Domain]uint64{kv.CommitmentDomain: 0},
+	})
 	require.NoError(t, err)
-	require.Positive(t, n)
-	require.Equal(t, 1, commitmentHist.dirtyFiles.Len(), "only commitment history below the cutoff is retired; above-cutoff kept")
+	require.Equal(t, 2, commitmentHist.dirtyFiles.Len(), "0 override must keep commitment even when Default covers it")
 }
 
-// TestRetireOldHistoryFiles_StandaloneII exercises the standalone-II loop
+// TestRetire_SubStepTxNumKeepsFiles pins that a cutoff txNum below
+// one full step floors to step 0 and retires nothing (the aggregator owns this
+// txNum→step floor).
+func TestRetire_SubStepTxNumKeepsFiles(t *testing.T) {
+	stepSize, stepsInFrozenFile := uint64(10), uint64(2)
+	agg := testDbAndAggregatorSmallFrozen(t, stepSize, stepsInFrozenFile)
+
+	generateAccountsFile(t, agg.Dirs(), []testFileRange{{0, 2}})
+	require.NoError(t, agg.OpenFolder())
+
+	n, err := agg.Retire(t.Context(), kv.RetireCutoffs{Default: stepSize - 1})
+	require.NoError(t, err)
+	require.Zero(t, n)
+	mustExist(t, filepath.Join(agg.Dirs().SnapHistory, "v1.0-accounts.0-2.v"), true)
+}
+
+// TestRetire_StandaloneII exercises the standalone-II loop
 // (LogAddrIdx et al.), separate from the per-domain loop.
-func TestRetireOldHistoryFiles_StandaloneII(t *testing.T) {
+func TestRetire_StandaloneII(t *testing.T) {
 	stepSize, stepsInFrozenFile := uint64(10), uint64(2)
 	agg := testDbAndAggregatorSmallFrozen(t, stepSize, stepsInFrozenFile)
 
@@ -190,7 +220,7 @@ func TestRetireOldHistoryFiles_StandaloneII(t *testing.T) {
 	mustExist(t, recentIdx, true)
 
 	at := agg.BeginFilesRo()
-	n, err := agg.RetireOldHistoryFiles(t.Context(), kv.Step(2), 0)
+	n, err := agg.Retire(t.Context(), kv.RetireCutoffs{Default: 2 * stepSize})
 	require.NoError(t, err)
 	require.Positive(t, n)
 	at.Close()
@@ -199,9 +229,9 @@ func TestRetireOldHistoryFiles_StandaloneII(t *testing.T) {
 	mustExist(t, recentIdx, true)
 }
 
-// TestRetireOldHistoryFiles_ReclaimConcurrent stresses BeginFilesRo/Close
+// TestRetire_ReclaimConcurrent stresses BeginFilesRo/Close
 // against concurrent retirement under the race detector.
-func TestRetireOldHistoryFiles_ReclaimConcurrent(t *testing.T) {
+func TestRetire_ReclaimConcurrent(t *testing.T) {
 	stepSize, stepsInFrozenFile := uint64(10), uint64(2)
 	agg := testDbAndAggregatorSmallFrozen(t, stepSize, stepsInFrozenFile)
 
@@ -228,7 +258,7 @@ func TestRetireOldHistoryFiles_ReclaimConcurrent(t *testing.T) {
 		}()
 	}
 
-	_, err := agg.RetireOldHistoryFiles(t.Context(), kv.Step(2), 0)
+	_, err := agg.Retire(t.Context(), kv.RetireCutoffs{Default: 2 * stepSize})
 	require.NoError(t, err)
 	close(stop)
 	wg.Wait()
