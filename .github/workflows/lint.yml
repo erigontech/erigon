@@ -20,11 +20,11 @@ jobs:
       - name: Install actionlint
         run: |
           curl -sSfL \
-            "https://github.com/rhysd/actionlint/releases/download/v1.7.7/actionlint_1.7.7_linux_amd64.tar.gz" \
+            "https://github.com/rhysd/actionlint/releases/download/v1.7.12/actionlint_1.7.12_linux_amd64.tar.gz" \
             | tar -xz -C /usr/local/bin actionlint
 
       - name: Install zizmor
-        run: pip install --break-system-packages zizmor==1.24.1
+        run: pip install --break-system-packages zizmor==1.26.1
 
       # -shellcheck '' disables actionlint's built-in inline-script checking;
       # the repo's QA workflow run: blocks have many pre-existing shellcheck
@@ -51,7 +51,7 @@ jobs:
       # without noise from pure style hints.
       - name: shellcheck
         run: |
-          find . -name '*.sh' -not -path './.git/*' -print0 \
+          find . -name '*.sh' -not -path './.git/*' -not -path '*/node_modules/*' -print0 \
             | xargs -0 shellcheck --severity=warning
 
       - uses: ./.github/actions/setup-erigon
