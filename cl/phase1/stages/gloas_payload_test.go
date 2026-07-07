@@ -428,4 +428,8 @@ func (t *testExecutionEngine) GetBlobs(context.Context, []common.Hash, clparams.
 	return nil, nil, nil
 }
 
+func (t *testExecutionEngine) GetClientVersionV1(context.Context, *engine_types.ClientVersionV1) ([]engine_types.ClientVersionV1, error) {
+	return nil, nil
+}
+
 var _ execution_client.ExecutionEngine = (*testExecutionEngine)(nil)

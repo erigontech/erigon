@@ -19,7 +19,6 @@ package handler
 import (
 	"bytes"
 	"context"
-	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -61,6 +60,7 @@ import (
 	"github.com/erigontech/erigon/common/length"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/version"
 	"github.com/erigontech/erigon/execution/engineapi/engine_types"
 	"github.com/erigontech/erigon/execution/protocol/params"
 	"github.com/erigontech/erigon/execution/rlp"
@@ -80,7 +80,10 @@ var (
 	errBuilderNotEnabled = errors.New("builder is not enabled")
 )
 
-var defaultGraffitiString = "Caplin"
+const (
+	caplinClientCode = "CN"
+	caplinClientName = "caplin"
+)
 
 const minPayloadPollingWindow = 100 * time.Millisecond
 
@@ -88,6 +91,55 @@ const minPayloadPollingWindow = 100 * time.Millisecond
 // attestation deadline, reserving that margin for consensus processing, signing and gossip so the
 // produced block still reaches attesters in time to earn the proposer boost.
 const payloadPublicationDivisor = 4
+
+// defaultGraffiti is used when the validator does not specify a graffiti. It follows the
+// client-version graffiti standard, encoding the execution and consensus client codes and
+// their commit prefixes so client-diversity tooling can attribute proposed blocks. See
+// https://github.com/ethereum/execution-apis/blob/main/src/engine/identification.md
+func (a *ApiHandler) defaultGraffiti(ctx context.Context) common.Hash {
+	graffiti := caplinClientCode + graffitiCommitPrefix(version.GitCommit)
+	if el := a.executionClientVersion(ctx); el != nil {
+		graffiti = el.Code + graffitiCommitPrefix(el.Commit) + graffiti
+	}
+	return graffitiFromString(graffiti)
+}
+
+// executionClientVersion returns the connected execution client's version, caching it on
+// first success so that block production stays off the engine API in steady state (the
+// version is static for the lifetime of an execution client connection).
+func (a *ApiHandler) executionClientVersion(ctx context.Context) *engine_types.ClientVersionV1 {
+	if cached := a.elClientVersion.Load(); cached != nil {
+		return cached
+	}
+	if a.engine == nil {
+		return nil
+	}
+	ctx, cancel := context.WithTimeout(ctx, time.Second)
+	defer cancel()
+	caplin := engine_types.NewClientVersionV1(caplinClientCode, caplinClientName, a.version, version.GitCommit)
+	versions, err := a.engine.GetClientVersionV1(ctx, &caplin)
+	if err != nil || len(versions) == 0 {
+		return nil
+	}
+	el := versions[0]
+	a.elClientVersion.Store(&el)
+	return &el
+}
+
+// graffitiCommitPrefix returns the leading 2 bytes (4 hex chars) of a commit hash.
+func graffitiCommitPrefix(commit string) string {
+	commit = strings.TrimPrefix(commit, "0x")
+	if len(commit) >= 4 {
+		return commit[:4]
+	}
+	return commit + strings.Repeat("0", 4-len(commit))
+}
+
+func graffitiFromString(s string) common.Hash {
+	var graffiti common.Hash
+	copy(graffiti[:], s)
+	return graffiti
+}
 
 type blockBuilderWindow struct {
 	firstGetAt time.Time
@@ -310,9 +362,11 @@ func (a *ApiHandler) GetEthV3ValidatorBlock(
 	if r.URL.Query().Has("skip_randao_verification") {
 		randaoReveal = common.Bytes96{0xc0} // infinity bls signature
 	}
-	graffiti := common.HexToHash(r.URL.Query().Get("graffiti"))
-	if !r.URL.Query().Has("graffiti") {
-		graffiti = common.HexToHash(hex.EncodeToString([]byte(defaultGraffitiString)))
+	var graffiti common.Hash
+	if r.URL.Query().Has("graffiti") {
+		graffiti = common.HexToHash(r.URL.Query().Get("graffiti"))
+	} else {
+		graffiti = a.defaultGraffiti(ctx)
 	}
 
 	tx, err := a.indiciesDB.BeginRo(ctx)
