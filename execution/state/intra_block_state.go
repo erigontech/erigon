@@ -572,10 +572,15 @@ func (sdb *IntraBlockState) Empty(addr accounts.Address) (empty bool, err error)
 		return true, nil
 	}
 
-	// EIP-161 emptiness from the current (overlaid) field values. Per-field
-	// refresh reads apply the same self-destruct gate as the whole-account path:
-	// a self-destructed account is still "alive" during the same tx (EIP-6780),
-	// while a cross-tx destruct already made versionedAccountBase return nil.
+	return sdb.emptyFromVersionedFields(addr, account)
+}
+
+// emptyFromVersionedFields computes the EIP-161 emptiness verdict for an
+// account that versionedAccountBase resolved as existing, reading the current
+// balance/nonce/codeHash per-field (short-circuiting on the first non-empty
+// field) instead of reconstructing the whole account. The per-field refresh
+// reads apply the same self-destruct gate as the whole-account path.
+func (sdb *IntraBlockState) emptyFromVersionedFields(addr accounts.Address, account *accounts.Account) (bool, error) {
 	balance, _, _, err := refreshBalance(sdb, addr, account.Balance)
 	if err != nil {
 		return false, err
@@ -961,12 +966,7 @@ func (sdb *IntraBlockState) touchAccount(addr accounts.Address) {
 // TouchAccount materializes an empty account and records the zero-balance touch
 // needed for state clearing and trie consistency.
 func (sdb *IntraBlockState) TouchAccount(addr accounts.Address) error {
-	stateObject, err := sdb.GetOrNewStateObject(addr)
-	if err != nil {
-		return err
-	}
-
-	if stateObject.data.Empty() {
+	markTouched := func() {
 		sdb.recordWriteBalance(addr, uint256.Int{})
 		if _, ok := sdb.journal.dirties[addr]; !ok {
 			if dbg.TraceTransactionIO && (sdb.trace || dbg.TraceAccount(addr.Handle())) {
@@ -974,6 +974,35 @@ func (sdb *IntraBlockState) TouchAccount(addr accounts.Address) error {
 			}
 			sdb.touchAccount(addr)
 		}
+	}
+
+	if sdb.versionMap != nil {
+		// The touch only depends on emptiness. For an existing account compute
+		// it from field reads without materializing/reconstructing the
+		// stateObject; only an absent account needs GetOrNewStateObject so
+		// createObject records the AddressPath write (OCC create detection).
+		account, _, _, err := sdb.versionedAccountBase(addr, true)
+		if err != nil {
+			return err
+		}
+		if account != nil {
+			empty, err := sdb.emptyFromVersionedFields(addr, account)
+			if err != nil {
+				return err
+			}
+			if empty {
+				markTouched()
+			}
+			return nil
+		}
+	}
+
+	stateObject, err := sdb.GetOrNewStateObject(addr)
+	if err != nil {
+		return err
+	}
+	if stateObject.data.Empty() {
+		markTouched()
 	}
 
 	return nil
