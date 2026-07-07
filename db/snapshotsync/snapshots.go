@@ -359,6 +359,9 @@ func (s *DirtySegment) closeSeg() {
 
 func (s *DirtySegment) closeIdx() {
 	for _, index := range s.indexes {
+		if index == nil {
+			continue
+		}
 		index.Close()
 	}
 
@@ -377,6 +380,9 @@ func (s *DirtySegment) closeAndRemoveFiles() {
 		toRemove := make([]string, 0, 1+len(s.indexes))
 		toRemove = append(toRemove, s.FilePath())
 		for _, index := range s.indexes {
+			if index == nil {
+				continue
+			}
 			toRemove = append(toRemove, index.FilePath())
 		}
 		s.closeIdx()
@@ -1299,7 +1305,8 @@ func (s *RoSnapshots) BuildMissedIndices(ctx context.Context, logPrefix string, 
 		return nil
 	}
 	if !s.SegmentsReady() {
-		return errors.New("not all snapshot segments are available")
+		return fmt.Errorf("not all snapshot segments are available: segments max=%d, indices max=%d, download ready=%t",
+			s.SegmentsMax(), s.IndicesMax(), s.DownloadReady())
 	}
 
 	// wait for Downloader service to download all expected snapshots

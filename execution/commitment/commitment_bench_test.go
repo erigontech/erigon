@@ -291,11 +291,17 @@ func BenchmarkGetDeferredUpdate(b *testing.B) {
 	prefix := []byte{0x01, 0x02, 0x03}
 	prev := []byte{0x04, 0x05, 0x06}
 
+	enc := NewBranchEncoder(1024)
+	raw, err := enc.EncodeBranch(bitmap, touchMap, afterMap, &cells)
+	if err != nil {
+		b.Fatal(err)
+	}
+
 	b.ResetTimer()
 	b.ReportAllocs()
 
 	for b.Loop() {
-		upd := getDeferredUpdate(prefix, bitmap, touchMap, afterMap, &cells, prev)
+		upd := getDeferredUpdate(prefix, raw, prev)
 		putDeferredUpdate(upd)
 	}
 }
@@ -324,11 +330,17 @@ func BenchmarkGetDeferredUpdate_FewCells(b *testing.B) {
 	prefix := []byte{0x01, 0x02, 0x03}
 	prev := []byte{0x04, 0x05, 0x06}
 
+	enc := NewBranchEncoder(1024)
+	raw, err := enc.EncodeBranch(bitmap, touchMap, afterMap, &cells)
+	if err != nil {
+		b.Fatal(err)
+	}
+
 	b.ResetTimer()
 	b.ReportAllocs()
 
 	for b.Loop() {
-		upd := getDeferredUpdate(prefix, bitmap, touchMap, afterMap, &cells, prev)
+		upd := getDeferredUpdate(prefix, raw, prev)
 		putDeferredUpdate(upd)
 	}
 }

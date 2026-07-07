@@ -119,6 +119,109 @@ func BenchmarkSais(b *testing.B) {
 	}
 }
 
+// verifySA16 checks that sa is a permutation of [0,n) whose suffixes of data are
+// in strictly ascending lexicographic order.
+func verifySA16(t *testing.T, data []uint16, sa []int32) {
+	t.Helper()
+	n := len(data)
+	seen := make([]bool, n)
+	for _, v := range sa {
+		require.GreaterOrEqual(t, int(v), 0)
+		require.Less(t, int(v), n)
+		require.False(t, seen[v], "duplicate in sa")
+		seen[v] = true
+	}
+	less := func(i, j int32) bool {
+		for int(i) < n && int(j) < n {
+			if data[i] != data[j] {
+				return data[i] < data[j]
+			}
+			i++
+			j++
+		}
+		return i > j // the shorter (later-starting) suffix is the smaller
+	}
+	for k := 1; k < n; k++ {
+		require.Truef(t, less(sa[k-1], sa[k]), "sa not sorted at %d", k)
+	}
+}
+
+func TestSais16Random(t *testing.T) {
+	var buf []int32
+	rng := rand.New(rand.NewSource(42))
+	for _, n := range []int{2, 3, 10, 100, 1000, 10000} {
+		data := make([]uint16, n)
+		for i := range data {
+			data[i] = uint16(rng.Intn(257)) // full alphabet incl. the 256 symbol
+		}
+		sa := make([]int32, n)
+		require.NoError(t, Sais16(data, 257, sa, &buf))
+		verifySA16(t, data, sa)
+	}
+}
+
+func TestSais16EdgeCases(t *testing.T) {
+	var buf []int32
+	require.NoError(t, Sais16(nil, 257, nil, &buf))
+
+	sa := make([]int32, 1)
+	require.NoError(t, Sais16([]uint16{256}, 257, sa, &buf))
+	assert.Equal(t, []int32{0}, sa)
+
+	// All same symbol: suffixes sort by descending start position.
+	data := make([]uint16, 100)
+	for i := range data {
+		data[i] = 256
+	}
+	sa = make([]int32, 100)
+	require.NoError(t, Sais16(data, 257, sa, &buf))
+	expected := make([]int32, 100)
+	for i := range expected {
+		expected[i] = int32(99 - i)
+	}
+	assert.Equal(t, expected, sa)
+}
+
+// TestSais16MatchesSuperstring pins the optimization invariant: the suffix array
+// of the uint16 code array (separator->0, byte b->b+1) equals the
+// even-position-filtered suffix array of the original 2n-byte superstring
+// (cell = marker byte + value byte).
+func TestSais16MatchesSuperstring(t *testing.T) {
+	var buf []int32
+	rng := rand.New(rand.NewSource(99))
+	for iter := 0; iter < 300; iter++ {
+		var super []byte  // 2-byte cells: real char = {1,b}, separator = {0,0}
+		var code []uint16 // one symbol per cell
+		nwords := 1 + rng.Intn(8)
+		for w := 0; w < nwords; w++ {
+			for k := rng.Intn(6); k > 0; k-- {
+				b := byte(rng.Intn(256))
+				super = append(super, 1, b)
+				code = append(code, uint16(b)+1)
+			}
+			super = append(super, 0, 0) // word boundary
+			code = append(code, 0)
+		}
+		n := len(code)
+
+		// Old path: SA over the 2n superstring, then keep even positions.
+		saB := make([]int32, len(super))
+		require.NoError(t, Sais(super, saB, &buf))
+		filtered := make([]int32, 0, n)
+		for _, v := range saB {
+			if v&1 == 0 {
+				filtered = append(filtered, v>>1)
+			}
+		}
+
+		// New path: SA over the n-length uint16 code array.
+		sa16 := make([]int32, n)
+		require.NoError(t, Sais16(code, 257, sa16, &buf))
+
+		require.Equalf(t, filtered, sa16, "iter %d (n=%d): SA16 != filtered superstring SA", iter, n)
+	}
+}
+
 // TestExpand8_32BStrictlyDecreasing verifies that within each character bucket,
 // the sequence of b values (bucket write positions) produced by expand_8_32 is
 // strictly decreasing. This follows from the algorithm always computing

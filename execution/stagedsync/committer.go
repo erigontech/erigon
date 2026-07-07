@@ -243,7 +243,7 @@ func (cc *commitmentCalculator) handleMessage(ctx context.Context, msg applyResu
 		// computeAndPublish overwrites this back to lastTxNum+1 right
 		// before ComputeCommitment, so the per-tx setting only affects
 		// the lazy-load path and never leaks into the trie fold path.
-		if len(r.writes) > 0 {
+		if !r.writes.IsEmpty() {
 			cc.asOfReader.txNum = r.txNum
 			cc.state.ApplyWrites(r.writes)
 		}

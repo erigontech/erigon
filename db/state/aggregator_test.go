@@ -175,6 +175,37 @@ func TestReferencesInCommitmentBranchesConcurrent(t *testing.T) {
 	wg.Wait()
 }
 
+// TestFilesAmountConcurrent exercises FilesAmount against concurrent dirtyFiles
+// mutation as done by background file integration; meaningful under -race.
+func TestFilesAmountConcurrent(t *testing.T) {
+	t.Parallel()
+	_, agg := testDbAndAggregatorv3(t, 1)
+
+	d := agg.d[kv.AccountsDomain]
+	const iters = 2000
+	var wg sync.WaitGroup
+	wg.Add(2)
+	go func() {
+		defer wg.Done()
+		for i := 0; i < iters; i++ {
+			item := &FilesItem{startTxNum: uint64(i), endTxNum: uint64(i + 1)}
+			agg.dirtyFilesLock.Lock()
+			d.dirtyFiles.Set(item)
+			agg.dirtyFilesLock.Unlock()
+			agg.dirtyFilesLock.Lock()
+			d.dirtyFiles.Delete(item)
+			agg.dirtyFilesLock.Unlock()
+		}
+	}()
+	go func() {
+		defer wg.Done()
+		for i := 0; i < iters; i++ {
+			_ = agg.FilesAmount()
+		}
+	}()
+	wg.Wait()
+}
+
 // generate test data for table tests, containing n; n < 20 keys of length 20 bytes and values of length <= 16 bytes
 func generateInputData(tb testing.TB, keySize, valueSize, keyCount int) ([][]byte, [][]byte) {
 	tb.Helper()
