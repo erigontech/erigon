@@ -8,16 +8,16 @@ The historical ("fat") receipts cache is no longer enabled by default on non-arc
 
 **What changed:**
 
-| `--prune.mode` | Persist historical receipts — before | after |
+| `--prune.mode` | Before | After |
 |---|---|---|
 | `archive` | off | off |
 | `full` | on | off |
 | `blocks` | on | off |
 | `minimal` | on | off |
 
-Receipts and logs stay available within a node's retention window regardless: without the cache they are re-executed on demand from state history, so `eth_getLogs` and `eth_getBlockReceipts` keep working, at higher latency.
+Receipts and logs stay available within a node's retention window regardless: without the cache they are re-executed on demand from state history, so `eth_getLogs` and `eth_getBlockReceipts` keep working, at higher latency. For `full` and `minimal` nodes the availability window is unchanged (receipts follow the state-history window either way). For `blocks` nodes the cache previously made receipts and logs queryable back to genesis; without it they follow the state-history window (last 262,144 blocks) — pass `--persist.receipts` if you rely on full-range `eth_getLogs`.
 
-**Migration:** existing datadirs are unaffected — `--persist.receipts` is recorded at datadir creation and the stored value wins, so a node already syncing with the cache keeps it. Only newly-created `full`/`minimal`/`blocks` datadirs start without it; pass `--persist.receipts` on a fresh datadir to opt back in.
+**Migration:** existing datadirs are unaffected — `--persist.receipts` is recorded at datadir creation and the stored value wins, so a node already syncing with the cache keeps it. Such a node now logs a startup notice that `--persist.receipts` differs from the value stored in the datadir; pass `--persist.receipts` explicitly to silence it. Only newly-created `full`/`minimal`/`blocks` datadirs start without the cache; pass `--persist.receipts` on a fresh datadir to opt back in.
 
 (#22296) — by @yperbasis
 
