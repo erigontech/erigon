@@ -73,6 +73,15 @@ surface the revived account while the validator marks the read invalid → the d
 characterize (is it benign conservative re-exec, or a spurious-abort/correctness issue?).
 This is the accretion — each arm added to fix one parallel-vs-serial bug in one path.
 
+**Pinned (revival_consistency_test.go).** Characterization confirms the divergence is *not*
+observable on any production history: a same-tx metamorphic SD+CREATE2 re-writes the read's
+own field (Balance/CodeHash) at the revival tx, so a stale pre-destruct read is invalidated by
+`checkVersion` before the revival arm matters — reader and validator agree. The verdicts only
+diverge in a synthetic AddressPath-*only* revival (no field co-write), which `createObject`
+never emits (it always co-writes CodeHash at 1664). So the validator's missing `AddressPath >=`
+arm is safe **only because of that co-write** — a fragile, load-bearing invariant the
+rationalization must keep (or make the AddressPath arm explicit at the validator).
+
 **Two distinct kinds of redundancy** (don't conflate them):
 1. *Lifecycle redundancy* — `CreateContractPath` appears mostly in exclusion lists
    (versionmap.go:901) and `noValueRead` (versionmap.go:1050) with no clear distinct
