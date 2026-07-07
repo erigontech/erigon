@@ -27,8 +27,6 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-
-	"github.com/erigontech/erigon/common/pool"
 )
 
 // decompressGzip reads a gzip-compressed body and returns the raw bytes.
@@ -175,7 +173,7 @@ func TestGzipHandlerLargeBody(t *testing.T) {
 // mode and that buffered bytes are drained into the gzip writer.
 func TestGzipResponseWriterFlushActivatesStreaming(t *testing.T) {
 	rec := httptest.NewRecorder()
-	buf := pool.GetBuffer()
+	buf := &bytes.Buffer{}
 	grw := &gzipResponseWriter{buf: buf, ResponseWriter: rec}
 
 	// Write into the buffer before activating streaming.
