@@ -199,6 +199,48 @@ intra-tx revert. Move revert onto the versioned write-set/journal (not `so.data`
 parallel path and can be removed, taking their reads/locks/allocs with them. (Matches the
 staged plan: the hard part is moving intra-tx revert/journal off `so.data`.)
 
+## Phase 2 execution plan (parallel stateObject removal)
+
+Goal: the parallel path never materializes/reconstructs the stateObject, so
+`refreshVersionedAccount` (the so.data↔versionMap sync) and the write-path
+`getStateObject` refresh are dead. Reads already bypass so.data; the write path is
+the remaining consumer. `balanceChange.revert` already reverts `versionedWrites`
+independently of so.data — the only coupling is the journal recording `prev` from
+so.data, which forces the refresh.
+
+Done: reads (getters), Empty/Exist (Phase 1), TouchAccount (increment 1 — existing
+accts compute emptiness via `emptyFromVersionedFields`, absent falls through to
+`GetOrNewStateObject` so `createObject` records AddressPath).
+
+Remaining, as **per-field vertical slices** (balance first, then nonce/code/storage),
+each gated by state -race + SD/recreate/OCC + hive engine-api + eest-devnet BAL:
+
+**Balance slice.** `AddBalance`/`SubBalance` already hold `prev` from `getBalance`
+(versionMap-direct). Replace the `GetOrNewStateObject` + `stateObject.SetBalance`
+with: append `balanceChange{prev, wasCommited}` + `OnBalanceChange(prev, update)`
+trace hook + `recordWriteBalance(update)` — no so.data. `SetBalance` reads current
+first for the journal `prev`. Revert stays as-is (materializes lazily only on the
+rare revert). **Subtlety:** `AddBalance`/`SetBalance` to an *absent* account must
+still `createObject` (AddressPath write for OCC create-detection) — existing accts
+skip materialization, absent keep it (mirror TouchAccount's split; needs an
+existence signal `getBalance` doesn't yet surface).
+
+**GetDelegatedDesignation.** Needs a code read with storage fallback AND no
+OCC-recording (refreshCode is no-record but skipStorage → misses cold code;
+readCode has fallback but records). Add a fallback+no-record code-read variant.
+
+Then delete the write-path `refreshVersionedAccount`.
+
+## Precise measurement (after Phase 2)
+
+The "structural OCC per-read tax" framing is currently an **inference** from the
+base-profile `versionedReadCore` decomposition, not a measurement of the changed
+warm path (the 53–265 ms cells are too thin for signal, and no geth comparison
+exists). Before optimizing the vio paths further: add fine-grained pprof labels
+(`vio-read`/`vio-write` or per-path) + extend `dbg.KVReadLevelledMetrics` into the
+versionedio read/write primitives, and use a higher-signal workload, so time
+attribution is measured rather than inferred.
+
 ## Follow-on: versionMap RWMutex strategy (deferred)
 
 Profiling the warm-extcodehash cell focused on `sub:exec-worker` shows `VersionMap.mu`'s
