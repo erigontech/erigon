@@ -234,6 +234,21 @@ func testMixerClose(t *testing.T) {
 	mix.Close() // shouldn't crash
 }
 
+// This test checks that AddSource closes the rejected iterator when the
+// mixer is already closed, so callers racing with Close do not leak resources.
+func TestFairMixAddSourceAfterClose(t *testing.T) {
+	mix := NewFairMix(-1)
+	mix.Close()
+
+	// Mixer is now closed. AddSource must close the rejected iterator
+	// so the caller does not leak it.
+	rejected := &genIter{index: 1}
+	mix.AddSource(rejected)
+	if rejected.Next() {
+		t.Fatal("rejected iterator was not closed by AddSource")
+	}
+}
+
 func idPrefixDistribution(nodes []*Node) map[uint32]int {
 	d := make(map[uint32]int)
 	for _, node := range nodes {

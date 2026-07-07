@@ -5,6 +5,7 @@ import (
 	"crypto/ecdsa"
 	"crypto/rand"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"io"
 	"net"
@@ -226,6 +227,104 @@ func TestSend(t *testing.T) {
 	require.NoError(t, err)
 	require.NotNil(t, sendReply)
 	require.Equal(t, 10, statusCount)
+}
+
+func TestPeerAdminAnySuccess(t *testing.T) {
+	testErr := errors.New("test error")
+
+	methods := []struct {
+		name   string
+		expect func(client *direct.MockSentryClient, success bool, err error)
+		call   func(mux sentryproto.SentryClient) (bool, error)
+	}{
+		{
+			name: "AddPeer",
+			expect: func(client *direct.MockSentryClient, success bool, err error) {
+				client.EXPECT().AddPeer(gomock.Any(), gomock.Any(), gomock.Any()).
+					Return(&sentryproto.AddPeerReply{Success: success}, err).AnyTimes()
+			},
+			call: func(mux sentryproto.SentryClient) (bool, error) {
+				reply, err := mux.AddPeer(context.Background(), &sentryproto.AddPeerRequest{})
+				return reply.GetSuccess(), err
+			},
+		},
+		{
+			name: "RemovePeer",
+			expect: func(client *direct.MockSentryClient, success bool, err error) {
+				client.EXPECT().RemovePeer(gomock.Any(), gomock.Any(), gomock.Any()).
+					Return(&sentryproto.RemovePeerReply{Success: success}, err).AnyTimes()
+			},
+			call: func(mux sentryproto.SentryClient) (bool, error) {
+				reply, err := mux.RemovePeer(context.Background(), &sentryproto.RemovePeerRequest{})
+				return reply.GetSuccess(), err
+			},
+		},
+		{
+			name: "AddTrustedPeer",
+			expect: func(client *direct.MockSentryClient, success bool, err error) {
+				client.EXPECT().AddTrustedPeer(gomock.Any(), gomock.Any(), gomock.Any()).
+					Return(&sentryproto.AddPeerReply{Success: success}, err).AnyTimes()
+			},
+			call: func(mux sentryproto.SentryClient) (bool, error) {
+				reply, err := mux.AddTrustedPeer(context.Background(), &sentryproto.AddPeerRequest{})
+				return reply.GetSuccess(), err
+			},
+		},
+		{
+			name: "RemoveTrustedPeer",
+			expect: func(client *direct.MockSentryClient, success bool, err error) {
+				client.EXPECT().RemoveTrustedPeer(gomock.Any(), gomock.Any(), gomock.Any()).
+					Return(&sentryproto.RemovePeerReply{Success: success}, err).AnyTimes()
+			},
+			call: func(mux sentryproto.SentryClient) (bool, error) {
+				reply, err := mux.RemoveTrustedPeer(context.Background(), &sentryproto.RemovePeerRequest{})
+				return reply.GetSuccess(), err
+			},
+		},
+	}
+
+	scenarios := []struct {
+		name        string
+		successes   []bool
+		errs        []error
+		wantSuccess bool
+	}{
+		{name: "all clients fail", successes: []bool{false, false, false}},
+		{name: "one client succeeds", successes: []bool{false, true, false}, wantSuccess: true},
+		{name: "all clients succeed", successes: []bool{true, true, true}, wantSuccess: true},
+		{name: "client error", successes: []bool{true, true, true}, errs: []error{nil, testErr, nil}},
+	}
+
+	for _, method := range methods {
+		for _, scenario := range scenarios {
+			t.Run(method.name+"/"+scenario.name, func(t *testing.T) {
+				ctrl := gomock.NewController(t)
+				defer ctrl.Finish()
+
+				clients := make([]sentryproto.SentryClient, 0, len(scenario.successes))
+				for i, success := range scenario.successes {
+					client := newClient(ctrl, i, nil)
+					var err error
+					if scenario.errs != nil {
+						err = scenario.errs[i]
+					}
+					method.expect(client, success, err)
+					clients = append(clients, client)
+				}
+
+				mux := libsentry.NewSentryMultiplexer(clients)
+				success, err := method.call(mux)
+
+				if scenario.errs != nil {
+					require.ErrorIs(t, err, testErr)
+					return
+				}
+
+				require.NoError(t, err)
+				require.Equal(t, scenario.wantSuccess, success)
+			})
+		}
+	}
 }
 
 func TestMessages(t *testing.T) {
