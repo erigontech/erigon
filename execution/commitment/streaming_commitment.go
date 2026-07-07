@@ -833,9 +833,7 @@ func applyDeferredGuarded(ctx PatriciaContext, deferred []*DeferredBranchUpdate,
 		return err
 	}
 
-	encoder := workerEncoderPool.Get().(*BranchEncoder)
 	merger := workerMergerPool.Get().(*BranchMerger)
-	defer workerEncoderPool.Put(encoder)
 	defer workerMergerPool.Put(merger)
 
 	applied := make(map[string][]byte, len(deferred))
@@ -853,7 +851,7 @@ func applyDeferredGuarded(ctx PatriciaContext, deferred []*DeferredBranchUpdate,
 			}
 			upd.prev = common.Copy(prev)
 		}
-		if err := encodeDeferredUpdate(upd, encoder, merger); err != nil {
+		if err := mergeDeferredUpdate(upd, merger); err != nil {
 			return err
 		}
 		if upd.encoded == nil {

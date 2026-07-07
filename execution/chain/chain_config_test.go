@@ -17,6 +17,7 @@
 package chain
 
 import (
+	"encoding/json"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -224,6 +225,33 @@ func TestBlobParameterInactiveHardfork(t *testing.T) {
 	assert.Equal(t, uint64(9), c.GetMaxBlobsPerBlock(time))
 	assert.Equal(t, uint64(5007716), c.GetBlobGasPriceUpdateFraction(time))
 }
+
+func TestConfigL2JSONRoundTrip(t *testing.T) {
+	var c Config
+	a := assert.New(t)
+	a.NoError(json.Unmarshal([]byte(`{"chainId":1,"l2":{"name":"testl2","foo":1}}`), &c))
+	a.JSONEq(`{"name":"testl2","foo":1}`, string(c.L2JSON))
+	a.True(c.IsL2())
+
+	var noL2 Config
+	a.NoError(json.Unmarshal([]byte(`{"chainId":1}`), &noL2))
+	a.False(noL2.IsL2())
+
+	var nullL2 Config
+	a.NoError(json.Unmarshal([]byte(`{"chainId":1,"l2":null}`), &nullL2))
+	a.False(nullL2.IsL2())
+
+	resolved := Config{L2: fakeL2{}}
+	a.True(resolved.IsL2())
+
+	var nilCfg *Config
+	a.False(nilCfg.IsL2())
+}
+
+type fakeL2 struct{}
+
+func (fakeL2) Name() string                                                 { return "fake" }
+func (fakeL2) ResolveRules(l2Version, blockNum, blockTime uint64, r *Rules) {}
 
 func TestBlobParameterDencunAndPectraAtGenesis(t *testing.T) {
 	var c Config

@@ -8,6 +8,7 @@ import (
 	"strconv"
 	"time"
 
+	"github.com/OffchainLabs/go-bitfield"
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/phase1/core/state/lru"
 	"github.com/erigontech/erigon/cl/utils/eth_clock"
@@ -25,7 +26,6 @@ import (
 	"github.com/libp2p/go-libp2p/core/metrics"
 	"github.com/libp2p/go-libp2p/core/peer"
 	"github.com/multiformats/go-multiaddr"
-	"github.com/prysmaticlabs/go-bitfield"
 )
 
 type P2PConfig struct {
