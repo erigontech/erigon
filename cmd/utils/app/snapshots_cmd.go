@@ -3424,7 +3424,7 @@ func doRetireCommand(ctx context.Context, cliCtx *cli.Command, dirs datadir.Dirs
 	cfg := ethconfig.NewSnapCfg(false, true, true, chainConfig.ChainName)
 
 	res, clean, err := openSnaps(ctx, cfg, dirs, db, logger)
-	caplinSnaps, br, agg := res.CaplinSnaps, res.BlockRetire, res.Aggregator
+	caplinSnaps, caplinStateSnaps, br, agg := res.CaplinSnaps, res.CaplinStateSnaps, res.BlockRetire, res.Aggregator
 	if err != nil {
 		return err
 	}
@@ -3472,6 +3472,10 @@ func doRetireCommand(ctx context.Context, cliCtx *cli.Command, dirs datadir.Dirs
 	}
 
 	if err := br.RemoveOverlaps(nil); err != nil {
+		return err
+	}
+
+	if err := caplinStateSnaps.RemoveOverlaps(); err != nil {
 		return err
 	}
 

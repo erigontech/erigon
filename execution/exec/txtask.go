@@ -60,7 +60,7 @@ type Task interface {
 	VersionMap() *state.VersionMap
 	GetBlockStateCache() *state.BlockStateCache
 	VersionedReads(ibs *state.IntraBlockState) state.ReadSet
-	VersionedWrites(ibs *state.IntraBlockState) state.VersionedWrites
+	VersionedWrites(ibs *state.IntraBlockState) *state.WriteSet
 	Reset(evm *vm.EVM, ibs *state.IntraBlockState, callTracer *calltracer.CallTracer) error
 	ResetGasPool(*protocol.GasPool)
 
@@ -106,7 +106,7 @@ type TxResult struct {
 	Err               error
 	Coinbase          accounts.Address
 	TxIn              state.ReadSet
-	TxOut             state.VersionedWrites
+	TxOut             *state.WriteSet
 
 	Receipt *types.Receipt
 	Logs    []*types.Log
@@ -119,7 +119,7 @@ type TxResult struct {
 	// address) produced by MakeWriteSet during worker execution. Used by the
 	// parallel finalize path to skip full IBS reconstruction: fee-calc balance
 	// adjustments are applied directly to these writes.
-	CollectorWrites state.VersionedWrites
+	CollectorWrites *state.WriteSet
 }
 
 func (r *TxResult) compare(other *TxResult) int {
@@ -453,7 +453,7 @@ func (t *TxTask) VersionedReads(ibs *state.IntraBlockState) state.ReadSet {
 	return ibs.VersionedReads()
 }
 
-func (t *TxTask) VersionedWrites(ibs *state.IntraBlockState) state.VersionedWrites {
+func (t *TxTask) VersionedWrites(ibs *state.IntraBlockState) *state.WriteSet {
 	return ibs.VersionedWrites(false)
 }
 
