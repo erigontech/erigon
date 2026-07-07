@@ -67,12 +67,7 @@ func TestGetChainNameFromChainData_OldSchema(t *testing.T) {
 	// this test catches it.
 	db, err := mdbx.New(dbcfg.ChainDB, logger).
 		Path(chainDataDir).
-		WithTableCfg(func(_ kv.TableCfg) kv.TableCfg {
-			return kv.TableCfg{
-				kv.HeaderCanonical: {},
-				kv.ConfigTable:     {},
-			}
-		}).
+		WithTableCfg(ChaindataSchemaForGenesis).
 		Open(ctx)
 	require.NoError(t, err)
 
@@ -117,12 +112,7 @@ func TestGetChainNameFromChainData_NonMainnet(t *testing.T) {
 
 	db, err := mdbx.New(dbcfg.ChainDB, logger).
 		Path(chainDataDir).
-		WithTableCfg(func(_ kv.TableCfg) kv.TableCfg {
-			return kv.TableCfg{
-				kv.HeaderCanonical: {},
-				kv.ConfigTable:     {},
-			}
-		}).
+		WithTableCfg(ChaindataSchemaForGenesis).
 		Open(ctx)
 	require.NoError(t, err)
 
@@ -145,12 +135,7 @@ func TestGetChainNameFromChainData_EmptyDB(t *testing.T) {
 
 	db, err := mdbx.New(dbcfg.ChainDB, logger).
 		Path(chainDataDir).
-		WithTableCfg(func(_ kv.TableCfg) kv.TableCfg {
-			return kv.TableCfg{
-				kv.HeaderCanonical: {},
-				kv.ConfigTable:     {},
-			}
-		}).
+		WithTableCfg(ChaindataSchemaForGenesis).
 		Open(ctx)
 	require.NoError(t, err)
 	db.Close()
