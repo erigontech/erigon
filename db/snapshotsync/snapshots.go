@@ -1305,8 +1305,8 @@ func (s *RoSnapshots) BuildMissedIndices(ctx context.Context, logPrefix string, 
 		return nil
 	}
 	if !s.SegmentsReady() {
-		return fmt.Errorf("not all snapshot segments are available: snapshots are not opened yet (dir=%s, segments max=%d, indices max=%d, download ready=%t)",
-			s.dir, s.SegmentsMax(), s.IndicesMax(), s.DownloadReady())
+		return fmt.Errorf("not all snapshot segments are available: segments max=%d, indices max=%d, download ready=%t",
+			s.SegmentsMax(), s.IndicesMax(), s.DownloadReady())
 	}
 
 	// wait for Downloader service to download all expected snapshots
