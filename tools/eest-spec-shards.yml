@@ -129,4 +129,4 @@
 - shard: zkevm-witness-race
   workers: 8
   # TODO: reduce to 0 (glamsterdam-devnet-6 EIPs WIP)
-  max-allowed-failures: 1680
+  max-allowed-failures: 207
