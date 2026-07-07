@@ -226,7 +226,9 @@ func (db *DB) UpdateNosync(ctx context.Context, f func(tx kv.RwTx) error) error 
 }
 
 func (db *DB) Close() {
-	//db.stateFiles.Close()
+	if db.stateFiles != nil {
+		db.stateFiles.Close()
+	}
 	db.RwDB.Close()
 	for _, forkagg := range db.forkaggs {
 		forkagg.Close()
@@ -296,6 +298,9 @@ func (tx *tx) AggTx() any             { return tx.aggtx }
 func (tx *tx) Agg() *state.Aggregator { return tx.db.stateFiles }
 func (tx *tx) StepsInFiles(entitySet ...kv.Domain) kv.Step {
 	return tx.aggtx.StepsInFiles(entitySet...)
+}
+func (tx *tx) Retire(ctx context.Context, cutoffs kv.RetireCutoffs) (int, error) {
+	return tx.Agg().Retire(ctx, cutoffs)
 }
 
 func (tx *tx) Rollback() {
@@ -684,7 +689,6 @@ func (db *DB) ForkableTables(names ...kv.ForkableId) (tables []string) {
 	}
 	return
 }
-func (db *DB) ReloadFiles() error { return db.stateFiles.ReloadFiles() }
 func (db *DB) BuildMissedAccessors(ctx context.Context, workers int) (err error) {
 	if err = db.stateFiles.BuildMissedAccessors(ctx, workers); err != nil {
 		return

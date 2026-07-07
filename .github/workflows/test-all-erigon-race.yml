@@ -17,7 +17,7 @@ jobs:
     outputs:
       test-groups: ${{ steps.load.outputs.groups }}
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 1
       - id: load
@@ -63,7 +63,7 @@ jobs:
           echo "This workflow is being executed by this runner: $RUNNER_NAME"
 
       - name: Checkout custom actions
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
         with:
           fetch-depth: 1
 
@@ -72,8 +72,12 @@ jobs:
         with:
           submodules: true
           cleanup-space: true
-          build-cache-extra-key: ${{ matrix.test-group }}
+          # Go's test cache can't see ERIGON_EXEC3_PARALLEL (read at package
+          # init), so serial and parallel results only stay mode-pure if each
+          # exec mode keeps its own cache lineage.
+          build-cache-extra-key: ${{ matrix.test-group }}-${{ matrix.exec_mode }}
           ramdisk: true
+          cache-namespace: test-all-erigon-race
 
       - name: Run ${{ matrix.test-group }} tests on ${{ matrix.os }} (${{ matrix.exec_mode }} exec)
         env:

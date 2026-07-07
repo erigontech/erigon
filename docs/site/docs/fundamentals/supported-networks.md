@@ -1,7 +1,7 @@
 ---
 title: "Supported Networks"
 description: "Mainnet, testnets, Gnosis, Polygon, and all other chains Erigon can sync."
-sidebar_position: 4
+sidebar_position: 8
 ---
 
 

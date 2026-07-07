@@ -75,8 +75,11 @@ type ForkChoiceStorageReader interface {
 	GetBlock(blockRoot common.Hash) (*cltypes.SignedBeaconBlock, bool)
 	// [New in Gloas:EIP7732] HasEnvelope checks if a signed execution payload envelope exists.
 	HasEnvelope(blockRoot common.Hash) bool
+	// [New in Gloas:EIP7732] IsPayloadVerified checks whether the execution payload was accepted by the EL.
+	IsPayloadVerified(blockRoot common.Hash) bool
 	// [New in Gloas:EIP7732] ReadEnvelopeFromDisk reads a signed execution payload envelope from disk.
 	ReadEnvelopeFromDisk(blockRoot common.Hash) (*cltypes.SignedExecutionPayloadEnvelope, error)
+	GetRecentExecutionPayloadStatusByRoot(blockRoot common.Hash) (execution_client.PayloadStatus, bool)
 	// [New in Gloas:EIP7732] IsBlobDataAvailable returns the local node's assessment of whether
 	// blob data is available for the given block. Used by the payload_attestation_data API so PTC
 	// validators can set the blob_data_available flag independently of payload_present.

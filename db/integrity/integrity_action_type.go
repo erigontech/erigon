@@ -130,7 +130,7 @@ const (
 // FastChecks is ordered cheapest → heaviest so time-budgeted runs give unused
 // budget to the heavier checks at the tail.
 var FastChecks = []Check{
-	StateProgress, Publishable, HeaderNoGaps, BlocksTxnID, Blocks,
+	Publishable, HeaderNoGaps, BlocksTxnID, Blocks,
 	ReceiptsNoDups, RCacheNoDups, ReceiptRootIntegrity, InvertedIndex, CommitmentRoot, CommitmentKvi,
 	HistoryNoSystemTxs, CommitmentHistVal, StateRootVerifyByHistory,
 }
@@ -139,6 +139,7 @@ var SlowChecks = []Check{StateVerify}
 var DeprecatedChecks = []Check{
 	BorEvents, BorSpans, BorCheckpoints,
 	CommitmentKvDeref, //StateVerify - will overcome
+	StateProgress,
 }
 var AllChecks = append(append(append([]Check{}, FastChecks...), SlowChecks...), DeprecatedChecks...)
 

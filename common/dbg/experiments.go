@@ -75,11 +75,13 @@ var (
 	BuildSnapshotAllowance = EnvInt("SNAPSHOT_BUILD_SEMA_SIZE", 1) // allows 1 kind of snapshots to be built simultaneously
 
 	SnapshotMadvRnd = EnvBool("SNAPSHOT_MADV_RND", true)
-	OnlyCreateDB    = EnvBool("ONLY_CREATE_DB", false)
+	// kill-switch: set SNAPSHOT_MADV_SEQUENTIAL=false to skip MADV_SEQUENTIAL in seg.OpenSequentialView
+	SnapshotMadvSequential = EnvBool("SNAPSHOT_MADV_SEQUENTIAL", true)
+	OnlyCreateDB           = EnvBool("ONLY_CREATE_DB", false)
 
 	CaplinSyncedDataMangerDeadlockDetection = EnvBool("CAPLIN_SYNCED_DATA_MANAGER_DEADLOCK_DETECTION", false)
 
-	Exec3Parallel        = EnvBool("EXEC3_PARALLEL", false)
+	Exec3Parallel        = EnvBool("EXEC3_PARALLEL", true)
 	numWorkers           = runtime.NumCPU()
 	Exec3Workers         = EnvInt("EXEC3_WORKERS", numWorkers)
 	ExecTerseLoggerLevel = EnvInt("EXEC_TERSE_LOGGER_LEVEL", int(log.LvlWarn))
@@ -114,6 +116,8 @@ var (
 	CaplinEfficientReorg  = EnvBool("CAPLIN_EFFICIENT_REORG", true)
 	UseTxDependencies     = EnvBool("USE_TX_DEPENDENCIES", false)
 	UseStateCache         = EnvBool("USE_STATE_CACHE", true)
+	UseCodeStore          = EnvBool("USE_CODE_STORE", true)
+	DisableAdaptivePin    = EnvBool("DISABLE_ADAPTIVE_PIN", false)
 	AssertStateCache      = EnvBool("ASSERT_STATE_CACHE", false)
 	ReadAhead             = EnvBool("READ_AHEAD", true)
 
@@ -121,7 +125,7 @@ var (
 	TraceDeletion         = EnvBool("TRACE_DELETION", false)
 
 	RpcDropResponse  = EnvBool("RPC_DROP_RESPONSE", false)
-	TipTrieWarmupers = EnvInt("TIP_TRIE_WARMUPERS", runtime.NumCPU()*8) //io-bound (not cpu-bound). it's ok to have `io-threads > cpus`
+	TipTrieWarmupers = EnvInt("TIP_TRIE_WARMUPERS", estimate.HalfCPUs())
 
 	PerfProfiles = EnvBool("PERF_PROFILES", false)
 )

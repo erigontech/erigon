@@ -53,6 +53,7 @@ import (
 	"github.com/erigontech/erigon/db/snaptype"
 	dbstate "github.com/erigontech/erigon/db/state"
 	"github.com/erigontech/erigon/execution/builder"
+	"github.com/erigontech/erigon/execution/cache"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/exec"
 	"github.com/erigontech/erigon/execution/execmodule"
@@ -122,6 +123,7 @@ type ExecModuleTester struct {
 	ForkValidator   *execmodule.ForkValidator
 	ExecModule      *execmodule.ExecModule
 	StateCache      *execmodule.Cache
+	domainCache     *cache.StateCache
 	retirementStart chan bool
 	retirementDone  chan struct{}
 	retirementWg    sync.WaitGroup
@@ -155,6 +157,9 @@ func (emt *ExecModuleTester) Close() {
 	}
 	if emt.DB != nil {
 		emt.DB.Close()
+	}
+	if emt.domainCache != nil {
+		emt.domainCache.Close()
 	}
 	if emt.tb == nil && emt.Dirs.DataDir != "" {
 		dir.RemoveAll(emt.Dirs.DataDir)
@@ -333,24 +338,42 @@ func WithFcuBackgroundCommit() Option {
 	}
 }
 
+// WithAlwaysGenerateChangesets pins --experimental.always-generate-changesets
+// regardless of the tester default: true for tests that reorg deeper than
+// MaxReorgDepth, false for tests that rely on the windowed-changesets
+// production behaviour.
+func WithAlwaysGenerateChangesets(v bool) Option {
+	return func(opts *options) {
+		opts.alwaysGenerateChangesets = &v
+	}
+}
+
 func WithFcuBackgroundPrune() Option {
 	return func(opts *options) {
 		opts.fcuBackgroundPrune = true
 	}
 }
 
+func WithSentryProtocol(protocol uint) Option {
+	return func(opts *options) {
+		opts.sentryProtocol = protocol
+	}
+}
+
 type options struct {
-	stepSize            *uint64
-	experimentalBAL     bool
-	genesis             *types.Genesis
-	chainConfig         *chain.Config
-	key                 *ecdsa.PrivateKey
-	engine              rules.Engine
-	pruneMode           *prune.Mode
-	withTxPool          bool
-	enableDomains       []kv.Domain
-	fcuBackgroundCommit bool
-	fcuBackgroundPrune  bool
+	stepSize                 *uint64
+	experimentalBAL          bool
+	genesis                  *types.Genesis
+	chainConfig              *chain.Config
+	key                      *ecdsa.PrivateKey
+	engine                   rules.Engine
+	pruneMode                *prune.Mode
+	withTxPool               bool
+	enableDomains            []kv.Domain
+	fcuBackgroundCommit      bool
+	fcuBackgroundPrune       bool
+	alwaysGenerateChangesets *bool
+	sentryProtocol           uint
 }
 
 func applyOptions(opts []Option) options {
@@ -361,6 +384,7 @@ func applyOptions(opts []Option) options {
 		pruneMode:       &defaultPruneMode,
 		chainConfig:     chain.TestChainBerlinConfig,
 		experimentalBAL: false,
+		sentryProtocol:  direct.ETH68,
 	}
 	for _, o := range opts {
 		o(&opt)
@@ -420,7 +444,9 @@ func New(tb testing.TB, opts ...Option) *ExecModuleTester {
 	cfg.Sync.BodyDownloadTimeoutSeconds = 10
 	cfg.TxPool.Disable = !withTxPool
 	cfg.Dirs = dirs
-	cfg.AlwaysGenerateChangesets = true
+	if opt.alwaysGenerateChangesets != nil {
+		cfg.AlwaysGenerateChangesets = *opt.alwaysGenerateChangesets
+	}
 	cfg.PersistReceiptsCacheV2 = true
 	cfg.ChaosMonkey = false
 	cfg.Snapshot.ChainName = gspec.Config.ChainName
@@ -523,7 +549,7 @@ func New(tb testing.TB, opts ...Option) *ExecModuleTester {
 
 	mock.Address = crypto.PubkeyToAddress(mock.Key.PublicKey)
 
-	mock.SentryClient, err = direct.NewSentryClientDirect(direct.ETH68, mock, nil)
+	mock.SentryClient, err = direct.NewSentryClientDirect(opt.sentryProtocol, mock, nil)
 	require.NoError(tb, err)
 	sentries := []sentryproto.SentryClient{mock.SentryClient}
 
@@ -695,6 +721,10 @@ func New(tb testing.TB, opts ...Option) *ExecModuleTester {
 		Accumulator:    mock.Notifications.Accumulator,
 		RecentReceipts: mock.Notifications.RecentReceipts,
 	}
+	// Per-instance domain cache, held on the tester so Close releases its
+	// envelope reservation. Uses the production default — the caches jump-grow on
+	// demand, so a small-working-set fixture stays small.
+	mock.domainCache = cache.NewDefaultStateCache()
 	mock.ExecModule = execmodule.NewExecModule(
 		ctx,
 		mock.BlockReader,
@@ -706,6 +736,7 @@ func New(tb testing.TB, opts ...Option) *ExecModuleTester {
 		hook,
 		accum,
 		mock.StateCache,
+		mock.domainCache,
 		logger,
 		engine,
 		cfg.Sync,
@@ -785,14 +816,7 @@ func (emt *ExecModuleTester) insertPoSBlocks(chain *blockgen.ChainPack) error {
 		insertedBlocks[chain.Blocks[i].NumberU64()] = struct{}{}
 	}
 
-	balMap := make(map[common.Hash][]byte)
-	for i, bal := range chain.BlockAccessLists {
-		if len(bal) > 0 {
-			block := chain.Blocks[i]
-			balMap[block.Hash()] = bal
-		}
-	}
-	if err := wr.InsertBlocksAndWaitWithAccessLists(emt.Ctx, chain.Blocks, balMap); err != nil {
+	if err := wr.InsertBlocks(emt.Ctx, chain.Blocks, chain.BlockAccessLists); err != nil {
 		return err
 	}
 

@@ -17,15 +17,17 @@ jobs:
 
     steps:
       - name: Checkout custom actions
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
         with:
           fetch-depth: 1
 
       - uses: ./.github/actions/setup-erigon
         id: erigon
+        with:
+          cache-namespace: test-integration-caplin
 
       - name: Cache cl_mainnet tarball
-        uses: actions/cache@v5
+        uses: actions/cache@v6
         with:
           # Only cache the .tar.gz; the extracted dir is recreated by
           # tools/test-fixtures.sh on each run from the cached tarball.
@@ -65,15 +67,17 @@ jobs:
 
     steps:
       - name: Checkout custom actions
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
         with:
           fetch-depth: 1
 
       - uses: ./.github/actions/setup-erigon
         id: erigon
+        with:
+          cache-namespace: test-integration-caplin
 
       - name: Cache cl_mainnet tarball
-        uses: actions/cache@v5
+        uses: actions/cache@v6
         with:
           path: test-fixtures-cache/cl_mainnet.tar.gz
           key: test-fixtures-cl-${{ runner.os }}-${{ hashFiles('test-fixtures.json') }}

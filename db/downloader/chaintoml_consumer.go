@@ -7,6 +7,7 @@ import (
 	"net"
 	"os"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -172,7 +173,7 @@ type ipPortAddr struct {
 
 func (a ipPortAddr) Network() string { return "tcp" }
 func (a ipPortAddr) String() string {
-	return net.JoinHostPort(a.IP.String(), fmt.Sprintf("%d", a.Port))
+	return net.JoinHostPort(a.IP.String(), strconv.Itoa(a.Port))
 }
 
 // ApplyDiscoveredChainToml merges discovered chain.toml entries into the preverified registry.

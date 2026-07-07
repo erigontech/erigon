@@ -19,10 +19,12 @@ jobs:
     runs-on: ${{ matrix.os }}
 
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
 
       - uses: ./.github/actions/setup-erigon
         id: erigon
+        with:
+          cache-namespace: reproducible-build
 
       - name: Build all
         run: make all

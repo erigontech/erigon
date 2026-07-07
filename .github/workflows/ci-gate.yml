@@ -2,11 +2,6 @@ name: CI Gate
 
 on:
   pull_request:
-    branches:
-      - main
-      - 'release/**'
-      - performance
-      - performance-stable
     types:
       - opened
       - reopened
@@ -179,46 +174,37 @@ jobs:
       - sonar
     runs-on: ubuntu-latest
     steps:
+      # cancelled() is only valid in `if:`, so capture it as a step output for
+      # the gate logic below to read.
+      - name: Detect run cancellation
+        id: cancelflag
+        if: cancelled()
+        run: echo "cancelled=true" >> "$GITHUB_OUTPUT"
+
+      - name: Checkout
+        if: always()
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
       - name: Check all required jobs
+        if: always()
         env:
           GH_TOKEN: ${{ github.token }}
-        run: |
-          echo '${{ toJSON(needs) }}' > needs.json
-          failed=$(jq -r 'to_entries[] | select(.value.result == "failure" or .value.result == "cancelled") | .key' needs.json)
-          if [ -n "$failed" ]; then
-            echo "The following gate jobs failed or were cancelled:"
-            echo "$failed"
-            jobs=$(gh api "repos/${{ github.repository }}/actions/runs/${{ github.run_id }}/jobs" --paginate) || true
-            # The leaf that fast-cancelled the run is the true root cause; other failed steps may be collateral from that cancellation.
-            root=$(echo "$jobs" | jq -r '.jobs[] | select(any(.steps[]?; .name == "Cancel workflow run on failure" and .conclusion == "success")) | "::error title=CI root cause::" + .name + " — failed step: " + ([.steps[] | select(.conclusion == "failure") | .name] | join("; "))' 2>/dev/null || true)
-            if [ -z "$root" ]; then
-              root=$(echo "$jobs" | jq -r '.jobs[] | select(.name != "ci-gate") | select(any(.steps[]?; .conclusion == "failure")) | "::error title=CI root cause::" + .name + " — failed step: " + ([.steps[] | select(.conclusion == "failure") | .name] | join("; "))' 2>/dev/null || true)
-            fi
-            echo "Root-cause job(s):"
-            echo "$root"
-            exit 1
-          fi
-          echo "All required jobs passed or were skipped."
+          NEEDS: ${{ toJSON(needs) }}
+          RUN_CANCELLED: ${{ steps.cancelflag.outputs.cancelled }}
+        run: bash .github/workflows/scripts/ci-gate-check.sh
 
-      # GitHub does not auto-remove UNMERGEABLE entries from the merge queue
-      # when their required checks fail — they sit at the queue position with
-      # state UNMERGEABLE until someone manually dequeues. This step does that
-      # automatically on real failures (not queue-reshuffle cancellations,
-      # where all needs come back as `cancelled` and GitHub re-creates a fresh
-      # merge_group event for us).
+      # GitHub does not auto-remove entries left UNMERGEABLE by a failed check,
+      # so dequeue explicitly; the gate only fails the job on a real failure.
       - name: Dequeue failed merge-queue PR
         if: failure() && github.event_name == 'merge_group'
         env:
           GH_TOKEN: ${{ github.token }}
-          NEEDS: ${{ toJSON(needs) }}
           REF: ${{ github.ref_name }}
           OWNER: ${{ github.repository_owner }}
           REPO_NAME: ${{ github.event.repository.name }}
         run: |
-          if ! echo "$NEEDS" | jq -e 'to_entries[] | select(.value.result == "failure")' > /dev/null; then
-            echo "No gate need failed (only cancellations) — likely a queue reshuffle, skipping dequeue."
-            exit 0
-          fi
           pr_number=$(echo "$REF" | grep -oE 'pr-[0-9]+' | head -1 | cut -d- -f2)
           if [ -z "$pr_number" ]; then
             echo "::warning::Could not parse PR number from ref $REF"

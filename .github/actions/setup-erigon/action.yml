@@ -22,6 +22,13 @@ inputs:
     description: "Extra segment appended to build cache key (e.g. matrix.test-group)"
     required: false
     default: ''
+  cache-namespace:
+    description: >
+      Workflow segment of the Go cache keys. Defaults to the top-level workflow
+      file basename, which differs between ci-gate and cache-warming runs;
+      reusable workflows should pass their own basename so keys match across both.
+    required: false
+    default: ''
   ramdisk:
     description: "Create a RAM disk and export its path as ERIGON_EXECUTION_TESTS_TMPDIR"
     required: false
@@ -123,7 +130,7 @@ runs:
     - name: Restore submodule git objects cache
       id: restore-submodules
       if: ${{ inputs.submodules == 'true' }}
-      uses: actions/cache/restore@v4
+      uses: actions/cache/restore@v5
       with:
         path: |
           .git/modules
@@ -227,29 +234,48 @@ runs:
         go-version: ${{ steps.goversion.outputs.version }}
         # We have our own caching because we smrt.
         cache: false
+        # Resolve 1.N.x to the same patch release on every runner regardless of
+        # what the image tool cache ships, so GOVERSION-keyed cache keys don't split.
+        check-latest: true
 
     # TODO: Make this optional, it's possibly not needed for lints and a few other quick things.
     - name: Install dependencies on Linux
       if: ${{ runner.os == 'Linux' }}
       shell: bash
       # erigon only needs build-essential (gcc/make). The hosted runner image
-      # ships extra third-party apt repos (Google Chrome, Microsoft, …) that are
-      # periodically mid-mirror-sync and answer with a Packages.gz size mismatch,
-      # which fails `apt-get update` and so the whole job — the recurring
-      # "dl.google.com/linux/chrome-stable … File has unexpected size" flake.
-      # Drop those repos before updating (we never install from them) and let the
-      # remaining Ubuntu archive retry on transient blips.
+      # ships third-party apt repos (Google Chrome, Microsoft/azure-cli) whose
+      # CDNs intermittently break `apt-get update` — a Packages.gz size mismatch
+      # mid-mirror-sync, or a 403 "no longer signed" on the azure-cli repo —
+      # failing the whole job. Drop every source pointing at those CDNs before
+      # updating (we never install from them); the Ubuntu archive retries on blips.
       # Can't suppress "Reading database..." from apt-get install. Also it's very slow...
       run: |
-        sudo rm -f /etc/apt/sources.list.d/google-chrome.list \
-                   /etc/apt/sources.list.d/microsoft-prod.list || true
+        sudo grep -rlZE 'dl\.google\.com|packages\.microsoft\.com' \
+          /etc/apt/sources.list.d/ 2>/dev/null | sudo xargs -0 -r rm -f || true
         sudo apt-get update -qq -o Acquire::Retries=3 \
           && sudo apt-get install -qq -y build-essential 2>/dev/null
 
-    - name: Install make on Windows
+    - name: Ensure make on Windows
       if: ${{ runner.os == 'Windows' }}
       shell: bash
-      run: choco install make -y --no-progress
+      # The hosted Windows image already ships GNU Make on PATH (C:\mingw64\bin),
+      # so the previous unconditional `choco install make` was redundant and added
+      # a flaky community.chocolatey.org/NuGet dependency. Use the present make and
+      # only fall back to a retried install if none is found.
+      run: |
+        set -euo pipefail
+        if ! command -v make >/dev/null 2>&1; then
+          echo "make not on PATH; installing via choco (fallback)"
+          for i in 1 2 3; do
+            choco install make -y --no-progress && break
+            echo "choco install make failed (attempt $i), retrying..."; sleep 30
+          done
+        fi
+        make_path="$(command -v make)" || { echo "::error::make unavailable on Windows"; exit 1; }
+        # Pin this make's directory at the front of PATH so later steps use
+        # exactly this binary, not another make/gmake also present on the image.
+        echo "$(cygpath -w "$(dirname "$make_path")")" >> "$GITHUB_PATH"
+        echo "using make: $make_path -> $(make --version | head -1)"
 
     - name: Debug parallelism
       shell: bash
@@ -259,21 +285,25 @@ runs:
     - name: Get Go environment paths
       id: go-env
       shell: bash
+      env:
+        CACHE_NAMESPACE: ${{ inputs.cache-namespace }}
       run: |
         echo "goversion=$(go env GOVERSION)" >> "$GITHUB_OUTPUT"
         echo "build=$(go env GOCACHE)" >> "$GITHUB_OUTPUT"
         echo "modcache=$(go env GOMODCACHE)" >> "$GITHUB_OUTPUT"
-        workflow=$(basename "${GITHUB_WORKFLOW_REF%%@*}" .yml)
+        workflow="${CACHE_NAMESPACE:-$(basename "${GITHUB_WORKFLOW_REF%%@*}" .yml)}"
         echo "workflow=$workflow" >> "$GITHUB_OUTPUT"
         echo "ERIGON_CI_GOCACHE_PATH=$(go env GOCACHE)" >> "$GITHUB_ENV"
         echo "ERIGON_CI_MODCACHE=$(go env GOMODCACHE)" >> "$GITHUB_ENV"
 
+    # The module cache is a pure function of go.sum (already in its key), so it
+    # never splits by matrix entry — sibling jobs share one entry per run and
+    # the cleanup-erigon probe dedups the save.
     - id: restore-mod-cache
       uses: ./.github/actions/restore-mod-cache
       with:
         modcache-path: ${{ steps.go-env.outputs.modcache }}
         workflow-id: ${{ steps.go-env.outputs.workflow }}
-        matrix-key: ${{ inputs.build-cache-extra-key }}
 
     - name: Export modcache key
       shell: bash

@@ -198,7 +198,7 @@ func (bt Backtester) backtestBlock(ctx context.Context, tx kv.TemporalTx, block 
 	bt.logger.Info("backtesting block commitment", "fromTxNum", fromTxNum, "toTxNum", toTxNum, "paraTrie", bt.paraTrie)
 	cfg := commitment.DefaultTrieConfig()
 	if bt.paraTrie {
-		cfg.Variant = commitment.VariantConcurrentHexPatricia
+		cfg.Variant = commitment.VariantParallelHexPatricia
 	}
 	cfg.EnableTrieWarmup = bt.trieWarmup
 	cfg.CsvMetricsFilePrefix = deriveBlockMetricsFilePrefix(blockOutputDir)
@@ -217,7 +217,11 @@ func (bt Backtester) backtestBlock(ctx context.Context, tx kv.TemporalTx, block 
 	//   - commitment data as-of the beginning of the block
 	//   - account/storage/code data as-of the end of the block
 	sd.GetCommitmentCtx().SetStateReader(commitmentdb.NewSplitHistoryReader(tx, fromTxNum, toTxNum /* withHistory */, false))
-	sd.GetCommitmentCtx().SetTrace(bt.logger.Enabled(ctx, log.LvlTrace))
+	if bt.logger.Enabled(ctx, log.LvlTrace) {
+		sd.GetCommitmentCtx().SetTraceWriter(os.Stderr)
+	} else {
+		sd.GetCommitmentCtx().SetTraceWriter(nil)
+	}
 	latestTxNum, latestBlockNum, err := sd.SeekCommitment(ctx, tx)
 	if err != nil {
 		return err

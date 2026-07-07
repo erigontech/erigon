@@ -1,12 +1,13 @@
 package app
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"os"
 
 	g "github.com/anacrolix/generics"
-	"github.com/urfave/cli/v2"
+	"github.com/urfave/cli/v3"
 
 	"github.com/erigontech/erigon/common/dir"
 	"github.com/erigontech/erigon/db/datadir/reset"
@@ -42,7 +43,7 @@ var (
 // Checks if a value was explicitly set in the given CLI command context or any of its parents. In
 // urfave/cli@v2, you must check the lineage to see if a flag was set in any context. It may be
 // different in v3.
-func isSetLineage(cliCtx *cli.Context, flagName string) bool {
+func isSetLineage(cliCtx *cli.Command, flagName string) bool {
 	for _, ctx := range cliCtx.Lineage() {
 		if ctx.IsSet(flagName) {
 			return true
@@ -51,19 +52,19 @@ func isSetLineage(cliCtx *cli.Context, flagName string) bool {
 	return false
 }
 
-func resetCliAction(cliCtx *cli.Context) (err error) {
+func resetCliAction(ctx context.Context, cliCtx *cli.Command) (err error) {
 	// This is set up in snapshots cli.Command.Before.
 	logger := log.Root()
-	removeLocal := removeLocalFlag.Get(cliCtx)
-	dryRun := dryRunFlag.Get(cliCtx)
+	removeLocal := cliCtx.Bool(removeLocalFlag.Name)
+	dryRun := cliCtx.Bool(dryRunFlag.Name)
 	dataDirPath := cliCtx.String(utils.DataDirFlag.Name)
 	logger.Info("resetting datadir", "path", dataDirPath)
 
 	dirs := datadir.Open(dataDirPath)
 
-	configChainName, chainNameErr := getChainNameFromChainData(cliCtx, logger, dirs.Chaindata)
+	configChainName, chainNameErr := getChainNameFromChainData(ctx, cliCtx, logger, dirs.Chaindata)
 
-	chainName := utils.ChainFlag.Get(cliCtx)
+	chainName := cliCtx.String(utils.ChainFlag.Name)
 	// Check the lineage, we don't want to use the mainnet default, but due to how urfave/cli@v2
 	// works we shouldn't randomly re-add the chain flag in the current command context.
 	if isSetLineage(cliCtx, utils.ChainFlag.Name) {
@@ -90,7 +91,7 @@ func resetCliAction(cliCtx *cli.Context) (err error) {
 	}
 	defer unlock()
 
-	err = snapcfg.LoadPreverified(cliCtx.Context, PreverifiedFlag.Get(cliCtx), &dirs, chainName)
+	err = snapcfg.LoadPreverified(ctx, cliCtx.String(PreverifiedFlag.Name), &dirs, chainName, "")
 	if err != nil {
 		return
 	}
@@ -144,14 +145,19 @@ func resetCliAction(cliCtx *cli.Context) (err error) {
 	return
 }
 
-func getChainNameFromChainData(cliCtx *cli.Context, logger log.Logger, chainDataDir string) (_ g.Option[string], err error) {
+func getChainNameFromChainData(ctx context.Context, cliCtx *cli.Command, logger log.Logger, chainDataDir string) (_ g.Option[string], err error) {
 	_, err = os.Stat(chainDataDir)
 	if err != nil {
 		return
 	}
-	ctx := cliCtx.Context
 	var db kv.RoDB
-	db, err = mdbx.New(dbcfg.ChainDB, logger).Path(chainDataDir).Accede(true).Readonly(true).Open(ctx)
+	// Open with only the tables we actually need. Using the full ChaindataTablesCfg
+	// would fail in Accede+Readonly mode if the database was created by an older version
+	// that is missing tables added since then (e.g. GLOAS/ePBS tables added in v3.5.0).
+	db, err = mdbx.New(dbcfg.ChainDB, logger).Path(chainDataDir).
+		Accede(true).
+		WithTableCfg(ChaindataSchemaForGenesis).
+		Open(ctx)
 	if err != nil {
 		err = fmt.Errorf("opening chaindata database: %w", err)
 		return
@@ -181,4 +187,11 @@ func getChainNameFromChainData(cliCtx *cli.Context, logger log.Logger, chainData
 		return
 	}
 	return g.Some(chainCfg.ChainName), nil
+}
+
+func ChaindataSchemaForGenesis(_ kv.TableCfg) kv.TableCfg {
+	return kv.TableCfg{
+		kv.HeaderCanonical: {},
+		kv.ConfigTable:     {},
+	}
 }

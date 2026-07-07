@@ -21,6 +21,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"math"
 	"os"
 	"sync"
 	"sync/atomic"
@@ -43,6 +44,7 @@ import (
 	"github.com/erigontech/erigon/execution/exec"
 	"github.com/erigontech/erigon/execution/protocol"
 	"github.com/erigontech/erigon/execution/protocol/rules"
+	"github.com/erigontech/erigon/execution/receipts"
 	"github.com/erigontech/erigon/execution/stagedsync/stages"
 	"github.com/erigontech/erigon/execution/state"
 	"github.com/erigontech/erigon/execution/tracing"
@@ -196,12 +198,6 @@ func ExecV3(ctx context.Context,
 
 	doms.EnableParaTrieDB(cfg.db)
 	doms.EnableTrieWarmup(true)
-	// Short-term: keep the trie warmuper's value cache off on the parallel
-	// path. The warmuper reads paraTrieDB (persisted state), so during a
-	// multi-block uncommitted batch (fork validation) it caches values stale
-	// w.r.t. sd.mem and feeds them to the trie, producing wrong roots. The
-	// page-cache warmer above is unaffected; the full fix lands separately.
-	doms.EnableWarmupCache(!isApplyingBlocks && !parallel)
 	doms.SetDeferCommitmentUpdates(false)
 	// Enable deferred commitment updates for fork validation and parallel initial sync.
 	// Deferred updates batch commitment calculations to block boundaries rather than
@@ -451,6 +447,23 @@ func (te *txExecutor) getHeader(ctx context.Context, hash common.Hash, number ui
 	return h, nil
 }
 
+// reconstructPriorReceipts re-derives receipts of a resumed block's prefix txs
+// (executed in an earlier batch): Finalize and the notification cache need the
+// block's full receipt set.
+func (te *txExecutor) reconstructPriorReceipts(ctx context.Context, applyTx kv.TemporalTx, header *types.Header, txs types.Transactions, startTxIndex int, blockStartTxNum uint64) (types.Receipts, error) {
+	priorIbs := state.New(state.NewHistoryReaderV3(applyTx, blockStartTxNum))
+	defer priorIbs.Release(true)
+	priorGp := protocol.NewGasPool(header.GasLimit, te.cfg.chainConfig.GetMaxBlobGasPerBlock(header.Time))
+	getHeader := func(hash common.Hash, number uint64) (*types.Header, error) {
+		return te.cfg.blockReader.Header(ctx, applyTx, hash, number)
+	}
+	priorReceipts, err := receipts.DerivePriorReceipts(ctx, te.cfg.chainConfig, te.cfg.engine, header, txs, startTxIndex, blockStartTxNum, applyTx, priorIbs, priorGp, getHeader)
+	if err != nil {
+		return nil, fmt.Errorf("failed to reconstruct prior receipts for partial block %d (startTxIndex %d): %w", header.Number.Uint64(), startTxIndex, err)
+	}
+	return priorReceipts, nil
+}
+
 func (te *txExecutor) onBlockStart(ctx context.Context, blockNum uint64, blockHash common.Hash) {
 	defer func() {
 		if rec := recover(); rec != nil {
@@ -587,13 +600,6 @@ func (te *txExecutor) executeBlocks(ctx context.Context, startBlockNum uint64, m
 				return fmt.Errorf("nil block %d", blockNum)
 			}
 			go warmTxsHashes(b)
-
-			// Bug 2 fix from commit 43a64a0b66 (parallel executor: fix two cache bugs):
-			// validate stateCache entries against this block's parent hash so stale
-			// values from a prior fork-validation are cleared before reads.
-			if stateCache := te.doms.GetStateCache(); stateCache != nil {
-				stateCache.ValidateAndPrepare(b.ParentHash(), b.Hash())
-			}
 
 			var dbBAL types.BlockAccessList
 			// Read BAL through blockTx (overlay or execRoTx) — do NOT open
@@ -833,4 +839,23 @@ func shouldGenerateChangeSets(cfg ExecuteBlockCfg, blockNum, maxBlockNum uint64)
 	// Generate changesets for blocks within the reorg window of the batch end,
 	// so the node can handle reorgs at the tip.
 	return blockNum+cfg.syncCfg.MaxReorgDepth >= maxBlockNum
+}
+
+// changesetWindowStart returns the first block in [startBlockNum, maxBlockNum]
+// for which shouldGenerateChangeSets is true, or math.MaxUint64 when there is
+// none. Parallel exec gates per-block changeset capture and the commitment
+// calculator's per-block mode on this boundary.
+func changesetWindowStart(alwaysGenerateChangesets bool, maxReorgDepth uint64, frozenBlocks uint64, startBlockNum uint64, maxBlockNum uint64) uint64 {
+	if alwaysGenerateChangesets {
+		return startBlockNum
+	}
+	windowStart := startBlockNum
+	if maxBlockNum > maxReorgDepth {
+		windowStart = max(windowStart, maxBlockNum-maxReorgDepth)
+	}
+	windowStart = max(windowStart, frozenBlocks)
+	if windowStart > maxBlockNum {
+		return math.MaxUint64
+	}
+	return windowStart
 }

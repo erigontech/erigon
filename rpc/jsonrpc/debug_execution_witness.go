@@ -46,10 +46,11 @@ type RecordingState struct {
 	prefix string
 
 	// Read tracking (all accessed keys, including reads that hit the overlay)
-	AccessedAccounts map[common.Address]struct{}
-	AccessedStorage  map[common.Address]map[common.Hash]struct{}
-	AccessedCode     map[common.Address][]byte // all code seen during execution
-	PreStateCode     map[common.Address][]byte // code read from the inner reader (pre-block state only)
+	AccessedAccounts  map[common.Address]struct{}
+	AccessedStorage   map[common.Address]map[common.Hash]struct{}
+	AccessedCode      map[common.Address][]byte // all code seen during execution
+	PreStateCode      map[common.Address][]byte // code read from the inner reader (pre-block state only)
+	emptyCodeAccessed bool                      // an empty-code account had its code loaded (legacy emits one empty bytecode)
 	// createdCodeHashes holds code hashes written in-block; a pre-state read of a hash
 	// already created in-block is redundant in the witness (the verifier replays the create).
 	createdCodeHashes map[common.Hash]struct{}
@@ -141,6 +142,11 @@ func (s *RecordingState) ReadAccountData(address accounts.Address) (*accounts.Ac
 		return acc, nil
 	}
 	acc, err := s.inner.ReadAccountData(address)
+	if acc != nil && acc.IsEmptyCodeHash() {
+		// Pre-state load of an empty-code account materializes the empty
+		// bytecode (legacy's single empty entry); overlay reads are post-state.
+		s.emptyCodeAccessed = true
+	}
 	if s.tracing(addr) {
 		if acc != nil {
 			fmt.Printf("[TRACE] ReadAccountData %s -> inner nonce=%d balance=%d codeHash=%x\n", addr.Hex(), acc.Nonce, &acc.Balance, acc.CodeHash)
@@ -264,6 +270,8 @@ func (s *RecordingState) ReadAccountCode(address accounts.Address) ([]byte, erro
 				s.PreStateCode[addr] = code
 			}
 		}
+	} else {
+		s.emptyCodeAccessed = true
 	}
 	if s.tracing(addr) {
 		fmt.Printf("[TRACE] ReadAccountCode %s -> inner len=%d\n", addr.Hex(), len(code))
@@ -400,6 +408,40 @@ func (s *RecordingState) CreateContract(address accounts.Address) error {
 	return nil
 }
 
+// accountExists reports whether the account exists in the post-state: present and
+// non-nil in the write overlay, otherwise not deleted and present in the pre-block
+// (inner) reader.
+func (s *RecordingState) accountExists(addr common.Address) bool {
+	if _, deleted := s.DeletedAccounts[addr]; deleted {
+		return false
+	}
+	if acc, ok := s.accountOverlay[addr]; ok {
+		return acc != nil
+	}
+	return s.innerExists(addr)
+}
+
+// innerExists reports parent-state (pre-block) presence by reading the inner reader
+// directly, so the check does not re-mark AccessedAccounts. A read error counts as
+// existence: over-inclusion is harmless, a dropped key would make the witness incomplete.
+func (s *RecordingState) innerExists(addr common.Address) bool {
+	acc, err := s.inner.ReadAccountData(accounts.InternAddress(addr))
+	return err != nil || acc != nil
+}
+
+// hasWitnessLeaf reports whether addr has a leaf in the witness trie needing a keys[]
+// preimage: it exists in the post-state, or it existed pre-block (so an account emptied
+// and EIP-161 state-cleared in-block still contributes its parent-trie leaf). The inner
+// reader is consulted at most once.
+func (s *RecordingState) hasWitnessLeaf(addr common.Address) bool {
+	if _, deleted := s.DeletedAccounts[addr]; !deleted {
+		if acc, ok := s.accountOverlay[addr]; ok && acc != nil {
+			return true
+		}
+	}
+	return s.innerExists(addr)
+}
+
 // --- Query methods ---
 
 // GetAccessedKeys returns all accessed account addresses and storage keys (reads + writes)
@@ -498,8 +540,8 @@ type ExecutionWitnessResult struct {
 	// matching Geth's witness.AddCode semantics. Code that was deployed/modified but never
 	// read (e.g. CREATE without a subsequent call) is intentionally excluded.
 	Codes []hexutil.Bytes `json:"codes"`
-	// Keys is reserved for future use; omitted while empty so the response matches
-	// the canonical {state, codes, headers} shape.
+	// Keys holds the standalone preimages of every accessed account address (20B) and
+	// storage slot (32B), matching the reference legacy witness; populated in both modes.
 	Keys []hexutil.Bytes `json:"keys,omitempty"`
 	// Headers is the contiguous chain of RLP-encoded ancestor headers from the parent
 	// back to the oldest block reached via BLOCKHASH.
@@ -516,10 +558,151 @@ func (m *ExecutionWitnessResult) getHashFn(blockNum uint64) (common.Hash, error)
 	return common.Hash{}, nil
 }
 
+// witnessMode selects the debug_executionWitness output format. legacy is the
+// default full format; canonical is the minimized form the ethereum/execution-spec-tests
+// zkevm corpus encodes (no empty nodes, no in-block-created bytecode, minimum siblings).
+type witnessMode int
+
+const (
+	witnessModeLegacy witnessMode = iota
+	witnessModeCanonical
+)
+
+// resolveWitnessMode resolves the witness mode from the request param; absent, defaults to legacy.
+// An explicit param value other than "legacy"/"canonical" is rejected.
+func resolveWitnessMode(modeParam *string) (witnessMode, error) {
+	if modeParam == nil {
+		return witnessModeLegacy, nil
+	}
+	switch *modeParam {
+	case "legacy":
+		return witnessModeLegacy, nil
+	case "canonical":
+		return witnessModeCanonical, nil
+	default:
+		return witnessModeLegacy, fmt.Errorf("invalid witness mode %q: must be \"legacy\" or \"canonical\"", *modeParam)
+	}
+}
+
+// buildAccessedState re-executes a block against a recording historical-state reader
+// and rolls the recorded accesses into an accessedState. The returned accessedBlockHashes
+// are the block numbers the BLOCKHASH opcode resolved during execution.
+func (api *BaseAPI) buildAccessedState(
+	ctx context.Context,
+	tx kv.TemporalTx,
+	block *types.Block,
+	chainConfig *chain.Config,
+	engine rules.EngineReader,
+	firstTxNumInBlock uint64,
+	mode witnessMode,
+) (accessed *accessedState, accessedBlockHashes []uint64, err error) {
+	blockNum := block.NumberU64()
+
+	// Create a state reader at the parent block state using the exact txnum
+	var stateReader state.StateReader = state.NewHistoryReaderV3(tx, firstTxNumInBlock)
+
+	// Create a combined recording state (reader + writer with in-memory overlay)
+	recordingState := NewRecordingState(stateReader)
+	recordingState.SetAccountsToTrace([]common.Address{
+		// Add addresses to trace here, e.g.:
+		// common.HexToAddress("0x8863786beBE8eB9659DF00b49f8f1eeEc7e2C8c1"),
+	})
+
+	// Create the in-block state with the recording state as reader
+	ibs := state.New(recordingState)
+
+	// Get header for block context
+	header := block.Header()
+
+	// Create EVM block context
+	blockCtx := transactions.NewEVMBlockContext(engine, header, true /* requireCanonical */, tx, api._blockReader, chainConfig)
+	blockRules := blockCtx.Rules(chainConfig)
+	signer := types.MakeSigner(chainConfig, blockNum, header.Time)
+
+	// Track accessed block hashes for BLOCKHASH opcode
+	originalGetHash := blockCtx.GetHash
+	blockCtx.GetHash = func(n uint64) (common.Hash, error) {
+		accessedBlockHashes = append(accessedBlockHashes, n)
+		return originalGetHash(n)
+	}
+
+	// Run block initialization (e.g. EIP-2935 blockhash contract, EIP-4788 beacon root)
+	fullEngine, ok := engine.(rules.Engine)
+	if !ok {
+		return nil, nil, fmt.Errorf("engine does not support full rules.Engine interface")
+	}
+	chainReader := consensuschain.NewReader(chainConfig, tx, api._blockReader, log.Root())
+	systemCallCustom := func(contract accounts.Address, data []byte, ibState *state.IntraBlockState, hdr *types.Header, constCall bool) ([]byte, error) {
+		return protocol.SysCallContract(contract, data, chainConfig, ibState, hdr, fullEngine, constCall, vm.Config{})
+	}
+	if err = fullEngine.Initialize(chainConfig, chainReader, header, ibs, systemCallCustom, log.Root(), nil); err != nil {
+		return nil, nil, fmt.Errorf("failed to initialize block: %w", err)
+	}
+	if err = ibs.FinalizeTx(blockRules, recordingState); err != nil {
+		return nil, nil, fmt.Errorf("failed to finalize engine.Initialize tx: %w", err)
+	}
+
+	// Execute all transactions in the block
+	for txIndex, txn := range block.Transactions() {
+		msg, err := txn.AsMessage(*signer, header.BaseFee, blockRules)
+		if err != nil {
+			return nil, nil, fmt.Errorf("failed to convert tx %d to message: %w", txIndex, err)
+		}
+
+		txCtx := protocol.NewEVMTxContext(msg)
+		evm := vm.NewEVM(blockCtx, txCtx, ibs, chainConfig, vm.Config{})
+
+		gp := new(protocol.GasPool).AddGas(header.GasLimit).AddBlobGas(chainConfig.GetMaxBlobGasPerBlock(header.Time))
+		ibs.SetTxContext(blockNum, txIndex)
+
+		_, err = protocol.ApplyMessage(evm, msg, gp, true /* refunds */, false /* gasBailout */, engine)
+		// A user tx that accesses the system address via an opcode keeps it in the
+		// witness; the per-tx access set captures this even on state-cache hits.
+		if acc := ibs.AccessedAddresses(); acc != nil {
+			if _, ok := acc[params.SystemAddress]; ok {
+				recordingState.MarkSystemAddrTouchedInTx()
+			}
+		}
+		if err != nil {
+			return nil, nil, fmt.Errorf("failed to apply tx %d: %w", txIndex, err)
+		}
+
+		if err = ibs.FinalizeTx(blockRules, recordingState); err != nil {
+			return nil, nil, fmt.Errorf("failed to finalize tx %d: %w", txIndex, err)
+		}
+	}
+
+	syscall := func(contract accounts.Address, data []byte) ([]byte, error) {
+		return protocol.SysCallContract(contract, data, chainConfig, ibs, header, fullEngine, false /* constCall */, vm.Config{})
+	}
+
+	// Collect logs accumulated during transaction execution into a synthetic receipt
+	// so that Finalize can parse EIP-6110 deposit requests from them.
+	// Finalize only uses receipt.Logs from each receipt — it doesn't read Status, GasUsed, CumulativeGasUsed, or any other field. It just concatenates all logs
+	// into a flat slice and passes them to ParseDepositLogs.
+	allLogs := ibs.Logs()
+	receipts := types.Receipts{&types.Receipt{Logs: allLogs}}
+
+	if _, err = fullEngine.Finalize(chainConfig, types.CopyHeader(header), ibs, block.Uncles(), receipts, block.Withdrawals(), chainReader, syscall, false /* skipReceiptsEval */, log.Root()); err != nil {
+		return nil, nil, fmt.Errorf("failed to finalize block: %w", err)
+	}
+
+	if err = ibs.CommitBlock(blockRules, recordingState); err != nil {
+		return nil, nil, fmt.Errorf("failed to commit block: %w", err)
+	}
+
+	return collectAccessedState(recordingState, mode), accessedBlockHashes, nil
+}
+
 // ExecutionWitness implements debug_executionWitness.
 // It executes a block using a historical state reader, records all state accesses
 // (accounts, storage, code), and builds merkle proofs for the accessed keys.
-func (api *DebugAPIImpl) ExecutionWitness(ctx context.Context, blockNrOrHash rpc.BlockNumberOrHash) (*ExecutionWitnessResult, error) {
+func (api *DebugAPIImpl) ExecutionWitness(ctx context.Context, blockNrOrHash rpc.BlockNumberOrHash, mode *string) (*ExecutionWitnessResult, error) {
+	resolvedMode, err := resolveWitnessMode(mode)
+	if err != nil {
+		return nil, err
+	}
+
 	tx, err := api.db.BeginTemporalRo(ctx)
 	if err != nil {
 		return nil, err
@@ -551,111 +734,23 @@ func (api *DebugAPIImpl) ExecutionWitness(ctx context.Context, blockNrOrHash rpc
 
 	engine := api.engine()
 
-	// Create a state reader at the parent block state using the exact txnum
-	var stateReader state.StateReader = state.NewHistoryReaderV3(tx, firstTxNumInBlock)
-
-	// Create a combined recording state (reader + writer with in-memory overlay)
-	recordingState := NewRecordingState(stateReader)
-	recordingState.SetAccountsToTrace([]common.Address{
-		// Add addresses to trace here, e.g.:
-		// common.HexToAddress("0x8863786beBE8eB9659DF00b49f8f1eeEc7e2C8c1"),
-	})
-
-	// Create the in-block state with the recording state as reader
-	ibs := state.New(recordingState)
-
-	// Get header for block context
-	header := block.Header()
-
-	// Create EVM block context
-	blockCtx := transactions.NewEVMBlockContext(engine, header, true /* requireCanonical */, tx, api._blockReader, chainConfig)
-	blockRules := blockCtx.Rules(chainConfig)
-	signer := types.MakeSigner(chainConfig, blockNum, header.Time)
-
-	// Track accessed block hashes for BLOCKHASH opcode
-	var accessedBlockHashes []uint64
-	originalGetHash := blockCtx.GetHash
-	blockCtx.GetHash = func(n uint64) (common.Hash, error) {
-		accessedBlockHashes = append(accessedBlockHashes, n)
-		return originalGetHash(n)
+	accessed, accessedBlockHashes, err := api.buildAccessedState(ctx, tx, block, chainConfig, engine, firstTxNumInBlock, resolvedMode)
+	if err != nil {
+		return nil, err
 	}
-
-	// Run block initialization (e.g. EIP-2935 blockhash contract, EIP-4788 beacon root)
-	fullEngine, ok := engine.(rules.Engine)
-	if !ok {
-		return nil, fmt.Errorf("engine does not support full rules.Engine interface")
-	}
-	chainReader := consensuschain.NewReader(chainConfig, tx, api._blockReader, log.Root())
-	systemCallCustom := func(contract accounts.Address, data []byte, ibState *state.IntraBlockState, hdr *types.Header, constCall bool) ([]byte, error) {
-		return protocol.SysCallContract(contract, data, chainConfig, ibState, hdr, fullEngine, constCall, vm.Config{})
-	}
-	if err = fullEngine.Initialize(chainConfig, chainReader, header, ibs, systemCallCustom, log.Root(), nil); err != nil {
-		return nil, fmt.Errorf("failed to initialize block: %w", err)
-	}
-	if err = ibs.FinalizeTx(blockRules, recordingState); err != nil {
-		return nil, fmt.Errorf("failed to finalize engine.Initialize tx: %w", err)
-	}
-
-	// Execute all transactions in the block
-	for txIndex, txn := range block.Transactions() {
-		msg, err := txn.AsMessage(*signer, header.BaseFee, blockRules)
-		if err != nil {
-			return nil, fmt.Errorf("failed to convert tx %d to message: %w", txIndex, err)
-		}
-
-		txCtx := protocol.NewEVMTxContext(msg)
-		evm := vm.NewEVM(blockCtx, txCtx, ibs, chainConfig, vm.Config{})
-
-		gp := new(protocol.GasPool).AddGas(header.GasLimit).AddBlobGas(chainConfig.GetMaxBlobGasPerBlock(header.Time))
-		ibs.SetTxContext(blockNum, txIndex)
-
-		_, err = protocol.ApplyMessage(evm, msg, gp, true /* refunds */, false /* gasBailout */, engine)
-		// A user tx that accesses the system address via an opcode keeps it in the
-		// witness; the per-tx access set captures this even on state-cache hits.
-		if acc := ibs.AccessedAddresses(); acc != nil {
-			if _, ok := acc[params.SystemAddress]; ok {
-				recordingState.MarkSystemAddrTouchedInTx()
-			}
-		}
-		if err != nil {
-			return nil, fmt.Errorf("failed to apply tx %d: %w", txIndex, err)
-		}
-
-		if err = ibs.FinalizeTx(blockRules, recordingState); err != nil {
-			return nil, fmt.Errorf("failed to finalize tx %d: %w", txIndex, err)
-		}
-	}
-
-	syscall := func(contract accounts.Address, data []byte) ([]byte, error) {
-		return protocol.SysCallContract(contract, data, chainConfig, ibs, header, fullEngine, false /* constCall */, vm.Config{})
-	}
-
-	// Collect logs accumulated during transaction execution into a synthetic receipt
-	// so that Finalize can parse EIP-6110 deposit requests from them.
-	// Finalize only uses receipt.Logs from each receipt — it doesn't read Status, GasUsed, CumulativeGasUsed, or any other field. It just concatenates all logs
-	// into a flat slice and passes them to ParseDepositLogs.
-	allLogs := ibs.Logs()
-	receipts := types.Receipts{&types.Receipt{Logs: allLogs}}
-
-	if _, err = fullEngine.Finalize(chainConfig, types.CopyHeader(header), ibs, block.Uncles(), receipts, block.Withdrawals(), chainReader, syscall, false /* skipReceiptsEval */, log.Root()); err != nil {
-		return nil, fmt.Errorf("failed to finalize block: %w", err)
-	}
-
-	if err = ibs.CommitBlock(blockRules, recordingState); err != nil {
-		return nil, fmt.Errorf("failed to commit block: %w", err)
-	}
-
-	accessed := collectAccessedState(recordingState)
 
 	result := &ExecutionWitnessResult{
 		State:          []hexutil.Bytes{},
 		Codes:          accessed.SortedCodes,
+		Keys:           accessed.WitnessKeys,
 		headerByNumber: make(map[uint64]*types.Header),
 	}
 
 	// Build merkle proofs for all accessed accounts
-	// Use the proof infrastructure from the commitment context
-	domains, err := execctx.NewSharedDomains(ctx, tx, log.New(), execctx.WithoutDeferredBranchUpdates())
+	// Use the proof infrastructure from the commitment context.
+	// Witness generation requires the sequential HexPatriciaHashed (Witness()
+	// type-asserts it); the parallel trie cannot serve it.
+	domains, err := execctx.NewSharedDomains(ctx, tx, log.New(), execctx.WithoutDeferredBranchUpdates(), execctx.WithSequentialCommitment())
 	if err != nil {
 		return nil, err
 	}
@@ -687,12 +782,14 @@ func (api *DebugAPIImpl) ExecutionWitness(ctx context.Context, blockNrOrHash rpc
 
 	siblingPaths, err := detectCollapseSiblings(ctx, tx, domains, sdCtx,
 		firstTxNumInBlock, endTxNum, blockNum, parentNum,
-		block.Root(), accessed)
+		block.Root(), accessed, resolvedMode)
 	if err != nil {
 		return nil, err
 	}
 
-	nodes, err := buildWitnessTrie(ctx, tx, domains, sdCtx, firstTxNumInBlock, expectedParentRoot, siblingPaths, accessed)
+	// Materialize exclusion-proof branches for strict sparse-trie verifiers in legacy/default
+	// mode; canonical mode stays minimal to match the reference witness.
+	nodes, err := buildWitnessTrie(ctx, tx, domains, sdCtx, firstTxNumInBlock, expectedParentRoot, siblingPaths, accessed, resolvedMode != witnessModeCanonical)
 	if err != nil {
 		return nil, err
 	}
@@ -705,8 +802,24 @@ func (api *DebugAPIImpl) ExecutionWitness(ctx context.Context, blockNrOrHash rpc
 	result.Headers = headers
 	result.headerByNumber = byNumber
 
+	fullEngine, ok := engine.(rules.Engine)
+	if !ok {
+		return nil, fmt.Errorf("engine does not support full rules.Engine interface")
+	}
 	if err := api.verifyWitnessStateless(ctx, tx, result, block, fullEngine); err != nil {
 		return nil, err
+	}
+
+	// legacy carries the empty storage-trie node (0x80) once when some account has an
+	// empty storage root (EmptyRoot appears only as an account-leaf storage-root field);
+	// canonical omits it. Added after stateless verification, which rejects the bare node.
+	if resolvedMode == witnessModeLegacy {
+		for _, node := range result.State {
+			if bytes.Contains(node, trie.EmptyRoot[:]) {
+				result.State = append(result.State, hexutil.Bytes{0x80})
+				break
+			}
+		}
 	}
 
 	// Sort after verifyWitnessStateless: RLPDecode treats result.State[0] as the trie root.
@@ -720,15 +833,16 @@ func (api *DebugAPIImpl) ExecutionWitness(ctx context.Context, blockNrOrHash rpc
 // accessedState summarizes everything the witness needs from a recorded execution:
 // the deduplicated set of accessed accounts/storage/code addresses, the sorted code
 // blobs that go into result.Codes, and the pre-state code reads that feed witness
-// trie generation. SortedKeys is built for symmetry with PR #21227 but currently
-// vestigial — result.Keys is intentionally always null per Geth compatibility.
+// trie generation. WitnessKeys holds the standalone preimages (20B addresses, 32B
+// slots) that go into result.Keys.
 type accessedState struct {
-	SortedKeys  []hexutil.Bytes
+	WitnessKeys []hexutil.Bytes
 	Addresses   map[common.Address]struct{}
 	Storage     map[common.Address]map[common.Hash]struct{}
 	CodeAddrs   map[common.Address]struct{}
 	SortedCodes []hexutil.Bytes
 	CodeReads   map[common.Hash]witnesstypes.CodeWithHash
+	Deleted     map[common.Address]struct{}
 }
 
 // isEmpty reports whether no accounts, storage slots, or code addresses were touched.
@@ -788,23 +902,21 @@ func (a *accessedState) touchAll(sdCtx *commitmentdb.SharedDomainsCommitmentCont
 	}
 }
 
-// collectAccessedState rolls the RecordingState read/write maps and the three
-// code-tracking maps into a single accessedState. SortedCodes is sourced from
-// rs.GetPreStateCode() (pre-block reads only): the witness must carry the
-// bytecode that existed at the start of the block, not code created in-block.
-// A stateless verifier re-derives in-block-created code by replaying the
-// transactions, so emitting it would be redundant over-inclusion.
-//
-// SortedCodes is initialized to an empty (non-nil) slice so callers can assign
-// result.Codes = accessed.SortedCodes without risking a "codes": null JSON
-// regression for empty-touch blocks; the Codes field has no omitempty.
-func collectAccessedState(rs *RecordingState) *accessedState {
+// collectAccessedState rolls the RecordingState maps into an accessedState.
+// SortedCodes carries only pre-block code reads (rs.GetPreStateCode): a stateless
+// verifier re-derives in-block-created code by replaying the transactions.
+func collectAccessedState(rs *RecordingState, mode witnessMode) *accessedState {
 	out := &accessedState{
 		Addresses:   make(map[common.Address]struct{}),
 		Storage:     make(map[common.Address]map[common.Hash]struct{}),
 		CodeAddrs:   make(map[common.Address]struct{}),
 		SortedCodes: []hexutil.Bytes{},
+		WitnessKeys: []hexutil.Bytes{},
 		CodeReads:   make(map[common.Hash]witnesstypes.CodeWithHash),
+		Deleted:     make(map[common.Address]struct{}),
+	}
+	for addr := range rs.DeletedAccounts {
+		out.Deleted[addr] = struct{}{}
 	}
 
 	readAddresses, readStorageKeys := rs.GetAccessedKeys()
@@ -859,31 +971,66 @@ func collectAccessedState(rs *RecordingState) *accessedState {
 		}
 	}
 
-	sortedKeys := make([]hexutil.Bytes, 0, len(out.Addresses))
-	for addr := range out.Addresses {
-		sortedKeys = append(sortedKeys, addr[:])
-	}
-	for addr, keys := range out.Storage {
+	// Address (20B) and slot (32B) keys never collide, so a per-type set
+	// reproduces the original single dedup set; slots dedup across accounts.
+	slotSet := make(map[common.Hash]struct{})
+	for _, keys := range out.Storage {
 		for key := range keys {
-			composite := append(addr[:], key[:]...)
-			sortedKeys = append(sortedKeys, composite)
+			slotSet[key] = struct{}{}
 		}
 	}
-	slices.SortFunc(sortedKeys, func(a, b hexutil.Bytes) int {
+	witnessKeys := make([]hexutil.Bytes, 0, len(out.Addresses)+len(slotSet))
+	for addr := range out.Addresses {
+		if !rs.hasWitnessLeaf(addr) {
+			continue
+		}
+		witnessKeys = append(witnessKeys, bytes.Clone(addr[:]))
+	}
+	for slot := range slotSet {
+		witnessKeys = append(witnessKeys, bytes.Clone(slot[:]))
+	}
+	slices.SortFunc(witnessKeys, func(a, b hexutil.Bytes) int {
 		return bytes.Compare(a, b)
 	})
-	out.SortedKeys = sortedKeys
+	out.WitnessKeys = witnessKeys
 
-	preStateCode := rs.GetPreStateCode()
 	allCodesByHash := make(map[common.Hash][]byte)
-	for _, code := range preStateCode {
-		if len(code) > 0 {
-			h := crypto.Keccak256Hash(code)
-			allCodesByHash[h] = code
+	emptyEntry := false
+	switch mode {
+	case witnessModeCanonical:
+		// canonical: only pre-state bytecode (excludes in-block-created), non-empty.
+		for _, code := range rs.GetPreStateCode() {
+			if len(code) > 0 {
+				allCodesByHash[crypto.Keccak256Hash(code)] = code
+			}
 		}
+	default:
+		// legacy: every bytecode loaded during execution plus a single empty bytecode if any
+		// empty-code account was loaded. PreStateCode is folded in because AccessedCode is
+		// keyed by address, so a delegated account's EIP-7702 designator is overwritten there
+		// by its resolved target code and survives only in PreStateCode.
+		for _, code := range rs.GetAccessedCode() {
+			if len(code) > 0 {
+				allCodesByHash[crypto.Keccak256Hash(code)] = code
+			}
+		}
+		for _, code := range rs.GetModifiedCode() {
+			if len(code) > 0 {
+				allCodesByHash[crypto.Keccak256Hash(code)] = code
+			}
+		}
+		for _, code := range rs.GetPreStateCode() {
+			if len(code) > 0 {
+				allCodesByHash[crypto.Keccak256Hash(code)] = code
+			}
+		}
+		emptyEntry = rs.emptyCodeAccessed
 	}
 
-	uniqueCodes := make([][]byte, 0, len(allCodesByHash))
+	uniqueCodes := make([][]byte, 0, len(allCodesByHash)+1)
+	if emptyEntry {
+		uniqueCodes = append(uniqueCodes, []byte{})
+	}
 	for _, code := range allCodesByHash {
 		uniqueCodes = append(uniqueCodes, code)
 	}
@@ -915,15 +1062,10 @@ func collectAccessedState(rs *RecordingState) *accessedState {
 	return out
 }
 
-// detectCollapseSiblings runs STEP 1 of witness construction: compute the full
-// commitment for this block against a split reader (commitment from parent state,
-// plain state from end of block) and record every sibling path the trie collapses
-// through. The collected paths are returned so STEP 2 can touch them while building
-// the witness — without those touches, collapsed-sibling data would be missing from
-// the witness and stateless re-execution would diverge from the canonical root.
-//
-// Triggers SeekCommitment #2 (split history reader). Preserves pre-refactor behavior
-// including the lupin012 seekBlockNum != parentNum guard.
+// detectCollapseSiblings computes the block's full commitment against a split reader
+// (commitment from parent state, plain state from block end) and returns the sibling
+// paths the trie collapses through. The witness build must touch them, else collapsed-
+// sibling data is missing and stateless re-execution diverges from the root.
 func detectCollapseSiblings(
 	ctx context.Context,
 	tx kv.TemporalTx,
@@ -932,6 +1074,7 @@ func detectCollapseSiblings(
 	firstTxNumInBlock, endTxNum, blockNum, parentNum uint64,
 	expectedBlockRoot common.Hash,
 	accessed *accessedState,
+	mode witnessMode,
 ) (siblingPaths [][]byte, err error) {
 	// Set up split reader: commitment from block beginning, plain state from block end.
 	// withHistory=false so branch updates are written using PutBranch().
@@ -979,29 +1122,28 @@ func detectCollapseSiblings(
 	// The canonical witness (insert-before-delete order) does not touch the sibling of
 	// a branch whose net block change leaves it with >=2 children; erigon's replay can
 	// transiently collapse such a branch, so drop those siblings to match membership.
+	// Legacy keeps every collapse sibling.
 	siblingPaths = make([][]byte, 0, len(candidates))
 	for _, c := range candidates {
-		childCount, err := sdCtx.BranchChildCount(tx, c.branchPrefix)
-		if err != nil {
-			return nil, fmt.Errorf("[debug_executionWitness] read post-state branch for collapse filter: %w", err)
-		}
-		if childCount >= 2 {
-			log.Debug("[debug_executionWitness] dropping transient-collapse sibling",
-				"branchPrefix", commitment.NibblesToString(c.branchPrefix), "childCount", childCount)
-			continue
+		if mode == witnessModeCanonical {
+			childCount, err := sdCtx.BranchChildCount(tx, c.branchPrefix)
+			if err != nil {
+				return nil, fmt.Errorf("[debug_executionWitness] read post-state branch for collapse filter: %w", err)
+			}
+			if childCount >= 2 {
+				log.Debug("[debug_executionWitness] dropping transient-collapse sibling",
+					"branchPrefix", commitment.NibblesToString(c.branchPrefix), "childCount", childCount)
+				continue
+			}
 		}
 		siblingPaths = append(siblingPaths, c.siblingPath)
 	}
 	return siblingPaths, nil
 }
 
-// buildWitnessTrie runs STEP 2 of witness construction: re-seek the commitment
-// against the parent-state reader, touch every accessed key plus the sibling
-// paths collected during collapse detection, then generate the witness trie and
-// RLP-encode it. The pre-state root is verified against expectedParentRoot
-// before the encoded nodes are returned.
-//
-// Triggers SeekCommitment #3 (parent-state reader). Preserves pre-refactor behavior.
+// buildWitnessTrie re-seeks the commitment against the parent-state reader, touches
+// every accessed key plus the collapse-sibling paths, and builds the witness node set
+// on the fly, verifying the pre-state root against expectedParentRoot.
 func buildWitnessTrie(
 	ctx context.Context,
 	tx kv.TemporalTx,
@@ -1011,6 +1153,7 @@ func buildWitnessTrie(
 	expectedParentRoot common.Hash,
 	siblingPaths [][]byte,
 	accessed *accessedState,
+	produceExclusionProofs bool,
 ) (encodedNodes []hexutil.Bytes, err error) {
 	encodedNodes = []hexutil.Bytes{}
 
@@ -1030,7 +1173,7 @@ func buildWitnessTrie(
 		}
 	}
 
-	witnessTrie, witnessRoot, err := sdCtx.Witness(ctx, accessed.CodeReads, "debug_executionWitness_witness_construction")
+	witnessNodes, witnessRoot, err := sdCtx.WitnessNodes(ctx, produceExclusionProofs, "debug_executionWitness_witness_construction")
 	if err != nil {
 		return nil, fmt.Errorf("failed to generate witness: %w", err)
 	}
@@ -1038,11 +1181,7 @@ func buildWitnessTrie(
 		return nil, fmt.Errorf("collapse witness root mismatch: calculated=%x, expected=%x", common.BytesToHash(witnessRoot), expectedParentRoot)
 	}
 
-	allNodes, err := witnessTrie.RLPEncode()
-	if err != nil {
-		return nil, fmt.Errorf("failed to encode trie nodes: %w", err)
-	}
-	for _, node := range allNodes {
+	for _, node := range witnessNodes {
 		encodedNodes = append(encodedNodes, common.Copy(node))
 	}
 	return encodedNodes, nil
@@ -1102,7 +1241,7 @@ func (api *DebugAPIImpl) resolveWitnessBlock(
 // pre-state and resolve BLOCKHASH lookups. The headers form a contiguous chain
 // from the parent back to the oldest block reached via the BLOCKHASH opcode, so
 // each header can be validated against the next one's parentHash.
-func (api *DebugAPIImpl) collectAccessedHeaders(
+func (api *BaseAPI) collectAccessedHeaders(
 	ctx context.Context,
 	tx kv.TemporalTx,
 	parentNum uint64,
@@ -1167,7 +1306,7 @@ func (api *DebugAPIImpl) verifyWitnessStateless(
 		return fmt.Errorf("failed to get chain config: %w", err)
 	}
 
-	newStateRoot, _, err := execBlockStatelessly(result, block, chainCfg, fullEngine)
+	newStateRoot, stateless, err := execBlockStatelessly(result, block, chainCfg, fullEngine)
 	if err != nil {
 		return fmt.Errorf("[debug_executionWitness] stateless block execution failed: %w", err)
 	}
@@ -1177,192 +1316,58 @@ func (api *DebugAPIImpl) verifyWitnessStateless(
 		return fmt.Errorf("[debug_executionWitness] state root mismatch after stateless execution : got %x, expected %x", newStateRoot, expectedRoot)
 	}
 
+	if stateless != nil {
+		if err := checkWitnessKeysComplete(stateless.usedTrieAddrs, stateless.usedTrieSlots, result.Keys); err != nil {
+			return fmt.Errorf("[debug_executionWitness] %w", err)
+		}
+	}
+
 	log.Debug("[debug_executionWitness] witness verified", "blockNum", block.NumberU64())
 	return nil
 }
 
-// buildExpectedPostState queries the actual state DB to build expected post-state for verification.
-func (api *DebugAPIImpl) buildExpectedPostState(
-	ctx context.Context,
-	tx kv.TemporalTx,
-	blockNum uint64,
-	block *types.Block,
-	readAddresses, writeAddresses []common.Address,
-	readStorageKeys, writeStorageKeys map[common.Address][]common.Hash,
-) (map[common.Address]*accounts.Account, map[common.Address]map[common.Hash]uint256.Int, error) {
-	expectedState := make(map[common.Address]*accounts.Account)
-	expectedStorage := make(map[common.Address]map[common.Hash]uint256.Int)
-
-	// Create commitment context for accurate storage roots (since they are not stored explicitly)
-	postDomains, err := execctx.NewSharedDomains(ctx, tx, log.New(), execctx.WithoutDeferredBranchUpdates())
-	if err != nil {
-		return nil, nil, fmt.Errorf("failed to create post-state domains: %w", err)
-	}
-	defer postDomains.Close()
-	postSdCtx := postDomains.GetCommitmentContext()
-
-	// Set up to read state at current block (after execution)
-	latestBlock, err := rpchelper.GetLatestBlockNumber(tx)
-	if err != nil {
-		return nil, nil, fmt.Errorf("failed to get latest block: %w", err)
-	}
-	if blockNum < latestBlock {
-		// Get first txnum of blockNum+1 to ensure correct state root
-		lastTxnInBlock, err := api._txNumReader.Min(ctx, tx, blockNum+1)
-		if err != nil {
-			return nil, nil, fmt.Errorf("failed to get last txn in block: %w", err)
-		}
-		postSdCtx.SetHistoryStateReader(tx, lastTxnInBlock)
-		if _, _, err := postDomains.SeekCommitment(ctx, tx); err != nil {
-			return nil, nil, fmt.Errorf("failed to seek commitment: %w", err)
+// checkWitnessKeysComplete verifies result.Keys carries a preimage for every account
+// and storage leaf the stateless re-execution resolved from the witness trie. A missing
+// preimage means a verifier treating keys[] as the closed accessed set cannot route to a
+// leaf that is present in state[]. The protocol system address is exempt (intentionally
+// omitted from keys[] unless it really changes).
+func checkWitnessKeysComplete(usedAddrs map[common.Address]struct{}, usedSlots map[common.Hash]struct{}, keys []hexutil.Bytes) error {
+	keyAddrs := make(map[common.Address]struct{})
+	keySlots := make(map[common.Hash]struct{})
+	for _, k := range keys {
+		switch len(k) {
+		case 20:
+			keyAddrs[common.BytesToAddress(k)] = struct{}{}
+		case 32:
+			keySlots[common.BytesToHash(k)] = struct{}{}
 		}
 	}
-
-	// Touch all modified accounts and storage keys for the post-state trie
-	for _, addr := range writeAddresses {
-		postSdCtx.TouchKey(kv.AccountsDomain, string(addr[:]), nil)
-	}
-	for addr, keys := range writeStorageKeys {
-		for _, key := range keys {
-			storageKey := string(append(addr[:], key[:]...))
-			postSdCtx.TouchKey(kv.StorageDomain, storageKey, nil)
+	sysAddr := common.Address(params.SystemAddress.Value())
+	var missing []string
+	for addr := range usedAddrs {
+		if addr == sysAddr {
+			continue
+		}
+		if _, ok := keyAddrs[addr]; !ok {
+			missing = append(missing, addr.Hex())
 		}
 	}
-
-	// Generate the trie with correct storage roots
-	postTrie, postRoot, err := postSdCtx.Witness(ctx, nil, "debug_executionWitness_postState")
-	if err != nil {
-		return nil, nil, fmt.Errorf("failed to generate post-state trie: %w", err)
-	}
-
-	// Verify the post-state root matches the block's state root
-	blockRoot := block.Root()
-	if !bytes.Equal(postRoot, blockRoot[:]) {
-		// only warn, so we can see comparison later
-		fmt.Printf("Warning: post-state trie root %x doesn't match block root %x\n", postRoot, block.Root())
-	}
-
-	// Read account data from the post-state trie (with correct storage roots)
-	// Include both read and write addresses
-	for _, addr := range readAddresses {
-		addrHash := crypto.Keccak256(addr[:])
-		acc, _ := postTrie.GetAccount(addrHash)
-		expectedState[addr] = acc
-	}
-	for _, addr := range writeAddresses {
-		addrHash := crypto.Keccak256(addr[:])
-		acc, _ := postTrie.GetAccount(addrHash)
-		expectedState[addr] = acc
-	}
-
-	// Read storage values from the state reader
-	currentBlockNum := rpc.BlockNumber(blockNum)
-	currentNrOrHash := rpc.BlockNumberOrHash{BlockNumber: &currentBlockNum}
-	postStateReader, err := rpchelper.CreateStateReader(ctx, tx, api._blockReader, currentNrOrHash, 0, api.filters, api.stateCache, api._txNumReader)
-	if err != nil {
-		return nil, nil, fmt.Errorf("failed to create postStateReader: %w", err)
-	}
-	// Include both read and write storage keys
-	for addr, keys := range readStorageKeys {
-		if expectedStorage[addr] == nil {
-			expectedStorage[addr] = make(map[common.Hash]uint256.Int)
-		}
-		for _, key := range keys {
-			storageKey := accounts.InternKey(key)
-			val, _, err := postStateReader.ReadAccountStorage(accounts.InternAddress(addr), storageKey)
-			if err != nil {
-				return nil, nil, fmt.Errorf("failed to read expected storage in post state: %x key %x: %w", addr, key, err)
-			}
-			expectedStorage[addr][key] = val
+	for slot := range usedSlots {
+		if _, ok := keySlots[slot]; !ok {
+			missing = append(missing, slot.Hex())
 		}
 	}
-	for addr, keys := range writeStorageKeys {
-		if expectedStorage[addr] == nil {
-			expectedStorage[addr] = make(map[common.Hash]uint256.Int)
-		}
-		for _, key := range keys {
-			storageKey := accounts.InternKey(key)
-			val, _, err := postStateReader.ReadAccountStorage(accounts.InternAddress(addr), storageKey)
-			if err != nil {
-				return nil, nil, fmt.Errorf("failed to read expected storage in post state: %x key %x: %w", addr, key, err)
-			}
-			expectedStorage[addr][key] = val
-		}
+	if len(missing) == 0 {
+		return nil
 	}
-
-	return expectedState, expectedStorage, nil
-}
-
-// compareComputedVsExpectedState compares the post execution state computed by witnessStateless against the expected state.
-func compareComputedVsExpectedState(stateless *witnessStateless, expectedState map[common.Address]*accounts.Account, expectedStorage map[common.Address]map[common.Hash]uint256.Int, storageDeletes map[common.Address]map[common.Hash]struct{}) {
-	fmt.Printf("\n=== Comparing computed vs expected state ===\n")
-	for addr, expectedAcc := range expectedState {
-		addrHash, _ := common.HashData(addr[:])
-		computedAcc, found := stateless.t.GetAccount(addrHash[:])
-
-		fmt.Printf("\nAccount %s (hash %x):\n", addr.Hex(), addrHash[:8])
-		if expectedAcc != nil {
-			fmt.Printf("  EXPECTED: Nonce=%d, Balance=%s, Root=%x, CodeHash=%x\n",
-				expectedAcc.Nonce, expectedAcc.Balance.String(), expectedAcc.Root, expectedAcc.CodeHash)
-		} else {
-			fmt.Printf("  EXPECTED: nil (deleted)\n")
-		}
-		if found && computedAcc != nil {
-			fmt.Printf("  COMPUTED: Nonce=%d, Balance=%s, Root=%x, CodeHash=%x\n",
-				computedAcc.Nonce, computedAcc.Balance.String(), computedAcc.Root, computedAcc.CodeHash)
-			// Check for differences - only print mismatches or a single tick if all match
-			if expectedAcc != nil {
-				allMatch := true
-				if _, ok := storageDeletes[addr]; ok {
-					fmt.Printf("   ⛔️ STORAGE deletes on this account!\n")
-				}
-				if expectedAcc.Nonce != computedAcc.Nonce {
-					fmt.Printf("    ❌ NONCE MISMATCH!\n")
-					allMatch = false
-				}
-				if !expectedAcc.Balance.Eq(&computedAcc.Balance) {
-					fmt.Printf("    ❌ BALANCE MISMATCH! (diff: %d wei)\n", new(uint256.Int).Sub(&expectedAcc.Balance, &computedAcc.Balance).Uint64())
-					allMatch = false
-				}
-				if expectedAcc.Root != computedAcc.Root {
-					fmt.Printf("    ❌ STORAGE ROOT MISMATCH!\n")
-					allMatch = false
-				}
-				if expectedAcc.CodeHash != computedAcc.CodeHash {
-					fmt.Printf("    ❌ CODE HASH MISMATCH!\n")
-					allMatch = false
-				}
-				if allMatch {
-					fmt.Printf("    ✅ All fields match\n")
-				}
-			}
-		} else {
-			fmt.Printf("  COMPUTED: NOT FOUND or nil\n")
-		}
+	slices.Sort(missing)
+	const maxListed = 16
+	listed, suffix := missing, ""
+	if len(missing) > maxListed {
+		listed = missing[:maxListed]
+		suffix = fmt.Sprintf(" (+%d more)", len(missing)-maxListed)
 	}
-
-	// Compare storage values
-	for addr, expectedKeys := range expectedStorage {
-		addrHash, _ := common.HashData(addr[:])
-		fmt.Printf("\nStorage for %s (hash %x):\n", addr.Hex(), addrHash[:8])
-		for key, expectedVal := range expectedKeys {
-			keyHash, _ := common.HashData(key[:])
-			cKey := dbutils.GenerateCompositeTrieKey(addrHash, keyHash)
-			computedBytes, found := stateless.t.Get(cKey)
-			var computedVal uint256.Int
-			if found && len(computedBytes) > 0 {
-				computedVal.SetBytes(computedBytes)
-			}
-			fmt.Printf("  Key %x (hash %x):\n", key, keyHash[:8])
-			fmt.Printf("    EXPECTED: %s (hex: %x)\n", expectedVal.String(), expectedVal.Bytes())
-			fmt.Printf("    COMPUTED: %s (hex: %x)\n", computedVal.String(), computedVal.Bytes())
-			if !expectedVal.Eq(&computedVal) {
-				fmt.Printf("    ❌ STORAGE VALUE MISMATCH!\n")
-			} else {
-				fmt.Printf("    ✅\n")
-			}
-		}
-	}
+	return fmt.Errorf("witness keys[] incomplete: %d preimage(s) for leaves present in state[] missing: %v%s", len(missing), listed, suffix)
 }
 
 // witnessStateless is a StateReader/StateWriter implementation that operates on a witness trie.
@@ -1377,6 +1382,11 @@ type witnessStateless struct {
 	deleted        map[common.Address]struct{}                    // deleted accounts
 	created        map[common.Address]struct{}                    // created contracts
 	trace          bool
+	strictVerify   bool // error on trie nodes missing from the witness
+
+	// preimages the witness trie actually supplied during re-exec; keys[] must cover these
+	usedTrieAddrs map[common.Address]struct{}
+	usedTrieSlots map[common.Hash]struct{}
 
 	// Debug: addresses to trace operations on
 	accountsToTrace map[common.Address]struct{}
@@ -1435,6 +1445,9 @@ func newWitnessStateless(result *ExecutionWitnessResult) (*witnessStateless, err
 		deleted:        make(map[common.Address]struct{}),
 		created:        make(map[common.Address]struct{}),
 		trace:          false,
+		strictVerify:   dbg.EnvBool("WITNESS_STRICT_VERIFY", false),
+		usedTrieAddrs:  make(map[common.Address]struct{}),
+		usedTrieSlots:  make(map[common.Hash]struct{}),
 	}, nil
 }
 
@@ -1485,6 +1498,9 @@ func (s *witnessStateless) ReadAccountData(address accounts.Address) (*accounts.
 
 	// Read from trie
 	acc, ok := s.t.GetAccount(addrHash[:])
+	if ok && acc != nil {
+		s.usedTrieAddrs[addr] = struct{}{}
+	}
 	if s.tracing(addr) {
 		if ok && acc != nil {
 			fmt.Printf("[TRACE-S] ReadAccountData %s -> trie nonce=%d balance=%d codeHash=%x\n", addr.Hex(), acc.Nonce, &acc.Balance, acc.CodeHash)
@@ -1494,6 +1510,12 @@ func (s *witnessStateless) ReadAccountData(address accounts.Address) (*accounts.
 	}
 	if ok {
 		return acc, nil
+	}
+	// gotValue==false ⟺ traversal hit an unresolved HashNode (node missing from witness).
+	// Strict mode errors on that, except the protocol system address (0xff..fe), whose
+	// state is protocol-fixed and intentionally omitted by reth too.
+	if s.strictVerify && addr != common.Address(params.SystemAddress.Value()) {
+		return nil, fmt.Errorf("strict witness: unresolved trie node reading account %x (missing from witness)", addr)
 	}
 	return nil, nil
 }
@@ -1535,6 +1557,7 @@ func (s *witnessStateless) ReadAccountStorage(address accounts.Address, key acco
 	// Read from trie
 	cKey := dbutils.GenerateCompositeTrieKey(addrHash, seckey)
 	if enc, ok := s.t.Get(cKey); ok {
+		s.usedTrieSlots[keyValue] = struct{}{}
 		var res uint256.Int
 		res.SetBytes(enc)
 		if s.tracing(addr) {
@@ -1545,6 +1568,9 @@ func (s *witnessStateless) ReadAccountStorage(address accounts.Address, key acco
 
 	if s.tracing(addr) {
 		fmt.Printf("[TRACE-S] ReadAccountStorage %s key=%s -> not found\n", addr.Hex(), keyValue.Hex())
+	}
+	if s.strictVerify && addr != common.Address(params.SystemAddress.Value()) {
+		return uint256.Int{}, false, fmt.Errorf("strict witness: unresolved trie node reading storage %x/%x (missing from witness)", addr, keyValue)
 	}
 	return uint256.Int{}, false, nil
 }

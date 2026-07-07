@@ -884,6 +884,8 @@ func (d *Downloader) decDownloadRequests() {
 // Returns all torrents, with names, because if a Torrent info isn't available, we can't just yank
 // the name from there.
 func (d *Downloader) allActiveSnapshots() (ret []snapshot) {
+	d.lock.RLock()
+	defer d.lock.RUnlock()
 	for name, t := range d.torrentsByName {
 		ret = append(ret, snapshot{
 			Name:     name,
@@ -1304,6 +1306,11 @@ func (d *Downloader) addCompleteTorrent(
 		err = fmt.Errorf("loading metainfo from disk: %w", err)
 		return
 	}
+	// Hold d.lock only for the torrentsByName mutation, like the download add paths do,
+	// so it cannot race allActiveSnapshots' iteration (which holds only RLock). This is
+	// the sole caller path that reaches addTorrent without the caller already holding it.
+	d.lock.Lock()
+	defer d.lock.Unlock()
 	return d.addCompleteTorrentFromMetainfo(name, mi)
 }
 

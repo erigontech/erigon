@@ -138,7 +138,9 @@ func (t *TopicSubscriptions) SubscribeWithExpiry(topic string, expiry time.Time)
 	defer t.mutex.Unlock()
 	sub, ok := t.subs[topic]
 	if !ok {
-		t.toSubscribes[topic] = expiry
+		if currentExpiry, exists := t.toSubscribes[topic]; !exists || expiry.After(currentExpiry) {
+			t.toSubscribes[topic] = expiry
+		}
 		return errors.New("topic not found")
 	}
 
@@ -152,7 +154,7 @@ func (t *TopicSubscriptions) SubscribeWithExpiry(topic string, expiry time.Time)
 		if err != nil {
 			return err
 		}
-		log.Info("[GossipManager] Subscribed to topic", "topic", topic, "expiration", expiry)
+		log.Debug("[GossipManager] Subscribed to topic", "topic", topic, "expiration", expiry)
 		sub.sub = s
 
 		// update ENR only on first subscription, not on expiry renewal
@@ -163,7 +165,9 @@ func (t *TopicSubscriptions) SubscribeWithExpiry(topic string, expiry time.Time)
 			t.p2p.UpdateENRSyncNets(extractSubnetIndexByGossipTopic(name), true)
 		}
 	}
-	sub.expiry = expiry
+	if expiry.After(sub.expiry) {
+		sub.expiry = expiry
+	}
 	return nil
 }
 

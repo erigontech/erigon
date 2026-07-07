@@ -8,93 +8,8 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/common"
-	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/execution/types/accounts"
 )
-
-// TestCalculatorTouchesMatchInline verifies that processing VersionedWrite
-// entries and calling TouchKey produces the same Updates as calling TouchKey
-// directly from DomainPut. This ensures the commitment calculator (which
-// receives writes via channel) produces identical trie roots to the inline
-// path (which calls TouchKey during DomainPut).
-func TestCalculatorTouchesMatchInline(t *testing.T) {
-	t.Parallel()
-
-	// Simulate account and storage writes for a block
-	type writeEntry struct {
-		domain kv.Domain
-		key    []byte // composite key (address for accounts, address+slot for storage)
-		val    []byte // serialized value
-	}
-
-	// Simulate: 3 account balance changes + 2 storage writes
-	acc1 := common.FromHex("c17fa85f22306d37cec90b0ec74c5623dbbac68f")
-	acc2 := common.FromHex("553bba1d92398a69fbc9f01593bbc51b58862366")
-	acc3 := common.FromHex("4838b106fce9647bdf1e7877bf73ce8b0bad5f97")
-
-	// Serialize accounts (simplified — real SerialiseV3 is more complex)
-	serializeAccount := func(balance uint64, nonce uint64) []byte {
-		var acc accounts.Account
-		acc.Balance = *uint256.NewInt(balance)
-		acc.Nonce = nonce
-		enc := make([]byte, acc.EncodingLengthForStorage())
-		acc.EncodeForStorage(enc)
-		return enc
-	}
-
-	storageKey1 := common.FromHex("553bba1d92398a69fbc9f01593bbc51b58862366" +
-		"0000000000000000000000000000000000000000000000000000000000000004")
-	storageKey2 := common.FromHex("553bba1d92398a69fbc9f01593bbc51b58862366" +
-		"0000000000000000000000000000000000000000000000000000000000000005")
-
-	writes := []writeEntry{
-		{kv.AccountsDomain, acc1, serializeAccount(1000, 5)},
-		{kv.AccountsDomain, acc2, serializeAccount(2000, 10)},
-		{kv.AccountsDomain, acc3, serializeAccount(3000, 15)},
-		{kv.StorageDomain, storageKey1, common.FromHex("7c1fed52ef2b45443e674ae782f51586aa29c384")},
-		{kv.StorageDomain, storageKey2, common.FromHex("a6b84e7cfb39a724cc086f9f")},
-	}
-
-	// Path 1: Inline — simulate what DomainPut does
-	inlineUpdates := NewUpdates(ModeDirect, t.TempDir(), keyHasherNoop)
-	for _, w := range writes {
-		switch w.domain {
-		case kv.AccountsDomain:
-			inlineUpdates.TouchPlainKey(string(w.key), w.val, inlineUpdates.TouchAccount)
-		case kv.StorageDomain:
-			inlineUpdates.TouchPlainKey(string(w.key), w.val, inlineUpdates.TouchStorage)
-		case kv.CodeDomain:
-			inlineUpdates.TouchPlainKey(string(w.key), w.val, inlineUpdates.TouchCode)
-		}
-	}
-
-	// Path 2: Calculator — simulate processing writes from channel
-	calcUpdates := NewUpdates(ModeDirect, t.TempDir(), keyHasherNoop)
-	for _, w := range writes {
-		switch w.domain {
-		case kv.AccountsDomain:
-			calcUpdates.TouchPlainKey(string(w.key), w.val, calcUpdates.TouchAccount)
-		case kv.StorageDomain:
-			calcUpdates.TouchPlainKey(string(w.key), w.val, calcUpdates.TouchStorage)
-		case kv.CodeDomain:
-			calcUpdates.TouchPlainKey(string(w.key), w.val, calcUpdates.TouchCode)
-		}
-	}
-
-	// Compare: same number of unique keys
-	require.Equal(t, inlineUpdates.Size(), calcUpdates.Size(),
-		"Inline and calculator should have same number of keys")
-
-	// Compare: same key set
-	for k := range inlineUpdates.keys {
-		_, ok := calcUpdates.keys[k]
-		assert.True(t, ok, "Calculator missing key: %x", k)
-	}
-	for k := range calcUpdates.keys {
-		_, ok := inlineUpdates.keys[k]
-		assert.True(t, ok, "Inline missing key: %x", k)
-	}
-}
 
 // TestCalculatorBlockBoundary verifies that the calculator correctly
 // accumulates touches across TXs within a block, then processes them
@@ -120,6 +35,27 @@ func TestCalculatorBlockBoundary(t *testing.T) {
 	assert.Equal(t, uint64(2), updates.Size(), "Should have 2 unique keys")
 }
 
+// TestTouchKeyIdempotent verifies that touching the same key twice
+// (as happens when DomainPut touches AND the Flush touches) produces
+// the same result as touching once.
+func TestTouchKeyIdempotent(t *testing.T) {
+	t.Parallel()
+
+	key := common.FromHex("c02aaa39b223fe8d0a0e5c4f27ead9083c756cc2")
+	acc := accounts.Account{Nonce: 1, Balance: *uint256.NewInt(1000), Incarnation: 1}
+	val := accounts.SerialiseV3(&acc)
+
+	single := NewUpdates(ModeUpdate, t.TempDir(), keyHasherNoop)
+	single.TouchPlainKey(string(key), val, single.TouchAccount)
+
+	double := NewUpdates(ModeUpdate, t.TempDir(), keyHasherNoop)
+	double.TouchPlainKey(string(key), val, double.TouchAccount)
+	double.TouchPlainKey(string(key), val, double.TouchAccount)
+
+	assert.Equal(t, single.Size(), double.Size(),
+		"Double touch should produce same key count as single touch")
+}
+
 // TestCalculatorStorageCompositeKey verifies that storage writes use the
 // correct composite key format (address + slot) for TouchKey.
 func TestCalculatorStorageCompositeKey(t *testing.T) {
@@ -138,7 +74,6 @@ func TestCalculatorStorageCompositeKey(t *testing.T) {
 	updates.TouchPlainKey(string(composite1), []byte("val1"), updates.TouchStorage)
 	updates.TouchPlainKey(string(composite2), []byte("val2"), updates.TouchStorage)
 
-	// Should have 2 unique keys (different slots)
 	assert.Equal(t, uint64(2), updates.Size(), "Different slots should be different keys")
 }
 
@@ -159,6 +94,48 @@ func TestCalculatorCodeDomain(t *testing.T) {
 	assert.True(t, ok, "Key should be the address")
 }
 
+// TestTouchKeyDomainMapping verifies the domain-to-touch-function mapping
+// used by both DomainPut and the commitment calculator.
+func TestTouchKeyDomainMapping(t *testing.T) {
+	t.Parallel()
+
+	updates := NewUpdates(ModeUpdate, t.TempDir(), keyHasherNoop)
+
+	// Account key (20 bytes)
+	accKey := common.FromHex("c02aaa39b223fe8d0a0e5c4f27ead9083c756cc2")
+	acc := accounts.Account{Nonce: 1, Balance: *uint256.NewInt(1000)}
+	accVal := accounts.SerialiseV3(&acc)
+	updates.TouchPlainKey(string(accKey), accVal, updates.TouchAccount)
+
+	// Storage key (52 bytes)
+	stgKey := common.FromHex("c02aaa39b223fe8d0a0e5c4f27ead9083c756cc2" + "0000000000000000000000000000000000000000000000000000000000000001")
+	updates.TouchPlainKey(string(stgKey), []byte{0x42}, updates.TouchStorage)
+
+	// Code key (20 bytes)
+	codeKey := common.FromHex("d2c6b20395bbb07b35d8c28ee439338a612dc82e")
+	updates.TouchPlainKey(string(codeKey), []byte{0xef, 0x01, 0x00}, updates.TouchCode)
+
+	require.Equal(t, uint64(3), updates.Size(), "Should have 3 touched keys")
+}
+
+// TestTouchKey_AccountAndCodeShareKey verifies that account and code touches for the same
+// address merge into a single entry: the commitment trie keys both leaves by the address.
+func TestTouchKey_AccountAndCodeShareKey(t *testing.T) {
+	t.Parallel()
+
+	addr := common.FromHex("c02aaa39b223fe8d0a0e5c4f27ead9083c756cc2")
+	slot := common.FromHex("0000000000000000000000000000000000000000000000000000000000000004")
+	stgKey := append(common.Copy(addr), slot...)
+
+	updates := NewUpdates(ModeUpdate, t.TempDir(), keyHasherNoop)
+	acc := accounts.Account{Nonce: 1, Balance: *uint256.NewInt(100)}
+	updates.TouchPlainKey(string(addr), accounts.SerialiseV3(&acc), updates.TouchAccount)
+	updates.TouchPlainKey(string(stgKey), []byte{0x42}, updates.TouchStorage)
+	updates.TouchPlainKey(string(addr), []byte{0xef}, updates.TouchCode)
+
+	assert.Equal(t, uint64(2), updates.Size(), "Should have 2 unique key entries (addr merged, addr+slot)")
+}
+
 // TestTouchPlainKeyDirect_MatchesSerialized verifies that TouchPlainKeyDirect
 // produces the same tree entries as TouchPlainKey with serialized bytes.
 // This ensures the commitment calculator (using Direct) produces identical
@@ -166,7 +143,6 @@ func TestCalculatorCodeDomain(t *testing.T) {
 func TestTouchPlainKeyDirect_MatchesSerialized(t *testing.T) {
 	t.Parallel()
 
-	// Build an account
 	acc := accounts.NewAccount()
 	acc.Balance = *uint256.NewInt(12345)
 	acc.Nonce = 42
@@ -188,30 +164,23 @@ func TestTouchPlainKeyDirect_MatchesSerialized(t *testing.T) {
 	}
 	utDirect.TouchPlainKeyDirect(key, update)
 
-	// Both should have 1 entry
 	assert.Equal(t, utSerialized.Size(), utDirect.Size(), "Same number of entries")
 
-	// Compare the Update contents in the tree
-	var serializedUpdate, directUpdate *Update
-	utSerialized.tree.Descend(func(item *KeyUpdate) bool {
-		if item.plainKey == key {
-			serializedUpdate = item.update
-		}
-		return true
-	})
-	utDirect.tree.Descend(func(item *KeyUpdate) bool {
-		if item.plainKey == key {
-			directUpdate = item.update
-		}
-		return true
-	})
-
-	require.NotNil(t, serializedUpdate, "Serialized should have entry")
-	require.NotNil(t, directUpdate, "Direct should have entry")
+	serializedUpdate := findKeyUpdate(t, utSerialized, key)
+	directUpdate := findKeyUpdate(t, utDirect, key)
 	assert.True(t, serializedUpdate.Balance.Eq(&directUpdate.Balance), "Balance should match")
 	assert.Equal(t, serializedUpdate.Nonce, directUpdate.Nonce, "Nonce should match")
 	assert.Equal(t, serializedUpdate.Flags&BalanceUpdate != 0, directUpdate.Flags&BalanceUpdate != 0, "BalanceUpdate flag")
 	assert.Equal(t, serializedUpdate.Flags&NonceUpdate != 0, directUpdate.Flags&NonceUpdate != 0, "NonceUpdate flag")
+}
+
+// findKeyUpdate returns the Update stored for plainKey, failing the test if absent.
+func findKeyUpdate(t *testing.T, ut *Updates, plainKey string) *Update {
+	t.Helper()
+	entry, ok := ut.treeIdx[plainKey]
+	require.True(t, ok, "key %x should be present", plainKey)
+	require.NotNil(t, entry.update)
+	return entry.update
 }
 
 // TestTouchPlainKeyDirect_Storage verifies direct storage touches.
@@ -237,22 +206,8 @@ func TestTouchPlainKeyDirect_Storage(t *testing.T) {
 
 	assert.Equal(t, utSerialized.Size(), utDirect.Size())
 
-	var su, du *Update
-	utSerialized.tree.Descend(func(item *KeyUpdate) bool {
-		if item.plainKey == key {
-			su = item.update
-		}
-		return true
-	})
-	utDirect.tree.Descend(func(item *KeyUpdate) bool {
-		if item.plainKey == key {
-			du = item.update
-		}
-		return true
-	})
-
-	require.NotNil(t, su)
-	require.NotNil(t, du)
+	su := findKeyUpdate(t, utSerialized, key)
+	du := findKeyUpdate(t, utDirect, key)
 	assert.Equal(t, su.Storage, du.Storage, "Storage value should match")
 	assert.Equal(t, su.StorageLen, du.StorageLen, "StorageLen should match")
 	assert.Equal(t, su.Flags, du.Flags, "Flags should match")
@@ -269,13 +224,6 @@ func TestTouchPlainKeyDirect_Delete(t *testing.T) {
 
 	assert.Equal(t, uint64(1), ut.Size())
 
-	var u *Update
-	ut.tree.Descend(func(item *KeyUpdate) bool {
-		if item.plainKey == key {
-			u = item.update
-		}
-		return true
-	})
-	require.NotNil(t, u)
+	u := findKeyUpdate(t, ut, key)
 	assert.Equal(t, DeleteUpdate, u.Flags&DeleteUpdate, "Should have DeleteUpdate flag")
 }
