@@ -99,8 +99,12 @@ const heapWindowBeg, heapWindowEnd = 0x00c0_0000_0000, 0x00e0_0000_0000
 // holes were filled at init.
 var enabled bool
 
+// heapProbe is package-level so it is heap-allocated regardless of escape
+// analysis; the init self-check tests the TSAN layout against its address.
+var heapProbe = new([16]byte)
+
 func init() {
-	probe := uintptr(unsafe.Pointer(new([16]byte)))
+	probe := uintptr(unsafe.Pointer(heapProbe))
 	if probe < heapWindowBeg || probe >= heapWindowEnd ||
 		C.shadow_is_mapped(C.uint64_t(mem2shadow(probe))) == 0 {
 		fmt.Fprintln(os.Stderr, "race: TSAN shadow layout self-check failed; not pre-mapping shadow for the heap window")
