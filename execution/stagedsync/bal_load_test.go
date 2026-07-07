@@ -163,18 +163,23 @@ func TestLoadFromBAL_MatchesApplyWrites(t *testing.T) {
 	// in ascending tx order — ApplyWrites' last-write-wins must land on
 	// the same end state as the BAL's highest-index value.
 	csInc := newTestCalcState()
-	csInc.ApplyWrites(state.VersionedWrites{
-		{Address: addrA, Path: state.BalancePath, Val: *uint256.NewInt(10)},
-		{Address: addrA, Path: state.BalancePath, Val: *uint256.NewInt(99)},
-		{Address: addrA, Path: state.NoncePath, Val: uint64(5)},
-		{Address: addrB, Path: state.StoragePath, Key: slotS1, Val: *uint256.NewInt(1)},
-		{Address: addrB, Path: state.StoragePath, Key: slotS1, Val: *uint256.NewInt(77)},
-		{Address: addrB, Path: state.StoragePath, Key: slotS2, Val: *uint256.NewInt(42)},
-		{Address: addrC, Path: state.BalancePath, Val: *uint256.NewInt(1000)},
-		{Address: addrC, Path: state.CodePath, Val: codeC},
-		{Address: addrE, Path: state.BalancePath, Val: *uint256.NewInt(200)},
-		{Address: addrE, Path: state.BalancePath, Val: *uint256.NewInt(500)},
-	})
+	// The typed WriteSet is a per-(addr,path) map, so a repeated Set is
+	// last-write-wins — the same end state the BAL's highest-index value yields.
+	bal2 := func(a accounts.Address, p state.AccountPath) state.WriteHeader {
+		return state.WriteHeader{Address: a, Path: p}
+	}
+	incWrites := &state.WriteSet{}
+	incWrites.SetBalance(addrA, &state.VersionedWrite[uint256.Int]{WriteHeader: bal2(addrA, state.BalancePath), Val: *uint256.NewInt(10)})
+	incWrites.SetBalance(addrA, &state.VersionedWrite[uint256.Int]{WriteHeader: bal2(addrA, state.BalancePath), Val: *uint256.NewInt(99)})
+	incWrites.SetNonce(addrA, &state.VersionedWrite[uint64]{WriteHeader: bal2(addrA, state.NoncePath), Val: uint64(5)})
+	incWrites.SetStorage(addrB, slotS1, &state.VersionedWrite[uint256.Int]{WriteHeader: state.WriteHeader{Address: addrB, Path: state.StoragePath, Key: slotS1}, Val: *uint256.NewInt(1)})
+	incWrites.SetStorage(addrB, slotS1, &state.VersionedWrite[uint256.Int]{WriteHeader: state.WriteHeader{Address: addrB, Path: state.StoragePath, Key: slotS1}, Val: *uint256.NewInt(77)})
+	incWrites.SetStorage(addrB, slotS2, &state.VersionedWrite[uint256.Int]{WriteHeader: state.WriteHeader{Address: addrB, Path: state.StoragePath, Key: slotS2}, Val: *uint256.NewInt(42)})
+	incWrites.SetBalance(addrC, &state.VersionedWrite[uint256.Int]{WriteHeader: bal2(addrC, state.BalancePath), Val: *uint256.NewInt(1000)})
+	incWrites.SetCode(addrC, &state.VersionedWrite[accounts.Code]{WriteHeader: bal2(addrC, state.CodePath), Val: accounts.NewCode(codeC)})
+	incWrites.SetBalance(addrE, &state.VersionedWrite[uint256.Int]{WriteHeader: bal2(addrE, state.BalancePath), Val: *uint256.NewInt(200)})
+	incWrites.SetBalance(addrE, &state.VersionedWrite[uint256.Int]{WriteHeader: bal2(addrE, state.BalancePath), Val: *uint256.NewInt(500)})
+	csInc.ApplyWrites(incWrites)
 
 	assert.Equal(t, csInc.accounts, csBAL.accounts, "accounts: BAL load diverged from the write stream")
 	assert.Equal(t, csInc.storageState, csBAL.storageState, "storageState: BAL load diverged from the write stream")

@@ -46,6 +46,13 @@ import (
 	"github.com/erigontech/erigon/execution/types/accounts"
 )
 
+func nonceBalanceWrites(addr accounts.Address, nonce uint64, bal uint256.Int) *state.WriteSet {
+	ws := &state.WriteSet{}
+	ws.SetNonce(addr, &state.VersionedWrite[uint64]{WriteHeader: state.WriteHeader{Address: addr, Path: state.NoncePath}, Val: nonce})
+	ws.SetBalance(addr, &state.VersionedWrite[uint256.Int]{WriteHeader: state.WriteHeader{Address: addr, Path: state.BalancePath}, Val: bal})
+	return ws
+}
+
 // TestHandleMessage_StepBoundaryCheckpointMidBlock pins the parallel-exec
 // step-boundary commitment bug: a block whose txNum range straddles a step
 // edge must leave a commitment checkpoint at that edge, otherwise the step's
@@ -93,10 +100,7 @@ func TestHandleMessage_StepBoundaryCheckpointMidBlock(t *testing.T) {
 		cc.handleMessage(ctx, &txResult{
 			blockNum: blockNum,
 			txNum:    txNum,
-			writes: state.VersionedWrites{
-				&state.VersionedWrite{Address: addr, Path: state.NoncePath, Val: txNum},
-				&state.VersionedWrite{Address: addr, Path: state.BalancePath, Val: bal},
-			},
+			writes:   nonceBalanceWrites(addr, txNum, bal),
 		})
 	}
 
@@ -160,10 +164,7 @@ func TestHandleMessage_StepCheckpointInPerBlockMode(t *testing.T) {
 		cc.handleMessage(ctx, &txResult{
 			blockNum: blockNum,
 			txNum:    txNum,
-			writes: state.VersionedWrites{
-				&state.VersionedWrite{Address: addr, Path: state.NoncePath, Val: txNum},
-				&state.VersionedWrite{Address: addr, Path: state.BalancePath, Val: bal},
-			},
+			writes:   nonceBalanceWrites(addr, txNum, bal),
 		})
 	}
 
@@ -219,10 +220,7 @@ func TestHandleMessage_PartialBlockComputeFailureNotSwallowed(t *testing.T) {
 		cc.handleMessage(ctx, &txResult{
 			blockNum: 1,
 			txNum:    txNum,
-			writes: state.VersionedWrites{
-				&state.VersionedWrite{Address: addr, Path: state.NoncePath, Val: txNum},
-				&state.VersionedWrite{Address: addr, Path: state.BalancePath, Val: bal},
-			},
+			writes:   nonceBalanceWrites(addr, txNum, bal),
 		})
 	}
 	require.False(t, cc.hasComputed)
@@ -295,7 +293,7 @@ func runBlockEndingOnStepEdge(t *testing.T, edgeTxHasWrites bool) stepEdgeOutcom
 
 	rnd := rand.New(rand.NewSource(42))
 	writeAccount := func(txNum uint64, hasWrites bool) {
-		var writes state.VersionedWrites
+		var writes *state.WriteSet
 		if hasWrites {
 			addrBytes := make([]byte, length.Addr)
 			rnd.Read(addrBytes)
@@ -304,10 +302,7 @@ func runBlockEndingOnStepEdge(t *testing.T, edgeTxHasWrites bool) stepEdgeOutcom
 			acc := accounts.Account{Nonce: txNum, Balance: bal, CodeHash: accounts.EmptyCodeHash}
 			buf := accounts.SerialiseV3(&acc)
 			require.NoError(t, doms.DomainPut(kv.AccountsDomain, tx, addrBytes, buf, txNum, nil))
-			writes = state.VersionedWrites{
-				&state.VersionedWrite{Address: addr, Path: state.NoncePath, Val: txNum},
-				&state.VersionedWrite{Address: addr, Path: state.BalancePath, Val: bal},
-			}
+			writes = nonceBalanceWrites(addr, txNum, bal)
 		}
 		cc.handleMessage(ctx, &txResult{blockNum: 1, txNum: txNum, writes: writes})
 	}
@@ -405,10 +400,7 @@ func TestHandleMessage_StepBoundaryDoesNotPolluteLiveChangeset(t *testing.T) {
 		cc.handleMessage(ctx, &txResult{
 			blockNum: 1,
 			txNum:    txNum,
-			writes: state.VersionedWrites{
-				&state.VersionedWrite{Address: addr, Path: state.NoncePath, Val: txNum},
-				&state.VersionedWrite{Address: addr, Path: state.BalancePath, Val: bal},
-			},
+			writes:   nonceBalanceWrites(addr, txNum, bal),
 		})
 	}
 
@@ -468,10 +460,7 @@ func TestHandleMessage_StepBoundaryRecordsIntoOwnChangesetInWindow(t *testing.T)
 			blockNum:  1,
 			blockHash: blockHash,
 			txNum:     txNum,
-			writes: state.VersionedWrites{
-				&state.VersionedWrite{Address: addr, Path: state.NoncePath, Val: txNum},
-				&state.VersionedWrite{Address: addr, Path: state.BalancePath, Val: bal},
-			},
+			writes:    nonceBalanceWrites(addr, txNum, bal),
 		})
 	}
 
@@ -514,10 +503,7 @@ func TestHandleMessage_PreWindowPerBlockComputeDoesNotPolluteLiveChangeset(t *te
 		cc.handleMessage(ctx, &txResult{
 			blockNum: 1,
 			txNum:    txNum,
-			writes: state.VersionedWrites{
-				&state.VersionedWrite{Address: addr, Path: state.NoncePath, Val: txNum},
-				&state.VersionedWrite{Address: addr, Path: state.BalancePath, Val: bal},
-			},
+			writes:   nonceBalanceWrites(addr, txNum, bal),
 		})
 	}
 	// First partial block => computeWithoutCheck, a per-block compute with no

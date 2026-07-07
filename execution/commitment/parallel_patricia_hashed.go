@@ -294,17 +294,23 @@ func (p *ParallelPatriciaHashed) Process(
 
 	p.rootHash.Store(nil)
 
-	if p.streaming != nil {
-		return p.processStreaming(ctx)
-	}
-
 	pu := updates.parallel
 	if pu.trie == nil || pu.trie.root == nil || pu.trie.root.subtreeCount == 0 {
+		// A consumed (or never-touched) collection must return the carried root; folding
+		// an empty streaming base would publish the empty-trie root instead.
 		rh, rerr := p.template.RootHash()
 		if rerr != nil {
 			return nil, rerr
 		}
 		return rh, nil
+	}
+
+	if p.streaming != nil {
+		rh, sErr := p.processStreaming(ctx)
+		if sErr == nil {
+			updates.consumeParallel()
+		}
+		return rh, sErr
 	}
 
 	rh, mErr := p.processMounted(ctx, updates)
@@ -326,6 +332,8 @@ func (p *ParallelPatriciaHashed) Process(
 	} else if aErr := p.applyDeferredUpdates(pu); aErr != nil {
 		return nil, aErr
 	}
+
+	updates.consumeParallel()
 
 	out := make([]byte, len(rh))
 	copy(out, rh)

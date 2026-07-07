@@ -560,7 +560,7 @@ func (a *Aggregator) openFolder() error {
 		return err
 	}
 
-	eg := &errgroup.Group{}
+	eg, ctx := errgroup.WithContext(a.ctx)
 	for _, d := range a.d {
 		if d.Disable {
 			continue
@@ -568,12 +568,7 @@ func (a *Aggregator) openFolder() error {
 
 		d := d
 		eg.Go(func() error {
-			select {
-			case <-a.ctx.Done():
-				return a.ctx.Err()
-			default:
-			}
-			return d.openFolder(scanDirsRes)
+			return d.openFolder(ctx, scanDirsRes)
 		})
 	}
 	for _, ii := range a.standaloneIIs() {
@@ -581,7 +576,7 @@ func (a *Aggregator) openFolder() error {
 			continue
 		}
 		ii := ii
-		eg.Go(func() error { return ii.openFolder(scanDirsRes) })
+		eg.Go(func() error { return ii.openFolder(ctx, scanDirsRes) })
 	}
 	if err := eg.Wait(); err != nil {
 		return fmt.Errorf("openFolder: %w", err)
@@ -1209,8 +1204,7 @@ func (a *Aggregator) mergeLoopStep(ctx context.Context, toTxNum uint64) (somethi
 		in.Close()
 		return true, err
 	}
-	a.IntegrateMergedDirtyFiles(in)
-	a.cleanAfterMerge(in)
+	a.integrateMergedDirtyFiles(in)
 	return true, nil
 }
 
@@ -1716,6 +1710,8 @@ func (a *Aggregator) CollateAndPrune(ctx context.Context, db kv.TemporalRwDB, pr
 	return nil
 }
 func (a *Aggregator) FilesAmount() (res []int) {
+	a.dirtyFilesLock.Lock()
+	defer a.dirtyFilesLock.Unlock()
 	for _, d := range a.d {
 		res = append(res, d.dirtyFiles.Len())
 	}
@@ -2030,8 +2026,11 @@ func (at *AggregatorRoTx) mergeFiles(ctx context.Context, files *FilesForMerge, 
 	return mf, err
 }
 
-func (a *Aggregator) IntegrateMergedDirtyFiles(in *MergeResult) {
+func (a *Aggregator) integrateMergedDirtyFiles(in *MergeResult) {
 	defer a.onFilesChange(in.FilePaths(a.dirs.Snap))
+
+	at := a.BeginFilesRo()
+	defer at.Close()
 
 	a.dirtyFilesLock.Lock()
 	defer a.dirtyFilesLock.Unlock()
@@ -2049,6 +2048,8 @@ func (a *Aggregator) IntegrateMergedDirtyFiles(in *MergeResult) {
 		}
 		ii.integrateMergedDirtyFiles(in.iis[id])
 	}
+
+	a.cleanAfterMergeLocked(at, in)
 }
 
 func (a *Aggregator) cleanAfterMerge(in *MergeResult) {
@@ -2058,6 +2059,10 @@ func (a *Aggregator) cleanAfterMerge(in *MergeResult) {
 	a.dirtyFilesLock.Lock()
 	defer a.dirtyFilesLock.Unlock()
 
+	a.cleanAfterMergeLocked(at, in)
+}
+
+func (a *Aggregator) cleanAfterMergeLocked(at *AggregatorRoTx, in *MergeResult) {
 	// Collect garbage names and remove it from dirtyFiles in one pass. onFilesDelete
 	// blocks downstream (e.g. Downloader) before recalc/reclaim physically unlinks
 	// anything (deferred to reclaimRetired), so it won't re-create a file we delete.
@@ -2164,7 +2169,9 @@ func (a *Aggregator) buildFilesInBackground(txNum uint64, doMerge bool) chan str
 		if a.snapshotBuildSema != nil {
 			//we are inside own goroutine - it's fine to block here
 			if err := a.snapshotBuildSema.Acquire(a.ctx, 1); err != nil { //TODO: not sure if this ctx is correct
-				a.logger.Warn("[snapshots] buildFilesInBackground", "err", err)
+				if !errors.Is(err, context.Canceled) && !errors.Is(err, common.ErrStopped) {
+					a.logger.Warn("[snapshots] buildFilesInBackground", "err", err)
+				}
 				close(fin)
 				return //nolint
 			}
