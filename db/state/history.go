@@ -746,18 +746,13 @@ func (sf HistoryFiles) CleanupOnError() {
 	}
 }
 
-type historyDirty struct {
-	hist *DirtyFiles
-	ii   *DirtyFiles
+func (h *History) dirtyTrees() (self, ii *DirtyFiles) {
+	return h.dirtyFiles, h.InvertedIndex.dirtyFiles
 }
 
-func (h *History) dirtyBundle() historyDirty {
-	return historyDirty{hist: h.dirtyFiles, ii: h.InvertedIndex.dirtyFiles}
-}
-
-func (h *History) calcVisibleFiles(dirty historyDirty, toTxNum uint64) (visibleFiles, *iiVisible) {
-	hv := calcVisibleFiles(dirty.hist, h.Accessors, nil, false, toTxNum)
-	hiv := h.InvertedIndex.calcVisibleFiles(dirty.ii, toTxNum)
+func (h *History) calcVisibleFiles(hfiles, iifiles *DirtyFiles, toTxNum uint64) (visibleFiles, *iiVisible) {
+	hv := calcVisibleFiles(hfiles, h.Accessors, nil, false, toTxNum)
+	hiv := h.InvertedIndex.calcVisibleFiles(iifiles, toTxNum)
 	return hv, hiv
 }
 
@@ -929,7 +924,8 @@ type HistoryRoTx struct {
 }
 
 func (h *History) beginForTests() *HistoryRoTx {
-	hv, hvi := h.calcVisibleFiles(h.dirtyBundle(), h.dirtyFilesEndTxNumMinimax())
+	hfiles, iifiles := h.dirtyTrees()
+	hv, hvi := h.calcVisibleFiles(hfiles, iifiles, h.dirtyFilesEndTxNumMinimax())
 	return h.beginFilesRo(hv, hvi)
 }
 

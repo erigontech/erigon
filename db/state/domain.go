@@ -394,19 +394,15 @@ func (d *Domain) closeWhatNotInList(fNames []string) {
 	closeWhatNotInList(d.dirtyFiles, fNames)
 }
 
-type domainDirty struct {
-	domain *DirtyFiles
-	hist   historyDirty
-}
-
-func (d *Domain) dirtyBundle() domainDirty {
-	return domainDirty{domain: d.dirtyFiles, hist: d.History.dirtyBundle()}
+func (d *Domain) dirtyTrees() (self, hist, histII *DirtyFiles) {
+	hist, histII = d.History.dirtyTrees()
+	return d.dirtyFiles, hist, histII
 }
 
 // calcVisibleFiles is pure — it does not mutate d, d.History, or d.History.InvertedIndex.
 // Aggregator.recalcVisibleFiles uses it to assemble a cross-entity consistent
 // snapshot that is published via a single atomic store.
-func (d *Domain) calcVisibleFiles(dirty domainDirty, toTxNum uint64) (*domainVisible, visibleFiles, *iiVisible) {
+func (d *Domain) calcVisibleFiles(dfiles, hfiles, hiifiles *DirtyFiles, toTxNum uint64) (*domainVisible, visibleFiles, *iiVisible) {
 	var checker func(startTxNum, endTxNum uint64) bool
 	if d.checker != nil {
 		ue := FromDomain(d.Name)
@@ -414,8 +410,8 @@ func (d *Domain) calcVisibleFiles(dirty domainDirty, toTxNum uint64) (*domainVis
 			return d.checker.CheckDependentPresent(ue, All, startTxNum, endTxNum)
 		}
 	}
-	dv := newDomainVisible(d.Name, calcVisibleFiles(dirty.domain, d.Accessors, checker, false, toTxNum))
-	hv, hiv := d.History.calcVisibleFiles(dirty.hist, toTxNum)
+	dv := newDomainVisible(d.Name, calcVisibleFiles(dfiles, d.Accessors, checker, false, toTxNum))
+	hv, hiv := d.History.calcVisibleFiles(hfiles, hiifiles, toTxNum)
 	return dv, hv, hiv
 }
 
@@ -657,7 +653,8 @@ func (dt *DomainRoTx) getLatestFromFile(i int, filekey []byte, hi, lo uint64) (v
 // because it can observe an unsynchronized/torn view of dirtyFiles across
 // entities. Production code goes through Aggregator.BeginFilesRo.
 func (d *Domain) beginForTests() *DomainRoTx {
-	dv, hv, iv := d.calcVisibleFiles(d.dirtyBundle(), d.dirtyFilesEndTxNumMinimax())
+	dfiles, hfiles, hiifiles := d.dirtyTrees()
+	dv, hv, iv := d.calcVisibleFiles(dfiles, hfiles, hiifiles, d.dirtyFilesEndTxNumMinimax())
 	return d.beginFilesRo(dv, hv, iv)
 }
 

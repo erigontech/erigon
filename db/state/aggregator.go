@@ -241,7 +241,7 @@ func (a *Aggregator) RegisterDomain(cfg statecfg.DomainCfg, salt *uint32, dirs d
 	}
 	d := a.d[cfg.Name]
 	d.salt.Store(salt)
-	a.dirty.d[cfg.Name] = d.dirtyBundle()
+	a.dirty.d[cfg.Name], a.dirty.dh[cfg.Name], a.dirty.dhii[cfg.Name] = d.dirtyTrees()
 	a.AddDependencyBtwnHistoryII(cfg.Name)
 	return nil
 }
@@ -1776,8 +1776,10 @@ type aggregatorVisible struct {
 // stable (created once per entity), so it is filled at RegisterDomain/RegisterII
 // and stored in mvcc.Lifetime, which passes it to recalcVisibleFiles per publish.
 type aggregatorDirty struct {
-	d   [kv.DomainLen]domainDirty
-	iis [kv.StandaloneIdxLen]*DirtyFiles
+	d    [kv.DomainLen]*DirtyFiles        // domain values
+	dh   [kv.DomainLen]*DirtyFiles        // per-domain History
+	dhii [kv.DomainLen]*DirtyFiles        // per-domain History.InvertedIndex
+	iis  [kv.StandaloneIdxLen]*DirtyFiles // standalone inverted indexes
 }
 
 // recalcVisibleFiles builds a fresh immutable aggregatorVisible bundle from the
@@ -1791,7 +1793,7 @@ func (a *Aggregator) recalcVisibleFiles(dirty *aggregatorDirty) *aggregatorVisib
 		if d == nil {
 			continue
 		}
-		next.d[id], next.dh[id], next.dhii[id] = d.calcVisibleFiles(dirty.d[id], toTxNum)
+		next.d[id], next.dh[id], next.dhii[id] = d.calcVisibleFiles(dirty.d[id], dirty.dh[id], dirty.dhii[id], toTxNum)
 	}
 	for id, ii := range a.standaloneIIs() {
 		if ii == nil {
