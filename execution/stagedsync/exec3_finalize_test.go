@@ -1106,7 +1106,7 @@ func TestNormalizeWriteSet_StorageNoOp(t *testing.T) {
 	writeSet := newWS().stor(addr, slotA, state.Version{TxIndex: 1, Incarnation: 0}, val100).build()
 	vm.FlushVersionedWrites(writeSet, true, "")
 
-	result := normalizeWriteSet(writeSet, vm, 1, 0, nil, nil, true, false)
+	result := writeSet.Normalize(vm, 1, 0, nil, nil, true, false)
 
 	storageCount := countPath(result, state.StoragePath)
 	assert.Equal(t, 0, storageCount, "no-op storage write should be filtered")
@@ -1128,7 +1128,7 @@ func TestNormalizeWriteSet_StorageChanged(t *testing.T) {
 	writeSet := newWS().stor(addr, slotA, state.Version{TxIndex: 1, Incarnation: 0}, val200).build()
 	vm.FlushVersionedWrites(writeSet, true, "")
 
-	result := normalizeWriteSet(writeSet, vm, 1, 0, nil, nil, true, false)
+	result := writeSet.Normalize(vm, 1, 0, nil, nil, true, false)
 
 	storageCount := countPath(result, state.StoragePath)
 	assert.Equal(t, 1, storageCount, "changed storage write should be kept")
@@ -1149,7 +1149,7 @@ func TestNormalizeWriteSet_StorageNewKey(t *testing.T) {
 	writeSet := newWS().stor(addr, slotA, state.Version{TxIndex: 0, Incarnation: 0}, val100).build()
 	vm.FlushVersionedWrites(writeSet, true, "")
 
-	result := normalizeWriteSet(writeSet, vm, 0, 0, nil, nil, true, false)
+	result := writeSet.Normalize(vm, 0, 0, nil, nil, true, false)
 
 	storageCount := countPath(result, state.StoragePath)
 	assert.Equal(t, 1, storageCount, "new storage key should be kept")
@@ -1183,7 +1183,7 @@ func TestNormalizeWriteSet_StaleIncarnation(t *testing.T) {
 		stor(addr, slotB, state.Version{TxIndex: 5, Incarnation: 0}, val200). // stale
 		build()
 
-	result := normalizeWriteSet(allWrites, vm, 5, 1, nil, nil, true, false)
+	result := allWrites.Normalize(vm, 5, 1, nil, nil, true, false)
 
 	storageCount := countPath(result, state.StoragePath)
 	assert.Equal(t, 1, storageCount, "only incarnation 1's slotA should survive")
@@ -1213,7 +1213,7 @@ func TestNormalizeWriteSet_SelfDestruct(t *testing.T) {
 	writeSet := newWS().selfDestruct(addr, state.Version{TxIndex: 1, Incarnation: 0}, true).build()
 	vm.FlushVersionedWrites(writeSet, true, "")
 
-	result := normalizeWriteSet(writeSet, vm, 1, 0, nil, nil, true, false)
+	result := writeSet.Normalize(vm, 1, 0, nil, nil, true, false)
 
 	// Should have: SelfDestructPath + DELETE for slotA + DELETE for slotB
 	sdCount := countPath(result, state.SelfDestructPath)
@@ -1244,7 +1244,7 @@ func TestNormalizeWriteSet_AccountFieldResolution(t *testing.T) {
 	// Worker's WriteSet had stale balance=120 (from speculative execution)
 	writeSet := newWS().bal(addr, state.Version{TxIndex: 1, Incarnation: 0}, *uint256.NewInt(120)).build()
 
-	result := normalizeWriteSet(writeSet, vm, 1, 0, nil, nil, true, false)
+	result := writeSet.Normalize(vm, 1, 0, nil, nil, true, false)
 
 	require.Equal(t, 1, writeSetLen(result))
 	w, ok := result.GetBalance(addr)
@@ -1264,7 +1264,7 @@ func TestNormalizeWriteSet_AddressPathExcluded(t *testing.T) {
 		build()
 	vm.FlushVersionedWrites(writeSet, true, "")
 
-	result := normalizeWriteSet(writeSet, vm, 0, 0, nil, nil, true, false)
+	result := writeSet.Normalize(vm, 0, 0, nil, nil, true, false)
 
 	addrCount := countPath(result, state.AddressPath)
 	balCount := countPath(result, state.BalancePath)
@@ -1297,7 +1297,7 @@ func TestNormalizeWriteSet_StorageOnlyAddress(t *testing.T) {
 	writeSet := newWS().stor(addr, slotA, state.Version{TxIndex: 0, Incarnation: 0}, val100).build()
 	vm.FlushVersionedWrites(writeSet, true, "")
 
-	result := normalizeWriteSet(writeSet, vm, 0, 0, reader, nil, true, false)
+	result := writeSet.Normalize(vm, 0, 0, reader, nil, true, false)
 
 	// Should have storage write AND account-level fields for addr.
 	// Serial emits UpdateAccountData for every dirty object.
@@ -1339,7 +1339,7 @@ func TestNormalizeWriteSet_StorageAllNoOps(t *testing.T) {
 	writeSet := newWS().stor(addr, slotA, state.Version{TxIndex: 1, Incarnation: 0}, val100).build()
 	vm.FlushVersionedWrites(writeSet, true, "")
 
-	result := normalizeWriteSet(writeSet, vm, 1, 0, reader, nil, true, false)
+	result := writeSet.Normalize(vm, 1, 0, reader, nil, true, false)
 
 	// Storage write should be filtered (no-op).
 	// But account fields should still be emitted — the IBS would have
@@ -1372,7 +1372,7 @@ func TestNormalizeWriteSet_CreateContract(t *testing.T) {
 		build()
 	vm.FlushVersionedWrites(writeSet, true, "")
 
-	result := normalizeWriteSet(writeSet, vm, 0, 0, nil, nil, true, false)
+	result := writeSet.Normalize(vm, 0, 0, nil, nil, true, false)
 
 	// Should have CreateContractPath + all 4 account fields.
 	// The empty balance should NOT cause deletion because CreateContractPath is present.
@@ -1402,7 +1402,7 @@ func TestNormalizeWriteSet_NewAccount(t *testing.T) {
 	// stateReader returns nil for this address (doesn't exist yet)
 	reader := newMapStateReader() // empty — no accounts
 
-	result := normalizeWriteSet(writeSet, vm, 0, 0, reader, nil, true, false)
+	result := writeSet.Normalize(vm, 0, 0, reader, nil, true, false)
 
 	balCount := countPath(result, state.BalancePath)
 	nonceCount := countPath(result, state.NoncePath)
@@ -1451,7 +1451,7 @@ func TestNormalizeWriteSet_EmptyAccountRemoval(t *testing.T) {
 		CodeHash: emptyCodeHash,
 	}
 
-	result := normalizeWriteSet(writeSet, vm, 5, 0, reader, nil, true, false)
+	result := writeSet.Normalize(vm, 5, 0, reader, nil, true, false)
 
 	// The normalized output should produce a Delete for this account,
 	// NOT a regular write with Balance=0, Nonce=0.
@@ -1505,7 +1505,7 @@ func TestNormalizeWriteSet_AuraSystemAddressRetained(t *testing.T) {
 			CodeHash: emptyCodeHash,
 		}
 
-		return normalizeWriteSet(writeSet, vm, 5, 0, reader, nil, true, isAura)
+		return writeSet.Normalize(vm, 5, 0, reader, nil, true, isAura)
 	}
 
 	hasDelete := func(writes *state.WriteSet) bool {
@@ -1556,7 +1556,7 @@ func TestNormalizeWriteSet_CodePathTravelsWithCodeHash(t *testing.T) {
 		codeHash(authority, ver0, designatorHash).
 		build()
 
-	result := normalizeWriteSet(rawWrites, vm, txIndex, 1, nil, nil, true, false)
+	result := rawWrites.Normalize(vm, txIndex, 1, nil, nil, true, false)
 
 	gotHash, okHash := result.GetCodeHash(authority)
 	require.True(t, okHash, "codeHash must be present in the normalized writeset")
@@ -1598,7 +1598,7 @@ func TestNormalizeWriteSet_CodePathRecoveredFromStateReader(t *testing.T) {
 	vm.FlushVersionedWrites(newWS().nonce(authority, ver0, 2).build(), true, "")
 	rawWrites := newWS().nonce(authority, ver0, 2).build()
 
-	result := normalizeWriteSet(rawWrites, vm, txIndex, 0, reader, nil, true, false)
+	result := rawWrites.Normalize(vm, txIndex, 0, reader, nil, true, false)
 
 	require.Equal(t, 1, countPath(result, state.CodeHashPath),
 		"codeHash is filled from committed state for the modified account")
@@ -1627,7 +1627,7 @@ func TestNormalizeWriteSet_MetamorphicSameTxRecreateKeepsWrites(t *testing.T) {
 		build()
 	vm.FlushVersionedWrites(ws, true, "")
 
-	result := normalizeWriteSet(ws, vm, 1, 0, nil, nil, true, false)
+	result := ws.Normalize(vm, 1, 0, nil, nil, true, false)
 
 	assert.Equal(t, 0, countPath(result, state.SelfDestructPath), "SelfDestructPath=false is not emitted")
 	assert.Equal(t, 0, countPath(result, state.StoragePath), "no storage-delete cascade for an alive account")
@@ -1652,7 +1652,7 @@ func TestNormalizeWriteSet_StaleIncarnationSelfDestructIgnored(t *testing.T) {
 		build()
 	vm.FlushVersionedWrites(ws, true, "")
 
-	result := normalizeWriteSet(ws, vm, 5, 1, nil, nil, true, false)
+	result := ws.Normalize(vm, 5, 1, nil, nil, true, false)
 
 	assert.Equal(t, 0, countPath(result, state.SelfDestructPath), "stale-incarnation SD must not be emitted")
 	b, ok := result.GetBalance(addr)
@@ -1675,12 +1675,12 @@ func TestNormalizeWriteSet_PostSelfDestructZeroStorageDroppedViaHistory(t *testi
 	reader := newMapStateReader()
 
 	zeroWrite := newWS().stor(addr, slot, state.Version{TxIndex: 5, Incarnation: 0}, uint256.Int{}).build()
-	dropped := normalizeWriteSet(zeroWrite, vm, 5, 0, reader, nil, true, false)
+	dropped := zeroWrite.Normalize(vm, 5, 0, reader, nil, true, false)
 	assert.Equal(t, 0, countPath(dropped, state.StoragePath), "post-SD zero write is a no-op against the zero baseline")
 
 	// Control: a non-zero post-SD write is a real change and survives.
 	nonZero := newWS().stor(addr, slot, state.Version{TxIndex: 5, Incarnation: 0}, *uint256.NewInt(77)).build()
-	kept := normalizeWriteSet(nonZero, vm, 5, 0, reader, nil, true, false)
+	kept := nonZero.Normalize(vm, 5, 0, reader, nil, true, false)
 	s, ok := kept.GetStorage(addr, slot)
 	require.True(t, ok, "non-zero post-SD write must survive")
 	assert.Equal(t, *uint256.NewInt(77), s.Val)
@@ -1709,7 +1709,7 @@ func TestNormalizeWriteSet_SelfDestructEarlierThenCreateContractZeroesFields(t *
 		createContract(addr, state.Version{TxIndex: 5, Incarnation: 0}, true).
 		bal(addr, state.Version{TxIndex: 5, Incarnation: 0}, *uint256.NewInt(100)).
 		build()
-	res := normalizeWriteSet(created, vm, 5, 0, nil, nil, true, false)
+	res := created.Normalize(vm, 5, 0, nil, nil, true, false)
 	n, ok := res.GetNonce(addr)
 	require.True(t, ok)
 	assert.Equal(t, uint64(0), n.Val, "CREATE2 after SD gets zero nonce, not the stale pre-SD 9")
@@ -1720,7 +1720,7 @@ func TestNormalizeWriteSet_SelfDestructEarlierThenCreateContractZeroesFields(t *
 	// Control: value-transfer resurrect (no CreateContractPath) inherits pre-SD
 	// fields from the versionMap.
 	resurrect := newWS().bal(addr, state.Version{TxIndex: 5, Incarnation: 0}, *uint256.NewInt(100)).build()
-	res2 := normalizeWriteSet(resurrect, vm, 5, 0, nil, nil, true, false)
+	res2 := resurrect.Normalize(vm, 5, 0, nil, nil, true, false)
 	n2, ok := res2.GetNonce(addr)
 	require.True(t, ok)
 	assert.Equal(t, uint64(9), n2.Val, "value-transfer resurrect inherits the pre-SD nonce")
@@ -1738,11 +1738,11 @@ func TestNormalizeWriteSet_StorageNoOpViaStateReaderPreBlock(t *testing.T) {
 	reader.storage[addr] = map[accounts.StorageKey]uint256.Int{slot: *uint256.NewInt(100)}
 
 	sameVal := newWS().stor(addr, slot, state.Version{TxIndex: 1, Incarnation: 0}, *uint256.NewInt(100)).build()
-	dropped := normalizeWriteSet(sameVal, vm, 1, 0, reader, nil, true, false)
+	dropped := sameVal.Normalize(vm, 1, 0, reader, nil, true, false)
 	assert.Equal(t, 0, countPath(dropped, state.StoragePath), "write-back of the pre-block value is a no-op")
 
 	diffVal := newWS().stor(addr, slot, state.Version{TxIndex: 1, Incarnation: 0}, *uint256.NewInt(200)).build()
-	kept := normalizeWriteSet(diffVal, vm, 1, 0, reader, nil, true, false)
+	kept := diffVal.Normalize(vm, 1, 0, reader, nil, true, false)
 	s, ok := kept.GetStorage(addr, slot)
 	require.True(t, ok, "a changed value must survive")
 	assert.Equal(t, *uint256.NewInt(200), s.Val)
