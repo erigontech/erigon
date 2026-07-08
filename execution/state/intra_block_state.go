@@ -2289,14 +2289,11 @@ func (sdb *IntraBlockState) MakeWriteSet(chainRules *chain.Rules, stateWriter St
 	return nil
 }
 
-// FinalizeTxVersioned finalizes a transaction on the parallel (versionMap) path.
-// The write-set is produced functionally from the recorded IO (WriteSet.Finalize
-// applies the EIP-6780 wipe and snapshots); IntraBlockState only resets its
-// journal for the next tx.
-func (sdb *IntraBlockState) FinalizeTxVersioned() *WriteSet {
-	writes := sdb.versionedWrites.Finalize()
-	sdb.clearJournalAndRefund()
-	return writes
+// FinalizedWrites returns the tx's committable write-set on the parallel
+// (versionMap) path: WriteSet.Finalize applies the EIP-6780 wipe and snapshots
+// the recorded IO. No journal reset here — Reset() does that before the next tx.
+func (sdb *IntraBlockState) FinalizedWrites() *WriteSet {
+	return sdb.versionedWrites.Finalize()
 }
 
 // MergeTxIOInto folds the current transaction's recorded reads, writes and

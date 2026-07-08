@@ -534,8 +534,8 @@ func (txTask *TxTask) Execute(evm *vm.EVM,
 		}
 		result.Err = engine.Initialize(chainConfig, chainReader, header, ibs, syscall, txTask.Logger, nil)
 		if result.Err == nil && !ibs.IsVersioned() {
-			// The versionMap path finalizes via FinalizeTxVersioned after the
-			// switch; the serial path commits the init writes here.
+			// The versionMap path finalizes from the write-set after the switch;
+			// the serial path commits the init writes here.
 			result.Err = ibs.FinalizeTx(rules, state.NewNoopWriter())
 		}
 	case txTask.IsBlockEnd():
@@ -607,9 +607,8 @@ func (txTask *TxTask) Execute(evm *vm.EVM,
 			// afterwards.
 			result.ExecutionResult.SelfDestructedWithBalance = ibs.GetRemovedAccountsWithBalance()
 
-			// The versionMap path defers finalize to FinalizeTxVersioned below so
-			// the journal stays intact for write-set reconciliation. The serial
-			// path clears pending changes here.
+			// The versionMap path produces its write-set from the recorded IO
+			// after the switch; only the serial path clears pending changes here.
 			if !ibs.IsVersioned() {
 				ibs.SoftFinalise()
 			}
@@ -621,7 +620,7 @@ func (txTask *TxTask) Execute(evm *vm.EVM,
 	if result.Err == nil {
 		txTask.BalanceIncreaseSet = ibs.BalanceIncreaseSet()
 		if ibs.IsVersioned() {
-			result.TxOut = ibs.FinalizeTxVersioned()
+			result.TxOut = ibs.FinalizedWrites()
 		} else {
 			if err = ibs.MakeWriteSet(rules, stateWriter); err != nil {
 				panic(err)
@@ -703,8 +702,8 @@ func (txTask *TxTask) executeAA(aaTxn *types.AccountAbstractionTransaction,
 
 	result.ExecutionResult.ReceiptGasUsed = gasUsed
 	result.ExecutionResult.BlockRegularGasUsed = gasUsed
-	// The versionMap path defers finalize to FinalizeTxVersioned so the journal
-	// stays intact for write-set reconciliation. The serial path clears here.
+	// The versionMap path produces its write-set from the recorded IO after
+	// the switch; only the serial path clears pending changes here.
 	if !ibs.IsVersioned() {
 		ibs.SoftFinalise()
 	}

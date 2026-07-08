@@ -1626,7 +1626,7 @@ func (result *execResult) finalizeSystemTx(
 	}
 	ibs.SetTrace(txTask.Trace)
 
-	writes := ibs.FinalizeTxVersioned()
+	writes := ibs.FinalizedWrites()
 	return nil, ibs.VersionedReads(), writes, nil
 }
 
