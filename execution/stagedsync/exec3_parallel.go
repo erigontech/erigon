@@ -1481,11 +1481,11 @@ func (pe *parallelExecutor) wait(ctx context.Context) error {
 	go func() {
 		if pe.execLoopGroup != nil {
 			err := pe.execLoopGroup.Wait()
+			pe.waitWorkers()
 			if err != nil && !errors.Is(err, context.Canceled) {
 				doneCh <- err
 				return
 			}
-			pe.waitWorkers()
 		}
 		doneCh <- nil
 	}()

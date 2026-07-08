@@ -1115,6 +1115,16 @@ func TestParallelExecWait(t *testing.T) {
 		require.True(t, workersWaited.Load())
 	})
 
+	t.Run("failed group waits for workers too", func(t *testing.T) {
+		boom := errors.New("exec blocks error: boom")
+		var workersWaited atomic.Bool
+		pe := newPE(func() error { return boom })
+		pe.waitWorkers = func() { workersWaited.Store(true) }
+		require.Same(t, boom, pe.wait(context.Background()))
+		require.True(t, workersWaited.Load(),
+			"worker goroutines must be joined before wait returns, error or not — execImpl reads shared state next")
+	})
+
 	t.Run("real error is not dropped during shutdown", func(t *testing.T) {
 		boom := errors.New("exec blocks error: boom")
 		pe := newPE(func() error {
