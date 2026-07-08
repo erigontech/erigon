@@ -2764,10 +2764,12 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 				blockStartTxNum := be.tasks[0].Version().TxNum - uint64(startTxIndex)
 				priorReceipts, err := pe.reconstructPriorReceipts(ctx, applyTx, header, txs, startTxIndex, blockStartTxNum)
 				if err != nil {
-					return nil, err
+					pe.logger.Warn("["+pe.logPrefix+"] failed to reconstruct prior receipts for partial block",
+						"block", be.blockNum, "startTxIndex", startTxIndex, "err", err)
+				} else {
+					blockReceipts = append(priorReceipts, blockReceipts...)
+					receiptsComplete = true
 				}
-				blockReceipts = append(priorReceipts, blockReceipts...)
-				receiptsComplete = true
 			}
 			// The post-exec validator, which fills receipt blooms for full
 			// blocks, skips partial ones — complete the published set here.
@@ -2832,9 +2834,11 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 				}
 
 				chainReader := consensuschain.NewReader(pe.cfg.chainConfig, applyTx, pe.cfg.blockReader, pe.logger)
+				// skipReceiptsEval when the receipt set is incomplete — see the serial
+				// executor's finalize for the rationale.
 				if _, err := pe.cfg.engine.Finalize(
 					pe.cfg.chainConfig, types.CopyHeader(tt.Header), ibs, tt.Uncles, blockReceipts,
-					tt.Withdrawals, chainReader, syscall, false, pe.logger); err != nil {
+					tt.Withdrawals, chainReader, syscall, !receiptsComplete, pe.logger); err != nil {
 					return be.invalidBlockResult(fmt.Errorf("%w: can't finalize block %d: %v", rules.ErrInvalidBlock, be.blockNum, err)), nil
 				}
 

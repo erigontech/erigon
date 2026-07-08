@@ -397,19 +397,26 @@ func (se *serialExecutor) executeBlock(ctx context.Context, tasks []exec.Task, i
 					blockStartTxNum := firstTask.TxNum - uint64(firstTask.TxIndex)
 					priorReceipts, priorErr := se.reconstructPriorReceipts(ctx, se.applyTx, txTask.Header, txTask.Txs, startTxIndex, blockStartTxNum)
 					if priorErr != nil {
-						return priorErr
+						se.logger.Warn(fmt.Sprintf("[%s] failed to reconstruct prior receipts for partial block", se.logPrefix),
+							"block", txTask.BlockNumber(), "startTxIndex", startTxIndex, "err", priorErr)
+					} else {
+						finalizeReceipts = append(priorReceipts, blockReceipts...)
+						// The post-exec validator, which fills receipt blooms for
+						// full blocks, runs only when startTxIndex == 0 — complete
+						// the published set here.
+						receipts.DeriveFields(finalizeReceipts, txTask.BlockHash())
+						priorComplete = true
 					}
-					finalizeReceipts = append(priorReceipts, blockReceipts...)
-					// The post-exec validator, which fills receipt blooms for
-					// full blocks, runs only when startTxIndex == 0 — complete
-					// the published set here.
-					receipts.DeriveFields(finalizeReceipts, txTask.BlockHash())
-					priorComplete = true
 				}
 
+				// Skip the receipt-derived evaluation (Prague requests hash) when the
+				// block's receipt set is incomplete — a resumed partial block whose
+				// prior receipts couldn't be reconstructed, or a node that keeps no
+				// receipts. It can't be validated from partial receipts, and the block
+				// was already validated when first executed.
 				_, err = se.cfg.engine.Finalize(
 					se.cfg.chainConfig, types.CopyHeader(txTask.Header), ibs, txTask.Uncles,
-					finalizeReceipts, txTask.Withdrawals, chainReader, syscall, false, se.logger)
+					finalizeReceipts, txTask.Withdrawals, chainReader, syscall, !priorComplete, se.logger)
 
 				if err != nil {
 					return fmt.Errorf("%w, txnIdx=%d, %w", rules.ErrInvalidBlock, txTask.TxIndex, err)
