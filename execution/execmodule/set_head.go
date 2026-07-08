@@ -109,6 +109,7 @@ func (e *ExecModule) SetHead(ctx context.Context, targetBlock uint64) error {
 	// and the next FCU re-execution reads them and computes a stale state root
 	// (BadBlock). Mirrors ValidateChain/forkchoice.
 	sd.SetStateCache(e.stateCache)
+	sd.SetCodeStore(e.codeStore)
 
 	// Drain in-flight warmup before the unwind bumps the cache epoch, so a
 	// fire-and-forget warmup can't Put a dead-fork value stamped with the new
