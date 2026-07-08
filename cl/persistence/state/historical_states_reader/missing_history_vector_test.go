@@ -49,6 +49,7 @@ func TestReadHistoryHashVector_MissingEntryIsTyped(t *testing.T) {
 	}{
 		{"first-slot hole", slot - size},
 		{"mid-window hole", slot - size/2},
+		{"trailing hole", slot - 1},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			db := memdb.NewTestDB(t, dbcfg.ChainDB)
@@ -74,4 +75,40 @@ func TestReadHistoryHashVector_MissingEntryIsTyped(t *testing.T) {
 			require.ErrorContains(t, err, kv.BlockRoot)
 		})
 	}
+}
+
+// A non-empty but wrong-length entry is corruption, not a missing slot: it must
+// surface as a hard error rather than ErrMissingHistoryVectorData (which would
+// make the antiquary back off and retry forever).
+func TestReadHistoryHashVector_CorruptEntryIsHardError(t *testing.T) {
+	const size = uint64(64)
+	const slot = 2 * size
+	const corruptAt = slot - size/2
+
+	genesisState, err := initial_state.GetGenesisState(chainspec.MainnetChainID)
+	require.NoError(t, err)
+
+	db := memdb.NewTestDB(t, dbcfg.ChainDB)
+	tx, err := db.BeginRw(context.Background())
+	require.NoError(t, err)
+	defer tx.Rollback()
+
+	var h [32]byte
+	for s := slot - size; s < slot; s++ {
+		v := h[:]
+		if s == corruptAt {
+			v = h[:5] // non-empty, wrong length
+		}
+		h[0], h[1] = byte(s), byte(s>>8)
+		require.NoError(t, tx.Put(kv.BlockRoot, base_encoding.Encode64ToBytes4(s), v))
+	}
+
+	r := NewHistoricalStatesReader(&clparams.MainnetBeaconConfig, nil, nil, genesisState, nil, nil)
+	getter := state_accessors.GetValFnTxAndSnapshot(tx, nil)
+	out := solid.NewHashVector(int(size))
+
+	err = r.readHistoryHashVector(tx, getter, genesisState.BlockRoots(), slot, size, kv.BlockRoot, out)
+	require.Error(t, err)
+	require.NotErrorIs(t, err, ErrMissingHistoryVectorData)
+	require.ErrorContains(t, err, "corrupt")
 }
