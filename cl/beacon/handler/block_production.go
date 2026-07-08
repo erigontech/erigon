@@ -111,35 +111,53 @@ var elClientVersionUnavailable = &engine_types.ClientVersionV1{}
 // executionClientVersion returns the connected execution client's version, caching the
 // outcome (success or unavailable) on first query so that block production stays off the
 // engine API in steady state (the version is static for the lifetime of a connection).
+// Concurrent first-time fetches are collapsed so only one engine call is in flight.
 func (a *ApiHandler) executionClientVersion(ctx context.Context) *engine_types.ClientVersionV1 {
 	if cached := a.elClientVersion.Load(); cached != nil {
-		if cached == elClientVersionUnavailable {
-			return nil
-		}
-		return cached
+		return normalizeELClientVersion(cached)
 	}
 	if a.engine == nil {
 		return nil
+	}
+	v, _, _ := a.elClientVersionGroup.Do("", func() (any, error) {
+		return a.fetchExecutionClientVersion(ctx), nil
+	})
+	cached, _ := v.(*engine_types.ClientVersionV1)
+	return normalizeELClientVersion(cached)
+}
+
+// fetchExecutionClientVersion queries the engine once and caches the outcome. It returns
+// nil (without caching) on transient errors so a later call can retry; only a genuinely
+// unsupported method (JSON-RPC -32601) or an empty result is memoized as unavailable.
+func (a *ApiHandler) fetchExecutionClientVersion(ctx context.Context) *engine_types.ClientVersionV1 {
+	if cached := a.elClientVersion.Load(); cached != nil {
+		return cached
 	}
 	ctx, cancel := context.WithTimeout(ctx, time.Second)
 	defer cancel()
 	caplin := engine_types.NewClientVersionV1(caplinClientCode, caplinClientName, a.version, version.GitCommit)
 	versions, err := a.engine.GetClientVersionV1(ctx, &caplin)
 	if err != nil {
-		// Only memoize the negative result when the method is genuinely unsupported;
-		// a transient error must not disable EL attribution until restart.
 		if methodNotFound(err) {
 			a.elClientVersion.Store(elClientVersionUnavailable)
+			return elClientVersionUnavailable
 		}
 		return nil
 	}
 	if len(versions) == 0 {
 		a.elClientVersion.Store(elClientVersionUnavailable)
-		return nil
+		return elClientVersionUnavailable
 	}
 	el := versions[0]
 	a.elClientVersion.Store(&el)
 	return &el
+}
+
+func normalizeELClientVersion(v *engine_types.ClientVersionV1) *engine_types.ClientVersionV1 {
+	if v == nil || v == elClientVersionUnavailable {
+		return nil
+	}
+	return v
 }
 
 // methodNotFound reports whether err is a JSON-RPC "method not found" (-32601) error.
