@@ -2308,7 +2308,7 @@ func (sdb *IntraBlockState) FinalizeTxVersioned() *WriteSet {
 			}
 		}
 	}
-	writes := sdb.VersionedWrites(false)
+	writes := sdb.VersionedWrites()
 	sdb.clearJournalAndRefund()
 	return writes
 }
@@ -2318,7 +2318,7 @@ func (sdb *IntraBlockState) FinalizeTxVersioned() *WriteSet {
 // VersionedIO.
 func (sdb *IntraBlockState) MergeTxIOInto(io *VersionedIO) {
 	version := Version{BlockNum: sdb.blockNum, TxIndex: sdb.txIndex, Incarnation: sdb.version}
-	io.mergeTx(version, sdb.versionedReads, sdb.VersionedWrites(false), sdb.addressAccess)
+	io.mergeTx(version, sdb.versionedReads, sdb.VersionedWrites(), sdb.addressAccess)
 }
 
 func (sdb *IntraBlockState) Print(chainRules chain.Rules, all bool) {
@@ -2893,17 +2893,14 @@ func (sdb *IntraBlockState) ResetVersionedReads() {
 	sdb.versionedReads = ReadSet{}
 }
 
-// VersionedWrites returns the current versioned write set if this block
-// checkDirty - is mainly for testing, for block processing this is called
-// after the block execution is completed and non dirty writes (due to reversions)
-// will already have been cleaned in MakeWriteSet
-// VersionedWrites returns a frozen typed snapshot of this tx's writes. With
-// checkDirty, a non-dirty address's writes are dropped (and deleted from the
-// version map). Under self-destruct only SelfDestruct/Balance/Incarnation/
-// Storage are kept (the BAL needs residual balance, resurrection needs the
-// prior incarnation, and the calculator needs per-slot deletes); Nonce/Code/
-// CodeHash/CodeSize/Address/CreateContract are dropped.
-func (sdb *IntraBlockState) VersionedWrites(checkDirty bool) *WriteSet {
+// VersionedWrites returns a frozen typed snapshot of this tx's writes. The
+// journal keeps versionedWrites in step with reverts, so no dirty reconciliation
+// is needed — every address present is a surviving write. Under self-destruct
+// only SelfDestruct/Balance/Incarnation/Storage are kept (the BAL needs residual
+// balance, resurrection needs the prior incarnation, and the calculator needs
+// per-slot deletes); Nonce/Code/CodeHash/CodeSize/Address/CreateContract are
+// dropped.
+func (sdb *IntraBlockState) VersionedWrites() *WriteSet {
 	src := &sdb.versionedWrites
 	out := &WriteSet{}
 
@@ -2913,13 +2910,6 @@ func (sdb *IntraBlockState) VersionedWrites(checkDirty bool) *WriteSet {
 	}
 
 	for addr := range addrs {
-		if checkDirty {
-			if _, isDirty := sdb.journal.dirties[addr]; !isDirty {
-				sdb.deleteAddrFromVersionMap(addr, src)
-				continue
-			}
-		}
-
 		sd := false
 		if vw, ok := src.selfDestruct[addr]; ok {
 			out.SetSelfDestruct(addr, cloneVW(vw))
@@ -2958,44 +2948,6 @@ func (sdb *IntraBlockState) VersionedWrites(checkDirty bool) *WriteSet {
 		}
 	}
 	return out
-}
-
-func (sdb *IntraBlockState) deleteAddrFromVersionMap(addr accounts.Address, src *WriteSet) {
-	del := func(path AccountPath, key accounts.StorageKey) {
-		sdb.versionMap.Delete(addr, path, key, sdb.txIndex, false)
-	}
-	if vw, ok := src.address[addr]; ok {
-		del(AddressPath, vw.Key)
-	}
-	if vw, ok := src.balance[addr]; ok {
-		del(BalancePath, vw.Key)
-	}
-	if vw, ok := src.nonce[addr]; ok {
-		del(NoncePath, vw.Key)
-	}
-	if vw, ok := src.incarnation[addr]; ok {
-		del(IncarnationPath, vw.Key)
-	}
-	if vw, ok := src.selfDestruct[addr]; ok {
-		del(SelfDestructPath, vw.Key)
-	}
-	if vw, ok := src.createContract[addr]; ok {
-		del(CreateContractPath, vw.Key)
-	}
-	if vw, ok := src.code[addr]; ok {
-		del(CodePath, vw.Key)
-	}
-	if vw, ok := src.codeHash[addr]; ok {
-		del(CodeHashPath, vw.Key)
-	}
-	if vw, ok := src.codeSize[addr]; ok {
-		del(CodeSizePath, vw.Key)
-	}
-	if inner, ok := src.storage[addr]; ok {
-		for k := range inner {
-			del(StoragePath, k)
-		}
-	}
 }
 
 // Apply entries in a given write set to StateDB. Note that this function does not change MVHashMap nor write set

@@ -93,7 +93,7 @@ func TestVersionedWritesMatchStateObjects(t *testing.T) {
 	require.NoError(t, err)
 
 	// Capture VersionedWrites BEFORE FinalizeTx (journal.dirties still intact).
-	writes := ibs.VersionedWrites(true)
+	writes := ibs.VersionedWrites()
 
 	// — addr1 checks —
 	idx1 := addrWriteIndex(writes, addr1)
@@ -194,7 +194,7 @@ func TestSnapshotRandomWithVersionMap(t *testing.T) {
 	require.Equal(t, uint256.NewInt(11), &stor, "storage should be reverted to pre-snapshot value")
 
 	// VersionedWrites must reflect the same reverted values.
-	writes := ibs.VersionedWrites(true)
+	writes := ibs.VersionedWrites()
 	idx := addrWriteIndex(writes, addr)
 
 	wbal, ok := idx[AccountKey{Path: BalancePath, Key: accounts.NilKey}]
@@ -241,7 +241,7 @@ func TestCommittedStateWithVersionMap(t *testing.T) {
 	require.NoError(t, err)
 
 	// Capture and flush before FinalizeTx (journal.dirties still populated).
-	writes0 := ibs0.VersionedWrites(true)
+	writes0 := ibs0.VersionedWrites()
 	mvhm.FlushVersionedWrites(writes0, true, "")
 
 	// — tx1 (txIndex 1) — reads committed state before modifying —
@@ -347,7 +347,7 @@ func TestDomainApplyFromVersionedWrites(t *testing.T) {
 	err = ibsTx.SetState(addr, key, wantStorage)
 	require.NoError(t, err)
 
-	writes := ibsTx.VersionedWrites(true)
+	writes := ibsTx.VersionedWrites()
 	require.NotEmpty(t, writes, "VersionedWrites must not be empty")
 
 	// — Step 2: apply VersionedWrites through existing round-trip path —

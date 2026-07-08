@@ -89,7 +89,7 @@ func TestSetCodeParallel_RevertToOriginalBug(t *testing.T) {
 	require.NoError(t, err)
 
 	// Flush TX 88 writes to versionMap
-	writes88 := ibs88.VersionedWrites(false)
+	writes88 := ibs88.VersionedWrites()
 	vm.FlushVersionedWrites(writes88, true, "")
 
 	// Verify TX 88 wrote empty code hash to versionMap
@@ -118,7 +118,7 @@ func TestSetCodeParallel_RevertToOriginalBug(t *testing.T) {
 		"GetCode after SetCode(delegationCode) should return the delegation code, not empty")
 
 	// Also verify that the versionedWrites contain the CodePath entry.
-	writes90 := ibs90.VersionedWrites(false)
+	writes90 := ibs90.VersionedWrites()
 	_, hasCodeWrite := writes90.GetCode(addr)
 	assert.True(t, hasCodeWrite,
 		"TX 90 should have a CodePath write in versionedWrites (the revert-to-original optimisation should NOT have fired)")

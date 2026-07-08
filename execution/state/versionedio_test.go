@@ -597,7 +597,7 @@ func TestIBSVersionedWrites_SelfdestructRetainsBalanceDropsOtherPaths(t *testing
 	// the zero-balance from Selfdestruct with a non-zero value that must be kept.
 	require.NoError(t, ibs.SetBalance(addr, *uint256.NewInt(500), tracing.BalanceChangeUnspecified))
 
-	writes := ibs.VersionedWrites(false)
+	writes := ibs.VersionedWrites()
 
 	pathSet := map[AccountPath]bool{}
 	for h := range writes.AllHeaders() {

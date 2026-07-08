@@ -471,7 +471,7 @@ func TestSelfDestructKeepsDirtyStorageReadableSameTx(t *testing.T) {
 	assert.True(t, destructed)
 
 	// And it must NOT have emitted spurious StoragePath=0 writes.
-	for waddr, slots := range ibs.VersionedWrites(false).Storages() {
+	for waddr, slots := range ibs.VersionedWrites().Storages() {
 		if waddr != addr {
 			continue
 		}

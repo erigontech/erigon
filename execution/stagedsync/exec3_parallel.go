@@ -1636,7 +1636,7 @@ func (result *execResult) finalizeSystemTx(
 	// Use checkDirty=false because FinalizeTx clears the journal (dirties map).
 	// With checkDirty=true, all writes would be deleted from the versionMap
 	// since no address appears dirty after the journal reset.
-	return nil, ibs.VersionedReads(), ibs.VersionedWrites(false), nil
+	return nil, ibs.VersionedReads(), ibs.VersionedWrites(), nil
 }
 
 func (result *execResult) calcFees(
@@ -2845,7 +2845,7 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 				be.blockIO.RecordReads(finalVersion, ibs.VersionedReads())
 				be.blockIO.RecordAccesses(finalVersion, ibs.AccessedAddresses())
 
-				ivw := ibs.VersionedWrites(true)
+				ivw := ibs.VersionedWrites()
 				if !ivw.IsEmpty() {
 					be.blockIO.RecordWrites(finalVersion, ivw)
 					be.versionMap.FlushVersionedWrites(ivw, true, "")

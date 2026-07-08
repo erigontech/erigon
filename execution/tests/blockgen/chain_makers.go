@@ -147,7 +147,7 @@ func (b *BlockGen) AddTxWithChain(getHeader func(hash common.Hash, number uint64
 	}
 
 	if b.ibs.IsVersioned() {
-		writes := b.ibs.VersionedWrites(false)
+		writes := b.ibs.VersionedWrites()
 		if b.blockIO != nil {
 			b.blockIO.RecordReads(txVersion, b.ibs.VersionedReads())
 			b.blockIO.RecordAccesses(txVersion, b.ibs.AccessedAddresses())
@@ -511,7 +511,7 @@ func GenerateChain(config *chain.Config, parent *types.Block, engine rules.Engin
 			// Record system call I/O into blockIO for BAL computation
 			if ibs.IsVersioned() && b.blockIO != nil {
 				initVersion := state.Version{BlockNum: b.header.Number.Uint64(), TxIndex: -1}
-				writes := ibs.VersionedWrites(false)
+				writes := ibs.VersionedWrites()
 				b.blockIO.RecordReads(initVersion, ibs.VersionedReads())
 				b.blockIO.RecordAccesses(initVersion, ibs.AccessedAddresses())
 				b.blockIO.RecordWrites(initVersion, writes)
@@ -551,7 +551,7 @@ func GenerateChain(config *chain.Config, parent *types.Block, engine rules.Engin
 			// Record finalize system call I/O into blockIO for BAL computation
 			if ibs.IsVersioned() && b.blockIO != nil {
 				finalizeVersion := state.Version{BlockNum: b.header.Number.Uint64(), TxIndex: len(b.txs)}
-				writes := ibs.VersionedWrites(false)
+				writes := ibs.VersionedWrites()
 				b.blockIO.RecordReads(finalizeVersion, ibs.VersionedReads())
 				b.blockIO.RecordAccesses(finalizeVersion, ibs.AccessedAddresses())
 				b.blockIO.RecordWrites(finalizeVersion, writes)

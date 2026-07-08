@@ -454,7 +454,7 @@ func (t *TxTask) VersionedReads(ibs *state.IntraBlockState) state.ReadSet {
 }
 
 func (t *TxTask) VersionedWrites(ibs *state.IntraBlockState) *state.WriteSet {
-	return ibs.VersionedWrites(false)
+	return ibs.VersionedWrites()
 }
 
 func (t *TxTask) IsBlockEnd() bool {
