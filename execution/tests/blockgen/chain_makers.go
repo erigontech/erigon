@@ -474,7 +474,11 @@ func GenerateChain(config *chain.Config, parent *types.Block, engine rules.Engin
 		if chainreader.Config().IsShanghai(parent.Time()) {
 			b.withdrawals = []*types.Withdrawal{}
 		}
-		if chainreader.Config().IsAmsterdam(parent.Time()) && !chainreader.Config().IsEIPDisabled(7928) {
+		// blockIO carries the per-phase write-sets. It feeds the Amsterdam BAL
+		// (below) and, whenever the block is versioned, the write-set commit that
+		// replaces CommitBlock(so.data) — so create it for any versioned block,
+		// not only Amsterdam.
+		if versionMap != nil || (chainreader.Config().IsAmsterdam(parent.Time()) && !chainreader.Config().IsEIPDisabled(7928)) {
 			b.blockIO = &state.VersionedIO{}
 		}
 
@@ -559,7 +563,41 @@ func GenerateChain(config *chain.Config, parent *types.Block, engine rules.Engin
 
 			// Write state changes to db
 			blockContext := protocol.NewEVMBlockContext(b.header, protocol.GetHashFn(b.header, nil), b.engine, accounts.NilAddress, config)
-			if err := ibs.CommitBlock(blockContext.Rules(config), stateWriter); err != nil {
+			blockRules := blockContext.Rules(config)
+			if b.versionMap != nil && b.blockIO != nil {
+				// Commit from the versionMap write-set via WriteSet.Normalize/Apply
+				// — the same path the parallel executor uses — instead of so.data
+				// via CommitBlock, so generation matches import once the write path
+				// bypasses so.data. Each recorded phase (init txIdx=-1, txs,
+				// finalize) is applied in order; applying a phase before normalizing
+				// the next lets the next phase's stateReader fallback see it.
+				blockNum := b.header.Number.Uint64()
+				domainStorageKeys := func(addr accounts.Address) []accounts.StorageKey {
+					av := addr.Value()
+					const addrLen, hashLen = 20, 32
+					var keys []accounts.StorageKey
+					if iterErr := domains.IteratePrefix(kv.StorageDomain, av[:], tx, func(k, _ []byte) (bool, error) {
+						if len(k) >= addrLen+hashLen {
+							keys = append(keys, accounts.InternKey(common.BytesToHash(k[addrLen:addrLen+hashLen])))
+						}
+						return true, nil
+					}); iterErr != nil {
+						return nil
+					}
+					return keys
+				}
+				emptyRemoval := blockNum != 0 && config.IsEIP161Enabled(blockNum)
+				isAura := config.Aura != nil
+				for i, ws := range b.blockIO.Outputs() {
+					if ws == nil || ws.IsEmpty() {
+						continue
+					}
+					normalized := ws.Normalize(b.versionMap, i-1, 0, stateReader, domainStorageKeys, emptyRemoval, isAura)
+					if err := normalized.Apply(domains, tx, blockNum, txNum, nil, blockRules, nil, false); err != nil {
+						return nil, nil, nil, fmt.Errorf("apply versioned block writes: %w", err)
+					}
+				}
+			} else if err := ibs.CommitBlock(blockRules, stateWriter); err != nil {
 				return nil, nil, nil, fmt.Errorf("call to CommitBlock to stateWriter: %w", err)
 			}
 
