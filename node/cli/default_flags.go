@@ -17,7 +17,7 @@
 package cli
 
 import (
-	"github.com/urfave/cli/v2"
+	"github.com/urfave/cli/v3"
 
 	"github.com/erigontech/erigon/cmd/utils"
 )
@@ -123,6 +123,7 @@ var DefaultFlags = []cli.Flag{
 	&RpcSubscriptionFiltersMaxTxsFlag,
 	&RpcSubscriptionFiltersMaxAddressesFlag,
 	&RpcSubscriptionFiltersMaxTopicsFlag,
+	&RpcSubscriptionFiltersTimeoutFlag,
 
 	&utils.SnapKeepBlocksFlag,
 	&utils.SnapStopFlag,

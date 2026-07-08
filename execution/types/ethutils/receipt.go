@@ -45,7 +45,7 @@ func MarshalReceipt(
 	switch t := txn.(type) {
 	case *types.LegacyTx:
 		if t.Protected() {
-			chainId = types.DeriveChainId(&t.V)
+			chainId, _ = types.DeriveChainId(&t.V)
 		}
 	default:
 		chainId = txn.GetChainID()

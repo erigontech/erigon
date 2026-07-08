@@ -45,6 +45,9 @@ func ConvertToAddrInfo(node *enode.Node) (*peer.AddrInfo, multiaddr.Multiaddr, e
 }
 
 func ConvertToSingleMultiAddr(node *enode.Node) (multiaddr.Multiaddr, error) {
+	if node.TCP() == 0 {
+		return nil, fmt.Errorf("node %s does not provide a tcp port", node.ID())
+	}
 	pubkey := node.Pubkey()
 	assertedKey, err := ConvertToInterfacePubkey(pubkey)
 	if err != nil {

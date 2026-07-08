@@ -46,10 +46,6 @@ type SnapshotRepo struct {
 	logger log.Logger
 }
 
-func NewSnapshotRepoForForkable(id kv.ForkableId, logger log.Logger) *SnapshotRepo {
-	return NewSnapshotRepo(Registry.Name(id), FromForkable(id), Registry.SnapshotConfig(id), logger)
-}
-
 func NewSnapshotRepo(name string, entity UniversalEntity, cfg *SnapshotConfig, logger log.Logger) *SnapshotRepo {
 	return &SnapshotRepo{
 		dirtyFiles: newDirtyFiles(),

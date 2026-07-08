@@ -358,7 +358,7 @@ func GenesisToBlock(tb testing.TB, g *types.Genesis, dirs datadir.Dirs, logger l
 	if err != nil {
 		return nil, nil, err
 	}
-	agg, err := dbstate.New(dirs).Logger(logger).WithErigonDBSettings(erigonDBSettings).Open(ctx, genesisTmpDB)
+	agg, err := dbstate.New(dirs).Logger(logger).WithErigonDBSettings(erigonDBSettings).DisableBranchCache().Open(ctx, genesisTmpDB)
 	if err != nil {
 		return nil, nil, err
 	}
