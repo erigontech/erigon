@@ -70,7 +70,8 @@ func TestParallelExec_PreDispatchFailure_SurfacesInsteadOfInfiniteLoop(t *testin
 	require.NoError(t, rawdbv3.TxNums.Append(setupTx, maxBlockNum, lastTxNum+2))
 	require.NoError(t, setupTx.Commit())
 
-	disarm := chaos_monkey.ArmPreExecutionError(errors.New("chaos monkey: simulated pre-dispatch failure (snapshot step misalignment)"))
+	chaosErr := errors.New("chaos monkey: simulated pre-dispatch failure (snapshot step misalignment)")
+	disarm := chaos_monkey.ArmPreExecutionError(chaosErr)
 	defer disarm()
 
 	syncCfg := m.Cfg().Sync
@@ -99,8 +100,8 @@ func TestParallelExec_PreDispatchFailure_SurfacesInsteadOfInfiniteLoop(t *testin
 	// The fix must surface the injected error. Classified as ErrLoopExhausted
 	// instead, sync.go:runStage returns moreWork=true and PipelineExecutor.RunLoop
 	// re-runs Execution forever with zero progress.
-	require.ErrorContains(t, err, "simulated pre-dispatch failure",
-		"the pre-dispatch failure must surface as a hard error")
+	require.ErrorIs(t, err, chaosErr,
+		"the pre-dispatch failure must surface as a hard error, wrapping the original")
 	var exhausted *stagedsync.ErrLoopExhausted
 	require.False(t, errors.As(err, &exhausted),
 		"pre-dispatch failure classified as ErrLoopExhausted → runStage loops forever with zero progress")
