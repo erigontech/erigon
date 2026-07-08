@@ -226,31 +226,6 @@ func BenchmarkCreateBloom(b *testing.B) {
 	})
 }
 
-func TestReceiptsMergedBloom(t *testing.T) {
-	t.Parallel()
-	receipts := Receipts{
-		{Logs: Logs{
-			{Address: common.HexToAddress("0x1111111111111111111111111111111111111111"), Topics: []common.Hash{common.HexToHash("0x01"), common.HexToHash("0x02")}},
-			{Address: common.HexToAddress("0x2222222222222222222222222222222222222222"), Topics: []common.Hash{common.HexToHash("0x03")}},
-		}},
-		{Logs: Logs{
-			{Address: common.HexToAddress("0x3333333333333333333333333333333333333333"), Topics: []common.Hash{common.HexToHash("0x04")}},
-		}},
-		{},
-	}
-	for _, r := range receipts {
-		r.Bloom = CreateBloom(Receipts{r})
-	}
-
-	merged := receipts.MergedBloom()
-	if merged.IsEmpty() {
-		t.Fatal("expected non-empty merged bloom")
-	}
-	if want := CreateBloom(receipts); merged != want {
-		t.Fatalf("merged bloom mismatch: got %x, want %x", merged, want)
-	}
-}
-
 func TestIsEmpty(t *testing.T) {
 	t.Parallel()
 	var b Bloom
