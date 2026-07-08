@@ -377,11 +377,15 @@ func resetTesterIfOversized(runner *engineapitester.EngineXTestRunner, key engin
 	return true, runner.Evict(key.fork, key.hash)
 }
 
-// dirSizeBytes returns the total size of the regular files under root, or 0 if
-// root does not exist.
+// dirSizeBytes returns the total size of the regular files under root.
+// Entries that vanish mid-walk are skipped rather than zeroing the count;
+// a missing root yields 0.
 func dirSizeBytes(root string) (int64, error) {
 	var total int64
 	err := filepath.WalkDir(root, func(_ string, d os.DirEntry, err error) error {
+		if errors.Is(err, os.ErrNotExist) {
+			return nil
+		}
 		if err != nil {
 			return err
 		}
@@ -389,15 +393,15 @@ func dirSizeBytes(root string) (int64, error) {
 			return nil
 		}
 		info, err := d.Info()
+		if errors.Is(err, os.ErrNotExist) {
+			return nil
+		}
 		if err != nil {
 			return err
 		}
 		total += info.Size()
 		return nil
 	})
-	if errors.Is(err, os.ErrNotExist) {
-		return 0, nil
-	}
 	return total, err
 }
 
