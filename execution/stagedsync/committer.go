@@ -463,11 +463,14 @@ func (cc *commitmentCalculator) computeAndCheck(ctx context.Context, br *blockRe
 // update under a nil accumulator — a pre-window block's branch deltas must
 // not pend into the first window block's changeset-routed compute.
 func (cc *commitmentCalculator) flushPendingUpdatesWithoutChangeset(ctx context.Context, br *blockResult) {
-	cc.doms.LockChangesetAccumulator()
-	restore := cc.doms.DetachChangesetAccumulatorLocked()
-	err := cc.doms.FlushPendingUpdatesLocked(ctx, cc.roTx)
-	restore()
-	cc.doms.UnlockChangesetAccumulator()
+	// The closure bounds the locked window: publish must stay outside it —
+	// the send can block on the apply loop, which contends on changesetMu.
+	err := func() error {
+		cc.doms.LockChangesetAccumulator()
+		defer cc.doms.UnlockChangesetAccumulator()
+		defer cc.doms.DetachChangesetAccumulatorLocked()()
+		return cc.doms.FlushPendingUpdatesLocked(ctx, cc.roTx)
+	}()
 	if err != nil {
 		cc.publish(ctx, commitmentResult{
 			blockNum: br.BlockNum,
