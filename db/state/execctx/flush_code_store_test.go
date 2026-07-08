@@ -73,10 +73,14 @@ func TestCommit_EnforcesCodeStoreTableCap(t *testing.T) {
 	require.NoError(t, err)
 	defer c.Close()
 	var total int
-	for k, v, err := c.First(); k != nil; k, v, err = c.Next() {
-		require.NoError(t, err)
+	// A cursor error returns k=nil, exiting the loop — check err after, not
+	// inside, or an errored scan false-passes with total=0.
+	k, v, err := c.First()
+	for k != nil {
 		total += len(k) + len(v)
+		k, v, err = c.Next()
 	}
+	require.NoError(t, err)
 	require.LessOrEqual(t, total, tableCap,
 		"Commit must keep the CodeStore MDBX tier within its byte cap; unbounded growth on FCU-less flows was the bug")
 }
