@@ -17,6 +17,7 @@
 package chain
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"math"
@@ -123,6 +124,12 @@ type Config struct {
 	Bor     BorConfig       `json:"-"`
 	BorJSON json.RawMessage `json:"bor,omitempty"`
 
+	// L2 carries opaque L2-chain-specific config. L2JSON is decoded from the
+	// chainspec JSON verbatim; the registering L2 package unmarshals it into
+	// L2 at spec-registration time, same contract as BorJSON/Bor.
+	L2     L2Config        `json:"-"`
+	L2JSON json.RawMessage `json:"l2,omitempty"`
+
 	// DisabledEIPs lists EIPs that are disabled for this chain, even when
 	// their parent fork is active. Used for devnets where the reference
 	// client doesn't yet implement certain EIPs (e.g. [7708, 7778, 7928]).
@@ -136,6 +143,14 @@ type Config struct {
 func (c *Config) IsEIPDisabled(eip int) bool {
 	return slices.Contains(c.DisabledEIPs, eip)
 }
+
+// IsL2 returns whether this chain config carries L2-chain-specific config,
+// either already resolved (L2) or still opaque (L2JSON).
+func (c *Config) IsL2() bool {
+	return c != nil && (c.L2 != nil || (len(c.L2JSON) > 0 && !bytes.Equal(c.L2JSON, jsonNull)))
+}
+
+var jsonNull = []byte("null")
 
 var (
 	TestChainAuraConfig = &Config{
@@ -240,6 +255,14 @@ type BorConfig interface {
 	CalculateSprintNumber(number uint64) uint64
 	CalculateSprintLength(number uint64) uint64
 	CalculateCoinbase(number uint64) accounts.Address
+}
+
+// L2Config is the resolved implementation of an L2 stack's chain-specific
+// config, registered by the L2 package at spec-registration time.
+type L2Config interface {
+	// Name returns the short identifier of the L2 stack (e.g. used to select
+	// a registered rules engine).
+	Name() string
 }
 
 func timestampToTime(unixSec uint64) *time.Time {
@@ -596,12 +619,13 @@ type forkBlockNumber struct {
 	name        string
 	blockNumber *uint64
 	optional    bool // if true, the fork may be nil and next fork is still allowed
+	outOfOrder  bool // if true, the fork is exempt from the ordering check (one-off fork, e.g. DAO)
 }
 
 func (c *Config) forkBlockNumbers() []forkBlockNumber {
 	return []forkBlockNumber{
 		{name: "homesteadBlock", blockNumber: c.HomesteadBlock},
-		{name: "daoForkBlock", blockNumber: c.DAOForkBlock, optional: true},
+		{name: "daoForkBlock", blockNumber: c.DAOForkBlock, optional: true, outOfOrder: true},
 		{name: "eip150Block", blockNumber: c.TangerineWhistleBlock},
 		{name: "eip155Block", blockNumber: c.SpuriousDragonBlock},
 		{name: "byzantiumBlock", blockNumber: c.ByzantiumBlock},
@@ -626,7 +650,7 @@ func (c *Config) CheckConfigForkOrder() error {
 	var lastFork forkBlockNumber
 
 	for _, fork := range c.forkBlockNumbers() {
-		if lastFork.name != "" {
+		if lastFork.name != "" && !fork.outOfOrder {
 			// Next one must be higher number
 			if lastFork.blockNumber == nil && fork.blockNumber != nil {
 				return fmt.Errorf("unsupported fork ordering: %v not enabled, but %v enabled at %v",
@@ -640,7 +664,7 @@ func (c *Config) CheckConfigForkOrder() error {
 			}
 			// If it was optional and not set, then ignore it
 		}
-		if !fork.optional || fork.blockNumber != nil {
+		if (!fork.optional || fork.blockNumber != nil) && !fork.outOfOrder {
 			lastFork = fork
 		}
 	}

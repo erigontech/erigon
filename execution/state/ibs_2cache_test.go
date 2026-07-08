@@ -32,24 +32,23 @@ import (
 	"github.com/erigontech/erigon/execution/types/accounts"
 )
 
-// writeIndex builds a lookup map from a VersionedWrites slice.
-// Key is (Address, Path, Key); value is the Val field.
-func writeIndex(writes VersionedWrites) map[AccountKey]any {
-	idx := make(map[AccountKey]any, len(writes))
-	for _, w := range writes {
-		idx[AccountKey{Path: w.Path, Key: w.Key}] = w.Val
-		// Keyed per-address via a composite; store per-address sub-map below.
-		_ = w.Address
+// writeIndex builds a lookup map from a WriteSet, keyed by (Path, Key) — the
+// address is not part of the key, so this assumes a single-address WriteSet
+// (use addrWriteIndex for multiple). Value is the typed Val field.
+func writeIndex(writes *WriteSet) map[AccountKey]any {
+	idx := make(map[AccountKey]any)
+	for h := range writes.AllHeaders() {
+		idx[AccountKey{Path: h.Path, Key: h.Key}] = writeSetVal(writes, h)
 	}
 	return idx
 }
 
 // addrWriteIndex is like writeIndex but scoped to a single address.
-func addrWriteIndex(writes VersionedWrites, addr accounts.Address) map[AccountKey]any {
+func addrWriteIndex(writes *WriteSet, addr accounts.Address) map[AccountKey]any {
 	idx := make(map[AccountKey]any)
-	for _, w := range writes {
-		if w.Address == addr {
-			idx[AccountKey{Path: w.Path, Key: w.Key}] = w.Val
+	for h := range writes.AllHeaders() {
+		if h.Address == addr {
+			idx[AccountKey{Path: h.Path, Key: h.Key}] = writeSetVal(writes, h)
 		}
 	}
 	return idx
@@ -115,7 +114,7 @@ func TestVersionedWritesMatchStateObjects(t *testing.T) {
 	require.True(t, ok, "addr1: CodePath write missing from VersionedWrites")
 	gotCode1, err := ibs.GetCode(addr1)
 	require.NoError(t, err)
-	require.Equal(t, gotCode1, wcode1.([]byte), "addr1: code mismatch between stateObject and VersionedWrites")
+	require.Equal(t, gotCode1, wcode1.(accounts.Code).Bytes, "addr1: code mismatch between stateObject and VersionedWrites")
 
 	wstor1, ok := idx1[AccountKey{Path: StoragePath, Key: key1}]
 	require.True(t, ok, "addr1: StoragePath[key1] write missing from VersionedWrites")

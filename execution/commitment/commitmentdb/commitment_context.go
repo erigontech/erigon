@@ -44,9 +44,6 @@ type sd interface {
 	// read), tagged with source.
 	MergeMetrics(source kvmetrics.Source, wm *kvmetrics.DomainMetrics)
 	StepSize() uint64
-	// ProbeReadLayers samples sd.mem, parent.mem and tx-direct (MDBX) for one
-	// key — BranchCache divergence-detection probe. Read-only.
-	ProbeReadLayers(domain kv.Domain, tx kv.TemporalTx, key []byte) (mem, parentMem, mdbx []byte, memOk, parentOk bool)
 
 	// Metrics exposes the per-SD DomainMetrics so callers can read
 	// per-domain (cache, db, file) read counters. Used by the

@@ -187,7 +187,10 @@ func ResetExec(ctx context.Context, db kv.TemporalRwDB) (err error) {
 		return err
 	}
 
-	// Wiping the commitment table makes branchCache entries stale; drop it so it repopulates from the wiped table.
+	// Wiping the commitment table leaves the aggregator's in-memory branchCache
+	// pointing at now-deleted trie nodes; drop it so a from-0 re-exec repopulates
+	// from the wiped table instead of computing a wrong root off stale nodes.
+	branchCacheCleared := false
 	if hasAgg, ok := db.(dbstate.HasAgg); ok {
 		if agg, ok := hasAgg.Agg().(*dbstate.Aggregator); ok {
 			aggTx := agg.BeginFilesRo()
@@ -195,7 +198,11 @@ func ResetExec(ctx context.Context, db kv.TemporalRwDB) (err error) {
 			if bc := aggTx.BranchCache(); bc != nil {
 				bc.Clear()
 			}
+			branchCacheCleared = true
 		}
+	}
+	if !branchCacheCleared {
+		log.Warn("[reset] commitment branch cache not cleared after wiping the table (no *state.Aggregator); a from-0 re-exec may read stale commitment nodes and produce a wrong trie root")
 	}
 	return nil
 }
@@ -248,8 +255,8 @@ func clearStageProgress(tx kv.RwTx, stagesList ...stages.SyncStage) error {
 	// "block 0 already done" — SeekCommitment then returns (1, 0), the exec
 	// loop starts at block 1, and the block-0 init task that re-applies the
 	// genesis allocation never runs. This breaks `stage_exec --reset` →
-	// `stage_exec` from-0 sync (parallel-exec drops genesis-allocated
-	// addresses that no subsequent block touches; see #21138).
+	// `stage_exec` from-0 sync (parallel exec drops genesis-allocated
+	// addresses that no subsequent block touches).
 	for _, stage := range stagesList {
 		if err := tx.Delete(kv.SyncStageProgress, []byte(stage)); err != nil {
 			return err

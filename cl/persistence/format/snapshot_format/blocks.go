@@ -17,15 +17,14 @@
 package snapshot_format
 
 import (
-	"bytes"
 	"encoding/binary"
 	"io"
-	"sync"
 
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/pool"
 	"github.com/erigontech/erigon/execution/types"
 )
 
@@ -36,10 +35,6 @@ type ExecutionBlockReaderByNumber interface {
 	// CacheBody stores a recently produced block body for immediate retrieval.
 	// Implementations that don't support caching should no-op.
 	CacheBody(blockNumber uint64, transactions [][]byte, withdrawals []*types.Withdrawal)
-}
-
-var buffersPool = sync.Pool{
-	New: func() any { return &bytes.Buffer{} },
 }
 
 // WriteBlockForSnapshot writes a block to the given writer in the format expected by the snapshot.
@@ -103,9 +98,8 @@ func readMetadataForBlock(r io.Reader, b []byte) (clparams.StateVersion, common.
 }
 
 func ReadBlockFromSnapshot(r io.Reader, executionReader ExecutionBlockReaderByNumber, cfg *clparams.BeaconChainConfig) (*cltypes.SignedBeaconBlock, error) {
-	buffer := buffersPool.Get().(*bytes.Buffer)
-	defer buffersPool.Put(buffer)
-	buffer.Reset()
+	buffer := pool.GetBuffer()
+	defer pool.PutBuffer(buffer)
 
 	// Read the metadata
 	metadataSlab := make([]byte, 33)
@@ -160,9 +154,8 @@ func ReadBlockFromSnapshot(r io.Reader, executionReader ExecutionBlockReaderByNu
 
 // ReadBlockHeaderFromSnapshotWithExecutionData reads the beacon block header and the EL block number and block hash.
 func ReadBlockHeaderFromSnapshotWithExecutionData(r io.Reader, cfg *clparams.BeaconChainConfig) (*cltypes.SignedBeaconBlockHeader, uint64, common.Hash, error) {
-	buffer := buffersPool.Get().(*bytes.Buffer)
-	defer buffersPool.Put(buffer)
-	buffer.Reset()
+	buffer := pool.GetBuffer()
+	defer pool.PutBuffer(buffer)
 
 	// Read the metadata
 	metadataSlab := make([]byte, 33)
@@ -232,9 +225,8 @@ func ReadBlockHeaderFromSnapshotWithExecutionData(r io.Reader, cfg *clparams.Bea
 //     Callers that need full EL data should use ReadBlockFromSnapshot instead.
 //   - GLOAS: stored as full SignedBeaconBlock (no payload to blind); decoded directly.
 func ReadBeaconBlockBodyFromSnapshot(r io.Reader, cfg *clparams.BeaconChainConfig) (*cltypes.SignedBeaconBlock, error) {
-	buffer := buffersPool.Get().(*bytes.Buffer)
-	defer buffersPool.Put(buffer)
-	buffer.Reset()
+	buffer := pool.GetBuffer()
+	defer pool.PutBuffer(buffer)
 
 	// Read the metadata
 	metadataSlab := make([]byte, 33)
