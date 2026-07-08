@@ -33,10 +33,10 @@ import (
 	"github.com/erigontech/erigon/db/version"
 )
 
-func writeBlockRootSeg(t *testing.T, dirs datadir.Dirs, from, to uint64, words [][]byte) {
+func writeRootSeg(t *testing.T, dirs datadir.Dirs, table string, from, to uint64, words [][]byte) {
 	t.Helper()
 	name := snaptype.BeaconBlocks.FileName(version.ZeroVersion, from, to)
-	name = strings.ReplaceAll(name, "beaconblocks", "BlockRoot")
+	name = strings.ReplaceAll(name, "beaconblocks", table)
 	c, err := seg.NewCompressor(context.Background(), "test", filepath.Join(dirs.SnapCaplin, name), dirs.Tmp, seg.DefaultCfg, log.LvlCrit, log.New())
 	require.NoError(t, err)
 	defer c.Close()
@@ -47,24 +47,52 @@ func writeBlockRootSeg(t *testing.T, dirs datadir.Dirs, from, to uint64, words [
 }
 
 func TestCheckCaplinStateRoots(t *testing.T) {
-	dirs := datadir.New(t.TempDir())
-	require.NoError(t, os.MkdirAll(dirs.SnapCaplin, 0o755))
-	require.NoError(t, os.MkdirAll(dirs.Tmp, 0o755))
 	ctx, logger := context.Background(), log.New()
 
-	root := make([]byte, length.Hash)
-	full := make([][]byte, 0, 20)
-	for range 20 {
-		full = append(full, root)
+	fullRoots := func() [][]byte {
+		root := make([]byte, length.Hash)
+		w := make([][]byte, 0, 20)
+		for range 20 {
+			w = append(w, root)
+		}
+		return w
+	}
+	holed := func() [][]byte {
+		w := fullRoots()
+		w[7] = nil
+		return w
+	}
+	setup := func(t *testing.T) datadir.Dirs {
+		t.Helper()
+		dirs := datadir.New(t.TempDir())
+		require.NoError(t, os.MkdirAll(dirs.SnapCaplin, 0o755))
+		require.NoError(t, os.MkdirAll(dirs.Tmp, 0o755))
+		return dirs
 	}
 
-	writeBlockRootSeg(t, dirs, 0, 50000, full)
-	require.NoError(t, CheckCaplinStateRoots(ctx, dirs, true, logger))
+	t.Run("all roots present", func(t *testing.T) {
+		dirs := setup(t)
+		writeRootSeg(t, dirs, "BlockRoot", 0, 50000, fullRoots())
+		writeRootSeg(t, dirs, "StateRoot", 0, 50000, fullRoots())
+		require.NoError(t, CheckCaplinStateRoots(ctx, dirs, true, logger))
+	})
 
-	holed := append([][]byte{}, full...)
-	holed[7] = nil
-	writeBlockRootSeg(t, dirs, 50000, 100000, holed)
-	err := CheckCaplinStateRoots(ctx, dirs, true, logger)
-	require.Error(t, err)
-	require.Contains(t, err.Error(), "no root")
+	t.Run("hole in BlockRoot", func(t *testing.T) {
+		dirs := setup(t)
+		writeRootSeg(t, dirs, "BlockRoot", 50000, 100000, holed())
+		err := CheckCaplinStateRoots(ctx, dirs, true, logger)
+		require.Error(t, err)
+		require.Contains(t, err.Error(), "BlockRoot")
+		require.Contains(t, err.Error(), "invalid root")
+	})
+
+	t.Run("hole in StateRoot", func(t *testing.T) {
+		dirs := setup(t)
+		writeRootSeg(t, dirs, "BlockRoot", 0, 50000, fullRoots())
+		writeRootSeg(t, dirs, "StateRoot", 50000, 100000, holed())
+		err := CheckCaplinStateRoots(ctx, dirs, true, logger)
+		require.Error(t, err)
+		require.Contains(t, err.Error(), "StateRoot")
+		require.Contains(t, err.Error(), "invalid root")
+	})
 }

@@ -49,14 +49,14 @@ func CheckCaplinStateRoots(ctx context.Context, dirs datadir.Dirs, failFast bool
 			if ctx.Err() != nil {
 				return ctx.Err()
 			}
-			blank, total, firstBlankSlot, err := scanBlankRoots(path)
+			blank, total, firstBlankSlot, err := scanBlankRoots(ctx, path)
 			if err != nil {
 				return err
 			}
 			if blank == 0 {
 				continue
 			}
-			err = fmt.Errorf("caplin %s snapshot %s: %d/%d slots have no root (first at slot %d)", table, filepath.Base(path), blank, total, firstBlankSlot)
+			err = fmt.Errorf("caplin %s snapshot %s: %d/%d slots have a missing or invalid root (first at slot %d)", table, filepath.Base(path), blank, total, firstBlankSlot)
 			logger.Error("[integrity] CaplinStateRoots", "err", err)
 			if failFast {
 				return err
@@ -69,7 +69,7 @@ func CheckCaplinStateRoots(ctx context.Context, dirs datadir.Dirs, failFast bool
 	return firstErr
 }
 
-func scanBlankRoots(path string) (blank, total, firstBlankSlot uint64, err error) {
+func scanBlankRoots(ctx context.Context, path string) (blank, total, firstBlankSlot uint64, err error) {
 	var from uint64
 	if info, _, ok := snaptype.ParseFileName(filepath.Dir(path), filepath.Base(path)); ok {
 		from = info.From
@@ -81,6 +81,9 @@ func scanBlankRoots(path string) (blank, total, firstBlankSlot uint64, err error
 	defer d.Close()
 	g := d.MakeGetter()
 	for g.HasNext() {
+		if total%8192 == 0 && ctx.Err() != nil {
+			return 0, 0, 0, ctx.Err()
+		}
 		w, _ := g.Next(nil)
 		if len(w) != length.Hash {
 			if blank == 0 {
