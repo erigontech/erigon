@@ -250,6 +250,55 @@ historical_trace_worker.go:197), genesis write, and RPC state-test util. Plus
 2. **Phase 2b — decouple the write-path setters** (balance/nonce/code/storage) from
    so.data, per the slices below. Only safe once nothing reads so.data at commit.
 
+### Complete usage census (2026-07-08) — every so.data commit call site
+
+`EXEC3_PARALLEL` defaults **true** (dbg/experiments.go:84), so both block import
+(parallel executor) *and* block generation (chain_makers.go:455, `needsVersionMap =
+Exec3Parallel || AmsterdamTime`) run with a versionMap. That is why versionMap-gated
+write changes fire even in non-Amsterdam SD/recreate tests.
+
+**versionMap != nil (must be write-set-sourced):**
+- exec3_parallel.go:2855 — finalize task. **DONE** (d4dd1a4b46): `normalizeWriteSet(ivw)`.
+- exec3_parallel.go:1633 — `finalizeSystemTx`: `ApplyVersionedWrites(TxOut)` → so.data →
+  `FinalizeTx(collector)`. The **domain commit already comes from the returned write-set**
+  (`VersionedWrites(false)` → `addWrites` → `RecordWrites` → `normalizeWriteSet@2617`); the
+  `collector` output is **discarded** (caller ignores it, 2549 `_`). So so.data here is
+  vestigial for domains — the FinalizeTx call clears the journal and (redundantly) re-emits
+  to a dead collector. Low-risk to drop the so.data emit.
+- exec3_serial.go:438 — serial executor. Runs when `!parallel` (versionMap==nil normally),
+  BUT the same `MakeWriteSet` is reached with versionMap set via the worker path; the
+  domain commit for regular txs is `TxOut`→`normalizeWriteSet@2617`, and the worker's
+  `MakeWriteSet`→`CollectorWrites` (txtask.go:619) is filtered by the versionMap
+  (`filterWritesByVersionMap`) and feeds BlockStateCache/fee-adjust, **not** the primary
+  trie. So its so.data output is also non-authoritative for domains.
+- **Block production — the confirmed remaining blocker.** chain_makers.go:562 (test
+  generator) and builder/exec.go:153/225→block_exec.go:357 (production PoS assembler) set
+  a versionMap and commit the *block-producing* state via `CommitBlock`→`MakeWriteSet`→
+  so.data. The balance-slice diagnostic (finalize already migrated) still failed — traced
+  to the **generation** side producing a wrong expected-header root because its so.data
+  commit dropped the fast-path writes. These two must commit from the write-set.
+
+**versionMap == nil (stays on so.data):** exec3_serial serial-only blocks, all rpc/jsonrpc/*
+(trace/simulate/callMany/overlay/witness/receipts), cmd/evm (t8ntool/runner), genesiswrite,
+polygon/tracer, protocol/state_processor + block_exec (RPC callers), and every `*_test.go`
+that isn't exercising the parallel path.
+
+### Unification design (Mark: fold into normalizeWriteSet; do the whole surface)
+
+The clean end-state: one write-set → committed-state authority. Since block-production sites
+live outside `stagedsync` (can't call the unexported `normalizeWriteSet`), the plan:
+1. Relocate `normalizeWriteSet` (pure `WriteSet`+`vm`+`stateReader`+`domainStorageKeys` →
+   `WriteSet` transform) into package `state` so builder/blockgen/stagedsync all share it.
+2. Add a `WriteSet → StateWriter` adapter in `state` (emit `UpdateAccountData` /
+   `DeleteAccount` / `UpdateAccountCode` / `WriteAccountStorage` from the normalized set),
+   so the existing `stateWriter` contract is preserved but sourced from `versionedWrites`
+   instead of `so.data`.
+3. Route the versionMap!=nil commit sites (`CommitBlock`/`MakeWriteSet` in block production,
+   the vestigial system-tx emit) through `normalizeWriteSet` + the adapter; the serial /
+   RPC (versionMap==nil) sites keep the so.data path.
+4. Open coupling: `domainStorageKeys` (full SD storage cascade) needs domain prefix
+   iteration — block-production sites have domain access; thread it in as the executor does.
+
 Done: reads (getters), Empty/Exist (Phase 1), TouchAccount (increment 1 — existing
 accts compute emptiness via `emptyFromVersionedFields`, absent falls through to
 `GetOrNewStateObject` so `createObject` records AddressPath).
