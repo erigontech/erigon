@@ -3195,18 +3195,25 @@ func (be *blockExecutor) scheduleExecution(ctx context.Context, pe *parallelExec
 	// at index < N is in flight. Lower-indexed workers' flushes land at
 	// indices visible to N's reads via vm.Read's floor(N-1); higher-indexed
 	// ones don't. Non-deferred txs keep dispatching via pending.
+	// maxValidated and minIP are invariant across the drain (it only moves txs
+	// deferred->pending, changing neither complete nor inProgress) — hoist them
+	// out of the per-deferred-tx predicate.
+	drainMaxValidated := be.validateTasks.maxComplete()
+	drainMinIP := be.execTasks.minInProgress()
 	be.execTasks.drainDeferredIfReady(func(tx int) bool {
-		if be.validateTasks.maxComplete() < tx-1 {
-			return false
-		}
-		minIP := be.execTasks.minInProgress()
-		return minIP < 0 || minIP >= tx
+		return drainMaxValidated >= tx-1 && (drainMinIP < 0 || drainMinIP >= tx)
 	})
 
+	// Refill only the queue's free slots: taking the whole pending set per result
+	// and pushing the overflow back is O(n²) churn that starves workers.
 	toExecute := make(sort.IntSlice, 0, 2)
 
-	for be.execTasks.minPending() >= 0 {
-		toExecute = append(toExecute, be.execTasks.takeNextPending())
+	if be.execTasks.minPending() >= 0 {
+		budget := pe.in.Capacity() - pe.in.NewTasksLen()
+		for budget > 0 && be.execTasks.minPending() >= 0 {
+			toExecute = append(toExecute, be.execTasks.takeNextPending())
+			budget--
+		}
 	}
 
 	// Forward-progress safety net: pending empty + no workers in flight

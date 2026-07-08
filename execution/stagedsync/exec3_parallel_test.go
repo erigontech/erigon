@@ -444,11 +444,11 @@ func checkNoStatusOverlap(pe *parallelExecutor) error {
 	defer pe.RUnlock()
 
 	for blockNum, blockStatus := range pe.blockExecutors {
-		for _, tx := range blockStatus.execTasks.complete {
+		for _, tx := range blockStatus.execTasks.completeList() {
 			seen[tx] = "complete"
 		}
 
-		for _, tx := range blockStatus.execTasks.inProgress {
+		for _, tx := range blockStatus.execTasks.inProgressList() {
 			if v, ok := seen[tx]; ok {
 				return fmt.Errorf("blk %d, tx %v is in both %v and inProgress", blockNum, v, tx)
 			}
@@ -1494,7 +1494,7 @@ func TestParallelResumeBoundaryOffsets(t *testing.T) {
 	}
 	be.tasks = []*execTask{eTask}
 	be.results = []*execResult{nil}
-	be.execTasks.inProgress = []int{0}
+	be.execTasks.setInProgress(0)
 
 	tVersion := &taskVersion{
 		execTask: eTask,
