@@ -538,7 +538,7 @@ func NewWorkersPool(ctx context.Context, accumulator *shards.Accumulator, backgr
 	engine rules.Engine, workerCount int, metrics *WorkerMetrics, dirs datadir.Dirs, logger log.Logger) (reconWorkers []*Worker, applyWorker *Worker, rws *ResultsQueue, clear func(), wait func(), err error) {
 	reconWorkers = make([]*Worker, workerCount)
 
-	resultsSize := workerCount * 512
+	resultsSize := workerCount * 8
 	rws = NewResultsQueue(resultsSize, workerCount)
 
 	g, gctx := errgroup.WithContext(ctx)
