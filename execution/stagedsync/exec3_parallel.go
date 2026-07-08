@@ -2834,11 +2834,9 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 				}
 
 				chainReader := consensuschain.NewReader(pe.cfg.chainConfig, applyTx, pe.cfg.blockReader, pe.logger)
-				// skipReceiptsEval when the receipt set is incomplete — see the serial
-				// executor's finalize for the rationale.
 				if _, err := pe.cfg.engine.Finalize(
 					pe.cfg.chainConfig, types.CopyHeader(tt.Header), ibs, tt.Uncles, blockReceipts,
-					tt.Withdrawals, chainReader, syscall, !receiptsComplete, pe.logger); err != nil {
+					tt.Withdrawals, chainReader, syscall, false, pe.logger); err != nil {
 					return be.invalidBlockResult(fmt.Errorf("%w: can't finalize block %d: %v", rules.ErrInvalidBlock, be.blockNum, err)), nil
 				}
 

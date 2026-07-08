@@ -409,14 +409,9 @@ func (se *serialExecutor) executeBlock(ctx context.Context, tasks []exec.Task, i
 					}
 				}
 
-				// Skip the receipt-derived evaluation (Prague requests hash) when the
-				// block's receipt set is incomplete — a resumed partial block whose
-				// prior receipts couldn't be reconstructed, or a node that keeps no
-				// receipts. It can't be validated from partial receipts, and the block
-				// was already validated when first executed.
 				_, err = se.cfg.engine.Finalize(
 					se.cfg.chainConfig, types.CopyHeader(txTask.Header), ibs, txTask.Uncles,
-					finalizeReceipts, txTask.Withdrawals, chainReader, syscall, !priorComplete, se.logger)
+					finalizeReceipts, txTask.Withdrawals, chainReader, syscall, false, se.logger)
 
 				if err != nil {
 					return fmt.Errorf("%w, txnIdx=%d, %w", rules.ErrInvalidBlock, txTask.TxIndex, err)
