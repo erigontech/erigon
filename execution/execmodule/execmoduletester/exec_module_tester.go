@@ -123,6 +123,7 @@ type ExecModuleTester struct {
 	ForkValidator   *execmodule.ForkValidator
 	ExecModule      *execmodule.ExecModule
 	StateCache      *execmodule.Cache
+	domainCache     *cache.StateCache
 	retirementStart chan bool
 	retirementDone  chan struct{}
 	retirementWg    sync.WaitGroup
@@ -160,6 +161,9 @@ func (emt *ExecModuleTester) Close() {
 	}
 	if emt.DB != nil {
 		emt.DB.Close()
+	}
+	if emt.domainCache != nil {
+		emt.domainCache.Close()
 	}
 	if emt.tb == nil && emt.Dirs.DataDir != "" {
 		dir.RemoveAll(emt.Dirs.DataDir)
@@ -722,6 +726,10 @@ func New(tb testing.TB, opts ...Option) *ExecModuleTester {
 		Accumulator:    mock.Notifications.Accumulator,
 		RecentReceipts: mock.Notifications.RecentReceipts,
 	}
+	// Per-instance domain cache, held on the tester so Close releases its
+	// envelope reservation. Uses the production default — the caches jump-grow on
+	// demand, so a small-working-set fixture stays small.
+	mock.domainCache = cache.NewDefaultStateCache()
 	mock.ExecModule = execmodule.NewExecModule(
 		ctx,
 		mock.BlockReader,
@@ -733,9 +741,7 @@ func New(tb testing.TB, opts ...Option) *ExecModuleTester {
 		hook,
 		accum,
 		mock.StateCache,
-		// Small per-instance domain cache: the harness builds one ExecModule per
-		// fixture, so production-size caches would allocate hundreds of MB each.
-		cache.NewStateCache(1*datasize.MB, 1*datasize.MB, 1*datasize.MB, 1*datasize.MB),
+		mock.domainCache,
 		logger,
 		engine,
 		cfg.Sync,

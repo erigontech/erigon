@@ -36,11 +36,27 @@ Aligns Erigon with the `eth_simulateV1` error code specification ([NethermindEth
 
 - If your tooling matches on error code `-32602` to detect base-fee-too-low conditions in `eth_simulateV1` responses, update it to match `-38012` instead.
 
+---
+
+#### JSON-RPC: idle polling filters are evicted after 5 minutes
+
+Filters created with `eth_newFilter`, `eth_newBlockFilter`, and `eth_newPendingTransactionFilter` are now evicted when not polled for 5 minutes, matching geth's stale-filter deadline. Previously they lived — and kept buffering data — until `eth_uninstallFilter` or a restart.
+
+**What changed:**
+
+| Aspect | Before | After |
+|---|---|---|
+| Idle polling filter | kept until uninstalled or restart | evicted after 5 minutes without a poll |
+| `eth_getFilterChanges` / `eth_getFilterLogs` on an evicted id | — | `filter not found` |
+
+**Migration:** poll more often than the timeout, or recreate the filter when `filter not found` is returned (as with geth). Tune with `--rpc.subscription.filters.timeout`; set it to 0 to restore the previous keep-forever behavior. (#22261 by @onelapahead)
+
 ### Added
 
 #### CLI & Operations
 
 - `--prune.distance.blocks` now accepts readable policy names — `keep-post-merge` and `keep-all` — instead of the raw `MaxUint64`-based magic numbers (`18446744073709551615` / `18446744073709551614`); `--prune.distance` likewise accepts `keep-all`. Numeric values still work (#22119) — by @yperbasis
+- `--rpc.subscription.filters.timeout` — deadline for evicting idle RPC polling filters (default 5m; 0 disables). New `subscriptions_active` gauge and `subscriptions_created_total` / `subscriptions_unsubscribed_total` / `subscriptions_reaped_total` counters track the filter lifecycle (#22261) — by @onelapahead
 
 ---
 

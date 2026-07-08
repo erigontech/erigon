@@ -92,6 +92,9 @@ type Domain struct {
 
 	// Long-lived commitment-branch cache; non-nil only on the commitment domain.
 	branchCache *commitment.BranchCache
+	// Adaptive pin controller, co-located with branchCache so pin residency ages
+	// by block-access recency across all SharedDomains rather than per-SD.
+	adaptivePinController *commitment.AdaptivePinController
 
 	// _testBuildAccessorHook - test-only: called with the recsplit before the build loop in buildHashMapAccessor
 	_testBuildAccessorHook func(rs *recsplit.RecSplit)
@@ -145,6 +148,12 @@ func (d *Domain) SetChecker(checker *DependencyIntegrityChecker) {
 // owning Aggregator's lifetime.
 func (d *Domain) BranchCache() *commitment.BranchCache {
 	return d.branchCache
+}
+
+// AdaptivePinController returns the aggregator-lifetime pin controller
+// co-located with BranchCache. Non-nil only on the commitment domain.
+func (d *Domain) AdaptivePinController() *commitment.AdaptivePinController {
+	return d.adaptivePinController
 }
 
 // kvWriteVersion is the version stamped on a new .kv file: the domain's KVWriteVersion hook if set, else DataKV.Current.

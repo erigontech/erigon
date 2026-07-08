@@ -14,7 +14,7 @@
 // You should have received a copy of the GNU Lesser General Public License
 // along with Erigon. If not, see <http://www.gnu.org/licenses/>.
 
-package direct
+package libsentry_test
 
 import (
 	"encoding/binary"
@@ -31,9 +31,9 @@ import (
 // (the pre-fix 16384 chan would hold ~160 GB of peer-controlled payload at
 // the eth 10 MB limit). Eviction must drop oldest entries, preserving the
 // freshest.
-func TestSentryMessagesStreamS_SendEvictsWhenConsumerSlow(t *testing.T) {
-	ch := make(chan *inboundMessageReply, libsentry.MessagesQueueSize)
-	s := &SentryMessagesStreamS{ch: ch, ctx: t.Context()}
+func TestSentryStreamS_SendEvictsWhenConsumerSlow(t *testing.T) {
+	ch := make(chan libsentry.StreamReply[*sentryproto.InboundMessage], libsentry.MessagesQueueSize)
+	s := &libsentry.SentryStreamS[*sentryproto.InboundMessage]{Ch: ch, Ctx: t.Context()}
 
 	const flood = libsentry.MessagesQueueSize * 10
 	for i := range flood {
@@ -48,23 +48,9 @@ func TestSentryMessagesStreamS_SendEvictsWhenConsumerSlow(t *testing.T) {
 	var last uint32
 	for len(ch) > 0 {
 		r := <-ch
-		require.NotNil(t, r)
-		require.NotNil(t, r.r)
-		last = binary.LittleEndian.Uint32(r.r.Data)
+		require.NotNil(t, r.R)
+		last = binary.LittleEndian.Uint32(r.R.Data)
 	}
 	assert.Equal(t, uint32(flood-1), last,
 		"eviction drops from the front; the most recent Send must remain queued")
-}
-
-func TestSentryPeersStreamS_SendEvictsWhenConsumerSlow(t *testing.T) {
-	ch := make(chan *peersReply, libsentry.MessagesQueueSize)
-	s := &SentryPeersStreamS{ch: ch, ctx: t.Context()}
-
-	const flood = libsentry.MessagesQueueSize * 10
-	for range flood {
-		require.NoError(t, s.Send(&sentryproto.PeerEvent{}))
-	}
-
-	require.LessOrEqual(t, len(ch), cap(ch))
-	require.Less(t, len(ch), flood)
 }
