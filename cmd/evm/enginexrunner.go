@@ -64,6 +64,7 @@ var engineXTestCommand = cli.Command{
 		&TimeFlag,
 		&VerbosityFlag,
 		&WorkersFlag,
+		&ResetTesterMaxDataDirMBFlag,
 		&cli.StringFlag{
 			Name:  "pprof.cpu",
 			Usage: "directory in which to write one CPU profile per engine API request",
@@ -174,13 +175,14 @@ func engineXTestCmd(ctx context.Context, cliCtx *cli.Command) error {
 	resultCh := make(chan testResult, totalTests)
 
 	timeIt := cliCtx.Bool(TimeFlag.Name)
+	maxDataDirMB := cliCtx.Uint64(ResetTesterMaxDataDirMBFlag.Name)
 	var wg sync.WaitGroup
 	for w := uint64(0); w < workers; w++ {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
 			for key := range groupCh {
-				runEngineXGroup(ctx, runner, key, groups[key], timeIt, resultCh)
+				runEngineXGroup(ctx, runner, key, groups[key], timeIt, maxDataDirMB, resultCh)
 			}
 		}()
 	}
@@ -285,9 +287,11 @@ func isUnderPreAlloc(p string) bool {
 	return false
 }
 
-// runEngineXGroup executes every test in the group sequentially on a single
-// tester (created lazily by the runner) then evicts the tester to free its
-// node and temp directory before returning. Results are streamed to resultCh
+// runEngineXGroup executes every test in the group sequentially on a tester
+// created lazily by the runner. When maxDataDirMB > 0 the tester is evicted and
+// rebuilt once its datadir grows past that size (see resetTesterIfOversized),
+// bounding datadir/heap growth on large-state groups. The tester is evicted at
+// the end to free its node and temp directory. Results are streamed to resultCh
 // so the parent goroutine can collect across all workers. When timeIt is
 // true, each test's single Run is wrapped in timedExec so wall-time and
 // memstats land on the JSON output.
@@ -297,6 +301,7 @@ func runEngineXGroup(
 	key engineXGroupKey,
 	tests []engineXNamedTest,
 	timeIt bool,
+	maxDataDirMB uint64,
 	resultCh chan<- testResult,
 ) {
 	defer func() {
@@ -305,7 +310,22 @@ func runEngineXGroup(
 			fmt.Fprintf(os.Stderr, "evict fork=%s preAllocHash=%s: %v\n", key.fork, key.hash, err)
 		}
 	}()
-	for _, t := range tests {
+	maxDataDirBytes := int64(maxDataDirMB) * 1024 * 1024
+	for i, t := range tests {
+		if i > 0 {
+			reset, err := resetTesterIfOversized(runner, key, maxDataDirBytes)
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "reset check fork=%s preAllocHash=%s: %v\n", key.fork, key.hash, err)
+			}
+			if reset {
+				// Rebuild now so the reset isn't charged to this test's --time
+				// measurement (EnsureTester runs outside the timed section below).
+				err := runner.EnsureTester(t.def)
+				if err != nil {
+					fmt.Fprintf(os.Stderr, "rebuild fork=%s preAllocHash=%s: %v\n", key.fork, key.hash, err)
+				}
+			}
+		}
 		r := testResult{Name: t.name, Pass: true}
 		// timedExec(bench=false): single execution with memstats. We
 		// deliberately don't expose bench=true (testing.Benchmark loop) for
@@ -332,6 +352,53 @@ func runEngineXGroup(
 		}
 		resultCh <- r
 	}
+}
+
+// resetTesterIfOversized evicts the group's cached tester when its datadir has
+// grown past maxBytes. Engine-x tests never advance the head, so blocks imported
+// by earlier tests in the group are throwaway; dropping them bounds datadir
+// (tmpfs on CI) and heap growth on large-state groups. maxBytes <= 0 disables
+// the check. Returns whether an eviction happened so the caller can rebuild.
+func resetTesterIfOversized(runner *engineapitester.EngineXTestRunner, key engineXGroupKey, maxBytes int64) (bool, error) {
+	if maxBytes <= 0 {
+		return false, nil
+	}
+	dataDir, ok := runner.TesterDataDir(key.fork, key.hash)
+	if !ok {
+		return false, nil
+	}
+	size, err := dirSizeBytes(dataDir)
+	if err != nil {
+		return false, err
+	}
+	if size <= maxBytes {
+		return false, nil
+	}
+	return true, runner.Evict(key.fork, key.hash)
+}
+
+// dirSizeBytes returns the total size of the regular files under root, or 0 if
+// root does not exist.
+func dirSizeBytes(root string) (int64, error) {
+	var total int64
+	err := filepath.WalkDir(root, func(_ string, d os.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if d.IsDir() {
+			return nil
+		}
+		info, err := d.Info()
+		if err != nil {
+			return err
+		}
+		total += info.Size()
+		return nil
+	})
+	if errors.Is(err, os.ErrNotExist) {
+		return 0, nil
+	}
+	return total, err
 }
 
 // safeFilenameRe matches characters that are unsafe in filenames across

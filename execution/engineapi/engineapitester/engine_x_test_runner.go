@@ -196,6 +196,16 @@ func (extr *EngineXTestRunner) evict(entry testerEntry) error {
 	return errors.Join(errs...)
 }
 
+// TesterDataDir returns the temp datadir of the cached (fork, preAllocHash)
+// tester, or ("", false) when none is cached. Callers use it to check a
+// long-lived tester's on-disk growth and decide whether to evict it.
+func (extr *EngineXTestRunner) TesterDataDir(fork Fork, preAllocHash PreAllocHash) (string, bool) {
+	extr.mu.Lock()
+	defer extr.mu.Unlock()
+	entry, ok := extr.testers[fork][preAllocHash]
+	return entry.dataDir, ok
+}
+
 // testNameKey is the unexported context key callers use to attach a test name
 // to the ctx passed into Run. The profile hook embeds the name in per-request
 // profile ids so callers can route profiles into named files.

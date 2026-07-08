@@ -131,7 +131,12 @@ case "$shard_route" in
 		printf -v gas_dir 'for_osaka_at_%04dM' "$gas_num"
 		cmd=enginextest
 		path="$base/blockchain_tests_engine_x/$gas_dir"
-		extra=(--pre-alloc-dir "$base/blockchain_tests_engine_x/pre_alloc" --time) ;;
+		# --reset-tester-max-datadir-mb bounds datadir(tmpfs)/heap growth: each test
+		# imports a throwaway 150M-gas block onto the shared genesis, so without a
+		# reset one tester accumulates the whole group's branch state and OOMs the
+		# 16GB CI runner (worst on the high-gas parallel shards).
+		extra=(--pre-alloc-dir "$base/blockchain_tests_engine_x/pre_alloc" --time \
+			--reset-tester-max-datadir-mb "${EEST_ENGINEX_MAX_TESTER_DATADIR_MB:-5120}") ;;
 	zkevm-witness*)
 		# Whole eest_zkevm blockchain_tests corpus; the "-race" variant differs
 		# only in the binary (evm.race, picked by the Makefile), not the fixtures.

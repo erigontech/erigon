@@ -146,6 +146,11 @@ var (
 		Value: 1,
 		Usage: "Number of workers to execute tests in parallel (must be >= 1)",
 	}
+	ResetTesterMaxDataDirMBFlag = cli.Uint64Flag{
+		Name:  "reset-tester-max-datadir-mb",
+		Value: 0,
+		Usage: "enginextest: evict and rebuild a (fork,preAllocHash) group's tester once its datadir exceeds this many MB, to bound datadir/heap growth (0 = never)",
+	}
 	JSONOutputFlag = cli.BoolFlag{
 		Name:  "jsonout",
 		Usage: "Output results as JSON array instead of human-readable format",
