@@ -1215,12 +1215,17 @@ func (ht *HistoryRoTx) HistorySeek(key []byte, txNum uint64, roTx kv.Tx) ([]byte
 		return nil, false, nil
 	}
 
-	v, ok, err := ht.historySeekInFiles(key, txNum)
-	if err != nil {
-		return nil, false, err
-	}
-	if ok {
-		return v, true, nil
+	// Files cover history only below iit.files.EndTxNum(); at or beyond that
+	// boundary no file record can be >= txNum, so the files probe is a
+	// guaranteed miss — skip it and read DB history directly.
+	if txNum < ht.iit.files.EndTxNum() {
+		v, ok, err := ht.historySeekInFiles(key, txNum)
+		if err != nil {
+			return nil, false, err
+		}
+		if ok {
+			return v, true, nil
+		}
 	}
 
 	return ht.historySeekInDB(key, txNum, roTx)
