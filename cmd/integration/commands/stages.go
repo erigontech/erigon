@@ -110,6 +110,7 @@ func makeStageCmd(use string, stageFn func(kv.TemporalRwDB, context.Context, log
 			}
 			ctx, cancel := context.WithCancel(cmd.Context())
 			defer cancel()
+			go kv.CollectTableSizesPeriodically(ctx, db, dbcfg.ChainDB, logger)
 			if err := stageFn(db, ctx, logger); err != nil {
 				if errors.Is(err, context.Canceled) {
 					return nil // graceful shutdown
@@ -376,7 +377,7 @@ func stageSnapshots(db kv.TemporalRwDB, ctx context.Context, logger log.Logger) 
 		}
 	}
 	dirs := datadir.New(datadirCli)
-	if err := rawdbreset.ResetBlocks(tx, db, br, bw, dirs, logger); err != nil {
+	if err := rawdbreset.ResetBlocks(db, tx, br, bw, dirs, logger); err != nil {
 		return fmt.Errorf("resetting blocks: %w", err)
 	}
 	domains, err := execctx.NewSharedDomains(ctx, tx, logger)
@@ -431,7 +432,7 @@ func stageHeaders(db kv.TemporalRwDB, ctx context.Context, logger log.Logger) er
 
 	return db.Update(ctx, func(tx kv.RwTx) error {
 		if reset {
-			if err := rawdbreset.ResetBlocks(tx, db, br, bw, dirs, logger); err != nil {
+			if err := rawdbreset.ResetBlocks(db, tx, br, bw, dirs, logger); err != nil {
 				return err
 			}
 			return nil
@@ -498,7 +499,7 @@ func stageBodies(db kv.TemporalRwDB, ctx context.Context, logger log.Logger) err
 
 	if reset {
 		return db.Update(ctx, func(tx kv.RwTx) error {
-			return rawdbreset.ResetBlocks(tx, db, br, bw, dirs, logger)
+			return rawdbreset.ResetBlocks(db, tx, br, bw, dirs, logger)
 		})
 	}
 
@@ -544,7 +545,7 @@ func stageSenders(db kv.TemporalRwDB, ctx context.Context, logger log.Logger) er
 
 	br, _ := blocksIO(db, logger)
 	if reset {
-		return db.Update(ctx, func(tx kv.RwTx) error { return rawdbreset.ResetSenders(ctx, tx) })
+		return rawdbreset.ResetSenders(ctx, db)
 	}
 
 	tx, err := db.BeginRw(ctx)
