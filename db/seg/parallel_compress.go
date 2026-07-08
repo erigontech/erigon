@@ -35,6 +35,7 @@ import (
 	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/dir"
 	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/db/bufiopool"
 	"github.com/erigontech/erigon/db/etl"
 	"github.com/erigontech/erigon/db/seg/patricia"
 	"github.com/erigontech/erigon/db/seg/sais"
@@ -395,8 +396,8 @@ func compressWithPatternCandidates(ctx context.Context, trace bool, cfg Cfg, log
 	intermediatePath := intermediateFile.Name()
 	defer dir.RemoveFile(intermediatePath)
 	defer intermediateFile.Close()
-	intermediateW := getBufioWriter(intermediateFile)
-	defer putBufioWriter(intermediateW)
+	intermediateW := bufiopool.Writer(intermediateFile)
+	defer bufiopool.PutWriter(intermediateW)
 
 	var inCount, outCount, emptyWordsCount uint64 // Counters words sent to compression and returned for compression
 	var numBuf [binary.MaxVarintLen64]byte
@@ -634,8 +635,8 @@ func compressWithPatternCandidates(ctx context.Context, trace bool, cfg Cfg, log
 	if lvl < log.LvlTrace {
 		logger.Log(lvl, fmt.Sprintf("[%s] Effective dictionary", logPrefix), logCtx...)
 	}
-	cw := getBufioWriter(cf)
-	defer putBufioWriter(cw)
+	cw := bufiopool.Writer(cf)
+	defer bufiopool.PutWriter(cw)
 	// 1-st, output amount of words - just a useful metadata
 	binary.BigEndian.PutUint64(numBuf[:], inCount) // Dictionary size
 	if _, err = cw.Write(numBuf[:8]); err != nil {
@@ -693,8 +694,8 @@ func compressWithPatternCandidates(ctx context.Context, trace bool, cfg Cfg, log
 	wc := 0
 	var hc BitWriter
 	hc.w = cw
-	r := getBufioReader(intermediateFile)
-	defer putBufioReader(r)
+	r := bufiopool.Reader(intermediateFile)
+	defer bufiopool.PutReader(r)
 	copyNBuf := make([]byte, 32*1024)
 
 	var l uint64
@@ -810,8 +811,8 @@ func compressNoWordPatterns(logPrefix string, cf *os.File, uncompressedFile *Raw
 		return err
 	}
 
-	cw := getBufioWriter(cf)
-	defer putBufioWriter(cw)
+	cw := bufiopool.Writer(cf)
+	defer bufiopool.PutWriter(cw)
 
 	// Write data header: word count, empty word count, patternsSize=0, then position dict.
 	binary.BigEndian.PutUint64(numBuf[:], inCount)
@@ -1174,8 +1175,8 @@ func PersistDictionary(fileName string, db *DictionaryBuilder) error {
 	if err != nil {
 		return err
 	}
-	w := getBufioWriter(df)
-	defer putBufioWriter(w)
+	w := bufiopool.Writer(df)
+	defer bufiopool.PutWriter(w)
 	db.ForEach(func(score uint64, word []byte) { fmt.Fprintf(w, "%d %x\n", score, word) })
 	if err = w.Flush(); err != nil {
 		return err
@@ -1194,8 +1195,8 @@ func ReadSimpleFile(fileName string, walker func(v []byte) error) error {
 		return err
 	}
 	defer f.Close()
-	r := getBufioReader(f)
-	defer putBufioReader(r)
+	r := bufiopool.Reader(f)
+	defer bufiopool.PutReader(r)
 	buf := make([]byte, 4096)
 	for l, e := binary.ReadUvarint(r); ; l, e = binary.ReadUvarint(r) {
 		if e != nil {

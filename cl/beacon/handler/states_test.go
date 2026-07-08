@@ -554,3 +554,39 @@ func TestGetRandao(t *testing.T) {
 		})
 	}
 }
+
+func TestGetPendingQueuesConsensusVersionHeader(t *testing.T) {
+	_, blocks, _, _, _, handler, _, _, fcu, _ := setupTestingHandler(t, clparams.ElectraVersion, log.Root(), false)
+
+	var err error
+	fcu.HeadVal, err = blocks[len(blocks)-1].Block.HashSSZ()
+	require.NoError(t, err)
+	fcu.HeadSlotVal = blocks[len(blocks)-1].Block.Slot
+	lowest := uint64(0)
+	fcu.LowestAvailableSlotVal = &lowest
+	fcu.PendingConsolidationsVal = map[common.Hash]*solid.ListSSZ[*solid.PendingConsolidation]{
+		fcu.HeadVal: solid.NewPendingConsolidationList(&clparams.MainnetBeaconConfig),
+	}
+	fcu.PendingDepositsVal = map[common.Hash]*solid.ListSSZ[*solid.PendingDeposit]{
+		fcu.HeadVal: solid.NewPendingDepositList(&clparams.MainnetBeaconConfig),
+	}
+	fcu.PendingPartialWithdrawalsVal = map[common.Hash]*solid.ListSSZ[*solid.PendingPartialWithdrawal]{
+		fcu.HeadVal: solid.NewPendingWithdrawalList(&clparams.MainnetBeaconConfig),
+	}
+
+	server := httptest.NewServer(handler.mux)
+	defer server.Close()
+
+	versions := map[string]string{}
+	for _, endpoint := range []string{"pending_consolidations", "pending_deposits", "pending_partial_withdrawals"} {
+		resp, err := http.Get(server.URL + "/eth/v1/beacon/states/head/" + endpoint)
+		require.NoError(t, err)
+		resp.Body.Close()
+		require.Equal(t, http.StatusOK, resp.StatusCode, endpoint)
+		v := resp.Header.Get("Eth-Consensus-Version")
+		require.NotEmpty(t, v, "%s must set Eth-Consensus-Version", endpoint)
+		versions[endpoint] = v
+	}
+	require.Equal(t, versions["pending_partial_withdrawals"], versions["pending_consolidations"])
+	require.Equal(t, versions["pending_partial_withdrawals"], versions["pending_deposits"])
+}
