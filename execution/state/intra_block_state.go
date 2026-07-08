@@ -871,6 +871,39 @@ func (sdb *IntraBlockState) ReadVersion(addr accounts.Address, path AccountPath,
 	return sdb.versionMap.ReadStatus(addr, path, key, txIdx)
 }
 
+// writeBalanceVersioned records a balance change on the versionMap write-set and
+// the journal without materializing the stateObject on the common existing-alive
+// path. An absent or destroyed-no-revival account is materialized via
+// GetOrNewStateObject so createObject records the AddressPath write OCC needs; the
+// create path never reads balance (matching the old stateObject path). The journal
+// prev is read only in the existing branch so a create does not widen the OCC
+// read-set with a spurious BalancePath read.
+func (sdb *IntraBlockState) writeBalanceVersioned(addr accounts.Address, update uint256.Int, wasCommited bool, reason tracing.BalanceChangeReason) error {
+	base, _, _, err := sdb.versionedAccountBase(addr, true)
+	if err != nil {
+		return err
+	}
+	if base == nil || sdb.accountLifecycle(addr) {
+		stateObject, err := sdb.GetOrNewStateObject(addr)
+		if err != nil {
+			return err
+		}
+		stateObject.SetBalance(update, wasCommited, reason)
+		sdb.recordWriteBalance(addr, update)
+		return nil
+	}
+	prev, _, err := sdb.getBalance(addr)
+	if err != nil {
+		return err
+	}
+	sdb.journal.append(balanceChange{account: addr, prev: prev, wasCommited: wasCommited})
+	if sdb.tracingHooks != nil && sdb.tracingHooks.OnBalanceChange != nil {
+		sdb.tracingHooks.OnBalanceChange(addr, prev, update, reason)
+	}
+	sdb.recordWriteBalance(addr, update)
+	return nil
+}
+
 // AddBalance adds amount to the account associated with addr.
 // DESCRIBED: docs/programmers_guide/guide.md#address---identifier-of-an-account
 func (sdb *IntraBlockState) AddBalance(addr accounts.Address, amount uint256.Int, reason tracing.BalanceChangeReason) error {
@@ -942,6 +975,10 @@ func (sdb *IntraBlockState) AddBalance(addr accounts.Address, amount uint256.Int
 	}
 
 	update := u256.Add(prev, amount)
+
+	if sdb.versionMap != nil {
+		return sdb.writeBalanceVersioned(addr, update, wasCommited, reason)
+	}
 
 	stateObject, err := sdb.GetOrNewStateObject(addr)
 	if err != nil {
@@ -1208,15 +1245,17 @@ func (sdb *IntraBlockState) SubBalance(addr accounts.Address, amount uint256.Int
 		}()
 	}
 
+	update := u256.Sub(prev, amount)
+
+	if sdb.versionMap != nil {
+		return sdb.writeBalanceVersioned(addr, update, wasCommited, reason)
+	}
+
 	stateObject, err := sdb.GetOrNewStateObject(addr)
 	if err != nil {
 		return err
 	}
-	update := u256.Sub(prev, amount)
 	stateObject.SetBalance(update, wasCommited, reason)
-	if sdb.versionMap != nil {
-		sdb.recordWriteBalance(addr, update)
-	}
 	return nil
 }
 
@@ -1225,6 +1264,9 @@ func (sdb *IntraBlockState) SetBalance(addr accounts.Address, amount uint256.Int
 	if dbg.TraceTransactionIO && (sdb.trace || dbg.TraceAccount(addr.Handle())) {
 		amount := amount
 		fmt.Printf("%d (%d.%d) SetBalance %x, %s\n", sdb.blockNum, sdb.txIndex, sdb.version, addr, amount.String())
+	}
+	if sdb.versionMap != nil {
+		return sdb.writeBalanceVersioned(addr, amount, !sdb.hasWrite(addr, BalancePath, accounts.NilKey), reason)
 	}
 	stateObject, err := sdb.GetOrNewStateObject(addr)
 	if err != nil {
@@ -2120,14 +2162,13 @@ func (sdb *IntraBlockState) GetRemovedAccountsWithBalance() (list []evmtypes.Add
 
 func (sdb *IntraBlockState) SoftFinalise() {
 	for addr := range sdb.journal.dirties {
-		_, exist := sdb.stateObjects[addr]
-		if !exist {
-			// ripeMD is 'touched' at block 1714175, in txn 0x1237f737031e40bcde4a8b7e717b2d15e3ecadfe49bb1bbc71ee9deb09c6fcf2
-			// That txn goes out of gas, and although the notion of 'touched' does not exist there, the
-			// touch-event will still be recorded in the journal. Since ripeMD is a special snowflake,
-			// it will persist in the journal even though the journal is reverted. In this special circumstance,
-			// it may exist in `sdb.journal.dirties` but not in `sdb.stateObjects`.
-			// Thus, we can safely ignore it here
+		// versionMap (parallel) path: a write can be recorded to versionedWrites
+		// without materializing a stateObject, so dirtiness must come from the
+		// journal (populated alongside every recordWrite), not stateObject
+		// existence — else MakeWriteSet's revert reconciliation drops the write.
+		// Serial path keeps the stateObject gate: a touched-but-reverted address
+		// (ripeMD, out-of-gas) lingers in journal.dirties without a stateObject.
+		if _, exist := sdb.stateObjects[addr]; !exist && sdb.versionMap == nil {
 			continue
 		}
 		sdb.stateObjectsDirty[addr] = struct{}{}
