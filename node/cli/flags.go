@@ -246,17 +246,7 @@ func applyRemainingEthFlags(ctx *cli.Command, cfg *ethconfig.Config, logger log.
 		utils.Fatalf("%v", err)
 	}
 
-	// check if the prune.mode flag is not set to archive
-	persistenceReceiptsV2 := ctx.String(PruneModeFlag.Name) != prune.ArchiveMode.String()
-
-	// overwrite receipts persistence if the flag is set
-	if ctx.IsSet(utils.PersistReceiptsV2Flag.Name) {
-		persistenceReceiptsV2 = ctx.Bool(utils.PersistReceiptsV2Flag.Name)
-	}
-
-	if persistenceReceiptsV2 {
-		cfg.PersistReceiptsCacheV2 = true
-	}
+	cfg.PersistReceiptsCacheV2 = ctx.Bool(utils.PersistReceiptsV2Flag.Name)
 
 	commitmentHistoryOlder := ctx.Uint64(utils.CommitmentHistoryDistanceFlag.Name)
 	mode, err := prune.FromCli(ctx.String(PruneModeFlag.Name), distance, blockDistance, commitmentHistoryOlder)
