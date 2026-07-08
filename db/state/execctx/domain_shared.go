@@ -960,6 +960,14 @@ func (sd *SharedDomains) Commit(ctx context.Context, tx kv.RwTx, validate ...fun
 			return err
 		}
 	}
+	// Enforce the store's byte cap on the path that grows it: flows that never
+	// reach the forkchoice prune loop (its other Evict site) would otherwise
+	// grow the table without bound.
+	if len(codeStoreWrites) > 0 {
+		if err := sd.codeStore.Evict(tx); err != nil {
+			return err
+		}
+	}
 	if err := runValidate(); err != nil {
 		return err
 	}
