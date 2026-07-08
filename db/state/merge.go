@@ -38,6 +38,7 @@ import (
 	"github.com/erigontech/erigon/db/recsplit/multiencseq"
 	"github.com/erigontech/erigon/db/seg"
 	"github.com/erigontech/erigon/db/state/statecfg"
+	"github.com/erigontech/erigon/db/version"
 	"github.com/erigontech/erigon/execution/commitment/commitmentdb"
 )
 
@@ -45,7 +46,7 @@ func (d *Domain) dirtyFilesEndTxNumMinimax() uint64 {
 	if d == nil {
 		return 0
 	}
-	return d.dirtyFiles.updateMinimax(d.History.dirtyFilesEndTxNumMinimax())
+	return d.dirtyFiles.endTxNumMinimax(d.History.dirtyFilesEndTxNumMinimax())
 }
 
 func (ii *InvertedIndex) dirtyFilesEndTxNumMinimax() uint64 {
@@ -55,7 +56,7 @@ func (h *History) dirtyFilesEndTxNumMinimax() uint64 {
 	if h.SnapshotsDisabled {
 		return math.MaxUint64
 	}
-	return h.dirtyFiles.updateMinimax(h.InvertedIndex.dirtyFilesEndTxNumMinimax())
+	return h.dirtyFiles.endTxNumMinimax(h.InvertedIndex.dirtyFilesEndTxNumMinimax())
 }
 
 type DomainRanges struct {
@@ -323,6 +324,7 @@ func (ht *HistoryRoTx) staticFilesInRange(r HistoryRanges) (indexFiles, historyF
 	}
 
 	if r.history.needMerge {
+		prevEnd, haveSelected := uint64(0), false
 		for _, item := range ht.files {
 			if item.startTxNum < r.history.from {
 				continue
@@ -330,6 +332,10 @@ func (ht *HistoryRoTx) staticFilesInRange(r HistoryRanges) (indexFiles, historyF
 			if item.endTxNum > r.history.to {
 				break
 			}
+			if haveSelected && item.startTxNum != prevEnd {
+				return nil, nil, fmt.Errorf("History.staticFilesInRange: gap in source files for merge range [%d,%d): file ending at %d is followed by %s starting at %d", r.history.from, r.history.to, prevEnd, ht.h.FilenameBase, item.startTxNum)
+			}
+			prevEnd, haveSelected = item.endTxNum, true
 
 			historyFiles = append(historyFiles, item.src)
 
@@ -378,7 +384,7 @@ type valueTransformer func(val []byte, startTxNum, endTxNum uint64) ([]byte, err
 
 const DomainMinStepsToCompress = 16
 
-func (dt *DomainRoTx) mergeFiles(ctx context.Context, domainFiles, indexFiles, historyFiles []*FilesItem, r DomainRanges, vt valueTransformer, ps *background.ProgressSet) (valuesIn, indexIn, historyIn *FilesItem, err error) {
+func (dt *DomainRoTx) mergeFiles(ctx context.Context, domainFiles, indexFiles, historyFiles []*FilesItem, r DomainRanges, vt valueTransformer, seqReadahead bool, ps *background.ProgressSet) (valuesIn, indexIn, historyIn *FilesItem, err error) {
 	if !r.any() {
 		return
 	}
@@ -442,7 +448,12 @@ func (dt *DomainRoTx) mergeFiles(ctx context.Context, domainFiles, indexFiles, h
 	var cp CursorHeap
 	heap.Init(&cp)
 	for _, item := range domainFiles {
-		g := dt.dataReader(item.decompressor)
+		view, err := item.decompressor.OpenSequentialView(seqReadahead)
+		if err != nil {
+			return nil, nil, nil, err
+		}
+		defer view.Close()
+		g := seg.NewReader(view.MakeGetter(), dt.d.Compression)
 		g.Reset(0)
 		if g.HasNext() {
 			key, _ := g.Next(nil)
@@ -535,6 +546,7 @@ func (dt *DomainRoTx) mergeFiles(ctx context.Context, domainFiles, indexFiles, h
 	ps.Delete(p)
 
 	valuesIn = newFilesItem(r.values.from, r.values.to)
+	valuesIn.version, _ = version.ParseVersion(filepath.Base(kvFilePath))
 	if valuesIn.decompressor, err = seg.NewDecompressor(kvFilePath); err != nil {
 		return nil, nil, nil, fmt.Errorf("merge %s decompressor [%d-%d]: %w", dt.d.FilenameBase, r.values.from, r.values.to, err)
 	}
@@ -552,7 +564,7 @@ func (dt *DomainRoTx) mergeFiles(ctx context.Context, domainFiles, indexFiles, h
 		}
 	}
 	if dt.d.Accessors.Has(statecfg.AccessorHashMap) {
-		if err = dt.d.buildHashMapAccessor(ctx, fromStep, toStep, dt.dataReader(valuesIn.decompressor), ps); err != nil {
+		if err = dt.d.buildHashMapAccessor(ctx, fromStep, toStep, valuesIn.decompressor, ps); err != nil {
 			return nil, nil, nil, fmt.Errorf("merge %s buildHashMapAccessor [%d-%d]: %w", dt.d.FilenameBase, r.values.from, r.values.to, err)
 		}
 		if valuesIn.index, err = dt.d.openHashMapAccessor(dt.d.kviAccessorNewFilePath(fromStep, toStep)); err != nil {
@@ -626,8 +638,14 @@ func (iit *InvertedIndexRoTx) mergeFiles(ctx context.Context, files []*FilesItem
 	var cp CursorHeap
 	heap.Init(&cp)
 
+	seqReadahead := true
 	for _, item := range files {
-		g := iit.dataReader(item.decompressor)
+		view, err := item.decompressor.OpenSequentialView(seqReadahead)
+		if err != nil {
+			return nil, err
+		}
+		defer view.Close()
+		g := seg.NewReader(view.MakeGetter(), iit.ii.Compression)
 		g.Reset(0)
 		if g.HasNext() {
 			key, _ := g.Next(nil)
@@ -715,7 +733,7 @@ func (iit *InvertedIndexRoTx) mergeFiles(ctx context.Context, files []*FilesItem
 	}
 	ps.Delete(p)
 
-	if err := iit.ii.buildMapAccessor(ctx, fromStep, toStep, iit.dataReader(outItem.decompressor), ps); err != nil {
+	if err := iit.ii.buildMapAccessor(ctx, fromStep, toStep, outItem.decompressor, ps); err != nil {
 		return nil, fmt.Errorf("merge %s buildHashMapAccessor [%d-%d]: %w", iit.ii.FilenameBase, startTxNum, endTxNum, err)
 	}
 	if outItem.index, err = iit.ii.openHashMapAccessor(iit.ii.efAccessorNewFilePath(fromStep, toStep)); err != nil {
@@ -791,7 +809,12 @@ func (ht *HistoryRoTx) mergeFiles(ctx context.Context, indexFiles, historyFiles 
 		var cp CursorHeap
 		heap.Init(&cp)
 		for _, item := range indexFiles {
-			g := ht.iit.dataReader(item.decompressor)
+			idxView, err := item.decompressor.OpenSequentialView(true)
+			if err != nil {
+				return nil, nil, err
+			}
+			defer idxView.Close()
+			g := seg.NewReader(idxView.MakeGetter(), ht.h.InvertedIndex.Compression)
 			g.Reset(0)
 			if g.HasNext() {
 				var g2 *seg.PagedReader
@@ -803,7 +826,12 @@ func (ht *HistoryRoTx) mergeFiles(ctx context.Context, indexFiles, historyFiles 
 							compressedPageValuesCount = ht.h.HistoryValuesOnCompressedPage
 						}
 
-						g2 = seg.NewPagedReader(ht.dataReader(hi.decompressor), compressedPageValuesCount, true)
+						histView, err := hi.decompressor.OpenSequentialView(true)
+						if err != nil {
+							return nil, nil, err
+						}
+						defer histView.Close()
+						g2 = seg.NewPagedReader(seg.NewReader(histView.MakeGetter(), ht.h.Compression), compressedPageValuesCount, true)
 						break
 					}
 				}
@@ -927,7 +955,8 @@ func (dt *DomainRoTx) cleanAfterMerge(mergedDomain, mergedHist, mergedIdx *Files
 	for _, out := range outs { // collect file names before files descriptors closed
 		deleted = append(deleted, out.FilePaths(dt.d.dirs.Snap)...)
 	}
-	retired = append(retired, retireMergeFiles(dt.d.dirtyFiles, outs, dt.d.FilenameBase, dt.d.logger)...)
+	retire(dt.d.dirtyFiles, outs, dt.d.FilenameBase, retireReasonMerged, dt.d.logger)
+	retired = append(retired, outs...)
 	return deleted, retired
 }
 
@@ -945,7 +974,8 @@ func (ht *HistoryRoTx) cleanAfterMerge(merged, mergedIdx *FilesItem) (deleted []
 	for _, out := range outs { // collect file names before files descriptors closed
 		deleted = append(deleted, out.FilePaths(ht.h.dirs.Snap)...)
 	}
-	retired = append(retired, retireMergeFiles(ht.h.dirtyFiles, outs, ht.h.FilenameBase, ht.h.logger)...)
+	retire(ht.h.dirtyFiles, outs, ht.h.FilenameBase, retireReasonMerged, ht.h.logger)
+	retired = append(retired, outs...)
 	return deleted, retired
 }
 
@@ -958,7 +988,8 @@ func (iit *InvertedIndexRoTx) cleanAfterMerge(merged *FilesItem) (deleted []stri
 	for _, out := range outs { // collect file names before files descriptors closed
 		deleted = append(deleted, out.FilePaths(iit.ii.dirs.Snap)...)
 	}
-	retired = append(retired, retireMergeFiles(iit.ii.dirtyFiles, outs, iit.ii.FilenameBase, iit.ii.logger)...)
+	retire(iit.ii.dirtyFiles, outs, iit.ii.FilenameBase, retireReasonMerged, iit.ii.logger)
+	retired = append(retired, outs...)
 	return deleted, retired
 }
 

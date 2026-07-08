@@ -33,9 +33,11 @@ import (
 
 	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/u256"
+	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/rawdbv3"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/tracing"
@@ -607,8 +609,8 @@ func TestVersionMapMarkEstimate(t *testing.T) {
 	assert.Equal(t, balance, b)
 
 	// Tx1 mark estimate
-	for _, v := range states[1].VersionedWrites(true) {
-		mvhm.MarkEstimate(v.Address, v.Path, v.Key, 1)
+	for h := range states[1].VersionedWrites(true).AllHeaders() {
+		mvhm.MarkEstimate(h.Address, h.Path, h.Key, 1)
 	}
 
 	defer func() {
@@ -682,14 +684,13 @@ func TestVersionMapOverwrite(t *testing.T) {
 	assert.Equal(t, balance2, b)
 
 	// Tx1 delete
-	states[1].versionedWrites.Scan(func(v *VersionedWrite) bool {
-		mvhm.Delete(v.Address, v.Path, v.Key, 1, true)
-		return true
-	})
-	states[1].versionedWrites = nil
+	for h := range states[1].versionedWrites.AllHeaders() {
+		mvhm.Delete(h.Address, h.Path, h.Key, 1, true)
+	}
+	states[1].versionedWrites = WriteSet{}
 
 	// Tx2 read should get Tx0's value
-	states[2].versionedReads = nil
+	states[2].versionedReads = ReadSet{}
 	v, err = states[2].GetState(addr, key)
 	assert.NoError(t, err)
 	b, err = states[2].GetBalance(addr)
@@ -706,14 +707,13 @@ func TestVersionMapOverwrite(t *testing.T) {
 	assert.Equal(t, balance1, b)
 
 	// Tx0 delete
-	states[0].versionedWrites.Scan(func(v *VersionedWrite) bool {
-		mvhm.Delete(v.Address, v.Path, v.Key, 0, true)
-		return true
-	})
-	states[0].versionedWrites = nil
+	for h := range states[0].versionedWrites.AllHeaders() {
+		mvhm.Delete(h.Address, h.Path, h.Key, 0, true)
+	}
+	states[0].versionedWrites = WriteSet{}
 
 	// Tx2 read again should get default vals
-	states[2].versionedReads = nil
+	states[2].versionedReads = ReadSet{}
 	v, err = states[2].GetState(addr, key)
 	assert.NoError(t, err)
 	b, err = states[2].GetBalance(addr)
@@ -778,7 +778,7 @@ func TestVersionMapWriteNoConflict(t *testing.T) {
 	// Now that Tx1 has flushed, re-reading without stale cache simulates a
 	// re-execution that the scheduler would trigger on dependency.
 	states[2].stateObjects = map[accounts.Address]*stateObject{}
-	states[2].versionedReads = nil
+	states[2].versionedReads = ReadSet{}
 	v, err = states[2].GetState(addr, key2)
 	assert.NoError(t, err)
 	assert.Equal(t, val2, v)
@@ -802,14 +802,13 @@ func TestVersionMapWriteNoConflict(t *testing.T) {
 	assert.Equal(t, balance1, b)
 
 	// Tx2 delete
-	states[2].versionedWrites.Scan(func(v *VersionedWrite) bool {
-		mvhm.Delete(v.Address, v.Path, v.Key, 2, true)
-		return true
-	})
-	states[2].versionedWrites = nil
+	for h := range states[2].versionedWrites.AllHeaders() {
+		mvhm.Delete(h.Address, h.Path, h.Key, 2, true)
+	}
+	states[2].versionedWrites = WriteSet{}
 
 	// Tx3 read
-	states[3].versionedReads = nil
+	states[3].versionedReads = ReadSet{}
 	v, err = states[3].GetState(addr, key1)
 	assert.NoError(t, err)
 	assert.Equal(t, val1, v)
@@ -834,7 +833,7 @@ func TestVersionMapWriteNoConflict(t *testing.T) {
 	// we need to flush the local state objects as we're not
 	// resetting the state - which is artificial for the test
 	states[3].stateObjects = map[accounts.Address]*stateObject{}
-	states[3].versionedReads = nil
+	states[3].versionedReads = ReadSet{}
 	v, err = states[3].GetState(addr, key1)
 	assert.NoError(t, err)
 	assert.Equal(t, uint256.Int{}, v)
@@ -846,14 +845,13 @@ func TestVersionMapWriteNoConflict(t *testing.T) {
 	assert.Equal(t, uint256.Int{}, b)
 
 	// Tx1 delete
-	states[1].versionedWrites.Scan(func(v *VersionedWrite) bool {
-		mvhm.Delete(v.Address, v.Path, v.Key, 1, true)
-		return true
-	})
-	states[1].versionedWrites = nil
+	for h := range states[1].versionedWrites.AllHeaders() {
+		mvhm.Delete(h.Address, h.Path, h.Key, 1, true)
+	}
+	states[1].versionedWrites = WriteSet{}
 
 	// Tx3 read
-	states[3].versionedReads = nil
+	states[3].versionedReads = ReadSet{}
 	v, err = states[3].GetState(addr, key1)
 	assert.NoError(t, err)
 	assert.Equal(t, uint256.Int{}, v)
@@ -948,4 +946,38 @@ func TestApplyVersionedWrites(t *testing.T) {
 	sSingleProcess.SetCode(addr1, code, tracing.CodeChangeUnspecified)
 
 	sClean.ApplyVersionedWrites(states[3].VersionedWrites(true))
+}
+
+// TestMakeWriteSetClearsCodeDomainOnEmptyOverride pins that clearing an
+// account's code (e.g. an eth_simulateV1 stateOverride of "code":"0x") writes
+// through to the CodeDomain, keeping it consistent with the now-empty account
+// codeHash. Regression: gating the code write on a non-nil code slice skipped
+// the clear, leaving the CodeDomain holding stale code and tripping the
+// commitment codeHash-mismatch assert.
+func TestMakeWriteSetClearsCodeDomainOnEmptyOverride(t *testing.T) {
+	t.Parallel()
+
+	_, tx, domains := NewTestRwTx(t)
+
+	addr := accounts.InternAddress(common.HexToAddress("0xc0de"))
+	addrVal := addr.Value()
+	code := []byte{0x60, 0x00, 0x60, 0x00, 0xf3}
+
+	deploy := New(NewReaderV3(domains.AsGetter(tx)))
+	require.NoError(t, deploy.CreateAccount(addr, true))
+	require.NoError(t, deploy.SetNonce(addr, 1, tracing.NonceChangeUnspecified))
+	require.NoError(t, deploy.SetCode(addr, code, tracing.CodeChangeUnspecified))
+	require.NoError(t, deploy.MakeWriteSet(&chain.Rules{}, NewWriter(domains.AsPutDel(tx), nil, 0)))
+
+	got, _, err := domains.AsGetter(tx).GetLatest(kv.CodeDomain, addrVal[:])
+	require.NoError(t, err)
+	require.Equal(t, code, got)
+
+	clear := New(NewReaderV3(domains.AsGetter(tx)))
+	require.NoError(t, clear.SetCode(addr, []byte{}, tracing.CodeChangeUnspecified))
+	require.NoError(t, clear.MakeWriteSet(&chain.Rules{}, NewWriter(domains.AsPutDel(tx), nil, 1)))
+
+	got, _, err = domains.AsGetter(tx).GetLatest(kv.CodeDomain, addrVal[:])
+	require.NoError(t, err)
+	require.Empty(t, got, "clearing code must clear the CodeDomain entry")
 }

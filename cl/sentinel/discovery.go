@@ -23,10 +23,10 @@ import (
 	"sort"
 	"time"
 
+	"github.com/OffchainLabs/go-bitfield"
 	"github.com/libp2p/go-libp2p/core/network"
 	"github.com/libp2p/go-libp2p/core/peer"
 	"github.com/multiformats/go-multiaddr"
-	"github.com/prysmaticlabs/go-bitfield"
 	"golang.org/x/sync/semaphore"
 
 	"github.com/erigontech/erigon/cl/clparams"
