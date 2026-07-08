@@ -1571,12 +1571,11 @@ func TestParallelResumeReconstructsPriorReceipts(t *testing.T) {
 	}
 }
 
-// TestParallelResumeReconstructionFailureErrors pins the failure policy when
-// prior receipts cannot be reconstructed: the batch must fail with the
-// reconstruction error instead of proceeding into a receipts-dependent
-// Finalize (post-Prague requests hash, AuRa epoch signal) that would
-// misclassify the valid block as invalid.
-func TestParallelResumeReconstructionFailureErrors(t *testing.T) {
+// TestParallelResumeReconstructionFailureIsNonFatal pins the failure policy when
+// prior receipts cannot be reconstructed: reconstruction is best-effort, so the
+// batch proceeds (prior receipts absent, block left not receipts-complete)
+// rather than halting the node mid-step. See reconstructPriorReceipts.
+func TestParallelResumeReconstructionFailureIsNonFatal(t *testing.T) {
 	assert := assert.New(t)
 	db := newResumeTestDB(t)
 
@@ -1632,8 +1631,10 @@ func TestParallelResumeReconstructionFailureErrors(t *testing.T) {
 	}
 
 	res, err := be.nextResult(context.Background(), pe, txResult, roTx)
-	assert.ErrorContains(err, "reconstruct prior receipts")
-	assert.Nil(res)
+	assert.NoError(err)
+	if assert.NotNil(res) {
+		assert.False(res.receiptsComplete)
+	}
 }
 
 // TestParallelFinalizeMissingPrevReceiptErrors pins the failure mode when the

@@ -454,8 +454,15 @@ func (te *txExecutor) getHeader(ctx context.Context, hash common.Hash, number ui
 }
 
 // reconstructPriorReceipts re-derives receipts of a resumed block's prefix txs
-// (executed in an earlier batch): Finalize and the notification cache need the
-// block's full receipt set.
+// (executed in an earlier batch) so Finalize and the notification cache can see
+// the block's full receipt set.
+//
+// Best-effort. At a mid-block step boundary the committed domain latest is the
+// step-edge value, not the block-start pre-state, so the prefix is not always
+// reconstructable (and minimal nodes retain no receipts at all). Callers MUST
+// treat a failure as non-fatal: the node still resumes from a mid-step boundary
+// and the block's own receipts and cumulative gas stay correct — only the prior
+// receipts are absent (block then left not receipts-complete).
 func (te *txExecutor) reconstructPriorReceipts(ctx context.Context, applyTx kv.TemporalTx, header *types.Header, txs types.Transactions, startTxIndex int, blockStartTxNum uint64) (types.Receipts, error) {
 	priorIbs := state.New(state.NewHistoryReaderV3(applyTx, blockStartTxNum))
 	defer priorIbs.Release(true)
