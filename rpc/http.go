@@ -254,6 +254,16 @@ func WithGzipStreamingHook(ctx context.Context, hook func()) context.Context {
 	return context.WithValue(ctx, httpFlusherContextKey{}, hook)
 }
 
+// withoutGzipStreamingHook masks any gzip-streaming hook set on an ancestor context. Batch
+// sub-calls write into a private per-item buffer rather than the HTTP response writer, so
+// the hook must not fire for them; calling it concurrently from multiple batch goroutines is
+// unsafe, since the underlying gzip.Writer it activates is not safe for concurrent use. The
+// value is stored as an untyped nil so the reader's ctx.Value(...).(func()) assertion fails
+// cleanly (ok == false) rather than yielding a non-nil-typed nil func.
+func withoutGzipStreamingHook(ctx context.Context) context.Context {
+	return context.WithValue(ctx, httpFlusherContextKey{}, nil)
+}
+
 func withOverloadedFlag(ctx context.Context) (context.Context, *bool) {
 	flag := new(bool)
 	return context.WithValue(ctx, httpOverloadedKey{}, flag), flag

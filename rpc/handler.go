@@ -198,6 +198,9 @@ func (h *handler) handleBatch(msgs []*jsonrpcMessage) {
 
 	// Process calls on a goroutine because they may block indefinitely:
 	h.startCallProc(func(cp *callProc) {
+		// Batch items below run concurrently and write into private per-item buffers;
+		// see withoutGzipStreamingHook for why the hook must not reach them.
+		cp.ctx = withoutGzipStreamingHook(cp.ctx)
 		// All goroutines will place results right to this array. Because requests order must match reply orders.
 		answersWithNils := make([][]byte, len(msgs))
 		// Bounded parallelism pattern explanation https://blog.golang.org/pipelines#TOC_9.
