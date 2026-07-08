@@ -1318,7 +1318,7 @@ func (d *Domain) integrateDirtyFiles(sf StaticFiles, txNumFrom, txNumTo uint64) 
 
 // unwind is similar to prune but the difference is that it restores domain values from the history as of txFrom
 // context Flush should be managed by caller.
-func (dt *DomainRoTx) unwind(ctx context.Context, rwTx kv.RwTx, step, txNumUnwindTo, currentFilesEndStep uint64, domainDiffs []kv.DomainEntryDiff) error {
+func (dt *DomainRoTx) unwind(ctx context.Context, rwTx kv.RwTx, step, txNumUnwindTo uint64, domainDiffs []kv.DomainEntryDiff) error {
 	// fmt.Printf("[domain][%s] unwinding domain to txNum=%d, step %d\n", d.filenameBase, txNumUnwindTo, step)
 	d := dt.d
 
@@ -1344,14 +1344,8 @@ func (dt *DomainRoTx) unwind(ctx context.Context, rwTx kv.RwTx, step, txNumUnwin
 	//                       empty tombstone to prevent getLatestFromDb falling through to files
 	//                       (which have no concept of deletions) and returning stale data
 	//   - non-empty      → restore the actual previous value
-	//
-	// The step tag for restored entries must be BEYOND the filed range, otherwise
-	// getLatestFromDb will discard them (step covered by files → fall through to
-	// files which have the pre-unwind value). Use the larger of the natural step
-	// and the first unfiled step. See #20169.
-	unwindStep := max(currentFilesEndStep, step)
 	unwindStepBytes := make([]byte, 8)
-	binary.BigEndian.PutUint64(unwindStepBytes, ^uint64(unwindStep))
+	binary.BigEndian.PutUint64(unwindStepBytes, ^uint64(step))
 
 	for i := range domainDiffs {
 		keyStr, value := domainDiffs[i].Key, domainDiffs[i].Value
@@ -1389,8 +1383,8 @@ func (dt *DomainRoTx) unwind(ctx context.Context, rwTx kv.RwTx, step, txNumUnwin
 		// A key changed at several steps in the range has one diff per step, sorted
 		// by key then descending step; only the lowest step's value is the value at
 		// txNumUnwindTo. Restore once, on the last (lowest-step) diff — else the
-		// DupSort table keeps several dups at unwindStep and getLatestFromDb returns
-		// the smallest. nil = different step, skip; []byte{} = absent, write tombstone.
+		// DupSort table keeps several dups at the unwind step and getLatestFromDb
+		// returns the smallest. nil = different step, skip; []byte{} = absent, write tombstone.
 		lastForKey := i+1 == len(domainDiffs) || domainDiffs[i+1].Key[:len(domainDiffs[i+1].Key)-8] != keyStr[:len(keyStr)-8]
 		if value != nil && lastForKey {
 			if err := valsCursor.Put(fullKey, append(unwindStepBytes, value...)); err != nil {
