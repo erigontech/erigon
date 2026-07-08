@@ -1,22 +1,16 @@
 # Item 1 — apply-loop resource authority (batch-cut / fold-orphan fix)
 
-Status: **orphan correctness fix IMPLEMENTED (stream-based)**; full apply-loop resource
-authority still to do. Flush-boundary crux **resolved** (2026-07-03): cap the fold-ahead
-distance rather than partition the flush — see "Crux resolved" below.
+The orphan bug is fixed with a stream-based freeze rather than shared state: the
+exec and commit routines coordinate only through the result stream. On a size cut
+the exec loop sends a `foldFreezeRequest` on `commitResults`; the calculator
+handles it in-order and stops folding (a goroutine-local flag it alone
+sets/reads); the exec loop then runs one more block so state catches up to the
+≤1-block-ahead fold, and commits where state and commitment agree.
 
-**Implemented (commit `4b7f03a497`):** the orphan bug is fixed via a stream-based
-freeze, NOT a shared variable (Mark: the exec and commit routines must coordinate only
-through the stream, not shared state). On the size cut the exec loop sends a
-`foldFreezeRequest` on `commitResults`; the calculator handles it in-order and stops
-folding (a goroutine-local flag it alone sets/reads); the exec loop then runs one more
-block so state catches up to the ≤1-block-ahead fold, and commits where state and
-commitment agree. Unit test `TestFoldFreeze_StopsFoldAhead`; needs the hive/eest + tip
-gate.
-
-**Still to do:** the fuller design below (move the size estimation into the apply loop,
-`errCleanBatchExit` vs `errDeliberateStop`, remove the exec loop's independent size
-estimation) is an architectural cleanup on top of the correctness fix — not required for
-correctness, kept as the north star.
+The fuller design below (move size estimation into the apply loop, an
+`errCleanBatchExit` vs `errDeliberateStop` cause split, drop the exec loop's
+independent size estimation) is an architectural cleanup on top of the
+correctness fix — the north star, not required for correctness.
 
 ## Problem
 
@@ -107,7 +101,7 @@ The open sub-problem this exposes: when `F > E` at cut time, the folds for `E+1 
 are already in `sd.mem` (commitment ahead of state) and must not be flushed to disk
 without matching state.
 
-**Crux resolved (2026-07-03): cap the fold-ahead distance; do NOT partition the flush.**
+**Crux: cap the fold-ahead distance; do NOT partition the flush.**
 `SharedDomains.Flush` → `sd.mem.Flush` → `TemporalMemBatch.flushWriters` flushes *all*
 domain writers with no txNum ceiling (verified: domain_shared.go:873 → temporal_mem_batch.go
 `flushWriters`; it has `if w == nil` nil-guards but no per-txNum filter). So a
@@ -130,7 +124,7 @@ fold from ever running far ahead:
 So the flush stays "all of sd.mem"; correctness comes from the fold-ahead cap making
 `max(E,F)` always cheaply reachable by both loops.
 
-## Interaction with the step-straddle fold-gate (item 2) — future refinement
+## Interaction with the step-straddle fold-gate (item 2)
 
 The item-2 fold-gate (a block crossing a step boundary drops to the incremental path)
 is a correct stopgap, not the complete BAL-driven behaviour. Two refinements fall out
@@ -153,12 +147,12 @@ Both depend on the mid-block step checkpoint being expressible from a fold, whic
 same storage-model concern as the flush-boundary crux above. Until then the eager
 fold-gate stands.
 
-## Unified shutdown model — IMPLEMENTED 2026-07-04
+## Unified shutdown model
 
 Built as one atomic change. The cancel-with-cause is a **signal**, not a blunt
-abort: each goroutine reads the cause and decides how to wind down (Mark: "the
-calculator can decide when to stop — abort immediately, or keep going until it
-gets to the end then stop"). Two constraints shaped the implementation:
+abort: each goroutine reads the cause and decides how to wind down — abort
+immediately, or keep going until it reaches the end then stop. Two constraints
+shaped the implementation:
 
 - **A clean-stop cancel must not abort in-flight commitment.** The trie fold bails
   on `ctx.Err()` (`hex_patricia_hashed.go` `foldMounted`) and the calculator's
@@ -199,7 +193,7 @@ Tests: `TestFoldCap_StopsFoldAhead` (fold capped at M via cause),
 Still needs the hive engine-api + eest-devnet(BAL) + mainnet-tip mid-batch-cut
 restart gate before merge (consensus-critical).
 
-### Original agreed sketch (2026-07-04)
+### Design sketch
 
 The cancel processing grew ad hoc: exec self-decides size/max/exhausted (via
 `execLoopShouldExit` + `triggerBatchCommitment`), while the apply loop only cancels
