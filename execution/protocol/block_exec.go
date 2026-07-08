@@ -172,7 +172,9 @@ func ExecuteBlockEphemerally(
 
 	var bloom types.Bloom
 	if !vmConfig.NoReceipts {
-		bloom = types.CreateBloom(receipts)
+		// ApplyTransaction populated each receipt's Bloom, so merge those
+		// instead of hashing all logs again.
+		bloom = receipts.MergedBloom()
 		if !vmConfig.StatelessExec && bloom != header.Bloom {
 			return nil, fmt.Errorf("bloom computed by execution: %x, in header: %x", bloom, header.Bloom)
 		}

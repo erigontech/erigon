@@ -21,6 +21,7 @@ package main
 
 import (
 	"bufio"
+	"context"
 	"encoding/json"
 	"fmt"
 	"maps"
@@ -30,7 +31,7 @@ import (
 	"slices"
 	"sync"
 
-	"github.com/urfave/cli/v2"
+	"github.com/urfave/cli/v3"
 
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/execution/tests/testutil"
@@ -50,7 +51,7 @@ var blockTestCommand = cli.Command{
 	},
 }
 
-func blockTestCmd(ctx *cli.Context) error {
+func blockTestCmd(_ context.Context, ctx *cli.Command) error {
 	path := ctx.Args().First()
 
 	// Set up logging
@@ -97,7 +98,7 @@ type fileResult struct {
 	err     error
 }
 
-func runBlockTestsParallel(ctx *cli.Context, files []string, workers uint64) ([]testResult, error) {
+func runBlockTestsParallel(ctx *cli.Command, files []string, workers uint64) ([]testResult, error) {
 	if workers == 1 {
 		results := make([]testResult, 0, len(files)*4) // pre-allocate: most files have a few tests
 		for _, fname := range files {
@@ -189,7 +190,7 @@ func collectFiles(path string) []string {
 	return out
 }
 
-func runBlockTest(ctx *cli.Context, fname string) ([]testResult, error) {
+func runBlockTest(ctx *cli.Command, fname string) ([]testResult, error) {
 	src, err := os.ReadFile(fname)
 	if err != nil {
 		return nil, err
