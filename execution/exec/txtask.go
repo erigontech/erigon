@@ -533,7 +533,9 @@ func (txTask *TxTask) Execute(evm *vm.EVM,
 			return ret, err
 		}
 		result.Err = engine.Initialize(chainConfig, chainReader, header, ibs, syscall, txTask.Logger, nil)
-		if result.Err == nil {
+		if result.Err == nil && !ibs.IsVersioned() {
+			// The versionMap path finalizes via FinalizeTxVersioned after the
+			// switch; the serial path commits the init writes here.
 			result.Err = ibs.FinalizeTx(rules, state.NewNoopWriter())
 		}
 	case txTask.IsBlockEnd():
@@ -618,7 +620,7 @@ func (txTask *TxTask) Execute(evm *vm.EVM,
 	// Prepare read set, write set and balanceIncrease set and send for serialisation
 	if result.Err == nil {
 		txTask.BalanceIncreaseSet = ibs.BalanceIncreaseSet()
-		if ibs.IsVersioned() && txTask.TxIndex >= 0 && !txTask.IsBlockEnd() {
+		if ibs.IsVersioned() {
 			result.TxOut = ibs.FinalizeTxVersioned()
 		} else {
 			if err = ibs.MakeWriteSet(rules, stateWriter); err != nil {
