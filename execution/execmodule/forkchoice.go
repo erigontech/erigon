@@ -310,6 +310,49 @@ func (e *ExecModule) updateForkChoice(ctx context.Context, originalBlockHash, sa
 		return sendForkchoiceErrorWithoutWaiting(e.logger, outcomeCh, err, false)
 	}
 
+	// FCU to genesis while the head is ahead: rewind the canonical chain to
+	// block 0. The reconnect/unwind path below is guarded to Number>0 (it derives
+	// the unwind target from Number-1, which underflows at genesis), so without
+	// this a head regression to genesis leaves the head stuck and reports a bad
+	// forkchoice. The enginex consume simulator resets a reused client between
+	// tests via FCU(head=genesis), so this must be honored.
+	if fcuHeader.Number.Sign() == 0 && canonicalHash == blockHash && finishProgressBefore > 0 {
+		minUnwindableBlock, err := rawtemporaldb.CanUnwindToBlockNum(tx)
+		if err != nil {
+			return sendForkchoiceErrorWithoutWaiting(e.logger, outcomeCh, err, false)
+		}
+		if minUnwindableBlock > 0 {
+			e.logger.Warn("reorg target below minimum unwindable block", "unwindTarget", 0, "minUnwindableBlock", minUnwindableBlock)
+			return sendForkchoiceResultWithoutWaiting(outcomeCh, ForkChoiceResult{
+				LatestValidHash: common.Hash{},
+				Status:          ExecutionStatusReorgTooDeep,
+			}, false)
+		}
+		if err := e.pipelineExecutor.UnwindTo(0, stagedsync.ForkChoice, tx); err != nil {
+			return sendForkchoiceErrorWithoutWaiting(e.logger, outcomeCh, err, false)
+		}
+		if err := e.hook.BeforeRun(tx, isSynced); err != nil {
+			return sendForkchoiceErrorWithoutWaiting(e.logger, outcomeCh, err, false)
+		}
+		if err := e.pipelineExecutor.RunUnwind(currentContext, tx); err != nil {
+			return sendForkchoiceErrorWithoutWaiting(e.logger, outcomeCh, fmt.Errorf("updateForkChoice: %w", err), false)
+		}
+		genesisMaxTxNum, err := rawdbv3.TxNums.Max(ctx, tx, 0)
+		if err != nil {
+			return sendForkchoiceErrorWithoutWaiting(e.logger, outcomeCh, err, false)
+		}
+		if err := rawdbv3.TxNums.Truncate(tx, 0); err != nil {
+			return sendForkchoiceErrorWithoutWaiting(e.logger, outcomeCh, err, false)
+		}
+		if err := rawdbv3.TxNums.Append(tx, 0, genesisMaxTxNum); err != nil {
+			return sendForkchoiceErrorWithoutWaiting(e.logger, outcomeCh, err, false)
+		}
+		if err := rawdb.TruncateCanonicalHash(tx, 1, false); err != nil {
+			return sendForkchoiceErrorWithoutWaiting(e.logger, outcomeCh, err, false)
+		}
+		rawdb.WriteHeadBlockHash(tx, blockHash)
+	}
+
 	if fcuHeader.Number.Sign() > 0 {
 		var finalisedBlockNum uint64
 		lastKnownFinalisedHash := rawdb.ReadForkchoiceFinalized(tx)

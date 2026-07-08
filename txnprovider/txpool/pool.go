@@ -1583,7 +1583,10 @@ func (p *TxPool) addTxnsOnNewBlock(blockNum uint64, cacheView kvcache.CacheView,
 		}
 		mt := newMetaTxn(txn, newTxns.IsLocal[i], blockNum)
 		if reason := p.addLocked(mt, &announcements); reason != txpoolcfg.NotSet {
-			p.discardLocked(mt, reason)
+			// A rejected txn was never inserted into byHash/p.all/sub-pools, so
+			// there is nothing to discard. Discarding it here deletes the resident
+			// txn that shares its (sender, nonce) key from p.all, orphaning that one
+			// in its sub-pool.
 			continue
 		}
 		sendersWithChangedState[mt.TxnSlot.SenderID] = struct{}{}
