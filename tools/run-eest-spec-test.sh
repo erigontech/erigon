@@ -81,7 +81,7 @@ base=test-fixtures-cache/$fixtures/fixtures
 # regex from the single-source manifest. This script, the test-eest-spec.yml
 # load-matrix job, and the coverage guard all read tools/eest-spec-shards.yml,
 # so adding a shard / tweaking a budget / changing a fork filter is a one-file
-# edit. yq converts YAML→JSON so the jq query stays identical.
+# edit. yq converts YAML→JSON so it can be queried with jq.
 manifest=tools/eest-spec-shards.yml
 shard_row=$(yq -o=json '.' "$manifest" | jq -r --arg s "$shard" '.[] | select(.shard == $s) | "\(.workers)\t\(."max-allowed-failures")\t\(."exec3-parallel" // false)\t\(.run // "")"')
 if [[ -z "$shard_row" ]]; then

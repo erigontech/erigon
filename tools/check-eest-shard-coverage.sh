@@ -43,7 +43,7 @@ race_regexes() {
 	yq -o=json '.' "$shards" \
 		| jq -r '.[]
 			| select(.shard | test("^blocktests-stable-race-"))
-			| select(.run)
+			| select((.run // "") != "")
 			| "\(.shard | sub("^blocktests-stable-race-"; "") | sub("-(sequential|parallel)$"; ""))=\(.run)"' \
 		| sort -u
 }
