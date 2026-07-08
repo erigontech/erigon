@@ -1376,6 +1376,7 @@ func NewP2PConfig(
 		MaxPendingPeers:   maxPendPeers,
 		NAT:               nat.Any(),
 		NoDiscovery:       nodiscover,
+		DiscoveryV5:       !nodiscover,
 		PrivateKey:        serverKey,
 		Name:              nodeName,
 		NodeDatabase:      enodeDBPath,

@@ -963,7 +963,7 @@ var saisBufPool = sync.Pool{New: func() any { return new([]int32) }}
 // into the collector, using lock to mutual exclusion. At the end (when the input channel is closed),
 // it notifies the waitgroup before exiting, so that the caller known when all work is done
 // No error channels for now
-func extractPatternsInSuperstrings(ctx context.Context, superstringCh chan []byte, dictCollector *etl.Collector, cfg Cfg, completion *sync.WaitGroup, logger log.Logger) {
+func extractPatternsInSuperstrings(ctx context.Context, superstringCh chan []uint16, dictCollector *etl.Collector, cfg Cfg, completion *sync.WaitGroup, logger log.Logger) {
 	minPatternScore, minPatternLen, maxPatternLen := cfg.MinPatternScore, cfg.MinPatternLen, cfg.MaxPatternLen
 	defer completion.Done()
 	dictVal := make([]byte, 8)
@@ -973,7 +973,7 @@ func extractPatternsInSuperstrings(ctx context.Context, superstringCh chan []byt
 	var lcp, sa, inv []int32
 	for {
 		var (
-			superstring []byte
+			superstring []uint16
 			ok          bool
 		)
 		select {
@@ -985,28 +985,19 @@ func extractPatternsInSuperstrings(ctx context.Context, superstringCh chan []byt
 			}
 		}
 
-		if cap(sa) < len(superstring) {
-			sa = make([]int32, len(superstring))
+		// superstring holds one uint16 symbol per cell (separator=0, byte b=b+1, alphabet 257),
+		// so the suffix array is over n=len(superstring) positions directly.
+		n := len(superstring)
+		if cap(sa) < n {
+			sa = make([]int32, n)
 		} else {
-			sa = sa[:len(superstring)]
+			sa = sa[:n]
 		}
-		//log.Info("Superstring", "len", len(superstring))
-		//start := time.Now()
-		if err := sais.Sais(superstring, sa, saisBuf); err != nil {
+		if err := sais.Sais16(superstring, 257, sa, saisBuf); err != nil {
 			panic(err)
 		}
-		//log.Info("Suffix array built", "in", time.Since(start))
-		// filter out suffixes that start with odd positions
-		n := len(sa) / 2
-		filtered := sa[:n]
-		//filtered := make([]int32, n)
 		var j int
-		for i := 0; i < len(sa); i++ {
-			if sa[i]&1 == 0 {
-				filtered[j] = sa[i] >> 1
-				j++
-			}
-		}
+		filtered := sa
 		// Now create an inverted array
 		if cap(inv) < n {
 			inv = make([]int32, n)
@@ -1042,7 +1033,7 @@ func extractPatternsInSuperstrings(ctx context.Context, superstringCh chan []byt
 
 			// Directly start matching from k'th index as
 			// at-least k-1 characters will match
-			for i+k < n && j+k < n && superstring[(i+k)*2] != 0 && superstring[(j+k)*2] != 0 && superstring[(i+k)*2+1] == superstring[(j+k)*2+1] {
+			for i+k < n && j+k < n && superstring[i+k] != 0 && superstring[i+k] == superstring[j+k] {
 				k++
 			}
 			lcp[inv[i]] = int32(k) // lcp for the present suffix.
@@ -1062,9 +1053,8 @@ func extractPatternsInSuperstrings(ctx context.Context, superstringCh chan []byt
 				p2 := int(filtered[i+1])
 				for p1+prefixLen < n &&
 					p2+prefixLen < n &&
-					superstring[(p1+prefixLen)*2] != 0 &&
-					superstring[(p2+prefixLen)*2] != 0 &&
-					superstring[(p1+prefixLen)*2+1] == superstring[(p2+prefixLen)*2+1] {
+					superstring[p1+prefixLen] != 0 &&
+					superstring[p1+prefixLen] == superstring[p2+prefixLen] {
 					prefixLen++
 				}
 				if prefixLen != int(lcp[i]) {
@@ -1131,7 +1121,7 @@ func extractPatternsInSuperstrings(ctx context.Context, superstringCh chan []byt
 
 				dictKey = dictKey[:l]
 				for s := 0; s < l; s++ {
-					dictKey[s] = superstring[(int(filtered[i])+s)*2+1]
+					dictKey[s] = byte(superstring[int(filtered[i])+s] - 1)
 				}
 				binary.BigEndian.PutUint64(dictVal, score)
 				if err := dictCollector.Collect(dictKey, dictVal); err != nil {
