@@ -960,16 +960,17 @@ func (sd *SharedDomains) Commit(ctx context.Context, tx kv.RwTx, validate ...fun
 			return err
 		}
 	}
+	if err := runValidate(); err != nil {
+		return err
+	}
 	// Enforce the store's byte cap on the path that grows it: flows that never
 	// reach the forkchoice prune loop (its other Evict site) would otherwise
-	// grow the table without bound.
+	// grow the table without bound. Runs after validation so a validate failure
+	// doesn't roll back eviction's in-memory size accounting with the tx.
 	if len(codeStoreWrites) > 0 {
 		if err := sd.codeStore.Evict(tx); err != nil {
 			return err
 		}
-	}
-	if err := runValidate(); err != nil {
-		return err
 	}
 	// Adaptive pin promotions/demotions run on the in-flight (pre-Commit) tx so
 	// the preload sees the just-flushed bytes.
