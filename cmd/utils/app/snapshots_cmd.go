@@ -263,7 +263,7 @@ var snapshotCommand = cli.Command{
 				}
 				defer l.Unlock()
 
-				err = dir2.DeleteFiles(dirs.SnapIdx, dirs.SnapHistory, dirs.SnapDomain, dirs.SnapAccessors, dirs.SnapForkable)
+				err = dir2.DeleteFiles(dirs.SnapIdx, dirs.SnapHistory, dirs.SnapDomain, dirs.SnapAccessors)
 				if err != nil {
 					return err
 				}
@@ -796,7 +796,7 @@ func DeleteStateSnapshots(args DeleteStateSnapshotsArgs) error {
 		filePath string
 	}, 0)
 
-	scanDirs := []string{dirs.SnapIdx, dirs.SnapHistory, dirs.SnapDomain, dirs.SnapAccessors, dirs.SnapForkable}
+	scanDirs := []string{dirs.SnapIdx, dirs.SnapHistory, dirs.SnapDomain, dirs.SnapAccessors}
 	if args.OnlyDomain {
 		scanDirs = []string{dirs.SnapDomain}
 	} else if args.OnlyHistory {
@@ -880,10 +880,7 @@ func DeleteStateSnapshots(args DeleteStateSnapshotsArgs) error {
 			if err != nil {
 				_, err = kv.String2Domain(domainName)
 				if err != nil {
-					_, err = kv.String2Forkable(domainName)
-					if err != nil {
-						return err
-					}
+					return err
 				}
 			}
 			for _, res := range files {
@@ -1066,7 +1063,7 @@ func DeleteStateSnapshots(args DeleteStateSnapshotsArgs) error {
 	// Unconditionally remove .tmp files from all snapshot directories.
 	// These are artifacts from incomplete/cancelled operations and should always be cleaned up.
 	var removedTmp uint64
-	for _, dirPath := range []string{dirs.Snap, dirs.SnapIdx, dirs.SnapHistory, dirs.SnapDomain, dirs.SnapAccessors, dirs.SnapCaplin, dirs.SnapForkable} {
+	for _, dirPath := range []string{dirs.Snap, dirs.SnapIdx, dirs.SnapHistory, dirs.SnapDomain, dirs.SnapAccessors, dirs.SnapCaplin} {
 		tmpFiles, err := snaptype.TmpFiles(dirPath)
 		if err != nil {
 			return err
@@ -1368,7 +1365,7 @@ func doRollbackSnapshotsToBlock(ctx context.Context, blockNum uint64, prompt boo
 	}
 	toStep := toTxNum / agg.StepSize()
 	var toDelete []string
-	for _, dirPath := range []string{dirs.Snap, dirs.SnapIdx, dirs.SnapHistory, dirs.SnapDomain, dirs.SnapAccessors, dirs.SnapForkable} {
+	for _, dirPath := range []string{dirs.Snap, dirs.SnapIdx, dirs.SnapHistory, dirs.SnapDomain, dirs.SnapAccessors} {
 		filePaths, err := dir2.ListFiles(dirPath)
 		if err != nil {
 			if errors.Is(err, fs.ErrNotExist) {
@@ -1646,6 +1643,8 @@ func doIntegrity(ctx context.Context, cliCtx *cli.Command) error {
 			return integrity.CheckStateProgress(ctx, db, blockReader, failFast)
 		case integrity.Publishable:
 			return doPublishable(dirs, chainDB)
+		case integrity.CaplinStateRoots:
+			return integrity.CheckCaplinStateRoots(ctx, dirs, failFast, logger)
 		case integrity.BorEvents:
 			if !CheckBorChain(chainConfig.ChainName) {
 				logger.Info("BorEvents skipped because not bor chain")
@@ -3035,7 +3034,6 @@ type OpenSnapsResult struct {
 	CaplinStateSnaps *snapshotsync.CaplinStateSnapshots
 	BlockRetire      *freezeblocks.BlockRetire
 	Aggregator       *state.Aggregator
-	ForkAgg          *state.ForkableAgg
 }
 
 func openSnaps(ctx context.Context, cfg ethconfig.BlocksFreezing, dirs datadir.Dirs, chainDB kv.RwDB, logger log.Logger) (
@@ -3672,7 +3670,6 @@ const (
 	duCatCaplin     = "caplin"
 	duCatCommitHist = "commitment hist"
 	duCatRcache     = "rcache"
-	duCatForkable   = "forkable"
 	duCatOther      = "other"
 )
 
@@ -3721,8 +3718,6 @@ func duClassifyFile(dir, name string) string {
 		return duCatAccessors
 	case "caplin":
 		return duCatCaplin
-	case "forkable":
-		return duCatForkable
 	}
 
 	// Files directly under snapshots/ — only known segment extensions are block segments.
@@ -3747,7 +3742,6 @@ func duWalkSnapshots(dirs datadir.Dirs) ([]duFileInfo, error) {
 		{dirs.SnapIdx, true},
 		{dirs.SnapAccessors, true},
 		{dirs.SnapCaplin, false},
-		{dirs.SnapForkable, false},
 		{dirs.Snap, false}, // top-level snapshots/ for block segments
 	}
 
