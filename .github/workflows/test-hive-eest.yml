@@ -131,9 +131,8 @@ jobs:
       - name: Checkout Hive
         uses: actions/checkout@v7
         with:
-          # TODO set to last ethereum/hive:master commit ref once upstream PR for MAX_REORG_DEPTH bump merged in ethereum/hive - https://github.com/ethereum/hive/pull/1568/changes
-          repository: taratorio/hive
-          ref: taratorio/enginex-max-reorg-depth
+          repository: ethereum/hive
+          ref: ${{ steps.hive-version.outputs.ref }}
           path: hive
 
       - name: Conditional Docker Login
@@ -255,9 +254,6 @@ jobs:
           if [ -n "$branch" ]; then
             branch_arg="--sim.buildarg branch=$branch"
           fi
-          # Upstream ethereum/hive's eels sims fetch fixtures by URL at build time (they
-          # lack the fork's local /fixtures staging), so pass the pinned release URL. The
-          # earlier "Stage fixtures" step is now a harmless no-op.
           fixtures_url=$(jq -r --arg t '${{ matrix.fixtures-tarball }}' '.[$t].url' erigon-full/test-fixtures.json)
           cd hive
           docker ps
