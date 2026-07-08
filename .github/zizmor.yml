@@ -23,7 +23,6 @@ rules:
       - qa-rpc-performance-tests.yml
       - qa-sync-from-scratch-full-node.yml
       - qa-sync-from-scratch.yml
-      - qa-tip-tracking-with-load.yml
       - qa-txpool-performance-test.yml
       - release.yml
       - test-all-erigon-race.yml
