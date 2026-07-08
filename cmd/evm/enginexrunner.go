@@ -358,7 +358,9 @@ func runEngineXGroup(
 // grown past maxBytes. Engine-x tests never advance the head, so blocks imported
 // by earlier tests in the group are throwaway; dropping them bounds datadir
 // (tmpfs on CI) and heap growth on large-state groups. maxBytes <= 0 disables
-// the check. Returns whether an eviction happened so the caller can rebuild.
+// the check. Returns whether an eviction happened so the caller can rebuild —
+// true even when Evict reports a cleanup error, since the cache entry is
+// removed regardless.
 func resetTesterIfOversized(runner *engineapitester.EngineXTestRunner, key engineXGroupKey, maxBytes int64) (bool, error) {
 	if maxBytes <= 0 {
 		return false, nil
