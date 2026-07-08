@@ -1630,13 +1630,8 @@ func (result *execResult) finalizeSystemTx(
 	}
 	ibs.SetTrace(txTask.Trace)
 
-	if err := ibs.FinalizeTx(rules, stateWriter); err != nil {
-		return nil, state.ReadSet{}, nil, err
-	}
-	// Use checkDirty=false because FinalizeTx clears the journal (dirties map).
-	// With checkDirty=true, all writes would be deleted from the versionMap
-	// since no address appears dirty after the journal reset.
-	return nil, ibs.VersionedReads(), ibs.VersionedWrites(), nil
+	writes := ibs.FinalizeTxVersioned()
+	return nil, ibs.VersionedReads(), writes, nil
 }
 
 func (result *execResult) calcFees(

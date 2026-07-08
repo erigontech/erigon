@@ -812,6 +812,92 @@ func (s *WriteSet) Filter(keep func(WriteHeader) bool) *WriteSet {
 	return out
 }
 
+// Finalize produces the committable write-set for a tx from the raw recorded
+// writes: it applies the EIP-6780 net-zero storage wipe, then returns the
+// filtered Snapshot. It operates on the write-set alone — no IntraBlockState —
+// so the parallel finalize can be driven straight from the recorded IO.
+func (s *WriteSet) Finalize() *WriteSet {
+	s.zeroSameTxCreateDestructStorage()
+	return s.Snapshot()
+}
+
+// zeroSameTxCreateDestructStorage implements EIP-6780 + EIP-7928: when a
+// contract is created and self-destructed in the same tx, its storage is wiped
+// at end-of-tx, so the BAL must record the dirty slots as reads (net-zero), not
+// changes. Zero the storage write values so AsBlockAccessList folds them away.
+// The create+destruct pair is detectable from the write-set itself
+// (createContract survives SELFDESTRUCT), so no stateObject is needed.
+func (s *WriteSet) zeroSameTxCreateDestructStorage() {
+	for addr, cc := range s.createContract {
+		if !cc.Val {
+			continue
+		}
+		if sd, ok := s.selfDestruct[addr]; !ok || !sd.Val {
+			continue
+		}
+		if inner, ok := s.storage[addr]; ok {
+			for _, vw := range inner {
+				vw.Val = uint256.Int{}
+			}
+		}
+	}
+}
+
+// Snapshot returns a frozen typed copy of the recorded writes. The journal keeps
+// the write-set in step with reverts, so every address present is a surviving
+// write — no dirty reconciliation is needed. Under self-destruct only
+// SelfDestruct/Balance/Incarnation/Storage are kept (the BAL needs residual
+// balance, resurrection needs the prior incarnation, and the calculator needs
+// per-slot deletes); Nonce/Code/CodeHash/CodeSize/Address/CreateContract drop.
+func (s *WriteSet) Snapshot() *WriteSet {
+	out := &WriteSet{}
+
+	addrs := make(map[accounts.Address]struct{})
+	for h := range s.AllHeaders() {
+		addrs[h.Address] = struct{}{}
+	}
+
+	for addr := range addrs {
+		sd := false
+		if vw, ok := s.selfDestruct[addr]; ok {
+			out.SetSelfDestruct(addr, cloneVW(vw))
+			sd = vw.Val
+		}
+		if vw, ok := s.balance[addr]; ok {
+			out.SetBalance(addr, cloneVW(vw))
+		}
+		if vw, ok := s.incarnation[addr]; ok {
+			out.SetIncarnation(addr, cloneVW(vw))
+		}
+		if inner, ok := s.storage[addr]; ok {
+			for k, vw := range inner {
+				out.SetStorage(addr, k, cloneVW(vw))
+			}
+		}
+		if !sd {
+			if vw, ok := s.address[addr]; ok {
+				out.SetAddress(addr, cloneVW(vw))
+			}
+			if vw, ok := s.nonce[addr]; ok {
+				out.SetNonce(addr, cloneVW(vw))
+			}
+			if vw, ok := s.code[addr]; ok {
+				out.SetCode(addr, cloneVW(vw))
+			}
+			if vw, ok := s.codeHash[addr]; ok {
+				out.SetCodeHash(addr, cloneVW(vw))
+			}
+			if vw, ok := s.codeSize[addr]; ok {
+				out.SetCodeSize(addr, cloneVW(vw))
+			}
+			if vw, ok := s.createContract[addr]; ok {
+				out.SetCreateContract(addr, cloneVW(vw))
+			}
+		}
+	}
+	return out
+}
+
 func (s *WriteSet) deleteAddr(addr accounts.Address) {
 	delete(s.address, addr)
 	delete(s.balance, addr)

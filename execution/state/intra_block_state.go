@@ -2289,26 +2289,12 @@ func (sdb *IntraBlockState) MakeWriteSet(chainRules *chain.Rules, stateWriter St
 	return nil
 }
 
-// FinalizeTxVersioned finalizes a transaction on the parallel (versionMap) path
-// without materializing stateObjects for dirty tracking. It applies the EIP-6780
-// same-tx create+selfdestruct storage wipe, snapshots the write-set, and clears
-// the journal. No dirty reconciliation is needed: the journal already keeps
-// versionedWrites in step with reverts (field-level entries prune themselves;
-// the record-level create/reset entries maintain their account-record writes),
-// so the write-set already contains exactly the surviving writes.
+// FinalizeTxVersioned finalizes a transaction on the parallel (versionMap) path.
+// The write-set is produced functionally from the recorded IO (WriteSet.Finalize
+// applies the EIP-6780 wipe and snapshots); IntraBlockState only resets its
+// journal for the next tx.
 func (sdb *IntraBlockState) FinalizeTxVersioned() *WriteSet {
-	for addr, so := range sdb.stateObjects {
-		// EIP-6780 + EIP-7928: a SELFDESTRUCT against a same-tx created contract
-		// clears storage at end-of-tx, so the BAL must record the dirty slots as
-		// reads, not changes. Zero the storage writes so AsBlockAccessList folds
-		// them away via net-zero.
-		if so.selfdestructed && so.newlyCreated {
-			for key := range so.dirtyStorage {
-				sdb.recordWriteStorage(addr, key, uint256.Int{})
-			}
-		}
-	}
-	writes := sdb.VersionedWrites()
+	writes := sdb.versionedWrites.Finalize()
 	sdb.clearJournalAndRefund()
 	return writes
 }
@@ -2893,61 +2879,11 @@ func (sdb *IntraBlockState) ResetVersionedReads() {
 	sdb.versionedReads = ReadSet{}
 }
 
-// VersionedWrites returns a frozen typed snapshot of this tx's writes. The
-// journal keeps versionedWrites in step with reverts, so no dirty reconciliation
-// is needed — every address present is a surviving write. Under self-destruct
-// only SelfDestruct/Balance/Incarnation/Storage are kept (the BAL needs residual
-// balance, resurrection needs the prior incarnation, and the calculator needs
-// per-slot deletes); Nonce/Code/CodeHash/CodeSize/Address/CreateContract are
-// dropped.
+// VersionedWrites returns a frozen typed snapshot of this tx's recorded writes.
+// The snapshot logic lives on the write-set itself (WriteSet.Snapshot); this is
+// the IntraBlockState accessor for it.
 func (sdb *IntraBlockState) VersionedWrites() *WriteSet {
-	src := &sdb.versionedWrites
-	out := &WriteSet{}
-
-	addrs := make(map[accounts.Address]struct{})
-	for h := range src.AllHeaders() {
-		addrs[h.Address] = struct{}{}
-	}
-
-	for addr := range addrs {
-		sd := false
-		if vw, ok := src.selfDestruct[addr]; ok {
-			out.SetSelfDestruct(addr, cloneVW(vw))
-			sd = vw.Val
-		}
-		if vw, ok := src.balance[addr]; ok {
-			out.SetBalance(addr, cloneVW(vw))
-		}
-		if vw, ok := src.incarnation[addr]; ok {
-			out.SetIncarnation(addr, cloneVW(vw))
-		}
-		if inner, ok := src.storage[addr]; ok {
-			for k, vw := range inner {
-				out.SetStorage(addr, k, cloneVW(vw))
-			}
-		}
-		if !sd {
-			if vw, ok := src.address[addr]; ok {
-				out.SetAddress(addr, cloneVW(vw))
-			}
-			if vw, ok := src.nonce[addr]; ok {
-				out.SetNonce(addr, cloneVW(vw))
-			}
-			if vw, ok := src.code[addr]; ok {
-				out.SetCode(addr, cloneVW(vw))
-			}
-			if vw, ok := src.codeHash[addr]; ok {
-				out.SetCodeHash(addr, cloneVW(vw))
-			}
-			if vw, ok := src.codeSize[addr]; ok {
-				out.SetCodeSize(addr, cloneVW(vw))
-			}
-			if vw, ok := src.createContract[addr]; ok {
-				out.SetCreateContract(addr, cloneVW(vw))
-			}
-		}
-	}
-	return out
+	return sdb.versionedWrites.Snapshot()
 }
 
 // Apply entries in a given write set to StateDB. Note that this function does not change MVHashMap nor write set
