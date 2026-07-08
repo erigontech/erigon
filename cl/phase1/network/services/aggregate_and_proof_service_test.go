@@ -193,10 +193,8 @@ func TestAggregateAndProofAllowsNextEpochWhenForkchoiceHasSeenIt(t *testing.T) {
 	fcu.HighestSeenVal = nextEpochSlot
 
 	err := aggService.ProcessMessage(context.Background(), nil, agg)
-	if err != nil {
-		require.NotContains(t, err.Error(), "too far from aggregate epoch")
-		require.NotContains(t, err.Error(), "epoch is not in previous or current epoch")
-	}
+	require.ErrorIs(t, err, ErrIgnore)
+	require.Contains(t, err.Error(), "block not seen")
 }
 
 func TestAggregateAndProofRejectsNextEpochBeforeForkchoiceHasSeenIt(t *testing.T) {
@@ -216,7 +214,7 @@ func TestAggregateAndProofRejectsNextEpochBeforeForkchoiceHasSeenIt(t *testing.T
 
 	err := aggService.ProcessMessage(context.Background(), nil, agg)
 	require.Error(t, err)
-	require.Contains(t, err.Error(), "epoch is not in previous or current epoch")
+	require.Contains(t, err.Error(), "epoch outside validation range")
 }
 
 func TestAggregateAndProofRejectsBeyondNextEpochDespiteForkchoiceHavingSeenIt(t *testing.T) {
@@ -236,7 +234,7 @@ func TestAggregateAndProofRejectsBeyondNextEpochDespiteForkchoiceHavingSeenIt(t 
 
 	err := aggService.ProcessMessage(context.Background(), nil, agg)
 	require.Error(t, err)
-	require.Contains(t, err.Error(), "epoch is not in previous or current epoch")
+	require.Contains(t, err.Error(), "epoch outside validation range")
 }
 
 func TestAggregateAndProofAncestorMissing(t *testing.T) {
