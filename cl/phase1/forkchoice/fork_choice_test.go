@@ -99,7 +99,7 @@ func TestForkChoiceBasic(t *testing.T) {
 		anchorState,
 		nil, // execution engine
 		pool,
-		fork_graph.NewForkGraphDisk(anchorState, nil, afero.NewMemMapFs(), beacon_router_configuration.RouterConfiguration{}, emitters),
+		fork_graph.NewForkGraphDisk(anchorState, nil, afero.NewMemMapFs(), beacon_router_configuration.RouterConfiguration{}),
 		emitters,
 		sd,
 		blobStorage,
@@ -189,7 +189,7 @@ func TestForkChoiceChainBellatrix(t *testing.T) {
 		pool,
 		fork_graph.NewForkGraphDisk(anchorState, nil, afero.NewMemMapFs(), beacon_router_configuration.RouterConfiguration{
 			Beacon: true,
-		}, emitters),
+		}),
 		emitters,
 		sd,
 		blobStorage,

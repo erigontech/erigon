@@ -1724,7 +1724,7 @@ func (c *MdbxCursorPseudoDupSort) LastDup() ([]byte, error) {
 		if mdbx.IsNotFound(err) {
 			return nil, nil
 		}
-		return nil, fmt.Errorf("in FirstDup: tbl=%s, %w", c.bucketName, err)
+		return nil, fmt.Errorf("in LastDup: tbl=%s, %w", c.bucketName, err)
 	}
 	return v, nil
 }
