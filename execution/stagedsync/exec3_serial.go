@@ -401,12 +401,12 @@ func (se *serialExecutor) executeBlock(ctx context.Context, tasks []exec.Task, i
 							"block", txTask.BlockNumber(), "startTxIndex", startTxIndex, "err", priorErr)
 					} else {
 						finalizeReceipts = append(priorReceipts, blockReceipts...)
-						// The post-exec validator, which fills receipt blooms for
-						// full blocks, runs only when startTxIndex == 0 — complete
-						// the published set here.
-						receipts.DeriveFields(finalizeReceipts, txTask.BlockHash())
 						priorComplete = true
 					}
+					// The post-exec validator, which fills receipt blooms for full
+					// blocks, skips partial ones — do it here, even when prior
+					// receipts couldn't be reconstructed (suffix still needs blooms).
+					receipts.DeriveFields(finalizeReceipts, txTask.BlockHash())
 				}
 
 				_, err = se.cfg.engine.Finalize(

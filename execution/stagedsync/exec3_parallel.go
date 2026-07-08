@@ -2772,10 +2772,9 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 				}
 			}
 			// The post-exec validator, which fills receipt blooms for full
-			// blocks, skips partial ones — complete the published set here.
-			if receiptsComplete {
-				receipts.DeriveFields(blockReceipts, be.blockHash)
-			}
+			// blocks, skips partial ones — do it here, even when prior receipts
+			// couldn't be reconstructed (the suffix receipts still need blooms).
+			receipts.DeriveFields(blockReceipts, be.blockHash)
 		}
 
 		// Block finalize: run engine.Finalize + MakeWriteSet on the producer
