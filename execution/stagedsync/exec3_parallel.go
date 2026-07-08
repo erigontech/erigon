@@ -1552,7 +1552,7 @@ type execResult struct {
 	cumulativeBlobGasUsed uint64
 }
 
-func (result *execResult) finalize(cumulativeGasUsed uint64, firstLogIndex uint32, engine rules.Engine, vm *state.VersionMap, stateReader state.StateReader, stateWriter state.StateWriter) (*types.Receipt, state.ReadSet, *state.WriteSet, error) {
+func (result *execResult) finalize(cumulativeGasUsed uint64, firstLogIndex uint32, engine rules.Engine, vm *state.VersionMap, stateReader state.StateReader) (*types.Receipt, state.ReadSet, *state.WriteSet, error) {
 	task, ok := result.Task.(*taskVersion)
 
 	if !ok {
@@ -1578,8 +1578,6 @@ func (result *execResult) finalize(cumulativeGasUsed uint64, firstLogIndex uint3
 		return nil, state.ReadSet{}, nil, nil
 	}
 
-	rules := txTask.EvmBlockContext.Rules(txTask.Config)
-
 	if txIndex < 0 || task.IsBlockEnd() {
 		// System TXs use full IBS reconstruction — they don't go through
 		// the worker execution path so fee splitting doesn't apply.
@@ -1591,7 +1589,7 @@ func (result *execResult) finalize(cumulativeGasUsed uint64, firstLogIndex uint3
 		result.TxIn.Delete(result.Coinbase)
 		result.TxIn.Delete(result.ExecutionResult.BurntContractAddress)
 		_, _, _ = coinbaseDelta, coinbaseDeltaIncrease, hasCoinbaseDelta
-		return result.finalizeSystemTx(task, txTask, rules, vm, stateReader, stateWriter)
+		return result.finalizeSystemTx(task, txTask, vm, stateReader)
 	}
 
 	return result.finalizeTx(task, txTask, cumulativeGasUsed, firstLogIndex, engine, vm, stateReader)
@@ -1603,10 +1601,8 @@ func (result *execResult) finalize(cumulativeGasUsed uint64, firstLogIndex uint3
 func (result *execResult) finalizeSystemTx(
 	task *taskVersion,
 	txTask *exec.TxTask,
-	rules *chain.Rules,
 	vm *state.VersionMap,
 	stateReader state.StateReader,
-	stateWriter state.StateWriter,
 ) (*types.Receipt, state.ReadSet, *state.WriteSet, error) {
 	blockNum := task.Version().BlockNum
 	txIndex := task.Version().TxIndex
@@ -2539,9 +2535,7 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 					}
 				}
 
-				collector := state.NewVersionedWriteCollector(pe.rs)
-
-				_, addReads, finalizeWrites, err := txResult.finalize(cumulativeGasUsed, firstLogIndex, pe.cfg.engine, be.versionMap, stateReader, collector)
+				_, addReads, finalizeWrites, err := txResult.finalize(cumulativeGasUsed, firstLogIndex, pe.cfg.engine, be.versionMap, stateReader)
 				if err != nil {
 					return nil, err
 				}
