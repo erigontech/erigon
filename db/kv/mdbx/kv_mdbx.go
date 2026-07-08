@@ -950,9 +950,6 @@ func (tx *MdbxTx) DistributeCursors(table string, from []byte, n int) ([][]byte,
 	for _, cw := range wrappers {
 		k, _, err := cw.Current()
 		if err != nil {
-			if !allSet { // unset surplus cursor ends the set prefix
-				break
-			}
 			return nil, err
 		}
 		if k == nil {
