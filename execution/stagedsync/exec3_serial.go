@@ -386,27 +386,21 @@ func (se *serialExecutor) executeBlock(ctx context.Context, tasks []exec.Task, i
 
 				chainReader := consensuschain.NewReader(se.cfg.chainConfig, se.applyTx, se.cfg.blockReader, se.logger)
 
-				// For partial blocks (resuming from snapshot boundary), reconstruct
-				// prior receipts so Finalize receives the full receipt set for requests
-				// hash computation (deposit extraction from logs). See #20452.
 				finalizeReceipts := blockReceipts
+				priorComplete := startTxIndex == 0
 				if startTxIndex > 0 && len(txTask.Txs) > 0 {
 					firstTask := tasks[0].(*exec.TxTask)
 					blockStartTxNum := firstTask.TxNum - uint64(firstTask.TxIndex)
-					reader := state.NewHistoryReaderV3(se.applyTx, blockStartTxNum)
-					priorIbs := state.New(reader)
-					defer priorIbs.Release(true)
-					priorGp := protocol.NewGasPool(txTask.Header.GasLimit, se.cfg.chainConfig.GetMaxBlobGasPerBlock(txTask.Header.Time))
-					getHeader := func(hash common.Hash, number uint64) (*types.Header, error) {
-						return se.cfg.blockReader.Header(ctx, se.applyTx, hash, number)
-					}
-					priorReceipts, priorErr := receipts.DerivePriorReceipts(ctx, se.cfg.chainConfig, se.cfg.engine, txTask.Header, txTask.Txs, startTxIndex, blockStartTxNum, se.applyTx, priorIbs, priorGp, getHeader)
+					priorReceipts, priorErr := se.reconstructPriorReceipts(ctx, se.applyTx, txTask.Header, txTask.Txs, startTxIndex, blockStartTxNum)
 					if priorErr != nil {
-						se.logger.Warn(fmt.Sprintf("[%s] failed to reconstruct prior receipts for partial block", se.logPrefix),
-							"block", txTask.BlockNumber(), "startTxIndex", startTxIndex, "err", priorErr)
-					} else {
-						finalizeReceipts = append(priorReceipts, blockReceipts...)
+						return priorErr
 					}
+					finalizeReceipts = append(priorReceipts, blockReceipts...)
+					// The post-exec validator, which fills receipt blooms for
+					// full blocks, runs only when startTxIndex == 0 — complete
+					// the published set here.
+					receipts.DeriveFields(finalizeReceipts, txTask.BlockHash())
+					priorComplete = true
 				}
 
 				_, err = se.cfg.engine.Finalize(
@@ -417,8 +411,8 @@ func (se *serialExecutor) executeBlock(ctx context.Context, tasks []exec.Task, i
 					return fmt.Errorf("%w, txnIdx=%d, %w", rules.ErrInvalidBlock, txTask.TxIndex, err)
 				}
 
-				if startTxIndex == 0 && !isInitialCycle {
-					se.cfg.notifications.RecentReceipts.Add(blockReceipts, txTask.Txs, txTask.Header)
+				if priorComplete && !isInitialCycle {
+					se.cfg.notifications.RecentReceipts.Add(finalizeReceipts, txTask.Txs, txTask.Header)
 				}
 				checkBloom := !se.cfg.vmConfig.StatelessExec && !se.cfg.vmConfig.NoReceipts
 				checkReceipts := checkBloom && se.cfg.chainConfig.IsByzantium(txTask.BlockNumber())
@@ -450,10 +444,13 @@ func (se *serialExecutor) executeBlock(ctx context.Context, tasks []exec.Task, i
 					}
 				} else if txTask.TxIndex > 0 {
 					// reconstruct receipt from previous receipt values
-					cumGasUsed, _, logIndexAfterTx, err := rawtemporaldb.ReceiptAsOf(se.applyTx, txTask.TxNum)
+					cumGasUsed, cumBlobGasUsed, logIndexAfterTx, err := rawtemporaldb.ReceiptAsOf(se.applyTx, txTask.TxNum)
 					if err != nil {
 						return err
 					}
+					// This tx's own blob gas was accumulated above; fold in the
+					// pre-resume cumulative so ApplyTxIndexes persists correct values.
+					se.blobGasUsed += cumBlobGasUsed
 					receipt, err = result.CreateReceipt(txTask.TxIndex, cumGasUsed+result.ExecutionResult.ReceiptGasUsed, logIndexAfterTx)
 					if err != nil {
 						return err
