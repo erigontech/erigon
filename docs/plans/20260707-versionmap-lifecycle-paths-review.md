@@ -208,6 +208,48 @@ the remaining consumer. `balanceChange.revert` already reverts `versionedWrites`
 independently of so.data — the only coupling is the journal recording `prev` from
 so.data, which forces the refresh.
 
+### Corrected ordering (2026-07-07): commit path is the real blocker, migrate it first
+
+An initial attempt at the balance slice (decouple `AddBalance`/`SubBalance`/`SetBalance`
+from so.data, skip materialization for existing-alive accounts) produced wrong trie
+roots in `TestCreate2Revive`/`TestSelfDestructReceive`/`TestRecreateAndRewind`. A
+forced-materialize diagnostic confirmed the *sole* cause: the parallel **commit** path
+still reads so.data for part of the block. The premise "so.data has no reader on the
+write path" was wrong — the *commit* reads it.
+
+The parallel flow today carries **two commit representations**:
+
+- **Regular txs — already write-set-based.** `rawWrites = blockIO.WriteSet(txIndex)`
+  (the merged `versionedWrites`) → `normalizeWriteSet(...)` → `txResult.writes` →
+  `ApplyStateWrites`. so.data is not consulted. (exec3_parallel.go:2617)
+- **Block finalize (rewards / withdrawals / syscalls) — still so.data-based.** The
+  finalize task captures `ivw := ibs.VersionedWrites(true)` (recorded to blockIO,
+  flushed to the versionMap) **but then discards it as the commit source** and builds
+  `finalizeWrites` via `MakeWriteSet(collector)` → `updateAccount(so.data)`.
+  (exec3_parallel.go:2855) A finalize `AddBalance(coinbase, reward)` that takes a
+  no-materialize fast path leaves no stateObject → `MakeWriteSet` skips it → the reward
+  is dropped → wrong root.
+
+`MakeWriteSet`/`FinalizeTx` (so.data → `updateAccount` → stateWriter) are the legacy
+methods that keep the duality alive. They are still used by: parallel finalize
+(exec3_parallel.go:2855, 1633), the serial executor (exec3_serial.go:438,
+versionMap==nil — stays), historical/trace workers (txtask.go:537/619,
+historical_trace_worker.go:197), genesis write, and RPC state-test util. Plus
+`GetRemovedAccountsWithBalance` (EIP-7708) reads `obj.Balance()` from so.data.
+
+**Corrected order:**
+
+1. **Phase 2a — unify the parallel commit on the write-set.** Migrate the finalize-task
+   commit (exec3_parallel.go:2855) off `MakeWriteSet(collector)` onto the same
+   `normalizeWriteSet(ivw, ...)` → apply path the regular txs already use, so the whole
+   parallel flow commits purely from `versionedWrites`. `ivw` is already in hand at that
+   site. Replicate `MakeWriteSet`'s remaining semantics (EIP-161 empty-removal,
+   EIP-6780 same-tx-SD storage-zeroing, reverted-write reconciliation) via
+   `normalizeWriteSet`'s params (the regular-tx path is the template). Audit the other
+   so.data finalize/EIP-7708 consumers. **This must be green before 2b.**
+2. **Phase 2b — decouple the write-path setters** (balance/nonce/code/storage) from
+   so.data, per the slices below. Only safe once nothing reads so.data at commit.
+
 Done: reads (getters), Empty/Exist (Phase 1), TouchAccount (increment 1 — existing
 accts compute emptiness via `emptyFromVersionedFields`, absent falls through to
 `GetOrNewStateObject` so `createObject` records AddressPath).

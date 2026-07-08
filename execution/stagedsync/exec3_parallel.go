@@ -2851,11 +2851,27 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 					be.versionMap.FlushVersionedWrites(ivw, true, "")
 				}
 
-				collector := state.NewVersionedWriteCollector(pe.rs)
-				if err := ibs.MakeWriteSet(tt.EvmBlockContext.Rules(tt.Config), collector); err != nil {
-					return nil, err
+				// Commit finalize writes from the versionMap write-set (ivw), the
+				// same normalizeWriteSet path regular txs use, rather than from
+				// so.data via MakeWriteSet. This keeps the parallel commit sourced
+				// solely from versionedWrites so the write-path stateObject is
+				// redundant.
+				domainStorageKeys := func(addr accounts.Address) []accounts.StorageKey {
+					av := addr.Value()
+					const addrLen, hashLen = 20, 32
+					var keys []accounts.StorageKey
+					if iterErr := pe.rs.Domains().IteratePrefix(kv.StorageDomain, av[:], applyTx, func(k, _ []byte) (bool, error) {
+						if len(k) >= addrLen+hashLen {
+							keys = append(keys, accounts.InternKey(common.BytesToHash(k[addrLen:addrLen+hashLen])))
+						}
+						return true, nil
+					}); iterErr != nil {
+						pe.logger.Warn("[parallel] finalize domainStorageKeys iterate failed", "addr", av, "err", iterErr)
+					}
+					return keys
 				}
-				finalizeWrites = collector.Writes()
+				emptyRemoval := be.blockNum != 0 && pe.cfg.chainConfig.IsEIP161Enabled(be.blockNum)
+				finalizeWrites = normalizeWriteSet(ivw, be.versionMap, finalVersion.TxIndex, finalVersion.Incarnation, reader, domainStorageKeys, emptyRemoval, pe.cfg.chainConfig.Aura != nil)
 				be.applyCount += finalizeWrites.Count()
 
 				// Apply finalize writes to the BlockStateCache.
