@@ -125,13 +125,27 @@ func (a *ApiHandler) executionClientVersion(ctx context.Context) *engine_types.C
 	defer cancel()
 	caplin := engine_types.NewClientVersionV1(caplinClientCode, caplinClientName, a.version, version.GitCommit)
 	versions, err := a.engine.GetClientVersionV1(ctx, &caplin)
-	if err != nil || len(versions) == 0 {
+	if err != nil {
+		// Only memoize the negative result when the method is genuinely unsupported;
+		// a transient error must not disable EL attribution until restart.
+		if methodNotFound(err) {
+			a.elClientVersion.Store(elClientVersionUnavailable)
+		}
+		return nil
+	}
+	if len(versions) == 0 {
 		a.elClientVersion.Store(elClientVersionUnavailable)
 		return nil
 	}
 	el := versions[0]
 	a.elClientVersion.Store(&el)
 	return &el
+}
+
+// methodNotFound reports whether err is a JSON-RPC "method not found" (-32601) error.
+func methodNotFound(err error) bool {
+	var coder interface{ ErrorCode() int }
+	return errors.As(err, &coder) && coder.ErrorCode() == -32601
 }
 
 // graffitiCommitPrefix returns the leading 2 bytes (4 hex chars) of a commit hash.

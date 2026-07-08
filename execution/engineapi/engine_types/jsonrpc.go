@@ -21,6 +21,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
 
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/common"
@@ -185,7 +186,7 @@ func (c ClientVersionV1) String() string {
 // it to the leading 4 bytes as required by
 // https://github.com/ethereum/execution-apis/blob/main/src/engine/identification.md
 func NewClientVersionV1(code, name, versionStr, gitCommit string) ClientVersionV1 {
-	commit := gitCommit
+	commit := strings.TrimPrefix(gitCommit, "0x")
 	if len(commit) >= 8 {
 		commit = commit[:8]
 	} else {
