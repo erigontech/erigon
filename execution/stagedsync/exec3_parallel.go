@@ -142,6 +142,19 @@ const (
 	stopBadBlock                   // wrong trie root — fail the implicated block and unwind
 )
 
+func (k stopKind) String() string {
+	switch k {
+	case stopReachedMax:
+		return "reached-max"
+	case stopMoreWork:
+		return "more-work"
+	case stopBadBlock:
+		return "bad-block"
+	default:
+		return fmt.Sprintf("stopKind(%d)", uint8(k))
+	}
+}
+
 // stopCause is the cancel cause published on the shared executor context. It
 // carries the block the batch coalesces to (M) and the kind so every goroutine
 // reads the same signal and decides how to wind down: exec produces state up to
@@ -156,9 +169,9 @@ type stopCause struct {
 
 func (s *stopCause) Error() string {
 	if s.err != nil {
-		return fmt.Sprintf("parallel executor stop (kind=%d block=%d): %v", s.kind, s.block, s.err)
+		return fmt.Sprintf("parallel executor stop (kind=%s block=%d): %v", s.kind, s.block, s.err)
 	}
-	return fmt.Sprintf("parallel executor stop (kind=%d block=%d)", s.kind, s.block)
+	return fmt.Sprintf("parallel executor stop (kind=%s block=%d)", s.kind, s.block)
 }
 
 // stopCauseOf returns the stopCause published on ctx, if any.
@@ -474,10 +487,17 @@ func (pe *parallelExecutor) execImpl(ctx context.Context, execStage *StageState,
 			if err == nil {
 				return nil
 			}
-			if !errors.Is(err, ErrWrongTrieRoot) {
-				return err
-			}
 			fail.consider(cr.blockNum, cr.blockHash, false, err)
+			if !errors.Is(err, ErrWrongTrieRoot) {
+				// Infra fault (lazy-load / compute), not block-validity: report it
+				// but do NOT return here — a bare return kills the apply loop while
+				// the exec loop may be blocked on a mustDeliver send, wedging
+				// shutdown. Record + cancel + keep draining (which unblocks that
+				// send); fail.err surfaces at channel close.
+				finalized = true
+				deliberateCancel()
+				return nil
+			}
 			if _, applied := appliedBlocks[cr.blockNum]; applied {
 				finalized = true
 				deliberateCancel()
@@ -886,18 +906,13 @@ func (pe *parallelExecutor) triggerBatchCommitment(ctx context.Context) {
 			panic(rec)
 		}
 	}()
-	// Data-arm-first: after a terminal stop the coordination ctx is already
-	// cancelled, but the calculator still needs this request to compute the batch
-	// commitment. Deliver it while the buffer has room; only fall back to ctx.Done
-	// if the buffer is full (the calculator is gone and the request is moot).
-	select {
-	case pe.commitResultsCh <- &commitComputeRequest{}:
-	default:
-		select {
-		case pe.commitResultsCh <- &commitComputeRequest{}:
-		case <-ctx.Done():
-		}
-	}
+	// Send unconditionally: a terminal stop publishes the stopCause (cancelling
+	// ctx) before this runs, but the calculator keeps draining commitResultsCh
+	// until it's closed, so blocking is safe (a closed channel is caught by the
+	// recover above). Honouring ctx.Done here would drop the batch-end commitment
+	// when the buffer is momentarily full — the tail commitment then never
+	// computes while stage progress advances, leaving commitment behind sd.mem.
+	pe.commitResultsCh <- &commitComputeRequest{}
 }
 
 func (pe *parallelExecutor) LogComplete(stepsInDb float64) {

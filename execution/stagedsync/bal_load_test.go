@@ -17,6 +17,7 @@
 package stagedsync
 
 import (
+	"bytes"
 	"math"
 	"testing"
 
@@ -231,4 +232,70 @@ func TestLoadFromBAL_EmptyAccountBecomesDelete(t *testing.T) {
 	}, false, false)
 	require.False(t, csPre.accounts[emptied].Deleted,
 		"pre-SpuriousDragon, an empty touched account is not removed")
+}
+
+// TestLoadFromBAL_SelfDestructKeepsCodeNotDeleted pins the post-EIP-6780 corner:
+// SELFDESTRUCT of a pre-existing contract drains its balance (→0) but keeps its
+// code and nonce, so its block-end state is NOT empty. The EIP-161 gate keys on
+// codeHash==empty, so a zero-balance account that still has code must remain a
+// regular update — reconstructing it as a delete would drop a live leaf and
+// diverge the root. (Here the code rides in via a CodeChange; in production the
+// codeHash comes from the pre-block state the fold lazy-loads.)
+func TestLoadFromBAL_SelfDestructKeepsCodeNotDeleted(t *testing.T) {
+	t.Parallel()
+
+	contract := accounts.InternAddress([20]byte{0x5d})
+	code := []byte{0x60, 0x00, 0x60, 0x00, 0xf3}
+	bal := types.BlockAccessList{
+		{
+			Address:        contract,
+			BalanceChanges: []*types.BalanceChange{{Index: 0, Value: *uint256.NewInt(0)}},
+			CodeChanges:    []*types.CodeChange{{Index: 0, Bytecode: code}},
+		},
+	}
+
+	cs := newTestCalcState()
+	cs.LoadFromBAL(bal, true, false) // SpuriousDragon on
+
+	require.False(t, cs.accounts[contract].Deleted,
+		"a zero-balance account that still has code must not be reconstructed as a delete")
+
+	updates := newTestUpdates()
+	cs.FlushToUpdates(updates)
+	key := contract.Value()
+	assert.NotEqual(t, commitment.DeleteUpdate, lookupKeyUpdate(t, updates, string(key[:])).Flags,
+		"a contract keeping its code must flush as a regular update, not DeleteUpdate")
+}
+
+// TestLoadFromBAL_CreatedThenDestroyedHasNoLeaf pins the EIP-6780 same-tx
+// create+destroy case: AsBlockAccessList folds it to a net-zero, so the account
+// gets no BAL entry at all — LoadFromBAL must then leave no leaf for it (a
+// fabricated zero leaf would diverge from serial, which never creates one).
+func TestLoadFromBAL_CreatedThenDestroyedHasNoLeaf(t *testing.T) {
+	t.Parallel()
+
+	transient := accounts.InternAddress([20]byte{0x7e})
+	live := accounts.InternAddress([20]byte{0xcd})
+	// The transient (created-then-destroyed) account is absent from the BAL.
+	bal := types.BlockAccessList{
+		{Address: live, BalanceChanges: []*types.BalanceChange{{Index: 0, Value: *uint256.NewInt(100)}}},
+	}
+
+	cs := newTestCalcState()
+	cs.LoadFromBAL(bal, true, false)
+
+	_, ok := cs.accounts[transient]
+	require.False(t, ok, "a created-then-destroyed account absent from the BAL must not enter calcState")
+
+	updates := newTestUpdates()
+	cs.FlushToUpdates(updates)
+	key := transient.Value()
+	found := false
+	require.NoError(t, updates.HashSort(t.Context(), nil, func(_, k []byte, _ *commitment.Update) error {
+		if bytes.Equal(k, key[:]) {
+			found = true
+		}
+		return nil
+	}))
+	assert.False(t, found, "no leaf may be emitted for an account the BAL folded away")
 }
