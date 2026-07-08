@@ -423,7 +423,7 @@ func (cc *commitmentCalculator) compute(ctx context.Context, t commitTarget, m c
 func (cc *commitmentCalculator) computeIsolated(ctx context.Context, t commitTarget) ([]byte, error) {
 	cc.doms.LockChangesetAccumulator()
 	defer cc.doms.UnlockChangesetAccumulator()
-	defer cc.doms.DetachAccumulatorLocked()()
+	defer cc.doms.DetachChangesetAccumulatorLocked()()
 
 	rh, err := cc.doms.ComputeCommitmentLocked(ctx, cc.roTx, true, t.blockNum, t.lastTxNum, cc.logPrefix, nil)
 	if err != nil {
@@ -464,7 +464,7 @@ func (cc *commitmentCalculator) computeAndCheck(ctx context.Context, br *blockRe
 // not pend into the first window block's changeset-routed compute.
 func (cc *commitmentCalculator) flushPendingUpdatesWithoutChangeset(ctx context.Context, br *blockResult) {
 	cc.doms.LockChangesetAccumulator()
-	restore := cc.doms.DetachAccumulatorLocked()
+	restore := cc.doms.DetachChangesetAccumulatorLocked()
 	err := cc.doms.FlushPendingUpdatesLocked(ctx, cc.roTx)
 	restore()
 	cc.doms.UnlockChangesetAccumulator()
@@ -556,7 +556,7 @@ func (cc *commitmentCalculator) computeWithBlockAccumulator(ctx context.Context,
 	//
 	// Inside the lock we must use the *Locked variants — the public
 	// counterparts re-acquire the same Mutex and would self-deadlock.
-	defer cc.doms.SwapAccumulatorLocked(cs)()
+	defer cc.doms.SwapChangesetAccumulatorLocked(cs)()
 	return cc.doms.ComputeCommitmentLocked(ctx, cc.roTx, true, t.blockNum, t.lastTxNum, cc.logPrefix, nil)
 }
 
