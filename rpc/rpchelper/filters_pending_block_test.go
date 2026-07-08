@@ -82,3 +82,21 @@ func TestFilters_PendingBlockInvalidatedByNewHeader(t *testing.T) {
 		})
 	}
 }
+
+// TestFilters_PendingBlockKeptOnUnparseablePayload pins that an unparseable
+// pending block payload is dropped instead of replacing the cached block with
+// a partially-decoded one.
+func TestFilters_PendingBlockKeptOnUnparseablePayload(t *testing.T) {
+	t.Parallel()
+
+	f := New(t.Context(), FiltersConfig{}, nil, nil, nil, func() {}, log.New(), nil)
+	pending := types.NewBlockWithHeader(&types.Header{Number: *uint256.NewInt(10)})
+	handlePendingBlock(t, f, pending)
+
+	f.HandlePendingBlock(&txpoolproto.OnPendingBlockReply{RplBlock: []byte("garbage")})
+
+	got := f.LastPendingBlock()
+	require.NotNil(t, got)
+	require.NotNil(t, got.HeaderNoCopy())
+	require.Equal(t, pending.Hash(), got.Hash())
+}
