@@ -151,7 +151,13 @@ func getChainNameFromChainData(cliCtx *cli.Context, logger log.Logger, chainData
 	}
 	ctx := cliCtx.Context
 	var db kv.RoDB
-	db, err = mdbx.New(dbcfg.ChainDB, logger).Path(chainDataDir).Accede(true).Readonly(true).Open(ctx)
+	// Open with only the tables we actually need. Using the full ChaindataTablesCfg
+	// would fail in Accede+Readonly mode if the database was created by an older version
+	// that is missing tables added since then (e.g. GLOAS/ePBS tables added in v3.5.0).
+	db, err = mdbx.New(dbcfg.ChainDB, logger).Path(chainDataDir).
+		Accede(true).
+		WithTableCfg(ChaindataSchemaForGenesis).
+		Open(ctx)
 	if err != nil {
 		err = fmt.Errorf("opening chaindata database: %w", err)
 		return
@@ -181,4 +187,11 @@ func getChainNameFromChainData(cliCtx *cli.Context, logger log.Logger, chainData
 		return
 	}
 	return g.Some(chainCfg.ChainName), nil
+}
+
+func ChaindataSchemaForGenesis(_ kv.TableCfg) kv.TableCfg {
+	return kv.TableCfg{
+		kv.HeaderCanonical: {},
+		kv.ConfigTable:     {},
+	}
 }
