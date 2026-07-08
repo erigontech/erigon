@@ -912,10 +912,27 @@ func (ff *Filters) onNewHeader(event *remoteproto.SubscribeReply) error {
 		return fmt.Errorf("unprocessable payload: %w", err)
 	}
 
+	ff.invalidateStalePendingBlock(&header)
+
 	return ff.headsSubs.Range(func(k HeadsSubID, v Sub[*types.Header]) error {
 		v.Send(&header)
 		return nil
 	})
+}
+
+// invalidateStalePendingBlock drops the cached pending block once the chain
+// moves on without it: a header at or above its height, or a competing block
+// replacing its parent. A stale pending block would otherwise pin "pending"
+// reads to an outdated height until this node builds a payload again.
+func (ff *Filters) invalidateStalePendingBlock(header *types.Header) {
+	ff.mu.Lock()
+	defer ff.mu.Unlock()
+	if ff.pendingBlock == nil {
+		return
+	}
+	if header.Number.Uint64()+1 >= ff.pendingBlock.NumberU64() && header.Hash() != ff.pendingBlock.ParentHash() {
+		ff.pendingBlock = nil
+	}
 }
 
 // OnReceipts handles a new receipt event from the remote and processes it.
