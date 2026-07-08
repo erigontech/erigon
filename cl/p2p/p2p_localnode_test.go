@@ -41,6 +41,7 @@ func TestNewUDPv5ListenerAdvertisesBoundUDPPort(t *testing.T) {
 	}
 	listener, err := NewUDPv5Listener(context.Background(), cfg, discover.Config{PrivateKey: privKey}, log.Root())
 	require.NoError(t, err)
+	defer listener.LocalNode().Database().Close()
 	defer listener.Close()
 
 	var udp enr.UDP
