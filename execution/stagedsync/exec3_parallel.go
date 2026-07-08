@@ -2925,10 +2925,16 @@ func (be *blockExecutor) scheduleExecution(ctx context.Context, pe *parallelExec
 		return minIP < 0 || minIP >= tx
 	})
 
+	// Take at most as many pending tasks as the input queue can currently accept.
+	// Taking the whole pending set on every result and pushing the overflow back
+	// (the queue bounds in-flight work) is O(n^2) per block for high-tx-count
+	// blocks and starves workers while the coordinator churns instead of refilling.
+	budget := pe.in.Capacity() - pe.in.NewTasksLen()
 	toExecute := make(sort.IntSlice, 0, 2)
 
-	for be.execTasks.minPending() >= 0 {
+	for budget > 0 && be.execTasks.minPending() >= 0 {
 		toExecute = append(toExecute, be.execTasks.takeNextPending())
+		budget--
 	}
 
 	// Forward-progress safety net: pending empty + no workers in flight
