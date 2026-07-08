@@ -191,10 +191,17 @@ func TestAggregateAndProofAllowsNextEpochWhenForkchoiceHasSeenIt(t *testing.T) {
 	aggService, sd, fcu := setupAggregateAndProofTest(t)
 	sd.OnHeadState(s)
 	fcu.HighestSeenVal = nextEpochSlot
+	fcu.FinalizedCheckpointVal = s.FinalizedCheckpoint()
+	fcu.Ancestors[s.FinalizedCheckpoint().Epoch*clparams.MainnetBeaconConfig.SlotsPerEpoch] = forkchoice.ForkChoiceNode{Root: s.FinalizedCheckpoint().Root}
+	fcu.Ancestors[nextEpochSlot] = forkchoice.ForkChoiceNode{Root: agg.SignedAggregateAndProof.Message.Aggregate.Data.Target.Root}
+	fcu.Headers[agg.SignedAggregateAndProof.Message.Aggregate.Data.BeaconBlockRoot] = &cltypes.BeaconBlockHeader{}
+	committee, err := s.GetBeaconCommitee(nextEpochSlot, agg.SignedAggregateAndProof.Message.Aggregate.Data.CommitteeIndex)
+	require.NoError(t, err)
+	require.NotEmpty(t, committee)
+	agg.SignedAggregateAndProof.Message.AggregatorIndex = committee[0]
 
-	err := aggService.ProcessMessage(context.Background(), nil, agg)
-	require.ErrorIs(t, err, ErrIgnore)
-	require.Contains(t, err.Error(), "block not seen")
+	err = aggService.ProcessMessage(context.Background(), nil, agg)
+	require.NoError(t, err)
 }
 
 func TestAggregateAndProofRejectsNextEpochBeforeForkchoiceHasSeenIt(t *testing.T) {
