@@ -4,9 +4,7 @@ import (
 	"bytes"
 	"encoding/binary"
 	"os"
-	"path/filepath"
 	"strconv"
-	"strings"
 	"testing"
 	"time"
 
@@ -15,13 +13,10 @@ import (
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/crypto"
-	"github.com/erigontech/erigon/common/dir"
 	"github.com/erigontech/erigon/common/empty"
 	"github.com/erigontech/erigon/common/log/v3"
-	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/rawdbv3"
-	"github.com/erigontech/erigon/db/kv/temporal"
 	"github.com/erigontech/erigon/db/state"
 	"github.com/erigontech/erigon/db/state/execctx"
 	"github.com/erigontech/erigon/db/state/statecfg"
@@ -50,70 +45,9 @@ func envIntOr(key string, def uint64) uint64 {
 
 // collectCommitmentFiles returns a map of filename→size for all commitment .kv files
 // in the domain snapshot directory.
-func collectCommitmentFiles(t *testing.T, dirs datadir.Dirs) map[string]int64 {
-	t.Helper()
-	result := make(map[string]int64)
-	paths, err := dir.ListFiles(dirs.SnapDomain, ".kv")
-	require.NoError(t, err)
-	commitStr := kv.CommitmentDomain.String()
-	for _, p := range paths {
-		name := filepath.Base(p)
-		if !strings.Contains(name, commitStr) {
-			continue
-		}
-		info, err := os.Stat(p)
-		require.NoError(t, err)
-		result[name] = info.Size()
-	}
-	return result
-}
 
 // wipeCommitment removes all commitment state from both database tables and snapshot files,
 // then rescans the aggregator's file state.
-func wipeCommitment(t *testing.T, db kv.TemporalRwDB, agg *state.Aggregator, dirs datadir.Dirs) {
-	t.Helper()
-
-	// Clear commitment tables in the database.
-	rwTx, err := db.BeginRw(t.Context())
-	require.NoError(t, err)
-	defer rwTx.Rollback()
-
-	buckets, err := rwTx.ListTables()
-	require.NoError(t, err)
-
-	commitStr := kv.CommitmentDomain.String()
-	for _, b := range buckets {
-		if strings.Contains(strings.ToLower(b), commitStr) {
-			err = rwTx.ClearTable(b)
-			require.NoError(t, err)
-		}
-	}
-	require.NoError(t, rwTx.Commit())
-
-	// Delete commitment .kv files and their siblings (.kvi, .kvei, .bt).
-	paths, err := dir.ListFiles(dirs.SnapDomain, ".kv")
-	require.NoError(t, err, "listing snapshot domain files")
-	for _, p := range paths {
-		if !strings.Contains(filepath.Base(p), commitStr) {
-			continue
-		}
-		err = dir.RemoveFile(p)
-		require.NoError(t, err, "removing commitment file: %s", p)
-		// Remove sibling index/accessor files.
-		base := strings.TrimSuffix(p, ".kv")
-		for _, ext := range []string{".kvi", ".kvei", ".bt"} {
-			_ = dir.RemoveFile(base + ext) // best-effort, may not exist
-		}
-	}
-
-	// Rescan file state.
-	err = agg.OpenFolder()
-	require.NoError(t, err)
-
-	// Verify the wipe was complete — no commitment files should remain.
-	remaining := collectCommitmentFiles(t, dirs)
-	require.Empty(t, remaining, "commitment files must be fully removed after wipe")
-}
 
 // logComparison prints a summary comparing baseline, sequential, and concurrent rebuild results.
 func logComparison(t *testing.T, baseline, sequential, concurrent rebuildResult, originalSizes map[string]int64) {
@@ -171,17 +105,6 @@ func logComparison(t *testing.T, baseline, sequential, concurrent rebuildResult,
 
 // reopenAggregator closes the current aggregator and reopens it with a fresh temporal DB wrapper.
 // Returns the new temporal DB and aggregator.
-func reopenAggregator(t *testing.T, db kv.TemporalRwDB, agg *state.Aggregator, stepSize uint64) (kv.TemporalRwDB, *state.Aggregator) {
-	t.Helper()
-	dirs := agg.Dirs()
-	agg.Close()
-
-	newAgg := testAgg(t, db, dirs, stepSize, log.New())
-	newDB, err := temporal.New(db, newAgg)
-	require.NoError(t, err)
-
-	return newDB, newAgg
-}
 
 // TestConcurrentRebuildCommitment generates deterministic data, records a baseline state root,
 // then rebuilds commitment sequentially (ground truth) and concurrently (primary target),
@@ -226,7 +149,7 @@ func TestConcurrentRebuildCommitment(t *testing.T) {
 
 	// --- Create aggregator and DB ---
 	db, agg, dirs := testDbAndAggregatorForLargeData(t, stepSize, persistentDir)
-	agg.ForTestReplaceKeysInValues(kv.CommitmentDomain, false)
+	agg.ForTestReferencesInCommitmentBranches(kv.CommitmentDomain, false)
 
 	ctx := t.Context()
 
@@ -502,7 +425,7 @@ func TestConcurrentRebuildCommitmentNoSqueeze(t *testing.T) {
 
 	// --- Phase 1: Data generation ---
 	db, agg, dirs := testDbAndAggregatorForLargeData(t, stepSize, "")
-	agg.ForTestReplaceKeysInValues(kv.CommitmentDomain, false)
+	agg.ForTestReferencesInCommitmentBranches(kv.CommitmentDomain, false)
 
 	ctx := t.Context()
 	rwTx, err := db.BeginTemporalRw(ctx)

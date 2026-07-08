@@ -394,7 +394,7 @@ func commitmentRebuild(db kv.TemporalRwDB, ctx context.Context, logger log.Logge
 	}
 
 	blockSnapBuildSema := semaphore.NewWeighted(int64(runtime.NumCPU()))
-	agg.ForTestReplaceKeysInValues(kv.CommitmentDomain, false)
+	agg.ForTestReferencesInCommitmentBranches(kv.CommitmentDomain, false)
 	agg.SetSnapshotBuildSema(blockSnapBuildSema)
 	agg.SetErigondbDomainStepsInFrozenFile(config3.UnboundedDomainMerge)
 	agg.PresetOfflineMerge()
@@ -557,14 +557,6 @@ func commitmentConvert(db kv.TemporalRwDB, ctx context.Context, logger log.Logge
 	agg.SetSnapshotBuildSema(semaphore.NewWeighted(int64(runtime.NumCPU())))
 	agg.DisableAllDependencies()
 	defer agg.MadvNormal().DisableReadAhead()
-	// commitmentValTransformDomain (the squeeze path's value transformer)
-	// short-circuits to pass-through when the live runtime flag is false.
-	// Force-enable it for the duration of the converter run so --squeeze=true
-	// works regardless of the operator's current schema config. Matches the
-	// pattern in RebuildCommitmentFiles / RebuildCommitmentFilesWithHistory.
-	if opts.TargetSqueeze {
-		agg.ForTestReplaceKeysInValues(kv.CommitmentDomain, true)
-	}
 
 	acRo := agg.BeginFilesRo()
 	defer acRo.Close()

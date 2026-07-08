@@ -2857,7 +2857,7 @@ func doDecompressSpeed(cliCtx *cli.Context) error {
 		//defer decompressor.MadvSequential().DisableReadAhead()
 
 		t := time.Now()
-		view, err := decompressor.OpenSequentialView()
+		view, err := decompressor.OpenSequentialView(true)
 		if err != nil {
 			panic(err)
 		}
@@ -2873,7 +2873,7 @@ func doDecompressSpeed(cliCtx *cli.Context) error {
 		//defer decompressor.MadvSequential().DisableReadAhead()
 
 		t := time.Now()
-		view, err := decompressor.OpenSequentialView()
+		view, err := decompressor.OpenSequentialView(true)
 		if err != nil {
 			panic(err)
 		}
@@ -3455,8 +3455,8 @@ func doRetireCommand(cliCtx *cli.Context, dirs datadir.Dirs) error {
 	}
 	defer clean()
 
-	defer br.MadvNormal().DisableReadAhead()
-	defer agg.MadvNormal().DisableReadAhead()
+	//defer br.MadvNormal().DisableReadAhead()
+	//defer agg.MadvNormal().DisableReadAhead()
 
 	if cliCtx.IsSet(utils.ErigondbDomainStepsInFrozenFileFlag.Name) {
 		s := cliCtx.String(utils.ErigondbDomainStepsInFrozenFileFlag.Name)
