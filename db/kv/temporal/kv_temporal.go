@@ -119,15 +119,10 @@ func (p *temporalFilesPin) BeginTemporalRo(ctx context.Context) (kv.TemporalTx, 
 	if err != nil {
 		return nil, err
 	}
+	// Commitment workers read only state domains through aggtx, never forkable
+	// data, so the worker tx needs the pinned file snapshot and nothing else.
 	tx := &Tx{Tx: kvTx, tx: tx{db: p.db, ctx: ctx}}
 	tx.aggtx = p.agg.BeginFilesRo()
-
-	if len(p.db.forkaggs) > 0 {
-		tx.forkaggs = make([]*state.ForkableAggTemporalTx, len(p.db.forkaggs))
-		for i, forkagg := range p.db.forkaggs {
-			tx.forkaggs[i] = forkagg.BeginTemporalTx()
-		}
-	}
 	return tx, nil
 }
 
