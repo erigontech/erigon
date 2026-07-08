@@ -42,6 +42,7 @@ func runDirectBench(b *testing.B, pk [][]byte, updates []Update) {
 		require.NoError(b, ms.applyPlainUpdates(pk, updates))
 		hph := NewHexPatriciaHashed(length.Addr, ms, DefaultTrieConfig())
 		upds := WrapKeyUpdates(b, ModeDirect, KeyToHexNibbleHash, pk, updates)
+		runtime.GC() // keep setup GC debt out of the timed window
 		b.StartTimer()
 
 		_, err := hph.Process(ctx, upds, "", nil, WarmupConfig{})
@@ -78,6 +79,7 @@ func runParallelBench(b *testing.B, pk [][]byte, updates []Update, workers int) 
 		}
 		pph.RootTrie().Reset()
 		upds := WrapKeyUpdates(b, ModeParallel, KeyToHexNibbleHash, pk, updates)
+		runtime.GC() // keep setup GC debt out of the timed window
 		b.StartTimer()
 
 		_, err := pph.Process(ctx, upds, "", nil, WarmupConfig{})
@@ -251,6 +253,7 @@ func Benchmark_StorageConcurrency(b *testing.B) {
 				for b.Loop() {
 					b.StopTimer()
 					r := setupGroup(b, single[0])
+					runtime.GC() // keep setup GC debt out of the timed window
 					b.StartTimer()
 					require.NoError(b, r.process())
 					b.StopTimer()
@@ -265,6 +268,7 @@ func Benchmark_StorageConcurrency(b *testing.B) {
 					for b.Loop() {
 						b.StopTimer()
 						rs := setupGroups(b, gs)
+						runtime.GC() // keep setup GC debt out of the timed window
 						b.StartTimer()
 						for _, r := range rs {
 							require.NoError(b, r.process())
@@ -278,6 +282,7 @@ func Benchmark_StorageConcurrency(b *testing.B) {
 					for b.Loop() {
 						b.StopTimer()
 						rs := setupGroups(b, gs)
+						runtime.GC() // keep setup GC debt out of the timed window
 						b.StartTimer()
 						var eg errgroup.Group
 						for _, r := range rs {
@@ -343,6 +348,7 @@ func runStreamingOverlapBench(b *testing.B, pk [][]byte, upds []Update, cpuIters
 		if scheduler {
 			require.NoError(b, sc.StartScheduler(ctx))
 		}
+		runtime.GC() // keep setup GC debt out of the timed window
 		b.StartTimer()
 
 		for _, k := range pk {
@@ -394,6 +400,7 @@ func runDirectCarriedBench(b *testing.B, pk [][]byte, updates []Update) {
 		hph := NewHexPatriciaHashed(length.Addr, ms, DefaultTrieConfig())
 		upds := NewUpdates(ModeDirect, b.TempDir(), KeyToHexNibbleHash)
 		touchCarriedFromState(b, upds, ms, pk, length.Addr)
+		runtime.GC() // keep setup GC debt out of the timed window
 		b.StartTimer()
 
 		_, err := hph.Process(ctx, upds, "", nil, WarmupConfig{})
@@ -416,6 +423,7 @@ func Benchmark_DeepStorageWhale(b *testing.B) {
 					require.NoError(b, ms.applyPlainUpdates(pk, upds))
 					hph := NewHexPatriciaHashed(length.Addr, ms, DefaultTrieConfig())
 					upd := WrapKeyUpdates(b, ModeDirect, KeyToHexNibbleHash, pk, upds)
+					runtime.GC() // keep setup GC debt out of the timed window
 					b.StartTimer()
 					_, err := hph.Process(context.Background(), upd, "", nil, WarmupConfig{})
 					b.StopTimer()
