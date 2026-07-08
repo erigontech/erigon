@@ -55,14 +55,18 @@ func TestDefaultGraffiti(t *testing.T) {
 		require.Equal(t, "GEc3d4"+caplinClientCode+clCommit, graffitiText(a.defaultGraffiti(context.Background())))
 	})
 
-	t.Run("execution client version unavailable falls back to consensus-only", func(t *testing.T) {
+	t.Run("execution client version unavailable falls back to consensus-only and is cached", func(t *testing.T) {
 		ctrl := gomock.NewController(t)
 		engine := execution_client.NewMockExecutionEngine(ctrl)
 		engine.EXPECT().GetClientVersionV1(gomock.Any(), gomock.Any()).
-			Return(nil, errors.New("not supported"))
+			Return(nil, errors.New("not supported")).
+			Times(1)
 
 		a := &ApiHandler{engine: engine, version: "1.2.3"}
-		require.Equal(t, caplinClientCode+clCommit, graffitiText(a.defaultGraffiti(context.Background())))
+		first := graffitiText(a.defaultGraffiti(context.Background()))
+		second := graffitiText(a.defaultGraffiti(context.Background()))
+		require.Equal(t, caplinClientCode+clCommit, first)
+		require.Equal(t, first, second)
 	})
 
 	t.Run("no engine falls back to consensus-only", func(t *testing.T) {

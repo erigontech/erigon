@@ -104,11 +104,18 @@ func (a *ApiHandler) defaultGraffiti(ctx context.Context) common.Hash {
 	return graffitiFromString(graffiti)
 }
 
-// executionClientVersion returns the connected execution client's version, caching it on
-// first success so that block production stays off the engine API in steady state (the
-// version is static for the lifetime of an execution client connection).
+// elClientVersionUnavailable is a sentinel cached when the execution client does not
+// implement engine_getClientVersionV1, so the negative outcome is memoized too.
+var elClientVersionUnavailable = &engine_types.ClientVersionV1{}
+
+// executionClientVersion returns the connected execution client's version, caching the
+// outcome (success or unavailable) on first query so that block production stays off the
+// engine API in steady state (the version is static for the lifetime of a connection).
 func (a *ApiHandler) executionClientVersion(ctx context.Context) *engine_types.ClientVersionV1 {
 	if cached := a.elClientVersion.Load(); cached != nil {
+		if cached == elClientVersionUnavailable {
+			return nil
+		}
 		return cached
 	}
 	if a.engine == nil {
@@ -119,6 +126,7 @@ func (a *ApiHandler) executionClientVersion(ctx context.Context) *engine_types.C
 	caplin := engine_types.NewClientVersionV1(caplinClientCode, caplinClientName, a.version, version.GitCommit)
 	versions, err := a.engine.GetClientVersionV1(ctx, &caplin)
 	if err != nil || len(versions) == 0 {
+		a.elClientVersion.Store(elClientVersionUnavailable)
 		return nil
 	}
 	el := versions[0]
