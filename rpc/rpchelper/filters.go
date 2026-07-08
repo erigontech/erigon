@@ -470,6 +470,7 @@ func (ff *Filters) HandlePendingBlock(reply *txpoolproto.OnPendingBlockReply) {
 	}
 	if err := rlp.DecodeBytes(reply.RplBlock, b); err != nil {
 		ff.logger.Warn("OnNewPendingBlock rpc filters, unprocessable payload", "err", err)
+		return
 	}
 
 	ff.mu.Lock()
