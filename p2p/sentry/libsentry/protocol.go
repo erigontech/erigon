@@ -20,6 +20,8 @@ import (
 	"github.com/erigontech/erigon/node/gointerfaces/sentryproto"
 )
 
+const noProtocol sentryproto.Protocol = -1
+
 // ethProtocolsByVersion lists ETH protocols in ascending version order.
 // Used by MinProtocol to find the lowest version supporting a message.
 var ethProtocolsByVersion = []sentryproto.Protocol{
@@ -38,7 +40,7 @@ func MinProtocol(m sentryproto.MessageId) sentryproto.Protocol {
 		}
 	}
 
-	return -1
+	return noProtocol
 }
 
 var ProtoIds = map[sentryproto.Protocol]map[sentryproto.MessageId]struct{}{

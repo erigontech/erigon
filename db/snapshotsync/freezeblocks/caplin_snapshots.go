@@ -713,16 +713,11 @@ func (s *CaplinSnapshots) ReadHeader(slot uint64, tx kv.Tx) (*cltypes.SignedBeac
 		return nil, 0, common.Hash{}, nil
 	}
 	// Decompress this thing
-	buffer := buffersPool.Get().(*bytes.Buffer)
-	defer buffersPool.Put(buffer)
-
-	buffer.Reset()
-	buffer.Write(buf)
 	reader := decompressorPool.Get().(*zstd.Decoder)
 	defer decompressorPool.Put(reader)
-	reader.Reset(buffer)
+	reader.Reset(bytes.NewReader(buf))
 
-	// Use pooled buffers and readers to avoid allocations.
+	// Use pooled readers to avoid allocations.
 	header, elBlockNumber, elBlockHash, err := snapshot_format.ReadBlockHeaderFromSnapshotWithExecutionData(reader, s.beaconCfg)
 	if err != nil {
 		return nil, 0, common.Hash{}, err
