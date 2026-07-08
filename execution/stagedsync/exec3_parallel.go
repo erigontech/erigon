@@ -2764,16 +2764,17 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 				blockStartTxNum := be.tasks[0].Version().TxNum - uint64(startTxIndex)
 				priorReceipts, err := pe.reconstructPriorReceipts(ctx, applyTx, header, txs, startTxIndex, blockStartTxNum)
 				if err != nil {
-					return nil, err
+					pe.logger.Warn("["+pe.logPrefix+"] failed to reconstruct prior receipts for partial block",
+						"block", be.blockNum, "startTxIndex", startTxIndex, "err", err)
+				} else {
+					blockReceipts = append(priorReceipts, blockReceipts...)
+					receiptsComplete = true
 				}
-				blockReceipts = append(priorReceipts, blockReceipts...)
-				receiptsComplete = true
 			}
 			// The post-exec validator, which fills receipt blooms for full
-			// blocks, skips partial ones — complete the published set here.
-			if receiptsComplete {
-				receipts.DeriveFields(blockReceipts, be.blockHash)
-			}
+			// blocks, skips partial ones — do it here, even when prior receipts
+			// couldn't be reconstructed (the suffix receipts still need blooms).
+			receipts.DeriveFields(blockReceipts, be.blockHash)
 		}
 
 		// Block finalize: run engine.Finalize + MakeWriteSet on the producer
