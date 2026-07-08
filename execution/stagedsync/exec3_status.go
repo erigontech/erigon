@@ -19,6 +19,9 @@ type execStatusList struct {
 	complete   []int
 	dependency map[int]map[int]bool
 	blocker    map[int]map[int]bool
+	// completeUpTo caches the contiguous-from-zero complete count so maxComplete
+	// is O(1) on the coordinator's per-result critical path. completeUpTo-1 == maxComplete.
+	completeUpTo int
 }
 
 func insertInList(l []int, v int) []int {
@@ -48,24 +51,8 @@ func (m *execStatusList) takeNextPending() int {
 	return x
 }
 
-func hasNoGap(l []int) bool {
-	return l[0]+len(l) == l[len(l)-1]+1
-}
-
 func (m execStatusList) maxComplete() int {
-	if len(m.complete) == 0 || m.complete[0] != 0 {
-		return -1
-	} else if m.complete[len(m.complete)-1] == len(m.complete)-1 {
-		return m.complete[len(m.complete)-1]
-	} else {
-		for i := len(m.complete) - 2; i >= 0; i-- {
-			if hasNoGap(m.complete[:i+1]) {
-				return m.complete[i]
-			}
-		}
-	}
-
-	return -1
+	return m.completeUpTo - 1
 }
 
 func (m *execStatusList) pushPending(tx int) {
@@ -136,6 +123,11 @@ func removeFromList(l []int, v int, expect bool) []int {
 func (m *execStatusList) markComplete(tx int) {
 	m.inProgress = removeFromList(m.inProgress, tx, true)
 	m.complete = insertInList(m.complete, tx)
+	if tx == m.completeUpTo {
+		for m.checkComplete(m.completeUpTo) {
+			m.completeUpTo++
+		}
+	}
 }
 
 func (m *execStatusList) minPending() int {
@@ -268,6 +260,9 @@ func (m *execStatusList) pushPendingSet(set []int) {
 
 func (m *execStatusList) clearComplete(tx int) {
 	m.complete = removeFromList(m.complete, tx, false)
+	if tx < m.completeUpTo {
+		m.completeUpTo = tx
+	}
 }
 
 func (m *execStatusList) clearPending(tx int) {
