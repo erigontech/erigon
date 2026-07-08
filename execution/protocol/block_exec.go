@@ -353,9 +353,15 @@ func FinalizeBlockExecution(
 		return nil, nil, err
 	}
 
-	blockContext := NewEVMBlockContext(header, GetHashFn(header, nil), engine, accounts.NilAddress, cc)
-	if err := ibs.CommitBlock(blockContext.Rules(cc), stateWriter); err != nil {
-		return nil, nil, fmt.Errorf("committing block %d failed: %w", header.Number.Uint64(), err)
+	// A versioned ibs (parallel-mode block assembly) commits from the versionMap
+	// write-set — the caller applies ba.BalIO() via WriteSet.Normalize/Apply after
+	// assembly, so so.data must not also be flushed here. versionMap==nil callers
+	// (ExecuteBlockEphemerally, RPC) keep the so.data CommitBlock.
+	if !ibs.IsVersioned() {
+		blockContext := NewEVMBlockContext(header, GetHashFn(header, nil), engine, accounts.NilAddress, cc)
+		if err := ibs.CommitBlock(blockContext.Rules(cc), stateWriter); err != nil {
+			return nil, nil, fmt.Errorf("committing block %d failed: %w", header.Number.Uint64(), err)
+		}
 	}
 
 	return newBlock, retRequests, nil
