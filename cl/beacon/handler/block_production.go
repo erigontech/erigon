@@ -19,7 +19,6 @@ package handler
 import (
 	"bytes"
 	"context"
-	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -61,6 +60,7 @@ import (
 	"github.com/erigontech/erigon/common/length"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/version"
 	"github.com/erigontech/erigon/execution/engineapi/engine_types"
 	"github.com/erigontech/erigon/execution/protocol/params"
 	"github.com/erigontech/erigon/execution/rlp"
@@ -80,7 +80,10 @@ var (
 	errBuilderNotEnabled = errors.New("builder is not enabled")
 )
 
-var defaultGraffitiString = "Caplin"
+const (
+	caplinClientCode = "CN"
+	caplinClientName = "caplin"
+)
 
 const minPayloadPollingWindow = 100 * time.Millisecond
 
@@ -88,6 +91,109 @@ const minPayloadPollingWindow = 100 * time.Millisecond
 // attestation deadline, reserving that margin for consensus processing, signing and gossip so the
 // produced block still reaches attesters in time to earn the proposer boost.
 const payloadPublicationDivisor = 4
+
+// defaultGraffiti is used when the validator does not specify a graffiti. It follows the
+// client-version graffiti standard, encoding the execution and consensus client codes and
+// their commit prefixes so client-diversity tooling can attribute proposed blocks. See
+// https://github.com/ethereum/execution-apis/blob/main/src/engine/identification.md
+func (a *ApiHandler) defaultGraffiti() common.Hash {
+	graffiti := caplinClientCode + graffitiCommitPrefix(version.GitCommit)
+	if el := a.executionClientVersion(); el != nil {
+		graffiti = graffitiClientCode(el.Code) + graffitiCommitPrefix(el.Commit) + graffiti
+	}
+	return graffitiFromString(graffiti)
+}
+
+// elClientVersionUnavailable is a sentinel cached when the execution client does not
+// implement engine_getClientVersionV1, so the negative outcome is memoized too.
+var elClientVersionUnavailable = &engine_types.ClientVersionV1{}
+
+// executionClientVersion returns the connected execution client's version if it is already
+// cached, otherwise it kicks off a one-shot background fetch and returns nil. Block
+// production never blocks on the engine API: the first proposal after startup falls back to
+// consensus-only graffiti and later proposals pick up the execution client code once the
+// fetch has populated the cache (the version is static for the lifetime of a connection).
+func (a *ApiHandler) executionClientVersion() *engine_types.ClientVersionV1 {
+	if cached := a.elClientVersion.Load(); cached != nil {
+		return normalizeELClientVersion(cached)
+	}
+	a.triggerELClientVersionFetch()
+	return nil
+}
+
+// triggerELClientVersionFetch starts a single background fetch of the execution client
+// version, unless one is already in flight or the version is already cached.
+func (a *ApiHandler) triggerELClientVersionFetch() {
+	if a.engine == nil || a.elClientVersion.Load() != nil {
+		return
+	}
+	if !a.elClientVersionFetching.CompareAndSwap(false, true) {
+		return
+	}
+	go func() {
+		defer a.elClientVersionFetching.Store(false)
+		a.fetchExecutionClientVersion()
+	}()
+}
+
+// fetchExecutionClientVersion queries the engine once and caches the outcome. Transient
+// errors are left uncached so a later fetch can retry; only a genuinely unsupported method
+// (JSON-RPC -32601) or an empty result is memoized as unavailable.
+func (a *ApiHandler) fetchExecutionClientVersion() {
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	caplin := engine_types.NewClientVersionV1(caplinClientCode, caplinClientName, a.version, version.GitCommit)
+	versions, err := a.engine.GetClientVersionV1(ctx, &caplin)
+	if err != nil {
+		if methodNotFound(err) {
+			a.elClientVersion.Store(elClientVersionUnavailable)
+		}
+		return
+	}
+	if len(versions) == 0 {
+		a.elClientVersion.Store(elClientVersionUnavailable)
+		return
+	}
+	el := versions[0]
+	a.elClientVersion.Store(&el)
+}
+
+func normalizeELClientVersion(v *engine_types.ClientVersionV1) *engine_types.ClientVersionV1 {
+	if v == nil || v == elClientVersionUnavailable {
+		return nil
+	}
+	return v
+}
+
+// graffitiClientCode clamps a client code to the 2 bytes the graffiti standard reserves for
+// it, guarding against a non-conforming execution client returning an over-long code.
+func graffitiClientCode(code string) string {
+	if len(code) > 2 {
+		return code[:2]
+	}
+	return code
+}
+
+// methodNotFound reports whether err is a JSON-RPC "method not found" (-32601) error.
+func methodNotFound(err error) bool {
+	var coder interface{ ErrorCode() int }
+	return errors.As(err, &coder) && coder.ErrorCode() == -32601
+}
+
+// graffitiCommitPrefix returns the leading 2 bytes (4 hex chars) of a commit hash.
+func graffitiCommitPrefix(commit string) string {
+	commit = strings.TrimPrefix(commit, "0x")
+	if len(commit) >= 4 {
+		return commit[:4]
+	}
+	return commit + strings.Repeat("0", 4-len(commit))
+}
+
+func graffitiFromString(s string) common.Hash {
+	var graffiti common.Hash
+	copy(graffiti[:], s)
+	return graffiti
+}
 
 type blockBuilderWindow struct {
 	firstGetAt time.Time
@@ -310,9 +416,11 @@ func (a *ApiHandler) GetEthV3ValidatorBlock(
 	if r.URL.Query().Has("skip_randao_verification") {
 		randaoReveal = common.Bytes96{0xc0} // infinity bls signature
 	}
-	graffiti := common.HexToHash(r.URL.Query().Get("graffiti"))
-	if !r.URL.Query().Has("graffiti") {
-		graffiti = common.HexToHash(hex.EncodeToString([]byte(defaultGraffitiString)))
+	var graffiti common.Hash
+	if r.URL.Query().Has("graffiti") {
+		graffiti = common.HexToHash(r.URL.Query().Get("graffiti"))
+	} else {
+		graffiti = a.defaultGraffiti()
 	}
 
 	tx, err := a.indiciesDB.BeginRo(ctx)
