@@ -541,23 +541,20 @@ func (sdc *SharedDomainsCommitmentContext) ComputeCommitment(ctx context.Context
 		warmupConfig = sdc.warmupBase
 		warmupConfig.MaxDepth = commitment.WarmupMaxDepth
 		warmupConfig.LogPrefix = logPrefix
-		// Pin the file generation this commitment (and its in-memory overlay) is
-		// bound to, so parallel/warmup worker reads stay consistent with it — a
-		// worker opening a fresh snapshot could pin a newer generation and read a
-		// domain (e.g. code) inconsistent with the account overlay.
-		var workerPin kv.TemporalFilesPin
-		if p, ok := tx.(filesPinner); ok {
-			if wp := p.Pin(); wp != nil {
-				workerPin = wp
-				defer workerPin.Close()
-			}
-		}
 		switch trie := sdc.patriciaTrie.(type) {
 		case *commitment.ParallelPatriciaHashed:
-			// A parallel commitment without a pinned snapshot means the backing tx
-			// can't pin its file generation, so concurrent worker reads may diverge
-			// from the main read across file generations (the torn Accounts/Code
-			// read). Expected only for non-pinnable backends (some tests/mocks).
+			// The parallel fold workers compute the root, so they must read the same
+			// file generation the in-memory overlay was built against: pin the main
+			// tx's generation and open worker txns from it. Otherwise a worker could
+			// pin a newer generation and read a domain (e.g. code) inconsistent with
+			// the account overlay (the torn Accounts/Code read).
+			var workerPin kv.TemporalFilesPin
+			if p, ok := tx.(filesPinner); ok {
+				if wp := p.Pin(); wp != nil {
+					workerPin = wp
+					defer workerPin.Close()
+				}
+			}
 			if workerPin == nil {
 				log.Warn("[commitment] parallel commitment without a pinned file snapshot; worker reads not generation-consistent", "logPrefix", logPrefix)
 			}
@@ -567,7 +564,9 @@ func (sdc *SharedDomainsCommitmentContext) ComputeCommitment(ctx context.Context
 			warmupConfig.CtxFactory, drainCollectors = sdc.concurrentTrieContextFactory(ctx, sdc.paraTrieDB, workerPin, txNum)
 			trie.SetTrieContextFactory(warmupConfig.CtxFactory)
 		default:
-			warmupConfig.CtxFactory = sdc.trieContextFactory(ctx, sdc.paraTrieDB, workerPin, txNum)
+			// Serial/streaming: this factory only serves page-cache warmup, which
+			// does not compute the root, so its reads need no generation pin.
+			warmupConfig.CtxFactory = sdc.trieContextFactory(ctx, sdc.paraTrieDB, txNum)
 		}
 	}
 
@@ -666,11 +665,11 @@ func beginWorkerRo(ctx context.Context, db kv.TemporalRoDB, pin kv.TemporalFiles
 	return db.BeginTemporalRo(ctx)
 }
 
-func (sdc *SharedDomainsCommitmentContext) trieContextFactory(ctx context.Context, db kv.TemporalRoDB, pin kv.TemporalFilesPin, txNum uint64) commitment.TrieContextFactory {
+func (sdc *SharedDomainsCommitmentContext) trieContextFactory(ctx context.Context, db kv.TemporalRoDB, txNum uint64) commitment.TrieContextFactory {
 	// avoid races like this
 	stepSize := sdc.sharedDomains.StepSize()
 	return func() (commitment.PatriciaContext, func()) {
-		roTx, err := beginWorkerRo(ctx, db, pin) //nolint:gocritic
+		roTx, err := db.BeginTemporalRo(ctx) //nolint:gocritic
 		if err != nil {
 			return &errorTrieContext{err: err}, func() {}
 		}
