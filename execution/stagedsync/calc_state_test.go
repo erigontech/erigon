@@ -683,3 +683,80 @@ func TestNormalizeWriteSet_PostGenesisEmptyAccountTriggersEIP161(t *testing.T) {
 	assert.Equal(t, commitment.DeleteUpdate, got.Flags,
 		"empty account with emptyRemoval=true must emit DeleteUpdate (EIP-161)")
 }
+
+// TestDropCreatedNonExistentWrites_RemovesPhantomRecord: an account created
+// empty in-block (createObject writes AddressPath + CodeHash, a value op writes
+// Balance=0) has NO NoncePath write — nonce stays 0. It is EIP-161-empty
+// (non-existent), so every one of its versionMap writes must be dropped from the
+// flush, or a later tx that reads it as absent re-executes against the phantom
+// record (and dropping only AddressPath would leave the Balance cell, which the
+// synthesis funded-check treats as existing).
+func TestDropCreatedNonExistentWrites_RemovesPhantomRecord(t *testing.T) {
+	addr := accounts.InternAddress([20]byte{0x6a, 0x0c, 0x8e, 0x82})
+	ver := state.Version{TxIndex: 46, Incarnation: 0}
+	writes := state.VersionedWrites{
+		&state.VersionedWrite{Address: addr, Path: state.AddressPath, Val: &accounts.Account{CodeHash: accounts.EmptyCodeHash}, Version: ver},
+		&state.VersionedWrite{Address: addr, Path: state.BalancePath, Val: uint256.Int{}, Version: ver},
+		&state.VersionedWrite{Address: addr, Path: state.CodeHashPath, Val: accounts.EmptyCodeHash, Version: ver},
+	}
+	out := dropCreatedNonExistentWrites(writes, true, false)
+	for _, w := range out {
+		require.NotEqualf(t, addr, w.Address, "every write for a created-empty account must be dropped, found path=%v", w.Path)
+	}
+}
+
+// TestDropCreatedNonExistentWrites_KeepsRealAccounts: a funded EOA (balance>0)
+// and a contract (nonce 1) are not empty and must keep all their writes;
+// emptyRemoval=false disables the filter entirely (pre-SpuriousDragon).
+func TestDropCreatedNonExistentWrites_KeepsRealAccounts(t *testing.T) {
+	funded := accounts.InternAddress([20]byte{0x01})
+	contract := accounts.InternAddress([20]byte{0x02})
+	empty := accounts.InternAddress([20]byte{0x03})
+	ver := state.Version{TxIndex: 46, Incarnation: 0}
+	writes := state.VersionedWrites{
+		&state.VersionedWrite{Address: funded, Path: state.AddressPath, Val: &accounts.Account{}, Version: ver},
+		&state.VersionedWrite{Address: funded, Path: state.BalancePath, Val: *uint256.NewInt(1000), Version: ver},
+		&state.VersionedWrite{Address: funded, Path: state.CodeHashPath, Val: accounts.EmptyCodeHash, Version: ver},
+		&state.VersionedWrite{Address: contract, Path: state.AddressPath, Val: &accounts.Account{}, Version: ver},
+		&state.VersionedWrite{Address: contract, Path: state.NoncePath, Val: uint64(1), Version: ver},
+		&state.VersionedWrite{Address: contract, Path: state.CodeHashPath, Val: accounts.EmptyCodeHash, Version: ver},
+		&state.VersionedWrite{Address: empty, Path: state.AddressPath, Val: &accounts.Account{CodeHash: accounts.EmptyCodeHash}, Version: ver},
+		&state.VersionedWrite{Address: empty, Path: state.BalancePath, Val: uint256.Int{}, Version: ver},
+		&state.VersionedWrite{Address: empty, Path: state.CodeHashPath, Val: accounts.EmptyCodeHash, Version: ver},
+	}
+	out := dropCreatedNonExistentWrites(writes, true, false)
+	kept := make(map[accounts.Address]int)
+	for _, w := range out {
+		kept[w.Address]++
+	}
+	require.Equal(t, 3, kept[funded], "funded account writes must be kept")
+	require.Equal(t, 3, kept[contract], "contract account writes must be kept")
+	require.Equal(t, 0, kept[empty], "created-empty account writes must be dropped")
+	require.Len(t, dropCreatedNonExistentWrites(writes, false, false), len(writes), "emptyRemoval=false keeps everything")
+}
+
+// TestDropCreatedNonExistentWrites_DropsSelfDestructed: EIP-6780 only lets a
+// same-tx-created account fully self-destruct, so a created account with a final
+// SelfDestructPath=true is net non-existent — its writes must be dropped, else a
+// later tx reading its SelfDestructPath before the SD flushed re-executes. A
+// created account whose final SelfDestructPath=false was resurrected and stays.
+func TestDropCreatedNonExistentWrites_DropsSelfDestructed(t *testing.T) {
+	destroyed := accounts.InternAddress([20]byte{0x0a, 0xd7})
+	recreated := accounts.InternAddress([20]byte{0x0a, 0xd8})
+	ver := state.Version{TxIndex: 205, Incarnation: 0}
+	writes := state.VersionedWrites{
+		&state.VersionedWrite{Address: destroyed, Path: state.AddressPath, Val: &accounts.Account{}, Version: ver},
+		&state.VersionedWrite{Address: destroyed, Path: state.BalancePath, Val: uint256.Int{}, Version: ver},
+		&state.VersionedWrite{Address: destroyed, Path: state.SelfDestructPath, Val: true, Version: ver},
+		&state.VersionedWrite{Address: recreated, Path: state.AddressPath, Val: &accounts.Account{}, Version: ver},
+		&state.VersionedWrite{Address: recreated, Path: state.NoncePath, Val: uint64(1), Version: ver},
+		&state.VersionedWrite{Address: recreated, Path: state.SelfDestructPath, Val: false, Version: ver},
+	}
+	out := dropCreatedNonExistentWrites(writes, true, false)
+	kept := make(map[accounts.Address]int)
+	for _, w := range out {
+		kept[w.Address]++
+	}
+	require.Equal(t, 0, kept[destroyed], "created-and-destroyed (EIP-6780) account writes must be dropped")
+	require.Equal(t, 3, kept[recreated], "created account with final SelfDestructPath=false (alive) must be kept")
+}

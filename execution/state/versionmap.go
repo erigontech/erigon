@@ -600,14 +600,13 @@ func valuesEqual(path AccountPath, readVal, writeVal any) bool {
 		wv, ok2 := writeVal.([]byte)
 		return ok1 && ok2 && bytes.Equal(rv, wv)
 	case AddressPath:
-		// Record-level comparison — both should be *accounts.Account
+		// Existence-only: the AddressPath cell keeps createObject's initial stamp
+		// (zero balance/nonce, empty code) while the fields are set afterwards and
+		// each validated as its own recorded read. Comparing fields here would
+		// spuriously re-execute a created account whose fields were set post-create.
 		rv, ok1 := readVal.(*accounts.Account)
 		wv, ok2 := writeVal.(*accounts.Account)
-		if !ok1 || !ok2 || rv == nil || wv == nil {
-			return false
-		}
-		return rv.Balance.Eq(&wv.Balance) && rv.Nonce == wv.Nonce &&
-			rv.Incarnation == wv.Incarnation && rv.CodeHash == wv.CodeHash
+		return ok1 && ok2 && rv != nil && wv != nil
 	case StoragePath:
 		rv, ok1 := readVal.(uint256.Int)
 		wv, ok2 := writeVal.(uint256.Int)

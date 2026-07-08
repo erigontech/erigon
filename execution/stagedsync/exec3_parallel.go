@@ -2224,6 +2224,16 @@ func (be *blockExecutor) tooManyRetries(tx, txIndex int, label string, origin er
 		rules.ErrInvalidBlock, be.blockNum, txIndex, be.tasks[tx].TxHash(), label, be.txIncarnations[tx], len(be.tasks)))
 }
 
+// flushVersionedWritesFiltered flushes the apply-loop write-set to the versionMap
+// after dropping created-then-non-existent accounts (EIP-161-empty or
+// EIP-6780-destroyed), whose leftover phantom records would otherwise re-execute
+// a reader that reads the account as absent.
+func (be *blockExecutor) flushVersionedWritesFiltered(pe *parallelExecutor, writes state.VersionedWrites, complete bool, tracePrefix string) {
+	emptyRemoval := be.blockNum != 0 && pe.cfg.chainConfig.IsEIP161Enabled(be.blockNum)
+	filtered := dropCreatedNonExistentWrites(writes, emptyRemoval, pe.cfg.chainConfig.Aura != nil)
+	be.versionMap.FlushVersionedWrites(filtered, complete, tracePrefix)
+}
+
 func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, res *exec.TxResult, applyTx kv.TemporalTx) (result *blockResult, err error) {
 	task, ok := res.Task.(*taskVersion)
 
@@ -2489,7 +2499,7 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 
 		be.versionMap.SetTrace(trace)
 		writeSet := be.blockIO.WriteSet(txVersion.TxIndex)
-		be.versionMap.FlushVersionedWrites(writeSet, applyLoopFlushAsComplete(valid, cntInvalid), tracePrefix)
+		be.flushVersionedWritesFiltered(pe, writeSet, applyLoopFlushAsComplete(valid, cntInvalid), tracePrefix)
 		be.versionMap.SetTrace(false)
 
 		if valid {
@@ -3601,6 +3611,90 @@ func normalizeWriteSet(writes state.VersionedWrites, vm *state.VersionMap, txInd
 	}
 
 	return filtered
+}
+
+// dropCreatedNonExistentWrites removes every versionMap write for an in-block
+// created account whose net state is non-existent (EIP-161-empty, or created
+// then self-destructed — which post-EIP-6780 means same-tx). A later reader falls
+// through to the absent DB record and matches, instead of re-executing against
+// the phantom cells createObject left. hasSDFalse guards a same-tx recreate.
+func dropCreatedNonExistentWrites(writes state.VersionedWrites, emptyRemoval bool, isAura bool) state.VersionedWrites {
+	if !emptyRemoval {
+		return writes
+	}
+	type acctState struct {
+		hasAddr    bool
+		hasBal     bool
+		hasNonce   bool
+		hasCode    bool
+		hasStorage bool
+		hasSDTrue  bool
+		hasSDFalse bool
+		balance    uint256.Int
+		nonce      uint64
+		codeHash   accounts.CodeHash
+	}
+	states := make(map[accounts.Address]*acctState)
+	stateOf := func(addr accounts.Address) *acctState {
+		s := states[addr]
+		if s == nil {
+			s = &acctState{}
+			states[addr] = s
+		}
+		return s
+	}
+	for _, w := range writes {
+		switch w.Path {
+		case state.AddressPath:
+			stateOf(w.Address).hasAddr = true
+		case state.BalancePath:
+			s := stateOf(w.Address)
+			s.hasBal = true
+			s.balance = w.Val.(uint256.Int)
+		case state.NoncePath:
+			s := stateOf(w.Address)
+			s.hasNonce = true
+			s.nonce = w.Val.(uint64)
+		case state.CodeHashPath:
+			s := stateOf(w.Address)
+			s.hasCode = true
+			s.codeHash = w.Val.(accounts.CodeHash)
+		case state.StoragePath:
+			stateOf(w.Address).hasStorage = true
+		case state.SelfDestructPath:
+			s := stateOf(w.Address)
+			if v, ok := w.Val.(bool); ok && v {
+				s.hasSDTrue = true
+			} else {
+				s.hasSDFalse = true
+			}
+		}
+	}
+	gone := make(map[accounts.Address]struct{})
+	for addr, s := range states {
+		if !state.EIP161EmptyRemoval(emptyRemoval, isAura, addr) || !s.hasAddr {
+			continue
+		}
+		destroyed := s.hasSDTrue && !s.hasSDFalse
+		emptyTouch := !s.hasSDTrue && !s.hasSDFalse && !s.hasStorage &&
+			(!s.hasBal || s.balance.IsZero()) &&
+			(!s.hasNonce || s.nonce == 0) &&
+			(!s.hasCode || s.codeHash.IsEmpty())
+		if destroyed || emptyTouch {
+			gone[addr] = struct{}{}
+		}
+	}
+	if len(gone) == 0 {
+		return writes
+	}
+	out := make(state.VersionedWrites, 0, len(writes))
+	for _, w := range writes {
+		if _, ok := gone[w.Address]; ok {
+			continue
+		}
+		out = append(out, w)
+	}
+	return out
 }
 
 // resolveStorageWrites produces a clean write set from CollectorWrites:

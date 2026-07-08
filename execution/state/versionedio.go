@@ -927,7 +927,10 @@ func versionedRead[T any](s *IntraBlockState, addr accounts.Address, path Accoun
 		if vw, ok := s.versionedWrite(addr, path, key); ok {
 			if res.Status() == MVReadResultDone {
 				if pr, ok := s.versionedReads[addr][AccountKey{Path: path, Key: key}]; ok {
-					if vr.Version.TxIndex > destrcutedVersion.TxIndex && vr.Version != pr.Version {
+					// Value-aware: only a genuine value change is a real dependency; a
+					// version-only churn (unchanged value — e.g. a forwarder whose net
+					// balance is restored) must not abort the writing tx.
+					if vr.Version.TxIndex > destrcutedVersion.TxIndex && vr.Version != pr.Version && !valuesEqual(path, pr.Val, res.Value()) {
 						if vr.Version.TxIndex > s.dep {
 							s.dep = vr.Version.TxIndex
 						}
@@ -967,6 +970,15 @@ func versionedRead[T any](s *IntraBlockState, addr accounts.Address, path Accoun
 				return pr.Val.(T), vr.Source, vr.Version, nil
 			}
 
+			// Value-aware relaxation: the version churned but the value is unchanged
+			// (existence-only for the AddressPath record; value-equal otherwise) — a
+			// spurious version-only dependency, not a real one. Return the cached read
+			// and keep the recorded read as-is; validation's value tiebreaker accepts
+			// it. Recording the churned version instead would fabricate a dependency.
+			if valuesEqual(path, pr.Val, res.Value()) {
+				return pr.Val.(T), pr.Source, pr.Version, nil
+			}
+
 			if vr.Version.TxIndex > s.dep {
 				s.dep = vr.Version.TxIndex
 			}
@@ -980,7 +992,6 @@ func versionedRead[T any](s *IntraBlockState, addr accounts.Address, path Accoun
 			}
 
 			s.versionedReads.Set(vr)
-
 			panic(ErrDependency)
 		}
 

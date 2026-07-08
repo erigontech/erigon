@@ -7,6 +7,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/commitment"
 	"github.com/erigontech/erigon/execution/types/accounts"
@@ -127,6 +128,25 @@ func TestValuesEqual(t *testing.T) {
 	assert.False(t, valuesEqual(CodePath, code, []byte{0x60, 0x01}), "Different code should not be equal")
 }
 
+// TestValuesEqual_AddressPathExistenceOnly: the AddressPath record comparison is
+// existence-only. createObject stamps the record with initial fields (balance 0,
+// nonce 0, empty code); the real fields are set afterwards and land in their own
+// Balance/Nonce/Incarnation/CodeHash cells that refreshVersionedAccount overlays
+// AND records as separate reads. So the record comparison must ignore ALL fields
+// (each validated via its own read) and only confirm existence — else a created
+// funded EOA or a contract (nonce 1 + code) re-executes against the stale initial
+// stamp. nil (creation/deletion) is still caught.
+func TestValuesEqual_AddressPathExistenceOnly(t *testing.T) {
+	ch := accounts.EmptyCodeHash
+	initial := &accounts.Account{CodeHash: ch}
+	funded := &accounts.Account{Balance: *uint256.NewInt(61522), CodeHash: ch}
+	contract := &accounts.Account{Nonce: 1, Incarnation: 1, CodeHash: accounts.InternCodeHash(crypto.HashData([]byte{0x60, 0x00}))}
+	assert.True(t, valuesEqual(AddressPath, funded, initial), "funded EOA vs initial stamp: existence-only → equal")
+	assert.True(t, valuesEqual(AddressPath, contract, initial), "contract vs initial stamp: existence-only → equal")
+	assert.False(t, valuesEqual(AddressPath, funded, nil), "nil (deletion) must still be caught")
+	assert.False(t, valuesEqual(AddressPath, nil, contract), "nil (creation) must still be caught")
+}
+
 // TestFoldedSubfieldRead_RelaxesOnUnchangedField (review R1): a sub-field read
 // with no dedicated cell folds onto AddressPath; when calcFees re-stamps the
 // AddressPath cell (new incarnation/balance, same code hash), the folded read
@@ -232,6 +252,167 @@ func TestCachedRefreshDoesNotReconcileRecordedRead(t *testing.T) {
 	require.True(t, ok)
 	assert.Equal(t, *uint256.NewInt(100), got.Balance,
 		"cached-refresh must not overwrite the recorded read with the overlaid value")
+}
+
+// TestCreatedAccountResolvedFromBAL: an account absent from the DB but carrying
+// a BAL-populated sub-field cell from an earlier tx must resolve as created —
+// read from the versionMap rather than returning "absent" and re-executing when
+// the creating tx later flushes its AddressPath record. This is the dominant
+// residual re-exec source (the storage(-2.-1)!=(N.0) pattern in the trace).
+func TestCreatedAccountResolvedFromBAL(t *testing.T) {
+	mvhm := NewVersionMap(nil)
+	addr := accounts.InternAddress([20]byte{0x08, 0x16})
+
+	// A prior tx funds X at tx 4; the BAL pre-populates its balance. No
+	// AddressPath cell (the record is never in the BAL), no DB entry, no code
+	// (EOA funding — the common created-account case).
+	mvhm.Write(addr, BalancePath, accounts.NilKey, Version{TxIndex: 4}, *uint256.NewInt(100), true)
+
+	ibs := NewWithVersionMap(&emptyReader{}, mvhm)
+	ibs.txIndex = 10
+
+	so, err := ibs.getStateObject(addr, true)
+	require.NoError(t, err)
+	require.NotNil(t, so, "account with a BAL sub-field cell from an earlier tx must resolve as created, not absent")
+	assert.Equal(t, *uint256.NewInt(100), so.data.Balance, "must see the BAL-populated balance")
+
+	// The creating tx flushes X's AddressPath record at tx 4 — a real funded
+	// EOA carries EmptyCodeHash, which the synthesized record must match.
+	created := &accounts.Account{Balance: *uint256.NewInt(100)}
+	created.CodeHash = accounts.EmptyCodeHash
+	mvhm.Write(addr, AddressPath, accounts.NilKey, Version{TxIndex: 4}, created, true)
+
+	// Validation must stay valid — the read resolved from the BAL, so no re-exec.
+	io := NewVersionedIO(11)
+	io.RecordReads(Version{TxIndex: 10, Incarnation: 0}, ibs.VersionedReads())
+	checkVersionEqual := func(rv, wv Version) VersionValidity {
+		if rv == wv {
+			return VersionValid
+		}
+		return VersionInvalid
+	}
+	valid := mvhm.ValidateVersion(10, io, checkVersionEqual, false, "")
+	assert.Equal(t, VersionValid, valid, "created-account read must not re-execute")
+}
+
+// TestCreatedContractResolvedFromBAL: post-EIP-6780 a contract created by a
+// prior tx always has incarnation 1 (cross-tx SD+recreate is impossible), so a
+// created contract absent from the DB is fully synthesizable from the BAL —
+// incarnation 1, codehash from the CodePath cell — and must not re-execute.
+func TestCreatedContractResolvedFromBAL(t *testing.T) {
+	mvhm := NewVersionMap(nil)
+	addr := accounts.InternAddress([20]byte{0x08, 0x88})
+	code := []byte{0x60, 0x00, 0x60, 0x00, 0xf3}
+	codeHash := accounts.InternCodeHash(crypto.HashData(code))
+
+	// A prior tx deploys X as a contract at tx 4; the BAL carries its balance,
+	// nonce and code. No AddressPath cell, no DB entry, no selfdestruct.
+	mvhm.Write(addr, BalancePath, accounts.NilKey, Version{TxIndex: 4}, *uint256.NewInt(50), true)
+	mvhm.Write(addr, NoncePath, accounts.NilKey, Version{TxIndex: 4}, uint64(1), true)
+	mvhm.Write(addr, CodePath, accounts.NilKey, Version{TxIndex: 4}, code, true)
+
+	ibs := NewWithVersionMap(&emptyReader{}, mvhm)
+	ibs.txIndex = 10
+
+	so, err := ibs.getStateObject(addr, true)
+	require.NoError(t, err)
+	require.NotNil(t, so, "created contract must resolve as created, not absent")
+	assert.Equal(t, *uint256.NewInt(50), so.data.Balance)
+	assert.Equal(t, uint64(1), so.data.Nonce)
+	assert.Equal(t, uint64(1), so.data.Incarnation, "fresh contract incarnation = 1")
+	assert.Equal(t, codeHash, so.data.CodeHash, "codehash = keccak(code)")
+
+	// The creating tx flushes X's record at tx 4.
+	created := &accounts.Account{Balance: *uint256.NewInt(50), Nonce: 1, Incarnation: 1, CodeHash: codeHash}
+	mvhm.Write(addr, AddressPath, accounts.NilKey, Version{TxIndex: 4}, created, true)
+
+	io := NewVersionedIO(11)
+	io.RecordReads(Version{TxIndex: 10, Incarnation: 0}, ibs.VersionedReads())
+	checkVersionEqual := func(rv, wv Version) VersionValidity {
+		if rv == wv {
+			return VersionValid
+		}
+		return VersionInvalid
+	}
+	valid := mvhm.ValidateVersion(10, io, checkVersionEqual, false, "")
+	assert.Equal(t, VersionValid, valid, "created-contract read must not re-execute")
+}
+
+// fixedReader returns a preset account for ReadAccountData (a pre-block DB
+// record), delegating everything else to emptyReader.
+type fixedReader struct {
+	emptyReader
+	acc *accounts.Account
+}
+
+func (r *fixedReader) ReadAccountData(accounts.Address) (*accounts.Account, error) { return r.acc, nil }
+
+// TestDBRecordOverlaysBALBalance: a record loaded from the DB (pre-block) must
+// overlay a newer in-block BAL BalancePath value, not keep the stale pre-block
+// balance. The bug was that the fresh DB-load stamped the record with the tx's
+// own version, so refreshVersionedAccount's bversion>readVersion overlay guard
+// skipped the (lower-versioned) BAL cell — leaving a stale balance that
+// re-executes at validation.
+func TestDBRecordOverlaysBALBalance(t *testing.T) {
+	mvhm := NewVersionMap(nil)
+	addr := accounts.InternAddress([20]byte{0xab, 0xcd})
+	// BAL: a prior tx changed X's balance to 200 at tx 5.
+	mvhm.Write(addr, BalancePath, accounts.NilKey, Version{TxIndex: 5}, *uint256.NewInt(200), true)
+	// DB: X exists pre-block with balance 100.
+	dbAcc := &accounts.Account{Balance: *uint256.NewInt(100)}
+	dbAcc.CodeHash = accounts.EmptyCodeHash
+
+	ibs := NewWithVersionMap(&fixedReader{acc: dbAcc}, mvhm)
+	ibs.txIndex = 10
+
+	so, err := ibs.getStateObject(addr, true)
+	require.NoError(t, err)
+	require.NotNil(t, so)
+	assert.Equal(t, *uint256.NewInt(200), so.data.Balance,
+		"DB-read record must overlay the BAL's in-block balance, not keep the stale pre-block value")
+
+	// The prior tx flushes X's record (balance 200) at tx 5.
+	rec := &accounts.Account{Balance: *uint256.NewInt(200)}
+	rec.CodeHash = accounts.EmptyCodeHash
+	mvhm.Write(addr, AddressPath, accounts.NilKey, Version{TxIndex: 5}, rec, true)
+
+	io := NewVersionedIO(11)
+	io.RecordReads(Version{TxIndex: 10, Incarnation: 0}, ibs.VersionedReads())
+	checkVersionEqual := func(rv, wv Version) VersionValidity {
+		if rv == wv {
+			return VersionValid
+		}
+		return VersionInvalid
+	}
+	valid := mvhm.ValidateVersion(10, io, checkVersionEqual, false, "")
+	assert.Equal(t, VersionValid, valid, "overlaid DB record read must not re-execute")
+}
+
+// TestStaleRecordCellOverlaidByBAL: a mid-flight worker can leave a stale
+// AddressPath record cell at a higher version than the BAL's BalancePath cell.
+// The record read must still resolve the BAL's authoritative balance (the BAL
+// is the source of truth for floor(txIndex)), not let the stale record shadow
+// it via the bversion>readVersion overlay guard. A read that doesn't resolve
+// from the BAL is exactly the non-determinism that causes re-execution.
+func TestStaleRecordCellOverlaidByBAL(t *testing.T) {
+	mvhm := NewVersionMap(nil)
+	addr := accounts.InternAddress([20]byte{0xf9, 0x7e})
+	// BAL: authoritative balance 200 for floor(10) (changed at tx 5).
+	mvhm.Write(addr, BalancePath, accounts.NilKey, Version{TxIndex: 5}, *uint256.NewInt(200), true)
+	// A mid-flight worker left a stale AddressPath record at tx 7 (balance 100),
+	// at a higher version than the BalancePath cell.
+	stale := &accounts.Account{Balance: *uint256.NewInt(100)}
+	stale.CodeHash = accounts.EmptyCodeHash
+	mvhm.Write(addr, AddressPath, accounts.NilKey, Version{TxIndex: 7}, stale, true)
+
+	ibs := NewWithVersionMap(&emptyReader{}, mvhm)
+	ibs.txIndex = 10
+
+	so, err := ibs.getStateObject(addr, true)
+	require.NoError(t, err)
+	require.NotNil(t, so)
+	assert.Equal(t, *uint256.NewInt(200), so.data.Balance,
+		"the BAL's balance must override a stale higher-versioned record cell")
 }
 
 // TestVersionedWriteVersion verifies that VersionedWrite entries at
@@ -610,4 +791,137 @@ func TestSelfDestructKeepsDirtyStorageReadableSameTx(t *testing.T) {
 			assert.False(t, v.IsZero(), "Selfdestruct must not emit StoragePath=0 for slot %x", w.Key.Value())
 		}
 	}
+}
+
+// TestReadTimeDependency_RelaxesOnUnchangedValue: a read-time version mismatch
+// whose VALUE is unchanged (a lower tx re-stamped the same value at a new
+// version — coinbase churn) must not abort with ErrDependency. The value-aware
+// check treats it as a spurious version-only dependency; validation stays the
+// backstop for real changes.
+func TestReadTimeDependency_RelaxesOnUnchangedValue(t *testing.T) {
+	vm := NewVersionMap(nil)
+	addr := accounts.InternAddress([20]byte{0xf9, 0x7e, 0x18, 0x0c})
+	vm.Write(addr, BalancePath, accounts.NilKey, Version{TxIndex: 5}, *uint256.NewInt(100), true)
+	ibs := NewWithVersionMap(&emptyReader{}, vm)
+	ibs.txIndex = 10
+	ibs.versionedReads = ReadSet{}
+	ibs.versionedReads.Set(VersionedRead{Address: addr, Path: BalancePath, Key: accounts.NilKey, Source: MapRead, Version: Version{TxIndex: 3}, Val: *uint256.NewInt(100)})
+	assert.NotPanics(t, func() {
+		v, _, _, err := versionedRead[uint256.Int](ibs, addr, BalancePath, accounts.NilKey, false, uint256.Int{}, nil, nil)
+		require.NoError(t, err)
+		assert.Equal(t, *uint256.NewInt(100), v)
+	}, "unchanged-value version churn must not abort")
+}
+
+// TestReadTimeDependency_RelaxesOnUnchangedRecord is the coinbase case: an
+// AddressPath record read whose version churned but whose existence is unchanged
+// (fields resolved separately from the BAL) must not abort.
+func TestReadTimeDependency_RelaxesOnUnchangedRecord(t *testing.T) {
+	vm := NewVersionMap(nil)
+	addr := accounts.InternAddress([20]byte{0xf9, 0x7e, 0x18, 0x0c})
+	vm.Write(addr, AddressPath, accounts.NilKey, Version{TxIndex: 5}, &accounts.Account{Balance: *uint256.NewInt(200), CodeHash: accounts.EmptyCodeHash}, true)
+	ibs := NewWithVersionMap(&emptyReader{}, vm)
+	ibs.txIndex = 10
+	ibs.versionedReads = ReadSet{}
+	ibs.versionedReads.Set(VersionedRead{Address: addr, Path: AddressPath, Key: accounts.NilKey, Source: MapRead, Version: Version{TxIndex: 3}, Val: &accounts.Account{Balance: *uint256.NewInt(100), CodeHash: accounts.EmptyCodeHash}})
+	assert.NotPanics(t, func() {
+		_, _, _, err := versionedRead[*accounts.Account](ibs, addr, AddressPath, accounts.NilKey, false, nil, nil, nil)
+		require.NoError(t, err)
+	}, "record read must not abort on version-only churn when existence is unchanged")
+}
+
+// TestReadTimeDependency_AbortsOnChangedValue guards the relaxation: a genuinely
+// changed value must still abort (real data dependency).
+func TestReadTimeDependency_AbortsOnChangedValue(t *testing.T) {
+	vm := NewVersionMap(nil)
+	addr := accounts.InternAddress([20]byte{0x0c, 0x0b})
+	vm.Write(addr, BalancePath, accounts.NilKey, Version{TxIndex: 5}, *uint256.NewInt(200), true)
+	ibs := NewWithVersionMap(&emptyReader{}, vm)
+	ibs.txIndex = 10
+	ibs.versionedReads = ReadSet{}
+	ibs.versionedReads.Set(VersionedRead{Address: addr, Path: BalancePath, Key: accounts.NilKey, Source: MapRead, Version: Version{TxIndex: 3}, Val: *uint256.NewInt(100)})
+	assert.Panics(t, func() {
+		_, _, _, _ = versionedRead[uint256.Int](ibs, addr, BalancePath, accounts.NilKey, false, uint256.Int{}, nil, nil)
+	}, "changed balance value must still abort (real dependency)")
+}
+
+// TestReadTimeDependency_RelaxationRecordsValue: a value-aware relaxation must
+// record the value it returned (not leave Val nil). Otherwise a subsequent
+// same-version read type-asserts a nil interface at the cached-read return and
+// panics — surfacing as a caught speculative-defer re-execution.
+func TestReadTimeDependency_RelaxationRecordsValue(t *testing.T) {
+	vm := NewVersionMap(nil)
+	addr := accounts.InternAddress([20]byte{0xab, 0xcd})
+	vm.Write(addr, BalancePath, accounts.NilKey, Version{TxIndex: 5}, *uint256.NewInt(100), true)
+	ibs := NewWithVersionMap(&emptyReader{}, vm)
+	ibs.txIndex = 10
+	ibs.versionedReads = ReadSet{}
+	ibs.versionedReads.Set(VersionedRead{Address: addr, Path: BalancePath, Key: accounts.NilKey, Source: MapRead, Version: Version{TxIndex: 3}, Val: *uint256.NewInt(100)})
+	_, _, _, err := versionedRead[uint256.Int](ibs, addr, BalancePath, accounts.NilKey, false, uint256.Int{}, nil, nil)
+	require.NoError(t, err)
+	rd, ok := ibs.versionedReads[addr][AccountKey{Path: BalancePath}]
+	require.True(t, ok)
+	require.NotNil(t, rd.Val, "relaxed read must record its value, not nil")
+	assert.NotPanics(t, func() {
+		_, _, _, _ = versionedRead[uint256.Int](ibs, addr, BalancePath, accounts.NilKey, false, uint256.Int{}, nil, nil)
+	}, "subsequent same-version read of the relaxed record must not nil-panic")
+}
+
+// TestWriteTimeDependency_RelaxesOnUnchangedValue: a tx that WROTE a path and
+// re-reads it must not abort when a version-only churn left the read value
+// unchanged (a value-forwarder whose net balance is restored). Only a genuine
+// value change is a real dependency (WR-DEP relaxation).
+func TestWriteTimeDependency_RelaxesOnUnchangedValue(t *testing.T) {
+	vm := NewVersionMap(nil)
+	addr := accounts.InternAddress([20]byte{0x41, 0x95})
+	vm.Write(addr, BalancePath, accounts.NilKey, Version{TxIndex: 5}, *uint256.NewInt(100), true)
+	ibs := NewWithVersionMap(&emptyReader{}, vm)
+	ibs.txIndex = 10
+	ibs.versionedReads = ReadSet{}
+	ibs.versionedReads.Set(VersionedRead{Address: addr, Path: BalancePath, Key: accounts.NilKey, Source: MapRead, Version: Version{TxIndex: 3}, Val: *uint256.NewInt(100)})
+	ibs.versionedWrites = WriteSet{}
+	ibs.versionedWrites.Set(VersionedWrite{Address: addr, Path: BalancePath, Key: accounts.NilKey, Version: Version{TxIndex: 10}, Val: *uint256.NewInt(50)})
+	ibs.journal.dirties[addr] = 1 // versionedWrite is only consulted for a dirtied address
+	assert.NotPanics(t, func() {
+		v, src, _, err := versionedRead[uint256.Int](ibs, addr, BalancePath, accounts.NilKey, false, uint256.Int{}, nil, nil)
+		require.NoError(t, err)
+		assert.Equal(t, WriteSetRead, src, "must return the tx's own write")
+		assert.Equal(t, *uint256.NewInt(50), v)
+	}, "write-time version churn with unchanged read value must not abort")
+}
+
+// TestWriteTimeDependency_AbortsOnChangedValue guards the WR-DEP relaxation: a
+// genuine value change under a written path must still abort.
+func TestWriteTimeDependency_AbortsOnChangedValue(t *testing.T) {
+	vm := NewVersionMap(nil)
+	addr := accounts.InternAddress([20]byte{0x41, 0x96})
+	vm.Write(addr, BalancePath, accounts.NilKey, Version{TxIndex: 5}, *uint256.NewInt(999), true)
+	ibs := NewWithVersionMap(&emptyReader{}, vm)
+	ibs.txIndex = 10
+	ibs.versionedReads = ReadSet{}
+	ibs.versionedReads.Set(VersionedRead{Address: addr, Path: BalancePath, Key: accounts.NilKey, Source: MapRead, Version: Version{TxIndex: 3}, Val: *uint256.NewInt(100)})
+	ibs.versionedWrites = WriteSet{}
+	ibs.versionedWrites.Set(VersionedWrite{Address: addr, Path: BalancePath, Key: accounts.NilKey, Version: Version{TxIndex: 10}, Val: *uint256.NewInt(50)})
+	ibs.journal.dirties[addr] = 1 // versionedWrite is only consulted for a dirtied address
+	assert.Panics(t, func() {
+		_, _, _, _ = versionedRead[uint256.Int](ibs, addr, BalancePath, accounts.NilKey, false, uint256.Int{}, nil, nil)
+	}, "write-time genuine value change must still abort")
+}
+
+// TestGetStateObject_SelfDestructedButBALFunded_StaysAlive: the account.Empty()
+// gate — a BAL-funded account (balance set at floor(txIndex)) must NOT be dropped
+// by a stale SelfDestructPath flag. Without the gate the funded account is
+// wrongly deleted.
+func TestGetStateObject_SelfDestructedButBALFunded_StaysAlive(t *testing.T) {
+	vm := NewVersionMap(nil)
+	addr := accounts.InternAddress([20]byte{0x5d, 0x02})
+	vm.Write(addr, SelfDestructPath, accounts.NilKey, Version{TxIndex: 2}, true, true)
+	vm.Write(addr, BalancePath, accounts.NilKey, Version{TxIndex: 3}, *uint256.NewInt(1000), true)
+	dbAcc := &accounts.Account{CodeHash: accounts.EmptyCodeHash}
+	ibs := NewWithVersionMap(&fixedReader{acc: dbAcc}, vm)
+	ibs.txIndex = 5
+	so, err := ibs.getStateObject(addr, true)
+	require.NoError(t, err)
+	require.NotNil(t, so, "a BAL-funded account must not be dropped by a stale SD flag")
+	assert.Equal(t, *uint256.NewInt(1000), so.data.Balance)
 }

@@ -1067,9 +1067,20 @@ func (sdb *IntraBlockState) getVersionedAccount(addr accounts.Address, readStora
 			source = StorageRead
 			sdb.stateReader.SetTrace(false, "")
 		}
-
-		if readAccount == nil || err != nil {
+		if err != nil {
 			return nil, StorageRead, UnknownVersion, err
+		}
+		if readAccount == nil {
+			if !readStorage {
+				return nil, StorageRead, UnknownVersion, nil
+			}
+			base := sdb.synthesizeCreatedAccountBase(addr)
+			if base == nil {
+				return nil, StorageRead, UnknownVersion, nil
+			}
+			readAccount = base
+			source = MapRead
+			version = UnknownVersion
 		}
 
 		// CachedReaderV3 bypasses the versionMap, so a prior in-block SD'd
@@ -1125,6 +1136,38 @@ func (sdb *IntraBlockState) getVersionedAccount(addr accounts.Address, readStora
 	return refreshed, refreshedSource, refreshedVersion, err
 }
 
+// synthesizeCreatedAccountBase reconstructs a record for an address absent from
+// the DB but created in-block by an earlier tx (detected by a BAL Balance/Nonce
+// cell below the current tx), so a record read resolves from the versionMap
+// instead of re-executing. A CodePath cell means a deploy → incarnation 1, unless
+// it is an EIP-7702 delegation (EOA, incarnation 0). Returns nil when the address
+// is genuinely absent or self-destructed.
+func (sdb *IntraBlockState) synthesizeCreatedAccountBase(addr accounts.Address) *accounts.Account {
+	limit := sdb.txIndex - 1
+	if limit < 0 {
+		return nil
+	}
+	_, funded := sdb.versionMap.LatestTxIndex(addr, BalancePath, accounts.NilKey, limit)
+	if !funded {
+		_, funded = sdb.versionMap.LatestTxIndex(addr, NoncePath, accounts.NilKey, limit)
+	}
+	if !funded {
+		return nil
+	}
+	if _, ok := sdb.versionMap.LatestTxIndex(addr, SelfDestructPath, accounts.NilKey, limit); ok {
+		return nil
+	}
+	account := &accounts.Account{}
+	account.CodeHash = accounts.EmptyCodeHash
+	if code, ok := versionedUpdate[[]byte](sdb.versionMap, addr, CodePath, accounts.NilKey, sdb.txIndex); ok && len(code) > 0 {
+		account.CodeHash = accounts.InternCodeHash(crypto.HashData(code))
+		if _, isDelegation := types.ParseDelegation(code); !isDelegation {
+			account.Incarnation = 1
+		}
+	}
+	return account
+}
+
 func (sdb *IntraBlockState) refreshVersionedAccount(addr accounts.Address, readAccount *accounts.Account, readSource ReadSource, readVersion Version) (*accounts.Account, ReadSource, Version, error) {
 	account := readAccount
 	version := readVersion
@@ -1134,19 +1177,21 @@ func (sdb *IntraBlockState) refreshVersionedAccount(addr accounts.Address, readA
 	if err != nil {
 		return nil, UnknownSource, UnknownVersion, err
 	}
-	if bversion.TxIndex > readVersion.TxIndex || (bversion.TxIndex == readVersion.TxIndex && bversion.Incarnation >= readVersion.Incarnation) {
-		if balance.Cmp(&account.Balance) != 0 {
-			if account == readAccount {
-				account = &accounts.Account{}
-				account.Copy(readAccount)
-			}
-			account.Balance = balance
+	// The versionMap holds the authoritative balance at floor(txIndex); apply it
+	// unconditionally (as CodeHash below is) so a stale higher-versioned worker
+	// AddressPath record can't shadow it via a version guard — that shadowing is
+	// the non-determinism that re-executes.
+	if balance.Cmp(&account.Balance) != 0 {
+		if account == readAccount {
+			account = &accounts.Account{}
+			account.Copy(readAccount)
 		}
-		if bversion.TxIndex > version.TxIndex || (bversion.TxIndex == version.TxIndex && bversion.Incarnation > version.Incarnation) {
-			version = bversion
-			if bsource != source {
-				source = bsource
-			}
+		account.Balance = balance
+	}
+	if bversion.TxIndex > version.TxIndex || (bversion.TxIndex == version.TxIndex && bversion.Incarnation > version.Incarnation) {
+		version = bversion
+		if bsource != source {
+			source = bsource
 		}
 	}
 
@@ -1655,7 +1700,11 @@ func (sdb *IntraBlockState) getStateObject(addr accounts.Address, recordRead boo
 	sdb.stateReader.SetTrace(false, "")
 
 	accountSource := StorageRead
-	accountVersion := sdb.Version()
+	// A record loaded from the DB is pre-block state — older than any in-block
+	// BAL cell — so refreshVersionedAccount must overlay the BAL sub-fields onto
+	// it. Stamping it with the tx's own version would make the bversion>readVersion
+	// overlay guard drop lower-versioned BAL cells, leaving a stale record.
+	accountVersion := UnknownVersion
 
 	if err != nil {
 		return nil, err
@@ -1664,22 +1713,18 @@ func (sdb *IntraBlockState) getStateObject(addr accounts.Address, recordRead boo
 	if readAccount == nil {
 		if sdb.versionMap != nil {
 			readAccount, accountSource, accountVersion, err = versionedRead[*accounts.Account](sdb, addr, AddressPath, accounts.NilKey, false, nil, nil, nil)
-
-			if readAccount == nil || err != nil {
+			if err != nil {
 				return nil, err
 			}
-
-			destructed, _, _, err := versionedRead(sdb, addr, SelfDestructPath, accounts.NilKey, false, false, nil, nil)
-
-			if destructed || err != nil {
-				so := stateObjectPool.Get().(*stateObject)
-				so.db = sdb
-				so.address = addr
-				so.selfdestructed = destructed
-				so.deleted = destructed
-				sdb.setStateObject(addr, so)
-				return nil, err
+			if readAccount == nil {
+				readAccount = sdb.synthesizeCreatedAccountBase(addr)
+				if readAccount == nil {
+					return nil, nil
+				}
+				accountSource = MapRead
+				accountVersion = UnknownVersion
 			}
+			// Deletion is derived below from the refreshed account's emptiness.
 		} else {
 			sdb.nilAccounts[addr] = struct{}{}
 			if bi, ok := sdb.balanceInc[addr]; ok && !bi.transferred {
@@ -1696,15 +1741,20 @@ func (sdb *IntraBlockState) getStateObject(addr accounts.Address, recordRead boo
 		if err != nil {
 			return nil, err
 		}
+		if account != readAccount {
+			if rd, ok := sdb.versionedReads[addr][AccountKey{Path: AddressPath}]; ok {
+				rd.Val = account
+				sdb.versionedReads.Set(rd)
+			}
+		}
 
-		// Check if a prior tx selfdestructed this account. The AddressPath
-		// versionedRead above returned nil (SelfDestructPath early-exit), but
-		// stateReader returned a committed value from SharedDomains. Read
-		// SelfDestructPath directly from the versionMap (not via versionedRead
-		// which itself short-circuits on the same flag). Use the same pattern
-		// as CreateAccount (line 1628).
+		// A prior tx may have self-destructed this account. Read SelfDestructPath
+		// straight from the versionMap (versionedRead short-circuits on the flag),
+		// but treat the refreshed record's emptiness as authoritative: the SD signal
+		// is a worker write the BAL doesn't carry, so a BAL-funded account overrides
+		// a stale flag and only a genuinely empty destroyed account is dropped.
 		if res := sdb.versionMap.Read(addr, SelfDestructPath, accounts.NilKey, sdb.txIndex); res.Status() == MVReadResultDone {
-			if destructed, ok := res.Value().(bool); ok && destructed {
+			if destructed, ok := res.Value().(bool); ok && destructed && account.Empty() {
 				// Only honour if the current tx hasn't already resurrected.
 				localResurrected := false
 				if vw, ok := sdb.versionedWrite(addr, SelfDestructPath, accounts.NilKey); ok {
