@@ -47,6 +47,34 @@ race_regexes() {
 			| "\(.shard | sub("^blocktests-stable-race-"; "") | sub("-(sequential|parallel)$"; ""))=\(.run)"' \
 		| sort -u
 }
+# A fork's -sequential/-parallel race shards must carry the same non-empty run
+# regex. The partition check only sees the deduped union, so a run dropped or
+# emptied on one mode still covers the fork via the other — while that mode hits
+# the runner's glob arm with no --run and races the whole corpus.
+check_race_mode_parity() {
+	echo "==== race shard -sequential/-parallel run parity ===="
+	local rows
+	rows=$(yq -o=json '.' "$shards" | jq -r '
+		.[]
+		| select(.shard | test("^blocktests-stable-race-.+-(sequential|parallel)$"))
+		| (.shard | capture("^blocktests-stable-race-(?<route>.+)-(?<mode>sequential|parallel)$")) as $m
+		| "\($m.route)\t\($m.mode)\t\(.run // "")"')
+	if [[ -z "${rows//[[:space:]]/}" ]]; then
+		echo "  ERROR: no stable race -sequential/-parallel shards found (shard naming changed?)" >&2
+		return 1
+	fi
+	printf '%s\n' "$rows" | awk -F'\t' '
+		{ run[$1 SUBSEP $2]=$3; seen[$1]=1 }
+		END {
+			for (r in seen) {
+				s=run[r SUBSEP "sequential"]; p=run[r SUBSEP "parallel"]
+				if (s=="" || p=="") { printf "  MISSING/EMPTY  %-11s sequential=[%s] parallel=[%s]\n", r, s, p; bad++ }
+				else if (s != p)    { printf "  DRIFT          %-11s sequential=[%s] parallel=[%s]\n", r, s, p; bad++ }
+				else                { printf "  ok  %-11s = %s\n", r, s }
+			}
+			if (bad) { print "  => -sequential/-parallel of a fork must share one non-empty run regex" > "/dev/stderr"; exit 1 }
+		}'
+}
 hive_consume_engine_regexes() {
 	yq -o=json '.jobs.test-hive-eest.strategy.matrix.include' "$hive" \
 		| jq -r '.[] | select(.sim=="consume-engine" and .["fixtures-tarball"]=="eest_stable") | "\(.shard)=\(.["sim-limit"])"' \
@@ -130,6 +158,8 @@ check_hive_eip_filter() {
 
 rc=0
 check_partition "spec race shards (blocktest --run)"  "$stable_index" blockchain_test        ""                     "$(race_regexes)" || rc=1
+echo
+check_race_mode_parity || rc=1
 echo
 check_partition "hive consume-engine (sim-limit)"     "$stable_index" blockchain_test_engine "eels/consume-engine/" "$(hive_consume_engine_regexes)" || rc=1
 echo
