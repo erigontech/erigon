@@ -825,6 +825,80 @@ func (s *WriteSet) deleteAddr(addr accounts.Address) {
 	delete(s.storage, addr)
 }
 
+// createWriteSnapshot holds a deep copy of the account-record writes that
+// createObject/createAccount overwrite when (re)creating an account. It lets a
+// reverted recreation restore the prior writes rather than leave them
+// overwritten — the record-level create journal entry maintaining its own
+// field-level writes.
+type createWriteSnapshot struct {
+	address        *VersionedWrite[*accounts.Account]
+	balance        *VersionedWrite[uint256.Int]
+	incarnation    *VersionedWrite[uint64]
+	selfDestruct   *VersionedWrite[bool]
+	createContract *VersionedWrite[bool]
+	codeHash       *VersionedWrite[accounts.CodeHash]
+}
+
+// snapshotCreateFields clones the account-record writes that a subsequent
+// createObject/createAccount will overwrite, so a reverted recreation can
+// restore them. Fields creation never writes (nonce/code/codeSize/storage) are
+// not captured — they survive the recreation untouched.
+func (s *WriteSet) snapshotCreateFields(addr accounts.Address) *createWriteSnapshot {
+	snap := &createWriteSnapshot{}
+	if vw, ok := s.address[addr]; ok {
+		snap.address = cloneVW(vw)
+	}
+	if vw, ok := s.balance[addr]; ok {
+		snap.balance = cloneVW(vw)
+	}
+	if vw, ok := s.incarnation[addr]; ok {
+		snap.incarnation = cloneVW(vw)
+	}
+	if vw, ok := s.selfDestruct[addr]; ok {
+		snap.selfDestruct = cloneVW(vw)
+	}
+	if vw, ok := s.createContract[addr]; ok {
+		snap.createContract = cloneVW(vw)
+	}
+	if vw, ok := s.codeHash[addr]; ok {
+		snap.codeHash = cloneVW(vw)
+	}
+	return snap
+}
+
+// restoreCreateFields reverts the account-record writes overwritten by a
+// recreation back to snap (nil entries in snap become deletions). Only the
+// fields creation writes are touched.
+func (s *WriteSet) restoreCreateFields(addr accounts.Address, snap *createWriteSnapshot) {
+	delete(s.address, addr)
+	delete(s.balance, addr)
+	delete(s.incarnation, addr)
+	delete(s.selfDestruct, addr)
+	delete(s.createContract, addr)
+	delete(s.codeHash, addr)
+	if snap == nil {
+		return
+	}
+	if snap.address != nil {
+		s.SetAddress(addr, snap.address)
+	}
+	if snap.balance != nil {
+		s.SetBalance(addr, snap.balance)
+	}
+	if snap.incarnation != nil {
+		s.SetIncarnation(addr, snap.incarnation)
+	}
+	if snap.selfDestruct != nil {
+		s.SetSelfDestruct(addr, snap.selfDestruct)
+	}
+	if snap.createContract != nil {
+		s.SetCreateContract(addr, snap.createContract)
+	}
+	if snap.codeHash != nil {
+		s.SetCodeHash(addr, snap.codeHash)
+	}
+}
+
 // DeleteAccountFields removes the Balance/Nonce/Incarnation/CodeHash writes for
 // addr, leaving storage/code/self-destruct intact.
 func (s *WriteSet) DeleteAccountFields(addr accounts.Address) {

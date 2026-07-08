@@ -1770,7 +1770,11 @@ func (sdb *IntraBlockState) createObject(addr accounts.Address, previous *stateO
 	if previous == nil {
 		sdb.journal.append(createObjectChange{account: addr})
 	} else {
-		sdb.journal.append(resetObjectChange{account: addr, prev: previous})
+		reset := resetObjectChange{account: addr, prev: previous}
+		if sdb.versionMap != nil {
+			reset.prevWrites = sdb.versionedWrites.snapshotCreateFields(addr)
+		}
+		sdb.journal.append(reset)
 	}
 	newobj.newlyCreated = true
 	sdb.setStateObject(addr, newobj)
@@ -2286,11 +2290,12 @@ func (sdb *IntraBlockState) MakeWriteSet(chainRules *chain.Rules, stateWriter St
 }
 
 // FinalizeTxVersioned finalizes a transaction on the parallel (versionMap) path
-// without materializing stateObjects for dirty tracking. It applies the
-// EIP-6780 same-tx create+selfdestruct storage wipe, captures the reconciled
-// write-set (reverting non-dirty addresses via the journal, not stateObject
-// existence), and clears the journal. It replaces the SoftFinalise +
-// MakeWriteSet pair used by the serial path.
+// without materializing stateObjects for dirty tracking. It applies the EIP-6780
+// same-tx create+selfdestruct storage wipe, snapshots the write-set, and clears
+// the journal. No dirty reconciliation is needed: the journal already keeps
+// versionedWrites in step with reverts (field-level entries prune themselves;
+// the record-level create/reset entries maintain their account-record writes),
+// so the write-set already contains exactly the surviving writes.
 func (sdb *IntraBlockState) FinalizeTxVersioned() *WriteSet {
 	for addr, so := range sdb.stateObjects {
 		// EIP-6780 + EIP-7928: a SELFDESTRUCT against a same-tx created contract
@@ -2303,7 +2308,7 @@ func (sdb *IntraBlockState) FinalizeTxVersioned() *WriteSet {
 			}
 		}
 	}
-	writes := sdb.VersionedWrites(true)
+	writes := sdb.VersionedWrites(false)
 	sdb.clearJournalAndRefund()
 	return writes
 }

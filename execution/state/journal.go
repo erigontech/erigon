@@ -114,8 +114,9 @@ type (
 		account accounts.Address
 	}
 	resetObjectChange struct {
-		account accounts.Address
-		prev    *stateObject
+		account    accounts.Address
+		prev       *stateObject
+		prevWrites *createWriteSnapshot
 	}
 	selfdestructChange struct {
 		account     accounts.Address
@@ -199,6 +200,14 @@ func (ch createObjectChange) revert(s *IntraBlockState) error {
 	}
 	delete(s.stateObjects, ch.account)
 	delete(s.stateObjectsDirty, ch.account)
+	// The account did not exist before this create, so all of its versioned
+	// writes originate from the creation being reverted. Field-level entries
+	// (balance/nonce/…) prune themselves on revert; the account-record writes
+	// createObject emits (address/codeHash/…) have no field-level journal entry,
+	// so drop them here to keep versionedWrites in step with the journal.
+	if s.versionMap != nil {
+		s.versionedWrites.deleteAddr(ch.account)
+	}
 	return nil
 }
 
@@ -211,6 +220,12 @@ func (ch resetObjectChange) revert(s *IntraBlockState) error {
 		current.release()
 	}
 	s.setStateObject(ch.account, ch.prev)
+	// Restore the account-record writes the recreation overwrote back to the
+	// snapshot taken before it ran, so versionedWrites reflects prev's state
+	// again (the field-level entries handle the fields creation doesn't write).
+	if s.versionMap != nil {
+		s.versionedWrites.restoreCreateFields(ch.account, ch.prevWrites)
+	}
 	return nil
 }
 
