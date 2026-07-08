@@ -1214,12 +1214,14 @@ func wrapAsExecAbort(origErr error, depTxIndex int) error {
 	return protocol.ErrExecAbortError{DependencyTxIndex: depTxIndex, OriginError: origErr}
 }
 
-// reconcileExecAndWaitErr combines the apply-loop result with a non-nil error
-// from pe.wait. A real (non-canceled) wait error has no resumable work, so it
+// reconcileExecAndWaitErr combines the apply-loop result with the error from
+// pe.wait. A canceled wait never overrides execErr: execImpl cancels the
+// executor group on every exit, so a canceled wait is the normal end of a
+// batch, not new information. A real wait error has no resumable work, so it
 // supersedes ErrLoopExhausted — joining would keep errors.Is(_, ErrLoopExhausted)
 // true and let a fatal exec error be retried silently forever.
 func reconcileExecAndWaitErr(execErr, waitErr error) error {
-	if waitErr == nil {
+	if waitErr == nil || errors.Is(waitErr, context.Canceled) {
 		return execErr
 	}
 	if execErr == nil || errors.Is(execErr, &ErrLoopExhausted{}) {

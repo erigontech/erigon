@@ -1011,6 +1011,9 @@ func TestProcessCommitErr(t *testing.T) {
 // errors.Is(_, &ErrLoopExhausted{}) true, so execImpl skips the failure Warn
 // and advances the stage to the unchanged commit height — turning a fatal
 // executeBlocks error into a silent zero-progress retry loop.
+// A canceled wait must never override execErr: execImpl cancels the executor
+// group on every exit, so a canceled wait is the normal end of a batch, not
+// new information.
 func TestReconcileExecAndWaitErr(t *testing.T) {
 	exhausted := &ErrLoopExhausted{From: 100, To: 0, Reason: "block batch is full"}
 	waitFail := errors.New("snapshot step misalignment: snapshot files need rebuilding")
@@ -1052,6 +1055,24 @@ func TestReconcileExecAndWaitErr(t *testing.T) {
 		require.ErrorIs(t, got, rules.ErrInvalidBlock)
 		require.ErrorIs(t, got, waitFail)
 		require.True(t, surfacesLoudly(got))
+	})
+
+	t.Run("canceled wait keeps a resumable batch resumable", func(t *testing.T) {
+		got := reconcileExecAndWaitErr(exhausted, context.Canceled)
+		require.Same(t, exhausted, got,
+			"a canceled wait must not supersede ErrLoopExhausted, or every batch-full commit under cancellation fails hard")
+	})
+
+	t.Run("canceled wait after a clean batch stays clean", func(t *testing.T) {
+		require.NoError(t, reconcileExecAndWaitErr(nil, context.Canceled))
+	})
+
+	t.Run("canceled wait does not contaminate a specific apply error", func(t *testing.T) {
+		invalid := fmt.Errorf("%w: bad receipts", rules.ErrInvalidBlock)
+		got := reconcileExecAndWaitErr(invalid, fmt.Errorf("worker: %w", context.Canceled))
+		require.Same(t, invalid, got)
+		require.NotErrorIs(t, got, context.Canceled,
+			"joining a cancellation would flip execImpl's quiet-exit gate and skip the failure handling")
 	})
 }
 
