@@ -111,13 +111,13 @@ case "$shard_route" in
 		cmd=blocktest;   path="$base/blockchain_tests" ;;
 	blocktests-stable-race-pre-cancun)
 		cmd=blocktest;   path="$base/blockchain_tests"
-		extra=(--run 'fork_(Frontier|Homestead|Byzantium|ConstantinopleFix|Istanbul|Berlin|London|Paris|Shanghai)') ;;
+		extra=(--run 'fork_(Frontier|Homestead|TangerineWhistle|SpuriousDragon|Byzantium|ConstantinopleFix|Istanbul|Berlin|London|Paris|Shanghai)') ;;
 	blocktests-stable-race-cancun)
 		cmd=blocktest;   path="$base/blockchain_tests"; extra=(--run 'fork_Cancun') ;;
 	blocktests-stable-race-prague)
 		cmd=blocktest;   path="$base/blockchain_tests"; extra=(--run 'fork_Prague') ;;
 	blocktests-stable-race-osaka)
-		cmd=blocktest;   path="$base/blockchain_tests"; extra=(--run 'fork_Osaka') ;;
+		cmd=blocktest;   path="$base/blockchain_tests"; extra=(--run 'fork_(Osaka|BPO)') ;;
 	blocktests-devnet-race-amsterdam)
 		cmd=blocktest;   path="$base/blockchain_tests"; extra=(--run 'fork_Amsterdam') ;;
 	enginextests-stable)
