@@ -1463,6 +1463,18 @@ func (pe *parallelExecutor) run(ctx context.Context) (context.Context, context.C
 	}, nil
 }
 
+// execWaitShutdownGrace bounds pe.wait once shutdown has begun: long enough
+// for canceled goroutines to unwind and report a real failure, short enough
+// that a stuck goroutine cannot hang process exit. Variable so tests can
+// shorten it.
+var execWaitShutdownGrace = 10 * time.Second
+
+// wait joins the executor goroutines and classifies the outcome. A canceled
+// group is routine teardown — execImpl cancels the executor on every exit,
+// success included — so it is never reported as an error, while a real error
+// is returned even when ctx is already shutting down. A canceled ctx only
+// bounds the wait: after execWaitShutdownGrace a stuck group is abandoned so
+// shutdown cannot hang.
 func (pe *parallelExecutor) wait(ctx context.Context) error {
 	doneCh := make(chan error, 1)
 
@@ -1478,12 +1490,16 @@ func (pe *parallelExecutor) wait(ctx context.Context) error {
 		doneCh <- nil
 	}()
 
-	for {
+	select {
+	case err := <-doneCh:
+		return err
+	case <-ctx.Done():
 		select {
-		case <-ctx.Done():
-			return nil
 		case err := <-doneCh:
 			return err
+		case <-time.After(execWaitShutdownGrace):
+			pe.logger.Warn(fmt.Sprintf("[%s] executor goroutines still running %s after shutdown; abandoning wait", pe.logPrefix, execWaitShutdownGrace))
+			return nil
 		}
 	}
 }

@@ -22,8 +22,10 @@ import (
 
 	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/require"
+	"golang.org/x/sync/errgroup"
 
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/execution/protocol"
 	"github.com/erigontech/erigon/execution/protocol/rules"
@@ -1073,6 +1075,83 @@ func TestReconcileExecAndWaitErr(t *testing.T) {
 		require.Same(t, invalid, got)
 		require.NotErrorIs(t, got, context.Canceled,
 			"joining a cancellation would flip execImpl's quiet-exit gate and skip the failure handling")
+	})
+}
+
+// Pins pe.wait's contract: it reports only real errors — a canceled group is
+// routine teardown, since execImpl cancels the executor on every exit — and a
+// real error is never dropped, even when ctx is already shutting down. wait
+// must also not return before the executor goroutines have finished: execImpl
+// reads shared state right after it.
+func TestParallelExecWait(t *testing.T) {
+	newPE := func(group func() error) *parallelExecutor {
+		pe := &parallelExecutor{}
+		pe.logger = log.New()
+		pe.waitWorkers = func() {}
+		pe.execLoopGroup = &errgroup.Group{}
+		pe.execLoopGroup.Go(group)
+		return pe
+	}
+
+	canceledCtx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	t.Run("real group error surfaces", func(t *testing.T) {
+		boom := errors.New("exec blocks error: boom")
+		pe := newPE(func() error { return boom })
+		require.Same(t, boom, pe.wait(context.Background()))
+	})
+
+	t.Run("canceled group is routine teardown", func(t *testing.T) {
+		pe := newPE(func() error { return fmt.Errorf("drain: %w", context.Canceled) })
+		require.NoError(t, pe.wait(context.Background()))
+	})
+
+	t.Run("clean group waits for workers", func(t *testing.T) {
+		var workersWaited atomic.Bool
+		pe := newPE(func() error { return nil })
+		pe.waitWorkers = func() { workersWaited.Store(true) }
+		require.NoError(t, pe.wait(context.Background()))
+		require.True(t, workersWaited.Load())
+	})
+
+	t.Run("real error is not dropped during shutdown", func(t *testing.T) {
+		boom := errors.New("exec blocks error: boom")
+		pe := newPE(func() error {
+			time.Sleep(20 * time.Millisecond)
+			return boom
+		})
+		got := pe.wait(canceledCtx)
+		require.ErrorIs(t, got, boom, "a real error must survive shutdown")
+		require.Same(t, boom, got)
+	})
+
+	t.Run("shutdown still waits for teardown to finish", func(t *testing.T) {
+		var toreDown atomic.Bool
+		pe := newPE(func() error {
+			time.Sleep(20 * time.Millisecond)
+			toreDown.Store(true)
+			return nil
+		})
+		require.NoError(t, pe.wait(canceledCtx))
+		require.True(t, toreDown.Load(),
+			"wait returned while executor goroutines were still running; execImpl reads shared state next")
+	})
+
+	t.Run("stuck group cannot hang shutdown", func(t *testing.T) {
+		prevGrace := execWaitShutdownGrace
+		execWaitShutdownGrace = 50 * time.Millisecond
+		defer func() { execWaitShutdownGrace = prevGrace }()
+
+		gate := make(chan struct{})
+		t.Cleanup(func() { close(gate) })
+		pe := newPE(func() error { <-gate; return nil })
+
+		start := time.Now()
+		require.NoError(t, pe.wait(canceledCtx))
+		elapsed := time.Since(start)
+		require.GreaterOrEqual(t, elapsed, 50*time.Millisecond, "wait must exhaust the grace period before abandoning")
+		require.Less(t, elapsed, 5*time.Second, "a stuck group must be abandoned after the grace period")
 	})
 }
 
