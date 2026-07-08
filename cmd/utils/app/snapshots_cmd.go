@@ -28,6 +28,7 @@ import (
 	"math"
 	"os"
 	"path/filepath"
+	"regexp"
 	"runtime"
 	"slices"
 	"sort"
@@ -437,6 +438,28 @@ var snapshotCommand = cli.Command{
 				&cli.Int64Flag{Name: "seed", Usage: "random seed for sampling (auto-generated if not set)"},
 				&cli.Float64Flag{Name: "sample", Usage: "fraction of items to check via pseudo-random sampling (0.0-1.0)", Value: 0.01},
 				&cli.DurationFlag{Name: "integrity.budget", Value: 0, Usage: "total wall-clock budget for the run; each check gets (remaining / remaining_checks). 0 (default) means no limit"},
+			}),
+		},
+		{
+			Name: "check-consistency",
+			Action: func(cliCtx *cli.Context) error {
+				logger := log.Root()
+				n, err := doCheckConsistency(cliCtx, logger)
+				if err != nil {
+					log.Error("[check-consistency] failure", "err", err)
+					return err
+				}
+				if n > 0 {
+					log.Warn("[check-consistency] violations found", "count", n)
+					return fmt.Errorf("%d consistency violations (see log above)", n)
+				}
+				log.Info("[check-consistency] snapshot directory is consistent")
+				return nil
+			},
+			Description: "scan the snapshots directory and report accessor/sidecar inconsistencies (orphan .torrent, orphan accessor, missing accessor). Pure disk check; does not open MDBX or aggregator.",
+			Flags: joinFlags([]cli.Flag{
+				&utils.DataDirFlag,
+				&cli.IntFlag{Name: "max-report", Value: 100, Usage: "cap per-category report lines (0 = no cap)"},
 			}),
 		},
 		{
@@ -1834,6 +1857,180 @@ func findBlockNumByTxNum(ctx context.Context, tx kv.Tx, txNumsReader rawdbv3.TxN
 		"find block num for tx num %d: not found (txnum index bounds: first block=%d txnum=%d, last block=%d txnum=%d)",
 		txNum, firstBlockNum, firstTxNum, lastBlockNum, lastTxNum,
 	)
+}
+
+// doCheckConsistency walks the snapshots directory and reports orphan
+// sidecars, orphan accessors, and primaries missing an index accessor.
+// Pure disk scan — does not open MDBX or the aggregator.
+//
+// Invariants checked:
+//
+//	I1: every X.torrent has a matching X on disk (else: orphan .torrent).
+//	I2: every accessor (.kvi/.bt/.kvei/.vi/.efi/.idx) has a matching
+//	    primary (.kv/.v/.ef/.seg) at the same (name, from-to) — else:
+//	    orphan accessor.
+//	I3: every state-domain primary .kv has at least one index accessor
+//	    (.bt or .kvi) at the same range — else: missing accessor.
+//
+// Returns the total violation count. Non-fatal warnings are logged;
+// only true consistency violations count toward the return.
+func doCheckConsistency(cliCtx *cli.Context, logger log.Logger) (int, error) {
+	dirs := datadir.New(cliCtx.String(utils.DataDirFlag.Name))
+	maxReport := cliCtx.Int("max-report")
+
+	type fileKey struct {
+		// stateShape: v<VER>-<name>.<from>-<to>.<ext>
+		// blockShape: v<VER>-<from>-<to>-<name>.<ext>
+		shape    string // "state" or "block"
+		name     string // domain name ("accounts", "commitment", ...) OR block name ("headers", "bodies", ...)
+		fromStep uint64
+		toStep   uint64
+	}
+
+	stateRe := regexp.MustCompile(`^v\d+\.\d+-([a-z]+)\.(\d+)-(\d+)\.([a-z]+)$`)
+	blockRe := regexp.MustCompile(`^v\d+\.\d+-(\d+)-(\d+)-([a-z-]+)\.([a-z]+)$`)
+
+	// primaries[key] = filename of the primary (relative to snapDir)
+	// accessors[key][ext] = filename of the accessor
+	primaries := make(map[fileKey]string)
+	accessors := make(map[fileKey]map[string]string)
+	seen := make(map[string]bool) // relative path -> exists
+
+	primaryExts := map[string]bool{"kv": true, "v": true, "ef": true, "seg": true}
+	// accessorFor[accessorExt] = expected primary extension
+	accessorFor := map[string]string{
+		"kvi": "kv", "bt": "kv", "kvei": "kv",
+		"vi":  "v",
+		"efi": "ef",
+		"idx": "seg",
+	}
+
+	if err := filepath.WalkDir(dirs.Snap, func(path string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if d.IsDir() {
+			return nil
+		}
+		rel, relErr := filepath.Rel(dirs.Snap, path)
+		if relErr != nil {
+			return relErr
+		}
+		seen[rel] = true
+
+		base := d.Name()
+		nameNoTorrent := strings.TrimSuffix(base, ".torrent")
+		if m := stateRe.FindStringSubmatch(nameNoTorrent); m != nil {
+			from, _ := strconv.ParseUint(m[2], 10, 64)
+			to, _ := strconv.ParseUint(m[3], 10, 64)
+			ext := m[4]
+			// The .torrent suffix itself is handled by I1 via seen[]; only
+			// register the underlying file's role.
+			if base == nameNoTorrent {
+				key := fileKey{"state", m[1], from, to}
+				if primaryExts[ext] {
+					primaries[key] = rel
+				} else if _, ok := accessorFor[ext]; ok {
+					if accessors[key] == nil {
+						accessors[key] = map[string]string{}
+					}
+					accessors[key][ext] = rel
+				}
+			}
+			return nil
+		}
+		if m := blockRe.FindStringSubmatch(nameNoTorrent); m != nil {
+			from, _ := strconv.ParseUint(m[1], 10, 64)
+			to, _ := strconv.ParseUint(m[2], 10, 64)
+			name := m[3]
+			ext := m[4]
+			// Compound accessor names: `transactions-to-block.idx` is a
+			// SECOND accessor for `transactions.seg` (tx-offset → block
+			// number lookup, alongside the primary tx-hash → offset .idx).
+			// Normalise the name for accessor lookups so it groups with
+			// the transactions primary; treat the suffix as the accessor's
+			// role tag.
+			accExt := ext
+			if strings.HasSuffix(name, "-to-block") && ext == "idx" {
+				name = strings.TrimSuffix(name, "-to-block")
+				accExt = "to-block-idx"
+				accessorFor[accExt] = "seg" // register on first sight
+			}
+			if base == nameNoTorrent {
+				key := fileKey{"block", name, from, to}
+				if primaryExts[ext] {
+					primaries[key] = rel
+				} else if _, ok := accessorFor[accExt]; ok {
+					if accessors[key] == nil {
+						accessors[key] = map[string]string{}
+					}
+					accessors[key][accExt] = rel
+				}
+			}
+			return nil
+		}
+		// Meta / unclassified files (chain.toml, chain.v2.*.ucan, erigondb.toml, ...):
+		// no accessor invariant, but their .torrent must still not orphan (I1).
+		return nil
+	}); err != nil {
+		return 0, fmt.Errorf("walk %s: %w", dirs.Snap, err)
+	}
+
+	violations := 0
+	report := func(category, msg string) {
+		violations++
+		if maxReport == 0 || violations <= maxReport {
+			logger.Warn("[check-consistency] "+category, "detail", msg)
+		}
+	}
+
+	// I1: orphan .torrent
+	for rel := range seen {
+		if !strings.HasSuffix(rel, ".torrent") {
+			continue
+		}
+		primary := strings.TrimSuffix(rel, ".torrent")
+		if !seen[primary] {
+			report("orphan-torrent", rel+" (no matching "+filepath.Base(primary)+")")
+		}
+	}
+
+	// I2: orphan accessor
+	for key, exts := range accessors {
+		for ext, accFile := range exts {
+			primaryExt := accessorFor[ext]
+			if _, hasPrimary := primaries[key]; !hasPrimary {
+				report("orphan-accessor", fmt.Sprintf("%s (no matching .%s primary at %s/%d-%d)", accFile, primaryExt, key.name, key.fromStep, key.toStep))
+			}
+		}
+	}
+
+	// I3: primary .kv missing an index accessor
+	for key, primaryFile := range primaries {
+		if key.shape != "state" {
+			continue
+		}
+		if !strings.HasSuffix(primaryFile, ".kv") {
+			continue
+		}
+		exts := accessors[key]
+		if _, hasBT := exts["bt"]; hasBT {
+			continue
+		}
+		if _, hasKVI := exts["kvi"]; hasKVI {
+			continue
+		}
+		report("missing-accessor", primaryFile+" has no .bt or .kvi index")
+	}
+
+	logger.Info("[check-consistency] scan complete",
+		"snap_dir", dirs.Snap,
+		"files_total", len(seen),
+		"primaries", len(primaries),
+		"accessor_groups", len(accessors),
+		"violations", violations,
+	)
+	return violations, nil
 }
 
 func doCheckCommitmentHistAtBlk(cliCtx *cli.Context, logger log.Logger) error {
