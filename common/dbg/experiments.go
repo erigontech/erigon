@@ -38,6 +38,8 @@ import (
 var (
 	MaxReorgDepth = EnvUint("MAX_REORG_DEPTH", 96)
 
+	WarmupTableWorkers = EnvUint("WARMUP_TABLE_WORKERS", 0)
+
 	saveHeapProfile             = EnvBool("SAVE_HEAP_PROFILE", false)
 	heapProfileFilePath         = EnvString("HEAP_PROFILE_FILE_PATH", "")
 	heapProfileThresholdPercent = EnvUint("HEAP_PROFILE_THRESHOLD", 35)
@@ -75,7 +77,9 @@ var (
 	BuildSnapshotAllowance = EnvInt("SNAPSHOT_BUILD_SEMA_SIZE", 1) // allows 1 kind of snapshots to be built simultaneously
 
 	SnapshotMadvRnd = EnvBool("SNAPSHOT_MADV_RND", true)
-	OnlyCreateDB    = EnvBool("ONLY_CREATE_DB", false)
+	// kill-switch: set SNAPSHOT_MADV_SEQUENTIAL=false to skip MADV_SEQUENTIAL in seg.OpenSequentialView
+	SnapshotMadvSequential = EnvBool("SNAPSHOT_MADV_SEQUENTIAL", true)
+	OnlyCreateDB           = EnvBool("ONLY_CREATE_DB", false)
 
 	CaplinSyncedDataMangerDeadlockDetection = EnvBool("CAPLIN_SYNCED_DATA_MANAGER_DEADLOCK_DETECTION", false)
 
@@ -114,26 +118,16 @@ var (
 	CaplinEfficientReorg  = EnvBool("CAPLIN_EFFICIENT_REORG", true)
 	UseTxDependencies     = EnvBool("USE_TX_DEPENDENCIES", false)
 	UseStateCache         = EnvBool("USE_STATE_CACHE", true)
+	UseCodeStore          = EnvBool("USE_CODE_STORE", true)
+	DisableAdaptivePin    = EnvBool("DISABLE_ADAPTIVE_PIN", false)
 	AssertStateCache      = EnvBool("ASSERT_STATE_CACHE", false)
 	ReadAhead             = EnvBool("READ_AHEAD", true)
 
 	BorValidateHeaderTime = EnvBool("BOR_VALIDATE_HEADER_TIME", true)
 	TraceDeletion         = EnvBool("TRACE_DELETION", false)
 
-	RpcDropResponse = EnvBool("RPC_DROP_RESPONSE", false)
-	// The original default was NumCPU()*8 with the rationale "io-bound, more
-	// workers drive more concurrent I/O." Our measurements (cold-cgroup 6c
-	// vs unconstrained 12c on the SSTORE-bloat bench) show read_bytes
-	// nearly identical (1.28 GB vs 1.24 GB) regardless of worker count,
-	// and 76 % of TEST-block CPU sits in the warmer's recsplit/xorfilter/
-	// seg-decompress path. The hot path is CPU-bound, not I/O-bound; the
-	// "drives I/O" rationale isn't borne out. Oversubscribing past
-	// available cores adds scheduler/context-switch overhead and queue
-	// noise without throughput gain. The constraint is queue depth on the
-	// warmer's work channel (sized at numWorkers*64), not worker count.
-	// GOMAXPROCS respects cgroup CPU caps under Go 1.25+, so this scales
-	// correctly inside a constrained envelope.
-	TipTrieWarmupers = EnvInt("TIP_TRIE_WARMUPERS", runtime.GOMAXPROCS(0))
+	RpcDropResponse  = EnvBool("RPC_DROP_RESPONSE", false)
+	TipTrieWarmupers = EnvInt("TIP_TRIE_WARMUPERS", estimate.HalfCPUs())
 
 	PerfProfiles = EnvBool("PERF_PROFILES", false)
 )

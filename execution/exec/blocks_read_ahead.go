@@ -10,6 +10,7 @@ import (
 	"golang.org/x/sync/errgroup"
 
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/length"
 	"github.com/erigontech/erigon/common/log/v3"
@@ -77,33 +78,38 @@ func (bra *BlockReadAheader) SetStateCache(sc *cache.StateCache) {
 // that SharedDomains.GetLatest consults — eliminating the file-accessor
 // stack cost on the EVM's first touch of any prefetched address.
 //
-// For the CodeDomain, when the code bytes come back together with the
-// owning account's codeHash (decoded from a preceding AccountsDomain read
-// in the same loop iteration), the wrapper also populates the L2b
-// ethHash→bytes + size-cache layers via PutCodeWithHash. The codeHash
-// hint is provided per-iteration via withCodeHashHint().
+// For the CodeDomain the wrapper also populates the codeHashToCode
+// (codeHash→bytes) + size-cache layers via PutCodeWithHash, keyed by the
+// code's own keccak hash so every cached pair is self-consistent.
 type cachePopulatingGetter struct {
-	g            kv.TemporalGetter
-	sc           *cache.StateCache
-	stepSize     uint64 // for the read txNum upper bound (last txNum of the read's step)
-	codeHashHint []byte // valid only for the next CodeDomain read; cleared after use
+	g        kv.TemporalGetter
+	sc       *cache.StateCache
+	stepSize uint64 // for the read txNum upper bound (last txNum of the read's step)
 }
 
 func (cpg *cachePopulatingGetter) GetLatest(name kv.Domain, k []byte) ([]byte, kv.Step, error) {
 	v, step, err := cpg.g.GetLatest(name, k)
 	if err == nil && cpg.sc != nil {
-		if name == kv.CodeDomain && len(cpg.codeHashHint) > 0 {
-			cpg.sc.PutCodeWithHash(k, v, cpg.codeHashHint)
-			cpg.codeHashHint = nil
+		// If-absent writes only: this runs in a fire-and-forget goroutine over a
+		// committed snapshot, so an unconditional Put racing an FCU flush's
+		// cache-apply could replace the flushed value with the pre-flush one.
+		if name == kv.CodeDomain && len(v) > 0 {
+			// Key the content cache by the code's OWN hash, never a separately
+			// read account codeHash: under parallel/speculative exec that hash
+			// can be skewed or cross-account, and a (hash, code) pair that
+			// doesn't satisfy keccak(code)==hash poisons every account sharing
+			// the hash. keccak(v) makes each entry self-consistent.
+			cpg.sc.PutCodeWithHashIfAbsent(k, v, crypto.Keccak256(v), (uint64(step)+1)*cpg.stepSize-1)
 		} else {
 			// Cache including nil/empty results: a probe returning no
 			// bytes is a valid negative answer (missing account, empty
-			// storage slot, no code) and caching it lets repeated probes
+			// storage slot; empty code lands here too but CodeCache drops
+			// zero-length puts) and caching it lets repeated probes
 			// skip the file accessor stack. Mirrors revm's CacheAccount
 			// { account: None, status: LoadedNotExisting } pattern.
 			// Stamp with an upper bound on the value's write txNum (last txNum
 			// of the step it came from) so unwind invalidation is correct.
-			cpg.sc.Put(name, k, v, (uint64(step)+1)*cpg.stepSize-1)
+			cpg.sc.PutIfAbsent(name, k, v, (uint64(step)+1)*cpg.stepSize-1)
 		}
 	}
 	return v, step, err
@@ -115,14 +121,6 @@ func (cpg *cachePopulatingGetter) HasPrefix(name kv.Domain, prefix []byte) ([]by
 
 func (cpg *cachePopulatingGetter) StepsInFiles(entitySet ...kv.Domain) kv.Step {
 	return cpg.g.StepsInFiles(entitySet...)
-}
-
-// withCodeHashHint stashes the codeHash so the next CodeDomain read routes
-// through PutCodeWithHash (populating L2b + size cache) instead of a bare
-// addr-keyed Put. Caller MUST follow this with a single GetLatest(CodeDomain, …)
-// for the matching addr; the hint clears on use.
-func (cpg *cachePopulatingGetter) withCodeHashHint(ethHash []byte) {
-	cpg.codeHashHint = ethHash
 }
 
 func (bra *BlockReadAheader) AddHeaderAndBody(ctx context.Context, db kv.RoDB, header *types.Header, body *types.Body) {
@@ -230,10 +228,8 @@ func (bra *BlockReadAheader) warmBody(ctx context.Context, db kv.RoDB, header *t
 					return nil
 				}
 				var getter kv.TemporalGetter = ttx
-				var cpg *cachePopulatingGetter
 				if bra.stateCache != nil {
-					cpg = &cachePopulatingGetter{g: ttx, sc: bra.stateCache, stepSize: ttx.Debug().StepSize()}
-					getter = cpg
+					getter = &cachePopulatingGetter{g: ttx, sc: bra.stateCache, stepSize: ttx.Debug().StepSize()}
 				}
 				stateReader := state.NewReaderV3(getter)
 
@@ -247,14 +243,7 @@ func (bra *BlockReadAheader) warmBody(ctx context.Context, db kv.RoDB, header *t
 					acctChanges := bal[idx]
 					acct, _ := stateReader.ReadAccountData(acctChanges.Address)
 					// Warm code if account has code or if there are code changes.
-					// When we already know the codeHash from the account read, hint
-					// the cache-populating getter so the code bytes land in the L2b
-					// (ethHash → bytes) + size layers — not just the addr-keyed L1.
 					if acct != nil && !acct.CodeHash.IsEmpty() {
-						if cpg != nil {
-							h := acct.CodeHash.Value()
-							cpg.withCodeHashHint(h[:])
-						}
 						stateReader.ReadAccountCode(acctChanges.Address)
 					} else if len(acctChanges.CodeChanges) > 0 {
 						stateReader.ReadAccountCode(acctChanges.Address)
@@ -329,10 +318,6 @@ func (bra *BlockReadAheader) warmBody(ctx context.Context, db kv.RoDB, header *t
 				if toAddr := txn.GetTo(); toAddr != nil {
 					to := accounts.InternAddress(*toAddr)
 					if acct, _ := stateReader.ReadAccountData(to); acct != nil && !acct.CodeHash.IsEmpty() {
-						if cpg != nil {
-							h := acct.CodeHash.Value()
-							cpg.withCodeHashHint(h[:])
-						}
 						stateReader.ReadAccountCode(to)
 					}
 				}
@@ -341,10 +326,6 @@ func (bra *BlockReadAheader) warmBody(ctx context.Context, db kv.RoDB, header *t
 				for _, entry := range txn.GetAccessList() {
 					addr := accounts.InternAddress(entry.Address)
 					if acct, _ := stateReader.ReadAccountData(addr); acct != nil && !acct.CodeHash.IsEmpty() {
-						if cpg != nil {
-							h := acct.CodeHash.Value()
-							cpg.withCodeHashHint(h[:])
-						}
 						stateReader.ReadAccountCode(addr)
 					}
 					for _, slot := range entry.StorageKeys {

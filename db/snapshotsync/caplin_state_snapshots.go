@@ -25,6 +25,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime/debug"
+	"sort"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -264,6 +265,25 @@ func (s *CaplinStateSnapshots) BlocksAvailable() uint64 {
 	return min(s.segmentsMax.Load(), s.idxMax.Load())
 }
 
+func (s *CaplinStateSnapshots) coveredRangesForType(name string) []Range {
+	s.visibleLock.RLock()
+	defer s.visibleLock.RUnlock()
+
+	v, ok := s.visible.Load(name)
+	if !ok {
+		return nil
+	}
+	segs, ok := v.(VisibleSegments)
+	if !ok {
+		return nil
+	}
+	ranges := make([]Range, 0, len(segs))
+	for _, seg := range segs {
+		ranges = append(ranges, seg.Range)
+	}
+	return ranges
+}
+
 func (s *CaplinStateSnapshots) Close() {
 	if s == nil {
 		return
@@ -296,32 +316,15 @@ func (s *CaplinStateSnapshots) OpenList(fileNames []string, optimistic bool) err
 	s.closeWhatNotInList(fileNames)
 	var segmentsMax uint64
 	var segmentsMaxSet bool
-Loop:
 	for _, fName := range fileNames {
 		f, _, _ := snaptype.ParseFileName(s.dir, fName)
-
-		var processed bool = true
-		var exists bool
-		var sn *DirtySegment
 
 		dirtySegments, ok := s.dirty[f.CaplinTypeString]
 		if !ok {
 			continue
 		}
 		filePath := filepath.Join(s.dir, fName)
-		dirtySegments.Walk(func(segments []*DirtySegment) bool {
-			for _, sn2 := range segments {
-				if sn2.Decompressor == nil { // it's ok if some segment was not able to open
-					continue
-				}
-				if filePath == sn2.filePath {
-					sn = sn2
-					exists = true
-					break
-				}
-			}
-			return true
-		})
+		sn, exists := findOpenSegment(dirtySegments, func(sn2 *DirtySegment) bool { return sn2.filePath == filePath })
 		if !exists {
 			sn = &DirtySegment{
 				// segType: f.Type, Unsupported
@@ -332,19 +335,17 @@ Loop:
 			}
 		}
 		if err := s.openSegIfNeed(sn, filePath); err != nil {
-			if errors.Is(err, os.ErrNotExist) {
-				if optimistic {
-					continue Loop
-				} else {
-					break Loop
-				}
+			stop, failErr := ClassifyOpenErr(err, optimistic)
+			if failErr != nil {
+				return failErr
 			}
-			if optimistic {
+			if stop {
+				break
+			}
+			if !errors.Is(err, os.ErrNotExist) {
 				s.logger.Warn("[snapshots] open segment", "err", err)
-				continue Loop
-			} else {
-				return err
 			}
+			continue
 		}
 
 		if !exists {
@@ -355,15 +356,12 @@ Loop:
 		if err := openIdxForCaplinStateIfNeeded(sn, filePath, optimistic); err != nil {
 			return err
 		}
-		// Only bob sidecars count for progression
-		if processed {
-			if f.To > 0 {
-				segmentsMax = f.To - 1
-			} else {
-				segmentsMax = 0
-			}
-			segmentsMaxSet = true
+		if f.To > 0 {
+			segmentsMax = f.To - 1
+		} else {
+			segmentsMax = 0
 		}
+		segmentsMaxSet = true
 	}
 
 	if segmentsMaxSet {
@@ -431,14 +429,17 @@ func (s *CaplinStateSnapshots) recalcVisibleFiles() {
 	s.visibleLock.Lock()
 	defer s.visibleLock.Unlock()
 
-	getNewVisibleSegments := func(dirtySegments *btree.BTreeG[*DirtySegment]) []*VisibleSegment {
-		newVisibleSegments := make([]*VisibleSegment, 0, dirtySegments.Len())
+	getNewVisibleSegments := func(dirtySegments *btree.BTreeG[*DirtySegment]) VisibleSegments {
+		newVisibleSegments := make(VisibleSegments, 0, dirtySegments.Len())
 		dirtySegments.Walk(func(segments []*DirtySegment) bool {
 			for _, sn := range segments {
 				if sn.canDelete.Load() {
 					continue
 				}
 				if !isIndexed(sn) {
+					continue
+				}
+				if n := len(newVisibleSegments); n > 0 && sn.isSubSetOf(newVisibleSegments[n-1].src) {
 					continue
 				}
 				for len(newVisibleSegments) > 0 && newVisibleSegments[len(newVisibleSegments)-1].src.isSubSetOf(sn) {
@@ -465,6 +466,58 @@ func (s *CaplinStateSnapshots) recalcVisibleFiles() {
 	})
 }
 
+// RemoveOverlaps deletes state segment files that are fully covered by a larger
+// indexed segment of the same type, so the on-disk publishable check stops flagging
+// them as overlapping. Offline maintenance only: it munmaps and unlinks files, so no
+// CaplinStateView may be open concurrently.
+func (s *CaplinStateSnapshots) RemoveOverlaps() error {
+	if s == nil {
+		return nil
+	}
+	s.dirtySegmentsLock.Lock()
+
+	var toRemove []*DirtySegment
+	for _, dirtySegments := range s.dirty {
+		var indexed []*DirtySegment
+		dirtySegments.Walk(func(segments []*DirtySegment) bool {
+			for _, sn := range segments {
+				if isIndexed(sn) {
+					indexed = append(indexed, sn)
+				}
+			}
+			return true
+		})
+
+		var rm []*DirtySegment
+		dirtySegments.Walk(func(segments []*DirtySegment) bool {
+			for _, sn := range segments {
+				for _, sup := range indexed {
+					if sn != sup && sn.isSubSetOf(sup) {
+						rm = append(rm, sn)
+						break
+					}
+				}
+			}
+			return true
+		})
+
+		for _, sn := range rm {
+			dirtySegments.Delete(sn)
+		}
+		toRemove = append(toRemove, rm...)
+	}
+
+	s.dirtySegmentsLock.Unlock()
+
+	s.recalcVisibleFiles()
+
+	for _, sn := range toRemove {
+		s.logger.Info("[caplin-state] removing overlapped segment", "file", sn.FileName())
+		sn.closeAndRemoveFiles()
+	}
+	return nil
+}
+
 func (s *CaplinStateSnapshots) idxAvailability() uint64 {
 	s.visibleLock.RLock()
 	defer s.visibleLock.RUnlock()
@@ -479,7 +532,7 @@ func (s *CaplinStateSnapshots) idxAvailability() uint64 {
 	// 	}
 	// }
 	s.visible.Range(func(_, v any) bool {
-		segs := v.([]*VisibleSegment)
+		segs := v.(VisibleSegments)
 		if len(segs) == 0 {
 			min = 0
 			return false
@@ -525,24 +578,12 @@ func (s *CaplinStateSnapshots) closeWhatNotInList(l []string) {
 	}
 
 	for _, dirtySegments := range s.dirty {
-		toClose := make([]*DirtySegment, 0)
-		dirtySegments.Walk(func(segments []*DirtySegment) bool {
-			for _, sn := range segments {
-				if sn.Decompressor == nil {
-					continue
-				}
-				_, name := filepath.Split(sn.FilePath())
-				if _, ok := protectFiles[name]; ok {
-					continue
-				}
-				toClose = append(toClose, sn)
-			}
-			return true
+		closeAndDropNotProtected(dirtySegments, protectFiles, func(sn *DirtySegment) string {
+			// sn.filePath, not the promoted Decompressor.FilePath(): the field is
+			// set for every tree member, incl. stubs whose Decompressor is nil.
+			_, name := filepath.Split(sn.filePath)
+			return name
 		})
-		for _, sn := range toClose {
-			sn.close()
-			dirtySegments.Delete(sn)
-		}
 	}
 }
 
@@ -568,7 +609,7 @@ func (s *CaplinStateSnapshots) View() *CaplinStateView {
 	// 	v.roTxs[k] = segments.BeginRo()
 	// }
 	s.visible.Range(func(k, val any) bool {
-		v.roTxs[k.(string)] = VisibleSegments(val.([]*VisibleSegment)).BeginRo()
+		v.roTxs[k.(string)] = val.(VisibleSegments).BeginRo()
 		return true
 	})
 	return v
@@ -588,7 +629,7 @@ func (v *CaplinStateView) Close() {
 	v.closed = true
 }
 
-func (v *CaplinStateView) VisibleSegments(tbl string) []*VisibleSegment {
+func (v *CaplinStateView) VisibleSegments(tbl string) VisibleSegments {
 	// if v.s == nil || v.s.visible[tbl] == nil {
 	// 	return nil
 	// }
@@ -597,7 +638,7 @@ func (v *CaplinStateView) VisibleSegments(tbl string) []*VisibleSegment {
 		return nil
 	}
 	if val, ok := v.s.visible.Load(tbl); ok {
-		return val.([]*VisibleSegment)
+		return val.(VisibleSegments)
 	}
 	return nil
 }
@@ -690,20 +731,65 @@ func simpleIdx(ctx context.Context, sn snaptype.FileInfo, salt uint32, tmpDir st
 	return nil
 }
 
-func (s *CaplinStateSnapshots) DumpCaplinState(ctx context.Context, fromSlot, toSlot, blocksPerFile uint64, salt uint32, dirs datadir.Dirs, workers int, lvl log.Lvl, logger log.Logger) error {
-	fromSlot = (fromSlot / blocksPerFile) * blocksPerFile
+type caplinStateDumpJob struct {
+	name     string
+	from, to uint64
+}
+
+// missingRanges returns the sub-ranges of [0, toSlot) not covered by `covered`
+// (the type's existing segment ranges, sorted by `from`).
+func missingRanges(covered []Range, toSlot uint64) []Range {
+	var missing []Range
+	var cur uint64
+	for _, r := range covered {
+		if r.from > cur {
+			gapEnd := min(r.from, toSlot)
+			missing = append(missing, Range{from: cur, to: gapEnd})
+		}
+		cur = max(cur, r.to)
+		if cur >= toSlot {
+			return missing
+		}
+	}
+	if cur < toSlot {
+		missing = append(missing, Range{from: cur, to: toSlot})
+	}
+	return missing
+}
+
+// planStateDump schedules only the ranges each type is missing within
+// [0, toSlot), starting every full file at a gap boundary so it fills holes and
+// the trailing tail without overlapping an existing segment.
+func planStateDump(coverage map[string][]Range, toSlot, blocksPerFile uint64) []caplinStateDumpJob {
 	toSlot = (toSlot / blocksPerFile) * blocksPerFile
-	for snapName, kvGetter := range s.snapshotTypes.KeyValueGetters {
-		for i := fromSlot; i < toSlot; i += blocksPerFile {
-			if toSlot-i < blocksPerFile {
-				break
+
+	names := make([]string, 0, len(coverage))
+	for name := range coverage {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+
+	jobs := make([]caplinStateDumpJob, 0)
+	for _, name := range names {
+		for _, gap := range missingRanges(coverage[name], toSlot) {
+			for i := gap.from; i+blocksPerFile <= gap.to; i += blocksPerFile {
+				jobs = append(jobs, caplinStateDumpJob{name: name, from: i, to: i + blocksPerFile})
 			}
-			// keep beaconblocks here but whatever....
-			to := i + blocksPerFile
-			logger.Log(lvl, "Dumping "+snapName, "from", i, "to", to)
-			if err := dumpCaplinState(ctx, snapName, kvGetter, i, to, blocksPerFile, salt, dirs, workers, lvl, logger, s.snapshotTypes.Compression[snapName]); err != nil {
-				return err
-			}
+		}
+	}
+	return jobs
+}
+
+func (s *CaplinStateSnapshots) DumpCaplinState(ctx context.Context, toSlot, blocksPerFile uint64, salt uint32, dirs datadir.Dirs, workers int, lvl log.Lvl, logger log.Logger) error {
+	coverage := make(map[string][]Range, len(s.snapshotTypes.KeyValueGetters))
+	for name := range s.snapshotTypes.KeyValueGetters {
+		coverage[name] = s.coveredRangesForType(name)
+	}
+
+	for _, job := range planStateDump(coverage, toSlot, blocksPerFile) {
+		logger.Log(lvl, "Dumping "+job.name, "from", job.from, "to", job.to)
+		if err := dumpCaplinState(ctx, job.name, s.snapshotTypes.KeyValueGetters[job.name], job.from, job.to, blocksPerFile, salt, dirs, workers, lvl, logger, s.snapshotTypes.Compression[job.name]); err != nil {
+			return err
 		}
 	}
 	return nil

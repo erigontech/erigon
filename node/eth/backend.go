@@ -72,6 +72,7 @@ import (
 	"github.com/erigontech/erigon/diagnostics/diaglib"
 	"github.com/erigontech/erigon/diagnostics/mem"
 	"github.com/erigontech/erigon/execution/builder"
+	"github.com/erigontech/erigon/execution/cache"
 	"github.com/erigontech/erigon/execution/chain"
 	chainspec "github.com/erigontech/erigon/execution/chain/spec"
 	"github.com/erigontech/erigon/execution/engineapi"
@@ -288,7 +289,7 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 			return err
 		}
 		if !notChanged {
-			logger.Warn("--persist.receipt changed since the last run, enabling historical receipts cache. full resync will be required to use the new configuration. if you do not need this feature, ignore this warning.", "inDB", config.PersistReceiptsCacheV2, "inConfig", inConfig)
+			logger.Warn("--persist.receipts differs from the value stored in the datadir; using the stored value (changing it requires a fresh datadir)", "inDB", config.PersistReceiptsCacheV2, "inConfig", inConfig)
 		}
 		if config.PersistReceiptsCacheV2 {
 			statecfg.EnableHistoricalRCache()
@@ -303,8 +304,11 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 		if config.KeepExecutionProofs {
 			statecfg.EnableHistoricalCommitment()
 		}
-		if config.ExperimentalConcurrentCommitment {
-			statecfg.ExperimentalConcurrentCommitment = true
+		if config.ExperimentalParallelCommitment {
+			statecfg.ExperimentalParallelCommitment = true
+		}
+		if config.ExperimentalStreamingCommitment {
+			statecfg.ExperimentalStreamingCommitment = true
 		}
 
 		if err = stages.UpdateMetrics(tx); err != nil {
@@ -340,6 +344,15 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 		stopNode: func() error {
 			return stack.Close()
 		},
+	}
+
+	// Seed erigondb.toml with the first-start commitment regime (--commitment.plainValues)
+	// before genesis-root computation. On a legacy datadir GenesisToBlock resolves erigondb
+	// settings against the real dir and would create erigondb.toml with the default regime,
+	// which the later flag-aware resolve in SetUpBlockReader then reads as pre-existing and
+	// drops the flag. Seeding here first makes --commitment.plainValues stick.
+	if _, err := state.ResolveErigonDBSettingsWithRefsDefault(dirs, logger, config.Snapshot.NoDownloader, config.CommitmentRefsFirstStart()); err != nil {
+		return nil, err
 	}
 
 	var chainConfig *chain.Config
@@ -654,7 +667,13 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 	executionFetcher = execp2p.NewFetcher(logger, backend.sentryProvider.ExecutionP2PMessageListener, backend.sentryProvider.ExecutionP2PMessageSender)
 	executionFetcher = execp2p.NewPenalizingFetcher(logger, executionFetcher, backend.sentryProvider.ExecutionP2PPeerPenalizer)
 	executionFetcher = execp2p.NewTrackingFetcher(executionFetcher, backend.sentryProvider.ExecutionP2PPeerTracker)
-	bbd := execp2p.NewBackwardBlockDownloader(logger, executionFetcher, backend.sentryProvider.ExecutionP2PPeerPenalizer, backend.sentryProvider.ExecutionP2PPeerTracker, tmpdir)
+	balFetcher := execp2p.NewBALFetcher(
+		logger,
+		backend.sentryProvider.ExecutionP2PMessageListener,
+		backend.sentryProvider.ExecutionP2PMessageSender,
+		backend.sentryProvider.ExecutionP2PPeerPenalizer,
+	)
+	bbd := execp2p.NewBackwardBlockDownloader(logger, executionFetcher, backend.sentryProvider.ExecutionP2PPeerPenalizer, backend.sentryProvider.ExecutionP2PPeerTracker, tmpdir, execp2p.WithBALFetcher(balFetcher))
 
 	// MultiClient is the late-binding half of the Sentry Provider — it needs
 	// the consensus engine which is only available after polygon + engine
@@ -686,18 +705,6 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 	)
 
 	backend.stateDiffClient = direct.NewStateDiffClientDirect(backend.kvRPC)
-
-	// Start the eth/71 BAL downloader (EIP-8159) only on chains that activate
-	// EIP-7928. collectMissingBALs already short-circuits on the first pre-
-	// Amsterdam header (BlockAccessListHash==nil), but skipping the whole
-	// goroutine on chains that never reach Amsterdam is cheaper and clearer.
-	if chainConfig.AmsterdamTime != nil {
-		// Always-on once gated, negotiation-driven: if no peer advertises eth/71
-		// this is a silent no-op per scan pass. When eth/71 peers connect, the
-		// downloader backfills missing BALs into rawdb so subsequent stage_exec
-		// runs can skip local BAL regeneration.
-		go sentry_multi_client.NewBALDownloader(backend.sentryProvider.Client, backend.chainDB, logger).Run(backend.sentryCtx)
-	}
 
 	// SD-wrapper state cache, shared by the txpool and the embedded
 	// rpcdaemon. Both read account state from the authoritative in-flight
@@ -801,9 +808,9 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 	if config.MCPAddress != "" {
 		go func() {
 			logger.Info("serve MCP on", "addr", config.MCPAddress)
-			mcpErr := mcpServer.ServeSSE(config.MCPAddress)
+			mcpErr := mcpServer.ServeSSE(ctx, config.MCPAddress)
 			if mcpErr != nil {
-				logger.Error("mcpServer.ServeSSE", "err", err)
+				logger.Error("mcpServer.ServeSSE", "err", mcpErr)
 				return
 			}
 		}()
@@ -931,9 +938,9 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 	// snapshots not in that set could cause issues. That's an unsolved issue and probably requires
 	// always resetting before resuming/starting a sync.
 	var afterSnapshotDownload func(ctx context.Context) error
-	if backend.components.Downloader != nil && backend.components.Downloader.Downloader != nil {
+	if dp := backend.components.Downloader; dp != nil && dp.Downloader != nil {
 		afterSnapshotDownload = func(ctx context.Context) (err error) {
-			incomplete, err := backend.components.Downloader.Downloader.AddTorrentsFromDisk(ctx)
+			incomplete, err := dp.AddTorrentsFromDisk(ctx)
 			if err != nil {
 				err = fmt.Errorf("adding torrents from disk: %w", err)
 				return
@@ -971,6 +978,14 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 		Accumulator:    backend.notifications.Accumulator,
 		RecentReceipts: backend.notifications.RecentReceipts,
 	}
+	// Test harnesses (e.g. EngineApiTester) set StateCacheBudget small so each
+	// per-fixture ExecModule doesn't allocate the full production cache; 0 keeps
+	// the production default.
+	var domainStateCache *cache.StateCache
+	if config.StateCacheBudget > 0 {
+		b := config.StateCacheBudget
+		domainStateCache = cache.NewStateCache(b, b, b, b)
+	}
 	backend.execModule = execmodule.NewExecModule(
 		ctx,
 		blockReader,
@@ -982,6 +997,7 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 		hook,
 		accum,
 		execmoduleCache,
+		domainStateCache,
 		logger,
 		backend.engine,
 		config.Sync,
@@ -1120,11 +1136,17 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 	}
 
 	if !dbg.NoBackgroundMaintenance() {
-		go func() {
-			if err := temporalDb.Debug().MergeLoop(ctx); err != nil {
-				logger.Error("snapashot merge loop error", "err", err)
+		// Track the MergeLoop goroutine in bgComponentsEg so that Stop() →
+		// bgComponentsEg.Wait() waits for it to exit before chainDB.Close().
+		// Without this, there is a data race between the goroutine reading
+		// Aggregator fields (in wg.TryAdd) and Close() writing them after
+		// wg.Wait() returns.
+		backend.bgComponentsEg.Go(func() error {
+			if err := temporalDb.Debug().MergeLoop(ctx); err != nil && !errors.Is(err, context.Canceled) {
+				logger.Error("snapshot merge loop error", "err", err)
 			}
-		}()
+			return nil
+		})
 	}
 
 	return backend, nil
@@ -1298,7 +1320,7 @@ func SetUpBlockReader(ctx context.Context, db kv.RwDB, dirs datadir.Dirs, snConf
 		return nil, nil, nil, nil, nil, nil, nil, err
 	}
 
-	erigonDBSettings, err := state.ResolveErigonDBSettings(dirs, logger, snConfig.Snapshot.NoDownloader)
+	erigonDBSettings, err := state.ResolveErigonDBSettingsWithRefsDefault(dirs, logger, snConfig.Snapshot.NoDownloader, snConfig.CommitmentRefsFirstStart())
 	if err != nil {
 		return nil, nil, nil, nil, nil, nil, nil, err
 	}

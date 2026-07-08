@@ -16,43 +16,12 @@
 
 package cache
 
-// Mode selects what GenericCache does when an insert would overflow the
-// capacity. The seam is the same for both modes — the in-package eviction
-// pop is the only behaviour difference.
+// Mode selects what GenericCache does when an insert would overflow capacity.
 //
-// ModeEvictLRU is the default and matches the policy other state caches in
-// the tree use (db/state/cache.go's DomainGetFromFileCache /
-// IISeekInFilesCache, execution/cache/code_cache.go's addr LRUs,
-// execution/balcache).
-//
-// ModeNoOp preserves the historical "first writers win forever" behaviour:
-// once full, every new key is silently dropped (counted via the dropped
-// metric). Kept as a deliberate diagnostic baseline so the regression
-// bench can compare against the pre-policy behaviour without flipping
-// branches.
-//
-// Pure LRU is scan-fragile in principle: a flood of one-shot keys (mainnet's
-// long tail of single-touch slots) can evict the genuinely-hot working set
-// because every cold scan is "more recent" than the hot entries. Two known
-// follow-up policies sit behind this seam:
-//
-//   - ModeEvictFixedCache (reth's choice). Reth's execution cache is
-//     `fixed-cache`: a lock-free direct-mapped / set-associative array
-//     with collision-evict semantics — no LRU list, no LFU sketch. Their
-//     PR #21128 (v1.11.0) quoted ~25% newPayload p50 / +33% gas/s vs the
-//     prior moka / quick-cache attempts; the win came from *removing*
-//     LRU/LFU bookkeeping, not adding LFU.
-//   - ModeEvictLFU. W-TinyLFU (Caffeine-style) admission policy keeps a
-//     small frequency sketch so single-touch entries can't displace
-//     frequently-touched ones. Helps mainnet steady-state in principle
-//     (+5-15pp on Zipfian-with-scan per Caffeine literature). Does NOT
-//     help the cycle-2 bloat fixtures — those are pure cold scans with
-//     no reuse, so admission policy has nothing to admit.
-//
-// See agentspecs/lfu-vs-lru-state-cache-decision-2026-05-15.md for the
-// full analysis (which lib to use if we ship LFU — otter, not ristretto)
-// and the decision criterion (24h mainnet replay hit-rate < 90% before
-// LFU is worth a new dep).
+// ModeEvictLRU (default) drops the least-recently-used entry, matching the
+// other state caches in the tree. ModeNoOp keeps the historical "first writers
+// win" behaviour — once full, new keys are dropped (counted via a metric) —
+// and exists only as a diagnostic baseline for the regression bench.
 type Mode uint8
 
 const (

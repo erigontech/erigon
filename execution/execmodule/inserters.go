@@ -56,9 +56,11 @@ func (e *ExecModule) flushBlockOverlayToDB(ctx context.Context, sd *execctx.Shar
 
 func (e *ExecModule) InsertBlocks(ctx context.Context, blocks []*types.RawBlock) (ExecutionStatus, error) {
 	defer insertBlocksDuration.ObserveDuration(time.Now())
-	if !e.fgTryAcquire() {
-		e.logger.Trace("ethereumExecutionModule.InsertBlocks: ExecutionStatus_Busy")
-		return ExecutionStatusBusy, nil
+	// Serialize behind any in-flight exec-module op, blocking rather than
+	// failing fast with Busy (callers and tests rely on the block), while
+	// staying in the foreground-worker model (enterForeground for the worker).
+	if err := e.fgAcquire(ctx); err != nil {
+		return 0, fmt.Errorf("ethereumExecutionModule.InsertBlocks: fg acquire: %w", err)
 	}
 	defer e.fgRelease()
 	e.forkValidator.ClearWithUnwind()

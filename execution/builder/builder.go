@@ -155,6 +155,11 @@ func (b *Builder) Build(param *Parameters, interrupt *atomic.Bool) (result *type
 		sd.SetParent(parentSD)
 	}
 
+	// Wire the parallel commitment trie's context factory. Values still resolve
+	// through the sd/parent mem-batch overlay chain; b.db only backs the fresh
+	// per-worker readers. Mirrors exec3; no-op for the sequential trie.
+	sd.EnableParaTrieDB(b.db)
+
 	executionAt, err := stages.GetStageProgress(compositeTx, stages.Execution)
 	if err != nil {
 		return nil, err

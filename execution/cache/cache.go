@@ -22,9 +22,18 @@ type Cache interface {
 	// Get retrieves data for the given key.
 	Get(key []byte) ([]byte, bool)
 
+	// GetWithTxNum is Get plus the txNum the cached value reflects, so the
+	// read path can apply a step bound against an in-flight unwind's maxStep.
+	GetWithTxNum(key []byte) ([]byte, uint64, bool)
+
 	// Put stores data for the given key, stamped with the txNum the value
 	// reflects (used for txNum/epoch unwind invalidation).
 	Put(key []byte, value []byte, txNum uint64)
+
+	// PutIfAbsent is Put except that a live entry for key is left untouched
+	// (a stale one is replaced) — for prefetch writers, whose snapshot may
+	// already be superseded by an authoritative Put.
+	PutIfAbsent(key []byte, value []byte, txNum uint64)
 
 	// Delete removes the data for the given key.
 	Delete(key []byte)
@@ -33,10 +42,13 @@ type Cache interface {
 	Clear()
 
 	// Unwind invalidates entries that reflect state above unwindToTxNum on a
-	// now-dead fork. Diffset-free: GenericCache bumps an epoch and lowers a
-	// floor (lazy evict on read); CodeCache clears its small mutable addr
-	// layers. Immutable content-addressed code layers are untouched.
+	// now-dead fork. Diffset-free and lazy: both GenericCache and CodeCache
+	// bump an epoch and lower a floor, so stale entries (including code and
+	// size) are evicted on the next read rather than walked eagerly.
 	Unwind(unwindToTxNum uint64)
+
+	// Close drops the cache's slot in the shared memory envelope. Idempotent.
+	Close()
 
 	// Len returns the number of entries in the cache.
 	Len() int

@@ -24,7 +24,6 @@ import (
 	"os"
 	"runtime"
 	"slices"
-	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -37,13 +36,11 @@ import (
 	"golang.org/x/sync/semaphore"
 
 	"github.com/erigontech/erigon/cl/clparams"
-	"github.com/erigontech/erigon/cmd/utils"
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/dir"
 	"github.com/erigontech/erigon/common/estimate"
 	"github.com/erigontech/erigon/common/log/v3"
-	"github.com/erigontech/erigon/db/config3"
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/fromdb"
 	"github.com/erigontech/erigon/db/integrity"
@@ -113,6 +110,7 @@ func makeStageCmd(use string, stageFn func(kv.TemporalRwDB, context.Context, log
 			}
 			ctx, cancel := context.WithCancel(cmd.Context())
 			defer cancel()
+			go kv.CollectTableSizesPeriodically(ctx, db, dbcfg.ChainDB, logger)
 			if err := stageFn(db, ctx, logger); err != nil {
 				if errors.Is(err, context.Canceled) {
 					return nil // graceful shutdown
@@ -337,6 +335,7 @@ func init() {
 	withPruneTo(cmdStageCustomTrace)
 	withTraceFlags(cmdStageCustomTrace)
 	withDomain(cmdStageCustomTrace)
+	withErigondbDomainStepsInFrozenFile(cmdStageCustomTrace)
 	rootCmd.AddCommand(cmdStageCustomTrace)
 
 	withStageBase(cmdStageTxLookup)
@@ -378,7 +377,7 @@ func stageSnapshots(db kv.TemporalRwDB, ctx context.Context, logger log.Logger) 
 		}
 	}
 	dirs := datadir.New(datadirCli)
-	if err := rawdbreset.ResetBlocks(tx, db, br, bw, dirs, logger); err != nil {
+	if err := rawdbreset.ResetBlocks(db, tx, br, bw, dirs, logger); err != nil {
 		return fmt.Errorf("resetting blocks: %w", err)
 	}
 	domains, err := execctx.NewSharedDomains(ctx, tx, logger)
@@ -433,7 +432,7 @@ func stageHeaders(db kv.TemporalRwDB, ctx context.Context, logger log.Logger) er
 
 	return db.Update(ctx, func(tx kv.RwTx) error {
 		if reset {
-			if err := rawdbreset.ResetBlocks(tx, db, br, bw, dirs, logger); err != nil {
+			if err := rawdbreset.ResetBlocks(db, tx, br, bw, dirs, logger); err != nil {
 				return err
 			}
 			return nil
@@ -500,7 +499,7 @@ func stageBodies(db kv.TemporalRwDB, ctx context.Context, logger log.Logger) err
 
 	if reset {
 		return db.Update(ctx, func(tx kv.RwTx) error {
-			return rawdbreset.ResetBlocks(tx, db, br, bw, dirs, logger)
+			return rawdbreset.ResetBlocks(db, tx, br, bw, dirs, logger)
 		})
 	}
 
@@ -546,7 +545,7 @@ func stageSenders(db kv.TemporalRwDB, ctx context.Context, logger log.Logger) er
 
 	br, _ := blocksIO(db, logger)
 	if reset {
-		return db.Update(ctx, func(tx kv.RwTx) error { return rawdbreset.ResetSenders(ctx, tx) })
+		return rawdbreset.ResetSenders(ctx, db)
 	}
 
 	tx, err := db.BeginRw(ctx)
@@ -626,9 +625,6 @@ func stageSenders(db kv.TemporalRwDB, ctx context.Context, logger log.Logger) er
 }
 
 func stageExec(db kv.TemporalRwDB, ctx context.Context, logger log.Logger) error {
-	if chainTipMode && noCommit {
-		return errors.New("--sync.mode.chaintip cannot work with --no-commit to be false")
-	}
 	dirs := datadir.New(datadirCli)
 	if err := datadir.ApplyMigrations(dirs); err != nil {
 		return err
@@ -714,9 +710,6 @@ func stageExec(db kv.TemporalRwDB, ctx context.Context, logger log.Logger) error
 		if err != nil {
 			return err
 		}
-		if noCommit {
-			return nil
-		}
 		return tx.Commit()
 	}
 
@@ -744,97 +737,99 @@ func stageExec(db kv.TemporalRwDB, ctx context.Context, logger log.Logger) error
 		block = sendersProgress
 	}
 
-	doms, err := execctx.NewSharedDomains(ctx, tx, logger)
-	if err != nil {
-		return err
-	}
-	doms.SetInMemHistoryReads(false)
+	agg := (db.(dbstate.HasAgg).Agg()).(*dbstate.Aggregator)
 
-	if chainTipMode {
-		//if chainTip = true, forced noCommit = false
-		for bn := execProgress; bn < block; bn++ {
-			if err := stagedsync.SpawnExecuteBlocksStage(s, sync, doms, tx, bn, ctx, cfg, logger); err != nil {
-				if !errors.Is(err, &stagedsync.ErrLoopExhausted{}) {
-					return err
-				}
-			}
-			if err := doms.Flush(ctx, tx); err != nil {
-				return err
-			}
-			doms.ClearRam(true)
-			if err := tx.Commit(); err != nil {
-				return err
-			}
-			if tx, err = db.BeginTemporalRw(ctx); err != nil {
-				return err
-			}
+	// Both modes run each batch in its own rwtx + SharedDomains (execBlocksBatch),
+	// then collate+prune (which also kicks background file building). Release the
+	// read tx first — MDBX allows one writer.
+	tx.Rollback()
+	tx = nil
 
+	collateAndPrune := func() error {
+		return agg.CollateAndPrune(ctx, db, func(tx kv.TemporalRwTx) error {
 			pruneStage, err := sync.PruneStageState(stages.Execution, s.BlockNumber, tx, s.CurrentSyncCycle.IsInitialCycle)
 			if err != nil {
 				return err
 			}
-			if err := stagedsync.PruneExecutionStage(ctx, pruneStage, tx, cfg, 0, logger); err != nil {
-				return err
-			}
-
-			if err := tx.Commit(); err != nil {
-				return err
-			}
-			if tx, err = db.BeginTemporalRw(ctx); err != nil {
-				return err
-			}
-		}
-		if err := doms.Flush(ctx, tx); err != nil {
-			return err
-		}
-		doms.ClearRam(true)
-		return tx.Commit()
+			return stagedsync.PruneExecutionStage(ctx, pruneStage, tx, cfg, 0, logger)
+		}, logger)
 	}
-	agg := (db.(dbstate.HasAgg).Agg()).(*dbstate.Aggregator)
+
+	if chainTipMode {
+		for bn := execProgress; bn < block; bn++ {
+			if _, err := execBlocksBatch(ctx, db, sync, cfg, bn, false, logger); err != nil {
+				return err
+			}
+			if err := collateAndPrune(); err != nil {
+				return err
+			}
+		}
+		return nil
+	}
+
 	blockSnapBuildSema := semaphore.NewWeighted(int64(runtime.NumCPU()))
 	agg.SetSnapshotBuildSema(blockSnapBuildSema)
+	if err := agg.SetDomainStepsInFrozenFile(erigondbDomainStepsInFrozenFile); err != nil {
+		return err
+	}
 	agg.PresetOfflineExecution()
 	agg.PeriodicalyPrintProcessSet(ctx)
 	agg.LockWorkersEditing()
 
 	for {
-		if err := stagedsync.SpawnExecuteBlocksStage(s, sync, doms, tx, block, ctx, cfg, logger); err != nil {
-			if !errors.Is(err, &stagedsync.ErrLoopExhausted{}) {
-				return err
-			}
-		}
-
-		if err := doms.Flush(ctx, tx); err != nil {
-			return err
-		}
-		doms.ClearRam(true)
-
-		pruneStage, err := sync.PruneStageState(stages.Execution, s.BlockNumber, tx, s.CurrentSyncCycle.IsInitialCycle)
+		execProgress, err = execBlocksBatch(ctx, db, sync, cfg, block, true, logger)
 		if err != nil {
 			return err
 		}
-		if err := stagedsync.PruneExecutionStage(ctx, pruneStage, tx, cfg, 0, logger); err != nil {
-			return err
-		}
-
-		if !noCommit {
-			if err := tx.Commit(); err != nil {
-				return err
-			}
-			if tx, err = db.BeginTemporalRw(ctx); err != nil {
-				return err
-			}
-		}
-
-		if execProgress, err = stages.GetStageProgress(tx, stages.Execution); err != nil {
+		if err := collateAndPrune(); err != nil {
 			return err
 		}
 		if execProgress >= block {
 			break
 		}
 	}
-
 	return nil
+}
+
+// execBlocksBatch runs one stage_exec batch in its own rwtx and SharedDomains:
+// exec up to toBlock (or the batch limit), then doms.Commit. Commit (not Flush)
+// refreshes the aggregator BranchCache to match committed state — a stale cache
+// makes the next batch compute a wrong trie root — and commits the tx. A fresh
+// SharedDomains per call avoids reusing a committed (spent) one. Pruning and
+// file-building are the caller's job (agg.CollateAndPrune). Returns the Execution
+// stage progress after the batch.
+func execBlocksBatch(ctx context.Context, db kv.TemporalRwDB, st *stagedsync.Sync, cfg stagedsync.ExecuteBlockCfg, toBlock uint64, initialCycle bool, logger log.Logger) (uint64, error) {
+	tx, err := db.BeginTemporalRw(ctx)
+	if err != nil {
+		return 0, err
+	}
+	defer tx.Rollback()
+
+	doms, err := execctx.NewSharedDomains(ctx, tx, logger)
+	if err != nil {
+		return 0, err
+	}
+	defer doms.Close()
+	doms.SetInMemHistoryReads(false)
+
+	s, err := st.StageState(stages.Execution, tx, initialCycle, false)
+	if err != nil {
+		return 0, err
+	}
+
+	if err := stagedsync.SpawnExecuteBlocksStage(s, st, doms, tx, toBlock, ctx, cfg, logger); err != nil {
+		if !errors.Is(err, &stagedsync.ErrLoopExhausted{}) {
+			return 0, err
+		}
+	}
+	progress, err := stages.GetStageProgress(tx, stages.Execution)
+	if err != nil {
+		return 0, err
+	}
+	if err := doms.Commit(ctx, tx); err != nil {
+		return 0, err
+	}
+	return progress, nil
 }
 
 // stageExecReplay re-executes historic blocks using conflict-free parallel workers.
@@ -951,6 +946,9 @@ func stageCustomTrace(db kv.TemporalRwDB, ctx context.Context, logger log.Logger
 
 	blockSnapBuildSema := semaphore.NewWeighted(int64(runtime.NumCPU()))
 	agg.SetSnapshotBuildSema(blockSnapBuildSema)
+	if err := agg.SetDomainStepsInFrozenFile(erigondbDomainStepsInFrozenFile); err != nil {
+		return err
+	}
 	agg.PresetOfflineExecution()
 	agg.PeriodicalyPrintProcessSet(ctx)
 
@@ -1077,26 +1075,6 @@ func allSnapshots(ctx context.Context, db kv.RoDB, logger log.Logger) (*freezebl
 			return
 		}
 		aggOpts := dbstate.New(dirs).Logger(logger).WithErigonDBSettings(erigonDBSettings)
-		if erigondbDomainStepsInFrozenFile != "" {
-			var v uint64
-			if strings.EqualFold(erigondbDomainStepsInFrozenFile, "inf") {
-				v = config3.UnboundedDomainMerge
-			} else {
-				parsed, perr := strconv.ParseUint(erigondbDomainStepsInFrozenFile, 10, 64)
-				if perr != nil || parsed == 0 {
-					err = fmt.Errorf("invalid --%s value %q: must be a positive integer or \"Inf\"",
-						utils.ErigondbDomainStepsInFrozenFileFlag.Name, erigondbDomainStepsInFrozenFile)
-					return
-				}
-				v = parsed
-			}
-			stepsStr := "Inf"
-			if v != config3.UnboundedDomainMerge {
-				stepsStr = fmt.Sprintf("%d", v)
-			}
-			logger.Info("domain merge cap overridden", "steps_in_frozen_file", stepsStr)
-			aggOpts = aggOpts.ErigondbDomainStepsInFrozenFile(v)
-		}
 		_aggSingleton = aggOpts.MustOpen(ctx, db)
 
 		_aggSingleton.SetProduceMod(snapCfg.ProduceE3)
@@ -1195,7 +1173,6 @@ func newSync(ctx context.Context, db kv.TemporalRwDB, builderConfig *buildercfg.
 	if chainTipMode {
 		syncCfg.LoopBlockLimit = 1
 		syncCfg.AlwaysGenerateChangesets = true
-		noCommit = false
 	}
 
 	if !dbg.BatchCommitments {

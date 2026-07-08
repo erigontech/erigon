@@ -107,6 +107,7 @@ type ForkChoiceStore struct {
 	// [New in Gloas:EIP7732] Track execution payload validation status by execution block hash.
 	// Used to check if parent execution payload has been validated/invalidated for gossip validation.
 	executionPayloadStatus *lru.Cache[common.Hash, execution_client.PayloadStatus]
+	payloadStatusByRoot    *lru.Cache[common.Hash, execution_client.PayloadStatus]
 	// [New in Gloas:EIP7732] Track execution payload gas_limit by execution block hash.
 	// Used for the is_gas_limit_target_compatible IGNORE check in bid gossip validation.
 	executionPayloadGasLimit *lru.Cache[common.Hash, uint64]
@@ -157,7 +158,10 @@ type ForkChoiceStore struct {
 	beaconCfg      *clparams.BeaconChainConfig
 
 	emitters *beaconevents.EventEmitter
-	synced   atomic.Bool
+	// event sends queued under f.mu, emitted after release (see queueEmit)
+	queuedEmits  []func()
+	queuedPrunes []uint64
+	synced       atomic.Bool
 
 	ethClock                eth_clock.EthereumClock
 	optimisticStore         optimistic.OptimisticStore
@@ -172,8 +176,8 @@ type ForkChoiceStore struct {
 	// Post-GLOAS: stores [block_timely, payload_timely] — two independent booleans.
 	// Used by is_head_late and proposer boost reorg logic.
 	blockTimeliness sync.Map // map[common.Hash][clparams.NumBlockTimelinessDeadlines]bool
-	// [New in Gloas:EIP7732] Indexed weight store for optimized weight calculation
-	indexedWeightStore *indexedWeightStore
+	// [New in Gloas:EIP7732]
+	gloasWeightTree *gloasWeightTree
 	// [New in Gloas:EIP7732] Envelopes waiting for their corresponding block to arrive.
 	// In GLOAS, BeaconBlock and ExecutionPayloadEnvelope are gossiped separately.
 	// Due to network timing, the envelope may arrive before its corresponding block.
@@ -316,6 +320,10 @@ func NewForkChoiceStore(
 	if err != nil {
 		return nil, err
 	}
+	payloadStatusByRoot, err := lru.New[common.Hash, execution_client.PayloadStatus](checkpointsPerCache)
+	if err != nil {
+		return nil, err
+	}
 
 	// [New in Gloas:EIP7732] Track execution payload gas_limit by execution block hash
 	executionPayloadGasLimit, err := lru.New[common.Hash, uint64](checkpointsPerCache)
@@ -377,6 +385,7 @@ func NewForkChoiceStore(
 		pendingEnvelopes:               pendingEnvelopes,
 		pendingLocalSelfBuildEnvelopes: pendingLocalSelfBuildEnvelopes,
 		executionPayloadStatus:         executionPayloadStatus,
+		payloadStatusByRoot:            payloadStatusByRoot,
 		executionPayloadGasLimit:       executionPayloadGasLimit,
 		db:                             db,
 	}
@@ -405,8 +414,7 @@ func NewForkChoiceStore(
 	f.payloadTimelinessVote.Store(common.Hash(anchorRoot), anchorTimelinessVotes)
 	f.payloadDataAvailabilityVote.Store(common.Hash(anchorRoot), anchorDataAvailabilityVotes)
 
-	// [New in Gloas:EIP7732] Initialize indexed weight store
-	f.indexedWeightStore = NewIndexedWeightStore(f)
+	f.gloasWeightTree = newGloasWeightTree(f)
 
 	return f, nil
 }
@@ -425,6 +433,13 @@ func (f *ForkChoiceStore) GetPeerDas() das.PeerDas {
 // [New in Gloas:EIP7732]
 func (f *ForkChoiceStore) GetRecentExecutionPayloadStatus(executionBlockHash common.Hash) (execution_client.PayloadStatus, bool) {
 	return f.executionPayloadStatus.Get(executionBlockHash)
+}
+
+func (f *ForkChoiceStore) GetRecentExecutionPayloadStatusByRoot(blockRoot common.Hash) (execution_client.PayloadStatus, bool) {
+	if f.payloadStatusByRoot == nil {
+		return execution_client.PayloadStatusNone, false
+	}
+	return f.payloadStatusByRoot.Get(blockRoot)
 }
 
 // GetExecutionPayloadGasLimit returns the gas_limit of a recently validated execution payload.
@@ -761,6 +776,58 @@ func (f *ForkChoiceStore) HasEnvelope(blockRoot common.Hash) bool {
 	return f.forkGraph.HasEnvelope(blockRoot)
 }
 
+// IsPayloadVerified returns whether the execution payload for the beacon block root
+// has been accepted by the execution layer.
+// [New in Gloas:EIP7732]
+func (f *ForkChoiceStore) IsPayloadVerified(blockRoot common.Hash) bool {
+	if f.verifiedExecutionPayload == nil {
+		return false
+	}
+	return f.verifiedExecutionPayload.Contains(blockRoot)
+}
+
+func (f *ForkChoiceStore) MarkPayloadVerified(blockRoot common.Hash, executionBlockHash common.Hash) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.markPayloadVerifiedLocked(blockRoot, executionBlockHash)
+}
+
+func (f *ForkChoiceStore) markPayloadVerifiedLocked(blockRoot common.Hash, executionBlockHash common.Hash) {
+	if f.verifiedExecutionPayload == nil {
+		return
+	}
+	f.verifiedExecutionPayload.Add(blockRoot, struct{}{})
+	if f.executionPayloadStatus != nil {
+		f.executionPayloadStatus.Add(executionBlockHash, execution_client.PayloadStatusValidated)
+	}
+	if f.payloadStatusByRoot != nil {
+		f.payloadStatusByRoot.Add(blockRoot, execution_client.PayloadStatusValidated)
+	}
+	f.headHash = common.Hash{}
+	f.headPayloadStatus = cltypes.PayloadStatusPending
+}
+
+func (f *ForkChoiceStore) MarkPayloadInvalid(blockRoot common.Hash, executionBlockHash common.Hash) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.markPayloadInvalidLocked(blockRoot, executionBlockHash)
+}
+
+func (f *ForkChoiceStore) markPayloadInvalidLocked(blockRoot common.Hash, executionBlockHash common.Hash) {
+	if f.verifiedExecutionPayload != nil {
+		f.verifiedExecutionPayload.Remove(blockRoot)
+	}
+	if f.executionPayloadStatus != nil {
+		f.executionPayloadStatus.Add(executionBlockHash, execution_client.PayloadStatusInvalidated)
+	}
+	if f.payloadStatusByRoot != nil {
+		f.payloadStatusByRoot.Add(blockRoot, execution_client.PayloadStatusInvalidated)
+	}
+	f.forkGraph.MarkHeaderAsInvalid(blockRoot)
+	f.headHash = common.Hash{}
+	f.headPayloadStatus = cltypes.PayloadStatusPending
+}
+
 // ReadEnvelopeFromDisk delegates to forkGraph.ReadEnvelopeFromDisk.
 // [New in Gloas:EIP7732]
 func (f *ForkChoiceStore) ReadEnvelopeFromDisk(blockRoot common.Hash) (*cltypes.SignedExecutionPayloadEnvelope, error) {
@@ -985,6 +1052,14 @@ func (f *ForkChoiceStore) GetProposerLookahead(slot uint64) (solid.Uint64VectorS
 func (f *ForkChoiceStore) addPendingELPayload(block *cltypes.SignedBeaconBlock, envelope *cltypes.SignedExecutionPayloadEnvelope) {
 	f.pendingELPayloadsMu.Lock()
 	defer f.pendingELPayloadsMu.Unlock()
+	root, ok := pendingELPayloadRoot(PendingELPayload{Block: block, Envelope: envelope})
+	if ok {
+		for _, p := range f.pendingELPayloads {
+			if existingRoot, existingOk := pendingELPayloadRoot(p); existingOk && existingRoot == root {
+				return
+			}
+		}
+	}
 	if len(f.pendingELPayloads) >= maxPendingELPayloads {
 		log.Warn("addPendingELPayload: dropping oldest pending EL payload", "queueLen", len(f.pendingELPayloads))
 		copy(f.pendingELPayloads, f.pendingELPayloads[1:])
@@ -997,8 +1072,21 @@ func (f *ForkChoiceStore) addPendingELPayload(block *cltypes.SignedBeaconBlock, 
 	})
 }
 
+func pendingELPayloadRoot(p PendingELPayload) (common.Hash, bool) {
+	if p.Envelope != nil && p.Envelope.Message != nil && p.Envelope.Message.BeaconBlockRoot != (common.Hash{}) {
+		return p.Envelope.Message.BeaconBlockRoot, true
+	}
+	return common.Hash{}, false
+}
+
+// RequeuePendingELPayload queues a drained execution payload for another EL validation attempt.
+// [New in Gloas:EIP7732]
+func (f *ForkChoiceStore) RequeuePendingELPayload(p PendingELPayload) {
+	f.addPendingELPayload(p.Block, p.Envelope)
+}
+
 // DrainPendingELPayloads returns and clears all queued EL payloads.
-// The stages layer calls this before Flush() to add them to blockCollector.
+// The stages layer calls this before Flush() to retry them with engine.NewPayload.
 func (f *ForkChoiceStore) DrainPendingELPayloads() []PendingELPayload {
 	f.pendingELPayloadsMu.Lock()
 	defer f.pendingELPayloadsMu.Unlock()

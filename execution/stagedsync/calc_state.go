@@ -5,7 +5,6 @@ import (
 
 	"github.com/holiman/uint256"
 
-	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/common/empty"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
@@ -67,6 +66,11 @@ func (r *calcDomainReader) ReadAccountStorage(addr accounts.Address, key account
 	return val, true, nil
 }
 
+// storageEnumerator lists every persisted storage slot under an address.
+type storageEnumerator interface {
+	EachStorageSlot(addr accounts.Address, fn func(key accounts.StorageKey) error) error
+}
+
 // calcState is the commitment calculator's local state accumulator.
 // It maintains the current state for every account/storage key that has been
 // touched. On first touch, values are lazy-loaded from the domain via the
@@ -82,6 +86,10 @@ type calcState struct {
 	// domainReader provides lazy-load from the domain via asOfStateReader.
 	domainReader *calcDomainReader
 
+	// storageEnum enumerates an account's persisted storage subtree for
+	// self-destruct; nil disables the on-disk subtree wipe.
+	storageEnum storageEnumerator
+
 	// lazyLoadErr captures the first error encountered during ensureAccount /
 	// ensureStorage. Sticky — never cleared — so the calculator can fail the
 	// next compute instead of silently producing wrong updates from a missing
@@ -92,8 +100,8 @@ type calcState struct {
 	logPrefix string
 }
 
-// LazyLoadErr returns the first error encountered during ensureAccount /
-// ensureStorage lazy-loads, or nil. The calculator must check this before
+// LazyLoadErr returns the first error encountered during ensureAccount
+// lazy-loads, or nil. The calculator must check this before
 // computing — a missing baseline yields a wrong trie root that is hard to
 // attribute back to the original I/O error.
 func (cs *calcState) LazyLoadErr() error { return cs.lazyLoadErr }
@@ -104,6 +112,7 @@ func newCalcState(reader *asOfStateReader, logger log.Logger, logPrefix string) 
 		storageState: make(map[accounts.Address]map[accounts.StorageKey]uint256.Int),
 		storageDirty: make(map[accounts.Address]map[accounts.StorageKey]bool),
 		domainReader: &calcDomainReader{reader: reader},
+		storageEnum:  &asOfStorageEnumerator{reader: reader},
 		logger:       logger,
 		logPrefix:    logPrefix,
 	}
@@ -139,184 +148,132 @@ func (cs *calcState) ensureAccount(addr accounts.Address) *calcAccountState {
 	return acc
 }
 
-// ensureStorage returns the storage value, lazy-loading from domain on first touch.
-func (cs *calcState) ensureStorage(addr accounts.Address, key accounts.StorageKey) uint256.Int {
-	slots, ok := cs.storageState[addr]
-	if !ok {
-		slots = make(map[accounts.StorageKey]uint256.Int)
-		cs.storageState[addr] = slots
-	}
-	if val, ok := slots[key]; ok {
-		return val
-	}
-
-	var val uint256.Int
-	if cs.domainReader != nil {
-		v, found, err := cs.domainReader.ReadAccountStorage(addr, key)
-		if err != nil {
-			// See ensureAccount: sticky so the next compute fails fast.
-			if cs.lazyLoadErr == nil {
-				cs.lazyLoadErr = fmt.Errorf("ensureStorage(%x/%x): %w", addr.Value(), key.Value(), err)
-			}
-			if cs.logger != nil {
-				cs.logger.Warn("["+cs.logPrefix+"] commitmentCalculator: lazy-load ReadAccountStorage failed", "addr", addr, "key", key, "err", err)
-			}
-		} else if found {
-			val = v
-		}
-	}
-	slots[key] = val
-	return val
-}
-
-// ApplyWrites updates the local state with all writes from a TX result.
+// ApplyWrites folds a tx's typed write collections into the local state.
 //
-// Two semantic invariants matter for SD-of-pre-existing-contract:
-//
-// (1) IBS.Selfdestruct emits three versionWritten entries (IncarnationPath
-//
-//	= preInc, SelfDestructPath=true, BalancePath=0). Without care, the
-//	trailing BalancePath=0 in the writeset would clobber Deleted=true
-//	via the unconditional `acc.Deleted = false` reset that
-//	BalancePath/NoncePath/CodeHashPath/CodePath cases use to reflect
-//	a re-creation. Fix: those cases only clear Deleted when the value
-//	is non-zero/non-empty. A zero-value write that arrives after SD is
-//	part of the SD's own emission and must not undo Deleted=true.
-//
-// (2) When SelfDestructPath=true is processed, zero Balance/Nonce/
-//
-//	CodeHash/Incarnation. Without zeroing, lazy-loaded pre-SD values
-//	survive in cs.accounts and FlushToUpdates routes into the default
-//	regular-UPDATE branch (emitting pre-SD nonce/codeHash) instead of
-//	the EIP-161 DeleteUpdate branch — which is what serial's
-//	DomainDel produces for a pure SD (leaf removed). Storage slots
-//	under the SD'd address must also zero out: vm.StorageKeys only
-//	returns slots written in the current tx's version map and SD via
-//	Selfdestruct() doesn't write storage explicitly, so without
-//	zeroing here, FlushToUpdates emits StorageUpdate with pre-SD
-//	values and leaves stale storage in the trie (TestRecreateAndRewind
-//	block 4 recreate sees stale storage).
-//
-// Ordering invariant that (1) relies on: when a single tx
-// self-destructs an address and then re-creates it (CREATE2 to the same
-// address — pre-Cancun pattern), IBS emits the SELFDESTRUCT-time writes
-// (SelfDestructPath=true, BalancePath=0, IncarnationPath=preInc) BEFORE
-// the recreate-time writes (BalancePath=newBal, NoncePath=1, CodeHash=…),
-// because the EVM runs the opcodes in that order and versionWritten fires
-// at opcode time. So the recreate's non-zero Balance/Nonce/CodeHash
-// re-clear acc.Deleted after the SD case set it. For SD-only (no recreate)
-// the post-SD BalancePath=0 arrives but is zero, so it does NOT re-clear.
-// For fresh creates (no prior SD in this writeset) acc.Deleted starts
-// false and the conditional is a no-op. (For per-block writesets the calc
-// also relies on this — but blocks aren't single txs; the SD-then-recreate
-// pattern there spans txs, and last-write-wins on acc.Deleted still holds.)
-func (cs *calcState) ApplyWrites(writes state.VersionedWrites) {
-	// Pre-scan: which addresses are self-destructed BY THIS tx's writeset.
-	// For those, the trailing zero account-field writes that IBS emits as
-	// part of the SELFDESTRUCT (BalancePath=0, etc. — when not stripped by
-	// normalizeWriteSet) must NOT clear Deleted. For any OTHER address, an
-	// account-field write — even a zero one — means the address is alive at
-	// the end of this tx (e.g. a 0-value transfer that re-creates a
-	// previously-destroyed address as an empty account on a pre-EIP-161
-	// fork — EEST frontier/opcodes/test_double_kill under EXEC3_PARALLEL),
-	// so it must clear Deleted.
+// Self-destruct is applied before the field writes so the priority is explicit
+// in loop order: a SELFDESTRUCT marks the account Deleted and zeros its fields
+// and storage subtree, then a same-address non-zero field write (a same-tx
+// recreate) revives it by clearing Deleted. A zero field write does not revive
+// a self-destructed address; for a non-self-destructed address any field write
+// — even zero — means it is alive (clears Deleted).
+func (cs *calcState) ApplyWrites(writes *state.WriteSet) {
 	sdThisCall := make(map[accounts.Address]bool)
-	for _, w := range writes {
-		if w.Path == state.SelfDestructPath {
-			if destructed, ok := w.Val.(bool); ok {
-				// Last SelfDestructPath entry wins (matches normalizeWriteSet /
-				// applyVersionedWrites): a SELFDESTRUCT followed by a same-tx
-				// CREATE2-recreate ends ALIVE, so the recreate's writes must
-				// clear Deleted.
-				sdThisCall[w.Address] = destructed
-			}
+	for addr, vw := range writes.SelfDestructs() {
+		sdThisCall[addr] = vw.Val
+		if vw.Val {
+			acc := cs.ensureAccount(addr)
+			acc.Deleted = true
+			acc.dirty = true
+			cs.deleteStorageSubtree(addr)
 		}
 	}
 	clearsDeleted := func(addr accounts.Address, nonZero bool) bool {
 		return nonZero || !sdThisCall[addr]
 	}
-	for _, w := range writes {
-		if w.Val == nil {
-			continue
+	for addr, vw := range writes.Balances() {
+		acc := cs.ensureAccount(addr)
+		acc.Balance = vw.Val
+		acc.dirty = true
+		if clearsDeleted(addr, !acc.Balance.IsZero()) {
+			acc.Deleted = false
 		}
+	}
+	for addr, vw := range writes.Nonces() {
+		acc := cs.ensureAccount(addr)
+		acc.Nonce = vw.Val
+		acc.dirty = true
+		if clearsDeleted(addr, acc.Nonce != 0) {
+			acc.Deleted = false
+		}
+	}
+	for addr, vw := range writes.CodeHashes() {
+		acc := cs.ensureAccount(addr)
+		acc.CodeHash = vw.Val.Value()
+		acc.dirty = true
+		if clearsDeleted(addr, vw.Val.Value() != empty.CodeHash) {
+			acc.Deleted = false
+		}
+	}
+	for addr, vw := range writes.Codes() {
+		acc := cs.ensureAccount(addr)
+		acc.CodeHash = vw.Val.Hash.Value()
+		acc.dirty = true
+		if clearsDeleted(addr, vw.Val.Len() > 0) {
+			acc.Deleted = false
+		}
+	}
+	for addr, vw := range writes.Incarnations() {
+		acc := cs.ensureAccount(addr)
+		acc.Incarnation = vw.Val
+		acc.dirty = true
+	}
+	for addr, inner := range writes.Storages() {
+		// Skip lazy-loading the prior slot value: the only downstream consumer
+		// (FlushToUpdates) reads exactly the value set below, so the cold
+		// GetAsOf seek it would cost is wasted.
+		slots := cs.storageState[addr]
+		if slots == nil {
+			slots = make(map[accounts.StorageKey]uint256.Int)
+			cs.storageState[addr] = slots
+		}
+		dirty := cs.storageDirty[addr]
+		if dirty == nil {
+			dirty = make(map[accounts.StorageKey]bool)
+			cs.storageDirty[addr] = dirty
+		}
+		for key, vw := range inner {
+			slots[key] = vw.Val
+			dirty[key] = true
+		}
+	}
+	// An account still Deleted after the field writes (no reviving non-zero
+	// write) must be all-zero — matching serial's DomainDel leaf removal — even
+	// though IBS emits the pre-SD IncarnationPath/BalancePath values.
+	for addr := range sdThisCall {
+		if acc, ok := cs.accounts[addr]; ok && acc.Deleted {
+			acc.Balance = uint256.Int{}
+			acc.Nonce = 0
+			acc.CodeHash = empty.CodeHash
+			acc.Incarnation = 0
+		}
+	}
+}
 
-		switch w.Path {
-		case state.BalancePath:
-			acc := cs.ensureAccount(w.Address)
-			acc.Balance = w.Val.(uint256.Int)
-			acc.dirty = true
-			if clearsDeleted(w.Address, !acc.Balance.IsZero()) {
-				acc.Deleted = false
-			}
-		case state.NoncePath:
-			acc := cs.ensureAccount(w.Address)
-			acc.Nonce = w.Val.(uint64)
-			acc.dirty = true
-			if clearsDeleted(w.Address, acc.Nonce != 0) {
-				acc.Deleted = false
-			}
-		case state.CodeHashPath:
-			acc := cs.ensureAccount(w.Address)
-			v := w.Val.(accounts.CodeHash)
-			acc.CodeHash = v.Value()
-			acc.dirty = true
-			if clearsDeleted(w.Address, v.Value() != empty.CodeHash) {
-				acc.Deleted = false
-			}
-		case state.CodePath:
-			acc := cs.ensureAccount(w.Address)
-			code := w.Val.([]byte)
-			acc.CodeHash = crypto.Keccak256Hash(code)
-			acc.dirty = true
-			if clearsDeleted(w.Address, len(code) > 0) {
-				acc.Deleted = false
-			}
-		case state.SelfDestructPath:
-			if destructed, ok := w.Val.(bool); ok && destructed {
-				acc := cs.ensureAccount(w.Address)
-				acc.Deleted = true
-				acc.dirty = true
-				// Invariant 2: zero account fields so FlushToUpdates
-				// routes into the EIP-161 DeleteUpdate branch.
-				acc.Balance = uint256.Int{}
-				acc.Nonce = 0
-				acc.CodeHash = empty.CodeHash
-				acc.Incarnation = 0
-				// Zero every tracked storage slot and mark dirty so
-				// FlushToUpdates emits DeleteUpdate per slot.
-				if slots, ok := cs.storageState[w.Address]; ok {
-					if cs.storageDirty[w.Address] == nil {
-						cs.storageDirty[w.Address] = make(map[accounts.StorageKey]bool)
-					}
-					for key := range slots {
-						slots[key] = uint256.Int{}
-						cs.storageDirty[w.Address][key] = true
-					}
-				}
-			}
-		case state.StoragePath:
-			v := w.Val.(uint256.Int)
-			// The previous slot value is irrelevant here: the next line
-			// overwrites it with the EVM-write value, and the only
-			// downstream consumer (FlushToUpdates) reads exactly the
-			// value we set. Skip the ensureStorage lazy-load — it
-			// triggers a cold .ef GetAsOf seek per first-touched slot
-			// (~5,910 wasted seeks per SSTORE-bloat block) and discards
-			// the loaded value. Initialize just the inner map.
-			slots := cs.storageState[w.Address]
-			if slots == nil {
-				slots = make(map[accounts.StorageKey]uint256.Int)
-				cs.storageState[w.Address] = slots
-			}
-			slots[w.Key] = v
-			if cs.storageDirty[w.Address] == nil {
-				cs.storageDirty[w.Address] = make(map[accounts.StorageKey]bool)
-			}
-			cs.storageDirty[w.Address][w.Key] = true
-		case state.IncarnationPath:
-			acc := cs.ensureAccount(w.Address)
-			acc.Incarnation = w.Val.(uint64)
-			acc.dirty = true
+// deleteStorageSubtree zeroes and dirties every storage slot under a
+// self-destructed account, including untouched on-disk slots pulled via
+// storageEnum, so FlushToUpdates emits a DeleteUpdate for each.
+func (cs *calcState) deleteStorageSubtree(addr accounts.Address) {
+	slots := cs.storageState[addr]
+	if slots == nil {
+		slots = make(map[accounts.StorageKey]uint256.Int)
+		cs.storageState[addr] = slots
+	}
+	dirty := cs.storageDirty[addr]
+	if dirty == nil {
+		dirty = make(map[accounts.StorageKey]bool)
+		cs.storageDirty[addr] = dirty
+	}
+	for key := range slots {
+		slots[key] = uint256.Int{}
+		dirty[key] = true
+	}
+	if cs.storageEnum == nil {
+		return
+	}
+	if err := cs.storageEnum.EachStorageSlot(addr, func(key accounts.StorageKey) error {
+		if _, ok := slots[key]; !ok {
+			slots[key] = uint256.Int{}
+			dirty[key] = true
+		}
+		return nil
+	}); err != nil {
+		// Sticky — a partial subtree wipe yields a wrong root, so fail the
+		// next compute rather than silently leaving stale slots.
+		if cs.lazyLoadErr == nil {
+			cs.lazyLoadErr = fmt.Errorf("deleteStorageSubtree(%x): %w", addr.Value(), err)
+		}
+		if cs.logger != nil {
+			cs.logger.Warn("["+cs.logPrefix+"] commitmentCalculator: SD storage enumeration failed", "addr", addr, "err", err)
 		}
 	}
 }
@@ -333,27 +290,10 @@ func (cs *calcState) FlushToUpdates(updates *commitment.Updates) {
 		address := addr.Value()
 		key := string(address[:])
 
-		// Three flavours of "Deleted" writeset, distinguished by whether
-		// the account fields actually became zero:
-		//   1. (Currently unreachable from production writesets — defensive
-		//      only.) SD-of-pre-existing-contract with incarnation > 0
-		//      retained: ApplyWrites' SelfDestructPath case now zeros
-		//      Incarnation along with Balance/Nonce/CodeHash, so SD always
-		//      lands in case 2 below. This branch stays as a safety net for
-		//      hand-built writesets and future ApplyWrites changes that
-		//      might preserve incarnation; if it fires, emit a zero-account
-		//      UPDATE (matches serial's post-DomainDel encoding when the
-		//      serialised account retains a non-zero incarnation).
-		//   2. SD / EIP-161 emptyRemoval: all fields zero (incarnation too).
-		//      Serial's DomainDel removes the leaf. Emit DeleteUpdate.
-		//   3. Deleted-but-not-empty (defense-in-depth): if the writeset
-		//      has SelfDestructPath=true but balance/nonce/code retain
-		//      non-zero values (e.g. OOG-during-CREATE2 with retained
-		//      value transfer per EIP-1014, or any write-ordering race
-		//      where BalancePath arrives before SelfDestructPath), serial
-		//      does NOT remove the leaf — it stays as the actual
-		//      balance-only or fully-populated account. Emit a regular
-		//      UPDATE with the actual values rather than zeroing them.
+		// A "Deleted" account only encodes as serial's leaf-removing DeleteUpdate
+		// when every field is actually zero; a Deleted account that still holds a
+		// non-zero balance/nonce/code (or a retained incarnation) keeps its leaf,
+		// so emit a regular UPDATE with the real values instead.
 		isAllZero := acc.Balance.IsZero() && acc.Nonce == 0 && acc.CodeHash == empty.CodeHash
 		switch {
 		case acc.Deleted && acc.Incarnation > 0 && isAllZero:

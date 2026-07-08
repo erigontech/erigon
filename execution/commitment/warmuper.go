@@ -20,6 +20,7 @@ import (
 	"context"
 	"encoding/binary"
 	"fmt"
+	"sync"
 	"sync/atomic"
 	"time"
 
@@ -29,20 +30,6 @@ import (
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/execution/commitment/nibbles"
 )
-
-// Warmer branch-read outcome counters. Hit: branchFromCacheOrDB returned
-// >= 4 bytes; Empty: returned nothing or unparseable. Used to size the
-// value of bypassing the xorfilter in this call path.
-var (
-	warmerBranchHitCount   atomic.Uint64
-	warmerBranchEmptyCount atomic.Uint64
-)
-
-// WarmerBranchOutcomeStats returns process-cumulative counts. Snapshot
-// before/after for per-block deltas.
-func WarmerBranchOutcomeStats() (hit, empty uint64) {
-	return warmerBranchHitCount.Load(), warmerBranchEmptyCount.Load()
-}
 
 // TrieContextFactory creates new PatriciaContext instances for parallel warmup.
 type TrieContextFactory func() (PatriciaContext, func())
@@ -83,6 +70,12 @@ type Warmuper struct {
 	keysProcessed atomic.Uint64
 	startTime     time.Time
 
+	// Per-slot in-flight warm-item counts; the per-key path stays lock-free, mu/cond engage
+	// only on the drain-to-zero and WaitBufferFree paths.
+	outstanding [arenaRingSize]atomic.Int64
+	mu          sync.Mutex
+	cond        *sync.Cond
+
 	// State
 	started atomic.Bool
 	closed  atomic.Bool
@@ -91,12 +84,13 @@ type Warmuper struct {
 type warmupWorkItem struct {
 	hashedKey  []byte
 	startDepth int
+	gen        uint64
 }
 
 // NewWarmuper creates a new Warmuper instance.
 func NewWarmuper(ctx context.Context, cfg WarmupConfig) *Warmuper {
 	ctx, cancel := context.WithCancel(ctx)
-	return &Warmuper{
+	w := &Warmuper{
 		ctx:        ctx,
 		cancel:     cancel,
 		ctxFactory: cfg.CtxFactory,
@@ -104,11 +98,8 @@ func NewWarmuper(ctx context.Context, cfg WarmupConfig) *Warmuper {
 		numWorkers: cfg.NumWorkers,
 		logPrefix:  cfg.LogPrefix,
 	}
-}
-
-func (w *Warmuper) branchFromCacheOrDB(trieCtx PatriciaContext, prefix []byte) ([]byte, error) {
-	branchData, _, err := trieCtx.Branch(prefix)
-	return branchData, err
+	w.cond = sync.NewCond(&w.mu)
+	return w
 }
 
 // Start initializes and starts the warmup workers.
@@ -140,10 +131,20 @@ func (w *Warmuper) Start() {
 					}
 					w.warmupKey(trieCtx, item.hashedKey, item.startDepth)
 					w.keysProcessed.Add(1)
+					w.releaseGen(item.gen)
 				}
 			}
 		})
 	}
+
+	// Wake any WaitBufferFree waiter on shutdown so it observes cancellation instead of blocking on undrained items.
+	w.g.Go(func() error {
+		<-w.ctx.Done()
+		w.mu.Lock()
+		w.cond.Broadcast()
+		w.mu.Unlock()
+		return nil
+	})
 }
 
 // warmupKey performs the actual warmup for a single key by reading data to warm MDBX page cache.
@@ -154,7 +155,7 @@ func (w *Warmuper) warmupKey(trieCtx PatriciaContext, hashedKey []byte, startDep
 		prefix := nibbles.HexToCompact(hashedKey[:depth])
 
 		// Check cache first, then fall back to DB
-		branchData, err := w.branchFromCacheOrDB(trieCtx, prefix)
+		branchData, _, err := trieCtx.Branch(prefix)
 		if err != nil {
 			log.Debug(fmt.Sprintf("[%s][warmup] failed to get branch", w.logPrefix),
 				"prefix", common.Bytes2Hex(prefix), "error", err)
@@ -162,10 +163,8 @@ func (w *Warmuper) warmupKey(trieCtx PatriciaContext, hashedKey []byte, startDep
 
 		// Branch data format: 2-byte touch map + 2-byte bitmap + per-child data
 		if len(branchData) < 4 {
-			warmerBranchEmptyCount.Add(1)
 			break
 		}
-		warmerBranchHitCount.Add(1)
 
 		if depth >= len(hashedKey) {
 			break
@@ -223,19 +222,49 @@ func (w *Warmuper) warmupKey(trieCtx PatriciaContext, hashedKey []byte, startDep
 
 // WarmKey submits a hashed key for warming. Call Start() first.
 // startDepth indicates the depth from which to start warming (based on divergence from previous key).
-func (w *Warmuper) WarmKey(hashedKey []byte, startDepth int) {
+func (w *Warmuper) WarmKey(hashedKey []byte, startDepth int, gen uint64) {
 	if !w.started.Load() || w.numWorkers <= 0 || w.closed.Load() {
 		return
 	}
+	w.outstanding[gen%arenaRingSize].Add(1)
 	// Blocking By-Design!
 	// Speed of system is equal to speed of facing all page-faults during
 	// Or warmapers face them or main thread
 	// It means doesn't make much sense to unblock main thread if all Warmupers are loaded
 	// Anyway main thread can't run ahead of Warmupers (there are page-faults which will stop him)
 	select {
-	case w.work <- warmupWorkItem{hashedKey: hashedKey, startDepth: startDepth}:
+	case w.work <- warmupWorkItem{hashedKey: hashedKey, startDepth: startDepth, gen: gen}:
 	case <-w.ctx.Done():
+		w.releaseGen(gen)
 	}
+}
+
+// releaseGen decrements gen's ring-slot counter and wakes WaitBufferFree when the slot drains to zero.
+func (w *Warmuper) releaseGen(gen uint64) {
+	if w.outstanding[gen%arenaRingSize].Add(-1) == 0 {
+		w.mu.Lock()
+		w.cond.Broadcast()
+		w.mu.Unlock()
+	}
+}
+
+// WaitBufferFree blocks until every in-flight warm item for slot completes, or returns the context error if canceled first.
+func (w *Warmuper) WaitBufferFree(slot int) error {
+	if slot < 0 || slot >= arenaRingSize {
+		return fmt.Errorf("invalid arena slot %d", slot)
+	}
+	if w.outstanding[slot].Load() == 0 {
+		return nil
+	}
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	for w.outstanding[slot].Load() != 0 {
+		if err := w.ctx.Err(); err != nil {
+			return err
+		}
+		w.cond.Wait()
+	}
+	return nil
 }
 
 // Wait waits for all warmup work to complete.
@@ -260,14 +289,15 @@ func (w *Warmuper) Stats() WarmupStats {
 	}
 }
 
-// DrainPending drains all pending work items from the work channel without processing them.
+// DrainPending discards queued work items, releasing each one's ring-slot counter so WaitBufferFree won't block on it.
 func (w *Warmuper) DrainPending() {
 	if !w.started.Load() || w.numWorkers <= 0 {
 		return
 	}
 	for {
 		select {
-		case <-w.work:
+		case item := <-w.work:
+			w.releaseGen(item.gen)
 		default:
 			return
 		}

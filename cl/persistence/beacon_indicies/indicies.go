@@ -29,16 +29,10 @@ import (
 	"github.com/erigontech/erigon/cl/persistence/base_encoding"
 	"github.com/erigontech/erigon/cl/persistence/format/snapshot_format"
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/pool"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/dbutils"
 )
-
-// make a buffer pool
-var bufferPool = &sync.Pool{
-	New: func() any {
-		return new(bytes.Buffer)
-	},
-}
 
 // make a zstd writer pool
 var zstdWriterPool = &sync.Pool{
@@ -350,11 +344,10 @@ func WriteBeaconBlock(ctx context.Context, tx kv.RwTx, block *cltypes.SignedBeac
 		return err
 	}
 	// take a buffer and encoder
-	buf := bufferPool.Get().(*bytes.Buffer)
-	defer bufferPool.Put(buf)
+	buf := pool.GetBuffer()
+	defer pool.PutBuffer(buf)
 	encoder := zstdWriterPool.Get().(*zstd.Encoder)
 	defer putWriter(encoder)
-	buf.Reset()
 	encoder.Reset(buf)
 	_, err = snapshot_format.WriteBlockForSnapshot(encoder, block, nil)
 	if err != nil {
@@ -410,28 +403,62 @@ func WriteBeaconBlockAndIndicies(ctx context.Context, tx kv.RwTx, block *cltypes
 }
 
 func PruneBlocks(ctx context.Context, tx kv.RwTx, to uint64) error {
+	_, _, err := PruneBlocksLimit(ctx, tx, to, 0)
+	return err
+}
+
+func PruneBlocksLimit(ctx context.Context, tx kv.RwTx, to uint64, limit int) (deleted int, hasMore bool, err error) {
 	cursor, err := tx.RwCursor(kv.BeaconBlocks)
 	if err != nil {
-		return err
+		return 0, false, err
 	}
 	defer cursor.Close()
-	for k, _, err := cursor.First(); err == nil && k != nil; k, _, err = cursor.Next() {
+	for k, _, err := cursor.First(); ; k, _, err = cursor.Next() {
+		if err != nil {
+			return deleted, false, err
+		}
+		if k == nil {
+			break
+		}
 		if len(k) != 40 {
 			continue
 		}
 		slot, err := dbutils.DecodeBlockNumber(k[:8])
 		if err != nil {
-			return err
+			return deleted, false, err
 		}
 		if slot >= to {
 			break
 		}
 		if err := cursor.DeleteCurrent(); err != nil {
-			return err
+			return deleted, false, err
+		}
+		deleted++
+		if limit > 0 && deleted >= limit {
+			hasMore, err := hasMorePrunableBeaconBlocks(cursor, to)
+			return deleted, hasMore, err
 		}
 	}
-	return nil
+	return deleted, false, nil
+}
 
+func hasMorePrunableBeaconBlocks(cursor kv.Cursor, to uint64) (bool, error) {
+	for k, _, err := cursor.Next(); ; k, _, err = cursor.Next() {
+		if err != nil {
+			return false, err
+		}
+		if k == nil {
+			return false, nil
+		}
+		if len(k) != 40 {
+			continue
+		}
+		slot, err := dbutils.DecodeBlockNumber(k[:8])
+		if err != nil {
+			return false, err
+		}
+		return slot < to, nil
+	}
 }
 
 func ReadSignedHeaderByBlockRoot(ctx context.Context, tx kv.Tx, blockRoot common.Hash) (*cltypes.SignedBeaconBlockHeader, bool, error) {

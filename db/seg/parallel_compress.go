@@ -32,21 +32,64 @@ import (
 	"time"
 
 	"github.com/erigontech/erigon/common"
-	"github.com/erigontech/erigon/common/assert"
+	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/dir"
 	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/db/bufiopool"
 	"github.com/erigontech/erigon/db/etl"
 	"github.com/erigontech/erigon/db/seg/patricia"
 	"github.com/erigontech/erigon/db/seg/sais"
 )
 
-func coverWordByPatterns(trace bool, input []byte, mf3 *patricia.MatchFinder3, output []byte, uncovered []int, patterns []int, cellRing *Ring, posMap map[uint64]uint64) ([]byte, []int, []int) {
+const posCounterSmall = 512
+
+// posCounter counts position-code frequencies. Positions are bounded by word
+// length, so nearly all increments hit the array; the map is the overflow path.
+type posCounter struct {
+	small [posCounterSmall]uint64
+	big   map[uint64]uint64
+}
+
+func (p *posCounter) add(k uint64) {
+	if k < posCounterSmall {
+		p.small[k]++
+		return
+	}
+	if p.big == nil {
+		p.big = make(map[uint64]uint64)
+	}
+	p.big[k]++
+}
+
+// coverWordByPatterns runs the optimal-parse DP over the match list. The DP
+// deque is a reversed flat slice: logical index e maps to physical index
+// len(cells)-1-e, so PushFront is append, Truncate is a front re-slice, and
+// the hot scan walks memory sequentially.
+func coverWordByPatterns(trace bool, input []byte, mf3 *patricia.ACMatcher, output []byte, uncovered []int, patterns []int, cells []DynamicCell, posMap *posCounter) ([]byte, []int, []int, []DynamicCell) {
 	matches := mf3.FindLongestMatches(input)
 
 	if len(matches) == 0 {
 		output = append(output, 0) // Encoding of 0 in VarUint is 1 zero byte
 		output = append(output, input...)
-		return output, patterns, uncovered
+		return output, patterns, uncovered, cells
+	}
+	if len(matches) == 1 && matches[0].End-matches[0].Start > 4 {
+		// Single match longer than the 4-byte encoding overhead: the DP always
+		// includes it, so emit directly. Output is byte-identical to the DP path.
+		f := matches[0]
+		p := f.Val.(*Pattern)
+		var numBuf [binary.MaxVarintLen64]byte
+		n := binary.PutUvarint(numBuf[:], 1)
+		output = append(output, numBuf[:n]...)
+		posMap.add(uint64(f.Start + 1))
+		n = binary.PutUvarint(numBuf[:], uint64(f.Start))
+		output = append(output, numBuf[:n]...)
+		n = binary.PutUvarint(numBuf[:], p.code)
+		output = append(output, numBuf[:n]...)
+		atomic.AddUint64(&p.uses, 1)
+		output = append(output, input[:f.Start]...)
+		output = append(output, input[f.End:]...)
+		return output, patterns, uncovered, cells
 	}
 	if trace {
 		fmt.Printf("Cluster | input = %x\n", input)
@@ -54,28 +97,60 @@ func coverWordByPatterns(trace bool, input []byte, mf3 *patricia.MatchFinder3, o
 			fmt.Printf(" [%x %d-%d]", input[match.Start:match.End], match.Start, match.End)
 		}
 	}
-	cellRing.Reset()
+	cells = cells[:0]
+	cellStart := 0                        // first valid physical index; logical back-truncation advances it
 	patterns = append(patterns[:0], 0, 0) // Sentinel entry - no meaning
 	lastF := matches[len(matches)-1]
-	for j := lastF.Start; j < lastF.End; j++ {
-		d := cellRing.PushBack()
-		d.optimStart = j + 1
-		d.coverStart = len(input)
-		d.compression = 0
-		d.patternIdx = 0
-		d.score = 0
-	}
+	// The initial DP window cells (optimStart in [lastF.Start+1, lastF.End]) are
+	// all identical: compression 0, coverStart len(input), no patterns. Keep them
+	// virtual: in the scan they contribute one candidate (ties never advance past
+	// the first), and truncation inside the region is interval arithmetic.
+	virtLo, virtHi := lastF.Start+1, lastF.End
+	virtCell := DynamicCell{coverStart: len(input)}
 	// Starting from the last match
 	for i := len(matches); i > 0; i-- {
 		f := matches[i-1]
 		p := f.Val.(*Pattern)
-		firstCell := cellRing.Get(0)
-		maxCompression := firstCell.compression
-		maxScore := firstCell.score
-		maxCell := firstCell
+		last := len(cells) - 1
+		var maxCompression int
+		var maxScore uint64
+		maxCell := &virtCell
+		if last >= cellStart {
+			maxCompression = cells[last].compression
+			maxScore = cells[last].score
+			maxCell = &cells[last]
+		}
 		var maxInclude bool
-		for e := 0; e < cellRing.Len(); e++ {
-			cell := cellRing.Get(e)
+		flen4 := f.End - f.Start - 4
+		scannedAll := true
+		for e := last; e >= cellStart; e-- {
+			cell := &cells[e]
+			// compression+flen4 bounds this cell's candidate from above, and
+			// compression is non-increasing along the scan: once the bound fails,
+			// no remaining cell (real or virtual) can win even on tie-break. Jump
+			// straight to the truncation point the full scan would reach (first
+			// optimStart > f.End, i.e. the largest physical index with that property).
+			if cell.compression+flen4 < maxCompression {
+				scannedAll = false
+				if cells[cellStart].optimStart > f.End {
+					lo, hi := cellStart, e
+					for lo < hi {
+						mid := (lo + hi + 1) / 2
+						if cells[mid].optimStart > f.End {
+							lo = mid
+						} else {
+							hi = mid - 1
+						}
+					}
+					cellStart = lo + 1
+					virtLo, virtHi = 1, 0 // virtual region is logically beyond the trigger
+				} else if virtLo > f.End {
+					virtLo, virtHi = 1, 0
+				} else if virtHi > f.End {
+					virtHi = f.End
+				}
+				break
+			}
 			comp := cell.compression - 4
 			if cell.coverStart >= f.End {
 				comp += f.End - f.Start
@@ -89,14 +164,31 @@ func coverWordByPatterns(trace bool, input []byte, mf3 *patricia.MatchFinder3, o
 				maxInclude = true
 				maxCell = cell
 			} else if cell.optimStart > f.End {
-				cellRing.Truncate(e)
+				scannedAll = false
+				cellStart = e + 1     // logical Truncate: drop this cell and all logically-later ones
+				virtLo, virtHi = 1, 0 // including the whole virtual region
 				break
 			}
 		}
-		d := cellRing.PushFront()
-		d.optimStart = f.Start
-		d.score = maxScore
-		d.compression = maxCompression
+		if scannedAll && virtLo <= virtHi {
+			// single virtual candidate: compression 0, coverStart len(input) >= f.End
+			comp := flen4
+			score := p.score
+			if comp > maxCompression || (comp == maxCompression && score > maxScore) {
+				maxCompression = comp
+				maxScore = score
+				maxInclude = true
+				maxCell = &virtCell
+				if virtHi > f.End {
+					virtHi = max(virtLo, f.End)
+				}
+			} else if virtLo > f.End {
+				virtLo, virtHi = 1, 0
+			} else if virtHi > f.End {
+				virtHi = f.End
+			}
+		}
+		d := DynamicCell{optimStart: f.Start, score: maxScore, compression: maxCompression}
 		if maxInclude {
 			if trace {
 				fmt.Printf("[include] cell for %d: with patterns", f.Start)
@@ -126,8 +218,9 @@ func coverWordByPatterns(trace bool, input []byte, mf3 *patricia.MatchFinder3, o
 			d.coverStart = maxCell.coverStart
 			d.patternIdx = maxCell.patternIdx
 		}
+		cells = append(cells, d) // logical PushFront
 	}
-	optimCell := cellRing.Get(0)
+	optimCell := &cells[len(cells)-1]
 	if trace {
 		fmt.Printf("optimal =")
 	}
@@ -156,7 +249,7 @@ func coverWordByPatterns(trace bool, input []byte, mf3 *patricia.MatchFinder3, o
 		}
 		lastUncovered = matches[pattern].End
 		// Starting position
-		posMap[uint64(matches[pattern].Start-lastStart+1)]++
+		posMap.add(uint64(matches[pattern].Start - lastStart + 1))
 		lastStart = matches[pattern].Start
 		n := binary.PutUvarint(numBuf[:], uint64(matches[pattern].Start))
 		output = append(output, numBuf[:n]...)
@@ -176,28 +269,28 @@ func coverWordByPatterns(trace bool, input []byte, mf3 *patricia.MatchFinder3, o
 	for i := 0; i < len(uncovered); i += 2 {
 		output = append(output, input[uncovered[i]:uncovered[i+1]]...)
 	}
-	return output, patterns, uncovered
+	return output, patterns, uncovered, cells
 }
 
-func coverWordsByPatternsWorker(trace bool, inputCh chan *CompressionWord, outCh chan *CompressionWord, completion *sync.WaitGroup, ft *patricia.FlatTree, inputSize, outputSize *atomic.Uint64, posMap map[uint64]uint64) {
+func coverWordsByPatternsWorker(trace bool, inputCh chan *CompressionWord, outCh chan *CompressionWord, completion *sync.WaitGroup, ac *patricia.AhoCorasick, inputSize, outputSize *atomic.Uint64, posMap *posCounter) {
 	defer completion.Done()
 	var output = make([]byte, 0, 256)
 	var uncovered = make([]int, 256)
 	var patterns = make([]int, 0, 256)
-	cellRing := NewRing()
-	mf3 := patricia.NewMatchFinder3(ft)
+	var cells = make([]DynamicCell, 0, 256)
+	mf3 := patricia.NewACMatcher(ac)
 	var numBuf [binary.MaxVarintLen64]byte
 	for compW := range inputCh {
 		wordLen := uint64(len(compW.word))
 		n := binary.PutUvarint(numBuf[:], wordLen)
 		output = append(output[:0], numBuf[:n]...) // Prepend with the encoding of length
-		output, patterns, uncovered = coverWordByPatterns(trace, compW.word, mf3, output, uncovered, patterns, cellRing, posMap)
+		output, patterns, uncovered, cells = coverWordByPatterns(trace, compW.word, mf3, output, uncovered, patterns, cells, posMap)
 		compW.word = append(compW.word[:0], output...)
 		outCh <- compW
 		inputSize.Add(1 + wordLen)
 		outputSize.Add(uint64(len(output)))
-		posMap[wordLen+1]++
-		posMap[0]++
+		posMap.add(wordLen + 1)
+		posMap.add(0)
 	}
 }
 
@@ -241,7 +334,7 @@ func compressWithPatternCandidates(ctx context.Context, trace bool, cfg Cfg, log
 	defer logEvery.Stop()
 
 	// DictionaryBuilder is for sorting words by their freuency (to assign codes)
-	var pt patricia.PatriciaTree
+	ac := patricia.NewAhoCorasick()
 	code2pattern := make([]*Pattern, 0, 256)
 	dictBuilder.ForEach(func(score uint64, word []byte) {
 		p := &Pattern{
@@ -251,12 +344,11 @@ func compressWithPatternCandidates(ctx context.Context, trace bool, cfg Cfg, log
 			codeBits: 0,
 			word:     word,
 		}
-		pt.Insert(word, p)
+		ac.Insert(word, p)
 		code2pattern = append(code2pattern, p)
 	})
 	dictBuilder.Close()
-	ft := pt.Flatten()
-	pt = patricia.PatriciaTree{} // release heap nodes for GC
+	ac.Build()
 	if lvl < log.LvlTrace {
 		logger.Log(lvl, fmt.Sprintf("[%s] dictionary file parsed", logPrefix), "entries", len(code2pattern))
 	}
@@ -278,19 +370,19 @@ func compressWithPatternCandidates(ctx context.Context, trace bool, cfg Cfg, log
 	var output = make([]byte, 0, 256)
 	var uncovered = make([]int, 256)
 	var patterns = make([]int, 0, 256)
-	cellRing := NewRing()
-	mf3 := patricia.NewMatchFinder3(ft)
+	var cells = make([]DynamicCell, 0, 256)
+	mf3 := patricia.NewACMatcher(ac)
 
-	var posMaps []map[uint64]uint64
-	uncompPosMap := make(map[uint64]uint64) // For the uncompressed words
+	var posMaps []*posCounter
+	uncompPosMap := &posCounter{} // For the uncompressed words
 	posMaps = append(posMaps, uncompPosMap)
 	var wg sync.WaitGroup
 	if cfg.Workers > 1 {
 		for i := 0; i < cfg.Workers; i++ {
-			posMap := make(map[uint64]uint64)
+			posMap := &posCounter{}
 			posMaps = append(posMaps, posMap)
 			wg.Add(1)
-			go coverWordsByPatternsWorker(trace, ch, out, &wg, ft, inputSize, outputSize, posMap)
+			go coverWordsByPatternsWorker(trace, ch, out, &wg, ac, inputSize, outputSize, posMap)
 		}
 	}
 	t := time.Now()
@@ -304,8 +396,8 @@ func compressWithPatternCandidates(ctx context.Context, trace bool, cfg Cfg, log
 	intermediatePath := intermediateFile.Name()
 	defer dir.RemoveFile(intermediatePath)
 	defer intermediateFile.Close()
-	intermediateW := getBufioWriter(intermediateFile)
-	defer putBufioWriter(intermediateW)
+	intermediateW := bufiopool.Writer(intermediateFile)
+	defer bufiopool.PutWriter(intermediateW)
 
 	var inCount, outCount, emptyWordsCount uint64 // Counters words sent to compression and returned for compression
 	var numBuf [binary.MaxVarintLen64]byte
@@ -363,8 +455,8 @@ func compressWithPatternCandidates(ctx context.Context, trace bool, cfg Cfg, log
 			if len(v) == 0 {
 				// Empty word, cannot be compressed
 				compW.word = append(compW.word[:0], 0)
-				uncompPosMap[1]++
-				uncompPosMap[0]++
+				uncompPosMap.add(1)
+				uncompPosMap.add(0)
 				heap.Push(&compressionQueue, compW) // Push to the queue directly, bypassing compression
 			} else if compression {
 				compW.word = append(compW.word[:0], v...)
@@ -373,8 +465,8 @@ func compressWithPatternCandidates(ctx context.Context, trace bool, cfg Cfg, log
 				// Prepend word with encoding of length + zero byte, which indicates no patterns to be found in this word
 				wordLen := uint64(len(v))
 				n := binary.PutUvarint(numBuf[:], wordLen)
-				uncompPosMap[wordLen+1]++
-				uncompPosMap[0]++
+				uncompPosMap.add(wordLen + 1)
+				uncompPosMap.add(0)
 				compW.word = append(append(append(compW.word[:0], numBuf[:n]...), 0), v...)
 				heap.Push(&compressionQueue, compW) // Push to the queue directly, bypassing compression
 			}
@@ -387,7 +479,7 @@ func compressWithPatternCandidates(ctx context.Context, trace bool, cfg Cfg, log
 			}
 			if wordLen > 0 {
 				if compression {
-					output, patterns, uncovered = coverWordByPatterns(trace, v, mf3, output[:0], uncovered, patterns, cellRing, uncompPosMap)
+					output, patterns, uncovered, cells = coverWordByPatterns(trace, v, mf3, output[:0], uncovered, patterns, cells, uncompPosMap)
 					if _, e := intermediateW.Write(output); e != nil {
 						return e
 					}
@@ -403,8 +495,8 @@ func compressWithPatternCandidates(ctx context.Context, trace bool, cfg Cfg, log
 				}
 			}
 			inputSize.Add(1 + wordLen)
-			uncompPosMap[wordLen+1]++
-			uncompPosMap[0]++
+			uncompPosMap.add(wordLen + 1)
+			uncompPosMap.add(0)
 		}
 		inCount++
 		if len(v) == 0 {
@@ -460,7 +552,12 @@ func compressWithPatternCandidates(ctx context.Context, trace bool, cfg Cfg, log
 	//logger.Info(fmt.Sprintf("[%s] Dictionary build done", logPrefix), "input", common.ByteCount(inputSize.Load()), "output", common.ByteCount(outputSize.Load()), "alloc", common.ByteCount(m.Alloc), "sys", common.ByteCount(m.Sys))
 	posMap := make(map[uint64]uint64)
 	for _, m := range posMaps {
-		for l, c := range m {
+		for l, c := range &m.small {
+			if c != 0 {
+				posMap[uint64(l)] += c
+			}
+		}
+		for l, c := range m.big {
 			posMap[l] += c
 		}
 	}
@@ -538,8 +635,8 @@ func compressWithPatternCandidates(ctx context.Context, trace bool, cfg Cfg, log
 	if lvl < log.LvlTrace {
 		logger.Log(lvl, fmt.Sprintf("[%s] Effective dictionary", logPrefix), logCtx...)
 	}
-	cw := getBufioWriter(cf)
-	defer putBufioWriter(cw)
+	cw := bufiopool.Writer(cf)
+	defer bufiopool.PutWriter(cw)
 	// 1-st, output amount of words - just a useful metadata
 	binary.BigEndian.PutUint64(numBuf[:], inCount) // Dictionary size
 	if _, err = cw.Write(numBuf[:8]); err != nil {
@@ -576,6 +673,20 @@ func compressWithPatternCandidates(ctx context.Context, trace bool, cfg Cfg, log
 	if err != nil {
 		return err
 	}
+	// bounded-array view of pos2code: position codes are word-length bounded,
+	// so the hot path avoids map lookups
+	var pos2codeArr [posCounterSmall]*Position
+	for k, v := range pos2code {
+		if k < posCounterSmall {
+			pos2codeArr[k] = v
+		}
+	}
+	pos2codeAt := func(k uint64) *Position {
+		if k < posCounterSmall {
+			return pos2codeArr[k]
+		}
+		return pos2code[k]
+	}
 	if lvl < log.LvlTrace {
 		logger.Log(lvl, fmt.Sprintf("[%s] Positional dictionary", logPrefix), "positionList.len", positionList.Len(), "posSize", common.ByteCount(posSize))
 	}
@@ -583,14 +694,14 @@ func compressWithPatternCandidates(ctx context.Context, trace bool, cfg Cfg, log
 	wc := 0
 	var hc BitWriter
 	hc.w = cw
-	r := getBufioReader(intermediateFile)
-	defer putBufioReader(r)
+	r := bufiopool.Reader(intermediateFile)
+	defer bufiopool.PutReader(r)
 	copyNBuf := make([]byte, 32*1024)
 
 	var l uint64
 	var e error
 	for l, e = binary.ReadUvarint(r); e == nil; l, e = binary.ReadUvarint(r) {
-		posCode := pos2code[l+1]
+		posCode := pos2codeAt(l + 1)
 		if posCode != nil {
 			if e = hc.encode(posCode.code, posCode.codeBits); e != nil {
 				return e
@@ -614,7 +725,7 @@ func compressWithPatternCandidates(ctx context.Context, trace bool, cfg Cfg, log
 				if pos, e = binary.ReadUvarint(r); e != nil {
 					return e
 				}
-				posCode = pos2code[pos-lastPos+1]
+				posCode = pos2codeAt(pos - lastPos + 1)
 				lastPos = pos
 				if posCode != nil {
 					if e = hc.encode(posCode.code, posCode.codeBits); e != nil {
@@ -640,7 +751,7 @@ func compressWithPatternCandidates(ctx context.Context, trace bool, cfg Cfg, log
 				uncoveredCount += int(l) - lastUncovered
 			}
 			// Terminating position and flush
-			posCode = pos2code[0]
+			posCode = pos2codeAt(0)
 			if e = hc.encode(posCode.code, posCode.codeBits); e != nil {
 				return e
 			}
@@ -700,8 +811,8 @@ func compressNoWordPatterns(logPrefix string, cf *os.File, uncompressedFile *Raw
 		return err
 	}
 
-	cw := getBufioWriter(cf)
-	defer putBufioWriter(cw)
+	cw := bufiopool.Writer(cf)
+	defer bufiopool.PutWriter(cw)
 
 	// Write data header: word count, empty word count, patternsSize=0, then position dict.
 	binary.BigEndian.PutUint64(numBuf[:], inCount)
@@ -847,19 +958,23 @@ func copyN(r io.Reader, w io.Writer, uncoveredCount int, buf []byte) error {
 	return nil
 }
 
+var saisBufPool = sync.Pool{New: func() any { return new([]int32) }}
+
 // extractPatternsInSuperstrings is the worker that processes one superstring and puts results
 // into the collector, using lock to mutual exclusion. At the end (when the input channel is closed),
 // it notifies the waitgroup before exiting, so that the caller known when all work is done
 // No error channels for now
-func extractPatternsInSuperstrings(ctx context.Context, superstringCh chan []byte, dictCollector *etl.Collector, cfg Cfg, completion *sync.WaitGroup, logger log.Logger) {
+func extractPatternsInSuperstrings(ctx context.Context, superstringCh chan []uint16, dictCollector *etl.Collector, cfg Cfg, completion *sync.WaitGroup, logger log.Logger) {
 	minPatternScore, minPatternLen, maxPatternLen := cfg.MinPatternScore, cfg.MinPatternLen, cfg.MaxPatternLen
 	defer completion.Done()
 	dictVal := make([]byte, 8)
 	dictKey := make([]byte, maxPatternLen)
-	var lcp, sa, inv, saisBuf []int32
+	saisBuf := saisBufPool.Get().(*[]int32)
+	defer saisBufPool.Put(saisBuf)
+	var lcp, sa, inv []int32
 	for {
 		var (
-			superstring []byte
+			superstring []uint16
 			ok          bool
 		)
 		select {
@@ -871,28 +986,19 @@ func extractPatternsInSuperstrings(ctx context.Context, superstringCh chan []byt
 			}
 		}
 
-		if cap(sa) < len(superstring) {
-			sa = make([]int32, len(superstring))
+		// superstring holds one uint16 symbol per cell (separator=0, byte b=b+1, alphabet 257),
+		// so the suffix array is over n=len(superstring) positions directly.
+		n := len(superstring)
+		if cap(sa) < n {
+			sa = make([]int32, n)
 		} else {
-			sa = sa[:len(superstring)]
+			sa = sa[:n]
 		}
-		//log.Info("Superstring", "len", len(superstring))
-		//start := time.Now()
-		if err := sais.Sais(superstring, sa, &saisBuf); err != nil {
+		if err := sais.Sais16(superstring, 257, sa, saisBuf); err != nil {
 			panic(err)
 		}
-		//log.Info("Suffix array built", "in", time.Since(start))
-		// filter out suffixes that start with odd positions
-		n := len(sa) / 2
-		filtered := sa[:n]
-		//filtered := make([]int32, n)
 		var j int
-		for i := 0; i < len(sa); i++ {
-			if sa[i]&1 == 0 {
-				filtered[j] = sa[i] >> 1
-				j++
-			}
-		}
+		filtered := sa
 		// Now create an inverted array
 		if cap(inv) < n {
 			inv = make([]int32, n)
@@ -928,7 +1034,7 @@ func extractPatternsInSuperstrings(ctx context.Context, superstringCh chan []byt
 
 			// Directly start matching from k'th index as
 			// at-least k-1 characters will match
-			for i+k < n && j+k < n && superstring[(i+k)*2] != 0 && superstring[(j+k)*2] != 0 && superstring[(i+k)*2+1] == superstring[(j+k)*2+1] {
+			for i+k < n && j+k < n && superstring[i+k] != 0 && superstring[i+k] == superstring[j+k] {
 				k++
 			}
 			lcp[inv[i]] = int32(k) // lcp for the present suffix.
@@ -941,16 +1047,15 @@ func extractPatternsInSuperstrings(ctx context.Context, superstringCh chan []byt
 		//log.Info("Kasai algorithm finished")
 		// Checking LCP array
 
-		if assert.Enable {
+		if dbg.AssertEnabled {
 			for i := 0; i < n-1; i++ {
 				var prefixLen int
 				p1 := int(filtered[i])
 				p2 := int(filtered[i+1])
 				for p1+prefixLen < n &&
 					p2+prefixLen < n &&
-					superstring[(p1+prefixLen)*2] != 0 &&
-					superstring[(p2+prefixLen)*2] != 0 &&
-					superstring[(p1+prefixLen)*2+1] == superstring[(p2+prefixLen)*2+1] {
+					superstring[p1+prefixLen] != 0 &&
+					superstring[p1+prefixLen] == superstring[p2+prefixLen] {
 					prefixLen++
 				}
 				if prefixLen != int(lcp[i]) {
@@ -1017,7 +1122,7 @@ func extractPatternsInSuperstrings(ctx context.Context, superstringCh chan []byt
 
 				dictKey = dictKey[:l]
 				for s := 0; s < l; s++ {
-					dictKey[s] = superstring[(int(filtered[i])+s)*2+1]
+					dictKey[s] = byte(superstring[int(filtered[i])+s] - 1)
 				}
 				binary.BigEndian.PutUint64(dictVal, score)
 				if err := dictCollector.Collect(dictKey, dictVal); err != nil {
@@ -1034,7 +1139,7 @@ func extractPatternsInSuperstrings(ctx context.Context, superstringCh chan []byt
 
 func DictionaryBuilderFromCollectors(ctx context.Context, cfg Cfg, logPrefix, tmpDir string, collectors []*etl.Collector, lvl log.Lvl, logger log.Logger) (*DictionaryBuilder, error) {
 	t := time.Now()
-	dictCollector := etl.NewCollectorWithAllocator(logPrefix+"_collectDict", tmpDir, etl.LargeSortableBuffers, logger)
+	dictCollector := etl.NewCollectorWithAllocator(logPrefix+"_collectDict", tmpDir, etl.SmallSortableBuffers, logger)
 	defer dictCollector.Close()
 	dictCollector.SortAndFlushInBackground(false)
 	dictCollector.LogLvl(lvl)
@@ -1070,8 +1175,8 @@ func PersistDictionary(fileName string, db *DictionaryBuilder) error {
 	if err != nil {
 		return err
 	}
-	w := getBufioWriter(df)
-	defer putBufioWriter(w)
+	w := bufiopool.Writer(df)
+	defer bufiopool.PutWriter(w)
 	db.ForEach(func(score uint64, word []byte) { fmt.Fprintf(w, "%d %x\n", score, word) })
 	if err = w.Flush(); err != nil {
 		return err
@@ -1090,8 +1195,8 @@ func ReadSimpleFile(fileName string, walker func(v []byte) error) error {
 		return err
 	}
 	defer f.Close()
-	r := getBufioReader(f)
-	defer putBufioReader(r)
+	r := bufiopool.Reader(f)
+	defer bufiopool.PutReader(r)
 	buf := make([]byte, 4096)
 	for l, e := binary.ReadUvarint(r); ; l, e = binary.ReadUvarint(r) {
 		if e != nil {

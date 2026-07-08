@@ -32,6 +32,8 @@ import (
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/db/state/changeset"
+	"github.com/erigontech/erigon/db/state/execctx"
+	"github.com/erigontech/erigon/db/state/kvmetrics"
 )
 
 type iodir int
@@ -63,13 +65,11 @@ type TemporalMemBatch struct {
 	domains         [kv.DomainLen]map[string][]dataWithTxNum
 	storage         *btree2.Map[string, []dataWithTxNum] // TODO: replace hardcoded domain name to per-config configuration of available Guarantees/AccessMethods (range vs get)
 
-	domainWriters   [kv.DomainLen]*DomainBufferedWriter
-	iiWriters       []*InvertedIndexBufferedWriter
-	forkableWriters map[kv.ForkableId]kv.BufferedWriter
+	domainWriters [kv.DomainLen]*DomainBufferedWriter
+	iiWriters     []*InvertedIndexBufferedWriter
 
-	pastDomainWriters   [kv.DomainLen][]*DomainBufferedWriter
-	pastIIWriters       []*InvertedIndexBufferedWriter
-	pastForkableWriters map[kv.ForkableId][]kv.BufferedWriter
+	pastDomainWriters [kv.DomainLen][]*DomainBufferedWriter
+	pastIIWriters     []*InvertedIndexBufferedWriter
 
 	currentChangesAccumulator *changeset.StateChangeSet
 	// pastChangesAccumulator is read by the parallel commitment calculator
@@ -95,13 +95,13 @@ type TemporalMemBatch struct {
 	// above the unwind target.
 	unwindChangesetRaw *[kv.DomainLen][]kv.DomainEntryDiff
 
-	metrics *changeset.DomainMetrics
+	metrics *kvmetrics.DomainMetrics
 }
 
 func NewTemporalMemBatch(tx kv.TemporalTx, ioMetrics any) *TemporalMemBatch {
 	sd := &TemporalMemBatch{
 		storage:           btree2.NewMap[string, []dataWithTxNum](128),
-		metrics:           ioMetrics.(*changeset.DomainMetrics),
+		metrics:           ioMetrics.(*kvmetrics.DomainMetrics),
 		inMemHistoryReads: true,
 	}
 	aggTx := AggTx(tx)
@@ -116,11 +116,6 @@ func NewTemporalMemBatch(tx kv.TemporalTx, ioMetrics any) *TemporalMemBatch {
 	for id, d := range aggTx.d {
 		sd.domains[id] = map[string][]dataWithTxNum{}
 		sd.domainWriters[id] = d.NewWriter()
-	}
-
-	sd.forkableWriters = make(map[kv.ForkableId]kv.BufferedWriter)
-	for _, id := range tx.Debug().AllForkableIds() {
-		sd.forkableWriters[id] = tx.Unmarked(id).BufferedWriter()
 	}
 
 	return sd
@@ -163,7 +158,7 @@ func (sd *TemporalMemBatch) putLatest(domain kv.Domain, key string, val []byte, 
 			dm.CachePutKeySize += putKeySize
 			dm.CachePutValueSize += putValueSize
 		} else {
-			sd.metrics.Domains[domain] = &changeset.DomainIOMetrics{
+			sd.metrics.Domains[domain] = &kvmetrics.DomainIOMetrics{
 				CachePutCount:     1,
 				CachePutSize:      putKeySize + putValueSize,
 				CachePutKeySize:   putKeySize,
@@ -172,7 +167,9 @@ func (sd *TemporalMemBatch) putLatest(domain kv.Domain, key string, val []byte, 
 		}
 	}
 
-	valWithStep := dataWithTxNum{data: val, txNum: txNum}
+	// Own the bytes now: val may alias a .kv mmap (the foreground exec tx's file generation)
+	// that a background merge can munmap while a concurrent commitment worker reads sd.mem.
+	valWithStep := dataWithTxNum{data: common.Copy(val), txNum: txNum}
 	putKeySize := 0
 	putValueSize := 0
 	if domain == kv.StorageDomain {
@@ -325,8 +322,12 @@ func (sd *TemporalMemBatch) GetAsOf(domain kv.Domain, key []byte, ts uint64) (v 
 }
 
 func (sd *TemporalMemBatch) SizeEstimate() uint64 {
-	sd.latestStateLock.RLock()
-	defer sd.latestStateLock.RUnlock()
+	// CachePutSize is guarded by the metrics lock — the put path, Merge and the
+	// reset all mutate it under sd.metrics.Lock(), and MergeMetrics folds in a
+	// boundary worker's accumulator from another goroutine. Read under the same
+	// lock (not latestStateLock, which guards the domains map, not this counter).
+	sd.metrics.RLock()
+	defer sd.metrics.RUnlock()
 	return uint64(sd.metrics.CachePutSize)
 }
 
@@ -609,14 +610,6 @@ func (sd *TemporalMemBatch) IndexAdd(table kv.InvertedIdx, key []byte, txNum uin
 	panic(fmt.Errorf("unknown index %s", table))
 }
 
-func (sd *TemporalMemBatch) PutForkable(id kv.ForkableId, num kv.Num, v []byte) error {
-	f, ok := sd.forkableWriters[id]
-	if !ok {
-		return fmt.Errorf("forkable not found: %s", Registry.Name(id))
-	}
-	return f.Put(num, v)
-}
-
 func (sd *TemporalMemBatch) Close() {
 	for _, d := range sd.domainWriters {
 		if d != nil {
@@ -633,14 +626,6 @@ func (sd *TemporalMemBatch) Close() {
 	}
 	for _, iiWriter := range sd.pastIIWriters {
 		iiWriter.close()
-	}
-	for _, fWriter := range sd.forkableWriters {
-		fWriter.Close()
-	}
-	for _, fs := range sd.pastForkableWriters {
-		for _, f := range fs {
-			f.Close()
-		}
 	}
 	sd.ClearRam()
 }
@@ -675,16 +660,6 @@ func (sd *TemporalMemBatch) Merge(o kv.TemporalMemBatch) error {
 	other.iiWriters = nil
 	sd.pastIIWriters = append(sd.pastIIWriters, other.pastIIWriters...)
 	other.pastIIWriters = nil
-
-	for id, writer := range other.forkableWriters {
-		sd.pastForkableWriters[id] = append(sd.pastForkableWriters[id], writer)
-	}
-	other.forkableWriters = nil
-
-	for id, writers := range other.pastForkableWriters {
-		sd.pastForkableWriters[id] = append(sd.pastForkableWriters[id], writers...)
-	}
-	other.pastForkableWriters = nil
 
 	if sd.currentChangesAccumulator != nil {
 		return fmt.Errorf("can't merge to batch with non-nil currentChangesAccumulator")
@@ -762,82 +737,8 @@ func (sd *TemporalMemBatch) Merge(o kv.TemporalMemBatch) error {
 	return nil
 }
 
-// FlushWithCallback flushes the mem-batch to tx, but first invokes cb for
-// every (domain, key, latest-value, step) tuple so downstream caches can be
-// refreshed. When drain is true it then drains the in-memory latest/history
-// state; when false the mem-batch is kept intact after the flush.
-//
-// The callback, the MDBX flush and the (optional) drain run under
-// latestStateLock as one atomic window: a concurrent reader sees either the
-// full pre-flush mem state or the fully-drained post-flush state, never a
-// partial mix. cb runs before the flush so that during the MDBX write window
-// the cache already holds the entry — a reader going mem → cache → MDBX never
-// sees a key missing from all three. data may be nil/empty for deletes — cb
-// distinguishes on len(v)==0.
-//
-// drain=false is used for a published generation's commit (gate item 2): the
-// generation's SharedDomains remains Events.LatestSD — the latest executed
-// block's stable snapshot — so its mem must survive the flush and answer
-// reads from its own immutable delta rather than falling through to the
-// shared, concurrently-mutated caches. Such a mem-batch is freed at Close.
-//
-// Used by SharedDomains.Flush to keep the BranchCache (commitment domain)
-// and the StateCache (accounts/storage/code) in sync — refreshed only on
-// flush, so they hold committed, fork-agnostic state.
-func (sd *TemporalMemBatch) FlushWithCallback(
-	ctx context.Context, tx kv.RwTx,
-	cb func(domain kv.Domain, k []byte, v []byte, txNum uint64),
-	drain bool,
-) error {
-	sd.latestStateLock.Lock()
-	defer sd.latestStateLock.Unlock()
-
-	for d := range sd.domains {
-		for keyStr, history := range sd.domains[d] {
-			if len(history) == 0 {
-				continue
-			}
-			latest := history[len(history)-1]
-			cb(kv.Domain(d), []byte(keyStr), latest.data, latest.txNum)
-		}
-	}
-	// StorageDomain entries live in sd.storage (a btree), not sd.domains.
-	sd.storage.Scan(func(keyStr string, history []dataWithTxNum) bool {
-		if len(history) == 0 {
-			return true
-		}
-		latest := history[len(history)-1]
-		cb(kv.StorageDomain, []byte(keyStr), latest.data, latest.txNum)
-		return true
-	})
-
-	if err := sd.flushLocked(ctx, tx); err != nil {
-		return err
-	}
-	if drain {
-		sd.drainLocked()
-	}
-	return nil
-}
-
-// drainLocked clears the in-memory latest/history state after a flush. The
-// caller must hold latestStateLock. Mirrors the data-clearing half of
-// ClearRam (without the metrics reset): once flushed, the mem-batch holds
-// no data — values now live in the DB and the refreshed caches, and a child
-// SD chained to this one as parent reads through instead of being shadowed
-// by stale, fork-specific bytes.
-func (sd *TemporalMemBatch) drainLocked() {
-	for i := range sd.domains {
-		sd.domains[i] = map[string][]dataWithTxNum{}
-	}
-	sd.storage = btree2.NewMap[string, []dataWithTxNum](128)
-	sd.unwindToTxNum = 0
-	sd.unwindChangeset = nil
-	sd.unwindChangesetRaw = nil
-}
-
-// flushLocked is the body of Flush, factored so FlushWithCallback can
-// run it inside latestStateLock without re-acquiring.
+// flushLocked is the body of Flush, factored so the callback path can run it
+// inside latestStateLock without re-acquiring.
 func (sd *TemporalMemBatch) flushLocked(ctx context.Context, tx kv.RwTx) error {
 	if sd.unwindChangesetRaw != nil {
 		for domain := range sd.unwindChangesetRaw {
@@ -861,10 +762,73 @@ func (sd *TemporalMemBatch) flushLocked(ctx context.Context, tx kv.RwTx) error {
 	return nil
 }
 
-func (sd *TemporalMemBatch) Flush(ctx context.Context, tx kv.RwTx) error {
+// Flush writes the mem-batch to tx. With kv.WithFlushCallback options, the
+// registered per-domain callback is invoked for every (key, value, step, txNum)
+// tuple after the MDBX write succeeds, so a downstream cache can never be left
+// ahead of MDBX. Runs under latestStateLock so the callback's snapshot matches
+// flush-time state.
+func (sd *TemporalMemBatch) Flush(ctx context.Context, tx kv.RwTx, opts ...kv.FlushOption) error {
 	sd.latestStateLock.Lock()
 	defer sd.latestStateLock.Unlock()
-	return sd.flushLocked(ctx, tx)
+
+	if err := sd.flushLocked(ctx, tx); err != nil {
+		return err
+	}
+
+	if len(opts) > 0 {
+		var cfg kv.FlushConfig
+		for _, opt := range opts {
+			opt(&cfg)
+		}
+		for domain, cb := range cfg.DomainCallbacks {
+			// StorageDomain values live in the separate sd.storage btree, not
+			// sd.domains[StorageDomain]; iterate it directly so the storage
+			// cache is flush-updated and never serves stale slots.
+			if domain == kv.StorageDomain {
+				sd.storage.Scan(func(keyStr string, history []dataWithTxNum) bool {
+					if len(history) == 0 {
+						return true
+					}
+					latest := history[len(history)-1]
+					cb([]byte(keyStr), latest.data, kv.Step(latest.txNum/sd.stepSize), latest.txNum)
+					return true
+				})
+				continue
+			}
+			for keyStr, history := range sd.domains[domain] {
+				if len(history) == 0 {
+					continue
+				}
+				latest := history[len(history)-1]
+				cb([]byte(keyStr), latest.data, kv.Step(latest.txNum/sd.stepSize), latest.txNum)
+			}
+		}
+	}
+
+	return nil
+}
+
+// FlushWithCommitmentCallback flushes the batch then invokes cb per
+// commitment-domain tuple under the lock.
+func (sd *TemporalMemBatch) FlushWithCommitmentCallback(ctx context.Context, tx kv.RwTx, cb execctx.CommitmentFlushCallback) error {
+	sd.latestStateLock.Lock()
+	defer sd.latestStateLock.Unlock()
+
+	if err := sd.flushLocked(ctx, tx); err != nil {
+		return err
+	}
+
+	if cb != nil {
+		for keyStr, history := range sd.domains[kv.CommitmentDomain] {
+			if len(history) == 0 {
+				continue
+			}
+			latest := history[len(history)-1]
+			cb([]byte(keyStr), latest.data, kv.Step(latest.txNum/sd.stepSize), latest.txNum)
+		}
+	}
+
+	return nil
 }
 
 func (sd *TemporalMemBatch) flushDiffSet(_ context.Context, tx kv.RwTx) error {
@@ -912,23 +876,6 @@ func (sd *TemporalMemBatch) flushWriters(ctx context.Context, tx kv.RwTx) error 
 			return err
 		}
 		w.close()
-	}
-	for _, ws := range sd.pastForkableWriters {
-		for i := len(ws) - 1; i >= 0; i-- {
-			if err := ws[i].Flush(ctx, tx); err != nil {
-				return err
-			}
-			ws[i].Close()
-		}
-	}
-	for _, w := range sd.forkableWriters {
-		if w == nil {
-			continue
-		}
-		if err := w.Flush(ctx, tx); err != nil {
-			return err
-		}
-		w.Close()
 	}
 	return nil
 }

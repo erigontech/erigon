@@ -5,6 +5,14 @@
 // it under the terms of the GNU Lesser General Public License as published by
 // the Free Software Foundation, either version 3 of the License, or
 // (at your option) any later version.
+//
+// Erigon is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
 
 package commitment
 
@@ -71,6 +79,10 @@ type ContractTrunkPreloadParallel struct {
 	usedBytes       int
 	maxDepthReached int
 	dbHitsPinned    int
+	// pinTxNum stamps pinned entries with the head txNum they were read at, so a
+	// later unwind below that point evicts them via the BranchCache floor (a
+	// txN=0 pin would escape it and be served stale after a deep unwind).
+	pinTxNum uint64
 }
 
 // NewContractTrunkPreloadParallel seeds a preload at depth 64 (storage subtree root).
@@ -119,7 +131,11 @@ func (p *ContractTrunkPreloadParallel) Run(
 			budgetHit = true
 			return false
 		}
-		cache.PinEntry(pk.key, v, 0, "preload-trunk-parallel-resumable")
+		// step=0: a storage-trunk branch resolved across merged files has no single
+		// source step, and the pinTxNum stamp already gives unwind coherence — the
+		// floor drops a preloaded pin before the cStep<=maxStep gate is consulted,
+		// so leaving step unset only keeps that gate trivially true for live pins.
+		cache.PinEntry(pk.key, v, 0, p.pinTxNum)
 		kc := make([]byte, len(pk.key))
 		copy(kc, pk.key)
 		p.pinnedPrefixes = append(p.pinnedPrefixes, kc)

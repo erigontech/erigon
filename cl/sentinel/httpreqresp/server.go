@@ -254,7 +254,7 @@ func NewRequestHandler(host host.Host) http.HandlerFunc {
 		// Parse comma-separated topics for multistream protocol negotiation.
 		// The first topic is preferred; libp2p picks the first one the peer supports.
 		var protocolIDs []protocol.ID
-		for _, t := range strings.Split(topic, ",") {
+		for t := range strings.SplitSeq(topic, ",") {
 			if t = strings.TrimSpace(t); t != "" {
 				protocolIDs = append(protocolIDs, protocol.ID(t))
 			}
@@ -305,7 +305,10 @@ func NewRequestHandler(host host.Host) http.HandlerFunc {
 		// we have 5 seconds to read the next byte. this is the 5 TTFB_TIMEOUT in the spec
 		stream.SetReadDeadline(time.Now().Add(5 * time.Second))
 		n, err := io.ReadFull(stream, code)
-		if err != nil {
+		synthesizedEmptySuccess := false
+		if err == io.EOF && n == 0 && communication.IsMultiChunkProtocol(topic) {
+			synthesizedEmptySuccess = true
+		} else if err != nil {
 			http.Error(w, "Read Code: "+err.Error()+", readBytes="+strconv.Itoa(n)+", bytesWritten="+strconv.FormatInt(bytesWritten, 10)+", contentLength="+strconv.FormatInt(r.ContentLength, 10)+", topic="+topic+", peer="+peerIdBase58, http.StatusBadRequest)
 			return
 		}
@@ -323,6 +326,10 @@ func NewRequestHandler(host host.Host) http.HandlerFunc {
 		w.Header().Set("REQRESP-PEER-ID", peerIdBase58)
 		w.Header().Set("REQRESP-TOPIC", topic)
 		w.Header().Set("REQRESP-RESPONSE-CODE", strconv.Itoa(int(code[0])))
+		if synthesizedEmptySuccess {
+			cw.setStreamingBody(io.NopCloser(bytes.NewReader(nil)))
+			return
+		}
 		// the deadline is 10 * expected chunk count, which the user can send. otherwise we will only wait 10 seconds
 		// this is technically incorrect, and more aggressive than the network might like.
 		stream.SetReadDeadline(time.Now().Add(10 * time.Second * time.Duration(chunks)))

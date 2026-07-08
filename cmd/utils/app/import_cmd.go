@@ -29,7 +29,7 @@ import (
 	"time"
 
 	"github.com/holiman/uint256"
-	"github.com/urfave/cli/v2"
+	"github.com/urfave/cli/v3"
 	"google.golang.org/grpc"
 
 	"github.com/erigontech/erigon/cmd/erigon/node"
@@ -45,6 +45,7 @@ import (
 	"github.com/erigontech/erigon/execution/rlp"
 	"github.com/erigontech/erigon/execution/tests/blockgen"
 	"github.com/erigontech/erigon/execution/types"
+	erigoncli "github.com/erigontech/erigon/node/cli"
 	"github.com/erigontech/erigon/node/debug"
 	"github.com/erigontech/erigon/node/eth"
 	"github.com/erigontech/erigon/node/gointerfaces/remoteproto"
@@ -75,7 +76,7 @@ If only one file is used, import error will result in failure. If several files 
 processing will proceed even if an individual RLP-file import failure occurs.`,
 }
 
-func importChain(cliCtx *cli.Context) error {
+func importChain(ctx context.Context, cliCtx *cli.Command) error {
 	if cliCtx.NArg() < 1 {
 		utils.Fatalf("This command requires an argument.")
 	}
@@ -90,13 +91,17 @@ func importChain(cliCtx *cli.Context) error {
 		utils.NoDownloaderFlag.Name:      "true",
 		utils.ExternalConsensusFlag.Name: "true",
 		utils.MCPDisableFlag.Name:        "true",
+		utils.TxPoolDisableFlag.Name:     "true",
+		utils.HTTPEnabledFlag.Name:       "false",
+		erigoncli.PrivateApiAddr.Name:    "",
+		utils.AuthRpcPort.Name:           "0", // no disable flag; 0 binds an ephemeral port
 	} {
 		if err := cliCtx.Set(flag, value); err != nil {
 			return fmt.Errorf("importChain: set %s=%s: %w", flag, value, err)
 		}
 	}
 
-	logger, tracer, _, _, err := debug.Setup(cliCtx, true /* rootLogger */)
+	logger, tracer, _, _, err := debug.Setup(ctx, cliCtx, true /* rootLogger */)
 	if err != nil {
 		return err
 	}
@@ -105,15 +110,24 @@ func importChain(cliCtx *cli.Context) error {
 	if err != nil {
 		return err
 	}
+	// p2p has no disable flag; a one-shot import needs no peers.
+	nodeCfg.DisableSentry = true
 
-	ethCfg := node.NewEthConfigUrfave(cliCtx, nodeCfg, logger)
-	stack := makeConfigNode(cliCtx.Context, nodeCfg, logger)
+	ethCfg := node.NewEthConfigUrfave(ctx, cliCtx, nodeCfg, logger)
+	// Skip the ~2s KZG warmup: Stop waits it out on exit, and kzg.Ctx()
+	// lazy-inits if a block actually needs the trusted setup.
+	ethCfg.WarmupKzgCtxOnInit = false
+	stack := makeConfigNode(ctx, nodeCfg, logger)
 	defer stack.Close()
 
-	ethereum, err := eth.New(cliCtx.Context, stack, ethCfg, logger, tracer)
+	ethereum, err := eth.New(ctx, stack, ethCfg, logger, tracer)
 	if err != nil {
 		return err
 	}
+	// The stack is never Start()ed, so the deferred stack.Close() skips
+	// lifecycle Stop — stop the backend explicitly to close chaindata on exit.
+	defer ethereum.Stop()
+
 	err = ethereum.Init(stack, ethCfg, ethCfg.Genesis.Config)
 	if err != nil {
 		return err
@@ -379,7 +393,7 @@ func InsertChain(ethereum *eth.Ethereum, chain *blockgen.ChainPack, setHead bool
 
 	chainRW := chainreader.NewChainReaderEth1(ethereum.ChainConfig(), ethereum.ExecutionModule(), time.Hour)
 
-	if err := chainRW.InsertBlocksAndWait(ctx, chain.Blocks); err != nil {
+	if err := chainRW.InsertBlocks(ctx, chain.Blocks, nil); err != nil {
 		return err
 	}
 

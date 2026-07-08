@@ -28,7 +28,7 @@ import (
 	"regexp"
 	"sync"
 
-	"github.com/urfave/cli/v2"
+	"github.com/urfave/cli/v3"
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/dir"
@@ -61,7 +61,7 @@ var stateTestCommand = cli.Command{
 	},
 }
 
-func stateTestCmd(ctx *cli.Context) error {
+func stateTestCmd(_ context.Context, ctx *cli.Command) error {
 	machineFriendlyOutput := ctx.Bool(MachineFlag.Name)
 	if machineFriendlyOutput {
 		log.Root().SetHandler(log.DiscardHandler())
@@ -114,7 +114,7 @@ func stateTestCmd(ctx *cli.Context) error {
 	return nil
 }
 
-func runStateTestsParallel(ctx *cli.Context, cfg vm.Config, files []string, workers uint64) ([]testResult, error) {
+func runStateTestsParallel(ctx *cli.Command, cfg vm.Config, files []string, workers uint64) ([]testResult, error) {
 	if workers == 1 {
 		results := make([]testResult, 0, len(files)*4) // pre-allocate
 		for _, fname := range files {
@@ -177,7 +177,7 @@ func runStateTestsParallel(ctx *cli.Context, cfg vm.Config, files []string, work
 }
 
 // runStateTest loads the state-test given by fname, and executes the test.
-func runStateTest(ctx *cli.Context, cfg vm.Config, fname string) ([]testResult, error) {
+func runStateTest(ctx *cli.Command, cfg vm.Config, fname string) ([]testResult, error) {
 	src, err := os.ReadFile(fname)
 	if err != nil {
 		return nil, err
@@ -225,10 +225,7 @@ func runStateTest(ctx *cli.Context, cfg vm.Config, fname string) ([]testResult, 
 				}
 				defer tx.Rollback()
 
-				// Per-subtest SD scope: caller-owned, never Flushed. Closing
-				// without Flush discards every write made during the subtest
-				// (pre-state + tx execution + commitment), so per-subtest state
-				// never enters the long-lived branch cache.
+				// Per-subtest SD: closed without Flush so its writes never enter the branch cache.
 				sd, err := execctx.NewSharedDomains(context.Background(), tx, log.New())
 				if err != nil {
 					result.Pass, result.Error = false, err.Error()
@@ -250,26 +247,9 @@ func runStateTest(ctx *cli.Context, cfg vm.Config, fname string) ([]testResult, 
 					}
 				}
 				if bench {
-					// Run the benchmark on a fresh tx + SD so the timed work
-					// starts from the same pre-state every iteration; the
-					// preceding test.Run mutated sd in place (pre-state +
-					// tx execution + commitment), which would otherwise
-					// skew the gas/throughput numbers.
-					benchTx, err := db.BeginTemporalRw(context.Background())
-					if err != nil {
-						result.Pass, result.Error = false, err.Error()
-						return
-					}
-					defer benchTx.Rollback()
-					benchSD, err := execctx.NewSharedDomains(context.Background(), benchTx, log.New())
-					if err != nil {
-						result.Pass, result.Error = false, err.Error()
-						return
-					}
-					defer benchSD.Close()
-
+					// Reuse the subtest's tx+sd: a second concurrent rwtx on the same env would deadlock.
 					_, stats, _ := timedExec(true, func() ([]byte, uint64, error) {
-						_, _, gasUsed, _ := test.RunNoVerify(nil, benchSD, benchTx, st, cfg, dirs)
+						_, _, gasUsed, _ := test.RunNoVerify(nil, sd, tx, st, cfg, dirs)
 						return nil, gasUsed, nil
 					})
 					result.Stats = &stats

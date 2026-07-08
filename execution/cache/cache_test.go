@@ -18,6 +18,7 @@ package cache
 
 import (
 	"bytes"
+	"sync"
 	"testing"
 
 	"github.com/c2h5oh/datasize"
@@ -25,6 +26,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/db/kv"
 )
 
@@ -54,7 +56,7 @@ func makeValue(i int) []byte {
 // =============================================================================
 
 func TestDomainCache_NewWithByteCapacity(t *testing.T) {
-	c := NewDomainCache(1 * datasize.MB) // 1MB
+	c := NewDomainCacheMode(1*datasize.MB, ModeEvictLRU) // 1MB
 	require.NotNil(t, c)
 	assert.Equal(t, 0, c.Len())
 	assert.Equal(t, int64(0), c.SizeBytes())
@@ -62,7 +64,7 @@ func TestDomainCache_NewWithByteCapacity(t *testing.T) {
 }
 
 func TestDomainCache_GetPut(t *testing.T) {
-	c := NewDomainCache(100)
+	c := NewDomainCacheMode(100, ModeEvictLRU)
 
 	addr := makeAddr(1)
 	value := makeValue(1)
@@ -81,7 +83,7 @@ func TestDomainCache_GetPut(t *testing.T) {
 }
 
 func TestDomainCache_PutUpdateValue(t *testing.T) {
-	c := NewDomainCache(100)
+	c := NewDomainCacheMode(100, ModeEvictLRU)
 
 	addr := makeAddr(1)
 	value1 := []byte{1, 2, 3, 4, 5, 6, 7, 8} // 8 bytes
@@ -153,7 +155,7 @@ func TestDomainCache_PutEvictsWhenFull_EvictMode(t *testing.T) {
 }
 
 func TestDomainCache_Delete(t *testing.T) {
-	c := NewDomainCache(100)
+	c := NewDomainCacheMode(100, ModeEvictLRU)
 
 	addr := makeAddr(1)
 	c.Put(addr, makeValue(1), 0)
@@ -167,7 +169,7 @@ func TestDomainCache_Delete(t *testing.T) {
 }
 
 func TestDomainCache_Clear(t *testing.T) {
-	c := NewDomainCache(100)
+	c := NewDomainCacheMode(100, ModeEvictLRU)
 
 	c.Put(makeAddr(1), makeValue(1), 0)
 	c.Put(makeAddr(2), makeValue(2), 0)
@@ -178,7 +180,7 @@ func TestDomainCache_Clear(t *testing.T) {
 }
 
 func TestDomainCache_PrintStatsAndReset(t *testing.T) {
-	c := NewDomainCache(100)
+	c := NewDomainCacheMode(100, ModeEvictLRU)
 
 	// Generate some hits and misses
 	c.Put(makeAddr(1), makeValue(1), 0)
@@ -194,7 +196,7 @@ func TestDomainCache_PrintStatsAndReset(t *testing.T) {
 }
 
 func TestDomainCache_PrintStatsAndReset_NoOps(t *testing.T) {
-	c := NewDomainCache(100)
+	c := NewDomainCacheMode(100, ModeEvictLRU)
 	// No operations - should handle zero total gracefully
 	c.PrintStatsAndReset("test")
 }
@@ -273,8 +275,7 @@ func TestCodeCache_CodeDeduplication(t *testing.T) {
 
 func TestCodeCache_AddrCapacityLimit(t *testing.T) {
 	// addrToHash is an LRU keyed by 20-byte address. Verify eviction is
-	// LRU rather than no-op-when-full — fresh-address workloads must
-	// warm up (geth's lru.Cache pattern, mirroring core/state/database_code.go).
+	// LRU rather than no-op-when-full so fresh-address workloads warm up.
 	// makeAddr / makeCode wrap at 256, so we generate addrs/codes from
 	// a wider 16-bit space directly.
 	wideAddr := func(i int) []byte {
@@ -306,9 +307,10 @@ func TestCodeCache_AddrCapacityLimit(t *testing.T) {
 	assert.True(t, ok, "most recent entry should remain")
 	assert.Equal(t, wideCode(1099), v)
 
-	// hashToCode stores all 1100 distinct codes (content-addressed,
-	// independent of addr LRU eviction).
-	assert.Equal(t, 1100, c.CodeLen())
+	// hashToCode now LRU-evicts at its own entry cap (codeCapacityB /
+	// avgCodeEntryBytes), so it holds far fewer than the 1100 distinct codes
+	// rather than growing unbounded.
+	assert.Less(t, c.CodeLen(), 1100)
 
 	// Updating an existing addr re-writes the entry (LRU promotes to MRU).
 	c.Put(wideAddr(1099), wideCode(4242), 0)
@@ -318,23 +320,25 @@ func TestCodeCache_AddrCapacityLimit(t *testing.T) {
 }
 
 func TestCodeCache_CodeCapacityLimit(t *testing.T) {
-	// Each code entry is 8 (hash) + 3 (code bytes) = 11 bytes
-	// Set code capacity to 25 bytes - enough for 2 entries but not 3
+	// Tiny byte budget → a 1-entry code layer cap. Successive distinct codes
+	// LRU-evict the coldest rather than freezing the layer.
 	c := NewCodeCache(25, 1024*1024) // 25 bytes code, 1MB addr
 
-	// Fill code capacity
 	c.Put(makeAddr(1), makeCode(1), 0)
 	c.Put(makeAddr(2), makeCode(2), 0)
-	assert.Equal(t, 2, c.CodeLen())
-
-	// Try to add more code - addr mapping added, but code not stored
 	c.Put(makeAddr(3), makeCode(3), 0)
-	assert.Equal(t, 3, c.Len())     // addr mapping added
-	assert.Equal(t, 2, c.CodeLen()) // code not added (at capacity)
 
-	// Get for addr3 should fail (code not in cache)
-	_, ok := c.Get(makeAddr(3))
-	assert.False(t, ok)
+	// Addr LRU keeps all three mappings (1MB); the code layer holds only the
+	// most-recent code(s) after eviction.
+	assert.Equal(t, 3, c.Len())
+	assert.LessOrEqual(t, c.CodeLen(), 1)
+
+	// Newest code is retrievable; the coldest was evicted from the code layer.
+	v, ok := c.Get(makeAddr(3))
+	assert.True(t, ok)
+	assert.Equal(t, makeCode(3), v)
+	_, ok = c.Get(makeAddr(1))
+	assert.False(t, ok, "coldest code should have been evicted")
 }
 
 func TestCodeCache_Delete(t *testing.T) {
@@ -361,8 +365,9 @@ func TestCodeCache_Clear(t *testing.T) {
 
 	c.Clear()
 	assert.Equal(t, 0, c.Len())
-	// Code should still exist (immutable)
-	assert.Equal(t, 2, c.CodeLen())
+	// Clear hard-resets every layer: unwound/cleared code must not remain
+	// discoverable, so the content layer is dropped too.
+	assert.Equal(t, 0, c.CodeLen())
 }
 
 func TestCodeCache_PrintStatsAndReset(t *testing.T) {
@@ -391,7 +396,7 @@ func TestCodeCache_GetMissingCode(t *testing.T) {
 	c.Put(addr, code, 0)
 
 	// Clear the code cache but keep addr mapping
-	c.hashToCode.Clear()
+	c.hashToCode.Purge()
 	c.codeSize.Store(0)
 
 	// Get should fail at code lookup stage
@@ -408,7 +413,7 @@ func TestCodeCache_ImplementsInterface(t *testing.T) {
 // =============================================================================
 
 func TestStateCache_NewStateCache(t *testing.T) {
-	c := NewStateCache(10, 20, 30, 40, 40)
+	c := NewStateCache(10, 20, 30, 40)
 	require.NotNil(t, c)
 
 	// Account, Storage, Code, Commitment should be initialized
@@ -431,7 +436,7 @@ func TestStateCache_NewDefaultStateCache(t *testing.T) {
 }
 
 func TestStateCache_GetPut_Account(t *testing.T) {
-	c := NewStateCache(100, 100, 100, 100, 100)
+	c := NewStateCache(100, 100, 100, 100)
 
 	addr := makeAddr(1)
 	value := makeValue(1)
@@ -449,7 +454,7 @@ func TestStateCache_GetPut_Account(t *testing.T) {
 }
 
 func TestStateCache_GetPut_Storage(t *testing.T) {
-	c := NewStateCache(100, 100, 100, 100, 100)
+	c := NewStateCache(100, 100, 100, 100)
 
 	key := make([]byte, 52) // addr(20) + slot(32)
 	copy(key, makeAddr(1))
@@ -463,7 +468,7 @@ func TestStateCache_GetPut_Storage(t *testing.T) {
 }
 
 func TestStateCache_GetPut_Code(t *testing.T) {
-	c := NewStateCache(1*datasize.MB, 1*datasize.MB, 1*datasize.MB, 1*datasize.MB, 1*datasize.MB)
+	c := NewStateCache(1*datasize.MB, 1*datasize.MB, 1*datasize.MB, 1*datasize.MB)
 
 	addr := makeAddr(1)
 	code := makeCode(1)
@@ -475,7 +480,7 @@ func TestStateCache_GetPut_Code(t *testing.T) {
 }
 
 func TestStateCache_GetPut_UnsupportedDomain(t *testing.T) {
-	c := NewStateCache(100, 100, 100, 100, 100)
+	c := NewStateCache(100, 100, 100, 100)
 
 	// ReceiptDomain is not supported
 	c.Put(kv.ReceiptDomain, makeAddr(1), makeValue(1), 0)
@@ -485,7 +490,7 @@ func TestStateCache_GetPut_UnsupportedDomain(t *testing.T) {
 }
 
 func TestStateCache_Delete(t *testing.T) {
-	c := NewStateCache(100, 100, 100, 100, 100)
+	c := NewStateCache(100, 100, 100, 100)
 
 	addr := makeAddr(1)
 	c.Put(kv.AccountsDomain, addr, makeValue(1), 0)
@@ -499,7 +504,7 @@ func TestStateCache_Delete(t *testing.T) {
 // caches deleted keys via Put(key, nil); if Get treats that as "not found",
 // the caller unnecessarily falls through to the DB on every read.
 func TestStateCache_PutEmpty_ThenGet_IsCacheHit(t *testing.T) {
-	c := NewStateCache(100, 100, 100, 100, 100)
+	c := NewStateCache(100, 100, 100, 100)
 
 	key := make([]byte, 52) // addr(20) + slot(32)
 	key[0] = 0x1d
@@ -514,7 +519,7 @@ func TestStateCache_PutEmpty_ThenGet_IsCacheHit(t *testing.T) {
 
 // Same test for []byte{} (zero-length but non-nil).
 func TestStateCache_PutEmptySlice_ThenGet_IsCacheHit(t *testing.T) {
-	c := NewStateCache(100, 100, 100, 100, 100)
+	c := NewStateCache(100, 100, 100, 100)
 
 	key := make([]byte, 52)
 	key[0] = 0x1d
@@ -528,14 +533,14 @@ func TestStateCache_PutEmptySlice_ThenGet_IsCacheHit(t *testing.T) {
 }
 
 func TestStateCache_Delete_UnsupportedDomain(t *testing.T) {
-	c := NewStateCache(100, 100, 100, 100, 100)
+	c := NewStateCache(100, 100, 100, 100)
 
 	// Should not panic
 	c.Delete(kv.ReceiptDomain, makeAddr(1))
 }
 
 func TestStateCache_Clear(t *testing.T) {
-	c := NewStateCache(100, 100, 100, 100, 100)
+	c := NewStateCache(100, 100, 100, 100)
 
 	c.Put(kv.AccountsDomain, makeAddr(1), makeValue(1), 0)
 	c.Put(kv.StorageDomain, makeAddr(2), makeValue(2), 0)
@@ -553,7 +558,7 @@ func TestStateCache_Clear(t *testing.T) {
 }
 
 func TestStateCache_GetCache_OutOfBounds(t *testing.T) {
-	c := NewStateCache(100, 100, 100, 100, 100)
+	c := NewStateCache(100, 100, 100, 100)
 
 	// Domain >= DomainLen should return nil
 	cache := c.GetCache(kv.DomainLen)
@@ -568,7 +573,7 @@ func TestStateCache_GetCache_OutOfBounds(t *testing.T) {
 // =============================================================================
 
 func TestDomainCache_ConcurrentAccess(t *testing.T) {
-	c := NewDomainCache(10000)
+	c := NewDomainCacheMode(10000, ModeEvictLRU)
 
 	done := make(chan bool)
 
@@ -622,7 +627,7 @@ func TestCodeCache_ConcurrentAccess(t *testing.T) {
 // =============================================================================
 
 func TestStateCache_DomainIsolation(t *testing.T) {
-	c := NewStateCache(1*datasize.MB, 1*datasize.MB, 1*datasize.MB, 1*datasize.MB, 1*datasize.MB)
+	c := NewStateCache(1*datasize.MB, 1*datasize.MB, 1*datasize.MB, 1*datasize.MB)
 
 	addr := makeAddr(1)
 	accountData := []byte("account")
@@ -683,7 +688,7 @@ func makeDiffKey(baseKey []byte, step uint64) string {
 // Entries stamped at/below the unwind point survive (warm hot set kept); entries
 // above it from the now-dead epoch are dropped lazily on read.
 func TestUnwind_KeepsBelowFloor_EvictsAbove(t *testing.T) {
-	c := NewDomainCache(1 * datasize.MB)
+	c := NewDomainCacheMode(1*datasize.MB, ModeEvictLRU)
 	below := makeAddr(1)
 	above := makeAddr(2)
 	c.Put(below, makeValue(1), 50)  // predates the unwind
@@ -700,15 +705,11 @@ func TestUnwind_KeepsBelowFloor_EvictsAbove(t *testing.T) {
 	assert.Equal(t, 1, c.Len(), "the stale entry is evicted lazily on its read")
 }
 
-// Boundary regression: unwindToTxNum is the FIRST rolled-back txNum
-// (Min(UnwindPoint+1)), so an entry stamped at exactly that txNum belongs to the
-// first dead block and must be evicted — the drop rule is txNum>=floor, not
-// txNum>floor. This reproduces the Sidechain Reorg wrong-root bug: an EIP-4788
-// beacon-root storage write runs in a block's begin-system-tx, stamped at the
-// block's first txNum; when that block is the first unwound one, txNum==floor and
-// a strict `>` left the dead-fork value served stale.
+// Pins the unwind floor boundary: unwindToTxNum is the FIRST rolled-back txNum,
+// so an entry stamped at exactly that txNum is dead-fork state and must be
+// evicted — the drop rule is txNum >= floor, not txNum > floor.
 func TestUnwind_EvictsEntryAtFloor(t *testing.T) {
-	c := NewDomainCache(1 * datasize.MB)
+	c := NewDomainCacheMode(1*datasize.MB, ModeEvictLRU)
 	atFloor := makeAddr(1)
 	belowFloor := makeAddr(2)
 	c.Put(atFloor, makeValue(1), 100)   // first txNum of the first unwound block
@@ -728,7 +729,7 @@ func TestUnwind_EvictsEntryAtFloor(t *testing.T) {
 // SAME txNum as the dead fork's write. The epoch — not the txNum — distinguishes
 // them, so the dead entry reads stale and the re-written one reads valid.
 func TestUnwind_ReusedTxNumDisambiguatedByEpoch(t *testing.T) {
-	c := NewDomainCache(1 * datasize.MB)
+	c := NewDomainCacheMode(1*datasize.MB, ModeEvictLRU)
 	k := makeAddr(1)
 	c.Put(k, makeValue(1), 150) // dead fork, epoch 0
 
@@ -747,7 +748,7 @@ func TestUnwind_ReusedTxNumDisambiguatedByEpoch(t *testing.T) {
 // dead epoch above the floor and reads stale no matter how far execution
 // advances afterwards (there is no rising high-water mark to re-validate it).
 func TestUnwind_StragglerNeverResurrects(t *testing.T) {
-	c := NewDomainCache(1 * datasize.MB)
+	c := NewDomainCacheMode(1*datasize.MB, ModeEvictLRU)
 	straggler := makeAddr(1)
 	c.Put(straggler, makeValue(1), 150) // epoch 0
 
@@ -764,7 +765,7 @@ func TestUnwind_StragglerNeverResurrects(t *testing.T) {
 // A second, shallower unwind must not resurrect entries a deeper earlier unwind
 // invalidated (floor only moves down).
 func TestUnwind_FloorOnlyMovesDown(t *testing.T) {
-	c := NewDomainCache(1 * datasize.MB)
+	c := NewDomainCacheMode(1*datasize.MB, ModeEvictLRU)
 	k := makeAddr(1)
 	c.Put(k, makeValue(1), 70) // epoch 0
 
@@ -773,4 +774,110 @@ func TestUnwind_FloorOnlyMovesDown(t *testing.T) {
 
 	_, ok := c.Get(k)
 	assert.False(t, ok, "deeper unwind's floor must not be raised by a later shallower one")
+}
+
+func TestDomainCache_PutIfAbsent(t *testing.T) {
+	c := NewDomainCacheMode(1*datasize.KB, ModeEvictLRU)
+	addr := makeAddr(1)
+	fresh := []byte("fresh")
+	stale := []byte("stale")
+
+	// Absent → inserts.
+	c.PutIfAbsent(addr, stale, 10)
+	v, ok := c.Get(addr)
+	require.True(t, ok)
+	assert.Equal(t, stale, v)
+
+	// Live entry → left untouched.
+	c.Put(addr, fresh, 20)
+	c.PutIfAbsent(addr, stale, 10)
+	v, ok = c.Get(addr)
+	require.True(t, ok)
+	assert.Equal(t, fresh, v, "PutIfAbsent must not replace a live entry")
+
+	// Entry below the unwind floor survives the unwind and still blocks PutIfAbsent.
+	low := makeAddr(2)
+	c.Put(low, fresh, 3)
+	c.Unwind(5)
+	c.PutIfAbsent(low, stale, 4)
+	v, ok = c.Get(low)
+	require.True(t, ok)
+	assert.Equal(t, fresh, v)
+
+	// Stale entry (at/above the floor, superseded epoch) → replaced.
+	c.PutIfAbsent(addr, stale, 10) // addr's entry was stamped txNum 20 >= floor 5
+	v, ok = c.Get(addr)
+	require.True(t, ok)
+	assert.Equal(t, stale, v, "PutIfAbsent must replace a stale entry")
+}
+
+func TestCodeCache_PutIfAbsentKeepsLiveAddrBinding(t *testing.T) {
+	cc := NewCodeCache(1*datasize.MB, 1*datasize.MB)
+	addr := makeAddr(1)
+	fresh := []byte{0xaa, 1, 2, 3}
+	stale := []byte{0xbb, 4, 5, 6}
+
+	cc.PutIfAbsent(addr, stale, 10)
+	v, ok := cc.Get(addr)
+	require.True(t, ok)
+	assert.Equal(t, stale, v)
+
+	cc.Put(addr, fresh, 20)
+	cc.PutIfAbsent(addr, stale, 10)
+	v, ok = cc.Get(addr)
+	require.True(t, ok)
+	assert.Equal(t, fresh, v, "PutIfAbsent must not rebind a live addr entry")
+
+	// After an unwind marks the binding stale, PutIfAbsent may rebind.
+	cc.Unwind(5)
+	cc.PutIfAbsent(addr, stale, 4)
+	v, ok = cc.Get(addr)
+	require.True(t, ok)
+	assert.Equal(t, stale, v)
+}
+
+func TestCodeCache_PutWithCodeHashIfAbsent(t *testing.T) {
+	cc := NewCodeCache(1*datasize.MB, 1*datasize.MB)
+	addr := makeAddr(1)
+	fresh := []byte{0xaa, 1, 2, 3}
+	stale := []byte{0xbb, 4, 5, 6}
+	freshHash := crypto.Keccak256(fresh)
+	staleHash := crypto.Keccak256(stale)
+
+	cc.PutWithCodeHash(addr, fresh, freshHash, 20)
+	cc.PutWithCodeHashIfAbsent(addr, stale, staleHash, 10)
+
+	v, ok := cc.Get(addr)
+	require.True(t, ok)
+	assert.Equal(t, fresh, v, "addr must stay bound to the fresher code")
+
+	// The content-addressed layers are per-key-immutable and still populated.
+	v, ok = cc.GetByCodeHash(staleHash)
+	require.True(t, ok)
+	assert.Equal(t, stale, v)
+	size, ok := cc.GetCodeSizeByCodeHash(staleHash)
+	require.True(t, ok)
+	assert.Equal(t, len(stale), size)
+}
+
+// A conditional put must be atomic w.r.t. a concurrent unconditional Put of
+// the same key: without a shared critical section the conditional writer can
+// check (absent), lose the CPU to the authoritative writer's insert, then
+// clobber it — the prefetch-vs-flush staleness this cache guards against.
+func TestDomainCache_PutIfAbsentAtomicWithPut(t *testing.T) {
+	c := NewDomainCacheMode(1*datasize.MB, ModeEvictLRU)
+	addr := makeAddr(1)
+	fresh := []byte("fresh")
+	stale := []byte("stale")
+	for round := 0; round < 20000; round++ {
+		c.Delete(addr)
+		var wg sync.WaitGroup
+		wg.Add(2)
+		go func() { defer wg.Done(); c.Put(addr, fresh, 20) }()
+		go func() { defer wg.Done(); c.PutIfAbsent(addr, stale, 10) }()
+		wg.Wait()
+		v, ok := c.Get(addr)
+		require.True(t, ok)
+		require.Equal(t, fresh, v, "round %d: PutIfAbsent raced past a concurrent Put", round)
+	}
 }

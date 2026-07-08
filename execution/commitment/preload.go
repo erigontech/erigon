@@ -5,6 +5,14 @@
 // it under the terms of the GNU Lesser General Public License as published by
 // the Free Software Foundation, either version 3 of the License, or
 // (at your option) any later version.
+//
+// Erigon is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
 
 package commitment
 
@@ -39,6 +47,10 @@ type ContractTrunkPreload struct {
 	pinned          int
 	usedBytes       int
 	maxDepthReached int
+	// pinTxNum stamps pinned entries with the head txNum they were read at, so a
+	// later unwind below that point evicts them via the BranchCache floor (a
+	// txN=0 pin would escape it and be served stale after a deep unwind).
+	pinTxNum uint64
 }
 
 // NewContractTrunkPreload seeds a preload state at depth 64 (storage
@@ -98,14 +110,8 @@ func (p *ContractTrunkPreload) Run(
 			break
 		}
 
-		// Trunk preload reads frozen .kv files only (below any unwind point),
-		// so the bytes can never go stale on a reorg — stamp txNum 0 ("frozen,
-		// always valid") so the tx-aware Get keeps them warm across unwinds.
-		_ = step
-		cache.PinEntry(prefix, v, 0, "preload-trunk")
-		// Copy prefix because nibbles.HexToCompact may return a slice
-		// over a reused buffer; we need a stable handle for later
-		// Invalidate on demotion.
+		cache.PinEntry(prefix, v, step, p.pinTxNum)
+		// HexToCompact may alias a reused buffer; copy for a stable Invalidate handle.
 		prefixCopy := make([]byte, len(prefix))
 		copy(prefixCopy, prefix)
 		p.pinnedPrefixes = append(p.pinnedPrefixes, prefixCopy)

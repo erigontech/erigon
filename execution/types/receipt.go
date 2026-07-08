@@ -32,6 +32,7 @@ import (
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/hexutil"
+	"github.com/erigontech/erigon/common/pool"
 	"github.com/erigontech/erigon/execution/rlp"
 )
 
@@ -145,9 +146,8 @@ func (r Receipt) EncodeRLP(w io.Writer) error {
 	if r.Type == LegacyTxType {
 		return rlp.Encode(w, data)
 	}
-	buf := encodeBufferPool.Get().(*bytes.Buffer)
-	defer encodeBufferPool.Put(buf)
-	buf.Reset()
+	buf := pool.GetBuffer()
+	defer pool.PutBuffer(buf)
 	if err := r.encodeTyped(data, buf); err != nil {
 		return err
 	}
@@ -303,7 +303,10 @@ func (r *Receipt) DecodeRLP(s *rlp.Stream) error {
 		// EIP-2718 typed txn receipt. Read the envelope as raw bytes,
 		// then decode from them using a fresh stream.
 		if size == 0 {
-			return rlp.EOL
+			// Empty string is not a valid typed receipt. Return a real error
+			// rather than rlp.EOL: as a slice element EOL would be read as
+			// end-of-list and silently drop the receipt.
+			return errShortTypedReceipt
 		}
 		b := make([]byte, size)
 		if err = s.ReadBytes(b); err != nil {

@@ -42,13 +42,16 @@ import (
 	"github.com/erigontech/erigon/rpc/rpchelper"
 )
 
+// ErrBlockRangeIntoFuture is the eth_getLogs message for a range past the
+// executed head, exported so other packages can match on the condition.
+const ErrBlockRangeIntoFuture = "block range extends beyond current head block"
+
 var (
 	errInvalidBlockRange               = "invalid block range params"
 	errExceedBlockRange                = "query block range exceeds server limit, narrow your filter"
-	errBlockRangeIntoFuture            = "block range extends beyond current head block"
 	errBlockHashWithRange              = "can't specify fromBlock/toBlock with blockHash"
-	errExceedMaxTopics                 = "exceed max topics"
-	errExceedLogQueryLimit             = "exceed max addresses or topics per search position"
+	errExceedMaxTopics                 = fmt.Sprintf("query exceeds the maximum of %d topics", maxTopics)
+	errExceedLogQueryLimit             = fmt.Sprintf("query exceeds the maximum of %d addresses or topics per search position", logQueryLimit)
 	errExceedLogResults                = "query returns too many logs, narrow your filter"
 	errRequestedBlockCountExceedsLimit = "requested blockCount exceeds server limit"
 	errRequestedLogCountExceedsLimit   = "requested logCount exceeds server limit"
@@ -74,6 +77,37 @@ func (api *BaseAPI) getReceipts(ctx context.Context, tx kv.TemporalTx, block *ty
 	return api.receiptsGenerator.GetReceipts(ctx, chainConfig, tx, block, eth.ReceiptsOpts{CommitmentHistoryEnabled: commitmentHistoryEnabled})
 }
 
+// getReceiptsWithBor returns the block's receipts plus, on bor chains with state sync
+// events in this block, the synthetic bor receipt (nil otherwise). The bor receipt is
+// returned separately because call sites marshal it differently from regular receipts.
+func (api *BaseAPI) getReceiptsWithBor(ctx context.Context, tx kv.TemporalTx, chainConfig *chain.Config, block *types.Block) (types.Receipts, *types.Receipt, error) {
+	receipts, err := api.getReceipts(ctx, tx, block)
+	if err != nil {
+		return nil, nil, err
+	}
+	if chainConfig.Bor == nil {
+		return receipts, nil, nil
+	}
+	borReceipt, err := api.borReceiptForBlock(ctx, tx, chainConfig, block)
+	if err != nil {
+		return nil, nil, err
+	}
+	return receipts, borReceipt, nil
+}
+
+// borReceiptForBlock returns the synthetic bor receipt for the block's state sync
+// events, or nil when the block has none.
+func (api *BaseAPI) borReceiptForBlock(ctx context.Context, tx kv.TemporalTx, chainConfig *chain.Config, block *types.Block) (*types.Receipt, error) {
+	events, err := api.bridgeReader.Events(ctx, block.Hash(), block.NumberU64())
+	if err != nil {
+		return nil, err
+	}
+	if len(events) == 0 {
+		return nil, nil
+	}
+	return api.borReceiptGenerator.GenerateBorReceipt(ctx, tx, block, events, chainConfig)
+}
+
 func (api *BaseAPI) getReceipt(ctx context.Context, cc *chain.Config, tx kv.TemporalTx, header *types.Header, txn types.Transaction, index int, txNum uint64, postState *receipts.PostStateInfo) (*types.Receipt, error) {
 	return api.receiptsGenerator.GetReceipt(ctx, cc, tx, header, txn, index, txNum, postState)
 }
@@ -86,9 +120,68 @@ func (api *BaseAPI) getCachedReceipts(ctx context.Context, hash common.Hash) (ty
 	return api.receiptsGenerator.GetCachedReceipts(ctx, hash)
 }
 
+// resolveLogsRange resolves a filter's block range. A BlockHash pins the range to that
+// block; otherwise negative tags are resolved against the chain, defaulting to the
+// latest executed block. With checkFuture, ranges past the latest executed block are
+// rejected as they are resolved.
+func (api *BaseAPI) resolveLogsRange(ctx context.Context, tx kv.Tx, crit filters.FilterCriteria, checkFuture bool) (begin, end uint64, err error) {
+	if crit.BlockHash != nil {
+		block, err := api.blockByHashWithSenders(ctx, tx, *crit.BlockHash)
+		if err != nil {
+			return 0, 0, err
+		}
+		if block == nil {
+			return 0, 0, fmt.Errorf("block not found: %x", *crit.BlockHash)
+		}
+
+		num := block.NumberU64()
+		return num, num, nil
+	}
+
+	latest, _, _, err := rpchelper.GetBlockNumber(ctx, rpc.BlockNumberOrHashWithNumber(rpc.LatestExecutedBlockNumber), tx, api._blockReader, nil)
+	if err != nil {
+		return 0, 0, err
+	}
+
+	begin = latest
+	if crit.FromBlock != nil {
+		fromBlock := crit.FromBlock.Int64()
+		if fromBlock > 0 {
+			begin = uint64(fromBlock)
+		} else {
+			blockNum := rpc.BlockNumber(fromBlock)
+			begin, _, _, err = rpchelper.GetBlockNumber(ctx, rpc.BlockNumberOrHashWithNumber(blockNum), tx, api._blockReader, api.filters)
+			if err != nil {
+				return 0, 0, err
+			}
+		}
+
+		if checkFuture && begin > latest {
+			return 0, 0, &rpc.CustomError{Message: ErrBlockRangeIntoFuture, Code: rpc.ErrCodeInvalidParams}
+		}
+	}
+	end = latest
+	if crit.ToBlock != nil {
+		toBlock := crit.ToBlock.Int64()
+		if toBlock > 0 {
+			end = uint64(toBlock)
+		} else {
+			blockNum := rpc.BlockNumber(toBlock)
+			end, _, _, err = rpchelper.GetBlockNumber(ctx, rpc.BlockNumberOrHashWithNumber(blockNum), tx, api._blockReader, api.filters)
+			if err != nil {
+				return 0, 0, err
+			}
+		}
+
+		if checkFuture && end > latest {
+			return 0, 0, &rpc.CustomError{Message: ErrBlockRangeIntoFuture, Code: rpc.ErrCodeInvalidParams}
+		}
+	}
+	return begin, end, nil
+}
+
 // GetLogs implements eth_getLogs. Returns an array of logs matching a given filter object.
 func (api *APIImpl) GetLogs(ctx context.Context, crit filters.FilterCriteria) (types.RPCLogs, error) {
-	var begin, end uint64
 	logs := types.RPCLogs{}
 
 	tx, beginErr := api.db.BeginTemporalRo(ctx)
@@ -110,73 +203,20 @@ func (api *APIImpl) GetLogs(ctx context.Context, crit filters.FilterCriteria) (t
 		}
 	}
 
-	if crit.BlockHash != nil {
-		if crit.FromBlock != nil || crit.ToBlock != nil {
-			return nil, &rpc.CustomError{Message: errBlockHashWithRange, Code: rpc.ErrCodeInvalidParams}
-		}
+	if crit.BlockHash != nil && (crit.FromBlock != nil || crit.ToBlock != nil) {
+		return nil, &rpc.CustomError{Message: errBlockHashWithRange, Code: rpc.ErrCodeInvalidParams}
+	}
 
-		block, err := api.blockByHashWithSenders(ctx, tx, *crit.BlockHash)
-		if err != nil {
-			return nil, err
-		}
-		if block == nil {
-			return nil, fmt.Errorf("block not found: %x", *crit.BlockHash)
-		}
-
-		num := block.NumberU64()
-		begin = num
-		end = num
-	} else {
-		// Convert the RPC block numbers into internal representations
-		// Pass api.filters (not nil) so LatestExecutedBlockNumber resolves
-		// through the block overlay — otherwise a freshly-FCU'd block whose
-		// background commit is still in flight is invisible here.
-		latest, _, _, err := rpchelper.GetBlockNumber(ctx, rpc.BlockNumberOrHashWithNumber(rpc.LatestExecutedBlockNumber), tx, api._blockReader, api.filters)
-		if err != nil {
-			return nil, err
-		}
-
-		begin = latest
-		if crit.FromBlock != nil {
-			fromBlock := crit.FromBlock.Int64()
-			if fromBlock > 0 {
-				begin = uint64(fromBlock)
-			} else {
-				blockNum := rpc.BlockNumber(fromBlock)
-				begin, _, _, err = rpchelper.GetBlockNumber(ctx, rpc.BlockNumberOrHashWithNumber(blockNum), tx, api._blockReader, api.filters)
-				if err != nil {
-					return nil, err
-				}
-			}
-
-			if begin > latest {
-				return nil, &rpc.CustomError{Message: errBlockRangeIntoFuture, Code: rpc.ErrCodeInvalidParams}
-			}
-		}
-		end = latest
-		if crit.ToBlock != nil {
-			toBlock := crit.ToBlock.Int64()
-			if toBlock > 0 {
-				end = uint64(toBlock)
-			} else {
-				blockNum := rpc.BlockNumber(toBlock)
-				end, _, _, err = rpchelper.GetBlockNumber(ctx, rpc.BlockNumberOrHashWithNumber(blockNum), tx, api._blockReader, api.filters)
-				if err != nil {
-					return nil, err
-				}
-			}
-
-			if end > latest {
-				return nil, &rpc.CustomError{Message: errBlockRangeIntoFuture, Code: rpc.ErrCodeInvalidParams}
-			}
-		}
+	begin, end, err := api.resolveLogsRange(ctx, tx, crit, true)
+	if err != nil {
+		return nil, err
 	}
 
 	if end < begin {
 		return nil, &rpc.CustomError{Message: errInvalidBlockRange, Code: rpc.ErrCodeInvalidParams}
 	}
 	if end > roaring.MaxUint32 {
-		latest, err := rpchelper.GetLatestBlockNumber(api.filters.WithOverlay(tx))
+		latest, err := rpchelper.GetLatestBlockNumber(tx)
 		if err != nil {
 			return nil, err
 		}
@@ -188,8 +228,7 @@ func (api *APIImpl) GetLogs(ctx context.Context, crit filters.FilterCriteria) (t
 
 	// Check if the requested blocks have been executed.
 	// This prevents returning empty results when blocks exist but haven't been executed yet.
-	// Overlay-wrap so an in-flight (not-yet-committed) FCU block counts as executed.
-	latestExecuted, err := rpchelper.GetLatestExecutedBlockNumber(api.filters.WithOverlay(tx))
+	latestExecuted, err := rpchelper.GetLatestExecutedBlockNumber(tx)
 	if err != nil {
 		return nil, err
 	}
@@ -511,13 +550,13 @@ func (api *APIImpl) GetTransactionReceipt(ctx context.Context, txnHash common.Ha
 		return nil, err
 	}
 
-	txNumMin, err := api._txNumReader.Min(ctx, overlayTx, blockNum)
+	// Private API returns 0 if transaction is not found.
+	isBorStateSyncTx := blockNum == 0 && chainConfig.Bor != nil
+
+	txnIndex, err := api.txnIndexInBlock(ctx, overlayTx, blockNum, txNum, isBorStateSyncTx)
 	if err != nil {
 		return nil, err
 	}
-
-	// Private API returns 0 if transaction is not found.
-	isBorStateSyncTx := blockNum == 0 && chainConfig.Bor != nil
 
 	if isBorStateSyncTx {
 		blockNum, ok, err = api.bridgeReader.EventTxnLookup(ctx, txnHash)
@@ -528,10 +567,6 @@ func (api *APIImpl) GetTransactionReceipt(ctx context.Context, txnHash common.Ha
 
 	if !ok {
 		return nil, nil
-	}
-
-	if txNumMin+1 > txNum && !isBorStateSyncTx {
-		return nil, fmt.Errorf("uint underflow txnums error txNum: %d, txNumMin: %d, blockNum: %d", txNum, txNumMin, blockNum)
 	}
 
 	header, err := api._blockReader.HeaderByNumber(ctx, overlayTx, blockNum)
@@ -548,24 +583,16 @@ func (api *APIImpl) GetTransactionReceipt(ctx context.Context, txnHash common.Ha
 			return nil, nil // not error, see https://github.com/erigontech/erigon/issues/1645
 		}
 
-		events, err := api.bridgeReader.Events(ctx, block.Hash(), blockNum)
+		borReceipt, err := api.borReceiptForBlock(ctx, tx, chainConfig, block)
 		if err != nil {
 			return nil, err
 		}
-
-		if len(events) == 0 {
+		if borReceipt == nil {
 			return nil, errors.New("tx not found")
-		}
-
-		borReceipt, err := api.borReceiptGenerator.GenerateBorReceipt(ctx, tx, block, events, chainConfig)
-		if err != nil {
-			return nil, err
 		}
 
 		return ethutils.MarshalReceipt(borReceipt, bortypes.NewBorTransaction(), chainConfig, block.HeaderNoCopy(), txnHash, false, false), nil
 	}
-
-	var txnIndex = int(txNum - txNumMin - 1)
 
 	txn, err := api._blockReader.TxnByIdxInBlock(ctx, overlayTx, header.Number.Uint64(), txnIndex)
 	if err != nil {
@@ -641,7 +668,7 @@ func (api *APIImpl) GetBlockReceipts(ctx context.Context, numberOrHash rpc.Block
 	if err != nil {
 		return nil, err
 	}
-	receipts, err := api.getReceipts(ctx, tx, block)
+	receipts, borReceipt, err := api.getReceiptsWithBor(ctx, tx, chainConfig, block)
 	if err != nil {
 		return nil, err
 	}
@@ -651,20 +678,8 @@ func (api *APIImpl) GetBlockReceipts(ctx context.Context, numberOrHash rpc.Block
 		result = append(result, ethutils.MarshalReceipt(receipt, txn, chainConfig, block.HeaderNoCopy(), txn.Hash(), true, true))
 	}
 
-	if chainConfig.Bor != nil {
-		events, err := api.bridgeReader.Events(ctx, block.Hash(), blockNum)
-		if err != nil {
-			return nil, err
-		}
-
-		if len(events) != 0 {
-			borReceipt, err := api.borReceiptGenerator.GenerateBorReceipt(ctx, tx, block, events, chainConfig)
-			if err != nil {
-				return nil, err
-			}
-
-			result = append(result, ethutils.MarshalReceipt(borReceipt, bortypes.NewBorTransaction(), chainConfig, block.HeaderNoCopy(), borReceipt.TxHash, false, true))
-		}
+	if borReceipt != nil {
+		result = append(result, ethutils.MarshalReceipt(borReceipt, bortypes.NewBorTransaction(), chainConfig, block.HeaderNoCopy(), borReceipt.TxHash, false, true))
 	}
 
 	return result, nil

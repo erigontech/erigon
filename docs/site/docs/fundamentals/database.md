@@ -1,7 +1,7 @@
 ---
 title: "Database"
 description: "How Erigon stores chain data — MDBX engine, datadir layout, snapshot files, and real mainnet sizing numbers."
-sidebar_position: 15
+sidebar_position: 3
 ---
 
 # Database
@@ -12,7 +12,7 @@ This page covers the *what* and *where* of Erigon's data. For the *why* — flat
 
 ## The datadir at a glance
 
-```
+```text
 datadir/
 ├── chaindata/        # Active state + recent blocks (MDBX). Small, hot, mutable.
 ├── snapshots/        # Historical data as immutable .seg files. Large, cold.
@@ -59,7 +59,7 @@ Snapshots are organised into several subdirectories. The main ones are:
 
 - You can replay a single historical transaction without re-executing its block.
 - If an account changes V1 → V2 → V1 within one block, `debug_getModifiedAccountsByNumber` correctly returns it.
-- Erigon stores compact per-transaction receipt *metadata* — cumulative gas used, blob gas used, log index — in a **required** receipt domain. Full receipts (with logs) live in a separate cache domain that is **persisted by default** for `full`, `minimal`, and `blocks` modes (toggled with `--persist.receipts`; `archive` nodes skip it by default and re-derive from full state history). When a full receipt isn't cached, it is reconstructed on demand, re-deriving logs by re-execution.
+- Erigon stores compact per-transaction receipt *metadata* — cumulative gas used, blob gas used, log index — in a **required** receipt domain. Full receipts (with logs) live in a separate cache domain that is **off by default** in every prune mode (opt in with `--persist.receipts`). When a full receipt isn't cached, it is reconstructed on demand, re-deriving logs by re-execution.
 
 ## What does it cost on disk?
 
@@ -77,7 +77,7 @@ snapshots TOTAL    2.3 TB
 
 The breakdown above lists the state/history snapshot subdirectories. The remaining ~1.2 TB is mostly block/transaction `.seg` data, which is not broken out separately here.
 
-For up-to-date totals across all networks and prune modes, see [Hardware Requirements](../get-started/hardware-requirements).
+For up-to-date totals across all networks and pruning modes, see [Hardware Requirements](../get-started/hardware-requirements).
 
 ## Why `chaindata/` stays so small
 
@@ -115,4 +115,4 @@ If you need to reclaim space without resyncing from scratch:
 - [Architecture](architecture) — how this storage model fits into staged sync and the flat-KV state design
 - [Optimizing Storage](optimizing-storage) — concrete recipes for splitting the datadir across multiple disks
 - [Hardware Requirements](../get-started/hardware-requirements) — disk-size numbers for each `--prune.mode`
-- [Prune Modes](prune-modes) — choosing what history to keep
+- [Pruning Modes](pruning-modes) — choosing what history to keep

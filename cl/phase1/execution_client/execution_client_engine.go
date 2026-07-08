@@ -153,9 +153,11 @@ func buildExecutionPayload(payload *cltypes.Eth1Block) *engine_types.ExecutionPa
 	}
 
 	if payload.Version() >= clparams.GloasVersion {
+		bal := hexutil.Bytes{}
 		if payload.BlockAccessList != nil {
-			request.BlockAccessList = payload.BlockAccessList.Bytes()
+			bal = payload.BlockAccessList.Bytes()
 		}
+		request.BlockAccessList = &bal
 		slotNumber := hexutil.Uint64(payload.SlotNumber)
 		request.SlotNumber = &slotNumber
 	}
@@ -251,21 +253,18 @@ func (cc *ExecutionClientEngine) SupportInsertion() bool {
 	return cc.isLocal()
 }
 
-func (cc *ExecutionClientEngine) InsertBlocks(ctx context.Context, blocks []*types.Block, wait bool) error {
+func (cc *ExecutionClientEngine) InsertBlocks(ctx context.Context, blocks []*types.Block, bals [][]byte) error {
 	if !cc.isLocal() {
 		return ErrNotSupported
 	}
-	if wait {
-		return cc.chainRW.InsertBlocksAndWait(ctx, blocks)
-	}
-	return cc.chainRW.InsertBlocks(ctx, blocks)
+	return cc.chainRW.InsertBlocks(ctx, blocks, bals)
 }
 
-func (cc *ExecutionClientEngine) InsertBlock(ctx context.Context, block *types.Block) error {
+func (cc *ExecutionClientEngine) InsertBlock(ctx context.Context, block *types.Block, bal []byte) error {
 	if !cc.isLocal() {
 		return ErrNotSupported
 	}
-	return cc.chainRW.InsertBlockAndWait(ctx, block)
+	return cc.chainRW.InsertBlock(ctx, block, bal)
 }
 
 func (cc *ExecutionClientEngine) CurrentHeader(ctx context.Context) (*types.Header, error) {
@@ -529,13 +528,13 @@ func executionPayloadToEth1Block(ep *engine_types.ExecutionPayload, version clpa
 	if ep.SlotNumber != nil {
 		block.SlotNumber = uint64(*ep.SlotNumber)
 	}
-	if len(ep.BlockAccessList) > 0 {
+	if ep.BlockAccessList != nil && len(*ep.BlockAccessList) > 0 {
 		maxBytes := uint64(1073741824) // MAX_BYTES_PER_TRANSACTION default
 		if beaconCfg != nil {
 			maxBytes = beaconCfg.MaxBytesPerTransaction
 		}
 		block.BlockAccessList = solid.NewByteListSSZ(maxBytes)
-		if err := block.BlockAccessList.SetBytes(ep.BlockAccessList); err != nil {
+		if err := block.BlockAccessList.SetBytes(*ep.BlockAccessList); err != nil {
 			return nil, err
 		}
 	}
@@ -611,4 +610,8 @@ func (cc *ExecutionClientEngine) GetBlobs(ctx context.Context, versionedHashes [
 		proofs[i] = [][]byte{bap.Proof}
 	}
 	return blobs, proofs, nil
+}
+
+func (cc *ExecutionClientEngine) GetClientVersionV1(ctx context.Context, callerVersion *engine_types.ClientVersionV1) ([]engine_types.ClientVersionV1, error) {
+	return cc.engine.GetClientVersionV1(ctx, callerVersion)
 }

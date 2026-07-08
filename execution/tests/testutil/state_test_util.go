@@ -314,10 +314,7 @@ func (t *StateTest) RunNoVerify(tb testing.TB, sd *execctx.SharedDomains, tx kv.
 		root = common.BytesToHash(rootBytes)
 	}()
 
-	// Read through sd.AsGetter(tx) so the tx execution sees pre-state
-	// writes held in sd.mem. Without this the reader would hit MDBX
-	// directly and miss the never-Flushed pre-state, surfacing as
-	// "insufficient funds for gas * price + value" on every test.
+	// Read through sd.AsGetter so execution sees never-Flushed pre-state held in sd.mem.
 	r := rpchelper.NewLatestStateReader(sd.AsGetter(tx))
 	w := rpchelper.NewLatestStateWriter(tx, sd, (*freezeblocks.BlockReader)(nil), writeBlockNr)
 	statedb = state.New(r)
@@ -425,12 +422,7 @@ func (t *StateTest) RunNoVerify(tb testing.TB, sd *execctx.SharedDomains, tx kv.
 	return statedb, root, gasUsed, nil
 }
 
-// MakePreState loads the test fixture's pre-allocation, flushes it to db +
-// the long-lived branch cache, and returns the resulting IntraBlockState.
-// Used by tracetest callers that need the pre-state to outlive the call.
-//
-// The state-test runner does NOT use this — see MakePreStateInto for the
-// ephemeral-SD shape that keeps per-subtest state out of the branch cache.
+// Loads pre-state and flushes it to db + branch cache; for callers needing pre-state to outlive the call.
 func MakePreState(rules *chain.Rules, tx kv.TemporalRwTx, alloc types.GenesisAlloc, blockNr uint64) (*state.IntraBlockState, error) {
 	sd, err := execctx.NewSharedDomains(context.Background(), tx, log.New())
 	if err != nil {
@@ -447,18 +439,9 @@ func MakePreState(rules *chain.Rules, tx kv.TemporalRwTx, alloc types.GenesisAll
 	return statedb, nil
 }
 
-// MakePreStateInto loads the test fixture's pre-allocation into the supplied
-// SharedDomains. The caller owns sd's lifecycle: a SD that is Closed without
-// Flush discards everything written here, leaving the long-lived branch cache
-// untouched. This is the production-aligned shape — application code uses
-// SharedDomains as the ephemeral working scope; Flush is what commits to db
-// and cache. Per-subtest state in the state-test runner is ephemeral and must
-// NOT enter the cache, so each subtest creates an SD, calls this, runs, and
-// discards the SD without flushing.
+// Loads pre-state into the caller-owned sd; closing sd without Flush discards it (keeps test state out of the branch cache).
 func MakePreStateInto(rules *chain.Rules, sd *execctx.SharedDomains, tx kv.TemporalRwTx, alloc types.GenesisAlloc, blockNr uint64) (*state.IntraBlockState, error) {
-	// Read through sd.AsGetter so SetCode/SetBalance see prior pre-state
-	// writes held in sd.mem (consistent with the writer that targets sd
-	// via NewLatestStateWriter below).
+	// Read through sd.AsGetter so SetCode/SetBalance see prior pre-state held in sd.mem.
 	r := rpchelper.NewLatestStateReader(sd.AsGetter(tx))
 	statedb := state.New(r)
 	statedb.SetTxContext(blockNr, 0)

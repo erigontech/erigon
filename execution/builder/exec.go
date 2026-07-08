@@ -229,16 +229,6 @@ func execBlock(ctx context0.Context, sd *execctx.SharedDomains, parentSD *execct
 		return err
 	}
 
-	header := block.HeaderNoCopy()
-
-	if execCfg.ChainConfig().IsPrague(header.Time) {
-		hash := common.Hash{}
-		if len(current.Requests) > 0 {
-			hash = *current.Requests.Hash()
-		}
-		header.RequestsHash = &hash
-	}
-
 	blockHeight := block.NumberU64()
 
 	// Compute state root directly from the domain writes accumulated during

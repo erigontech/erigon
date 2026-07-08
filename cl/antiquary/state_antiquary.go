@@ -43,13 +43,6 @@ import (
 	"github.com/erigontech/erigon/db/snaptype"
 )
 
-// pool for buffers
-var bufferPool = sync.Pool{
-	New: func() any {
-		return &bytes.Buffer{}
-	},
-}
-
 func (s *Antiquary) loopStates(ctx context.Context) {
 	// Execute this each second
 	reqRetryTimer := time.NewTicker(100 * time.Millisecond)
@@ -594,7 +587,6 @@ func (s *Antiquary) IncrementBeaconState(ctx context.Context, to uint64) error {
 		}
 		if err := s.stateSn.DumpCaplinState(
 			ctx,
-			s.stateSn.BlocksAvailable()+1,
 			to,
 			blocksPerStatefulFile,
 			s.sn.Salt,
@@ -605,15 +597,17 @@ func (s *Antiquary) IncrementBeaconState(ctx context.Context, to uint64) error {
 		); err != nil {
 			return err
 		}
-		paths := s.stateSn.SegFileNames(from, to)
+		// Open the new files before collecting paths so the seeder sees them;
+		// seed from 0 since a per-type resume can dump a new type from genesis.
+		if err := s.stateSn.OpenFolder(); err != nil {
+			return err
+		}
 		if s.downloader != nil {
+			paths := s.stateSn.SegFileNames(0, to)
 			// Notify bittorent to seed the new snapshots
 			if err := s.downloader.Seed(s.ctx, paths); err != nil {
 				s.logger.Warn("[Antiquary] Failed to add items to bittorent", "err", err)
 			}
-		}
-		if err := s.stateSn.OpenFolder(); err != nil {
-			return err
 		}
 	}
 

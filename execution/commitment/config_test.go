@@ -19,9 +19,6 @@ func TestDefaultTrieConfig(t *testing.T) {
 	if cfg.LeaveDeferredForCaller {
 		t.Error("LeaveDeferredForCaller should default to false")
 	}
-	if !cfg.EnableWarmupCache {
-		t.Error("EnableWarmupCache should default to true")
-	}
 	if !cfg.EnableTrieWarmup {
 		t.Error("EnableTrieWarmup should default to true")
 	}
@@ -63,7 +60,6 @@ func TestTrieConfig_Subtrie(t *testing.T) {
 		Variant:                VariantHexPatriciaTrie,
 		DeferBranchUpdates:     true,
 		LeaveDeferredForCaller: true,
-		EnableWarmupCache:      true,
 		EnableTrieWarmup:       true,
 		CsvMetricsFilePrefix:   "pre",
 		MemoizationOff:         true,
@@ -87,7 +83,6 @@ func TestTrieConfig_PropagationToHPH(t *testing.T) {
 	cfg := TrieConfig{
 		DeferBranchUpdates:     false,
 		LeaveDeferredForCaller: true,
-		EnableWarmupCache:      true,
 		MemoizationOff:         true,
 	}
 
@@ -133,31 +128,5 @@ func TestTrieConfig_SpawnSubTrieInheritsConfig(t *testing.T) {
 	}
 	if sub.branchEncoder.deferUpdates {
 		t.Error("sub-trie branchEncoder should not defer updates")
-	}
-}
-
-func TestTrieConfig_ConcurrentPatriciaHashedPropagation(t *testing.T) {
-	cfg := TrieConfig{
-		DeferBranchUpdates: true,
-		MemoizationOff:     true,
-	}
-
-	root := NewHexPatriciaHashed(length.Addr, nil, cfg)
-	cph := NewConcurrentPatriciaHashed(root, nil)
-	defer cph.Release()
-
-	// Root config should match
-	if !cph.root.cfg.MemoizationOff {
-		t.Error("root should inherit MemoizationOff=true")
-	}
-
-	// Mounts inherit config via SpawnSubTrie, with DeferBranchUpdates=false
-	for i, mount := range cph.mounts {
-		if mount.cfg.DeferBranchUpdates {
-			t.Errorf("mount[%d] DeferBranchUpdates should be false", i)
-		}
-		if !mount.cfg.MemoizationOff {
-			t.Errorf("mount[%d] should inherit MemoizationOff=true", i)
-		}
 	}
 }

@@ -324,6 +324,45 @@ func (c *MockExecutionEngineGetBodiesByRangeCall) DoAndReturn(f func(context.Con
 	return c
 }
 
+// GetClientVersionV1 mocks base method.
+func (m *MockExecutionEngine) GetClientVersionV1(ctx context.Context, callerVersion *engine_types.ClientVersionV1) ([]engine_types.ClientVersionV1, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "GetClientVersionV1", ctx, callerVersion)
+	ret0, _ := ret[0].([]engine_types.ClientVersionV1)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// GetClientVersionV1 indicates an expected call of GetClientVersionV1.
+func (mr *MockExecutionEngineMockRecorder) GetClientVersionV1(ctx, callerVersion any) *MockExecutionEngineGetClientVersionV1Call {
+	mr.mock.ctrl.T.Helper()
+	call := mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetClientVersionV1", reflect.TypeOf((*MockExecutionEngine)(nil).GetClientVersionV1), ctx, callerVersion)
+	return &MockExecutionEngineGetClientVersionV1Call{Call: call}
+}
+
+// MockExecutionEngineGetClientVersionV1Call wrap *gomock.Call
+type MockExecutionEngineGetClientVersionV1Call struct {
+	*gomock.Call
+}
+
+// Return rewrite *gomock.Call.Return
+func (c *MockExecutionEngineGetClientVersionV1Call) Return(arg0 []engine_types.ClientVersionV1, arg1 error) *MockExecutionEngineGetClientVersionV1Call {
+	c.Call = c.Call.Return(arg0, arg1)
+	return c
+}
+
+// Do rewrite *gomock.Call.Do
+func (c *MockExecutionEngineGetClientVersionV1Call) Do(f func(context.Context, *engine_types.ClientVersionV1) ([]engine_types.ClientVersionV1, error)) *MockExecutionEngineGetClientVersionV1Call {
+	c.Call = c.Call.Do(f)
+	return c
+}
+
+// DoAndReturn rewrite *gomock.Call.DoAndReturn
+func (c *MockExecutionEngineGetClientVersionV1Call) DoAndReturn(f func(context.Context, *engine_types.ClientVersionV1) ([]engine_types.ClientVersionV1, error)) *MockExecutionEngineGetClientVersionV1Call {
+	c.Call = c.Call.DoAndReturn(f)
+	return c
+}
+
 // HasBlock mocks base method.
 func (m *MockExecutionEngine) HasBlock(ctx context.Context, hash common.Hash) (bool, error) {
 	m.ctrl.T.Helper()
@@ -402,17 +441,17 @@ func (c *MockExecutionEngineHasGapInSnapshotsCall) DoAndReturn(f func(context.Co
 }
 
 // InsertBlock mocks base method.
-func (m *MockExecutionEngine) InsertBlock(ctx context.Context, block *types.Block) error {
+func (m *MockExecutionEngine) InsertBlock(ctx context.Context, block *types.Block, bal []byte) error {
 	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "InsertBlock", ctx, block)
+	ret := m.ctrl.Call(m, "InsertBlock", ctx, block, bal)
 	ret0, _ := ret[0].(error)
 	return ret0
 }
 
 // InsertBlock indicates an expected call of InsertBlock.
-func (mr *MockExecutionEngineMockRecorder) InsertBlock(ctx, block any) *MockExecutionEngineInsertBlockCall {
+func (mr *MockExecutionEngineMockRecorder) InsertBlock(ctx, block, bal any) *MockExecutionEngineInsertBlockCall {
 	mr.mock.ctrl.T.Helper()
-	call := mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "InsertBlock", reflect.TypeOf((*MockExecutionEngine)(nil).InsertBlock), ctx, block)
+	call := mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "InsertBlock", reflect.TypeOf((*MockExecutionEngine)(nil).InsertBlock), ctx, block, bal)
 	return &MockExecutionEngineInsertBlockCall{Call: call}
 }
 
@@ -428,29 +467,29 @@ func (c *MockExecutionEngineInsertBlockCall) Return(arg0 error) *MockExecutionEn
 }
 
 // Do rewrite *gomock.Call.Do
-func (c *MockExecutionEngineInsertBlockCall) Do(f func(context.Context, *types.Block) error) *MockExecutionEngineInsertBlockCall {
+func (c *MockExecutionEngineInsertBlockCall) Do(f func(context.Context, *types.Block, []byte) error) *MockExecutionEngineInsertBlockCall {
 	c.Call = c.Call.Do(f)
 	return c
 }
 
 // DoAndReturn rewrite *gomock.Call.DoAndReturn
-func (c *MockExecutionEngineInsertBlockCall) DoAndReturn(f func(context.Context, *types.Block) error) *MockExecutionEngineInsertBlockCall {
+func (c *MockExecutionEngineInsertBlockCall) DoAndReturn(f func(context.Context, *types.Block, []byte) error) *MockExecutionEngineInsertBlockCall {
 	c.Call = c.Call.DoAndReturn(f)
 	return c
 }
 
 // InsertBlocks mocks base method.
-func (m *MockExecutionEngine) InsertBlocks(ctx context.Context, blocks []*types.Block, wait bool) error {
+func (m *MockExecutionEngine) InsertBlocks(ctx context.Context, blocks []*types.Block, bals [][]byte) error {
 	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "InsertBlocks", ctx, blocks, wait)
+	ret := m.ctrl.Call(m, "InsertBlocks", ctx, blocks, bals)
 	ret0, _ := ret[0].(error)
 	return ret0
 }
 
 // InsertBlocks indicates an expected call of InsertBlocks.
-func (mr *MockExecutionEngineMockRecorder) InsertBlocks(ctx, blocks, wait any) *MockExecutionEngineInsertBlocksCall {
+func (mr *MockExecutionEngineMockRecorder) InsertBlocks(ctx, blocks, bals any) *MockExecutionEngineInsertBlocksCall {
 	mr.mock.ctrl.T.Helper()
-	call := mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "InsertBlocks", reflect.TypeOf((*MockExecutionEngine)(nil).InsertBlocks), ctx, blocks, wait)
+	call := mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "InsertBlocks", reflect.TypeOf((*MockExecutionEngine)(nil).InsertBlocks), ctx, blocks, bals)
 	return &MockExecutionEngineInsertBlocksCall{Call: call}
 }
 
@@ -466,13 +505,13 @@ func (c *MockExecutionEngineInsertBlocksCall) Return(arg0 error) *MockExecutionE
 }
 
 // Do rewrite *gomock.Call.Do
-func (c *MockExecutionEngineInsertBlocksCall) Do(f func(context.Context, []*types.Block, bool) error) *MockExecutionEngineInsertBlocksCall {
+func (c *MockExecutionEngineInsertBlocksCall) Do(f func(context.Context, []*types.Block, [][]byte) error) *MockExecutionEngineInsertBlocksCall {
 	c.Call = c.Call.Do(f)
 	return c
 }
 
 // DoAndReturn rewrite *gomock.Call.DoAndReturn
-func (c *MockExecutionEngineInsertBlocksCall) DoAndReturn(f func(context.Context, []*types.Block, bool) error) *MockExecutionEngineInsertBlocksCall {
+func (c *MockExecutionEngineInsertBlocksCall) DoAndReturn(f func(context.Context, []*types.Block, [][]byte) error) *MockExecutionEngineInsertBlocksCall {
 	c.Call = c.Call.DoAndReturn(f)
 	return c
 }

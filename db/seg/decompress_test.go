@@ -90,6 +90,36 @@ func TestDecompressSkip(t *testing.T) {
 	require.Equal(t, 16, int(offset))
 }
 
+func TestOpenSequentialView(t *testing.T) {
+	d := prepareLoremDict(t)
+	defer d.Close()
+
+	var want [][]byte
+	g := d.MakeGetter()
+	for g.HasNext() {
+		w, _ := g.Next(nil)
+		want = append(want, w)
+	}
+
+	readAll := func(separateReadahead bool) [][]byte {
+		v, err := d.OpenSequentialView(separateReadahead)
+		require.NoError(t, err)
+		defer v.Close()
+		var got [][]byte
+		vg := v.MakeGetter()
+		for vg.HasNext() {
+			w, _ := vg.Next(nil)
+			got = append(got, w)
+		}
+		return got
+	}
+
+	require.Equal(t, want, readAll(true), "separate MADV_SEQUENTIAL mmap view")
+	require.Equal(t, want, readAll(false), "shared mmap view (MADV_NORMAL)")
+	// the shared view's Close must be a no-op on the decompressor's mmap: a subsequent read still works
+	require.Equal(t, want, readAll(true))
+}
+
 func TestDecompressMatchOK(t *testing.T) {
 	loremStrings := append(strings.Split(rmNewLine(lorem), " "), "") // including emtpy string - to trigger corner cases
 	d := prepareLoremDict(t)
@@ -524,6 +554,44 @@ excepteur sint occaecat cupidatat non proident sunt in culpa qui officia deserun
 
 func rmNewLine(s string) string {
 	return strings.ReplaceAll(strings.ReplaceAll(s, "\n", " "), "\r", "")
+}
+
+func TestDecompressDeepPositionSubtable(t *testing.T) {
+	// 600 words where a common pattern appears at 600 distinct byte positions
+	// force posMaxDepth=10>9, creating subtables and exercising nextPosSubtable.
+	const nWords = 600
+	logger := log.New()
+	tmpDir := t.TempDir()
+	file := filepath.Join(tmpDir, "deep_pos")
+	cfg := DefaultCfg
+	cfg.MinPatternScore = 1
+	cfg.Workers = 2
+	c, err := NewCompressor(t.Context(), t.Name(), file, tmpDir, cfg, log.LvlDebug, logger)
+	require.NoError(t, err)
+
+	words := make([][]byte, nWords)
+	pat := []byte("SUBTABLEPATTERN")
+	for i := range words {
+		words[i] = append(bytes.Repeat([]byte{byte(i % 251)}, i), pat...)
+		require.NoError(t, c.AddWord(words[i]))
+	}
+	require.NoError(t, c.Compress())
+	c.Close()
+
+	d, err := NewDecompressor(file)
+	require.NoError(t, err)
+	defer d.Close()
+
+	require.NotNil(t, d.posArena)
+	require.Greater(t, len(d.posArena.tables), 1, "expected posMaxDepth>9 to create subtables")
+
+	g := d.MakeGetter()
+	for i, want := range words {
+		require.True(t, g.HasNext(), "word %d", i)
+		got, _ := g.Next(nil)
+		require.Equal(t, want, got, "word %d mismatch", i)
+	}
+	require.False(t, g.HasNext())
 }
 
 func TestDecompressTorrent(t *testing.T) {
