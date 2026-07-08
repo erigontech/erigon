@@ -19,6 +19,7 @@ package temporal
 import (
 	"context"
 	"errors"
+	"fmt"
 	"sync"
 	"testing"
 	"time"
@@ -296,6 +297,22 @@ func (tx *Tx) LockDBInRam() error {
 	return nil
 }
 
+// DistributeCursors forwards to the underlying mdbx engine. Like DeleteRange, it
+// fails loud on a non-mdbx inner rather than silently degrading (none exists today).
+func (tx *Tx) DistributeCursors(table string, from []byte, n int) ([][]byte, error) {
+	if s, ok := tx.Tx.(kv.DBWithDistributionSupport); ok {
+		return s.DistributeCursors(table, from, n)
+	}
+	return nil, fmt.Errorf("DistributeCursors not supported by %T", tx.Tx)
+}
+
+func (tx *RwTx) DistributeCursors(table string, from []byte, n int) ([][]byte, error) {
+	if s, ok := tx.RwTx.(kv.DBWithDistributionSupport); ok {
+		return s.DistributeCursors(table, from, n)
+	}
+	return nil, fmt.Errorf("DistributeCursors not supported by %T", tx.RwTx)
+}
+
 func (tx *Tx) Apply(ctx context.Context, f func(tx kv.Tx) error) error {
 	tx.tx.mu.RLock()
 	applyTx := tx.Tx
@@ -311,6 +328,15 @@ func (tx *RwTx) WarmupDB(force bool) error {
 		return mdbxTx.WarmupDB(force)
 	}
 	return nil
+}
+
+func (tx *RwTx) DeleteRange(table string, from, to []byte) (uint64, error) {
+	if dr, ok := tx.RwTx.(kv.HasDeleteRange); ok {
+		return dr.DeleteRange(table, from, to)
+	}
+	// No non-mdbx temporal backend exists (mdbx's native range-delete is used
+	// above); fail loud rather than carry an unexercised, DupSort-unsafe emulation.
+	return 0, fmt.Errorf("DeleteRange not supported by %T", tx.RwTx)
 }
 
 func (tx *RwTx) LockDBInRam() error {
