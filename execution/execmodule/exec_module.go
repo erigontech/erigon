@@ -451,6 +451,7 @@ func (e *ExecModule) ValidateChain(ctx context.Context, blockHash common.Hash, b
 	defer validateChainDuration.ObserveDuration(time.Now())
 	if !e.semaphore.TryAcquire(1) {
 		e.logger.Trace("ethereumExecutionModule.ValidateChain: ExecutionStatus_Busy")
+		semaphoreBusyValidateChain.Inc()
 		return ValidationResult{
 			ValidationStatus: ExecutionStatusBusy,
 		}, nil

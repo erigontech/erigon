@@ -157,6 +157,7 @@ func writeForkChoiceHashes(tx kv.RwTx, blockHash, safeHash, finalizedHash common
 func (e *ExecModule) updateForkChoice(ctx context.Context, originalBlockHash, safeHash, finalizedHash common.Hash, outcomeCh chan forkchoiceOutcome) (err error) {
 	if !e.semaphore.TryAcquire(1) {
 		e.logger.Trace("ethereumExecutionModule.updateForkChoice: ExecutionStatus_Busy")
+		semaphoreBusyUpdateForkChoice.Inc()
 		sendForkchoiceResultWithoutWaiting(outcomeCh, ForkChoiceResult{
 			LatestValidHash: common.Hash{},
 			Status:          ExecutionStatusBusy,
@@ -164,8 +165,12 @@ func (e *ExecModule) updateForkChoice(ctx context.Context, originalBlockHash, sa
 		return fmt.Errorf("semaphore timeout")
 	}
 	shouldReleaseSema := true
+	// Set once the FCU result is returned early to the CL; measures how long the
+	// semaphore stays held for the durability tail after the CL is unblocked.
+	var tailHoldStart time.Time
 	defer func() {
 		if shouldReleaseSema {
+			observeForkChoiceTailHold(tailHoldStart)
 			e.semaphore.Release(1)
 		}
 	}()
@@ -514,6 +519,7 @@ func (e *ExecModule) updateForkChoice(ctx context.Context, originalBlockHash, sa
 				Status:          ExecutionStatusSuccess,
 				ValidationError: validationError,
 			}, false)
+			tailHoldStart = time.Now()
 			e.logHeadUpdated(blockHash, fcuHeader, 0, "head validated", false)
 		}
 		if err := e.forkValidator.MergeExtendingFork(ctx, tx, currentContext, e.accum); err != nil {
@@ -681,7 +687,10 @@ func (e *ExecModule) updateForkChoice(ctx context.Context, originalBlockHash, sa
 			shouldReleaseSema = false
 			cleanupBeforeSemaRelease()
 			go func() {
-				defer e.semaphore.Release(1)
+				defer func() {
+					observeForkChoiceTailHold(tailHoldStart)
+					e.semaphore.Release(1)
+				}()
 				if err := work(); err != nil && !errors.Is(err, context.Canceled) {
 					e.logger.Error("Error running background post forkchoice", "err", err)
 				}

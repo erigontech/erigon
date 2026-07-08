@@ -29,7 +29,30 @@ var (
 	updateForkChoicePruneDuration = metrics.NewSummary(`update_fork_choice{type="prune_duration"}`)
 	validateChainDuration         = metrics.NewSummary(`validate_chain{type="execution_duration"}`)
 	insertBlocksDuration          = metrics.NewSummary(`insert_blocks{type="execution_duration"}`)
+
+	// Semaphore wait inside InsertBlocks, isolated from the insert body: how
+	// long the next block waited for the previous FCU's durability tail to
+	// release the module semaphore.
+	insertBlocksSemaphoreWait = metrics.NewSummary(`insert_blocks{type="semaphore_wait"}`)
+	// Time the module semaphore stays held after the FCU result was returned
+	// early to the consensus client (flush+commit+prune tail). The quantity the
+	// tail-decoupling work is meant to shrink.
+	updateForkChoiceTailHold = metrics.NewSummary(`update_fork_choice{type="tail_hold"}`)
+
+	// Count of ops that bailed with Busy because the semaphore was held (a
+	// ValidateChain bail surfaces to the CL as SYNCING).
+	semaphoreBusyValidateChain    = metrics.NewCounter(`execmodule_semaphore_busy{op="validate_chain"}`)
+	semaphoreBusyUpdateForkChoice = metrics.NewCounter(`execmodule_semaphore_busy{op="update_fork_choice"}`)
 )
+
+// observeForkChoiceTailHold records how long the semaphore was held past the
+// early FCU return. No-op when start is zero (paths that never returned early).
+func observeForkChoiceTailHold(start time.Time) {
+	if start.IsZero() {
+		return
+	}
+	updateForkChoiceTailHold.ObserveDuration(start)
+}
 
 func UpdateForkChoiceArrivalDelay(blockTime uint64) {
 	t := time.Unix(int64(blockTime), 0)
