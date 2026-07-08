@@ -38,6 +38,26 @@ func Sais(data []byte, sa []int32, buf *[]int32) error {
 	return nil
 }
 
+// Sais16 computes the suffix array of a uint16 text (alphabet [0,textMax)) into sa.
+func Sais16(text []uint16, textMax int, sa []int32, buf *[]int32) error {
+	n := len(text)
+	if n != len(sa) {
+		panic("sais: len(text) != len(sa)")
+	}
+	if n <= 1 {
+		if n == 1 {
+			sa[0] = 0
+		}
+		return nil
+	}
+	clear(sa)
+
+	needed := max(2*textMax, n/2)
+	*buf = slices.Grow((*buf)[:0], needed)[:needed]
+	sais_16_32(text, textMax, sa, *buf)
+	return nil
+}
+
 func sais_8_32(text []byte, textMax int, sa, tmp []int32) {
 	if len(sa) != len(text) || len(tmp) < textMax {
 		panic("sais: misuse of sais_8_32")

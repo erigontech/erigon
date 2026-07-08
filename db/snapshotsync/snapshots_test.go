@@ -24,6 +24,7 @@ import (
 	"testing/fstest"
 
 	"github.com/stretchr/testify/require"
+	"github.com/tidwall/btree"
 
 	dir2 "github.com/erigontech/erigon/common/dir"
 	"github.com/erigontech/erigon/common/log/v3"
@@ -1153,4 +1154,28 @@ func TestOverlapNoTruncation(t *testing.T) {
 	require.Equal(uint64(1_000_000), visibleTxn[1].from)
 	require.Equal(uint64(1_500_000), visibleTxn[1].to)
 	require.Equal(uint64(1_500_000-1), s.SegmentsMax())
+}
+
+func TestCloseAndDropNotProtected(t *testing.T) {
+	tree := btree.NewBTreeGOptions[*DirtySegment](DirtySegmentLess, btree.Options{Degree: 4, NoLocks: false})
+	protected := &DirtySegment{Range: Range{0, 1000}}
+	stale := &DirtySegment{Range: Range{2000, 3000}}
+	tree.Set(protected)
+	tree.Set(stale)
+
+	closeAndDropNotProtected(tree, map[string]struct{}{"keep": {}}, func(sn *DirtySegment) string {
+		if sn == protected {
+			return "keep"
+		}
+		return "drop"
+	})
+
+	require.Equal(t, 1, tree.Len(), "only the protected segment must survive")
+	var survivors []*DirtySegment
+	tree.Walk(func(segs []*DirtySegment) bool {
+		survivors = append(survivors, segs...)
+		return true
+	})
+	require.Contains(t, survivors, protected)
+	require.NotContains(t, survivors, stale)
 }

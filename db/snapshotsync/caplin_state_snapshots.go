@@ -316,32 +316,15 @@ func (s *CaplinStateSnapshots) OpenList(fileNames []string, optimistic bool) err
 	s.closeWhatNotInList(fileNames)
 	var segmentsMax uint64
 	var segmentsMaxSet bool
-Loop:
 	for _, fName := range fileNames {
 		f, _, _ := snaptype.ParseFileName(s.dir, fName)
-
-		var processed bool = true
-		var exists bool
-		var sn *DirtySegment
 
 		dirtySegments, ok := s.dirty[f.CaplinTypeString]
 		if !ok {
 			continue
 		}
 		filePath := filepath.Join(s.dir, fName)
-		dirtySegments.Walk(func(segments []*DirtySegment) bool {
-			for _, sn2 := range segments {
-				if sn2.Decompressor == nil { // it's ok if some segment was not able to open
-					continue
-				}
-				if filePath == sn2.filePath {
-					sn = sn2
-					exists = true
-					break
-				}
-			}
-			return true
-		})
+		sn, exists := findOpenSegment(dirtySegments, func(sn2 *DirtySegment) bool { return sn2.filePath == filePath })
 		if !exists {
 			sn = &DirtySegment{
 				// segType: f.Type, Unsupported
@@ -352,19 +335,17 @@ Loop:
 			}
 		}
 		if err := s.openSegIfNeed(sn, filePath); err != nil {
-			if errors.Is(err, os.ErrNotExist) {
-				if optimistic {
-					continue Loop
-				} else {
-					break Loop
-				}
+			stop, failErr := ClassifyOpenErr(err, optimistic)
+			if failErr != nil {
+				return failErr
 			}
-			if optimistic {
+			if stop {
+				break
+			}
+			if !errors.Is(err, os.ErrNotExist) {
 				s.logger.Warn("[snapshots] open segment", "err", err)
-				continue Loop
-			} else {
-				return err
 			}
+			continue
 		}
 
 		if !exists {
@@ -375,15 +356,12 @@ Loop:
 		if err := openIdxForCaplinStateIfNeeded(sn, filePath, optimistic); err != nil {
 			return err
 		}
-		// Only bob sidecars count for progression
-		if processed {
-			if f.To > 0 {
-				segmentsMax = f.To - 1
-			} else {
-				segmentsMax = 0
-			}
-			segmentsMaxSet = true
+		if f.To > 0 {
+			segmentsMax = f.To - 1
+		} else {
+			segmentsMax = 0
 		}
+		segmentsMaxSet = true
 	}
 
 	if segmentsMaxSet {
@@ -597,24 +575,12 @@ func (s *CaplinStateSnapshots) closeWhatNotInList(l []string) {
 	}
 
 	for _, dirtySegments := range s.dirty {
-		toClose := make([]*DirtySegment, 0)
-		dirtySegments.Walk(func(segments []*DirtySegment) bool {
-			for _, sn := range segments {
-				if sn.Decompressor == nil {
-					continue
-				}
-				_, name := filepath.Split(sn.FilePath())
-				if _, ok := protectFiles[name]; ok {
-					continue
-				}
-				toClose = append(toClose, sn)
-			}
-			return true
+		closeAndDropNotProtected(dirtySegments, protectFiles, func(sn *DirtySegment) string {
+			// sn.filePath, not the promoted Decompressor.FilePath(): the field is
+			// set for every tree member, incl. stubs whose Decompressor is nil.
+			_, name := filepath.Split(sn.filePath)
+			return name
 		})
-		for _, sn := range toClose {
-			sn.close()
-			dirtySegments.Delete(sn)
-		}
 	}
 }
 

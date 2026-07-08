@@ -1086,40 +1086,21 @@ func (s *RoSnapshots) openSegments(fileNames []string, open bool, optimistic boo
 			continue
 		}
 
-		var sn *DirtySegment
-		var exists bool
-		segtype.Walk(func(segs []*DirtySegment) bool {
-			for _, sn2 := range segs {
-				if sn2.Decompressor == nil { // it's ok if some segment was not able to open
-					continue
-				}
-				if fName == sn2.FileName() {
-					sn = sn2
-					exists = true
-					return false
-				}
-			}
-			return true
-		})
-
+		sn, exists := FindOpenSegment(segtype, fName)
 		if !exists {
 			sn = &DirtySegment{segType: f.Type, version: f.Version, Range: Range{f.From, f.To}, frozen: s.snCfg.IsFrozen(f)}
 		}
 
 		if open {
 			if err := sn.Open(s.dir); err != nil {
-				if errors.Is(err, os.ErrNotExist) {
-					if optimistic {
-						continue
-					} else {
-						break
-					}
+				stop, failErr := ClassifyOpenErr(err, optimistic)
+				if failErr != nil {
+					return failErr
 				}
-				if optimistic {
-					continue
-				} else {
-					return err
+				if stop {
+					break
 				}
+				continue
 			}
 		}
 
@@ -1269,6 +1250,63 @@ func (s *RoSnapshots) detachNotInList(protect []string) []*DirtySegment {
 	return detached
 }
 
+// CloseSegmentsNotInList closes and drops tree segments whose file name is not
+// in protectFiles.
+func CloseSegmentsNotInList(tree *btree.BTreeG[*DirtySegment], protectFiles map[string]struct{}) {
+	closeAndDropNotProtected(tree, protectFiles, (*DirtySegment).FileName)
+}
+
+func closeAndDropNotProtected(tree *btree.BTreeG[*DirtySegment], protectFiles map[string]struct{}, nameOf func(*DirtySegment) string) {
+	var toClose []*DirtySegment
+	tree.Walk(func(segs []*DirtySegment) bool {
+		for _, seg := range segs {
+			if _, ok := protectFiles[nameOf(seg)]; ok {
+				continue
+			}
+			toClose = append(toClose, seg)
+		}
+		return true
+	})
+	for _, delSeg := range toClose {
+		delSeg.close()
+		tree.Delete(delSeg)
+	}
+}
+
+// FindOpenSegment returns tree's already-open segment named fName, if any.
+func FindOpenSegment(tree *btree.BTreeG[*DirtySegment], fName string) (*DirtySegment, bool) {
+	return findOpenSegment(tree, func(sn *DirtySegment) bool { return sn.FileName() == fName })
+}
+
+func findOpenSegment(tree *btree.BTreeG[*DirtySegment], match func(*DirtySegment) bool) (sn *DirtySegment, ok bool) {
+	tree.Walk(func(segs []*DirtySegment) bool {
+		for _, sn2 := range segs {
+			if sn2.Decompressor == nil { // it's ok if some segment was not able to open
+				continue
+			}
+			if match(sn2) {
+				sn, ok = sn2, true
+				return false
+			}
+		}
+		return true
+	})
+	return sn, ok
+}
+
+// ClassifyOpenErr says how a snapshot-listing loop proceeds after a segment
+// open error: stop the whole listing (stop), fail hard (failErr), or, when
+// neither, skip just this file.
+func ClassifyOpenErr(err error, optimistic bool) (stop bool, failErr error) {
+	if errors.Is(err, os.ErrNotExist) {
+		return !optimistic, nil
+	}
+	if optimistic {
+		return false, nil
+	}
+	return false, err
+}
+
 func (s *RoSnapshots) RemoveOverlaps(onDelete func(l []string) error) error {
 	list, err := snaptype.Segments(s.dir)
 	if err != nil {
@@ -1356,7 +1394,8 @@ func (s *RoSnapshots) BuildMissedIndices(ctx context.Context, logPrefix string, 
 		return nil
 	}
 	if !s.SegmentsReady() {
-		return errors.New("not all snapshot segments are available")
+		return fmt.Errorf("not all snapshot segments are available: segments max=%d, indices max=%d, download ready=%t",
+			s.SegmentsMax(), s.IndicesMax(), s.DownloadReady())
 	}
 
 	// wait for Downloader service to download all expected snapshots
