@@ -31,6 +31,7 @@ import (
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/background"
 	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/db/bufiopool"
 	"github.com/erigontech/erigon/db/recsplit/eliasfano32"
 	"github.com/erigontech/erigon/db/seg"
 	"github.com/erigontech/erigon/db/state/statecfg"
@@ -205,8 +206,8 @@ func writeV0Index(tb testing.TB, dataPath, indexPath string, compressed seg.File
 	f, err := os.Create(indexPath)
 	require.NoError(tb, err)
 	defer f.Close()
-	w := getBufioWriter(f)
-	defer putBufioWriter(w)
+	w := bufiopool.Writer(f)
+	defer bufiopool.PutWriter(w)
 
 	if count > 0 {
 		ef := eliasfano32.NewEliasFano(count, uint64(r.Size()))

@@ -123,3 +123,45 @@ jobs:
         run: |
           echo "::error title=Merge-queue root-cause failure::This job failed and is fast-cancelling the CI Gate run; THIS job is the real failure (the others show as cancelled). See its logs."
           gh run cancel ${{ github.run_id }} || true
+
+  # Fast guard (no fixture execution): catches coverage regressions a normal test
+  # run does NOT surface — the stable race / hive-consume-engine fork partitions
+  # (a fork silently unmatched by any shard) and glamsterdam-devnet EIP-filter
+  # liveness+completeness. Reads live config + corpus .meta/index.json. Part of
+  # this reusable workflow, so ci-gate's eest-spec-tests dependency fails when
+  # coverage regresses.
+  eest-shard-coverage:
+    if: ${{ !inputs.cache-warming-only }}
+    name: eest-shard-coverage
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 1
+
+      - name: Restore EEST tarballs
+        uses: actions/cache/restore@v6
+        with:
+          path: |
+            test-fixtures-cache/eest_stable.tar.gz
+            test-fixtures-cache/eest_devnet.tar.gz
+            test-fixtures-cache/eest_benchmark.tar.gz
+            test-fixtures-cache/eest_zkevm.tar.gz
+          key: test-fixtures-eest-${{ runner.os }}-${{ hashFiles('test-fixtures.json') }}
+          restore-keys: |
+            test-fixtures-eest-${{ runner.os }}-
+
+      - name: Check EEST shard coverage
+        run: make check-eest-shards
+
+      # In the merge queue, cancel the run on first failure so the gate
+      # doesn't stall waiting for still-running siblings. PR runs keep
+      # going so authors see the full failure picture.
+      - name: Cancel workflow run on failure
+        if: failure() && github.event_name == 'merge_group'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          echo "::error title=Merge-queue root-cause failure::This job failed and is fast-cancelling the CI Gate run; THIS job is the real failure (the others show as cancelled). See its logs."
+          gh run cancel ${{ github.run_id }} || true

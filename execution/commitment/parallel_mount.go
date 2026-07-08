@@ -3,6 +3,7 @@ package commitment
 import (
 	"context"
 	"fmt"
+	"io"
 	"math/bits"
 	"os"
 	"sort"
@@ -17,6 +18,39 @@ var cmtTiming = os.Getenv("ERIGON_CMT_TIMING") == "1"
 
 // deepStorageThreshold is the touched-slot count above which an account's storage subtree folds concurrently instead of streaming through its worker.
 const deepStorageThreshold = 1_000
+
+// unfoldRootWall unfolds base at the root until row 0 forms the top-nibble mount wall,
+// consuming at most one nibble per step: a restored root extension sharing the probe's
+// leading nibble would otherwise unfold several levels at once and misplace the wall.
+func unfoldRootWall(ctx context.Context, base *HexPatriciaHashed) error {
+	zero := []byte{0}
+	for u := base.needUnfolding(zero); u > 0; u = base.needUnfolding(zero) {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		if err := base.unfold(zero, min(u, 1)); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// seedRootBase synthesizes a row-0 wall when the on-disk root has no branch, so foldMounted stops
+// at the mount boundary and returns cells excluding the mount nibble for empty and non-empty bases alike.
+func seedRootBase(base *HexPatriciaHashed) {
+	if base.activeRows != 0 {
+		return
+	}
+	base.activeRows = 1
+	base.currentKeyLen = 0
+	base.depths[0] = 1
+	base.touchMap[0] = 0
+	base.afterMap[0] = 0
+	base.branchBefore[0] = false
+	for i := range base.grid[0] {
+		base.grid[0][i].reset()
+	}
+}
 
 // if nibble set is -1 then subtrie is not mounted to the nibble, but limited by depth: eg do not fold mounted trie above depth 63
 func (hph *HexPatriciaHashed) mountTo(root *HexPatriciaHashed, nibble int) {
@@ -72,15 +106,10 @@ func (p *ParallelPatriciaHashed) processMounted(ctx context.Context, updates *Up
 		tStart = time.Now()
 	}
 
-	zero := []byte{0}
-	for u := base.needUnfolding(zero); u > 0; u = base.needUnfolding(zero) {
-		if err := ctx.Err(); err != nil {
-			return nil, err
-		}
-		if err := base.unfold(zero, u); err != nil {
-			return nil, fmt.Errorf("processMounted: unfold root: %w", err)
-		}
+	if err := unfoldRootWall(ctx, base); err != nil {
+		return nil, fmt.Errorf("processMounted: unfold root: %w", err)
 	}
+	seedRootBase(base)
 	if cmtTiming {
 		tUnfolded = time.Now()
 	}
@@ -100,9 +129,10 @@ func (p *ParallelPatriciaHashed) processMounted(ctx context.Context, updates *Up
 		g.Go(func() error {
 			w := p.workerPool.Get().(*HexPatriciaHashed)
 			w.mountTo(base, ni)
-			if p.template != nil {
-				w.trace = p.template.trace
-				w.traceDomain = p.template.traceDomain
+			if p.template != nil && p.template.traceW != nil {
+				w.traceW = tracePrefix(p.template.traceW, fmt.Sprintf("[mnt %x] ", ni))
+			} else {
+				w.traceW = nil
 			}
 			wctx, cleanup := p.trieCtxFactory()
 			if cleanup != nil {
@@ -120,8 +150,8 @@ func (p *ParallelPatriciaHashed) processMounted(ctx context.Context, updates *Up
 			path := make([]byte, 0, 144)
 			path = append(path, byte(ni))
 			path = append(path, ch.ext...)
-			buildErr := dfsSubtreeDeep(w, ch, path, func(n *prefixNode, pth []byte) (common.Hash, error) {
-				return foldStorageRoot(gctx, p.numWorkers, p.newStorageWorker, pu, n, pth)
+			buildErr := dfsSubtreeDeep(w, ch, path, func(n *prefixNode, pth []byte, accountFresh bool) (common.Hash, error) {
+				return foldStorageRoot(gctx, p.numWorkers, p.newStorageWorker, pu, n, pth, accountFresh)
 			})
 			if buildErr != nil {
 				w.resetForReuse()
@@ -174,8 +204,6 @@ func (p *ParallelPatriciaHashed) processMounted(ctx context.Context, updates *Up
 			return nil, fmt.Errorf("processMounted: root fold: %w", err)
 		}
 	}
-	// fold() only sets rootPresent on a multi-child root fold, so set it here for the EncodeCurrentState/SetState round-trip.
-	base.rootPresent = !base.root.IsEmpty()
 	if deferred := base.TakeDeferredUpdates(); len(deferred) > 0 {
 		pu.appendDeferred(deferred)
 	}
@@ -220,7 +248,11 @@ func printMountTiming(tStart, tUnfolded, tWorkers time.Time, buildDur, foldDur *
 }
 
 func (p *ParallelPatriciaHashed) newStorageWorker() (*HexPatriciaHashed, func()) {
-	return newDeferredStorageWorker(&p.workerPool, p.trieCtxFactory, p.template != nil && p.template.trace)
+	var traceW io.Writer
+	if p.template != nil {
+		traceW = p.template.traceW
+	}
+	return newDeferredStorageWorker(&p.workerPool, p.trieCtxFactory, traceW)
 }
 
 // setAccountStorageRoot sets the account leaf's storage root to sr; computeCellHash uses cell.hash as the storageRoot when no storage cell was processed.
@@ -231,6 +263,12 @@ func setAccountStorageRoot(w *HexPatriciaHashed, accHash []byte, sr common.Hash)
 	} else {
 		c = &w.grid[w.activeRows-1][accHash[w.currentKeyLen]]
 	}
+	// sr already covers the whole storage subtree, so a stale storage plain key on this cell must
+	// go, or computeCellHash rehashes it as a singleton from the stale slot and discards sr.
+	c.storageAddrLen = 0
+	c.StorageLen = 0
+	c.Flags &^= StorageUpdate
+	c.loaded &^= cellLoadStorage
 	c.hash = sr
 	c.hashLen = 32
 	c.stateHashLen = 0

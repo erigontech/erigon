@@ -63,6 +63,26 @@ func GetOrCreateCounter(name string) Counter {
 	return &counter{c}
 }
 
+// GetOrCreateCounterVec returns registered CounterVec with the given name
+// or creates a new CounterVec if the registry doesn't contain a CounterVec with
+// the given name and labels.
+//
+// name must be a valid Prometheus-compatible metric with possible labels.
+// labels are the names of the dimensions associated with the counter vector.
+// For instance,
+//
+//   - foo, with labels []string{"bar", "baz"}
+//
+// The returned CounterVec is safe to use from concurrent goroutines.
+func GetOrCreateCounterVec(name string, labels []string, help ...string) *CounterVec {
+	cv, err := defaultSet.GetOrCreateCounterVec(name, labels, help...)
+	if err != nil {
+		panic(fmt.Errorf("could not get or create new countervec: %w", err))
+	}
+
+	return &CounterVec{cv}
+}
+
 // NewGauge registers and returns gauge with the given name.
 //
 // name must be valid Prometheus-compatible metric with possible labels.

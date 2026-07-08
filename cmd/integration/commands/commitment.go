@@ -187,7 +187,7 @@ Examples:
   integration commitment branch --datadir /path/to/datadir  # reads root (empty prefix)`,
 	Run: func(cmd *cobra.Command, args []string) {
 		logger := debug.SetupCobra(cmd, "integration")
-		ctx, _ := common.RootContext()
+		ctx := cmd.Context()
 
 		prefix, err := commitment.PrefixStringToNibbles(branchPrefixFlag)
 		if err != nil {
@@ -394,7 +394,7 @@ func commitmentRebuild(db kv.TemporalRwDB, ctx context.Context, logger log.Logge
 	}
 
 	blockSnapBuildSema := semaphore.NewWeighted(int64(runtime.NumCPU()))
-	agg.ForTestReplaceKeysInValues(kv.CommitmentDomain, false)
+	agg.ForTestReferencesInCommitmentBranches(kv.CommitmentDomain, false)
 	agg.SetSnapshotBuildSema(blockSnapBuildSema)
 	agg.SetErigondbDomainStepsInFrozenFile(config3.UnboundedDomainMerge)
 	agg.PresetOfflineMerge()
@@ -557,14 +557,6 @@ func commitmentConvert(db kv.TemporalRwDB, ctx context.Context, logger log.Logge
 	agg.SetSnapshotBuildSema(semaphore.NewWeighted(int64(runtime.NumCPU())))
 	agg.DisableAllDependencies()
 	defer agg.MadvNormal().DisableReadAhead()
-	// commitmentValTransformDomain (the squeeze path's value transformer)
-	// short-circuits to pass-through when the live runtime flag is false.
-	// Force-enable it for the duration of the converter run so --squeeze=true
-	// works regardless of the operator's current schema config. Matches the
-	// pattern in RebuildCommitmentFiles / RebuildCommitmentFilesWithHistory.
-	if opts.TargetSqueeze {
-		agg.ForTestReplaceKeysInValues(kv.CommitmentDomain, true)
-	}
 
 	acRo := agg.BeginFilesRo()
 	defer acRo.Close()
@@ -607,7 +599,7 @@ Examples:
   integration commitment bench-lookup --datadir /path/to/datadir --seed 12345`,
 	Run: func(cmd *cobra.Command, args []string) {
 		logger := debug.SetupCobra(cmd, "integration")
-		ctx, _ := common.RootContext()
+		ctx := cmd.Context()
 
 		if err := benchLookup(ctx, logger); err != nil {
 			if !errors.Is(err, context.Canceled) {
@@ -631,7 +623,7 @@ Examples:
   integration commitment bench-history-lookup --datadir /path/to/datadir --prefix aa --seed 12345`,
 	Run: func(cmd *cobra.Command, args []string) {
 		logger := debug.SetupCobra(cmd, "integration")
-		ctx, _ := common.RootContext()
+		ctx := cmd.Context()
 
 		if err := benchHistoryLookup(ctx, logger); err != nil {
 			if !errors.Is(err, context.Canceled) {

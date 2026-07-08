@@ -180,13 +180,16 @@ func (se *serialExecutor) exec(ctx context.Context, execStage *StageState, u Unw
 		}
 
 		if !dbg.BatchCommitments || shouldGenerateChangesets || se.cfg.syncCfg.KeepExecutionProofs {
-			if dbg.TraceBlock(blockNum) {
+			traceBlk := dbg.TraceBlock(blockNum)
+			if traceBlk {
 				fmt.Println(blockNum, "Commitment")
-				se.doms.SetTrace(true, false)
+				se.doms.GetCommitmentCtx().SetTraceWriter(os.Stderr)
 			}
 			// Warmup is enabled via EnableTrieWarmup at executor init
 			rh, err := se.doms.ComputeCommitment(ctx, se.applyTx, true, blockNum, inputTxNum-1, se.logPrefix, nil)
-			se.doms.SetTrace(false, false)
+			if traceBlk {
+				se.doms.GetCommitmentCtx().SetTraceWriter(nil)
+			}
 
 			if err != nil {
 				return nil, rwTx, err
@@ -265,12 +268,8 @@ func (se *serialExecutor) exec(ctx context.Context, execStage *StageState, u Unw
 
 		lastExecutedStep := kv.Step(uint64(se.lastExecutedTxNum.Load()) / se.doms.StepSize())
 
-		// if we're in the initialCycle before we consider the blockLimit we need to make sure we keep executing
-		// until we reach a transaction whose comittement which is writable to the db, otherwise the update will get lost
-		if !initialCycle || lastExecutedStep > 0 && lastExecutedStep > lastFrozenStep && !dbg.DiscardCommitment() {
-			if blockLimit > 0 && blockNum-startBlockNum+1 >= blockLimit && blockNum != maxBlockNum {
-				return b.HeaderNoCopy(), rwTx, &ErrLoopExhausted{From: startBlockNum, To: blockNum, Reason: "block limit reached"}
-			}
+		if shouldMarkExhaustedAtBlock(initialCycle, lastExecutedStep, lastFrozenStep, dbg.DiscardCommitment(), blockLimit, blockNum, startBlockNum, maxBlockNum) {
+			return b.HeaderNoCopy(), rwTx, &ErrLoopExhausted{From: startBlockNum, To: blockNum, Reason: "block limit reached"}
 		}
 	}
 	se.doms.PrintCacheStats()

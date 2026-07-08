@@ -276,8 +276,7 @@ func TestCodeCache_CodeDeduplication(t *testing.T) {
 
 func TestCodeCache_AddrCapacityLimit(t *testing.T) {
 	// addrToHash is an LRU keyed by 20-byte address. Verify eviction is
-	// LRU rather than no-op-when-full — fresh-address workloads must
-	// warm up (geth's lru.Cache pattern, mirroring core/state/database_code.go).
+	// LRU rather than no-op-when-full so fresh-address workloads warm up.
 	// makeAddr / makeCode wrap at 256, so we generate addrs/codes from
 	// a wider 16-bit space directly.
 	wideAddr := func(i int) []byte {
@@ -309,9 +308,10 @@ func TestCodeCache_AddrCapacityLimit(t *testing.T) {
 	assert.True(t, ok, "most recent entry should remain")
 	assert.Equal(t, wideCode(1099), v)
 
-	// hashToCode stores all 1100 distinct codes (content-addressed,
-	// independent of addr LRU eviction).
-	assert.Equal(t, 1100, c.CodeLen())
+	// hashToCode now LRU-evicts at its own entry cap (codeCapacityB /
+	// avgCodeEntryBytes), so it holds far fewer than the 1100 distinct codes
+	// rather than growing unbounded.
+	assert.Less(t, c.CodeLen(), 1100)
 
 	// Updating an existing addr re-writes the entry (LRU promotes to MRU).
 	c.Put(wideAddr(1099), wideCode(4242), 0)
@@ -321,23 +321,25 @@ func TestCodeCache_AddrCapacityLimit(t *testing.T) {
 }
 
 func TestCodeCache_CodeCapacityLimit(t *testing.T) {
-	// Each code entry is 8 (hash) + 3 (code bytes) = 11 bytes
-	// Set code capacity to 25 bytes - enough for 2 entries but not 3
+	// Tiny byte budget → a 1-entry code layer cap. Successive distinct codes
+	// LRU-evict the coldest rather than freezing the layer.
 	c := NewCodeCache(25, 1024*1024) // 25 bytes code, 1MB addr
 
-	// Fill code capacity
 	c.Put(makeAddr(1), makeCode(1), 0)
 	c.Put(makeAddr(2), makeCode(2), 0)
-	assert.Equal(t, 2, c.CodeLen())
-
-	// Try to add more code - addr mapping added, but code not stored
 	c.Put(makeAddr(3), makeCode(3), 0)
-	assert.Equal(t, 3, c.Len())     // addr mapping added
-	assert.Equal(t, 2, c.CodeLen()) // code not added (at capacity)
 
-	// Get for addr3 should fail (code not in cache)
-	_, ok := c.Get(makeAddr(3))
-	assert.False(t, ok)
+	// Addr LRU keeps all three mappings (1MB); the code layer holds only the
+	// most-recent code(s) after eviction.
+	assert.Equal(t, 3, c.Len())
+	assert.LessOrEqual(t, c.CodeLen(), 1)
+
+	// Newest code is retrievable; the coldest was evicted from the code layer.
+	v, ok := c.Get(makeAddr(3))
+	assert.True(t, ok)
+	assert.Equal(t, makeCode(3), v)
+	_, ok = c.Get(makeAddr(1))
+	assert.False(t, ok, "coldest code should have been evicted")
 }
 
 func TestCodeCache_Delete(t *testing.T) {
@@ -365,7 +367,7 @@ func TestCodeCache_Clear(t *testing.T) {
 	c.Clear()
 	assert.Equal(t, 0, c.Len())
 	// Clear hard-resets every layer: unwound/cleared code must not remain
-	// discoverable (#21752), so the content layer is dropped too.
+	// discoverable, so the content layer is dropped too.
 	assert.Equal(t, 0, c.CodeLen())
 }
 
@@ -395,7 +397,7 @@ func TestCodeCache_GetMissingCode(t *testing.T) {
 	c.Put(addr, code, 0)
 
 	// Clear the code cache but keep addr mapping
-	c.hashToCode.Clear()
+	c.hashToCode.Purge()
 	c.codeSize.Store(0)
 
 	// Get should fail at code lookup stage
@@ -953,10 +955,12 @@ func TestCodeCache_ContainsLive(t *testing.T) {
 	cc.Unwind(5)
 	require.False(t, cc.ContainsLive(addr), "stale binding must not read as live")
 
-	// A bound addr whose content layer refused the bytes (capacity) is not live.
-	tiny := NewCodeCache(2*datasize.B, 1*datasize.MB)
-	tiny.PutWithCodeHash(addr, code, crypto.Keccak256(code), 10)
-	require.False(t, tiny.ContainsLive(addr), "binding without content bytes is not servable")
+	// A bound addr whose content entry was evicted is not live: the binding
+	// alone cannot serve the bytes.
+	cc2 := NewCodeCache(1*datasize.MB, 1*datasize.MB)
+	cc2.PutWithCodeHash(addr, code, crypto.Keccak256(code), 10)
+	cc2.hashToCode.Purge()
+	require.False(t, cc2.ContainsLive(addr), "binding without content bytes is not servable")
 }
 
 // The drain-before-unwind convention (drainReadAhead ordered before every
