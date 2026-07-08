@@ -32,7 +32,6 @@ import (
 	"github.com/erigontech/erigon/cl/fork"
 	"github.com/erigontech/erigon/cl/gossip"
 	"github.com/erigontech/erigon/cl/phase1/core/state"
-	"github.com/erigontech/erigon/cl/phase1/core/state/lru"
 	"github.com/erigontech/erigon/cl/utils"
 	"github.com/erigontech/erigon/cl/utils/bls"
 	"github.com/erigontech/erigon/cl/utils/eth_clock"
@@ -58,8 +57,8 @@ type syncContributionService struct {
 	ethClock                       eth_clock.EthereumClock
 	batchSignatureVerifier         *BatchSignatureVerifier
 	validatorParams                *validator_params.ValidatorParams
-	proposerIndicesCache           *lru.Cache[uint64, []uint64]
-	test                           bool
+	localProposerChecker
+	test bool
 
 	mu sync.Mutex
 }
@@ -82,10 +81,6 @@ func NewSyncContributionService(
 	validatorParams *validator_params.ValidatorParams,
 	test bool,
 ) SyncContributionService {
-	proposerIndicesCache, err := lru.New[uint64, []uint64]("proposerIndices", 3)
-	if err != nil {
-		panic(err)
-	}
 	return &syncContributionService{
 		syncedDataManager:              syncedDataManager,
 		beaconCfg:                      beaconCfg,
@@ -95,7 +90,7 @@ func NewSyncContributionService(
 		emitters:                       emitters,
 		batchSignatureVerifier:         batchSignatureVerifier,
 		validatorParams:                validatorParams,
-		proposerIndicesCache:           proposerIndicesCache,
+		localProposerChecker:           newLocalProposerChecker(beaconCfg),
 		test:                           test,
 	}
 }
@@ -106,41 +101,6 @@ func (s *syncContributionService) Names() []string {
 
 func (s *syncContributionService) IsMyGossipMessage(name string) bool {
 	return name == gossip.TopicNameSyncCommitteeContributionAndProof
-}
-
-// isLocalValidatorProposer checks if any local validator is a proposer in the current or next epoch.
-// For current epoch: uses cached GetBeaconProposerIndices.
-// For next epoch: uses GetProposerLookahead() (Fulu+) or always returns true (pre-Fulu).
-func (s *syncContributionService) isLocalValidatorProposer(headState *state.CachingBeaconState, currentEpoch uint64, localValidators []uint64) bool {
-	if headState.Version() < clparams.FuluVersion {
-		return true
-	}
-	// Check current epoch using cached proposer indices
-	currentProposers, ok := s.proposerIndicesCache.Get(currentEpoch)
-	if !ok {
-		var err error
-		currentProposers, err = headState.GetBeaconProposerIndices(currentEpoch)
-		if err == nil {
-			s.proposerIndicesCache.Add(currentEpoch, currentProposers)
-		}
-	}
-	for _, validatorIndex := range localValidators {
-		if slices.Contains(currentProposers, validatorIndex) {
-			return true
-		}
-	}
-
-	// For Fulu+, use the efficient proposer lookahead for next epoch
-	lookahead := headState.GetProposerLookahead()
-	// The lookahead contains proposers for current and next epoch, skip current epoch slots
-	slotsPerEpoch := int(s.beaconCfg.SlotsPerEpoch)
-	for i := slotsPerEpoch; i < lookahead.Length(); i++ {
-		proposerIndex := lookahead.Get(i)
-		if slices.Contains(localValidators, proposerIndex) {
-			return true
-		}
-	}
-	return false
 }
 
 func (s *syncContributionService) DecodeGossipMessage(pid peer.ID, data []byte, version clparams.StateVersion) (*SignedContributionAndProofForGossip, error) {

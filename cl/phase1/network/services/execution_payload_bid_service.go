@@ -20,8 +20,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"sync"
-	"sync/atomic"
 	"time"
 
 	"github.com/erigontech/erigon/cl/beacon/beaconevents"
@@ -52,12 +50,6 @@ type pendingBidKey struct {
 	slot         uint64
 }
 
-// pendingBidJob represents a pending bid waiting for proposer preferences to arrive.
-type pendingBidJob struct {
-	msg          *cltypes.SignedExecutionPayloadBid
-	creationTime time.Time
-}
-
 var errBidDependencyUnavailable = fmt.Errorf("%w: bid dependency unavailable", ErrIgnore)
 
 const (
@@ -81,9 +73,7 @@ type executionPayloadBidService struct {
 	seenCache *lru.Cache[seenBidKey, struct{}]
 
 	// Pending bids waiting for proposer preferences
-	pendingBids  sync.Map // pendingBidKey -> *pendingBidJob
-	pendingCount atomic.Int32
-	pendingCond  *sync.Cond
+	pending *pendingJobQueue[pendingBidKey, *cltypes.SignedExecutionPayloadBid]
 }
 
 // NewExecutionPayloadBidService creates a new execution payload bid gossip service.
@@ -109,10 +99,19 @@ func NewExecutionPayloadBidService(
 		epbsPool:          epbsPool,
 		emitters:          emitters,
 		seenCache:         seenCache,
-		pendingCond:       sync.NewCond(&sync.Mutex{}),
 	}
-	go s.loop(ctx)
+	s.pending = s.newPendingQueue()
+	go s.pending.loop(ctx)
 	return s
+}
+
+func (s *executionPayloadBidService) newPendingQueue() *pendingJobQueue[pendingBidKey, *cltypes.SignedExecutionPayloadBid] {
+	return newPendingJobQueue(maxPendingBids, pendingBidExpiry, pendingBidCheckInterval,
+		s.tryProcessPendingBid,
+		func(key pendingBidKey) {
+			log.Trace("Pending execution payload bid expired",
+				"slot", key.slot, "builderIndex", key.builderIndex)
+		})
 }
 
 func (s *executionPayloadBidService) Names() []string {
@@ -334,119 +333,44 @@ func (s *executionPayloadBidService) validateAndStoreBid(
 
 // queuePendingBid adds a bid to the pending queue for later processing when preferences arrive.
 func (s *executionPayloadBidService) queuePendingBid(msg *cltypes.SignedExecutionPayloadBid) {
-	if s.pendingCount.Add(1) > maxPendingBids {
-		s.pendingCount.Add(-1)
-		return
-	}
-
-	key := pendingBidKey{
+	s.pending.enqueue(pendingBidKey{
 		builderIndex: msg.Message.BuilderIndex,
 		slot:         msg.Message.Slot,
-	}
-
-	if _, loaded := s.pendingBids.LoadOrStore(key, &pendingBidJob{
-		msg:          msg,
-		creationTime: time.Now(),
-	}); loaded {
-		s.pendingCount.Add(-1)
-	} else {
-		s.pendingCond.L.Lock()
-		s.pendingCond.Signal()
-		s.pendingCond.L.Unlock()
-	}
+	}, msg)
 }
 
-// loop is the background goroutine that processes pending bids.
-func (s *executionPayloadBidService) loop(ctx context.Context) {
-	// Wake any blocked Wait() on context cancellation to prevent deadlock.
-	go func() {
-		<-ctx.Done()
-		s.pendingCond.L.Lock()
-		s.pendingCond.Broadcast()
-		s.pendingCond.L.Unlock()
-	}()
-
-	for {
-		// Wait until there are pending bids
-		s.pendingCond.L.Lock()
-		for s.pendingCount.Load() == 0 {
-			select {
-			case <-ctx.Done():
-				s.pendingCond.L.Unlock()
-				return
-			default:
-			}
-			s.pendingCond.Wait()
-		}
-		s.pendingCond.L.Unlock()
-
-		// Poll until all pending bids are processed
-		ticker := time.NewTicker(pendingBidCheckInterval)
-		for s.pendingCount.Load() > 0 {
-			select {
-			case <-ctx.Done():
-				ticker.Stop()
-				return
-			case <-ticker.C:
-				s.processPendingBids()
-			}
-		}
-		ticker.Stop()
+// tryProcessPendingBid validates and stores the bid once its proposer preferences have arrived,
+// dropping bids whose slot is no longer current or whose preference matching fails.
+func (s *executionPayloadBidService) tryProcessPendingBid(_ context.Context, key pendingBidKey, msg *cltypes.SignedExecutionPayloadBid) (func(), bool) {
+	// Check if bid slot is still valid
+	currentSlot := s.ethClock.GetCurrentSlot()
+	if key.slot != currentSlot && key.slot != currentSlot+1 {
+		log.Trace("Pending execution payload bid slot expired",
+			"slot", key.slot, "builderIndex", key.builderIndex)
+		return nil, true
 	}
-}
 
-// processPendingBids checks pending bids whose proposer preferences may have arrived.
-func (s *executionPayloadBidService) processPendingBids() {
-	s.pendingBids.Range(func(key, value any) bool {
-		pendingKey := key.(pendingBidKey)
-		job := value.(*pendingBidJob)
-
-		// Check expiry
-		if time.Since(job.creationTime) > pendingBidExpiry {
-			s.pendingBids.Delete(pendingKey)
-			s.pendingCount.Add(-1)
-			log.Trace("Pending execution payload bid expired",
-				"slot", pendingKey.slot, "builderIndex", pendingKey.builderIndex)
-			return true
+	preferences, ok, err := s.matchingProposerPreferences(msg)
+	if err != nil {
+		if errors.Is(err, errBidDependencyUnavailable) {
+			return nil, false
 		}
+		log.Trace("Failed to match pending execution payload bid",
+			"slot", key.slot,
+			"builderIndex", key.builderIndex,
+			"err", err)
+		return nil, true
+	}
+	if !ok {
+		return nil, false // Preferences still not here, keep waiting
+	}
 
-		// Check if bid slot is still valid
-		currentSlot := s.ethClock.GetCurrentSlot()
-		if pendingKey.slot != currentSlot && pendingKey.slot != currentSlot+1 {
-			s.pendingBids.Delete(pendingKey)
-			s.pendingCount.Add(-1)
-			log.Trace("Pending execution payload bid slot expired",
-				"slot", pendingKey.slot, "builderIndex", pendingKey.builderIndex)
-			return true
-		}
-
-		preferences, ok, err := s.matchingProposerPreferences(job.msg)
-		if err != nil {
-			if errors.Is(err, errBidDependencyUnavailable) {
-				return true
-			}
-			s.pendingBids.Delete(pendingKey)
-			s.pendingCount.Add(-1)
-			log.Trace("Failed to match pending execution payload bid",
-				"slot", pendingKey.slot,
-				"builderIndex", pendingKey.builderIndex,
-				"err", err)
-			return true
-		}
-		if !ok {
-			return true // Preferences still not here, keep waiting
-		}
-
-		// Preferences arrived, remove from pending and process.
-		s.pendingBids.Delete(pendingKey)
-		s.pendingCount.Add(-1)
-
-		if err := s.validateAndStoreBid(job.msg, preferences); err != nil {
+	return func() {
+		if err := s.validateAndStoreBid(msg, preferences); err != nil {
 			log.Trace("Failed to process pending execution payload bid",
-				"slot", pendingKey.slot,
-				"builderIndex", pendingKey.builderIndex,
+				"slot", key.slot,
+				"builderIndex", key.builderIndex,
 				"err", err)
 		}
-		return true
-	})
+	}, true
 }
