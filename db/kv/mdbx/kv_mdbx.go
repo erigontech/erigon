@@ -939,8 +939,8 @@ func (tx *MdbxTx) DistributeCursors(table string, from []byte, n int) ([][]byte,
 	if st, err := tx.BucketStat(table); err == nil && st.Depth > 2 {
 		deepness = st.Depth - 2
 	}
-	// allSet is false when the range had fewer positions than n: surplus cursors
-	// are left at EOF, so a Current error below is end-of-prefix, not a fault.
+	// allSet is false when the range had fewer positions than n: the surplus
+	// cursors are left hollow, and Current() normalizes them to a nil key below.
 	allSet, err := mdbx.DistributeCursors(rawCursor(firstC), nil, cursors, deepness)
 	if err != nil {
 		return nil, err
@@ -950,12 +950,9 @@ func (tx *MdbxTx) DistributeCursors(table string, from []byte, n int) ([][]byte,
 	for _, cw := range wrappers {
 		k, _, err := cw.Current()
 		if err != nil {
-			if !allSet { // unset surplus cursor ends the set prefix
-				break
-			}
 			return nil, err
 		}
-		if k == nil {
+		if k == nil { // hollow surplus cursor: Current normalizes ENODATA to nil
 			break
 		}
 		keys = append(keys, k)
@@ -1615,7 +1612,7 @@ func (c *MdbxCursor) Prev() (k, v []byte, err error) {
 func (c *MdbxCursor) Current() ([]byte, []byte, error) {
 	k, v, err := c.c.Get(nil, nil, mdbx.GetCurrent)
 	if err != nil {
-		if mdbx.IsNotFound(err) {
+		if mdbx.IsNotFound(err) || mdbx.IsNoData(err) {
 			return nil, nil, nil
 		}
 		return []byte{}, nil, err
