@@ -2285,6 +2285,29 @@ func (sdb *IntraBlockState) MakeWriteSet(chainRules *chain.Rules, stateWriter St
 	return nil
 }
 
+// FinalizeTxVersioned finalizes a transaction on the parallel (versionMap) path
+// without materializing stateObjects for dirty tracking. It applies the
+// EIP-6780 same-tx create+selfdestruct storage wipe, captures the reconciled
+// write-set (reverting non-dirty addresses via the journal, not stateObject
+// existence), and clears the journal. It replaces the SoftFinalise +
+// MakeWriteSet pair used by the serial path.
+func (sdb *IntraBlockState) FinalizeTxVersioned() *WriteSet {
+	for addr, so := range sdb.stateObjects {
+		// EIP-6780 + EIP-7928: a SELFDESTRUCT against a same-tx created contract
+		// clears storage at end-of-tx, so the BAL must record the dirty slots as
+		// reads, not changes. Zero the storage writes so AsBlockAccessList folds
+		// them away via net-zero.
+		if so.selfdestructed && so.newlyCreated {
+			for key := range so.dirtyStorage {
+				sdb.recordWriteStorage(addr, key, uint256.Int{})
+			}
+		}
+	}
+	writes := sdb.VersionedWrites(true)
+	sdb.clearJournalAndRefund()
+	return writes
+}
+
 // MergeTxIOInto folds the current transaction's recorded reads, writes and
 // accesses into io at the current tx index, without building an intermediate
 // VersionedIO.

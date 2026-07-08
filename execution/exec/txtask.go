@@ -605,10 +605,12 @@ func (txTask *TxTask) Execute(evm *vm.EVM,
 			// afterwards.
 			result.ExecutionResult.SelfDestructedWithBalance = ibs.GetRemovedAccountsWithBalance()
 
-			// TODO these can be removed - use result instead
-			// Update the state with pending changes
-			ibs.SoftFinalise()
-			//txTask.Error = ibs.FinalizeTx(rules, noop)
+			// The versionMap path defers finalize to FinalizeTxVersioned below so
+			// the journal stays intact for write-set reconciliation. The serial
+			// path clears pending changes here.
+			if !ibs.IsVersioned() {
+				ibs.SoftFinalise()
+			}
 			result.Logs = ibs.GetLogs(txTask.TxIndex, txTask.TxHash(), txTask.BlockNumber(), txTask.BlockHash())
 		}
 
@@ -616,13 +618,17 @@ func (txTask *TxTask) Execute(evm *vm.EVM,
 	// Prepare read set, write set and balanceIncrease set and send for serialisation
 	if result.Err == nil {
 		txTask.BalanceIncreaseSet = ibs.BalanceIncreaseSet()
-		if err = ibs.MakeWriteSet(rules, stateWriter); err != nil {
-			panic(err)
+		if ibs.IsVersioned() && txTask.TxIndex >= 0 && !txTask.IsBlockEnd() {
+			result.TxOut = ibs.FinalizeTxVersioned()
+		} else {
+			if err = ibs.MakeWriteSet(rules, stateWriter); err != nil {
+				panic(err)
+			}
+			result.TxOut = txTask.VersionedWrites(ibs)
 		}
 
 		result.AccessedAddresses = ibs.AccessedAddresses()
 		result.TxIn = txTask.VersionedReads(ibs)
-		result.TxOut = txTask.VersionedWrites(ibs)
 	}
 
 	return &result
@@ -695,8 +701,11 @@ func (txTask *TxTask) executeAA(aaTxn *types.AccountAbstractionTransaction,
 
 	result.ExecutionResult.ReceiptGasUsed = gasUsed
 	result.ExecutionResult.BlockRegularGasUsed = gasUsed
-	// Update the state with pending changes
-	ibs.SoftFinalise()
+	// The versionMap path defers finalize to FinalizeTxVersioned so the journal
+	// stays intact for write-set reconciliation. The serial path clears here.
+	if !ibs.IsVersioned() {
+		ibs.SoftFinalise()
+	}
 	result.Logs = ibs.GetLogs(txTask.TxIndex, txTask.TxHash(), txTask.BlockNumber(), txTask.BlockHash())
 
 	log.Info("🚀[aa] executed AA bundle transaction", "txIndex", txTask.TxIndex, "status", status)
