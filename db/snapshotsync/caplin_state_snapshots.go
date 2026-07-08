@@ -693,6 +693,10 @@ func (v *CaplinStateView) VisibleSegment(slot uint64, tbl string) (*VisibleSegme
 // frozen yet.
 var errIncompleteStateRange = errors.New("state range not fully reconstructed")
 
+// fsyncGracePeriod lets the OS flush a freshly written .seg to disk before it is
+// mmap'd for index generation. A package var so tests can zero the wait.
+var fsyncGracePeriod = 15 * time.Second
+
 func dumpCaplinState(ctx context.Context, snapName string, kvGetter KeyValueGetter, fromSlot uint64, toSlot, blocksPerFile uint64, salt uint32, dirs datadir.Dirs, workers int, lvl log.Lvl, logger log.Logger, compress bool) error {
 	tmpDir, snapDir := dirs.Tmp, dirs.SnapCaplin
 
@@ -722,7 +726,12 @@ func dumpCaplinState(ctx context.Context, snapName string, kvGetter KeyValueGett
 			return err
 		}
 		if mustBeDense && len(dump) != length.Hash {
-			return fmt.Errorf("%w: %s slot %d has %d bytes", errIncompleteStateRange, snapName, i, len(dump))
+			// An empty entry is a not-yet-reconstructed slot (retry later); a
+			// non-empty entry of the wrong length is corruption (surface it).
+			if len(dump) != 0 {
+				return fmt.Errorf("%s slot %d: corrupt root, %d bytes (want %d)", snapName, i, len(dump), length.Hash)
+			}
+			return fmt.Errorf("%w: %s slot %d", errIncompleteStateRange, snapName, i)
 		}
 		if i%20_000 == 0 {
 			logger.Log(lvl, "Dumping "+snapName, "progress", i)
@@ -746,8 +755,7 @@ func dumpCaplinState(ctx context.Context, snapName string, kvGetter KeyValueGett
 	// Generate .idx file, which is the slot => offset mapping.
 	p := &background.Progress{}
 
-	// Ugly hack to wait for fsync
-	time.Sleep(15 * time.Second)
+	time.Sleep(fsyncGracePeriod)
 
 	return simpleIdx(ctx, f, salt, tmpDir, p, lvl, logger)
 }
