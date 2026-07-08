@@ -2395,7 +2395,7 @@ func (at *AggregatorRoTx) FileStream(name kv.Domain, fromTxNum, toTxNum uint64) 
 	return NewSegStreamReader(r, -1), nil
 }
 
-// AggregatorRoTx guarantee consistent View of files ("snapshots isolation" level https://en.wikipedia.org/wiki/Snapshot_isolation):
+// AggregatorRoTx guarantee consistent View of files ("serializable" isolation level https://en.wikipedia.org/wiki/Serializability):
 //   - long-living consistent view of all files (no limitations)
 //   - hiding garbage and files overlaps
 //   - protecting useful files from removal
