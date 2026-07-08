@@ -23,7 +23,6 @@ import (
 	"sync/atomic"
 
 	"github.com/go-chi/chi/v5"
-	"golang.org/x/sync/singleflight"
 
 	"github.com/erigontech/erigon/cl/aggregation"
 	"github.com/erigontech/erigon/cl/beacon/beacon_router_configuration"
@@ -112,7 +111,7 @@ type ApiHandler struct {
 	blobBundles                        *lru.Cache[common.Bytes48, BlobBundle] // Keep recent bundled blobs from the execution layer.
 	engine                             execution_client.ExecutionEngine
 	elClientVersion                    atomic.Pointer[engine_types.ClientVersionV1] // Cached execution client version for default graffiti.
-	elClientVersionGroup               singleflight.Group                           // Collapses concurrent first-time elClientVersion fetches.
+	elClientVersionFetching            atomic.Bool                                  // Guards a single in-flight background elClientVersion fetch.
 	syncMessagePool                    sync_contribution_pool.SyncContributionPool
 	committeeSub                       *committee_subscription.CommitteeSubscribeMgmt
 	attestationProducer                attestation_producer.AttestationDataProducer

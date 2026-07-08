@@ -182,9 +182,9 @@ func (c ClientVersionV1) String() string {
 	return fmt.Sprintf("ClientCode: %s, %s-%s-%s", c.Code, c.Name, c.Version, c.Commit)
 }
 
-// NewClientVersionV1 builds a ClientVersionV1 from a git commit hash, truncating
-// it to the leading 4 bytes as required by
-// https://github.com/ethereum/execution-apis/blob/main/src/engine/identification.md
+// NewClientVersionV1 builds a ClientVersionV1 from a git commit hash, using its leading
+// 4 bytes as required by the standard, or all-zero bytes when the hash is missing or too
+// short. See https://github.com/ethereum/execution-apis/blob/main/src/engine/identification.md
 func NewClientVersionV1(code, name, versionStr, gitCommit string) ClientVersionV1 {
 	commit := strings.TrimPrefix(gitCommit, "0x")
 	if len(commit) >= 8 {

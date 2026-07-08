@@ -22,6 +22,7 @@ import (
 	"errors"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
 	"go.uber.org/mock/gomock"
@@ -48,20 +49,28 @@ func TestGraffitiCommitPrefix(t *testing.T) {
 	require.Equal(t, "0000", graffitiCommitPrefix(""))
 }
 
-func TestDefaultGraffiti(t *testing.T) {
-	clCommit := graffitiCommitPrefix(version.GitCommit)
+func TestGraffitiClientCode(t *testing.T) {
+	require.Equal(t, "GE", graffitiClientCode("GE"))
+	require.Equal(t, "GE", graffitiClientCode("GETH"))
+	require.Equal(t, "N", graffitiClientCode("N"))
+}
 
-	t.Run("execution client version available", func(t *testing.T) {
+func TestFetchExecutionClientVersion(t *testing.T) {
+	t.Run("available is cached", func(t *testing.T) {
 		ctrl := gomock.NewController(t)
 		engine := execution_client.NewMockExecutionEngine(ctrl)
 		engine.EXPECT().GetClientVersionV1(gomock.Any(), gomock.Any()).
-			Return([]engine_types.ClientVersionV1{{Code: "GE", Commit: "0xc3d4e5f6"}}, nil)
+			Return([]engine_types.ClientVersionV1{{Code: "GE", Commit: "0xc3d4e5f6"}}, nil).
+			Times(1)
 
 		a := &ApiHandler{engine: engine, version: "1.2.3"}
-		require.Equal(t, "GEc3d4"+caplinClientCode+clCommit, graffitiText(a.defaultGraffiti(context.Background())))
+		a.fetchExecutionClientVersion()
+		got := a.elClientVersion.Load()
+		require.NotNil(t, got)
+		require.Equal(t, "GE", got.Code)
 	})
 
-	t.Run("method-not-found falls back to consensus-only and is cached", func(t *testing.T) {
+	t.Run("method-not-found is cached as unavailable", func(t *testing.T) {
 		ctrl := gomock.NewController(t)
 		engine := execution_client.NewMockExecutionEngine(ctrl)
 		engine.EXPECT().GetClientVersionV1(gomock.Any(), gomock.Any()).
@@ -69,13 +78,11 @@ func TestDefaultGraffiti(t *testing.T) {
 			Times(1)
 
 		a := &ApiHandler{engine: engine, version: "1.2.3"}
-		first := graffitiText(a.defaultGraffiti(context.Background()))
-		second := graffitiText(a.defaultGraffiti(context.Background()))
-		require.Equal(t, caplinClientCode+clCommit, first)
-		require.Equal(t, first, second)
+		a.fetchExecutionClientVersion()
+		require.Same(t, elClientVersionUnavailable, a.elClientVersion.Load())
 	})
 
-	t.Run("empty version list falls back to consensus-only and is cached", func(t *testing.T) {
+	t.Run("empty version list is cached as unavailable", func(t *testing.T) {
 		ctrl := gomock.NewController(t)
 		engine := execution_client.NewMockExecutionEngine(ctrl)
 		engine.EXPECT().GetClientVersionV1(gomock.Any(), gomock.Any()).
@@ -83,13 +90,11 @@ func TestDefaultGraffiti(t *testing.T) {
 			Times(1)
 
 		a := &ApiHandler{engine: engine, version: "1.2.3"}
-		first := graffitiText(a.defaultGraffiti(context.Background()))
-		second := graffitiText(a.defaultGraffiti(context.Background()))
-		require.Equal(t, caplinClientCode+clCommit, first)
-		require.Equal(t, first, second)
+		a.fetchExecutionClientVersion()
+		require.Same(t, elClientVersionUnavailable, a.elClientVersion.Load())
 	})
 
-	t.Run("transient error is not cached and is retried", func(t *testing.T) {
+	t.Run("transient error is not cached and a later fetch can succeed", func(t *testing.T) {
 		ctrl := gomock.NewController(t)
 		engine := execution_client.NewMockExecutionEngine(ctrl)
 		gomock.InOrder(
@@ -100,58 +105,85 @@ func TestDefaultGraffiti(t *testing.T) {
 		)
 
 		a := &ApiHandler{engine: engine, version: "1.2.3"}
-		require.Equal(t, caplinClientCode+clCommit, graffitiText(a.defaultGraffiti(context.Background())))
-		require.Equal(t, "GEc3d4"+caplinClientCode+clCommit, graffitiText(a.defaultGraffiti(context.Background())))
+		a.fetchExecutionClientVersion()
+		require.Nil(t, a.elClientVersion.Load())
+		a.fetchExecutionClientVersion()
+		got := a.elClientVersion.Load()
+		require.NotNil(t, got)
+		require.Equal(t, "GE", got.Code)
 	})
+}
 
-	t.Run("no engine falls back to consensus-only", func(t *testing.T) {
+func TestDefaultGraffiti(t *testing.T) {
+	clCommit := graffitiCommitPrefix(version.GitCommit)
+
+	t.Run("cached execution client version yields full graffiti", func(t *testing.T) {
 		a := &ApiHandler{version: "1.2.3"}
-		require.Equal(t, caplinClientCode+clCommit, graffitiText(a.defaultGraffiti(context.Background())))
+		a.elClientVersion.Store(&engine_types.ClientVersionV1{Code: "GE", Commit: "0xc3d4e5f6"})
+		require.Equal(t, "GEc3d4"+caplinClientCode+clCommit, graffitiText(a.defaultGraffiti()))
 	})
 
-	t.Run("concurrent first fetches are collapsed into one engine call", func(t *testing.T) {
+	t.Run("over-long execution client code is clamped to two bytes", func(t *testing.T) {
+		a := &ApiHandler{version: "1.2.3"}
+		a.elClientVersion.Store(&engine_types.ClientVersionV1{Code: "GETH", Commit: "0xc3d4e5f6"})
+		require.Equal(t, "GEc3d4"+caplinClientCode+clCommit, graffitiText(a.defaultGraffiti()))
+	})
+
+	t.Run("cached-unavailable yields consensus-only", func(t *testing.T) {
+		a := &ApiHandler{version: "1.2.3"}
+		a.elClientVersion.Store(elClientVersionUnavailable)
+		require.Equal(t, caplinClientCode+clCommit, graffitiText(a.defaultGraffiti()))
+	})
+
+	t.Run("no engine yields consensus-only", func(t *testing.T) {
+		a := &ApiHandler{version: "1.2.3"}
+		require.Equal(t, caplinClientCode+clCommit, graffitiText(a.defaultGraffiti()))
+	})
+
+	t.Run("cold cache does not block and fills asynchronously", func(t *testing.T) {
 		ctrl := gomock.NewController(t)
 		engine := execution_client.NewMockExecutionEngine(ctrl)
-		entered := make(chan struct{})
 		release := make(chan struct{})
 		engine.EXPECT().GetClientVersionV1(gomock.Any(), gomock.Any()).
 			DoAndReturn(func(context.Context, *engine_types.ClientVersionV1) ([]engine_types.ClientVersionV1, error) {
-				close(entered)
 				<-release
 				return []engine_types.ClientVersionV1{{Code: "GE", Commit: "0xc3d4e5f6"}}, nil
 			}).
 			Times(1)
 
 		a := &ApiHandler{engine: engine, version: "1.2.3"}
-		const n = 16
-		var wg sync.WaitGroup
-		results := make([]string, n)
-		for i := 0; i < n; i++ {
-			wg.Add(1)
-			go func(i int) {
-				defer wg.Done()
-				results[i] = graffitiText(a.defaultGraffiti(context.Background()))
-			}(i)
-		}
-		<-entered
+		// Returns immediately with consensus-only graffiti while the engine call is still blocked.
+		require.Equal(t, caplinClientCode+clCommit, graffitiText(a.defaultGraffiti()))
 		close(release)
-		wg.Wait()
-		for _, r := range results {
-			require.Equal(t, "GEc3d4"+caplinClientCode+clCommit, r)
-		}
+		require.Eventually(t, func() bool {
+			return graffitiText(a.defaultGraffiti()) == "GEc3d4"+caplinClientCode+clCommit
+		}, time.Second, time.Millisecond)
 	})
 
-	t.Run("execution client version is cached across calls", func(t *testing.T) {
+	t.Run("concurrent cold-cache proposals trigger at most one fetch", func(t *testing.T) {
 		ctrl := gomock.NewController(t)
 		engine := execution_client.NewMockExecutionEngine(ctrl)
+		release := make(chan struct{})
 		engine.EXPECT().GetClientVersionV1(gomock.Any(), gomock.Any()).
-			Return([]engine_types.ClientVersionV1{{Code: "GE", Commit: "0xc3d4e5f6"}}, nil).
+			DoAndReturn(func(context.Context, *engine_types.ClientVersionV1) ([]engine_types.ClientVersionV1, error) {
+				<-release
+				return []engine_types.ClientVersionV1{{Code: "GE", Commit: "0xc3d4e5f6"}}, nil
+			}).
 			Times(1)
 
 		a := &ApiHandler{engine: engine, version: "1.2.3"}
-		first := graffitiText(a.defaultGraffiti(context.Background()))
-		second := graffitiText(a.defaultGraffiti(context.Background()))
-		require.Equal(t, first, second)
-		require.Equal(t, "GEc3d4"+caplinClientCode+clCommit, second)
+		var wg sync.WaitGroup
+		for i := 0; i < 16; i++ {
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				_ = a.defaultGraffiti()
+			}()
+		}
+		wg.Wait() // returns while the engine call is still blocked, proving proposals never block on it
+		close(release)
+		require.Eventually(t, func() bool {
+			return graffitiText(a.defaultGraffiti()) == "GEc3d4"+caplinClientCode+clCommit
+		}, time.Second, time.Millisecond)
 	})
 }

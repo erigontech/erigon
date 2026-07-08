@@ -262,7 +262,7 @@ func (e *EngineServer) GetPayloadBodiesByRangeV2(ctx context.Context, start, cou
 // See https://github.com/ethereum/execution-apis/blob/main/src/engine/identification.md#engine_getclientversionv1
 func (e *EngineServer) GetClientVersionV1(ctx context.Context, callerVersion *engine_types.ClientVersionV1) ([]engine_types.ClientVersionV1, error) {
 	if callerVersion != nil {
-		e.logger.Info("[GetClientVersionV1] Received request from" + callerVersion.String())
+		e.logger.Info("[GetClientVersionV1] Received request from " + callerVersion.String())
 	}
 	return []engine_types.ClientVersionV1{engine_types.LocalClientVersionV1()}, nil
 }
