@@ -228,7 +228,7 @@ func (a *aggregateAndProofServiceImpl) ProcessMessage(
 		highestSeen := a.forkchoiceStore.HighestSeen()
 		prevEpoch, currEpoch := validationEpochRange(headState, highestSeen, highestSeen, a.beaconCfg.SlotsPerEpoch)
 		if epoch < prevEpoch || epoch > currEpoch {
-			return fmt.Errorf("%w: epoch is not in previous or current epoch: %d (prev=%d, curr=%d)", ErrIgnore, epoch, prevEpoch, currEpoch)
+			return fmt.Errorf("%w: epoch outside validation range: %d (prev=%d, curr=%d)", ErrIgnore, epoch, prevEpoch, currEpoch)
 		}
 
 		// [REJECT] The committee index is within the expected range -- i.e. index < get_committee_count_per_slot(state, aggregate.data.target.epoch).

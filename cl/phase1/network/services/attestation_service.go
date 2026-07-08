@@ -315,7 +315,7 @@ func (s *attestationService) ProcessMessage(ctx context.Context, subnet *uint64,
 	blockHeader, ok := s.forkchoiceStore.GetHeader(root)
 	if !ok {
 		//s.scheduleAttestationForLaterProcessing(att)
-		return ErrIgnore
+		return fmt.Errorf("%w: block not seen: %v", ErrIgnore, root)
 	}
 
 	// [New in Gloas] [REJECT] attestation.data.index == 0 if block.slot == attestation.data.slot

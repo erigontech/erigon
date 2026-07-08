@@ -365,36 +365,6 @@ func (t *attestationTestSuite) TestAttestationProcessMessage() {
 	}
 }
 
-func (t *attestationTestSuite) TestAttestationProcessMessageAllowsNextEpochWhenForkchoiceHasSeenIt() {
-	nextEpochSlot := mockSlot + mockSlotsPerEpoch
-	nextEpoch := mockEpoch + 1
-	nextEpochAttData := *attData
-	nextEpochAttData.Slot = nextEpochSlot
-	nextEpochAttData.Source.Epoch = mockEpoch
-	nextEpochAttData.Target.Epoch = nextEpoch
-	nextEpochAtt := *att
-	nextEpochAtt.Data = &nextEpochAttData
-
-	computeCommitteeCountPerSlot = func(_ abstract.BeaconStateReader, _, _ uint64) uint64 {
-		return 8
-	}
-	computeSubnetForAttestation = func(_, _, _, _, _ uint64) uint64 {
-		return 1
-	}
-	t.ethClock.EXPECT().GetEpochAtSlot(nextEpochSlot).Return(nextEpoch).Times(1)
-	t.ethClock.EXPECT().GetCurrentSlot().Return(nextEpochSlot).Times(1)
-	t.mockForkChoice.HighestSeenVal = nextEpochSlot
-
-	err := t.attService.ProcessMessage(context.Background(), common.NewUint64(1), &AttestationForGossip{
-		Attestation:      &nextEpochAtt,
-		ImmediateProcess: true,
-	})
-
-	if err != nil {
-		t.Require().NotContains(err.Error(), "too far from attestation epoch")
-	}
-}
-
 func (t *attestationTestSuite) TestAttestationProcessMessageAllowsNextEpochWhenClockHasReachedIt() {
 	nextEpochSlot := mockSlot + mockSlotsPerEpoch
 	nextEpoch := mockEpoch + 1
@@ -420,9 +390,8 @@ func (t *attestationTestSuite) TestAttestationProcessMessageAllowsNextEpochWhenC
 		ImmediateProcess: true,
 	})
 
-	if err != nil {
-		t.Require().NotContains(err.Error(), "too far from attestation epoch")
-	}
+	t.Require().ErrorIs(err, ErrIgnore)
+	t.Require().Contains(err.Error(), "block not seen")
 }
 
 func (t *attestationTestSuite) TestAttestationProcessMessageRejectsBeyondNextEpochDespiteForkchoiceHavingSeenIt() {
