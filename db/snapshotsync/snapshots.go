@@ -1203,14 +1203,19 @@ func (s *RoSnapshots) Close() {
 	}
 	s.dirtyLock.Lock()
 	defer s.dirtyLock.Unlock()
-	defer s.recalcVisibleFiles(s.alignMin, nil)
 
 	detached := s.detachNotInList(nil)
-	// Close fds only when no reader still pins the current generation; closing a segment
+
+	// Publish the empty generation before reading the outgoing one's refcnt, so a concurrent
+	// lock-free View() re-check fails its pin on it and retries onto the empty generation.
+	prev := s.visible.Load()
+	s.recalcVisibleFiles(s.alignMin, nil)
+
+	// Close fds only when no reader still pins the outgoing generation; closing a segment
 	// a live View holds would nil its Decompressor out from under that reader. At shutdown
 	// leaking the fds is preferable to that use-after-close.
-	if v := s.visible.Load(); v != nil && v.refcnt.Load() != 0 {
-		s.logger.Warn("[snapshots] Close called with live readers; leaving fds open", "refcnt", v.refcnt.Load())
+	if prev != nil && prev.refcnt.Load() != 0 {
+		s.logger.Warn("[snapshots] Close called with live readers; leaving fds open", "refcnt", prev.refcnt.Load())
 	} else {
 		for _, sn := range detached {
 			sn.close()
