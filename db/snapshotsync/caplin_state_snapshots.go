@@ -29,7 +29,6 @@ import (
 	"strings"
 	"sync"
 	"sync/atomic"
-	"time"
 
 	"github.com/tidwall/btree"
 
@@ -693,10 +692,6 @@ func (v *CaplinStateView) VisibleSegment(slot uint64, tbl string) (*VisibleSegme
 // frozen yet.
 var errIncompleteStateRange = errors.New("state range not fully reconstructed")
 
-// fsyncGracePeriod lets the OS flush a freshly written .seg to disk before it is
-// mmap'd for index generation. A package var so tests can zero the wait.
-var fsyncGracePeriod = 15 * time.Second
-
 func dumpCaplinState(ctx context.Context, snapName string, kvGetter KeyValueGetter, fromSlot uint64, toSlot, blocksPerFile uint64, salt uint32, dirs datadir.Dirs, workers int, lvl log.Lvl, logger log.Logger, compress bool) error {
 	tmpDir, snapDir := dirs.Tmp, dirs.SnapCaplin
 
@@ -754,8 +749,6 @@ func dumpCaplinState(ctx context.Context, snapName string, kvGetter KeyValueGett
 	}
 	// Generate .idx file, which is the slot => offset mapping.
 	p := &background.Progress{}
-
-	time.Sleep(fsyncGracePeriod)
 
 	return simpleIdx(ctx, f, salt, tmpDir, p, lvl, logger)
 }
