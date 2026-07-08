@@ -90,16 +90,25 @@ func (rs *StateV3) applyUpdates(roTx kv.TemporalTx, blockNum, txNum uint64, stat
 				}
 
 				if update.code != nil {
-					if dbg.TraceApply && (rs.trace || dbg.TraceAccount(update.address.Handle())) {
-						code := update.code
-						if len(code) > 40 {
-							code = code[:40]
-						}
-						fmt.Printf("%d apply:put code: %x %x\n", blockNum, update.address, code)
-					}
 					address := update.address.Value()
-					if err = domains.DomainPut(kv.CodeDomain, roTx, address[:], update.code, txNum, nil); err != nil {
-						return false
+					if len(update.code) == 0 {
+						if dbg.TraceApply && (rs.trace || dbg.TraceAccount(update.address.Handle())) {
+							fmt.Printf("%d apply:del code: %x\n", blockNum, update.address)
+						}
+						if err = domains.DomainDel(kv.CodeDomain, roTx, address[:], txNum, nil); err != nil {
+							return false
+						}
+					} else {
+						if dbg.TraceApply && (rs.trace || dbg.TraceAccount(update.address.Handle())) {
+							code := update.code
+							if len(code) > 40 {
+								code = code[:40]
+							}
+							fmt.Printf("%d apply:put code: %x %x\n", blockNum, update.address, code)
+						}
+						if err = domains.DomainPut(kv.CodeDomain, roTx, address[:], update.code, txNum, nil); err != nil {
+							return false
+						}
 					}
 				}
 
@@ -495,6 +504,12 @@ func (w *BufferedWriter) UpdateAccountCode(address accounts.Address, incarnation
 	if w.accumulator != nil {
 		w.accumulator.ChangeCode(address.Value(), incarnation, code)
 	}
+	if code == nil {
+		// nil marks "code untouched" in stateUpdate/bufferedAccount; a non-nil
+		// empty slice keeps a clear-to-empty distinguishable so applyUpdates
+		// deletes the stale CodeDomain entry.
+		code = []byte{}
+	}
 
 	if update, ok := w.writeSet.Get(&stateUpdate{address: address}); !ok {
 		w.writeSet.Set(&stateUpdate{&bufferedAccount{code: code}, address, false})
@@ -650,7 +665,11 @@ func (w *Writer) UpdateAccountCode(address accounts.Address, incarnation uint64,
 		fmt.Printf("code: %x, %x, valLen: %d\n", address, codeHash, len(code))
 	}
 	addressValue := address.Value()
-	if err := w.tx.DomainPut(kv.CodeDomain, addressValue[:], code, w.txNum, nil); err != nil {
+	if len(code) == 0 {
+		if err := w.tx.DomainDel(kv.CodeDomain, addressValue[:], w.txNum, nil); err != nil {
+			return err
+		}
+	} else if err := w.tx.DomainPut(kv.CodeDomain, addressValue[:], code, w.txNum, nil); err != nil {
 		return err
 	}
 	if w.accumulator != nil {
