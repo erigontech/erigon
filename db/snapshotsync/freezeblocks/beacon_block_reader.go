@@ -34,10 +34,6 @@ import (
 	"github.com/erigontech/erigon/execution/types"
 )
 
-var buffersPool = sync.Pool{
-	New: func() any { return &bytes.Buffer{} },
-}
-
 var decompressorPool = sync.Pool{
 	New: func() any {
 		r, err := zstd.NewReader(nil)
@@ -135,16 +131,11 @@ func (r *beaconSnapshotReader) ReadBlockBySlot(ctx context.Context, tx kv.Tx, sl
 	}
 
 	// Decompress this thing
-	buffer := buffersPool.Get().(*bytes.Buffer)
-	defer buffersPool.Put(buffer)
-
-	buffer.Reset()
-	buffer.Write(buf)
 	reader := decompressorPool.Get().(*zstd.Decoder)
 	defer decompressorPool.Put(reader)
-	reader.Reset(buffer)
+	reader.Reset(bytes.NewReader(buf))
 
-	// Use pooled buffers and readers to avoid allocations.
+	// Use pooled readers to avoid allocations.
 	return snapshot_format.ReadBlockFromSnapshot(reader, r.eth1Getter, r.cfg)
 }
 
@@ -197,16 +188,11 @@ func (r *beaconSnapshotReader) ReadBeaconBlockBodyBySlot(ctx context.Context, tx
 	}
 
 	// Decompress this thing
-	buffer := buffersPool.Get().(*bytes.Buffer)
-	defer buffersPool.Put(buffer)
-
-	buffer.Reset()
-	buffer.Write(buf)
 	reader := decompressorPool.Get().(*zstd.Decoder)
 	defer decompressorPool.Put(reader)
-	reader.Reset(buffer)
+	reader.Reset(bytes.NewReader(buf))
 
-	// Use pooled buffers and readers to avoid allocations.
+	// Use pooled readers to avoid allocations.
 	return snapshot_format.ReadBeaconBlockBodyFromSnapshot(reader, r.cfg)
 }
 
@@ -275,16 +261,11 @@ func (r *beaconSnapshotReader) ReadBlockByRoot(ctx context.Context, tx kv.Tx, ro
 		return nil, nil
 	}
 	// Decompress this thing
-	buffer := buffersPool.Get().(*bytes.Buffer)
-	defer buffersPool.Put(buffer)
-
-	buffer.Reset()
-	buffer.Write(buf)
 	reader := decompressorPool.Get().(*zstd.Decoder)
 	defer decompressorPool.Put(reader)
-	reader.Reset(buffer)
+	reader.Reset(bytes.NewReader(buf))
 
-	// Use pooled buffers and readers to avoid allocations.
+	// Use pooled readers to avoid allocations.
 	return snapshot_format.ReadBlockFromSnapshot(reader, r.eth1Getter, r.cfg)
 }
 
@@ -315,6 +296,5 @@ func (r *beaconSnapshotReader) ReadHeaderByRoot(ctx context.Context, tx kv.Tx, r
 	}
 
 	h, _, _, err := r.sn.ReadHeader(*slot, tx)
-	// Use pooled buffers and readers to avoid allocations.
 	return h, err
 }
