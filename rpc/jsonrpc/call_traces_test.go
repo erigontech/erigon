@@ -18,6 +18,7 @@ package jsonrpc
 
 import (
 	"context"
+	"math/big"
 	"sync"
 	"testing"
 
@@ -378,4 +379,36 @@ func TestFilterRejectedBlockOverrideReturnsError(t *testing.T) {
 		BlockOverrides: &ethapi.BlockOverrides{BeaconRoot: &beaconRoot},
 	}, stream)
 	require.Error(t, err)
+}
+
+// TestFilterSignerReflectsBlockOverridesNumber is filterV3's analogue of
+// TestReplayTransactionSignerReflectsBlockOverridesNumber: filterV3 derives
+// fork rules (lastRules) from the overridden BlockContext but must also
+// recompute lastSigner from it, not from the block's real number. filterV3
+// reports per-transaction failures as an "error" field inside the stream
+// rather than as a Go error, so the assertion inspects the stream contents.
+func TestFilterSignerReflectsBlockOverridesNumber(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow test")
+	}
+
+	c := newBaseFeeTestChain(t, delayedSpuriousDragonConfig())
+	c.mineProtectedTxAtBlock3(t)
+	api := c.traceAPI()
+
+	n := rpc.BlockNumber(3)
+	traceReq := TraceFilterRequest{
+		FromBlock: &rpc.BlockNumberOrHash{BlockNumber: &n},
+		ToBlock:   &rpc.BlockNumberOrHash{BlockNumber: &n},
+		ToAddress: []*common.Address{&c.bankAddress},
+	}
+
+	s := jsoniter.ConfigDefault.BorrowStream(nil)
+	defer jsoniter.ConfigDefault.ReturnStream(s)
+	stream := jsonstream.Wrap(s)
+	err := api.Filter(context.Background(), traceReq, new(bool), &config.TraceConfig{
+		BlockOverrides: &ethapi.BlockOverrides{Number: (*hexutil.Big)(big.NewInt(1))},
+	}, stream)
+	require.NoError(t, err)
+	require.Contains(t, string(stream.Buffer()), "protected txn is not supported by signer")
 }

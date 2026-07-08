@@ -1001,3 +1001,71 @@ func TestReplayBlockTransactionsParallelPathBlockOverridesOtherFieldsAffectOpcod
 		})
 	}
 }
+
+// delayedSpuriousDragonConfig activates every fork through Tangerine Whistle
+// at genesis but delays Spurious Dragon (which makes EIP-155-protected
+// transactions mandatory) to block 3, so tests can probe the
+// Homestead/Spurious-Dragon signer boundary.
+func delayedSpuriousDragonConfig() *chain.Config {
+	return &chain.Config{
+		ChainID:               uint256.NewInt(1337),
+		Rules:                 chain.EtHashRules,
+		HomesteadBlock:        common.NewUint64(0),
+		TangerineWhistleBlock: common.NewUint64(0),
+		SpuriousDragonBlock:   common.NewUint64(3),
+		Ethash:                new(chain.EthashConfig),
+	}
+}
+
+// mineProtectedTxAtBlock3 mines two empty blocks (still pre-Spurious Dragon)
+// then a third block, exactly at Spurious Dragon activation, containing a
+// single EIP-155-protected bank-to-bank transfer. Blocks 1-2 are left empty
+// so real block validation (which correctly uses each block's own number)
+// never has to recover a protected transaction under a signer that rejects
+// it. Returns the transfer's hash.
+func (c *baseFeeTestChain) mineProtectedTxAtBlock3(t *testing.T) common.Hash {
+	t.Helper()
+
+	c.mineBlock(t, func(*blockgen.BlockGen) {})
+	c.mineBlock(t, func(*blockgen.BlockGen) {})
+
+	var txHash common.Hash
+	c.mineBlock(t, func(block *blockgen.BlockGen) {
+		nonce := block.TxNonce(c.bankAddress)
+		tx, err := types.SignTx(&types.LegacyTx{
+			CommonTx: types.CommonTx{
+				Nonce:    nonce,
+				To:       &c.bankAddress,
+				GasLimit: 21_000,
+			},
+			GasPrice: *uint256.NewInt(1_000_000_000),
+		}, *c.signer, c.bankKey)
+		require.NoError(t, err)
+		block.AddTx(tx)
+		txHash = tx.Hash()
+	})
+	require.EqualValues(t, 3, c.head.NumberU64())
+	return txHash
+}
+
+// TestReplayTransactionSignerReflectsBlockOverridesNumber reproduces a bug
+// where callTransaction derived fork rules from the BlockOverrides-adjusted
+// BlockContext but recovered the transaction sender with a signer built from
+// the block's real, un-overridden number. Replaying an EIP-155-protected
+// transaction while overriding the block number back before Spurious Dragon
+// must fail: a protected legacy transaction cannot be validly interpreted
+// under a signer that predates EIP-155.
+func TestReplayTransactionSignerReflectsBlockOverridesNumber(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow test")
+	}
+
+	c := newBaseFeeTestChain(t, delayedSpuriousDragonConfig())
+	txHash := c.mineProtectedTxAtBlock3(t)
+
+	api := c.traceAPI()
+	_, err := api.ReplayTransaction(context.Background(), txHash, []string{"trace"}, new(bool), &config.TraceConfig{
+		BlockOverrides: &ethapi.BlockOverrides{Number: (*hexutil.Big)(big.NewInt(1))},
+	})
+	require.ErrorContains(t, err, "protected txn is not supported by signer")
+}

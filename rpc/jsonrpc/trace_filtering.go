@@ -112,9 +112,8 @@ func (api *TraceAPIImpl) Transaction(ctx context.Context, txHash common.Hash, ga
 
 	bn := hexutil.Uint64(blockNumber)
 	hash := header.Hash()
-	signer := types.MakeSigner(chainConfig, blockNumber, header.Time)
 	// Returns an array of trace arrays, one trace array for each transaction
-	trace, err := api.callTransaction(ctx, tx, header, []string{TraceTypeTrace}, txIndex, *gasBailOut, signer, chainConfig, traceConfig)
+	trace, err := api.callTransaction(ctx, tx, header, []string{TraceTypeTrace}, txIndex, *gasBailOut, chainConfig, traceConfig)
 	if err != nil {
 		return nil, err
 	}
@@ -224,8 +223,7 @@ func (api *TraceAPIImpl) Block(ctx context.Context, blockNr rpc.BlockNumber, gas
 	if err != nil {
 		return nil, err
 	}
-	signer := types.MakeSigner(cfg, blockNum, block.Time())
-	traces, wdiffs, syscall, err := api.callBlock(ctx, tx, block, []string{TraceTypeTrace}, *gasBailOut /* gasBailOut */, signer, cfg, traceConfig)
+	traces, wdiffs, syscall, err := api.callBlock(ctx, tx, block, []string{TraceTypeTrace}, *gasBailOut /* gasBailOut */, cfg, traceConfig)
 	if err != nil {
 		return nil, err
 	}
@@ -480,11 +478,11 @@ func (api *TraceAPIImpl) filterV3(ctx context.Context, dbtx kv.TemporalTx, fromB
 			}
 
 			lastBlockHash = lastHeader.Hash()
-			lastSigner = types.MakeSigner(chainConfig, blockNum, lastHeader.Time)
 			blockCtx := transactions.NewEVMBlockContext(engine, lastHeader, true /* requireCanonical */, dbtx, api._blockReader, chainConfig)
 			if err := overrideBlockContext(traceConfig, &blockCtx); err != nil {
 				return err
 			}
+			lastSigner = types.MakeSigner(chainConfig, blockCtx.BlockNumber, blockCtx.Time)
 			lastRules = blockCtx.Rules(chainConfig)
 			lastBaseFee = blockCtx.BaseFee
 		}
@@ -776,7 +774,6 @@ func (api *TraceAPIImpl) callBlock(
 	block *types.Block,
 	traceTypes []string,
 	gasBailOut bool,
-	signer *types.Signer,
 	cfg *chain.Config,
 	traceConfig *config.TraceConfig,
 ) ([]*TraceCallResult, []withdrawalBalanceDiff, protocolrules.SystemCall, error) {
@@ -794,6 +791,7 @@ func (api *TraceAPIImpl) callBlock(
 		return nil, nil, nil, err
 	}
 	rules := blockCtx.Rules(cfg)
+	signer := types.MakeSigner(cfg, blockCtx.BlockNumber, blockCtx.Time)
 	txs := block.Transactions()
 	var borStateSyncTxn types.Transaction
 	var borStateSyncTxnHash common.Hash
@@ -1111,7 +1109,6 @@ func (api *TraceAPIImpl) callTransaction(
 	traceTypes []string,
 	txIndex int,
 	gasBailOut bool,
-	signer *types.Signer,
 	cfg *chain.Config,
 	traceConfig *config.TraceConfig,
 ) (*TraceCallResult, error) {
@@ -1128,6 +1125,7 @@ func (api *TraceAPIImpl) callTransaction(
 		return nil, err
 	}
 	rules := blockCtx.Rules(cfg)
+	signer := types.MakeSigner(cfg, blockCtx.BlockNumber, blockCtx.Time)
 	var txn types.Transaction
 	var borStateSyncTxnHash common.Hash
 	isBorStateSyncTxn := txIndex == -1 && cfg.Bor != nil
