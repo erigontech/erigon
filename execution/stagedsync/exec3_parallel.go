@@ -3039,4 +3039,3 @@ func (be *blockExecutor) scheduleExecution(ctx context.Context, pe *parallelExec
 func MergeVersionedWrites(prev, next *state.WriteSet) *state.WriteSet {
 	return prev.Merge(next)
 }
-

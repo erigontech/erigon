@@ -69,19 +69,17 @@ func (rs *StateV3) SetTxNum(txNum uint64) {
 	rs.txNum = txNum
 }
 
-// applyVersionedWrites applies a VersionedWrites slice directly to the shared
-// domains without any intermediate BTree representation.
+// Apply writes this (already-Normalized) write-set directly to the shared
+// domains, no intermediate BTree — the single write-set commit path shared by
+// the parallel executor and block production. trace gates the dbg.TraceApply
+// logging StateV3 used to read from its own flag.
 //
-// Writes from versionedWriteCollector carry complete account state (all fields
-// emitted by UpdateAccountData), so no domain reads are needed to reconstruct
-// the full serialised account. SelfDestructPath=true signals either:
+// Writes carry complete account state (all fields emitted by UpdateAccountData),
+// so no domain reads are needed to reconstruct the full serialised account.
+// SelfDestructPath=true signals either:
 //   - pure account deletion (no account fields follow) — from DeleteAccount
 //   - code+storage cleanup before recreation — from UpdateAccountData when
 //     original.Incarnation > account.Incarnation (followed by account fields)
-// Apply writes this (already-Normalized) write-set to the SharedDomains — the
-// single write-set commit path shared by the parallel executor and block
-// production. trace gates the dbg.TraceApply logging that StateV3 used to read
-// from its own flag.
 func (writes *WriteSet) Apply(domains *execctx.SharedDomains, roTx kv.TemporalTx, blockNum, txNum uint64, balanceIncreases map[accounts.Address]uint256.Int, rules *chain.Rules, blockCache *BlockStateCache, trace bool) error {
 	if writes != nil && !writes.IsEmpty() {
 		type addrState struct {
