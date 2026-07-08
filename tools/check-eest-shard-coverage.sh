@@ -6,7 +6,7 @@
 # manifests (.meta/index.json); nothing is hard-coded:
 #
 #   1. partition (stable): the fork-split families each run every fork exactly
-#      once — spec race shards (run-eest-spec-test.sh, blocktest --run) over
+#      once — spec race shards (eest-spec-shards.yml `run` regexes) over
 #      blockchain_test, and hive consume-engine (test-hive-eest.yml sim-limit)
 #      over blockchain_test_engine. A gap silently never runs a fork; an overlap
 #      runs it twice.
@@ -28,7 +28,7 @@ set -euo pipefail
 here=$(cd "$(dirname "$0")/.." && pwd)
 stable_index="${1:-$here/test-fixtures-cache/eest_stable/fixtures/.meta/index.json}"
 devnet_index="${2:-$here/test-fixtures-cache/eest_devnet/fixtures/.meta/index.json}"
-runner="$here/tools/run-eest-spec-test.sh"
+shards="$here/tools/eest-spec-shards.yml"
 hive="$here/.github/workflows/test-hive-eest.yml"
 
 for tool in jq yq awk; do
@@ -36,12 +36,16 @@ for tool in jq yq awk; do
 done
 [[ -f "$stable_index" ]] || { echo "check-eest-shard-coverage: stable index not found: $stable_index" >&2; exit 1; }
 
-# Live regexes, one "shard=regex" per line, parsed from the shard definitions.
+# Live regexes, one "route=regex" per line, read from the shard manifest's `run`
+# keys. -sequential/-parallel variants of a fork carry the same regex, so strip
+# the mode suffix and dedupe to one entry per fork route.
 race_regexes() {
-	awk '
-		/blocktests-stable-race-[a-z0-9-]+\)/ { n=$0; sub(/.*blocktests-stable-race-/,"",n); sub(/\).*/,"",n) }
-		n!="" && /--run/ { r=$0; sub(/.*--run '\''/,"",r); sub(/'\''.*/,"",r); print n"="r; n="" }
-	' "$runner"
+	yq -o=json '.' "$shards" \
+		| jq -r '.[]
+			| select(.shard | test("^blocktests-stable-race-"))
+			| select(.run)
+			| "\(.shard | sub("^blocktests-stable-race-"; "") | sub("-(sequential|parallel)$"; ""))=\(.run)"' \
+		| sort -u
 }
 hive_consume_engine_regexes() {
 	yq -o=json '.jobs.test-hive-eest.strategy.matrix.include' "$hive" \
@@ -139,6 +143,6 @@ fi
 if (( rc == 0 )); then
 	echo "EEST shard coverage OK."
 else
-	echo "EEST shard coverage FAILED: fix the regexes in tools/run-eest-spec-test.sh and/or .github/workflows/test-hive-eest.yml." >&2
+	echo "EEST shard coverage FAILED: fix the race run regexes in tools/eest-spec-shards.yml and/or the hive sim-limit in .github/workflows/test-hive-eest.yml." >&2
 fi
 exit $rc
