@@ -12,16 +12,31 @@ type ExecutionStat struct {
 	Duration    time.Duration
 }
 
+// execStatusList tracks per-tx scheduling state for one block. pending/deferred
+// stay sorted []int (populated in-order, popped from the front). complete and
+// inProgress use dense []bool membership because completions arrive out of tx
+// order across workers — a sorted-slice insert/delete there is O(n) per event,
+// O(n²) over a block, which dominates high-tx-count (e.g. ether_transfers) blocks.
 type execStatusList struct {
 	pending    []int
-	inProgress []int
 	deferred   []int // txs whose retry waits on a directed-delay predicate
-	complete   []int
+	inProg     []bool
+	comp       []bool
 	dependency map[int]map[int]bool
 	blocker    map[int]map[int]bool
-	// completeUpTo caches the contiguous-from-zero complete count so maxComplete
-	// is O(1) on the coordinator's per-result critical path. completeUpTo-1 == maxComplete.
+	inProgCnt  int
+	compCnt    int
+	// completeUpTo-1 == maxComplete: the contiguous-from-zero complete prefix, O(1).
 	completeUpTo int
+}
+
+func (m *execStatusList) ensureLen(tx int) {
+	if tx < len(m.comp) {
+		return
+	}
+	grow := tx + 1 - len(m.comp)
+	m.comp = append(m.comp, make([]bool, grow)...)
+	m.inProg = append(m.inProg, make([]bool, grow)...)
 }
 
 func insertInList(l []int, v int) []int {
@@ -46,7 +61,11 @@ func (m *execStatusList) takeNextPending() int {
 
 	x := m.pending[0]
 	m.pending = m.pending[1:]
-	m.inProgress = insertInList(m.inProgress, x)
+	m.ensureLen(x)
+	if !m.inProg[x] {
+		m.inProg[x] = true
+		m.inProgCnt++
+	}
 
 	return x
 }
@@ -56,6 +75,7 @@ func (m execStatusList) maxComplete() int {
 }
 
 func (m *execStatusList) pushPending(tx int) {
+	m.ensureLen(tx)
 	m.pending = insertInList(m.pending, tx)
 }
 
@@ -90,19 +110,25 @@ func (m *execStatusList) drainDeferredIfReady(ready func(tx int) bool) {
 	m.deferred = kept
 }
 
-func (m *execStatusList) inProgressCount() int { return len(m.inProgress) }
+func (m *execStatusList) inProgressCount() int { return m.inProgCnt }
 
 // minInProgress returns the lowest in-progress tx index, or -1 if empty.
+// Cold path: only reached while deferred tasks exist (conflict workloads).
 func (m *execStatusList) minInProgress() int {
-	if len(m.inProgress) == 0 {
+	if m.inProgCnt == 0 {
 		return -1
 	}
-	return m.inProgress[0]
+	for i, v := range m.inProg {
+		if v {
+			return i
+		}
+	}
+	return -1
 }
 
 func removeFromList(l []int, v int, expect bool) []int {
 	x := sort.SearchInts(l, v)
-	if x == -1 || l[x] != v {
+	if x == -1 || x >= len(l) || l[x] != v {
 		if expect {
 			panic(errors.New("should not happen - element expected in list"))
 		}
@@ -121,10 +147,17 @@ func removeFromList(l []int, v int, expect bool) []int {
 }
 
 func (m *execStatusList) markComplete(tx int) {
-	m.inProgress = removeFromList(m.inProgress, tx, true)
-	m.complete = insertInList(m.complete, tx)
+	m.ensureLen(tx)
+	if m.inProg[tx] {
+		m.inProg[tx] = false
+		m.inProgCnt--
+	}
+	if !m.comp[tx] {
+		m.comp[tx] = true
+		m.compCnt++
+	}
 	if tx == m.completeUpTo {
-		for m.checkComplete(m.completeUpTo) {
+		for m.completeUpTo < len(m.comp) && m.comp[m.completeUpTo] {
 			m.completeUpTo++
 		}
 	}
@@ -139,7 +172,7 @@ func (m *execStatusList) minPending() int {
 }
 
 func (m *execStatusList) countComplete() int {
-	return len(m.complete)
+	return m.compCnt
 }
 
 func (m *execStatusList) addDependency(blocker int, dependent int) bool {
@@ -204,16 +237,16 @@ func (m *execStatusList) removeDependency(tx int) {
 }
 
 func (m *execStatusList) clearInProgress(tx int) {
-	m.inProgress = removeFromList(m.inProgress, tx, true)
+	if tx < len(m.inProg) && m.inProg[tx] {
+		m.inProg[tx] = false
+		m.inProgCnt--
+	} else if tx >= len(m.inProg) {
+		panic(errors.New("should not happen - element expected in list"))
+	}
 }
 
 func (m *execStatusList) checkInProgress(tx int) bool {
-	x := sort.SearchInts(m.inProgress, tx)
-	if x < len(m.inProgress) && m.inProgress[x] == tx {
-		return true
-	}
-
-	return false
+	return tx >= 0 && tx < len(m.inProg) && m.inProg[tx]
 }
 
 func (m *execStatusList) checkPending(tx int) bool {
@@ -226,12 +259,7 @@ func (m *execStatusList) checkPending(tx int) bool {
 }
 
 func (m *execStatusList) checkComplete(tx int) bool {
-	x := sort.SearchInts(m.complete, tx)
-	if x < len(m.complete) && m.complete[x] == tx {
-		return true
-	}
-
-	return false
+	return tx >= 0 && tx < len(m.comp) && m.comp[tx]
 }
 
 // getRevalidationRange: this range will be all tasks from tx (inclusive) that are not currently in progress up to the
@@ -259,7 +287,10 @@ func (m *execStatusList) pushPendingSet(set []int) {
 }
 
 func (m *execStatusList) clearComplete(tx int) {
-	m.complete = removeFromList(m.complete, tx, false)
+	if tx >= 0 && tx < len(m.comp) && m.comp[tx] {
+		m.comp[tx] = false
+		m.compCnt--
+	}
 	if tx < m.completeUpTo {
 		m.completeUpTo = tx
 	}
@@ -267,4 +298,25 @@ func (m *execStatusList) clearComplete(tx int) {
 
 func (m *execStatusList) clearPending(tx int) {
 	m.pending = removeFromList(m.pending, tx, false)
+}
+
+// completeList / inProgressList reconstruct the sorted index slice (test helpers).
+func (m *execStatusList) completeList() []int {
+	out := make([]int, 0, m.compCnt)
+	for i, v := range m.comp {
+		if v {
+			out = append(out, i)
+		}
+	}
+	return out
+}
+
+func (m *execStatusList) inProgressList() []int {
+	out := make([]int, 0, m.inProgCnt)
+	for i, v := range m.inProg {
+		if v {
+			out = append(out, i)
+		}
+	}
+	return out
 }
