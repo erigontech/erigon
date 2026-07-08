@@ -513,10 +513,6 @@ func (sdb *IntraBlockState) Exist(addr accounts.Address) (exists bool, err error
 		return s != nil && !s.deleted, nil
 	}
 
-	if s, ok := sdb.stateObjects[addr]; ok {
-		return s != nil && !s.deleted, nil
-	}
-
 	// Existence needs only the base record + self-destruct gate, not the
 	// per-field overlay, so skip refreshVersionedAccount.
 	// Same-tx self-destruct: the account is still alive (EIP-6780).
@@ -546,10 +542,6 @@ func (sdb *IntraBlockState) Empty(addr accounts.Address) (empty bool, err error)
 
 		return so == nil || so.deleted || so.data.Empty(), nil
 	}
-	if so, ok := sdb.stateObjects[addr]; ok {
-		return so == nil || so.deleted || so.data.Empty(), nil
-	}
-
 	// Existence + the self-destruct/revival gate, without reconstructing the
 	// whole account: the EIP-161 verdict needs only the current balance, nonce
 	// and code hash, read per-field below (short-circuiting), so the
