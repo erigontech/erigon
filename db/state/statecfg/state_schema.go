@@ -76,7 +76,7 @@ func Configure(Schema SchemaGen, a AggSetters, dirs datadir.Dirs, salt *uint32, 
 
 const MaxNonFuriousDirtySpacePerTx = 64 * datasize.MB
 
-var dbgCommBtIndex = dbg.EnvBool("AGG_COMMITMENT_BT", false)
+var dbgCommBtIndex = dbg.EnvBool("AGG_COMMITMENT_BT", true)
 
 func init() {
 	if dbgCommBtIndex {
