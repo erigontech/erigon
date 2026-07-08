@@ -1643,6 +1643,8 @@ func doIntegrity(ctx context.Context, cliCtx *cli.Command) error {
 			return integrity.CheckStateProgress(ctx, db, blockReader, failFast)
 		case integrity.Publishable:
 			return doPublishable(dirs, chainDB)
+		case integrity.CaplinStateRoots:
+			return integrity.CheckCaplinStateRoots(ctx, dirs, failFast, logger)
 		case integrity.BorEvents:
 			if !CheckBorChain(chainConfig.ChainName) {
 				logger.Info("BorEvents skipped because not bor chain")
