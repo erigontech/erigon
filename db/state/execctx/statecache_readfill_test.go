@@ -209,3 +209,75 @@ func TestReadFill_NegativeStampedWithProgress(t *testing.T) {
 	_, ok = sc.Get(kv.AccountsDomain, missing)
 	require.False(t, ok, "a negative observed at progress 100 must not survive an unwind to 50")
 }
+
+// A flush-apply for a deletion must leave a live tombstone, not remove the
+// entry: with the key absent, a read-fill from a straddling pre-delete
+// snapshot re-inserts the deleted value as live (PutIfAbsent only defers to
+// live entries), and the resurrected account is served as canonical.
+func TestReadFill_DoesNotResurrectDeletedKey(t *testing.T) {
+	if testing.Short() {
+		t.Skip()
+	}
+	t.Parallel()
+
+	const stepSize = uint64(16)
+	ctx := t.Context()
+	db := newTestDb(t, stepSize)
+	sc := newSmallStateCache()
+
+	key := make([]byte, 20)
+	key[0] = 0xbb
+	v1 := encAccount(1)
+
+	rwTx1, err := db.BeginTemporalRw(ctx)
+	require.NoError(t, err)
+	defer rwTx1.Rollback()
+	sd1, err := execctx.NewSharedDomains(ctx, rwTx1, log.New())
+	require.NoError(t, err)
+	defer sd1.Close()
+	sd1.SetStateCacheForTest(sc)
+	sd1.SetTxNum(10)
+	require.NoError(t, sd1.DomainPut(kv.AccountsDomain, rwTx1, key, v1, 10, nil))
+	require.NoError(t, sd1.Commit(ctx, rwTx1))
+
+	// A reader snapshot from before the deletion.
+	roTxOld, err := db.BeginTemporalRo(ctx)
+	require.NoError(t, err)
+	defer roTxOld.Rollback()
+
+	rwTx2, err := db.BeginTemporalRw(ctx)
+	require.NoError(t, err)
+	defer rwTx2.Rollback()
+	sd2, err := execctx.NewSharedDomains(ctx, rwTx2, log.New())
+	require.NoError(t, err)
+	defer sd2.Close()
+	sd2.SetStateCacheForTest(sc)
+	sd2.SetTxNum(20)
+	require.NoError(t, sd2.DomainDel(kv.AccountsDomain, rwTx2, key, 20, v1))
+	require.NoError(t, sd2.Commit(ctx, rwTx2))
+
+	// The straddling reader: any fill it makes must not resurrect the account.
+	sdOld, err := execctx.NewSharedDomains(ctx, roTxOld, log.New())
+	require.NoError(t, err)
+	defer sdOld.Close()
+	sdOld.SetStateCacheForTest(sc)
+	_, _, err = sdOld.GetLatest(kv.AccountsDomain, roTxOld, key)
+	require.NoError(t, err)
+
+	roTxNew, err := db.BeginTemporalRo(ctx)
+	require.NoError(t, err)
+	defer roTxNew.Rollback()
+	sdNew, err := execctx.NewSharedDomains(ctx, roTxNew, log.New())
+	require.NoError(t, err)
+	defer sdNew.Close()
+	sdNew.SetStateCacheForTest(sc)
+	v, _, err := sdNew.GetLatest(kv.AccountsDomain, roTxNew, key)
+	require.NoError(t, err)
+	require.Empty(t, v, "the straddling read-fill must not resurrect the deleted account")
+
+	// The tombstone is stamped with the delete's txNum, so an unwind at or
+	// below it drops the negative instead of letting it outlive the deletion.
+	_, cTxNum, ok := sc.GetWithTxNum(kv.AccountsDomain, key)
+	require.True(t, ok)
+	require.Equal(t, uint64(20), cTxNum)
+}
