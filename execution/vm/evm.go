@@ -30,7 +30,6 @@ import (
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/common/dbg"
-	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/protocol/mdgas"
 	"github.com/erigontech/erigon/execution/protocol/params"
@@ -161,36 +160,21 @@ func (evm *EVM) Cancel() { evm.abort.Store(true) }
 // Cancelled returns true if Cancel has been called
 func (evm *EVM) Cancelled() bool { return evm.abort.Load() }
 
-// handleFrameRevert handles the full error path for a call or create frame:
-// state revert, EIP-8037 source-based state-gas refill, and regular gas
-// burning on exceptional halt.
+// handleFrameRevert reverts the frame's state, applies the EIP-8037 state-gas
+// refill, and burns remaining regular gas on an exceptional halt (not REVERT).
 //
-// At depth 0 there is no parent reservoir to restore to: the evm.call /
-// evm.create depth==0 defers fold the error semantics into gasUsed.State
-// (reset to 0 for CALL, -StateGasNewAccount for CREATE) so TxnExecutor
-// can read gasUsed.State directly without checking the error.
-func (evm *EVM) handleFrameRevert(gasRemaining *mdgas.MdGas, err error, depth int, snapshot int, stateGasUsed int64, stateGasSpill uint64) {
+// The frame fully reverted, so its net state-gas usage is zero: refund the
+// spilled regular gas and restore the reservoir it started with. At depth 0
+// there is no parent to restore to (the evm.call/evm.create depth==0 defers
+// fold error semantics into gasUsed.State), but restoring gasRemaining still
+// keeps the deferred deriveFrameRegularGasUsed correct.
+func (evm *EVM) handleFrameRevert(gasRemaining *mdgas.MdGas, err error, snapshot int, entryStateReservoir uint64, stateGasSpill uint64) {
 	// 1. Revert state changes.
 	evm.intraBlockState.RevertToSnapshot(snapshot, err)
-	// 2. EIP-8037 refill frame state gas
+	// 2. EIP-8037: refund spilled regular gas and restore the entry reservoir.
 	if evm.chainRules.IsAmsterdam {
 		gasRemaining.Regular += stateGasSpill
-		// gasRemaining.State + stateGasUsed - stateGasSpill equals the
-		// reservoir the frame was given (>= 0 by construction). A negative
-		// value means a code path mutated the state-gas trackers without the
-		// paired update; surface it loudly and clamp.
-		newState := int64(gasRemaining.State) + stateGasUsed - int64(stateGasSpill)
-		if newState < 0 {
-			log.Error(
-				"EIP-8037 invariant violated; clamping reservoir to 0",
-				"gasRemainingState", gasRemaining.State,
-				"stateGasUsed", stateGasUsed,
-				"stateGasSpill", stateGasSpill,
-				"depth", depth,
-			)
-			newState = 0
-		}
-		gasRemaining.State = uint64(newState)
+		gasRemaining.State = entryStateReservoir
 	}
 	// 3. On exceptional halt (not REVERT), burn remaining regular gas.
 	if err != ErrExecutionReverted {
@@ -456,7 +440,7 @@ func (evm *EVM) call(typ OpCode, caller accounts.Address, callerAddress accounts
 	// above we revert to the snapshot and consume any gas remaining. Additionally
 	// when we're in Homestead this also counts for code storage gas errors.
 	if err != nil || evm.config.RestoreState {
-		evm.handleFrameRevert(&gasRemaining, err, depth, snapshot, gasUsed.State, gasUsed.StateSpill)
+		evm.handleFrameRevert(&gasRemaining, err, snapshot, gas.State, gasUsed.StateSpill)
 	}
 
 	return ret, gasRemaining, gasUsed, err
@@ -720,7 +704,7 @@ func (evm *EVM) create(caller accounts.Address, codeAndHash *codeAndHash, gas md
 	// above, we revert to the snapshot and consume any gas remaining. Additionally,
 	// when we're in Homestead, this also counts for code storage gas errors.
 	if err != nil && (evm.chainRules.IsHomestead || err != ErrCodeStoreOutOfGas) {
-		evm.handleFrameRevert(&gasRemaining, err, depth, snapshot, gasUsed.State, gasUsed.StateSpill)
+		evm.handleFrameRevert(&gasRemaining, err, snapshot, gas.State, gasUsed.StateSpill)
 	}
 
 	return ret, address, gasRemaining, gasUsed, wasBalanceOnly, err
