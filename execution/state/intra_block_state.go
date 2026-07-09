@@ -1351,6 +1351,15 @@ func (sdb *IntraBlockState) setState(addr accounts.Address, key accounts.Storage
 		fmt.Printf("%d (%d.%d) SetState %x, %x=%s\n", sdb.blockNum, sdb.txIndex, sdb.version, addr, key, value.Hex())
 	}
 
+	// The EVM SSTORE path (force==false) writes through cells without
+	// materializing a stateObject. force==true (ApplyVersionedWrites replay) and
+	// a fakeStorage override (eth_simulate) still need the object.
+	if sdb.versionMap != nil && !force {
+		if so, ok := sdb.stateObjects[addr]; !ok || so.fakeStorage == nil {
+			return sdb.setStateVersioned(addr, key, value)
+		}
+	}
+
 	stateObject, err := sdb.GetOrNewStateObject(addr)
 	if err != nil {
 		return err
@@ -1367,6 +1376,37 @@ func (sdb *IntraBlockState) setState(addr accounts.Address, key accounts.Storage
 		// the entry was gone and the revert had nothing to restore.
 		sdb.recordWriteStorage(addr, key, value)
 	}
+	return nil
+}
+
+// setStateVersioned records a storage write on the parallel (versionMap) path
+// without materializing a stateObject. It mirrors stateObject.SetState's set
+// decision and journalling; the prev value comes from the cell-based
+// readStateForSet. An already-materialized stateObject is kept in step so the
+// so.data-based commit paths (genesis FinalizeTx, RPC) stay correct.
+func (sdb *IntraBlockState) setStateVersioned(addr accounts.Address, key accounts.StorageKey, value uint256.Int) error {
+	prev, source, _, commited, err := readStateForSet(sdb, addr, key)
+	if err != nil {
+		return err
+	}
+	// See stateObject.SetState: a value resolved from a cached read or the
+	// version map has no versioned write for this key this tx, so this is the
+	// first write and commited must be true for storageChange.revert to delete
+	// (not update) the cell.
+	if source != WriteSetRead && source != UnknownSource && source != StorageRead {
+		commited = true
+	}
+	if source != UnknownSource && prev == value {
+		return nil
+	}
+	sdb.journal.append(storageChange{account: addr, key: key, prevalue: prev, wasCommited: commited})
+	if sdb.tracingHooks != nil && sdb.tracingHooks.OnStorageChange != nil {
+		sdb.tracingHooks.OnStorageChange(addr, key, prev, value)
+	}
+	if so, ok := sdb.stateObjects[addr]; ok {
+		so.setState(key, value)
+	}
+	sdb.recordWriteStorage(addr, key, value)
 	return nil
 }
 
