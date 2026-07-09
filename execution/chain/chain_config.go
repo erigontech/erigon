@@ -619,12 +619,13 @@ type forkBlockNumber struct {
 	name        string
 	blockNumber *uint64
 	optional    bool // if true, the fork may be nil and next fork is still allowed
+	outOfOrder  bool // if true, the fork is exempt from the ordering check (one-off fork, e.g. DAO)
 }
 
 func (c *Config) forkBlockNumbers() []forkBlockNumber {
 	return []forkBlockNumber{
 		{name: "homesteadBlock", blockNumber: c.HomesteadBlock},
-		{name: "daoForkBlock", blockNumber: c.DAOForkBlock, optional: true},
+		{name: "daoForkBlock", blockNumber: c.DAOForkBlock, optional: true, outOfOrder: true},
 		{name: "eip150Block", blockNumber: c.TangerineWhistleBlock},
 		{name: "eip155Block", blockNumber: c.SpuriousDragonBlock},
 		{name: "byzantiumBlock", blockNumber: c.ByzantiumBlock},
@@ -649,7 +650,7 @@ func (c *Config) CheckConfigForkOrder() error {
 	var lastFork forkBlockNumber
 
 	for _, fork := range c.forkBlockNumbers() {
-		if lastFork.name != "" {
+		if lastFork.name != "" && !fork.outOfOrder {
 			// Next one must be higher number
 			if lastFork.blockNumber == nil && fork.blockNumber != nil {
 				return fmt.Errorf("unsupported fork ordering: %v not enabled, but %v enabled at %v",
@@ -663,7 +664,7 @@ func (c *Config) CheckConfigForkOrder() error {
 			}
 			// If it was optional and not set, then ignore it
 		}
-		if !fork.optional || fork.blockNumber != nil {
+		if (!fork.optional || fork.blockNumber != nil) && !fork.outOfOrder {
 			lastFork = fork
 		}
 	}

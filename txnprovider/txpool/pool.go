@@ -175,6 +175,8 @@ type TxPool struct {
 	senderLastActivity   map[uint64]uint64 // senderID → block of last on-chain state change
 	avgBlockTimeMs       atomic.Int64      // EWMA of block-to-block wall-clock interval (ms); default 12 000
 	lastBlockTimestampMs atomic.Int64      // unix-ms timestamp of the last processed block
+
+	hasUnprocessedRemoteTxns atomic.Bool // lock-free way to check if pool needs to flush buffered remote txs
 }
 
 type ValidateAA interface {
@@ -463,15 +465,17 @@ func (p *TxPool) OnNewBlock(ctx context.Context, stateChanges *remoteproto.State
 }
 
 func (p *TxPool) processRemoteTxns(ctx context.Context) (err error) {
+	if !p.Started() {
+		return errors.New("txpool not started yet")
+	}
+	if !p.hasUnprocessedRemoteTxns.Load() {
+		return nil
+	}
 	defer func() {
 		if r := recover(); r != nil {
 			err = fmt.Errorf("panic: %v\n%s", r, stack.Trace().String())
 		}
 	}()
-
-	if !p.Started() {
-		return errors.New("txpool not started yet")
-	}
 
 	defer processBatchTxnsTimer.ObserveDuration(time.Now())
 	coreDB, cache := p.chainDB()
@@ -490,6 +494,7 @@ func (p *TxPool) processRemoteTxns(ctx context.Context) (err error) {
 
 	l := len(p.unprocessedRemoteTxns.Txns)
 	if l == 0 {
+		p.hasUnprocessedRemoteTxns.Store(false)
 		return nil
 	}
 
@@ -537,6 +542,7 @@ func (p *TxPool) processRemoteTxns(ctx context.Context) (err error) {
 	}
 
 	p.unprocessedRemoteTxns.Resize(0)
+	p.hasUnprocessedRemoteTxns.Store(false)
 	p.unprocessedRemotePeers = p.unprocessedRemotePeers[:0]
 	p.unprocessedRemoteByHash = map[string]int{}
 
@@ -946,6 +952,7 @@ func (p *TxPool) AddRemoteTxns(_ context.Context, newTxns TxnSlots, peerID PeerI
 		p.unprocessedRemoteTxns.Append(txn, newTxns.Senders.At(i), false)
 		p.unprocessedRemotePeers = append(p.unprocessedRemotePeers, src)
 	}
+	p.hasUnprocessedRemoteTxns.Store(len(p.unprocessedRemoteTxns.Txns) > 0)
 }
 
 func toBlobs(_blobs [][]byte) []*goethkzg.Blob {

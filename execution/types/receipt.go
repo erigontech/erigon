@@ -32,6 +32,7 @@ import (
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/hexutil"
+	"github.com/erigontech/erigon/common/pool"
 	"github.com/erigontech/erigon/execution/rlp"
 )
 
@@ -145,9 +146,8 @@ func (r Receipt) EncodeRLP(w io.Writer) error {
 	if r.Type == LegacyTxType {
 		return rlp.Encode(w, data)
 	}
-	buf := encodeBufferPool.Get().(*bytes.Buffer)
-	defer encodeBufferPool.Put(buf)
-	buf.Reset()
+	buf := pool.GetBuffer()
+	defer pool.PutBuffer(buf)
 	if err := r.encodeTyped(data, buf); err != nil {
 		return err
 	}
