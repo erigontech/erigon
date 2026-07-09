@@ -25,13 +25,16 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/dbcfg"
 	"github.com/erigontech/erigon/db/kv/memdb"
+	"github.com/erigontech/erigon/db/kv/temporal"
 	"github.com/erigontech/erigon/db/snapshotsync"
 	"github.com/erigontech/erigon/db/snapshotsync/blocksnapshots"
 	"github.com/erigontech/erigon/db/snaptype"
 	snaptype2 "github.com/erigontech/erigon/db/snaptype2"
+	"github.com/erigontech/erigon/db/state"
 	"github.com/erigontech/erigon/db/version"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/chain/networkname"
@@ -88,6 +91,57 @@ func TestRemoveBlockSnapshotsBelow(t *testing.T) {
 		require.FileExistsf(t, above, "%s at/above floor must remain", typ.Enum())
 	}
 	require.Equal(t, 2*mergeLimit-1, snapshots.SegmentsMax())
+}
+
+// TestTemporalTxDefersBlockFileUnlink proves step 2: a block file retired while a
+// temporal tx is open is not physically unlinked until that tx closes, because
+// the tx pins the block-files view (blocktx) for its whole lifetime — the same
+// reclamation watermark that already governs state files.
+func TestTemporalTxDefersBlockFileUnlink(t *testing.T) {
+	logger := log.New()
+	dirs := datadir.New(t.TempDir())
+	ctx := t.Context()
+
+	ver := version.V1_0
+	const mergeLimit uint64 = snaptype.Erigon2MergeLimit
+	for _, typ := range snaptype2.BlockSnapshotTypes {
+		createTestSegmentFile(t, 0, mergeLimit, typ.Enum(), dirs.Snap, ver, logger)
+		createTestSegmentFile(t, mergeLimit, 2*mergeLimit, typ.Enum(), dirs.Snap, ver, logger)
+	}
+
+	cfg := ethconfig.Defaults.Snapshot
+	cfg.ChainName = networkname.Mainnet
+	snapshots := blocksnapshots.NewRoSnapshots(cfg, dirs.Snap, logger)
+	defer snapshots.Close()
+	require.NoError(t, snapshots.OpenFolder())
+
+	rawDB := memdb.NewTestDB(t, dbcfg.ChainDB)
+	agg := state.NewTest(dirs).MustOpen(ctx, rawDB)
+	require.NoError(t, agg.OpenFolder())
+	t.Cleanup(agg.Close)
+	tdb, err := temporal.New(rawDB, agg, snapshots)
+	require.NoError(t, err)
+
+	blockReader := NewBlockReader(snapshots, nil)
+	br := &BlockRetire{db: rawDB, blockReader: blockReader, logger: logger}
+
+	txBelow := filepath.Join(dirs.Snap, snaptype.SegmentFileName(ver, 0, mergeLimit, snaptype2.Transactions.Enum()))
+	require.FileExists(t, txBelow)
+
+	// Open a temporal tx: it pins the block-files view for its lifetime.
+	tx, err := tdb.BeginTemporalRo(ctx)
+	require.NoError(t, err)
+
+	deleted, err := br.RemoveBlockSnapshotsBelow(ctx, mergeLimit, nil)
+	require.NoError(t, err)
+	require.True(t, deleted)
+
+	// The open tx pins the outgoing generation, so the retired file survives.
+	require.FileExists(t, txBelow, "block file must survive while a temporal tx pins the view")
+
+	// Closing the tx drains the generation; reclamation then unlinks the file.
+	tx.Rollback()
+	require.NoFileExists(t, txBelow, "block file must be unlinked once the temporal tx closes")
 }
 
 func TestDumpRangeErrorsWhenRangeAlreadyClaimed(t *testing.T) {
