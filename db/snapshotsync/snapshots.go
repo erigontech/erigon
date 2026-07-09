@@ -666,16 +666,6 @@ func (s *RoSnapshots) IndexBuilder(t snaptype.Type) snaptype.IndexBuilder {
 	return nil
 }
 
-func (s *RoSnapshots) SetIndexBuilder(t snaptype.Type, indexBuilder snaptype.IndexBuilder) {
-	if operators, ok := s.operators[t.Enum()]; ok {
-		operators.indexBuilder = indexBuilder
-	} else {
-		s.operators[t.Enum()] = &retireOperators{
-			indexBuilder: indexBuilder,
-		}
-	}
-}
-
 func (s *RoSnapshots) RangeExtractor(t snaptype.Type) snaptype.RangeExtractor {
 	if operators, ok := s.operators[t.Enum()]; ok {
 		return operators.rangeExtractor
@@ -763,18 +753,6 @@ func (s *RoSnapshots) MadvNormal() *RoSnapshots {
 		}
 	}
 
-	return s
-}
-
-func (s *RoSnapshots) EnableMadvWillNeed() *RoSnapshots {
-	v := s.View()
-	defer v.Close()
-
-	for _, t := range s.enums {
-		for _, sn := range v.segments[t].Segments {
-			sn.src.MadvWillNeed()
-		}
-	}
 	return s
 }
 
@@ -1505,26 +1483,6 @@ func (s *RoSnapshots) buildMissedIndices(logPrefix string, ctx context.Context, 
 		return newIdxBuilt, ie
 	case <-ctx.Done():
 		return newIdxBuilt, ctx.Err()
-	}
-}
-
-func (s *RoSnapshots) PrintDebug() {
-	v := s.View()
-	defer v.Close()
-	for _, t := range s.types {
-		fmt.Println("    == [dbg] Snapshots,", t.Enum().String())
-		printDebug := func(sn *DirtySegment) {
-			args := make([]any, 0, len(sn.Type().Indexes())+1)
-			args = append(args, sn.from)
-			for _, index := range sn.Type().Indexes() {
-				args = append(args, sn.Index(index) != nil)
-			}
-			fmt.Println(args...)
-		}
-		s.dirty[t.Enum()].Scan(func(sn *DirtySegment) bool {
-			printDebug(sn)
-			return true
-		})
 	}
 }
 
