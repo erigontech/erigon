@@ -1531,11 +1531,10 @@ func (pe *parallelExecutor) closeApplyChannels() (closedOrder []string) {
 // triggered the check) so a failure log identifies the exit path
 // involved without needing a stack trace.
 func (pe *parallelExecutor) execLoopExitCheck(ctx context.Context, reason string) error {
-	// Any cancellation — a published stopCause or an external/parent cancel —
-	// legitimately ends the loop, so skip the pending-blocks completeness check.
-	// ctx.Err() subsumes stopCauseOf(ctx): a stopCause is only ever published via
-	// a cancel, and this also covers external cancels a stopCause check would miss.
-	if ctx.Err() != nil {
+	// Only a deliberate stopCause exempts the pending-blocks completeness check;
+	// an unrelated cancel (shutdown, parent cancel) with blocks still pending is a
+	// genuine silent-miss and must surface.
+	if _, ok := stopCauseOf(ctx); ok {
 		return nil
 	}
 	pe.RLock()

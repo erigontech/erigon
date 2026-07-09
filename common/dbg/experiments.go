@@ -116,8 +116,9 @@ var (
 	IgnoreBAL             = EnvBool("IGNORE_BAL", false)
 	BatchCommitments      = EnvBool("BATCH_COMMITMENTS", true)
 	// BALDrivenCommitment folds a block's commitment from its BAL ahead of the
-	// per-tx result stream, overlapping execution. On by default; IGNORE_BAL is
-	// the kill switch if it ever misbehaves.
+	// per-tx result stream, overlapping execution. On by default; set
+	// BAL_DRIVEN_COMMITMENT=false (or IGNORE_BAL=true) to fall back to the
+	// incremental path if it ever misbehaves.
 	BALDrivenCommitment = EnvBool("BAL_DRIVEN_COMMITMENT", true)
 	// BALShadowCompute (requires BALDrivenCommitment) also computes each
 	// BAL-driven block incrementally and asserts both roots match before
