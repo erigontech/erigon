@@ -653,7 +653,7 @@ func (h *handler) runMethod(ctx context.Context, msg *jsonrpcMessage, callb *cal
 	}
 
 	// Switch gzip middleware to streaming mode before writing any response data.
-	if flush, ok := ctx.Value(httpFlusherContextKey{}).(func()); ok {
+	if flush, ok := ctx.Value(httpFlusherContextKey{}).(func()); ok && flush != nil {
 		flush()
 	}
 

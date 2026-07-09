@@ -17,12 +17,14 @@
 package node
 
 import (
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
 
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/rpc/jsonstream"
@@ -50,16 +52,32 @@ func TestGzipHandlerBatchConcurrentStreamableFlush(t *testing.T) {
 	handler := newGzipHandler(srv)
 
 	const n = 8
+	echoArg := strings.Repeat("x", 256) // large enough that the batch response exceeds minGzipBodySize
 	calls := make([]string, n)
 	for i := range calls {
-		calls[i] = fmt.Sprintf(`{"jsonrpc":"2.0","id":%d,"method":"test_echo","params":["x"]}`, i+1)
+		calls[i] = fmt.Sprintf(`{"jsonrpc":"2.0","id":%d,"method":"test_echo","params":["%s"]}`, i+1, echoArg)
 	}
-	body := "[" + strings.Join(calls, ",") + "]"
+	reqBody := "[" + strings.Join(calls, ",") + "]"
 
-	req := httptest.NewRequest(http.MethodPost, "/", strings.NewReader(body))
+	req := httptest.NewRequest(http.MethodPost, "/", strings.NewReader(reqBody))
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Accept-Encoding", "gzip")
 	rec := httptest.NewRecorder()
 
 	handler.ServeHTTP(rec, req)
+
+	require.Equal(t, http.StatusOK, rec.Code)
+	assert.Equal(t, "gzip", rec.Header().Get("Content-Encoding"))
+
+	respBody := decompressGzip(t, rec.Body)
+	var respBatch []struct {
+		ID     int    `json:"id"`
+		Result string `json:"result"`
+	}
+	require.NoError(t, json.Unmarshal(respBody, &respBatch))
+	require.Len(t, respBatch, n)
+	for i, resp := range respBatch {
+		assert.Equal(t, i+1, resp.ID)
+		assert.Equal(t, echoArg, resp.Result)
+	}
 }

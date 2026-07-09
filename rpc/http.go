@@ -251,6 +251,9 @@ type httpFlusherContextKey struct{}
 // writing the first byte of a streamable response, switching the gzip middleware from
 // one-shot buffering to incremental streaming. Must only be called by the gzip middleware.
 func WithGzipStreamingHook(ctx context.Context, hook func()) context.Context {
+	if hook == nil {
+		panic("rpc: WithGzipStreamingHook called with a nil hook")
+	}
 	return context.WithValue(ctx, httpFlusherContextKey{}, hook)
 }
 
