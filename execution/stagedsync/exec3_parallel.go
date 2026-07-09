@@ -643,6 +643,17 @@ func (pe *parallelExecutor) execImpl(ctx context.Context, execStage *StageState,
 						finalized = true
 						continue
 					}
+					// failInfra routes an apply-loop infrastructure fault through
+					// failCandidate (earliest-block-wins) + cancel, and keeps the loop
+					// draining. Never bare-return from the apply loop while the exec
+					// loop may sit in a terminal mustDeliver send on a full applyResults
+					// — that strands closeApplyChannels and wedges pe.wait.
+					failInfra := func(err error) {
+						appliedBlocks[applyResult.BlockNum] = struct{}{}
+						fail.consider(applyResult.BlockNum, applyResult.BlockHash, true, err)
+						finalized = true
+						deliberateCancel()
+					}
 					// StartChange + NotifyAccumulator must both run in the apply
 					// goroutine — keeps all accumulator access single-threaded
 					// (avoids data race with the executor goroutine).
@@ -651,7 +662,8 @@ func (pe *parallelExecutor) execImpl(ctx context.Context, execStage *StageState,
 					if pe.accumulator != nil && applyResult.Header != nil {
 						rawTxs, marshalErr := types.MarshalTransactionsBinary(applyResult.Txs)
 						if marshalErr != nil {
-							return fmt.Errorf("marshal transactions for accumulator, block %d: %w", applyResult.BlockNum, marshalErr)
+							failInfra(fmt.Errorf("marshal transactions for accumulator, block %d: %w", applyResult.BlockNum, marshalErr))
+							continue
 						}
 						pe.accumulator.StartChange(applyResult.Header, rawTxs, false)
 						for _, writes := range pendingAccumulatorWrites {
@@ -671,20 +683,24 @@ func (pe *parallelExecutor) execImpl(ctx context.Context, execStage *StageState,
 						b, err := pe.cfg.blockReader.BlockByHash(ctx, rwTx, applyResult.BlockHash)
 
 						if err != nil {
-							return fmt.Errorf("can't retrieve block %d: for post validation: %w", applyResult.BlockNum, err)
+							failInfra(fmt.Errorf("can't retrieve block %d: for post validation: %w", applyResult.BlockNum, err))
+							continue
 						}
 						if b == nil {
-							return fmt.Errorf("nil block %d (hash %x)", applyResult.BlockNum, applyResult.BlockHash)
+							failInfra(fmt.Errorf("nil block %d (hash %x)", applyResult.BlockNum, applyResult.BlockHash))
+							continue
 						}
 
 						lastHeader = b.HeaderNoCopy()
 
 						if lastHeader.Number.Uint64() != applyResult.BlockNum {
-							return fmt.Errorf("block numbers don't match expected: %d: got: %d for hash %x", applyResult.BlockNum, lastHeader.Number.Uint64(), applyResult.BlockHash)
+							failInfra(fmt.Errorf("block numbers don't match expected: %d: got: %d for hash %x", applyResult.BlockNum, lastHeader.Number.Uint64(), applyResult.BlockHash))
+							continue
 						}
 
 						if blockUpdateCount != applyResult.ApplyCount {
-							return fmt.Errorf("block %d: applyCount mismatch: got: %d expected %d", applyResult.BlockNum, blockUpdateCount, applyResult.ApplyCount)
+							failInfra(fmt.Errorf("block %d: applyCount mismatch: got: %d expected %d", applyResult.BlockNum, blockUpdateCount, applyResult.ApplyCount))
+							continue
 						}
 
 						// Spawn per-block validation in a goroutine — the result is
@@ -718,13 +734,22 @@ func (pe *parallelExecutor) execImpl(ctx context.Context, execStage *StageState,
 					// per-block blockValidator was spawned earlier (~30 LOC up)
 					// and runs concurrently with the work above; Wait() joins it.
 					if err := blockValidatorWaiter.Wait(); err != nil {
-						return fmt.Errorf("%w, block=%d, %v", rules.ErrInvalidBlock, applyResult.BlockNum, err)
+						// Block-validity verdict from post-execution validation. Route it
+						// through failCandidate (earliest-block-wins, exec supersedes a
+						// commit wrong-root at the same block) and keep draining rather
+						// than bare-returning — a bare return here would strand the exec
+						// loop in a terminal mustDeliver send on a full applyResults and
+						// wedge pe.wait. No cancel: mirror the blockResult.Err path.
+						appliedBlocks[applyResult.BlockNum] = struct{}{}
+						fail.consider(applyResult.BlockNum, applyResult.BlockHash, true, fmt.Errorf("%w, block=%d, %v", rules.ErrInvalidBlock, applyResult.BlockNum, err))
+						finalized = true
+						continue
 					}
 
 					if pe.cfg.chainConfig.IsAmsterdam(applyResult.BlockTime) || pe.cfg.experimentalBAL {
-						err = ProcessBAL(rwTx, lastHeader, applyResult.TxIO, pe.cfg.chainConfig.IsAmsterdam(applyResult.BlockTime), pe.cfg.experimentalBAL, pe.cfg.dirs.DataDir, pe.logger)
-						if err != nil {
-							return err
+						if err = ProcessBAL(rwTx, lastHeader, applyResult.TxIO, pe.cfg.chainConfig.IsAmsterdam(applyResult.BlockTime), pe.cfg.experimentalBAL, pe.cfg.dirs.DataDir, pe.logger); err != nil {
+							failInfra(err)
+							continue
 						}
 					}
 
@@ -971,9 +996,15 @@ func (pe *parallelExecutor) execLoop(ctx context.Context) (err error) {
 	applyTx := pe.applyTx
 	pe.RUnlock()
 
-	// sizeCutPending: the batch hit its size limit and this loop is executing one
-	// more block so state catches up to any block the fold already computed ahead,
-	// then it stops at a boundary where state and commitment agree.
+	// sizeCutPending: on a size-limit cut, execute one more block so state catches
+	// up to any block the fold computed ahead, then stop at a boundary where state
+	// and commitment agree. Under the current C=1 contiguous fold this is
+	// scaffolding, not load-bearing: cause-before-send means B+1's fold gate never
+	// opens past the terminal block B (blockResult(B) reaches the calculator only
+	// after B's stop decision), so nothing is ever folded ahead of the cut and this
+	// path only overshoots the batch budget by one block. It is kept for a future
+	// explicit C>1 fold-ahead mode, where state would genuinely need to reach the
+	// folded-ahead frontier before stopping.
 	sizeCutPending := false
 
 	for {
@@ -1500,7 +1531,11 @@ func (pe *parallelExecutor) closeApplyChannels() (closedOrder []string) {
 // triggered the check) so a failure log identifies the exit path
 // involved without needing a stack trace.
 func (pe *parallelExecutor) execLoopExitCheck(ctx context.Context, reason string) error {
-	if _, ok := stopCauseOf(ctx); ok {
+	// Any cancellation — a published stopCause or an external/parent cancel —
+	// legitimately ends the loop, so skip the pending-blocks completeness check.
+	// ctx.Err() subsumes stopCauseOf(ctx): a stopCause is only ever published via
+	// a cancel, and this also covers external cancels a stopCause check would miss.
+	if ctx.Err() != nil {
 		return nil
 	}
 	pe.RLock()

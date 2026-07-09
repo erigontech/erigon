@@ -28,11 +28,11 @@ exec3_parallel.go ~1104, via `execLoopShouldExit`). When it fires at block K:
 
 Committing then persists commitment@K+1 alongside state@K. On restart the state root
 recomputed from state@K will not match the persisted commitment@K+1 → wrong root /
-corruption. This is yperbasis's item-1 review finding.
+corruption.
 
 The exec loop can only see execution progress; it cannot see how far the calculator
 folded, so it cannot pick a consistent cut point. Two loops independently estimating
-resources / deciding the cut is the ambiguity Mark wants removed.
+resources / deciding the cut is the ambiguity this design removes.
 
 ## Design — full apply-loop authority
 
@@ -161,7 +161,7 @@ shaped the implementation:
   (signal) context** — a signal cancel caps its fold-ahead at M but never aborts a
   block it is mid-computing. (`newCommitmentCalculator(workCtx, signalCtx, …)`,
   `cc.signalCtx`, `maybeFoldAhead` reads `stopCauseOf(cc.signalCtx)`.)
-- **Workers get their own inner context (Mark's inner/outer scoping).** The OCC
+- **Workers get their own inner context (inner/outer scoping).** The OCC
   pool runs on `workersCtx = WithCancel(execLoopCtx)` — a child of the exec loop's
   (outer) context. The exec loop, as controller, halts them via `cancelWorkers`;
   its exit path (`defer pe.cancelWorkers()` + teardown) guarantees they can't
@@ -240,7 +240,7 @@ The low-risk alternative (keep the cut in the exec loop, but defer honoring it w
 `pe.txExecutor.lastCommittedBlockNum > blockResult.BlockNum` so exec catches up to the
 fold) fixes the orphan with ~5 lines and preserves the current ownership invariant. It
 was rejected in favour of the full inversion because it leaves resource estimation
-split across loops (the ambiguity Mark wants gone) and only patches the symptom. If the
+split across loops (the split-estimation ambiguity) and only patches the symptom. If the
 full design proves too risky to land in one step, this remains a valid intermediate.
 
 ## Tests required

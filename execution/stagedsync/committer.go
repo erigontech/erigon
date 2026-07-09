@@ -343,8 +343,11 @@ func (cc *commitmentCalculator) handleMessage(ctx context.Context, msg applyResu
 		// the BAL (foldStepCheckpoints), computed while the domain sat exactly at
 		// each edge. Re-checkpointing here from the partially-accumulated cc.state
 		// on an already-advanced domain would let the last writer win and leave the
-		// step's commitment .kv inconsistent — so only the incremental path (which
-		// owns the checkpoint for non-folded blocks) runs the hook.
+		// step's commitment .kv inconsistent — so the incremental path is normally
+		// the sole checkpointer for a block. The in/reqs select has no cross-channel
+		// priority, so a late-consumed blockRequest can leave foldedAhead[n] unset
+		// when this hook fires and let both paths checkpoint the same edge; that is
+		// benign — both emit identical values at the same txNum (idempotent).
 		if !cc.foldedAhead[r.blockNum] && cc.doms.IsUnfrozenStepEdge(cc.roTx, r.txNum) {
 			cc.computeStepBoundary(ctx, &blockResult{BlockNum: r.blockNum, BlockHash: r.blockHash, lastTxNum: r.txNum})
 		}

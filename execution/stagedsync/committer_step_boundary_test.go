@@ -70,7 +70,7 @@ func TestHandleMessage_StepBoundaryCheckpointMidBlock(t *testing.T) {
 
 	in := make(chan applyResult, 64)
 	out := make(chan commitmentResult, 64)
-	cc, err := newCommitmentCalculator(ctx, ctx, doms, db, nil, "test", logger, false, 1<<62, in, nil, out)
+	cc, err := newCommitmentCalculator(ctx, ctx, doms, db, &chain.Config{}, "test", logger, false, 1<<62, in, nil, out)
 	require.NoError(t, err)
 
 	// Block 1: txNums 1..10, fully before the step-0 edge (txNum 15).
@@ -146,7 +146,7 @@ func TestHandleMessage_StepCheckpointInPerBlockMode(t *testing.T) {
 	in := make(chan applyResult, 64)
 	out := make(chan commitmentResult, 64)
 	// forcePerBlockCompute=true => snapshot-producer mode (per-block at every block).
-	cc, err := newCommitmentCalculator(ctx, ctx, doms, db, nil, "test", logger, true, 1<<62, in, nil, out)
+	cc, err := newCommitmentCalculator(ctx, ctx, doms, db, &chain.Config{}, "test", logger, true, 1<<62, in, nil, out)
 	require.NoError(t, err)
 
 	const block1End = uint64(10)
@@ -204,7 +204,7 @@ func TestHandleMessage_PartialBlockComputeFailureNotSwallowed(t *testing.T) {
 	in := make(chan applyResult, 64)
 	out := make(chan commitmentResult, 64)
 	// forcePerBlockCompute=true routes the first partial block to computeWithoutCheck.
-	cc, err := newCommitmentCalculator(ctx, ctx, doms, db, nil, "test", logger, true, 1<<62, in, nil, out)
+	cc, err := newCommitmentCalculator(ctx, ctx, doms, db, &chain.Config{}, "test", logger, true, 1<<62, in, nil, out)
 	require.NoError(t, err)
 	defer cc.Stop()
 
@@ -288,7 +288,7 @@ func runBlockEndingOnStepEdge(t *testing.T, edgeTxHasWrites bool) stepEdgeOutcom
 	// forcePerBlockCompute=false + huge perBlockFrom => pure batch mode: the
 	// blockResult never triggers a per-block compute, so the only thing that can
 	// checkpoint the step edge is the step-boundary hook.
-	cc, err := newCommitmentCalculator(ctx, ctx, doms, db, nil, "test", logger, false, 1<<62, in, nil, out)
+	cc, err := newCommitmentCalculator(ctx, ctx, doms, db, &chain.Config{}, "test", logger, false, 1<<62, in, nil, out)
 	require.NoError(t, err)
 
 	rnd := rand.New(rand.NewSource(42))
@@ -383,7 +383,7 @@ func TestHandleMessage_StepBoundaryDoesNotPolluteLiveChangeset(t *testing.T) {
 
 	in := make(chan applyResult, 64)
 	out := make(chan commitmentResult, 64)
-	cc, err := newCommitmentCalculator(ctx, ctx, doms, db, nil, "test", logger, false, 1<<62, in, nil, out)
+	cc, err := newCommitmentCalculator(ctx, ctx, doms, db, &chain.Config{}, "test", logger, false, 1<<62, in, nil, out)
 	require.NoError(t, err)
 	defer cc.Stop()
 
@@ -442,7 +442,7 @@ func TestHandleMessage_StepBoundaryRecordsIntoOwnChangesetInWindow(t *testing.T)
 	out := make(chan commitmentResult, 64)
 	// perBlockFrom=1 => block 1 is in-window, so it routes through the hash-aware
 	// wrap (ownsChangeset(1)=true) rather than the isolated path.
-	cc, err := newCommitmentCalculator(ctx, ctx, doms, db, nil, "test", logger, false, 1, in, nil, out)
+	cc, err := newCommitmentCalculator(ctx, ctx, doms, db, &chain.Config{}, "test", logger, false, 1, in, nil, out)
 	require.NoError(t, err)
 	defer cc.Stop()
 
@@ -487,7 +487,7 @@ func TestHandleMessage_PreWindowPerBlockComputeDoesNotPolluteLiveChangeset(t *te
 	out := make(chan commitmentResult, 64)
 	// forcePerBlockCompute=true + perBlockFrom=5 => block 1 is pre-window yet
 	// still computes per-block.
-	cc, err := newCommitmentCalculator(ctx, ctx, doms, db, nil, "test", logger, true, 5, in, nil, out)
+	cc, err := newCommitmentCalculator(ctx, ctx, doms, db, &chain.Config{}, "test", logger, true, 5, in, nil, out)
 	require.NoError(t, err)
 	defer cc.Stop()
 
