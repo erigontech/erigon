@@ -179,10 +179,7 @@ func (c *StateCache) putCodeWithHash(addr, code, codeHash []byte, txNum uint64, 
 }
 
 // HasLiveCode reports whether addr has a live code-cache binding a
-// conditional put would defer to — servable code bytes or a no-code deletion
-// marker — without touching stats or LRU recency. Prefetchers probe it to
-// skip the keccak+copy of preparing a conditional code put that such a
-// binding would no-op; advisory only.
+// conditional put would defer to; see CodeCache.ContainsLive.
 func (c *StateCache) HasLiveCode(addr []byte) bool {
 	cc, ok := c.caches[kv.CodeDomain].(*CodeCache)
 	return ok && cc.ContainsLive(addr)
@@ -310,9 +307,7 @@ func (c *StateCache) Unwind(unwindToTxNum uint64) {
 }
 
 // WarmupStarted and WarmupDone bracket a fire-and-forget cache-populating
-// prefetch. A prefetch put racing an unwind's epoch bump could stamp a
-// dead-fork value with the post-unwind epoch, so Unwind asserts (under
-// ASSERT_STATE_CACHE) that no warmup is in flight.
+// prefetch; see warmupsInFlight.
 func (c *StateCache) WarmupStarted() { c.warmupsInFlight.Add(1) }
 
 // WarmupDone is the counterpart of WarmupStarted.

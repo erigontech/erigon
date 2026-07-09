@@ -59,11 +59,9 @@ type entry[T any] struct {
 // GenericCache is a sharded, LRU-evicting bounded cache for key-value
 // data. Eviction mode is fixed at construction (see policy.go).
 type GenericCache[T any] struct {
-	// data is the sharded LRU, replaced wholesale on a jump-grow. The swap
-	// happens with every put stripe held and the new generation fully copied,
-	// so a striped write can never land in a retired generation (a write lost
-	// that way would resurface the older value as live — a stale serve, not a
-	// benign miss) and no operation ever sees a partially-copied one.
+	// data is the sharded LRU, replaced wholesale on a jump-grow with every
+	// put stripe held and the new generation fully copied — no write lands in
+	// a retired generation and no reader sees a partial one (see maybeGrow).
 	data      atomic.Pointer[freelru.ShardedLRU[uint64, entry[T]]]
 	capacityB datasize.ByteSize
 	mode      Mode
@@ -206,7 +204,7 @@ func (c *GenericCache[T]) newShards(capacity uint32) *freelru.ShardedLRU[uint64,
 // retired and a conditional put never sees a mid-resize gap it could fill
 // with a stale value; readers stay on the retiring generation until the swap
 // and never miss. Grows are a handful of steps per cache lifetime, so the
-// stall is a bounded one-off, not a steady-state cost.
+// writer stall is a bounded one-off.
 func (c *GenericCache[T]) maybeGrow() {
 	c.resizeMu.Lock()
 	defer c.resizeMu.Unlock()
@@ -392,11 +390,10 @@ func (c *GenericCache[T]) putLocked(key []byte, value T, txNum uint64, overwrite
 	return needGrow
 }
 
-// dropStale removes key's entry under its put stripe, re-checking that it is
-// still the same key's stale entry — a concurrent put may have replaced it
-// with a live one — and because an unstriped Remove racing put's
-// read-modify-write would double-subtract the displaced entry's size (once
-// via OnEvict, once via put's update delta).
+// dropStale removes key's entry under its put stripe: the re-check keeps an
+// entry a concurrent put revived, and striping the Remove stops it
+// double-subtracting the displaced size against put's update delta (once via
+// OnEvict, once via the delta).
 func (c *GenericCache[T]) dropStale(h uint64, key []byte) {
 	mu := &c.putStripes[h&(putStripeCount-1)]
 	mu.Lock()

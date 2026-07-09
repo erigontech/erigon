@@ -1043,10 +1043,9 @@ func (sd *SharedDomains) Commit(ctx context.Context, tx kv.RwTx, validate ...fun
 			}
 		case kv.AccountsDomain:
 			if len(u.val) == 0 {
-				// Tombstone rather than delete: a live negative defends the key
-				// against a straddling pre-delete read-fill re-inserting the old
-				// value (PutIfAbsent only defers to live entries). Same for the
-				// code binding, via its no-code deletion marker.
+				// Deletions are authoritative nil puts — a tombstone here, the
+				// no-code marker for the code binding — so a straddling
+				// pre-delete read-fill defers instead of resurrecting the value.
 				sd.stateCache.Put(kv.AccountsDomain, u.key, nil, u.txN)
 				sd.stateCache.Put(kv.CodeDomain, u.key, nil, u.txN)
 				sd.stateCache.DeleteAddrCodeHash(u.key)
@@ -1092,14 +1091,12 @@ func (sd *SharedDomains) GetLatestContext(ctx context.Context, domain kv.Domain,
 	return sd.getLatestMetered(domain, tx, k, kvmetrics.MetricsFromContext(ctx))
 }
 
-// servableUnderBound is the shared cache gate for reads of a key an in-flight
-// unwind has re-bound: the mem overlay publishes a per-key maxStep while MDBX
-// still holds the dying rows, and a cached entry reflecting a step above that
-// bound would diverge from the bounded read the cache-disabled path takes.
-// The (txNum, epoch) floor usually already drops such entries; this keeps the
-// two read paths identical regardless. Callers convert their unit first — the
-// StateCache stamps txNums (divide by step size), the BranchCache stores step
-// indices (no divide).
+// servableUnderBound gates a cached entry against an in-flight unwind's
+// per-key maxStep: a hit above the bound would diverge from the bounded read
+// the cache-disabled path takes (the epoch floor usually drops such entries
+// already; the gate keeps the two paths identical regardless). Callers convert
+// their unit first — the StateCache stamps txNums (divide by step size), the
+// BranchCache stores step indices (no divide).
 func servableUnderBound(cStep, maxStep kv.Step) bool {
 	return cStep <= maxStep
 }
@@ -1242,17 +1239,13 @@ func (sd *SharedDomains) getLatestMetered(domain kv.Domain, tx kv.TemporalTx, k 
 		return nil, 0, fmt.Errorf("storage %x read error: %w", k, err)
 	}
 
-	// Populate state cache on successful read, with if-absent semantics: a
-	// read-fill never carries newer information than a flush-apply, and an
-	// unconditional Put racing one (an embedded-RPC read straddling an FCU
-	// commit, or a bounded read during an in-flight unwind) would overwrite
-	// the fresher value. Stamp with an upper bound on the value's write txNum
-	// (the read only gives us the file/step it came from): the last txNum of
-	// that step. An unwind below this bound can't leave the value stale, so
-	// frozen-step reads stay warm across unwinds while recent-step reads are
-	// dropped. A negative result carries no step — stamp it with the domain's
-	// progress at observation time so it drops on any unwind instead of
-	// outliving the fact it caches.
+	// Populate the cache with if-absent semantics: a read-fill never carries
+	// newer information than a flush-apply, so it must not overwrite one
+	// (e.g. an embedded-RPC read straddling an FCU commit). Stamp with the
+	// last txNum of the step the value came from — an upper bound on its
+	// write txNum — so an unwind below it can't leave the entry stale. A
+	// negative carries no step; stamp it with the domain's progress at
+	// observation time so any unwind drops it.
 	if sd.stateCache != nil {
 		readTxNum := (uint64(step)+1)*sd.StepSize() - 1
 		if domain == kv.CodeDomain {

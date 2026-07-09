@@ -84,10 +84,9 @@ type versionedAddressID struct {
 	codeHash [32]byte
 	txNum    uint64
 	epoch    uint32
-	// deleted marks a live no-code binding: the addr's code was deleted at
-	// txNum. A valid negative on read, and a binding conditional puts defer
-	// to — without it, a fill from a pre-delete snapshot would resurrect the
-	// deleted code.
+	// deleted marks a live no-code binding — the code-cache analogue of a
+	// domain tombstone: a valid negative on read that conditional binds defer
+	// to (see the Cache interface's no-Delete note).
 	deleted bool
 }
 
