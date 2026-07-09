@@ -125,12 +125,18 @@ const (
 	// DeriveSha, and compares it with block.header.ReceiptHash. Similar to StateRootVerifyByHistory
 	// but for receipt roots instead of state roots.
 	ReceiptRootIntegrity Check = "ReceiptRootIntegrity"
+
+	// CaplinStateRoots verifies frozen caplin block_roots/state_roots snapshots hold a
+	// 32-byte root for every slot. process_slot writes these every slot, so an empty word is
+	// a range frozen before it was reconstructed; such a blank segment shadows the DB and
+	// breaks historical-state reads. Cheap: iterates the .seg words, no DB or re-derivation.
+	CaplinStateRoots Check = "CaplinStateRoots"
 )
 
 // FastChecks is ordered cheapest → heaviest so time-budgeted runs give unused
 // budget to the heavier checks at the tail.
 var FastChecks = []Check{
-	Publishable, HeaderNoGaps, BlocksTxnID, Blocks,
+	Publishable, HeaderNoGaps, BlocksTxnID, Blocks, CaplinStateRoots,
 	ReceiptsNoDups, RCacheNoDups, ReceiptRootIntegrity, InvertedIndex, CommitmentRoot, CommitmentKvi,
 	HistoryNoSystemTxs, CommitmentHistVal, StateRootVerifyByHistory,
 }

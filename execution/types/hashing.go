@@ -23,18 +23,12 @@ import (
 	"bytes"
 	"fmt"
 	"io"
-	"sync"
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/execution/commitment/trie"
 	"github.com/erigontech/erigon/execution/rlp"
 )
-
-// encodeBufferPool holds temporary encoder buffers for DeriveSha and TX encoding.
-var encodeBufferPool = sync.Pool{
-	New: func() any { return new(bytes.Buffer) },
-}
 
 type DerivableList interface {
 	Len() int

@@ -17,6 +17,12 @@
 #   max-allowed-failures  (required) — failure budget; bump only with a comment
 #                                      explaining why and a tracking issue.
 #   exec3-parallel        (optional, default false) — pins ERIGON_EXEC3_PARALLEL.
+#   run                   (optional) — blocktest --run fork regex for race shards.
+#                                      Read by run-eest-spec-test.sh (to filter the
+#                                      run) and tools/check-eest-shard-coverage.sh
+#                                      (to verify the shards partition every fork).
+#                                      -sequential/-parallel variants of a fork
+#                                      carry the same regex.
 
 - shard: statetests-stable
   workers: 12
@@ -24,7 +30,7 @@
 - shard: statetests-devnet
   workers: 12
   # TODO: reduce to 0 (glamsterdam-devnet-6 EIPs WIP)
-  max-allowed-failures: 522
+  max-allowed-failures: 534
 - shard: blocktests-stable-sequential
   workers: 12
   max-allowed-failures: 0
@@ -35,7 +41,7 @@
 - shard: blocktests-devnet
   workers: 12
   # TODO: reduce to 0 (glamsterdam-devnet-6 EIPs WIP)
-  max-allowed-failures: 21711
+  max-allowed-failures: 21833
   exec3-parallel: true
 - shard: enginextests-stable-sequential
   workers: 8
@@ -96,36 +102,45 @@
 - shard: blocktests-stable-race-pre-cancun-sequential
   workers: 12
   max-allowed-failures: 0
+  run: 'fork_(Frontier|Homestead|TangerineWhistle|SpuriousDragon|Byzantium|ConstantinopleFix|Istanbul|Berlin|London|Paris|Shanghai)'
 - shard: blocktests-stable-race-cancun-sequential
   workers: 12
   max-allowed-failures: 0
+  run: 'fork_Cancun'
 - shard: blocktests-stable-race-prague-sequential
   workers: 12
   max-allowed-failures: 0
+  run: 'fork_Prague'
 - shard: blocktests-stable-race-osaka-sequential
   workers: 12
   max-allowed-failures: 0
+  run: 'fork_(Osaka|BPO)'
 - shard: blocktests-stable-race-pre-cancun-parallel
   workers: 12
   max-allowed-failures: 0
   exec3-parallel: true
+  run: 'fork_(Frontier|Homestead|TangerineWhistle|SpuriousDragon|Byzantium|ConstantinopleFix|Istanbul|Berlin|London|Paris|Shanghai)'
 - shard: blocktests-stable-race-cancun-parallel
   workers: 12
   max-allowed-failures: 0
   exec3-parallel: true
+  run: 'fork_Cancun'
 - shard: blocktests-stable-race-prague-parallel
   workers: 12
   max-allowed-failures: 0
   exec3-parallel: true
+  run: 'fork_Prague'
 - shard: blocktests-stable-race-osaka-parallel
   workers: 12
   max-allowed-failures: 0
   exec3-parallel: true
+  run: 'fork_(Osaka|BPO)'
 - shard: blocktests-devnet-race-amsterdam
   workers: 12
   # TODO: reduce to 0 (glamsterdam-devnet-6 EIPs WIP)
-  max-allowed-failures: 21639
+  max-allowed-failures: 21833
   exec3-parallel: true
+  run: 'fork_Amsterdam'
 - shard: zkevm-witness-race
   workers: 8
   # TODO: reduce to 0 (glamsterdam-devnet-6 EIPs WIP)

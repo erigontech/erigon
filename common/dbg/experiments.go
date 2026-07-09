@@ -38,6 +38,8 @@ import (
 var (
 	MaxReorgDepth = EnvUint("MAX_REORG_DEPTH", 96)
 
+	WarmupTableWorkers = EnvUint("WARMUP_TABLE_WORKERS", 0)
+
 	saveHeapProfile             = EnvBool("SAVE_HEAP_PROFILE", false)
 	heapProfileFilePath         = EnvString("HEAP_PROFILE_FILE_PATH", "")
 	heapProfileThresholdPercent = EnvUint("HEAP_PROFILE_THRESHOLD", 35)
@@ -116,6 +118,8 @@ var (
 	CaplinEfficientReorg  = EnvBool("CAPLIN_EFFICIENT_REORG", true)
 	UseTxDependencies     = EnvBool("USE_TX_DEPENDENCIES", false)
 	UseStateCache         = EnvBool("USE_STATE_CACHE", true)
+	UseCodeStore          = EnvBool("USE_CODE_STORE", true)
+	DisableAdaptivePin    = EnvBool("DISABLE_ADAPTIVE_PIN", false)
 	AssertStateCache      = EnvBool("ASSERT_STATE_CACHE", false)
 	ReadAhead             = EnvBool("READ_AHEAD", true)
 

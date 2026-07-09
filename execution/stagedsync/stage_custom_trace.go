@@ -501,7 +501,7 @@ func StageCustomTraceReset(ctx context.Context, db kv.TemporalRwDB, produce Prod
 	if produce.TraceTo {
 		tables = append(tables, db.Debug().InvertedIdxTables(kv.TracesToIdx)...)
 	}
-	if err := backup.ClearTables(ctx, tx, tables...); err != nil {
+	if err := backup.ClearTables(ctx, db, tx, tables...); err != nil {
 		return err
 	}
 	// Clearing the data tables alone is not enough: the prune-progress bookmark in

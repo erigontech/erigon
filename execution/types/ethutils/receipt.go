@@ -45,7 +45,7 @@ func MarshalReceipt(
 	switch t := txn.(type) {
 	case *types.LegacyTx:
 		if t.Protected() {
-			chainId = types.DeriveChainId(&t.V)
+			chainId, _ = types.DeriveChainId(&t.V)
 		}
 	default:
 		chainId = txn.GetChainID()
@@ -55,13 +55,6 @@ func MarshalReceipt(
 	if signed {
 		signer := types.LatestSignerForChainID(chainId)
 		from, _ = txn.Sender(*signer)
-	}
-
-	// Reuse a Bloom the receipt's source already computed; hash the logs only
-	// when it was left unset (e.g. cache reads that skip bloom derivation).
-	logsBloom := receipt.Bloom
-	if logsBloom.IsEmpty() && len(receipt.Logs) > 0 {
-		logsBloom = types.CreateBloom(types.Receipts{receipt})
 	}
 
 	var logsToMarshal any
@@ -96,7 +89,7 @@ func MarshalReceipt(
 		"cumulativeGasUsed": hexutil.Uint64(receipt.CumulativeGasUsed),
 		"contractAddress":   nil,
 		"logs":              logsToMarshal,
-		"logsBloom":         logsBloom,
+		"logsBloom":         types.CreateBloom(types.Receipts{receipt}),
 	}
 
 	if !chainConfig.IsLondon(header.Number.Uint64()) {
