@@ -543,12 +543,29 @@ func (sdc *SharedDomainsCommitmentContext) ComputeCommitment(ctx context.Context
 		warmupConfig.LogPrefix = logPrefix
 		switch trie := sdc.patriciaTrie.(type) {
 		case *commitment.ParallelPatriciaHashed:
+			// The parallel fold workers compute the root, so they must read the same
+			// file generation the in-memory overlay was built against: pin the main
+			// tx's generation and open worker txns from it. Otherwise a worker could
+			// pin a newer generation and read a domain (e.g. code) inconsistent with
+			// the account overlay (the torn Accounts/Code read).
+			var workerPin kv.TemporalFilesPin
+			if p, ok := tx.(filesPinner); ok {
+				if wp := p.Pin(); wp != nil {
+					workerPin = wp
+					defer workerPin.Close()
+				}
+			}
+			if workerPin == nil {
+				log.Warn("[commitment] parallel commitment without a pinned file snapshot; worker reads not generation-consistent", "logPrefix", logPrefix)
+			}
 			// Each worker writes its branch updates through a private collector
 			// so concurrent PutBranch calls never race; collectors are drained
 			// after Process and merged into the main writer below.
-			warmupConfig.CtxFactory, drainCollectors = sdc.concurrentTrieContextFactory(ctx, sdc.paraTrieDB, txNum)
+			warmupConfig.CtxFactory, drainCollectors = sdc.concurrentTrieContextFactory(ctx, sdc.paraTrieDB, workerPin, txNum)
 			trie.SetTrieContextFactory(warmupConfig.CtxFactory)
 		default:
+			// Serial/streaming: this factory only serves page-cache warmup, which
+			// does not compute the root, so its reads need no generation pin.
 			warmupConfig.CtxFactory = sdc.trieContextFactory(ctx, sdc.paraTrieDB, txNum)
 		}
 	}
@@ -629,6 +646,25 @@ func (sdc *SharedDomainsCommitmentContext) ComputeCommitment(ctx context.Context
 	return rootHash, err
 }
 
+// filesPinner is the optional capability of a temporal tx to pin its visible
+// file generation (see kv.TemporalFilesPin).
+type filesPinner interface {
+	Pin() kv.TemporalFilesPin
+}
+
+// beginWorkerRo opens a per-worker read tx for parallel/warmup commitment reads.
+// When a files pin is available it opens the tx bound to that snapshot, so a
+// worker never reads a domain from a newer file generation than the in-memory
+// overlay was built against — the torn Accounts-vs-Code read that fails the
+// code-hash assert. Without a pin (a backend that can't pin files) it falls back
+// to an independent snapshot.
+func beginWorkerRo(ctx context.Context, db kv.TemporalRoDB, pin kv.TemporalFilesPin) (kv.TemporalTx, error) {
+	if pin != nil {
+		return pin.BeginTemporalRo(ctx)
+	}
+	return db.BeginTemporalRo(ctx)
+}
+
 func (sdc *SharedDomainsCommitmentContext) trieContextFactory(ctx context.Context, db kv.TemporalRoDB, txNum uint64) commitment.TrieContextFactory {
 	// avoid races like this
 	stepSize := sdc.sharedDomains.StepSize()
@@ -668,13 +704,13 @@ func (sdc *SharedDomainsCommitmentContext) trieContextFactory(ctx context.Contex
 // concurrentTrieContextFactory is like trieContextFactory but also creates a per-goroutine
 // etl.Collector for each context so that PutBranch writes are isolated (no shared writer race).
 // Returns the factory and a drain function that collects all created collectors.
-func (sdc *SharedDomainsCommitmentContext) concurrentTrieContextFactory(ctx context.Context, db kv.TemporalRoDB, txNum uint64) (commitment.TrieContextFactory, func() []*etl.Collector) {
+func (sdc *SharedDomainsCommitmentContext) concurrentTrieContextFactory(ctx context.Context, db kv.TemporalRoDB, pin kv.TemporalFilesPin, txNum uint64) (commitment.TrieContextFactory, func() []*etl.Collector) {
 	stepSize := sdc.sharedDomains.StepSize()
 	var mu sync.Mutex
 	var collectors []*etl.Collector
 
 	factory := func() (commitment.PatriciaContext, func()) {
-		roTx, err := db.BeginTemporalRo(ctx) //nolint:gocritic
+		roTx, err := beginWorkerRo(ctx, db, pin) //nolint:gocritic
 		if err != nil {
 			return &errorTrieContext{err: err}, func() {}
 		}

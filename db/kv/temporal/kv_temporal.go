@@ -97,6 +97,37 @@ func (db *DB) BeginTemporalRo(ctx context.Context) (kv.TemporalTx, error) {
 
 	return tx, nil
 }
+
+// temporalFilesPin implements kv.TemporalFilesPin: it holds a consistent
+// aggregator file snapshot and opens read txns bound to it.
+type temporalFilesPin struct {
+	db  *DB
+	agg *state.AggregatorFilesPin
+}
+
+// Pin holds this tx's aggregator file snapshot so consistent read txns can be
+// opened from it (BeginTemporalRo) even after newer file generations are
+// published — used by parallel-commitment workers so they never read a domain
+// from a generation inconsistent with the in-memory overlay this tx was built
+// against. The pin is independent of this tx's lifetime; release it with Close.
+func (tx *tx) Pin() kv.TemporalFilesPin {
+	return &temporalFilesPin{db: tx.db, agg: tx.aggtx.Pin()}
+}
+
+func (p *temporalFilesPin) BeginTemporalRo(ctx context.Context) (kv.TemporalTx, error) {
+	kvTx, err := p.db.RwDB.BeginRo(ctx) //nolint:gocritic
+	if err != nil {
+		return nil, err
+	}
+	// Commitment workers read only state domains through aggtx, never forkable
+	// data, so the worker tx needs the pinned file snapshot and nothing else.
+	tx := &Tx{Tx: kvTx, tx: tx{db: p.db, ctx: ctx}}
+	tx.aggtx = p.agg.BeginFilesRo()
+	return tx, nil
+}
+
+func (p *temporalFilesPin) Close() { p.agg.Close() }
+
 func (db *DB) ViewTemporal(ctx context.Context, f func(tx kv.TemporalTx) error) error {
 	tx, err := db.BeginTemporalRo(ctx)
 	if err != nil {
