@@ -474,7 +474,12 @@ func TestVersionMapReadWriteDelete(t *testing.T) {
 	assert.Equal(t, val, v)
 	assert.Equal(t, balance, b)
 
-	// Tx3 delete
+	// Tx3 delete. FinalizeTx below is the materialized-object commit path
+	// (serial/genesis/RPC); the parallel executor never runs it (see the
+	// IsVersioned guards in txtask.go) and instead commits via the write-set.
+	// Materialize explicitly here — as Tx1 does — so FinalizeTx's updateAccount
+	// marks the object deleted and the post-finalize read observes the wipe.
+	states[3].GetOrNewStateObject(addr)
 	states[3].Selfdestruct(addr)
 
 	// Within Tx 3, the state should not change before finalize

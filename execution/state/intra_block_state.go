@@ -1430,6 +1430,9 @@ func (sdb *IntraBlockState) Selfdestruct(addr accounts.Address) (bool, error) {
 	if dbg.TraceTransactionIO && (sdb.trace || dbg.TraceAccount(addr.Handle())) {
 		fmt.Printf("%d (%d.%d) SelfDestruct %x\n", sdb.blockNum, sdb.txIndex, sdb.version, addr)
 	}
+	if sdb.versionMap != nil {
+		return sdb.selfdestructVersioned(addr)
+	}
 	stateObject, err := sdb.getStateObject(addr, true)
 	if err != nil {
 		return false, err
@@ -1466,6 +1469,62 @@ func (sdb *IntraBlockState) Selfdestruct(addr accounts.Address) (bool, error) {
 	// The parallel commitment calculator gets the per-slot DELETE entries from
 	// normalizeWriteSet's SD cascade (sdStorageSlots = vm.StorageKeys ∪
 	// domainStorageKeys), so they don't need to be emitted here.
+
+	return true, nil
+}
+
+// selfdestructVersioned records a self-destruct on the parallel (versionMap)
+// path without materializing a stateObject. Existence and the prior
+// self-destruct flag / balance / incarnation are read from the base record plus
+// this tx's own versioned writes, never a cached object. An already-materialized
+// stateObject is kept in step for the so.data-based commit paths (genesis
+// FinalizeTx, RPC).
+func (sdb *IntraBlockState) selfdestructVersioned(addr accounts.Address) (bool, error) {
+	base, _, _, err := sdb.versionedAccountBase(addr, true)
+	if err != nil {
+		return false, err
+	}
+	// base is nil for an absent account and for one destroyed in a prior tx and
+	// not revived (versionedAccountBase applies that gate) — the serial path's
+	// stateObject.deleted check. A same-tx repeat SELFDESTRUCT still proceeds:
+	// the serial object stays deleted==false until finalize, so it re-runs.
+	if base == nil {
+		return false, nil
+	}
+
+	prev := false
+	if vw, ok := sdb.versionedWrites.GetSelfDestruct(addr); ok {
+		prev = vw.Val
+	}
+	prevBalance := base.Balance
+	if vw, ok := sdb.versionedWrites.GetBalance(addr); ok {
+		prevBalance = vw.Val
+	}
+	inc := base.Incarnation
+	if vw, ok := sdb.versionedWrites.GetIncarnation(addr); ok {
+		inc = vw.Val
+	}
+
+	sdb.journal.append(selfdestructChange{
+		account:     addr,
+		prev:        prev,
+		prevbalance: prevBalance,
+		wasCommited: !sdb.hasWrite(addr, SelfDestructPath, accounts.NilKey),
+	})
+
+	if sdb.tracingHooks != nil && sdb.tracingHooks.OnBalanceChange != nil && !prevBalance.IsZero() {
+		sdb.tracingHooks.OnBalanceChange(addr, prevBalance, zeroBalance, tracing.BalanceDecreaseSelfdestruct)
+	}
+
+	if so, ok := sdb.stateObjects[addr]; ok {
+		so.markSelfdestructed()
+		so.createdContract = false
+		so.data.Balance.Clear()
+	}
+
+	sdb.recordWriteIncarnation(addr, inc)
+	sdb.recordWriteSelfDestruct(addr, true)
+	sdb.recordWriteBalance(addr, uint256.Int{})
 
 	return true, nil
 }
@@ -2080,6 +2139,22 @@ func (sdb *IntraBlockState) FinalizeTx(chainRules *chain.Rules, stateWriter Stat
 // be logged.
 // Specification EIP-7708: https://eips.ethereum.org/EIPS/eip-7708
 func (sdb *IntraBlockState) GetRemovedAccountsWithBalance() (list []evmtypes.AddressAndBalance) {
+	if sdb.versionMap != nil {
+		// Parallel path: self-destructs don't materialize a stateObject, so the
+		// verdict comes from the versioned writes. A residual balance is a
+		// post-SELFDESTRUCT credit, which is always recorded as a BalancePath
+		// write (SELFDESTRUCT itself zeroes it), so reading the write cell needs
+		// no OCC read.
+		for addr := range sdb.journal.dirties {
+			if sd, ok := sdb.versionedWriteSelfDestruct(addr); !ok || !sd {
+				continue
+			}
+			if vw, ok := sdb.versionedWrites.GetBalance(addr); ok && !vw.Val.IsZero() {
+				list = append(list, evmtypes.AddressAndBalance{Address: addr.Value(), Balance: vw.Val})
+			}
+		}
+		return list
+	}
 	for addr := range sdb.journal.dirties {
 		if obj, exist := sdb.stateObjects[addr]; exist && obj.selfdestructed {
 			if balance := obj.Balance(); !balance.IsZero() {
