@@ -267,9 +267,9 @@ The plan's "target: negative in `execution/commitment`" is **not** met for cumul
 
 ### Task 10: [Final] Update documentation
 
-- [ ] update package doc comments / `docs/` if engine-facing names changed
-- [ ] note in `docs/plans/20260702-parallel-commitment-split-points.md` that Tasks 7–15 are realized here
-- [ ] move this plan to `docs/plans/completed/`
+- [x] rewrote `docs/design/parallel-patricia-hashed.md` to the frontier-fold-dispatch engine: §1 scope, §4.1 (mount/fold → derive+fold DAG via `dispatchFrontier`/`deriveFoldFrontier`/`foldPool`), §4.1.1 (deep storage fold → depth-64 account/storage seam), §5 invariants (I2/I5/I6 tasks-not-workers, I7 deep-fold → seed-or-demote), §7 config (`deepStorageThreshold` → `K`/`foldKMin`/`c`), §8 failure modes (seed-vanished hard error), §9 (added `TestFrontierParity_*`/`TestUnifiedDispatch_*`), §10–§11, §12 source map (`fold_dag.go`/`fold_pool.go` added, `streaming_deep_fold.go` reworked). No exported engine symbols were renamed (facade stayed stable per Task 5), and the package has no `// Package commitment` doc comment, so the design spec was the only doc needing changes
+- [x] the referenced parent plan `docs/plans/20260702-parallel-commitment-split-points.md` is **not present in this repo** (nor in git history on any branch — it is an external/conceptual predecessor cited in the Overview); there is no file to annotate, so this item is a no-op recorded here rather than fabricating that plan
+- [x] moved this plan to `docs/plans/completed/` (`git mv`)
 
 ## Post-Completion
 

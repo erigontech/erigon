@@ -22,19 +22,22 @@ changes nothing in the on-disk format, branch encoding, or root definition.
 in this document exists to uphold R1; any optimization that violates R1 is a
 defect, not a trade-off.
 
-It unfolds the root branch once, then mounts a worker per touched top-level
-nibble that folds that child's subtree into a single cell concurrently, and
-re-folds the merged root row on the main goroutine — a *mount/fold* model driven
-from the touched-key prefix trie.
+It walks the touched-key prefix trie once into a **fold DAG**, then folds that DAG
+with a **single frontier-scheduled worker pool** and re-folds the root row on the
+main goroutine. A subtree of at most `K` keys is a **leaf task** — one worker
+mounts at its prefix and replays its keys serially; a larger subtree is a **merge
+task** — a worker seeds its row from the on-disk `Branch(prefix)` and stitches its
+already-folded child cells. `K` is box-adaptive (§7). A worker never blocks holding
+a slot while waiting on a child: each child's completion decrements its parent's
+pending counter and the pool schedules the parent at zero, so utilization stays
+near-full until the DAG collapses onto the root spine.
 
-The top level mounts one worker per touched root nibble (≤ 16). A second level
-handles the case where the work concentrates inside one subtree: when
-a worker reaches a *big-storage account* (> `deepStorageThreshold` touched storage
-keys across ≥ 2 first-storage nibbles) it folds that account's storage subtree
-concurrently — one worker per touched first-storage nibble — instead of streaming
-it serially. This *deep storage fold* (§4.1.1) is the same mount/fold primitive
-applied one level down. Splitting deeper than the first storage nibble is future
-work (§11).
+There is no separate whale/big-storage special case: an account with a large
+storage subtree is just a subtree with more than `K` keys, and its storage folds in
+parallel through ordinary merge tasks. The one structural special case is the
+depth-64 account↔storage seam (§4.1.1): an account leaf **depends on** a storage-root
+subtask, so storage subtrees are leaf-most in the DAG and drain first —
+storage-first ordering falls out of the dependency for free.
 
 ## 2. Preliminaries *(informative)*
 
@@ -47,9 +50,9 @@ from the `PatriciaContext`), applies the update, and folds completed rows upward
 hashing each branch and writing it via `PatriciaContext.PutBranch`; the final fold
 to row 0 yields the root. A branch hash mixes **every present nibble** of the
 branch, not only the touched ones — the property §4 must preserve under
-partitioning, by unfolding any row a fold collapses from the DB first: the shared
-root row before mounting, and a whale's storage-root row before the deep fold
-(§4.1.1).
+partitioning, by seeding any row a fold collapses from the DB first: the shared
+root row before dispatch, and every merge task's `Branch(prefix)` row before it
+stitches its children (§4.1, including the depth-64 storage-root seam of §4.1.1).
 
 ## 3. Data structures
 
@@ -97,95 +100,99 @@ pooled workers, `numWorkers`, the published `rootHash`, and — for the deferred
 — a `leaveDeferredForCaller` flag with a `deferredForCaller` hand-off slice. An
 optional `streaming *StreamingCommitter`: when set, `Process` delegates to it
 (`processStreaming`, §10) and the mount path below is not used. The `template`
-doubles as the **mount base** during `Process`: it is unfolded to the root branch,
-the workers' folded cells are dropped into its row 0, and it folds the merged root.
-(Outside `Process` it exposes ctx/cache/metrics/trace configuration only.)
+doubles as the **finale base** during `Process`: its row 0 is seeded from the root
+branch, the top-nibble tasks' folded cells are stitched into it, and it folds the
+merged root. (Outside `Process` it exposes ctx/cache/metrics/trace configuration only.)
 
 ## 4. Pipeline
 
 | phase | site | action |
 | --- | --- | --- |
 | 1. Touch | `Updates.TouchPlainKey` (ModeParallel) | insert each hashed key into the prefix trie, carrying its `plainKey`/`update` on the terminating node; no ETL collectors are used |
-| 2. Mount + fold | `processMounted`, concurrent | unfold the base to the root branch; mount a worker per touched root nibble; each folds its child subtree into a cell (a big-storage account's storage folds concurrently, §4.1.1); drop the cells back into the base row and fold the merged root |
+| 2. Derive + fold DAG | `dispatchFrontier`, concurrent | seed the base root row; walk the prefix trie into a fold DAG (leaf/merge tasks + storage-root seams); fold the DAG with one frontier-scheduled worker pool; stitch the top-nibble cells into the base row and fold the merged root |
 | 3. Commit | `Process` end | apply (or hand off) the merged deferred branch updates; publish the root |
 
-### 4.1 Phase 2 — Mount and fold (`processMounted`, `dfsSubtreeDeep`)
+### 4.1 Phase 2 — Derive and fold the DAG (`dispatchFrontier`, `deriveFoldFrontier`, `foldPool`)
 
-1. **Unfold the base.** `processMounted` unfolds `template` down to the root
-   branch (`needUnfolding`/`unfold` on the zero prefix), loading the on-disk root
-   branch into `grid[0]`. This populates **every present child nibble, touched or
-   not** (I2), so untouched siblings survive the final fold and the branch hash
-   mixes all nibbles. The base MUST have `root.ext == 0` (§8).
-2. **Mount per touched nibble.** For each set bit in the prefix trie's root
-   `bitmap`, an errgroup (limit `numWorkers`) acquires a pooled
-   `*HexPatriciaHashed`, calls `mountTo(base, nibble)` — inheriting a copy of the
-   base's unfolded grid and sharing the base root cell read-only — and binds it to
-   a fresh factory `PatriciaContext` with deferred branch writes enabled.
-3. **Build.** `dfsSubtreeDeep(child, [nibble]+child.ext)` walks the nibble's subtree
-   in nibble-ascending order. At each terminating node it reconstructs the full
-   hashed key, reads the `plainKey`/`update` off the node, and calls
-   `followAndUpdate`. A node MUST emit its own key **before** descending to its
-   children, so an account at depth 64 precedes its storage keys — the sorted order
-   the fold state machine requires (I4). A terminating node with a nil `plainKey`
-   and no children is unsupported and MUST raise an error rather than be skipped.
-   When a node is a *big-storage account* (`isDeepStorageAccount`: depth 64, plain
-   key set, ≥ 2 first-storage nibbles, `subtreeCount > deepStorageThreshold`) the
-   walk does **not** descend into its storage children: it computes the storage root
-   via the deep storage fold (§4.1.1) and injects it into the account leaf
-   (`setAccountStorageRoot`).
-4. **Fold the mount.** `foldMounted(nibble)` folds the worker's subtree upward,
-   stopping when it reaches `mountWall` — the depth `mountTo` records as
-   `split-depth + 1`, so the top-level mount stops at depth 1, before it would absorb
-   the shared base root row — and returns `grid[0][nibble]`. The worker's deferred
-   branch updates are appended to the shared accumulator and the worker is returned
-   to the pool.
-5. **Merge and fold root.** On the main goroutine, after `errgroup.Wait`, each
-   folded cell is dropped into `base.grid[0][nibble]` (stripping the leading nibble
-   a hash-only sub-branch carries in its extension) and the touch/after maps are
-   set. The base then folds row 0 to the root; `rootPresent` is set from
-   `!root.IsEmpty()` so the encode/restore round-trip (§6.3) stays correct.
+Both the mount path (`processMounted`) and the streaming path (`StreamingCommitter.Process`)
+call `foldPool.dispatchFrontier`; the streaming path additionally passes a
+`reuseSchedulerCells` consumer (§10). The steps below are that shared core.
 
-Workers share the base root cell read-only and each inherit an independent copy of
-the unfolded grid; only the main goroutine mutates the base after `Wait`. There is
-no fold-time barrier and no cross-worker synchronisation beyond the deferred-update
-mutex.
+1. **Seed the base root row.** `unfoldRootWall` / `seedRootBase` seed `template`'s
+   `grid[0]` from the on-disk root branch, populating **every present child nibble,
+   touched or not** (I2), so untouched siblings survive the final fold and the branch
+   hash mixes all nibbles. The base MUST have `root.ext == 0` (§8).
+2. **Derive the DAG.** `deriveFoldFrontier(root, K, seedable)` walks the frozen prefix
+   trie top-down once (`fold_dag.go`). Each node is classified:
+   - `subtreeCount ≤ K` → **leaf task**: a serial replay of its ≤ `K` keys mounted on
+     the parent merge's seeded base.
+   - `subtreeCount > K` **and** `seedable(prefix)` → **merge task**: seed `Branch(prefix)`,
+     stitch its child cells, fold to the mount wall. Its children are derived recursively.
+   - `subtreeCount > K` but **not** `seedable(prefix)` → **demote**: the subtree is *not*
+     an independent task; it collapses into the serial replay of its nearest
+     branch-bearing ancestor (the seed-or-demote predicate, §5 I7 / §8).
+   - depth-64 account/storage seam → an **account-leaf task depending on a storage-root
+     subtask** (§4.1.1), never an ordinary account-plane merge.
+   The root itself is always the serial finale (never demoted): it folds against the
+   pre-seeded root wall. `K` is the box-adaptive boundary (§7). A merge (and an
+   account leaf awaiting its storage root) starts with a pending counter equal to its
+   child count.
+3. **Seed merge bases.** Before dispatch, `foldPool.run` seeds each merge task's own
+   pooled `*HexPatriciaHashed` from `Branch(prefix)` (`seedBaseAtPrefix`) under its own
+   factory `PatriciaContext` with deferred branch writes enabled — the mount wall its
+   children copy from and the row it stitches and folds.
+4. **Fold with the frontier pool.** `dispatchFoldTasks` runs `numWorkers` goroutines
+   pulling ready tasks off a channel. A task is ready when its pending counter is zero.
+   - A **leaf task** mounts a pooled worker on the parent merge's base (`mountTo`),
+     replays its key group in nibble-ascending order via `followAndUpdate` (a node emits
+     its own key before descending, so an account at depth 64 precedes its storage keys —
+     I4), and `foldMounted` returns the mount-wall cell.
+   - A **merge task** stitches its already-folded child cells into its seeded base
+     (`mergeChildrenAtPrefix`) and folds to the mount wall.
+   Folding a task decrements its parent's pending counter; at zero the parent is enqueued.
+   No task ever blocks holding a worker while waiting on a child, so the single pool is
+   the whole concurrency budget and the dispatch is deadlock-free by construction. A
+   fold error cancels the shared context and every worker drains out.
+5. **Merge and fold root.** On the main goroutine, each top-nibble task's cell is
+   stitched into `base.grid[0][nibble]` (`stitchSplitCells`, stripping the leading
+   nibble a hash-only sub-branch carries in its extension) and the base folds row 0 to
+   the root; `rootPresent` is set from `!root.IsEmpty()` so the encode/restore round-trip
+   (§6.3) stays correct.
 
-### 4.1.1 Deep storage fold (`foldStorageRoot`, `streaming_deep_fold.go`)
+Each task owns its own seeded base (merge) or pooled worker (leaf) and its own factory
+context; only the main goroutine mutates `template` after the pool drains. There is no
+fold-time barrier and no cross-worker synchronisation — tasks own disjoint prefixes, so
+their reads and deferred-branch accumulation never overlap.
 
-A big-storage account's storage subtree (a "whale") would otherwise fold serially on
-its top-nibble worker. `foldStorageRoot` folds it concurrently, applying the §4.1
-mount/fold model one level down at depth 64. It runs the same primitives
-(`mountTo`/`foldMounted`/`followAndUpdate`) and is shared verbatim by the streaming
-variant (§10).
+### 4.1.1 Depth-64 account/storage seam (`fold_dag.go`, `foldStorageSeam`)
 
-1. **Unfold the storage-root branch.** `unfoldStorageBase(base, accHash[:64])` seeds a
-   base worker by reading the account's on-disk storage-root branch
-   (`branchFromCacheOrDB` + `decodeBranchIntoRow` — the same decode the account unfold
-   `unfoldBranchNode` uses, entered manually at depth 64 instead of by recursive
-   descent). This is I2 applied at depth 64:
-   untouched on-disk first-storage-nibble siblings MUST be present before the storage
-   root is folded, or they are dropped and the storage root — hence the state root —
-   diverges (see I2).
-2. **Fold per first-storage nibble.** One errgroup worker per touched first-storage
-   nibble: `foldStorageLeaf` mounts the shared base at that nibble (`mountWall = 65`),
-   streams the nibble's sorted slots, and `foldMounted` returns the depth-65 child
-   cell. Workers defer their branch writes into the shared accumulator. They own
-   disjoint storage prefixes, so concurrent reads of the shared base are race-free.
-3. **Aggregate.** `aggregateMountedStorageRoot` overlays the folded child cells onto
-   the unfolded base row (setting/clearing each touched present bit, leaving untouched
-   on-disk siblings intact) and folds once to the account's storage-root cell.
-4. **Inject.** `setAccountStorageRoot` writes that hash into the account leaf
-   (`cell.hash`, `hashLen = 32`); `computeCellHash` uses it as the storageRoot for an
-   account whose storage cell was not streamed, so the leaf hashes identically to the
-   serial path. The DFS then skips the account's storage children.
+An account at depth 64 whose storage subtree exceeds `K` is **not** an ordinary
+account-plane merge: its children are storage nibbles, not account siblings. The
+derivation encodes this as an account-leaf task with a `storage` dependency edge:
 
-Below `deepStorageThreshold`, or with storage in a single first nibble, the account
-streams inline as in §4.1 — the per-account setup cost (a pooled worker, a fresh
-context, the storage-root unfold) only pays off for genuinely large storage.
+1. **Split.** The account node becomes a **leaf task** (`planeAccount`) plus a
+   **storage-root subtask** (`planeMerge`, `planeStorage`) rooted at the same depth-64
+   prefix; the leaf's pending counter is 1 (the storage edge). The storage subtask's
+   children are derived from the touched first-storage nibbles under ordinary K policy,
+   so a whale's storage folds across many merge/leaf tasks, not one worker.
+2. **Fold the storage root.** The storage subtask is a merge seeded from the account's
+   on-disk storage-root branch (I2 at depth 64: untouched on-disk storage siblings MUST
+   be present, or the storage root — hence the state root — diverges). `foldStorageSeam`
+   aggregates the folded child cells (`aggregateMountedStorageRoot`) into the account's
+   storage-root cell, collapsing a single survivor via `storageRootFromSingleChild`.
+3. **Inject.** The collapsed root hash is stored on the parent, releasing its pending
+   edge; when the account leaf folds it applies the account update and calls
+   `setAccountStorageRoot`, which writes the hash into the account leaf (`cell.hash`,
+   `hashLen = 32`). `computeCellHash` uses it as the storageRoot for an account whose
+   storage cell was not streamed, so the leaf hashes identically to the serial path.
+
+Because the account leaf depends on its storage-root subtask, storage subtrees are
+leaf-most in the DAG and drain first — storage-first ordering is a property of the
+dependency, not a scheduled phase.
 
 ### 4.2 Phase 3 — Commit and root publication
 
-Workers accumulate `DeferredBranchUpdate`s rather than writing branches. After the
+Tasks accumulate `DeferredBranchUpdate`s rather than writing branches. After the
 fold:
 
 - **Default (inline).** `applyDeferredUpdates` merges every list and applies it
@@ -206,11 +213,11 @@ primary enforcement of I1.
 - **I1 — Equal root.** The published root equals the sequential root for every
   input (R1).
 - **I2 — Untouched-nibble preservation.** Because a branch hash mixes all present
-  nibbles, every branch row a fold collapses MUST first be unfolded from `ctx.Branch`
-  so untouched on-disk siblings are present. This holds at two depths: the shared
-  root row before mounting (`processMounted`), and each big-storage account's
-  storage-root branch before the deep fold (`unfoldStorageBase`, §4.1.1). Dropping
-  either unfold drops untouched siblings and diverges the root.
+  nibbles, every branch row a fold collapses MUST first be seeded from `ctx.Branch`
+  so untouched on-disk siblings are present. This holds for every merge task
+  (`seedBaseAtPrefix(Branch(prefix))` before it stitches its children), the shared
+  root row before dispatch (`seedRootBase`), and each depth-64 storage-root seam
+  (§4.1.1). Dropping any seed drops untouched siblings and diverges the root.
 - **I3 — `plainKey` follows the split.** `prefixTrie.Insert` MUST route a
   terminator's `plainKey` to the correct node across path-compression splits (§3.1).
   A misroute is a wrong DB read and a diverged root.
@@ -218,18 +225,21 @@ primary enforcement of I1.
   `followAndUpdate` in ascending hashed-key order, a terminating node before its
   descendants; the DFS yields this because children are nibble-ordered.
 - **I5 — Single branch writer.** All `PutBranch` calls issue from one goroutine
-  (inline apply) or are handed to the caller; workers own disjoint top-nibble
-  subtrees hence disjoint branch prefixes, and each subtree has a single producer.
-- **I6 — Read safety.** Workers walk disjoint top-nibble subtrees of the frozen
-  prefix trie and each fold an independent copy of the unfolded grid, sharing the
-  base root cell read-only; the merged base row is folded only on the main
-  goroutine after `errgroup.Wait`, so concurrent structure/`plainKey` reads and the
-  final fold are race-free.
-- **I7 — Deep fold equals inline stream.** For a big-storage account, the storage
-  root from `foldStorageRoot` injected via `setAccountStorageRoot` MUST equal the
-  root the serial inline stream would produce. Its per-first-nibble workers own
-  disjoint storage prefixes, share the unfolded storage base read-only, and each
-  defers its own branch writes (I5).
+  (inline apply) or are handed to the caller; tasks own disjoint subtree prefixes
+  hence disjoint branch prefixes, and each prefix has a single producer.
+- **I6 — Read safety.** Each task folds on its own pooled worker (leaf) or seeded
+  base (merge) under its own factory context, and the tasks own disjoint prefixes of
+  the frozen prefix trie; the merged base row is folded only on the main goroutine
+  after the pool drains, so concurrent structure/`plainKey` reads and the final fold
+  are race-free. The dispatch is deadlock-free by construction: no task holds a worker
+  while waiting on a child (§4.1 step 4).
+- **I7 — Seed-or-demote is exact.** A merge task is created for prefix P **only** when
+  a read-only `Branch(P)` probe confirms an on-disk branch exactly at P; otherwise the
+  subtree demotes into its nearest seedable ancestor's serial replay. A false "empty"
+  probe would drop on-disk siblings and diverge the root, so an unproven probe MUST
+  demote or hard-error — never fold a synthesized empty wall (§8). For the depth-64
+  seam, the storage root from `foldStorageSeam` injected via `setAccountStorageRoot`
+  MUST equal the root the serial inline stream would produce.
 
 ## 6. Integration contract
 
@@ -270,18 +280,21 @@ substitution of the as-of reader is validated at runtime by the block-root check
 | --- | --- | --- |
 | `--experimental.parallel-commitment` | off | selects `VariantParallelHexPatricia` (`execctx.PickTrieVariant`) |
 | `--experimental.streaming-commitment` | off | selects `VariantStreamingHexPatricia` (`StreamingCommitter`); takes precedence over `--experimental.parallel-commitment` |
-| `deepStorageThreshold` | 1000 | compile-time const (not a runtime flag): per-account touched-storage-key count above which the storage subtree folds concurrently (§4.1.1); mitigates the whale bottleneck of §11 |
-| `numWorkers` | `runtime.NumCPU()` | worker-pool size and errgroup limit; override via `SetNumWorkers` |
+| `K` | `max(foldKMin, total/(c·numWorkers))` | leaf/merge boundary (`foldK`): subtrees ≤ `K` fold as one serial leaf, larger ones subdivide into merges; `total` = root `subtreeCount` |
+| `foldKMin` | 1024 | compile-time const: floors `K` so a merge task always folds enough keys to amortize its fixed cost (own trie context, mmap pin, a `Branch(prefix)` seed read) |
+| `c` | 1 | compile-time oversubscription factor in `foldK`; `c=1` keeps `K` a no-op at the natural fan-out (≈ one task per worker on balanced data). Raised only on bench evidence — a higher `c` subdivides every top nibble into ~`c` tasks each paying ctx+pin+seed, the measured detach regression |
+| `numWorkers` | `runtime.NumCPU()` | shared pool size (the single GOMAXPROCS-capped concurrency budget); override via `SetNumWorkers` |
 
 ## 8. Failure modes
 
 | condition | behaviour |
 | --- | --- |
 | empty update set | return the template's existing root (matches the sequential no-op) |
-| base root carries an extension (`root.ext != 0`) | return an error — not yet supported by the mount path |
+| base root carries an extension (`root.ext != 0`) | return an error — not yet supported by the dispatch path |
 | terminating node with nil `plainKey` and no children | return an error (only reachable via a hashed-only `TouchHashedKey`; that path is not wired for the parallel trie) |
+| merge seed absent at `Branch(prefix)` when the DAG expected it | hard error `errStorageBaseNotBranch` (a store change mid-Process) — never fold a sibling-dropping empty wall |
 | deferred apply failure (inline path) | discard the staged root; never surface an unpersisted root |
-| worker error mid-fold | cancel the group; return pooled deferred entries |
+| task error mid-fold | cancel the shared context; recycle every collected task's deferred entries to the pool, apply nothing (fail-closed) |
 
 ## 9. Validation
 
@@ -289,6 +302,13 @@ substitution of the as-of reader is validated at runtime by the block-root check
 - `TestVerifyParallel_RandomBatches` / `TestVerifyParallel_AllShapes` — randomized
   and shaped batches, parallel vs sequential root equality.
 - `FuzzParallelEquivalence` — fuzzes parallel-vs-sequential equality.
+- `TestFrontierParity_*` (`frontier_parity_test.go`) — root **and** stored-branch
+  byte parity vs the sequential trie after **every** batch (N ≥ 3), with an
+  `EncodeCurrentState`→`SetState` round-trip between batches, over balanced,
+  mega-whale, delete-to-collapse, and extension-topped corpora; an injection self-test
+  proves the harness goes red on a corrupted branch.
+- `TestUnifiedDispatch_ParallelMatchesStreaming` — the mount and streaming paths
+  produce byte-identical root + branch store per batch through the shared dispatch.
 - `ErrWrongTrieRoot` — at block-apply time, the computed root is compared to the
   block header; the value-source substitution of §6.3 is proven here, not by the
   unit harness.
@@ -302,41 +322,52 @@ in scheduling.
 | --- | --- | --- |
 | flag | (default) | `--experimental.parallel-commitment` |
 | `Updates` mode | `ModeDirect` / `ModeUpdate` | `ModeParallel` |
-| parallel unit | none | one worker per **touched** top nibble (≤16), plus one per first-storage nibble inside a big-storage account |
-| split granularity | none | touched top nibbles at depth 1, and first-storage nibbles at depth 64 for big-storage accounts (§4.1.1) |
-| merge | single bottom-up fold | per-mount cells dropped into the base row, single root fold |
+| parallel unit | none | one fold task per DAG node (leaf ≤ `K` keys / merge > `K`), pulled by a shared pool of `numWorkers` |
+| split granularity | none | frontier-scheduled over the whole fold DAG at any depth; a whale's storage subtree subdivides into ordinary merge/leaf tasks (§4.1.1) |
+| merge | single bottom-up fold | per-task cells stitched into the parent's seeded row, folded up the DAG to a single root fold |
 | branch writes | inline | deferred, applied once or handed to the caller |
 | key delivery | one sorted stream | prefix trie carrying `plainKey`/`update` |
 | applicability | always | any shape with `root.ext == 0` |
 
 A third variant, `StreamingCommitter` (`--experimental.streaming-commitment` →
 `VariantStreamingHexPatricia`), layers on this one rather than replacing it: it
-reuses the same prefix trie and fold engine and upholds R1 identically. It differs
-only in *when* the fold runs — touched keys are re-folded per top-nibble split in a
-background worker pool overlapping execution, so `Process` collapses to a merge of
-already-folded split cells. Folds are stateless (re-folded from the prefix-trie key
-set, never a persistent per-split hph mutated by touches — that would break the
-monotonic `followAndUpdate` contract). It uses the `streaming` flag on `Updates`
-(not a new `Mode`).
+reuses the same prefix trie and the **same** `foldPool.dispatchFrontier` core, and
+upholds R1 identically. It differs only in *when* the fold runs — as touches arrive,
+an eager background scheduler pre-folds clean top-nibble splits overlapping execution;
+at `Process` the frontier dispatch **consumes** those cached cells via
+`reuseSchedulerCells` (a clean split is pruned from the DAG and its pre-folded
+cell/deferred stitched directly), while re-dirtied or heavy nibbles fold fresh through
+the pool. Folds are stateless (re-folded from the prefix-trie key set, never a
+persistent per-split hph mutated by touches — that would break the monotonic
+`followAndUpdate` contract). It uses the `streaming` flag on `Updates` (not a new `Mode`).
 
-Big-storage accounts take the **same** deep storage fold (§4.1.1): each split's
-`foldSplit` runs `dfsSubtreeDeep` with `foldStorageRoot`, shared verbatim from
-`streaming_deep_fold.go` — the deep-fold logic is not duplicated. See
-`execution/commitment/streaming_commitment.go`.
+Whale storage is **not** a special case in either variant: it partitions through the
+same fold DAG as any other subtree (§4.1.1), and the mount path (`processMounted`) and
+streaming path (`Process`) share one `dispatchFrontier` — the mount path simply passes
+`reuse=nil`. See `execution/commitment/streaming_commitment.go`.
 
 ## 11. Performance characteristics *(informative)*
 
-Top-level parallelism is bounded by the number of **touched** root nibbles (≤ 16);
-within a big-storage account the deep fold (§4.1.1) adds a second level bounded by
-its touched first-storage nibbles (≤ 16), so a single "whale" account with hundreds
-of thousands of storage slots folds across up to 16 workers instead of one.
+Parallelism is no longer bounded by the ≤ 16 touched root nibbles: the frontier pool
+subdivides any subtree over `K` into merge/leaf tasks at any depth, so a single "whale"
+account with hundreds of thousands of storage slots folds across the whole pool, and
+utilization stays near-full until the DAG collapses onto the root spine. At
+`numWorkers = NumCPU` on a seedable (re-touched) whale the pool holds > 92 %
+utilization with a < 2.5 % serial-collapse tail; the > 16-core utilization gain is only
+demonstrable on a > 16-core box.
 
-At `numWorkers = NumCPU` the parallel commitment is effectively core-bound: worker
-budget beyond NumCPU buys little, and lowering `deepStorageThreshold` to detach
-medium accounts costs more in per-account setup (a pooled worker, a fresh context,
-the storage-root unfold) than the extra split saves. Splitting deeper than the first
-storage nibble, and detaching storage below the whale threshold, are not currently
-worthwhile.
+At `numWorkers = NumCPU` the commitment is core-bound: worker budget beyond NumCPU
+buys little, and the `c = 1` / `foldKMin` policy (§7) is a deliberate no-op at the
+natural fan-out — a smaller `K` would subdivide every top nibble into tasks each paying
+ctx+pin+seed, the measured detach regression.
+
+One case is serial by construction: a **fresh** whale (a contract created *and* writing
+> `K` slots in the same block) has no on-disk account branch, so its prefix is
+unseedable and its storage subtree demotes (§5 I7) to a single serial leaf. Freshness
+is only knowable at fold time, after derivation, so the pure-DAG storage-first ordering
+cannot parallelize it without a derive-time freshness oracle — deliberately not adopted
+(a false negative would drop on-disk siblings and diverge the root; correctness
+outranks the speedup). Re-touched whales, the common case, keep full seam parallelism.
 
 The benchmark `MockState` serializes reads on a shared lock and therefore
 under-reports the parallel speedup relative to production's independent per-worker
@@ -346,13 +377,15 @@ MDBX readers; figures are for inspection, not a CI gate.
 
 | file | contents |
 | --- | --- |
-| `execution/commitment/parallel_patricia_hashed.go` | `ParallelPatriciaHashed`, `Process` (routes to `processStreaming` when a committer is set), `dfsSubtree`, deferred apply and hand-off |
-| `execution/commitment/parallel_mount.go` | `processMounted` — unfold, per-nibble mount/fold via `dfsSubtreeDeep`, merged root fold; `mountTo`; `setAccountStorageRoot`; `deepStorageThreshold` |
-| `execution/commitment/streaming_deep_fold.go` | the deep storage fold shared by the parallel and streaming paths: `dfsSubtreeDeep`, `isDeepStorageAccount`, `foldStorageRoot`, `unfoldStorageBase`, `foldStorageLeaf`, `aggregateMountedStorageRoot` |
-| `execution/commitment/hex_patricia_hashed.go` | sequential engine; `foldMounted` and the `mountWall` stop used by both fold levels |
+| `execution/commitment/fold_dag.go` | the fold DAG: `foldTask`, `deriveFoldDAG` (leaf/merge classification, seed-or-demote, the depth-64 storage-root seam edge), `foldK`/`foldKMin` |
+| `execution/commitment/fold_pool.go` | the frontier pool: `foldPool`, `dispatchFrontier`, `deriveFoldFrontier`, `dispatchFoldTasks` (ready-counter scheduling), `foldLeafTask`/`foldMergeTask`/`foldStorageSeam`, `seedMerge`, fail-closed recycling |
+| `execution/commitment/parallel_patricia_hashed.go` | `ParallelPatriciaHashed`, `Process` (routes to `processStreaming` when a committer is set), `dfsSubtree`, `newFoldPool`, deferred apply and hand-off |
+| `execution/commitment/parallel_mount.go` | `processMounted` — seed the root wall, then `dispatchFrontier` (reuse=nil); `unfoldRootWall`; `seedRootBase`; `mountTo`; `setAccountStorageRoot` |
+| `execution/commitment/streaming_deep_fold.go` | the fold seam primitives the pool folds with: `seedBaseAtPrefix` (the seedable prober), `seedOrDemote`, `mergeChildrenAtPrefix`/`stripCellToMountWall`, `aggregateMountedStorageRoot`/`storageRootFromSingleChild`, `stitchChildrenIntoRow0`, `collectSubtreeKeys`, `newDeferredStorageWorker` |
+| `execution/commitment/hex_patricia_hashed.go` | sequential engine; `foldMounted` and the `mountWall` stop used by every fold task |
 | `execution/commitment/parallel_update.go` | `parallelUpdate`, `plainKeyArena`, `Insert`/deferred accumulation |
-| `execution/commitment/prefix_trie.go` | path-compressed prefix trie + slab arena; `Insert` `plainKey` placement |
+| `execution/commitment/prefix_trie.go` | path-compressed prefix trie + slab arena; `Insert` `plainKey` placement; `subtreeCount` (the DAG's leaf/merge signal) |
 | `execution/commitment/commitment.go` | `Updates` (ModeParallel carries keys in the prefix trie), `InitializeTrieAndUpdates` |
 | `execution/commitment/commitmentdb/commitment_context.go` | wires ModeParallel and caller-deferred updates into `ComputeCommitment` |
 | `execution/stagedsync/committer.go` | parallel-exec commitment calculator; keeps the ModeParallel buffer, serves values via the as-of reader |
-| `execution/commitment/streaming_commitment.go` | `StreamingCommitter`, the prepare-on-touch variant layered on this one |
+| `execution/commitment/streaming_commitment.go` | `StreamingCommitter`, the prepare-on-touch variant layered on this one; `Process`, `reuseSchedulerCells`, the eager scheduler |
