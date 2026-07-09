@@ -968,6 +968,59 @@ func TestFindMergeRangeInFiles(t *testing.T) {
 		assert.Equal(t, uint64(4), mr.from)
 		assert.Equal(t, uint64(6), mr.to)
 	})
+
+	// --- Coverage-mismatch guard: never propose a merge whose declared range
+	// extends past the union of input files. Under --prune.mode=minimal,
+	// retire's gap-detection guard (aggregator.go:2350) refuses to build empty
+	// single-step files for the "pruned history" range, and can leave a lone
+	// late-step file whose max-aligned window sits strictly left of it with
+	// nothing in between. Without the coverage guard, merge would produce a
+	// wider output whose name lies about its actual data coverage.
+
+	t.Run("lone_late_file_at_non_max_aligned_position_no_merge", func(t *testing.T) {
+		// [287, 288) with maxSpan=32 → no merge. calculateMergeStartTxNum would
+		// propose start=256, but no file covers [256, 287); a merge would produce
+		// a `.256-288` output containing only the [287, 288) portion, whose
+		// declared step range lies about actual coverage.
+		files := visibleFiles{f(287, 288)}
+		mr := findMergeRangeInFiles(files, stepSize, 288, 32, false)
+		assert.False(t, mr.needMerge,
+			"lone non-aligned file must not trigger a wider merge with no coverage below it")
+	})
+
+	t.Run("lone_late_file_at_non_max_aligned_position_no_merge_superSet", func(t *testing.T) {
+		files := visibleFiles{f(287, 288)}
+		mr := findMergeRangeInFiles(files, stepSize, 288, 32, true)
+		assert.False(t, mr.needMerge)
+	})
+
+	t.Run("gap_between_earlier_and_late_file_no_wider_merge", func(t *testing.T) {
+		// [0, 256), [287, 288) with maxSpan=32 → no merge. f(0,256) doesn't extend
+		// coverage past 256; [256, 287) remains uncovered.
+		files := visibleFiles{f(0, 256), f(287, 288)}
+		mr := findMergeRangeInFiles(files, stepSize, 288, 32, false)
+		assert.False(t, mr.needMerge,
+			"the gap between .0-256 and .287-288 must not be filled by a fabricated merge")
+	})
+
+	t.Run("contiguous_files_still_merge_after_guard", func(t *testing.T) {
+		// The new guard must NOT block legitimate merges: contiguous files that
+		// actually cover the proposed range should still merge as before. This is
+		// the state after the mode-B history-download step populates the
+		// intermediate preverified files.
+		files := visibleFiles{
+			f(256, 272),
+			f(272, 280),
+			f(280, 284),
+			f(284, 286),
+			f(286, 287),
+			f(287, 288),
+		}
+		mr := findMergeRangeInFiles(files, stepSize, 288, 32, false)
+		assert.True(t, mr.needMerge)
+		assert.Equal(t, uint64(256), mr.from)
+		assert.Equal(t, uint64(288), mr.to)
+	})
 }
 
 func Test_mergeEliasFano(t *testing.T) {

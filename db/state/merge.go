@@ -125,7 +125,7 @@ func calculateMergeStartTxNum(endTxNum, stepSize, maxSpan uint64) uint64 {
 // take over.
 func findMergeRangeInFiles(files visibleFiles, stepSize, maxEndTxNum, maxSpan uint64, superSetCheck bool) MergeRange {
 	var r MergeRange
-	for _, item := range files {
+	for i, item := range files {
 		if item.endTxNum > maxEndTxNum {
 			continue
 		}
@@ -139,6 +139,9 @@ func findMergeRangeInFiles(files visibleFiles, stepSize, maxEndTxNum, maxSpan ui
 		if start >= item.startTxNum {
 			continue
 		}
+		if !filesCoverBackwardTo(files, i, start) {
+			continue
+		}
 		if r.needMerge && start > r.from {
 			continue
 		}
@@ -147,6 +150,38 @@ func findMergeRangeInFiles(files visibleFiles, stepSize, maxEndTxNum, maxSpan ui
 		r.to = item.endTxNum
 	}
 	return r
+}
+
+// filesCoverBackwardTo reports whether files[i] plus contiguous earlier
+// files reach down to start. `files` is sorted by endTxNum ascending; a
+// contiguous run is a suffix f[k], f[k+1], … f[i] where every adjacent
+// pair f[j].endTxNum == f[j+1].startTxNum.
+//
+// Without this check findMergeRangeInFiles would propose a merge whose
+// declared range exceeds the union of its input files, and mergeFiles
+// would produce an output whose name claims a wider step range than
+// its actual data covers. That silent-coverage-mismatch is what the
+// buildFiles gap-detection guard (aggregator.go:2350) is trying to
+// prevent on the retire side; without this check the same corruption
+// slips through on the merge side when retire correctly refused to
+// build the earlier steps but left a lone late-step file behind.
+// Concrete repro: --prune.mode=minimal leaves only `.287-288.v` after
+// retire; calculateMergeStartTxNum would propose {256, 288} → merge
+// writes `.256-288.v` containing only the .287-288 content, and every
+// subsequent reader (mode-B compute in particular) sees a file whose
+// step range lies about its data coverage.
+func filesCoverBackwardTo(files visibleFiles, i int, start uint64) bool {
+	coverStart := files[i].startTxNum
+	for j := i - 1; j >= 0; j-- {
+		if files[j].endTxNum != coverStart {
+			break
+		}
+		coverStart = files[j].startTxNum
+		if coverStart <= start {
+			return true
+		}
+	}
+	return coverStart <= start
 }
 
 // clipMergeStartToFileBoundary bumps start up to the endTxNum of any visible
