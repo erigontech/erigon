@@ -208,47 +208,51 @@ func (e *ExecModule) unwindIfNeeded(
 			Status:          ExecutionStatusSuccess,
 		}, nil
 	}
-	currentParentHash := fcuHeader.ParentHash
-	var currentParentNumber uint64
-	if fcuHeader.Number.Sign() == 0 {
-		// genesis is its own canonical reconnection point; Number-1 would underflow
-		currentParentHash = fcuHeader.Hash()
-	} else {
-		currentParentNumber = fcuHeader.Number.Uint64() - 1
+	if fcuHeader.Number.Sign() == 0 && canonicalHash != blockHash {
+		return &ForkChoiceResult{
+			LatestValidHash: rawdb.ReadHeadBlockHash(tx),
+			Status:          ExecutionStatusBadBlock,
+			ValidationError: "forkchoice head is a non-genesis block at height 0",
+		}, nil
 	}
-	isCanonicalHash, err := e.isCanonicalHash(ctx, tx, currentParentHash)
-	if err != nil {
-		return nil, err
-	}
-	// Find such point, and collect all hashes
+	// Find the canonical reconnection point, and collect all hashes on the way
 	newCanonicals := make([]*canonicalEntry, 0, 64)
 	newCanonicals = append(newCanonicals, &canonicalEntry{
 		hash:   fcuHeader.Hash(),
 		number: fcuHeader.Number.Uint64(),
 	})
-	for !isCanonicalHash {
-		newCanonicals = append(newCanonicals, &canonicalEntry{
-			hash:   currentParentHash,
-			number: currentParentNumber,
-		})
-		currentHeader, err := e.blockReader.Header(ctx, tx, currentParentHash, currentParentNumber)
+	var currentParentNumber uint64
+	if fcuHeader.Number.Sign() > 0 {
+		currentParentHash := fcuHeader.ParentHash
+		currentParentNumber = fcuHeader.Number.Uint64() - 1
+		isCanonicalHash, err := e.isCanonicalHash(ctx, tx, currentParentHash)
 		if err != nil {
 			return nil, err
 		}
-		if currentHeader == nil {
-			return &ForkChoiceResult{
-				LatestValidHash: common.Hash{},
-				Status:          ExecutionStatusMissingSegment,
-			}, nil
-		}
-		currentParentHash = currentHeader.ParentHash
-		if currentHeader.Number.Sign() == 0 {
-			panic("assert:uint64 underflow") //uint-underflow
-		}
-		currentParentNumber = currentHeader.Number.Uint64() - 1
-		isCanonicalHash, err = e.isCanonicalHash(ctx, tx, currentParentHash)
-		if err != nil {
-			return nil, err
+		for !isCanonicalHash {
+			newCanonicals = append(newCanonicals, &canonicalEntry{
+				hash:   currentParentHash,
+				number: currentParentNumber,
+			})
+			currentHeader, err := e.blockReader.Header(ctx, tx, currentParentHash, currentParentNumber)
+			if err != nil {
+				return nil, err
+			}
+			if currentHeader == nil {
+				return &ForkChoiceResult{
+					LatestValidHash: common.Hash{},
+					Status:          ExecutionStatusMissingSegment,
+				}, nil
+			}
+			currentParentHash = currentHeader.ParentHash
+			if currentHeader.Number.Sign() == 0 {
+				panic("assert:uint64 underflow") //uint-underflow
+			}
+			currentParentNumber = currentHeader.Number.Uint64() - 1
+			isCanonicalHash, err = e.isCanonicalHash(ctx, tx, currentParentHash)
+			if err != nil {
+				return nil, err
+			}
 		}
 	}
 	unwindTarget := currentParentNumber
