@@ -1394,8 +1394,10 @@ func (m Mode) String() string {
 
 type Updates struct {
 	hasher keyHasher
-	keys   map[string]struct{} // plain keys to keep only unique keys in etl
-	etl    *etl.Collector      // all-in-one collector
+	// keys dedups touched keys; in ModeDirect the value is the key's index into
+	// direct (for carried-value merges), -1 when no in-memory entry exists.
+	keys map[string]int32
+	etl  *etl.Collector // all-in-one collector
 	// Sorted by hashedKey first, with plainKey as a tiebreaker (see
 	// keyUpdateLessFn). Trie traversal must happen in hashedKey order so
 	// Process's fold/unfold operates on adjacent paths; iterating by
@@ -1417,6 +1419,12 @@ type Updates struct {
 	direct         []KeyUpdate
 	directBytes    int
 	directMemLimit int
+	directUpdates  updateSlab
+	directHKs      nibbleSlab
+
+	// hkScratch backs ModeParallel hashed keys: both the prefix trie and the
+	// streaming sink copy what they keep, so one buffer per Updates suffices.
+	hkScratch [128]byte
 
 	// streaming (ModeParallel only) forwards every touched key to streamer.
 	streaming bool
@@ -1497,6 +1505,28 @@ func (t *Updates) hashKey(key []byte) []byte {
 	return t.hasher(key)
 }
 
+// hashKeyRetained nibblizes key into the cycle-scoped slab; valid until the
+// collection cycle is consumed. ModeDirect entries retain these.
+func (t *Updates) hashKeyRetained(key []byte) []byte {
+	if !t.addrCacheReuse {
+		return t.hasher(key)
+	}
+	n := 2 * length.Hash
+	if len(key) > length.Addr {
+		n = 4 * length.Hash
+	}
+	return keyToHexNibbleHashCachedInto(key, &t.addrCache, t.directHKs.alloc(n))
+}
+
+// hashKeyTransient nibblizes key into a single reused scratch; valid only until
+// the next call. ModeParallel consumers copy what they keep.
+func (t *Updates) hashKeyTransient(key []byte) []byte {
+	if !t.addrCacheReuse {
+		return t.hasher(key)
+	}
+	return keyToHexNibbleHashCachedInto(key, &t.addrCache, t.hkScratch[:])
+}
+
 // NewEmpty creates a fresh Updates matching the receiver. The streaming sink must
 // carry over, or a buffer rotated mid-stream silently computes a stale root.
 func (t *Updates) NewEmpty() *Updates {
@@ -1516,12 +1546,12 @@ func NewUpdates(m Mode, tmpdir string, hasher keyHasher) *Updates {
 	}
 	switch t.mode {
 	case ModeDirect:
-		t.keys = make(map[string]struct{})
+		t.keys = make(map[string]int32)
 	case ModeUpdate:
 		t.tree = btree.NewG(64, keyUpdateLessFn)
 		t.treeIdx = make(map[string]*KeyUpdate)
 	case ModeParallel:
-		t.keys = make(map[string]struct{})
+		t.keys = make(map[string]int32)
 		t.parallel = newParallelUpdate()
 	}
 	return t
@@ -1532,7 +1562,7 @@ func (t *Updates) SetMode(m Mode) {
 	switch t.mode {
 	case ModeDirect:
 		if t.keys == nil {
-			t.keys = make(map[string]struct{})
+			t.keys = make(map[string]int32)
 		}
 	case ModeUpdate:
 		if t.tree == nil {
@@ -1541,7 +1571,7 @@ func (t *Updates) SetMode(m Mode) {
 		}
 	case ModeParallel:
 		if t.keys == nil {
-			t.keys = make(map[string]struct{})
+			t.keys = make(map[string]int32)
 		}
 		if t.parallel == nil {
 			t.parallel = newParallelUpdate()
@@ -1576,19 +1606,164 @@ func plainKeyBytes(pk string) []byte {
 	return common.ToBytesZeroCopy(pk)
 }
 
-// collectDirect records one ModeDirect touch. hashedKey and plainKey must be
-// immutable: both are retained until HashSort consumes the batch.
-func (t *Updates) collectDirect(hashedKey []byte, plainKey string) {
+// carriedUpdateSize approximates a carried *Update's heap cost in the
+// directMemLimit accounting.
+const carriedUpdateSize = 128
+
+const updateSlabChunk = 2048
+
+// updateSlab bump-allocates Updates from fixed chunks: addresses stay stable,
+// the pointer-free chunks add no GC scan work, and reset keeps the first chunk
+// so steady-state collection allocates nothing.
+type updateSlab struct {
+	chunks   [][]Update
+	chunkIdx int
+	next     int
+}
+
+func (s *updateSlab) alloc() *Update {
+	if s.chunkIdx >= len(s.chunks) {
+		s.chunks = append(s.chunks, make([]Update, updateSlabChunk))
+	}
+	c := s.chunks[s.chunkIdx]
+	u := &c[s.next]
+	s.next++
+	if s.next == len(c) {
+		s.chunkIdx++
+		s.next = 0
+	}
+	*u = Update{}
+	return u
+}
+
+func (s *updateSlab) reset() {
+	if len(s.chunks) > 1 {
+		s.chunks = s.chunks[:1]
+	}
+	s.chunkIdx, s.next = 0, 0
+}
+
+const nibbleSlabChunk = 128 * 1024
+
+// nibbleSlab bump-allocates hashed-key buffers for one collection cycle. The
+// rewind is deferred through markStale to the next alloc: in-flight warmup
+// items may hold slab-backed keys until the consuming Process returns, and the
+// next touch cannot happen before that.
+type nibbleSlab struct {
+	chunks   [][]byte
+	chunkIdx int
+	next     int
+	stale    bool
+}
+
+func (s *nibbleSlab) markStale() { s.stale = true }
+
+func (s *nibbleSlab) rewind() {
+	if len(s.chunks) > 1 {
+		s.chunks = s.chunks[:1]
+	}
+	s.chunkIdx, s.next, s.stale = 0, 0, false
+}
+
+func (s *nibbleSlab) alloc(n int) []byte {
+	if s.stale {
+		s.rewind()
+	}
+	if s.chunkIdx >= len(s.chunks) {
+		s.chunks = append(s.chunks, make([]byte, nibbleSlabChunk))
+	}
+	c := s.chunks[s.chunkIdx]
+	if s.next+n > len(c) {
+		s.chunkIdx++
+		s.next = 0
+		if s.chunkIdx >= len(s.chunks) {
+			s.chunks = append(s.chunks, make([]byte, nibbleSlabChunk))
+		}
+		c = s.chunks[s.chunkIdx]
+	}
+	b := c[s.next : s.next+n : s.next+n]
+	s.next += n
+	return b
+}
+
+// collectDirect records one ModeDirect touch and returns the entry's index into
+// direct, or -1 when the batch lives in the etl collector. hashedKey and plainKey
+// must be immutable: both are retained until HashSort consumes the batch. update
+// (owned by the receiver) carries the key's full post-state for delivery; nil
+// keeps the fold-time re-read. Spilled batches always deliver nil — carried
+// values never cross the etl encoding.
+func (t *Updates) collectDirect(hashedKey []byte, plainKey string, update *Update) int32 {
 	if t.etl != nil {
 		if err := t.etl.Collect(hashedKey, plainKeyBytes(plainKey)); err != nil {
 			log.Warn("failed to collect updated key", "key", fmt.Sprintf("%x", plainKey), "err", err)
 		}
-		return
+		return -1
 	}
-	t.direct = append(t.direct, KeyUpdate{hashedKey: hashedKey, plainKey: plainKey})
+	t.direct = append(t.direct, KeyUpdate{hashedKey: hashedKey, plainKey: plainKey, update: update})
 	t.directBytes += len(hashedKey) + len(plainKey) + directEntryOverhead
+	if update != nil {
+		t.directBytes += carriedUpdateSize
+	}
 	if t.directBytes >= t.directMemLimit {
 		t.spillDirect()
+		return -1
+	}
+	return int32(len(t.direct) - 1)
+}
+
+// carryDirect merges a value-carrying touch into the in-memory collection:
+// last write wins, one entry per key at its first-touch position.
+func (t *Updates) carryDirect(key string, update *Update) {
+	idx, ok := t.keys[key]
+	if !ok {
+		u := t.directUpdates.alloc()
+		*u = *update
+		t.keys[key] = t.collectDirect(t.hashKeyRetained(common.ToBytesZeroCopy(key)), key, u)
+		return
+	}
+	if t.etl != nil || idx < 0 {
+		return
+	}
+	e := &t.direct[idx]
+	if e.update == nil {
+		e.update = t.directUpdates.alloc()
+		t.directBytes += carriedUpdateSize
+	}
+	*e.update = *update
+	// Upgrading a marker grows directBytes, so honor the same spill threshold as
+	// collectDirect; otherwise a marker-heavy batch upgraded in place blows the cap.
+	if t.directBytes >= t.directMemLimit {
+		t.spillDirect()
+	}
+}
+
+// TouchPlainKeyDropCarried marks key as touched in ModeDirect while dropping any
+// value it carries, so the fold re-reads it; used when a write invalidates a
+// record the carried value was derived from.
+func (t *Updates) TouchPlainKeyDropCarried(key string) {
+	if t.mode != ModeDirect {
+		return
+	}
+	idx, ok := t.keys[key]
+	if !ok {
+		t.keys[key] = t.collectDirect(t.hashKeyRetained(common.ToBytesZeroCopy(key)), key, nil)
+		return
+	}
+	if t.etl == nil && idx >= 0 && t.direct[idx].update != nil {
+		t.direct[idx].update = nil
+		t.directBytes -= carriedUpdateSize
+	}
+}
+
+// DropCarriedValues downgrades every collected entry to fold-time re-read; call
+// when the state the values were captured from may no longer be current
+// (unwind, state-reader swap).
+func (t *Updates) DropCarriedValues() {
+	for i := range t.direct {
+		if t.direct[i].update != nil {
+			t.direct[i].update = nil
+			t.directBytes -= carriedUpdateSize
+		}
 	}
 }
 
@@ -1602,6 +1777,8 @@ func (t *Updates) spillDirect() {
 		}
 	}
 	t.direct, t.directBytes = nil, 0
+	t.directUpdates.reset()
+	t.directHKs.markStale()
 }
 
 func (t *Updates) Mode() Mode { return t.mode }
@@ -1658,19 +1835,18 @@ func (t *Updates) TouchPlainKey(key string, val []byte, fn func(c *KeyUpdate, va
 		}
 	case ModeDirect:
 		if _, ok := t.keys[key]; !ok {
-			t.collectDirect(t.hashKey(common.ToBytesZeroCopy(key)), key)
-			t.keys[key] = struct{}{}
+			t.keys[key] = t.collectDirect(t.hashKeyRetained(common.ToBytesZeroCopy(key)), key, nil)
 		}
 	case ModeParallel:
 		// The dedup map only guards plain-key interning: every touch reaches the prefix
 		// trie and the streamer, so a same-block re-touch invalidates any eager fold of
 		// its split instead of leaving it stale.
 		keyBytes := common.ToBytesZeroCopy(key)
-		hashedKey := t.hashKey(keyBytes)
+		hashedKey := t.hashKeyTransient(keyBytes)
 		ik := keyBytes
 		if _, ok := t.keys[key]; !ok {
 			ik = t.parallel.internKey(keyBytes)
-			t.keys[key] = struct{}{}
+			t.keys[key] = -1
 		}
 		t.parallel.Insert(hashedKey, ik, nil)
 		if t.streaming && t.streamer != nil {
@@ -1727,20 +1903,17 @@ func (t *Updates) TouchPlainKeyDirect(key string, update *Update) {
 			t.treeIdx[key] = pivot
 		}
 	case ModeDirect:
-		if _, ok := t.keys[key]; !ok {
-			t.collectDirect(t.hashKey(common.ToBytesZeroCopy(key)), key)
-			t.keys[key] = struct{}{}
-		}
+		t.carryDirect(key, update)
 	case ModeParallel:
 		keyBytes := common.ToBytesZeroCopy(key)
-		hashedKey := t.hashKey(keyBytes)
+		hashedKey := t.hashKeyTransient(keyBytes)
 		// Carry the value so the fold uses it directly instead of re-reading ctx, which lags cc.state.
 		u := new(Update)
 		*u = *update
 		ik := keyBytes
 		if _, ok := t.keys[key]; !ok {
 			ik = t.parallel.internKey(keyBytes)
-			t.keys[key] = struct{}{}
+			t.keys[key] = -1
 		}
 		t.parallel.Insert(hashedKey, ik, u)
 		if t.streaming && t.streamer != nil {
@@ -1759,8 +1932,7 @@ func (t *Updates) TouchHashedKey(hashedKey []byte) {
 		// string(hashedKey) copies the bytes, so the retained key is safe even if the caller reuses the slice.
 		dedupKey := string(hashedKey)
 		if _, ok := t.keys[dedupKey]; !ok {
-			t.collectDirect(common.ToBytesZeroCopy(dedupKey), "")
-			t.keys[dedupKey] = struct{}{}
+			t.keys[dedupKey] = t.collectDirect(common.ToBytesZeroCopy(dedupKey), "", nil)
 		}
 	case ModeParallel:
 		if len(hashedKey) == 0 {
@@ -1770,7 +1942,7 @@ func (t *Updates) TouchHashedKey(hashedKey []byte) {
 		if _, ok := t.keys[dedupKey]; !ok {
 			// Hashed-only touch has no plainKey; the parallel fold rejects such a terminator.
 			t.parallel.Insert(hashedKey, nil, nil)
-			t.keys[dedupKey] = struct{}{}
+			t.keys[dedupKey] = -1
 		}
 	case ModeUpdate:
 		pivot := &KeyUpdate{hashedKey: common.Copy(hashedKey), update: new(Update)}
@@ -1834,6 +2006,52 @@ func (t *Updates) TouchCode(c *KeyUpdate, code []byte) {
 	c.update.CodeHash = crypto.HashData(code)
 }
 
+// NewCarriedAccountUpdate builds the full post-state update for a serialized
+// account value in the exact shape a fold-time re-read (TrieContext.Account)
+// produces: Nonce and Balance flags always set, CodeUpdate only for a non-zero
+// code hash, DeleteUpdate for an absent account. Partial-flag updates suppress
+// the cell's lazy re-read and hash wrong leaves, so the full shape is required.
+func NewCarriedAccountUpdate(val []byte) (u *Update, err error) {
+	u = &Update{CodeHash: empty.CodeHash}
+	if len(val) == 0 {
+		u.Flags = DeleteUpdate
+		return u, nil
+	}
+	// DeserialiseV3 panics rather than erroring on truncated input; a malformed
+	// value must degrade to the re-read path, not crash the writer.
+	defer func() {
+		if r := recover(); r != nil {
+			u, err = nil, fmt.Errorf("malformed account value %x: %v", val, r)
+		}
+	}()
+	acc := new(accounts.Account)
+	if err := accounts.DeserialiseV3(acc, val); err != nil {
+		return nil, err
+	}
+	u.Flags = NonceUpdate | BalanceUpdate
+	u.Nonce = acc.Nonce
+	u.Balance.Set(&acc.Balance)
+	if !acc.CodeHash.IsZero() {
+		u.Flags |= CodeUpdate
+		u.CodeHash = acc.CodeHash.Value()
+	}
+	return u, nil
+}
+
+// NewCarriedStorageUpdate builds the full post-state update for a storage value,
+// matching TrieContext.Storage: StorageUpdate with the value, or DeleteUpdate
+// for an empty one.
+func NewCarriedStorageUpdate(val []byte) *Update {
+	u := &Update{StorageLen: int8(len(val))}
+	if u.StorageLen > 0 {
+		u.Flags = StorageUpdate
+		copy(u.Storage[:u.StorageLen], val)
+	} else {
+		u.Flags = DeleteUpdate
+	}
+	return u
+}
+
 func (t *Updates) Close() {
 	if t.keys != nil {
 		clear(t.keys)
@@ -1847,6 +2065,8 @@ func (t *Updates) Close() {
 		t.etl = nil
 	}
 	t.direct, t.directBytes = nil, 0
+	t.directUpdates = updateSlab{}
+	t.directHKs = nibbleSlab{}
 	if t.parallel != nil {
 		t.parallel.Close()
 		t.parallel = nil
@@ -1886,7 +2106,7 @@ func (t *Updates) hashSortDirectInMem(ctx context.Context, warmuper *Warmuper, f
 				return ctx.Err()
 			default:
 			}
-			if err := fn(batch[i].hashedKey, plainKeyBytes(batch[i].plainKey), nil); err != nil {
+			if err := fn(batch[i].hashedKey, plainKeyBytes(batch[i].plainKey), batch[i].update); err != nil {
 				return err
 			}
 		}
@@ -1897,6 +2117,8 @@ func (t *Updates) hashSortDirectInMem(ctx context.Context, warmuper *Warmuper, f
 	clear(t.direct)
 	t.direct = t.direct[:0]
 	t.directBytes = 0
+	t.directUpdates.reset()
+	t.directHKs.markStale()
 	return nil
 }
 
@@ -1990,6 +2212,7 @@ func (t *Updates) HashSort(ctx context.Context, warmuper *Warmuper, fn func(hk, 
 
 		t.etl.Close()
 		t.etl = nil
+		t.directHKs.markStale()
 
 	case ModeUpdate:
 		t.batchSlab = t.batchSlab[:0]
@@ -2095,7 +2318,7 @@ func (t *Updates) Reset() {
 	switch t.mode {
 	case ModeDirect:
 		if t.keys == nil {
-			t.keys = make(map[string]struct{})
+			t.keys = make(map[string]int32)
 		} else {
 			clear(t.keys)
 		}
@@ -2106,12 +2329,14 @@ func (t *Updates) Reset() {
 		clear(t.direct)
 		t.direct = t.direct[:0]
 		t.directBytes = 0
+		t.directUpdates.reset()
+		t.directHKs.rewind()
 	case ModeUpdate:
 		t.tree.Clear(true)
 		clear(t.treeIdx)
 	case ModeParallel:
 		if t.keys == nil {
-			t.keys = make(map[string]struct{})
+			t.keys = make(map[string]int32)
 		} else {
 			clear(t.keys)
 		}

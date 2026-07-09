@@ -151,6 +151,10 @@ type HexPatriciaHashed struct {
 	memoizationOff bool // if true, do not rely on memoized hashes
 	//temp buffers
 	accValBuf rlp.RlpEncodedBytes
+	// storValBuf and leafEncScratch avoid per-leaf heap escapes: the interface
+	// boxing of leaf values and the tiny prefix buffers written through io.Writer.
+	storValBuf     rlp.RlpSerializableBytes
+	leafEncScratch [16]byte
 
 	// leaveDeferredForCaller when true, Process() leaves deferred updates on the branchEncoder
 	// for the caller to handle via TakeDeferredUpdates(). When false (default), Process()
@@ -719,9 +723,10 @@ func (cell *cell) accountForHashing(buffer []byte, storageRootHash common.Hash) 
 }
 
 func (hph *HexPatriciaHashed) completeLeafHash(buf []byte, compactLen int, key []byte, compact0 byte, ni int, val rlp.RlpSerializable, singleton bool) ([]byte, error) {
-	// Compute the total length of binary representation
+	// Compute the total length of binary representation. The prefix buffers live
+	// in leafEncScratch: written through an io.Writer, locals would escape per leaf.
 	var kp, kl int
-	var keyPrefix [1]byte
+	keyPrefix := hph.leafEncScratch[4:5]
 	if compactLen > 1 {
 		keyPrefix[0] = 0x80 + byte(compactLen)
 		kp = 1
@@ -731,8 +736,8 @@ func (hph *HexPatriciaHashed) completeLeafHash(buf []byte, compactLen int, key [
 	}
 
 	totalLen := kp + kl + val.DoubleRLPLen()
-	var lenPrefix [4]byte
-	pl := rlp.EncodeListPrefixToBuf(totalLen, lenPrefix[:])
+	lenPrefix := hph.leafEncScratch[0:4]
+	pl := rlp.EncodeListPrefixToBuf(totalLen, lenPrefix)
 	canEmbed := !singleton && totalLen+pl < length.Hash
 	var writer io.Writer
 	if canEmbed {
@@ -749,19 +754,19 @@ func (hph *HexPatriciaHashed) completeLeafHash(buf []byte, compactLen int, key [
 	if _, err := writer.Write(keyPrefix[:kp]); err != nil {
 		return nil, err
 	}
-	b := [1]byte{compact0}
-	if _, err := writer.Write(b[:]); err != nil {
+	b := hph.leafEncScratch[5:6]
+	b[0] = compact0
+	if _, err := writer.Write(b); err != nil {
 		return nil, err
 	}
 	for i := 1; i < compactLen; i++ {
 		b[0] = key[ni]*16 + key[ni+1]
-		if _, err := writer.Write(b[:]); err != nil {
+		if _, err := writer.Write(b); err != nil {
 			return nil, err
 		}
 		ni += 2
 	}
-	var prefixBuf [8]byte
-	if err := val.ToDoubleRLP(writer, prefixBuf[:]); err != nil {
+	if err := val.ToDoubleRLP(writer, hph.leafEncScratch[8:16]); err != nil {
 		return nil, err
 	}
 	if canEmbed {
@@ -789,7 +794,8 @@ func (hph *HexPatriciaHashed) leafHashWithKeyVal(buf, key []byte, val rlp.RlpSer
 	} else {
 		compact0 = 0x20
 	}
-	return hph.completeLeafHash(buf, compactLen, key, compact0, ni, val, singleton)
+	hph.storValBuf = val
+	return hph.completeLeafHash(buf, compactLen, key, compact0, ni, &hph.storValBuf, singleton)
 }
 
 func (hph *HexPatriciaHashed) accountLeafHashWithKey(buf, key []byte, val rlp.RlpSerializable) ([]byte, error) {
@@ -1051,12 +1057,12 @@ func (hph *HexPatriciaHashed) witnessComputeCellHashWithStorage(cell *cell, dept
 			cell.setFromUpdate(update)
 		}
 
-		var valBuf [128]byte
-		valLen := cell.accountForHashing(valBuf[:], storageRootHash)
+		valLen := cell.accountForHashing(hph.accValBuf[:128], storageRootHash)
+		hph.accValBuf = hph.accValBuf[:valLen]
 		if hph.traceW != nil {
-			fmt.Fprintf(hph.traceW, "accountLeafHashWithKey for [%x]=>[%x]\n", hashedKeyBuf[:65-depth], rlp.RlpEncodedBytes(valBuf[:valLen]))
+			fmt.Fprintf(hph.traceW, "accountLeafHashWithKey for [%x]=>[%x]\n", hashedKeyBuf[:65-depth], hph.accValBuf)
 		}
-		leafHash, err := hph.accountLeafHashWithKey(buf, hashedKeyBuf[:65-depth], rlp.RlpEncodedBytes(valBuf[:valLen]))
+		leafHash, err := hph.accountLeafHashWithKey(buf, hashedKeyBuf[:65-depth], &hph.accValBuf)
 		if err != nil {
 			return nil, storageRootHashIsSet, nil, err
 		}
@@ -1203,8 +1209,9 @@ func (hph *HexPatriciaHashed) computeCellHash(cell *cell, depth int16, buf []byt
 			cell.setFromUpdate(update)
 		}
 
-		valLen := cell.accountForHashing(hph.accValBuf, storageRootHash)
-		buf, err = hph.accountLeafHashWithKey(buf, cell.hashedExtension[:65-depth], hph.accValBuf[:valLen])
+		valLen := cell.accountForHashing(hph.accValBuf[:128], storageRootHash)
+		hph.accValBuf = hph.accValBuf[:valLen]
+		buf, err = hph.accountLeafHashWithKey(buf, cell.hashedExtension[:65-depth], &hph.accValBuf)
 		if err != nil {
 			return nil, err
 		}
@@ -2278,6 +2285,49 @@ func (hph *HexPatriciaHashed) unfoldKeyPath(hashedKey, plainKey []byte) error {
 	return nil
 }
 
+// assertCarriedUpdate re-reads plainKey and requires the carried update to match
+// the read on every leaf-effective field; a divergence means a producer carried
+// stale or partial state. Only meaningful where the fold-time read is
+// authoritative (serial ModeDirect): the parallel calculator deliberately
+// carries values its lagging reader cannot reproduce.
+func (hph *HexPatriciaHashed) assertCarriedUpdate(plainKey []byte, carried *Update) error {
+	var read *Update
+	var err error
+	if int16(len(plainKey)) == hph.accountKeyLen {
+		read, err = hph.accountFromCacheOrDB(plainKey)
+	} else {
+		read, err = hph.storageFromCacheOrDB(plainKey)
+	}
+	if err != nil {
+		return fmt.Errorf("carried-update assert: re-read of %x failed: %w", plainKey, err)
+	}
+	if carried.Deleted() != read.Deleted() {
+		return fmt.Errorf("carried-update assert: key %x carried deleted=%v read deleted=%v", plainKey, carried.Deleted(), read.Deleted())
+	}
+	if carried.Deleted() {
+		return nil
+	}
+	if int16(len(plainKey)) == hph.accountKeyLen {
+		carriedCode, readCode := empty.CodeHash, empty.CodeHash
+		if carried.Flags&CodeUpdate != 0 {
+			carriedCode = carried.CodeHash
+		}
+		if read.Flags&CodeUpdate != 0 {
+			readCode = read.CodeHash
+		}
+		if carried.Nonce != read.Nonce || !carried.Balance.Eq(&read.Balance) || carriedCode != readCode {
+			return fmt.Errorf("carried-update assert: key %x carried {nonce %d balance %s code %x} read {nonce %d balance %s code %x}",
+				plainKey, carried.Nonce, carried.Balance.String(), carriedCode, read.Nonce, read.Balance.String(), readCode)
+		}
+		return nil
+	}
+	if carried.StorageLen != read.StorageLen || !bytes.Equal(carried.Storage[:carried.StorageLen], read.Storage[:read.StorageLen]) {
+		return fmt.Errorf("carried-update assert: key %x carried storage %x read %x",
+			plainKey, carried.Storage[:carried.StorageLen], read.Storage[:read.StorageLen])
+	}
+	return nil
+}
+
 func (hph *HexPatriciaHashed) followAndUpdate(hashedKey, plainKey []byte, stateUpdate *Update) (err error) {
 	//if hph.traceW != nil {
 	// fmt.Fprintf(hph.traceW, "mnt: %0x current: %x path %x\n", hph.mountedNib, hph.currentKey[:hph.currentKeyLen], hashedKey)
@@ -2314,6 +2364,10 @@ func (hph *HexPatriciaHashed) followAndUpdate(hashedKey, plainKey []byte, stateU
 			if err != nil {
 				return fmt.Errorf("GetStorage for key %x failed: %w", plainKey, err)
 			}
+		}
+	} else if dbg.AssertCarriedUpdates {
+		if err := hph.assertCarriedUpdate(plainKey, stateUpdate); err != nil {
+			return err
 		}
 	}
 	hph.updateCell(plainKey, hashedKey, stateUpdate)

@@ -17,6 +17,7 @@ import (
 	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/empty"
+	"github.com/erigontech/erigon/common/length"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/etl"
 	"github.com/erigontech/erigon/db/kv"
@@ -79,6 +80,8 @@ type SharedDomainsCommitmentContext struct {
 // SetStateReader can be used to set a custom state reader (otherwise the default one is set in SharedDomainsCommitmentContext.trieContext).
 func (sdc *SharedDomainsCommitmentContext) SetStateReader(stateReader StateReader) {
 	sdc.stateReader = stateReader
+	// Carried values were captured against the previously installed reader's state.
+	sdc.updates.DropCarriedValues()
 }
 
 // StateReader returns the currently installed custom state reader, or nil when
@@ -273,6 +276,57 @@ func (sdc *SharedDomainsCommitmentContext) TouchKey(d kv.Domain, key string, val
 	default:
 		//panic(fmt.Errorf("TouchKey: unknown domain %s", d))
 	}
+}
+
+// TouchKeyWrite records a domain write with its authoritative post-write value,
+// letting ModeDirect carry the full update into the fold instead of re-reading
+// it. val is the value being written; nil means the key is deleted. Read-only
+// accessors (witness, proof, rebuild, history replay) must use TouchKey — their
+// nil means "re-read", not "delete".
+func (sdc *SharedDomainsCommitmentContext) TouchKeyWrite(d kv.Domain, key string, val []byte) {
+	if sdc.updates.Mode() != commitment.ModeDirect {
+		sdc.TouchKey(d, key, val)
+		return
+	}
+	if dbg.TraceTouchKey {
+		fmt.Printf("TOUCHKEYWRITE %s key=%x val=%x\n", d, key, val)
+	}
+	// The fold classifies keys by LENGTH (accounts length.Addr, storage
+	// length.Addr+length.Hash) regardless of the domain the caller wrote to.
+	// A carried update must agree with that classification or it lands in a
+	// differently-typed cell and corrupts the trie; any mismatched write
+	// degrades to the marker/re-read path, which resolves by length.
+	switch d {
+	case kv.AccountsDomain:
+		if len(key) != length.Addr {
+			sdc.updates.TouchPlainKey(key, val, sdc.updates.TouchAccount)
+			return
+		}
+		u, err := commitment.NewCarriedAccountUpdate(val)
+		if err != nil {
+			sdc.updates.TouchPlainKey(key, val, sdc.updates.TouchAccount)
+			return
+		}
+		sdc.updates.TouchPlainKeyDirect(key, u)
+	case kv.StorageDomain:
+		if len(key) != length.Addr+length.Hash {
+			sdc.updates.TouchPlainKey(key, val, sdc.updates.TouchStorage)
+			return
+		}
+		sdc.updates.TouchPlainKeyDirect(key, commitment.NewCarriedStorageUpdate(val))
+	case kv.CodeDomain:
+		// The leaf's code hash comes from the account record, so a code write
+		// only marks the key; dropping any carried account value makes the fold
+		// re-read the record regardless of account/code write ordering.
+		sdc.updates.TouchPlainKeyDropCarried(key)
+	default:
+	}
+}
+
+// DropCarriedValues downgrades collected touches to fold-time re-read; call when
+// the state carried values were captured from may no longer be current.
+func (sdc *SharedDomainsCommitmentContext) DropCarriedValues() {
+	sdc.updates.DropCarriedValues()
 }
 
 // TouchHashedKey touches a hashed key which can be anywhere from 1 to 128 nibbles

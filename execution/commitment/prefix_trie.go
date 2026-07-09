@@ -37,11 +37,28 @@ type prefixSlab struct {
 	nodes [prefixSlabSize]prefixNode
 }
 
-// prefixArena bump-allocates prefixNodes from a list of slabs.
+// prefixArena bump-allocates prefixNodes from a list of slabs, and node.ext
+// suffix copies from replace-when-full byte chunks (earlier sub-slices keep
+// their backing until reset, like plainKeyArena).
 type prefixArena struct {
 	slabs   []*prefixSlab
 	slabIdx int
 	nextIdx int
+	extBuf  []byte
+}
+
+const extArenaChunk = 64 * 1024
+
+func (a *prefixArena) copyExt(b []byte) []byte {
+	if len(b) == 0 {
+		return nil
+	}
+	if cap(a.extBuf)-len(a.extBuf) < len(b) {
+		a.extBuf = make([]byte, 0, extArenaChunk)
+	}
+	off := len(a.extBuf)
+	a.extBuf = append(a.extBuf, b...)
+	return a.extBuf[off : off+len(b) : off+len(b)]
 }
 
 func newPrefixArena() *prefixArena {
@@ -76,6 +93,7 @@ func (a *prefixArena) resetArena() {
 	a.slabs = a.slabs[:1]
 	a.slabIdx = 0
 	a.nextIdx = 0
+	a.extBuf = nil
 }
 
 func (a *prefixArena) nodeCount() int {
@@ -172,7 +190,7 @@ func (t *prefixTrie) Insert(hashedKey, plainKey []byte, update *Update) (isNew b
 
 			newLeaf := t.arena.allocNode()
 			newNib := remain[m]
-			newLeaf.ext = append([]byte(nil), remain[m+1:]...)
+			newLeaf.ext = t.arena.copyExt(remain[m+1:])
 			newLeaf.subtreeCount = 1
 			newLeaf.plainKey = plainKey
 			newLeaf.update = update
@@ -213,7 +231,7 @@ func (t *prefixTrie) Insert(hashedKey, plainKey []byte, update *Update) (isNew b
 		idx, ok := childIndex(node, nib)
 		if !ok {
 			newLeaf := t.arena.allocNode()
-			newLeaf.ext = append([]byte(nil), hashedKey[keyOffset+1:]...)
+			newLeaf.ext = t.arena.copyExt(hashedKey[keyOffset+1:])
 			newLeaf.subtreeCount = 1
 			newLeaf.plainKey = plainKey
 			newLeaf.update = update

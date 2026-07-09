@@ -660,6 +660,11 @@ func (sd *SharedDomains) Unwind(txNumUnwindTo uint64, changeset *[kv.DomainLen][
 	if sd.stateCache != nil {
 		sd.stateCache.Unwind(txNumUnwindTo)
 	}
+	// Values carried into the commitment buffer were captured from pre-unwind
+	// state; downgrade them so the fold re-reads post-unwind values.
+	if sd.sdCtx != nil && !sd.disableInlineTouchKey {
+		sd.sdCtx.DropCarriedValues()
+	}
 }
 
 func (sd *SharedDomains) GetMemBatch() kv.TemporalMemBatch { return sd.mem }
@@ -747,8 +752,12 @@ func (sd *SharedDomains) PrintCacheStats() {
 func (sd *SharedDomains) ClearRam(resetCommitment bool) {
 	// When the commitment calculator goroutine owns the Updates buffer,
 	// skip ClearRam on the commitment context to avoid concurrent btree access.
-	if resetCommitment && sd.sdCtx != nil && !sd.disableInlineTouchKey {
-		sd.sdCtx.ClearRam()
+	if sd.sdCtx != nil && !sd.disableInlineTouchKey {
+		if resetCommitment {
+			sd.sdCtx.ClearRam()
+		} else {
+			sd.sdCtx.DropCarriedValues()
+		}
 	}
 	sd.mem.ClearRam()
 }
@@ -1576,7 +1585,7 @@ func (sd *SharedDomains) domainPut(domain kv.Domain, roTx kv.TemporalTx, k, v []
 	}
 	ks := string(k)
 	if !sd.disableInlineTouchKey {
-		sd.sdCtx.TouchKey(domain, ks, v)
+		sd.sdCtx.TouchKeyWrite(domain, ks, v)
 	}
 	if prevVal == nil {
 		var err error
@@ -1628,7 +1637,7 @@ func (sd *SharedDomains) domainPut(domain kv.Domain, roTx kv.TemporalTx, k, v []
 func (sd *SharedDomains) DomainDel(domain kv.Domain, tx kv.TemporalTx, k []byte, txNum uint64, prevVal []byte) error {
 	ks := string(k)
 	if !sd.disableInlineTouchKey {
-		sd.sdCtx.TouchKey(domain, ks, nil)
+		sd.sdCtx.TouchKeyWrite(domain, ks, nil)
 	}
 
 	if prevVal == nil {
@@ -1821,6 +1830,9 @@ func (sd *SharedDomains) touchChangedKeys(tx kv.TemporalTx, d kv.Domain, fromTxN
 			return changes, err
 		}
 		if !sd.disableInlineTouchKey {
+			// Read-marker touch: nil here means "resolve through the state
+			// reader at fold time", never "deleted" — this replays history,
+			// it does not write.
 			sd.GetCommitmentContext().TouchKey(d, string(k), nil)
 		}
 		changes++
