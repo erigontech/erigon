@@ -118,8 +118,9 @@ func (p *ParallelPatriciaHashed) processMounted(ctx context.Context, updates *Up
 		cells   [16]cell
 		present [16]bool
 	)
+	foldSem := newFoldSem()
 	g, gctx := errgroup.WithContext(ctx)
-	g.SetLimit(p.numWorkers)
+	g.SetLimit(min(p.numWorkers, maxFoldConcurrency()))
 
 	childIdx := 0
 	for bm := root.bitmap; bm != 0; {
@@ -151,7 +152,7 @@ func (p *ParallelPatriciaHashed) processMounted(ctx context.Context, updates *Up
 			path = append(path, byte(ni))
 			path = append(path, ch.ext...)
 			buildErr := dfsSubtreeDeep(w, ch, path, func(n *prefixNode, pth []byte, accountFresh bool) (common.Hash, error) {
-				return foldStorageRoot(gctx, p.numWorkers, p.newStorageWorker, pu, n, pth, accountFresh)
+				return foldStorageRoot(gctx, foldSem, p.newStorageWorker, pu, n, pth, accountFresh)
 			})
 			if buildErr != nil {
 				w.resetForReuse()

@@ -18,6 +18,7 @@ package stages
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"math"
 	"sync/atomic"
@@ -378,7 +379,9 @@ func SpawnStageHistoryDownload(cfg StageHistoryReconstructionCfg, ctx context.Co
 
 		for !cfg.downloader.Finished() {
 			if err := cfg.downloader.RequestMore(ctx); err != nil {
-				log.Warn("closing backfilling routine", "err", err)
+				if !errors.Is(err, context.Canceled) {
+					log.Warn("closing backfilling routine", "err", err)
+				}
 				return
 			}
 		}

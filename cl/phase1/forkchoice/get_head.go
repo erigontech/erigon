@@ -100,10 +100,7 @@ func voteSampleBounds(count int, probabilistic bool, gen *rand.Rand) (int, int) 
 	if !probabilistic || count == 0 {
 		return 0, 1
 	}
-	startLimit := sampleBasis
-	if count < startLimit {
-		startLimit = count
-	}
+	startLimit := min(count, sampleBasis)
 	return gen.Intn(startLimit), sampleBasis + gen.Intn(sampleFactor)
 }
 
