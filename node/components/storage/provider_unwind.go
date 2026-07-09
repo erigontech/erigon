@@ -134,6 +134,20 @@ func (p *Provider) Unwind(ctx context.Context, toBlock uint64, opts UnwindOpts) 
 		return err
 	}
 
+	// 0. Ensure preverified history for the compute walk range is on
+	//    disk. Under --prune.mode=minimal the bootstrap filter skips
+	//    state history (see db/snapshotsync/preverified_filter.go),
+	//    leaving the compute's walk from a step-256-aligned baseline
+	//    unable to find keys touched pre-retention. The ensure step
+	//    downloads only what's missing and returns a cleanup callback
+	//    that removes the temp files after Unwind returns — critical
+	//    for test determinism (see memory/mode-b-temp-history-cleanup-decision.md).
+	historyCleanup, err := p.ensureHistoryForUnwindWalk(ctx, opts, toBlock)
+	if err != nil {
+		return fmt.Errorf("storage.Provider.Unwind: ensure history: %w", err)
+	}
+	defer historyCleanup()
+
 	// 1. Probe-compute the commitment anchor. Two outcomes:
 	//    - Success: the chain has enough local history to validate
 	//      directly. Captures the recompute result for Apply (step 5).
