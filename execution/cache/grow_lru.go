@@ -53,19 +53,10 @@ func newGrowLRU[V any](maxBytes datasize.ByteSize, avgBytes uint32, onEvict func
 	if avgBytes == 0 {
 		avgBytes = avgBytesPerEntry
 	}
-	maxCap := uint32(uint64(maxBytes) / uint64(avgBytes))
-	if maxCap < 1 {
-		maxCap = 1
-	}
-	if maxCap > 1<<24 {
-		maxCap = 1 << 24
-	}
+	maxCap := min(max(uint32(uint64(maxBytes)/uint64(avgBytes)), 1), 1<<24)
 	// Start small (bounded by the ceiling); the floor is on the start size, not
 	// the ceiling — a tiny configured budget yields a tiny, still-evicting cap.
-	start := uint32(genericCacheStartCapacity)
-	if start > maxCap {
-		start = maxCap
-	}
+	start := min(uint32(genericCacheStartCapacity), maxCap)
 	g := &growLRU[V]{onEvict: onEvict, avgBytes: int64(avgBytes), startCap: start, maxCap: maxCap}
 	g.curCap.Store(start)
 	g.reserved = int64(start) * g.avgBytes
@@ -104,10 +95,7 @@ func (g *growLRU[V]) maybeGrow() {
 	if curCap >= g.maxCap || old.Len() < int(curCap) {
 		return
 	}
-	newCap := curCap * genericCacheGrowFactor
-	if newCap > g.maxCap {
-		newCap = g.maxCap
-	}
+	newCap := min(curCap*genericCacheGrowFactor, g.maxCap)
 	delta := int64(newCap-curCap) * g.avgBytes
 	if !cachebudget.Global.Reserve(delta) {
 		return

@@ -128,10 +128,7 @@ func New(ctx context.Context, config FiltersConfig, ethBackend ApiBackend, txPoo
 		// Check more frequently than the timeout to ensure timely eviction, with a
 		// 1s floor: time.NewTicker panics on non-positive intervals and a
 		// sub-second sweep would burn CPU for no practical benefit.
-		checkInterval := config.RpcSubscriptionFiltersTimeout / 2
-		if checkInterval < time.Second {
-			checkInterval = time.Second
-		}
+		checkInterval := max(config.RpcSubscriptionFiltersTimeout/2, time.Second)
 		logger.Info("[rpc] [filters] starting timeout loop for idle filter eviction",
 			"timeout", config.RpcSubscriptionFiltersTimeout,
 			"checkInterval", checkInterval)
