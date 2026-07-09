@@ -362,39 +362,36 @@ func (s *EngineServer) newPayload(ctx context.Context, req *engine_types.Executi
 			return nil, &rpc.InvalidParamsError{Message: "blockAccessList missing"}
 		}
 		bal := *req.BlockAccessList
-		if len(bal) == 0 {
-			blockAccessList = make(types.BlockAccessList, 0)
-			hash := empty.BlockAccessListHash
-			header.BlockAccessListHash = &hash
-			blockAccessListBytes, err = types.EncodeBlockAccessListBytes(blockAccessList)
-			if err != nil {
-				return nil, &rpc.InvalidParamsError{Message: fmt.Sprintf("encode empty blockAccessList: %v", err)}
-			}
-		} else {
-			blockAccessList, err = types.DecodeBlockAccessListBytes(bal)
-			if err != nil {
-				s.logger.Debug("[NewPayload] failed to decode blockAccessList", "err", err, "raw", hex.EncodeToString(bal))
+		blockAccessList, err = types.DecodeBlockAccessListBytes(bal)
+		if err != nil {
+			s.logger.Debug("[NewPayload] failed to decode blockAccessList", "err", err, "raw", hex.EncodeToString(bal))
+			// A decodable list that violates EIP-7928 rules is an invalid
+			// block; undecodable bytes are a malformed request (-32602).
+			if errors.Is(err, types.ErrInvalidBlockAccessList) {
 				return &engine_types.PayloadStatus{
 					Status:          engine_types.InvalidStatus,
-					ValidationError: engine_types.NewStringifiedErrorFromString(fmt.Sprintf("invalid block access list decode: %v", err)),
+					ValidationError: engine_types.NewStringifiedErrorFromString(err.Error()),
 				}, nil
 			}
-			if err := blockAccessList.Validate(); err != nil {
-				return &engine_types.PayloadStatus{
-					Status:          engine_types.InvalidStatus,
-					ValidationError: engine_types.NewStringifiedErrorFromString(fmt.Sprintf("invalid block access list validate: %v", err)),
-				}, nil
-			}
-			hash := crypto.HashData(bal)
-			header.BlockAccessListHash = &hash
-			blockAccessListBytes = bal
+			return nil, &rpc.InvalidParamsError{Message: fmt.Sprintf("undecodable blockAccessList: %v", err)}
 		}
+		if err := blockAccessList.Validate(); err != nil {
+			return &engine_types.PayloadStatus{
+				Status:          engine_types.InvalidStatus,
+				ValidationError: engine_types.NewStringifiedErrorFromString(fmt.Sprintf("invalid block access list validate: %v", err)),
+			}, nil
+		}
+		hash := crypto.HashData(bal)
+		header.BlockAccessListHash = &hash
+		blockAccessListBytes = bal
 		if req.SlotNumber != nil {
 			slotNumber := uint64(*req.SlotNumber)
 			header.SlotNumber = &slotNumber
 		} else {
 			return nil, &rpc.InvalidParamsError{Message: "slotNumber missing"}
 		}
+	} else if req.BlockAccessList != nil && len(*req.BlockAccessList) > 0 {
+		return nil, &rpc.InvalidParamsError{Message: "unexpected blockAccessList in pre-Amsterdam payload"}
 	}
 
 	if (!s.config.IsCancun(header.Time) && version >= clparams.DenebVersion) ||
