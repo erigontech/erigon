@@ -503,7 +503,8 @@ func stageBodies(db kv.TemporalRwDB, ctx context.Context, logger log.Logger) err
 		})
 	}
 
-	_, engine, _, sync := newSync(ctx, db, nil /* miningConfig */, logger)
+	_, clean, engine, _, sync := newSync(ctx, db, nil /* miningConfig */, logger)
+	defer clean()
 	defer engine.Close()
 
 	if err := db.Update(ctx, func(tx kv.RwTx) error {
@@ -538,7 +539,8 @@ func stageBodies(db kv.TemporalRwDB, ctx context.Context, logger log.Logger) err
 func stageSenders(db kv.TemporalRwDB, ctx context.Context, logger log.Logger) error {
 	tmpdir := datadir.New(datadirCli).Tmp
 	chainConfig := fromdb.ChainConfig(db)
-	_, engine, _, sync := newSync(ctx, db, nil /* miningConfig */, logger)
+	_, clean, engine, _, sync := newSync(ctx, db, nil /* miningConfig */, logger)
+	defer clean()
 	defer engine.Close()
 
 	must(sync.SetCurrentStage(stages.Senders))
@@ -630,7 +632,8 @@ func stageExec(db kv.TemporalRwDB, ctx context.Context, logger log.Logger) error
 		return err
 	}
 
-	_, engine, vmConfig, sync := newSync(ctx, db, nil /* miningConfig */, logger)
+	_, clean, engine, vmConfig, sync := newSync(ctx, db, nil /* miningConfig */, logger)
+	defer clean()
 	defer engine.Close()
 	must(sync.SetCurrentStage(stages.Execution))
 	if reset {
@@ -842,7 +845,8 @@ func stageExecReplay(db kv.TemporalRwDB, ctx context.Context, logger log.Logger)
 		return err
 	}
 
-	_, engine, _, sync := newSync(ctx, db, nil /* miningConfig */, logger)
+	_, clean, engine, _, sync := newSync(ctx, db, nil /* miningConfig */, logger)
+	defer clean()
 	must(sync.SetCurrentStage(stages.Execution))
 
 	chainConfig := fromdb.ChainConfig(db)
@@ -913,7 +917,8 @@ func stageCustomTrace(db kv.TemporalRwDB, ctx context.Context, logger log.Logger
 		return err
 	}
 
-	br, engine, vmConfig, sync := newSync(ctx, db, nil /* miningConfig */, logger)
+	br, clean, engine, vmConfig, sync := newSync(ctx, db, nil /* miningConfig */, logger)
+	defer clean()
 	defer engine.Close()
 	must(sync.SetCurrentStage(stages.Execution))
 
@@ -962,7 +967,8 @@ func stageCustomTrace(db kv.TemporalRwDB, ctx context.Context, logger log.Logger
 
 func stageTxLookup(db kv.TemporalRwDB, ctx context.Context, logger log.Logger) error {
 	dirs, pm := datadir.New(datadirCli), fromdb.PruneMode(db)
-	_, engine, _, sync := newSync(ctx, db, nil /* miningConfig */, logger)
+	_, clean, engine, _, sync := newSync(ctx, db, nil /* miningConfig */, logger)
+	defer clean()
 	defer engine.Close()
 
 	must(sync.SetCurrentStage(stages.TxLookup))
@@ -1153,7 +1159,7 @@ func blocksIO(db kv.RoDB, logger log.Logger) (services.FullBlockReader, *blockio
 }
 
 func newSync(ctx context.Context, db kv.TemporalRwDB, builderConfig *buildercfg.BuilderConfig, logger log.Logger) (
-	services.BlockRetire, rules.Engine, *vm.Config, *stagedsync.Sync,
+	services.BlockRetire, func(), rules.Engine, *vm.Config, *stagedsync.Sync,
 ) {
 	dirs, pm := datadir.New(datadirCli), fromdb.PruneMode(db)
 
@@ -1226,10 +1232,10 @@ func newSync(ctx context.Context, db kv.TemporalRwDB, builderConfig *buildercfg.
 		panic(err)
 	}
 	notifications := shards.NewNotifications(nil)
-	blockRetire := freezeblocks.NewBlockRetire(estimate.CompressSnapshot.Workers(), dirs, blockReader, blockWriter, db, heimdallStore, bridgeStore, chainConfig, &cfg, notifications.Events, blockSnapBuildSema, logger)
+	blockRetire := freezeblocks.NewBlockRetire(ctx, estimate.CompressSnapshot.Workers(), dirs, blockReader, blockWriter, db, heimdallStore, bridgeStore, chainConfig, &cfg, notifications.Events, blockSnapBuildSema, logger)
 	stageList := stageloop.NewDefaultStages(context.Background(), db, &cfg, sentryControlServer, notifications, nil, blockReader, blockRetire, nil, nil, exec.NewBlockReadAheader())
 	sync := stagedsync.New(cfg.Sync, stageList, stagedsync.DefaultUnwindOrder, stagedsync.DefaultPruneOrder, logger, stages.ModeApplyingBlocks)
-	return blockRetire, engine, vmConfig, sync
+	return blockRetire, blockRetire.Close, engine, vmConfig, sync
 }
 
 func progress(tx kv.Getter, stage stages.SyncStage) uint64 {

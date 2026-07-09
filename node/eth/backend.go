@@ -1570,6 +1570,11 @@ func (s *Ethereum) Stop() error {
 		}
 	}
 
+	// Drain the in-flight block retire before chainDB.Close.
+	if s.components != nil && s.components.Storage != nil {
+		s.components.Storage.Close()
+	}
+
 	s.chainDB.Close()
 
 	if s.config.Downloader != nil {
