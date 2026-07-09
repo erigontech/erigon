@@ -1407,11 +1407,11 @@ func (sd *SharedDomains) codeHashForAddr(tx kv.TemporalTx, addr []byte, txNum ui
 	// on flush. Route mem-first; the LRU is a committed-state layer that may only
 	// answer once mem has missed.
 	if v, _, ok := sd.mem.GetLatest(kv.AccountsDomain, addr); ok {
-		return decodeAccountCodeHash(v)
+		return accounts.DeserialiseV3CodeHash(v)
 	}
 	if sd.parent != nil {
 		if v, _, ok := sd.parent.mem.GetLatest(kv.AccountsDomain, addr); ok {
-			return decodeAccountCodeHash(v)
+			return accounts.DeserialiseV3CodeHash(v)
 		}
 	}
 
@@ -1432,14 +1432,14 @@ func (sd *SharedDomains) codeHashForAddr(tx kv.TemporalTx, addr []byte, txNum ui
 	resolve := func() []byte {
 		if sd.stateCache != nil {
 			if v, ok := sd.stateCache.Get(kv.AccountsDomain, addr); ok {
-				return decodeAccountCodeHash(v)
+				return accounts.DeserialiseV3CodeHash(v)
 			}
 		}
 		v, _, err := tx.GetLatest(kv.AccountsDomain, addr)
 		if err != nil || len(v) == 0 {
 			return nil
 		}
-		return decodeAccountCodeHash(v)
+		return accounts.DeserialiseV3CodeHash(v)
 	}
 
 	h := resolve()
@@ -1455,16 +1455,6 @@ func (sd *SharedDomains) codeHashForAddr(tx kv.TemporalTx, addr []byte, txNum ui
 		sd.stateCache.PutAddrCodeHash(addr, fixed, txNum)
 	}
 	return h
-}
-
-// decodeAccountCodeHash extracts the codeHash from an account's encoded
-// bytes. Returns nil on a malformed record or when the account has no code.
-// AccountsDomain values are SerialiseV3-encoded — DecodeForStorage is the
-// legacy MDBX bitmask format with an incompatible layout that would silently
-// misparse. The targeted extractor skips the full decode (balance parse,
-// interning) this runs per mem-hit on the codeHash fast path.
-func decodeAccountCodeHash(enc []byte) []byte {
-	return accounts.DeserialiseV3CodeHash(enc)
 }
 
 func (sd *SharedDomains) Metrics() *kvmetrics.DomainMetrics {

@@ -97,10 +97,11 @@ func (cpg *cachePopulatingGetter) GetLatest(name kv.Domain, k []byte) ([]byte, k
 		// If-absent writes only: this runs in a fire-and-forget goroutine over a
 		// committed snapshot, so an unconditional Put racing an FCU flush's
 		// cache-apply could replace the flushed value with the pre-flush one.
-		if name == kv.CodeDomain && len(v) > 0 {
+		if name == kv.CodeDomain {
 			// A live binding makes the conditional put a no-op — skip before
-			// paying the keccak+copy below.
-			if !cpg.sc.HasLiveCode(k) {
+			// paying the keccak+copy below. Code negatives end here too: they
+			// are not cacheable (CodeCache drops zero-length puts).
+			if len(v) > 0 && !cpg.sc.HasLiveCode(k) {
 				// Key the content cache by the code's OWN hash, never a separately
 				// read account codeHash: under parallel/speculative exec that hash
 				// can be skewed or cross-account, and a (hash, code) pair that
@@ -111,8 +112,7 @@ func (cpg *cachePopulatingGetter) GetLatest(name kv.Domain, k []byte) ([]byte, k
 		} else {
 			// Cache including nil/empty results: a probe returning no
 			// bytes is a valid negative answer (missing account, empty
-			// storage slot; empty code lands here too but CodeCache drops
-			// zero-length puts) and caching it lets repeated probes
+			// storage slot) and caching it lets repeated probes
 			// skip the file accessor stack. Mirrors revm's CacheAccount
 			// { account: None, status: LoadedNotExisting } pattern.
 			// Stamp with an upper bound on the value's write txNum: the last
