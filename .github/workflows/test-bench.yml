@@ -24,6 +24,7 @@ jobs:
   benchmarks:
     name: benchmarks (${{ matrix.exec_mode }})
     runs-on: ubuntu-24.04
+    timeout-minutes: 60
     strategy:
       # In merge_group: cancel sibling shards on first failure so ci-gate's
       # `needs` reach terminal state quickly and the broken PR can be evicted.

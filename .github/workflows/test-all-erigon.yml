@@ -39,6 +39,7 @@ jobs:
             skip_execution_tests: 'true'
     name: tests-mac-linux (${{ matrix.os }}, ${{ matrix.exec_mode }})
     runs-on: ${{ matrix.os }}
+    timeout-minutes: 60
 
     steps:
       - name: Declare runners

@@ -13,6 +13,7 @@ jobs:
   test-hive-eest:
     runs-on:
       group: hive
+    timeout-minutes: 60
     name: test-hive-eest (${{ matrix.shard }}, ${{ matrix.exec_mode }})
     strategy:
       # In merge_group: cancel sibling shards on first failure so ci-gate's

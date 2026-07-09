@@ -10,6 +10,7 @@ defaults:
 jobs:
   lint:
     runs-on: ubuntu-latest
+    timeout-minutes: 60
 
     steps:
       - name: Checkout custom actions

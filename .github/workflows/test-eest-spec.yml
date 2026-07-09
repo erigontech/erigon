@@ -21,6 +21,7 @@ jobs:
   # blockchain_tests_engine_x/); re-add it there when the fixture lands.
   load-matrix:
     runs-on: ubuntu-latest
+    timeout-minutes: 60
     outputs:
       matrix: ${{ steps.load.outputs.matrix }}
     steps:

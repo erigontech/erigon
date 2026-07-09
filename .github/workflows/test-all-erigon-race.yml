@@ -14,6 +14,7 @@ jobs:
   # the test code (tools/test-groups), keeping CI and local runs in sync.
   load-matrix:
     runs-on: ubuntu-latest
+    timeout-minutes: 60
     outputs:
       test-groups: ${{ steps.load.outputs.groups }}
     steps:
@@ -36,7 +37,7 @@ jobs:
 
   tests-linux:
     needs: load-matrix
-    timeout-minutes: 90
+    timeout-minutes: 60
     strategy:
       # In merge_group: cancel sibling shards on first failure so ci-gate's
       # `needs` reach terminal state quickly and the broken PR can be evicted.

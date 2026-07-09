@@ -63,6 +63,7 @@ jobs:
     name: build-erigon-image
     if: ${{ !inputs.cl-images-only && !contains(github.event.pull_request.labels.*.name, 'skip-uncaching') }}
     runs-on: ubuntu-latest
+    timeout-minutes: 60
     steps:
       - name: Fast checkout git repository
         uses: actions/checkout@v7
@@ -180,6 +181,7 @@ jobs:
   warm-third-party-images:
     if: ${{ inputs.cl-images-only }}
     runs-on: ubuntu-latest
+    timeout-minutes: 60
     steps:
       - name: Conditional Docker Login
         if: |
@@ -310,6 +312,7 @@ jobs:
     # cache; there's nothing for the matrix to do (the test step is skipped).
     if: ${{ !inputs.cache-warming-only && !inputs.cl-images-only && !contains(github.event.pull_request.labels.*.name, 'skip-uncaching') }}
     runs-on: ubuntu-latest
+    timeout-minutes: 60
     strategy:
       # In merge_group: cancel sibling shards on first failure so ci-gate's
       # `needs` reach terminal state quickly and the broken PR can be evicted.
