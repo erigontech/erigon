@@ -158,13 +158,12 @@ def case_attempts_multi():
         write(tmp, "results/test_report.json", report(0, []))
         write(tmp, "output.log", ATTEMPTS_LOG)
         out = render(tmp, result="success")
-        check("attempts: section present", "## Attempts" in out)
-        check("attempts: attempt 1 sync failed", "| 1 | ❌ sync failed |" in out)
-        check("attempts: attempt 2 counts failures", "| 2 | ❌ 2 failing tests |" in out)
-        check("attempts: attempt 2 names failing tests",
-              "`http  ::debug_traceBlockByNumber/test_42.json`" in out
-              and "`http  ::debug_traceBlockByNumber/test_44.json`" in out)
-        check("attempts: attempt 3 passed", "| 3 | ✅ passed |" in out)
+        check("attempts: compact line present", "**Attempts** (3 full-suite reruns" in out)
+        check("attempts: attempt 1 sync failed", "1 · ❌ sync failed" in out)
+        check("attempts: attempt 2 counts failures", "2 · ❌ 2 failing tests" in out)
+        check("attempts: attempt 3 passed", "3 · ✅ passed" in out)
+        check("attempts: no redundant per-attempt names column",
+              "`http  ::debug_traceBlockByNumber/test_42.json`" not in out)
 
 
 def case_attempts_single_hidden():
@@ -172,7 +171,7 @@ def case_attempts_single_hidden():
         write(tmp, "results/test_report.json", report(0, []))
         write(tmp, "output.log", "\nAttempt 1\nLatest batch 1/5 (50 tests)\n")
         out = render(tmp, result="success")
-        check("attempts/single: no section for one attempt", "## Attempts" not in out)
+        check("attempts/single: no line for one attempt", "**Attempts**" not in out)
 
 
 def case_attempts_final_failed_reconciled():
@@ -182,8 +181,8 @@ def case_attempts_final_failed_reconciled():
     with tempfile.TemporaryDirectory() as tmp:
         write(tmp, "output.log", log)
         out = render(tmp, result="failure")
-        check("attempts/reconcile: final not shown as passed", "| 2 | ✅ passed |" not in out)
-        check("attempts/reconcile: final marked failed", "| 2 | ❌ failed |" in out)
+        check("attempts/reconcile: final not shown as passed", "2 · ✅ passed" not in out)
+        check("attempts/reconcile: final marked failed", "2 · ❌ failed" in out)
 
 
 def case_success_report_with_failed_count():

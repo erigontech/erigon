@@ -25,8 +25,6 @@ MAX_FAILURES = 200
 LOG_TAIL_LINES = 200
 ATTEMPTS_SCAN_MAX_BYTES = 8 * 1024 * 1024
 ATTEMPT_RE = re.compile(r"^Attempt\s+(\d+)\s*$")
-FAILED_TEST_RE = re.compile(r"^\s*\d+\.\s+(\S+\s+::\S+)\s+failed:")
-ATTEMPT_FAILURES_SHOWN = 5
 
 
 def badge(result):
@@ -83,21 +81,15 @@ def summarize_attempts(log_path):
     attempts = []
     for idx, (start, n) in enumerate(marks):
         end = marks[idx + 1][0] if idx + 1 < len(marks) else len(lines)
-        block_lines = lines[start + 1:end]
-        block = "\n".join(block_lines).lower()
+        block = "\n".join(lines[start + 1:end]).lower()
         fails = block.count("failed:")
-        names = []
-        for line in block_lines:
-            m = FAILED_TEST_RE.match(line)
-            if m:
-                names.append(m.group(1))
         if "not synced" in block or "sync on latest block number failed" in block:
             status = "❌ sync failed"
         elif fails:
             status = f"❌ {fails} failing test{'s' if fails != 1 else ''}"
         else:
             status = "✅ passed"
-        attempts.append((n, status, names))
+        attempts.append((n, status))
     return attempts
 
 
@@ -112,16 +104,9 @@ def render(args):
     attempts = summarize_attempts(log_path)
     if len(attempts) > 1:
         if (args.result or "").lower() != "success" and attempts[-1][1] == "✅ passed":
-            attempts[-1] = (attempts[-1][0], "❌ failed", attempts[-1][2])
-        out += ["## Attempts", "",
-                "> Each attempt reruns the full suite; the result above is the final attempt.", "",
-                "| Attempt | Outcome | Failing tests |", "| ---: | --- | --- |"]
-        for n, s, names in attempts:
-            shown = ", ".join(f"`{t}`" for t in names[:ATTEMPT_FAILURES_SHOWN])
-            if len(names) > ATTEMPT_FAILURES_SHOWN:
-                shown += f" … +{len(names) - ATTEMPT_FAILURES_SHOWN} more"
-            out.append(f"| {n} | {s} | {shown} |")
-        out.append("")
+            attempts[-1] = (attempts[-1][0], "❌ failed")
+        trail = " → ".join(f"{n} · {s}" for n, s in attempts)
+        out += [f"**Attempts** ({len(attempts)} full-suite reruns; the verdict above is the last): {trail}", ""]
 
     report = None
     if os.path.isfile(report_path):
