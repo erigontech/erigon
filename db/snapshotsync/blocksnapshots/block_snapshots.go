@@ -19,6 +19,7 @@ package blocksnapshots
 import (
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/snapshotsync"
+	"github.com/erigontech/erigon/db/snaptype"
 	"github.com/erigontech/erigon/db/snaptype2"
 	"github.com/erigontech/erigon/node/ethconfig"
 )
@@ -52,6 +53,11 @@ func (v *View) Headers() []*snapshotsync.VisibleSegment { return v.base.Segments
 func (v *View) Bodies() []*snapshotsync.VisibleSegment  { return v.base.Segments(snaptype2.Bodies) }
 func (v *View) Txs() []*snapshotsync.VisibleSegment {
 	return v.base.Segments(snaptype2.Transactions)
+}
+
+// Segment returns the segment of type t covering blockNum, if any.
+func (v *View) Segment(t snaptype.Type, blockNum uint64) (*snapshotsync.VisibleSegment, bool) {
+	return v.base.Segment(t, blockNum)
 }
 
 func (v *View) HeadersSegment(blockNum uint64) (*snapshotsync.VisibleSegment, bool) {

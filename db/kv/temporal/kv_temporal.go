@@ -281,6 +281,11 @@ func (tx *tx) FreezeInfo() kv.FreezeInfo { return tx.aggtx }
 
 func (tx *tx) AggTx() any             { return tx.aggtx }
 func (tx *tx) Agg() *state.Aggregator { return tx.db.stateFiles }
+
+// BlockFilesRo returns the block-files view pinned for this tx lifetime, or nil
+// when the DB carries no block snapshots. Lets a block reader read through the
+// tx's consistent snapshot instead of opening its own view.
+func (tx *tx) BlockFilesRo() *blocksnapshots.View { return tx.blocktx }
 func (tx *tx) StepsInFiles(entitySet ...kv.Domain) kv.Step {
 	return tx.aggtx.StepsInFiles(entitySet...)
 }
