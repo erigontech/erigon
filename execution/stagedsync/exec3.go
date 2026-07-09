@@ -244,7 +244,9 @@ func ExecV3(ctx context.Context,
 			pe.LogComplete(stepsInDb)
 		}()
 
-		lastHeader, applyTx, execErr = pe.exec(ctx, execStage, u, startBlockNum, offsetFromBlockBeginning, maxBlockNum, blockLimit,
+		// pe.exec may create a fresh applyTx internally (CommitAndBegin); keep the
+		// reference even though the parallel path doesn't read it afterwards.
+		lastHeader, applyTx, execErr = pe.exec(ctx, execStage, u, startBlockNum, offsetFromBlockBeginning, maxBlockNum, blockLimit, //nolint:ineffassign
 			initialTxNum, inputTxNum, initialCycle, applyTx, stepsInDb, accumulator, readAhead, logEvery)
 
 		lastCommittedBlockNum = pe.lastCommittedBlockNum.Load()

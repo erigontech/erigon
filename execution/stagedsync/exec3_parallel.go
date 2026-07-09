@@ -24,6 +24,7 @@ import (
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/rawdb/rawtemporaldb"
+	dbstate "github.com/erigontech/erigon/db/state"
 	"github.com/erigontech/erigon/db/state/changeset"
 	"github.com/erigontech/erigon/diagnostics/metrics"
 	"github.com/erigontech/erigon/execution/chain"
@@ -662,8 +663,9 @@ func (pe *parallelExecutor) execImpl(ctx context.Context, execStage *StageState,
 					hasLoggedExecution = true
 					lastExecutedLog = time.Now()
 					pe.LogExecution()
-					if pe.agg.HasBackgroundFilesBuild() {
-						pe.logger.Info(fmt.Sprintf("[%s] Background files build", pe.logPrefix), "progress", pe.agg.BackgroundProgress())
+					agg := pe.cfg.db.(dbstate.HasAgg).Agg().(*dbstate.Aggregator)
+					if agg.HasBackgroundFilesBuild() {
+						pe.logger.Info(fmt.Sprintf("[%s] Background files build", pe.logPrefix), "progress", agg.BackgroundProgress())
 					}
 				}
 			}
