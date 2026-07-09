@@ -55,10 +55,10 @@ func (v *View) Txs() []*snapshotsync.VisibleSegment {
 	return v.base.Segments(snaptype2.Transactions)
 }
 
-// Segment returns the segment of type t covering blockNum, if any.
 func (v *View) Segment(t snaptype.Type, blockNum uint64) (*snapshotsync.VisibleSegment, bool) {
 	return v.base.Segment(t, blockNum)
 }
+func (v *View) Segments(t snaptype.Type) []*snapshotsync.VisibleSegment { return v.base.Segments(t) }
 
 func (v *View) HeadersSegment(blockNum uint64) (*snapshotsync.VisibleSegment, bool) {
 	return v.base.Segment(snaptype2.Headers, blockNum)

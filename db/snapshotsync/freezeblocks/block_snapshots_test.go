@@ -120,8 +120,9 @@ func newBlocksTemporalDB(t *testing.T) (context.Context, datadir.Dirs, *blocksna
 	agg := state.NewTest(dirs).MustOpen(ctx, rawDB)
 	require.NoError(t, agg.OpenFolder())
 	t.Cleanup(agg.Close)
-	tdb, err := temporal.New(rawDB, agg, snapshots)
+	tdb, err := temporal.New(rawDB, agg)
 	require.NoError(t, err)
+	tdb.SetBlockSnapshots(snapshots)
 
 	br := &BlockRetire{db: rawDB, blockReader: NewBlockReader(snapshots, nil), logger: logger}
 	return ctx, dirs, snapshots, tdb, br

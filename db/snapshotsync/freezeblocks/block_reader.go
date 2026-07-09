@@ -516,20 +516,48 @@ func (r *BlockReader) HeadersRange(ctx context.Context, walker func(header *type
 	return ForEachHeader(ctx, r.sn, walker)
 }
 
-// viewSingleFile returns the segment of type t covering blockNum. When tx carries
-// a temporal block-files view (pinned for the tx lifetime), it reads from that
-// consistent snapshot and the returned release is a no-op — the tx owns the pin.
-// Otherwise it opens a fresh view from r.sn, which the caller releases as before.
+// blockFilesRoTxProvider is a tx (e.g. a temporal tx) exposing a block-files view
+// pinned for its lifetime.
+type blockFilesRoTxProvider interface {
+	BlockFilesRoTx() *blocksnapshots.View
+}
+
+// txBlockView returns the block-files view pinned by tx, or nil.
+func txBlockView(tx kv.Getter) *blocksnapshots.View {
+	if v, ok := tx.(blockFilesRoTxProvider); ok {
+		return v.BlockFilesRoTx()
+	}
+	return nil
+}
+
+// viewSingleFile returns the segment of type t covering blockNum, from tx's pinned
+// view when present (no-op release), else a fresh r.sn view the caller releases.
 func (r *BlockReader) viewSingleFile(tx kv.Getter, t snaptype.Type, blockNum uint64) (*snapshotsync.VisibleSegment, bool, func()) {
-	if v, ok := tx.(interface {
-		BlockFilesRo() *blocksnapshots.View
-	}); ok {
-		if bv := v.BlockFilesRo(); bv != nil {
-			seg, found := bv.Segment(t, blockNum)
-			return seg, found, func() {}
-		}
+	if bv := txBlockView(tx); bv != nil {
+		seg, ok := bv.Segment(t, blockNum)
+		return seg, ok, func() {}
 	}
 	return r.sn.ViewSingleFile(t, blockNum)
+}
+
+// viewType returns type t's segments, from tx's pinned view when present (no-op
+// release), else a fresh r.sn view the caller releases.
+func (r *BlockReader) viewType(tx kv.Getter, t snaptype.Type) ([]*snapshotsync.VisibleSegment, func()) {
+	if bv := txBlockView(tx); bv != nil {
+		return bv.Segments(t), func() {}
+	}
+	rotx := r.sn.ViewType(t)
+	return rotx.Segments, rotx.Close
+}
+
+// view returns a block-files view, tx's pinned one when present (no-op release),
+// else a fresh r.sn view the caller releases.
+func (r *BlockReader) view(tx kv.Getter) (*blocksnapshots.View, func()) {
+	if bv := txBlockView(tx); bv != nil {
+		return bv, func() {}
+	}
+	v := r.sn.View()
+	return v, v.Close
 }
 
 func (r *BlockReader) HeaderByNumber(ctx context.Context, tx kv.Getter, blockHeight uint64) (h *types.Header, err error) {
@@ -624,11 +652,10 @@ func (r *BlockReader) HeaderByHash(ctx context.Context, tx kv.Getter, hash commo
 		return h, nil
 	}
 
-	segmentRotx := r.sn.ViewType(snaptype2.Headers)
-	defer segmentRotx.Close()
+	segments, release := r.viewType(tx, snaptype2.Headers)
+	defer release()
 
 	buf := make([]byte, 128)
-	segments := segmentRotx.Segments
 	for i := len(segments) - 1; i >= 0; i-- {
 		h, err = r.headerFromSnapshotByHash(hash, segments[i], buf)
 		if err != nil {
@@ -1301,9 +1328,9 @@ func (r *BlockReader) TxnLookup(_ context.Context, tx kv.Getter, txnHash common.
 		return *blockNumPointer, *txNumPointer, true, nil
 	}
 
-	txns := r.sn.ViewType(snaptype2.Transactions)
-	defer txns.Close()
-	_, blockNum, txNum, ok, err = r.txnByHash(txnHash, txns.Segments, nil)
+	segments, release := r.viewType(tx, snaptype2.Transactions)
+	defer release()
+	_, blockNum, txNum, ok, err = r.txnByHash(txnHash, segments, nil)
 	if err != nil {
 		return 0, 0, false, err
 	}
@@ -1311,7 +1338,7 @@ func (r *BlockReader) TxnLookup(_ context.Context, tx kv.Getter, txnHash common.
 }
 
 func (r *BlockReader) FirstTxnNumNotInSnapshots() uint64 {
-	sn, ok, close := r.sn.ViewSingleFile(snaptype2.Transactions, r.sn.BlocksAvailable())
+	sn, ok, close := r.viewSingleFile(nil, snaptype2.Transactions, r.sn.BlocksAvailable())
 	if !ok {
 		return 0
 	}
@@ -1322,8 +1349,8 @@ func (r *BlockReader) FirstTxnNumNotInSnapshots() uint64 {
 }
 
 func (r *BlockReader) IterateFrozenBodies(f func(blockNum, baseTxNum, txCount uint64) error) error {
-	view := r.sn.View()
-	defer view.Close()
+	view, release := r.view(nil)
+	defer release()
 	for _, sn := range view.Bodies() {
 		defer sn.Src().MadvSequential().DisableReadAhead()
 
@@ -1347,8 +1374,8 @@ func (r *BlockReader) IterateFrozenBodies(f func(blockNum, baseTxNum, txCount ui
 
 func (r *BlockReader) IntegrityTxnID(ctx context.Context, failFast bool) error {
 	defer log.Info("[integrity] BlocksTxnID done")
-	view := r.sn.View()
-	defer view.Close()
+	view, release := r.view(nil)
+	defer release()
 
 	var expectedFirstTxnID uint64
 	for i, snb := range view.Bodies() {
@@ -1500,8 +1527,8 @@ func (r *BlockReader) ensureHeaderNumber(n uint64, seg *snapshotsync.VisibleSegm
 }
 
 func (r *BlockReader) Integrity(ctx context.Context) error {
-	view := r.sn.View()
-	defer view.Close()
+	view, release := r.view(nil)
+	defer release()
 	for _, seg := range view.Headers() {
 		if err := r.ensureHeaderNumber(seg.From(), seg); err != nil {
 			return err
