@@ -179,7 +179,7 @@ func ExecV3(ctx context.Context,
 	defer resetCommitmentGauges(ctx)
 	defer resetDomainGauges(ctx)
 
-	stepsInDb := rawdbhelpers.IdxStepsCountV3(applyTx, applyTx.Debug().StepSize())
+	stepsInDb := rawdbhelpers.IdxStepsCountV3(applyTx, doms.StepSize())
 
 	if maxBlockNum < blockNum {
 		return nil
@@ -222,7 +222,6 @@ func ExecV3(ctx context.Context,
 				cfg:               cfg,
 				rs:                rs,
 				doms:              doms,
-				agg:               agg,
 				isForkValidation:  isForkValidation,
 				isApplyingBlocks:  isApplyingBlocks,
 				logger:            logger,
@@ -231,6 +230,7 @@ func ExecV3(ctx context.Context,
 				enableChaosMonkey: execStage.CurrentSyncCycle.IsInitialCycle,
 				hooks:             hooks,
 			},
+			agg:         agg,
 			workerCount: cfg.syncCfg.ExecWorkerCount,
 		}
 		pe.lastCommittedTxNum.Store(inputTxNum)
@@ -256,7 +256,6 @@ func ExecV3(ctx context.Context,
 				cfg:               cfg,
 				rs:                rs,
 				doms:              doms,
-				agg:               agg,
 				u:                 u,
 				isForkValidation:  isForkValidation,
 				isApplyingBlocks:  isApplyingBlocks,
@@ -300,7 +299,7 @@ func ExecV3(ctx context.Context,
 					committedTransactions := currentTxNum - se.lastCommittedTxNum.Load()
 					se.lastCommittedTxNum.Store(currentTxNum)
 
-					stepsInDb = rawdbhelpers.IdxStepsCountV3(applyTx, applyTx.Debug().StepSize())
+					stepsInDb = rawdbhelpers.IdxStepsCountV3(applyTx, doms.StepSize())
 
 					if initialCycle {
 						se.LogCommitments(committedTransactions, stepsInDb, commitment.CommitProgress{})
@@ -383,7 +382,6 @@ func ExecV3(ctx context.Context,
 type txExecutor struct {
 	sync.RWMutex
 	cfg              ExecuteBlockCfg
-	agg              *dbstate.Aggregator
 	rs               *state.StateV3Buffered
 	doms             *execctx.SharedDomains
 	u                Unwinder
