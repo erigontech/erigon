@@ -100,6 +100,16 @@ read-fields the reference emits.
 5. **stateObject → cells.** Field getters/setters and `Exist`/`Empty` source
    cells; `so.data` is no longer a reconciled cache. `refresh` fully gone.
 
+## Component D detail (Mark)
+
+- **IBS StateWriter mechanism is fully removable.** Writes flow
+  versionedio → `WriteSet.Apply` → SharedDomains; the `NoopWriter`-to-suppress-
+  output-until-needed pattern is obsolete. The whole StateWriter surface off IBS
+  is unused → delete it.
+- **StateV3** is superseded by versionedio → SharedDomains processing; collapse it.
+- **The reader stays, but as a pure adapter over SharedDomains** (needed for both
+  latest and historic reads). Make it a thin pass-through, no logic.
+
 ## Execution notes
 
 - Consensus-sensitive: gate **every** step with `make eest-devnet` (hive branch
