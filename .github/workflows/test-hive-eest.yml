@@ -124,6 +124,7 @@ jobs:
         uses: actions/checkout@v7
         with:
           path: erigon-full
+          persist-credentials: false
 
       - name: Read pinned Hive ref
         id: hive-version
@@ -135,6 +136,7 @@ jobs:
           repository: ethereum/hive
           ref: ${{ steps.hive-version.outputs.ref }}
           path: hive
+          persist-credentials: false
 
       - name: Conditional Docker Login
         # Only login if we can. Workflow works without it but we want to avoid

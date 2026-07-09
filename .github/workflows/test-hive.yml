@@ -90,6 +90,7 @@ jobs:
         uses: actions/checkout@v7
         with:
           path: erigon-full
+          persist-credentials: false
 
       - name: Read pinned versions
         id: hive-version
@@ -104,6 +105,7 @@ jobs:
           # version hive and update periodically/on-demand to prevent upstream changes in Hive affecting us with red CI
           ref: ${{ steps.hive-version.outputs.ref }}
           path: hive
+          persist-credentials: false
 
       - name: Setup go env and cache
         uses: actions/setup-go@v6

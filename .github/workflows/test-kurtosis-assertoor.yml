@@ -67,6 +67,8 @@ jobs:
     steps:
       - name: Fast checkout git repository
         uses: actions/checkout@v7
+        with:
+          persist-credentials: false
 
       - name: Conditional Docker Login
         # Only login if we can. Workflow works without it but we want to avoid
@@ -198,6 +200,7 @@ jobs:
         uses: actions/checkout@v7
         with:
           sparse-checkout: .github/workflows/kurtosis
+          persist-credentials: false
 
       - name: Load image versions from the .io files (single source of truth)
         run: |
@@ -377,6 +380,8 @@ jobs:
     steps:
       - name: Fast checkout git repository
         uses: actions/checkout@v7
+        with:
+          persist-credentials: false
 
       - name: Conditional Docker Login
         # Only login if we can. Workflow works without it but we want to avoid

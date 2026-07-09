@@ -9,6 +9,8 @@ jobs:
     timeout-minutes: 60
     steps:
       - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
 
       # Defensive guard — skip silently only when docs/site/ is absent
       # (e.g. branches that predate the Docusaurus migration).

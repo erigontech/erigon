@@ -17,6 +17,7 @@ jobs:
         with:
           fetch-depth: 0
           filter: blob:none
+          persist-credentials: false
 
       - name: Check for large files in PR
         env:

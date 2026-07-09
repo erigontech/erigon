@@ -28,6 +28,7 @@ jobs:
       - uses: actions/checkout@v7
         with:
           fetch-depth: 1
+          persist-credentials: false
       # Warming runs replace the shard matrix with one build per cache class;
       # the -race suffix routes build-cache-extra-key below.
       - id: load
@@ -64,6 +65,7 @@ jobs:
         uses: actions/checkout@v7
         with:
           fetch-depth: 1
+          persist-credentials: false
 
       - uses: ./.github/actions/setup-erigon
         id: erigon
@@ -140,6 +142,7 @@ jobs:
       - uses: actions/checkout@v7
         with:
           fetch-depth: 1
+          persist-credentials: false
 
       - name: Restore EEST tarballs
         uses: actions/cache/restore@v6
