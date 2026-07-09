@@ -19,9 +19,11 @@ package cache
 import (
 	"encoding/binary"
 	"sync"
+	"sync/atomic"
 	"testing"
 
 	"github.com/c2h5oh/datasize"
+	"github.com/stretchr/testify/require"
 )
 
 // TestGenericCache_ConcurrentPutAcrossGrow guards the jump-grow data race:
@@ -50,4 +52,77 @@ func TestGenericCache_ConcurrentPutAcrossGrow(t *testing.T) {
 		}(w)
 	}
 	wg.Wait()
+}
+
+// A same-key put serialized by its stripe must never be undone by a grow: with
+// copy-then-swap migration, a writer that loaded the old generation before the
+// swap landed its write in the abandoned generation, and the migrated (older)
+// value resurfaced as live — a stale serve, not a benign miss. The writer
+// self-verifies each put and a reader checks the hot key's monotonically
+// increasing value never goes backward.
+func TestGenericCache_PutNotLostAcrossGrow(t *testing.T) {
+	value := func(n uint64) []byte {
+		b := make([]byte, 8)
+		binary.BigEndian.PutUint64(b, n)
+		return b
+	}
+	for round := 0; round < 50; round++ {
+		c := NewGenericCache[[]byte](64*datasize.MB, func(v []byte) int { return len(v) }, ModeEvictLRU)
+		hot := []byte("hot-key")
+		c.Put(hot, value(0), 1)
+
+		stop := make(chan struct{})
+		var regressed atomic.Bool
+		var wg sync.WaitGroup
+		wg.Add(2)
+		go func() {
+			defer wg.Done()
+			for n := uint64(1); ; n++ {
+				select {
+				case <-stop:
+					return
+				default:
+				}
+				c.Put(hot, value(n), n)
+				if v, ok := c.Get(hot); ok {
+					if got := binary.BigEndian.Uint64(v); got < n {
+						regressed.Store(true)
+						return
+					}
+				}
+			}
+		}()
+		go func() {
+			defer wg.Done()
+			last := uint64(0)
+			for {
+				select {
+				case <-stop:
+					return
+				default:
+				}
+				if v, ok := c.Get(hot); ok {
+					if n := binary.BigEndian.Uint64(v); n < last {
+						regressed.Store(true)
+						return
+					} else {
+						last = n
+					}
+				}
+			}
+		}()
+
+		// Cross the grow threshold so maybeGrow swaps the generation while the
+		// hot-key writer runs.
+		key := make([]byte, 8)
+		for i := 0; i < 3*genericCacheStartCapacity; i++ {
+			binary.BigEndian.PutUint64(key, uint64(1+i))
+			c.Put(key, []byte{1}, 1)
+		}
+
+		close(stop)
+		wg.Wait()
+		c.Close()
+		require.False(t, regressed.Load(), "round %d: a striped put was lost across a grow (older value resurfaced)", round)
+	}
 }

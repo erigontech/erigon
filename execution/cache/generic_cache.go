@@ -60,8 +60,10 @@ type entry[T any] struct {
 // data. Eviction mode is fixed at construction (see policy.go).
 type GenericCache[T any] struct {
 	// data is the sharded LRU, replaced wholesale on a jump-grow. Load it once per
-	// operation; a write racing a resize may land in the LRU about to be replaced
-	// and be dropped — a benign miss (the value is re-read from the domain).
+	// operation, inside the stripe for writes: maybeGrow swaps generations first
+	// and then migrates under the same stripes, so a striped write is never
+	// silently undone by the migration (an update lost that way would resurface
+	// the older value as live — a stale serve, not a benign miss).
 	data      atomic.Pointer[freelru.ShardedLRU[uint64, entry[T]]]
 	capacityB datasize.ByteSize
 	mode      Mode
@@ -196,7 +198,16 @@ func (c *GenericCache[T]) newShards(capacity uint32) *freelru.ShardedLRU[uint64,
 
 // maybeGrow jump-resizes the LRU one step larger when it is full, the ceiling
 // hasn't been reached, and the shared envelope can fund the step. Otherwise the
-// LRU keeps its size and freelru evicts within it. Called with no lock held.
+// LRU keeps its size and freelru evicts within it. Must be called with no
+// stripe held (it sweeps every stripe).
+//
+// Swap first, then migrate: entries copied before the swap could be updated in
+// the old generation by a concurrent striped writer, and the stale copy would
+// resurface as live. After the swap, the stripe sweep fences the writers that
+// loaded the old generation before it, freezing the old generation; migration
+// then moves each key under its stripe, if-absent, so it never clobbers a
+// fresher post-swap write. Until a key is migrated, reads of it miss — that
+// (and only that) is the benign transient of a resize.
 func (c *GenericCache[T]) maybeGrow() {
 	c.resizeMu.Lock()
 	defer c.resizeMu.Unlock()
@@ -215,12 +226,24 @@ func (c *GenericCache[T]) maybeGrow() {
 		return
 	}
 	next := c.newShards(newCap)
-	for _, k := range old.Keys() {
-		if v, ok := old.Get(k); ok {
-			next.Add(k, v)
-		}
-	}
 	c.data.Store(next)
+	for i := range c.putStripes {
+		c.putStripes[i].Lock()
+		c.putStripes[i].Unlock() //nolint:gocritic,staticcheck // empty critical section is the writer fence
+	}
+	for _, k := range old.Keys() {
+		mu := &c.putStripes[k&(putStripeCount-1)]
+		mu.Lock()
+		if v, ok := old.Get(k); ok {
+			if _, exists := next.Get(k); exists {
+				// A post-swap write superseded this entry; its residency ends here.
+				c.currentSize.Add(-int64(v.size))
+			} else {
+				next.Add(k, v)
+			}
+		}
+		mu.Unlock()
+	}
 	c.curCap.Store(newCap)
 	c.reservedBytes += delta
 }
@@ -313,6 +336,14 @@ func (c *GenericCache[T]) put(key []byte, value T, txNum uint64, overwrite bool)
 	newSize := len(key) + valBytes + 24
 	ep := c.coh.Epoch()
 
+	// Grow toward the ceiling before taking the stripe — maybeGrow sweeps every
+	// stripe, so growing while holding one would deadlock.
+	if c.mode != ModeNoOp {
+		if curCap := c.curCap.Load(); curCap < c.maxCap && c.data.Load().Len() >= int(curCap) {
+			c.maybeGrow()
+		}
+	}
+
 	mu := &c.putStripes[h&(putStripeCount-1)]
 	mu.Lock()
 	defer mu.Unlock()
@@ -341,12 +372,6 @@ func (c *GenericCache[T]) put(key []byte, value T, txNum uint64, overwrite bool)
 		}
 	}
 
-	// ModeEvictLRU: grow toward the ceiling before inserting into a full LRU, so a
-	// busy cache expands into its budget rather than evicting at the start size.
-	if curCap := c.curCap.Load(); c.mode != ModeNoOp && curCap < c.maxCap && lru.Len() >= int(curCap) {
-		c.maybeGrow()
-		lru = c.data.Load()
-	}
 	// In ModeEvictLRU the byte budget is enforced through the entry-count cap,
 	// not a separate currentSize check: capacityEntries is derived from
 	// capacityB (capacityB/avgBytesPerEntry, see NewGenericCache /
