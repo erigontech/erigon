@@ -2311,3 +2311,20 @@ func TestUpdateForkChoiceShallowReorgAfterLargeBatchExec(t *testing.T) {
 		return nil
 	}))
 }
+
+// A forkchoice head at height 0 that is not the genesis (e.g. a block carrying a
+// corrupted number) must be rejected, not treated as a genesis reset.
+func TestUpdateForkChoiceToNonGenesisBlockAtHeightZero(t *testing.T) {
+	ctx := t.Context()
+	m := execmoduletester.New(t, execmoduletester.WithGenesisSpec(&types.Genesis{Config: chain.AllProtocolChanges}))
+	fakeHeader := m.Genesis.Header()
+	fakeHeader.Extra = []byte("not the genesis")
+	fakeBlock := types.NewBlockWithHeader(fakeHeader)
+	require.NotEqual(t, m.Genesis.Hash(), fakeBlock.Hash())
+	insRes, err := insertBlocks(ctx, m.ExecModule, []*types.Block{fakeBlock})
+	require.NoError(t, err)
+	require.Equal(t, execmodule.ExecutionStatusSuccess, insRes)
+	fcu, err := updateForkChoice(ctx, m.ExecModule, fakeBlock.Header())
+	require.NoError(t, err)
+	require.Equal(t, execmodule.ExecutionStatusBadBlock, fcu.Status)
+}

@@ -66,6 +66,13 @@ func FinishForward(s *StageState, tx kv.RwTx, cfg FinishCfg) error {
 }
 
 func UnwindFinish(u *UnwindState, tx kv.RwTx) (err error) {
+	hash, err := rawdb.ReadCanonicalHash(tx, u.UnwindPoint)
+	if err != nil {
+		return err
+	}
+	if hash != (common.Hash{}) {
+		rawdb.WriteHeadBlockHash(tx, hash)
+	}
 	return u.Done(tx)
 }
 
