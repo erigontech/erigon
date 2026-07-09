@@ -132,14 +132,24 @@ func TestGenericCache_PutNotLostAcrossGrow(t *testing.T) {
 // PutIfAbsent arriving in that gap finds the key absent and inserts its
 // (stale) value — the writer class the if-absent semantics exist to close.
 // The prober watches for the generation swap and bursts conditional puts the
-// moment it lands, mimicking a fill thread that starts a put mid-resize; its
-// idle spin keeps the hot key MRU so LRU eviction cannot produce the stale
-// value legitimately.
+// moment it lands, mimicking a fill thread that starts a put mid-resize.
+//
+// The cache is seeded below any capacity pressure with the hot key inserted
+// last — the LRU victim is always an older seed key, so the hot key cannot be
+// evicted and a stale value at the end can only have come through a resize
+// gap. The grow is forced by lowering curCap: reaching Len >= startCap
+// organically needs every freelru shard full, which would make the hot key
+// evictable and the signal ambiguous.
 func TestGenericCache_PutIfAbsentDefersAcrossGrow(t *testing.T) {
 	fresh := []byte("fresh-value")
 	stale := []byte("stale-value")
 	for round := 0; round < 50; round++ {
 		c := NewGenericCache[[]byte](64*datasize.MB, func(v []byte) int { return len(v) }, ModeEvictLRU)
+		key := make([]byte, 8)
+		for i := 0; i < 512; i++ {
+			binary.BigEndian.PutUint64(key, uint64(1+i))
+			c.Put(key, []byte{1}, 1)
+		}
 		hot := []byte("hot-key")
 		c.Put(hot, fresh, 10)
 
@@ -161,15 +171,12 @@ func TestGenericCache_PutIfAbsentDefersAcrossGrow(t *testing.T) {
 					}
 					return
 				}
-				c.Get(hot)
 			}
 		}()
 
-		key := make([]byte, 8)
-		for i := 0; i < 3*genericCacheStartCapacity; i++ {
-			binary.BigEndian.PutUint64(key, uint64(1+i))
-			c.Put(key, []byte{1}, 1)
-		}
+		c.curCap.Store(uint32(c.Len()))
+		binary.BigEndian.PutUint64(key, 0)
+		c.Put(key, []byte{1}, 1) // insert at the lowered cap → triggers the grow
 
 		close(stop)
 		wg.Wait()

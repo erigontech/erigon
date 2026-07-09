@@ -324,21 +324,21 @@ func (c *GenericCache[T]) PutIfAbsent(key []byte, value T, txNum uint64) {
 }
 
 func (c *GenericCache[T]) put(key []byte, value T, txNum uint64, overwrite bool) {
+	if c.putLocked(key, value, txNum, overwrite) {
+		// Grow outside the stripe — maybeGrow takes every stripe.
+		c.maybeGrow()
+	}
+}
+
+// putLocked performs the write under the key's stripe and reports whether the
+// insert landed in a full LRU with ceiling headroom, i.e. the caller should
+// grow. Detection stays on the insert path — Len locks every shard, too costly
+// per warm update.
+func (c *GenericCache[T]) putLocked(key []byte, value T, txNum uint64, overwrite bool) bool {
 	h := maphash.Hash(key)
 	valBytes := c.sizeFunc(value)
 	newSize := len(key) + valBytes + 24
 	ep := c.coh.Epoch()
-
-	// Grow after the stripe is released (defers run LIFO): maybeGrow takes
-	// every stripe, so triggering it under one would deadlock. Detection stays
-	// on the insert path below — Len locks every shard, too costly per warm
-	// update.
-	needGrow := false
-	defer func() {
-		if needGrow {
-			c.maybeGrow()
-		}
-	}()
 
 	mu := &c.putStripes[h&(putStripeCount-1)]
 	mu.Lock()
@@ -352,11 +352,11 @@ func (c *GenericCache[T]) put(key []byte, value T, txNum uint64, overwrite bool)
 	// old one.
 	if hasExisting && bytes.Equal(existing.key, key) {
 		if !overwrite && !c.coh.IsStale(existing.txNum, existing.epoch) {
-			return
+			return false
 		}
 		lru.Add(h, entry[T]{key: existing.key, val: value, size: newSize, txNum: txNum, epoch: ep})
 		c.currentSize.Add(int64(newSize - existing.size))
-		return
+		return false
 	}
 
 	if c.mode == ModeNoOp {
@@ -364,15 +364,12 @@ func (c *GenericCache[T]) put(key []byte, value T, txNum uint64, overwrite bool)
 		// entry-count cap, which ModeNoOp ("drop new keys when full") must not do.
 		if c.currentSize.Load()+int64(newSize) > int64(c.capacityB) || lru.Len() >= int(c.maxCap) {
 			c.dropped.Add(1)
-			return
+			return false
 		}
 	}
 
-	// This insert lands in a full LRU with ceiling headroom — grow one step
-	// (after the stripe is released, see above).
-	if curCap := c.curCap.Load(); c.mode != ModeNoOp && curCap < c.maxCap && lru.Len() >= int(curCap) {
-		needGrow = true
-	}
+	curCap := c.curCap.Load()
+	needGrow := c.mode != ModeNoOp && curCap < c.maxCap && lru.Len() >= int(curCap)
 
 	// In ModeEvictLRU the byte budget is enforced through the entry-count cap,
 	// not a separate currentSize check: capacityEntries is derived from
@@ -397,6 +394,7 @@ func (c *GenericCache[T]) put(key []byte, value T, txNum uint64, overwrite bool)
 	lru.Add(h, entry[T]{key: keyCopy, val: value, size: newSize, txNum: txNum, epoch: ep})
 	c.currentSize.Add(int64(newSize))
 	c.inserts.Add(1)
+	return needGrow
 }
 
 // Delete removes the data for the given key. Runs under the key's put stripe:
@@ -424,16 +422,6 @@ func (c *GenericCache[T]) dropStale(h uint64, key []byte) {
 	if e, ok := lru.Get(h); ok && bytes.Equal(e.key, key) && c.coh.IsStale(e.txNum, e.epoch) {
 		lru.Remove(h)
 	}
-}
-
-// ContainsLive reports whether key has a live (non-stale) entry, without
-// touching hit/miss counters or LRU recency. Prefetchers probe it to skip the
-// copy work of preparing a conditional put that a live entry would no-op;
-// advisory only — PutIfAbsent re-decides under the key's stripe.
-func (c *GenericCache[T]) ContainsLive(key []byte) bool {
-	h := maphash.Hash(key)
-	e, ok := c.data.Load().Peek(h)
-	return ok && bytes.Equal(e.key, key) && !c.coh.IsStale(e.txNum, e.epoch)
 }
 
 // Clear removes all entries from the cache. It also resets the (epoch,

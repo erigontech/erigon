@@ -924,25 +924,6 @@ func TestDomainCache_StaleDropAtomicWithPut_NoSizeDrift(t *testing.T) {
 	}
 }
 
-func TestDomainCache_ContainsLive(t *testing.T) {
-	c := NewDomainCacheMode(1*datasize.KB, ModeEvictLRU)
-	addr := makeAddr(1)
-	require.False(t, c.ContainsLive(addr), "absent key")
-
-	c.Put(addr, []byte("v"), 10)
-	require.True(t, c.ContainsLive(addr))
-
-	c.Unwind(5) // entry txNum 10 >= floor 5, superseded epoch → stale
-	require.False(t, c.ContainsLive(addr), "stale entry must not read as live")
-
-	// The probe is passive: the stale entry is left for PutIfAbsent to replace.
-	c.PutIfAbsent(addr, []byte("w"), 4)
-	v, ok := c.Get(addr)
-	require.True(t, ok)
-	assert.Equal(t, []byte("w"), v)
-	require.True(t, c.ContainsLive(addr))
-}
-
 func TestCodeCache_ContainsLive(t *testing.T) {
 	cc := NewCodeCache(1*datasize.MB, 1*datasize.MB)
 	addr := makeAddr(1)

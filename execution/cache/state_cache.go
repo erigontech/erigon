@@ -263,14 +263,9 @@ func (c *StateCache) put(domain kv.Domain, key []byte, value []byte, txNum uint6
 	}
 	if overwrite {
 		cache.Put(key, common.Copy(value), txNum)
-		return
+	} else {
+		cache.PutIfAbsent(key, common.Copy(value), txNum)
 	}
-	// Skip the copy a live entry would discard; advisory — PutIfAbsent
-	// re-decides under the key's stripe.
-	if cache.ContainsLive(key) {
-		return
-	}
-	cache.PutIfAbsent(key, common.Copy(value), txNum)
 }
 
 // Delete removes the data for the given domain and key.

@@ -91,6 +91,10 @@ type cachePopulatingGetter struct {
 	progress func(kv.Domain) uint64
 }
 
+func newCachePopulatingGetter(ttx kv.TemporalTx, sc *cache.StateCache) *cachePopulatingGetter {
+	return &cachePopulatingGetter{g: ttx, sc: sc, stepSize: ttx.Debug().StepSize(), progress: ttx.Debug().DomainProgress}
+}
+
 func (cpg *cachePopulatingGetter) GetLatest(name kv.Domain, k []byte) ([]byte, kv.Step, error) {
 	v, step, err := cpg.g.GetLatest(name, k)
 	if err == nil && cpg.sc != nil {
@@ -254,7 +258,7 @@ func (bra *BlockReadAheader) warmBody(ctx context.Context, db kv.RoDB, header *t
 				}
 				var getter kv.TemporalGetter = ttx
 				if bra.stateCache != nil {
-					getter = &cachePopulatingGetter{g: ttx, sc: bra.stateCache, stepSize: ttx.Debug().StepSize(), progress: ttx.Debug().DomainProgress}
+					getter = newCachePopulatingGetter(ttx, bra.stateCache)
 				}
 				stateReader := state.NewReaderV3(getter)
 
@@ -325,7 +329,7 @@ func (bra *BlockReadAheader) warmBody(ctx context.Context, db kv.RoDB, header *t
 			var getter kv.TemporalGetter = ttx
 			var cpg *cachePopulatingGetter
 			if bra.stateCache != nil {
-				cpg = &cachePopulatingGetter{g: ttx, sc: bra.stateCache, stepSize: ttx.Debug().StepSize(), progress: ttx.Debug().DomainProgress}
+				cpg = newCachePopulatingGetter(ttx, bra.stateCache)
 				getter = cpg
 			}
 			stateReader := state.NewReaderV3(getter)
