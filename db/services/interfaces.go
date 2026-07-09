@@ -125,7 +125,6 @@ type BlockRetire interface {
 		onFinishRetire func() error,
 		onDone func()) bool
 	BuildMissedIndicesIfNeed(ctx context.Context, logPrefix string, notifier DBEventNotifier) error
-	RemoveBlockSnapshotsBelow(ctx context.Context, floor uint64, onDelete func(l []string) error) (deleted bool, err error)
 	SetWorkers(workers int)
 	GetWorkers() int
 	Close()

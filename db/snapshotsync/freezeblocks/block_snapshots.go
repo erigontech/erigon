@@ -554,45 +554,6 @@ func (br *BlockRetire) RemoveOverlaps(onDelete func(l []string) error) error {
 	return nil
 }
 
-// RemoveBlockSnapshotsBelow unlinks transaction segments lying entirely below
-// floor via the reclamation machinery (safe under live readers); onDelete stops
-// the seeder first. Only fully merged (Erigon2MergeLimit) files are removed, so
-// no sub-segment reappears on the next OpenFolder.
-//
-// Headers and bodies are kept: dropping older headers would make
-// FillDBFromSnapshots accumulate total difficulty from the lowest retained
-// header, yielding a too-low head TD that trips the engine-API newPayload
-// "< TTD" guard.
-func (br *BlockRetire) RemoveBlockSnapshotsBelow(ctx context.Context, floor uint64, onDelete func(l []string) error) (deleted bool, err error) {
-	sn := br.snapshots()
-
-	// Hold the View across Delete (like Aggregator.cleanAfterMerge): the pin defers
-	// the physical unlink to reclaimRetired at Close — off the dirtyFilesLock and
-	// never out from under a concurrent reader.
-	view := sn.BaseRoSnapshots.View()
-	defer view.Close()
-
-	var toDelete []string
-	for _, seg := range view.Segments(snaptype2.Transactions) {
-		if seg.To() > floor || seg.To()-seg.From() != snaptype.Erigon2MergeLimit {
-			continue
-		}
-		toDelete = append(toDelete, seg.Src().FileName())
-	}
-	if len(toDelete) == 0 {
-		return false, nil
-	}
-	if onDelete != nil {
-		if err := onDelete(toDelete); err != nil {
-			return false, err
-		}
-	}
-	if err := sn.Delete(toDelete...); err != nil {
-		return false, err
-	}
-	return true, nil
-}
-
 func (br *BlockRetire) MadvNormal() *BlockRetire {
 	br.snapshots().MadvNormal()
 	if br.chainConfig.Bor != nil {

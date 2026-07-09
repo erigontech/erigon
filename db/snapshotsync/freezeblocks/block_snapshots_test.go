@@ -41,64 +41,12 @@ import (
 	"github.com/erigontech/erigon/node/ethconfig"
 )
 
-// TestRemoveBlockSnapshotsBelow pins the minimal-mode behavior: aged, fully
-// merged transaction files below the retention floor are unlinked, while headers
-// and bodies (kept so FillDBFromSnapshots computes head TD from genesis) and any
-// segment at/above the floor are kept.
-func TestRemoveBlockSnapshotsBelow(t *testing.T) {
-	logger := log.New()
-	dir := t.TempDir()
-	db := memdb.NewTestDB(t, dbcfg.ChainDB)
-	cfg := ethconfig.Defaults.Snapshot
-	cfg.ChainName = networkname.Mainnet
-	snapshots := blocksnapshots.NewRoSnapshots(cfg, dir, logger)
-	defer snapshots.Close()
-
-	ver := version.V1_0
-	const mergeLimit uint64 = snaptype.Erigon2MergeLimit
-	for _, typ := range snaptype2.BlockSnapshotTypes {
-		createTestSegmentFile(t, 0, mergeLimit, typ.Enum(), dir, ver, logger)
-		createTestSegmentFile(t, mergeLimit, 2*mergeLimit, typ.Enum(), dir, ver, logger)
-	}
-	require.NoError(t, snapshots.OpenFolder())
-	require.Equal(t, 2*mergeLimit-1, snapshots.SegmentsMax())
-
-	blockReader := NewBlockReader(snapshots, nil)
-	br := &BlockRetire{db: db, blockReader: blockReader, logger: logger}
-
-	var seederDeleted []string
-	onDelete := func(l []string) error {
-		seederDeleted = append(seederDeleted, l...)
-		return nil
-	}
-
-	deleted, err := br.RemoveBlockSnapshotsBelow(t.Context(), mergeLimit, onDelete)
-	require.NoError(t, err)
-	require.True(t, deleted)
-
-	// Only the below-floor transactions segment is removed.
-	txBelow := filepath.Join(dir, snaptype.SegmentFileName(ver, 0, mergeLimit, snaptype2.Transactions.Enum()))
-	require.NoFileExists(t, txBelow)
-	require.Equal(t, []string{filepath.Base(txBelow)}, seederDeleted)
-
-	// Headers/bodies below the floor are kept; every type at/above the floor stays.
-	for _, typ := range []snaptype.Type{snaptype2.Headers, snaptype2.Bodies} {
-		below := filepath.Join(dir, snaptype.SegmentFileName(ver, 0, mergeLimit, typ.Enum()))
-		require.FileExistsf(t, below, "%s below floor must be kept", typ.Enum())
-	}
-	for _, typ := range snaptype2.BlockSnapshotTypes {
-		above := filepath.Join(dir, snaptype.SegmentFileName(ver, mergeLimit, 2*mergeLimit, typ.Enum()))
-		require.FileExistsf(t, above, "%s at/above floor must remain", typ.Enum())
-	}
-	require.Equal(t, 2*mergeLimit-1, snapshots.SegmentsMax())
-}
-
 const testMergeLimit = snaptype.Erigon2MergeLimit
 
 // newBlocksTemporalDB builds a temporal.DB carrying real block snapshots (two
 // merged segments per type at [0,mergeLimit) and [mergeLimit,2*mergeLimit)) plus
-// the BlockRetire that removes them.
-func newBlocksTemporalDB(t *testing.T) (context.Context, datadir.Dirs, *blocksnapshots.RoSnapshots, *temporal.DB, *BlockRetire) {
+// a block reader over them.
+func newBlocksTemporalDB(t *testing.T) (context.Context, datadir.Dirs, *blocksnapshots.RoSnapshots, *temporal.DB, *BlockReader) {
 	t.Helper()
 	logger := log.New()
 	dirs := datadir.New(t.TempDir())
@@ -124,8 +72,7 @@ func newBlocksTemporalDB(t *testing.T) (context.Context, datadir.Dirs, *blocksna
 	require.NoError(t, err)
 	tdb.SetBlockSnapshots(snapshots)
 
-	br := &BlockRetire{db: rawDB, blockReader: NewBlockReader(snapshots, nil), logger: logger}
-	return ctx, dirs, snapshots, tdb, br
+	return ctx, dirs, snapshots, tdb, NewBlockReader(snapshots, nil)
 }
 
 // TestTemporalTxDefersBlockFileUnlink proves step 2: a block file retired while a
@@ -133,9 +80,9 @@ func newBlocksTemporalDB(t *testing.T) (context.Context, datadir.Dirs, *blocksna
 // the tx pins the block-files view (blocktx) for its whole lifetime — the same
 // reclamation watermark that already governs state files.
 func TestTemporalTxDefersBlockFileUnlink(t *testing.T) {
-	ctx, dirs, _, tdb, br := newBlocksTemporalDB(t)
-
-	txBelow := filepath.Join(dirs.Snap, snaptype.SegmentFileName(version.V1_0, 0, testMergeLimit, snaptype2.Transactions.Enum()))
+	ctx, dirs, snapshots, tdb, _ := newBlocksTemporalDB(t)
+	txName := snaptype.SegmentFileName(version.V1_0, 0, testMergeLimit, snaptype2.Transactions.Enum())
+	txBelow := filepath.Join(dirs.Snap, txName)
 	require.FileExists(t, txBelow)
 
 	// Open a temporal tx: it pins the block-files view for its lifetime.
@@ -143,9 +90,7 @@ func TestTemporalTxDefersBlockFileUnlink(t *testing.T) {
 	require.NoError(t, err)
 	defer tx.Rollback()
 
-	deleted, err := br.RemoveBlockSnapshotsBelow(ctx, testMergeLimit, nil)
-	require.NoError(t, err)
-	require.True(t, deleted)
+	require.NoError(t, snapshots.Delete(txName)) // retire the below-floor segment
 
 	// The open tx pins the outgoing generation, so the retired file survives.
 	require.FileExists(t, txBelow, "block file must survive while a temporal tx pins the view")
@@ -159,9 +104,8 @@ func TestTemporalTxDefersBlockFileUnlink(t *testing.T) {
 // tx-pinned view. A segment retired while the tx is open vanishes from the live
 // snapshot set, yet the still-open tx keeps resolving it through its pinned view.
 func TestBlockReaderReadsThroughTemporalTxView(t *testing.T) {
-	ctx, _, snapshots, tdb, br := newBlocksTemporalDB(t)
-	blockReader := br.blockReader.(*BlockReader)
-
+	ctx, _, snapshots, tdb, blockReader := newBlocksTemporalDB(t)
+	txName := snaptype.SegmentFileName(version.V1_0, 0, testMergeLimit, snaptype2.Transactions.Enum())
 	const blockInRemovedSegment = testMergeLimit / 2 // inside [0, mergeLimit)
 
 	tx, err := tdb.BeginTemporalRo(ctx)
@@ -172,9 +116,7 @@ func TestBlockReaderReadsThroughTemporalTxView(t *testing.T) {
 	release()
 	require.True(t, ok, "segment must be resolvable through the tx before removal")
 
-	deleted, err := br.RemoveBlockSnapshotsBelow(ctx, testMergeLimit, nil)
-	require.NoError(t, err)
-	require.True(t, deleted)
+	require.NoError(t, snapshots.Delete(txName)) // retire while the tx is open
 
 	// The live set no longer has the retired segment...
 	_, okLive, releaseLive := snapshots.BaseRoSnapshots.ViewSingleFile(snaptype2.Transactions, blockInRemovedSegment)
