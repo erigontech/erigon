@@ -637,3 +637,51 @@ func TestFold_StepBoundaryCheckpointMidBlock(t *testing.T) {
 
 	requireBranchesConsistentWithAccounts(t, doms, tx, accountValues)
 }
+
+// feedBlock1Shadow builds a calculator, feeds block 1's n writes (seed 42) into
+// cc.state, marks the block folded-ahead with balRoots[1]=balRoot, then delivers
+// blockResult(1) with BAL_SHADOW_COMPUTE on so shadowCrossCheck recomputes the
+// incremental root and cross-checks it against balRoot. Returns the published result.
+func feedBlock1Shadow(t *testing.T, n uint64, balRoot []byte) commitmentResult {
+	t.Helper()
+	defer func(p bool) { dbg.BALShadowCompute = p }(dbg.BALShadowCompute)
+	defer func(p bool) { dbg.BALDrivenCommitment = p }(dbg.BALDrivenCommitment)
+	dbg.BALShadowCompute = true
+	dbg.BALDrivenCommitment = true
+
+	ctx := context.Background()
+	db, _, doms := setupStepTest(t)
+	in := make(chan applyResult, 64)
+	out := make(chan commitmentResult, 64)
+	cc, err := newCommitmentCalculator(ctx, ctx, doms, db, &chain.Config{}, "shadow", log.New(), false, 1<<62, in, nil, out)
+	require.NoError(t, err)
+
+	rnd := rand.New(rand.NewSource(42))
+	for txNum := uint64(1); txNum <= n; txNum++ {
+		addrBytes := make([]byte, length.Addr)
+		rnd.Read(addrBytes)
+		addr := accounts.InternAddress([20]byte(addrBytes))
+		cc.handleMessage(ctx, &txResult{blockNum: 1, txNum: txNum, writes: nonceBalanceWrites(addr, txNum, *uint256.NewInt(txNum * 1000))})
+	}
+	cc.foldedAhead[1] = true
+	cc.balRoots[1] = balRoot
+
+	cc.handleMessage(ctx, &blockResult{BlockNum: 1, BlockHash: common.Hash{0x01}, lastTxNum: n})
+	cc.Stop()
+	select {
+	case res := <-out:
+		return res
+	default:
+		t.Fatal("shadowCrossCheck published no result")
+		return commitmentResult{}
+	}
+}
+
+// TestShadowCrossCheck_Mismatch pins the safety path: a folded block whose
+// recorded balRoot disagrees with the incremental recompute must fail the block
+// with ErrWrongTrieRoot rather than publish silently.
+func TestShadowCrossCheck_Mismatch(t *testing.T) {
+	res := feedBlock1Shadow(t, 4, bytes.Repeat([]byte{0xEE}, 32))
+	require.Error(t, res.err, "a divergent folded root must fail the block")
+	require.ErrorIs(t, res.err, ErrWrongTrieRoot, "shadow mismatch must surface as ErrWrongTrieRoot")
+}

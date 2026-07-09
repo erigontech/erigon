@@ -2347,8 +2347,8 @@ func TestUpdateForkChoiceShallowReorgAfterLargeBatchExec(t *testing.T) {
 // randomises ParentBeaconBlockRoot per block, so under Amsterdam — required for
 // BALs — two chains can't share a prefix and a mid-chain parent has no state.)
 func TestBALDrivenFoldAheadChangesetIntegrity(t *testing.T) {
-	off := runBALFoldAheadChangeset(t, false)
-	on := runBALFoldAheadChangeset(t, true)
+	off := runBALFoldAheadChangeset(t, false, false)
+	on := runBALFoldAheadChangeset(t, true, false)
 
 	require.Zero(t, off.folds, "fold-off must not fold any block")
 	require.Positive(t, on.folds, "fold-on must actually fold the pre-window blocks (else the differential is vacuous)")
@@ -2365,6 +2365,16 @@ func TestBALDrivenFoldAheadChangesetIntegrity(t *testing.T) {
 			"window block's changeset")
 }
 
+// TestBALShadowCompute_MatchesIncremental exercises BAL_SHADOW_COMPUTE's success
+// path end-to-end: with fold-ahead AND shadow cross-check on, every folded block
+// is recomputed incrementally and the two roots must agree. runBALFoldAheadChangeset
+// asserts the batch validates cleanly, so a shadow mismatch would fail the block
+// with ErrWrongTrieRoot; a clean run with folds>0 proves the match path ran.
+func TestBALShadowCompute_MatchesIncremental(t *testing.T) {
+	res := runBALFoldAheadChangeset(t, true, true)
+	require.Positive(t, res.folds, "the fold must have run so shadow cross-check exercised the match path")
+}
+
 type balFoldResult struct {
 	// windowCommitmentKeys maps each window block number to the sorted set of
 	// CommitmentDomain changeset keys (branch prefixes) it touched — compared
@@ -2373,11 +2383,13 @@ type balFoldResult struct {
 	folds                int64
 }
 
-func runBALFoldAheadChangeset(t *testing.T, foldAhead bool) balFoldResult {
+func runBALFoldAheadChangeset(t *testing.T, foldAhead, shadow bool) balFoldResult {
 	defer func(prev bool) { dbg.BALDrivenCommitment = prev }(dbg.BALDrivenCommitment)
 	defer func(prev bool) { dbg.IgnoreBAL = prev }(dbg.IgnoreBAL)
+	defer func(prev bool) { dbg.BALShadowCompute = prev }(dbg.BALShadowCompute)
 	dbg.BALDrivenCommitment = foldAhead
 	dbg.IgnoreBAL = false
+	dbg.BALShadowCompute = shadow
 	stagedsync.ResetFoldsAheadForTest()
 
 	const chainLen = 12
