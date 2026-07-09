@@ -1530,17 +1530,17 @@ func (s *RoSnapshots) PrintDebug() {
 
 type View struct {
 	s           *RoSnapshots
-	segments    []*RoTx
+	segments    [snaptype.MaxEnum]*RoTx
 	baseSegType snaptype.Type
 }
 
 func (s *RoSnapshots) View() *View {
 	v := s.visible.Load()
-	sgs := make([]*RoTx, snaptype.MaxEnum)
+	view := &View{s: s, baseSegType: snaptype2.Transactions} // Transactions is the last segment to be processed, so it's the most reliable.
 	for _, t := range s.enums {
-		sgs[t] = v.segments[t].BeginRo()
+		view.segments[t] = v.segments[t].BeginRo()
 	}
-	return &View{s: s, segments: sgs, baseSegType: snaptype2.Transactions} // Transactions is the last segment to be processed, so it's the most reliable.
+	return view
 }
 
 func (v *View) Close() {
