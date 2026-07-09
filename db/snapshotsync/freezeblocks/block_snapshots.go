@@ -570,7 +570,14 @@ func (br *BlockRetire) DisableReadAhead() {
 }
 
 func DumpBlocks(ctx context.Context, blockFrom, blockTo uint64, chainConfig *chain.Config, tmpDir, snapDir string, chainDB kv.RoDB, workers int, lvl log.Lvl, logger log.Logger, blockReader services.FullBlockReader, snCfg *snapcfg.Cfg, inProgress *snapshotsync.BaseRoSnapshots) error {
-	firstTxNum := blockReader.FirstTxnNumNotInSnapshots(nil)
+	var firstTxNum uint64
+	if err := chainDB.View(ctx, func(tx kv.Tx) error {
+		firstTxNum = blockReader.FirstTxnNumNotInSnapshots(tx)
+		return nil
+	}); err != nil {
+		return err
+	}
+
 	for i := blockFrom; i < blockTo; i = chooseSegmentEnd(i, blockTo, snaptype2.Enums.Headers, snCfg) {
 		lastTxNum, err := dumpBlocksRange(ctx, i, chooseSegmentEnd(i, blockTo, snaptype2.Enums.Headers, snCfg), tmpDir, snapDir, firstTxNum, chainDB, chainConfig, workers, lvl, logger, inProgress)
 		if err != nil {
