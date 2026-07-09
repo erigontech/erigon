@@ -69,6 +69,7 @@ import (
 	"github.com/erigontech/erigon/db/recsplit"
 	"github.com/erigontech/erigon/db/seg"
 	"github.com/erigontech/erigon/db/snapshotsync"
+	"github.com/erigontech/erigon/db/snapshotsync/blocksnapshots"
 	"github.com/erigontech/erigon/db/snapshotsync/freezeblocks"
 	"github.com/erigontech/erigon/db/snaptype"
 	"github.com/erigontech/erigon/db/snaptype2"
@@ -2979,7 +2980,7 @@ func lsDatadir(ctx context.Context, dirs datadir.Dirs, logger log.Logger) error 
 
 	cfg := ethconfig.NewSnapCfg(false, true, true, chainName)
 
-	blockSnaps := freezeblocks.NewRoSnapshots(cfg, dirs.Snap, logger)
+	blockSnaps := blocksnapshots.NewRoSnapshots(cfg, dirs.Snap, logger)
 	if err := blockSnaps.OpenFolder(); err != nil {
 		return err
 	}
@@ -3028,7 +3029,7 @@ func tryOpenChaindata(ctx context.Context, dirs datadir.Dirs, logger log.Logger)
 }
 
 type OpenSnapsResult struct {
-	BlockSnaps       *freezeblocks.RoSnapshots
+	BlockSnaps       *blocksnapshots.RoSnapshots
 	BorSnaps         *heimdall.RoSnapshots
 	CaplinSnaps      *freezeblocks.CaplinSnapshots
 	CaplinStateSnaps *snapshotsync.CaplinStateSnapshots
@@ -3047,7 +3048,7 @@ func openSnaps(ctx context.Context, cfg ethconfig.BlocksFreezing, dirs datadir.D
 
 	chainConfig := fromdb.ChainConfig(chainDB)
 
-	res.BlockSnaps = freezeblocks.NewRoSnapshots(cfg, dirs.Snap, logger)
+	res.BlockSnaps = blocksnapshots.NewRoSnapshots(cfg, dirs.Snap, logger)
 	if err = res.BlockSnaps.OpenFolder(); err != nil {
 		return
 	}

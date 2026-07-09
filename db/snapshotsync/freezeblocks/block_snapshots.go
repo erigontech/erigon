@@ -50,6 +50,7 @@ import (
 	"github.com/erigontech/erigon/db/services"
 	"github.com/erigontech/erigon/db/snapcfg"
 	"github.com/erigontech/erigon/db/snapshotsync"
+	"github.com/erigontech/erigon/db/snapshotsync/blocksnapshots"
 	"github.com/erigontech/erigon/db/snaptype"
 	"github.com/erigontech/erigon/db/snaptype2"
 	"github.com/erigontech/erigon/diagnostics/metrics"
@@ -67,19 +68,6 @@ import (
 var (
 	BorDataNotReadyTimeout = 5 * time.Minute
 )
-
-type RoSnapshots struct {
-	snapshotsync.RoSnapshots
-}
-
-// NewRoSnapshots - opens all snapshots. But to simplify everything:
-//   - it opens snapshots only on App start and immutable after
-//   - all snapshots of given blocks range must exist - to make this blocks range available
-//   - gaps are not allowed
-//   - segment have [from:to) semantic
-func NewRoSnapshots(cfg ethconfig.BlocksFreezing, snapDir string, logger log.Logger) *RoSnapshots {
-	return &RoSnapshots{*snapshotsync.NewRoSnapshots(cfg, snapDir, snaptype2.BlockSnapshotTypes, true, logger)}
-}
 
 // headers
 // value: first_byte_of_header_hash + header_rlp
@@ -203,9 +191,13 @@ func (br *BlockRetire) BorStore() (heimdall.Store, bridge.Store) {
 	return br.heimdallStore, br.bridgeStore
 }
 
-func (br *BlockRetire) Writer() *RoSnapshots { return br.blockReader.Snapshots().(*RoSnapshots) }
+func (br *BlockRetire) Writer() *blocksnapshots.RoSnapshots {
+	return br.blockReader.Snapshots().(*blocksnapshots.RoSnapshots)
+}
 
-func (br *BlockRetire) snapshots() *RoSnapshots { return br.blockReader.Snapshots().(*RoSnapshots) }
+func (br *BlockRetire) snapshots() *blocksnapshots.RoSnapshots {
+	return br.blockReader.Snapshots().(*blocksnapshots.RoSnapshots)
+}
 
 func (br *BlockRetire) borSnapshots() *heimdall.RoSnapshots {
 	return br.blockReader.BorSnapshots().(*heimdall.RoSnapshots)
@@ -294,7 +286,7 @@ func (br *BlockRetire) retireBlocks(
 		logger.Log(lvl, "[snapshots] Retire Blocks", "range",
 			fmt.Sprintf("%s-%s", common.PrettyCounter(blockFrom), common.PrettyCounter(blockTo)))
 		// in future we will do it in background
-		if err := DumpBlocks(ctx, blockFrom, blockTo, br.chainConfig, tmpDir, snapshots.Dir(), db, int(workers), lvl, logger, blockReader, br.snCfg, &snapshots.RoSnapshots); err != nil {
+		if err := DumpBlocks(ctx, blockFrom, blockTo, br.chainConfig, tmpDir, snapshots.Dir(), db, int(workers), lvl, logger, blockReader, br.snCfg, &snapshots.BaseRoSnapshots); err != nil {
 			return ok, fmt.Errorf("DumpBlocks: %w", err)
 		}
 
@@ -336,7 +328,7 @@ func (br *BlockRetire) MergeBlocks(
 
 		return seeder.Seed(ctx, mergedFileNames)
 	}
-	if err = merger.Merge(ctx, &snapshots.RoSnapshots, snapshots.Types(), rangesToMerge, snapshots.Dir(), true /* doIndex */, onMerge, seeder.Delete); err != nil {
+	if err = merger.Merge(ctx, &snapshots.BaseRoSnapshots, snapshots.Types(), rangesToMerge, snapshots.Dir(), true /* doIndex */, onMerge, seeder.Delete); err != nil {
 		return false, err
 	}
 
@@ -542,7 +534,7 @@ func (br *BlockRetire) BuildMissedIndicesIfNeed(ctx context.Context, logPrefix s
 	}
 
 	if br.chainConfig.Bor != nil {
-		if err := br.borSnapshots().RoSnapshots.BuildMissedIndices(ctx, logPrefix, notifier, br.dirs, br.chainConfig, br.logger); err != nil {
+		if err := br.borSnapshots().BaseRoSnapshots.BuildMissedIndices(ctx, logPrefix, notifier, br.dirs, br.chainConfig, br.logger); err != nil {
 			return err
 		}
 	}
@@ -555,7 +547,7 @@ func (br *BlockRetire) RemoveOverlaps(onDelete func(l []string) error) error {
 	}
 
 	if br.chainConfig.Bor != nil {
-		if err := br.borSnapshots().RoSnapshots.RemoveOverlaps(onDelete); err != nil {
+		if err := br.borSnapshots().BaseRoSnapshots.RemoveOverlaps(onDelete); err != nil {
 			return err
 		}
 	}
@@ -577,7 +569,7 @@ func (br *BlockRetire) RemoveBlockSnapshotsBelow(ctx context.Context, floor uint
 	// Hold the View across Delete (like Aggregator.cleanAfterMerge): the pin defers
 	// the physical unlink to reclaimRetired at Close — off the dirtyFilesLock and
 	// never out from under a concurrent reader.
-	view := sn.RoSnapshots.View()
+	view := sn.BaseRoSnapshots.View()
 	defer view.Close()
 
 	var toDelete []string
@@ -604,7 +596,7 @@ func (br *BlockRetire) RemoveBlockSnapshotsBelow(ctx context.Context, floor uint
 func (br *BlockRetire) MadvNormal() *BlockRetire {
 	br.snapshots().MadvNormal()
 	if br.chainConfig.Bor != nil {
-		br.borSnapshots().RoSnapshots.MadvNormal()
+		br.borSnapshots().BaseRoSnapshots.MadvNormal()
 	}
 	return br
 }
@@ -612,11 +604,11 @@ func (br *BlockRetire) MadvNormal() *BlockRetire {
 func (br *BlockRetire) DisableReadAhead() {
 	br.snapshots().DisableReadAhead()
 	if br.chainConfig.Bor != nil {
-		br.borSnapshots().RoSnapshots.DisableReadAhead()
+		br.borSnapshots().BaseRoSnapshots.DisableReadAhead()
 	}
 }
 
-func DumpBlocks(ctx context.Context, blockFrom, blockTo uint64, chainConfig *chain.Config, tmpDir, snapDir string, chainDB kv.RoDB, workers int, lvl log.Lvl, logger log.Logger, blockReader services.FullBlockReader, snCfg *snapcfg.Cfg, inProgress *snapshotsync.RoSnapshots) error {
+func DumpBlocks(ctx context.Context, blockFrom, blockTo uint64, chainConfig *chain.Config, tmpDir, snapDir string, chainDB kv.RoDB, workers int, lvl log.Lvl, logger log.Logger, blockReader services.FullBlockReader, snCfg *snapcfg.Cfg, inProgress *snapshotsync.BaseRoSnapshots) error {
 	firstTxNum := blockReader.FirstTxnNumNotInSnapshots()
 	for i := blockFrom; i < blockTo; i = chooseSegmentEnd(i, blockTo, snaptype2.Enums.Headers, snCfg) {
 		lastTxNum, err := dumpBlocksRange(ctx, i, chooseSegmentEnd(i, blockTo, snaptype2.Enums.Headers, snCfg), tmpDir, snapDir, firstTxNum, chainDB, chainConfig, workers, lvl, logger, inProgress)
@@ -628,7 +620,7 @@ func DumpBlocks(ctx context.Context, blockFrom, blockTo uint64, chainConfig *cha
 	return nil
 }
 
-func dumpBlocksRange(ctx context.Context, blockFrom, blockTo uint64, tmpDir, snapDir string, firstTxNum uint64, chainDB kv.RoDB, chainConfig *chain.Config, workers int, lvl log.Lvl, logger log.Logger, inProgress *snapshotsync.RoSnapshots) (lastTxNum uint64, err error) {
+func dumpBlocksRange(ctx context.Context, blockFrom, blockTo uint64, tmpDir, snapDir string, firstTxNum uint64, chainDB kv.RoDB, chainConfig *chain.Config, workers int, lvl log.Lvl, logger log.Logger, inProgress *snapshotsync.BaseRoSnapshots) (lastTxNum uint64, err error) {
 	logEvery := time.NewTicker(20 * time.Second)
 	defer logEvery.Stop()
 
@@ -669,7 +661,7 @@ var BlockCompressCfg = seg.Cfg{
 	Workers:              1,
 }
 
-func dumpRange(ctx context.Context, f snaptype.FileInfo, dumper dumpFunc, firstKey firstKeyGetter, chainDB kv.RoDB, chainConfig *chain.Config, tmpDir string, workers int, lvl log.Lvl, logger log.Logger, inProgress *snapshotsync.RoSnapshots) (uint64, error) {
+func dumpRange(ctx context.Context, f snaptype.FileInfo, dumper dumpFunc, firstKey firstKeyGetter, chainDB kv.RoDB, chainConfig *chain.Config, tmpDir string, workers int, lvl log.Lvl, logger log.Logger, inProgress *snapshotsync.BaseRoSnapshots) (uint64, error) {
 	// Claim this (type, range) so a concurrent OpenFolder doesn't pick up the
 	// .seg before its index is built and race our BuildIndexes below.
 	if inProgress != nil {
@@ -1087,7 +1079,7 @@ func DumpBodies(ctx context.Context, db kv.RoDB, _ *chain.Config, blockFrom, blo
 	return lastTxNum, nil
 }
 
-func ForEachHeader(ctx context.Context, s *RoSnapshots, walker func(header *types.Header) error) error {
+func ForEachHeader(ctx context.Context, s *blocksnapshots.RoSnapshots, walker func(header *types.Header) error) error {
 	word := make([]byte, 0, 2*4096)
 
 	view := s.View()
@@ -1114,35 +1106,6 @@ func ForEachHeader(ctx context.Context, s *RoSnapshots, walker func(header *type
 	}
 
 	return nil
-}
-
-type View struct {
-	base *snapshotsync.View
-}
-
-func (s *RoSnapshots) View() *View {
-	return &View{base: s.RoSnapshots.View().WithBaseSegType(snaptype2.Transactions)}
-}
-
-func (v *View) Close() {
-	v.base.Close()
-}
-
-func (v *View) Headers() []*snapshotsync.VisibleSegment { return v.base.Segments(snaptype2.Headers) }
-func (v *View) Bodies() []*snapshotsync.VisibleSegment  { return v.base.Segments(snaptype2.Bodies) }
-func (v *View) Txs() []*snapshotsync.VisibleSegment {
-	return v.base.Segments(snaptype2.Transactions)
-}
-
-func (v *View) HeadersSegment(blockNum uint64) (*snapshotsync.VisibleSegment, bool) {
-	return v.base.Segment(snaptype2.Headers, blockNum)
-}
-
-func (v *View) BodiesSegment(blockNum uint64) (*snapshotsync.VisibleSegment, bool) {
-	return v.base.Segment(snaptype2.Bodies, blockNum)
-}
-func (v *View) TxsSegment(blockNum uint64) (*snapshotsync.VisibleSegment, bool) {
-	return v.base.Segment(snaptype2.Transactions, blockNum)
 }
 
 func RemoveIncompatibleIndices(dirs datadir.Dirs) error {
