@@ -116,6 +116,11 @@ type ReadSet struct {
 	codeHash       map[accounts.Address]VersionedRead[accounts.CodeHash]
 	codeSize       map[accounts.Address]VersionedRead[int]
 	storage        map[accounts.Address]map[accounts.StorageKey]VersionedRead[uint256.Int]
+
+	// access carries EIP-7928 "address was accessed" marks (with the
+	// non-revertable "real EVM access" bit) on the read side, so the access set
+	// travels with the read-set rather than as a separate IntraBlockState cache.
+	access AccessSet
 }
 
 func readSetPut[T any](m *map[accounts.Address]VersionedRead[T], addr accounts.Address, tr VersionedRead[T]) {
@@ -407,6 +412,14 @@ func (s *ReadSet) mergeFrom(src ReadSet) {
 	for a, inner := range src.storage {
 		for k, tr := range inner {
 			s.SetStorage(a, k, tr)
+		}
+	}
+	if len(src.access) > 0 {
+		if s.access == nil {
+			s.access = make(AccessSet, len(src.access))
+		}
+		for a, opts := range src.access {
+			s.access[a] = opts
 		}
 	}
 }

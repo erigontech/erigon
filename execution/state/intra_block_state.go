@@ -177,13 +177,12 @@ type IntraBlockState struct {
 
 	// Journal of state modifications. This is the backbone of
 	// Snapshot and RevertToSnapshot.
-	journal       *journal
-	revisions     *revisions
-	trace         bool
-	tracingHooks  *tracing.Hooks
-	balanceInc    map[accounts.Address]*BalanceIncrease // Map of balance increases (without first reading the account)
-	addressAccess AccessSet
-	recordAccess  bool // gates MarkAddressAccess — enabled in Prepare
+	journal      *journal
+	revisions    *revisions
+	trace        bool
+	tracingHooks *tracing.Hooks
+	balanceInc   map[accounts.Address]*BalanceIncrease // Map of balance increases (without first reading the account)
+	recordAccess bool                                  // gates MarkAddressAccess — enabled in Prepare
 
 	// Versioned storage used for parallel tx processing, versions
 	// are maintaned across transactions until they are reset
@@ -231,7 +230,6 @@ func New(stateReader StateReader) *IntraBlockState {
 		accessList:        accessList{addresses: make(map[accounts.Address]int)},
 		transientStorage:  newTransientStorage(),
 		balanceInc:        map[accounts.Address]*BalanceIncrease{},
-		addressAccess:     nil,
 		recordAccess:      false,
 		txIndex:           0,
 		trace:             false,
@@ -391,7 +389,6 @@ func (sdb *IntraBlockState) Reset() {
 	// typed pool before resetting.
 	sdb.versionedWrites.ReleaseAndReset()
 	sdb.recordAccess = false
-	sdb.addressAccess = nil
 	sdb.accountReadDuration = 0
 	sdb.accountReadCount = 0
 	sdb.storageReadDuration = 0
@@ -2230,7 +2227,7 @@ func (sdb *IntraBlockState) FinalizedWrites() *WriteSet {
 // VersionedIO.
 func (sdb *IntraBlockState) MergeTxIOInto(io *VersionedIO) {
 	version := Version{BlockNum: sdb.blockNum, TxIndex: sdb.txIndex, Incarnation: sdb.version}
-	io.mergeTx(version, sdb.versionedReads, sdb.VersionedWrites(), sdb.addressAccess)
+	io.mergeTx(version, sdb.versionedReads, sdb.VersionedWrites(), sdb.versionedReads.access)
 }
 
 func (sdb *IntraBlockState) Print(chainRules chain.Rules, all bool) {
@@ -2332,7 +2329,7 @@ func (sdb *IntraBlockState) Prepare(rules *chain.Rules, sender, coinbase account
 	}
 	// Reset transient storage at the beginning of transaction execution
 	sdb.transientStorage = newTransientStorage()
-	sdb.addressAccess = make(map[accounts.Address]*accessOptions)
+	sdb.versionedReads.access = nil
 	sdb.recordAccess = true
 
 	// EIP-3651 makes the coinbase warm (Shanghai+). EIP-7928 BAL must include
@@ -2340,7 +2337,7 @@ func (sdb *IntraBlockState) Prepare(rules *chain.Rules, sender, coinbase account
 	// (i.e. nothing else in the tx writes to the coinbase). Without this, txns
 	// that produce no fee for the coinbase leave its address out of the BAL
 	// and the validator-side BAL hash diverges from the spec sidecar.
-	// recordAccess was just enabled and addressAccess freshly allocated, so
+	// recordAccess was just enabled and the access set reset, so
 	// MarkAddressAccess will actually take effect here (unlike when called
 	// from verifyAuthorities, which runs before Prepare).
 	if rules.IsShanghai {
@@ -2397,15 +2394,18 @@ func (sdb *IntraBlockState) SlotInAccessList(addr accounts.Address, slot account
 }
 
 func (sdb *IntraBlockState) MarkAddressAccess(addr accounts.Address, revertable bool) {
-	if !sdb.recordAccess || sdb.addressAccess == nil {
+	if !sdb.recordAccess {
 		return
 	}
-	if opts, ok := sdb.addressAccess[addr]; ok {
+	if sdb.versionedReads.access == nil {
+		sdb.versionedReads.access = make(AccessSet)
+	}
+	if opts, ok := sdb.versionedReads.access[addr]; ok {
 		if opts.revertable && !revertable {
 			opts.revertable = false
 		}
 	} else {
-		sdb.addressAccess[addr] = &accessOptions{revertable}
+		sdb.versionedReads.access[addr] = &accessOptions{revertable}
 	}
 }
 
@@ -2422,17 +2422,18 @@ func (sdb *IntraBlockState) MarkReadsInternal(addr accounts.Address) {
 
 // AccessedAddresses returns and resets the set of addresses touched during the current transaction.
 func (sdb *IntraBlockState) AccessedAddresses() AccessSet {
-	if len(sdb.addressAccess) == 0 {
+	access := sdb.versionedReads.access
+	if len(access) == 0 {
 		sdb.recordAccess = false
-		sdb.addressAccess = nil
+		sdb.versionedReads.access = nil
 		return nil
 	}
-	out := make(AccessSet, len(sdb.addressAccess))
-	for addr, opts := range sdb.addressAccess {
+	out := make(AccessSet, len(access))
+	for addr, opts := range access {
 		out[addr] = opts
 	}
 	sdb.recordAccess = false
-	sdb.addressAccess = nil
+	sdb.versionedReads.access = nil
 	return out
 }
 
@@ -2797,7 +2798,6 @@ func (sdb *IntraBlockState) ResetVersionedIO() {
 	sdb.versionedWrites.ReleaseAndReset()
 	sdb.dep = UnknownDep
 	sdb.recordAccess = false
-	sdb.addressAccess = nil
 }
 
 // ResetVersionedReads clears tracked versioned reads without affecting writes.
