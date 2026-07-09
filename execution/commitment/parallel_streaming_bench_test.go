@@ -23,6 +23,7 @@ import (
 	"math/rand"
 	"runtime"
 	"slices"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -31,6 +32,7 @@ import (
 	"golang.org/x/sync/errgroup"
 
 	"github.com/erigontech/erigon/common/length"
+	"github.com/erigontech/erigon/execution/commitment/nibbles"
 )
 
 func runDirectBench(b *testing.B, pk [][]byte, updates []Update) {
@@ -108,6 +110,9 @@ func Benchmark_Commitment_SmallCounts(b *testing.B) {
 	}
 }
 
+// ModeParallel is the frontier-pool engine; ModeDirect is the sequential baseline. The former
+// static top-nibble partition arm was deleted with the whale fan-out (plan Task 6), so it is no
+// longer an in-tree comparison point — frontier-pool vs sequential is the gate.
 func Benchmark_Commitment_1MWhales(b *testing.B) {
 	pk, updates := buildWhaleCorpus(whale1M())
 	b.Logf("corpus keys=%d", len(pk))
@@ -243,6 +248,8 @@ func closeGroups(rs []groupRun) {
 }
 
 func Benchmark_StorageConcurrency(b *testing.B) {
+	ncpu := runtime.NumCPU()
+	poolWorkers := slices.Compact(slices.Sorted(slices.Values([]int{ncpu, ncpu * 2, ncpu * 4})))
 	for _, slots := range []int{750_000} {
 		b.Run(fmt.Sprintf("slots=%d", slots), func(b *testing.B) {
 			single := buildWhaleStorageGroups(slots, 1)
@@ -257,6 +264,13 @@ func Benchmark_StorageConcurrency(b *testing.B) {
 					b.StartTimer()
 				}
 			})
+			// The real frontier-pool engine over the same single whale: Single/Groups-* above are the
+			// synthetic independent-trie ceiling; this is what the engine actually achieves.
+			for _, w := range poolWorkers {
+				b.Run(fmt.Sprintf("FrontierPool-w%d", w), func(b *testing.B) {
+					runParallelBench(b, single[0].pk, single[0].updates, w)
+				})
+			}
 
 			for _, groups := range []int{4, 8, 16} {
 				gs := buildWhaleStorageGroups(slots, groups)
@@ -380,7 +394,12 @@ func Benchmark_StreamingOverlap(b *testing.B) {
 	}
 }
 
+// The real frontier-pool engine (ModeParallel) is compared against the sequential baseline
+// (Sequential) and the synthetic per-nibble ceiling (ConcurrentStorage-*). numWorkers sweeps
+// {NumCPU, 2×, 4×} so the >fan-out utilization behavior on a mega-whale is visible.
 func Benchmark_DeepStorageWhale(b *testing.B) {
+	ncpu := runtime.NumCPU()
+	poolWorkers := slices.Compact(slices.Sorted(slices.Values([]int{ncpu, ncpu * 2, ncpu * 4})))
 	for _, slots := range []int{750_000} {
 		addr, accHash, accNib, accUpd, pk, upds, groups := whaleByNibble(slots)
 		b.Run(fmt.Sprintf("slots=%d", slots), func(b *testing.B) {
@@ -399,6 +418,9 @@ func Benchmark_DeepStorageWhale(b *testing.B) {
 					b.StartTimer()
 				}
 			})
+			for _, w := range poolWorkers {
+				b.Run(fmt.Sprintf("ModeParallel-w%d", w), func(b *testing.B) { runParallelBench(b, pk, upds, w) })
+			}
 			for _, parallel := range []bool{false, true} {
 				name := "ConcurrentStorage-serial"
 				if parallel {
@@ -418,5 +440,316 @@ func Benchmark_DeepStorageWhale(b *testing.B) {
 				})
 			}
 		})
+	}
+}
+
+// foldKForC sizes the leaf/merge boundary for an oversubscription factor c, mirroring the
+// production foldK (which pins c=1) so the c-sweep can measure alternative constants without
+// mutating the shipped policy.
+func foldKForC(total uint32, numWorkers, c int) uint32 {
+	if numWorkers < 1 {
+		numWorkers = 1
+	}
+	if c < 1 {
+		c = 1
+	}
+	k := total / (uint32(c) * uint32(numWorkers))
+	if k < foldKMin {
+		return foldKMin
+	}
+	return k
+}
+
+// busyInterval is one task's fold window relative to the dispatch start.
+type busyInterval struct {
+	start, end time.Duration
+}
+
+// utilStats summarizes how busy the worker pool stayed over one dispatch: busy is the summed
+// per-task fold time, span the wall-clock of the dispatch, and tailFrac the fraction of span
+// after concurrency last fell below 2 — the serial-spine collapse the frontier design trades
+// idle-tail against static 16-way ownership.
+type utilStats struct {
+	tasks       int
+	span        time.Duration
+	busy        time.Duration
+	maxParallel int
+	tailFrac    float64
+}
+
+// foldUtilStats reconstructs the concurrency profile from the per-task intervals via an event
+// sweep and derives the busy integral, peak parallelism, and serial-collapse tail.
+func foldUtilStats(iv []busyInterval, span time.Duration) utilStats {
+	st := utilStats{tasks: len(iv), span: span}
+	if len(iv) == 0 {
+		return st
+	}
+	type ev struct {
+		t time.Duration
+		d int
+	}
+	evs := make([]ev, 0, 2*len(iv))
+	for _, x := range iv {
+		st.busy += x.end - x.start
+		evs = append(evs, ev{x.start, +1}, ev{x.end, -1})
+	}
+	// Ends (-1) sort before starts (+1) at the same instant so a hand-off is not counted as an
+	// extra concurrent worker.
+	slices.SortFunc(evs, func(a, b ev) int {
+		if a.t != b.t {
+			return int(a.t - b.t)
+		}
+		return a.d - b.d
+	})
+	cur := 0
+	var lastGE2End time.Duration
+	prevGE2 := false
+	for _, e := range evs {
+		if prevGE2 {
+			lastGE2End = e.t
+		}
+		cur += e.d
+		if cur > st.maxParallel {
+			st.maxParallel = cur
+		}
+		prevGE2 = cur >= 2
+	}
+	if span > 0 {
+		st.tailFrac = float64(span-lastGE2End) / float64(span)
+	}
+	return st
+}
+
+func (s *utilStats) add(o utilStats) {
+	s.tasks += o.tasks
+	s.span += o.span
+	s.busy += o.busy
+	if o.maxParallel > s.maxParallel {
+		s.maxParallel = o.maxParallel
+	}
+	s.tailFrac += o.tailFrac
+}
+
+func (s utilStats) report(b *testing.B, iters, workers int, k, total uint32) {
+	if iters == 0 {
+		return
+	}
+	span := float64(s.span.Nanoseconds()) / float64(iters)
+	busy := float64(s.busy.Nanoseconds()) / float64(iters)
+	b.ReportMetric(span, "dispatch-ns/op")
+	if span > 0 {
+		b.ReportMetric(busy/span, "avg-parallel")
+		b.ReportMetric(100*busy/(span*float64(workers)), "util-%")
+	}
+	b.ReportMetric(float64(s.maxParallel), "max-parallel")
+	b.ReportMetric(100*s.tailFrac/float64(iters), "serial-tail-%")
+	b.ReportMetric(float64(s.tasks)/float64(iters), "tasks/op")
+	b.Logf("k=%d total=%d workers=%d", k, total, workers)
+}
+
+// buildRetouchedWhale seeds a whale (top nibble 0xd) with slots random storage slots plus a few
+// spread accounts (batch1), then re-touches every slot and the balance (batch2). After batch1 the
+// depth-64 account prefix carries an on-disk branch, so batch2's fold derives a seedable storage
+// merge that fans out across the first-storage-nibble subtries — the mega-whale utilization case.
+func buildRetouchedWhale(seed int64, slots int) (batch1, batch2 engineBatch) {
+	rnd := rand.New(rand.NewSource(seed))
+	waddr := findAddressForNibble(0xd, int(seed))
+	whale := addrHex(waddr)
+
+	locs := make([]string, slots)
+	ub1 := NewUpdateBuilder()
+	ub1.Balance(whale, 12345)
+	for i := range slots {
+		loc := make([]byte, length.Hash)
+		rnd.Read(loc)
+		val := make([]byte, 32)
+		rnd.Read(val)
+		locs[i] = hex.EncodeToString(loc)
+		ub1.Storage(whale, locs[i], hex.EncodeToString(val))
+	}
+	for _, nib := range []int{2, 6, 0xa} {
+		ub1.Balance(addrHex(findAddressForNibble(nib, int(seed)+nib)), uint64(8000+nib))
+	}
+	k1, u1 := ub1.Build()
+
+	ub2 := NewUpdateBuilder()
+	ub2.Balance(whale, 55555)
+	for _, l := range locs {
+		val := make([]byte, 32)
+		rnd.Read(val)
+		ub2.Storage(whale, l, hex.EncodeToString(val))
+	}
+	k2, u2 := ub2.Build()
+	return engineBatch{k1, u1}, engineBatch{k2, u2}
+}
+
+// newBenchFoldBase builds the finale root base the top-nibble tasks stitch into — unfolded one
+// level at the on-disk root branch, then walled at the top nibble, exactly StreamingCommitter's
+// buildBase. Returns the base and a cleanup that releases it and its factory context.
+func newBenchFoldBase(b *testing.B, ctx context.Context, factory TrieContextFactory) (*HexPatriciaHashed, func()) {
+	base := NewHexPatriciaHashed(length.Addr, nil, DefaultTrieConfig())
+	bctx, bclean := factory()
+	base.ResetContext(bctx)
+	base.branchEncoder.setDeferUpdates(true)
+	base.SetLeaveDeferredForCaller(true)
+	require.NoError(b, unfoldRootWall(ctx, base))
+	seedRootBase(base)
+	return base, func() {
+		base.Release()
+		if bclean != nil {
+			bclean()
+		}
+	}
+}
+
+// dispatchFoldInstrumented seeds every merge base and folds the DAG below rootTask through the real
+// worker pool, bracketing each task's foldOne with wall-clock timestamps so the caller gets a
+// worker-busy-over-time profile. It reproduces foldPool.run's seeding and cleanup but wraps the
+// fold callback dispatchFoldTasks already accepts as a parameter, so no production code is touched.
+// The finale root fold (the serial spine) is intentionally excluded — the utilization window is the
+// parallel dispatch itself.
+func dispatchFoldInstrumented(ctx context.Context, pool *foldPool, rootTask *foldTask) (utilStats, error) {
+	subTasks := collectFoldTasks(rootTask, nil)
+	defer func() {
+		for _, t := range subTasks {
+			if t.baseCleanup != nil {
+				t.baseCleanup()
+				t.baseCleanup = nil
+			}
+		}
+	}()
+	for _, t := range subTasks {
+		if t.kind != foldMerge {
+			continue
+		}
+		if err := pool.seedMerge(t); err != nil {
+			return utilStats{}, err
+		}
+	}
+
+	var (
+		mu sync.Mutex
+		iv []busyInterval
+	)
+	t0 := time.Now()
+	fold := func(ctx context.Context, t *foldTask) error {
+		s := time.Since(t0)
+		err := pool.foldOne(ctx, t)
+		e := time.Since(t0)
+		mu.Lock()
+		iv = append(iv, busyInterval{s, e})
+		mu.Unlock()
+		return err
+	}
+	derr := dispatchFoldTasks(ctx, pool.numWorkers, rootTask, subTasks, fold)
+	span := time.Since(t0)
+	if derr != nil {
+		return utilStats{}, derr
+	}
+	stats := foldUtilStats(iv, span)
+	recycleTaskDeferred(subTasks)
+	return stats, nil
+}
+
+// runFoldUtilBench measures pool utilization on batch2's fold after batch1 has seeded the on-disk
+// branch store, at the given worker count and oversubscription factor c. The corpus build and
+// batch1 seeding happen once; each iteration rebuilds only the per-Process DAG and root base.
+func runFoldUtilBench(b *testing.B, batch1, batch2 engineBatch, workers, c int) {
+	ctx := context.Background()
+	b.ReportAllocs()
+
+	ms := NewMockState(b)
+	ms.SetConcurrentCommitment(true)
+	seqTrie := NewHexPatriciaHashed(length.Addr, ms, DefaultTrieConfig())
+	processBatch(b, ms, seqTrie, batch1.keys, batch1.upds)
+	seqTrie.Release()
+	require.NoError(b, ms.applyPlainUpdates(batch2.keys, batch2.upds))
+
+	factory := mockTrieCtxFactory(ms)
+	seedable := func(prefix []byte) bool {
+		bb, _, err := ms.Branch(nibbles.HexToCompact(prefix))
+		require.NoError(b, err)
+		return len(bb) > 0
+	}
+	buildTrie := func() *prefixTrie {
+		tr := newPrefixTrie()
+		for i, k := range batch2.keys {
+			tr.Insert(KeyToHexNibbleHash(k), k, &batch2.upds[i])
+		}
+		return tr
+	}
+	total := buildTrie().root.subtreeCount
+	k := foldKForC(total, workers, c)
+
+	var (
+		agg   utilStats
+		iters int
+	)
+	for b.Loop() {
+		b.StopTimer()
+		rootTask := deriveFoldFrontier(buildTrie().root, k, seedable)
+		require.NotNil(b, rootTask)
+		base, cleanupBase := newBenchFoldBase(b, ctx, factory)
+		rootTask.base = base
+		pool := &foldPool{
+			numWorkers: workers,
+			ctxFactory: factory,
+			workerPool: &sync.Pool{New: func() any { return NewHexPatriciaHashed(length.Addr, nil, DefaultTrieConfig()) }},
+		}
+		b.StartTimer()
+
+		stats, err := dispatchFoldInstrumented(ctx, pool, rootTask)
+
+		b.StopTimer()
+		require.NoError(b, err)
+		agg.add(stats)
+		iters++
+		cleanupBase()
+		b.StartTimer()
+	}
+	agg.report(b, iters, workers, k, total)
+}
+
+func foldUtilCorpora() []struct {
+	name           string
+	batch1, batch2 engineBatch
+} {
+	mk, mu := buildMixedCorpus(99, 20_000)
+	w1, w2 := buildRetouchedWhale(717, 120_000)
+	return []struct {
+		name           string
+		batch1, batch2 engineBatch
+	}{
+		{"mixed20k", engineBatch{mk, mu}, engineBatch{mk, mu}},
+		{"whale120k", w1, w2},
+	}
+}
+
+// Benchmark_FoldUtilization reports the worker-busy-over-time profile (util-%, avg/max parallelism,
+// serial-tail-%) of the frontier dispatch across worker counts — the idle-tail metric the perf gate
+// needs beyond aggregate ns/op. c is pinned to the shipped value (1).
+func Benchmark_FoldUtilization(b *testing.B) {
+	ncpu := runtime.NumCPU()
+	workers := slices.Compact(slices.Sorted(slices.Values([]int{ncpu, ncpu * 2, ncpu * 4})))
+	for _, corpus := range foldUtilCorpora() {
+		for _, w := range workers {
+			b.Run(fmt.Sprintf("%s/w%d", corpus.name, w), func(b *testing.B) {
+				runFoldUtilBench(b, corpus.batch1, corpus.batch2, w, 1)
+			})
+		}
+	}
+}
+
+// Benchmark_FoldKSweep sweeps the oversubscription factor c at numWorkers=NumCPU. Raising c shrinks
+// K and multiplies tasks (each paying ctx+pin+seed); the sweep records whether that buys utilization
+// or just adds overhead, fixing the shipped constant with evidence rather than assertion.
+func Benchmark_FoldKSweep(b *testing.B) {
+	ncpu := runtime.NumCPU()
+	for _, corpus := range foldUtilCorpora() {
+		for _, c := range []int{1, 2, 4, 8} {
+			b.Run(fmt.Sprintf("%s/c%d", corpus.name, c), func(b *testing.B) {
+				runFoldUtilBench(b, corpus.batch1, corpus.batch2, ncpu, c)
+			})
+		}
 	}
 }
