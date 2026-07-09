@@ -33,10 +33,12 @@ type Cache interface {
 	// PutIfAbsent is Put except that a live entry for key is left untouched
 	// (a stale one is replaced) — for prefetch writers, whose snapshot may
 	// already be superseded by an authoritative Put.
+	//
+	// There is deliberately no Delete: a deletion is an authoritative Put of
+	// nil (a tombstone / no-code marker), so conditional fills from stale
+	// snapshots defer to it. Removing the entry instead would let such a fill
+	// resurrect the deleted value.
 	PutIfAbsent(key []byte, value []byte, txNum uint64)
-
-	// Delete removes the data for the given key.
-	Delete(key []byte)
 
 	// Clear removes all mutable entries from the cache.
 	Clear()

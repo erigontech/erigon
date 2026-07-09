@@ -267,11 +267,6 @@ func (c *DomainCache) Put(key []byte, value []byte, txNum uint64) {
 	c.GenericCache.Put(key, value, txNum)
 }
 
-// Delete removes the data for the given key, delegating to GenericCache.
-func (c *DomainCache) Delete(key []byte) {
-	c.GenericCache.Delete(key)
-}
-
 // Get retrieves data for the given key.
 func (c *GenericCache[T]) Get(key []byte) (T, bool) {
 	v, _, ok := c.GetWithTxNum(key)
@@ -397,23 +392,11 @@ func (c *GenericCache[T]) putLocked(key []byte, value T, txNum uint64, overwrite
 	return needGrow
 }
 
-// Delete removes the data for the given key. Runs under the key's put stripe:
-// an unstriped Remove racing put's read-modify-write would double-subtract the
-// displaced entry's size (once via OnEvict, once via put's update delta).
-func (c *GenericCache[T]) Delete(key []byte) {
-	h := maphash.Hash(key)
-	mu := &c.putStripes[h&(putStripeCount-1)]
-	mu.Lock()
-	defer mu.Unlock()
-	lru := c.data.Load()
-	if existing, ok := lru.Get(h); ok && bytes.Equal(existing.key, key) {
-		lru.Remove(h)
-	}
-}
-
 // dropStale removes key's entry under its put stripe, re-checking that it is
 // still the same key's stale entry — a concurrent put may have replaced it
-// with a live one, and Remove must be striped for the same reason Delete is.
+// with a live one — and because an unstriped Remove racing put's
+// read-modify-write would double-subtract the displaced entry's size (once
+// via OnEvict, once via put's update delta).
 func (c *GenericCache[T]) dropStale(h uint64, key []byte) {
 	mu := &c.putStripes[h&(putStripeCount-1)]
 	mu.Lock()

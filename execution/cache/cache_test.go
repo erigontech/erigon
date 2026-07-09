@@ -155,20 +155,6 @@ func TestDomainCache_PutEvictsWhenFull_EvictMode(t *testing.T) {
 	assert.Positive(t, missingCount, "ModeEvictLRU should have evicted some early entries")
 }
 
-func TestDomainCache_Delete(t *testing.T) {
-	c := NewDomainCacheMode(100, ModeEvictLRU)
-
-	addr := makeAddr(1)
-	c.Put(addr, makeValue(1), 0)
-	assert.Equal(t, 1, c.Len())
-
-	c.Delete(addr)
-	assert.Equal(t, 0, c.Len())
-
-	_, ok := c.Get(addr)
-	assert.False(t, ok)
-}
-
 func TestDomainCache_Clear(t *testing.T) {
 	c := NewDomainCacheMode(100, ModeEvictLRU)
 
@@ -353,21 +339,6 @@ func TestCodeCache_CodeCapacityLimit(t *testing.T) {
 	assert.False(t, ok, "coldest code should have been evicted")
 }
 
-func TestCodeCache_Delete(t *testing.T) {
-	c := NewCodeCache(100, 200)
-
-	addr := makeAddr(1)
-	code := makeCode(1)
-	c.Put(addr, code, 0)
-
-	c.Delete(addr)
-	assert.Equal(t, 0, c.Len())
-	// Code should still exist (immutable)
-	assert.Equal(t, 1, c.CodeLen())
-
-	_, ok := c.Get(addr)
-	assert.False(t, ok)
-}
 
 func TestCodeCache_Clear(t *testing.T) {
 	c := NewCodeCache(100, 200)
@@ -501,16 +472,6 @@ func TestStateCache_GetPut_UnsupportedDomain(t *testing.T) {
 	assert.Nil(t, v)
 }
 
-func TestStateCache_Delete(t *testing.T) {
-	c := NewStateCache(100, 100, 100, 100)
-
-	addr := makeAddr(1)
-	c.Put(kv.AccountsDomain, addr, makeValue(1), 0)
-	c.Delete(kv.AccountsDomain, addr)
-
-	_, ok := c.Get(kv.AccountsDomain, addr)
-	assert.False(t, ok)
-}
 
 // Put(key, nil) must be a cache hit, not a miss. SharedDomains.GetLatest
 // caches deleted keys via Put(key, nil); if Get treats that as "not found",
@@ -542,13 +503,6 @@ func TestStateCache_PutEmptySlice_ThenGet_IsCacheHit(t *testing.T) {
 	v, ok := c.Get(kv.StorageDomain, key)
 	assert.True(t, ok, "Get after Put([]byte{}) must be a cache hit")
 	assert.Empty(t, v)
-}
-
-func TestStateCache_Delete_UnsupportedDomain(t *testing.T) {
-	c := NewStateCache(100, 100, 100, 100)
-
-	// Should not panic
-	c.Delete(kv.ReceiptDomain, makeAddr(1))
 }
 
 func TestStateCache_Clear(t *testing.T) {
@@ -878,11 +832,10 @@ func TestCodeCache_PutWithCodeHashIfAbsent(t *testing.T) {
 // clobber it — the prefetch-vs-flush staleness this cache guards against.
 func TestDomainCache_PutIfAbsentAtomicWithPut(t *testing.T) {
 	c := NewDomainCacheMode(1*datasize.MB, ModeEvictLRU)
-	addr := makeAddr(1)
 	fresh := []byte("fresh")
 	stale := []byte("stale")
 	for round := 0; round < 20000; round++ {
-		c.Delete(addr)
+		addr := makeAddr(round) // a fresh key each round, so both writers race on the insert path
 		var wg sync.WaitGroup
 		wg.Add(2)
 		go func() { defer wg.Done(); c.Put(addr, fresh, 20) }()
@@ -894,34 +847,17 @@ func TestDomainCache_PutIfAbsentAtomicWithPut(t *testing.T) {
 	}
 }
 
-// A Delete racing an update-in-place put must not double-subtract the
-// displaced entry's size: freelru's OnEvict subtracts it for the Remove, and
-// put's update delta subtracts it again unless the two writers share the
-// key's stripe.
-func TestDomainCache_DeleteAtomicWithPut_NoSizeDrift(t *testing.T) {
-	c := NewDomainCacheMode(1*datasize.MB, ModeEvictLRU)
-	addr := makeAddr(1)
-	v1 := []byte("value-one")
-	v2 := []byte("value-two")
-	for round := 0; round < 20000; round++ {
-		c.Put(addr, v1, 10)
-		var wg sync.WaitGroup
-		wg.Add(2)
-		go func() { defer wg.Done(); c.Put(addr, v2, 20) }()
-		go func() { defer wg.Done(); c.Delete(addr) }()
-		wg.Wait()
-		c.Delete(addr)
-		require.Zero(t, c.SizeBytes(), "round %d: size accounting drifted", round)
-	}
-}
-
-// Same invariant for the lazy stale-drop inside GetWithTxNum, the other
-// unstriped Remove path.
+// The lazy stale-drop inside GetWithTxNum removes entries; an unstriped
+// Remove racing put's read-modify-write double-subtracts the displaced
+// entry's size (once via freelru's OnEvict, once via put's update delta).
+// Exactly one live entry remains after every round, so drift shows as a size
+// mismatch.
 func TestDomainCache_StaleDropAtomicWithPut_NoSizeDrift(t *testing.T) {
 	c := NewDomainCacheMode(1*datasize.MB, ModeEvictLRU)
 	addr := makeAddr(1)
 	v1 := []byte("value-one")
 	v2 := []byte("value-two")
+	wantSize := int64(len(addr) + len(v1) + 24) // key + value + entry overhead
 	for round := 0; round < 20000; round++ {
 		c.Put(addr, v1, 10)
 		c.Unwind(5) // epoch bump makes the entry above stale (txNum 10 >= floor 5)
@@ -930,8 +866,7 @@ func TestDomainCache_StaleDropAtomicWithPut_NoSizeDrift(t *testing.T) {
 		go func() { defer wg.Done(); c.Put(addr, v2, 20) }()
 		go func() { defer wg.Done(); c.Get(addr) }()
 		wg.Wait()
-		c.Delete(addr)
-		require.Zero(t, c.SizeBytes(), "round %d: size accounting drifted", round)
+		require.Equal(t, wantSize, c.SizeBytes(), "round %d: size accounting drifted", round)
 	}
 }
 
