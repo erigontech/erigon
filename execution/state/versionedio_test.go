@@ -959,10 +959,12 @@ func TestApplyVersionedWrites_StorageWriteGeneratesBalanceRead(t *testing.T) {
 	))
 	require.NoError(t, err)
 
+	// Lean footprint: a storage write no longer drags in a whole-account
+	// refresh, so it records no BalancePath read. Balance is not a BAL read
+	// field (only StorageReads exist), so this is BAL-neutral.
 	reads := ibs.VersionedReads()
-	require.True(t, hasRead(reads, addr, BalancePath),
-		"StoragePath write must generate a BalancePath read (via refreshVersionedAccount); "+
-			"direct finalize must replicate this for BAL correctness")
+	require.False(t, hasRead(reads, addr, BalancePath),
+		"StoragePath write must not generate a spurious BalancePath read")
 }
 
 // TestApplyVersionedWrites_NonceWriteGeneratesBalanceRead verifies that a
@@ -983,9 +985,10 @@ func TestApplyVersionedWrites_NonceWriteGeneratesBalanceRead(t *testing.T) {
 	))
 	require.NoError(t, err)
 
+	// Lean footprint: a nonce write no longer drags in a whole-account refresh.
 	reads := ibs.VersionedReads()
-	require.True(t, hasRead(reads, addr, BalancePath),
-		"NoncePath write must generate a BalancePath read (via refreshVersionedAccount)")
+	require.False(t, hasRead(reads, addr, BalancePath),
+		"NoncePath write must not generate a spurious BalancePath read")
 }
 
 // TestApplyVersionedWrites_MultipleAccountsAllGetBalanceReads verifies that
@@ -1012,10 +1015,13 @@ func TestApplyVersionedWrites_MultipleAccountsAllGetBalanceReads(t *testing.T) {
 	))
 	require.NoError(t, err)
 
+	// Lean footprint: only a balance write reads prior balance (the net-zero
+	// baseline). Nonce/storage writes no longer drag in a whole-account refresh,
+	// so they record no spurious BalancePath read.
 	reads := ibs.VersionedReads()
-	require.True(t, hasRead(reads, addrA, BalancePath), "addrA (BalancePath write) must have BalancePath read")
-	require.True(t, hasRead(reads, addrB, BalancePath), "addrB (NoncePath write) must have BalancePath read")
-	require.True(t, hasRead(reads, addrC, BalancePath), "addrC (StoragePath write) must have BalancePath read")
+	require.True(t, hasRead(reads, addrA, BalancePath), "addrA (BalancePath write) reads its prior balance (net-zero baseline)")
+	require.False(t, hasRead(reads, addrB, BalancePath), "addrB (NoncePath write) must not have a spurious BalancePath read")
+	require.False(t, hasRead(reads, addrC, BalancePath), "addrC (StoragePath write) must not have a spurious BalancePath read")
 }
 
 // TestApplyVersionedWrites_NewAccountNoBalanceRead verifies that for accounts

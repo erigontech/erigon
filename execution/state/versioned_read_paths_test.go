@@ -412,35 +412,26 @@ func TestVersionedRead_G4_RefreshRecordsTypedDefaultInReadSet(t *testing.T) {
 
 	addr := accounts.InternAddress([20]byte{0xa4})
 
-	// Reading the balance triggers getStateObject → getVersionedAccount
-	// → refreshVersionedAccount → refreshBalance/refreshNonce/...
+	// Lean read footprint: GetBalance reads only the balance field from the
+	// cell pipeline — it no longer drags in a whole-account refresh, so nonce /
+	// incarnation / codeHash are NOT recorded. Balance is recorded because
+	// GetBalance genuinely read it.
 	bal, err := ibs.GetBalance(addr)
 	require.NoError(t, err)
 	assert.Equal(t, *uint256.NewInt(1234), bal,
-		"GetBalance returns the storage-read account's balance after refresh")
+		"GetBalance returns the storage-read account's balance")
 
-	// Each refresh* path that ran in refreshVersionedAccount with
-	// no versionMap entry should have recorded its defaultV (the
-	// account's field) into the readSet.  Verify:
 	balRead, ok := ibs.versionedReads.GetBalance(addr)
 	require.True(t, ok, "BalancePath read must be recorded")
 	assert.Equal(t, *uint256.NewInt(1234), balRead.Val,
-		"recorded BalancePath value must be the refresh defaultV (currentBalance), not zero")
+		"recorded BalancePath value must be the read value, not zero")
 
-	nonceRead, ok := ibs.versionedReads.GetNonce(addr)
-	require.True(t, ok, "NoncePath read must be recorded")
-	assert.Equal(t, uint64(7), nonceRead.Val,
-		"recorded NoncePath value must be the refresh defaultV (currentNonce), not zero")
-
-	incRead, ok := ibs.versionedReads.GetIncarnation(addr)
-	require.True(t, ok, "IncarnationPath read must be recorded")
-	assert.Equal(t, uint64(3), incRead.Val,
-		"recorded IncarnationPath value must be the refresh defaultV (currentIncarnation), not zero")
-
-	chRead, ok := ibs.versionedReads.GetCodeHash(addr)
-	require.True(t, ok, "CodeHashPath read must be recorded")
-	assert.Equal(t, accounts.InternCodeHash([32]byte{0xab}), chRead.Val,
-		"recorded CodeHashPath value must be the refresh defaultV (currentCodeHash), not zero")
+	_, ok = ibs.versionedReads.GetNonce(addr)
+	require.False(t, ok, "NoncePath must NOT be recorded by a balance-only read")
+	_, ok = ibs.versionedReads.GetIncarnation(addr)
+	require.False(t, ok, "IncarnationPath must NOT be recorded by a balance-only read")
+	_, ok = ibs.versionedReads.GetCodeHash(addr)
+	require.False(t, ok, "CodeHashPath must NOT be recorded by a balance-only read")
 }
 
 // refreshReader returns a fixed account for ReadAccountData and zero/empty

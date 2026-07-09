@@ -1059,11 +1059,7 @@ func (sdb *IntraBlockState) readSelfDestructMemo(addr accounts.Address) (bool, R
 // construction) need the reconstructed record; field-oriented callers
 // (GetBalance/Empty/Exist) read what they need without it.
 func (sdb *IntraBlockState) getVersionedAccount(addr accounts.Address, readStorage bool) (*accounts.Account, ReadSource, Version, error) {
-	readAccount, source, version, err := sdb.versionedAccountBase(addr, readStorage)
-	if err != nil || readAccount == nil {
-		return readAccount, source, version, err
-	}
-	return sdb.refreshVersionedAccount(addr, readAccount, source, version)
+	return sdb.versionedAccountBase(addr, readStorage)
 }
 
 // versionedAccountBase resolves account existence via the AddressPath read (and
@@ -1115,98 +1111,6 @@ func (sdb *IntraBlockState) versionedAccountBase(addr accounts.Address, readStor
 	}
 
 	return readAccount, source, version, nil
-}
-
-func (sdb *IntraBlockState) refreshVersionedAccount(addr accounts.Address, readAccount *accounts.Account, readSource ReadSource, readVersion Version) (*accounts.Account, ReadSource, Version, error) {
-	account := readAccount
-	version := readVersion
-	source := readSource
-
-	balance, bsource, bversion, err := refreshBalance(sdb, addr, account.Balance)
-	if err != nil {
-		return nil, UnknownSource, UnknownVersion, err
-	}
-	if bversion.TxIndex > readVersion.TxIndex || (bversion.TxIndex == readVersion.TxIndex && bversion.Incarnation >= readVersion.Incarnation) {
-		if balance.Cmp(&account.Balance) != 0 {
-			if account == readAccount {
-				account = &accounts.Account{}
-				account.Copy(readAccount)
-			}
-			account.Balance = balance
-		}
-		if bversion.TxIndex > version.TxIndex || (bversion.TxIndex == version.TxIndex && bversion.Incarnation > version.Incarnation) {
-			version = bversion
-			if bsource != source {
-				source = bsource
-			}
-		}
-	}
-
-	nonce, nsource, nversion, err := refreshNonce(sdb, addr, account.Nonce)
-	if err != nil {
-		return nil, UnknownSource, UnknownVersion, err
-	}
-	if nversion.TxIndex > readVersion.TxIndex || (nversion.TxIndex == readVersion.TxIndex && nversion.Incarnation >= readVersion.Incarnation) {
-		if nonce > account.Nonce {
-			if account == readAccount {
-				account = &accounts.Account{}
-				account.Copy(readAccount)
-			}
-			account.Nonce = nonce
-		}
-		if nversion.TxIndex > version.TxIndex || (nversion.TxIndex == version.TxIndex && nversion.Incarnation > version.Incarnation) {
-			version = nversion
-			if nsource != source {
-				source = nsource
-			}
-		}
-	}
-
-	incarnation, isource, iversion, err := refreshIncarnation(sdb, addr, account.Incarnation)
-	if err != nil {
-		return nil, UnknownSource, UnknownVersion, err
-	}
-	if iversion.TxIndex > readVersion.TxIndex || (iversion.TxIndex == readVersion.TxIndex && iversion.Incarnation >= readVersion.Incarnation) {
-		if incarnation > account.Incarnation {
-			if account == readAccount {
-				account = &accounts.Account{}
-				account.Copy(readAccount)
-			}
-			account.Incarnation = incarnation
-		}
-		if iversion.TxIndex > version.TxIndex || (iversion.TxIndex == version.TxIndex && iversion.Incarnation > version.Incarnation) {
-			version = iversion
-			if isource != source {
-				source = isource
-			}
-		}
-	}
-
-	codeHash, csource, cversion, err := refreshCodeHash(sdb, addr, account.CodeHash)
-	if err != nil {
-		return nil, UnknownSource, UnknownVersion, err
-	}
-
-	// Always apply CodeHash from versionMap if it differs from the account
-	// read. The version check (cversion > readVersion) can skip the update
-	// when both AddressPath and CodeHashPath were written by the same TX,
-	// leaving account.CodeHash stale. This causes the revert-to-original
-	// optimisation in SetCode to incorrectly delete CodePath writes.
-	if codeHash != account.CodeHash {
-		if account == readAccount {
-			account = &accounts.Account{}
-			account.Copy(readAccount)
-		}
-		account.CodeHash = codeHash
-	}
-	if cversion.TxIndex > version.TxIndex || (cversion.TxIndex == version.TxIndex && cversion.Incarnation > version.Incarnation) {
-		version = cversion
-		if csource != source {
-			source = csource
-		}
-	}
-
-	return account, source, version, nil
 }
 
 // SubBalance subtracts amount from the account associated with addr.
@@ -1314,6 +1218,21 @@ func (sdb *IntraBlockState) SetCode(addr accounts.Address, code []byte, reason t
 	canonical := accounts.NewCode(code)
 	codeHash := canonical.Hash
 	baseCodeHash := stateObject.data.CodeHash
+	origHash := stateObject.original.CodeHash
+	if sdb.versionMap != nil {
+		// so.data/so.original are the base record and miss a prior-tx
+		// CodeHashPath-only write now that refreshVersionedAccount is gone.
+		// baseCodeHash ("what this SetCode saw") = the current cell, including
+		// this tx's own earlier code writes. origHash (the cumulative net-zero
+		// baseline) = the versionMap floor at txIndex — the tx-start value,
+		// excluding this tx's unflushed writes.
+		if ch, chErr := sdb.GetCodeHash(addr); chErr == nil {
+			baseCodeHash = ch
+		}
+		if ch, res, ok := sdb.versionMap.ReadCodeHash(addr, sdb.txIndex); ok && res.Status() == MVReadResultDone {
+			origHash = ch
+		}
+	}
 	written, err := stateObject.SetCode(canonical, !sdb.hasWrite(addr, CodePath, accounts.NilKey), reason)
 	if err != nil {
 		return err
@@ -1325,7 +1244,7 @@ func (sdb *IntraBlockState) SetCode(addr accounts.Address, code []byte, reason t
 		// then resets within the same tx). Case (2) is disabled for newly
 		// created stateObjects: original holds the pre-creation snapshot,
 		// and deleting CodePath/CodeHashPath writes would corrupt the trie.
-		matchesOriginal := !stateObject.newlyCreated && codeHash == stateObject.original.CodeHash
+		matchesOriginal := !stateObject.newlyCreated && codeHash == origHash
 		if codeHash == baseCodeHash || matchesOriginal {
 			if dbg.TraceTransactionIO && (sdb.trace || dbg.TraceAccount(addr.Handle())) {
 				fmt.Printf("%d (%d.%d) SetCode SKIP (matches base) %x codeHash=%x baseHash=%x originalHash=%x codeLen=%d\n",
@@ -1565,33 +1484,6 @@ func (sdb *IntraBlockState) stateObjectForAccount(addr accounts.Address, account
 
 func (sdb *IntraBlockState) getStateObject(addr accounts.Address, recordRead bool) (*stateObject, error) {
 	if so, ok := sdb.stateObjects[addr]; ok {
-		if sdb.versionMap != nil {
-			// Refresh cached stateObject fields from the versionMap.
-			// The stateObject caches the full account (record-level) but the
-			// versionMap tracks individual fields (BalancePath, NoncePath, etc.).
-			// A prior TX's re-execution may have updated field-level entries
-			// since this stateObject was loaded.
-			// Use UnknownVersion so any versionMap entry is considered newer
-			// than the cached stateObject.
-			refreshed, _, _, err := sdb.refreshVersionedAccount(addr, &so.data, StorageRead, UnknownVersion)
-			if err != nil {
-				return nil, err
-			}
-			if refreshed != &so.data {
-				so.data = *refreshed
-			}
-			// Check if code changed (e.g. EIP-7702 authorization set/cleared
-			// the delegation prefix). Clear the cached code so the next
-			// Code() call reads fresh from the stateReader.
-			codeHash, _, chVersion, err := refreshCodeHash(sdb, addr, so.data.CodeHash)
-			if err != nil {
-				return nil, err
-			}
-			if chVersion.TxIndex > UnknownVersion.TxIndex && codeHash != so.data.CodeHash {
-				so.data.CodeHash = codeHash
-				so.code = accounts.Code{} // force re-read
-			}
-		}
 		return so, nil
 	}
 
@@ -1664,10 +1556,7 @@ func (sdb *IntraBlockState) getStateObject(addr accounts.Address, recordRead boo
 	var code []byte
 
 	if sdb.versionMap != nil {
-		account, accountSource, accountVersion, err = sdb.refreshVersionedAccount(addr, readAccount, accountSource, accountVersion)
-		if err != nil {
-			return nil, err
-		}
+		account = readAccount
 
 		// Check if a prior tx selfdestructed this account. The AddressPath
 		// versionedReadCore above returned nil (SelfDestructPath early-exit), but
