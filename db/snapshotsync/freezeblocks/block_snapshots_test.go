@@ -26,7 +26,7 @@ import (
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/snapshotsync"
-	"github.com/erigontech/erigon/db/snapshotsync/freezeblocks/blocksnapshots"
+	"github.com/erigontech/erigon/db/snapshotsync/blocksnapshots"
 	snaptype2 "github.com/erigontech/erigon/db/snaptype2"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/chain/networkname"
