@@ -11,9 +11,9 @@
     "branch": "devnets/bal/7"
   },
   "eest_stable": {
-    "url": "https://github.com/ethereum/execution-spec-tests/releases/download/v5.4.0/fixtures_develop.tar.gz",
-    "sha256": "3e2b02d49fe903eda4fd8caca5cbf0d139c470e97e1de9a85299b1b034f97099",
-    "size": 422845437
+    "url": "https://github.com/ethereum/execution-specs/releases/download/tests%40v20.0.0/fixtures.tar.gz",
+    "sha256": "b183702a5b447b465873865357ced9eb342315922e52e31b714e2de115dd0bb4",
+    "size": 399656884
   },
   "eest_zkevm": {
     "url": "https://github.com/ethereum/execution-specs/releases/download/tests-zkevm%40v0.4.1/fixtures_zkevm.tar.gz",

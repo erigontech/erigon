@@ -22,14 +22,25 @@ import (
 	"fmt"
 	"io"
 	"math/bits"
+	"runtime"
 	"sync"
 
 	"golang.org/x/sync/errgroup"
+	"golang.org/x/sync/semaphore"
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/empty"
 	"github.com/erigontech/erigon/execution/commitment/nibbles"
 )
+
+// maxFoldConcurrency caps the whale-storage fold fan-out at the CPUs the process
+// may run on. The account-mount and whale-storage fan-outs nest, so an unshared
+// per-level limit of numWorkers permits ~numWorkers² runnable leaf goroutines; one
+// shared budget of this size caps that product. GOMAXPROCS, not numWorkers, which
+// would starve cores when numWorkers < GOMAXPROCS and several whales fold at once.
+func maxFoldConcurrency() int { return max(1, runtime.GOMAXPROCS(0)) }
+
+func newFoldSem() *semaphore.Weighted { return semaphore.NewWeighted(int64(maxFoldConcurrency())) }
 
 // errStorageBaseNotBranch: no on-disk branch exactly at the account prefix (its
 // storage top is a deeper extension); callers fall back to streaming recursion.
@@ -83,20 +94,22 @@ func isDeepStorageAccount(node *prefixNode, depth int) bool {
 
 // dfsSubtreeDeep walks node's subtree applying each key to w, but at a big-storage
 // account it injects storageRoot's result instead of streaming the slots.
-func dfsSubtreeDeep(w *HexPatriciaHashed, node *prefixNode, path []byte, storageRoot func(node *prefixNode, path []byte) (common.Hash, error)) error {
+func dfsSubtreeDeep(w *HexPatriciaHashed, node *prefixNode, path []byte, storageRoot func(node *prefixNode, path []byte, accountFresh bool) (common.Hash, error)) error {
 	if node == nil {
 		return nil
 	}
+	accountFresh := false
 	if node.plainKey != nil {
 		if err := w.followAndUpdate(path, node.plainKey, node.update); err != nil {
 			return err
 		}
+		accountFresh = w.lastUpdateCellWasEmpty
 	} else if node.bitmap == 0 {
 		return errors.New("commitment: trie leaf without a plainKey")
 	}
 
 	if isDeepStorageAccount(node, len(path)) {
-		sr, err := storageRoot(node, path)
+		sr, err := storageRoot(node, path, accountFresh)
 		if err == nil {
 			setAccountStorageRoot(w, path, sr)
 			return nil
@@ -126,7 +139,9 @@ func dfsSubtreeDeep(w *HexPatriciaHashed, node *prefixNode, path []byte, storage
 }
 
 // Storage-root analogue of the account mount fold: parallelize a whale's storage by first nibble.
-func foldStorageRoot(ctx context.Context, numWorkers int, newWorker func() (*HexPatriciaHashed, func()), pu *parallelUpdate, node *prefixNode, path []byte) (common.Hash, error) {
+// sem is the shared fold-concurrency budget: acquired per first-nibble worker so that
+// this whale's fan-out plus every other concurrently-folding subtree stays within the core count.
+func foldStorageRoot(ctx context.Context, sem *semaphore.Weighted, newWorker func() (*HexPatriciaHashed, func()), pu *parallelUpdate, node *prefixNode, path []byte, accountFresh bool) (common.Hash, error) {
 	accPrefix := append([]byte(nil), path...)
 
 	base, releaseBase := newWorker()
@@ -145,12 +160,15 @@ func foldStorageRoot(ctx context.Context, numWorkers int, newWorker func() (*Hex
 		base.SetTraceWriter(tracePrefix(base.traceW, accTag))
 	}
 	if err := unfoldStorageBase(base, accPrefix); err != nil {
-		return common.Hash{}, fmt.Errorf("unfold storage root: %w", err)
+		// A fresh account proves nothing exists on disk beneath accPrefix, so the reset
+		// (empty) wall rows unfoldStorageBase left behind are the correct seed.
+		if !accountFresh || !errors.Is(err, errStorageBaseNotBranch) {
+			return common.Hash{}, fmt.Errorf("unfold storage root: %w", err)
+		}
 	}
 
 	var children [16]cell
 	g, gctx := errgroup.WithContext(ctx)
-	g.SetLimit(numWorkers)
 	childIdx := 0
 	for bm := node.bitmap; bm != 0; {
 		nib := int(bits.TrailingZeros16(bm))
@@ -162,9 +180,10 @@ func foldStorageRoot(ctx context.Context, numWorkers int, newWorker func() (*Hex
 		childPrefix = append(childPrefix, ch.ext...)
 		group := collectSubtreeKeys(ch, childPrefix)
 		g.Go(func() error {
-			if err := gctx.Err(); err != nil {
+			if err := sem.Acquire(gctx, 1); err != nil {
 				return err
 			}
+			defer sem.Release(1)
 			w, release := newWorker()
 			if w.traceW != nil {
 				w.SetTraceWriter(tracePrefix(w.traceW, accTag))

@@ -21,9 +21,9 @@ func BenchmarkVersionedReadGetters(b *testing.B) {
 
 	// Seed version map: tx 0 wrote nonce, balance, storage
 	v0 := Version{TxIndex: 0, Incarnation: 1}
-	mvhm.Write(addr, NoncePath, accounts.NilKey, v0, uint64(42), true)
-	mvhm.Write(addr, BalancePath, accounts.NilKey, v0, *uint256.NewInt(100), true)
-	mvhm.Write(addr, StoragePath, key, v0, *uint256.NewInt(123), true)
+	mvhm.WriteNonce(addr, v0, uint64(42), true)
+	mvhm.WriteBalance(addr, v0, *uint256.NewInt(100), true)
+	mvhm.WriteStorage(addr, key, v0, *uint256.NewInt(123), true)
 
 	// tx 1 reads → hits MapRead path inside versionedRead
 	s := NewWithVersionMap(reader, mvhm)
