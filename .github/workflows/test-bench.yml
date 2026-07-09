@@ -24,11 +24,7 @@ jobs:
   benchmarks:
     name: benchmarks (${{ matrix.exec_mode }})
     runs-on: ubuntu-24.04
-    # Benchmarks are exempt from `go test -timeout` (the testing alarm stops
-    # before the bench phase), so without a cap a stalled benchmark runs until
-    # GitHub's 6h limit and blocks the merge queue. The in-step watchdog below
-    # fails faster (60min) with diagnostics; this is the backstop.
-    timeout-minutes: 90
+    timeout-minutes: 60
     strategy:
       # In merge_group: cancel sibling shards on first failure so ci-gate's
       # `needs` reach terminal state quickly and the broken PR can be evicted.
@@ -53,6 +49,7 @@ jobs:
         uses: actions/checkout@v7
         with:
           fetch-depth: 1
+          persist-credentials: false
 
       - uses: ./.github/actions/setup-erigon
         id: erigon
@@ -62,16 +59,17 @@ jobs:
 
       - name: Run benchmarks
         if: '!inputs.cache-warming-only'
-        # The watchdog SIGQUITs the test binaries if the bench run exceeds
-        # 60min: the Go runtime dumps all goroutine stacks into this step's
-        # log (pinpointing where a stalled benchmark is stuck) and the job
-        # fails fast instead of holding the merge queue until timeout-minutes.
+        # `go test -timeout` doesn't cover benchmarks (the testing alarm stops
+        # before the bench phase), so a hung benchmark would only die at the
+        # 60min job cap — which kills it with no diagnostics. This watchdog
+        # fires first at 45min: SIGQUIT makes the Go runtime dump all goroutine
+        # stacks into this step's log, pinpointing the stall, then fails the job.
         run: |
           (
-            sleep 3600
+            sleep 2700
             {
               echo "## bench stall watchdog"
-              echo "test-bench exceeded 60min: sent SIGQUIT to the test binaries; goroutine dumps are in the 'Run benchmarks' step log"
+              echo "test-bench exceeded 45min: sent SIGQUIT to the test binaries; goroutine dumps are in the 'Run benchmarks' step log"
             } >> "$GITHUB_STEP_SUMMARY"
             pkill -QUIT -f 'go-build.*\.test' || true
             sleep 120
