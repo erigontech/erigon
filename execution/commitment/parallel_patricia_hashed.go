@@ -259,6 +259,9 @@ func (p *ParallelPatriciaHashed) RootHash() ([]byte, error) {
 
 // processStreaming delegates Process to the attached StreamingCommitter and republishes the root.
 func (p *ParallelPatriciaHashed) processStreaming(ctx context.Context) ([]byte, error) {
+	// The template root is the restore target of SetState, so it seeds the committer's base;
+	// PromoteRootInto below keeps the two in sync after every fold.
+	p.streaming.SeedRootFrom(p.template)
 	rh, err := p.streaming.Process(ctx)
 	if err != nil {
 		return nil, err

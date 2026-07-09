@@ -211,6 +211,46 @@ func (s *Set) GetOrCreateCounter(name string, help ...string) (prometheus.Counte
 	})
 }
 
+// GetOrCreateCounterVec returns registered CounterVec in s with the given name
+// or creates new CounterVec if s doesn't contain CounterVec with the given name.
+//
+// name must be valid Prometheus-compatible metric with possible labels.
+// For instance,
+//
+//   - foo
+//   - foo{bar="baz"}
+//   - foo{bar="baz",aaa="b"}
+//
+// labels are the labels associated with the CounterVec.
+//
+// The returned CounterVec is safe to use from concurrent goroutines.
+func (s *Set) GetOrCreateCounterVec(name string, labels []string, help ...string) (*prometheus.CounterVec, error) {
+	return getOrCreateVec(s, name, func() (*prometheus.CounterVec, error) {
+		return newCounterVec(name, labels, help...)
+	})
+}
+
+// newCounterVec creates a new Prometheus CounterVec.
+func newCounterVec(name string, labels []string, help ...string) (*prometheus.CounterVec, error) {
+	name, constLabels, err := parseMetric(name)
+	if err != nil {
+		return nil, err
+	}
+
+	helpStr := "counter metric"
+	if len(help) > 0 {
+		helpStr = strings.Join(help, ", ")
+	}
+
+	cv := prometheus.NewCounterVec(prometheus.CounterOpts{
+		Name:        name,
+		Help:        helpStr,
+		ConstLabels: constLabels,
+	}, labels)
+
+	return cv, nil
+}
+
 // NewGauge registers and returns gauge with the given name.
 //
 // name must be valid Prometheus-compatible metric with possible labels.
