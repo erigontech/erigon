@@ -94,7 +94,7 @@ func (r *RemoteBlockReader) HeadersRange(ctx context.Context, walker func(header
 	panic("not implemented")
 }
 
-func (r *RemoteBlockReader) Integrity(_ context.Context) error {
+func (r *RemoteBlockReader) Integrity(_ context.Context, _ kv.Getter) error {
 	panic("not implemented")
 }
 
@@ -1526,8 +1526,8 @@ func (r *BlockReader) ensureHeaderNumber(n uint64, seg *snapshotsync.VisibleSegm
 	return nil
 }
 
-func (r *BlockReader) Integrity(ctx context.Context) error {
-	view, release := r.view(nil)
+func (r *BlockReader) Integrity(ctx context.Context, tx kv.Getter) error {
+	view, release := r.view(tx)
 	defer release()
 	for _, seg := range view.Headers() {
 		if err := r.ensureHeaderNumber(seg.From(), seg); err != nil {

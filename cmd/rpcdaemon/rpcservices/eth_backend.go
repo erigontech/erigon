@@ -71,7 +71,7 @@ func (back *RemoteBackend) HeadersRange(ctx context.Context, walker func(header 
 	panic("not implemented")
 }
 
-func (back *RemoteBackend) Integrity(_ context.Context) error {
+func (back *RemoteBackend) Integrity(_ context.Context, _ kv.Getter) error {
 	panic("not implemented")
 }
 

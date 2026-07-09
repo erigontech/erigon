@@ -49,7 +49,7 @@ type HeaderReader interface {
 
 	// HeadersRange - TODO: change it to `stream`
 	HeadersRange(ctx context.Context, walker func(header *types.Header) error) error
-	Integrity(ctx context.Context) error
+	Integrity(ctx context.Context, tx kv.Getter) error
 }
 
 type CanonicalReader interface {
