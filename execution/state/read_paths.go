@@ -80,6 +80,47 @@ func (sdb *IntraBlockState) committedStorageDirect(addr accounts.Address, key ac
 	return res, nil
 }
 
+// committedCodeDirect reads an account's committed code bytes straight from the
+// state reader, with no stateObject. Reached only for a cold CodePath read (the
+// versionMap CodePath cell already missed upstream), so it needs no prior-tx
+// EIP-7702 re-check.
+func (sdb *IntraBlockState) committedCodeDirect(addr accounts.Address) ([]byte, error) {
+	if dbg.TraceDomainIO || (dbg.TraceTransactionIO && (sdb.trace || dbg.TraceAccount(addr.Handle()))) {
+		sdb.stateReader.SetTrace(true, fmt.Sprintf("%d (%d.%d)", sdb.blockNum, sdb.txIndex, sdb.version))
+	}
+	var readStart time.Time
+	if dbg.KVReadLevelledMetrics {
+		readStart = time.Now()
+	}
+	code, err := sdb.stateReader.ReadAccountCode(addr)
+	if dbg.KVReadLevelledMetrics {
+		sdb.codeReadDuration += time.Since(readStart)
+		sdb.codeReadCount++
+	}
+	sdb.stateReader.SetTrace(false, "")
+	return code, err
+}
+
+// committedCodeSizeDirect reads an account's committed code size straight from
+// the state reader, with no stateObject. Size-only for stateless-witness
+// correctness (a witness node carries the size but not the bytes).
+func (sdb *IntraBlockState) committedCodeSizeDirect(addr accounts.Address) (int, error) {
+	if dbg.TraceDomainIO || (dbg.TraceTransactionIO && (sdb.trace || dbg.TraceAccount(addr.Handle()))) {
+		sdb.stateReader.SetTrace(true, fmt.Sprintf("%d (%d.%d)", sdb.blockNum, sdb.txIndex, sdb.version))
+	}
+	var readStart time.Time
+	if dbg.KVReadLevelledMetrics {
+		readStart = time.Now()
+	}
+	size, err := sdb.stateReader.ReadAccountCodeSize(addr)
+	if dbg.KVReadLevelledMetrics {
+		sdb.codeReadDuration += time.Since(readStart)
+		sdb.codeReadCount++
+	}
+	sdb.stateReader.SetTrace(false, "")
+	return size, err
+}
+
 // versionedReadCore runs the type-independent part of a versionMap-aware read —
 // the writeSet/versionMap/readSet tier probes plus destruct/revival logic — and
 // returns a readPathResult telling the typed wrapper which source to read the
@@ -526,6 +567,45 @@ func versionedReadCore(s *IntraBlockState, addr accounts.Address, path AccountPa
 				return
 			}
 		}
+		// Cold code / code-size read: resolve directly from the state reader
+		// without materializing a stateObject. A cached object (write this tx)
+		// carries dirtyCode / the loaded bytes, so reuse it when present. Code
+		// paths record only their own dependency (no false AddressPath dep) and
+		// their recorded value is not compared in validation (noValueRead).
+		if (path == CodePath || path == CodeSizePath) && so == nil {
+			hdr.Source = StorageRead
+			if cached, ok := s.stateObjects[addr]; ok {
+				so = cached
+			} else {
+				if path == CodePath {
+					code, err := s.committedCodeDirect(addr)
+					if err != nil {
+						r.err = err
+						r.outcome = outcomeReturnDefault
+						r.source = StorageRead
+						r.version = UnknownVersion
+						return
+					}
+					r.mapCodeVal = code
+				} else {
+					size, err := s.committedCodeSizeDirect(addr)
+					if err != nil {
+						r.err = err
+						r.outcome = outcomeReturnDefault
+						r.source = StorageRead
+						r.version = UnknownVersion
+						return
+					}
+					r.mapCodeSizeVal = size
+				}
+				r.outcome = outcomeStorageRead
+				r.hdr = hdr
+				r.recordVR = true
+				r.source = hdr.Source
+				r.version = hdr.Version
+				return
+			}
+		}
 		if so == nil {
 			hdr.Source = StorageRead
 			obj, err := s.getStateObject(addr, true)
@@ -815,12 +895,16 @@ func readCode(s *IntraBlockState, addr accounts.Address, commited bool) ([]byte,
 		return v, r.source, r.version, nil
 	case outcomeStorageRead:
 		var v []byte
-		if r.so != nil && !r.so.deleted {
-			code, err := r.so.Code()
-			if err != nil {
-				return nil, StorageRead, UnknownVersion, err
+		if r.so != nil {
+			if !r.so.deleted {
+				code, err := r.so.Code()
+				if err != nil {
+					return nil, StorageRead, UnknownVersion, err
+				}
+				v = code
 			}
-			v = code
+		} else {
+			v = r.mapCodeVal
 		}
 		if r.recordVR {
 			s.versionedReads.SetCode(addr, VersionedRead[[]byte]{r.hdr, v})
@@ -883,12 +967,18 @@ func readCodeSize(s *IntraBlockState, addr accounts.Address) (int, ReadSource, V
 		}
 		return v, r.source, r.version, nil
 	case outcomeStorageRead:
-		// CodeSizePath delegates to the per-stateObject code-size
-		// pattern: prefer cached so.code length, else load full code
-		// once (geth-style) and populate so.code.
-		v, err := codeSizeFromStateObject(s, r.so, addr)
-		if err != nil {
-			return 0, r.source, r.version, err
+		var v int
+		if r.so != nil {
+			// CodeSizePath delegates to the per-stateObject code-size pattern:
+			// prefer cached so.code length, else load full code once (geth-style)
+			// and populate so.code.
+			sz, err := codeSizeFromStateObject(s, r.so, addr)
+			if err != nil {
+				return 0, r.source, r.version, err
+			}
+			v = sz
+		} else {
+			v = r.mapCodeSizeVal
 		}
 		if r.recordVR {
 			s.versionedReads.SetCodeSize(addr, VersionedRead[int]{r.hdr, v})
