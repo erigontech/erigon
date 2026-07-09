@@ -92,13 +92,21 @@ read-fields the reference emits.
    existing-live accounts (mirror `writeBalanceVersioned`), prev via a
    **non-recording** read (versionedWrites-then-base). Now consistent with the
    lean materialized footprint.
-4. **Access map → `AccessPath` pseudo-field.** Replace `addressAccess` /
-   `MarkAddressAccess` / `AccessedAddresses` with an `AccessPath` pseudo-read in
-   `versionedReads` carrying the non-revertable "real EVM access" bit (the thing
-   reads/writes can't currently express, gating the SYSTEM_ADDRESS filter). Then
-   `AsBlockAccessList` derives everything from reads/writes and the map drops.
-5. **stateObject → cells.** Field getters/setters and `Exist`/`Empty` source
-   cells; `so.data` is no longer a reconciled cache. `refresh` fully gone.
+4. **Access map → read-side access.** B1 DONE (cc167a75c6): `addressAccess` moved
+   off IBS into `ReadSet.access` (behavior-neutral; still flows via the existing
+   plumbing). B2 remaining (BAL-derivation change, eest-gated): `AsBlockAccessList`
+   reads access from `io.ReadSet(txIndex).access`; drop `result.AccessedAddresses`
+   (txtask.go) + the 3 `RecordAccesses` sites (exec3_parallel.go ~2244/2336/2835)
+   + `VersionedIO.accessed`/`RecordAccesses`/`AccessedAddresses(txIndex)` + the
+   `accesses` param of `mergeTx` + IBS `AccessedAddresses()`. Access then flows
+   purely via `TxIn`/`RecordReads` (mergeFrom already merges `ReadSet.access`).
+5. **stateObject → cells (C).** SPLIT parallel vs serial (Mark): serial keeps its
+   stateObject/`so.data`; only the parallel (versionMap) path goes cell-based.
+   Move the journal-revert off `so.data` onto the cells — repetitive but not deep
+   (one edit per journal entry). Then `getStateObject`/`GetOrNewStateObject` stop
+   materializing on the parallel path; `stateObjects`/`nilAccounts`/`balanceInc`/
+   `sdProbe` drop. The fast-path-so.data-consistency rule (from the nonce slice)
+   is obsolete once the so.data-commit paths (genesis/RPC) are on the write-set (D).
 
 ## Component D detail (Mark)
 
