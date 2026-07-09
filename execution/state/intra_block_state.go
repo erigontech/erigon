@@ -2227,7 +2227,7 @@ func (sdb *IntraBlockState) FinalizedWrites() *WriteSet {
 // VersionedIO.
 func (sdb *IntraBlockState) MergeTxIOInto(io *VersionedIO) {
 	version := Version{BlockNum: sdb.blockNum, TxIndex: sdb.txIndex, Incarnation: sdb.version}
-	io.mergeTx(version, sdb.versionedReads, sdb.VersionedWrites(), sdb.versionedReads.access)
+	io.mergeTx(version, sdb.versionedReads, sdb.VersionedWrites())
 }
 
 func (sdb *IntraBlockState) Print(chainRules chain.Rules, all bool) {

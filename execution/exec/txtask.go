@@ -111,9 +111,8 @@ type TxResult struct {
 	Receipt *types.Receipt
 	Logs    []*types.Log
 
-	TraceFroms        map[accounts.Address]struct{}
-	TraceTos          map[accounts.Address]struct{}
-	AccessedAddresses state.AccessSet
+	TraceFroms map[accounts.Address]struct{}
+	TraceTos   map[accounts.Address]struct{}
 
 	// CollectorWrites holds collector-format writes (all 4 account fields per
 	// address) produced by MakeWriteSet during worker execution. Used by the
@@ -628,7 +627,6 @@ func (txTask *TxTask) Execute(evm *vm.EVM,
 			result.TxOut = txTask.VersionedWrites(ibs)
 		}
 
-		result.AccessedAddresses = ibs.AccessedAddresses()
 		result.TxIn = txTask.VersionedReads(ibs)
 	}
 

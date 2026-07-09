@@ -214,7 +214,6 @@ func (ba *BlockAssembler) AddTransactions(
 		if !ba.HasBAL() {
 			return
 		}
-		ibs.AccessedAddresses()
 		ibs.ResetVersionedIO()
 	}
 

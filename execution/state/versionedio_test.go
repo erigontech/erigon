@@ -1049,10 +1049,15 @@ func TestApplyVersionedWrites_NewAccountNoBalanceRead(t *testing.T) {
 		"newly-created account (not in DB) should NOT generate a BalancePath read")
 }
 
-// recordTouch records an address-level ephemeral access for txIndex via the
-// access map (accesses feed the BAL through RecordAccesses).
+// recordTouch records an address-level ephemeral access for txIndex on the
+// read-set (accesses feed the BAL through the read-set now).
 func recordTouch(io *VersionedIO, txIndex int, addr accounts.Address, revertable bool) {
-	io.RecordAccesses(Version{TxIndex: txIndex}, AccessSet{addr: &accessOptions{revertable: revertable}})
+	rs := io.ReadSet(txIndex)
+	if rs.access == nil {
+		rs.access = make(AccessSet)
+	}
+	rs.access[addr] = &accessOptions{revertable: revertable}
+	io.RecordReads(Version{TxIndex: txIndex}, rs)
 }
 
 // hasRead reports whether the ReadSet has a read for the given address and path.
@@ -1529,6 +1534,8 @@ func TestVersionedIO_mergeTxEquivalentToMerge(t *testing.T) {
 			ReadHeader: ReadHeader{Source: StorageRead, Version: Version{TxIndex: x.txIdx, Incarnation: x.inc}},
 			Val:        *uint256.NewInt(x.val),
 		})
+		// Access marks travel on the read-set now.
+		rs.access = AccessSet{x.addr: &accessOptions{}}
 		return rs
 	}
 	writes := func(x txIO) *WriteSet {
@@ -1536,7 +1543,6 @@ func TestVersionedIO_mergeTxEquivalentToMerge(t *testing.T) {
 		ws.SetBalance(x.addr, &VersionedWrite[uint256.Int]{WriteHeader: WriteHeader{Address: x.addr, Path: BalancePath, Version: Version{TxIndex: x.txIdx, Incarnation: x.inc}}, Val: *uint256.NewInt(x.val + 1)})
 		return ws
 	}
-	accesses := func(x txIO) AccessSet { return AccessSet{x.addr: &accessOptions{}} }
 
 	txs := []txIO{
 		{-1, 0, addrs[0], slots[0], 5}, // begin-system tx (TxIndex -1)
@@ -1553,13 +1559,12 @@ func TestVersionedIO_mergeTxEquivalentToMerge(t *testing.T) {
 		io := &VersionedIO{}
 		io.RecordReads(v, reads(x))
 		io.RecordWrites(v, writes(x))
-		io.RecordAccesses(v, accesses(x))
 		merged = merged.Merge(io)
 	}
 
 	fused := &VersionedIO{}
 	for _, x := range txs {
-		fused.mergeTx(Version{TxIndex: x.txIdx, Incarnation: x.inc}, reads(x), writes(x), accesses(x))
+		fused.mergeTx(Version{TxIndex: x.txIdx, Incarnation: x.inc}, reads(x), writes(x))
 	}
 
 	require.Equal(t, merged.Len(), fused.Len(), "Len mismatch")
@@ -1569,15 +1574,15 @@ func TestVersionedIO_mergeTxEquivalentToMerge(t *testing.T) {
 	// The BAL hash does not surface a dropped access (a non-system access adds
 	// no BAL field), so compare every channel at every index directly: a mergeTx
 	// that overwrote instead of merged a slot passes the hash check but fails here.
+	// Access marks travel on the read-set now, so the ReadSet compare covers them.
 	for i := -1; i < merged.Len()-1; i++ {
 		require.Equal(t, merged.ReadSet(i), fused.ReadSet(i), "reads differ at tx %d", i)
 		require.Equal(t, merged.ReadSetIncarnation(i), fused.ReadSetIncarnation(i), "incarnation differs at tx %d", i)
 		require.Equal(t, merged.WriteSet(i), fused.WriteSet(i), "writes differ at tx %d", i)
-		require.Equal(t, merged.AccessedAddresses(i), fused.AccessedAddresses(i), "accesses differ at tx %d", i)
 	}
 
-	require.True(t, len(fused.inputs) == len(fused.outputs) && len(fused.outputs) == len(fused.accessed),
-		"mergeTx must keep inputs/outputs/accessed equal length")
+	require.True(t, len(fused.inputs) == len(fused.outputs),
+		"mergeTx must keep inputs/outputs equal length")
 }
 
 // TestSetAccountBalanceOrDelete_NoncePathOnly_AppendBalanceNotFullAccount

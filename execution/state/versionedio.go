@@ -2129,16 +2129,14 @@ func (writes *WriteSet) SetAccountBalanceOrDelete(addr accounts.Address, acc *ac
 
 // note that TxIndex starts at -1 (the begin system tx)
 type VersionedIO struct {
-	inputs   []versionedReadSet
-	outputs  []*WriteSet // write sets that should be checked during validation
-	accessed []AccessSet
+	inputs  []versionedReadSet
+	outputs []*WriteSet // write sets that should be checked during validation
 }
 
 func NewVersionedIO(numTx int) *VersionedIO {
 	return &VersionedIO{
-		inputs:   make([]versionedReadSet, numTx+1),
-		outputs:  make([]*WriteSet, numTx+1),
-		accessed: make([]AccessSet, numTx+1),
+		inputs:  make([]versionedReadSet, numTx+1),
+		outputs: make([]*WriteSet, numTx+1),
 	}
 }
 
@@ -2146,7 +2144,7 @@ func (io *VersionedIO) Len() int {
 	if io == nil {
 		return 0
 	}
-	return max(len(io.inputs), max(len(io.outputs), len(io.accessed)))
+	return max(len(io.inputs), len(io.outputs))
 }
 
 func (io *VersionedIO) Inputs() []versionedReadSet {
@@ -2220,27 +2218,6 @@ func (io *VersionedIO) RecordWrites(txVersion Version, output *WriteSet) {
 	io.outputs[txId+1] = output
 }
 
-func (io *VersionedIO) RecordAccesses(txVersion Version, addresses AccessSet) {
-	if len(addresses) == 0 {
-		return
-	}
-	if len(io.accessed) <= txVersion.TxIndex+1 {
-		io.accessed = append(io.accessed, make([]AccessSet, txVersion.TxIndex+2-len(io.accessed))...)
-	}
-	dest := make(AccessSet, len(addresses))
-	for addr, opt := range addresses {
-		dest[addr] = opt
-	}
-	io.accessed[txVersion.TxIndex+1] = dest
-}
-
-func (io *VersionedIO) AccessedAddresses(txIndex int) AccessSet {
-	if len(io.accessed) <= txIndex+1 {
-		return nil
-	}
-	return io.accessed[txIndex+1]
-}
-
 func (io *VersionedIO) Merge(other *VersionedIO) *VersionedIO {
 	mergedLen := max(io.Len(), other.Len())
 	merged := NewVersionedIO(mergedLen - 1)
@@ -2264,15 +2241,6 @@ func (io *VersionedIO) Merge(other *VersionedIO) *VersionedIO {
 		} else if i < len(other.outputs) {
 			merged.outputs[i] = other.outputs[i].Merge(nil)
 		}
-		if i < len(io.accessed) {
-			if i < len(other.accessed) {
-				merged.accessed[i] = io.accessed[i].Merge(other.accessed[i])
-			} else {
-				merged.accessed[i] = io.accessed[i].Merge(nil)
-			}
-		} else if i < len(other.accessed) {
-			merged.accessed[i] = other.accessed[i].Merge(nil)
-		}
 	}
 	return merged
 }
@@ -2281,17 +2249,14 @@ func (io *VersionedIO) Merge(other *VersionedIO) *VersionedIO {
 // version.TxIndex) into io at that index, accumulating into the slot rather
 // than overwriting it the way RecordReads does. The three per-tx slices grow in
 // lockstep so they stay equal length.
-func (io *VersionedIO) mergeTx(version Version, reads ReadSet, writes *WriteSet, accesses AccessSet) {
+func (io *VersionedIO) mergeTx(version Version, reads ReadSet, writes *WriteSet) {
 	idx := version.TxIndex + 1
-	n := max(idx+1, len(io.inputs), len(io.outputs), len(io.accessed))
+	n := max(idx+1, len(io.inputs), len(io.outputs))
 	if n > len(io.inputs) {
 		io.inputs = append(io.inputs, make([]versionedReadSet, n-len(io.inputs))...)
 	}
 	if n > len(io.outputs) {
 		io.outputs = append(io.outputs, make([]*WriteSet, n-len(io.outputs))...)
-	}
-	if n > len(io.accessed) {
-		io.accessed = append(io.accessed, make([]AccessSet, n-len(io.accessed))...)
 	}
 	if reads.Len() > 0 {
 		if io.inputs[idx].readSet.Len() == 0 {
@@ -2304,9 +2269,6 @@ func (io *VersionedIO) mergeTx(version Version, reads ReadSet, writes *WriteSet,
 	}
 	if !writes.IsEmpty() {
 		io.outputs[idx] = io.outputs[idx].Merge(writes)
-	}
-	if len(accesses) > 0 {
-		io.accessed[idx] = io.accessed[idx].Merge(accesses)
 	}
 }
 
@@ -2444,7 +2406,7 @@ func (io *VersionedIO) AsBlockAccessList() types.BlockAccessList {
 		}
 
 		isUserTx := txIndex >= 0
-		for addr, opts := range io.AccessedAddresses(txIndex) {
+		for addr, opts := range io.ReadSet(txIndex).access {
 			if addr.IsNil() {
 				continue
 			}

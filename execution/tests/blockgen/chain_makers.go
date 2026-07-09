@@ -150,7 +150,6 @@ func (b *BlockGen) AddTxWithChain(getHeader func(hash common.Hash, number uint64
 		writes := b.ibs.VersionedWrites()
 		if b.blockIO != nil {
 			b.blockIO.RecordReads(txVersion, b.ibs.VersionedReads())
-			b.blockIO.RecordAccesses(txVersion, b.ibs.AccessedAddresses())
 			b.blockIO.RecordWrites(txVersion, writes)
 		}
 		b.versionMap.FlushVersionedWrites(writes, true, "")
@@ -513,7 +512,6 @@ func GenerateChain(config *chain.Config, parent *types.Block, engine rules.Engin
 				initVersion := state.Version{BlockNum: b.header.Number.Uint64(), TxIndex: -1}
 				writes := ibs.VersionedWrites()
 				b.blockIO.RecordReads(initVersion, ibs.VersionedReads())
-				b.blockIO.RecordAccesses(initVersion, ibs.AccessedAddresses())
 				b.blockIO.RecordWrites(initVersion, writes)
 				if b.versionMap != nil {
 					b.versionMap.FlushVersionedWrites(writes, true, "")
@@ -553,7 +551,6 @@ func GenerateChain(config *chain.Config, parent *types.Block, engine rules.Engin
 				finalizeVersion := state.Version{BlockNum: b.header.Number.Uint64(), TxIndex: len(b.txs)}
 				writes := ibs.VersionedWrites()
 				b.blockIO.RecordReads(finalizeVersion, ibs.VersionedReads())
-				b.blockIO.RecordAccesses(finalizeVersion, ibs.AccessedAddresses())
 				b.blockIO.RecordWrites(finalizeVersion, writes)
 				if b.versionMap != nil {
 					b.versionMap.FlushVersionedWrites(writes, true, "")

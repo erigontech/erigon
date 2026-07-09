@@ -2241,7 +2241,6 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 				fmt.Println(be.blockNum, "err", execErr)
 			}
 			be.blockIO.RecordReads(res.Version(), res.TxIn)
-			be.blockIO.RecordAccesses(res.Version(), res.AccessedAddresses)
 
 			if execErr.IsError() {
 				// Genuine, non-dependency execution error (issue #21319).
@@ -2333,7 +2332,6 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 		txVersion := res.Version()
 
 		be.blockIO.RecordReads(txVersion, res.TxIn)
-		be.blockIO.RecordAccesses(txVersion, res.AccessedAddresses)
 
 		if res.Version().Incarnation == 0 {
 			be.blockIO.RecordWrites(txVersion, res.TxOut)
@@ -2832,7 +2830,6 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 				// ibs.MakeWriteSet into finalizeWrites below.
 
 				be.blockIO.RecordReads(finalVersion, ibs.VersionedReads())
-				be.blockIO.RecordAccesses(finalVersion, ibs.AccessedAddresses())
 
 				ivw := ibs.VersionedWrites()
 				if !ivw.IsEmpty() {
