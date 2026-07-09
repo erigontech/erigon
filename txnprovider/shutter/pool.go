@@ -299,14 +299,14 @@ func (p *Pool) ProvideTxns(ctx context.Context, opts ...txnprovider.ProvideOptio
 		accessList := txn.GetAccessList()
 		isAATxn := txn.Type() == types.AccountAbstractionTxType
 		to := txn.GetTo()
-		txnSender, _ := txn.GetSender()
+		txnSender, senderOk := txn.GetSender()
 		intrinsicGasResult, overflow := mdgas.IntrinsicGas(mdgas.IntrinsicGasCalcArgs{
 			Data:               txn.GetData(),
 			AuthorizationsLen:  uint64(len(txn.GetAuthorizations())),
 			AccessListLen:      uint64(len(accessList)),
 			StorageKeysLen:     uint64(accessList.StorageKeys()),
 			IsContractCreation: txn.IsContractDeploy(),
-			IsSelfTransfer:     to != nil && txnSender.Value() == *to,
+			IsSelfTransfer:     senderOk && to != nil && txnSender.Value() == *to,
 			HasValue:           !txn.GetValue().IsZero(),
 			IsEIP2:             true,
 			IsEIP2028:          true,
