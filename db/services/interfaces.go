@@ -36,7 +36,7 @@ type BlockReader interface {
 	BlockByHash(ctx context.Context, db kv.Tx, hash common.Hash) (*types.Block, error)
 	CurrentBlock(db kv.Tx) (*types.Block, error)
 	BlockWithSenders(ctx context.Context, tx kv.Getter, hash common.Hash, blockNum uint64) (block *types.Block, senders []common.Address, err error)
-	IterateFrozenBodies(f func(blockNum, baseTxNum, txCount uint64) error) error
+	IterateFrozenBodies(tx kv.Getter, f func(blockNum, baseTxNum, txCount uint64) error) error
 	MinimumBlockAvailable(ctx context.Context, tx kv.Tx) (uint64, error)
 }
 
@@ -71,7 +71,7 @@ type TxnReader interface {
 	TxnLookup(ctx context.Context, tx kv.Getter, txnHash common.Hash) (blockNum uint64, txNum uint64, ok bool, err error)
 	TxnByIdxInBlock(ctx context.Context, tx kv.Getter, blockNum uint64, i int) (txn types.Transaction, err error)
 	RawTransactions(ctx context.Context, tx kv.Getter, fromBlock, toBlock uint64) (txs [][]byte, err error)
-	FirstTxnNumNotInSnapshots() uint64
+	FirstTxnNumNotInSnapshots(tx kv.Getter) uint64
 }
 
 type HeaderAndCanonicalReader interface {

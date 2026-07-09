@@ -189,7 +189,7 @@ func buildBlackListForPruning(
 type blockReader interface {
 	Snapshots() services.BlockSnapshots
 	BorSnapshots() services.BlockSnapshots
-	IterateFrozenBodies(_ func(blockNum uint64, baseTxNum uint64, txCount uint64) error) error
+	IterateFrozenBodies(tx kv.Getter, _ func(blockNum uint64, baseTxNum uint64, txCount uint64) error) error
 	FreezingCfg() ethconfig.BlocksFreezing
 	AllTypes() []snaptype.Type
 	FrozenFiles() (list []string)
@@ -222,7 +222,7 @@ func getMinimumBlocksToDownload(
 	minHistoryStep = kv.Step(math.MaxUint32)
 	minCommitmentHistoryStep = kv.Step(math.MaxUint32)
 	stateTxNum := maxStateStep * stepSize
-	if err := blockReader.IterateFrozenBodies(func(blockNum, baseTxNum, txAmount uint64) error {
+	if err := blockReader.IterateFrozenBodies(nil, func(blockNum, baseTxNum, txAmount uint64) error {
 		if iterations%1e6 == 0 {
 			if ctx.Err() != nil {
 				return context.Cause(ctx)

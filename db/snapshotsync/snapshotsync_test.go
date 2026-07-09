@@ -55,7 +55,7 @@ type fakeBlockReader struct {
 
 func (f *fakeBlockReader) Snapshots() services.BlockSnapshots { return fakeSnapshots{max: f.frozenMax} }
 
-func (f *fakeBlockReader) IterateFrozenBodies(fn func(blockNum, baseTxNum, txCount uint64) error) error {
+func (f *fakeBlockReader) IterateFrozenBodies(_ kv.Getter, fn func(blockNum, baseTxNum, txCount uint64) error) error {
 	for _, b := range f.bodies {
 		if err := fn(b.blockNum, b.baseTxNum, b.txCount); err != nil {
 			return err

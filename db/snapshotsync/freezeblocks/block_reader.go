@@ -83,7 +83,7 @@ func (r *RemoteBlockReader) RawTransactions(ctx context.Context, tx kv.Getter, f
 	panic("not implemented")
 }
 
-func (r *RemoteBlockReader) FirstTxnNumNotInSnapshots() uint64 {
+func (r *RemoteBlockReader) FirstTxnNumNotInSnapshots(_ kv.Getter) uint64 {
 	panic("not implemented")
 }
 
@@ -264,7 +264,7 @@ func (r *RemoteBlockReader) BlockWithSenders(ctx context.Context, _ kv.Getter, h
 	return block, senders, nil
 }
 
-func (r *RemoteBlockReader) IterateFrozenBodies(_ func(blockNum uint64, baseTxNum uint64, txCount uint64) error) error {
+func (r *RemoteBlockReader) IterateFrozenBodies(_ kv.Getter, _ func(blockNum uint64, baseTxNum uint64, txCount uint64) error) error {
 	panic("not implemented")
 }
 
@@ -1337,8 +1337,8 @@ func (r *BlockReader) TxnLookup(_ context.Context, tx kv.Getter, txnHash common.
 	return blockNum, txNum, ok, nil
 }
 
-func (r *BlockReader) FirstTxnNumNotInSnapshots() uint64 {
-	sn, ok, close := r.viewSingleFile(nil, snaptype2.Transactions, r.sn.BlocksAvailable())
+func (r *BlockReader) FirstTxnNumNotInSnapshots(tx kv.Getter) uint64 {
+	sn, ok, close := r.viewSingleFile(tx, snaptype2.Transactions, r.sn.BlocksAvailable())
 	if !ok {
 		return 0
 	}
@@ -1348,8 +1348,8 @@ func (r *BlockReader) FirstTxnNumNotInSnapshots() uint64 {
 	return lastTxnID
 }
 
-func (r *BlockReader) IterateFrozenBodies(f func(blockNum, baseTxNum, txCount uint64) error) error {
-	view, release := r.view(nil)
+func (r *BlockReader) IterateFrozenBodies(tx kv.Getter, f func(blockNum, baseTxNum, txCount uint64) error) error {
+	view, release := r.view(tx)
 	defer release()
 	for _, sn := range view.Bodies() {
 		defer sn.Src().MadvSequential().DisableReadAhead()
