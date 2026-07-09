@@ -24,6 +24,11 @@ jobs:
   benchmarks:
     name: benchmarks (${{ matrix.exec_mode }})
     runs-on: ubuntu-24.04
+    # Benchmarks are exempt from `go test -timeout` (the testing alarm stops
+    # before the bench phase), so without a cap a stalled benchmark runs until
+    # GitHub's 6h limit and blocks the merge queue. The in-step watchdog below
+    # fails faster (60min) with diagnostics; this is the backstop.
+    timeout-minutes: 90
     strategy:
       # In merge_group: cancel sibling shards on first failure so ci-gate's
       # `needs` reach terminal state quickly and the broken PR can be evicted.
@@ -57,7 +62,28 @@ jobs:
 
       - name: Run benchmarks
         if: '!inputs.cache-warming-only'
-        run: make test-bench
+        # The watchdog SIGQUITs the test binaries if the bench run exceeds
+        # 60min: the Go runtime dumps all goroutine stacks into this step's
+        # log (pinpointing where a stalled benchmark is stuck) and the job
+        # fails fast instead of holding the merge queue until timeout-minutes.
+        run: |
+          (
+            sleep 3600
+            {
+              echo "## bench stall watchdog"
+              echo "test-bench exceeded 60min: sent SIGQUIT to the test binaries; goroutine dumps are in the 'Run benchmarks' step log"
+            } >> "$GITHUB_STEP_SUMMARY"
+            pkill -QUIT -f 'go-build.*\.test' || true
+            sleep 120
+            pkill -KILL -f 'go-build.*\.test' || true
+          ) >/dev/null 2>&1 &
+          watchdog_pid=$!
+          cleanup() {
+            pkill -P "$watchdog_pid" 2>/dev/null || true
+            kill "$watchdog_pid" 2>/dev/null || true
+          }
+          trap cleanup EXIT
+          make test-bench
 
       - name: Build test binaries (cache warming)
         if: inputs.cache-warming-only
