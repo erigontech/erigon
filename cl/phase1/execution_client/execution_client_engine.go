@@ -611,3 +611,7 @@ func (cc *ExecutionClientEngine) GetBlobs(ctx context.Context, versionedHashes [
 	}
 	return blobs, proofs, nil
 }
+
+func (cc *ExecutionClientEngine) GetClientVersionV1(ctx context.Context, callerVersion *engine_types.ClientVersionV1) ([]engine_types.ClientVersionV1, error) {
+	return cc.engine.GetClientVersionV1(ctx, callerVersion)
+}

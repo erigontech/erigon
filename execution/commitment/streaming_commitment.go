@@ -27,6 +27,7 @@ import (
 	"sync/atomic"
 
 	"golang.org/x/sync/errgroup"
+	"golang.org/x/sync/semaphore"
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/db/kv"
@@ -96,11 +97,15 @@ type StreamingCommitter struct {
 
 	// rootValid gates root promotion: cleared each Process and set only on the
 	// folded path, so the no-touch path leaves the template's prior root untouched.
+	// rootSeeded marks the same snapshot as a base seed: a trie whose root row
+	// collapsed to one child has no root branch record on disk, so the carried
+	// root cell is the only way a fresh base can see the existing state.
 	rootCell    cell
 	rootChecked bool
 	rootTouched bool
 	rootPresent bool
 	rootValid   bool
+	rootSeeded  bool
 
 	traceW io.Writer
 }
@@ -287,6 +292,44 @@ func (sc *StreamingCommitter) captureRoot(base *HexPatriciaHashed) {
 	sc.rootTouched = base.rootTouched
 	sc.rootPresent = base.rootPresent
 	sc.rootValid = true
+	sc.rootSeeded = true
+}
+
+// SeedRootFrom snapshots tmpl's root cell and flags as the seed for the next
+// Process's base — the mirror of PromoteRootInto, used after tmpl was restored
+// via SetState. A changed seed invalidates any base built from the previous one
+// (including a running scheduler's), which is dropped so the next Process
+// rebuilds from the new seed instead of folding against stale root state.
+func (sc *StreamingCommitter) SeedRootFrom(tmpl *HexPatriciaHashed) {
+	if tmpl == nil {
+		return
+	}
+	if sc.rootCell == tmpl.root && sc.rootChecked == tmpl.rootChecked &&
+		sc.rootTouched == tmpl.rootTouched && sc.rootPresent == tmpl.rootPresent {
+		sc.rootSeeded = true
+		return
+	}
+	sc.rootCell = tmpl.root
+	sc.rootChecked = tmpl.rootChecked
+	sc.rootTouched = tmpl.rootTouched
+	sc.rootPresent = tmpl.rootPresent
+	sc.rootSeeded = true
+	if sc.base != nil {
+		sc.Stop()
+		sc.releaseBase()
+	}
+	// Splits folded against the previous seed's base are stale; drop their cells and
+	// deferred updates so Process re-folds them against the reseeded base.
+	for _, s := range sc.splits {
+		s.mu.Lock()
+		s.folded = false
+		s.dirty = true
+		for _, upd := range s.deferred {
+			putDeferredUpdate(upd)
+		}
+		s.deferred = nil
+		s.mu.Unlock()
+	}
 }
 
 // PromoteRootInto copies the most recently folded root cell and flags into tmpl,
@@ -321,7 +364,8 @@ func (sc *StreamingCommitter) newProcessBase(ctx context.Context) (*HexPatriciaH
 	return base, cleanup, root, nil
 }
 
-// newBaseTrie constructs a fresh deferring base trie and a cleanup releasing it.
+// newBaseTrie constructs a fresh deferring base trie, seeded with the carried
+// root snapshot when one exists, and a cleanup releasing it.
 func (sc *StreamingCommitter) newBaseTrie() (*HexPatriciaHashed, func()) {
 	base := NewHexPatriciaHashed(sc.accountKeyLen, nil, sc.cfg)
 	bctx, bclean := sc.trieCtxFactory()
@@ -329,6 +373,12 @@ func (sc *StreamingCommitter) newBaseTrie() (*HexPatriciaHashed, func()) {
 	base.SetTraceWriter(sc.traceW)
 	base.branchEncoder.setDeferUpdates(true)
 	base.SetLeaveDeferredForCaller(true)
+	if sc.rootSeeded {
+		base.root = sc.rootCell
+		base.rootChecked = sc.rootChecked
+		base.rootTouched = sc.rootTouched
+		base.rootPresent = sc.rootPresent
+	}
 	return base, func() {
 		base.Release()
 		if bclean != nil {
@@ -355,16 +405,9 @@ func (sc *StreamingCommitter) processBase(ctx context.Context) (*HexPatriciaHash
 func (sc *StreamingCommitter) buildBase(ctx context.Context) (*HexPatriciaHashed, func(), error) {
 	base, cleanup := sc.newBaseTrie()
 
-	zero := []byte{0}
-	for u := base.needUnfolding(zero); u > 0; u = base.needUnfolding(zero) {
-		if err := ctx.Err(); err != nil {
-			cleanup()
-			return nil, nil, err
-		}
-		if err := base.unfold(zero, u); err != nil {
-			cleanup()
-			return nil, nil, fmt.Errorf("StreamingCommitter: unfold root: %w", err)
-		}
+	if err := unfoldRootWall(ctx, base); err != nil {
+		cleanup()
+		return nil, nil, fmt.Errorf("StreamingCommitter: unfold root: %w", err)
 	}
 	seedRootBase(base)
 	return base, cleanup, nil
@@ -623,8 +666,9 @@ func (o *overlayContext) Storage(plainKey []byte) (*Update, error) { return o.ba
 // base, recording which slots were folded; it never applies or merges.
 func (sc *StreamingCommitter) foldPresentSplits(ctx context.Context, base *HexPatriciaHashed, root *prefixNode) ([16]bool, error) {
 	var present [16]bool
+	foldSem := newFoldSem()
 	g, gctx := errgroup.WithContext(ctx)
-	g.SetLimit(sc.numWorkers)
+	g.SetLimit(min(sc.numWorkers, maxFoldConcurrency()))
 
 	childIdx := 0
 	for bm := root.bitmap; bm != 0; {
@@ -646,7 +690,7 @@ func (sc *StreamingCommitter) foldPresentSplits(ctx context.Context, base *HexPa
 			continue
 		}
 		ch := child
-		g.Go(func() error { return sc.foldSplit(gctx, base, s, ch) })
+		g.Go(func() error { return sc.foldSplit(gctx, foldSem, base, s, ch) })
 		childIdx++
 		bm &^= uint16(1) << nib
 	}
@@ -698,7 +742,7 @@ func stitchSplitCells(base *HexPatriciaHashed, cells *[16]cell, present *[16]boo
 // foldSplit re-folds one top-nibble subtree on a worker mounted at the unfolded
 // base, to the split cell rather than the root, replacing the split's cell and
 // deferred set.
-func (sc *StreamingCommitter) foldSplit(ctx context.Context, base *HexPatriciaHashed, s *splitState, child *prefixNode) error {
+func (sc *StreamingCommitter) foldSplit(ctx context.Context, foldSem *semaphore.Weighted, base *HexPatriciaHashed, s *splitState, child *prefixNode) error {
 	ni := s.prefix[0]
 	w := sc.workerPool.Get().(*HexPatriciaHashed)
 	w.mountTo(base, int(ni))
@@ -720,7 +764,7 @@ func (sc *StreamingCommitter) foldSplit(ctx context.Context, base *HexPatriciaHa
 	path = append(path, ni)
 	path = append(path, child.ext...)
 	deepStorageRoot := func(n *prefixNode, pth []byte, accountFresh bool) (common.Hash, error) {
-		sr, err := foldStorageRoot(ctx, sc.numWorkers, sc.newStorageWorker, &pu, n, pth, accountFresh)
+		sr, err := foldStorageRoot(ctx, foldSem, sc.newStorageWorker, &pu, n, pth, accountFresh)
 		if err == nil {
 			sc.deepLocalFolds.Add(1)
 		}
@@ -895,6 +939,7 @@ func (sc *StreamingCommitter) Reset() {
 		putDeferredUpdate(upd)
 	}
 	sc.deferredForCaller = nil
+	sc.rootValid, sc.rootSeeded = false, false
 	sc.resetPool()
 }
 
@@ -919,5 +964,6 @@ func (sc *StreamingCommitter) Release() {
 		putDeferredUpdate(upd)
 	}
 	sc.deferredForCaller = nil
+	sc.rootValid, sc.rootSeeded = false, false
 	sc.resetPool()
 }

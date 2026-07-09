@@ -43,13 +43,6 @@ import (
 	"github.com/erigontech/erigon/db/snaptype"
 )
 
-// pool for buffers
-var bufferPool = sync.Pool{
-	New: func() any {
-		return &bytes.Buffer{}
-	},
-}
-
 func (s *Antiquary) loopStates(ctx context.Context) {
 	// Execute this each second
 	reqRetryTimer := time.NewTicker(100 * time.Millisecond)
