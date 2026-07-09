@@ -339,7 +339,6 @@ func TestCodeCache_CodeCapacityLimit(t *testing.T) {
 	assert.False(t, ok, "coldest code should have been evicted")
 }
 
-
 func TestCodeCache_Clear(t *testing.T) {
 	c := NewCodeCache(100, 200)
 
@@ -471,7 +470,6 @@ func TestStateCache_GetPut_UnsupportedDomain(t *testing.T) {
 	assert.False(t, ok)
 	assert.Nil(t, v)
 }
-
 
 // Put(key, nil) must be a cache hit, not a miss. SharedDomains.GetLatest
 // caches deleted keys via Put(key, nil); if Get treats that as "not found",
