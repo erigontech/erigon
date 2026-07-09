@@ -1179,13 +1179,61 @@ func (sdb *IntraBlockState) SetNonce(addr accounts.Address, nonce uint64, reason
 		fmt.Printf("%d (%d.%d) SetNonce %x, %d\n", sdb.blockNum, sdb.txIndex, sdb.version, addr, nonce)
 	}
 
+	wasCommited := !sdb.hasWrite(addr, NoncePath, accounts.NilKey)
+	if sdb.versionMap != nil {
+		return sdb.writeNonceVersioned(addr, nonce, wasCommited, reason)
+	}
+
 	stateObject, err := sdb.GetOrNewStateObject(addr)
 	if err != nil {
 		return err
 	}
 
-	stateObject.SetNonce(nonce, !sdb.hasWrite(addr, NoncePath, accounts.NilKey), reason)
+	stateObject.SetNonce(nonce, wasCommited, reason)
 	sdb.recordWriteNonce(addr, stateObject.Nonce(), reason)
+	return nil
+}
+
+// writeNonceVersioned records a nonce write on the parallel (versionMap) path
+// without materializing a stateObject for an existing, live account. A nonce SET
+// does not depend on the prior value, so prev is read WITHOUT recording an OCC
+// read (versionedWrites for this tx's own prior write, else the base record) —
+// matching the materialized path's AddressPath-only footprint. Absent/destroyed
+// accounts still materialize (account creation).
+func (sdb *IntraBlockState) writeNonceVersioned(addr accounts.Address, nonce uint64, wasCommited bool, reason tracing.NonceChangeReason) error {
+	base, _, _, err := sdb.versionedAccountBase(addr, true)
+	if err != nil {
+		return err
+	}
+	if base == nil || sdb.accountLifecycle(addr) {
+		stateObject, err := sdb.GetOrNewStateObject(addr)
+		if err != nil {
+			return err
+		}
+		stateObject.SetNonce(nonce, wasCommited, reason)
+		sdb.recordWriteNonce(addr, nonce, reason)
+		return nil
+	}
+	prev := base.Nonce
+	if vw, ok := sdb.versionedWrites.GetNonce(addr); ok {
+		prev = vw.Val
+	}
+	// Keep an already-materialized stateObject's so.data in step so the
+	// so.data-based commit paths (genesis FinalizeTx, RPC) stay correct. We
+	// don't materialize one that isn't present — that's the whole point.
+	if so, ok := sdb.stateObjects[addr]; ok {
+		prev = so.data.Nonce
+		so.setNonce(nonce)
+	}
+	sdb.journal.append(nonceChange{account: addr, prev: prev, wasCommited: wasCommited})
+	if sdb.tracingHooks != nil {
+		if sdb.tracingHooks.OnNonceChangeV2 != nil {
+			sdb.tracingHooks.OnNonceChangeV2(addr, prev, nonce, reason)
+		} else if sdb.tracingHooks.OnNonceChange != nil {
+			sdb.tracingHooks.OnNonceChange(addr, prev, nonce)
+		}
+	}
+	sdb.recordWriteNonce(addr, nonce, reason)
 	return nil
 }
 
