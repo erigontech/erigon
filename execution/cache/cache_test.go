@@ -948,3 +948,22 @@ func TestStateCache_UnwindAssertsWarmupInFlight(t *testing.T) {
 	defer sc.WarmupDone()
 	require.NotPanics(t, func() { sc.Unwind(10) })
 }
+
+// The applied-progress watermark follows flush-applies up (monotonically),
+// unwinds down, and Clear to zero, independently per domain.
+func TestStateCache_AppliedProgressWatermark(t *testing.T) {
+	b := 1 * datasize.MB
+	sc := NewStateCache(b, b, b, b)
+	require.Zero(t, sc.AppliedProgress(kv.AccountsDomain))
+
+	sc.NoteApplied(kv.AccountsDomain, 20)
+	sc.NoteApplied(kv.AccountsDomain, 10)
+	require.Equal(t, uint64(20), sc.AppliedProgress(kv.AccountsDomain))
+	require.Zero(t, sc.AppliedProgress(kv.StorageDomain))
+
+	sc.Unwind(15)
+	require.Equal(t, uint64(15), sc.AppliedProgress(kv.AccountsDomain))
+
+	sc.Clear()
+	require.Zero(t, sc.AppliedProgress(kv.AccountsDomain))
+}

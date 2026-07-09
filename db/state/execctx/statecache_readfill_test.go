@@ -352,3 +352,95 @@ func TestReadFill_DoesNotResurrectDeletedCode(t *testing.T) {
 	require.True(t, ok, "the deletion must be cached as a live no-code marker")
 	require.Equal(t, uint64(20), cTxNum)
 }
+
+// commitDelete seeds one key with v at txNum 10 and deletes it at txNum 20,
+// each in its own committed SD, then returns a pre-delete read snapshot.
+func commitDelete(t *testing.T, db kv.TemporalRwDB, sc *cache.StateCache, domain kv.Domain, key, v []byte) kv.TemporalTx {
+	t.Helper()
+	ctx := t.Context()
+
+	rwTx1, err := db.BeginTemporalRw(ctx)
+	require.NoError(t, err)
+	defer rwTx1.Rollback()
+	sd1, err := execctx.NewSharedDomains(ctx, rwTx1, log.New())
+	require.NoError(t, err)
+	defer sd1.Close()
+	sd1.SetStateCacheForTest(sc)
+	sd1.SetTxNum(10)
+	require.NoError(t, sd1.DomainPut(domain, rwTx1, key, v, 10, nil))
+	require.NoError(t, sd1.Commit(ctx, rwTx1))
+
+	roTxOld, err := db.BeginTemporalRo(ctx)
+	require.NoError(t, err)
+	t.Cleanup(roTxOld.Rollback)
+
+	rwTx2, err := db.BeginTemporalRw(ctx)
+	require.NoError(t, err)
+	defer rwTx2.Rollback()
+	sd2, err := execctx.NewSharedDomains(ctx, rwTx2, log.New())
+	require.NoError(t, err)
+	defer sd2.Close()
+	sd2.SetStateCacheForTest(sc)
+	sd2.SetTxNum(20)
+	require.NoError(t, sd2.DomainDel(domain, rwTx2, key, 20, v))
+	require.NoError(t, sd2.Commit(ctx, rwTx2))
+
+	return roTxOld
+}
+
+// A tombstone or no-code marker is an ordinary LRU entry: cache pressure can
+// evict it while a pre-delete snapshot is still alive, and that snapshot's
+// fill then finds the key absent. The applied-progress watermark —
+// unevictable — must reject the stale snapshot's fill regardless.
+func TestReadFill_DoesNotResurrectAfterMarkerEviction(t *testing.T) {
+	if testing.Short() {
+		t.Skip()
+	}
+	t.Parallel()
+
+	for _, domain := range []kv.Domain{kv.AccountsDomain, kv.CodeDomain} {
+		t.Run(domain.String(), func(t *testing.T) {
+			t.Parallel()
+			const stepSize = uint64(16)
+			ctx := t.Context()
+			db := newTestDb(t, stepSize)
+			b := 1 * datasize.KB // entry caps clamp to their minimums — cheap to pressure
+			sc := cache.NewStateCache(b, b, b, b)
+
+			key := make([]byte, 20)
+			key[0] = 0xdd
+			v := encAccount(1)
+
+			roTxOld := commitDelete(t, db, sc, domain, key, v)
+
+			// Evict the deletion marker with cache pressure. Check only after
+			// the burst — a per-insert Get would keep the marker MRU.
+			pressure := make([]byte, 20)
+			for i := 0; i < 8192; i++ {
+				binary.BigEndian.PutUint64(pressure[1:], uint64(i))
+				sc.Put(domain, pressure, v, 10)
+			}
+			_, stillThere := sc.Get(domain, key)
+			require.False(t, stillThere, "pressure must evict the deletion marker")
+
+			// The straddling reader's fill runs against the marker-less cache.
+			sdOld, err := execctx.NewSharedDomains(ctx, roTxOld, log.New())
+			require.NoError(t, err)
+			defer sdOld.Close()
+			sdOld.SetStateCacheForTest(sc)
+			_, _, err = sdOld.GetLatest(domain, roTxOld, key)
+			require.NoError(t, err)
+
+			roTxNew, err := db.BeginTemporalRo(ctx)
+			require.NoError(t, err)
+			defer roTxNew.Rollback()
+			sdNew, err := execctx.NewSharedDomains(ctx, roTxNew, log.New())
+			require.NoError(t, err)
+			defer sdNew.Close()
+			sdNew.SetStateCacheForTest(sc)
+			got, _, err := sdNew.GetLatest(domain, roTxNew, key)
+			require.NoError(t, err)
+			require.Empty(t, got, "a stale snapshot's fill must not resurrect the deleted value once its marker is evicted")
+		})
+	}
+}

@@ -97,38 +97,39 @@ func newCachePopulatingGetter(ttx kv.TemporalTx, sc *cache.StateCache) *cachePop
 
 func (cpg *cachePopulatingGetter) GetLatest(name kv.Domain, k []byte) ([]byte, kv.Step, error) {
 	v, step, err := cpg.g.GetLatest(name, k)
-	if err == nil && cpg.sc != nil {
+	if err == nil && cpg.sc != nil && cpg.progress != nil {
 		// If-absent writes only: this runs in a fire-and-forget goroutine over a
 		// committed snapshot, so an unconditional Put racing an FCU flush's
 		// cache-apply could replace the flushed value with the pre-flush one.
-		if name == kv.CodeDomain {
-			// A live binding makes the conditional put a no-op — skip before
-			// paying the keccak+copy below. Code negatives end here too: they
-			// are not cacheable (CodeCache drops zero-length puts).
-			if len(v) > 0 && !cpg.sc.HasLiveCode(k) {
-				// Key the content cache by keccak(v), the code's own hash — never
-				// a separately read account codeHash, which parallel exec can skew
-				// (see the code-domain read-fill in SharedDomains.getLatestMetered).
-				cpg.sc.PutCodeWithHashIfAbsent(k, v, crypto.Keccak256(v), (uint64(step)+1)*cpg.stepSize-1)
-			}
-		} else {
-			// Cache including nil/empty results: a probe returning no bytes is
-			// a valid negative answer (missing account, empty storage slot) and
-			// caching it lets repeated probes skip the file accessor stack —
-			// revm's CacheAccount { account: None, status: LoadedNotExisting }
-			// pattern. Stamp with the last txNum of the value's step; a
-			// negative has no step — use the domain's progress at observation
-			// time so any unwind drops it.
-			txNum := (uint64(step)+1)*cpg.stepSize - 1
-			if len(v) == 0 {
-				if cpg.progress == nil {
-					// No progress oracle → no honest stamp; skip rather than
-					// cache an unwind-immortal negative.
-					return v, step, err
+		// Fill only from a snapshot at least as fresh as the last flush-apply —
+		// see the SD read-fill gate; a getter without a progress oracle cannot
+		// prove freshness and never fills.
+		snap := cpg.progress(name)
+		if snap >= cpg.sc.AppliedProgress(name) {
+			if name == kv.CodeDomain {
+				// A live binding makes the conditional put a no-op — skip before
+				// paying the keccak+copy below. Code negatives end here too: they
+				// are not cacheable (CodeCache drops zero-length puts).
+				if len(v) > 0 && !cpg.sc.HasLiveCode(k) {
+					// Key the content cache by keccak(v), the code's own hash — never
+					// a separately read account codeHash, which parallel exec can skew
+					// (see the code-domain read-fill in SharedDomains.getLatestMetered).
+					cpg.sc.PutCodeWithHashIfAbsent(k, v, crypto.Keccak256(v), (uint64(step)+1)*cpg.stepSize-1)
 				}
-				txNum = cpg.progress(name)
+			} else {
+				// Cache including nil/empty results: a probe returning no bytes is
+				// a valid negative answer (missing account, empty storage slot) and
+				// caching it lets repeated probes skip the file accessor stack —
+				// revm's CacheAccount { account: None, status: LoadedNotExisting }
+				// pattern. Stamp with the last txNum of the value's step; a
+				// negative has no step — use the snapshot's progress so any unwind
+				// drops it.
+				txNum := (uint64(step)+1)*cpg.stepSize - 1
+				if len(v) == 0 {
+					txNum = snap
+				}
+				cpg.sc.PutIfAbsent(name, k, v, txNum)
 			}
-			cpg.sc.PutIfAbsent(name, k, v, txNum)
 		}
 	}
 	return v, step, err

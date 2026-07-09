@@ -60,7 +60,7 @@ func TestCachePopulatingGetterKeepsFresherEntry(t *testing.T) {
 	for _, domain := range []kv.Domain{kv.AccountsDomain, kv.StorageDomain} {
 		sc := newTestStateCache()
 		sc.Put(domain, key, fresh, 54)
-		cpg := &cachePopulatingGetter{g: stubTemporalGetter{v: stale}, sc: sc, stepSize: 1_562_500}
+		cpg := &cachePopulatingGetter{g: stubTemporalGetter{v: stale}, sc: sc, stepSize: 1_562_500, progress: zeroProgress}
 
 		v, _, err := cpg.GetLatest(domain, key)
 		require.NoError(t, err)
@@ -80,7 +80,7 @@ func TestCachePopulatingGetterKeepsFresherCodeBinding(t *testing.T) {
 	staleCode := []byte{0xbb, 0x04, 0x05, 0x06}
 	sc := newTestStateCache()
 	sc.PutCodeWithHash(addr, freshCode, crypto.Keccak256(freshCode), 54)
-	cpg := &cachePopulatingGetter{g: stubTemporalGetter{v: staleCode}, sc: sc, stepSize: 1_562_500}
+	cpg := &cachePopulatingGetter{g: stubTemporalGetter{v: staleCode}, sc: sc, stepSize: 1_562_500, progress: zeroProgress}
 
 	_, _, err := cpg.GetLatest(kv.CodeDomain, addr)
 	require.NoError(t, err)
@@ -163,9 +163,9 @@ func TestCachePopulatingGetterNegativeDropsOnUnwind(t *testing.T) {
 	require.False(t, ok, "a negative observed at txNum 10M must not survive an unwind to 5M")
 }
 
-// A getter constructed without a progress oracle must skip caching negatives
-// (an honest stamp is impossible), not panic.
-func TestCachePopulatingGetterNilProgressSkipsNegative(t *testing.T) {
+// A getter constructed without a progress oracle cannot prove its snapshot's
+// freshness and must not fill at all, let alone panic.
+func TestCachePopulatingGetterNilProgressNeverFills(t *testing.T) {
 	key := []byte("\x11\x22\x33\x44\x55\x66\x77\x88\x99\xaa\xbb\xcc\xdd\xee\xff\x00\x11\x22\x33\x44")
 	sc := newTestStateCache()
 	cpg := &cachePopulatingGetter{g: stubTemporalGetter{v: nil}, sc: sc, stepSize: 1_562_500}
@@ -174,7 +174,23 @@ func TestCachePopulatingGetterNilProgressSkipsNegative(t *testing.T) {
 		require.NoError(t, err)
 	})
 	_, ok := sc.Get(kv.AccountsDomain, key)
-	require.False(t, ok, "no progress oracle — the negative must not be cached")
+	require.False(t, ok, "no progress oracle — nothing may be cached")
+}
+
+// The applied-progress watermark rejects fills from snapshots older than the
+// last flush-apply — the eviction-proof backstop behind the tombstones.
+func TestCachePopulatingGetterStaleSnapshotDoesNotFill(t *testing.T) {
+	key := []byte("\x11\x22\x33\x44\x55\x66\x77\x88\x99\xaa\xbb\xcc\xdd\xee\xff\x00\x11\x22\x33\x44")
+	sc := newTestStateCache()
+	sc.NoteApplied(kv.AccountsDomain, 20)
+	cpg := &cachePopulatingGetter{
+		g: stubTemporalGetter{v: []byte("pre-delete-record")}, sc: sc, stepSize: 1_562_500,
+		progress: func(kv.Domain) uint64 { return 10 }, // snapshot older than the applied commit
+	}
+	_, _, err := cpg.GetLatest(kv.AccountsDomain, key)
+	require.NoError(t, err)
+	_, ok := sc.Get(kv.AccountsDomain, key)
+	require.False(t, ok, "a snapshot behind the applied watermark must not fill")
 }
 
 func zeroProgress(kv.Domain) uint64 { return 0 }

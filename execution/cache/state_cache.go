@@ -61,6 +61,12 @@ type StateCache struct {
 	// racing the epoch bump could stamp a dead-fork value with the post-unwind
 	// epoch and have it served as canonical.
 	warmupsInFlight atomic.Int64
+
+	// appliedProgress is the per-domain txNum watermark of flush-applied
+	// commits. A fill from a snapshot behind it must be skipped: the reader's
+	// view may predate a deletion, and the deletion's tombstone defends its
+	// key only while resident in the LRU — the watermark cannot be evicted.
+	appliedProgress [kv.DomainLen]atomic.Uint64
 }
 
 // NewStateCache creates a new StateCache with the specified byte capacities.
@@ -273,6 +279,9 @@ func (c *StateCache) Clear() {
 			cache.Clear()
 		}
 	}
+	for i := range c.appliedProgress {
+		c.appliedProgress[i].Store(0)
+	}
 }
 
 // Close releases every sub-cache's slot in the shared memory envelope so later
@@ -304,6 +313,27 @@ func (c *StateCache) Unwind(unwindToTxNum uint64) {
 			cache.Unwind(unwindToTxNum)
 		}
 	}
+	for i := range c.appliedProgress {
+		if c.appliedProgress[i].Load() > unwindToTxNum {
+			c.appliedProgress[i].Store(unwindToTxNum)
+		}
+	}
+}
+
+// NoteApplied raises domain's applied-progress watermark to txNum; the flush
+// cache-apply calls it for every update it lands.
+func (c *StateCache) NoteApplied(domain kv.Domain, txNum uint64) {
+	for {
+		cur := c.appliedProgress[domain].Load()
+		if txNum <= cur || c.appliedProgress[domain].CompareAndSwap(cur, txNum) {
+			return
+		}
+	}
+}
+
+// AppliedProgress returns domain's applied-progress watermark; see the field.
+func (c *StateCache) AppliedProgress(domain kv.Domain) uint64 {
+	return c.appliedProgress[domain].Load()
 }
 
 // WarmupStarted and WarmupDone bracket a fire-and-forget cache-populating

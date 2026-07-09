@@ -1034,6 +1034,9 @@ func (sd *SharedDomains) Commit(ctx context.Context, tx kv.RwTx, validate ...fun
 	}
 	for i := range pending {
 		u := &pending[i]
+		if u.domain != kv.CommitmentDomain {
+			sd.stateCache.NoteApplied(u.domain, u.txN)
+		}
 		switch u.domain {
 		case kv.CommitmentDomain:
 			if len(u.val) == 0 {
@@ -1046,6 +1049,7 @@ func (sd *SharedDomains) Commit(ctx context.Context, tx kv.RwTx, validate ...fun
 				// Deletions are authoritative nil puts — a tombstone here, the
 				// no-code marker for the code binding — so a straddling
 				// pre-delete read-fill defers instead of resurrecting the value.
+				sd.stateCache.NoteApplied(kv.CodeDomain, u.txN)
 				sd.stateCache.Put(kv.AccountsDomain, u.key, nil, u.txN)
 				sd.stateCache.Put(kv.CodeDomain, u.key, nil, u.txN)
 				sd.stateCache.DeleteAddrCodeHash(u.key)
@@ -1241,28 +1245,33 @@ func (sd *SharedDomains) getLatestMetered(domain kv.Domain, tx kv.TemporalTx, k 
 
 	// Populate the cache with if-absent semantics: a read-fill never carries
 	// newer information than a flush-apply, so it must not overwrite one
-	// (e.g. an embedded-RPC read straddling an FCU commit). Stamp with the
-	// last txNum of the step the value came from — an upper bound on its
-	// write txNum — so an unwind below it can't leave the entry stale. A
-	// negative carries no step; stamp it with the domain's progress at
-	// observation time so any unwind drops it.
-	if sd.stateCache != nil {
-		readTxNum := (uint64(step)+1)*sd.StepSize() - 1
-		if domain == kv.CodeDomain {
-			if len(v) > 0 {
-				// This SD getter is the single place that populates the code cache
-				// on a read. Key the content-addressed entry by the code's OWN hash,
-				// keccak(v) — NEVER a separately-read account codeHash, which under
-				// parallel exec can be a skewed or cross-account value and would
-				// poison the shared codeHash→code map for every account sharing
-				// that hash.
-				sd.stateCache.PutCodeWithHashIfAbsent(k, v, crypto.Keccak256(v), readTxNum)
+	// (e.g. an embedded-RPC read straddling an FCU commit). Fill only from a
+	// snapshot at least as fresh as the last flush-apply: a staler reader
+	// could resurrect a deleted key once its tombstone is evicted — the
+	// watermark, unlike the tombstone, cannot be. Stamp with the last txNum of
+	// the step the value came from — an upper bound on its write txNum — so an
+	// unwind below it can't leave the entry stale. A negative carries no step;
+	// stamp it with the snapshot's progress so any unwind drops it.
+	if sd.stateCache != nil && sd.stateCache.GetCache(domain) != nil {
+		snapshotProgress := tx.Debug().DomainProgress(domain)
+		if snapshotProgress >= sd.stateCache.AppliedProgress(domain) {
+			readTxNum := (uint64(step)+1)*sd.StepSize() - 1
+			if domain == kv.CodeDomain {
+				if len(v) > 0 {
+					// This SD getter is the single place that populates the code cache
+					// on a read. Key the content-addressed entry by the code's OWN hash,
+					// keccak(v) — NEVER a separately-read account codeHash, which under
+					// parallel exec can be a skewed or cross-account value and would
+					// poison the shared codeHash→code map for every account sharing
+					// that hash.
+					sd.stateCache.PutCodeWithHashIfAbsent(k, v, crypto.Keccak256(v), readTxNum)
+				}
+			} else {
+				if len(v) == 0 {
+					readTxNum = snapshotProgress
+				}
+				sd.stateCache.PutIfAbsent(domain, k, v, readTxNum)
 			}
-		} else {
-			if len(v) == 0 && sd.stateCache.GetCache(domain) != nil {
-				readTxNum = tx.Debug().DomainProgress(domain)
-			}
-			sd.stateCache.PutIfAbsent(domain, k, v, readTxNum)
 		}
 	}
 	// Only cache a branch when the read's txN is known: a txN=0 entry would
@@ -1437,15 +1446,17 @@ func (sd *SharedDomains) codeHashForAddr(tx kv.TemporalTx, addr []byte, txNum ui
 	}
 
 	h := resolve()
-	if sd.stateCache != nil {
+	// Populate — including the zero-hash sentinel for misses, so repeat
+	// lookups skip the whole resolve() chain — but only from a snapshot at
+	// least as fresh as the last flush-apply (see the read-fill gate). txNum
+	// is a conservative upper bound (>= the resolved account's write txNum),
+	// so the mapping drops on any unwind that reverts that account.
+	if sd.stateCache != nil &&
+		tx.Debug().DomainProgress(kv.AccountsDomain) >= sd.stateCache.AppliedProgress(kv.AccountsDomain) {
 		var fixed [32]byte
 		if len(h) == 32 {
 			copy(fixed[:], h)
 		}
-		// Always populate, including the zero-hash sentinel for misses —
-		// repeat lookups skip the whole resolve() chain. txNum is a
-		// conservative upper bound (>= the resolved account's write txNum), so
-		// the mapping drops on any unwind that reverts that account.
 		sd.stateCache.PutAddrCodeHash(addr, fixed, txNum)
 	}
 	return h
