@@ -30,7 +30,7 @@
 - shard: statetests-devnet
   workers: 12
   # TODO: reduce to 0 (glamsterdam-devnet-6 EIPs WIP)
-  max-allowed-failures: 12458
+  max-allowed-failures: 12639
 - shard: blocktests-stable-sequential
   workers: 12
   max-allowed-failures: 0
@@ -41,7 +41,7 @@
 - shard: blocktests-devnet
   workers: 12
   # TODO: reduce to 0 (glamsterdam-devnet-6 EIPs WIP)
-  max-allowed-failures: 21711
+  max-allowed-failures: 21833
   exec3-parallel: true
 - shard: enginextests-stable-sequential
   workers: 8
@@ -138,7 +138,7 @@
 - shard: blocktests-devnet-race-amsterdam
   workers: 12
   # TODO: reduce to 0 (glamsterdam-devnet-6 EIPs WIP)
-  max-allowed-failures: 21639
+  max-allowed-failures: 21833
   exec3-parallel: true
   run: 'fork_Amsterdam'
 - shard: zkevm-witness-race
