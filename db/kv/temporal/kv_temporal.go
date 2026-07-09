@@ -31,6 +31,7 @@ import (
 	"github.com/erigontech/erigon/db/kv/memdb"
 	"github.com/erigontech/erigon/db/kv/order"
 	"github.com/erigontech/erigon/db/kv/stream"
+	"github.com/erigontech/erigon/db/services"
 	"github.com/erigontech/erigon/db/state"
 	"github.com/erigontech/erigon/db/version"
 )
@@ -77,14 +78,20 @@ var ( // Compile time interface checks
 type DB struct {
 	kv.RwDB
 	stateFiles *state.Aggregator
+	// blockFiles is the block-data peer of stateFiles: the immutable block
+	// snapshots (headers/bodies/transactions). Held as the services.BlockSnapshots
+	// interface; the concrete *freezeblocks.RoSnapshots is recovered by the block
+	// reader. nil for state-only tools that never read blocks.
+	blockFiles services.BlockSnapshots
 }
 
-func New(db kv.RwDB, agg *state.Aggregator) (*DB, error) {
-	return &DB{RwDB: db, stateFiles: agg}, nil
+func New(db kv.RwDB, agg *state.Aggregator, blockSnapshots services.BlockSnapshots) (*DB, error) {
+	return &DB{RwDB: db, stateFiles: agg, blockFiles: blockSnapshots}, nil
 }
-func (db *DB) Agg() any                  { return db.stateFiles }
-func (db *DB) InternalDB() kv.RwDB       { return db.RwDB }
-func (db *DB) Debug() kv.TemporalDebugDB { return kv.TemporalDebugDB(db) }
+func (db *DB) Agg() any                                { return db.stateFiles }
+func (db *DB) BlockSnapshots() services.BlockSnapshots { return db.blockFiles }
+func (db *DB) InternalDB() kv.RwDB                     { return db.RwDB }
+func (db *DB) Debug() kv.TemporalDebugDB               { return kv.TemporalDebugDB(db) }
 
 func (db *DB) BeginTemporalRo(ctx context.Context) (kv.TemporalTx, error) {
 	kvTx, err := db.RwDB.BeginRo(ctx) //nolint:gocritic
@@ -217,7 +224,7 @@ func NewTestDB(tb testing.TB, label kv.Label) kv.TemporalRwDB {
 	dirs := datadir.New(tb.TempDir())
 	agg := state.NewTest(dirs).DisableHistory().MustOpen(context.Background(), db)
 	tb.Cleanup(agg.Close)
-	tdb, _ := New(db, agg)
+	tdb, _ := New(db, agg, nil)
 	return tdb
 }
 

@@ -364,7 +364,7 @@ func GenesisToBlock(tb testing.TB, g *types.Genesis, dirs datadir.Dirs, logger l
 	}
 	defer agg.Close()
 
-	tdb, err := temporal.New(genesisTmpDB, agg)
+	tdb, err := temporal.New(genesisTmpDB, agg, nil)
 	if err != nil {
 		return nil, nil, err
 	}

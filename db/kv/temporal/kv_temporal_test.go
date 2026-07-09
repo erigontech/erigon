@@ -28,7 +28,7 @@ func TestTemporalTx_HasPrefix_StorageDomain(t *testing.T) {
 	agg := state.NewTest(dirs).StepSize(stepSize).MustOpen(ctx, mdbxDb)
 	defer agg.Close()
 
-	temporalDb, err := New(mdbxDb, agg)
+	temporalDb, err := New(mdbxDb, agg, nil)
 	require.NoError(t, err)
 	defer temporalDb.Close()
 
@@ -225,7 +225,7 @@ func TestTemporalTx_RangeAsOf_StorageDomain(t *testing.T) {
 	stepSize := uint64(1)
 	agg := state.NewTest(dirs).StepSize(stepSize).MustOpen(ctx, mdbxDb)
 	defer agg.Close()
-	temporalDb, err := New(mdbxDb, agg)
+	temporalDb, err := New(mdbxDb, agg, nil)
 	require.NoError(t, err)
 	defer temporalDb.Close()
 
