@@ -47,6 +47,9 @@ type Cache interface {
 	// size) are evicted on the next read rather than walked eagerly.
 	Unwind(unwindToTxNum uint64)
 
+	// Close drops the cache's slot in the shared memory envelope. Idempotent.
+	Close()
+
 	// Len returns the number of entries in the cache.
 	Len() int
 }
