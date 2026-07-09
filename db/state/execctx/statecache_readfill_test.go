@@ -281,3 +281,74 @@ func TestReadFill_DoesNotResurrectDeletedKey(t *testing.T) {
 	require.True(t, ok)
 	require.Equal(t, uint64(20), cTxNum)
 }
+
+// The code-domain equivalent of the tombstone test: a code deletion must
+// leave a live no-code marker on the addr binding, or a read-fill from a
+// straddling pre-delete snapshot re-binds the deleted code as a live hit.
+func TestReadFill_DoesNotResurrectDeletedCode(t *testing.T) {
+	if testing.Short() {
+		t.Skip()
+	}
+	t.Parallel()
+
+	const stepSize = uint64(16)
+	ctx := t.Context()
+	db := newTestDb(t, stepSize)
+	sc := newSmallStateCache()
+
+	addr := make([]byte, 20)
+	addr[0] = 0xcc
+	code := []byte{0xaa, 1, 2, 3}
+
+	rwTx1, err := db.BeginTemporalRw(ctx)
+	require.NoError(t, err)
+	defer rwTx1.Rollback()
+	sd1, err := execctx.NewSharedDomains(ctx, rwTx1, log.New())
+	require.NoError(t, err)
+	defer sd1.Close()
+	sd1.SetStateCacheForTest(sc)
+	sd1.SetTxNum(10)
+	require.NoError(t, sd1.DomainPut(kv.CodeDomain, rwTx1, addr, code, 10, nil))
+	require.NoError(t, sd1.Commit(ctx, rwTx1))
+
+	// A reader snapshot from before the deletion.
+	roTxOld, err := db.BeginTemporalRo(ctx)
+	require.NoError(t, err)
+	defer roTxOld.Rollback()
+
+	rwTx2, err := db.BeginTemporalRw(ctx)
+	require.NoError(t, err)
+	defer rwTx2.Rollback()
+	sd2, err := execctx.NewSharedDomains(ctx, rwTx2, log.New())
+	require.NoError(t, err)
+	defer sd2.Close()
+	sd2.SetStateCacheForTest(sc)
+	sd2.SetTxNum(20)
+	require.NoError(t, sd2.DomainDel(kv.CodeDomain, rwTx2, addr, 20, code))
+	require.NoError(t, sd2.Commit(ctx, rwTx2))
+
+	// The straddling reader: any fill it makes must not resurrect the code.
+	sdOld, err := execctx.NewSharedDomains(ctx, roTxOld, log.New())
+	require.NoError(t, err)
+	defer sdOld.Close()
+	sdOld.SetStateCacheForTest(sc)
+	_, _, err = sdOld.GetLatest(kv.CodeDomain, roTxOld, addr)
+	require.NoError(t, err)
+
+	roTxNew, err := db.BeginTemporalRo(ctx)
+	require.NoError(t, err)
+	defer roTxNew.Rollback()
+	sdNew, err := execctx.NewSharedDomains(ctx, roTxNew, log.New())
+	require.NoError(t, err)
+	defer sdNew.Close()
+	sdNew.SetStateCacheForTest(sc)
+	v, _, err := sdNew.GetLatest(kv.CodeDomain, roTxNew, addr)
+	require.NoError(t, err)
+	require.Empty(t, v, "the straddling read-fill must not resurrect the deleted code")
+
+	// The marker is stamped with the delete's txNum, so an unwind at or below
+	// it drops the negative instead of letting it outlive the deletion.
+	_, cTxNum, ok := sc.GetWithTxNum(kv.CodeDomain, addr)
+	require.True(t, ok, "the deletion must be cached as a live no-code marker")
+	require.Equal(t, uint64(20), cTxNum)
+}

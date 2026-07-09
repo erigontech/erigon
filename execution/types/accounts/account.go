@@ -645,10 +645,12 @@ func DeserialiseV3(a *Account, enc []byte) error {
 
 // DeserialiseV3CodeHash extracts just the codeHash field from a
 // SerialiseV3-encoded account, skipping the full decode (balance parse,
-// codeHash interning) that DeserialiseV3 pays. Returns a subslice of enc —
-// valid only while enc is — or nil for a malformed record or an account
-// without code (including a non-canonical record spelling out the empty or
-// zero sentinel, which CodeHash.IsEmpty treats as no-code).
+// codeHash interning) that DeserialiseV3 pays. It parses only up to and
+// including the codeHash field — later fields are not validated. Returns a
+// subslice of enc — valid only while enc is — or nil when the record is
+// malformed up to that field or the account has no code (including a
+// non-canonical record spelling out the empty or zero sentinel, which
+// CodeHash.IsEmpty treats as no-code).
 func DeserialiseV3CodeHash(enc []byte) []byte {
 	pos := 0
 	for range 2 { // skip the length-prefixed nonce and balance fields

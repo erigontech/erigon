@@ -1045,9 +1045,10 @@ func (sd *SharedDomains) Commit(ctx context.Context, tx kv.RwTx, validate ...fun
 			if len(u.val) == 0 {
 				// Tombstone rather than delete: a live negative defends the key
 				// against a straddling pre-delete read-fill re-inserting the old
-				// value (PutIfAbsent only defers to live entries).
+				// value (PutIfAbsent only defers to live entries). Same for the
+				// code binding, via its no-code deletion marker.
 				sd.stateCache.Put(kv.AccountsDomain, u.key, nil, u.txN)
-				sd.stateCache.Delete(kv.CodeDomain, u.key)
+				sd.stateCache.Put(kv.CodeDomain, u.key, nil, u.txN)
 				sd.stateCache.DeleteAddrCodeHash(u.key)
 			} else {
 				sd.stateCache.Put(kv.AccountsDomain, u.key, u.val, u.txN)
@@ -1061,7 +1062,7 @@ func (sd *SharedDomains) Commit(ctx context.Context, tx kv.RwTx, validate ...fun
 			}
 		case kv.CodeDomain:
 			if len(u.val) == 0 {
-				sd.stateCache.Delete(kv.CodeDomain, u.key)
+				sd.stateCache.Put(kv.CodeDomain, u.key, nil, u.txN)
 			} else {
 				// Validated committed code: populate the addr layer AND the
 				// content-addressed codeHash->code map, keyed by keccak(v) so each

@@ -243,9 +243,20 @@ func TestCodeCache_PutEmptyCode(t *testing.T) {
 	addr := makeAddr(1)
 	c.Put(addr, []byte{}, 0)
 
-	// Should not store empty code
-	assert.Equal(t, 0, c.Len())
+	// An authoritative empty put is a deletion: it binds a no-code marker (a
+	// valid negative), never code bytes.
+	assert.Equal(t, 1, c.Len())
 	assert.Equal(t, 0, c.CodeLen())
+	v, ok := c.Get(addr)
+	assert.True(t, ok)
+	assert.Empty(t, v)
+
+	// A conditional empty put stays a no-op.
+	c2 := NewCodeCache(100, 200)
+	c2.PutIfAbsent(addr, []byte{}, 0)
+	assert.Equal(t, 0, c2.Len())
+	_, ok = c2.Get(addr)
+	assert.False(t, ok)
 }
 
 func TestCodeCache_CodeDeduplication(t *testing.T) {
@@ -922,6 +933,45 @@ func TestDomainCache_StaleDropAtomicWithPut_NoSizeDrift(t *testing.T) {
 		c.Delete(addr)
 		require.Zero(t, c.SizeBytes(), "round %d: size accounting drifted", round)
 	}
+}
+
+// A code deletion (an overwrite put of nil) must leave a live no-code marker:
+// it serves as a valid negative, a conditional bind defers to it, an
+// authoritative rebind replaces it, and an unwind at or below the deletion
+// drops it.
+func TestCodeCache_DeletionMarker(t *testing.T) {
+	cc := NewCodeCache(1*datasize.MB, 1*datasize.MB)
+	addr := makeAddr(1)
+	code := []byte{0xaa, 1, 2, 3}
+	cc.PutWithCodeHash(addr, code, crypto.Keccak256(code), 10)
+
+	cc.Put(addr, nil, 20) // the flush-apply shape of a deletion
+
+	v, cTxNum, ok := cc.GetWithTxNum(addr)
+	require.True(t, ok, "a deletion is a valid negative, not a miss")
+	require.Empty(t, v)
+	require.Equal(t, uint64(20), cTxNum)
+	require.True(t, cc.ContainsLive(addr), "a conditional put would defer to the marker")
+
+	// A straddling if-absent fill of the old code defers to the marker.
+	cc.PutWithCodeHashIfAbsent(addr, code, crypto.Keccak256(code), 15)
+	v, _, ok = cc.GetWithTxNum(addr)
+	require.True(t, ok)
+	require.Empty(t, v, "an if-absent fill must not resurrect deleted code")
+
+	// An authoritative rebind (new deployment) replaces the marker.
+	fresh := []byte{0xbb, 4, 5, 6}
+	cc.PutWithCodeHash(addr, fresh, crypto.Keccak256(fresh), 30)
+	v, ok = cc.Get(addr)
+	require.True(t, ok)
+	require.Equal(t, fresh, v)
+
+	// An unwind at or below the deletion drops the marker.
+	cc2 := NewCodeCache(1*datasize.MB, 1*datasize.MB)
+	cc2.Put(addr, nil, 20)
+	cc2.Unwind(15)
+	_, _, ok = cc2.GetWithTxNum(addr)
+	require.False(t, ok, "a marker from a rolled-back deletion must not survive the unwind")
 }
 
 func TestCodeCache_ContainsLive(t *testing.T) {

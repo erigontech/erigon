@@ -178,10 +178,11 @@ func (c *StateCache) putCodeWithHash(addr, code, codeHash []byte, txNum uint64, 
 	}
 }
 
-// HasLiveCode reports whether addr resolves to live code bytes through the
-// code cache's addr→code binding, without touching stats or LRU recency.
-// Prefetchers probe it to skip the keccak+copy of preparing a conditional
-// code put that a live binding would no-op; advisory only.
+// HasLiveCode reports whether addr has a live code-cache binding a
+// conditional put would defer to — servable code bytes or a no-code deletion
+// marker — without touching stats or LRU recency. Prefetchers probe it to
+// skip the keccak+copy of preparing a conditional code put that such a
+// binding would no-op; advisory only.
 func (c *StateCache) HasLiveCode(addr []byte) bool {
 	cc, ok := c.caches[kv.CodeDomain].(*CodeCache)
 	return ok && cc.ContainsLive(addr)
