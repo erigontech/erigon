@@ -247,11 +247,23 @@ At `numWorkers=NumCPU` the pool holds >92% utilization with a <2.5% serial colla
 
 ### Task 9: Verify acceptance criteria
 
-- [ ] all Overview goals implemented: frontier-pool dispatch, storage-first-by-dependency, unified ModeParallel+streaming Process path, whale fan-out deleted with seam kept
-- [ ] edge cases: degenerate roots, delete-to-empty, single-survivor collapse, extension-topped mount, threshold boundary, encode/restore round-trips, whale-without-account-touch
-- [ ] full suite: `GOGC=80 make test-all` (or `make test-short` + package `-count=1 -race`)
-- [ ] `make lint` clean (run repeatedly — non-deterministic)
-- [ ] net line count vs main recorded (target: negative in `execution/commitment`)
+- [x] all Overview goals implemented, verified in code (not just claimed): frontier-pool dispatch (`foldPool`/`dispatchFrontier`/`dispatchFoldTasks` in `fold_pool.go`), storage-first-by-dependency (`foldTask.storage` edge → `setAccountStorageRoot`/`foldStorageSeam`), unified ModeParallel+streaming Process path (both `parallel_mount.go` `processMounted` and `streaming_commitment.go` `Process` call `dispatchFrontier`; streaming passes `reuseSchedulerCells`), whale fan-out deleted with seam kept (`isDeepStorageAccount`/`deepStorageThreshold`/`dfsSubtreeDeep`/`newFoldSem`/`maxFoldConcurrency`/`DeepLocalFolds` all absent; `storageRootFromSingleChild`/`setAccountStorageRoot`/`aggregateMountedStorageRoot` seam present)
+- [x] edge cases each backed by a test: degenerate roots (`TestDeriveFoldDAG_Degenerate`), delete-to-collapse (`TestFrontierParity_DeleteToCollapse`, `TestStateRoundTrip_DeleteCollapseToSingleNibble`), single-survivor collapse at depth 2 and depth 64 (`TestFoldPrimitives_SingleSurvivorCollapseDepth2`, `TestDeepFold_{Branch,Leaf}SurvivorCollapse`), extension-topped mount (`TestFrontierParity_ExtensionTopped`, `TestStreaming_ExtensionToppedMountSplit`), threshold boundary k/k+1 (`TestDeriveFoldDAG_KBoundary`), encode/restore round-trips (`EncodeCurrentState`→`SetState` in the `parallel_testkit_test.go` parity chains), whale-without-account-touch (`TestDeepFold_FreshWhaleFoldsParallel`, storage-only `touch=nil`)
+- [x] full suite green: package `go test -count=1 -race ./execution/commitment/` PASS (89.2s; the `ld` LC_DYSYMTAB warning is the known macOS toolchain artifact, not a race) + `make test-short` full-repo PASS (exit 0, `-failfast`)
+- [x] `make lint` clean — 0 issues on two consecutive runs (exit 0, mod-tidy + golangci-lint)
+- [x] net line count vs main recorded (see block below)
+
+**Task 9 net line count** (`git diff origin/main...HEAD`, change confined to `execution/commitment/` + this plan doc — no `db/`/`commitmentdb` facade churn):
+
+| bucket | added | deleted | net |
+|---|---|---|---|
+| production (`*.go` non-test) | 751 | 403 | **+348** |
+| tests (`*_test.go`) | 2274 | 20 | +2254 |
+| commitment total | 3025 | 423 | +2602 |
+
+Per production file: `fold_dag.go` +186, `fold_pool.go` +384 (the two new DAG+pool infra files), `parallel_patricia_hashed.go` +20, `parallel_mount.go` +20/−163, `streaming_commitment.go` +60/−69, `streaming_deep_fold.go` +81/−171.
+
+The plan's "target: negative in `execution/commitment`" is **not** met for cumulative production code: production nets **+348**. The Overview's "net-negative lines" claim scoped only the whale-special-case *removal* (Task 6 deletion commit = −198, as recorded), which did net negative; the frontier feature as a whole adds the DAG (`fold_dag.go`) + shared pool (`fold_pool.go`) infrastructure that replaces the static top-nibble errgroup, so the deletions of `foldStorageRoot`/`dfsSubtreeDeep`/`isDeepStorageAccount`/`newFoldSem` (−403 across three files) are outweighed by the +570 of new infra. This is recorded as-is rather than reshaped to hit a negative target.
 
 ### Task 10: [Final] Update documentation
 
