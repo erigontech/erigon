@@ -19,18 +19,75 @@ package freezeblocks
 import (
 	"context"
 	"errors"
+	"path/filepath"
 	"testing"
 
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/kv/dbcfg"
+	"github.com/erigontech/erigon/db/kv/memdb"
 	"github.com/erigontech/erigon/db/snapshotsync"
+	"github.com/erigontech/erigon/db/snaptype"
 	snaptype2 "github.com/erigontech/erigon/db/snaptype2"
+	"github.com/erigontech/erigon/db/version"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/chain/networkname"
 	"github.com/erigontech/erigon/node/ethconfig"
 )
+
+// TestRemoveBlockSnapshotsBelow pins the minimal-mode behavior: aged, fully
+// merged transaction files below the retention floor are unlinked, while headers
+// and bodies (kept so FillDBFromSnapshots computes head TD from genesis) and any
+// segment at/above the floor are kept.
+func TestRemoveBlockSnapshotsBelow(t *testing.T) {
+	logger := log.New()
+	dir := t.TempDir()
+	db := memdb.NewTestDB(t, dbcfg.ChainDB)
+	cfg := ethconfig.Defaults.Snapshot
+	cfg.ChainName = networkname.Mainnet
+	snapshots := NewRoSnapshots(cfg, dir, logger)
+	defer snapshots.Close()
+
+	ver := version.V1_0
+	const mergeLimit uint64 = snaptype.Erigon2MergeLimit
+	for _, typ := range snaptype2.BlockSnapshotTypes {
+		createTestSegmentFile(t, 0, mergeLimit, typ.Enum(), dir, ver, logger)
+		createTestSegmentFile(t, mergeLimit, 2*mergeLimit, typ.Enum(), dir, ver, logger)
+	}
+	require.NoError(t, snapshots.OpenFolder())
+	require.Equal(t, 2*mergeLimit-1, snapshots.SegmentsMax())
+
+	blockReader := NewBlockReader(snapshots, nil)
+	br := &BlockRetire{db: db, blockReader: blockReader, logger: logger}
+
+	var seederDeleted []string
+	onDelete := func(l []string) error {
+		seederDeleted = append(seederDeleted, l...)
+		return nil
+	}
+
+	deleted, err := br.RemoveBlockSnapshotsBelow(t.Context(), mergeLimit, onDelete)
+	require.NoError(t, err)
+	require.True(t, deleted)
+
+	// Only the below-floor transactions segment is removed.
+	txBelow := filepath.Join(dir, snaptype.SegmentFileName(ver, 0, mergeLimit, snaptype2.Transactions.Enum()))
+	require.NoFileExists(t, txBelow)
+	require.Equal(t, []string{filepath.Base(txBelow)}, seederDeleted)
+
+	// Headers/bodies below the floor are kept; every type at/above the floor stays.
+	for _, typ := range []snaptype.Type{snaptype2.Headers, snaptype2.Bodies} {
+		below := filepath.Join(dir, snaptype.SegmentFileName(ver, 0, mergeLimit, typ.Enum()))
+		require.FileExistsf(t, below, "%s below floor must be kept", typ.Enum())
+	}
+	for _, typ := range snaptype2.BlockSnapshotTypes {
+		above := filepath.Join(dir, snaptype.SegmentFileName(ver, mergeLimit, 2*mergeLimit, typ.Enum()))
+		require.FileExistsf(t, above, "%s at/above floor must remain", typ.Enum())
+	}
+	require.Equal(t, 2*mergeLimit-1, snapshots.SegmentsMax())
+}
 
 func TestDumpRangeErrorsWhenRangeAlreadyClaimed(t *testing.T) {
 	logger := log.New()

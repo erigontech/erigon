@@ -534,6 +534,43 @@ func (br *BlockRetire) RemoveOverlaps(onDelete func(l []string) error) error {
 	return nil
 }
 
+// RemoveBlockSnapshotsBelow unlinks fully merged transaction segments lying
+// entirely below floor via the reclamation machinery (safe under live readers);
+// onDelete stops the seeder first. Only Erigon2MergeLimit-sized files are removed
+// so no sub-segment reappears on the next OpenFolder.
+//
+// Transactions only: aged headers and bodies are deliberately kept. On a normal
+// restart FillDBFromSnapshots accumulates total difficulty from the lowest retained
+// header, so dropping older headers yields a too-low head TD that trips the
+// engine-API newPayload "< TTD" guard. Caplin/bor snapshots are separate stores,
+// untouched.
+func (br *BlockRetire) RemoveBlockSnapshotsBelow(ctx context.Context, floor uint64, onDelete func(l []string) error) (deleted bool, err error) {
+	sn := br.snapshots()
+
+	var toDelete []string
+	view := sn.RoSnapshots.View()
+	for _, seg := range view.Segments(snaptype2.Transactions) {
+		if seg.To() > floor || seg.To()-seg.From() != snaptype.Erigon2MergeLimit {
+			continue
+		}
+		toDelete = append(toDelete, seg.Src().FileName())
+	}
+	view.Close()
+
+	if len(toDelete) == 0 {
+		return false, nil
+	}
+	if onDelete != nil {
+		if err := onDelete(toDelete); err != nil {
+			return false, err
+		}
+	}
+	if err := sn.Delete(toDelete...); err != nil {
+		return false, err
+	}
+	return true, nil
+}
+
 func (br *BlockRetire) MadvNormal() *BlockRetire {
 	br.snapshots().MadvNormal()
 	if br.chainConfig.Bor != nil {
