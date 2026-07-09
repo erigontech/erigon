@@ -38,6 +38,7 @@ import (
 	"github.com/erigontech/erigon/db/kv/rawdbv3"
 	"github.com/erigontech/erigon/db/kv/temporal/temporaltest"
 	"github.com/erigontech/erigon/db/snapshotsync/freezeblocks"
+	"github.com/erigontech/erigon/db/snapshotsync/freezeblocks/blocksnapshots"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/chain/networkname"
 	chainspec "github.com/erigontech/erigon/execution/chain/spec"
@@ -329,7 +330,7 @@ func TestSetupGenesis(t *testing.T) {
 			//cc := tool.ChainConfigFromDB(db)
 			freezingCfg := ethconfig.Defaults.Snapshot
 			//freezingCfg.ChainName = cc.ChainName //TODO: nil-pointer?
-			blockReader := freezeblocks.NewBlockReader(freezeblocks.NewRoSnapshots(freezingCfg, dirs.Snap, log.New()), nil)
+			blockReader := freezeblocks.NewBlockReader(blocksnapshots.NewRoSnapshots(freezingCfg, dirs.Snap, log.New()), nil)
 			config, genesis, err := test.fn(t, db, tmpdir)
 			// Check the return values.
 			if !reflect.DeepEqual(err, test.wantErr) {

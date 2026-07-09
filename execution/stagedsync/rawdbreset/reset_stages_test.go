@@ -29,6 +29,7 @@ import (
 	"github.com/erigontech/erigon/db/kv/temporal/temporaltest"
 	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/db/snapshotsync/freezeblocks"
+	"github.com/erigontech/erigon/db/snapshotsync/freezeblocks/blocksnapshots"
 	"github.com/erigontech/erigon/execution/chain/networkname"
 	"github.com/erigontech/erigon/execution/stagedsync/rawdbreset"
 	"github.com/erigontech/erigon/execution/stagedsync/stages"
@@ -42,7 +43,7 @@ import (
 // paths and is out of scope for this unit test.
 func newEmptyBlockReader(t *testing.T, dirs datadir.Dirs, logger log.Logger) *freezeblocks.BlockReader {
 	t.Helper()
-	snaps := freezeblocks.NewRoSnapshots(ethconfig.BlocksFreezing{ChainName: networkname.Mainnet}, dirs.Snap, logger)
+	snaps := blocksnapshots.NewRoSnapshots(ethconfig.BlocksFreezing{ChainName: networkname.Mainnet}, dirs.Snap, logger)
 	t.Cleanup(snaps.Close)
 	return freezeblocks.NewBlockReader(snaps, nil)
 }

@@ -66,6 +66,7 @@ import (
 	"github.com/erigontech/erigon/db/services"
 	"github.com/erigontech/erigon/db/snapcfg"
 	"github.com/erigontech/erigon/db/snapshotsync/freezeblocks"
+	"github.com/erigontech/erigon/db/snapshotsync/freezeblocks/blocksnapshots"
 	"github.com/erigontech/erigon/db/snaptype"
 	"github.com/erigontech/erigon/db/state"
 	"github.com/erigontech/erigon/db/state/statecfg"
@@ -197,7 +198,7 @@ type Ethereum struct {
 	blockBuilderNotifyNewTxns chan struct{}
 	components                *nodebuilder.Builder
 
-	blockSnapshots *freezeblocks.RoSnapshots
+	blockSnapshots *blocksnapshots.RoSnapshots
 	blockReader    services.FullBlockReader
 	blockWriter    *blockio.BlockWriter
 	kvRPC          *remotedbserver.KvServer
@@ -1292,9 +1293,9 @@ func (s *Ethereum) NodesInfo(limit int) (*remoteproto.NodesInfoReply, error) {
 	return nodesInfo, nil
 }
 
-func SetUpBlockReader(ctx context.Context, db kv.RwDB, dirs datadir.Dirs, snConfig *ethconfig.Config, chainConfig *chain.Config, dbReadConcurrency int, logger log.Logger, blockSnapBuildSema *semaphore.Weighted) (*freezeblocks.BlockReader, *blockio.BlockWriter, *freezeblocks.RoSnapshots, *heimdall.RoSnapshots, bridge.Store, heimdall.Store, kv.TemporalRwDB, error) {
+func SetUpBlockReader(ctx context.Context, db kv.RwDB, dirs datadir.Dirs, snConfig *ethconfig.Config, chainConfig *chain.Config, dbReadConcurrency int, logger log.Logger, blockSnapBuildSema *semaphore.Weighted) (*freezeblocks.BlockReader, *blockio.BlockWriter, *blocksnapshots.RoSnapshots, *heimdall.RoSnapshots, bridge.Store, heimdall.Store, kv.TemporalRwDB, error) {
 	snConfig.Snapshot.ChainName = chainConfig.ChainName
-	allSnapshots := freezeblocks.NewRoSnapshots(snConfig.Snapshot, dirs.Snap, logger)
+	allSnapshots := blocksnapshots.NewRoSnapshots(snConfig.Snapshot, dirs.Snap, logger)
 
 	var allBorSnapshots *heimdall.RoSnapshots
 	var bridgeStore bridge.Store

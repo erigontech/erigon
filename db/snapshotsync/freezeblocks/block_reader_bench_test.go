@@ -53,6 +53,7 @@ import (
 	"github.com/erigontech/erigon/db/kv/dbcfg"
 	"github.com/erigontech/erigon/db/kv/memdb"
 	"github.com/erigontech/erigon/db/rawdb"
+	"github.com/erigontech/erigon/db/snapshotsync/freezeblocks/blocksnapshots"
 	"github.com/erigontech/erigon/execution/chain/networkname"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/node/ethconfig"
@@ -197,7 +198,7 @@ func BenchmarkCanonicalHash_RealSnapshot(b *testing.B) {
 	logger := log.New()
 	cfg := ethconfig.Defaults.Snapshot
 	cfg.ChainName = networkname.Mainnet
-	snapshots := NewRoSnapshots(cfg, snapDir, logger)
+	snapshots := blocksnapshots.NewRoSnapshots(cfg, snapDir, logger)
 	if err := snapshots.OpenFolder(); err != nil {
 		b.Fatal(err)
 	}
@@ -263,7 +264,7 @@ func BenchmarkCanonicalHash_RealSnapshot_MainEquivalent(b *testing.B) {
 	logger := log.New()
 	cfg := ethconfig.Defaults.Snapshot
 	cfg.ChainName = networkname.Mainnet
-	snapshots := NewRoSnapshots(cfg, snapDir, logger)
+	snapshots := blocksnapshots.NewRoSnapshots(cfg, snapDir, logger)
 	if err := snapshots.OpenFolder(); err != nil {
 		b.Fatal(err)
 	}
@@ -331,7 +332,7 @@ func BenchmarkCanonicalHash_RealSnapshot_Cold(b *testing.B) {
 	logger := log.New()
 	cfg := ethconfig.Defaults.Snapshot
 	cfg.ChainName = networkname.Mainnet
-	snapshots := NewRoSnapshots(cfg, snapDir, logger)
+	snapshots := blocksnapshots.NewRoSnapshots(cfg, snapDir, logger)
 	if err := snapshots.OpenFolder(); err != nil {
 		b.Fatal(err)
 	}

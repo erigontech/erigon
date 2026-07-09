@@ -37,6 +37,7 @@ import (
 	"github.com/erigontech/erigon/db/recsplit"
 	"github.com/erigontech/erigon/db/services"
 	"github.com/erigontech/erigon/db/snapshotsync"
+	"github.com/erigontech/erigon/db/snapshotsync/freezeblocks/blocksnapshots"
 	"github.com/erigontech/erigon/db/snaptype"
 	"github.com/erigontech/erigon/db/snaptype2"
 	"github.com/erigontech/erigon/execution/rlp"
@@ -363,7 +364,7 @@ func (r *RemoteBlockReader) TxnumReader() rawdbv3.TxNumsReader {
 
 // BlockReader can read blocks from db and snapshots
 type BlockReader struct {
-	sn           *RoSnapshots
+	sn           *blocksnapshots.RoSnapshots
 	borSn        *heimdall.RoSnapshots
 	txNumsReader rawdbv3.TxNumsReader
 
@@ -377,7 +378,7 @@ var canonicalHashCacheSize = dbg.EnvInt("RPC_CANONICAL_HASH_LRU", 10_000)
 
 func NewBlockReader(snapshots services.BlockSnapshots, borSnapshots services.BlockSnapshots) *BlockReader {
 	borSn, _ := borSnapshots.(*heimdall.RoSnapshots)
-	sn, _ := snapshots.(*RoSnapshots)
+	sn, _ := snapshots.(*blocksnapshots.RoSnapshots)
 	br := &BlockReader{sn: sn, borSn: borSn}
 	br.headerByNumCache, _ = lru.New[uint64, *types.Header](headerByNumCacheSize)
 	br.canonicalHashCache, _ = lru.New[uint64, common.Hash](canonicalHashCacheSize)
@@ -1546,7 +1547,7 @@ func (t *txBlockIndexWithBlockReader) BlockNumber(ctx context.Context, tx kv.Tx,
 	}
 	var buf []byte
 	var b *types.BodyOnlyTxn
-	view := t.r.Snapshots().(*RoSnapshots).View()
+	view := t.r.Snapshots().(*blocksnapshots.RoSnapshots).View()
 	defer view.Close()
 
 	getMaxTxNum := func(seg *snapshotsync.VisibleSegment) GetMaxTxNum {

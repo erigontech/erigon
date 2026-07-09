@@ -26,6 +26,7 @@ import (
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/snapshotsync"
+	"github.com/erigontech/erigon/db/snapshotsync/freezeblocks/blocksnapshots"
 	snaptype2 "github.com/erigontech/erigon/db/snaptype2"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/chain/networkname"
@@ -37,7 +38,7 @@ func TestDumpRangeErrorsWhenRangeAlreadyClaimed(t *testing.T) {
 	dir := t.TempDir()
 	cfg := ethconfig.Defaults.Snapshot
 	cfg.ChainName = networkname.Mainnet
-	snapshots := NewRoSnapshots(cfg, dir, logger)
+	snapshots := blocksnapshots.NewRoSnapshots(cfg, dir, logger)
 	defer snapshots.Close()
 
 	f := snaptype2.Headers.FileInfo(dir, 0, 1000)
@@ -49,7 +50,7 @@ func TestDumpRangeErrorsWhenRangeAlreadyClaimed(t *testing.T) {
 		return 0, errors.New("dumper must not run on a claimed range")
 	}
 
-	_, err := dumpRange(t.Context(), f, dumper, nil, nil, nil, dir, 1, log.LvlInfo, logger, &snapshots.RoSnapshots)
+	_, err := dumpRange(t.Context(), f, dumper, nil, nil, nil, dir, 1, log.LvlInfo, logger, &snapshots.BaseRoSnapshots)
 	require.ErrorIs(t, err, snapshotsync.ErrRangeBuildInProgress)
 	require.False(t, dumperCalled)
 }

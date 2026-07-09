@@ -14,39 +14,26 @@
 // You should have received a copy of the GNU Lesser General Public License
 // along with Erigon. If not, see <http://www.gnu.org/licenses/>.
 
-package heimdall
+package blocksnapshots
 
 import (
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/snapshotsync"
+	"github.com/erigontech/erigon/db/snaptype2"
 	"github.com/erigontech/erigon/node/ethconfig"
 )
-
-// Bor Events
-// value: event_rlp
-// bor_transaction_hash  -> bor_event_segment_offset
-
-// Bor Spans
-// value: span_json
-// span_id -> offset
 
 type RoSnapshots struct {
 	snapshotsync.BaseRoSnapshots
 }
 
-// NewBorRoSnapshots - opens all bor snapshots. But to simplify everything:
+// NewRoSnapshots - opens all snapshots. But to simplify everything:
 //   - it opens snapshots only on App start and immutable after
 //   - all snapshots of given blocks range must exist - to make this blocks range available
 //   - gaps are not allowed
-//   - segment have [from:to] semantic
+//   - segment have [from:to) semantic
 func NewRoSnapshots(cfg ethconfig.BlocksFreezing, snapDir string, logger log.Logger) *RoSnapshots {
-	return &RoSnapshots{*snapshotsync.NewBaseRoSnapshots(cfg, snapDir, SnapshotTypes(), false, logger)}
-}
-
-func (s *RoSnapshots) Ranges(align bool) []snapshotsync.Range {
-	view := s.View()
-	defer view.Close()
-	return view.base.Ranges(align)
+	return &RoSnapshots{*snapshotsync.NewBaseRoSnapshots(cfg, snapDir, snaptype2.BlockSnapshotTypes, true, logger)}
 }
 
 type View struct {
@@ -54,27 +41,26 @@ type View struct {
 }
 
 func (s *RoSnapshots) View() *View {
-	v := &View{base: s.BaseRoSnapshots.View().WithBaseSegType(Spans)}
-	return v
+	return &View{base: s.BaseRoSnapshots.View().WithBaseSegType(snaptype2.Transactions)}
 }
 
 func (v *View) Close() {
 	v.base.Close()
 }
 
-func (v *View) Events() []*snapshotsync.VisibleSegment { return v.base.Segments(Events) }
-func (v *View) Spans() []*snapshotsync.VisibleSegment  { return v.base.Segments(Spans) }
-func (v *View) Checkpoints() []*snapshotsync.VisibleSegment {
-	return v.base.Segments(Checkpoints)
-}
-func (v *View) Milestones() []*snapshotsync.VisibleSegment {
-	return v.base.Segments(Milestones)
+func (v *View) Headers() []*snapshotsync.VisibleSegment { return v.base.Segments(snaptype2.Headers) }
+func (v *View) Bodies() []*snapshotsync.VisibleSegment  { return v.base.Segments(snaptype2.Bodies) }
+func (v *View) Txs() []*snapshotsync.VisibleSegment {
+	return v.base.Segments(snaptype2.Transactions)
 }
 
-func (v *View) EventsSegment(blockNum uint64) (*snapshotsync.VisibleSegment, bool) {
-	return v.base.Segment(Events, blockNum)
+func (v *View) HeadersSegment(blockNum uint64) (*snapshotsync.VisibleSegment, bool) {
+	return v.base.Segment(snaptype2.Headers, blockNum)
 }
 
-func (v *View) SpansSegment(blockNum uint64) (*snapshotsync.VisibleSegment, bool) {
-	return v.base.Segment(Spans, blockNum)
+func (v *View) BodiesSegment(blockNum uint64) (*snapshotsync.VisibleSegment, bool) {
+	return v.base.Segment(snaptype2.Bodies, blockNum)
+}
+func (v *View) TxsSegment(blockNum uint64) (*snapshotsync.VisibleSegment, bool) {
+	return v.base.Segment(snaptype2.Transactions, blockNum)
 }

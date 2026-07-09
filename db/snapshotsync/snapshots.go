@@ -509,7 +509,7 @@ type retireOperators struct {
 	indexBuilder   snaptype.IndexBuilder
 }
 
-type RoSnapshots struct {
+type BaseRoSnapshots struct {
 	downloadReady atomic.Bool
 	segmentsReady atomic.Bool
 
@@ -551,16 +551,16 @@ var ErrRangeBuildInProgress = errors.New("range build is already in progress")
 
 // TryAcquireRange atomically claims (enum, from, to) for building. Returns false
 // if another builder already holds it, in which case the caller must skip it.
-func (s *RoSnapshots) TryAcquireRange(enum snaptype.Enum, from, to uint64) bool {
+func (s *BaseRoSnapshots) TryAcquireRange(enum snaptype.Enum, from, to uint64) bool {
 	_, loaded := s.rangesInProgress.LoadOrStore(rangeKey{enum, from, to}, struct{}{})
 	return !loaded
 }
 
-func (s *RoSnapshots) ReleaseRange(enum snaptype.Enum, from, to uint64) {
+func (s *BaseRoSnapshots) ReleaseRange(enum snaptype.Enum, from, to uint64) {
 	s.rangesInProgress.Delete(rangeKey{enum, from, to})
 }
 
-func (s *RoSnapshots) isInProgress(enum snaptype.Enum, from, to uint64) bool {
+func (s *BaseRoSnapshots) isInProgress(enum snaptype.Enum, from, to uint64) bool {
 	_, ok := s.rangesInProgress.Load(rangeKey{enum, from, to})
 	return ok
 }
@@ -570,25 +570,25 @@ type snapshotVisible struct {
 	segmentsMax uint64            // max visible (indexed, non-subsumed, gap-free) segment height across all types
 }
 
-// NewRoSnapshots - opens all snapshots. But to simplify everything:
+// NewBaseRoSnapshots - opens all snapshots. But to simplify everything:
 //   - it opens snapshots only on App start and immutable after
 //   - all snapshots of given blocks range must exist - to make this blocks range available
 //   - gaps are not allowed
 //   - segment have [from:to) semantic
-func NewRoSnapshots(cfg ethconfig.BlocksFreezing, snapDir string, types []snaptype.Type, alignMin bool, logger log.Logger) *RoSnapshots {
-	return newRoSnapshots(cfg, snapDir, types, alignMin, logger)
+func NewBaseRoSnapshots(cfg ethconfig.BlocksFreezing, snapDir string, types []snaptype.Type, alignMin bool, logger log.Logger) *BaseRoSnapshots {
+	return newBaseRoSnapshots(cfg, snapDir, types, alignMin, logger)
 }
 
-func newRoSnapshots(cfg ethconfig.BlocksFreezing, snapDir string, types []snaptype.Type, alignMin bool, logger log.Logger) *RoSnapshots {
+func newBaseRoSnapshots(cfg ethconfig.BlocksFreezing, snapDir string, types []snaptype.Type, alignMin bool, logger log.Logger) *BaseRoSnapshots {
 	if cfg.ChainName == "" {
-		log.Debug("[dbg] newRoSnapshots created with empty ChainName", "stack", dbg.Stack())
+		log.Debug("[dbg] newBaseRoSnapshots created with empty ChainName", "stack", dbg.Stack())
 	}
 	enums := make([]snaptype.Enum, len(types))
 	for i, t := range types {
 		enums[i] = t.Enum()
 	}
 	snCfg := snapcfg.KnownCfgOrDevnet(cfg.ChainName)
-	s := &RoSnapshots{dir: snapDir, cfg: cfg, snCfg: snCfg, logger: logger,
+	s := &BaseRoSnapshots{dir: snapDir, cfg: cfg, snCfg: snCfg, logger: logger,
 		types: types, enums: enums,
 		dirty:             make(DirtyFiles, snaptype.MaxEnum),
 		alignMin:          alignMin,
@@ -610,13 +610,13 @@ func newRoSnapshots(cfg ethconfig.BlocksFreezing, snapDir string, types []snapty
 	return s
 }
 
-func (s *RoSnapshots) Cfg() ethconfig.BlocksFreezing { return s.cfg }
-func (s *RoSnapshots) Dir() string                   { return s.dir }
-func (s *RoSnapshots) DownloadReady() bool           { return s.downloadReady.Load() }
-func (s *RoSnapshots) SegmentsReady() bool           { return s.segmentsReady.Load() }
-func (s *RoSnapshots) IndicesMax() uint64            { return s.idxMax.Load() }
-func (s *RoSnapshots) SegmentsMax() uint64           { return s.visible.Load().segmentsMax }
-func (s *RoSnapshots) SegmentsMinByType(t snaptype.Enum) (min uint64, ok bool) {
+func (s *BaseRoSnapshots) Cfg() ethconfig.BlocksFreezing { return s.cfg }
+func (s *BaseRoSnapshots) Dir() string                   { return s.dir }
+func (s *BaseRoSnapshots) DownloadReady() bool           { return s.downloadReady.Load() }
+func (s *BaseRoSnapshots) SegmentsReady() bool           { return s.segmentsReady.Load() }
+func (s *BaseRoSnapshots) IndicesMax() uint64            { return s.idxMax.Load() }
+func (s *BaseRoSnapshots) SegmentsMax() uint64           { return s.visible.Load().segmentsMax }
+func (s *BaseRoSnapshots) SegmentsMinByType(t snaptype.Enum) (min uint64, ok bool) {
 	if s == nil {
 		return 0, false
 	}
@@ -633,7 +633,7 @@ func (s *RoSnapshots) SegmentsMinByType(t snaptype.Enum) (min uint64, ok bool) {
 
 	return min, true
 }
-func (s *RoSnapshots) BlocksAvailable() uint64 {
+func (s *BaseRoSnapshots) BlocksAvailable() uint64 {
 	if s == nil {
 		return 0
 	}
@@ -641,15 +641,15 @@ func (s *RoSnapshots) BlocksAvailable() uint64 {
 	return s.idxMax.Load()
 }
 
-func (s *RoSnapshots) DirtyBlocksAvailable(t snaptype.Enum) uint64 {
+func (s *BaseRoSnapshots) DirtyBlocksAvailable(t snaptype.Enum) uint64 {
 	return s.dirtyIdxAvailability(t)
 }
 
-func (s *RoSnapshots) VisibleBlocksAvailable(t snaptype.Enum) uint64 {
+func (s *BaseRoSnapshots) VisibleBlocksAvailable(t snaptype.Enum) uint64 {
 	return s.visibleIdxAvailability(t)
 }
 
-func (s *RoSnapshots) DownloadComplete() {
+func (s *BaseRoSnapshots) DownloadComplete() {
 	wasReady := s.downloadReady.Swap(true)
 	if !wasReady {
 		if s.SegmentsReady() {
@@ -658,7 +658,7 @@ func (s *RoSnapshots) DownloadComplete() {
 	}
 }
 
-func (s *RoSnapshots) IndexBuilder(t snaptype.Type) snaptype.IndexBuilder {
+func (s *BaseRoSnapshots) IndexBuilder(t snaptype.Type) snaptype.IndexBuilder {
 	if operators, ok := s.operators[t.Enum()]; ok {
 		return operators.indexBuilder
 	}
@@ -666,7 +666,7 @@ func (s *RoSnapshots) IndexBuilder(t snaptype.Type) snaptype.IndexBuilder {
 	return nil
 }
 
-func (s *RoSnapshots) SetIndexBuilder(t snaptype.Type, indexBuilder snaptype.IndexBuilder) {
+func (s *BaseRoSnapshots) SetIndexBuilder(t snaptype.Type, indexBuilder snaptype.IndexBuilder) {
 	if operators, ok := s.operators[t.Enum()]; ok {
 		operators.indexBuilder = indexBuilder
 	} else {
@@ -676,7 +676,7 @@ func (s *RoSnapshots) SetIndexBuilder(t snaptype.Type, indexBuilder snaptype.Ind
 	}
 }
 
-func (s *RoSnapshots) RangeExtractor(t snaptype.Type) snaptype.RangeExtractor {
+func (s *BaseRoSnapshots) RangeExtractor(t snaptype.Type) snaptype.RangeExtractor {
 	if operators, ok := s.operators[t.Enum()]; ok {
 		return operators.rangeExtractor
 	}
@@ -684,7 +684,7 @@ func (s *RoSnapshots) RangeExtractor(t snaptype.Type) snaptype.RangeExtractor {
 	return nil
 }
 
-func (s *RoSnapshots) SetRangeExtractor(t snaptype.Type, rangeExtractor snaptype.RangeExtractor) {
+func (s *BaseRoSnapshots) SetRangeExtractor(t snaptype.Type, rangeExtractor snaptype.RangeExtractor) {
 	if operators, ok := s.operators[t.Enum()]; ok {
 		operators.rangeExtractor = rangeExtractor
 	} else {
@@ -695,7 +695,7 @@ func (s *RoSnapshots) SetRangeExtractor(t snaptype.Type, rangeExtractor snaptype
 	}
 }
 
-func (s *RoSnapshots) LogStat(label string) {
+func (s *BaseRoSnapshots) LogStat(label string) {
 	var m runtime.MemStats
 	dbg.ReadMemStats(&m)
 	s.logger.Info(fmt.Sprintf("[snapshots:%s] Stat", label),
@@ -703,15 +703,15 @@ func (s *RoSnapshots) LogStat(label string) {
 		"alloc", common.ByteCount(m.Alloc), "sys", common.ByteCount(m.Sys))
 }
 
-func (s *RoSnapshots) Types() []snaptype.Type { return s.types }
-func (s *RoSnapshots) HasType(in snaptype.Type) bool {
+func (s *BaseRoSnapshots) Types() []snaptype.Type { return s.types }
+func (s *BaseRoSnapshots) HasType(in snaptype.Type) bool {
 	return slices.Contains(s.enums, in.Enum())
 }
 
 // ready is an alias for the shared common.Ready type.
 type ready = common.Ready
 
-func (s *RoSnapshots) Ready(ctx context.Context) <-chan error {
+func (s *BaseRoSnapshots) Ready(ctx context.Context) <-chan error {
 	errc := make(chan error)
 
 	go func() {
@@ -729,7 +729,7 @@ func (s *RoSnapshots) Ready(ctx context.Context) <-chan error {
 }
 
 // DisableReadAhead - usage: `defer d.EnableReadAhead().DisableReadAhead()`. Please don't use this funcs without `defer` to avoid leak.
-func (s *RoSnapshots) DisableReadAhead() *RoSnapshots {
+func (s *BaseRoSnapshots) DisableReadAhead() *BaseRoSnapshots {
 	v := s.View()
 	defer v.Close()
 
@@ -741,7 +741,7 @@ func (s *RoSnapshots) DisableReadAhead() *RoSnapshots {
 	return s
 }
 
-func (s *RoSnapshots) EnableReadAhead() *RoSnapshots {
+func (s *BaseRoSnapshots) EnableReadAhead() *BaseRoSnapshots {
 	v := s.View()
 	defer v.Close()
 
@@ -753,7 +753,7 @@ func (s *RoSnapshots) EnableReadAhead() *RoSnapshots {
 
 	return s
 }
-func (s *RoSnapshots) MadvNormal() *RoSnapshots {
+func (s *BaseRoSnapshots) MadvNormal() *BaseRoSnapshots {
 	v := s.View()
 	defer v.Close()
 
@@ -766,7 +766,7 @@ func (s *RoSnapshots) MadvNormal() *RoSnapshots {
 	return s
 }
 
-func (s *RoSnapshots) EnableMadvWillNeed() *RoSnapshots {
+func (s *BaseRoSnapshots) EnableMadvWillNeed() *BaseRoSnapshots {
 	v := s.View()
 	defer v.Close()
 
@@ -838,7 +838,7 @@ func RecalcVisibleSegments(dirtySegments *btree.BTreeG[*DirtySegment]) VisibleSe
 	return newVisibleSegments
 }
 
-func (s *RoSnapshots) recalcVisibleFiles(alignMin bool) {
+func (s *BaseRoSnapshots) recalcVisibleFiles(alignMin bool) {
 	defer func() {
 		s.idxMax.Store(s.idxAvailability())
 	}()
@@ -901,7 +901,7 @@ func (s *RoSnapshots) recalcVisibleFiles(alignMin bool) {
 }
 
 // minimax of existing indices
-func (s *RoSnapshots) idxAvailability() uint64 {
+func (s *BaseRoSnapshots) idxAvailability() uint64 {
 	// Use-Cases:
 	//   1. developers can add new types in future. and users will not have files of this type
 	//   2. some types are network-specific. example: borevents exists only on Bor-consensus networks
@@ -922,7 +922,7 @@ func (s *RoSnapshots) idxAvailability() uint64 {
 	return maxIdx
 }
 
-func (s *RoSnapshots) dirtyIdxAvailability(segtype snaptype.Enum) uint64 {
+func (s *BaseRoSnapshots) dirtyIdxAvailability(segtype snaptype.Enum) uint64 {
 	s.dirtyLock.RLock()
 	defer s.dirtyLock.RUnlock()
 
@@ -949,7 +949,7 @@ func (s *RoSnapshots) dirtyIdxAvailability(segtype snaptype.Enum) uint64 {
 	return _max
 }
 
-func (s *RoSnapshots) visibleIdxAvailability(segtype snaptype.Enum) (maxVisibleIdx uint64) {
+func (s *BaseRoSnapshots) visibleIdxAvailability(segtype snaptype.Enum) (maxVisibleIdx uint64) {
 	visibleFiles := s.visible.Load().segments[segtype]
 	if len(visibleFiles) > 0 {
 		maxVisibleIdx = visibleFiles[len(visibleFiles)-1].to - 1
@@ -958,7 +958,7 @@ func (s *RoSnapshots) visibleIdxAvailability(segtype snaptype.Enum) (maxVisibleI
 	return
 }
 
-func (s *RoSnapshots) Ls() {
+func (s *BaseRoSnapshots) Ls() {
 	view := s.View()
 	defer view.Close()
 
@@ -976,7 +976,7 @@ func (s *RoSnapshots) Ls() {
 	log.Info("[snapshots] total", "words", stats.Words, "dictOnDisk", common.ByteCount(stats.Dict), "dictMem", common.ByteCount(stats.DictMem))
 }
 
-func (s *RoSnapshots) Files() (list []string) {
+func (s *BaseRoSnapshots) Files() (list []string) {
 	view := s.View()
 	defer view.Close()
 	for _, t := range s.enums {
@@ -1007,7 +1007,7 @@ func AllTypedSegments(dir string, types []snaptype.Type) (res []snaptype.FileInf
 	return res, nil
 }
 
-func (s *RoSnapshots) openSegments(fileNames []string, open bool, optimistic bool) error {
+func (s *BaseRoSnapshots) openSegments(fileNames []string, open bool, optimistic bool) error {
 	wg := &errgroup.Group{}
 	wg.SetLimit(estimate.HalfCPUs())
 	//fmt.Println("RS", s)
@@ -1088,14 +1088,14 @@ func (s *RoSnapshots) openSegments(fileNames []string, open bool, optimistic boo
 	return nil
 }
 
-func (s *RoSnapshots) Ranges(align bool) []Range {
+func (s *BaseRoSnapshots) Ranges(align bool) []Range {
 	view := s.View()
 	defer view.Close()
 	return view.Ranges(align)
 }
 
-func (s *RoSnapshots) OptimisticalyOpenFolder() { _ = s.OpenFolder() }
-func (s *RoSnapshots) OpenFolder() error {
+func (s *BaseRoSnapshots) OptimisticalyOpenFolder() { _ = s.OpenFolder() }
+func (s *BaseRoSnapshots) OpenFolder() error {
 	if err := func() error {
 		s.dirtyLock.Lock()
 		defer s.dirtyLock.Unlock()
@@ -1126,7 +1126,7 @@ func (s *RoSnapshots) OpenFolder() error {
 	return nil
 }
 
-func (s *RoSnapshots) OpenSegments(types []snaptype.Type, alignMin bool) error {
+func (s *BaseRoSnapshots) OpenSegments(types []snaptype.Type, alignMin bool) error {
 	defer s.recalcVisibleFiles(alignMin)
 
 	s.dirtyLock.Lock()
@@ -1152,7 +1152,7 @@ func (s *RoSnapshots) OpenSegments(types []snaptype.Type, alignMin bool) error {
 	return nil
 }
 
-func (s *RoSnapshots) Close() {
+func (s *BaseRoSnapshots) Close() {
 	if s == nil {
 		return
 	}
@@ -1163,7 +1163,7 @@ func (s *RoSnapshots) Close() {
 	s.closeWhatNotInList(nil)
 }
 
-func (s *RoSnapshots) closeWhatNotInList(l []string) {
+func (s *BaseRoSnapshots) closeWhatNotInList(l []string) {
 	protectFiles := make(map[string]struct{}, len(l))
 	for _, f := range l {
 		protectFiles[f] = struct{}{}
@@ -1238,7 +1238,7 @@ func ClassifyOpenErr(err error, optimistic bool) (stop bool, failErr error) {
 	return false, err
 }
 
-func (s *RoSnapshots) RemoveOverlaps(onDelete func(l []string) error) error {
+func (s *BaseRoSnapshots) RemoveOverlaps(onDelete func(l []string) error) error {
 	list, err := snaptype.Segments(s.dir)
 	if err != nil {
 		return err
@@ -1311,7 +1311,7 @@ type snapshotNotifier interface {
 	OnNewSnapshot()
 }
 
-func (s *RoSnapshots) BuildMissedIndices(ctx context.Context, logPrefix string, notifier snapshotNotifier, dirs datadir.Dirs, cc *chain.Config, logger log.Logger) error {
+func (s *BaseRoSnapshots) BuildMissedIndices(ctx context.Context, logPrefix string, notifier snapshotNotifier, dirs datadir.Dirs, cc *chain.Config, logger log.Logger) error {
 	if !s.Cfg().ProduceE2 && s.IndicesMax() == 0 {
 		if s.SegmentsMax() == 0 {
 			return nil
@@ -1345,7 +1345,7 @@ func (s *RoSnapshots) BuildMissedIndices(ctx context.Context, logPrefix string, 
 	return nil
 }
 
-func (s *RoSnapshots) delete(fileName string) error {
+func (s *BaseRoSnapshots) delete(fileName string) error {
 	s.dirtyLock.Lock()
 	defer s.dirtyLock.Unlock()
 
@@ -1385,7 +1385,7 @@ func (s *RoSnapshots) delete(fileName string) error {
 }
 
 // prune visible segments
-func (s *RoSnapshots) Delete(fileNames ...string) error {
+func (s *BaseRoSnapshots) Delete(fileNames ...string) error {
 	if s == nil {
 		return nil
 	}
@@ -1402,7 +1402,7 @@ func (s *RoSnapshots) Delete(fileNames ...string) error {
 	return nil
 }
 
-func (s *RoSnapshots) buildMissedIndices(logPrefix string, ctx context.Context, dirs datadir.Dirs, chainConfig *chain.Config, workers int, logger log.Logger) (newIdxBuilt bool, err error) {
+func (s *BaseRoSnapshots) buildMissedIndices(logPrefix string, ctx context.Context, dirs datadir.Dirs, chainConfig *chain.Config, workers int, logger log.Logger) (newIdxBuilt bool, err error) {
 	if s == nil {
 		return
 	}
@@ -1508,7 +1508,7 @@ func (s *RoSnapshots) buildMissedIndices(logPrefix string, ctx context.Context, 
 	}
 }
 
-func (s *RoSnapshots) PrintDebug() {
+func (s *BaseRoSnapshots) PrintDebug() {
 	v := s.View()
 	defer v.Close()
 	for _, t := range s.types {
@@ -1529,12 +1529,12 @@ func (s *RoSnapshots) PrintDebug() {
 }
 
 type View struct {
-	s           *RoSnapshots
+	s           *BaseRoSnapshots
 	segments    []*RoTx
 	baseSegType snaptype.Type
 }
 
-func (s *RoSnapshots) View() *View {
+func (s *BaseRoSnapshots) View() *View {
 	v := s.visible.Load()
 	sgs := make([]*RoTx, snaptype.MaxEnum)
 	for _, t := range s.enums {
@@ -1561,11 +1561,11 @@ func (s *View) WithBaseSegType(t snaptype.Type) *View {
 
 var noop = func() {}
 
-func (s *RoSnapshots) ViewType(t snaptype.Type) *RoTx {
+func (s *BaseRoSnapshots) ViewType(t snaptype.Type) *RoTx {
 	return s.visible.Load().segments[t.Enum()].BeginRo()
 }
 
-func (s *RoSnapshots) ViewSingleFile(t snaptype.Type, blockNum uint64) (segment *VisibleSegment, ok bool, close func()) {
+func (s *BaseRoSnapshots) ViewSingleFile(t snaptype.Type, blockNum uint64) (segment *VisibleSegment, ok bool, close func()) {
 	segmentRotx := s.visible.Load().segments[t.Enum()].BeginRo()
 
 	for _, seg := range segmentRotx.Segments {
