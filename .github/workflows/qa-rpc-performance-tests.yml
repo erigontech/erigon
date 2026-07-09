@@ -11,8 +11,8 @@ on:
         type: boolean
         required: false
         default: false
-      exec_mode:
-        description: 'Erigon execution mode ("default" leaves ERIGON_EXEC3_PARALLEL unset)'
+      commitment_mode:
+        description: 'Erigon commitment mode ("default" leaves ERIGON_COMMITMENT_PARALLEL unset)'
         type: choice
         required: false
         default: default
@@ -208,21 +208,21 @@ jobs:
         if: matrix.client == 'erigon'
         working-directory: ${{ github.workspace }}/build/bin
         env:
-          EXEC_MODE: ${{ github.event.inputs.exec_mode }}
+          EXEC_MODE: ${{ github.event.inputs.commitment_mode }}
         run: |
           echo "Starting RpcDaemon..."
 
-          # Only set ERIGON_EXEC3_PARALLEL on an explicit choice; otherwise ensure it's
+          # Only set ERIGON_COMMITMENT_PARALLEL on an explicit choice; otherwise ensure it's
           # unset so erigon uses its built-in default (and doesn't inherit runner env).
           if [ "$EXEC_MODE" = "parallel" ]; then
-            export ERIGON_EXEC3_PARALLEL=true
-            echo "Set ERIGON_EXEC3_PARALLEL=true (parallel mode)"
+            export ERIGON_COMMITMENT_PARALLEL=true
+            echo "Set ERIGON_COMMITMENT_PARALLEL=true (parallel mode)"
           elif [ "$EXEC_MODE" = "serial" ]; then
-            export ERIGON_EXEC3_PARALLEL=false
-            echo "Set ERIGON_EXEC3_PARALLEL=false (serial mode)"
+            export ERIGON_COMMITMENT_PARALLEL=false
+            echo "Set ERIGON_COMMITMENT_PARALLEL=false (serial mode)"
           else
-            unset ERIGON_EXEC3_PARALLEL
-            echo "Leaving ERIGON_EXEC3_PARALLEL unset (default behavior)"
+            unset ERIGON_COMMITMENT_PARALLEL
+            echo "Leaving ERIGON_COMMITMENT_PARALLEL unset (default behavior)"
           fi
 
           ./rpcdaemon --datadir $ERIGON_REFERENCE_DATA_DIR --http.api admin,debug,eth,parity,erigon,trace,web3,txpool,ots,net > erigon.log 2>&1 &
@@ -371,7 +371,7 @@ jobs:
               --repo $client \
               --branch $branch_name \
               --commit $commit_hash \
-              --test_name rpc-performance-test-$client${{ (matrix.client == 'erigon' && github.event.inputs.exec_mode == 'parallel' && '-parallel') || (matrix.client == 'erigon' && github.event.inputs.exec_mode == 'serial' && '-serial') || '' }}-$method \
+              --test_name rpc-performance-test-$client${{ (matrix.client == 'erigon' && github.event.inputs.commitment_mode == 'parallel' && '-parallel') || (matrix.client == 'erigon' && github.event.inputs.commitment_mode == 'serial' && '-serial') || '' }}-$method \
               --chain $CHAIN \
               --runner ${{ runner.name }} \
               --db_version $db_version \
@@ -434,7 +434,7 @@ jobs:
         if: always() && matrix.client == 'erigon' && steps.rpcdaemon_running_step.outputs.rpc_daemon_started == 'true'
         uses: actions/upload-artifact@v7
         with:
-          name: rpcdaemon-logs${{ (github.event.inputs.exec_mode == 'parallel' && '-parallel') || (github.event.inputs.exec_mode == 'serial' && '-serial') || '' }}
+          name: rpcdaemon-logs${{ (github.event.inputs.commitment_mode == 'parallel' && '-parallel') || (github.event.inputs.commitment_mode == 'serial' && '-serial') || '' }}
           path: ${{ github.workspace }}/build/bin/erigon.log
 
       - name: Restore Erigon Chaindata Directory
@@ -470,7 +470,7 @@ jobs:
         if: (matrix.client == 'erigon' || needs.setup.outputs.run_geth == 'true') && steps.test_step.outputs.test_executed == 'true'
         uses: actions/upload-artifact@v7
         with:
-          name: test-results-${{ env.CHAIN }}-${{ matrix.client }}${{ (matrix.client == 'erigon' && github.event.inputs.exec_mode == 'parallel' && '-parallel') || (matrix.client == 'erigon' && github.event.inputs.exec_mode == 'serial' && '-serial') || '' }}
+          name: test-results-${{ env.CHAIN }}-${{ matrix.client }}${{ (matrix.client == 'erigon' && github.event.inputs.commitment_mode == 'parallel' && '-parallel') || (matrix.client == 'erigon' && github.event.inputs.commitment_mode == 'serial' && '-serial') || '' }}
           path: ${{ env.past_test_dir }}
 
       - name: Action to check failure condition

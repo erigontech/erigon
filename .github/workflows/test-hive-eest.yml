@@ -13,7 +13,7 @@ jobs:
   test-hive-eest:
     runs-on:
       group: hive
-    name: test-hive-eest (${{ matrix.shard }}, ${{ matrix.exec_mode }})
+    name: test-hive-eest (${{ matrix.shard }}, ${{ matrix.commitment_mode }})
     strategy:
       # In merge_group: cancel sibling shards on first failure so ci-gate's
       # `needs` reach terminal state quickly and the broken PR is evicted
@@ -22,11 +22,12 @@ jobs:
       # see the full failure picture across every shard.
       fail-fast: ${{ github.event_name == 'merge_group' }}
       matrix:
-        # Each shard runs twice — once with serial exec
-        # (ERIGON_EXEC3_PARALLEL=false) and once with parallel — so
-        # divergence between the two paths is caught on the PR. Matrix
-        # entries spawn separate `hive` group runners and run concurrently —
-        # wall-clock unchanged, runner-minutes doubled.
+        # Each shard runs twice — once with serial commitment
+        # (ERIGON_COMMITMENT_PARALLEL=false) and once with parallel — so
+        # divergence between the two paths is caught on the PR. Execution is
+        # parallel in both legs (default). Matrix entries spawn separate `hive`
+        # group runners and run concurrently — wall-clock unchanged,
+        # runner-minutes doubled.
         include:
           # consume-enginex: split by fork for parallelism (~50k tests total).
           # Engine API tests only exist from Paris (The Merge) onwards; the
@@ -39,61 +40,61 @@ jobs:
             shard: paris+shanghai
             fixtures-tarball: eest_stable
             max-failures: 0
-            exec_mode: serial
+            commitment_mode: serial
           - sim: consume-enginex
             sim-limit: ".*/.*fork_(Paris|Shanghai)"
             shard: paris+shanghai
             fixtures-tarball: eest_stable
             max-failures: 0
-            exec_mode: parallel
+            commitment_mode: parallel
           - sim: consume-enginex
             sim-limit: ".*/.*fork_Cancun"
             shard: cancun
             fixtures-tarball: eest_stable
             max-failures: 0
-            exec_mode: serial
+            commitment_mode: serial
           - sim: consume-enginex
             sim-limit: ".*/.*fork_Cancun"
             shard: cancun
             fixtures-tarball: eest_stable
             max-failures: 0
-            exec_mode: parallel
+            commitment_mode: parallel
           - sim: consume-enginex
             sim-limit: ".*/.*fork_Prague"
             shard: prague
             fixtures-tarball: eest_stable
             max-failures: 0
-            exec_mode: serial
+            commitment_mode: serial
           - sim: consume-enginex
             sim-limit: ".*/.*fork_Prague"
             shard: prague
             fixtures-tarball: eest_stable
             max-failures: 0
-            exec_mode: parallel
+            commitment_mode: parallel
           - sim: consume-enginex
             sim-limit: ".*/.*fork_(Osaka|BPO)"
             shard: osaka
             fixtures-tarball: eest_stable
             max-failures: 0
-            exec_mode: serial
+            commitment_mode: serial
           - sim: consume-enginex
             sim-limit: ".*/.*fork_(Osaka|BPO)"
             shard: osaka
             fixtures-tarball: eest_stable
             max-failures: 0
-            exec_mode: parallel
+            commitment_mode: parallel
           - sim: consume-rlp
             sim-limit: ".*(eip2930_access_list|eip4844_blobs).*" # all tests take too long
             shard: rlp
             fixtures-tarball: eest_stable
             max-failures: 0
-            exec_mode: serial
+            commitment_mode: serial
           - sim: consume-rlp
             sim-limit: ".*(eip2930_access_list|eip4844_blobs).*"
             shard: rlp
             fixtures-tarball: eest_stable
             max-failures: 0
-            exec_mode: parallel
+            commitment_mode: parallel
           # Glamsterdam devnet: BAL EIPs against devnet fixtures
           - sim: consume-engine
             sim-limit: ".*(7708|7778|7843|7928|7954|7976|7981|8024|8037).*"
@@ -102,7 +103,7 @@ jobs:
             extra-hive-flags: "--sim.loglevel=3 --client.checktimelimit=300s"
             erigon-extra-flags: "--experimental.bal"
             max-failures: 0
-            exec_mode: parallel
+            commitment_mode: parallel
     steps:
       - name: Clean docker system
         run: |
@@ -178,10 +179,10 @@ jobs:
 
       - name: Get dependencies and build hive
         env:
-          # Toggle dbg.Exec3Parallel inside the hive erigon container.
-          # Baked as an ENV directive into the client Dockerfile so every
-          # erigon instance hive launches inherits it.
-          ERIGON_EXEC3_PARALLEL: ${{ matrix.exec_mode == 'parallel' && 'true' || 'false' }}
+          # Toggle statecfg.ExperimentalParallelCommitment inside the hive
+          # erigon container. Baked as an ENV directive into the client
+          # Dockerfile so every erigon instance hive launches inherits it.
+          ERIGON_COMMITMENT_PARALLEL: ${{ matrix.commitment_mode == 'parallel' && 'true' || 'false' }}
         run: |
           cd hive
           retry() {
@@ -204,10 +205,10 @@ jobs:
             echo "ERROR: failed to repoint hive's erigon client Dockerfile at hive/erigon:cilocal"
             exit 1
           fi
-          # Inject ERIGON_EXEC3_PARALLEL into the runtime image so the
+          # Inject ERIGON_COMMITMENT_PARALLEL into the runtime image so the
           # erigon process inside hive picks it up. Append as the last layer
           # so it doesn't invalidate earlier build caches.
-          echo "ENV ERIGON_EXEC3_PARALLEL=${ERIGON_EXEC3_PARALLEL}" >> clients/erigon/Dockerfile
+          echo "ENV ERIGON_COMMITMENT_PARALLEL=${ERIGON_COMMITMENT_PARALLEL}" >> clients/erigon/Dockerfile
           erigon_extra_flags="${{ matrix.erigon-extra-flags }}"
           if [ -n "$erigon_extra_flags" ]; then
             echo "Patching erigon.sh with extra flags: $erigon_extra_flags"
@@ -302,9 +303,9 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v7
         with:
-          # exec_mode in the artifact name keeps the two matrix entries from
+          # commitment_mode in the artifact name keeps the two matrix entries from
           # clobbering each other's logs on the same artifact key.
-          name: hive-workspace-log-${{ matrix.shard }}-${{ matrix.exec_mode }}
+          name: hive-workspace-log-${{ matrix.shard }}-${{ matrix.commitment_mode }}
           path: hive/workspace/logs
           if-no-files-found: ignore
       - name: Test Results

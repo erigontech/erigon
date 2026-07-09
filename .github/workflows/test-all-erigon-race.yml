@@ -47,13 +47,14 @@ jobs:
         os:
           - ubuntu-latest
         test-group: ${{ fromJson(needs.load-matrix.outputs.test-groups) }}
-        # Run both serial and parallel exec paths so race-detector signal
-        # covers both. Each entry runs on its own GitHub-hosted runner —
-        # wall-clock unchanged, runner-minutes doubled.
-        exec_mode:
+        # Run both serial and parallel commitment paths so race-detector
+        # signal covers both. Execution is parallel in both legs (default).
+        # Each entry runs on its own GitHub-hosted runner — wall-clock
+        # unchanged, runner-minutes doubled.
+        commitment_mode:
           - serial
           - parallel
-    name: tests-linux (${{ matrix.os }}, ${{ matrix.test-group }}, ${{ matrix.exec_mode }})
+    name: tests-linux (${{ matrix.os }}, ${{ matrix.test-group }}, ${{ matrix.commitment_mode }})
     runs-on: ${{ matrix.os }}
 
     steps:
@@ -72,21 +73,21 @@ jobs:
         with:
           submodules: true
           cleanup-space: true
-          # Go's test cache can't see ERIGON_EXEC3_PARALLEL (read at package
+          # Go's test cache can't see ERIGON_COMMITMENT_PARALLEL (read at package
           # init), so serial and parallel results only stay mode-pure if each
-          # exec mode keeps its own cache lineage.
-          build-cache-extra-key: ${{ matrix.test-group }}-${{ matrix.exec_mode }}
+          # commitment mode keeps its own cache lineage.
+          build-cache-extra-key: ${{ matrix.test-group }}-${{ matrix.commitment_mode }}
           ramdisk: true
           cache-namespace: test-all-erigon-race
 
-      - name: Run ${{ matrix.test-group }} tests on ${{ matrix.os }} (${{ matrix.exec_mode }} exec)
+      - name: Run ${{ matrix.test-group }} tests on ${{ matrix.os }} (${{ matrix.commitment_mode }} commitment)
         env:
           SKIP_FLAKY_TESTS: 'true'
           CGO_CFLAGS: -D__BLST_PORTABLE__
-          # Toggle dbg.Exec3Parallel from CI without code changes. envLookup
-          # in common/dbg/dbg_env.go auto-prepends ERIGON_, so this maps to
-          # the EXEC3_PARALLEL flag declared in common/dbg/experiments.go.
-          ERIGON_EXEC3_PARALLEL: ${{ matrix.exec_mode == 'parallel' && 'true' || 'false' }}
+          # Toggle statecfg.ExperimentalParallelCommitment from CI without code
+          # changes. envLookup in common/dbg/dbg_env.go auto-prepends ERIGON_, so
+          # this maps to the COMMITMENT_PARALLEL flag read in db/state/statecfg.
+          ERIGON_COMMITMENT_PARALLEL: ${{ matrix.commitment_mode == 'parallel' && 'true' || 'false' }}
         run: make test-group TEST_GROUP=${{ matrix.test-group }} GO_FLAGS="-race -timeout=60m"
 
       - uses: ./.github/actions/cleanup-erigon

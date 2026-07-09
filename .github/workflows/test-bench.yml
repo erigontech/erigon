@@ -22,7 +22,7 @@ defaults:
 
 jobs:
   benchmarks:
-    name: benchmarks (${{ matrix.exec_mode }})
+    name: benchmarks (${{ matrix.commitment_mode }})
     runs-on: ubuntu-24.04
     strategy:
       # In merge_group: cancel sibling shards on first failure so ci-gate's
@@ -32,16 +32,17 @@ jobs:
       fail-fast: ${{ github.event_name == 'merge_group' }}
       matrix:
         # Each entry runs on its own GitHub-hosted runner — wall-clock
-        # unchanged, runner-minutes doubled. Bench numbers are reported
-        # per matrix entry so serial vs parallel can be compared directly.
-        exec_mode:
+        # unchanged, runner-minutes doubled. Bench numbers are reported per
+        # matrix entry so serial vs parallel commitment can be compared
+        # directly. Execution is parallel in both legs (default).
+        commitment_mode:
           - serial
           - parallel
     env:
-      # Toggle dbg.Exec3Parallel from CI without code changes. envLookup
-      # in common/dbg/dbg_env.go auto-prepends ERIGON_, so this maps to
-      # the EXEC3_PARALLEL flag declared in common/dbg/experiments.go.
-      ERIGON_EXEC3_PARALLEL: ${{ matrix.exec_mode == 'parallel' && 'true' || 'false' }}
+      # Toggle statecfg.ExperimentalParallelCommitment from CI without code
+      # changes. envLookup in common/dbg/dbg_env.go auto-prepends ERIGON_, so
+      # this maps to the COMMITMENT_PARALLEL flag read in db/state/statecfg.
+      ERIGON_COMMITMENT_PARALLEL: ${{ matrix.commitment_mode == 'parallel' && 'true' || 'false' }}
 
     steps:
       - name: Checkout custom actions

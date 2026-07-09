@@ -35,12 +35,13 @@
 #                                              the whole corpus (run via evm.race).
 #   *-parallel                                  any of the above with "-parallel"
 #                                              appended runs with
-#                                              ERIGON_EXEC3_PARALLEL=true. Every
+#                                              ERIGON_COMMITMENT_PARALLEL=true. Every
 #                                              other shard runs with
-#                                              ERIGON_EXEC3_PARALLEL=false so
+#                                              ERIGON_COMMITMENT_PARALLEL=false so
 #                                              the runtime default in
-#                                              dbg.Exec3Parallel can flip without
-#                                              redefining the shards.
+#                                              statecfg.ExperimentalParallelCommitment
+#                                              can flip without redefining the shards.
+#                                              Execution is parallel in every shard.
 #
 # Each shard maps to one cmd/evm subcommand running with --jsonout. Pass/fail
 # is decided here (not by the binary, which always exits 0): the shard fails
@@ -77,27 +78,27 @@ case "$shard" in
 esac
 base=test-fixtures-cache/$fixtures/fixtures
 
-# Resolve workers + failure budget + exec3-parallel + the optional race --run
-# regex from the single-source manifest. This script, the test-eest-spec.yml
-# load-matrix job, and the coverage guard all read tools/eest-spec-shards.yml,
-# so adding a shard / tweaking a budget / changing a fork filter is a one-file
-# edit. yq converts YAML→JSON so it can be queried with jq.
+# Resolve workers + failure budget + commitment-parallel + the optional race
+# --run regex from the single-source manifest. This script, the test-eest-spec.yml
+# load-matrix job, and the coverage guard all read tools/eest-spec-shards.yml, so
+# adding a shard / tweaking a budget / changing a fork filter is a one-file edit.
+# yq converts YAML→JSON so it can be queried with jq.
 manifest=tools/eest-spec-shards.yml
-shard_row=$(yq -o=json '.' "$manifest" | jq -r --arg s "$shard" '.[] | select(.shard == $s) | "\(.workers)\t\(."max-allowed-failures")\t\(."exec3-parallel" // false)\t\(.run // "")"')
+shard_row=$(yq -o=json '.' "$manifest" | jq -r --arg s "$shard" '.[] | select(.shard == $s) | "\(.workers)\t\(."max-allowed-failures")\t\(."commitment-parallel" // false)\t\(.run // "")"')
 if [[ -z "$shard_row" ]]; then
 	echo "shard $shard not found in $manifest" >&2
 	exit 2
 fi
-IFS=$'\t' read -r default_workers default_max exec3_parallel run_regex <<<"$shard_row"
-# Always set ERIGON_EXEC3_PARALLEL explicitly (true or false) so the shard's
-# behaviour is pinned to the manifest, independent of whatever dbg.Exec3Parallel
-# defaults to at runtime. If the default flips, the shards still run the mode
-# they were defined for.
-export ERIGON_EXEC3_PARALLEL="$exec3_parallel"
+IFS=$'\t' read -r default_workers default_max commitment_parallel run_regex <<<"$shard_row"
+# Always set ERIGON_COMMITMENT_PARALLEL explicitly (true or false) so the shard's
+# commitment mode is pinned to the manifest, independent of whatever
+# statecfg.ExperimentalParallelCommitment defaults to at runtime. Execution is
+# parallel in every shard (dbg.Exec3Parallel defaults true).
+export ERIGON_COMMITMENT_PARALLEL="$commitment_parallel"
 
 # Strip "-parallel" / "-sequential" suffix for case-arm routing — both variants
 # share the same fixture path / regex as the parent shard; only the
-# ERIGON_EXEC3_PARALLEL env var differs.
+# ERIGON_COMMITMENT_PARALLEL env var differs.
 shard_route="${shard%-parallel}"
 shard_route="${shard_route%-sequential}"
 
@@ -186,7 +187,7 @@ echo "max-allowed-failures: $max"
 # code 66: the Go race runtime's "data race detected" signal, emitted even when
 # the run completes and the JSON parses clean, so it must be checked explicitly.
 # The grep filter strips any init-time log lines (e.g. dbg.envLookup's
-# "[WARN] [env]" message when ERIGON_EXEC3_PARALLEL is set fires before cmd/evm
+# "[WARN] [env]" message when ERIGON_COMMITMENT_PARALLEL is set fires before cmd/evm
 # sets the log handler, and the default log handler writes to stdout) so jq
 # sees only JSON.
 raw_file=$(mktemp)

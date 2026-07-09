@@ -12,7 +12,7 @@ concurrency:
 
 jobs:
   test-hive:
-    name: test-hive (${{ matrix.sim }}, ${{ matrix.sim-limit }}, ${{ matrix.exec_mode }})
+    name: test-hive (${{ matrix.sim }}, ${{ matrix.sim-limit }}, ${{ matrix.commitment_mode }})
     if: >-
       ${{ !github.event.pull_request.number
       || (!github.event.pull_request.draft
@@ -26,10 +26,11 @@ jobs:
       # picture across every shard.
       fail-fast: ${{ github.event_name == 'merge_group' }}
       matrix:
-        # Each (sim, sim-limit) pair is run twice — once with serial exec
-        # (ERIGON_EXEC3_PARALLEL=false) and once with parallel — so engine-API
-        # / wire-protocol divergence between the two paths is caught on the
-        # PR. Matrix entries spawn separate `hive` group runners and run
+        # Each (sim, sim-limit) pair is run twice — once with serial commitment
+        # (ERIGON_COMMITMENT_PARALLEL=false) and once with parallel — so
+        # engine-API / wire-protocol divergence between the two paths is caught
+        # on the PR. Execution is parallel in both legs (default). Matrix
+        # entries spawn separate `hive` group runners and run
         # concurrently — wall-clock unchanged, runner-minutes doubled.
         # `sim` is the simulator path passed to `hive --sim`. Most simulators
         # live under simulators/ethereum/, but a few (e.g. devp2p) are top-level.
@@ -37,53 +38,53 @@ jobs:
           - sim: ethereum/engine
             sim-limit: exchange-capabilities|auth
             max-allowed-failures: 0
-            exec_mode: serial
+            commitment_mode: serial
           - sim: ethereum/engine
             sim-limit: exchange-capabilities|auth
             max-allowed-failures: 0
-            exec_mode: parallel
+            commitment_mode: parallel
           - sim: ethereum/engine
             sim-limit: withdrawals
             max-allowed-failures: 0
-            exec_mode: serial
+            commitment_mode: serial
           - sim: ethereum/engine
             sim-limit: withdrawals
             max-allowed-failures: 0
-            exec_mode: parallel
+            commitment_mode: parallel
           - sim: ethereum/engine
             sim-limit: cancun
             max-allowed-failures: 0
-            exec_mode: serial
+            commitment_mode: serial
           - sim: ethereum/engine
             sim-limit: cancun
             max-allowed-failures: 0
-            exec_mode: parallel
+            commitment_mode: parallel
           - sim: ethereum/engine
             sim-limit: api
             max-allowed-failures: 0
-            exec_mode: serial
+            commitment_mode: serial
           - sim: ethereum/engine
             sim-limit: api
             max-allowed-failures: 0
-            exec_mode: parallel
+            commitment_mode: parallel
           - sim: ethereum/rpc-compat
             sim-limit: ".*"
             max-allowed-failures: 0
-            exec_mode: serial
+            commitment_mode: serial
           - sim: ethereum/rpc-compat
             sim-limit: ".*"
             max-allowed-failures: 0
-            exec_mode: parallel
+            commitment_mode: parallel
           - sim: devp2p
             sim-limit: eth
             max-allowed-failures: 0
-            exec_mode: serial
+            commitment_mode: serial
           # discv5 exercises peer discovery, not the EL exec path, so it runs in
-          # just one exec mode — duplicating it in the serial leg adds no signal.
+          # just one commitment mode — duplicating it in the serial leg adds no signal.
           - sim: devp2p
             sim-limit: eth|discv5
             max-allowed-failures: 0
-            exec_mode: parallel
+            commitment_mode: parallel
     steps:
       - name: Checkout Erigon
         uses: actions/checkout@v7
@@ -149,10 +150,10 @@ jobs:
       - name: Get dependencies and build hive
         env:
           EXECUTION_APIS_REF: ${{ steps.hive-version.outputs.execution_apis_ref }}
-          # Toggle dbg.Exec3Parallel inside the hive erigon container.
-          # We bake this as an ENV directive into the client Dockerfile so
-          # every erigon instance hive launches inherits it.
-          ERIGON_EXEC3_PARALLEL: ${{ matrix.exec_mode == 'parallel' && 'true' || 'false' }}
+          # Toggle statecfg.ExperimentalParallelCommitment inside the hive
+          # erigon container. We bake this as an ENV directive into the client
+          # Dockerfile so every erigon instance hive launches inherits it.
+          ERIGON_COMMITMENT_PARALLEL: ${{ matrix.commitment_mode == 'parallel' && 'true' || 'false' }}
         run: |
           cd hive
           retry() {
@@ -175,10 +176,10 @@ jobs:
             echo "ERROR: failed to repoint hive's erigon client Dockerfile at hive/erigon:cilocal"
             exit 1
           fi
-          # Inject ERIGON_EXEC3_PARALLEL into the runtime image so the
+          # Inject ERIGON_COMMITMENT_PARALLEL into the runtime image so the
           # erigon process inside hive picks it up. Append as the last layer
           # so it doesn't invalidate earlier build caches.
-          echo "ENV ERIGON_EXEC3_PARALLEL=${ERIGON_EXEC3_PARALLEL}" >> clients/erigon/Dockerfile
+          echo "ENV ERIGON_COMMITMENT_PARALLEL=${ERIGON_COMMITMENT_PARALLEL}" >> clients/erigon/Dockerfile
           # Pin the execution-apis ref used by the rpc-compat simulator so that
           # upstream test additions don't break CI unexpectedly.
           # SECURITY: value comes from hive-versions.json which fork PRs can modify;
@@ -254,13 +255,13 @@ jobs:
       - name: Compute artifact name
         id: artifact-name
         env:
-          RAW_NAME: hive-workspace-log-${{ matrix.sim }}-${{ matrix.sim-limit }}-${{ matrix.exec_mode }}
+          RAW_NAME: hive-workspace-log-${{ matrix.sim }}-${{ matrix.sim-limit }}-${{ matrix.commitment_mode }}
         run: echo "name=${RAW_NAME//[^A-Za-z0-9._-]/_}" >> "$GITHUB_OUTPUT"
 
       - name: Upload output log
         uses: actions/upload-artifact@v7
         with:
-          # exec_mode in the artifact name keeps the two matrix entries from
+          # commitment_mode in the artifact name keeps the two matrix entries from
           # clobbering each other's logs on the same artifact key.
           name: ${{ steps.artifact-name.outputs.name }}
           path: hive/workspace/logs
