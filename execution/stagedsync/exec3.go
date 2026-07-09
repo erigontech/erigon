@@ -124,8 +124,8 @@ func ExecV3(ctx context.Context,
 		return err
 	}
 
-	agg := cfg.db.(dbstate.HasAgg).Agg().(*dbstate.Aggregator)
 	if isApplyingBlocks {
+		agg := cfg.db.(dbstate.HasAgg).Agg().(*dbstate.Aggregator)
 		if initialCycle {
 			agg.PresetNonChainTipConcurrency()
 		} else {
@@ -230,7 +230,6 @@ func ExecV3(ctx context.Context,
 				enableChaosMonkey: execStage.CurrentSyncCycle.IsInitialCycle,
 				hooks:             hooks,
 			},
-			agg:         agg,
 			workerCount: cfg.syncCfg.ExecWorkerCount,
 		}
 		pe.lastCommittedTxNum.Store(inputTxNum)
