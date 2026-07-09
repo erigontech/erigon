@@ -71,9 +71,23 @@ read-fields the reference emits.
 2. **Remove `refreshVersionedAccount`** (3 sites: getVersionedAccount:1074,
    getStateObject cached:1584, getStateObject stateReader-path:1675). Execution
    path goes lean (OCC records only genuine dependency reads; no incarnation).
-   Cell-source `SetCode` (reads `so.data.CodeHash`/`original`). Update the 4
-   footprint tests (`TestApplyVersionedWrites_*GeneratesBalanceRead`,
-   `TestVersionedRead_G4_RefreshRecordsTypedDefaultInReadSet`) to the new model.
+   The three removals are mechanical and build. Two things must be handled with
+   them:
+   - **`SetCode` net-zero elision** (the hard part). It reads `so.data.CodeHash`
+     (baseCodeHash) *and* `so.original.CodeHash` (matchesOriginal). Without
+     refresh, BOTH are the domain-committed value and miss a prior-tx
+     CodeHashPath-only write. baseCodeHash is easily cell-sourced
+     (`GetCodeHash`), but `original` must become the **tx-start versionMap
+     codehash**, not the domain original — see
+     `TestSetCodeParallel_RevertToOriginalBug` (TX88 clears code, TX90 re-sets
+     it; matchesOriginal wrongly fires against domain original A). This elision
+     is **BAL-load-bearing**: `applyToCode` does NOT net-zero-fold code changes,
+     so the write-time elision is what folds an EIP-7702 delegate-then-reset —
+     dropping it changes the BAL. So `original` needs a correct tx-start cell
+     source; verify against eest.
+   - Update the 4 footprint tests (`TestApplyVersionedWrites_*GeneratesBalanceRead`,
+     `TestVersionedRead_G4_RefreshRecordsTypedDefaultInReadSet`) — they assert
+     the now-confirmed BAL-irrelevant balance reads; rewrite to the lean model.
 3. **Write slices** (nonce/code/storage): drop stateObject materialization for
    existing-live accounts (mirror `writeBalanceVersioned`), prev via a
    **non-recording** read (versionedWrites-then-base). Now consistent with the
