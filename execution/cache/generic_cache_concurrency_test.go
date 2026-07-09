@@ -126,3 +126,56 @@ func TestGenericCache_PutNotLostAcrossGrow(t *testing.T) {
 		require.False(t, regressed.Load(), "round %d: a striped put was lost across a grow (older value resurfaced)", round)
 	}
 }
+
+// A conditional put must keep deferring to a live entry across a grow: if the
+// resize ever publishes a generation the entry hasn't reached yet, a
+// PutIfAbsent arriving in that gap finds the key absent and inserts its
+// (stale) value — the writer class the if-absent semantics exist to close.
+// The prober watches for the generation swap and bursts conditional puts the
+// moment it lands, mimicking a fill thread that starts a put mid-resize; its
+// idle spin keeps the hot key MRU so LRU eviction cannot produce the stale
+// value legitimately.
+func TestGenericCache_PutIfAbsentDefersAcrossGrow(t *testing.T) {
+	fresh := []byte("fresh-value")
+	stale := []byte("stale-value")
+	for round := 0; round < 50; round++ {
+		c := NewGenericCache[[]byte](64*datasize.MB, func(v []byte) int { return len(v) }, ModeEvictLRU)
+		hot := []byte("hot-key")
+		c.Put(hot, fresh, 10)
+
+		stop := make(chan struct{})
+		var wg sync.WaitGroup
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			before := c.data.Load()
+			for {
+				select {
+				case <-stop:
+					return
+				default:
+				}
+				if c.data.Load() != before {
+					for j := 0; j < 4096; j++ {
+						c.PutIfAbsent(hot, stale, 5)
+					}
+					return
+				}
+				c.Get(hot)
+			}
+		}()
+
+		key := make([]byte, 8)
+		for i := 0; i < 3*genericCacheStartCapacity; i++ {
+			binary.BigEndian.PutUint64(key, uint64(1+i))
+			c.Put(key, []byte{1}, 1)
+		}
+
+		close(stop)
+		wg.Wait()
+		v, ok := c.Get(hot)
+		require.True(t, ok, "round %d: hot key missing", round)
+		require.Equal(t, fresh, v, "round %d: PutIfAbsent bypassed the live entry across a grow", round)
+		c.Close()
+	}
+}

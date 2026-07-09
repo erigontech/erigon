@@ -59,11 +59,11 @@ type entry[T any] struct {
 // GenericCache is a sharded, LRU-evicting bounded cache for key-value
 // data. Eviction mode is fixed at construction (see policy.go).
 type GenericCache[T any] struct {
-	// data is the sharded LRU, replaced wholesale on a jump-grow. Load it once per
-	// operation, inside the stripe for writes: maybeGrow swaps generations first
-	// and then migrates under the same stripes, so a striped write is never
-	// silently undone by the migration (an update lost that way would resurface
-	// the older value as live — a stale serve, not a benign miss).
+	// data is the sharded LRU, replaced wholesale on a jump-grow. The swap
+	// happens with every put stripe held and the new generation fully copied,
+	// so a striped write can never land in a retired generation (a write lost
+	// that way would resurface the older value as live — a stale serve, not a
+	// benign miss) and no operation ever sees a partially-copied one.
 	data      atomic.Pointer[freelru.ShardedLRU[uint64, entry[T]]]
 	capacityB datasize.ByteSize
 	mode      Mode
@@ -198,16 +198,15 @@ func (c *GenericCache[T]) newShards(capacity uint32) *freelru.ShardedLRU[uint64,
 
 // maybeGrow jump-resizes the LRU one step larger when it is full, the ceiling
 // hasn't been reached, and the shared envelope can fund the step. Otherwise the
-// LRU keeps its size and freelru evicts within it. Must be called with no
-// stripe held (it sweeps every stripe).
+// LRU keeps its size and freelru evicts within it. Must not be called with a
+// stripe held (it takes them all).
 //
-// Swap first, then migrate: entries copied before the swap could be updated in
-// the old generation by a concurrent striped writer, and the stale copy would
-// resurface as live. After the swap, the stripe sweep fences the writers that
-// loaded the old generation before it, freezing the old generation; migration
-// then moves each key under its stripe, if-absent, so it never clobbers a
-// fresher post-swap write. Until a key is migrated, reads of it miss — that
-// (and only that) is the benign transient of a resize.
+// The copy runs with every put stripe held: writers (and the striped
+// stale-drop) are excluded, so no write can land in the generation being
+// retired and a conditional put never sees a mid-resize gap it could fill
+// with a stale value; readers stay on the retiring generation until the swap
+// and never miss. Grows are a handful of steps per cache lifetime, so the
+// stall is a bounded one-off, not a steady-state cost.
 func (c *GenericCache[T]) maybeGrow() {
 	c.resizeMu.Lock()
 	defer c.resizeMu.Unlock()
@@ -225,26 +224,20 @@ func (c *GenericCache[T]) maybeGrow() {
 	if !cachebudget.Global.Reserve(delta) {
 		return
 	}
-	next := c.newShards(newCap)
-	c.data.Store(next)
+	next := c.newShards(newCap) // allocate before excluding writers
 	for i := range c.putStripes {
 		c.putStripes[i].Lock()
-		c.putStripes[i].Unlock() //nolint:gocritic,staticcheck // empty critical section is the writer fence
 	}
 	for _, k := range old.Keys() {
-		mu := &c.putStripes[k&(putStripeCount-1)]
-		mu.Lock()
 		if v, ok := old.Get(k); ok {
-			if _, exists := next.Get(k); exists {
-				// A post-swap write superseded this entry; its residency ends here.
-				c.currentSize.Add(-int64(v.size))
-			} else {
-				next.Add(k, v)
-			}
+			next.Add(k, v)
 		}
-		mu.Unlock()
 	}
+	c.data.Store(next)
 	c.curCap.Store(newCap)
+	for i := range c.putStripes {
+		c.putStripes[i].Unlock()
+	}
 	c.reservedBytes += delta
 }
 
@@ -336,13 +329,16 @@ func (c *GenericCache[T]) put(key []byte, value T, txNum uint64, overwrite bool)
 	newSize := len(key) + valBytes + 24
 	ep := c.coh.Epoch()
 
-	// Grow toward the ceiling before taking the stripe — maybeGrow sweeps every
-	// stripe, so growing while holding one would deadlock.
-	if c.mode != ModeNoOp {
-		if curCap := c.curCap.Load(); curCap < c.maxCap && c.data.Load().Len() >= int(curCap) {
+	// Grow after the stripe is released (defers run LIFO): maybeGrow takes
+	// every stripe, so triggering it under one would deadlock. Detection stays
+	// on the insert path below — Len locks every shard, too costly per warm
+	// update.
+	needGrow := false
+	defer func() {
+		if needGrow {
 			c.maybeGrow()
 		}
-	}
+	}()
 
 	mu := &c.putStripes[h&(putStripeCount-1)]
 	mu.Lock()
@@ -370,6 +366,12 @@ func (c *GenericCache[T]) put(key []byte, value T, txNum uint64, overwrite bool)
 			c.dropped.Add(1)
 			return
 		}
+	}
+
+	// This insert lands in a full LRU with ceiling headroom — grow one step
+	// (after the stripe is released, see above).
+	if curCap := c.curCap.Load(); c.mode != ModeNoOp && curCap < c.maxCap && lru.Len() >= int(curCap) {
+		needGrow = true
 	}
 
 	// In ModeEvictLRU the byte budget is enforced through the entry-count cap,
