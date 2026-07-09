@@ -6,7 +6,7 @@
 # manifests (.meta/index.json); nothing is hard-coded:
 #
 #   1. partition (stable): the fork-split families each run every fork exactly
-#      once — spec race shards (run-eest-spec-test.sh, blocktest --run) over
+#      once — spec race shards (eest-spec-shards.yml `run` regexes) over
 #      blockchain_test, and hive consume-enginex (test-hive-eest.yml sim-limit)
 #      over blockchain_test_engine_x. A gap silently never runs a fork; an overlap
 #      runs it twice.
@@ -28,7 +28,7 @@ set -euo pipefail
 here=$(cd "$(dirname "$0")/.." && pwd)
 stable_index="${1:-$here/test-fixtures-cache/eest_stable/fixtures/.meta/index.json}"
 devnet_index="${2:-$here/test-fixtures-cache/eest_devnet/fixtures/.meta/index.json}"
-runner="$here/tools/run-eest-spec-test.sh"
+shards="$here/tools/eest-spec-shards.yml"
 hive="$here/.github/workflows/test-hive-eest.yml"
 
 for tool in jq yq awk; do
@@ -36,12 +36,44 @@ for tool in jq yq awk; do
 done
 [[ -f "$stable_index" ]] || { echo "check-eest-shard-coverage: stable index not found: $stable_index" >&2; exit 1; }
 
-# Live regexes, one "shard=regex" per line, parsed from the shard definitions.
+# Live regexes, one "route=regex" per line, read from the shard manifest's `run`
+# keys. -sequential/-parallel variants of a fork carry the same regex, so strip
+# the mode suffix and dedupe to one entry per fork route.
 race_regexes() {
-	awk '
-		/blocktests-stable-race-[a-z0-9-]+\)/ { n=$0; sub(/.*blocktests-stable-race-/,"",n); sub(/\).*/,"",n) }
-		n!="" && /--run/ { r=$0; sub(/.*--run '\''/,"",r); sub(/'\''.*/,"",r); print n"="r; n="" }
-	' "$runner"
+	yq -o=json '.' "$shards" \
+		| jq -r '.[]
+			| select(.shard | test("^blocktests-stable-race-"))
+			| select((.run // "") != "")
+			| "\(.shard | sub("^blocktests-stable-race-"; "") | sub("-(sequential|parallel)$"; ""))=\(.run)"' \
+		| sort -u
+}
+# A fork's -sequential/-parallel race shards must carry the same non-empty run
+# regex. The partition check only sees the deduped union, so a run dropped or
+# emptied on one mode still covers the fork via the other — while that mode hits
+# the runner's glob arm with no --run and races the whole corpus.
+check_race_mode_parity() {
+	echo "==== race shard -sequential/-parallel run parity ===="
+	local rows
+	rows=$(yq -o=json '.' "$shards" | jq -r '
+		.[]
+		| select(.shard | test("^blocktests-stable-race-.+-(sequential|parallel)$"))
+		| (.shard | capture("^blocktests-stable-race-(?<route>.+)-(?<mode>sequential|parallel)$")) as $m
+		| "\($m.route)\t\($m.mode)\t\(.run // "")"')
+	if [[ -z "${rows//[[:space:]]/}" ]]; then
+		echo "  ERROR: no stable race -sequential/-parallel shards found (shard naming changed?)" >&2
+		return 1
+	fi
+	printf '%s\n' "$rows" | awk -F'\t' '
+		{ run[$1 SUBSEP $2]=$3; seen[$1]=1 }
+		END {
+			for (r in seen) {
+				s=run[r SUBSEP "sequential"]; p=run[r SUBSEP "parallel"]
+				if (s=="" || p=="") { printf "  MISSING/EMPTY  %-11s sequential=[%s] parallel=[%s]\n", r, s, p; bad++ }
+				else if (s != p)    { printf "  DRIFT          %-11s sequential=[%s] parallel=[%s]\n", r, s, p; bad++ }
+				else                { printf "  ok  %-11s = %s\n", r, s }
+			}
+			if (bad) { print "  => -sequential/-parallel of a fork must share one non-empty run regex" > "/dev/stderr"; exit 1 }
+		}'
 }
 hive_consume_enginex_regexes() {
 	yq -o=json '.jobs.test-hive-eest.strategy.matrix.include' "$hive" \
@@ -127,6 +159,8 @@ check_hive_eip_filter() {
 rc=0
 check_partition "spec race shards (blocktest --run)"  "$stable_index" blockchain_test        ""                     "$(race_regexes)" || rc=1
 echo
+check_race_mode_parity || rc=1
+echo
 check_partition "hive consume-enginex (sim-limit)"    "$stable_index" blockchain_test_engine_x "eels/consume-enginex/" "$(hive_consume_enginex_regexes)" || rc=1
 echo
 if [[ -f "$devnet_index" ]]; then
@@ -139,6 +173,6 @@ fi
 if (( rc == 0 )); then
 	echo "EEST shard coverage OK."
 else
-	echo "EEST shard coverage FAILED: fix the regexes in tools/run-eest-spec-test.sh and/or .github/workflows/test-hive-eest.yml." >&2
+	echo "EEST shard coverage FAILED: fix the race run regexes in tools/eest-spec-shards.yml and/or the hive sim-limit in .github/workflows/test-hive-eest.yml." >&2
 fi
 exit $rc
