@@ -17,8 +17,7 @@ jobs:
       ${{ !github.event.pull_request.number
       || (!github.event.pull_request.draft
       && !contains(github.event.pull_request.labels.*.name, 'skip-uncaching')) }}
-    runs-on:
-      group: hive
+    runs-on: ubuntu-latest
     strategy:
       # In merge_group: cancel sibling shards on first failure so ci-gate's
       # `needs` reach terminal state quickly and the broken PR can be evicted.

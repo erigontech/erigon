@@ -11,8 +11,7 @@ concurrency:
 
 jobs:
   test-hive-eest:
-    runs-on:
-      group: hive
+    runs-on: ubuntu-latest
     name: test-hive-eest (${{ matrix.shard }}, ${{ matrix.exec_mode }})
     strategy:
       # In merge_group: cancel sibling shards on first failure so ci-gate's
