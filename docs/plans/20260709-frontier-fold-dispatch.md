@@ -181,14 +181,14 @@ The fresh-whale regression is documented; Task 8's perf gate records it and the 
 
 **Files:**
 - Create: `execution/commitment/fold_pool_lifecycle_test.go`
-- Modify: `execution/commitment/fold_pool.go`
+- ~~Modify: `execution/commitment/fold_pool.go`~~ — no production change needed; the existing recycle/cleanup paths (`run`'s base-cleanup defer + `recycleTaskDeferred`, `seedMerge`'s cleanup-on-error, `dispatchFrontier`'s `putDeferredUpdates`, `applyDeferred`'s recycle defer) already fail closed. The new tests pin that behavior as a regression net.
 
-- [ ] failable MockState (Branch/PutBranch error after N calls) driving every recycle path: worker error mid-leaf, merge-seed error, deferred-apply error → no double-pooled workers, no leaked deferred updates, committer reusable after `Reset`
-- [ ] ctx-cancel mid-Process: clean unwind, trie restorable via `SetState`, second Process after cancel yields the sequential root
-- [ ] fail-closed assertions: any task error drops ALL deferred and writes nothing to the store (snapshot untouched); unseedable merge hard-errors rather than emitting a branch
-- [ ] poisoning ctx factory that invalidates buffers after `cleanup()` — regression net for the mmap use-after-munmap class; every task's reads stay in its own pin scope
-- [ ] `go test -race ./execution/commitment/` clean
-- [ ] run tests — must pass before next task
+- [x] failable `failState` (wraps `MockState`; per-op `injector` fires errInjected/empty after N matching calls) driving every recycle path: `TestFoldPoolLifecycle_LeafReadErrorFailsClosed` (account read fault mid-leaf → store untouched), `TestFoldPoolLifecycle_MergeSeedFailsClosed` (targeted `Branch(accPrefix)` fault at `fp.run`'s seed → no task leaks deferred), `TestFoldPoolLifecycle_ApplyErrorFailsClosed` (first `PutBranch` fault). `TestFoldPoolLifecycle_ReusableAfterReset` folds the same batch cleanly on the same committer after `Reset`; double-pooled-worker net = the package `-race` run
+- [x] ctx-cancel: `TestFoldPoolLifecycle_ContextCancel` (cancelled ctx → clean unwind, store untouched, second Process over the `SetState`-restored template yields the sequential root + branches); `TestFoldPool_DispatchCancels` pins `dispatchFoldTasks` returns the cancellation promptly (no hang)
+- [x] fail-closed: every task-error test asserts `requireBranchesUnchanged` (writes nothing); `TestFoldPoolLifecycle_MergeSeedFailsClosed/vanished_branch` asserts an absent (empty) seed hard-errors with `errStorageBaseNotBranch` rather than folding a sibling-dropping empty wall
+- [x] `TestFoldPoolLifecycle_PinScope`: `pinState`/`pinCtx` factory poisons its bytes and flags any read after its own `cleanup()`; the fold matches the sequential root + branches with `violations==0` — the mmap use-after-munmap regression net
+- [x] `go test -race ./execution/commitment/` clean (package, 86s; the `ld` LC_DYSYMTAB warning is a macOS toolchain artifact, not a race)
+- [x] run tests — package green (`-count=1`), lifecycle + dispatch tests `-race` clean, `make lint` clean
 
 ### Task 8: Performance gate
 
