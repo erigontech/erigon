@@ -34,6 +34,7 @@ import (
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/background"
+	"github.com/erigontech/erigon/common/concurrent"
 	"github.com/erigontech/erigon/common/dbg"
 	dir2 "github.com/erigontech/erigon/common/dir"
 	"github.com/erigontech/erigon/common/estimate"
@@ -131,9 +132,15 @@ type BlockRetire struct {
 	heimdallStore         heimdall.Store
 	bridgeStore           bridge.Store
 	borDataNotReadyBefore time.Time
+
+	// Close cancels the in-flight retire (ctx/stopFn) and waits for it (background).
+	background concurrent.ClosingWaitGroup
+	ctx        context.Context
+	stopFn     context.CancelFunc
 }
 
 func NewBlockRetire(
+	ctx context.Context,
 	compressWorkers int,
 	dirs datadir.Dirs,
 	blockReader services.FullBlockReader,
@@ -168,6 +175,7 @@ func NewBlockRetire(
 		bridgeStore:           bridgeStore,
 		borDataNotReadyBefore: time.Now(),
 	}
+	r.ctx, r.stopFn = context.WithCancel(ctx)
 	r.workers.Store(int32(compressWorkers))
 	return r
 }
@@ -401,9 +409,15 @@ func (br *BlockRetire) RetireBlocksInBackground(
 		return false
 	}
 
-	go func() {
+	started := br.background.TryGo(func() {
 		defer onDone()
 		defer br.working.Store(false)
+
+		// Cancel on either the caller's ctx or Close (br.ctx).
+		ctx, cancel := context.WithCancel(ctx)
+		defer cancel()
+		stopOnClose := context.AfterFunc(br.ctx, cancel)
+		defer stopOnClose()
 
 		if br.snBuildAllowed != nil {
 			//we are inside own goroutine - it's fine to block here
@@ -434,9 +448,23 @@ func (br *BlockRetire) RetireBlocksInBackground(
 			br.logger.Error("[snapshots] retire blocks", "err", err)
 			return
 		}
-	}()
+	})
+	if !started { // Close has latched; no retire was started
+		br.working.Store(false)
+		return false
+	}
 
 	return true
+}
+
+// Close cancels the in-flight background retire and waits for it, so the DB and
+// snapshots can be torn down safely afterwards. Idempotent.
+func (br *BlockRetire) Close() {
+	if !br.background.BeginClose() {
+		return
+	}
+	br.stopFn()
+	br.background.Wait()
 }
 
 func (br *BlockRetire) RetireBlocks(
@@ -745,11 +773,11 @@ func DumpTxs(ctx context.Context, db kv.RoDB, chainConfig *chain.Config, blockFr
 		}
 
 		if doWarmup && !warmupSenders.Load() && blockNum%1_000 == 0 {
-			clean := kv.ReadAhead(warmupCtx, db, warmupSenders, kv.Senders, hexutil.EncodeTs(blockNum), 10_000)
+			clean := kv.ReadAheadDeprecated(warmupCtx, db, warmupSenders, kv.Senders, hexutil.EncodeTs(blockNum), 10_000)
 			defer clean()
 		}
 		if doWarmup && !warmupTxs.Load() && blockNum%1_000 == 0 {
-			clean := kv.ReadAhead(warmupCtx, db, warmupTxs, kv.EthTx, body.BaseTxnID.Bytes(), 100*10_000)
+			clean := kv.ReadAheadDeprecated(warmupCtx, db, warmupTxs, kv.EthTx, body.BaseTxnID.Bytes(), 100*10_000)
 			defer clean()
 		}
 		senders, err := rawdb.ReadSenders(tx, h, blockNum)

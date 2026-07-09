@@ -231,3 +231,8 @@ func (cc *ExecutionClientDirect) GetBlobs(ctx context.Context, versionedHashes [
 	}
 	return blobs, proofs, nil
 }
+
+// In direct mode the execution layer is the in-process Erigon node, so report it directly.
+func (cc *ExecutionClientDirect) GetClientVersionV1(_ context.Context, _ *engine_types.ClientVersionV1) ([]engine_types.ClientVersionV1, error) {
+	return []engine_types.ClientVersionV1{engine_types.LocalClientVersionV1()}, nil
+}
