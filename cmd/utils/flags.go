@@ -1117,6 +1117,10 @@ var (
 		Name:  "prune.commitment-history.distance",
 		Usage: "Keep commitment history only for the latest N blocks. Older snapshots are skipped at download time. 0 (default) keeps everything. Requires --prune.include-commitment-history.",
 	}
+	PersistReceiptsDistanceFlag = cli.Uint64Flag{
+		Name:  "persist.receipts.distance",
+		Usage: "Keep the receipt cache only for the latest N blocks. Older snapshots are skipped at download time. 0 (default) keeps everything. Requires --persist.receipts.",
+	}
 	AlwaysGenerateChangesetsFlag = cli.BoolFlag{
 		Name:  "experimental.always-generate-changesets",
 		Usage: "Allows to override changesets generation logic",

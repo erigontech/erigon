@@ -109,15 +109,17 @@ func canSnapshotBePruned(name string) bool {
 //     reaches their To and pruneMode.History is enabled.
 //   - commitment-domain state history files: additionally blacklisted when
 //     minCommitmentHistoryStep >= their To, independent of pruneMode.History.
+//   - rcache-domain state history files: additionally blacklisted when
+//     minReceiptsStep >= their To, independent of pruneMode.History.
 //   - transaction segments: blacklisted by distance when pruneMode.Blocks is a
 //     finite Distance (res.To <= blockPrune), or by chain history-expiry when
 //     pruneMode.Blocks is KeepPostMergeBlocksPruneMode and cc has MergeHeight set
 //     (cc.IsPreMerge(res.From)). KeepAllBlocksPruneMode leaves tx segments alone.
-//   - bodies, headers, rcache, domain files: never blacklisted here.
+//   - bodies, headers, domain files: never blacklisted here.
 func buildBlackListForPruning(
 	pruneMode prune.Mode,
 	cc *chain.Config,
-	historyStepPrune, minCommitmentHistoryStep kv.Step, minBlockToDownload, blockPrune uint64,
+	historyStepPrune, minCommitmentHistoryStep, minReceiptsStep kv.Step, minBlockToDownload, blockPrune uint64,
 	preverified snapcfg.Preverified,
 ) (map[string]struct{}, error) {
 
@@ -126,9 +128,10 @@ func buildBlackListForPruning(
 	historyEnabled := pruneMode.History.Enabled()
 	blocksEnabled := pruneMode.Blocks.Enabled()
 	commitmentHistoryEnabled := minCommitmentHistoryStep > 0
+	receiptsEnabled := minReceiptsStep > 0
 	applyChainHistoryExpiry := pruneMode.Blocks == prune.KeepPostMergeBlocksPruneMode && cc != nil && cc.MergeHeight != nil
 
-	if !historyEnabled && !blocksEnabled && !commitmentHistoryEnabled && !applyChainHistoryExpiry {
+	if !historyEnabled && !blocksEnabled && !commitmentHistoryEnabled && !receiptsEnabled && !applyChainHistoryExpiry {
 		return blackList, nil
 	}
 
@@ -138,6 +141,19 @@ func buildBlackListForPruning(
 
 	for _, p := range preverified.Items {
 		name := p.Name
+		// Receipts-history filter runs independently of History pruning and of the
+		// canSnapshotBePruned rcache exclusion, so persist-receipts configs skip
+		// old rcache history segments by their own window.
+		if receiptsEnabled && isStateHistory(name) && strings.Contains(name, kv.RCacheDomain.String()) {
+			res, _, ok := snaptype.ParseFileName("", name)
+			if !ok {
+				return blackList, errors.New("invalid state snapshot name")
+			}
+			if minReceiptsStep >= kv.Step(res.To) {
+				blackList[name] = struct{}{}
+			}
+			continue
+		}
 		// Don't prune unprunable files
 		if !canSnapshotBePruned(name) {
 			continue
@@ -207,8 +223,8 @@ func getMinimumBlocksToDownload(
 	ctx context.Context,
 	blockReader blockReader,
 	maxStateStep, stepSize uint64,
-	stateHistoryPruneTo, commitmentHistoryPruneTo uint64,
-) (minBlockToDownload uint64, minHistoryStep, minCommitmentHistoryStep kv.Step, err error) {
+	stateHistoryPruneTo, commitmentHistoryPruneTo, receiptsHistoryPruneTo uint64,
+) (minBlockToDownload uint64, minHistoryStep, minCommitmentHistoryStep, minReceiptsStep kv.Step, err error) {
 	started := time.Now()
 	var iterations int64
 	defer func() {
@@ -221,6 +237,7 @@ func getMinimumBlocksToDownload(
 	minToDownload := uint64(math.MaxUint64)
 	minHistoryStep = kv.Step(math.MaxUint32)
 	minCommitmentHistoryStep = kv.Step(math.MaxUint32)
+	minReceiptsStep = kv.Step(math.MaxUint32)
 	stateTxNum := maxStateStep * stepSize
 	if err := blockReader.IterateFrozenBodies(func(blockNum, baseTxNum, txAmount uint64) error {
 		if iterations%1e6 == 0 {
@@ -235,6 +252,9 @@ func getMinimumBlocksToDownload(
 		if blockNum == commitmentHistoryPruneTo {
 			minCommitmentHistoryStep = stepAtTxNum(baseTxNum, stepSize)
 		}
+		if blockNum == receiptsHistoryPruneTo {
+			minReceiptsStep = stepAtTxNum(baseTxNum, stepSize)
+		}
 		if stateTxNum <= baseTxNum { // only consider the block if it
 			return nil
 		}
@@ -247,10 +267,10 @@ func getMinimumBlocksToDownload(
 		}
 		return nil
 	}); err != nil {
-		return 0, 0, 0, err
+		return 0, 0, 0, 0, err
 	}
 
-	return frozenBlocks - minToDownload, minHistoryStep, minCommitmentHistoryStep, nil
+	return frozenBlocks - minToDownload, minHistoryStep, minCommitmentHistoryStep, minReceiptsStep, nil
 }
 
 func getMaxStepRangeInSnapshots(preverified snapcfg.Preverified) (uint64, error) {
@@ -296,7 +316,7 @@ func computeBlocksToPrune(blockReader blockReader, p prune.Mode) (blocksToPrune 
 // chain-history-expiry for blocks. The KeepPostMergeBlocksPruneMode + MergeHeight
 // branch covers that.
 func downloadFilteringApplies(pruneMode prune.Mode, cc *chain.Config) bool {
-	if pruneMode.History.Enabled() || pruneMode.Blocks.Enabled() || pruneMode.CommitmentHistoryAmount().Enabled() {
+	if pruneMode.History.Enabled() || pruneMode.Blocks.Enabled() || pruneMode.CommitmentHistoryAmount().Enabled() || pruneMode.ReceiptsAmount().Enabled() {
 		return true
 	}
 	return pruneMode.Blocks == prune.KeepPostMergeBlocksPruneMode && cc != nil && cc.MergeHeight != nil
@@ -453,8 +473,9 @@ func SyncSnapshots(
 				return err
 			}
 			commitmentHistoryPrune := prune.CommitmentHistoryAmount().PruneTo(frozenBlocks)
-			minBlockToDownload, minHistoryStep, minCommitmentHistoryStep, err := getMinimumBlocksToDownload(
-				ctx, blockReader, maxStateStep, stepSize, historyPrune, commitmentHistoryPrune)
+			receiptsPrune := prune.ReceiptsAmount().PruneTo(frozenBlocks)
+			minBlockToDownload, minHistoryStep, minCommitmentHistoryStep, minReceiptsStep, err := getMinimumBlocksToDownload(
+				ctx, blockReader, maxStateStep, stepSize, historyPrune, commitmentHistoryPrune, receiptsPrune)
 			if err != nil {
 				return err
 			}
@@ -467,8 +488,17 @@ func SyncSnapshots(
 					"pruneToBlock", commitmentHistoryPrune,
 					"minStep", minCommitmentHistoryStep)
 			}
+			// Receipts filtering is opt-in (requires --persist.receipts); a zero
+			// step disables it in buildBlackListForPruning.
+			if !prune.ReceiptsAmount().Enabled() {
+				minReceiptsStep = 0
+			} else if minReceiptsStep > 0 {
+				log.Info(fmt.Sprintf("[%s] Filtering old receipt-cache segments", logPrefix),
+					"pruneToBlock", receiptsPrune,
+					"minStep", minReceiptsStep)
+			}
 
-			blackListForPruning, err = buildBlackListForPruning(prune, cc, minHistoryStep, minCommitmentHistoryStep, minBlockToDownload, blockPrune, preverifiedBlockSnapshots)
+			blackListForPruning, err = buildBlackListForPruning(prune, cc, minHistoryStep, minCommitmentHistoryStep, minReceiptsStep, minBlockToDownload, blockPrune, preverifiedBlockSnapshots)
 			if err != nil {
 				return err
 			}

@@ -36,8 +36,9 @@ import (
 
 // TestRetireCutoffs_ConvertsBlockDistanceToTxNum pins the per-domain
 // block-distance-to-txNum conversion: Default drives most domains, CommitmentDomain
-// gets its own window, RCacheDomain follows the history window. The aggregator
-// floors txNum to its file step, so this layer stays in txNum.
+// gets its own window, RCacheDomain follows the history window by default or its
+// own receipts window when set. The aggregator floors txNum to its file step, so
+// this layer stays in txNum.
 func TestRetireCutoffs_ConvertsBlockDistanceToTxNum(t *testing.T) {
 	logger := log.New()
 	dirs := datadir.New(t.TempDir())
@@ -103,5 +104,26 @@ func TestRetireCutoffs_ConvertsBlockDistanceToTxNum(t *testing.T) {
 		require.False(t, cutoffs.IsNoop())
 		require.Equal(t, uint64(0), cutoffs.Default)
 		require.Equal(t, uint64(100), cutoffs.PerDomain[kv.CommitmentDomain])
+	})
+
+	t.Run("finite history + finite receipts -> rcache uses its own window", func(t *testing.T) {
+		// history Distance(10) -> block 20, txNum 200; receipts Distance(5) ->
+		// block 25, txNum 250 (a narrower window is retired more aggressively).
+		pm := prune.Mode{Initialised: true, History: prune.Distance(10), Receipts: prune.Distance(5)}
+		cutoffs, err := historyRetireCutoffs(ctx, tx, br, pm, forward)
+		require.NoError(t, err)
+		require.False(t, cutoffs.IsNoop())
+		require.Equal(t, uint64(200), cutoffs.Default)
+		require.Equal(t, uint64(250), cutoffs.PerDomain[kv.RCacheDomain], "rcache uses its own receipts window, not the history one")
+	})
+
+	t.Run("archive history + finite receipts -> rcache only", func(t *testing.T) {
+		// History keep-all -> Default 0; receipts Distance(20) -> block 10, txNum 100.
+		pm := prune.Mode{Initialised: true, History: prune.KeepAllBlocksPruneMode, Receipts: prune.Distance(20)}
+		cutoffs, err := historyRetireCutoffs(ctx, tx, br, pm, forward)
+		require.NoError(t, err)
+		require.False(t, cutoffs.IsNoop())
+		require.Equal(t, uint64(0), cutoffs.Default)
+		require.Equal(t, uint64(100), cutoffs.PerDomain[kv.RCacheDomain])
 	})
 }

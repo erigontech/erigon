@@ -620,7 +620,9 @@ func PruneExecutionStage(ctx context.Context, s *PruneState, tx kv.TemporalRwTx,
 
 // historyRetireCutoffs maps the prune mode to per-domain retirement cutoffs, in
 // txNum — the aggregator floors each to its file step. CommitmentDomain uses its
-// own --prune.commitment-history.distance window.
+// own --prune.commitment-history.distance window; RCacheDomain follows the
+// general history window by default, or its own --persist.receipts.distance
+// window when set.
 func historyRetireCutoffs(ctx context.Context, tx kv.Tx, blockReader services.FullBlockReader, pm prune.Mode, forwardProgress uint64) (cutoffs kv.RetireCutoffs, err error) {
 	historyTxNum, err := blockAmountRetireCutoffTxNum(ctx, tx, blockReader, pm.History, forwardProgress)
 	if err != nil {
@@ -630,7 +632,13 @@ func historyRetireCutoffs(ctx context.Context, tx kv.Tx, blockReader services.Fu
 	if err != nil {
 		return kv.RetireCutoffs{}, err
 	}
-	rcacheTxNum := historyTxNum // TODO: in future PR add cli flag to manage rcache distance
+	rcacheTxNum := historyTxNum
+	if pm.ReceiptsAmount().Enabled() {
+		rcacheTxNum, err = blockAmountRetireCutoffTxNum(ctx, tx, blockReader, pm.ReceiptsAmount(), forwardProgress)
+		if err != nil {
+			return kv.RetireCutoffs{}, err
+		}
+	}
 	return kv.RetireCutoffs{
 		Default: historyTxNum,
 		PerDomain: map[kv.Domain]uint64{
