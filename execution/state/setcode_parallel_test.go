@@ -1,13 +1,15 @@
 package state
 
 import (
-	"github.com/erigontech/erigon/execution/tracing"
 	"testing"
 
-	"github.com/erigontech/erigon/common/crypto"
+	"github.com/erigontech/erigon/execution/tracing"
+
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/erigontech/erigon/common/crypto"
+	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/accounts"
 )
 
@@ -122,4 +124,73 @@ func TestSetCodeParallel_RevertToOriginalBug(t *testing.T) {
 	_, hasCodeWrite := writes90.GetCode(addr)
 	assert.True(t, hasCodeWrite,
 		"TX 90 should have a CodePath write in versionedWrites (the revert-to-original optimisation should NOT have fired)")
+}
+
+// TestSetCodeParallel_NoMaterialize_DelegateThenRevoke pins the within-tx
+// delegate-then-revoke net-zero elision on the cache-free (noMaterialize) path
+// — the EIP-7702 case that regressed the BAL hive suite.
+//
+// A single tx sets a delegation on an EOA then revokes it (sets code back to
+// empty). The net effect is no code change, so both code writes must fold away.
+// Without the current-code seed, the transient stateObject rebuilt for the
+// second SetCode saw the tx-start (empty) code as its prev, computed
+// written=false for the revoke, and left the first SetCode's cell in place —
+// producing wrong code and a receiptHash mismatch.
+func TestSetCodeParallel_NoMaterialize_DelegateThenRevoke(t *testing.T) {
+	delegationCode := []byte{0xef, 0x01, 0x00,
+		0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0a,
+		0x0b, 0x0c, 0x0d, 0x0e, 0x0f, 0x10, 0x11, 0x12, 0x13, 0x14,
+	}
+	addr := accounts.InternAddress([20]byte{0xDE, 0xAD})
+
+	// EOA with no code at tx start.
+	acc := accounts.NewAccount()
+	acc.Nonce = 1
+	reader := &codeReader{addr: addr, account: &acc}
+
+	ibs := NewWithVersionMap(reader, NewVersionMap(nil))
+	ibs.SetNoMaterialize(true)
+	ibs.SetTxContext(100, 5)
+	ibs.SetVersion(0)
+
+	require.NoError(t, ibs.SetCode(addr, delegationCode, tracing.CodeChangeUnspecified))
+	require.NoError(t, ibs.SetCode(addr, nil, tracing.CodeChangeUnspecified)) // revoke
+
+	code, err := ibs.GetCode(addr)
+	require.NoError(t, err)
+	assert.Empty(t, code, "delegate-then-revoke must leave the code empty")
+
+	writes := ibs.VersionedWrites()
+	_, hasCodeWrite := writes.GetCode(addr)
+	assert.False(t, hasCodeWrite, "net-zero delegate-then-revoke must fold away the CodePath write")
+	assert.Empty(t, ibs.stateObjects, "noMaterialize SetCode must not cache a stateObject")
+}
+
+// TestGetDelegatedDesignationParallel_NoMaterialize_OwnWrite pins the multi-hop
+// EIP-7702 case: a delegation set earlier in the same tx must be visible to
+// GetDelegatedDesignation (used for the auth state-gas refund). On the
+// noMaterialize path stateObject.Code() resolves via the versionMap floor
+// (prior-tx only) and would miss this tx's own SetCode without the code seed in
+// reconstructCellFlags.
+func TestGetDelegatedDesignationParallel_NoMaterialize_OwnWrite(t *testing.T) {
+	target := accounts.InternAddress([20]byte{0xBB, 0xBB})
+	delegationCode := types.AddressToDelegation(target)
+	addr := accounts.InternAddress([20]byte{0xAA, 0xAA})
+
+	acc := accounts.NewAccount()
+	acc.Nonce = 1
+	reader := &codeReader{addr: addr, account: &acc}
+
+	ibs := NewWithVersionMap(reader, NewVersionMap(nil))
+	ibs.SetNoMaterialize(true)
+	ibs.SetTxContext(100, 5)
+	ibs.SetVersion(0)
+
+	require.NoError(t, ibs.SetCode(addr, delegationCode, tracing.CodeChangeAuthorization))
+
+	got, ok, err := ibs.GetDelegatedDesignation(addr)
+	require.NoError(t, err)
+	assert.True(t, ok, "own-tx delegation must be visible to GetDelegatedDesignation")
+	assert.Equal(t, target, got)
+	assert.Empty(t, ibs.stateObjects, "GetDelegatedDesignation must not materialize a stateObject")
 }

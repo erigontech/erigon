@@ -218,7 +218,9 @@ func (ch resetObjectChange) revert(s *IntraBlockState) error {
 	if current, ok := s.stateObjects[ch.account]; ok && current != ch.prev {
 		current.release()
 	}
-	s.setStateObject(ch.account, ch.prev)
+	if !s.noMaterialize {
+		s.setStateObject(ch.account, ch.prev)
+	}
 	// Restore the account-record writes the recreation overwrote back to the
 	// snapshot taken before it ran, so versionedWrites reflects prev's state
 	// again (the field-level entries handle the fields creation doesn't write).

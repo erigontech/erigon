@@ -1996,6 +1996,7 @@ func (ev *taskVersion) Reset(evm *vm.EVM, ibs *state.IntraBlockState, callTracer
 		return err
 	}
 	ibs.SetVersionMap(ev.versionMap)
+	ibs.SetNoMaterialize(true)
 	ibs.SetVersion(ev.version.Incarnation)
 	return nil
 }

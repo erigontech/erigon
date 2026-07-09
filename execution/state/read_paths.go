@@ -53,11 +53,14 @@ func codeSizeFromStateObject(sdb *IntraBlockState, so *stateObject, addr account
 
 // committedStorageDirect reads a storage slot's committed value straight from
 // the state reader, with no stateObject. Used on the parallel path for a cold
-// slot: no versionMap cell and no stateObject materialized this tx. A same-tx
-// created contract or a fakeStorage override always materializes a stateObject
-// (caught by the cached-object check before this is reached), so the pure-cold
-// path here is unconditionally a committed read.
+// slot: no versionMap cell and no stateObject materialized this tx. When this
+// tx created the contract (own CreateContract cell) its storage is fresh, so a
+// cold slot reads zero rather than a prior incarnation's committed value —
+// under noMaterialize there is no fresh stateObject to short-circuit that.
 func (sdb *IntraBlockState) committedStorageDirect(addr accounts.Address, key accounts.StorageKey) (uint256.Int, error) {
+	if cc, ok := sdb.versionedWriteCreateContract(addr); ok && cc {
+		return uint256.Int{}, nil
+	}
 	if dbg.TraceDomainIO || (dbg.TraceTransactionIO && (sdb.trace || dbg.TraceAccount(addr.Handle()))) {
 		sdb.stateReader.SetTrace(true, fmt.Sprintf("%d (%d.%d)", sdb.blockNum, sdb.txIndex, sdb.version))
 	}
@@ -82,9 +85,13 @@ func (sdb *IntraBlockState) committedStorageDirect(addr accounts.Address, key ac
 
 // committedCodeDirect reads an account's committed code bytes straight from the
 // state reader, with no stateObject. Reached only for a cold CodePath read (the
-// versionMap CodePath cell already missed upstream), so it needs no prior-tx
-// EIP-7702 re-check.
+// versionMap CodePath cell already missed upstream). A contract this tx created
+// (own CreateContract cell) has no code until SetCode runs, so it reads empty
+// rather than a prior incarnation's bytes.
 func (sdb *IntraBlockState) committedCodeDirect(addr accounts.Address) ([]byte, error) {
+	if cc, ok := sdb.versionedWriteCreateContract(addr); ok && cc {
+		return nil, nil
+	}
 	if dbg.TraceDomainIO || (dbg.TraceTransactionIO && (sdb.trace || dbg.TraceAccount(addr.Handle()))) {
 		sdb.stateReader.SetTrace(true, fmt.Sprintf("%d (%d.%d)", sdb.blockNum, sdb.txIndex, sdb.version))
 	}
@@ -101,10 +108,51 @@ func (sdb *IntraBlockState) committedCodeDirect(addr accounts.Address) ([]byte, 
 	return code, err
 }
 
+// codeSeed returns the code this tx currently sees at addr — its own Code write
+// cell if it wrote one, else the committed value — without recording an OCC
+// read. On the noMaterialize path the transient stateObject is rebuilt from the
+// tx-start account, so its code reflects the committed value; seeding it with
+// this lets stateObject.SetCode compare against the current code (matching the
+// cached path) instead of the stale tx-start value.
+func (sdb *IntraBlockState) codeSeed(addr accounts.Address, currentHash accounts.CodeHash) (accounts.Code, error) {
+	if _, isDirty := sdb.journal.dirties[addr]; isDirty {
+		if vw, ok := sdb.versionedWrites.GetCode(addr); ok {
+			return vw.Val, nil
+		}
+	}
+	if currentHash == accounts.EmptyCodeHash {
+		return accounts.Code{Hash: accounts.EmptyCodeHash}, nil
+	}
+	bytes, err := sdb.committedCodeDirect(addr)
+	if err != nil {
+		return accounts.Code{}, err
+	}
+	return accounts.Code{Hash: currentHash, Bytes: bytes}, nil
+}
+
+// committedCodeHash returns the tx-start code hash from the committed reader
+// (normalised to EmptyCodeHash for an absent or code-less account), without
+// recording an OCC read. Used on the noMaterialize path where the rebuilt
+// transient's original reflects this tx's own code cell rather than tx start.
+func (sdb *IntraBlockState) committedCodeHash(addr accounts.Address) (accounts.CodeHash, error) {
+	acc, err := sdb.stateReader.ReadAccountData(addr)
+	if err != nil {
+		return accounts.EmptyCodeHash, err
+	}
+	if acc == nil || acc.CodeHash.IsEmpty() {
+		return accounts.EmptyCodeHash, nil
+	}
+	return acc.CodeHash, nil
+}
+
 // committedCodeSizeDirect reads an account's committed code size straight from
 // the state reader, with no stateObject. Size-only for stateless-witness
-// correctness (a witness node carries the size but not the bytes).
+// correctness (a witness node carries the size but not the bytes). A contract
+// this tx created has zero code size until SetCode runs.
 func (sdb *IntraBlockState) committedCodeSizeDirect(addr accounts.Address) (int, error) {
+	if cc, ok := sdb.versionedWriteCreateContract(addr); ok && cc {
+		return 0, nil
+	}
 	if dbg.TraceDomainIO || (dbg.TraceTransactionIO && (sdb.trace || dbg.TraceAccount(addr.Handle()))) {
 		sdb.stateReader.SetTrace(true, fmt.Sprintf("%d (%d.%d)", sdb.blockNum, sdb.txIndex, sdb.version))
 	}

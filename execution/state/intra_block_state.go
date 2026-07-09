@@ -209,6 +209,13 @@ type IntraBlockState struct {
 	// re-executions without a per-tx map clear.
 	sdProbe      map[accounts.Address]sdProbeEntry
 	sdProbeEpoch uint64
+
+	// noMaterialize suppresses the stateObject cache on the parallel execution
+	// path: create/write flows record only versioned cells and committed reads
+	// resolve from the state reader, gated by this tx's own CreateContract /
+	// SelfDestruct cells. Left false for genesis/RPC/serial, which still commit
+	// via FinalizeTx→so.data.
+	noMaterialize bool
 }
 
 type sdProbeEntry struct {
@@ -281,6 +288,12 @@ func (sdb *IntraBlockState) SetVersionMap(versionMap *VersionMap) {
 
 func (sdb *IntraBlockState) VersionMap() *VersionMap {
 	return sdb.versionMap
+}
+
+// SetNoMaterialize enables the cache-free parallel path: create/write flows
+// record only versioned cells and never populate the stateObject map.
+func (sdb *IntraBlockState) SetNoMaterialize(v bool) {
+	sdb.noMaterialize = v
 }
 
 func (sdb *IntraBlockState) IsVersioned() bool {
@@ -1276,7 +1289,22 @@ func (sdb *IntraBlockState) SetCode(addr accounts.Address, code []byte, reason t
 		}
 		if ch, res, ok := sdb.versionMap.ReadCodeHash(addr, sdb.txIndex); ok && res.Status() == MVReadResultDone {
 			origHash = ch
+		} else if sdb.noMaterialize {
+			// The rebuilt transient's original reflects this tx's own code cell
+			// (readAccount folds CodeHashPath), not the tx-start value. With no
+			// prior-tx floor entry the cumulative baseline is the committed hash.
+			origHash, err = sdb.committedCodeHash(addr)
+			if err != nil {
+				return err
+			}
 		}
+	}
+	if sdb.noMaterialize {
+		seed, err := sdb.codeSeed(addr, baseCodeHash)
+		if err != nil {
+			return err
+		}
+		stateObject.setCode(seed)
 	}
 	written, err := stateObject.SetCode(canonical, !sdb.hasWrite(addr, CodePath, accounts.NilKey), reason)
 	if err != nil {
@@ -1622,6 +1650,10 @@ func (sdb *IntraBlockState) GetTransientState(addr accounts.Address, key account
 
 func (sdb *IntraBlockState) stateObjectForAccount(addr accounts.Address, account *accounts.Account) *stateObject {
 	obj := newObject(sdb, addr, account, account)
+	if sdb.noMaterialize {
+		sdb.reconstructCellFlags(obj, addr)
+		return obj
+	}
 	sdb.setStateObject(addr, obj)
 	return obj
 }
@@ -1680,12 +1712,14 @@ func (sdb *IntraBlockState) getStateObject(addr accounts.Address, recordRead boo
 			destructed, _, _, err := refreshSelfDestruct(sdb, addr)
 
 			if destructed || err != nil {
-				so := stateObjectPool.Get().(*stateObject)
-				so.db = sdb
-				so.address = addr
-				so.selfdestructed = destructed
-				so.deleted = destructed
-				sdb.setStateObject(addr, so)
+				if !sdb.noMaterialize {
+					so := stateObjectPool.Get().(*stateObject)
+					so.db = sdb
+					so.address = addr
+					so.selfdestructed = destructed
+					so.deleted = destructed
+					sdb.setStateObject(addr, so)
+				}
 				return nil, err
 			}
 		} else {
@@ -1717,12 +1751,14 @@ func (sdb *IntraBlockState) getStateObject(addr accounts.Address, recordRead boo
 				}
 			}
 			if !localResurrected {
-				so := stateObjectPool.Get().(*stateObject)
-				so.db = sdb
-				so.address = addr
-				so.selfdestructed = true
-				so.deleted = true
-				sdb.setStateObject(addr, so)
+				if !sdb.noMaterialize {
+					so := stateObjectPool.Get().(*stateObject)
+					so.db = sdb
+					so.address = addr
+					so.selfdestructed = true
+					so.deleted = true
+					sdb.setStateObject(addr, so)
+				}
 				return nil, nil
 			}
 		}
@@ -1752,6 +1788,10 @@ func (sdb *IntraBlockState) getStateObject(addr accounts.Address, recordRead boo
 			obj.data.CodeHash = codeHash
 			obj.original.CodeHash = codeHash
 		}
+	}
+	if sdb.noMaterialize {
+		sdb.reconstructCellFlags(obj, addr)
+		return obj, nil
 	}
 	sdb.setStateObject(addr, obj)
 	return obj, nil
@@ -1802,7 +1842,9 @@ func (sdb *IntraBlockState) createObject(addr accounts.Address, previous *stateO
 		sdb.journal.append(reset)
 	}
 	newobj.newlyCreated = true
-	sdb.setStateObject(addr, newobj)
+	if !sdb.noMaterialize {
+		sdb.setStateObject(addr, newobj)
+	}
 	data := newobj.data
 	sdb.recordWriteAddress(addr, &data)
 	// Write CodeHashPath so that any stale versionedReads cache entry
@@ -1917,6 +1959,17 @@ func (sdb *IntraBlockState) CreateAccount(addr accounts.Address, contractCreatio
 			// per-tx writes to it, so a same-block credit on this IBS lives only in
 			// the cache; reuse it as `previous` to keep the balance carry-over below.
 			previous = so
+		} else if sd, ok := sdb.versionedWriteSelfDestruct(addr); ok && sd {
+			// Cache-free parallel path: a within-tx create→self-destruct leaves no
+			// committed base record and no cached stateObject. Rebuild `previous`
+			// from this tx's own cells so the recreated account's incarnation still
+			// accumulates and the resurrect write is emitted.
+			prev := newObject(sdb, addr, &accounts.Account{}, &accounts.Account{})
+			prev.selfdestructed = true
+			if vw, ok := sdb.versionedWrites.GetIncarnation(addr); ok {
+				prev.data.Incarnation = vw.Val
+			}
+			previous = prev
 		}
 	}
 
@@ -2811,6 +2864,51 @@ func (sdb *IntraBlockState) versionedWriteSelfDestruct(addr accounts.Address) (b
 		return false, false
 	}
 	return vw.Val, true
+}
+
+// versionedWriteCreateContract reports whether this tx's own writes created a
+// contract at addr (the CreateContract cell). Guarded by journal.dirties so a
+// stale entry from a reverted create is ignored.
+func (sdb *IntraBlockState) versionedWriteCreateContract(addr accounts.Address) (bool, bool) {
+	if sdb.versionMap == nil {
+		return false, false
+	}
+	if _, isDirty := sdb.journal.dirties[addr]; !isDirty {
+		return false, false
+	}
+	vw, ok := sdb.versionedWrites.GetCreateContract(addr)
+	if !ok {
+		return false, false
+	}
+	return vw.Val, true
+}
+
+// reconstructCellFlags stamps the transient (uncached) stateObject's
+// create/self-destruct flags from this tx's own versioned-write cells. Under
+// noMaterialize the stateObject is rebuilt on every getStateObject call, so the
+// createdContract / newlyCreated / selfdestructed state that a materialized
+// object would have carried must be recovered from the cells instead.
+func (sdb *IntraBlockState) reconstructCellFlags(obj *stateObject, addr accounts.Address) {
+	if obj == nil {
+		return
+	}
+	if cc, ok := sdb.versionedWriteCreateContract(addr); ok && cc {
+		obj.createdContract = true
+		obj.newlyCreated = true
+	}
+	if sd, ok := sdb.versionedWriteSelfDestruct(addr); ok && sd {
+		obj.selfdestructed = true
+	}
+	// The transient object is rebuilt from the tx-start account, so
+	// stateObject.Code() would resolve this tx's own SetCode via the versionMap
+	// floor (prior-tx only) and miss it. Seed the code from this tx's own Code
+	// write cell so delegation/code reads through the object see it.
+	if _, isDirty := sdb.journal.dirties[addr]; isDirty {
+		if vw, ok := sdb.versionedWrites.GetCode(addr); ok && vw.Val.Bytes != nil {
+			obj.code = vw.Val
+			obj.data.CodeHash = vw.Val.Hash
+		}
+	}
 }
 
 // versionedWriteHit probes the dirty per-tx write set for a write at
