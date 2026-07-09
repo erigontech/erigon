@@ -18,6 +18,7 @@ package commitment
 
 import (
 	"context"
+	"fmt"
 	"io"
 	"sync"
 	"sync/atomic"
@@ -25,6 +26,7 @@ import (
 	"golang.org/x/sync/errgroup"
 
 	"github.com/erigontech/erigon/common/empty"
+	"github.com/erigontech/erigon/execution/commitment/nibbles"
 )
 
 // foldPool folds a fold DAG with one shared worker pool. Leaf tasks mount on their parent
@@ -113,6 +115,94 @@ func (fp *foldPool) run(ctx context.Context, rootTask *foldTask) ([]*DeferredBra
 			deferred = append(deferred, t.deferred...)
 			t.deferred = nil
 		}
+	}
+	return deferred, nil
+}
+
+// dispatchFrontier derives the fold DAG over root, folds it with fp's shared worker pool, stitches
+// the resulting top-nibble cells into base, and folds base down to its root, returning the deferred
+// branch updates the whole fold produced. reuse, when non-nil, is the streaming scheduler's
+// cached-cell consumer: it prunes clean top nibbles from the DAG (their pre-folded cells are
+// stitched directly) and returns the deferred those reused folds produced. A seed-probe read error
+// or any fold error fails closed — every collected deferred update is recycled and nothing is
+// returned, so a partial fold never leaks a plausible-but-wrong branch to the caller.
+func (fp *foldPool) dispatchFrontier(ctx context.Context, base *HexPatriciaHashed, root *prefixNode,
+	reuse func(*foldTask) ([16]cell, [16]bool, []*DeferredBranchUpdate),
+) ([]*DeferredBranchUpdate, error) {
+	dctx, dcleanup := fp.ctxFactory()
+	if dcleanup != nil {
+		defer dcleanup()
+	}
+	// seed-or-demote prober: a merge candidate is confirmed only if an on-disk branch exists
+	// exactly at its prefix; a read error fails the whole fold closed.
+	var seedErr error
+	seedable := func(prefix []byte) bool {
+		if seedErr != nil {
+			return false
+		}
+		b, _, berr := dctx.Branch(nibbles.HexToCompact(prefix))
+		if berr != nil {
+			seedErr = berr
+			return false
+		}
+		return len(b) > 0
+	}
+
+	k := foldK(root.subtreeCount, fp.numWorkers)
+	rootTask := deriveFoldFrontier(root, k, seedable)
+	if seedErr != nil {
+		return nil, seedErr
+	}
+	rootTask.base = base
+
+	var (
+		reusedCells    [16]cell
+		reusedPresent  [16]bool
+		reusedDeferred []*DeferredBranchUpdate
+	)
+	if reuse != nil {
+		reusedCells, reusedPresent, reusedDeferred = reuse(rootTask)
+	}
+
+	deferred, err := fp.run(ctx, rootTask)
+	if err != nil {
+		putDeferredUpdates(reusedDeferred)
+		return nil, err
+	}
+	deferred = append(deferred, reusedDeferred...)
+
+	var (
+		cells   [16]cell
+		present [16]bool
+	)
+	for _, top := range rootTask.children {
+		cells[top.nib] = top.cell
+		present[top.nib] = true
+	}
+	for nib := range 16 {
+		if reusedPresent[nib] {
+			cells[nib] = reusedCells[nib]
+			present[nib] = true
+		}
+	}
+
+	stitchSplitCells(base, &cells, &present)
+
+	if base.activeRows == 0 {
+		base.activeRows = 1
+	}
+	for base.activeRows > 0 {
+		if err := ctx.Err(); err != nil {
+			putDeferredUpdates(deferred)
+			return nil, err
+		}
+		if err := base.fold(); err != nil {
+			putDeferredUpdates(deferred)
+			return nil, fmt.Errorf("fold frontier: root fold: %w", err)
+		}
+	}
+	if d := base.TakeDeferredUpdates(); len(d) > 0 {
+		deferred = mergeDeferredByPrefix(deferred, d)
 	}
 	return deferred, nil
 }

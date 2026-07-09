@@ -31,7 +31,6 @@ import (
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/db/kv"
-	"github.com/erigontech/erigon/execution/commitment/nibbles"
 )
 
 type splitState struct {
@@ -223,73 +222,10 @@ func (sc *StreamingCommitter) Process(ctx context.Context) ([]byte, error) {
 		return base.RootHash()
 	}
 
-	dctx, dcleanup := sc.trieCtxFactory()
-	if dcleanup != nil {
-		defer dcleanup()
-	}
-	// seed-or-demote prober: a merge candidate is confirmed only if an on-disk branch exists
-	// exactly at its prefix; a read error fails the whole Process closed.
-	var seedErr error
-	seedable := func(prefix []byte) bool {
-		if seedErr != nil {
-			return false
-		}
-		b, _, berr := dctx.Branch(nibbles.HexToCompact(prefix))
-		if berr != nil {
-			seedErr = berr
-			return false
-		}
-		return len(b) > 0
-	}
-
-	k := foldK(root.subtreeCount, sc.numWorkers)
-	rootTask := deriveFoldFrontier(root, k, seedable)
-	if seedErr != nil {
-		sc.dropSplitDeferred()
-		return nil, seedErr
-	}
-	rootTask.base = base
-
-	reusedCells, reusedPresent, reusedDeferred := sc.reuseSchedulerCells(rootTask)
-
-	deferred, err := sc.newFoldPool().run(ctx, rootTask)
+	deferred, err := sc.newFoldPool().dispatchFrontier(ctx, base, root, sc.reuseSchedulerCells)
 	if err != nil {
-		putDeferredUpdates(reusedDeferred)
 		sc.dropSplitDeferred()
 		return nil, err
-	}
-	deferred = append(deferred, reusedDeferred...)
-
-	var (
-		cells   [16]cell
-		present [16]bool
-	)
-	for _, top := range rootTask.children {
-		cells[top.nib] = top.cell
-		present[top.nib] = true
-	}
-	for nib := range 16 {
-		if reusedPresent[nib] {
-			cells[nib] = reusedCells[nib]
-			present[nib] = true
-		}
-	}
-
-	stitchSplitCells(base, &cells, &present)
-
-	if base.activeRows == 0 {
-		base.activeRows = 1
-	}
-	for base.activeRows > 0 {
-		if err := ctx.Err(); err != nil {
-			return nil, err
-		}
-		if err := base.fold(); err != nil {
-			return nil, fmt.Errorf("StreamingCommitter: root fold: %w", err)
-		}
-	}
-	if d := base.TakeDeferredUpdates(); len(d) > 0 {
-		deferred = mergeDeferredByPrefix(deferred, d)
 	}
 
 	if sc.leaveDeferredForCaller {

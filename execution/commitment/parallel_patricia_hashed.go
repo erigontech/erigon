@@ -42,6 +42,11 @@ type ParallelPatriciaHashed struct {
 	leaveDeferredForCaller bool
 	deferredForCaller      []*DeferredBranchUpdate
 
+	// templateCtxFromFactory records that processMounted's fallback installed a per-Process
+	// factory ctx on the template; it is cleared when that ctx is released, so a set flag at the
+	// next Process entry means the template carries a factory-owned, already-freed ctx.
+	templateCtxFromFactory bool
+
 	streaming *StreamingCommitter
 }
 
@@ -275,6 +280,21 @@ func (p *ParallelPatriciaHashed) processStreaming(ctx context.Context) ([]byte, 
 	copy(out, rh)
 	p.rootHash.Store(&out)
 	return out, nil
+}
+
+// newFoldPool builds a fold pool sharing the trie's worker pool, context factory, and template
+// trace writer, so processMounted folds through the same dispatch as the streaming Process path.
+func (p *ParallelPatriciaHashed) newFoldPool() *foldPool {
+	var traceW io.Writer
+	if p.template != nil {
+		traceW = p.template.traceW
+	}
+	return &foldPool{
+		numWorkers: p.numWorkers,
+		ctxFactory: p.trieCtxFactory,
+		workerPool: &p.workerPool,
+		traceW:     traceW,
+	}
 }
 
 // Process is the entry point for parallel commitment computation; it requires updates.mode == ModeParallel.

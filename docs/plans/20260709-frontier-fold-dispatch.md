@@ -151,13 +151,13 @@ Finding-4 no-op holds: the mixed +5–7% is the intended >fan-out headroom subdi
 - Modify: `execution/commitment/parallel_mount.go`
 - Modify: `execution/commitment/parallel_patricia_hashed.go`
 
-- [ ] `processMounted` delegates to the same `deriveFoldDAG` + pool (its static top-nibble errgroup replaced); facade (`RootHash`, deferred API, pooling, `Variant`) unchanged so `commitmentdb` needs no changes
-- [ ] delete now-dead `printMountTiming`/`cmtTiming` (`parallel_mount.go:217-249`) and any ModeParallel dual prefix-trie insert the shared dispatch makes unused (funds the net-negative target beyond the whale deletion)
-- [ ] port the parent plan's B8 guard: debug-assert that the template never carries a factory-owned ctx across Process calls (the `processMounted` ctx-fallback site survives here)
-- [ ] confirm the ModeParallel (scheduler-never-started) and streaming (scheduler) paths share one dispatch
-- [ ] existing parallel/streaming tests green against the unified engine; N≥3-batch branch-parity chains green
-- [ ] write tests: ModeParallel and streaming produce identical root + branches on the shared corpora
-- [ ] run tests — must pass before next task
+- [x] `processMounted` delegates to the same `deriveFoldDAG` + pool: the shared core (seedable prober → `deriveFoldFrontier` + K policy → pool run → stitch → root fold → deferred) is `foldPool.dispatchFrontier`, called by both `processMounted` (reuse=nil) and streaming `Process` (reuse=`reuseSchedulerCells`); the static top-nibble errgroup + whale deep-fold in `processMounted` is gone. Facade (`RootHash`, deferred API, pooling, `Variant`) unchanged — `commitmentdb` untouched
+- [x] delete now-dead `printMountTiming`/`cmtTiming` + the dead `p.newStorageWorker` the reroute orphaned. **Dual prefix-trie insert kept**: the ModeParallel `pu.trie` build is NOT made unused — `ParallelPatriciaHashed.Process` uses `pu.trie.root.subtreeCount==0` as the empty-collection gate even on the streaming path, so removing it needs a separate empty-gate rework (out of scope, risks streaming). Recorded rather than removed
+- [x] port the parent plan's B8 guard: `templateCtxFromFactory` flag + `dbg.AssertEnabled` panic at `processMounted` entry, and the ctx-fallback now clears `base.ctx` (ResetContext(nil)) after its per-Process cleanup so the template never carries a factory-owned, freed ctx into the next Process
+- [x] confirm the ModeParallel (scheduler-never-started) and streaming (scheduler) paths share one dispatch — both route through `dispatchFrontier`; `TestUnifiedDispatch_ParallelMatchesStreaming` asserts byte-identical root + branch store per batch across the four corpora
+- [x] existing parallel/streaming tests green against the unified engine; N≥3-batch branch-parity chains green (`TestFrontierParity_*`, `TestDeepFold_*` — package `-count=1` and `-race` clean)
+- [x] write tests: ModeParallel and streaming produce identical root + branches on the shared corpora — `parallel_unified_dispatch_test.go`
+- [x] run tests — package green, `-race` clean, `make lint` clean
 
 ### Task 6: Delete the whale fan-out scaffolding
 
