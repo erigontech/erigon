@@ -42,15 +42,18 @@ func maxFoldConcurrency() int { return max(1, runtime.GOMAXPROCS(0)) }
 
 func newFoldSem() *semaphore.Weighted { return semaphore.NewWeighted(int64(maxFoldConcurrency())) }
 
-// errStorageBaseNotBranch: no on-disk branch exactly at the account prefix (its
-// storage top is a deeper extension); callers fall back to streaming recursion.
-var errStorageBaseNotBranch = errors.New("streaming: storage base has no branch at account prefix")
+// errStorageBaseNotBranch: no on-disk branch exactly at prefix P (its subtree top is
+// a deeper extension, embedded, or absent); a merge candidate at P must demote to its
+// nearest seedable ancestor's serial leaf rather than seed an empty — and sibling-dropping — wall.
+var errStorageBaseNotBranch = errors.New("commitment: no branch at seed prefix")
 
-// Seed the base from the real on-disk branch, not a hand-seed, so untouched first-nibble subtrees survive instead of dropping and diverging the root from the sequential trie.
-
-func unfoldStorageBase(base *HexPatriciaHashed, accPrefix []byte) error {
-	d := int16(len(accPrefix))
-	copy(base.currentKey[:], accPrefix)
+// seedBaseAtPrefix seeds base's row 0 from the on-disk Branch(P) at any depth, so a merge
+// task folds its children against the real state and every untouched sibling survives instead
+// of dropping and diverging the root. It returns errStorageBaseNotBranch when no branch exists
+// exactly at P; that same probe is what the fold DAG uses to decide seed-vs-demote.
+func seedBaseAtPrefix(base *HexPatriciaHashed, prefix []byte) error {
+	d := int16(len(prefix))
+	copy(base.currentKey[:], prefix)
 	base.currentKeyLen = d
 	base.depths[0] = d + 1
 	base.activeRows = 1
@@ -59,7 +62,7 @@ func unfoldStorageBase(base *HexPatriciaHashed, accPrefix []byte) error {
 	}
 	base.touchMap[0], base.afterMap[0], base.branchBefore[0] = 0, 0, false
 
-	branch, err := base.branchFromCacheOrDB(nibbles.HexToCompact(accPrefix))
+	branch, err := base.branchFromCacheOrDB(nibbles.HexToCompact(prefix))
 	if err != nil {
 		return err
 	}
@@ -68,14 +71,34 @@ func unfoldStorageBase(base *HexPatriciaHashed, accPrefix []byte) error {
 	}
 	// A stored branch is always >= 4 bytes (touchMap+afterMap); a shorter non-empty read is corrupt, not missing.
 	if len(branch) < 4 {
-		return fmt.Errorf("unfoldStorageBase: corrupt branch record at %x: %d bytes", accPrefix, len(branch))
+		return fmt.Errorf("seedBaseAtPrefix: corrupt branch record at %x: %d bytes", prefix, len(branch))
 	}
 	base.branchBefore[0] = true
 	return base.decodeBranchIntoRow(0, d+1, branch[2:], false)
 }
 
-// Mounts the shared unfolded base so concurrent first-nibble workers fold against the same on-disk storage state.
-func foldStorageLeaf(ctx context.Context, w *HexPatriciaHashed, base *HexPatriciaHashed, nib int, group []touchedKey) (cell, error) {
+// seedOrDemote seeds base at P and reports whether P carries an independent merge task:
+// true when an on-disk branch is present, false (demote to an ancestor's serial leaf) when
+// absent. It is the seed-or-demote decision the DAG derivation makes at every merge candidate.
+// A false-empty seed would drop P's untouched on-disk siblings and diverge the root, so absence
+// must demote — never guess a branch; a present branch loses only parallelism if wrong, so it is
+// the safe classification.
+func seedOrDemote(base *HexPatriciaHashed, prefix []byte) (seeded bool, err error) {
+	err = seedBaseAtPrefix(base, prefix)
+	if errors.Is(err, errStorageBaseNotBranch) {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	return true, nil
+}
+
+// foldMountedLeaf mounts w on the parent's seeded base at slot nib, serially replays the
+// leaf task's key group, and folds to the mount wall — the cell the parent stitches at nib,
+// excluding the parent prefix and nib (invariant M). It works at any depth, exercising the
+// arbitrary-P mount wall in mountTo/foldMounted.
+func foldMountedLeaf(ctx context.Context, w *HexPatriciaHashed, base *HexPatriciaHashed, nib int, group []touchedKey) (cell, error) {
 	w.mountTo(base, nib)
 	for i := range group {
 		if err := w.followAndUpdate(group[i].hk, group[i].pk, group[i].upd); err != nil {
@@ -159,9 +182,9 @@ func foldStorageRoot(ctx context.Context, sem *semaphore.Weighted, newWorker fun
 		accTag = fmt.Sprintf("[%x] ", accID)
 		base.SetTraceWriter(tracePrefix(base.traceW, accTag))
 	}
-	if err := unfoldStorageBase(base, accPrefix); err != nil {
+	if err := seedBaseAtPrefix(base, accPrefix); err != nil {
 		// A fresh account proves nothing exists on disk beneath accPrefix, so the reset
-		// (empty) wall rows unfoldStorageBase left behind are the correct seed.
+		// (empty) wall rows seedBaseAtPrefix left behind are the correct seed.
 		if !accountFresh || !errors.Is(err, errStorageBaseNotBranch) {
 			return common.Hash{}, fmt.Errorf("unfold storage root: %w", err)
 		}
@@ -188,7 +211,7 @@ func foldStorageRoot(ctx context.Context, sem *semaphore.Weighted, newWorker fun
 			if w.traceW != nil {
 				w.SetTraceWriter(tracePrefix(w.traceW, accTag))
 			}
-			c, err := foldStorageLeaf(gctx, w, base, ni, group)
+			c, err := foldMountedLeaf(gctx, w, base, ni, group)
 			if err == nil {
 				if d := w.TakeDeferredUpdates(); len(d) > 0 {
 					pu.appendDeferred(d)
@@ -222,7 +245,10 @@ func foldStorageRoot(ctx context.Context, sem *semaphore.Weighted, newWorker fun
 	return sr.hash, nil
 }
 
-func aggregateMountedStorageRoot(base *HexPatriciaHashed, children *[16]cell, bitmap uint16) (cell, error) {
+// stitchChildrenIntoRow0 drops each folded child cell into base's seeded row 0 at its nibble
+// slot, marking every stitched slot touched; an empty child clears its slot, a present one
+// replaces it. Untouched slots keep the on-disk sibling the seed decoded.
+func stitchChildrenIntoRow0(base *HexPatriciaHashed, children *[16]cell, bitmap uint16) {
 	for bm := bitmap; bm != 0; {
 		bit := bm & -bm
 		x := bits.TrailingZeros16(bit)
@@ -236,6 +262,14 @@ func aggregateMountedStorageRoot(base *HexPatriciaHashed, children *[16]cell, bi
 		}
 		bm ^= bit
 	}
+}
+
+// aggregateMountedStorageRoot folds a whale's stitched storage row into the account's single
+// storage-root cell — the depth-64 account/storage seam. It collapses to a bare root hash the
+// caller injects via setAccountStorageRoot, so a single surviving child is rehashed at depth 64
+// rather than propagated as a leaf/extension the way an account-plane merge would.
+func aggregateMountedStorageRoot(base *HexPatriciaHashed, children *[16]cell, bitmap uint16) (cell, error) {
+	stitchChildrenIntoRow0(base, children, bitmap)
 	if base.afterMap[0] == 0 && !base.branchBefore[0] {
 		base.activeRows = 0
 		return cell{}, nil
@@ -249,6 +283,49 @@ func aggregateMountedStorageRoot(base *HexPatriciaHashed, children *[16]cell, bi
 		return cell{}, err
 	}
 	return base.root, nil
+}
+
+// mergeChildrenAtPrefix folds a merge task's stitched row into the one cell its parent stitches
+// at the mount wall. Unlike the depth-64 storage seam it never collapses to a bare storage-root
+// hash: it runs the standard fold (branch, single-survivor propagate, or delete) so an account-plane
+// or interior-storage survivor stays a propagated leaf/extension cell the parent can keep folding,
+// then strips the leading mountWall nibbles so the returned cell excludes the parent prefix and the
+// slot nibble (invariant M). mountWall is len(parentPrefix)+1.
+func mergeChildrenAtPrefix(base *HexPatriciaHashed, children *[16]cell, bitmap uint16, mountWall int16) (cell, error) {
+	stitchChildrenIntoRow0(base, children, bitmap)
+	if base.afterMap[0] == 0 && !base.branchBefore[0] {
+		base.activeRows = 0
+		return cell{}, nil
+	}
+	for base.activeRows > 0 {
+		if err := base.fold(); err != nil {
+			return cell{}, err
+		}
+	}
+	return stripCellToMountWall(&base.root, mountWall), nil
+}
+
+// stripCellToMountWall re-expresses a merge's folded root — whose extension spans the merge's
+// whole prefix P — as the mount-wall-relative cell the parent stitches: the leading mountWall
+// nibbles (parent prefix plus slot nibble) drop out of extension and hashedExtension, leaving
+// only the tail beyond the wall. Hash and leaf/state payload are unchanged.
+func stripCellToMountWall(root *cell, mountWall int16) cell {
+	out := *root
+	if root.extLen > mountWall {
+		n := root.extLen - mountWall
+		copy(out.extension[:n], root.extension[mountWall:root.extLen])
+		out.extLen = n
+	} else {
+		out.extLen = 0
+	}
+	if root.hashedExtLen > mountWall {
+		n := root.hashedExtLen - mountWall
+		copy(out.hashedExtension[:n], root.hashedExtension[mountWall:root.hashedExtLen])
+		out.hashedExtLen = n
+	} else {
+		out.hashedExtLen = 0
+	}
+	return out
 }
 
 // storageRootFromSingleChild builds the storage root for a single-surviving-child collapse — an

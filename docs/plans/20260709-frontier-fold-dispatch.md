@@ -110,12 +110,12 @@ This is the concrete **Step-1** realization of `docs/plans/20260702-parallel-com
 - Modify: `execution/commitment/hex_patricia_hashed.go`
 - Create: `execution/commitment/fold_primitives_test.go`
 
-- [ ] generalize `unfoldStorageBase` → `seedBaseAtPrefix(base, P)` seeding row 0 from `Branch(P)` at any depth, returning `errStorageBaseNotBranch` when absent (single primitive; also the derivation `seedable` prober)
-- [ ] generalize `foldStorageLeaf` → a leaf-task fold that mounts at arbitrary P on the parent's seeded base, replays its key group, `foldMounted` → cell (exercise the arbitrary-P mount wall in `mountTo`/`foldMounted`)
-- [ ] **parametrize the depth-64 hardcode:** `storageRootFromSingleChild`'s `computeCellHash(&root, 64, nil)` and `aggregateMountedStorageRoot`'s `base.root` return are storage-seam-specific — split into (a) the depth-64 account/storage seam variant (storage-root injection, kept) and (b) a general account-plane merge returning a **mount-wall-relative cell excluding P** (invariant M) at `depth = len(P)`. An interior single-survivor collapse must not use the storage return convention.
-- [ ] seed-or-demote decision function with direct coverage of **both** evidence paths (false-empty drops siblings → wrong root; false-present → serial only)
-- [ ] mount-boundary byte-equality tests at depths {2, 64, 65}, **including a single-survivor collapse at depth 2** (not only at 64); error-path test: merge on an unseedable base returns the hard error
-- [ ] run tests — must pass before next task
+- [x] generalize `unfoldStorageBase` → `seedBaseAtPrefix(base, P)` seeding row 0 from `Branch(P)` at any depth, returning `errStorageBaseNotBranch` when absent (single primitive; also the derivation `seedable` prober) — `streaming_deep_fold.go`; callers in `foldStorageRoot` updated
+- [x] generalize `foldStorageLeaf` → a leaf-task fold that mounts at arbitrary P on the parent's seeded base, replays its key group, `foldMounted` → cell (exercise the arbitrary-P mount wall in `mountTo`/`foldMounted`) — `foldMountedLeaf`
+- [x] **parametrize the depth-64 hardcode:** split into (a) the depth-64 account/storage seam variant kept as `aggregateMountedStorageRoot` (still collapses to a bare storage-root hash via `storageRootFromSingleChild`) and (b) a general `mergeChildrenAtPrefix` returning a mount-wall-relative cell via `stripCellToMountWall`; the shared row-stitch is `stitchChildrenIntoRow0`. The interior single-survivor collapse folds through the standard `foldPropagate` (not the storage return convention), verified byte-exact by the depth-2 collapse test.
+- [x] seed-or-demote decision function with direct coverage of **both** evidence paths (false-empty drops siblings → wrong root; false-present → serial only) — `seedOrDemote` + `TestFoldPrimitives_SeedOrDemote`
+- [x] mount-boundary byte-equality tests at depths {2, 64, 65}, **including a single-survivor collapse at depth 2** (not only at 64); error-path test: merge on an unseedable base returns the hard error — `fold_primitives_test.go` (serial recursive folder over `deriveFoldDAG`, root+branch byte parity vs sequential)
+- [x] run tests — must pass before next task — package green + `-race` clean, `make lint` clean
 
 ### Task 4: Frontier pool dispatch wired into the streaming Process path
 

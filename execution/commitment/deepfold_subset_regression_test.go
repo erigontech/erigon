@@ -97,7 +97,7 @@ func TestDeepFold_PreExistingWhale_SubsetTouched(t *testing.T) {
 // A pre-existing on-disk whale whose storage all sits under a SINGLE first-storage-nibble
 // has no branch record exactly at the account prefix — its storage top is a deeper
 // extension. The next block touches other first-nibbles, crossing deepStorageThreshold and
-// driving the deep storage fold. unfoldStorageBase finds no branch at the account prefix;
+// driving the deep storage fold. seedBaseAtPrefix finds no branch at the account prefix;
 // it must still recover the untouched single-nibble subtree rather than seeding an empty
 // base and dropping it, so the parallel/streaming root matches sequential. Regression for
 // the empty-seed sibling drop (#22113).
