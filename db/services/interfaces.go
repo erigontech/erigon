@@ -128,6 +128,7 @@ type BlockRetire interface {
 	RemoveBlockSnapshotsBelow(ctx context.Context, floor uint64, onDelete func(l []string) error) (deleted bool, err error)
 	SetWorkers(workers int)
 	GetWorkers() int
+	Close()
 }
 
 type DBEventNotifier interface {
