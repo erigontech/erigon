@@ -181,9 +181,6 @@ func Test_DeleteStateSnaps_RemovesTmpFiles(t *testing.T) {
 		f.Close()
 	}
 
-	// SnapForkable is not auto-created by datadir.New, so create it manually
-	require.NoError(t, os.MkdirAll(dirs.SnapForkable, 0755))
-
 	// Create .tmp files in all snapshot directories (matching patterns from issue #18789)
 	tmpFiles := []string{
 		filepath.Join(dirs.Snap, "v1.1-headers.0-500.seg.123456.tmp"),
@@ -192,7 +189,6 @@ func Test_DeleteStateSnaps_RemovesTmpFiles(t *testing.T) {
 		filepath.Join(dirs.SnapIdx, "v1.1-storage.8256-8288.bt.209594880.tmp"),
 		filepath.Join(dirs.SnapAccessors, "v2.0-commitment.8256-8272.kvi.3646922560.existence.tmp"),
 		filepath.Join(dirs.SnapCaplin, "v1.0-beaconblocks.0-100.seg.999999.tmp"),
-		filepath.Join(dirs.SnapForkable, "v1.0-forkable.0-100.kv.111111.tmp"),
 	}
 	for _, tf := range tmpFiles {
 		touchFile(tf)

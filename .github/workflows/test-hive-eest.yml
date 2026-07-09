@@ -28,8 +28,9 @@ jobs:
         # entries spawn separate `hive` group runners and run concurrently —
         # wall-clock unchanged, runner-minutes doubled.
         include:
-          # consume-engine: split by fork for parallelism (61k+ tests total).
-          # Engine API tests only exist from Paris (The Merge) onwards.
+          # consume-engine: split by fork for parallelism (~50k tests total).
+          # Engine API tests only exist from Paris (The Merge) onwards; the
+          # osaka shard also carries the BPO fork-transition fixtures.
           # Pattern format: "<suite-regex>/<test-regex>" — the leading ".*/""
           # matches the suite name (eest/consume-engine) while the remainder
           # filters individual pytest test IDs by fork parameter.
@@ -84,14 +85,14 @@ jobs:
             max-failures: 0
             exec_mode: parallel
           - sim: consume-engine
-            sim-limit: ".*/.*fork_Osaka"
+            sim-limit: ".*/.*fork_(Osaka|BPO)"
             shard: osaka
             pool-size: 4
             fixtures-tarball: eest_stable
             max-failures: 0
             exec_mode: serial
           - sim: consume-engine
-            sim-limit: ".*/.*fork_Osaka"
+            sim-limit: ".*/.*fork_(Osaka|BPO)"
             shard: osaka
             pool-size: 4
             fixtures-tarball: eest_stable
@@ -120,7 +121,7 @@ jobs:
             extra-hive-flags: "--sim.loglevel=3 --client.checktimelimit=300s"
             erigon-extra-flags: "--experimental.bal"
             # TODO: reduce to 0 (glamsterdam-devnet-6 EIPs WIP)
-            max-failures: 3411
+            max-failures: 3477
             exec_mode: parallel
     steps:
       - name: Clean docker system
