@@ -45,7 +45,6 @@ import (
 	"github.com/erigontech/erigon/db/snaptype"
 	"github.com/erigontech/erigon/db/snaptype2"
 	"github.com/erigontech/erigon/db/version"
-	"github.com/erigontech/erigon/diagnostics/diaglib"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/node/ethconfig"
 )
@@ -1430,7 +1429,6 @@ func (s *BaseRoSnapshots) buildMissedIndices(logPrefix string, ctx context.Conte
 			case <-logEvery.C:
 				var m runtime.MemStats
 				dbg.ReadMemStats(&m)
-				sendDiagnostics(startIndexingTime, ps.DiagnosticsData(), m.Alloc, m.Sys)
 				logger.Info(fmt.Sprintf("[%s] Indexing", logPrefix), "progress", ps.String(), "total-indexing-time", time.Since(startIndexingTime).Round(time.Second).String(), "alloc", common.ByteCount(m.Alloc), "sys", common.ByteCount(m.Sys))
 			case <-finish:
 				return
@@ -1467,7 +1465,6 @@ func (s *BaseRoSnapshots) buildMissedIndices(logPrefix string, ctx context.Conte
 					defer s.ReleaseRange(t, from, to)
 					p := &background.Progress{}
 					ps.Add(p)
-					defer notifySegmentIndexingFinished(info.Name())
 					defer ps.Delete(p)
 					if err := t.BuildIndexes(gCtx, info, indexBuilder, chainConfig, tmpDir, p, log.LvlInfo, logger); err != nil {
 						// unsuccessful indexing should allow other indexing to finish
@@ -1631,37 +1628,6 @@ func (v *View) Ranges(align bool) (ranges []Range) {
 	}
 
 	return ranges
-}
-
-func notifySegmentIndexingFinished(name string) {
-	dts := []diaglib.SnapshotSegmentIndexingStatistics{
-		{
-			SegmentName: name,
-			Percent:     100,
-			Alloc:       0,
-			Sys:         0,
-		},
-	}
-	diaglib.Send(diaglib.SnapshotIndexingStatistics{
-		Segments:    dts,
-		TimeElapsed: -1,
-	})
-}
-
-func sendDiagnostics(startIndexingTime time.Time, indexPercent map[string]int, alloc uint64, sys uint64) {
-	segmentsStats := make([]diaglib.SnapshotSegmentIndexingStatistics, 0, len(indexPercent))
-	for k, v := range indexPercent {
-		segmentsStats = append(segmentsStats, diaglib.SnapshotSegmentIndexingStatistics{
-			SegmentName: k,
-			Percent:     v,
-			Alloc:       alloc,
-			Sys:         sys,
-		})
-	}
-	diaglib.Send(diaglib.SnapshotIndexingStatistics{
-		Segments:    segmentsStats,
-		TimeElapsed: time.Since(startIndexingTime).Round(time.Second).Seconds(),
-	})
 }
 
 func removeOldFiles(toDel []string) {
