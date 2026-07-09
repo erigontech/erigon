@@ -143,7 +143,13 @@ This is the concrete **Step-1** realization of `docs/plans/20260702-parallel-com
 
 Finding-4 no-op holds: the mixed +5–7% is the intended >fan-out headroom subdivision (18 workers > 16 nibbles drops K below the per-nibble load), not a per-nibble subdivision at fan-out. `DeepLocalFolds()` is now always 0 on the Process path (the separate deep-fold counter is retired here; deleted in Task 6); `TestDeepFold_FreshWhaleFoldsParallel` was retargeted to pin byte parity (the surviving invariant) instead of that counter.
 
-**⚠️ Risk carried to Task 6/8 — fresh-whale serialization:** a *fresh* whale's account prefix is unseedable (no on-disk branch), so `deriveFoldFrontier` demotes its whole storage subtree to one serial leaf — 4.3× slower than the old `foldStorageRoot` deep fold, which parallelized fresh whales via the `accountFresh` empty-seed path. The pure-DAG storage-first ordering can't replicate that at derive time: freshness is only knowable at fold time (`lastUpdateCellWasEmpty`), and the account fold runs *after* its storage subtask, so the storage fold can't consult it. Re-touched (seedable) whales — the common case — still parallelize via the seam (+7–8% overhead only). Task 6 deletes the deep fold, making this permanent; Task 8's perf gate (`if any corpus regresses, STOP`) will trip on the fresh-whale corpus. **Decision needed before Task 6**: accept the fresh-whale regression, keep a fold-time deep-fold fallback for demoted-deep leaves, or add a derive-time freshness oracle (pre-state `Account(plainKey)` probe).
+**⚠️ Risk carried to Task 6/8 — fresh-whale serialization:** a *fresh* whale's account prefix is unseedable (no on-disk branch), so `deriveFoldFrontier` demotes its whole storage subtree to one serial leaf — 4.3× slower than the old `foldStorageRoot` deep fold, which parallelized fresh whales via the `accountFresh` empty-seed path. The pure-DAG storage-first ordering can't replicate that at derive time: freshness is only knowable at fold time (`lastUpdateCellWasEmpty`), and the account fold runs *after* its storage subtask, so the storage fold can't consult it. Re-touched (seedable) whales — the common case — still parallelize via the seam (+7–8% overhead only). Task 6 deletes the deep fold, making this permanent; Task 8's perf gate (`if any corpus regresses, STOP`) will trip on the fresh-whale corpus.
+
+**Decision (resolved at Task 6): accept the fresh-whale regression (option 1).** The plan's optimization order is correctness > fail-closed > performance > simplicity. Serial demotion is provably correct — the sequential-trie reference behavior. The rejected alternatives:
+- *Fold-time deep-fold fallback for demoted-deep leaves* reintroduces nested parallelism (a pool worker running an errgroup+semaphore fan-out) and breaks the "no task blocks holding a worker" invariant the frontier design exists to remove — it keeps most of the code Task 6 deletes.
+- *Derive-time freshness oracle* (pre-state `Account(plainKey)` probe → empty-seed the storage subtask instead of demoting) is the performant option, but it adds a new correctness predicate whose false-negative drops on-disk siblings and diverges the root. Adopting it autonomously — without human sign-off that "account absent from the Account domain" ⟺ "no storage on disk beneath its prefix" holds across every self-destruct/recreate path — inverts the correctness-first order. It stays available as a follow-up if the fresh-whale case proves to matter in practice.
+
+The fresh-whale regression is documented; Task 8's perf gate records it and the Post-Completion rollout/backport decision is where the human weighs it. Fresh whales (a contract created *and* writing >K slots in the same block) are rare; re-touched whales, the common case, keep seam parallelism.
 
 ### Task 5: Route ModeParallel (processMounted) through the unified dispatch
 
@@ -165,11 +171,11 @@ Finding-4 no-op holds: the mixed +5–7% is the intended >fan-out headroom subdi
 - Modify: `execution/commitment/streaming_deep_fold.go`
 - Modify: `execution/commitment/parallel_mount.go`
 
-- [ ] delete `foldStorageRoot`'s errgroup fan-out, `isDeepStorageAccount`, the `deepStorageThreshold` gate, and now-dead `foldSem`/`newFoldSem`/`maxFoldConcurrency` plumbing if unused (whale storage now partitions through the general DAG)
-- [ ] keep `storageRootFromSingleChild` and `setAccountStorageRoot` as the depth-64 seam primitives invoked by the general merge/leaf tasks
-- [ ] whale corpora (750k–1M slots, embedded-slot, single-nibble-on-disk, collapse-to-survivor, delete-all) parity green: root + branch byte parity vs sequential
-- [ ] record net line delta in `execution/commitment` (target: negative)
-- [ ] run tests — must pass before next task
+- [x] deleted `foldStorageRoot`'s errgroup fan-out, `dfsSubtreeDeep`, `isDeepStorageAccount`, the `deepStorageThreshold` gate, and the `newFoldSem`/`maxFoldConcurrency` semaphore plumbing (whale storage now partitions through the general DAG). Also removed the now-orphaned `foldMountedLeaf` (Task-3 primitive whose only caller was `foldStorageRoot`; the pool's `foldLeafTask` inlines the mount fold), the streaming-only `newStorageWorker`, and the retired `deepLocalFolds`/`DeepLocalFolds` counter. The test-only `foldSplit`→`foldPresentSplits`→`foldDirtySplits` re-fold self-test chain (kept in Task 4) survives — `foldSplit` now replays its subtree via plain `dfsSubtree` (its `TestStreaming_NonEmptyPrevRefold` corpus is non-whale, so the deleted deep-fold branch was never exercised there; behavior is byte-identical)
+- [x] kept `storageRootFromSingleChild` and `setAccountStorageRoot` as the depth-64 seam primitives invoked by the general merge/leaf tasks (`foldStorageSeam`/`aggregateMountedStorageRoot` in `fold_pool.go`)
+- [x] whale corpora parity green: `TestDeepFold_*` (subset-touched, single-nibble-on-disk, fresh-whale, existing-whale-demotes, leaf-survivor-collapse) + `TestFrontierParity_MegaWhale`/`_DeleteToCollapse`/`_ExtensionTopped` — root + branch byte parity vs sequential, package `-count=1` and `-race` clean
+- [x] net line delta in `execution/commitment`: **−198** (15 added, 213 deleted)
+- [x] run tests — package green (`-count=1`), dispatch/whale tests `-race` clean, `make lint` clean
 
 ### Task 7: Error, cancel, and pin discipline
 

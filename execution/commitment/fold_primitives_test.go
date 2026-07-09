@@ -30,9 +30,9 @@ import (
 	"github.com/erigontech/erigon/execution/commitment/nibbles"
 )
 
-// These tests pin the generalized fold primitives — seedBaseAtPrefix, foldMountedLeaf,
-// mergeChildrenAtPrefix (with stripCellToMountWall), and the depth-64 storage seam — before the
-// frontier pool (Task 4) wires them into Process. A serial recursive folder drives them over a
+// These tests pin the generalized fold primitives — seedBaseAtPrefix, the leaf-task mount fold,
+// mergeChildrenAtPrefix (with stripCellToMountWall), and the depth-64 storage seam. A serial
+// recursive folder drives them over a
 // deriveFoldDAG tree and the produced root + stored branches are compared byte-for-byte against
 // the sequential trie, so mount-boundary invariant M (a task at prefix P under nibble n returns
 // exactly the cell the sequential trie leaves in slot (P,n)) is enforced at depths {2, 64, 65}.

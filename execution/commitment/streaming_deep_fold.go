@@ -17,30 +17,14 @@
 package commitment
 
 import (
-	"context"
 	"errors"
 	"fmt"
 	"io"
 	"math/bits"
-	"runtime"
 	"sync"
 
-	"golang.org/x/sync/errgroup"
-	"golang.org/x/sync/semaphore"
-
-	"github.com/erigontech/erigon/common"
-	"github.com/erigontech/erigon/common/empty"
 	"github.com/erigontech/erigon/execution/commitment/nibbles"
 )
-
-// maxFoldConcurrency caps the whale-storage fold fan-out at the CPUs the process
-// may run on. The account-mount and whale-storage fan-outs nest, so an unshared
-// per-level limit of numWorkers permits ~numWorkers² runnable leaf goroutines; one
-// shared budget of this size caps that product. GOMAXPROCS, not numWorkers, which
-// would starve cores when numWorkers < GOMAXPROCS and several whales fold at once.
-func maxFoldConcurrency() int { return max(1, runtime.GOMAXPROCS(0)) }
-
-func newFoldSem() *semaphore.Weighted { return semaphore.NewWeighted(int64(maxFoldConcurrency())) }
 
 // errStorageBaseNotBranch: no on-disk branch exactly at prefix P (its subtree top is
 // a deeper extension, embedded, or absent); a merge candidate at P must demote to its
@@ -92,157 +76,6 @@ func seedOrDemote(base *HexPatriciaHashed, prefix []byte) (seeded bool, err erro
 		return false, err
 	}
 	return true, nil
-}
-
-// foldMountedLeaf mounts w on the parent's seeded base at slot nib, serially replays the
-// leaf task's key group, and folds to the mount wall — the cell the parent stitches at nib,
-// excluding the parent prefix and nib (invariant M). It works at any depth, exercising the
-// arbitrary-P mount wall in mountTo/foldMounted.
-func foldMountedLeaf(ctx context.Context, w *HexPatriciaHashed, base *HexPatriciaHashed, nib int, group []touchedKey) (cell, error) {
-	w.mountTo(base, nib)
-	for i := range group {
-		if err := w.followAndUpdate(group[i].hk, group[i].pk, group[i].upd); err != nil {
-			return cell{}, err
-		}
-	}
-	return w.foldMounted(ctx, nib)
-}
-
-// isDeepStorageAccount reports whether node is an account leaf whose touched storage
-// is large and forked enough to fold concurrently.
-func isDeepStorageAccount(node *prefixNode, depth int) bool {
-	return depth == 64 && node.plainKey != nil &&
-		bits.OnesCount16(node.bitmap) >= 2 && node.subtreeCount > deepStorageThreshold
-}
-
-// dfsSubtreeDeep walks node's subtree applying each key to w, but at a big-storage
-// account it injects storageRoot's result instead of streaming the slots.
-func dfsSubtreeDeep(w *HexPatriciaHashed, node *prefixNode, path []byte, storageRoot func(node *prefixNode, path []byte, accountFresh bool) (common.Hash, error)) error {
-	if node == nil {
-		return nil
-	}
-	accountFresh := false
-	if node.plainKey != nil {
-		if err := w.followAndUpdate(path, node.plainKey, node.update); err != nil {
-			return err
-		}
-		accountFresh = w.lastUpdateCellWasEmpty
-	} else if node.bitmap == 0 {
-		return errors.New("commitment: trie leaf without a plainKey")
-	}
-
-	if isDeepStorageAccount(node, len(path)) {
-		sr, err := storageRoot(node, path, accountFresh)
-		if err == nil {
-			setAccountStorageRoot(w, path, sr)
-			return nil
-		}
-		if !errors.Is(err, errStorageBaseNotBranch) {
-			return fmt.Errorf("storageRoot: %w", err)
-		}
-		// fall through to normal streaming recursion, which recovers the untouched
-		// on-disk siblings via per-key unfolds
-	}
-
-	childIdx := 0
-	for bm := node.bitmap; bm != 0; {
-		nib := byte(bits.TrailingZeros16(bm))
-		child := node.children[childIdx]
-		base := len(path)
-		path = append(path, nib)
-		path = append(path, child.ext...)
-		if err := dfsSubtreeDeep(w, child, path, storageRoot); err != nil {
-			return err
-		}
-		path = path[:base]
-		childIdx++
-		bm &^= uint16(1) << nib
-	}
-	return nil
-}
-
-// Storage-root analogue of the account mount fold: parallelize a whale's storage by first nibble.
-// sem is the shared fold-concurrency budget: acquired per first-nibble worker so that
-// this whale's fan-out plus every other concurrently-folding subtree stays within the core count.
-func foldStorageRoot(ctx context.Context, sem *semaphore.Weighted, newWorker func() (*HexPatriciaHashed, func()), pu *parallelUpdate, node *prefixNode, path []byte, accountFresh bool) (common.Hash, error) {
-	accPrefix := append([]byte(nil), path...)
-
-	base, releaseBase := newWorker()
-	defer releaseBase()
-
-	// Tag this account's storage-fold workers with its address so one account's
-	// fold can be grepped out of the interleaved parallel trace. Only paid for
-	// when tracing is on (base.traceW mirrors every worker's trace state).
-	var accTag string
-	if base.traceW != nil {
-		accID := node.plainKey
-		if accID == nil {
-			accID = accPrefix
-		}
-		accTag = fmt.Sprintf("[%x] ", accID)
-		base.SetTraceWriter(tracePrefix(base.traceW, accTag))
-	}
-	if err := seedBaseAtPrefix(base, accPrefix); err != nil {
-		// A fresh account proves nothing exists on disk beneath accPrefix, so the reset
-		// (empty) wall rows seedBaseAtPrefix left behind are the correct seed.
-		if !accountFresh || !errors.Is(err, errStorageBaseNotBranch) {
-			return common.Hash{}, fmt.Errorf("unfold storage root: %w", err)
-		}
-	}
-
-	var children [16]cell
-	g, gctx := errgroup.WithContext(ctx)
-	childIdx := 0
-	for bm := node.bitmap; bm != 0; {
-		nib := int(bits.TrailingZeros16(bm))
-		child := node.children[childIdx]
-		ni, ch := nib, child
-		childPrefix := make([]byte, len(accPrefix), len(accPrefix)+1+len(ch.ext))
-		copy(childPrefix, accPrefix)
-		childPrefix = append(childPrefix, byte(ni))
-		childPrefix = append(childPrefix, ch.ext...)
-		group := collectSubtreeKeys(ch, childPrefix)
-		g.Go(func() error {
-			if err := sem.Acquire(gctx, 1); err != nil {
-				return err
-			}
-			defer sem.Release(1)
-			w, release := newWorker()
-			if w.traceW != nil {
-				w.SetTraceWriter(tracePrefix(w.traceW, accTag))
-			}
-			c, err := foldMountedLeaf(gctx, w, base, ni, group)
-			if err == nil {
-				if d := w.TakeDeferredUpdates(); len(d) > 0 {
-					pu.appendDeferred(d)
-				}
-			}
-			release()
-			if err != nil {
-				return fmt.Errorf("storage nibble[%x] fold: %w", ni, err)
-			}
-			children[ni] = c
-			return nil
-		})
-		childIdx++
-		bm &^= uint16(1) << nib
-	}
-	if err := g.Wait(); err != nil {
-		return common.Hash{}, err
-	}
-
-	sr, err := aggregateMountedStorageRoot(base, &children, node.bitmap)
-	if err != nil {
-		return common.Hash{}, fmt.Errorf("storage branch fold: %w", err)
-	}
-	if deferred := base.TakeDeferredUpdates(); len(deferred) > 0 {
-		pu.appendDeferred(deferred)
-	}
-	// A fully collapsed aggregate means a storage-less account: empty-trie root, not zero.
-	if sr.IsEmpty() {
-		return empty.RootHash, nil
-	}
-	return sr.hash, nil
 }
 
 // stitchChildrenIntoRow0 drops each folded child cell into base's seeded row 0 at its nibble

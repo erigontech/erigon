@@ -85,8 +85,8 @@ func buildSubsetTouchedWhale(seed int64, wide, touch []byte, perNibble1, perNibb
 func TestDeepFold_PreExistingWhale_SubsetTouched(t *testing.T) {
 	wide := nibs(0, 1, 2, 3, 4, 5, 6, 7)
 	touch := nibs(0, 1, 2)
-	// batch 2 crosses deepStorageThreshold on a subset of the wide nibbles, triggering the
-	// deep fold while the untouched first-nibbles stay on disk.
+	// batch 2 pushes the touched-slot count past K on a subset of the wide nibbles, splitting
+	// the storage subtree across the fold DAG while the untouched first-nibbles stay on disk.
 	k1, u1, k2, u2 := buildSubsetTouchedWhale(20260622, wide, touch, 60, 420)
 	fk, fu := buildMixedCorpus(7777, 200)
 	k1 = append(append([][]byte{}, fk...), k1...)
@@ -96,14 +96,14 @@ func TestDeepFold_PreExistingWhale_SubsetTouched(t *testing.T) {
 
 // A pre-existing on-disk whale whose storage all sits under a SINGLE first-storage-nibble
 // has no branch record exactly at the account prefix — its storage top is a deeper
-// extension. The next block touches other first-nibbles, crossing deepStorageThreshold and
-// driving the deep storage fold. seedBaseAtPrefix finds no branch at the account prefix;
+// extension. The next block touches other first-nibbles, pushing the storage subtree past K
+// and splitting it across the fold DAG. seedBaseAtPrefix finds no branch at the account prefix;
 // it must still recover the untouched single-nibble subtree rather than seeding an empty
 // base and dropping it, so the parallel/streaming root matches sequential. Regression for
 // the empty-seed sibling drop (#22113).
 func TestDeepFold_PreExistingWhale_SingleNibbleOnDisk(t *testing.T) {
 	onDisk := nibs(0)   // all existing slots under one first-nibble -> no branch at the account prefix
-	touch := nibs(3, 7) // next block touches disjoint first-nibbles, crossing the deep-fold threshold
+	touch := nibs(3, 7) // next block touches disjoint first-nibbles, pushing the storage subtree past K
 	k1, u1, k2, u2 := buildSubsetTouchedWhale(20260702, onDisk, touch, 120, 700)
 	fk, fu := buildMixedCorpus(4242, 200)
 	k1 = append(append([][]byte{}, fk...), k1...)
@@ -138,8 +138,9 @@ func TestDeepFold_FreshWhaleFoldsParallel(t *testing.T) {
 	require.Equal(t, seqRoot, parRoot)
 }
 
-// The demotion gate stays for accounts present in the pre-state without a branch record
-// at their prefix (single embedded slot): the influx still streams serially.
+// A pre-existing account without a branch record at its prefix (single embedded slot) has an
+// unseedable storage prefix, so the influx folds serially through the demotion path. Byte parity
+// with the sequential trie is the invariant.
 func TestDeepFold_ExistingWhaleStillDemotes(t *testing.T) {
 	k1, u1, k2, u2 := buildSubsetTouchedWhale(20260708, nibs(0), nibs(3, 7), 1, 700)
 	fk, fu := buildMixedCorpus(556, 200)
@@ -161,5 +162,4 @@ func TestDeepFold_ExistingWhaleStillDemotes(t *testing.T) {
 	got, err := sc.Process(context.Background())
 	require.NoError(t, err)
 	require.Equal(t, seqRoot, got)
-	require.Zero(t, sc.DeepLocalFolds(), "an account present in the pre-state must keep the serial demotion")
 }

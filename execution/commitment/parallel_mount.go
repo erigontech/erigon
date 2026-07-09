@@ -8,9 +8,6 @@ import (
 	"github.com/erigontech/erigon/common/dbg"
 )
 
-// deepStorageThreshold is the touched-slot count above which an account's storage subtree folds concurrently instead of streaming through its worker.
-const deepStorageThreshold = 1_000
-
 // unfoldRootWall unfolds base at the root until row 0 forms the top-nibble mount wall,
 // consuming at most one nibble per step: a restored root extension sharing the probe's
 // leading nibble would otherwise unfold several levels at once and misplace the wall.
