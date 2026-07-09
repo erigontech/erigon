@@ -248,7 +248,7 @@ func testFuzzDbAndAggregatorv3(f *testing.F, stepSize uint64) (kv.TemporalRwDB, 
 	f.Cleanup(agg.Close)
 	err = agg.OpenFolder()
 	require.NoError(err)
-	tdb, err := temporal.New(db, agg, nil)
+	tdb, err := temporal.New(db, agg)
 	require.NoError(err)
 	return tdb, agg
 }

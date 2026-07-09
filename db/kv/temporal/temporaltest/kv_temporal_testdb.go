@@ -59,7 +59,7 @@ func NewTestDBWithStepSize(tb testing.TB, dirs datadir.Dirs, stepSize uint64) kv
 		tb.Cleanup(agg.Close)
 	}
 
-	db, err := temporal.New(rawDB, agg, nil)
+	db, err := temporal.New(rawDB, agg)
 	if err != nil {
 		panic(err)
 	}

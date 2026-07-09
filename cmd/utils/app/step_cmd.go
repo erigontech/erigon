@@ -175,7 +175,7 @@ func resetExecState(ctx context.Context, dirs datadir.Dirs, logger log.Logger) e
 	defer chainDB.Close()
 	agg := openAgg(ctx, dirs, chainDB, logger)
 	defer agg.Close()
-	tdb, err := temporal.New(chainDB, agg, nil)
+	tdb, err := temporal.New(chainDB, agg)
 	if err != nil {
 		return err
 	}

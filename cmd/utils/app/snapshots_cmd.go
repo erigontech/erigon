@@ -1348,7 +1348,7 @@ func doRollbackSnapshotsToBlock(ctx context.Context, blockNum uint64, prompt boo
 		return err
 	}
 	defer clean()
-	db, err := temporal.New(chainDB, agg, nil)
+	db, err := temporal.New(chainDB, agg)
 	if err != nil {
 		return err
 	}
@@ -1610,7 +1610,7 @@ func doIntegrity(ctx context.Context, cliCtx *cli.Command) error {
 	defer blockRetire.MadvNormal().DisableReadAhead()
 	defer agg.MadvNormal().DisableReadAhead()
 
-	db, err := temporal.New(chainDB, agg, nil)
+	db, err := temporal.New(chainDB, agg)
 	if err != nil {
 		return err
 	}
@@ -1814,7 +1814,7 @@ func doCheckCommitmentHistAtBlk(ctx context.Context, cliCtx *cli.Command, logger
 	defer clean()
 	defer blockRetire.MadvNormal().DisableReadAhead()
 	defer agg.MadvNormal().DisableReadAhead()
-	db, err := temporal.New(chainDB, agg, nil)
+	db, err := temporal.New(chainDB, agg)
 	if err != nil {
 		return err
 	}
@@ -1839,7 +1839,7 @@ func doCheckStateRootByHistory(ctx context.Context, cliCtx *cli.Command, logger 
 		return err
 	}
 	defer clean()
-	db, err := temporal.New(chainDB, agg, nil)
+	db, err := temporal.New(chainDB, agg)
 	if err != nil {
 		return err
 	}
@@ -1884,7 +1884,7 @@ func doCheckRCacheRootAtBlk(ctx context.Context, cliCtx *cli.Command, logger log
 	blockRetire, agg := res.BlockRetire, res.Aggregator
 	defer blockRetire.MadvNormal().DisableReadAhead()
 	defer agg.MadvNormal().DisableReadAhead()
-	db, err := temporal.New(chainDB, agg, nil)
+	db, err := temporal.New(chainDB, agg)
 	if err != nil {
 		return err
 	}
@@ -1912,7 +1912,7 @@ func doCheckRCacheRootAtBlkRange(ctx context.Context, cliCtx *cli.Command, logge
 	blockRetire, agg := res.BlockRetire, res.Aggregator
 	defer blockRetire.MadvNormal().DisableReadAhead()
 	defer agg.MadvNormal().DisableReadAhead()
-	db, err := temporal.New(chainDB, agg, nil)
+	db, err := temporal.New(chainDB, agg)
 	if err != nil {
 		return err
 	}
@@ -1966,7 +1966,7 @@ func doVerifyState(ctx context.Context, cliCtx *cli.Command, logger log.Logger) 
 	agg := openAgg(ctx, dirs, chainDB, logger)
 	defer agg.Close()
 	defer agg.MadvNormal().DisableReadAhead()
-	db, err := temporal.New(chainDB, agg, nil)
+	db, err := temporal.New(chainDB, agg)
 	if err != nil {
 		return err
 	}
@@ -1995,7 +1995,7 @@ func doVerifyHistory(ctx context.Context, cliCtx *cli.Command, logger log.Logger
 	blockReader := freezeblocks.NewBlockReader(snaps.BlockSnaps, snaps.BorSnaps)
 
 	agg := snaps.Aggregator
-	db, err := temporal.New(chainDB, agg, nil)
+	db, err := temporal.New(chainDB, agg)
 	if err != nil {
 		return err
 	}
@@ -2678,7 +2678,7 @@ func doBlkTxNum(ctx context.Context, cliCtx *cli.Command) error {
 	}
 	defer clean()
 
-	db, err := temporal.New(chainDB, agg, nil)
+	db, err := temporal.New(chainDB, agg)
 	if err != nil {
 		return err
 	}
@@ -2954,7 +2954,7 @@ func doIndicesCommand(ctx context.Context, cliCtx *cli.Command, dirs datadir.Dir
 		return err
 	}
 
-	temporalDb, err := temporal.New(chainDB, agg, nil)
+	temporalDb, err := temporal.New(chainDB, agg)
 	if err != nil {
 		return err
 	}
@@ -3497,7 +3497,7 @@ func doRetireCommand(ctx context.Context, cliCtx *cli.Command, dirs datadir.Dirs
 
 	logger.Info("Pruning has ended", "deleted blocks", allDeletedBlocks)
 
-	db, err = temporal.New(db, agg, nil)
+	db, err = temporal.New(db, agg)
 	if err != nil {
 		return err
 	}

@@ -79,23 +79,23 @@ var ( // Compile time interface checks
 type DB struct {
 	kv.RwDB
 	stateFiles *state.Aggregator
-	// blockFiles is the block-data peer of stateFiles: the immutable block
-	// snapshots (headers/bodies/transactions). Held as the services.BlockSnapshots
-	// interface; the concrete *freezeblocks.RoSnapshots is recovered by the block
-	// reader. nil for state-only tools that never read blocks.
+	// blockFiles: block snapshots, the peer of stateFiles. Optional; nil for
+	// state-only tools. Set via SetBlockSnapshots.
 	blockFiles services.BlockSnapshots
 }
 
-func New(db kv.RwDB, agg *state.Aggregator, blockSnapshots services.BlockSnapshots) (*DB, error) {
-	return &DB{RwDB: db, stateFiles: agg, blockFiles: blockSnapshots}, nil
+func New(db kv.RwDB, agg *state.Aggregator) (*DB, error) {
+	return &DB{RwDB: db, stateFiles: agg}, nil
 }
+
+// SetBlockSnapshots wires the (optional) block snapshots. Call once at startup,
+// before any tx is opened.
+func (db *DB) SetBlockSnapshots(sn services.BlockSnapshots) { db.blockFiles = sn }
+
 func (db *DB) Agg() any                                { return db.stateFiles }
 func (db *DB) BlockSnapshots() services.BlockSnapshots { return db.blockFiles }
 
-// beginBlockFilesRo pins a consistent view of the block snapshots for a tx
-// lifetime — the block-data peer of stateFiles.BeginFilesRo(). nil when the DB
-// carries no block snapshots (state-only tools) or they aren't the block
-// RoSnapshots type.
+// beginBlockFilesRo pins the block-files view for a tx, or nil if unset.
 func (db *DB) beginBlockFilesRo() *blocksnapshots.View {
 	sn, ok := db.blockFiles.(*blocksnapshots.RoSnapshots)
 	if !ok {
@@ -239,7 +239,7 @@ func NewTestDB(tb testing.TB, label kv.Label) kv.TemporalRwDB {
 	dirs := datadir.New(tb.TempDir())
 	agg := state.NewTest(dirs).DisableHistory().MustOpen(context.Background(), db)
 	tb.Cleanup(agg.Close)
-	tdb, _ := New(db, agg, nil)
+	tdb, _ := New(db, agg)
 	return tdb
 }
 
@@ -282,10 +282,8 @@ func (tx *tx) FreezeInfo() kv.FreezeInfo { return tx.aggtx }
 func (tx *tx) AggTx() any             { return tx.aggtx }
 func (tx *tx) Agg() *state.Aggregator { return tx.db.stateFiles }
 
-// BlockFilesRo returns the block-files view pinned for this tx lifetime, or nil
-// when the DB carries no block snapshots. Lets a block reader read through the
-// tx's consistent snapshot instead of opening its own view.
-func (tx *tx) BlockFilesRo() *blocksnapshots.View { return tx.blocktx }
+// BlockFilesRoTx returns the tx's pinned block-files view, or nil if unset.
+func (tx *tx) BlockFilesRoTx() *blocksnapshots.View { return tx.blocktx }
 func (tx *tx) StepsInFiles(entitySet ...kv.Domain) kv.Step {
 	return tx.aggtx.StepsInFiles(entitySet...)
 }

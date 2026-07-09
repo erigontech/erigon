@@ -82,7 +82,7 @@ func (r *CommitmentReplay) ComputeCustomCommitmentFromStateHistory(
 	}
 	defer agg.Close()
 
-	tdb, err := temporal.New(db, agg, nil)
+	tdb, err := temporal.New(db, agg)
 	if err != nil {
 		return nil, err
 	}

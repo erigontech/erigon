@@ -122,7 +122,7 @@ func testDbAndAggregatorForLargeData(tb testing.TB, aggStep uint64, persistentDi
 	agg := testAgg(tb, db, dirs, aggStep, logger)
 	err := agg.OpenFolder()
 	require.NoError(tb, err)
-	tdb, err := temporal.New(db, agg, nil)
+	tdb, err := temporal.New(db, agg)
 	require.NoError(tb, err)
 	tb.Cleanup(tdb.Close)
 	return tdb, agg, dirs
@@ -138,7 +138,7 @@ func testDbAndAggregatorv3(tb testing.TB, aggStep uint64) (kv.TemporalRwDB, *sta
 	agg := testAgg(tb, db, dirs, aggStep, logger)
 	err := agg.OpenFolder()
 	require.NoError(tb, err)
-	tdb, err := temporal.New(db, agg, nil)
+	tdb, err := temporal.New(db, agg)
 	require.NoError(tb, err)
 	tb.Cleanup(tdb.Close)
 	return tdb, agg
@@ -374,7 +374,7 @@ func TestAggregator_RebuildCommitmentBasedOnFiles(t *testing.T) {
 	}
 
 	agg = testAgg(t, db, agg.Dirs(), agg.StepSize(), log.New())
-	db, err := temporal.New(db, agg, nil)
+	db, err := temporal.New(db, agg)
 	require.NoError(t, err)
 	defer db.Close()
 
@@ -581,7 +581,7 @@ func aggregatorV3_RestartOnDatadir(t *testing.T, rc runCfg) {
 	defer anotherAgg.Close()
 	require.NoError(t, anotherAgg.OpenFolder())
 
-	db, err = temporal.New(db, anotherAgg, nil) // to set aggregator in the db
+	db, err = temporal.New(db, anotherAgg) // to set aggregator in the db
 	require.NoError(t, err)
 	defer db.Close()
 
