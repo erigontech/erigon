@@ -121,6 +121,11 @@ func (cpg *cachePopulatingGetter) GetLatest(name kv.Domain, k []byte) ([]byte, k
 			// time so any unwind drops it.
 			txNum := (uint64(step)+1)*cpg.stepSize - 1
 			if len(v) == 0 {
+				if cpg.progress == nil {
+					// No progress oracle → no honest stamp; skip rather than
+					// cache an unwind-immortal negative.
+					return v, step, err
+				}
 				txNum = cpg.progress(name)
 			}
 			cpg.sc.PutIfAbsent(name, k, v, txNum)

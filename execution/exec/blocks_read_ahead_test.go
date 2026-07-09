@@ -163,4 +163,18 @@ func TestCachePopulatingGetterNegativeDropsOnUnwind(t *testing.T) {
 	require.False(t, ok, "a negative observed at txNum 10M must not survive an unwind to 5M")
 }
 
+// A getter constructed without a progress oracle must skip caching negatives
+// (an honest stamp is impossible), not panic.
+func TestCachePopulatingGetterNilProgressSkipsNegative(t *testing.T) {
+	key := []byte("\x11\x22\x33\x44\x55\x66\x77\x88\x99\xaa\xbb\xcc\xdd\xee\xff\x00\x11\x22\x33\x44")
+	sc := newTestStateCache()
+	cpg := &cachePopulatingGetter{g: stubTemporalGetter{v: nil}, sc: sc, stepSize: 1_562_500}
+	require.NotPanics(t, func() {
+		_, _, err := cpg.GetLatest(kv.AccountsDomain, key)
+		require.NoError(t, err)
+	})
+	_, ok := sc.Get(kv.AccountsDomain, key)
+	require.False(t, ok, "no progress oracle — the negative must not be cached")
+}
+
 func zeroProgress(kv.Domain) uint64 { return 0 }
