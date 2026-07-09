@@ -31,6 +31,7 @@ import (
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/execution/commitment/nibbles"
 )
 
 type splitState struct {
@@ -197,8 +198,10 @@ func (sc *StreamingCommitter) TouchKey(hashedKey, plainKey []byte, update *Updat
 	}
 }
 
-// Process folds every touched top-nibble split into a cell, stitches the cells
-// into the base row, and folds to the root.
+// Process derives the fold DAG over the touched prefix trie, folds it with one shared worker
+// pool (leaf subtrees bottom-up, merges as their children complete), stitches the top-nibble
+// cells into the base row, folds to the root, and applies (or stages) the deferred branch
+// updates. A clean top-nibble split pre-folded by the scheduler is reused rather than re-folded.
 func (sc *StreamingCommitter) Process(ctx context.Context) ([]byte, error) {
 	if sc.trieCtxFactory == nil {
 		return nil, errors.New("StreamingCommitter.Process requires a TrieContextFactory")
@@ -220,24 +223,56 @@ func (sc *StreamingCommitter) Process(ctx context.Context) ([]byte, error) {
 		return base.RootHash()
 	}
 
-	present, err := sc.foldPresentSplits(ctx, base, root)
+	dctx, dcleanup := sc.trieCtxFactory()
+	if dcleanup != nil {
+		defer dcleanup()
+	}
+	// seed-or-demote prober: a merge candidate is confirmed only if an on-disk branch exists
+	// exactly at its prefix; a read error fails the whole Process closed.
+	var seedErr error
+	seedable := func(prefix []byte) bool {
+		if seedErr != nil {
+			return false
+		}
+		b, _, berr := dctx.Branch(nibbles.HexToCompact(prefix))
+		if berr != nil {
+			seedErr = berr
+			return false
+		}
+		return len(b) > 0
+	}
+
+	k := foldK(root.subtreeCount, sc.numWorkers)
+	rootTask := deriveFoldFrontier(root, k, seedable)
+	if seedErr != nil {
+		sc.dropSplitDeferred()
+		return nil, seedErr
+	}
+	rootTask.base = base
+
+	reusedCells, reusedPresent, reusedDeferred := sc.reuseSchedulerCells(rootTask)
+
+	deferred, err := sc.newFoldPool().run(ctx, rootTask)
 	if err != nil {
+		putDeferredUpdates(reusedDeferred)
 		sc.dropSplitDeferred()
 		return nil, err
 	}
+	deferred = append(deferred, reusedDeferred...)
 
 	var (
-		cells    [16]cell
-		deferred []*DeferredBranchUpdate
+		cells   [16]cell
+		present [16]bool
 	)
+	for _, top := range rootTask.children {
+		cells[top.nib] = top.cell
+		present[top.nib] = true
+	}
 	for nib := range 16 {
-		if !present[nib] {
-			continue
+		if reusedPresent[nib] {
+			cells[nib] = reusedCells[nib]
+			present[nib] = true
 		}
-		s := sc.splits[byte(nib)]
-		cells[nib] = s.cell
-		deferred = append(deferred, s.deferred...)
-		s.deferred = nil
 	}
 
 	stitchSplitCells(base, &cells, &present)
@@ -270,6 +305,54 @@ func (sc *StreamingCommitter) Process(ctx context.Context) ([]byte, error) {
 	flushTrieStateRates()
 	sc.endBlock()
 	return rh, nil
+}
+
+// newFoldPool builds a fold pool sharing the committer's worker pool, context factory, and trace
+// writer so the pool and the scheduler draw from the same recycled workers.
+func (sc *StreamingCommitter) newFoldPool() *foldPool {
+	return &foldPool{
+		numWorkers: sc.numWorkers,
+		ctxFactory: sc.trieCtxFactory,
+		workerPool: &sc.workerPool,
+		traceW:     sc.traceW,
+	}
+}
+
+// reuseSchedulerCells consumes the eager scheduler's output: a clean (folded, not re-dirtied)
+// top-nibble split is pruned from the pool and its pre-folded cell/deferred are stitched directly
+// (overlap preserved for light nibbles); a dirty split's stale cached deferred are recycled and
+// its subtree folds fresh through the pool. Returns the reused cells and their deferred updates.
+func (sc *StreamingCommitter) reuseSchedulerCells(rootTask *foldTask) (cells [16]cell, present [16]bool, deferred []*DeferredBranchUpdate) {
+	kept := rootTask.children[:0]
+	for _, top := range rootTask.children {
+		s := sc.splits[byte(top.nib)]
+		reuse := false
+		if s != nil {
+			s.mu.Lock()
+			if s.reusable() {
+				reuse = true
+				cells[top.nib] = s.cell
+				present[top.nib] = true
+				deferred = append(deferred, s.deferred...)
+			} else {
+				putDeferredUpdates(s.deferred)
+			}
+			s.deferred = nil
+			s.mu.Unlock()
+		}
+		if !reuse {
+			kept = append(kept, top)
+		}
+	}
+	rootTask.children = kept
+	return cells, present, deferred
+}
+
+// putDeferredUpdates recycles every deferred branch update in the slice to the pool.
+func putDeferredUpdates(deferred []*DeferredBranchUpdate) {
+	for _, upd := range deferred {
+		putDeferredUpdate(upd)
+	}
 }
 
 // endBlock drains the per-block touch funnel and releases the scheduler base

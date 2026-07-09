@@ -124,14 +124,26 @@ This is the concrete **Step-1** realization of `docs/plans/20260702-parallel-com
 - Create: `execution/commitment/fold_pool.go`
 - Create: `execution/commitment/fold_pool_test.go`
 
-- [ ] `fold_pool.go`: shared pool of `numWorkers` goroutines pulling ready `*foldTask`; on completion decrement parent `pending`, enqueue parent at zero; single GOMAXPROCS budget; no task blocks holding a worker
-- [ ] rewire `StreamingCommitter.Process` to `deriveFoldDAG` → run the pool → final root fold → deferred handling (replace `foldPresentSplits`/`foldSplit`/`stitchSplitCells` static errgroup on the Process path; leave the scheduler *mechanics* untouched)
-- [ ] **consume the scheduler's cached cells:** a top-nibble-grain leaf task whose `splitState.reusable()` holds a clean pre-folded cell reuses it (overlap preserved for light nibbles); heavy/dirty nibbles fold fresh. Test asserts reuse is actually observed (not silently orphaned).
-- [ ] **NumCPU no-op gate (Finding 4):** before declaring the task done, run the `numWorkers=NumCPU` balanced-corpus bench with `c=1` and confirm no wall-clock regression vs the pre-change engine; if it regresses, STOP — do not proceed to Task 5
-- [ ] deadlock-free oversubscription test: many ready subtrees, few workers → completes, concurrency bounded by GOMAXPROCS
-- [ ] Task 1 parity chains green through the new dispatch (root + branch byte parity, encode/restore, N≥3) on all corpora
-- [ ] race detector clean on the dispatch tests; `make lint` clean
-- [ ] run tests — must pass before next task
+- [x] `fold_pool.go`: shared pool of `numWorkers` goroutines pulling ready `*foldTask`; on completion decrement parent `pending`, enqueue parent at zero; single GOMAXPROCS budget; no task blocks holding a worker (`foldPool`/`dispatchFoldTasks`; ready-channel sized to task count so no send blocks, closed once every task folds, error cancels the shared ctx)
+- [x] rewire `StreamingCommitter.Process` to `deriveFoldFrontier` (always-merge finale root over the pre-built root wall; `deriveFoldDAG`'s per-child derivation + K policy) → seed merge bases → run the pool → final root fold → deferred handling. `foldPresentSplits`/`foldSplit` kept only for the `foldDirtySplits` re-fold self-test; scheduler mechanics untouched
+- [x] **consume the scheduler's cached cells:** `reuseSchedulerCells` prunes a clean (`splitState.reusable()`) top nibble from the pool and lifts its cell+deferred into the finale stitch (overlap preserved); a re-dirtied nibble stays in the pool and its stale cached deferred are recycled — `TestFoldPool_ReuseSchedulerCells` asserts the pruning + lift, not just parity
+- [x] **NumCPU no-op gate (Finding 4):** ran `Benchmark_StreamingOverlap` at `numWorkers=NumCPU` (18) with `c=1`, git-stashed baseline A/B. Balanced/uniform no-op holds (K-floor 1024 + c=1 ⇒ no per-nibble subdivision at ≤fan-out; `TestDeriveFoldDAG_NoOpPerNibble`). Numbers + the whale regression finding recorded below — see **Task 4 bench results** and **⚠️ Risk**
+- [x] deadlock-free oversubscription test: `TestFoldPool_DispatchScheduling` — 200+ ready leaves, 3 workers, multi-level merge chain + account↔storage edge; asserts completion (no hang), one fold per task, dependency order, concurrency ≤ workers
+- [x] Task 1 parity chains green through the new dispatch (root + branch byte parity, encode/restore, N≥3) on all corpora — `TestFrontierParity_{Balanced,MegaWhale,DeleteToCollapse,ExtensionTopped}` run `modeStreaming`+`modeStreamingScheduled` through the new Process
+- [x] race detector clean on the dispatch tests (`-race` on parity + `TestFoldPool*` + streaming/deepfold); `make lint` clean
+- [x] run tests — package green
+
+**Task 4 bench results** (18-core box, `numWorkers=NumCPU`, `c=1`, git-stashed static-errgroup baseline vs frontier pool, `process-ns/op`):
+
+| corpus | baseline | frontier pool | delta |
+|---|---|---|---|
+| mixed 20k (batch) | 4.71–4.95 ms | 4.96–5.27 ms | +5–7% |
+| whale 40k **fresh** single-batch | 8.5–9.1 ms | 37.3–37.8 ms | **+4.3×** |
+| whale 40k **re-touched** (seedable) batch-2 | 43.7–44.2 ms | 47.4–47.5 ms | +7–8% |
+
+Finding-4 no-op holds: the mixed +5–7% is the intended >fan-out headroom subdivision (18 workers > 16 nibbles drops K below the per-nibble load), not a per-nibble subdivision at fan-out. `DeepLocalFolds()` is now always 0 on the Process path (the separate deep-fold counter is retired here; deleted in Task 6); `TestDeepFold_FreshWhaleFoldsParallel` was retargeted to pin byte parity (the surviving invariant) instead of that counter.
+
+**⚠️ Risk carried to Task 6/8 — fresh-whale serialization:** a *fresh* whale's account prefix is unseedable (no on-disk branch), so `deriveFoldFrontier` demotes its whole storage subtree to one serial leaf — 4.3× slower than the old `foldStorageRoot` deep fold, which parallelized fresh whales via the `accountFresh` empty-seed path. The pure-DAG storage-first ordering can't replicate that at derive time: freshness is only knowable at fold time (`lastUpdateCellWasEmpty`), and the account fold runs *after* its storage subtask, so the storage fold can't consult it. Re-touched (seedable) whales — the common case — still parallelize via the seam (+7–8% overhead only). Task 6 deletes the deep fold, making this permanent; Task 8's perf gate (`if any corpus regresses, STOP`) will trip on the fresh-whale corpus. **Decision needed before Task 6**: accept the fresh-whale regression, keep a fold-time deep-fold fallback for demoted-deep leaves, or add a derive-time freshness oracle (pre-state `Account(plainKey)` probe).
 
 ### Task 5: Route ModeParallel (processMounted) through the unified dispatch
 

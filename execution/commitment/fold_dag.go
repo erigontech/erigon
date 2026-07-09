@@ -19,6 +19,8 @@ package commitment
 import (
 	"math/bits"
 	"sync/atomic"
+
+	"github.com/erigontech/erigon/common"
 )
 
 // foldKMin floors the leaf/merge boundary so an internal task always folds
@@ -78,6 +80,14 @@ type foldTask struct {
 	pending  atomic.Int32
 	cell     cell
 	deferred []*DeferredBranchUpdate
+
+	// base is a merge task's own seeded trie (Branch(prefix) unfolded into row 0): the mount
+	// wall its children copy from and the trie it stitches and folds. Nil on leaf tasks and on
+	// the finale root, whose base is the caller's pre-built root wall.
+	base        *HexPatriciaHashed
+	baseCleanup func()
+	// storageRoot carries a storage-root subtask's collapsed hash to its account-leaf parent.
+	storageRoot common.Hash
 }
 
 // deriveFoldDAG walks the prefix trie top-down once, classifying each node as a
