@@ -399,11 +399,7 @@ func (q *Deque[T]) Remove(at int) T {
 // Setting a larger minimum capacity may be used to prevent resizing when the
 // number of stored items changes frequently across a wide range.
 func (q *Deque[T]) SetMinCapacity(minCapacityExp uint) {
-	if 1<<minCapacityExp > minCapacity {
-		q.minCap = 1 << minCapacityExp
-	} else {
-		q.minCap = minCapacity
-	}
+	q.minCap = max(1<<minCapacityExp, minCapacity)
 }
 
 // prev returns the previous buffer position wrapping around buffer.

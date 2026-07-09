@@ -7,8 +7,8 @@
 #
 #   1. partition (stable): the fork-split families each run every fork exactly
 #      once — spec race shards (eest-spec-shards.yml `run` regexes) over
-#      blockchain_test, and hive consume-engine (test-hive-eest.yml sim-limit)
-#      over blockchain_test_engine. A gap silently never runs a fork; an overlap
+#      blockchain_test, and hive consume-enginex (test-hive-eest.yml sim-limit)
+#      over blockchain_test_engine_x. A gap silently never runs a fork; an overlap
 #      runs it twice.
 #   2. EIP-filter liveness + completeness (devnet): the hive glamsterdam-devnet
 #      sim-limit hand-picks the target fork's EIPs. Liveness — every token still
@@ -75,9 +75,9 @@ check_race_mode_parity() {
 			if (bad) { print "  => -sequential/-parallel of a fork must share one non-empty run regex" > "/dev/stderr"; exit 1 }
 		}'
 }
-hive_consume_engine_regexes() {
+hive_consume_enginex_regexes() {
 	yq -o=json '.jobs.test-hive-eest.strategy.matrix.include' "$hive" \
-		| jq -r '.[] | select(.sim=="consume-engine" and .["fixtures-tarball"]=="eest_stable") | "\(.shard)=\(.["sim-limit"])"' \
+		| jq -r '.[] | select(.sim=="consume-enginex" and .["fixtures-tarball"]=="eest_stable") | "\(.shard)=\(.["sim-limit"])"' \
 		| sort -u
 }
 
@@ -161,7 +161,7 @@ check_partition "spec race shards (blocktest --run)"  "$stable_index" blockchain
 echo
 check_race_mode_parity || rc=1
 echo
-check_partition "hive consume-engine (sim-limit)"     "$stable_index" blockchain_test_engine "eels/consume-engine/" "$(hive_consume_engine_regexes)" || rc=1
+check_partition "hive consume-enginex (sim-limit)"    "$stable_index" blockchain_test_engine_x "eels/consume-enginex/" "$(hive_consume_enginex_regexes)" || rc=1
 echo
 if [[ -f "$devnet_index" ]]; then
 	check_hive_eip_filter "$devnet_index" || rc=1

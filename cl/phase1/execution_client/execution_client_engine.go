@@ -78,12 +78,13 @@ func NewExecutionClientEngineLocal(
 	txpool txpoolproto.TxpoolClient,
 	beaconCfg *clparams.BeaconChainConfig,
 ) (*ExecutionClientEngine, error) {
-	return &ExecutionClientEngine{
-		engine:    engine,
-		chainRW:   &chainRW,
-		txpool:    txpool,
-		beaconCfg: beaconCfg,
-	}, nil
+	cc := &ExecutionClientEngine{
+		engine:  engine,
+		chainRW: &chainRW,
+		txpool:  txpool,
+	}
+	cc.SetBeaconChainConfig(beaconCfg)
+	return cc, nil
 }
 
 // NewExecutionClientEngineRPC creates a remote engine client that communicates
@@ -106,6 +107,11 @@ func (cc *ExecutionClientEngine) isLocal() bool {
 
 func (cc *ExecutionClientEngine) SetBeaconChainConfig(beaconCfg *clparams.BeaconChainConfig) {
 	cc.beaconCfg = beaconCfg
+	if engineWithCfg, ok := cc.engine.(interface {
+		SetBeaconChainConfig(*clparams.BeaconChainConfig)
+	}); ok {
+		engineWithCfg.SetBeaconChainConfig(beaconCfg)
+	}
 }
 
 // Close releases resources held by the engine client (HTTP connections, goroutines).
