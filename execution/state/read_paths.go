@@ -51,6 +51,35 @@ func codeSizeFromStateObject(sdb *IntraBlockState, so *stateObject, addr account
 	return size, err
 }
 
+// committedStorageDirect reads a storage slot's committed value straight from
+// the state reader, with no stateObject. Used on the parallel path for a cold
+// slot: no versionMap cell and no stateObject materialized this tx. A same-tx
+// created contract or a fakeStorage override always materializes a stateObject
+// (caught by the cached-object check before this is reached), so the pure-cold
+// path here is unconditionally a committed read.
+func (sdb *IntraBlockState) committedStorageDirect(addr accounts.Address, key accounts.StorageKey) (uint256.Int, error) {
+	if dbg.TraceDomainIO || (dbg.TraceTransactionIO && (sdb.trace || dbg.TraceAccount(addr.Handle()))) {
+		sdb.stateReader.SetTrace(true, fmt.Sprintf("%d (%d.%d)", sdb.blockNum, sdb.txIndex, sdb.version))
+	}
+	var readStart time.Time
+	if dbg.KVReadLevelledMetrics {
+		readStart = time.Now()
+	}
+	res, ok, err := sdb.stateReader.ReadAccountStorage(addr, key)
+	if dbg.KVReadLevelledMetrics {
+		sdb.storageReadDuration += time.Since(readStart)
+	}
+	sdb.storageReadCount++
+	sdb.stateReader.SetTrace(false, "")
+	if err != nil {
+		return uint256.Int{}, err
+	}
+	if !ok {
+		res.Clear()
+	}
+	return res, nil
+}
+
 // versionedReadCore runs the type-independent part of a versionMap-aware read —
 // the writeSet/versionMap/readSet tier probes plus destruct/revival logic — and
 // returns a readPathResult telling the typed wrapper which source to read the
@@ -466,6 +495,35 @@ func versionedReadCore(s *IntraBlockState, addr accounts.Address, path AccountPa
 				hdr.Source = accSource
 				hdr.Version = accVersion
 				so = newObject(s, addr, readAccount, readAccount)
+			}
+		}
+		// Cold committed storage read: resolve directly from the state reader
+		// without materializing a stateObject. A stateObject exists here only
+		// when a write this tx materialized one (created contract / fakeStorage /
+		// dirty slots live on that object), so reuse it when present.
+		if path == StoragePath && so == nil {
+			hdr.Source = StorageRead
+			if cached, ok := s.stateObjects[addr]; ok {
+				so = cached
+			} else {
+				// A cold slot depends only on its own StoragePath cell — record
+				// no AddressPath dependency (that would be a false dep). The value
+				// is the committed slot straight from the state reader.
+				val, err := s.committedStorageDirect(addr, key)
+				if err != nil {
+					r.err = err
+					r.outcome = outcomeReturnDefault
+					r.source = StorageRead
+					r.version = UnknownVersion
+					return
+				}
+				r.mapStorageVal = val
+				r.outcome = outcomeStorageRead
+				r.hdr = hdr
+				r.recordVR = true
+				r.source = hdr.Source
+				r.version = hdr.Version
+				return
 			}
 		}
 		if so == nil {
@@ -950,8 +1008,14 @@ func readStateForSet(s *IntraBlockState, addr accounts.Address, key accounts.Sto
 	case outcomeStorageRead:
 		var v uint256.Int
 		var clean bool
-		if r.so != nil && !r.so.deleted {
-			v, clean = r.so.GetState(key)
+		if r.so != nil {
+			if !r.so.deleted {
+				v, clean = r.so.GetState(key)
+			}
+		} else {
+			// Cold committed read resolved by committedStorageDirect: no dirty
+			// value exists on the parallel path, so it is always clean.
+			v, clean = r.mapStorageVal, true
 		}
 		if r.recordVR {
 			s.versionedReads.SetStorage(addr, key, VersionedRead[uint256.Int]{r.hdr, v})
@@ -991,12 +1055,16 @@ func readCommittedState(s *IntraBlockState, addr accounts.Address, key accounts.
 		return v, r.source, r.version, nil
 	case outcomeStorageRead:
 		var v uint256.Int
-		if r.so != nil && !r.so.deleted {
-			cv, err := r.so.GetCommittedState(key)
-			if err != nil {
-				return uint256.Int{}, StorageRead, UnknownVersion, err
+		if r.so != nil {
+			if !r.so.deleted {
+				cv, err := r.so.GetCommittedState(key)
+				if err != nil {
+					return uint256.Int{}, StorageRead, UnknownVersion, err
+				}
+				v = cv
 			}
-			v = cv
+		} else {
+			v = r.mapStorageVal
 		}
 		if r.recordVR {
 			s.versionedReads.SetStorage(addr, key, VersionedRead[uint256.Int]{r.hdr, v})
