@@ -143,13 +143,10 @@ func buildBlackListForPruning(
 		name := p.Name
 		// Receipts-history filter runs independently of History pruning and of the
 		// canSnapshotBePruned rcache exclusion, so persist-receipts configs skip
-		// old rcache history segments by their own window.
+		// old rcache history segments by their own window. An unparseable name is
+		// left for download rather than aborting the sync.
 		if receiptsEnabled && isStateHistory(name) && strings.Contains(name, kv.RCacheDomain.String()) {
-			res, _, ok := snaptype.ParseFileName("", name)
-			if !ok {
-				return blackList, errors.New("invalid state snapshot name")
-			}
-			if minReceiptsStep >= kv.Step(res.To) {
+			if res, _, ok := snaptype.ParseFileName("", name); ok && minReceiptsStep >= kv.Step(res.To) {
 				blackList[name] = struct{}{}
 			}
 			continue
@@ -539,9 +536,14 @@ func SyncSnapshots(
 				continue
 			}
 
-			isRcacheRelatedSegment := strings.Contains(p.Name, kv.RCacheDomain.String()) ||
-				strings.Contains(p.Name, kv.LogAddrIdx.String()) ||
+			// When --persist.receipts.distance is set, rcache retention is governed
+			// by its own window (the receipts blacklist above), consistent with the
+			// retire side; only the log indexes follow the block-data window here.
+			isRcacheRelatedSegment := strings.Contains(p.Name, kv.LogAddrIdx.String()) ||
 				strings.Contains(p.Name, kv.LogTopicIdx.String())
+			if !prune.ReceiptsAmount().Enabled() {
+				isRcacheRelatedSegment = isRcacheRelatedSegment || strings.Contains(p.Name, kv.RCacheDomain.String())
+			}
 
 			if isRcacheRelatedSegment && isReceiptsSegmentPruned(ctx, tx, txNumsReader, cc, prune, frozenBlocks, p, stepSize) {
 				continue

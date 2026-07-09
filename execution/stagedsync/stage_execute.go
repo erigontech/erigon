@@ -633,8 +633,8 @@ func historyRetireCutoffs(ctx context.Context, tx kv.Tx, blockReader services.Fu
 		return kv.RetireCutoffs{}, err
 	}
 	rcacheTxNum := historyTxNum
-	if pm.ReceiptsAmount().Enabled() {
-		rcacheTxNum, err = blockAmountRetireCutoffTxNum(ctx, tx, blockReader, pm.ReceiptsAmount(), forwardProgress)
+	if receipts := pm.ReceiptsAmount(); receipts.Enabled() {
+		rcacheTxNum, err = blockAmountRetireCutoffTxNum(ctx, tx, blockReader, receipts, forwardProgress)
 		if err != nil {
 			return kv.RetireCutoffs{}, err
 		}
