@@ -83,17 +83,15 @@ func TestPrestateTracerDiffModeDeletedAccount(t *testing.T) {
 	require.Equal(t, common.Hash{}, *post.CodeHash, "deleted account must have zero codeHash")
 }
 
-// TestPrestateTracerOnTxEndExcludesAccountEmptyBeforeStorageTouched verifies the
-// Geth-compatible behavior that an account which was empty before the tx stays
-// excluded from the prestate even if its storage got read (e.g. a virgin SLOAD)
-// during the tx: emptiness is decided at first lookup, not re-derived afterward.
+// TestPrestateTracerOnTxEndExcludesAccountEmptyBeforeStorageTouched pins the
+// account.empty invariant (see its field doc) against a virgin-SLOAD account.
 func TestPrestateTracerOnTxEndExcludesAccountEmptyBeforeStorageTouched(t *testing.T) {
 	addr := accounts.InternAddress(common.HexToAddress("0x0000000000000000000000000000000000004242"))
 	otherAddr := accounts.InternAddress(common.HexToAddress("0x0000000000000000000000000000000000009999"))
 
 	tr := newTestPrestateTracer(prestateTracerConfig{})
 	tr.env = &tracing.VMContext{
-		IntraBlockState: &postTxIBS{deletedAddr: otherAddr}, // addr reads as empty: zero balance/nonce, no code
+		IntraBlockState: &postTxIBS{deletedAddr: otherAddr},
 	}
 
 	tr.lookupAccount(addr)
@@ -117,7 +115,7 @@ func TestPrestateTracerDiffModeCodelessUnchanged(t *testing.T) {
 	tr.pre[addr] = &account{Balance: big.NewInt(0)}
 
 	tr.env = &tracing.VMContext{
-		IntraBlockState: &postTxIBS{deletedAddr: otherAddr}, // addr returns EmptyCodeHash
+		IntraBlockState: &postTxIBS{deletedAddr: otherAddr},
 	}
 
 	tr.processDiffState()
@@ -143,7 +141,7 @@ func TestPrestateTracerDiffModeZeroStorageUnmodified(t *testing.T) {
 	}
 
 	tr.env = &tracing.VMContext{
-		IntraBlockState: &postTxIBS{deletedAddr: otherAddr}, // addr returns EmptyCodeHash
+		IntraBlockState: &postTxIBS{deletedAddr: otherAddr},
 	}
 
 	tr.processDiffState()

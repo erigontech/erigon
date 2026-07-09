@@ -65,10 +65,6 @@ func (a *account) exists() bool {
 	return a.Nonce > 0 || a.CodeHash != nil || len(a.Storage) > 0 || (a.Balance != nil && a.Balance.Sign() != 0)
 }
 
-func isZeroHash(h common.Hash) bool {
-	return h == (common.Hash{})
-}
-
 type accountMarshaling struct {
 	Balance *hexutil.Big
 	Code    *hexutil.Bytes
@@ -319,7 +315,7 @@ func (t *prestateTracer) processDiffState() {
 		if !t.config.DisableStorage {
 			for key, val := range state.Storage {
 				// don't include the empty slot
-				if isZeroHash(val) {
+				if val == (common.Hash{}) {
 					delete(state.Storage, key)
 				}
 
@@ -394,8 +390,6 @@ func (t *prestateTracer) lookupAccount(addr accounts.Address) {
 		codeHash := crypto.HashData(code)
 		acc.CodeHash = &codeHash
 	}
-	// The emptiness check must run before Storage is populated below, so that
-	// slots read later via SLOAD/SSTORE don't retroactively count as prestate.
 	acc.empty = !acc.exists()
 	// The code must be fetched first for the emptiness check.
 	if t.config.DisableCode {
