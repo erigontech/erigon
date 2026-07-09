@@ -42,10 +42,6 @@ import (
 	"github.com/erigontech/erigon/db/snapshotsync/freezeblocks"
 )
 
-var buffersPool = sync.Pool{
-	New: func() any { return &bytes.Buffer{} },
-}
-
 type HistoricalStatesReader struct {
 	cfg            *clparams.BeaconChainConfig
 	validatorTable *state_accessors.StaticValidatorTable // We can save 80% of the I/O by caching the validator table
@@ -572,16 +568,8 @@ func (r *HistoricalStatesReader) reconstructDiffedUint64List(tx kv.Tx, kvGetter 
 		return nil, fmt.Errorf("dump not found for slot %d", freshDumpSlot)
 	}
 
-	buffer := buffersPool.Get().(*bytes.Buffer)
-	defer buffersPool.Put(buffer)
-	buffer.Reset()
-
-	if _, err := buffer.Write(compressed); err != nil {
-		return nil, err
-	}
-
 	// Read the diff file
-	zstdReader, err := zstd.NewReader(buffer)
+	zstdReader, err := zstd.NewReader(bytes.NewReader(compressed))
 	if err != nil {
 		return nil, err
 	}
@@ -644,10 +632,6 @@ func (r *HistoricalStatesReader) reconstructBalances(tx kv.Tx, kvGetter state_ac
 	remainder := slot % clparams.SlotsPerDump
 	freshDumpSlot := slot - remainder
 
-	buffer := buffersPool.Get().(*bytes.Buffer)
-	defer buffersPool.Put(buffer)
-	buffer.Reset()
-
 	var compressed []byte
 	currentStageProgress, err := state_accessors.GetStateProcessingProgress(tx)
 	if err != nil {
@@ -670,10 +654,7 @@ func (r *HistoricalStatesReader) reconstructBalances(tx kv.Tx, kvGetter state_ac
 	if len(compressed) == 0 {
 		return nil, fmt.Errorf("dump not found for slot %d", freshDumpSlot)
 	}
-	if _, err := buffer.Write(compressed); err != nil {
-		return nil, err
-	}
-	zstdReader, err := zstd.NewReader(buffer)
+	zstdReader, err := zstd.NewReader(bytes.NewReader(compressed))
 	if err != nil {
 		return nil, err
 	}
@@ -1057,22 +1038,13 @@ func ReadQueueSSZ[T solid.EncodableHashableSSZ](kvGetter state_accessors.GetValF
 	remainder := slot % clparams.SlotsPerDump
 	freshDumpSlot := slot - remainder
 
-	buffer := buffersPool.Get().(*bytes.Buffer)
-	defer buffersPool.Put(buffer)
-	buffer.Reset()
-
-	var compressed []byte
-
 	compressed, err := kvGetter(dumpTable, base_encoding.Encode64ToBytes4(freshDumpSlot))
 	if err != nil {
 		return err
 	}
 
 	if len(compressed) != 0 {
-		if _, err := buffer.Write(compressed); err != nil {
-			return err
-		}
-		zstdReader, err := zstd.NewReader(buffer)
+		zstdReader, err := zstd.NewReader(bytes.NewReader(compressed))
 		if err != nil {
 			return err
 		}
@@ -1089,7 +1061,6 @@ func ReadQueueSSZ[T solid.EncodableHashableSSZ](kvGetter state_accessors.GetValF
 	}
 
 	for currSlot := freshDumpSlot + 1; currSlot <= slot; currSlot++ {
-		buffer.Reset()
 		key := base_encoding.Encode64ToBytes4(currSlot)
 		v, err := kvGetter(diffsTable, key)
 		if err != nil {
@@ -1099,11 +1070,7 @@ func ReadQueueSSZ[T solid.EncodableHashableSSZ](kvGetter state_accessors.GetValF
 			continue
 		}
 
-		if _, err := buffer.Write(v); err != nil {
-			return err
-		}
-
-		if err := base_encoding.ApplySSZQueueDiff(buffer, out, 0); err != nil {
+		if err := base_encoding.ApplySSZQueueDiff(bytes.NewReader(v), out, 0); err != nil {
 			return err
 		}
 	}
@@ -1127,15 +1094,8 @@ func ReadRequiredQueueSSZ[T solid.EncodableHashableSSZ](kvGetter state_accessors
 		return fmt.Errorf("%w: table %s, slot %d", ErrMissingGloasData, dumpTable, slot)
 	}
 
-	// Decompress and decode the dump (reuse buffer pool).
-	buffer := buffersPool.Get().(*bytes.Buffer)
-	defer buffersPool.Put(buffer)
-	buffer.Reset()
-
-	if _, err := buffer.Write(compressed); err != nil {
-		return err
-	}
-	zstdReader, err := zstd.NewReader(buffer)
+	// Decompress and decode the dump.
+	zstdReader, err := zstd.NewReader(bytes.NewReader(compressed))
 	if err != nil {
 		return err
 	}
@@ -1150,7 +1110,6 @@ func ReadRequiredQueueSSZ[T solid.EncodableHashableSSZ](kvGetter state_accessors
 
 	// Apply per-slot diffs from dump+1 to target slot.
 	for currSlot := freshDumpSlot + 1; currSlot <= slot; currSlot++ {
-		buffer.Reset()
 		key := base_encoding.Encode64ToBytes4(currSlot)
 		v, err := kvGetter(diffsTable, key)
 		if err != nil {
@@ -1159,10 +1118,7 @@ func ReadRequiredQueueSSZ[T solid.EncodableHashableSSZ](kvGetter state_accessors
 		if len(v) == 0 {
 			continue
 		}
-		if _, err := buffer.Write(v); err != nil {
-			return err
-		}
-		if err := base_encoding.ApplySSZQueueDiff(buffer, out, 0); err != nil {
+		if err := base_encoding.ApplySSZQueueDiff(bytes.NewReader(v), out, 0); err != nil {
 			return err
 		}
 	}
@@ -1199,14 +1155,7 @@ func readCompressedSSZ[T interface {
 		return fmt.Errorf("%w: table %s, slot %d", ErrMissingGloasData, table, slot)
 	}
 
-	buffer := buffersPool.Get().(*bytes.Buffer)
-	defer buffersPool.Put(buffer)
-	buffer.Reset()
-
-	if _, err := buffer.Write(compressed); err != nil {
-		return err
-	}
-	zstdReader, err := zstd.NewReader(buffer)
+	zstdReader, err := zstd.NewReader(bytes.NewReader(compressed))
 	if err != nil {
 		return err
 	}

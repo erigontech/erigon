@@ -103,8 +103,8 @@ func (df *DirtyFiles) EndTxNumMax() uint64 {
 	return 0
 }
 
-// updateMinimax: callers use 0 as "not set yet".
-func (df *DirtyFiles) updateMinimax(current uint64) uint64 {
+// endTxNumMinimax: callers use 0 as "not set yet".
+func (df *DirtyFiles) endTxNumMinimax(current uint64) uint64 {
 	if max, ok := df.Max(); ok {
 		if current == 0 {
 			return max.endTxNum
@@ -125,8 +125,8 @@ type FilesItem struct {
 	version  version.Version
 	refcount atomic.Int32
 
-	// Deprecated: only the not-yet-migrated forkable subsystem still uses this (with
-	// refcount); the aggregator reclaims via aggregatorVisible generations (retired + refcnt).
+	// Used by the SnapshotRepo mark-and-sweep reclamation path (with refcount); the
+	// aggregator instead reclaims via aggregatorVisible generations (retired + refcnt).
 	canDelete atomic.Bool
 }
 

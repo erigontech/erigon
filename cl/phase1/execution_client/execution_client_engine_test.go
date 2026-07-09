@@ -25,7 +25,29 @@ import (
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
+	"github.com/erigontech/erigon/execution/engineapi"
+	"github.com/erigontech/erigon/execution/execmodule/chainreader"
 )
+
+type beaconCfgEngineStub struct {
+	engineapi.EngineAPI
+	cfg *clparams.BeaconChainConfig
+}
+
+func (s *beaconCfgEngineStub) SetBeaconChainConfig(cfg *clparams.BeaconChainConfig) {
+	s.cfg = cfg
+}
+
+func TestNewExecutionClientEngineLocalPropagatesBeaconConfig(t *testing.T) {
+	cfg := clparams.MainnetBeaconConfig
+	engine := &beaconCfgEngineStub{}
+
+	client, err := NewExecutionClientEngineLocal(engine, chainreader.ChainReaderWriterEth1{}, nil, &cfg)
+	require.NoError(t, err)
+
+	require.Same(t, &cfg, client.beaconCfg)
+	require.Same(t, &cfg, engine.cfg)
+}
 
 func TestBuildExecutionPayload_BlockAccessListGloasOnly(t *testing.T) {
 	beaconCfg := clparams.MainnetBeaconConfig
