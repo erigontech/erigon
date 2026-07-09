@@ -32,6 +32,7 @@ import (
 	"github.com/erigontech/erigon/db/kv/order"
 	"github.com/erigontech/erigon/db/kv/stream"
 	"github.com/erigontech/erigon/db/services"
+	"github.com/erigontech/erigon/db/snapshotsync/blocksnapshots"
 	"github.com/erigontech/erigon/db/state"
 	"github.com/erigontech/erigon/db/version"
 )
@@ -90,8 +91,20 @@ func New(db kv.RwDB, agg *state.Aggregator, blockSnapshots services.BlockSnapsho
 }
 func (db *DB) Agg() any                                { return db.stateFiles }
 func (db *DB) BlockSnapshots() services.BlockSnapshots { return db.blockFiles }
-func (db *DB) InternalDB() kv.RwDB                     { return db.RwDB }
-func (db *DB) Debug() kv.TemporalDebugDB               { return kv.TemporalDebugDB(db) }
+
+// beginBlockFilesRo pins a consistent view of the block snapshots for a tx
+// lifetime — the block-data peer of stateFiles.BeginFilesRo(). nil when the DB
+// carries no block snapshots (state-only tools) or they aren't the block
+// RoSnapshots type.
+func (db *DB) beginBlockFilesRo() *blocksnapshots.View {
+	sn, ok := db.blockFiles.(*blocksnapshots.RoSnapshots)
+	if !ok {
+		return nil
+	}
+	return sn.View()
+}
+func (db *DB) InternalDB() kv.RwDB       { return db.RwDB }
+func (db *DB) Debug() kv.TemporalDebugDB { return kv.TemporalDebugDB(db) }
 
 func (db *DB) BeginTemporalRo(ctx context.Context) (kv.TemporalTx, error) {
 	kvTx, err := db.RwDB.BeginRo(ctx) //nolint:gocritic
@@ -101,6 +114,7 @@ func (db *DB) BeginTemporalRo(ctx context.Context) (kv.TemporalTx, error) {
 	tx := &Tx{Tx: kvTx, tx: tx{db: db, ctx: ctx}}
 
 	tx.aggtx = db.stateFiles.BeginFilesRo()
+	tx.blocktx = db.beginBlockFilesRo()
 
 	return tx, nil
 }
@@ -129,6 +143,7 @@ func (db *DB) View(ctx context.Context, f func(tx kv.Tx) error) error {
 func (db *DB) newRwTx(kvTx kv.RwTx, ctx context.Context) *RwTx {
 	tx := &RwTx{RwTx: kvTx, tx: tx{db: db, ctx: ctx}}
 	tx.aggtx = db.stateFiles.BeginFilesRo()
+	tx.blocktx = db.beginBlockFilesRo()
 	return tx
 }
 
@@ -242,6 +257,7 @@ func NewTestTx(tb testing.TB) (kv.TemporalRwDB, kv.TemporalRwTx) {
 type tx struct {
 	db               *DB
 	aggtx            *state.AggregatorRoTx
+	blocktx          *blocksnapshots.View
 	resourcesToClose []kv.Closer
 	ctx              context.Context
 	mu               sync.RWMutex
@@ -410,6 +426,7 @@ func (rwtx *RwTx) AsyncClone(asyncTx kv.RwTx) *asyncClone {
 			tx: tx{
 				db:               rwtx.db,
 				aggtx:            rwtx.aggtx,
+				blocktx:          rwtx.blocktx,
 				resourcesToClose: nil,
 				ctx:              rwtx.ctx,
 			}}}
@@ -430,6 +447,9 @@ func (tx *tx) autoClose() {
 		closer.Close()
 	}
 	tx.aggtx.Close()
+	if tx.blocktx != nil {
+		tx.blocktx.Close()
+	}
 }
 
 func (tx *RwTx) Commit() error {
