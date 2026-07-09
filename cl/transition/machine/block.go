@@ -316,15 +316,9 @@ func processVoluntaryExits(impl BlockOperationProcessor, s abstract.BeaconState,
 				return err
 			}
 
-			// [New in Gloas:EIP7732] Get pubkey from builders for builder indices
 			var pk [48]byte
 			if s.Version() >= clparams.GloasVersion && state.IsBuilderIndex(voluntaryExit.ValidatorIndex) {
-				builderIndex := state.ConvertValidatorIndexToBuilderIndex(voluntaryExit.ValidatorIndex)
-				builders := s.GetBuilders()
-				if builders == nil || int(builderIndex) >= builders.Len() {
-					return fmt.Errorf("ProcessVoluntaryExit: invalid builder index %d", builderIndex)
-				}
-				pk = builders.Get(int(builderIndex)).Pubkey
+				return fmt.Errorf("ProcessVoluntaryExit: builder index voluntary exits are not supported")
 			} else {
 				validator, err := s.ValidatorForValidatorIndex(int(voluntaryExit.ValidatorIndex))
 				if err != nil {

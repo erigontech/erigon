@@ -128,6 +128,51 @@ MIN_BUILDER_WITHDRAWABILITY_DELAY: 8192
 	require.Equal(t, GloasVersion, beaconCfg.GetCurrentStateVersion(100))
 }
 
+func TestCustomConfigRejectsGloasRequestTypeMismatch(t *testing.T) {
+	yamlContent := `
+PRESET_BASE: minimal
+GLOAS_FORK_EPOCH: 1
+BUILDER_DEPOSIT_REQUEST_TYPE: 0x09
+`
+	dir := t.TempDir()
+	configPath := filepath.Join(dir, "config.yaml")
+	require.NoError(t, os.WriteFile(configPath, []byte(yamlContent), 0644))
+
+	_, _, err := CustomConfig(configPath)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "BUILDER_DEPOSIT_REQUEST_TYPE mismatch")
+}
+
+func TestCustomConfigRejectsElectraRequestTypeMismatchWithoutGloas(t *testing.T) {
+	yamlContent := `
+PRESET_BASE: minimal
+ELECTRA_FORK_EPOCH: 1
+DEPOSIT_REQUEST_TYPE: 0x09
+`
+	dir := t.TempDir()
+	configPath := filepath.Join(dir, "config.yaml")
+	require.NoError(t, os.WriteFile(configPath, []byte(yamlContent), 0644))
+
+	_, _, err := CustomConfig(configPath)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "DEPOSIT_REQUEST_TYPE mismatch")
+}
+
+func TestCustomConfigRejectsBaseRequestTypeMismatchWhenOnlyGloasScheduled(t *testing.T) {
+	yamlContent := `
+PRESET_BASE: minimal
+GLOAS_FORK_EPOCH: 1
+DEPOSIT_REQUEST_TYPE: 0x09
+`
+	dir := t.TempDir()
+	configPath := filepath.Join(dir, "config.yaml")
+	require.NoError(t, os.WriteFile(configPath, []byte(yamlContent), 0644))
+
+	_, _, err := CustomConfig(configPath)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "DEPOSIT_REQUEST_TYPE mismatch")
+}
+
 // TestCustomConfigUnsetForksAreFarFuture verifies that fork epochs omitted from a
 // custom config default to far-future, like other clients, rather than inheriting
 // the finite epochs of the mainnet base config.

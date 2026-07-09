@@ -62,7 +62,7 @@ func newTestDb(tb testing.TB, stepSize uint64) kv.TemporalRwDB {
 	tb.Cleanup(agg.Close)
 	err := agg.OpenFolder()
 	require.NoError(tb, err)
-	tdb, err := temporal.New(db, agg, nil)
+	tdb, err := temporal.New(db, agg)
 	require.NoError(tb, err)
 	return tdb
 }
