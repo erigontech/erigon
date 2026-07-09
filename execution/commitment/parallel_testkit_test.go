@@ -110,6 +110,23 @@ const (
 	modeStreamingPublic
 )
 
+func (m runMode) String() string {
+	switch m {
+	case modeSeq:
+		return "seq"
+	case modeParallel:
+		return "parallel"
+	case modeStreaming:
+		return "streaming"
+	case modeStreamingScheduled:
+		return "streaming_scheduled"
+	case modeStreamingPublic:
+		return "streaming_public"
+	default:
+		return "unknown"
+	}
+}
+
 func newSeqTrie(t *testing.T, ms *MockState) *HexPatriciaHashed {
 	t.Helper()
 	return NewHexPatriciaHashed(length.Addr, ms, DefaultTrieConfig())
@@ -293,31 +310,78 @@ func requireAllEnginesParity(t *testing.T, k1 [][]byte, u1 []Update, k2 [][]byte
 	require.Equalf(t, seqRoot, schRoot, "streaming-scheduled(workers=%d) vs sequential root mismatch", workers)
 }
 
-func requireBranchParity(t *testing.T, seq, got *MockState) {
+// runEngineBatchesParity folds one batch stream through the sequential oracle and a candidate
+// engine in lockstep, asserting root AND stored-branch byte parity after EVERY batch — not just
+// end-of-chain, which is what let corrupt intermediate branches hide until a later block. Each
+// engine carries its own state blob across the EncodeCurrentState→SetState restart round-trip
+// that processModeBatchState performs between batches, so state that never reaches a branch
+// record (a propagate-folded root) is exercised too.
+func runEngineBatchesParity(t *testing.T, mode runMode, workers int, batches []engineBatch) {
 	t.Helper()
-	mism := 0
-	seen := map[string]struct{}{}
+	require.GreaterOrEqualf(t, len(batches), 3, "parity harness expects N>=3 batches, got %d", len(batches))
+
+	seqMs := NewMockState(t)
+	candMs := NewMockState(t)
+	candMs.SetConcurrentCommitment(true)
+
+	var seqBlob, candBlob []byte
+	for i, b := range batches {
+		var seqRoot, candRoot []byte
+		seqRoot, seqBlob = processModeBatchState(t, seqMs, modeSeq, 0, b.keys, b.upds, seqBlob)
+		candRoot, candBlob = processModeBatchState(t, candMs, mode, workers, b.keys, b.upds, candBlob)
+
+		if !bytes.Equal(seqRoot, candRoot) {
+			branchDiff(t, seqMs, candMs)
+		}
+		require.Equalf(t, seqRoot, candRoot, "%s(workers=%d) batch %d root != sequential", mode, workers, i+1)
+		requireBranchParity(t, seqMs, candMs)
+	}
+}
+
+// branchParityT is the subset of *testing.T the branch-parity assertions use. Taking an
+// interface lets the injection self-test drive requireBranchParity with a recorder and prove
+// it fails on a corrupted branch, instead of trusting that it would.
+type branchParityT interface {
+	require.TestingT
+	Helper()
+	Log(args ...any)
+	Logf(format string, args ...any)
+}
+
+// branchStoreMismatches returns the branch prefixes that differ between the two stores —
+// present in one but not the other, or differing bytes. Empty ⇒ byte-for-byte parity. It is
+// the shared predicate under requireBranchParity, exposed so the self-test exercises the exact
+// comparison the harness trusts.
+func branchStoreMismatches(seq, got *MockState) []string {
+	seen := make(map[string]struct{}, len(seq.cm)+len(got.cm))
 	for k := range seq.cm {
 		seen[k] = struct{}{}
 	}
 	for k := range got.cm {
 		seen[k] = struct{}{}
 	}
+	var out []string
 	for k := range seen {
 		sb, sok := seq.cm[k]
 		pb, pok := got.cm[k]
 		if !sok || !pok || !bytes.Equal(sb, pb) {
-			mism++
+			out = append(out, k)
 		}
 	}
-	if mism != 0 {
+	return out
+}
+
+func requireBranchParity(t branchParityT, seq, got *MockState) {
+	t.Helper()
+	mism := branchStoreMismatches(seq, got)
+	if len(mism) != 0 {
 		branchDiff(t, seq, got)
 	}
 	require.Equal(t, len(seq.cm), len(got.cm), "branch count must match")
-	require.Zero(t, mism, "stored branch metadata differs between streaming and sequential")
+	require.Emptyf(t, mism, "stored branch metadata differs (%d divergent prefixes)", len(mism))
 }
 
-func branchDiff(t *testing.T, seq, par *MockState) {
+func branchDiff(t branchParityT, seq, par *MockState) {
 	t.Helper()
 	seen := map[string]struct{}{}
 	for k := range seq.cm {

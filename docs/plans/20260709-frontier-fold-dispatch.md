@@ -85,11 +85,11 @@ This is the concrete **Step-1** realization of `docs/plans/20260702-parallel-com
 - Modify: `execution/commitment/parallel_testkit_test.go`
 - Create: `execution/commitment/frontier_parity_test.go`
 
-- [ ] extend the engine-parity helper so branch-store byte parity is asserted after **every** batch (not just end-of-chain), N≥3 batches, with an `EncodeCurrentState`→`SetState` round-trip between batches — over the CURRENT streaming/mount engines
-- [ ] add a divergence-injection self-test proving the harness goes RED on a deliberately corrupted branch (guards against a harness that silently passes)
-- [ ] add corpora: balanced (uniform top-nibble), lopsided-by-corecount (mega-whale storage 750k–1M slots), delete-to-collapse, extension-topped mount
-- [ ] run tests — green on current engine, and the injection self-test RED as expected; commit
-- [ ] `make lint` clean
+- [x] extend the engine-parity helper so branch-store byte parity is asserted after **every** batch (not just end-of-chain), N≥3 batches, with an `EncodeCurrentState`→`SetState` round-trip between batches — over the CURRENT streaming/mount engines (`runEngineBatchesParity` in `parallel_testkit_test.go`)
+- [x] add a divergence-injection self-test proving the harness goes RED on a deliberately corrupted branch (guards against a harness that silently passes) — `TestFrontierParity_InjectionSelfTest` exercises the real `requireBranchParity` via a recorder over byte-flip/extra/missing-branch injections; shared predicate `branchStoreMismatches`
+- [x] add corpora: balanced (uniform top-nibble), lopsided-by-corecount (mega-whale storage), delete-to-collapse, extension-topped mount (in `frontier_parity_test.go`; mega-whale builder is parameterized by slot count — Task 8 bench cranks it to 750k–1M, the harness test uses 40k for suite speed)
+- [x] run tests — green on current engine, and the injection self-test RED as expected; commit
+- [x] `make lint` clean
 
 ### Task 2: Fold DAG derivation + K policy
 
