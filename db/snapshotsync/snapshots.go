@@ -894,7 +894,7 @@ func (s *BaseRoSnapshots) recalcVisibleFiles(alignMin bool, retired []*DirtySegm
 // acquireVisible pins the current generation. Load and increment are not atomic together,
 // so after incrementing we re-check the generation is still current; if superseded mid-pin
 // we drop the stale pin and retry (hazard-pointer style).
-func (s *RoSnapshots) acquireVisible() *snapshotVisible {
+func (s *BaseRoSnapshots) acquireVisible() *snapshotVisible {
 	for {
 		v := s.visible.Load()
 		v.refcnt.Add(1)
@@ -907,7 +907,7 @@ func (s *RoSnapshots) acquireVisible() *snapshotVisible {
 
 // releaseVisible drops a pin taken by acquireVisible; the last reader of a superseded
 // generation triggers reclamation of drained generations' retired files.
-func (s *RoSnapshots) releaseVisible(v *snapshotVisible) {
+func (s *BaseRoSnapshots) releaseVisible(v *snapshotVisible) {
 	if v.refcnt.Add(-1) == 0 {
 		s.reclaimRetired()
 	}
@@ -916,7 +916,7 @@ func (s *RoSnapshots) releaseVisible(v *snapshotVisible) {
 // reclaimRetiredLocked walks the oldest->newest chain from the head, collecting the
 // retired files of every fully-drained generation older than the current one. Must be
 // called with dirtyLock held; the returned files are deleted by the caller off-lock.
-func (s *RoSnapshots) reclaimRetiredLocked() (toDelete []*DirtySegment) {
+func (s *BaseRoSnapshots) reclaimRetiredLocked() (toDelete []*DirtySegment) {
 	cur := s.visible.Load()
 	for h := s.oldestVisible; h != cur && h.refcnt.Load() == 0; h = h.next {
 		toDelete = append(toDelete, h.retired...)
@@ -926,7 +926,7 @@ func (s *RoSnapshots) reclaimRetiredLocked() (toDelete []*DirtySegment) {
 	return toDelete
 }
 
-func (s *RoSnapshots) reclaimRetired() {
+func (s *BaseRoSnapshots) reclaimRetired() {
 	s.dirtyLock.Lock()
 	toDelete := s.reclaimRetiredLocked()
 	s.dirtyLock.Unlock()
