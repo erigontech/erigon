@@ -192,10 +192,10 @@ Conclusion: under the parallel regime the direct fold serializes the whale stora
 
 ### Task 11: Verify acceptance criteria
 
-- [ ] all Overview goals: direct fold, on-disk reconciliation, deferred emission, account-plane seam, dispatch reused, buffer-reuse invariant
-- [ ] edge cases: single-survivor collapse, extension-topped, delete-to-empty, encode/restore, whale + mixed + incremental
-- [ ] `GOGC=80 make test-all` (or `make test-short` + package `-count=1 -race`); `make lint` clean
-- [ ] alloc-ceiling bench green
+- [x] all Overview goals verified against code: direct fold (`foldNode`), on-disk reconciliation (`foldReconciledStorageRoot` + `TestTruthtreeFold_OnDiskSiblingReconciliation`), deferred emission (`foldFreshStorageRootDeferred`/`emitBranchUpdate` + `TestTruthtreeFold_FreshDeferredEmission`), account-plane seam (`foldFreshAccountSubtreeCellDeferred` + `TestTruthtreeFold_AccountPlaneFresh`/`_AccountPlaneMountWall`), dispatch reused (`directLeafEligible` gates the leaf task on `fp.truthtreeFold`, DAG/pool/stitch unchanged), buffer-reuse invariant (`foldCtx` reused-scratch + `TestTruthtreeFold_AllocCeiling`)
+- [x] edge cases covered by tests: single-survivor collapse / extension-topped root (`TestTruthtreeFold_SingleSurvivorCollapse`, delete-all-but-one-nibble → depth-64 extension-node root), delete-to-empty (`TestTruthtreeFold_DeleteToEmpty`), encode/restore restart (`TestTruthtreeFold_LeafFlagParity` folds across the encode/restore round-trip), whale + mixed + incremental (`TestTruthtreeFold_WhaleStorageFlagParity` fresh-whale-parallel corpus + `megaWhaleBatches` incremental re-touch/delete, `buildMixedCorpus` account plane)
+- [x] `make test-short` (repo-wide: 239 packages ok, 0 FAIL) + commitment package `-count=1` (15.8s) AND `-race` clean (124.9s, full package); `make lint` 0 issues. Chose the `make test-short` + package `-count=1 -race` arm over `GOGC=80 make test-all` — the change is flag-gated (default off) and fully contained in `execution/commitment`, so the package race run is the load-bearing gate and test-short covers the flag-plumbing packages
+- [x] alloc-ceiling bench green: `TestTruthtreeFold_AllocCeiling` 42.6 MB/op (under the 96 MB ceiling, near the ~47 MB proto figure); `Benchmark_TruthtreeFold_FreshWhaleAlloc` 44.6 MB/op / 4.53M allocs, matching the recorded Task 2 figure and never regressing toward 575 MB
 
 ### Task 12: [Final] Update documentation
 
