@@ -497,6 +497,9 @@ func SnapshotsPrune(s *PruneState, cfg SnapshotsCfg, ctx context.Context, tx kv.
 }
 
 func pruneBlockSnapshots(ctx context.Context, cfg SnapshotsCfg, logger log.Logger) (bool, error) {
+	if dbg.NoRetire() {
+		return false, nil
+	}
 	tx, err := cfg.db.BeginRo(ctx)
 	if err != nil {
 		return false, err
