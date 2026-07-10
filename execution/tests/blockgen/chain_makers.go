@@ -392,14 +392,36 @@ func InitPraguePreDeploys(db kv.TemporalRwDB, config *chain.Config, logger log.L
 	}
 	stateWriter := state.NewWriter(domains.AsPutDel(tx), nil, latestTxNum)
 
-	stateWriter.UpdateAccountData(withdrawalAddr, &accounts.Account{}, &accounts.Account{
+	err = stateWriter.UpdateAccountData(withdrawalAddr, &accounts.Account{}, &accounts.Account{
 		CodeHash: withdrawalRequestCodeHash,
+		Nonce:    1,
 	})
-	stateWriter.UpdateAccountCode(withdrawalAddr, 0, withdrawalRequestCodeHash, withdrawalRequestCode)
-	stateWriter.UpdateAccountData(consolidationAddr, &accounts.Account{}, &accounts.Account{
+	if err != nil {
+		return err
+	}
+	err = stateWriter.UpdateAccountCode(withdrawalAddr, 0, withdrawalRequestCodeHash, withdrawalRequestCode)
+	if err != nil {
+		return err
+	}
+	err = stateWriter.WriteAccountStorage(withdrawalAddr, 0, accounts.ZeroKey, uint256.Int{}, *new(uint256.Int).SetAllOne())
+	if err != nil {
+		return err
+	}
+	err = stateWriter.UpdateAccountData(consolidationAddr, &accounts.Account{}, &accounts.Account{
 		CodeHash: consolidationRequestCodeHash,
+		Nonce:    1,
 	})
-	stateWriter.UpdateAccountCode(consolidationAddr, 0, consolidationRequestCodeHash, consolidationRequestCode)
+	if err != nil {
+		return err
+	}
+	err = stateWriter.UpdateAccountCode(consolidationAddr, 0, consolidationRequestCodeHash, consolidationRequestCode)
+	if err != nil {
+		return err
+	}
+	err = stateWriter.WriteAccountStorage(consolidationAddr, 0, accounts.ZeroKey, uint256.Int{}, *new(uint256.Int).SetAllOne())
+	if err != nil {
+		return err
+	}
 
 	return domains.Commit(ctx, tx)
 }
@@ -427,14 +449,36 @@ func InitAmsterdamPreDeploys(db kv.TemporalRwDB, config *chain.Config, logger lo
 	}
 	stateWriter := state.NewWriter(domains.AsPutDel(tx), nil, latestTxNum)
 
-	stateWriter.UpdateAccountData(builderDepositAddr, &accounts.Account{}, &accounts.Account{
+	err = stateWriter.UpdateAccountData(builderDepositAddr, &accounts.Account{}, &accounts.Account{
 		CodeHash: builderDepositRequestCodeHash,
+		Nonce:    1,
 	})
-	stateWriter.UpdateAccountCode(builderDepositAddr, 0, builderDepositRequestCodeHash, builderDepositRequestCode)
-	stateWriter.UpdateAccountData(builderExitAddr, &accounts.Account{}, &accounts.Account{
+	if err != nil {
+		return err
+	}
+	err = stateWriter.UpdateAccountCode(builderDepositAddr, 0, builderDepositRequestCodeHash, builderDepositRequestCode)
+	if err != nil {
+		return err
+	}
+	err = stateWriter.WriteAccountStorage(builderDepositAddr, 0, accounts.ZeroKey, uint256.Int{}, *new(uint256.Int).SetAllOne())
+	if err != nil {
+		return err
+	}
+	err = stateWriter.UpdateAccountData(builderExitAddr, &accounts.Account{}, &accounts.Account{
 		CodeHash: builderExitRequestCodeHash,
+		Nonce:    1,
 	})
-	stateWriter.UpdateAccountCode(builderExitAddr, 0, builderExitRequestCodeHash, builderExitRequestCode)
+	if err != nil {
+		return err
+	}
+	err = stateWriter.UpdateAccountCode(builderExitAddr, 0, builderExitRequestCodeHash, builderExitRequestCode)
+	if err != nil {
+		return err
+	}
+	err = stateWriter.WriteAccountStorage(builderExitAddr, 0, accounts.ZeroKey, uint256.Int{}, *new(uint256.Int).SetAllOne())
+	if err != nil {
+		return err
+	}
 
 	return domains.Commit(ctx, tx)
 }
