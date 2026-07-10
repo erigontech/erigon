@@ -163,10 +163,23 @@ The frontier **DAG + pool + merge/finale stitch are unchanged.** A leaf task tod
 **Files:**
 - Modify: `execution/commitment/parallel_streaming_bench_test.go`
 
-- [ ] `Benchmark_DeepStorageWhale` + a mixed + an incremental (seeded) corpus, flag-on vs flag-off, `numWorkers=NumCPU`, alloc + time; record numbers here
-- [ ] acceptance: flag-on beats flag-off on the whale, no regression on mixed/incremental; alloc-ceiling holds engine-wide
-- [ ] if any corpus regresses: stop, record, do not tune topology + fold together
-- [ ] run benches — record; `make lint` clean
+- [x] `Benchmark_TruthtreeFold_Gate` (whale + mixed + incremental-seeded corpus, flag-on vs flag-off, `numWorkers=NumCPU`, alloc + time) added to `parallel_streaming_bench_test.go`; `runParallelBenchCfg` (config-parameterized `runParallelBench`) + `runIncrementalBenchCfg` (seed batch1 untimed → measure batch2). Numbers below (Apple M5 Max, 18 workers, `-benchtime=5x -count=4`)
+- [x] acceptance evaluated: **flag-on does NOT beat flag-off on the whale — it is 4.56× slower** (623.8 vs 136.8 ms/op); mixed regresses ~14% (4.10 vs 3.59 ms/op); incremental is wall-clock parity. This is the topology trade-off Task 7 flagged: flag-on routes the fresh-whale storage leaf through the **serial** `foldFreshStorageRootDeferred`, replacing `foldFreshStorage`'s per-nibble parallel fan-out, so the 750k storage subtree folds single-threaded. The fold-body buffer-reuse win (Task 2 isolated: ~44 MB) is real but swamped at the whole-Process level by ~300 MB of shared setup allocation, so B/op is ~flat (344.6 vs 350.5 MB, +1.7%). Alloc-ceiling holds engine-wide: whole-Process B/op stays ~345 MB regardless of flag (never regressing toward the 575 MB naive figure), and `TestTruthtreeFold_AllocCeiling` stays green (~44 MB fold body)
+- [x] whale wall-clock regresses → **stopped, recorded, did NOT tune topology + fold together** (per the plan rule). The parallel-direct fold topology (fan the direct recursion out per-nibble instead of serial) is the follow-up; flag stays default-off — the gate result gates the flip: the direct fold is not ready to flip default-on under the parallel regime until the storage fold is parallelized
+- [x] ran benches — recorded below; `make lint` 0 issues
+
+**Results** (Apple M5 Max, `numWorkers=NumCPU=18`, `-benchtime=5x -count=4`, averaged):
+
+| corpus | arm | ns/op | B/op | allocs/op |
+|---|---|---|---|---|
+| whale750k | flag-off | 136.8M | 344.6M | 5.87M |
+| whale750k | flag-on | 623.8M (**4.56× slower**) | 350.5M (+1.7%) | 6.66M (+13%) |
+| mixed20k | flag-off | 3.59M | 16.6M | 171k |
+| mixed20k | flag-on | 4.10M (+14%) | 14.4M (noisy) | 179k (+4.7%) |
+| incremental-whale120k | flag-off | 28.5M | 115M | 1.233M |
+| incremental-whale120k | flag-on | 28.0M (parity) | 133M (+15%) | 1.241M (+0.6%) |
+
+Conclusion: under the parallel regime the direct fold serializes the whale storage fold and loses to the per-nibble fan-out on wall-clock; it is an alloc-neutral-to-slightly-worse change at whole-Process granularity (the buffer-reuse win lives at the fold-body level, gated separately by Task 2). Keep the flag default-off; the parallel-direct storage topology is required before a default flip. Incremental (seedable/replay path) is inert under the flag, as designed.
 
 ### Task 10: Delete the subsumed fold path (post-flip)
 

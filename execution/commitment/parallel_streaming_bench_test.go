@@ -56,6 +56,10 @@ func runDirectBench(b *testing.B, pk [][]byte, updates []Update) {
 }
 
 func runParallelBench(b *testing.B, pk [][]byte, updates []Update, workers int) {
+	runParallelBenchCfg(b, pk, updates, workers, DefaultTrieConfig())
+}
+
+func runParallelBenchCfg(b *testing.B, pk [][]byte, updates []Update, workers int, cfg TrieConfig) {
 	ctx := context.Background()
 	b.ReportAllocs()
 	// pph is reused across iterations so the worker pool amortizes.
@@ -71,7 +75,7 @@ func runParallelBench(b *testing.B, pk [][]byte, updates []Update, workers int) 
 		ms.SetConcurrentCommitment(true)
 		require.NoError(b, ms.applyPlainUpdates(pk, updates))
 		if pph == nil {
-			pph = NewParallelPatriciaHashed(mockTrieCtxFactory(ms), length.Addr, DefaultTrieConfig())
+			pph = NewParallelPatriciaHashed(mockTrieCtxFactory(ms), length.Addr, cfg)
 			pph.SetNumWorkers(workers)
 		} else {
 			// Rewire MockState without Reset()/Release(), which would drop the worker pool.
@@ -441,6 +445,80 @@ func Benchmark_DeepStorageWhale(b *testing.B) {
 			}
 		})
 	}
+}
+
+// runIncrementalBenchCfg seeds batch1 through the parallel engine (untimed) so the branch store
+// carries on-disk state, then measures only batch2's Process. The pph instance is reused across
+// iterations so the worker pool amortizes and the in-memory root carries batch1 without a state
+// blob round-trip; MockState is rebuilt per iteration and reseeded by batch1.
+func runIncrementalBenchCfg(b *testing.B, batch1, batch2 engineBatch, workers int, cfg TrieConfig) {
+	ctx := context.Background()
+	b.ReportAllocs()
+	var pph *ParallelPatriciaHashed
+	defer func() {
+		if pph != nil {
+			pph.Release()
+		}
+	}()
+	for b.Loop() {
+		b.StopTimer()
+		ms := NewMockState(b)
+		ms.SetConcurrentCommitment(true)
+		if pph == nil {
+			pph = NewParallelPatriciaHashed(mockTrieCtxFactory(ms), length.Addr, cfg)
+			pph.SetNumWorkers(workers)
+		} else {
+			pph.SetTrieContextFactory(mockTrieCtxFactory(ms))
+			pph.ResetContext(ms)
+		}
+		pph.RootTrie().Reset()
+
+		require.NoError(b, ms.applyPlainUpdates(batch1.keys, batch1.upds))
+		u1 := WrapKeyUpdates(b, ModeParallel, KeyToHexNibbleHash, batch1.keys, batch1.upds)
+		_, err := pph.Process(ctx, u1, "", nil, WarmupConfig{})
+		require.NoError(b, err)
+		u1.Close()
+
+		require.NoError(b, ms.applyPlainUpdates(batch2.keys, batch2.upds))
+		u2 := WrapKeyUpdates(b, ModeParallel, KeyToHexNibbleHash, batch2.keys, batch2.upds)
+		b.StartTimer()
+
+		_, err = pph.Process(ctx, u2, "", nil, WarmupConfig{})
+
+		b.StopTimer()
+		require.NoError(b, err)
+		u2.Close()
+		b.StartTimer()
+	}
+}
+
+// Benchmark_TruthtreeFold_Gate is the Task 9 perf gate: flag-on (TruthtreeFold) vs flag-off at
+// numWorkers=NumCPU on the three corpora that bound the change — the fresh 750k deep-storage whale
+// (where the direct recursion serializes the storage fold but reuses buffers), a mixed account/
+// storage corpus, and an incremental seeded whale whose batch2 folds through on-disk branches (the
+// replay path, so flag-on must not regress it). Records alloc + time for both arms.
+func Benchmark_TruthtreeFold_Gate(b *testing.B) {
+	ncpu := runtime.NumCPU()
+	onCfg := DefaultTrieConfig()
+	onCfg.TruthtreeFold = true
+	offCfg := DefaultTrieConfig()
+
+	_, _, _, _, wpk, wupds, _ := whaleByNibble(750_000)
+	mpk, mupds := buildMixedCorpus(99, 20_000)
+	inc1, inc2 := buildRetouchedWhale(717, 120_000)
+
+	b.Run("whale750k", func(b *testing.B) {
+		b.Run("flag-off", func(b *testing.B) { runParallelBenchCfg(b, wpk, wupds, ncpu, offCfg) })
+		b.Run("flag-on", func(b *testing.B) { runParallelBenchCfg(b, wpk, wupds, ncpu, onCfg) })
+	})
+	b.Run("mixed20k", func(b *testing.B) {
+		b.Run("flag-off", func(b *testing.B) { runParallelBenchCfg(b, mpk, mupds, ncpu, offCfg) })
+		b.Run("flag-on", func(b *testing.B) { runParallelBenchCfg(b, mpk, mupds, ncpu, onCfg) })
+	})
+	b.Run("incremental-whale120k", func(b *testing.B) {
+		b.Run("flag-off", func(b *testing.B) { runIncrementalBenchCfg(b, inc1, inc2, ncpu, offCfg) })
+		b.Run("flag-on", func(b *testing.B) { runIncrementalBenchCfg(b, inc1, inc2, ncpu, onCfg) })
+	})
 }
 
 // foldKForC sizes the leaf/merge boundary for an oversubscription factor c, mirroring the
