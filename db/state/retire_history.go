@@ -62,30 +62,7 @@ func (ht *HistoryRoTx) filesBeforeStep(cutoff kv.Step) (deleted []string, aged [
 	for _, out := range outs {
 		deleted = append(deleted, out.FilePaths(ht.h.dirs.Snap)...)
 	}
-	return deleted, []agedFiles{iAged, {ht.h.dirtyFiles, ht.h.FilenameBase, outs}}
-}
-
-// visibleFilesMaxEndTxNum is the highest endTxNum among the visible history/II files — the
-// tip of what retire selects over. Read from the pinned visible bundle (not dirtyFiles), and
-// naturally 0 only when there are no visible files at all (an empty entity contributes nothing).
-func (at *AggregatorRoTx) visibleFilesMaxEndTxNum() (tip uint64) {
-	for _, dt := range at.d {
-		if dt == nil {
-			continue
-		}
-		if f := dt.ht.files; len(f) > 0 {
-			tip = max(tip, f[len(f)-1].endTxNum)
-		}
-	}
-	for _, iit := range at.standaloneIIs() {
-		if iit == nil {
-			continue
-		}
-		if f := iit.files; len(f) > 0 {
-			tip = max(tip, f[len(f)-1].endTxNum)
-		}
-	}
-	return tip
+	return deleted, []agedFiles{iAged, agedFiles{ht.h.dirtyFiles, ht.h.FilenameBase, outs}}
 }
 
 // Retire drops old visible History+InvertedIndex files below their per-domain cutoff.
