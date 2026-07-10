@@ -442,10 +442,7 @@ func isBlocksRetentionPolicy(b BlockAmount) bool {
 // shape).
 func isFiniteDistance(b BlockAmount) bool {
 	d, ok := b.(Distance)
-	if !ok {
-		return false
-	}
-	return d != KeepAllBlocksPruneMode && d != KeepPostMergeBlocksPruneMode && d != KeepAllReceiptsPruneMode
+	return ok && d.Enabled()
 }
 
 // writeBlockAmount stores one BlockAmount under the given key, replacing any

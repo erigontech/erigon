@@ -57,9 +57,8 @@ func ParseCommitmentHistoryDistance(s string) (uint64, error) {
 }
 
 // ParseReceiptsDistance parses a --persist.receipts.distance value; "keep-all"
-// maps to KeepAllReceiptsPruneMode, not KeepAllBlocksPruneMode — the latter is
-// receipts' unset default (follow the state-history window), so forcing keep-all
-// needs its own value.
+// maps to KeepAllReceiptsPruneMode (see its declaration for why receipts needs a
+// keep-all value distinct from the KeepAllBlocksPruneMode default).
 func ParseReceiptsDistance(s string) (uint64, error) {
 	return parseStateHistoryDistance(s, "--persist.receipts.distance", KeepAllReceiptsPruneMode)
 }
