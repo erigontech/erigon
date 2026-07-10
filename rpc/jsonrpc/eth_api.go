@@ -176,6 +176,8 @@ func NewBaseApi(f *rpchelper.Filters, stateCache kvcache.Cache, blockReader serv
 		panic(err)
 	}
 
+	// BAL regeneration needs a full rules.Engine to replay system calls; a
+	// remote rpcdaemon holds only an EngineReader and serves stored BALs only.
 	var balRegenerator *bal.Regenerator
 	if fullEngine, ok := engine.(rules.Engine); ok {
 		balRegenerator = bal.NewRegenerator(blockReader, fullEngine, log.Root())

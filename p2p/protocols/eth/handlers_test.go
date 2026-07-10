@@ -743,3 +743,64 @@ func TestAnswerGetBlockAccessListsQuery_GeneratorFallback(t *testing.T) {
 		t.Errorf("getter consulted for unknown block %d times, want 0", getter.calls[hashUnknown])
 	}
 }
+
+// TestAnswerGetBlockAccessListsQuery_RegenerationBudget verifies that a single
+// request triggers at most MaxBlockAccessListsRegenerate regenerations — the
+// response is truncated at the budget so the peer re-requests the remainder —
+// and that stored BALs do not consume the budget.
+func TestAnswerGetBlockAccessListsQuery_RegenerationBudget(t *testing.T) {
+	t.Parallel()
+	db := temporaltest.NewTestDB(t, datadir.New(t.TempDir()))
+	tx, err := db.BeginTemporalRw(context.Background())
+	if err != nil {
+		t.Fatalf("begin rw: %v", err)
+	}
+	defer tx.Rollback()
+	const storedCount = 5
+	regenCount := MaxBlockAccessListsRegenerate + 8
+	reader := balHeaderReader{}
+	getter := &fakeBalGetter{
+		bals:  map[common.Hash][]byte{},
+		calls: map[common.Hash]int{},
+	}
+	storedBal := []byte{0xc3, 0x01, 0x02, 0x03}
+	regenBal := []byte{0xc3, 0x04, 0x05, 0x06}
+	query := make(GetBlockAccessListsPacket, 0, storedCount+regenCount)
+	for i := 0; i < storedCount; i++ {
+		h := common.Hash{0xaa, byte(i)}
+		num := uint64(100 + i)
+		reader[h] = num
+		if err := rawdb.WriteBlockAccessListBytes(tx, h, num, storedBal); err != nil {
+			t.Fatalf("WriteBlockAccessListBytes: %v", err)
+		}
+		query = append(query, h)
+	}
+	for i := 0; i < regenCount; i++ {
+		h := common.Hash{0xbb, byte(i)}
+		num := uint64(200 + i)
+		reader[h] = num
+		getter.bals[h] = regenBal
+		query = append(query, h)
+	}
+	result := AnswerGetBlockAccessListsQuery(context.Background(), chain.AllProtocolChanges, tx, query, reader, getter)
+	wantLen := storedCount + MaxBlockAccessListsRegenerate
+	if len(result) != wantLen {
+		t.Fatalf("result len: have %d, want %d (truncated at the regeneration budget)", len(result), wantLen)
+	}
+	totalCalls := 0
+	for _, n := range getter.calls {
+		totalCalls += n
+	}
+	if totalCalls != MaxBlockAccessListsRegenerate {
+		t.Errorf("getter calls: have %d, want %d", totalCalls, MaxBlockAccessListsRegenerate)
+	}
+	for i, e := range result {
+		want := regenBal
+		if i < storedCount {
+			want = storedBal
+		}
+		if !bytes.Equal(e, want) {
+			t.Errorf("result[%d] mismatch: have %x, want %x", i, e, want)
+		}
+	}
+}

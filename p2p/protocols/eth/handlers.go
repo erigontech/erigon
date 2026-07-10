@@ -201,11 +201,13 @@ type BlockAccessListGetter interface {
 // the sentinel.
 //
 // Limits mirror AnswerGetBlockBodiesQuery: softResponseLimit caps total reply
-// size, MaxBlockAccessListsServe caps the disk-lookup count. When a limit is
-// reached, the response is truncated (not padded with 0x80) — the peer sees a
-// shorter array than requested, same convention as the BlockBodies handler.
+// size, MaxBlockAccessListsServe caps the disk-lookup count, and
+// MaxBlockAccessListsRegenerate caps the re-execution work per request. When a
+// limit is reached, the response is truncated (not padded with 0x80) — the peer
+// sees a shorter array than requested, same convention as the BlockBodies handler.
 func AnswerGetBlockAccessListsQuery(ctx context.Context, cfg *chain.Config, db kv.TemporalTx, query GetBlockAccessListsPacket, blockReader services.HeaderReader, balGetter BlockAccessListGetter) []rlp.RawValue {
 	var bytes int
+	var regenerations int
 	bals := make([]rlp.RawValue, 0, len(query))
 
 	for lookups, hash := range query {
@@ -222,6 +224,10 @@ func AnswerGetBlockAccessListsQuery(ctx context.Context, cfg *chain.Config, db k
 		}
 		bal, _ := rawdb.ReadBlockAccessListBytes(db, hash, *number)
 		if len(bal) == 0 && balGetter != nil {
+			if regenerations >= MaxBlockAccessListsRegenerate {
+				break
+			}
+			regenerations++
 			bal, _ = balGetter.GetBlockAccessListBytes(ctx, cfg, db, hash, *number)
 		}
 		if len(bal) == 0 {

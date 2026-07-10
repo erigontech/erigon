@@ -68,7 +68,7 @@ func (e *ExecModule) beginOverlayOrRo(ctx context.Context) (kv.TemporalTx, func(
 			// Open a fresh RO tx while still holding the read lock so that
 			// the overlay cannot be closed between our check and the
 			// NewReadView call (TOCTOU avoidance).
-			roTx, err := e.db.BeginRo(ctx) //nolint:gocritic
+			roTx, err := e.db.BeginTemporalRo(ctx) //nolint:gocritic
 			if err != nil {
 				e.lock.RUnlock()
 				return nil, nil, err
@@ -347,18 +347,23 @@ func (e *ExecModule) GetPayloadBodiesByRange(ctx context.Context, start, count u
 }
 
 // regenerateBlockAccessList re-derives a missing BAL by re-execution. Returns
-// nil bytes when the block has no BAL or the required history is no longer
-// available — the engine API then reports null for that block, per spec.
+// nil bytes when the block has no BAL or it cannot be regenerated — the engine
+// API then reports null for that block, per spec, rather than failing the
+// whole request.
 func (e *ExecModule) regenerateBlockAccessList(ctx context.Context, tx kv.TemporalTx, blockHash common.Hash, blockNum uint64) ([]byte, error) {
 	encoded, err := e.balRegenerator.GetBlockAccessListBytes(ctx, e.config, tx, blockHash, blockNum)
+	if err == nil {
+		return encoded, nil
+	}
+	if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+		return nil, err
+	}
 	if errors.Is(err, state.PrunedError) {
 		e.logger.Debug("regenerateBlockAccessList: history unavailable", "block", blockNum, "hash", blockHash, "err", err)
 		return nil, nil
 	}
-	if err != nil {
-		return nil, err
-	}
-	return encoded, nil
+	e.logger.Warn("regenerateBlockAccessList: regeneration failed", "block", blockNum, "hash", blockHash, "err", err)
+	return nil, nil
 }
 
 func (e *ExecModule) GetHeaderHashNumber(ctx context.Context, blockHash common.Hash) (*uint64, error) {

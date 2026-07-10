@@ -38,7 +38,7 @@ import (
 )
 
 var (
-	balsCacheLimit      = dbg.EnvInt("BAL_LRU", 1024) // ~100KiB avg encoded BAL → ~100MB RAM
+	balsCacheLimit      = dbg.EnvInt("BAL_LRU", 1024) // ~100KiB avg encoded BAL → ~100MB RAM per Regenerator instance
 	balsExecConcurrency = max(1, dbg.EnvInt("BAL_EXEC_CONCURRENCY", runtime.GOMAXPROCS(0)/2))
 )
 
@@ -75,8 +75,10 @@ func NewRegenerator(blockReader services.FullBlockReader, engine rules.Engine, l
 // GetBlockAccessListBytes returns the canonical RLP-encoded Block Access List
 // for the given block, regenerating it via re-execution against historical
 // state. Returns (nil, nil) for blocks without a BAL commitment in the header
-// (pre-Amsterdam) and state.PrunedError-wrapped errors when the required
-// history is no longer available.
+// (pre-Amsterdam) and for non-canonical blocks (only canonical history can be
+// replayed), and state.PrunedError-wrapped errors when the required history is
+// no longer available. The returned bytes are shared with the internal cache
+// and must be treated as read-only.
 func (g *Regenerator) GetBlockAccessListBytes(ctx context.Context, cfg *chain.Config, tx kv.TemporalTx, blockHash common.Hash, blockNum uint64) ([]byte, error) {
 	if cached, ok := g.cache.Get(blockHash); ok {
 		return cached, nil
@@ -86,6 +88,13 @@ func (g *Regenerator) GetBlockAccessListBytes(ctx context.Context, cfg *chain.Co
 		return nil, err
 	}
 	if header == nil || header.BlockAccessListHash == nil {
+		return nil, nil
+	}
+	canonicalHash, ok, err := g.blockReader.CanonicalHash(ctx, tx, blockNum)
+	if err != nil {
+		return nil, err
+	}
+	if !ok || canonicalHash != blockHash {
 		return nil, nil
 	}
 	mu := g.perBlockExecMu.lock(blockHash)
@@ -122,7 +131,10 @@ func (g *Regenerator) GetBlockAccessListBytes(ctx context.Context, cfg *chain.Co
 	}
 	computedHash := bal.Hash()
 	if computedHash != *header.BlockAccessListHash {
-		return nil, fmt.Errorf("bal.Regenerator: regenerated BAL hash mismatch for block %d (%x): got %s want %s", blockNum, blockHash, computedHash, *header.BlockAccessListHash)
+		// A canonical block whose replay diverges from its commitment is a
+		// re-derivation bug: keep it observable but degrade to unavailable.
+		g.logger.Warn("bal.Regenerator: re-derived BAL hash mismatch", "block", blockNum, "hash", blockHash, "got", computedHash, "want", *header.BlockAccessListHash)
+		return nil, nil
 	}
 	encoded, err := types.EncodeBlockAccessListBytes(bal)
 	if err != nil {
