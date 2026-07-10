@@ -18,7 +18,6 @@ package prune
 
 import (
 	"fmt"
-	"math"
 	"strconv"
 	"strings"
 )
@@ -45,18 +44,37 @@ func ParseBlocksDistance(s string) (uint64, error) {
 	}
 }
 
-// ParseHistoryDistance parses a --prune.distance value. It accepts a decimal
-// block count, the "keep-all" alias (keep all state history), or an empty
-// string (returns 0, meaning unset). The block-only "keep-post-merge" policy
-// is rejected: chain history-expiry has no meaning for state history.
+// ParseHistoryDistance parses a --prune.distance value: a decimal block count,
+// "keep-all" (keep all state history), or an empty string (0, meaning unset).
 func ParseHistoryDistance(s string) (uint64, error) {
+	return parseStateHistoryDistance(s, "--prune.distance", KeepPostMergeBlocksPruneMode)
+}
+
+// ParseCommitmentHistoryDistance parses a --prune.commitment-history.distance
+// value; "keep-all" maps to KeepAllBlocksPruneMode (also its default).
+func ParseCommitmentHistoryDistance(s string) (uint64, error) {
+	return parseStateHistoryDistance(s, "--prune.commitment-history.distance", KeepAllBlocksPruneMode)
+}
+
+// ParseReceiptsDistance parses a --persist.receipts.distance value; "keep-all"
+// maps to KeepAllReceiptsPruneMode (see its declaration for why receipts needs a
+// keep-all value distinct from the KeepAllBlocksPruneMode default).
+func ParseReceiptsDistance(s string) (uint64, error) {
+	return parseStateHistoryDistance(s, "--persist.receipts.distance", KeepAllReceiptsPruneMode)
+}
+
+// parseStateHistoryDistance parses a state-history-style distance flag: a decimal
+// block count, "keep-all" (→ keepAll), or an empty string (→ 0, unset). Unlike
+// Blocks, "keep-post-merge" is rejected — chain history-expiry is meaningless for
+// state.
+func parseStateHistoryDistance(s, flag string, keepAll Distance) (uint64, error) {
 	switch normalizeDistanceAlias(s) {
 	case "":
 		return 0, nil
 	case "keep-all":
-		return math.MaxUint64, nil
+		return uint64(keepAll), nil
 	default:
-		return parseDistanceNumber(s, "--prune.distance", historyDistanceAliasHint)
+		return parseDistanceNumber(s, flag, historyDistanceAliasHint)
 	}
 }
 

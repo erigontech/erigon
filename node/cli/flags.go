@@ -237,19 +237,17 @@ func applyRemainingEthFlags(ctx *cli.Command, cfg *ethconfig.Config, logger log.
 	}
 	_ = chainId
 
-	blockDistance, err := prune.ParseBlocksDistance(ctx.String(PruneBlocksDistanceFlag.Name))
-	if err != nil {
-		utils.Fatalf("%v", err)
-	}
-	distance, err := prune.ParseHistoryDistance(ctx.String(PruneDistanceFlag.Name))
-	if err != nil {
-		utils.Fatalf("%v", err)
-	}
+	blockDistance := mustDistance(prune.ParseBlocksDistance(ctx.String(PruneBlocksDistanceFlag.Name)))
+	distance := mustDistance(prune.ParseHistoryDistance(ctx.String(PruneDistanceFlag.Name)))
 
 	cfg.PersistReceiptsCacheV2 = ctx.Bool(utils.PersistReceiptsV2Flag.Name)
 
-	commitmentHistoryOlder := ctx.Uint64(utils.CommitmentHistoryDistanceFlag.Name)
-	mode, err := prune.FromCli(ctx.String(PruneModeFlag.Name), distance, blockDistance, commitmentHistoryOlder)
+	commitmentHistoryOlder := mustDistance(prune.ParseCommitmentHistoryDistance(ctx.String(utils.CommitmentHistoryDistanceFlag.Name)))
+	receiptsDistance := mustDistance(prune.ParseReceiptsDistance(ctx.String(utils.PersistReceiptsDistanceFlag.Name)))
+	if ctx.IsSet(utils.PersistReceiptsDistanceFlag.Name) && !cfg.PersistReceiptsCacheV2 {
+		utils.Fatalf("--%s requires --%s", utils.PersistReceiptsDistanceFlag.Name, utils.PersistReceiptsV2Flag.Name)
+	}
+	mode, err := prune.FromCli(ctx.String(PruneModeFlag.Name), distance, blockDistance, commitmentHistoryOlder, receiptsDistance)
 	if err != nil {
 		utils.Fatalf(fmt.Sprintf("error while parsing mode: %v", err))
 	}
@@ -327,18 +325,16 @@ func applyRemainingEthFlags(ctx *cli.Command, cfg *ethconfig.Config, logger log.
 
 func ApplyFlagsForEthConfigCobra(f *pflag.FlagSet, cfg *ethconfig.Config) {
 	pruneMode := cobraStringValueOrDefault(f, PruneModeFlag.Name, PruneModeFlag.Value)
-	pruneBlockDistance, err := prune.ParseBlocksDistance(cobraStringValueOrDefault(f, PruneBlocksDistanceFlag.Name, PruneBlocksDistanceFlag.Value))
-	if err != nil {
-		utils.Fatalf("%v", err)
-	}
-	pruneDistance, err := prune.ParseHistoryDistance(cobraStringValueOrDefault(f, PruneDistanceFlag.Name, PruneDistanceFlag.Value))
-	if err != nil {
-		utils.Fatalf("%v", err)
+	pruneBlockDistance := mustDistance(prune.ParseBlocksDistance(cobraStringValueOrDefault(f, PruneBlocksDistanceFlag.Name, PruneBlocksDistanceFlag.Value)))
+	pruneDistance := mustDistance(prune.ParseHistoryDistance(cobraStringValueOrDefault(f, PruneDistanceFlag.Name, PruneDistanceFlag.Value)))
+
+	commitmentHistoryOlder := mustDistance(prune.ParseCommitmentHistoryDistance(cobraStringValueOrDefault(f, utils.CommitmentHistoryDistanceFlag.Name, "")))
+	receiptsDistance := mustDistance(prune.ParseReceiptsDistance(cobraStringValueOrDefault(f, utils.PersistReceiptsDistanceFlag.Name, "")))
+	if f.Changed(utils.PersistReceiptsDistanceFlag.Name) && !cobraBoolValueOrDefault(f, utils.PersistReceiptsV2Flag.Name, utils.PersistReceiptsV2Flag.Value) {
+		utils.Fatalf("--%s requires --%s", utils.PersistReceiptsDistanceFlag.Name, utils.PersistReceiptsV2Flag.Name)
 	}
 
-	commitmentHistoryOlder := cobraUint64ValueOrDefault(f, utils.CommitmentHistoryDistanceFlag.Name, 0)
-
-	mode, err := prune.FromCli(pruneMode, pruneDistance, pruneBlockDistance, commitmentHistoryOlder)
+	mode, err := prune.FromCli(pruneMode, pruneDistance, pruneBlockDistance, commitmentHistoryOlder, receiptsDistance)
 	if err != nil {
 		utils.Fatalf(fmt.Sprintf("error while parsing mode: %v", err))
 	}
@@ -385,17 +381,6 @@ func cobraStringValueOrDefault(f *pflag.FlagSet, name, fallback string) string {
 	return v
 }
 
-func cobraUint64ValueOrDefault(f *pflag.FlagSet, name string, fallback uint64) uint64 {
-	if f.Lookup(name) == nil {
-		return fallback
-	}
-	v, err := f.GetUint64(name)
-	if err != nil {
-		utils.Fatalf("failed to read --%s: %v", name, err)
-	}
-	return v
-}
-
 func cobraBoolValueOrDefault(f *pflag.FlagSet, name string, fallback bool) bool {
 	if f.Lookup(name) == nil {
 		return fallback
@@ -403,6 +388,14 @@ func cobraBoolValueOrDefault(f *pflag.FlagSet, name string, fallback bool) bool 
 	v, err := f.GetBool(name)
 	if err != nil {
 		utils.Fatalf("failed to read --%s: %v", name, err)
+	}
+	return v
+}
+
+// mustDistance fatals on a prune-distance parse error and returns the value.
+func mustDistance(v uint64, err error) uint64 {
+	if err != nil {
+		utils.Fatalf("%v", err)
 	}
 	return v
 }

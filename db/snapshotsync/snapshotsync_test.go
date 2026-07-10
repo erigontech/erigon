@@ -100,7 +100,7 @@ func TestBlackListForPruning(t *testing.T) {
 	// effectiveCutoff mirrors the internal adjustBlockPrune clamp; without
 	// it the assertion accepts segments above the cutoff the function actually used.
 	effectiveCutoff := adjustBlockPrune(blockPrune, minBlockToDownload)
-	blackList, err := buildBlackListForPruning(prune.MinimalMode, nil, stepPrune, 0, minBlockToDownload, blockPrune, preverified)
+	blackList, err := buildBlackListForPruning(prune.MinimalMode, nil, stepPrune, 0, 0, minBlockToDownload, blockPrune, preverified)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -155,7 +155,7 @@ func TestBlackListForPruning_BlocksModeKeepsAllTransactions(t *testing.T) {
 	// range so at least some history files land in the blacklist; the exact
 	// number depends on the bundled preverified set.
 	const stepPrune = 5000
-	blackList, err := buildBlackListForPruning(prune.BlocksMode, nil, stepPrune, 0, 100_000, 0, preverified)
+	blackList, err := buildBlackListForPruning(prune.BlocksMode, nil, stepPrune, 0, 0, 100_000, 0, preverified)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -222,6 +222,14 @@ func TestDownloadFilteringApplies(t *testing.T) {
 			cc:   ccMainnet,
 			want: true,
 		},
+		{
+			// Receipts-only config: History/Blocks unlimited but a bounded
+			// receipts window. Filtering must still apply (regression guard).
+			name: "receipts-only bounded",
+			mode: prune.Mode{Initialised: true, History: prune.KeepAllBlocksPruneMode, Blocks: prune.KeepAllBlocksPruneMode, CommitmentHistory: prune.KeepAllBlocksPruneMode, Receipts: prune.Distance(100_000)},
+			cc:   ccMainnet,
+			want: true,
+		},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -253,7 +261,7 @@ func TestBlackListForPruning_ChainHistoryExpiry(t *testing.T) {
 		Blocks:      prune.KeepPostMergeBlocksPruneMode,
 	}
 
-	blackList, err := buildBlackListForPruning(legacyFull, cc, 64, 0, 100_000, 0, preverified)
+	blackList, err := buildBlackListForPruning(legacyFull, cc, 64, 0, 0, 100_000, 0, preverified)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -298,7 +306,7 @@ func TestBuildBlackListForPruning_CommitmentHistory(t *testing.T) {
 	// Archive keeps History/Blocks unlimited; only the commitment-history filter
 	// should fire (regression guard for commitment-only configs).
 	const minCommitmentHistoryStep = 16
-	blackList, err := buildBlackListForPruning(prune.ArchiveMode, nil, 0, minCommitmentHistoryStep, 0, 0, preverified)
+	blackList, err := buildBlackListForPruning(prune.ArchiveMode, nil, 0, minCommitmentHistoryStep, 0, 0, 0, preverified)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -331,7 +339,7 @@ func TestBuildBlackListForPruning_CommitmentHistoryDisabled(t *testing.T) {
 	preverified := snapcfg.Preverified{Items: snapcfg.PreverifiedItems{
 		{Name: "history/v1.0-commitment.0-16.v"},
 	}}
-	blackList, err := buildBlackListForPruning(prune.ArchiveMode, nil, 0, 0, 0, 0, preverified)
+	blackList, err := buildBlackListForPruning(prune.ArchiveMode, nil, 0, 0, 0, 0, 0, preverified)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -340,9 +348,70 @@ func TestBuildBlackListForPruning_CommitmentHistoryDisabled(t *testing.T) {
 	}
 }
 
-// TestGetMinimumBlocksToDownload_TwoCutoffs verifies the single pass resolves the
-// history and commitment-history cutoffs to their respective steps independently.
-func TestGetMinimumBlocksToDownload_TwoCutoffs(t *testing.T) {
+// TestBuildBlackListForPruning_Receipts locks down the receipt-cache filter
+// folded into buildBlackListForPruning: rcache-domain state-history files
+// (idx/history/accessor) with To <= minReceiptsStep are blacklisted, while the
+// rcache domain file, non-rcache history, and transaction segments are left
+// alone. Filtering runs even when History pruning is off (the archive +
+// --persist.receipts.distance config).
+func TestBuildBlackListForPruning_Receipts(t *testing.T) {
+	preverified := snapcfg.Preverified{Items: snapcfg.PreverifiedItems{
+		{Name: "history/v1.0-rcache.0-16.v"},
+		{Name: "idx/v1.0-rcache.0-16.ef"},
+		{Name: "accessor/v1.0-rcache.0-16.vi"},
+		{Name: "history/v1.0-rcache.16-32.v"},
+		{Name: "history/v1.0-accounts.0-16.v"},
+		{Name: "domain/v1.0-rcache.0-16.kv"},
+		{Name: "v1.0-000000-000100-transactions.seg"},
+	}}
+
+	const minReceiptsStep = 16
+	blackList, err := buildBlackListForPruning(prune.ArchiveMode, nil, 0, 0, minReceiptsStep, 0, 0, preverified)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	want := []string{
+		"history/v1.0-rcache.0-16.v",
+		"idx/v1.0-rcache.0-16.ef",
+		"accessor/v1.0-rcache.0-16.vi",
+	}
+	for _, name := range want {
+		if _, ok := blackList[name]; !ok {
+			t.Errorf("expected %s to be blacklisted (To <= minReceiptsStep=%d)", name, minReceiptsStep)
+		}
+	}
+	for _, keep := range []string{
+		"history/v1.0-rcache.16-32.v",  // above the window
+		"history/v1.0-accounts.0-16.v", // not rcache domain
+		"domain/v1.0-rcache.0-16.kv",   // domain files are never filtered
+		"v1.0-000000-000100-transactions.seg",
+	} {
+		if _, ok := blackList[keep]; ok {
+			t.Errorf("%s must not be blacklisted", keep)
+		}
+	}
+}
+
+// TestBuildBlackListForPruning_ReceiptsDisabled verifies that a zero
+// minReceiptsStep disables receipt-cache filtering entirely.
+func TestBuildBlackListForPruning_ReceiptsDisabled(t *testing.T) {
+	preverified := snapcfg.Preverified{Items: snapcfg.PreverifiedItems{
+		{Name: "history/v1.0-rcache.0-16.v"},
+	}}
+	blackList, err := buildBlackListForPruning(prune.ArchiveMode, nil, 0, 0, 0, 0, 0, preverified)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(blackList) != 0 {
+		t.Errorf("receipt-cache filtering must be disabled at minReceiptsStep=0, got %v", blackList)
+	}
+}
+
+// TestGetMinimumBlocksToDownload_ThreeCutoffs verifies the single pass resolves the
+// history, commitment-history and receipts cutoffs to their respective steps
+// independently.
+func TestGetMinimumBlocksToDownload_ThreeCutoffs(t *testing.T) {
 	const stepSize = 100
 	// blockNum -> baseTxNum. step(baseTxNum) = floor((baseTxNum-(stepSize-1))/stepSize).
 	br := &fakeBlockReader{
@@ -356,14 +425,16 @@ func TestGetMinimumBlocksToDownload_TwoCutoffs(t *testing.T) {
 	// maxStateStep=150 → stateTxNum=15_000. Only block 100 (baseTxNum 10_000) is
 	// below the cutoff, so minToDownload=1000-100=900 and minBlock=1000-900=100.
 	tx := beginTestRoTx(t)
-	minBlock, historyStep, commitmentStep, err := getMinimumBlocksToDownload(context.Background(), br, tx, 150, stepSize, 100, 300)
+	minBlock, historyStep, commitmentStep, receiptsStep, err := getMinimumBlocksToDownload(context.Background(), br, tx, 150, stepSize, 100, 300, 200)
 	if err != nil {
 		t.Fatal(err)
 	}
 	assert.Equal(t, uint64(100), minBlock)
-	// step(10_000) = (10_000-99)/100 = 99 ; step(30_000) = (30_000-99)/100 = 299.
+	// step(10_000) = (10_000-99)/100 = 99 ; step(30_000) = (30_000-99)/100 = 299 ;
+	// step(20_000) = (20_000-99)/100 = 199.
 	assert.Equal(t, kv.Step(99), historyStep)
 	assert.Equal(t, kv.Step(299), commitmentStep)
+	assert.Equal(t, kv.Step(199), receiptsStep)
 }
 
 // TestGetMinimumBlocksToDownload_MinBlock pins the minBlockToDownload computation and
@@ -381,12 +452,13 @@ func TestGetMinimumBlocksToDownload_MinBlock(t *testing.T) {
 	// maxStateStep=150 → stateTxNum=15_000. Only block 100 (baseTxNum 10_000) is
 	// below the cutoff, so minToDownload=300-100=200 and minBlock=300-200=100.
 	tx := beginTestRoTx(t)
-	minBlock, historyStep, commitmentStep, err := getMinimumBlocksToDownload(context.Background(), br, tx, 150, stepSize, 200, 200)
+	minBlock, historyStep, commitmentStep, receiptsStep, err := getMinimumBlocksToDownload(context.Background(), br, tx, 150, stepSize, 200, 200, 100)
 	if err != nil {
 		t.Fatal(err)
 	}
 	assert.Equal(t, uint64(100), minBlock)
-	// step(20_000) = (20_000-99)/100 = 199.
+	// step(20_000) = (20_000-99)/100 = 199 ; step(10_000) = (10_000-99)/100 = 99.
 	assert.Equal(t, kv.Step(199), historyStep)
 	assert.Equal(t, kv.Step(199), commitmentStep)
+	assert.Equal(t, kv.Step(99), receiptsStep)
 }
