@@ -144,7 +144,15 @@ func CalcIntrinsicGas(args IntrinsicGasCalcArgs) (IntrinsicGasCalcResult, bool) 
 		}
 	}
 	if args.AccessListLen > 0 {
-		product, overflow := math.SafeMul(args.AccessListLen, params.TxAccessListAddressGas)
+		var addressGas, storageKeyGas uint64
+		if args.IsEIP8037 {
+			addressGas = params.TxAccessListAddressGasEIP8038
+			storageKeyGas = params.TxAccessListStorageKeyGasEIP8038
+		} else {
+			addressGas = params.TxAccessListAddressGas
+			storageKeyGas = params.TxAccessListStorageKeyGas
+		}
+		product, overflow := math.SafeMul(args.AccessListLen, addressGas)
 		if overflow {
 			return IntrinsicGasCalcResult{}, true
 		}
@@ -153,7 +161,7 @@ func CalcIntrinsicGas(args IntrinsicGasCalcArgs) (IntrinsicGasCalcResult, bool) 
 			return IntrinsicGasCalcResult{}, true
 		}
 
-		product, overflow = math.SafeMul(args.StorageKeysLen, params.TxAccessListStorageKeyGas)
+		product, overflow = math.SafeMul(args.StorageKeysLen, storageKeyGas)
 		if overflow {
 			return IntrinsicGasCalcResult{}, true
 		}
@@ -262,7 +270,7 @@ func CalcIntrinsicGas(args IntrinsicGasCalcArgs) (IntrinsicGasCalcResult, bool) 
 
 	// Add the cost of authorizations
 	if args.IsEIP8037 {
-		regularCost, overflow := math.SafeMul(args.AuthorizationsLen, params.PerAuthBaseCostEIP8037)
+		regularCost, overflow := math.SafeMul(args.AuthorizationsLen, params.PerAuthRegularCostEIP8038)
 		if overflow {
 			return IntrinsicGasCalcResult{}, true
 		}
