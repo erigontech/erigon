@@ -27,6 +27,7 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/require"
+	"golang.org/x/sync/semaphore"
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/empty"
@@ -1083,11 +1084,11 @@ func TestTruthtreeFold_FreshNonWhaleParity(t *testing.T) {
 // concern.)
 func TestTruthtreeFold_ArityGateSingleNibble(t *testing.T) {
 	keys, upds, whale, _ := freshWhaleAloneCorpus(20260711, nibs(7), 1500)
-	depth64Key := string(nibbles.HexToCompact(KeyToHexNibbleHash(whale)[:64]))
+	depth64Key := nibbles.HexToCompact(KeyToHexNibbleHash(whale)[:64])
 
 	seqMs := NewMockState(t)
 	seqRoot, _ := processModeBatchState(t, seqMs, modeSeq, 0, keys, upds, nil)
-	_, seqHas := seqMs.cm[depth64Key]
+	_, seqHas := seqMs.cm[string(depth64Key)]
 	require.False(t, seqHas, "single-first-nibble storage collapses to an extension: sequential stores no branch at the depth-64 prefix")
 
 	onMs := NewMockState(t)
@@ -1098,7 +1099,7 @@ func TestTruthtreeFold_ArityGateSingleNibble(t *testing.T) {
 	require.Equal(t, seqRoot, onRoot, "flag-on single-first-nibble whale root != sequential")
 	require.Equal(t, before, directWhaleStorageFolds.Load(),
 		"single-first-nibble whale must route to foldFreshStorage/storageRootFromSingleChild, not the serial foldNode fold")
-	_, onHas := onMs.cm[depth64Key]
+	_, onHas := onMs.cm[string(depth64Key)]
 	require.False(t, onHas, "arity gate must not emit a bogus foldNode branch at the depth-64 prefix")
 }
 
@@ -1118,4 +1119,155 @@ func TestTruthtreeFold_Depth64SeamParity(t *testing.T) {
 	requireFreshWhaleFlagParity(t, 4, keys, upds)
 	require.Greater(t, directWhaleStorageFolds.Load(), before,
 		"touched-account fresh whale never folded storage through the serial recursion")
+}
+
+// requireForkJoinFoldParity folds a fresh whale's storage subtree through both the parallel
+// foldFreshForkJoin and the serial foldFreshStorageRootDeferred, pinning byte parity: equal storage
+// roots, each fold's branch records applied to their own store == the sequential oracle store, and
+// the wrapped account root == the sequential oracle root. workers drives K = foldK(subtreeCount,
+// workers); slots below K/2 exercise the serial-degenerate (no-fork) entry, above it the forked path.
+func requireForkJoinFoldParity(t *testing.T, workers, slots int) {
+	t.Helper()
+	ctx := context.Background()
+	addr, accHash, _, accUpd, pk, upds, _ := whaleByNibble(slots)
+
+	oracle := oracleRoot(t, pk, upds)
+	oracleMs := seqFreshBranchOracle(t, pk, upds)
+
+	ms := NewMockState(t)
+	require.NoError(t, ms.applyPlainUpdates(pk, upds))
+	node, accPrefix := whaleStorageNode(pk, upds, accHash)
+
+	srSerial, defSerial, err := foldFreshStorageRootDeferred(node, accPrefix)
+	require.NoError(t, err)
+
+	fp := makeFoldPool(ms, workers)
+	srPar, defPar, err := fp.foldFreshForkJoin(ctx, node, accPrefix)
+	require.NoError(t, err)
+
+	require.Equal(t, srSerial, srPar, "fork-join storage root != serial foldFreshStorageRootDeferred")
+
+	msSerial := NewMockState(t)
+	_, err = ApplyDeferredBranchUpdates(defSerial, 1, msSerial.PutBranch)
+	require.NoError(t, err)
+	requireBranchParity(t, oracleMs, msSerial)
+
+	msPar := NewMockState(t)
+	_, err = ApplyDeferredBranchUpdates(defPar, 1, msPar.PutBranch)
+	require.NoError(t, err)
+	requireBranchParity(t, oracleMs, msPar)
+
+	root, err := wrapAccountRoot(ms, addr, accUpd, srPar)
+	require.NoError(t, err)
+	require.Equal(t, oracle, root, "fork-join account root != sequential oracle")
+}
+
+// TestTruthtreeFold_ForkJoinParity is the Task 3 parity gate: the parallel foldFreshForkJoin folds a
+// fresh whale's storage byte-for-byte identically to the serial foldFreshStorageRootDeferred and the
+// sequential oracle, across a non-whale (subtreeCount below K, folds serially through the entry) and
+// three whale corpora at different sizes and worker counts (N>=3 batches).
+func TestTruthtreeFold_ForkJoinParity(t *testing.T) {
+	for _, tc := range []struct{ workers, slots int }{
+		{4, 800},    // non-whale: subtreeCount below K, entry degrades to the serial foldNode
+		{4, 3_000},  // whale: root-level fork
+		{8, 20_000}, // whale: more workers, lower K
+		{2, 50_000}, // whale: fewer workers
+	} {
+		t.Run(fmt.Sprintf("workers=%d/slots=%d", tc.workers, tc.slots), func(t *testing.T) {
+			requireForkJoinFoldParity(t, tc.workers, tc.slots)
+		})
+	}
+}
+
+// TestTruthtreeFold_ForkJoinMultiDepthParity drives K low (well below every interior branch count)
+// over an abundant semaphore, so every split point forks — including branches below the depth-64
+// storage root. This is where per-prefix (split-point) forking diverges from a fixed per-first-nibble
+// split: nested split points must fan out and still reproduce the serial fold and the sequential
+// oracle byte-for-byte. forkFoldMaxDepth pins that a fork actually spawned below the storage root.
+func TestTruthtreeFold_ForkJoinMultiDepthParity(t *testing.T) {
+	ctx := context.Background()
+	const slots = 50_000
+	addr, accHash, _, accUpd, pk, upds, _ := whaleByNibble(slots)
+
+	oracle := oracleRoot(t, pk, upds)
+	oracleMs := seqFreshBranchOracle(t, pk, upds)
+	depths := branchDepths(oracleMs)
+	interior := 0
+	for d, n := range depths {
+		if d >= 66 {
+			interior += n
+		}
+	}
+	require.Positive(t, interior, "corpus must nest storage branches >=2 deep for a multi-depth fork test")
+
+	ms := NewMockState(t)
+	require.NoError(t, ms.applyPlainUpdates(pk, upds))
+	node, accPrefix := whaleStorageNode(pk, upds, accHash)
+
+	srSerial, defSerial, err := foldFreshStorageRootDeferred(node, accPrefix)
+	require.NoError(t, err)
+
+	forkFoldMaxDepth.Store(0)
+	fc := newFoldCtx(true)
+	ff := &forkFolder{sem: semaphore.NewWeighted(1 << 20), k: 64}
+	srPar, err := ff.fold(ctx, fc, node, accPrefix, 64)
+	require.NoError(t, err)
+	defPar := fc.deferred
+	fc.hph.Release()
+
+	require.Greater(t, forkFoldMaxDepth.Load(), int64(64),
+		"low-K fork-join must split below the depth-64 storage root (per-prefix), not only at it")
+	require.Equal(t, srSerial, srPar, "multi-depth fork-join root != serial fold")
+
+	msSerial := NewMockState(t)
+	_, err = ApplyDeferredBranchUpdates(defSerial, 1, msSerial.PutBranch)
+	require.NoError(t, err)
+	requireBranchParity(t, oracleMs, msSerial)
+
+	msPar := NewMockState(t)
+	_, err = ApplyDeferredBranchUpdates(defPar, 1, msPar.PutBranch)
+	require.NoError(t, err)
+	requireBranchParity(t, oracleMs, msPar)
+
+	root, err := wrapAccountRoot(ms, addr, accUpd, srPar)
+	require.NoError(t, err)
+	require.Equal(t, oracle, root, "multi-depth fork-join account root != sequential oracle")
+}
+
+// foldForkJoinWhale benches the fork-join fold with emission off (pure hash, buffer-per-lineage), the
+// parallel-arm analog of foldFreshWhale, so its per-op allocation is comparable to the serial ceiling.
+func foldForkJoinWhale(b *testing.B, node *prefixNode) {
+	b.ReportAllocs()
+	ctx := context.Background()
+	sem := semaphore.NewWeighted(int64(maxFoldConcurrency()))
+	ff := &forkFolder{sem: sem, k: foldK(node.subtreeCount, runtime.NumCPU())}
+	var sink common.Hash
+	for b.Loop() {
+		fc := newFoldCtx(false)
+		h, err := ff.fold(ctx, fc, node, nil, 64)
+		fc.hph.Release()
+		if err != nil {
+			b.Fatal(err)
+		}
+		sink = h
+	}
+	runtime.KeepAlive(sink)
+}
+
+func Benchmark_TruthtreeFold_ForkJoinWhaleAlloc(b *testing.B) {
+	foldForkJoinWhale(b, freshWhaleFoldNode(b, 750_000))
+}
+
+// TestTruthtreeFold_ForkJoinAllocCeiling pins the parallel arm's buffer-per-lineage allocation: the
+// fork-join of the 750k fresh-whale storage subtree stays near the proto's ~49 MB parallel figure and
+// well under the same ceiling as the serial fold, never regressing toward the ~575 MB naive fold.
+func TestTruthtreeFold_ForkJoinAllocCeiling(t *testing.T) {
+	node := freshWhaleFoldNode(t, 750_000)
+	res := testing.Benchmark(func(b *testing.B) { foldForkJoinWhale(b, node) })
+	require.NotZero(t, res.N, "fork-join alloc bench did not run")
+	got := res.AllocedBytesPerOp()
+	t.Logf("truthtree fork-join 750k fresh-whale: %.1f MB/op, %d allocs/op", float64(got)/(1<<20), res.AllocsPerOp())
+	require.Lessf(t, got, int64(truthtreeFoldAllocCeiling),
+		"fork-join alloc %.1f MB/op exceeds %.0f MB ceiling — buffer-per-lineage regression toward the ~575 MB naive fold",
+		float64(got)/(1<<20), float64(truthtreeFoldAllocCeiling)/(1<<20))
 }

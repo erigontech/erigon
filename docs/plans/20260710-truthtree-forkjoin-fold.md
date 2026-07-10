@@ -136,22 +136,27 @@ roots + stored branches byte-match sequential HexPatricia.
 - Modify: `execution/commitment/fold_pool.go`
 - Modify: `execution/commitment/truthtree_fold.go`
 
-- [ ] add `foldPool.foldFreshForkJoin(ctx, node, accPrefix) (common.Hash, []*DeferredBranchUpdate, error)`:
-      a recursive fork-join over the touched subtree. At a branch node with `subtreeCount > K`
-      (`K = foldK(total, numWorkers)` — the **same** threshold the DAG uses, `fold_pool.go:169`), fork each
-      child onto `foldSem` with its **own** `foldCtx` and recurse; at `subtreeCount <= K`, fold serially via
-      `foldCtx.foldNode` (buffer reuse). The fork unit is the **split point**, never the top nibble — a fixed
-      per-first-nibble split is explicitly not what this does.
-- [ ] empty-wall base (provably fresh); stitch forked child roots via `foldNode`'s existing branch keccak;
-      emit the per-branch `DeferredBranchUpdate`s; merge child deferred at each join (dedup-safe via the
-      existing apply path; parity gate confirms).
-- [ ] bound concurrency by the existing `foldSem` — no new semaphore; fork only above K (no over-spawn on
-      small subtrees).
-- [ ] parity test: fork-join result == serial `foldFreshStorageRootDeferred` == sequential, N≥3 batches,
-      whale + non-whale, with `K` driven low enough that forks occur at **multiple depths** (nested split
-      points, not just the storage root) — this is where per-prefix diverges from per-nibble and must be pinned.
-- [ ] alloc assertion: parallel arm ~49 MB (never 575 MB); serial arm still ≤ 44 MB ceiling.
-- [ ] run parity + alloc gates — must pass before Task 4.
+- [x] `foldPool.foldFreshForkJoin(ctx, node, accPrefix) (common.Hash, []*DeferredBranchUpdate, error)` added
+      (`fold_pool.go`): a recursive fork-join (`forkFolder.fold`, `truthtree_fold.go`) over the touched
+      subtree. At a branch with `subtreeCount > K` (`K = foldK(node.subtreeCount, numWorkers)` — the same
+      `foldK` policy the DAG uses) each child branch forks with its **own** `foldCtx` and recurses; at
+      `subtreeCount <= K` it folds serially via `foldCtx.foldNode` (buffer reuse). The fork unit is the
+      **split point**, never the top nibble.
+- [x] empty-wall base (provably fresh); forked child roots stitch via the shared `hashBranchRow` — the
+      exact 17-slot branch keccak extracted from `foldNode`, so serial and fork-join are byte-identical;
+      per-branch `DeferredBranchUpdate`s emitted; child deferred merged at each join after the barrier.
+      Parity gate confirms the store is dedup-safe (unique fresh prefixes, order-independent).
+- [x] concurrency bounded by the existing `foldSem` (no new semaphore); only children `> K` fork, small
+      subtrees fold inline via `foldNode`. **TryAcquire + inline-fallback** replaces a blocking acquire:
+      recursive forks would deadlock a blocking acquire (a forked goroutine holds its slot while awaiting
+      its own children); the elastic fallback always makes progress and never over-spawns.
+- [x] `TestTruthtreeFold_ForkJoinParity` (non-whale + 3 whales, N≥3) and
+      `TestTruthtreeFold_ForkJoinMultiDepthParity` (K=64 over an abundant sem, `forkFoldMaxDepth > 64`
+      pins forks **below** the depth-64 storage root): fork-join == serial `foldFreshStorageRootDeferred`
+      == sequential oracle, root + every stored branch, all green under `-race`.
+- [x] `TestTruthtreeFold_ForkJoinAllocCeiling`: parallel arm 43 MB/op on the 750k whale (< 96 MB ceiling,
+      never ~575 MB); serial `TestTruthtreeFold_AllocCeiling` still 42.6 MB.
+- [x] parity + alloc gates pass; `make lint` and full `go test -short ./execution/commitment/` green.
 
 ### Task 4: Route flag-on fresh whale to the parallel path; delete the serial path
 

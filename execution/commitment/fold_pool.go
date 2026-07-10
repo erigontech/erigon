@@ -499,6 +499,32 @@ func (fp *foldPool) foldFreshStorage(ctx context.Context, node *prefixNode, accP
 	return sr.hash, deferred, nil
 }
 
+// foldFreshForkJoin folds a provably-fresh whale's storage subtree into its root and branch records
+// with a recursive per-split-point fork-join over foldNode: at any storage branch larger than
+// K = foldK(node.subtreeCount, numWorkers) — the same threshold the fold DAG uses — each child
+// branch forks onto foldSem with its own foldCtx and recurses, while smaller subtrees fold serially
+// with buffer reuse. The fork unit is the split point, not the top nibble, so nested splits fan out
+// at every depth. Byte-identical to the serial foldFreshStorageRootDeferred; fail-closed drops every
+// collected update on any error.
+func (fp *foldPool) foldFreshForkJoin(ctx context.Context, node *prefixNode, accPrefix []byte) (common.Hash, []*DeferredBranchUpdate, error) {
+	if node == nil || node.bitmap == 0 {
+		return empty.RootHash, nil, nil
+	}
+	sem := fp.foldSem
+	if sem == nil {
+		sem = semaphore.NewWeighted(int64(maxFoldConcurrency()))
+	}
+	ff := &forkFolder{sem: sem, k: foldK(node.subtreeCount, fp.numWorkers)}
+	fc := newFoldCtx(true)
+	defer fc.hph.Release()
+	h, err := ff.fold(ctx, fc, node, accPrefix, 64)
+	if err != nil {
+		putDeferredUpdates(fc.deferred)
+		return common.Hash{}, nil, err
+	}
+	return h, fc.deferred, nil
+}
+
 // collectStorageKeys collects a depth-64 account node's storage keys (its child subtrees),
 // excluding the account terminator the caller applies separately.
 func collectStorageKeys(node *prefixNode, accPrefix []byte) []touchedKey {

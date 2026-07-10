@@ -21,6 +21,10 @@ import (
 	"errors"
 	"fmt"
 	"math/bits"
+	"sync/atomic"
+
+	"golang.org/x/sync/errgroup"
+	"golang.org/x/sync/semaphore"
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/empty"
@@ -217,6 +221,15 @@ func (fc *foldCtx) foldNode(node *prefixNode, prefix []byte, branchDepth int16) 
 		childIdx++
 		bm &^= uint16(1) << nib
 	}
+	return fc.hashBranchRow(node, prefix, &rec, totalLen, childDepth)
+}
+
+// hashBranchRow keccaks the 17-slot branch row from the already-classified child records into the
+// branch hash and, when emit is on, stages this branch's DeferredBranchUpdate. rec holds every
+// present slot's kind/node/child-hash; totalLen is the RLP payload length summed from the child
+// hlens (the empty-slot padding is added here). It is the shared branch-stitch tail of the serial
+// foldNode and the fork-join fold, so both produce byte-identical hashes and records.
+func (fc *foldCtx) hashBranchRow(node *prefixNode, prefix []byte, rec *[16]foldChild, totalLen int, childDepth int16) (common.Hash, error) {
 	totalLen += 17 - bits.OnesCount16(node.bitmap)
 
 	fc.hph.keccak2.Reset()
@@ -263,6 +276,158 @@ func (fc *foldCtx) foldNode(node *prefixNode, prefix []byte, branchDepth int16) 
 		}
 	}
 	return h, nil
+}
+
+// newFoldCtx builds a foldCtx with its own HexPatriciaHashed keccak state; emit toggles
+// DeferredBranchUpdate staging. Each fork-join lineage owns one (own scratch cell + output buffer),
+// so a forked goroutine never shares mutable state with its parent. The caller releases fc.hph.
+func newFoldCtx(emit bool) *foldCtx {
+	return &foldCtx{hph: NewHexPatriciaHashed(length.Addr, nil, DefaultTrieConfig()), emit: emit}
+}
+
+// forkFolder folds a provably-fresh storage subtree with a recursive per-split-point fork-join,
+// bounding concurrency by sem and splitting at any branch whose subtreeCount exceeds k — the same
+// threshold the fold DAG uses. Below k a subtree folds serially via foldNode's buffer-reuse path;
+// above it each child branch forks onto its own lineage. The stitch is foldNode's exact 17-slot
+// branch keccak, so the fork-join root and its branch records are byte-identical to the serial fold.
+type forkFolder struct {
+	sem *semaphore.Weighted
+	k   uint32
+}
+
+// forkFoldMaxDepth records the deepest branch (its row's nibble depth) at which the fresh-whale
+// fork-join spawned child lineages. Tests read it to confirm splits fanned out below the depth-64
+// storage root (per-prefix), not only at the root (the per-nibble split this work moves past).
+var forkFoldMaxDepth atomic.Int64
+
+func recordForkDepth(depth int16) {
+	d := int64(depth)
+	for {
+		cur := forkFoldMaxDepth.Load()
+		if d <= cur || forkFoldMaxDepth.CompareAndSwap(cur, d) {
+			return
+		}
+	}
+}
+
+// forkJob is one storage sub-branch large enough (subtreeCount > k) to be a split point: either
+// forked onto its own lineage or, when foldSem is saturated, folded inline in the parent lineage.
+type forkJob struct {
+	node   *prefixNode
+	prefix []byte
+	depth  int16
+	nib    int
+}
+
+// fold folds the storage-plane branch pn (whose branch row sits at branchDepth) into its hash and
+// merges every forked child's deferred updates into fc. A subtree at or below k folds serially in fc
+// via foldNode (buffer reuse). Above k, leaves and small child branches fold serially in fc, and each
+// child branch larger than k is a split point: it forks onto its own foldCtx when a foldSem slot is
+// free, else folds inline in fc.
+//
+// TryAcquire (not a blocking Acquire) is load-bearing for deadlock freedom: a forked goroutine holds
+// its slot while awaiting its own forked children, so under saturation a blocking acquire would wedge
+// every slot on a parent waiting for a child that can never start. Falling back to an inline fold
+// always makes progress without another slot. fc is only ever touched by this goroutine — forked
+// children own separate foldCtxs and their results merge after the join — so no lock guards it.
+//
+// Storage-plane only: a key-terminating branch (an account seam) cannot occur below the depth-64
+// storage root, so one is rejected fail-closed rather than mis-folded.
+func (ff *forkFolder) fold(ctx context.Context, fc *foldCtx, pn *prefixNode, prefix []byte, branchDepth int16) (common.Hash, error) {
+	if pn.subtreeCount <= ff.k {
+		return fc.foldNode(pn, prefix, branchDepth)
+	}
+	childDepth := branchDepth + 1
+	var rec [16]foldChild
+	totalLen := 0
+	var jobs []forkJob
+	childIdx := 0
+	for bm := pn.bitmap; bm != 0; {
+		nib := bits.TrailingZeros16(bm)
+		child := pn.children[childIdx]
+		r := &rec[nib]
+		r.present, r.node = true, child
+		switch {
+		case child.bitmap == 0:
+			if child.plainKey == nil {
+				return common.Hash{}, fmt.Errorf("truthtree fork fold: leaf without plainKey at slot %x", nib)
+			}
+			r.kind = childStorageLeaf
+			fc.setStorageLeaf(child)
+			r.hlen = fc.hph.computeCellHashLen(&fc.cell, childDepth)
+		case child.plainKey != nil:
+			return common.Hash{}, fmt.Errorf("truthtree fork fold: unexpected storage seam at slot %x", nib)
+		default:
+			r.kind = childBranch
+			r.hlen = length.Hash + 1
+			childBranchDepth := childDepth + int16(len(child.ext))
+			childPrefix := fc.childPrefix(prefix, nib, child.ext)
+			if child.subtreeCount > ff.k {
+				jobs = append(jobs, forkJob{node: child, prefix: childPrefix, depth: childBranchDepth, nib: nib})
+			} else {
+				bh, err := fc.foldNode(child, childPrefix, childBranchDepth)
+				if err != nil {
+					return common.Hash{}, err
+				}
+				r.bh = bh
+			}
+		}
+		totalLen += int(r.hlen)
+		childIdx++
+		bm &^= uint16(1) << nib
+	}
+
+	if len(jobs) > 0 {
+		results := make([][]*DeferredBranchUpdate, len(jobs))
+		forkedBH := make([]common.Hash, len(jobs))
+		forked := make([]bool, len(jobs))
+		g, gctx := errgroup.WithContext(ctx)
+		var inlineErr error
+		for i := range jobs {
+			if ff.sem.TryAcquire(1) {
+				recordForkDepth(branchDepth)
+				forked[i] = true
+				g.Go(func() error {
+					defer ff.sem.Release(1)
+					cfc := newFoldCtx(fc.emit)
+					defer cfc.hph.Release()
+					bh, err := ff.fold(gctx, cfc, jobs[i].node, jobs[i].prefix, jobs[i].depth)
+					if err != nil {
+						putDeferredUpdates(cfc.deferred)
+						return err
+					}
+					forkedBH[i] = bh
+					results[i] = cfc.deferred
+					return nil
+				})
+				continue
+			}
+			bh, err := ff.fold(ctx, fc, jobs[i].node, jobs[i].prefix, jobs[i].depth)
+			if err != nil {
+				inlineErr = err
+				break
+			}
+			rec[jobs[i].nib].bh = bh
+		}
+		werr := g.Wait()
+		if inlineErr != nil || werr != nil {
+			for i := range results {
+				putDeferredUpdates(results[i])
+			}
+			if inlineErr != nil {
+				return common.Hash{}, inlineErr
+			}
+			return common.Hash{}, werr
+		}
+		for i := range jobs {
+			if forked[i] {
+				rec[jobs[i].nib].bh = forkedBH[i]
+				fc.deferred = append(fc.deferred, results[i]...)
+			}
+		}
+	}
+
+	return fc.hashBranchRow(pn, prefix, &rec, totalLen, childDepth)
 }
 
 // childPrefix builds the hex-nibble path to a child branch (prefix ++ slot nibble ++ child ext)
