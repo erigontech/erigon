@@ -74,10 +74,10 @@ The frontier **DAG + pool + merge/finale stitch are unchanged.** A leaf task tod
 - Create: `execution/commitment/truthtree_fold.go`
 - Create: `execution/commitment/truthtree_fold_test.go`
 
-- [ ] port `srV3Lean` into production `foldNode` for a **fresh** storage subtree — `common.Hash`/small-cell by value, reused leaf scratch, reuse `computeCellHash`/`computeCellHashLen`/`setFromUpdate`, hand-roll only the branch keccak
-- [ ] unit tests vs the sequential oracle for a fresh storage subtree (5k/50k slots), root byte-equal
-- [ ] error-path: empty subtree; malformed node
-- [ ] run tests — must pass before next task
+- [x] port `srV3Lean` into production `foldNode` for a **fresh** storage subtree — `common.Hash`/small-cell by value, reused leaf scratch, reuse `computeCellHash`/`computeCellHashLen`/`setFromUpdate`, hand-roll only the branch keccak
+- [x] unit tests vs the sequential oracle for a fresh storage subtree (5k/50k slots), root byte-equal
+- [x] error-path: empty subtree; malformed node
+- [x] run tests — must pass before next task
 
 ### Task 2: Buffer-reuse alloc-ceiling gate
 
