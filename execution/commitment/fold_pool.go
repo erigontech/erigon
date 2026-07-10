@@ -269,7 +269,7 @@ func (fp *foldPool) dispatchWholeFresh(ctx context.Context, base *HexPatriciaHas
 	if sem == nil {
 		sem = semaphore.NewWeighted(int64(maxFoldConcurrency()))
 	}
-	ff := &forkFolder{sem: sem, k: foldK(rootTask.node.subtreeCount, fp.numWorkers)}
+	ff := &forkFolder{sem: sem, k: foldK(rootTask.node.subtreeCount, fp.numWorkers), numWorkers: fp.numWorkers}
 
 	var (
 		cells    [16]cell
@@ -709,7 +709,7 @@ func (fp *foldPool) foldFreshForkJoin(ctx context.Context, node *prefixNode, acc
 	if sem == nil {
 		sem = semaphore.NewWeighted(int64(maxFoldConcurrency()))
 	}
-	ff := &forkFolder{sem: sem, k: foldK(node.subtreeCount, fp.numWorkers)}
+	ff := &forkFolder{sem: sem, k: foldK(node.subtreeCount, fp.numWorkers), numWorkers: fp.numWorkers}
 	fc := newFoldCtx(true)
 	defer fc.hph.Release()
 	h, err := ff.fold(ctx, fc, node, accPrefix, 64)

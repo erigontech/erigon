@@ -249,14 +249,50 @@ allocated by **subtree cost**, not a flat global grain.
 **Files:**
 - Modify: `execution/commitment/fold_pool.go`, `execution/commitment/truthtree_fold.go`
 
-- [ ] make the whole-fresh fork **per-subtree adaptive**: a deep whale storage subtree keeps forking at its
+- [x] make the whole-fresh fork **per-subtree adaptive**: a deep whale storage subtree keeps forking at its
       *own* `subtreeCount`/numWorkers so it splits finely at any worker count — OR invoke an explicit
       whale-split (reuse frontier's `freshWhaleCandidate` / `deepStorageThreshold`) for big-storage accounts
       inside the whole-fresh dispatch, independent of the account-plane budget.
-- [ ] parity unchanged: fresh whale + account plane + seam == sequential, N≥3 (roots + branches byte-identical).
-- [ ] perf (`Benchmark_FreshBuildFork`, carried updates): at **NumCPU (w18)** flag-on ≤ flag-off frontier
+      (Per-subtree adaptive: `forkFolder` gains a `numWorkers` field and a `storageFold` helper. At each
+      depth-64 account seam, `forkFolder.fold` recurses via `storageFold`, which folds the storage plane on a
+      grain `min(ff.k, foldK(storageSubtree.subtreeCount, numWorkers))` — the storage subtree's own count /
+      numWorkers, capped by the enclosing gate. The cap keeps a low-K test's deep-fork intent; in the real
+      engine the storage grain is always ≤ the account grain, so a whale's storage forks at any worker count
+      instead of only under oversubscription. Only the grain differs — the fold is byte-identical to a
+      same-k `ff.fold`, so parity is untouched by construction.)
+- [x] parity unchanged: fresh whale + account plane + seam == sequential, N≥3 (roots + branches byte-identical).
+      (Existing `TestFreshBuild_*` / `TestTruthtreeFold_*` parity gates stay green — a grain change cannot alter
+      the fold output. New `TestFreshBuild_WhaleStorageForksAtGrain` pins the fix red→green deterministically:
+      at the *production* account grain `foldK(root.subtreeCount, numWorkers)` the whale storage now forks below
+      the depth-64 seam (`forkFoldMaxDepth >= 64`) — it did not before Task 5 (measured `forkFoldMaxDepth=3`) —
+      while the root stays byte-identical to serial + the sequential oracle.)
+- [x] perf (`Benchmark_FreshBuildFork`, carried updates): at **NumCPU (w18)** flag-on ≤ flag-off frontier
       (close the 13% regression, ideally beat it); at oversubscription still ≥ 2×; alloc ≤ frontier (~25% less).
-- [ ] `make lint && make test-short` clean. Before Task 6.
+      (**MET and exceeded** — see table below. w18: flag-on 271 ms vs flag-off 714 ms = **2.63× faster** (the
+      Task-4 13% regression is now a 2.6× win); w36 2.70×, w72 2.60× (≥2× holds); alloc 386 vs 513 MB = 25%
+      less; incremental guard 25.0 == 25.2 ms — whole-fresh path dormant on seeded state.)
+- [x] `make lint && make test-short` clean. Before Task 6. (`make lint` clean twice; commitment `-short`
+      green + race-clean; `make erigon integration` builds.)
+
+#### Task 5 results (measured — M5 Max, 18 cores arm64, carried updates, `-benchtime=15x`)
+
+`Benchmark_FreshBuildFork`, roots byte-identical between flag-on/flag-off, stored branches parity-clean.
+
+1MWhales (fresh, 1,000,003 keys) — per-subtree grain forks the whale storage at *every* worker count:
+
+| workers | flag-off (frontier) | flag-on (fork) | fork vs frontier | vs Task-4 flag-on |
+|---------|---------------------|----------------|------------------|-------------------|
+| NumCPU=18 | 714 ms | 271 ms | 2.63× faster | 800 → 271 ms |
+| 2×=36 | 721 ms | 267 ms | 2.70× faster | 358 → 267 ms |
+| 4×=72 | 742 ms | 285 ms | 2.60× faster | 357 → 285 ms |
+
+Peak mem/op: flag-off ~513 MB, flag-on ~386 MB (fork ~25% lower). The Task-4 NumCPU regression (flag-on
+800 ms, 13% slower than frontier) is closed and inverted: flag-on is now flat ~270 ms across the sweep and
+2.6× faster than frontier at NumCPU, because the whale storage forks on its own `foldK(storage, numWorkers)`
+grain instead of the coarse account-plane grain that only shrank enough to split it under oversubscription.
+
+incremental-whale120k (seeded, on-disk state — the guard): flag-off 25.2 ms == flag-on 25.0 ms → the
+whole-fresh route stays dormant on seeded state; the seedable path is byte- and perf-untouched.
 
 ## Milestone 4 — Verify + document
 

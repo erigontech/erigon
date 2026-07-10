@@ -303,11 +303,14 @@ func newFoldCtx(emit bool) *foldCtx {
 // fork-join, bounding concurrency by sem and splitting at any branch whose subtreeCount exceeds k —
 // the same threshold the fold DAG uses. Below k a subtree folds serially via foldNode's buffer-reuse
 // path; above it each child branch forks onto its own lineage, and a depth-64 account seam recurses
-// into its storage on the same threshold. The stitch is foldNode's exact 17-slot branch keccak, so
-// the fork-join root and its branch records are byte-identical to the serial fold.
+// into its storage on a grain sized to that storage subtree's own key count (see storageFold). The
+// stitch is foldNode's exact 17-slot branch keccak, so the fork-join root and its branch records are
+// byte-identical to the serial fold. numWorkers sizes the storage-plane grain and is 0 for a caller
+// that pins k directly (a test forcing a low K); foldK treats 0 workers as 1.
 type forkFolder struct {
-	sem *semaphore.Weighted
-	k   uint32
+	sem        *semaphore.Weighted
+	k          uint32
+	numWorkers int
 }
 
 // forkFoldMaxDepth records the deepest branch (its row's nibble depth) at which a fresh fork-join
@@ -374,7 +377,7 @@ func (ff *forkFolder) fold(ctx context.Context, fc *foldCtx, pn *prefixNode, pre
 			r.hlen = fc.hph.computeCellHashLen(&fc.cell, childDepth)
 		case child.plainKey != nil:
 			// Depth-64 account seam: the child terminates an account key and branches into storage,
-			// folded back through fold so a large storage plane forks just like the account plane.
+			// folded back through storageFold so a large storage plane forks on its own grain.
 			switch {
 			case seamAccountInline(child):
 				r.kind = childSeamAccountInline
@@ -384,7 +387,7 @@ func (ff *forkFolder) fold(ctx context.Context, fc *foldCtx, pn *prefixNode, pre
 				survNib := bits.TrailingZeros16(child.bitmap)
 				sub := child.children[0]
 				subPrefix := fc.seamSubPrefix(prefix, nib, child.ext, survNib, sub.ext)
-				bh, err := ff.fold(ctx, fc, sub, subPrefix, 64+1+int16(len(sub.ext)))
+				bh, err := ff.storageFold(ctx, fc, sub, subPrefix, 64+1+int16(len(sub.ext)))
 				if err != nil {
 					return common.Hash{}, err
 				}
@@ -393,7 +396,7 @@ func (ff *forkFolder) fold(ctx context.Context, fc *foldCtx, pn *prefixNode, pre
 			default:
 				r.kind = childSeamAccount
 				accPrefix := fc.childPrefix(prefix, nib, child.ext)
-				sr, err := ff.fold(ctx, fc, child, accPrefix, 64)
+				sr, err := ff.storageFold(ctx, fc, child, accPrefix, 64)
 				if err != nil {
 					return common.Hash{}, err
 				}
@@ -472,6 +475,18 @@ func (ff *forkFolder) fold(ctx context.Context, fc *foldCtx, pn *prefixNode, pre
 	}
 
 	return fc.hashBranchRow(pn, prefix, &rec, totalLen, childDepth)
+}
+
+// storageFold recurses into a depth-64 account's fresh storage plane on a grain sized to that storage
+// subtree's own key count rather than the enclosing account-plane gate. On a whale-dominated build the
+// account-plane k (root subtreeCount / numWorkers) is far coarser than a big storage subtree needs, so
+// without a storage-local grain the whale's storage folds serially behind the account plane at
+// numWorkers=NumCPU and only splits once oversubscription shrinks the global grain. The grain is capped
+// at ff.k so a caller that pins a low K (a test proving deep forking) still forks at least that finely
+// below the seam. Only the grain differs — the fold is byte-identical to a same-k ff.fold.
+func (ff *forkFolder) storageFold(ctx context.Context, fc *foldCtx, node *prefixNode, prefix []byte, branchDepth int16) (common.Hash, error) {
+	storageFF := &forkFolder{sem: ff.sem, numWorkers: ff.numWorkers, k: min(ff.k, foldK(node.subtreeCount, ff.numWorkers))}
+	return storageFF.fold(ctx, fc, node, prefix, branchDepth)
 }
 
 // childPrefix builds the hex-nibble path to a child branch (prefix ++ slot nibble ++ child ext)

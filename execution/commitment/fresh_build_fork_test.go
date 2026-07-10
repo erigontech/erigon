@@ -361,6 +361,44 @@ func TestFreshBuild_AccountForkJoinSeamParity(t *testing.T) {
 	requireBranchParity(t, oracleMs, msPar)
 }
 
+// TestFreshBuild_WhaleStorageForksAtGrain is the Task 5 gate: at the *production* account-plane grain
+// (foldK(root.subtreeCount, numWorkers)) a whale's fresh storage still forks below the depth-64 seam.
+// On a whale-dominated build the account-plane grain is far coarser than the whale's per-first-nibble
+// storage count, so the pre-Task-5 fork (which reused the account grain across the seam) folded the
+// whale serially at numWorkers=NumCPU. The corpus is tuned so the whale's per-nibble storage count sits
+// *below* the account grain (no fork on the old grain) but *above* the storage-local grain
+// foldK(whaleStorage, numWorkers) (fork on the new grain), so forkFoldMaxDepth reaching the storage
+// plane (>= 64) proves the per-subtree grain engaged — while the root stays byte-identical to serial.
+func TestFreshBuild_WhaleStorageForksAtGrain(t *testing.T) {
+	ctx := context.Background()
+	const workers = 24
+	pk, upds := freshWhaleAccountPlaneCorpus(5_005, 1_500, 32_000)
+	root := freshAccountTrie(pk, upds)
+	require.Empty(t, root.ext, "a multi-way fresh corpus root branches at depth 0")
+
+	k := foldK(root.subtreeCount, workers)
+	require.Greater(t, k, uint32(32_000/16),
+		"corpus mis-tuned: account grain must exceed the whale's per-nibble storage count (no fork on the old grain)")
+	require.Less(t, foldK(32_000, workers), uint32(32_000/16),
+		"corpus mis-tuned: storage-local grain must fall below the whale's per-nibble storage count (fork on the new grain)")
+
+	oracle := oracleRoot(t, pk, upds)
+	srSerial, _, err := foldFreshAccountRootDeferred(root)
+	require.NoError(t, err)
+
+	forkFoldMaxDepth.Store(0)
+	fc := newFoldCtx(true)
+	ff := &forkFolder{sem: semaphore.NewWeighted(1 << 20), k: k, numWorkers: workers}
+	srPar, err := ff.fold(ctx, fc, root, nil, 0)
+	require.NoError(t, err)
+	fc.hph.Release()
+
+	require.Equal(t, srSerial, srPar, "per-subtree-grain fork-join root != serial account fold")
+	require.Equal(t, oracle, srPar[:], "per-subtree-grain fork-join root != sequential oracle")
+	require.GreaterOrEqual(t, forkFoldMaxDepth.Load(), int64(64),
+		"whale storage did not fork below the depth-64 seam at the production account grain (per-subtree grain not engaged)")
+}
+
 // TestFreshBuild_Seam is the Task 3 seam-correctness gate through the real engine: each of the three
 // seam shapes — an account whose fresh storage forks across the depth-64 seam, an account whose storage
 // is confined to a single first nibble (ext / inline seam), and accounts sharing deep top-nibble
