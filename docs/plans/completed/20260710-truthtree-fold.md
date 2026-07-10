@@ -199,8 +199,8 @@ Conclusion: under the parallel regime the direct fold serializes the whale stora
 
 ### Task 12: [Final] Update documentation
 
-- [ ] package doc comments if fold-facing names changed; note the `truthtree-rollback-base` tag + the Phase 2 (streaming unfold-on-touch) follow-up
-- [ ] move this plan to `docs/plans/completed/`
+- [x] package doc comments if fold-facing names changed — added `execution/commitment/doc.go` with a package overview orienting readers to the two leaf-fold regimes (mount+replay vs the direct buffer-reuse `foldNode` recursion in `truthtree_fold.go`) and the `--experimental.truthtree-fold` flag (`TrieConfig.TruthtreeFold`, parallel regime only, default off, both paths byte-identical). The fold-facing symbols themselves already carry doc comments from Tasks 1–7. Per the repo comment policy (no git-tag/task references or scope narration in source), the `truthtree-rollback-base` rollback tag (`46ffcc1b8c`) and the Phase 2 (streaming unfold-on-touch) follow-up are recorded in the commit message / this plan, not in code
+- [x] move this plan to `docs/plans/completed/`
 
 ## Post-Completion
 
