@@ -721,14 +721,6 @@ func chainWithDeployedContractAndConfig(t *testing.T, cfg *chain.Config) (*execm
 		// fundedBankGenesis budgets the matching block gas under Amsterdam.
 		transferGasLimit = 204_600
 	}
-	transferGasLimit := uint64(21000)
-	if chainConfig.AmsterdamTime != nil {
-		// A value transfer that creates the recipient costs 21000 (value-transfer
-		// intrinsic) + 183600 (EIP-2780 NEW_ACCOUNT state gas) = 204600; the block
-		// must budget the state gas for every filler.
-		transferGasLimit = 204_600
-		gspec.GasLimit = 60_000_000
-	}
 	// accounts to fill up MPT
 	_, fillerPublicKeys, err := generatePseudoRandomECDSAKeyPairs(rng, nFillerAccounts)
 	require.NoError(t, err)
