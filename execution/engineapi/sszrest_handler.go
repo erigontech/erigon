@@ -59,6 +59,8 @@ func (e *EngineServer) handleSSZREST(w http.ResponseWriter, r *http.Request) {
 		e.handleSSZNewPayload(w, r, version)
 	case r.Method == http.MethodGet && len(parts) == 4 && parts[2] == "payloads":
 		e.handleSSZGetPayload(w, r, version, parts[3])
+	case r.Method == http.MethodPost && len(parts) == 5 && parts[2] == "payloads" && parts[3] == "bodies":
+		e.handleSSZGetBodies(w, r, version, parts[4])
 	case r.Method == http.MethodPost && len(parts) == 3 && parts[2] == "forkchoice":
 		e.handleSSZForkchoice(w, r, version)
 	case r.Method == http.MethodPost && len(parts) == 3 && parts[2] == "blobs":
@@ -245,6 +247,10 @@ func (e *EngineServer) handleSSZGetPayload(w http.ResponseWriter, r *http.Reques
 		e.logger.Info("[SSZ-REST] handled get payload", "path", r.URL.Path)
 		writeSSZBytes(w, out)
 	}
+}
+
+func (e *EngineServer) handleSSZGetBodies(w http.ResponseWriter, r *http.Request, version int, filterBy string) {
+	
 }
 
 func callGetPayload(ctx context.Context, e *EngineServer, version int, id hexutil.Bytes) (*engine_types.GetPayloadResponse, error) {
