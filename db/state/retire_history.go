@@ -124,6 +124,9 @@ func (at *AggregatorRoTx) Retire(ctx context.Context, cutoffs kv.RetireCutoffs) 
 		if cutoffStep == 0 {
 			continue
 		}
+		if len(dt.ht.files) == 0 || cutoffTxNum <= dt.ht.files[0].startTxNum {
+			continue
+		}
 		d, agedList := dt.ht.filesBeforeStep(cutoffStep)
 		deleted = append(deleted, d...)
 		aged = append(aged, agedList...)
