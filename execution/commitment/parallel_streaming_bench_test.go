@@ -55,11 +55,49 @@ func runDirectBench(b *testing.B, pk [][]byte, updates []Update) {
 	}
 }
 
+// benchWrap builds the ModeParallel Updates a bench feeds to Process. wrapKeyUpdatesParallel stages
+// nil updates (WrapKeyUpdates) that force the fold to re-read ctx — a cost production never pays;
+// wrapCarriedUpdates carries each Update value via TouchPlainKeyDirect, the parallel-exec entry point.
+// Perf benches use the carried variant to match production; the parity harness keeps WrapKeyUpdates.
+type benchWrap func(tb testing.TB, keys [][]byte, updates []Update) *Updates
+
+func wrapKeyUpdatesParallel(tb testing.TB, keys [][]byte, updates []Update) *Updates {
+	return WrapKeyUpdates(tb, ModeParallel, KeyToHexNibbleHash, keys, updates)
+}
+
+func wrapCarriedUpdates(tb testing.TB, keys [][]byte, updates []Update) *Updates {
+	tb.Helper()
+	upd := NewUpdates(ModeParallel, tb.TempDir(), KeyToHexNibbleHash)
+	for i, key := range keys {
+		upd.TouchPlainKeyDirect(string(key), &updates[i])
+	}
+	return upd
+}
+
+// benchForkWholeFresh flips the dev-only whole-fresh fork toggle for a bench and restores it on
+// cleanup, so a bench can measure the frontier-serial baseline (toggle off) against the fork (on).
+func benchForkWholeFresh(b *testing.B, on bool) {
+	b.Helper()
+	prev := forkWholeFresh.Load()
+	forkWholeFresh.Store(on)
+	b.Cleanup(func() { forkWholeFresh.Store(prev) })
+}
+
 func runParallelBench(b *testing.B, pk [][]byte, updates []Update, workers int) {
 	runParallelBenchCfg(b, pk, updates, workers, DefaultTrieConfig())
 }
 
 func runParallelBenchCfg(b *testing.B, pk [][]byte, updates []Update, workers int, cfg TrieConfig) {
+	runParallelBenchWrap(b, pk, updates, workers, cfg, wrapKeyUpdatesParallel)
+}
+
+// runParallelBenchCarried runs the parallel bench with production-representative carried updates
+// (TouchPlainKeyDirect) instead of the nil-update WrapKeyUpdates path that forces ctx re-reads.
+func runParallelBenchCarried(b *testing.B, pk [][]byte, updates []Update, workers int) {
+	runParallelBenchWrap(b, pk, updates, workers, DefaultTrieConfig(), wrapCarriedUpdates)
+}
+
+func runParallelBenchWrap(b *testing.B, pk [][]byte, updates []Update, workers int, cfg TrieConfig, wrap benchWrap) {
 	ctx := context.Background()
 	b.ReportAllocs()
 	// pph is reused across iterations so the worker pool amortizes.
@@ -83,7 +121,7 @@ func runParallelBenchCfg(b *testing.B, pk [][]byte, updates []Update, workers in
 			pph.ResetContext(ms)
 		}
 		pph.RootTrie().Reset()
-		upds := WrapKeyUpdates(b, ModeParallel, KeyToHexNibbleHash, pk, updates)
+		upds := wrap(b, pk, updates)
 		b.StartTimer()
 
 		_, err := pph.Process(ctx, upds, "", nil, WarmupConfig{})
@@ -126,7 +164,7 @@ func Benchmark_Commitment_1MWhales(b *testing.B) {
 	workers = slices.Compact(workers)
 	b.Run("ModeDirect", func(b *testing.B) { runDirectBench(b, pk, updates) })
 	for _, w := range workers {
-		b.Run(fmt.Sprintf("ModeParallel-w%d", w), func(b *testing.B) { runParallelBench(b, pk, updates, w) })
+		b.Run(fmt.Sprintf("ModeParallel-w%d", w), func(b *testing.B) { runParallelBenchCarried(b, pk, updates, w) })
 	}
 }
 
@@ -452,6 +490,15 @@ func Benchmark_DeepStorageWhale(b *testing.B) {
 // iterations so the worker pool amortizes and the in-memory root carries batch1 without a state
 // blob round-trip; MockState is rebuilt per iteration and reseeded by batch1.
 func runIncrementalBenchCfg(b *testing.B, batch1, batch2 engineBatch, workers int, cfg TrieConfig) {
+	runIncrementalBenchWrap(b, batch1, batch2, workers, cfg, wrapKeyUpdatesParallel)
+}
+
+// runIncrementalBenchCarried runs the incremental bench with production-representative carried updates.
+func runIncrementalBenchCarried(b *testing.B, batch1, batch2 engineBatch, workers int) {
+	runIncrementalBenchWrap(b, batch1, batch2, workers, DefaultTrieConfig(), wrapCarriedUpdates)
+}
+
+func runIncrementalBenchWrap(b *testing.B, batch1, batch2 engineBatch, workers int, cfg TrieConfig, wrap benchWrap) {
 	ctx := context.Background()
 	b.ReportAllocs()
 	var pph *ParallelPatriciaHashed
@@ -474,13 +521,13 @@ func runIncrementalBenchCfg(b *testing.B, batch1, batch2 engineBatch, workers in
 		pph.RootTrie().Reset()
 
 		require.NoError(b, ms.applyPlainUpdates(batch1.keys, batch1.upds))
-		u1 := WrapKeyUpdates(b, ModeParallel, KeyToHexNibbleHash, batch1.keys, batch1.upds)
+		u1 := wrap(b, batch1.keys, batch1.upds)
 		_, err := pph.Process(ctx, u1, "", nil, WarmupConfig{})
 		require.NoError(b, err)
 		u1.Close()
 
 		require.NoError(b, ms.applyPlainUpdates(batch2.keys, batch2.upds))
-		u2 := WrapKeyUpdates(b, ModeParallel, KeyToHexNibbleHash, batch2.keys, batch2.upds)
+		u2 := wrap(b, batch2.keys, batch2.upds)
 		b.StartTimer()
 
 		_, err = pph.Process(ctx, u2, "", nil, WarmupConfig{})
@@ -518,6 +565,42 @@ func Benchmark_TruthtreeFold_Gate(b *testing.B) {
 	b.Run("incremental-whale120k", func(b *testing.B) {
 		b.Run("flag-off", func(b *testing.B) { runIncrementalBenchCfg(b, inc1, inc2, ncpu, offCfg) })
 		b.Run("flag-on", func(b *testing.B) { runIncrementalBenchCfg(b, inc1, inc2, ncpu, onCfg) })
+	})
+}
+
+// Benchmark_FreshBuildFork is the Task 4 perf gate for the whole-fresh account-plane fork. It compares
+// the fork route (flag-on) against the frontier-serial baseline (flag-off) with production-representative
+// carried updates: on the fresh 1MWhales corpus the whole-fresh fork fires (the bulk-load win), and on
+// an incremental seeded whale it stays dormant, so flag-on == flag-off proves the seedable path is
+// untouched.
+func Benchmark_FreshBuildFork(b *testing.B) {
+	ncpu := runtime.NumCPU()
+	workers := slices.Compact(slices.Sorted(slices.Values([]int{ncpu, ncpu * 2, ncpu * 4})))
+	wpk, wupds := buildWhaleCorpus(whale1M())
+	inc1, inc2 := buildRetouchedWhale(717, 120_000)
+
+	b.Run("1MWhales", func(b *testing.B) {
+		b.Logf("corpus keys=%d", len(wpk))
+		for _, w := range workers {
+			b.Run(fmt.Sprintf("flag-off/w%d", w), func(b *testing.B) {
+				benchForkWholeFresh(b, false)
+				runParallelBenchCarried(b, wpk, wupds, w)
+			})
+			b.Run(fmt.Sprintf("flag-on/w%d", w), func(b *testing.B) {
+				benchForkWholeFresh(b, true)
+				runParallelBenchCarried(b, wpk, wupds, w)
+			})
+		}
+	})
+	b.Run("incremental-whale120k", func(b *testing.B) {
+		b.Run("flag-off", func(b *testing.B) {
+			benchForkWholeFresh(b, false)
+			runIncrementalBenchCarried(b, inc1, inc2, ncpu)
+		})
+		b.Run("flag-on", func(b *testing.B) {
+			benchForkWholeFresh(b, true)
+			runIncrementalBenchCarried(b, inc1, inc2, ncpu)
+		})
 	})
 }
 

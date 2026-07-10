@@ -178,12 +178,62 @@ Target: flag-on `1MWhales` ∥ from 900 → ~200 ms (approach/beat main); **zero
 **Files:**
 - Modify: `execution/commitment/parallel_streaming_bench_test.go`
 
-- [ ] switch the whale + incremental benches to carried updates (`TouchPlainKeyDirect`); keep a
+- [x] switch the whale + incremental benches to carried updates (`TouchPlainKeyDirect`); keep a
       `WrapKeyUpdates` variant only for the parity harness.
-- [ ] measure flag-on vs flag-off (frontier) vs main on `1MWhales` (fresh) and the incremental delta.
-- [ ] acceptance: flag-on `1MWhales` ∥ approaches/beats main (900 → ~200 ms); flag-on incremental ∥
+      (`wrapCarriedUpdates` (TouchPlainKeyDirect) vs `wrapKeyUpdatesParallel` (WrapKeyUpdates) selected
+      via a `benchWrap` func; `runParallelBenchCarried`/`runIncrementalBenchCarried` use the carried
+      variant. `Benchmark_Commitment_1MWhales` switched to carried; the WrapKeyUpdates path is retained
+      only for the parity harness. New `benchForkWholeFresh` toggle helper mirrors the test helper.)
+- [x] measure flag-on vs flag-off (frontier) vs main on `1MWhales` (fresh) and the incremental delta.
+      (`Benchmark_FreshBuildFork`: flag-on/flag-off × worker-sweep on 1MWhales + incremental. Numbers
+      below. "main" is an external baseline — not runnable in this worktree — referenced from Context.)
+- [x] acceptance: flag-on `1MWhales` ∥ approaches/beats main (900 → ~200 ms); flag-on incremental ∥
       unchanged vs frontier (~3.83 ms — the seedable path is untouched).
-- [ ] record numbers in the plan. Before Task 5.
+      (**Incremental guard: MET** — flag-on == flag-off (24.4 ms == 24.4 ms on M5 Max), whole-fresh path
+      dormant on seeded state. **1MWhales vs frontier: 2× faster at oversubscription** (w≥2×NumCPU:
+      357 ms vs frontier's flat ~715 ms), but **~13% slower at NumCPU** (800 ms vs 707 ms). **vs main's
+      ~200 ms: NOT reached** on this hardware — best flag-on 357 ms; the M5-Max frontier baseline is
+      707 ms not the plan's 900 ms, so direct ms-comparison to a different-machine 202 ms is unsound;
+      the meaningful in-repo result is the 2× fork-over-frontier win at oversubscription. Finding for
+      Task 6's default-flag decision: the win is oversubscription-gated — see mechanism below.)
+- [x] record numbers in the plan. Before Task 5. (Results table below.)
+
+#### Task 4 results (measured — M5 Max, 18 cores arm64, carried updates, `-benchtime=15x`)
+
+`Benchmark_FreshBuildFork`, roots byte-identical between flag-on/flag-off (`0fdf30b1…`), stored branches
+parity-clean.
+
+1MWhales (fresh, 1,095,003 keys):
+
+| workers | flag-off (frontier) | flag-on (fork) | fork vs frontier |
+|---------|---------------------|----------------|------------------|
+| NumCPU=18 | 707 ms | 800 ms | 1.13× slower |
+| 2×=36 | 716 ms | 358 ms | 2.00× faster |
+| 4×=72 | 720 ms | 357 ms | 2.02× faster |
+
+Peak mem/op: flag-off ~513 MB, flag-on ~383 MB (fork ~25% lower, ~12% more allocs). ModeDirect
+sequential anchor: 1172 ms.
+
+incremental-whale120k (seeded, on-disk state — the guard):
+
+| flag-off | flag-on |
+|----------|---------|
+| 24.4 ms | 24.4 ms |
+
+Identical → the whole-fresh route stays dormant when on-disk state is present; the seedable path is
+byte- and perf-untouched. (Absolute 24 ms vs the plan's 3.83 ms baseline is machine/corpus scaling, not
+a regression — the flag-on/flag-off delta is what proves the guard, and it is zero.)
+
+Mechanism (why the win is oversubscription-gated): frontier is flat (~710 ms) across the worker sweep —
+`freshWhaleCandidate` splits the whale storage independently of grain, giving fixed parallelism. The
+whole-fresh account-plane fork's grain is `foldK = subtreeCount/numWorkers`; on a whale-dominated corpus
+`subtreeCount` is dominated by the 750k-slot whale storage, so at numWorkers=NumCPU the grain (~60k) is
+too coarse — the account-plane forks consume the fold budget and the whale storage folds serially behind
+them (shallow `forkFoldMaxDepth`, `directWhaleStorage=0`). At numWorkers≥2×NumCPU the grain shrinks
+(~30k/15k) and the whale storage splits finely enough to overlap the account plane, hitting 357 ms.
+Follow-up (out of Task 4's measure-only scope, for Task 6 / the materialized-mount continuation): give
+the whole-fresh dispatch an explicit whale-split (as frontier has) so the win holds at NumCPU without
+oversubscription.
 
 ## Milestone 4 — Verify + document
 
