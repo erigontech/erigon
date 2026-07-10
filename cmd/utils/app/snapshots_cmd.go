@@ -1618,6 +1618,7 @@ func doIntegrity(ctx context.Context, cliCtx *cli.Command) error {
 
 	blockReader, _ := blockRetire.IO()
 	heimdallStore, _ := blockRetire.BorStore()
+	db.SetBlockSnapshots(blockReader.Snapshots())
 
 	var commitmentHistoryEnabled bool
 	if err := chainDB.View(ctx, func(tx kv.Tx) error {
