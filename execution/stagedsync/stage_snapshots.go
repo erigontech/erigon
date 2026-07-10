@@ -287,7 +287,7 @@ func DownloadAndIndexSnapshotsIfNeed(s *StageState, ctx context.Context, tx kv.R
 	}
 
 	if temporal, ok := tx.(*temporal.RwTx); ok {
-		temporal.ForceReopenAggCtx() // otherwise next stages will not see just-indexed-files
+		temporal.ForceReopenUnderlyingFilesTx() // otherwise next stages will not see just-indexed-files
 	}
 
 	// It's ok to notify before tx.Commit(), because RPCDaemon does read list of files by gRPC (not by reading from db)
@@ -308,7 +308,7 @@ func DownloadAndIndexSnapshotsIfNeed(s *StageState, ctx context.Context, tx kv.R
 	}
 
 	if temporal, ok := tx.(*temporal.RwTx); ok {
-		temporal.ForceReopenAggCtx() // otherwise next stages will not see just-indexed-files
+		temporal.ForceReopenUnderlyingFilesTx() // otherwise next stages will not see just-indexed-files
 	}
 
 	// In E3, the post-execution state is in domain files. After FillDBFromSnapshots,

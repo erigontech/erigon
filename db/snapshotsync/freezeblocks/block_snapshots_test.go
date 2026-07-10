@@ -70,7 +70,8 @@ func TestBlockReaderPrefersTxBlockView(t *testing.T) {
 	// Pin a view, then retire the [0, mergeLimit) tx segment from the live set.
 	tx := blockFilesTxStub{view: snapshots.View()}
 	defer tx.view.Close()
-	require.NoError(t, snapshots.RetireFiles(snaptype.SegmentFileName(ver, 0, testMergeLimit, snaptype2.Transactions.Enum())))
+	_, err := snapshots.RetireFilesBelow(snaptype2.Transactions, testMergeLimit+1, nil)
+	require.NoError(t, err)
 
 	const blk = testMergeLimit / 2 // inside the retired [0, mergeLimit) segment
 

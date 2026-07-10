@@ -277,7 +277,9 @@ type RwTx struct {
 	tx
 }
 
-func (tx *tx) ForceReopenAggCtx() {
+func (tx *tx) ForceReopenUnderlyingFilesTx() {
+	tx.blocktx.Close()
+	tx.blocktx = tx.db.beginBlockFilesRo()
 	tx.aggtx.Close()
 	tx.aggtx = tx.Agg().BeginFilesRo()
 }

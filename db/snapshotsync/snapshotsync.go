@@ -394,6 +394,7 @@ func SyncSnapshots(
 	} else {
 		toBlock := syncCfg.SnapshotDownloadToBlock // exclusive [0, toBlock)
 		toStep := kv.Step(math.MaxUint64)          // exclusive [0, toStep)
+		log.Warn("[dbg] oops", "headerchain", headerchain, "toBlock", toBlock, "blockReader.Snapshots().SegmentsMax()", blockReader.Snapshots().SegmentsMax())
 		if !headerchain && toBlock > 0 {
 			toTxNum, err := blockReader.TxnumReader().Min(ctx, tx, syncCfg.SnapshotDownloadToBlock)
 			if err != nil {
@@ -403,22 +404,9 @@ func SyncSnapshots(
 			log.Debug(fmt.Sprintf("[%s] filtering", logPrefix), "toBlock", toBlock, "toStep", toStep, "toTxNum", toTxNum)
 			// we downloaded extra seg files during the header chain download (the ones containing the toBlock)
 			// so that we can correctly calculate toTxNum above (now we should delete these)
-			var toDeleteSeg, toDeleteDownloader []string
-			for _, f := range blockReader.FrozenFiles() {
-				fileInfo, stateFile, ok := snaptype.ParseFileName("", f)
-				if !ok || stateFile || strings.HasPrefix(fileInfo.Name(), "salt") || fileInfo.To < toBlock {
-					continue
-				}
-				toDeleteSeg = append(toDeleteSeg, f)
-				toDeleteDownloader = append(toDeleteDownloader, f, strings.Replace(f, ".seg", ".idx", 1))
-			}
-			log.Debug(fmt.Sprintf("[%s] deleting", logPrefix), "toDeleteSeg", toDeleteSeg, "toDeleteDownloader", toDeleteDownloader)
-			err = snapshotDownloader.Delete(ctx, toDeleteDownloader)
-			if err != nil {
-				return err
-			}
-			err = blockReader.Snapshots().RetireFiles(toDeleteSeg...)
-			if err != nil {
+			if err = blockReader.Snapshots().RetireFilesAbove(toBlock, func(files []string) error {
+				return snapshotDownloader.Delete(ctx, files)
+			}); err != nil {
 				return err
 			}
 			// re-open headers and bodies with alignMin=false after deletes,
@@ -427,6 +415,11 @@ func SyncSnapshots(
 			if err != nil {
 				return fmt.Errorf("error opening segments after to block filter deletion: %w", err)
 			}
+			log.Warn("[dbg] oops2", "headerchain", headerchain, "toBlock", toBlock, "blockReader.Snapshots().SegmentsMax()", blockReader.Snapshots().SegmentsMax())
+
+			tx.Rollback() //remove me
+			log.Warn("[dbg] oops3", "headerchain", headerchain, "toBlock", toBlock, "blockReader.Snapshots().SegmentsMax()", blockReader.Snapshots().SegmentsMax())
+			panic(1)
 		}
 
 		txNumsReader := blockReader.TxnumReader()

@@ -1438,13 +1438,14 @@ func (s *BaseRoSnapshots) delete(fileName string) *DirtySegment {
 	return delSeg
 }
 
-// RetireFiles drops the named segments from the live set. Physical unlink is deferred
+// retireFiles drops the named segments from the live set. Physical unlink is deferred
 // to the reader watermark via the generation chain, so files pinned by open views survive.
-func (s *BaseRoSnapshots) RetireFiles(fileNames ...string) error {
+func (s *BaseRoSnapshots) retireFiles(fileNames ...string) error {
 	if s == nil {
 		return nil
 	}
 
+	log.Warn("[dbg] retireFiles", "files", fileNames)
 	s.dirtyLock.Lock()
 	defer s.dirtyLock.Unlock()
 
@@ -1494,7 +1495,39 @@ func (s *BaseRoSnapshots) RetireFilesBelow(typ snaptype.Type, blockTo uint64, on
 			return false, fmt.Errorf("onDelete: %w", err)
 		}
 	}
-	return true, s.RetireFiles(names...)
+	return true, s.retireFiles(names...)
+}
+
+// RetireFilesAbove retires VISIBLE segments whose range ends at or beyond blockNum — the extra
+// files downloaded past a SnapshotDownloadToBlock target — handing their files (.seg + indexes)
+// to onDelete for the seeder. Reads visible only; unlink is deferred to the reader watermark.
+func (s *BaseRoSnapshots) RetireFilesAbove(blockNum uint64, onDelete func(l []string) error) error {
+	if s == nil {
+		return nil
+	}
+
+	v := s.View()
+	defer v.Close()
+	var names, paths []string
+	for _, t := range s.types {
+		for _, sn := range v.Segments(t) {
+			if sn.To() < blockNum {
+				continue
+			}
+			names = append(names, sn.src.FileName())
+			paths = append(paths, sn.src.FilePaths(s.dir)...)
+		}
+	}
+	if len(names) == 0 {
+		return nil
+	}
+
+	if onDelete != nil {
+		if err := onDelete(paths); err != nil {
+			return err
+		}
+	}
+	return s.retireFiles(names...)
 }
 
 func (s *BaseRoSnapshots) buildMissedIndices(logPrefix string, ctx context.Context, dirs datadir.Dirs, chainConfig *chain.Config, workers int, logger log.Logger) (newIdxBuilt bool, err error) {

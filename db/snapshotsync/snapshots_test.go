@@ -369,7 +369,7 @@ func TestDeleteSnapshots(t *testing.T) {
 	}
 	require.NoError(s.OpenFolder())
 	for _, f := range retireFiles {
-		require.NoError(s.RetireFiles(f))
+		require.NoError(s.retireFiles(f))
 		require.False(slices.Contains(s.Files(), f))
 	}
 }
@@ -389,14 +389,14 @@ func TestRetireFilesIsIdempotent(t *testing.T) {
 
 	fileName := snaptype.SegmentFileName(version.V1_0, 0, 10_000, snaptype2.Bodies.Enum())
 
-	require.NoError(s.RetireFiles(fileName))
+	require.NoError(s.retireFiles(fileName))
 	require.False(slices.Contains(s.Files(), fileName))
 
 	require.NotPanics(func() {
-		require.NoError(s.RetireFiles(fileName))
+		require.NoError(s.retireFiles(fileName))
 	})
 	require.NotPanics(func() {
-		require.NoError(s.RetireFiles("v1.0-999999-1000000-bodies.seg"))
+		require.NoError(s.retireFiles("v1.0-999999-1000000-bodies.seg"))
 	})
 }
 
@@ -428,14 +428,14 @@ func TestRetireFilesDetachesFromDirty(t *testing.T) {
 	require.Equal(2, s.dirty[txEnum].Len())
 	require.True(visibleHas(s, txEnum, 0, 10_000))
 
-	require.NoError(s.RetireFiles(snaptype.SegmentFileName(version.V1_0, 0, 10_000, txEnum)))
+	require.NoError(s.retireFiles(snaptype.SegmentFileName(version.V1_0, 0, 10_000, txEnum)))
 
 	// Detached from dirty, not just hidden...
 	require.Equal(1, s.dirty[txEnum].Len())
 	require.False(visibleHas(s, txEnum, 0, 10_000))
 
 	// ...so a fresh recalc (no-arg RetireFiles rebuilds visible from dirty) can't resurface it.
-	require.NoError(s.RetireFiles())
+	require.NoError(s.retireFiles())
 	require.False(visibleHas(s, txEnum, 0, 10_000))
 	require.True(visibleHas(s, txEnum, 10_000, 20_000))
 }
@@ -490,6 +490,42 @@ func TestRetireFilesBelowRefusesWindowTooSmall(t *testing.T) {
 	require.Error(err)
 	require.False(retired)
 	require.Equal(2, s.dirty[txEnum].Len())
+}
+
+// The SnapshotDownloadToBlock cleanup: after downloading past the target block, the extra
+// segments (ending at/beyond it) are retired across all block types and handed to the seeder,
+// while segments fully below it stay.
+func TestRetireFilesAbove(t *testing.T) {
+	logger := log.New()
+	dir := t.TempDir()
+	require := require.New(t)
+
+	s := NewBaseRoSnapshots(ethconfig.BlocksFreezing{ChainName: networkname.Mainnet}, dir, snaptype2.BlockSnapshotTypes, true, logger)
+	defer s.Close()
+	for _, snT := range snaptype2.BlockSnapshotTypes {
+		createTestSegmentFile(t, 0, 10_000, snT.Enum(), dir, version.V1_0, logger)
+		createTestSegmentFile(t, 10_000, 20_000, snT.Enum(), dir, version.V1_0, logger)
+		createTestSegmentFile(t, 20_000, 30_000, snT.Enum(), dir, version.V1_0, logger)
+	}
+	require.NoError(s.OpenFolder())
+
+	txEnum := snaptype2.Transactions.Enum()
+	require.Equal(3, s.dirty[txEnum].Len())
+
+	var deleted []string
+	require.NoError(s.RetireFilesAbove(20_000, func(files []string) error {
+		deleted = append(deleted, files...)
+		return nil
+	}))
+
+	require.Equal(1, s.dirty[txEnum].Len())
+	require.True(visibleHas(s, txEnum, 0, 10_000), "segment fully below the target is kept")
+	require.False(visibleHas(s, txEnum, 10_000, 20_000))
+	require.False(visibleHas(s, txEnum, 20_000, 30_000))
+
+	require.Contains(deleted, snaptype.SegmentFileName(version.V1_0, 10_000, 20_000, txEnum), "seeder told about removed files")
+	require.Contains(deleted, snaptype.SegmentFileName(version.V1_0, 20_000, 30_000, txEnum))
+	require.NotContains(deleted, snaptype.SegmentFileName(version.V1_0, 0, 10_000, txEnum))
 }
 
 func TestRemoveOverlaps(t *testing.T) {
@@ -1113,7 +1149,7 @@ func TestRetireVsLiveViewDoesNotCrash(t *testing.T) {
 			subNames = append(subNames, snaptype.SegmentFileName(verOf(i), from, from+1_000, snT.Enum()))
 		}
 	}
-	require.NoError(s.RetireFiles(subNames...))
+	require.NoError(s.retireFiles(subNames...))
 
 	// Closing the View must not crash.
 	defer func() {

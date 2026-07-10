@@ -140,7 +140,7 @@ type BlockSnapshots interface {
 	OpenFolder() error
 	OpenSegments(types []snaptype.Type, alignMin bool) error
 	SegmentsMax() uint64
-	RetireFiles(fileNames ...string) error
+	RetireFilesAbove(blockNum uint64, onDelete func(l []string) error) error
 	Types() []snaptype.Type
 	Close()
 	DownloadComplete()
