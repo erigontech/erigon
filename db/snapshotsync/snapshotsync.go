@@ -190,7 +190,7 @@ func buildBlackListForPruning(
 type blockReader interface {
 	Snapshots() services.BlockSnapshots
 	BorSnapshots() services.BlockSnapshots
-	IterateFrozenBodies(_ func(blockNum uint64, baseTxNum uint64, txCount uint64) error) error
+	IterateFrozenBodies(tx kv.Getter, _ func(blockNum uint64, baseTxNum uint64, txCount uint64) error) error
 	FreezingCfg() ethconfig.BlocksFreezing
 	AllTypes() []snaptype.Type
 	FrozenFiles() (list []string)
@@ -207,6 +207,7 @@ func stepAtTxNum(txNum, stepSize uint64) kv.Step {
 func getMinimumBlocksToDownload(
 	ctx context.Context,
 	blockReader blockReader,
+	tx kv.Getter,
 	maxStateStep, stepSize uint64,
 	stateHistoryPruneTo, commitmentHistoryPruneTo, receiptsHistoryPruneTo uint64,
 ) (minBlockToDownload uint64, minHistoryStep, minCommitmentHistoryStep, minReceiptsStep kv.Step, err error) {
@@ -224,7 +225,7 @@ func getMinimumBlocksToDownload(
 	minCommitmentHistoryStep = kv.Step(math.MaxUint32)
 	minReceiptsStep = kv.Step(math.MaxUint32)
 	stateTxNum := maxStateStep * stepSize
-	if err := blockReader.IterateFrozenBodies(func(blockNum, baseTxNum, txAmount uint64) error {
+	if err := blockReader.IterateFrozenBodies(tx, func(blockNum, baseTxNum, txAmount uint64) error {
 		if iterations%1e6 == 0 {
 			if ctx.Err() != nil {
 				return context.Cause(ctx)
@@ -460,7 +461,7 @@ func SyncSnapshots(
 			commitmentHistoryPrune := prune.CommitmentHistoryAmount().PruneTo(frozenBlocks)
 			receiptsPrune := prune.ReceiptsAmount().PruneTo(frozenBlocks)
 			minBlockToDownload, minHistoryStep, minCommitmentHistoryStep, minReceiptsStep, err := getMinimumBlocksToDownload(
-				ctx, blockReader, maxStateStep, stepSize, historyPrune, commitmentHistoryPrune, receiptsPrune)
+				ctx, blockReader, tx, maxStateStep, stepSize, historyPrune, commitmentHistoryPrune, receiptsPrune)
 			if err != nil {
 				return err
 			}
