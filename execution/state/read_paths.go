@@ -141,7 +141,17 @@ func (s *IntraBlockState) readValueUnchanged(addr accounts.Address, path Account
 	switch path {
 	case AddressPath:
 		pr, ok := s.versionedReads.GetAddress(addr)
-		return ok && pr.Val != nil && pr.Val.Account() != nil && r.mapAddressVal != nil
+		if !ok {
+			return false
+		}
+		var prAcc *accounts.Account
+		if pr.Val != nil {
+			prAcc = pr.Val.Account()
+		}
+		if prAcc.Empty() && r.mapAddressVal.Empty() {
+			return true
+		}
+		return prAcc != nil && r.mapAddressVal != nil
 	case BalancePath:
 		pr, ok := s.versionedReads.GetBalance(addr)
 		return ok && pr.Val.Eq(&r.mapBalanceVal)

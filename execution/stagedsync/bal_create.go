@@ -89,7 +89,7 @@ func ProcessBAL(tx kv.TemporalRwTx, h *types.Header, vio *state.VersionedIO, isE
 	}
 	// Always validate computed BAL against header. The BalancePath cross-check
 	// in VersionMap.validateRead ensures deterministic parallel execution even
-	// without a stored BAL body (HasBAL=false), so the computed BAL is accurate.
+	// without a stored BAL body, so the computed BAL is accurate.
 	computedBlockBalHash := computedBlockBal.Hash()
 	if blockBalHash != computedBlockBalHash {
 		reportBALMismatch(blockNum, blockHash, blockBal, blockBalHash, computedBlockBal, dataDir, logger)

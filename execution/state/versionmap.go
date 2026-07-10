@@ -1,6 +1,7 @@
 package state
 
 import (
+	"bytes"
 	"errors"
 	"fmt"
 	"sync"
@@ -151,16 +152,14 @@ func markCellFlag[T any](cells *btree.Map[int, *WriteCell[T]], txIdx int, flag s
 }
 
 type VersionMap struct {
-	mu     sync.RWMutex
-	s      map[accounts.Address]*AddressEntry
-	trace  bool
-	HasBAL bool // When true, all significant writes are pre-populated from BAL
+	mu    sync.RWMutex
+	s     map[accounts.Address]*AddressEntry
+	trace bool
 }
 
 func NewVersionMap(changes []*types.AccountChanges) *VersionMap {
 	vm := &VersionMap{
-		s:      map[accounts.Address]*AddressEntry{},
-		HasBAL: len(changes) > 0,
+		s: map[accounts.Address]*AddressEntry{},
 	}
 	vm.WriteChanges(changes)
 	return vm
@@ -547,76 +546,26 @@ func (vm *VersionMap) AnyDoneSelfDestructEquals(addr accounts.Address, txIdxLimi
 	return found
 }
 
-// DropCreatedNonExistentWrites filters a tx's write set before it is flushed
-// into the versionMap, removing every write of an account that nets
-// non-existent within the tx — either created EIP-161-empty (a bare touch) or
-// created-and-destroyed (final SelfDestruct=true with the Incarnation sibling
-// a real SELFDESTRUCT emits; EIP-6780, implied by the BAL fork, restricts that
-// to same-tx-created accounts). Such accounts are DB-absent, and the BAL emits
-// no cells for them, so readers that fall through to the DB correctly see them
-// as non-existent; the phantom versionMap record would spuriously invalidate
-// those readers. BAL-gated: without a BAL the input is returned unchanged.
-// blockIO, the BAL builder and the commitment feed all keep the raw set.
-func DropCreatedNonExistentWrites(writes *WriteSet, hasBAL bool) *WriteSet {
-	if !hasBAL || writes == nil {
-		return writes
+// destroyedAndUnrevived reports whether the latest SelfDestruct cell below
+// txIndex marks the account destroyed with no later cell showing life again.
+// Same-tx re-creation writes SelfDestructPath and AddressPath at the SAME
+// TxIdx, so AddressPath uses >= (not strict >).
+func (vm *VersionMap) destroyedAndUnrevived(addr accounts.Address, txIndex int) bool {
+	destructed, sdRR, ok := vm.ReadSelfDestruct(addr, txIndex)
+	if !ok || sdRR.Status() != MVReadResultDone || !destructed {
+		return false
 	}
-	var drop map[accounts.Address]struct{}
-	var storageAddrs map[accounts.Address]struct{}
-	seen := map[accounts.Address]struct{}{}
-	for h := range writes.AllHeaders() {
-		if h.Path == StoragePath {
-			if storageAddrs == nil {
-				storageAddrs = map[accounts.Address]struct{}{}
-			}
-			storageAddrs[h.Address] = struct{}{}
-		}
-		seen[h.Address] = struct{}{}
+	destructTxIndex := sdRR.DepIdx()
+	revivalLimit := txIndex - 1
+	if hi, ok := vm.LatestTxIndex(addr, AddressPath, accounts.NilKey, revivalLimit); ok && hi >= destructTxIndex {
+		return false
 	}
-	for addr := range seen {
-		if sd, ok := writes.GetSelfDestruct(addr); ok && sd.Val {
-			if _, ok := writes.GetIncarnation(addr); ok {
-				if drop == nil {
-					drop = map[accounts.Address]struct{}{}
-				}
-				drop[addr] = struct{}{}
-			}
-			continue
+	for _, p := range [...]AccountPath{BalancePath, NoncePath, CodeHashPath} {
+		if hi, ok := vm.LatestTxIndex(addr, p, accounts.NilKey, revivalLimit); ok && hi > destructTxIndex {
+			return false
 		}
-		aw, ok := writes.GetAddress(addr)
-		if !ok {
-			continue
-		}
-		if bw, ok := writes.GetBalance(addr); ok && !bw.Val.IsZero() {
-			continue
-		}
-		if nw, ok := writes.GetNonce(addr); ok && nw.Val != 0 {
-			continue
-		}
-		if cw, ok := writes.GetCode(addr); ok && len(cw.Val.Bytes) != 0 {
-			continue
-		}
-		if chw, ok := writes.GetCodeHash(addr); ok && !chw.Val.IsEmpty() {
-			continue
-		}
-		if aw.Val != nil && (!aw.Val.Balance.IsZero() || aw.Val.Nonce != 0 || !aw.Val.CodeHash.IsEmpty()) {
-			continue
-		}
-		if _, ok := storageAddrs[addr]; ok {
-			continue
-		}
-		if drop == nil {
-			drop = map[accounts.Address]struct{}{}
-		}
-		drop[addr] = struct{}{}
 	}
-	if drop == nil {
-		return writes
-	}
-	return writes.Filter(func(h WriteHeader) bool {
-		_, dropped := drop[h.Address]
-		return !dropped
-	})
+	return true
 }
 
 // FlushVersionedWrites atomically flushes all writes to the version map
@@ -912,9 +861,9 @@ func validateRead[T any](vm *VersionMap, txIndex int, addr accounts.Address, pat
 	matchesLive := func() bool { return ok && eq(readVal, live) }
 	valid := vm.validateReadImpl(txIndex, addr, path, key, source, version, rr, matchesLive, checkVersion, traceInvalid, tracePrefix, false)
 	if dbg.TraceReexec && valid == VersionInvalid {
-		fmt.Printf("VINV tx=%d %x %s src=%s rv=(%d.%d) cell=(%d.%d,st=%d) hasBAL=%v readVal=%v live=%v liveOK=%v\n",
+		fmt.Printf("VINV tx=%d %x %s src=%s rv=(%d.%d) cell=(%d.%d,st=%d) readVal=%v live=%v liveOK=%v\n",
 			txIndex, addr, AccountKey{path, key}, source, version.TxIndex, version.Incarnation,
-			rr.depIdx, rr.incarnation, rr.Status(), vm.HasBAL, readVal, live, ok)
+			rr.depIdx, rr.incarnation, rr.Status(), readVal, live, ok)
 	}
 	return valid
 }
@@ -939,9 +888,14 @@ func liveAddress(vm *VersionMap, a accounts.Address, _ accounts.StorageKey, tx i
 func liveStorage(vm *VersionMap, a accounts.Address, k accounts.StorageKey, tx int) (uint256.Int, ReadResult, bool) {
 	return vm.ReadStorage(a, k, tx)
 }
+func liveCode(vm *VersionMap, a accounts.Address, _ accounts.StorageKey, tx int) ([]byte, ReadResult, bool) {
+	c, res, ok := vm.ReadCode(a, tx)
+	return c.Bytes, res, ok
+}
 
 func eqUint256(a, b uint256.Int) bool { return a.Eq(&b) }
 func eqUint64(a, b uint64) bool       { return a == b }
+func eqCode(a, b []byte) bool         { return bytes.Equal(a, b) }
 func eqCodeHash(a, b accounts.CodeHash) bool {
 	return a == b
 }
@@ -949,8 +903,13 @@ func eqCodeHash(a, b accounts.CodeHash) bool {
 // eqAccount is existence-only: the AddressPath record's version churns as
 // workers re-stamp it, but each sub-field (balance/nonce/codeHash) is recorded
 // and validated as its own read. Two non-nil records satisfy the record-level
-// tiebreaker; a destroyed account (nil live value) correctly fails it.
+// tiebreaker, and a nil read is equivalent to an EIP-161-empty record — a dead
+// account is EVM-indistinguishable from a non-existent one; a live account vs
+// a nil/dead read correctly fails.
 func eqAccount(a, b *accounts.Account) bool {
+	if a.Empty() && b.Empty() {
+		return true
+	}
 	return a != nil && b != nil
 }
 
@@ -969,34 +928,19 @@ func (vm *VersionMap) validateReadImpl(txIndex int, addr accounts.Address, path 
 	switch rr.Status() {
 	case MVReadResultDone:
 		if source != MapRead {
-			// When BAL is present, significant writes for BalancePath,
-			// NoncePath, CodePath and StoragePath are pre-populated in the
-			// VersionMap before execution.  If a read of one of those paths
-			// was from storage (no VersionMap entry at execution time) but
-			// the VersionMap now has an entry from a concurrent worker
-			// flush, the entry is a BAL-filtered no-op write and the read
-			// value is still correct.
-			//
-			// AddressPath and other paths are NOT pre-populated by the BAL,
-			// so a new VersionMap entry means a real state change from a
-			// concurrent worker (e.g. account creation) and must trigger
-			// invalidation.
-			isBALPrePopulatedPath := path == BalancePath || path == NoncePath ||
-				path == CodePath || path == StoragePath
-			if !vm.HasBAL || !isBALPrePopulatedPath {
-				if recursive && matchesLive == nil {
-					// Synthetic cross-validate probe (no recorded value of its
-					// own) — the outer entry's validation covers it. Without this
-					// guard a recursive AddressPath/SelfDestructPath probe that
-					// lands on a Done cell would over-invalidate.
-				} else if matchesLive != nil && matchesLive() {
-					// Value tiebreaker: a Done entry now exists where the read
-					// saw storage, but it holds the same value — read stays valid.
-					// Evaluated typed by the caller; no boxing.
-				} else {
-					valid = VersionInvalid
-					invReason = "done-notmap"
-				}
+			if recursive && matchesLive == nil {
+				// Synthetic cross-validate probe (no recorded value of its
+				// own) — the outer entry's validation covers it. Without this
+				// guard a recursive AddressPath/SelfDestructPath probe that
+				// lands on a Done cell would over-invalidate.
+			} else if matchesLive != nil && matchesLive() {
+				// Value tiebreaker: a Done entry now exists where the read
+				// saw storage, but it holds the same value (e.g. a no-op write
+				// of a BAL-pre-populated path) — read stays valid. Evaluated
+				// typed by the caller; no boxing.
+			} else {
+				valid = VersionInvalid
+				invReason = "done-notmap"
 			}
 		} else {
 			valid = checkVersion(version, rr.Version())
@@ -1079,11 +1023,16 @@ func (vm *VersionMap) validateReadImpl(txIndex int, addr accounts.Address, path 
 					// A prior tx re-creating this account makes a nil AddressPath
 					// storage read stale; IncarnationPath is the specific signal
 					// (written only by CreateAccount and SelfDestruct), unlike
-					// BalancePath which overfires for every gas payer.
+					// BalancePath which overfires for every gas payer. A
+					// destroyed-and-unrevived account is the exception: its
+					// Incarnation cell belongs to a dead account, so the nil
+					// read is correct.
 					if valid == VersionValid {
 						if _, incRR, ok := vm.ReadIncarnation(addr, txIndex); ok && incRR.Status() == MVReadResultDone {
-							valid = VersionInvalid
-							invReason = "addr-inc-created"
+							if !vm.destroyedAndUnrevived(addr, txIndex) {
+								valid = VersionInvalid
+								invReason = "addr-inc-created"
+							}
 						}
 					}
 				}
@@ -1096,9 +1045,9 @@ func (vm *VersionMap) validateReadImpl(txIndex int, addr accounts.Address, path 
 	}
 
 	if dbg.TraceReexec && valid == VersionInvalid && invReason != "" {
-		fmt.Printf("VINV-R tx=%d %x %s src=%s reason=%s recursive=%v rv=(%d.%d) cell=(%d.%d,st=%d) hasBAL=%v\n",
+		fmt.Printf("VINV-R tx=%d %x %s src=%s reason=%s recursive=%v rv=(%d.%d) cell=(%d.%d,st=%d)\n",
 			txIndex, addr, AccountKey{path, key}, source, invReason, recursive,
-			version.TxIndex, version.Incarnation, rr.depIdx, rr.incarnation, rr.Status(), vm.HasBAL)
+			version.TxIndex, version.Incarnation, rr.depIdx, rr.incarnation, rr.Status())
 	}
 
 	if vm.trace || (traceInvalid && valid == VersionInvalid) {
@@ -1190,7 +1139,7 @@ func (vm *VersionMap) ValidateVersion(txIdx int, lastIO *VersionedIO, checkVersi
 		}
 	}
 	for a, tr := range rs.code {
-		if !ok(noValueRead(a, CodePath, accounts.NilKey, tr.ReadHeader)) {
+		if !ok(validateRead(vm, txIdx, a, CodePath, accounts.NilKey, tr.Source, tr.Version, tr.Val, liveCode, eqCode, checkVersion, traceInvalid, tracePrefix)) {
 			return
 		}
 	}

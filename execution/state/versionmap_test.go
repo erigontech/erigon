@@ -317,11 +317,11 @@ func TestMVHashMapBasics(t *testing.T) {
 	require.Equal(t, valueFor(AddressPath, 10, 2), resVal)
 }
 
-// TestValidateRead_HasBAL_NoBypassForAddressPath verifies that when HasBAL is
-// true, AddressPath is NOT bypassed — a new MVReadResultDone entry on
-// AddressPath means a real state change (e.g. account creation) from a
-// concurrent worker, and the read must be invalidated.
-func TestValidateRead_HasBAL_NoBypassForAddressPath(t *testing.T) {
+// TestValidateRead_NewAddressEntryInvalidatesStorageRead: a new
+// MVReadResultDone entry on AddressPath means a real state change (e.g.
+// account creation) from a concurrent worker, and a nil storage-sourced read
+// must be invalidated.
+func TestValidateRead_NewAddressEntryInvalidatesStorageRead(t *testing.T) {
 	t.Parallel()
 
 	addr := getAddress(42)
@@ -333,7 +333,6 @@ func TestValidateRead_HasBAL_NoBypassForAddressPath(t *testing.T) {
 	}
 
 	vm := NewVersionMap(nil)
-	vm.HasBAL = true
 
 	// A concurrent worker wrote to AddressPath at txIndex 0.
 	writeFor(vm, addr, AddressPath, accounts.NilKey, Version{TxIndex: 0, Incarnation: 1}, valueFor(AddressPath, 0, 1), true)
@@ -348,13 +347,13 @@ func TestValidateRead_HasBAL_NoBypassForAddressPath(t *testing.T) {
 
 	valid := vm.ValidateVersion(2, io, checkVersionEqual, false, "")
 	require.Equal(t, VersionInvalid, valid,
-		"HasBAL should NOT bypass invalidation for AddressPath — new entry means real state change")
+		"a new AddressPath entry means a real state change and must invalidate the nil read")
 }
 
-// TestValidateRead_NoHasBAL_InvalidatesAllPaths verifies the baseline behavior
-// without HasBAL: any StorageRead that now finds a MVReadResultDone entry
-// should be invalidated, regardless of path.
-func TestValidateRead_NoHasBAL_InvalidatesAllPaths(t *testing.T) {
+// TestValidateRead_ChangedValueInvalidatesStorageRead: a StorageRead that now
+// finds a MVReadResultDone entry with a different value must be invalidated,
+// regardless of path.
+func TestValidateRead_ChangedValueInvalidatesStorageRead(t *testing.T) {
 	t.Parallel()
 
 	addr := getAddress(42)
@@ -367,8 +366,7 @@ func TestValidateRead_NoHasBAL_InvalidatesAllPaths(t *testing.T) {
 
 	for _, path := range []AccountPath{BalancePath, NoncePath, AddressPath} {
 		t.Run(path.String(), func(t *testing.T) {
-			vm := NewVersionMap(nil) // HasBAL = false
-			require.False(t, vm.HasBAL)
+			vm := NewVersionMap(nil)
 
 			// A concurrent worker wrote at txIndex 0.
 			writeFor(vm, addr, path, accounts.NilKey, Version{TxIndex: 0, Incarnation: 1}, valueFor(path, 0, 1), true)
@@ -381,7 +379,7 @@ func TestValidateRead_NoHasBAL_InvalidatesAllPaths(t *testing.T) {
 
 			valid := vm.ValidateVersion(2, io, checkVersionEqual, false, "")
 			require.Equal(t, VersionInvalid, valid,
-				"without HasBAL, StorageRead finding MVReadResultDone should invalidate for %s", path)
+				"StorageRead finding a MVReadResultDone entry with a changed value should invalidate for %s", path)
 		})
 	}
 }
@@ -596,7 +594,6 @@ func TestValidateRead_PriorAccountCreation_DetectedViaIncarnationPath(t *testing
 	addr := getAddress(99)
 
 	vm := NewVersionMap(nil)
-	vm.HasBAL = true
 	// Post-flush state after tx 0 creates the account: BAL pre-populated
 	// Balance/Nonce/CodeHash; the worker additionally flushed Incarnation
 	// (CreateAccount writes it, BAL does not). AddressPath was BAL-filtered out.
@@ -724,7 +721,6 @@ func TestBALPrePop_SameSenderTxs_NoConflicts(t *testing.T) {
 	}
 
 	vm := NewVersionMap(nil)
-	vm.HasBAL = true
 
 	for i := 0; i < numTxs; i++ {
 		writeFor(vm, sender, BalancePath, accounts.NilKey, Version{TxIndex: i, Incarnation: 0}, *uint256.NewInt(uint64(1000 - i)), true)
@@ -781,7 +777,6 @@ func TestNoBAL_SameSenderTxs_DetectsConflicts(t *testing.T) {
 	}
 
 	vm := NewVersionMap(nil)
-	require.False(t, vm.HasBAL, "test exercises the no-BAL path")
 
 	origBalance := *uint256.NewInt(1_000_000)
 	origNonce := uint64(42)
@@ -872,7 +867,6 @@ func TestReadValueUnchanged(t *testing.T) {
 // otherwise race the creator's flush and re-execute.
 func TestGetVersionedAccount_SynthesizesCreatedFromBAL(t *testing.T) {
 	mvhm := NewVersionMap(nil)
-	mvhm.HasBAL = true
 	addr := accounts.InternAddress([20]byte{0xba, 0x01})
 	mvhm.WriteBalance(addr, Version{TxIndex: 2}, *uint256.NewInt(500), true)
 	ibs := NewWithVersionMap(&minimalStateReader{}, mvhm)
@@ -893,7 +887,6 @@ func TestGetVersionedAccount_SynthesizesCreatedFromBAL(t *testing.T) {
 // calcFees coinbase record) is flushed at validation time.
 func TestGetVersionedAccount_ReconcilesDBLoadedRecordRead(t *testing.T) {
 	mvhm := NewVersionMap(nil)
-	mvhm.HasBAL = true
 	addr := accounts.InternAddress([20]byte{0xdb, 0x01})
 	mvhm.WriteBalance(addr, Version{TxIndex: 2}, *uint256.NewInt(700), true)
 	dbAcc := &accounts.Account{Balance: *uint256.NewInt(100), CodeHash: accounts.EmptyCodeHash}
@@ -915,7 +908,6 @@ func TestGetVersionedAccount_ReconcilesDBLoadedRecordRead(t *testing.T) {
 // recordRead only means "don't add a read", not "leave a wrong one".
 func TestGetStateObject_NoRecordReadStillReconciles(t *testing.T) {
 	mvhm := NewVersionMap(nil)
-	mvhm.HasBAL = true
 	addr := accounts.InternAddress([20]byte{0xdb, 0x02})
 	mvhm.WriteBalance(addr, Version{TxIndex: 2}, *uint256.NewInt(900), true)
 	dbAcc := &accounts.Account{Balance: *uint256.NewInt(100), CodeHash: accounts.EmptyCodeHash}
@@ -930,24 +922,10 @@ func TestGetStateObject_NoRecordReadStillReconciles(t *testing.T) {
 	require.NotNil(t, rd.Val.Account())
 }
 
-// Without a BAL the sub-field cells are racing worker flushes, not a
-// deterministic pre-population — no synthesis.
-func TestGetVersionedAccount_NoSynthesisWithoutBAL(t *testing.T) {
-	mvhm := NewVersionMap(nil)
-	addr := accounts.InternAddress([20]byte{0xba, 0x02})
-	mvhm.WriteBalance(addr, Version{TxIndex: 2}, *uint256.NewInt(500), true)
-	ibs := NewWithVersionMap(&minimalStateReader{}, mvhm)
-	ibs.txIndex = 5
-	acc, _, _, err := ibs.getVersionedAccount(addr, true)
-	require.NoError(t, err)
-	assert.Nil(t, acc)
-}
-
 // Cells proving only an EIP-161-empty state must not synthesize: an
 // existing-empty account is not gas-equivalent to a non-existent one.
 func TestGetVersionedAccount_NoSynthesisForEmpty(t *testing.T) {
 	mvhm := NewVersionMap(nil)
-	mvhm.HasBAL = true
 	addr := accounts.InternAddress([20]byte{0xba, 0x03})
 	mvhm.WriteBalance(addr, Version{TxIndex: 2}, uint256.Int{}, true)
 	ibs := NewWithVersionMap(&minimalStateReader{}, mvhm)
@@ -960,7 +938,6 @@ func TestGetVersionedAccount_NoSynthesisForEmpty(t *testing.T) {
 // An estimate (non-Done) cell is a racing speculative write — no synthesis.
 func TestGetVersionedAccount_NoSynthesisFromEstimate(t *testing.T) {
 	mvhm := NewVersionMap(nil)
-	mvhm.HasBAL = true
 	addr := accounts.InternAddress([20]byte{0xba, 0x04})
 	mvhm.WriteBalance(addr, Version{TxIndex: 2}, *uint256.NewInt(500), false)
 	ibs := NewWithVersionMap(&minimalStateReader{}, mvhm)
@@ -973,7 +950,6 @@ func TestGetVersionedAccount_NoSynthesisFromEstimate(t *testing.T) {
 // A destroyed account (SelfDestruct floor true) must not be synthesized.
 func TestGetVersionedAccount_NoSynthesisAfterSelfDestruct(t *testing.T) {
 	mvhm := NewVersionMap(nil)
-	mvhm.HasBAL = true
 	addr := accounts.InternAddress([20]byte{0xba, 0x05})
 	mvhm.WriteBalance(addr, Version{TxIndex: 2}, *uint256.NewInt(500), true)
 	mvhm.WriteSelfDestruct(addr, Version{TxIndex: 3}, true, true)
@@ -988,7 +964,6 @@ func TestGetVersionedAccount_NoSynthesisAfterSelfDestruct(t *testing.T) {
 // hash and a fresh incarnation, and getStateObject loads the code bytes.
 func TestGetStateObject_SynthesizedContractFromBAL(t *testing.T) {
 	mvhm := NewVersionMap(nil)
-	mvhm.HasBAL = true
 	addr := accounts.InternAddress([20]byte{0xba, 0x06})
 	code := []byte{0x60, 0x00, 0x60, 0x00, 0xf3}
 	mvhm.WriteCode(addr, Version{TxIndex: 2}, accounts.NewCode(code), true)
@@ -1022,156 +997,41 @@ func TestGetStateObject_SelfDestructedButBALFunded_StaysAlive(t *testing.T) {
 	assert.Equal(t, *uint256.NewInt(1000), so.data.Balance)
 }
 
-// wsFor assembles a WriteSet for the DropCreatedNonExistentWrites tests.
-type wsFor struct{ ws *WriteSet }
-
-func newTestWS() *wsFor { return &wsFor{ws: &WriteSet{}} }
-
-func (b *wsFor) addr(a accounts.Address, ver Version, val *accounts.Account) *wsFor {
-	b.ws.SetAddress(a, &VersionedWrite[*accounts.Account]{WriteHeader: WriteHeader{Address: a, Path: AddressPath, Version: ver}, Val: val})
-	return b
+// A nil record read is equivalent to an EIP-161-empty one — a dead account is
+// EVM-indistinguishable from a non-existent account; a live record still fails
+// against either.
+func TestEqAccount_DeadEquivalence(t *testing.T) {
+	empty := &accounts.Account{CodeHash: accounts.EmptyCodeHash}
+	funded := &accounts.Account{Balance: *uint256.NewInt(5), CodeHash: accounts.EmptyCodeHash}
+	assert.True(t, eqAccount(nil, empty))
+	assert.True(t, eqAccount(empty, nil))
+	assert.True(t, eqAccount(nil, nil))
+	assert.False(t, eqAccount(nil, funded))
+	assert.False(t, eqAccount(funded, nil))
+	assert.True(t, eqAccount(funded, funded)) //nolint:gocritic
 }
 
-func (b *wsFor) bal(a accounts.Address, ver Version, val uint256.Int) *wsFor {
-	b.ws.SetBalance(a, &VersionedWrite[uint256.Int]{WriteHeader: WriteHeader{Address: a, Path: BalancePath, Version: ver}, Val: val})
-	return b
-}
-
-func (b *wsFor) nonce(a accounts.Address, ver Version, val uint64) *wsFor {
-	b.ws.SetNonce(a, &VersionedWrite[uint64]{WriteHeader: WriteHeader{Address: a, Path: NoncePath, Version: ver}, Val: val})
-	return b
-}
-
-func (b *wsFor) inc(a accounts.Address, ver Version, val uint64) *wsFor {
-	b.ws.SetIncarnation(a, &VersionedWrite[uint64]{WriteHeader: WriteHeader{Address: a, Path: IncarnationPath, Version: ver}, Val: val})
-	return b
-}
-
-func (b *wsFor) codeHash(a accounts.Address, ver Version, val accounts.CodeHash) *wsFor {
-	b.ws.SetCodeHash(a, &VersionedWrite[accounts.CodeHash]{WriteHeader: WriteHeader{Address: a, Path: CodeHashPath, Version: ver}, Val: val})
-	return b
-}
-
-func (b *wsFor) selfDestruct(a accounts.Address, ver Version, val bool) *wsFor {
-	b.ws.SetSelfDestruct(a, &VersionedWrite[bool]{WriteHeader: WriteHeader{Address: a, Path: SelfDestructPath, Version: ver}, Val: val})
-	return b
-}
-
-func (b *wsFor) stor(a accounts.Address, key accounts.StorageKey, ver Version, val uint256.Int) *wsFor {
-	b.ws.SetStorage(a, key, &VersionedWrite[uint256.Int]{WriteHeader: WriteHeader{Address: a, Path: StoragePath, Key: key, Version: ver}, Val: val})
-	return b
-}
-
-func addrN(n byte) accounts.Address {
-	return accounts.InternAddress([20]byte{0xd0, n})
-}
-
-func emptyRecord() *accounts.Account {
-	return &accounts.Account{CodeHash: accounts.EmptyCodeHash}
-}
-
-func fundedRecord(v uint64) *accounts.Account {
-	return &accounts.Account{Balance: *uint256.NewInt(v), CodeHash: accounts.EmptyCodeHash}
-}
-
-// A created account that nets EIP-161-empty leaves a phantom record in the
-// versionMap that spuriously invalidates readers which correctly saw it as
-// non-existent; every write for it must be dropped from the flush.
-func TestDropCreatedNonExistentWrites_RemovesEmptyCreated(t *testing.T) {
-	empty := addrN(1)
-	funded := addrN(2)
-	ver := Version{TxIndex: 3}
-	ws := newTestWS().
-		addr(empty, ver, emptyRecord()).
-		codeHash(empty, ver, accounts.EmptyCodeHash).
-		bal(empty, ver, uint256.Int{}).
-		addr(funded, ver, fundedRecord(100)).
-		codeHash(funded, ver, accounts.EmptyCodeHash).
-		bal(funded, ver, *uint256.NewInt(100)).ws
-	out := DropCreatedNonExistentWrites(ws, true)
-	_, hasEmptyAddr := out.GetAddress(empty)
-	_, hasEmptyBal := out.GetBalance(empty)
-	_, hasEmptyCH := out.GetCodeHash(empty)
-	assert.False(t, hasEmptyAddr, "empty created account record must be dropped")
-	assert.False(t, hasEmptyBal)
-	assert.False(t, hasEmptyCH)
-	_, hasFundedAddr := out.GetAddress(funded)
-	_, hasFundedBal := out.GetBalance(funded)
-	assert.True(t, hasFundedAddr, "funded account must keep its writes")
-	assert.True(t, hasFundedBal)
-}
-
-// Under EIP-6780 (any BAL block) a final SelfDestruct=true means
-// created-and-destroyed in the same tx: net non-existent, DB-absent. Readers
-// must fall through to the DB instead of racing the SD signal cell.
-func TestDropCreatedNonExistentWrites_DropsDestroyed(t *testing.T) {
-	destroyed := addrN(3)
-	ver := Version{TxIndex: 5}
-	key := accounts.InternKey([32]byte{0x11})
-	ws := newTestWS().
-		selfDestruct(destroyed, ver, true).
-		bal(destroyed, ver, uint256.Int{}).
-		inc(destroyed, ver, 1).
-		stor(destroyed, key, ver, *uint256.NewInt(7)).ws
-	out := DropCreatedNonExistentWrites(ws, true)
-	assert.Zero(t, out.Count(), "all writes of a destroyed (created+SD) account must be dropped")
-}
-
-// A same-tx destroy-then-recreate ends with SelfDestruct=false: the account
-// survives, so its writes must be kept.
-func TestDropCreatedNonExistentWrites_KeepsResurrected(t *testing.T) {
-	resurrected := addrN(4)
-	ver := Version{TxIndex: 2}
-	ws := newTestWS().
-		selfDestruct(resurrected, ver, false).
-		addr(resurrected, ver, fundedRecord(50)).
-		bal(resurrected, ver, *uint256.NewInt(50)).ws
-	out := DropCreatedNonExistentWrites(ws, true)
-	_, hasAddr := out.GetAddress(resurrected)
-	_, hasBal := out.GetBalance(resurrected)
-	_, hasSD := out.GetSelfDestruct(resurrected)
-	assert.True(t, hasAddr)
-	assert.True(t, hasBal)
-	assert.True(t, hasSD)
-}
-
-// A created contract starts at nonce 1 (EIP-161) — never empty, always kept.
-func TestDropCreatedNonExistentWrites_KeepsCreatedContract(t *testing.T) {
-	contract := addrN(5)
-	ver := Version{TxIndex: 1}
-	rec := &accounts.Account{Nonce: 1, CodeHash: accounts.EmptyCodeHash, Incarnation: 1}
-	ws := newTestWS().
-		addr(contract, ver, rec).
-		nonce(contract, ver, 1).
-		codeHash(contract, ver, accounts.EmptyCodeHash).
-		inc(contract, ver, 1).ws
-	out := DropCreatedNonExistentWrites(ws, true)
-	_, hasAddr := out.GetAddress(contract)
-	assert.True(t, hasAddr, "nonce-1 contract is not EIP-161-empty")
-}
-
-// An otherwise-empty created account with storage writes is kept (conservative).
-func TestDropCreatedNonExistentWrites_KeepsStorageWriter(t *testing.T) {
-	a := addrN(6)
-	ver := Version{TxIndex: 1}
-	key := accounts.InternKey([32]byte{0x22})
-	ws := newTestWS().
-		addr(a, ver, emptyRecord()).
-		stor(a, key, ver, *uint256.NewInt(9)).ws
-	out := DropCreatedNonExistentWrites(ws, true)
-	_, hasAddr := out.GetAddress(a)
-	assert.True(t, hasAddr)
-}
-
-// Without a BAL the no-BAL Block-STM semantics must stay byte-identical:
-// the input set is returned unchanged.
-func TestDropCreatedNonExistentWrites_NoBALPassthrough(t *testing.T) {
-	a := addrN(7)
-	ver := Version{TxIndex: 1}
-	ws := newTestWS().
-		addr(a, ver, emptyRecord()).
-		bal(a, ver, uint256.Int{}).
-		selfDestruct(addrN(8), ver, true).ws
-	out := DropCreatedNonExistentWrites(ws, false)
-	assert.Same(t, ws, out, "no-BAL path must be a passthrough")
+// A nil AddressPath storage read of a created-then-destroyed account stays
+// valid: the Incarnation cell belongs to a dead account. A later revival makes
+// the same nil read stale again.
+func TestValidateRead_NilReadOfDestroyedAccountStaysValid(t *testing.T) {
+	t.Parallel()
+	addr := getAddress(77)
+	newIO := func() *VersionedIO {
+		io := NewVersionedIO(4)
+		rs := ReadSet{}
+		rs.SetAddress(addr, VersionedRead[AccountView]{
+			ReadHeader: ReadHeader{Source: StorageRead, Version: UnknownVersion},
+		})
+		io.RecordReads(Version{TxIndex: 3, Incarnation: 0}, rs)
+		return io
+	}
+	vm := NewVersionMap(nil)
+	vm.WriteSelfDestruct(addr, Version{TxIndex: 1}, true, true)
+	vm.WriteIncarnation(addr, Version{TxIndex: 1}, 1, true)
+	valid := vm.ValidateVersion(3, newIO(), validateEqualVersion, false, "")
+	require.Equal(t, VersionValid, valid, "nil read of a destroyed, unrevived account is correct")
+	vm.WriteBalance(addr, Version{TxIndex: 2}, *uint256.NewInt(100), true)
+	valid = vm.ValidateVersion(3, newIO(), validateEqualVersion, false, "")
+	require.Equal(t, VersionInvalid, valid, "a post-destruct funding revives the account — the nil read is stale")
 }

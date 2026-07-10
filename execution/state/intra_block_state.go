@@ -939,16 +939,34 @@ func (sdb *IntraBlockState) TouchAccount(addr accounts.Address) error {
 	return nil
 }
 
+// selfDestructRevived reports whether any cell written after the destruct
+// index shows the account alive again. Same-tx re-creation (metamorphic
+// SD+CREATE2) writes both SelfDestructPath and AddressPath at the SAME TxIdx,
+// so AddressPath uses >= (not strict >).
+func (sdb *IntraBlockState) selfDestructRevived(addr accounts.Address, destructTxIndex int) bool {
+	revivalLimit := sdb.txIndex - 1
+	if hi, ok := sdb.versionMap.LatestTxIndex(addr, AddressPath, accounts.NilKey, revivalLimit); ok && hi >= destructTxIndex {
+		return true
+	}
+	for _, path := range [...]AccountPath{BalancePath, NoncePath, CodeHashPath} {
+		if hi, ok := sdb.versionMap.LatestTxIndex(addr, path, accounts.NilKey, revivalLimit); ok && hi > destructTxIndex {
+			return true
+		}
+	}
+	return false
+}
+
 // synthesizeCreatedAccountBase reconstructs the record of an account that is
-// absent from both the versionMap AddressPath and the DB, from the BAL's
-// pre-populated sub-field cells (EIP-7928 carries balance/nonce/code but not
-// the record itself). Those cells are deterministic — written before execution
-// starts — so resolving existence from them removes the read-after-create race
-// with the creator's flush. Only a non-EIP-161-empty result synthesizes: an
+// absent from both the versionMap AddressPath and the DB, from its sub-field
+// cells: an EIP-7928 BAL pre-populates balance/nonce/code but not the record
+// itself, and a worker flush strips the record for destroyed accounts. With a
+// BAL the cells are deterministic (written before execution starts), so
+// resolving existence from them removes the read-after-create race with the
+// creator's flush. Only a non-EIP-161-empty result synthesizes: an
 // existing-empty account is not gas-equivalent to a non-existent one. Non-Done
 // cells (racing worker estimates) and destroyed accounts return ok=false.
 func (sdb *IntraBlockState) synthesizeCreatedAccountBase(addr accounts.Address) (*accounts.Account, bool) {
-	if sdb.versionMap == nil || !sdb.versionMap.HasBAL {
+	if sdb.versionMap == nil {
 		return nil, false
 	}
 	if destructed, sdRes, ok := sdb.versionMap.ReadSelfDestruct(addr, sdb.txIndex); ok && sdRes.Status() == MVReadResultDone && destructed {
@@ -1049,37 +1067,13 @@ func (sdb *IntraBlockState) getVersionedAccount(addr accounts.Address, readStora
 		// only overwrites fields a versionMap cell exists for), so Empty()
 		// returns false and the EVM misses CallNewAccountGas.
 		if destructed, sdRes, _ := sdb.versionMap.ReadSelfDestruct(addr, sdb.txIndex); sdRes.Status() == MVReadResultDone && destructed {
-			destructTxIndex := sdRes.DepIdx()
-			revivalLimit := sdb.txIndex - 1
-			revived := false
-			// Same-tx re-creation (metamorphic SD+CREATE2): both
-			// SelfDestructPath and AddressPath are written at the SAME
-			// TxIdx, so >= (not strict >) is needed on AddressPath.
-			if hi, ok := sdb.versionMap.LatestTxIndex(addr, AddressPath, accounts.NilKey, revivalLimit); ok && hi >= destructTxIndex {
-				revived = true
-			}
-			if !revived {
-				if hi, ok := sdb.versionMap.LatestTxIndex(addr, BalancePath, accounts.NilKey, revivalLimit); ok && hi > destructTxIndex {
-					revived = true
-				}
-			}
-			if !revived {
-				if hi, ok := sdb.versionMap.LatestTxIndex(addr, NoncePath, accounts.NilKey, revivalLimit); ok && hi > destructTxIndex {
-					revived = true
-				}
-			}
-			if !revived {
-				if hi, ok := sdb.versionMap.LatestTxIndex(addr, CodeHashPath, accounts.NilKey, revivalLimit); ok && hi > destructTxIndex {
-					revived = true
-				}
-			}
-			if !revived {
+			if !sdb.selfDestructRevived(addr, sdRes.DepIdx()) {
 				return nil, StorageRead, UnknownVersion, nil
 			}
 		}
 
 		account, accSource, accVersion, err := sdb.refreshVersionedAccount(addr, readAccount, source, version)
-		if err == nil && account != nil && sdb.versionMap.HasBAL {
+		if err == nil && account != nil {
 			// readAccount above recorded a nil map-read marker; the DB resolved
 			// the account, so reconcile the recorded read — a later record cell
 			// (e.g. the calcFees coinbase record) would otherwise spuriously
@@ -1662,11 +1656,11 @@ func (sdb *IntraBlockState) getStateObject(addr accounts.Address, recordRead boo
 		// SelfDestructPath directly from the versionMap (not via versionedReadCore
 		// which itself short-circuits on the same flag). Use the same pattern
 		// as CreateAccount (line 1628).
-		if destructed, res, ok := sdb.versionMap.ReadSelfDestruct(addr, sdb.txIndex); ok && res.Status() == MVReadResultDone && destructed && account.Empty() {
-			// Gate on the refreshed record's emptiness: the SD flag is a worker
-			// signal the BAL doesn't carry, so a BAL-funded account (non-empty)
-			// must not be dropped by a stale flag; only a genuinely empty
-			// destroyed account is deleted.
+		if destructed, res, ok := sdb.versionMap.ReadSelfDestruct(addr, sdb.txIndex); ok && res.Status() == MVReadResultDone && destructed && !sdb.selfDestructRevived(addr, res.DepIdx()) {
+			// Revival must be evidenced by cells written after the destruct
+			// index (e.g. a BAL-funded balance): the DB record's own fields are
+			// pre-block state, so their non-emptiness says nothing about life
+			// after an in-block self-destruct.
 			// Only honour if the current tx hasn't already resurrected.
 			localResurrected := false
 			if sdVal, ok := sdb.versionedWriteSelfDestruct(addr); ok {
@@ -1693,10 +1687,10 @@ func (sdb *IntraBlockState) getStateObject(addr accounts.Address, recordRead boo
 		account = readAccount
 	}
 
-	// recordRead=false must still reconcile on the BAL path: the map-miss above
+	// recordRead=false must still reconcile on the versioned path: the map-miss above
 	// already recorded a nil marker (refreshAccount/getVersionedAccount), and a
 	// wrong nil read would spuriously invalidate against a later record cell.
-	if recordRead || (sdb.versionMap != nil && sdb.versionMap.HasBAL) {
+	if recordRead || sdb.versionMap != nil {
 		sdb.accountRead(addr, account, accountSource, accountVersion)
 	}
 	obj := newObject(sdb, addr, account, account)

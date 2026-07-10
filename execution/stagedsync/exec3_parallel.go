@@ -2360,15 +2360,9 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 
 			// Remove entries that were previously written but are no longer
 			// written — res.TxOut.Has answers membership directly, no cmp map.
-			// Compare the FLUSHED views on both sides: DropCreatedNonExistentWrites
-			// filtered the prior flush, so unfiltered entries never had cells
-			// (Delete would panic), and entries the new set will filter must
-			// still be deleted if the prior flush wrote them.
-			prevFlushed := state.DropCreatedNonExistentWrites(prevWrites, be.versionMap.HasBAL)
-			newFlushable := state.DropCreatedNonExistentWrites(res.TxOut, be.versionMap.HasBAL)
 			deletedWrites := 0
-			for h := range prevFlushed.AllHeaders() {
-				if !newFlushable.Has(h) {
+			for h := range prevWrites.AllHeaders() {
+				if !res.TxOut.Has(h) {
 					hasWriteChange = true
 					deletedWrites++
 					be.versionMap.Delete(h.Address, h.Path, h.Key, txVersion.TxIndex, true)
@@ -2498,7 +2492,7 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 				be.blockNum, txVersion.TxIndex, txVersion.Incarnation, cntInvalid)
 		}
 		be.versionMap.SetTrace(trace)
-		writeSet := state.DropCreatedNonExistentWrites(be.blockIO.WriteSet(txVersion.TxIndex), be.versionMap.HasBAL)
+		writeSet := be.blockIO.WriteSet(txVersion.TxIndex)
 		be.versionMap.FlushVersionedWrites(writeSet, applyLoopFlushAsComplete(valid, cntInvalid), tracePrefix)
 		be.versionMap.SetTrace(false)
 
@@ -2595,10 +2589,8 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 					// to the version map so that subsequent per-tx
 					// finalizations see the full post-tx state (execution
 					// + fees) when reading via the version map fallback
-					// chain. Filtered like the apply-loop flush: block-init's
-					// finalize writes would otherwise re-introduce the dropped
-					// created-empty records (e.g. the EIP-4788 system caller).
-					be.versionMap.FlushVersionedWrites(state.DropCreatedNonExistentWrites(merged, be.versionMap.HasBAL), true, "")
+					// chain.
+					be.versionMap.FlushVersionedWrites(merged, true, "")
 
 					// Update CollectorWrites with fee-adjusted balances (coinbase /
 					// burnt) so the BlockStateCache sees the correct accumulated fees.
