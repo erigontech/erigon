@@ -1366,8 +1366,11 @@ func (r *BlockReader) TxnLookup(_ context.Context, tx kv.Getter, txnHash common.
 	return blockNum, txNum, ok, nil
 }
 
-func (r *BlockReader) FirstTxnNumNotInSnapshots(tx kv.Getter) uint64 {
-	sn, ok, close := r.viewSingleFile(tx, snaptype2.Transactions, r.sn.BlocksAvailable())
+// Whole-extent readers (this + IterateFrozenBodies/Integrity/IntegrityTxnID) read live
+// r.sn, not a tx-pinned view: they must see the current frozen set. A stale/empty pinned
+// view undercounts it — here it would collapse the txnum base to 0 and corrupt MaxTxNum.
+func (r *BlockReader) FirstTxnNumNotInSnapshots(_ kv.Getter) uint64 {
+	sn, ok, close := r.sn.ViewSingleFile(snaptype2.Transactions, r.sn.BlocksAvailable())
 	if !ok {
 		return 0
 	}
@@ -1377,9 +1380,9 @@ func (r *BlockReader) FirstTxnNumNotInSnapshots(tx kv.Getter) uint64 {
 	return lastTxnID
 }
 
-func (r *BlockReader) IterateFrozenBodies(tx kv.Getter, f func(blockNum, baseTxNum, txCount uint64) error) error {
-	view, release := r.view(tx)
-	defer release()
+func (r *BlockReader) IterateFrozenBodies(_ kv.Getter, f func(blockNum, baseTxNum, txCount uint64) error) error {
+	view := r.sn.View()
+	defer view.Close()
 	for _, sn := range view.Bodies() {
 		defer sn.Src().MadvSequential().DisableReadAhead()
 
@@ -1401,10 +1404,10 @@ func (r *BlockReader) IterateFrozenBodies(tx kv.Getter, f func(blockNum, baseTxN
 	return nil
 }
 
-func (r *BlockReader) IntegrityTxnID(ctx context.Context, tx kv.Getter, failFast bool) error {
+func (r *BlockReader) IntegrityTxnID(ctx context.Context, _ kv.Getter, failFast bool) error {
 	defer log.Info("[integrity] BlocksTxnID done")
-	view, release := r.view(tx)
-	defer release()
+	view := r.sn.View()
+	defer view.Close()
 
 	var expectedFirstTxnID uint64
 	for i, snb := range view.Bodies() {
@@ -1555,9 +1558,9 @@ func (r *BlockReader) ensureHeaderNumber(n uint64, seg *snapshotsync.VisibleSegm
 	return nil
 }
 
-func (r *BlockReader) Integrity(ctx context.Context, tx kv.Getter) error {
-	view, release := r.view(tx)
-	defer release()
+func (r *BlockReader) Integrity(ctx context.Context, _ kv.Getter) error {
+	view := r.sn.View()
+	defer view.Close()
 	for _, seg := range view.Headers() {
 		if err := r.ensureHeaderNumber(seg.From(), seg); err != nil {
 			return err

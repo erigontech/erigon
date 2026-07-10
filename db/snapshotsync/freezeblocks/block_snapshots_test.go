@@ -85,6 +85,39 @@ func TestBlockReaderPrefersTxBlockView(t *testing.T) {
 	require.True(t, okTx, "reader must resolve the retired segment via the tx's pinned view")
 }
 
+// TestFirstTxnNumNotInSnapshotsIgnoresTxView pins the whole-extent invariant:
+// FirstTxnNumNotInSnapshots reads the live snapshots, so a tx pinning an empty/stale
+// block-files view must not change its result. Regression for the txnum-base collapse
+// (base→0) that corrupted MaxTxNum once the tx-pinned view was enabled.
+func TestFirstTxnNumNotInSnapshotsIgnoresTxView(t *testing.T) {
+	logger := log.New()
+	dir := t.TempDir()
+	cfg := ethconfig.Defaults.Snapshot
+	cfg.ChainName = networkname.Mainnet
+	snapshots := blocksnapshots.NewRoSnapshots(cfg, dir, logger)
+	defer snapshots.Close()
+
+	ver := version.V1_0
+	for _, typ := range snaptype2.BlockSnapshotTypes {
+		createTestSegmentFile(t, 0, testMergeLimit, typ.Enum(), dir, ver, logger)
+		createTestSegmentFile(t, testMergeLimit, 2*testMergeLimit, typ.Enum(), dir, ver, logger)
+	}
+	require.NoError(t, snapshots.OpenFolder())
+	blockReader := NewBlockReader(snapshots, nil)
+
+	want := blockReader.FirstTxnNumNotInSnapshots(nil)
+	require.NotZero(t, want, "sanity: live snapshots must yield a non-zero first txnum")
+
+	// A tx whose pinned view is empty must not change the answer.
+	empty := blocksnapshots.NewRoSnapshots(cfg, t.TempDir(), logger)
+	defer empty.Close()
+	staleTx := blockFilesTxStub{view: empty.View()}
+	defer staleTx.view.Close()
+
+	require.Equal(t, want, blockReader.FirstTxnNumNotInSnapshots(staleTx),
+		"must read live r.sn, not the tx's empty pinned view")
+}
+
 func TestDumpRangeErrorsWhenRangeAlreadyClaimed(t *testing.T) {
 	logger := log.New()
 	dir := t.TempDir()
