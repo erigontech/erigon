@@ -999,7 +999,9 @@ func createEngineListener(cfg *httpcfg.HttpCfg, engineApi []rpc.API, logger log.
 
 	// Engine API (auth) is the CL↔EL protocol — not user RPC. Do not tag with TxPriorityRPC
 	// so execution-engine DB operations use blocking Acquire instead of fail-fast TryAcquire.
-	engineHttpHandler := node.NewHTTPHandlerStack(engineSrv, nil /* authCors */, cfg.AuthRpcVirtualHost, cfg.HttpCompression, 0, false)
+	// Compression is always off here: engine responses (getBlobs, getPayload) are multi-MB and
+	// latency-critical, and gzip costs far more time than the transfer it saves.
+	engineHttpHandler := node.NewHTTPHandlerStack(engineSrv, nil /* authCors */, cfg.AuthRpcVirtualHost, false /* compression */, 0, false)
 
 	graphQLHandler := graphql.CreateHandler(engineApi)
 
