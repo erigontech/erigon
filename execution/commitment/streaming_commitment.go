@@ -633,21 +633,6 @@ func childForNib(root *prefixNode, nib byte) (*prefixNode, bool) {
 	return root.children[idx], true
 }
 
-// keyArena copies walk-path nibbles into chunked backing buffers so each
-// collected key gets a stable slice without one allocation per key.
-type keyArena struct{ buf []byte }
-
-const keyArenaChunk = 64 * 1024
-
-func (a *keyArena) copy(hk []byte) []byte {
-	if len(hk) > cap(a.buf)-len(a.buf) {
-		a.buf = make([]byte, 0, max(keyArenaChunk, len(hk)))
-	}
-	start := len(a.buf)
-	a.buf = append(a.buf, hk...)
-	return a.buf[start:len(a.buf):len(a.buf)]
-}
-
 // collectSplitKeys walks a split's subtree in sorted order, copying each key's
 // hashed nibbles off the reused walk path.
 func collectSplitKeys(child *prefixNode, nib byte) []touchedKey {

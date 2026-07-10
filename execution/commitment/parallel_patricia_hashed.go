@@ -42,11 +42,6 @@ type ParallelPatriciaHashed struct {
 	leaveDeferredForCaller bool
 	deferredForCaller      []*DeferredBranchUpdate
 
-	// templateCtxFromFactory records that processMounted's fallback installed a per-Process
-	// factory ctx on the template; it is cleared when that ctx is released, so a set flag at the
-	// next Process entry means the template carries a factory-owned, already-freed ctx.
-	templateCtxFromFactory bool
-
 	streaming *StreamingCommitter
 }
 

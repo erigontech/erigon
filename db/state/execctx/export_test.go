@@ -3,7 +3,14 @@ package execctx
 import (
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/execution/cache"
+	"github.com/erigontech/erigon/execution/commitment"
 )
+
+// ResolveTrieConfigForTest exposes resolveTrieConfig so the external test package can pin the
+// flag/option gating without building a full SharedDomains.
+func ResolveTrieConfigForTest(opts ...SharedDomainOption) commitment.TrieConfig {
+	return resolveTrieConfig(opts)
+}
 
 // CodeHashForAddr exposes the unexported codeHashForAddr for tests in the
 // external test package (which cannot import db/state to build a SharedDomains

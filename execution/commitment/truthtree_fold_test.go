@@ -1087,7 +1087,7 @@ func TestTruthtreeFold_FreshNonWhaleParity(t *testing.T) {
 // the depth-64-absence check, and the counter. (Full stored-branch parity is not asserted here: a
 // single-survivor storage collapse has a benign resolved-root-vs-stored-leaf encoding difference vs
 // sequential that flag-off parallel shares — see deleteToCollapseBatches — so it is not the gate's
-// concern.)
+// concern.) No t.Parallel: the counter assertion is a zero delta on a process-global.
 func TestTruthtreeFold_ArityGateSingleNibble(t *testing.T) {
 	keys, upds, whale, _ := freshWhaleAloneCorpus(20260711, nibs(7), 1500)
 	depth64Key := nibbles.HexToCompact(KeyToHexNibbleHash(whale)[:64])

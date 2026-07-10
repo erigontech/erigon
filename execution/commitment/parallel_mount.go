@@ -5,7 +5,6 @@ import (
 	"fmt"
 
 	"github.com/erigontech/erigon/common"
-	"github.com/erigontech/erigon/common/dbg"
 )
 
 // unfoldRootWall unfolds base at the root until row 0 forms the top-nibble mount wall,
@@ -75,13 +74,9 @@ func (p *ParallelPatriciaHashed) processMounted(ctx context.Context, updates *Up
 	if base == nil {
 		return nil, fmt.Errorf("processMounted: nil template")
 	}
-	if dbg.AssertEnabled && p.templateCtxFromFactory {
-		panic("processMounted: template carried a factory-owned ctx across Process calls")
-	}
 	if base.ctx == nil && p.trieCtxFactory != nil {
 		bctx, cleanup := p.trieCtxFactory()
 		base.ResetContext(bctx)
-		p.templateCtxFromFactory = true
 		// The fallback ctx is per-Process (cleanup munmaps it); release it before returning so
 		// the template never carries a factory-owned, freed ctx into the next Process.
 		defer func() {
@@ -89,7 +84,6 @@ func (p *ParallelPatriciaHashed) processMounted(ctx context.Context, updates *Up
 				cleanup()
 			}
 			base.ResetContext(nil)
-			p.templateCtxFromFactory = false
 		}()
 	}
 	base.branchEncoder.setDeferUpdates(true)

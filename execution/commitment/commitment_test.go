@@ -1128,3 +1128,78 @@ func TestDeferredUpdateArenaEscapeSurvivesReset(t *testing.T) {
 		putDeferredUpdate(upd)
 	}
 }
+
+// The pre-merged encoded bytes are backed by a pooled merger's arena and retained by the caller
+// until the next-block flush; merger reuse from the pool must never rewind them.
+func TestMergedEncodedSurvivesMergerPoolChurn(t *testing.T) {
+	be := NewBranchEncoder(1024)
+	raw := encodeTestBranch(t, be, 0xffff, 1)
+	prev := encodeTestBranch(t, be, 0x00ff, 2)
+
+	held := getDeferredUpdate(&be.arena, []byte{0x01}, raw, prev)
+	require.NoError(t, MergeDeferredBranchUpdates([]*DeferredBranchUpdate{held}, 1))
+	require.True(t, held.merged)
+	want := common.Copy(held.encoded)
+
+	churnRaw := encodeTestBranch(t, be, 0xffff, 3)
+	churnPrev := encodeTestBranch(t, be, 0x0ff0, 4)
+	churn := make([]*DeferredBranchUpdate, 0, 2*byteArenaChunk/len(churnRaw)+1)
+	for written := 0; written <= 2*byteArenaChunk; written += len(churnRaw) {
+		churn = append(churn, getDeferredUpdate(&be.arena, []byte{0x02}, churnRaw, churnPrev))
+	}
+	require.NoError(t, MergeDeferredBranchUpdates(churn, 4))
+
+	require.Equal(t, BranchData(want), held.encoded, "held pre-merged bytes must survive pooled-merger churn")
+	putDeferredUpdate(held)
+	putDeferredUpdates(churn)
+}
+
+// The concurrent chunked path of MergeDeferredBranchUpdates must match the sequential path on a
+// mixed list (pre-merged, prev-empty, unchanged, and real prev+raw merges) and propagate a worker's
+// merge error.
+func TestMergeDeferredBranchUpdatesChunked(t *testing.T) {
+	be := NewBranchEncoder(1024)
+	mk := func(i int) *DeferredBranchUpdate {
+		seed := byte(i*2 + 1)
+		raw := encodeTestBranch(t, be, 0xffff, seed)
+		switch i % 4 {
+		case 0: // real merge
+			return getDeferredUpdate(&be.arena, []byte{byte(i)}, raw, encodeTestBranch(t, be, 0x00ff, seed+1))
+		case 1: // fresh: no predecessor
+			return getDeferredUpdate(&be.arena, []byte{byte(i)}, raw, nil)
+		case 2: // unchanged: prev == raw, stays a skipped write
+			return getDeferredUpdate(&be.arena, []byte{byte(i)}, raw, raw)
+		default: // pre-merged on the fold worker, must be skipped (encoded already final)
+			upd := getDeferredUpdate(&be.arena, []byte{byte(i)}, raw, encodeTestBranch(t, be, 0x0ff0, seed+1))
+			require.NoError(t, mergeDeferredUpdate(upd, NewHexBranchMerger(1024)))
+			return upd
+		}
+	}
+	const n = 64
+	deferred := make([]*DeferredBranchUpdate, 0, n)
+	reference := make([]*DeferredBranchUpdate, 0, n)
+	for i := range n {
+		deferred = append(deferred, mk(i))
+		reference = append(reference, mk(i))
+	}
+	defer putDeferredUpdates(deferred)
+	defer putDeferredUpdates(reference)
+
+	require.NoError(t, MergeDeferredBranchUpdates(deferred, 4))
+	require.NoError(t, MergeDeferredBranchUpdates(reference, 1))
+	for i := range n {
+		require.Truef(t, deferred[i].merged, "entry %d left unmerged", i)
+		require.Equalf(t, reference[i].encoded, deferred[i].encoded, "entry %d diverges from the sequential path", i)
+	}
+
+	poisoned := make([]*DeferredBranchUpdate, 0, n)
+	for i := range n {
+		upd := getDeferredUpdate(&be.arena, []byte{byte(i)}, encodeTestBranch(t, be, 0xffff, byte(i)), nil)
+		if i == n/2 {
+			upd.prev = []byte{0xde} // malformed predecessor: the worker's merge must fail
+		}
+		poisoned = append(poisoned, upd)
+	}
+	defer putDeferredUpdates(poisoned)
+	require.Error(t, MergeDeferredBranchUpdates(poisoned, 4), "a worker merge error must propagate")
+}

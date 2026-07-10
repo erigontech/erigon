@@ -164,21 +164,28 @@ var wholeFreshCellFolds atomic.Int64
 
 func init() { forkWholeFresh.Store(true) }
 
-// wholeFreshBuild reports whether a Process runs against empty on-disk state: no branch at the root
-// prefix (rootSeedable false) and no seedable branch probed anywhere during derivation (sawSeedable
-// false). A propagate-folded root is not empty — its deeper branches are seedable, so sawSeedable
-// excludes it. Only a real multi-way root branch qualifies (no root extension, ≥2 children): a
-// common-prefix / single-account corpus yields a root extension or a single-child root that the
-// sequential engine collapses to an extension (no root branch record), which the account-plane fork
-// does not reproduce, so it routes to frontier. Gated on the dev-only forkWholeFresh toggle.
-func wholeFreshBuild(root *prefixNode, rootSeedable, sawSeedable bool) bool {
+// wholeFreshBuild reports whether a Process runs against provably empty on-disk state: no seedable
+// branch probed anywhere during derivation (a propagate-folded root's deeper branches are seedable,
+// so sawSeedable excludes it) AND an empty unfolded root wall. Probe absence alone cannot prove
+// emptiness — a root collapsed to a single leaf or extension has no branch record at the root prefix
+// either, yet its cell is carried on base's wall and must be folded, not overwritten. Only a real
+// multi-way root branch qualifies (no root extension, ≥2 children), the shape the account-plane fork
+// reproduces. Gated on the dev-only forkWholeFresh toggle.
+func wholeFreshBuild(base *HexPatriciaHashed, root *prefixNode, sawSeedable bool) bool {
 	if !forkWholeFresh.Load() {
 		return false
 	}
-	if rootSeedable || sawSeedable {
+	if sawSeedable || !rootWallEmpty(base) {
 		return false
 	}
 	return len(root.ext) == 0 && bits.OnesCount16(root.bitmap) >= 2
+}
+
+// rootWallEmpty reports whether base's unfolded row-0 wall carries no on-disk state: an empty root
+// cell, no child cells, and no root branch record.
+func rootWallEmpty(base *HexPatriciaHashed) bool {
+	return base != nil && base.activeRows > 0 && base.root.IsEmpty() &&
+		base.afterMap[0] == 0 && !base.branchBefore[0]
 }
 
 // dispatchFrontier derives the fold DAG over root, folds it with fp's shared worker pool, stitches
@@ -219,14 +226,14 @@ func (fp *foldPool) dispatchFrontier(ctx context.Context, base *HexPatriciaHashe
 
 	fp.foldSem = semaphore.NewWeighted(int64(maxFoldConcurrency()))
 	k := foldK(root.subtreeCount, fp.numWorkers)
-	rootSeedable := seedable(append([]byte(nil), root.ext...))
+	seedable(append([]byte(nil), root.ext...)) // explicit root probe; derivation only probes merge candidates
 	rootTask := deriveFoldFrontier(root, k, seedable)
 	if seedErr != nil {
 		return nil, seedErr
 	}
 	rootTask.base = base
 
-	if wholeFreshBuild(root, rootSeedable, sawSeedable) {
+	if wholeFreshBuild(base, root, sawSeedable) {
 		return fp.dispatchWholeFresh(ctx, base, rootTask, reuse)
 	}
 	return fp.foldFrontierBody(ctx, base, rootTask, reuse)
@@ -296,14 +303,19 @@ func (fp *foldPool) dispatchWholeFresh(ctx context.Context, base *HexPatriciaHas
 		deferred = append(deferred, d...)
 	}
 	deferred = append(deferred, reusedDeferred...)
+	overlayReusedCells(&cells, &present, &reusedCells, &reusedPresent)
+
+	return fp.stitchAndFoldRoot(ctx, base, &cells, &present, deferred)
+}
+
+// overlayReusedCells stitches the scheduler's pre-folded top-nibble cells over the route's own.
+func overlayReusedCells(cells *[16]cell, present *[16]bool, reusedCells *[16]cell, reusedPresent *[16]bool) {
 	for nib := range 16 {
 		if reusedPresent[nib] {
 			cells[nib] = reusedCells[nib]
 			present[nib] = true
 		}
 	}
-
-	return fp.stitchAndFoldRoot(ctx, base, &cells, &present, deferred)
 }
 
 // allTopNibblesPureBranch reports whether every child of the whole-fresh root branch is a pure branch
@@ -392,12 +404,7 @@ func (fp *foldPool) foldFrontierBody(ctx context.Context, base *HexPatriciaHashe
 		cells[top.nib] = top.cell
 		present[top.nib] = true
 	}
-	for nib := range 16 {
-		if reusedPresent[nib] {
-			cells[nib] = reusedCells[nib]
-			present[nib] = true
-		}
-	}
+	overlayReusedCells(&cells, &present, &reusedCells, &reusedPresent)
 
 	return fp.stitchAndFoldRoot(ctx, base, &cells, &present, deferred)
 }

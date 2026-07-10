@@ -187,16 +187,25 @@ func PickTrieVariant() commitment.TrieVariant {
 	return commitment.VariantHexPatriciaTrie
 }
 
-func NewSharedDomains(ctx context.Context, tx kv.TemporalTx, logger log.Logger, opts ...SharedDomainOption) (*SharedDomains, error) {
+// resolveTrieConfig applies the option list over the flag-derived defaults, then enforces the
+// truthtree-fold gate on the variant the options settled on: the direct fold is a
+// parallel-regime-only change, so streaming and sequential (e.g. WithSequentialCommitment)
+// keep the mount+replay fold even with the flag set.
+func resolveTrieConfig(opts []SharedDomainOption) commitment.TrieConfig {
 	o := sharedDomainOptions{trieCfg: commitment.DefaultTrieConfig()}
 	o.trieCfg.Variant = PickTrieVariant()
-	// The direct fold is a parallel-regime-only Phase 1 change, so honor the flag only when the
-	// parallel variant is selected; streaming and sequential keep the mount+replay fold.
-	o.trieCfg.TruthtreeFold = statecfg.ExperimentalTruthtreeFold && o.trieCfg.Variant == commitment.VariantParallelHexPatricia
+	o.trieCfg.TruthtreeFold = statecfg.ExperimentalTruthtreeFold
 	for _, opt := range opts {
 		opt(&o)
 	}
-	trieCfg := o.trieCfg
+	if o.trieCfg.Variant != commitment.VariantParallelHexPatricia {
+		o.trieCfg.TruthtreeFold = false
+	}
+	return o.trieCfg
+}
+
+func NewSharedDomains(ctx context.Context, tx kv.TemporalTx, logger log.Logger, opts ...SharedDomainOption) (*SharedDomains, error) {
+	trieCfg := resolveTrieConfig(opts)
 
 	sd := &SharedDomains{
 		logger:   logger,

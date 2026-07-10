@@ -24,6 +24,8 @@ import (
 
 	"github.com/stretchr/testify/require"
 	"golang.org/x/sync/semaphore"
+
+	"github.com/erigontech/erigon/common/length"
 )
 
 // freshAccountPlaneCorpus builds a whole-fresh corpus whose every top nibble is a branch (so the
@@ -55,6 +57,7 @@ func freshAccountPlaneCorpus(seed int64, perNibble, whaleSlots int) ([][]byte, [
 
 // setForkWholeFresh flips the dev-only whole-fresh fork toggle for the duration of a test and
 // restores it on cleanup, so a test can measure the frontier-serial baseline (toggle off).
+// Callers must not use t.Parallel: the toggle is process-global.
 func setForkWholeFresh(t *testing.T, on bool) {
 	t.Helper()
 	prev := forkWholeFresh.Load()
@@ -65,6 +68,7 @@ func setForkWholeFresh(t *testing.T, on bool) {
 // runWholeFreshBatch folds one fresh batch (empty on-disk state) through the sequential oracle and
 // the candidate engine, returning both roots and the number of Process calls that routed through the
 // whole-fresh account-plane fork. It also asserts stored-branch byte parity between the two stores.
+// routes is a delta on a process-global counter: callers asserting on it must not use t.Parallel.
 func runWholeFreshBatch(t *testing.T, mode runMode, workers int, keys [][]byte, upds []Update) (candRoot, seqRoot []byte, routes int64) {
 	t.Helper()
 	seqMs := NewMockState(t)
@@ -82,26 +86,37 @@ func runWholeFreshBatch(t *testing.T, mode runMode, workers int, keys [][]byte, 
 }
 
 // TestWholeFreshBuild_Detector pins the empty-state detector in isolation: only a real root branch
-// with no on-disk state (rootSeedable and sawSeedable both false) and no root extension is whole-fresh,
-// and the dev-only toggle gates the whole predicate.
+// over a provably empty root wall (no seedable branch probed, no cell carried on the wall) and no
+// root extension is whole-fresh, and the dev-only toggle gates the whole predicate.
 func TestWholeFreshBuild_Detector(t *testing.T) {
 	branchRoot := &prefixNode{bitmap: 0b11} // real multi-way root branch, no extension
 	extRoot := &prefixNode{bitmap: 0b11, ext: []byte{1, 2}}
 	singleChild := &prefixNode{bitmap: 0b100} // one first nibble: a propagate/common-prefix root
 	loneLeaf := &prefixNode{bitmap: 0}        // no root branch (single account / propagate-folded root)
 
+	emptyWall := func() *HexPatriciaHashed {
+		base := NewHexPatriciaHashed(length.Addr, nil, DefaultTrieConfig())
+		seedRootBase(base)
+		return base
+	}
+	leafWall := emptyWall() // a collapsed root: the wall carries a leaf cell, no branch record
+	leafWall.afterMap[0] = 1 << 7
+
 	t.Run("toggle_on", func(t *testing.T) {
 		setForkWholeFresh(t, true)
-		require.True(t, wholeFreshBuild(branchRoot, false, false), "empty state + multi-way root branch is whole-fresh")
-		require.False(t, wholeFreshBuild(branchRoot, true, false), "present root branch is not fresh")
-		require.False(t, wholeFreshBuild(branchRoot, false, true), "a seedable deeper branch is not fresh")
-		require.False(t, wholeFreshBuild(extRoot, false, false), "root extension routes to frontier")
-		require.False(t, wholeFreshBuild(singleChild, false, false), "single-first-nibble propagate root routes to frontier")
-		require.False(t, wholeFreshBuild(loneLeaf, false, false), "no root branch routes to frontier")
+		require.True(t, wholeFreshBuild(emptyWall(), branchRoot, false), "empty state + multi-way root branch is whole-fresh")
+		require.False(t, wholeFreshBuild(emptyWall(), branchRoot, true), "a seedable branch is not fresh")
+		require.False(t, wholeFreshBuild(leafWall, branchRoot, false), "a cell carried on the wall is not fresh")
+		require.False(t, wholeFreshBuild(nil, branchRoot, false), "no wall proves nothing")
+		require.False(t, wholeFreshBuild(NewHexPatriciaHashed(length.Addr, nil, DefaultTrieConfig()), branchRoot, false),
+			"an unformed wall (activeRows 0) proves nothing")
+		require.False(t, wholeFreshBuild(emptyWall(), extRoot, false), "root extension routes to frontier")
+		require.False(t, wholeFreshBuild(emptyWall(), singleChild, false), "single-first-nibble propagate root routes to frontier")
+		require.False(t, wholeFreshBuild(emptyWall(), loneLeaf, false), "no root branch routes to frontier")
 	})
 	t.Run("toggle_off", func(t *testing.T) {
 		setForkWholeFresh(t, false)
-		require.False(t, wholeFreshBuild(branchRoot, false, false), "toggle off never routes to whole-fresh")
+		require.False(t, wholeFreshBuild(emptyWall(), branchRoot, false), "toggle off never routes to whole-fresh")
 	})
 }
 
@@ -177,7 +192,8 @@ func TestFreshBuild_AccountPlane(t *testing.T) {
 // TestFreshBuildFork_IncrementalStaysFrontier is the guard test: once batch 1 has built on-disk
 // state, batch 2's incremental commit must NOT route through the whole-fresh fork (the on-disk root
 // branch makes it unfit) and must stay root- and branch-identical to sequential. This proves the
-// slice is additive — non-empty state keeps the frontier path.
+// slice is additive — non-empty state keeps the frontier path. No t.Parallel: the route assertion
+// is a zero delta on a process-global counter.
 func TestFreshBuildFork_IncrementalStaysFrontier(t *testing.T) {
 	batches := balancedBatches()
 	for _, mode := range parityModes {
@@ -219,6 +235,38 @@ func TestFreshBuildFork_ToggleOffIsFrontier(t *testing.T) {
 			})
 		}
 	}
+}
+
+// collapsedRootThenFreshFanoutBatches: batch 1 is a single account (top nibble 7), so the on-disk
+// root collapses to a leaf with no branch record at the root prefix — the same probe signature as
+// empty state. Batch 2 leaves it untouched and adds fresh accounts under every top nibble: a gate
+// that infers emptiness from probe absence misroutes to the whole-fresh fork and drops the carried
+// leaf. Batch 3 re-touches the solo account (the harness asserts parity after every batch).
+func collapsedRootThenFreshFanoutBatches() []engineBatch {
+	solo := addrHex(findAddressForNibble(7, 31_000))
+	ub := NewUpdateBuilder()
+	ub.Balance(solo, 1_000_001)
+	k1, u1 := ub.Build()
+
+	ub2 := NewUpdateBuilder()
+	for nib := range 16 {
+		for s := range 2 {
+			ub2.Balance(addrHex(findAddressForNibble(nib, 32_000+nib*8+s)), uint64(500+nib*16+s))
+		}
+	}
+	k2, u2 := ub2.Build()
+
+	ub3 := NewUpdateBuilder()
+	ub3.Balance(solo, 1_000_002)
+	k3, u3 := ub3.Build()
+	return []engineBatch{{k1, u1}, {k2, u2}, {k3, u3}}
+}
+
+// TestFreshBuildFork_CollapsedRootNotWholeFresh pins that a root collapsed to a single leaf (no
+// root branch record) is NOT treated as empty state: the fan-out batch must fold the carried leaf
+// into the new root, byte-identical to the sequential oracle.
+func TestFreshBuildFork_CollapsedRootNotWholeFresh(t *testing.T) {
+	runParityOverModes(t, collapsedRootThenFreshFanoutBatches(), []int{1, 4})
 }
 
 // freshWhaleAccountPlaneCorpus builds a whole-fresh corpus with a multi-way root branch (spread

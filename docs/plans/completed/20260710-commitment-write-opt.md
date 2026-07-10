@@ -280,4 +280,5 @@ merge was 4.25 ms CPU/seeded block → now 0 on the flush path.
   architecture change — the architecture is already there.
 - **Deferred / not in scope:** making the serial engine write-free (would affect the default path — forbidden);
   the reorg-recompute-before-read hot path (`domain-epoch-unwind.md` §8); the bigger fold/build headroom
-  (materialized-mount / unfold-on-touch) is a separate track.
+  (materialized-mount / unfold-on-touch) is a separate track. Follow-up candidates (gated, unverified) are
+  recorded in `docs/plans/20260711-deferred-write-api-simplification-followup.md`.

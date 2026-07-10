@@ -28,7 +28,9 @@ const byteArenaChunk = 64 * 1024
 
 func (a *byteArena) intern(b []byte) []byte {
 	if len(b) > byteArenaChunk {
-		return append([]byte(nil), b...)
+		out := make([]byte, len(b))
+		copy(out, b)
+		return out
 	}
 	if cap(a.buf)-len(a.buf) < len(b) {
 		a.buf = make([]byte, 0, byteArenaChunk)

@@ -1147,6 +1147,14 @@ func (m *BranchMerger) Merge(branch1 BranchData, branch2 BranchData) (BranchData
 	if len(branch1) == 0 {
 		return branch2, nil
 	}
+	// A truncated record must surface as an error the deferred-apply paths fail closed on,
+	// not an index panic.
+	if len(branch1) < 4 {
+		return nil, fmt.Errorf("MergeHexBranches branch1 is too small: %d bytes", len(branch1))
+	}
+	if len(branch2) < 4 {
+		return nil, fmt.Errorf("MergeHexBranches branch2 is too small: %d bytes", len(branch2))
+	}
 
 	touchMap1 := binary.BigEndian.Uint16(branch1[0:])
 	afterMap1 := binary.BigEndian.Uint16(branch1[2:])

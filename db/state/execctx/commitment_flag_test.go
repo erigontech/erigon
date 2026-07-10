@@ -164,3 +164,33 @@ func TestSharedDomains_StreamingFlag_RootEquivalence(t *testing.T) {
 		"sequential and streaming commitment roots must match: sequential=%x streaming=%x",
 		seqRoot, strRoot)
 }
+
+// TestResolveTrieConfig_TruthtreeFoldGating pins that the truthtree-fold flag is honored only when
+// the parallel variant survives option application — an option forcing another variant (e.g.
+// WithSequentialCommitment) must also drop the fold flag.
+func TestResolveTrieConfig_TruthtreeFoldGating(t *testing.T) {
+	// No t.Parallel: mutates process-global statecfg flags.
+	origFold := statecfg.ExperimentalTruthtreeFold
+	t.Cleanup(func() { statecfg.ExperimentalTruthtreeFold = origFold })
+
+	withCommitmentFlag(t, commitment.VariantParallelHexPatricia)
+	statecfg.ExperimentalTruthtreeFold = true
+
+	cfg := execctx.ResolveTrieConfigForTest()
+	require.Equal(t, commitment.VariantParallelHexPatricia, cfg.Variant)
+	require.True(t, cfg.TruthtreeFold, "flag on + parallel variant must enable the fold")
+
+	cfg = execctx.ResolveTrieConfigForTest(execctx.WithSequentialCommitment())
+	require.Equal(t, commitment.VariantHexPatriciaTrie, cfg.Variant)
+	require.False(t, cfg.TruthtreeFold, "an option forcing the sequential variant must drop the fold flag")
+
+	withCommitmentFlag(t, commitment.VariantStreamingHexPatricia)
+	cfg = execctx.ResolveTrieConfigForTest()
+	require.Equal(t, commitment.VariantStreamingHexPatricia, cfg.Variant)
+	require.False(t, cfg.TruthtreeFold, "streaming variant keeps the mount+replay fold")
+
+	withCommitmentFlag(t, commitment.VariantParallelHexPatricia)
+	statecfg.ExperimentalTruthtreeFold = false
+	cfg = execctx.ResolveTrieConfigForTest()
+	require.False(t, cfg.TruthtreeFold, "flag off never enables the fold")
+}

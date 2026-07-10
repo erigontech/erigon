@@ -59,7 +59,7 @@ stitches its children (§4.1, including the depth-64 storage-root seam of §4.1.
 Field lists are normative: the named fields and their stated invariants define the
 contract. Files are given for reference.
 
-### 3.1 `prefixNode`, `prefixTrie`, `plainKeyArena` (`prefix_trie.go`, `parallel_update.go`)
+### 3.1 `prefixNode`, `prefixTrie`, `byteArena` (`prefix_trie.go`, `byte_arena.go`)
 
 A path-compressed nibble trie of the touched hashed keys, bump-allocated from a
 slab arena. It is the sole carrier of the touched-key set and their plain keys;
@@ -76,8 +76,13 @@ the mount fold DFS-walks it directly.
 | `plainKey` | `[]byte` | the un-hashed key terminating here; non-nil **iff** a key terminates at this node and was supplied with a plain key; nil otherwise |
 | `update` | `*Update` | the carried per-key value; nil ⟹ the fold re-reads from `ctx` |
 
-- `plainKey` bytes are owned by a per-batch `plainKeyArena` (chunked; a full chunk
-  is replaced, not grown, so issued sub-slices remain stable for the trie's life).
+- `plainKey` bytes are owned by a per-batch `byteArena` (`parallelUpdate.keyArena`).
+  A `byteArena` is chunked and never rewinds: a full chunk is replaced, not grown or
+  reused, so issued sub-slices stay stable for as long as any consumer holds them —
+  even past `reset()`. The same arena type backs the deferred-update byte fields
+  (`BranchEncoder.arena`: prefix/raw/prev) and the pre-merged encodings
+  (`BranchMerger.arena`), where escaped slices are retained across blocks
+  (pinned by `TestDeferredUpdateArenaEscapeSurvivesReset`).
 - **`Insert(hashedKey, plainKey)`** MUST place `plainKey` on the node where
   `hashedKey` terminates, including across the two path-compression *split* cases:
   when a node is split, a `plainKey` already present on it belongs to a key that
@@ -87,7 +92,7 @@ the mount fold DFS-walks it directly.
 
 ### 3.2 `parallelUpdate` (`parallel_update.go`)
 
-Per-batch state: the `prefixTrie`, the `plainKeyArena`, and a mutex-guarded
+Per-batch state: the `prefixTrie`, the plain-key `byteArena`, and a mutex-guarded
 `deferredCombined` slice. `Insert` calls MUST be serialized by the caller;
 `deferredCombined` is the sole shared-mutable slice during the parallel phase and
 is guarded by `deferredMu` (`appendDeferred`).
@@ -238,10 +243,18 @@ fold:
   `PutBranch` concurrently (I5). The root hash returned by the base fold is then
   published to `rootHash`.
 - **Caller-deferred.** Under `SetLeaveDeferredForCaller(true)` the inline apply is
-  skipped; the merged list is handed to the caller via `TakeDeferredUpdates` and
-  the root is published directly. This is sound because the root hash is determined
-  by the in-memory fold and is independent of when the branches are persisted
-  (§6.3).
+  skipped; the list is handed to the caller via `TakeDeferredUpdates` and the root
+  is published directly. This is sound because the root hash is determined by the
+  in-memory fold and is independent of when the branches are persisted (§6.3).
+  Every handed-off entry is **flush-ready**: each pool task merges its own updates
+  right after its fold (`foldPool.run`), and a catch-all
+  `MergeDeferredBranchUpdates` at each `Process` hand-off covers what the per-task
+  merge did not reach (whole-fresh fork-join, scheduler-reused splits, the
+  root-fold tail). `merged` marks `encoded` as final; `prev` is retained untouched
+  as the changeset undo record. The caller's later flush
+  (`ApplyDeferredBranchUpdates`) degrades to a pure write pass, and a merge error
+  at the hand-off fails closed — every update is recycled and nothing reaches the
+  caller.
 
 ## 5. Invariants
 
@@ -304,9 +317,9 @@ path. Two conditions make it compatible with the parallel trie:
 1. **ModeParallel buffer.** The calculator MUST keep its `Updates` buffer in
    `ModeParallel` (it does not downgrade to `ModeUpdate`), so `Process` accepts it.
 2. **Caller-deferred branches.** With `deferCommitmentUpdates` set, `Process` runs
-   under `SetLeaveDeferredForCaller(true)`; the merged branch updates are stashed in
-   the pending update and flushed into the correct block's changeset, not applied at
-   the current txNum.
+   under `SetLeaveDeferredForCaller(true)`; the flush-ready (pre-merged, §4.2)
+   branch updates are stashed in the pending update and written into the correct
+   block's changeset, not applied at the current txNum.
 
 Because the ModeParallel buffer may hold no values, leaf values are served by the
 calculator's as-of state reader (`sd.GetAsOf(plainKey, lastTxNum+1)`, which
@@ -433,7 +446,8 @@ MDBX readers; figures are for inspection, not a CI gate.
 | `execution/commitment/parallel_mount.go` | `processMounted` — seed the root wall, then `dispatchFrontier` (reuse=nil); `unfoldRootWall`; `seedRootBase`; `mountTo`; `setAccountStorageRoot` |
 | `execution/commitment/streaming_deep_fold.go` | the fold seam primitives the pool folds with: `seedBaseAtPrefix` (the seedable prober), `seedOrDemote`, `mergeChildrenAtPrefix`/`stripCellToMountWall`, `aggregateMountedStorageRoot`/`storageRootFromSingleChild`, `stitchChildrenIntoRow0`, `collectSubtreeKeys`, `newDeferredStorageWorker` |
 | `execution/commitment/hex_patricia_hashed.go` | sequential engine; `foldMounted` and the `mountWall` stop used by every fold task |
-| `execution/commitment/parallel_update.go` | `parallelUpdate`, `plainKeyArena`, `Insert`/deferred accumulation |
+| `execution/commitment/parallel_update.go` | `parallelUpdate`, `Insert`/deferred accumulation |
+| `execution/commitment/byte_arena.go` | `byteArena`: chunked bump arena, never rewinds a chunk, so escaped slices survive `reset()`; backs plain keys, deferred prefix/raw/prev, and pre-merged encodings |
 | `execution/commitment/prefix_trie.go` | path-compressed prefix trie + slab arena; `Insert` `plainKey` placement; `subtreeCount` (the DAG's leaf/merge signal) |
 | `execution/commitment/commitment.go` | `Updates` (ModeParallel carries keys in the prefix trie), `InitializeTrieAndUpdates` |
 | `execution/commitment/commitmentdb/commitment_context.go` | wires ModeParallel and caller-deferred updates into `ComputeCommitment` |

@@ -1,5 +1,16 @@
 # TruthTree fresh-whale fork-join: swap the fold body to `foldNode`, restore parallelism
 
+> **Status (2026-07-11):** Tasks 1–3 done @ `d5757bfe66`. The Context section below predates three
+> plans that have since landed on this branch — `completed/20260710-conflict-gate-fold.md` (whole-fresh
+> account-plane fork-join: `forkFolder` is now production via `dispatchWholeFresh`, and
+> `foldFreshForkJoin` from Task 3 is currently test-only), `completed/20260710-commitment-write-opt.md`
+> (`getDeferredUpdate` now takes the `BranchEncoder` arena — Task 4's deletion of
+> `foldFreshStorageRootDeferred` must account for the changed signature), and the flag-on routing now
+> lives in `foldFreshWhaleStorage` (`fold_pool.go`), not at the line pinned below. Re-verify every
+> anchor in Context before executing Tasks 4–6. See also item 4 in
+> `20260711-deferred-write-api-simplification-followup.md` (thread `accountKeyLen`/`TrieConfig` into
+> the same constructors Task 4 touches).
+
 ## Overview
 
 The `--experimental.truthtree-fold` flag regresses the fresh-whale fold **4.56×** (623 vs 137 ms/op,

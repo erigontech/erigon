@@ -350,6 +350,11 @@ type forkJob struct {
 // always makes progress without another slot. fc is only ever touched by this goroutine — forked
 // children own separate foldCtxs and their results merge after the join — so no lock guards it.
 func (ff *forkFolder) fold(ctx context.Context, fc *foldCtx, pn *prefixNode, prefix []byte, branchDepth int16) (common.Hash, error) {
+	// One cancellation check per split-point row bounds an uncancellable stretch to a k-sized
+	// serial subtree — the same granularity the pool's task dispatch cancels at.
+	if err := ctx.Err(); err != nil {
+		return common.Hash{}, err
+	}
 	if pn.subtreeCount <= ff.k {
 		return fc.foldNode(pn, prefix, branchDepth)
 	}
@@ -526,7 +531,9 @@ func (fc *foldCtx) emitBranchUpdate(bitmap uint16, prefix []byte, cellData *[16]
 	if err != nil {
 		return err
 	}
-	fc.deferred = append(fc.deferred, getDeferredUpdate(&fc.hph.branchEncoder.arena, nibbles.HexToCompact(prefix), raw, nil))
+	// prev is empty, not nil, matching CollectDeferredUpdate: a nil prev makes the flush re-read
+	// the branch from state per record.
+	fc.deferred = append(fc.deferred, getDeferredUpdate(&fc.hph.branchEncoder.arena, nibbles.HexToCompact(prefix), raw, []byte{}))
 	return nil
 }
 

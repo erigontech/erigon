@@ -775,8 +775,8 @@ func TestStreamingCommitterStateRoundTrip(t *testing.T) {
 		"RootHash after SetState must reproduce the published streaming root")
 }
 
-func TestKeyArena_PointerStability(t *testing.T) {
-	var arena keyArena
+func TestByteArena_PointerStability(t *testing.T) {
+	var arena byteArena
 
 	inputs := make([][]byte, 0, 4096)
 	got := make([][]byte, 0, 4096)
@@ -784,12 +784,15 @@ func TestKeyArena_PointerStability(t *testing.T) {
 	for i := range 4096 {
 		in := bytes.Repeat([]byte{byte(i), byte(i >> 8)}, 32)
 		inputs = append(inputs, in)
-		got = append(got, arena.copy(in))
+		got = append(got, arena.intern(in))
 	}
-	// Oversized key forces the max(keyArenaChunk, len) allocation path.
-	big := bytes.Repeat([]byte{0xAB}, keyArenaChunk+128)
+	// Oversized input forces the standalone-copy path; an exact-chunk input lands on the boundary.
+	big := bytes.Repeat([]byte{0xAB}, byteArenaChunk+128)
 	inputs = append(inputs, big)
-	got = append(got, arena.copy(big))
+	got = append(got, arena.intern(big))
+	exact := bytes.Repeat([]byte{0xCD}, byteArenaChunk)
+	inputs = append(inputs, exact)
+	got = append(got, arena.intern(exact))
 
 	for i, in := range inputs {
 		require.True(t, bytes.Equal(in, got[i]),
@@ -809,6 +812,18 @@ func TestKeyArena_PointerStability(t *testing.T) {
 				"key %d overlaps another arena slice (overwritten at byte %d)", i, j)
 		}
 	}
+}
+
+// TestByteArena_CopyBytesContract pins copyBytes' common.Copy contract: nil in, nil out; empty in,
+// empty (non-nil) out. mergeDeferredUpdate and the flush's prev handling both branch on that
+// distinction.
+func TestByteArena_CopyBytesContract(t *testing.T) {
+	var arena byteArena
+	require.Nil(t, arena.copyBytes(nil))
+	empty := arena.copyBytes([]byte{})
+	require.NotNil(t, empty)
+	require.Empty(t, empty)
+	require.Equal(t, []byte{1, 2, 3}, arena.copyBytes([]byte{1, 2, 3}))
 }
 
 // Mixes shallow account forks with a whale storage subtree forking below depth 64 to fan out folds across many depths.

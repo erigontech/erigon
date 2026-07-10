@@ -49,9 +49,10 @@ var errInjected = errors.New("fold pool lifecycle test: injected failure")
 type failKind int
 
 const (
-	failOff   failKind = iota
-	failError          // surface errInjected
-	failEmpty          // return an absent (empty) branch — the vanished-branch case
+	failOff     failKind = iota
+	failError            // surface errInjected
+	failEmpty            // return an absent (empty) branch — the vanished-branch case
+	failCorrupt          // return a truncated branch record — the corrupt-store case
 )
 
 // injector fires on the after-th matching call. prefix, when set, restricts matching to that exact
@@ -105,6 +106,8 @@ func (fs *failState) Branch(prefix []byte) ([]byte, kv.Step, error) {
 		return nil, 0, errInjected
 	case failEmpty:
 		return nil, 0, nil
+	case failCorrupt:
+		return []byte{0xde}, 0, nil
 	}
 	return fs.MockState.Branch(prefix)
 }
@@ -520,4 +523,124 @@ func TestFoldPoolLifecycle_PinScope(t *testing.T) {
 	require.Equal(t, seqRoot, root, "pin-scoped streaming root != sequential")
 	requireBranchParity(t, seqMs, ms)
 	require.Zero(t, ps.violations.Load(), "a task read a context after its own cleanup")
+}
+
+// TestFoldPoolLifecycle_CatchAllMergeFailsClosed corrupts the third root-record read — the prev
+// fetched for the root branch the root-fold tail emits, which only the Process catch-all merges —
+// and asserts both caller-deferred engines fail closed: the merge error surfaces, the store is
+// untouched, and a clean retry reproduces the sequential root and branches (nothing recycled twice
+// or leaked into the pools).
+func TestFoldPoolLifecycle_CatchAllMergeFailsClosed(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	rootPrefix := nibbles.HexToCompact(nil)
+
+	t.Run("streaming", func(t *testing.T) {
+		t.Parallel()
+		batches := balancedBatches()
+		b1, b2 := batches[0], batches[1]
+		seqRoot, seqMs := seqReference(t, b1, b2)
+
+		ms, blob := seedBatch1(t, b1)
+		require.NoError(t, ms.applyPlainUpdates(b2.keys, b2.upds))
+		before := snapshotBranches(ms)
+
+		fs := newFailState(ms)
+		fs.branch = injector{after: 3, prefix: rootPrefix, kind: failCorrupt}
+		sc := NewStreamingCommitter(fs.factory(), length.Addr, DefaultTrieConfig())
+		defer sc.Release()
+		sc.SetNumWorkers(3)
+		sc.SetLeaveDeferredForCaller(true)
+		tmpl := NewHexPatriciaHashed(length.Addr, ms, DefaultTrieConfig())
+		defer tmpl.Release()
+		require.NoError(t, tmpl.SetState(blob))
+		sc.SeedRootFrom(tmpl)
+		touchAll(sc, b2.keys)
+		_, err := sc.Process(ctx)
+		require.ErrorContains(t, err, "too small", "the corrupt prev must fail the catch-all merge")
+		require.True(t, fs.branch.fired, "the corrupt root read must have fired")
+		require.Empty(t, sc.TakeDeferredUpdates(), "a failed Process must hand the caller nothing")
+		requireBranchesUnchanged(t, before, ms)
+
+		root, _, err := streamAttempt(ctx, t, ms, mockTrieCtxFactory(ms), 3, b2.keys, blob)
+		require.NoError(t, err, "the engine must fold cleanly after the failed attempt")
+		require.Equal(t, seqRoot, root)
+		requireBranchParity(t, seqMs, ms)
+	})
+
+	t.Run("parallel", func(t *testing.T) {
+		t.Parallel()
+		k1, u1, k2, u2 := buildRetouchCorpora(300)
+
+		ms := NewMockState(t)
+		ms.SetConcurrentCommitment(true)
+		_, blob := processModeBatchState(t, ms, modeParallel, 4, k1, u1, nil)
+		require.NoError(t, ms.applyPlainUpdates(k2, u2))
+		before := snapshotBranches(ms)
+
+		fs := newFailState(ms)
+		fs.branch = injector{after: 3, prefix: rootPrefix, kind: failCorrupt}
+		tr := NewParallelPatriciaHashed(fs.factory(), length.Addr, DefaultTrieConfig())
+		tr.SetNumWorkers(4)
+		tr.ResetContext(fs)
+		defer tr.Release()
+		require.NoError(t, tr.RootTrie().SetState(blob))
+		tr.SetLeaveDeferredForCaller(true)
+		ut := WrapKeyUpdates(t, ModeParallel, KeyToHexNibbleHash, k2, u2)
+		defer ut.Close()
+		_, err := tr.Process(ctx, ut, "", nil, WarmupConfig{})
+		require.ErrorContains(t, err, "too small", "the corrupt prev must fail the catch-all merge")
+		require.True(t, fs.branch.fired, "the corrupt root read must have fired")
+		require.Empty(t, tr.TakeDeferredUpdates(), "a failed Process must hand the caller nothing")
+		requireBranchesUnchanged(t, before, ms)
+
+		root2, _ := processModeBatchState(t, ms, modeParallel, 4, k2, u2, blob)
+		seqRoot, seqMs := incrementalRoot(t, modeSeq, 0, k1, u1, k2, u2)
+		require.Equal(t, seqRoot, root2, "the engine must fold cleanly after the failed attempt")
+		requireBranchParity(t, seqMs, ms)
+	})
+}
+
+// TestFoldPool_RunMergesUnderFold pins merge-under-fold at the pool boundary: run must hand back
+// every subtree-task update already merged (encoded final, prev intact), so the Process catch-all
+// and the caller's flush have nothing left to merge for pool-folded subtrees.
+func TestFoldPool_RunMergesUnderFold(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	batches := balancedBatches()
+	b1, b2 := batches[0], batches[1]
+
+	ms, blob := seedBatch1(t, b1)
+	require.NoError(t, ms.applyPlainUpdates(b2.keys, b2.upds))
+
+	tr := newPrefixTrie()
+	for i, k := range b2.keys {
+		tr.Insert(KeyToHexNibbleHash(k), k, &b2.upds[i])
+	}
+	root := deriveFoldFrontier(tr.root, 8, seedableOf(t, ms))
+	require.NotNil(t, root)
+
+	base := NewHexPatriciaHashed(length.Addr, nil, DefaultTrieConfig())
+	defer base.Release()
+	bctx, bclean := mockTrieCtxFactory(ms)()
+	if bclean != nil {
+		defer bclean()
+	}
+	base.ResetContext(bctx)
+	require.NoError(t, base.SetState(blob))
+	base.branchEncoder.setDeferUpdates(true)
+	base.SetLeaveDeferredForCaller(true)
+	require.NoError(t, unfoldRootWall(ctx, base))
+	seedRootBase(base)
+	root.base = base
+
+	pool := &foldPool{
+		numWorkers: 4,
+		ctxFactory: mockTrieCtxFactory(ms),
+		workerPool: &sync.Pool{New: func() any { return NewHexPatriciaHashed(length.Addr, nil, DefaultTrieConfig()) }},
+	}
+	deferred, err := pool.run(ctx, root)
+	require.NoError(t, err)
+	requireFlushReadyDeferred(t, deferred)
+	putDeferredUpdates(deferred)
 }

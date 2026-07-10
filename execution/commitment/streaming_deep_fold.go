@@ -217,9 +217,9 @@ func newDeferredStorageWorker(pool *sync.Pool, factory TrieContextFactory, trace
 // nibbles off the reused walk path but leaves plainKey/update aliased.
 func collectSubtreeKeys(node *prefixNode, path []byte) []touchedKey {
 	out := make([]touchedKey, 0, node.subtreeCount)
-	var arena keyArena
+	var arena byteArena
 	_ = dfsSubtree(node, path, func(hk, pk []byte, upd *Update) error {
-		out = append(out, touchedKey{hk: arena.copy(hk), pk: pk, upd: upd})
+		out = append(out, touchedKey{hk: arena.intern(hk), pk: pk, upd: upd})
 		return nil
 	})
 	return out
