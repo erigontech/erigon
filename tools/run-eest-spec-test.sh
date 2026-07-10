@@ -83,12 +83,12 @@ base=test-fixtures-cache/$fixtures/fixtures
 # so adding a shard / tweaking a budget / changing a fork filter is a one-file
 # edit. yq converts YAML→JSON so it can be queried with jq.
 manifest=tools/eest-spec-shards.yml
-shard_row=$(yq -o=json '.' "$manifest" | jq -r --arg s "$shard" '.[] | select(.shard == $s) | "\(.workers)\t\(."max-allowed-failures")\t\(."exec3-parallel" // false)\t\(.run // "")"')
+shard_row=$(yq -o=json '.' "$manifest" | jq -r --arg s "$shard" '.[] | select(.shard == $s) | "\(.workers)\t\(."max-allowed-failures")\t\(."exec3-parallel" // false)\t\(."no-ramdisk" // false)\t\(.run // "")"')
 if [[ -z "$shard_row" ]]; then
 	echo "shard $shard not found in $manifest" >&2
 	exit 2
 fi
-IFS=$'\t' read -r default_workers default_max exec3_parallel run_regex <<<"$shard_row"
+IFS=$'\t' read -r default_workers default_max exec3_parallel shard_no_ramdisk run_regex <<<"$shard_row"
 # Always set ERIGON_EXEC3_PARALLEL explicitly (true or false) so the shard's
 # behaviour is pinned to the manifest, independent of whatever dbg.Exec3Parallel
 # defaults to at runtime. If the default flips, the shards still run the mode
@@ -167,7 +167,10 @@ trap cleanup EXIT
 # and never unmounts; CI gets the env var pre-set via the setup-erigon
 # action's ramdisk: true input. Local Linux users can opt in by exporting
 # ERIGON_EXECUTION_TESTS_TMPDIR or TMPDIR=/dev/shm.
-if [[ -z "${ERIGON_EXECUTION_TESTS_TMPDIR:-}" && "$(uname -s)" == "Darwin" ]]; then
+# Shards with no-ramdisk: true in the manifest skip the Darwin auto-ramdisk too:
+# their datadirs are few and long-lived, so tmpfs buys nothing — and the 150m
+# datadir (~7GB) doesn't even fit the default ramdisk size.
+if [[ "$shard_no_ramdisk" != "true" && -z "${ERIGON_EXECUTION_TESTS_TMPDIR:-}" && "$(uname -s)" == "Darwin" ]]; then
 	ramdisk=$(bash tools/create-ramdisk) || true
 	if [[ -n "$ramdisk" ]]; then
 		export ERIGON_EXECUTION_TESTS_TMPDIR="$ramdisk"

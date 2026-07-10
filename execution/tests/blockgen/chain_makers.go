@@ -403,10 +403,6 @@ func InitPraguePreDeploys(db kv.TemporalRwDB, config *chain.Config, logger log.L
 	if err != nil {
 		return err
 	}
-	err = stateWriter.WriteAccountStorage(withdrawalAddr, 0, accounts.ZeroKey, uint256.Int{}, *new(uint256.Int).SetAllOne())
-	if err != nil {
-		return err
-	}
 	err = stateWriter.UpdateAccountData(consolidationAddr, &accounts.Account{}, &accounts.Account{
 		CodeHash: consolidationRequestCodeHash,
 		Nonce:    1,
@@ -415,10 +411,6 @@ func InitPraguePreDeploys(db kv.TemporalRwDB, config *chain.Config, logger log.L
 		return err
 	}
 	err = stateWriter.UpdateAccountCode(consolidationAddr, 0, consolidationRequestCodeHash, consolidationRequestCode)
-	if err != nil {
-		return err
-	}
-	err = stateWriter.WriteAccountStorage(consolidationAddr, 0, accounts.ZeroKey, uint256.Int{}, *new(uint256.Int).SetAllOne())
 	if err != nil {
 		return err
 	}
@@ -460,10 +452,6 @@ func InitAmsterdamPreDeploys(db kv.TemporalRwDB, config *chain.Config, logger lo
 	if err != nil {
 		return err
 	}
-	err = stateWriter.WriteAccountStorage(builderDepositAddr, 0, accounts.ZeroKey, uint256.Int{}, *new(uint256.Int).SetAllOne())
-	if err != nil {
-		return err
-	}
 	err = stateWriter.UpdateAccountData(builderExitAddr, &accounts.Account{}, &accounts.Account{
 		CodeHash: builderExitRequestCodeHash,
 		Nonce:    1,
@@ -472,10 +460,6 @@ func InitAmsterdamPreDeploys(db kv.TemporalRwDB, config *chain.Config, logger lo
 		return err
 	}
 	err = stateWriter.UpdateAccountCode(builderExitAddr, 0, builderExitRequestCodeHash, builderExitRequestCode)
-	if err != nil {
-		return err
-	}
-	err = stateWriter.WriteAccountStorage(builderExitAddr, 0, accounts.ZeroKey, uint256.Int{}, *new(uint256.Int).SetAllOne())
 	if err != nil {
 		return err
 	}

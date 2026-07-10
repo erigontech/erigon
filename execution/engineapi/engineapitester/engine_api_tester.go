@@ -115,18 +115,14 @@ func DefaultEngineApiTesterGenesis() (*types.Genesis, *ecdsa.PrivateKey, error) 
 				Balance: new(big.Int).Exp(big.NewInt(10), big.NewInt(21), nil), // 1_000 ETH
 			},
 			chainConfig.GetConsolidationRequestContract().Value(): {
-				Code: consolidationRequestCode, // can't be empty
-				Storage: map[common.Hash]common.Hash{
-					common.Hash{}: common.HexToHash("0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"),
-				},
+				Code:    consolidationRequestCode, // can't be empty
+				Storage: make(map[common.Hash]common.Hash),
 				Balance: new(big.Int).Exp(big.NewInt(10), big.NewInt(18), nil),
 				Nonce:   1,
 			},
 			chainConfig.GetWithdrawalRequestContract().Value(): {
-				Code: withdrawalRequestCode, // can't be empty
-				Storage: map[common.Hash]common.Hash{
-					common.Hash{}: common.HexToHash("0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"),
-				},
+				Code:    withdrawalRequestCode, // can't be empty
+				Storage: make(map[common.Hash]common.Hash),
 				Balance: new(big.Int).Exp(big.NewInt(10), big.NewInt(18), nil),
 				Nonce:   1,
 			},
@@ -136,18 +132,14 @@ func DefaultEngineApiTesterGenesis() (*types.Genesis, *ecdsa.PrivateKey, error) 
 				Balance: new(big.Int),
 			},
 			chainConfig.GetBuilderDepositContract().Value(): {
-				Code: misc.BuilderDepositRequestCode,
-				Storage: map[common.Hash]common.Hash{
-					common.Hash{}: common.HexToHash("0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"),
-				},
+				Code:    misc.BuilderDepositRequestCode,
+				Storage: make(map[common.Hash]common.Hash),
 				Balance: new(big.Int),
 				Nonce:   1,
 			},
 			chainConfig.GetBuilderExitContract().Value(): {
-				Code: misc.BuilderExitRequestCode,
-				Storage: map[common.Hash]common.Hash{
-					common.Hash{}: common.HexToHash("0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"),
-				},
+				Code:    misc.BuilderExitRequestCode,
+				Storage: make(map[common.Hash]common.Hash),
 				Balance: new(big.Int),
 				Nonce:   1,
 			},
@@ -258,6 +250,7 @@ func InitialiseEngineApiTester(ctx context.Context, args EngineApiTesterInitArgs
 		Enabled:                  true,
 		HttpServerEnabled:        true,
 		WebsocketEnabled:         true,
+		HttpCompression:          true,
 		HttpListenAddress:        "127.0.0.1",
 		HttpPort:                 jsonRpcPort,
 		HttpListener:             jsonRpcListener,
