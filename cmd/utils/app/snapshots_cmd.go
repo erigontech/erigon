@@ -1631,7 +1631,9 @@ func doIntegrity(ctx context.Context, cliCtx *cli.Command) error {
 	runCheck := func(ctx context.Context, chk integrity.Check) error {
 		switch chk {
 		case integrity.BlocksTxnID:
-			return blockReader.(*freezeblocks.BlockReader).IntegrityTxnID(ctx, failFast)
+			return db.View(ctx, func(tx kv.Tx) error {
+				return blockReader.(*freezeblocks.BlockReader).IntegrityTxnID(ctx, tx, failFast)
+			})
 		case integrity.HeaderNoGaps:
 			return integrity.NoGapsInCanonicalHeaders(ctx, db, blockReader, failFast)
 		case integrity.Blocks:

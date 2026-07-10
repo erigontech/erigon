@@ -1372,9 +1372,9 @@ func (r *BlockReader) IterateFrozenBodies(tx kv.Getter, f func(blockNum, baseTxN
 	return nil
 }
 
-func (r *BlockReader) IntegrityTxnID(ctx context.Context, failFast bool) error {
+func (r *BlockReader) IntegrityTxnID(ctx context.Context, tx kv.Getter, failFast bool) error {
 	defer log.Info("[integrity] BlocksTxnID done")
-	view, release := r.view(nil)
+	view, release := r.view(tx)
 	defer release()
 
 	var expectedFirstTxnID uint64

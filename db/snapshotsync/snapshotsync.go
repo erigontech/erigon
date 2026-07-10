@@ -206,6 +206,7 @@ func stepAtTxNum(txNum, stepSize uint64) kv.Step {
 func getMinimumBlocksToDownload(
 	ctx context.Context,
 	blockReader blockReader,
+	tx kv.Getter,
 	maxStateStep, stepSize uint64,
 	stateHistoryPruneTo, commitmentHistoryPruneTo uint64,
 ) (minBlockToDownload uint64, minHistoryStep, minCommitmentHistoryStep kv.Step, err error) {
@@ -222,7 +223,7 @@ func getMinimumBlocksToDownload(
 	minHistoryStep = kv.Step(math.MaxUint32)
 	minCommitmentHistoryStep = kv.Step(math.MaxUint32)
 	stateTxNum := maxStateStep * stepSize
-	if err := blockReader.IterateFrozenBodies(nil, func(blockNum, baseTxNum, txAmount uint64) error {
+	if err := blockReader.IterateFrozenBodies(tx, func(blockNum, baseTxNum, txAmount uint64) error {
 		if iterations%1e6 == 0 {
 			if ctx.Err() != nil {
 				return context.Cause(ctx)
@@ -454,7 +455,7 @@ func SyncSnapshots(
 			}
 			commitmentHistoryPrune := prune.CommitmentHistoryAmount().PruneTo(frozenBlocks)
 			minBlockToDownload, minHistoryStep, minCommitmentHistoryStep, err := getMinimumBlocksToDownload(
-				ctx, blockReader, maxStateStep, stepSize, historyPrune, commitmentHistoryPrune)
+				ctx, blockReader, tx, maxStateStep, stepSize, historyPrune, commitmentHistoryPrune)
 			if err != nil {
 				return err
 			}

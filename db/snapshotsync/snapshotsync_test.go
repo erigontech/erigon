@@ -24,6 +24,8 @@ import (
 	"github.com/stretchr/testify/assert"
 
 	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/kv/dbcfg"
+	"github.com/erigontech/erigon/db/kv/memdb"
 	"github.com/erigontech/erigon/db/kv/prune"
 	"github.com/erigontech/erigon/db/services"
 	"github.com/erigontech/erigon/db/snapcfg"
@@ -31,6 +33,16 @@ import (
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/chain/networkname"
 )
+
+func beginTestRoTx(t *testing.T) kv.Tx {
+	t.Helper()
+	tx, err := memdb.NewTestDB(t, dbcfg.ChainDB).BeginRo(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(tx.Rollback)
+	return tx
+}
 
 type frozenBody struct {
 	blockNum  uint64
@@ -343,7 +355,8 @@ func TestGetMinimumBlocksToDownload_TwoCutoffs(t *testing.T) {
 	}
 	// maxStateStep=150 → stateTxNum=15_000. Only block 100 (baseTxNum 10_000) is
 	// below the cutoff, so minToDownload=1000-100=900 and minBlock=1000-900=100.
-	minBlock, historyStep, commitmentStep, err := getMinimumBlocksToDownload(context.Background(), br, 150, stepSize, 100, 300)
+	tx := beginTestRoTx(t)
+	minBlock, historyStep, commitmentStep, err := getMinimumBlocksToDownload(context.Background(), br, tx, 150, stepSize, 100, 300)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -367,7 +380,8 @@ func TestGetMinimumBlocksToDownload_MinBlock(t *testing.T) {
 	}
 	// maxStateStep=150 → stateTxNum=15_000. Only block 100 (baseTxNum 10_000) is
 	// below the cutoff, so minToDownload=300-100=200 and minBlock=300-200=100.
-	minBlock, historyStep, commitmentStep, err := getMinimumBlocksToDownload(context.Background(), br, 150, stepSize, 200, 200)
+	tx := beginTestRoTx(t)
+	minBlock, historyStep, commitmentStep, err := getMinimumBlocksToDownload(context.Background(), br, tx, 150, stepSize, 200, 200)
 	if err != nil {
 		t.Fatal(err)
 	}
