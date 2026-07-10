@@ -63,12 +63,16 @@ func whaleStorageNode(pk [][]byte, upds []Update, accHash []byte) (*prefixNode, 
 	return node, append([]byte(nil), accHash[:64]...)
 }
 
-func makeFoldPool(ms *MockState, workers int) *foldPool {
+func makeFoldPoolFactory(factory TrieContextFactory, workers int) *foldPool {
 	return &foldPool{
 		numWorkers: workers,
-		ctxFactory: mockTrieCtxFactory(ms),
+		ctxFactory: factory,
 		workerPool: &sync.Pool{New: func() any { return NewHexPatriciaHashed(length.Addr, nil, DefaultTrieConfig()) }},
 	}
+}
+
+func makeFoldPool(ms *MockState, workers int) *foldPool {
+	return makeFoldPoolFactory(mockTrieCtxFactory(ms), workers)
 }
 
 // oracleRoot computes the reference account state root via the sequential ModeDirect engine.
@@ -283,15 +287,11 @@ func requireReconciledFoldParity(t *testing.T, addr, accHash []byte, accUpd Upda
 	requireBranchParity(t, oracleMs, msFold)
 }
 
-// TestTruthtreeFold_OnDiskSiblingReconciliation is the net-new crux: block 2 touches a scattered
-// subset of block 1's on-disk storage, so most of the subtree is untouched on-disk siblings the
-// direct fold never sees in the touched trie. The hand-rolled fresh fold drops them and diverges
-// (the RED baseline); the reconciling fold reads the on-disk branches and reproduces the root.
-func TestTruthtreeFold_OnDiskSiblingReconciliation(t *testing.T) {
-	addr, accHash, _, accUpd, pk, upds, groups := whaleByNibble(20_000)
-
-	var k2 [][]byte
-	var u2 []Update
+// reconcileTwoBlock builds the two-block reconciliation corpus: block 1 seeds a whale's storage
+// subtree on disk, block 2 re-touches a scattered i%7 subset (flipping one byte per slot). Most of
+// the subtree is untouched on-disk siblings the direct fold never sees in the touched trie.
+func reconcileTwoBlock(slots int) (addr, accHash []byte, accUpd Update, pk [][]byte, upds []Update, k2 [][]byte, u2 []Update) {
+	addr, accHash, _, accUpd, pk, upds, groups := whaleByNibble(slots)
 	for x := range 16 {
 		for i, kv := range groups[x] {
 			if i%7 != 0 {
@@ -303,6 +303,15 @@ func TestTruthtreeFold_OnDiskSiblingReconciliation(t *testing.T) {
 			u2 = append(u2, nu)
 		}
 	}
+	return addr, accHash, accUpd, pk, upds, k2, u2
+}
+
+// TestTruthtreeFold_OnDiskSiblingReconciliation is the net-new crux: block 2 touches a scattered
+// subset of block 1's on-disk storage, so most of the subtree is untouched on-disk siblings the
+// direct fold never sees in the touched trie. The hand-rolled fresh fold drops them and diverges
+// (the RED baseline); the reconciling fold reads the on-disk branches and reproduces the root.
+func TestTruthtreeFold_OnDiskSiblingReconciliation(t *testing.T) {
+	addr, accHash, accUpd, pk, upds, k2, u2 := reconcileTwoBlock(20_000)
 
 	oracle, _ := seqTwoBlockOracle(t, pk, upds, k2, u2)
 
@@ -359,6 +368,115 @@ func TestTruthtreeFold_DeleteToEmpty(t *testing.T) {
 		}
 	}
 	requireReconciledFoldParity(t, addr, accHash, accUpd, pk, upds, k2, u2)
+}
+
+// seedReconcileDisk returns a fresh store with block 1 folded onto disk and block 2 plain-applied,
+// ready for the reconciling fold to read its on-disk siblings from.
+func seedReconcileDisk(t *testing.T, pk [][]byte, upds, u2 []Update, k2 [][]byte) *MockState {
+	t.Helper()
+	ms := NewMockState(t)
+	ms.SetConcurrentCommitment(true)
+	seqStorageDisk(t, ms, pk, upds)
+	require.NoError(t, ms.applyPlainUpdates(k2, u2))
+	return ms
+}
+
+// TestTruthtreeFold_ReconciledReadFailsClosed injects a read fault on the reconciling fold's on-disk
+// Branch path — once at the depth-64 seed, once at a deeper sibling unfold — and pins fail-closed:
+// the error surfaces, no deferred update is returned, and the branch store is left untouched.
+func TestTruthtreeFold_ReconciledReadFailsClosed(t *testing.T) {
+	ctx := context.Background()
+	_, accHash, _, pk, upds, k2, u2 := reconcileTwoBlock(5_000)
+
+	cases := []struct {
+		name  string
+		after int
+	}{
+		{"seed read", 1},    // the very first Branch read is the depth-64 seed
+		{"sibling read", 6}, // a later read is a deeper on-disk-sibling unfold
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			ms := seedReconcileDisk(t, pk, upds, u2, k2)
+			before := snapshotBranches(ms)
+
+			fs := newFailState(ms)
+			fs.branch = injector{after: tc.after, kind: failError}
+
+			fp := makeFoldPoolFactory(fs.factory(), runtime.NumCPU())
+			node2, accPrefix := whaleStorageNode(k2, u2, accHash)
+			sr, deferred, err := foldReconciledStorageRoot(fp, ctx, node2, accPrefix)
+			require.ErrorIs(t, err, errInjected)
+			require.Nil(t, deferred, "a read fault must drop every deferred update")
+			require.Equal(t, common.Hash{}, sr)
+			require.True(t, fs.branch.fired, "the injected Branch fault never fired")
+			requireBranchesUnchanged(t, before, ms)
+		})
+	}
+}
+
+// TestTruthtreeFold_ResolveSubtreeReadFailsClosed pins that the nil-update pre-pass fails closed on
+// the first read error: it surfaces the error, reports no empty terminator, and never crosses planes
+// (a storage key is never read as an account).
+func TestTruthtreeFold_ResolveSubtreeReadFailsClosed(t *testing.T) {
+	storageLeaf := &prefixNode{plainKey: bytes.Repeat([]byte{0xab}, length.Addr+length.Hash)}
+	root := &prefixNode{bitmap: uint16(1) << 2, children: []*prefixNode{storageLeaf}}
+
+	readAccount := func([]byte) (*Update, error) {
+		t.Fatal("resolveSubtreeUpdates read a storage key as an account")
+		return nil, nil
+	}
+	readStorage := func([]byte) (*Update, error) { return nil, errInjected }
+
+	hasEmpty, err := resolveSubtreeUpdates(root, length.Addr, readAccount, readStorage)
+	require.ErrorIs(t, err, errInjected)
+	require.False(t, hasEmpty, "a read fault must not report a resolved empty terminator")
+}
+
+// TestTruthtreeFold_ReconciledContextCancel cancels the context around the reconciling fold and pins
+// a clean unwind: the cancellation surfaces, no deferred update is returned, the store is untouched,
+// and a fresh fold on a live context still reproduces the sequential root and branches.
+func TestTruthtreeFold_ReconciledContextCancel(t *testing.T) {
+	addr, accHash, accUpd, pk, upds, k2, u2 := reconcileTwoBlock(5_000)
+
+	ms := seedReconcileDisk(t, pk, upds, u2, k2)
+	before := snapshotBranches(ms)
+
+	fp := makeFoldPool(ms, runtime.NumCPU())
+	node2, accPrefix := whaleStorageNode(k2, u2, accHash)
+
+	cancelled, cancel := context.WithCancel(context.Background())
+	cancel()
+	_, deferred, err := foldReconciledStorageRoot(fp, cancelled, node2, accPrefix)
+	require.ErrorIs(t, err, context.Canceled)
+	require.Nil(t, deferred, "a cancelled fold must drop every deferred update")
+	requireBranchesUnchanged(t, before, ms)
+
+	requireReconciledFoldParity(t, addr, accHash, accUpd, pk, upds, k2, u2)
+}
+
+// TestTruthtreeFold_ReconciledPinScope hands the reconciling fold a context that flags any read
+// arriving after its own cleanup (the mmap use-after-munmap class) and asserts the fold matches the
+// sequential root and branches with zero post-cleanup reads — its reads stay in their own pin scope.
+func TestTruthtreeFold_ReconciledPinScope(t *testing.T) {
+	ctx := context.Background()
+	addr, accHash, accUpd, pk, upds, k2, u2 := reconcileTwoBlock(5_000)
+	oracle, oracleMs := seqTwoBlockOracle(t, pk, upds, k2, u2)
+
+	ms := seedReconcileDisk(t, pk, upds, u2, k2)
+	ps := &pinState{ms: ms}
+	fp := makeFoldPoolFactory(ps.factory(), runtime.NumCPU())
+	node2, accPrefix := whaleStorageNode(k2, u2, accHash)
+
+	sr, deferred, err := foldReconciledStorageRoot(fp, ctx, node2, accPrefix)
+	require.NoError(t, err)
+	root, err := wrapAccountRoot(ms, addr, accUpd, sr)
+	require.NoError(t, err)
+	require.Equal(t, oracle, root, "pin-scoped reconciled root != sequential")
+	_, err = ApplyDeferredBranchUpdates(deferred, 1, ms.PutBranch)
+	require.NoError(t, err)
+	requireBranchParity(t, oracleMs, ms)
+	require.Zero(t, ps.violations.Load(), "the reconciled fold read a context after its own cleanup")
 }
 
 // truthtreeFoldAllocCeiling caps the direct fold's per-op allocation on the 750k fresh-whale

@@ -153,10 +153,10 @@ The frontier **DAG + pool + merge/finale stitch are unchanged.** A leaf task tod
 **Files:**
 - Modify: `execution/commitment/truthtree_fold_test.go`
 
-- [ ] failable MockState on the recursion's `Branch`/read paths — fail-closed (drop deferred, write nothing)
-- [ ] ctx-cancel mid-fold: clean unwind; each goroutine's reads stay in its own `BeginTemporalRo` pin
-- [ ] `go test -race ./execution/commitment/` clean flag-on
-- [ ] run tests — must pass before next task
+- [x] failable MockState on the recursion's `Branch`/read paths — fail-closed (drop deferred, write nothing). `TestTruthtreeFold_ReconciledReadFailsClosed` injects a `failState` Branch fault on the reconciling fold (`foldReconciledStorageRoot`) at the depth-64 seed and at a deeper on-disk-sibling unfold; both surface `errInjected`, return nil deferred + zero storage root, and leave the branch store byte-unchanged (`requireBranchesUnchanged`). `TestTruthtreeFold_ResolveSubtreeReadFailsClosed` pins the nil-update pre-pass fails closed on the first read error without crossing planes. The two fresh deferred paths were already covered by Task 4's `TestTruthtreeFold_FreshDeferredFailClosed`. Reused the existing `failState`/`injector` harness; factored `makeFoldPoolFactory` to pool the fold onto a fault-injecting ctx
+- [x] ctx-cancel mid-fold: clean unwind; each goroutine's reads stay in its own `BeginTemporalRo` pin. `TestTruthtreeFold_ReconciledContextCancel` runs the reconciling fold on an already-cancelled context → `context.Canceled`, nil deferred, store untouched, then a fresh live-context fold reproduces the sequential root + branches (`requireReconciledFoldParity`). `TestTruthtreeFold_ReconciledPinScope` runs the fold through a `pinState` ctx that flags any read after its own cleanup and asserts root+branch parity with zero post-cleanup reads — the fold confines its `newDeferredStorageWorker` reads to its own pin scope
+- [x] `go test -race ./execution/commitment/` clean flag-on — race-clean on the flag-on parity chains (`LeafFlagParity`, `WhaleStorageFlagParity`, `FreshDeleteFallback`, `FreshWhaleStorageDeleteFallback`) plus the new Reconciled read/cancel/pin tests
+- [x] run tests — `go test ./execution/commitment/ -count=1` green (15.6s), `-race` clean flag-on, `make lint` 0 issues
 
 ### Task 9: Performance gate
 
