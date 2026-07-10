@@ -117,10 +117,10 @@ The frontier **DAG + pool + merge/finale stitch are unchanged.** A leaf task tod
 - Modify: `execution/commitment/truthtree_fold.go`
 - Modify: `execution/commitment/truthtree_fold_test.go`
 
-- [ ] recurse account branches (mixed depths) and cross the depth-64 seam inline (fold storage subtree → root, hash account leaf over fields+root) — no seam special-case
-- [ ] apply the mount-wall strip so a leaf-task subtree returns the parent-stitchable cell (invariant M), matching `stripCellToMountWall`
-- [ ] tests vs oracle: `buildMixedCorpus` account-plane subtree, depth-{2,64,65} byte parity
-- [ ] run tests — must pass before next task
+- [x] recurse account branches (mixed depths) and cross the depth-64 seam inline — `foldNode` now branches on `branchDepth >= 64` (storage plane) vs account plane; a child with `plainKey != nil && bitmap != 0` is the seam. Three seam representations matching the sequential engine's stored cell: single storage slot held inline as `storageAddr` (`childSeamAccountInline`), single storage first-nibble over a sub-branch held as storage-extension + sub-branch hash (`childSeamAccountExt`), and a ≥2-nibble storage branch held as the branch-root hash (`childSeamAccount`). `foldFreshAccountRoot`/`foldFreshAccountRootDeferred` fold a whole fresh account trie → state root + branch records
+- [x] apply the mount-wall strip so a leaf-task subtree returns the parent-stitchable cell (invariant M) — `foldFreshAccountSubtreeCellDeferred`/`foldSubtreeCell` fold a top-nibble account subtree, wrap its branch hash in a full-prefix cell, and call `stripCellToMountWall`; `TestTruthtreeFold_AccountPlaneMountWall` stitches those cells into the finale root wall and reproduces the oracle root + branch store
+- [x] tests vs oracle: `buildMixedCorpus` account-plane subtree, depth-{2,64,65} byte parity — `TestTruthtreeFold_AccountPlaneFresh` (2k/20k keys, direct whole-trie fold) + `TestTruthtreeFold_AccountPlaneMountWall` (mount-wall stitched); `requireSpansAllPlanes` asserts the corpus exercises account branches (depth 2), storage-root seams (depth 64), and interior storage branches (depth 65). Discovery: the account-with-storage cell has three distinct on-disk encodings (inline slot / storage-extension / branch-root hash); the root hash matched from the start, but stored branch-record bytes only reached parity once all three were reproduced
+- [x] run tests — `go test ./execution/commitment/ -count=1` green, `-race` clean, `make lint` 0 issues, `make erigon integration` builds
 
 ### Task 6: Flag plumbing + wire into the leaf task (parallel regime only)
 

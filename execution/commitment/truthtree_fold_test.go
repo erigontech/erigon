@@ -19,6 +19,7 @@ package commitment
 import (
 	"context"
 	"fmt"
+	"math/bits"
 	"runtime"
 	"sync"
 	"testing"
@@ -28,6 +29,7 @@ import (
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/empty"
 	"github.com/erigontech/erigon/common/length"
+	"github.com/erigontech/erigon/execution/commitment/nibbles"
 )
 
 // whaleStorageNode builds the touched prefix trie for the whale corpus and returns the depth-64
@@ -400,6 +402,125 @@ func TestTruthtreeFold_AllocCeiling(t *testing.T) {
 	require.Lessf(t, got, int64(truthtreeFoldAllocCeiling),
 		"fold alloc %.1f MB/op exceeds %.0f MB ceiling — buffer-reuse regression toward the ~575 MB naive fold",
 		float64(got)/(1<<20), float64(truthtreeFoldAllocCeiling)/(1<<20))
+}
+
+// freshAccountTrie builds the touched prefix trie for a fresh account corpus and returns its root.
+func freshAccountTrie(pk [][]byte, upds []Update) *prefixNode {
+	tr := newPrefixTrie()
+	for i, k := range pk {
+		tr.Insert(KeyToHexNibbleHash(k), k, &upds[i])
+	}
+	return tr.root
+}
+
+// branchDepths counts the stored branch records by their nibble-path depth, so a test can assert a
+// corpus actually exercises account branches (depth < 64), the storage-root seam (depth 64), and
+// interior storage branches (depth > 64).
+func branchDepths(ms *MockState) map[int]int {
+	out := make(map[int]int)
+	for k := range ms.cm {
+		out[len(nibbles.CompactToHex([]byte(k)))]++
+	}
+	return out
+}
+
+func requireSpansAllPlanes(t *testing.T, ms *MockState) {
+	t.Helper()
+	depths := branchDepths(ms)
+	require.Positive(t, depths[2], "corpus must have account branches at depth 2")
+	require.Positive(t, depths[64], "corpus must have storage-root branches at depth 64 (multi-nibble storage)")
+	require.Positive(t, depths[65], "corpus must have interior storage branches at depth 65")
+}
+
+// TestTruthtreeFold_AccountPlaneFresh folds a fresh mixed account/storage corpus directly through
+// the account-plane recursion — recursing account branches at mixed depths and crossing every
+// depth-64 storage seam inline — and pins its state root and every emitted branch record
+// byte-for-byte against the sequential oracle at depths {2, 64, 65}.
+func TestTruthtreeFold_AccountPlaneFresh(t *testing.T) {
+	for _, n := range []int{2_000, 20_000} {
+		t.Run(fmt.Sprintf("keys=%d", n), func(t *testing.T) {
+			pk, upds := buildMixedCorpus(int64(n), n)
+			root := freshAccountTrie(pk, upds)
+			require.Empty(t, root.ext, "a large mixed corpus root branches at depth 0")
+
+			oracle := oracleRoot(t, pk, upds)
+			oracleMs := seqFreshBranchOracle(t, pk, upds)
+			requireSpansAllPlanes(t, oracleMs)
+
+			sr, deferred, err := foldFreshAccountRootDeferred(root)
+			require.NoError(t, err)
+			require.Equal(t, oracle, sr[:], "direct account fold state root != sequential oracle")
+
+			got := NewMockState(t)
+			_, err = ApplyDeferredBranchUpdates(deferred, 1, got.PutBranch)
+			require.NoError(t, err)
+			requireBranchParity(t, oracleMs, got)
+
+			pure, err := foldFreshAccountRoot(root)
+			require.NoError(t, err)
+			require.Equal(t, sr, pure, "deferred account fold root != pure account fold root")
+		})
+	}
+}
+
+// TestTruthtreeFold_AccountPlaneMountWall folds each top-nibble account subtree into its mount-wall
+// cell via foldFreshAccountSubtreeCellDeferred (invariant M: stripCellToMountWall over the subtree
+// prefix), stitches those cells into the finale root wall, and folds to the state root — asserting
+// the leaf-task cells are parent-stitchable by reproducing the oracle root and branch store.
+func TestTruthtreeFold_AccountPlaneMountWall(t *testing.T) {
+	ctx := context.Background()
+	const n = 20_000
+	pk, upds := buildMixedCorpus(7_007, n)
+	root := freshAccountTrie(pk, upds)
+	require.Empty(t, root.ext, "a large mixed corpus root branches at depth 0")
+
+	oracle := oracleRoot(t, pk, upds)
+	oracleMs := seqFreshBranchOracle(t, pk, upds)
+	requireSpansAllPlanes(t, oracleMs)
+
+	ms := NewMockState(t)
+	require.NoError(t, ms.applyPlainUpdates(pk, upds))
+	fp := makeFoldPool(ms, 1)
+	base, release := newDeferredStorageWorker(fp.workerPool, fp.ctxFactory, nil)
+	defer release()
+	require.NoError(t, unfoldRootWall(ctx, base))
+	seedRootBase(base)
+
+	var (
+		cells    [16]cell
+		present  [16]bool
+		deferred []*DeferredBranchUpdate
+	)
+	childIdx := 0
+	for bm := root.bitmap; bm != 0; {
+		nib := bits.TrailingZeros16(bm)
+		child := root.children[childIdx]
+		require.NotZero(t, child.bitmap, "top-nibble subtree must be a branch for a 20k corpus")
+		c, d, err := foldFreshAccountSubtreeCellDeferred(child, root.ext, nib)
+		require.NoError(t, err)
+		cells[nib] = c
+		present[nib] = true
+		deferred = append(deferred, d...)
+		childIdx++
+		bm &^= uint16(1) << nib
+	}
+	stitchSplitCells(base, &cells, &present)
+	if base.activeRows == 0 {
+		base.activeRows = 1
+	}
+	for base.activeRows > 0 {
+		require.NoError(t, base.fold())
+	}
+	deferred = append(deferred, base.TakeDeferredUpdates()...)
+
+	gotRoot, err := base.RootHash()
+	require.NoError(t, err)
+	require.Equal(t, oracle, gotRoot, "mount-wall stitched root != sequential oracle")
+
+	got := NewMockState(t)
+	_, err = ApplyDeferredBranchUpdates(deferred, 1, got.PutBranch)
+	require.NoError(t, err)
+	requireBranchParity(t, oracleMs, got)
 }
 
 func TestTruthtreeFold_ErrorPaths(t *testing.T) {
