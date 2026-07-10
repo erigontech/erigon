@@ -1601,13 +1601,13 @@ func doIntegrity(ctx context.Context, cliCtx *cli.Command) error {
 	cfg := ethconfig.NewSnapCfg(false, true, true, chainConfig.ChainName)
 
 	res, clean, err := openSnaps(ctx, cfg, dirs, chainDB, logger)
-	borSnaps, blockFileBuilder, agg := res.BorSnaps, res.BlockRetire, res.Aggregator
+	borSnaps, blockRetire, agg := res.BorSnaps, res.BlockRetire, res.Aggregator
 	if err != nil {
 		return err
 	}
 	defer clean()
 
-	defer blockFileBuilder.MadvNormal().DisableReadAhead()
+	defer blockRetire.MadvNormal().DisableReadAhead()
 	defer agg.MadvNormal().DisableReadAhead()
 
 	db, err := temporal.New(chainDB, agg)
@@ -1616,8 +1616,8 @@ func doIntegrity(ctx context.Context, cliCtx *cli.Command) error {
 	}
 	defer db.Close()
 
-	blockReader, _ := blockFileBuilder.IO()
-	heimdallStore, _ := blockFileBuilder.BorStore()
+	blockReader, _ := blockRetire.IO()
+	heimdallStore, _ := blockRetire.BorStore()
 
 	var commitmentHistoryEnabled bool
 	if err := chainDB.View(ctx, func(tx kv.Tx) error {
@@ -1821,7 +1821,7 @@ func doCheckCommitmentHistAtBlk(ctx context.Context, cliCtx *cli.Command, logger
 		return err
 	}
 	defer db.Close()
-	blockReader, _ := blockFileBuilder.IO()
+	blockReader, _ := blockRetire.IO()
 	blockNum := cliCtx.Uint64("block")
 	if err = integrity.CheckCommitmentHistAtBlk(ctx, db, blockReader, blockNum, log.LvlInfo, logger); err != nil {
 		return fmt.Errorf("checkCommitmentHistAtBlk: %d, %w", blockNum, err)
@@ -1846,7 +1846,7 @@ func doCheckStateRootByHistory(ctx context.Context, cliCtx *cli.Command, logger 
 		return err
 	}
 	defer db.Close()
-	blockReader, _ := blockFileBuilder.IO()
+	blockReader, _ := blockRetire.IO()
 	from := cliCtx.Uint64("from")
 	to := cliCtx.Uint64("to")
 	if !cliCtx.IsSet("to") {
@@ -1891,7 +1891,7 @@ func doCheckRCacheRootAtBlk(ctx context.Context, cliCtx *cli.Command, logger log
 		return err
 	}
 	defer db.Close()
-	blockReader, _ := blockFileBuilder.IO()
+	blockReader, _ := blockRetire.IO()
 	blockNum := cliCtx.Uint64("block")
 	failFast := cliCtx.Bool("failFast")
 	if err := integrity.CheckRCacheRootAtBlk(ctx, db, blockReader, chainConfig, blockNum, failFast, logger); err != nil {
@@ -1919,7 +1919,7 @@ func doCheckRCacheRootAtBlkRange(ctx context.Context, cliCtx *cli.Command, logge
 		return err
 	}
 	defer db.Close()
-	blockReader, _ := blockFileBuilder.IO()
+	blockReader, _ := blockRetire.IO()
 
 	from := cliCtx.Uint64("from")
 	to := cliCtx.Uint64("to")
