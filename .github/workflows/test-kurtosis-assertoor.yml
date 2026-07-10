@@ -63,9 +63,12 @@ jobs:
     name: build-erigon-image
     if: ${{ !inputs.cl-images-only && !contains(github.event.pull_request.labels.*.name, 'skip-uncaching') }}
     runs-on: ubuntu-latest
+    timeout-minutes: 60
     steps:
       - name: Fast checkout git repository
         uses: actions/checkout@v7
+        with:
+          persist-credentials: false
 
       - name: Conditional Docker Login
         # Only login if we can. Workflow works without it but we want to avoid
@@ -180,6 +183,7 @@ jobs:
   warm-third-party-images:
     if: ${{ inputs.cl-images-only }}
     runs-on: ubuntu-latest
+    timeout-minutes: 60
     steps:
       - name: Conditional Docker Login
         if: |
@@ -196,6 +200,7 @@ jobs:
         uses: actions/checkout@v7
         with:
           sparse-checkout: .github/workflows/kurtosis
+          persist-credentials: false
 
       - name: Load image versions from the .io files (single source of truth)
         run: |
@@ -310,6 +315,7 @@ jobs:
     # cache; there's nothing for the matrix to do (the test step is skipped).
     if: ${{ !inputs.cache-warming-only && !inputs.cl-images-only && !contains(github.event.pull_request.labels.*.name, 'skip-uncaching') }}
     runs-on: ubuntu-latest
+    timeout-minutes: 60
     strategy:
       # In merge_group: cancel sibling shards on first failure so ci-gate's
       # `needs` reach terminal state quickly and the broken PR can be evicted.
@@ -374,6 +380,8 @@ jobs:
     steps:
       - name: Fast checkout git repository
         uses: actions/checkout@v7
+        with:
+          persist-credentials: false
 
       - name: Conditional Docker Login
         # Only login if we can. Workflow works without it but we want to avoid

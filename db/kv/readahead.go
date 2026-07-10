@@ -97,10 +97,7 @@ func NewReadAhead(ctx context.Context, db RoDB, table string, cfg ReadAheadCfg) 
 	if db == nil || len(cfg.Bounds) < 2 {
 		return nil // Close/SetPos are nil-safe
 	}
-	workers := cfg.Workers
-	if workers < 1 {
-		workers = 1
-	}
+	workers := max(1, cfg.Workers)
 	ctx, cancel := context.WithCancel(ctx)
 	r := &ReadAhead{cancel: cancel, done: make(chan struct{}), warmValues: cfg.WarmValues, bounds: cfg.Bounds}
 	r.turnCond = sync.NewCond(&r.mu)
