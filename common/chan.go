@@ -28,12 +28,33 @@ var ErrUnwind = errors.New("unwound")
 // NilIfCanceled converts context cancellation (bare or wrapped) into nil, for
 // paths where routine cancellation is not an error — e.g. errgroup members,
 // where a Canceled return would occupy the group's first-error slot ahead of
-// a concurrent real failure.
+// a concurrent real failure. A joined error counts as cancellation only if
+// every branch does; any real branch preserves the original error.
 func NilIfCanceled(err error) error {
-	if errors.Is(err, context.Canceled) {
+	if err == nil || isAllCanceled(err) {
 		return nil
 	}
 	return err
+}
+
+func isAllCanceled(err error) bool {
+	switch x := err.(type) {
+	case interface{ Unwrap() []error }:
+		errs := x.Unwrap()
+		if len(errs) == 0 {
+			return false
+		}
+		for _, e := range errs {
+			if !isAllCanceled(e) {
+				return false
+			}
+		}
+		return true
+	case interface{ Unwrap() error }:
+		return isAllCanceled(x.Unwrap())
+	default:
+		return errors.Is(err, context.Canceled)
+	}
 }
 
 // FastContextErr is faster than ctx.Err() because usually it doesn't lock an internal mutex.

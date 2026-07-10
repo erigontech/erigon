@@ -29,8 +29,18 @@ func TestNilIfCanceled(t *testing.T) {
 	require.NoError(t, NilIfCanceled(nil))
 	require.NoError(t, NilIfCanceled(context.Canceled))
 	require.NoError(t, NilIfCanceled(fmt.Errorf("drain: %w", context.Canceled)))
+	require.NoError(t, NilIfCanceled(errors.Join(context.Canceled, fmt.Errorf("drain: %w", context.Canceled))),
+		"a join that is cancellation on every branch is still cancellation")
 
 	boom := errors.New("boom")
 	require.Same(t, boom, NilIfCanceled(boom))
 	require.ErrorIs(t, NilIfCanceled(context.DeadlineExceeded), context.DeadlineExceeded)
+
+	joined := errors.Join(context.Canceled, boom)
+	require.ErrorIs(t, NilIfCanceled(joined), boom,
+		"a real branch of a joined error must survive the filter")
+	require.ErrorIs(t, NilIfCanceled(errors.Join(boom, context.Canceled)), boom)
+	wrapped := fmt.Errorf("teardown: %w", joined)
+	require.ErrorIs(t, NilIfCanceled(wrapped), boom,
+		"a wrapped join with a real branch must survive the filter")
 }
