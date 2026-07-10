@@ -52,8 +52,12 @@ Naming:
  Stream - high-level iterator-like api over Table/InvertedIndex/History/Domain. Server-side-streaming-friendly. See package `stream`
 
 Methods Naming:
- Prune: delete old data
+ Prune: delete old data from DB (db rows already written to files)
  Unwind: delete recent data
+ Collate: read one step of data out of the db, ready to write into a file
+ BuildFiles: write (and index) collated steps into new immutable files
+ Merge: fold adjacent files into a bigger one - only produces a new file; inputs become garbage
+ Retire: drop files from the live set (merged-away, or aged past the prune window); unlink deferred until no reader references them
  Get: exact match of criteria
  Range: [from, to). from=nil means StartOfTable, to=nil means EndOfTable, rangeLimit=-1 means Unlimited
      Range is analog of SQL's: SELECT * FROM Table WHERE k>=from AND k<to ORDER BY k ASC/DESC LIMIT n

@@ -125,6 +125,7 @@ type BlockRetire interface {
 		onFinishRetire func() error,
 		onDone func()) bool
 	BuildMissedIndicesIfNeed(ctx context.Context, logPrefix string, notifier DBEventNotifier) error
+	RetireTransactionFiles(blockTo uint64, onDelete func(l []string) error) (bool, error)
 	SetWorkers(workers int)
 	GetWorkers() int
 	Close()
@@ -139,7 +140,7 @@ type BlockSnapshots interface {
 	OpenFolder() error
 	OpenSegments(types []snaptype.Type, alignMin bool) error
 	SegmentsMax() uint64
-	Delete(fileNames ...string) error
+	RetireFiles(fileNames ...string) error
 	Types() []snaptype.Type
 	Close()
 	DownloadComplete()

@@ -235,7 +235,7 @@ func TestReadersRaceRetire(t *testing.T) {
 	// Retire subsumed sub-segments concurrently with the readers.
 	require.NoError(s.RemoveOverlaps(nil))
 	for _, f := range subNames {
-		_ = s.Delete(f)
+		_ = s.RetireFiles(f)
 	}
 
 	time.Sleep(20 * time.Millisecond)

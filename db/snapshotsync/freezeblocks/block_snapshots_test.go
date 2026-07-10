@@ -70,7 +70,7 @@ func TestBlockReaderPrefersTxBlockView(t *testing.T) {
 	// Pin a view, then retire the [0, mergeLimit) tx segment from the live set.
 	tx := blockFilesTxStub{view: snapshots.View()}
 	defer tx.view.Close()
-	require.NoError(t, snapshots.Delete(snaptype.SegmentFileName(ver, 0, testMergeLimit, snaptype2.Transactions.Enum())))
+	require.NoError(t, snapshots.RetireFiles(snaptype.SegmentFileName(ver, 0, testMergeLimit, snaptype2.Transactions.Enum())))
 
 	const blk = testMergeLimit / 2 // inside the retired [0, mergeLimit) segment
 
@@ -83,6 +83,54 @@ func TestBlockReaderPrefersTxBlockView(t *testing.T) {
 	_, okTx, relTx := blockReader.viewSingleFile(tx, snaptype2.Transactions, blk)
 	relTx()
 	require.True(t, okTx, "reader must resolve the retired segment via the tx's pinned view")
+}
+
+// Transaction segments below the cutoff are retired (gone from the live set, files handed
+// to the seeder); segments at/above the cutoff and other block types stay.
+func TestRetireMergedTransactionFilesBelow(t *testing.T) {
+	logger := log.New()
+	dir := t.TempDir()
+	cfg := ethconfig.Defaults.Snapshot
+	cfg.ChainName = networkname.Mainnet
+	snapshots := blocksnapshots.NewRoSnapshots(cfg, dir, logger)
+	defer snapshots.Close()
+
+	ver := version.V1_0
+	for _, typ := range snaptype2.BlockSnapshotTypes {
+		createTestSegmentFile(t, 0, testMergeLimit, typ.Enum(), dir, ver, logger)
+		createTestSegmentFile(t, testMergeLimit, 2*testMergeLimit, typ.Enum(), dir, ver, logger)
+	}
+	require.NoError(t, snapshots.OpenFolder())
+
+	var deleted []string
+	retired, err := snapshots.RetireMergedFilesBelow(snaptype2.Transactions.Enum(), testMergeLimit+testMergeLimit/2, func(files []string) error {
+		deleted = append(deleted, files...)
+		return nil
+	})
+	require.NoError(t, err)
+	require.True(t, retired)
+
+	// The seeder is told about the [0, mergeLimit) tx segment: its .seg + both indexes.
+	require.ElementsMatch(t, []string{
+		snaptype.SegmentFileName(ver, 0, testMergeLimit, snaptype2.Transactions.Enum()),
+		snaptype.IdxFileName(ver, 0, testMergeLimit, snaptype2.Transactions.Enum().String()),
+		snaptype.IdxFileName(ver, 0, testMergeLimit, snaptype2.Indexes.TxnHash2BlockNum.Name),
+	}, deleted)
+
+	// Gone from the live set...
+	_, ok, rel := snapshots.BaseRoSnapshots.ViewSingleFile(snaptype2.Transactions, testMergeLimit/2)
+	rel()
+	require.False(t, ok, "retired tx segment must be gone from the live set")
+
+	// ...the [mergeLimit, 2*mergeLimit) tx segment stays (its range ends at the cutoff)...
+	_, ok, rel = snapshots.BaseRoSnapshots.ViewSingleFile(snaptype2.Transactions, testMergeLimit)
+	rel()
+	require.True(t, ok, "tx segment at/above the cutoff must be kept")
+
+	// ...and headers of the same range are untouched.
+	_, ok, rel = snapshots.BaseRoSnapshots.ViewSingleFile(snaptype2.Headers, testMergeLimit/2)
+	rel()
+	require.True(t, ok, "only transaction segments are retired")
 }
 
 func TestDumpRangeErrorsWhenRangeAlreadyClaimed(t *testing.T) {

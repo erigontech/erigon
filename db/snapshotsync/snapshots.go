@@ -1439,7 +1439,9 @@ func (s *BaseRoSnapshots) delete(fileName string) *DirtySegment {
 }
 
 // prune visible segments
-func (s *BaseRoSnapshots) Delete(fileNames ...string) error {
+// RetireFiles drops the named segments from the live set. Physical unlink is deferred
+// to the reader watermark via the generation chain, so files pinned by open views survive.
+func (s *BaseRoSnapshots) RetireFiles(fileNames ...string) error {
 	if s == nil {
 		return nil
 	}
@@ -1455,6 +1457,48 @@ func (s *BaseRoSnapshots) Delete(fileNames ...string) error {
 	}
 	s.recalcVisibleFiles(s.alignMin, retired)
 	return nil
+}
+
+// RetireMergedFilesBelow retires fully-merged segments of type typ ending below blockTo,
+// passing the removed files (.seg + indexes) to onDelete for the seeder. The whole-file
+// check keeps a range straddling blockTo from being partially removed. The View held here
+// pins the outgoing generation so the physical unlink runs off the dirty lock.
+func (s *BaseRoSnapshots) RetireMergedFilesBelow(typ snaptype.Enum, blockTo uint64, onDelete func(l []string) error) (bool, error) {
+	if s == nil {
+		return false, nil
+	}
+
+	var names, paths []string
+	func() {
+		s.dirtyLock.Lock()
+		defer s.dirtyLock.Unlock()
+		s.dirty[typ].Walk(func(segs []*DirtySegment) bool {
+			for _, sn := range segs {
+				if sn.Decompressor == nil {
+					continue
+				}
+				if sn.To() >= blockTo || sn.To()-sn.From() != snaptype.Erigon2MergeLimit {
+					continue
+				}
+				names = append(names, sn.FileName())
+				paths = append(paths, sn.FilePaths(s.dir)...)
+			}
+			return true
+		})
+	}()
+	if len(names) == 0 {
+		return false, nil
+	}
+
+	if onDelete != nil {
+		if err := onDelete(paths); err != nil {
+			return false, fmt.Errorf("onDelete: %w", err)
+		}
+	}
+
+	v := s.View()
+	defer v.Close()
+	return true, s.RetireFiles(names...)
 }
 
 func (s *BaseRoSnapshots) buildMissedIndices(logPrefix string, ctx context.Context, dirs datadir.Dirs, chainConfig *chain.Config, workers int, logger log.Logger) (newIdxBuilt bool, err error) {

@@ -369,12 +369,12 @@ func TestDeleteSnapshots(t *testing.T) {
 	}
 	require.NoError(s.OpenFolder())
 	for _, f := range retireFiles {
-		require.NoError(s.Delete(f))
+		require.NoError(s.RetireFiles(f))
 		require.False(slices.Contains(s.Files(), f))
 	}
 }
 
-func TestDeleteSnapshotsIsIdempotent(t *testing.T) {
+func TestRetireFilesIsIdempotent(t *testing.T) {
 	logger := testlog.Logger(t, log.LvlCrit)
 	dir := t.TempDir()
 	require := require.New(t)
@@ -389,14 +389,14 @@ func TestDeleteSnapshotsIsIdempotent(t *testing.T) {
 
 	fileName := snaptype.SegmentFileName(version.V1_0, 0, 10_000, snaptype2.Bodies.Enum())
 
-	require.NoError(s.Delete(fileName))
+	require.NoError(s.RetireFiles(fileName))
 	require.False(slices.Contains(s.Files(), fileName))
 
 	require.NotPanics(func() {
-		require.NoError(s.Delete(fileName))
+		require.NoError(s.RetireFiles(fileName))
 	})
 	require.NotPanics(func() {
-		require.NoError(s.Delete("v1.0-999999-1000000-bodies.seg"))
+		require.NoError(s.RetireFiles("v1.0-999999-1000000-bodies.seg"))
 	})
 }
 
@@ -1021,7 +1021,7 @@ func TestRetireVsLiveViewDoesNotCrash(t *testing.T) {
 			subNames = append(subNames, snaptype.SegmentFileName(verOf(i), from, from+1_000, snT.Enum()))
 		}
 	}
-	require.NoError(s.Delete(subNames...))
+	require.NoError(s.RetireFiles(subNames...))
 
 	// Closing the View must not crash.
 	defer func() {

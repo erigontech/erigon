@@ -417,7 +417,7 @@ func SyncSnapshots(
 			if err != nil {
 				return err
 			}
-			err = blockReader.Snapshots().Delete(toDeleteSeg...)
+			err = blockReader.Snapshots().RetireFiles(toDeleteSeg...)
 			if err != nil {
 				return err
 			}
