@@ -73,6 +73,9 @@ func newWitnessCache(blocks, maxMB uint) *witnessCache {
 // witnessResultBytes is the resident size of a result: the summed lengths of
 // its state nodes, codes, keys, and headers.
 func witnessResultBytes(r *ExecutionWitnessResult) uint64 {
+	if r.cachedJSON != nil {
+		return uint64(len(r.cachedJSON))
+	}
 	var n uint64
 	for _, b := range r.State {
 		n += uint64(len(b))

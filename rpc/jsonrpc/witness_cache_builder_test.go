@@ -18,7 +18,6 @@ package jsonrpc
 
 import (
 	"context"
-	"encoding/json"
 	"testing"
 	"time"
 
@@ -194,9 +193,11 @@ func TestWitnessCacheBuilderParity(t *testing.T) {
 	want, err := onDemand.ExecutionWitness(ctx, rpc.BlockNumberOrHash{BlockNumber: &bn}, nil)
 	require.NoError(t, err)
 
-	wantBytes, err := json.Marshal(want)
+	// Compare the served form (rpc.fastJSONResult path): the cache stores a shell
+	// carrying only pre-marshaled bytes, so MarshalFastJSON is what a hit serves.
+	wantBytes, err := want.MarshalFastJSON()
 	require.NoError(t, err)
-	gotBytes, err := json.Marshal(cached)
+	gotBytes, err := cached.MarshalFastJSON()
 	require.NoError(t, err)
 	require.Equal(t, wantBytes, gotBytes, "builder-path witness must be byte-identical to on-demand")
 }

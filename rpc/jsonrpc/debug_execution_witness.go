@@ -3,6 +3,7 @@ package jsonrpc
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"slices"
@@ -550,6 +551,26 @@ type ExecutionWitnessResult struct {
 
 	// lookup map for BLOCKHASH opcode, not serialized to JSON
 	headerByNumber map[uint64]*types.Header
+
+	// cachedJSON, when non-nil, is this result's pre-marshaled JSON. The eager
+	// witness cache stores a shell carrying only this, so a hit serves the bytes
+	// verbatim via MarshalFastJSON instead of re-marshaling the struct.
+	cachedJSON []byte
+}
+
+// executionWitnessResultView drops the fastJSONResult method so json.Marshal
+// encodes the exported fields directly, without recursing through MarshalFastJSON.
+type executionWitnessResultView ExecutionWitnessResult
+
+// MarshalFastJSON is the rpc fast-result path (rpc.fastJSONResult): a cache shell
+// returns its stored bytes verbatim, while a freshly built result marshals its
+// fields exactly as encoding/json would — so cached and on-demand output match.
+func (m *ExecutionWitnessResult) MarshalFastJSON() ([]byte, error) {
+	if m.cachedJSON != nil {
+		return m.cachedJSON, nil
+	}
+	v := executionWitnessResultView(*m)
+	return json.Marshal(&v)
 }
 
 func (m *ExecutionWitnessResult) getHashFn(blockNum uint64) (common.Hash, error) {

@@ -446,12 +446,12 @@ var (
 	}
 	WitnessCacheBlocksFlag = cli.UintFlag{
 		Name:  "witness.cache.blocks",
-		Usage: "Number of recent blocks whose legacy debug_executionWitness result is eagerly cached in memory (embedded RPC only; requires --prune.experimental.include-commitment-history). 0 disables the cache; capped at 96. The --witness.cache.maxmb byte cap usually binds first: 96 blocks can be ~1.1-2.4GB raw.",
+		Usage: "Number of recent blocks whose legacy debug_executionWitness result is eagerly cached in memory (embedded RPC only; requires --prune.experimental.include-commitment-history). 0 disables the cache; capped at 96. Each witness is stored as serialized JSON so a hit is served verbatim; the --witness.cache.maxmb byte cap usually binds first.",
 		Value: 0,
 	}
 	WitnessCacheMaxMBFlag = cli.UintFlag{
 		Name:  "witness.cache.maxmb",
-		Usage: "Resident-byte cap for the eager witness cache, in MiB (the real bound on witnesses held: a 1024 cap holds ~85 median-mainnet blocks).",
+		Usage: "Resident-byte cap for the eager witness cache, in MiB (the real bound on witnesses held: witnesses are cached as serialized JSON, so a 1024 cap holds ~60 median-mainnet blocks).",
 		Value: 1024,
 	}
 	RpcTxSyncDefaultTimeoutFlag = cli.DurationFlag{

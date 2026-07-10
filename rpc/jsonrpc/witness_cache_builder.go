@@ -278,7 +278,13 @@ func (api *DebugAPIImpl) buildAndCache(ctx context.Context, num uint64, hash com
 		log.Warn("[witness-cache] build witness", "block", num, "err", err)
 		return false
 	}
-	api.witnessCache.put(num, hash, result)
+	enc, err := result.MarshalFastJSON()
+	if err != nil {
+		witnessCacheBuildFailOtherCounter.Inc()
+		log.Warn("[witness-cache] marshal witness", "block", num, "err", err)
+		return false
+	}
+	api.witnessCache.put(num, hash, &ExecutionWitnessResult{cachedJSON: enc})
 	witnessCacheBuildOKCounter.Inc()
 	return true
 }
