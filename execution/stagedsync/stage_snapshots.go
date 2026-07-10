@@ -304,6 +304,7 @@ func DownloadAndIndexSnapshotsIfNeed(s *StageState, ctx context.Context, tx kv.R
 		s.BlockNumber = frozenBlocks
 	}
 
+	logger.Info("[dbg] SnapshotsStage: calling FillDBFromSnapshots", "logPrefix", s.LogPrefix(), "stageBlockNumber", s.BlockNumber, "frozenBlocks", frozenBlocks)
 	if err := rawdbreset.FillDBFromSnapshots(s.LogPrefix(), ctx, tx, cfg.dirs, cfg.blockReader, logger); err != nil {
 		return fmt.Errorf("FillDBFromSnapshots: %w", err)
 	}

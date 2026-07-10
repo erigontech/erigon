@@ -1365,9 +1365,6 @@ func (r *BlockReader) TxnLookup(_ context.Context, tx kv.Getter, txnHash common.
 	return blockNum, txNum, ok, nil
 }
 
-// Whole-extent readers (this + IterateFrozenBodies/Integrity/IntegrityTxnID) read live
-// r.sn, not a tx-pinned view: they must see the current frozen set. A stale/empty pinned
-// view undercounts it — here it would collapse the txnum base to 0 and corrupt MaxTxNum.
 func (r *BlockReader) FirstTxnNumNotInSnapshots(_ kv.Getter) uint64 {
 	blocksAvailable := r.sn.BlocksAvailable()
 	sn, ok, close := r.sn.ViewSingleFile(snaptype2.Transactions, blocksAvailable)
