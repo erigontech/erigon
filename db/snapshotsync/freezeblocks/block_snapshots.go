@@ -127,7 +127,7 @@ type BlockRetire struct {
 	stopFn     context.CancelFunc
 }
 
-func NewBlockFileBuilder(
+func NewBlockRetire(
 	ctx context.Context,
 	compressWorkers int,
 	dirs datadir.Dirs,
