@@ -342,6 +342,9 @@ func ApplyFlagsForEthConfigCobra(f *pflag.FlagSet, cfg *ethconfig.Config) {
 
 	commitmentHistoryOlder := cobraUint64ValueOrDefault(f, utils.CommitmentHistoryDistanceFlag.Name, 0)
 	receiptsDistance := cobraUint64ValueOrDefault(f, utils.PersistReceiptsDistanceFlag.Name, 0)
+	if f.Changed(utils.PersistReceiptsDistanceFlag.Name) && !cobraBoolValueOrDefault(f, utils.PersistReceiptsV2Flag.Name, utils.PersistReceiptsV2Flag.Value) {
+		utils.Fatalf("--%s requires --%s", utils.PersistReceiptsDistanceFlag.Name, utils.PersistReceiptsV2Flag.Name)
+	}
 
 	mode, err := prune.FromCli(pruneMode, pruneDistance, pruneBlockDistance, commitmentHistoryOlder, receiptsDistance)
 	if err != nil {
