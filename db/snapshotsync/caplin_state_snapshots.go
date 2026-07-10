@@ -396,7 +396,8 @@ func openIdxIfNeedForCaplinState(s *DirtySegment, filePath string) (err error) {
 
 	s.indexes = make([]*recsplit.Index, 1)
 
-	filePath = strings.ReplaceAll(filePath, ".seg", ".idx")
+	// Swap only the trailing extension — the datadir path itself may contain ".seg".
+	filePath = strings.TrimSuffix(filePath, ".seg") + ".idx"
 	index, err := recsplit.OpenIndex(filePath)
 	if err != nil {
 		return fmt.Errorf("%w, fileName: %s", err, filePath)
@@ -433,6 +434,9 @@ func (s *CaplinStateSnapshots) recalcVisibleFiles() {
 		newVisibleSegments := make(VisibleSegments, 0, dirtySegments.Len())
 		dirtySegments.Walk(func(segments []*DirtySegment) bool {
 			for _, sn := range segments {
+				// An un-indexed segment (a .seg published before its .idx) must never
+				// become visible: it has no index to serve a read yet would shadow the DB
+				// for its range. This gate is what keeps the publish-before-index window safe.
 				if !isIndexed(sn) {
 					continue
 				}
