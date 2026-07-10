@@ -153,8 +153,8 @@ func (at *AggregatorRoTx) Retire(ctx context.Context, cutoffs kv.RetireCutoffs) 
 	// the lock: it mutates the dirtyFiles btrees that recalcVisibleFiles reads.
 	at.a.dirtyFilesLock.Lock()
 	defer at.a.dirtyFilesLock.Unlock()
-	for _, a := range aged {
-		retire(a.dirtyFiles, a.files, a.filenameBase, retireReasonAged, at.a.logger)
+	for _, agedList := range aged {
+		retire(agedList.dirtyFiles, agedList.files, agedList.filenameBase, retireReasonAged, at.a.logger)
 	}
 	at.a.onFilesDelete(deleted)
 	at.a.recalcVisibleFiles(retired)
