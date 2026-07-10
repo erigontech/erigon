@@ -118,6 +118,16 @@ func TestRetireCutoffs_ConvertsBlockDistanceToTxNum(t *testing.T) {
 		require.Equal(t, uint64(250), cutoffs.PerDomain[kv.RCacheDomain], "rcache uses its own receipts window, not the history one")
 	})
 
+	t.Run("finite history + keep-all receipts -> rcache retires nothing", func(t *testing.T) {
+		// history Distance(10) -> block 20, txNum 200; receipts keep-all overrides
+		// the follow-history default so rcache is kept in full (cutoff 0).
+		pm := prune.Mode{Initialised: true, History: prune.Distance(10), Receipts: prune.KeepAllReceiptsPruneMode}
+		cutoffs, err := historyRetireCutoffs(ctx, tx, br, pm, forward)
+		require.NoError(t, err)
+		require.Equal(t, uint64(200), cutoffs.Default)
+		require.Equal(t, uint64(0), cutoffs.PerDomain[kv.RCacheDomain], "explicit keep-all overrides follow-history")
+	})
+
 	t.Run("archive history + finite receipts -> rcache only", func(t *testing.T) {
 		// History keep-all -> Default 0; receipts Distance(20) -> block 10, txNum 100.
 		pm := prune.Mode{Initialised: true, History: prune.KeepAllBlocksPruneMode, Receipts: prune.Distance(20)}

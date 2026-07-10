@@ -248,8 +248,14 @@ func applyRemainingEthFlags(ctx *cli.Command, cfg *ethconfig.Config, logger log.
 
 	cfg.PersistReceiptsCacheV2 = ctx.Bool(utils.PersistReceiptsV2Flag.Name)
 
-	commitmentHistoryOlder := ctx.Uint64(utils.CommitmentHistoryDistanceFlag.Name)
-	receiptsDistance := ctx.Uint64(utils.PersistReceiptsDistanceFlag.Name)
+	commitmentHistoryOlder, err := prune.ParseCommitmentHistoryDistance(ctx.String(utils.CommitmentHistoryDistanceFlag.Name))
+	if err != nil {
+		utils.Fatalf("%v", err)
+	}
+	receiptsDistance, err := prune.ParseReceiptsDistance(ctx.String(utils.PersistReceiptsDistanceFlag.Name))
+	if err != nil {
+		utils.Fatalf("%v", err)
+	}
 	if ctx.IsSet(utils.PersistReceiptsDistanceFlag.Name) && !cfg.PersistReceiptsCacheV2 {
 		utils.Fatalf("--%s requires --%s", utils.PersistReceiptsDistanceFlag.Name, utils.PersistReceiptsV2Flag.Name)
 	}
@@ -340,8 +346,14 @@ func ApplyFlagsForEthConfigCobra(f *pflag.FlagSet, cfg *ethconfig.Config) {
 		utils.Fatalf("%v", err)
 	}
 
-	commitmentHistoryOlder := cobraUint64ValueOrDefault(f, utils.CommitmentHistoryDistanceFlag.Name, 0)
-	receiptsDistance := cobraUint64ValueOrDefault(f, utils.PersistReceiptsDistanceFlag.Name, 0)
+	commitmentHistoryOlder, err := prune.ParseCommitmentHistoryDistance(cobraStringValueOrDefault(f, utils.CommitmentHistoryDistanceFlag.Name, ""))
+	if err != nil {
+		utils.Fatalf("%v", err)
+	}
+	receiptsDistance, err := prune.ParseReceiptsDistance(cobraStringValueOrDefault(f, utils.PersistReceiptsDistanceFlag.Name, ""))
+	if err != nil {
+		utils.Fatalf("%v", err)
+	}
 	if f.Changed(utils.PersistReceiptsDistanceFlag.Name) && !cobraBoolValueOrDefault(f, utils.PersistReceiptsV2Flag.Name, utils.PersistReceiptsV2Flag.Value) {
 		utils.Fatalf("--%s requires --%s", utils.PersistReceiptsDistanceFlag.Name, utils.PersistReceiptsV2Flag.Name)
 	}
@@ -387,17 +399,6 @@ func cobraStringValueOrDefault(f *pflag.FlagSet, name, fallback string) string {
 		return fallback
 	}
 	v, err := f.GetString(name)
-	if err != nil {
-		utils.Fatalf("failed to read --%s: %v", name, err)
-	}
-	return v
-}
-
-func cobraUint64ValueOrDefault(f *pflag.FlagSet, name string, fallback uint64) uint64 {
-	if f.Lookup(name) == nil {
-		return fallback
-	}
-	v, err := f.GetUint64(name)
 	if err != nil {
 		utils.Fatalf("failed to read --%s: %v", name, err)
 	}

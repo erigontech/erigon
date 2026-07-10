@@ -60,6 +60,36 @@ func ParseHistoryDistance(s string) (uint64, error) {
 	}
 }
 
+// ParseCommitmentHistoryDistance parses a --prune.commitment-history.distance
+// value: a decimal block count, "keep-all" (KeepAllBlocksPruneMode, also the
+// default), or an empty string (0, meaning unset).
+func ParseCommitmentHistoryDistance(s string) (uint64, error) {
+	switch normalizeDistanceAlias(s) {
+	case "":
+		return 0, nil
+	case "keep-all":
+		return uint64(KeepAllBlocksPruneMode), nil
+	default:
+		return parseDistanceNumber(s, "--prune.commitment-history.distance", historyDistanceAliasHint)
+	}
+}
+
+// ParseReceiptsDistance parses a --persist.receipts.distance value: a decimal
+// block count, "keep-all" or an empty string (0, meaning unset). "keep-all"
+// maps to KeepAllReceiptsPruneMode, not KeepAllBlocksPruneMode: the latter is
+// the unset default (follow the state-history window), so keeping all receipts
+// needs its own value.
+func ParseReceiptsDistance(s string) (uint64, error) {
+	switch normalizeDistanceAlias(s) {
+	case "":
+		return 0, nil
+	case "keep-all":
+		return uint64(KeepAllReceiptsPruneMode), nil
+	default:
+		return parseDistanceNumber(s, "--persist.receipts.distance", historyDistanceAliasHint)
+	}
+}
+
 func normalizeDistanceAlias(s string) string {
 	return strings.ToLower(strings.TrimSpace(s))
 }
