@@ -954,3 +954,168 @@ func TestTruthtreeFold_FreshWhaleStorageDeleteFallback(t *testing.T) {
 	require.Greater(t, directWhaleStorageFallbacks.Load(), fallbacks,
 		"fresh-whale storage delete never fell back — corpus no longer covers the guard")
 }
+
+// freshWhaleAloneCorpus builds one fresh batch: a whale whose storage spans the given
+// first-storage-nibbles (perNibble slots each) left ALONE under its top account nibble — so it
+// demotes to the depth-64 seam leaf and folds through the serial foldFreshStorageRootDeferred rather
+// than being absorbed into an account-plane subtree fold — plus a single-balance account under each
+// of the other 15 top account nibbles so the root is a real branch. Returns the batch keys/updates,
+// the whale account key, and the spread account addresses (for N>=3 re-touch chains).
+func freshWhaleAloneCorpus(seed int64, wide []byte, perNibble int) (keys [][]byte, upds []Update, whale []byte, spread []string) {
+	wk, wu, _, _ := buildSubsetTouchedWhale(seed, wide, nil, perNibble, 0)
+	for _, k := range wk {
+		if len(k) == length.Addr {
+			whale = k
+			break
+		}
+	}
+	whaleNib := int(KeyToHexNibbleHash(whale)[0])
+
+	ub := NewUpdateBuilder()
+	for nib := range 16 {
+		if nib == whaleNib {
+			continue
+		}
+		a := addrHex(findAddressForNibble(nib, 5100+nib))
+		spread = append(spread, a)
+		ub.Balance(a, uint64(6000+nib))
+	}
+	sk, su := ub.Build()
+	keys = append(append([][]byte{}, sk...), wk...)
+	upds = append(append([]Update{}, su...), wu...)
+	return keys, upds, whale, spread
+}
+
+// freshInteriorWhaleBatches wraps a multi-level fresh whale (storage concentrated under a few
+// first-storage-nibbles, nested >=2 deep below the depth-64 root) in an N>=3 chain. The whale is
+// fresh only in batch 1, where its multi-level storage folds through the serial
+// foldFreshStorageRootDeferred; two spread-only re-touch batches leave it on disk, untouched.
+func freshInteriorWhaleBatches(seed int64, perNibble int) []engineBatch {
+	k1, u1, _, spread := freshWhaleAloneCorpus(seed, nibs(3, 7, 0xb), perNibble)
+	retouch := func(bal uint64) engineBatch {
+		rb := NewUpdateBuilder()
+		for i, a := range spread {
+			rb.Balance(a, bal+uint64(i))
+		}
+		k, u := rb.Build()
+		return engineBatch{k, u}
+	}
+	return []engineBatch{{k1, u1}, retouch(30000), retouch(40000)}
+}
+
+// TestTruthtreeFold_FreshInteriorParity folds a multi-level fresh whale (storage branches nested
+// >=2 deep below the depth-64 root) through the serial foldFreshStorageRootDeferred and pins root +
+// stored-branch byte parity against the sequential oracle across an N>=3 chain. foldNode recurses
+// every interior storage branch and emits a DeferredBranchUpdate at each, so the nested whale pins
+// the interior prefixes, not just the storage-root branch.
+func TestTruthtreeFold_FreshInteriorParity(t *testing.T) {
+	batches := freshInteriorWhaleBatches(20260710, 700)
+
+	oracleMs := seqFreshBranchOracle(t, batches[0].keys, batches[0].upds)
+	depths := branchDepths(oracleMs)
+	require.Positive(t, depths[64], "whale storage-root branch at depth 64")
+	require.Positive(t, depths[65], "storage branch at depth 65 (one level below the root)")
+	interior := 0
+	for d, n := range depths {
+		if d >= 66 {
+			interior += n
+		}
+	}
+	require.Positive(t, interior, "multi-level whale must nest storage branches >=2 deep (depth >= 66)")
+
+	before := directWhaleStorageFolds.Load()
+	requireFlagLeafParity(t, 4, batches)
+	require.Greater(t, directWhaleStorageFolds.Load(), before,
+		"fresh whale never folded storage through the serial foldFreshStorageRootDeferred")
+}
+
+// freshNonWhaleBatches builds several fresh account-plane subtrees (>=2 accounts per first nibble)
+// each with a small storage subtree (1..6 slots), so the depth-64 seams fold inline through the
+// account-plane direct recursion (foldFreshAccountSubtreeCellDeferred) rather than the whale storage
+// path — the shape the whale tests never exercise. Two re-touch batches follow for the N>=3 chain.
+func freshNonWhaleBatches() []engineBatch {
+	ub := NewUpdateBuilder()
+	accts := make([]string, 0, 6)
+	add := func(nib, seed, slots int) {
+		a := addrHex(findAddressForNibble(nib, 6200+seed))
+		accts = append(accts, a)
+		ub.Balance(a, uint64(2000+seed))
+		for s := range slots {
+			ub.Storage(a, hex.EncodeToString(slotHashBytes(400+seed*8+s)), slotValHex(400+seed*8+s))
+		}
+	}
+	add(5, 1, 1)
+	add(5, 2, 4)
+	add(9, 3, 2)
+	add(9, 4, 6)
+	add(0xc, 5, 3)
+	add(0xc, 6, 5)
+	k1, u1 := ub.Build()
+
+	retouch := func(bal uint64) engineBatch {
+		rb := NewUpdateBuilder()
+		for i, a := range accts {
+			rb.Balance(a, bal+uint64(i))
+		}
+		k, u := rb.Build()
+		return engineBatch{k, u}
+	}
+	return []engineBatch{{k1, u1}, retouch(20000), retouch(30000)}
+}
+
+// TestTruthtreeFold_FreshNonWhaleParity pins root + stored-branch byte parity for fresh account-plane
+// subtrees whose accounts carry small storage — the inline/ext/small-branch depth-64 seams the whale
+// never hits — folded through the direct account-plane recursion. The direct fold must actually fire.
+func TestTruthtreeFold_FreshNonWhaleParity(t *testing.T) {
+	direct := requireFlagLeafParity(t, 4, freshNonWhaleBatches())
+	require.Greater(t, direct, int64(0),
+		"fresh non-whale never folded through the direct account-plane recursion")
+}
+
+// TestTruthtreeFold_ArityGateSingleNibble pins the arity gate: a fresh whale whose storage lives
+// under a single first nibble (popcount==1) must route to foldFreshStorage/storageRootFromSingleChild
+// — an extension root with no branch record at the depth-64 prefix — not the 17-slot foldNode branch
+// keccak. Sequential agrees (no depth-64 branch), the flag-on root matches, and the serial fold never
+// fires. A broken gate would fire the serial fold and emit a bogus depth-64 branch, redding the root,
+// the depth-64-absence check, and the counter. (Full stored-branch parity is not asserted here: a
+// single-survivor storage collapse has a benign resolved-root-vs-stored-leaf encoding difference vs
+// sequential that flag-off parallel shares — see deleteToCollapseBatches — so it is not the gate's
+// concern.)
+func TestTruthtreeFold_ArityGateSingleNibble(t *testing.T) {
+	keys, upds, whale, _ := freshWhaleAloneCorpus(20260711, nibs(7), 1500)
+	depth64Key := string(nibbles.HexToCompact(KeyToHexNibbleHash(whale)[:64]))
+
+	seqMs := NewMockState(t)
+	seqRoot, _ := processModeBatchState(t, seqMs, modeSeq, 0, keys, upds, nil)
+	_, seqHas := seqMs.cm[depth64Key]
+	require.False(t, seqHas, "single-first-nibble storage collapses to an extension: sequential stores no branch at the depth-64 prefix")
+
+	onMs := NewMockState(t)
+	onMs.SetConcurrentCommitment(true)
+	before := directWhaleStorageFolds.Load()
+	onRoot, _ := processParallelBatchCfg(t, onMs, truthtreeFoldCfg(), 4, keys, upds, nil)
+
+	require.Equal(t, seqRoot, onRoot, "flag-on single-first-nibble whale root != sequential")
+	require.Equal(t, before, directWhaleStorageFolds.Load(),
+		"single-first-nibble whale must route to foldFreshStorage/storageRootFromSingleChild, not the serial foldNode fold")
+	_, onHas := onMs.cm[depth64Key]
+	require.False(t, onHas, "arity gate must not emit a bogus foldNode branch at the depth-64 prefix")
+}
+
+// TestTruthtreeFold_Depth64SeamParity pins the depth-64 seam: a touched whale account over fresh
+// multi-nibble storage folds through foldWhaleLeaf, which injects the folded storage root into the
+// account cell. The account-plane branch carrying that cell and the storage branches (the depth-64
+// seam and its interior at depth 65) must all match sequential byte-for-byte.
+func TestTruthtreeFold_Depth64SeamParity(t *testing.T) {
+	keys, upds, _, _ := freshWhaleAloneCorpus(20260712, nibs(2, 5, 9, 0xe), 700)
+
+	oracleMs := seqFreshBranchOracle(t, keys, upds)
+	depths := branchDepths(oracleMs)
+	require.Positive(t, depths[64], "storage-root seam branch at depth 64 (touched account over fresh storage)")
+	require.Positive(t, depths[65], "interior storage branch at depth 65")
+
+	before := directWhaleStorageFolds.Load()
+	requireFreshWhaleFlagParity(t, 4, keys, upds)
+	require.Greater(t, directWhaleStorageFolds.Load(), before,
+		"touched-account fresh whale never folded storage through the serial recursion")
+}

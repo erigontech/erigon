@@ -96,19 +96,24 @@ roots + stored branches byte-match sequential HexPatricia.
 **Files:**
 - Modify: `execution/commitment/truthtree_fold_test.go`
 
-- [ ] `TestTruthtreeFold_FreshInteriorParity`: a **multi-level** fresh whale (storage branches nested ≥2
+- [x] `TestTruthtreeFold_FreshInteriorParity`: a **multi-level** fresh whale (storage branches nested ≥2
       deep below the depth-64 root) folded via the serial `foldFreshStorageRootDeferred` path; assert
       `runEngineBatchesParity` (root + every stored branch) == sequential, N≥3 batches. No `foldK` hook —
       `foldNode` recurses every interior branch and emits a `DeferredBranchUpdate` at each, so a multi-level
       whale already exercises interior prefixes.
-- [ ] fresh **non-whale** case (small fresh storage, still storage-less on disk) — the shape the whale test
-      never exercises.
-- [ ] **arity-gate** test: a single-first-nibble fresh whale (`popcount==1`) must route to `foldFreshStorage`
+- [x] fresh **non-whale** case (small fresh storage, still storage-less on disk) — the shape the whale test
+      never exercises. (`TestTruthtreeFold_FreshNonWhaleParity`: small-storage account-plane subtrees fold
+      through the direct account-plane recursion, root + branch parity, N≥3.)
+- [x] **arity-gate** test: a single-first-nibble fresh whale (`popcount==1`) must route to `foldFreshStorage`
       /`storageRootFromSingleChild` (extension root + delete record), NOT `foldNode`; assert the root and the
-      absence of a bogus branch record at the depth-64 prefix, == sequential.
-- [ ] depth-64 seam case: touched account + fresh storage; assert the injected storage root and seam branch
-      bytes == sequential.
-- [ ] run `make test-short` in `execution/commitment` — must pass before Task 2.
+      absence of a bogus branch record at the depth-64 prefix, == sequential. (`TestTruthtreeFold_ArityGateSingleNibble`;
+      full stored-branch parity is intentionally not asserted — a single-survivor collapse has a benign
+      resolved-root-vs-stored-leaf encoding difference that flag-off parallel shares.)
+- [x] depth-64 seam case: touched account + fresh storage; assert the injected storage root and seam branch
+      bytes == sequential. (`TestTruthtreeFold_Depth64SeamParity`: touched whale account over fresh
+      multi-nibble storage, seam + interior branches byte-match, serial fold fires.)
+- [x] run `make test-short` in `execution/commitment` — must pass before Task 2. (Full `go test -short ./...`
+      under `execution/commitment` green.)
 
 ### Task 2: Fix any interior empty-wall divergence (conditional — only if Task 1 reds)
 
