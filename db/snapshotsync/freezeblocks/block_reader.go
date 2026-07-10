@@ -553,7 +553,6 @@ func warnNoTxBlockView(tx kv.Getter) {
 		name = fn.Name()
 	}
 	log.Warn("[dbg] block read without tx-pinned view", "caller", name, "txType", fmt.Sprintf("%T", tx), "stack", dbg.Stack())
-	panic(fmt.Sprintf("[dbg] block read without tx-pinned view: %s, %s, %s", name, fmt.Sprintf("%T", tx), dbg.Stack()))
 }
 
 // viewSingleFile returns the segment of type t covering blockNum, from tx's pinned
