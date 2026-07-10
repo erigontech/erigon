@@ -100,22 +100,14 @@ func isStateHistory(name string) bool {
 	return strings.HasPrefix(name, "idx") || strings.HasPrefix(name, "history") || strings.HasPrefix(name, "accessor")
 }
 func canSnapshotBePruned(name string) bool {
-	return (isStateHistory(name) || strings.Contains(name, "transactions")) && !strings.Contains(name, "rcache")
+	return isStateHistory(name) || strings.Contains(name, "transactions")
 }
 
-// buildBlackListForPruning returns the set of preverified snapshot names that
-// should be skipped at download time according to pruneMode:
-//   - state history files (idx/history/accessor): blacklisted when stepPrune
-//     reaches their To and pruneMode.History is enabled.
-//   - commitment-domain state history files: additionally blacklisted when
-//     minCommitmentHistoryStep >= their To, independent of pruneMode.History.
-//   - rcache-domain state history files: additionally blacklisted when
-//     minReceiptsStep >= their To, independent of pruneMode.History.
-//   - transaction segments: blacklisted by distance when pruneMode.Blocks is a
-//     finite Distance (res.To <= blockPrune), or by chain history-expiry when
-//     pruneMode.Blocks is KeepPostMergeBlocksPruneMode and cc has MergeHeight set
-//     (cc.IsPreMerge(res.From)). KeepAllBlocksPruneMode leaves tx segments alone.
-//   - bodies, headers, domain files: never blacklisted here.
+// buildBlackListForPruning returns preverified snapshot names to skip at
+// download time: state history past the History window; commitment and rcache
+// history past their own windows (independent of History); tx segments past the
+// Blocks window, or pre-merge under chain history-expiry. Bodies, headers and
+// domain files are never blacklisted.
 func buildBlackListForPruning(
 	pruneMode prune.Mode,
 	cc *chain.Config,
@@ -141,16 +133,6 @@ func buildBlackListForPruning(
 
 	for _, p := range preverified.Items {
 		name := p.Name
-		// Receipts-history filter runs independently of History pruning and of the
-		// canSnapshotBePruned rcache exclusion, so persist-receipts configs skip
-		// old rcache history segments by their own window. An unparseable name is
-		// left for download rather than aborting the sync.
-		if receiptsEnabled && isStateHistory(name) && strings.Contains(name, kv.RCacheDomain.String()) {
-			if res, _, ok := snaptype.ParseFileName("", name); ok && minReceiptsStep >= kv.Step(res.To) {
-				blackList[name] = struct{}{}
-			}
-			continue
-		}
 		// Don't prune unprunable files
 		if !canSnapshotBePruned(name) {
 			continue
@@ -162,8 +144,14 @@ func buildBlackListForPruning(
 			if !ok {
 				return blackList, errors.New("invalid state snapshot name")
 			}
-			// Commitment-history filter runs independently of History pruning so
-			// commitment-only configs still skip old commitment segments.
+			// rcache history: pruned by its own receipts window, not History.
+			if isStateHistory(name) && strings.Contains(name, kv.RCacheDomain.String()) {
+				if receiptsEnabled && minReceiptsStep >= kv.Step(res.To) {
+					blackList[name] = struct{}{}
+				}
+				continue
+			}
+			// commitment history: pruned by its own window, not History.
 			if commitmentHistoryEnabled && isStateHistory(name) && strings.Contains(name, kv.CommitmentDomain.String()) && minCommitmentHistoryStep >= kv.Step(res.To) {
 				blackList[name] = struct{}{}
 				continue
@@ -177,7 +165,7 @@ func buildBlackListForPruning(
 			blackList[name] = struct{}{}
 			continue
 		}
-		// Block segment (transactions only — canSnapshotBePruned filters bodies/headers/rcache).
+		// Block segment (transactions only — canSnapshotBePruned filters bodies/headers/domains).
 		// e.g 'v1.0-000000-000100-transactions.seg'
 		// parse "from" (000000) and "to" (000100) from the name. 100 is 100'000 blocks
 		res, _, ok := snaptype.ParseFileName("", name)
@@ -536,9 +524,8 @@ func SyncSnapshots(
 				continue
 			}
 
-			// When --persist.receipts.distance is set, rcache retention is governed
-			// by its own window (the receipts blacklist above), consistent with the
-			// retire side; only the log indexes follow the block-data window here.
+			// With --persist.receipts.distance set, rcache follows its own window;
+			// only log indexes follow the block-data window here.
 			isRcacheRelatedSegment := strings.Contains(p.Name, kv.LogAddrIdx.String()) ||
 				strings.Contains(p.Name, kv.LogTopicIdx.String())
 			if !prune.ReceiptsAmount().Enabled() {
