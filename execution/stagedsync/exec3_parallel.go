@@ -595,8 +595,8 @@ func (pe *parallelExecutor) execImpl(ctx context.Context, execStage *StageState,
 						}
 					}
 					// Fallback for exit paths that publish no cause: a single-block
-					// fork-validation batch exits via execLoopExitCheck (no cause), and
-					// real shutdown cancels with context.Canceled. A fully-applied
+					// fork-validation batch exits without a stopCause, and real
+					// shutdown cancels with context.Canceled. A fully-applied
 					// requested range is a clean end; otherwise there is more work.
 					if lastBlockResult.BlockNum >= pe.maxBlockNum {
 						return nil
@@ -1550,42 +1550,6 @@ func (pe *parallelExecutor) closeApplyChannels() (closedOrder []string) {
 		pe.applyResultsCh = nil
 	}
 	return
-}
-
-// execLoopExitCheck enforces the completeness invariant for the exec
-// loop's clean exit paths: all blocks the loop was asked to process must
-// be drained from pe.blockExecutors. A non-empty map at exit means a
-// block was scheduled (or queued) but never produced a blockResult,
-// which previously caused "block accepted when it should have been
-// rejected" failures (the apply loop never received the block, post-
-// validation never fired). Converts that silent-success path into a
-// loud InvalidBlock error so the failure surfaces through InsertChain.
-//
-// The reason argument tags the call site (which silent-return path
-// triggered the check) so a failure log identifies the exit path
-// involved without needing a stack trace.
-func (pe *parallelExecutor) execLoopExitCheck(ctx context.Context, reason string) error {
-	// Only a deliberate stopCause exempts the pending-blocks completeness check;
-	// an unrelated cancel (shutdown, parent cancel) with blocks still pending is a
-	// genuine silent-miss and must surface.
-	if _, ok := stopCauseOf(ctx); ok {
-		return nil
-	}
-	pe.RLock()
-	pendingBlocks := len(pe.blockExecutors)
-	var pendingNums []uint64
-	if pendingBlocks > 0 {
-		pendingNums = make([]uint64, 0, pendingBlocks)
-		for n := range pe.blockExecutors {
-			pendingNums = append(pendingNums, n)
-		}
-	}
-	pe.RUnlock()
-	if pendingBlocks > 0 {
-		return fmt.Errorf("%w: parallel exec loop exited with %d block(s) still pending in pe.blockExecutors %v (reason=%s)",
-			rules.ErrInvalidBlock, pendingBlocks, pendingNums, reason)
-	}
-	return nil
 }
 
 // scheduleNextPending picks the lowest-numbered block still queued in

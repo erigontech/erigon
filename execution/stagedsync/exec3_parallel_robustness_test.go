@@ -183,50 +183,6 @@ func TestApplyLoopMissingBlocks(t *testing.T) {
 	}
 }
 
-// TestExecLoopExitCheck covers the exec-loop exit invariant:
-// pe.blockExecutors must be empty at every clean exit, otherwise an
-// orphaned (queued-but-never-scheduled) block silently sits there
-// forever and the apply loop never sees its blockResult.
-func TestExecLoopExitCheck(t *testing.T) {
-	t.Run("empty map returns nil", func(t *testing.T) {
-		pe := &parallelExecutor{}
-		pe.blockExecutors = map[uint64]*blockExecutor{}
-		if err := pe.execLoopExitCheck(context.Background(), "test"); err != nil {
-			t.Fatalf("execLoopExitCheck on empty map should return nil, got: %v", err)
-		}
-	})
-
-	t.Run("non-empty map returns ErrInvalidBlock with block nums", func(t *testing.T) {
-		pe := &parallelExecutor{}
-		pe.blockExecutors = map[uint64]*blockExecutor{
-			3: {},
-			7: {},
-		}
-		err := pe.execLoopExitCheck(context.Background(), "test-reason")
-		if err == nil {
-			t.Fatalf("execLoopExitCheck on non-empty map should return error, got nil")
-		}
-		if !errors.Is(err, rules.ErrInvalidBlock) {
-			t.Fatalf("expected wrapped ErrInvalidBlock, got: %v", err)
-		}
-		// Both block nums must appear in the error so the operator can
-		// see exactly which blocks were left orphaned.
-		for _, want := range []string{"3", "7", "test-reason"} {
-			if !strings.Contains(err.Error(), want) {
-				t.Errorf("error message missing %q: %s", want, err.Error())
-			}
-		}
-	})
-
-	t.Run("nil map returns nil (defensive)", func(t *testing.T) {
-		pe := &parallelExecutor{}
-		// pe.blockExecutors is nil
-		if err := pe.execLoopExitCheck(context.Background(), "test"); err != nil {
-			t.Fatalf("execLoopExitCheck on nil map should return nil, got: %v", err)
-		}
-	})
-}
-
 // TestBlockValidatorWaitNil verifies the per-block validator is
 // safe to Wait on when nil (the case where the apply loop's if-condition
 // declined to construct one). Defends against NPE regression if someone
@@ -1261,36 +1217,6 @@ func TestCheckBlocksDrained(t *testing.T) {
 		boom := errors.New("snapshot step misalignment")
 		got := withPending().checkBlocksDrained(context.Background(), boom)
 		require.Same(t, boom, got)
-	})
-}
-
-// TestExecLoopExitCheckDeliberateStop verifies that a ctx cancelled with a
-// stopCause suppresses the pending-block ErrInvalidBlock noise.
-func TestExecLoopExitCheckDeliberateStop(t *testing.T) {
-	t.Run("pending blocks but stopCause returns nil", func(t *testing.T) {
-		pe := &parallelExecutor{}
-		pe.blockExecutors = map[uint64]*blockExecutor{3: {}, 7: {}}
-		ctx, cancel := context.WithCancelCause(context.Background())
-		cancel(&stopCause{block: 7, kind: stopBadBlock, err: errors.New("wrong root")})
-		if err := pe.execLoopExitCheck(ctx, "post-cancel-drain"); err != nil {
-			t.Fatalf("stopCause must suppress pending-block error, got: %v", err)
-		}
-	})
-
-	t.Run("pending blocks without deliberate-stop still errors", func(t *testing.T) {
-		pe := &parallelExecutor{}
-		pe.blockExecutors = map[uint64]*blockExecutor{3: {}}
-		err := pe.execLoopExitCheck(context.Background(), "silent-miss")
-		require.ErrorIs(t, err, rules.ErrInvalidBlock, "must still flag silent miss when not deliberately stopped")
-	})
-
-	t.Run("pending blocks with unrelated cancel cause still errors", func(t *testing.T) {
-		pe := &parallelExecutor{}
-		pe.blockExecutors = map[uint64]*blockExecutor{3: {}}
-		ctx, cancel := context.WithCancelCause(context.Background())
-		cancel(errors.New("shutdown"))
-		err := pe.execLoopExitCheck(ctx, "non-deliberate-cancel")
-		require.ErrorIs(t, err, rules.ErrInvalidBlock, "unrelated cancel cause must not suppress the silent-miss error")
 	})
 }
 
