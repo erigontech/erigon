@@ -51,7 +51,7 @@ type SnapshotsCfg struct {
 	db                 kv.TemporalRwDB
 	chainConfig        *chain.Config
 	dirs               datadir.Dirs
-	blockFileBuilder   services.BlockFileBuilder
+	blockFileBuilder   services.BlockRetire
 	snapshotDownloader downloader.Client
 	blockReader        services.FullBlockReader
 	notifier           *shards.Notifications
@@ -79,7 +79,7 @@ func StageSnapshotsCfg(db kv.TemporalRwDB,
 	chainConfig *chain.Config,
 	syncConfig ethconfig.Sync,
 	dirs datadir.Dirs,
-	blockFileBuilder services.BlockFileBuilder,
+	blockFileBuilder services.BlockRetire,
 	snapshotDownloader downloader.Client,
 	blockReader services.FullBlockReader,
 	notifier *shards.Notifications,

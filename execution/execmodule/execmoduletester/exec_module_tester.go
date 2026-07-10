@@ -139,7 +139,7 @@ type ExecModuleTester struct {
 	HistoryV3        bool
 	cfg              ethconfig.Config
 	BlockSnapshots   *blocksnapshots.RoSnapshots
-	blockFileBuilder services.BlockFileBuilder
+	blockFileBuilder services.BlockRetire
 	BlockReader      services.FullBlockReader
 	ReceiptsReader   *receipts.Generator
 	posStagedSync    *stagedsync.Sync

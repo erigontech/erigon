@@ -113,8 +113,8 @@ type FullBlockReader interface {
 	TxnumReader() rawdbv3.TxNumsReader
 }
 
-// BlockFileBuilder - freezing blocks: moving old data from DB to snapshot files
-type BlockFileBuilder interface {
+// BlockRetire - freezing blocks: moving old data from DB to snapshot files
+type BlockRetire interface {
 	PruneAncientBlocks(tx kv.RwTx, limit int, timeout time.Duration) (deleted int, err error)
 	BuildFilesInBackground(
 		ctx context.Context,

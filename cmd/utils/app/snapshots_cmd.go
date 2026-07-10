@@ -1343,7 +1343,7 @@ func doRollbackSnapshotsToBlock(ctx context.Context, blockNum uint64, prompt boo
 	chainConfig := fromdb.ChainConfig(chainDB)
 	cfg := ethconfig.NewSnapCfg(false, true, true, chainConfig.ChainName)
 	res, clean, err := openSnaps(ctx, cfg, dirs, chainDB, logger)
-	br, agg := res.BlockFileBuilder, res.Aggregator
+	br, agg := res.BlockRetire, res.Aggregator
 	if err != nil {
 		return err
 	}
@@ -1601,7 +1601,7 @@ func doIntegrity(ctx context.Context, cliCtx *cli.Command) error {
 	cfg := ethconfig.NewSnapCfg(false, true, true, chainConfig.ChainName)
 
 	res, clean, err := openSnaps(ctx, cfg, dirs, chainDB, logger)
-	borSnaps, blockFileBuilder, agg := res.BorSnaps, res.BlockFileBuilder, res.Aggregator
+	borSnaps, blockFileBuilder, agg := res.BorSnaps, res.BlockRetire, res.Aggregator
 	if err != nil {
 		return err
 	}
@@ -1809,7 +1809,7 @@ func doCheckCommitmentHistAtBlk(ctx context.Context, cliCtx *cli.Command, logger
 	chainConfig := fromdb.ChainConfig(chainDB)
 	cfg := ethconfig.NewSnapCfg(false /*keepBlocks*/, true /*produceE2*/, true /*produceE3*/, chainConfig.ChainName)
 	res, clean, err := openSnaps(ctx, cfg, dirs, chainDB, logger)
-	blockFileBuilder, agg := res.BlockFileBuilder, res.Aggregator
+	blockFileBuilder, agg := res.BlockRetire, res.Aggregator
 	if err != nil {
 		return err
 	}
@@ -1836,7 +1836,7 @@ func doCheckStateRootByHistory(ctx context.Context, cliCtx *cli.Command, logger 
 	chainConfig := fromdb.ChainConfig(chainDB)
 	cfg := ethconfig.NewSnapCfg(false /*keepBlocks*/, true /*produceE2*/, true /*produceE3*/, chainConfig.ChainName)
 	res, clean, err := openSnaps(ctx, cfg, dirs, chainDB, logger)
-	blockFileBuilder, agg := res.BlockFileBuilder, res.Aggregator
+	blockFileBuilder, agg := res.BlockRetire, res.Aggregator
 	if err != nil {
 		return err
 	}
@@ -1883,7 +1883,7 @@ func doCheckRCacheRootAtBlk(ctx context.Context, cliCtx *cli.Command, logger log
 		return err
 	}
 	defer clean()
-	blockFileBuilder, agg := res.BlockFileBuilder, res.Aggregator
+	blockFileBuilder, agg := res.BlockRetire, res.Aggregator
 	defer blockFileBuilder.MadvNormal().DisableReadAhead()
 	defer agg.MadvNormal().DisableReadAhead()
 	db, err := temporal.New(chainDB, agg)
@@ -1911,7 +1911,7 @@ func doCheckRCacheRootAtBlkRange(ctx context.Context, cliCtx *cli.Command, logge
 		return err
 	}
 	defer clean()
-	blockFileBuilder, agg := res.BlockFileBuilder, res.Aggregator
+	blockFileBuilder, agg := res.BlockRetire, res.Aggregator
 	defer blockFileBuilder.MadvNormal().DisableReadAhead()
 	defer agg.MadvNormal().DisableReadAhead()
 	db, err := temporal.New(chainDB, agg)
@@ -2674,7 +2674,7 @@ func doBlkTxNum(ctx context.Context, cliCtx *cli.Command) error {
 	cfg := ethconfig.NewSnapCfg(false, true, true, chainConfig.ChainName)
 
 	res, clean, err := openSnaps(ctx, cfg, dirs, chainDB, logger)
-	br, agg := res.BlockFileBuilder, res.Aggregator
+	br, agg := res.BlockRetire, res.Aggregator
 	if err != nil {
 		return err
 	}
@@ -2939,7 +2939,7 @@ func doIndicesCommand(ctx context.Context, cliCtx *cli.Command, dirs datadir.Dir
 	cfg := ethconfig.NewSnapCfg(false, true, true, chainConfig.ChainName)
 
 	res, clean, err := openSnaps(ctx, cfg, dirs, chainDB, logger)
-	caplinSnaps, caplinStateSnaps, br, agg := res.CaplinSnaps, res.CaplinStateSnaps, res.BlockFileBuilder, res.Aggregator
+	caplinSnaps, caplinStateSnaps, br, agg := res.CaplinSnaps, res.CaplinStateSnaps, res.BlockRetire, res.Aggregator
 	if err != nil {
 		return err
 	}
@@ -3035,7 +3035,7 @@ type OpenSnapsResult struct {
 	BorSnaps         *heimdall.RoSnapshots
 	CaplinSnaps      *freezeblocks.CaplinSnapshots
 	CaplinStateSnaps *snapshotsync.CaplinStateSnapshots
-	BlockFileBuilder *freezeblocks.BlockFileBuilder
+	BlockRetire      *freezeblocks.BlockFileBuilder
 	Aggregator       *state.Aggregator
 }
 
@@ -3102,7 +3102,7 @@ func openSnaps(ctx context.Context, cfg ethconfig.BlocksFreezing, dirs datadir.D
 	blockReader := freezeblocks.NewBlockReader(res.BlockSnaps, res.BorSnaps)
 	blockWriter := blockio.NewBlockWriter()
 	blockSnapBuildSema := semaphore.NewWeighted(int64(dbg.BuildSnapshotAllowance))
-	res.BlockFileBuilder = freezeblocks.NewBlockFileBuilder(ctx, estimate.CompressSnapshot.Workers(), dirs, blockReader, blockWriter, chainDB, heimdallStore, bridgeStore, chainConfig, &ethconfig.Defaults, nil, blockSnapBuildSema, logger)
+	res.BlockRetire = freezeblocks.NewBlockFileBuilder(ctx, estimate.CompressSnapshot.Workers(), dirs, blockReader, blockWriter, chainDB, heimdallStore, bridgeStore, chainConfig, &ethconfig.Defaults, nil, blockSnapBuildSema, logger)
 
 	res.Aggregator = openAgg(ctx, dirs, chainDB, logger)
 	res.Aggregator.SetSnapshotBuildSema(blockSnapBuildSema)
@@ -3112,7 +3112,7 @@ func openSnaps(ctx context.Context, cfg ethconfig.BlocksFreezing, dirs datadir.D
 		defer res.BorSnaps.Close()
 		defer res.CaplinSnaps.Close()
 		defer res.Aggregator.Close()
-		defer res.BlockFileBuilder.Close() // LIFO: drain the retire before agg/snaps close
+		defer res.BlockRetire.Close() // LIFO: drain the retire before agg/snaps close
 	}
 	err = chainDB.View(ctx, func(tx kv.Tx) error {
 		ac := res.Aggregator.BeginFilesRo()
@@ -3402,7 +3402,7 @@ func doUnmerge(ctx context.Context, cliCtx *cli.Command, dirs datadir.Dirs) erro
 	chainConfig := fromdb.ChainConfig(chainDB)
 	cfg := ethconfig.NewSnapCfg(false, true, true, chainConfig.ChainName)
 	res, clean, err := openSnaps(ctx, cfg, dirs, chainDB, logger)
-	br := res.BlockFileBuilder
+	br := res.BlockRetire
 	if err != nil {
 		return err
 	}
@@ -3425,7 +3425,7 @@ func doRetireCommand(ctx context.Context, cliCtx *cli.Command, dirs datadir.Dirs
 	cfg := ethconfig.NewSnapCfg(false, true, true, chainConfig.ChainName)
 
 	res, clean, err := openSnaps(ctx, cfg, dirs, db, logger)
-	caplinSnaps, caplinStateSnaps, br, agg := res.CaplinSnaps, res.CaplinStateSnaps, res.BlockFileBuilder, res.Aggregator
+	caplinSnaps, caplinStateSnaps, br, agg := res.CaplinSnaps, res.CaplinStateSnaps, res.BlockRetire, res.Aggregator
 	if err != nil {
 		return err
 	}

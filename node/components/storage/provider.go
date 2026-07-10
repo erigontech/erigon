@@ -66,7 +66,7 @@ type Provider struct {
 	GenesisHash          common.Hash
 	CurrentBlockNumber   uint64
 	SegmentsBuildLimiter *semaphore.Weighted
-	BlockFileBuilder     services.BlockFileBuilder
+	BlockFileBuilder     services.BlockRetire
 
 	logger log.Logger
 }
