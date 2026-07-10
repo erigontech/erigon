@@ -128,7 +128,7 @@ the unchanged on-demand path. Increment hit/miss metrics (Task 5).
 - **TDD:** unit test with a hand-populated `witnessCache` asserting hit returns the stored result and
   canonical bypasses it.
 
-- [ ] **Status:** pending
+- [x] **Status:** complete
 
 ### Task 3: Eager builder loop
 

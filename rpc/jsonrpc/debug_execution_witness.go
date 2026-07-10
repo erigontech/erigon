@@ -709,6 +709,10 @@ func (api *DebugAPIImpl) ExecutionWitness(ctx context.Context, blockNrOrHash rpc
 	}
 	defer tx.Rollback()
 
+	if cached, ok := api.serveFromWitnessCache(ctx, tx, blockNrOrHash, resolvedMode); ok {
+		return cached, nil
+	}
+
 	commitmentHistoryEnabled, _, err := rawdb.ReadDBCommitmentHistoryEnabled(tx)
 	if err != nil {
 		return nil, err
@@ -723,6 +727,21 @@ func (api *DebugAPIImpl) ExecutionWitness(ctx context.Context, blockNrOrHash rpc
 	}
 
 	return api.buildWitnessResult(ctx, tx, info, resolvedMode)
+}
+
+// serveFromWitnessCache returns a cached legacy-mode witness when the eager cache
+// is enabled and holds an exact (num, hash) match for the requested block. A nil
+// cache, a canonical request, an unresolvable block, or a miss all report ok=false
+// so the caller falls through to the unchanged on-demand build.
+func (api *DebugAPIImpl) serveFromWitnessCache(ctx context.Context, tx kv.TemporalTx, blockNrOrHash rpc.BlockNumberOrHash, mode witnessMode) (*ExecutionWitnessResult, bool) {
+	if api.witnessCache == nil || mode != witnessModeLegacy {
+		return nil, false
+	}
+	num, hash, _, err := rpchelper.GetBlockNumber(ctx, blockNrOrHash, tx, api._blockReader, api.filters)
+	if err != nil {
+		return nil, false
+	}
+	return api.witnessCache.get(num, hash)
 }
 
 // buildWitnessResult runs the witness-building pipeline for an already-resolved block

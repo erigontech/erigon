@@ -1213,6 +1213,76 @@ func TestExecutionWitness(t *testing.T) {
 	})
 }
 
+// TestExecutionWitnessCacheServe pins the Task 2 serve hook: a legacy request for a
+// cached (num, hash) returns the stored pointer, while canonical requests, empty-cache
+// misses, and the nil-cache path all fall through to the unchanged on-demand build.
+func TestExecutionWitnessCacheServe(t *testing.T) {
+	previousSchema := statecfg.Schema
+	statecfg.EnableHistoricalCommitment()
+	t.Cleanup(func() {
+		statecfg.Schema = previousSchema
+	})
+
+	m, _, _ := rpcdaemontest.CreateTestExecModule(t)
+	api := NewPrivateDebugAPI(newBaseApiForTest(m), m.DB, nil, 0, false)
+	ctx := context.Background()
+
+	err := m.DB.Update(ctx, func(tx kv.RwTx) error {
+		return rawdb.WriteDBCommitmentHistoryEnabled(tx, true)
+	})
+	require.NoError(t, err)
+
+	var block1Hash common.Hash
+	err = m.DB.View(ctx, func(tx kv.Tx) error {
+		block1Hash, _, err = m.BlockReader.CanonicalHash(ctx, tx, 1)
+		return err
+	})
+	require.NoError(t, err)
+
+	bn := rpc.BlockNumber(1)
+	sentinel := &ExecutionWitnessResult{State: []hexutil.Bytes{{0xde, 0xad, 0xbe, 0xef}}}
+
+	t.Run("legacy hit returns cached pointer", func(t *testing.T) {
+		cache := newWitnessCache(96, 1024)
+		cache.put(1, block1Hash, sentinel)
+		api.witnessCache = cache
+		t.Cleanup(func() { api.witnessCache = nil })
+
+		result, err := api.ExecutionWitness(ctx, rpc.BlockNumberOrHash{BlockNumber: &bn}, nil)
+		require.NoError(t, err)
+		require.Same(t, sentinel, result, "legacy request must serve the cached pointer")
+	})
+
+	t.Run("canonical request bypasses the cache", func(t *testing.T) {
+		cache := newWitnessCache(96, 1024)
+		cache.put(1, block1Hash, sentinel)
+		api.witnessCache = cache
+		t.Cleanup(func() { api.witnessCache = nil })
+
+		canonical := "canonical"
+		result, _ := api.ExecutionWitness(ctx, rpc.BlockNumberOrHash{BlockNumber: &bn}, &canonical)
+		require.NotSame(t, sentinel, result, "canonical request must never serve the legacy cache")
+	})
+
+	t.Run("empty-cache miss falls through to on-demand", func(t *testing.T) {
+		api.witnessCache = newWitnessCache(96, 1024)
+		t.Cleanup(func() { api.witnessCache = nil })
+
+		result, err := api.ExecutionWitness(ctx, rpc.BlockNumberOrHash{BlockNumber: &bn}, nil)
+		require.NoError(t, err)
+		require.NotSame(t, sentinel, result)
+		require.NotNil(t, result.State, "miss must build a real witness on demand")
+	})
+
+	t.Run("nil cache path unaffected", func(t *testing.T) {
+		api.witnessCache = nil
+		result, err := api.ExecutionWitness(ctx, rpc.BlockNumberOrHash{BlockNumber: &bn}, nil)
+		require.NoError(t, err)
+		require.NotSame(t, sentinel, result)
+		require.NotNil(t, result.State)
+	})
+}
+
 // mockEthBackend implements privateapi.EthBackend for testing
 type mockEthBackend struct {
 	setHeadCalled bool
