@@ -386,7 +386,7 @@ func TestCheckBlocksDrainedConcurrentReads(t *testing.T) {
 	go func() {
 		defer wg.Done()
 		for !stop.Load() {
-			_ = pe.checkBlocksDrained(context.Background(), nil)
+			_ = pe.checkBlocksDrained(context.Background(), context.Background(), nil)
 		}
 	}()
 
@@ -1168,7 +1168,8 @@ func TestApplyLoopCloseBranchSurfacesDeferredRootBeforeMissing(t *testing.T) {
 // context that left scheduled blocks undrained is a genuine silent miss and must
 // surface as ErrInvalidBlock. Leftover blocks are expected — and must pass
 // through untouched — when the batch is resumable (ErrLoopExhausted), already
-// failing, or being canceled/shut down.
+// failing, being canceled/shut down, or stopped on a bad block (whose handled
+// wrong-root path resolves into a scheduled unwind with a nil execErr).
 func TestCheckBlocksDrained(t *testing.T) {
 	withPending := func() *parallelExecutor {
 		pe := &parallelExecutor{}
@@ -1177,14 +1178,14 @@ func TestCheckBlocksDrained(t *testing.T) {
 	}
 
 	t.Run("clean exit with undrained block is a silent miss", func(t *testing.T) {
-		err := withPending().checkBlocksDrained(context.Background(), nil)
+		err := withPending().checkBlocksDrained(context.Background(), context.Background(), nil)
 		require.ErrorIs(t, err, rules.ErrInvalidBlock)
 	})
 
 	t.Run("undrained block numbers appear in the error", func(t *testing.T) {
 		pe := &parallelExecutor{}
 		pe.blockExecutors = map[uint64]*blockExecutor{3: {}, 7: {}}
-		err := pe.checkBlocksDrained(context.Background(), nil)
+		err := pe.checkBlocksDrained(context.Background(), context.Background(), nil)
 		require.ErrorIs(t, err, rules.ErrInvalidBlock)
 		require.Contains(t, err.Error(), "3")
 		require.Contains(t, err.Error(), "7")
@@ -1193,29 +1194,56 @@ func TestCheckBlocksDrained(t *testing.T) {
 	t.Run("clean exit with everything drained is fine", func(t *testing.T) {
 		pe := &parallelExecutor{}
 		pe.blockExecutors = map[uint64]*blockExecutor{}
-		require.NoError(t, pe.checkBlocksDrained(context.Background(), nil))
+		require.NoError(t, pe.checkBlocksDrained(context.Background(), context.Background(), nil))
 	})
 
 	t.Run("nil map is fine", func(t *testing.T) {
-		require.NoError(t, (&parallelExecutor{}).checkBlocksDrained(context.Background(), nil))
+		require.NoError(t, (&parallelExecutor{}).checkBlocksDrained(context.Background(), context.Background(), nil))
 	})
 
 	t.Run("canceled batch leaves undrained blocks alone", func(t *testing.T) {
 		ctx, cancel := context.WithCancel(context.Background())
 		cancel()
-		require.NoError(t, withPending().checkBlocksDrained(ctx, nil))
+		require.NoError(t, withPending().checkBlocksDrained(ctx, context.Background(), nil))
+	})
+
+	t.Run("bad-block stop leaves undrained follow-on blocks alone", func(t *testing.T) {
+		// The handled (!initialCycle) wrong-root path schedules an unwind and
+		// returns a nil execErr; blocks canceled behind the bad block never
+		// drain. Flagging them here would fire a second UnwindTo that
+		// overrides the correct one with a valid block's hash.
+		ectx, cancel := context.WithCancelCause(context.Background())
+		cancel(&stopCause{block: 5, kind: stopBadBlock, err: errors.New("wrong root")})
+		require.NoError(t, withPending().checkBlocksDrained(context.Background(), ectx, nil))
+	})
+
+	t.Run("reached-max stop with an undrained block still flags", func(t *testing.T) {
+		ectx, cancel := context.WithCancelCause(context.Background())
+		cancel(&stopCause{block: 5, kind: stopReachedMax})
+		err := withPending().checkBlocksDrained(context.Background(), ectx, nil)
+		require.ErrorIs(t, err, rules.ErrInvalidBlock)
+	})
+
+	t.Run("routine boundary executorCancel does not exempt", func(t *testing.T) {
+		// execImpl always cancels the executor context (nil cause →
+		// context.Canceled) before the check runs; only a bad-block stop may
+		// exempt, or the check never fires at all.
+		ectx, cancel := context.WithCancelCause(context.Background())
+		cancel(nil)
+		err := withPending().checkBlocksDrained(context.Background(), ectx, nil)
+		require.ErrorIs(t, err, rules.ErrInvalidBlock)
 	})
 
 	t.Run("resumable batch keeps ErrLoopExhausted, not ErrInvalidBlock", func(t *testing.T) {
 		exhausted := &ErrLoopExhausted{From: 1, To: 2, Reason: "block batch is full"}
-		got := withPending().checkBlocksDrained(context.Background(), exhausted)
+		got := withPending().checkBlocksDrained(context.Background(), context.Background(), exhausted)
 		require.Same(t, exhausted, got)
 		require.NotErrorIs(t, got, rules.ErrInvalidBlock)
 	})
 
 	t.Run("existing error is not masked", func(t *testing.T) {
 		boom := errors.New("snapshot step misalignment")
-		got := withPending().checkBlocksDrained(context.Background(), boom)
+		got := withPending().checkBlocksDrained(context.Background(), context.Background(), boom)
 		require.Same(t, boom, got)
 	})
 }

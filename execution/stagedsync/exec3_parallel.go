@@ -834,7 +834,7 @@ func (pe *parallelExecutor) execImpl(ctx context.Context, execStage *StageState,
 
 	// Wait for all goroutines to complete before reading shared state.
 	execErr = reconcileExecAndWaitErr(execErr, pe.wait(ctx))
-	execErr = pe.checkBlocksDrained(ctx, execErr)
+	execErr = pe.checkBlocksDrained(ctx, executorContext, execErr)
 
 	// Commitment is computed per-block by the calculator. Stage progress
 	// is updated in handleCommitResult when results are consumed.
@@ -1536,10 +1536,16 @@ func (pe *parallelExecutor) closeApplyChannels() (closedOrder []string) {
 // checkBlocksDrained turns a clean apply-loop exit (execErr == nil) that left
 // scheduled blocks undrained in pe.blockExecutors into an ErrInvalidBlock;
 // leftover blocks on a resumable (ErrLoopExhausted) or canceled batch are
-// expected and pass through.
-func (pe *parallelExecutor) checkBlocksDrained(ctx context.Context, execErr error) error {
+// expected and pass through. So does a stopBadBlock cause on executorCtx: the
+// handled wrong-root path resolves into a scheduled unwind with a nil execErr,
+// and the blocks canceled behind the bad block never drain — flagging them
+// would fire a second UnwindTo that overrides the correct one.
+func (pe *parallelExecutor) checkBlocksDrained(ctx, executorCtx context.Context, execErr error) error {
 	if execErr != nil || ctx.Err() != nil {
 		return execErr
+	}
+	if sc, ok := stopCauseOf(executorCtx); ok && sc.kind == stopBadBlock {
+		return nil
 	}
 	pe.RLock()
 	pending := slices.Collect(maps.Keys(pe.blockExecutors))
