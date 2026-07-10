@@ -263,6 +263,11 @@ type L2Config interface {
 	// Name returns the short identifier of the L2 stack (e.g. used to select
 	// a registered rules engine).
 	Name() string
+
+	// ResolveRules lets an L2 stack finalize the per-block Rules after the
+	// standard fork resolution: set L2Version and flip any EVM-fork booleans
+	// that the L2 gates on its own version ladder instead of L1 time/number.
+	ResolveRules(l2Version, blockNum, blockTime uint64, rules *Rules)
 }
 
 func timestampToTime(unixSec uint64) *time.Time {
@@ -830,6 +835,11 @@ type Rules struct {
 	IsPrague, IsOsaka, IsAmsterdam                    bool
 	DisabledEIPs                                      []int
 	IsAura                                            bool
+
+	// L2Version is the L2 stack's own upgrade version (e.g. an ArbOS-style
+	// version ladder), resolved per block by the chain's L2Config oracle.
+	// Zero for L1 chains.
+	L2Version uint64
 }
 
 // IsEIPDisabled returns true if the given EIP number has been disabled for this chain.
