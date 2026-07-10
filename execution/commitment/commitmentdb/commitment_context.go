@@ -544,10 +544,9 @@ func (sdc *SharedDomainsCommitmentContext) ComputeCommitment(ctx context.Context
 		switch trie := sdc.patriciaTrie.(type) {
 		case *commitment.ParallelPatriciaHashed:
 			// The parallel fold workers compute the root, so they must read the same
-			// file generation the in-memory overlay was built against: pin the main
-			// tx's generation and open worker txns from it. Otherwise a worker could
-			// pin a newer generation and read a domain (e.g. code) inconsistent with
-			// the account overlay (the torn Accounts/Code read).
+			// file generation the main tx was built against: pin it and open worker
+			// txns from that pin. Otherwise a worker could pin a newer generation and
+			// read one domain (e.g. code) inconsistent with another (e.g. accounts).
 			var workerPin kv.TemporalFilesPin
 			if p, ok := tx.(filesPinner); ok {
 				if wp := p.Pin(); wp != nil {
@@ -564,8 +563,9 @@ func (sdc *SharedDomainsCommitmentContext) ComputeCommitment(ctx context.Context
 			warmupConfig.CtxFactory, drainCollectors = sdc.concurrentTrieContextFactory(ctx, sdc.paraTrieDB, workerPin, txNum)
 			trie.SetTrieContextFactory(warmupConfig.CtxFactory)
 		default:
-			// Serial/streaming: this factory only serves page-cache warmup, which
-			// does not compute the root, so its reads need no generation pin.
+			// Serial: this factory only serves page-cache warmup, which does not
+			// compute the root, so its reads need no generation pin. (Streaming is
+			// a *ParallelPatriciaHashed and takes the pinned branch above.)
 			warmupConfig.CtxFactory = sdc.trieContextFactory(ctx, sdc.paraTrieDB, txNum)
 		}
 	}
@@ -652,12 +652,10 @@ type filesPinner interface {
 	Pin() kv.TemporalFilesPin
 }
 
-// beginWorkerRo opens a per-worker read tx for parallel/warmup commitment reads.
-// When a files pin is available it opens the tx bound to that snapshot, so a
-// worker never reads a domain from a newer file generation than the in-memory
-// overlay was built against — the torn Accounts-vs-Code read that fails the
-// code-hash assert. Without a pin (a backend that can't pin files) it falls back
-// to an independent snapshot.
+// beginWorkerRo opens a per-worker read tx for parallel/warmup commitment reads,
+// bound to the pinned file snapshot when one is available so all workers observe
+// the main tx's generation. Falls back to an independent snapshot when the
+// backend can't pin files.
 func beginWorkerRo(ctx context.Context, db kv.TemporalRoDB, pin kv.TemporalFilesPin) (kv.TemporalTx, error) {
 	if pin != nil {
 		return pin.BeginTemporalRo(ctx)

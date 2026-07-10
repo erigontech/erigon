@@ -105,11 +105,9 @@ type temporalFilesPin struct {
 	agg *state.AggregatorFilesPin
 }
 
-// Pin holds this tx's aggregator file snapshot so consistent read txns can be
-// opened from it (BeginTemporalRo) even after newer file generations are
-// published — used by parallel-commitment workers so they never read a domain
-// from a generation inconsistent with the in-memory overlay this tx was built
-// against. The pin is independent of this tx's lifetime; release it with Close.
+// Pin returns a kv.TemporalFilesPin holding this tx's aggregator file snapshot;
+// read txns opened from it stay on that generation. Independent of this tx's
+// lifetime — release with Close.
 func (tx *tx) Pin() kv.TemporalFilesPin {
 	return &temporalFilesPin{db: tx.db, agg: tx.aggtx.Pin()}
 }

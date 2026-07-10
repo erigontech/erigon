@@ -115,13 +115,13 @@ func (m *MemoryMutation) UnderlyingTx() kv.TemporalTx {
 	return m.db
 }
 
-// Pin forwards the files-pin capability to the underlying tx so that parallel
-// commitment workers reading through an overlay view still pin the same file
-// generation as the main read — domain (Accounts/Code/Storage) reads fall
-// through the overlay to the underlying tx, so pinning it keeps worker reads
-// consistent. Returns nil when the underlying tx can't pin files, letting the
-// caller fall back to an independent snapshot.
+// Pin forwards the files-pin capability to the underlying tx: domain reads fall
+// through the overlay to it, so pinning the underlying tx keeps overlay-view
+// reads on the same file generation. Returns nil when the underlying tx can't
+// pin files, letting the caller fall back to an independent snapshot.
 func (m *MemoryMutation) Pin() kv.TemporalFilesPin {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
 	if p, ok := m.db.(interface{ Pin() kv.TemporalFilesPin }); ok {
 		return p.Pin()
 	}
