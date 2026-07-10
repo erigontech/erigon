@@ -364,7 +364,7 @@ func (rw *Worker) Run() (err error) {
 	pprof.SetGoroutineLabels(pprof.WithLabels(rw.ctx, pprof.Labels("sub", "exec-worker")))
 	defer func() {
 		if rec := recover(); rec != nil {
-			err = fmt.Errorf("exec.Worker panic: %s, %s", rec, dbg.Stack())
+			err = fmt.Errorf("exec.Worker panic: %v, %s", rec, dbg.Stack())
 			rw.logger.Warn("Worker failed", "err", err)
 		}
 	}()
@@ -389,7 +389,7 @@ func (rw *Worker) Run() (err error) {
 				if rec := recover(); rec != nil {
 					result = &TxResult{
 						Task: txTask,
-						Err:  fmt.Errorf("exec task panic: %s, %s", rec, dbg.Stack()),
+						Err:  fmt.Errorf("exec task panic: %v, %s", rec, dbg.Stack()),
 					}
 				}
 			}()

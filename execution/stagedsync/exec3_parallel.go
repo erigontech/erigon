@@ -370,7 +370,7 @@ func (pe *parallelExecutor) execImpl(ctx context.Context, execStage *StageState,
 		defer func() {
 			if rec := recover(); rec != nil {
 				pe.logger.Warn("["+execStage.LogPrefix()+"] rw panic", "rec", rec, "stack", dbg.Stack())
-				err = fmt.Errorf("apply loop panic: %s", rec)
+				err = fmt.Errorf("apply loop panic: %v", rec)
 			} else if err != nil && !(errors.Is(err, context.Canceled) || errors.Is(err, &ErrLoopExhausted{})) {
 				pe.logger.Warn("["+execStage.LogPrefix()+"] rw exit", "err", err, "stack", dbg.Stack())
 			} else {
@@ -990,7 +990,7 @@ func (pe *parallelExecutor) execLoop(ctx context.Context) (err error) {
 	defer func() {
 		if rec := recover(); rec != nil {
 			pe.logger.Warn("["+pe.logPrefix+"] exec loop panic", "rec", rec, "stack", dbg.Stack())
-			err = fmt.Errorf("exec loop panic: %s", rec)
+			err = fmt.Errorf("exec loop panic: %v", rec)
 		} else if err != nil && !errors.Is(err, context.Canceled) {
 			pe.logger.Warn("["+pe.logPrefix+"] exec loop error", "err", err)
 		} else {

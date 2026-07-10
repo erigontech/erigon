@@ -541,7 +541,7 @@ func (te *txExecutor) executeBlocks(ctx context.Context, startBlockNum uint64, m
 		// Closing here would race with the exec loop sending results.
 		defer func() {
 			if rec := recover(); rec != nil {
-				err = fmt.Errorf("exec blocks panic: %s", rec)
+				err = fmt.Errorf("exec blocks panic: %v", rec)
 				return
 			}
 			if err = common.NilIfCanceled(err); err != nil {
