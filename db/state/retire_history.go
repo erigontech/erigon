@@ -142,8 +142,8 @@ func (at *AggregatorRoTx) Retire(ctx context.Context, cutoffs kv.RetireCutoffs) 
 	}
 
 	var retired []*FilesItem
-	for _, a := range aged {
-		retired = append(retired, a.files...)
+	for _, agedList := range aged {
+		retired = append(retired, agedList.files...)
 	}
 	if len(retired) == 0 {
 		return 0, nil
