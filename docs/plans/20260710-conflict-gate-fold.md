@@ -235,9 +235,32 @@ Follow-up (out of Task 4's measure-only scope, for Task 6 / the materialized-mou
 the whole-fresh dispatch an explicit whale-split (as frontier has) so the win holds at NumCPU without
 oversubscription.
 
+## Milestone 3.5 — Per-subtree grain: split the whale finely at NumCPU
+
+### Task 5: Whale-split within the whole-fresh dispatch (close the NumCPU regression)
+
+Problem (measured, Task 4): `foldK = subtreeCount/numWorkers` is a *global* grain. On a whale-dominated
+corpus `subtreeCount` is dominated by the whale storage, so at NumCPU the grain is too coarse — the
+account-plane forks consume the budget and the whale folds serially behind them (w18: 800 ms, 13% slower
+than frontier); it only wins at ≥2×NumCPU (357 ms). Frontier's `freshWhaleCandidate` splits the whale
+*independent* of grain (flat ~710 ms). This is the "generalized recursion" gap: concurrency must be
+allocated by **subtree cost**, not a flat global grain.
+
+**Files:**
+- Modify: `execution/commitment/fold_pool.go`, `execution/commitment/truthtree_fold.go`
+
+- [ ] make the whole-fresh fork **per-subtree adaptive**: a deep whale storage subtree keeps forking at its
+      *own* `subtreeCount`/numWorkers so it splits finely at any worker count — OR invoke an explicit
+      whale-split (reuse frontier's `freshWhaleCandidate` / `deepStorageThreshold`) for big-storage accounts
+      inside the whole-fresh dispatch, independent of the account-plane budget.
+- [ ] parity unchanged: fresh whale + account plane + seam == sequential, N≥3 (roots + branches byte-identical).
+- [ ] perf (`Benchmark_FreshBuildFork`, carried updates): at **NumCPU (w18)** flag-on ≤ flag-off frontier
+      (close the 13% regression, ideally beat it); at oversubscription still ≥ 2×; alloc ≤ frontier (~25% less).
+- [ ] `make lint && make test-short` clean. Before Task 6.
+
 ## Milestone 4 — Verify + document
 
-### Task 5: Verify acceptance criteria
+### Task 6: Verify acceptance criteria
 
 - [ ] flag-on == flag-off == sequential: root + branch parity, N≥3, fresh corpora + seam; guard tests
       confirm incremental routes to frontier unchanged.
@@ -246,7 +269,7 @@ oversubscription.
       reuse (`git diff` those files shows only additive wiring, if any).
 - [ ] `make lint && make test-short` clean.
 
-### Task 6: [Final] Docs; flag-default decision
+### Task 7: [Final] Docs; flag-default decision
 
 **Files:**
 - Modify: `docs/design/parallel-patricia-hashed.md`, package doc
