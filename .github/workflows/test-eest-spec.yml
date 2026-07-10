@@ -72,7 +72,8 @@ jobs:
         with:
           submodules: false
           cleanup-space: ${{ !inputs.cache-warming-only }}
-          ramdisk: ${{ !inputs.cache-warming-only }}
+          # matrix.no-ramdisk is absent (null, falsy) for shards without the key.
+          ramdisk: ${{ !inputs.cache-warming-only && !matrix.no-ramdisk }}
           cache-namespace: test-eest-spec
           # All non-race shards build the same evm binary and all race shards the
           # same evm.race, so the cache splits by class rather than by shard.
@@ -105,7 +106,13 @@ jobs:
         env:
           EEST_SPEC_MAX_FAILURES: ${{ matrix.max-allowed-failures }}
           EEST_SPEC_WORKERS: ${{ matrix.workers }}
-        run: make eest-spec-${{ matrix.shard }}
+          SHARD_NO_RAMDISK: ${{ matrix.no-ramdisk == true }}
+        run: |
+          if [ "$SHARD_NO_RAMDISK" = "true" ]; then
+            export ERIGON_EXECUTION_TESTS_TMPDIR="$RUNNER_TEMP/eest-datadirs"
+            mkdir -p "$ERIGON_EXECUTION_TESTS_TMPDIR"
+          fi
+          make eest-spec-${{ matrix.shard }}
 
       - name: Build evm binary (cache warming)
         if: inputs.cache-warming-only
