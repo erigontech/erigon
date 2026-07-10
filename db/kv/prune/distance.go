@@ -18,7 +18,6 @@ package prune
 
 import (
 	"fmt"
-	"math"
 	"strconv"
 	"strings"
 )
@@ -48,7 +47,7 @@ func ParseBlocksDistance(s string) (uint64, error) {
 // ParseHistoryDistance parses a --prune.distance value: a decimal block count,
 // "keep-all" (keep all state history), or an empty string (0, meaning unset).
 func ParseHistoryDistance(s string) (uint64, error) {
-	return parseStateHistoryDistance(s, "--prune.distance", Distance(math.MaxUint64))
+	return parseStateHistoryDistance(s, "--prune.distance", KeepPostMergeBlocksPruneMode)
 }
 
 // ParseCommitmentHistoryDistance parses a --prune.commitment-history.distance
