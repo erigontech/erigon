@@ -17,6 +17,8 @@
 package commitment
 
 import (
+	"context"
+	"errors"
 	"fmt"
 	"math/bits"
 
@@ -145,4 +147,44 @@ func foldFreshStorageRoot(node *prefixNode) (common.Hash, error) {
 	fc := &foldCtx{hph: NewHexPatriciaHashed(length.Addr, nil, DefaultTrieConfig())}
 	defer fc.hph.Release()
 	return fc.foldNode(node, 64)
+}
+
+// foldReconciledStorageRoot folds a touched storage subtree against on-disk state, so untouched
+// on-disk siblings inside a touched branch survive into the folded root — the reconciliation the
+// fresh hand-rolled fold lacks (it reads no disk). It seeds row 0 from the on-disk branch at
+// accPrefix, replays the touched keys so unfold reads each deeper on-disk branch and fold keeps its
+// untouched children blinded, then collapses row 0 into the account's single storage-root cell at
+// the depth-64 seam. A missing branch at accPrefix means the account is storage-less on disk (the
+// fresh case) — an empty wall, no siblings. Returns the storage root and the deferred branch
+// updates the fold produced.
+func foldReconciledStorageRoot(fp *foldPool, ctx context.Context, node *prefixNode, accPrefix []byte) (common.Hash, []*DeferredBranchUpdate, error) {
+	base, release := newDeferredStorageWorker(fp.workerPool, fp.ctxFactory, fp.traceW)
+	defer release()
+
+	if err := seedBaseAtPrefix(base, accPrefix); err != nil && !errors.Is(err, errStorageBaseNotBranch) {
+		return common.Hash{}, nil, fmt.Errorf("reconciled storage seed: %w", err)
+	}
+
+	if err := dfsSubtree(node, append([]byte(nil), accPrefix...), base.followAndUpdate); err != nil {
+		return common.Hash{}, nil, err
+	}
+	for base.activeRows > 1 {
+		if err := ctx.Err(); err != nil {
+			return common.Hash{}, nil, err
+		}
+		if err := base.fold(); err != nil {
+			return common.Hash{}, nil, fmt.Errorf("reconciled storage fold: %w", err)
+		}
+	}
+
+	var noChildren [16]cell
+	sr, err := aggregateMountedStorageRoot(base, &noChildren, 0)
+	if err != nil {
+		return common.Hash{}, nil, fmt.Errorf("reconciled storage aggregate: %w", err)
+	}
+	deferred := base.TakeDeferredUpdates()
+	if sr.IsEmpty() {
+		return empty.RootHash, deferred, nil
+	}
+	return sr.hash, deferred, nil
 }

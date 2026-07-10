@@ -128,6 +128,153 @@ func TestTruthtreeFold_FreshStoragePlane(t *testing.T) {
 	}
 }
 
+// seqStorageDisk seeds one storage block on disk (branch records into ms) via the sequential
+// engine and returns the resulting root.
+func seqStorageDisk(t *testing.T, ms *MockState, pk [][]byte, upds []Update) []byte {
+	t.Helper()
+	require.NoError(t, ms.applyPlainUpdates(pk, upds))
+	hph := NewHexPatriciaHashed(length.Addr, ms, DefaultTrieConfig())
+	defer hph.Release()
+	u := WrapKeyUpdates(t, ModeDirect, KeyToHexNibbleHash, pk, upds)
+	defer u.Close()
+	root, err := hph.Process(context.Background(), u, "", nil, WarmupConfig{})
+	require.NoError(t, err)
+	return common.Copy(root)
+}
+
+// seqTwoBlockOracle folds block 1 then block 2 through the sequential engine on one state, so
+// block 1's branches are the on-disk state block 2 reconciles against, and returns block 2's root
+// plus the resulting branch store. For a single-account whale every stored branch is a storage
+// branch, so the store doubles as the branch-parity oracle.
+func seqTwoBlockOracle(t *testing.T, pk [][]byte, upds []Update, k2 [][]byte, u2 []Update) ([]byte, *MockState) {
+	t.Helper()
+	ctx := context.Background()
+	ms := NewMockState(t)
+	hph := NewHexPatriciaHashed(length.Addr, ms, DefaultTrieConfig())
+	defer hph.Release()
+
+	require.NoError(t, ms.applyPlainUpdates(pk, upds))
+	u1 := WrapKeyUpdates(t, ModeDirect, KeyToHexNibbleHash, pk, upds)
+	_, err := hph.Process(ctx, u1, "", nil, WarmupConfig{})
+	require.NoError(t, err)
+	u1.Close()
+
+	require.NoError(t, ms.applyPlainUpdates(k2, u2))
+	u2w := WrapKeyUpdates(t, ModeDirect, KeyToHexNibbleHash, k2, u2)
+	root, err := hph.Process(ctx, u2w, "", nil, WarmupConfig{})
+	require.NoError(t, err)
+	u2w.Close()
+	return common.Copy(root), ms
+}
+
+// requireReconciledFoldParity seeds block 1 on disk, then folds block 2's touched storage subtree
+// against that disk via foldReconciledStorageRoot and asserts (1) the wrapped account root equals
+// the sequential oracle and (2) the branch records the fold emits — the deletes it writes in place
+// plus the deferred branch updates it returns — reproduce the oracle's branch store byte-for-byte.
+// block 2 leaves the account untouched, so accUpd holds the on-disk account fields and the account
+// leaf rehashes over the reconciled storage root.
+func requireReconciledFoldParity(t *testing.T, addr, accHash []byte, accUpd Update, pk [][]byte, upds []Update, k2 [][]byte, u2 []Update) {
+	t.Helper()
+	ctx := context.Background()
+
+	oracle, oracleMs := seqTwoBlockOracle(t, pk, upds, k2, u2)
+
+	msFold := NewMockState(t)
+	seqStorageDisk(t, msFold, pk, upds)
+	require.NoError(t, msFold.applyPlainUpdates(k2, u2))
+
+	node2, accPrefix := whaleStorageNode(k2, u2, accHash)
+	fp := makeFoldPool(msFold, runtime.NumCPU())
+
+	sr, deferred, err := foldReconciledStorageRoot(fp, ctx, node2, accPrefix)
+	require.NoError(t, err)
+	root, err := wrapAccountRoot(msFold, addr, accUpd, sr)
+	require.NoError(t, err)
+	require.Equal(t, oracle, root, "reconciled fold root != sequential oracle")
+
+	_, err = ApplyDeferredBranchUpdates(deferred, 1, msFold.PutBranch)
+	require.NoError(t, err)
+	requireBranchParity(t, oracleMs, msFold)
+}
+
+// TestTruthtreeFold_OnDiskSiblingReconciliation is the net-new crux: block 2 touches a scattered
+// subset of block 1's on-disk storage, so most of the subtree is untouched on-disk siblings the
+// direct fold never sees in the touched trie. The hand-rolled fresh fold drops them and diverges
+// (the RED baseline); the reconciling fold reads the on-disk branches and reproduces the root.
+func TestTruthtreeFold_OnDiskSiblingReconciliation(t *testing.T) {
+	addr, accHash, _, accUpd, pk, upds, groups := whaleByNibble(20_000)
+
+	var k2 [][]byte
+	var u2 []Update
+	for x := range 16 {
+		for i, kv := range groups[x] {
+			if i%7 != 0 {
+				continue
+			}
+			nu := kv.upd
+			nu.Storage[len(nu.Storage)-1] ^= 0x5A
+			k2 = append(k2, kv.pk)
+			u2 = append(u2, nu)
+		}
+	}
+
+	oracle, _ := seqTwoBlockOracle(t, pk, upds, k2, u2)
+
+	// RED baseline: without reconciliation the fresh fold sees only the touched subset and drops
+	// every untouched on-disk sibling, so its root cannot match the oracle.
+	node2, _ := whaleStorageNode(k2, u2, accHash)
+	freshSR, err := foldFreshStorageRoot(node2)
+	require.NoError(t, err)
+	freshRoot, err := wrapAccountRoot(NewMockState(t), addr, accUpd, freshSR)
+	require.NoError(t, err)
+	require.NotEqual(t, oracle, freshRoot, "precondition: fresh fold must drop on-disk siblings and diverge")
+
+	requireReconciledFoldParity(t, addr, accHash, accUpd, pk, upds, k2, u2)
+}
+
+// TestTruthtreeFold_SingleSurvivorCollapse deletes every storage slot but one whole first-nibble
+// group, so the reconciled storage subtree collapses to a single surviving first-nibble child — the
+// depth-64 seam must emit the extension-node root over the survivor, not a branch hash.
+func TestTruthtreeFold_SingleSurvivorCollapse(t *testing.T) {
+	addr, accHash, _, accUpd, pk, upds, groups := whaleByNibble(20_000)
+	surv := -1
+	for x := range 16 {
+		if len(groups[x]) >= 2 {
+			surv = x
+			break
+		}
+	}
+	require.GreaterOrEqual(t, surv, 0, "corpus must have a multi-slot first-nibble group")
+
+	var k2 [][]byte
+	var u2 []Update
+	for x := range 16 {
+		if x == surv {
+			continue
+		}
+		for _, kv := range groups[x] {
+			k2 = append(k2, kv.pk)
+			u2 = append(u2, Update{Flags: DeleteUpdate})
+		}
+	}
+	requireReconciledFoldParity(t, addr, accHash, accUpd, pk, upds, k2, u2)
+}
+
+// TestTruthtreeFold_DeleteToEmpty deletes every storage slot, so the reconciled fold must collect
+// the delete of the storage-root branch and return the empty-storage root.
+func TestTruthtreeFold_DeleteToEmpty(t *testing.T) {
+	addr, accHash, _, accUpd, pk, upds, groups := whaleByNibble(2_000)
+	var k2 [][]byte
+	var u2 []Update
+	for x := range 16 {
+		for _, kv := range groups[x] {
+			k2 = append(k2, kv.pk)
+			u2 = append(u2, Update{Flags: DeleteUpdate})
+		}
+	}
+	requireReconciledFoldParity(t, addr, accHash, accUpd, pk, upds, k2, u2)
+}
+
 // truthtreeFoldAllocCeiling caps the direct fold's per-op allocation on the 750k fresh-whale
 // storage subtree. Buffer reuse keeps it near the proto's ~44 MB serial figure; the naive
 // per-node-cell fold the proto rejected sits at ~575 MB (~331 MB for the current copy-replay fold).

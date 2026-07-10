@@ -94,11 +94,11 @@ The frontier **DAG + pool + merge/finale stitch are unchanged.** A leaf task tod
 - Modify: `execution/commitment/truthtree_fold.go`
 - Modify: `execution/commitment/truthtree_fold_test.go`
 
-- [ ] RED first: on-disk-state MockState fixture — block 1 seeds a storage subtree on disk, block 2 touches a subset; `foldNode` must reproduce the sequential root+branches (fails before reconciliation)
-- [ ] implement: at each recursed branch, read `Branch(prefix)` and fold untouched on-disk children as blinded cells; fresh (missing branch) = no siblings
-- [ ] fixtures + parity for single-survivor collapse and delete-to-empty (the seed+stitch+delete interaction)
-- [ ] differential branch byte-parity vs sequential on all three
-- [ ] run tests — must pass before next task
+- [x] RED first: on-disk-state MockState fixture — block 1 seeds a storage subtree on disk, block 2 touches a scattered subset; `TestTruthtreeFold_OnDiskSiblingReconciliation` pins that the fresh hand-rolled fold drops the untouched on-disk siblings and diverges (RED baseline, `require.NotEqual`), and the reconciling fold reproduces the sequential root. Confirmed RED by neutering the on-disk seed → root mismatch on all three corpora
+- [x] implement: `foldReconciledStorageRoot` seeds row 0 from `Branch(accPrefix)` and replays the touched keys so `followAndUpdate`'s unfold reads each deeper on-disk branch and fold keeps its untouched children blinded; a missing branch (`errStorageBaseNotBranch`) = fresh, empty wall, no siblings. Discovery: reconciliation rides the proven seed+replay+fold, not a hand-rolled on-disk descent (that reimplements the engine); the hand-rolled `foldNode` stays the fresh no-read fast path
+- [x] fixtures + parity for single-survivor collapse (`TestTruthtreeFold_SingleSurvivorCollapse`, delete-all-but-one-nibble → depth-64 extension-node root) and delete-to-empty (`TestTruthtreeFold_DeleteToEmpty`, delete every slot → empty-storage root + storage-root-branch delete)
+- [x] differential branch byte-parity vs sequential on all three — `requireReconciledFoldParity` applies the fold's in-place deletes + returned deferred updates over the block-1 disk and `requireBranchParity` asserts the branch store equals the sequential oracle (single-account whale ⇒ every stored branch is a storage branch)
+- [x] run tests — `go test ./execution/commitment/ -count=1` green, `-race` clean, `make lint` 0 issues
 
 ### Task 4: Deferred branch-update emission
 
