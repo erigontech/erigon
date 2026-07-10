@@ -70,6 +70,7 @@ var errCaplinEnabled = &rpc.UnsupportedForkError{Message: "caplin is enabled"}
 type EngineServer struct {
 	blockDownloader *engine_block_downloader.EngineBlockDownloader
 	config          *chain.Config
+	beaconCfg       atomic.Pointer[clparams.BeaconChainConfig]
 	// Block proposing for proof-of-stake
 	proposing bool
 	// Block consuming for proof-of-stake
@@ -124,6 +125,10 @@ func NewEngineServer(
 	srv.consuming.Store(consuming)
 
 	return srv
+}
+
+func (e *EngineServer) SetBeaconChainConfig(beaconCfg *clparams.BeaconChainConfig) {
+	e.beaconCfg.Store(beaconCfg)
 }
 
 func (e *EngineServer) Start(
