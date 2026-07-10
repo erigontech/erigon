@@ -1438,7 +1438,6 @@ func (s *BaseRoSnapshots) delete(fileName string) *DirtySegment {
 	return delSeg
 }
 
-// prune visible segments
 // RetireFiles drops the named segments from the live set. Physical unlink is deferred
 // to the reader watermark via the generation chain, so files pinned by open views survive.
 func (s *BaseRoSnapshots) RetireFiles(fileNames ...string) error {
