@@ -59,6 +59,7 @@ var (
 
 	//state v3
 	noPrune              = EnvBool("NO_PRUNE", false)
+	noRetire             = EnvBool("NO_RETIRE", false)              // kill-switch: don't delete aged frozen files (history/II + block snapshots)
 	noMerge              = EnvBool("NO_MERGE", false)               // don't merge Domain/Hist/II
 	noBackgroundE3Build  = EnvBool("NO_BACKGROUND_E3_BUILD", false) // suppress background E3 file build / merge / retire goroutines
 	noMergeHistory       = EnvBool("NO_MERGE_HISTORY", false)       // don't merge Hist/II but still merge Domain
@@ -157,6 +158,7 @@ func ReadMemStats(m *runtime.MemStats) {
 
 func DiscardCommitment() bool       { return discardCommitment }
 func NoPrune() bool                 { return noPrune }
+func NoRetire() bool                { return noRetire }
 func NoMerge() bool                 { return noMerge }
 func NoBackgroundMaintenance() bool { return noBackgroundE3Build }
 func NoMergeHistory() bool          { return noMergeHistory }
