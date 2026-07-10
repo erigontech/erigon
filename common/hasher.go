@@ -26,30 +26,35 @@ type Hasher struct {
 	Sha keccak.KeccakState
 }
 
-var hashersPool = sync.Pool{
+var keccakStatePool = sync.Pool{
 	New: func() any {
-		return &Hasher{Sha: keccak.NewFastKeccak()}
+		return keccak.NewFastKeccak()
 	},
 }
 
-func NewHasher() *Hasher {
-	h := hashersPool.Get().(*Hasher)
-	h.Sha.Reset()
-	return h
+// NewKeccakState returns a reset KeccakState from a shared pool.
+func NewKeccakState() keccak.KeccakState {
+	sha := keccakStatePool.Get().(keccak.KeccakState)
+	sha.Reset()
+	return sha
 }
-func ReturnHasherToPool(h *Hasher) { hashersPool.Put(h) }
+
+func ReturnKeccakState(sha keccak.KeccakState) { keccakStatePool.Put(sha) }
+
+func NewHasher() *Hasher           { return &Hasher{Sha: NewKeccakState()} }
+func ReturnHasherToPool(h *Hasher) { ReturnKeccakState(h.Sha) }
 
 func HashData(data []byte) (Hash, error) {
-	h := NewHasher()
-	defer ReturnHasherToPool(h)
+	sha := NewKeccakState()
+	defer ReturnKeccakState(sha)
 
-	_, err := h.Sha.Write(data)
+	_, err := sha.Write(data)
 	if err != nil {
 		return Hash{}, err
 	}
 
 	var buf Hash
-	_, err = h.Sha.Read(buf[:])
+	_, err = sha.Read(buf[:])
 	if err != nil {
 		return Hash{}, err
 	}

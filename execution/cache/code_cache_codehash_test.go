@@ -97,16 +97,18 @@ func TestCodeCache_PutWithCodeHash_EmptyHashOrCodeIsNoOp(t *testing.T) {
 	require.Nil(t, v)
 }
 
-func TestCodeCache_PutWithCodeHash_RespectsCodeCapacity(t *testing.T) {
-	// 8-byte cap: 32-byte codeHash + 4-byte code > 32. New codeHashToCode puts must
-	// no-op when the layer is full. Use tiny code to keep math obvious.
+func TestCodeCache_PutWithCodeHash_EvictsColdestWhenFull(t *testing.T) {
+	// Tiny byte budget → a 1-entry freelru cap. The second put must EVICT the
+	// coldest entry (LRU), not freeze the layer: the newest code is retrievable
+	// and the oldest is gone.
 	c := NewCodeCache(8, 1*datasize.MB)
 	c.PutWithCodeHash(makeAddr(1), []byte{1, 2, 3, 4}, makeCodeHash(1), 0)
-	// Second put exceeds the codeHashToCode budget — must no-op.
 	c.PutWithCodeHash(makeAddr(2), []byte{5, 6, 7, 8}, makeCodeHash(2), 0)
 
 	_, ok := c.GetByCodeHash(makeCodeHash(2))
-	assert.False(t, ok, "second codeHashToCode entry should not exist when capacity is exceeded")
+	assert.True(t, ok, "newest codeHashToCode entry must be present after eviction (no freeze)")
+	_, ok = c.GetByCodeHash(makeCodeHash(1))
+	assert.False(t, ok, "coldest codeHashToCode entry must have been evicted")
 }
 
 func TestCodeCache_CodeSize_PopulatedAlongsideBytes(t *testing.T) {
@@ -214,7 +216,7 @@ func BenchmarkCodeCache_GetByCodeHash_ManyAddrs_OneCode(b *testing.B) {
 }
 
 // TestCodeCache_Unwind_DropsUnwoundCodeEverywhere verifies the (txNum, epoch)
-// model the user requires (#21752): code deployed on a fork that is later
+// model: code deployed on a fork that is later
 // unwound must stop being discoverable on EVERY layer — addr→code, the
 // content-addressed codeHash→code, and the size layer — not just the addr
 // layer. The code's value is invariant for a hash, but its existence is not.

@@ -182,12 +182,16 @@ func (f *ForkChoiceStore) payloadDataAvailability(root common.Hash, available bo
 // Compares current block's parent_block_hash with parent block's block_hash from their bids.
 // [New in Gloas:EIP7732]
 func (f *ForkChoiceStore) getParentPayloadStatus(block *cltypes.BeaconBlock) cltypes.PayloadStatus {
-	// Get the parent block
 	parentBlock, ok := f.forkGraph.GetBlock(block.ParentRoot)
 	if !ok || parentBlock == nil {
 		return cltypes.PayloadStatusEmpty
 	}
+	return parentPayloadStatusFromBids(parentBlock, block)
+}
 
+// parentPayloadStatusFromBids is getParentPayloadStatus with the parent block
+// already resolved, so callers iterating siblings fetch the parent only once.
+func parentPayloadStatusFromBids(parentBlock *cltypes.SignedBeaconBlock, block *cltypes.BeaconBlock) cltypes.PayloadStatus {
 	// Pre-GLOAS parent blocks have no bid field. From the GLOAS fork choice
 	// perspective they are treated as EMPTY: they always carried their execution
 	// payload inline (no separate envelope), so the PENDING → EMPTY/FULL

@@ -150,7 +150,11 @@ func makeBranch(prefix []byte, afterMap uint16, touched []int, seed byte, prev [
 			cells[n].hash[b] = seed + byte(n)
 		}
 	}
-	return getDeferredUpdate(prefix, tm, tm, afterMap, &cells, prev)
+	raw, err := NewBranchEncoder(64).EncodeBranch(tm, tm, afterMap, &cells)
+	if err != nil {
+		panic(err)
+	}
+	return getDeferredUpdate(prefix, raw, prev)
 }
 
 // Settle condition is idle, not all-clean: the coalescing gate may legitimately leave a split dirty.
