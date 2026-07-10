@@ -721,6 +721,16 @@ func (api *DebugAPIImpl) ExecutionWitness(ctx context.Context, blockNrOrHash rpc
 	if err != nil {
 		return nil, err
 	}
+
+	return api.buildWitnessResult(ctx, tx, info, resolvedMode)
+}
+
+// buildWitnessResult runs the witness-building pipeline for an already-resolved block
+// against an open temporal tx: re-execute to record accesses, fold the commitment trie,
+// collect ancestor headers, verify statelessly, then append the legacy empty-storage node
+// and sort. It is the single seam shared by the on-demand handler and the eager cache
+// builder, so both produce byte-identical results; never fork the build logic.
+func (api *DebugAPIImpl) buildWitnessResult(ctx context.Context, tx kv.TemporalTx, info *witnessBlockInfo, mode witnessMode) (*ExecutionWitnessResult, error) {
 	blockNum := info.BlockNum
 	block := info.Block
 	firstTxNumInBlock := info.FirstTxNumInBlock
@@ -734,7 +744,7 @@ func (api *DebugAPIImpl) ExecutionWitness(ctx context.Context, blockNrOrHash rpc
 
 	engine := api.engine()
 
-	accessed, accessedBlockHashes, err := api.buildAccessedState(ctx, tx, block, chainConfig, engine, firstTxNumInBlock, resolvedMode)
+	accessed, accessedBlockHashes, err := api.buildAccessedState(ctx, tx, block, chainConfig, engine, firstTxNumInBlock, mode)
 	if err != nil {
 		return nil, err
 	}
@@ -782,14 +792,14 @@ func (api *DebugAPIImpl) ExecutionWitness(ctx context.Context, blockNrOrHash rpc
 
 	siblingPaths, err := detectCollapseSiblings(ctx, tx, domains, sdCtx,
 		firstTxNumInBlock, endTxNum, blockNum, parentNum,
-		block.Root(), accessed, resolvedMode)
+		block.Root(), accessed, mode)
 	if err != nil {
 		return nil, err
 	}
 
 	// Materialize exclusion-proof branches for strict sparse-trie verifiers in legacy/default
 	// mode; canonical mode stays minimal to match the reference witness.
-	nodes, err := buildWitnessTrie(ctx, tx, domains, sdCtx, firstTxNumInBlock, expectedParentRoot, siblingPaths, accessed, resolvedMode != witnessModeCanonical)
+	nodes, err := buildWitnessTrie(ctx, tx, domains, sdCtx, firstTxNumInBlock, expectedParentRoot, siblingPaths, accessed, mode != witnessModeCanonical)
 	if err != nil {
 		return nil, err
 	}
@@ -813,7 +823,7 @@ func (api *DebugAPIImpl) ExecutionWitness(ctx context.Context, blockNrOrHash rpc
 	// legacy carries the empty storage-trie node (0x80) once when some account has an
 	// empty storage root (EmptyRoot appears only as an account-leaf storage-root field);
 	// canonical omits it. Added after stateless verification, which rejects the bare node.
-	if resolvedMode == witnessModeLegacy {
+	if mode == witnessModeLegacy {
 		for _, node := range result.State {
 			if bytes.Contains(node, trie.EmptyRoot[:]) {
 				result.State = append(result.State, hexutil.Bytes{0x80})

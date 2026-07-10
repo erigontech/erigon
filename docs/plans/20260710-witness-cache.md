@@ -97,6 +97,8 @@ check commitment-history, resolve block, call `buildWitnessResult`.
   `ExecutionWitness` result bytes for a fixture block before the extraction and assert equality after,
   so the append-vs-sort tail can't silently reorder.
 
+- [x] **Status:** complete
+
 ### Task 1: `witnessCache` type (TDD)
 
 New file `rpc/jsonrpc/witness_cache.go` (copyright 2026). Unexported type `witnessCache` in package
@@ -112,6 +114,8 @@ New file `rpc/jsonrpc/witness_cache.go` (copyright 2026). Unexported type `witne
   hash-mismatch; `reconcile` evicts an orphaned hash and drops above-head entries; concurrent
   get/put race-free (`-race`).
 
+- [ ] **Status:** pending
+
 ### Task 2: Serve hook
 
 In `ExecutionWitness`, after mode resolution: if `api.witnessCache != nil && mode == legacy`, resolve
@@ -123,6 +127,8 @@ the unchanged on-demand path. Increment hit/miss metrics (Task 5).
   uncached requests are unaffected; `nil` cache path identical to today.
 - **TDD:** unit test with a hand-populated `witnessCache` asserting hit returns the stored result and
   canonical bypasses it.
+
+- [ ] **Status:** pending
 
 ### Task 3: Eager builder loop
 
@@ -161,6 +167,8 @@ shutdown.
   equal the on-demand `ExecutionWitness` result for the same block — no live archive node needed. Add a
   reorg case asserting a post-reorg request misses and falls through.
 
+- [ ] **Status:** pending
+
 ### Task 4: Flags, config, wiring, gating
 
 - **Flags** (`cmd/utils/flags.go`, model on `RpcGasCapFlag` `cli.UintFlag`): `WitnessCacheBlocksFlag`
@@ -190,6 +198,8 @@ shutdown.
   node with the flag but no commitment-history logs and no-ops; standalone rpcdaemon with the flag set
   parses it and serves on-demand only (nil cache); default (flag 0) is a complete no-op.
 
+- [ ] **Status:** pending
+
 ### Task 5: Metrics + docs
 
 - Counters (existing metrics facility): `hit`, `miss`, `build_ok`, `build_fail_verify`, `build_fail_other`,
@@ -197,6 +207,8 @@ shutdown.
   histogram.
 - Flag docs / help text: embedded-only, requires `--prune.experimental.include-commitment-history`,
   `maxmb` is the real cap (a 1GB cap holds ~85 median-mainnet blocks; 96 blocks can be ~1.1–2.4GB raw).
+
+- [ ] **Status:** pending
 
 ## Testing
 

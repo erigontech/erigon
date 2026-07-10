@@ -1182,6 +1182,29 @@ func TestExecutionWitness(t *testing.T) {
 		require.NotNil(t, result.State, "State should not be nil")
 	})
 
+	// Guards the buildWitnessResult seam: the append-vs-sort tail must produce a stable,
+	// fully sorted State so a byte-identical witness comes out on every build.
+	t.Run("result bytes stable and sorted", func(t *testing.T) {
+		for blockNum := uint64(1); blockNum <= latestBlockNum; blockNum++ {
+			bn := rpc.BlockNumber(blockNum)
+			first, err := api.ExecutionWitness(ctx, rpc.BlockNumberOrHash{BlockNumber: &bn}, nil)
+			require.NoError(t, err, "block %d", blockNum)
+			for i := 1; i < len(first.State); i++ {
+				require.LessOrEqual(t, bytes.Compare(first.State[i-1], first.State[i]), 0,
+					"block %d State must be sorted ascending", blockNum)
+			}
+			firstBytes, err := json.Marshal(first)
+			require.NoError(t, err)
+
+			second, err := api.ExecutionWitness(ctx, rpc.BlockNumberOrHash{BlockNumber: &bn}, nil)
+			require.NoError(t, err, "block %d", blockNum)
+			secondBytes, err := json.Marshal(second)
+			require.NoError(t, err)
+
+			require.Equal(t, firstBytes, secondBytes, "block %d witness bytes must be deterministic", blockNum)
+		}
+	})
+
 	t.Run("non-existent block", func(t *testing.T) {
 		// Very high block number that doesn't exist
 		blockNum := rpc.BlockNumber(999999999)
