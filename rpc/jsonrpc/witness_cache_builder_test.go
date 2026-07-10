@@ -22,6 +22,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/cmd/rpcdaemon/rpcdaemontest"
@@ -32,8 +33,61 @@ import (
 	"github.com/erigontech/erigon/db/state/statecfg"
 	"github.com/erigontech/erigon/execution/execmodule/execmoduletester"
 	"github.com/erigontech/erigon/execution/rlp"
+	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/rpc"
 )
+
+// encodeSyntheticHeader RLP-encodes a header carrying only a block number, as the
+// header subscription would deliver it, and returns its bytes and canonical hash.
+func encodeSyntheticHeader(t *testing.T, num uint64) ([]byte, common.Hash) {
+	t.Helper()
+	h := &types.Header{Number: *uint256.NewInt(num)}
+	b, err := rlp.EncodeToBytes(h)
+	require.NoError(t, err)
+	return b, h.Hash()
+}
+
+func TestDecodeHeaderRefs(t *testing.T) {
+	h10, hash10 := encodeSyntheticHeader(t, 10)
+
+	refs, err := decodeHeaderRefs([][]byte{h10})
+	require.NoError(t, err)
+	require.Len(t, refs, 1)
+	require.Equal(t, uint64(10), refs[0].num)
+	require.Equal(t, hash10, refs[0].hash)
+
+	refs, err = decodeHeaderRefs([][]byte{{}, h10, {}})
+	require.NoError(t, err)
+	require.Len(t, refs, 1, "empty payloads are skipped")
+
+	_, err = decodeHeaderRefs([][]byte{{0xff, 0xff, 0xff}})
+	require.Error(t, err, "garbage RLP is a decode error")
+}
+
+func TestProcessHeaderBatch(t *testing.T) {
+	cache := newWitnessCache(96, 1024)
+
+	h5, _ := encodeSyntheticHeader(t, 5)
+	newest, single, valid := processHeaderBatch(cache, [][]byte{h5})
+	require.True(t, valid)
+	require.True(t, single)
+	require.Equal(t, uint64(5), newest.num)
+
+	// Out-of-order multi-header batch: newest is the highest number, not the first entry.
+	h6, _ := encodeSyntheticHeader(t, 6)
+	h7, hash7 := encodeSyntheticHeader(t, 7)
+	newest, single, valid = processHeaderBatch(cache, [][]byte{h7, h6})
+	require.True(t, valid)
+	require.False(t, single)
+	require.Equal(t, uint64(7), newest.num)
+	require.Equal(t, hash7, newest.hash)
+
+	_, _, valid = processHeaderBatch(cache, nil)
+	require.False(t, valid, "empty batch is not usable")
+
+	_, _, valid = processHeaderBatch(cache, [][]byte{{0xff, 0xff, 0xff}})
+	require.False(t, valid, "decode error is not usable")
+}
 
 func TestWitnessCacheShouldBuild(t *testing.T) {
 	cases := []struct {
@@ -119,7 +173,11 @@ func TestWitnessCacheBuilderParity(t *testing.T) {
 	builder.witnessCache = cache
 
 	headerCh := make(chan [][]byte, 8)
-	go RunWitnessCacheBuilder(ctx, builder, headerCh)
+	builderDone := make(chan struct{})
+	go func() { defer close(builderDone); RunWitnessCacheBuilder(ctx, builder, headerCh) }()
+	// Join the builder before the test module's DB is torn down so no in-flight build
+	// touches a closed DB under -race.
+	defer func() { cancel(); <-builderDone }()
 
 	const blockNum = uint64(3)
 	hash, headerRLP := buildTestChainHeader(t, m, blockNum)
@@ -169,7 +227,11 @@ func TestWitnessCacheBuilderReorgEviction(t *testing.T) {
 	cache.put(blockNum, staleHash, &ExecutionWitnessResult{State: []hexutil.Bytes{{0x01}}})
 
 	headerCh := make(chan [][]byte, 8)
-	go RunWitnessCacheBuilder(ctx, builder, headerCh)
+	builderDone := make(chan struct{})
+	go func() { defer close(builderDone); RunWitnessCacheBuilder(ctx, builder, headerCh) }()
+	// Join the builder before the test module's DB is torn down so no in-flight build
+	// touches a closed DB under -race.
+	defer func() { cancel(); <-builderDone }()
 
 	hash, headerRLP := buildTestChainHeader(t, m, blockNum)
 	require.NotEqual(t, staleHash, hash, "seed hash must differ from the canonical hash")

@@ -1248,9 +1248,11 @@ func TestExecutionWitnessCacheServe(t *testing.T) {
 		api.witnessCache = cache
 		t.Cleanup(func() { api.witnessCache = nil })
 
+		hitBefore := witnessCacheHitCounter.GetValueUint64()
 		result, err := api.ExecutionWitness(ctx, rpc.BlockNumberOrHash{BlockNumber: &bn}, nil)
 		require.NoError(t, err)
 		require.Same(t, sentinel, result, "legacy request must serve the cached pointer")
+		require.Equal(t, uint64(1), witnessCacheHitCounter.GetValueUint64()-hitBefore, "a hit increments the hit counter once")
 	})
 
 	t.Run("canonical request bypasses the cache", func(t *testing.T) {
@@ -1260,18 +1262,22 @@ func TestExecutionWitnessCacheServe(t *testing.T) {
 		t.Cleanup(func() { api.witnessCache = nil })
 
 		canonical := "canonical"
-		result, _ := api.ExecutionWitness(ctx, rpc.BlockNumberOrHash{BlockNumber: &bn}, &canonical)
+		result, err := api.ExecutionWitness(ctx, rpc.BlockNumberOrHash{BlockNumber: &bn}, &canonical)
+		require.NoError(t, err)
 		require.NotSame(t, sentinel, result, "canonical request must never serve the legacy cache")
+		require.NotNil(t, result.State, "canonical request must build a real witness on demand")
 	})
 
 	t.Run("empty-cache miss falls through to on-demand", func(t *testing.T) {
 		api.witnessCache = newWitnessCache(96, 1024)
 		t.Cleanup(func() { api.witnessCache = nil })
 
+		missBefore := witnessCacheMissCounter.GetValueUint64()
 		result, err := api.ExecutionWitness(ctx, rpc.BlockNumberOrHash{BlockNumber: &bn}, nil)
 		require.NoError(t, err)
 		require.NotSame(t, sentinel, result)
 		require.NotNil(t, result.State, "miss must build a real witness on demand")
+		require.Equal(t, uint64(1), witnessCacheMissCounter.GetValueUint64()-missBefore, "a miss increments the miss counter once")
 	})
 
 	t.Run("nil cache path unaffected", func(t *testing.T) {

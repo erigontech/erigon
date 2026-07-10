@@ -257,7 +257,10 @@ func (api *DebugAPIImpl) buildAndCache(ctx context.Context, num uint64, hash com
 	}
 	defer tx.Rollback()
 
-	info, err := api.resolveWitnessBlock(ctx, tx, rpc.BlockNumberOrHashWithNumber(rpc.BlockNumber(num)))
+	// Resolve by the hash waitCommittedHead already validated as canonical at num, not
+	// by number: the built block is then provably the one stored under (num, hash), with
+	// no dependence on how block-number resolution treats the pending-commit overlay.
+	info, err := api.resolveWitnessBlock(ctx, tx, rpc.BlockNumberOrHashWithHash(hash, false))
 	if err != nil {
 		log.Warn("[witness-cache] resolve block", "block", num, "err", err)
 		witnessCacheBuildFailOtherCounter.Inc()

@@ -138,8 +138,9 @@ dirs, evmCallTimeout) plus `db`/`ethBackend`/`gascap`, and `APIList` builds its 
 and returns only `[]rpc.API` — so the builder cannot reach that impl. Resolve this by constructing a
 **builder-owned** `*DebugAPIImpl` from the same args `APIList` receives, sharing the single
 `*witnessCache` pointer with the serve-side impl. Two impls, one cache. Entry point:
-`RunWitnessCacheBuilder(ctx, dbg *DebugAPIImpl, headerCh <-chan [][]byte, notifications *shards.Notifications)`
-where `dbg` is the wired builder-owned impl (its `witnessCache` field is the shared pointer).
+`RunWitnessCacheBuilder(ctx, dbg *DebugAPIImpl, headerCh <-chan [][]byte)` where `dbg` is the
+wired builder-owned impl (its `witnessCache` field is the shared pointer) and `headerCh` is the
+canonical-header subscription opened by the embedded wiring.
 
 Decompose into pure, testable helpers (keep the loop itself thin — it is not unit-testable):
 

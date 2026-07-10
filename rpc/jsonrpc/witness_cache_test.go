@@ -54,6 +54,23 @@ func TestWitnessCacheGetHitAndHashMismatch(t *testing.T) {
 	require.False(t, ok, "absent number must miss")
 }
 
+func TestNewWitnessCacheClampsBlocks(t *testing.T) {
+	require.Equal(t, int(witnessCacheMaxBlocks), newWitnessCache(200, 1024).maxEntries,
+		"a block count above the hard cap clamps to witnessCacheMaxBlocks")
+	require.Equal(t, witnessCacheMaxBlocks, newWitnessCache(witnessCacheMaxBlocks, 1024).maxEntries,
+		"a block count at the hard cap is kept")
+
+	c := newWitnessCache(1, 1024)
+	require.Equal(t, 1, c.maxEntries)
+	c.put(1, hashN(1), mkResult(10))
+	c.put(2, hashN(2), mkResult(10))
+	require.Equal(t, 1, c.entryCount(), "a capacity-1 cache holds only the newest number")
+	_, ok := c.get(1, hashN(1))
+	require.False(t, ok, "lowest number evicted at capacity 1")
+	_, ok = c.get(2, hashN(2))
+	require.True(t, ok)
+}
+
 func TestWitnessCacheCountCapEviction(t *testing.T) {
 	c := newWitnessCache(3, 1024)
 	for n := uint64(1); n <= 4; n++ {
