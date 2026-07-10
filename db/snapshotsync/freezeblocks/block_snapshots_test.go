@@ -85,8 +85,8 @@ func TestBlockReaderPrefersTxBlockView(t *testing.T) {
 	require.True(t, okTx, "reader must resolve the retired segment via the tx's pinned view")
 }
 
-// Transaction segments below the cutoff are retired (gone from the live set, files handed
-// to the seeder); segments at/above the cutoff and other block types stay.
+// The minimal/full-node step: expire old transaction segments (handing their files to the
+// seeder), keeping recent ones and the other block types.
 func TestRetireMergedTransactionFilesBelow(t *testing.T) {
 	logger := log.New()
 	dir := t.TempDir()

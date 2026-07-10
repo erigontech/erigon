@@ -1459,9 +1459,11 @@ func (s *BaseRoSnapshots) RetireFiles(fileNames ...string) error {
 	return nil
 }
 
-// RetireMergedFilesBelow retires fully-merged segments of type typ ending below blockTo,
-// passing the removed files (.seg + indexes) to onDelete for the seeder. The whole-file
-// check keeps a range straddling blockTo from being partially removed. The View held here
+// RetireMergedFilesBelow retires fully-merged VISIBLE segments of type typ ending below
+// blockTo, passing the removed files (.seg + indexes) to onDelete for the seeder. It reads
+// only visible files — retire drops just what the node serves; invisible garbage
+// (subsumed/overlapping) is left to the merge clean-up (RemoveOverlaps). The whole-file
+// check keeps a range straddling blockTo from being partially removed; the View held here
 // pins the outgoing generation so the physical unlink runs off the dirty lock.
 func (s *BaseRoSnapshots) RetireMergedFilesBelow(typ snaptype.Enum, blockTo uint64, onDelete func(l []string) error) (bool, error) {
 	if s == nil {
@@ -1469,23 +1471,13 @@ func (s *BaseRoSnapshots) RetireMergedFilesBelow(typ snaptype.Enum, blockTo uint
 	}
 
 	var names, paths []string
-	func() {
-		s.dirtyLock.Lock()
-		defer s.dirtyLock.Unlock()
-		s.dirty[typ].Walk(func(segs []*DirtySegment) bool {
-			for _, sn := range segs {
-				if sn.Decompressor == nil {
-					continue
-				}
-				if sn.To() >= blockTo || sn.To()-sn.From() != snaptype.Erigon2MergeLimit {
-					continue
-				}
-				names = append(names, sn.FileName())
-				paths = append(paths, sn.FilePaths(s.dir)...)
-			}
-			return true
-		})
-	}()
+	for _, sn := range s.visible.Load().segments[typ] {
+		if sn.To() >= blockTo || sn.To()-sn.From() != snaptype.Erigon2MergeLimit {
+			continue
+		}
+		names = append(names, sn.src.FileName())
+		paths = append(paths, sn.src.FilePaths(s.dir)...)
+	}
 	if len(names) == 0 {
 		return false, nil
 	}

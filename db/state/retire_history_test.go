@@ -127,14 +127,13 @@ func TestRetire_RetiresFrozenFileEntirelyBelowCutoff(t *testing.T) {
 // cutoff must never be selected.
 func TestEntirelyBeforeStep_BoundaryStraddlingFileKept(t *testing.T) {
 	stepSize := uint64(10)
-	df := newDirtyFiles()
 	straddling := newFilesItem(9*stepSize, 11*stepSize) // steps [9,11)
-	df.Set(straddling)
+	files := visibleFiles{{src: straddling}}
 
-	outs := entirelyBeforeStep(df, stepSize, kv.Step(10))
+	outs := entirelyBeforeStep(files, stepSize, kv.Step(10))
 	require.Empty(t, outs)
 
-	outsAfterBoundaryMoves := entirelyBeforeStep(df, stepSize, kv.Step(11))
+	outsAfterBoundaryMoves := entirelyBeforeStep(files, stepSize, kv.Step(11))
 	require.Len(t, outsAfterBoundaryMoves, 1)
 }
 
@@ -152,6 +151,11 @@ func TestRetire_RetiresCommitmentAtOwnCutoff(t *testing.T) {
 	stepSize, stepsInFrozenFile := uint64(10), uint64(2)
 	agg := testDbAndAggregatorSmallFrozen(t, stepSize, stepsInFrozenFile)
 
+	// State domains lead the visible ceiling (dirtyFilesEndTxNumMinimax). Without them
+	// commitment history is clamped out of the visible set that Retire reads.
+	generateAccountsFile(t, agg.Dirs(), []testFileRange{{0, 2}, {2, 3}})
+	generateCodeFile(t, agg.Dirs(), []testFileRange{{0, 2}, {2, 3}})
+	generateStorageFile(t, agg.Dirs(), []testFileRange{{0, 2}, {2, 3}})
 	generateCommitmentHistoryAndIndexFiles(t, agg.Dirs(), []testFileRange{{0, 2}, {2, 3}})
 	require.NoError(t, agg.OpenFolder())
 	enableCommitmentHistory(agg)
@@ -174,6 +178,11 @@ func TestRetire_KeepsDomainWhenCutoffZero(t *testing.T) {
 	stepSize, stepsInFrozenFile := uint64(10), uint64(2)
 	agg := testDbAndAggregatorSmallFrozen(t, stepSize, stepsInFrozenFile)
 
+	// State domains lead the visible ceiling (dirtyFilesEndTxNumMinimax). Without them
+	// commitment history is clamped out of the visible set that Retire reads.
+	generateAccountsFile(t, agg.Dirs(), []testFileRange{{0, 2}, {2, 3}})
+	generateCodeFile(t, agg.Dirs(), []testFileRange{{0, 2}, {2, 3}})
+	generateStorageFile(t, agg.Dirs(), []testFileRange{{0, 2}, {2, 3}})
 	generateCommitmentHistoryAndIndexFiles(t, agg.Dirs(), []testFileRange{{0, 2}, {2, 3}})
 	require.NoError(t, agg.OpenFolder())
 	enableCommitmentHistory(agg)
@@ -196,6 +205,8 @@ func TestRetire_SubStepTxNumKeepsFiles(t *testing.T) {
 	agg := testDbAndAggregatorSmallFrozen(t, stepSize, stepsInFrozenFile)
 
 	generateAccountsFile(t, agg.Dirs(), []testFileRange{{0, 2}})
+	generateCodeFile(t, agg.Dirs(), []testFileRange{{0, 2}})
+	generateStorageFile(t, agg.Dirs(), []testFileRange{{0, 2}})
 	require.NoError(t, agg.OpenFolder())
 
 	n, err := agg.Retire(t.Context(), kv.RetireCutoffs{Default: stepSize - 1})
@@ -211,6 +222,10 @@ func TestRetire_StandaloneII(t *testing.T) {
 	agg := testDbAndAggregatorSmallFrozen(t, stepSize, stepsInFrozenFile)
 
 	ranges := []testFileRange{{0, 2}, {2, 3}}
+	// State domains lead the visible ceiling that Retire reads (see dirtyFilesEndTxNumMinimax).
+	generateAccountsFile(t, agg.Dirs(), ranges)
+	generateCodeFile(t, agg.Dirs(), ranges)
+	generateStorageFile(t, agg.Dirs(), ranges)
 	generateStandaloneIIFile(t, kv.LogAddrIdx, agg.Dirs(), ranges)
 	require.NoError(t, agg.OpenFolder())
 
@@ -237,6 +252,8 @@ func TestRetire_ReclaimConcurrent(t *testing.T) {
 
 	ranges := []testFileRange{{0, 2}, {2, 3}}
 	generateAccountsFile(t, agg.Dirs(), ranges)
+	generateCodeFile(t, agg.Dirs(), ranges)
+	generateStorageFile(t, agg.Dirs(), ranges)
 	require.NoError(t, agg.OpenFolder())
 
 	var wg sync.WaitGroup
@@ -266,9 +283,8 @@ func TestRetire_ReclaimConcurrent(t *testing.T) {
 	mustExist(t, filepath.Join(agg.Dirs().SnapHistory, "v1.0-accounts.0-2.v"), false)
 }
 
-// TestRetire_DetachesFromDirtyFiles pins the same invariant as the block store: a
-// retired file must leave dirtyFiles, not merely the visible view — a segment left in
-// dirty would be rebuilt straight back into visible by the next recalcVisibleFiles.
+// Retire must detach from dirtyFiles, not merely the visible view: a file left in dirty
+// would be rebuilt back into visible by the next recalcVisibleFiles.
 func TestRetire_DetachesFromDirtyFiles(t *testing.T) {
 	stepSize, stepsInFrozenFile := uint64(10), uint64(2)
 	agg := testDbAndAggregatorSmallFrozen(t, stepSize, stepsInFrozenFile)
@@ -296,11 +312,9 @@ func TestRetire_DetachesFromDirtyFiles(t *testing.T) {
 	require.Equal(t, uint64(2), hf[0].startTxNum/stepSize)
 }
 
-// TestRetire_DirtyButNotVisibleFile: a history file ([0,2]) fully subsumed by a larger
-// one ([0,4]) is in dirtyFiles but not visible. Because Retire iterates dirtyFiles, an
-// entirely-below-cutoff invisible file is still swept — and the visible covering file
-// must be left intact.
-func TestRetire_DirtyButNotVisibleFile(t *testing.T) {
+// Retire selects over visible files, so a subsumed (dirty-but-not-visible) file below the
+// cutoff is covered garbage left to the merge clean-up, not retired here.
+func TestRetire_SkipsDirtyButNotVisibleFile(t *testing.T) {
 	stepSize, stepsInFrozenFile := uint64(10), uint64(2)
 	agg := testDbAndAggregatorSmallFrozen(t, stepSize, stepsInFrozenFile)
 
@@ -319,14 +333,10 @@ func TestRetire_DirtyButNotVisibleFile(t *testing.T) {
 	require.Equal(t, uint64(4), at.d[kv.AccountsDomain].ht.files[0].endTxNum/stepSize)
 	at.Close()
 
-	// cutoff step 2: [0,2] is entirely below, [0,4] straddles -> only [0,2] retired
+	// cutoff step 2: the only visible accounts file is [0,4] (endStep 4 > 2), so nothing is
+	// retired. The invisible [0,2] is left for the merge clean-up, not swept by Retire.
 	n, err := agg.Retire(t.Context(), kv.RetireCutoffs{Default: 2 * stepSize})
 	require.NoError(t, err)
-	require.Positive(t, n)
-
-	require.Equal(t, 1, accountsHist.dirtyFiles.Len())
-	at2 := agg.BeginFilesRo()
-	defer at2.Close()
-	require.Len(t, at2.d[kv.AccountsDomain].ht.files, 1)
-	require.Equal(t, uint64(4), at2.d[kv.AccountsDomain].ht.files[0].endTxNum/stepSize, "covering file intact")
+	require.Zero(t, n)
+	require.Equal(t, 2, accountsHist.dirtyFiles.Len(), "invisible subsumed file must not be retired")
 }
