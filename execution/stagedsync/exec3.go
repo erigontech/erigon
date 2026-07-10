@@ -125,8 +125,8 @@ func ExecV3(ctx context.Context,
 		return err
 	}
 
-	agg := cfg.db.(dbstate.HasAgg).Agg().(*dbstate.Aggregator)
 	if isApplyingBlocks {
+		agg := cfg.db.(dbstate.HasAgg).Agg().(*dbstate.Aggregator)
 		if initialCycle {
 			agg.PresetNonChainTipConcurrency()
 		} else {
@@ -180,7 +180,7 @@ func ExecV3(ctx context.Context,
 	defer resetCommitmentGauges(ctx)
 	defer resetDomainGauges(ctx)
 
-	stepsInDb := rawdbhelpers.IdxStepsCountV3(applyTx, applyTx.Debug().StepSize())
+	stepsInDb := rawdbhelpers.IdxStepsCountV3(applyTx, doms.StepSize())
 
 	if maxBlockNum < blockNum {
 		return nil
@@ -223,7 +223,6 @@ func ExecV3(ctx context.Context,
 				cfg:               cfg,
 				rs:                rs,
 				doms:              doms,
-				agg:               agg,
 				isForkValidation:  isForkValidation,
 				isApplyingBlocks:  isApplyingBlocks,
 				logger:            logger,
@@ -246,7 +245,9 @@ func ExecV3(ctx context.Context,
 			pe.LogComplete(stepsInDb)
 		}()
 
-		lastHeader, applyTx, execErr = pe.exec(ctx, execStage, u, startBlockNum, offsetFromBlockBeginning, maxBlockNum, blockLimit,
+		// pe.exec may create a fresh applyTx internally (CommitAndBegin); keep the
+		// reference even though the parallel path doesn't read it afterwards.
+		lastHeader, applyTx, execErr = pe.exec(ctx, execStage, u, startBlockNum, offsetFromBlockBeginning, maxBlockNum, blockLimit, //nolint:ineffassign
 			initialTxNum, inputTxNum, initialCycle, applyTx, stepsInDb, accumulator, readAhead, logEvery)
 
 		lastCommittedBlockNum = pe.lastCommittedBlockNum.Load()
@@ -257,7 +258,6 @@ func ExecV3(ctx context.Context,
 				cfg:               cfg,
 				rs:                rs,
 				doms:              doms,
-				agg:               agg,
 				u:                 u,
 				isForkValidation:  isForkValidation,
 				isApplyingBlocks:  isApplyingBlocks,
@@ -301,7 +301,7 @@ func ExecV3(ctx context.Context,
 					committedTransactions := currentTxNum - se.lastCommittedTxNum.Load()
 					se.lastCommittedTxNum.Store(currentTxNum)
 
-					stepsInDb = rawdbhelpers.IdxStepsCountV3(applyTx, applyTx.Debug().StepSize())
+					stepsInDb = rawdbhelpers.IdxStepsCountV3(applyTx, doms.StepSize())
 
 					if initialCycle {
 						se.LogCommitments(committedTransactions, stepsInDb, commitment.CommitProgress{})
@@ -384,7 +384,6 @@ func ExecV3(ctx context.Context,
 type txExecutor struct {
 	sync.RWMutex
 	cfg              ExecuteBlockCfg
-	agg              *dbstate.Aggregator
 	rs               *state.StateV3Buffered
 	doms             *execctx.SharedDomains
 	u                Unwinder

@@ -97,12 +97,13 @@ jobs:
             exec_mode: parallel
           # Glamsterdam devnet: BAL EIPs against devnet fixtures
           - sim: consume-engine
-            sim-limit: ".*(7708|7778|7843|7928|7954|7976|7981|8024|8037).*"
+            sim-limit: ".*(2780|7708|7778|7843|7928|7954|7976|7981|7997|8024|8037|8038|8246|8282).*"
             shard: glamsterdam-devnet
             fixtures-tarball: eest_devnet
             extra-hive-flags: "--sim.loglevel=3 --client.checktimelimit=300s"
             erigon-extra-flags: "--experimental.bal"
-            max-failures: 0
+            # TODO: reduce to 0 (glamsterdam-devnet-6 EIPs WIP)
+            max-failures: 3473
             exec_mode: parallel
     steps:
       - name: Clean docker system

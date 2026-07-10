@@ -31,6 +31,7 @@ import (
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv/dbcfg"
 	"github.com/erigontech/erigon/db/kv/memdb"
+	"github.com/erigontech/erigon/db/snapshotsync/blocksnapshots"
 	"github.com/erigontech/erigon/db/snapshotsync/freezeblocks"
 	"github.com/erigontech/erigon/execution/abi"
 	"github.com/erigontech/erigon/execution/builder"
@@ -169,7 +170,7 @@ func TestEmptySystemAccountCreation(t *testing.T) {
 	require.NoError(err)
 
 	config := genesis.Config
-	blockReader := freezeblocks.NewBlockReader(freezeblocks.NewRoSnapshots(ethconfig.Defaults.Snapshot, dirs.Snap, logger), nil)
+	blockReader := freezeblocks.NewBlockReader(blocksnapshots.NewRoSnapshots(ethconfig.Defaults.Snapshot, dirs.Snap, logger), nil)
 	chainRdr := stagedsync.ChainReader{Cfg: config, Db: tx, BlockReader: blockReader}
 	engine := rulesconfig.CreateRulesEngineBareBones(ctx, config, logger)
 	time := uint64(1)
