@@ -394,6 +394,63 @@ func TestEIP2780IntrinsicGas(t *testing.T) {
 	}
 }
 
+// TestEIP8038IntrinsicGas isolates the EIP-8038 intrinsic contributions: access-list
+// entries reprice to COLD_ACCOUNT_ACCESS (3000) per address and COLD_STORAGE_ACCESS
+// (3000) per storage key, and each authorization costs PER_AUTH_REGULAR (15816) regular
+// gas plus NEW_ACCOUNT+AUTH_BASE state gas. The floor EIPs and the EIP-2780 base are
+// left off so a regression in the 8038 repricing localizes here rather than muddying
+// with the floor surcharge (see TestEIP7981IntrinsicGas / TestEIP2780IntrinsicGas).
+func TestEIP8038IntrinsicGas(t *testing.T) {
+	cases := map[string]struct {
+		accessListLen     uint64
+		storageKeysLen    uint64
+		authorizationsLen uint64
+		expectedRegular   uint64
+		expectedState     uint64
+	}{
+		"access list address only": {
+			accessListLen:   1,
+			expectedRegular: params.TxGas + params.TxAccessListAddressGasEIP8038,
+		},
+		"access list address and storage key": {
+			accessListLen:   1,
+			storageKeysLen:  1,
+			expectedRegular: params.TxGas + params.TxAccessListAddressGasEIP8038 + params.TxAccessListStorageKeyGasEIP8038,
+		},
+		"access list address and three keys": {
+			accessListLen:   1,
+			storageKeysLen:  3,
+			expectedRegular: params.TxGas + params.TxAccessListAddressGasEIP8038 + 3*params.TxAccessListStorageKeyGasEIP8038,
+		},
+		"single authorization": {
+			authorizationsLen: 1,
+			expectedRegular:   params.TxGas + params.PerAuthRegularCostEIP8038,
+			expectedState:     params.StateGasNewAccountAndAuth,
+		},
+		"two authorizations": {
+			authorizationsLen: 2,
+			expectedRegular:   params.TxGas + 2*params.PerAuthRegularCostEIP8038,
+			expectedState:     2 * params.StateGasNewAccountAndAuth,
+		},
+	}
+	for name, c := range cases {
+		t.Run(name, func(t *testing.T) {
+			result, overflow := CalcIntrinsicGas(IntrinsicGasCalcArgs{
+				AccessListLen:     c.accessListLen,
+				StorageKeysLen:    c.storageKeysLen,
+				AuthorizationsLen: c.authorizationsLen,
+				IsEIP2:            true,
+				IsEIP2028:         true,
+				IsEIP8037:         true,
+			})
+			assert.False(t, overflow)
+			assert.Equal(t, c.expectedRegular, result.RegularGas, "RegularGas mismatch")
+			assert.Equal(t, c.expectedState, result.StateGas, "StateGas mismatch")
+			assert.Equal(t, params.TxGas, result.FloorGasCost, "FloorGasCost mismatch")
+		})
+	}
+}
+
 // TestEIP7981NotActive verifies that when IsEIP7981 is false (but EIP-7976 is on),
 // the EIP-7976 floor formula is used and the access list is NOT included in the
 // floor or added to the standard intrinsic gas.
