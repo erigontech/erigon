@@ -147,6 +147,10 @@ call `foldPool.dispatchFrontier`; the streaming path additionally passes a
      replays its key group in nibble-ascending order via `followAndUpdate` (a node emits
      its own key before descending, so an account at depth 64 precedes its storage keys —
      I4), and `foldMounted` returns the mount-wall cell.
+     Under `--experimental.truthtree-fold`, a leaf whose mounted slot is empty — proof
+     that no on-disk sibling lives below it — instead folds directly over its touched
+     prefix trie with reused scratch (`foldNode`), emitting the same mount-wall cell and
+     branch records; a non-fresh slot falls back to mount+replay.
    - A **merge task** stitches its already-folded child cells into its seeded base
      (`mergeChildrenAtPrefix`) and folds to the mount wall.
    Folding a task decrements its parent's pending counter; at zero the parent is enqueued.
@@ -280,6 +284,7 @@ substitution of the as-of reader is validated at runtime by the block-root check
 | --- | --- | --- |
 | `--experimental.parallel-commitment` | off | selects `VariantParallelHexPatricia` (`execctx.PickTrieVariant`) |
 | `--experimental.streaming-commitment` | off | selects `VariantStreamingHexPatricia` (`StreamingCommitter`); takes precedence over `--experimental.parallel-commitment` |
+| `--experimental.truthtree-fold` | off | parallel variant only: a leaf task whose mounted slot is empty (⇒ no on-disk siblings) folds directly via `foldNode` (`truthtree_fold.go`) instead of mount+replay; inert under streaming and the sequential trie. Root and branch records stay byte-identical to the default path. Default off pending a parallel-direct topology — the direct fold currently serialises the touched storage subtree. |
 | `K` | `max(foldKMin, total/(c·numWorkers))` | leaf/merge boundary (`foldK`): subtrees ≤ `K` fold as one serial leaf, larger ones subdivide into merges; `total` = root `subtreeCount` |
 | `foldKMin` | 1024 | compile-time const: floors `K` so a merge task always folds enough keys to amortize its fixed cost (own trie context, mmap pin, a `Branch(prefix)` seed read) |
 | `c` | 1 | compile-time oversubscription factor in `foldK`; `c=1` keeps `K` a no-op at the natural fan-out (≈ one task per worker on balanced data). Raised only on bench evidence — a higher `c` subdivides every top nibble into ~`c` tasks each paying ctx+pin+seed, the measured detach regression |
