@@ -31,6 +31,8 @@ import (
 	"github.com/erigontech/erigon/db/kv/memdb"
 	"github.com/erigontech/erigon/db/kv/order"
 	"github.com/erigontech/erigon/db/kv/stream"
+	"github.com/erigontech/erigon/db/services"
+	"github.com/erigontech/erigon/db/snapshotsync/blocksnapshots"
 	"github.com/erigontech/erigon/db/state"
 	"github.com/erigontech/erigon/db/version"
 )
@@ -77,12 +79,34 @@ var ( // Compile time interface checks
 type DB struct {
 	kv.RwDB
 	stateFiles *state.Aggregator
+	// blockFiles: block snapshots, the peer of stateFiles. Optional; nil for
+	// state-only tools. Set via SetBlockSnapshots.
+	blockFiles services.BlockSnapshots
 }
 
 func New(db kv.RwDB, agg *state.Aggregator) (*DB, error) {
 	return &DB{RwDB: db, stateFiles: agg}, nil
 }
-func (db *DB) Agg() any                  { return db.stateFiles }
+
+// SetBlockSnapshots wires the (optional) block snapshots. Call once at startup,
+// before any tx is opened.
+//
+// TODO: currently a no-op so this change is behavior-preserving (blockFiles stays
+// nil → reads keep using their own view, not the temporal tx's). Enable by
+// assigning db.blockFiles = sn here — a single-line change, no call-site churn.
+func (db *DB) SetBlockSnapshots(sn services.BlockSnapshots) {}
+
+func (db *DB) Agg() any                                { return db.stateFiles }
+func (db *DB) BlockSnapshots() services.BlockSnapshots { return db.blockFiles }
+
+// beginBlockFilesRo pins the block-files view for a tx, or nil if unset.
+func (db *DB) beginBlockFilesRo() *blocksnapshots.View {
+	sn, ok := db.blockFiles.(*blocksnapshots.RoSnapshots)
+	if !ok {
+		return nil
+	}
+	return sn.View()
+}
 func (db *DB) InternalDB() kv.RwDB       { return db.RwDB }
 func (db *DB) Debug() kv.TemporalDebugDB { return kv.TemporalDebugDB(db) }
 
@@ -94,6 +118,7 @@ func (db *DB) BeginTemporalRo(ctx context.Context) (kv.TemporalTx, error) {
 	tx := &Tx{Tx: kvTx, tx: tx{db: db, ctx: ctx}}
 
 	tx.aggtx = db.stateFiles.BeginFilesRo()
+	tx.blocktx = db.beginBlockFilesRo()
 
 	return tx, nil
 }
@@ -151,6 +176,7 @@ func (db *DB) View(ctx context.Context, f func(tx kv.Tx) error) error {
 func (db *DB) newRwTx(kvTx kv.RwTx, ctx context.Context) *RwTx {
 	tx := &RwTx{RwTx: kvTx, tx: tx{db: db, ctx: ctx}}
 	tx.aggtx = db.stateFiles.BeginFilesRo()
+	tx.blocktx = db.beginBlockFilesRo()
 	return tx
 }
 
@@ -264,6 +290,7 @@ func NewTestTx(tb testing.TB) (kv.TemporalRwDB, kv.TemporalRwTx) {
 type tx struct {
 	db               *DB
 	aggtx            *state.AggregatorRoTx
+	blocktx          *blocksnapshots.View
 	resourcesToClose []kv.Closer
 	ctx              context.Context
 	mu               sync.RWMutex
@@ -287,6 +314,9 @@ func (tx *tx) FreezeInfo() kv.FreezeInfo { return tx.aggtx }
 
 func (tx *tx) AggTx() any             { return tx.aggtx }
 func (tx *tx) Agg() *state.Aggregator { return tx.db.stateFiles }
+
+// BlockFilesRoTx returns the tx's pinned block-files view, or nil if unset.
+func (tx *tx) BlockFilesRoTx() *blocksnapshots.View { return tx.blocktx }
 func (tx *tx) StepsInFiles(entitySet ...kv.Domain) kv.Step {
 	return tx.aggtx.StepsInFiles(entitySet...)
 }
@@ -432,6 +462,7 @@ func (rwtx *RwTx) AsyncClone(asyncTx kv.RwTx) *asyncClone {
 			tx: tx{
 				db:               rwtx.db,
 				aggtx:            rwtx.aggtx,
+				blocktx:          rwtx.blocktx,
 				resourcesToClose: nil,
 				ctx:              rwtx.ctx,
 			}}}
@@ -452,6 +483,9 @@ func (tx *tx) autoClose() {
 		closer.Close()
 	}
 	tx.aggtx.Close()
+	if tx.blocktx != nil {
+		tx.blocktx.Close()
+	}
 }
 
 func (tx *RwTx) Commit() error {
