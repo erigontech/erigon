@@ -128,6 +128,51 @@ func TestTruthtreeFold_FreshStoragePlane(t *testing.T) {
 	}
 }
 
+// truthtreeFoldAllocCeiling caps the direct fold's per-op allocation on the 750k fresh-whale
+// storage subtree. Buffer reuse keeps it near the proto's ~44 MB serial figure; the naive
+// per-node-cell fold the proto rejected sits at ~575 MB (~331 MB for the current copy-replay fold).
+// The ceiling sits well above the former and far below the latter, so it catches a buffer-reuse
+// regression without pinning an exact byte count.
+const truthtreeFoldAllocCeiling = 96 << 20
+
+func freshWhaleFoldNode(tb testing.TB, slots int) *prefixNode {
+	tb.Helper()
+	_, accHash, _, _, pk, upds, _ := whaleByNibble(slots)
+	node, _ := whaleStorageNode(pk, upds, accHash)
+	return node
+}
+
+func foldFreshWhale(b *testing.B, node *prefixNode) {
+	b.ReportAllocs()
+	var sink common.Hash
+	for b.Loop() {
+		h, err := foldFreshStorageRoot(node)
+		if err != nil {
+			b.Fatal(err)
+		}
+		sink = h
+	}
+	runtime.KeepAlive(sink)
+}
+
+func Benchmark_TruthtreeFold_FreshWhaleAlloc(b *testing.B) {
+	foldFreshWhale(b, freshWhaleFoldNode(b, 750_000))
+}
+
+// TestTruthtreeFold_AllocCeiling is the buffer-reuse definition-of-done gate: the direct fold of the
+// 750k fresh-whale storage subtree must stay near the proto's ~44 MB figure and never regress toward
+// the ~575 MB naive per-node-cell fold.
+func TestTruthtreeFold_AllocCeiling(t *testing.T) {
+	node := freshWhaleFoldNode(t, 750_000)
+	res := testing.Benchmark(func(b *testing.B) { foldFreshWhale(b, node) })
+	require.NotZero(t, res.N, "alloc-ceiling bench did not run")
+	got := res.AllocedBytesPerOp()
+	t.Logf("truthtree fold 750k fresh-whale: %.1f MB/op, %d allocs/op", float64(got)/(1<<20), res.AllocsPerOp())
+	require.Lessf(t, got, int64(truthtreeFoldAllocCeiling),
+		"fold alloc %.1f MB/op exceeds %.0f MB ceiling — buffer-reuse regression toward the ~575 MB naive fold",
+		float64(got)/(1<<20), float64(truthtreeFoldAllocCeiling)/(1<<20))
+}
+
 func TestTruthtreeFold_ErrorPaths(t *testing.T) {
 	t.Run("nil subtree", func(t *testing.T) {
 		h, err := foldFreshStorageRoot(nil)

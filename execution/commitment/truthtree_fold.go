@@ -72,7 +72,9 @@ func (fc *foldCtx) setBranch(node *prefixNode, bh common.Hash) {
 // a storage leaf is placed raw so computeCellHash re-derives its key tail at the slot depth; a
 // sub-branch is folded here and applied as an extension/hash cell so the parent applies extension
 // hashing over the branch hash. Only the 17-slot branch keccak is hand-rolled; leaf and extension
-// hashing run transitively inside computeCellHash.
+// hashing run transitively inside computeCellHash. The hash is returned by value into fc's reused
+// scratch — the non-escaping shape the proto settled on; escape behavior is a manual `-gcflags=-m`
+// spot-check, while the alloc-ceiling bench is the CI gate.
 func (fc *foldCtx) foldNode(node *prefixNode, branchDepth int16) (common.Hash, error) {
 	childDepth := branchDepth + 1
 	var rec [16]foldChild

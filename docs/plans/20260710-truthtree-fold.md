@@ -84,9 +84,9 @@ The frontier **DAG + pool + merge/finale stitch are unchanged.** A leaf task tod
 **Files:**
 - Modify: `execution/commitment/truthtree_fold_test.go`
 
-- [ ] alloc-ceiling bench on the 750k fresh whale storage fold asserting B/op stays near ~47 MB and never regresses toward 575 MB
-- [ ] one concise buffer-reuse invariant comment at `foldNode`; manual `-gcflags=-m` spot-check noted (not a CI assertion)
-- [ ] run bench — record the alloc number; tests pass before next task
+- [x] alloc-ceiling bench on the 750k fresh whale storage fold asserting B/op stays near ~47 MB and never regresses toward 575 MB (`Benchmark_TruthtreeFold_FreshWhaleAlloc` + `TestTruthtreeFold_AllocCeiling` gate, ceiling 96 MB)
+- [x] one concise buffer-reuse invariant comment at `foldNode`; manual `-gcflags=-m` spot-check noted (not a CI assertion)
+- [x] run bench — record the alloc number; tests pass before next task — measured 44,618,517 B/op (42.6 MB), 411 ms/op, 4,525,621 allocs/op (Apple M5 Max, serial), matching the proto's ~44 MB serial figure
 
 ### Task 3: On-disk-sibling reconciliation (net-new crux)
 
