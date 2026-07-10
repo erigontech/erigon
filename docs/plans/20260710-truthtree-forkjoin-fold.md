@@ -120,11 +120,13 @@ roots + stored branches byte-match sequential HexPatricia.
 **Files:**
 - Modify: `execution/commitment/truthtree_fold.go`
 
-- [ ] if Task 1 localized a divergence at an interior prefix, correct `foldNode`'s fresh-branch emission so
-      the empty-wall base is the seed at every interior merge prefix; if Task 1 was fully green, record that
-      here and make no speculative edit.
-- [ ] extend the parity test to pin any fixed case red→green.
-- [ ] run parity suite — green before Milestone 2.
+- [x] Task 1 was fully green — no interior empty-wall divergence was localized. No speculative edit to
+      `foldNode` / `truthtree_fold.go`; the serial fresh fold already byte-matches sequential at every
+      interior prefix (four Task 1 parity tests confirm).
+- [x] no fixed case to pin — Task 1's `FreshInteriorParity` / `FreshNonWhaleParity` / `ArityGateSingleNibble`
+      / `Depth64SeamParity` already cover interior, non-whale, arity-gate, and seam prefixes red-clean.
+- [x] parity suite green before Milestone 2 — the four Task 1 parity tests pass (0.34s) and full
+      `go test -short ./execution/commitment/` is green (14.8s).
 
 ## Milestone 2 — Parallel `foldNode` fresh fan-out (recover the regression)
 
