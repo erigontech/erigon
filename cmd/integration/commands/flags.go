@@ -175,6 +175,7 @@ func withDataDir(cmd *cobra.Command) {
 func withExperimentalCommitment(cmd *cobra.Command) {
 	cmd.Flags().BoolVar(&statecfg.ExperimentalParallelCommitment, utils.ExperimentalParallelCommitmentFlag.Name, utils.ExperimentalParallelCommitmentFlag.Value, utils.ExperimentalParallelCommitmentFlag.Usage)
 	cmd.Flags().BoolVar(&statecfg.ExperimentalStreamingCommitment, utils.ExperimentalStreamingCommitmentFlag.Name, utils.ExperimentalStreamingCommitmentFlag.Value, utils.ExperimentalStreamingCommitmentFlag.Usage)
+	cmd.Flags().BoolVar(&statecfg.ExperimentalTruthtreeFold, utils.ExperimentalTruthtreeFoldFlag.Name, utils.ExperimentalTruthtreeFoldFlag.Value, utils.ExperimentalTruthtreeFoldFlag.Usage)
 }
 
 func withBatchSize(cmd *cobra.Command) {

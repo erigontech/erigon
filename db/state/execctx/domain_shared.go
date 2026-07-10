@@ -190,6 +190,9 @@ func PickTrieVariant() commitment.TrieVariant {
 func NewSharedDomains(ctx context.Context, tx kv.TemporalTx, logger log.Logger, opts ...SharedDomainOption) (*SharedDomains, error) {
 	o := sharedDomainOptions{trieCfg: commitment.DefaultTrieConfig()}
 	o.trieCfg.Variant = PickTrieVariant()
+	// The direct fold is a parallel-regime-only Phase 1 change, so honor the flag only when the
+	// parallel variant is selected; streaming and sequential keep the mount+replay fold.
+	o.trieCfg.TruthtreeFold = statecfg.ExperimentalTruthtreeFold && o.trieCfg.Variant == commitment.VariantParallelHexPatricia
 	for _, opt := range opts {
 		opt(&o)
 	}

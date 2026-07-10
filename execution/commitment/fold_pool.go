@@ -53,6 +53,10 @@ type foldPool struct {
 	// foldSem bounds the nested fresh-whale storage fan-out at GOMAXPROCS across all account
 	// leaves folding at once, so the leaf workers spawning it never oversubscribe the cores.
 	foldSem *semaphore.Weighted
+	// truthtreeFold routes provably-fresh leaf subtrees through the direct foldNode recursion
+	// instead of mount+replay. Set from TrieConfig only on the parallel regime's pool; the
+	// streaming pool leaves it false so streaming keeps the current fold.
+	truthtreeFold bool
 }
 
 // deriveFoldFrontier builds the fold DAG for one Process: the root task is always the serial
@@ -262,6 +266,27 @@ func isStorageRootSubtask(t *foldTask) bool {
 func (fp *foldPool) foldLeafTask(ctx context.Context, t *foldTask) error {
 	w, release := newDeferredStorageWorker(fp.workerPool, fp.ctxFactory, fp.traceW)
 	defer release()
+
+	if fp.directLeafEligible(t) {
+		hasEmpty, err := resolveSubtreeUpdates(t.node, w.accountKeyLen, w.accountFromCacheOrDB, w.storageFromCacheOrDB)
+		if err != nil {
+			return err
+		}
+		// An empty (deleted) leaf must be dropped, which the fresh direct fold does not do; fall
+		// back to replay, which folds the now-populated delete correctly.
+		if !hasEmpty {
+			directLeafFolds.Add(1)
+			c, deferred, ferr := foldFreshAccountSubtreeCellDeferred(t.node, t.parent.prefix, t.nib)
+			if ferr != nil {
+				return ferr
+			}
+			t.cell = c
+			t.deferred = append(t.deferred, deferred...)
+			return nil
+		}
+		directLeafFallbacks.Add(1)
+	}
+
 	w.mountTo(t.parent.base, t.nib)
 
 	switch {
@@ -291,6 +316,46 @@ func (fp *foldPool) foldLeafTask(ctx context.Context, t *foldTask) error {
 	t.cell = c
 	t.deferred = append(t.deferred, w.TakeDeferredUpdates()...)
 	return nil
+}
+
+// directLeafFolds counts leaf tasks folded through the direct foldNode recursion (the truthtree
+// path) instead of mount+replay. Read by tests to confirm the flag-on path actually executed.
+var directLeafFolds atomic.Int64
+
+// directLeafFallbacks counts eligible leaves that resolved an empty (deleted) terminator and fell
+// back to replay rather than the fresh direct fold. Read by tests to confirm that guard executed.
+var directLeafFallbacks atomic.Int64
+
+// directLeafEligible reports whether a leaf task can be folded by the direct foldNode recursion
+// instead of mount+replay: the flag is on and the leaf is a fresh, pure account-plane branch
+// subtree. Freshness is proven by an empty mounted slot on the parent's seeded base — the on-disk
+// Branch(parentPrefix) had no child there, so nothing on disk lives under this subtree and the
+// fresh fold has no siblings to drop. Storage-plane, depth-64 seam, single-leaf, and non-fresh
+// leaves stay on replay (Task 7 routes the merge/seam/whale paths through foldNode).
+func (fp *foldPool) directLeafEligible(t *foldTask) bool {
+	if !fp.truthtreeFold {
+		return false
+	}
+	if t.plane != planeAccount || len(t.prefix) >= 64 {
+		return false
+	}
+	if t.node.bitmap == 0 || t.node.plainKey != nil {
+		return false
+	}
+	return mountSlotEmpty(t.parent.base, t.nib)
+}
+
+// mountSlotEmpty reports whether the parent base's mount-wall slot for nib carries no on-disk
+// state — an empty cell means Branch(parentPrefix) had no child there, so the subtree mounted at
+// that slot is fresh.
+func mountSlotEmpty(base *HexPatriciaHashed, nib int) bool {
+	if base == nil {
+		return false
+	}
+	if base.activeRows == 0 {
+		return base.root.IsEmpty()
+	}
+	return base.grid[base.activeRows-1][nib].IsEmpty()
 }
 
 // foldWhaleLeaf applies a demoted big-storage account, then folds its storage: in parallel when

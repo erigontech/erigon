@@ -17,7 +17,9 @@
 package commitment
 
 import (
+	"bytes"
 	"context"
+	"encoding/hex"
 	"fmt"
 	"math/bits"
 	"runtime"
@@ -540,4 +542,137 @@ func TestTruthtreeFold_ErrorPaths(t *testing.T) {
 		_, err := foldFreshStorageRoot(parent)
 		require.Error(t, err)
 	})
+}
+
+func truthtreeFoldCfg() TrieConfig {
+	cfg := DefaultTrieConfig()
+	cfg.TruthtreeFold = true
+	return cfg
+}
+
+// processParallelBatchCfg folds one batch through the parallel engine built with cfg, carrying the
+// EncodeCurrentState→SetState blob across batches like processModeBatchState, and returns the root
+// plus the new state blob. It is the flag-parameterized sibling of processModeBatchState's parallel
+// case, letting one corpus fold flag-on and flag-off through the same restart lifecycle.
+func processParallelBatchCfg(t *testing.T, ms *MockState, cfg TrieConfig, workers int, keys [][]byte, upds []Update, blob []byte) ([]byte, []byte) {
+	t.Helper()
+	require.NoError(t, ms.applyPlainUpdates(keys, upds))
+	tr := NewParallelPatriciaHashed(mockTrieCtxFactory(ms), length.Addr, cfg)
+	tr.SetNumWorkers(workers)
+	tr.ResetContext(ms)
+	defer tr.Release()
+	require.NoError(t, tr.RootTrie().SetState(blob))
+	ut := NewUpdates(ModeParallel, t.TempDir(), KeyToHexNibbleHash)
+	defer ut.Close()
+	for i, k := range keys {
+		ks := string(k)
+		ut.TouchPlainKey(ks, nil, func(c *KeyUpdate, _ []byte) {
+			c.plainKey = ks
+			c.hashedKey = KeyToHexNibbleHash(k)
+			c.update = &upds[i]
+		})
+	}
+	root := processRoot(t, tr, ut)
+	out, err := tr.RootTrie().EncodeCurrentState(nil)
+	require.NoError(t, err)
+	return root, out
+}
+
+// requireFlagLeafParity folds one batch stream through the sequential oracle, the flag-off parallel
+// engine, and the flag-on parallel engine in lockstep, asserting root AND stored-branch byte parity
+// after every batch. It returns the number of leaf tasks the flag-on run folded through the direct
+// recursion, so the caller can prove the truthtree path actually executed. Each engine carries its
+// own state blob across the per-batch encode/restore restart.
+func requireFlagLeafParity(t *testing.T, workers int, batches []engineBatch) int64 {
+	t.Helper()
+	require.GreaterOrEqualf(t, len(batches), 3, "flag parity harness expects N>=3 batches, got %d", len(batches))
+
+	seqMs := NewMockState(t)
+	offMs := NewMockState(t)
+	offMs.SetConcurrentCommitment(true)
+	onMs := NewMockState(t)
+	onMs.SetConcurrentCommitment(true)
+	onCfg := truthtreeFoldCfg()
+
+	before := directLeafFolds.Load()
+	var seqBlob, offBlob, onBlob []byte
+	for i, b := range batches {
+		var seqRoot, offRoot, onRoot []byte
+		seqRoot, seqBlob = processModeBatchState(t, seqMs, modeSeq, 0, b.keys, b.upds, seqBlob)
+		offRoot, offBlob = processParallelBatchCfg(t, offMs, DefaultTrieConfig(), workers, b.keys, b.upds, offBlob)
+		onRoot, onBlob = processParallelBatchCfg(t, onMs, onCfg, workers, b.keys, b.upds, onBlob)
+
+		require.Equalf(t, seqRoot, offRoot, "flag-off parallel batch %d root != sequential", i+1)
+		if !bytes.Equal(seqRoot, onRoot) {
+			branchDiff(t, seqMs, onMs)
+		}
+		require.Equalf(t, seqRoot, onRoot, "flag-on parallel batch %d root != sequential", i+1)
+		requireBranchParity(t, seqMs, offMs)
+		requireBranchParity(t, seqMs, onMs)
+	}
+	return directLeafFolds.Load() - before
+}
+
+// TestTruthtreeFold_LeafFlagParity is the Task 6 gate: flag-on == flag-off == sequential, root and
+// stored-branch byte-for-byte, over an N>=3 batch chain on the account-plane (balanced), whale, and
+// incremental (re-touch) corpora, through the encode/restore restart. The balanced corpus must route
+// at least one leaf through the direct recursion, or the flag-on arm never exercised foldNode.
+func TestTruthtreeFold_LeafFlagParity(t *testing.T) {
+	direct := requireFlagLeafParity(t, 4, balancedBatches())
+	require.Greaterf(t, direct, int64(0),
+		"flag-on run folded no leaf through the direct recursion — the balanced corpus no longer covers foldNode")
+
+	requireFlagLeafParity(t, 4, megaWhaleBatches(20_000))
+	requireFlagLeafParity(t, 8, megaWhaleBatches(20_000))
+}
+
+// freshDeleteBatches builds, in one fresh batch, two multi-account branch subtrees: nibble 7 holds
+// only clean accounts (folded via the direct recursion), while nibble 3 holds clean accounts plus one
+// whose only storage slot is set then deleted in the same batch. That slot resolves to a delete the
+// fresh direct fold would wrongly hash, so nibble 3 must fall back to replay. Two re-touch batches
+// follow for the N>=3 chain.
+func freshDeleteBatches() []engineBatch {
+	slot := hex.EncodeToString(slotHashBytes(1))
+	clean := make([]string, 0, 7)
+
+	ub := NewUpdateBuilder()
+	addClean := func(nib, s int) {
+		a := addrHex(findAddressForNibble(nib, 700+nib*8+s))
+		clean = append(clean, a)
+		ub.Balance(a, uint64(1000+nib*4+s))
+		ub.Storage(a, hex.EncodeToString(slotHashBytes(100+nib*4+s)), slotValHex(100+nib*4+s))
+	}
+	for s := range 3 {
+		addClean(7, s) // nibble 7: all clean -> direct fold
+		addClean(3, s) // nibble 3: clean siblings of the deleter -> branch leaf
+	}
+	deleter := addrHex(findAddressForNibble(3, 42))
+	ub.Balance(deleter, 5000)
+	ub.Storage(deleter, slot, slotValHex(7))
+	ub.DeleteStorage(deleter, slot)
+	k1, u1 := ub.Build()
+
+	retouch := func(bal uint64) engineBatch {
+		rb := NewUpdateBuilder()
+		for i, a := range clean {
+			rb.Balance(a, bal+uint64(i))
+		}
+		rb.Balance(deleter, bal+100)
+		k, u := rb.Build()
+		return engineBatch{k, u}
+	}
+
+	return []engineBatch{{k1, u1}, retouch(20000), retouch(30000)}
+}
+
+// TestTruthtreeFold_FreshDeleteFallback pins that a fresh account whose only slot is set-then-deleted
+// in the same batch stays byte-parity-clean flag-on: the direct fold detects the resolved delete and
+// falls back to replay, which drops the empty leaf. Both the direct fold (nibble 3) and the fallback
+// (nibble 5) must fire, or the corpus stopped covering the guard.
+func TestTruthtreeFold_FreshDeleteFallback(t *testing.T) {
+	folds := directLeafFolds.Load()
+	fallbacks := directLeafFallbacks.Load()
+	requireFlagLeafParity(t, 4, freshDeleteBatches())
+	require.Greater(t, directLeafFolds.Load(), folds, "direct fold never ran — corpus no longer covers foldNode")
+	require.Greater(t, directLeafFallbacks.Load(), fallbacks, "delete fallback never ran — corpus no longer covers the guard")
 }

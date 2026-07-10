@@ -306,6 +306,43 @@ func (fc *foldCtx) emitBranchUpdate(bitmap uint16, prefix []byte, cellData *[16]
 	return nil
 }
 
+// resolveSubtreeUpdates fills every nil terminator update in the subtree from the trie context and
+// reports whether any terminator resolved to an empty (deleted) value. The ModeParallel prefix trie
+// inserts touched keys with a nil update by design — the value is re-read from state on demand
+// (followAndUpdate does this). The direct fold reads node.update straight, never the ctx, so it
+// needs the values materialized first; this pre-pass performs the same reads the replay path would.
+// A resolved delete means a leaf the direct fold would hash instead of dropping, so the caller falls
+// back to replay (which sees the now-populated update and folds the delete correctly). Fail-closed
+// on the first read error.
+func resolveSubtreeUpdates(node *prefixNode, accountKeyLen int16, readAccount, readStorage func([]byte) (*Update, error)) (hasEmpty bool, err error) {
+	if node == nil {
+		return false, nil
+	}
+	if node.plainKey != nil && node.update == nil {
+		var u *Update
+		if int16(len(node.plainKey)) == accountKeyLen {
+			u, err = readAccount(node.plainKey)
+		} else {
+			u, err = readStorage(node.plainKey)
+		}
+		if err != nil {
+			return false, err
+		}
+		node.update = u
+		if u.Deleted() {
+			hasEmpty = true
+		}
+	}
+	for _, c := range node.children {
+		childEmpty, cerr := resolveSubtreeUpdates(c, accountKeyLen, readAccount, readStorage)
+		if cerr != nil {
+			return false, cerr
+		}
+		hasEmpty = hasEmpty || childEmpty
+	}
+	return hasEmpty, nil
+}
+
 // foldFreshStorageRoot folds a fresh account's touched storage subtree (rooted at the depth-64
 // account node, whose children are the first storage nibbles) into its storage root, reading no
 // on-disk siblings — the fresh-whale case the proto validated. An empty subtree hashes to the

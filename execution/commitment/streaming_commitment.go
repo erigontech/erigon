@@ -243,6 +243,8 @@ func (sc *StreamingCommitter) Process(ctx context.Context) ([]byte, error) {
 // newFoldPool builds a fold pool sharing the committer's worker pool, context factory, and trace
 // writer so the pool and the scheduler draw from the same recycled workers.
 func (sc *StreamingCommitter) newFoldPool() *foldPool {
+	// truthtreeFold is deliberately left false: the direct fold is a parallel-regime-only Phase 1
+	// change, so the streaming engine keeps the mount+replay fold even when the flag is set.
 	return &foldPool{
 		numWorkers: sc.numWorkers,
 		ctxFactory: sc.trieCtxFactory,

@@ -23,6 +23,11 @@ type TrieConfig struct {
 	CsvMetricsFilePrefix   string      // CSV metrics output prefix; empty = check env var
 	MemoizationOff         bool        // disable memoized hashes in computeCellHash (default: false)
 
+	// TruthtreeFold selects the direct buffer-reuse fold recursion (foldNode) for provably-fresh
+	// leaf subtrees in the parallel regime, instead of the mount+replay path. Default off; only
+	// meaningful under --experimental.parallel-commitment and inert for the streaming engine.
+	TruthtreeFold bool
+
 	// WarmupNumWorkers is the number of parallel workers used by the MDBX page-cache
 	// warmup during commitment. 0 = use dbg.TipTrieWarmupers (env TIP_TRIE_WARMUPERS).
 	WarmupNumWorkers int

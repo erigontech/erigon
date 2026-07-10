@@ -310,6 +310,9 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 		if config.ExperimentalStreamingCommitment {
 			statecfg.ExperimentalStreamingCommitment = true
 		}
+		if config.ExperimentalTruthtreeFold {
+			statecfg.ExperimentalTruthtreeFold = true
+		}
 
 		if err = stages.UpdateMetrics(tx); err != nil {
 			return err

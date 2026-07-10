@@ -1103,6 +1103,14 @@ var (
 		Usage: "EXPERIMENTAL: enables streaming trie for commitment (StreamingCommitter, overlaps folding with execution). Takes precedence over --experimental.parallel-commitment if set.",
 		Value: false,
 	}
+	// ExperimentalTruthtreeFoldFlag selects the direct buffer-reuse fold recursion for
+	// provably-fresh leaf subtrees. Only meaningful with --experimental.parallel-commitment;
+	// inert under the streaming engine.
+	ExperimentalTruthtreeFoldFlag = cli.BoolFlag{
+		Name:  "experimental.truthtree-fold",
+		Usage: "EXPERIMENTAL: fold provably-fresh commitment leaves via direct recursion. Requires --experimental.parallel-commitment; has no effect under --experimental.streaming-commitment.",
+		Value: false,
+	}
 	GDBMeFlag = cli.BoolFlag{
 		Name:  "gdbme",
 		Usage: "restart erigon under gdb for debug purposes",
@@ -1989,6 +1997,10 @@ func SetEthConfig(nodeCtx context.Context, ctx *cli.Command, nodeConfig *nodecfg
 
 	if ctx.Bool(ExperimentalStreamingCommitmentFlag.Name) {
 		cfg.ExperimentalStreamingCommitment = true
+	}
+
+	if ctx.Bool(ExperimentalTruthtreeFoldFlag.Name) {
+		cfg.ExperimentalTruthtreeFold = true
 	}
 
 	cfg.FcuTimeout = ctx.Duration(FcuTimeoutFlag.Name)

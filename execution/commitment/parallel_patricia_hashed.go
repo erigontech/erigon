@@ -290,10 +290,11 @@ func (p *ParallelPatriciaHashed) newFoldPool() *foldPool {
 		traceW = p.template.traceW
 	}
 	return &foldPool{
-		numWorkers: p.numWorkers,
-		ctxFactory: p.trieCtxFactory,
-		workerPool: &p.workerPool,
-		traceW:     traceW,
+		numWorkers:    p.numWorkers,
+		ctxFactory:    p.trieCtxFactory,
+		workerPool:    &p.workerPool,
+		traceW:        traceW,
+		truthtreeFold: p.cfg.TruthtreeFold,
 	}
 }
 

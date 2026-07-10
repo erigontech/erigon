@@ -131,11 +131,11 @@ The frontier **DAG + pool + merge/finale stitch are unchanged.** A leaf task tod
 - Modify: `execution/commitment/fold_pool.go` (`foldLeafTask` branch on flag)
 - Modify: `cmd/utils/flags.go` (`--experimental.truthtree-fold`, guarded by `--experimental.parallel-commitment`)
 
-- [ ] add the flag to `TrieConfig` (default off) and thread through both `newFoldPool` sites + `parallel_mount.go`
-- [ ] gate streaming **inert**: flag only selects `foldNode` in the parallel regime; streaming keeps the current fold in Phase 1
-- [ ] `foldLeafTask` branches on the flag: `foldNode` vs current replay
-- [ ] parity chains green flag-on AND flag-off (root + branch, N≥3 batches, encode/restore) on whale + mixed + incremental corpora
-- [ ] run tests — must pass before next task
+- [x] add the flag to `TrieConfig` (default off) and thread through both `newFoldPool` sites + `parallel_mount.go` — `TrieConfig.TruthtreeFold`; the parallel `newFoldPool` (`parallel_patricia_hashed.go`) copies `p.cfg.TruthtreeFold` into `foldPool.truthtreeFold`, which flows to `processMounted`'s `dispatchFrontier` via the pool (no change needed in `parallel_mount.go` — the pool carries the flag). CLI: `--experimental.truthtree-fold` (`cmd/utils/flags.go` + `node/cli/default_flags.go` + `cmd/integration/commands/flags.go`) → `ethconfig.Config.ExperimentalTruthtreeFold` → `statecfg.ExperimentalTruthtreeFold` → `NewSharedDomains` sets `trieCfg.TruthtreeFold` only when the parallel variant is selected
+- [x] gate streaming **inert**: flag only selects `foldNode` in the parallel regime; streaming keeps the current fold in Phase 1 — streaming's `newFoldPool` deliberately leaves `truthtreeFold` false, and `domain_shared.go` only sets `TruthtreeFold` when `Variant == VariantParallelHexPatricia`, so streaming/sequential keep mount+replay even with the flag on
+- [x] `foldLeafTask` branches on the flag: `foldNode` vs current replay — `directLeafEligible` routes a provably-fresh (empty mounted slot ⇒ no on-disk siblings) pure account-plane branch leaf through the direct recursion (`foldFreshAccountSubtreeCellDeferred`); everything else stays on replay. Discovery: the ModeParallel prefix trie carries nil terminator updates (value = re-read from ctx), so a fail-closed `resolveSubtreeUpdates` pre-pass materializes them from the worker's ctx before the pure fold; a resolved empty/deleted leaf falls back to replay (which drops it) — the fresh direct fold would wrongly hash it
+- [x] parity chains green flag-on AND flag-off (root + branch, N≥3 batches, encode/restore) on whale + mixed + incremental corpora — `TestTruthtreeFold_LeafFlagParity` runs `balancedBatches` (account plane) + `megaWhaleBatches` (whale + incremental re-touch/delete) through sequential vs flag-off vs flag-on parallel, root + stored-branch byte parity after every batch across the encode/restore restart, and asserts the direct path fired; `TestTruthtreeFold_FreshDeleteFallback` covers the set-then-delete fallback guard
+- [x] run tests — `go test ./execution/commitment/ -count=1` green, `-race` clean, `make lint` 0 issues, `make erigon integration` builds, flag registered in `erigon --help`
 
 ### Task 7: Prove subsumption, then route merge/fresh-whale through the recursion
 

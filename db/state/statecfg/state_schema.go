@@ -206,6 +206,11 @@ var ExperimentalParallelCommitment = false
 // ExperimentalParallelCommitment.
 var ExperimentalStreamingCommitment = false
 
+// ExperimentalTruthtreeFold selects the direct buffer-reuse fold recursion for provably-fresh
+// leaf subtrees. Default false. Only meaningful together with ExperimentalParallelCommitment;
+// inert under the streaming engine and the sequential trie.
+var ExperimentalTruthtreeFold = false
+
 var Schema = SchemaGen{
 	AccountsDomain: DomainCfg{
 		Name: kv.AccountsDomain, ValuesTable: kv.TblAccountVals,
