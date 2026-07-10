@@ -49,6 +49,10 @@ type BlockContext struct {
 	PrevRanDao  *common.Hash     // Provides information for PREVRANDAO
 	BlobBaseFee uint256.Int      // Provides information for BLOBBASEFEE
 	SlotNumber  uint64           // Provides information for SLOTNUM
+
+	// L2Version is populated by the chain's engine/block-context construction
+	// for L2 chains; zero otherwise.
+	L2Version uint64
 }
 
 // TxContext provides the EVM with information about a transaction.
