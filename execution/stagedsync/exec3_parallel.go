@@ -1709,17 +1709,16 @@ func (pe *parallelExecutor) wait(ctx context.Context) error {
 	}
 }
 
-// reconcileExecAndWaitErr combines the apply-loop result with the error from
-// pe.wait. A canceled wait never overrides execErr: execImpl cancels the
-// executor group on every exit, so a canceled wait is the normal end of a
-// batch, not new information. A real wait error has no resumable work, so it
-// supersedes ErrLoopExhausted — joining would keep errors.Is(_, ErrLoopExhausted)
-// true and let a fatal exec error be retried silently forever.
+// reconcileExecAndWaitErr merges the apply-loop verdict with pe.wait's. A real
+// wait error supersedes ErrLoopExhausted and apply-side cancellations — joining
+// would leave the aggregate classified as resumable/canceled and a fatal exec
+// error silently dropped; a canceled wait is routine teardown (execImpl cancels
+// the executor group on every exit) and never overrides execErr.
 func reconcileExecAndWaitErr(execErr, waitErr error) error {
 	if waitErr == nil || errors.Is(waitErr, context.Canceled) {
 		return execErr
 	}
-	if execErr == nil || errors.Is(execErr, &ErrLoopExhausted{}) {
+	if execErr == nil || errors.Is(execErr, &ErrLoopExhausted{}) || errors.Is(execErr, context.Canceled) {
 		return waitErr
 	}
 	return errors.Join(execErr, waitErr)

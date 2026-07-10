@@ -1027,6 +1027,19 @@ func TestReconcileExecAndWaitErr(t *testing.T) {
 		require.NotErrorIs(t, got, context.Canceled,
 			"joining a cancellation would flip execImpl's quiet-exit gate and skip the failure handling")
 	})
+
+	t.Run("wait error supersedes a canceled apply exit", func(t *testing.T) {
+		got := reconcileExecAndWaitErr(context.Canceled, waitFail)
+		require.Same(t, waitFail, got)
+		require.True(t, surfacesLoudly(got),
+			"a Canceled-classified aggregate is dropped by execImpl's gate and ExecModule.Start")
+	})
+
+	t.Run("wait error supersedes a wrapped canceled apply exit", func(t *testing.T) {
+		got := reconcileExecAndWaitErr(fmt.Errorf("apply loop: open roTx: %w", context.Canceled), waitFail)
+		require.Same(t, waitFail, got)
+		require.True(t, surfacesLoudly(got))
+	})
 }
 
 // Pins pe.wait's contract: it reports only real errors — a canceled group is
