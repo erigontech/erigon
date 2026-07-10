@@ -525,11 +525,13 @@ func SyncSnapshots(
 				continue
 			}
 
-			// With --persist.receipts.distance set, rcache follows its own window;
-			// only log indexes follow the block-data window here.
+			// rcache follows the block-data window here only under the
+			// follow-history default; a finite --persist.receipts.distance uses
+			// its own window (the receipts blacklist), and keep-all keeps it all.
+			// Log indexes always follow the block-data window.
 			isRcacheRelatedSegment := strings.Contains(p.Name, kv.LogAddrIdx.String()) ||
 				strings.Contains(p.Name, kv.LogTopicIdx.String())
-			if !prune.ReceiptsAmount().Enabled() {
+			if prune.ReceiptsFollowHistory() {
 				isRcacheRelatedSegment = isRcacheRelatedSegment || strings.Contains(p.Name, kv.RCacheDomain.String())
 			}
 

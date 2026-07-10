@@ -174,7 +174,14 @@ func appendCommitmentHistory(sb *strings.Builder, m Mode) {
 }
 
 func appendReceipts(sb *strings.Builder, m Mode) {
-	if m.Receipts != nil && m.Receipts.toValue() != KeepAllBlocksPruneMode.toValue() {
+	if m.Receipts == nil {
+		return
+	}
+	switch m.Receipts.toValue() {
+	case KeepAllBlocksPruneMode.toValue(): // follow-history default — nothing to render
+	case KeepAllReceiptsPruneMode.toValue():
+		sb.WriteString(" --persist.receipts.distance=keep-all")
+	default:
 		fmt.Fprintf(sb, " --persist.receipts.distance=%d", m.Receipts.toValue())
 	}
 }
@@ -267,6 +274,11 @@ func Get(db kv.Getter) (Mode, error) {
 const (
 	KeepPostMergeBlocksPruneMode = Distance(math.MaxUint64)     // Use chain-specific history pruning (aka. history-expiry)
 	KeepAllBlocksPruneMode       = Distance(math.MaxUint64 - 1) // Keep all history
+	// KeepAllReceiptsPruneMode forces the receipt cache to be kept in full.
+	// It is distinct from KeepAllBlocksPruneMode, which for receipts is the
+	// unset default meaning "follow the state-history window" rather than
+	// "keep all" — so an operator needs a separate value to override it.
+	KeepAllReceiptsPruneMode = Distance(math.MaxUint64 - 2)
 )
 
 type BlockAmount interface {
@@ -286,11 +298,12 @@ type BlockAmount interface {
 type Distance uint64
 
 // Enabled reports whether p actively drives distance-based pruning. It is
-// false for the two sentinel values that select a different policy shape
+// false for the sentinel values that select a different policy shape
 // (KeepPostMergeBlocksPruneMode → chain history-expiry; KeepAllBlocksPruneMode →
-// retain forever) and true for every finite Distance.
+// retain forever / follow-history for receipts; KeepAllReceiptsPruneMode →
+// force keep-all receipts) and true for every finite Distance.
 func (p Distance) Enabled() bool {
-	return p != KeepPostMergeBlocksPruneMode && p != KeepAllBlocksPruneMode
+	return p != KeepPostMergeBlocksPruneMode && p != KeepAllBlocksPruneMode && p != KeepAllReceiptsPruneMode
 }
 func (p Distance) toValue() uint64 { return uint64(p) }
 func (p Distance) dbType() []byte  { return kv.PruneTypeOlder }
@@ -401,11 +414,12 @@ func isCommitmentHistoryRetentionPolicy(b BlockAmount) bool {
 }
 
 // isReceiptsRetentionPolicy reports whether b expresses a receipt-cache
-// retention policy the shim will let operators move between. Like commitment
-// history, finite Distance and KeepAllBlocksPruneMode both qualify in either
-// direction; KeepPostMergeBlocksPruneMode is meaningless here.
+// retention policy the shim will let operators move between. Finite Distance,
+// KeepAllBlocksPruneMode (follow-history default) and KeepAllReceiptsPruneMode
+// (force keep-all) all qualify in either direction; KeepPostMergeBlocksPruneMode
+// is meaningless here.
 func isReceiptsRetentionPolicy(b BlockAmount) bool {
-	if b == KeepAllBlocksPruneMode {
+	if b == KeepAllBlocksPruneMode || b == KeepAllReceiptsPruneMode {
 		return true
 	}
 	return isFiniteDistance(b)
@@ -431,7 +445,7 @@ func isFiniteDistance(b BlockAmount) bool {
 	if !ok {
 		return false
 	}
-	return d != KeepAllBlocksPruneMode && d != KeepPostMergeBlocksPruneMode
+	return d != KeepAllBlocksPruneMode && d != KeepPostMergeBlocksPruneMode && d != KeepAllReceiptsPruneMode
 }
 
 // writeBlockAmount stores one BlockAmount under the given key, replacing any
@@ -475,6 +489,14 @@ func receiptsOrDefault(b BlockAmount) BlockAmount {
 // field as keep-all so callers can query it without a nil check.
 func (m Mode) ReceiptsAmount() BlockAmount {
 	return receiptsOrDefault(m.Receipts)
+}
+
+// ReceiptsFollowHistory reports whether receipt-cache retention uses the
+// follow-history default — no explicit --persist.receipts.distance, so the
+// cache tracks the general retention window rather than a finite window or
+// KeepAllReceiptsPruneMode.
+func (m Mode) ReceiptsFollowHistory() bool {
+	return receiptsOrDefault(m.Receipts) == KeepAllBlocksPruneMode
 }
 
 func overwriteStoredMode(db kv.GetPut, pm Mode) error {
