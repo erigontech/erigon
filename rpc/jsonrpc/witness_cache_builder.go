@@ -18,6 +18,7 @@ package jsonrpc
 
 import (
 	"context"
+	"errors"
 	"time"
 
 	"github.com/erigontech/erigon/cmd/rpcdaemon/cli/httpcfg"
@@ -179,6 +180,7 @@ func RunWitnessCacheBuilder(ctx context.Context, dbg *DebugAPIImpl, headerCh <-c
 						break
 					}
 					if n2, s2, v2 := processHeaderBatch(cache, b2); v2 {
+						witnessCacheCoalesceDropCounter.Inc()
 						newest, single = n2, s2
 						lastSeen = max(lastSeen, n2.num)
 					}
@@ -246,6 +248,7 @@ func (api *DebugAPIImpl) buildAndCache(ctx context.Context, num uint64, hash com
 	if err != nil {
 		if ctx.Err() == nil {
 			log.Warn("[witness-cache] wait committed head", "block", num, "err", err)
+			witnessCacheBuildFailOtherCounter.Inc()
 		}
 		return false
 	}
@@ -257,13 +260,22 @@ func (api *DebugAPIImpl) buildAndCache(ctx context.Context, num uint64, hash com
 	info, err := api.resolveWitnessBlock(ctx, tx, rpc.BlockNumberOrHashWithNumber(rpc.BlockNumber(num)))
 	if err != nil {
 		log.Warn("[witness-cache] resolve block", "block", num, "err", err)
+		witnessCacheBuildFailOtherCounter.Inc()
 		return false
 	}
+	start := time.Now()
 	result, err := api.buildWitnessResult(ctx, tx, info, witnessModeLegacy)
+	witnessCacheBuildDuration.ObserveDuration(start)
 	if err != nil {
+		if errors.Is(err, errWitnessVerifyFailed) {
+			witnessCacheBuildFailVerifyCounter.Inc()
+		} else {
+			witnessCacheBuildFailOtherCounter.Inc()
+		}
 		log.Warn("[witness-cache] build witness", "block", num, "err", err)
 		return false
 	}
 	api.witnessCache.put(num, hash, result)
+	witnessCacheBuildOKCounter.Inc()
 	return true
 }

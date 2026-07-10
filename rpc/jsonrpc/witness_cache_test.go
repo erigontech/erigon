@@ -136,6 +136,19 @@ func TestWitnessCacheReconcileEmptyIsNoop(t *testing.T) {
 	require.Equal(t, 1, c.entryCount())
 }
 
+func TestWitnessCacheMetrics(t *testing.T) {
+	evictBefore := witnessCacheEvictCounter.GetValueUint64()
+
+	c := newWitnessCache(2, 1024)
+	c.put(1, hashN(1), mkResult(10))
+	c.put(2, hashN(2), mkResult(20))
+	c.put(3, hashN(3), mkResult(30)) // count cap 2 evicts num 1
+
+	require.Equal(t, uint64(1), witnessCacheEvictCounter.GetValueUint64()-evictBefore, "one eviction counted")
+	require.Equal(t, c.residentBytes(), witnessCacheBytesResidentGauge.GetValueUint64(), "bytes gauge tracks resident bytes")
+	require.Equal(t, uint64(c.entryCount()), witnessCacheEntriesResidentGauge.GetValueUint64(), "entries gauge tracks entry count")
+}
+
 func TestWitnessCacheConcurrentGetPut(t *testing.T) {
 	c := newWitnessCache(16, 1024)
 	const workers = 8

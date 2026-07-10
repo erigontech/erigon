@@ -116,6 +116,7 @@ func (c *witnessCache) put(num uint64, hash common.Hash, result *ExecutionWitnes
 	c.entries[num] = witnessCacheEntry{hash: hash, result: result, bytes: size}
 	c.totalBytes += size
 	c.evictLocked()
+	c.updateGaugesLocked()
 }
 
 // reconcile applies a canonical-header batch: evict any entry whose number
@@ -141,6 +142,7 @@ func (c *witnessCache) reconcile(headers []headerRef) {
 			c.dropLocked(num, e)
 		}
 	}
+	c.updateGaugesLocked()
 }
 
 // evictLocked removes lowest-number entries until the count cap holds and the
@@ -174,6 +176,14 @@ func (c *witnessCache) dropLocked(num uint64, e witnessCacheEntry) {
 	c.totalBytes -= e.bytes
 	delete(c.entries, num)
 	c.evictions++
+	witnessCacheEvictCounter.Inc()
+}
+
+// updateGaugesLocked publishes the current resident byte and entry counts. Callers
+// hold the write lock so the gauges track the cache after every mutation settles.
+func (c *witnessCache) updateGaugesLocked() {
+	witnessCacheBytesResidentGauge.SetUint64(c.totalBytes)
+	witnessCacheEntriesResidentGauge.SetInt(len(c.entries))
 }
 
 func (c *witnessCache) entryCount() int {

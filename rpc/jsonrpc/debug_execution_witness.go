@@ -3,6 +3,7 @@ package jsonrpc
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"slices"
 
@@ -739,10 +740,22 @@ func (api *DebugAPIImpl) serveFromWitnessCache(ctx context.Context, tx kv.Tempor
 	}
 	num, hash, _, err := rpchelper.GetBlockNumber(ctx, blockNrOrHash, tx, api._blockReader, api.filters)
 	if err != nil {
+		witnessCacheMissCounter.Inc()
 		return nil, false
 	}
-	return api.witnessCache.get(num, hash)
+	result, ok := api.witnessCache.get(num, hash)
+	if ok {
+		witnessCacheHitCounter.Inc()
+	} else {
+		witnessCacheMissCounter.Inc()
+	}
+	return result, ok
 }
+
+// errWitnessVerifyFailed wraps a stateless-verification failure from the shared build
+// seam so the eager cache builder can classify build_fail_verify separately from other
+// build errors; the on-demand handler surfaces it as a normal error.
+var errWitnessVerifyFailed = errors.New("witness stateless verification failed")
 
 // buildWitnessResult runs the witness-building pipeline for an already-resolved block
 // against an open temporal tx: re-execute to record accesses, fold the commitment trie,
@@ -836,7 +849,7 @@ func (api *DebugAPIImpl) buildWitnessResult(ctx context.Context, tx kv.TemporalT
 		return nil, fmt.Errorf("engine does not support full rules.Engine interface")
 	}
 	if err := api.verifyWitnessStateless(ctx, tx, result, block, fullEngine); err != nil {
-		return nil, err
+		return nil, fmt.Errorf("%w: %w", errWitnessVerifyFailed, err)
 	}
 
 	// legacy carries the empty storage-trie node (0x80) once when some account has an

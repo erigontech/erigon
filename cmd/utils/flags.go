@@ -446,7 +446,7 @@ var (
 	}
 	WitnessCacheBlocksFlag = cli.UintFlag{
 		Name:  "witness.cache.blocks",
-		Usage: "Number of recent blocks whose legacy debug_executionWitness result is eagerly cached in memory (embedded RPC only; requires --prune.experimental.include-commitment-history). 0 disables the cache; capped at 96.",
+		Usage: "Number of recent blocks whose legacy debug_executionWitness result is eagerly cached in memory (embedded RPC only; requires --prune.experimental.include-commitment-history). 0 disables the cache; capped at 96. The --witness.cache.maxmb byte cap usually binds first: 96 blocks can be ~1.1-2.4GB raw.",
 		Value: 0,
 	}
 	WitnessCacheMaxMBFlag = cli.UintFlag{

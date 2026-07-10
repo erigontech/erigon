@@ -208,7 +208,7 @@ shutdown.
 - Flag docs / help text: embedded-only, requires `--prune.experimental.include-commitment-history`,
   `maxmb` is the real cap (a 1GB cap holds ~85 median-mainnet blocks; 96 blocks can be ~1.1–2.4GB raw).
 
-- [ ] **Status:** pending
+- [x] **Status:** complete
 
 ## Testing
 
