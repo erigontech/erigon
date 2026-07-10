@@ -35,49 +35,71 @@ func entirelyBeforeStep(files visibleFiles, stepSize uint64, cutoff kv.Step) (ou
 	return outs
 }
 
+// agedFiles is one entity's dirty files selected for retirement, carried from the lock-free
+// selection pass to the locked detach pass.
+type agedFiles struct {
+	dirtyFiles   *DirtyFiles
+	filenameBase string
+	files        []*FilesItem
+}
+
 // filesBeforeStep selects (does not mutate) the .ef/.efi dirty files entirely below cutoff.
-// mutate detaches them from dirtyFiles and must run under dirtyFilesLock.
-func (iit *InvertedIndexRoTx) filesBeforeStep(cutoff kv.Step) (deleted []string, outs []*FilesItem, mutate func()) {
-	outs = entirelyBeforeStep(iit.files, iit.stepSize, cutoff)
+func (iit *InvertedIndexRoTx) filesBeforeStep(cutoff kv.Step) (deleted []string, aged agedFiles) {
+	outs := entirelyBeforeStep(iit.files, iit.stepSize, cutoff)
 	for _, out := range outs {
 		deleted = append(deleted, out.FilePaths(iit.ii.dirs.Snap)...)
 	}
-	mutate = func() { retire(iit.ii.dirtyFiles, outs, iit.ii.FilenameBase, retireReasonAged, iit.ii.logger) }
-	return deleted, outs, mutate
+	return deleted, agedFiles{iit.ii.dirtyFiles, iit.ii.FilenameBase, outs}
 }
 
 // filesBeforeStep selects History (.v) and its InvertedIndex (.ef) files together, so the
-// two never diverge. mutate must run under dirtyFilesLock.
-func (ht *HistoryRoTx) filesBeforeStep(cutoff kv.Step) (deleted []string, outs []*FilesItem, mutate func()) {
-	iDeleted, iOuts, iMutate := ht.iit.filesBeforeStep(cutoff)
+// two never diverge.
+func (ht *HistoryRoTx) filesBeforeStep(cutoff kv.Step) (deleted []string, aged []agedFiles) {
+	iDeleted, iAged := ht.iit.filesBeforeStep(cutoff)
 	deleted = append(deleted, iDeleted...)
-	outs = append(outs, iOuts...)
 
-	hOuts := entirelyBeforeStep(ht.files, ht.stepSize, cutoff)
-	for _, out := range hOuts {
+	outs := entirelyBeforeStep(ht.files, ht.stepSize, cutoff)
+	for _, out := range outs {
 		deleted = append(deleted, out.FilePaths(ht.h.dirs.Snap)...)
 	}
-	outs = append(outs, hOuts...)
-	mutate = func() {
-		iMutate()
-		retire(ht.h.dirtyFiles, hOuts, ht.h.FilenameBase, retireReasonAged, ht.h.logger)
+	return deleted, []agedFiles{iAged, {ht.h.dirtyFiles, ht.h.FilenameBase, outs}}
+}
+
+// visibleFilesMaxEndTxNum is the highest endTxNum among the visible history/II files — the
+// tip of what retire selects over. Read from the pinned visible bundle (not dirtyFiles), and
+// naturally 0 only when there are no visible files at all (an empty entity contributes nothing).
+func (at *AggregatorRoTx) visibleFilesMaxEndTxNum() (tip uint64) {
+	for _, dt := range at.d {
+		if dt == nil {
+			continue
+		}
+		if f := dt.ht.files; len(f) > 0 {
+			tip = max(tip, f[len(f)-1].endTxNum)
+		}
 	}
-	return deleted, outs, mutate
+	for _, iit := range at.standaloneIIs() {
+		if iit == nil {
+			continue
+		}
+		if f := iit.files; len(f) > 0 {
+			tip = max(tip, f[len(f)-1].endTxNum)
+		}
+	}
+	return tip
 }
 
 // Retire drops old visible History+InvertedIndex files below their per-domain cutoff.
 // Reads visible only — invisible garbage is the merge clean-up's job (cleanAfterMerge /
 // RemoveOverlaps). Physical deletion is deferred until no reader pins the retired generation.
-func (a *Aggregator) Retire(ctx context.Context, cutoffs kv.RetireCutoffs) (retiredCount int, err error) {
+func (at *AggregatorRoTx) Retire(ctx context.Context, cutoffs kv.RetireCutoffs) (retiredCount int, err error) {
 	if cutoffs.IsNoop() {
 		return 0, nil
 	}
 
 	// Paranoia: retire deletes files. A cutoff reaching the visible tip means the retention
 	// window collapsed and every file would be retired — almost always a caller bug (a distance
-	// computed as ~0). Refuse rather than wipe the node's history. The tip is the ceiling the
-	// visible files retire selects over are clamped to.
-	if tip := a.dirtyFilesEndTxNumMinimax(); tip > 0 {
+	// computed as ~0). Refuse rather than wipe the node's history.
+	if tip := at.visibleFilesMaxEndTxNum(); tip > 0 {
 		cutoff := cutoffs.Default
 		for _, c := range cutoffs.PerDomain {
 			cutoff = max(cutoff, c)
@@ -87,18 +109,9 @@ func (a *Aggregator) Retire(ctx context.Context, cutoffs kv.RetireCutoffs) (reti
 		}
 	}
 
-	at := a.BeginFilesRo()
-	defer at.Close()
-
-	// Select (lock-free): read the visible files backing each entity below its cutoff.
+	// Select over visible files (no lock — at.d/at.iis are the pinned visible generation).
 	var deleted []string
-	var retired []*FilesItem
-	var mutations []func()
-	selectEntity := func(deletedNames []string, outs []*FilesItem, mutate func()) {
-		deleted = append(deleted, deletedNames...)
-		retired = append(retired, outs...)
-		mutations = append(mutations, mutate)
-	}
+	var aged []agedFiles
 	for _, dt := range at.d {
 		if dt.d.Disable || dt.d.SnapshotsDisabled || dt.d.HistoryDisabled {
 			continue
@@ -111,7 +124,9 @@ func (a *Aggregator) Retire(ctx context.Context, cutoffs kv.RetireCutoffs) (reti
 		if cutoffStep == 0 {
 			continue
 		}
-		selectEntity(dt.ht.filesBeforeStep(cutoffStep))
+		d, a := dt.ht.filesBeforeStep(cutoffStep)
+		deleted = append(deleted, d...)
+		aged = append(aged, a...)
 	}
 	for _, iit := range at.standaloneIIs() {
 		if iit.ii.Disable {
@@ -121,24 +136,30 @@ func (a *Aggregator) Retire(ctx context.Context, cutoffs kv.RetireCutoffs) (reti
 		if cutoffStep == 0 {
 			continue
 		}
-		selectEntity(iit.filesBeforeStep(cutoffStep))
+		d, a := iit.filesBeforeStep(cutoffStep)
+		deleted = append(deleted, d...)
+		aged = append(aged, a)
 	}
 
+	var retired []*FilesItem
+	for _, a := range aged {
+		retired = append(retired, a.files...)
+	}
 	if len(retired) == 0 {
 		return 0, nil
 	}
 
-	// Mutate (locked): detach from dirtyFiles, notify the seeder, and publish a new visible
-	// generation — atomically, so readers observe one cross-entity-consistent step.
-	a.dirtyFilesLock.Lock()
-	defer a.dirtyFilesLock.Unlock()
-	for _, mutate := range mutations {
-		mutate()
+	// Detach from dirtyFiles + publish the new visible generation atomically. Only this needs
+	// the lock: it mutates the dirtyFiles btrees that recalcVisibleFiles reads.
+	at.a.dirtyFilesLock.Lock()
+	defer at.a.dirtyFilesLock.Unlock()
+	for _, a := range aged {
+		retire(a.dirtyFiles, a.files, a.filenameBase, retireReasonAged, at.a.logger)
 	}
-	a.onFilesDelete(deleted)
-	a.recalcVisibleFiles(retired)
+	at.a.onFilesDelete(deleted)
+	at.a.recalcVisibleFiles(retired)
 
 	mxRetiredHistoryFiles.AddInt(len(retired))
-	a.logger.Info("[snapshots] retired old history files", "removed", len(retired), "cutoffs", cutoffs.String(a.StepSize()))
+	at.a.logger.Info("[snapshots] retired old history files", "removed", len(retired), "cutoffs", cutoffs.String(at.a.StepSize()))
 	return len(retired), nil
 }

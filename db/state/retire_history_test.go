@@ -48,6 +48,15 @@ func testDbAndAggregatorSmallFrozen(t *testing.T, stepSize, stepsInFrozenFile ui
 	return agg
 }
 
+// aggRetire runs Retire on a fresh RoTx (Retire is an AggregatorRoTx method). Tests that must
+// assert deferred deletion pin their own RoTx across Retire instead.
+func aggRetire(t *testing.T, agg *Aggregator, cutoffs kv.RetireCutoffs) (int, error) {
+	t.Helper()
+	at := agg.BeginFilesRo()
+	defer at.Close()
+	return at.Retire(t.Context(), cutoffs)
+}
+
 // generateStandaloneIIFile writes mock .ef/.efi files for an inverted index
 // with no owning domain (LogAddrIdx, TracesFromIdx, ...).
 func generateStandaloneIIFile(t *testing.T, name kv.InvertedIdx, dirs datadir.Dirs, ranges []testFileRange) {
@@ -100,7 +109,7 @@ func TestRetire_RetiresFrozenFileEntirelyBelowCutoff(t *testing.T) {
 	// pin the current generation to assert deferred (not immediate) deletion
 	at := agg.BeginFilesRo()
 
-	n, err := agg.Retire(t.Context(), kv.RetireCutoffs{Default: 2 * stepSize})
+	n, err := at.Retire(t.Context(), kv.RetireCutoffs{Default: 2 * stepSize})
 	require.NoError(t, err)
 	require.Positive(t, n)
 
@@ -163,7 +172,7 @@ func TestRetire_RetiresCommitmentAtOwnCutoff(t *testing.T) {
 	commitmentHist := agg.d[kv.CommitmentDomain].History
 	require.Equal(t, 2, commitmentHist.dirtyFiles.Len())
 
-	_, err := agg.Retire(t.Context(), kv.RetireCutoffs{
+	_, err := aggRetire(t, agg, kv.RetireCutoffs{
 		Default:   0,
 		PerDomain: map[kv.Domain]uint64{kv.CommitmentDomain: 2 * stepSize},
 	})
@@ -189,7 +198,7 @@ func TestRetire_KeepsDomainWhenCutoffZero(t *testing.T) {
 
 	commitmentHist := agg.d[kv.CommitmentDomain].History
 
-	_, err := agg.Retire(t.Context(), kv.RetireCutoffs{
+	_, err := aggRetire(t, agg, kv.RetireCutoffs{
 		Default:   2 * stepSize,
 		PerDomain: map[kv.Domain]uint64{kv.CommitmentDomain: 0},
 	})
@@ -209,7 +218,7 @@ func TestRetire_SubStepTxNumKeepsFiles(t *testing.T) {
 	generateStorageFile(t, agg.Dirs(), []testFileRange{{0, 2}})
 	require.NoError(t, agg.OpenFolder())
 
-	n, err := agg.Retire(t.Context(), kv.RetireCutoffs{Default: stepSize - 1})
+	n, err := aggRetire(t, agg, kv.RetireCutoffs{Default: stepSize - 1})
 	require.NoError(t, err)
 	require.Zero(t, n)
 	mustExist(t, filepath.Join(agg.Dirs().SnapHistory, "v1.0-accounts.0-2.v"), true)
@@ -235,7 +244,7 @@ func TestRetire_StandaloneII(t *testing.T) {
 	mustExist(t, recentIdx, true)
 
 	at := agg.BeginFilesRo()
-	n, err := agg.Retire(t.Context(), kv.RetireCutoffs{Default: 2 * stepSize})
+	n, err := at.Retire(t.Context(), kv.RetireCutoffs{Default: 2 * stepSize})
 	require.NoError(t, err)
 	require.Positive(t, n)
 	at.Close()
@@ -275,7 +284,7 @@ func TestRetire_ReclaimConcurrent(t *testing.T) {
 		}()
 	}
 
-	_, err := agg.Retire(t.Context(), kv.RetireCutoffs{Default: 2 * stepSize})
+	_, err := aggRetire(t, agg, kv.RetireCutoffs{Default: 2 * stepSize})
 	require.NoError(t, err)
 	close(stop)
 	wg.Wait()
@@ -298,7 +307,7 @@ func TestRetire_DetachesFromDirtyFiles(t *testing.T) {
 	accountsHist := agg.d[kv.AccountsDomain].History
 	require.Equal(t, 2, accountsHist.dirtyFiles.Len())
 
-	n, err := agg.Retire(t.Context(), kv.RetireCutoffs{Default: 2 * stepSize})
+	n, err := aggRetire(t, agg, kv.RetireCutoffs{Default: 2 * stepSize})
 	require.NoError(t, err)
 	require.Positive(t, n)
 
@@ -335,7 +344,7 @@ func TestRetire_SkipsDirtyButNotVisibleFile(t *testing.T) {
 
 	// cutoff step 2: the only visible accounts file is [0,4] (endStep 4 > 2), so nothing is
 	// retired. The invisible [0,2] is left for the merge clean-up, not swept by Retire.
-	n, err := agg.Retire(t.Context(), kv.RetireCutoffs{Default: 2 * stepSize})
+	n, err := aggRetire(t, agg, kv.RetireCutoffs{Default: 2 * stepSize})
 	require.NoError(t, err)
 	require.Zero(t, n)
 	require.Equal(t, 2, accountsHist.dirtyFiles.Len(), "invisible subsumed file must not be retired")
@@ -356,7 +365,7 @@ func TestRetire_RefusesWindowTooSmall(t *testing.T) {
 	accountsHist := agg.d[kv.AccountsDomain].History
 	require.Equal(t, 2, accountsHist.dirtyFiles.Len())
 
-	n, err := agg.Retire(t.Context(), kv.RetireCutoffs{Default: 3 * stepSize})
+	n, err := aggRetire(t, agg, kv.RetireCutoffs{Default: 3 * stepSize})
 	require.Error(t, err)
 	require.Zero(t, n)
 	require.Equal(t, 2, accountsHist.dirtyFiles.Len(), "no files retired when the window is too small")

@@ -541,7 +541,7 @@ func (br *BlockRetire) BuildMissedIndicesIfNeed(ctx context.Context, logPrefix s
 // RetireTransactionFiles expires transaction segments ending below blockTo — the
 // minimal/full-node step that drops old bodies once state no longer needs them.
 func (br *BlockRetire) RetireTransactionFiles(blockTo uint64, onDelete func(l []string) error) (bool, error) {
-	return br.snapshots().RetireMergedFilesBelow(snaptype2.Transactions, blockTo, onDelete)
+	return br.snapshots().RetireFilesBelow(snaptype2.Transactions, blockTo, onDelete)
 }
 
 func (br *BlockRetire) RemoveOverlaps(onDelete func(l []string) error) error {

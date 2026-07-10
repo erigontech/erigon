@@ -442,7 +442,7 @@ func TestRetireFilesDetachesFromDirty(t *testing.T) {
 
 // Retire selects over visible files, so a subsumed (dirty-but-not-visible) segment below
 // the cutoff is left to the merge clean-up, not retired here.
-func TestRetireMergedFilesBelowSkipsDirtyButNotVisible(t *testing.T) {
+func TestRetireFilesBelowSkipsDirtyButNotVisible(t *testing.T) {
 	logger := log.New()
 	dir := t.TempDir()
 	require := require.New(t)
@@ -461,7 +461,7 @@ func TestRetireMergedFilesBelowSkipsDirtyButNotVisible(t *testing.T) {
 	require.False(visibleHas(s, txEnum, 0, mergeLimit), "the merge-sized subsumed segment is dirty but not visible")
 
 	// The subsumed merge-sized segment is below cutoff but invisible -> must not be retired.
-	retired, err := s.RetireMergedFilesBelow(snaptype2.Transactions, 2*mergeLimit, func([]string) error { return nil })
+	retired, err := s.RetireFilesBelow(snaptype2.Transactions, 2*mergeLimit, func([]string) error { return nil })
 	require.NoError(err)
 	require.False(retired, "invisible subsumed file must not be retired")
 	require.Equal(2, s.dirty[txEnum].Len())
@@ -469,7 +469,7 @@ func TestRetireMergedFilesBelowSkipsDirtyButNotVisible(t *testing.T) {
 
 // A blockTo past the visible tip means the retention window collapsed — retiring would wipe
 // every file, so Retire must refuse rather than proceed on a bad cutoff.
-func TestRetireMergedFilesBelowRefusesWindowTooSmall(t *testing.T) {
+func TestRetireFilesBelowRefusesWindowTooSmall(t *testing.T) {
 	logger := log.New()
 	dir := t.TempDir()
 	require := require.New(t)
@@ -486,7 +486,7 @@ func TestRetireMergedFilesBelowRefusesWindowTooSmall(t *testing.T) {
 	txEnum := snaptype2.Transactions.Enum()
 	require.Equal(2, s.dirty[txEnum].Len())
 
-	retired, err := s.RetireMergedFilesBelow(snaptype2.Transactions, 3*mergeLimit, func([]string) error { return nil })
+	retired, err := s.RetireFilesBelow(snaptype2.Transactions, 3*mergeLimit, func([]string) error { return nil })
 	require.Error(err)
 	require.False(retired)
 	require.Equal(2, s.dirty[txEnum].Len())

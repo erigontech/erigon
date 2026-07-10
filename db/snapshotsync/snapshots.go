@@ -1458,11 +1458,11 @@ func (s *BaseRoSnapshots) RetireFiles(fileNames ...string) error {
 	return nil
 }
 
-// RetireMergedFilesBelow retires fully-merged VISIBLE segments of type typ ending below
-// blockTo, handing their files (.seg + indexes) to onDelete for the seeder. Reads visible
-// only — invisible garbage is the merge clean-up's job. The View pins the generation for
-// both the read and the deferred off-lock unlink.
-func (s *BaseRoSnapshots) RetireMergedFilesBelow(typ snaptype.Type, blockTo uint64, onDelete func(l []string) error) (bool, error) {
+// RetireFilesBelow retires VISIBLE segments of type typ ending below blockTo, handing their
+// files (.seg + indexes) to onDelete for the seeder. Reads visible only — invisible garbage
+// is the merge clean-up's job. The View pins the generation for both the read and the
+// deferred off-lock unlink.
+func (s *BaseRoSnapshots) RetireFilesBelow(typ snaptype.Type, blockTo uint64, onDelete func(l []string) error) (bool, error) {
 	if s == nil {
 		return false, nil
 	}
@@ -1480,11 +1480,6 @@ func (s *BaseRoSnapshots) RetireMergedFilesBelow(typ snaptype.Type, blockTo uint
 	var names, paths []string
 	for _, sn := range segs {
 		if sn.To() >= blockTo {
-			continue
-		}
-		// only whole, fully-merged files — 100k, or the old 500k format (never a partial or
-		// still-merging sub-range).
-		if l := sn.To() - sn.From(); l != snaptype.Erigon2MergeLimit && l != snaptype.Erigon2OldMergeLimit {
 			continue
 		}
 		names = append(names, sn.src.FileName())
