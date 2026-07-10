@@ -330,8 +330,9 @@ var directLeafFallbacks atomic.Int64
 // instead of mount+replay: the flag is on and the leaf is a fresh, pure account-plane branch
 // subtree. Freshness is proven by an empty mounted slot on the parent's seeded base — the on-disk
 // Branch(parentPrefix) had no child there, so nothing on disk lives under this subtree and the
-// fresh fold has no siblings to drop. Storage-plane, depth-64 seam, single-leaf, and non-fresh
-// leaves stay on replay (Task 7 routes the merge/seam/whale paths through foldNode).
+// fresh fold has no siblings to drop. The fresh-whale storage leaf routes through foldNode in
+// foldWhaleLeaf; seedable merge/seam leaves read on-disk siblings the fresh fold cannot reproduce,
+// so they stay on replay.
 func (fp *foldPool) directLeafEligible(t *foldTask) bool {
 	if !fp.truthtreeFold {
 		return false
@@ -373,13 +374,46 @@ func (fp *foldPool) foldWhaleLeaf(ctx context.Context, w *HexPatriciaHashed, t *
 		}
 		return nil
 	}
-	sr, deferred, err := fp.foldFreshStorage(ctx, t.node, t.prefix)
+	sr, deferred, err := fp.foldFreshWhaleStorage(ctx, w, t.node, t.prefix)
 	if err != nil {
 		return err
 	}
 	t.deferred = append(t.deferred, deferred...)
 	setAccountStorageRoot(w, t.prefix, sr)
 	return nil
+}
+
+// directWhaleStorageFolds counts fresh-whale storage subtrees folded through the direct foldNode
+// recursion (foldFreshStorageRootDeferred) instead of foldFreshStorage's mount+replay fan-out. Read
+// by tests to confirm the flag-on whale path executed.
+var directWhaleStorageFolds atomic.Int64
+
+// directWhaleStorageFallbacks counts eligible fresh-whale storage subtrees that resolved a deleted
+// slot and fell back to foldFreshStorage rather than the direct fold. Read by tests to confirm the
+// guard executed.
+var directWhaleStorageFallbacks atomic.Int64
+
+// foldFreshWhaleStorage folds a provably-fresh whale's storage subtree into its root and branch
+// records. With the truthtree flag on and a real (>=2 first-nibble) storage-root branch, it routes
+// through the direct foldNode recursion — the case foldFreshStorageRootDeferred reproduces
+// foldFreshStorage byte-for-byte; a single-first-nibble top collapses to an extension root the direct
+// depth-64 keccak does not build, so it stays on foldFreshStorage. The direct fold reads each leaf's
+// update straight, so the storage children's ModeParallel nil updates are materialized from the
+// worker's ctx first; a materialized delete is a slot the direct fold would wrongly hash, so it falls
+// back to replay (which drops it). Flag-off or ineligible ⇒ the mount+replay path.
+func (fp *foldPool) foldFreshWhaleStorage(ctx context.Context, w *HexPatriciaHashed, node *prefixNode, accPrefix []byte) (common.Hash, []*DeferredBranchUpdate, error) {
+	if fp.truthtreeFold && bits.OnesCount16(node.bitmap) >= 2 {
+		hasEmpty, err := resolveSubtreeUpdates(node, w.accountKeyLen, w.accountFromCacheOrDB, w.storageFromCacheOrDB)
+		if err != nil {
+			return common.Hash{}, nil, err
+		}
+		if !hasEmpty {
+			directWhaleStorageFolds.Add(1)
+			return foldFreshStorageRootDeferred(node, accPrefix)
+		}
+		directWhaleStorageFallbacks.Add(1)
+	}
+	return fp.foldFreshStorage(ctx, node, accPrefix)
 }
 
 // freshWhaleParallelFolds counts fresh-whale parallel storage folds — the only runtime signal

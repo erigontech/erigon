@@ -676,3 +676,101 @@ func TestTruthtreeFold_FreshDeleteFallback(t *testing.T) {
 	require.Greater(t, directLeafFolds.Load(), folds, "direct fold never ran — corpus no longer covers foldNode")
 	require.Greater(t, directLeafFallbacks.Load(), fallbacks, "delete fallback never ran — corpus no longer covers the guard")
 }
+
+// requireFreshWhaleFlagParity folds one fresh batch through the sequential oracle, the flag-off
+// parallel engine, and the flag-on parallel engine, asserting root AND stored-branch byte parity —
+// the single-batch fresh-whale analog of requireFlagLeafParity used where the corpus is a lone fresh
+// whale rather than an N>=3 re-touch chain.
+func requireFreshWhaleFlagParity(t *testing.T, workers int, keys [][]byte, upds []Update) {
+	t.Helper()
+	seqMs := NewMockState(t)
+	seqRoot, _ := processModeBatchState(t, seqMs, modeSeq, 0, keys, upds, nil)
+
+	offMs := NewMockState(t)
+	offMs.SetConcurrentCommitment(true)
+	offRoot, _ := processParallelBatchCfg(t, offMs, DefaultTrieConfig(), workers, keys, upds, nil)
+
+	onMs := NewMockState(t)
+	onMs.SetConcurrentCommitment(true)
+	onRoot, _ := processParallelBatchCfg(t, onMs, truthtreeFoldCfg(), workers, keys, upds, nil)
+
+	require.Equal(t, seqRoot, offRoot, "flag-off parallel root != sequential")
+	if !bytes.Equal(seqRoot, onRoot) {
+		branchDiff(t, seqMs, onMs)
+	}
+	require.Equal(t, seqRoot, onRoot, "flag-on parallel root != sequential")
+	requireBranchParity(t, seqMs, offMs)
+	requireBranchParity(t, seqMs, onMs)
+}
+
+// TestTruthtreeFold_WhaleStorageFlagParity is the Task 7 gate for the fresh-whale storage leaf: with
+// the flag on, a fresh whale's storage subtree folds through the direct foldNode recursion
+// (foldFreshStorageRootDeferred) instead of foldFreshStorage's mount+replay, and must stay root +
+// stored-branch byte-parity-clean vs sequential and flag-off — both on the lone fresh-whale corpus
+// (the TestDeepFold_FreshWhaleParallelStorage_Parity scenario) and on the N>=3 mega-whale re-touch
+// chain. The directWhaleStorageFolds counter proves the direct whale path fired flag-on.
+func TestTruthtreeFold_WhaleStorageFlagParity(t *testing.T) {
+	wk, wu, _, _ := buildSubsetTouchedWhale(20260710, nibs(3, 7), nil, 2000, 0)
+	fk, fu := buildMixedCorpus(31337, 40)
+	keys := append(append([][]byte{}, fk...), wk...)
+	upds := append(append([]Update{}, fu...), wu...)
+
+	before := directWhaleStorageFolds.Load()
+	requireFreshWhaleFlagParity(t, 4, keys, upds)
+	require.Greater(t, directWhaleStorageFolds.Load(), before,
+		"fresh-whale storage never folded through the direct recursion flag-on — corpus no longer covers foldFreshStorageRootDeferred")
+
+	requireFlagLeafParity(t, 4, megaWhaleBatches(20_000))
+}
+
+// freshWhaleDeleteBatches builds a fresh whale (absent on disk) whose storage spans many first
+// nibbles — a real storage-root branch past foldKMin — with one slot set then deleted in the same
+// batch. That resolved delete is a slot the direct fold would wrongly hash, so the whale storage
+// falls back to foldFreshStorage. The whale is left alone under its top nibble (the spread skips it)
+// so it reaches the depth-64 fresh-whale seam rather than an account-plane subtree fold. Two re-touch
+// batches follow for the N>=3 chain.
+func freshWhaleDeleteBatches(slots int) []engineBatch {
+	const whaleNib = 0xd
+	whale := addrHex(findAddressForNibble(whaleNib, 4242))
+	spread := make([]string, 0, 16)
+
+	ub := NewUpdateBuilder()
+	ub.Balance(whale, 12345)
+	for nib := range 16 {
+		if nib == whaleNib {
+			continue
+		}
+		a := addrHex(findAddressForNibble(nib, 9000+nib))
+		spread = append(spread, a)
+		ub.Balance(a, uint64(7000+nib))
+	}
+	for i := range slots {
+		ub.Storage(whale, hex.EncodeToString(slotHashBytes(i)), slotValHex(i))
+	}
+	victim := hex.EncodeToString(slotHashBytes(slots + 1))
+	ub.Storage(whale, victim, slotValHex(slots+1))
+	ub.DeleteStorage(whale, victim)
+	k1, u1 := ub.Build()
+
+	retouch := func(bal uint64) engineBatch {
+		rb := NewUpdateBuilder()
+		rb.Balance(whale, bal)
+		for i, a := range spread {
+			rb.Balance(a, bal+uint64(i))
+		}
+		k, u := rb.Build()
+		return engineBatch{k, u}
+	}
+	return []engineBatch{{k1, u1}, retouch(40000), retouch(50000)}
+}
+
+// TestTruthtreeFold_FreshWhaleStorageDeleteFallback pins that a fresh whale whose storage subtree
+// carries a set-then-deleted slot stays byte-parity-clean flag-on: the direct fold detects the
+// resolved delete and falls back to foldFreshStorage, which drops the empty slot. The fallback must
+// fire, or the corpus stopped covering the guard.
+func TestTruthtreeFold_FreshWhaleStorageDeleteFallback(t *testing.T) {
+	fallbacks := directWhaleStorageFallbacks.Load()
+	requireFlagLeafParity(t, 4, freshWhaleDeleteBatches(2_000))
+	require.Greater(t, directWhaleStorageFallbacks.Load(), fallbacks,
+		"fresh-whale storage delete never fell back — corpus no longer covers the guard")
+}
