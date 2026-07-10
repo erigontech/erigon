@@ -165,11 +165,12 @@ func TestFoldPool_ReuseSchedulerCells(t *testing.T) {
 
 	sc := NewStreamingCommitter(nil, length.Addr, DefaultTrieConfig())
 
+	var arena byteArena
 	cleanCell := cell{hashLen: 32}
-	cleanUpd := getDeferredUpdate([]byte{0x1}, []byte{0, 0, 0, 0}, nil)
+	cleanUpd := getDeferredUpdate(&arena, []byte{0x1}, []byte{0, 0, 0, 0}, nil)
 	sc.splits[0x1] = &splitState{prefix: []byte{0x1}, folded: true, dirty: false, cell: cleanCell, deferred: []*DeferredBranchUpdate{cleanUpd}}
 
-	staleUpd := getDeferredUpdate([]byte{0x2}, []byte{0, 0, 0, 0}, nil)
+	staleUpd := getDeferredUpdate(&arena, []byte{0x2}, []byte{0, 0, 0, 0}, nil)
 	sc.splits[0x2] = &splitState{prefix: []byte{0x2}, folded: true, dirty: true, cell: cell{hashLen: 16}, deferred: []*DeferredBranchUpdate{staleUpd}}
 
 	cells, present, deferred := sc.reuseSchedulerCells(rootTask)

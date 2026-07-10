@@ -993,3 +993,83 @@ func TestInitializeTrieAndUpdates_HexVariantUnchanged(t *testing.T) {
 	require.Equal(t, ModeDirect, upd.Mode())
 	require.Nil(t, upd.parallel)
 }
+
+// encodeTestBranch builds a valid branch encoding whose cell hashes derive from seed.
+func encodeTestBranch(tb testing.TB, be *BranchEncoder, bitmap uint16, seed byte) BranchData {
+	tb.Helper()
+	var cells [16]cellEncodeData
+	for i := 0; i < 16; i++ {
+		if bitmap&(1<<i) == 0 {
+			continue
+		}
+		c := &cells[i]
+		c.hashLen = 32
+		for j := 0; j < 32; j++ {
+			c.hash[j] = seed + byte(i*32+j)
+		}
+	}
+	raw, err := be.EncodeBranch(bitmap, bitmap, bitmap, &cells)
+	require.NoError(tb, err)
+	return common.Copy(raw)
+}
+
+func TestGetDeferredUpdateAllocs(t *testing.T) {
+	be := NewBranchEncoder(1024)
+	raw := encodeTestBranch(t, be, 0xffff, 1)
+	prev := encodeTestBranch(t, be, 0x00ff, 2)
+	prefix := []byte{0x01, 0x02, 0x03, 0x04, 0x05}
+
+	allocs := testing.AllocsPerRun(1000, func() {
+		upd := getDeferredUpdate(&be.arena, prefix, raw, prev)
+		putDeferredUpdate(upd)
+	})
+	require.LessOrEqualf(t, allocs, 1.0, "deferred-update collection must not clone per branch")
+}
+
+func TestMergeDeferredUpdateAllocs(t *testing.T) {
+	be := NewBranchEncoder(1024)
+	raw := encodeTestBranch(t, be, 0xffff, 1)
+	prev := encodeTestBranch(t, be, 0xffff, 2)
+
+	merger := NewHexBranchMerger(1024)
+	upd := &DeferredBranchUpdate{prefix: []byte{0x01}, raw: raw, prev: prev}
+	require.NoError(t, mergeDeferredUpdate(upd, merger))
+	require.NotNil(t, upd.encoded)
+
+	allocs := testing.AllocsPerRun(1000, func() {
+		upd.encoded = nil
+		if err := mergeDeferredUpdate(upd, merger); err != nil {
+			panic(err)
+		}
+	})
+	require.LessOrEqualf(t, allocs, 0.5, "merge must not clone the merged encoding per branch")
+}
+
+// Consumers (MockState, the pending-update flush) retain deferred slices past
+// ClearDeferred and past the encoder's continued reuse; the arena must never
+// rewind a chunk, so those escaped bytes stay intact.
+func TestDeferredUpdateArenaEscapeSurvivesReset(t *testing.T) {
+	be := NewBranchEncoder(1024)
+	raw := encodeTestBranch(t, be, 0xffff, 1)
+	prev := encodeTestBranch(t, be, 0x00ff, 2)
+	prefix := []byte{0x0a, 0x0b, 0x0c}
+
+	escaped := getDeferredUpdate(&be.arena, prefix, raw, prev)
+	wantPrefix, wantRaw, wantPrev := common.Copy(escaped.prefix), common.Copy(escaped.raw), common.Copy(escaped.prev)
+
+	be.ClearDeferred()
+	filler := encodeTestBranch(t, be, 0xffff, 3)
+	churn := make([]*DeferredBranchUpdate, 0, 2*byteArenaChunk/len(filler))
+	for written := 0; written <= 2*byteArenaChunk; written += len(filler) {
+		churn = append(churn, getDeferredUpdate(&be.arena, prefix, filler, nil))
+	}
+
+	require.Equal(t, wantPrefix, escaped.prefix)
+	require.EqualValues(t, wantRaw, escaped.raw)
+	require.EqualValues(t, wantPrev, escaped.prev)
+
+	putDeferredUpdate(escaped)
+	for _, upd := range churn {
+		putDeferredUpdate(upd)
+	}
+}

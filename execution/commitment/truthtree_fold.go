@@ -526,7 +526,7 @@ func (fc *foldCtx) emitBranchUpdate(bitmap uint16, prefix []byte, cellData *[16]
 	if err != nil {
 		return err
 	}
-	fc.deferred = append(fc.deferred, getDeferredUpdate(nibbles.HexToCompact(prefix), raw, nil))
+	fc.deferred = append(fc.deferred, getDeferredUpdate(&fc.hph.branchEncoder.arena, nibbles.HexToCompact(prefix), raw, nil))
 	return nil
 }
 

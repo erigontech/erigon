@@ -132,21 +132,43 @@ CPU merge pass off the flush critical path.
 - Modify: `execution/commitment/commitment.go`
 - Modify: `execution/commitment/commitment_test.go` (or a focused bench/test file)
 
-- [ ] red: a bench asserting reduced allocs/op for the deferred-update collection over an N-branch block
-      (fails at baseline).
-- [ ] green: add a per-block bump arena owned by `BranchEncoder`, reset in `ClearDeferred` (`:369-378`);
+- [x] red: a bench asserting reduced allocs/op for the deferred-update collection over an N-branch block
+      (fails at baseline). (`TestGetDeferredUpdateAllocs` failed at 3 allocs/op, `TestMergeDeferredUpdateAllocs`
+      at 1 alloc/op — exactly the baseline clones.)
+- [x] green: add a per-block bump arena owned by `BranchEncoder`, reset in `ClearDeferred` (`:369-378`);
       `getDeferredUpdate` (`:272-282`) and `mergeDeferredUpdate` (`:392`) write `prefix`/`raw`/`prev`/`merged`
       into arena-backed bytes instead of `common.Copy`. Lifetime bounded to the block (freed at
-      `ClearDeferred`/flush).
-- [ ] **arena-lifetime safety (load-bearing — verify before writing code):** does `sd.mem` /
+      `ClearDeferred`/flush). (Deviation, measured: `ClearDeferred` keeps the tail chunk instead of dropping
+      it — dropping cost +10.7 MB/op on the seeded whale from per-lineage chunk slack; chunks are append-only
+      and die with the block's recycled updates via GC, so keeping the tail is safe and reuses the slack.)
+- [x] **arena-lifetime safety (load-bearing — verify before writing code):** does `sd.mem` /
       `TemporalMemBatch.DomainPut` **copy** the branch bytes on write, or **retain** the caller's slice? If
       it retains, a per-block arena that resets at `ClearDeferred` recycles bytes `sd.mem` still references →
       use-after-reset. Then the arena must survive until after flush/`Commit` (not per-block), or the write
       must copy. Also confirm the serial barrier path (`:2612`) does not read arena bytes after a reset.
-- [ ] **serial-identity test:** serial (`ModeDirect`) engine over a block range produces byte-identical
+      (Verified: production copies everywhere — key via `string(k)` in `SharedDomains.domainPut`, value via
+      `common.Copy` in `TemporalMemBatch.putLatest`:172, history/ETL collectors copy, changeset
+      `DomainDiff.DomainUpdate` clones key+prev. But `MockState.PutBranch` RETAINS `data`, and the fork-join
+      path (`truthtree_fold.go:439-447`) calls `hph.Release()`→`ClearDeferred` while its deferred have
+      escaped into `results[i]` — so the arena must NEVER rewind a chunk: reset/clear only drops references
+      and GC keeps escaped chunks alive. Pinned by `TestDeferredUpdateArenaEscapeSurvivesReset`.)
+- [x] **serial-identity test:** serial (`ModeDirect`) engine over a block range produces byte-identical
       roots + stored branches before/after (the arena must not change any encoded byte).
-- [ ] parity: parallel-engine root + branch parity unchanged; allocs/op down.
-- [ ] `make lint && make test-short`. Before Task 3.
+      (Existing `Test_HexPatriciaHashed_DeferredBranchUpdates` + `..Differential` compare deferred-vs-eager
+      roots AND stored branch bytes; added `..MidFoldFlush` forcing `maxDeferredUpdates=1` so every collect
+      crosses the mid-fold `ApplyDeferredUpdates`+`ClearDeferred` on retained MockState branches.)
+- [x] parity: parallel-engine root + branch parity unchanged; allocs/op down. (Full package + `-race` green.)
+- [x] `make lint && make test-short`. Before Task 3.
+
+#### Results (Task 2, recorded 2026-07-11, same machine as baseline)
+
+- `BenchmarkGetDeferredUpdate`: 139→96 ns/op, 3→0 allocs/op (912→898 B/op, bytes now amortized chunks);
+  `_FewCells`: 43→24 ns/op, 3→0 allocs/op. `mergeDeferredUpdate`: 1→0 allocs/op (merged into merger arena).
+- Whole-fresh whale (`1MWhales/flag-on/w18`, 5x, 3 runs): 8.454M→7.64–7.82M allocs/op (−8–10%),
+  387.7→363–385 MB/op, 260.7–277.8 ms/op (baseline 263.2 within spread — time neutral, as expected:
+  this task targets allocs; the merge move is Task 3).
+- Seeded whale (`incremental-whale120k/flag-on`, 40x): 1.116M→935k allocs/op (−16%), 97.1→99.4 MB/op
+  (+2.3 MB residual tail-chunk slack), 24.5→24.7 ms/op (noise).
 
 ## Milestone 2 — Merge-under-fold (parallel engine only)
 

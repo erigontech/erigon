@@ -293,6 +293,11 @@ func Test_HexPatriciaHashed_DeferredBranchUpdates(t *testing.T) {
 
 func requireDeferredMatchesEager(tb testing.TB, rounds ...*UpdateBuilder) {
 	tb.Helper()
+	requireDeferredMatchesEagerWith(tb, nil, rounds...)
+}
+
+func requireDeferredMatchesEagerWith(tb testing.TB, tweakDeferred func(*HexPatriciaHashed), rounds ...*UpdateBuilder) {
+	tb.Helper()
 
 	ctx := context.Background()
 	stateEager := NewMockState(tb)
@@ -303,6 +308,9 @@ func requireDeferredMatchesEager(tb testing.TB, rounds ...*UpdateBuilder) {
 	deferredCfg.DeferBranchUpdates = true
 	trieEager := NewHexPatriciaHashed(length.Addr, stateEager, eagerCfg)
 	trieDeferred := NewHexPatriciaHashed(length.Addr, stateDeferred, deferredCfg)
+	if tweakDeferred != nil {
+		tweakDeferred(trieDeferred)
+	}
 
 	for i, builder := range rounds {
 		plainKeys, updates := builder.Build()
@@ -328,6 +336,41 @@ func Test_HexPatriciaHashed_DeferredBranchUpdatesDifferential(t *testing.T) {
 	t.Parallel()
 
 	requireDeferredMatchesEager(t,
+		NewUpdateBuilder().
+			Balance("1000000000000000000000000000000000000001", 1).
+			Nonce("1000000000000000000000000000000000000002", 2).
+			Storage(
+				"1000000000000000000000000000000000000001",
+				"0100000000000000000000000000000000000000000000000000000000000000",
+				"0102",
+			),
+		NewUpdateBuilder().
+			Balance("1000000000000000000000000000000000000001", 3).
+			CodeHash(
+				"1000000000000000000000000000000000000003",
+				"0300000000000000000000000000000000000000000000000000000000000000",
+			).
+			DeleteStorage(
+				"1000000000000000000000000000000000000001",
+				"0100000000000000000000000000000000000000000000000000000000000000",
+			),
+		NewUpdateBuilder().
+			Delete("1000000000000000000000000000000000000002").
+			Storage(
+				"1000000000000000000000000000000000000004",
+				"0400000000000000000000000000000000000000000000000000000000000000",
+				"040506",
+			),
+	)
+}
+
+// Forces the mid-fold flush (ApplyDeferredUpdates + ClearDeferred) on every collect,
+// so branches the state retained across arena resets must stay byte-identical to eager.
+func Test_HexPatriciaHashed_DeferredBranchUpdatesMidFoldFlush(t *testing.T) {
+	t.Parallel()
+
+	requireDeferredMatchesEagerWith(t,
+		func(trie *HexPatriciaHashed) { trie.branchEncoder.maxDeferredUpdates = 1 },
 		NewUpdateBuilder().
 			Balance("1000000000000000000000000000000000000001", 1).
 			Nonce("1000000000000000000000000000000000000002", 2).

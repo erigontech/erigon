@@ -20,28 +20,6 @@ import (
 	"sync"
 )
 
-// plainKeyArena hands out stable plainKey copies; a full chunk is replaced, not
-// grown, so earlier sub-slices keep their backing until reset.
-type plainKeyArena struct {
-	buf []byte
-}
-
-const plainKeyArenaChunk = 64 * 1024
-
-func (a *plainKeyArena) intern(b []byte) []byte {
-	if len(b) > plainKeyArenaChunk {
-		return append([]byte(nil), b...)
-	}
-	if cap(a.buf)-len(a.buf) < len(b) {
-		a.buf = make([]byte, 0, plainKeyArenaChunk)
-	}
-	off := len(a.buf)
-	a.buf = append(a.buf, b...)
-	return a.buf[off : off+len(b) : off+len(b)]
-}
-
-func (a *plainKeyArena) reset() { a.buf = nil }
-
 // parallelUpdate owns the per-batch state that drives parallel commitment.
 // Insert calls must be serialized by the caller.
 type parallelUpdate struct {
@@ -50,7 +28,7 @@ type parallelUpdate struct {
 	deferredMu       sync.Mutex
 	deferredCombined []*DeferredBranchUpdate
 
-	keyArena plainKeyArena
+	keyArena byteArena
 }
 
 func newParallelUpdate() *parallelUpdate {

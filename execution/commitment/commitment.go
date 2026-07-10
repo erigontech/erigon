@@ -266,16 +266,16 @@ func GetDeferredUpdateMetrics() int64 {
 }
 
 // getDeferredUpdate gets a DeferredBranchUpdate from the global pool and copies the
-// prefix, the collect-time raw encoding, and the predecessor. The copies transfer to
-// whoever the apply hands them to (putBranch retains prefix and data), so pooled
-// objects never keep their backing arrays.
-func getDeferredUpdate(prefix []byte, raw, prev []byte) *DeferredBranchUpdate {
+// prefix, the collect-time raw encoding, and the predecessor into the arena. Consumers
+// may retain the slices past a reset — the arena never rewinds a chunk — so pooled
+// objects never pin more than the chunks their batch wrote.
+func getDeferredUpdate(arena *byteArena, prefix, raw, prev []byte) *DeferredBranchUpdate {
 	getDeferredUpdateCount.Add(1)
 	upd := deferredUpdatePool.Get().(*DeferredBranchUpdate)
 
-	upd.prefix = common.Copy(prefix)
-	upd.raw = common.Copy(raw)
-	upd.prev = common.Copy(prev)
+	upd.prefix = arena.copyBytes(prefix)
+	upd.raw = arena.copyBytes(raw)
+	upd.prev = arena.copyBytes(prev)
 	upd.encoded = nil
 
 	return upd
@@ -327,6 +327,7 @@ type BranchEncoder struct {
 	deferUpdates       bool
 	maxDeferredUpdates int // flush threshold; 0 = use DefaultMaxDeferredUpdates from config
 	deferred           []*DeferredBranchUpdate
+	arena              byteArena                           // backs the deferred updates' prefix/raw/prev copies
 	pendingPrefixes    *maphash.NonConcurrentMap[struct{}] // tracks pending prefixes to detect duplicates
 }
 
@@ -366,6 +367,8 @@ func (be *BranchEncoder) HasPendingPrefix(prefix []byte) bool {
 }
 
 // ClearDeferred clears the deferred updates list and returns all objects to the pool.
+// The arena is kept: its filled chunks die with the recycled updates, and reusing the
+// tail chunk across batches avoids discarding it mostly empty on every clear.
 func (be *BranchEncoder) ClearDeferred() {
 	for _, upd := range be.deferred {
 		putDeferredUpdate(upd)
@@ -389,7 +392,7 @@ func mergeDeferredUpdate(upd *DeferredBranchUpdate, merger *BranchMerger) error 
 		if err != nil {
 			return err
 		}
-		upd.encoded = common.Copy(merged)
+		upd.encoded = merger.arena.copyBytes(merged)
 		return nil
 	}
 	upd.encoded = upd.raw
@@ -598,7 +601,7 @@ func (be *BranchEncoder) CollectDeferredUpdate(
 	if err != nil {
 		return err
 	}
-	be.deferred = append(be.deferred, getDeferredUpdate(prefix, raw, prev))
+	be.deferred = append(be.deferred, getDeferredUpdate(&be.arena, prefix, raw, prev))
 	return nil
 }
 
@@ -1104,8 +1107,9 @@ func validatePlainKeys(branchKey []byte, row [16]*cell, keccak keccak.KeccakStat
 }
 
 type BranchMerger struct {
-	buf []byte
-	num [4]byte
+	buf   []byte
+	num   [4]byte
+	arena byteArena // backs merged encodings that must outlive the next Merge
 }
 
 func NewHexBranchMerger(capacity uint64) *BranchMerger {
