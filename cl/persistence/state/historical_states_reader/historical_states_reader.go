@@ -412,7 +412,13 @@ func (r *HistoricalStatesReader) readHistoryHashVector(tx kv.Tx, kvGetter state_
 			return err
 		}
 		if len(v) != 32 {
-			return fmt.Errorf("%w: table %s slot %d (%d bytes)", ErrMissingHistoryVectorData, table, i, len(v))
+			// An empty entry is a not-yet-reconstructed slot the antiquary can
+			// re-antiquate past; a non-empty entry of the wrong length is
+			// corruption and must surface as a hard error.
+			if len(v) != 0 {
+				return fmt.Errorf("table %s slot %d: corrupt root, %d bytes (want 32)", table, i, len(v))
+			}
+			return fmt.Errorf("%w: table %s slot %d", ErrMissingHistoryVectorData, table, i)
 		}
 		currKeySlot = i
 		out.Set(int(currKeySlot%size), common.BytesToHash(v))
@@ -420,6 +426,12 @@ func (r *HistoricalStatesReader) readHistoryHashVector(tx kv.Tx, kvGetter state_
 		if inserted == needFromDB {
 			break
 		}
+	}
+
+	// A short window means the tail slots are absent from both DB and snapshots;
+	// leaving those vector entries zero would fabricate roots, so surface it.
+	if inserted < needFromDB {
+		return fmt.Errorf("%w: table %s slot %d", ErrMissingHistoryVectorData, table, slot-needFromDB+inserted)
 	}
 
 	for i := 0; i < int(needFromGenesis); i++ {
@@ -1133,10 +1145,11 @@ func ReadRequiredQueueSSZ[T solid.EncodableHashableSSZ](kvGetter state_accessors
 var ErrMissingGloasData = errors.New("missing GLOAS snapshot data (re-antiquation required)")
 
 // ErrMissingHistoryVectorData is returned when a dense block_roots/state_roots
-// history slot has a missing or short snapshot entry. Per process_slot these
+// history slot has a missing (empty) snapshot entry. Per process_slot these
 // vectors are filled every slot (never empty), so an empty entry is a frozen
 // data gap, not valid state — the caller must re-antiquate past it rather than
-// fabricate a root.
+// fabricate a root. A non-empty entry of the wrong length is corruption and
+// surfaces as a hard error instead.
 var ErrMissingHistoryVectorData = errors.New("missing block/state root history (re-antiquation required)")
 
 // readCompressedSSZ reads a zstd-compressed SSZ value from the given table at the given slot,
