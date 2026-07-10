@@ -795,6 +795,68 @@ func TestTruthtreeFold_FreshDeleteFallback(t *testing.T) {
 	require.Greater(t, directLeafFallbacks.Load(), fallbacks, "delete fallback never ran — corpus no longer covers the guard")
 }
 
+// TestResolveSubtreeUpdates_CarriedDeleteDetected pins that a terminator carrying a non-nil
+// DeleteUpdate — the shape TouchPlainKeyDirect stages in ModeParallel — is reported as empty, so the
+// direct fold falls back to replay instead of hashing a phantom leaf. The readers must never fire:
+// a carried update is used verbatim, never re-read from ctx.
+func TestResolveSubtreeUpdates_CarriedDeleteDetected(t *testing.T) {
+	tr := newPrefixTrie()
+	dead := findAddressForNibble(3, 42)
+	tr.Insert(KeyToHexNibbleHash(dead), dead, &Update{Flags: DeleteUpdate, CodeHash: empty.CodeHash})
+
+	panicRead := func([]byte) (*Update, error) {
+		t.Fatal("resolveSubtreeUpdates re-read a carried update from ctx")
+		return nil, nil
+	}
+	hasEmpty, err := resolveSubtreeUpdates(tr.root, length.Addr, panicRead, panicRead)
+	require.NoError(t, err)
+	require.True(t, hasEmpty, "carried DeleteUpdate not reported empty — the direct fold would hash a phantom leaf")
+}
+
+// processParallelBatchDirect folds one batch through the flag-on parallel engine driven by
+// TouchPlainKeyDirect — the production ModeParallel entry point the parallel-exec commitment
+// calculator uses. Unlike TouchPlainKey (which stages a nil update re-read from ctx), it carries the
+// Update, including DeleteUpdate, onto the touched key. Returns the root and the new state blob.
+func processParallelBatchDirect(t *testing.T, ms *MockState, cfg TrieConfig, workers int, keys [][]byte, upds []Update, blob []byte) ([]byte, []byte) {
+	t.Helper()
+	require.NoError(t, ms.applyPlainUpdates(keys, upds))
+	tr := NewParallelPatriciaHashed(mockTrieCtxFactory(ms), length.Addr, cfg)
+	tr.SetNumWorkers(workers)
+	tr.ResetContext(ms)
+	defer tr.Release()
+	require.NoError(t, tr.RootTrie().SetState(blob))
+	ut := NewUpdates(ModeParallel, t.TempDir(), KeyToHexNibbleHash)
+	defer ut.Close()
+	for i, k := range keys {
+		ut.TouchPlainKeyDirect(string(k), &upds[i])
+	}
+	root := processRoot(t, tr, ut)
+	out, err := tr.RootTrie().EncodeCurrentState(nil)
+	require.NoError(t, err)
+	return root, out
+}
+
+// TestTruthtreeFold_CarriedDeleteDirectTouch pins root parity with the sequential oracle for a fresh
+// account whose only slot is set-then-deleted in the same batch, when the delete is carried onto the
+// key via TouchPlainKeyDirect (the real ModeParallel production path) rather than re-read from ctx.
+// The direct fold must detect the carried delete and fall back to replay; without that, it hashes a
+// phantom leaf and the root diverges.
+func TestTruthtreeFold_CarriedDeleteDirectTouch(t *testing.T) {
+	batches := freshDeleteBatches()
+	seqMs := NewMockState(t)
+	onMs := NewMockState(t)
+	onMs.SetConcurrentCommitment(true)
+	onCfg := truthtreeFoldCfg()
+
+	var seqBlob, onBlob []byte
+	for i, b := range batches {
+		var seqRoot, onRoot []byte
+		seqRoot, seqBlob = processModeBatchState(t, seqMs, modeSeq, 0, b.keys, b.upds, seqBlob)
+		onRoot, onBlob = processParallelBatchDirect(t, onMs, onCfg, 4, b.keys, b.upds, onBlob)
+		require.Equalf(t, seqRoot, onRoot, "flag-on direct-touch batch %d root != sequential", i+1)
+	}
+}
+
 // requireFreshWhaleFlagParity folds one fresh batch through the sequential oracle, the flag-off
 // parallel engine, and the flag-on parallel engine, asserting root AND stored-branch byte parity —
 // the single-batch fresh-whale analog of requireFlagLeafParity used where the corpus is a lone fresh

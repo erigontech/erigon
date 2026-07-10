@@ -306,30 +306,31 @@ func (fc *foldCtx) emitBranchUpdate(bitmap uint16, prefix []byte, cellData *[16]
 	return nil
 }
 
-// resolveSubtreeUpdates fills every nil terminator update in the subtree from the trie context and
-// reports whether any terminator resolved to an empty (deleted) value. The ModeParallel prefix trie
-// inserts touched keys with a nil update by design — the value is re-read from state on demand
-// (followAndUpdate does this). The direct fold reads node.update straight, never the ctx, so it
-// needs the values materialized first; this pre-pass performs the same reads the replay path would.
-// A resolved delete means a leaf the direct fold would hash instead of dropping, so the caller falls
-// back to replay (which sees the now-populated update and folds the delete correctly). Fail-closed
-// on the first read error.
+// resolveSubtreeUpdates materializes every terminator update in the subtree and reports whether any
+// terminator is an empty (deleted) value. A ModeParallel touch stages either a nil update
+// (TouchPlainKey — re-read from state on demand, as the replay path does) or a carried value
+// (TouchPlainKeyDirect — the parallel-exec commitment calculator's entry point, which can carry a
+// DeleteUpdate). The direct fold reads node.update straight and hashes every present slot, so a
+// delete in either form is a leaf it would wrongly hash instead of drop; reporting it routes the
+// caller back to replay, which folds the delete correctly. Fail-closed on the first read error.
 func resolveSubtreeUpdates(node *prefixNode, accountKeyLen int16, readAccount, readStorage func([]byte) (*Update, error)) (hasEmpty bool, err error) {
 	if node == nil {
 		return false, nil
 	}
-	if node.plainKey != nil && node.update == nil {
-		var u *Update
-		if int16(len(node.plainKey)) == accountKeyLen {
-			u, err = readAccount(node.plainKey)
-		} else {
-			u, err = readStorage(node.plainKey)
+	if node.plainKey != nil {
+		if node.update == nil {
+			var u *Update
+			if int16(len(node.plainKey)) == accountKeyLen {
+				u, err = readAccount(node.plainKey)
+			} else {
+				u, err = readStorage(node.plainKey)
+			}
+			if err != nil {
+				return false, err
+			}
+			node.update = u
 		}
-		if err != nil {
-			return false, err
-		}
-		node.update = u
-		if u.Deleted() {
+		if node.update != nil && node.update.Deleted() {
 			hasEmpty = true
 		}
 	}
