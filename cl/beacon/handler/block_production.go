@@ -19,7 +19,6 @@ package handler
 import (
 	"bytes"
 	"context"
-	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -61,6 +60,7 @@ import (
 	"github.com/erigontech/erigon/common/length"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/version"
 	"github.com/erigontech/erigon/execution/engineapi/engine_types"
 	"github.com/erigontech/erigon/execution/protocol/params"
 	"github.com/erigontech/erigon/execution/rlp"
@@ -80,7 +80,10 @@ var (
 	errBuilderNotEnabled = errors.New("builder is not enabled")
 )
 
-var defaultGraffitiString = "Caplin"
+const (
+	caplinClientCode = "CN"
+	caplinClientName = "caplin"
+)
 
 const minPayloadPollingWindow = 100 * time.Millisecond
 
@@ -88,6 +91,109 @@ const minPayloadPollingWindow = 100 * time.Millisecond
 // attestation deadline, reserving that margin for consensus processing, signing and gossip so the
 // produced block still reaches attesters in time to earn the proposer boost.
 const payloadPublicationDivisor = 4
+
+// defaultGraffiti is used when the validator does not specify a graffiti. It follows the
+// client-version graffiti standard, encoding the execution and consensus client codes and
+// their commit prefixes so client-diversity tooling can attribute proposed blocks. See
+// https://github.com/ethereum/execution-apis/blob/main/src/engine/identification.md
+func (a *ApiHandler) defaultGraffiti() common.Hash {
+	graffiti := caplinClientCode + graffitiCommitPrefix(version.GitCommit)
+	if el := a.executionClientVersion(); el != nil {
+		graffiti = graffitiClientCode(el.Code) + graffitiCommitPrefix(el.Commit) + graffiti
+	}
+	return graffitiFromString(graffiti)
+}
+
+// elClientVersionUnavailable is a sentinel cached when the execution client does not
+// implement engine_getClientVersionV1, so the negative outcome is memoized too.
+var elClientVersionUnavailable = &engine_types.ClientVersionV1{}
+
+// executionClientVersion returns the connected execution client's version if it is already
+// cached, otherwise it kicks off a one-shot background fetch and returns nil. Block
+// production never blocks on the engine API: the first proposal after startup falls back to
+// consensus-only graffiti and later proposals pick up the execution client code once the
+// fetch has populated the cache (the version is static for the lifetime of a connection).
+func (a *ApiHandler) executionClientVersion() *engine_types.ClientVersionV1 {
+	if cached := a.elClientVersion.Load(); cached != nil {
+		return normalizeELClientVersion(cached)
+	}
+	a.triggerELClientVersionFetch()
+	return nil
+}
+
+// triggerELClientVersionFetch starts a single background fetch of the execution client
+// version, unless one is already in flight or the version is already cached.
+func (a *ApiHandler) triggerELClientVersionFetch() {
+	if a.engine == nil || a.elClientVersion.Load() != nil {
+		return
+	}
+	if !a.elClientVersionFetching.CompareAndSwap(false, true) {
+		return
+	}
+	go func() {
+		defer a.elClientVersionFetching.Store(false)
+		a.fetchExecutionClientVersion()
+	}()
+}
+
+// fetchExecutionClientVersion queries the engine once and caches the outcome. Transient
+// errors are left uncached so a later fetch can retry; only a genuinely unsupported method
+// (JSON-RPC -32601) or an empty result is memoized as unavailable.
+func (a *ApiHandler) fetchExecutionClientVersion() {
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	caplin := engine_types.NewClientVersionV1(caplinClientCode, caplinClientName, a.version, version.GitCommit)
+	versions, err := a.engine.GetClientVersionV1(ctx, &caplin)
+	if err != nil {
+		if methodNotFound(err) {
+			a.elClientVersion.Store(elClientVersionUnavailable)
+		}
+		return
+	}
+	if len(versions) == 0 {
+		a.elClientVersion.Store(elClientVersionUnavailable)
+		return
+	}
+	el := versions[0]
+	a.elClientVersion.Store(&el)
+}
+
+func normalizeELClientVersion(v *engine_types.ClientVersionV1) *engine_types.ClientVersionV1 {
+	if v == nil || v == elClientVersionUnavailable {
+		return nil
+	}
+	return v
+}
+
+// graffitiClientCode clamps a client code to the 2 bytes the graffiti standard reserves for
+// it, guarding against a non-conforming execution client returning an over-long code.
+func graffitiClientCode(code string) string {
+	if len(code) > 2 {
+		return code[:2]
+	}
+	return code
+}
+
+// methodNotFound reports whether err is a JSON-RPC "method not found" (-32601) error.
+func methodNotFound(err error) bool {
+	var coder interface{ ErrorCode() int }
+	return errors.As(err, &coder) && coder.ErrorCode() == -32601
+}
+
+// graffitiCommitPrefix returns the leading 2 bytes (4 hex chars) of a commit hash.
+func graffitiCommitPrefix(commit string) string {
+	commit = strings.TrimPrefix(commit, "0x")
+	if len(commit) >= 4 {
+		return commit[:4]
+	}
+	return commit + strings.Repeat("0", 4-len(commit))
+}
+
+func graffitiFromString(s string) common.Hash {
+	var graffiti common.Hash
+	copy(graffiti[:], s)
+	return graffiti
+}
 
 type blockBuilderWindow struct {
 	firstGetAt time.Time
@@ -310,9 +416,11 @@ func (a *ApiHandler) GetEthV3ValidatorBlock(
 	if r.URL.Query().Has("skip_randao_verification") {
 		randaoReveal = common.Bytes96{0xc0} // infinity bls signature
 	}
-	graffiti := common.HexToHash(r.URL.Query().Get("graffiti"))
-	if !r.URL.Query().Has("graffiti") {
-		graffiti = common.HexToHash(hex.EncodeToString([]byte(defaultGraffitiString)))
+	var graffiti common.Hash
+	if r.URL.Query().Has("graffiti") {
+		graffiti = common.HexToHash(r.URL.Query().Get("graffiti"))
+	} else {
+		graffiti = a.defaultGraffiti()
 	}
 
 	tx, err := a.indiciesDB.BeginRo(ctx)
@@ -456,7 +564,7 @@ func (a *ApiHandler) GetEthV3ValidatorBlock(
 				if ok {
 					cachedReqs := cached.ExecutionRequests
 					if cachedReqs == nil {
-						cachedReqs = cltypes.NewExecutionRequests(a.beaconChainCfg)
+						cachedReqs = cltypes.NewExecutionRequestsWithVersion(a.beaconChainCfg, clparams.GloasVersion)
 					}
 					envelope := &cltypes.ExecutionPayloadEnvelope{
 						Payload:               cached.Payload,
@@ -849,12 +957,13 @@ func (a *ApiHandler) produceBeaconBody(
 
 	var executionPayload *cltypes.Eth1Block
 	var executionValue uint64
+	var executionErr error
 	var executionRequestsRoot common.Hash
 	// [New in Gloas:EIP7732] saved for envelope construction.
 	// Always initialize for GLOAS so EncodeSSZ never sees nil sub-fields.
 	var gloasExecRequests *cltypes.ExecutionRequests
 	if stateVersion.AfterOrEqual(clparams.GloasVersion) {
-		gloasExecRequests = cltypes.NewExecutionRequests(a.beaconChainCfg)
+		gloasExecRequests = cltypes.NewExecutionRequestsWithVersion(a.beaconChainCfg, clparams.GloasVersion)
 	}
 
 	blockRoot := baseBlockRoot
@@ -1031,70 +1140,30 @@ func (a *ApiHandler) produceBeaconBody(
 			}
 		}
 
-		// Add the requests bundle (pre-GLOAS only; in GLOAS, ExecutionRequests live in the envelope)
-		if stateVersion.Before(clparams.GloasVersion) && requestsBundle != nil && requestsBundle.GetRequests() != nil {
-			if len(requestsBundle.GetRequests()) > 0 {
-				log.Info("BlockProduction: Received requests bundle", "len", len(requestsBundle.GetRequests()))
+		if requestsBundle != nil && requestsBundle.GetRequests() != nil {
+			requests := requestsBundle.GetRequests()
+			if len(requests) > 0 {
+				log.Info("BlockProduction: Received requests bundle", "len", len(requests))
 			}
 
-			for _, request := range requestsBundle.GetRequests() {
-				rType := request[0]
-				requestData := request[1:]
-				switch rType {
-				case types.DepositRequestType:
-					if beaconBody.ExecutionRequests.Deposits.Len() > 0 {
-						log.Error("BlockProduction: Deposit request already exists")
-					} else if err := beaconBody.ExecutionRequests.Deposits.DecodeSSZ(requestData, int(stateVersion)); err != nil {
-						log.Error("BlockProduction: Failed to decode deposit request", "err", err)
-					} else {
-						log.Info("BlockProduction: Decoded deposit request", "len", beaconBody.ExecutionRequests.Deposits.Len())
-					}
-				case types.WithdrawalRequestType:
-
-					if beaconBody.ExecutionRequests.Withdrawals.Len() > 0 {
-						log.Error("BlockProduction: Withdrawal request already exists")
-					} else if err := beaconBody.ExecutionRequests.Withdrawals.DecodeSSZ(requestData, int(stateVersion)); err != nil {
-						log.Error("BlockProduction: Failed to decode withdrawal request", "err", err)
-					} else {
-						log.Info("BlockProduction: Decoded withdrawal request", "len", beaconBody.ExecutionRequests.Withdrawals.Len())
-					}
-
-				case types.ConsolidationRequestType:
-					if beaconBody.ExecutionRequests.Consolidations.Len() > 0 {
-						log.Error("BlockProduction: Consolidation request already exists")
-					} else if err := beaconBody.ExecutionRequests.Consolidations.DecodeSSZ(requestData, int(stateVersion)); err != nil {
-						log.Error("BlockProduction: Failed to decode consolidation request", "err", err)
-					} else {
-						log.Info("BlockProduction: Decoded consolidation request", "len", beaconBody.ExecutionRequests.Consolidations.Len())
-					}
-				}
+			requestList := make([]hexutil.Bytes, len(requests))
+			for i := range requests {
+				requestList[i] = requests[i]
+			}
+			execReqs, err := cltypes.DecodeExecutionRequestsList(a.beaconChainCfg, requestList, stateVersion)
+			if err != nil {
+				executionErr = fmt.Errorf("produceBeaconBody: invalid execution requests bundle: %w", err)
+				return
+			}
+			if stateVersion.Before(clparams.GloasVersion) {
+				beaconBody.ExecutionRequests = execReqs
+			} else {
+				gloasExecRequests = execReqs
 			}
 		}
 
-		// GLOAS: decode execution requests from the bundle to compute the bid's ExecutionRequestsRoot.
+		// GLOAS: compute the bid's ExecutionRequestsRoot from the envelope request container.
 		if stateVersion.AfterOrEqual(clparams.GloasVersion) {
-			if requestsBundle != nil && requestsBundle.GetRequests() != nil {
-				execReqs := cltypes.NewExecutionRequests(a.beaconChainCfg)
-				for _, request := range requestsBundle.GetRequests() {
-					rType := request[0]
-					requestData := request[1:]
-					switch rType {
-					case types.DepositRequestType:
-						if err := execReqs.Deposits.DecodeSSZ(requestData, int(stateVersion)); err != nil {
-							log.Error("BlockProduction: GLOAS failed to decode deposit request for root", "err", err)
-						}
-					case types.WithdrawalRequestType:
-						if err := execReqs.Withdrawals.DecodeSSZ(requestData, int(stateVersion)); err != nil {
-							log.Error("BlockProduction: GLOAS failed to decode withdrawal request for root", "err", err)
-						}
-					case types.ConsolidationRequestType:
-						if err := execReqs.Consolidations.DecodeSSZ(requestData, int(stateVersion)); err != nil {
-							log.Error("BlockProduction: GLOAS failed to decode consolidation request for root", "err", err)
-						}
-					}
-				}
-				gloasExecRequests = execReqs
-			}
 			// Always compute the root from the (possibly empty) gloasExecRequests
 			// so the bid's ExecutionRequestsRoot matches the envelope's actual root.
 			root, err := gloasExecRequests.HashSSZ()
@@ -1193,6 +1262,9 @@ func (a *ApiHandler) produceBeaconBody(
 		}()
 	}
 	wg.Wait()
+	if executionErr != nil {
+		return nil, 0, executionErr
+	}
 	if executionPayload == nil {
 		return nil, 0, errors.New("failed to produce execution payload")
 	}
@@ -1221,7 +1293,7 @@ func (a *ApiHandler) produceBeaconBody(
 		// [New in Gloas:EIP7732]
 		cachedExecReqs := gloasExecRequests
 		if cachedExecReqs == nil {
-			cachedExecReqs = cltypes.NewExecutionRequests(a.beaconChainCfg)
+			cachedExecReqs = cltypes.NewExecutionRequestsWithVersion(a.beaconChainCfg, clparams.GloasVersion)
 		}
 		a.selfBuildPayloads.Add(executionPayload.BlockHash, &selfBuildPayload{
 			Payload:           executionPayload,
@@ -1416,6 +1488,9 @@ func (a *ApiHandler) publishBlindedBlocks(w http.ResponseWriter, r *http.Request
 	version, err := a.parseEthConsensusVersion(ethVersion, apiVersion)
 	if err != nil {
 		return nil, beaconhttp.NewEndpointError(http.StatusBadRequest, err)
+	}
+	if version >= clparams.GloasVersion {
+		return nil, beaconhttp.NewEndpointError(http.StatusBadRequest, cltypes.ErrGloasCannotBlind)
 	}
 
 	// todo: broadcast_validation
@@ -1887,7 +1962,7 @@ func (a *ApiHandler) broadcastSelfBuildEnvelope(ctx context.Context, blk *cltype
 
 		execReqs := cached.ExecutionRequests
 		if execReqs == nil {
-			execReqs = cltypes.NewExecutionRequests(a.beaconChainCfg)
+			execReqs = cltypes.NewExecutionRequestsWithVersion(a.beaconChainCfg, clparams.GloasVersion)
 		}
 		envelope := &cltypes.ExecutionPayloadEnvelope{
 			Payload:               cached.Payload,
@@ -2346,28 +2421,19 @@ func (a *ApiHandler) findBestAttestationsForBlockProduction(
 	return ret
 }
 
-// aggregatePayloadAttestations collects PTC votes from the pool for the parent
-// block, groups them by PayloadAttestationData, aggregates BLS signatures and
-// builds aggregation_bits indexed against the parent slot's PTC committee.
-// Returns up to MaxPayloadAttestations sorted by weight (most votes first).
-// [New in Gloas:EIP7732]
 func (a *ApiHandler) aggregatePayloadAttestations(
 	baseState *state.CachingBeaconState,
 	parentSlot uint64,
 	parentRoot common.Hash,
 ) *solid.ListSSZ[*cltypes.PayloadAttestation] {
-	maxPA := int(a.beaconChainCfg.MaxPayloadAttestations)
-	ptcSize := int(a.beaconChainCfg.PtcSize)
 	result := solid.NewStaticListSSZ[*cltypes.PayloadAttestation](
-		maxPA,
+		int(a.beaconChainCfg.MaxPayloadAttestations),
 		cltypes.PayloadAttestationSSZSizeWithPtcSize(a.beaconChainCfg.PtcSize),
 	)
-
 	if a.epbsPool == nil {
 		return result
 	}
 
-	// 1. Collect matching messages from pool (parent slot, parent root).
 	var msgs []*cltypes.PayloadAttestationMessage
 	for _, key := range a.epbsPool.PayloadAttestations.Keys() {
 		if key.Slot != parentSlot {
@@ -2386,109 +2452,12 @@ func (a *ApiHandler) aggregatePayloadAttestations(
 		return result
 	}
 
-	// 2. Get the PTC committee for the parent slot.
-	ptc, err := baseState.GetPTC(parentSlot)
+	aggregated, err := aggregatePayloadAttestationMessages(a.beaconChainCfg, baseState, msgs)
 	if err != nil {
-		log.Warn("BlockProduction: failed to get PTC for payload attestations", "slot", parentSlot, "err", err)
+		log.Warn("BlockProduction: failed to aggregate payload attestations", "slot", parentSlot, "err", err)
 		return result
 	}
-
-	// Build a map from validator index -> PTC position for O(1) lookups.
-	validatorToPTCIndex := make(map[uint64]int, len(ptc))
-	for i, valIdx := range ptc {
-		validatorToPTCIndex[valIdx] = i
-	}
-
-	// 3. Group messages by identical PayloadAttestationData.
-	type dataKey struct {
-		BeaconBlockRoot   common.Hash
-		Slot              uint64
-		PayloadPresent    bool
-		BlobDataAvailable bool
-	}
-	type group struct {
-		data *cltypes.PayloadAttestationData
-		// PTC-index -> signature bytes
-		sigs map[int][]byte
-	}
-	groups := make(map[dataKey]*group)
-
-	for _, msg := range msgs {
-		ptcIdx, ok := validatorToPTCIndex[msg.ValidatorIndex]
-		if !ok {
-			// Validator not in PTC for this slot; skip.
-			continue
-		}
-		dk := dataKey{
-			BeaconBlockRoot:   msg.Data.BeaconBlockRoot,
-			Slot:              msg.Data.Slot,
-			PayloadPresent:    msg.Data.PayloadPresent,
-			BlobDataAvailable: msg.Data.BlobDataAvailable,
-		}
-		g, exists := groups[dk]
-		if !exists {
-			g = &group{
-				data: msg.Data,
-				sigs: make(map[int][]byte),
-			}
-			groups[dk] = g
-		}
-		// If we already have a vote from this PTC position, keep the first one.
-		if _, dup := g.sigs[ptcIdx]; !dup {
-			g.sigs[ptcIdx] = msg.Signature[:]
-		}
-	}
-
-	// 4. Build PayloadAttestation for each group.
-	type candidate struct {
-		att    *cltypes.PayloadAttestation
-		weight int // number of set bits
-	}
-	candidates := make([]candidate, 0, len(groups))
-
-	for _, g := range groups {
-		bits := solid.NewBitVector(ptcSize)
-		sigBytes := make([][]byte, 0, len(g.sigs))
-
-		for ptcIdx, sig := range g.sigs {
-			if err := bits.SetBitAt(ptcIdx, true); err != nil {
-				log.Warn("BlockProduction: failed to set PTC bit", "ptcIdx", ptcIdx, "err", err)
-				continue
-			}
-			sigCopy := make([]byte, len(sig))
-			copy(sigCopy, sig)
-			sigBytes = append(sigBytes, sigCopy)
-		}
-		if len(sigBytes) == 0 {
-			continue
-		}
-
-		aggSig, err := bls.AggregateSignatures(sigBytes)
-		if err != nil {
-			log.Warn("BlockProduction: failed to aggregate PTC signatures", "err", err)
-			continue
-		}
-		var sig96 common.Bytes96
-		copy(sig96[:], aggSig)
-
-		att := &cltypes.PayloadAttestation{
-			AggregationBits: bits,
-			Data:            g.data,
-			Signature:       sig96,
-		}
-		candidates = append(candidates, candidate{att: att, weight: len(g.sigs)})
-	}
-
-	// 5. Sort by weight descending.
-	sort.Slice(candidates, func(i, j int) bool {
-		return candidates[i].weight > candidates[j].weight
-	})
-
-	// 6. Take up to MaxPayloadAttestations.
-	for i := 0; i < len(candidates) && result.Len() < maxPA; i++ {
-		result.Append(candidates[i].att)
-	}
-	return result
+	return aggregated
 }
 
 // computeAttestationReward computes the reward for a specific attestation.

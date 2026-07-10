@@ -111,6 +111,10 @@ func (forkChoiceSpectestEngine) GetBlobs(context.Context, []common.Hash, clparam
 	return nil, nil, nil
 }
 
+func (forkChoiceSpectestEngine) GetClientVersionV1(context.Context, *engine_types.ClientVersionV1) ([]engine_types.ClientVersionV1, error) {
+	return nil, nil
+}
+
 func (f *ForkChoiceStep) StepType() string {
 	if f.PayloadStatus != nil {
 		return "on_payload_info"
