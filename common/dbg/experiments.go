@@ -38,6 +38,8 @@ import (
 var (
 	MaxReorgDepth = EnvUint("MAX_REORG_DEPTH", 96)
 
+	WarmupTableWorkers = EnvUint("WARMUP_TABLE_WORKERS", 0)
+
 	saveHeapProfile             = EnvBool("SAVE_HEAP_PROFILE", false)
 	heapProfileFilePath         = EnvString("HEAP_PROFILE_FILE_PATH", "")
 	heapProfileThresholdPercent = EnvUint("HEAP_PROFILE_THRESHOLD", 35)
@@ -113,11 +115,22 @@ var (
 	BadBlockHalt          = EnvBool("BAD_BLOCK_HALT", false)
 	IgnoreBAL             = EnvBool("IGNORE_BAL", false)
 	BatchCommitments      = EnvBool("BATCH_COMMITMENTS", true)
-	CaplinEfficientReorg  = EnvBool("CAPLIN_EFFICIENT_REORG", true)
-	UseTxDependencies     = EnvBool("USE_TX_DEPENDENCIES", false)
-	UseStateCache         = EnvBool("USE_STATE_CACHE", true)
-	AssertStateCache      = EnvBool("ASSERT_STATE_CACHE", false)
-	ReadAhead             = EnvBool("READ_AHEAD", true)
+	// BALDrivenCommitment folds a block's commitment from its BAL ahead of the
+	// per-tx result stream, overlapping execution. On by default; set
+	// BAL_DRIVEN_COMMITMENT=false (or IGNORE_BAL=true) to fall back to the
+	// incremental path if it ever misbehaves.
+	BALDrivenCommitment = EnvBool("BAL_DRIVEN_COMMITMENT", true)
+	// BALShadowCompute (requires BALDrivenCommitment) also computes each
+	// BAL-driven block incrementally and asserts both roots match before
+	// publishing; without it the BAL-driven root is published directly.
+	BALShadowCompute     = EnvBool("BAL_SHADOW_COMPUTE", false)
+	CaplinEfficientReorg = EnvBool("CAPLIN_EFFICIENT_REORG", true)
+	UseTxDependencies    = EnvBool("USE_TX_DEPENDENCIES", false)
+	UseStateCache        = EnvBool("USE_STATE_CACHE", true)
+	UseCodeStore         = EnvBool("USE_CODE_STORE", true)
+	DisableAdaptivePin   = EnvBool("DISABLE_ADAPTIVE_PIN", false)
+	AssertStateCache     = EnvBool("ASSERT_STATE_CACHE", false)
+	ReadAhead            = EnvBool("READ_AHEAD", true)
 
 	BorValidateHeaderTime = EnvBool("BOR_VALIDATE_HEADER_TIME", true)
 	TraceDeletion         = EnvBool("TRACE_DELETION", false)

@@ -384,10 +384,7 @@ func (s *simulator) sanitizeCall(
 
 	if args.Gas == nil {
 		// Default to remaining block gas, but capped by the node's effective gas cap.
-		remaining := blockContext.GasLimit - gasUsed
-		if remaining > effectiveCap {
-			remaining = effectiveCap
-		}
+		remaining := min(blockContext.GasLimit-gasUsed, effectiveCap)
 		args.Gas = (*hexutil.Uint64)(&remaining)
 	} else {
 		// Cap user-specified gas against the node's gas cap.
@@ -774,14 +771,8 @@ func (s *simulator) simulateCall(
 	vmConfig vm.Config,
 	precompiles vm.PrecompiledContracts,
 ) (*CallResult, types.Transaction, *types.Receipt, error) {
-	// Setup context, so it may be cancelled after the call has completed or in case of unmetered gas use a timeout.
-	var cancel context.CancelFunc
-	if s.evmCallTimeout > 0 {
-		ctx, cancel = context.WithTimeout(ctx, s.evmCallTimeout)
-	} else {
-		ctx, cancel = context.WithCancel(ctx)
-	}
-	defer cancel()
+	_, storeEVM, cleanup := setupEVMTimeout(ctx, s.evmCallTimeout)
+	defer cleanup()
 
 	err := s.sanitizeCall(call, intraBlockState, &blockCtx, header.BaseFee, *cumulativeGasUsed, s.gasPool.Gas())
 	if err != nil {
@@ -808,9 +799,7 @@ func (s *simulator) simulateCall(
 
 	// It is possible to override precompiles with EVM bytecode or move them to another address.
 	evm.SetPrecompiles(precompiles)
-
-	stop := context.AfterFunc(ctx, evm.Cancel)
-	defer stop()
+	storeEVM(evm)
 
 	s.gasPool.AddBlobGas(msg.BlobGas())
 	result, err := protocol.ApplyMessage(evm, msg, s.gasPool, true, false, s.engine)

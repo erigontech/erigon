@@ -273,7 +273,7 @@ func (s *CaplinStateSnapshots) coveredRangesForType(name string) []Range {
 	if !ok {
 		return nil
 	}
-	segs, ok := v.([]*VisibleSegment)
+	segs, ok := v.(VisibleSegments)
 	if !ok {
 		return nil
 	}
@@ -316,32 +316,15 @@ func (s *CaplinStateSnapshots) OpenList(fileNames []string, optimistic bool) err
 	s.closeWhatNotInList(fileNames)
 	var segmentsMax uint64
 	var segmentsMaxSet bool
-Loop:
 	for _, fName := range fileNames {
 		f, _, _ := snaptype.ParseFileName(s.dir, fName)
-
-		var processed bool = true
-		var exists bool
-		var sn *DirtySegment
 
 		dirtySegments, ok := s.dirty[f.CaplinTypeString]
 		if !ok {
 			continue
 		}
 		filePath := filepath.Join(s.dir, fName)
-		dirtySegments.Walk(func(segments []*DirtySegment) bool {
-			for _, sn2 := range segments {
-				if sn2.Decompressor == nil { // it's ok if some segment was not able to open
-					continue
-				}
-				if filePath == sn2.filePath {
-					sn = sn2
-					exists = true
-					break
-				}
-			}
-			return true
-		})
+		sn, exists := findOpenSegment(dirtySegments, func(sn2 *DirtySegment) bool { return sn2.filePath == filePath })
 		if !exists {
 			sn = &DirtySegment{
 				// segType: f.Type, Unsupported
@@ -352,19 +335,17 @@ Loop:
 			}
 		}
 		if err := s.openSegIfNeed(sn, filePath); err != nil {
-			if errors.Is(err, os.ErrNotExist) {
-				if optimistic {
-					continue Loop
-				} else {
-					break Loop
-				}
+			stop, failErr := ClassifyOpenErr(err, optimistic)
+			if failErr != nil {
+				return failErr
 			}
-			if optimistic {
+			if stop {
+				break
+			}
+			if !errors.Is(err, os.ErrNotExist) {
 				s.logger.Warn("[snapshots] open segment", "err", err)
-				continue Loop
-			} else {
-				return err
 			}
+			continue
 		}
 
 		if !exists {
@@ -375,15 +356,12 @@ Loop:
 		if err := openIdxForCaplinStateIfNeeded(sn, filePath, optimistic); err != nil {
 			return err
 		}
-		// Only bob sidecars count for progression
-		if processed {
-			if f.To > 0 {
-				segmentsMax = f.To - 1
-			} else {
-				segmentsMax = 0
-			}
-			segmentsMaxSet = true
+		if f.To > 0 {
+			segmentsMax = f.To - 1
+		} else {
+			segmentsMax = 0
 		}
+		segmentsMaxSet = true
 	}
 
 	if segmentsMaxSet {
@@ -451,14 +429,14 @@ func (s *CaplinStateSnapshots) recalcVisibleFiles() {
 	s.visibleLock.Lock()
 	defer s.visibleLock.Unlock()
 
-	getNewVisibleSegments := func(dirtySegments *btree.BTreeG[*DirtySegment]) []*VisibleSegment {
-		newVisibleSegments := make([]*VisibleSegment, 0, dirtySegments.Len())
+	getNewVisibleSegments := func(dirtySegments *btree.BTreeG[*DirtySegment]) VisibleSegments {
+		newVisibleSegments := make(VisibleSegments, 0, dirtySegments.Len())
 		dirtySegments.Walk(func(segments []*DirtySegment) bool {
 			for _, sn := range segments {
-				if sn.canDelete.Load() {
+				if !isIndexed(sn) {
 					continue
 				}
-				if !isIndexed(sn) {
+				if n := len(newVisibleSegments); n > 0 && sn.isSubSetOf(newVisibleSegments[n-1].src) {
 					continue
 				}
 				for len(newVisibleSegments) > 0 && newVisibleSegments[len(newVisibleSegments)-1].src.isSubSetOf(sn) {
@@ -485,6 +463,58 @@ func (s *CaplinStateSnapshots) recalcVisibleFiles() {
 	})
 }
 
+// RemoveOverlaps deletes state segment files that are fully covered by a larger
+// indexed segment of the same type, so the on-disk publishable check stops flagging
+// them as overlapping. Offline maintenance only: it munmaps and unlinks files, so no
+// CaplinStateView may be open concurrently.
+func (s *CaplinStateSnapshots) RemoveOverlaps() error {
+	if s == nil {
+		return nil
+	}
+	s.dirtySegmentsLock.Lock()
+
+	var toRemove []*DirtySegment
+	for _, dirtySegments := range s.dirty {
+		var indexed []*DirtySegment
+		dirtySegments.Walk(func(segments []*DirtySegment) bool {
+			for _, sn := range segments {
+				if isIndexed(sn) {
+					indexed = append(indexed, sn)
+				}
+			}
+			return true
+		})
+
+		var rm []*DirtySegment
+		dirtySegments.Walk(func(segments []*DirtySegment) bool {
+			for _, sn := range segments {
+				for _, sup := range indexed {
+					if sn != sup && sn.isSubSetOf(sup) {
+						rm = append(rm, sn)
+						break
+					}
+				}
+			}
+			return true
+		})
+
+		for _, sn := range rm {
+			dirtySegments.Delete(sn)
+		}
+		toRemove = append(toRemove, rm...)
+	}
+
+	s.dirtySegmentsLock.Unlock()
+
+	s.recalcVisibleFiles()
+
+	for _, sn := range toRemove {
+		s.logger.Info("[caplin-state] removing overlapped segment", "file", sn.FileName())
+		sn.closeAndRemoveFiles()
+	}
+	return nil
+}
+
 func (s *CaplinStateSnapshots) idxAvailability() uint64 {
 	s.visibleLock.RLock()
 	defer s.visibleLock.RUnlock()
@@ -499,7 +529,7 @@ func (s *CaplinStateSnapshots) idxAvailability() uint64 {
 	// 	}
 	// }
 	s.visible.Range(func(_, v any) bool {
-		segs := v.([]*VisibleSegment)
+		segs := v.(VisibleSegments)
 		if len(segs) == 0 {
 			min = 0
 			return false
@@ -545,24 +575,12 @@ func (s *CaplinStateSnapshots) closeWhatNotInList(l []string) {
 	}
 
 	for _, dirtySegments := range s.dirty {
-		toClose := make([]*DirtySegment, 0)
-		dirtySegments.Walk(func(segments []*DirtySegment) bool {
-			for _, sn := range segments {
-				if sn.Decompressor == nil {
-					continue
-				}
-				_, name := filepath.Split(sn.FilePath())
-				if _, ok := protectFiles[name]; ok {
-					continue
-				}
-				toClose = append(toClose, sn)
-			}
-			return true
+		closeAndDropNotProtected(dirtySegments, protectFiles, func(sn *DirtySegment) string {
+			// sn.filePath, not the promoted Decompressor.FilePath(): the field is
+			// set for every tree member, incl. stubs whose Decompressor is nil.
+			_, name := filepath.Split(sn.filePath)
+			return name
 		})
-		for _, sn := range toClose {
-			sn.close()
-			dirtySegments.Delete(sn)
-		}
 	}
 }
 
@@ -588,7 +606,7 @@ func (s *CaplinStateSnapshots) View() *CaplinStateView {
 	// 	v.roTxs[k] = segments.BeginRo()
 	// }
 	s.visible.Range(func(k, val any) bool {
-		v.roTxs[k.(string)] = VisibleSegments(val.([]*VisibleSegment)).BeginRo()
+		v.roTxs[k.(string)] = val.(VisibleSegments).BeginRo()
 		return true
 	})
 	return v
@@ -608,7 +626,7 @@ func (v *CaplinStateView) Close() {
 	v.closed = true
 }
 
-func (v *CaplinStateView) VisibleSegments(tbl string) []*VisibleSegment {
+func (v *CaplinStateView) VisibleSegments(tbl string) VisibleSegments {
 	// if v.s == nil || v.s.visible[tbl] == nil {
 	// 	return nil
 	// }
@@ -617,7 +635,7 @@ func (v *CaplinStateView) VisibleSegments(tbl string) []*VisibleSegment {
 		return nil
 	}
 	if val, ok := v.s.visible.Load(tbl); ok {
-		return val.([]*VisibleSegment)
+		return val.(VisibleSegments)
 	}
 	return nil
 }

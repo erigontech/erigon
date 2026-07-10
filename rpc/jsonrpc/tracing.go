@@ -18,11 +18,8 @@ package jsonrpc
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"time"
-
-	"github.com/holiman/uint256"
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/dbg"
@@ -258,31 +255,16 @@ func (api *DebugAPIImpl) TraceTransaction(ctx context.Context, hash common.Hash,
 		return err
 	}
 	// Retrieve the transaction and assemble its EVM context
-	var isBorStateSyncTxn bool
-	blockNum, txNum, ok, err := api.txnLookup(ctx, tx, hash)
+	blockNum, txNum, isBorStateSyncTxn, ok, err := api.txnLookupWithBorFallback(ctx, tx, hash, chainConfig)
 	if err != nil {
 		return err
 	}
-
 	if !ok {
-		if chainConfig.Bor == nil {
-			return fmt.Errorf("transaction not found")
-		}
-
-		// otherwise this may be a bor state sync transaction - check
-		blockNum, ok, err = api.bridgeReader.EventTxnLookup(ctx, hash)
-		if err != nil {
-			return err
-		}
-		if !ok {
-			return fmt.Errorf("transaction not found")
-		}
-		if config == nil || config.BorTraceEnabled == nil || !*config.BorTraceEnabled {
-			stream.WriteEmptyArray() // matches maticnetwork/bor API behaviour for consistency
-			return nil
-		}
-
-		isBorStateSyncTxn = true
+		return fmt.Errorf("transaction not found")
+	}
+	if isBorStateSyncTxn && (config == nil || config.BorTraceEnabled == nil || !*config.BorTraceEnabled) {
+		stream.WriteEmptyArray() // matches maticnetwork/bor API behaviour for consistency
+		return nil
 	}
 
 	if blockNum == 0 {
@@ -309,14 +291,10 @@ func (api *DebugAPIImpl) TraceTransaction(ctx context.Context, hash common.Hash,
 		// bor state sync txn is appended at the end of the block
 		txnIndex = block.Transactions().Len()
 	} else {
-		txNumMin, err := api._txNumReader.Min(ctx, tx, blockNum)
+		txnIndex, err = api.txnIndexInBlock(ctx, tx, blockNum, txNum, false)
 		if err != nil {
 			return err
 		}
-		if txNumMin+1 > txNum {
-			return fmt.Errorf("uint underflow txnums error txNum: %d, txNumMin: %d, blockNum: %d", txNum, txNumMin, blockNum)
-		}
-		txnIndex = int(txNum - txNumMin - 1)
 		if txnIndex >= block.Transactions().Len() {
 			return fmt.Errorf("transaction %#x not found", hash)
 		}
@@ -425,22 +403,12 @@ func (api *DebugAPIImpl) TraceCall(ctx context.Context, args ethapi.CallArgs, bl
 	}
 	ibs := state.New(stateReader)
 
-	var baseFee *uint256.Int
-	if header.BaseFee != nil {
-		baseFee = new(uint256.Int).Set(header.BaseFee)
+	baseFee, err := overrideBaseFee(config, header.BaseFee)
+	if err != nil {
+		return err
 	}
-
-	if config != nil && config.BlockOverrides != nil {
-		if config.BlockOverrides.BaseFeePerGas != nil && baseFee != nil {
-			overflow := baseFee.SetFromBig(config.BlockOverrides.BaseFeePerGas.ToInt())
-			if overflow {
-				return errors.New("BlockOverrides.BaseFee uint256 overflow")
-			}
-		}
-
-		if config.BlockOverrides.BlobBaseFee != nil {
-			args.MaxFeePerBlobGas = config.BlockOverrides.BlobBaseFee
-		}
+	if config != nil && config.BlockOverrides != nil && config.BlockOverrides.BlobBaseFee != nil {
+		args.MaxFeePerBlobGas = config.BlockOverrides.BlobBaseFee
 	}
 
 	msg, err := args.ToMessage(api.GasCap, baseFee)
@@ -503,18 +471,8 @@ func (api *DebugAPIImpl) TraceCallMany(ctx context.Context, bundles []Bundle, si
 	if err != nil {
 		return err
 	}
-	if len(bundles) == 0 {
-		return errors.New("empty bundles")
-	}
-	empty := true
-	for _, bundle := range bundles {
-		if len(bundle.Transactions) != 0 {
-			empty = false
-		}
-	}
-
-	if empty {
-		return errors.New("empty bundles")
+	if err := validateBundles(bundles); err != nil {
+		return err
 	}
 
 	defer func(start time.Time) { log.Trace("Tracing CallMany finished", "runtime", time.Since(start)) }(time.Now())
@@ -562,17 +520,7 @@ func (api *DebugAPIImpl) TraceCallMany(ctx context.Context, bundles []Bundle, si
 
 	ibs := state.New(stateReader)
 
-	getHash := func(i uint64) (common.Hash, error) {
-		if hash, ok := overrideBlockHash[i]; ok {
-			return hash, nil
-		}
-		hash, ok, err := api._blockReader.CanonicalHash(ctx, tx, i)
-		if err != nil || !ok {
-			log.Debug("Can't get block hash by number", "number", i, "only-canonical", true, "err", err, "ok", ok)
-			return common.Hash{}, err
-		}
-		return hash, nil
-	}
+	getHash := transactions.MakeBlockHashProvider(ctx, tx, api._blockReader, overrideBlockHash)
 
 	blockCtx = protocol.NewEVMBlockContext(header, getHash, api.engine(), accounts.NilAddress /* author */, chainConfig)
 	// Apply global block overrides as the baseline for all bundles.

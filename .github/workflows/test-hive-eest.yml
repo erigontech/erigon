@@ -13,6 +13,7 @@ jobs:
   test-hive-eest:
     runs-on:
       group: hive
+    timeout-minutes: 60
     name: test-hive-eest (${{ matrix.shard }}, ${{ matrix.exec_mode }})
     strategy:
       # In merge_group: cancel sibling shards on first failure so ci-gate's
@@ -28,86 +29,69 @@ jobs:
         # entries spawn separate `hive` group runners and run concurrently —
         # wall-clock unchanged, runner-minutes doubled.
         include:
-          # consume-engine: split by fork for parallelism (61k+ tests total).
-          # Engine API tests only exist from Paris (The Merge) onwards.
+          # consume-enginex: split by fork for parallelism (~50k tests total).
+          # Engine API tests only exist from Paris (The Merge) onwards; the
+          # osaka shard also carries the BPO fork-transition fixtures.
           # Pattern format: "<suite-regex>/<test-regex>" — the leading ".*/""
-          # matches the suite name (eest/consume-engine) while the remainder
+          # matches the suite name (eest/consume-enginex) while the remainder
           # filters individual pytest test IDs by fork parameter.
-          # pool-size: --client.pool.size for hive's warm-daemon client pool.
-          # Tuned per shard from a trace-instrumented dispatch (run 24938677388);
-          # the LRU hit-rate curve plateaus at ~50% past size=4 on the long
-          # consume-engine shards (reuse is essentially depth-2 consecutive),
-          # so 4 captures all available reuse and 24+ buys nothing. paris+shanghai
-          # and consume-rlp have ~unique pre-state per test (0% hit at any size).
-          # glamsterdam-devnet is the exception — its curve keeps climbing past
-          # 24, so it gets a larger pool.
-          - sim: consume-engine
+          - sim: consume-enginex
             sim-limit: ".*/.*fork_(Paris|Shanghai)"
             shard: paris+shanghai
-            pool-size: 0
             fixtures-tarball: eest_stable
             max-failures: 0
             exec_mode: serial
-          - sim: consume-engine
+          - sim: consume-enginex
             sim-limit: ".*/.*fork_(Paris|Shanghai)"
             shard: paris+shanghai
-            pool-size: 0
             fixtures-tarball: eest_stable
             max-failures: 0
             exec_mode: parallel
-          - sim: consume-engine
+          - sim: consume-enginex
             sim-limit: ".*/.*fork_Cancun"
             shard: cancun
-            pool-size: 4
             fixtures-tarball: eest_stable
             max-failures: 0
             exec_mode: serial
-          - sim: consume-engine
+          - sim: consume-enginex
             sim-limit: ".*/.*fork_Cancun"
             shard: cancun
-            pool-size: 4
             fixtures-tarball: eest_stable
             max-failures: 0
             exec_mode: parallel
-          - sim: consume-engine
+          - sim: consume-enginex
             sim-limit: ".*/.*fork_Prague"
             shard: prague
-            pool-size: 4
             fixtures-tarball: eest_stable
             max-failures: 0
             exec_mode: serial
-          - sim: consume-engine
+          - sim: consume-enginex
             sim-limit: ".*/.*fork_Prague"
             shard: prague
-            pool-size: 4
             fixtures-tarball: eest_stable
             max-failures: 0
             exec_mode: parallel
-          - sim: consume-engine
-            sim-limit: ".*/.*fork_Osaka"
+          - sim: consume-enginex
+            sim-limit: ".*/.*fork_(Osaka|BPO)"
             shard: osaka
-            pool-size: 4
             fixtures-tarball: eest_stable
             max-failures: 0
             exec_mode: serial
-          - sim: consume-engine
-            sim-limit: ".*/.*fork_Osaka"
+          - sim: consume-enginex
+            sim-limit: ".*/.*fork_(Osaka|BPO)"
             shard: osaka
-            pool-size: 4
             fixtures-tarball: eest_stable
             max-failures: 0
             exec_mode: parallel
           - sim: consume-rlp
             sim-limit: ".*(eip2930_access_list|eip4844_blobs).*" # all tests take too long
             shard: rlp
-            pool-size: 0
             fixtures-tarball: eest_stable
             max-failures: 0
             exec_mode: serial
           - sim: consume-rlp
             sim-limit: ".*(eip2930_access_list|eip4844_blobs).*"
             shard: rlp
-            pool-size: 0
             fixtures-tarball: eest_stable
             max-failures: 0
             exec_mode: parallel
@@ -115,7 +99,6 @@ jobs:
           - sim: consume-engine
             sim-limit: ".*(7708|7778|7843|7928|7954|7976|7981|8024|8037).*"
             shard: glamsterdam-devnet
-            pool-size: 24
             fixtures-tarball: eest_devnet
             extra-hive-flags: "--sim.loglevel=3 --client.checktimelimit=300s"
             erigon-extra-flags: "--experimental.bal"
@@ -141,6 +124,7 @@ jobs:
         uses: actions/checkout@v7
         with:
           path: erigon-full
+          persist-credentials: false
 
       - name: Read pinned Hive ref
         id: hive-version
@@ -149,14 +133,10 @@ jobs:
       - name: Checkout Hive
         uses: actions/checkout@v7
         with:
-          # EXPERIMENT: pinned to erigontech/hive yperbasis/client-pool — the
-          # upstream-PR-ready warm-daemon client pool (ethereum/hive#1449), which
-          # now also carries local-fixtures support for the eels
-          # consume-engine/consume-rlp simulators (merged via erigontech/hive#2).
-          # Revert to ethereum/hive + steps.hive-version.outputs.ref once upstream.
-          repository: erigontech/hive
-          ref: 9afe5f15a37136fa57f2b2055d1d6c69c681aa16
+          repository: ethereum/hive
+          ref: ${{ steps.hive-version.outputs.ref }}
           path: hive
+          persist-credentials: false
 
       - name: Conditional Docker Login
         # Only login if we can. Workflow works without it but we want to avoid
@@ -277,6 +257,7 @@ jobs:
           if [ -n "$branch" ]; then
             branch_arg="--sim.buildarg branch=$branch"
           fi
+          fixtures_url=$(jq -r --arg t '${{ matrix.fixtures-tarball }}' '.[$t].url' erigon-full/test-fixtures.json)
           cd hive
           docker ps
           run_suite() {
@@ -287,7 +268,7 @@ jobs:
             # image-build/registry/clone failure); a completed run is judged on its first result.
             local attempt=1 max_attempts=3
             while true; do
-              ./hive -docker.output -docker.auth --sim ethereum/eels/"${1}" --sim.limit="${2}" --sim.parallelism=12 --client.pool.size=${{ matrix.pool-size }} --client erigon --docker.nocache=true --sim.limit.exact=false --sim.buildarg fixtures=/fixtures ${branch_arg} ${{ matrix.extra-hive-flags }} 2>&1 | tee output.log || true
+              ./hive -docker.output -docker.auth --sim ethereum/eels/"${1}" --sim.limit="${2}" --sim.parallelism=12 --client erigon --docker.nocache=true --sim.limit.exact=false --sim.buildarg fixtures="$fixtures_url" ${branch_arg} ${{ matrix.extra-hive-flags }} 2>&1 | tee output.log || true
               status_line=$(tail -2 output.log | head -1 | sed -r "s/\x1B\[[0-9;]*[a-zA-Z]//g")
               suites=$(echo "$status_line" | sed -n 's/.*suites=\([0-9]*\).*/\1/p')
               if [ -z "$suites" ]; then

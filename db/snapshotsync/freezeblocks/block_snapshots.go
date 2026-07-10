@@ -34,6 +34,7 @@ import (
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/background"
+	"github.com/erigontech/erigon/common/concurrent"
 	"github.com/erigontech/erigon/common/dbg"
 	dir2 "github.com/erigontech/erigon/common/dir"
 	"github.com/erigontech/erigon/common/estimate"
@@ -93,37 +94,6 @@ func NewRoSnapshots(cfg ethconfig.BlocksFreezing, snapDir string, logger log.Log
 // transaction_hash  -> transactions_segment_offset
 // transaction_hash  -> block_number
 
-func SegmentsCaplin(dir string, minBlock uint64) (res []snaptype.FileInfo, missingSnapshots []snapshotsync.Range, err error) {
-	list, err := snaptype.Segments(dir)
-	if err != nil {
-		return nil, missingSnapshots, err
-	}
-
-	{
-		var l, lSidecars []snaptype.FileInfo
-		var m []snapshotsync.Range
-		for _, f := range list {
-			if f.Type.Enum() != snaptype.CaplinEnums.BeaconBlocks && f.Type.Enum() != snaptype.CaplinEnums.BlobSidecars {
-				continue
-			}
-			if f.Type.Enum() == snaptype.CaplinEnums.BlobSidecars {
-				lSidecars = append(lSidecars, f) // blobs are an exception
-				continue
-			}
-			l = append(l, f)
-		}
-		l, m = snapshotsync.NoGaps(snapshotsync.NoOverlaps(l))
-		if len(m) > 0 {
-			lst := m[len(m)-1]
-			log.Debug("[snapshots] see gap", "type", snaptype.CaplinEnums.BeaconBlocks, "from", lst.From())
-		}
-		res = append(res, l...)
-		res = append(res, lSidecars...)
-		missingSnapshots = append(missingSnapshots, m...)
-	}
-	return res, missingSnapshots, nil
-}
-
 func chooseSegmentEnd(from, to uint64, snapType snaptype.Enum, snCfg *snapcfg.Cfg) uint64 {
 	blocksPerFile := snapcfg.MergeLimitFromCfg(snCfg, snapType, from)
 
@@ -162,9 +132,15 @@ type BlockRetire struct {
 	heimdallStore         heimdall.Store
 	bridgeStore           bridge.Store
 	borDataNotReadyBefore time.Time
+
+	// Close cancels the in-flight retire (ctx/stopFn) and waits for it (background).
+	background concurrent.ClosingWaitGroup
+	ctx        context.Context
+	stopFn     context.CancelFunc
 }
 
 func NewBlockRetire(
+	ctx context.Context,
 	compressWorkers int,
 	dirs datadir.Dirs,
 	blockReader services.FullBlockReader,
@@ -199,6 +175,7 @@ func NewBlockRetire(
 		bridgeStore:           bridgeStore,
 		borDataNotReadyBefore: time.Now(),
 	}
+	r.ctx, r.stopFn = context.WithCancel(ctx)
 	r.workers.Store(int32(compressWorkers))
 	return r
 }
@@ -225,8 +202,6 @@ func (br *BlockRetire) IO() (services.FullBlockReader, *blockio.BlockWriter) {
 func (br *BlockRetire) BorStore() (heimdall.Store, bridge.Store) {
 	return br.heimdallStore, br.bridgeStore
 }
-
-func (br *BlockRetire) Writer() *RoSnapshots { return br.blockReader.Snapshots().(*RoSnapshots) }
 
 func (br *BlockRetire) snapshots() *RoSnapshots { return br.blockReader.Snapshots().(*RoSnapshots) }
 
@@ -432,14 +407,22 @@ func (br *BlockRetire) RetireBlocksInBackground(
 		return false
 	}
 
-	go func() {
+	started := br.background.TryGo(func() {
 		defer onDone()
 		defer br.working.Store(false)
+
+		// Cancel on either the caller's ctx or Close (br.ctx).
+		ctx, cancel := context.WithCancel(ctx)
+		defer cancel()
+		stopOnClose := context.AfterFunc(br.ctx, cancel)
+		defer stopOnClose()
 
 		if br.snBuildAllowed != nil {
 			//we are inside own goroutine - it's fine to block here
 			if err := br.snBuildAllowed.Acquire(ctx, 1); err != nil {
-				br.logger.Warn("[snapshots] retire blocks", "err", err)
+				if !errors.Is(err, context.Canceled) && !errors.Is(err, common.ErrStopped) {
+					br.logger.Warn("[snapshots] retire blocks", "err", err)
+				}
 				return
 			}
 			defer br.snBuildAllowed.Release(1)
@@ -456,12 +439,30 @@ func (br *BlockRetire) RetireBlocksInBackground(
 			return
 		}
 		if err != nil {
+			if errors.Is(err, context.Canceled) || errors.Is(err, common.ErrStopped) {
+				br.logger.Debug("[snapshots] retire blocks canceled", "err", err)
+				return
+			}
 			br.logger.Error("[snapshots] retire blocks", "err", err)
 			return
 		}
-	}()
+	})
+	if !started { // Close has latched; no retire was started
+		br.working.Store(false)
+		return false
+	}
 
 	return true
+}
+
+// Close cancels the in-flight background retire and waits for it, so the DB and
+// snapshots can be torn down safely afterwards. Idempotent.
+func (br *BlockRetire) Close() {
+	if !br.background.BeginClose() {
+		return
+	}
+	br.stopFn()
+	br.background.Wait()
 }
 
 func (br *BlockRetire) RetireBlocks(
@@ -770,11 +771,11 @@ func DumpTxs(ctx context.Context, db kv.RoDB, chainConfig *chain.Config, blockFr
 		}
 
 		if doWarmup && !warmupSenders.Load() && blockNum%1_000 == 0 {
-			clean := kv.ReadAhead(warmupCtx, db, warmupSenders, kv.Senders, hexutil.EncodeTs(blockNum), 10_000)
+			clean := kv.ReadAheadDeprecated(warmupCtx, db, warmupSenders, kv.Senders, hexutil.EncodeTs(blockNum), 10_000)
 			defer clean()
 		}
 		if doWarmup && !warmupTxs.Load() && blockNum%1_000 == 0 {
-			clean := kv.ReadAhead(warmupCtx, db, warmupTxs, kv.EthTx, body.BaseTxnID.Bytes(), 100*10_000)
+			clean := kv.ReadAheadDeprecated(warmupCtx, db, warmupTxs, kv.EthTx, body.BaseTxnID.Bytes(), 100*10_000)
 			defer clean()
 		}
 		senders, err := rawdb.ReadSenders(tx, h, blockNum)

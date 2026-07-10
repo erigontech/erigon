@@ -99,9 +99,10 @@ func (b *builderClient) GetHeader(ctx context.Context, slot int64, parentHash co
 	if b.beaconConfig.SlotsPerEpoch != 0 {
 		epoch = uint64(slot / int64(b.beaconConfig.SlotsPerEpoch))
 	}
+	version := b.beaconConfig.GetCurrentStateVersion(epoch)
 	headerIn.Data = ExecutionHeaderData{Message: ExecutionHeaderMessage{
-		Header:             cltypes.NewEth1Header(b.beaconConfig.GetCurrentStateVersion(epoch)),
-		ExecutionRequests:  cltypes.NewExecutionRequests(b.beaconConfig),
+		Header:             cltypes.NewEth1Header(version),
+		ExecutionRequests:  cltypes.NewExecutionRequestsWithVersion(b.beaconConfig, version),
 		BlobKzgCommitments: solid.NewStaticListSSZ[*cltypes.KZGCommitment](cltypes.MaxBlobsCommittmentsPerBlock, 48),
 	}}
 
@@ -180,7 +181,7 @@ func (b *builderClient) SubmitBlindedBlocks(ctx context.Context, block *cltypes.
 		}{
 			ExecutionPayload:  cltypes.NewEth1Block(version, b.beaconConfig),
 			BlobsBundle:       &engine_types.BlobsBundle{},
-			ExecutionRequests: cltypes.NewExecutionRequests(b.beaconConfig),
+			ExecutionRequests: cltypes.NewExecutionRequestsWithVersion(b.beaconConfig, version),
 		}
 		if err := json.Unmarshal(resp.Data, denebResp); err != nil {
 			return nil, nil, nil, err

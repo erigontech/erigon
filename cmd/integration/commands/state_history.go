@@ -44,12 +44,8 @@ func init() {
 	withDataDir2(distributionCmd)
 	withHistoryDomain(distributionCmd)
 
-	withDataDir2(rebuildCmd)
-	withHistoryDomain(rebuildCmd)
-
 	historyCmd.AddCommand(printCmd)
 	historyCmd.AddCommand(distributionCmd)
-	historyCmd.AddCommand(rebuildCmd)
 
 	rootCmd.AddCommand(historyCmd)
 }
@@ -74,7 +70,7 @@ var historyCmd = &cobra.Command{
 	Use: "history",
 }
 
-func openHistory(dirs datadir.Dirs, domainName string, scanToStep uint64, logger log.Logger) (*state.History, *state.ErigonDBSettings, error) {
+func openHistory(ctx context.Context, dirs datadir.Dirs, domainName string, scanToStep uint64, logger log.Logger) (*state.History, *state.ErigonDBSettings, error) {
 	settings, err := state.ResolveErigonDBSettings(dirs, logger, false)
 	if err != nil {
 		return nil, nil, fmt.Errorf("resolve erigondb settings: %w", err)
@@ -93,7 +89,7 @@ func openHistory(dirs datadir.Dirs, domainName string, scanToStep uint64, logger
 	if err != nil {
 		return nil, nil, fmt.Errorf("init history: %w", err)
 	}
-	history.Scan(scanToStep * settings.StepSize)
+	history.Scan(ctx, scanToStep*settings.StepSize)
 	return history, settings, nil
 }
 
@@ -109,7 +105,7 @@ var printCmd = &cobra.Command{
 		}
 		defer l.Unlock()
 
-		history, settings, err := openHistory(dirs, historyDomain, toStep, logger)
+		history, settings, err := openHistory(cmd.Context(), dirs, historyDomain, toStep, logger)
 		if err != nil {
 			logger.Error("Failed to open history", "error", err)
 			return
@@ -153,7 +149,7 @@ var distributionCmd = &cobra.Command{
 		}
 		defer l.Unlock()
 
-		history, settings, err := openHistory(dirs, historyDomain, toStep, logger)
+		history, settings, err := openHistory(cmd.Context(), dirs, historyDomain, toStep, logger)
 		if err != nil {
 			logger.Error("Failed to open history", "error", err)
 			return
@@ -224,49 +220,6 @@ var distributionCmd = &cobra.Command{
 			}
 
 			fmt.Printf("%d percentile distribution: %d (example key: 0x%x)\n", percentiles[i].P, percentiles[i].Value, percentiles[i].ExampleKey)
-		}
-	},
-}
-
-var rebuildCmd = &cobra.Command{
-	Use:   "rebuild",
-	Short: "Regenerate .ef .efi .v .vi domain history snapshots from step 0",
-	Run: func(cmd *cobra.Command, args []string) {
-		logger := debug.SetupCobra(cmd, "integration")
-
-		dirs, l, err := datadir.New(datadirCli).MustFlock()
-		if err != nil {
-			logger.Error("Opening Datadir", "error", err)
-			return
-		}
-		defer l.Unlock()
-
-		history, settings, err := openHistory(dirs, historyDomain, toStep, logger)
-		if err != nil {
-			logger.Error("Failed to open history", "error", err)
-			return
-		}
-		stepSize := settings.StepSize
-		stepsInFrozenFile := settings.StepsInFrozenFile
-
-		roTx := history.BeginFilesRoForDebug()
-		defer roTx.Close()
-
-		for i := uint64(0); i < roTx.FirstStepNotInFiles().ToTxNum(stepSize); {
-			fromTxNum := i
-			i += stepSize * stepsInFrozenFile
-
-			if i > roTx.FirstStepNotInFiles().ToTxNum(stepSize) {
-				i = roTx.FirstStepNotInFiles().ToTxNum(stepSize)
-			}
-
-			fmt.Printf("Compacting files %d-%d step\n", fromTxNum/stepSize, i/stepSize)
-
-			err = roTx.CompactRange(context.TODO(), fromTxNum, i)
-			if err != nil {
-				logger.Error("Failed to rebuild history", "error", err)
-				return
-			}
 		}
 	},
 }

@@ -23,6 +23,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"os"
 	"path/filepath"
 	"runtime"
 	"sort"
@@ -214,7 +215,11 @@ func checkCommitmentRootViaSd(ctx context.Context, tx kv.TemporalTx, f state.Vis
 	if err != nil {
 		return nil, err
 	}
-	sd.GetCommitmentCtx().SetTrace(logger.Enabled(ctx, log.LvlTrace))
+	if logger.Enabled(ctx, log.LvlTrace) {
+		sd.GetCommitmentCtx().SetTraceWriter(os.Stderr)
+	} else {
+		sd.GetCommitmentCtx().SetTraceWriter(nil)
+	}
 	sd.GetCommitmentCtx().SetStateReader(commitmentdb.NewFilesOnlyStateReader(tx, maxTxNum))
 	latestTxNum, _, err := sd.SeekCommitment(ctx, tx) // seek commitment again to use the new state reader instead
 	if err != nil {
@@ -565,10 +570,7 @@ func checkCommitmentKvDeref(ctx context.Context, file state.VisibleFile, stepSiz
 		return derefCounts{}, nil
 	}
 	trace := logger.Enabled(ctx, log.LvlTrace)
-	workers := dbg.EnvInt("CHECK_COMMITMENT_KVS_DEREF_WORKERS", 4)
-	if workers < 1 {
-		workers = 1
-	}
+	workers := max(dbg.EnvInt("CHECK_COMMITMENT_KVS_DEREF_WORKERS", 4), 1)
 	logger.Info("[integrity] CommitmentKvDeref", "kv", fileName, "startTxNum", startTxNum, "endTxNum", endTxNum, "workers", workers)
 
 	// Open shared decompressors — each worker creates independent readers via MakeGetter()
@@ -1038,7 +1040,11 @@ func checkCommitmentHistAtBlkWithIdx(ctx context.Context, tx kv.TemporalTx, sd *
 	// plain state data view: as of end of the block
 	splitStateReader := commitmentdb.NewSplitHistoryReader(tx, commitmentAsOf, toTxNum, true /* withHistory */)
 	sd.GetCommitmentCtx().SetStateReader(splitStateReader)
-	sd.GetCommitmentCtx().SetTrace(logger.Enabled(ctx, log.LvlTrace))
+	if logger.Enabled(ctx, log.LvlTrace) {
+		sd.GetCommitmentCtx().SetTraceWriter(os.Stderr)
+	} else {
+		sd.GetCommitmentCtx().SetTraceWriter(nil)
+	}
 	latestTxNum, latestBlockNum, err := sd.SeekCommitment(ctx, tx) // seek commitment again with new history state reader
 	if err != nil {
 		return err
