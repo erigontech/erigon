@@ -460,10 +460,35 @@ func TestRetireMergedFilesBelowSkipsDirtyButNotVisible(t *testing.T) {
 	require.Equal(2, s.dirty[txEnum].Len())
 	require.False(visibleHas(s, txEnum, 0, mergeLimit), "the merge-sized subsumed segment is dirty but not visible")
 
-	// [0,mergeLimit] is merge-sized and below cutoff, but invisible -> must not be retired.
-	retired, err := s.RetireMergedFilesBelow(txEnum, 3*mergeLimit, func([]string) error { return nil })
+	// The subsumed merge-sized segment is below cutoff but invisible -> must not be retired.
+	retired, err := s.RetireMergedFilesBelow(snaptype2.Transactions, 2*mergeLimit, func([]string) error { return nil })
 	require.NoError(err)
 	require.False(retired, "invisible subsumed file must not be retired")
+	require.Equal(2, s.dirty[txEnum].Len())
+}
+
+// A blockTo past the visible tip means the retention window collapsed — retiring would wipe
+// every file, so Retire must refuse rather than proceed on a bad cutoff.
+func TestRetireMergedFilesBelowRefusesWindowTooSmall(t *testing.T) {
+	logger := log.New()
+	dir := t.TempDir()
+	require := require.New(t)
+
+	s := NewBaseRoSnapshots(ethconfig.BlocksFreezing{ChainName: networkname.Mainnet}, dir, snaptype2.BlockSnapshotTypes, true, logger)
+	defer s.Close()
+	const mergeLimit = snaptype.Erigon2MergeLimit
+	for _, snT := range snaptype2.BlockSnapshotTypes {
+		createTestSegmentFile(t, 0, mergeLimit, snT.Enum(), dir, version.V1_0, logger)
+		createTestSegmentFile(t, mergeLimit, 2*mergeLimit, snT.Enum(), dir, version.V1_0, logger)
+	}
+	require.NoError(s.OpenFolder())
+
+	txEnum := snaptype2.Transactions.Enum()
+	require.Equal(2, s.dirty[txEnum].Len())
+
+	retired, err := s.RetireMergedFilesBelow(snaptype2.Transactions, 3*mergeLimit, func([]string) error { return nil })
+	require.Error(err)
+	require.False(retired)
 	require.Equal(2, s.dirty[txEnum].Len())
 }
 

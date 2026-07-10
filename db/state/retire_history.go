@@ -18,6 +18,7 @@ package state
 
 import (
 	"context"
+	"fmt"
 
 	"github.com/erigontech/erigon/db/kv"
 )
@@ -34,31 +35,34 @@ func entirelyBeforeStep(files visibleFiles, stepSize uint64, cutoff kv.Step) (ou
 	return outs
 }
 
-// retireBeforeStep removes .ef/.efi dirty files entirely below cutoff.
-func (iit *InvertedIndexRoTx) retireBeforeStep(cutoff kv.Step) (deleted []string, retired []*FilesItem) {
-	outs := entirelyBeforeStep(iit.files, iit.stepSize, cutoff)
+// filesBeforeStep selects (does not mutate) the .ef/.efi dirty files entirely below cutoff.
+// mutate detaches them from dirtyFiles and must run under dirtyFilesLock.
+func (iit *InvertedIndexRoTx) filesBeforeStep(cutoff kv.Step) (deleted []string, outs []*FilesItem, mutate func()) {
+	outs = entirelyBeforeStep(iit.files, iit.stepSize, cutoff)
 	for _, out := range outs {
 		deleted = append(deleted, out.FilePaths(iit.ii.dirs.Snap)...)
 	}
-	retire(iit.ii.dirtyFiles, outs, iit.ii.FilenameBase, retireReasonAged, iit.ii.logger)
-	retired = append(retired, outs...)
-	return deleted, retired
+	mutate = func() { retire(iit.ii.dirtyFiles, outs, iit.ii.FilenameBase, retireReasonAged, iit.ii.logger) }
+	return deleted, outs, mutate
 }
 
-// retireBeforeStep removes History (.v) and its InvertedIndex (.ef) files
-// together, so the two never diverge.
-func (ht *HistoryRoTx) retireBeforeStep(cutoff kv.Step) (deleted []string, retired []*FilesItem) {
-	iNames, iRetired := ht.iit.retireBeforeStep(cutoff)
-	deleted = append(deleted, iNames...)
-	retired = append(retired, iRetired...)
+// filesBeforeStep selects History (.v) and its InvertedIndex (.ef) files together, so the
+// two never diverge. mutate must run under dirtyFilesLock.
+func (ht *HistoryRoTx) filesBeforeStep(cutoff kv.Step) (deleted []string, outs []*FilesItem, mutate func()) {
+	iDeleted, iOuts, iMutate := ht.iit.filesBeforeStep(cutoff)
+	deleted = append(deleted, iDeleted...)
+	outs = append(outs, iOuts...)
 
-	outs := entirelyBeforeStep(ht.files, ht.stepSize, cutoff)
-	for _, out := range outs {
+	hOuts := entirelyBeforeStep(ht.files, ht.stepSize, cutoff)
+	for _, out := range hOuts {
 		deleted = append(deleted, out.FilePaths(ht.h.dirs.Snap)...)
 	}
-	retire(ht.h.dirtyFiles, outs, ht.h.FilenameBase, retireReasonAged, ht.h.logger)
-	retired = append(retired, outs...)
-	return deleted, retired
+	outs = append(outs, hOuts...)
+	mutate = func() {
+		iMutate()
+		retire(ht.h.dirtyFiles, hOuts, ht.h.FilenameBase, retireReasonAged, ht.h.logger)
+	}
+	return deleted, outs, mutate
 }
 
 // Retire drops old visible History+InvertedIndex files below their per-domain cutoff.
@@ -68,14 +72,33 @@ func (a *Aggregator) Retire(ctx context.Context, cutoffs kv.RetireCutoffs) (reti
 	if cutoffs.IsNoop() {
 		return 0, nil
 	}
+
+	// Paranoia: retire deletes files. A cutoff reaching the visible tip means the retention
+	// window collapsed and every file would be retired — almost always a caller bug (a distance
+	// computed as ~0). Refuse rather than wipe the node's history. The tip is the ceiling the
+	// visible files retire selects over are clamped to.
+	if tip := a.dirtyFilesEndTxNumMinimax(); tip > 0 {
+		cutoff := cutoffs.Default
+		for _, c := range cutoffs.PerDomain {
+			cutoff = max(cutoff, c)
+		}
+		if cutoff >= tip {
+			return 0, fmt.Errorf("retire refused: cutoff %d >= visible tip %d (retention window too small; would retire all files)", cutoff, tip)
+		}
+	}
+
 	at := a.BeginFilesRo()
 	defer at.Close()
 
-	a.dirtyFilesLock.Lock()
-	defer a.dirtyFilesLock.Unlock()
-
+	// Select (lock-free): read the visible files backing each entity below its cutoff.
 	var deleted []string
 	var retired []*FilesItem
+	var mutations []func()
+	selectEntity := func(deletedNames []string, outs []*FilesItem, mutate func()) {
+		deleted = append(deleted, deletedNames...)
+		retired = append(retired, outs...)
+		mutations = append(mutations, mutate)
+	}
 	for _, dt := range at.d {
 		if dt.d.Disable || dt.d.SnapshotsDisabled || dt.d.HistoryDisabled {
 			continue
@@ -88,9 +111,7 @@ func (a *Aggregator) Retire(ctx context.Context, cutoffs kv.RetireCutoffs) (reti
 		if cutoffStep == 0 {
 			continue
 		}
-		names, r := dt.ht.retireBeforeStep(cutoffStep)
-		deleted = append(deleted, names...)
-		retired = append(retired, r...)
+		selectEntity(dt.ht.filesBeforeStep(cutoffStep))
 	}
 	for _, iit := range at.standaloneIIs() {
 		if iit.ii.Disable {
@@ -100,15 +121,20 @@ func (a *Aggregator) Retire(ctx context.Context, cutoffs kv.RetireCutoffs) (reti
 		if cutoffStep == 0 {
 			continue
 		}
-		names, r := iit.retireBeforeStep(cutoffStep)
-		deleted = append(deleted, names...)
-		retired = append(retired, r...)
+		selectEntity(iit.filesBeforeStep(cutoffStep))
 	}
 
 	if len(retired) == 0 {
 		return 0, nil
 	}
 
+	// Mutate (locked): detach from dirtyFiles, notify the seeder, and publish a new visible
+	// generation — atomically, so readers observe one cross-entity-consistent step.
+	a.dirtyFilesLock.Lock()
+	defer a.dirtyFilesLock.Unlock()
+	for _, mutate := range mutations {
+		mutate()
+	}
 	a.onFilesDelete(deleted)
 	a.recalcVisibleFiles(retired)
 

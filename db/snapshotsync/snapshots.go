@@ -1460,16 +1460,31 @@ func (s *BaseRoSnapshots) RetireFiles(fileNames ...string) error {
 
 // RetireMergedFilesBelow retires fully-merged VISIBLE segments of type typ ending below
 // blockTo, handing their files (.seg + indexes) to onDelete for the seeder. Reads visible
-// only — invisible garbage is the merge clean-up's job. The View pins the outgoing
-// generation so the physical unlink runs off the dirty lock.
-func (s *BaseRoSnapshots) RetireMergedFilesBelow(typ snaptype.Enum, blockTo uint64, onDelete func(l []string) error) (bool, error) {
+// only — invisible garbage is the merge clean-up's job. The View pins the generation for
+// both the read and the deferred off-lock unlink.
+func (s *BaseRoSnapshots) RetireMergedFilesBelow(typ snaptype.Type, blockTo uint64, onDelete func(l []string) error) (bool, error) {
 	if s == nil {
 		return false, nil
 	}
 
+	v := s.View()
+	defer v.Close()
+	segs := v.Segments(typ)
+
+	// Paranoia: retire deletes files. blockTo past the newest visible segment means the
+	// retention window collapsed and every file would be retired — refuse rather than wipe them.
+	if len(segs) > 0 && blockTo > segs[len(segs)-1].To() {
+		return false, fmt.Errorf("retire refused: blockTo %d past visible tip %d for %s (window too small; would retire all files)", blockTo, segs[len(segs)-1].To(), typ)
+	}
+
 	var names, paths []string
-	for _, sn := range s.visible.Load().segments[typ] {
-		if sn.To() >= blockTo || sn.To()-sn.From() != snaptype.Erigon2MergeLimit {
+	for _, sn := range segs {
+		if sn.To() >= blockTo {
+			continue
+		}
+		// only whole, fully-merged files — 100k, or the old 500k format (never a partial or
+		// still-merging sub-range).
+		if l := sn.To() - sn.From(); l != snaptype.Erigon2MergeLimit && l != snaptype.Erigon2OldMergeLimit {
 			continue
 		}
 		names = append(names, sn.src.FileName())
@@ -1484,9 +1499,6 @@ func (s *BaseRoSnapshots) RetireMergedFilesBelow(typ snaptype.Enum, blockTo uint
 			return false, fmt.Errorf("onDelete: %w", err)
 		}
 	}
-
-	v := s.View()
-	defer v.Close()
 	return true, s.RetireFiles(names...)
 }
 

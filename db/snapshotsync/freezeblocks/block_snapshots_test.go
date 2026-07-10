@@ -103,7 +103,7 @@ func TestRetireMergedTransactionFilesBelow(t *testing.T) {
 	require.NoError(t, snapshots.OpenFolder())
 
 	var deleted []string
-	retired, err := snapshots.RetireMergedFilesBelow(snaptype2.Transactions.Enum(), testMergeLimit+testMergeLimit/2, func(files []string) error {
+	retired, err := snapshots.RetireMergedFilesBelow(snaptype2.Transactions, testMergeLimit+testMergeLimit/2, func(files []string) error {
 		deleted = append(deleted, files...)
 		return nil
 	})
