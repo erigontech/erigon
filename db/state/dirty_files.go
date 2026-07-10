@@ -125,8 +125,8 @@ type FilesItem struct {
 	version  version.Version
 	refcount atomic.Int32
 
-	// Deprecated: only the not-yet-migrated forkable subsystem still uses this (with
-	// refcount); the aggregator reclaims via aggregatorVisible generations (retired + refcnt).
+	// Used by the SnapshotRepo mark-and-sweep reclamation path (with refcount); the
+	// aggregator instead reclaims via aggregatorVisible generations (retired + refcnt).
 	canDelete atomic.Bool
 }
 

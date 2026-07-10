@@ -13,26 +13,7 @@ rules:
       - ci-cd-main-branch-docker-images.yml
       - ci-gate.yml               # toJSON(needs) is not user-controllable
       - docker-image-remove.yml
-      - qa-clean-exit-block-downloading.yml
-      - qa-clean-exit-snapshot-downloading.yml
-      - qa-constrained-tip-tracking.yml
-      - qa-rpc-integration-tests-clients.yml
-      - qa-rpc-integration-tests-gnosis.yml
-      - qa-rpc-integration-tests-latest.yml
-      - qa-rpc-integration-tests-polygon.yml
-      - qa-rpc-integration-tests-remote.yml
-      - qa-rpc-integration-tests.yml
-      - qa-rpc-performance-comparison-tests.yml
-      - qa-rpc-performance-tests.yml
-      - qa-snap-download.yml
-      - qa-stage-exec.yml
-      - qa-sync-from-scratch-minimal-node.yml
-      - qa-sync-from-scratch.yml
-      - qa-sync-with-externalcl.yml
-      - qa-tip-tracking-gnosis.yml
-      - qa-tip-tracking-with-load.yml
-      - qa-tip-tracking.yml
-      - qa-txpool-performance-test.yml
+      - qa-sync-from-scratch-full-node.yml
       - release.yml
       - test-all-erigon-race.yml
 
@@ -46,6 +27,14 @@ rules:
       - qa-sync-from-scratch.yml
       - test-kurtosis-assertoor.yml
       - test-kurtosis-gloas.yml
+
+  # create-github-app-token steps scope `repositories:` but not per-permission
+  # scopes, so the app token inherits blanket installation permissions.
+  # Scoping these down is a release-pipeline change; tracked in #21132.
+  github-app:
+    ignore:
+      - release.yml
+      - update-disk-sizes.yml
 
   # Workflows missing explicit permissions: blocks — needs a cleanup pass
   # to add least-privilege permissions to each workflow; tracked in #21132.

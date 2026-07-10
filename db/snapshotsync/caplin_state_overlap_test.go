@@ -51,7 +51,7 @@ func writeCaplinStateFixture(t *testing.T, dir, table string, from, to uint64, l
 	require.NoError(t, c.AddWord([]byte{1}))
 	require.NoError(t, c.Compress())
 
-	idxPath = strings.ReplaceAll(segPath, ".seg", ".idx")
+	idxPath = strings.TrimSuffix(segPath, ".seg") + ".idx"
 	idx, err := recsplit.NewRecSplit(recsplit.RecSplitArgs{
 		KeyCount:   1,
 		BucketSize: 10,

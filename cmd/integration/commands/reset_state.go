@@ -33,7 +33,7 @@ import (
 	"github.com/erigontech/erigon/db/kv/prune"
 	"github.com/erigontech/erigon/db/kv/rawdbv3"
 	"github.com/erigontech/erigon/db/rawdb/rawdbhelpers"
-	"github.com/erigontech/erigon/db/snapshotsync/freezeblocks"
+	"github.com/erigontech/erigon/db/snapshotsync/blocksnapshots"
 	dbstate "github.com/erigontech/erigon/db/state"
 	"github.com/erigontech/erigon/db/state/statecfg"
 	"github.com/erigontech/erigon/execution/stagedsync/rawdbreset"
@@ -105,7 +105,7 @@ var cmdClearBadBlocks = &cobra.Command{
 		defer db.Close()
 
 		return db.Update(ctx, func(tx kv.RwTx) error {
-			return backup.ClearTables(ctx, tx, kv.BadHeaderNumber)
+			return backup.ClearTables(ctx, db, tx, kv.BadHeaderNumber)
 		})
 	},
 }
@@ -120,7 +120,7 @@ func init() {
 	rootCmd.AddCommand(cmdClearBadBlocks)
 }
 
-func printStages(tx kv.TemporalTx, snapshots *freezeblocks.RoSnapshots, borSn *heimdall.RoSnapshots) error {
+func printStages(tx kv.TemporalTx, snapshots *blocksnapshots.RoSnapshots, borSn *heimdall.RoSnapshots) error {
 	var err error
 	var progress uint64
 	w := new(tabwriter.Writer)

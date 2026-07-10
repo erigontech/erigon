@@ -30,6 +30,9 @@ import (
 	"github.com/urfave/cli/v3"
 
 	"github.com/erigontech/erigon/common/dbg"
+	"github.com/erigontech/erigon/db/datadir"
+	"github.com/erigontech/erigon/node/direct"
+	"github.com/erigontech/erigon/p2p"
 )
 
 func Test_SplitTagsFlag(t *testing.T) {
@@ -279,6 +282,26 @@ func TestExecPerfFlags_OverrideDbg(t *testing.T) {
 		dbg.SetNoBackgroundMaintenance(false)
 		run("--exec.no-background-maintenance=true")
 		require.True(t, dbg.NoBackgroundMaintenance())
+	})
+}
+
+func TestNewP2PConfig_DiscoveryDefaults(t *testing.T) {
+	newCfg := func(nodiscover bool) *p2p.Config {
+		cfg, err := NewP2PConfig(nodiscover, datadir.New(t.TempDir()), "", "none", 100, 1000, "test", nil, nil, 30303, direct.ETH68, false, false)
+		require.NoError(t, err)
+		return cfg
+	}
+
+	t.Run("discovery enabled by default", func(t *testing.T) {
+		cfg := newCfg(false)
+		require.False(t, cfg.NoDiscovery)
+		require.True(t, cfg.DiscoveryV5)
+	})
+
+	t.Run("nodiscover disables discovery", func(t *testing.T) {
+		cfg := newCfg(true)
+		require.True(t, cfg.NoDiscovery)
+		require.False(t, cfg.DiscoveryV5)
 	})
 }
 

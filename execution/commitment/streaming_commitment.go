@@ -27,6 +27,7 @@ import (
 	"sync/atomic"
 
 	"golang.org/x/sync/errgroup"
+	"golang.org/x/sync/semaphore"
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/db/kv"
@@ -623,8 +624,9 @@ func (o *overlayContext) Storage(plainKey []byte) (*Update, error) { return o.ba
 // base, recording which slots were folded; it never applies or merges.
 func (sc *StreamingCommitter) foldPresentSplits(ctx context.Context, base *HexPatriciaHashed, root *prefixNode) ([16]bool, error) {
 	var present [16]bool
+	foldSem := newFoldSem()
 	g, gctx := errgroup.WithContext(ctx)
-	g.SetLimit(sc.numWorkers)
+	g.SetLimit(min(sc.numWorkers, maxFoldConcurrency()))
 
 	childIdx := 0
 	for bm := root.bitmap; bm != 0; {
@@ -646,7 +648,7 @@ func (sc *StreamingCommitter) foldPresentSplits(ctx context.Context, base *HexPa
 			continue
 		}
 		ch := child
-		g.Go(func() error { return sc.foldSplit(gctx, base, s, ch) })
+		g.Go(func() error { return sc.foldSplit(gctx, foldSem, base, s, ch) })
 		childIdx++
 		bm &^= uint16(1) << nib
 	}
@@ -698,7 +700,7 @@ func stitchSplitCells(base *HexPatriciaHashed, cells *[16]cell, present *[16]boo
 // foldSplit re-folds one top-nibble subtree on a worker mounted at the unfolded
 // base, to the split cell rather than the root, replacing the split's cell and
 // deferred set.
-func (sc *StreamingCommitter) foldSplit(ctx context.Context, base *HexPatriciaHashed, s *splitState, child *prefixNode) error {
+func (sc *StreamingCommitter) foldSplit(ctx context.Context, foldSem *semaphore.Weighted, base *HexPatriciaHashed, s *splitState, child *prefixNode) error {
 	ni := s.prefix[0]
 	w := sc.workerPool.Get().(*HexPatriciaHashed)
 	w.mountTo(base, int(ni))
@@ -720,7 +722,7 @@ func (sc *StreamingCommitter) foldSplit(ctx context.Context, base *HexPatriciaHa
 	path = append(path, ni)
 	path = append(path, child.ext...)
 	deepStorageRoot := func(n *prefixNode, pth []byte, accountFresh bool) (common.Hash, error) {
-		sr, err := foldStorageRoot(ctx, sc.numWorkers, sc.newStorageWorker, &pu, n, pth, accountFresh)
+		sr, err := foldStorageRoot(ctx, foldSem, sc.newStorageWorker, &pu, n, pth, accountFresh)
 		if err == nil {
 			sc.deepLocalFolds.Add(1)
 		}

@@ -36,7 +36,7 @@ import (
 	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/db/rawdb/rawtemporaldb"
 	"github.com/erigontech/erigon/db/services"
-	"github.com/erigontech/erigon/db/snapshotsync/freezeblocks"
+	"github.com/erigontech/erigon/db/snapshotsync/blocksnapshots"
 	dbstate "github.com/erigontech/erigon/db/state"
 	"github.com/erigontech/erigon/db/state/execctx"
 	"github.com/erigontech/erigon/execution/chain"
@@ -149,7 +149,7 @@ func SpawnCustomTrace(cfg CustomTraceCfg, ctx context.Context, logger log.Logger
 	}
 	endBlock = execProgress
 
-	defer cfg.ExecArgs.BlockReader.Snapshots().(*freezeblocks.RoSnapshots).MadvNormal().DisableReadAhead()
+	defer cfg.ExecArgs.BlockReader.Snapshots().(*blocksnapshots.RoSnapshots).MadvNormal().DisableReadAhead()
 	//defer tx.(dbstate.HasAggTx).AggTx().(*dbstate.AggregatorRoTx).MadvNormal().DisableReadAhead()
 
 	log.Info("SpawnCustomTrace", "startBlock", startBlock, "endBlock", endBlock)
@@ -501,7 +501,7 @@ func StageCustomTraceReset(ctx context.Context, db kv.TemporalRwDB, produce Prod
 	if produce.TraceTo {
 		tables = append(tables, db.Debug().InvertedIdxTables(kv.TracesToIdx)...)
 	}
-	if err := backup.ClearTables(ctx, tx, tables...); err != nil {
+	if err := backup.ClearTables(ctx, db, tx, tables...); err != nil {
 		return err
 	}
 	// Clearing the data tables alone is not enough: the prune-progress bookmark in

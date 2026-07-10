@@ -19,6 +19,7 @@ package state
 import (
 	"context"
 
+	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/db/kv"
 )
 
@@ -65,7 +66,7 @@ func (ht *HistoryRoTx) retireBeforeStep(cutoff kv.Step) (deleted []string, retir
 // Retire retires History+InvertedIndex files entirely below their per-domain
 // cutoff; physical deletion is deferred until no reader pins the retired generation.
 func (a *Aggregator) Retire(ctx context.Context, cutoffs kv.RetireCutoffs) (retiredCount int, err error) {
-	if cutoffs.IsNoop() {
+	if dbg.NoRetire() || cutoffs.IsNoop() {
 		return 0, nil
 	}
 	at := a.BeginFilesRo()

@@ -175,6 +175,8 @@ type TxPool struct {
 	senderLastActivity   map[uint64]uint64 // senderID → block of last on-chain state change
 	avgBlockTimeMs       atomic.Int64      // EWMA of block-to-block wall-clock interval (ms); default 12 000
 	lastBlockTimestampMs atomic.Int64      // unix-ms timestamp of the last processed block
+
+	hasUnprocessedRemoteTxns atomic.Bool // lock-free way to check if pool needs to flush buffered remote txs
 }
 
 type ValidateAA interface {
@@ -463,15 +465,17 @@ func (p *TxPool) OnNewBlock(ctx context.Context, stateChanges *remoteproto.State
 }
 
 func (p *TxPool) processRemoteTxns(ctx context.Context) (err error) {
+	if !p.Started() {
+		return errors.New("txpool not started yet")
+	}
+	if !p.hasUnprocessedRemoteTxns.Load() {
+		return nil
+	}
 	defer func() {
 		if r := recover(); r != nil {
 			err = fmt.Errorf("panic: %v\n%s", r, stack.Trace().String())
 		}
 	}()
-
-	if !p.Started() {
-		return errors.New("txpool not started yet")
-	}
 
 	defer processBatchTxnsTimer.ObserveDuration(time.Now())
 	coreDB, cache := p.chainDB()
@@ -490,6 +494,7 @@ func (p *TxPool) processRemoteTxns(ctx context.Context) (err error) {
 
 	l := len(p.unprocessedRemoteTxns.Txns)
 	if l == 0 {
+		p.hasUnprocessedRemoteTxns.Store(false)
 		return nil
 	}
 
@@ -537,6 +542,7 @@ func (p *TxPool) processRemoteTxns(ctx context.Context) (err error) {
 	}
 
 	p.unprocessedRemoteTxns.Resize(0)
+	p.hasUnprocessedRemoteTxns.Store(false)
 	p.unprocessedRemotePeers = p.unprocessedRemotePeers[:0]
 	p.unprocessedRemoteByHash = map[string]int{}
 
@@ -810,6 +816,7 @@ func (p *TxPool) best(ctx context.Context, n int, txns *TxnsRlp, onTopOf uint64,
 		// this stage
 		isAATxn := mt.TxnSlot.TxType() == types.AccountAbstractionTxType
 		authorizationLen := uint64(len(mt.TxnSlot.Txn.GetAuthorizations()))
+		to := mt.TxnSlot.Txn.GetTo()
 		intrinsicGasResult, _ := mdgas.CalcIntrinsicGas(mdgas.IntrinsicGasCalcArgs{
 			Data:               make([]byte, mt.TxnSlot.GetDataLen()),
 			DataNonZeroLen:     uint64(mt.TxnSlot.GetDataNonZeroLen()),
@@ -817,6 +824,7 @@ func (p *TxPool) best(ctx context.Context, n int, txns *TxnsRlp, onTopOf uint64,
 			AccessListLen:      uint64(mt.TxnSlot.GetAccessListAddrCount()),
 			StorageKeysLen:     uint64(mt.TxnSlot.GetAccessListStorCount()),
 			IsContractCreation: mt.TxnSlot.IsCreation(),
+			IsSelfTransfer:     to != nil && *to == sender,
 			HasValue:           !mt.TxnSlot.GetValue().IsZero(),
 			IsEIP2:             true,
 			IsEIP2028:          true,
@@ -948,6 +956,7 @@ func (p *TxPool) AddRemoteTxns(_ context.Context, newTxns TxnSlots, peerID PeerI
 		p.unprocessedRemoteTxns.Append(txn, newTxns.Senders.At(i), false)
 		p.unprocessedRemotePeers = append(p.unprocessedRemotePeers, src)
 	}
+	p.hasUnprocessedRemoteTxns.Store(len(p.unprocessedRemoteTxns.Txns) > 0)
 }
 
 func toBlobs(_blobs [][]byte) []*goethkzg.Blob {
@@ -1008,6 +1017,8 @@ func (p *TxPool) validateTx(txn *TxnSlot, isLocal bool, stateCache kvcache.Cache
 	}
 
 	isAATxn := txn.TxType() == types.AccountAbstractionTxType
+	txnSender, senderOk := txn.Txn.GetSender()
+	to := txn.Txn.GetTo()
 	intrinsicGasResult, overflow := mdgas.CalcIntrinsicGas(mdgas.IntrinsicGasCalcArgs{
 		Data:               make([]byte, txn.GetDataLen()),
 		DataNonZeroLen:     uint64(txn.GetDataNonZeroLen()),
@@ -1015,6 +1026,7 @@ func (p *TxPool) validateTx(txn *TxnSlot, isLocal bool, stateCache kvcache.Cache
 		AccessListLen:      uint64(txn.GetAccessListAddrCount()),
 		StorageKeysLen:     uint64(txn.GetAccessListStorCount()),
 		IsContractCreation: txn.IsCreation(),
+		IsSelfTransfer:     senderOk && to != nil && txnSender.Value() == *to,
 		HasValue:           !txn.GetValue().IsZero(),
 		IsEIP2:             true,
 		IsEIP2028:          true,
@@ -1983,15 +1995,10 @@ func (p *TxPool) nextDormancySweepInterval(backoff *float64, lastEvicted, queued
 		*backoff = 1.0
 	}
 
-	interval := time.Duration(float64(base) * pressure * *backoff)
-
 	// Clamp to [30 s, 10 min].
-	if interval < 30*time.Second {
-		interval = 30 * time.Second
-	}
-	if interval > 10*time.Minute {
-		interval = 10 * time.Minute
-	}
+	interval := time.Duration(float64(base) * pressure * *backoff)
+	interval = max(interval, 30*time.Second)
+	interval = min(interval, 10*time.Minute)
 	return interval
 }
 

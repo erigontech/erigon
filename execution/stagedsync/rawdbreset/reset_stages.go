@@ -108,7 +108,7 @@ func ResetCanonicalAndRefillFromSnapshots(ctx context.Context, db kv.TemporalRwD
 	})
 }
 
-func ResetBlocks(tx kv.RwTx, db kv.RoDB, br services.FullBlockReader, bw *blockio.BlockWriter, dirs datadir.Dirs, logger log.Logger) error {
+func ResetBlocks(db kv.RwDB, tx kv.RwTx, br services.FullBlockReader, bw *blockio.BlockWriter, dirs datadir.Dirs, logger log.Logger) error {
 	// keep Genesis
 	if err := rawdb.TruncateBlocks(context.Background(), tx, 1); err != nil {
 		return err
@@ -157,14 +157,16 @@ func ResetBlocks(tx kv.RwTx, db kv.RoDB, br services.FullBlockReader, bw *blocki
 	return nil
 }
 
-func ResetSenders(ctx context.Context, tx kv.RwTx) error {
-	if err := backup.ClearTables(ctx, tx, kv.Senders); err != nil {
-		return fmt.Errorf("clearing senders table: %w", err)
-	}
-	return clearStageProgress(tx, stages.Senders)
+func ResetSenders(ctx context.Context, db kv.RwDB) error {
+	return db.Update(ctx, func(tx kv.RwTx) error {
+		if err := backup.ClearTables(ctx, db, tx, kv.Senders); err != nil {
+			return fmt.Errorf("clearing senders table: %w", err)
+		}
+		return clearStageProgress(tx, stages.Senders)
+	})
 }
 
-func ResetExec(ctx context.Context, db kv.TemporalRwDB) (err error) {
+func ResetExec(ctx context.Context, db kv.TemporalRwDB) error {
 	domainTablesCount := len(db.Debug().DomainTables(kv.AccountsDomain, kv.StorageDomain, kv.CodeDomain, kv.CommitmentDomain, kv.ReceiptDomain, kv.RCacheDomain))
 	invertedIdxTablesCount := len(db.Debug().InvertedIdxTables(kv.LogAddrIdx, kv.LogTopicIdx, kv.TracesFromIdx, kv.TracesToIdx))
 	cleanupList := make([]string, 0, len(stateBuckets)+len(stateHistoryBuckets)+domainTablesCount+invertedIdxTablesCount)
@@ -175,19 +177,21 @@ func ResetExec(ctx context.Context, db kv.TemporalRwDB) (err error) {
 
 	if err := db.Update(ctx, func(tx kv.RwTx) error {
 		if err := clearStageProgress(tx, stages.Execution); err != nil {
-			return err
-		}
-
-		if err := backup.ClearTables(ctx, tx, cleanupList...); err != nil {
-			return fmt.Errorf("clearing exec state tables: %w", err)
+			return fmt.Errorf("clearing Execution stage progress: %w", err)
 		}
 		// corner case: state files may be ahead of block files - so, can't use SharedDomains here. just leave progress as 0.
+		if err := backup.ClearTables(ctx, db, tx, cleanupList...); err != nil {
+			return fmt.Errorf("reset exec state tables: %w", err)
+		}
 		return nil
 	}); err != nil {
 		return err
 	}
 
-	// Wiping the commitment table makes branchCache entries stale; drop it so it repopulates from the wiped table.
+	// Wiping the commitment table leaves the aggregator's in-memory branchCache
+	// pointing at now-deleted trie nodes; drop it so a from-0 re-exec repopulates
+	// from the wiped table instead of computing a wrong root off stale nodes.
+	branchCacheCleared := false
 	if hasAgg, ok := db.(dbstate.HasAgg); ok {
 		if agg, ok := hasAgg.Agg().(*dbstate.Aggregator); ok {
 			aggTx := agg.BeginFilesRo()
@@ -195,7 +199,11 @@ func ResetExec(ctx context.Context, db kv.TemporalRwDB) (err error) {
 			if bc := aggTx.BranchCache(); bc != nil {
 				bc.Clear()
 			}
+			branchCacheCleared = true
 		}
+	}
+	if !branchCacheCleared {
+		log.Warn("[reset] commitment branch cache not cleared after wiping the table (no *state.Aggregator); a from-0 re-exec may read stale commitment nodes and produce a wrong trie root")
 	}
 	return nil
 }
@@ -248,8 +256,8 @@ func clearStageProgress(tx kv.RwTx, stagesList ...stages.SyncStage) error {
 	// "block 0 already done" — SeekCommitment then returns (1, 0), the exec
 	// loop starts at block 1, and the block-0 init task that re-applies the
 	// genesis allocation never runs. This breaks `stage_exec --reset` →
-	// `stage_exec` from-0 sync (parallel-exec drops genesis-allocated
-	// addresses that no subsequent block touches; see #21138).
+	// `stage_exec` from-0 sync (parallel exec drops genesis-allocated
+	// addresses that no subsequent block touches).
 	for _, stage := range stagesList {
 		if err := tx.Delete(kv.SyncStageProgress, []byte(stage)); err != nil {
 			return err
@@ -264,14 +272,11 @@ func clearStageProgress(tx kv.RwTx, stagesList ...stages.SyncStage) error {
 func Reset(ctx context.Context, db kv.RwDB, stagesList ...stages.SyncStage) error {
 	return db.Update(ctx, func(tx kv.RwTx) error {
 		for _, st := range stagesList {
-			if err := backup.ClearTables(ctx, tx, Tables[st]...); err != nil {
-				return err
-			}
-			if err := clearStageProgress(tx, stagesList...); err != nil {
+			if err := backup.ClearTables(ctx, db, tx, Tables[st]...); err != nil {
 				return err
 			}
 		}
-		return nil
+		return clearStageProgress(tx, stagesList...)
 	})
 }
 
@@ -365,13 +370,13 @@ func FillDBFromSnapshots(logPrefix string, ctx context.Context, tx kv.RwTx, dirs
 			}
 
 		case stages.Bodies:
-			firstTxNum := blockReader.FirstTxnNumNotInSnapshots()
+			firstTxNum := blockReader.FirstTxnNumNotInSnapshots(tx)
 			if err := tx.ResetSequence(kv.EthTx, firstTxNum); err != nil {
 				return err
 			}
 
 			_ = tx.ClearTable(kv.MaxTxNum)
-			if err := blockReader.IterateFrozenBodies(func(blockNum, baseTxNum, txAmount uint64) error {
+			if err := blockReader.IterateFrozenBodies(tx, func(blockNum, baseTxNum, txAmount uint64) error {
 				select {
 				case <-ctx.Done():
 					return ctx.Err()
