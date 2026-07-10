@@ -131,7 +131,7 @@ func (br *BlockFileBuilder) MergeBorBlocks(
 		}
 		return seeder.Seed(ctx, mergedFiles)
 	}
-	if err := merger.Merge(ctx, &snapshots.RoSnapshots, heimdall.SnapshotTypes(), rangesToMerge, snapshots.Dir(), true /* doIndex */, onMerge, seeder.Delete); err != nil {
+	if err := merger.Merge(ctx, &snapshots.BaseRoSnapshots, heimdall.SnapshotTypes(), rangesToMerge, snapshots.Dir(), true /* doIndex */, onMerge, seeder.Delete); err != nil {
 		return false, err
 	}
 
