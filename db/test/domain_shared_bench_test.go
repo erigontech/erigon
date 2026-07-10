@@ -159,28 +159,65 @@ func BenchmarkSharedDomains_ComputeCommitment(b *testing.B) {
 	require.NoError(b, err)
 	defer domains.Close()
 
-	maxTx := stepSize * 17
-	data := generateTestDataForDomainCommitment(b, length.Addr, length.Addr+length.Hash, maxTx, 15, 100)
+	maxTx := stepSize * 4
+	data := generateTestDataForDomainCommitment(b, length.Addr, length.Addr+length.Hash, maxTx, 8, 32)
 	require.NotNil(b, data)
 
 	var txNum, blockNum uint64
 	for domName, d := range data {
-		fom := kv.AccountsDomain
+		dom := kv.AccountsDomain
 		if domName == "storage" {
-			fom = kv.StorageDomain
+			dom = kv.StorageDomain
 		}
 		for key, upd := range d {
 			for _, u := range upd {
 				txNum = u.txNum
-				err := domains.DomainPut(fom, rwTx, []byte(key), u.value, txNum, nil)
-				require.NoError(b, err)
+				require.NoError(b, domains.DomainPut(dom, rwTx, []byte(key), u.value, txNum, nil))
 			}
 		}
 	}
 
+	type keyTouch struct {
+		dom kv.Domain
+		key []byte
+		val []byte
+	}
+	nKeys := 0
+	for _, d := range data {
+		nKeys += len(d)
+	}
+	touches := make([]keyTouch, 0, nKeys)
+	for domName, d := range data {
+		dom := kv.AccountsDomain
+		if domName == "storage" {
+			dom = kv.StorageDomain
+		}
+		for key := range d {
+			v, _, err := domains.GetLatest(dom, rwTx, []byte(key))
+			require.NoError(b, err)
+			if v == nil {
+				continue
+			}
+			touches = append(touches, keyTouch{dom, []byte(key), common.Copy(v)})
+		}
+	}
+
 	b.Run("ComputeCommitment", func(b *testing.B) {
+		b.ReportAllocs()
 		for b.Loop() {
-			_, err := domains.ComputeCommitment(ctx, rwTx, true, blockNum, txNum, "", nil)
+			// Re-touch keys each iteration so ComputeCommitment has real work —
+			// the first call drains the update set. Re-putting the current value
+			// only re-runs TouchKey (the value-unchanged short-circuit skips the
+			// sd.mem write), so the touched set is rebuilt without growing memory.
+			b.StopTimer()
+			for _, t := range touches {
+				require.NoError(b, domains.DomainPut(t.dom, rwTx, t.key, t.val, txNum, nil))
+			}
+			b.StartTimer()
+
+			// saveState=false measures pure recompute; persisting branches each
+			// iteration would grow the write-txn dirty pages.
+			_, err := domains.ComputeCommitment(ctx, rwTx, false, blockNum, txNum, "", nil)
 			require.NoError(b, err)
 		}
 	})
@@ -290,6 +327,11 @@ func BenchmarkPruneSmallBatches(b *testing.B) {
 	// Populate data: write enough txs to span several steps
 	maxTx := stepSize * 50
 	keysCount := uint64(100)
+	if testing.Short() {
+		// The full setup's sd.mem/ETL flush stalls under CI page-cache pressure; shrink it (#22361).
+		maxTx = stepSize * 4
+		keysCount = 20
+	}
 
 	rwTx, err := db.BeginTemporalRw(ctx)
 	require.NoError(b, err)

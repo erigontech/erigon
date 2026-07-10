@@ -503,7 +503,7 @@ func (m *mockHeaderReader) ReadAncestor(_ kv.Getter, hash common.Hash, number, a
 func (m *mockHeaderReader) HeadersRange(_ context.Context, _ func(*types.Header) error) error {
 	return nil
 }
-func (m *mockHeaderReader) Integrity(_ context.Context) error { return nil }
+func (m *mockHeaderReader) Integrity(_ context.Context, _ kv.Getter) error { return nil }
 
 // TestAnswerGetBlockHeadersQuery_HashModeSkip guards against a regression where
 // the non-reverse hash-mode branch read `query.Origin.Number` (the current block)
@@ -563,7 +563,7 @@ func (balHeaderReader) ReadAncestor(kv.Getter, common.Hash, uint64, uint64, *uin
 func (balHeaderReader) HeadersRange(context.Context, func(*types.Header) error) error {
 	panic("not expected")
 }
-func (balHeaderReader) Integrity(context.Context) error { panic("not expected") }
+func (balHeaderReader) Integrity(context.Context, kv.Getter) error { panic("not expected") }
 
 // TestAnswerGetBlockAccessListsQuery_OrderedResponseWithMissing verifies that
 // the handler returns one entry per requested hash in request order, returning
