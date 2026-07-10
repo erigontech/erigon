@@ -146,13 +146,23 @@ var forkWholeFresh atomic.Bool
 // stayed dormant on an incremental one.
 var wholeFreshFolds atomic.Int64
 
+// wholeFreshForkJoins counts whole-fresh Process calls that took the account-plane fork-join rather
+// than falling back to the frontier fold (a non-pure-branch top nibble routes to the fallback). Read
+// by tests to confirm the fork actually ran on an all-branch fresh corpus.
+var wholeFreshForkJoins atomic.Int64
+
+// wholeFreshCellFolds counts top-nibble subtrees folded through the account-plane fork-join.
+var wholeFreshCellFolds atomic.Int64
+
 func init() { forkWholeFresh.Store(true) }
 
 // wholeFreshBuild reports whether a Process runs against empty on-disk state: no branch at the root
 // prefix (rootSeedable false) and no seedable branch probed anywhere during derivation (sawSeedable
 // false). A propagate-folded root is not empty — its deeper branches are seedable, so sawSeedable
-// excludes it. Only a real root branch qualifies (no root extension), so a common-prefix or
-// single-account corpus routes to frontier. Gated on the dev-only forkWholeFresh toggle.
+// excludes it. Only a real multi-way root branch qualifies (no root extension, ≥2 children): a
+// common-prefix / single-account corpus yields a root extension or a single-child root that the
+// sequential engine collapses to an extension (no root branch record), which the account-plane fork
+// does not reproduce, so it routes to frontier. Gated on the dev-only forkWholeFresh toggle.
 func wholeFreshBuild(root *prefixNode, rootSeedable, sawSeedable bool) bool {
 	if !forkWholeFresh.Load() {
 		return false
@@ -160,7 +170,7 @@ func wholeFreshBuild(root *prefixNode, rootSeedable, sawSeedable bool) bool {
 	if rootSeedable || sawSeedable {
 		return false
 	}
-	return len(root.ext) == 0 && root.bitmap != 0
+	return len(root.ext) == 0 && bits.OnesCount16(root.bitmap) >= 2
 }
 
 // dispatchFrontier derives the fold DAG over root, folds it with fp's shared worker pool, stitches
@@ -215,13 +225,131 @@ func (fp *foldPool) dispatchFrontier(ctx context.Context, base *HexPatriciaHashe
 }
 
 // dispatchWholeFresh folds a whole-fresh build (empty on-disk state) through the account-plane
-// fork-join. Task 2 lands the fork; this stub records the route and delegates to the frontier fold,
-// so a whole-fresh commit stays byte-identical to frontier until the fork replaces this body.
+// fork-join: each top-nibble subtree folds against an empty wall via the recursive per-split-point
+// fork-join (recursing across every depth-64 seam into each account's fresh storage), and the
+// resulting mount-wall cells stitch into base and fold to the root — byte-identical to the serial
+// account fold the frontier path would produce, but fanned out per prefix. A scheduler-pre-folded
+// top nibble is reused rather than re-folded. A top nibble that is not a pure branch (a lone account
+// or a whale seam at the mount boundary) routes the whole commit to the frontier fold, which handles
+// those shapes. Fail-closed: any fold error recycles every collected update.
 func (fp *foldPool) dispatchWholeFresh(ctx context.Context, base *HexPatriciaHashed, rootTask *foldTask,
 	reuse func(*foldTask) ([16]cell, [16]bool, []*DeferredBranchUpdate),
 ) ([]*DeferredBranchUpdate, error) {
 	wholeFreshFolds.Add(1)
-	return fp.foldFrontierBody(ctx, base, rootTask, reuse)
+	if !allTopNibblesPureBranch(rootTask.node) {
+		return fp.foldFrontierBody(ctx, base, rootTask, reuse)
+	}
+
+	// A ModeParallel touch stages a nil update the fold must read from state; materialize the whole
+	// plane up front (a no-op for carried updates) so the fork-join reads immutable node.update
+	// fields concurrently. A resolved delete is a leaf the fresh fold would wrongly hash, so any
+	// empty terminator routes the commit to the frontier fold, which drops it.
+	w, wrelease := newDeferredStorageWorker(fp.workerPool, fp.ctxFactory, fp.traceW)
+	forkable := accountPlaneForkable(rootTask.node, len(rootTask.prefix), int(w.accountKeyLen))
+	hasEmpty, err := resolveSubtreeUpdates(rootTask.node, w.accountKeyLen, w.accountFromCacheOrDB, w.storageFromCacheOrDB)
+	wrelease()
+	if err != nil {
+		return nil, err
+	}
+	if !forkable || hasEmpty {
+		return fp.foldFrontierBody(ctx, base, rootTask, reuse)
+	}
+	wholeFreshForkJoins.Add(1)
+
+	var (
+		reusedCells    [16]cell
+		reusedPresent  [16]bool
+		reusedDeferred []*DeferredBranchUpdate
+	)
+	if reuse != nil {
+		reusedCells, reusedPresent, reusedDeferred = reuse(rootTask)
+	}
+
+	sem := fp.foldSem
+	if sem == nil {
+		sem = semaphore.NewWeighted(int64(maxFoldConcurrency()))
+	}
+	ff := &forkFolder{sem: sem, k: foldK(rootTask.node.subtreeCount, fp.numWorkers)}
+
+	var (
+		cells    [16]cell
+		present  [16]bool
+		deferred []*DeferredBranchUpdate
+	)
+	for _, top := range rootTask.children {
+		c, d, err := foldFreshAccountSubtreeCellForkJoin(ctx, ff, top.node, rootTask.prefix, top.nib)
+		if err != nil {
+			putDeferredUpdates(deferred)
+			putDeferredUpdates(reusedDeferred)
+			return nil, err
+		}
+		cells[top.nib] = c
+		present[top.nib] = true
+		deferred = append(deferred, d...)
+	}
+	deferred = append(deferred, reusedDeferred...)
+	for nib := range 16 {
+		if reusedPresent[nib] {
+			cells[nib] = reusedCells[nib]
+			present[nib] = true
+		}
+	}
+
+	return fp.stitchAndFoldRoot(ctx, base, &cells, &present, deferred)
+}
+
+// allTopNibblesPureBranch reports whether every child of the whole-fresh root branch is a pure branch
+// (bitmap set, no plain key) — the shape the account-plane fork-join wraps as a mount-wall cell. A
+// lone account or a whale seam directly at a top nibble is not, and routes the commit to the frontier.
+func allTopNibblesPureBranch(root *prefixNode) bool {
+	for _, child := range root.children {
+		if child.bitmap == 0 || child.plainKey != nil {
+			return false
+		}
+	}
+	return true
+}
+
+// accountPlaneForkable reports whether the whole-fresh account plane (above the depth-64 seam) holds
+// only account leaves. An orphan storage slot — a storage write with no account, which never occurs
+// in real state — lands as a long-keyed leaf in the account plane where the direct fold would hash it
+// as an account and corrupt the root; such a corpus routes to the frontier fold instead. A leaf is
+// classified by its parent branch's depth (foldNode's storagePlane), so its own extension is ignored;
+// storage subtrees at or below a seam are folded, not classified here, so the walk stops at the seam.
+func accountPlaneForkable(node *prefixNode, depth, accountKeyLen int) bool {
+	if node == nil || node.bitmap == 0 || node.plainKey != nil || depth >= 64 {
+		return true
+	}
+	childIdx := 0
+	for bm := node.bitmap; bm != 0; {
+		nib := bits.TrailingZeros16(bm)
+		child := node.children[childIdx]
+		if child.bitmap == 0 {
+			if len(child.plainKey) != accountKeyLen {
+				return false
+			}
+		} else if !accountPlaneForkable(child, depth+1+len(child.ext), accountKeyLen) {
+			return false
+		}
+		childIdx++
+		bm &^= uint16(1) << nib
+	}
+	return true
+}
+
+// foldFreshAccountSubtreeCellForkJoin folds one fresh account-plane top-nibble subtree into its
+// parent-stitchable mount-wall cell plus the branch records it emits, through the recursive
+// fork-join. Fail-closed on any error.
+func foldFreshAccountSubtreeCellForkJoin(ctx context.Context, ff *forkFolder, node *prefixNode, parentPrefix []byte, nib int) (cell, []*DeferredBranchUpdate, error) {
+	wholeFreshCellFolds.Add(1)
+	fc := newFoldCtx(true)
+	defer fc.hph.Release()
+	c, err := fc.foldSubtreeCellForkJoin(ctx, ff, node, parentPrefix, nib)
+	if err != nil {
+		putDeferredUpdates(fc.deferred)
+		return cell{}, nil, err
+	}
+	return c, fc.deferred, nil
 }
 
 // foldFrontierBody folds the derived DAG below rootTask with the shared worker pool, stitches the
@@ -263,7 +391,15 @@ func (fp *foldPool) foldFrontierBody(ctx context.Context, base *HexPatriciaHashe
 		}
 	}
 
-	stitchSplitCells(base, &cells, &present)
+	return fp.stitchAndFoldRoot(ctx, base, &cells, &present, deferred)
+}
+
+// stitchAndFoldRoot stitches the top-nibble cells into base's row-0 wall and folds base down to its
+// root, merging any branch updates the root fold emits into deferred. Shared by the frontier dispatch
+// and the whole-fresh route, which reach it with the same base/cells contract. Fail-closed: any error
+// recycles deferred and returns nothing.
+func (fp *foldPool) stitchAndFoldRoot(ctx context.Context, base *HexPatriciaHashed, cells *[16]cell, present *[16]bool, deferred []*DeferredBranchUpdate) ([]*DeferredBranchUpdate, error) {
+	stitchSplitCells(base, cells, present)
 
 	if base.activeRows == 0 {
 		base.activeRows = 1

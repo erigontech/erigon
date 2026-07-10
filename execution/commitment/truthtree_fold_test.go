@@ -737,6 +737,10 @@ func requireFlagLeafParity(t *testing.T, workers int, batches []engineBatch) int
 // incremental (re-touch) corpora, through the encode/restore restart. The balanced corpus must route
 // at least one leaf through the direct recursion, or the flag-on arm never exercised foldNode.
 func TestTruthtreeFold_LeafFlagParity(t *testing.T) {
+	// This gate covers the frontier direct-leaf recursion (foldLeafTask), which owns fresh subtrees
+	// only when the whole-fresh route is off or the state is non-empty; disable the route so the
+	// whole-fresh corpora here exercise the frontier path rather than the account-plane fork-join.
+	setForkWholeFresh(t, false)
 	direct := requireFlagLeafParity(t, 4, balancedBatches())
 	require.Greaterf(t, direct, int64(0),
 		"flag-on run folded no leaf through the direct recursion — the balanced corpus no longer covers foldNode")
@@ -1068,6 +1072,8 @@ func freshNonWhaleBatches() []engineBatch {
 // subtrees whose accounts carry small storage — the inline/ext/small-branch depth-64 seams the whale
 // never hits — folded through the direct account-plane recursion. The direct fold must actually fire.
 func TestTruthtreeFold_FreshNonWhaleParity(t *testing.T) {
+	// Exercise the frontier direct-leaf recursion, not the whole-fresh account-plane fork-join.
+	setForkWholeFresh(t, false)
 	direct := requireFlagLeafParity(t, 4, freshNonWhaleBatches())
 	require.Greater(t, direct, int64(0),
 		"fresh non-whale never folded through the direct account-plane recursion")
@@ -1256,6 +1262,46 @@ func foldForkJoinWhale(b *testing.B, node *prefixNode) {
 
 func Benchmark_TruthtreeFold_ForkJoinWhaleAlloc(b *testing.B) {
 	foldForkJoinWhale(b, freshWhaleFoldNode(b, 750_000))
+}
+
+// foldForkJoinAccountRoot benches the account-plane fork-join (emission off, buffer-per-lineage) over
+// a whole fresh account trie, crossing every depth-64 seam — the parallel-arm allocation the whole-
+// fresh route drives.
+func foldForkJoinAccountRoot(b *testing.B, root *prefixNode) {
+	b.ReportAllocs()
+	ctx := context.Background()
+	sem := semaphore.NewWeighted(int64(maxFoldConcurrency()))
+	ff := &forkFolder{sem: sem, k: foldK(root.subtreeCount, runtime.NumCPU())}
+	var sink common.Hash
+	for b.Loop() {
+		fc := newFoldCtx(false)
+		h, err := ff.fold(ctx, fc, root, root.ext, int16(len(root.ext)))
+		fc.hph.Release()
+		if err != nil {
+			b.Fatal(err)
+		}
+		sink = h
+	}
+	runtime.KeepAlive(sink)
+}
+
+// TestFreshBuild_AccountPlaneForkJoinAllocCeiling pins the account-plane fork-join's buffer-per-lineage
+// allocation: folding a whole fresh account trie (tail accounts across all nibbles + a whale seam)
+// stays well under the same ceiling as the serial fold, never regressing toward the naive per-node
+// fold.
+func TestFreshBuild_AccountPlaneForkJoinAllocCeiling(t *testing.T) {
+	pk, upds := freshAccountPlaneCorpus(88, 24, 40_000)
+	root := freshAccountTrie(pk, upds)
+	require.Empty(t, root.ext, "corpus root must branch at depth 0")
+	require.GreaterOrEqual(t, bits.OnesCount16(root.bitmap), 2, "corpus root must be a multi-way branch")
+
+	res := testing.Benchmark(func(b *testing.B) { foldForkJoinAccountRoot(b, root) })
+	require.NotZero(t, res.N, "account-plane fork-join alloc bench did not run")
+	got := res.AllocedBytesPerOp()
+	t.Logf("account-plane fork-join fresh build: %.1f MB/op, %d allocs/op", float64(got)/(1<<20), res.AllocsPerOp())
+	require.Lessf(t, got, int64(truthtreeFoldAllocCeiling),
+		"account-plane fork-join alloc %.1f MB/op exceeds %.0f MB ceiling",
+		float64(got)/(1<<20), float64(truthtreeFoldAllocCeiling)/(1<<20))
 }
 
 // TestTruthtreeFold_ForkJoinAllocCeiling pins the parallel arm's buffer-per-lineage allocation: the

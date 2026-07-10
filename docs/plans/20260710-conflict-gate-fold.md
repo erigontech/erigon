@@ -127,15 +127,26 @@ Target: flag-on `1MWhales` ∥ from 900 → ~200 ms (approach/beat main); **zero
 **Files:**
 - Modify: `execution/commitment/truthtree_fold.go`, `execution/commitment/fold_pool.go`
 
-- [ ] lift the storage-plane-only restriction (`truthtree_fold.go:364`): `forkFolder`/`foldFreshForkJoin`
+- [x] lift the storage-plane-only restriction (`truthtree_fold.go:364`): `forkFolder`/`foldFreshForkJoin`
       forks account-plane conflict gates too, folding account cells (with their storage roots) via
       `foldNode`, recursing across the depth-64 seam into each account's (fresh) storage.
-- [ ] the whole-fresh entry (Task 1) folds the entire account plane per-prefix, empty-wall, buffer-per-lineage,
+      (`forkFolder.fold` now mirrors `foldNode`'s child classification by plane — `setPlaneLeaf` picks
+      account/storage by key length — and the depth-64 seam cases recurse via `ff.fold` so a whale's
+      fresh storage forks on the same threshold as the account plane above it.)
+- [x] the whole-fresh entry (Task 1) folds the entire account plane per-prefix, empty-wall, buffer-per-lineage,
       down to the `foldK` grain; eager fold via the existing pending counters.
-- [ ] parity: `TestFreshBuild_AccountPlane` (whales + tail + seam), flag-on == flag-off == sequential,
+      (`dispatchWholeFresh` folds each top-nibble subtree via `foldFreshAccountSubtreeCellForkJoin`
+      through one shared `forkFolder{k: foldK(root.subtreeCount, numWorkers)}`, stitches the mount-wall
+      cells into base, and folds base — the fork/join barrier is the eager-fold mechanism. Materializes
+      ModeParallel nil updates once up front, and routes any delete, orphan storage, or non-pure-branch
+      top nibble to the frontier fold — fail-safe.)
+- [x] parity: `TestFreshBuild_AccountPlane` (whales + tail + seam), flag-on == flag-off == sequential,
       N≥3, AND the fork path fired (counter). Guard test (incremental → frontier) stays green.
-- [ ] alloc: parallel arm within ceiling; serial grain ≤ existing ceiling.
-- [ ] full parity suite. Before Task 3.
+      (3 seed/worker configs × parallel/streaming/streaming-scheduled; `wholeFreshForkJoins` proves the
+      fork ran, `forkFoldMaxDepth` proves it fanned out below the top nibble.)
+- [x] alloc: parallel arm within ceiling; serial grain ≤ existing ceiling.
+      (`TestFreshBuild_AccountPlaneForkJoinAllocCeiling`: 2.5 MB/op, well under the 96 MB ceiling.)
+- [x] full parity suite. Before Task 3. (`make lint && make test-short` clean; `make erigon integration` builds.)
 
 ### Task 3: Seam correctness on the account plane
 

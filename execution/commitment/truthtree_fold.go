@@ -90,6 +90,22 @@ func (fc *foldCtx) setAccountLeaf(node *prefixNode) {
 	c.setFromUpdate(node.update)
 }
 
+// setPlaneLeaf places a present leaf slot's cell by plane and returns its foldChild kind. On the
+// account plane a leaf must carry an account key; a longer key is an orphan storage slot (a storage
+// write with no account, impossible in real state) that would land above the depth-64 seam and hash
+// wrong, so it is rejected fail-closed rather than mis-folded.
+func (fc *foldCtx) setPlaneLeaf(node *prefixNode, storagePlane bool) (foldChildKind, error) {
+	if storagePlane {
+		fc.setStorageLeaf(node)
+		return childStorageLeaf, nil
+	}
+	if int16(len(node.plainKey)) != fc.hph.accountKeyLen {
+		return 0, fmt.Errorf("truthtree fold: account-plane leaf with non-account key len %d", len(node.plainKey))
+	}
+	fc.setAccountLeaf(node)
+	return childAccountLeaf, nil
+}
+
 // setSeamAccount places a depth-64 account over a storage branch (≥2 first nibbles): the cell
 // carries the folded storage branch root as its hash, which computeCellHash consumes directly.
 func (fc *foldCtx) setSeamAccount(node *prefixNode, sr common.Hash) {
@@ -171,13 +187,11 @@ func (fc *foldCtx) foldNode(node *prefixNode, prefix []byte, branchDepth int16) 
 			if child.plainKey == nil {
 				return common.Hash{}, fmt.Errorf("truthtree fold: leaf without plainKey at slot %x", nib)
 			}
-			if storagePlane {
-				r.kind = childStorageLeaf
-				fc.setStorageLeaf(child)
-			} else {
-				r.kind = childAccountLeaf
-				fc.setAccountLeaf(child)
+			kind, err := fc.setPlaneLeaf(child, storagePlane)
+			if err != nil {
+				return common.Hash{}, err
 			}
+			r.kind = kind
 			r.hlen = fc.hph.computeCellHashLen(&fc.cell, childDepth)
 		case child.plainKey != nil:
 			// Depth-64 storage seam: the child terminates an account key and branches into storage.
@@ -285,19 +299,20 @@ func newFoldCtx(emit bool) *foldCtx {
 	return &foldCtx{hph: NewHexPatriciaHashed(length.Addr, nil, DefaultTrieConfig()), emit: emit}
 }
 
-// forkFolder folds a provably-fresh storage subtree with a recursive per-split-point fork-join,
-// bounding concurrency by sem and splitting at any branch whose subtreeCount exceeds k — the same
-// threshold the fold DAG uses. Below k a subtree folds serially via foldNode's buffer-reuse path;
-// above it each child branch forks onto its own lineage. The stitch is foldNode's exact 17-slot
-// branch keccak, so the fork-join root and its branch records are byte-identical to the serial fold.
+// forkFolder folds a provably-fresh subtree — in either plane — with a recursive per-split-point
+// fork-join, bounding concurrency by sem and splitting at any branch whose subtreeCount exceeds k —
+// the same threshold the fold DAG uses. Below k a subtree folds serially via foldNode's buffer-reuse
+// path; above it each child branch forks onto its own lineage, and a depth-64 account seam recurses
+// into its storage on the same threshold. The stitch is foldNode's exact 17-slot branch keccak, so
+// the fork-join root and its branch records are byte-identical to the serial fold.
 type forkFolder struct {
 	sem *semaphore.Weighted
 	k   uint32
 }
 
-// forkFoldMaxDepth records the deepest branch (its row's nibble depth) at which the fresh-whale
-// fork-join spawned child lineages. Tests read it to confirm splits fanned out below the depth-64
-// storage root (per-prefix), not only at the root (the per-nibble split this work moves past).
+// forkFoldMaxDepth records the deepest branch (its row's nibble depth) at which a fresh fork-join
+// spawned child lineages. Tests read it to confirm splits fanned out at deep prefixes (account
+// branches and, across the seam, a whale's storage), not only at the top nibble.
 var forkFoldMaxDepth atomic.Int64
 
 func recordForkDepth(depth int16) {
@@ -319,25 +334,24 @@ type forkJob struct {
 	nib    int
 }
 
-// fold folds the storage-plane branch pn (whose branch row sits at branchDepth) into its hash and
+// fold folds the branch pn (whose branch row sits at branchDepth, in either plane) into its hash and
 // merges every forked child's deferred updates into fc. A subtree at or below k folds serially in fc
 // via foldNode (buffer reuse). Above k, leaves and small child branches fold serially in fc, and each
 // child branch larger than k is a split point: it forks onto its own foldCtx when a foldSem slot is
-// free, else folds inline in fc.
+// free, else folds inline in fc. A depth-64 account seam recurses back through fold, so a whale's
+// fresh storage plane fans out on the same split threshold as the account plane above it.
 //
 // TryAcquire (not a blocking Acquire) is load-bearing for deadlock freedom: a forked goroutine holds
 // its slot while awaiting its own forked children, so under saturation a blocking acquire would wedge
 // every slot on a parent waiting for a child that can never start. Falling back to an inline fold
 // always makes progress without another slot. fc is only ever touched by this goroutine — forked
 // children own separate foldCtxs and their results merge after the join — so no lock guards it.
-//
-// Storage-plane only: a key-terminating branch (an account seam) cannot occur below the depth-64
-// storage root, so one is rejected fail-closed rather than mis-folded.
 func (ff *forkFolder) fold(ctx context.Context, fc *foldCtx, pn *prefixNode, prefix []byte, branchDepth int16) (common.Hash, error) {
 	if pn.subtreeCount <= ff.k {
 		return fc.foldNode(pn, prefix, branchDepth)
 	}
 	childDepth := branchDepth + 1
+	storagePlane := branchDepth >= 64
 	var rec [16]foldChild
 	totalLen := 0
 	var jobs []forkJob
@@ -352,11 +366,41 @@ func (ff *forkFolder) fold(ctx context.Context, fc *foldCtx, pn *prefixNode, pre
 			if child.plainKey == nil {
 				return common.Hash{}, fmt.Errorf("truthtree fork fold: leaf without plainKey at slot %x", nib)
 			}
-			r.kind = childStorageLeaf
-			fc.setStorageLeaf(child)
+			kind, err := fc.setPlaneLeaf(child, storagePlane)
+			if err != nil {
+				return common.Hash{}, err
+			}
+			r.kind = kind
 			r.hlen = fc.hph.computeCellHashLen(&fc.cell, childDepth)
 		case child.plainKey != nil:
-			return common.Hash{}, fmt.Errorf("truthtree fork fold: unexpected storage seam at slot %x", nib)
+			// Depth-64 account seam: the child terminates an account key and branches into storage,
+			// folded back through fold so a large storage plane forks just like the account plane.
+			switch {
+			case seamAccountInline(child):
+				r.kind = childSeamAccountInline
+				fc.setSeamAccountInline(child)
+			case bits.OnesCount16(child.bitmap) == 1:
+				r.kind = childSeamAccountExt
+				survNib := bits.TrailingZeros16(child.bitmap)
+				sub := child.children[0]
+				subPrefix := fc.seamSubPrefix(prefix, nib, child.ext, survNib, sub.ext)
+				bh, err := ff.fold(ctx, fc, sub, subPrefix, 64+1+int16(len(sub.ext)))
+				if err != nil {
+					return common.Hash{}, err
+				}
+				r.bh = bh
+				fc.setSeamAccountExt(child, bh)
+			default:
+				r.kind = childSeamAccount
+				accPrefix := fc.childPrefix(prefix, nib, child.ext)
+				sr, err := ff.fold(ctx, fc, child, accPrefix, 64)
+				if err != nil {
+					return common.Hash{}, err
+				}
+				r.bh = sr
+				fc.setSeamAccount(child, sr)
+			}
+			r.hlen = fc.hph.computeCellHashLen(&fc.cell, childDepth)
 		default:
 			r.kind = childBranch
 			r.hlen = length.Hash + 1
@@ -605,17 +649,50 @@ func foldFreshAccountRootDeferred(root *prefixNode) (common.Hash, []*DeferredBra
 // seams inside the subtree fold inline. Only a pure branch subtree is a leaf-task root here; a lone
 // account or a whale seam at the mount boundary is handled by the account-leaf/whale paths.
 func (fc *foldCtx) foldSubtreeCell(node *prefixNode, parentPrefix []byte, nib int) (cell, error) {
+	prefix, err := subtreeCellPrefix(node, parentPrefix, nib)
+	if err != nil {
+		return cell{}, err
+	}
+	bh, err := fc.foldNode(node, prefix, int16(len(prefix)))
+	if err != nil {
+		return cell{}, err
+	}
+	return mountWallCell(prefix, bh, int16(len(parentPrefix))+1), nil
+}
+
+// foldSubtreeCellForkJoin is the fork-join analog of foldSubtreeCell: it folds a fresh account-plane
+// leaf-task subtree through the recursive per-split-point fork-join instead of the serial foldNode,
+// producing the byte-identical mount-wall cell the parent stitches.
+func (fc *foldCtx) foldSubtreeCellForkJoin(ctx context.Context, ff *forkFolder, node *prefixNode, parentPrefix []byte, nib int) (cell, error) {
+	prefix, err := subtreeCellPrefix(node, parentPrefix, nib)
+	if err != nil {
+		return cell{}, err
+	}
+	bh, err := ff.fold(ctx, fc, node, prefix, int16(len(prefix)))
+	if err != nil {
+		return cell{}, err
+	}
+	return mountWallCell(prefix, bh, int16(len(parentPrefix))+1), nil
+}
+
+// subtreeCellPrefix builds the hex-nibble path (parentPrefix ++ slot nibble ++ node ext) to a fresh
+// account-plane leaf-task subtree. Only a pure branch is a leaf-task root; a lone account or a whale
+// seam at the mount boundary is handled by the account-leaf/whale paths.
+func subtreeCellPrefix(node *prefixNode, parentPrefix []byte, nib int) ([]byte, error) {
 	if node.bitmap == 0 || node.plainKey != nil {
-		return cell{}, fmt.Errorf("truthtree fold: subtree cell expects a pure branch at slot %x", nib)
+		return nil, fmt.Errorf("truthtree fold: subtree cell expects a pure branch at slot %x", nib)
 	}
 	prefix := make([]byte, 0, len(parentPrefix)+1+len(node.ext))
 	prefix = append(prefix, parentPrefix...)
 	prefix = append(prefix, byte(nib))
 	prefix = append(prefix, node.ext...)
-	bh, err := fc.foldNode(node, prefix, int16(len(prefix)))
-	if err != nil {
-		return cell{}, err
-	}
+	return prefix, nil
+}
+
+// mountWallCell wraps a folded subtree branch hash into the parent-stitchable cell (invariant M): its
+// extension spans the whole subtree prefix, which stripCellToMountWall trims of the parent prefix and
+// slot nibble.
+func mountWallCell(prefix []byte, bh common.Hash, mountWall int16) cell {
 	var full cell
 	full.extLen = int16(len(prefix))
 	copy(full.extension[:], prefix)
@@ -623,7 +700,7 @@ func (fc *foldCtx) foldSubtreeCell(node *prefixNode, parentPrefix []byte, nib in
 	copy(full.hashedExtension[:], prefix)
 	full.hashLen = length.Hash
 	full.hash = bh
-	return stripCellToMountWall(&full, int16(len(parentPrefix))+1), nil
+	return stripCellToMountWall(&full, mountWall)
 }
 
 // foldFreshAccountSubtreeCellDeferred folds a fresh account-plane leaf-task subtree into its
