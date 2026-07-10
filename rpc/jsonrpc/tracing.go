@@ -18,11 +18,8 @@ package jsonrpc
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"time"
-
-	"github.com/holiman/uint256"
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/dbg"
@@ -408,22 +405,12 @@ func (api *DebugAPIImpl) TraceCall(ctx context.Context, args ethapi.CallArgs, bl
 	}
 	ibs := state.New(stateReader)
 
-	var baseFee *uint256.Int
-	if header.BaseFee != nil {
-		baseFee = new(uint256.Int).Set(header.BaseFee)
+	baseFee, err := overrideBaseFee(config, header.BaseFee)
+	if err != nil {
+		return err
 	}
-
-	if config != nil && config.BlockOverrides != nil {
-		if config.BlockOverrides.BaseFeePerGas != nil && baseFee != nil {
-			overflow := baseFee.SetFromBig(config.BlockOverrides.BaseFeePerGas.ToInt())
-			if overflow {
-				return errors.New("BlockOverrides.BaseFee uint256 overflow")
-			}
-		}
-
-		if config.BlockOverrides.BlobBaseFee != nil {
-			args.MaxFeePerBlobGas = config.BlockOverrides.BlobBaseFee
-		}
+	if config != nil && config.BlockOverrides != nil && config.BlockOverrides.BlobBaseFee != nil {
+		args.MaxFeePerBlobGas = config.BlockOverrides.BlobBaseFee
 	}
 
 	msg, err := args.ToMessage(api.GasCap, baseFee)

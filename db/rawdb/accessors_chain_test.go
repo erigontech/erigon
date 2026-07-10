@@ -1331,3 +1331,27 @@ func checkReceiptsRLP(have, want types.Receipts) error {
 	}
 	return nil
 }
+
+// Bodies count two system txn slots that have no kv.EthTx entries, and side-chain
+// blocks share the same monotonic txn-id space. A reader that seeks from the system
+// slot and takes TxCount raw entries therefore drifts past its block and returns
+// another chain's transactions.
+func TestRawTransactionsRangeExcludesForeignTxns(t *testing.T) {
+	_, tx := memdb.NewTestTx(t)
+	require := require.New(t)
+	genesisHash := common.Hash{0x0e}
+	require.NoError(rawdb.WriteBodyForStorage(tx, genesisHash, 0, &types.BodyForStorage{BaseTxnID: 0, TxCount: 2}))
+	require.NoError(rawdb.WriteCanonicalHash(tx, genesisHash, 0))
+	sideHash := common.Hash{0xaa}
+	txSide := []byte{0xa1}
+	require.NoError(rawdb.WriteBodyForStorage(tx, sideHash, 1, &types.BodyForStorage{BaseTxnID: 2, TxCount: 3}))
+	require.NoError(rawdb.WriteRawTransactions(tx, [][]byte{txSide}, 2))
+	canonHash := common.Hash{0xbb}
+	txCanon := []byte{0xb1}
+	require.NoError(rawdb.WriteBodyForStorage(tx, canonHash, 1, &types.BodyForStorage{BaseTxnID: 5, TxCount: 3}))
+	require.NoError(rawdb.WriteRawTransactions(tx, [][]byte{txCanon}, 5))
+	require.NoError(rawdb.WriteCanonicalHash(tx, canonHash, 1))
+	txs, err := rawdb.RawTransactionsRange(tx, 0, 1)
+	require.NoError(err)
+	require.Equal([][]byte{txCanon}, txs)
+}

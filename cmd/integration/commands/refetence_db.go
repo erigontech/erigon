@@ -104,7 +104,7 @@ var cmdMdbxToMdbx = &cobra.Command{
 		ctx := cmd.Context()
 		logger := debug.SetupCobra(cmd, "integration")
 		from, to := backup.OpenPair(chaindata, toChaindata, dbcfg.ChainDB, 0, logger)
-		err := backup.Kv2kv(ctx, from, to, nil, backup.ReadAheadThreads, logger)
+		err := backup.Kv2kv(ctx, from, to, nil, logger)
 		if err != nil && !errors.Is(err, context.Canceled) {
 			if !errors.Is(err, context.Canceled) {
 				logger.Error(err.Error())

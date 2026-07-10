@@ -1351,6 +1351,49 @@ func BenchmarkDexScenarioWithMetadata(b *testing.B) {
 	testExecutorCombWithMetadata(b, totalTxs, numReads, numWrites, numNonIO, taskRunner, logger)
 }
 
+func TestFailCandidate_Consider(t *testing.T) {
+	commitErr := func(b uint64) error { return fmt.Errorf("wrong root block %d", b) }
+	execErr := func(b uint64) error { return fmt.Errorf("invalid block %d", b) }
+
+	hashOf := func(b uint64) common.Hash { return common.Hash{byte(b)} }
+
+	t.Run("earliest block wins across streams regardless of arrival order", func(t *testing.T) {
+		var fc failCandidate
+		fc.consider(8, hashOf(8), true, execErr(8))    // exec-fail at 8 seen first
+		fc.consider(5, hashOf(5), false, commitErr(5)) // earlier commit-fail at 5 seen later
+		assert.True(t, fc.set)
+		assert.Equal(t, uint64(5), fc.block)
+		assert.False(t, fc.exec)
+		// The winning candidate's hash rides along, so a !initialCycle wrong-root
+		// unwind marks the implicated block, not whatever exec last applied.
+		assert.Equal(t, hashOf(5), fc.blockHash)
+	})
+
+	t.Run("same block: exec verdict supersedes commit wrong-root", func(t *testing.T) {
+		var fc failCandidate
+		fc.consider(7, hashOf(7), false, commitErr(7))
+		fc.consider(7, hashOf(7), true, execErr(7))
+		assert.Equal(t, uint64(7), fc.block)
+		assert.True(t, fc.exec)
+	})
+
+	t.Run("a later commit-fail does not override an earlier exec-fail", func(t *testing.T) {
+		var fc failCandidate
+		fc.consider(4, hashOf(4), true, execErr(4))
+		fc.consider(9, hashOf(9), false, commitErr(9))
+		assert.Equal(t, uint64(4), fc.block)
+		assert.True(t, fc.exec)
+	})
+
+	t.Run("a later same-block commit-fail does not downgrade an exec-fail", func(t *testing.T) {
+		var fc failCandidate
+		fc.consider(6, hashOf(6), true, execErr(6))
+		fc.consider(6, hashOf(6), false, commitErr(6))
+		assert.Equal(t, uint64(6), fc.block)
+		assert.True(t, fc.exec)
+	})
+}
+
 // newResumeTestDB builds the temporal DB stack the resume tests run against.
 func newResumeTestDB(t *testing.T) kv.TemporalRwDB {
 	if runtime.GOOS == "windows" {
@@ -1567,12 +1610,11 @@ func TestParallelResumeReconstructsPriorReceipts(t *testing.T) {
 	}
 }
 
-// TestParallelResumeReconstructionFailureErrors pins the failure policy when
-// prior receipts cannot be reconstructed: the batch must fail with the
-// reconstruction error instead of proceeding into a receipts-dependent
-// Finalize (post-Prague requests hash, AuRa epoch signal) that would
-// misclassify the valid block as invalid.
-func TestParallelResumeReconstructionFailureErrors(t *testing.T) {
+// TestParallelResumeReconstructionFailureIsNonFatal pins the failure policy when
+// prior receipts cannot be reconstructed: reconstruction is best-effort, so the
+// batch proceeds (prior receipts absent, block left not receipts-complete)
+// rather than halting the node mid-step. See reconstructPriorReceipts.
+func TestParallelResumeReconstructionFailureIsNonFatal(t *testing.T) {
 	assert := assert.New(t)
 	db := newResumeTestDB(t)
 
@@ -1628,8 +1670,10 @@ func TestParallelResumeReconstructionFailureErrors(t *testing.T) {
 	}
 
 	res, err := be.nextResult(context.Background(), pe, txResult, roTx)
-	assert.ErrorContains(err, "reconstruct prior receipts")
-	assert.Nil(res)
+	assert.NoError(err)
+	if assert.NotNil(res) {
+		assert.False(res.receiptsComplete)
+	}
 }
 
 // TestParallelFinalizeMissingPrevReceiptErrors pins the failure mode when the

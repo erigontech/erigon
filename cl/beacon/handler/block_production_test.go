@@ -21,6 +21,7 @@ import (
 	"context"
 	"errors"
 	"math/big"
+	"net/http"
 	"net/http/httptest"
 	"testing"
 	"time"
@@ -73,6 +74,16 @@ func TestBlockBuilderWindowGloas(t *testing.T) {
 	// Attestation deadline is 3s; polling stops a quarter of it (750ms) earlier, at 2.25s.
 	require.Equal(t, slotStart.Add(2250*time.Millisecond).Add(-minPayloadPollingWindow), window.firstGetAt)
 	require.Equal(t, slotStart.Add(2250*time.Millisecond), window.pollUntil)
+}
+
+func TestPublishBlindedBlocksRejectsGloas(t *testing.T) {
+	_, _, _, _, _, h, _, _, _, _ := setupTestingHandler(t, clparams.ElectraVersion, log.Root(), true)
+	req := httptest.NewRequest(http.MethodPost, "/eth/v2/beacon/blinded_blocks", bytes.NewReader(nil))
+	req.Header.Set("Eth-Consensus-Version", clparams.GloasVersion.String())
+
+	_, err := h.publishBlindedBlocks(httptest.NewRecorder(), req, 2)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), cltypes.ErrGloasCannotBlind.Error())
 }
 
 func TestBlockBuilderWindowLateStartKeepsPublicationMargin(t *testing.T) {
@@ -467,7 +478,7 @@ func TestCaplinBlockProductionGlamsterdamSlotNumber(t *testing.T) {
 	// so block production expects an envelope on disk. Provide one with empty ExecutionRequests.
 	fcu.Envelopes[baseBlockRoot] = &cltypes.SignedExecutionPayloadEnvelope{
 		Message: &cltypes.ExecutionPayloadEnvelope{
-			ExecutionRequests: &cltypes.ExecutionRequests{},
+			ExecutionRequests: cltypes.NewExecutionRequestsWithVersion(h.beaconChainCfg, clparams.GloasVersion),
 		},
 	}
 
