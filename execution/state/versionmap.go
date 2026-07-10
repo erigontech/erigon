@@ -526,6 +526,78 @@ func (vm *VersionMap) AnyDoneSelfDestructEquals(addr accounts.Address, txIdxLimi
 	return found
 }
 
+// DropCreatedNonExistentWrites filters a tx's write set before it is flushed
+// into the versionMap, removing every write of an account that nets
+// non-existent within the tx — either created EIP-161-empty (a bare touch) or
+// created-and-destroyed (final SelfDestruct=true with the Incarnation sibling
+// a real SELFDESTRUCT emits; EIP-6780, implied by the BAL fork, restricts that
+// to same-tx-created accounts). Such accounts are DB-absent, and the BAL emits
+// no cells for them, so readers that fall through to the DB correctly see them
+// as non-existent; the phantom versionMap record would spuriously invalidate
+// those readers. BAL-gated: without a BAL the input is returned unchanged.
+// blockIO, the BAL builder and the commitment feed all keep the raw set.
+func DropCreatedNonExistentWrites(writes *WriteSet, hasBAL bool) *WriteSet {
+	if !hasBAL || writes == nil {
+		return writes
+	}
+	var drop map[accounts.Address]struct{}
+	var storageAddrs map[accounts.Address]struct{}
+	seen := map[accounts.Address]struct{}{}
+	for h := range writes.AllHeaders() {
+		if h.Path == StoragePath {
+			if storageAddrs == nil {
+				storageAddrs = map[accounts.Address]struct{}{}
+			}
+			storageAddrs[h.Address] = struct{}{}
+		}
+		seen[h.Address] = struct{}{}
+	}
+	for addr := range seen {
+		if sd, ok := writes.GetSelfDestruct(addr); ok && sd.Val {
+			if _, ok := writes.GetIncarnation(addr); ok {
+				if drop == nil {
+					drop = map[accounts.Address]struct{}{}
+				}
+				drop[addr] = struct{}{}
+			}
+			continue
+		}
+		aw, ok := writes.GetAddress(addr)
+		if !ok {
+			continue
+		}
+		if bw, ok := writes.GetBalance(addr); ok && !bw.Val.IsZero() {
+			continue
+		}
+		if nw, ok := writes.GetNonce(addr); ok && nw.Val != 0 {
+			continue
+		}
+		if cw, ok := writes.GetCode(addr); ok && len(cw.Val.Bytes) != 0 {
+			continue
+		}
+		if chw, ok := writes.GetCodeHash(addr); ok && !chw.Val.IsEmpty() {
+			continue
+		}
+		if aw.Val != nil && (!aw.Val.Balance.IsZero() || aw.Val.Nonce != 0 || !aw.Val.CodeHash.IsEmpty()) {
+			continue
+		}
+		if _, ok := storageAddrs[addr]; ok {
+			continue
+		}
+		if drop == nil {
+			drop = map[accounts.Address]struct{}{}
+		}
+		drop[addr] = struct{}{}
+	}
+	if drop == nil {
+		return writes
+	}
+	return writes.Filter(func(h WriteHeader) bool {
+		_, dropped := drop[h.Address]
+		return !dropped
+	})
+}
+
 // FlushVersionedWrites atomically flushes all writes to the version map
 // under a single lock acquisition. This prevents concurrent readers from
 // observing a partially-flushed state (e.g. seeing an AddressPath write

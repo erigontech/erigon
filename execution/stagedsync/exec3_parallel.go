@@ -2360,12 +2360,12 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 
 			// Remove entries that were previously written but are no longer
 			// written — res.TxOut.Has answers membership directly, no cmp map.
-			// Compare the FLUSHED views on both sides: dropCreatedNonExistentWrites
+			// Compare the FLUSHED views on both sides: DropCreatedNonExistentWrites
 			// filtered the prior flush, so unfiltered entries never had cells
 			// (Delete would panic), and entries the new set will filter must
 			// still be deleted if the prior flush wrote them.
-			prevFlushed := dropCreatedNonExistentWrites(prevWrites, be.versionMap.HasBAL)
-			newFlushable := dropCreatedNonExistentWrites(res.TxOut, be.versionMap.HasBAL)
+			prevFlushed := state.DropCreatedNonExistentWrites(prevWrites, be.versionMap.HasBAL)
+			newFlushable := state.DropCreatedNonExistentWrites(res.TxOut, be.versionMap.HasBAL)
 			for h := range prevFlushed.AllHeaders() {
 				if !newFlushable.Has(h) {
 					hasWriteChange = true
@@ -2488,7 +2488,7 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 		valid := validity == state.VersionValid
 
 		be.versionMap.SetTrace(trace)
-		writeSet := dropCreatedNonExistentWrites(be.blockIO.WriteSet(txVersion.TxIndex), be.versionMap.HasBAL)
+		writeSet := state.DropCreatedNonExistentWrites(be.blockIO.WriteSet(txVersion.TxIndex), be.versionMap.HasBAL)
 		be.versionMap.FlushVersionedWrites(writeSet, applyLoopFlushAsComplete(valid, cntInvalid), tracePrefix)
 		be.versionMap.SetTrace(false)
 
@@ -2588,7 +2588,7 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 					// chain. Filtered like the apply-loop flush: block-init's
 					// finalize writes would otherwise re-introduce the dropped
 					// created-empty records (e.g. the EIP-4788 system caller).
-					be.versionMap.FlushVersionedWrites(dropCreatedNonExistentWrites(merged, be.versionMap.HasBAL), true, "")
+					be.versionMap.FlushVersionedWrites(state.DropCreatedNonExistentWrites(merged, be.versionMap.HasBAL), true, "")
 
 					// Update CollectorWrites with fee-adjusted balances (coinbase /
 					// burnt) so the BlockStateCache sees the correct accumulated fees.
@@ -3045,78 +3045,6 @@ func (be *blockExecutor) scheduleExecution(ctx context.Context, pe *parallelExec
 
 func MergeVersionedWrites(prev, next *state.WriteSet) *state.WriteSet {
 	return prev.Merge(next)
-}
-
-// dropCreatedNonExistentWrites filters a tx's write set before it is flushed
-// into the versionMap, removing every write of an account that nets
-// non-existent within the tx — either created EIP-161-empty (a bare touch) or
-// created-and-destroyed (final SelfDestruct=true with the Incarnation sibling
-// a real SELFDESTRUCT emits; EIP-6780, implied by the BAL fork, restricts that
-// to same-tx-created accounts). Such accounts are DB-absent, and the BAL emits
-// no cells for them, so readers that fall through to the DB correctly see them
-// as non-existent; the phantom versionMap record would spuriously invalidate
-// those readers. BAL-gated: without a BAL the input is returned unchanged.
-// blockIO, the BAL builder and the commitment feed all keep the raw set.
-func dropCreatedNonExistentWrites(writes *state.WriteSet, hasBAL bool) *state.WriteSet {
-	if !hasBAL || writes == nil {
-		return writes
-	}
-	var drop map[accounts.Address]struct{}
-	var storageAddrs map[accounts.Address]struct{}
-	seen := map[accounts.Address]struct{}{}
-	for h := range writes.AllHeaders() {
-		if h.Path == state.StoragePath {
-			if storageAddrs == nil {
-				storageAddrs = map[accounts.Address]struct{}{}
-			}
-			storageAddrs[h.Address] = struct{}{}
-		}
-		seen[h.Address] = struct{}{}
-	}
-	for addr := range seen {
-		if sd, ok := writes.GetSelfDestruct(addr); ok && sd.Val {
-			if _, ok := writes.GetIncarnation(addr); ok {
-				if drop == nil {
-					drop = map[accounts.Address]struct{}{}
-				}
-				drop[addr] = struct{}{}
-			}
-			continue
-		}
-		aw, ok := writes.GetAddress(addr)
-		if !ok {
-			continue
-		}
-		if bw, ok := writes.GetBalance(addr); ok && !bw.Val.IsZero() {
-			continue
-		}
-		if nw, ok := writes.GetNonce(addr); ok && nw.Val != 0 {
-			continue
-		}
-		if cw, ok := writes.GetCode(addr); ok && len(cw.Val.Bytes) != 0 {
-			continue
-		}
-		if chw, ok := writes.GetCodeHash(addr); ok && !chw.Val.IsEmpty() {
-			continue
-		}
-		if aw.Val != nil && (!aw.Val.Balance.IsZero() || aw.Val.Nonce != 0 || !aw.Val.CodeHash.IsEmpty()) {
-			continue
-		}
-		if _, ok := storageAddrs[addr]; ok {
-			continue
-		}
-		if drop == nil {
-			drop = map[accounts.Address]struct{}{}
-		}
-		drop[addr] = struct{}{}
-	}
-	if drop == nil {
-		return writes
-	}
-	return writes.Filter(func(h state.WriteHeader) bool {
-		_, dropped := drop[h.Address]
-		return !dropped
-	})
 }
 
 // normalizeWriteSet produces a clean write set from the versionMap's WriteSet
