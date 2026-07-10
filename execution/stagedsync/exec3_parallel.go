@@ -1417,22 +1417,6 @@ func wrapAsExecAbort(origErr error, depTxIndex int) error {
 	return protocol.ErrExecAbortError{DependencyTxIndex: depTxIndex, OriginError: origErr}
 }
 
-// reconcileExecAndWaitErr combines the apply-loop result with the error from
-// pe.wait. A canceled wait never overrides execErr: execImpl cancels the
-// executor group on every exit, so a canceled wait is the normal end of a
-// batch, not new information. A real wait error has no resumable work, so it
-// supersedes ErrLoopExhausted — joining would keep errors.Is(_, ErrLoopExhausted)
-// true and let a fatal exec error be retried silently forever.
-func reconcileExecAndWaitErr(execErr, waitErr error) error {
-	if waitErr == nil || errors.Is(waitErr, context.Canceled) {
-		return execErr
-	}
-	if execErr == nil || errors.Is(execErr, &ErrLoopExhausted{}) {
-		return waitErr
-	}
-	return errors.Join(execErr, waitErr)
-}
-
 // execLoopExitDecision is the result of evaluating the exec-loop's
 // per-blockResult exit conditions. Values are ordered by precedence:
 // later conditions only matter if no earlier one fired.
@@ -1723,6 +1707,22 @@ func (pe *parallelExecutor) wait(ctx context.Context) error {
 			return nil
 		}
 	}
+}
+
+// reconcileExecAndWaitErr combines the apply-loop result with the error from
+// pe.wait. A canceled wait never overrides execErr: execImpl cancels the
+// executor group on every exit, so a canceled wait is the normal end of a
+// batch, not new information. A real wait error has no resumable work, so it
+// supersedes ErrLoopExhausted — joining would keep errors.Is(_, ErrLoopExhausted)
+// true and let a fatal exec error be retried silently forever.
+func reconcileExecAndWaitErr(execErr, waitErr error) error {
+	if waitErr == nil || errors.Is(waitErr, context.Canceled) {
+		return execErr
+	}
+	if execErr == nil || errors.Is(execErr, &ErrLoopExhausted{}) {
+		return waitErr
+	}
+	return errors.Join(execErr, waitErr)
 }
 
 type applyResult any
