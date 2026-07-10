@@ -376,6 +376,7 @@ func (fp *foldPool) foldWhaleLeaf(ctx context.Context, w *HexPatriciaHashed, t *
 	}
 	sr, deferred, err := fp.foldFreshWhaleStorage(ctx, w, t.node, t.prefix)
 	if err != nil {
+		putDeferredUpdates(deferred)
 		return err
 	}
 	t.deferred = append(t.deferred, deferred...)
