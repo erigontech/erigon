@@ -1353,6 +1353,7 @@ func doRollbackSnapshotsToBlock(ctx context.Context, blockNum uint64, prompt boo
 		return err
 	}
 	defer db.Close()
+	db.SetBlockSnapshots(res.BlockSnaps)
 	tx, err := db.BeginTemporalRo(ctx)
 	if err != nil {
 		return err
@@ -1822,6 +1823,7 @@ func doCheckCommitmentHistAtBlk(ctx context.Context, cliCtx *cli.Command, logger
 		return err
 	}
 	defer db.Close()
+	db.SetBlockSnapshots(res.BlockSnaps)
 	blockReader, _ := blockRetire.IO()
 	blockNum := cliCtx.Uint64("block")
 	if err = integrity.CheckCommitmentHistAtBlk(ctx, db, blockReader, blockNum, log.LvlInfo, logger); err != nil {
@@ -1847,6 +1849,7 @@ func doCheckStateRootByHistory(ctx context.Context, cliCtx *cli.Command, logger 
 		return err
 	}
 	defer db.Close()
+	db.SetBlockSnapshots(res.BlockSnaps)
 	blockReader, _ := blockRetire.IO()
 	from := cliCtx.Uint64("from")
 	to := cliCtx.Uint64("to")
@@ -1892,6 +1895,7 @@ func doCheckRCacheRootAtBlk(ctx context.Context, cliCtx *cli.Command, logger log
 		return err
 	}
 	defer db.Close()
+	db.SetBlockSnapshots(res.BlockSnaps)
 	blockReader, _ := blockRetire.IO()
 	blockNum := cliCtx.Uint64("block")
 	failFast := cliCtx.Bool("failFast")
@@ -1920,6 +1924,7 @@ func doCheckRCacheRootAtBlkRange(ctx context.Context, cliCtx *cli.Command, logge
 		return err
 	}
 	defer db.Close()
+	db.SetBlockSnapshots(res.BlockSnaps)
 	blockReader, _ := blockRetire.IO()
 
 	from := cliCtx.Uint64("from")
@@ -2003,6 +2008,7 @@ func doVerifyHistory(ctx context.Context, cliCtx *cli.Command, logger log.Logger
 		return err
 	}
 	defer db.Close()
+	db.SetBlockSnapshots(snaps.BlockSnaps)
 
 	engine := rulesconfig.CreateRulesEngineBareBones(ctx, chainConfig, logger)
 
@@ -2686,6 +2692,7 @@ func doBlkTxNum(ctx context.Context, cliCtx *cli.Command) error {
 		return err
 	}
 	defer db.Close()
+	db.SetBlockSnapshots(res.BlockSnaps)
 
 	tx, err := db.BeginTemporalRo(ctx)
 	if err != nil {
@@ -2961,6 +2968,7 @@ func doIndicesCommand(ctx context.Context, cliCtx *cli.Command, dirs datadir.Dir
 	if err != nil {
 		return err
 	}
+	temporalDb.SetBlockSnapshots(res.BlockSnaps)
 
 	err = temporalDb.BuildMissedAccessors(ctx, estimate.IndexSnapshot.Workers())
 	if err != nil {
@@ -3504,6 +3512,7 @@ func doRetireCommand(ctx context.Context, cliCtx *cli.Command, dirs datadir.Dirs
 	if err != nil {
 		return err
 	}
+	db.(*temporal.DB).SetBlockSnapshots(res.BlockSnaps)
 
 	logger.Info("Work on state history snapshots")
 	indexWorkers := estimate.IndexSnapshot.Workers()

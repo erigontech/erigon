@@ -146,6 +146,7 @@ func doBacktestCommitment(ctx context.Context, args backtestCommitmentArgs, logg
 		return err
 	}
 	defer db.Close()
+	db.SetBlockSnapshots(snaps.BlockSnaps)
 	var opts []backtester.Opt
 	if args.paraTrie {
 		opts = append(opts, backtester.WithParaTrie(true))
