@@ -169,7 +169,7 @@ func modeEquals(a, b Mode) bool {
 
 func appendCommitmentHistory(sb *strings.Builder, m Mode) {
 	if m.CommitmentHistory != nil && m.CommitmentHistory.toValue() != KeepAllBlocksPruneMode.toValue() {
-		fmt.Fprintf(sb, " --prune.commitment-history.older=%d", m.CommitmentHistory.toValue())
+		fmt.Fprintf(sb, " --prune.commitment-history.distance=%d", m.CommitmentHistory.toValue())
 	}
 }
 
@@ -227,7 +227,7 @@ func (m Mode) Validate() error {
 		return nil
 	}
 	if commitment, history := commitmentHistory.toValue(), m.History.toValue(); commitment > history {
-		return fmt.Errorf("--prune.commitment-history.older=%d exceeds --prune.distance=%d; commitment history older than state-history retention cannot serve eth_getProof", commitment, history)
+		return fmt.Errorf("--prune.commitment-history.distance=%d exceeds --prune.distance=%d; commitment history older than state-history retention cannot serve eth_getProof", commitment, history)
 	}
 	return nil
 }
@@ -476,8 +476,9 @@ func (m Mode) CommitmentHistoryAmount() BlockAmount {
 	return commitmentHistoryOrDefault(m.CommitmentHistory)
 }
 
-// receiptsOrDefault treats an unset Receipts as keep-all, guarding the
-// persistence layer against a nil BlockAmount.
+// receiptsOrDefault resolves an unset Receipts to KeepAllBlocksPruneMode — the
+// follow-history default (not force keep-all, which is KeepAllReceiptsPruneMode)
+// — guarding the persistence layer against a nil BlockAmount.
 func receiptsOrDefault(b BlockAmount) BlockAmount {
 	if b == nil {
 		return KeepAllBlocksPruneMode
@@ -485,8 +486,8 @@ func receiptsOrDefault(b BlockAmount) BlockAmount {
 	return b
 }
 
-// ReceiptsAmount returns the receipt-cache retention, treating an unset (nil)
-// field as keep-all so callers can query it without a nil check.
+// ReceiptsAmount returns the receipt-cache retention, resolving an unset (nil)
+// field to the follow-history default so callers can query it without a nil check.
 func (m Mode) ReceiptsAmount() BlockAmount {
 	return receiptsOrDefault(m.Receipts)
 }

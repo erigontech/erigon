@@ -71,14 +71,14 @@ func TestModeEqualsComparesCommitmentHistory(t *testing.T) {
 func TestModeString_CommitmentHistory(t *testing.T) {
 	m := ArchiveMode
 	m.CommitmentHistory = Distance(100_000)
-	assert.Equal(t, "archive --prune.commitment-history.older=100000", m.String())
+	assert.Equal(t, "archive --prune.commitment-history.distance=100000", m.String())
 
 	// Default (keep-all) commitment history adds no clause.
 	assert.Equal(t, "archive", ArchiveMode.String())
 
 	// Legacy blocks shape with a bounded commitment window.
 	legacyBlocks := Mode{Initialised: true, History: Distance(100_000), Blocks: KeepAllBlocksPruneMode, CommitmentHistory: Distance(80_000)}
-	assert.Equal(t, "blocks --prune.distance=100000 --prune.commitment-history.older=80000", legacyBlocks.String())
+	assert.Equal(t, "blocks --prune.distance=100000 --prune.commitment-history.distance=80000", legacyBlocks.String())
 }
 
 func TestModeString_LegacyShapes(t *testing.T) {
@@ -155,7 +155,7 @@ func TestParseCLIMode(t *testing.T) {
 
 func TestFromCli_CommitmentHistory(t *testing.T) {
 	t.Run("zero-keeps-all", func(t *testing.T) {
-		// --prune.commitment-history.older=0 is the "unlimited" spelling.
+		// --prune.commitment-history.distance=0 is the "unlimited" spelling.
 		mode, err := FromCli(archiveModeStr, 0, 0, 0, 0)
 		require.NoError(t, err)
 		assert.Equal(t, KeepAllBlocksPruneMode, mode.CommitmentHistory)
