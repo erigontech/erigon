@@ -198,7 +198,7 @@ shutdown.
   node with the flag but no commitment-history logs and no-ops; standalone rpcdaemon with the flag set
   parses it and serves on-demand only (nil cache); default (flag 0) is a complete no-op.
 
-- [ ] **Status:** pending
+- [x] **Status:** complete
 
 ### Task 5: Metrics + docs
 

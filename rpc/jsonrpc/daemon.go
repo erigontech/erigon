@@ -47,7 +47,7 @@ func APIList(db kv.TemporalRoDB, eth rpchelper.ApiBackend, txPool txpoolproto.Tx
 	filters *rpchelper.Filters, stateCache kvcache.Cache,
 	blockReader services.FullBlockReader, cfg *httpcfg.HttpCfg, engine rules.EngineReader,
 	logger log.Logger, bridgeReader bridgeReader, spanProducersReader spanProducersReader,
-	testingEntry *rpc.API,
+	testingEntry *rpc.API, witnessCache *witnessCache,
 ) (list []rpc.API) {
 	base := NewBaseApi(filters, stateCache, blockReader, cfg.WithDatadir, cfg.EvmCallTimeout, engine, cfg.Dirs, bridgeReader, cfg.BlockRangeLimit, cfg.GetLogsMaxResults)
 	ethImpl := NewEthAPI(base, db, eth, txPool, mining, NewEthApiConfig(cfg), logger)
@@ -55,6 +55,7 @@ func APIList(db kv.TemporalRoDB, eth rpchelper.ApiBackend, txPool txpoolproto.Tx
 	txpoolImpl := NewTxPoolAPI(base, db, txPool)
 	netImpl := NewNetAPIImpl(eth)
 	debugImpl := NewPrivateDebugAPI(base, db, eth, cfg.Gascap, cfg.GethCompatibility)
+	debugImpl.witnessCache = witnessCache
 	traceImpl := NewTraceAPI(base, db, cfg)
 	web3Impl := NewWeb3APIImpl(eth)
 	adminImpl := NewAdminAPI(eth)

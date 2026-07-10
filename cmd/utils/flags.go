@@ -444,6 +444,16 @@ var (
 		Name:  "rpc.gethcompat",
 		Usage: "Enables Geth-compatible storage iteration order for debug_storageRangeAt (sorted by keccak256 hash). Disabled by default for performance.",
 	}
+	WitnessCacheBlocksFlag = cli.UintFlag{
+		Name:  "witness.cache.blocks",
+		Usage: "Number of recent blocks whose legacy debug_executionWitness result is eagerly cached in memory (embedded RPC only; requires --prune.experimental.include-commitment-history). 0 disables the cache; capped at 96.",
+		Value: 0,
+	}
+	WitnessCacheMaxMBFlag = cli.UintFlag{
+		Name:  "witness.cache.maxmb",
+		Usage: "Resident-byte cap for the eager witness cache, in MiB (the real bound on witnesses held: a 1024 cap holds ~85 median-mainnet blocks).",
+		Value: 1024,
+	}
 	RpcTxSyncDefaultTimeoutFlag = cli.DurationFlag{
 		Name:  "rpc.txsync.defaulttimeout",
 		Usage: "Default timeout for eth_sendRawTransactionSync (default: 25 secs).",

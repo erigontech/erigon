@@ -20,14 +20,19 @@ import (
 	"context"
 	"time"
 
+	"github.com/erigontech/erigon/cmd/rpcdaemon/cli/httpcfg"
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/kv/kvcache"
 	"github.com/erigontech/erigon/db/rawdb"
+	"github.com/erigontech/erigon/db/services"
+	"github.com/erigontech/erigon/execution/protocol/rules"
 	"github.com/erigontech/erigon/execution/rlp"
 	"github.com/erigontech/erigon/execution/stagedsync/stages"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/rpc"
+	"github.com/erigontech/erigon/rpc/rpchelper"
 )
 
 const (
@@ -109,6 +114,36 @@ func waitCommittedHead(ctx context.Context, db kv.TemporalRoDB, num uint64, hash
 			}
 		}
 	}
+}
+
+// WitnessCacheShouldEnable is the embedded-wiring gate: the eager cache runs only
+// when a positive block count is requested and the datadir was built with commitment
+// history (without it every build errors, so the cache would stay empty).
+func WitnessCacheShouldEnable(blocks uint, commitmentHistoryEnabled bool) bool {
+	return blocks > 0 && commitmentHistoryEnabled
+}
+
+// NewWitnessCacheBuilderAPI builds the shared witness cache plus a builder-owned
+// DebugAPIImpl wired to it, mirroring the debug impl APIList constructs for serving
+// so both paths run the identical build seam. The returned cache is threaded into
+// APIList so the serve-side impl shares it; the returned impl drives
+// RunWitnessCacheBuilder. When enable is false it returns (nil, nil) and the caller
+// leaves the cache disabled.
+func NewWitnessCacheBuilderAPI(
+	enable bool,
+	db kv.TemporalRoDB, eth rpchelper.ApiBackend,
+	filters *rpchelper.Filters, stateCache kvcache.Cache,
+	blockReader services.FullBlockReader, cfg *httpcfg.HttpCfg,
+	engine rules.EngineReader, bridgeReader bridgeReader,
+) (*witnessCache, *DebugAPIImpl) {
+	if !enable {
+		return nil, nil
+	}
+	cache := newWitnessCache(cfg.WitnessCacheBlocks, cfg.WitnessCacheMaxMB)
+	base := NewBaseApi(filters, stateCache, blockReader, cfg.WithDatadir, cfg.EvmCallTimeout, engine, cfg.Dirs, bridgeReader, cfg.BlockRangeLimit, cfg.GetLogsMaxResults)
+	impl := NewPrivateDebugAPI(base, db, eth, cfg.Gascap, cfg.GethCompatibility)
+	impl.witnessCache = cache
+	return cache, impl
 }
 
 // RunWitnessCacheBuilder consumes canonical-header batches and eagerly builds the
