@@ -44,6 +44,7 @@ import (
 	"github.com/erigontech/erigon/execution/exec"
 	"github.com/erigontech/erigon/execution/protocol"
 	"github.com/erigontech/erigon/execution/protocol/rules"
+	"github.com/erigontech/erigon/execution/receipts"
 	"github.com/erigontech/erigon/execution/stagedsync/stages"
 	"github.com/erigontech/erigon/execution/state"
 	"github.com/erigontech/erigon/execution/tracing"
@@ -445,6 +446,30 @@ func (te *txExecutor) getHeader(ctx context.Context, hash common.Hash, number ui
 	return h, nil
 }
 
+// reconstructPriorReceipts re-derives receipts of a resumed block's prefix txs
+// (executed in an earlier batch) so Finalize and the notification cache can see
+// the block's full receipt set.
+//
+// Best-effort. At a mid-block step boundary the committed domain latest is the
+// step-edge value, not the block-start pre-state, so the prefix is not always
+// reconstructable (and minimal nodes retain no receipts at all). Callers MUST
+// treat a failure as non-fatal: the node still resumes from a mid-step boundary
+// and the block's own receipts and cumulative gas stay correct — only the prior
+// receipts are absent (block then left not receipts-complete).
+func (te *txExecutor) reconstructPriorReceipts(ctx context.Context, applyTx kv.TemporalTx, header *types.Header, txs types.Transactions, startTxIndex int, blockStartTxNum uint64) (types.Receipts, error) {
+	priorIbs := state.New(state.NewHistoryReaderV3(applyTx, blockStartTxNum))
+	defer priorIbs.Release(true)
+	priorGp := protocol.NewGasPool(header.GasLimit, te.cfg.chainConfig.GetMaxBlobGasPerBlock(header.Time))
+	getHeader := func(hash common.Hash, number uint64) (*types.Header, error) {
+		return te.cfg.blockReader.Header(ctx, applyTx, hash, number)
+	}
+	priorReceipts, err := receipts.DerivePriorReceipts(ctx, te.cfg.chainConfig, te.cfg.engine, header, txs, startTxIndex, blockStartTxNum, applyTx, priorIbs, priorGp, getHeader)
+	if err != nil {
+		return nil, fmt.Errorf("failed to reconstruct prior receipts for partial block %d (startTxIndex %d): %w", header.Number.Uint64(), startTxIndex, err)
+	}
+	return priorReceipts, nil
+}
+
 func (te *txExecutor) onBlockStart(ctx context.Context, blockNum uint64, blockHash common.Hash) {
 	defer func() {
 		if rec := recover(); rec != nil {
@@ -503,7 +528,7 @@ func (te *txExecutor) onBlockStart(ctx context.Context, blockNum uint64, blockHa
 	}
 }
 
-func (te *txExecutor) executeBlocks(ctx context.Context, startBlockNum uint64, maxBlockNum uint64, blockLimit uint64, initialTxNum uint64, inputTxNum uint64, readAhead chan uint64, initialCycle bool, applyResults chan applyResult, commitResults ...chan applyResult) error {
+func (te *txExecutor) executeBlocks(ctx context.Context, startBlockNum uint64, maxBlockNum uint64, blockLimit uint64, initialTxNum uint64, inputTxNum uint64, readAhead chan uint64, initialCycle bool, applyResults chan applyResult, blockRequests chan *blockRequest, commitResults ...chan applyResult) error {
 	if te.execLoopGroup == nil {
 		return errors.New("no exec group")
 	}
@@ -523,8 +548,12 @@ func (te *txExecutor) executeBlocks(ctx context.Context, startBlockNum uint64, m
 			}
 		}()
 
-		// Channel close is handled by pe.execLoop's deferred close.
-		// Do NOT close channels here — execLoop owns the lifecycle.
+		// execLoop owns the apply/commit channels, but blockRequests is closed
+		// by its sole sender (this goroutine) — closing it from execLoop would
+		// race this send select and panic on "send on closed channel".
+		if blockRequests != nil {
+			defer close(blockRequests)
+		}
 
 		// Open a thread-local roTx for block metadata and StepsInFiles.
 		// Must NOT use the stageloop's rwTx — it's thread-bound.
@@ -618,6 +647,7 @@ func (te *txExecutor) executeBlocks(ctx context.Context, startBlockNum uint64, m
 			// Per-block committed state cache for parallel workers' GetCommittedState.
 			blockStateCache := state.NewBlockStateCache()
 
+			blockStartTxNum := inputTxNum
 			for txIndex := -1; txIndex <= len(txs); txIndex++ {
 				if inputTxNum > 0 && inputTxNum <= initialTxNum {
 					inputTxNum++
@@ -658,6 +688,24 @@ func (te *txExecutor) executeBlocks(ctx context.Context, startBlockNum uint64, m
 			var commitCh chan applyResult
 			if len(commitResults) > 0 {
 				commitCh = commitResults[0]
+			}
+			// Heads-up to the commitment calculator, ahead of the block's
+			// txResult/blockResult stream and on its own channel. inputTxNum
+			// has been advanced past this block's tasks by the loop above,
+			// so inputTxNum-1 is the block's final txNum.
+			if blockRequests != nil {
+				select {
+				case blockRequests <- &blockRequest{
+					blockNum:   b.NumberU64(),
+					blockHash:  b.Hash(),
+					stateRoot:  header.Root,
+					firstTxNum: blockStartTxNum,
+					lastTxNum:  inputTxNum - 1,
+					bal:        dbBAL,
+				}:
+				case <-ctx.Done():
+					return ctx.Err()
+				}
 			}
 			select {
 			case te.execRequests <- &execRequest{b.NumberU64(), b.Hash(),
@@ -787,7 +835,7 @@ func computeAndCheckCommitmentV3(ctx context.Context, header *types.Header, appl
 //     the historical reasoning.
 //
 // blockNum != maxBlockNum guards against marking the goal block as
-// exhausted — the goal block already triggers a clean reachedMaxBlock
+// exhausted — the goal block already triggers a clean stopReachedMax
 // exit and shouldn't be relabeled as "more work pending".
 //
 // Pure function so the precedence is unit-testable. See
