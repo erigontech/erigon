@@ -153,12 +153,23 @@ Target: flag-on `1MWhales` ∥ from 900 → ~200 ms (approach/beat main); **zero
 **Files:**
 - Modify: `execution/commitment/truthtree_fold.go`
 
-- [ ] verify the account→storage-root wiring holds under the account-plane fork (each account's fresh
+- [x] verify the account→storage-root wiring holds under the account-plane fork (each account's fresh
       storage folds via the same recursion; the account cell gets its storage root before its branch keccak).
       Reuse `foldNode`'s existing seam handling — do not degenerate the seam to a plain nibble fork.
-- [ ] parity tests: touched account with fresh storage across the seam, single-first-nibble account,
+      (`forkFolder.fold` handles the three seam kinds — `childSeamAccount`/`childSeamAccountExt`/
+      `childSeamAccountInline` — exactly as `foldNode`, recursing the storage root via `ff.fold`, placing it
+      into the account cell via `setSeamAccount`/`setSeamAccountExt` before the branch keccak deferred to the
+      shared `hashBranchRow`. `TestFreshBuild_AccountForkJoinSeamParity` pins it deterministically: an
+      unbounded-sem, low-K `ff.fold` at depth 0 provably forks below the seam — `forkFoldMaxDepth > 64` — into
+      the whale's fresh storage and reproduces the serial fold + sequential oracle byte-for-byte.)
+- [x] parity tests: touched account with fresh storage across the seam, single-first-nibble account,
       accounts sharing top nibbles; == sequential.
-- [ ] `make test-short` + full parity. Before Task 4.
+      (`TestFreshBuild_Seam`: three scenarios × 3 engine modes, each flag-on == flag-off == sequential
+      root + stored branches, fork-join fired. Corpora: `freshWhaleAccountPlaneCorpus` (whale storage across
+      the seam), `freshSeamSingleNibbleCorpus` (ext + inline single-first-nibble seams), and
+      `freshSeamSharedTopNibbleCorpus` (deep shared-top-nibble account branches).)
+- [x] `make test-short` + full parity. Before Task 4. (`make lint` clean twice, full commitment `-short`
+      suite green, race-clean, `make erigon integration` builds.)
 
 ## Milestone 3 — Performance (production-representative)
 
