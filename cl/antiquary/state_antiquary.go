@@ -669,8 +669,9 @@ func (s *Antiquary) initializeStateAntiquaryIfNeeded(ctx context.Context, tx kv.
 			// If GLOAS snapshot data is missing (DB upgraded but not yet
 			// re-antiquated), back off to an earlier slot so the antiquary
 			// can rebuild forward from a valid pre-GLOAS state.
-			if errors.Is(err, historical_states_reader.ErrMissingGloasData) {
-				log.Warn("GLOAS snapshot data missing, backing off to re-antiquate", "slot", attempt, "err", err)
+			if errors.Is(err, historical_states_reader.ErrMissingGloasData) ||
+				errors.Is(err, historical_states_reader.ErrMissingHistoryVectorData) {
+				log.Warn("historical snapshot data missing, backing off to re-antiquate", "slot", attempt, "err", err)
 				backoffStep += backoffStrides
 				continue
 			}
