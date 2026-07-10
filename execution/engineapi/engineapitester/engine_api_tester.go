@@ -301,6 +301,10 @@ func InitialiseEngineApiTester(ctx context.Context, args EngineApiTesterInitArgs
 	txPoolConfig := txpoolcfg.DefaultConfig
 	txPoolConfig.DBDir = dirs.TxPool
 	txPoolConfig.Disable = args.DisableTxPool
+	// Without a limit the txpool DB reserves 1TB of VA, which cannot fit below
+	// the Go race-mode heap window on darwin and starves arena reservation
+	// ("too many address space collisions for -race mode").
+	txPoolConfig.MdbxDBSizeLimit = mdbxDBSizeLimit
 	syncDefault := ethconfig.Defaults.Sync
 	syncDefault.ParallelStateFlushing = false
 	ethConfig := ethconfig.Config{

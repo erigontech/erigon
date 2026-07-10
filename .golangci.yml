@@ -95,7 +95,6 @@ linters:
         - atomictypes
         - forvar
         - mapsloop
-        - minmax
         - omitzero
         - rangeint
         - reflecttypefor

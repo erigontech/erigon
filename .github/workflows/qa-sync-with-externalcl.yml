@@ -101,16 +101,18 @@ jobs:
         if: ${{ always() && steps.test_step.outputs.test_executed == 'true' }}
         env:
           TEST_RESULT: ${{ steps.test_step.outputs.TEST_RESULT }}
+          CLIENT: ${{ matrix.client }}
+          MATRIX_CHAIN: ${{ matrix.chain }}
         run: |
           python3 $ERIGON_QA_PATH/test_system/qa-tests/uploads/upload_test_results.py \
             --repo erigon \
             --commit $(git rev-parse HEAD) \
-            --branch ${{ github.ref_name }} \
-            --test_name sync-from-scratch-${{ matrix.client }}-minimal-node \
-            --chain ${{ matrix.chain }} \
-            --runner ${{ runner.name }} \
+            --branch "$GITHUB_REF_NAME" \
+            --test_name "sync-from-scratch-$CLIENT-minimal-node" \
+            --chain "$MATRIX_CHAIN" \
+            --runner "$RUNNER_NAME" \
             --outcome $TEST_RESULT \
-            --result_file ${{ github.workspace }}/result-${{ matrix.chain }}.json
+            --result_file "$GITHUB_WORKSPACE/result-$MATRIX_CHAIN.json"
 
       - name: Upload test results (Lighthouse)
         if: ${{ always() && steps.test_step.outputs.test_executed == 'true' && matrix.client == 'lighthouse' }}
