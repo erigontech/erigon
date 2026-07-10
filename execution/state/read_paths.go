@@ -304,7 +304,7 @@ func versionedReadCore(s *IntraBlockState, addr accounts.Address, path AccountPa
 							s.dep = hdr.Version.TxIndex
 						}
 						if dbg.TraceReexec {
-							fmt.Printf("DEP-WR blk=%d tx=%d.%d %x %s pr=(%d.%d) cur=(%d.%d)\n",
+							fmt.Printf("DEP-WR blk=%d tx=%d inc=%d %x %s pr=(%d.%d) cur=(%d.%d)\n",
 								s.blockNum, s.txIndex, s.version, addr, AccountKey{path, key},
 								prHeader.Version.TxIndex, prHeader.Version.Incarnation,
 								hdr.Version.TxIndex, hdr.Version.Incarnation)
@@ -361,7 +361,7 @@ func versionedReadCore(s *IntraBlockState, addr accounts.Address, path AccountPa
 				s.dep = hdr.Version.TxIndex
 			}
 			if dbg.TraceReexec {
-				fmt.Printf("DEP-RD blk=%d tx=%d.%d %x %s pr=(%d.%d,src=%s) cur=(%d.%d)\n",
+				fmt.Printf("DEP-RD blk=%d tx=%d inc=%d %x %s pr=(%d.%d,src=%s) cur=(%d.%d)\n",
 					s.blockNum, s.txIndex, s.version, addr, AccountKey{path, key},
 					prHeader.Version.TxIndex, prHeader.Version.Incarnation, prHeader.Source,
 					hdr.Version.TxIndex, hdr.Version.Incarnation)
@@ -405,7 +405,7 @@ func versionedReadCore(s *IntraBlockState, addr accounts.Address, path AccountPa
 
 	case MVReadResultDependency:
 		if dbg.TraceReexec {
-			fmt.Printf("DEP-MP blk=%d tx=%d.%d %x %s dep=(%d.%d)\n",
+			fmt.Printf("DEP-MP blk=%d tx=%d inc=%d %x %s dep=(%d.%d)\n",
 				s.blockNum, s.txIndex, s.version, addr, AccountKey{path, key},
 				res.DepIdx(), res.Incarnation())
 		}

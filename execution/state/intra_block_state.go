@@ -953,7 +953,7 @@ func (sdb *IntraBlockState) synthesizeCreatedAccountBase(addr accounts.Address) 
 	}
 	if destructed, sdRes, ok := sdb.versionMap.ReadSelfDestruct(addr, sdb.txIndex); ok && sdRes.Status() == MVReadResultDone && destructed {
 		if dbg.TraceReexec {
-			fmt.Printf("SYNTH-DECLINE sd blk=%d tx=%d %x sdIdx=%d\n", sdb.blockNum, sdb.txIndex, addr, sdRes.DepIdx())
+			fmt.Printf("SYNTH-DECLINE reason=sd blk=%d tx=%d %x sdIdx=%d\n", sdb.blockNum, sdb.txIndex, addr, sdRes.DepIdx())
 		}
 		return nil, false
 	}
@@ -962,7 +962,7 @@ func (sdb *IntraBlockState) synthesizeCreatedAccountBase(addr accounts.Address) 
 	if bal, res, ok := sdb.versionMap.ReadBalance(addr, sdb.txIndex); ok {
 		if res.Status() != MVReadResultDone {
 			if dbg.TraceReexec {
-				fmt.Printf("SYNTH-DECLINE est-bal blk=%d tx=%d %x cellIdx=%d\n", sdb.blockNum, sdb.txIndex, addr, res.DepIdx())
+				fmt.Printf("SYNTH-DECLINE reason=est-bal blk=%d tx=%d %x cellIdx=%d\n", sdb.blockNum, sdb.txIndex, addr, res.DepIdx())
 			}
 			return nil, false
 		}
@@ -972,7 +972,7 @@ func (sdb *IntraBlockState) synthesizeCreatedAccountBase(addr accounts.Address) 
 	if nonce, res, ok := sdb.versionMap.ReadNonce(addr, sdb.txIndex); ok {
 		if res.Status() != MVReadResultDone {
 			if dbg.TraceReexec {
-				fmt.Printf("SYNTH-DECLINE est-nonce blk=%d tx=%d %x cellIdx=%d\n", sdb.blockNum, sdb.txIndex, addr, res.DepIdx())
+				fmt.Printf("SYNTH-DECLINE reason=est-nonce blk=%d tx=%d %x cellIdx=%d\n", sdb.blockNum, sdb.txIndex, addr, res.DepIdx())
 			}
 			return nil, false
 		}
@@ -982,7 +982,7 @@ func (sdb *IntraBlockState) synthesizeCreatedAccountBase(addr accounts.Address) 
 	if code, res, ok := sdb.versionMap.ReadCode(addr, sdb.txIndex); ok {
 		if res.Status() != MVReadResultDone {
 			if dbg.TraceReexec {
-				fmt.Printf("SYNTH-DECLINE est-code blk=%d tx=%d %x cellIdx=%d\n", sdb.blockNum, sdb.txIndex, addr, res.DepIdx())
+				fmt.Printf("SYNTH-DECLINE reason=est-code blk=%d tx=%d %x cellIdx=%d\n", sdb.blockNum, sdb.txIndex, addr, res.DepIdx())
 			}
 			return nil, false
 		}
@@ -996,7 +996,7 @@ func (sdb *IntraBlockState) synthesizeCreatedAccountBase(addr accounts.Address) 
 	}
 	if !found || acc.Empty() {
 		if dbg.TraceReexec && found {
-			fmt.Printf("SYNTH-DECLINE empty blk=%d tx=%d %x\n", sdb.blockNum, sdb.txIndex, addr)
+			fmt.Printf("SYNTH-DECLINE reason=empty blk=%d tx=%d %x\n", sdb.blockNum, sdb.txIndex, addr)
 		}
 		return nil, false
 	}

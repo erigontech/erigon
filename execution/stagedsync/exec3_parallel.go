@@ -2366,11 +2366,17 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 			// still be deleted if the prior flush wrote them.
 			prevFlushed := state.DropCreatedNonExistentWrites(prevWrites, be.versionMap.HasBAL)
 			newFlushable := state.DropCreatedNonExistentWrites(res.TxOut, be.versionMap.HasBAL)
+			deletedWrites := 0
 			for h := range prevFlushed.AllHeaders() {
 				if !newFlushable.Has(h) {
 					hasWriteChange = true
+					deletedWrites++
 					be.versionMap.Delete(h.Address, h.Path, h.Key, txVersion.TxIndex, true)
 				}
+			}
+			if dbg.TraceReexec {
+				fmt.Printf("REEXEC-RESULT blk=%d tx=%d inc=%d writeChange=%v deleted=%d\n",
+					be.blockNum, txVersion.TxIndex, txVersion.Incarnation, hasWriteChange, deletedWrites)
 			}
 
 			be.blockIO.RecordWrites(txVersion, res.TxOut)
@@ -2487,6 +2493,10 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 		// a result is committed only if validation explicitly passed it.
 		valid := validity == state.VersionValid
 
+		if dbg.TraceReexec && valid && cntInvalid > 0 {
+			fmt.Printf("FLUSH-EST blk=%d tx=%d inc=%d batchInvalid=%d\n",
+				be.blockNum, txVersion.TxIndex, txVersion.Incarnation, cntInvalid)
+		}
 		be.versionMap.SetTrace(trace)
 		writeSet := state.DropCreatedNonExistentWrites(be.blockIO.WriteSet(txVersion.TxIndex), be.versionMap.HasBAL)
 		be.versionMap.FlushVersionedWrites(writeSet, applyLoopFlushAsComplete(valid, cntInvalid), tracePrefix)

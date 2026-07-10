@@ -195,18 +195,39 @@ func (vm *VersionMap) StorageKeys(addr accounts.Address) []accounts.StorageKey {
 // panic on the first read of the cell.
 func (vm *VersionMap) WriteChanges(changes []*types.AccountChanges) {
 	for _, accountChanges := range changes {
+		if dbg.TraceBALFeed {
+			fmt.Printf("BAL-ACCT %x storage=%d balance=%d nonce=%d code=%d reads=%d\n",
+				accountChanges.Address, len(accountChanges.StorageChanges), len(accountChanges.BalanceChanges),
+				len(accountChanges.NonceChanges), len(accountChanges.CodeChanges), len(accountChanges.StorageReads))
+		}
 		for _, storageChanges := range accountChanges.StorageChanges {
 			for _, change := range storageChanges.Changes {
+				if dbg.TraceBALFeed {
+					fmt.Printf("BAL-CELL %x storage[%x] balIdx=%d cell=%d val=%s\n",
+						accountChanges.Address, storageChanges.Slot, change.Index, int(change.Index)-1, change.Value.Hex())
+				}
 				vm.WriteStorage(accountChanges.Address, storageChanges.Slot, Version{TxIndex: int(change.Index) - 1}, change.Value, true)
 			}
 		}
 		for _, balanceChange := range accountChanges.BalanceChanges {
+			if dbg.TraceBALFeed {
+				fmt.Printf("BAL-CELL %x balance balIdx=%d cell=%d val=%v\n",
+					accountChanges.Address, balanceChange.Index, int(balanceChange.Index)-1, &balanceChange.Value)
+			}
 			vm.WriteBalance(accountChanges.Address, Version{TxIndex: int(balanceChange.Index) - 1}, balanceChange.Value, true)
 		}
 		for _, nonceChange := range accountChanges.NonceChanges {
+			if dbg.TraceBALFeed {
+				fmt.Printf("BAL-CELL %x nonce balIdx=%d cell=%d val=%d\n",
+					accountChanges.Address, nonceChange.Index, int(nonceChange.Index)-1, nonceChange.Value)
+			}
 			vm.WriteNonce(accountChanges.Address, Version{TxIndex: int(nonceChange.Index) - 1}, nonceChange.Value, true)
 		}
 		for _, codeChange := range accountChanges.CodeChanges {
+			if dbg.TraceBALFeed {
+				fmt.Printf("BAL-CELL %x code balIdx=%d cell=%d len=%d\n",
+					accountChanges.Address, codeChange.Index, int(codeChange.Index)-1, len(codeChange.Bytecode))
+			}
 			vm.WriteCode(accountChanges.Address, Version{TxIndex: int(codeChange.Index) - 1}, accounts.NewCode(codeChange.Bytecode), true)
 		}
 	}

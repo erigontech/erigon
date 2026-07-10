@@ -618,8 +618,12 @@ func (te *txExecutor) executeBlocks(ctx context.Context, startBlockNum uint64, m
 					return fmt.Errorf("invalid block access list: %w", err)
 				}
 			}
-			if dbg.TraceReexec && blockNum%2000 == 0 {
-				fmt.Printf("BAL-FEED blk=%d balBytes=%d\n", blockNum, len(data))
+			if dbg.TraceBALFeed {
+				if dbBAL != nil {
+					fmt.Printf("BAL-FEED blk=%d bytes=%d accounts=%d\n", blockNum, len(data), len(dbBAL))
+				} else if te.cfg.chainConfig.IsAmsterdam(b.HeaderNoCopy().Time) {
+					fmt.Printf("BAL-MISSING blk=%d bytes=%d\n", blockNum, len(data))
+				}
 			}
 
 			txs := b.Transactions()
