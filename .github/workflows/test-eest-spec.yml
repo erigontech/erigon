@@ -106,7 +106,8 @@ jobs:
         env:
           EEST_SPEC_MAX_FAILURES: ${{ matrix.max-allowed-failures }}
           EEST_SPEC_WORKERS: ${{ matrix.workers }}
-        run: make eest-spec-${{ matrix.shard }}
+          SHARD: ${{ matrix.shard }}
+        run: make "eest-spec-$SHARD"
 
       - name: Build evm binary (cache warming)
         if: inputs.cache-warming-only
