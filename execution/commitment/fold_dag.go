@@ -126,16 +126,14 @@ func (b *foldDAGBuilder) derive(node *prefixNode, prefix []byte) *foldTask {
 	sc := node.subtreeCount
 	depth := len(prefix)
 
-	// Depth-64 account/storage seam: an account terminator (or a storage-only node
-	// when the account itself was untouched) carrying a foldable storage subtree
-	// splits into an account-leaf task that depends on a storage-root subtask, never
-	// an ordinary account-plane merge — its children are storage nibbles, not siblings.
+	// Depth-64 account/storage seam. A touched account (plainKey != nil) with a large,
+	// seedable storage subtree splits into an account-leaf task that depends on a
+	// storage-root subtask — its children are storage nibbles, not siblings. A storage-only
+	// node (account untouched) must not split: with no account update, the seam's
+	// setAccountStorageRoot would hash a cell missing the on-disk nonce/balance/codeHash, so
+	// it demotes to a serial leaf whose replay unfolds the account from disk.
 	if depth == 64 && node.bitmap != 0 {
-		storageSlots := sc
-		if node.plainKey != nil {
-			storageSlots--
-		}
-		if storageSlots > b.k && b.seedable(prefix) {
+		if node.plainKey != nil && sc-1 > b.k && b.seedable(prefix) {
 			leaf := b.newTask(prefix, node, foldLeaf, planeAccount)
 			storage := b.newTask(prefix, node, foldMerge, planeStorage)
 			b.addChildren(storage, node, prefix)

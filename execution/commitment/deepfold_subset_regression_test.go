@@ -32,6 +32,13 @@ import (
 // only the touch subset (plus a balance bump so the account leaf is touched). The
 // wide-minus-touch nibbles stay untouched on disk and must survive batch 2.
 func buildSubsetTouchedWhale(seed int64, wide, touch []byte, perNibble1, perNibble2 int) (k1 [][]byte, u1 []Update, k2 [][]byte, u2 []Update) {
+	return buildTouchedWhale(seed, wide, touch, perNibble1, perNibble2, true)
+}
+
+// buildTouchedWhale is buildSubsetTouchedWhale with control over whether batch 2 also
+// touches the whale's account. bumpBatch2Account=false leaves the account untouched
+// (a pure-SSTORE block), so the depth-64 seam node carries plainKey==nil.
+func buildTouchedWhale(seed int64, wide, touch []byte, perNibble1, perNibble2 int, bumpBatch2Account bool) (k1 [][]byte, u1 []Update, k2 [][]byte, u2 []Update) {
 	rnd := rand.New(rand.NewSource(seed))
 	addr := make([]byte, length.Addr)
 	rnd.Read(addr)
@@ -66,7 +73,9 @@ func buildSubsetTouchedWhale(seed int64, wide, touch []byte, perNibble1, perNibb
 	k1, u1 = ub1.Build()
 
 	ub2 := NewUpdateBuilder()
-	ub2.Balance(a, 2)
+	if bumpBatch2Account {
+		ub2.Balance(a, 2)
+	}
 	for _, n := range touch {
 		for range perNibble2 {
 			l, v := genSlot(n)
@@ -89,6 +98,23 @@ func TestDeepFold_PreExistingWhale_SubsetTouched(t *testing.T) {
 	// the storage subtree across the fold DAG while the untouched first-nibbles stay on disk.
 	k1, u1, k2, u2 := buildSubsetTouchedWhale(20260622, wide, touch, 60, 420)
 	fk, fu := buildMixedCorpus(7777, 200)
+	k1 = append(append([][]byte{}, fk...), k1...)
+	u1 = append(append([]Update{}, fu...), u1...)
+	requireAllEnginesParity(t, k1, u1, k2, u2, 4)
+}
+
+// A pre-existing whale whose account is NOT touched in the next block (a pure-SSTORE block:
+// storage slots churn past K while nonce/balance/code stay unchanged). The depth-64 seam node
+// then carries plainKey==nil, so the account leaf must fold through the serial demotion path
+// that unfolds the account from disk — the seam's setAccountStorageRoot would hash a cell
+// missing the on-disk nonce/balance/codeHash. Byte parity with the sequential trie is the
+// invariant across the streaming and parallel engines.
+func TestDeepFold_PreExistingWhale_StorageOnlyTouch(t *testing.T) {
+	wide := nibs(0, 1, 2, 3, 4, 5, 6, 7)
+	touch := nibs(0, 1, 2)
+	// batch 2 churns >K slots on the whale with no account touch, so plainKey==nil at the seam.
+	k1, u1, k2, u2 := buildTouchedWhale(20260709, wide, touch, 60, 420, false)
+	fk, fu := buildMixedCorpus(9182, 200)
 	k1 = append(append([][]byte{}, fk...), k1...)
 	u1 = append(append([]Update{}, fu...), u1...)
 	requireAllEnginesParity(t, k1, u1, k2, u2, 4)
