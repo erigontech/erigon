@@ -148,7 +148,7 @@ func (p *Provider) Initialize(deps Deps) error {
 	// commit time).
 	if hasAgg, ok := p.ChainDB.(dbstate.HasAgg); ok {
 		if agg, ok := hasAgg.Agg().(*dbstate.Aggregator); ok && agg != nil {
-			p.BlockFileBuilder.(*freezeblocks.BlockFileBuilder).SetCommitGate(agg.CommitGate())
+			p.BlockFileBuilder.(*freezeblocks.BlockRetire).SetCommitGate(agg.CommitGate())
 		}
 	}
 

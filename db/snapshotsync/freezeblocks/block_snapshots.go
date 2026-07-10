@@ -95,7 +95,7 @@ func chooseSegmentEnd(from, to uint64, snapType snaptype.Enum, snCfg *snapcfg.Cf
 	return to - (to % snaptype.Erigon2MinSegmentSize) // round down to the nearest 1k
 }
 
-type BlockFileBuilder struct {
+type BlockRetire struct {
 	maxScheduledBlock  atomic.Uint64
 	working            atomic.Bool
 	lastRetireGapStart atomic.Uint64
@@ -141,13 +141,13 @@ func NewBlockFileBuilder(
 	notifier services.DBEventNotifier,
 	snBuildAllowed *semaphore.Weighted,
 	logger log.Logger,
-) *BlockFileBuilder {
+) *BlockRetire {
 	var chainName string
 	if chainConfig != nil {
 		chainName = chainConfig.ChainName
 	}
 	snCfg := snapcfg.KnownCfgOrDevnet(chainName)
-	r := &BlockFileBuilder{
+	r := &BlockRetire{
 		tmpDir:                dirs.Tmp,
 		dirs:                  dirs,
 		blockReader:           blockReader,
@@ -168,34 +168,34 @@ func NewBlockFileBuilder(
 	return r
 }
 
-func (br *BlockFileBuilder) SetWorkers(workers int) { br.workers.Store(int32(workers)) }
-func (br *BlockFileBuilder) GetWorkers() int        { return int(br.workers.Load()) }
+func (br *BlockRetire) SetWorkers(workers int) { br.workers.Store(int32(workers)) }
+func (br *BlockRetire) GetWorkers() int        { return int(br.workers.Load()) }
 
 // SetCommitGate wraps the retirement's chain DB reads with the given gate so
 // each db.View acquires RLock, serializing against a writer (Aggregator
 // commit+prune path) that briefly holds Lock during MDBX commit. Prevents a
 // retirement RO tx from pinning the freelist and blocking page reclamation.
 // Safe to call with nil — no-op. Must be called before retirement starts.
-func (br *BlockFileBuilder) SetCommitGate(gate *sync.RWMutex) {
+func (br *BlockRetire) SetCommitGate(gate *sync.RWMutex) {
 	if gate == nil {
 		return
 	}
 	br.db = kv.NewGatedRoDB(br.db, gate)
 }
 
-func (br *BlockFileBuilder) IO() (services.FullBlockReader, *blockio.BlockWriter) {
+func (br *BlockRetire) IO() (services.FullBlockReader, *blockio.BlockWriter) {
 	return br.blockReader, br.blockWriter
 }
 
-func (br *BlockFileBuilder) BorStore() (heimdall.Store, bridge.Store) {
+func (br *BlockRetire) BorStore() (heimdall.Store, bridge.Store) {
 	return br.heimdallStore, br.bridgeStore
 }
 
-func (br *BlockFileBuilder) snapshots() *blocksnapshots.RoSnapshots {
+func (br *BlockRetire) snapshots() *blocksnapshots.RoSnapshots {
 	return br.blockReader.Snapshots().(*blocksnapshots.RoSnapshots)
 }
 
-func (br *BlockFileBuilder) borSnapshots() *heimdall.RoSnapshots {
+func (br *BlockRetire) borSnapshots() *heimdall.RoSnapshots {
 	return br.blockReader.BorSnapshots().(*heimdall.RoSnapshots)
 }
 
@@ -222,7 +222,7 @@ func CanDeleteTo(curBlockNum uint64, blocksInSnapshots uint64) (blockTo uint64) 
 	return min(hardLimit, blocksInSnapshots+1)
 }
 
-func (br *BlockFileBuilder) dbHasEnoughDataForBlocksRetire(ctx context.Context) (bool, error) {
+func (br *BlockRetire) dbHasEnoughDataForBlocksRetire(ctx context.Context) (bool, error) {
 	// pre-check if db has enough data
 	var haveGap bool
 	if err := br.db.View(ctx, func(tx kv.Tx) error {
@@ -255,7 +255,7 @@ func (br *BlockFileBuilder) dbHasEnoughDataForBlocksRetire(ctx context.Context) 
 	return !haveGap, nil
 }
 
-func (br *BlockFileBuilder) buildFiles(
+func (br *BlockRetire) buildFiles(
 	ctx context.Context,
 	minBlockNum uint64,
 	maxBlockNum uint64,
@@ -299,7 +299,7 @@ func (br *BlockFileBuilder) buildFiles(
 	return ok || merged, err
 }
 
-func (br *BlockFileBuilder) MergeBlocks(
+func (br *BlockRetire) MergeBlocks(
 	ctx context.Context,
 	lvl log.Lvl,
 	seeder downloader.SeederClient,
@@ -339,7 +339,7 @@ func (br *BlockFileBuilder) MergeBlocks(
 
 var mxPruneTookBor = metrics.GetOrCreateSummary(`prune_seconds{type="bor"}`)
 
-func (br *BlockFileBuilder) PruneAncientBlocks(tx kv.RwTx, limit int, timeout time.Duration) (deleted int, err error) {
+func (br *BlockRetire) PruneAncientBlocks(tx kv.RwTx, limit int, timeout time.Duration) (deleted int, err error) {
 	if br.blockReader.FreezingCfg().KeepBlocks {
 		return deleted, nil
 	}
@@ -380,7 +380,7 @@ func (br *BlockFileBuilder) PruneAncientBlocks(tx kv.RwTx, limit int, timeout ti
 	return deleted + deletedBorBlocks, nil
 }
 
-func (br *BlockFileBuilder) BuildFilesInBackground(
+func (br *BlockRetire) BuildFilesInBackground(
 	ctx context.Context,
 	minBlockNum,
 	maxBlockNum uint64,
@@ -447,7 +447,7 @@ func (br *BlockFileBuilder) BuildFilesInBackground(
 
 // Close cancels the in-flight background retire and waits for it, so the DB and
 // snapshots can be torn down safely afterwards. Idempotent.
-func (br *BlockFileBuilder) Close() {
+func (br *BlockRetire) Close() {
 	if !br.background.BeginClose() {
 		return
 	}
@@ -455,7 +455,7 @@ func (br *BlockFileBuilder) Close() {
 	br.background.Wait()
 }
 
-func (br *BlockFileBuilder) BuildFiles(
+func (br *BlockRetire) BuildFiles(
 	ctx context.Context,
 	requestedMinBlockNum uint64,
 	requestedMaxBlockNum uint64,
@@ -524,7 +524,7 @@ func (br *BlockFileBuilder) BuildFiles(
 	return nil
 }
 
-func (br *BlockFileBuilder) BuildMissedIndicesIfNeed(ctx context.Context, logPrefix string, notifier services.DBEventNotifier) error {
+func (br *BlockRetire) BuildMissedIndicesIfNeed(ctx context.Context, logPrefix string, notifier services.DBEventNotifier) error {
 	if err := br.snapshots().BuildMissedIndices(ctx, logPrefix, notifier, br.dirs, br.chainConfig, br.logger); err != nil {
 		return err
 	}
@@ -537,7 +537,7 @@ func (br *BlockFileBuilder) BuildMissedIndicesIfNeed(ctx context.Context, logPre
 
 	return nil
 }
-func (br *BlockFileBuilder) RemoveOverlaps(onDelete func(l []string) error) error {
+func (br *BlockRetire) RemoveOverlaps(onDelete func(l []string) error) error {
 	if err := br.snapshots().RemoveOverlaps(onDelete); err != nil {
 		return err
 	}
@@ -550,7 +550,7 @@ func (br *BlockFileBuilder) RemoveOverlaps(onDelete func(l []string) error) erro
 	return nil
 }
 
-func (br *BlockFileBuilder) MadvNormal() *BlockFileBuilder {
+func (br *BlockRetire) MadvNormal() *BlockRetire {
 	br.snapshots().MadvNormal()
 	if br.chainConfig.Bor != nil {
 		br.borSnapshots().BaseRoSnapshots.MadvNormal()
@@ -558,7 +558,7 @@ func (br *BlockFileBuilder) MadvNormal() *BlockFileBuilder {
 	return br
 }
 
-func (br *BlockFileBuilder) DisableReadAhead() {
+func (br *BlockRetire) DisableReadAhead() {
 	br.snapshots().DisableReadAhead()
 	if br.chainConfig.Bor != nil {
 		br.borSnapshots().BaseRoSnapshots.DisableReadAhead()

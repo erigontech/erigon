@@ -22,7 +22,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	uint256 "github.com/holiman/uint256"
+	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
@@ -137,7 +137,7 @@ func TestBlockFileBuilderSkipsOnGap(t *testing.T) {
 	require.NoError(t, rwTx.Commit())
 
 	blockReader := NewBlockReader(snapshots, nil)
-	br := &BlockFileBuilder{
+	br := &BlockRetire{
 		db:          db,
 		blockReader: blockReader,
 		logger:      logger,
@@ -178,7 +178,7 @@ func TestBlockFileBuilderContiguous(t *testing.T) {
 	require.NoError(t, rwTx.Commit())
 
 	blockReader := NewBlockReader(snapshots, nil)
-	br := &BlockFileBuilder{
+	br := &BlockRetire{
 		db:          db,
 		blockReader: blockReader,
 		logger:      logger,
@@ -229,7 +229,7 @@ func TestBlockFileBuilderFallback(t *testing.T) {
 
 	// DB starts right after snapshots, retirement should be allowed.
 	blockReader := NewBlockReader(snapshots, nil)
-	br := &BlockFileBuilder{
+	br := &BlockRetire{
 		db:          db,
 		blockReader: blockReader,
 		logger:      logger,
@@ -255,7 +255,7 @@ func TestBlockFileBuilderFallback(t *testing.T) {
 	requireSegmentFilesExist(t, tmpDir, ver, 1000, 2000, snaptype2.Enums.Transactions)
 
 	blockReader = NewBlockReader(reopenedSnapshots, nil)
-	br = &BlockFileBuilder{
+	br = &BlockRetire{
 		db:          db,
 		blockReader: blockReader,
 		logger:      logger,
@@ -276,7 +276,7 @@ func TestBlockFileBuilderFallback(t *testing.T) {
 	require.Equal(t, uint64(1999), restoredSnapshots.SegmentsMax())
 
 	blockReader = NewBlockReader(restoredSnapshots, nil)
-	br = &BlockFileBuilder{
+	br = &BlockRetire{
 		db:          db,
 		blockReader: blockReader,
 		logger:      logger,
@@ -337,7 +337,7 @@ func TestBlockFileBuilderAllOverlapped(t *testing.T) {
 	require.Equal(t, uint64(1999), reopened.SegmentsMax())
 
 	blockReader := NewBlockReader(reopened, nil)
-	br := &BlockFileBuilder{
+	br := &BlockRetire{
 		db:          db,
 		blockReader: blockReader,
 		logger:      logger,

@@ -947,7 +947,7 @@ func stageCustomTrace(db kv.TemporalRwDB, ctx context.Context, logger log.Logger
 	must(batchSize.UnmarshalText([]byte(batchSizeStr)))
 
 	agg := db.(dbstate.HasAgg).Agg().(*dbstate.Aggregator)
-	defer br.(*freezeblocks.BlockFileBuilder).MadvNormal().DisableReadAhead()
+	defer br.(*freezeblocks.BlockRetire).MadvNormal().DisableReadAhead()
 	//defer agg.MadvNormal().DisableReadAhead()
 
 	blockSnapBuildSema := semaphore.NewWeighted(int64(runtime.NumCPU()))

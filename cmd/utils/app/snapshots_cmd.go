@@ -3035,7 +3035,7 @@ type OpenSnapsResult struct {
 	BorSnaps         *heimdall.RoSnapshots
 	CaplinSnaps      *freezeblocks.CaplinSnapshots
 	CaplinStateSnaps *snapshotsync.CaplinStateSnapshots
-	BlockRetire      *freezeblocks.BlockFileBuilder
+	BlockRetire      *freezeblocks.BlockRetire
 	Aggregator       *state.Aggregator
 }
 
