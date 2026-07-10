@@ -96,19 +96,6 @@ func (at *AggregatorRoTx) Retire(ctx context.Context, cutoffs kv.RetireCutoffs) 
 		return 0, nil
 	}
 
-	// Paranoia: retire deletes files. A cutoff reaching the visible tip means the retention
-	// window collapsed and every file would be retired — almost always a caller bug (a distance
-	// computed as ~0). Refuse rather than wipe the node's history.
-	if tip := at.visibleFilesMaxEndTxNum(); tip > 0 {
-		cutoff := cutoffs.Default
-		for _, c := range cutoffs.PerDomain {
-			cutoff = max(cutoff, c)
-		}
-		if cutoff >= tip {
-			return 0, fmt.Errorf("retire refused: cutoff %d >= visible tip %d (retention window too small; would retire all files)", cutoff, tip)
-		}
-	}
-
 	// Select over visible files (no lock — at.d/at.iis are the pinned visible generation).
 	var deleted []string
 	var aged []agedFiles
@@ -124,8 +111,14 @@ func (at *AggregatorRoTx) Retire(ctx context.Context, cutoffs kv.RetireCutoffs) 
 		if cutoffStep == 0 {
 			continue
 		}
-		if len(dt.ht.files) == 0 || cutoffTxNum <= dt.ht.files[0].startTxNum {
+		if len(dt.ht.files) == 0 {
 			continue
+		}
+		if cutoffTxNum <= dt.ht.files.StartTxNum() {
+			continue
+		}
+		if tip := dt.ht.files.EndTxNum(); cutoffTxNum >= tip {
+			return 0, fmt.Errorf("retire refused: cutoff %d >= %s tip %d (would retire all its files)", cutoffTxNum, dt.name, tip)
 		}
 		d, agedList := dt.ht.filesBeforeStep(cutoffStep)
 		deleted = append(deleted, d...)
@@ -139,8 +132,14 @@ func (at *AggregatorRoTx) Retire(ctx context.Context, cutoffs kv.RetireCutoffs) 
 		if cutoffStep == 0 {
 			continue
 		}
-		if len(iit.files) == 0 || cutoffs.Default <= iit.files[0].startTxNum {
+		if len(iit.files) == 0 {
 			continue
+		}
+		if cutoffs.Default <= iit.files.StartTxNum() {
+			continue
+		}
+		if tip := iit.files.EndTxNum(); cutoffs.Default >= tip {
+			return 0, fmt.Errorf("retire refused: cutoff %d >= %s tip %d (would retire all its files)", cutoffs.Default, iit.ii.FilenameBase, tip)
 		}
 		d, agedList := iit.filesBeforeStep(cutoffStep)
 		deleted = append(deleted, d...)
@@ -155,8 +154,7 @@ func (at *AggregatorRoTx) Retire(ctx context.Context, cutoffs kv.RetireCutoffs) 
 		return 0, nil
 	}
 
-	// Detach from dirtyFiles + publish the new visible generation atomically. Only this needs
-	// the lock: it mutates the dirtyFiles btrees that recalcVisibleFiles reads.
+	// get lock only if have something to retire
 	at.a.dirtyFilesLock.Lock()
 	defer at.a.dirtyFilesLock.Unlock()
 	for _, agedList := range aged {
