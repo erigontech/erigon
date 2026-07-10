@@ -51,7 +51,7 @@ type SnapshotsCfg struct {
 	db                 kv.TemporalRwDB
 	chainConfig        *chain.Config
 	dirs               datadir.Dirs
-	blockFileBuilder   services.BlockRetire
+	blockRetire        services.BlockRetire
 	snapshotDownloader downloader.Client
 	blockReader        services.FullBlockReader
 	notifier           *shards.Notifications
@@ -94,7 +94,7 @@ func StageSnapshotsCfg(db kv.TemporalRwDB,
 		db:                 db,
 		chainConfig:        chainConfig,
 		dirs:               dirs,
-		blockFileBuilder:   blockFileBuilder,
+		blockRetire:        blockFileBuilder,
 		snapshotDownloader: snapshotDownloader,
 		blockReader:        blockReader,
 		notifier:           notifier,
@@ -357,7 +357,7 @@ func buildOrDeferE2Indices(ctx context.Context, s *StageState, cfg SnapshotsCfg,
 	canDefer := headersProgress > 0 && !isBor
 
 	if !canDefer {
-		if err := cfg.blockFileBuilder.BuildMissedIndicesIfNeed(ctx, s.LogPrefix(), cfg.notifier.Events); err != nil {
+		if err := cfg.blockRetire.BuildMissedIndicesIfNeed(ctx, s.LogPrefix(), cfg.notifier.Events); err != nil {
 			return err
 		}
 	} else {
@@ -453,12 +453,12 @@ func SnapshotsPrune(s *PruneState, cfg SnapshotsCfg, ctx context.Context, tx kv.
 		var minBlockNumber uint64
 
 		if s.CurrentSyncCycle.IsInitialCycle {
-			cfg.blockFileBuilder.SetWorkers(estimate.CompressSnapshot.Workers())
+			cfg.blockRetire.SetWorkers(estimate.CompressSnapshot.Workers())
 		} else {
-			cfg.blockFileBuilder.SetWorkers(1)
+			cfg.blockRetire.SetWorkers(1)
 		}
 
-		started := cfg.blockFileBuilder.BuildFilesInBackground(
+		started := cfg.blockRetire.BuildFilesInBackground(
 			ctx,
 			minBlockNumber,
 			s.ForwardProgress,
@@ -487,7 +487,7 @@ func SnapshotsPrune(s *PruneState, cfg SnapshotsCfg, ctx context.Context, tx kv.
 		pruneLimit = 10_000
 		pruneTimeout = time.Hour
 	}
-	if _, err := cfg.blockFileBuilder.PruneAncientBlocks(tx, pruneLimit, pruneTimeout); err != nil {
+	if _, err := cfg.blockRetire.PruneAncientBlocks(tx, pruneLimit, pruneTimeout); err != nil {
 		return err
 	}
 	if err := pruneCanonicalMarkers(ctx, tx, cfg.blockReader); err != nil {
