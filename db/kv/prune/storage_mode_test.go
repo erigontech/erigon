@@ -171,7 +171,7 @@ func TestFromCli_CommitmentHistory(t *testing.T) {
 
 func TestNamedModesKeepAllReceipts(t *testing.T) {
 	for _, m := range []Mode{ArchiveMode, FullMode, BlocksMode, MinimalMode, MockMode, DefaultMode} {
-		assert.Equal(t, KeepAllBlocksPruneMode, m.Receipts, "named modes must default Receipts to keep-all")
+		assert.Equal(t, KeepAllBlocksPruneMode, m.Receipts, "named modes must leave Receipts at the follow-history default (KeepAllBlocksPruneMode, not the explicit keep-all sentinel KeepAllReceiptsPruneMode)")
 		assert.False(t, m.Receipts.Enabled())
 	}
 }

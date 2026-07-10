@@ -462,3 +462,31 @@ func TestGetMinimumBlocksToDownload_MinBlock(t *testing.T) {
 	assert.Equal(t, kv.Step(199), commitmentStep)
 	assert.Equal(t, kv.Step(99), receiptsStep)
 }
+
+// TestGetMinimumBlocksToDownload_CutoffBelowFrozenBodies pins sentinel
+// normalization: when a prune-to boundary block is not visited during the
+// frozen-body scan (it falls below the first frozen body), the corresponding
+// step must resolve to 0 — disabling that filter so nothing is blacklisted —
+// rather than staying at the MaxUint32 sentinel, which would blacklist every
+// matching history file and skip downloading data the node needs.
+func TestGetMinimumBlocksToDownload_CutoffBelowFrozenBodies(t *testing.T) {
+	const stepSize = 100
+	br := &fakeBlockReader{
+		frozenMax: 1000,
+		bodies: []frozenBody{
+			{blockNum: 500, baseTxNum: 50_000},
+			{blockNum: 600, baseTxNum: 60_000},
+			{blockNum: 700, baseTxNum: 70_000},
+		},
+	}
+	tx := beginTestRoTx(t)
+	// All three prune-to boundaries (50/60/70) sit below the first frozen body
+	// (500), so none is hit during iteration and each step stays unset.
+	_, historyStep, commitmentStep, receiptsStep, err := getMinimumBlocksToDownload(context.Background(), br, tx, 600, stepSize, 50, 60, 70)
+	if err != nil {
+		t.Fatal(err)
+	}
+	assert.Equal(t, kv.Step(0), historyStep)
+	assert.Equal(t, kv.Step(0), commitmentStep)
+	assert.Equal(t, kv.Step(0), receiptsStep)
+}

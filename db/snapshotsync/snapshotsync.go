@@ -256,7 +256,21 @@ func getMinimumBlocksToDownload(
 		return 0, 0, 0, 0, err
 	}
 
+	// A prune-to boundary below the first frozen body is never hit above, leaving
+	// its step at the MaxUint32 sentinel. Resolve it to 0 (disable the filter,
+	// keep everything) so an unfound cutoff can't blacklist every matching file.
+	minHistoryStep = clearUnsetStep(minHistoryStep)
+	minCommitmentHistoryStep = clearUnsetStep(minCommitmentHistoryStep)
+	minReceiptsStep = clearUnsetStep(minReceiptsStep)
+
 	return frozenBlocks - minToDownload, minHistoryStep, minCommitmentHistoryStep, minReceiptsStep, nil
+}
+
+func clearUnsetStep(s kv.Step) kv.Step {
+	if s == kv.Step(math.MaxUint32) {
+		return 0
+	}
+	return s
 }
 
 func getMaxStepRangeInSnapshots(preverified snapcfg.Preverified) (uint64, error) {
