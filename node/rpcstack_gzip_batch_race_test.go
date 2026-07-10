@@ -27,6 +27,9 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/common/testlog"
+	"github.com/erigontech/erigon/rpc"
 	"github.com/erigontech/erigon/rpc/jsonstream"
 )
 
@@ -46,7 +49,8 @@ func (gzipBatchStreamingService) Echo(s string, stream jsonstream.Stream) error 
 // underlying gzip.Writer and can dereference a nil flate compressor. Run with -race to
 // observe the race (or a direct panic/crash from an unrecovered panic in a batch goroutine).
 func TestGzipHandlerBatchConcurrentStreamableFlush(t *testing.T) {
-	srv := newTestRPCServer(t)
+	srv := rpc.NewServer(50, false /* traceRequests */, false /* traceSingleRequest */, true, testlog.Logger(t, log.LvlError), 0)
+	t.Cleanup(srv.Stop)
 	require.NoError(t, srv.RegisterName("test", gzipBatchStreamingService{}))
 
 	handler := newGzipHandler(srv)
