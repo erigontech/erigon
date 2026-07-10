@@ -136,14 +136,14 @@ type ExecModuleTester struct {
 	TxPool           *txpool.TxPool
 	TxPoolGrpcServer txpoolproto.TxpoolServer
 
-	HistoryV3        bool
-	cfg              ethconfig.Config
-	BlockSnapshots   *blocksnapshots.RoSnapshots
-	blockFileBuilder services.BlockRetire
-	BlockReader      services.FullBlockReader
-	ReceiptsReader   *receipts.Generator
-	posStagedSync    *stagedsync.Sync
-	bgComponentsEg   errgroup.Group
+	HistoryV3      bool
+	cfg            ethconfig.Config
+	BlockSnapshots *blocksnapshots.RoSnapshots
+	blockRetire    services.BlockRetire
+	BlockReader    services.FullBlockReader
+	ReceiptsReader *receipts.Generator
+	posStagedSync  *stagedsync.Sync
+	bgComponentsEg errgroup.Group
 }
 
 func (emt *ExecModuleTester) Close() {
@@ -151,8 +151,8 @@ func (emt *ExecModuleTester) Close() {
 	if err := emt.bgComponentsEg.Wait(); err != nil && emt.tb != nil {
 		require.Equal(emt.tb, context.Canceled, err) // upon waiting for clean exit we should get ctx cancelled
 	}
-	if emt.blockFileBuilder != nil {
-		emt.blockFileBuilder.Close()
+	if emt.blockRetire != nil {
+		emt.blockRetire.Close()
 	}
 	if emt.Engine != nil {
 		emt.Engine.Close()
@@ -676,7 +676,7 @@ func New(tb testing.TB, opts ...Option) *ExecModuleTester {
 	)
 
 	blockRetire := freezeblocks.NewBlockRetire(mock.Ctx, 1, dirs, mock.BlockReader, blockWriter, mock.DB, nil, nil, mock.ChainConfig, &cfg, mock.Notifications.Events, nil, logger)
-	mock.blockFileBuilder = blockRetire
+	mock.blockRetire = blockRetire
 	mock.Sync = stagedsync.New(
 		cfg.Sync,
 		stagedsync.DefaultStages(
