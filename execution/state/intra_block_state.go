@@ -2899,16 +2899,31 @@ func (sdb *IntraBlockState) reconstructCellFlags(obj *stateObject, addr accounts
 	if sd, ok := sdb.versionedWriteSelfDestruct(addr); ok && sd {
 		obj.selfdestructed = true
 	}
-	// The transient object is rebuilt from the tx-start account, so
-	// stateObject.Code() would resolve this tx's own SetCode via the versionMap
-	// floor (prior-tx only) and miss it. Seed the code from this tx's own Code
-	// write cell so delegation/code reads through the object see it.
+	// The transient is rebuilt from the AddressPath account, whose CodeHash can
+	// lag the CodePath/CodeHashPath cells (e.g. a delegation set by a prior tx
+	// whose AddressPath record was published with an empty code hash). Seed the
+	// code from this tx's own Code write, else the versionMap floor cell, so
+	// object code reads (GetDelegatedDesignation, stateObject.Code()) agree with
+	// the cells — matching the refresh-and-sync the fall-through getStateObject
+	// path performs for accounts it materializes from scratch.
 	if _, isDirty := sdb.journal.dirties[addr]; isDirty {
 		if vw, ok := sdb.versionedWrites.GetCode(addr); ok && vw.Val.Bytes != nil {
 			obj.code = vw.Val
 			obj.data.CodeHash = vw.Val.Hash
+			return
 		}
 	}
+	if obj.code.Bytes != nil {
+		return
+	}
+	code, _, _, err := refreshCode(sdb, addr)
+	if err != nil || code == nil {
+		return
+	}
+	codeHash := accounts.InternCodeHash(crypto.HashData(code))
+	obj.code = accounts.Code{Hash: codeHash, Bytes: code}
+	obj.data.CodeHash = codeHash
+	obj.original.CodeHash = codeHash
 }
 
 // versionedWriteHit probes the dirty per-tx write set for a write at
