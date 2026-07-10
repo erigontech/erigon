@@ -116,9 +116,9 @@ type FullBlockReader interface {
 // BlockRetire - freezing blocks: moving old data from DB to snapshot files
 type BlockRetire interface {
 	PruneAncientBlocks(tx kv.RwTx, limit int, timeout time.Duration) (deleted int, err error)
-	RetireBlocksInBackground(
+	BuildFilesInBackground(
 		ctx context.Context,
-		miBlockNum uint64,
+		minBlockNum uint64,
 		maxBlockNum uint64,
 		lvl log.Lvl,
 		seeder downloader.SeederClient,
