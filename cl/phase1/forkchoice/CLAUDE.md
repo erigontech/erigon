@@ -27,10 +27,10 @@ verified against the Go code in this repository.
 | `get_head.go`: `accountWeights`, `computeVotes`, `getHead`, `GetHead` | Phase0 `get_attestation_score`, `get_weight`, `get_head`; Gloas dispatch boundary for modified `get_head` |
 | `get_head.go`: `getHeadGloas` | Gloas `get_head`, `get_node_children`, `get_weight`, `get_payload_status_tiebreaker` |
 | `get_head.go`: `getFilteredBlockTree`, `getFilterBlockTree` | Phase0 `get_filtered_block_tree`, `filter_block_tree`, `get_voting_source`; Gloas inherits filtered-tree viability |
-| `weight_store.go`, `weight_store_indexed.go`: `GetWeight`, `GetAttestationScore`, `GetProposerScore`, `ShouldApplyProposerBoost`, `IndexVote`, `RemoveVote` | Phase0 `get_weight`, `get_attestation_score`, `get_proposer_score`; Gloas modified `get_weight`, `get_attestation_score`, `should_apply_proposer_boost`, `LatestMessage` indexing |
+| `weight_store.go`, `gloas_weight_tree.go`: `GetWeight`, `GetAttestationScore`, `GetProposerScore`, `ShouldApplyProposerBoost` | Phase0 `get_weight`, `get_attestation_score`, `get_proposer_score`; Gloas modified `get_weight`, `get_attestation_score`, delta-maintained `LatestMessage` weights; delegates Gloas proposer-boost checks to `timing.go` |
 | `payload_vote.go`: `notifyPtcMessages`, `applyPayloadAttestationVote` | Gloas `notify_ptc_messages`, `on_payload_attestation_message` vote application |
 | `payload_vote.go`: `payloadTimeliness`, `payloadDataAvailability` | Gloas `payload_timeliness`, `payload_data_availability`; requires local envelope availability plus independent PTC majorities |
-| `payload_vote.go`: `getParentPayloadStatus`, `isParentNodeFull`, `isSupportingVote` | Gloas `get_parent_payload_status`, `is_parent_node_full`, `is_supporting_vote` |
+| `payload_vote.go`: `getParentPayloadStatus`, `isParentNodeFull`, `getSupportedNode`, `isAncestor` | Gloas `get_parent_payload_status`, `is_parent_node_full`, `get_supported_node`, `is_ancestor` |
 | `payload_vote.go`: `ShouldExtendPayload`, `getPayloadStatusTiebreaker`, `getNodeChildren`, `validateParentPayloadPath` | Gloas `should_extend_payload`, `get_payload_status_tiebreaker`, `get_node_children`, modified `on_block` parent payload path checks |
 | `timing.go`: `getAttestationDueMs`, `getAggregateDueMs`, `getSyncMessageDueMs`, `getContributionDueMs`, `getPayloadAttestationDueMs` | Phase0 timing helpers; Gloas modified timing helpers and `get_payload_attestation_due_ms` |
 | `timing.go`: `recordBlockTimeliness`, `updateProposerBoostRoot`, `shouldApplyProposerBoostGloas` | Phase0 `record_block_timeliness`, `update_proposer_boost_root`; Gloas modified `record_block_timeliness`, `update_proposer_boost_root`, `should_apply_proposer_boost` |
@@ -96,7 +96,7 @@ verified against the Go code in this repository.
 - Gloas payload status: when reviewing `PENDING`, `EMPTY`, and `FULL` handling,
   trace both the beacon block root and the parent execution block hash. Confirm
   `get_parent_payload_status`, `get_node_children`,
-  `get_payload_status_tiebreaker`, and `is_supporting_vote` agree on the same
+  `get_payload_status_tiebreaker`, and `is_ancestor` agree on the same
   status transition.
 - PTC votes: payload timeliness and blob-data availability are separate vote
   vectors. A payload-present vote must not imply blob-data availability, and

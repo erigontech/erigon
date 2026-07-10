@@ -22,6 +22,7 @@ import (
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/engineapi/engine_helpers"
 	"github.com/erigontech/erigon/execution/engineapi/engine_types"
+	"github.com/erigontech/erigon/execution/types"
 )
 
 func TestSSZRESTCapabilitiesCodecRoundTrip(t *testing.T) {
@@ -71,6 +72,15 @@ func TestSSZRESTRequestCodecsRoundTrip(t *testing.T) {
 			require.NoError(t, tc.decode(enc, tc.version))
 		})
 	}
+}
+
+func TestSSZRESTBeaconChainConfigPrefersRuntimeConfig(t *testing.T) {
+	cfg := clparams.MainnetBeaconConfig
+	cfg.BuilderDepositRequestType = 0x7a
+	srv := NewEngineServer(log.New(), &chain.Config{ChainName: "mainnet"}, nil, nil, false, true, false, false, nil, nil, 0, 0)
+	srv.SetBeaconChainConfig(&cfg)
+
+	require.Same(t, &cfg, srv.beaconChainConfig())
 }
 
 func encodeEmptyNewPayloadRequest(version clparams.StateVersion) ([]byte, error) {
@@ -230,7 +240,8 @@ func TestSSZRESTNewPayloadV5UsesGloasPayloadSchema(t *testing.T) {
 	payload := engine_types.NewExecutionPayloadSSZ(clparams.GloasVersion)
 	slot := hexutil.Uint64(123)
 	payload.SlotNumber = &slot
-	payload.BlockAccessList = hexutil.Bytes{0x01, 0x02, 0x03}
+	bal := hexutil.Bytes{0x01, 0x02, 0x03}
+	payload.BlockAccessList = &bal
 
 	enc, err := encodeNewPayloadRequest(clparams.GloasVersion, payload, solid.NewHashList(sszMaxBlobHashes), common.Hash{}, &solid.TransactionsSSZ{})
 	require.NoError(t, err)
@@ -242,7 +253,8 @@ func TestSSZRESTNewPayloadV5UsesGloasPayloadSchema(t *testing.T) {
 
 	require.NotNil(t, out.SlotNumber)
 	require.Equal(t, hexutil.Uint64(123), *out.SlotNumber)
-	require.Equal(t, hexutil.Bytes{0x01, 0x02, 0x03}, out.BlockAccessList)
+	require.NotNil(t, out.BlockAccessList)
+	require.Equal(t, hexutil.Bytes{0x01, 0x02, 0x03}, *out.BlockAccessList)
 }
 
 func TestSSZRESTForkchoiceV4UsesGloasPayloadAttributesSchema(t *testing.T) {
@@ -270,6 +282,84 @@ func TestSSZRESTForkchoiceV4UsesGloasPayloadAttributesSchema(t *testing.T) {
 	require.Equal(t, hexutil.Uint64(456), *engineAttrs.SlotNumber)
 	require.NotNil(t, engineAttrs.TargetGasLimit)
 	require.Equal(t, hexutil.Uint64(36000000), *engineAttrs.TargetGasLimit)
+}
+
+func TestExecutionRequestsFromListDecodesGloasBuilderRequests(t *testing.T) {
+	builderDeposit := &solid.BuilderDepositRequest{Amount: 123}
+	builderDeposit.PubKey[0] = 0x11
+	builderDeposit.WithdrawalCredentials[0] = 0x01
+	builderDeposit.Signature[0] = 0x22
+	builderExit := &solid.BuilderExitRequest{SourceAddress: common.HexToAddress("0x0000000000000000000000000000000000001234")}
+	builderExit.PubKey[0] = 0x33
+	encodedDeposit, err := builderDeposit.EncodeSSZ(nil)
+	require.NoError(t, err)
+	encodedExit, err := builderExit.EncodeSSZ(nil)
+	require.NoError(t, err)
+
+	requests, err := executionRequestsFromList(&clparams.MainnetBeaconConfig, []hexutil.Bytes{
+		append(hexutil.Bytes{types.BuilderDepositRequestType}, encodedDeposit...),
+		append(hexutil.Bytes{types.BuilderExitRequestType}, encodedExit...),
+	}, clparams.GloasVersion)
+	require.NoError(t, err)
+
+	require.Equal(t, 1, requests.BuilderDeposits.Len())
+	require.Equal(t, 1, requests.BuilderExits.Len())
+	require.Equal(t, uint64(123), requests.BuilderDeposits.Get(0).Amount)
+	require.Equal(t, builderExit.SourceAddress, requests.BuilderExits.Get(0).SourceAddress)
+}
+
+func TestExecutionRequestsFromListRejectsInvalidOrdering(t *testing.T) {
+	emptyDeposits, err := solid.NewStaticListSSZ[*solid.DepositRequest](1, solid.SizeDepositRequest).EncodeSSZ(nil)
+	require.NoError(t, err)
+	emptyWithdrawals, err := solid.NewStaticListSSZ[*solid.WithdrawalRequest](1, solid.SizeWithdrawalRequest).EncodeSSZ(nil)
+	require.NoError(t, err)
+
+	for _, tc := range []struct {
+		name     string
+		requests []hexutil.Bytes
+	}{
+		{
+			name:     "empty",
+			requests: []hexutil.Bytes{{}},
+		},
+		{
+			name: "duplicate",
+			requests: []hexutil.Bytes{
+				append(hexutil.Bytes{types.DepositRequestType}, emptyDeposits...),
+				append(hexutil.Bytes{types.DepositRequestType}, emptyDeposits...),
+			},
+		},
+		{
+			name: "out of order",
+			requests: []hexutil.Bytes{
+				append(hexutil.Bytes{types.WithdrawalRequestType}, emptyWithdrawals...),
+				append(hexutil.Bytes{types.DepositRequestType}, emptyDeposits...),
+			},
+		},
+		{
+			name:     "unknown",
+			requests: []hexutil.Bytes{{0xff, 0x00}},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := executionRequestsFromList(&clparams.MainnetBeaconConfig, tc.requests, clparams.GloasVersion)
+			require.Error(t, err)
+		})
+	}
+}
+
+func TestEncodeGetPayloadResponseIgnoresExecutionRequestsBeforeElectra(t *testing.T) {
+	for _, version := range []clparams.StateVersion{clparams.CapellaVersion, clparams.DenebVersion} {
+		t.Run(version.String(), func(t *testing.T) {
+			resp := &engine_types.GetPayloadResponse{
+				ExecutionPayload:  engine_types.NewExecutionPayloadSSZ(version),
+				ExecutionRequests: []hexutil.Bytes{{0xff, 0x00}},
+			}
+
+			_, err := encodeGetPayloadResponse(&clparams.MainnetBeaconConfig, resp, version)
+			require.NoError(t, err)
+		})
+	}
 }
 
 func TestExchangeCapabilitiesAdvertisesJSONRPCAndSSZREST(t *testing.T) {

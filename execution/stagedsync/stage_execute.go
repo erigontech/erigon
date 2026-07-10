@@ -147,6 +147,36 @@ func (cfg ExecuteBlockCfg) WithAuthor(author accounts.Address) ExecuteBlockCfg {
 
 var ErrTooDeepUnwind = errors.New("too deep unwind")
 
+// findExecutedDiffsetAtHeight returns the diffset of the block executed at currentBlock.
+// When no canonical hash is recorded at that height (e.g. the block is no longer canonical
+// after a reorg) it falls back to the stored header.
+func findExecutedDiffsetAtHeight(ctx context.Context, rwTx kv.TemporalRwTx, br services.FullBlockReader, doms *execctx.SharedDomains, currentBlock uint64) (diffSet [kv.DomainLen][]kv.DomainEntryDiff, executedHash common.Hash, found bool, err error) {
+	executedHash, ok, err := br.CanonicalHash(ctx, rwTx, currentBlock)
+	if err != nil {
+		return diffSet, common.Hash{}, false, err
+	}
+	if !ok {
+		// we may have executed blocks which are not in the canonical chain
+		nonCanonicalHeaders, err := rawdb.ReadHeadersByNumber(rwTx, currentBlock)
+		if err != nil {
+			return diffSet, common.Hash{}, false, err
+		}
+		switch {
+		case len(nonCanonicalHeaders) == 0:
+			return diffSet, common.Hash{}, false, fmt.Errorf("can't find diffsets for: %d", currentBlock)
+		case len(nonCanonicalHeaders) == 1:
+			executedHash = nonCanonicalHeaders[0].Hash()
+		default:
+			return diffSet, common.Hash{}, false, fmt.Errorf("diffsets ambiguous for: %d, have %d headers", currentBlock, len(nonCanonicalHeaders))
+		}
+	}
+	diffSet, found, err = doms.GetDiffset(rwTx, executedHash, currentBlock)
+	if err != nil {
+		return diffSet, common.Hash{}, false, err
+	}
+	return diffSet, executedHash, found, nil
+}
+
 func unwindExec3(u *UnwindState, s *StageState, doms *execctx.SharedDomains, rwTx kv.TemporalRwTx, ctx context.Context, cfg ExecuteBlockCfg, accumulator *shards.Accumulator, logger log.Logger) (err error) {
 	br := cfg.blockReader
 	txNumsReader := br.TxnumReader()
@@ -160,28 +190,11 @@ func unwindExec3(u *UnwindState, s *StageState, doms *execctx.SharedDomains, rwT
 	t := time.Now()
 	var changeSet *[kv.DomainLen][]kv.DomainEntryDiff
 	for currentBlock := u.CurrentBlockNumber; currentBlock > u.UnwindPoint; currentBlock-- {
-		currentHash, ok, err := br.CanonicalHash(ctx, rwTx, currentBlock)
+		currentKeys, executedHash, found, err := findExecutedDiffsetAtHeight(ctx, rwTx, br, doms, currentBlock)
 		if err != nil {
 			return err
 		}
-		if !ok {
-			// we may have executed blocks which are not in the canonical chain
-			nonCanonicalHeaders, err := rawdb.ReadHeadersByNumber(rwTx, currentBlock)
-			if err != nil {
-				return err
-			}
-			switch {
-			case len(nonCanonicalHeaders) == 0:
-				return fmt.Errorf("can't find diffsets for: %d", currentBlock)
-			case len(nonCanonicalHeaders) == 1:
-				currentHash = nonCanonicalHeaders[0].Hash()
-			default:
-				return fmt.Errorf("diffsets ambiguous for: %d, have %d headers", currentBlock, len(nonCanonicalHeaders))
-			}
-		}
-		var currentKeys [kv.DomainLen][]kv.DomainEntryDiff
-		currentKeys, ok, err = doms.GetDiffset(rwTx, currentHash, currentBlock)
-		if !ok {
+		if !found {
 			if changeSet == nil {
 				// this handles the edge case where we're traversing backwards from
 				// the current block and we've not found the first diff yet it just
@@ -191,10 +204,7 @@ func unwindExec3(u *UnwindState, s *StageState, doms *execctx.SharedDomains, rwT
 				// all previous blocks
 				continue
 			}
-			return fmt.Errorf("domains.GetDiffset(%d, %s): not found", currentBlock, currentHash)
-		}
-		if err != nil {
-			return err
+			return fmt.Errorf("domains.GetDiffset(%d, %s): not found", currentBlock, executedHash)
 		}
 		if changeSet == nil {
 			changeSet = &currentKeys
@@ -204,23 +214,13 @@ func unwindExec3(u *UnwindState, s *StageState, doms *execctx.SharedDomains, rwT
 			}
 		}
 	}
-	// Get the hash of the last executed block (the tip we're unwinding from)
-	// so RevertWithDiffset can detect if the cache was modified by a rolled-back tx.
+	// Get the hash of the last executed block (the tip we're unwinding from).
 	lastExecHash, _, err := br.CanonicalHash(ctx, rwTx, u.CurrentBlockNumber)
 	if err != nil {
 		lastExecHash = common.Hash{}
 	}
 	if err := unwindExec3State(ctx, doms, rwTx, u.UnwindPoint, txNum, accumulator, changeSet, lastExecHash, logger); err != nil {
 		return fmt.Errorf("unwindExec3State(%d->%d): %w, took %s", s.BlockNumber, u.UnwindPoint, err, time.Since(t))
-	}
-	// Surgically evict keys touched by the unwound blocks from the state cache.
-	// Keys not in the diffset remain cached (they weren't modified by the unwound range).
-	if stateCache := doms.GetStateCache(); stateCache != nil && changeSet != nil {
-		unwindTargetHash, _, err := br.CanonicalHash(ctx, rwTx, u.UnwindPoint)
-		if err != nil {
-			unwindTargetHash = common.Hash{}
-		}
-		stateCache.RevertWithDiffset(changeSet, lastExecHash, unwindTargetHash)
 	}
 	if err := rawdb.DeleteNewerEpochs(rwTx, u.UnwindPoint+1); err != nil {
 		return fmt.Errorf("delete newer epochs: %w", err)
@@ -393,6 +393,29 @@ func SpawnExecuteBlocksStage(s *StageState, u Unwinder, doms *execctx.SharedDoma
 func UnwindExecutionStage(u *UnwindState, s *StageState, doms *execctx.SharedDomains, rwTx kv.TemporalRwTx, ctx context.Context, cfg ExecuteBlockCfg, logger log.Logger) (err error) {
 	//fmt.Printf("unwind: %d -> %d\n", u.CurrentBlockNumber, u.UnwindPoint)
 	if u.UnwindPoint >= s.BlockNumber {
+		// MDBX has nothing above u.UnwindPoint to roll back here, but the in-RAM
+		// overlay (reused across the unwind→retry loop) can still hold uncommitted
+		// writes for blocks above it — e.g. a block that failed its post-execution
+		// gas check before its step was flushed. Prune them so re-execution doesn't
+		// read a stale value; the committed prune in unwindExec3 is skipped here.
+		//
+		// Prune from s.BlockNumber+1, not u.UnwindPoint+1: this early return skips
+		// u.Done, so committed progress stays at s.BlockNumber and re-execution
+		// resumes there — the whole (s.BlockNumber, u.UnwindPoint] range re-executes
+		// and its stale overlay writes must be pruned too, or an SSTORE_SET is
+		// mischarged as SSTORE_RESET (gas undercharge).
+		txNum, err := cfg.blockReader.TxnumReader().Min(ctx, rwTx, s.BlockNumber+1)
+		if err != nil {
+			return err
+		}
+		// NB: do NOT ResetPendingUpdates here. Unlike the disk-unwind path below
+		// (which discards then rebuilds commitment state via unwindExec3 +
+		// SeekCommitment), this early return only rewinds the in-RAM overlay and
+		// returns — the overlay and its deferred commitment updates are reused by
+		// the in-loop re-execution, so discarding them strands the commitment
+		// context and stalls the next block.
+		doms.Unwind(txNum, nil)
+		doms.SetTxNum(txNum)
 		return nil
 	}
 
@@ -444,12 +467,16 @@ func UnwindExecutionStage(u *UnwindState, s *StageState, doms *execctx.SharedDom
 		return err
 	}
 
-	_, _, _ = doms.SeekCommitment(ctx, rwTx) // ensure internal state of `doms` is set
+	// Restore doms' internal commitment state to the unwound tip; a failure here
+	// leaves doms inconsistent for the next re-execution, so surface it.
+	if _, _, err = doms.SeekCommitment(ctx, rwTx); err != nil {
+		return fmt.Errorf("unwind: SeekCommitment after disk unwind: %w", err)
+	}
 	//dumpPlainStateDebug(tx, nil)
 	return nil
 }
 
-func PruneExecutionStage(ctx context.Context, s *PruneState, tx kv.RwTx, cfg ExecuteBlockCfg, timeout time.Duration, logger log.Logger) (err error) {
+func PruneExecutionStage(ctx context.Context, s *PruneState, tx kv.TemporalRwTx, cfg ExecuteBlockCfg, timeout time.Duration, logger log.Logger) (err error) {
 	if dbg.NoPrune() {
 		return s.Done(tx)
 	}
@@ -468,20 +495,40 @@ func PruneExecutionStage(ctx context.Context, s *PruneState, tx kv.RwTx, cfg Exe
 	// that defers to FCU when work is pending — out of scope here.
 	baseTimeout := time.Duration(cfg.chainConfig.SecondsPerSlot()*1000/3) * time.Millisecond
 	maxTimeout := time.Duration(cfg.chainConfig.SecondsPerSlot()*2000/3) * time.Millisecond
-	quickPruneTimeout := baseTimeout
+	stagePruneTimeout := baseTimeout
 	if hasAgg, ok := cfg.db.(state.HasAgg); ok {
 		if agg, ok := hasAgg.Agg().(*state.Aggregator); ok && agg != nil {
 			// Each 100 prunable steps adds 200ms. 1000-step backlog -> +2s.
 			extra := time.Duration(agg.MaxPrunableStepsBacklog()/100) * 200 * time.Millisecond
-			quickPruneTimeout = baseTimeout + extra
-			if quickPruneTimeout > maxTimeout {
-				quickPruneTimeout = maxTimeout
-			}
+			stagePruneTimeout = min(baseTimeout+extra, maxTimeout)
 		}
 	}
+	if timeout > 0 && timeout > stagePruneTimeout {
+		stagePruneTimeout = timeout
+	}
 
-	if timeout > 0 && timeout > quickPruneTimeout {
-		quickPruneTimeout = timeout
+	pruneDiffsLimit := 200_000
+	pruneBalLimit := 10_000
+	if s.CurrentSyncCycle.IsInitialCycle {
+		pruneDiffsLimit = math.MaxInt
+		pruneBalLimit = math.MaxInt
+		stagePruneTimeout = 12 * time.Hour
+	}
+
+	stagePruneStartTime := time.Now()
+	remainingPruneTimeout := func() time.Duration {
+		// Initial-cycle pruning is aggressive: there is no FCU to leave time for, so
+		// each prune step gets the full long budget instead of sharing it. Sharing
+		// here would let earlier steps eat into the budget and drop PruneSmallBatches
+		// below the furious-prune threshold (>5h) or skip it entirely.
+		if s.CurrentSyncCycle.IsInitialCycle {
+			return stagePruneTimeout
+		}
+		remaining := stagePruneTimeout - time.Since(stagePruneStartTime)
+		if remaining <= 0 {
+			return 0
+		}
+		return remaining
 	}
 
 	// AlwaysGenerateChangesets disables this prune so the node retains
@@ -492,71 +539,73 @@ func PruneExecutionStage(ctx context.Context, s *PruneState, tx kv.RwTx, cfg Exe
 	if s.ForwardProgress > cfg.syncCfg.MaxReorgDepth && !cfg.syncCfg.AlwaysGenerateChangesets {
 		// (chunkLen is 8Kb) * (1_000 chunks) = 8mb
 		// Some blocks on bor-mainnet have 400 chunks of diff = 3mb
-		var pruneDiffsLimitOnChainTip = 200_000
-		pruneTimeout := quickPruneTimeout
-		if s.CurrentSyncCycle.IsInitialCycle {
-			pruneDiffsLimitOnChainTip = math.MaxInt
-			pruneTimeout = time.Hour
-		}
-		pruneChangeSetsStartTime := time.Now()
-		if err := rawdb.PruneTable(
-			tx,
-			kv.ChangeSets3,
-			s.ForwardProgress-cfg.syncCfg.MaxReorgDepth,
-			ctx,
-			pruneDiffsLimitOnChainTip,
-			pruneTimeout,
-			logger,
-			s.LogPrefix(),
-		); err != nil {
-			return err
-		}
-		if duration := time.Since(pruneChangeSetsStartTime); duration > quickPruneTimeout {
-			logger.Debug(
-				fmt.Sprintf("[%s] prune changesets timing", s.LogPrefix()),
-				"duration", duration,
-				"initialCycle", s.CurrentSyncCycle.IsInitialCycle,
-			)
+		if pruneChangeSetsTimeout := remainingPruneTimeout(); pruneChangeSetsTimeout > 0 {
+			pruneChangeSetsStartTime := time.Now()
+			if err := rawdb.PruneTable(
+				tx,
+				kv.ChangeSets3,
+				s.ForwardProgress-cfg.syncCfg.MaxReorgDepth,
+				ctx,
+				pruneDiffsLimit,
+				pruneChangeSetsTimeout,
+				logger,
+				s.LogPrefix(),
+			); err != nil {
+				return err
+			}
+			if duration := time.Since(pruneChangeSetsStartTime); duration > pruneChangeSetsTimeout {
+				logger.Debug(
+					fmt.Sprintf("[%s] prune changesets timing", s.LogPrefix()),
+					"duration", duration,
+					"timeout", pruneChangeSetsTimeout,
+					"initialCycle", s.CurrentSyncCycle.IsInitialCycle,
+				)
+			}
 		}
 	}
 
 	if s.ForwardProgress > cfg.syncCfg.MaxReorgDepth {
-		pruneBalLimit := 10_000
-		pruneTimeout := quickPruneTimeout
-		if s.CurrentSyncCycle.IsInitialCycle {
-			pruneBalLimit = math.MaxInt
-			pruneTimeout = time.Hour
+		if pruneTimeout := remainingPruneTimeout(); pruneTimeout > 0 {
+			if err := rawdb.PruneTable(
+				tx,
+				kv.BlockAccessList,
+				s.ForwardProgress-cfg.syncCfg.MaxReorgDepth,
+				ctx,
+				pruneBalLimit,
+				pruneTimeout,
+				logger,
+				s.LogPrefix(),
+			); err != nil {
+				return err
+			}
 		}
-		if err := rawdb.PruneTable(
-			tx,
-			kv.BlockAccessList,
-			s.ForwardProgress-cfg.syncCfg.MaxReorgDepth,
-			ctx,
-			pruneBalLimit,
-			pruneTimeout,
-			logger,
-			s.LogPrefix(),
-		); err != nil {
+	}
+
+	mxExecStepsInDB.Set(rawdbhelpers.IdxStepsCountV3(tx, tx.Debug().StepSize()) * 100)
+
+	cutoffs, err := historyRetireCutoffs(ctx, tx, cfg.blockReader, cfg.prune, s.ForwardProgress)
+	if err != nil {
+		return err
+	}
+	if !cutoffs.IsNoop() {
+		if pruneTimeout := remainingPruneTimeout(); pruneTimeout > 0 {
+			logger.Debug(fmt.Sprintf("[%s] history file retirement", s.LogPrefix()), "cutoffs", cutoffs.String(tx.Debug().StepSize()))
+			if _, err := tx.Debug().Retire(ctx, cutoffs); err != nil {
+				return err
+			}
+		}
+	}
+
+	if pruneTimeout := remainingPruneTimeout(); pruneTimeout > 0 {
+		if _, err := tx.PruneSmallBatches(ctx, pruneTimeout); err != nil {
 			return err
 		}
 	}
-
-	agg := cfg.db.(state.HasAgg).Agg().(*state.Aggregator)
-	mxExecStepsInDB.Set(rawdbhelpers.IdxStepsCountV3(tx, agg.StepSize()) * 100)
-
-	pruneTimeout := quickPruneTimeout
-	if s.CurrentSyncCycle.IsInitialCycle {
-		pruneTimeout = 12 * time.Hour
-	}
-
-	pruneSmallBatchesStartTime := time.Now()
-	if _, err := tx.(kv.TemporalRwTx).PruneSmallBatches(ctx, pruneTimeout); err != nil {
-		return err
-	}
-	if duration := time.Since(pruneSmallBatchesStartTime); duration > quickPruneTimeout {
+	if duration := time.Since(stagePruneStartTime); duration > stagePruneTimeout {
 		logger.Debug(
-			fmt.Sprintf("[%s] prune small batches timing", s.LogPrefix()),
+			fmt.Sprintf("[%s] prune execution timing", s.LogPrefix()),
 			"duration", duration,
+			"timeout", stagePruneTimeout,
 			"initialCycle", s.CurrentSyncCycle.IsInitialCycle,
 		)
 	}
@@ -564,4 +613,39 @@ func PruneExecutionStage(ctx context.Context, s *PruneState, tx kv.RwTx, cfg Exe
 		return err
 	}
 	return nil
+}
+
+// historyRetireCutoffs maps the prune mode to per-domain retirement cutoffs, in
+// txNum — the aggregator floors each to its file step. CommitmentDomain uses its
+// own --prune.commitment-history.distance window.
+func historyRetireCutoffs(ctx context.Context, tx kv.Tx, blockReader services.FullBlockReader, pm prune.Mode, forwardProgress uint64) (cutoffs kv.RetireCutoffs, err error) {
+	historyTxNum, err := blockAmountRetireCutoffTxNum(ctx, tx, blockReader, pm.History, forwardProgress)
+	if err != nil {
+		return kv.RetireCutoffs{}, err
+	}
+	commitmentTxNum, err := blockAmountRetireCutoffTxNum(ctx, tx, blockReader, pm.CommitmentHistoryAmount(), forwardProgress)
+	if err != nil {
+		return kv.RetireCutoffs{}, err
+	}
+	rcacheTxNum := historyTxNum // TODO: in future PR add cli flag to manage rcache distance
+	return kv.RetireCutoffs{
+		Default: historyTxNum,
+		PerDomain: map[kv.Domain]uint64{
+			kv.CommitmentDomain: commitmentTxNum,
+			kv.RCacheDomain:     rcacheTxNum,
+		},
+	}, nil
+}
+
+// blockAmountRetireCutoffTxNum resolves a retention window to the txNum below
+// which frozen files may be retired; 0 means retire nothing.
+func blockAmountRetireCutoffTxNum(ctx context.Context, tx kv.Tx, blockReader services.FullBlockReader, ba prune.BlockAmount, forwardProgress uint64) (uint64, error) {
+	if ba == nil || !ba.Enabled() {
+		return 0, nil
+	}
+	cutoffBlock := ba.PruneTo(forwardProgress)
+	if cutoffBlock == 0 {
+		return 0, nil
+	}
+	return blockReader.TxnumReader().Min(ctx, tx, cutoffBlock)
 }

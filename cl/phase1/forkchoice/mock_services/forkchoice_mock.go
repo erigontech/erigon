@@ -45,6 +45,7 @@ type ForkChoiceStorageMock struct {
 	AnchorRootVal          common.Hash
 	FinalizedCheckpointVal solid.Checkpoint
 	FinalizedSlotVal       uint64
+	LowestAvailableSlotVal *uint64
 	HeadVal                common.Hash
 	HeadSlotVal            uint64
 	HeadPayloadStatusVal   cltypes.PayloadStatus
@@ -57,20 +58,24 @@ type ForkChoiceStorageMock struct {
 
 	ParticipationVal map[uint64]*solid.ParticipationBitList
 
-	StateAtBlockRootVal       map[common.Hash]*state.CachingBeaconState
-	StateAtSlotVal            map[uint64]*state.CachingBeaconState
-	GetSyncCommitteesVal      map[uint64][2]*solid.SyncCommittee
-	GetFinalityCheckpointsVal map[common.Hash][3]solid.Checkpoint
-	WeightsMock               []forkchoice.ForkNode
-	LightClientBootstraps     map[common.Hash]*cltypes.LightClientBootstrap
-	NewestLCUpdate            *cltypes.LightClientUpdate
-	LCUpdates                 map[uint64]*cltypes.LightClientUpdate
-	SyncContributionPool      sync_contribution_pool.SyncContributionPool
-	Headers                   map[common.Hash]*cltypes.BeaconBlockHeader
-	Blocks                    map[common.Hash]*cltypes.SignedBeaconBlock
-	Envelopes                 map[common.Hash]*cltypes.SignedExecutionPayloadEnvelope
-	VerifiedPayloads          map[common.Hash]bool
-	GetBeaconCommitteeMock    func(slot, committeeIndex uint64) ([]uint64, error)
+	StateAtBlockRootVal          map[common.Hash]*state.CachingBeaconState
+	StateAtSlotVal               map[uint64]*state.CachingBeaconState
+	GetSyncCommitteesVal         map[uint64][2]*solid.SyncCommittee
+	GetFinalityCheckpointsVal    map[common.Hash][3]solid.Checkpoint
+	PendingConsolidationsVal     map[common.Hash]*solid.ListSSZ[*solid.PendingConsolidation]
+	PendingDepositsVal           map[common.Hash]*solid.ListSSZ[*solid.PendingDeposit]
+	PendingPartialWithdrawalsVal map[common.Hash]*solid.ListSSZ[*solid.PendingPartialWithdrawal]
+	WeightsMock                  []forkchoice.ForkNode
+	LightClientBootstraps        map[common.Hash]*cltypes.LightClientBootstrap
+	NewestLCUpdate               *cltypes.LightClientUpdate
+	LCUpdates                    map[uint64]*cltypes.LightClientUpdate
+	SyncContributionPool         sync_contribution_pool.SyncContributionPool
+	Headers                      map[common.Hash]*cltypes.BeaconBlockHeader
+	Blocks                       map[common.Hash]*cltypes.SignedBeaconBlock
+	Envelopes                    map[common.Hash]*cltypes.SignedExecutionPayloadEnvelope
+	VerifiedPayloads             map[common.Hash]bool
+	OnExecutionPayloadErr        error
+	GetBeaconCommitteeMock       func(slot, committeeIndex uint64) ([]uint64, error)
 
 	Pool pool.OperationsPool
 
@@ -283,7 +288,11 @@ func (f *ForkChoiceStorageMock) GetStateAtBlockRoot(
 	blockRoot common.Hash,
 	alwaysCopy bool,
 ) (*state.CachingBeaconState, error) {
-	return f.StateAtBlockRootVal[blockRoot], nil
+	st := f.StateAtBlockRootVal[blockRoot]
+	if st == nil || !alwaysCopy {
+		return st, nil
+	}
+	return st.Copy()
 }
 
 func (f *ForkChoiceStorageMock) GetFinalityCheckpoints(
@@ -341,7 +350,7 @@ func (f *ForkChoiceStorageMock) OnBlock(
 }
 
 func (f *ForkChoiceStorageMock) OnExecutionPayload(ctx context.Context, signedEnvelope *cltypes.SignedExecutionPayloadEnvelope, checkBlobData, validatePayload bool) error {
-	return nil
+	return f.OnExecutionPayloadErr
 }
 
 func (f *ForkChoiceStorageMock) ApplyLocalSelfBuildEnvelope(ctx context.Context, signedEnvelope *cltypes.SignedExecutionPayloadEnvelope) error {
@@ -373,6 +382,9 @@ func (f *ForkChoiceStorageMock) RandaoMixes(blockRoot common.Hash, out solid.Has
 }
 
 func (f *ForkChoiceStorageMock) LowestAvailableSlot() uint64 {
+	if f.LowestAvailableSlotVal != nil {
+		return *f.LowestAvailableSlotVal
+	}
 	return f.FinalizedSlotVal
 }
 
@@ -518,15 +530,18 @@ func (f *ForkChoiceStorageMock) IsHeadOptimistic() bool {
 }
 
 func (f *ForkChoiceStorageMock) GetPendingConsolidations(blockRoot common.Hash) (*solid.ListSSZ[*solid.PendingConsolidation], bool) {
-	return nil, false
+	v, ok := f.PendingConsolidationsVal[blockRoot]
+	return v, ok
 }
 
 func (f *ForkChoiceStorageMock) GetPendingDeposits(blockRoot common.Hash) (*solid.ListSSZ[*solid.PendingDeposit], bool) {
-	return nil, false
+	v, ok := f.PendingDepositsVal[blockRoot]
+	return v, ok
 }
 
 func (f *ForkChoiceStorageMock) GetPendingPartialWithdrawals(blockRoot common.Hash) (*solid.ListSSZ[*solid.PendingPartialWithdrawal], bool) {
-	return nil, false
+	v, ok := f.PendingPartialWithdrawalsVal[blockRoot]
+	return v, ok
 }
 
 func (f *ForkChoiceStorageMock) GetProposerLookahead(slot uint64) (solid.Uint64VectorSSZ, bool) {

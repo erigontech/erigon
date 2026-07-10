@@ -46,10 +46,6 @@ type SnapshotRepo struct {
 	logger log.Logger
 }
 
-func NewSnapshotRepoForForkable(id kv.ForkableId, logger log.Logger) *SnapshotRepo {
-	return NewSnapshotRepo(Registry.Name(id), FromForkable(id), Registry.SnapshotConfig(id), logger)
-}
-
 func NewSnapshotRepo(name string, entity UniversalEntity, cfg *SnapshotConfig, logger log.Logger) *SnapshotRepo {
 	return &SnapshotRepo{
 		dirtyFiles: newDirtyFiles(),
@@ -434,7 +430,7 @@ func (f *SnapshotRepo) loadDirtyFiles(aps []string) {
 			f.logger.Trace("can't parse file name", "file", ap)
 			continue
 		}
-		dirtyFile := newFilesItemWithSnapConfig(fileInfo.From, fileInfo.To, f.cfg)
+		dirtyFile := newFilesItem(fileInfo.From, fileInfo.To)
 
 		if _, has := f.dirtyFiles.Get(dirtyFile); !has {
 			f.dirtyFiles.Set(dirtyFile)

@@ -64,26 +64,30 @@ jobs:
     - name: Print job parameters
       if: matrix.client == 'erigon' || (matrix.client == 'geth' && github.event.inputs.run_geth == 'true')
       run: |
-        echo "Execution name: ${{ env.EXECUTION_NAME }}"
-        echo "Load pattern: ${{ env.LOAD_PATTERN }}"
-        echo "Load sequence: ${{ env.LOAD_SEQUENCE }}"
+        echo "Execution name: $EXECUTION_NAME"
+        echo "Load pattern: $LOAD_PATTERN"
+        echo "Load sequence: $LOAD_SEQUENCE"
 
     - name: Clean runner workspace
+      env:
+        RUNNER_WS: ${{ runner.workspace }}
       run: |
         # Remove all contents under the runner workspace directory
-        rm -rf ${{ runner.workspace }}/* || true
-        mkdir -p ${{ runner.workspace }}/erigon
+        rm -rf "$RUNNER_WS"/* || true
+        mkdir -p "$RUNNER_WS/erigon"
 
     - name: Check out Erigon repository
       if: matrix.client == 'erigon'
-      uses: actions/checkout@v6
+      uses: actions/checkout@v7
 
     - name: Checkout RPC Tests Repository & Install Requirements
       if: matrix.client == 'erigon' || (matrix.client == 'geth' && github.event.inputs.run_geth == 'true')
+      env:
+        RUNNER_WS: ${{ runner.workspace }}
       run: |
-        rm -rf ${{runner.workspace}}/rpc-tests
-        git -c advice.detachedHead=false clone --depth 1 --branch v1.124.0 https://github.com/erigontech/rpc-tests ${{runner.workspace}}/rpc-tests
-        cd ${{runner.workspace}}/rpc-tests
+        rm -rf "$RUNNER_WS/rpc-tests"
+        git -c advice.detachedHead=false clone --depth 1 --branch v1.124.0 https://github.com/erigontech/rpc-tests "$RUNNER_WS/rpc-tests"
+        cd "$RUNNER_WS/rpc-tests"
 
     - name: Clean Erigon Build Directory
       if: matrix.client == 'erigon'
@@ -124,12 +128,12 @@ jobs:
         set +e # Disable exit on error
         
         # Launch the testbed client instance & test its ability to maintain sync for 2 minutes
-        if [ "${{ matrix.client }}" == "erigon" ]; then
+        if [ "$CLIENT" == "erigon" ]; then
           python3 $ERIGON_QA_PATH/test_system/qa-tests/tip-tracking/run_and_check_tip_tracking.py \
             "$ERIGON_TESTBED_DATA_DIR/../" "$ERIGON_TESTBED_DATA_DIR" 120 "$TOTAL_TIME_SECONDS" "Erigon3" "$CHAIN"
         else
           python3 $ERIGON_QA_PATH/test_system/qa-tests/tip-tracking/check_tip_tracking.py \
-            "${{ matrix.client }}" "http://localhost:8545" 120 "$TOTAL_TIME_SECONDS" "$CHAIN"            
+            "$CLIENT" "http://localhost:8545" 120 "$TOTAL_TIME_SECONDS" "$CHAIN"
         fi
         
         # Capture monitoring script exit status
@@ -162,24 +166,24 @@ jobs:
         set +e # Disable exit on error
         
         # Launch the testbed client instance & test its ability to maintain sync with a load for TRACKING_TIME_SECONDS
-        if [ "${{ matrix.client }}" == "erigon" ]; then
+        if [ "$CLIENT" == "erigon" ]; then
           python3 $ERIGON_QA_PATH/test_system/qa-tests/tip-tracking/run_and_check_tip_tracking.py \
-            "${{ github.workspace }}/build/bin" \
+            "$GITHUB_WORKSPACE/build/bin" \
             "$ERIGON_TESTBED_DATA_DIR" \
             "$TRACKING_TIME_SECONDS" \
             "$TOTAL_TIME_SECONDS" \
             "Erigon3" \
             "$CHAIN" \
             "archive_node" \
-            "${{ env.LOAD_MODE }}@${SAFE_EXECUTION_NAME}@${SAFE_LOAD_PATTERN}@${SAFE_LOAD_SEQUENCE}@${RPC_TESTS_DIR}"
+            "$LOAD_MODE@${SAFE_EXECUTION_NAME}@${SAFE_LOAD_PATTERN}@${SAFE_LOAD_SEQUENCE}@${RPC_TESTS_DIR}"
         else
           python3 $ERIGON_QA_PATH/test_system/qa-tests/tip-tracking/check_tip_tracking.py \
-            "${{ matrix.client }}" \
+            "$CLIENT" \
             "http://localhost:8545" \
             "$TRACKING_TIME_SECONDS" \
             "$TOTAL_TIME_SECONDS" \
             "$CHAIN" \
-            "${{ env.LOAD_MODE }}@${SAFE_EXECUTION_NAME}@${SAFE_LOAD_PATTERN}@${SAFE_LOAD_SEQUENCE}@${RPC_TESTS_DIR}"
+            "$LOAD_MODE@${SAFE_EXECUTION_NAME}@${SAFE_LOAD_PATTERN}@${SAFE_LOAD_SEQUENCE}@${RPC_TESTS_DIR}"
         fi
         # Capture monitoring script exit status
         test_exit_status=$?
@@ -190,33 +194,33 @@ jobs:
         # Check test runner script exit status
         if [ $test_exit_status -eq 0 ]; then
           echo "Tip-tracking w/ load test completed successfully"
-          echo "::notice::Tip-tracking w/ load test ${{ matrix.client }} completed successfully"
+          echo "::notice::Tip-tracking w/ load test $CLIENT completed successfully"
           echo "TEST_RESULT=success" >> "$GITHUB_OUTPUT"
         elif [ $test_exit_status -eq 1 ]; then
           # Ignore failures relating to unacceptable behaviour, as these are potentially tests designed to break the system.
           echo "TEST_RESULT=success" >> "$GITHUB_OUTPUT"
-          if reason=$(python3 $ERIGON_QA_PATH/test_system/qa-tests/tip-tracking/print_reason.py ${{ github.workspace }}/result-$CHAIN.json); then
+          if reason=$(python3 $ERIGON_QA_PATH/test_system/qa-tests/tip-tracking/print_reason.py "$GITHUB_WORKSPACE/result-$CHAIN.json"); then
             echo "Tip-tracking w/ load test completed with a warning: $reason"
-            echo "::warning::Tip-tracking w/ load test ${{ matrix.client }} completed with a warning: $reason"
+            echo "::warning::Tip-tracking w/ load test $CLIENT completed with a warning: $reason"
           else
             echo "Tip-tracking w/ load test completed with a warning"
-            echo "::warning::Tip-tracking w/ load test ${{ matrix.client }} completed with a warning"
+            echo "::warning::Tip-tracking w/ load test $CLIENT completed with a warning"
           fi
         else
           echo "TEST_RESULT=failure" >> "$GITHUB_OUTPUT"
-          if reason=$(python3 $ERIGON_QA_PATH/test_system/qa-tests/tip-tracking/print_reason.py ${{ github.workspace }}/result-$CHAIN.json); then
+          if reason=$(python3 $ERIGON_QA_PATH/test_system/qa-tests/tip-tracking/print_reason.py "$GITHUB_WORKSPACE/result-$CHAIN.json"); then
             echo "Error detected during tests: $reason"
-            echo "::error::Tip-tracking w/ load test ${{ matrix.client }} encountered an error: $reason"
+            echo "::error::Tip-tracking w/ load test $CLIENT encountered an error: $reason"
             exit 1
           else
             echo "Tip-tracking w/ load test encountered an error"
-            echo "::error::Tip-tracking w/ load test ${{ matrix.client }} encountered an error"
+            echo "::error::Tip-tracking w/ load test $CLIENT encountered an error"
             exit 1
           fi
-        fi 
+        fi
         
-        PLOT_FILE="metrics-${{ env.CHAIN }}-plots_sync_with_load_combined_gauge.png"
-        if [ -f "${{ github.workspace }}/$PLOT_FILE" ]; then
+        PLOT_FILE="metrics-$CHAIN-plots_sync_with_load_combined_gauge.png"
+        if [ -f "$GITHUB_WORKSPACE/$PLOT_FILE" ]; then
           echo "TEST_RESULT=success" >> "$GITHUB_OUTPUT"
           echo "::notice::To see the result of the test, please check the '$PLOT_FILE' plot in the plots artifact"
         else
@@ -235,11 +239,12 @@ jobs:
       if: always() && steps.test_step.outputs.test_executed == 'true'
       env:
         TEST_RESULT: ${{ steps.test_step.outputs.TEST_RESULT }}
+        RUNNER_WS: ${{ runner.workspace }}
       run: |
         # Detect the commit hash and branch name
-        if [ "${{ matrix.client }}" == "erigon" ]; then
-          commit=$(git -C ${{runner.workspace}}/erigon rev-parse --short HEAD)
-          branch_name=${{ github.ref_name }}
+        if [ "$CLIENT" == "erigon" ]; then
+          commit=$(git -C "$RUNNER_WS/erigon" rev-parse --short HEAD)
+          branch_name=$GITHUB_REF_NAME
          else
           branch_name="release"
           commit=$(git -C $GETH_INSTALL_DIR rev-parse --short HEAD)
@@ -253,15 +258,15 @@ jobs:
         fi
         
         python3 $ERIGON_QA_PATH/test_system/qa-tests/uploads/upload_test_results.py \
-          --repo ${{ matrix.client }} \
+          --repo "$CLIENT" \
           --commit $commit \
           --branch $branch_name \
-          --test_name tip-tracking-with-load-${{ matrix.client }} \
+          --test_name "tip-tracking-with-load-$CLIENT" \
           --chain $CHAIN \
-          --runner ${{ runner.name }} \
+          --runner "$RUNNER_NAME" \
           --db_version $db_version \
           --outcome $TEST_RESULT \
-          --result_file ${{ github.workspace }}/result-$CHAIN.json
+          --result_file "$GITHUB_WORKSPACE/result-$CHAIN.json"
 
     - name: Upload test results
       if: always() && steps.test_step.outputs.test_executed == 'true'

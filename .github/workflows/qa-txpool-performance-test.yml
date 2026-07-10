@@ -38,7 +38,7 @@ jobs:
 
     steps:
       - name: Fast checkout git repository
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
 
       - name: Login to Docker Hub
         uses: docker/login-action@v4
@@ -75,7 +75,7 @@ jobs:
         id: parse_kurtosis_output
         run: |
           # Find the folder starting with 'assertoor--'
-          assertoor_folder=$(find ${{ runner.temp }}/${{ env.ENCLAVE_NAME }}/dump -type d -name 'assertoor--*' | head -n 1)
+          assertoor_folder=$(find "$RUNNER_TEMP/$ENCLAVE_NAME/dump" -type d -name 'assertoor--*' | head -n 1)
 
           # Exit if no assertoor folder is found
           if [ -z "$assertoor_folder" ]; then
@@ -88,7 +88,7 @@ jobs:
           echo "Parsing file: $output_log"
 
           # Create an empty JSON file if there are no results
-          output_json="${{ github.workspace }}/outputs_kurtosis.json"
+          output_json="$GITHUB_WORKSPACE/outputs_kurtosis.json"
           echo "{}" > $output_json
 
           # Create a temporary directory
@@ -282,16 +282,21 @@ jobs:
           python3 $ERIGON_QA_PATH/test_system/qa-tests/uploads/upload_test_results.py \
             --repo erigon \
             --commit $(git rev-parse HEAD) \
-            --branch ${{ github.ref_name }} \
+            --branch "$GITHUB_REF_NAME" \
             --test_name txpool-performance \
-            --runner ${{ runner.name }} \
+            --runner "$RUNNER_NAME" \
             --outcome $TEST_RESULT \
-            --result_file ${{ github.workspace }}/outputs_kurtosis.json
+            --result_file "$GITHUB_WORKSPACE/outputs_kurtosis.json"
 
       - name: Report results in run summary
         if: always()
+        env:
+          TEST_RESULT: ${{ steps.erigon_kurtosis_test.outputs.test_result || 'failure' }}
+          RAW_JSON_URL: ${{ steps.upload_outputs_kurtosis_json.outputs.artifact-url }}
+          LATENCY_PLOTS_URL: ${{ steps.upload_latency_plots.outputs.artifact-url }}
+          THROUGHPUT_PLOTS_URL: ${{ steps.upload_throughput_plots.outputs.artifact-url }}
         run: |
-          output_json="${{ github.workspace }}/outputs_kurtosis.json"
+          output_json="$GITHUB_WORKSPACE/outputs_kurtosis.json"
 
           # Start building the summary
           echo "# TxPool Performance Test Results" >> $GITHUB_STEP_SUMMARY
@@ -304,7 +309,7 @@ jobs:
           fi
 
           # Extract test result status
-          test_result="${{ steps.erigon_kurtosis_test.outputs.test_result || 'failure' }}"
+          test_result="$TEST_RESULT"
           if [ "$test_result" = "success" ]; then
             echo "✅ **Overall Test Status:** PASSED" >> $GITHUB_STEP_SUMMARY
           else
@@ -403,17 +408,17 @@ jobs:
 
           # Add link to raw JSON results if available
           if [ -f "$output_json" ]; then
-            echo "- [Raw JSON Results](${{ steps.upload_outputs_kurtosis_json.outputs.artifact-url }})" >> $GITHUB_STEP_SUMMARY
+            echo "- [Raw JSON Results]($RAW_JSON_URL)" >> $GITHUB_STEP_SUMMARY
           fi
 
           # Add link to latency plots if they were generated
-          if [ "${{ steps.upload_latency_plots.outputs.artifact-url }}" != "" ]; then
-            echo "- [Latency Distribution Plots](${{ steps.upload_latency_plots.outputs.artifact-url }})" >> $GITHUB_STEP_SUMMARY
+          if [ "$LATENCY_PLOTS_URL" != "" ]; then
+            echo "- [Latency Distribution Plots]($LATENCY_PLOTS_URL)" >> $GITHUB_STEP_SUMMARY
           fi
 
           # Add link to throughput plots if they were generated
-          if [ "${{ steps.upload_throughput_plots.outputs.artifact-url }}" != "" ]; then
-            echo "- [Throughput Analysis Plots](${{ steps.upload_throughput_plots.outputs.artifact-url }})" >> $GITHUB_STEP_SUMMARY
+          if [ "$THROUGHPUT_PLOTS_URL" != "" ]; then
+            echo "- [Throughput Analysis Plots]($THROUGHPUT_PLOTS_URL)" >> $GITHUB_STEP_SUMMARY
           fi
 
       - name: Clean test results

@@ -43,13 +43,6 @@ import (
 	"github.com/erigontech/erigon/db/snaptype"
 )
 
-// pool for buffers
-var bufferPool = sync.Pool{
-	New: func() any {
-		return &bytes.Buffer{}
-	},
-}
-
 func (s *Antiquary) loopStates(ctx context.Context) {
 	// Execute this each second
 	reqRetryTimer := time.NewTicker(100 * time.Millisecond)
@@ -193,6 +186,8 @@ func FillStaticValidatorsTableIfNeeded(ctx context.Context, logger log.Logger, s
 	return true, nil
 }
 
+const stateAntiquaryMaxSlotsPerCommit uint64 = 4 * clparams.SlotsPerDump
+
 func (s *Antiquary) IncrementBeaconState(ctx context.Context, to uint64) error {
 
 	// Check if you need to fill the static validators table
@@ -208,7 +203,7 @@ func (s *Antiquary) IncrementBeaconState(ctx context.Context, to uint64) error {
 	defer tx.Rollback()
 
 	// maps which validators changes
-	var changedValidators sync.Map
+	changedValidators := &sync.Map{}
 
 	if refilledStaticValidators {
 		s.validatorsTable.ForEach(func(validatorIndex uint64, validator *state_accessors.StaticValidator) bool {
@@ -349,7 +344,54 @@ func (s *Antiquary) IncrementBeaconState(ctx context.Context, to uint64) error {
 
 	startLoop := time.Now()
 
+	commitBatch := func() error {
+		rwTx, err := s.mainDB.BeginRw(ctx)
+		if err != nil {
+			return err
+		}
+		defer rwTx.Rollback()
+		if err := stateAntiquaryCollector.flush(ctx, rwTx); err != nil {
+			return err
+		}
+		if err := state_accessors.SetStateProcessingProgress(rwTx, s.currentState.Slot()); err != nil {
+			return err
+		}
+		s.validatorsTable.SetSlot(s.currentState.Slot())
+		buf := &bytes.Buffer{}
+		var writeErr error
+		s.validatorsTable.ForEach(func(validatorIndex uint64, validator *state_accessors.StaticValidator) bool {
+			if _, ok := changedValidators.Load(validatorIndex); !ok {
+				return true
+			}
+			buf.Reset()
+			if writeErr = validator.WriteTo(buf); writeErr != nil {
+				return false
+			}
+			if writeErr = rwTx.Put(kv.StaticValidators, base_encoding.Encode64ToBytes4(validatorIndex), common.Copy(buf.Bytes())); writeErr != nil {
+				return false
+			}
+			return true
+		})
+		if writeErr != nil {
+			return writeErr
+		}
+		return rwTx.Commit()
+	}
+	lastCommitSlot := slot
+
 	for ; slot < to && startLoop.Add(timeBeforeCommit).After(time.Now()); slot++ {
+		// Bound each mdbx commit: once maxSlotsPerCommit slots have accumulated,
+		// flush + commit them and start a fresh collector, so no single commit
+		// carries a huge retired-page list.
+		if slot-lastCommitSlot >= s.maxSlotsPerCommit {
+			if err := commitBatch(); err != nil {
+				return err
+			}
+			stateAntiquaryCollector.close()
+			stateAntiquaryCollector = newBeaconStatesCollector(s.cfg, s.dirs.Tmp, s.logger)
+			changedValidators = &sync.Map{}
+			lastCommitSlot = slot
+		}
 		slashingOccurred = false // Set this to false at the beginning of each slot.
 
 		isDumpSlot := slot%clparams.SlotsPerDump == 0
@@ -527,42 +569,9 @@ func (s *Antiquary) IncrementBeaconState(ctx context.Context, to uint64) error {
 	log.Debug("Finished beacon state iteration", "elapsed", time.Since(start))
 
 	log.Log(logLvl, "Stopped Caplin to load states")
-	rwTx, err := s.mainDB.BeginRw(ctx)
-	if err != nil {
-		return err
-	}
-	defer rwTx.Rollback()
-
 	start = time.Now()
-	// We now need to store the state
-	if err := stateAntiquaryCollector.flush(ctx, rwTx); err != nil {
-		return err
-	}
-
-	if err := state_accessors.SetStateProcessingProgress(rwTx, s.currentState.Slot()); err != nil {
-		return err
-	}
-
-	s.validatorsTable.SetSlot(s.currentState.Slot())
-
-	buf := &bytes.Buffer{}
-	s.validatorsTable.ForEach(func(validatorIndex uint64, validator *state_accessors.StaticValidator) bool {
-		if _, ok := changedValidators.Load(validatorIndex); !ok {
-			return true
-		}
-		buf.Reset()
-		if err = validator.WriteTo(buf); err != nil {
-			return false
-		}
-		if err = rwTx.Put(kv.StaticValidators, base_encoding.Encode64ToBytes4(validatorIndex), common.Copy(buf.Bytes())); err != nil {
-			return false
-		}
-		return true
-	})
-	if err != nil {
-		return err
-	}
-	if err := rwTx.Commit(); err != nil {
+	// Flush + commit the remaining slots since the last in-loop commit.
+	if err := commitBatch(); err != nil {
 		return err
 	}
 	endTime := time.Since(start)
@@ -594,7 +603,6 @@ func (s *Antiquary) IncrementBeaconState(ctx context.Context, to uint64) error {
 		}
 		if err := s.stateSn.DumpCaplinState(
 			ctx,
-			s.stateSn.BlocksAvailable()+1,
 			to,
 			blocksPerStatefulFile,
 			s.sn.Salt,
@@ -605,15 +613,17 @@ func (s *Antiquary) IncrementBeaconState(ctx context.Context, to uint64) error {
 		); err != nil {
 			return err
 		}
-		paths := s.stateSn.SegFileNames(from, to)
+		// Open the new files before collecting paths so the seeder sees them;
+		// seed from 0 since a per-type resume can dump a new type from genesis.
+		if err := s.stateSn.OpenFolder(); err != nil {
+			return err
+		}
 		if s.downloader != nil {
+			paths := s.stateSn.SegFileNames(0, to)
 			// Notify bittorent to seed the new snapshots
 			if err := s.downloader.Seed(s.ctx, paths); err != nil {
 				s.logger.Warn("[Antiquary] Failed to add items to bittorent", "err", err)
 			}
-		}
-		if err := s.stateSn.OpenFolder(); err != nil {
-			return err
 		}
 	}
 
@@ -659,8 +669,9 @@ func (s *Antiquary) initializeStateAntiquaryIfNeeded(ctx context.Context, tx kv.
 			// If GLOAS snapshot data is missing (DB upgraded but not yet
 			// re-antiquated), back off to an earlier slot so the antiquary
 			// can rebuild forward from a valid pre-GLOAS state.
-			if errors.Is(err, historical_states_reader.ErrMissingGloasData) {
-				log.Warn("GLOAS snapshot data missing, backing off to re-antiquate", "slot", attempt, "err", err)
+			if errors.Is(err, historical_states_reader.ErrMissingGloasData) ||
+				errors.Is(err, historical_states_reader.ErrMissingHistoryVectorData) {
+				log.Warn("historical snapshot data missing, backing off to re-antiquate", "slot", attempt, "err", err)
 				backoffStep += backoffStrides
 				continue
 			}

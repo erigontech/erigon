@@ -19,7 +19,7 @@
 #   blocktests-stable-race-{pre-cancun,cancun,prague,osaka}-sequential
 #                                              race-detector variant of
 #                                              blocktests-stable-sequential, split by
-#                                              fork via the --run regex so
+#                                              fork via the manifest `run` regex so
 #                                              each sub-shard fits under ~30
 #                                              min. Caller (Makefile / CI) must
 #                                              export EVM_BIN to the race-built
@@ -66,27 +66,29 @@ for tool in yq jq; do
 	command -v "$tool" >/dev/null 2>&1 || { echo "run-eest-spec-test: required tool '$tool' not found in PATH" >&2; exit 1; }
 done
 
-# Resolve fixtures base from the shard name. blocktests-{stable,devnet}-race-*
+# Resolve the fixture set from the shard name. blocktests-{stable,devnet}-race-*
 # inherit from the parent shard (stable/devnet).
 case "$shard" in
-	*zkevm*)      base=test-fixtures-cache/eest_zkevm/fixtures ;;
-	*-stable*)    base=test-fixtures-cache/eest_stable/fixtures ;;
-	*-devnet*)    base=test-fixtures-cache/eest_devnet/fixtures ;;
-	*-benchmark*) base=test-fixtures-cache/eest_benchmark/fixtures ;;
+	*zkevm*)      fixtures=eest_zkevm ;;
+	*-stable*)    fixtures=eest_stable ;;
+	*-devnet*)    fixtures=eest_devnet ;;
+	*-benchmark*) fixtures=eest_benchmark ;;
 	*) echo "cannot resolve fixtures for shard: $shard" >&2; exit 2 ;;
 esac
+base=test-fixtures-cache/$fixtures/fixtures
 
-# Resolve workers + failure budget + exec3-parallel flag from the single-source
-# manifest. Both this script and the test-eest-spec.yml load-matrix job read
-# tools/eest-spec-shards.yml, so adding a shard / tweaking a budget is a
-# one-file edit. yq converts YAML→JSON so the jq query stays identical.
+# Resolve workers + failure budget + exec3-parallel + the optional race --run
+# regex from the single-source manifest. This script, the test-eest-spec.yml
+# load-matrix job, and the coverage guard all read tools/eest-spec-shards.yml,
+# so adding a shard / tweaking a budget / changing a fork filter is a one-file
+# edit. yq converts YAML→JSON so it can be queried with jq.
 manifest=tools/eest-spec-shards.yml
-budget_row=$(yq -o=json '.' "$manifest" | jq -r --arg s "$shard" '.[] | select(.shard == $s) | "\(.workers)\t\(."max-allowed-failures")\t\(."exec3-parallel" // false)"')
-if [[ -z "$budget_row" ]]; then
+shard_row=$(yq -o=json '.' "$manifest" | jq -r --arg s "$shard" '.[] | select(.shard == $s) | "\(.workers)\t\(."max-allowed-failures")\t\(."exec3-parallel" // false)\t\(."no-ramdisk" // false)\t\(.run // "")"')
+if [[ -z "$shard_row" ]]; then
 	echo "shard $shard not found in $manifest" >&2
 	exit 2
 fi
-IFS=$'\t' read -r default_workers default_max exec3_parallel <<<"$budget_row"
+IFS=$'\t' read -r default_workers default_max exec3_parallel shard_no_ramdisk run_regex <<<"$shard_row"
 # Always set ERIGON_EXEC3_PARALLEL explicitly (true or false) so the shard's
 # behaviour is pinned to the manifest, independent of whatever dbg.Exec3Parallel
 # defaults to at runtime. If the default flips, the shards still run the mode
@@ -106,19 +108,10 @@ extra=()
 case "$shard_route" in
 	statetests-stable | statetests-devnet)
 		cmd=statetest;   path="$base/state_tests" ;;
-	blocktests-stable | blocktests-devnet)
+	# race shards reuse this arm; each one's per-fork --run regex comes from the
+	# manifest `run` key (appended after this case), not from a per-shard arm.
+	blocktests-stable | blocktests-devnet | blocktests-stable-race-* | blocktests-devnet-race-*)
 		cmd=blocktest;   path="$base/blockchain_tests" ;;
-	blocktests-stable-race-pre-cancun)
-		cmd=blocktest;   path="$base/blockchain_tests"
-		extra=(--run 'fork_(Frontier|Homestead|Byzantium|ConstantinopleFix|Istanbul|Berlin|London|Paris|Shanghai)') ;;
-	blocktests-stable-race-cancun)
-		cmd=blocktest;   path="$base/blockchain_tests"; extra=(--run 'fork_Cancun') ;;
-	blocktests-stable-race-prague)
-		cmd=blocktest;   path="$base/blockchain_tests"; extra=(--run 'fork_Prague') ;;
-	blocktests-stable-race-osaka)
-		cmd=blocktest;   path="$base/blockchain_tests"; extra=(--run 'fork_Osaka') ;;
-	blocktests-devnet-race-amsterdam)
-		cmd=blocktest;   path="$base/blockchain_tests"; extra=(--run 'fork_Amsterdam') ;;
 	enginextests-stable)
 		cmd=enginextest; path="$base/blockchain_tests_engine_x"
 		extra=(--pre-alloc-dir "$path/pre_alloc") ;;
@@ -137,6 +130,7 @@ case "$shard_route" in
 		cmd=zkevmtest;   path="$base/blockchain_tests" ;;
 	*) echo "unknown shard: $shard (route: $shard_route)" >&2; exit 2 ;;
 esac
+[[ -n "$run_regex" ]] && extra+=(--run "$run_regex")
 
 workers="${EEST_SPEC_WORKERS:-$default_workers}"
 max="${EEST_SPEC_MAX_FAILURES:-$default_max}"
@@ -146,10 +140,14 @@ if [[ ! -x "$evm_bin" ]]; then
 	echo "$evm_bin not found or not executable; run 'make evm' first" >&2
 	exit 2
 fi
+
+# Provision only this shard's fixture set (no-op when already extracted) —
+# all corpora together are 20G+ extracted and don't fit on the smaller CI
+# runner disks.
+bash tools/test-fixtures.sh test-fixtures.json test-fixtures-cache "$fixtures"
+
 if [[ ! -d "$path" ]]; then
-	fixtures_target=test-fixtures-eest
-	case "$shard" in *zkevm*) fixtures_target=test-fixtures-zkevm ;; esac
-	echo "fixture path $path does not exist; run 'make $fixtures_target' first" >&2
+	echo "fixture path $path does not exist in the $fixtures corpus" >&2
 	exit 2
 fi
 
@@ -169,7 +167,10 @@ trap cleanup EXIT
 # and never unmounts; CI gets the env var pre-set via the setup-erigon
 # action's ramdisk: true input. Local Linux users can opt in by exporting
 # ERIGON_EXECUTION_TESTS_TMPDIR or TMPDIR=/dev/shm.
-if [[ -z "${ERIGON_EXECUTION_TESTS_TMPDIR:-}" && "$(uname -s)" == "Darwin" ]]; then
+# Shards with no-ramdisk: true in the manifest skip the Darwin auto-ramdisk too:
+# their datadirs are few and long-lived, so tmpfs buys nothing — and the 150m
+# datadir (~7GB) doesn't even fit the default ramdisk size.
+if [[ "$shard_no_ramdisk" != "true" && -z "${ERIGON_EXECUTION_TESTS_TMPDIR:-}" && "$(uname -s)" == "Darwin" ]]; then
 	ramdisk=$(bash tools/create-ramdisk) || true
 	if [[ -n "$ramdisk" ]]; then
 		export ERIGON_EXECUTION_TESTS_TMPDIR="$ramdisk"

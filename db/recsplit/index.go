@@ -328,6 +328,19 @@ func (idx *Index) ForceExistenceFilterNormal() {
 		idx.existenceV2.MadvNormal()
 	}
 }
+func (idx *Index) ForceExistenceFilterRandom() {
+	existanceSupported := idx.dataStructureVersion >= 1 && idx.lessFalsePositives && idx.keyCount > 0
+	if !existanceSupported {
+		return
+	}
+	if idx.dataStructureVersion == 1 {
+		idx.existenceV1.MadvRandom()
+		return
+	}
+	if idx.dataStructureVersion >= 2 {
+		idx.existenceV2.MadvRandom()
+	}
+}
 func (idx *Index) ForceExistenceFilterInRAM() datasize.ByteSize {
 	existanceSupported := idx.dataStructureVersion >= 1 && idx.lessFalsePositives && idx.keyCount > 0
 	if !existanceSupported {
@@ -417,9 +430,6 @@ func (idx *Index) Lookup(bucketHash, fingerprint uint64) (uint64, bool) {
 		_, fName := filepath.Split(idx.filePath)
 		panic("no Lookup should be done when keyCount==0, please use Empty function to guard " + fName)
 	}
-	if idx.keyCount == 1 {
-		return 0, true
-	}
 	if idx.lessFalsePositives {
 		switch idx.dataStructureVersion {
 		case 1:
@@ -431,6 +441,12 @@ func (idx *Index) Lookup(bucketHash, fingerprint uint64) (uint64, bool) {
 				return 0, false
 			}
 		}
+	}
+	if idx.keyCount == 1 {
+		if !idx.enums {
+			return binary.BigEndian.Uint64(idx.data[9+idx.bytesPerRec:]) & idx.recMask, true
+		}
+		return 0, true
 	}
 
 	var gr GolombRiceReader

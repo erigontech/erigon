@@ -1,0 +1,559 @@
+// Copyright 2026 The Erigon Authors
+// This file is part of Erigon.
+//
+// Erigon is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Erigon is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
+
+package handler
+
+import (
+	"context"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"net/http"
+	"net/http/httptest"
+	"strings"
+	"testing"
+
+	"github.com/go-chi/chi/v5"
+	"github.com/stretchr/testify/require"
+	"go.uber.org/mock/gomock"
+
+	"github.com/erigontech/erigon/cl/clparams"
+	"github.com/erigontech/erigon/cl/cltypes"
+	"github.com/erigontech/erigon/cl/cltypes/solid"
+	"github.com/erigontech/erigon/cl/phase1/network/services"
+	mock_services "github.com/erigontech/erigon/cl/phase1/network/services/mock_services"
+	"github.com/erigontech/erigon/cl/pool"
+	"github.com/erigontech/erigon/cl/utils/bls"
+	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/log/v3"
+)
+
+func TestPostPayloadAttestationsRejectsNullMessage(t *testing.T) {
+	_, _, _, _, _, handler, _, _, _, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), true)
+
+	request := httptest.NewRequest(http.MethodPost, "/eth/v1/beacon/pool/payload_attestations", strings.NewReader(`[null]`))
+	request.Header.Set("Content-Type", "application/json")
+	recorder := httptest.NewRecorder()
+
+	handler.PostEthV1BeaconPoolPayloadAttestations(recorder, request)
+
+	require.Equal(t, http.StatusBadRequest, recorder.Code, recorder.Body.String())
+	require.Contains(t, recorder.Body.String(), "missing payload attestation message data")
+}
+
+func TestPostPayloadAttestationsRejectsOversizedSSZ(t *testing.T) {
+	_, _, _, _, _, handler, _, _, _, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), true)
+	msgSize := (&cltypes.PayloadAttestationMessage{Data: new(cltypes.PayloadAttestationData)}).EncodingSizeSSZ()
+	maxSize := int(handler.beaconChainCfg.PtcSize) * msgSize
+
+	request := httptest.NewRequest(http.MethodPost, "/eth/v1/beacon/pool/payload_attestations", strings.NewReader(strings.Repeat("\x00", maxSize+1)))
+	request.Header.Set("Content-Type", "application/octet-stream")
+	recorder := httptest.NewRecorder()
+
+	handler.PostEthV1BeaconPoolPayloadAttestations(recorder, request)
+
+	require.Equal(t, http.StatusBadRequest, recorder.Code, recorder.Body.String())
+}
+
+func TestPostPayloadAttestationsAcceptsMoreThanBlockAggregateLimitSSZ(t *testing.T) {
+	_, _, _, _, _, handler, _, _, _, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), true)
+	msg := &cltypes.PayloadAttestationMessage{
+		Data: new(cltypes.PayloadAttestationData),
+	}
+	encoded, err := msg.EncodeSSZ(nil)
+	require.NoError(t, err)
+	body := strings.Repeat(string(encoded), int(handler.beaconChainCfg.MaxPayloadAttestations)+1)
+
+	request := httptest.NewRequest(http.MethodPost, "/eth/v1/beacon/pool/payload_attestations", strings.NewReader(body))
+	request.Header.Set("Content-Type", "application/octet-stream")
+	recorder := httptest.NewRecorder()
+
+	handler.PostEthV1BeaconPoolPayloadAttestations(recorder, request)
+
+	require.Equal(t, http.StatusOK, recorder.Code, recorder.Body.String())
+}
+
+func TestPostPayloadAttestationsAcceptsSSZContentTypeParameters(t *testing.T) {
+	_, _, _, _, _, handler, _, _, _, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), true)
+	msg := &cltypes.PayloadAttestationMessage{
+		Data: new(cltypes.PayloadAttestationData),
+	}
+	body, err := msg.EncodeSSZ(nil)
+	require.NoError(t, err)
+
+	request := httptest.NewRequest(http.MethodPost, "/eth/v1/beacon/pool/payload_attestations", strings.NewReader(string(body)))
+	request.Header.Set("Content-Type", "application/octet-stream; charset=utf-8")
+	recorder := httptest.NewRecorder()
+
+	handler.PostEthV1BeaconPoolPayloadAttestations(recorder, request)
+
+	require.Equal(t, http.StatusOK, recorder.Code, recorder.Body.String())
+}
+
+func TestPostPayloadAttestationsAcceptsQueuedWithoutPooling(t *testing.T) {
+	_, _, _, _, _, handler, _, _, _, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), true)
+	ctrl := gomock.NewController(t)
+	defer ctrl.Finish()
+
+	msg := newTestPayloadAttestationMessage(t, 12, common.HexToHash("0x1234"))
+	attestationService := mock_services.NewMockPayloadAttestationService(ctrl)
+	attestationService.EXPECT().ProcessMessage(gomock.Any(), gomock.Nil(), gomock.Any()).Return(fmt.Errorf("%w: %w", services.ErrIgnore, services.ErrAttestationQueued))
+	handler.payloadAttestationService = attestationService
+	handler.epbsPool = pool.NewEpbsPool()
+
+	body, err := json.Marshal([]*cltypes.PayloadAttestationMessage{msg})
+	require.NoError(t, err)
+	request := httptest.NewRequest(http.MethodPost, "/eth/v1/beacon/pool/payload_attestations", strings.NewReader(string(body)))
+	request.Header.Set("Content-Type", "application/json")
+	recorder := httptest.NewRecorder()
+
+	handler.PostEthV1BeaconPoolPayloadAttestations(recorder, request)
+
+	require.Equal(t, http.StatusOK, recorder.Code, recorder.Body.String())
+	_, found := handler.epbsPool.PayloadAttestations.Get(pool.PayloadAttestationKey{Slot: msg.Data.Slot, ValidatorIndex: msg.ValidatorIndex})
+	require.False(t, found)
+}
+
+func TestPostPayloadAttestationsRejectsMalformedContentType(t *testing.T) {
+	_, _, _, _, _, handler, _, _, _, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), true)
+
+	request := httptest.NewRequest(http.MethodPost, "/eth/v1/beacon/pool/payload_attestations", strings.NewReader(`[]`))
+	request.Header.Set("Content-Type", "application/octet-stream; bad")
+	recorder := httptest.NewRecorder()
+
+	handler.PostEthV1BeaconPoolPayloadAttestations(recorder, request)
+
+	require.Equal(t, http.StatusUnsupportedMediaType, recorder.Code, recorder.Body.String())
+}
+
+func TestPostPayloadAttestationsRejectsUnsupportedContentType(t *testing.T) {
+	_, _, _, _, _, handler, _, _, _, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), true)
+
+	request := httptest.NewRequest(http.MethodPost, "/eth/v1/beacon/pool/payload_attestations", strings.NewReader(`[]`))
+	request.Header.Set("Content-Type", "text/plain")
+	recorder := httptest.NewRecorder()
+
+	handler.PostEthV1BeaconPoolPayloadAttestations(recorder, request)
+
+	require.Equal(t, http.StatusUnsupportedMediaType, recorder.Code, recorder.Body.String())
+}
+
+func TestPostExecutionPayloadEnvelopeReturnsForkchoiceError(t *testing.T) {
+	_, _, _, _, _, handler, _, _, fcu, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), true)
+	fcu.OnExecutionPayloadErr = errors.New("invalid execution payload")
+
+	request := httptest.NewRequest(http.MethodPost, "/eth/v1/beacon/execution_payload_envelope", strings.NewReader(`{}`))
+	request.Header.Set("Content-Type", "application/json; charset=utf-8")
+	recorder := httptest.NewRecorder()
+
+	handler.PostEthV1BeaconExecutionPayloadEnvelope(recorder, request)
+
+	require.Equal(t, http.StatusInternalServerError, recorder.Code, recorder.Body.String())
+	require.Contains(t, recorder.Body.String(), "invalid execution payload")
+}
+
+func TestPostPtcDutiesDoesNotCapValidatorCount(t *testing.T) {
+	_, _, _, _, _, handler, _, _, _, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), true)
+	handler.beaconChainCfg.GloasForkEpoch = 0
+	indices := make([]string, 2049)
+	for i := range indices {
+		indices[i] = `"1"`
+	}
+	request := httptest.NewRequest(http.MethodPost, "/eth/v1/validator/duties/ptc/5", strings.NewReader("["+strings.Join(indices, ",")+"]"))
+	rctx := chi.NewRouteContext()
+	rctx.URLParams.Add("epoch", "5")
+	request = request.WithContext(context.WithValue(request.Context(), chi.RouteCtxKey, rctx))
+
+	_, err := handler.PostEthV1ValidatorDutiesPtc(httptest.NewRecorder(), request)
+	require.NoError(t, err)
+}
+
+func TestPostExecutionPayloadBidAcceptsSSZ(t *testing.T) {
+	_, _, _, _, _, handler, _, _, _, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), true)
+	bid := &cltypes.SignedExecutionPayloadBid{
+		Message: newTestExecutionPayloadBid(12, 3, 1000),
+	}
+	body, err := bid.EncodeSSZ(nil)
+	require.NoError(t, err)
+
+	request := httptest.NewRequest(http.MethodPost, "/eth/v1/beacon/execution_payload_bid", strings.NewReader(string(body)))
+	request.Header.Set("Content-Type", "application/octet-stream")
+	recorder := httptest.NewRecorder()
+
+	handler.PostEthV1BeaconExecutionPayloadBid(recorder, request)
+
+	require.Equal(t, http.StatusOK, recorder.Code, recorder.Body.String())
+}
+
+func TestPostExecutionPayloadBidAcceptsQueuedBid(t *testing.T) {
+	_, _, _, _, _, handler, _, _, _, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), true)
+	ctrl := gomock.NewController(t)
+	defer ctrl.Finish()
+
+	bidService := mock_services.NewMockExecutionPayloadBidService(ctrl)
+	bidService.EXPECT().ProcessMessage(gomock.Any(), gomock.Nil(), gomock.Any()).Return(fmt.Errorf("%w: %w", services.ErrIgnore, services.ErrBidQueued))
+	handler.executionPayloadBidService = bidService
+
+	bid := &cltypes.SignedExecutionPayloadBid{
+		Message: newTestExecutionPayloadBid(12, 3, 1000),
+	}
+	body, err := bid.EncodeSSZ(nil)
+	require.NoError(t, err)
+
+	request := httptest.NewRequest(http.MethodPost, "/eth/v1/beacon/execution_payload_bid", strings.NewReader(string(body)))
+	request.Header.Set("Content-Type", "application/octet-stream")
+	recorder := httptest.NewRecorder()
+
+	handler.PostEthV1BeaconExecutionPayloadBid(recorder, request)
+
+	require.Equal(t, http.StatusOK, recorder.Code, recorder.Body.String())
+}
+
+func TestPostExecutionPayloadBidRejectsHardIgnore(t *testing.T) {
+	_, _, _, _, _, handler, _, _, _, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), true)
+	ctrl := gomock.NewController(t)
+	defer ctrl.Finish()
+
+	bidService := mock_services.NewMockExecutionPayloadBidService(ctrl)
+	bidService.EXPECT().ProcessMessage(gomock.Any(), gomock.Nil(), gomock.Any()).Return(services.ErrIgnore)
+	handler.executionPayloadBidService = bidService
+
+	bid := &cltypes.SignedExecutionPayloadBid{
+		Message: newTestExecutionPayloadBid(12, 3, 1000),
+	}
+	body, err := bid.EncodeSSZ(nil)
+	require.NoError(t, err)
+
+	request := httptest.NewRequest(http.MethodPost, "/eth/v1/beacon/execution_payload_bid", strings.NewReader(string(body)))
+	request.Header.Set("Content-Type", "application/octet-stream")
+	recorder := httptest.NewRecorder()
+
+	handler.PostEthV1BeaconExecutionPayloadBid(recorder, request)
+
+	require.Equal(t, http.StatusBadRequest, recorder.Code, recorder.Body.String())
+}
+
+func TestPostExecutionPayloadBidRejectsOversizedSSZ(t *testing.T) {
+	_, _, _, _, _, handler, _, _, _, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), true)
+
+	request := httptest.NewRequest(http.MethodPost, "/eth/v1/beacon/execution_payload_bid", strings.NewReader(strings.Repeat("\x00", int(maxSignedExecutionPayloadBidSSZSize())+1)))
+	request.Header.Set("Content-Type", "application/octet-stream")
+	recorder := httptest.NewRecorder()
+
+	handler.PostEthV1BeaconExecutionPayloadBid(recorder, request)
+
+	require.Equal(t, http.StatusBadRequest, recorder.Code, recorder.Body.String())
+}
+
+func TestPostExecutionPayloadBidRejectsMissingMessage(t *testing.T) {
+	_, _, _, _, _, handler, _, _, _, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), true)
+
+	request := httptest.NewRequest(http.MethodPost, "/eth/v1/beacon/execution_payload_bid", strings.NewReader(`{}`))
+	request.Header.Set("Content-Type", "application/json")
+	recorder := httptest.NewRecorder()
+
+	handler.PostEthV1BeaconExecutionPayloadBid(recorder, request)
+
+	require.Equal(t, http.StatusBadRequest, recorder.Code, recorder.Body.String())
+	require.Contains(t, recorder.Body.String(), "missing message")
+}
+
+func TestPostExecutionPayloadBidRejectsMalformedContentType(t *testing.T) {
+	_, _, _, _, _, handler, _, _, _, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), true)
+
+	request := httptest.NewRequest(http.MethodPost, "/eth/v1/beacon/execution_payload_bid", strings.NewReader(`{}`))
+	request.Header.Set("Content-Type", "application/octet-stream; bad")
+	recorder := httptest.NewRecorder()
+
+	handler.PostEthV1BeaconExecutionPayloadBid(recorder, request)
+
+	require.Equal(t, http.StatusUnsupportedMediaType, recorder.Code, recorder.Body.String())
+}
+
+func TestGetValidatorExecutionPayloadBidReturnsUnsignedBid(t *testing.T) {
+	_, _, _, _, _, handler, _, _, _, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), true)
+	handler.beaconChainCfg.GloasForkEpoch = 0
+	handler.epbsPool = pool.NewEpbsPool()
+	bid := newTestExecutionPayloadBid(12, 3, 1000)
+	handler.epbsPool.HighestBids.Add(pool.HighestBidKey{
+		Slot:            bid.Slot,
+		ParentBlockHash: bid.ParentBlockHash,
+		ParentBlockRoot: bid.ParentBlockRoot,
+	}, &cltypes.SignedExecutionPayloadBid{Message: bid})
+
+	request := httptest.NewRequest(http.MethodGet, "/eth/v1/validator/execution_payload_bid/12/3", nil)
+	recorder := httptest.NewRecorder()
+
+	handler.ServeHTTP(recorder, request)
+
+	require.Equal(t, http.StatusOK, recorder.Code, recorder.Body.String())
+	require.Contains(t, recorder.Body.String(), `"builder_index":"3"`)
+	require.NotContains(t, recorder.Body.String(), `"signature"`)
+	require.NotContains(t, recorder.Body.String(), `"message"`)
+}
+
+func TestAggregatePayloadAttestationMessagesFiltersAndLimits(t *testing.T) {
+	cfg := clparams.MainnetBeaconConfig
+	cfg.PtcSize = 5
+	cfg.MaxPayloadAttestations = 2
+	ptc := fixedPTCProvider{ptc: map[uint64][]uint64{12: {10, 11, 12, 13, 14}}}
+
+	first := common.HexToHash("0x1111")
+	second := common.HexToHash("0x2222")
+	third := common.HexToHash("0x3333")
+	messages := []*cltypes.PayloadAttestationMessage{
+		newTestPayloadAttestationMessage(t, 10, first),
+		newTestPayloadAttestationMessage(t, 10, first),
+		newTestPayloadAttestationMessage(t, 11, first),
+		newTestPayloadAttestationMessage(t, 12, first),
+		newTestPayloadAttestationMessage(t, 12, second),
+		newTestPayloadAttestationMessage(t, 99, second),
+		newTestPayloadAttestationMessage(t, 14, third),
+	}
+
+	attestations, err := aggregatePayloadAttestationMessages(&cfg, ptc, messages)
+
+	require.NoError(t, err)
+	require.Equal(t, 2, attestations.Len())
+	require.Equal(t, first, attestations.Get(0).Data.BeaconBlockRoot)
+	require.Equal(t, []int{0, 1, 2}, attestations.Get(0).AggregationBits.GetOnIndices())
+	require.Equal(t, second, attestations.Get(1).Data.BeaconBlockRoot)
+	require.Equal(t, []int{2}, attestations.Get(1).AggregationBits.GetOnIndices())
+}
+
+func TestAggregatePayloadAttestationMessagesIncludesDuplicatePTCPositions(t *testing.T) {
+	cfg := clparams.MainnetBeaconConfig
+	cfg.PtcSize = 3
+	cfg.MaxPayloadAttestations = 1
+	ptc := fixedPTCProvider{ptc: map[uint64][]uint64{12: {10, 10, 11}}}
+	root := common.HexToHash("0x1111")
+
+	attestations, err := aggregatePayloadAttestationMessages(&cfg, ptc, []*cltypes.PayloadAttestationMessage{
+		newTestPayloadAttestationMessage(t, 10, root),
+		newTestPayloadAttestationMessage(t, 11, root),
+	})
+
+	require.NoError(t, err)
+	require.Equal(t, 1, attestations.Len())
+	require.Equal(t, []int{0, 1, 2}, attestations.Get(0).AggregationBits.GetOnIndices())
+}
+
+func TestAggregatePayloadAttestationMessagesSkipsMalformedSignatureGroup(t *testing.T) {
+	cfg := clparams.MainnetBeaconConfig
+	cfg.PtcSize = 2
+	cfg.MaxPayloadAttestations = 2
+	ptc := fixedPTCProvider{ptc: map[uint64][]uint64{12: {10, 11}}}
+	badRoot := common.HexToHash("0x1111")
+	goodRoot := common.HexToHash("0x2222")
+	bad := newTestPayloadAttestationMessage(t, 10, badRoot)
+	bad.Signature = common.Bytes96{0x01}
+
+	attestations, err := aggregatePayloadAttestationMessages(&cfg, ptc, []*cltypes.PayloadAttestationMessage{
+		bad,
+		newTestPayloadAttestationMessage(t, 11, goodRoot),
+	})
+
+	require.NoError(t, err)
+	require.Equal(t, 1, attestations.Len())
+	require.Equal(t, goodRoot, attestations.Get(0).Data.BeaconBlockRoot)
+	require.Equal(t, []int{1}, attestations.Get(0).AggregationBits.GetOnIndices())
+}
+
+func TestAggregatePayloadAttestationMessagesSkipsUnavailablePTC(t *testing.T) {
+	cfg := clparams.MainnetBeaconConfig
+	cfg.PtcSize = 2
+	cfg.MaxPayloadAttestations = 2
+	ptc := fixedPTCProvider{
+		ptc: map[uint64][]uint64{12: {10, 11}},
+		err: map[uint64]error{13: errors.New("ptc unavailable")},
+	}
+	goodRoot := common.HexToHash("0x1111")
+	skipped := newTestPayloadAttestationMessage(t, 10, common.HexToHash("0x2222"))
+	skipped.Data.Slot = 13
+
+	attestations, err := aggregatePayloadAttestationMessages(&cfg, ptc, []*cltypes.PayloadAttestationMessage{
+		skipped,
+		newTestPayloadAttestationMessage(t, 10, goodRoot),
+	})
+
+	require.NoError(t, err)
+	require.Equal(t, 1, attestations.Len())
+	require.Equal(t, goodRoot, attestations.Get(0).Data.BeaconBlockRoot)
+}
+
+func TestSnapshotPayloadAttestationPTCsCopiesMessageSlots(t *testing.T) {
+	source := []uint64{10, 11}
+	provider := fixedPTCProvider{
+		ptc: map[uint64][]uint64{
+			12: source,
+			13: {20, 21},
+		},
+	}
+	msg := newTestPayloadAttestationMessage(t, 10, common.Hash{})
+
+	snapshot := snapshotPayloadAttestationPTCs(provider, []*cltypes.PayloadAttestationMessage{
+		nil,
+		&cltypes.PayloadAttestationMessage{Data: nil},
+		msg,
+	})
+
+	source[0] = 99
+	ptc, err := snapshot.GetPTC(12)
+	require.NoError(t, err)
+	require.Equal(t, []uint64{10, 11}, ptc)
+	_, err = snapshot.GetPTC(13)
+	require.Error(t, err)
+}
+
+type fixedPTCProvider struct {
+	ptc map[uint64][]uint64
+	err map[uint64]error
+}
+
+func (p fixedPTCProvider) GetPTC(slot uint64) ([]uint64, error) {
+	if err := p.err[slot]; err != nil {
+		return nil, err
+	}
+	return p.ptc[slot], nil
+}
+
+func newTestPayloadAttestationMessage(t *testing.T, validatorIndex uint64, beaconBlockRoot common.Hash) *cltypes.PayloadAttestationMessage {
+	t.Helper()
+	privateKey, err := bls.GenerateKey()
+	require.NoError(t, err)
+	var signingMessage [32]byte
+	signingMessage[0] = byte(validatorIndex)
+	signature := privateKey.Sign(signingMessage[:])
+	var signatureBytes common.Bytes96
+	copy(signatureBytes[:], signature.Bytes())
+	return &cltypes.PayloadAttestationMessage{
+		ValidatorIndex: validatorIndex,
+		Data: &cltypes.PayloadAttestationData{
+			BeaconBlockRoot:   beaconBlockRoot,
+			Slot:              12,
+			PayloadPresent:    true,
+			BlobDataAvailable: true,
+		},
+		Signature: signatureBytes,
+	}
+}
+
+func TestPostValidatorProposerPreferencesAcceptsBatchJSON(t *testing.T) {
+	_, _, _, _, _, handler, _, _, _, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), true)
+	handler.epbsPool = pool.NewEpbsPool()
+	body, err := json.Marshal([]*cltypes.SignedProposerPreferences{
+		{
+			Message: &cltypes.ProposerPreferences{
+				DependentRoot:  common.HexToHash("0x1111111111111111111111111111111111111111111111111111111111111111"),
+				ProposalSlot:   32,
+				ValidatorIndex: 1,
+				FeeRecipient:   common.HexToAddress("0x2222222222222222222222222222222222222222"),
+				TargetGasLimit: 30_000_000,
+			},
+		},
+		{
+			Message: &cltypes.ProposerPreferences{
+				DependentRoot:  common.HexToHash("0x3333333333333333333333333333333333333333333333333333333333333333"),
+				ProposalSlot:   33,
+				ValidatorIndex: 2,
+				FeeRecipient:   common.HexToAddress("0x4444444444444444444444444444444444444444"),
+				TargetGasLimit: 30_000_001,
+			},
+		},
+	})
+	require.NoError(t, err)
+
+	request := httptest.NewRequest(http.MethodPost, "/eth/v1/validator/proposer_preferences", strings.NewReader(string(body)))
+	request.Header.Set("Content-Type", "application/json")
+	recorder := httptest.NewRecorder()
+
+	handler.ServeHTTP(recorder, request)
+
+	require.Equal(t, http.StatusOK, recorder.Code, recorder.Body.String())
+	_, ok := handler.epbsPool.ProposerPreferences.Get(pool.ProposerPreferencesKey{
+		Slot:          32,
+		DependentRoot: common.HexToHash("0x1111111111111111111111111111111111111111111111111111111111111111"),
+	})
+	require.True(t, ok)
+	_, ok = handler.epbsPool.ProposerPreferences.Get(pool.ProposerPreferencesKey{
+		Slot:          33,
+		DependentRoot: common.HexToHash("0x3333333333333333333333333333333333333333333333333333333333333333"),
+	})
+	require.True(t, ok)
+}
+
+func TestPostBeaconPoolProposerPreferencesAcceptsBatchJSON(t *testing.T) {
+	_, _, _, _, _, handler, _, _, _, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), true)
+	handler.epbsPool = pool.NewEpbsPool()
+	body, err := json.Marshal([]*cltypes.SignedProposerPreferences{
+		{
+			Message: &cltypes.ProposerPreferences{
+				DependentRoot:  common.HexToHash("0x5555555555555555555555555555555555555555555555555555555555555555"),
+				ProposalSlot:   34,
+				ValidatorIndex: 3,
+				FeeRecipient:   common.HexToAddress("0x6666666666666666666666666666666666666666"),
+				TargetGasLimit: 30_000_002,
+			},
+		},
+	})
+	require.NoError(t, err)
+
+	request := httptest.NewRequest(http.MethodPost, "/eth/v1/beacon/pool/proposer_preferences", strings.NewReader(string(body)))
+	request.Header.Set("Content-Type", "application/json")
+	recorder := httptest.NewRecorder()
+
+	handler.ServeHTTP(recorder, request)
+
+	require.Equal(t, http.StatusOK, recorder.Code, recorder.Body.String())
+	_, ok := handler.epbsPool.ProposerPreferences.Get(pool.ProposerPreferencesKey{
+		Slot:          34,
+		DependentRoot: common.HexToHash("0x5555555555555555555555555555555555555555555555555555555555555555"),
+	})
+	require.True(t, ok)
+}
+
+func TestGetValidatorExecutionPayloadEnvelopesBySlot(t *testing.T) {
+	_, _, _, _, _, handler, _, _, _, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), true)
+	handler.beaconChainCfg.GloasForkEpoch = 0
+	slot := uint64(3)
+	envelope := cltypes.NewExecutionPayloadEnvelope(handler.beaconChainCfg)
+	envelope.BuilderIndex = 7
+	handler.selfBuildEnvelopes.Add(slot, envelope)
+
+	request := httptest.NewRequest(http.MethodGet, "/eth/v1/validator/execution_payload_envelopes/3", nil)
+	recorder := httptest.NewRecorder()
+
+	handler.ServeHTTP(recorder, request)
+
+	require.Equal(t, http.StatusOK, recorder.Code, recorder.Body.String())
+	require.Contains(t, recorder.Body.String(), `"builder_index":"7"`)
+}
+
+func newTestExecutionPayloadBid(slot, builderIndex, value uint64) *cltypes.ExecutionPayloadBid {
+	return &cltypes.ExecutionPayloadBid{
+		ParentBlockHash:    common.HexToHash("0x1111111111111111111111111111111111111111111111111111111111111111"),
+		ParentBlockRoot:    common.HexToHash("0x2222222222222222222222222222222222222222222222222222222222222222"),
+		BlockHash:          common.HexToHash("0x3333333333333333333333333333333333333333333333333333333333333333"),
+		PrevRandao:         common.HexToHash("0x4444444444444444444444444444444444444444444444444444444444444444"),
+		FeeRecipient:       common.HexToAddress("0x5555555555555555555555555555555555555555"),
+		GasLimit:           30_000_000,
+		BuilderIndex:       builderIndex,
+		Slot:               slot,
+		Value:              value,
+		ExecutionPayment:   0,
+		BlobKzgCommitments: *solid.NewStaticListSSZ[*cltypes.KZGCommitment](cltypes.MaxBlobsCommittmentsPerBlock, 48),
+	}
+}

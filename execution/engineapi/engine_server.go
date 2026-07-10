@@ -70,6 +70,7 @@ var errCaplinEnabled = &rpc.UnsupportedForkError{Message: "caplin is enabled"}
 type EngineServer struct {
 	blockDownloader *engine_block_downloader.EngineBlockDownloader
 	config          *chain.Config
+	beaconCfg       atomic.Pointer[clparams.BeaconChainConfig]
 	// Block proposing for proof-of-stake
 	proposing bool
 	// Block consuming for proof-of-stake
@@ -124,6 +125,10 @@ func NewEngineServer(
 	srv.consuming.Store(consuming)
 
 	return srv
+}
+
+func (e *EngineServer) SetBeaconChainConfig(beaconCfg *clparams.BeaconChainConfig) {
+	e.beaconCfg.Store(beaconCfg)
 }
 
 func (e *EngineServer) Start(
@@ -207,6 +212,9 @@ func (s *EngineServer) validatePayloadAttributesPreFCU(version clparams.StateVer
 	if s.config.IsCancun(timestamp) && version < clparams.DenebVersion { // V1/V2 fcu at a Cancun timestamp
 		return &rpc.UnsupportedForkError{Message: "Unsupported fork"}
 	}
+	if s.config.IsAmsterdam(timestamp) && version < clparams.GloasVersion { // V3 fcu at an Amsterdam timestamp
+		return &rpc.UnsupportedForkError{Message: "Unsupported fork"}
+	}
 	if version >= clparams.CapellaVersion && !s.isWithdrawalsPresenceValid(timestamp, payloadAttributes.Withdrawals) {
 		return &engine_helpers.InvalidPayloadAttributesErr // wrong V1/V2 withdrawals presence vs Shanghai
 	}
@@ -227,13 +235,18 @@ func (s *EngineServer) validatePayloadAttributesPostFCU(version clparams.StateVe
 	if !s.config.IsCancun(timestamp) && version >= clparams.DenebVersion { // V3 outside Cancun window (cancun.md point 8.2)
 		return &rpc.UnsupportedForkError{Message: "Unsupported fork"}
 	}
+	if !s.config.IsAmsterdam(timestamp) && version >= clparams.GloasVersion { // V4 outside Amsterdam window
+		return &rpc.UnsupportedForkError{Message: "Unsupported fork"}
+	}
 	if version >= clparams.GloasVersion && payloadAttributes.SlotNumber == nil {
 		return &engine_helpers.InvalidPayloadAttributesErr // SlotNumber required for Glamsterdam (EIP-7843)
 	}
-	// TODO: enable once tests catch up with glamsterdam-devnet-4 spec
-	// if version >= clparams.GloasVersion && payloadAttributes.TargetGasLimit == nil {
-	// 	return &engine_helpers.InvalidPayloadAttributesErr // TargetGasLimit required for V4 attrs
-	// }
+	if version >= clparams.GloasVersion && payloadAttributes.TargetGasLimit == nil {
+		return &engine_helpers.InvalidPayloadAttributesErr // TargetGasLimit required for V4 attrs
+	}
+	if version < clparams.GloasVersion && payloadAttributes.SlotNumber != nil {
+		return &engine_helpers.InvalidPayloadAttributesErr // pre-V4 attrs MUST NOT carry slotNumber
+	}
 	if version < clparams.GloasVersion && payloadAttributes.TargetGasLimit != nil {
 		return &engine_helpers.InvalidPayloadAttributesErr // pre-V4 attrs MUST NOT carry targetGasLimit
 	}
@@ -353,7 +366,8 @@ func (s *EngineServer) newPayload(ctx context.Context, req *engine_types.Executi
 		if req.BlockAccessList == nil {
 			return nil, &rpc.InvalidParamsError{Message: "blockAccessList missing"}
 		}
-		if len(req.BlockAccessList) == 0 {
+		bal := *req.BlockAccessList
+		if len(bal) == 0 {
 			blockAccessList = make(types.BlockAccessList, 0)
 			hash := empty.BlockAccessListHash
 			header.BlockAccessListHash = &hash
@@ -362,9 +376,9 @@ func (s *EngineServer) newPayload(ctx context.Context, req *engine_types.Executi
 				return nil, &rpc.InvalidParamsError{Message: fmt.Sprintf("encode empty blockAccessList: %v", err)}
 			}
 		} else {
-			blockAccessList, err = types.DecodeBlockAccessListBytes(req.BlockAccessList)
+			blockAccessList, err = types.DecodeBlockAccessListBytes(bal)
 			if err != nil {
-				s.logger.Debug("[NewPayload] failed to decode blockAccessList", "err", err, "raw", hex.EncodeToString(req.BlockAccessList))
+				s.logger.Debug("[NewPayload] failed to decode blockAccessList", "err", err, "raw", hex.EncodeToString(bal))
 				return &engine_types.PayloadStatus{
 					Status:          engine_types.InvalidStatus,
 					ValidationError: engine_types.NewStringifiedErrorFromString(fmt.Sprintf("invalid block access list decode: %v", err)),
@@ -376,9 +390,9 @@ func (s *EngineServer) newPayload(ctx context.Context, req *engine_types.Executi
 					ValidationError: engine_types.NewStringifiedErrorFromString(fmt.Sprintf("invalid block access list validate: %v", err)),
 				}, nil
 			}
-			hash := crypto.HashData(req.BlockAccessList)
+			hash := crypto.HashData(bal)
 			header.BlockAccessListHash = &hash
-			blockAccessListBytes = req.BlockAccessList
+			blockAccessListBytes = bal
 		}
 		if req.SlotNumber != nil {
 			slotNumber := uint64(*req.SlotNumber)
@@ -1112,12 +1126,10 @@ func assembledBlockToPayloadResponse(br *types.BlockWithReceipts, blockValue *ui
 		ep.SlotNumber = &sn
 	}
 	if header.BlockAccessListHash != nil && br.BlockAccessList != nil {
-		// EIP-7928: encode even when br.BlockAccessList is empty — an empty
-		// BAL serializes to 0xc0 via standard RLP rules. A nil BAL means
-		// the data is missing/not-populated and should not be emitted.
 		encoded, encErr := types.EncodeBlockAccessListBytes(br.BlockAccessList)
 		if encErr == nil {
-			ep.BlockAccessList = encoded
+			bal := hexutil.Bytes(encoded)
+			ep.BlockAccessList = &bal
 		}
 	}
 

@@ -18,6 +18,7 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -29,7 +30,7 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/urfave/cli/v2"
+	"github.com/urfave/cli/v3"
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/hexutil"
@@ -64,7 +65,7 @@ var zkevmTestCommand = cli.Command{
 	},
 }
 
-func zkevmTestCmd(ctx *cli.Context) error {
+func zkevmTestCmd(_ context.Context, ctx *cli.Command) error {
 	path := ctx.Args().First()
 	if path == "" {
 		return errors.New("path argument required")
@@ -106,11 +107,10 @@ func zkevmTestCmd(ctx *cli.Context) error {
 func newZkevmFailMatcher() *testutil.TestMatcher {
 	tm := new(testutil.TestMatcher)
 
-	// The eip8025_optional_proofs witness_validation_* fixtures are stateless-verifier
-	// negative tests storing a deliberately mutated executionWitness, so producer
-	// comparison always diverges until a stateless-verify consumer mode exists.
-	// https://github.com/erigontech/erigon/issues/21566
-	const verifierNegative = "verifier-negative witness fixture needs a stateless-verify consumer, see #21566"
+	// These witness_validation_* fixtures deliberately store a mutated executionWitness for
+	// stateless verifiers; a stateful EL only produces the canonical witness, so producer
+	// comparison can never match them — out of scope, not pending work. See #21566.
+	const verifierNegative = "verifier-negative fixture: stateful EL can't reproduce a mutated witness, see #21566"
 	for _, p := range []string{
 		`witness_validation_(codes|headers|state)/[a-z0-9_]+_(missing|extra|malformed)_`,
 		`witness_headers/witness_headers_extra_unused_older_ancestor`,

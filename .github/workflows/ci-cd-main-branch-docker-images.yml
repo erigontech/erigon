@@ -39,12 +39,13 @@ jobs:
           rm -drf $(pwd)/*
 
       - name: Fast checkout git repository, git ref ${{ inputs.checkout_ref == '' && github.ref_name || inputs.checkout_ref }}
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
         with:
           repository: ${{ env.APP_REPO }}
           fetch-depth: 1
           ref: ${{ inputs.checkout_ref == '' && github.ref || inputs.checkout_ref }}
           path: 'erigon'
+          persist-credentials: false
 
       - name: Define variables
         id: def_docker_vars
@@ -97,7 +98,7 @@ jobs:
           password: ${{ secrets.DOCKERHUB_PUSH_TOKEN }}
 
       - name: Set up QEMU
-        uses: docker/setup-qemu-action@v4.1.0
+        uses: docker/setup-qemu-action@v4.2.0
 
       - name: Set up Docker Buildx
         id: docker-buildx

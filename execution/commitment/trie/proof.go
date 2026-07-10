@@ -112,13 +112,252 @@ func (t *Trie) Prove(key []byte, fromLevel int, storage bool) ([][]byte, error) 
 			}
 		case ValueNode:
 			tn = nil
-		case HashNode:
+		case HashNode, *HashNode:
 			return nil, fmt.Errorf("encountered hashNode unexpectedly, key %x, fromLevel %d", key, fromLevel)
 		default:
 			panic(fmt.Sprintf("%T: invalid node: %v", tn, tn))
 		}
 	}
 	return proof, nil
+}
+
+// WitnessNodesForKeys returns the deduplicated proof nodes (root first) on the paths
+// to the given hex-nibble keys — the lean node set a strict verifier needs. Descent is
+// driven by remaining key length, so mixed-length account (64) and storage (128) keys work.
+func (t *Trie) WitnessNodesForKeys(hexKeys [][]byte) ([][]byte, error) {
+	hasher := newHasher(t.valueNodesRLPEncoded)
+	defer returnHasherToPool(hasher)
+	seen := make(map[string]struct{})
+	var out [][]byte
+	add := func(n Node) error {
+		rlp, err := hasher.hashChildren(n, 0)
+		if err != nil {
+			return err
+		}
+		// A node whose RLP is <32B is inlined into its parent and never referenced by
+		// hash, so it must not be emitted as a standalone witness node. The root is the
+		// exception: Trie.Hash force-hashes it, so it is referenced by hash even when short.
+		if len(rlp) < 32 && n != t.RootNode {
+			return nil
+		}
+		if _, ok := seen[string(rlp)]; ok {
+			return nil
+		}
+		c := common.Copy(rlp)
+		// c is appended to out and never mutated, so alias it as the set key
+		// instead of allocating a second copy of the same bytes.
+		seen[common.ToStringZeroCopy(c)] = struct{}{}
+		out = append(out, c)
+		return nil
+	}
+	addIfStructural := func(n Node) error {
+		switch n.(type) {
+		case *FullNode, *ShortNode:
+			return add(n)
+		}
+		return nil
+	}
+	for _, key := range hexKeys {
+		tn := t.RootNode
+		k := key
+		for tn != nil {
+			switch n := tn.(type) {
+			case *ShortNode:
+				if err := add(n); err != nil {
+					return nil, err
+				}
+				nKey := n.Key
+				if len(nKey) > 0 && nKey[len(nKey)-1] == 16 {
+					nKey = nKey[:len(nKey)-1]
+				}
+				if len(k) < len(nKey) || !bytes.Equal(nKey, k[:len(nKey)]) {
+					// Key diverges inside this extension: include the node behind it so a
+					// strict verifier can descend the exclusion/collapse branch.
+					if err := addIfStructural(n.Val); err != nil {
+						return nil, err
+					}
+					tn = nil
+				} else {
+					tn = n.Val
+					k = k[len(nKey):]
+				}
+			case *FullNode:
+				if err := add(n); err != nil {
+					return nil, err
+				}
+				if len(k) == 0 {
+					tn = nil
+				} else {
+					tn = n.Children[k[0]]
+					k = k[1:]
+				}
+			case *AccountNode:
+				if len(k) == 0 {
+					tn = nil
+				} else {
+					tn = n.Storage
+				}
+			case ValueNode:
+				tn = nil
+			case HashNode, *HashNode:
+				tn = nil
+			default:
+				return nil, fmt.Errorf("witness: invalid node %T on key %x", tn, key)
+			}
+		}
+	}
+	return out, nil
+}
+
+// WitnessNodesForKeysFromNodes returns the same lean proof-node set as
+// WitnessNodesForKeys, but walks the captured node bytes directly (indexed by hash)
+// and decodes only the nodes on the proof paths, instead of RLPDecode expanding the
+// whole superset first. nodes is root-first (index 0 is the trie root).
+func WitnessNodesForKeysFromNodes(nodes, hexKeys [][]byte) ([][]byte, error) {
+	if len(nodes) == 0 {
+		return nil, nil
+	}
+	hasher := newHasher(false)
+	defer returnHasherToPool(hasher)
+	byHash := make(map[common.Hash][]byte, len(nodes))
+	for _, n := range nodes {
+		byHash[crypto.Keccak256Hash(n)] = n
+	}
+	rootHash := crypto.Keccak256Hash(nodes[0])
+
+	seen := make(map[string]struct{})
+	var out [][]byte
+	// emit appends a node's canonical bytes: the captured bytes when the node came
+	// from the set (rlp != nil), else the re-encoding of an embedded child.
+	emit := func(n Node, rlp []byte) error {
+		if rlp == nil {
+			hashed, err := hasher.hashChildren(n, 0)
+			if err != nil {
+				return err
+			}
+			rlp = hashed
+		}
+		// <32B nodes are inlined in their parent; only the root stays referenced by
+		// hash (Trie.Hash force-hashes it) and must be kept even when short.
+		if len(rlp) < 32 && crypto.Keccak256Hash(rlp) != rootHash {
+			return nil
+		}
+		if _, ok := seen[string(rlp)]; ok {
+			return nil
+		}
+		c := common.Copy(rlp)
+		seen[common.ToStringZeroCopy(c)] = struct{}{}
+		out = append(out, c)
+		return nil
+	}
+	// nodeAt decodes the captured node with the given hash once and caches it, so a
+	// node shared by many proof paths is decoded a single time (nil node if blinded).
+	decoded := make(map[common.Hash]Node)
+	nodeAt := func(h common.Hash) (Node, []byte, error) {
+		rlp, ok := byHash[h]
+		if !ok {
+			return nil, nil, nil
+		}
+		if n, ok := decoded[h]; ok {
+			return n, rlp, nil
+		}
+		n, err := decodeTrieNode(rlp)
+		if err != nil {
+			return nil, nil, err
+		}
+		decoded[h] = n
+		return n, rlp, nil
+	}
+	// resolve turns a child reference into the next node plus its captured bytes: a
+	// HashNode is looked up in the set (nil node if blinded), an embedded node is
+	// returned as-is with nil bytes (it is not a separately captured node).
+	resolve := func(child Node) (Node, []byte, error) {
+		hn, ok := child.(*HashNode)
+		if !ok {
+			return child, nil, nil
+		}
+		return nodeAt(common.BytesToHash(hn.hash))
+	}
+
+	if _, ok := byHash[rootHash]; !ok {
+		return nil, fmt.Errorf("witness root %x absent from node set", rootHash)
+	}
+	for _, key := range hexKeys {
+		node, nodeRLP, err := nodeAt(rootHash)
+		if err != nil {
+			return nil, err
+		}
+		k := key
+		insideStorage := false
+		for node != nil {
+			switch n := node.(type) {
+			case *ShortNode:
+				if err := emit(n, nodeRLP); err != nil {
+					return nil, err
+				}
+				nKey := n.Key
+				terminating := len(nKey) > 0 && nKey[len(nKey)-1] == 16
+				if terminating {
+					nKey = nKey[:len(nKey)-1]
+				}
+				if len(k) < len(nKey) || !bytes.Equal(nKey, k[:len(nKey)]) {
+					behind, behindRLP, err := resolve(n.Val)
+					if err != nil {
+						return nil, err
+					}
+					switch behind.(type) {
+					case *FullNode, *ShortNode:
+						if err := emit(behind, behindRLP); err != nil {
+							return nil, err
+						}
+					}
+					node = nil
+					break
+				}
+				k = k[len(nKey):]
+				if !terminating {
+					node, nodeRLP, err = resolve(n.Val)
+					if err != nil {
+						return nil, err
+					}
+					break
+				}
+				// terminating leaf: descend into storage if this is an account and
+				// storage nibbles remain.
+				node = nil
+				if !insideStorage && len(k) > 0 {
+					if vn, ok := n.Val.(ValueNode); ok {
+						var acc accounts.Account
+						if decErr := acc.DecodeForHashing(vn); decErr == nil && acc.Root != EmptyRoot && acc.Root != (common.Hash{}) {
+							sn, srlp, sErr := nodeAt(acc.Root)
+							if sErr != nil {
+								return nil, sErr
+							}
+							if sn != nil {
+								node, nodeRLP, insideStorage = sn, srlp, true
+							}
+						}
+					}
+				}
+			case *FullNode:
+				if err := emit(n, nodeRLP); err != nil {
+					return nil, err
+				}
+				if len(k) == 0 {
+					node = nil
+					break
+				}
+				node, nodeRLP, err = resolve(n.Children[k[0]])
+				if err != nil {
+					return nil, err
+				}
+				k = k[1:]
+			default:
+				node = nil
+			}
+		}
+	}
+	return out, nil
 }
 
 func decodeRef(buf []byte) (Node, []byte, error) {

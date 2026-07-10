@@ -172,7 +172,9 @@ func ExecuteBlockEphemerally(
 
 	var bloom types.Bloom
 	if !vmConfig.NoReceipts {
-		bloom = types.CreateBloom(receipts)
+		// ApplyTransaction populated each receipt's Bloom, so merge those
+		// instead of hashing all logs again.
+		bloom = receipts.MergedBloom()
 		if !vmConfig.StatelessExec && bloom != header.Bloom {
 			return nil, fmt.Errorf("bloom computed by execution: %x, in header: %x", bloom, header.Bloom)
 		}
@@ -374,72 +376,4 @@ func InitializeBlockExecution(engine rules.Engine, chain rules.ChainHeaderReader
 	}
 	blockContext := NewEVMBlockContext(header, GetHashFn(header, nil), engine, accounts.NilAddress, cc)
 	return ibs.FinalizeTx(blockContext.Rules(cc), stateWriter)
-}
-
-var alwaysSkipReceiptCheck = dbg.EnvBool("EXEC_SKIP_RECEIPT_CHECK", false)
-
-func BlockPostValidation(blockGasUsed, blobGasUsed uint64, checkReceipts, checkBloom bool, receipts types.Receipts, h *types.Header, txns types.Transactions, chainConfig *chain.Config, logger log.Logger) error {
-	if blockGasUsed != h.GasUsed {
-		logger.Warn("gas used mismatch", "block", h.Number.Uint64(), "header", h.GasUsed, "execution", blockGasUsed,
-			"diff", int64(blockGasUsed)-int64(h.GasUsed), "txCount", len(txns), "receiptCount", len(receipts))
-		// Dump per-tx gas for debugging
-		var cumGas uint64
-		for i, r := range receipts {
-			txGas := r.GasUsed
-			cumGas += txGas
-			var txHash string
-			if i < len(txns) {
-				txHash = txns[i].Hash().Hex()[:18]
-			}
-			logger.Warn("  tx gas detail", "block", h.Number.Uint64(), "txIdx", i, "txHash", txHash,
-				"gasUsed", txGas, "cumGasUsed", r.CumulativeGasUsed, "computedCumGas", cumGas, "status", r.Status)
-		}
-		return fmt.Errorf("gas used by execution: %d, in header: %d, headerNum=%d, %x",
-			blockGasUsed, h.GasUsed, h.Number.Uint64(), h.Hash())
-	}
-
-	if h.BlobGasUsed != nil && blobGasUsed != *h.BlobGasUsed {
-		return fmt.Errorf("blobGasUsed by execution: %d, in header: %d, headerNum=%d, %x",
-			blobGasUsed, *h.BlobGasUsed, h.Number.Uint64(), h.Hash())
-	}
-
-	var lbloom types.Bloom
-	bloomFromReceipts := checkReceipts && checkBloom && !alwaysSkipReceiptCheck
-	if checkReceipts && !alwaysSkipReceiptCheck {
-		for _, r := range receipts {
-			r.Bloom = types.CreateBloom(types.Receipts{r})
-			if bloomFromReceipts {
-				lbloom.Or(&r.Bloom)
-			}
-		}
-		receiptHash := types.DeriveSha(receipts)
-		if receiptHash != h.ReceiptHash {
-			if dbg.LogHashMismatchReason() {
-				ethutils.LogReceipts(log.LvlWarn, "receipt hash mismatch in BlockPostValidation", receipts, txns, chainConfig, h, logger)
-			}
-			return fmt.Errorf("receiptHash mismatch: %x != %x, headerNum=%d, %x",
-				receiptHash, h.ReceiptHash, h.Number.Uint64(), h.Hash())
-		}
-	}
-
-	// The logs bloom is part of every block header from Frontier on, so it must
-	// be validated independently of the receipt-root check (which is gated on
-	// Byzantium because pre-Byzantium receipts encode an intermediate state
-	// root that Erigon doesn't materialise). Without this, an invalid bloom on
-	// a pre-Byzantium block (e.g. hive bcInvalidHeaderTest/log1_wrongBloom)
-	// is silently accepted.
-	if checkBloom && !alwaysSkipReceiptCheck {
-		if !bloomFromReceipts {
-			lbloom = types.CreateBloom(receipts)
-		}
-		if lbloom != h.Bloom {
-			return fmt.Errorf("invalid bloom (remote: %x  local: %x)", h.Bloom, lbloom)
-		}
-	}
-
-	if dbg.TraceLogs && dbg.TraceBlock(h.Number.Uint64()) {
-		ethutils.LogReceipts(log.LvlInfo, "trace logs", receipts, txns, chainConfig, h, logger)
-	}
-
-	return nil
 }
