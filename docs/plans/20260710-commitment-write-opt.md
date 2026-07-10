@@ -223,10 +223,38 @@ CPU merge pass off the flush critical path.
 
 ### Task 4: Benchmark + acceptance
 
-- [ ] parallel-engine allocs/op down vs Task 1 baseline (clone kill); `flushPendingUpdates` merge ~eliminated.
-- [ ] `Benchmark_FreshBuildFork` not regressed (ideally improved at w18).
-- [ ] serial engine byte-identical (root + branch) over a block range; no default/CLI change.
-- [ ] full parity suite + `make lint && make test-short` clean.
+- [x] parallel-engine allocs/op down vs Task 1 baseline (clone kill); `flushPendingUpdates` merge ~eliminated.
+      (Microbench 3→0 allocs/op; fresh whale −8%, seeded −16% allocs/op; pprof shows 0 merge samples in
+      the apply pass — details below.)
+- [x] `Benchmark_FreshBuildFork` not regressed (ideally improved at w18). (w18 260.8–276.6 ms/op vs
+      263.2 baseline — inside the Task 2 spread; seeded 23.85–24.15 vs 24.5 ms/op, slightly improved.)
+- [x] serial engine byte-identical (root + branch) over a block range; no default/CLI change.
+      (`git diff afafd273ec..HEAD -- hex_patricia_hashed.go` empty; branch diff confined to
+      `execution/commitment/*` + docs; `Test_HexPatriciaHashed_DeferredBranchUpdates{,Differential,MidFoldFlush}`
+      green — root + stored-branch byte equality deferred-vs-eager.)
+- [x] full parity suite + `make lint && make test-short` clean. (Full `execution/commitment` package +
+      `-race` green — includes the Process-contract + parity-vs-sequential-oracle tests; lint 2x clean;
+      test-short green.)
+
+#### Results (Task 4, recorded 2026-07-11 @ ed45c1ca3e, same machine/method as baseline)
+
+**Microbench (3 runs; baseline → now):**
+- `BenchmarkGetDeferredUpdate`: 139 → 97.3–100.2 ns/op, 3 → 0 allocs/op, 912 → 898 B/op
+- `BenchmarkGetDeferredUpdate_FewCells`: 43 → 23.9–24.2 ns/op, 3 → 0 allocs/op, 144 → 120 B/op
+
+**Whole-fresh whale (`1MWhales/flag-on/w18`, 5x, 3 runs):**
+- 260.8–276.6 ms/op (baseline 263.2 — inside spread, not regressed), 379.3–394.6 MB/op (baseline 387.7),
+  7.758–7.870M allocs/op (baseline 8.454M, **−7–8%**).
+
+**Seeded whale (`incremental-whale120k/flag-on`, 40x, 4 runs incl. profiled):**
+- 23.85–24.15 ms/op (baseline 24.5, −1.5–2.7%), 937.8–939.6k allocs/op (baseline 1.116M, **−16%**),
+  102.8–106.2 MB/op (baseline 97.1 — the arena tail-chunk slack recorded at Task 2).
+
+**Flush merge eliminated (seeded CPU profile, 40x):** the apply pass
+(`ApplyDeferredBranchUpdates` subtree) carries **zero** `mergeDeferredUpdate` samples — its 0.12s cum is
+the sequential `PutBranch` write loop only. All merge CPU (0.11s ≈ 2.75 ms/block) runs under
+`dispatchFoldTasks`/`foldPool.run` on the fold workers, overlapped with the fold. Baseline flush-pass
+merge was 4.25 ms CPU/seeded block → now 0 on the flush path.
 
 ### Task 5: [Final] Docs
 
