@@ -900,16 +900,21 @@ func eqCodeHash(a, b accounts.CodeHash) bool {
 	return a == b
 }
 
-// eqAccount is existence-only: the AddressPath record's version churns as
-// workers re-stamp it, but each sub-field (balance/nonce/codeHash) is recorded
-// and validated as its own read. Two non-nil records satisfy the record-level
-// tiebreaker, and a nil read is equivalent to an EIP-161-empty record — a dead
-// account is EVM-indistinguishable from a non-existent one; a live account vs
-// a nil/dead read correctly fails.
-func eqAccount(a, b *accounts.Account) bool {
+// The AddressPath record tiebreakers are existence-only: the record's version
+// churns as workers re-stamp it, but each sub-field (balance/nonce/codeHash)
+// is recorded and validated as its own read. Under EIP-161 a nil read is
+// additionally equivalent to an empty record — a dead account is
+// EVM-indistinguishable from a non-existent one. Before EIP-161 that does not
+// hold (existing-empty accounts persist and CALL charges new-account gas on
+// non-existence only), so the strict form applies there.
+func eqAccountDead(a, b *accounts.Account) bool {
 	if a.Empty() && b.Empty() {
 		return true
 	}
+	return a != nil && b != nil
+}
+
+func eqAccountStrict(a, b *accounts.Account) bool {
 	return a != nil && b != nil
 }
 
@@ -1076,9 +1081,13 @@ func (vm *VersionMap) validateReadImpl(txIndex int, addr accounts.Address, path 
 }
 
 // ValidateVersion check if transaction's readSet is still valid based on the current multi-versioned memory
-func (vm *VersionMap) ValidateVersion(txIdx int, lastIO *VersionedIO, checkVersion func(readVersion, writeVersion Version) VersionValidity, traceInvalid bool, tracePrefix string) (valid VersionValidity) {
+func (vm *VersionMap) ValidateVersion(txIdx int, lastIO *VersionedIO, checkVersion func(readVersion, writeVersion Version) VersionValidity, eip161 bool, traceInvalid bool, tracePrefix string) (valid VersionValidity) {
 	rs := lastIO.ReadSet(txIdx)
 	valid = VersionValid
+	eqAccount := eqAccountStrict
+	if eip161 {
+		eqAccount = eqAccountDead
+	}
 	// ok checks one validity result, latching valid; ok==false stops the scan.
 	ok := func(v VersionValidity) bool { valid = v; return v == VersionValid }
 	// noValueRead validates a path whose recorded value carries no tiebreaker

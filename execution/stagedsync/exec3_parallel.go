@@ -2277,7 +2277,7 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 								return state.VersionInvalid
 							}
 							return state.VersionValid
-						}, false, "")
+						}, be.tasks[tx].Task.Rules().IsSpuriousDragon, false, "")
 					if validity == state.VersionValid {
 						return be.invalidBlockResult(fmt.Errorf("%w: could not apply tx %d:%d [%d:%v]: %w", rules.ErrInvalidBlock, be.blockNum, txVersion.TxIndex, txVersion.TxNum, task.TxHash(), execErr.OriginError)), nil
 					}
@@ -2472,7 +2472,7 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 				}
 
 				return vv
-			}, trace, tracePrefix)
+			}, txTask.Rules().IsSpuriousDragon, trace, tracePrefix)
 		be.versionMap.SetTrace(false)
 
 		if validity == state.VersionTooEarly {
@@ -2994,7 +2994,7 @@ func (be *blockExecutor) scheduleExecution(ctx context.Context, pe *parallelExec
 								return state.VersionValid
 							}
 							return state.VersionInvalid
-						}, false, "") != state.VersionValid) {
+						}, execTask.Rules().IsSpuriousDragon, false, "") != state.VersionValid) {
 				be.execTasks.pushPending(nextTx)
 				continue
 			}

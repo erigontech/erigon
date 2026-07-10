@@ -1053,7 +1053,7 @@ func TestFinalizeTxSimple_FeeWriteInvalidatesStaleCoinbaseRead(t *testing.T) {
 			Val: readVal,
 		})
 		io.RecordReads(state.Version{TxIndex: 1}, rs)
-		return vm.ValidateVersion(1, io, checkVersion, false, "")
+		return vm.ValidateVersion(1, io, checkVersion, true, false, "")
 	}
 
 	// Stale timing — the dependent worker read the coinbase via stateReader

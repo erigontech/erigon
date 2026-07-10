@@ -345,7 +345,7 @@ func TestValidateRead_NewAddressEntryInvalidatesStorageRead(t *testing.T) {
 	})
 	io.RecordReads(Version{TxIndex: 2, Incarnation: 1}, rs)
 
-	valid := vm.ValidateVersion(2, io, checkVersionEqual, false, "")
+	valid := vm.ValidateVersion(2, io, checkVersionEqual, true, false, "")
 	require.Equal(t, VersionInvalid, valid,
 		"a new AddressPath entry means a real state change and must invalidate the nil read")
 }
@@ -377,7 +377,7 @@ func TestValidateRead_ChangedValueInvalidatesStorageRead(t *testing.T) {
 			rs.SetHeader(addr, path, accounts.NilKey, ReadHeader{Source: StorageRead, Version: Version{TxIndex: 2, Incarnation: 1}})
 			io.RecordReads(Version{TxIndex: 2, Incarnation: 1}, rs)
 
-			valid := vm.ValidateVersion(2, io, checkVersionEqual, false, "")
+			valid := vm.ValidateVersion(2, io, checkVersionEqual, true, false, "")
 			require.Equal(t, VersionInvalid, valid,
 				"StorageRead finding a MVReadResultDone entry with a changed value should invalidate for %s", path)
 		})
@@ -527,7 +527,7 @@ func TestValidateRead_StoragePath_ValueTiebreaker(t *testing.T) {
 	})
 	io.RecordReads(Version{TxIndex: 10, Incarnation: 1}, rs)
 
-	valid := vm.ValidateVersion(10, io, checkVersionEqual, false, "")
+	valid := vm.ValidateVersion(10, io, checkVersionEqual, true, false, "")
 	require.Equal(t, VersionValid, valid,
 		"StoragePath read with matching value should be valid via tiebreaker")
 
@@ -535,7 +535,7 @@ func TestValidateRead_StoragePath_ValueTiebreaker(t *testing.T) {
 	vm2 := NewVersionMap(nil)
 	writeFor(vm2, addr, StoragePath, storageKey, Version{TxIndex: 5, Incarnation: 1}, *uint256.NewInt(999), true)
 
-	valid2 := vm2.ValidateVersion(10, io, checkVersionEqual, false, "")
+	valid2 := vm2.ValidateVersion(10, io, checkVersionEqual, true, false, "")
 	require.Equal(t, VersionInvalid, valid2,
 		"StoragePath read with different value should be invalid")
 }
@@ -609,7 +609,7 @@ func TestValidateRead_PriorAccountCreation_DetectedViaIncarnationPath(t *testing
 	})
 	io.RecordReads(Version{TxIndex: 1, Incarnation: 0}, rs)
 
-	require.Equal(t, VersionInvalid, vm.ValidateVersion(1, io, validateEqualVersion, false, ""),
+	require.Equal(t, VersionInvalid, vm.ValidateVersion(1, io, validateEqualVersion, true, false, ""),
 		"a prior IncarnationPath write (account created) must invalidate the stale AddressPath storage read")
 }
 
@@ -635,7 +635,7 @@ func TestValidateRead_SDStaleness_InvalidatesPreDestructRead(t *testing.T) {
 	})
 	io.RecordReads(Version{TxIndex: 5, Incarnation: 0}, rs)
 
-	require.Equal(t, VersionInvalid, vm.ValidateVersion(5, io, validateEqualVersion, false, ""),
+	require.Equal(t, VersionInvalid, vm.ValidateVersion(5, io, validateEqualVersion, true, false, ""),
 		"a later self-destruct with no revival must invalidate the pre-destruct BalancePath read")
 }
 
@@ -659,7 +659,7 @@ func TestValidateRead_SDStaleness_RevivalKeepsReadValid(t *testing.T) {
 	})
 	io.RecordReads(Version{TxIndex: 5, Incarnation: 0}, rs)
 
-	require.Equal(t, VersionValid, vm.ValidateVersion(5, io, validateEqualVersion, false, ""),
+	require.Equal(t, VersionValid, vm.ValidateVersion(5, io, validateEqualVersion, true, false, ""),
 		"a revival write after the destruct re-creates the account — the read stays valid")
 }
 
@@ -753,7 +753,7 @@ func TestBALPrePop_SameSenderTxs_NoConflicts(t *testing.T) {
 	}
 
 	for txIdx := 0; txIdx < numTxs; txIdx++ {
-		valid := vm.ValidateVersion(txIdx, io, checkVersionEqual, false, "")
+		valid := vm.ValidateVersion(txIdx, io, checkVersionEqual, true, false, "")
 		require.Equal(t, VersionValid, valid,
 			"tx %d: BAL-pre-populated reads should validate without conflicts; got %s", txIdx, valid)
 	}
@@ -796,11 +796,11 @@ func TestNoBAL_SameSenderTxs_DetectsConflicts(t *testing.T) {
 	ws.SetNonce(sender, &VersionedWrite[uint64]{WriteHeader: WriteHeader{Address: sender, Path: NoncePath, Version: Version{TxIndex: 0, Incarnation: 0}}, Val: postNonce})
 	vm.FlushVersionedWrites(ws, true, "")
 
-	require.Equal(t, VersionValid, vm.ValidateVersion(0, io, checkVersionEqual, false, ""),
+	require.Equal(t, VersionValid, vm.ValidateVersion(0, io, checkVersionEqual, true, false, ""),
 		"tx 0 should validate (no prior writes to conflict with)")
 
 	for txIdx := 1; txIdx < numTxs; txIdx++ {
-		valid := vm.ValidateVersion(txIdx, io, checkVersionEqual, false, "")
+		valid := vm.ValidateVersion(txIdx, io, checkVersionEqual, true, false, "")
 		require.Equal(t, VersionInvalid, valid,
 			"tx %d: recorded StorageRead of sender.BalancePath conflicts with tx 0's flushed Done; got %s", txIdx, valid)
 	}
@@ -814,16 +814,6 @@ type fixedAccountReader struct {
 
 func (r *fixedAccountReader) ReadAccountData(accounts.Address) (*accounts.Account, error) {
 	return r.acc, nil
-}
-
-// eqAccount is existence-only: two non-nil records match; each sub-field is
-// recorded and validated as its own read.
-func TestEqAccount_ExistenceOnly(t *testing.T) {
-	a := &accounts.Account{Balance: *uint256.NewInt(1)}
-	b := &accounts.Account{Balance: *uint256.NewInt(2)}
-	assert.True(t, eqAccount(a, b), "two non-nil records must satisfy the record-level tiebreaker")
-	assert.False(t, eqAccount(nil, b), "a destroyed (nil) record must fail")
-	assert.False(t, eqAccount(a, nil))
 }
 
 // A MapRead whose writer-version churned but whose value is unchanged stays
@@ -997,18 +987,45 @@ func TestGetStateObject_SelfDestructedButBALFunded_StaysAlive(t *testing.T) {
 	assert.Equal(t, *uint256.NewInt(1000), so.data.Balance)
 }
 
-// A nil record read is equivalent to an EIP-161-empty one — a dead account is
-// EVM-indistinguishable from a non-existent account; a live record still fails
-// against either.
+// Under EIP-161 a nil record read is equivalent to an empty one — a dead
+// account is EVM-indistinguishable from a non-existent account; a live record
+// still fails against either. Pre-EIP-161 existing-empty is observable (CALL
+// new-account gas), so the strict form treats nil vs empty as a conflict.
 func TestEqAccount_DeadEquivalence(t *testing.T) {
 	empty := &accounts.Account{CodeHash: accounts.EmptyCodeHash}
 	funded := &accounts.Account{Balance: *uint256.NewInt(5), CodeHash: accounts.EmptyCodeHash}
-	assert.True(t, eqAccount(nil, empty))
-	assert.True(t, eqAccount(empty, nil))
-	assert.True(t, eqAccount(nil, nil))
-	assert.False(t, eqAccount(nil, funded))
-	assert.False(t, eqAccount(funded, nil))
-	assert.True(t, eqAccount(funded, funded)) //nolint:gocritic
+	assert.True(t, eqAccountDead(nil, empty))
+	assert.True(t, eqAccountDead(empty, nil))
+	assert.True(t, eqAccountDead(nil, nil))
+	assert.False(t, eqAccountDead(nil, funded))
+	assert.False(t, eqAccountDead(funded, nil))
+	assert.True(t, eqAccountDead(funded, funded)) //nolint:gocritic
+	assert.False(t, eqAccountStrict(nil, empty), "pre-EIP-161 nil vs existing-empty is a real conflict")
+	assert.False(t, eqAccountStrict(empty, nil))
+	assert.True(t, eqAccountStrict(empty, empty)) //nolint:gocritic
+}
+
+// Pre-EIP-161 a nil storage read validated against a created-empty record cell
+// must invalidate (existing-empty is gas-observable); under EIP-161 the same
+// read is valid (dead ≡ non-existent).
+func TestValidateRead_NilVsEmptyRecordForkAware(t *testing.T) {
+	t.Parallel()
+	addr := getAddress(88)
+	newIO := func() *VersionedIO {
+		io := NewVersionedIO(3)
+		rs := ReadSet{}
+		rs.SetAddress(addr, VersionedRead[AccountView]{
+			ReadHeader: ReadHeader{Source: StorageRead, Version: UnknownVersion},
+		})
+		io.RecordReads(Version{TxIndex: 2, Incarnation: 0}, rs)
+		return io
+	}
+	vm := NewVersionMap(nil)
+	vm.WriteAddress(addr, Version{TxIndex: 0}, &accounts.Account{CodeHash: accounts.EmptyCodeHash}, true)
+	require.Equal(t, VersionValid, vm.ValidateVersion(2, newIO(), validateEqualVersion, true, false, ""),
+		"post-EIP-161: nil read of a dead account is correct")
+	require.Equal(t, VersionInvalid, vm.ValidateVersion(2, newIO(), validateEqualVersion, false, false, ""),
+		"pre-EIP-161: existing-empty vs non-existent is observable — must re-execute")
 }
 
 // A nil AddressPath storage read of a created-then-destroyed account stays
@@ -1029,9 +1046,9 @@ func TestValidateRead_NilReadOfDestroyedAccountStaysValid(t *testing.T) {
 	vm := NewVersionMap(nil)
 	vm.WriteSelfDestruct(addr, Version{TxIndex: 1}, true, true)
 	vm.WriteIncarnation(addr, Version{TxIndex: 1}, 1, true)
-	valid := vm.ValidateVersion(3, newIO(), validateEqualVersion, false, "")
+	valid := vm.ValidateVersion(3, newIO(), validateEqualVersion, true, false, "")
 	require.Equal(t, VersionValid, valid, "nil read of a destroyed, unrevived account is correct")
 	vm.WriteBalance(addr, Version{TxIndex: 2}, *uint256.NewInt(100), true)
-	valid = vm.ValidateVersion(3, newIO(), validateEqualVersion, false, "")
+	valid = vm.ValidateVersion(3, newIO(), validateEqualVersion, true, false, "")
 	require.Equal(t, VersionInvalid, valid, "a post-destruct funding revives the account — the nil read is stale")
 }
