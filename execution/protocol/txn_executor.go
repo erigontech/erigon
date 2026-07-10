@@ -844,6 +844,8 @@ func (st *TxnExecutor) calcIntrinsicGas(contractCreation bool, auths []types.Aut
 		AccessListLen:      uint64(len(accessTuples)),
 		StorageKeysLen:     uint64(accessTuples.StorageKeys()),
 		IsContractCreation: contractCreation,
+		IsSelfTransfer:     !contractCreation && st.msg.To() == st.msg.From(),
+		HasValue:           !st.msg.Value().IsZero(),
 		IsEIP2:             rules.IsHomestead,
 		IsEIP2028:          rules.IsIstanbul,
 		IsEIP3860:          vmConfig.HasEip3860(rules),
@@ -851,5 +853,6 @@ func (st *TxnExecutor) calcIntrinsicGas(contractCreation bool, auths []types.Aut
 		IsEIP7976:          rules.IsAmsterdam,
 		IsEIP7981:          rules.IsAmsterdam,
 		IsEIP8037:          rules.IsAmsterdam,
+		IsEIP2780:          rules.IsAmsterdam,
 	})
 }

@@ -62,14 +62,19 @@ jobs:
 
       - name: Run RPC Integration Tests
         id: test_step
+        env:
+          RUNNER_WS: ${{ runner.workspace }}
+          INSTALL_DIR: ${{ matrix.install_dir }}
+          CLIENT: ${{ matrix.client }}
+          TEST_SCRIPT: ${{ matrix.test_script }}
         run: |
-          client_version=$(git -C ${{ matrix.install_dir }} rev-parse --short HEAD 2>/dev/null || echo "no-version")
-          TEST_RESULT_DIR="$RPC_PAST_TEST_DIR/mainnet_$(date +%Y%m%d_%H%M%S)_integration_${{ matrix.client }}_${client_version}_http"
+          client_version=$(git -C "$INSTALL_DIR" rev-parse --short HEAD 2>/dev/null || echo "no-version")
+          TEST_RESULT_DIR="$RPC_PAST_TEST_DIR/mainnet_$(date +%Y%m%d_%H%M%S)_integration_${CLIENT}_${client_version}_http"
           echo "TEST_RESULT_DIR=$TEST_RESULT_DIR" >> $GITHUB_ENV
 
           set +e # Disable exit on error for test run
-          ${{ github.workspace }}/.github/workflows/scripts/${{ matrix.test_script }} \
-            "${{ runner.workspace }}" \
+          "$GITHUB_WORKSPACE/.github/workflows/scripts/$TEST_SCRIPT" \
+            "$RUNNER_WS" \
             "$TEST_RESULT_DIR"
           test_exit_status=$?
           set -e # Re-enable exit on error after test run
@@ -88,28 +93,32 @@ jobs:
 
       - name: Generate Summary
         if: always() && steps.test_step.outputs.test_executed == 'true'
+        env:
+          WORKFLOW: ${{ github.workflow }}
+          CLIENT: ${{ matrix.client }}
+          TEST_RESULT: ${{ steps.test_step.outputs.TEST_RESULT }}
         run: |
-          SUMMARY_FILE="${{ env.TEST_RESULT_DIR }}/summary.md"
-          LOG_FILE="${{ env.TEST_RESULT_DIR }}/output.log"
+          SUMMARY_FILE="$TEST_RESULT_DIR/summary.md"
+          LOG_FILE="$TEST_RESULT_DIR/output.log"
 
-          cat << 'EOF' > $SUMMARY_FILE
-          # ${{ github.workflow }} - ${{ matrix.client }} Report
+          {
+            echo "# $WORKFLOW - $CLIENT Report"
+            echo
+            echo "## Test Configuration"
+            echo "- **Client:** $CLIENT"
+            echo "- **Chain:** $CHAIN"
+            echo "- **Result:** $TEST_RESULT"
+            echo
+            echo "## Test Output"
+            echo '```'
+          } > "$SUMMARY_FILE"
 
-          ## Test Configuration
-          - **Client:** ${{ matrix.client }}
-          - **Chain:** ${{ env.CHAIN }}
-          - **Result:** ${{ steps.test_step.outputs.TEST_RESULT }}
+          cat "$LOG_FILE" >> "$SUMMARY_FILE"
 
-          ## Test Output
-          ```
-          EOF
+          echo '```' >> "$SUMMARY_FILE"
 
-          cat $LOG_FILE >> $SUMMARY_FILE
-
-          echo '```' >> $SUMMARY_FILE
-
-          cat $SUMMARY_FILE
-          cat $SUMMARY_FILE >> $GITHUB_STEP_SUMMARY
+          cat "$SUMMARY_FILE"
+          cat "$SUMMARY_FILE" >> "$GITHUB_STEP_SUMMARY"
 
       - name: Upload test results
         if: always() && steps.test_step.outputs.test_executed == 'true'
@@ -122,24 +131,28 @@ jobs:
         if: always() && steps.test_step.outputs.test_executed == 'true'
         env:
           TEST_RESULT: ${{ steps.test_step.outputs.TEST_RESULT }}
+          INSTALL_DIR: ${{ matrix.install_dir }}
+          CLIENT: ${{ matrix.client }}
         run: |
-          client_version=$(git -C ${{ matrix.install_dir }} rev-parse HEAD 2>/dev/null || echo "no-version")
+          client_version=$(git -C "$INSTALL_DIR" rev-parse HEAD 2>/dev/null || echo "no-version")
 
           python3 $ERIGON_QA_PATH/test_system/qa-tests/uploads/upload_test_results.py \
-            --repo ${{ matrix.client }} \
+            --repo "$CLIENT" \
             --commit $client_version \
             --branch release \
             --test_name rpc-integration-tests \
             --chain $CHAIN \
-            --runner ${{ runner.name }} \
+            --runner "$RUNNER_NAME" \
             --db_version no-version \
             --outcome $TEST_RESULT \
             --result_file $TEST_RESULT_DIR/results/test_report.json
 
       - name: Action to check failure condition
         if: failure()
+        env:
+          TEST_EXECUTED: ${{ steps.test_step.outputs.test_executed }}
         run: |
-          if [ "${{ steps.test_step.outputs.test_executed }}" != "true" ]; then
+          if [ "$TEST_EXECUTED" != "true" ]; then
             echo "::error::Test not executed, workflow failed for infrastructure reasons"
           fi
           exit 1
