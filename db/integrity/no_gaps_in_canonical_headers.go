@@ -39,7 +39,7 @@ func NoGapsInCanonicalHeaders(ctx context.Context, db kv.RoDB, br services.FullB
 	logEvery := time.NewTicker(10 * time.Second)
 	defer logEvery.Stop()
 
-	if err := br.Integrity(ctx); err != nil {
+	if err := br.Integrity(ctx, tx); err != nil {
 		panic(err)
 	}
 

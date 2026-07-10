@@ -713,7 +713,7 @@ func (e *ExecModule) Start(ctx context.Context, hook *stageloop.Hook) {
 		}
 		e.forkValidator.NotifyCurrentHeight(progress)
 		return nil
-	}); err != nil {
+	}); err != nil && !errors.Is(err, context.Canceled) {
 		e.logger.Warn("Could not notify fork validator of current height", "err", err)
 	}
 }

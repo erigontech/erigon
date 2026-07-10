@@ -500,10 +500,7 @@ func PruneExecutionStage(ctx context.Context, s *PruneState, tx kv.TemporalRwTx,
 		if agg, ok := hasAgg.Agg().(*state.Aggregator); ok && agg != nil {
 			// Each 100 prunable steps adds 200ms. 1000-step backlog -> +2s.
 			extra := time.Duration(agg.MaxPrunableStepsBacklog()/100) * 200 * time.Millisecond
-			stagePruneTimeout = baseTimeout + extra
-			if stagePruneTimeout > maxTimeout {
-				stagePruneTimeout = maxTimeout
-			}
+			stagePruneTimeout = min(baseTimeout+extra, maxTimeout)
 		}
 	}
 	if timeout > 0 && timeout > stagePruneTimeout {

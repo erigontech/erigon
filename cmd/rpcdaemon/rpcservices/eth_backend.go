@@ -71,7 +71,7 @@ func (back *RemoteBackend) HeadersRange(ctx context.Context, walker func(header 
 	panic("not implemented")
 }
 
-func (back *RemoteBackend) Integrity(_ context.Context) error {
+func (back *RemoteBackend) Integrity(_ context.Context, _ kv.Getter) error {
 	panic("not implemented")
 }
 
@@ -82,7 +82,7 @@ func (back *RemoteBackend) RawTransactions(ctx context.Context, tx kv.Getter, fr
 	panic("not implemented")
 }
 
-func (back *RemoteBackend) FirstTxnNumNotInSnapshots() uint64 {
+func (back *RemoteBackend) FirstTxnNumNotInSnapshots(_ kv.Getter) uint64 {
 	panic("not implemented")
 }
 
@@ -321,7 +321,7 @@ func (back *RemoteBackend) BlockWithSenders(ctx context.Context, tx kv.Getter, h
 	return back.blockReader.BlockWithSenders(ctx, tx, hash, blockNum)
 }
 
-func (back *RemoteBackend) IterateFrozenBodies(_ func(blockNum uint64, baseTxNum uint64, txCount uint64) error) error {
+func (back *RemoteBackend) IterateFrozenBodies(_ kv.Getter, _ func(blockNum uint64, baseTxNum uint64, txCount uint64) error) error {
 	panic("not implemented")
 }
 
