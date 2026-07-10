@@ -1177,12 +1177,13 @@ func TestApplyLoopCloseBranchSurfacesDeferredRootBeforeMissing(t *testing.T) {
 	})
 }
 
-// Pins checkBlocksDrained: a clean apply-loop exit (execErr == nil) on a live
-// context that left scheduled blocks undrained is a genuine silent miss and must
-// surface as ErrInvalidBlock. Leftover blocks are expected — and must pass
-// through untouched — when the batch is resumable (ErrLoopExhausted), already
-// failing, being canceled/shut down, or stopped on a bad block (whose handled
-// wrong-root path resolves into a scheduled unwind with a nil execErr).
+// Pins checkBlocksDrained: a live-ctx exit that left scheduled blocks undrained
+// in pe.blockExecutors is a genuine silent miss and must surface as
+// ErrInvalidBlock — including a no-cause ErrLoopExhausted manufactured by the
+// apply loop's close fallback, which would otherwise retry forever as "more
+// work". Leftovers are expected — and pass through untouched — when the batch
+// is already failing, being canceled/shut down, or stopped for more work or a
+// bad block (both leave canceled follow-on blocks behind).
 func TestCheckBlocksDrained(t *testing.T) {
 	withPending := func() *parallelExecutor {
 		pe := &parallelExecutor{}
@@ -1248,10 +1249,35 @@ func TestCheckBlocksDrained(t *testing.T) {
 	})
 
 	t.Run("resumable batch keeps ErrLoopExhausted, not ErrInvalidBlock", func(t *testing.T) {
+		ectx, cancel := context.WithCancelCause(context.Background())
+		cancel(&stopCause{block: 2, kind: stopMoreWork})
 		exhausted := &ErrLoopExhausted{From: 1, To: 2, Reason: "block batch is full"}
-		got := withPending().checkBlocksDrained(context.Background(), context.Background(), exhausted)
+		got := withPending().checkBlocksDrained(context.Background(), ectx, exhausted)
 		require.Same(t, exhausted, got)
 		require.NotErrorIs(t, got, rules.ErrInvalidBlock)
+	})
+
+	t.Run("no-cause exhaustion with an undrained block still flags", func(t *testing.T) {
+		// The close fallback manufactures ErrLoopExhausted when the channels
+		// close without a stop cause; exempting it would turn a silent miss into
+		// a zero-progress retry loop, so the flag must supersede (not wrap) the
+		// exhaustion — runStage classifies by errors.As first.
+		ectx, cancel := context.WithCancelCause(context.Background())
+		cancel(nil)
+		exhausted := &ErrLoopExhausted{From: 1, To: 0, Reason: "block batch is full"}
+		err := withPending().checkBlocksDrained(context.Background(), ectx, exhausted)
+		require.ErrorIs(t, err, rules.ErrInvalidBlock)
+		require.NotErrorIs(t, err, &ErrLoopExhausted{})
+	})
+
+	t.Run("more-work stop leaves undrained follow-on blocks alone", func(t *testing.T) {
+		// A wrong-root handled at a batch-full boundary resolves into a scheduled
+		// unwind with a nil execErr while the earlier stopMoreWork cause sticks;
+		// the blocks queued beyond the coalesce point are expected leftovers, and
+		// flagging them would fire a second, wrong UnwindTo.
+		ectx, cancel := context.WithCancelCause(context.Background())
+		cancel(&stopCause{block: 5, kind: stopMoreWork})
+		require.NoError(t, withPending().checkBlocksDrained(context.Background(), ectx, nil))
 	})
 
 	t.Run("existing error is not masked", func(t *testing.T) {

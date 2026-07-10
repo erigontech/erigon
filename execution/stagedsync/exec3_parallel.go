@@ -1517,28 +1517,30 @@ func (pe *parallelExecutor) closeApplyChannels() (closedOrder []string) {
 	return
 }
 
-// checkBlocksDrained turns a clean apply-loop exit (execErr == nil) that left
-// scheduled blocks undrained in pe.blockExecutors into an ErrInvalidBlock;
-// leftover blocks on a resumable (ErrLoopExhausted) or canceled batch are
-// expected and pass through. So does a stopBadBlock cause on executorCtx: the
-// handled wrong-root path resolves into a scheduled unwind with a nil execErr,
-// and the blocks canceled behind the bad block never drain — flagging them
-// would fire a second UnwindTo that overrides the correct one.
+// checkBlocksDrained turns a live-ctx exit that leaves scheduled blocks
+// undrained in pe.blockExecutors into an ErrInvalidBlock — such a block never
+// reached apply-loop validation. stopMoreWork and stopBadBlock stops are exempt
+// (their canceled follow-on blocks are expected leftovers, and flagging a
+// handled bad block would fire a second, wrong UnwindTo); a no-cause
+// ErrLoopExhausted is not, or a silent miss would resume forever as "more work".
 func (pe *parallelExecutor) checkBlocksDrained(ctx, executorCtx context.Context, execErr error) error {
-	if execErr != nil || ctx.Err() != nil {
+	if ctx.Err() != nil {
 		return execErr
 	}
-	if sc, ok := stopCauseOf(executorCtx); ok && sc.kind == stopBadBlock {
-		return nil
+	if execErr != nil && !errors.Is(execErr, &ErrLoopExhausted{}) {
+		return execErr
+	}
+	if sc, ok := stopCauseOf(executorCtx); ok && (sc.kind == stopBadBlock || sc.kind == stopMoreWork) {
+		return execErr
 	}
 	pe.RLock()
 	pending := slices.Collect(maps.Keys(pe.blockExecutors))
 	pe.RUnlock()
 	if len(pending) == 0 {
-		return nil
+		return execErr
 	}
 	slices.Sort(pending)
-	return fmt.Errorf("%w: parallel exec apply loop finished cleanly but %d scheduled block(s) never drained: %v",
+	return fmt.Errorf("%w: parallel exec apply loop exited with %d scheduled block(s) never drained: %v",
 		rules.ErrInvalidBlock, len(pending), pending)
 }
 
