@@ -114,7 +114,7 @@ New file `rpc/jsonrpc/witness_cache.go` (copyright 2026). Unexported type `witne
   hash-mismatch; `reconcile` evicts an orphaned hash and drops above-head entries; concurrent
   get/put race-free (`-race`).
 
-- [ ] **Status:** pending
+- [x] **Status:** complete
 
 ### Task 2: Serve hook
 
