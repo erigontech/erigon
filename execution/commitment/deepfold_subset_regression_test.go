@@ -17,6 +17,7 @@
 package commitment
 
 import (
+	"bytes"
 	"context"
 	"encoding/hex"
 	"math/rand"
@@ -162,6 +163,39 @@ func TestDeepFold_FreshWhaleFoldsParallel(t *testing.T) {
 
 	parRoot, _ := engineRoot(t, modeParallel, 4, keys, upds)
 	require.Equal(t, seqRoot, parRoot)
+}
+
+// A brand-new whale (absent on disk before this block) with ~4000 storage slots spread across two
+// first-storage nibbles — comfortably above foldKMin=1024 so the seam cannot fold it as one serial
+// leaf — forces the depth-64 seam to classify a freshWhaleCandidate and foldWhaleLeaf to take
+// foldFreshStorage's PARALLEL branch. The freshWhaleParallelFolds counter proves that branch ran
+// (not the serial fallback), and root plus stored-branch byte parity vs the sequential trie is the
+// hard gate across the parallel, streaming, and streaming-scheduled engines.
+func TestDeepFold_FreshWhaleParallelStorage_Parity(t *testing.T) {
+	wk, wu, _, _ := buildSubsetTouchedWhale(20260710, nibs(3, 7), nil, 2000, 0)
+	fk, fu := buildMixedCorpus(31337, 40)
+	keys := append(append([][]byte{}, fk...), wk...)
+	upds := append(append([]Update{}, fu...), wu...)
+
+	seqRoot, seqMs := engineRoot(t, modeSeq, 0, keys, upds)
+
+	before := freshWhaleParallelFolds.Load()
+	parRoot, parMs := engineRoot(t, modeParallel, 4, keys, upds)
+	require.Greater(t, freshWhaleParallelFolds.Load(), before,
+		"fresh-whale parallel storage fold did not execute — test no longer covers the parallel path")
+	if !bytes.Equal(seqRoot, parRoot) {
+		branchDiff(t, seqMs, parMs)
+	}
+	require.Equal(t, seqRoot, parRoot, "parallel root != sequential")
+	requireBranchParity(t, seqMs, parMs)
+
+	strRoot, strMs := engineRoot(t, modeStreaming, 4, keys, upds)
+	require.Equal(t, seqRoot, strRoot, "streaming root != sequential")
+	requireBranchParity(t, seqMs, strMs)
+
+	schRoot, schMs := engineRoot(t, modeStreamingScheduled, 4, keys, upds)
+	require.Equal(t, seqRoot, schRoot, "streaming-scheduled root != sequential")
+	requireBranchParity(t, seqMs, schMs)
 }
 
 // A pre-existing account without a branch record at its prefix (single embedded slot) has an

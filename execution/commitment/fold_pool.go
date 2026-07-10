@@ -317,10 +317,16 @@ func (fp *foldPool) foldWhaleLeaf(ctx context.Context, w *HexPatriciaHashed, t *
 	return nil
 }
 
+// freshWhaleParallelFolds counts fresh-whale parallel storage folds — the only runtime signal
+// that foldFreshStorage's concurrent path (not the serial fallback in foldWhaleLeaf) executed.
+// Read by tests to confirm coverage of a rarely-taken path.
+var freshWhaleParallelFolds atomic.Int64
+
 // foldFreshStorage folds a fresh account's storage subtree in parallel by first nibble against an
 // empty wall — the account is provably storage-less on disk, so seedBaseAtPrefix's reset wall is
 // the correct seed. Returns the collapsed storage root and the deferred branch updates produced.
 func (fp *foldPool) foldFreshStorage(ctx context.Context, node *prefixNode, accPrefix []byte) (common.Hash, []*DeferredBranchUpdate, error) {
+	freshWhaleParallelFolds.Add(1)
 	base, releaseBase := newDeferredStorageWorker(fp.workerPool, fp.ctxFactory, fp.traceW)
 	defer releaseBase()
 	if err := seedBaseAtPrefix(base, accPrefix); err != nil && !errors.Is(err, errStorageBaseNotBranch) {
