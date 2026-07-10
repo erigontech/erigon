@@ -134,18 +134,9 @@ func NewGenericCacheWithAvg[T any](capacityBytes datasize.ByteSize, avgBytes uin
 	if avgBytes == 0 {
 		avgBytes = avgBytesPerEntry
 	}
-	maxCap := uint32(uint64(capacityBytes) / uint64(avgBytes))
-	if maxCap < genericCacheStartCapacity {
-		maxCap = genericCacheStartCapacity
-	}
 	// Absolute safety ceiling on the slot array.
-	if maxCap > 1<<24 {
-		maxCap = 1 << 24
-	}
-	start := uint32(genericCacheStartCapacity)
-	if start > maxCap {
-		start = maxCap
-	}
+	maxCap := min(max(uint32(uint64(capacityBytes)/uint64(avgBytes)), genericCacheStartCapacity), 1<<24)
+	start := min(uint32(genericCacheStartCapacity), maxCap)
 	c := newGenericCacheEntries[T](capacityBytes, start, sizeFunc, mode)
 	c.maxCap = maxCap
 	c.avgEntryBytes = int64(avgBytes)
@@ -214,10 +205,7 @@ func (c *GenericCache[T]) maybeGrow() {
 	if curCap >= c.maxCap || old.Len() < int(curCap) {
 		return
 	}
-	newCap := curCap * genericCacheGrowFactor
-	if newCap > c.maxCap {
-		newCap = c.maxCap
-	}
+	newCap := min(curCap*genericCacheGrowFactor, c.maxCap)
 	delta := int64(newCap-curCap) * c.avgEntryBytes
 	if !cachebudget.Global.Reserve(delta) {
 		return

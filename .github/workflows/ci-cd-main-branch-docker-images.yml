@@ -45,6 +45,7 @@ jobs:
           fetch-depth: 1
           ref: ${{ inputs.checkout_ref == '' && github.ref || inputs.checkout_ref }}
           path: 'erigon'
+          persist-credentials: false
 
       - name: Define variables
         id: def_docker_vars

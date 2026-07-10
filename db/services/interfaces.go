@@ -36,7 +36,7 @@ type BlockReader interface {
 	BlockByHash(ctx context.Context, db kv.Tx, hash common.Hash) (*types.Block, error)
 	CurrentBlock(db kv.Tx) (*types.Block, error)
 	BlockWithSenders(ctx context.Context, tx kv.Getter, hash common.Hash, blockNum uint64) (block *types.Block, senders []common.Address, err error)
-	IterateFrozenBodies(f func(blockNum, baseTxNum, txCount uint64) error) error
+	IterateFrozenBodies(tx kv.Getter, f func(blockNum, baseTxNum, txCount uint64) error) error
 	MinimumBlockAvailable(ctx context.Context, tx kv.Tx) (uint64, error)
 }
 
@@ -49,7 +49,7 @@ type HeaderReader interface {
 
 	// HeadersRange - TODO: change it to `stream`
 	HeadersRange(ctx context.Context, walker func(header *types.Header) error) error
-	Integrity(ctx context.Context) error
+	Integrity(ctx context.Context, tx kv.Getter) error
 }
 
 type CanonicalReader interface {
@@ -71,7 +71,7 @@ type TxnReader interface {
 	TxnLookup(ctx context.Context, tx kv.Getter, txnHash common.Hash) (blockNum uint64, txNum uint64, ok bool, err error)
 	TxnByIdxInBlock(ctx context.Context, tx kv.Getter, blockNum uint64, i int) (txn types.Transaction, err error)
 	RawTransactions(ctx context.Context, tx kv.Getter, fromBlock, toBlock uint64) (txs [][]byte, err error)
-	FirstTxnNumNotInSnapshots() uint64
+	FirstTxnNumNotInSnapshots(tx kv.Getter) uint64
 }
 
 type HeaderAndCanonicalReader interface {
@@ -127,6 +127,7 @@ type BlockRetire interface {
 	BuildMissedIndicesIfNeed(ctx context.Context, logPrefix string, notifier DBEventNotifier) error
 	SetWorkers(workers int)
 	GetWorkers() int
+	Close()
 }
 
 type DBEventNotifier interface {
