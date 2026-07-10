@@ -133,7 +133,7 @@ func (e *EngineServer) Start(
 	blockReader services.FullBlockReader,
 	filters *rpchelper.Filters,
 	stateCache kvcache.Cache,
-	engineReader rules.EngineReader,
+	engine rules.Engine,
 	eth rpchelper.ApiBackend,
 	mining txpoolproto.MiningClient,
 	events *shards.Events,
@@ -150,7 +150,7 @@ func (e *EngineServer) Start(
 			return nil
 		})
 	}
-	base := jsonrpc.NewBaseApi(filters, stateCache, blockReader, httpConfig.WithDatadir, httpConfig.EvmCallTimeout, engineReader, httpConfig.Dirs, nil, httpConfig.BlockRangeLimit, httpConfig.GetLogsMaxResults)
+	base := jsonrpc.NewBaseApi(filters, stateCache, blockReader, httpConfig.WithDatadir, httpConfig.EvmCallTimeout, engine, httpConfig.Dirs, nil, httpConfig.BlockRangeLimit, httpConfig.GetLogsMaxResults)
 	ethImpl := jsonrpc.NewEthAPI(base, db, eth, e.txpool, mining, jsonrpc.NewEthApiConfig(httpConfig), e.logger)
 
 	apiList := []rpc.API{

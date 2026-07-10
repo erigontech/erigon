@@ -71,7 +71,7 @@ func (api *APIImpl) GetBlockAccessList(ctx context.Context, numberOrHash rpc.Blo
 	if err != nil {
 		return nil, err
 	}
-	if data == nil && api.balRegenerator != nil {
+	if data == nil {
 		data, err = api.balRegenerator.GetBlockAccessListBytes(ctx, chainConfig, tx, blockHash, blockNum)
 		if err != nil && !errors.Is(err, state.PrunedError) {
 			return nil, err

@@ -163,7 +163,7 @@ type BaseAPI struct {
 	balRegenerator      *bal.Regenerator
 }
 
-func NewBaseApi(f *rpchelper.Filters, stateCache kvcache.Cache, blockReader services.FullBlockReader, singleNodeMode bool, evmCallTimeout time.Duration, engine rules.EngineReader, dirs datadir.Dirs, bridgeReader bridgeReader, rangeLimit int, getLogsMaxResults int) *BaseAPI {
+func NewBaseApi(f *rpchelper.Filters, stateCache kvcache.Cache, blockReader services.FullBlockReader, singleNodeMode bool, evmCallTimeout time.Duration, engine rules.Engine, dirs datadir.Dirs, bridgeReader bridgeReader, rangeLimit int, getLogsMaxResults int) *BaseAPI {
 	var (
 		blocksLRUSize = 128 // ~32Mb
 	)
@@ -174,13 +174,6 @@ func NewBaseApi(f *rpchelper.Filters, stateCache kvcache.Cache, blockReader serv
 	blocksLRU, err := lru.New[common.Hash, *types.Block](blocksLRUSize)
 	if err != nil {
 		panic(err)
-	}
-
-	// BAL regeneration needs a full rules.Engine to replay system calls; a
-	// remote rpcdaemon holds only an EngineReader and serves stored BALs only.
-	var balRegenerator *bal.Regenerator
-	if fullEngine, ok := engine.(rules.Engine); ok {
-		balRegenerator = bal.NewRegenerator(blockReader, fullEngine, log.Root())
 	}
 
 	return &BaseAPI{
@@ -194,7 +187,7 @@ func NewBaseApi(f *rpchelper.Filters, stateCache kvcache.Cache, blockReader serv
 		_engine:             engine,
 		receiptsGenerator:   receipts.NewGenerator(dirs, blockReader, engine, stateCache, evmCallTimeout, f),
 		borReceiptGenerator: receipts.NewBorGenerator(blockReader, engine, stateCache, f),
-		balRegenerator:      balRegenerator,
+		balRegenerator:      bal.NewRegenerator(blockReader, engine, log.Root()),
 		dirs:                dirs,
 		bridgeReader:        bridgeReader,
 		blockRangeLimit:     rangeLimit,
