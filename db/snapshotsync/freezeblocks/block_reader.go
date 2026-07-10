@@ -1369,13 +1369,18 @@ func (r *BlockReader) TxnLookup(_ context.Context, tx kv.Getter, txnHash common.
 // r.sn, not a tx-pinned view: they must see the current frozen set. A stale/empty pinned
 // view undercounts it — here it would collapse the txnum base to 0 and corrupt MaxTxNum.
 func (r *BlockReader) FirstTxnNumNotInSnapshots(_ kv.Getter) uint64 {
-	sn, ok, close := r.sn.ViewSingleFile(snaptype2.Transactions, r.sn.BlocksAvailable())
+	blocksAvailable := r.sn.BlocksAvailable()
+	sn, ok, close := r.sn.ViewSingleFile(snaptype2.Transactions, blocksAvailable)
 	if !ok {
+		log.Warn("[dbg] FirstTxnNumNotInSnapshots: no transactions segment covers blocksAvailable", "blocksAvailable", blocksAvailable, "segmentsMax", r.sn.SegmentsMax(), "indicesMax", r.sn.IndicesMax())
 		return 0
 	}
 	defer close()
 
-	lastTxnID := sn.Src().Index(snaptype2.Indexes.TxnHash).BaseDataID() + uint64(sn.Src().Count())
+	baseDataID := sn.Src().Index(snaptype2.Indexes.TxnHash).BaseDataID()
+	count := uint64(sn.Src().Count())
+	lastTxnID := baseDataID + count
+	log.Info("[dbg] FirstTxnNumNotInSnapshots", "blocksAvailable", blocksAvailable, "segFrom", sn.From(), "segTo", sn.To(), "baseDataID", baseDataID, "count", count, "firstTxNum", lastTxnID)
 	return lastTxnID
 }
 
