@@ -106,13 +106,7 @@ jobs:
         env:
           EEST_SPEC_MAX_FAILURES: ${{ matrix.max-allowed-failures }}
           EEST_SPEC_WORKERS: ${{ matrix.workers }}
-          SHARD_NO_RAMDISK: ${{ matrix.no-ramdisk == true }}
-        run: |
-          if [ "$SHARD_NO_RAMDISK" = "true" ]; then
-            export ERIGON_EXECUTION_TESTS_TMPDIR="$RUNNER_TEMP/eest-datadirs"
-            mkdir -p "$ERIGON_EXECUTION_TESTS_TMPDIR"
-          fi
-          make eest-spec-${{ matrix.shard }}
+        run: make eest-spec-${{ matrix.shard }}
 
       - name: Build evm binary (cache warming)
         if: inputs.cache-warming-only
