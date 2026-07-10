@@ -64,7 +64,7 @@ func RederiveBlockAccessList(
 	if err != nil {
 		return nil, fmt.Errorf("bal.RederiveBlockAccessList: initialize block %d: %w", blockNum, err)
 	}
-	balIO = balIO.Merge(ibs.TxIO())
+	ibs.MergeTxIOInto(balIO)
 	ibs.ResetVersionedIO()
 	gasUsed := new(protocol.GasUsed)
 	gp := new(protocol.GasPool).AddGas(header.GasLimit).AddBlobGas(cfg.GetMaxBlobGasPerBlock(header.Time))
@@ -83,7 +83,7 @@ func RederiveBlockAccessList(
 		if err != nil {
 			return nil, fmt.Errorf("bal.RederiveBlockAccessList: replay tx %d of block %d: %w", i, blockNum, err)
 		}
-		balIO = balIO.Merge(ibs.TxIO())
+		ibs.MergeTxIOInto(balIO)
 		ibs.ResetVersionedIO()
 		receipts = append(receipts, receipt)
 	}
@@ -93,6 +93,6 @@ func RederiveBlockAccessList(
 	if err != nil {
 		return nil, fmt.Errorf("bal.RederiveBlockAccessList: finalize block %d: %w", blockNum, err)
 	}
-	balIO = balIO.Merge(ibs.TxIO())
+	ibs.MergeTxIOInto(balIO)
 	return balIO.AsBlockAccessList(), nil
 }
