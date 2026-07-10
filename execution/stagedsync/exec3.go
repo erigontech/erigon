@@ -542,7 +542,9 @@ func (te *txExecutor) executeBlocks(ctx context.Context, startBlockNum uint64, m
 		defer func() {
 			if rec := recover(); rec != nil {
 				err = fmt.Errorf("exec blocks panic: %s", rec)
-			} else if err != nil && !errors.Is(err, context.Canceled) {
+				return
+			}
+			if err = common.NilIfCanceled(err); err != nil {
 				err = fmt.Errorf("exec blocks error: %w", err)
 			} else {
 				te.logger.Debug("[" + te.logPrefix + "] exec blocks exit")

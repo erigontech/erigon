@@ -1662,7 +1662,7 @@ func (pe *parallelExecutor) run(ctx context.Context) (context.Context, context.C
 		defer pe.rws.Close()
 		defer pe.in.Release()
 		pe.resetWorkers(workersCtx, pe.rs, nil)
-		return pe.execLoop(execLoopCtx)
+		return common.NilIfCanceled(pe.execLoop(execLoopCtx))
 	})
 
 	return execLoopCtx, func(cause error) {
@@ -1680,7 +1680,7 @@ func (pe *parallelExecutor) run(ctx context.Context) (context.Context, context.C
 // real worker failure (a panic surfaced as an error) cancels the group and
 // surfaces through pe.wait, while routine cancellation is not an error.
 func joinWorkers(waitWorkers func() error) error {
-	if err := waitWorkers(); err != nil && !errors.Is(err, context.Canceled) {
+	if err := common.NilIfCanceled(waitWorkers()); err != nil {
 		return fmt.Errorf("worker pool: %w", err)
 	}
 	return nil
@@ -1695,10 +1695,7 @@ func (pe *parallelExecutor) wait() error {
 	if pe.execLoopGroup == nil {
 		return nil
 	}
-	if err := pe.execLoopGroup.Wait(); err != nil && !errors.Is(err, context.Canceled) {
-		return err
-	}
-	return nil
+	return common.NilIfCanceled(pe.execLoopGroup.Wait())
 }
 
 // reconcileExecAndWaitErr merges the apply-loop verdict with pe.wait's. A real
@@ -1707,7 +1704,7 @@ func (pe *parallelExecutor) wait() error {
 // error silently dropped; a canceled wait is routine teardown (execImpl cancels
 // the executor group on every exit) and never overrides execErr.
 func reconcileExecAndWaitErr(execErr, waitErr error) error {
-	if waitErr == nil || errors.Is(waitErr, context.Canceled) {
+	if waitErr = common.NilIfCanceled(waitErr); waitErr == nil {
 		return execErr
 	}
 	if execErr == nil || errors.Is(execErr, &ErrLoopExhausted{}) || errors.Is(execErr, context.Canceled) {

@@ -25,6 +25,17 @@ import (
 var ErrStopped = errors.New("stopped")
 var ErrUnwind = errors.New("unwound")
 
+// NilIfCanceled converts context cancellation (bare or wrapped) into nil, for
+// paths where routine cancellation is not an error — e.g. errgroup members,
+// where a Canceled return would occupy the group's first-error slot ahead of
+// a concurrent real failure.
+func NilIfCanceled(err error) error {
+	if errors.Is(err, context.Canceled) {
+		return nil
+	}
+	return err
+}
+
 // FastContextErr is faster than ctx.Err() because usually it doesn't lock an internal mutex.
 // It locks it only if the context is done and at the first call.
 // See implementation of cancelCtx in context/context.go.

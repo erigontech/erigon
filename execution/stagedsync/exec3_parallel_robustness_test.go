@@ -1107,6 +1107,38 @@ func TestJoinWorkers(t *testing.T) {
 	require.NotErrorIs(t, got, context.Canceled)
 }
 
+// Pins the errgroup property the member filters guard against: the group
+// retains its FIRST non-nil return, so a member surfacing routine cancellation
+// (an independent teardown, not caused by the failure) would occupy the slot
+// ahead of a concurrent real error. Production members therefore filter
+// cancellation before returning (common.NilIfCanceled / joinWorkers).
+func TestCanceledMemberCannotMaskRealError(t *testing.T) {
+	boom := errors.New("exec.Worker panic: boom")
+
+	t.Run("raw cancellation occupies the first-error slot", func(t *testing.T) {
+		g := &errgroup.Group{}
+		g.Go(func() error { return context.Canceled })
+		g.Go(func() error {
+			time.Sleep(20 * time.Millisecond)
+			return boom
+		})
+		require.NotErrorIs(t, g.Wait(), boom,
+			"errgroup keeps the first non-nil return — the raw Canceled masks the real error")
+	})
+
+	t.Run("filtered members surface a late real worker error", func(t *testing.T) {
+		pe := &parallelExecutor{}
+		pe.execLoopGroup = &errgroup.Group{}
+		pe.execLoopGroup.Go(func() error { return common.NilIfCanceled(context.Canceled) })
+		pe.execLoopGroup.Go(func() error {
+			time.Sleep(20 * time.Millisecond)
+			return joinWorkers(func() error { return boom })
+		})
+		require.ErrorIs(t, pe.wait(), boom,
+			"a routine cancellation must not mask a concurrent real worker failure")
+	})
+}
+
 // Pins the close-branch precedence: the deferred failure must surface ahead of
 // the missing-blocks completeness error, otherwise a deliberate cancel masks
 // ErrWrongTrieRoot behind a generic ErrInvalidBlock. The closure mirrors the

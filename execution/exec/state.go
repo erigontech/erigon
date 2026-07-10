@@ -605,7 +605,7 @@ func NewWorkersPool(ctx context.Context, accumulator *shards.Accumulator, backgr
 	if background {
 		for i := 0; i < workerCount; i++ {
 			g.Go(func() error {
-				return reconWorkers[i].Run()
+				return common.NilIfCanceled(reconWorkers[i].Run())
 			})
 		}
 		wait = func() error { return g.Wait() }
