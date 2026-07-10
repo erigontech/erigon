@@ -85,9 +85,44 @@ Target: reduced allocs/op on the parallel engine (kill the clone) + merge off th
 
 ### Task 1: Characterize the deferred path
 
-- [ ] bench the parallel engine's deferred path: allocs/op in `getDeferredUpdate`/`mergeDeferredUpdate`
+- [x] bench the parallel engine's deferred path: allocs/op in `getDeferredUpdate`/`mergeDeferredUpdate`
       (memprofile), and `flushPendingUpdates` merge-pass wall time per block on the whale corpus. Record the
       numbers this plan must beat. No code change.
+
+#### Baseline (Task 1, recorded 2026-07-10 @ e2e3235191, Apple M5 Max 18-core, go1.25.7)
+
+Repro: `go test -run '^$' -bench <name> -benchmem -cpuprofile -memprofile ./execution/commitment/`;
+pprof numbers via `-show/-focus 'getDeferredUpdate|mergeDeferredUpdate|ApplyDeferredBranchUpdates'`.
+The benches apply deferred updates inline in `Process` (same `ApplyDeferredBranchUpdates` halves that
+`flushPendingUpdates` runs with `runtime.NumCPU()` workers in production), so the merge/write splits
+below are the flush-pass costs Task 3 targets.
+
+**Per-branch clone cost (microbench, 3 allocs = the 3 `common.Copy` at `commitment.go:276-278`):**
+- `BenchmarkGetDeferredUpdate` (full 16-cell branch): 139 ns/op, 912 B/op, 3 allocs/op
+- `BenchmarkGetDeferredUpdate_FewCells` (2-cell): 43 ns/op, 144 B/op, 3 allocs/op
+
+**Whole-fresh whale block (`Benchmark_FreshBuildFork/1MWhales/flag-on/w18`, 5x, ~1.05M keys):**
+- 263.2 ms/op, 387.7 MB/op, 8.454M allocs/op (timed window)
+- `getDeferredUpdate`: 133.5 MB + 872k heap allocs per block (7.5% of run alloc_space, ~10% of the
+  timed window's allocs/op — the plan's "~8% of allocs"); ≈436k deferred branches/block (2 allocs each:
+  prefix+raw; empty `prev` copy doesn't allocate). CPU incl. copy children: 84 ms/block across workers.
+- merge pass: **0 CPU samples** — whole-fresh `prev` is empty, `mergeDeferredUpdate` is a no-op path.
+- apply pass (`ApplyDeferredBranchUpdates`): 36 ms CPU/block, of which the sequential `PutBranch`
+  write loop = 34 ms (wall≈CPU, sequential; MockState map — production writes `sd.mem`), merge chunk ≈2 ms.
+
+**Seeded whale block (`Benchmark_FreshBuildFork/incremental-whale120k/flag-on`, 40x, 120k-slot retouch):**
+- 24.5 ms/op, 97.1 MB/op, 1.116M allocs/op (timed = batch2 only; profile spans batch1+batch2)
+- `getDeferredUpdate`: 42.5 MB + 233.5k allocs per block-pair (10.9% of run alloc_space)
+- `mergeDeferredUpdate` (the 4th clone, `commitment.go:392`): 12.2 MB + 44.6k allocs per seeded block
+  (≈44.6k branches actually merged against a non-empty `prev`)
+- **merge-pass baseline Task 3 must beat: 4.25 ms CPU per seeded block** (0.17s worker-goroutine cum /
+  40; ~0.3–1 ms wall at 18 workers, ~4 ms sequential-equivalent) + the 12.2 MB/44.6k-alloc merged
+  copies. Write half (sequential `PutBranch` loop): ≈1.5 ms/block. Post-Task-3 target: flush merge ≈0,
+  flush = pure write.
+
+**Targets:** Task 2 kills the 2–3 collection allocs/branch (872k allocs/133.5 MB per fresh 1M block;
+912 B/op microbench) and the merge copy (44.6k/12.2 MB per seeded block). Task 3 moves the 4.25 ms
+CPU merge pass off the flush critical path.
 
 ## Milestone 1 — Kill the deferred-update clones (byte-identical, serial-safe)
 
