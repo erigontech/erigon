@@ -370,13 +370,13 @@ func FillDBFromSnapshots(logPrefix string, ctx context.Context, tx kv.RwTx, dirs
 			}
 
 		case stages.Bodies:
-			firstTxNum := blockReader.FirstTxnNumNotInSnapshots()
+			firstTxNum := blockReader.FirstTxnNumNotInSnapshots(tx)
 			if err := tx.ResetSequence(kv.EthTx, firstTxNum); err != nil {
 				return err
 			}
 
 			_ = tx.ClearTable(kv.MaxTxNum)
-			if err := blockReader.IterateFrozenBodies(func(blockNum, baseTxNum, txAmount uint64) error {
+			if err := blockReader.IterateFrozenBodies(tx, func(blockNum, baseTxNum, txAmount uint64) error {
 				select {
 				case <-ctx.Done():
 					return ctx.Err()

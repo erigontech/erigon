@@ -152,7 +152,7 @@ func buildIdx(ctx context.Context, sn snaptype.FileInfo, indexBuilder snaptype.I
 // Merge does merge segments in given ranges
 func (m *Merger) Merge(
 	ctx context.Context,
-	snapshots *RoSnapshots,
+	snapshots *BaseRoSnapshots,
 	snapTypes []snaptype.Type,
 	mergeRanges []Range,
 	snapDir string,
@@ -264,7 +264,7 @@ func (m *Merger) Merge(
 	return nil
 }
 
-func (m *Merger) integrateMergedDirtyFiles(snapshots *RoSnapshots, in, out map[snaptype.Enum][]*DirtySegment) {
+func (m *Merger) integrateMergedDirtyFiles(snapshots *BaseRoSnapshots, in, out map[snaptype.Enum][]*DirtySegment) {
 	var retired []*DirtySegment
 
 	snapshots.dirtyLock.Lock()
