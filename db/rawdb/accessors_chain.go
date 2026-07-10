@@ -546,9 +546,14 @@ func RawTransactionsRange(db kv.Getter, from, to uint64) (res [][]byte, err erro
 		if err != nil {
 			return nil, err
 		}
+		if txCount <= 2 {
+			continue
+		}
 
-		binary.BigEndian.PutUint64(encNum, baseTxnID.U64())
-		if err = db.ForAmount(kv.EthTx, encNum, txCount, func(k, v []byte) error {
+		// TxCount counts the two system txns, which have no kv.EthTx entries;
+		// reading from the system slot drifts into neighbouring blocks' txns.
+		binary.BigEndian.PutUint64(encNum, baseTxnID.First())
+		if err = db.ForAmount(kv.EthTx, encNum, txCount-2, func(k, v []byte) error {
 			res = append(res, v)
 			return nil
 		}); err != nil {

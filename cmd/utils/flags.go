@@ -2218,10 +2218,7 @@ func setDevnetEthConfig(ctx *cli.Command, cfg *ethconfig.Config, logger log.Logg
 	beaconCfg.DenebForkEpoch = 0
 	beaconCfg.ElectraForkEpoch = 0
 	beaconCfg.FuluForkEpoch = 0
-	slotTime := uint64(ctx.Int(DevSlotTimeFlag.Name))
-	if slotTime < 2 {
-		slotTime = 2
-	}
+	slotTime := max(uint64(ctx.Int(DevSlotTimeFlag.Name)), 2)
 	beaconCfg.SecondsPerSlot = slotTime
 	beaconCfg.InitializeForkSchedule()
 	genesisTime := uint64(time.Now().Unix())
