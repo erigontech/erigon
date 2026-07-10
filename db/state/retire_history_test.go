@@ -265,3 +265,68 @@ func TestRetire_ReclaimConcurrent(t *testing.T) {
 
 	mustExist(t, filepath.Join(agg.Dirs().SnapHistory, "v1.0-accounts.0-2.v"), false)
 }
+
+// TestRetire_DetachesFromDirtyFiles pins the same invariant as the block store: a
+// retired file must leave dirtyFiles, not merely the visible view — a segment left in
+// dirty would be rebuilt straight back into visible by the next recalcVisibleFiles.
+func TestRetire_DetachesFromDirtyFiles(t *testing.T) {
+	stepSize, stepsInFrozenFile := uint64(10), uint64(2)
+	agg := testDbAndAggregatorSmallFrozen(t, stepSize, stepsInFrozenFile)
+
+	ranges := []testFileRange{{0, 2}, {2, 3}}
+	generateAccountsFile(t, agg.Dirs(), ranges)
+	generateCodeFile(t, agg.Dirs(), ranges)
+	generateStorageFile(t, agg.Dirs(), ranges)
+	require.NoError(t, agg.OpenFolder())
+
+	accountsHist := agg.d[kv.AccountsDomain].History
+	require.Equal(t, 2, accountsHist.dirtyFiles.Len())
+
+	n, err := agg.Retire(t.Context(), kv.RetireCutoffs{Default: 2 * stepSize})
+	require.NoError(t, err)
+	require.Positive(t, n)
+
+	// detached from dirty, not just hidden from the visible view
+	require.Equal(t, 1, accountsHist.dirtyFiles.Len())
+
+	at := agg.BeginFilesRo()
+	defer at.Close()
+	hf := at.d[kv.AccountsDomain].ht.files
+	require.Len(t, hf, 1)
+	require.Equal(t, uint64(2), hf[0].startTxNum/stepSize)
+}
+
+// TestRetire_DirtyButNotVisibleFile: a history file ([0,2]) fully subsumed by a larger
+// one ([0,4]) is in dirtyFiles but not visible. Because Retire iterates dirtyFiles, an
+// entirely-below-cutoff invisible file is still swept — and the visible covering file
+// must be left intact.
+func TestRetire_DirtyButNotVisibleFile(t *testing.T) {
+	stepSize, stepsInFrozenFile := uint64(10), uint64(2)
+	agg := testDbAndAggregatorSmallFrozen(t, stepSize, stepsInFrozenFile)
+
+	ranges := []testFileRange{{0, 2}, {0, 4}}
+	generateAccountsFile(t, agg.Dirs(), ranges)
+	generateCodeFile(t, agg.Dirs(), ranges)
+	generateStorageFile(t, agg.Dirs(), ranges)
+	require.NoError(t, agg.OpenFolder())
+
+	accountsHist := agg.d[kv.AccountsDomain].History
+	require.Equal(t, 2, accountsHist.dirtyFiles.Len())
+
+	// [0,4] covers [0,2] -> only the covering file is visible
+	at := agg.BeginFilesRo()
+	require.Len(t, at.d[kv.AccountsDomain].ht.files, 1)
+	require.Equal(t, uint64(4), at.d[kv.AccountsDomain].ht.files[0].endTxNum/stepSize)
+	at.Close()
+
+	// cutoff step 2: [0,2] is entirely below, [0,4] straddles -> only [0,2] retired
+	n, err := agg.Retire(t.Context(), kv.RetireCutoffs{Default: 2 * stepSize})
+	require.NoError(t, err)
+	require.Positive(t, n)
+
+	require.Equal(t, 1, accountsHist.dirtyFiles.Len())
+	at2 := agg.BeginFilesRo()
+	defer at2.Close()
+	require.Len(t, at2.d[kv.AccountsDomain].ht.files, 1)
+	require.Equal(t, uint64(4), at2.d[kv.AccountsDomain].ht.files[0].endTxNum/stepSize, "covering file intact")
+}

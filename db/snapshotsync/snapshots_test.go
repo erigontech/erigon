@@ -400,6 +400,77 @@ func TestRetireFilesIsIdempotent(t *testing.T) {
 	})
 }
 
+func visibleHas(s *BaseRoSnapshots, enum snaptype.Enum, from, to uint64) bool {
+	for _, seg := range s.visible.Load().segments[enum] {
+		if seg.from == from && seg.to == to {
+			return true
+		}
+	}
+	return false
+}
+
+// TestRetireFilesDetachesFromDirty pins the load-bearing invariant behind the
+// generation chain: RetireFiles must remove the segment from dirtyFiles, not merely
+// hide it from the visible view. A segment left in dirty would be rebuilt straight
+// back into the visible set by the next recalcVisibleFiles.
+func TestRetireFilesDetachesFromDirty(t *testing.T) {
+	logger := log.New()
+	dir := t.TempDir()
+	require := require.New(t)
+
+	s := NewBaseRoSnapshots(ethconfig.BlocksFreezing{ChainName: networkname.Mainnet}, dir, snaptype2.BlockSnapshotTypes, true, logger)
+	defer s.Close()
+	for _, snT := range snaptype2.BlockSnapshotTypes {
+		createTestSegmentFile(t, 0, 10_000, snT.Enum(), dir, version.V1_0, logger)
+		createTestSegmentFile(t, 10_000, 20_000, snT.Enum(), dir, version.V1_0, logger)
+	}
+	require.NoError(s.OpenFolder())
+
+	txEnum := snaptype2.Transactions.Enum()
+	require.Equal(2, s.dirty[txEnum].Len())
+	require.True(visibleHas(s, txEnum, 0, 10_000))
+
+	require.NoError(s.RetireFiles(snaptype.SegmentFileName(version.V1_0, 0, 10_000, txEnum)))
+
+	// Detached from dirty, not just hidden...
+	require.Equal(1, s.dirty[txEnum].Len())
+	require.False(visibleHas(s, txEnum, 0, 10_000))
+
+	// ...so a fresh recalc (no-arg RetireFiles rebuilds visible from dirty) can't resurface it.
+	require.NoError(s.RetireFiles())
+	require.False(visibleHas(s, txEnum, 0, 10_000))
+	require.True(visibleHas(s, txEnum, 10_000, 20_000))
+}
+
+// TestRetireDirtyButNotVisibleFile: a subsumed segment ([0,10000] covered by
+// [0,20000]) sits in dirtyFiles but not in the visible view. Retiring it must drop
+// it from dirty without disturbing the visible covering segment.
+func TestRetireDirtyButNotVisibleFile(t *testing.T) {
+	logger := log.New()
+	dir := t.TempDir()
+	require := require.New(t)
+
+	s := NewBaseRoSnapshots(ethconfig.BlocksFreezing{ChainName: networkname.Mainnet}, dir, snaptype2.BlockSnapshotTypes, true, logger)
+	defer s.Close()
+	for _, snT := range snaptype2.BlockSnapshotTypes {
+		createTestSegmentFile(t, 0, 10_000, snT.Enum(), dir, version.V1_0, logger)
+		createTestSegmentFile(t, 0, 20_000, snT.Enum(), dir, version.V1_0, logger)
+	}
+	require.NoError(s.OpenFolder())
+
+	txEnum := snaptype2.Transactions.Enum()
+	require.Equal(2, s.dirty[txEnum].Len())
+	require.True(visibleHas(s, txEnum, 0, 20_000), "the covering segment is visible")
+	require.False(visibleHas(s, txEnum, 0, 10_000), "the subsumed segment is dirty but not visible")
+
+	require.NotPanics(func() {
+		require.NoError(s.RetireFiles(snaptype.SegmentFileName(version.V1_0, 0, 10_000, txEnum)))
+	})
+
+	require.Equal(1, s.dirty[txEnum].Len())
+	require.True(visibleHas(s, txEnum, 0, 20_000), "retiring an invisible file leaves the visible set intact")
+}
+
 func TestRemoveOverlaps(t *testing.T) {
 	mustSeeFile := func(files []string, fileNameWithoutVersion string) bool { //file-version agnostic
 		for _, f := range files {
