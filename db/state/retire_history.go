@@ -23,9 +23,8 @@ import (
 )
 
 // entirelyBeforeStep returns the dirty source files backing the visible files entirely
-// below cutoff step. It selects over visible (not dirty) so retire only ever drops files
-// the node actually serves; invisible garbage (subsumed/overlapping) is left to the merge
-// clean-up path (cleanAfterMerge / RemoveOverlaps).
+// below cutoff step — selecting over visible (not dirty), so retire drops only what the
+// node serves.
 func entirelyBeforeStep(files visibleFiles, stepSize uint64, cutoff kv.Step) (outs []*FilesItem) {
 	for _, f := range files {
 		if _, endStep := f.src.StepRange(stepSize); endStep <= cutoff {
@@ -62,11 +61,9 @@ func (ht *HistoryRoTx) retireBeforeStep(cutoff kv.Step) (deleted []string, retir
 	return deleted, retired
 }
 
-// Retire drops old visible History+InvertedIndex files entirely below their per-domain
-// cutoff — it reads/deletes only visible files, so it touches just what the node serves.
-// Invisible garbage (subsumed/overlapping) is not retire's concern; it is dropped by the
-// separate merge clean-up (cleanAfterMerge / RemoveOverlaps). Physical deletion is deferred
-// until no reader pins the retired generation.
+// Retire drops old visible History+InvertedIndex files below their per-domain cutoff.
+// Reads visible only — invisible garbage is the merge clean-up's job (cleanAfterMerge /
+// RemoveOverlaps). Physical deletion is deferred until no reader pins the retired generation.
 func (a *Aggregator) Retire(ctx context.Context, cutoffs kv.RetireCutoffs) (retiredCount int, err error) {
 	if cutoffs.IsNoop() {
 		return 0, nil

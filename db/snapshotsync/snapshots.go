@@ -1459,11 +1459,9 @@ func (s *BaseRoSnapshots) RetireFiles(fileNames ...string) error {
 }
 
 // RetireMergedFilesBelow retires fully-merged VISIBLE segments of type typ ending below
-// blockTo, passing the removed files (.seg + indexes) to onDelete for the seeder. It reads
-// only visible files — retire drops just what the node serves; invisible garbage
-// (subsumed/overlapping) is left to the merge clean-up (RemoveOverlaps). The whole-file
-// check keeps a range straddling blockTo from being partially removed; the View held here
-// pins the outgoing generation so the physical unlink runs off the dirty lock.
+// blockTo, handing their files (.seg + indexes) to onDelete for the seeder. Reads visible
+// only — invisible garbage is the merge clean-up's job. The View pins the outgoing
+// generation so the physical unlink runs off the dirty lock.
 func (s *BaseRoSnapshots) RetireMergedFilesBelow(typ snaptype.Enum, blockTo uint64, onDelete func(l []string) error) (bool, error) {
 	if s == nil {
 		return false, nil
