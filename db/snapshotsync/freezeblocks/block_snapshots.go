@@ -265,7 +265,7 @@ func (br *BlockRetire) dbHasEnoughDataForBlocksRetire(ctx context.Context) (bool
 	return !haveGap, nil
 }
 
-func (br *BlockRetire) retireBlocks(
+func (br *BlockRetire) buildFiles(
 	ctx context.Context,
 	minBlockNum uint64,
 	maxBlockNum uint64,
@@ -390,7 +390,7 @@ func (br *BlockRetire) PruneAncientBlocks(tx kv.RwTx, limit int, timeout time.Du
 	return deleted + deletedBorBlocks, nil
 }
 
-func (br *BlockRetire) RetireBlocksInBackground(
+func (br *BlockRetire) BuildFilesInBackground(
 	ctx context.Context,
 	minBlockNum,
 	maxBlockNum uint64,
@@ -428,7 +428,7 @@ func (br *BlockRetire) RetireBlocksInBackground(
 			defer br.snBuildAllowed.Release(1)
 		}
 
-		err := br.RetireBlocks(ctx, minBlockNum, maxBlockNum, lvl, seeder, onFinishRetire)
+		err := br.BuildFiles(ctx, minBlockNum, maxBlockNum, lvl, seeder, onFinishRetire)
 		if errors.Is(err, heimdall.ErrHeimdallDataIsNotReady) {
 			br.borDataNotReadyBefore = time.Now().Add(BorDataNotReadyTimeout)
 			br.logger.Debug("[snapshots] bor data is not ready to be retired", "nextAttemptAt", br.borDataNotReadyBefore)
@@ -465,7 +465,7 @@ func (br *BlockRetire) Close() {
 	br.background.Wait()
 }
 
-func (br *BlockRetire) RetireBlocks(
+func (br *BlockRetire) BuildFiles(
 	ctx context.Context,
 	requestedMinBlockNum uint64,
 	requestedMaxBlockNum uint64,
@@ -482,7 +482,7 @@ func (br *BlockRetire) RetireBlocks(
 		return nil
 	}
 
-	if err := br.BuildMissedIndicesIfNeed(ctx, "RetireBlocks", br.notifier); err != nil {
+	if err := br.BuildMissedIndicesIfNeed(ctx, "BuildFiles", br.notifier); err != nil {
 		return err
 	}
 
@@ -509,7 +509,7 @@ func (br *BlockRetire) RetireBlocks(
 		var ok, okBor bool
 		minBlockNum := max(br.blockReader.FrozenBlocks(), requestedMinBlockNum)
 		maxBlockNum := br.maxScheduledBlock.Load()
-		ok, err = br.retireBlocks(ctx, minBlockNum, maxBlockNum, lvl, seeder)
+		ok, err = br.buildFiles(ctx, minBlockNum, maxBlockNum, lvl, seeder)
 		if err != nil {
 			return err
 		}
