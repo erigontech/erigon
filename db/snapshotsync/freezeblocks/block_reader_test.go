@@ -22,7 +22,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	uint256 "github.com/holiman/uint256"
+	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 

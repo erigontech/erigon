@@ -347,9 +347,9 @@ func DownloadAndIndexSnapshotsIfNeed(s *StageState, ctx context.Context, tx kv.R
 // buildOrDeferE2Indices decides whether to build E2 block snapshot indices synchronously
 // or defer them to background processing.
 // On restart (headersProgress > 0), E2 indexing is skipped at startup. Missing indices
-// will be built in the background via RetireBlocksInBackground (called from SnapshotsPrune
+// will be built in the background via BuildFilesInBackground (called from SnapshotsPrune
 // on every sync cycle).
-// Exception: Bor chains always index synchronously because RetireBlocks has an early-exit
+// Exception: Bor chains always index synchronously because BuildFiles has an early-exit
 // guard for Bor data readiness that may skip BuildMissedIndicesIfNeed.
 func buildOrDeferE2Indices(ctx context.Context, s *StageState, cfg SnapshotsCfg, headersProgress uint64) error {
 	isBor := cfg.chainConfig.Bor != nil
@@ -457,14 +457,14 @@ func SnapshotsPrune(s *PruneState, cfg SnapshotsCfg, ctx context.Context, tx kv.
 			cfg.blockRetire.SetWorkers(1)
 		}
 
-		started := cfg.blockRetire.RetireBlocksInBackground(
+		started := cfg.blockRetire.BuildFilesInBackground(
 			ctx,
 			minBlockNumber,
 			s.ForwardProgress,
 			log.LvlDebug,
 			cfg.getSeederClient(),
 			func() error {
-				filesDeleted, err := pruneBlockSnapshots(ctx, cfg, logger)
+				filesDeleted, err := retireBlockSnapshots(ctx, cfg, logger)
 				if filesDeleted && cfg.notifier != nil {
 					cfg.notifier.Events.OnNewSnapshot()
 				}
@@ -495,7 +495,10 @@ func SnapshotsPrune(s *PruneState, cfg SnapshotsCfg, ctx context.Context, tx kv.
 	return nil
 }
 
-func pruneBlockSnapshots(ctx context.Context, cfg SnapshotsCfg, logger log.Logger) (bool, error) {
+func retireBlockSnapshots(ctx context.Context, cfg SnapshotsCfg, logger log.Logger) (bool, error) {
+	if dbg.NoRetire() {
+		return false, nil
+	}
 	tx, err := cfg.db.BeginRo(ctx)
 	if err != nil {
 		return false, err

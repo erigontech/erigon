@@ -20,6 +20,7 @@ import (
 	"context"
 	"fmt"
 
+	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/db/kv"
 )
 
@@ -69,7 +70,7 @@ func (ht *HistoryRoTx) filesBeforeStep(cutoff kv.Step) (deleted []string, aged [
 // Reads visible only — invisible garbage is the merge clean-up's job (cleanAfterMerge /
 // RemoveOverlaps). Physical deletion is deferred until no reader pins the retired generation.
 func (at *AggregatorRoTx) Retire(ctx context.Context, cutoffs kv.RetireCutoffs) (retiredCount int, err error) {
-	if cutoffs.IsNoop() {
+	if dbg.NoRetire() || cutoffs.IsNoop() {
 		return 0, nil
 	}
 
