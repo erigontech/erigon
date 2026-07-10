@@ -98,12 +98,12 @@ func TestInclusionContributions(t *testing.T) {
 	t.Run("Amsterdam EIP-7702 tx with multiple authorizations", func(t *testing.T) {
 		// EIP-7702 tx with N authorizations: intrinsic.state accumulates
 		// N * StateGasNewAccountAndAuth, intrinsic.regular accumulates
-		// N * PerAuthBaseCostEIP8037 on top of TxGas. The cross-dimension
+		// N * PerAuthRegularCostEIP8038 on top of TxGas. The cross-dimension
 		// subtraction matters here: the state check must subtract
 		// intrinsic.regular (which includes the per-auth base cost) so a
 		// well-sized 7702 tx isn't over-rejected.
 		nAuths := uint64(3)
-		intrinsicRegular := params.TxGas + nAuths*params.PerAuthBaseCostEIP8037
+		intrinsicRegular := params.TxGas + nAuths*params.PerAuthRegularCostEIP8038
 		intrinsicState := nAuths * uint64(params.StateGasNewAccountAndAuth)
 		floor := params.TxGas
 		// Same sizing rationale as the creation case: keep gas above

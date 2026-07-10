@@ -269,7 +269,7 @@ func (evm *EVM) chargeTopLevelFrameGas(gasRemaining mdgas.MdGas, addr accounts.A
 			return gasRemaining, topLvlFrameStateGas, fmt.Errorf("%w: %w", ErrIntraBlockStateFailed, err)
 		}
 		if isDelegated {
-			cold := params.ColdAccountAccessEIP2780
+			cold := coldAccountAccessCost(evm.chainRules)
 			if gasRemaining.Regular < cold {
 				return gasRemaining, topLvlFrameStateGas, ErrOutOfGas
 			}
