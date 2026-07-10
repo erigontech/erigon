@@ -66,7 +66,7 @@ type Provider struct {
 	GenesisHash          common.Hash
 	CurrentBlockNumber   uint64
 	SegmentsBuildLimiter *semaphore.Weighted
-	BlockFileBuilder     services.BlockRetire
+	BlockRetire          services.BlockRetire
 
 	logger log.Logger
 }
@@ -140,7 +140,7 @@ func (p *Provider) Initialize(deps Deps) error {
 	}
 
 	// BlockFileBuilder — heimdallStore and bridgeStore may be nil for non-Bor chains.
-	p.BlockFileBuilder = freezeblocks.NewBlockFileBuilder(ctx, 1, config.Dirs, p.BlockReader, p.BlockWriter, p.ChainDB, p.HeimdallStore, p.BridgeStore, p.ChainConfig, config, deps.DBEventNotifier, p.SegmentsBuildLimiter, logger)
+	p.BlockRetire = freezeblocks.NewBlockFileBuilder(ctx, 1, config.Dirs, p.BlockReader, p.BlockWriter, p.ChainDB, p.HeimdallStore, p.BridgeStore, p.ChainConfig, config, deps.DBEventNotifier, p.SegmentsBuildLimiter, logger)
 
 	// Serialize retirement's chain-DB reads against Aggregator commit+prune.
 	// Without this, retirement's db.View RO txs can overlap a commit and pin
@@ -148,7 +148,7 @@ func (p *Provider) Initialize(deps Deps) error {
 	// commit time).
 	if hasAgg, ok := p.ChainDB.(dbstate.HasAgg); ok {
 		if agg, ok := hasAgg.Agg().(*dbstate.Aggregator); ok && agg != nil {
-			p.BlockFileBuilder.(*freezeblocks.BlockRetire).SetCommitGate(agg.CommitGate())
+			p.BlockRetire.(*freezeblocks.BlockRetire).SetCommitGate(agg.CommitGate())
 		}
 	}
 
@@ -186,9 +186,9 @@ func (p *Provider) Initialize(deps Deps) error {
 	return nil
 }
 
-// Close drains BlockFileBuilder before the DB is torn down.
+// Close drains BlockRetire before the DB is torn down.
 func (p *Provider) Close() {
-	if p.BlockFileBuilder != nil {
-		p.BlockFileBuilder.Close()
+	if p.BlockRetire != nil {
+		p.BlockRetire.Close()
 	}
 }

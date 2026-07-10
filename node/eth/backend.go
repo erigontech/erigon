@@ -872,7 +872,7 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 	)
 	backend.pendingBlocks = blkBuilder.PendingBlockCh()
 
-	blockFileBuilder := backend.components.Storage.BlockFileBuilder
+	blockFileBuilder := backend.components.Storage.BlockRetire
 	var creds credentials.TransportCredentials
 	if stack.Config().PrivateApiAddr != "" {
 		if stack.Config().TLSConnection {
