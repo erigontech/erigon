@@ -14,8 +14,11 @@ import (
 	"github.com/erigontech/erigon/db/kv/dbcfg"
 	"github.com/erigontech/erigon/db/kv/memdb"
 	"github.com/erigontech/erigon/db/kv/order"
+	"github.com/erigontech/erigon/db/snapshotsync/blocksnapshots"
 	"github.com/erigontech/erigon/db/state"
 	"github.com/erigontech/erigon/db/state/execctx"
+	"github.com/erigontech/erigon/execution/chain/networkname"
+	"github.com/erigontech/erigon/node/ethconfig"
 )
 
 func TestTemporalTx_HasPrefix_StorageDomain(t *testing.T) {
@@ -214,6 +217,39 @@ func TestTemporalTx_HasPrefix_StorageDomain(t *testing.T) {
 		require.Equal(t, append(append([]byte{}, acc1[:]...), acc1slot1[:]...), firstKey)
 		require.Equal(t, []byte{3}, firstVal)
 	}
+}
+
+// TestTemporalTx_PinsBlockFilesView pins the SetBlockSnapshots contract: once
+// block snapshots are wired, every temporal tx pins its own block-files view
+// (the peer of aggtx); with none wired, block reads keep their own view.
+func TestTemporalTx_PinsBlockFilesView(t *testing.T) {
+	t.Parallel()
+	ctx := t.Context()
+
+	mdbxDb := memdb.NewTestDB(t, dbcfg.ChainDB)
+	dirs := datadir.New(t.TempDir())
+	agg := state.NewTest(dirs).StepSize(1).MustOpen(ctx, mdbxDb)
+	defer agg.Close()
+
+	temporalDb, err := New(mdbxDb, agg)
+	require.NoError(t, err)
+	defer temporalDb.Close()
+
+	roTx, err := temporalDb.BeginTemporalRo(ctx)
+	require.NoError(t, err)
+	defer roTx.Rollback()
+	require.Nil(t, roTx.(*Tx).blocktx)
+
+	cfg := ethconfig.Defaults.Snapshot
+	cfg.ChainName = networkname.Mainnet
+	sn := blocksnapshots.NewRoSnapshots(cfg, dirs.Snap, log.New())
+	defer sn.Close()
+	temporalDb.SetBlockSnapshots(sn)
+
+	roTx2, err := temporalDb.BeginTemporalRo(ctx)
+	require.NoError(t, err)
+	defer roTx2.Rollback()
+	require.NotNil(t, roTx2.(*Tx).blocktx)
 }
 
 func TestTemporalTx_RangeAsOf_StorageDomain(t *testing.T) {

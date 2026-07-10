@@ -21,8 +21,10 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
+	"runtime"
 	"slices"
 	"sort"
+	"sync"
 
 	lru "github.com/hashicorp/golang-lru/v2"
 	"google.golang.org/protobuf/types/known/emptypb"
@@ -530,6 +532,29 @@ func txBlockView(tx kv.Getter) *blocksnapshots.View {
 	return nil
 }
 
+var nilBlockViewSites sync.Map
+
+// warnNoTxBlockView surfaces, under ERIGON_ASSERT, block reads that fall back to
+// the reader's own view because tx pinned none — so we can audit which call sites
+// still don't thread a temporal tx. Logged once per call site.
+func warnNoTxBlockView(tx kv.Getter) {
+	if !dbg.AssertEnabled {
+		return
+	}
+	var pcs [1]uintptr
+	if runtime.Callers(3, pcs[:]) == 0 { // skip Callers, warnNoTxBlockView, wrapper
+		return
+	}
+	if _, seen := nilBlockViewSites.LoadOrStore(pcs[0], struct{}{}); seen {
+		return
+	}
+	name := "?"
+	if fn := runtime.FuncForPC(pcs[0]); fn != nil {
+		name = fn.Name()
+	}
+	log.Warn("[dbg] block read without tx-pinned view", "caller", name, "txType", fmt.Sprintf("%T", tx), "stack", dbg.Stack())
+}
+
 // viewSingleFile returns the segment of type t covering blockNum, from tx's pinned
 // view when present (no-op release), else a fresh r.sn view the caller releases.
 func (r *BlockReader) viewSingleFile(tx kv.Getter, t snaptype.Type, blockNum uint64) (*snapshotsync.VisibleSegment, bool, func()) {
@@ -537,6 +562,7 @@ func (r *BlockReader) viewSingleFile(tx kv.Getter, t snaptype.Type, blockNum uin
 		seg, ok := bv.Segment(t, blockNum)
 		return seg, ok, func() {}
 	}
+	warnNoTxBlockView(tx)
 	return r.sn.ViewSingleFile(t, blockNum)
 }
 
@@ -546,6 +572,7 @@ func (r *BlockReader) viewType(tx kv.Getter, t snaptype.Type) ([]*snapshotsync.V
 	if bv := txBlockView(tx); bv != nil {
 		return bv.Segments(t), func() {}
 	}
+	warnNoTxBlockView(tx)
 	rotx := r.sn.ViewType(t)
 	return rotx.Segments, rotx.Close
 }
@@ -556,6 +583,7 @@ func (r *BlockReader) view(tx kv.Getter) (*blocksnapshots.View, func()) {
 	if bv := txBlockView(tx); bv != nil {
 		return bv, func() {}
 	}
+	warnNoTxBlockView(tx)
 	v := r.sn.View()
 	return v, v.Close
 }

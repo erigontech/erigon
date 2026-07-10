@@ -135,10 +135,15 @@ func openDB(opts kv2.MdbxOpts, applyMigrations bool, chain string, logger log.Lo
 		return nil, err
 	}
 
-	_, _, agg, _, _, _, err := allSnapshots(context.Background(), rawDB, logger)
+	blockSnaps, _, agg, _, _, _, err := allSnapshots(context.Background(), rawDB, logger)
 	if err != nil {
 		return nil, err
 	}
 
-	return temporal.New(rawDB, agg)
+	db, err := temporal.New(rawDB, agg)
+	if err != nil {
+		return nil, err
+	}
+	db.SetBlockSnapshots(blockSnaps)
+	return db, nil
 }

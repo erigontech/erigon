@@ -88,13 +88,10 @@ func New(db kv.RwDB, agg *state.Aggregator) (*DB, error) {
 	return &DB{RwDB: db, stateFiles: agg}, nil
 }
 
-// SetBlockSnapshots wires the (optional) block snapshots. Call once at startup,
-// before any tx is opened.
-//
-// TODO: currently a no-op so this change is behavior-preserving (blockFiles stays
-// nil → reads keep using their own view, not the temporal tx's). Enable by
-// assigning db.blockFiles = sn here — a single-line change, no call-site churn.
-func (db *DB) SetBlockSnapshots(sn services.BlockSnapshots) {}
+// SetBlockSnapshots wires the (optional) block snapshots — the block-data peer of
+// stateFiles. Call once at startup, before any tx is opened. Left nil by
+// state-only tools, in which case block reads fall back to their own view.
+func (db *DB) SetBlockSnapshots(sn services.BlockSnapshots) { db.blockFiles = sn }
 
 func (db *DB) Agg() any                                { return db.stateFiles }
 func (db *DB) BlockSnapshots() services.BlockSnapshots { return db.blockFiles }
