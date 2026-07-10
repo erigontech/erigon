@@ -136,13 +136,41 @@ func (fp *foldPool) run(ctx context.Context, rootTask *foldTask) ([]*DeferredBra
 	return deferred, nil
 }
 
+// forkWholeFresh gates the whole-fresh account-plane fork-join route. It is a dev-only package
+// toggle — set it false to measure the frontier-serial baseline in a bench — and is never wired to
+// a CLI flag. Default on.
+var forkWholeFresh atomic.Bool
+
+// wholeFreshFolds counts Process calls routed through the whole-fresh account-plane fork
+// (dispatchWholeFresh). Read by tests to confirm the whole-fresh path fired on a fresh build and
+// stayed dormant on an incremental one.
+var wholeFreshFolds atomic.Int64
+
+func init() { forkWholeFresh.Store(true) }
+
+// wholeFreshBuild reports whether a Process runs against empty on-disk state: no branch at the root
+// prefix (rootSeedable false) and no seedable branch probed anywhere during derivation (sawSeedable
+// false). A propagate-folded root is not empty — its deeper branches are seedable, so sawSeedable
+// excludes it. Only a real root branch qualifies (no root extension), so a common-prefix or
+// single-account corpus routes to frontier. Gated on the dev-only forkWholeFresh toggle.
+func wholeFreshBuild(root *prefixNode, rootSeedable, sawSeedable bool) bool {
+	if !forkWholeFresh.Load() {
+		return false
+	}
+	if rootSeedable || sawSeedable {
+		return false
+	}
+	return len(root.ext) == 0 && root.bitmap != 0
+}
+
 // dispatchFrontier derives the fold DAG over root, folds it with fp's shared worker pool, stitches
 // the resulting top-nibble cells into base, and folds base down to its root, returning the deferred
 // branch updates the whole fold produced. reuse, when non-nil, is the streaming scheduler's
 // cached-cell consumer: it prunes clean top nibbles from the DAG (their pre-folded cells are
-// stitched directly) and returns the deferred those reused folds produced. A seed-probe read error
-// or any fold error fails closed — every collected deferred update is recycled and nothing is
-// returned, so a partial fold never leaks a plausible-but-wrong branch to the caller.
+// stitched directly) and returns the deferred those reused folds produced. A whole-fresh build
+// (empty on-disk state) routes to the account-plane fork instead. A seed-probe read error or any
+// fold error fails closed — every collected deferred update is recycled and nothing is returned, so
+// a partial fold never leaks a plausible-but-wrong branch to the caller.
 func (fp *foldPool) dispatchFrontier(ctx context.Context, base *HexPatriciaHashed, root *prefixNode,
 	reuse func(*foldTask) ([16]cell, [16]bool, []*DeferredBranchUpdate),
 ) ([]*DeferredBranchUpdate, error) {
@@ -151,8 +179,10 @@ func (fp *foldPool) dispatchFrontier(ctx context.Context, base *HexPatriciaHashe
 		defer dcleanup()
 	}
 	// seed-or-demote prober: a merge candidate is confirmed only if an on-disk branch exists
-	// exactly at its prefix; a read error fails the whole fold closed.
+	// exactly at its prefix; a read error fails the whole fold closed. sawSeedable records whether
+	// any on-disk branch was found, feeding the whole-fresh detection below.
 	var seedErr error
+	sawSeedable := false
 	seedable := func(prefix []byte) bool {
 		if seedErr != nil {
 			return false
@@ -162,17 +192,46 @@ func (fp *foldPool) dispatchFrontier(ctx context.Context, base *HexPatriciaHashe
 			seedErr = berr
 			return false
 		}
-		return len(b) > 0
+		if len(b) == 0 {
+			return false
+		}
+		sawSeedable = true
+		return true
 	}
 
 	fp.foldSem = semaphore.NewWeighted(int64(maxFoldConcurrency()))
 	k := foldK(root.subtreeCount, fp.numWorkers)
+	rootSeedable := seedable(append([]byte(nil), root.ext...))
 	rootTask := deriveFoldFrontier(root, k, seedable)
 	if seedErr != nil {
 		return nil, seedErr
 	}
 	rootTask.base = base
 
+	if wholeFreshBuild(root, rootSeedable, sawSeedable) {
+		return fp.dispatchWholeFresh(ctx, base, rootTask, reuse)
+	}
+	return fp.foldFrontierBody(ctx, base, rootTask, reuse)
+}
+
+// dispatchWholeFresh folds a whole-fresh build (empty on-disk state) through the account-plane
+// fork-join. Task 2 lands the fork; this stub records the route and delegates to the frontier fold,
+// so a whole-fresh commit stays byte-identical to frontier until the fork replaces this body.
+func (fp *foldPool) dispatchWholeFresh(ctx context.Context, base *HexPatriciaHashed, rootTask *foldTask,
+	reuse func(*foldTask) ([16]cell, [16]bool, []*DeferredBranchUpdate),
+) ([]*DeferredBranchUpdate, error) {
+	wholeFreshFolds.Add(1)
+	return fp.foldFrontierBody(ctx, base, rootTask, reuse)
+}
+
+// foldFrontierBody folds the derived DAG below rootTask with the shared worker pool, stitches the
+// top-nibble cells (plus any scheduler-reused cells) into base, and folds base down to its root,
+// returning the deferred branch updates. Shared by the frontier dispatch and the whole-fresh route,
+// which reach it with the same rootTask/base contract. Fail-closed: any error recycles the collected
+// deferred and returns nothing.
+func (fp *foldPool) foldFrontierBody(ctx context.Context, base *HexPatriciaHashed, rootTask *foldTask,
+	reuse func(*foldTask) ([16]cell, [16]bool, []*DeferredBranchUpdate),
+) ([]*DeferredBranchUpdate, error) {
 	var (
 		reusedCells    [16]cell
 		reusedPresent  [16]bool

@@ -106,15 +106,19 @@ Target: flag-on `1MWhales` ∥ from 900 → ~200 ms (approach/beat main); **zero
 - Modify: `execution/commitment/fold_pool.go`
 - Modify: `execution/commitment/frontier_parity_test.go` (or new `fresh_build_fork_test.go`)
 
-- [ ] add a whole-fresh detector *inside* the parallel/streaming engine (empty on-disk state: unseedable
+- [x] add a whole-fresh detector *inside* the parallel/streaming engine (empty on-disk state: unseedable
       root + no seedable prefix seen during derivation, or caller hint). Non-empty state → frontier path
       unchanged. **No CLI flag** — the existing parallel/streaming mode selection is the only user flag.
-- [ ] add a **test-only package toggle** (default: fork on) so benches can measure the frontier-serial
-      baseline; dev-only, never wired to a CLI flag.
-- [ ] wire a new entry the whole-fresh case routes to (stub → falls back to frontier for now, tree stays green).
-- [ ] test: a fresh corpus hits the new entry (assert via counter, red until Task 2); an incremental corpus
-      does NOT (guard test, green now); toggle-off == frontier.
-- [ ] `make test-short`. Before Task 2.
+      (`wholeFreshBuild`, `fold_pool.go`: root-prefix probe + `sawSeedable` tracking in `dispatchFrontier`.)
+- [x] add a **test-only package toggle** (default: fork on) so benches can measure the frontier-serial
+      baseline; dev-only, never wired to a CLI flag. (`forkWholeFresh atomic.Bool`, default on via `init`.)
+- [x] wire a new entry the whole-fresh case routes to (stub → falls back to frontier for now, tree stays green).
+      (`dispatchWholeFresh` counts the route via `wholeFreshFolds` and delegates to the extracted `foldFrontierBody`.)
+- [x] test: a fresh corpus hits the new entry (assert via counter, red until Task 2); an incremental corpus
+      does NOT (guard test, green now); toggle-off == frontier. (`fresh_build_fork_test.go`: detector unit test +
+      fresh-routes/incremental-guard/toggle-off parity across all three engine modes. The counter proves the
+      route fired; the account-plane fork itself lands in Task 2.)
+- [x] `make test-short`. Before Task 2.
 
 ## Milestone 2 — Account-plane fork-join over `foldNode`
 
