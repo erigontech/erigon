@@ -1433,25 +1433,6 @@ func reconcileExecAndWaitErr(execErr, waitErr error) error {
 	return errors.Join(execErr, waitErr)
 }
 
-// checkBlocksDrained turns a clean apply-loop exit (execErr == nil) that left
-// scheduled blocks undrained in pe.blockExecutors into an ErrInvalidBlock;
-// leftover blocks on a resumable (ErrLoopExhausted) or canceled batch are
-// expected and pass through.
-func (pe *parallelExecutor) checkBlocksDrained(ctx context.Context, execErr error) error {
-	if execErr != nil || ctx.Err() != nil {
-		return execErr
-	}
-	pe.RLock()
-	pending := slices.Collect(maps.Keys(pe.blockExecutors))
-	pe.RUnlock()
-	if len(pending) == 0 {
-		return nil
-	}
-	slices.Sort(pending)
-	return fmt.Errorf("%w: parallel exec apply loop finished cleanly but %d scheduled block(s) never drained: %v",
-		rules.ErrInvalidBlock, len(pending), pending)
-}
-
 // execLoopExitDecision is the result of evaluating the exec-loop's
 // per-blockResult exit conditions. Values are ordered by precedence:
 // later conditions only matter if no earlier one fired.
@@ -1550,6 +1531,25 @@ func (pe *parallelExecutor) closeApplyChannels() (closedOrder []string) {
 		pe.applyResultsCh = nil
 	}
 	return
+}
+
+// checkBlocksDrained turns a clean apply-loop exit (execErr == nil) that left
+// scheduled blocks undrained in pe.blockExecutors into an ErrInvalidBlock;
+// leftover blocks on a resumable (ErrLoopExhausted) or canceled batch are
+// expected and pass through.
+func (pe *parallelExecutor) checkBlocksDrained(ctx context.Context, execErr error) error {
+	if execErr != nil || ctx.Err() != nil {
+		return execErr
+	}
+	pe.RLock()
+	pending := slices.Collect(maps.Keys(pe.blockExecutors))
+	pe.RUnlock()
+	if len(pending) == 0 {
+		return nil
+	}
+	slices.Sort(pending)
+	return fmt.Errorf("%w: parallel exec apply loop finished cleanly but %d scheduled block(s) never drained: %v",
+		rules.ErrInvalidBlock, len(pending), pending)
 }
 
 // scheduleNextPending picks the lowest-numbered block still queued in
