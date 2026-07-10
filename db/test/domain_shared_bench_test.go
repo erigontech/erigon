@@ -318,9 +318,6 @@ func generateRandomTxNum(r *rndGen, maxTxNum uint64, usedTxNums map[uint64]bool)
 // It populates domains with data across multiple steps, builds snapshot files,
 // then measures the time to prune the data covered by those snapshots.
 func BenchmarkPruneSmallBatches(b *testing.B) {
-	if testing.Short() {
-		b.Skip("setup accumulates multi-GB sd.mem; the ETL flush stalls under CI page-cache pressure, see #22361")
-	}
 	stepSize := uint64(100)
 	db, agg := testDbAndAggregatorBench(b, stepSize)
 
@@ -330,6 +327,11 @@ func BenchmarkPruneSmallBatches(b *testing.B) {
 	// Populate data: write enough txs to span several steps
 	maxTx := stepSize * 50
 	keysCount := uint64(100)
+	if testing.Short() {
+		// The full setup's sd.mem/ETL flush stalls under CI page-cache pressure; shrink it (#22361).
+		maxTx = stepSize * 4
+		keysCount = 20
+	}
 
 	rwTx, err := db.BeginTemporalRw(ctx)
 	require.NoError(b, err)
