@@ -1809,12 +1809,12 @@ func doCheckCommitmentHistAtBlk(ctx context.Context, cliCtx *cli.Command, logger
 	chainConfig := fromdb.ChainConfig(chainDB)
 	cfg := ethconfig.NewSnapCfg(false /*keepBlocks*/, true /*produceE2*/, true /*produceE3*/, chainConfig.ChainName)
 	res, clean, err := openSnaps(ctx, cfg, dirs, chainDB, logger)
-	blockFileBuilder, agg := res.BlockRetire, res.Aggregator
+	blockRetire, agg := res.BlockRetire, res.Aggregator
 	if err != nil {
 		return err
 	}
 	defer clean()
-	defer blockFileBuilder.MadvNormal().DisableReadAhead()
+	defer blockRetire.MadvNormal().DisableReadAhead()
 	defer agg.MadvNormal().DisableReadAhead()
 	db, err := temporal.New(chainDB, agg)
 	if err != nil {
@@ -1836,7 +1836,7 @@ func doCheckStateRootByHistory(ctx context.Context, cliCtx *cli.Command, logger 
 	chainConfig := fromdb.ChainConfig(chainDB)
 	cfg := ethconfig.NewSnapCfg(false /*keepBlocks*/, true /*produceE2*/, true /*produceE3*/, chainConfig.ChainName)
 	res, clean, err := openSnaps(ctx, cfg, dirs, chainDB, logger)
-	blockFileBuilder, agg := res.BlockRetire, res.Aggregator
+	blockRetire, agg := res.BlockRetire, res.Aggregator
 	if err != nil {
 		return err
 	}
@@ -1883,8 +1883,8 @@ func doCheckRCacheRootAtBlk(ctx context.Context, cliCtx *cli.Command, logger log
 		return err
 	}
 	defer clean()
-	blockFileBuilder, agg := res.BlockRetire, res.Aggregator
-	defer blockFileBuilder.MadvNormal().DisableReadAhead()
+	blockRetire, agg := res.BlockRetire, res.Aggregator
+	defer blockRetire.MadvNormal().DisableReadAhead()
 	defer agg.MadvNormal().DisableReadAhead()
 	db, err := temporal.New(chainDB, agg)
 	if err != nil {
@@ -1911,8 +1911,8 @@ func doCheckRCacheRootAtBlkRange(ctx context.Context, cliCtx *cli.Command, logge
 		return err
 	}
 	defer clean()
-	blockFileBuilder, agg := res.BlockRetire, res.Aggregator
-	defer blockFileBuilder.MadvNormal().DisableReadAhead()
+	blockRetire, agg := res.BlockRetire, res.Aggregator
+	defer blockRetire.MadvNormal().DisableReadAhead()
 	defer agg.MadvNormal().DisableReadAhead()
 	db, err := temporal.New(chainDB, agg)
 	if err != nil {
