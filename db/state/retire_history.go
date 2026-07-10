@@ -124,9 +124,9 @@ func (at *AggregatorRoTx) Retire(ctx context.Context, cutoffs kv.RetireCutoffs) 
 		if cutoffStep == 0 {
 			continue
 		}
-		d, a := dt.ht.filesBeforeStep(cutoffStep)
+		d, agedList := dt.ht.filesBeforeStep(cutoffStep)
 		deleted = append(deleted, d...)
-		aged = append(aged, a...)
+		aged = append(aged, agedList...)
 	}
 	for _, iit := range at.standaloneIIs() {
 		if iit.ii.Disable {
@@ -136,9 +136,9 @@ func (at *AggregatorRoTx) Retire(ctx context.Context, cutoffs kv.RetireCutoffs) 
 		if cutoffStep == 0 {
 			continue
 		}
-		d, a := iit.filesBeforeStep(cutoffStep)
+		d, agedList := iit.filesBeforeStep(cutoffStep)
 		deleted = append(deleted, d...)
-		aged = append(aged, a)
+		aged = append(aged, agedList)
 	}
 
 	var retired []*FilesItem
