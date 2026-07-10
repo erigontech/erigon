@@ -1995,15 +1995,10 @@ func (p *TxPool) nextDormancySweepInterval(backoff *float64, lastEvicted, queued
 		*backoff = 1.0
 	}
 
-	interval := time.Duration(float64(base) * pressure * *backoff)
-
 	// Clamp to [30 s, 10 min].
-	if interval < 30*time.Second {
-		interval = 30 * time.Second
-	}
-	if interval > 10*time.Minute {
-		interval = 10 * time.Minute
-	}
+	interval := time.Duration(float64(base) * pressure * *backoff)
+	interval = max(interval, 30*time.Second)
+	interval = min(interval, 10*time.Minute)
 	return interval
 }
 

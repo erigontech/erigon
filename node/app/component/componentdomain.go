@@ -127,11 +127,7 @@ func NewComponentDomain(context context.Context, id string, options ...app.Optio
 		if opts.execPoolSize != nil {
 			poolSize = *opts.execPoolSize
 		} else {
-			poolSize = int(float64(runtime.NumCPU()) * POOL_LOAD_FACTOR)
-
-			if poolSize < MIN_POOL_SIZE {
-				poolSize = MIN_POOL_SIZE
-			}
+			poolSize = max(int(float64(runtime.NumCPU())*POOL_LOAD_FACTOR), MIN_POOL_SIZE)
 		}
 
 		execPool = workerpool.New(poolSize)
@@ -155,11 +151,7 @@ func NewComponentDomain(context context.Context, id string, options ...app.Optio
 			if opts.execPoolSize != nil && *opts.execPoolSize > 0 {
 				poolSize = *opts.execPoolSize
 			} else {
-				poolSize = int(float64(runtime.NumCPU()) * POOL_LOAD_FACTOR)
-
-				if poolSize < MIN_POOL_SIZE {
-					poolSize = MIN_POOL_SIZE
-				}
+				poolSize = max(int(float64(runtime.NumCPU())*POOL_LOAD_FACTOR), MIN_POOL_SIZE)
 			}
 
 			execPool := workerpool.New(poolSize)
