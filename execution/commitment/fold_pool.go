@@ -18,16 +18,26 @@ package commitment
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
+	"math/bits"
+	"runtime"
 	"sync"
 	"sync/atomic"
 
 	"golang.org/x/sync/errgroup"
+	"golang.org/x/sync/semaphore"
 
+	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/empty"
 	"github.com/erigontech/erigon/execution/commitment/nibbles"
 )
+
+// maxFoldConcurrency caps the fresh-whale storage fan-out at the CPUs the process may run on, so
+// the account-leaf worker that spawns it plus every other concurrently-folding storage subtree
+// stays within the core count.
+func maxFoldConcurrency() int { return max(1, runtime.GOMAXPROCS(0)) }
 
 // foldPool folds a fold DAG with one shared worker pool. Leaf tasks mount on their parent
 // merge's seeded base and fold their key group; merge tasks stitch their already-folded child
@@ -40,6 +50,9 @@ type foldPool struct {
 	ctxFactory TrieContextFactory
 	workerPool *sync.Pool
 	traceW     io.Writer
+	// foldSem bounds the nested fresh-whale storage fan-out at GOMAXPROCS across all account
+	// leaves folding at once, so the leaf workers spawning it never oversubscribe the cores.
+	foldSem *semaphore.Weighted
 }
 
 // deriveFoldFrontier builds the fold DAG for one Process: the root task is always the serial
@@ -148,6 +161,7 @@ func (fp *foldPool) dispatchFrontier(ctx context.Context, base *HexPatriciaHashe
 		return len(b) > 0
 	}
 
+	fp.foldSem = semaphore.NewWeighted(int64(maxFoldConcurrency()))
 	k := foldK(root.subtreeCount, fp.numWorkers)
 	rootTask := deriveFoldFrontier(root, k, seedable)
 	if seedErr != nil {
@@ -250,14 +264,19 @@ func (fp *foldPool) foldLeafTask(ctx context.Context, t *foldTask) error {
 	defer release()
 	w.mountTo(t.parent.base, t.nib)
 
-	if t.storage != nil {
+	switch {
+	case t.storage != nil:
 		if t.node.plainKey != nil {
 			if err := w.followAndUpdate(t.prefix, t.node.plainKey, t.node.update); err != nil {
 				return err
 			}
 		}
 		setAccountStorageRoot(w, t.prefix, t.storageRoot)
-	} else {
+	case t.freshWhaleCandidate:
+		if err := fp.foldWhaleLeaf(ctx, w, t); err != nil {
+			return err
+		}
+	default:
 		for _, kk := range collectSubtreeKeys(t.node, append([]byte(nil), t.prefix...)) {
 			if err := w.followAndUpdate(kk.hk, kk.pk, kk.upd); err != nil {
 				return err
@@ -270,8 +289,126 @@ func (fp *foldPool) foldLeafTask(ctx context.Context, t *foldTask) error {
 		return err
 	}
 	t.cell = c
-	t.deferred = w.TakeDeferredUpdates()
+	t.deferred = append(t.deferred, w.TakeDeferredUpdates()...)
 	return nil
+}
+
+// foldWhaleLeaf applies a demoted big-storage account, then folds its storage: in parallel when
+// the account proves fresh (empty on disk, so its storage is provably storage-less and needs no
+// seed), else serial. It leaves the account cell, with its storage root injected, for foldMounted.
+func (fp *foldPool) foldWhaleLeaf(ctx context.Context, w *HexPatriciaHashed, t *foldTask) error {
+	if err := w.followAndUpdate(t.prefix, t.node.plainKey, t.node.update); err != nil {
+		return err
+	}
+	if !w.lastUpdateCellWasEmpty {
+		for _, kk := range collectStorageKeys(t.node, t.prefix) {
+			if err := w.followAndUpdate(kk.hk, kk.pk, kk.upd); err != nil {
+				return err
+			}
+		}
+		return nil
+	}
+	sr, deferred, err := fp.foldFreshStorage(ctx, t.node, t.prefix)
+	if err != nil {
+		return err
+	}
+	t.deferred = append(t.deferred, deferred...)
+	setAccountStorageRoot(w, t.prefix, sr)
+	return nil
+}
+
+// foldFreshStorage folds a fresh account's storage subtree in parallel by first nibble against an
+// empty wall — the account is provably storage-less on disk, so seedBaseAtPrefix's reset wall is
+// the correct seed. Returns the collapsed storage root and the deferred branch updates produced.
+func (fp *foldPool) foldFreshStorage(ctx context.Context, node *prefixNode, accPrefix []byte) (common.Hash, []*DeferredBranchUpdate, error) {
+	base, releaseBase := newDeferredStorageWorker(fp.workerPool, fp.ctxFactory, fp.traceW)
+	defer releaseBase()
+	if err := seedBaseAtPrefix(base, accPrefix); err != nil && !errors.Is(err, errStorageBaseNotBranch) {
+		return common.Hash{}, nil, fmt.Errorf("fresh storage seed: %w", err)
+	}
+
+	sem := fp.foldSem
+	if sem == nil {
+		sem = semaphore.NewWeighted(int64(maxFoldConcurrency()))
+	}
+	var (
+		children [16]cell
+		mu       sync.Mutex
+		deferred []*DeferredBranchUpdate
+	)
+	g, gctx := errgroup.WithContext(ctx)
+	childIdx := 0
+	for bm := node.bitmap; bm != 0; {
+		nib := int(bits.TrailingZeros16(bm))
+		child := node.children[childIdx]
+		childPrefix := make([]byte, len(accPrefix), len(accPrefix)+1+len(child.ext))
+		copy(childPrefix, accPrefix)
+		childPrefix = append(childPrefix, byte(nib))
+		childPrefix = append(childPrefix, child.ext...)
+		group := collectSubtreeKeys(child, childPrefix)
+		ni := nib
+		g.Go(func() error {
+			if err := sem.Acquire(gctx, 1); err != nil {
+				return err
+			}
+			defer sem.Release(1)
+			cw, crelease := newDeferredStorageWorker(fp.workerPool, fp.ctxFactory, fp.traceW)
+			defer crelease()
+			cw.mountTo(base, ni)
+			for i := range group {
+				if err := cw.followAndUpdate(group[i].hk, group[i].pk, group[i].upd); err != nil {
+					return err
+				}
+			}
+			c, err := cw.foldMounted(gctx, ni)
+			if err != nil {
+				return fmt.Errorf("fresh storage nibble[%x]: %w", ni, err)
+			}
+			if d := cw.TakeDeferredUpdates(); len(d) > 0 {
+				mu.Lock()
+				deferred = append(deferred, d...)
+				mu.Unlock()
+			}
+			children[ni] = c
+			return nil
+		})
+		childIdx++
+		bm &^= uint16(1) << nib
+	}
+	if err := g.Wait(); err != nil {
+		return common.Hash{}, deferred, err
+	}
+
+	sr, err := aggregateMountedStorageRoot(base, &children, node.bitmap)
+	if err != nil {
+		return common.Hash{}, deferred, fmt.Errorf("fresh storage aggregate: %w", err)
+	}
+	if d := base.TakeDeferredUpdates(); len(d) > 0 {
+		deferred = append(deferred, d...)
+	}
+	if sr.IsEmpty() {
+		return empty.RootHash, deferred, nil
+	}
+	return sr.hash, deferred, nil
+}
+
+// collectStorageKeys collects a depth-64 account node's storage keys (its child subtrees),
+// excluding the account terminator the caller applies separately.
+func collectStorageKeys(node *prefixNode, accPrefix []byte) []touchedKey {
+	var out []touchedKey
+	childIdx := 0
+	for bm := node.bitmap; bm != 0; {
+		nib := bits.TrailingZeros16(bm)
+		child := node.children[childIdx]
+		childPrefix := make([]byte, len(accPrefix), len(accPrefix)+1+len(child.ext))
+		copy(childPrefix, accPrefix)
+		childPrefix = append(childPrefix, byte(nib))
+		childPrefix = append(childPrefix, child.ext...)
+		out = append(out, collectSubtreeKeys(child, childPrefix)...)
+		childIdx++
+		bm &^= uint16(1) << nib
+	}
+	return out
 }
 
 // foldMergeTask stitches the task's already-folded child cells into its seeded base and folds to

@@ -88,6 +88,12 @@ type foldTask struct {
 	baseCleanup func()
 	// storageRoot carries a storage-root subtask's collapsed hash to its account-leaf parent.
 	storageRoot common.Hash
+
+	// freshWhaleCandidate marks a demoted big-storage account leaf (unseedable, so no branch
+	// on disk at its prefix). foldLeafTask confirms freshness at fold time (the account cell is
+	// empty on disk) and then folds its storage in parallel against an empty wall, recovering the
+	// parallelism the seedable-only seam gives a re-touched whale. Not fresh ⇒ serial replay.
+	freshWhaleCandidate bool
 }
 
 // deriveFoldDAG walks the prefix trie top-down once, classifying each node as a
@@ -142,7 +148,13 @@ func (b *foldDAGBuilder) derive(node *prefixNode, prefix []byte) *foldTask {
 			leaf.pending.Store(1)
 			return leaf
 		}
-		return b.newTask(prefix, node, foldLeaf, planeAccount)
+		leaf := b.newTask(prefix, node, foldLeaf, planeAccount)
+		// A touched big-storage account with no on-disk branch is a fresh-whale candidate:
+		// foldLeafTask parallelizes its storage if the account proves fresh at fold time.
+		if node.plainKey != nil && sc-1 > b.k {
+			leaf.freshWhaleCandidate = true
+		}
+		return leaf
 	}
 
 	if sc <= b.k || !b.seedable(prefix) {
