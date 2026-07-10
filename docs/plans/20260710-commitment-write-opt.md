@@ -178,24 +178,46 @@ CPU merge pass off the flush critical path.
 - Modify: `execution/commitment/commitment.go` (extract `MergeDeferredBranchUpdates` = merge half of `:455-482`)
 - Modify: `execution/commitment/parallel_patricia_hashed.go`
 
-- [ ] red: a unit test asserting the parallel engine's returned deferred list has `encoded` populated and
+- [x] red: a unit test asserting the parallel engine's returned deferred list has `encoded` populated and
       `raw`/`prev` cleared (fails today — returns pre-merge), AND that `flushPendingUpdates` performs no merge
-      (pure memcpy) for such a list.
-- [ ] green: extract `MergeDeferredBranchUpdates(deferred, numWorkers)` (merge half only, no `PutBranch`);
+      (pure memcpy) for such a list. (`TestMergeDeferredBranchUpdatesPreMergesForFlush` — corrupts `raw`
+      post-merge and proves apply writes the pre-merged bytes; `TestParallelProcessLeavesMergedDeferred` +
+      `TestStreamingProcessLeavesMergedDeferred` pin the Process contract on both parallel engines. Deviation
+      from the Context phrasing, per this task's safety item: `raw`/`prev` are KEPT, not cleared — `prev` is
+      written through as the changeset undo record, `raw` is needed by `applyDeferredGuarded`'s
+      substitute-prev re-merge; a `merged` flag marks `encoded` final instead.)
+- [x] green: extract `MergeDeferredBranchUpdates(deferred, numWorkers)` (merge half only, no `PutBranch`);
       run it on the parallel path before `p.deferredForCaller = pu.deferredCombined` (`:351`) — ideally per
       fork as subtrees complete (`CollectDeferredUpdate` site) to overlap the fold; make
       `ApplyDeferredBranchUpdates`/flush skip the merge when `encoded` is already set.
-- [ ] **merge feasibility + unwind-changeset safety (load-bearing — verify first):** determine what
+      (Per-fork: `foldPool.run` merges each task's deferred right after its fold on the dispatch worker —
+      covers mounted + streaming subtree folds; catch-alls at both `Process` hand-offs cover the whole-fresh
+      fork-join, scheduler-reused splits, and the root-fold tail. `ApplyDeferredBranchUpdates` = skip-merged
+      merge pass + sequential write pass, deduplicating the old interleaved/worker halves.)
+- [x] **merge feasibility + unwind-changeset safety (load-bearing — verify first):** determine what
       `mergeDeferredUpdate` combines. If `prev` is the on-disk previous branch, confirm it is available on the
       fold worker (empty for whole-fresh; from the seed for seedable) — no fresh ctx read the worker can't do.
       AND: `flushPendingUpdates`'s changeset routing (`domain_shared.go:379-401`) writes the unwind undo
       record from `prev` — moving merge under the fold must NOT drop `prev` before the changeset is built.
       Keep `prev` alongside `encoded`, or build the changeset during the under-fold merge. Reorg test must
       reproduce the correct pre-block root.
-- [ ] **serial path untouched:** the serial engine's `ApplyDeferredUpdates` barrier path is unchanged
-      (still merges+writes inline) — `git diff` shows no serial behavior change.
-- [ ] parity: parallel root + branch parity unchanged; `flushPendingUpdates` merge time → ~0.
-- [ ] `make lint && make test-short`. Before Task 4.
+      (Verified: the merge is pure CPU over `upd.raw`/`upd.prev` captured at `CollectDeferredUpdate` time —
+      `prev` is read via `ctx.Branch` on the fold worker already, no new ctx read. `prev` stays on the struct;
+      the flush write pass still calls `putBranch(prefix, encoded, prev)` → `domainPutNoLock(..., prevVal)`
+      unchanged, so changeset routing is byte-identical. The one true re-merge consumer,
+      `applyDeferredGuarded`'s duplicate-prefix path, substitutes `prev` and calls `mergeDeferredUpdate`
+      directly, which merges unconditionally — the skip lives only in the batch merge pass.)
+- [x] **serial path untouched:** the serial engine's `ApplyDeferredUpdates` barrier path is unchanged
+      (still merges+writes inline) — `git diff` shows no serial behavior change. (`hex_patricia_hashed.go`
+      diff is empty; serial deferred arrive un-merged so the shared apply merges exactly as before;
+      `Test_HexPatriciaHashed_DeferredBranchUpdates*` green, full package + `-race` green.)
+- [x] parity: parallel root + branch parity unchanged; `flushPendingUpdates` merge time → ~0.
+      (Root+branch parity vs sequential oracle asserted in both new Process tests after a pure-write apply
+      of the taken list; full parity suite green. Flush merge pass on a pre-merged list = one flag scan,
+      zero merges — pinned by the corrupted-`raw` unit test. Sanity bench: seeded whale 24.5→23.5–24.0 ms/op,
+      allocs flat; whole-fresh w18 281 ms/369 MB/7.67M allocs, inside Task 2's recorded spread. Formal
+      numbers in Task 4.)
+- [x] `make lint && make test-short`. Before Task 4. (lint 2x clean; test-short green.)
 
 ## Milestone 3 — Verify + measure
 

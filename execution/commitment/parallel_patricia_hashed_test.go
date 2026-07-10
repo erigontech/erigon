@@ -22,12 +22,14 @@ import (
 	"encoding/binary"
 	"encoding/hex"
 	"fmt"
+	"math/rand"
 	"runtime"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/common/length"
 	"github.com/erigontech/erigon/execution/commitment/nibbles"
@@ -942,4 +944,97 @@ func TestVerifyParallel_StorageIncrementalDeletes(t *testing.T) {
 	for _, w := range []int{1, 2, 4, 8} {
 		requireIncrementalEquiv(t, keys, upds, k2, u2, w)
 	}
+}
+
+// buildRetouchCorpora builds a seed batch and a same-keys re-touch batch with
+// different values, so the second fold merges against non-empty on-disk prev.
+func buildRetouchCorpora(n int) (k1 [][]byte, u1 []Update, k2 [][]byte, u2 []Update) {
+	rnd := rand.New(rand.NewSource(7331))
+	addrs := make([]string, n)
+	ub1, ub2 := NewUpdateBuilder(), NewUpdateBuilder()
+	for i := range addrs {
+		addr := make([]byte, length.Addr)
+		rnd.Read(addr)
+		addrs[i] = hex.EncodeToString(addr)
+		ub1.Balance(addrs[i], uint64(i)+1)
+		ub2.Balance(addrs[i], uint64(i)+1_000_000)
+	}
+	k1, u1 = ub1.Build()
+	k2, u2 = ub2.Build()
+	return k1, u1, k2, u2
+}
+
+// requireFlushReadyDeferred asserts the engine handed the caller merge-under-fold
+// output: every entry carries its final encoded bytes (flush is a pure write) and
+// prev survives for the unwind changeset; the corpus must exercise real merges.
+func requireFlushReadyDeferred(t *testing.T, deferred []*DeferredBranchUpdate) {
+	t.Helper()
+	require.NotEmpty(t, deferred)
+	mergedAgainstPrev := 0
+	for _, upd := range deferred {
+		require.Truef(t, upd.merged, "deferred for prefix %x returned pre-merge; flush would re-run the merge", upd.prefix)
+		if len(upd.prev) > 0 && upd.encoded != nil {
+			mergedAgainstPrev++
+		}
+	}
+	require.Positive(t, mergedAgainstPrev, "corpus must exercise the seeded raw+prev merge")
+}
+
+// The parallel engine must hand the caller flush-ready deferred updates —
+// merged on the fold, so the next block's pending-update flush is a pure write.
+func TestParallelProcessLeavesMergedDeferred(t *testing.T) {
+	t.Parallel()
+	k1, u1, k2, u2 := buildRetouchCorpora(300)
+
+	ms := NewMockState(t)
+	ms.SetConcurrentCommitment(true)
+	_, blob := processModeBatchState(t, ms, modeParallel, 4, k1, u1, nil)
+
+	require.NoError(t, ms.applyPlainUpdates(k2, u2))
+	tr := newParTrie(t, ms, 4)
+	defer tr.Release()
+	require.NoError(t, tr.RootTrie().SetState(blob))
+	tr.SetLeaveDeferredForCaller(true)
+	ut := WrapKeyUpdates(t, ModeParallel, KeyToHexNibbleHash, k2, u2)
+	defer ut.Close()
+	root2 := processRoot(t, tr, ut)
+
+	deferred := tr.TakeDeferredUpdates()
+	requireFlushReadyDeferred(t, deferred)
+
+	_, err := ApplyDeferredBranchUpdates(deferred, runtime.NumCPU(), ms.PutBranch)
+	require.NoError(t, err)
+
+	seqRoot, seqMs := incrementalRoot(t, modeSeq, 0, k1, u1, k2, u2)
+	require.Equal(t, seqRoot, root2)
+	requireBranchParity(t, seqMs, ms)
+}
+
+// Same contract for the streaming committer's caller-flush path.
+func TestStreamingProcessLeavesMergedDeferred(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	k1, u1, k2, u2 := buildRetouchCorpora(300)
+
+	sc, ms := newStreamingFixture(t, k1, u1, 4)
+	defer sc.Release()
+	touchAll(sc, k1)
+	_, err := sc.Process(ctx)
+	require.NoError(t, err)
+
+	require.NoError(t, ms.applyPlainUpdates(k2, u2))
+	sc.SetLeaveDeferredForCaller(true)
+	touchAll(sc, k2)
+	root2, err := sc.Process(ctx)
+	require.NoError(t, err)
+
+	deferred := sc.TakeDeferredUpdates()
+	requireFlushReadyDeferred(t, deferred)
+
+	_, err = ApplyDeferredBranchUpdates(deferred, runtime.NumCPU(), ms.PutBranch)
+	require.NoError(t, err)
+
+	seqRoot, seqMs := incrementalRoot(t, modeSeq, 0, k1, u1, k2, u2)
+	require.Equal(t, seqRoot, common.Copy(root2))
+	requireBranchParity(t, seqMs, ms)
 }

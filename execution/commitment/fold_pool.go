@@ -121,7 +121,15 @@ func (fp *foldPool) run(ctx context.Context, rootTask *foldTask) ([]*DeferredBra
 		}
 	}
 
-	if err := dispatchFoldTasks(ctx, fp.numWorkers, rootTask, subTasks, fp.foldOne); err != nil {
+	// Merging each task's deferred right after its fold overlaps the raw+prev merge
+	// with the remaining folds, so the caller's flush is a pure write pass.
+	foldAndMerge := func(ctx context.Context, t *foldTask) error {
+		if err := fp.foldOne(ctx, t); err != nil {
+			return err
+		}
+		return MergeDeferredBranchUpdates(t.deferred, 1)
+	}
+	if err := dispatchFoldTasks(ctx, fp.numWorkers, rootTask, subTasks, foldAndMerge); err != nil {
 		recycleTaskDeferred(subTasks)
 		return nil, err
 	}

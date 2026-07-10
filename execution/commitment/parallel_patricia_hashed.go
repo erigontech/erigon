@@ -350,6 +350,16 @@ func (p *ParallelPatriciaHashed) Process(
 
 	if p.leaveDeferredForCaller {
 		pu.deferredMu.Lock()
+		// Catch-all for updates the per-fork merge did not reach (whole-fresh
+		// fork-join, root-fold tail); the caller's flush must be a pure write.
+		if mErr := MergeDeferredBranchUpdates(pu.deferredCombined, p.numWorkers); mErr != nil {
+			for _, upd := range pu.deferredCombined {
+				putDeferredUpdate(upd)
+			}
+			pu.deferredCombined = pu.deferredCombined[:0]
+			pu.deferredMu.Unlock()
+			return nil, mErr
+		}
 		p.deferredForCaller = pu.deferredCombined
 		pu.deferredCombined = nil
 		pu.deferredMu.Unlock()

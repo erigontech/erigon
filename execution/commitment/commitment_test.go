@@ -1045,6 +1045,61 @@ func TestMergeDeferredUpdateAllocs(t *testing.T) {
 	require.LessOrEqualf(t, allocs, 0.5, "merge must not clone the merged encoding per branch")
 }
 
+// The merge-under-fold contract: MergeDeferredBranchUpdates fills encoded ahead of
+// the flush, prev stays intact for the unwind changeset, and a later
+// ApplyDeferredBranchUpdates writes the pre-merged bytes without re-merging.
+func TestMergeDeferredBranchUpdatesPreMergesForFlush(t *testing.T) {
+	be := NewBranchEncoder(1024)
+	raw := encodeTestBranch(t, be, 0xffff, 1)
+	prev := encodeTestBranch(t, be, 0x00ff, 2)
+	rawUnchanged := encodeTestBranch(t, be, 0x0f0f, 3)
+
+	merger := NewHexBranchMerger(1024)
+	wantMerged, err := merger.Merge(prev, raw)
+	require.NoError(t, err)
+	wantMerged = common.Copy(wantMerged)
+
+	seeded := getDeferredUpdate(&be.arena, []byte{0x01}, raw, prev)
+	fresh := getDeferredUpdate(&be.arena, []byte{0x02}, raw, nil)
+	unchanged := getDeferredUpdate(&be.arena, []byte{0x03}, rawUnchanged, rawUnchanged)
+	deferred := []*DeferredBranchUpdate{seeded, fresh, unchanged}
+	defer func() {
+		for _, upd := range deferred {
+			putDeferredUpdate(upd)
+		}
+	}()
+
+	require.NoError(t, MergeDeferredBranchUpdates(deferred, 4))
+	for _, upd := range deferred {
+		require.Truef(t, upd.merged, "prefix %x left unmerged", upd.prefix)
+	}
+	require.Equal(t, BranchData(wantMerged), seeded.encoded)
+	require.Equal(t, []byte(prev), seeded.prev, "prev must survive the merge for the changeset undo record")
+	require.Equal(t, raw, seeded.raw)
+	require.Equal(t, BranchData(raw), fresh.encoded)
+	require.Nil(t, unchanged.encoded, "prev==raw stays a skipped write")
+
+	// Corrupt the seeded entry's raw: if the apply re-ran the merge instead of
+	// writing the pre-merged bytes, the written branch would differ.
+	for i := range seeded.raw {
+		seeded.raw[i] ^= 0xff
+	}
+
+	written := map[string][]byte{}
+	prevSeen := map[string][]byte{}
+	n, err := ApplyDeferredBranchUpdates(deferred, 1, func(prefix, data, prevData []byte) error {
+		written[string(prefix)] = common.Copy(data)
+		prevSeen[string(prefix)] = common.Copy(prevData)
+		return nil
+	})
+	require.NoError(t, err)
+	require.Equal(t, 2, n)
+	require.Equal(t, []byte(wantMerged), written[string([]byte{0x01})], "flush must be a pure write of the pre-merged bytes")
+	require.Equal(t, []byte(prev), prevSeen[string([]byte{0x01})])
+	require.Equal(t, []byte(raw), written[string([]byte{0x02})])
+	require.NotContains(t, written, string([]byte{0x03}))
+}
+
 // Consumers (MockState, the pending-update flush) retain deferred slices past
 // ClearDeferred and past the encoder's continued reuse; the arena must never
 // rewind a chunk, so those escaped bytes stay intact.

@@ -239,10 +239,14 @@ type DeferredBranchUpdate struct {
 	// Branch encoding produced at collect time, before merging with prev; kept
 	// separate so a later apply can re-merge against a different predecessor.
 	raw BranchData
-	// Previous data from ctx.Branch (for merging)
+	// Previous data from ctx.Branch (for merging); kept after the merge because
+	// the flush writes it through as the changeset's undo record.
 	prev []byte
 	// Result after merging (filled during apply)
 	encoded BranchData
+	// merged marks encoded as final so the apply write pass skips the merge;
+	// a nil encoded with merged set means unchanged, skip the write too.
+	merged bool
 }
 
 // Global pool for deferred branch updates.
@@ -277,6 +281,7 @@ func getDeferredUpdate(arena *byteArena, prefix, raw, prev []byte) *DeferredBran
 	upd.raw = arena.copyBytes(raw)
 	upd.prev = arena.copyBytes(prev)
 	upd.encoded = nil
+	upd.merged = false
 
 	return upd
 }
@@ -289,6 +294,7 @@ func putDeferredUpdate(upd *DeferredBranchUpdate) {
 		upd.raw = nil
 		upd.prev = nil
 		upd.encoded = nil
+		upd.merged = false
 		deferredUpdatePool.Put(upd)
 	}
 }
@@ -380,12 +386,14 @@ func (be *BranchEncoder) ClearDeferred() {
 	ResetDeferredUpdateMetrics()
 }
 
-// encodeDeferredUpdate encodes a branch update using the provided encoder and merger.
+// mergeDeferredUpdate fills upd.encoded from raw and prev, unconditionally: callers
+// that substitute a fresh prev use it to re-merge an already-merged update.
 // Cell hashes are already computed during fold() before cells were copied.
 func mergeDeferredUpdate(upd *DeferredBranchUpdate, merger *BranchMerger) error {
 	if len(upd.prev) > 0 {
 		if bytes.Equal(upd.prev, upd.raw) {
 			upd.encoded = nil // skip unchanged
+			upd.merged = true
 			return nil
 		}
 		merged, err := merger.Merge(upd.prev, upd.raw)
@@ -393,9 +401,11 @@ func mergeDeferredUpdate(upd *DeferredBranchUpdate, merger *BranchMerger) error 
 			return err
 		}
 		upd.encoded = merger.arena.copyBytes(merged)
+		upd.merged = true
 		return nil
 	}
 	upd.encoded = upd.raw
+	upd.merged = true
 	return nil
 }
 
@@ -417,44 +427,38 @@ func (be *BranchEncoder) ApplyDeferredUpdates(
 // Pool for worker mergers to avoid per-call allocations.
 var workerMergerPool = sync.Pool{New: func() any { return NewHexBranchMerger(512) }}
 
-// ApplyDeferredBranchUpdates encodes deferred branch updates concurrently and writes them.
-// Returns the number of updates successfully written.
-func ApplyDeferredBranchUpdates(
-	deferred []*DeferredBranchUpdate,
-	numWorkers int,
-	putBranch func(prefix []byte, data []byte, prevData []byte) error,
-) (int, error) {
-	if len(deferred) == 0 {
-		return 0, nil
+// MergeDeferredBranchUpdates runs the merge half of the deferred apply, filling each
+// update's encoded result from raw and prev. Already-merged entries are skipped, so
+// the parallel engine can merge on its fold workers and the later flush degrades to
+// a pure write pass.
+func MergeDeferredBranchUpdates(deferred []*DeferredBranchUpdate, numWorkers int) error {
+	unmerged := 0
+	for _, upd := range deferred {
+		if !upd.merged {
+			unmerged++
+		}
 	}
-	if numWorkers <= 1 {
-		numWorkers = 1
+	if unmerged == 0 {
+		return nil
 	}
 
 	// Sequential fast path: avoids goroutine overhead for small batches.
-	if numWorkers == 1 || len(deferred) <= numWorkers {
+	if numWorkers <= 1 || unmerged <= numWorkers {
 		merger := workerMergerPool.Get().(*BranchMerger)
 		defer workerMergerPool.Put(merger)
-
-		var written int
 		for _, upd := range deferred {
-			if err := mergeDeferredUpdate(upd, merger); err != nil {
-				return written, err
-			}
-			if upd.encoded == nil {
+			if upd.merged {
 				continue
 			}
-			if err := putBranch(upd.prefix, upd.encoded, upd.prev); err != nil {
-				return written, err
+			if err := mergeDeferredUpdate(upd, merger); err != nil {
+				return err
 			}
-			written++
 		}
-		mxTrieBranchesUpdated.AddInt(written)
-		return written, nil
+		return nil
 	}
 
 	// Workers merge disjoint index ranges in place; per-item channel handoff costs more
-	// than the merging itself, so the write pass below stays sequential over the slice.
+	// than the merging itself.
 	chunk := (len(deferred) + numWorkers - 1) / numWorkers
 	errs := make([]error, numWorkers)
 	var wg sync.WaitGroup
@@ -470,6 +474,9 @@ func ApplyDeferredBranchUpdates(
 			merger := workerMergerPool.Get().(*BranchMerger)
 			defer workerMergerPool.Put(merger)
 			for i := lo; i < hi; i++ {
+				if deferred[i].merged {
+					continue
+				}
 				if err := mergeDeferredUpdate(deferred[i], merger); err != nil {
 					errs[w] = err
 					return
@@ -480,8 +487,24 @@ func ApplyDeferredBranchUpdates(
 	wg.Wait()
 	for _, err := range errs {
 		if err != nil {
-			return 0, err
+			return err
 		}
+	}
+	return nil
+}
+
+// ApplyDeferredBranchUpdates encodes deferred branch updates concurrently and writes them.
+// Returns the number of updates successfully written.
+func ApplyDeferredBranchUpdates(
+	deferred []*DeferredBranchUpdate,
+	numWorkers int,
+	putBranch func(prefix []byte, data []byte, prevData []byte) error,
+) (int, error) {
+	if len(deferred) == 0 {
+		return 0, nil
+	}
+	if err := MergeDeferredBranchUpdates(deferred, numWorkers); err != nil {
+		return 0, err
 	}
 
 	var written int

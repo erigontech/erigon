@@ -226,6 +226,12 @@ func (sc *StreamingCommitter) Process(ctx context.Context) ([]byte, error) {
 	}
 
 	if sc.leaveDeferredForCaller {
+		// Catch-all for updates the per-fork merge did not reach (scheduler-reused
+		// splits, root-fold tail); the caller's flush must be a pure write.
+		if err := MergeDeferredBranchUpdates(deferred, sc.numWorkers); err != nil {
+			putDeferredUpdates(deferred)
+			return nil, err
+		}
 		sc.deferredForCaller = deferred
 	} else if err := sc.applyDeferred(deferred); err != nil {
 		return nil, err
