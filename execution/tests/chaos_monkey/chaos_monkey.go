@@ -60,8 +60,10 @@ func (a *armedError) throw() error {
 }
 
 var (
-	preExecErr armedError
-	workerErr  armedError
+	preExecErr     armedError
+	workerErr      armedError
+	execLoopFault  armedError
+	applyLoopFault armedError
 )
 
 // ArmPreExecutionError makes ThrowPreExecutionError return err (while chaos is
@@ -88,4 +90,32 @@ func ArmWorkerError(err error) (disarm func()) {
 // ArmWorkerError.
 func ThrowWorkerError() error {
 	return workerErr.throw()
+}
+
+// ArmExecLoopPanic makes ExecLoopPanic panic with err until the returned
+// disarm func runs. Test-only; production never arms it.
+func ArmExecLoopPanic(err error) (disarm func()) {
+	return execLoopFault.arm(err)
+}
+
+// ExecLoopPanic reproduces a bug-class panic in the exec loop. No-op unless a
+// test armed it via ArmExecLoopPanic.
+func ExecLoopPanic() {
+	if err := execLoopFault.throw(); err != nil {
+		panic(err)
+	}
+}
+
+// ArmApplyLoopPanic makes ApplyLoopPanic panic with err until the returned
+// disarm func runs. Test-only; production never arms it.
+func ArmApplyLoopPanic(err error) (disarm func()) {
+	return applyLoopFault.arm(err)
+}
+
+// ApplyLoopPanic reproduces a bug-class panic in the apply loop. No-op unless
+// a test armed it via ArmApplyLoopPanic.
+func ApplyLoopPanic() {
+	if err := applyLoopFault.throw(); err != nil {
+		panic(err)
+	}
 }

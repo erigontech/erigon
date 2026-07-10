@@ -370,12 +370,19 @@ func (pe *parallelExecutor) execImpl(ctx context.Context, execStage *StageState,
 		defer func() {
 			if rec := recover(); rec != nil {
 				pe.logger.Warn("["+execStage.LogPrefix()+"] rw panic", "rec", rec, "stack", dbg.Stack())
+				err = fmt.Errorf("apply loop panic: %s", rec)
 			} else if err != nil && !(errors.Is(err, context.Canceled) || errors.Is(err, &ErrLoopExhausted{})) {
 				pe.logger.Warn("["+execStage.LogPrefix()+"] rw exit", "err", err, "stack", dbg.Stack())
 			} else {
 				pe.logger.Debug("[" + execStage.LogPrefix() + "] rw exit")
 			}
 		}()
+
+		// Test-only chaos injection (gated by the ChaosMonkey flag): reproduce
+		// a panic in the apply loop.
+		if pe.cfg.syncCfg.ChaosMonkey && pe.enableChaosMonkey {
+			chaos_monkey.ApplyLoopPanic()
+		}
 
 		// Open a thread-local read-only tx for domain operations. The apply loop
 		// must not use the rwTx for domain reads — rwTx is thread-bound to the
@@ -983,12 +990,19 @@ func (pe *parallelExecutor) execLoop(ctx context.Context) (err error) {
 	defer func() {
 		if rec := recover(); rec != nil {
 			pe.logger.Warn("["+pe.logPrefix+"] exec loop panic", "rec", rec, "stack", dbg.Stack())
+			err = fmt.Errorf("exec loop panic: %s", rec)
 		} else if err != nil && !errors.Is(err, context.Canceled) {
 			pe.logger.Warn("["+pe.logPrefix+"] exec loop error", "err", err)
 		} else {
 			pe.logger.Debug("[" + pe.logPrefix + "] exec loop exit")
 		}
 	}()
+
+	// Test-only chaos injection (gated by the ChaosMonkey flag): reproduce
+	// a panic in the exec loop.
+	if pe.cfg.syncCfg.ChaosMonkey && pe.enableChaosMonkey {
+		chaos_monkey.ExecLoopPanic()
+	}
 
 	pe.RLock()
 	applyTx := pe.applyTx

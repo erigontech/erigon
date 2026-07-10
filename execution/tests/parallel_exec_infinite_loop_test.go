@@ -31,6 +31,7 @@ import (
 	"github.com/erigontech/erigon/execution/stagedsync"
 	"github.com/erigontech/erigon/execution/stagedsync/stages"
 	"github.com/erigontech/erigon/execution/tests/chaos_monkey"
+	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/vm"
 )
 
@@ -75,6 +76,50 @@ func TestParallelExec_PreDispatchFailure_SurfacesInsteadOfInfiniteLoop(t *testin
 	disarm := chaos_monkey.ArmPreExecutionError(chaosErr)
 	defer disarm()
 
+	err = runParallelExecV3(t, m, maxBlockNum)
+
+	// The fix must surface the injected error. Classified as ErrLoopExhausted
+	// instead, sync.go:runStage returns moreWork=true and PipelineExecutor.RunLoop
+	// re-runs Execution forever with zero progress.
+	require.ErrorIs(t, err, chaosErr,
+		"the pre-dispatch failure must surface as a hard error, wrapping the original")
+	var exhausted *stagedsync.ErrLoopExhausted
+	require.False(t, errors.As(err, &exhausted),
+		"pre-dispatch failure classified as ErrLoopExhausted → runStage loops forever with zero progress")
+}
+
+// tipWithUnexecutedBlock2 commits block 1 through the insert pipeline, then
+// stores block 2 raw (header, body, canonical hash, txNums) WITHOUT executing
+// it: ExecV3 gets a real block to dispatch past the committed tip, and the
+// dispatch itself cannot fail and mask the fault under test.
+func tipWithUnexecutedBlock2(t *testing.T) (*execmoduletester.ExecModuleTester, *types.Block) {
+	t.Helper()
+	ctx := context.Background()
+
+	m := execmoduletester.New(t)
+	chain := makeBlockChain(m.Genesis, 2, m, canonicalSeed)
+	require.NoError(t, m.InsertChain(chain.Slice(0, 1)))
+
+	b2 := chain.Blocks[1]
+	setupTx, err := m.DB.BeginTemporalRw(ctx)
+	require.NoError(t, err)
+	defer setupTx.Rollback() // safety net; no-op after the Commit below
+	require.NoError(t, rawdb.WriteHeader(setupTx, b2.Header()))
+	require.NoError(t, rawdb.WriteBody(setupTx, b2.Hash(), b2.NumberU64(), b2.Body()))
+	require.NoError(t, rawdb.WriteCanonicalHash(setupTx, b2.Hash(), b2.NumberU64()))
+	_, lastTxNum, err := m.BlockReader.TxnumReader().Last(setupTx)
+	require.NoError(t, err)
+	require.NoError(t, rawdbv3.TxNums.Append(setupTx, b2.NumberU64(), lastTxNum+2))
+	require.NoError(t, setupTx.Commit())
+	return m, b2
+}
+
+// runParallelExecV3 drives the real parallel executor from the committed tip
+// (block 1) to maxBlockNum, with the flag half of the chaos gate enabled.
+func runParallelExecV3(t *testing.T, m *execmoduletester.ExecModuleTester, maxBlockNum uint64) error {
+	t.Helper()
+	ctx := context.Background()
+
 	syncCfg := m.Cfg().Sync
 	syncCfg.ChaosMonkey = true
 	execCfg := stagedsync.StageExecuteBlocksCfg(
@@ -96,16 +141,7 @@ func TestParallelExec_PreDispatchFailure_SurfacesInsteadOfInfiniteLoop(t *testin
 		BlockNumber:      1,
 		CurrentSyncCycle: stagedsync.CurrentSyncCycleInfo{IsInitialCycle: true}, // enables the chaos gate
 	}
-	err = stagedsync.ExecV3(ctx, s, nil /*Unwinder*/, execCfg, doms, rwTx, true /*parallel*/, maxBlockNum, m.Log)
-
-	// The fix must surface the injected error. Classified as ErrLoopExhausted
-	// instead, sync.go:runStage returns moreWork=true and PipelineExecutor.RunLoop
-	// re-runs Execution forever with zero progress.
-	require.ErrorIs(t, err, chaosErr,
-		"the pre-dispatch failure must surface as a hard error, wrapping the original")
-	var exhausted *stagedsync.ErrLoopExhausted
-	require.False(t, errors.As(err, &exhausted),
-		"pre-dispatch failure classified as ErrLoopExhausted → runStage loops forever with zero progress")
+	return stagedsync.ExecV3(ctx, s, nil /*Unwinder*/, execCfg, doms, rwTx, true /*parallel*/, maxBlockNum, m.Log)
 }
 
 // TestParallelExec_WorkerPoolDeath_SurfacesInsteadOfHanging pins the worker-pool
@@ -117,56 +153,58 @@ func TestParallelExec_PreDispatchFailure_SurfacesInsteadOfInfiniteLoop(t *testin
 // and ExecV3 hangs — on a regression this test fails via the suite timeout with
 // a goroutine dump showing the starved exec loop.
 func TestParallelExec_WorkerPoolDeath_SurfacesInsteadOfHanging(t *testing.T) {
-	ctx := context.Background()
-
-	// Execute+commit block 1, then store block 2 raw (header, body, canonical
-	// hash, txNums) WITHOUT executing it: ExecV3 has a real block to dispatch,
-	// and the armed fault kills each worker at Run entry, before it consumes a
-	// task — the executeBlocks dispatch itself must not fail, or its error would
-	// mask the one under test.
-	m := execmoduletester.New(t)
-	chain := makeBlockChain(m.Genesis, 2, m, canonicalSeed)
-	require.NoError(t, m.InsertChain(chain.Slice(0, 1)))
-
-	b2 := chain.Blocks[1]
-	setupTx, err := m.DB.BeginTemporalRw(ctx)
-	require.NoError(t, err)
-	defer setupTx.Rollback() // safety net; no-op after the Commit below
-	require.NoError(t, rawdb.WriteHeader(setupTx, b2.Header()))
-	require.NoError(t, rawdb.WriteBody(setupTx, b2.Hash(), b2.NumberU64(), b2.Body()))
-	require.NoError(t, rawdb.WriteCanonicalHash(setupTx, b2.Hash(), b2.NumberU64()))
-	_, lastTxNum, err := m.BlockReader.TxnumReader().Last(setupTx)
-	require.NoError(t, err)
-	require.NoError(t, rawdbv3.TxNums.Append(setupTx, b2.NumberU64(), lastTxNum+2))
-	require.NoError(t, setupTx.Commit())
+	// The armed fault kills each worker at Run entry, before it consumes a task.
+	m, b2 := tipWithUnexecutedBlock2(t)
 
 	chaosErr := errors.New("chaos monkey: simulated worker panic")
 	disarm := chaos_monkey.ArmWorkerError(chaosErr)
 	defer disarm()
 
-	execCfg := stagedsync.StageExecuteBlocksCfg(
-		m.DB, m.Cfg().Prune, m.Cfg().BatchSize, m.ChainConfig, m.Engine, &vm.Config{},
-		m.Notifications, m.Cfg().StateStream, false /*badBlockHalt*/, m.Dirs, m.BlockReader,
-		m.Cfg().Genesis, m.Cfg().Sync, false /*experimentalBAL*/, exec.NewBlockReadAheader(),
-	)
-
-	rwTx, err := m.DB.BeginTemporalRw(ctx)
-	require.NoError(t, err)
-	defer rwTx.Rollback()
-	doms, err := execctx.NewSharedDomains(ctx, rwTx, m.Log)
-	require.NoError(t, err)
-	defer doms.Close()
-
-	s := &stagedsync.StageState{
-		State:       m.Sync,
-		ID:          stages.Execution,
-		BlockNumber: 1,
-	}
-	err = stagedsync.ExecV3(ctx, s, nil /*Unwinder*/, execCfg, doms, rwTx, true /*parallel*/, b2.NumberU64() /*maxBlockNum*/, m.Log)
+	err := runParallelExecV3(t, m, b2.NumberU64())
 
 	require.ErrorIs(t, err, chaosErr,
 		"a dead worker pool must surface its error through the executor group")
 	var exhausted *stagedsync.ErrLoopExhausted
 	require.False(t, errors.As(err, &exhausted),
 		"worker-pool death classified as ErrLoopExhausted → runStage retries forever with zero progress")
+}
+
+// TestParallelExec_ApplyLoopPanic_SurfacesInsteadOfCommitting pins the apply
+// side of the panic-surfacing invariant: a recovered apply-loop panic must fail
+// the batch. The apply loop owns post-execution validation while the exec loop
+// and calculator complete state and commitment on their own, so a swallowed
+// apply panic looks like a clean batch — checkBlocksDrained sees a fully
+// drained map — and unvalidated blocks advance the stage as success.
+func TestParallelExec_ApplyLoopPanic_SurfacesInsteadOfCommitting(t *testing.T) {
+	m, b2 := tipWithUnexecutedBlock2(t)
+
+	chaosErr := errors.New("chaos monkey: simulated apply-loop panic")
+	disarm := chaos_monkey.ArmApplyLoopPanic(chaosErr)
+	defer disarm()
+
+	err := runParallelExecV3(t, m, b2.NumberU64())
+
+	require.ErrorContains(t, err, chaosErr.Error(),
+		"a recovered apply-loop panic must fail the batch, not commit unvalidated blocks")
+}
+
+// TestParallelExec_ExecLoopPanic_SurfacesInsteadOfRetrying pins the exec side:
+// a recovered exec-loop panic must fail the batch. A panic before any block is
+// scheduled leaves pe.blockExecutors empty, so checkBlocksDrained cannot catch
+// it; the apply loop's close fallback then manufactures a no-cause
+// ErrLoopExhausted and runStage retries forever with zero progress.
+func TestParallelExec_ExecLoopPanic_SurfacesInsteadOfRetrying(t *testing.T) {
+	m, b2 := tipWithUnexecutedBlock2(t)
+
+	chaosErr := errors.New("chaos monkey: simulated exec-loop panic")
+	disarm := chaos_monkey.ArmExecLoopPanic(chaosErr)
+	defer disarm()
+
+	err := runParallelExecV3(t, m, b2.NumberU64())
+
+	require.ErrorContains(t, err, chaosErr.Error(),
+		"a recovered exec-loop panic must surface as a hard error")
+	var exhausted *stagedsync.ErrLoopExhausted
+	require.False(t, errors.As(err, &exhausted),
+		"exec-loop panic classified as ErrLoopExhausted → runStage retries forever with zero progress")
 }
