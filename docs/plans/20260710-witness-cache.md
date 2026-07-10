@@ -167,7 +167,7 @@ shutdown.
   equal the on-demand `ExecutionWitness` result for the same block — no live archive node needed. Add a
   reorg case asserting a post-reorg request misses and falls through.
 
-- [ ] **Status:** pending
+- [x] **Status:** complete
 
 ### Task 4: Flags, config, wiring, gating
 
