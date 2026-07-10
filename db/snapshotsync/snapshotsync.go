@@ -394,7 +394,6 @@ func SyncSnapshots(
 	} else {
 		toBlock := syncCfg.SnapshotDownloadToBlock // exclusive [0, toBlock)
 		toStep := kv.Step(math.MaxUint64)          // exclusive [0, toStep)
-		log.Warn("[dbg] oops", "headerchain", headerchain, "toBlock", toBlock, "blockReader.Snapshots().SegmentsMax()", blockReader.Snapshots().SegmentsMax())
 		if !headerchain && toBlock > 0 {
 			toTxNum, err := blockReader.TxnumReader().Min(ctx, tx, syncCfg.SnapshotDownloadToBlock)
 			if err != nil {
@@ -415,11 +414,6 @@ func SyncSnapshots(
 			if err != nil {
 				return fmt.Errorf("error opening segments after to block filter deletion: %w", err)
 			}
-			log.Warn("[dbg] oops2", "headerchain", headerchain, "toBlock", toBlock, "blockReader.Snapshots().SegmentsMax()", blockReader.Snapshots().SegmentsMax())
-
-			tx.Rollback() //remove me
-			log.Warn("[dbg] oops3", "headerchain", headerchain, "toBlock", toBlock, "blockReader.Snapshots().SegmentsMax()", blockReader.Snapshots().SegmentsMax())
-			panic(1)
 		}
 
 		txNumsReader := blockReader.TxnumReader()
