@@ -20,7 +20,7 @@
 //
 // Notifications (state-change events) are NOT owned by storage — they are an
 // execution-layer concern and will move to the execution component. Storage
-// receives Notifications as a dep for BlockFileBuilder and snapshot event forwarding.
+// receives Notifications as a dep for BlockRetire and snapshot event forwarding.
 //
 // Sequencing: Initialize must be called early in backend.New(), after
 // OpenDatabase and SetUpBlockReader, and before any component that needs
@@ -92,7 +92,7 @@ type Deps struct {
 	// Config for snapshot and downloader settings.
 	Config *ethconfig.Config
 
-	// DBEventNotifier — NOT owned by storage. Passed in so BlockFileBuilder and
+	// DBEventNotifier — NOT owned by storage. Passed in so BlockRetire and
 	// file-change callbacks can forward snapshot events. Currently backed by
 	// shards.Events; will migrate to the framework event bus.
 	DBEventNotifier services.DBEventNotifier
@@ -139,7 +139,7 @@ func (p *Provider) Initialize(deps Deps) error {
 		p.CurrentBlockNumber = currentBlock.NumberU64()
 	}
 
-	// BlockFileBuilder — heimdallStore and bridgeStore may be nil for non-Bor chains.
+	// BlockRetire — heimdallStore and bridgeStore may be nil for non-Bor chains.
 	p.BlockRetire = freezeblocks.NewBlockRetire(ctx, 1, config.Dirs, p.BlockReader, p.BlockWriter, p.ChainDB, p.HeimdallStore, p.BridgeStore, p.ChainConfig, config, deps.DBEventNotifier, p.SegmentsBuildLimiter, logger)
 
 	// Serialize retirement's chain-DB reads against Aggregator commit+prune.
