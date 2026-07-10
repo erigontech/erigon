@@ -289,7 +289,7 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 			return err
 		}
 		if !notChanged {
-			logger.Warn("--persist.receipt changed since the last run, enabling historical receipts cache. full resync will be required to use the new configuration. if you do not need this feature, ignore this warning.", "inDB", config.PersistReceiptsCacheV2, "inConfig", inConfig)
+			logger.Warn("--persist.receipts differs from the value stored in the datadir; using the stored value (changing it requires a fresh datadir)", "inDB", config.PersistReceiptsCacheV2, "inConfig", inConfig)
 		}
 		if config.PersistReceiptsCacheV2 {
 			statecfg.EnableHistoricalRCache()
@@ -1568,6 +1568,11 @@ func (s *Ethereum) Stop() error {
 		case <-time.After(30 * time.Second):
 			s.logger.Warn("KZG warmup goroutine still running at shutdown")
 		}
+	}
+
+	// Drain the in-flight block retire before chainDB.Close.
+	if s.components != nil && s.components.Storage != nil {
+		s.components.Storage.Close()
 	}
 
 	s.chainDB.Close()

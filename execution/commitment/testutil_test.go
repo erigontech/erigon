@@ -31,6 +31,10 @@ import (
 	"github.com/erigontech/erigon/common/length"
 )
 
+// forceDirectSpill makes ModeDirect collection spill to the etl collector from the
+// first touch, pinning the arena/etl HashSort path regardless of batch size.
+func forceDirectSpill(ut *Updates) { ut.directMemLimit = 0 }
+
 // forEachMode runs fn as a subtest once per Updates mode, named after the mode.
 func forEachMode(t *testing.T, fn func(t *testing.T, mode Mode)) {
 	t.Helper()
