@@ -340,11 +340,22 @@ guard re-confirmed at HEAD: flag-off 24.7 ms == flag-on 25.0 ms.
 **Files:**
 - Modify: `docs/design/parallel-patricia-hashed.md`, package doc
 
-- [ ] document the whole-fresh fork path (additive, in the parallel/streaming engine, no CLI flag; frontier
+- [x] document the whole-fresh fork path (additive, in the parallel/streaming engine, no CLI flag; frontier
       untouched for on-disk state); note the materialized-mount TruthTree as the continuation.
-- [ ] confirm no CLI flag shipped and the test-only toggle is dev-only; whole-node validation before relying
+      (`docs/design/parallel-patricia-hashed.md`: new §4.1.2 (detection, empty-wall fork-join, per-subtree
+      storage grain, fail-safe routing, no-flag routing + dev toggle), §5 I7 empty-wall reconciliation, §8
+      fail-safe row, §11 rewritten fresh-state paragraph with measured numbers + the materialized-mount
+      TruthTree continuation, §12 source-map rows. Package doc (`doc.go`) gains the whole-fresh paragraph.)
+- [x] confirm no CLI flag shipped and the test-only toggle is dev-only; whole-node validation before relying
       on the fork path in production sync.
-- [ ] move this plan to `docs/plans/completed/`.
+      (Grep-verified: `forkWholeFresh`/`wholeFresh*` symbols exist only in `execution/commitment`
+      (`fold_pool.go` + test files); no flag registration outside the pre-existing base-branch
+      `experimental.truthtree-fold`; `wholeFreshBuild` consults no config. Default decision: the dev toggle
+      stays on inside the experimental engine — the fork strictly dominates frontier on fresh builds
+      (2.6× faster, 25% less mem) and is byte/perf-dormant on seeded state — while the user-facing
+      parallel/streaming flags remain experimental default-off, so no production default changed.
+      Whole-node validation is documented as required in §4.1.2 and remains a Post-Completion manual step.)
+- [x] move this plan to `docs/plans/completed/`. (This commit.)
 
 ## Post-Completion
 

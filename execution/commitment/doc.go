@@ -25,4 +25,11 @@
 // folds directly over its touched prefixTrie with reused per-goroutine scratch
 // (truthtree_fold.go), avoiding that double materialization. Both paths emit
 // byte-identical roots and branch records.
+//
+// A commit against provably-empty on-disk state (genesis, initial sync) routes to a
+// whole-fresh account-plane fork-join (dispatchWholeFresh, fold_pool.go): each
+// top-nibble subtree folds per prefix against an empty wall through the direct
+// recursion, crossing every depth-64 seam into the account's fresh storage. The route
+// is internal to the parallel/streaming regimes — no flag — and any commit with
+// on-disk state keeps the ordinary frontier fold unchanged.
 package commitment

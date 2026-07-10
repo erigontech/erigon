@@ -136,7 +136,8 @@ call `foldPool.dispatchFrontier`; the streaming path additionally passes a
    The root itself is always the serial finale (never demoted): it folds against the
    pre-seeded root wall. `K` is the box-adaptive boundary (§7). A merge (and an
    account leaf awaiting its storage root) starts with a pending counter equal to its
-   child count.
+   child count. If the derivation probes prove the on-disk state empty, the commit
+   routes to the whole-fresh fork-join (§4.1.2) instead of steps 3–4.
 3. **Seed merge bases.** Before dispatch, `foldPool.run` seeds each merge task's own
    pooled `*HexPatriciaHashed` from `Branch(prefix)` (`seedBaseAtPrefix`) under its own
    factory `PatriciaContext` with deferred branch writes enabled — the mount wall its
@@ -194,6 +195,39 @@ Because the account leaf depends on its storage-root subtask, storage subtrees a
 leaf-most in the DAG and drain first — storage-first ordering is a property of the
 dependency, not a scheduled phase.
 
+### 4.1.2 Whole-fresh builds — empty on-disk state (`dispatchWholeFresh`, `forkFolder`)
+
+A commit against **empty on-disk state** (genesis, initial sync) has nothing to seed:
+every subtree is unseedable, so the ordinary derivation would demote the whole account
+plane into the serial root finale. `dispatchFrontier` detects this case
+(`wholeFreshBuild`) and routes it to a dedicated fork-join instead. Detection MUST be
+conservative: the root probe found no branch, **no** seedable prefix was probed anywhere
+during derivation (a propagate-folded root has deeper seedable branches and is excluded),
+and the root is a real multi-way branch (`ext == 0`, ≥ 2 children). Any doubt routes to
+the ordinary frontier fold unchanged.
+
+On the fork path each top-nibble subtree folds per-prefix against an **empty wall**
+through the recursive fork-join (`forkFolder`, `truthtree_fold.go`): the direct
+`foldNode` recursion over the touched prefix trie, forking a goroutine per split point
+down to the `K` grain and crossing every depth-64 seam into the account's fresh storage.
+At a seam the storage plane re-derives its grain from the storage subtree's **own**
+`subtreeCount` (`storageFold`), so a whale's storage splits finely at any worker count
+rather than inheriting the coarser account-plane grain. The folded cells stitch into the
+base row and fold to the root exactly as §4.1 step 5; roots and stored branch records are
+byte-identical to the sequential fold.
+
+Shapes the empty-wall fork does not reproduce route the whole commit to the frontier
+fold, fail-safe: a top nibble that is not a pure branch, an orphan storage slot in the
+account plane, or a resolved delete. Commits with any on-disk state never reach this
+path, so `seedMerge`, demotion, and the mount+replay bodies are untouched by it.
+
+There is **no user flag** for this route: it is internally selected under the existing
+`--experimental.parallel-commitment` / `--experimental.streaming-commitment` modes. A
+dev-only package toggle (`forkWholeFresh`, default on) exists solely so benchmarks can
+measure the frontier-serial baseline; it MUST NOT be wired to configuration. Whole-node
+validation (flag-on vs flag-off root comparison over a fresh-heavy block range) is
+required before relying on the fork path in production sync.
+
 ### 4.2 Phase 3 — Commit and root publication
 
 Tasks accumulate `DeferredBranchUpdate`s rather than writing branches. After the
@@ -241,7 +275,9 @@ primary enforcement of I1.
   a read-only `Branch(P)` probe confirms an on-disk branch exactly at P; otherwise the
   subtree demotes into its nearest seedable ancestor's serial replay. A false "empty"
   probe would drop on-disk siblings and diverge the root, so an unproven probe MUST
-  demote or hard-error — never fold a synthesized empty wall (§8). For the depth-64
+  demote or hard-error — never fold a synthesized empty wall (§8). The one sound
+  empty wall is the whole-fresh build (§4.1.2), where derivation proved no on-disk
+  branch exists anywhere, so there are no siblings to drop. For the depth-64
   seam, the storage root from `foldStorageSeam` injected via `setAccountStorageRoot`
   MUST equal the root the serial inline stream would produce.
 
@@ -298,6 +334,7 @@ substitution of the as-of reader is validated at runtime by the block-root check
 | base root carries an extension (`root.ext != 0`) | return an error — not yet supported by the dispatch path |
 | terminating node with nil `plainKey` and no children | return an error (only reachable via a hashed-only `TouchHashedKey`; that path is not wired for the parallel trie) |
 | merge seed absent at `Branch(prefix)` when the DAG expected it | hard error `errStorageBaseNotBranch` (a store change mid-Process) — never fold a sibling-dropping empty wall |
+| whole-fresh build with a shape the empty-wall fork does not reproduce (non-pure-branch top nibble, orphan storage, resolved delete) | route the commit to the ordinary frontier fold (§4.1.2) — fail-safe, not an error |
 | deferred apply failure (inline path) | discard the staged root; never surface an unpersisted root |
 | task error mid-fold | cancel the shared context; recycle every collected task's deferred entries to the pool, apply nothing (fail-closed) |
 
@@ -366,13 +403,20 @@ buys little, and the `c = 1` / `foldKMin` policy (§7) is a deliberate no-op at 
 natural fan-out — a smaller `K` would subdivide every top nibble into tasks each paying
 ctx+pin+seed, the measured detach regression.
 
-One case is serial by construction: a **fresh** whale (a contract created *and* writing
-> `K` slots in the same block) has no on-disk account branch, so its prefix is
-unseedable and its storage subtree demotes (§5 I7) to a single serial leaf. Freshness
-is only knowable at fold time, after derivation, so the pure-DAG storage-first ordering
-cannot parallelize it without a derive-time freshness oracle — deliberately not adopted
-(a false negative would drop on-disk siblings and diverge the root; correctness
-outranks the speedup). Re-touched whales, the common case, keep full seam parallelism.
+Fresh state parallelizes through two additive routes. A **fresh whale** (a contract
+created *and* writing > `K` slots in the same block) has no on-disk account branch, so
+its prefix is unseedable; derivation marks it a `freshWhaleCandidate` and the leaf task
+parallelizes its storage if the account proves fresh at fold time — an unproven probe
+still demotes (§5 I7). A **whole-fresh build** (empty on-disk state) fork-joins the
+entire account plane (§4.1.2): on a 1M-key fresh mixed corpus (18-core arm64) the fork
+folds in ~275 ms where the demoting frontier fold takes ~718 ms (2.6×, ~25 % lower peak
+memory), against a ~198 ms sequential-engine bulk-load baseline — a residual ~1.4× gap.
+Seeded/incremental commits never take either route and are byte- and perf-identical.
+The residual gap is the target of the **materialized-mount TruthTree** continuation:
+unfold the on-disk mounts into the tree during build — materializing untouched siblings,
+spanning leaves, and extensions as cells carrying their value or position-invariant
+hash — so the same fork-join folds uniformly and ctx-free over *mixed* state; the
+whole-fresh route is its degenerate case (nothing to mount).
 
 The benchmark `MockState` serializes reads on a shared lock and therefore
 under-reports the parallel speedup relative to production's independent per-worker
@@ -383,7 +427,8 @@ MDBX readers; figures are for inspection, not a CI gate.
 | file | contents |
 | --- | --- |
 | `execution/commitment/fold_dag.go` | the fold DAG: `foldTask`, `deriveFoldDAG` (leaf/merge classification, seed-or-demote, the depth-64 storage-root seam edge), `foldK`/`foldKMin` |
-| `execution/commitment/fold_pool.go` | the frontier pool: `foldPool`, `dispatchFrontier`, `deriveFoldFrontier`, `dispatchFoldTasks` (ready-counter scheduling), `foldLeafTask`/`foldMergeTask`/`foldStorageSeam`, `seedMerge`, fail-closed recycling |
+| `execution/commitment/fold_pool.go` | the frontier pool: `foldPool`, `dispatchFrontier`, `deriveFoldFrontier`, `dispatchFoldTasks` (ready-counter scheduling), `foldLeafTask`/`foldMergeTask`/`foldStorageSeam`, `seedMerge`, fail-closed recycling; `wholeFreshBuild`/`dispatchWholeFresh` (§4.1.2) |
+| `execution/commitment/truthtree_fold.go` | direct fresh fold: `foldCtx.foldNode` (buffer-reuse recursion over the touched prefix trie, seam-crossing), `forkFolder`/`storageFold` (per-split-point fork-join with per-subtree storage grain), `foldFreshAccountSubtreeCellForkJoin` |
 | `execution/commitment/parallel_patricia_hashed.go` | `ParallelPatriciaHashed`, `Process` (routes to `processStreaming` when a committer is set), `dfsSubtree`, `newFoldPool`, deferred apply and hand-off |
 | `execution/commitment/parallel_mount.go` | `processMounted` — seed the root wall, then `dispatchFrontier` (reuse=nil); `unfoldRootWall`; `seedRootBase`; `mountTo`; `setAccountStorageRoot` |
 | `execution/commitment/streaming_deep_fold.go` | the fold seam primitives the pool folds with: `seedBaseAtPrefix` (the seedable prober), `seedOrDemote`, `mergeChildrenAtPrefix`/`stripCellToMountWall`, `aggregateMountedStorageRoot`/`storageRootFromSingleChild`, `stitchChildrenIntoRow0`, `collectSubtreeKeys`, `newDeferredStorageWorker` |
