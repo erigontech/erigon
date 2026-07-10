@@ -36,29 +36,56 @@ func ThrowRandomConsensusError(IsInitialCycle bool, txIndex int, badBlockHalt bo
 	return nil
 }
 
+// armedError is a test-armed fault: throw returns nil unless a test armed it.
+type armedError struct {
+	mu  sync.Mutex
+	err error
+}
+
+func (a *armedError) arm(err error) (disarm func()) {
+	a.mu.Lock()
+	a.err = err
+	a.mu.Unlock()
+	return func() {
+		a.mu.Lock()
+		a.err = nil
+		a.mu.Unlock()
+	}
+}
+
+func (a *armedError) throw() error {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	return a.err
+}
+
 var (
-	preExecMu  sync.Mutex
-	preExecErr error
+	preExecErr armedError
+	workerErr  armedError
 )
 
 // ArmPreExecutionError makes ThrowPreExecutionError return err (while chaos is
 // enabled) until the returned disarm func runs. Test-only; production never arms it.
 func ArmPreExecutionError(err error) (disarm func()) {
-	preExecMu.Lock()
-	preExecErr = err
-	preExecMu.Unlock()
-	return func() {
-		preExecMu.Lock()
-		preExecErr = nil
-		preExecMu.Unlock()
-	}
+	return preExecErr.arm(err)
 }
 
 // ThrowPreExecutionError reproduces a failure that hits executeBlocks before it
 // dispatches any block (snapshot step misalignment, a missing block, a BAL decode
 // error). Returns nil unless a test armed it via ArmPreExecutionError.
 func ThrowPreExecutionError() error {
-	preExecMu.Lock()
-	defer preExecMu.Unlock()
-	return preExecErr
+	return preExecErr.throw()
+}
+
+// ArmWorkerError makes ThrowWorkerError return err until the returned disarm
+// func runs. Test-only; production never arms it.
+func ArmWorkerError(err error) (disarm func()) {
+	return workerErr.arm(err)
+}
+
+// ThrowWorkerError reproduces an OCC worker goroutine dying outside a tx task
+// (a panic in the worker loop). Returns nil unless a test armed it via
+// ArmWorkerError.
+func ThrowWorkerError() error {
+	return workerErr.throw()
 }

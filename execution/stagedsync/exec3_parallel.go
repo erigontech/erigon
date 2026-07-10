@@ -89,7 +89,7 @@ type parallelExecutor struct {
 	txExecutor
 	execWorkers []*exec.Worker
 	stopWorkers func()
-	waitWorkers func()
+	waitWorkers func() error
 	// cancelExecLoop publishes the stopCause on the coordination context
 	// (execLoopCtx). It is a SIGNAL that the exec loop, calculator and apply loop
 	// each read to decide how to wind down. It cancels execLoopCtx and therefore
@@ -832,7 +832,7 @@ func (pe *parallelExecutor) execImpl(ctx context.Context, execStage *StageState,
 	}
 
 	// Wait for all goroutines to complete before reading shared state.
-	execErr = reconcileExecAndWaitErr(execErr, pe.wait(ctx))
+	execErr = reconcileExecAndWaitErr(execErr, pe.wait())
 	execErr = pe.checkBlocksDrained(ctx, executorContext, execErr)
 
 	// Commitment is computed per-block by the calculator. Stage progress
@@ -1651,6 +1651,13 @@ func (pe *parallelExecutor) run(ctx context.Context) (context.Context, context.C
 		return execLoopCtx, execLoopCtxCancel, err
 	}
 
+	// The worker pool joins the executor group: a real worker failure cancels
+	// execLoopCtx (unblocking the exec loop's result wait) and surfaces through
+	// pe.wait, instead of starving the batch with its error discarded.
+	pe.execLoopGroup.Go(func() error {
+		return joinWorkers(pe.waitWorkers)
+	})
+
 	pe.execLoopGroup.Go(func() error {
 		defer pe.rws.Close()
 		defer pe.in.Release()
@@ -1665,49 +1672,33 @@ func (pe *parallelExecutor) run(ctx context.Context) (context.Context, context.C
 		pe.in.Release()
 		pe.stopWorkers()
 
-		_ = pe.wait(ctx)
+		_ = pe.wait()
 	}, nil
 }
 
-// execWaitShutdownGrace bounds pe.wait once shutdown has begun: long enough
-// for canceled goroutines to unwind and report a real failure, short enough
-// that a stuck goroutine cannot hang process exit. Variable so tests can
-// shorten it.
-var execWaitShutdownGrace = 10 * time.Second
-
-// wait joins the executor goroutines and classifies the outcome. A canceled
-// group is routine teardown — execImpl cancels the executor on every exit,
-// success included — so it is never reported as an error, while a real error
-// is returned even when ctx is already shutting down. A canceled ctx only
-// bounds the wait: after execWaitShutdownGrace a stuck group is abandoned so
-// shutdown cannot hang.
-func (pe *parallelExecutor) wait(ctx context.Context) error {
-	doneCh := make(chan error, 1)
-
-	go func() {
-		if pe.execLoopGroup != nil {
-			err := pe.execLoopGroup.Wait()
-			pe.waitWorkers()
-			if err != nil && !errors.Is(err, context.Canceled) {
-				doneCh <- err
-				return
-			}
-		}
-		doneCh <- nil
-	}()
-
-	select {
-	case err := <-doneCh:
-		return err
-	case <-ctx.Done():
-		select {
-		case err := <-doneCh:
-			return err
-		case <-time.After(execWaitShutdownGrace):
-			pe.logger.Warn(fmt.Sprintf("[%s] executor goroutines still running %s after shutdown; abandoning wait", pe.logPrefix, execWaitShutdownGrace))
-			return nil
-		}
+// joinWorkers turns the worker pool's join into an executor-group member: a
+// real worker failure (a panic surfaced as an error) cancels the group and
+// surfaces through pe.wait, while routine cancellation is not an error.
+func joinWorkers(waitWorkers func() error) error {
+	if err := waitWorkers(); err != nil && !errors.Is(err, context.Canceled) {
+		return fmt.Errorf("worker pool: %w", err)
 	}
+	return nil
+}
+
+// wait joins the executor group — exec loop, block dispatch, worker pool — and
+// classifies the outcome: a canceled group is routine teardown (execImpl cancels
+// the executor on every exit), a real error surfaces even during shutdown.
+// Teardown is deterministic — every producer honours cancellation and the apply
+// loop drains to channel close — so the join needs no deadline.
+func (pe *parallelExecutor) wait() error {
+	if pe.execLoopGroup == nil {
+		return nil
+	}
+	if err := pe.execLoopGroup.Wait(); err != nil && !errors.Is(err, context.Canceled) {
+		return err
+	}
+	return nil
 }
 
 // reconcileExecAndWaitErr merges the apply-loop verdict with pe.wait's. A real
