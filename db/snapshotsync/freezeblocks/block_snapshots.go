@@ -191,10 +191,6 @@ func (br *BlockRetire) BorStore() (heimdall.Store, bridge.Store) {
 	return br.heimdallStore, br.bridgeStore
 }
 
-func (br *BlockRetire) Writer() *blocksnapshots.RoSnapshots {
-	return br.blockReader.Snapshots().(*blocksnapshots.RoSnapshots)
-}
-
 func (br *BlockRetire) snapshots() *blocksnapshots.RoSnapshots {
 	return br.blockReader.Snapshots().(*blocksnapshots.RoSnapshots)
 }

@@ -353,6 +353,15 @@ func WithAlwaysGenerateChangesets(v bool) Option {
 	}
 }
 
+// WithMaxReorgDepth pins syncCfg.MaxReorgDepth so the changeset window
+// (maxBlockNum-MaxReorgDepth) can be placed mid-batch — leaving earlier blocks
+// pre-window (BAL-fold candidates) and later blocks window (per-block changeset).
+func WithMaxReorgDepth(d uint64) Option {
+	return func(opts *options) {
+		opts.maxReorgDepth = &d
+	}
+}
+
 func WithFcuBackgroundPrune() Option {
 	return func(opts *options) {
 		opts.fcuBackgroundPrune = true
@@ -378,6 +387,7 @@ type options struct {
 	fcuBackgroundCommit      bool
 	fcuBackgroundPrune       bool
 	alwaysGenerateChangesets *bool
+	maxReorgDepth            *uint64
 	sentryProtocol           uint
 }
 
@@ -451,6 +461,9 @@ func New(tb testing.TB, opts ...Option) *ExecModuleTester {
 	cfg.Dirs = dirs
 	if opt.alwaysGenerateChangesets != nil {
 		cfg.AlwaysGenerateChangesets = *opt.alwaysGenerateChangesets
+	}
+	if opt.maxReorgDepth != nil {
+		cfg.Sync.MaxReorgDepth = *opt.maxReorgDepth
 	}
 	cfg.PersistReceiptsCacheV2 = true
 	cfg.ChaosMonkey = false
