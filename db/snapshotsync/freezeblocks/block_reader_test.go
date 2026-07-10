@@ -34,6 +34,7 @@ import (
 	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/db/recsplit"
 	"github.com/erigontech/erigon/db/seg"
+	"github.com/erigontech/erigon/db/snapshotsync/blocksnapshots"
 	"github.com/erigontech/erigon/db/snaptype"
 	"github.com/erigontech/erigon/db/snaptype2"
 	"github.com/erigontech/erigon/db/version"
@@ -116,7 +117,7 @@ func TestBlockRetireSkipsOnGap(t *testing.T) {
 
 	cfg := ethconfig.Defaults.Snapshot
 	cfg.ChainName = networkname.Mainnet
-	snapshots := NewRoSnapshots(cfg, tmpDir, logger)
+	snapshots := blocksnapshots.NewRoSnapshots(cfg, tmpDir, logger)
 	ver := version.V1_0
 	createTestSegmentFile(t, 1, 1000, snaptype2.Enums.Headers, tmpDir, ver, logger)
 	createTestSegmentFile(t, 1, 1000, snaptype2.Enums.Bodies, tmpDir, ver, logger)
@@ -157,7 +158,7 @@ func TestBlockRetireContiguous(t *testing.T) {
 
 	cfg := ethconfig.Defaults.Snapshot
 	cfg.ChainName = networkname.Mainnet
-	snapshots := NewRoSnapshots(cfg, tmpDir, logger)
+	snapshots := blocksnapshots.NewRoSnapshots(cfg, tmpDir, logger)
 	ver := version.V1_0
 	createTestSegmentFile(t, 1, 1000, snaptype2.Enums.Headers, tmpDir, ver, logger)
 	createTestSegmentFile(t, 1, 1000, snaptype2.Enums.Bodies, tmpDir, ver, logger)
@@ -208,7 +209,7 @@ func TestBlockRetireFallback(t *testing.T) {
 	createTestSegmentFile(t, 1000, 2000, snaptype2.Enums.Bodies, tmpDir, ver, logger)
 	createTestSegmentFile(t, 1000, 2000, snaptype2.Enums.Transactions, tmpDir, ver, logger)
 
-	snapshots := NewRoSnapshots(cfg, tmpDir, logger)
+	snapshots := blocksnapshots.NewRoSnapshots(cfg, tmpDir, logger)
 	defer snapshots.Close()
 	require.NoError(t, snapshots.OpenFolder())
 	require.Equal(t, uint64(1999), snapshots.SegmentsMax())
@@ -246,7 +247,7 @@ func TestBlockRetireFallback(t *testing.T) {
 	// remain visible until the covering segment becomes indexed.
 	createTestSegmentOnlyFile(t, 1, 2000, snaptype2.Enums.Transactions, tmpDir, ver, logger)
 
-	reopenedSnapshots := NewRoSnapshots(cfg, tmpDir, logger)
+	reopenedSnapshots := blocksnapshots.NewRoSnapshots(cfg, tmpDir, logger)
 	defer reopenedSnapshots.Close() // fallback safety guard in case of early test failure
 	require.NoError(t, reopenedSnapshots.OpenFolder())
 	require.Equal(t, uint64(1999), reopenedSnapshots.SegmentsMax())
@@ -269,7 +270,7 @@ func TestBlockRetireFallback(t *testing.T) {
 	unindexedOverlap := filepath.Join(tmpDir, snaptype.SegmentFileName(ver, 1, 2000, snaptype2.Enums.Transactions))
 	require.NoError(t, dir.RemoveFile(unindexedOverlap))
 
-	restoredSnapshots := NewRoSnapshots(cfg, tmpDir, logger)
+	restoredSnapshots := blocksnapshots.NewRoSnapshots(cfg, tmpDir, logger)
 	require.NoError(t, restoredSnapshots.OpenFolder())
 	defer restoredSnapshots.Close()
 	require.Equal(t, uint64(1999), restoredSnapshots.SegmentsMax())
@@ -305,7 +306,7 @@ func TestBlockRetireAllOverlapped(t *testing.T) {
 		createTestSegmentFile(t, 1000, 2000, enum, tmpDir, ver, logger)
 	}
 
-	snapshots := NewRoSnapshots(cfg, tmpDir, logger)
+	snapshots := blocksnapshots.NewRoSnapshots(cfg, tmpDir, logger)
 	defer snapshots.Close()
 	require.NoError(t, snapshots.OpenFolder())
 	require.Equal(t, uint64(1999), snapshots.SegmentsMax())
@@ -330,7 +331,7 @@ func TestBlockRetireAllOverlapped(t *testing.T) {
 		createTestSegmentOnlyFile(t, 1, 2000, enum, tmpDir, ver, logger)
 	}
 
-	reopened := NewRoSnapshots(cfg, tmpDir, logger)
+	reopened := blocksnapshots.NewRoSnapshots(cfg, tmpDir, logger)
 	require.NoError(t, reopened.OpenFolder())
 	defer reopened.Close()
 	require.Equal(t, uint64(1999), reopened.SegmentsMax())
@@ -380,7 +381,7 @@ func TestBlockReaderGenesisBlockWithSnapshots(t *testing.T) {
 	// create snapshots file for testing starting from block 1
 	cfg := ethconfig.Defaults.Snapshot
 	cfg.ChainName = networkname.Mainnet
-	snapshots := NewRoSnapshots(cfg, tmpDir, logger)
+	snapshots := blocksnapshots.NewRoSnapshots(cfg, tmpDir, logger)
 	ver := version.V1_0
 	createTestSegmentFile(t, 1, 1000, snaptype2.Enums.Headers, tmpDir, ver, logger)
 	createTestSegmentFile(t, 1, 1000, snaptype2.Enums.Bodies, tmpDir, ver, logger)
@@ -437,7 +438,7 @@ func TestCanonicalHashCache_DBHit(t *testing.T) {
 
 	cfg := ethconfig.Defaults.Snapshot
 	cfg.ChainName = networkname.Mainnet
-	snapshots := NewRoSnapshots(cfg, t.TempDir(), logger)
+	snapshots := blocksnapshots.NewRoSnapshots(cfg, t.TempDir(), logger)
 	defer snapshots.Close()
 	blockReader := NewBlockReader(snapshots, nil)
 
@@ -468,7 +469,7 @@ func TestCanonicalHashCache_Miss(t *testing.T) {
 
 	cfg := ethconfig.Defaults.Snapshot
 	cfg.ChainName = networkname.Mainnet
-	snapshots := NewRoSnapshots(cfg, t.TempDir(), logger)
+	snapshots := blocksnapshots.NewRoSnapshots(cfg, t.TempDir(), logger)
 	defer snapshots.Close()
 	blockReader := NewBlockReader(snapshots, nil)
 
@@ -506,7 +507,7 @@ func TestCanonicalHashCache_MultipleBlocks(t *testing.T) {
 
 	cfg := ethconfig.Defaults.Snapshot
 	cfg.ChainName = networkname.Mainnet
-	snapshots := NewRoSnapshots(cfg, t.TempDir(), logger)
+	snapshots := blocksnapshots.NewRoSnapshots(cfg, t.TempDir(), logger)
 	defer snapshots.Close()
 	blockReader := NewBlockReader(snapshots, nil)
 
@@ -587,7 +588,7 @@ func TestCanonicalHashCache_SnapshotPath(t *testing.T) {
 
 	cfg := ethconfig.Defaults.Snapshot
 	cfg.ChainName = networkname.Mainnet
-	snapshots := NewRoSnapshots(cfg, tmpDir, logger)
+	snapshots := blocksnapshots.NewRoSnapshots(cfg, tmpDir, logger)
 	require.NoError(t, snapshots.OpenFolder())
 	defer snapshots.Close()
 

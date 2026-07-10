@@ -49,6 +49,7 @@ import (
 	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/db/rawdb/blockio"
 	"github.com/erigontech/erigon/db/services"
+	"github.com/erigontech/erigon/db/snapshotsync/blocksnapshots"
 	"github.com/erigontech/erigon/db/snapshotsync/freezeblocks"
 	"github.com/erigontech/erigon/db/snaptype"
 	dbstate "github.com/erigontech/erigon/db/state"
@@ -137,7 +138,8 @@ type ExecModuleTester struct {
 
 	HistoryV3      bool
 	cfg            ethconfig.Config
-	BlockSnapshots *freezeblocks.RoSnapshots
+	BlockSnapshots *blocksnapshots.RoSnapshots
+	blockRetire    services.BlockRetire
 	BlockReader    services.FullBlockReader
 	ReceiptsReader *receipts.Generator
 	posStagedSync  *stagedsync.Sync
@@ -148,6 +150,9 @@ func (emt *ExecModuleTester) Close() {
 	emt.cancel()
 	if err := emt.bgComponentsEg.Wait(); err != nil && emt.tb != nil {
 		require.Equal(emt.tb, context.Canceled, err) // upon waiting for clean exit we should get ctx cancelled
+	}
+	if emt.blockRetire != nil {
+		emt.blockRetire.Close()
 	}
 	if emt.Engine != nil {
 		emt.Engine.Close()
@@ -348,6 +353,15 @@ func WithAlwaysGenerateChangesets(v bool) Option {
 	}
 }
 
+// WithMaxReorgDepth pins syncCfg.MaxReorgDepth so the changeset window
+// (maxBlockNum-MaxReorgDepth) can be placed mid-batch — leaving earlier blocks
+// pre-window (BAL-fold candidates) and later blocks window (per-block changeset).
+func WithMaxReorgDepth(d uint64) Option {
+	return func(opts *options) {
+		opts.maxReorgDepth = &d
+	}
+}
+
 func WithFcuBackgroundPrune() Option {
 	return func(opts *options) {
 		opts.fcuBackgroundPrune = true
@@ -373,6 +387,7 @@ type options struct {
 	fcuBackgroundCommit      bool
 	fcuBackgroundPrune       bool
 	alwaysGenerateChangesets *bool
+	maxReorgDepth            *uint64
 	sentryProtocol           uint
 }
 
@@ -447,6 +462,9 @@ func New(tb testing.TB, opts ...Option) *ExecModuleTester {
 	if opt.alwaysGenerateChangesets != nil {
 		cfg.AlwaysGenerateChangesets = *opt.alwaysGenerateChangesets
 	}
+	if opt.maxReorgDepth != nil {
+		cfg.Sync.MaxReorgDepth = *opt.maxReorgDepth
+	}
 	cfg.PersistReceiptsCacheV2 = true
 	cfg.ChaosMonkey = false
 	cfg.Snapshot.ChainName = gspec.Config.ChainName
@@ -489,7 +507,7 @@ func New(tb testing.TB, opts ...Option) *ExecModuleTester {
 	}
 
 	erigonGrpcServer := remotedbserver.NewKvServer(ctx, db, nil, nil, nil, logger)
-	allSnapshots := freezeblocks.NewRoSnapshots(cfg.Snapshot, dirs.Snap, logger)
+	allSnapshots := blocksnapshots.NewRoSnapshots(cfg.Snapshot, dirs.Snap, logger)
 	allBorSnapshots := heimdall.NewRoSnapshots(cfg.Snapshot, dirs.Snap, logger)
 
 	br := freezeblocks.NewBlockReader(allSnapshots, allBorSnapshots)
@@ -657,7 +675,8 @@ func New(tb testing.TB, opts ...Option) *ExecModuleTester {
 		logger,
 	)
 
-	blockRetire := freezeblocks.NewBlockRetire(1, dirs, mock.BlockReader, blockWriter, mock.DB, nil, nil, mock.ChainConfig, &cfg, mock.Notifications.Events, nil, logger)
+	blockRetire := freezeblocks.NewBlockRetire(mock.Ctx, 1, dirs, mock.BlockReader, blockWriter, mock.DB, nil, nil, mock.ChainConfig, &cfg, mock.Notifications.Events, nil, logger)
+	mock.blockRetire = blockRetire
 	mock.Sync = stagedsync.New(
 		cfg.Sync,
 		stagedsync.DefaultStages(

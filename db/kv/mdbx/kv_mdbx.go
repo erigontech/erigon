@@ -42,6 +42,7 @@ import (
 	"github.com/erigontech/erigon/common/dir"
 	"github.com/erigontech/erigon/common/estimate"
 	"github.com/erigontech/erigon/common/log/v3"
+	_ "github.com/erigontech/erigon/common/race"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/dbcfg"
 	"github.com/erigontech/erigon/db/kv/order"
@@ -177,6 +178,12 @@ func (opts MdbxOpts) InMem(tb testing.TB, tmpDir string) MdbxOpts {
 	opts.dirtySpace = uint64(16 * datasize.MB)
 	if tb != nil {
 		opts.dirtySpace = uint64(2 * datasize.MB)
+		// Parallel unit tests pile 16GB VA reservations into the Go race heap
+		// window ("too many address space collisions for -race mode"); cap them.
+		// Benchmarks run sequentially and can need the full map.
+		if _, isBench := tb.(*testing.B); !isBench {
+			opts.mapSize = 1 * datasize.GB
+		}
 	}
 	opts.shrinkThreshold = 0 // disable
 	opts.pageSize = 4096
@@ -882,6 +889,99 @@ func (db *MdbxKV) View(ctx context.Context, f func(tx kv.Tx) error) (err error) 
 	return f(tx)
 }
 
+func rawCursor(c kv.Cursor) *mdbx.Cursor {
+	if dc, ok := c.(*MdbxDupSortCursor); ok {
+		return dc.c
+	}
+	return c.(*MdbxCursor).c
+}
+
+const maxDistributeCursors = 4096
+
+// DistributeCursors partitions bucket into n approximately equal-count key
+// ranges using mdbx's b-tree distribution. Fast on db >> RAM: it touches only
+// the b-tree branch nodes. Interior boundaries point into tx-owned pages — clone
+// them before any same-tx write (a range-delete invalidates them).
+func (tx *MdbxTx) DistributeCursors(table string, from []byte, n int) ([][]byte, error) {
+	if n <= 1 {
+		return [][]byte{from, nil}, nil
+	}
+	n = min(n, maxDistributeCursors) // n is derived from table size; cap it so a multi-TB table doesn't open tens of thousands of cursors
+
+	firstC, err := tx.Cursor(table)
+	if err != nil {
+		return nil, err
+	}
+	defer firstC.Close()
+	var fk []byte
+	if from == nil {
+		fk, _, err = firstC.First()
+	} else {
+		fk, _, err = firstC.Seek(from)
+	}
+	if err != nil {
+		return nil, err
+	}
+	if fk == nil { // empty table, or `from` is past the last key
+		return [][]byte{from, nil}, nil
+	}
+
+	// Read positions through kv.Cursor.Current: it normalizes the not-found/EOF
+	// signal, sparing us platform-specific mdbx error codes.
+	wrappers := make([]kv.Cursor, n)
+	cursors := make([]*mdbx.Cursor, n)
+	for i := range wrappers {
+		cw, err := tx.Cursor(table)
+		if err != nil {
+			return nil, err
+		}
+		defer cw.Close()
+		wrappers[i], cursors[i] = cw, rawCursor(cw)
+	}
+
+	// Distribute at the lowest branch level (Depth-2), not the leaves: keeps the
+	// count-traversal in branch pages (cheap, cacheable) instead of faulting cold
+	// leaves on a >>RAM table. Balance stays within ~1%; 42 only for shallow trees.
+	deepness := uint(42)
+	if st, err := tx.BucketStat(table); err == nil && st.Depth > 2 {
+		deepness = st.Depth - 2
+	}
+	// allSet is false when the range had fewer positions than n: the surplus
+	// cursors are left hollow, and Current() normalizes them to a nil key below.
+	allSet, err := mdbx.DistributeCursors(rawCursor(firstC), nil, cursors, deepness)
+	if err != nil {
+		return nil, err
+	}
+
+	keys := make([][]byte, 0, n)
+	for _, cw := range wrappers {
+		k, _, err := cw.Current()
+		if err != nil {
+			return nil, err
+		}
+		if k == nil { // hollow surplus cursor: Current normalizes ENODATA to nil
+			break
+		}
+		keys = append(keys, k)
+	}
+	if allSet && len(keys) > 0 {
+		keys = keys[:len(keys)-1] // last cursor pins the table's last key; nil closes the final range
+	}
+
+	bounds := make([][]byte, 0, len(keys)+2)
+	bounds = append(bounds, from)
+	var prev []byte
+	for _, k := range keys {
+		if prev != nil && bytes.Equal(k, prev) {
+			continue // clustered keys collapsed to one boundary
+		}
+		bounds = append(bounds, k)
+		prev = k
+	}
+	bounds = append(bounds, nil)
+	return bounds, nil
+}
+
 func (tx *MdbxTx) Apply(_ context.Context, f func(tx kv.Tx) error) (err error) {
 	return f(tx)
 }
@@ -1101,6 +1201,46 @@ func (tx *MdbxTx) ClearTable(bucket string) error {
 		return nil
 	}
 	return tx.tx.Drop(mdbx.DBI(dbi), false)
+}
+
+// DeleteRange removes keys in [from, to) using mdbx's native bulk range-delete,
+// which cuts whole pages and branches out of the B-tree at once. to==nil deletes
+// through the last key. Returns the number of keys removed.
+func (tx *MdbxTx) DeleteRange(table string, from, to []byte) (uint64, error) {
+	beginC, err := tx.RwCursor(table)
+	if err != nil {
+		return 0, err
+	}
+	defer beginC.Close()
+	bk, _, err := beginC.Seek(from)
+	if err != nil {
+		return 0, err
+	}
+	if bk == nil {
+		return 0, nil
+	}
+
+	begin := rawCursor(beginC)
+	var end *mdbx.Cursor
+	endIncluding := true // nil end => delete through the last key
+	if to != nil {
+		endC, err := tx.RwCursor(table)
+		if err != nil {
+			return 0, err
+		}
+		defer endC.Close()
+		ek, _, err := endC.Seek(to)
+		if err != nil {
+			return 0, err
+		}
+		if ek != nil {
+			if bytes.Compare(bk, ek) >= 0 {
+				return 0, nil // empty range
+			}
+			end, endIncluding = rawCursor(endC), false
+		}
+	}
+	return begin.DeleteRange(end, endIncluding)
 }
 
 func (tx *MdbxTx) DropTable(bucket string) error {
@@ -1479,7 +1619,7 @@ func (c *MdbxCursor) Prev() (k, v []byte, err error) {
 func (c *MdbxCursor) Current() ([]byte, []byte, error) {
 	k, v, err := c.c.Get(nil, nil, mdbx.GetCurrent)
 	if err != nil {
-		if mdbx.IsNotFound(err) {
+		if mdbx.IsNotFound(err) || mdbx.IsNoData(err) {
 			return nil, nil, nil
 		}
 		return []byte{}, nil, err
@@ -1591,7 +1731,7 @@ func (c *MdbxCursorPseudoDupSort) LastDup() ([]byte, error) {
 		if mdbx.IsNotFound(err) {
 			return nil, nil
 		}
-		return nil, fmt.Errorf("in FirstDup: tbl=%s, %w", c.bucketName, err)
+		return nil, fmt.Errorf("in LastDup: tbl=%s, %w", c.bucketName, err)
 	}
 	return v, nil
 }

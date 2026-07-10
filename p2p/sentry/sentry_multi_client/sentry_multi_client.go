@@ -250,8 +250,8 @@ func (cs *MultiClient) getBlockHeaders66(ctx context.Context, inreq *sentryproto
 	}
 	_, err = sentry.SendMessageById(ctx, &outreq, &grpc.EmptyCallOption{})
 	if err != nil {
-		if !libsentry.IsPeerNotFoundErr(err) {
-			return fmt.Errorf("send header response 66: %w", err)
+		if libsentry.IsPeerNotFoundErr(err) {
+			return nil
 		}
 		return fmt.Errorf("send header response 66: %w", err)
 	}

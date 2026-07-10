@@ -32,6 +32,7 @@ import (
 	"github.com/erigontech/erigon/db/kv/rawdbv3"
 	"github.com/erigontech/erigon/db/kv/temporal"
 	"github.com/erigontech/erigon/db/rawdb"
+	"github.com/erigontech/erigon/db/snapshotsync/blocksnapshots"
 	"github.com/erigontech/erigon/db/snapshotsync/freezeblocks"
 	dbstate "github.com/erigontech/erigon/db/state"
 	"github.com/erigontech/erigon/db/state/changeset"
@@ -66,7 +67,7 @@ func TestUnwindExecutionStage_PrunesUncommittedOverlayWrite(t *testing.T) {
 
 	// Block reader backed only by MDBX — the unwind range is at the tip, above
 	// any frozen snapshot boundary, so no snapshots are needed.
-	snaps := freezeblocks.NewRoSnapshots(ethconfig.BlocksFreezing{ChainName: networkname.Mainnet}, dirs.Snap, logger)
+	snaps := blocksnapshots.NewRoSnapshots(ethconfig.BlocksFreezing{ChainName: networkname.Mainnet}, dirs.Snap, logger)
 	t.Cleanup(snaps.Close)
 	br := freezeblocks.NewBlockReader(snaps, nil)
 
@@ -199,7 +200,7 @@ func TestFindExecutedDiffsetAtHeight_FallsBackAfterCanonicalReorg(t *testing.T) 
 
 	// Block reader backed only by MDBX — the unwind range is at the tip, above any
 	// frozen snapshot boundary, so no snapshots are needed.
-	snaps := freezeblocks.NewRoSnapshots(ethconfig.BlocksFreezing{ChainName: networkname.Mainnet}, dirs.Snap, logger)
+	snaps := blocksnapshots.NewRoSnapshots(ethconfig.BlocksFreezing{ChainName: networkname.Mainnet}, dirs.Snap, logger)
 	t.Cleanup(snaps.Close)
 	br := freezeblocks.NewBlockReader(snaps, nil)
 

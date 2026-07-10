@@ -678,7 +678,7 @@ func (txTask *TxTask) executeAA(aaTxn *types.AccountAbstractionTransaction,
 			result.Err = outerErr
 			return &result
 		}
-		log.Info("✅[aa] validated AA bundle", "len", startIdx-endIdx)
+		log.Info("✅[aa] validated AA bundle", "len", endIdx-startIdx+1)
 
 		result.ValidationResults = validationResults
 	}

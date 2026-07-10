@@ -268,12 +268,8 @@ func (se *serialExecutor) exec(ctx context.Context, execStage *StageState, u Unw
 
 		lastExecutedStep := kv.Step(uint64(se.lastExecutedTxNum.Load()) / se.doms.StepSize())
 
-		// if we're in the initialCycle before we consider the blockLimit we need to make sure we keep executing
-		// until we reach a transaction whose comittement which is writable to the db, otherwise the update will get lost
-		if !initialCycle || lastExecutedStep > 0 && lastExecutedStep > lastFrozenStep && !dbg.DiscardCommitment() {
-			if blockLimit > 0 && blockNum-startBlockNum+1 >= blockLimit && blockNum != maxBlockNum {
-				return b.HeaderNoCopy(), rwTx, &ErrLoopExhausted{From: startBlockNum, To: blockNum, Reason: "block limit reached"}
-			}
+		if shouldMarkExhaustedAtBlock(initialCycle, lastExecutedStep, lastFrozenStep, dbg.DiscardCommitment(), blockLimit, blockNum, startBlockNum, maxBlockNum) {
+			return b.HeaderNoCopy(), rwTx, &ErrLoopExhausted{From: startBlockNum, To: blockNum, Reason: "block limit reached"}
 		}
 	}
 	se.doms.PrintCacheStats()
@@ -397,14 +393,16 @@ func (se *serialExecutor) executeBlock(ctx context.Context, tasks []exec.Task, i
 					blockStartTxNum := firstTask.TxNum - uint64(firstTask.TxIndex)
 					priorReceipts, priorErr := se.reconstructPriorReceipts(ctx, se.applyTx, txTask.Header, txTask.Txs, startTxIndex, blockStartTxNum)
 					if priorErr != nil {
-						return priorErr
+						se.logger.Warn(fmt.Sprintf("[%s] failed to reconstruct prior receipts for partial block", se.logPrefix),
+							"block", txTask.BlockNumber(), "startTxIndex", startTxIndex, "err", priorErr)
+					} else {
+						finalizeReceipts = append(priorReceipts, blockReceipts...)
+						priorComplete = true
 					}
-					finalizeReceipts = append(priorReceipts, blockReceipts...)
-					// The post-exec validator, which fills receipt blooms for
-					// full blocks, runs only when startTxIndex == 0 — complete
-					// the published set here.
+					// The post-exec validator, which fills receipt blooms for full
+					// blocks, skips partial ones — do it here, even when prior
+					// receipts couldn't be reconstructed (suffix still needs blooms).
 					receipts.DeriveFields(finalizeReceipts, txTask.BlockHash())
-					priorComplete = true
 				}
 
 				_, err = se.cfg.engine.Finalize(

@@ -180,119 +180,51 @@ func (s *CaplinSnapshots) OpenList(fileNames []string, optimistic bool) error {
 
 	var segmentsMax uint64
 	var segmentsMaxSet bool
-Loop:
 	for _, fName := range fileNames {
 		f, _, ok := snaptype.ParseFileName(s.dir, fName)
 		if !ok {
 			continue
 		}
-		var processed bool = true
-		switch f.Type.Enum() {
-		case snaptype.CaplinEnums.BeaconBlocks:
-			var sn *snapshotsync.DirtySegment
-			var exists bool
-			s.dirty[snaptype.BeaconBlocks.Enum()].Walk(func(segments []*snapshotsync.DirtySegment) bool {
-				for _, sn2 := range segments {
-					if sn2.Decompressor == nil { // it's ok if some segment was not able to open
-						continue
-					}
-					if fName == sn2.FileName() {
-						sn = sn2
-						exists = true
-						break
-					}
-				}
-				return true
-			})
-			if !exists {
-				sn = snapshotsync.NewDirtySegment(
-					snaptype.BeaconBlocks,
-					f.Version,
-					f.From, f.To,
-					true)
-			}
-			if err := sn.Open(s.dir); err != nil {
-				if errors.Is(err, os.ErrNotExist) {
-					if optimistic {
-						continue Loop
-					} else {
-						break Loop
-					}
-				}
-				if optimistic {
-					s.logger.Warn("[snapshots] open segment", "err", err)
-					continue Loop
-				} else {
-					return err
-				}
-			}
+		typ := f.Type.Enum()
+		if typ != snaptype.CaplinEnums.BeaconBlocks && typ != snaptype.CaplinEnums.BlobSidecars {
+			continue
+		}
+		tree := s.dirty[typ]
 
-			if !exists {
-				// it's possible to iterate over .seg file even if you don't have index
-				// then make segment available even if index open may fail
-				s.dirty[snaptype.BeaconBlocks.Enum()].Set(sn)
+		sn, exists := snapshotsync.FindOpenSegment(tree, fName)
+		if !exists {
+			sn = snapshotsync.NewDirtySegment(f.Type, f.Version, f.From, f.To, true)
+		}
+		if err := sn.Open(s.dir); err != nil {
+			stop, failErr := snapshotsync.ClassifyOpenErr(err, optimistic)
+			if failErr != nil {
+				return failErr
 			}
-			if err := sn.OpenIdxIfNeed(s.dir, optimistic, dirEntries); err != nil {
-				return err
+			if stop {
+				break
 			}
-			// Only bob sidecars count for progression
-			if processed {
-				if f.To > 0 {
-					segmentsMax = f.To - 1
-				} else {
-					segmentsMax = 0
-				}
-				segmentsMaxSet = true
+			if !errors.Is(err, os.ErrNotExist) {
+				s.logger.Warn("[snapshots] open segment", "err", err)
 			}
-		case snaptype.CaplinEnums.BlobSidecars:
-			var sn *snapshotsync.DirtySegment
-			var exists bool
-			s.dirty[snaptype.BlobSidecars.Enum()].Walk(func(segments []*snapshotsync.DirtySegment) bool {
-				for _, sn2 := range segments {
-					if sn2.Decompressor == nil { // it's ok if some segment was not able to open
-						continue
-					}
-					if fName == sn2.FileName() {
-						sn = sn2
-						exists = true
-						break
-					}
-				}
-				return true
-			})
-			if !exists {
-				sn = snapshotsync.NewDirtySegment(
-					snaptype.BlobSidecars,
-					f.Version,
-					f.From, f.To,
-					true)
-			}
-			if err := sn.Open(s.dir); err != nil {
-				if errors.Is(err, os.ErrNotExist) {
-					if optimistic {
-						continue Loop
-					} else {
-						break Loop
-					}
-				}
-				if optimistic {
-					s.logger.Warn("[snapshots] open segment", "err", err)
-					continue Loop
-				} else {
-					return err
-				}
-			}
-
-			if !exists {
-				// it's possible to iterate over .seg file even if you don't have index
-				// then make segment available even if index open may fail
-				s.dirty[snaptype.BlobSidecars.Enum()].Set(sn)
-			}
-			if err := sn.OpenIdxIfNeed(s.dir, optimistic, dirEntries); err != nil {
-				return err
-			}
+			continue
 		}
 
+		if !exists {
+			// it's possible to iterate over .seg file even if you don't have index
+			// then make segment available even if index open may fail
+			tree.Set(sn)
+		}
+		if err := sn.OpenIdxIfNeed(s.dir, optimistic, dirEntries); err != nil {
+			return err
+		}
+		if typ == snaptype.CaplinEnums.BeaconBlocks {
+			if f.To > 0 {
+				segmentsMax = f.To - 1
+			} else {
+				segmentsMax = 0
+			}
+			segmentsMaxSet = true
+		}
 	}
 	if segmentsMaxSet {
 		s.segmentsMax.Store(segmentsMax)
@@ -339,43 +271,8 @@ func (s *CaplinSnapshots) closeWhatNotInList(l []string) {
 	for _, fName := range l {
 		protectFiles[fName] = struct{}{}
 	}
-	toClose := make([]*snapshotsync.DirtySegment, 0)
-	s.dirty[snaptype.BeaconBlocks.Enum()].Walk(func(segments []*snapshotsync.DirtySegment) bool {
-		for _, sn := range segments {
-			if sn.Decompressor == nil {
-				continue
-			}
-			_, name := filepath.Split(sn.FilePath())
-			if _, ok := protectFiles[name]; ok {
-				continue
-			}
-			toClose = append(toClose, sn)
-		}
-		return true
-	})
-	for _, sn := range toClose {
-		sn.Close()
-		s.dirty[snaptype.BeaconBlocks.Enum()].Delete(sn)
-	}
-
-	toClose = make([]*snapshotsync.DirtySegment, 0)
-	s.dirty[snaptype.BlobSidecars.Enum()].Walk(func(segments []*snapshotsync.DirtySegment) bool {
-		for _, sn := range segments {
-			if sn.Decompressor == nil {
-				continue
-			}
-			_, name := filepath.Split(sn.FilePath())
-			if _, ok := protectFiles[name]; ok {
-				continue
-			}
-			toClose = append(toClose, sn)
-		}
-		return true
-	})
-	for _, sn := range toClose {
-		sn.Close()
-		s.dirty[snaptype.BlobSidecars.Enum()].Delete(sn)
-	}
+	snapshotsync.CloseSegmentsNotInList(s.dirty[snaptype.BeaconBlocks.Enum()], protectFiles)
+	snapshotsync.CloseSegmentsNotInList(s.dirty[snaptype.BlobSidecars.Enum()], protectFiles)
 }
 
 type CaplinView struct {
@@ -713,16 +610,11 @@ func (s *CaplinSnapshots) ReadHeader(slot uint64, tx kv.Tx) (*cltypes.SignedBeac
 		return nil, 0, common.Hash{}, nil
 	}
 	// Decompress this thing
-	buffer := buffersPool.Get().(*bytes.Buffer)
-	defer buffersPool.Put(buffer)
-
-	buffer.Reset()
-	buffer.Write(buf)
 	reader := decompressorPool.Get().(*zstd.Decoder)
 	defer decompressorPool.Put(reader)
-	reader.Reset(buffer)
+	reader.Reset(bytes.NewReader(buf))
 
-	// Use pooled buffers and readers to avoid allocations.
+	// Use pooled readers to avoid allocations.
 	header, elBlockNumber, elBlockHash, err := snapshot_format.ReadBlockHeaderFromSnapshotWithExecutionData(reader, s.beaconCfg)
 	if err != nil {
 		return nil, 0, common.Hash{}, err

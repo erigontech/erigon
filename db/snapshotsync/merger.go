@@ -152,7 +152,7 @@ func buildIdx(ctx context.Context, sn snaptype.FileInfo, indexBuilder snaptype.I
 // Merge does merge segments in given ranges
 func (m *Merger) Merge(
 	ctx context.Context,
-	snapshots *RoSnapshots,
+	snapshots *BaseRoSnapshots,
 	snapTypes []snaptype.Type,
 	mergeRanges []Range,
 	snapDir string,
@@ -264,11 +264,14 @@ func (m *Merger) Merge(
 	return nil
 }
 
-func (m *Merger) integrateMergedDirtyFiles(snapshots *RoSnapshots, in, out map[snaptype.Enum][]*DirtySegment) {
-	defer snapshots.recalcVisibleFiles(snapshots.alignMin)
+func (m *Merger) integrateMergedDirtyFiles(snapshots *BaseRoSnapshots, in, out map[snaptype.Enum][]*DirtySegment) {
+	var retired []*DirtySegment
 
 	snapshots.dirtyLock.Lock()
 	defer snapshots.dirtyLock.Unlock()
+	// Publish under the same lock so the dirty mutation and the bundle publish are one
+	// atomic step (no window for a concurrent open to re-adopt a just-retired file).
+	defer func() { snapshots.recalcVisibleFiles(snapshots.alignMin, retired) }()
 
 	// add new segments
 	for enum, newSegs := range in {
@@ -292,7 +295,10 @@ func (m *Merger) integrateMergedDirtyFiles(snapshots *RoSnapshots, in, out map[s
 		}
 	}
 
-	// delete old sub segments
+	// delete old sub segments. out may list the same segment more than once (a merge
+	// output subsumes the same subs the frozen-walk re-collects); dedup so each is
+	// retired — and later unlinked — exactly once.
+	seen := make(map[*DirtySegment]struct{})
 	for enum, delSegs := range out {
 		dirtySegments := snapshots.dirty[enum]
 		inDirtySegments := in[enum]
@@ -308,9 +314,13 @@ func (m *Merger) integrateMergedDirtyFiles(snapshots *RoSnapshots, in, out map[s
 			if skip {
 				continue
 			}
+			if _, ok := seen[delSeg]; ok {
+				continue
+			}
+			seen[delSeg] = struct{}{}
 
 			dirtySegments.Delete(delSeg)
-			delSeg.canDelete.Store(true)
+			retired = append(retired, delSeg)
 		}
 	}
 }
