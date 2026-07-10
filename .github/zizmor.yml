@@ -13,12 +13,7 @@ rules:
       - ci-cd-main-branch-docker-images.yml
       - ci-gate.yml               # toJSON(needs) is not user-controllable
       - docker-image-remove.yml
-      - qa-rpc-integration-tests-remote.yml
-      - qa-rpc-performance-comparison-tests.yml
-      - qa-rpc-performance-tests.yml
       - qa-sync-from-scratch-full-node.yml
-      - qa-sync-from-scratch.yml
-      - qa-txpool-performance-test.yml
       - release.yml
       - test-all-erigon-race.yml
 
