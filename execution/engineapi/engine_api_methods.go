@@ -296,11 +296,6 @@ func (e *EngineServer) GetBlobsV1(ctx context.Context, blobHashes []common.Hash)
 
 func (e *EngineServer) GetBlobsV2(ctx context.Context, blobHashes []common.Hash) (engine_types.BlobsBundleV2, error) {
 	e.logger.Debug("[GetBlobsV2] Received Request", "hashes", len(blobHashes))
-	if currentHeader := e.chainRW.CurrentHeader(ctx); currentHeader != nil {
-		if !e.config.IsOsaka(currentHeader.Time) {
-			return nil, nil
-		}
-	}
 	// GetBlobsV2 was actually introduced in Fusaka,
 	// but here we're using the Pectra version to differentiate it from GetBlobsV3.
 	resp, err := e.getBlobs(ctx, blobHashes, clparams.ElectraVersion)
@@ -313,11 +308,6 @@ func (e *EngineServer) GetBlobsV2(ctx context.Context, blobHashes []common.Hash)
 
 func (e *EngineServer) GetBlobsV3(ctx context.Context, blobHashes []common.Hash) (engine_types.BlobsBundleV2, error) {
 	e.logger.Debug("[GetBlobsV3] Received Request", "hashes", len(blobHashes))
-	if currentHeader := e.chainRW.CurrentHeader(ctx); currentHeader != nil {
-		if !e.config.IsOsaka(currentHeader.Time) {
-			return nil, nil
-		}
-	}
 	resp, err := e.getBlobs(ctx, blobHashes, clparams.FuluVersion)
 	if err != nil {
 		return nil, err

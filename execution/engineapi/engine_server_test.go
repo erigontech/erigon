@@ -44,6 +44,7 @@ import (
 	"github.com/erigontech/erigon/node/direct"
 	"github.com/erigontech/erigon/node/ethconfig"
 	"github.com/erigontech/erigon/node/gointerfaces/txpoolproto"
+	"github.com/erigontech/erigon/rpc"
 	"github.com/erigontech/erigon/rpc/jsonrpc"
 	"github.com/erigontech/erigon/rpc/rpccfg"
 	"github.com/erigontech/erigon/rpc/rpchelper"
@@ -388,4 +389,29 @@ func TestGetPayloadBodiesByRangeV2(t *testing.T) {
 	req.NotNil(bodies[1].BlockAccessList)
 	req.Equal(hexutil.Bytes(balBytes1), bodies[0].BlockAccessList)
 	req.Equal(hexutil.Bytes(balBytes2), bodies[1].BlockAccessList)
+}
+
+func TestGetBlobsV1PostOsakaRejection(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow test")
+	}
+	require := require.New(t)
+
+	// Osaka is active (AllProtocolChanges has Osaka enabled from genesis):
+	// GetBlobsV1 must return UnsupportedForkError
+	mockSentry := execmoduletester.New(t, execmoduletester.WithTxPool(), execmoduletester.WithChainConfig(chain.AllProtocolChanges))
+	oneBlockStep(mockSentry, require)
+
+	txPoolClient := direct.NewTxPoolClient(mockSentry.TxPoolGrpcServer)
+	executionRpc := mockSentry.ExecModule
+	fcuTimeout := ethconfig.Defaults.FcuTimeout
+	maxReorgDepth := ethconfig.Defaults.MaxReorgDepth
+	engineServer := NewEngineServer(mockSentry.Log, mockSentry.ChainConfig, executionRpc, nil, false, false, false, true, txPoolClient, mockSentry.TxPool, fcuTimeout, maxReorgDepth)
+
+	ctx := context.Background()
+
+	_, err := engineServer.GetBlobsV1(ctx, []common.Hash{{}})
+	var rpcErr *rpc.UnsupportedForkError
+	require.ErrorAs(err, &rpcErr)
+	require.Equal("Unsupported fork", rpcErr.Message)
 }
