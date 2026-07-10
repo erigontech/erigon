@@ -57,6 +57,7 @@ import (
 	"github.com/erigontech/erigon/db/kv/temporal"
 	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/db/services"
+	"github.com/erigontech/erigon/db/snapshotsync/blocksnapshots"
 	"github.com/erigontech/erigon/db/snapshotsync/freezeblocks"
 	dbstate "github.com/erigontech/erigon/db/state"
 	"github.com/erigontech/erigon/db/state/stats"
@@ -380,7 +381,7 @@ func RemoteServices(ctx context.Context, cfg *httpcfg.HttpCfg, logger log.Logger
 	}
 
 	// Configure DB first
-	var allSnapshots *freezeblocks.RoSnapshots
+	var allSnapshots *blocksnapshots.RoSnapshots
 	var allBorSnapshots *heimdall.RoSnapshots
 	onNewSnapshot := func() {}
 	roTxLimit := int64(cfg.DBReadConcurrency)
@@ -435,7 +436,7 @@ func RemoteServices(ctx context.Context, cfg *httpcfg.HttpCfg, logger log.Logger
 			return nil, nil, nil, nil, nil, nil, nil, ff, nil, nil, err
 		}
 
-		allSnapshots = freezeblocks.NewRoSnapshots(cfg.Snap, cfg.Dirs.Snap, logger)
+		allSnapshots = blocksnapshots.NewRoSnapshots(cfg.Snap, cfg.Dirs.Snap, logger)
 		allBorSnapshots = heimdall.NewRoSnapshots(cfg.Snap, cfg.Dirs.Snap, logger)
 		allSnapshots.DownloadComplete()
 		allBorSnapshots.DownloadComplete()
@@ -1002,7 +1003,9 @@ func createEngineListener(cfg *httpcfg.HttpCfg, engineApi []rpc.API, logger log.
 
 	// Engine API (auth) is the CL↔EL protocol — not user RPC. Do not tag with TxPriorityRPC
 	// so execution-engine DB operations use blocking Acquire instead of fail-fast TryAcquire.
-	engineHttpHandler := node.NewHTTPHandlerStack(engineSrv, nil /* authCors */, cfg.AuthRpcVirtualHost, cfg.HttpCompression, 0, false)
+	// Compression is always off here: engine responses (getBlobs, getPayload) are multi-MB and
+	// latency-critical, and gzip costs far more time than the transfer it saves.
+	engineHttpHandler := node.NewHTTPHandlerStack(engineSrv, nil /* authCors */, cfg.AuthRpcVirtualHost, false /* compression */, 0, false)
 
 	graphQLHandler := graphql.CreateHandler(engineApi)
 

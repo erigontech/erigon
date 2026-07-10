@@ -215,7 +215,7 @@ func TestMergeSnapshots(t *testing.T) {
 	for i := uint64(0); i < N; i++ {
 		createFile(i*10_000, (i+1)*10_000)
 	}
-	s := NewRoSnapshots(ethconfig.BlocksFreezing{ChainName: networkname.Mainnet}, dir, snaptype2.BlockSnapshotTypes, true, logger)
+	s := NewBaseRoSnapshots(ethconfig.BlocksFreezing{ChainName: networkname.Mainnet}, dir, snaptype2.BlockSnapshotTypes, true, logger)
 	defer s.Close()
 	require.NoError(s.OpenFolder())
 	{
@@ -264,7 +264,7 @@ func TestMergeSnapshots(t *testing.T) {
 	// for i := uint64(0); i < N; i++ {
 	// 	createFile(start+i*10_000, start+(i+1)*10_000)
 	// }
-	// s = NewRoSnapshots(ethconfig.BlocksFreezing{Enabled: true}, dir, start, logger)
+	// s = NewBaseRoSnapshots(ethconfig.BlocksFreezing{Enabled: true}, dir, start, logger)
 	// defer s.Close()
 	// require.NoError(s.OpenFolder())
 	// {
@@ -311,7 +311,7 @@ func TestMergeSkipsPreClaimedRange(t *testing.T) {
 			createTestSegmentFile(t, i*10_000, (i+1)*10_000, snT.Enum(), dir, version.V1_0, logger)
 		}
 	}
-	s := NewRoSnapshots(ethconfig.BlocksFreezing{ChainName: networkname.Mainnet}, dir, snaptype2.BlockSnapshotTypes, true, logger)
+	s := NewBaseRoSnapshots(ethconfig.BlocksFreezing{ChainName: networkname.Mainnet}, dir, snaptype2.BlockSnapshotTypes, true, logger)
 	defer s.Close()
 	require.NoError(s.OpenFolder())
 
@@ -360,7 +360,7 @@ func TestDeleteSnapshots(t *testing.T) {
 	for i := uint64(0); i < N; i++ {
 		createFile(i*10_000, (i+1)*10_000)
 	}
-	s := NewRoSnapshots(ethconfig.BlocksFreezing{ChainName: networkname.Mainnet}, dir, snaptype2.BlockSnapshotTypes, true, logger)
+	s := NewBaseRoSnapshots(ethconfig.BlocksFreezing{ChainName: networkname.Mainnet}, dir, snaptype2.BlockSnapshotTypes, true, logger)
 	defer s.Close()
 	retireFiles := []string{
 		"v1.0-000000-000010-bodies.seg",
@@ -383,7 +383,7 @@ func TestDeleteSnapshotsIsIdempotent(t *testing.T) {
 		createTestSegmentFile(t, 0, 10_000, snT.Enum(), dir, version.V1_0, logger)
 	}
 
-	s := NewRoSnapshots(ethconfig.BlocksFreezing{ChainName: networkname.Mainnet}, dir, snaptype2.BlockSnapshotTypes, true, logger)
+	s := NewBaseRoSnapshots(ethconfig.BlocksFreezing{ChainName: networkname.Mainnet}, dir, snaptype2.BlockSnapshotTypes, true, logger)
 	defer s.Close()
 	require.NoError(s.OpenFolder())
 
@@ -440,7 +440,7 @@ func TestRemoveOverlaps(t *testing.T) {
 		createFile(200_000+i*10_000, 200_000+(i+1)*10_000)
 	}
 
-	s := NewRoSnapshots(ethconfig.BlocksFreezing{ChainName: networkname.Mainnet}, dir, snaptype2.BlockSnapshotTypes, true, logger)
+	s := NewBaseRoSnapshots(ethconfig.BlocksFreezing{ChainName: networkname.Mainnet}, dir, snaptype2.BlockSnapshotTypes, true, logger)
 	defer s.Close()
 
 	list, err := snaptype.Segments(s.Dir())
@@ -498,7 +498,7 @@ func TestRemoveOverlaps_CrossingTypeString(t *testing.T) {
 
 	createFile(0, 10000)
 
-	s := NewRoSnapshots(ethconfig.BlocksFreezing{ChainName: networkname.Mainnet}, dir, snaptype2.BlockSnapshotTypes, true, logger)
+	s := NewBaseRoSnapshots(ethconfig.BlocksFreezing{ChainName: networkname.Mainnet}, dir, snaptype2.BlockSnapshotTypes, true, logger)
 	defer s.Close()
 
 	list, err := snaptype.Segments(s.Dir())
@@ -560,7 +560,7 @@ func TestOpenAllSnapshot(t *testing.T) {
 		createFile := func(from, to uint64, name snaptype.Type) {
 			createTestSegmentFile(t, from, to, name.Enum(), dir, version.V1_0, logger)
 		}
-		s := NewRoSnapshots(cfg, dir, snaptype2.BlockSnapshotTypes, true, logger)
+		s := NewBaseRoSnapshots(cfg, dir, snaptype2.BlockSnapshotTypes, true, logger)
 		defer s.Close()
 		err := s.OpenFolder()
 		require.NoError(err)
@@ -569,7 +569,7 @@ func TestOpenAllSnapshot(t *testing.T) {
 		s.Close()
 
 		createFile(step, step*2, snaptype2.Bodies)
-		s = NewRoSnapshots(cfg, dir, snaptype2.BlockSnapshotTypes, true, logger)
+		s = NewBaseRoSnapshots(cfg, dir, snaptype2.BlockSnapshotTypes, true, logger)
 		defer s.Close()
 		require.NotNil(s.visible.Load().segments[snaptype2.Enums.Bodies])
 		require.Empty(s.visible.Load().segments[snaptype2.Enums.Bodies])
@@ -577,7 +577,7 @@ func TestOpenAllSnapshot(t *testing.T) {
 
 		createFile(step, step*2, snaptype2.Headers)
 		createFile(step, step*2, snaptype2.Transactions)
-		s = NewRoSnapshots(cfg, dir, snaptype2.BlockSnapshotTypes, true, logger)
+		s = NewBaseRoSnapshots(cfg, dir, snaptype2.BlockSnapshotTypes, true, logger)
 		err = s.OpenFolder()
 		require.NoError(err)
 		require.NotNil(s.visible.Load().segments[snaptype2.Enums.Headers])
@@ -588,7 +588,7 @@ func TestOpenAllSnapshot(t *testing.T) {
 		createFile(0, step, snaptype2.Bodies)
 		createFile(0, step, snaptype2.Headers)
 		createFile(0, step, snaptype2.Transactions)
-		s = NewRoSnapshots(cfg, dir, snaptype2.BlockSnapshotTypes, true, logger)
+		s = NewBaseRoSnapshots(cfg, dir, snaptype2.BlockSnapshotTypes, true, logger)
 		defer s.Close()
 
 		err = s.OpenFolder()
@@ -613,7 +613,7 @@ func TestOpenAllSnapshot(t *testing.T) {
 		// Erigon may create new snapshots by itself - with high bigger than hardcoded ExpectedBlocks
 		// ExpectedBlocks - says only how much block must come from Torrent
 		chainSnapshotCfg.ExpectBlocks = 500_000 - 1
-		s = NewRoSnapshots(cfg, dir, snaptype2.BlockSnapshotTypes, true, logger)
+		s = NewBaseRoSnapshots(cfg, dir, snaptype2.BlockSnapshotTypes, true, logger)
 		err = s.OpenFolder()
 		require.NoError(err)
 		defer s.Close()
@@ -624,7 +624,7 @@ func TestOpenAllSnapshot(t *testing.T) {
 		createFile(step, step*2-step/5, snaptype2.Bodies)
 		createFile(step, step*2-step/5, snaptype2.Transactions)
 		chainSnapshotCfg.ExpectBlocks = math.MaxUint64
-		s = NewRoSnapshots(cfg, dir, snaptype2.BlockSnapshotTypes, true, logger)
+		s = NewBaseRoSnapshots(cfg, dir, snaptype2.BlockSnapshotTypes, true, logger)
 		defer s.Close()
 		err = s.OpenFolder()
 		require.NoError(err)
@@ -822,7 +822,7 @@ func TestCalculateVisibleSegments(t *testing.T) {
 		createFile(i*500_000, (i+1)*500_000, snaptype2.Transactions)
 	}
 	cfg := ethconfig.BlocksFreezing{ChainName: networkname.Mainnet}
-	s := NewRoSnapshots(cfg, dir, snaptype2.BlockSnapshotTypes, true, logger)
+	s := NewBaseRoSnapshots(cfg, dir, snaptype2.BlockSnapshotTypes, true, logger)
 	defer s.Close()
 
 	{
@@ -894,7 +894,7 @@ func TestCalculateVisibleSegmentsWhenGapsInIdx(t *testing.T) {
 	require.NoError(err)
 
 	cfg := ethconfig.BlocksFreezing{ChainName: networkname.Mainnet}
-	s := NewRoSnapshots(cfg, dir, snaptype2.BlockSnapshotTypes, true, logger)
+	s := NewBaseRoSnapshots(cfg, dir, snaptype2.BlockSnapshotTypes, true, logger)
 	defer s.Close()
 
 	require.NoError(s.OpenFolder())
@@ -913,7 +913,7 @@ func TestSegmentsMaxDerivedFromVisible(t *testing.T) {
 	}
 	cfg := ethconfig.BlocksFreezing{ChainName: networkname.Mainnet}
 
-	s := NewRoSnapshots(cfg, dir, snaptype2.BlockSnapshotTypes, true, logger)
+	s := NewBaseRoSnapshots(cfg, dir, snaptype2.BlockSnapshotTypes, true, logger)
 	require.NoError(s.OpenFolder())
 	require.Equal(uint64(0), s.SegmentsMax())
 	s.Close()
@@ -923,7 +923,7 @@ func TestSegmentsMaxDerivedFromVisible(t *testing.T) {
 		createFile(i*500_000, (i+1)*500_000, snaptype2.Bodies)
 		createFile(i*500_000, (i+1)*500_000, snaptype2.Transactions)
 	}
-	s = NewRoSnapshots(cfg, dir, snaptype2.BlockSnapshotTypes, true, logger)
+	s = NewBaseRoSnapshots(cfg, dir, snaptype2.BlockSnapshotTypes, true, logger)
 	require.NoError(s.OpenFolder())
 	require.Equal(uint64(1_500_000-1), s.SegmentsMax())
 
@@ -952,7 +952,7 @@ func TestViewPinsGeneration(t *testing.T) {
 	}
 
 	cfg := ethconfig.BlocksFreezing{ChainName: networkname.Mainnet}
-	s := NewRoSnapshots(cfg, dir, snaptype2.BlockSnapshotTypes, true, logger)
+	s := NewBaseRoSnapshots(cfg, dir, snaptype2.BlockSnapshotTypes, true, logger)
 	defer s.Close()
 	require.NoError(s.OpenFolder())
 
@@ -1006,7 +1006,7 @@ func TestRetireVsLiveViewDoesNotCrash(t *testing.T) {
 		}
 	}
 
-	s := NewRoSnapshots(ethconfig.BlocksFreezing{ChainName: networkname.Mainnet}, dir, snaptype2.BlockSnapshotTypes, true, logger)
+	s := NewBaseRoSnapshots(ethconfig.BlocksFreezing{ChainName: networkname.Mainnet}, dir, snaptype2.BlockSnapshotTypes, true, logger)
 	defer s.Close()
 	require.NoError(s.OpenFolder())
 
@@ -1084,7 +1084,7 @@ func TestOpenFolderPromotesCovering(t *testing.T) {
 	createTestSegmentOnlyFile(t, 0, 1_000_000, snaptype2.Enums.Transactions, dir, version.V1_0, logger)
 
 	cfg := ethconfig.BlocksFreezing{ChainName: networkname.Mainnet}
-	s := NewRoSnapshots(cfg, dir, snaptype2.BlockSnapshotTypes, true, logger)
+	s := NewBaseRoSnapshots(cfg, dir, snaptype2.BlockSnapshotTypes, true, logger)
 	defer s.Close()
 
 	require.NoError(s.OpenFolder())
@@ -1142,7 +1142,7 @@ func TestOverlapNoTruncation(t *testing.T) {
 	createFile(1_000_000, 1_500_000, snaptype2.Transactions)
 
 	cfg := ethconfig.BlocksFreezing{ChainName: networkname.Mainnet}
-	s := NewRoSnapshots(cfg, dir, snaptype2.BlockSnapshotTypes, true, logger)
+	s := NewBaseRoSnapshots(cfg, dir, snaptype2.BlockSnapshotTypes, true, logger)
 	defer s.Close()
 
 	require.NoError(s.OpenFolder())
