@@ -25,6 +25,7 @@ import (
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/empty"
 	"github.com/erigontech/erigon/common/length"
+	"github.com/erigontech/erigon/execution/commitment/nibbles"
 	"github.com/erigontech/erigon/execution/rlp"
 )
 
@@ -33,9 +34,11 @@ import (
 // one reused hash-output buffer. No per-node heap cell is allocated — this reuse is the
 // buffer-reuse win the proto validated (the naive per-node-cell fold regresses ~10x on alloc).
 type foldCtx struct {
-	hph  *HexPatriciaHashed
-	cell cell
-	buf  []byte
+	hph      *HexPatriciaHashed
+	cell     cell
+	buf      []byte
+	emit     bool
+	deferred []*DeferredBranchUpdate
 }
 
 // foldChild records one present slot of a branch during a fold: whether it is a storage leaf
@@ -77,7 +80,7 @@ func (fc *foldCtx) setBranch(node *prefixNode, bh common.Hash) {
 // hashing run transitively inside computeCellHash. The hash is returned by value into fc's reused
 // scratch — the non-escaping shape the proto settled on; escape behavior is a manual `-gcflags=-m`
 // spot-check, while the alloc-ceiling bench is the CI gate.
-func (fc *foldCtx) foldNode(node *prefixNode, branchDepth int16) (common.Hash, error) {
+func (fc *foldCtx) foldNode(node *prefixNode, prefix []byte, branchDepth int16) (common.Hash, error) {
 	childDepth := branchDepth + 1
 	var rec [16]foldChild
 	childIdx := 0
@@ -95,7 +98,14 @@ func (fc *foldCtx) foldNode(node *prefixNode, branchDepth int16) (common.Hash, e
 			fc.setLeaf(child)
 			r.hlen = fc.hph.computeCellHashLen(&fc.cell, childDepth)
 		} else {
-			bh, err := fc.foldNode(child, childDepth+int16(len(child.ext)))
+			var childPrefix []byte
+			if fc.emit {
+				childPrefix = make([]byte, 0, len(prefix)+1+len(child.ext))
+				childPrefix = append(childPrefix, prefix...)
+				childPrefix = append(childPrefix, byte(nib))
+				childPrefix = append(childPrefix, child.ext...)
+			}
+			bh, err := fc.foldNode(child, childPrefix, childDepth+int16(len(child.ext)))
 			if err != nil {
 				return common.Hash{}, err
 			}
@@ -112,6 +122,7 @@ func (fc *foldCtx) foldNode(node *prefixNode, branchDepth int16) (common.Hash, e
 	var lp [4]byte
 	pt := rlp.EncodeListPrefixToBuf(totalLen, lp[:])
 	fc.hph.keccak2.Write(lp[:pt])
+	var cellData [16]cellEncodeData
 	b80 := [1]byte{0x80}
 	for s := range 17 {
 		if s == 16 || !rec[s].present {
@@ -130,10 +141,30 @@ func (fc *foldCtx) foldNode(node *prefixNode, branchDepth int16) (common.Hash, e
 		}
 		fc.buf = hb
 		fc.hph.keccak2.Write(hb)
+		if fc.emit {
+			cellData[s] = cellEncodeDataFromCell(&fc.cell)
+		}
 	}
 	var h common.Hash
 	fc.hph.keccak2.Read(h[:])
+	if fc.emit {
+		if err := fc.emitBranchUpdate(node.bitmap, prefix, &cellData); err != nil {
+			return common.Hash{}, err
+		}
+	}
 	return h, nil
+}
+
+// emitBranchUpdate encodes this fresh branch (every present child both touched and after, no
+// predecessor) with the same BranchEncoder the sequential fold uses and stages a DeferredBranchUpdate
+// for prefix, so the emitted records are byte-identical to foldMounted's.
+func (fc *foldCtx) emitBranchUpdate(bitmap uint16, prefix []byte, cellData *[16]cellEncodeData) error {
+	raw, err := fc.hph.branchEncoder.EncodeBranch(bitmap, bitmap, bitmap, cellData)
+	if err != nil {
+		return err
+	}
+	fc.deferred = append(fc.deferred, getDeferredUpdate(nibbles.HexToCompact(prefix), raw, nil))
+	return nil
 }
 
 // foldFreshStorageRoot folds a fresh account's touched storage subtree (rooted at the depth-64
@@ -146,7 +177,27 @@ func foldFreshStorageRoot(node *prefixNode) (common.Hash, error) {
 	}
 	fc := &foldCtx{hph: NewHexPatriciaHashed(length.Addr, nil, DefaultTrieConfig())}
 	defer fc.hph.Release()
-	return fc.foldNode(node, 64)
+	return fc.foldNode(node, nil, 64)
+}
+
+// foldFreshStorageRootDeferred folds a fresh account's touched storage subtree like
+// foldFreshStorageRoot, but also emits a DeferredBranchUpdate per storage branch prefix, so the
+// caller can persist the trie, not just its root. accPrefix is the 64-nibble account path the
+// storage-root branch sits at. Fail-closed: any fold error drops every collected update.
+func foldFreshStorageRootDeferred(node *prefixNode, accPrefix []byte) (common.Hash, []*DeferredBranchUpdate, error) {
+	if node == nil || node.bitmap == 0 {
+		return empty.RootHash, nil, nil
+	}
+	fc := &foldCtx{hph: NewHexPatriciaHashed(length.Addr, nil, DefaultTrieConfig()), emit: true}
+	defer fc.hph.Release()
+	h, err := fc.foldNode(node, accPrefix, 64)
+	if err != nil {
+		for _, upd := range fc.deferred {
+			putDeferredUpdate(upd)
+		}
+		return common.Hash{}, nil, err
+	}
+	return h, fc.deferred, nil
 }
 
 // foldReconciledStorageRoot folds a touched storage subtree against on-disk state, so untouched

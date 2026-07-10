@@ -128,6 +128,88 @@ func TestTruthtreeFold_FreshStoragePlane(t *testing.T) {
 	}
 }
 
+// seqFreshBranchOracle processes the fresh whale through the sequential engine and returns the
+// resulting branch store; for a single-account whale every stored branch is a storage branch.
+func seqFreshBranchOracle(t *testing.T, pk [][]byte, upds []Update) *MockState {
+	t.Helper()
+	ms := NewMockState(t)
+	require.NoError(t, ms.applyPlainUpdates(pk, upds))
+	hph := NewHexPatriciaHashed(length.Addr, ms, DefaultTrieConfig())
+	defer hph.Release()
+	u := WrapKeyUpdates(t, ModeDirect, KeyToHexNibbleHash, pk, upds)
+	defer u.Close()
+	_, err := hph.Process(context.Background(), u, "", nil, WarmupConfig{})
+	require.NoError(t, err)
+	return ms
+}
+
+// TestTruthtreeFold_FreshDeferredEmission pins that the direct fresh fold emits a branch record per
+// storage branch prefix byte-for-byte identical to the sequential engine: applying the fold's
+// deferred updates to an empty branch store must reproduce the oracle store prefix-for-prefix.
+func TestTruthtreeFold_FreshDeferredEmission(t *testing.T) {
+	for _, slots := range []int{5_000, 50_000} {
+		t.Run(fmt.Sprintf("slots=%d", slots), func(t *testing.T) {
+			_, accHash, _, _, pk, upds, _ := whaleByNibble(slots)
+
+			oracleMs := seqFreshBranchOracle(t, pk, upds)
+
+			node, accPrefix := whaleStorageNode(pk, upds, accHash)
+			sr, deferred, err := foldFreshStorageRootDeferred(node, accPrefix)
+			require.NoError(t, err)
+			require.NotEmpty(t, deferred, "fresh fold must emit branch records")
+
+			got := NewMockState(t)
+			_, err = ApplyDeferredBranchUpdates(deferred, 1, got.PutBranch)
+			require.NoError(t, err)
+			requireBranchParity(t, oracleMs, got)
+
+			pureSR, err := foldFreshStorageRoot(node)
+			require.NoError(t, err)
+			require.Equal(t, pureSR, sr, "deferred fold storage root != pure fold storage root")
+		})
+	}
+}
+
+// TestTruthtreeFold_FreshDeferredFailClosed pins fail-closed emission: a subtree whose first
+// storage nibble folds and emits a branch record, followed by a malformed sibling that errors
+// mid-fold, must return no deferred updates at all — a partial write is never surfaced.
+func TestTruthtreeFold_FreshDeferredFailClosed(t *testing.T) {
+	_, accHash, _, _, _, _, groups := whaleByNibble(200)
+	x, z := -1, -1
+	for nib := range 16 {
+		if x == -1 {
+			if len(groups[nib]) >= 2 {
+				x = nib
+			}
+			continue
+		}
+		if len(groups[nib]) >= 1 {
+			z = nib
+			break
+		}
+	}
+	require.GreaterOrEqual(t, x, 0, "corpus needs a multi-slot first-nibble group")
+	require.Greater(t, z, x, "corpus needs a second populated first-nibble group above it")
+
+	var pk2 [][]byte
+	var u2 []Update
+	for _, kv := range groups[x] {
+		pk2 = append(pk2, kv.pk)
+		u2 = append(u2, kv.upd)
+	}
+	for _, kv := range groups[z] {
+		pk2 = append(pk2, kv.pk)
+		u2 = append(u2, kv.upd)
+	}
+	node, accPrefix := whaleStorageNode(pk2, u2, accHash)
+	require.Len(t, node.children, 2)
+	node.children[1] = &prefixNode{} // malformed leaf: bitmap 0, nil plainKey
+
+	_, deferred, err := foldFreshStorageRootDeferred(node, accPrefix)
+	require.Error(t, err)
+	require.Nil(t, deferred, "error must drop every collected deferred update")
+}
+
 // seqStorageDisk seeds one storage block on disk (branch records into ms) via the sequential
 // engine and returns the resulting root.
 func seqStorageDisk(t *testing.T, ms *MockState, pk [][]byte, upds []Update) []byte {

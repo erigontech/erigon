@@ -106,10 +106,10 @@ The frontier **DAG + pool + merge/finale stitch are unchanged.** A leaf task tod
 - Modify: `execution/commitment/truthtree_fold.go`
 - Modify: `execution/commitment/truthtree_fold_test.go`
 
-- [ ] each branch node emits a `DeferredBranchUpdate` for its prefix via the same encoder `foldMounted` uses; collected into the task's deferred slice
-- [ ] branch byte-parity oracle: the emitted branch records equal the sequential/`foldMounted` records prefix-for-prefix (`requireBranchParity`)
-- [ ] fail-closed: error drops all deferred
-- [ ] run tests — must pass before next task
+- [x] each branch node emits a `DeferredBranchUpdate` for its prefix via the same encoder `foldMounted` uses (`foldCtx.emitBranchUpdate` calls `branchEncoder.EncodeBranch` + `getDeferredUpdate`); the fresh direct recursion threads the hex-nibble prefix and collects into `fc.deferred`, surfaced by `foldFreshStorageRootDeferred`. The pure `foldFreshStorageRoot` stays emission-free so the Task 2 alloc ceiling holds (verified 42.6 MB/op unchanged — `cellData` proved non-escaping on the no-emit path)
+- [x] branch byte-parity oracle: `TestTruthtreeFold_FreshDeferredEmission` runs the sequential fresh-whale engine (`seqFreshBranchOracle`), applies the fold's deferred updates to an empty branch store, and `requireBranchParity` asserts prefix-for-prefix byte equality (single-account whale ⇒ every stored branch is a storage branch); slots 5k/50k
+- [x] fail-closed: `foldFreshStorageRootDeferred` drops (and pool-returns) every collected update on any fold error; `TestTruthtreeFold_FreshDeferredFailClosed` folds one emitting sub-branch then a malformed sibling and asserts `err != nil` with `deferred == nil`
+- [x] run tests — `go test ./execution/commitment/ -count=1` green, `-race` clean, `make lint` 0 issues
 
 ### Task 5: Account-plane fold + inline depth-64 seam
 
