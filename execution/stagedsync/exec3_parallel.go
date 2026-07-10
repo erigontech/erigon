@@ -274,8 +274,15 @@ func (pe *parallelExecutor) execImpl(ctx context.Context, execStage *StageState,
 		return nil, rwTx, err
 	}
 
-	// Set accumulator before pe.run() so execLoop sees it without a race.
+	// Set accumulator, channels and limits before pe.run() so execLoop sees
+	// them without a race — on an early group cancel its exit path reads the
+	// channel fields right away. blockRequests is intentionally not stashed:
+	// it is closed by its sole sender (the executeBlocks dispatch goroutine),
+	// not by execLoop — closing it from execLoop would race that send.
 	pe.accumulator = accumulator
+	pe.applyResultsCh = applyResults
+	pe.commitResultsCh = commitResults
+	pe.maxBlockNum = maxBlockNum
 
 	executorContext, executorCancel, err := pe.run(ctx)
 	defer executorCancel(nil)
@@ -314,14 +321,6 @@ func (pe *parallelExecutor) execImpl(ctx context.Context, execStage *StageState,
 	sdCtx := pe.rs.Domains().GetCommitmentContext()
 	prevStateReader := sdCtx.StateReader()
 	defer sdCtx.SetStateReader(prevStateReader)
-
-	// Store channels and limits on pe so execLoop can access them.
-	// blockRequests is intentionally not stashed here: it is closed by its
-	// sole sender (the executeBlocks dispatch goroutine), not by execLoop —
-	// closing it from execLoop would race the dispatch goroutine's send.
-	pe.applyResultsCh = applyResults
-	pe.commitResultsCh = commitResults
-	pe.maxBlockNum = maxBlockNum
 
 	// Configure changeset capture and seed the initial accumulator BEFORE
 	// the exec loop / executeBlocks goroutines start touching sd.mem. The
