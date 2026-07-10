@@ -351,7 +351,6 @@ func (fp *foldPool) foldFreshStorage(ctx context.Context, node *prefixNode, accP
 		copy(childPrefix, accPrefix)
 		childPrefix = append(childPrefix, byte(nib))
 		childPrefix = append(childPrefix, child.ext...)
-		group := collectSubtreeKeys(child, childPrefix)
 		ni := nib
 		g.Go(func() error {
 			if err := sem.Acquire(gctx, 1); err != nil {
@@ -361,10 +360,12 @@ func (fp *foldPool) foldFreshStorage(ctx context.Context, node *prefixNode, accP
 			cw, crelease := newDeferredStorageWorker(fp.workerPool, fp.ctxFactory, fp.traceW)
 			defer crelease()
 			cw.mountTo(base, ni)
-			for i := range group {
-				if err := cw.followAndUpdate(group[i].hk, group[i].pk, group[i].upd); err != nil {
-					return err
-				}
+			// Each goroutine walks its own disjoint first-nibble subtree read-only and streams
+			// keys straight into followAndUpdate, so no []touchedKey is materialized per group.
+			if err := dfsSubtree(child, childPrefix, func(hk, pk []byte, upd *Update) error {
+				return cw.followAndUpdate(hk, pk, upd)
+			}); err != nil {
+				return err
 			}
 			c, err := cw.foldMounted(gctx, ni)
 			if err != nil {
