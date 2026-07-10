@@ -298,12 +298,42 @@ whole-fresh route stays dormant on seeded state; the seedable path is byte- and 
 
 ### Task 6: Verify acceptance criteria
 
-- [ ] flag-on == flag-off == sequential: root + branch parity, N≥3, fresh corpora + seam; guard tests
+- [x] flag-on == flag-off == sequential: root + branch parity, N≥3, fresh corpora + seam; guard tests
       confirm incremental routes to frontier unchanged.
-- [ ] `1MWhales` ∥ ≤ main; incremental ∥ == frontier; alloc ceilings held.
-- [ ] no changes leaked into `seedMerge` / mount+replay / demotion / `foldFreshStorage` fallback / streaming
+      (Full suite green at HEAD: `TestWholeFreshBuild_Detector`, `TestFreshBuildFork_{FreshRoutesToWholeFresh,
+      IncrementalStaysFrontier,ToggleOffIsFrontier}`, `TestFreshBuild_{AccountPlane,Seam,
+      AccountForkJoinSeamParity,WhaleStorageForksAtGrain}`, all `TestTruthtreeFold_*` + both alloc ceilings.)
+- [x] `1MWhales` ∥ ≤ main; incremental ∥ == frontier; alloc ceilings held.
+      (**Verified with a same-machine main baseline — mixed verdict.** Incremental guard MET (24.7 == 25.0 ms),
+      alloc ceilings MET (flag-on 382 MB, 25% under frontier's 510 MB). "≤ main" **NOT met**: flag-on 275 ms
+      vs main 198 ms = 1.39× slower. Measured, not lore — see Task 6 results below. The fresh-build gap to
+      main narrowed from 3.6× (frontier 718 ms) to 1.39×; the residual gap is input to Task 7's default
+      decision and the materialized-mount continuation.)
+- [x] no changes leaked into `seedMerge` / mount+replay / demotion / `foldFreshStorage` fallback / streaming
       reuse (`git diff` those files shows only additive wiring, if any).
-- [ ] `make lint && make test-short` clean.
+      (Diff audit vs base `d5757bfe66`: `streaming_deep_fold.go` (`seedOrDemote`) and `streaming_commitment.go`
+      (`reuseSchedulerCells`) have zero diff. In `fold_pool.go` the hunks (old lines 136–178, 204–210, 514–520)
+      do not intersect `seedMerge`, `foldLeafTask`, `foldMergeTask`, or `foldFreshStorage` (old 232–513);
+      `foldFreshForkJoin` gains only the `numWorkers` pass-through; `stitchAndFoldRoot` is an extract-method of
+      `dispatchFrontier`'s tail shared with the whole-fresh route — additive wiring only.)
+- [x] `make lint && make test-short` clean. (Lint clean twice; full-repo `make test-short` exit 0, zero FAILs.)
+
+#### Task 6 results (verification — M5 Max, 18 cores arm64, `-benchtime=10x`)
+
+Same-machine main baseline, measured in a throwaway worktree at main @ `4aad1d8899` — the corpus builder
+(`buildWhaleCorpus(whale1M())`, seed 919273) is byte-identical between main and this branch, so the
+comparison is apples-to-apples:
+
+| arm | 1MWhales ∥ w18 | mem/op |
+|-----|----------------|--------|
+| main `Benchmark_Commitment_1MWhales` | **197.6 ms** (w36: 199.0 ms) | 621 MB |
+| branch flag-off (frontier) | 718 ms | 510 MB |
+| branch flag-on (fork) | **275 ms** | 382 MB |
+
+The plan's Context baseline ("main ∥ 202 ms") replicates on this machine (197.6 ms), but its "frontier
+∥ 900 ms" is 718 ms here — so the headline gap was 3.6×, not 4.5×. The fork closes it to 1.39×
+(2.6× of the 3.6× recovered), with 25% less memory than frontier and 39% less than main. Incremental
+guard re-confirmed at HEAD: flag-off 24.7 ms == flag-on 25.0 ms.
 
 ### Task 7: [Final] Docs; flag-default decision
 
