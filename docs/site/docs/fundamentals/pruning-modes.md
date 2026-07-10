@@ -23,7 +23,11 @@ In order to switch type of node, you must first delete the `/chaindata` folder i
 :::tip
 **Persisting receipts**, which are pre-calculated receipts, increase the requests-per-second (RPS) and improve the latency and throughput of all receipts and logs-related RPC calls.
 
-As of v3.6 they are disabled by default in every pruning mode (previously they were enabled by default for all modes except Archive); enable them with the flag `--persist.receipts`. Without them, receipts and logs are re-derived on demand from state history, so the related RPC calls keep working within the node's state-history window, just with higher latency. On a Historical Blocks node, persisted receipts additionally extend receipts and logs availability from the state-history window back to genesis.
+As of v3.6 they are disabled by default in every pruning mode (previously they were enabled by default for all modes
+except Archive); enable them with the flag `--prune.include-receipts` (the former `--persist.receipts` still works as an
+alias). Without them, receipts and logs are re-derived on demand from state history, so the related RPC calls keep
+working within the node's state-history window, just with higher latency. On a Historical Blocks node, persisted
+receipts additionally extend receipts and logs availability from the state-history window back to genesis.
 :::
 
 :::note[Breaking change in v3.5]
@@ -50,4 +54,10 @@ The Minimal Node configuration (`--prune.mode=minimal`) is the smallest possible
 
 ## Blocks node
 
-The Blocks Node configuration (`--prune.mode=blocks`) keeps the **full block and transaction history** — every block back to genesis — while pruning **state history**. It retains state only within the EIP-8252 window (the last 262,144 blocks), the same state-retention as a Full Node, but unlike a Full Node it never prunes older blocks. This suits users who need complete historical **block and transaction data** — for research, indexing, or block explorers — without paying the disk cost of an archive node's full historical **state**. For full-range **receipts and logs** (`eth_getLogs` / `eth_getBlockReceipts` back to genesis), add `--persist.receipts`; without it they are served only within the state-history window (the last 262,144 blocks).
+The Blocks Node configuration (`--prune.mode=blocks`) keeps the **full block and transaction history** — every block
+back to genesis — while pruning **state history**. It retains state only within the EIP-8252 window (the last 262,144
+blocks), the same state-retention as a Full Node, but unlike a Full Node it never prunes older blocks. This suits users
+who need complete historical **block and transaction data** — for research, indexing, or block explorers — without
+paying the disk cost of an archive node's full historical **state**. For full-range **receipts and logs**
+(`eth_getLogs` / `eth_getBlockReceipts` back to genesis), add `--prune.include-receipts`; without it they are served
+only within the state-history window (the last 262,144 blocks).

@@ -618,7 +618,7 @@ func PruneExecutionStage(ctx context.Context, s *PruneState, tx kv.TemporalRwTx,
 // historyRetireCutoffs maps the prune mode to per-domain retirement cutoffs, in
 // txNum — the aggregator floors each to its file step. CommitmentDomain uses its
 // own --prune.commitment-history.distance window; RCacheDomain follows the
-// general history window by default, or its own --persist.receipts.distance
+// general history window by default, or its own --prune.receipts.distance
 // window when set (keep-all retires nothing).
 func historyRetireCutoffs(ctx context.Context, tx kv.Tx, blockReader services.FullBlockReader, pm prune.Mode, forwardProgress uint64) (cutoffs kv.RetireCutoffs, err error) {
 	historyTxNum, err := blockAmountRetireCutoffTxNum(ctx, tx, blockReader, pm.History, forwardProgress)

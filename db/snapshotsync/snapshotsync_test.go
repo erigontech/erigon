@@ -353,7 +353,7 @@ func TestBuildBlackListForPruning_CommitmentHistoryDisabled(t *testing.T) {
 // (idx/history/accessor) with To <= minReceiptsStep are blacklisted, while the
 // rcache domain file, non-rcache history, and transaction segments are left
 // alone. Filtering runs even when History pruning is off (the archive +
-// --persist.receipts.distance config).
+// --prune.receipts.distance config).
 func TestBuildBlackListForPruning_Receipts(t *testing.T) {
 	preverified := snapcfg.Preverified{Items: snapcfg.PreverifiedItems{
 		{Name: "history/v1.0-rcache.0-16.v"},

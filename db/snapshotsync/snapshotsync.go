@@ -474,7 +474,7 @@ func SyncSnapshots(
 					"pruneToBlock", commitmentHistoryPrune,
 					"minStep", minCommitmentHistoryStep)
 			}
-			// Receipts filtering is opt-in (requires --persist.receipts); a zero
+			// Receipts filtering is opt-in (requires --prune.include-receipts); a zero
 			// step disables it in buildBlackListForPruning.
 			if !prune.ReceiptsAmount().Enabled() {
 				minReceiptsStep = 0
@@ -526,7 +526,7 @@ func SyncSnapshots(
 			}
 
 			// rcache follows the block-data window here only under the
-			// follow-history default; a finite --persist.receipts.distance uses
+			// follow-history default; a finite --prune.receipts.distance uses
 			// its own window (the receipts blacklist), and keep-all keeps it all.
 			// Log indexes always follow the block-data window.
 			isRcacheRelatedSegment := strings.Contains(p.Name, kv.LogAddrIdx.String()) ||

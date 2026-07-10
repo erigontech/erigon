@@ -182,10 +182,10 @@ func TestModeString_ReceiptsKeepAll(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, KeepAllReceiptsPruneMode, mode.Receipts)
 	assert.False(t, mode.ReceiptsFollowHistory(), "explicit keep-all is not the follow-history default")
-	assert.Contains(t, mode.String(), "--persist.receipts.distance=keep-all")
+	assert.Contains(t, mode.String(), "--prune.receipts.distance=keep-all")
 
 	def, err := FromCli(minimalModeStr, 0, 0, 0, 0)
 	require.NoError(t, err)
 	assert.True(t, def.ReceiptsFollowHistory(), "unset receipts follows history")
-	assert.NotContains(t, def.String(), "persist.receipts.distance")
+	assert.NotContains(t, def.String(), "prune.receipts.distance")
 }

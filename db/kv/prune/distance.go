@@ -56,11 +56,11 @@ func ParseCommitmentHistoryDistance(s string) (uint64, error) {
 	return parseStateHistoryDistance(s, "--prune.commitment-history.distance", KeepAllBlocksPruneMode)
 }
 
-// ParseReceiptsDistance parses a --persist.receipts.distance value; "keep-all"
+// ParseReceiptsDistance parses a --prune.receipts.distance value; "keep-all"
 // maps to KeepAllReceiptsPruneMode (see its declaration for why receipts needs a
 // keep-all value distinct from the KeepAllBlocksPruneMode default).
 func ParseReceiptsDistance(s string) (uint64, error) {
-	return parseStateHistoryDistance(s, "--persist.receipts.distance", KeepAllReceiptsPruneMode)
+	return parseStateHistoryDistance(s, "--prune.receipts.distance", KeepAllReceiptsPruneMode)
 }
 
 // parseStateHistoryDistance parses a state-history-style distance flag: a decimal

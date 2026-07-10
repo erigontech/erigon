@@ -187,7 +187,7 @@ func TestModeEqualsComparesReceipts(t *testing.T) {
 func TestModeString_Receipts(t *testing.T) {
 	m := ArchiveMode
 	m.Receipts = Distance(100_000)
-	assert.Equal(t, "archive --persist.receipts.distance=100000", m.String())
+	assert.Equal(t, "archive --prune.receipts.distance=100000", m.String())
 
 	// Default (keep-all) receipts adds no clause.
 	assert.Equal(t, "archive", ArchiveMode.String())
