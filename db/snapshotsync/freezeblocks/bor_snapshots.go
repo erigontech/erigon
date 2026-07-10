@@ -32,11 +32,11 @@ import (
 	"github.com/erigontech/erigon/polygon/heimdall"
 )
 
-func (br *BlockRetire) dbHasEnoughDataForBorRetire(ctx context.Context) (bool, error) {
+func (br *BlockFileBuilder) dbHasEnoughDataForBorRetire(ctx context.Context) (bool, error) {
 	return true, nil
 }
 
-func (br *BlockRetire) retireBorBlocks(
+func (br *BlockFileBuilder) retireBorBlocks(
 	ctx context.Context,
 	minBlockNum uint64,
 	maxBlockNum uint64,
@@ -109,7 +109,7 @@ func (br *BlockRetire) retireBorBlocks(
 	return blocksRetired || merged, err
 }
 
-func (br *BlockRetire) MergeBorBlocks(
+func (br *BlockFileBuilder) MergeBorBlocks(
 	ctx context.Context,
 	lvl log.Lvl,
 	seeder downloader.SeederClient,

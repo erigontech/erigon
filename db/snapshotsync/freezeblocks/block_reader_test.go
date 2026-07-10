@@ -105,11 +105,11 @@ func requireSegmentFilesExist(t *testing.T, dir string, ver snaptype.Version, fr
 	}
 }
 
-// TestBlockRetireSkipsOnGap verifies that the block retirement
+// TestBlockFileBuilderSkipsOnGap verifies that the block retirement
 // logic correctly prevents freezing when there is a gap between the last block available
 // in the snapshots and the first block still present in the database. If this gap exists,
 // we cannot retire blocks because the history is not contiguous.
-func TestBlockRetireSkipsOnGap(t *testing.T) {
+func TestBlockFileBuilderSkipsOnGap(t *testing.T) {
 	tmpDir := t.TempDir()
 	db := memdb.NewTestDB(t, dbcfg.ChainDB)
 	logger := log.New()
@@ -136,7 +136,7 @@ func TestBlockRetireSkipsOnGap(t *testing.T) {
 	require.NoError(t, rwTx.Commit())
 
 	blockReader := NewBlockReader(snapshots, nil)
-	br := &BlockRetire{
+	br := &BlockFileBuilder{
 		db:          db,
 		blockReader: blockReader,
 		logger:      logger,
@@ -147,10 +147,10 @@ func TestBlockRetireSkipsOnGap(t *testing.T) {
 	require.False(t, hasEnough)
 }
 
-// TestBlockRetireContiguous ensures that block retirement is allowed
+// TestBlockFileBuilderContiguous ensures that block retirement is allowed
 // to proceed when the database block history starts exactly where the snapshots end.
 // This is the correct, contiguous state where we can transition retired blocks.
-func TestBlockRetireContiguous(t *testing.T) {
+func TestBlockFileBuilderContiguous(t *testing.T) {
 	tmpDir := t.TempDir()
 	db := memdb.NewTestDB(t, dbcfg.ChainDB)
 	logger := log.New()
@@ -177,7 +177,7 @@ func TestBlockRetireContiguous(t *testing.T) {
 	require.NoError(t, rwTx.Commit())
 
 	blockReader := NewBlockReader(snapshots, nil)
-	br := &BlockRetire{
+	br := &BlockFileBuilder{
 		db:          db,
 		blockReader: blockReader,
 		logger:      logger,
@@ -188,12 +188,12 @@ func TestBlockRetireContiguous(t *testing.T) {
 	require.True(t, hasEnough)
 }
 
-// TestBlockRetireFallback verifies that if a merged segment is written
+// TestBlockFileBuilderFallback verifies that if a merged segment is written
 // to disk but its index is not generated yet, the node restart will not hide the smaller
 // subsegments. These subsegments must remain visible so that block retirement can keep
 // running without getting stuck (fixes issue #21472). Once the unindexed covering segment
 // is deleted or indexed, the visibility should remain stable.
-func TestBlockRetireFallback(t *testing.T) {
+func TestBlockFileBuilderFallback(t *testing.T) {
 	tmpDir := t.TempDir()
 	db := memdb.NewTestDB(t, dbcfg.ChainDB)
 	logger := log.New()
@@ -228,7 +228,7 @@ func TestBlockRetireFallback(t *testing.T) {
 
 	// DB starts right after snapshots, retirement should be allowed.
 	blockReader := NewBlockReader(snapshots, nil)
-	br := &BlockRetire{
+	br := &BlockFileBuilder{
 		db:          db,
 		blockReader: blockReader,
 		logger:      logger,
@@ -254,7 +254,7 @@ func TestBlockRetireFallback(t *testing.T) {
 	requireSegmentFilesExist(t, tmpDir, ver, 1000, 2000, snaptype2.Enums.Transactions)
 
 	blockReader = NewBlockReader(reopenedSnapshots, nil)
-	br = &BlockRetire{
+	br = &BlockFileBuilder{
 		db:          db,
 		blockReader: blockReader,
 		logger:      logger,
@@ -275,7 +275,7 @@ func TestBlockRetireFallback(t *testing.T) {
 	require.Equal(t, uint64(1999), restoredSnapshots.SegmentsMax())
 
 	blockReader = NewBlockReader(restoredSnapshots, nil)
-	br = &BlockRetire{
+	br = &BlockFileBuilder{
 		db:          db,
 		blockReader: blockReader,
 		logger:      logger,
@@ -285,12 +285,12 @@ func TestBlockRetireFallback(t *testing.T) {
 	require.True(t, hasEnough)
 }
 
-// TestBlockRetireAllOverlapped tests a scenario where all block
+// TestBlockFileBuilderAllOverlapped tests a scenario where all block
 // snapshot types (Headers, Bodies, and Transactions) have unindexed covering segments
 // on disk. Under the alignMin setting, we must verify that all three types correctly
 // fall back to their indexed subsegments and maintain the correct visible range, allowing
 // block retirement to proceed (related to issue #21472).
-func TestBlockRetireAllOverlapped(t *testing.T) {
+func TestBlockFileBuilderAllOverlapped(t *testing.T) {
 	tmpDir := t.TempDir()
 	db := memdb.NewTestDB(t, dbcfg.ChainDB)
 	logger := log.New()
@@ -336,7 +336,7 @@ func TestBlockRetireAllOverlapped(t *testing.T) {
 	require.Equal(t, uint64(1999), reopened.SegmentsMax())
 
 	blockReader := NewBlockReader(reopened, nil)
-	br := &BlockRetire{
+	br := &BlockFileBuilder{
 		db:          db,
 		blockReader: blockReader,
 		logger:      logger,

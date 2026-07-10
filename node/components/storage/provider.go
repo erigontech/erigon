@@ -20,7 +20,7 @@
 //
 // Notifications (state-change events) are NOT owned by storage — they are an
 // execution-layer concern and will move to the execution component. Storage
-// receives Notifications as a dep for BlockRetire and snapshot event forwarding.
+// receives Notifications as a dep for BlockFileBuilder and snapshot event forwarding.
 //
 // Sequencing: Initialize must be called early in backend.New(), after
 // OpenDatabase and SetUpBlockReader, and before any component that needs
@@ -65,7 +65,7 @@ type Provider struct {
 	GenesisHash          common.Hash
 	CurrentBlockNumber   uint64
 	SegmentsBuildLimiter *semaphore.Weighted
-	BlockRetire          services.BlockRetire
+	BlockFileBuilder     services.BlockFileBuilder
 
 	logger log.Logger
 }
@@ -91,7 +91,7 @@ type Deps struct {
 	// Config for snapshot and downloader settings.
 	Config *ethconfig.Config
 
-	// DBEventNotifier — NOT owned by storage. Passed in so BlockRetire and
+	// DBEventNotifier — NOT owned by storage. Passed in so BlockFileBuilder and
 	// file-change callbacks can forward snapshot events. Currently backed by
 	// shards.Events; will migrate to the framework event bus.
 	DBEventNotifier services.DBEventNotifier
@@ -138,8 +138,8 @@ func (p *Provider) Initialize(deps Deps) error {
 		p.CurrentBlockNumber = currentBlock.NumberU64()
 	}
 
-	// BlockRetire — heimdallStore and bridgeStore may be nil for non-Bor chains.
-	p.BlockRetire = freezeblocks.NewBlockRetire(ctx, 1, config.Dirs, p.BlockReader, p.BlockWriter, p.ChainDB, p.HeimdallStore, p.BridgeStore, p.ChainConfig, config, deps.DBEventNotifier, p.SegmentsBuildLimiter, logger)
+	// BlockFileBuilder — heimdallStore and bridgeStore may be nil for non-Bor chains.
+	p.BlockFileBuilder = freezeblocks.NewBlockFileBuilder(ctx, 1, config.Dirs, p.BlockReader, p.BlockWriter, p.ChainDB, p.HeimdallStore, p.BridgeStore, p.ChainConfig, config, deps.DBEventNotifier, p.SegmentsBuildLimiter, logger)
 
 	// Serialize retirement's chain-DB reads against Aggregator commit+prune.
 	// Without this, retirement's db.View RO txs can overlap a commit and pin
@@ -147,7 +147,7 @@ func (p *Provider) Initialize(deps Deps) error {
 	// commit time).
 	if hasAgg, ok := p.ChainDB.(dbstate.HasAgg); ok {
 		if agg, ok := hasAgg.Agg().(*dbstate.Aggregator); ok && agg != nil {
-			p.BlockRetire.(*freezeblocks.BlockRetire).SetCommitGate(agg.CommitGate())
+			p.BlockFileBuilder.(*freezeblocks.BlockFileBuilder).SetCommitGate(agg.CommitGate())
 		}
 	}
 
@@ -185,9 +185,9 @@ func (p *Provider) Initialize(deps Deps) error {
 	return nil
 }
 
-// Close drains BlockRetire before the DB is torn down.
+// Close drains BlockFileBuilder before the DB is torn down.
 func (p *Provider) Close() {
-	if p.BlockRetire != nil {
-		p.BlockRetire.Close()
+	if p.BlockFileBuilder != nil {
+		p.BlockFileBuilder.Close()
 	}
 }

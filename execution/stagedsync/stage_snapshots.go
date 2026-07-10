@@ -51,7 +51,7 @@ type SnapshotsCfg struct {
 	db                 kv.TemporalRwDB
 	chainConfig        *chain.Config
 	dirs               datadir.Dirs
-	blockRetire        services.BlockRetire
+	blockFileBuilder   services.BlockFileBuilder
 	snapshotDownloader downloader.Client
 	blockReader        services.FullBlockReader
 	notifier           *shards.Notifications
@@ -79,7 +79,7 @@ func StageSnapshotsCfg(db kv.TemporalRwDB,
 	chainConfig *chain.Config,
 	syncConfig ethconfig.Sync,
 	dirs datadir.Dirs,
-	blockRetire services.BlockRetire,
+	blockFileBuilder services.BlockFileBuilder,
 	snapshotDownloader downloader.Client,
 	blockReader services.FullBlockReader,
 	notifier *shards.Notifications,
@@ -94,7 +94,7 @@ func StageSnapshotsCfg(db kv.TemporalRwDB,
 		db:                 db,
 		chainConfig:        chainConfig,
 		dirs:               dirs,
-		blockRetire:        blockRetire,
+		blockFileBuilder:   blockFileBuilder,
 		snapshotDownloader: snapshotDownloader,
 		blockReader:        blockReader,
 		notifier:           notifier,
@@ -357,7 +357,7 @@ func buildOrDeferE2Indices(ctx context.Context, s *StageState, cfg SnapshotsCfg,
 	canDefer := headersProgress > 0 && !isBor
 
 	if !canDefer {
-		if err := cfg.blockRetire.BuildMissedIndicesIfNeed(ctx, s.LogPrefix(), cfg.notifier.Events); err != nil {
+		if err := cfg.blockFileBuilder.BuildMissedIndicesIfNeed(ctx, s.LogPrefix(), cfg.notifier.Events); err != nil {
 			return err
 		}
 	} else {
@@ -453,12 +453,12 @@ func SnapshotsPrune(s *PruneState, cfg SnapshotsCfg, ctx context.Context, tx kv.
 		var minBlockNumber uint64
 
 		if s.CurrentSyncCycle.IsInitialCycle {
-			cfg.blockRetire.SetWorkers(estimate.CompressSnapshot.Workers())
+			cfg.blockFileBuilder.SetWorkers(estimate.CompressSnapshot.Workers())
 		} else {
-			cfg.blockRetire.SetWorkers(1)
+			cfg.blockFileBuilder.SetWorkers(1)
 		}
 
-		started := cfg.blockRetire.BuildFilesInBackground(
+		started := cfg.blockFileBuilder.BuildFilesInBackground(
 			ctx,
 			minBlockNumber,
 			s.ForwardProgress,
@@ -487,7 +487,7 @@ func SnapshotsPrune(s *PruneState, cfg SnapshotsCfg, ctx context.Context, tx kv.
 		pruneLimit = 10_000
 		pruneTimeout = time.Hour
 	}
-	if _, err := cfg.blockRetire.PruneAncientBlocks(tx, pruneLimit, pruneTimeout); err != nil {
+	if _, err := cfg.blockFileBuilder.PruneAncientBlocks(tx, pruneLimit, pruneTimeout); err != nil {
 		return err
 	}
 	if err := pruneCanonicalMarkers(ctx, tx, cfg.blockReader); err != nil {
@@ -523,7 +523,7 @@ func retireBlockSnapshots(ctx context.Context, cfg SnapshotsCfg, logger log.Logg
 		return false, nil
 	}
 
-	//TODO: push-down this logic into `blockRetire`: instead of work on raw file names - we must work on dirtySegments. Instead of calling downloader.Del(file) we must call `downloader.Del(dirtySegment.Paths(snapDir)`
+	//TODO: push-down this logic into `blockFileBuilder`: instead of work on raw file names - we must work on dirtySegments. Instead of calling downloader.Del(file) we must call `downloader.Del(dirtySegment.Paths(snapDir)`
 	snapshotFileNames := cfg.blockReader.FrozenFiles()
 	filesDeleted := false
 	// Prune blocks snapshots if necessary

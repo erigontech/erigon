@@ -135,14 +135,14 @@ type ExecModuleTester struct {
 	TxPool           *txpool.TxPool
 	TxPoolGrpcServer txpoolproto.TxpoolServer
 
-	HistoryV3      bool
-	cfg            ethconfig.Config
-	BlockSnapshots *freezeblocks.RoSnapshots
-	blockRetire    services.BlockRetire
-	BlockReader    services.FullBlockReader
-	ReceiptsReader *receipts.Generator
-	posStagedSync  *stagedsync.Sync
-	bgComponentsEg errgroup.Group
+	HistoryV3        bool
+	cfg              ethconfig.Config
+	BlockSnapshots   *freezeblocks.RoSnapshots
+	blockFileBuilder services.BlockFileBuilder
+	BlockReader      services.FullBlockReader
+	ReceiptsReader   *receipts.Generator
+	posStagedSync    *stagedsync.Sync
+	bgComponentsEg   errgroup.Group
 }
 
 func (emt *ExecModuleTester) Close() {
@@ -150,8 +150,8 @@ func (emt *ExecModuleTester) Close() {
 	if err := emt.bgComponentsEg.Wait(); err != nil && emt.tb != nil {
 		require.Equal(emt.tb, context.Canceled, err) // upon waiting for clean exit we should get ctx cancelled
 	}
-	if emt.blockRetire != nil {
-		emt.blockRetire.Close()
+	if emt.blockFileBuilder != nil {
+		emt.blockFileBuilder.Close()
 	}
 	if emt.Engine != nil {
 		emt.Engine.Close()
@@ -674,13 +674,13 @@ func New(tb testing.TB, opts ...Option) *ExecModuleTester {
 		logger,
 	)
 
-	blockRetire := freezeblocks.NewBlockRetire(mock.Ctx, 1, dirs, mock.BlockReader, blockWriter, mock.DB, nil, nil, mock.ChainConfig, &cfg, mock.Notifications.Events, nil, logger)
-	mock.blockRetire = blockRetire
+	blockFileBuilder := freezeblocks.NewBlockFileBuilder(mock.Ctx, 1, dirs, mock.BlockReader, blockWriter, mock.DB, nil, nil, mock.ChainConfig, &cfg, mock.Notifications.Events, nil, logger)
+	mock.blockFileBuilder = blockFileBuilder
 	mock.Sync = stagedsync.New(
 		cfg.Sync,
 		stagedsync.DefaultStages(
 			mock.Ctx,
-			stagedsync.StageSnapshotsCfg(mock.DB, mock.ChainConfig, cfg.Sync, dirs, blockRetire, snapDownloader, mock.BlockReader, mock.Notifications, false, false, false, pruneMode, nil, nil),
+			stagedsync.StageSnapshotsCfg(mock.DB, mock.ChainConfig, cfg.Sync, dirs, blockFileBuilder, snapDownloader, mock.BlockReader, mock.Notifications, false, false, false, pruneMode, nil, nil),
 			stagedsync.StageHeadersCfg(mock.BlockReader),
 			stagedsync.StageBlockHashesCfg(mock.Dirs.Tmp, blockWriter),
 			stagedsync.StageBodiesCfg(mock.BlockReader, blockWriter),
@@ -720,7 +720,7 @@ func New(tb testing.TB, opts ...Option) *ExecModuleTester {
 	}
 
 	cfg.Genesis = gspec
-	pipelineStages := stageloop.NewPipelineStages(mock.Ctx, db, &cfg, mock.sentriesClient, mock.Notifications, snapDownloader, mock.BlockReader, blockRetire, tracer, nil, readAheader)
+	pipelineStages := stageloop.NewPipelineStages(mock.Ctx, db, &cfg, mock.sentriesClient, mock.Notifications, snapDownloader, mock.BlockReader, blockFileBuilder, tracer, nil, readAheader)
 	mock.posStagedSync = stagedsync.New(cfg.Sync, pipelineStages, stagedsync.PipelineUnwindOrder, stagedsync.PipelinePruneOrder, logger, stages.ModeApplyingBlocks)
 
 	// Create validation Sync and PipelineExecutor.

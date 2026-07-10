@@ -946,7 +946,7 @@ func stageCustomTrace(db kv.TemporalRwDB, ctx context.Context, logger log.Logger
 	must(batchSize.UnmarshalText([]byte(batchSizeStr)))
 
 	agg := db.(dbstate.HasAgg).Agg().(*dbstate.Aggregator)
-	defer br.(*freezeblocks.BlockRetire).MadvNormal().DisableReadAhead()
+	defer br.(*freezeblocks.BlockFileBuilder).MadvNormal().DisableReadAhead()
 	//defer agg.MadvNormal().DisableReadAhead()
 
 	blockSnapBuildSema := semaphore.NewWeighted(int64(runtime.NumCPU()))
@@ -1159,7 +1159,7 @@ func blocksIO(db kv.RoDB, logger log.Logger) (services.FullBlockReader, *blockio
 }
 
 func newSync(ctx context.Context, db kv.TemporalRwDB, builderConfig *buildercfg.BuilderConfig, logger log.Logger) (
-	services.BlockRetire, func(), rules.Engine, *vm.Config, *stagedsync.Sync,
+	services.BlockFileBuilder, func(), rules.Engine, *vm.Config, *stagedsync.Sync,
 ) {
 	dirs, pm := datadir.New(datadirCli), fromdb.PruneMode(db)
 
@@ -1232,10 +1232,10 @@ func newSync(ctx context.Context, db kv.TemporalRwDB, builderConfig *buildercfg.
 		panic(err)
 	}
 	notifications := shards.NewNotifications(nil)
-	blockRetire := freezeblocks.NewBlockRetire(ctx, estimate.CompressSnapshot.Workers(), dirs, blockReader, blockWriter, db, heimdallStore, bridgeStore, chainConfig, &cfg, notifications.Events, blockSnapBuildSema, logger)
-	stageList := stageloop.NewDefaultStages(context.Background(), db, &cfg, sentryControlServer, notifications, nil, blockReader, blockRetire, nil, nil, exec.NewBlockReadAheader())
+	blockFileBuilder := freezeblocks.NewBlockFileBuilder(ctx, estimate.CompressSnapshot.Workers(), dirs, blockReader, blockWriter, db, heimdallStore, bridgeStore, chainConfig, &cfg, notifications.Events, blockSnapBuildSema, logger)
+	stageList := stageloop.NewDefaultStages(context.Background(), db, &cfg, sentryControlServer, notifications, nil, blockReader, blockFileBuilder, nil, nil, exec.NewBlockReadAheader())
 	sync := stagedsync.New(cfg.Sync, stageList, stagedsync.DefaultUnwindOrder, stagedsync.DefaultPruneOrder, logger, stages.ModeApplyingBlocks)
-	return blockRetire, blockRetire.Close, engine, vmConfig, sync
+	return blockFileBuilder, blockFileBuilder.Close, engine, vmConfig, sync
 }
 
 func progress(tx kv.Getter, stage stages.SyncStage) uint64 {
