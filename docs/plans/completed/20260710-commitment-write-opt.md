@@ -261,10 +261,12 @@ merge was 4.25 ms CPU/seeded block → now 0 on the flush path.
 **Files:**
 - Modify: package doc / design doc
 
-- [ ] document the arena + merge-under-fold on the parallel deferred path; note serial path untouched and
+- [x] document the arena + merge-under-fold on the parallel deferred path; note serial path untouched and
       the "externalize the write" reality (already deferred to `Commit`; this only moves merge off the flush
-      critical path and kills the clones).
-- [ ] move this plan to `docs/plans/completed/`.
+      critical path and kills the clones). (Package doc paragraph in `execution/commitment/doc.go`;
+      code-level docs on `DeferredBranchUpdate.merged`, the `BranchEncoder` arena field, and
+      `MergeDeferredBranchUpdates` landed with Tasks 2–3.)
+- [x] move this plan to `docs/plans/completed/`.
 
 ## Post-Completion
 

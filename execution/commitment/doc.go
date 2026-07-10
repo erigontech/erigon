@@ -32,4 +32,13 @@
 // recursion, crossing every depth-64 seam into the account's fresh storage. The route
 // is internal to the parallel/streaming regimes — no flag — and any commit with
 // on-disk state keeps the ordinary frontier fold unchanged.
+//
+// With DeferBranchUpdates the fold emits DeferredBranchUpdate records instead of
+// writing branches to state; their prefix/raw/prev bytes live in a per-block arena
+// owned by BranchEncoder rather than per-branch clones. The parallel/streaming
+// regimes additionally merge each update against its previous branch bytes on the
+// fold workers as subtrees complete, so the deferred list handed to the caller is
+// pre-merged and the caller's flush is a pure write — the durable DB write happens
+// at the caller's Commit. The serial engine applies its deferred updates inline at
+// the end of Process, merging and writing at that barrier, unchanged.
 package commitment
