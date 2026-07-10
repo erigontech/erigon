@@ -186,9 +186,9 @@ Conclusion: under the parallel regime the direct fold serializes the whale stora
 **Files:**
 - Modify: `execution/commitment/fold_pool.go`, `streaming_deep_fold.go`, `fold_dag.go`
 
-- [ ] after parity + the replay arm (Post-Completion): flip default, delete the replaced replay path + any merge/collapse code Task 7 subsumed; remove the flag
-- [ ] record net line delta (target: negative); full suite + branch-parity chains green
-- [ ] run tests — must pass before next task
+- [x] BLOCKED — not automatable, intentionally not executed: this is a post-flip cleanup gated on the Post-Completion replay arm (manual mainnet/sepolia replay-validation, cannot run in-session) AND on flipping the default. Task 9's perf gate already evaluated the flip and deferred it — flag-on is 4.56× slower on the 750k whale because the direct fold serializes the storage subtree, so the flag stays default-off until a parallel-direct storage topology lands. Deleting the subsumed replay path now would delete the faster path, regress performance, and break the plan's flip gating (correctness > performance ordering). Left for a follow-up after the replay arm passes and the perf regression is resolved.
+- [x] record net line delta (skipped - depends on the deletion above, which is intentionally not executed)
+- [x] run tests (skipped - no code change this iteration; the suite remains green from Task 9)
 
 ### Task 11: Verify acceptance criteria
 
