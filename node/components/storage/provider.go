@@ -39,6 +39,7 @@ import (
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/rawdb/blockio"
 	"github.com/erigontech/erigon/db/services"
+	"github.com/erigontech/erigon/db/snapshotsync/blocksnapshots"
 	"github.com/erigontech/erigon/db/snapshotsync/freezeblocks"
 	dbstate "github.com/erigontech/erigon/db/state"
 	"github.com/erigontech/erigon/execution/chain"
@@ -56,7 +57,7 @@ type Provider struct {
 	ChainDB              kv.TemporalRwDB
 	BlockReader          *freezeblocks.BlockReader
 	BlockWriter          *blockio.BlockWriter
-	AllSnapshots         *freezeblocks.RoSnapshots
+	AllSnapshots         *blocksnapshots.RoSnapshots
 	AllBorSnapshots      *heimdall.RoSnapshots // nil if not Bor
 	BridgeStore          bridge.Store          // nil if not Bor
 	HeimdallStore        heimdall.Store        // nil if not Bor
@@ -79,7 +80,7 @@ type Deps struct {
 	ChainDB         kv.TemporalRwDB
 	BlockReader     *freezeblocks.BlockReader
 	BlockWriter     *blockio.BlockWriter
-	AllSnapshots    *freezeblocks.RoSnapshots
+	AllSnapshots    *blocksnapshots.RoSnapshots
 	AllBorSnapshots *heimdall.RoSnapshots // nil if not Bor
 	BridgeStore     bridge.Store          // nil if not Bor
 	HeimdallStore   heimdall.Store        // nil if not Bor
