@@ -16,7 +16,8 @@
 
 package engineapi
 
-// testing_api.go implements the testing_ RPC namespace, specifically testing_buildBlockV1.
+// testing_api.go implements the testing_ RPC namespace (testing_buildBlockV1,
+// testing_commitBlockV1).
 // Enable via --http.api=...,testing (e.g. --http.api eth,erigon,testing).
 // This namespace MUST NOT be enabled on production networks.
 
@@ -34,6 +35,7 @@ import (
 	"github.com/erigontech/erigon/db/kv"
 	execctx "github.com/erigontech/erigon/db/state/execctx"
 	"github.com/erigontech/erigon/execution/builder"
+	"github.com/erigontech/erigon/execution/engineapi/engine_helpers"
 	"github.com/erigontech/erigon/execution/engineapi/engine_types"
 	"github.com/erigontech/erigon/execution/execmodule"
 	"github.com/erigontech/erigon/execution/state"
@@ -54,6 +56,13 @@ type TestingAPI interface {
 	//               []   → build an empty block (mempool bypassed, no txs)
 	//               [...] → build a block containing exactly these transactions (strict nonce check)
 	BuildBlockV1(ctx context.Context, parentHash common.Hash, payloadAttributes *engine_types.PayloadAttributes, transactions *[]hexutil.Bytes, extraData *hexutil.Bytes) (*engine_types.GetPayloadResponse, error)
+
+	// CommitBlockV1 builds a block on top of the current canonical head, inserts it into the
+	// chain, and sets it as the new head — the equivalent of BuildBlockV1 followed by
+	// engine_newPayload + engine_forkchoiceUpdated in a single call. Returns the hash of the
+	// committed block. On any failure the canonical head is left unchanged.
+	// The transactions parameter follows the same semantics as BuildBlockV1.
+	CommitBlockV1(ctx context.Context, payloadAttributes *engine_types.PayloadAttributes, transactions *[]hexutil.Bytes, extraData *hexutil.Bytes) (common.Hash, error)
 }
 
 // testingImpl is the concrete implementation of TestingAPI.
@@ -159,16 +168,160 @@ func (t *testingImpl) BuildBlockV1(
 		return nil, &rpc.InvalidParamsError{Message: "unknown parent hash"}
 	}
 
+	assembled, version, err := t.assembleTestingBlock(ctx, parentHash, parentHeader, payloadAttributes, transactions, extraData, t.slotDeadline(ctx))
+	if err != nil {
+		return nil, err
+	}
+
+	response, err := assembledBlockToPayloadResponse(assembled.Block, assembled.BlockValue, version)
+	if err != nil {
+		return nil, err
+	}
+	response.ShouldOverrideBuilder = false
+
+	return response, nil
+}
+
+// CommitBlockV1 implements TestingAPI.
+func (t *testingImpl) CommitBlockV1(
+	ctx context.Context,
+	payloadAttributes *engine_types.PayloadAttributes,
+	transactions *[]hexutil.Bytes,
+	extraData *hexutil.Bytes,
+) (common.Hash, error) {
+	if payloadAttributes == nil {
+		return common.Hash{}, &rpc.InvalidParamsError{Message: "payloadAttributes must not be null"}
+	}
+
+	parentHeader := t.server.chainRW.CurrentHeader(ctx)
+	if parentHeader == nil {
+		return common.Hash{}, errors.New("no canonical head available")
+	}
+
+	// Preserve the current safe and finalized hashes: committing only advances the head.
+	_, finalizedHash, safeHash, err := t.server.chainRW.GetForkChoice(ctx)
+	if err != nil {
+		return common.Hash{}, err
+	}
+
+	deadline := t.slotDeadline(ctx)
+	assembled, _, err := t.assembleTestingBlock(ctx, parentHeader.Hash(), parentHeader, payloadAttributes, transactions, extraData, deadline)
+	if err != nil {
+		return common.Hash{}, err
+	}
+
+	block := assembled.Block.Block
+	blockHash := block.Hash()
+	blockNumber := block.NumberU64()
+
+	var encodedBAL []byte
+	if assembled.Block.BlockAccessList != nil {
+		if encodedBAL, err = types.EncodeBlockAccessListBytes(assembled.Block.BlockAccessList); err != nil {
+			return common.Hash{}, err
+		}
+	}
+
+	t.server.lock.Lock()
+	err = t.server.chainRW.InsertBlock(ctx, block, encodedBAL)
+	t.server.lock.Unlock()
+	if err != nil {
+		return common.Hash{}, err
+	}
+
+	status, validationErr, busy, err := t.lockedStatusPoll(deadline, func() (execmodule.ExecutionStatus, *string, error) {
+		s, v, _, err := t.server.chainRW.ValidateChain(ctx, blockHash, blockNumber)
+		return s, v, err
+	})
+	if err != nil {
+		return common.Hash{}, err
+	}
+	if busy {
+		return common.Hash{}, errors.New("execution service is busy, cannot validate block")
+	}
+	if status != execmodule.ExecutionStatusSuccess {
+		return common.Hash{}, commitStatusError("block validation failed", status, validationErr)
+	}
+
+	status, validationErr, busy, err = t.lockedStatusPoll(deadline, func() (execmodule.ExecutionStatus, *string, error) {
+		s, v, _, err := t.server.chainRW.UpdateForkChoice(ctx, blockHash, safeHash, finalizedHash)
+		return s, v, err
+	})
+	if err != nil {
+		return common.Hash{}, err
+	}
+	if busy {
+		return common.Hash{}, errors.New("execution service is busy, cannot update fork choice")
+	}
+	switch status {
+	case execmodule.ExecutionStatusSuccess:
+	case execmodule.ExecutionStatusInvalidForkchoice:
+		return common.Hash{}, &engine_helpers.InvalidForkchoiceStateErr
+	case execmodule.ExecutionStatusReorgTooDeep:
+		return common.Hash{}, &engine_helpers.ReorgTooDeepErr
+	default:
+		return common.Hash{}, commitStatusError("fork choice update failed", status, validationErr)
+	}
+
+	return blockHash, nil
+}
+
+// lockedStatusPoll runs call under the engine lock, retrying while the execution
+// service reports busy, until the deadline expires.
+func (t *testingImpl) lockedStatusPoll(deadline time.Time, call func() (execmodule.ExecutionStatus, *string, error)) (status execmodule.ExecutionStatus, validationErr *string, busy bool, err error) {
+	t.server.lock.Lock()
+	defer t.server.lock.Unlock()
+	busy, err = waitForResponse(time.Until(deadline), func() (bool, error) {
+		var callErr error
+		status, validationErr, callErr = call()
+		if callErr != nil {
+			return false, callErr
+		}
+		return status == execmodule.ExecutionStatusBusy, nil
+	})
+	return status, validationErr, busy, err
+}
+
+func commitStatusError(what string, status execmodule.ExecutionStatus, validationErr *string) error {
+	msg := fmt.Sprintf("%s: %s", what, status)
+	if validationErr != nil {
+		msg = fmt.Sprintf("%s: %s", msg, *validationErr)
+	}
+	return &rpc.CustomError{Code: rpc.ErrCodeDefault, Message: msg}
+}
+
+// slotDeadline bounds the total wall-clock time of a testing_ call to one slot
+// (e.g. 12 s), honouring a shorter caller-supplied context deadline.
+func (t *testingImpl) slotDeadline(ctx context.Context) time.Time {
+	deadline := time.Now().Add(time.Duration(t.server.config.SecondsPerSlot()) * time.Second)
+	if ctxDeadline, ok := ctx.Deadline(); ok && ctxDeadline.Before(deadline) {
+		deadline = ctxDeadline
+	}
+	return deadline
+}
+
+// assembleTestingBlock validates the payload attributes against the given parent and
+// synchronously assembles a block on top of it. Each build step acquires the engine
+// lock independently, matching production behaviour where ForkChoiceUpdated and
+// GetPayload are separate RPC calls; both share the supplied deadline.
+func (t *testingImpl) assembleTestingBlock(
+	ctx context.Context,
+	parentHash common.Hash,
+	parentHeader *types.Header,
+	payloadAttributes *engine_types.PayloadAttributes,
+	transactions *[]hexutil.Bytes,
+	extraData *hexutil.Bytes,
+	deadline time.Time,
+) (*execmodule.AssembledBlockResult, clparams.StateVersion, error) {
 	timestamp := uint64(payloadAttributes.Timestamp)
 
 	// Timestamp must be strictly greater than parent.
 	if parentHeader.Time >= timestamp {
-		return nil, &rpc.InvalidParamsError{Message: "payload timestamp must be greater than parent block timestamp"}
+		return nil, 0, &rpc.InvalidParamsError{Message: "payload timestamp must be greater than parent block timestamp"}
 	}
 
 	// Validate withdrawals presence.
 	if err := t.server.checkWithdrawalsPresence(timestamp, payloadAttributes.Withdrawals); err != nil {
-		return nil, err
+		return nil, 0, err
 	}
 
 	// Determine version from timestamp for proper fork handling.
@@ -188,31 +341,31 @@ func (t *testingImpl) BuildBlockV1(
 
 	// Validate parentBeaconBlockRoot presence for Cancun+.
 	if version >= clparams.DenebVersion && payloadAttributes.ParentBeaconBlockRoot == nil {
-		return nil, &rpc.InvalidParamsError{Message: "parentBeaconBlockRoot required for Cancun and later forks"}
+		return nil, 0, &rpc.InvalidParamsError{Message: "parentBeaconBlockRoot required for Cancun and later forks"}
 	}
 	if version < clparams.DenebVersion && payloadAttributes.ParentBeaconBlockRoot != nil {
-		return nil, &rpc.InvalidParamsError{Message: "parentBeaconBlockRoot not supported before Cancun"}
+		return nil, 0, &rpc.InvalidParamsError{Message: "parentBeaconBlockRoot not supported before Cancun"}
 	}
 
 	// Validate slotNumber presence for Glamsterdam+.
 	if version >= clparams.GloasVersion && payloadAttributes.SlotNumber == nil {
-		return nil, &rpc.InvalidParamsError{Message: "slotNumber required for Glamsterdam and later forks"}
+		return nil, 0, &rpc.InvalidParamsError{Message: "slotNumber required for Glamsterdam and later forks"}
 	}
 	if version < clparams.GloasVersion && payloadAttributes.SlotNumber != nil {
-		return nil, &rpc.InvalidParamsError{Message: "slotNumber not supported before Glamsterdam"}
+		return nil, 0, &rpc.InvalidParamsError{Message: "slotNumber not supported before Glamsterdam"}
 	}
 
 	// Validate targetGasLimit presence for Glamsterdam+.
 	if version >= clparams.GloasVersion && payloadAttributes.TargetGasLimit == nil {
-		return nil, &rpc.InvalidParamsError{Message: "targetGasLimit required for Glamsterdam and later forks"}
+		return nil, 0, &rpc.InvalidParamsError{Message: "targetGasLimit required for Glamsterdam and later forks"}
 	}
 	if version < clparams.GloasVersion && payloadAttributes.TargetGasLimit != nil {
-		return nil, &rpc.InvalidParamsError{Message: "targetGasLimit not supported before Glamsterdam"}
+		return nil, 0, &rpc.InvalidParamsError{Message: "targetGasLimit not supported before Glamsterdam"}
 	}
 
 	customProvider, err := t.decodeTxnProvider(ctx, transactions, parentHeader.Number.Uint64()+1, timestamp)
 	if err != nil {
-		return nil, err
+		return nil, 0, err
 	}
 
 	// Build the AssembleBlock parameters (mirrors forkchoiceUpdated logic).
@@ -223,6 +376,9 @@ func (t *testingImpl) BuildBlockV1(
 		SuggestedFeeRecipient: payloadAttributes.SuggestedFeeRecipient,
 		CustomTxnProvider:     customProvider,
 	}
+	if extraData != nil {
+		assembleParams.ExtraData = *extraData
+	}
 	if version >= clparams.CapellaVersion {
 		assembleParams.Withdrawals = payloadAttributes.Withdrawals
 	}
@@ -232,16 +388,6 @@ func (t *testingImpl) BuildBlockV1(
 	if version >= clparams.GloasVersion {
 		assembleParams.SlotNumber = (*uint64)(payloadAttributes.SlotNumber)
 		assembleParams.TargetGasLimit = (*uint64)(payloadAttributes.TargetGasLimit)
-	}
-
-	// Both steps share a single slot-duration budget so the total wall-clock
-	// time of BuildBlockV1 is bounded to one slot (e.g. 12 s), not two.
-	// Each step acquires the lock independently, matching production behaviour
-	// where ForkChoiceUpdated and GetPayload are separate RPC calls.
-	// If the caller already set a context deadline shorter than one slot, honour it.
-	deadline := time.Now().Add(time.Duration(t.server.config.SecondsPerSlot()) * time.Second)
-	if ctxDeadline, ok := ctx.Deadline(); ok && ctxDeadline.Before(deadline) {
-		deadline = ctxDeadline
 	}
 
 	var payloadID uint64
@@ -262,10 +408,10 @@ func (t *testingImpl) BuildBlockV1(
 		return busy, err
 	}()
 	if err != nil {
-		return nil, err
+		return nil, 0, err
 	}
 	if execBusy {
-		return nil, errors.New("execution service is busy, cannot build block")
+		return nil, 0, errors.New("execution service is busy, cannot build block")
 	}
 
 	var assembled execmodule.AssembledBlockResult
@@ -284,28 +430,16 @@ func (t *testingImpl) BuildBlockV1(
 		return busy, err
 	}()
 	if err != nil {
-		return nil, err
+		return nil, 0, err
 	}
 	if execBusy {
-		return nil, errors.New("execution service is busy retrieving assembled block")
+		return nil, 0, errors.New("execution service is busy retrieving assembled block")
 	}
 	if assembled.Block == nil {
-		return nil, errors.New("no assembled block data available for payload ID")
+		return nil, 0, errors.New("no assembled block data available for payload ID")
 	}
 
-	response, err := assembledBlockToPayloadResponse(assembled.Block, assembled.BlockValue, version)
-	if err != nil {
-		return nil, err
-	}
-	response.ShouldOverrideBuilder = false
-	if extraData != nil {
-		h := types.CopyHeader(assembled.Block.Block.Header())
-		h.Extra = *extraData
-		response.ExecutionPayload.ExtraData = *extraData
-		response.ExecutionPayload.BlockHash = h.Hash()
-	}
-
-	return response, nil
+	return &assembled, version, nil
 }
 
 // staticTxnProvider is a TxnProvider that yields a fixed transaction list exactly once,
