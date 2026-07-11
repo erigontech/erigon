@@ -113,7 +113,13 @@ func ReadRabbits(out []uint64, r io.Reader) ([]uint64, error) {
 		if err != nil {
 			return nil, err
 		}
+		if current+count < current {
+			return nil, fmt.Errorf("rabbit: index overflow at current=%d count=%d", current, count)
+		}
 		if active {
+			if count > length-uint64(len(out)) {
+				return nil, fmt.Errorf("rabbit: run length %d exceeds remaining %d expected elements", count, length-uint64(len(out)))
+			}
 			for i := current; i < current+count; i++ {
 				out = append(out, i)
 			}
