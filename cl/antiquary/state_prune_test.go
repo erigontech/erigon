@@ -20,15 +20,22 @@ import (
 	"context"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
 
+	"github.com/erigontech/erigon/cl/antiquary/tests"
+	"github.com/erigontech/erigon/cl/beacon/synced_data"
+	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/persistence/base_encoding"
 	state_accessors "github.com/erigontech/erigon/cl/persistence/state"
 	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/dbcfg"
 	"github.com/erigontech/erigon/db/kv/memdb"
+	"github.com/erigontech/erigon/db/snapshotsync"
+	"github.com/erigontech/erigon/node/ethconfig"
 )
 
 func seedStateSlots(t *testing.T, db kv.RwDB, table string, slots []uint64) {
@@ -165,6 +172,61 @@ func TestPruneStateTablesBatchCommits(t *testing.T) {
 	require.Empty(t, tableSlots(t, db, kv.BlockRoot))
 	require.Equal(t, uint64(100), pruneMarker(t, db, kv.BlockRoot))
 	require.GreaterOrEqual(t, commits.Load(), int64(10))
+}
+
+func TestStatePruneBudget(t *testing.T) {
+	cfg := &clparams.MainnetBeaconConfig // 12s slots: base 4s, cap 8s
+
+	require.Equal(t, 4*time.Second, statePruneBudget(cfg, 0))
+	require.Equal(t, 6*time.Second, statePruneBudget(cfg, 1000))
+	require.Equal(t, 8*time.Second, statePruneBudget(cfg, 1_000_000))
+
+	t.Setenv("CAPLIN_STATE_PRUNE_TIMEOUT", "150ms")
+	require.Equal(t, 150*time.Millisecond, statePruneBudget(cfg, 1000))
+}
+
+func TestStatePruneKillSwitch(t *testing.T) {
+	db := memdb.NewTestDB(t, dbcfg.ChainDB)
+	seedStateSlots(t, db, kv.BlockRoot, slotRange(0, 100))
+	ctx := context.Background()
+	stateSn := snapshotsync.NewCaplinStateSnapshots(ethconfig.BlocksFreezing{}, &clparams.MainnetBeaconConfig, datadir.New(t.TempDir()), snapshotsync.MakeCaplinStateSnapshotsTypes(db), log.New())
+	a := NewAntiquary(ctx, nil, nil, nil, &clparams.MainnetBeaconConfig, datadir.New(t.TempDir()), nil, db, stateSn, nil, nil, nil, log.New(), true, true, true, false, nil)
+	a.statePruneBoundaryFn = func(string) uint64 { return 50 }
+
+	a.statePruneDisabled = true
+	a.pruneFrozenStateTables(ctx)
+	require.Equal(t, slotRange(0, 100), tableSlots(t, db, kv.BlockRoot))
+	require.Zero(t, pruneMarker(t, db, kv.BlockRoot))
+
+	a.statePruneDisabled = false
+	a.pruneFrozenStateTables(ctx)
+	require.Equal(t, slotRange(50, 100), tableSlots(t, db, kv.BlockRoot))
+	require.Equal(t, uint64(50), pruneMarker(t, db, kv.BlockRoot))
+}
+
+func TestStatePruneWiredIntoAntiquaryCycle(t *testing.T) {
+	blocks, preState, postState := tests.GetCapellaRandom()
+	to := blocks[len(blocks)-1].Block.Slot + 33
+
+	run := func(disabled bool) int64 {
+		db := memdb.NewTestDB(t, dbcfg.ChainDB)
+		reader := tests.LoadChain(blocks, postState, db, t)
+		sn := synced_data.NewSyncedDataManager(&clparams.MainnetBeaconConfig, true)
+		sn.OnHeadState(postState)
+		ctx := context.Background()
+		vt := state_accessors.NewStaticValidatorTable()
+		stateSn := snapshotsync.NewCaplinStateSnapshots(ethconfig.BlocksFreezing{}, &clparams.MainnetBeaconConfig, datadir.New(t.TempDir()), snapshotsync.MakeCaplinStateSnapshotsTypes(db), log.New())
+		a := NewAntiquary(ctx, nil, preState, vt, &clparams.MainnetBeaconConfig, datadir.New(t.TempDir()), nil, db, stateSn, nil, reader, sn, log.New(), true, true, true, false, nil)
+		a.maxSlotsPerCommit = 8
+		a.statePruneDisabled = disabled
+		calls := &atomic.Int64{}
+		a.statePruneBoundaryFn = func(string) uint64 { calls.Add(1); return 0 }
+		require.NoError(t, a.IncrementBeaconState(ctx, to))
+		return calls.Load()
+	}
+
+	require.Zero(t, run(true))
+	require.Positive(t, run(false))
 }
 
 func TestPruneStateTablesRotationAndZeroBoundary(t *testing.T) {

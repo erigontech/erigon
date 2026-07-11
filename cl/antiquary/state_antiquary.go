@@ -391,6 +391,7 @@ func (s *Antiquary) IncrementBeaconState(ctx context.Context, to uint64) error {
 			stateAntiquaryCollector = newBeaconStatesCollector(s.cfg, s.dirs.Tmp, s.logger)
 			changedValidators = &sync.Map{}
 			lastCommitSlot = slot
+			s.pruneFrozenStateTables(ctx)
 		}
 		slashingOccurred = false // Set this to false at the beginning of each slot.
 
@@ -618,6 +619,8 @@ func (s *Antiquary) IncrementBeaconState(ctx context.Context, to uint64) error {
 		if err := s.stateSn.OpenFolder(); err != nil {
 			return err
 		}
+		// Prune only after OpenFolder: coverage must include the just-frozen range.
+		s.pruneFrozenStateTables(ctx)
 		if s.downloader != nil {
 			paths := s.stateSn.SegFileNames(0, to)
 			// Notify bittorent to seed the new snapshots

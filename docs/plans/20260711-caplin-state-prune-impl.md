@@ -119,26 +119,26 @@ Acceptance: tests green; `make erigon` builds.
 
 ### Task 4: budget, kill-switch, wire into the antiquary cadence
 
-- [ ] `cl/antiquary/state_prune.go`:
+- [x] `cl/antiquary/state_prune.go`:
   - `func statePruneBudget(cfg *clparams.BeaconChainConfig, backlogSlots uint64) time.Duration`
     mirroring EL (`execution/execmodule/forkchoice.go:915-917`):
     `base = SecondsPerSlot/3`, `max = SecondsPerSlot*2/3`,
     `budget = min(base + (backlogSlots/100)*200ms, max)`. Override the whole thing
     with `dbg.EnvDuration("CAPLIN_STATE_PRUNE_TIMEOUT", <computed>)`
     (`dbg_env.go:119`) when the env var is set.
-- [ ] `Antiquary` struct: add `statePruneStartIdx int` and `statePruneDisabled bool`.
+- [x] `Antiquary` struct: add `statePruneStartIdx int` and `statePruneDisabled bool`.
   Initialize `statePruneDisabled` in `NewAntiquary` from
   `dbg.EnvBool("CAPLIN_STATE_PRUNE_DISABLE", false)` (`common/dbg/dbg_env.go:69`).
   It is a **field, not a package var**, so tests can toggle it directly without
   mutating process env (which would not take effect after init anyway).
-- [ ] Deterministic table list: build once from `snapshotTypes.KeyValueGetters` keys,
+- [x] Deterministic table list: build once from `snapshotTypes.KeyValueGetters` keys,
   sorted (add a small accessor on `CaplinStateSnapshots` if needed).
-- [ ] **Gate: `if !s.statePruneDisabled && s.stateSn != nil`. Do NOT gate on
+- [x] **Gate: `if !s.statePruneDisabled && s.stateSn != nil`. Do NOT gate on
   `s.snapgen`** — `snapgen` only gates local dumping; an archive-state node that
   *downloaded* state snapshots must prune too. The natural scope is already
   archive-state (this loop only runs when `ArchiveStates`), and
   `ContiguousCoverageEnd == 0` makes a node with no visible coverage a safe no-op.
-- [ ] Two wire points in `cl/antiquary/state_antiquary.go`:
+- [x] Two wire points in `cl/antiquary/state_antiquary.go`:
   1. **After each `commitBatch()` + fresh collector** (after ~:404) — drains
      already-visible backlog frozen by prior calls.
   2. **After `DumpCaplinState` succeeds AND `s.stateSn.OpenFolder()`** (after

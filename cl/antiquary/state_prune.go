@@ -20,8 +20,10 @@ import (
 	"context"
 	"time"
 
+	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/persistence/base_encoding"
 	state_accessors "github.com/erigontech/erigon/cl/persistence/state"
+	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/diagnostics/metrics"
@@ -31,6 +33,57 @@ var (
 	mxAntiquaryStatePruneBatchSeconds = metrics.GetOrCreateSummary(`caplin_antiquary_batch_seconds{phase="state_prune"}`)
 	mxAntiquaryPrunedStateRows        = metrics.GetOrCreateCounter("caplin_antiquary_pruned_state_rows_total")
 )
+
+const statePruneBatchLimit = 1000
+
+func statePruneBudget(cfg *clparams.BeaconChainConfig, backlogSlots uint64) time.Duration {
+	base := time.Duration(cfg.SecondsPerSlot*1000/3) * time.Millisecond
+	maxBudget := time.Duration(cfg.SecondsPerSlot*2000/3) * time.Millisecond
+	budget := min(base+time.Duration(backlogSlots/100)*200*time.Millisecond, maxBudget)
+	return dbg.EnvDuration("CAPLIN_STATE_PRUNE_TIMEOUT", budget)
+}
+
+func (s *Antiquary) pruneFrozenStateTables(ctx context.Context) {
+	if s.statePruneDisabled || s.stateSn == nil {
+		return
+	}
+	if s.statePruneTables == nil {
+		s.statePruneTables = s.stateSn.TypeNames()
+	}
+	boundaryFn := s.statePruneBoundaryFn
+	if boundaryFn == nil {
+		boundaryFn = s.stateSn.ContiguousCoverageEnd
+	}
+	ctx, cancel := context.WithTimeout(ctx, statePruneBudget(s.cfg, s.statePruneBacklog(ctx)))
+	defer cancel()
+	next, err := pruneStateTables(ctx, s.mainDB, s.statePruneTables, boundaryFn, s.statePruneStartIdx, statePruneBatchLimit, s.logger)
+	if err != nil {
+		s.logger.Warn("[Antiquary] Failed to prune state tables", "err", err)
+		return
+	}
+	s.statePruneStartIdx = next
+}
+
+func (s *Antiquary) statePruneBacklog(ctx context.Context) uint64 {
+	if s.currentState == nil {
+		return 0
+	}
+	head := s.currentState.Slot()
+	minMarker := head
+	if err := s.mainDB.View(ctx, func(tx kv.Tx) error {
+		for _, table := range s.statePruneTables {
+			marker, err := state_accessors.ReadStatePruneProgress(tx, table)
+			if err != nil {
+				return err
+			}
+			minMarker = min(minMarker, marker)
+		}
+		return nil
+	}); err != nil {
+		return 0
+	}
+	return head - minMarker
+}
 
 // pruneStateTables deletes state rows below each table's boundary, visiting
 // tables once starting at startIdx and wrapping. Deletes are committed in
