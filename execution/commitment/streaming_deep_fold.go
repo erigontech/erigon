@@ -28,7 +28,6 @@ import (
 	"golang.org/x/sync/errgroup"
 	"golang.org/x/sync/semaphore"
 
-	"github.com/erigontech/erigon/common/empty"
 	"github.com/erigontech/erigon/execution/commitment/nibbles"
 )
 
@@ -214,12 +213,12 @@ func foldStorageRoot(ctx context.Context, sem *semaphore.Weighted, newWorker fun
 	if deferred := base.TakeDeferredUpdates(); len(deferred) > 0 {
 		pu.appendDeferred(deferred)
 	}
-	// A fully collapsed aggregate means a storage-less account: empty-trie root, not zero.
+	// A storage-less account must leave the account leaf's storage-root hashLen at 0, not
+	// empty.RootHash: computeCellHash supplies empty.RootHash at hash time, so the root is the
+	// same, but a stored hash makes needUnfolding descend into a storage-root branch that was
+	// never written, failing a later storage re-touch with "empty branch data read during unfold".
 	if sr.IsEmpty() {
-		var e cell
-		e.hashLen = 32
-		copy(e.hash[:], empty.RootHash[:])
-		return e, nil
+		return cell{}, nil
 	}
 	return sr, nil
 }
