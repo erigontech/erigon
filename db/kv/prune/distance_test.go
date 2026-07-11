@@ -56,7 +56,7 @@ func TestParseBlocksDistance(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.in, func(t *testing.T) {
-			got, err := ParseBlocksDistance(tc.in)
+			got, err := ParseBlocksDistance(tc.in, "prune.distance.blocks")
 			if tc.wantErr {
 				require.Error(t, err)
 				return
@@ -88,7 +88,7 @@ func TestParseHistoryDistance(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.in, func(t *testing.T) {
-			got, err := ParseHistoryDistance(tc.in)
+			got, err := ParseHistoryDistance(tc.in, "prune.distance")
 			if tc.wantErr {
 				require.Error(t, err)
 				return
@@ -108,7 +108,7 @@ func TestBlocksDistanceCLIValue(t *testing.T) {
 // A keep-post-merge Blocks sentinel must render with its readable alias rather
 // than the raw MaxUint64 magic number.
 func TestModeString_BlocksSentinelAlias(t *testing.T) {
-	blockDist, err := ParseBlocksDistance("keep-post-merge")
+	blockDist, err := ParseBlocksDistance("keep-post-merge", "prune.distance.blocks")
 	require.NoError(t, err)
 
 	mode, err := FromCli(archiveModeStr, 0, blockDist, 0, 0)
@@ -133,7 +133,7 @@ func TestParseCommitmentHistoryDistance(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.in, func(t *testing.T) {
-			got, err := ParseCommitmentHistoryDistance(tc.in)
+			got, err := ParseCommitmentHistoryDistance(tc.in, "prune.commitment-history.distance")
 			if tc.wantErr {
 				require.Error(t, err)
 				return
@@ -161,7 +161,7 @@ func TestParseReceiptsDistance(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.in, func(t *testing.T) {
-			got, err := ParseReceiptsDistance(tc.in)
+			got, err := ParseReceiptsDistance(tc.in, "prune.receipts.distance")
 			if tc.wantErr {
 				require.Error(t, err)
 				return
@@ -175,17 +175,17 @@ func TestParseReceiptsDistance(t *testing.T) {
 // Explicit receipts keep-all must round-trip through FromCli, be distinct from
 // the follow-history default, and render with its alias (not the magic number).
 func TestModeString_ReceiptsKeepAll(t *testing.T) {
-	dist, err := ParseReceiptsDistance("keep-all")
+	dist, err := ParseReceiptsDistance("keep-all", "prune.receipts.distance")
 	require.NoError(t, err)
 
 	mode, err := FromCli(minimalModeStr, 0, 0, 0, dist)
 	require.NoError(t, err)
 	assert.Equal(t, KeepAllReceiptsPruneMode, mode.Receipts)
 	assert.False(t, mode.ReceiptsFollowHistory(), "explicit keep-all is not the follow-history default")
-	assert.Contains(t, mode.String(), "--persist.receipts.distance=keep-all")
+	assert.Contains(t, mode.String(), "--prune.receipts.distance=keep-all")
 
 	def, err := FromCli(minimalModeStr, 0, 0, 0, 0)
 	require.NoError(t, err)
 	assert.True(t, def.ReceiptsFollowHistory(), "unset receipts follows history")
-	assert.NotContains(t, def.String(), "persist.receipts.distance")
+	assert.NotContains(t, def.String(), "prune.receipts.distance")
 }

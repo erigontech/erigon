@@ -353,7 +353,7 @@ func TestBuildBlackListForPruning_CommitmentHistoryDisabled(t *testing.T) {
 // (idx/history/accessor) with To <= minReceiptsStep are blacklisted, while the
 // rcache domain file, non-rcache history, and transaction segments are left
 // alone. Filtering runs even when History pruning is off (the archive +
-// --persist.receipts.distance config).
+// --prune.receipts.distance config).
 func TestBuildBlackListForPruning_Receipts(t *testing.T) {
 	preverified := snapcfg.Preverified{Items: snapcfg.PreverifiedItems{
 		{Name: "history/v1.0-rcache.0-16.v"},
@@ -461,4 +461,49 @@ func TestGetMinimumBlocksToDownload_MinBlock(t *testing.T) {
 	assert.Equal(t, kv.Step(199), historyStep)
 	assert.Equal(t, kv.Step(199), commitmentStep)
 	assert.Equal(t, kv.Step(99), receiptsStep)
+}
+
+// TestGetMinimumBlocksToDownload_CutoffBelowFrozenBodies pins sentinel
+// normalization: when a prune-to boundary block is not visited during the
+// frozen-body scan (it falls below the first frozen body), the corresponding
+// step must resolve to 0 — disabling that filter so nothing is blacklisted —
+// rather than staying at the MaxUint32 sentinel, which would blacklist every
+// matching history file and skip downloading data the node needs.
+func TestGetMinimumBlocksToDownload_CutoffBelowFrozenBodies(t *testing.T) {
+	const stepSize = 100
+	br := &fakeBlockReader{
+		frozenMax: 1000,
+		bodies: []frozenBody{
+			{blockNum: 500, baseTxNum: 50_000},
+			{blockNum: 600, baseTxNum: 60_000},
+			{blockNum: 700, baseTxNum: 70_000},
+		},
+	}
+	tx := beginTestRoTx(t)
+	// All three prune-to boundaries (50/60/70) sit below the first frozen body
+	// (500), so none is hit during iteration and each step stays unset.
+	_, historyStep, commitmentStep, receiptsStep, err := getMinimumBlocksToDownload(context.Background(), br, tx, 600, stepSize, 50, 60, 70)
+	if err != nil {
+		t.Fatal(err)
+	}
+	assert.Equal(t, kv.Step(0), historyStep)
+	assert.Equal(t, kv.Step(0), commitmentStep)
+	assert.Equal(t, kv.Step(0), receiptsStep)
+}
+
+// TestReceiptsSegmentRetentionCutoff: when blocks are kept but state history is
+// pruned, rcache history must follow state history (so download agrees with
+// retirement) while log indexes follow block data; the windows coincide otherwise.
+func TestReceiptsSegmentRetentionCutoff(t *testing.T) {
+	const head = 1_000_000
+	rcacheSeg := "history/v1.0-" + kv.RCacheDomain.String() + ".0-64.v"
+	logIdxSeg := "idx/v1.0-" + kv.LogAddrIdx.String() + ".0-64.ef"
+
+	blocksHistory := historyRetentionCutoff(prune.BlocksMode, head)
+	assert.NotZero(t, blocksHistory, "blocks-mode history window must be finite")
+	assert.Equal(t, uint64(0), blocksRetentionCutoff(prune.BlocksMode, nil, head), "blocks-mode blocks window is keep-all")
+	assert.Equal(t, blocksHistory, receiptsSegmentRetentionCutoff(prune.BlocksMode, nil, head, rcacheSeg))
+	assert.Equal(t, uint64(0), receiptsSegmentRetentionCutoff(prune.BlocksMode, nil, head, logIdxSeg))
+
+	assert.Equal(t, blocksRetentionCutoff(prune.MinimalMode, nil, head), receiptsSegmentRetentionCutoff(prune.MinimalMode, nil, head, rcacheSeg))
 }

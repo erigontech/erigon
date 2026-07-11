@@ -237,13 +237,13 @@ func applyRemainingEthFlags(ctx *cli.Command, cfg *ethconfig.Config, logger log.
 	}
 	_ = chainId
 
-	blockDistance := mustDistance(prune.ParseBlocksDistance(ctx.String(PruneBlocksDistanceFlag.Name)))
-	distance := mustDistance(prune.ParseHistoryDistance(ctx.String(PruneDistanceFlag.Name)))
+	blockDistance := mustDistance(prune.ParseBlocksDistance(ctx.String(PruneBlocksDistanceFlag.Name), PruneBlocksDistanceFlag.Name))
+	distance := mustDistance(prune.ParseHistoryDistance(ctx.String(PruneDistanceFlag.Name), PruneDistanceFlag.Name))
 
 	cfg.PersistReceiptsCacheV2 = ctx.Bool(utils.PersistReceiptsV2Flag.Name)
 
-	commitmentHistoryOlder := mustDistance(prune.ParseCommitmentHistoryDistance(ctx.String(utils.CommitmentHistoryDistanceFlag.Name)))
-	receiptsDistance := mustDistance(prune.ParseReceiptsDistance(ctx.String(utils.PersistReceiptsDistanceFlag.Name)))
+	commitmentHistoryOlder := mustDistance(prune.ParseCommitmentHistoryDistance(ctx.String(utils.CommitmentHistoryDistanceFlag.Name), utils.CommitmentHistoryDistanceFlag.Name))
+	receiptsDistance := mustDistance(prune.ParseReceiptsDistance(ctx.String(utils.PersistReceiptsDistanceFlag.Name), utils.PersistReceiptsDistanceFlag.Name))
 	if ctx.IsSet(utils.PersistReceiptsDistanceFlag.Name) && !cfg.PersistReceiptsCacheV2 {
 		utils.Fatalf("--%s requires --%s", utils.PersistReceiptsDistanceFlag.Name, utils.PersistReceiptsV2Flag.Name)
 	}
@@ -325,11 +325,11 @@ func applyRemainingEthFlags(ctx *cli.Command, cfg *ethconfig.Config, logger log.
 
 func ApplyFlagsForEthConfigCobra(f *pflag.FlagSet, cfg *ethconfig.Config) {
 	pruneMode := cobraStringValueOrDefault(f, PruneModeFlag.Name, PruneModeFlag.Value)
-	pruneBlockDistance := mustDistance(prune.ParseBlocksDistance(cobraStringValueOrDefault(f, PruneBlocksDistanceFlag.Name, PruneBlocksDistanceFlag.Value)))
-	pruneDistance := mustDistance(prune.ParseHistoryDistance(cobraStringValueOrDefault(f, PruneDistanceFlag.Name, PruneDistanceFlag.Value)))
+	pruneBlockDistance := mustDistance(prune.ParseBlocksDistance(cobraStringValueOrDefault(f, PruneBlocksDistanceFlag.Name, PruneBlocksDistanceFlag.Value), PruneBlocksDistanceFlag.Name))
+	pruneDistance := mustDistance(prune.ParseHistoryDistance(cobraStringValueOrDefault(f, PruneDistanceFlag.Name, PruneDistanceFlag.Value), PruneDistanceFlag.Name))
 
-	commitmentHistoryOlder := mustDistance(prune.ParseCommitmentHistoryDistance(cobraStringValueOrDefault(f, utils.CommitmentHistoryDistanceFlag.Name, "")))
-	receiptsDistance := mustDistance(prune.ParseReceiptsDistance(cobraStringValueOrDefault(f, utils.PersistReceiptsDistanceFlag.Name, "")))
+	commitmentHistoryOlder := mustDistance(prune.ParseCommitmentHistoryDistance(cobraStringValueOrDefault(f, utils.CommitmentHistoryDistanceFlag.Name, ""), utils.CommitmentHistoryDistanceFlag.Name))
+	receiptsDistance := mustDistance(prune.ParseReceiptsDistance(cobraStringValueOrDefault(f, utils.PersistReceiptsDistanceFlag.Name, ""), utils.PersistReceiptsDistanceFlag.Name))
 	if f.Changed(utils.PersistReceiptsDistanceFlag.Name) && !cobraBoolValueOrDefault(f, utils.PersistReceiptsV2Flag.Name, utils.PersistReceiptsV2Flag.Value) {
 		utils.Fatalf("--%s requires --%s", utils.PersistReceiptsDistanceFlag.Name, utils.PersistReceiptsV2Flag.Name)
 	}

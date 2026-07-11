@@ -256,7 +256,21 @@ func getMinimumBlocksToDownload(
 		return 0, 0, 0, 0, err
 	}
 
+	// A prune-to boundary below the first frozen body is never hit above, leaving
+	// its step at the MaxUint32 sentinel. Resolve it to 0 (disable the filter,
+	// keep everything) so an unfound cutoff can't blacklist every matching file.
+	minHistoryStep = clearUnsetStep(minHistoryStep)
+	minCommitmentHistoryStep = clearUnsetStep(minCommitmentHistoryStep)
+	minReceiptsStep = clearUnsetStep(minReceiptsStep)
+
 	return frozenBlocks - minToDownload, minHistoryStep, minCommitmentHistoryStep, minReceiptsStep, nil
+}
+
+func clearUnsetStep(s kv.Step) kv.Step {
+	if s == kv.Step(math.MaxUint32) {
+		return 0
+	}
+	return s
 }
 
 func getMaxStepRangeInSnapshots(preverified snapcfg.Preverified) (uint64, error) {
@@ -334,16 +348,29 @@ func blocksRetentionCutoff(pruneMode prune.Mode, cc *chain.Config, head uint64) 
 	}
 }
 
-// isReceiptsSegmentPruned reports whether a receipt-related preverified
-// segment (rcache, logaddrs, logtopics) should be skipped at download time.
-// It mirrors buildBlackListForPruning's per-mode handling for tx segments,
-// but operates on block height (converted to txNum/step) because receipts
-// are step-aligned in storage.
-func isReceiptsSegmentPruned(ctx context.Context, tx kv.RwTx, txNumsReader rawdbv3.TxNumsReader, cc *chain.Config, pruneMode prune.Mode, head uint64, p snapcfg.PreverifiedItem, stepSize uint64) bool {
+func historyRetentionCutoff(pruneMode prune.Mode, head uint64) uint64 {
+	if pruneMode.History == nil || !pruneMode.History.Enabled() {
+		return 0
+	}
+	return pruneMode.History.PruneTo(head)
+}
+
+// receiptsSegmentRetentionCutoff picks the download cutoff for a receipt-related
+// segment: rcache history follows state history (so download agrees with rcache
+// retirement in historyRetireCutoffs), log indexes follow block data.
+func receiptsSegmentRetentionCutoff(pruneMode prune.Mode, cc *chain.Config, head uint64, name string) uint64 {
+	if pruneMode.ReceiptsFollowHistory() && strings.Contains(name, kv.RCacheDomain.String()) {
+		return historyRetentionCutoff(pruneMode, head)
+	}
+	return blocksRetentionCutoff(pruneMode, cc, head)
+}
+
+// isReceiptsSegmentPruned reports whether a receipt-related segment predates
+// pruneHeight (0 = keep everything) and should be skipped at download time.
+func isReceiptsSegmentPruned(ctx context.Context, tx kv.RwTx, txNumsReader rawdbv3.TxNumsReader, p snapcfg.PreverifiedItem, stepSize, pruneHeight uint64) bool {
 	if strings.Contains(p.Name, "domain") {
 		return false // domain snapshots are never pruned
 	}
-	pruneHeight := blocksRetentionCutoff(pruneMode, cc, head)
 	if pruneHeight == 0 {
 		return false
 	}
@@ -461,7 +488,7 @@ func SyncSnapshots(
 					"pruneToBlock", commitmentHistoryPrune,
 					"minStep", minCommitmentHistoryStep)
 			}
-			// Receipts filtering is opt-in (requires --persist.receipts); a zero
+			// Receipts filtering is opt-in (requires --prune.include-receipts); a zero
 			// step disables it in buildBlackListForPruning.
 			if !prune.ReceiptsAmount().Enabled() {
 				minReceiptsStep = 0
@@ -512,18 +539,18 @@ func SyncSnapshots(
 				continue
 			}
 
-			// rcache follows the block-data window here only under the
-			// follow-history default; a finite --persist.receipts.distance uses
-			// its own window (the receipts blacklist), and keep-all keeps it all.
-			// Log indexes always follow the block-data window.
-			isRcacheRelatedSegment := strings.Contains(p.Name, kv.LogAddrIdx.String()) ||
+			// rcache reaches this filter only in the follow-history default;
+			// explicit receipts windows are handled by the blacklist above.
+			isLogIndexSegment := strings.Contains(p.Name, kv.LogAddrIdx.String()) ||
 				strings.Contains(p.Name, kv.LogTopicIdx.String())
-			if prune.ReceiptsFollowHistory() {
-				isRcacheRelatedSegment = isRcacheRelatedSegment || strings.Contains(p.Name, kv.RCacheDomain.String())
-			}
-
-			if isRcacheRelatedSegment && isReceiptsSegmentPruned(ctx, tx, txNumsReader, cc, prune, frozenBlocks, p, stepSize) {
-				continue
+			isRcacheHistorySegment := prune.ReceiptsFollowHistory() && strings.Contains(p.Name, kv.RCacheDomain.String())
+			if isLogIndexSegment || isRcacheHistorySegment {
+				cutoff := receiptsSegmentRetentionCutoff(prune, cc, frozenBlocks, p.Name)
+				if isReceiptsSegmentPruned(ctx, tx, txNumsReader, p, stepSize, cutoff) {
+					log.Debug(fmt.Sprintf("[%s] skipping expired receipt-related segment", logPrefix),
+						"name", p.Name, "cutoffBlock", cutoff, "rcacheHistory", isRcacheHistorySegment)
+					continue
+				}
 			}
 
 			if _, ok := blackListForPruning[p.Name]; ok {

@@ -180,9 +180,9 @@ func appendReceipts(sb *strings.Builder, m Mode) {
 	switch m.Receipts.toValue() {
 	case KeepAllBlocksPruneMode.toValue(): // follow-history default — nothing to render
 	case KeepAllReceiptsPruneMode.toValue():
-		sb.WriteString(" --persist.receipts.distance=keep-all")
+		sb.WriteString(" --prune.receipts.distance=keep-all")
 	default:
-		fmt.Fprintf(sb, " --persist.receipts.distance=%d", m.Receipts.toValue())
+		fmt.Fprintf(sb, " --prune.receipts.distance=%d", m.Receipts.toValue())
 	}
 }
 
@@ -493,7 +493,7 @@ func (m Mode) ReceiptsAmount() BlockAmount {
 }
 
 // ReceiptsFollowHistory reports whether receipt-cache retention uses the
-// follow-history default — no explicit --persist.receipts.distance, so the
+// follow-history default — no explicit --prune.receipts.distance, so the
 // cache tracks the general retention window rather than a finite window or
 // KeepAllReceiptsPruneMode.
 func (m Mode) ReceiptsFollowHistory() bool {
