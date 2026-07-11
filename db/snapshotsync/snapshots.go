@@ -1646,17 +1646,17 @@ func (s *BaseRoSnapshots) buildMissedIndices(logPrefix string, ctx context.Conte
 type View struct {
 	s           *BaseRoSnapshots
 	visible     *snapshotVisible // the pinned generation; released once by Close
-	segments    []*RoTx
+	segments    [snaptype.MaxEnum]*RoTx
 	baseSegType snaptype.Type
 }
 
 func (s *BaseRoSnapshots) View() *View {
 	v := s.acquireVisible()
-	sgs := make([]*RoTx, snaptype.MaxEnum)
+	view := &View{s: s, visible: v, baseSegType: snaptype2.Transactions} // Transactions is the last segment to be processed, so it's the most reliable.
 	for _, t := range s.enums {
-		sgs[t] = v.segments[t].BeginRo() // non-owning children; the View owns the single pin
+		view.segments[t] = v.segments[t].BeginRo() // non-owning children; the View owns the single pin
 	}
-	return &View{s: s, visible: v, segments: sgs, baseSegType: snaptype2.Transactions} // Transactions is the last segment to be processed, so it's the most reliable.
+	return view
 }
 
 func (v *View) Close() {
