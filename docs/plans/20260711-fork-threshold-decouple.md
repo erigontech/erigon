@@ -240,14 +240,37 @@ incremental-whale120k flag-on ≤ ~25 ms (observation, machine-dependent); fresh
 - Modify: `execution/commitment/fold_pool.go` (a `forkFolder` fork-floor — **not** a `foldK` change, so
   the frontier path is untouched)
 
-- [ ] measure whether gating the interior fork on slot-availability + a fixed `foldKMin` floor (instead
+- [x] measure whether gating the interior fork on slot-availability + a fixed `foldKMin` floor (instead
       of `child.subtreeCount > k`) buys parallelism *beyond* Task 3's top-level fix; sweep the floor.
       Fork-vs-inline is byte-identical, so this only moves concurrency/`B/op`, never bytes
-- [ ] **adopt only if** fresh improves AND `Benchmark_FreshBuildFork/incremental-whale120k` stays ≤
+      *(`Benchmark_ForkFloorSweep` + two 5×5 benchstat A/Bs; `TestFreshBuild_ForkFloorParity` pins
+      byte-identity — root + branch records vs serial fold + sequential oracle, gate-at-k control)*
+- [x] **adopt only if** fresh improves AND `Benchmark_FreshBuildFork/incremental-whale120k` stays ≤
       baseline AND B/op does not balloon; record the decision + numbers here. The entire *measured* win
-      is already in Task 3 — treat this as opportunistic
-- [ ] if not adopted, note it explicitly here (no silent scope drop) and keep only the top-level fix
-- [ ] run tests + `-race` - green before Task 5
+      is already in Task 3 — treat this as opportunistic *(ADOPTED — floor = `foldKMin`, numbers below)*
+- [x] if not adopted, note it explicitly here (no silent scope drop) and keep only the top-level fix
+      *(adopted — n/a)*
+- [x] run tests + `-race` - green before Task 5 *(full package green; `-race` green on
+      `TestFreshBuild|TestWholeFresh|TestTruthtreeFold`; `make lint` clean ×2)*
+
+**Adopted (2026-07-11, M5 Max 18c): interior fork gate = `min(foldKMin, k)`, decoupled from the k
+serial-leaf boundary** — `forkGate()` in `truthtree_fold.go`; the dev-only `freshForkFloor` knob pins
+explicit floors for the sweep bench (≥ k restores gate-at-k).
+
+- Sweep (fresh 1M, w18, 3x): gate-at-k 200.7 ms / 7.37 cores; floor-1024 → 187.6 ms / 8.68 cores;
+  floor-4096 → 183.1 ms but B/op +10 % (402.7 MB, +227k allocs); floor-16384 → wash (200.1 ms).
+- Confirming A/B (5x × count=5, benchstat): wall 189.7 → 174.4 ms (**−8.1 %, p=0.032**), avg-cores
+  7.29 → 8.26 (+13.3 %, p=0.008), B/op flat (362.5 → 361.8 MiB, p=1.0), cpu-ms ~ (p=0.15).
+- Locality: an account-plane-only floor variant showed **no win** (192.8 → 199.6 ms, p=0.55) — the
+  win lives in the storage-plane fold (the 750k whale storage folds at grain 1024 instead of ~42k,
+  smoothing the load-imbalance tail), so the floor is plane-blind.
+- Incremental whale120k flat across all floors (22.9–24.3 ms vs 24.3–25.0 baseline) — the frontier
+  path never constructs `forkFolder`, confirmed by measurement.
+- Cost: 750k-whale storage-fold micro-bench B/op 47.6 → 49.7 MB (+4 %), wall parity within noise.
+  Under `-race` the ~40× goroutine-spawn count roughly doubles measured heap (94.2 → 110.6 MB vs the
+  96 MB ceiling, which pre-change already sat at 98 % under race) — the fork-join alloc-ceiling tests
+  now take 2× slack via `race.Enabled` (`forkJoinAllocCeiling`), keeping the tight 96 MB pin in
+  normal builds.
 
 ### Task 5: (Optional) Unify the fork-dispatch pattern — cleanup only
 

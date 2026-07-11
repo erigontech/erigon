@@ -32,6 +32,7 @@ import (
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/empty"
 	"github.com/erigontech/erigon/common/length"
+	"github.com/erigontech/erigon/common/race"
 	"github.com/erigontech/erigon/execution/commitment/nibbles"
 )
 
@@ -486,6 +487,16 @@ func TestTruthtreeFold_ReconciledPinScope(t *testing.T) {
 // The ceiling sits well above the former and far below the latter, so it catches a buffer-reuse
 // regression without pinning an exact byte count.
 const truthtreeFoldAllocCeiling = 96 << 20
+
+// forkJoinAllocCeiling doubles the ceiling under the race detector: race instrumentation roughly
+// doubles the fork-join's measured per-op heap (per-goroutine bookkeeping), which would trip a
+// ceiling calibrated for normal builds.
+func forkJoinAllocCeiling() int64 {
+	if race.Enabled {
+		return 2 * truthtreeFoldAllocCeiling
+	}
+	return truthtreeFoldAllocCeiling
+}
 
 func freshWhaleFoldNode(tb testing.TB, slots int) *prefixNode {
 	tb.Helper()
@@ -1299,9 +1310,9 @@ func TestFreshBuild_AccountPlaneForkJoinAllocCeiling(t *testing.T) {
 	require.NotZero(t, res.N, "account-plane fork-join alloc bench did not run")
 	got := res.AllocedBytesPerOp()
 	t.Logf("account-plane fork-join fresh build: %.1f MB/op, %d allocs/op", float64(got)/(1<<20), res.AllocsPerOp())
-	require.Lessf(t, got, int64(truthtreeFoldAllocCeiling),
+	require.Lessf(t, got, forkJoinAllocCeiling(),
 		"account-plane fork-join alloc %.1f MB/op exceeds %.0f MB ceiling",
-		float64(got)/(1<<20), float64(truthtreeFoldAllocCeiling)/(1<<20))
+		float64(got)/(1<<20), float64(forkJoinAllocCeiling())/(1<<20))
 }
 
 // TestTruthtreeFold_ForkJoinAllocCeiling pins the parallel arm's buffer-per-lineage allocation: the
@@ -1313,7 +1324,7 @@ func TestTruthtreeFold_ForkJoinAllocCeiling(t *testing.T) {
 	require.NotZero(t, res.N, "fork-join alloc bench did not run")
 	got := res.AllocedBytesPerOp()
 	t.Logf("truthtree fork-join 750k fresh-whale: %.1f MB/op, %d allocs/op", float64(got)/(1<<20), res.AllocsPerOp())
-	require.Lessf(t, got, int64(truthtreeFoldAllocCeiling),
+	require.Lessf(t, got, forkJoinAllocCeiling(),
 		"fork-join alloc %.1f MB/op exceeds %.0f MB ceiling — buffer-per-lineage regression toward the ~575 MB naive fold",
-		float64(got)/(1<<20), float64(truthtreeFoldAllocCeiling)/(1<<20))
+		float64(got)/(1<<20), float64(forkJoinAllocCeiling())/(1<<20))
 }

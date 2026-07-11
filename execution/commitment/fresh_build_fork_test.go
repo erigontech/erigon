@@ -450,6 +450,55 @@ func TestFreshBuild_WhaleStorageForksAtGrain(t *testing.T) {
 		"whale storage did not fork below the depth-64 seam at the production account grain (per-subtree grain not engaged)")
 }
 
+// TestFreshBuild_ForkFloorParity pins the interior fork-floor gate: with k just below the corpus
+// (so no child clears the k gate) a sub-k forkFloor is the only source of forks, and the fold
+// must stay byte-identical to the serial fold and the sequential oracle (root + stored branches).
+// The gate-at-k control (forkFloor pinned to k) proves the floor is what created the forks.
+func TestFreshBuild_ForkFloorParity(t *testing.T) {
+	ctx := context.Background()
+	pk, upds := freshWhaleAccountPlaneCorpus(3_003, 8, 50_000)
+	root := freshAccountTrie(pk, upds)
+	require.Empty(t, root.ext, "a multi-way fresh corpus root branches at depth 0")
+	k := root.subtreeCount - 1
+
+	oracle := oracleRoot(t, pk, upds)
+	oracleMs := seqFreshBranchOracle(t, pk, upds)
+	srSerial, defSerial, err := foldFreshAccountRootDeferred(root)
+	require.NoError(t, err)
+	msSerial := NewMockState(t)
+	_, err = ApplyDeferredBranchUpdates(defSerial, 1, msSerial.PutBranch)
+	require.NoError(t, err)
+	requireBranchParity(t, oracleMs, msSerial)
+
+	forkFoldMaxDepth.Store(-1)
+	fc0 := newFoldCtx(true)
+	ff0 := &forkFolder{sem: semaphore.NewWeighted(1 << 20), k: k, forkFloor: k}
+	srCtl, err := ff0.fold(ctx, fc0, root, nil, 0)
+	require.NoError(t, err)
+	putDeferredUpdates(fc0.deferred)
+	fc0.hph.Release()
+	require.Equal(t, srSerial, srCtl, "gate-at-k control root != serial account fold")
+	require.Equal(t, int64(-1), forkFoldMaxDepth.Load(),
+		"test setup: gate-at-k control must not fork (children must sit below k)")
+
+	forkFoldMaxDepth.Store(-1)
+	fc := newFoldCtx(true)
+	ff := &forkFolder{sem: semaphore.NewWeighted(1 << 20), k: k, forkFloor: 256}
+	srPar, err := ff.fold(ctx, fc, root, nil, 0)
+	require.NoError(t, err)
+	defPar := fc.deferred
+	fc.hph.Release()
+	require.GreaterOrEqual(t, forkFoldMaxDepth.Load(), int64(0),
+		"fork floor did not create forks (gate not engaged)")
+
+	require.Equal(t, srSerial, srPar, "fork-floor root != serial account fold")
+	require.Equal(t, oracle, srPar[:], "fork-floor state root != sequential oracle")
+	msPar := NewMockState(t)
+	_, err = ApplyDeferredBranchUpdates(defPar, 1, msPar.PutBranch)
+	require.NoError(t, err)
+	requireBranchParity(t, oracleMs, msPar)
+}
+
 // nibFoldRendezvous pins top-nibble fold overlap deterministically: each fold entry blocks until a
 // second entrant arrives, so a serial dispatch (one nibble in flight at a time) strands the first
 // entrant until the timeout, while a concurrent dispatch releases as soon as two folds run

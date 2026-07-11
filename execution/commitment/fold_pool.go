@@ -163,6 +163,11 @@ var wholeFreshForkJoins atomic.Int64
 // wholeFreshCellFolds counts top-nibble subtrees folded through the account-plane fork-join.
 var wholeFreshCellFolds atomic.Int64
 
+// freshForkFloor is a dev-only package knob for the fresh fork-join's interior fork gate (see
+// forkFolder.forkFloor) — set by the floor-sweep bench, never wired to a CLI flag. Default 0
+// applies the foldKMin gate; a value at or above k restores the gate-at-k dispatch.
+var freshForkFloor atomic.Uint32
+
 // onNibFold, when non-nil, receives the wall time of each top-nibble subtree fold, measured on the
 // goroutine executing it — a measurement hook for the fresh-fork critical-path study. nil in
 // production; must be safe for concurrent calls.
@@ -295,7 +300,7 @@ func (fp *foldPool) dispatchWholeFresh(ctx context.Context, base *HexPatriciaHas
 	if sem == nil {
 		sem = semaphore.NewWeighted(int64(maxFoldConcurrency()))
 	}
-	ff := &forkFolder{sem: sem, k: foldK(rootTask.node.subtreeCount, fp.numWorkers), numWorkers: fp.numWorkers}
+	ff := &forkFolder{sem: sem, k: foldK(rootTask.node.subtreeCount, fp.numWorkers), numWorkers: fp.numWorkers, forkFloor: freshForkFloor.Load()}
 
 	cells, present, deferred, err := foldTopNibblesForkJoin(ctx, ff, rootTask.children, rootTask.prefix)
 	if err != nil {
@@ -790,7 +795,7 @@ func (fp *foldPool) foldFreshForkJoin(ctx context.Context, node *prefixNode, acc
 	if sem == nil {
 		sem = semaphore.NewWeighted(int64(maxFoldConcurrency()))
 	}
-	ff := &forkFolder{sem: sem, k: foldK(node.subtreeCount, fp.numWorkers), numWorkers: fp.numWorkers}
+	ff := &forkFolder{sem: sem, k: foldK(node.subtreeCount, fp.numWorkers), numWorkers: fp.numWorkers, forkFloor: freshForkFloor.Load()}
 	fc := newFoldCtx(true)
 	defer fc.hph.Release()
 	h, err := ff.fold(ctx, fc, node, accPrefix, 64)

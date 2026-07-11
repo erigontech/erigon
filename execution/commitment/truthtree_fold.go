@@ -300,17 +300,32 @@ func newFoldCtx(emit bool) *foldCtx {
 }
 
 // forkFolder folds a provably-fresh subtree — in either plane — with a recursive per-split-point
-// fork-join, bounding concurrency by sem and splitting at any branch whose subtreeCount exceeds k —
-// the same threshold the fold DAG uses. Below k a subtree folds serially via foldNode's buffer-reuse
-// path; above it each child branch forks onto its own lineage, and a depth-64 account seam recurses
-// into its storage on a grain sized to that storage subtree's own key count (see storageFold). The
-// stitch is foldNode's exact 17-slot branch keccak, so the fork-join root and its branch records are
-// byte-identical to the serial fold. numWorkers sizes the storage-plane grain and is 0 for a caller
-// that pins k directly (a test forcing a low K); foldK treats 0 workers as 1.
+// fork-join, bounding concurrency by sem. At or below k — the same threshold the fold DAG uses — a
+// subtree folds serially via foldNode's buffer-reuse path; above it each child branch clearing the
+// fork gate (forkGate — foldKMin by default, decoupled from the k leaf boundary) forks onto its own
+// lineage, and a depth-64 account seam recurses into its storage on a grain sized to that storage
+// subtree's own key count (see storageFold). The stitch is foldNode's exact 17-slot branch keccak,
+// so the fork-join root and its branch records are byte-identical to the serial fold. numWorkers
+// sizes the storage-plane grain and is 0 for a caller that pins k directly (a test forcing a low K);
+// foldK treats 0 workers as 1.
 type forkFolder struct {
 	sem        *semaphore.Weighted
 	k          uint32
 	numWorkers int
+	// forkFloor pins the fork gate below k so smaller child branches become fork candidates while
+	// the serial-leaf boundary stays at k — slot availability, not the load-balance grain, then
+	// limits fan-out. Fork-vs-inline is byte-identical, so the floor only moves concurrency and
+	// allocation, never bytes. Zero means the default foldKMin gate; k or above disables the floor.
+	forkFloor uint32
+}
+
+// forkGate returns the child subtree size above which a child branch is a fork candidate.
+func (ff *forkFolder) forkGate() uint32 {
+	g := ff.forkFloor
+	if g == 0 {
+		g = foldKMin
+	}
+	return min(g, ff.k)
 }
 
 // forkFoldMaxDepth records the deepest branch (its row's nibble depth) at which a fresh fork-join
@@ -328,8 +343,9 @@ func recordForkDepth(depth int16) {
 	}
 }
 
-// forkJob is one storage sub-branch large enough (subtreeCount > k) to be a split point: either
-// forked onto its own lineage or, when foldSem is saturated, folded inline in the parent lineage.
+// forkJob is one sub-branch large enough (subtreeCount clearing the fork gate) to be a split point:
+// either forked onto its own lineage or, when foldSem is saturated, folded inline in the parent
+// lineage.
 type forkJob struct {
 	node   *prefixNode
 	prefix []byte
@@ -340,9 +356,9 @@ type forkJob struct {
 // fold folds the branch pn (whose branch row sits at branchDepth, in either plane) into its hash and
 // merges every forked child's deferred updates into fc. A subtree at or below k folds serially in fc
 // via foldNode (buffer reuse). Above k, leaves and small child branches fold serially in fc, and each
-// child branch larger than k is a split point: it forks onto its own foldCtx when a foldSem slot is
-// free, else folds inline in fc. A depth-64 account seam recurses back through fold, so a whale's
-// fresh storage plane fans out on the same split threshold as the account plane above it.
+// child branch clearing the fork gate is a split point: it forks onto its own foldCtx when a foldSem
+// slot is free, else folds inline in fc. A depth-64 account seam recurses back through fold, so a
+// whale's fresh storage plane fans out on the same split threshold as the account plane above it.
 //
 // TryAcquire (not a blocking Acquire) is load-bearing for deadlock freedom: a forked goroutine holds
 // its slot while awaiting its own forked children, so under saturation a blocking acquire would wedge
@@ -360,6 +376,7 @@ func (ff *forkFolder) fold(ctx context.Context, fc *foldCtx, pn *prefixNode, pre
 	}
 	childDepth := branchDepth + 1
 	storagePlane := branchDepth >= 64
+	gate := ff.forkGate()
 	var rec [16]foldChild
 	totalLen := 0
 	var jobs []forkJob
@@ -414,7 +431,7 @@ func (ff *forkFolder) fold(ctx context.Context, fc *foldCtx, pn *prefixNode, pre
 			r.hlen = length.Hash + 1
 			childBranchDepth := childDepth + int16(len(child.ext))
 			childPrefix := fc.childPrefix(prefix, nib, child.ext)
-			if child.subtreeCount > ff.k {
+			if child.subtreeCount > gate {
 				jobs = append(jobs, forkJob{node: child, prefix: childPrefix, depth: childBranchDepth, nib: nib})
 			} else {
 				bh, err := fc.foldNode(child, childPrefix, childBranchDepth)
@@ -490,7 +507,7 @@ func (ff *forkFolder) fold(ctx context.Context, fc *foldCtx, pn *prefixNode, pre
 // at ff.k so a caller that pins a low K (a test proving deep forking) still forks at least that finely
 // below the seam. Only the grain differs — the fold is byte-identical to a same-k ff.fold.
 func (ff *forkFolder) storageFold(ctx context.Context, fc *foldCtx, node *prefixNode, prefix []byte, branchDepth int16) (common.Hash, error) {
-	storageFF := &forkFolder{sem: ff.sem, numWorkers: ff.numWorkers, k: min(ff.k, foldK(node.subtreeCount, ff.numWorkers))}
+	storageFF := &forkFolder{sem: ff.sem, numWorkers: ff.numWorkers, k: min(ff.k, foldK(node.subtreeCount, ff.numWorkers)), forkFloor: ff.forkFloor}
 	return storageFF.fold(ctx, fc, node, prefix, branchDepth)
 }
 

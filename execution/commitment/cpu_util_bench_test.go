@@ -211,6 +211,52 @@ func Benchmark_FreshNibTimeline(b *testing.B) {
 	}
 }
 
+// benchForkFloor sets the dev-only interior fork-floor knob for a bench and restores it on cleanup.
+func benchForkFloor(b *testing.B, floor uint32) {
+	b.Helper()
+	prev := freshForkFloor.Load()
+	freshForkFloor.Store(floor)
+	b.Cleanup(func() { freshForkFloor.Store(prev) })
+}
+
+// Benchmark_ForkFloorSweep sweeps the fresh fork-join's interior fork gate (forkFolder.forkFloor)
+// against the gate-at-k control (the pre-floor dispatch) on the fresh 1M-whale corpus and the
+// incremental seeded whale, reporting wall/avg-cores/B/op per floor so the interior-threshold
+// decouple stays justified by measurement.
+func Benchmark_ForkFloorSweep(b *testing.B) {
+	ncpu := runtime.NumCPU()
+	wpk, wupds := buildWhaleCorpus(whale1M())
+	inc1, inc2 := buildRetouchedWhale(717, 120_000)
+	floors := []struct {
+		name string
+		v    uint32
+	}{
+		{"gate-at-k", ^uint32(0)},
+		{"floor-1024", foldKMin},
+		{"floor-4096", 4 * foldKMin},
+		{"floor-16384", 16 * foldKMin},
+	}
+
+	b.Run("fresh1M", func(b *testing.B) {
+		for _, f := range floors {
+			b.Run(fmt.Sprintf("%s/w%d", f.name, ncpu), func(b *testing.B) {
+				benchForkWholeFresh(b, true)
+				benchForkFloor(b, f.v)
+				runProcessCPUUtilBench(b, wpk, wupds, ncpu)
+			})
+		}
+	})
+	b.Run("incremental-whale120k", func(b *testing.B) {
+		for _, f := range floors {
+			b.Run(fmt.Sprintf("%s/w%d", f.name, ncpu), func(b *testing.B) {
+				benchForkWholeFresh(b, true)
+				benchForkFloor(b, f.v)
+				runIncrementalBenchCarried(b, inc1, inc2, ncpu)
+			})
+		}
+	})
+}
+
 func rusageCPU(ru *syscall.Rusage) time.Duration {
 	u := time.Duration(ru.Utime.Sec)*time.Second + time.Duration(ru.Utime.Usec)*time.Microsecond
 	s := time.Duration(ru.Stime.Sec)*time.Second + time.Duration(ru.Stime.Usec)*time.Microsecond
