@@ -1977,9 +1977,11 @@ Flags for managing how old chain data is handled and stored. See [Snapshots Mana
 * `--prune.distance.blocks value`: Keeps block history for the latest `N` blocks, or a named policy: `keep-post-merge` (prune pre-merge blocks only) or `keep-all` (keep every block).
   * Default: unset (retention follows `--prune.mode`)
 * `--prune.include-commitment-history, --prune.experimental.include-commitment-history, --experimental.commitment-history`: Enables fast `eth_getProof` for executed blocks by storing commitment history. Requires +32 GB RAM. See [`eth_getProof`](/interacting-with-erigon/eth#eth_getproof).
-* `--prune.commitment-history.distance value`: Keeps commitment history for the latest `N` blocks, or `keep-all`. Empty or `0` (default) keeps everything. Requires `--prune.include-commitment-history`.
-* `--prune.receipts.distance, --persist.receipts.distance value`: Keeps the receipt cache for the latest `N` blocks, or `keep-all`. Empty or `0` (default) follows the state-history window. Requires `--prune.include-receipts`.
   * Default: `false`
+* `--prune.commitment-history.distance value`: Keeps commitment history for the latest `N` blocks, or `keep-all`. Empty or `0` (default) keeps everything. Requires `--prune.include-commitment-history`.
+  * Default: unset (empty / `0`, keeps everything)
+* `--prune.receipts.distance, --persist.receipts.distance value`: Keeps the receipt cache for the latest `N` blocks, or `keep-all`. Empty or `0` (default) follows the state-history window. Requires `--prune.include-receipts`.
+  * Default: unset (empty / `0`, follows the state-history window)
 * `--snap.skip-state-snapshot-download`: Skips state download and starts from genesis.
   * Default: `false`
 * `--snap.keepblocks`: Workaround/debug — keeps ancient blocks in the DB instead of moving them into snapshots (useful for debugging).
