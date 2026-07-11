@@ -102,7 +102,7 @@ var (
 	PersistReceiptsV2Flag = cli.BoolFlag{
 		Name:    "prune.include-receipts",
 		Aliases: []string{"experiment.persist.receipts.v2", "persist.receipts"},
-		Usage:   "Download historical Receipts. If disabled: using state-history to re-exec transactions and generate Receipts - all RPC: eth_getLogs, eth_getBlockReceipts will work (just higher latency)",
+		Usage:   "Download historical Receipts (stored on disk as the rcache domain: snapshots/history/*rcache*.v). If disabled: using state-history to re-exec transactions and generate Receipts - all RPC: eth_getLogs, eth_getBlockReceipts will work (just higher latency)",
 		Value:   ethconfig.Defaults.PersistReceiptsCacheV2,
 	}
 	DevValidatorSeedFlag = cli.StringFlag{

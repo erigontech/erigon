@@ -59,5 +59,7 @@ back to genesis — while pruning **state history**. It retains state only withi
 blocks), the same state-retention as a Full Node, but unlike a Full Node it never prunes older blocks. This suits users
 who need complete historical **block and transaction data** — for research, indexing, or block explorers — without
 paying the disk cost of an archive node's full historical **state**. For full-range **receipts and logs**
-(`eth_getLogs` / `eth_getBlockReceipts` back to genesis), add `--prune.include-receipts`; without it they are served
-only within the state-history window (the last 262,144 blocks).
+(`eth_getLogs` / `eth_getBlockReceipts` back to genesis), add
+`--prune.include-receipts --prune.receipts.distance=keep-all`; with `--prune.include-receipts` alone the receipt cache
+follows the state-history window (the last 262,144 blocks), and without it receipts are re-derived from state history
+within that same window.

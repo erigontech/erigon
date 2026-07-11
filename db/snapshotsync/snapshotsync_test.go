@@ -490,3 +490,20 @@ func TestGetMinimumBlocksToDownload_CutoffBelowFrozenBodies(t *testing.T) {
 	assert.Equal(t, kv.Step(0), commitmentStep)
 	assert.Equal(t, kv.Step(0), receiptsStep)
 }
+
+// TestReceiptsSegmentRetentionCutoff: when blocks are kept but state history is
+// pruned, rcache history must follow state history (so download agrees with
+// retirement) while log indexes follow block data; the windows coincide otherwise.
+func TestReceiptsSegmentRetentionCutoff(t *testing.T) {
+	const head = 1_000_000
+	rcacheSeg := "history/v1.0-" + kv.RCacheDomain.String() + ".0-64.v"
+	logIdxSeg := "idx/v1.0-" + kv.LogAddrIdx.String() + ".0-64.ef"
+
+	blocksHistory := historyRetentionCutoff(prune.BlocksMode, head)
+	assert.NotZero(t, blocksHistory, "blocks-mode history window must be finite")
+	assert.Equal(t, uint64(0), blocksRetentionCutoff(prune.BlocksMode, nil, head), "blocks-mode blocks window is keep-all")
+	assert.Equal(t, blocksHistory, receiptsSegmentRetentionCutoff(prune.BlocksMode, nil, head, rcacheSeg))
+	assert.Equal(t, uint64(0), receiptsSegmentRetentionCutoff(prune.BlocksMode, nil, head, logIdxSeg))
+
+	assert.Equal(t, blocksRetentionCutoff(prune.MinimalMode, nil, head), receiptsSegmentRetentionCutoff(prune.MinimalMode, nil, head, rcacheSeg))
+}

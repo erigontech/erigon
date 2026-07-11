@@ -27,11 +27,9 @@ const (
 	historyDistanceAliasHint = `a block count or "keep-all"`
 )
 
-// ParseBlocksDistance parses a --prune.distance.blocks value. It accepts a
-// decimal block count, the named sentinels ("keep-post-merge" →
-// KeepPostMergeBlocksPruneMode, "keep-all" → KeepAllBlocksPruneMode), or an
-// empty string (returns 0, meaning unset).
-func ParseBlocksDistance(s string) (uint64, error) {
+// ParseBlocksDistance parses a block-distance value: a decimal count,
+// "keep-post-merge", "keep-all", or empty ("" → 0, unset).
+func ParseBlocksDistance(s, flagName string) (uint64, error) {
 	switch normalizeDistanceAlias(s) {
 	case "":
 		return 0, nil
@@ -40,27 +38,24 @@ func ParseBlocksDistance(s string) (uint64, error) {
 	case "keep-all":
 		return uint64(KeepAllBlocksPruneMode), nil
 	default:
-		return parseDistanceNumber(s, "--prune.distance.blocks", blocksDistanceAliasHint)
+		return parseDistanceNumber(s, "--"+flagName, blocksDistanceAliasHint)
 	}
 }
 
-// ParseHistoryDistance parses a --prune.distance value: a decimal block count,
-// "keep-all" (keep all state history), or an empty string (0, meaning unset).
-func ParseHistoryDistance(s string) (uint64, error) {
-	return parseStateHistoryDistance(s, "--prune.distance", KeepPostMergeBlocksPruneMode)
+// ParseHistoryDistance parses a state-history distance value: a decimal count,
+// "keep-all", or empty ("" → 0, unset).
+func ParseHistoryDistance(s, flagName string) (uint64, error) {
+	return parseStateHistoryDistance(s, "--"+flagName, KeepPostMergeBlocksPruneMode)
 }
 
 // ParseCommitmentHistoryDistance parses a commitment-history distance value;
-// "keep-all" maps to KeepAllBlocksPruneMode (also its default). flagName is the
-// CLI flag the value came from, used only in error messages.
+// "keep-all" maps to KeepAllBlocksPruneMode (its default).
 func ParseCommitmentHistoryDistance(s, flagName string) (uint64, error) {
 	return parseStateHistoryDistance(s, "--"+flagName, KeepAllBlocksPruneMode)
 }
 
 // ParseReceiptsDistance parses a receipts distance value; "keep-all" maps to
-// KeepAllReceiptsPruneMode (see its declaration for why receipts needs a keep-all
-// value distinct from the KeepAllBlocksPruneMode default). flagName is the CLI
-// flag the value came from, used only in error messages.
+// KeepAllReceiptsPruneMode, distinct from the KeepAllBlocksPruneMode follow-history default.
 func ParseReceiptsDistance(s, flagName string) (uint64, error) {
 	return parseStateHistoryDistance(s, "--"+flagName, KeepAllReceiptsPruneMode)
 }

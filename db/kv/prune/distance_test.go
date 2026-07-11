@@ -56,7 +56,7 @@ func TestParseBlocksDistance(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.in, func(t *testing.T) {
-			got, err := ParseBlocksDistance(tc.in)
+			got, err := ParseBlocksDistance(tc.in, "prune.distance.blocks")
 			if tc.wantErr {
 				require.Error(t, err)
 				return
@@ -88,7 +88,7 @@ func TestParseHistoryDistance(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.in, func(t *testing.T) {
-			got, err := ParseHistoryDistance(tc.in)
+			got, err := ParseHistoryDistance(tc.in, "prune.distance")
 			if tc.wantErr {
 				require.Error(t, err)
 				return
@@ -108,7 +108,7 @@ func TestBlocksDistanceCLIValue(t *testing.T) {
 // A keep-post-merge Blocks sentinel must render with its readable alias rather
 // than the raw MaxUint64 magic number.
 func TestModeString_BlocksSentinelAlias(t *testing.T) {
-	blockDist, err := ParseBlocksDistance("keep-post-merge")
+	blockDist, err := ParseBlocksDistance("keep-post-merge", "prune.distance.blocks")
 	require.NoError(t, err)
 
 	mode, err := FromCli(archiveModeStr, 0, blockDist, 0, 0)
