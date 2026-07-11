@@ -43,9 +43,9 @@ jobs:
       - name: Set reference data dir based on branch
         run: |
           # For pull_request events base_ref is the target branch name; for push/dispatch parse from ref.
-          BRANCH="${{ github.base_ref }}"
+          BRANCH="$GITHUB_BASE_REF"
           if [ -z "$BRANCH" ]; then
-            BRANCH="${{ github.ref }}"
+            BRANCH="$GITHUB_REF"
             BRANCH="${BRANCH#refs/heads/}"
           fi
           if [[ "$BRANCH" == release/* ]]; then
@@ -149,16 +149,18 @@ jobs:
 
       - name: Run RPC Integration Tests
         id: test_step
+        env:
+          RUNNER_WS: ${{ runner.workspace }}
         run: |
           mkdir -p $RPC_PAST_TEST_DIR
-          commit=$(git -C ${{runner.workspace}}/erigon rev-parse --short HEAD)
+          commit=$(git -C "$RUNNER_WS/erigon" rev-parse --short HEAD)
           TEST_RESULT_DIR="$RPC_PAST_TEST_DIR/mainnet_$(date +%Y%m%d_%H%M%S)_integration_${commit}_http"
           echo "TEST_RESULT_DIR=$TEST_RESULT_DIR" >> $GITHUB_ENV
 
-          chmod +x ${{ runner.workspace }}/erigon/.github/workflows/scripts/run_rpc_tests_remote_ethereum.sh
-          
+          chmod +x "$RUNNER_WS/erigon/.github/workflows/scripts/run_rpc_tests_remote_ethereum.sh"
+
           set +e # Disable exit on error for test run
-          ${{ runner.workspace }}/erigon/.github/workflows/scripts/run_rpc_tests_remote_ethereum.sh ${{ runner.workspace }} $TEST_RESULT_DIR
+          "$RUNNER_WS/erigon/.github/workflows/scripts/run_rpc_tests_remote_ethereum.sh" "$RUNNER_WS" $TEST_RESULT_DIR
           test_exit_status=$? # Capture test runner script exit status
           set -e # Re-enable exit on error after test run
 
@@ -176,27 +178,30 @@ jobs:
 
       - name: Generate Summary
         if: always() && steps.test_step.outputs.test_executed == 'true'
+        env:
+          WORKFLOW: ${{ github.workflow }}
+          TEST_RESULT: ${{ steps.test_step.outputs.TEST_RESULT }}
         run: |
-          SUMMARY_FILE="${{ env.TEST_RESULT_DIR }}/summary.md"
-          LOG_FILE="${{ env.TEST_RESULT_DIR }}/output.log"
+          SUMMARY_FILE="$TEST_RESULT_DIR/summary.md"
+          LOG_FILE="$TEST_RESULT_DIR/output.log"
 
-          cat << 'EOF' > $SUMMARY_FILE
-          # ${{ github.workflow }} Report
+          {
+            echo "# $WORKFLOW Report"
+            echo
+            echo "## Test Configuration"
+            echo "- **Chain:** $CHAIN"
+            echo "- **Result:** $TEST_RESULT"
+            echo
+            echo "## Test Output"
+            echo '```'
+          } > "$SUMMARY_FILE"
 
-          ## Test Configuration
-          - **Chain:** ${{ env.CHAIN }}
-          - **Result:** ${{ steps.test_step.outputs.TEST_RESULT }}
+          cat "$LOG_FILE" >> "$SUMMARY_FILE"
 
-          ## Test Output
-          ```
-          EOF
+          echo '```' >> "$SUMMARY_FILE"
 
-          cat $LOG_FILE >> $SUMMARY_FILE
-
-          echo '```' >> $SUMMARY_FILE
-
-          cat $SUMMARY_FILE
-          cat $SUMMARY_FILE >> $GITHUB_STEP_SUMMARY
+          cat "$SUMMARY_FILE"
+          cat "$SUMMARY_FILE" >> "$GITHUB_STEP_SUMMARY"
 
       - name: Stop Erigon & RpcDaemon
         if: always()
@@ -220,8 +225,10 @@ jobs:
 
       - name: Restore Erigon Chaindata Directory
         if: always()
+        env:
+          SAVE_CHAINDATA_OUTCOME: ${{ steps.save_chaindata_step.outcome }}
         run: |
-          if [ -d "$ERIGON_TESTBED_AREA/chaindata-prev" ] && [ "${{ steps.save_chaindata_step.outcome }}" == "success" ]; then
+          if [ -d "$ERIGON_TESTBED_AREA/chaindata-prev" ] && [ "$SAVE_CHAINDATA_OUTCOME" == "success" ]; then
           rm -rf $ERIGON_REFERENCE_DATA_DIR/chaindata
           echo "Restore chaindata"
           mv $ERIGON_TESTBED_AREA/chaindata-prev $ERIGON_REFERENCE_DATA_DIR/chaindata
@@ -256,18 +263,20 @@ jobs:
           python3 $ERIGON_QA_PATH/test_system/qa-tests/uploads/upload_test_results.py \
             --repo erigon \
             --commit $(git rev-parse HEAD) \
-            --branch ${{ github.ref_name }} \
+            --branch "$GITHUB_REF_NAME" \
             --test_name rpc-integration-tests-remote \
             --chain $CHAIN \
-            --runner ${{ runner.name }} \
+            --runner "$RUNNER_NAME" \
             --db_version $db_version \
             --outcome $TEST_RESULT \
             --result_file $TEST_RESULT_DIR/results/test_report.json
 
       - name: Action to check failure condition
         if: failure()
+        env:
+          TEST_EXECUTED: ${{ steps.test_step.outputs.test_executed }}
         run: |
-          if [ "${{ steps.test_step.outputs.test_executed }}" != "true" ]; then
+          if [ "$TEST_EXECUTED" != "true" ]; then
             echo "::error::Test not executed, workflow failed for infrastructure reasons"
           fi
           exit 1
