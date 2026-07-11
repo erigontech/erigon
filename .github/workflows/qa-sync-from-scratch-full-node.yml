@@ -59,7 +59,7 @@ jobs:
 
           # Run Erigon, wait sync and check ability to maintain sync
           python3 $ERIGON_QA_PATH/test_system/qa-tests/tip-tracking/run_and_check_tip_tracking.py \
-            ${{ github.workspace }}/build/bin $ERIGON_DATA_DIR $TRACKING_TIME_SECONDS $TOTAL_TIME_SECONDS Erigon3 $CHAIN $NODE_TYPE
+            "$GITHUB_WORKSPACE/build/bin" $ERIGON_DATA_DIR $TRACKING_TIME_SECONDS $TOTAL_TIME_SECONDS Erigon3 $CHAIN $NODE_TYPE
 
           # Capture monitoring script exit status
           test_exit_status=$?
@@ -94,12 +94,12 @@ jobs:
           python3 $ERIGON_QA_PATH/test_system/qa-tests/uploads/upload_test_results.py \
             --repo erigon \
             --commit $(git rev-parse HEAD) \
-            --branch ${{ github.ref_name }} \
+            --branch "$GITHUB_REF_NAME" \
             --test_name sync-from-scratch-full-node \
             --chain $CHAIN \
-            --runner ${{ runner.name }} \
+            --runner "$RUNNER_NAME" \
             --outcome $TEST_RESULT \
-            --result_file ${{ github.workspace }}/result-$CHAIN.json
+            --result_file "$GITHUB_WORKSPACE/result-$CHAIN.json"
 
       - name: Upload test results
         if: ${{ always() && steps.test_step.outputs.test_executed == 'true' }}
@@ -135,7 +135,7 @@ jobs:
           # du -sB1 = actual disk blocks used, in bytes (NOT --apparent-size).
           BYTES=$(du -sB1 "$ERIGON_DATA_DIR" | awk '{print $1}')
           echo "Disk usage for $CHAIN $MODE: ${BYTES} bytes"
-          echo "$BYTES" > ${{ github.workspace }}/disk-usage-${{ env.CHAIN }}-${{ env.MODE }}.txt
+          echo "$BYTES" > "$GITHUB_WORKSPACE/disk-usage-$CHAIN-$MODE.txt"
 
       - name: Upload disk usage
         if: ${{ always() && steps.test_step.outputs.test_executed == 'true' }}

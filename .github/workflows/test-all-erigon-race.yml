@@ -90,7 +90,8 @@ jobs:
           # in common/dbg/dbg_env.go auto-prepends ERIGON_, so this maps to
           # the EXEC3_PARALLEL flag declared in common/dbg/experiments.go.
           ERIGON_EXEC3_PARALLEL: ${{ matrix.exec_mode == 'parallel' && 'true' || 'false' }}
-        run: make test-group TEST_GROUP=${{ matrix.test-group }} GO_FLAGS="-race -timeout=60m"
+          TEST_GROUP: ${{ matrix.test-group }}
+        run: make test-group TEST_GROUP="$TEST_GROUP" GO_FLAGS="-race -timeout=60m"
 
       - uses: ./.github/actions/cleanup-erigon
         if: always()
