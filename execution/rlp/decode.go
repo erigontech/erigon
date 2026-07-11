@@ -659,13 +659,15 @@ func NewStream(r io.Reader, inputLimit uint64) *Stream {
 	return s
 }
 
-// NewStreamFromPool returns a Stream from the pool.
-func NewStreamFromPool(r io.Reader, inputLimit uint64) (stream *Stream, done func()) {
-	stream = streamPool.Get().(*Stream)
+// NewStreamFromPool returns a pooled Stream reading from r. The caller MUST
+// return it via PutStream once done. Pair as:
+//
+//	s := rlp.NewStreamFromPool(r, limit)
+//	defer rlp.PutStream(s)
+func NewStreamFromPool(r io.Reader, inputLimit uint64) *Stream {
+	stream := streamPool.Get().(*Stream)
 	stream.Reset(r, inputLimit)
-	return stream, func() {
-		streamPool.Put(stream)
-	}
+	return stream
 }
 
 // NewBytesStream returns a pooled Stream reading from b. The caller MUST
