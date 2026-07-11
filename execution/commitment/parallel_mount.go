@@ -262,7 +262,9 @@ func setAccountStorageRoot(w *HexPatriciaHashed, accHash []byte, sr cell) {
 	c.loaded &^= cellLoadStorage
 	// Carry sr's navigation onto the account leaf: a single-child collapse's extension (or a single
 	// leaf's plain key) must persist, or a later re-touch unfolds to a storage-root branch record the
-	// collapse never wrote.
+	// collapse never wrote. computeCellHash reads c.extLen as the storage-root extension, so a hash-only
+	// root (multi-child or empty) must clear any extension a prior single-child collapse left on a reused
+	// cell, otherwise the leaf hashes extension(oldExt, sr.hash) instead of sr.hash.
 	if sr.storageAddrLen > 0 {
 		c.storageAddrLen = sr.storageAddrLen
 		copy(c.storageAddr[:], sr.storageAddr[:sr.storageAddrLen])
@@ -272,8 +274,8 @@ func setAccountStorageRoot(w *HexPatriciaHashed, accHash []byte, sr cell) {
 		}
 		c.loaded |= sr.loaded & cellLoadStorage
 	}
+	c.extLen = sr.extLen
 	if sr.extLen > 0 {
-		c.extLen = sr.extLen
 		copy(c.extension[:], sr.extension[:sr.extLen])
 	}
 	c.hashLen = sr.hashLen

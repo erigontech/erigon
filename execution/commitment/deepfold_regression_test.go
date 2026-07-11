@@ -115,6 +115,49 @@ func TestDeepFold_InjectedStorageRootWins(t *testing.T) {
 		"account hash must be driven by the injected storage root, not a stale storage slot")
 }
 
+// A whale that deep-folds to a single-child storage root (extension) in one block and to a hash-only
+// root (multi-child or empty) in the next reuses the same account cell. The hash-only injection must
+// clear the extension the single-child collapse left, or computeCellHash hashes extension(oldExt, sr)
+// instead of sr and produces a wrong account/state root.
+func TestDeepFold_HashOnlyRootClearsStaleExtension(t *testing.T) {
+	t.Parallel()
+
+	acct := common.HexToAddress("0x1234567890abcdef1234567890abcdef12345678")
+	accHashed := KeyToHexNibbleHash(acct[:])
+	accUpd := Update{Flags: BalanceUpdate | NonceUpdate}
+	accUpd.Balance.SetUint64(1_000_000)
+	accUpd.Nonce = 3
+
+	var singleChildSR cell
+	singleChildSR.hash = common.HexToHash("0x1111111111111111111111111111111111111111111111111111111111111111")
+	singleChildSR.hashLen = 32
+	singleChildSR.extLen = 3
+	singleChildSR.extension[0], singleChildSR.extension[1], singleChildSR.extension[2] = 0x0a, 0x0b, 0x0c
+
+	var multiSR cell
+	multiSR.hash = common.HexToHash("0x2222222222222222222222222222222222222222222222222222222222222222")
+	multiSR.hashLen = 32
+
+	reused := NewHexPatriciaHashed(length.Addr, NewMockState(t), DefaultTrieConfig())
+	reused.updateCell(acct[:], accHashed, &accUpd)
+	setAccountStorageRoot(reused, accHashed, singleChildSR)
+	require.NotZero(t, reused.root.extLen, "single-child collapse must set the storage extension")
+	setAccountStorageRoot(reused, accHashed, multiSR)
+	require.Zerof(t, reused.root.extLen,
+		"a hash-only storage root must clear the prior single-child extension (got len=%d)", reused.root.extLen)
+	reusedHash, err := reused.computeCellHash(&reused.root, 0, nil)
+	require.NoError(t, err)
+
+	clean := NewHexPatriciaHashed(length.Addr, NewMockState(t), DefaultTrieConfig())
+	clean.updateCell(acct[:], accHashed, &accUpd)
+	setAccountStorageRoot(clean, accHashed, multiSR)
+	cleanHash, err := clean.computeCellHash(&clean.root, 0, nil)
+	require.NoError(t, err)
+
+	require.Equal(t, cleanHash, reusedHash,
+		"a reused cell's stale storage extension must not change the account hash")
+}
+
 type engineBatch struct {
 	keys [][]byte
 	upds []Update
