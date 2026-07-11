@@ -30,21 +30,28 @@ func WriteRabbits(in []uint64, w io.Writer) error {
 	defer putComp(compressor)
 	compressor.Reset(w)
 
+	var buf [8]byte
+	writeNum := func(v uint64) error {
+		binary.LittleEndian.PutUint64(buf[:], v)
+		_, err := compressor.Write(buf[:])
+		return err
+	}
+
 	expectedNum := uint64(0)
 	count := 0
 	// write length
-	if err := binary.Write(compressor, binary.LittleEndian, uint64(len(in))); err != nil {
+	if err := writeNum(uint64(len(in))); err != nil {
 		return err
 	}
 	for _, element := range in {
 		if expectedNum != element {
 			// [1,2,5,6]
 			// write contiguous sequence
-			if err := binary.Write(compressor, binary.LittleEndian, uint64(count)); err != nil {
+			if err := writeNum(uint64(count)); err != nil {
 				return err
 			}
 			// write non-contiguous element
-			if err := binary.Write(compressor, binary.LittleEndian, element-expectedNum); err != nil {
+			if err := writeNum(element - expectedNum); err != nil {
 				return err
 			}
 			count = 0
@@ -54,7 +61,7 @@ func WriteRabbits(in []uint64, w io.Writer) error {
 
 	}
 	// write last contiguous sequence
-	if err := binary.Write(compressor, binary.LittleEndian, uint64(count)); err != nil {
+	if err := writeNum(uint64(count)); err != nil {
 		return err
 	}
 	return compressor.Close()
@@ -68,8 +75,16 @@ func ReadRabbits(out []uint64, r io.Reader) ([]uint64, error) {
 	}
 	defer decompressor.Close()
 
-	var length uint64
-	if err := binary.Read(decompressor, binary.LittleEndian, &length); err != nil {
+	var buf [8]byte
+	readNum := func() (uint64, error) {
+		if _, err := io.ReadFull(decompressor, buf[:]); err != nil {
+			return 0, err
+		}
+		return binary.LittleEndian.Uint64(buf[:]), nil
+	}
+
+	length, err := readNum()
+	if err != nil {
 		return nil, err
 	}
 
@@ -77,11 +92,10 @@ func ReadRabbits(out []uint64, r io.Reader) ([]uint64, error) {
 		out = make([]uint64, 0, length)
 	}
 	out = out[:0]
-	var count uint64
 	var current uint64
 	active := true
-	for err != io.EOF {
-		err = binary.Read(decompressor, binary.LittleEndian, &count)
+	for {
+		count, err := readNum()
 		if errors.Is(err, io.EOF) {
 			break
 		}
@@ -92,10 +106,8 @@ func ReadRabbits(out []uint64, r io.Reader) ([]uint64, error) {
 			for i := current; i < current+count; i++ {
 				out = append(out, i)
 			}
-			current += count
-		} else {
-			current += count
 		}
+		current += count
 		active = !active
 	}
 	return out, nil

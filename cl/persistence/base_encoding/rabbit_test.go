@@ -23,6 +23,23 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+func BenchmarkWriteRabbits(b *testing.B) {
+	// sparse list with many non-contiguous runs -> many scalar writes
+	list := make([]uint64, 0, 100000)
+	for i := uint64(0); i < 100000; i++ {
+		list = append(list, i*3)
+	}
+	var w bytes.Buffer
+	b.ResetTimer()
+	b.ReportAllocs()
+	for i := 0; i < b.N; i++ {
+		w.Reset()
+		if err := WriteRabbits(list, &w); err != nil {
+			b.Fatal(err)
+		}
+	}
+}
+
 func TestRabbit(t *testing.T) {
 	list := []uint64{2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 17, 23, 90}
 	var w bytes.Buffer
