@@ -250,7 +250,65 @@ func (e *EngineServer) handleSSZGetPayload(w http.ResponseWriter, r *http.Reques
 }
 
 func (e *EngineServer) handleSSZGetBodies(w http.ResponseWriter, r *http.Request, version int, filterBy string) {
-	
+	if version != 1 {
+		writeSSZError(w, http.StatusNotFound, "unsupported get payload bodies version")
+		return
+	}
+
+	if filterBy != "by-hash" && filterBy != "by-range" {
+		writeSSZError(w, http.StatusNotFound, "unsupported filtering method")
+		return
+	}
+
+	body, err := readSSZBody(r)
+	if err != nil {
+		writeSSZError(w, http.StatusRequestEntityTooLarge, err.Error())
+		return
+	}
+
+	switch filterBy {
+	case "by-hash":
+		hashes, err := decodeGetPayloadBodiesByHashRequest(body)
+		if err != nil {
+			writeSSZError(w, http.StatusBadRequest, err.Error())
+			return
+		}
+
+		bodies, err := e.GetPayloadBodiesByHashV1(r.Context(), hashes)
+		if err != nil {
+			writeEngineError(w, err)
+			return
+		}
+
+		out, err := encodePayloadBodiesV1Response(bodies)
+		if err != nil {
+			writeSSZError(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+		e.logger.Info("[SSZ-REST] handled get payload bodies", "path", r.URL.Path)
+		writeSSZBytes(w, out)
+
+	case "by-range":
+		start, count, err := decodeGetPayloadBodiesByRangeRequest(body)
+		if err != nil {
+			writeSSZError(w, http.StatusBadRequest, err.Error())
+			return
+		}
+
+		bodies, err := e.GetPayloadBodiesByRangeV1(r.Context(), hexutil.Uint64(start), hexutil.Uint64(count))
+		if err != nil {
+			writeEngineError(w, err)
+			return
+		}
+
+		out, err := encodePayloadBodiesV1Response(bodies)
+		if err != nil {
+			writeSSZError(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+		e.logger.Info("[SSZ-REST] handled get payload bodies", "path", r.URL.Path)
+		writeSSZBytes(w, out)
+	}
 }
 
 func callGetPayload(ctx context.Context, e *EngineServer, version int, id hexutil.Bytes) (*engine_types.GetPayloadResponse, error) {

@@ -18,20 +18,23 @@ import (
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
+	"github.com/erigontech/erigon/cl/merkle_tree"
 	ssz2 "github.com/erigontech/erigon/cl/ssz"
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/clonable"
 	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/execution/engineapi/engine_types"
 )
 
 const (
-	sszMaxBlobHashes          = 4096
-	sszMaxGetBlobHashes       = 128
-	sszMaxCapabilityNameBytes = 64
-	sszMaxCapabilities        = 64
-	sszBlobBytes              = 0x20000
-	sszKZGBytes               = 48
-	sszCellsPerExtBlob        = 128
+	sszMaxBlobHashes           = 4096
+	sszMaxGetBlobHashes        = 128
+	sszMaxCapabilityNameBytes  = 64
+	sszMaxCapabilities         = 64
+	sszBlobBytes               = 0x20000
+	sszKZGBytes                = 48
+	sszCellsPerExtBlob         = 128
+	sszMaxPayloadBodiesRequest = 32
 )
 
 func hashListValues(l solid.HashListSSZ) []common.Hash {
@@ -208,6 +211,77 @@ func encodeClientVersionResponse(versions []engine_types.ClientVersionV1) ([]byt
 		list.Append(&versions[i])
 	}
 	return ssz2.MarshalSSZ(nil, list)
+}
+
+func decodeGetPayloadBodiesByHashRequest(buf []byte) ([]common.Hash, error) {
+	hashes := solid.NewHashList(sszMaxPayloadBodiesRequest)
+	if err := ssz2.UnmarshalSSZ(buf, 0, hashes); err != nil {
+		return nil, err
+	}
+	return hashListValues(hashes), nil
+}
+
+func decodeGetPayloadBodiesByRangeRequest(buf []byte) (start, count uint64, err error) {
+	if err = ssz2.UnmarshalSSZ(buf, 0, &start, &count); err != nil {
+		return 0, 0, err
+	}
+	return start, count, nil
+}
+
+type executionPayloadBodyV1SSZ struct {
+	transactions *solid.TransactionsSSZ
+	withdrawals  *solid.ListSSZ[*cltypes.Withdrawal]
+}
+
+func newExecutionPayloadBodyV1SSZ(body *engine_types.ExecutionPayloadBody) *executionPayloadBodyV1SSZ {
+	b := &executionPayloadBodyV1SSZ{
+		transactions: solid.NewTransactionsSSZFromTransactions(nil),
+		withdrawals:  solid.NewStaticListSSZ[*cltypes.Withdrawal](int(clparams.MainnetBeaconConfig.MaxWithdrawalsPerPayload), 44),
+	}
+	if body == nil {
+		return b
+	}
+	txs := make([][]byte, len(body.Transactions))
+	for i := range body.Transactions {
+		txs[i] = body.Transactions[i]
+	}
+	b.transactions = solid.NewTransactionsSSZFromTransactions(txs)
+	for _, w := range body.Withdrawals {
+		b.withdrawals.Append(&cltypes.Withdrawal{Index: w.Index, Validator: w.Validator, Address: w.Address, Amount: w.Amount})
+	}
+	return b
+}
+
+func (b *executionPayloadBodyV1SSZ) EncodeSSZ(dst []byte) ([]byte, error) {
+	return ssz2.MarshalSSZ(dst, b.transactions, b.withdrawals)
+}
+
+func (b *executionPayloadBodyV1SSZ) DecodeSSZ(buf []byte, version int) error {
+	return ssz2.UnmarshalSSZ(buf, version, b.transactions, b.withdrawals)
+}
+
+func (b *executionPayloadBodyV1SSZ) EncodingSizeSSZ() int {
+	return 8 + b.transactions.EncodingSizeSSZ() + b.withdrawals.EncodingSizeSSZ()
+}
+
+func (b *executionPayloadBodyV1SSZ) HashSSZ() ([32]byte, error) {
+	return merkle_tree.HashTreeRoot(b.transactions, b.withdrawals)
+}
+
+func (b *executionPayloadBodyV1SSZ) Clone() clonable.Clonable {
+	return newExecutionPayloadBodyV1SSZ(nil)
+}
+
+func encodePayloadBodiesV1Response(bodies []*engine_types.ExecutionPayloadBody) ([]byte, error) {
+	payloadBodies := solid.NewDynamicListSSZ[*solid.ListSSZ[*executionPayloadBodyV1SSZ]](sszMaxPayloadBodiesRequest)
+	for _, body := range bodies {
+		entry := solid.NewDynamicListSSZ[*executionPayloadBodyV1SSZ](1)
+		if body != nil {
+			entry.Append(newExecutionPayloadBodyV1SSZ(body))
+		}
+		payloadBodies.Append(entry)
+	}
+	return ssz2.MarshalSSZ(nil, payloadBodies)
 }
 
 func decodeClientVersionRequest(buf []byte) (*engine_types.ClientVersionV1, error) {
