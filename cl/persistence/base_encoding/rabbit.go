@@ -121,5 +121,8 @@ func ReadRabbits(out []uint64, r io.Reader) ([]uint64, error) {
 		current += count
 		active = !active
 	}
+	if uint64(len(out)) != length {
+		return nil, fmt.Errorf("rabbit: decoded %d elements, header declared %d", len(out), length)
+	}
 	return out, nil
 }
