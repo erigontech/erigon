@@ -103,7 +103,7 @@ type Decoder interface {
 //	NewStream(r, limit).Decode(val)
 func Decode(r io.Reader, val interface{}) error {
 	stream := streamPool.Get().(*Stream)
-	defer streamPool.Put(stream)
+	defer PutStream(stream)
 
 	stream.Reset(r, 0)
 	return stream.Decode(val)
@@ -115,7 +115,7 @@ func DecodeBytes(b []byte, val interface{}) error {
 	r := (*sliceReader)(&b)
 
 	stream := streamPool.Get().(*Stream)
-	defer streamPool.Put(stream)
+	defer PutStream(stream)
 
 	stream.Reset(r, uint64(len(b)))
 	if err := stream.Decode(val); err != nil {
@@ -188,7 +188,7 @@ func DecodeBytesPartial(b []byte, val any) error {
 	r := (*sliceReader)(&b)
 
 	stream := streamPool.Get().(*Stream)
-	defer streamPool.Put(stream)
+	defer PutStream(stream)
 
 	stream.Reset(r, uint64(len(b)))
 	return stream.Decode(val)
