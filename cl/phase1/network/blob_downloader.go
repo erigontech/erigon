@@ -256,10 +256,23 @@ func (b *BlobHistoryDownloader) downloadOnce(shouldLog bool) error {
 				return b.ctx.Err()
 			case <-logInterval.C:
 				if shouldLog {
+					head := b.headSlot.Load()
 					blkSec := float64(prevLogSlot-currentSlot) / time.Since(prevTime).Seconds()
 					prevLogSlot = currentSlot
 					prevTime = time.Now()
-					b.logger.Info("[BlobHistoryDownloader] Downloading blobs backwards", "slot", currentSlot, "blks/sec", fmt.Sprintf("%.1f", blkSec))
+					eta := "n/a"
+					if blkSec > 0 {
+						eta = (time.Duration(float64(currentSlot-targetSlot)/blkSec) * time.Second).Truncate(time.Second).String()
+					}
+					progress := 0.0
+					if head > targetSlot {
+						progress = float64(head-currentSlot) / float64(head-targetSlot) * 100
+					}
+					b.logger.Info("[BlobHistoryDownloader] Downloading blobs backwards",
+						"slot", currentSlot, "to", targetSlot,
+						"blks/sec", fmt.Sprintf("%.1f", blkSec),
+						"progress", fmt.Sprintf("%.1f%%", progress),
+						"eta", eta)
 				}
 			default:
 			}
