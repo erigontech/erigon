@@ -77,7 +77,7 @@ func BitvectorRootWithLimit(bits []byte, limit uint64) ([32]byte, error) {
 }
 
 func packBits(bytes []byte) [][32]byte {
-	var chunks [][32]byte
+	chunks := make([][32]byte, 0, (len(bytes)+31)/32)
 	for i := 0; i < len(bytes); i += 32 {
 		var chunk [32]byte
 		copy(chunk[:], bytes[i:])

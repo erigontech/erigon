@@ -152,6 +152,11 @@ func EligibleValidatorsIndicies(b abstract.BeaconState) (eligibleValidators []ui
 	}
 	wp.Execute()
 	// Merge the results from all threads.
+	total := 0
+	for i := range eligibleValidatorsShards {
+		total += len(eligibleValidatorsShards[i])
+	}
+	eligibleValidators = make([]uint64, 0, total)
 	for i := range eligibleValidatorsShards {
 		eligibleValidators = append(eligibleValidators, eligibleValidatorsShards[i]...)
 	}
