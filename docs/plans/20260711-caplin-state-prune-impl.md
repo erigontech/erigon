@@ -191,9 +191,9 @@ Acceptance: both cases green.
 
 ### Task 6: lint, build, package tests
 
-- [ ] `make lint` (repeat until clean).
-- [ ] `make erigon`.
-- [ ] `go test ./cl/antiquary/... ./cl/persistence/state/... ./db/snapshotsync/...`
+- [x] `make lint` (repeat until clean).
+- [x] `make erigon`.
+- [x] `go test ./cl/antiquary/... ./cl/persistence/state/... ./db/snapshotsync/...`
 
 Acceptance: all green, lint clean.
 
