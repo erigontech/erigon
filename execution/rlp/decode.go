@@ -685,6 +685,7 @@ func NewBytesStream(b []byte) *Stream {
 // PutStream returns a Stream to the pool.
 func PutStream(stream *Stream) {
 	stream.sliceRdr = nil // release caller's backing array
+	stream.r = nil        // release caller's reader (may hold a large backing slice)
 	streamPool.Put(stream)
 }
 
