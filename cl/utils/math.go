@@ -66,9 +66,9 @@ func ETA(remaining uint64, ratePerSec float64) string {
 	if ratePerSec <= 0 {
 		return "n/a"
 	}
-	seconds := float64(remaining) / ratePerSec
-	if seconds >= float64(math.MaxInt64)/float64(time.Second) {
+	nanos := float64(remaining) / ratePerSec * float64(time.Second)
+	if nanos >= float64(math.MaxInt64) {
 		return time.Duration(math.MaxInt64).Truncate(time.Second).String()
 	}
-	return time.Duration(seconds * float64(time.Second)).Truncate(time.Second).String()
+	return time.Duration(nanos).Truncate(time.Second).String()
 }
