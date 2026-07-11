@@ -17,13 +17,13 @@
 package snapshotsync
 
 import (
+	"path/filepath"
 	"sync"
 	"testing"
 	"time"
 
 	"github.com/stretchr/testify/require"
 
-	dir2 "github.com/erigontech/erigon/common/dir"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv"
@@ -152,8 +152,8 @@ func TestCaplinStateOpenListSinglePublishNoTransient(t *testing.T) {
 	table := kv.BlockRoot
 	typ := mustCaplinStateType(t, table)
 
-	writeCaplinStateFixture(t, dirs.SnapCaplin, table, 0, 100_000, logger)                     // A (kept)
-	cSeg, cIdx := writeCaplinStateFixture(t, dirs.SnapCaplin, table, 200_000, 250_000, logger) // C (goes stale)
+	writeCaplinStateFixture(t, dirs.SnapCaplin, table, 0, 100_000, logger)                  // A (kept)
+	cSeg, _ := writeCaplinStateFixture(t, dirs.SnapCaplin, table, 200_000, 250_000, logger) // C (goes stale)
 
 	s := openTestCaplinStateSnapshots(t, dirs, table, logger)
 
@@ -162,15 +162,23 @@ func TestCaplinStateOpenListSinglePublishNoTransient(t *testing.T) {
 	pinned := s.gens.current.Load()
 	require.Equal(t, pinned, s.gens.oldest, "chain must be collapsed to the pinned generation")
 
-	require.NoError(t, dir2.RemoveFile(cSeg))
-	require.NoError(t, dir2.RemoveFile(cIdx))
 	writeCaplinStateFixture(t, dirs.SnapCaplin, table, 100_000, 150_000, logger) // B (new)
 
-	require.NoError(t, s.OpenFolder())
+	// Drop C from the open list to make it stale. Excluding it drives the same detach
+	// path as an on-disk removal, without unlinking a still-mmapped segment (which
+	// Windows forbids).
+	cName := filepath.Base(cSeg)
+	var kept []string
+	for _, f := range listAllSegFilesInDir(dirs.SnapCaplin) {
+		if f != cName {
+			kept = append(kept, f)
+		}
+	}
+	require.NoError(t, s.OpenList(kept, true))
 
-	require.NotEqual(t, pinned, s.gens.current.Load(), "OpenFolder must publish a new generation")
+	require.NotEqual(t, pinned, s.gens.current.Load(), "OpenList must publish a new generation")
 	require.Same(t, s.gens.current.Load(), pinned.next,
-		"OpenFolder must publish exactly one generation: the pinned gen links directly to it, no transient in between")
+		"OpenList must publish exactly one generation: the pinned gen links directly to it, no transient in between")
 	require.Equal(t, []Range{{from: 0, to: 100_000}, {from: 100_000, to: 150_000}}, s.coveredRangesForType(typ),
 		"published generation shows A+B (new B present, stale C gone) — never a transient missing B")
 }
