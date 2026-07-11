@@ -25,6 +25,7 @@ import (
 	"runtime"
 	"sync"
 	"sync/atomic"
+	"time"
 
 	"golang.org/x/sync/errgroup"
 	"golang.org/x/sync/semaphore"
@@ -162,6 +163,10 @@ var wholeFreshForkJoins atomic.Int64
 // wholeFreshCellFolds counts top-nibble subtrees folded through the account-plane fork-join.
 var wholeFreshCellFolds atomic.Int64
 
+// onNibFold, when non-nil, receives the wall time of each top-nibble subtree fold in the serial
+// dispatch loop — a measurement hook for the fresh-fork critical-path study. nil in production.
+var onNibFold func(nib int, subtreeCount uint32, d time.Duration)
+
 func init() { forkWholeFresh.Store(true) }
 
 // wholeFreshBuild reports whether a Process runs against provably empty on-disk state: no seedable
@@ -292,11 +297,18 @@ func (fp *foldPool) dispatchWholeFresh(ctx context.Context, base *HexPatriciaHas
 		deferred []*DeferredBranchUpdate
 	)
 	for _, top := range rootTask.children {
+		var t0 time.Time
+		if onNibFold != nil {
+			t0 = time.Now()
+		}
 		c, d, err := foldFreshAccountSubtreeCellForkJoin(ctx, ff, top.node, rootTask.prefix, top.nib)
 		if err != nil {
 			putDeferredUpdates(deferred)
 			putDeferredUpdates(reusedDeferred)
 			return nil, err
+		}
+		if onNibFold != nil {
+			onNibFold(top.nib, top.node.subtreeCount, time.Since(t0))
 		}
 		cells[top.nib] = c
 		present[top.nib] = true

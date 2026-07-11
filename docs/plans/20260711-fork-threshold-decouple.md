@@ -140,16 +140,37 @@ they fold to.
 - Modify: `execution/commitment/fold_pool.go` (add the `onNibFold` measurement hook near the whole-fresh
   counters + the two-line call in the `dispatchWholeFresh` loop)
 
-- [ ] port `Benchmark_ProcessCPUUtil`, `Benchmark_SerialVsForkCPU`, `Benchmark_FreshNibTimeline`, the
+- [x] port `Benchmark_ProcessCPUUtil`, `Benchmark_SerialVsForkCPU`, `Benchmark_FreshNibTimeline`, the
       `runProcessCPUUtilBench`/`runSerialCPUUtilBench`/`rusageCPU` helpers, and the `onNibFold` hook
       (`git show awskii/cpu-util-bench:execution/commitment/cpu_util_bench_test.go` and the `fold_pool.go`
       hook diff)
-- [ ] run and record in this plan the numbers to beat: `Benchmark_SerialVsForkCPU` (serial ~1160 ms /
+- [x] run and record in this plan the numbers to beat: `Benchmark_SerialVsForkCPU` (serial ~1160 ms /
       1.09 cores; fork w18 ~255 ms / 5.3 cores), `Benchmark_FreshNibTimeline` (sum≈190 ms, ratio≈0.74,
       whale nib ~70 ms, 13 small ~7 ms), `Benchmark_FreshBuildFork` fresh + incremental-whale120k
       (~24.5 ms) + B/op
-- [ ] confirm compile + benches run; no production behavior change (hook is nil in prod)
-- [ ] run tests - package green before Task 2
+- [x] confirm compile + benches run; no production behavior change (hook is nil in prod)
+- [x] run tests - package green before Task 2
+
+**Baselines recorded (M5 Max 18c, darwin/arm64, `-benchtime 3x`, sequential runs, 2026-07-11):**
+
+| Bench | wall ms/op | avg-cores | B/op | allocs/op |
+|---|---|---|---|---|
+| `SerialVsForkCPU/1MWhales/serial-direct` | 1167 | 1.06 | 389,152,746 | 7,788,249 |
+| `SerialVsForkCPU/1MWhales/fork-w18` | 264.0 | 5.22 | 384,631,192 | 7,797,520 |
+| `FreshBuildFork/1MWhales/flag-off/w18` | 693.6 | — | 511,144,674 | 6,845,889 |
+| `FreshBuildFork/1MWhales/flag-on/w18` | 273.0 | — | 378,019,794 | 7,747,429 |
+| `FreshBuildFork/incremental-whale120k/flag-off` | 24.3 | — | 105,262,146 | 933,415 |
+| `FreshBuildFork/incremental-whale120k/flag-on` | 25.0 | — | 102,461,549 | 942,212 |
+
+`FreshNibTimeline` (single fresh 1M-whale Process, w18): Process wall **271 ms**, sum(nib folds)
+**188 ms**, **ratio 0.69**, 16 nibs — whale nib=a (762k keys) **67 ms**, nib=4 (162k) 20 ms,
+nib=2 (17k) 11 ms, remaining 13 small (~12k each) **~7 ms apiece ≈ 91 ms serial**. Confirms the
+plan's premise: top-nibble folds are serial and sum to ~70 % of Process wall.
+
+**Numbers to beat (Task 5/6 gates):** fresh fork w18 wall 264–273 ms → target ~140–160 ms;
+avg-cores 5.22 → up; nib-fold sum/wall ratio 0.69 → folds overlap (ratio well below wall);
+incremental-whale120k flag-on ≤ ~25 ms (observation, machine-dependent); fresh flag-on B/op
+~378 MB bounded (vs 511 MB flag-off).
 
 ### Task 2: Red — deterministic top-level concurrency test
 
