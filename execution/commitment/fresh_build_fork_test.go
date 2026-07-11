@@ -419,7 +419,8 @@ func TestFreshBuild_AccountForkJoinSeamParity(t *testing.T) {
 // whale serially at numWorkers=NumCPU. The corpus is tuned so the whale's per-nibble storage count sits
 // *below* the account grain (no fork on the old grain) but *above* the storage-local grain
 // foldK(whaleStorage, numWorkers) (fork on the new grain), so forkFoldMaxDepth reaching the storage
-// plane (>= 64) proves the per-subtree grain engaged — while the root stays byte-identical to serial.
+// plane (>= 64) proves the per-subtree grain engaged — while root and stored branches stay
+// byte-identical to the serial fold and the sequential oracle.
 func TestFreshBuild_WhaleStorageForksAtGrain(t *testing.T) {
 	ctx := context.Background()
 	const workers = 24
@@ -434,20 +435,30 @@ func TestFreshBuild_WhaleStorageForksAtGrain(t *testing.T) {
 		"corpus mis-tuned: storage-local grain must fall below the whale's per-nibble storage count (fork on the new grain)")
 
 	oracle := oracleRoot(t, pk, upds)
-	srSerial, _, err := foldFreshAccountRootDeferred(root)
+	oracleMs := seqFreshBranchOracle(t, pk, upds)
+	srSerial, defSerial, err := foldFreshAccountRootDeferred(root)
 	require.NoError(t, err)
+	msSerial := NewMockState(t)
+	_, err = ApplyDeferredBranchUpdates(defSerial, 1, msSerial.PutBranch)
+	require.NoError(t, err)
+	requireBranchParity(t, oracleMs, msSerial)
 
 	forkFoldMaxDepth.Store(0)
 	fc := newFoldCtx(true)
 	ff := &forkFolder{sem: semaphore.NewWeighted(1 << 20), k: k, numWorkers: workers}
 	srPar, err := ff.fold(ctx, fc, root, nil, 0)
 	require.NoError(t, err)
+	defPar := fc.deferred
 	fc.hph.Release()
 
 	require.Equal(t, srSerial, srPar, "per-subtree-grain fork-join root != serial account fold")
 	require.Equal(t, oracle, srPar[:], "per-subtree-grain fork-join root != sequential oracle")
 	require.GreaterOrEqual(t, forkFoldMaxDepth.Load(), int64(64),
 		"whale storage did not fork below the depth-64 seam at the production account grain (per-subtree grain not engaged)")
+	msPar := NewMockState(t)
+	_, err = ApplyDeferredBranchUpdates(defPar, 1, msPar.PutBranch)
+	require.NoError(t, err)
+	requireBranchParity(t, oracleMs, msPar)
 }
 
 // TestFreshBuild_ForkFloorParity pins the interior fork-floor gate: with k just below the corpus

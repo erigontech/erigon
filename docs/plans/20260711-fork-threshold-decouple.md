@@ -302,23 +302,46 @@ explicit floors for the sweep bench (≥ k restores gate-at-k).
 
 ### Task 6: Verify acceptance criteria
 
-- [ ] **byte-identity (primary gate):** root **and the persisted branch-record set** identical to the
+- [x] **byte-identity (primary gate):** root **and the persisted branch-record set** identical to the
       pre-change fork and the serial oracle — assert the deferred/stored-branch set directly, not just the
       32-byte root (the existing test compares roots only; extend it), across the parity +
       deferred-vs-eager differential suites; whale + depth-64 seam corpora covered
-- [ ] **incremental non-regression via diff-scope, not absolute ms:** confirm no incremental/frontier-path
+      *(parity suites — `TopNibbleDispatchParity`, `AccountPlane`, `Seam`, `AccountForkJoinSeamParity`,
+      `ForkFloorParity`, `Depth64SeamParity`, `ForkJoinMultiDepthParity` — already assert
+      `requireBranchParity`; the deferred-vs-eager differentials assert the full branch map
+      (`stateEager.cm == stateDeferred.cm`); extended the one remaining root-only test,
+      `TestFreshBuild_WhaleStorageForksAtGrain` (whale + depth-64 seam corpus), to apply both deferred
+      sets and assert branch parity vs the sequential oracle. All green)*
+- [x] **incremental non-regression via diff-scope, not absolute ms:** confirm no incremental/frontier-path
       files changed — `git diff 2ae26b58d5 --stat` touches only `forkFolder`/`dispatchWholeFresh` (+ tests
       + `foldKMin` floor if Task 4 adopted), never `deriveFoldFrontier`/`dispatchFoldTasks`/`foldK`. Run
       `Benchmark_FreshBuildFork/incremental-whale120k` and record it as an observation (machine-dependent),
       not a hard-fail number
-- [ ] serial engine untouched: `git diff 2ae26b58d5 -- execution/commitment/hex_patricia_hashed.go` empty
-- [ ] **perf observations (recorded, not hard-fail):** `Benchmark_SerialVsForkCPU`/`ProcessCPUUtil` fresh
+      *(diff touches only `fold_pool.go`, `truthtree_fold.go`, tests, the ported bench, and this plan;
+      `foldK` appears solely as unchanged call sites gaining the `forkFloor` field. incremental-whale120k
+      flag-on 25.1 ms / 98.8 MB B/op vs 25.0 ms / 102.5 MB baseline — flat)*
+- [x] serial engine untouched: `git diff 2ae26b58d5 -- execution/commitment/hex_patricia_hashed.go` empty
+      *(zero-byte diff)*
+- [x] **perf observations (recorded, not hard-fail):** `Benchmark_SerialVsForkCPU`/`ProcessCPUUtil` fresh
       w18 improved (target ~140–160 ms), avg-cores up from 5.3; `Benchmark_FreshNibTimeline` top-nibble
       folds overlap (no longer sum to ~74% of wall); fresh B/op bounded (note any regression vs the 25%
-      fresh-fork memory win)
-- [ ] deadlock-freedom: dispatch at `foldSem` size 1 and 2 over a fork-heavy corpus completes, `-race` green
-- [ ] full `execution/commitment` suite green, `-race` green, `make lint` clean (run repeatedly), `make
-      test-short` exit 0
+      fresh-fork memory win) *(recorded below)*
+- [x] deadlock-freedom: dispatch at `foldSem` size 1 and 2 over a fork-heavy corpus completes, `-race` green
+      *(`TestFreshBuild_TopNibbleDispatchDeadlockFree` sem1+sem2 green under `-race`)*
+- [x] full `execution/commitment` suite green, `-race` green, `make lint` clean (run repeatedly), `make
+      test-short` exit 0 *(full `./execution/commitment/...` green; full-package `-race` green (152 s);
+      `make lint` 0 issues ×2; `make test-short` exit 0, zero FAIL lines)*
+
+**Acceptance numbers (2026-07-11, M5 Max 18c, `-benchtime 3x`, vs Task 1 baselines):**
+
+- `SerialVsForkCPU/1MWhales/fork-w18`: **172–192 ms / 7.4–8.3 avg-cores** on quiet runs (baseline
+  264 ms / 5.22) — wall −27–35 %, past main-parallel #21945's 197 ms; the ~140–160 ms stretch target
+  not quite reached. One batch read 227–350 ms under background load (load avg ~20); quiet-run numbers
+  recorded. serial-direct flat (1207 ms / 1.12 cores vs 1167 / 1.06).
+- `FreshBuildFork/1MWhales/flag-on/w18`: **190 ms / 387 MB B/op** (baseline 273 ms / 378 MB) — wall
+  −30 %, B/op +2.4 %, still well under flag-off's 506 MB (the fresh-fork memory win holds).
+- `FreshNibTimeline`: Process wall **170 ms**, sum(nib folds) 348 ms, **ratio 2.05** (baseline 0.69
+  serial) — top-nibble folds overlap; the whale nib=a (98 ms, 58 % of wall) is now the critical path.
 
 ### Task 7: [Final] Documentation and cleanup
 
