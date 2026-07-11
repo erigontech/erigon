@@ -19,7 +19,9 @@ package base_encoding
 import (
 	"encoding/binary"
 	"errors"
+	"fmt"
 	"io"
+	"math"
 
 	"github.com/klauspost/compress/zstd"
 )
@@ -94,7 +96,10 @@ func ReadRabbits(out []uint64, r io.Reader) ([]uint64, error) {
 		return nil, err
 	}
 
-	if cap(out) < int(length) {
+	if length > math.MaxInt {
+		return nil, fmt.Errorf("rabbit: encoded length %d overflows int", length)
+	}
+	if uint64(cap(out)) < length {
 		out = make([]uint64, 0, length)
 	}
 	out = out[:0]
