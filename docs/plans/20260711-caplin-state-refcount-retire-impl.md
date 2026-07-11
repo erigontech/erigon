@@ -89,19 +89,19 @@ Acceptance: tests green vs unchanged production code; `make erigon` builds.
 
 New file `db/snapshotsync/visible_generations.go`, payload-opaque:
 
-- [ ] `type generation[P any] struct { payload P; refcnt atomic.Int32; retired []*DirtySegment; next *generation[P] }`
-- [ ] `type visibleGenerations[P any] struct { lock *sync.RWMutex; current atomic.Pointer[generation[P]]; oldest *generation[P] }`
-- [ ] `acquire() *generation[P]` — load→`refcnt.Add(1)`→re-check current→retry (hazard pointer).
-- [ ] `release(*generation[P])` — `refcnt.Add(-1)`; if 0 → `reclaim()`.
-- [ ] **`publish(newPayload P, retired []*DirtySegment)`** — caller holds `lock`. Build `next`;
+- [x] `type generation[P any] struct { payload P; refcnt atomic.Int32; retired []*DirtySegment; next *generation[P] }`
+- [x] `type visibleGenerations[P any] struct { lock *sync.RWMutex; current atomic.Pointer[generation[P]]; oldest *generation[P] }`
+- [x] `acquire() *generation[P]` — load→`refcnt.Add(1)`→re-check current→retry (hazard pointer).
+- [x] `release(*generation[P])` — `refcnt.Add(-1)`; if 0 → `reclaim()`.
+- [x] **`publish(newPayload P, retired []*DirtySegment)`** — caller holds `lock`. Build `next`;
       set `old.retired = retired`, `old.next = next`; store `current = next`; then
       `closeAndRemoveSegments(reclaimLocked())` **inline, under the lock** — byte-identical to
       EL recalc tail (snapshots.go:862-870). Publish is publish-**and**-eager-reclaim, never
       store-only. (I2: recalc/publish closes under lock; the release path closes off-lock.)
-- [ ] `reclaimLocked() []*DirtySegment` (walk `oldest`→current, collect retired of drained
+- [x] `reclaimLocked() []*DirtySegment` (walk `oldest`→current, collect retired of drained
       gens, advance `oldest`); `reclaim()` (lock, reclaimLocked, unlock, `closeAndRemoveSegments`
       **off-lock** — the release-path timing, EL :908-913).
-- [ ] `DirtySegment` and `closeAndRemoveSegments` stay shared/unchanged.
+- [x] `DirtySegment` and `closeAndRemoveSegments` stay shared/unchanged.
 
 Acceptance: builds; a focused unit test of `visibleGenerations[int]` proves: publish with a
 drained old gen deletes immediately; publish while a reader pins defers until release; hazard retry.
