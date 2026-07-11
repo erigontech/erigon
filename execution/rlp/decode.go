@@ -111,15 +111,13 @@ func Decode(r io.Reader, val interface{}) error {
 // DecodeBytes parses RLP data from b into val. Please see package-level documentation for
 // the decoding rules. The input must contain exactly one value and no trailing data.
 func DecodeBytes(b []byte, val interface{}) error {
-	r := (*sliceReader)(&b)
-
-	stream := NewStreamFromPool(r, uint64(len(b)))
+	stream := NewBytesStream(b)
 	defer PutStream(stream)
 
 	if err := stream.Decode(val); err != nil {
 		return err
 	}
-	if len(b) > 0 {
+	if stream.Remaining() > 0 {
 		return ErrMoreThanOneValue
 	}
 	return nil
@@ -183,9 +181,7 @@ func addErrorContext(err error, ctx string) error {
 // DecodeBytesPartial parses RLP data from b into val.
 // Unlike DecodeBytes, it does not require that all bytes are consumed.
 func DecodeBytesPartial(b []byte, val any) error {
-	r := (*sliceReader)(&b)
-
-	stream := NewStreamFromPool(r, uint64(len(b)))
+	stream := NewBytesStream(b)
 	defer PutStream(stream)
 
 	return stream.Decode(val)
