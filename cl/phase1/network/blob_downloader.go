@@ -265,7 +265,7 @@ func (b *BlobHistoryDownloader) downloadOnce(shouldLog bool) error {
 						eta = (time.Duration(float64(currentSlot-targetSlot)/blkSec) * time.Second).Truncate(time.Second).String()
 					}
 					progress := 0.0
-					if head > targetSlot {
+					if head >= currentSlot && head > targetSlot {
 						progress = float64(head-currentSlot) / float64(head-targetSlot) * 100
 					}
 					b.logger.Info("[BlobHistoryDownloader] Downloading blobs backwards",

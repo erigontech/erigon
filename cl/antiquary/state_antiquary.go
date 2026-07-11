@@ -338,6 +338,7 @@ func (s *Antiquary) IncrementBeaconState(ctx context.Context, to uint64) error {
 	progressTimer := time.NewTicker(1 * time.Minute)
 	defer progressTimer.Stop()
 	prevSlot := slot
+	startSlot := slot
 	first := false
 	timeBeforeCommit := 30 * time.Minute
 	blocksProcessed := 0
@@ -559,15 +560,19 @@ func (s *Antiquary) IncrementBeaconState(ctx context.Context, to uint64) error {
 		// We now do some post-processing on the state.
 		select {
 		case <-progressTimer.C:
-			blkPerSec := float64(slot-prevSlot) / 60
-			var eta time.Duration
+			blkPerSec := float64(slot-prevSlot) / time.Minute.Seconds()
+			eta := "n/a"
 			if blkPerSec > 0 {
-				eta = (time.Duration(float64(to-slot)/blkPerSec) * time.Second).Truncate(time.Second)
+				eta = (time.Duration(float64(to-slot)/blkPerSec) * time.Second).Truncate(time.Second).String()
+			}
+			progress := 0.0
+			if to > startSlot {
+				progress = float64(slot-startSlot) / float64(to-startSlot) * 100
 			}
 			log.Log(logLvl, "[Caplin-Archive] Historical States reconstruction",
 				"slot", slot, "to", to,
 				"blk/sec", fmt.Sprintf("%.2f", blkPerSec),
-				"progress", fmt.Sprintf("%.1f%%", float64(slot)/float64(to)*100),
+				"progress", fmt.Sprintf("%.1f%%", progress),
 				"eta", eta)
 			prevSlot = slot
 		default:
