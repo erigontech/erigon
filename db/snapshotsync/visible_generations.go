@@ -22,13 +22,16 @@ import (
 )
 
 // generation is one published, immutable view of the dirty file set. Readers pin a
-// generation via acquire/release; the retired files it is the last to reference are
-// unlinked only once every reader pinning it has drained (refcnt hits 0).
+// generation via acquire/release; the files it is the last to reference are disposed only
+// once every reader pinning it has drained (refcnt hits 0). retired files are unlinked from
+// disk; detached files only have their fds closed (the file stays on disk) — the split keeps
+// permanent removal (RemoveOverlaps, merge cleanup) apart from re-open/shutdown fd cleanup.
 type generation[P any] struct {
-	payload P
-	refcnt  atomic.Int32    // live readers pinning this generation
-	retired []*DirtySegment // segments this generation is the last to reference; unlinked on head-drain
-	next    *generation[P]  // oldest->newest chain link (set under lock)
+	payload  P
+	refcnt   atomic.Int32    // live readers pinning this generation
+	retired  []*DirtySegment // last-referenced files to unlink on head-drain (permanent removal)
+	detached []*DirtySegment // last-referenced files to close fds-only on head-drain (no unlink)
+	next     *generation[P]  // oldest->newest chain link (set under lock)
 }
 
 // visibleGenerations is the payload-opaque refcounted-generation core shared by the EL
@@ -75,35 +78,57 @@ func (g *visibleGenerations[P]) release(v *generation[P]) {
 	}
 }
 
-// publish stores newPayload as the current generation, retiring `retired` (files removed
-// from dirty during the outgoing generation's tenure) onto the outgoing generation, then
-// eagerly reclaims and unlinks the retired files of already-drained older generations inline
-// under lock. Caller must hold lock. Publish is publish-and-eager-reclaim, never store-only.
+// publish stores newPayload as the current generation, retiring `retired` (files permanently
+// removed from dirty during the outgoing generation's tenure) onto the outgoing generation,
+// then eagerly reclaims the drained older generations inline under lock. Caller must hold
+// lock. Publish is publish-and-eager-reclaim, never store-only.
 func (g *visibleGenerations[P]) publish(newPayload P, retired []*DirtySegment) {
+	g.publishDisposing(newPayload, retired, nil)
+}
+
+// publishDisposing is publish with both disposition lists: retired files are unlinked on
+// head-drain, detached files only have their fds closed (kept on disk). Caller must hold lock.
+func (g *visibleGenerations[P]) publishDisposing(newPayload P, retired, detached []*DirtySegment) {
 	next := &generation[P]{payload: newPayload}
 	old := g.current.Load()
 	old.retired = retired
+	old.detached = detached
 	old.next = next
 	g.current.Store(next)
-	closeAndRemoveSegments(g.reclaimLocked())
+	disposeReclaimed(g.reclaimLocked())
 }
 
-// reclaimLocked walks the oldest->newest chain from the head, collecting the retired files
+// reclaimed holds the files of drained generations, split by disposition.
+type reclaimed struct {
+	toUnlink []*DirtySegment // closeAndRemoveFiles: close fds and unlink from disk
+	toClose  []*DirtySegment // close fds only; the file stays on disk
+}
+
+// reclaimLocked walks the oldest->newest chain from the head, collecting the disposable files
 // of every fully-drained generation older than the current one. Caller must hold lock; the
-// returned files are deleted by the caller off-lock.
-func (g *visibleGenerations[P]) reclaimLocked() (toDelete []*DirtySegment) {
+// returned files are disposed by the caller off-lock.
+func (g *visibleGenerations[P]) reclaimLocked() (r reclaimed) {
 	cur := g.current.Load()
 	for h := g.oldest; h != cur && h.refcnt.Load() == 0; h = h.next {
-		toDelete = append(toDelete, h.retired...)
+		r.toUnlink = append(r.toUnlink, h.retired...)
+		r.toClose = append(r.toClose, h.detached...)
 		h.retired = nil
+		h.detached = nil
 		g.oldest = h.next
 	}
-	return toDelete
+	return r
+}
+
+func disposeReclaimed(r reclaimed) {
+	closeAndRemoveSegments(r.toUnlink)
+	for _, sn := range r.toClose {
+		sn.close()
+	}
 }
 
 func (g *visibleGenerations[P]) reclaim() {
 	g.lock.Lock()
-	toDelete := g.reclaimLocked()
+	r := g.reclaimLocked()
 	g.lock.Unlock()
-	closeAndRemoveSegments(toDelete)
+	disposeReclaimed(r)
 }

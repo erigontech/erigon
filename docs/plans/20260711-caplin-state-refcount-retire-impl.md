@@ -199,29 +199,28 @@ Acceptance: `db/snapshotsync` caplin-state tests green under `-race`; reads unch
 Two distinct drain-gated actions (I2b): **unlink-retirement** vs **fd-close-only**. Do not
 conflate them.
 
-- [ ] **`RemoveOverlaps` (:474) — unlink-retirement.** Drop covered segments from dirty and
-      `publish(newPayload, retiredCovered)` (publish unlinks the drained set inline under the
-      lock, I2). Contract: with no pre-existing reader pinning the retired generation, files
-      are unlinked **by return** (take a temp View pin then release, mirroring EL, to force
-      the drain); defer only while a live reader pins. Drop the "offline maintenance only" doc.
-- [ ] **`Close` — shutdown, close fds only, NEVER unlink.** `Close` must not call the unlink
-      path or `closeAndRemoveSegments`; it publishes an empty generation and closes fds after
-      readers drain. Removing files here would delete the whole state snapshot set on normal
-      shutdown.
-- [ ] **`closeWhatNotInList` in `OpenList` — detach-only, single publish.** Make it
-      detach-only (remove stale from dirty, return the stale set). `OpenList` holds the unified
-      lock through: stale-detach → open/insert new files → build candidate payload → **one
-      final `publish`** with the stale set as close-only (fd-close on drain, **no unlink**).
-      Never publish mid-`OpenList` (avoids a transient generation with stale gone but new not
-      yet visible).
-- [ ] Audit every other `closeSeg`/`closeIdx`/`closeAndRemoveFiles`/detach caller in
-      `caplin_state_snapshots.go`; each must be either unlink-retirement or close-only, and
-      drain-gated if it can touch a segment a live view may pin.
-- [ ] TDD under `-race`: (a) open a `CaplinStateView`, run `RemoveOverlaps` concurrently →
-      pinned reader still reads correctly, covered files unlinked only after the view closes;
-      (b) no-reader `RemoveOverlaps` unlinks by return (publishable/overlap re-scan callers
-      unaffected); (c) **`Close` removes no files from disk**; (d) `OpenList` never exposes a
-      transient generation missing the new files.
+- [x] **`RemoveOverlaps` (:474) — unlink-retirement.** Drop covered segments from dirty and
+      `recalcVisibleFiles(retiredCovered, nil)` → `publish` unlinks the drained set inline under
+      the lock (I2). Contract: with no pre-existing reader pinning the retired generation, files
+      are unlinked **by return** (temp `s.View()` pin + deferred `Close`, mirroring EL, forces
+      the drain); defer only while a live reader pins. Dropped the "offline maintenance only" doc.
+- [x] **`Close` — shutdown, close fds only, NEVER unlink.** Detaches every segment and
+      `recalcVisibleFiles(nil, detached)` publishes an empty generation, closing fds only once
+      readers drain via the new close-only disposition (no `closeAndRemoveFiles`/unlink).
+- [x] **`closeWhatNotInList` in `OpenList` → `detachNotInList`, single publish.** Now
+      detach-only (removes stale from dirty, returns the stale set without closing). `OpenList`
+      holds the lock through: stale-detach → open/insert new files → **one final
+      `recalcVisibleFiles(nil, stale)`** (deferred, LIFO before Unlock) with the stale set as
+      close-only (fd-close on drain, **no unlink**). Never publishes mid-`OpenList`
+      (`TestCaplinStateOpenListSinglePublishNoTransient` pins `pinned.next == current`).
+- [x] Audited every `closeSeg`/`closeIdx`/`closeAndRemoveFiles`/detach caller in
+      `caplin_state_snapshots.go`: none remain outside the two drain-gated publish paths
+      (`detachNotInList` close-only; `recalcVisibleFiles(retired, …)` unlink). Extended the core
+      with a `detached` (close-only) disposition alongside `retired` (unlink); EL unchanged.
+- [x] TDD under `-race`: (a) `TestCaplinStateRemoveOverlapsDefersUnlinkWhileViewOpen` — pinned
+      reader keeps the covered files until it closes (verified it bites vs eager unlink);
+      (b) no-reader `RemoveOverlaps` unlinks by return (existing `TestCaplinStateRemoveOverlaps`);
+      (c) `TestCaplinStateCloseRemovesNoFiles`; (d) `TestCaplinStateOpenListSinglePublishNoTransient`.
 
 Acceptance: race tests green under `-race`; `db/snapshotsync` suite green; the
 publishable/overlap integrity tests still pass.

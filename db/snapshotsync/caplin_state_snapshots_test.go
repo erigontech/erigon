@@ -24,7 +24,7 @@ import (
 	"github.com/tidwall/btree"
 )
 
-func TestCaplinStateCloseWhatNotInListDropsUnopenedStub(t *testing.T) {
+func TestCaplinStateDetachNotInListDropsUnopenedStub(t *testing.T) {
 	tree := btree.NewBTreeGOptions[*DirtySegment](DirtySegmentLess, btree.Options{Degree: 4, NoLocks: false})
 	kept := &DirtySegment{Range: Range{0, 1000}, filePath: filepath.Join("snapshots", "keep.seg")}
 	stale := &DirtySegment{Range: Range{1000, 2000}, filePath: filepath.Join("snapshots", "drop.seg")}
@@ -32,10 +32,11 @@ func TestCaplinStateCloseWhatNotInListDropsUnopenedStub(t *testing.T) {
 	tree.Set(stale)
 	s := &CaplinStateSnapshots{dirty: map[CaplinStateType]*btree.BTreeG[*DirtySegment]{CaplinBlockRoot: tree}}
 
-	s.closeWhatNotInList([]string{"keep.seg"})
+	detached := s.detachNotInList([]string{"keep.seg"})
 
-	require.Equal(t, 1, tree.Len(), "unopened stale stub must be dropped")
+	require.Equal(t, 1, tree.Len(), "unopened stale stub must be dropped from dirty")
 	survivor, ok := tree.Min()
 	require.True(t, ok)
 	require.Same(t, kept, survivor)
+	require.Equal(t, []*DirtySegment{stale}, detached, "detach returns the removed stub without closing it")
 }

@@ -179,7 +179,7 @@ func NewCaplinStateSnapshots(cfg ethconfig.BlocksFreezing, beaconCfg *clparams.B
 	c.gens.init(&c.dirtyLock, caplinStateVisible{segments: make([]VisibleSegments, caplinStateTypeCount)})
 
 	c.dirtyLock.Lock()
-	c.recalcVisibleFiles()
+	c.recalcVisibleFiles(nil, nil)
 	c.dirtyLock.Unlock()
 	return c
 }
@@ -251,6 +251,9 @@ func (s *CaplinStateSnapshots) coveredRangesForType(name CaplinStateType) []Rang
 	return ranges
 }
 
+// Close tears down the snapshot set on shutdown: it detaches every segment from dirty and
+// publishes an empty generation, closing their fds only once readers drain. It must never
+// unlink — removing the files here would delete the whole on-disk state snapshot set.
 func (s *CaplinStateSnapshots) Close() {
 	if s == nil {
 		return
@@ -258,7 +261,8 @@ func (s *CaplinStateSnapshots) Close() {
 	s.dirtyLock.Lock()
 	defer s.dirtyLock.Unlock()
 
-	s.closeWhatNotInList(nil)
+	detached := s.detachNotInList(nil)
+	s.recalcVisibleFiles(nil, detached)
 }
 
 func (s *CaplinStateSnapshots) openSegIfNeed(sn *DirtySegment, filepath string) error {
@@ -277,9 +281,15 @@ func (s *CaplinStateSnapshots) openSegIfNeed(sn *DirtySegment, filepath string) 
 func (s *CaplinStateSnapshots) OpenList(fileNames []string, optimistic bool) error {
 	s.dirtyLock.Lock()
 	defer s.dirtyLock.Unlock()
-	defer s.recalcVisibleFiles() // LIFO: runs before Unlock, so publish holds the lock
 
-	s.closeWhatNotInList(fileNames)
+	// Detach stale segments (in dirty, not in the new list) up front but do NOT close them:
+	// a live reader may still pin the current generation referencing them. The single publish
+	// below closes their fds only on drain (no unlink). One publish under the lock, after all
+	// new files are opened, so no reader ever sees a transient set with stale gone but new
+	// files not yet visible.
+	detached := s.detachNotInList(fileNames)
+	defer s.recalcVisibleFiles(nil, detached) // LIFO: runs before Unlock, so publish holds the lock
+
 	var segmentsMax uint64
 	var segmentsMaxSet bool
 	for _, fName := range fileNames {
@@ -393,9 +403,10 @@ func isIndexed(s *DirtySegment) bool {
 
 // recalcVisibleFiles builds a fresh enum-indexed visible bundle from dirty and publishes it
 // as the new generation. Must be called with dirtyLock held, so the caller's dirty mutation
-// and this publish are one atomic step. State visibility replacement never retires files
-// (retired=nil); only dirty-removal paths retire, and they do so via their own publish.
-func (s *CaplinStateSnapshots) recalcVisibleFiles() {
+// and this publish are one atomic step. `retired` are files to unlink on drain (permanent
+// removal); `detached` are files to close fds-only on drain (re-open/shutdown cleanup, no
+// unlink). Ordinary visibility replacement passes both nil (I1: it never removes files).
+func (s *CaplinStateSnapshots) recalcVisibleFiles(retired, detached []*DirtySegment) {
 	getNewVisibleSegments := func(dirtySegments *btree.BTreeG[*DirtySegment]) VisibleSegments {
 		newVisibleSegments := make(VisibleSegments, 0, dirtySegments.Len())
 		dirtySegments.Walk(func(segments []*DirtySegment) bool {
@@ -429,62 +440,66 @@ func (s *CaplinStateSnapshots) recalcVisibleFiles() {
 		segments[t] = getNewVisibleSegments(s.dirty[t])
 	}
 
-	s.gens.publish(caplinStateVisible{
+	s.gens.publishDisposing(caplinStateVisible{
 		segments:    segments,
 		segmentsMax: s.segmentsMax.Load(),
 		idxMax:      idxAvailabilityFrom(segments, s.types),
-	}, nil)
+	}, retired, detached)
 	s.indicesReady.Store(true)
 }
 
-// RemoveOverlaps deletes state segment files that are fully covered by a larger
-// indexed segment of the same type, so the on-disk publishable check stops flagging
-// them as overlapping. Offline maintenance only: it munmaps and unlinks files, so no
-// CaplinStateView may be open concurrently.
+// RemoveOverlaps deletes state segment files that are fully covered by a larger indexed
+// segment of the same type, so the on-disk publishable check stops flagging them as
+// overlapping. The unlink is drain-gated: the covered files are retired to the outgoing
+// generation and unlinked only once no reader pins it. The temp View pin taken here forces
+// that drain, so with no other reader the files are unlinked by the time this returns.
 func (s *CaplinStateSnapshots) RemoveOverlaps() error {
 	if s == nil {
 		return nil
 	}
-	s.dirtyLock.Lock()
 
-	var toRemove []*DirtySegment
-	for _, dirtySegments := range s.dirty {
-		var indexed []*DirtySegment
-		dirtySegments.Walk(func(segments []*DirtySegment) bool {
-			for _, sn := range segments {
-				if isIndexed(sn) {
-					indexed = append(indexed, sn)
-				}
-			}
-			return true
-		})
+	v := s.View()
+	defer v.Close()
+	func() {
+		s.dirtyLock.Lock()
+		defer s.dirtyLock.Unlock()
 
-		var rm []*DirtySegment
-		dirtySegments.Walk(func(segments []*DirtySegment) bool {
-			for _, sn := range segments {
-				for _, sup := range indexed {
-					if sn != sup && sn.isSubSetOf(sup) {
-						rm = append(rm, sn)
-						break
+		var toRemove []*DirtySegment //nolint:prealloc // sparse subset of dirty; full-size prealloc would over-allocate
+		for _, dirtySegments := range s.dirty {
+			var indexed []*DirtySegment
+			dirtySegments.Walk(func(segments []*DirtySegment) bool {
+				for _, sn := range segments {
+					if isIndexed(sn) {
+						indexed = append(indexed, sn)
 					}
 				}
+				return true
+			})
+
+			var rm []*DirtySegment
+			dirtySegments.Walk(func(segments []*DirtySegment) bool {
+				for _, sn := range segments {
+					for _, sup := range indexed {
+						if sn != sup && sn.isSubSetOf(sup) {
+							rm = append(rm, sn)
+							break
+						}
+					}
+				}
+				return true
+			})
+
+			for _, sn := range rm {
+				dirtySegments.Delete(sn)
 			}
-			return true
-		})
-
-		for _, sn := range rm {
-			dirtySegments.Delete(sn)
+			toRemove = append(toRemove, rm...)
 		}
-		toRemove = append(toRemove, rm...)
-	}
 
-	s.recalcVisibleFiles()
-	s.dirtyLock.Unlock()
-
-	for _, sn := range toRemove {
-		s.logger.Info("[caplin-state] removing overlapped segment", "file", sn.FileName())
-		sn.closeAndRemoveFiles()
-	}
+		for _, sn := range toRemove {
+			s.logger.Info("[caplin-state] removing overlapped segment", "file", sn.FileName())
+		}
+		s.recalcVisibleFiles(toRemove, nil)
+	}()
 	return nil
 }
 
@@ -531,20 +546,41 @@ func (s *CaplinStateSnapshots) OpenFolder() error {
 	return s.OpenList(listAllSegFilesInDir(s.dir), false)
 }
 
-func (s *CaplinStateSnapshots) closeWhatNotInList(l []string) {
-	protectFiles := make(map[string]struct{}, len(l))
-	for _, fName := range l {
+// detachNotInList removes from dirty every segment whose base file name is not in `protect`
+// and returns them WITHOUT closing; the caller decides their disposition (unlink or close) via
+// publish, so a segment a live view still pins is not torn down under the reader. Must be
+// called with dirtyLock held.
+func (s *CaplinStateSnapshots) detachNotInList(protect []string) []*DirtySegment {
+	protectFiles := make(map[string]struct{}, len(protect))
+	for _, fName := range protect {
 		protectFiles[fName] = struct{}{}
 	}
 
+	total := 0
 	for _, dirtySegments := range s.dirty {
-		closeAndDropNotProtected(dirtySegments, protectFiles, func(sn *DirtySegment) string {
-			// sn.filePath, not the promoted Decompressor.FilePath(): the field is
-			// set for every tree member, incl. stubs whose Decompressor is nil.
-			_, name := filepath.Split(sn.filePath)
-			return name
-		})
+		total += dirtySegments.Len()
 	}
+	detached := make([]*DirtySegment, 0, total)
+	for _, dirtySegments := range s.dirty {
+		var toDelete []*DirtySegment
+		dirtySegments.Walk(func(segments []*DirtySegment) bool {
+			for _, sn := range segments {
+				// sn.filePath, not the promoted Decompressor.FilePath(): the field is
+				// set for every tree member, incl. stubs whose Decompressor is nil.
+				_, name := filepath.Split(sn.filePath)
+				if _, ok := protectFiles[name]; ok {
+					continue
+				}
+				toDelete = append(toDelete, sn)
+			}
+			return true
+		})
+		for _, sn := range toDelete {
+			dirtySegments.Delete(sn)
+		}
+		detached = append(detached, toDelete...)
+	}
+	return detached
 }
 
 type CaplinStateView struct {
