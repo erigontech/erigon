@@ -32,10 +32,13 @@ they fold to.
   nested). The incremental/frontier path uses `deriveFoldFrontier` → `dispatchFoldTasks` and **never
   touches `forkFolder`**. Keep the change inside `forkFolder`/`dispatchWholeFresh` and do **not** alter
   shared `foldK` (`fold_dag.go:36`) → incremental cannot regress.
-- **The serial loop:** `fold_pool.go:279-289` — `for _, top := range rootTask.children { c, d, err :=
-  foldFreshAccountSubtreeCellForkJoin(ctx, ff, top.node, ...) }`. Each call creates its own `foldCtx`
-  (`newFoldCtx`) and returns a `mountWallCell` + deferred; they are already independent. Only the loop
-  serializes them.
+- **The serial loop:** `fold_pool.go:294-304` (forkFolder constructed at `:287`) — `for _, top := range
+  rootTask.children { c, d, err := foldFreshAccountSubtreeCellForkJoin(ctx, ff, top.node, ...) }`. Each
+  call creates its **own** `foldCtx` (`newFoldCtx`, `fold_pool.go:365`) and returns an independent
+  `mountWallCell` + deferred. Only the loop serializes them. Note this per-nibble-own-`foldCtx` ownership
+  differs from `forkFolder.fold`'s interior inline arm, which reuses the *parent* `fc` and merges child
+  hashes into one branch row (`truthtree_fold.go:457`) — the two dispatch loops are **not** the same
+  shape (see Task 4).
 - **The fork mechanism to reuse:** `forkFolder.fold` (`truthtree_fold.go:352`) — `jobs` loop with
   `ff.sem.TryAcquire(1)` → `errgroup` fork, inline `foldNode` fallback under saturation. `TryAcquire`
   (non-blocking) is load-bearing for deadlock freedom: a forked parent holds its slot while awaiting its
@@ -64,9 +67,12 @@ they fold to.
 
 - **Correctness (green throughout):** root byte-identity vs the pre-change fork and vs the serial oracle,
   on multi-nibble fresh corpora incl. whales and the depth-64 seam. These are refactor-safety nets.
-- **Behavioral red-first:** a top-level peak-concurrency counter — with a multi-nibble fresh corpus and
-  ≥2 `foldSem` slots, the number of top-nibble subtrees folding concurrently must exceed 1. Fails today
-  (serial loop → peak 1), passes after. This is the driver, not a perf assertion.
+- **Behavioral red-first (deterministic, not timing-based):** a rendezvous barrier at each top-nibble
+  fold's execution start that releases only after ≥2 entrants arrive, with a timeout that **fails**.
+  Serial loop → 1 entrant → deterministic timeout (RED); concurrent → 2 arrive → release (GREEN). Works
+  at `foldSem`=1 (one forks, one inline in the dispatcher = 2 entrants). Also asserts
+  `wholeFreshForkJoins` fired so a frontier-fallback corpus can't produce a false red. This is the
+  driver, not a perf assertion — and it must never `t.Skip`.
 - **Deadlock-freedom under saturation:** run the new dispatch with `foldSem` size 1 and 2 over a
   fork-heavy corpus; must complete (inline fallback), `-race` clean.
 - **Perf gates (acceptance, Task 5):** ported `Benchmark_FreshNibTimeline` (folds now overlap),
@@ -96,12 +102,25 @@ they fold to.
 - **Concurrency bound:** total in-flight fold goroutines stay capped by `foldSem` (numWorkers slots).
   The top-level dispatch acquires from the *same* semaphore as interior forks, so routing 16 nibbles
   through it does not oversubscribe — it fills idle slots the serial loop left empty.
-- **Deferred collection:** each forked nibble owns its `foldCtx.deferred`; results merge after join
-  exactly as the serial loop appended them. Order of `append` into the combined slice is not
-  root-affecting (branch records are keyed by prefix), but preserve deterministic collection for the
-  duplicate-prefix flush path — verify against the existing deferred-vs-eager differential tests.
-- **Fail-closed:** any nibble error recycles all collected deferred (`putDeferredUpdates`) and returns
-  nothing, matching the current loop's error arm.
+- **Deferred collection (no shared append):** each forked nibble writes into its **own** result slot
+  (per-nibble `cells[nib]`/`present[nib]`/a `results[i] []*DeferredBranchUpdate`); the combined `deferred`
+  slice is assembled **after `g.Wait()`**, never appended from goroutines (a shared `append` races —
+  `-race` would catch it, but do not write it). Order is not root-affecting here and provably so: the
+  route folds only the complementary set — `reuseSchedulerCells` (`streaming_commitment.go:267-288`)
+  **prunes reused nibbles from `rootTask.children`** — so the top nibbles are disjoint prefixes among
+  themselves and disjoint from reused, `reusedDeferred` stays appended **last**, and the combined slice
+  has **no duplicate prefixes** (`hasDuplicatePrefix` false → order-independent apply). This is why the
+  reorder cannot change bytes; it is not a "preserve ordering for the duplicate-prefix path" concern
+  (there are no duplicate prefixes on this route).
+- **Fail-closed under concurrency:** the error arm must recycle deferred from **all** nibbles — completed
+  forked `results[i]`, the inline nibble, and `reusedDeferred` — matching `forkFolder.fold`'s `results[i]`
+  recycling (`truthtree_fold.go:464-473`). A serial-style single `putDeferredUpdates(deferred)` leaks
+  in-flight forked results.
+- **Inline arm holds no slot:** the saturation fallback (fold a nibble inline in the dispatch goroutine)
+  must hold **no** `foldSem` slot while folding, mirroring `forkFolder.fold`'s inline arm
+  (`truthtree_fold.go:457`). This no-slot property is the load-bearing bit of the deadlock-free contract:
+  slotted goroutines only ever await children that hold their own slot or fold inline, so concurrency
+  stays `numWorkers` slotted + 1 un-slotted dispatcher — identical to today.
 - **Seam/fallback unchanged:** the `allTopNibblesPureBranch` / `accountPlaneForkable` / `hasEmpty`
   guards that route non-forkable corpora to the frontier fold stay exactly as-is; only the forkable
   branch's dispatch changes.
@@ -132,21 +151,26 @@ they fold to.
 - [ ] confirm compile + benches run; no production behavior change (hook is nil in prod)
 - [ ] run tests - package green before Task 2
 
-### Task 2: Red — top-level peak-concurrency behavioral test
+### Task 2: Red — deterministic top-level concurrency test
 
 **Files:**
-- Modify: `execution/commitment/fold_pool.go` (test-readable peak-concurrency counter for the top-nibble
-  dispatch, gated like the existing whole-fresh atomics)
+- Modify: `execution/commitment/fold_pool.go` (a test-only rendezvous hook straddling each top-nibble
+  fold's *execution*, gated like the existing whole-fresh atomics; nil in prod)
 - Create/Modify: `execution/commitment/fresh_build_fork_test.go` (the red test)
 
-- [ ] add a test-observable counter recording the peak number of top-nibble subtrees folding
-      concurrently in `dispatchWholeFresh`
-- [ ] write a failing test: a fresh corpus with ≥4 populated top nibbles and `foldSem` ≥ 2 must reach
-      peak top-level concurrency > 1 (fails today: serial loop → peak 1). Confirm it fails for the right
-      reason (serial dispatch), not a setup error
-- [ ] write the root-parity green test alongside: same corpus, root byte-identical to the current fork
-      and to the serial oracle (refactor safety net)
-- [ ] run tests - the concurrency test is RED, the parity test is GREEN
+- [ ] **deterministic barrier, NOT a peak counter** (a timing-dependent peak counter can flake, and the
+      no-`t.Skip` rule would then wedge the executor). Add a test-only rendezvous the fold entry calls at
+      the *start* of each top-nibble execution (inside both the forked goroutine and the inline arm — not
+      at enqueue): the test's rendezvous releases only after ≥2 entrants arrive, with a timeout that
+      **fails** (never skips). Serial dispatch → only 1 entrant ever → deterministic timeout = RED;
+      concurrent → 2 arrive, release = GREEN. Works even at `foldSem` size 1 (one nibble forks, one folds
+      inline in the dispatcher = 2 concurrent entrants)
+- [ ] pin red-for-the-right-reason: the test must also assert `wholeFreshForkJoins` incremented (matches
+      `fresh_build_fork_test.go:172`), so a corpus that silently slips to the frontier fallback (fails
+      `allTopNibblesPureBranch`/`accountPlaneForkable`/`hasEmpty`) is a test-setup failure, not a false red
+- [ ] write the root-parity green test alongside: same corpus, root **and the persisted branch-record
+      set** byte-identical to the current fork and to the serial oracle (refactor safety net)
+- [ ] run tests - the barrier test is RED (times out under the serial loop), the parity test is GREEN
 
 ### Task 3: Green — route the top-nibble dispatch through the shared fork mechanism
 
@@ -157,9 +181,15 @@ they fold to.
 
 - [ ] replace `dispatchWholeFresh`'s serial `for` loop with a `TryAcquire`+`errgroup` dispatch over
       `rootTask.children` sharing `fp.foldSem`: fork `foldFreshAccountSubtreeCellForkJoin` when a slot is
-      free, fold inline under saturation; collect `cells`/`present`/`deferred` as before; preserve the
-      fail-closed error arm (`putDeferredUpdates`)
-- [ ] preserve the deadlock-safe TryAcquire-then-inline-fallback contract (no blocking acquire)
+      free, fold inline (holding **no** slot) under saturation
+- [ ] **no shared append from goroutines**: each nibble writes its own `cells[nib]`/`present[nib]` and a
+      per-index `results[i]` deferred slot; assemble the combined `deferred` (then `reusedDeferred` last)
+      **after `g.Wait()`**
+- [ ] fail-closed error arm recycles **all** nibbles' deferred — forked `results[i]`, the inline nibble,
+      and `reusedDeferred` — per `forkFolder.fold`'s pattern (`truthtree_fold.go:464-473`); not a single
+      serial-style `putDeferredUpdates(deferred)`
+- [ ] preserve the deadlock-safe TryAcquire-then-inline-fallback contract (no blocking acquire; inline
+      holds no slot)
 - [ ] make the Task 2 concurrency test pass; keep the parity test green
 - [ ] update `onNibFold` capture if the loop shape changed so `Benchmark_FreshNibTimeline` still reports
       per-nibble folds (now overlapping)
@@ -167,42 +197,61 @@ they fold to.
       clean
 - [ ] run tests + `-race` on the concurrency-touched tests - all green before Task 4
 
-### Task 4: Unify the dispatch pattern and sweep the threshold
+### Task 4: Sweep the interior fork threshold (measure-gated, byte-identical)
 
 **Files:**
-- Modify: `execution/commitment/truthtree_fold.go` (extract the shared fork-dispatch helper used by both
-  `forkFolder.fold` and the top-level dispatch)
-- Modify: `execution/commitment/fold_pool.go` / `execution/commitment/fold_dag.go` (only if the measured
-  internal-threshold decouple is adopted — a `forkFolder` fork-floor field, not a `foldK` change)
+- Modify: `execution/commitment/fold_pool.go` (a `forkFolder` fork-floor — **not** a `foldK` change, so
+  the frontier path is untouched)
 
-- [ ] extract the "for each independent child: fork if slot free, else inline" pattern into one helper;
-      route both `forkFolder.fold` and the top-level dispatch through it (remove the duplication); keep
-      the deadlock contract in the single helper
 - [ ] measure whether gating the interior fork on slot-availability + a fixed `foldKMin` floor (instead
-      of `child.subtreeCount > k`) improves fresh; sweep the floor. **Adopt only if** fresh improves AND
-      incremental (`Benchmark_FreshBuildFork/incremental-whale120k`) stays ≤ baseline AND B/op does not
-      balloon. Record the decision + numbers in this plan
-- [ ] if not adopted, `log`/note it explicitly (no silent scope drop) and keep only the top-level fix
-- [ ] write tests for the shared helper (fork-under-slots, inline-under-saturation, error propagation)
+      of `child.subtreeCount > k`) buys parallelism *beyond* Task 3's top-level fix; sweep the floor.
+      Fork-vs-inline is byte-identical, so this only moves concurrency/`B/op`, never bytes
+- [ ] **adopt only if** fresh improves AND `Benchmark_FreshBuildFork/incremental-whale120k` stays ≤
+      baseline AND B/op does not balloon; record the decision + numbers here. The entire *measured* win
+      is already in Task 3 — treat this as opportunistic
+- [ ] if not adopted, note it explicitly here (no silent scope drop) and keep only the top-level fix
 - [ ] run tests + `-race` - green before Task 5
 
-### Task 5: Verify acceptance criteria
+### Task 5: (Optional) Unify the fork-dispatch pattern — cleanup only
 
-- [ ] `Benchmark_SerialVsForkCPU` / `Benchmark_ProcessCPUUtil`: fresh w18 improved toward ~140–160 ms,
-      avg-cores up from 5.3; record the numbers
-- [ ] `Benchmark_FreshNibTimeline`: top-nibble folds overlap (no longer sum to ~74% of wall)
-- [ ] `Benchmark_FreshBuildFork`: fresh improved, `incremental-whale120k` unregressed (≤ ~24.5 ms),
-      B/op bounded (note any regression vs the 25% fresh-fork memory win)
-- [ ] root byte-identity across the parity + deferred-vs-eager differential suites; whale + depth-64 seam
-      corpora covered
+**Files:**
+- Modify: `execution/commitment/truthtree_fold.go`, `execution/commitment/fold_pool.go`
+
+- [ ] **caveat first:** the two loops are NOT the same shape — `forkFolder.fold`'s inline arm reuses the
+      *parent* `fc` and merges child hashes into one branch row; the top level gives each nibble its own
+      `newFoldCtx` producing independent mount-wall cells. A shared helper that imposes the interior
+      "inline reuses parent fc" contract on the top level would be **wrong** (interleaves independent
+      nibbles' deferred/scratch → byte corruption). The measured win is entirely in Task 3
+- [ ] extract a shared helper **only** if it preserves per-nibble `foldCtx` ownership at the top level;
+      it must not touch the byte-identity-critical path merely to de-duplicate. If the abstraction can't
+      stay clean, **skip this task** and note why (duplication is acceptable here per repo policy)
+- [ ] if done: write helper tests (fork-under-slots, inline-under-saturation, error propagation);
+      root + branch-record byte-identity unchanged; `-race` green
+
+### Task 6: Verify acceptance criteria
+
+- [ ] **byte-identity (primary gate):** root **and the persisted branch-record set** identical to the
+      pre-change fork and the serial oracle — assert the deferred/stored-branch set directly, not just the
+      32-byte root (the existing test compares roots only; extend it), across the parity +
+      deferred-vs-eager differential suites; whale + depth-64 seam corpora covered
+- [ ] **incremental non-regression via diff-scope, not absolute ms:** confirm no incremental/frontier-path
+      files changed — `git diff 2ae26b58d5 --stat` touches only `forkFolder`/`dispatchWholeFresh` (+ tests
+      + `foldKMin` floor if Task 4 adopted), never `deriveFoldFrontier`/`dispatchFoldTasks`/`foldK`. Run
+      `Benchmark_FreshBuildFork/incremental-whale120k` and record it as an observation (machine-dependent),
+      not a hard-fail number
 - [ ] serial engine untouched: `git diff 2ae26b58d5 -- execution/commitment/hex_patricia_hashed.go` empty
+- [ ] **perf observations (recorded, not hard-fail):** `Benchmark_SerialVsForkCPU`/`ProcessCPUUtil` fresh
+      w18 improved (target ~140–160 ms), avg-cores up from 5.3; `Benchmark_FreshNibTimeline` top-nibble
+      folds overlap (no longer sum to ~74% of wall); fresh B/op bounded (note any regression vs the 25%
+      fresh-fork memory win)
+- [ ] deadlock-freedom: dispatch at `foldSem` size 1 and 2 over a fork-heavy corpus completes, `-race` green
 - [ ] full `execution/commitment` suite green, `-race` green, `make lint` clean (run repeatedly), `make
       test-short` exit 0
 
-### Task 6: [Final] Documentation and cleanup
+### Task 7: [Final] Documentation and cleanup
 
-- [ ] update `execution/commitment/doc.go` (or the fresh-fork design doc) to describe the unified
-      slot-bounded top-level dispatch replacing the serial loop
+- [ ] update `execution/commitment/doc.go` (or the fresh-fork design doc) to describe the slot-bounded
+      top-level dispatch replacing the serial loop
 - [ ] decide the fate of the `onNibFold` hook + measurement benches: keep the benches as regression gates;
       keep or remove the hook per whether the nib-timeline bench still needs it
 - [ ] update CLAUDE.md / memory only if a new invariant emerged
