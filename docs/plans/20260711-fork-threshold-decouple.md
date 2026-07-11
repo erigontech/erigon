@@ -277,16 +277,28 @@ explicit floors for the sweep bench (≥ k restores gate-at-k).
 **Files:**
 - Modify: `execution/commitment/truthtree_fold.go`, `execution/commitment/fold_pool.go`
 
-- [ ] **caveat first:** the two loops are NOT the same shape — `forkFolder.fold`'s inline arm reuses the
+- [x] **caveat first:** the two loops are NOT the same shape — `forkFolder.fold`'s inline arm reuses the
       *parent* `fc` and merges child hashes into one branch row; the top level gives each nibble its own
       `newFoldCtx` producing independent mount-wall cells. A shared helper that imposes the interior
       "inline reuses parent fc" contract on the top level would be **wrong** (interleaves independent
       nibbles' deferred/scratch → byte corruption). The measured win is entirely in Task 3
-- [ ] extract a shared helper **only** if it preserves per-nibble `foldCtx` ownership at the top level;
+      *(resolved by abstracting only the dispatch skeleton — TryAcquire→errgroup fork / inline-no-slot /
+      break-on-inline-error / join / inline-error precedence — which is identical at both sites and
+      never sees a `foldCtx`; both arms stay as call-site closures)*
+- [x] extract a shared helper **only** if it preserves per-nibble `foldCtx` ownership at the top level;
       it must not touch the byte-identity-critical path merely to de-duplicate. If the abstraction can't
       stay clean, **skip this task** and note why (duplication is acceptable here per repo policy)
-- [ ] if done: write helper tests (fork-under-slots, inline-under-saturation, error propagation);
+      *(`forkJoinEach(ctx, sem, n, fork, inline)` in `truthtree_fold.go`, holding the deadlock-contract
+      doc in the one place; `foldTopNibblesForkJoin` passes one closure for both arms — its arms were
+      identical — and `forkFolder.fold`'s jobs loop keeps its two distinct arms. The other errgroup
+      sites (`foldFreshStorage` blocking-Acquire fan-out, `dispatchFoldTasks` frontier pool) are
+      different mechanisms and stay untouched)*
+- [x] if done: write helper tests (fork-under-slots, inline-under-saturation, error propagation);
       root + branch-record byte-identity unchanged; `-race` green
+      *(`TestForkJoinEach_ForksUnderFreeSlots` rendezvous, `_InlineUnderSaturation` sem-held-external
+      completes inline in order, `_ErrorPropagation` ×3 incl. inline-precedence + join-before-return;
+      `TestFreshBuild|TestWholeFresh|TestTruthtreeFold` `-race` green, full package green, `make lint`
+      clean ×2)*
 
 ### Task 6: Verify acceptance criteria
 

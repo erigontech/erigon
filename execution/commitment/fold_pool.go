@@ -313,12 +313,12 @@ func (fp *foldPool) dispatchWholeFresh(ctx context.Context, base *HexPatriciaHas
 	return fp.stitchAndFoldRoot(ctx, base, &cells, &present, deferred)
 }
 
-// foldTopNibblesForkJoin folds the whole-fresh top-nibble subtrees through the shared fork
-// mechanism: a nibble forks onto its own goroutine when a foldSem slot is free, else folds inline in
-// the dispatch goroutine holding no slot — the same TryAcquire-then-inline contract as
-// forkFolder.fold, deadlock-free for the same reason. The nibbles are disjoint hashed-key prefixes,
-// so each goroutine owns its cell/present/deferred slot and the combined slice assembles only after
-// the join. Fail-closed: any error recycles every completed nibble's deferred.
+// foldTopNibblesForkJoin folds the whole-fresh top-nibble subtrees through the shared fork-join
+// dispatch (forkJoinEach): a nibble forks onto its own goroutine when a foldSem slot is free, else
+// folds inline in the dispatch goroutine holding no slot. The nibbles are disjoint hashed-key
+// prefixes, so each fold owns its cell/present/deferred slot — one closure serves both dispatch arms
+// — and the combined slice assembles only after the join. Fail-closed: any error recycles every
+// completed nibble's deferred.
 func foldTopNibblesForkJoin(ctx context.Context, ff *forkFolder, children []*foldTask, prefix []byte,
 ) ([16]cell, [16]bool, []*DeferredBranchUpdate, error) {
 	var (
@@ -326,41 +326,22 @@ func foldTopNibblesForkJoin(ctx context.Context, ff *forkFolder, children []*fol
 		present [16]bool
 	)
 	results := make([][]*DeferredBranchUpdate, len(children))
-	g, gctx := errgroup.WithContext(ctx)
-	var inlineErr error
-	for i, top := range children {
-		if ff.sem.TryAcquire(1) {
-			g.Go(func() error {
-				defer ff.sem.Release(1)
-				c, d, err := foldFreshAccountSubtreeCellForkJoin(gctx, ff, top.node, prefix, top.nib)
-				if err != nil {
-					return err
-				}
-				cells[top.nib] = c
-				present[top.nib] = true
-				results[i] = d
-				return nil
-			})
-			continue
-		}
+	foldOne := func(ctx context.Context, i int) error {
+		top := children[i]
 		c, d, err := foldFreshAccountSubtreeCellForkJoin(ctx, ff, top.node, prefix, top.nib)
 		if err != nil {
-			inlineErr = err
-			break
+			return err
 		}
 		cells[top.nib] = c
 		present[top.nib] = true
 		results[i] = d
+		return nil
 	}
-	werr := g.Wait()
-	if inlineErr != nil || werr != nil {
+	if err := forkJoinEach(ctx, ff.sem, len(children), foldOne, foldOne); err != nil {
 		for _, r := range results {
 			putDeferredUpdates(r)
 		}
-		if inlineErr != nil {
-			return [16]cell{}, [16]bool{}, nil, inlineErr
-		}
-		return [16]cell{}, [16]bool{}, nil, werr
+		return [16]cell{}, [16]bool{}, nil, err
 	}
 	var deferred []*DeferredBranchUpdate
 	for _, r := range results {

@@ -20,11 +20,14 @@ import (
 	"bytes"
 	"context"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"math/bits"
 	"runtime"
 	"sync"
+	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
 	"golang.org/x/sync/semaphore"
@@ -1327,4 +1330,119 @@ func TestTruthtreeFold_ForkJoinAllocCeiling(t *testing.T) {
 	require.Lessf(t, got, forkJoinAllocCeiling(),
 		"fork-join alloc %.1f MB/op exceeds %.0f MB ceiling — buffer-per-lineage regression toward the ~575 MB naive fold",
 		float64(got)/(1<<20), float64(forkJoinAllocCeiling())/(1<<20))
+}
+
+// TestForkJoinEach_ForksUnderFreeSlots pins that items fork onto their own goroutines while sem
+// slots are free: both fork arms must be in flight at once to pass the rendezvous, and the inline
+// arm must never run.
+func TestForkJoinEach_ForksUnderFreeSlots(t *testing.T) {
+	t.Parallel()
+	sem := semaphore.NewWeighted(2)
+	arrived := make(chan struct{}, 2)
+	release := make(chan struct{})
+	go func() {
+		for range 2 {
+			<-arrived
+		}
+		close(release)
+	}()
+	var forks atomic.Int64
+	err := forkJoinEach(context.Background(), sem, 2,
+		func(ctx context.Context, i int) error {
+			forks.Add(1)
+			arrived <- struct{}{}
+			select {
+			case <-release:
+				return nil
+			case <-time.After(10 * time.Second):
+				return fmt.Errorf("fork %d: rendezvous timed out — items did not overlap", i)
+			}
+		},
+		func(ctx context.Context, i int) error {
+			return fmt.Errorf("item %d ran inline with free slots", i)
+		})
+	require.NoError(t, err)
+	require.EqualValues(t, 2, forks.Load())
+}
+
+// TestForkJoinEach_InlineUnderSaturation pins the saturation fallback: with every sem slot held
+// externally the dispatch still completes, running each item inline in order on the dispatcher
+// goroutine — progress without acquiring a slot.
+func TestForkJoinEach_InlineUnderSaturation(t *testing.T) {
+	t.Parallel()
+	sem := semaphore.NewWeighted(1)
+	require.True(t, sem.TryAcquire(1))
+	defer sem.Release(1)
+	var order []int
+	err := forkJoinEach(context.Background(), sem, 3,
+		func(ctx context.Context, i int) error {
+			return fmt.Errorf("item %d forked under saturation", i)
+		},
+		func(ctx context.Context, i int) error {
+			order = append(order, i)
+			return nil
+		})
+	require.NoError(t, err)
+	require.Equal(t, []int{0, 1, 2}, order)
+}
+
+func TestForkJoinEach_ErrorPropagation(t *testing.T) {
+	t.Parallel()
+	t.Run("inline error stops dispatch", func(t *testing.T) {
+		t.Parallel()
+		sem := semaphore.NewWeighted(1)
+		require.True(t, sem.TryAcquire(1))
+		defer sem.Release(1)
+		boom := errors.New("boom")
+		var calls []int
+		err := forkJoinEach(context.Background(), sem, 3,
+			func(ctx context.Context, i int) error {
+				return fmt.Errorf("item %d forked under saturation", i)
+			},
+			func(ctx context.Context, i int) error {
+				calls = append(calls, i)
+				if i == 1 {
+					return boom
+				}
+				return nil
+			})
+		require.ErrorIs(t, err, boom)
+		require.Equal(t, []int{0, 1}, calls, "dispatch must stop at the inline error")
+	})
+	t.Run("forked error propagates", func(t *testing.T) {
+		t.Parallel()
+		sem := semaphore.NewWeighted(2)
+		boom := errors.New("boom")
+		err := forkJoinEach(context.Background(), sem, 2,
+			func(ctx context.Context, i int) error {
+				if i == 0 {
+					return boom
+				}
+				return nil
+			},
+			func(ctx context.Context, i int) error {
+				return fmt.Errorf("item %d ran inline with free slots", i)
+			})
+		require.ErrorIs(t, err, boom)
+	})
+	t.Run("inline error wins and forked items still join", func(t *testing.T) {
+		t.Parallel()
+		sem := semaphore.NewWeighted(1)
+		inlineBoom := errors.New("inline boom")
+		forkBoom := errors.New("fork boom")
+		inlineDone := make(chan struct{})
+		var forkJoined atomic.Bool
+		err := forkJoinEach(context.Background(), sem, 2,
+			func(ctx context.Context, i int) error {
+				<-inlineDone
+				forkJoined.Store(true)
+				return forkBoom
+			},
+			func(ctx context.Context, i int) error {
+				defer close(inlineDone)
+				return inlineBoom
+			})
+		require.ErrorIs(t, err, inlineBoom, "inline error must win over the forked one")
+		require.True(t, forkJoined.Load(), "helper must join forked items before returning")
+	})
 }

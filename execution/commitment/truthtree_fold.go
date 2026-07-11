@@ -353,18 +353,49 @@ type forkJob struct {
 	nib    int
 }
 
+// forkJoinEach dispatches n independent items through the shared fork-join contract: an item whose
+// TryAcquire wins a sem slot forks onto its own goroutine (releasing the slot when it returns), else
+// it runs inline in the dispatching goroutine holding no slot. An inline error stops dispatch,
+// already-forked items still join, and the inline error wins over a forked one. fork receives the
+// join group's context so forked items cancel together; inline keeps the dispatcher's own ctx.
+//
+// TryAcquire (not a blocking Acquire) is load-bearing for deadlock freedom: a forked item holds its
+// slot while awaiting its own forked children, so under saturation a blocking acquire would wedge
+// every slot on a parent waiting for a child that can never start. The inline fallback always makes
+// progress without another slot.
+func forkJoinEach(ctx context.Context, sem *semaphore.Weighted, n int,
+	fork, inline func(ctx context.Context, i int) error,
+) error {
+	g, gctx := errgroup.WithContext(ctx)
+	var inlineErr error
+	for i := range n {
+		if sem.TryAcquire(1) {
+			g.Go(func() error {
+				defer sem.Release(1)
+				return fork(gctx, i)
+			})
+			continue
+		}
+		if err := inline(ctx, i); err != nil {
+			inlineErr = err
+			break
+		}
+	}
+	werr := g.Wait()
+	if inlineErr != nil {
+		return inlineErr
+	}
+	return werr
+}
+
 // fold folds the branch pn (whose branch row sits at branchDepth, in either plane) into its hash and
 // merges every forked child's deferred updates into fc. A subtree at or below k folds serially in fc
 // via foldNode (buffer reuse). Above k, leaves and small child branches fold serially in fc, and each
-// child branch clearing the fork gate is a split point: it forks onto its own foldCtx when a foldSem
-// slot is free, else folds inline in fc. A depth-64 account seam recurses back through fold, so a
-// whale's fresh storage plane fans out on the same split threshold as the account plane above it.
-//
-// TryAcquire (not a blocking Acquire) is load-bearing for deadlock freedom: a forked goroutine holds
-// its slot while awaiting its own forked children, so under saturation a blocking acquire would wedge
-// every slot on a parent waiting for a child that can never start. Falling back to an inline fold
-// always makes progress without another slot. fc is only ever touched by this goroutine — forked
-// children own separate foldCtxs and their results merge after the join — so no lock guards it.
+// child branch clearing the fork gate is a split point dispatched through forkJoinEach: it forks onto
+// its own foldCtx when a foldSem slot is free, else folds inline in fc. A depth-64 account seam
+// recurses back through fold, so a whale's fresh storage plane fans out on the same split threshold
+// as the account plane above it. fc is only ever touched by this goroutine — forked children own
+// separate foldCtxs and their results merge after the join — so no lock guards it.
 func (ff *forkFolder) fold(ctx context.Context, fc *foldCtx, pn *prefixNode, prefix []byte, branchDepth int16) (common.Hash, error) {
 	// One cancellation check per split-point row bounds an uncancellable stretch to a k-sized
 	// serial subtree — the same granularity the pool's task dispatch cancels at.
@@ -450,43 +481,34 @@ func (ff *forkFolder) fold(ctx context.Context, fc *foldCtx, pn *prefixNode, pre
 		results := make([][]*DeferredBranchUpdate, len(jobs))
 		forkedBH := make([]common.Hash, len(jobs))
 		forked := make([]bool, len(jobs))
-		g, gctx := errgroup.WithContext(ctx)
-		var inlineErr error
-		for i := range jobs {
-			if ff.sem.TryAcquire(1) {
+		err := forkJoinEach(ctx, ff.sem, len(jobs),
+			func(ctx context.Context, i int) error {
 				recordForkDepth(branchDepth)
 				forked[i] = true
-				g.Go(func() error {
-					defer ff.sem.Release(1)
-					cfc := newFoldCtx(fc.emit)
-					defer cfc.hph.Release()
-					bh, err := ff.fold(gctx, cfc, jobs[i].node, jobs[i].prefix, jobs[i].depth)
-					if err != nil {
-						putDeferredUpdates(cfc.deferred)
-						return err
-					}
-					forkedBH[i] = bh
-					results[i] = cfc.deferred
-					return nil
-				})
-				continue
-			}
-			bh, err := ff.fold(ctx, fc, jobs[i].node, jobs[i].prefix, jobs[i].depth)
-			if err != nil {
-				inlineErr = err
-				break
-			}
-			rec[jobs[i].nib].bh = bh
-		}
-		werr := g.Wait()
-		if inlineErr != nil || werr != nil {
+				cfc := newFoldCtx(fc.emit)
+				defer cfc.hph.Release()
+				bh, err := ff.fold(ctx, cfc, jobs[i].node, jobs[i].prefix, jobs[i].depth)
+				if err != nil {
+					putDeferredUpdates(cfc.deferred)
+					return err
+				}
+				forkedBH[i] = bh
+				results[i] = cfc.deferred
+				return nil
+			},
+			func(ctx context.Context, i int) error {
+				bh, err := ff.fold(ctx, fc, jobs[i].node, jobs[i].prefix, jobs[i].depth)
+				if err != nil {
+					return err
+				}
+				rec[jobs[i].nib].bh = bh
+				return nil
+			})
+		if err != nil {
 			for i := range results {
 				putDeferredUpdates(results[i])
 			}
-			if inlineErr != nil {
-				return common.Hash{}, inlineErr
-			}
-			return common.Hash{}, werr
+			return common.Hash{}, err
 		}
 		for i := range jobs {
 			if forked[i] {
