@@ -112,17 +112,18 @@ drained old gen deletes immediately; publish while a reader pins defers until re
 
 Behavior-preserving. `P = blockVisible{ segments []VisibleSegments; segmentsMax uint64 }`.
 
-- [ ] Replace `snapshotVisible` + `visible` + `oldestVisible` + `acquireVisible`/`releaseVisible`
+- [x] Replace `snapshotVisible` + `visible` + `oldestVisible` + `acquireVisible`/`releaseVisible`
       + `reclaimRetired*` with embedded `visibleGenerations[blockVisible]` sharing `dirtyLock`.
-- [ ] `recalcVisibleFiles(alignMin, retired)` builds `blockVisible` as today and calls
+- [x] `recalcVisibleFiles(alignMin, retired)` builds `blockVisible` as today and calls
       `publish(payload, retired)` — which closes the drained files inline under `dirtyLock`,
       byte-identical to the current recalc tail (I2). Preserve I1 (recalc's `retired` still
       comes only from its callers' dirty-removal, unchanged — a visibility-only recalc passes
       `retired = nil`).
-- [ ] All readers route through the core's current payload / acquire.
-- [ ] **Hot-path allocation gate**: add a benchmark (or `-gcflags=-m` escape check) for
+- [x] All readers route through the core's current payload / acquire.
+- [x] **Hot-path allocation gate**: add a benchmark (or `-gcflags=-m` escape check) for
       `View`/`ViewType`/`ViewSingleFile` proving **no new heap allocs / interface boxing** vs
       pre-refactor (generic must monomorphize to concrete types).
+      (`TestViewHotPathNoExtraAllocs` + `BenchmarkViewHotPath`: View=1+nTypes, ViewType/ViewSingleFile=2 allocs, unchanged.)
 
 Acceptance: **all existing `db/snapshotsync` tests green** (the oracle) under `-race`; the
 alloc benchmark shows no regression; `make lint` clean; no behavior change.

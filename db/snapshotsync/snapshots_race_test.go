@@ -170,23 +170,23 @@ func TestStackedGenerationsReclaimInOrder(t *testing.T) {
 
 	// Collapse any open-time generation chain to a single node.
 	s.View().Close()
-	require.Equal(s.visible.Load(), s.oldestVisible, "chain must be collapsed before stacking")
+	require.Equal(s.gens.current.Load(), s.gens.oldest, "chain must be collapsed before stacking")
 
 	sub0 := snaptype.SegmentFileName(version.V1_0, 0, 1_000, snaptype2.Headers.Enum())
 	sub1 := snaptype.SegmentFileName(version.V1_0, 1_000, 2_000, snaptype2.Headers.Enum())
 	sub0Path := filepath.Join(dir, sub0)
 	sub1Path := filepath.Join(dir, sub1)
 
-	g0 := s.visible.Load()
+	g0 := s.gens.current.Load()
 	v0 := s.View() // pins g0
 
 	require.NoError(s.Delete(sub0)) // retires sub0 to g0, publishes g1
-	g1 := s.visible.Load()
+	g1 := s.gens.current.Load()
 	require.NotSame(g0, g1)
 	v1 := s.View() // pins g1
 
 	require.NoError(s.Delete(sub1)) // retires sub1 to g1, publishes g2
-	g2 := s.visible.Load()
+	g2 := s.gens.current.Load()
 	require.NotSame(g1, g2)
 	v2 := s.View() // pins g2 (current)
 
@@ -217,7 +217,7 @@ func TestStackedGenerationsReclaimInOrder(t *testing.T) {
 
 // TestReadPinnedSegmentSurvivesConcurrentRetire stresses the pin+retire hazard: readers
 // pin a generation and read the exact segment a concurrent retire is removing. The
-// hazard-pointer re-check in acquireVisible and the drain gate together guarantee a
+// hazard-pointer re-check in visibleGenerations.acquire and the drain gate together guarantee a
 // pinned segment is never closed/unlinked under a live reader. Run under -race.
 func TestReadPinnedSegmentSurvivesConcurrentRetire(t *testing.T) {
 	if testing.Short() {
@@ -285,7 +285,7 @@ func TestReadPinnedSegmentSurvivesConcurrentRetire(t *testing.T) {
 
 	// Drain any lingering pins and confirm the retired files are gone with no leak.
 	s.View().Close()
-	require.Equal(s.visible.Load(), s.oldestVisible, "generation chain must collapse once readers drain")
+	require.Equal(s.gens.current.Load(), s.gens.oldest, "generation chain must collapse once readers drain")
 	for i := 1; i < n; i++ {
 		for _, snT := range snaptype2.BlockSnapshotTypes {
 			_, err := os.Stat(filepath.Join(dir, names[snT.Enum()][i]))
@@ -399,7 +399,7 @@ func TestReadersRaceRetire(t *testing.T) {
 	// With all readers gone, one more View/Close collapses the generation chain to a
 	// single node and reclaims every retired file — no leak.
 	s.View().Close()
-	require.Equal(s.visible.Load(), s.oldestVisible, "generation chain must collapse once readers drain")
+	require.Equal(s.gens.current.Load(), s.gens.oldest, "generation chain must collapse once readers drain")
 	for _, f := range subNames {
 		_, err := os.Stat(filepath.Join(dir, f))
 		require.True(os.IsNotExist(err), "retired sub-segment %s must be unlinked after drain", f)

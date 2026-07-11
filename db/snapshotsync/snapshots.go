@@ -494,13 +494,9 @@ type BaseRoSnapshots struct {
 	types []snaptype.Type //immutable
 	enums []snaptype.Enum //immutable
 
-	dirtyLock sync.RWMutex // guards `dirty` and the generation chain (oldestVisible/next/retired)
+	dirtyLock sync.RWMutex // guards `dirty` and the generation chain (publish/reclaim)
 	dirty     DirtyFiles   // ordered map `type.Enum()` -> DirtySegments
-	visible   atomic.Pointer[snapshotVisible]
-
-	// oldestVisible is the chain head: reclamation walks oldest->newest from here,
-	// deleting a generation's retired files once its refcnt hits 0. Mutated under dirtyLock.
-	oldestVisible *snapshotVisible
+	gens      visibleGenerations[blockVisible]
 
 	dir               string
 	segmentsMinByType map[snaptype.Enum]*atomic.Uint64 // min block number per segment type
@@ -546,13 +542,9 @@ func (s *BaseRoSnapshots) isInProgress(enum snaptype.Enum, from, to uint64) bool
 	return ok
 }
 
-type snapshotVisible struct {
+type blockVisible struct {
 	segments    []VisibleSegments // ordered map `type.Enum()` -> VisibleSegments
 	segmentsMax uint64            // max visible (indexed, non-subsumed, gap-free) segment height across all types
-
-	refcnt  atomic.Int32     // live readers pinning this generation
-	retired []*DirtySegment  // segments this generation is the last to reference; unlinked on head-drain
-	next    *snapshotVisible // oldest->newest chain link (set under dirtyLock)
 }
 
 // NewBaseRoSnapshots - opens all snapshots. But to simplify everything:
@@ -583,9 +575,7 @@ func newRoSnapshots(cfg ethconfig.BlocksFreezing, snapDir string, types []snapty
 	for _, snapType := range types {
 		s.dirty[snapType.Enum()] = btree.NewBTreeGOptions[*DirtySegment](DirtySegmentLess, btree.Options{Degree: 128, NoLocks: false})
 	}
-	empty := &snapshotVisible{segments: make([]VisibleSegments, snaptype.MaxEnum)}
-	s.visible.Store(empty)
-	s.oldestVisible = empty
+	s.gens.init(&s.dirtyLock, blockVisible{segments: make([]VisibleSegments, snaptype.MaxEnum)})
 
 	for _, t := range s.enums {
 		u := &atomic.Uint64{}
@@ -604,7 +594,7 @@ func (s *BaseRoSnapshots) Dir() string                   { return s.dir }
 func (s *BaseRoSnapshots) DownloadReady() bool           { return s.downloadReady.Load() }
 func (s *BaseRoSnapshots) SegmentsReady() bool           { return s.segmentsReady.Load() }
 func (s *BaseRoSnapshots) IndicesMax() uint64            { return s.idxMax.Load() }
-func (s *BaseRoSnapshots) SegmentsMax() uint64           { return s.visible.Load().segmentsMax }
+func (s *BaseRoSnapshots) SegmentsMax() uint64           { return s.gens.currentPayload().segmentsMax }
 func (s *BaseRoSnapshots) SegmentsMinByType(t snaptype.Enum) (min uint64, ok bool) {
 	if s == nil {
 		return 0, false
@@ -859,57 +849,7 @@ func (s *BaseRoSnapshots) recalcVisibleFiles(alignMin bool, retired []*DirtySegm
 		}
 	}
 
-	next := &snapshotVisible{segments: visible, segmentsMax: segmentsMax}
-	old := s.visible.Load()
-	old.retired = retired
-	old.next = next
-	s.visible.Store(next)
-
-	// `recalcVisibleFiles` is rare background operation under `dirtyFilesLock`
-	// it's good idea to delete files here, then hot reader-Close path will more likely be lock-free
-	closeAndRemoveSegments(s.reclaimRetiredLocked())
-}
-
-// acquireVisible pins the current generation. Load and increment are not atomic together,
-// so after incrementing we re-check the generation is still current; if superseded mid-pin
-// we drop the stale pin and retry (hazard-pointer style).
-func (s *BaseRoSnapshots) acquireVisible() *snapshotVisible {
-	for {
-		v := s.visible.Load()
-		v.refcnt.Add(1)
-		if s.visible.Load() == v {
-			return v
-		}
-		s.releaseVisible(v)
-	}
-}
-
-// releaseVisible drops a pin taken by acquireVisible; the last reader of a superseded
-// generation triggers reclamation of drained generations' retired files.
-func (s *BaseRoSnapshots) releaseVisible(v *snapshotVisible) {
-	if v.refcnt.Add(-1) == 0 {
-		s.reclaimRetired()
-	}
-}
-
-// reclaimRetiredLocked walks the oldest->newest chain from the head, collecting the
-// retired files of every fully-drained generation older than the current one. Must be
-// called with dirtyLock held; the returned files are deleted by the caller off-lock.
-func (s *BaseRoSnapshots) reclaimRetiredLocked() (toDelete []*DirtySegment) {
-	cur := s.visible.Load()
-	for h := s.oldestVisible; h != cur && h.refcnt.Load() == 0; h = h.next {
-		toDelete = append(toDelete, h.retired...)
-		h.retired = nil
-		s.oldestVisible = h.next
-	}
-	return toDelete
-}
-
-func (s *BaseRoSnapshots) reclaimRetired() {
-	s.dirtyLock.Lock()
-	toDelete := s.reclaimRetiredLocked()
-	s.dirtyLock.Unlock()
-	closeAndRemoveSegments(toDelete)
+	s.gens.publish(blockVisible{segments: visible, segmentsMax: segmentsMax}, retired)
 }
 
 func closeAndRemoveSegments(segs []*DirtySegment) {
@@ -932,7 +872,7 @@ func (s *BaseRoSnapshots) idxAvailability() uint64 {
 	}
 
 	var maxIdx uint64
-	visible := s.visible.Load().segments[s.enums[0]]
+	visible := s.gens.currentPayload().segments[s.enums[0]]
 	if len(visible) > 0 {
 		maxIdx = visible[len(visible)-1].to - 1
 	}
@@ -968,7 +908,7 @@ func (s *BaseRoSnapshots) dirtyIdxAvailability(segtype snaptype.Enum) uint64 {
 }
 
 func (s *BaseRoSnapshots) visibleIdxAvailability(segtype snaptype.Enum) (maxVisibleIdx uint64) {
-	visibleFiles := s.visible.Load().segments[segtype]
+	visibleFiles := s.gens.currentPayload().segments[segtype]
 	if len(visibleFiles) > 0 {
 		maxVisibleIdx = visibleFiles[len(visibleFiles)-1].to - 1
 	}
@@ -1186,7 +1126,7 @@ func (s *BaseRoSnapshots) Close() {
 
 	// Publish the empty generation before reading the outgoing one's refcnt, so a concurrent
 	// lock-free View() re-check fails its pin on it and retries onto the empty generation.
-	prev := s.visible.Load()
+	prev := s.gens.current.Load()
 	s.recalcVisibleFiles(s.alignMin, nil)
 
 	// Close fds only when no reader still pins the outgoing generation; closing a segment
@@ -1565,16 +1505,16 @@ func (s *BaseRoSnapshots) buildMissedIndices(logPrefix string, ctx context.Conte
 
 type View struct {
 	s           *BaseRoSnapshots
-	visible     *snapshotVisible // the pinned generation; released once by Close
+	visible     *generation[blockVisible] // the pinned generation; released once by Close
 	segments    [snaptype.MaxEnum]*RoTx
 	baseSegType snaptype.Type
 }
 
 func (s *BaseRoSnapshots) View() *View {
-	v := s.acquireVisible()
+	v := s.gens.acquire()
 	view := &View{s: s, visible: v, baseSegType: snaptype2.Transactions} // Transactions is the last segment to be processed, so it's the most reliable.
 	for _, t := range s.enums {
-		view.segments[t] = v.segments[t].BeginRo() // non-owning children; the View owns the single pin
+		view.segments[t] = v.payload.segments[t].BeginRo() // non-owning children; the View owns the single pin
 	}
 	return view
 }
@@ -1583,7 +1523,7 @@ func (v *View) Close() {
 	if v == nil || v.s == nil {
 		return
 	}
-	v.s.releaseVisible(v.visible)
+	v.s.gens.release(v.visible)
 	v.s = nil
 }
 
@@ -1598,9 +1538,9 @@ func (s *View) WithBaseSegType(t snaptype.Type) *View {
 var noop = func() {}
 
 func (s *BaseRoSnapshots) ViewType(t snaptype.Type) *RoTx {
-	v := s.acquireVisible()
-	rotx := v.segments[t.Enum()].BeginRo()
-	rotx.release = func() { s.releaseVisible(v) }
+	v := s.gens.acquire()
+	rotx := v.payload.segments[t.Enum()].BeginRo()
+	rotx.release = func() { s.gens.release(v) }
 	return rotx
 }
 
