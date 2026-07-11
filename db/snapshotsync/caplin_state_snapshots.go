@@ -114,29 +114,28 @@ type CaplinStateSnapshots struct {
 
 	Salt uint32
 
-	dirtySegmentsLock   sync.RWMutex
-	visibleSegmentsLock sync.RWMutex
-
-	// BeaconBlocks *segments
-	// BlobSidecars *segments
-	// Segments      map[string]*segments
-	dirtyLock sync.RWMutex                                     // guards `dirty` field
+	// dirtyLock guards the dirty tree and the generation chain (publish/reclaim); the
+	// generation core shares it so a dirty mutation and its publish are one atomic step.
+	dirtyLock sync.RWMutex
 	dirty     map[CaplinStateType]*btree.BTreeG[*DirtySegment] // ordered map type -> DirtySegments
-
-	visibleLock sync.RWMutex // guards  `visible` field
-	visible     sync.Map
-	//visible     map[string]VisibleSegments // ordered map `type.Enum()` -> VisbileSegments
+	gens      visibleGenerations[caplinStateVisible]
+	types     []CaplinStateType // configured types (sorted), immutable after construction
 
 	snapshotTypes SnapshotTypes
 
 	dir         string
 	tmpdir      string
-	segmentsMax atomic.Uint64 // all types of .seg files are available - up to this number
-	idxMax      atomic.Uint64 // all types of .idx files are available - up to this number
+	segmentsMax atomic.Uint64 // all types of .seg files are available - up to this number; snapshotted into the published payload
 	cfg         ethconfig.BlocksFreezing
 	logger      log.Logger
 	// chain cfg
 	beaconCfg *clparams.BeaconChainConfig
+}
+
+type caplinStateVisible struct {
+	segments    []VisibleSegments // enum-indexed: CaplinStateType -> VisibleSegments
+	segmentsMax uint64            // max .seg height across all types
+	idxMax      uint64            // min visible .idx height across configured types
 }
 
 type KeyValueGetter func(numId uint64) ([]byte, []byte, error)
@@ -169,20 +168,24 @@ func NewCaplinStateSnapshots(cfg ethconfig.BlocksFreezing, beaconCfg *clparams.B
 	// 	}
 	// }
 	dirty := make(map[CaplinStateType]*btree.BTreeG[*DirtySegment])
+	types := make([]CaplinStateType, 0, len(snapshotTypes.KeyValueGetters))
 	for k := range snapshotTypes.KeyValueGetters {
 		dirty[k] = btree.NewBTreeGOptions[*DirtySegment](DirtySegmentLess, btree.Options{Degree: 128, NoLocks: false})
+		types = append(types, k)
 	}
+	sort.Slice(types, func(i, j int) bool { return types[i] < types[j] })
 
-	c := &CaplinStateSnapshots{snapshotTypes: snapshotTypes, dir: dirs.SnapCaplin, tmpdir: dirs.Tmp, cfg: cfg, dirty: dirty, logger: logger, beaconCfg: beaconCfg}
-	for k := range snapshotTypes.KeyValueGetters {
-		c.visible.Store(k, make(VisibleSegments, 0))
-	}
+	c := &CaplinStateSnapshots{snapshotTypes: snapshotTypes, dir: dirs.SnapCaplin, tmpdir: dirs.Tmp, cfg: cfg, dirty: dirty, types: types, logger: logger, beaconCfg: beaconCfg}
+	c.gens.init(&c.dirtyLock, caplinStateVisible{segments: make([]VisibleSegments, caplinStateTypeCount)})
+
+	c.dirtyLock.Lock()
 	c.recalcVisibleFiles()
+	c.dirtyLock.Unlock()
 	return c
 }
 
-func (s *CaplinStateSnapshots) IndicesMax() uint64  { return s.idxMax.Load() }
-func (s *CaplinStateSnapshots) SegmentsMax() uint64 { return s.segmentsMax.Load() }
+func (s *CaplinStateSnapshots) IndicesMax() uint64  { return s.gens.currentPayload().idxMax }
+func (s *CaplinStateSnapshots) SegmentsMax() uint64 { return s.gens.currentPayload().segmentsMax }
 
 func (s *CaplinStateSnapshots) LogStat(str string) {
 	s.logger.Info(fmt.Sprintf("[snapshots:%s] Stat", str),
@@ -231,21 +234,16 @@ func (s *CaplinStateSnapshots) SegFileNames(from, to uint64) []string {
 }
 
 func (s *CaplinStateSnapshots) BlocksAvailable() uint64 {
-	return min(s.segmentsMax.Load(), s.idxMax.Load())
+	p := s.gens.currentPayload()
+	return min(p.segmentsMax, p.idxMax)
 }
 
 func (s *CaplinStateSnapshots) coveredRangesForType(name CaplinStateType) []Range {
-	s.visibleLock.RLock()
-	defer s.visibleLock.RUnlock()
-
-	v, ok := s.visible.Load(name)
-	if !ok {
+	segments := s.gens.currentPayload().segments
+	if int(name) < 0 || int(name) >= len(segments) {
 		return nil
 	}
-	segs, ok := v.(VisibleSegments)
-	if !ok {
-		return nil
-	}
+	segs := segments[name]
 	ranges := make([]Range, 0, len(segs))
 	for _, seg := range segs {
 		ranges = append(ranges, seg.Range)
@@ -257,8 +255,8 @@ func (s *CaplinStateSnapshots) Close() {
 	if s == nil {
 		return
 	}
-	s.dirtySegmentsLock.Lock()
-	defer s.dirtySegmentsLock.Unlock()
+	s.dirtyLock.Lock()
+	defer s.dirtyLock.Unlock()
 
 	s.closeWhatNotInList(nil)
 }
@@ -277,10 +275,9 @@ func (s *CaplinStateSnapshots) openSegIfNeed(sn *DirtySegment, filepath string) 
 
 // OpenList stops on optimistic=false, continue opening files on optimistic=true
 func (s *CaplinStateSnapshots) OpenList(fileNames []string, optimistic bool) error {
-	defer s.recalcVisibleFiles()
-
-	s.dirtySegmentsLock.Lock()
-	defer s.dirtySegmentsLock.Unlock()
+	s.dirtyLock.Lock()
+	defer s.dirtyLock.Unlock()
+	defer s.recalcVisibleFiles() // LIFO: runs before Unlock, so publish holds the lock
 
 	s.closeWhatNotInList(fileNames)
 	var segmentsMax uint64
@@ -394,15 +391,11 @@ func isIndexed(s *DirtySegment) bool {
 	return true
 }
 
+// recalcVisibleFiles builds a fresh enum-indexed visible bundle from dirty and publishes it
+// as the new generation. Must be called with dirtyLock held, so the caller's dirty mutation
+// and this publish are one atomic step. State visibility replacement never retires files
+// (retired=nil); only dirty-removal paths retire, and they do so via their own publish.
 func (s *CaplinStateSnapshots) recalcVisibleFiles() {
-	defer func() {
-		s.idxMax.Store(s.idxAvailability())
-		s.indicesReady.Store(true)
-	}()
-
-	s.visibleLock.Lock()
-	defer s.visibleLock.Unlock()
-
 	getNewVisibleSegments := func(dirtySegments *btree.BTreeG[*DirtySegment]) VisibleSegments {
 		newVisibleSegments := make(VisibleSegments, 0, dirtySegments.Len())
 		dirtySegments.Walk(func(segments []*DirtySegment) bool {
@@ -431,13 +424,17 @@ func (s *CaplinStateSnapshots) recalcVisibleFiles() {
 		return newVisibleSegments
 	}
 
-	// for k := range s.visible {
-	// 	s.visible[k] = getNewVisibleSegments(s.dirty[k])
-	// }
-	s.visible.Range(func(k, v any) bool {
-		s.visible.Store(k, getNewVisibleSegments(s.dirty[k.(CaplinStateType)]))
-		return true
-	})
+	segments := make([]VisibleSegments, caplinStateTypeCount)
+	for _, t := range s.types {
+		segments[t] = getNewVisibleSegments(s.dirty[t])
+	}
+
+	s.gens.publish(caplinStateVisible{
+		segments:    segments,
+		segmentsMax: s.segmentsMax.Load(),
+		idxMax:      idxAvailabilityFrom(segments, s.types),
+	}, nil)
+	s.indicesReady.Store(true)
 }
 
 // RemoveOverlaps deletes state segment files that are fully covered by a larger
@@ -448,7 +445,7 @@ func (s *CaplinStateSnapshots) RemoveOverlaps() error {
 	if s == nil {
 		return nil
 	}
-	s.dirtySegmentsLock.Lock()
+	s.dirtyLock.Lock()
 
 	var toRemove []*DirtySegment
 	for _, dirtySegments := range s.dirty {
@@ -481,9 +478,8 @@ func (s *CaplinStateSnapshots) RemoveOverlaps() error {
 		toRemove = append(toRemove, rm...)
 	}
 
-	s.dirtySegmentsLock.Unlock()
-
 	s.recalcVisibleFiles()
+	s.dirtyLock.Unlock()
 
 	for _, sn := range toRemove {
 		s.logger.Info("[caplin-state] removing overlapped segment", "file", sn.FileName())
@@ -492,30 +488,20 @@ func (s *CaplinStateSnapshots) RemoveOverlaps() error {
 	return nil
 }
 
-func (s *CaplinStateSnapshots) idxAvailability() uint64 {
-	s.visibleLock.RLock()
-	defer s.visibleLock.RUnlock()
-
+// idxAvailabilityFrom computes the min visible .idx height across the configured types of a
+// candidate segment bundle (I4: read from the candidate about to be published, never from the
+// already-published generation). A configured type with no visible segment caps availability at 0.
+func idxAvailabilityFrom(segments []VisibleSegments, types []CaplinStateType) uint64 {
 	min := uint64(math.MaxUint64)
-	// for _, segs := range s.visible {
-	// 	if len(segs) == 0 {
-	// 		return 0
-	// 	}
-	// 	if segs[len(segs)-1].to < min {
-	// 		min = segs[len(segs)-1].to
-	// 	}
-	// }
-	s.visible.Range(func(_, v any) bool {
-		segs := v.(VisibleSegments)
+	for _, t := range types {
+		segs := segments[t]
 		if len(segs) == 0 {
-			min = 0
-			return false
+			return 0
 		}
 		if segs[len(segs)-1].to < min {
 			min = segs[len(segs)-1].to
 		}
-		return true
-	})
+	}
 	if min == math.MaxUint64 {
 		return 0
 	}
@@ -562,27 +548,21 @@ func (s *CaplinStateSnapshots) closeWhatNotInList(l []string) {
 }
 
 type CaplinStateView struct {
-	s      *CaplinStateSnapshots
-	roTxs  map[CaplinStateType]*RoTx
-	closed bool
+	s       *CaplinStateSnapshots
+	visible *generation[caplinStateVisible] // the pinned generation; released once by Close
+	roTxs   map[CaplinStateType]*RoTx
+	closed  bool
 }
 
 func (s *CaplinStateSnapshots) View() *CaplinStateView {
 	if s == nil {
 		return nil
 	}
-	s.visibleSegmentsLock.RLock()
-	defer s.visibleSegmentsLock.RUnlock()
-
-	v := &CaplinStateView{s: s, roTxs: make(map[CaplinStateType]*RoTx)}
-	// BeginRo increments refcount - which is contended
-	s.dirtySegmentsLock.RLock()
-	defer s.dirtySegmentsLock.RUnlock()
-
-	s.visible.Range(func(k, val any) bool {
-		v.roTxs[k.(CaplinStateType)] = val.(VisibleSegments).BeginRo()
-		return true
-	})
+	g := s.gens.acquire()
+	v := &CaplinStateView{s: s, visible: g, roTxs: make(map[CaplinStateType]*RoTx)}
+	for _, t := range s.types {
+		v.roTxs[t] = g.payload.segments[t].BeginRo() // non-owning children; the View owns the single pin
+	}
 	return v
 }
 
@@ -593,21 +573,21 @@ func (v *CaplinStateView) Close() {
 	if v.closed {
 		return
 	}
-	for _, segments := range v.roTxs {
-		segments.Close()
-	}
+	v.s.gens.release(v.visible)
 	v.s = nil
+	v.visible = nil
 	v.closed = true
 }
 
 func (v *CaplinStateView) VisibleSegments(tbl CaplinStateType) VisibleSegments {
-	if v.s == nil {
+	if v == nil || v.visible == nil {
 		return nil
 	}
-	if val, ok := v.s.visible.Load(tbl); ok {
-		return val.(VisibleSegments)
+	segs := v.visible.payload.segments
+	if int(tbl) < 0 || int(tbl) >= len(segs) {
+		return nil
 	}
-	return nil
+	return segs[tbl]
 }
 
 func (v *CaplinStateView) VisibleSegment(slot uint64, tbl CaplinStateType) (*VisibleSegment, bool) {

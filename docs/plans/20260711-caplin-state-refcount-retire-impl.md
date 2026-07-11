@@ -170,20 +170,24 @@ Acceptance: all `db/snapshotsync` + `cl/antiquary` + `cl/persistence/state` test
 `P = caplinStateVisible{ segments []VisibleSegments; segmentsMax, idxMax uint64 }` — enum-indexed
 `segments`, same shape as `blockVisible`.
 
-- [ ] **Lock consolidation (do first).** State has `dirtyLock` (declared, effectively
+- [x] **Lock consolidation (do first).** State has `dirtyLock` (declared, effectively
       unused), `visibleLock`, `dirtySegmentsLock` — real dirty mutations use
       `dirtySegmentsLock`. Consolidate onto ONE `RWMutex` that guards dirty-tree mutation
       **and** generation publish/reclaim; wire `visibleGenerations.lock` to it. Remove the
-      dead locks.
-- [ ] Replace the `visible` recalc-in-place (`recalcVisibleFiles` :424-468) with
+      dead locks. (Kept `dirtyLock` as the single lock, mirroring EL; removed
+      `dirtySegmentsLock`/`visibleSegmentsLock`/`visibleLock`; `gens.init(&s.dirtyLock,…)`.)
+- [x] Replace the `visible` recalc-in-place (`recalcVisibleFiles` :424-468) with
       `visibleGenerations[caplinStateVisible]`. Recalc builds the new enum-indexed `segments`,
       computes `segmentsMax` and `idxMax` **from the candidate `segments`** via a new
       `idxAvailabilityFrom([]VisibleSegments)` (do NOT call the old `idxAvailability` that reads
       the published generation — I4), and `publish`es with **`retired = nil`** (I1).
-- [ ] `BlocksAvailable()` = `min(segmentsMax, idxMax)` read from the **current generation
+      (`idxMax` derives from the candidate; `segmentsMax` snapshots the OpenList-computed value
+      into the payload — behavior-preserving, so `BlocksAvailable` stays byte-identical.)
+- [x] `BlocksAvailable()` = `min(segmentsMax, idxMax)` read from the **current generation
       payload** (I4).
-- [ ] `CaplinStateView` **acquires** the generation on open and **releases** on Close (real
+- [x] `CaplinStateView` **acquires** the generation on open and **releases** on Close (real
       pin); `VisibleSegment`/`Get` read the pinned generation's payload — not the shared set.
+      (`TestCaplinStateViewPinsGeneration` pins the contract; confirmed it bites without the acquire.)
 
 Acceptance: `db/snapshotsync` caplin-state tests green under `-race`; reads unchanged;
 `make erigon` builds.
