@@ -17,6 +17,7 @@
 package snapshotsync
 
 import (
+	"os"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -1154,6 +1155,55 @@ func TestOverlapNoTruncation(t *testing.T) {
 	require.Equal(uint64(1_000_000), visibleTxn[1].from)
 	require.Equal(uint64(1_500_000), visibleTxn[1].to)
 	require.Equal(uint64(1_500_000-1), s.SegmentsMax())
+}
+
+// TestVisibilityOnlyRecomputeKeepsHiddenDirty pins invariant I1: a recalc that hides a
+// smaller segment behind a larger covering one — with no dirty removal — must NOT retire
+// or unlink the hidden files. They stay in dirty and on disk; the outgoing generation
+// retires nothing. This is the characterization that would catch a later extraction
+// treating hidden-but-dirty segments as retired.
+func TestVisibilityOnlyRecomputeKeepsHiddenDirty(t *testing.T) {
+	logger := testlog.Logger(t, log.LvlCrit)
+	dir, require := t.TempDir(), require.New(t)
+	createFile := func(from, to uint64, name snaptype.Type) {
+		createTestSegmentFile(t, from, to, name.Enum(), dir, version.V1_0, logger)
+	}
+
+	for i := uint64(0); i < 2; i++ {
+		createFile(i*500_000, (i+1)*500_000, snaptype2.Headers)
+		createFile(i*500_000, (i+1)*500_000, snaptype2.Bodies)
+		createFile(i*500_000, (i+1)*500_000, snaptype2.Transactions)
+	}
+
+	cfg := ethconfig.BlocksFreezing{ChainName: networkname.Mainnet}
+	s := NewBaseRoSnapshots(cfg, dir, snaptype2.BlockSnapshotTypes, true, logger)
+	defer s.Close()
+	require.NoError(s.OpenFolder())
+	require.Len(s.visible.Load().segments[snaptype2.Enums.Headers], 2)
+
+	subPath := filepath.Join(dir, snaptype.SegmentFileName(version.V1_0, 0, 500_000, snaptype2.Headers.Enum()))
+	_, err := os.Stat(subPath)
+	require.NoError(err)
+
+	// Add an indexed covering [0,1m) that subsumes both subs in the visible set. This is a
+	// pure visibility-only recompute: no segment leaves dirty.
+	before := s.visible.Load()
+	createFile(0, 1_000_000, snaptype2.Headers)
+	createFile(0, 1_000_000, snaptype2.Bodies)
+	createFile(0, 1_000_000, snaptype2.Transactions)
+	require.NoError(s.OpenFolder())
+
+	// Visible collapses to the single covering segment...
+	require.Len(s.visible.Load().segments[snaptype2.Enums.Headers], 1)
+	require.Equal(uint64(0), s.visible.Load().segments[snaptype2.Enums.Headers][0].from)
+	require.Equal(uint64(1_000_000), s.visible.Load().segments[snaptype2.Enums.Headers][0].to)
+
+	// ...but the hidden subs are NOT retired: still in dirty, still on disk, and the
+	// outgoing generation retired nothing.
+	require.Equal(3, s.dirty[snaptype2.Enums.Headers].Len())
+	require.Nil(before.retired, "a visibility-only recompute must publish with retired == nil")
+	_, err = os.Stat(subPath)
+	require.NoError(err, "visibility-only recompute must not unlink a hidden-but-dirty segment")
 }
 
 func TestCloseAndDropNotProtected(t *testing.T) {

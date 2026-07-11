@@ -63,18 +63,21 @@ the core needs anything payload-specific, the abstraction has leaked — push it
 Pin current EL behavior so the extraction can't regress it. Extend
 `snapshots_race_test.go` / `snapshots_test.go` where gaps exist:
 
-- [ ] reader `acquireVisible`s a generation; a concurrent dirty-removal + recalc retires
+- [x] reader `acquireVisible`s a generation; a concurrent dirty-removal + recalc retires
       files → NOT unlinked while pinned; unlinked after release (I3).
-- [ ] **no-reader path**: a dirty-removal + publish with no live reader unlinks the retired
-      files **by the time the call returns** (I2). (This likely already exists as the
-      RemoveOverlaps "leaves only N files" assertion — identify and keep it.)
-- [ ] hazard-pointer retry: `acquireVisible` under concurrent recalc never returns a stale
-      generation.
-- [ ] stacked generations reclaim oldest→current only as each drains.
-- [ ] **I1 visibility-only recompute**: open small segments, add an indexed covering segment,
+      (`TestStackedGenerationsReclaimInOrder` + existing `TestRemoveOverlapsDefersUnlinkWhileViewOpen`.)
+- [x] **no-reader path**: a dirty-removal + publish with no live reader unlinks the retired
+      files **by the time the call returns** (I2). (Existing `TestRemoveOverlaps` — asserts 45→15
+      files on disk by return; identified and kept.)
+- [x] hazard-pointer retry: `acquireVisible` under concurrent recalc never returns a stale
+      generation. (`TestReadPinnedSegmentSurvivesConcurrentRetire`, `-race`.)
+- [x] stacked generations reclaim oldest→current only as each drains.
+      (`TestStackedGenerationsReclaimInOrder`.)
+- [x] **I1 visibility-only recompute**: open small segments, add an indexed covering segment,
       run recalc/OpenFolder with **no dirty removal** → the hidden small files stay on disk
       and in `dirty` (they are NOT retired/unlinked). This is the test that catches a Task-3
       regression treating hidden-but-dirty segments as retired.
+      (`TestVisibilityOnlyRecomputeKeepsHiddenDirty`.)
 
 Temporarily weaken the drain guard to confirm the tests bite, then restore. No production
 change beyond making behavior observable.

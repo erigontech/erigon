@@ -140,6 +140,160 @@ func TestRemoveOverlapsProtectsPendingRetired(t *testing.T) {
 	require.True(os.IsNotExist(err), "sub must be reclaimed once the reader drained")
 }
 
+// TestStackedGenerationsReclaimInOrder pins invariants I3 (drain gate) and the
+// oldest->current reclaim order: three generations are stacked, each with its own retired
+// file and each pinned by a live View. A drained middle generation must NOT release its
+// files while an older generation is still pinned; only when the chain drains from the
+// oldest end do the retired files unlink, oldest-first.
+func TestStackedGenerationsReclaimInOrder(t *testing.T) {
+	if testing.Short() {
+		t.Skip()
+	}
+	logger := log.New()
+	dir := t.TempDir()
+	require := require.New(t)
+
+	// Ten 1k subs [0,10000) per type plus a covering [0,10000): the subs are hidden by the
+	// covering, so retiring a sub is a pure dirty-removal that leaves visible height fixed.
+	for from := uint64(0); from < 10_000; from += 1_000 {
+		for _, snT := range snaptype2.BlockSnapshotTypes {
+			createTestSegmentFile(t, from, from+1_000, snT.Enum(), dir, version.V1_0, logger)
+		}
+	}
+	for _, snT := range snaptype2.BlockSnapshotTypes {
+		createTestSegmentFile(t, 0, 10_000, snT.Enum(), dir, version.V1_0, logger)
+	}
+
+	s := NewBaseRoSnapshots(ethconfig.BlocksFreezing{ChainName: networkname.Mainnet}, dir, snaptype2.BlockSnapshotTypes, true, logger)
+	defer s.Close()
+	require.NoError(s.OpenFolder())
+
+	// Collapse any open-time generation chain to a single node.
+	s.View().Close()
+	require.Equal(s.visible.Load(), s.oldestVisible, "chain must be collapsed before stacking")
+
+	sub0 := snaptype.SegmentFileName(version.V1_0, 0, 1_000, snaptype2.Headers.Enum())
+	sub1 := snaptype.SegmentFileName(version.V1_0, 1_000, 2_000, snaptype2.Headers.Enum())
+	sub0Path := filepath.Join(dir, sub0)
+	sub1Path := filepath.Join(dir, sub1)
+
+	g0 := s.visible.Load()
+	v0 := s.View() // pins g0
+
+	require.NoError(s.Delete(sub0)) // retires sub0 to g0, publishes g1
+	g1 := s.visible.Load()
+	require.NotSame(g0, g1)
+	v1 := s.View() // pins g1
+
+	require.NoError(s.Delete(sub1)) // retires sub1 to g1, publishes g2
+	g2 := s.visible.Load()
+	require.NotSame(g1, g2)
+	v2 := s.View() // pins g2 (current)
+
+	// All three generations pinned: no retired file may be unlinked yet.
+	_, err := os.Stat(sub0Path)
+	require.NoError(err, "sub0 must stay on disk while g0 is pinned")
+	_, err = os.Stat(sub1Path)
+	require.NoError(err, "sub1 must stay on disk while g1 is pinned")
+
+	// Drain the middle generation first. Reclaim walks oldest->current and stops at the
+	// still-pinned g0, so NOTHING may be unlinked yet — not even g1's own retired file.
+	v1.Close()
+	_, err = os.Stat(sub0Path)
+	require.NoError(err, "sub0 must stay: g0 still pinned")
+	_, err = os.Stat(sub1Path)
+	require.NoError(err, "sub1 must stay: reclaim is blocked at the still-pinned older g0")
+
+	// Drain the oldest. Now the chain drains g0 then g1 (both refcnt 0) up to current g2,
+	// unlinking both retired files.
+	v0.Close()
+	_, err = os.Stat(sub0Path)
+	require.True(os.IsNotExist(err), "sub0 must be unlinked once g0 drained")
+	_, err = os.Stat(sub1Path)
+	require.True(os.IsNotExist(err), "sub1 must be unlinked once g0->g1 drained")
+
+	v2.Close()
+}
+
+// TestReadPinnedSegmentSurvivesConcurrentRetire stresses the pin+retire hazard: readers
+// pin a generation and read the exact segment a concurrent retire is removing. The
+// hazard-pointer re-check in acquireVisible and the drain gate together guarantee a
+// pinned segment is never closed/unlinked under a live reader. Run under -race.
+func TestReadPinnedSegmentSurvivesConcurrentRetire(t *testing.T) {
+	if testing.Short() {
+		t.Skip()
+	}
+	logger := log.New()
+	dir := t.TempDir()
+	require := require.New(t)
+
+	const n = 20
+	names := make(map[snaptype.Enum][]string)
+	for i := uint64(0); i < n; i++ {
+		for _, snT := range snaptype2.BlockSnapshotTypes {
+			createTestSegmentFile(t, i*1_000, (i+1)*1_000, snT.Enum(), dir, version.V1_0, logger)
+			names[snT.Enum()] = append(names[snT.Enum()], snaptype.SegmentFileName(version.V1_0, i*1_000, (i+1)*1_000, snT.Enum()))
+		}
+	}
+
+	s := NewBaseRoSnapshots(ethconfig.BlocksFreezing{ChainName: networkname.Mainnet}, dir, snaptype2.BlockSnapshotTypes, true, logger)
+	defer s.Close()
+	require.NoError(s.OpenFolder())
+
+	var wg sync.WaitGroup
+	stop := make(chan struct{})
+	for r := 0; r < 8; r++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for {
+				select {
+				case <-stop:
+					return
+				default:
+				}
+				v := s.View()
+				segs := v.Segments(snaptype2.Headers)
+				if len(segs) > 0 {
+					top := segs[len(segs)-1] // the segment most likely being retired next
+					g := top.Src().MakeGetter()
+					g.Reset(0)
+					if g.HasNext() {
+						g.Next(nil)
+					}
+				}
+				v.Close()
+			}
+		}()
+	}
+
+	// Let readers warm up so they are pinning generations when retirement hits.
+	time.Sleep(20 * time.Millisecond)
+
+	// Retire the top segment (all types together, keeping alignMin heights consistent)
+	// from the top down — the exact segment concurrent readers are reading.
+	for i := n - 1; i >= 1; i-- {
+		del := make([]string, 0, len(snaptype2.BlockSnapshotTypes))
+		for _, snT := range snaptype2.BlockSnapshotTypes {
+			del = append(del, names[snT.Enum()][i])
+		}
+		require.NoError(s.Delete(del...))
+	}
+
+	close(stop)
+	wg.Wait()
+
+	// Drain any lingering pins and confirm the retired files are gone with no leak.
+	s.View().Close()
+	require.Equal(s.visible.Load(), s.oldestVisible, "generation chain must collapse once readers drain")
+	for i := 1; i < n; i++ {
+		for _, snT := range snaptype2.BlockSnapshotTypes {
+			_, err := os.Stat(filepath.Join(dir, names[snT.Enum()][i]))
+			require.True(os.IsNotExist(err), "retired segment %s must be unlinked after drain", names[snT.Enum()][i])
+		}
+	}
+}
+
 // TestReadersRaceRetire stresses the Load()->pin window and the eager-unlink hazard:
 // many readers open/close Views (bundle + standalone) on segments that a concurrent
 // retire (Delete / RemoveOverlaps) is removing. On the pre-bundle design a reader can
