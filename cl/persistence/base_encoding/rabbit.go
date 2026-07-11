@@ -33,8 +33,14 @@ func WriteRabbits(in []uint64, w io.Writer) error {
 	var buf [8]byte
 	writeNum := func(v uint64) error {
 		binary.LittleEndian.PutUint64(buf[:], v)
-		_, err := compressor.Write(buf[:])
-		return err
+		n, err := compressor.Write(buf[:])
+		if err != nil {
+			return err
+		}
+		if n != len(buf) {
+			return io.ErrShortWrite
+		}
+		return nil
 	}
 
 	expectedNum := uint64(0)
