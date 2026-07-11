@@ -17,6 +17,7 @@ import (
 	"github.com/erigontech/erigon/cl/cltypes/solid"
 	ssz2 "github.com/erigontech/erigon/cl/ssz"
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/clonable"
 	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/execution/chain"
@@ -369,6 +370,8 @@ func TestExchangeCapabilitiesAdvertisesJSONRPCAndSSZREST(t *testing.T) {
 	require.Contains(t, caps, "engine_getPayloadV6")
 	require.Contains(t, caps, "POST /engine/v1/capabilities")
 	require.Contains(t, caps, "GET /engine/v6/payloads/{payload_id}")
+	require.Contains(t, caps, "POST /engine/v1/payloads/bodies/by-hash")
+	require.Contains(t, caps, "POST /engine/v1/payloads/bodies/by-range")
 	require.NotContains(t, caps, "engine_exchangeCapabilities")
 }
 
@@ -379,6 +382,97 @@ func TestSSZRESTGetPayloadIDPathParsing(t *testing.T) {
 
 	_, err = parsePayloadIDPath("0x01")
 	require.Error(t, err)
+}
+
+func TestSSZRESTGetBodiesRequestCodecsRoundTrip(t *testing.T) {
+	t.Run("by-hash", func(t *testing.T) {
+		hashes := []common.Hash{common.HexToHash("0x01"), common.HexToHash("0x02")}
+		list := solid.NewHashList(sszMaxPayloadBodiesRequest)
+		for _, h := range hashes {
+			list.Append(h)
+		}
+		enc, err := ssz2.MarshalSSZ(nil, list)
+		require.NoError(t, err)
+
+		out, err := decodeGetPayloadBodiesByHashRequest(enc)
+		require.NoError(t, err)
+		require.Equal(t, hashes, out)
+	})
+
+	t.Run("by-range", func(t *testing.T) {
+		start, count := uint64(1000), uint64(64)
+		enc, err := ssz2.MarshalSSZ(nil, &start, &count)
+		require.NoError(t, err)
+
+		gotStart, gotCount, err := decodeGetPayloadBodiesByRangeRequest(enc)
+		require.NoError(t, err)
+		require.Equal(t, start, gotStart)
+		require.Equal(t, count, gotCount)
+	})
+}
+
+// testPayloadBodiesEntry mirrors the List[ExecutionPayloadBodyV1, 1] inner element so the
+// PayloadBodiesV1Response can be decoded in tests: the production code only encodes it, and
+// decoding the bare *ListSSZ element panics on its nil-pointer Clone.
+type testPayloadBodiesEntry struct {
+	list *solid.ListSSZ[*executionPayloadBodyV1SSZ]
+}
+
+func newTestPayloadBodiesEntry() *testPayloadBodiesEntry {
+	return &testPayloadBodiesEntry{list: solid.NewDynamicListSSZ[*executionPayloadBodyV1SSZ](1)}
+}
+
+func (e *testPayloadBodiesEntry) EncodeSSZ(dst []byte) ([]byte, error) { return e.list.EncodeSSZ(dst) }
+func (e *testPayloadBodiesEntry) DecodeSSZ(buf []byte, v int) error    { return e.list.DecodeSSZ(buf, v) }
+func (e *testPayloadBodiesEntry) EncodingSizeSSZ() int                 { return e.list.EncodingSizeSSZ() }
+func (e *testPayloadBodiesEntry) HashSSZ() ([32]byte, error)           { return e.list.HashSSZ() }
+func (e *testPayloadBodiesEntry) Clone() clonable.Clonable             { return newTestPayloadBodiesEntry() }
+
+func TestSSZRESTPayloadBodiesV1ResponseCodecRoundTrip(t *testing.T) {
+	known := &engine_types.ExecutionPayloadBody{
+		Transactions: []hexutil.Bytes{{0x01, 0x02}, {0x03}},
+		Withdrawals: []*types.Withdrawal{
+			{Index: 1, Validator: 2, Address: common.HexToAddress("0x1234"), Amount: 100},
+		},
+	}
+	enc, err := encodePayloadBodiesV1Response([]*engine_types.ExecutionPayloadBody{known, nil})
+	require.NoError(t, err)
+
+	outer := solid.NewDynamicListSSZ[*testPayloadBodiesEntry](sszMaxPayloadBodiesRequest)
+	require.NoError(t, ssz2.UnmarshalSSZ(enc, 0, outer))
+	require.Equal(t, 2, outer.Len())
+	require.Equal(t, 1, outer.Get(0).list.Len(), "known block has exactly one body")
+	require.Equal(t, 0, outer.Get(1).list.Len(), "unknown block has an empty inner list")
+
+	gotBody := outer.Get(0).list.Get(0)
+	require.Equal(t, [][]byte{{0x01, 0x02}, {0x03}}, gotBody.transactions.UnderlyngReference())
+	require.Equal(t, 1, gotBody.withdrawals.Len())
+	gotWd := gotBody.withdrawals.Get(0)
+	require.Equal(t, uint64(1), gotWd.Index)
+	require.Equal(t, uint64(2), gotWd.Validator)
+	require.Equal(t, common.HexToAddress("0x1234"), gotWd.Address)
+	require.Equal(t, uint64(100), gotWd.Amount)
+}
+
+func TestSSZRESTGetBodiesRoute(t *testing.T) {
+	srv := NewEngineServer(log.New(), &chain.Config{}, nil, nil, false, true, false, false, nil, nil, 0, 0)
+	for _, route := range []struct {
+		name string
+		path string
+		code int
+	}{
+		{"unsupported version", "/engine/v2/payloads/bodies/by-hash", http.StatusNotFound},
+		{"unsupported filter", "/engine/v1/payloads/bodies/by-nothing", http.StatusNotFound},
+		{"bad by-hash ssz", "/engine/v1/payloads/bodies/by-hash", http.StatusBadRequest},
+		{"bad by-range ssz", "/engine/v1/payloads/bodies/by-range", http.StatusBadRequest},
+	} {
+		t.Run(route.name, func(t *testing.T) {
+			req := httptest.NewRequest(http.MethodPost, route.path, strings.NewReader("bad-ssz"))
+			rec := httptest.NewRecorder()
+			srv.SSZRESTHandler().ServeHTTP(rec, req)
+			require.Equal(t, route.code, rec.Code)
+		})
+	}
 }
 
 func TestSSZRESTErrorMapping(t *testing.T) {

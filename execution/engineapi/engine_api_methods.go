@@ -74,6 +74,8 @@ var ourCapabilities = []string{
 	"GET /engine/v4/payloads/{payload_id}",
 	"GET /engine/v5/payloads/{payload_id}",
 	"GET /engine/v6/payloads/{payload_id}",
+	"POST /engine/v1/payloads/bodies/by-hash",
+	"POST /engine/v1/payloads/bodies/by-range",
 	"POST /engine/v1/forkchoice",
 	"POST /engine/v2/forkchoice",
 	"POST /engine/v3/forkchoice",
