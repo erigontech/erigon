@@ -100,7 +100,7 @@ func ReadRabbits(out []uint64, r io.Reader) ([]uint64, error) {
 		return nil, fmt.Errorf("rabbit: encoded length %d overflows int", length)
 	}
 	if uint64(cap(out)) < length {
-		out = make([]uint64, 0, length)
+		out = make([]uint64, 0, int(length))
 	}
 	out = out[:0]
 	var current uint64
