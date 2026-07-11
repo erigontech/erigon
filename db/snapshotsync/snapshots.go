@@ -1531,7 +1531,7 @@ func (s *BaseRoSnapshots) RetireFilesAbove(blockNum uint64, onDelete func(l []st
 
 	if onDelete != nil {
 		if err := onDelete(paths); err != nil {
-			return err
+			return fmt.Errorf("onDelete: %w", err)
 		}
 	}
 	return s.retireFiles(names...)
