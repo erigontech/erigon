@@ -48,7 +48,7 @@ Acceptance: test green; `make erigon` builds.
 
 Expose the safe prune boundary per type.
 
-- [ ] `db/snapshotsync/caplin_state_snapshots.go`: add
+- [x] `db/snapshotsync/caplin_state_snapshots.go`: add
   `(s *CaplinStateSnapshots) ContiguousCoverageEnd(typeName string) uint64`. Use
   `coveredRangesForType(typeName)` (:268). Ranges are `Range{From,To}`. Sort by
   `From`, walk from slot 0, and return the `To` of the first unbroken run (a run
@@ -57,9 +57,9 @@ Expose the safe prune boundary per type.
 TDD: unit test in `db/snapshotsync` — drive `coveredRangesForType` via the existing
 visible-segments test setup (see `caplin_state_overlap_test.go` /
 `caplin_state_visibility_test.go` for how tests construct segments). Cases:
-- [ ] contiguous `[0,50),[50,100)` → 100
-- [ ] gap `[0,50),[60,100)` → 50
-- [ ] no coverage / first range not at 0 → 0
+- [x] contiguous `[0,50),[50,100)` → 100
+- [x] gap `[0,50),[60,100)` → 50
+- [x] no coverage / first range not at 0 → 0
 
 Acceptance: test green.
 
