@@ -80,8 +80,9 @@ func ComputeShuffledIndicies(beaconConfig *clparams.BeaconChainConfig, mix commo
 	hashFunc := utils.OptimizedSha256NotThreadSafe()
 	epoch := slot / beaconConfig.SlotsPerEpoch
 	seed := GetSeed(beaconConfig, mix, epoch, beaconConfig.DomainBeaconAttester)
+	var hashed common.Hash
 	eth2ShuffleHashFunc := func(data []byte) []byte {
-		hashed := hashFunc(data)
+		hashed = hashFunc(data)
 		return hashed[:]
 	}
 	eth2shuffle.UnshuffleList(eth2ShuffleHashFunc, out, uint8(beaconConfig.ShuffleRoundCount), seed)
