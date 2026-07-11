@@ -50,17 +50,19 @@ func ParseHistoryDistance(s string) (uint64, error) {
 	return parseStateHistoryDistance(s, "--prune.distance", KeepPostMergeBlocksPruneMode)
 }
 
-// ParseCommitmentHistoryDistance parses a --prune.commitment-history.distance
-// value; "keep-all" maps to KeepAllBlocksPruneMode (also its default).
-func ParseCommitmentHistoryDistance(s string) (uint64, error) {
-	return parseStateHistoryDistance(s, "--prune.commitment-history.distance", KeepAllBlocksPruneMode)
+// ParseCommitmentHistoryDistance parses a commitment-history distance value;
+// "keep-all" maps to KeepAllBlocksPruneMode (also its default). flagName is the
+// CLI flag the value came from, used only in error messages.
+func ParseCommitmentHistoryDistance(s, flagName string) (uint64, error) {
+	return parseStateHistoryDistance(s, "--"+flagName, KeepAllBlocksPruneMode)
 }
 
-// ParseReceiptsDistance parses a --prune.receipts.distance value; "keep-all"
-// maps to KeepAllReceiptsPruneMode (see its declaration for why receipts needs a
-// keep-all value distinct from the KeepAllBlocksPruneMode default).
-func ParseReceiptsDistance(s string) (uint64, error) {
-	return parseStateHistoryDistance(s, "--prune.receipts.distance", KeepAllReceiptsPruneMode)
+// ParseReceiptsDistance parses a receipts distance value; "keep-all" maps to
+// KeepAllReceiptsPruneMode (see its declaration for why receipts needs a keep-all
+// value distinct from the KeepAllBlocksPruneMode default). flagName is the CLI
+// flag the value came from, used only in error messages.
+func ParseReceiptsDistance(s, flagName string) (uint64, error) {
+	return parseStateHistoryDistance(s, "--"+flagName, KeepAllReceiptsPruneMode)
 }
 
 // parseStateHistoryDistance parses a state-history-style distance flag: a decimal

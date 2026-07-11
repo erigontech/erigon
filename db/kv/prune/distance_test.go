@@ -133,7 +133,7 @@ func TestParseCommitmentHistoryDistance(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.in, func(t *testing.T) {
-			got, err := ParseCommitmentHistoryDistance(tc.in)
+			got, err := ParseCommitmentHistoryDistance(tc.in, "prune.commitment-history.distance")
 			if tc.wantErr {
 				require.Error(t, err)
 				return
@@ -161,7 +161,7 @@ func TestParseReceiptsDistance(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.in, func(t *testing.T) {
-			got, err := ParseReceiptsDistance(tc.in)
+			got, err := ParseReceiptsDistance(tc.in, "prune.receipts.distance")
 			if tc.wantErr {
 				require.Error(t, err)
 				return
@@ -175,7 +175,7 @@ func TestParseReceiptsDistance(t *testing.T) {
 // Explicit receipts keep-all must round-trip through FromCli, be distinct from
 // the follow-history default, and render with its alias (not the magic number).
 func TestModeString_ReceiptsKeepAll(t *testing.T) {
-	dist, err := ParseReceiptsDistance("keep-all")
+	dist, err := ParseReceiptsDistance("keep-all", "prune.receipts.distance")
 	require.NoError(t, err)
 
 	mode, err := FromCli(minimalModeStr, 0, 0, 0, dist)
