@@ -168,13 +168,13 @@ Acceptance: `make erigon` builds; `go test ./cl/antiquary/...` green; a prune
 Prove the invariant end to end. In `cl/antiquary` (reuse the
 `state_antiquary_test.go` harness) or `historical_states_reader`:
 
-- [ ] run the state antiquary far enough to freeze at least one range to `.seg`
+- [x] run the state antiquary far enough to freeze at least one range to `.seg`
   segments, then call `pruneStateTables` below coverage.
-- [ ] read a historical state at a **pruned** slot → must reconstruct correctly (served
+- [x] read a historical state at a **pruned** slot → must reconstruct correctly (served
   from segments).
-- [ ] read a historical state at a **tail** slot (above coverage) → correct (served
+- [x] read a historical state at a **tail** slot (above coverage) → correct (served
   from DB; not pruned).
-- [ ] balances edge (make it deterministic): `reconstructBalances`
+- [x] balances edge (make it deterministic): `reconstructBalances`
   (`cl/persistence/state/historical_states_reader/historical_states_reader.go:648-660`)
   picks the *next* dump instead of the previous when
   `slot % SlotsPerDump > SlotsPerDump/2` and progress is past it — which would read
