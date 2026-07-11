@@ -23,7 +23,6 @@ import (
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/persistence/base_encoding"
 	state_accessors "github.com/erigontech/erigon/cl/persistence/state"
-	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/diagnostics/metrics"
@@ -39,24 +38,25 @@ const statePruneBatchLimit = 1000
 func statePruneBudget(cfg *clparams.BeaconChainConfig, backlogSlots uint64) time.Duration {
 	base := time.Duration(cfg.SecondsPerSlot*1000/3) * time.Millisecond
 	maxBudget := time.Duration(cfg.SecondsPerSlot*2000/3) * time.Millisecond
-	budget := min(base+time.Duration(backlogSlots/100)*200*time.Millisecond, maxBudget)
-	return dbg.EnvDuration("CAPLIN_STATE_PRUNE_TIMEOUT", budget)
+	return min(base+time.Duration(backlogSlots/100)*200*time.Millisecond, maxBudget)
 }
 
 func (s *Antiquary) pruneFrozenStateTables(ctx context.Context) {
 	if s.statePruneDisabled || s.stateSn == nil {
 		return
 	}
-	if s.statePruneTables == nil {
-		s.statePruneTables = s.stateSn.TypeNames()
-	}
+	tables := s.stateSn.TypeNames()
 	boundaryFn := s.statePruneBoundaryFn
 	if boundaryFn == nil {
 		boundaryFn = s.stateSn.ContiguousCoverageEnd
 	}
-	ctx, cancel := context.WithTimeout(ctx, statePruneBudget(s.cfg, s.statePruneBacklog(ctx)))
+	budget := statePruneBudget(s.cfg, s.statePruneBacklog(ctx, tables, boundaryFn))
+	if s.statePruneTimeout > 0 {
+		budget = s.statePruneTimeout
+	}
+	ctx, cancel := context.WithTimeout(ctx, budget)
 	defer cancel()
-	next, err := pruneStateTables(ctx, s.mainDB, s.statePruneTables, boundaryFn, s.statePruneStartIdx, statePruneBatchLimit, s.logger)
+	next, err := pruneStateTables(ctx, s.mainDB, tables, boundaryFn, s.statePruneStartIdx, statePruneBatchLimit, s.logger)
 	if err != nil {
 		s.logger.Warn("[Antiquary] Failed to prune state tables", "err", err)
 		return
@@ -64,25 +64,50 @@ func (s *Antiquary) pruneFrozenStateTables(ctx context.Context) {
 	s.statePruneStartIdx = next
 }
 
-func (s *Antiquary) statePruneBacklog(ctx context.Context) uint64 {
-	if s.currentState == nil {
-		return 0
-	}
-	head := s.currentState.Slot()
-	minMarker := head
+func (s *Antiquary) statePruneBacklog(ctx context.Context, tables []string, boundaryFn func(table string) uint64) uint64 {
+	var backlog uint64
 	if err := s.mainDB.View(ctx, func(tx kv.Tx) error {
-		for _, table := range s.statePruneTables {
+		for _, table := range tables {
+			boundary := boundaryFn(table)
+			if boundary == 0 {
+				continue
+			}
 			marker, err := state_accessors.ReadStatePruneProgress(tx, table)
 			if err != nil {
 				return err
 			}
-			minMarker = min(minMarker, marker)
+			if marker < boundary {
+				backlog += boundary - marker
+			}
 		}
 		return nil
 	}); err != nil {
 		return 0
 	}
-	return head - minMarker
+	return backlog
+}
+
+// floorStatePruneMarkers lowers each table's prune marker to replayFrom, so rows
+// re-flushed by a reconstruction that resumed below an already-pruned range are
+// revisited by later prune passes instead of leaking behind the marker.
+func (s *Antiquary) floorStatePruneMarkers(ctx context.Context, replayFrom uint64) error {
+	if s.stateSn == nil {
+		return nil
+	}
+	return s.mainDB.Update(ctx, func(tx kv.RwTx) error {
+		for _, table := range s.stateSn.TypeNames() {
+			marker, err := state_accessors.ReadStatePruneProgress(tx, table)
+			if err != nil {
+				return err
+			}
+			if marker > replayFrom {
+				if err := state_accessors.SetStatePruneProgress(tx, table, replayFrom); err != nil {
+					return err
+				}
+			}
+		}
+		return nil
+	})
 }
 
 // pruneStateTables deletes state rows below each table's boundary, visiting

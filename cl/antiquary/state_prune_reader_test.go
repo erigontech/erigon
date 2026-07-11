@@ -146,11 +146,21 @@ func TestPruneStateHistoricalReadsServedFromSegments(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, 0, next)
 
-	// the whole chain sits below the boundary: every state table must be empty
-	for _, table := range []string{kv.SlotData, kv.BalancesDump, kv.ValidatorBalance, kv.BlockRoot, kv.EpochData} {
+	// the whole chain sits below the boundary: every covered table must be
+	// empty with its marker at the boundary, and uncovered tables untouched
+	covered := 0
+	for _, table := range stateSn.TypeNames() {
+		end := stateSn.ContiguousCoverageEnd(table)
+		if end == 0 {
+			require.Zero(t, pruneMarker(t, db, table), "table %s", table)
+			continue
+		}
+		covered++
+		require.Equal(t, boundary, end, "table %s", table)
 		require.Empty(t, tableSlots(t, db, table), "table %s", table)
-		require.Equal(t, boundary, pruneMarker(t, db, table))
+		require.Equal(t, boundary, pruneMarker(t, db, table), "table %s", table)
 	}
+	require.GreaterOrEqual(t, covered, 5)
 
 	require.Equal(t, midRootBefore, env.readRoot(t, ctx, midSlot))
 	require.Equal(t, stateRootOf(t, blocks, headSlot), env.readRoot(t, ctx, headSlot))
@@ -226,6 +236,7 @@ func TestPruneStateBalancesForwardAndReverseDumpPaths(t *testing.T) {
 	}
 	compressor, err := zstd.NewWriter(nil)
 	require.NoError(t, err)
+	defer compressor.Close()
 	dump := func(slot uint64) []byte { return compressor.EncodeAll(balancesAt(slot), nil) }
 	slotData := func() []byte {
 		var b bytes.Buffer

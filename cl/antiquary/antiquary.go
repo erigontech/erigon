@@ -87,7 +87,7 @@ type Antiquary struct {
 
 	statePruneStartIdx   int
 	statePruneDisabled   bool
-	statePruneTables     []string
+	statePruneTimeout    time.Duration
 	statePruneBoundaryFn func(table string) uint64
 }
 
@@ -120,6 +120,7 @@ func NewAntiquary(ctx context.Context, blobStorage blob_storage.BlobStorage, gen
 
 		maxSlotsPerCommit:  stateAntiquaryMaxSlotsPerCommit,
 		statePruneDisabled: dbg.EnvBool("CAPLIN_STATE_PRUNE_DISABLE", false),
+		statePruneTimeout:  dbg.EnvDuration("CAPLIN_STATE_PRUNE_TIMEOUT", 0),
 	}
 }
 

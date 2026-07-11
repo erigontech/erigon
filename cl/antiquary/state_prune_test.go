@@ -171,7 +171,50 @@ func TestPruneStateTablesBatchCommits(t *testing.T) {
 	require.Equal(t, 0, next)
 	require.Empty(t, tableSlots(t, db, kv.BlockRoot))
 	require.Equal(t, uint64(100), pruneMarker(t, db, kv.BlockRoot))
-	require.GreaterOrEqual(t, commits.Load(), int64(10))
+	require.Equal(t, int64(10), commits.Load())
+}
+
+func TestPruneStateTablesResumesAtInterruptedTable(t *testing.T) {
+	db := memdb.NewTestDB(t, dbcfg.ChainDB)
+	tables := []string{kv.BlockRoot, kv.StateRoot, kv.EpochData}
+	for _, table := range tables {
+		seedStateSlots(t, db, table, slotRange(0, 100))
+	}
+	boundaryFn := func(string) uint64 { return 50 }
+
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+	interrupted := &cancelOnCommitDB{RwDB: db, onCommit: cancel}
+
+	// the first commit finishes kv.BlockRoot and cancels: the index of the next
+	// unvisited table must come back so the following pass starts there
+	next, err := pruneStateTables(ctx, interrupted, tables, boundaryFn, 0, 1000, log.New())
+	require.NoError(t, err)
+	require.Equal(t, 1, next)
+	require.Equal(t, slotRange(50, 100), tableSlots(t, db, kv.BlockRoot))
+	require.Equal(t, slotRange(0, 100), tableSlots(t, db, kv.StateRoot))
+	require.Equal(t, slotRange(0, 100), tableSlots(t, db, kv.EpochData))
+
+	next, err = pruneStateTables(t.Context(), db, tables, boundaryFn, next, 1000, log.New())
+	require.NoError(t, err)
+	require.Equal(t, 1, next)
+	for _, table := range tables {
+		require.Equal(t, slotRange(50, 100), tableSlots(t, db, table), "table %s", table)
+		require.Equal(t, uint64(50), pruneMarker(t, db, table), "table %s", table)
+	}
+}
+
+func TestPruneStateTablesErrorReturnsFailingTable(t *testing.T) {
+	db := memdb.NewTestDB(t, dbcfg.ChainDB)
+	seedStateSlots(t, db, kv.BlockRoot, slotRange(0, 100))
+	tables := []string{kv.BlockRoot, "NonexistentTable"}
+
+	next, err := pruneStateTables(t.Context(), db, tables, func(string) uint64 { return 50 }, 0, 1000, log.New())
+	require.Error(t, err)
+	require.Equal(t, 1, next)
+	// the healthy table was still pruned before the failure
+	require.Equal(t, slotRange(50, 100), tableSlots(t, db, kv.BlockRoot))
+	require.Equal(t, uint64(50), pruneMarker(t, db, kv.BlockRoot))
 }
 
 func TestStatePruneBudget(t *testing.T) {
@@ -180,9 +223,61 @@ func TestStatePruneBudget(t *testing.T) {
 	require.Equal(t, 4*time.Second, statePruneBudget(cfg, 0))
 	require.Equal(t, 6*time.Second, statePruneBudget(cfg, 1000))
 	require.Equal(t, 8*time.Second, statePruneBudget(cfg, 1_000_000))
+}
 
+func TestStatePruneEnvConfig(t *testing.T) {
+	db := memdb.NewTestDB(t, dbcfg.ChainDB)
+	newA := func() *Antiquary {
+		return NewAntiquary(context.Background(), nil, nil, nil, &clparams.MainnetBeaconConfig, datadir.New(t.TempDir()), nil, db, nil, nil, nil, nil, log.New(), true, true, true, false, nil)
+	}
+	require.False(t, newA().statePruneDisabled)
+	require.Zero(t, newA().statePruneTimeout)
+
+	t.Setenv("CAPLIN_STATE_PRUNE_DISABLE", "true")
 	t.Setenv("CAPLIN_STATE_PRUNE_TIMEOUT", "150ms")
-	require.Equal(t, 150*time.Millisecond, statePruneBudget(cfg, 1000))
+	a := newA()
+	require.True(t, a.statePruneDisabled)
+	require.Equal(t, 150*time.Millisecond, a.statePruneTimeout)
+}
+
+func TestStatePruneBacklog(t *testing.T) {
+	db := memdb.NewTestDB(t, dbcfg.ChainDB)
+	ctx := context.Background()
+	a := NewAntiquary(ctx, nil, nil, nil, &clparams.MainnetBeaconConfig, datadir.New(t.TempDir()), nil, db, nil, nil, nil, nil, log.New(), true, true, true, false, nil)
+	require.NoError(t, db.Update(ctx, func(tx kv.RwTx) error {
+		if err := state_accessors.SetStatePruneProgress(tx, kv.BlockRoot, 10); err != nil {
+			return err
+		}
+		return state_accessors.SetStatePruneProgress(tx, kv.EpochData, 70)
+	}))
+	boundaries := map[string]uint64{kv.BlockRoot: 50, kv.StateRoot: 100, kv.EpochData: 0}
+	tables := []string{kv.BlockRoot, kv.StateRoot, kv.EpochData}
+
+	// (50-10) + (100-0); zero-boundary tables contribute nothing
+	backlog := a.statePruneBacklog(ctx, tables, func(table string) uint64 { return boundaries[table] })
+	require.Equal(t, uint64(140), backlog)
+
+	// a marker at or past the boundary contributes nothing
+	boundaries[kv.EpochData] = 70
+	backlog = a.statePruneBacklog(ctx, tables, func(table string) uint64 { return boundaries[table] })
+	require.Equal(t, uint64(140), backlog)
+}
+
+func TestFloorStatePruneMarkers(t *testing.T) {
+	db := memdb.NewTestDB(t, dbcfg.ChainDB)
+	ctx := context.Background()
+	stateSn := snapshotsync.NewCaplinStateSnapshots(ethconfig.BlocksFreezing{}, &clparams.MainnetBeaconConfig, datadir.New(t.TempDir()), snapshotsync.MakeCaplinStateSnapshotsTypes(db), log.New())
+	a := NewAntiquary(ctx, nil, nil, nil, &clparams.MainnetBeaconConfig, datadir.New(t.TempDir()), nil, db, stateSn, nil, nil, nil, log.New(), true, true, true, false, nil)
+	require.NoError(t, db.Update(ctx, func(tx kv.RwTx) error {
+		if err := state_accessors.SetStatePruneProgress(tx, kv.BlockRoot, 100); err != nil {
+			return err
+		}
+		return state_accessors.SetStatePruneProgress(tx, kv.StateRoot, 30)
+	}))
+
+	require.NoError(t, a.floorStatePruneMarkers(ctx, 50))
+	require.Equal(t, uint64(50), pruneMarker(t, db, kv.BlockRoot))
+	require.Equal(t, uint64(30), pruneMarker(t, db, kv.StateRoot))
 }
 
 func TestStatePruneKillSwitch(t *testing.T) {
@@ -198,7 +293,14 @@ func TestStatePruneKillSwitch(t *testing.T) {
 	require.Equal(t, slotRange(0, 100), tableSlots(t, db, kv.BlockRoot))
 	require.Zero(t, pruneMarker(t, db, kv.BlockRoot))
 
+	// an already-expired timeout override must stop the pass before any delete
 	a.statePruneDisabled = false
+	a.statePruneTimeout = time.Nanosecond
+	a.pruneFrozenStateTables(ctx)
+	require.Equal(t, slotRange(0, 100), tableSlots(t, db, kv.BlockRoot))
+	require.Zero(t, pruneMarker(t, db, kv.BlockRoot))
+
+	a.statePruneTimeout = 0
 	a.pruneFrozenStateTables(ctx)
 	require.Equal(t, slotRange(50, 100), tableSlots(t, db, kv.BlockRoot))
 	require.Equal(t, uint64(50), pruneMarker(t, db, kv.BlockRoot))
@@ -207,10 +309,14 @@ func TestStatePruneKillSwitch(t *testing.T) {
 func TestStatePruneWiredIntoAntiquaryCycle(t *testing.T) {
 	blocks, preState, postState := tests.GetCapellaRandom()
 	to := blocks[len(blocks)-1].Block.Slot + 33
+	// the fixture chain sits far above this boundary, so the cycle never
+	// re-flushes rows below it and the seeded rows are the only prunable ones
+	const boundary = uint64(10)
 
-	run := func(disabled bool) int64 {
+	run := func(disabled bool) (int64, []uint64) {
 		db := memdb.NewTestDB(t, dbcfg.ChainDB)
 		reader := tests.LoadChain(blocks, postState, db, t)
+		seedStateSlots(t, db, kv.BlockRoot, slotRange(0, boundary))
 		sn := synced_data.NewSyncedDataManager(&clparams.MainnetBeaconConfig, true)
 		sn.OnHeadState(postState)
 		ctx := context.Background()
@@ -220,13 +326,30 @@ func TestStatePruneWiredIntoAntiquaryCycle(t *testing.T) {
 		a.maxSlotsPerCommit = 8
 		a.statePruneDisabled = disabled
 		calls := &atomic.Int64{}
-		a.statePruneBoundaryFn = func(string) uint64 { calls.Add(1); return 0 }
+		a.statePruneBoundaryFn = func(table string) uint64 {
+			calls.Add(1)
+			if table == kv.BlockRoot {
+				return boundary
+			}
+			return 0
+		}
 		require.NoError(t, a.IncrementBeaconState(ctx, to))
-		return calls.Load()
+		var belowBoundary []uint64
+		for _, s := range tableSlots(t, db, kv.BlockRoot) {
+			if s < boundary {
+				belowBoundary = append(belowBoundary, s)
+			}
+		}
+		return calls.Load(), belowBoundary
 	}
 
-	require.Zero(t, run(true))
-	require.Positive(t, run(false))
+	calls, below := run(true)
+	require.Zero(t, calls)
+	require.Equal(t, slotRange(0, boundary), below)
+
+	calls, below = run(false)
+	require.Positive(t, calls)
+	require.Empty(t, below)
 }
 
 func TestPruneStateTablesRotationAndZeroBoundary(t *testing.T) {
