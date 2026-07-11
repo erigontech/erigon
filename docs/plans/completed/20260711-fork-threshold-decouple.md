@@ -345,12 +345,17 @@ explicit floors for the sweep bench (≥ k restores gate-at-k).
 
 ### Task 7: [Final] Documentation and cleanup
 
-- [ ] update `execution/commitment/doc.go` (or the fresh-fork design doc) to describe the slot-bounded
-      top-level dispatch replacing the serial loop
-- [ ] decide the fate of the `onNibFold` hook + measurement benches: keep the benches as regression gates;
-      keep or remove the hook per whether the nib-timeline bench still needs it
-- [ ] update CLAUDE.md / memory only if a new invariant emerged
-- [ ] move this plan to `docs/plans/completed/`
+- [x] update `execution/commitment/doc.go` (or the fresh-fork design doc) to describe the slot-bounded
+      top-level dispatch replacing the serial loop *(whole-fresh paragraph now covers the shared
+      `forkJoinEach` slot-bounded dispatch — fork on free slot, inline under saturation)*
+- [x] decide the fate of the `onNibFold` hook + measurement benches: keep the benches as regression gates;
+      keep or remove the hook per whether the nib-timeline bench still needs it *(KEEP both:
+      `Benchmark_FreshNibTimeline` consumes `onNibFold`, the Task 2 overlap test consumes
+      `onNibFoldStart`; both nil-guarded, nil in prod)*
+- [x] update CLAUDE.md / memory only if a new invariant emerged *(none new outside the package — the
+      forkJoinEach deadlock contract and the foldKMin fork-floor decoupling are documented at their
+      definitions in `truthtree_fold.go`/`fold_dag.go`; no repo-wide update needed)*
+- [x] move this plan to `docs/plans/completed/`
 
 ## Post-Completion
 

@@ -29,9 +29,14 @@
 // A commit against provably-empty on-disk state (genesis, initial sync) routes to a
 // whole-fresh account-plane fork-join (dispatchWholeFresh, fold_pool.go): each
 // top-nibble subtree folds per prefix against an empty wall through the direct
-// recursion, crossing every depth-64 seam into the account's fresh storage. The route
-// is internal to the parallel/streaming regimes — no flag — and any commit with
-// on-disk state keeps the ordinary frontier fold unchanged.
+// recursion, crossing every depth-64 seam into the account's fresh storage. The
+// top-nibble subtrees and the interior splits inside them dispatch through the same
+// slot-bounded fork-join contract (forkJoinEach, truthtree_fold.go) sharing one
+// worker-count semaphore: a subtree forks onto its own goroutine when a slot is
+// free and folds inline when saturated, so independent subtrees overlap instead of
+// draining back-to-back. The route is internal to the parallel/streaming regimes —
+// no flag — and any commit with on-disk state keeps the ordinary frontier fold
+// unchanged.
 //
 // With DeferBranchUpdates the fold emits DeferredBranchUpdate records instead of
 // writing branches to state; their prefix/raw/prev bytes live in a per-block arena
