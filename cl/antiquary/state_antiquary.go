@@ -36,6 +36,7 @@ import (
 	"github.com/erigontech/erigon/cl/phase1/core/state/raw"
 	"github.com/erigontech/erigon/cl/transition"
 	"github.com/erigontech/erigon/cl/transition/impl/eth2"
+	"github.com/erigontech/erigon/cl/utils"
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
@@ -573,10 +574,6 @@ func (s *Antiquary) IncrementBeaconState(ctx context.Context, to uint64) error {
 		select {
 		case <-progressTimer.C:
 			blkPerSec := float64(slot-prevSlot) / time.Minute.Seconds()
-			eta := "n/a"
-			if blkPerSec > 0 {
-				eta = (time.Duration(float64(to-slot)/blkPerSec) * time.Second).Truncate(time.Second).String()
-			}
 			progress := 0.0
 			if to > startSlot {
 				progress = float64(slot-startSlot) / float64(to-startSlot) * 100
@@ -585,7 +582,7 @@ func (s *Antiquary) IncrementBeaconState(ctx context.Context, to uint64) error {
 				"slot", slot, "to", to,
 				"blk/sec", fmt.Sprintf("%.2f", blkPerSec),
 				"progress", fmt.Sprintf("%.1f%%", progress),
-				"eta", eta)
+				"eta", utils.ETA(to-slot, blkPerSec))
 			prevSlot = slot
 		default:
 		}

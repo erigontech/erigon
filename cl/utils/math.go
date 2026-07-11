@@ -18,6 +18,7 @@ package utils
 
 import (
 	"math"
+	"time"
 
 	"github.com/thomaso-mirodin/intmath/u64"
 )
@@ -56,4 +57,18 @@ func IntegerSquareRoot(n uint64) uint64 {
 	}
 
 	return uint64(math.Sqrt(float64(n)))
+}
+
+// ETA estimates the time to process `remaining` items at `ratePerSec` items per
+// second, truncated to whole seconds. Returns "n/a" for a non-positive rate and
+// clamps to the max representable duration when the rate is extremely slow.
+func ETA(remaining uint64, ratePerSec float64) string {
+	if ratePerSec <= 0 {
+		return "n/a"
+	}
+	seconds := float64(remaining) / ratePerSec
+	if seconds >= float64(math.MaxInt64)/float64(time.Second) {
+		return time.Duration(math.MaxInt64).Truncate(time.Second).String()
+	}
+	return time.Duration(seconds * float64(time.Second)).Truncate(time.Second).String()
 }

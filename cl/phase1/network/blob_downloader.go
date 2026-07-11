@@ -29,6 +29,7 @@ import (
 	"github.com/erigontech/erigon/cl/das"
 	"github.com/erigontech/erigon/cl/persistence/blob_storage"
 	"github.com/erigontech/erigon/cl/rpc"
+	"github.com/erigontech/erigon/cl/utils"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/snapshotsync/freezeblocks"
@@ -203,6 +204,7 @@ func (b *BlobHistoryDownloader) downloadOnce(shouldLog bool) error {
 	if currentSlot == 0 {
 		return nil // not initialized yet
 	}
+	startSlot := currentSlot
 
 	// Check peer count before proceeding
 	peers, err := b.rpc.Peers()
@@ -256,23 +258,18 @@ func (b *BlobHistoryDownloader) downloadOnce(shouldLog bool) error {
 				return b.ctx.Err()
 			case <-logInterval.C:
 				if shouldLog {
-					head := b.headSlot.Load()
 					blkSec := float64(prevLogSlot-currentSlot) / time.Since(prevTime).Seconds()
 					prevLogSlot = currentSlot
 					prevTime = time.Now()
-					eta := "n/a"
-					if blkSec > 0 {
-						eta = (time.Duration(float64(currentSlot-targetSlot)/blkSec) * time.Second).Truncate(time.Second).String()
-					}
 					progress := 0.0
-					if head >= currentSlot && head > targetSlot {
-						progress = float64(head-currentSlot) / float64(head-targetSlot) * 100
+					if startSlot > targetSlot {
+						progress = float64(startSlot-currentSlot) / float64(startSlot-targetSlot) * 100
 					}
 					b.logger.Info("[BlobHistoryDownloader] Downloading blobs backwards",
 						"slot", currentSlot, "to", targetSlot,
 						"blks/sec", fmt.Sprintf("%.1f", blkSec),
 						"progress", fmt.Sprintf("%.1f%%", progress),
-						"eta", eta)
+						"eta", utils.ETA(currentSlot-targetSlot, blkSec))
 				}
 			default:
 			}
