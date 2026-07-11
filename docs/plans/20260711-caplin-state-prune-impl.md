@@ -81,36 +81,36 @@ func pruneStateTables(
 ) (nextStartIdx int, err error)
 ```
 
-- [ ] Iterate `tables` starting at `startIdx` (rotating), wrapping once.
-- [ ] Per table: `boundary = boundaryFn(table)`; `marker = ReadStatePruneProgress`; if
+- [x] Iterate `tables` starting at `startIdx` (rotating), wrapping once.
+- [x] Per table: `boundary = boundaryFn(table)`; `marker = ReadStatePruneProgress`; if
   `marker >= boundary` continue. Else open an RW txn, cursor-seek to `marker`, and
   `DeleteCurrent` while `key < boundary`, counting; at `batchLimit` deletions
   commit, persist the marker to the last-deleted-slot+1, and start a new txn.
   Keys are `base_encoding.Encode64ToBytes4(slot)`; decode to compare against
   `boundary`.
-- [ ] **Fully-drained tables must jump the marker to `boundary`.** Most frozen tables
+- [x] **Fully-drained tables must jump the marker to `boundary`.** Most frozen tables
   are sparse / rounded-key (EpochData rounds to epoch; `*Dump` round to
   `SlotsPerDump`; sync committees round to period — `cl/antiquary/beacon_states_collector.go`).
   After the last delete, a seek from `marker` returns nil or a key `>= boundary`
   even though `marker < boundary`. In that no-more-keys-below-boundary case,
   persist `marker = boundary` — otherwise the table is treated as backlog every
   cycle and inflates the budget forever.
-- [ ] Check `ctx.Err()` only at txn boundaries (never mid-txn). On deadline: commit the
+- [x] Check `ctx.Err()` only at txn boundaries (never mid-txn). On deadline: commit the
   in-flight batch, return the current table index as `nextStartIdx`, nil error.
-- [ ] No ranged truncate in mdbx — cursor delete only. `batchLimit` keeps txns small.
-- [ ] Log per committed batch at `LvlDebug` (table, from→to slot, count, duration);
+- [x] No ranged truncate in mdbx — cursor delete only. `batchLimit` keeps txns small.
+- [x] Log per committed batch at `LvlDebug` (table, from→to slot, count, duration);
   per-table summary at `LvlInfo` when a table is fully drained to its boundary.
-- [ ] Add prometheus counters mirroring `mxAntiquaryPrunedBlocks` /
+- [x] Add prometheus counters mirroring `mxAntiquaryPrunedBlocks` /
   `mxAntiquaryPruneBatchSeconds` (see `cl/antiquary/antiquary.go`).
 
 TDD: unit test in `cl/antiquary` with an mdbx test DB and an injected `boundaryFn`
 (no real `CaplinStateSnapshots` needed):
-- [ ] seed `kv.BlockRoot` with slots `0..99`; `boundaryFn → 50`; prune with a large
+- [x] seed `kv.BlockRoot` with slots `0..99`; `boundaryFn → 50`; prune with a large
   deadline; assert slots `<50` gone, `>=50` present, marker == 50.
-- [ ] second call is a no-op (marker already at boundary).
-- [ ] tiny deadline (e.g. cancel after first batch): assert partial delete, marker
+- [x] second call is a no-op (marker already at boundary).
+- [x] tiny deadline (e.g. cancel after first batch): assert partial delete, marker
   advanced partially, and a follow-up call finishes the rest (resumable).
-- [ ] `batchLimit = 10` over 100 rows commits in ≥10 txns (assert via marker stepping
+- [x] `batchLimit = 10` over 100 rows commits in ≥10 txns (assert via marker stepping
   or a commit counter).
 
 Acceptance: tests green; `make erigon` builds.
