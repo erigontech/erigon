@@ -28,7 +28,6 @@ import (
 	"golang.org/x/sync/errgroup"
 	"golang.org/x/sync/semaphore"
 
-	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/empty"
 	"github.com/erigontech/erigon/execution/commitment/nibbles"
 )
@@ -94,7 +93,7 @@ func isDeepStorageAccount(node *prefixNode, depth int) bool {
 
 // dfsSubtreeDeep walks node's subtree applying each key to w, but at a big-storage
 // account it injects storageRoot's result instead of streaming the slots.
-func dfsSubtreeDeep(w *HexPatriciaHashed, node *prefixNode, path []byte, storageRoot func(node *prefixNode, path []byte, accountFresh bool) (common.Hash, error)) error {
+func dfsSubtreeDeep(w *HexPatriciaHashed, node *prefixNode, path []byte, storageRoot func(node *prefixNode, path []byte, accountFresh bool) (cell, error)) error {
 	if node == nil {
 		return nil
 	}
@@ -141,7 +140,7 @@ func dfsSubtreeDeep(w *HexPatriciaHashed, node *prefixNode, path []byte, storage
 // Storage-root analogue of the account mount fold: parallelize a whale's storage by first nibble.
 // sem is the shared fold-concurrency budget: acquired per first-nibble worker so that
 // this whale's fan-out plus every other concurrently-folding subtree stays within the core count.
-func foldStorageRoot(ctx context.Context, sem *semaphore.Weighted, newWorker func() (*HexPatriciaHashed, func()), pu *parallelUpdate, node *prefixNode, path []byte, accountFresh bool) (common.Hash, error) {
+func foldStorageRoot(ctx context.Context, sem *semaphore.Weighted, newWorker func() (*HexPatriciaHashed, func()), pu *parallelUpdate, node *prefixNode, path []byte, accountFresh bool) (cell, error) {
 	accPrefix := append([]byte(nil), path...)
 
 	base, releaseBase := newWorker()
@@ -163,7 +162,7 @@ func foldStorageRoot(ctx context.Context, sem *semaphore.Weighted, newWorker fun
 		// A fresh account proves nothing exists on disk beneath accPrefix, so the reset
 		// (empty) wall rows unfoldStorageBase left behind are the correct seed.
 		if !accountFresh || !errors.Is(err, errStorageBaseNotBranch) {
-			return common.Hash{}, fmt.Errorf("unfold storage root: %w", err)
+			return cell{}, fmt.Errorf("unfold storage root: %w", err)
 		}
 	}
 
@@ -205,21 +204,24 @@ func foldStorageRoot(ctx context.Context, sem *semaphore.Weighted, newWorker fun
 		bm &^= uint16(1) << nib
 	}
 	if err := g.Wait(); err != nil {
-		return common.Hash{}, err
+		return cell{}, err
 	}
 
 	sr, err := aggregateMountedStorageRoot(base, &children, node.bitmap)
 	if err != nil {
-		return common.Hash{}, fmt.Errorf("storage branch fold: %w", err)
+		return cell{}, fmt.Errorf("storage branch fold: %w", err)
 	}
 	if deferred := base.TakeDeferredUpdates(); len(deferred) > 0 {
 		pu.appendDeferred(deferred)
 	}
 	// A fully collapsed aggregate means a storage-less account: empty-trie root, not zero.
 	if sr.IsEmpty() {
-		return empty.RootHash, nil
+		var e cell
+		e.hashLen = 32
+		copy(e.hash[:], empty.RootHash[:])
+		return e, nil
 	}
-	return sr.hash, nil
+	return sr, nil
 }
 
 func aggregateMountedStorageRoot(base *HexPatriciaHashed, children *[16]cell, bitmap uint16) (cell, error) {
@@ -248,7 +250,11 @@ func aggregateMountedStorageRoot(base *HexPatriciaHashed, children *[16]cell, bi
 	if err := base.fold(); err != nil {
 		return cell{}, err
 	}
-	return base.root, nil
+	// A multi-child storage root's subtree persists as branch records, so the account leaf references
+	// it by hash without an extension; a single-child collapse (handled above) carries one instead.
+	out := base.root
+	out.extLen = 0
+	return out, nil
 }
 
 // storageRootFromSingleChild builds the storage root for a single-surviving-child collapse — an
@@ -275,14 +281,7 @@ func storageRootFromSingleChild(base *HexPatriciaHashed) (cell, error) {
 	} else {
 		root = child // single storage leaf: rehashed from its full storage key at depth 64
 	}
-	h, err := base.computeCellHash(&root, 64, nil)
-	if err != nil {
-		return cell{}, err
-	}
-	var out cell
-	out.hashLen = int16(len(h) - 1)
-	copy(out.hash[:], h[1:])
-	return out, nil
+	return root, nil
 }
 
 // newDeferredStorageWorker yields a pooled trie worker for a deferring storage fold

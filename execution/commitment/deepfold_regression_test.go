@@ -75,7 +75,7 @@ func TestDeepFold_InjectedRootClearsStaleStorage(t *testing.T) {
 	require.True(t, hph.root.loaded.storage(), "precondition: root is flagged storage-loaded")
 
 	acct := common.HexToAddress("0x1234567890abcdef1234567890abcdef12345678")
-	setAccountStorageRoot(hph, KeyToHexNibbleHash(acct[:]), common.HexToHash("0x1234"))
+	setAccountStorageRoot(hph, KeyToHexNibbleHash(acct[:]), cell{hash: common.HexToHash("0x1234"), hashLen: 32})
 
 	require.Zerof(t, hph.root.storageAddrLen,
 		"injecting a storage root must clear the stale storage plain key (got len=%d)", hph.root.storageAddrLen)
@@ -98,7 +98,7 @@ func TestDeepFold_InjectedStorageRootWins(t *testing.T) {
 
 	clean := NewHexPatriciaHashed(length.Addr, NewMockState(t), DefaultTrieConfig())
 	clean.updateCell(acct[:], accHashed, &accUpd)
-	setAccountStorageRoot(clean, accHashed, injectedSR)
+	setAccountStorageRoot(clean, accHashed, cell{hash: injectedSR, hashLen: 32})
 	cleanHash, err := clean.computeCellHash(&clean.root, 0, nil)
 	require.NoError(t, err)
 
@@ -107,7 +107,7 @@ func TestDeepFold_InjectedStorageRootWins(t *testing.T) {
 	stale := NewHexPatriciaHashed(length.Addr, NewMockState(t), DefaultTrieConfig())
 	addStorageToCell(&stale.root, staleAddr, staleLoc, []byte{0xAA, 0xBB, 0xCC, 0xDD})
 	stale.updateCell(acct[:], accHashed, &accUpd)
-	setAccountStorageRoot(stale, accHashed, injectedSR)
+	setAccountStorageRoot(stale, accHashed, cell{hash: injectedSR, hashLen: 32})
 	staleHash, err := stale.computeCellHash(&stale.root, 0, nil)
 	require.NoError(t, err)
 
