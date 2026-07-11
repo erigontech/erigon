@@ -522,6 +522,57 @@ func TestFreshBuild_TopNibbleDispatchParity(t *testing.T) {
 	}
 }
 
+// TestFreshBuild_TopNibbleDispatchDeadlockFree pins the TryAcquire-then-inline contract of the
+// top-nibble dispatch under full semaphore saturation: at foldSem sizes 1 and 2 a forked nibble
+// holds the only slot(s) while the rest must fall back to inline folds, so a blocking acquire
+// anywhere in the dispatch would wedge exactly this configuration. Each run must complete and
+// reproduce the serial per-subtree mount-wall cells.
+func TestFreshBuild_TopNibbleDispatchDeadlockFree(t *testing.T) {
+	ctx := context.Background()
+	keys, upds := freshAccountPlaneCorpus(11, 40, 4_000)
+	root := freshAccountTrie(keys, upds)
+	require.Empty(t, root.ext, "a multi-way fresh corpus root branches at depth 0")
+	rootTask := deriveFoldFrontier(root, foldK(root.subtreeCount, 8), func([]byte) bool { return false })
+	require.Len(t, rootTask.children, 16, "corpus must touch all 16 top nibbles")
+
+	var expected [16]cell
+	for _, top := range rootTask.children {
+		c, d, err := foldFreshAccountSubtreeCellDeferred(top.node, rootTask.prefix, top.nib)
+		require.NoError(t, err)
+		putDeferredUpdates(d)
+		expected[top.nib] = c
+	}
+
+	for _, slots := range []int64{1, 2} {
+		t.Run(fmt.Sprintf("sem%d", slots), func(t *testing.T) {
+			ff := &forkFolder{sem: semaphore.NewWeighted(slots), k: 64, numWorkers: int(slots)}
+			type dispatchResult struct {
+				cells    [16]cell
+				present  [16]bool
+				deferred []*DeferredBranchUpdate
+				err      error
+			}
+			done := make(chan dispatchResult, 1)
+			go func() {
+				var r dispatchResult
+				r.cells, r.present, r.deferred, r.err = foldTopNibblesForkJoin(ctx, ff, rootTask.children, rootTask.prefix)
+				done <- r
+			}()
+			select {
+			case r := <-done:
+				require.NoError(t, r.err)
+				putDeferredUpdates(r.deferred)
+				for _, top := range rootTask.children {
+					require.True(t, r.present[top.nib], "nibble %x missing from the dispatch result", top.nib)
+					require.Equal(t, expected[top.nib], r.cells[top.nib], "nibble %x cell != serial per-subtree fold", top.nib)
+				}
+			case <-time.After(2 * time.Minute):
+				t.Fatal("top-nibble dispatch wedged under foldSem saturation")
+			}
+		})
+	}
+}
+
 // TestFreshBuild_Seam is the Task 3 seam-correctness gate through the real engine: each of the three
 // seam shapes — an account whose fresh storage forks across the depth-64 seam, an account whose storage
 // is confined to a single first nibble (ext / inline seam), and accounts sharing deep top-nibble

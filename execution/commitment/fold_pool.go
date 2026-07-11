@@ -163,8 +163,9 @@ var wholeFreshForkJoins atomic.Int64
 // wholeFreshCellFolds counts top-nibble subtrees folded through the account-plane fork-join.
 var wholeFreshCellFolds atomic.Int64
 
-// onNibFold, when non-nil, receives the wall time of each top-nibble subtree fold in the serial
-// dispatch loop — a measurement hook for the fresh-fork critical-path study. nil in production.
+// onNibFold, when non-nil, receives the wall time of each top-nibble subtree fold, measured on the
+// goroutine executing it — a measurement hook for the fresh-fork critical-path study. nil in
+// production; must be safe for concurrent calls.
 var onNibFold func(nib int, subtreeCount uint32, d time.Duration)
 
 // onNibFoldStart, when non-nil, is called at the start of each top-nibble subtree fold from the
@@ -296,33 +297,71 @@ func (fp *foldPool) dispatchWholeFresh(ctx context.Context, base *HexPatriciaHas
 	}
 	ff := &forkFolder{sem: sem, k: foldK(rootTask.node.subtreeCount, fp.numWorkers), numWorkers: fp.numWorkers}
 
-	var (
-		cells    [16]cell
-		present  [16]bool
-		deferred []*DeferredBranchUpdate
-	)
-	for _, top := range rootTask.children {
-		var t0 time.Time
-		if onNibFold != nil {
-			t0 = time.Now()
-		}
-		c, d, err := foldFreshAccountSubtreeCellForkJoin(ctx, ff, top.node, rootTask.prefix, top.nib)
-		if err != nil {
-			putDeferredUpdates(deferred)
-			putDeferredUpdates(reusedDeferred)
-			return nil, err
-		}
-		if onNibFold != nil {
-			onNibFold(top.nib, top.node.subtreeCount, time.Since(t0))
-		}
-		cells[top.nib] = c
-		present[top.nib] = true
-		deferred = append(deferred, d...)
+	cells, present, deferred, err := foldTopNibblesForkJoin(ctx, ff, rootTask.children, rootTask.prefix)
+	if err != nil {
+		putDeferredUpdates(reusedDeferred)
+		return nil, err
 	}
 	deferred = append(deferred, reusedDeferred...)
 	overlayReusedCells(&cells, &present, &reusedCells, &reusedPresent)
 
 	return fp.stitchAndFoldRoot(ctx, base, &cells, &present, deferred)
+}
+
+// foldTopNibblesForkJoin folds the whole-fresh top-nibble subtrees through the shared fork
+// mechanism: a nibble forks onto its own goroutine when a foldSem slot is free, else folds inline in
+// the dispatch goroutine holding no slot — the same TryAcquire-then-inline contract as
+// forkFolder.fold, deadlock-free for the same reason. The nibbles are disjoint hashed-key prefixes,
+// so each goroutine owns its cell/present/deferred slot and the combined slice assembles only after
+// the join. Fail-closed: any error recycles every completed nibble's deferred.
+func foldTopNibblesForkJoin(ctx context.Context, ff *forkFolder, children []*foldTask, prefix []byte,
+) ([16]cell, [16]bool, []*DeferredBranchUpdate, error) {
+	var (
+		cells   [16]cell
+		present [16]bool
+	)
+	results := make([][]*DeferredBranchUpdate, len(children))
+	g, gctx := errgroup.WithContext(ctx)
+	var inlineErr error
+	for i, top := range children {
+		if ff.sem.TryAcquire(1) {
+			g.Go(func() error {
+				defer ff.sem.Release(1)
+				c, d, err := foldFreshAccountSubtreeCellForkJoin(gctx, ff, top.node, prefix, top.nib)
+				if err != nil {
+					return err
+				}
+				cells[top.nib] = c
+				present[top.nib] = true
+				results[i] = d
+				return nil
+			})
+			continue
+		}
+		c, d, err := foldFreshAccountSubtreeCellForkJoin(ctx, ff, top.node, prefix, top.nib)
+		if err != nil {
+			inlineErr = err
+			break
+		}
+		cells[top.nib] = c
+		present[top.nib] = true
+		results[i] = d
+	}
+	werr := g.Wait()
+	if inlineErr != nil || werr != nil {
+		for _, r := range results {
+			putDeferredUpdates(r)
+		}
+		if inlineErr != nil {
+			return [16]cell{}, [16]bool{}, nil, inlineErr
+		}
+		return [16]cell{}, [16]bool{}, nil, werr
+	}
+	var deferred []*DeferredBranchUpdate
+	for _, r := range results {
+		deferred = append(deferred, r...)
+	}
+	return cells, present, deferred, nil
 }
 
 // overlayReusedCells stitches the scheduler's pre-folded top-nibble cells over the route's own.
@@ -382,12 +421,19 @@ func foldFreshAccountSubtreeCellForkJoin(ctx context.Context, ff *forkFolder, no
 	if onNibFoldStart != nil {
 		onNibFoldStart(nib)
 	}
+	var t0 time.Time
+	if onNibFold != nil {
+		t0 = time.Now()
+	}
 	fc := newFoldCtx(true)
 	defer fc.hph.Release()
 	c, err := fc.foldSubtreeCellForkJoin(ctx, ff, node, parentPrefix, nib)
 	if err != nil {
 		putDeferredUpdates(fc.deferred)
 		return cell{}, nil, err
+	}
+	if onNibFold != nil {
+		onNibFold(nib, node.subtreeCount, time.Since(t0))
 	}
 	return c, fc.deferred, nil
 }

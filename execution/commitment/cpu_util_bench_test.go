@@ -164,10 +164,10 @@ type nibTiming struct {
 	d   time.Duration
 }
 
-// Benchmark_FreshNibTimeline captures the per-top-nibble fold wall time of the serial dispatch loop
-// in dispatchWholeFresh over one fresh 1M-whale Process, to locate the critical path: if the 16
-// durations sum to ~the total Process wall, the top-nibble subtrees run serially (no overlap); a
-// single dominant duration is the whale nibble carrying the tail.
+// Benchmark_FreshNibTimeline captures the per-top-nibble fold wall time of the whole-fresh dispatch
+// over one fresh 1M-whale Process, to locate the critical path: if the 16 durations sum to ~the
+// total Process wall, the top-nibble subtrees ran serially (no overlap); under the concurrent
+// dispatch the sum exceeds the wall and the whale nibble carries the tail.
 func Benchmark_FreshNibTimeline(b *testing.B) {
 	wpk, wupds := buildWhaleCorpus(whale1M())
 	benchForkWholeFresh(b, true)

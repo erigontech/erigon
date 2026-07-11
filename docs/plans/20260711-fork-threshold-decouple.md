@@ -207,23 +207,32 @@ incremental-whale120k flag-on ≤ ~25 ms (observation, machine-dependent); fresh
   concurrent `foldSem`-bounded dispatch)
 - Modify: `execution/commitment/truthtree_fold.go` (if extracting the shared fork-dispatch helper)
 
-- [ ] replace `dispatchWholeFresh`'s serial `for` loop with a `TryAcquire`+`errgroup` dispatch over
+- [x] replace `dispatchWholeFresh`'s serial `for` loop with a `TryAcquire`+`errgroup` dispatch over
       `rootTask.children` sharing `fp.foldSem`: fork `foldFreshAccountSubtreeCellForkJoin` when a slot is
       free, fold inline (holding **no** slot) under saturation
-- [ ] **no shared append from goroutines**: each nibble writes its own `cells[nib]`/`present[nib]` and a
+      *(extracted as `foldTopNibblesForkJoin` in `fold_pool.go`, called from `dispatchWholeFresh`)*
+- [x] **no shared append from goroutines**: each nibble writes its own `cells[nib]`/`present[nib]` and a
       per-index `results[i]` deferred slot; assemble the combined `deferred` (then `reusedDeferred` last)
       **after `g.Wait()`**
-- [ ] fail-closed error arm recycles **all** nibbles' deferred — forked `results[i]`, the inline nibble,
+- [x] fail-closed error arm recycles **all** nibbles' deferred — forked `results[i]`, the inline nibble,
       and `reusedDeferred` — per `forkFolder.fold`'s pattern (`truthtree_fold.go:464-473`); not a single
-      serial-style `putDeferredUpdates(deferred)`
-- [ ] preserve the deadlock-safe TryAcquire-then-inline-fallback contract (no blocking acquire; inline
+      serial-style `putDeferredUpdates(deferred)` *(the erroring nibble self-recycles its `fc.deferred`
+      inside `foldFreshAccountSubtreeCellForkJoin`; the error arm recycles every completed `results[i]`;
+      `dispatchWholeFresh` recycles `reusedDeferred`)*
+- [x] preserve the deadlock-safe TryAcquire-then-inline-fallback contract (no blocking acquire; inline
       holds no slot)
-- [ ] make the Task 2 concurrency test pass; keep the parity test green
-- [ ] update `onNibFold` capture if the loop shape changed so `Benchmark_FreshNibTimeline` still reports
-      per-nibble folds (now overlapping)
-- [ ] write a deadlock-freedom test: same dispatch with `foldSem` size 1 and 2 completes and is `-race`
-      clean
-- [ ] run tests + `-race` on the concurrency-touched tests - all green before Task 4
+- [x] make the Task 2 concurrency test pass; keep the parity test green
+      *(`TestFreshBuild_TopNibbleFoldsOverlap` RED→GREEN; parity + seam suites green)*
+- [x] update `onNibFold` capture if the loop shape changed so `Benchmark_FreshNibTimeline` still reports
+      per-nibble folds (now overlapping) *(timing moved into `foldFreshAccountSubtreeCellForkJoin`, on the
+      executing goroutine; smoke run: Process wall 184 ms, sum(nib folds) 374 ms, ratio 2.03, 16 nibs —
+      folds overlap)*
+- [x] write a deadlock-freedom test: same dispatch with `foldSem` size 1 and 2 completes and is `-race`
+      clean *(`TestFreshBuild_TopNibbleDispatchDeadlockFree`, watchdog-timed, cells vs serial per-subtree
+      fold)*
+- [x] run tests + `-race` on the concurrency-touched tests - all green before Task 4
+      *(`TestFreshBuild|TestWholeFresh|TestTruthtreeFold` `-race` green; full
+      `./execution/commitment/...` green; `make lint` clean ×2)*
 
 ### Task 4: Sweep the interior fork threshold (measure-gated, byte-identical)
 
