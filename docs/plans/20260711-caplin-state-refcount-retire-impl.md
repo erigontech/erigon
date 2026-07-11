@@ -229,11 +229,13 @@ publishable/overlap integrity tests still pass.
 
 ### Task 7: lint, build, tests
 
-- [ ] `make lint` (repeat until clean).
-- [ ] `make erigon`.
-- [ ] `go test ./db/snapshotsync/... ./cl/antiquary/...`
-- [ ] `go test -race ./db/snapshotsync/...`
-- [ ] hot-path alloc benchmark from Task 3 shows no regression.
+- [x] `make lint` (repeat until clean). (0 issues.)
+- [x] `make erigon`. (builds; binary at build/bin/erigon.)
+- [x] `go test ./db/snapshotsync/... ./cl/antiquary/...` (all green.)
+- [x] `go test -race ./db/snapshotsync/...` (all green under -race.)
+- [x] hot-path alloc benchmark from Task 3 shows no regression.
+      (`TestViewHotPathNoExtraAllocs` green; `BenchmarkViewHotPath` View=4 (1+nTypes),
+      ViewType=2 allocs — matches baseline.)
 
 Acceptance: all green, lint clean.
 
