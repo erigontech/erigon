@@ -36,9 +36,6 @@ import (
 // unlinked only once that view closes. The no-reader case (unlink by return) is covered by
 // TestCaplinStateRemoveOverlaps.
 func TestCaplinStateRemoveOverlapsDefersUnlinkWhileViewOpen(t *testing.T) {
-	if testing.Short() {
-		t.Skip()
-	}
 	logger := log.New()
 	dirs := datadir.New(t.TempDir())
 	table := kv.PendingDepositsDump
@@ -66,9 +63,6 @@ func TestCaplinStateRemoveOverlapsDefersUnlinkWhileViewOpen(t *testing.T) {
 // every retired file is unlinked once all readers drain. -race is the real oracle here — the
 // CL side otherwise relies entirely on the shared core's EL race tests.
 func TestCaplinStateReadersRaceRemoveOverlaps(t *testing.T) {
-	if testing.Short() {
-		t.Skip()
-	}
 	logger := log.New()
 	dirs := datadir.New(t.TempDir())
 	table := kv.PendingDepositsDump

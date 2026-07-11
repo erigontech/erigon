@@ -45,9 +45,6 @@ func newTestDirtySegment(t *testing.T, from, to uint64, dir string, logger log.L
 // A publish with no reader pinning the outgoing generation reclaims and unlinks its retired
 // files by the time the call returns (I2 eager reclaim under lock).
 func TestVisibleGenerationsPublishDrainedDeletesImmediately(t *testing.T) {
-	if testing.Short() {
-		t.Skip()
-	}
 	logger := log.New()
 	dir := t.TempDir()
 	require := require.New(t)
@@ -70,9 +67,6 @@ func TestVisibleGenerationsPublishDrainedDeletesImmediately(t *testing.T) {
 // A publish while a reader pins the outgoing generation defers unlink of its retired files
 // until that reader releases (I3 drain gate).
 func TestVisibleGenerationsPublishDefersWhilePinned(t *testing.T) {
-	if testing.Short() {
-		t.Skip()
-	}
 	logger := log.New()
 	dir := t.TempDir()
 	require := require.New(t)
@@ -108,9 +102,6 @@ type hazardPayload struct {
 // already unlinked, so a reader pinning it would observe a missing file. The hazard-pointer
 // re-check in acquire prevents this. Run under -race for the memory-ordering half.
 func TestVisibleGenerationsHazardRetry(t *testing.T) {
-	if testing.Short() {
-		t.Skip()
-	}
 	logger := log.New()
 	dir := t.TempDir()
 	require := require.New(t)

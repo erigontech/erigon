@@ -39,9 +39,6 @@ import (
 // unlinks eagerly (only the fd-close is guarded), so the file vanishes under the reader;
 // with the watermark it is retired and deleted only once the pinning View closes.
 func TestRemoveOverlapsDefersUnlinkWhileViewOpen(t *testing.T) {
-	if testing.Short() {
-		t.Skip()
-	}
 	logger := log.New()
 	dir := t.TempDir()
 	require := require.New(t)
@@ -84,9 +81,6 @@ func TestRemoveOverlapsDefersUnlinkWhileViewOpen(t *testing.T) {
 // RemoveOverlaps must recognize them as pending reclamation and NOT unlink them as
 // orphans while the reader still mmaps them.
 func TestRemoveOverlapsProtectsPendingRetired(t *testing.T) {
-	if testing.Short() {
-		t.Skip()
-	}
 	logger := log.New()
 	dir := t.TempDir()
 	require := require.New(t)
@@ -146,9 +140,6 @@ func TestRemoveOverlapsProtectsPendingRetired(t *testing.T) {
 // files while an older generation is still pinned; only when the chain drains from the
 // oldest end do the retired files unlink, oldest-first.
 func TestStackedGenerationsReclaimInOrder(t *testing.T) {
-	if testing.Short() {
-		t.Skip()
-	}
 	logger := log.New()
 	dir := t.TempDir()
 	require := require.New(t)
@@ -220,9 +211,6 @@ func TestStackedGenerationsReclaimInOrder(t *testing.T) {
 // hazard-pointer re-check in visibleGenerations.acquire and the drain gate together guarantee a
 // pinned segment is never closed/unlinked under a live reader. Run under -race.
 func TestReadPinnedSegmentSurvivesConcurrentRetire(t *testing.T) {
-	if testing.Short() {
-		t.Skip()
-	}
 	logger := log.New()
 	dir := t.TempDir()
 	require := require.New(t)
