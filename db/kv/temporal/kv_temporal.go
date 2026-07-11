@@ -278,9 +278,13 @@ type RwTx struct {
 }
 
 func (tx *tx) ForceReopenUnderlyingFilesTx() {
-	tx.blocktx.Close()
+	if tx.blocktx != nil {
+		tx.blocktx.Close()
+	}
 	tx.blocktx = tx.db.beginBlockFilesRo()
-	tx.aggtx.Close()
+	if tx.aggtx != nil {
+		tx.aggtx.Close()
+	}
 	tx.aggtx = tx.Agg().BeginFilesRo()
 }
 func (tx *tx) FreezeInfo() kv.FreezeInfo { return tx.aggtx }
