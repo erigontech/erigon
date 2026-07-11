@@ -25,12 +25,12 @@ source.
 
 Add the per-table prune-progress marker.
 
-- `db/kv/tables.go`: add `StatesPruneProgress = "StatesPruneProgress"` next to
+- [x] `db/kv/tables.go`: add `StatesPruneProgress = "StatesPruneProgress"` next to
   `StatesProcessingProgress` (:281) and register it in the SAME table list that
   registers `StatesProcessingProgress` (find where `StatesProcessingProgress` is
   added to the tables slice, ~:432, and add there — this is the caplin indexing DB
   config).
-- `cl/persistence/state/state_accessors.go`: add
+- [x] `cl/persistence/state/state_accessors.go`: add
   `ReadStatePruneProgress(tx kv.Tx, table string) (uint64, error)` and
   `SetStatePruneProgress(tx kv.RwTx, table string, slot uint64) error`. Key =
   `[]byte(table)`. Value encoding = same as `SetStateProcessingProgress`
@@ -48,7 +48,7 @@ Acceptance: test green; `make erigon` builds.
 
 Expose the safe prune boundary per type.
 
-- `db/snapshotsync/caplin_state_snapshots.go`: add
+- [ ] `db/snapshotsync/caplin_state_snapshots.go`: add
   `(s *CaplinStateSnapshots) ContiguousCoverageEnd(typeName string) uint64`. Use
   `coveredRangesForType(typeName)` (:268). Ranges are `Range{From,To}`. Sort by
   `From`, walk from slot 0, and return the `To` of the first unbroken run (a run
@@ -57,9 +57,9 @@ Expose the safe prune boundary per type.
 TDD: unit test in `db/snapshotsync` — drive `coveredRangesForType` via the existing
 visible-segments test setup (see `caplin_state_overlap_test.go` /
 `caplin_state_visibility_test.go` for how tests construct segments). Cases:
-- contiguous `[0,50),[50,100)` → 100
-- gap `[0,50),[60,100)` → 50
-- no coverage / first range not at 0 → 0
+- [ ] contiguous `[0,50),[50,100)` → 100
+- [ ] gap `[0,50),[60,100)` → 50
+- [ ] no coverage / first range not at 0 → 0
 
 Acceptance: test green.
 
@@ -81,36 +81,36 @@ func pruneStateTables(
 ) (nextStartIdx int, err error)
 ```
 
-- Iterate `tables` starting at `startIdx` (rotating), wrapping once.
-- Per table: `boundary = boundaryFn(table)`; `marker = ReadStatePruneProgress`; if
+- [ ] Iterate `tables` starting at `startIdx` (rotating), wrapping once.
+- [ ] Per table: `boundary = boundaryFn(table)`; `marker = ReadStatePruneProgress`; if
   `marker >= boundary` continue. Else open an RW txn, cursor-seek to `marker`, and
   `DeleteCurrent` while `key < boundary`, counting; at `batchLimit` deletions
   commit, persist the marker to the last-deleted-slot+1, and start a new txn.
   Keys are `base_encoding.Encode64ToBytes4(slot)`; decode to compare against
   `boundary`.
-- **Fully-drained tables must jump the marker to `boundary`.** Most frozen tables
+- [ ] **Fully-drained tables must jump the marker to `boundary`.** Most frozen tables
   are sparse / rounded-key (EpochData rounds to epoch; `*Dump` round to
   `SlotsPerDump`; sync committees round to period — `cl/antiquary/beacon_states_collector.go`).
   After the last delete, a seek from `marker` returns nil or a key `>= boundary`
   even though `marker < boundary`. In that no-more-keys-below-boundary case,
   persist `marker = boundary` — otherwise the table is treated as backlog every
   cycle and inflates the budget forever.
-- Check `ctx.Err()` only at txn boundaries (never mid-txn). On deadline: commit the
+- [ ] Check `ctx.Err()` only at txn boundaries (never mid-txn). On deadline: commit the
   in-flight batch, return the current table index as `nextStartIdx`, nil error.
-- No ranged truncate in mdbx — cursor delete only. `batchLimit` keeps txns small.
-- Log per committed batch at `LvlDebug` (table, from→to slot, count, duration);
+- [ ] No ranged truncate in mdbx — cursor delete only. `batchLimit` keeps txns small.
+- [ ] Log per committed batch at `LvlDebug` (table, from→to slot, count, duration);
   per-table summary at `LvlInfo` when a table is fully drained to its boundary.
-- Add prometheus counters mirroring `mxAntiquaryPrunedBlocks` /
+- [ ] Add prometheus counters mirroring `mxAntiquaryPrunedBlocks` /
   `mxAntiquaryPruneBatchSeconds` (see `cl/antiquary/antiquary.go`).
 
 TDD: unit test in `cl/antiquary` with an mdbx test DB and an injected `boundaryFn`
 (no real `CaplinStateSnapshots` needed):
-- seed `kv.BlockRoot` with slots `0..99`; `boundaryFn → 50`; prune with a large
+- [ ] seed `kv.BlockRoot` with slots `0..99`; `boundaryFn → 50`; prune with a large
   deadline; assert slots `<50` gone, `>=50` present, marker == 50.
-- second call is a no-op (marker already at boundary).
-- tiny deadline (e.g. cancel after first batch): assert partial delete, marker
+- [ ] second call is a no-op (marker already at boundary).
+- [ ] tiny deadline (e.g. cancel after first batch): assert partial delete, marker
   advanced partially, and a follow-up call finishes the rest (resumable).
-- `batchLimit = 10` over 100 rows commits in ≥10 txns (assert via marker stepping
+- [ ] `batchLimit = 10` over 100 rows commits in ≥10 txns (assert via marker stepping
   or a commit counter).
 
 Acceptance: tests green; `make erigon` builds.
@@ -119,26 +119,26 @@ Acceptance: tests green; `make erigon` builds.
 
 ### Task 4: budget, kill-switch, wire into the antiquary cadence
 
-- `cl/antiquary/state_prune.go`:
+- [ ] `cl/antiquary/state_prune.go`:
   - `func statePruneBudget(cfg *clparams.BeaconChainConfig, backlogSlots uint64) time.Duration`
     mirroring EL (`execution/execmodule/forkchoice.go:915-917`):
     `base = SecondsPerSlot/3`, `max = SecondsPerSlot*2/3`,
     `budget = min(base + (backlogSlots/100)*200ms, max)`. Override the whole thing
     with `dbg.EnvDuration("CAPLIN_STATE_PRUNE_TIMEOUT", <computed>)`
     (`dbg_env.go:119`) when the env var is set.
-- `Antiquary` struct: add `statePruneStartIdx int` and `statePruneDisabled bool`.
+- [ ] `Antiquary` struct: add `statePruneStartIdx int` and `statePruneDisabled bool`.
   Initialize `statePruneDisabled` in `NewAntiquary` from
   `dbg.EnvBool("CAPLIN_STATE_PRUNE_DISABLE", false)` (`common/dbg/dbg_env.go:69`).
   It is a **field, not a package var**, so tests can toggle it directly without
   mutating process env (which would not take effect after init anyway).
-- Deterministic table list: build once from `snapshotTypes.KeyValueGetters` keys,
+- [ ] Deterministic table list: build once from `snapshotTypes.KeyValueGetters` keys,
   sorted (add a small accessor on `CaplinStateSnapshots` if needed).
-- **Gate: `if !s.statePruneDisabled && s.stateSn != nil`. Do NOT gate on
+- [ ] **Gate: `if !s.statePruneDisabled && s.stateSn != nil`. Do NOT gate on
   `s.snapgen`** — `snapgen` only gates local dumping; an archive-state node that
   *downloaded* state snapshots must prune too. The natural scope is already
   archive-state (this loop only runs when `ArchiveStates`), and
   `ContiguousCoverageEnd == 0` makes a node with no visible coverage a safe no-op.
-- Two wire points in `cl/antiquary/state_antiquary.go`:
+- [ ] Two wire points in `cl/antiquary/state_antiquary.go`:
   1. **After each `commitBatch()` + fresh collector** (after ~:404) — drains
      already-visible backlog frozen by prior calls.
   2. **After `DumpCaplinState` succeeds AND `s.stateSn.OpenFolder()`** (after
@@ -168,13 +168,13 @@ Acceptance: `make erigon` builds; `go test ./cl/antiquary/...` green; a prune
 Prove the invariant end to end. In `cl/antiquary` (reuse the
 `state_antiquary_test.go` harness) or `historical_states_reader`:
 
-- run the state antiquary far enough to freeze at least one range to `.seg`
+- [ ] run the state antiquary far enough to freeze at least one range to `.seg`
   segments, then call `pruneStateTables` below coverage.
-- read a historical state at a **pruned** slot → must reconstruct correctly (served
+- [ ] read a historical state at a **pruned** slot → must reconstruct correctly (served
   from segments).
-- read a historical state at a **tail** slot (above coverage) → correct (served
+- [ ] read a historical state at a **tail** slot (above coverage) → correct (served
   from DB; not pruned).
-- balances edge (make it deterministic): `reconstructBalances`
+- [ ] balances edge (make it deterministic): `reconstructBalances`
   (`cl/persistence/state/historical_states_reader/historical_states_reader.go:648-660`)
   picks the *next* dump instead of the previous when
   `slot % SlotsPerDump > SlotsPerDump/2` and progress is past it — which would read
@@ -191,9 +191,9 @@ Acceptance: both cases green.
 
 ### Task 6: lint, build, package tests
 
-- `make lint` (repeat until clean).
-- `make erigon`.
-- `go test ./cl/antiquary/... ./cl/persistence/state/... ./db/snapshotsync/...`
+- [ ] `make lint` (repeat until clean).
+- [ ] `make erigon`.
+- [ ] `go test ./cl/antiquary/... ./cl/persistence/state/... ./db/snapshotsync/...`
 
 Acceptance: all green, lint clean.
 

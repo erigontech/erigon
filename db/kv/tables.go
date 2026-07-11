@@ -279,6 +279,7 @@ const (
 	// End GLOAS
 
 	StatesProcessingProgress = "StatesProcessingProgress"
+	StatesPruneProgress      = "StatesPruneProgress" // table name => slot
 
 	//Diagnostics tables
 	DiagSystemInfo = "DiagSystemInfo"
@@ -430,6 +431,7 @@ var ChaindataTables = []string{
 	RandaoMixes,
 	Proposers,
 	StatesProcessingProgress,
+	StatesPruneProgress,
 	InactivityScores,
 	NextSyncCommittee,
 	CurrentSyncCommittee,
