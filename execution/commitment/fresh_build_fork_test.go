@@ -20,7 +20,10 @@ import (
 	"context"
 	"fmt"
 	"math/rand"
+	"sync"
+	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
 	"golang.org/x/sync/semaphore"
@@ -445,6 +448,78 @@ func TestFreshBuild_WhaleStorageForksAtGrain(t *testing.T) {
 	require.Equal(t, oracle, srPar[:], "per-subtree-grain fork-join root != sequential oracle")
 	require.GreaterOrEqual(t, forkFoldMaxDepth.Load(), int64(64),
 		"whale storage did not fork below the depth-64 seam at the production account grain (per-subtree grain not engaged)")
+}
+
+// nibFoldRendezvous pins top-nibble fold overlap deterministically: each fold entry blocks until a
+// second entrant arrives, so a serial dispatch (one nibble in flight at a time) strands the first
+// entrant until the timeout, while a concurrent dispatch releases as soon as two folds run
+// together. The timeout arm records failure and returns, so Process always completes and the test
+// asserts — it never hangs or skips.
+type nibFoldRendezvous struct {
+	arrived     atomic.Int32
+	release     chan struct{}
+	releaseOnce sync.Once
+	timedOut    atomic.Bool
+	timeout     time.Duration
+}
+
+func newNibFoldRendezvous(timeout time.Duration) *nibFoldRendezvous {
+	return &nibFoldRendezvous{release: make(chan struct{}), timeout: timeout}
+}
+
+func (r *nibFoldRendezvous) enter(int) {
+	if r.arrived.Add(1) >= 2 {
+		r.releaseOnce.Do(func() { close(r.release) })
+	}
+	select {
+	case <-r.release:
+	case <-time.After(r.timeout):
+		// both arms ready must count as a release, not a timeout
+		select {
+		case <-r.release:
+		default:
+			r.timedOut.Store(true)
+		}
+	}
+}
+
+// TestFreshBuild_TopNibbleFoldsOverlap is the top-level dispatch concurrency gate: at least two
+// top-nibble folds must execute concurrently — the rendezvous releases only once a second entrant
+// arrives, so a serial dispatch deterministically times out. Also asserts the fork-join
+// route fired, so a corpus that slips to the frontier fallback reads as a setup failure rather
+// than a false verdict. No t.Parallel: the hook and route counters are process-global.
+func TestFreshBuild_TopNibbleFoldsOverlap(t *testing.T) {
+	keys, upds := freshAccountPlaneCorpus(7, 6, 400)
+
+	r := newNibFoldRendezvous(5 * time.Second)
+	onNibFoldStart = r.enter
+	t.Cleanup(func() { onNibFoldStart = nil })
+
+	forkBefore := wholeFreshForkJoins.Load()
+	ms := NewMockState(t)
+	ms.SetConcurrentCommitment(true)
+	processModeBatchState(t, ms, modeStreaming, 4, keys, upds, nil)
+
+	require.Greater(t, wholeFreshForkJoins.Load(), forkBefore,
+		"test setup: whole-fresh fork-join did not fire (fell back to frontier)")
+	require.GreaterOrEqual(t, r.arrived.Load(), int32(2),
+		"test setup: fewer than two top-nibble folds executed")
+	require.False(t, r.timedOut.Load(),
+		"top-nibble folds never overlapped: whole-fresh dispatch is serial")
+}
+
+// TestFreshBuild_TopNibbleDispatchParity pins byte-identity for the corpus the overlap gate
+// drives: fork-on and fork-off both fold root- and stored-branch-identical to the sequential
+// oracle, and the fork-join fires, across engines and worker counts.
+func TestFreshBuild_TopNibbleDispatchParity(t *testing.T) {
+	for _, mode := range parityModes {
+		for _, w := range []int{1, 4} {
+			t.Run(fmt.Sprintf("%s/w%d", mode, w), func(t *testing.T) {
+				keys, upds := freshAccountPlaneCorpus(7, 6, 400)
+				runSeamParity(t, mode, w, keys, upds)
+			})
+		}
+	}
 }
 
 // TestFreshBuild_Seam is the Task 3 seam-correctness gate through the real engine: each of the three

@@ -167,6 +167,11 @@ var wholeFreshCellFolds atomic.Int64
 // dispatch loop — a measurement hook for the fresh-fork critical-path study. nil in production.
 var onNibFold func(nib int, subtreeCount uint32, d time.Duration)
 
+// onNibFoldStart, when non-nil, is called at the start of each top-nibble subtree fold from the
+// goroutine executing it — a test-only rendezvous point pinning that independent top-nibble folds
+// may overlap. nil in production.
+var onNibFoldStart func(nib int)
+
 func init() { forkWholeFresh.Store(true) }
 
 // wholeFreshBuild reports whether a Process runs against provably empty on-disk state: no seedable
@@ -374,6 +379,9 @@ func accountPlaneForkable(node *prefixNode, depth, accountKeyLen int) bool {
 // fork-join. Fail-closed on any error.
 func foldFreshAccountSubtreeCellForkJoin(ctx context.Context, ff *forkFolder, node *prefixNode, parentPrefix []byte, nib int) (cell, []*DeferredBranchUpdate, error) {
 	wholeFreshCellFolds.Add(1)
+	if onNibFoldStart != nil {
+		onNibFoldStart(nib)
+	}
 	fc := newFoldCtx(true)
 	defer fc.hph.Release()
 	c, err := fc.foldSubtreeCellForkJoin(ctx, ff, node, parentPrefix, nib)

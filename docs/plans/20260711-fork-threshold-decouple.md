@@ -179,19 +179,26 @@ incremental-whale120k flag-on ≤ ~25 ms (observation, machine-dependent); fresh
   fold's *execution*, gated like the existing whole-fresh atomics; nil in prod)
 - Create/Modify: `execution/commitment/fresh_build_fork_test.go` (the red test)
 
-- [ ] **deterministic barrier, NOT a peak counter** (a timing-dependent peak counter can flake, and the
+- [x] **deterministic barrier, NOT a peak counter** (a timing-dependent peak counter can flake, and the
       no-`t.Skip` rule would then wedge the executor). Add a test-only rendezvous the fold entry calls at
       the *start* of each top-nibble execution (inside both the forked goroutine and the inline arm — not
       at enqueue): the test's rendezvous releases only after ≥2 entrants arrive, with a timeout that
       **fails** (never skips). Serial dispatch → only 1 entrant ever → deterministic timeout = RED;
       concurrent → 2 arrive, release = GREEN. Works even at `foldSem` size 1 (one nibble forks, one folds
       inline in the dispatcher = 2 concurrent entrants)
-- [ ] pin red-for-the-right-reason: the test must also assert `wholeFreshForkJoins` incremented (matches
+      *(hook `onNibFoldStart` fires inside `foldFreshAccountSubtreeCellForkJoin` — the per-nibble
+      execution entry — so any future dispatch arm calls it from its executing goroutine)*
+- [x] pin red-for-the-right-reason: the test must also assert `wholeFreshForkJoins` incremented (matches
       `fresh_build_fork_test.go:172`), so a corpus that silently slips to the frontier fallback (fails
       `allTopNibblesPureBranch`/`accountPlaneForkable`/`hasEmpty`) is a test-setup failure, not a false red
-- [ ] write the root-parity green test alongside: same corpus, root **and the persisted branch-record
+      *(also guards `arrived >= 2` so a <2-nibble corpus is a setup failure too)*
+- [x] write the root-parity green test alongside: same corpus, root **and the persisted branch-record
       set** byte-identical to the current fork and to the serial oracle (refactor safety net)
-- [ ] run tests - the barrier test is RED (times out under the serial loop), the parity test is GREEN
+      *(`TestFreshBuild_TopNibbleDispatchParity`: fork-on + fork-off vs sequential, root +
+      `requireBranchParity`, all parityModes × w1/w4)*
+- [x] run tests - the barrier test is RED (times out under the serial loop), the parity test is GREEN
+      *(RED on the overlap assertion after the 5s strand — setup guards passed, so red for the right
+      reason; parity green; rest of package green via `-skip`; `make lint` clean ×2)*
 
 ### Task 3: Green — route the top-nibble dispatch through the shared fork mechanism
 
