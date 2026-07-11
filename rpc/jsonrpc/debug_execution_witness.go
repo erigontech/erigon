@@ -759,12 +759,12 @@ func (api *DebugAPIImpl) serveFromWitnessCache(ctx context.Context, tx kv.Tempor
 	if api.witnessCache == nil || mode != witnessModeLegacy {
 		return nil, false
 	}
-	num, hash, _, err := rpchelper.GetBlockNumber(ctx, blockNrOrHash, tx, api._blockReader, api.filters)
+	_, hash, _, err := rpchelper.GetBlockNumber(ctx, blockNrOrHash, tx, api._blockReader, api.filters)
 	if err != nil {
 		witnessCacheMissCounter.Inc()
 		return nil, false
 	}
-	result, ok := api.witnessCache.get(num, hash)
+	result, ok := api.witnessCache.Get(hash)
 	if ok {
 		witnessCacheHitCounter.Inc()
 	} else {

@@ -1210,7 +1210,7 @@ func (s *Ethereum) Init(stack *node.Node, config *ethconfig.Config, chainConfig 
 			jsonrpc.RunWitnessCacheBuilder(ctx, witnessBuilder, headCh)
 			return nil
 		})
-		s.logger.Info("[witness-cache] eager witness cache enabled", "blocks", httpRpcCfg.WitnessCacheBlocks, "maxmb", httpRpcCfg.WitnessCacheMaxMB)
+		s.logger.Info("[witness-cache] eager witness cache enabled", "blocks", httpRpcCfg.WitnessCacheBlocks)
 	}
 
 	s.apiList = jsonrpc.APIList(chainKv, s.ethRpcClient, s.txPoolRpcClient, s.miningRpcClient, s.rpcFilters, s.rpcDaemonStateCache, blockReader, &httpRpcCfg, s.engine, s.logger, s.polygonBridge, s.heimdallService, testingEntry, witnessCache)

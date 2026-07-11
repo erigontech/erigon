@@ -136,11 +136,11 @@ func NewWitnessCacheBuilderAPI(
 	filters *rpchelper.Filters, stateCache kvcache.Cache,
 	blockReader services.FullBlockReader, cfg *httpcfg.HttpCfg,
 	engine rules.EngineReader, bridgeReader bridgeReader,
-) (*witnessCache, *DebugAPIImpl) {
+) (*witnessResultCache, *DebugAPIImpl) {
 	if !enable {
 		return nil, nil
 	}
-	cache := newWitnessCache(cfg.WitnessCacheBlocks, cfg.WitnessCacheMaxMB)
+	cache := newWitnessResultCache(cfg.WitnessCacheBlocks)
 	base := NewBaseApi(filters, stateCache, blockReader, cfg.WithDatadir, cfg.EvmCallTimeout, engine, cfg.Dirs, bridgeReader, cfg.BlockRangeLimit, cfg.GetLogsMaxResults)
 	impl := NewPrivateDebugAPI(base, db, eth, cfg.Gascap, cfg.GethCompatibility)
 	impl.witnessCache = cache
@@ -152,8 +152,7 @@ func NewWitnessCacheBuilderAPI(
 // against every batch so reorgs evict stale entries. It runs until ctx is done or the
 // header channel closes. A nil cache is a no-op.
 func RunWitnessCacheBuilder(ctx context.Context, dbg *DebugAPIImpl, headerCh <-chan [][]byte) {
-	cache := dbg.witnessCache
-	if cache == nil {
+	if dbg.witnessCache == nil {
 		return
 	}
 	var frozen, lastSeen uint64
@@ -165,13 +164,13 @@ func RunWitnessCacheBuilder(ctx context.Context, dbg *DebugAPIImpl, headerCh <-c
 			if !ok {
 				return
 			}
-			newest, single, valid := processHeaderBatch(cache, batch)
+			newest, single, valid := processHeaderBatch(batch)
 			if !valid {
 				continue
 			}
 			lastSeen = max(lastSeen, newest.num)
-			// Coalesce: drain queued batches to the freshest tip, reconciling each so a
-			// missed eviction self-heals, then build only that newest header.
+			// Coalesce: drain queued batches to the freshest tip, then build only that
+			// newest header.
 			for draining := true; draining; {
 				select {
 				case b2, open := <-headerCh:
@@ -179,7 +178,7 @@ func RunWitnessCacheBuilder(ctx context.Context, dbg *DebugAPIImpl, headerCh <-c
 						draining = false
 						break
 					}
-					if n2, s2, v2 := processHeaderBatch(cache, b2); v2 {
+					if n2, s2, v2 := processHeaderBatch(b2); v2 {
 						witnessCacheCoalesceDropCounter.Inc()
 						newest, single = n2, s2
 						lastSeen = max(lastSeen, n2.num)
@@ -200,10 +199,16 @@ func RunWitnessCacheBuilder(ctx context.Context, dbg *DebugAPIImpl, headerCh <-c
 	}
 }
 
-// processHeaderBatch decodes a canonical-header batch, reconciles the cache against it,
-// and returns the newest header, whether the batch was a single-header advance, and
-// whether the batch was usable (valid=false on a decode error or empty batch).
-func processHeaderBatch(cache *witnessCache, batch [][]byte) (newest headerRef, singleHeaderBatch, valid bool) {
+// headerRef is a canonical block's number and hash, decoded from a header batch.
+type headerRef struct {
+	num  uint64
+	hash common.Hash
+}
+
+// processHeaderBatch decodes a canonical-header batch and returns the newest header,
+// whether the batch was a single-header advance, and whether it was usable
+// (valid=false on a decode error or empty batch).
+func processHeaderBatch(batch [][]byte) (newest headerRef, singleHeaderBatch, valid bool) {
 	refs, err := decodeHeaderRefs(batch)
 	if err != nil {
 		log.Warn("[witness-cache] decode headers", "err", err)
@@ -212,7 +217,6 @@ func processHeaderBatch(cache *witnessCache, batch [][]byte) (newest headerRef, 
 	if len(refs) == 0 {
 		return headerRef{}, false, false
 	}
-	cache.reconcile(refs)
 	newest = refs[0]
 	for _, r := range refs[1:] {
 		if r.num > newest.num {
@@ -284,7 +288,8 @@ func (api *DebugAPIImpl) buildAndCache(ctx context.Context, num uint64, hash com
 		log.Warn("[witness-cache] marshal witness", "block", num, "err", err)
 		return false
 	}
-	api.witnessCache.put(num, hash, &ExecutionWitnessResult{cachedJSON: enc})
+	api.witnessCache.Add(hash, &ExecutionWitnessResult{cachedJSON: enc})
+	witnessCacheEntriesResidentGauge.SetInt(api.witnessCache.Len())
 	witnessCacheBuildOKCounter.Inc()
 	return true
 }

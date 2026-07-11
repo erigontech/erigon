@@ -98,7 +98,6 @@ var DefaultFlags = []cli.Flag{
 	&utils.RpcTraceCompatFlag,
 	&utils.RpcGethCompatFlag,
 	&utils.WitnessCacheBlocksFlag,
-	&utils.WitnessCacheMaxMBFlag,
 	&utils.RpcGasCapFlag,
 	&utils.RpcBlockRangeLimit,
 	&utils.RpcGetLogsMaxResults,

@@ -26,7 +26,6 @@ import (
 
 	"github.com/erigontech/erigon/cmd/rpcdaemon/rpcdaemontest"
 	"github.com/erigontech/erigon/common"
-	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/db/state/statecfg"
@@ -64,10 +63,8 @@ func TestDecodeHeaderRefs(t *testing.T) {
 }
 
 func TestProcessHeaderBatch(t *testing.T) {
-	cache := newWitnessCache(96, 1024)
-
 	h5, _ := encodeSyntheticHeader(t, 5)
-	newest, single, valid := processHeaderBatch(cache, [][]byte{h5})
+	newest, single, valid := processHeaderBatch([][]byte{h5})
 	require.True(t, valid)
 	require.True(t, single)
 	require.Equal(t, uint64(5), newest.num)
@@ -75,16 +72,16 @@ func TestProcessHeaderBatch(t *testing.T) {
 	// Out-of-order multi-header batch: newest is the highest number, not the first entry.
 	h6, _ := encodeSyntheticHeader(t, 6)
 	h7, hash7 := encodeSyntheticHeader(t, 7)
-	newest, single, valid = processHeaderBatch(cache, [][]byte{h7, h6})
+	newest, single, valid = processHeaderBatch([][]byte{h7, h6})
 	require.True(t, valid)
 	require.False(t, single)
 	require.Equal(t, uint64(7), newest.num)
 	require.Equal(t, hash7, newest.hash)
 
-	_, _, valid = processHeaderBatch(cache, nil)
+	_, _, valid = processHeaderBatch(nil)
 	require.False(t, valid, "empty batch is not usable")
 
-	_, _, valid = processHeaderBatch(cache, [][]byte{{0xff, 0xff, 0xff}})
+	_, _, valid = processHeaderBatch([][]byte{{0xff, 0xff, 0xff}})
 	require.False(t, valid, "decode error is not usable")
 }
 
@@ -167,7 +164,7 @@ func TestWitnessCacheBuilderParity(t *testing.T) {
 
 	onDemand := NewPrivateDebugAPI(newBaseApiForTest(m), m.DB, nil, 0, false)
 
-	cache := newWitnessCache(96, 1024)
+	cache := newWitnessResultCache(96)
 	builder := NewPrivateDebugAPI(newBaseApiForTest(m), m.DB, nil, 0, false)
 	builder.witnessCache = cache
 
@@ -185,7 +182,7 @@ func TestWitnessCacheBuilderParity(t *testing.T) {
 
 	var cached *ExecutionWitnessResult
 	require.Eventually(t, func() bool {
-		cached, _ = cache.get(blockNum, hash)
+		cached, _ = cache.Get(hash)
 		return cached != nil
 	}, 30*time.Second, 20*time.Millisecond, "builder must populate the cache")
 
@@ -200,50 +197,4 @@ func TestWitnessCacheBuilderParity(t *testing.T) {
 	gotBytes, err := cached.MarshalFastJSON()
 	require.NoError(t, err)
 	require.Equal(t, wantBytes, gotBytes, "builder-path witness must be byte-identical to on-demand")
-}
-
-// TestWitnessCacheBuilderReorgEviction seeds a stale entry under a wrong hash, feeds the
-// real canonical header, and asserts the builder evicts the stale entry (a request for
-// the old hash now misses and falls through) while caching the real (num, hash).
-func TestWitnessCacheBuilderReorgEviction(t *testing.T) {
-	previousSchema := statecfg.Schema
-	statecfg.EnableHistoricalCommitment()
-	t.Cleanup(func() { statecfg.Schema = previousSchema })
-
-	m, _, _ := rpcdaemontest.CreateTestExecModule(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-
-	err := m.DB.Update(ctx, func(tx kv.RwTx) error {
-		return rawdb.WriteDBCommitmentHistoryEnabled(tx, true)
-	})
-	require.NoError(t, err)
-
-	cache := newWitnessCache(96, 1024)
-	builder := NewPrivateDebugAPI(newBaseApiForTest(m), m.DB, nil, 0, false)
-	builder.witnessCache = cache
-
-	const blockNum = uint64(4)
-	staleHash := hashN(0xba)
-	cache.put(blockNum, staleHash, &ExecutionWitnessResult{State: []hexutil.Bytes{{0x01}}})
-
-	headerCh := make(chan [][]byte, 8)
-	builderDone := make(chan struct{})
-	go func() { defer close(builderDone); RunWitnessCacheBuilder(ctx, builder, headerCh) }()
-	// Join the builder before the test module's DB is torn down so no in-flight build
-	// touches a closed DB under -race.
-	defer func() { cancel(); <-builderDone }()
-
-	hash, headerRLP := buildTestChainHeader(t, m, blockNum)
-	require.NotEqual(t, staleHash, hash, "seed hash must differ from the canonical hash")
-
-	headerCh <- [][]byte{headerRLP}
-
-	require.Eventually(t, func() bool {
-		r, ok := cache.get(blockNum, hash)
-		return ok && r != nil
-	}, 30*time.Second, 20*time.Millisecond, "builder must cache the real (num, hash)")
-
-	_, ok := cache.get(blockNum, staleHash)
-	require.False(t, ok, "stale entry under the old hash must be evicted so the request falls through")
 }

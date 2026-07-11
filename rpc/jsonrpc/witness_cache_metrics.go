@@ -24,10 +24,8 @@ var (
 	witnessCacheBuildOKCounter         = metrics.GetOrCreateCounter("witness_cache_build_ok_total")
 	witnessCacheBuildFailVerifyCounter = metrics.GetOrCreateCounter("witness_cache_build_fail_verify_total")
 	witnessCacheBuildFailOtherCounter  = metrics.GetOrCreateCounter("witness_cache_build_fail_other_total")
-	witnessCacheEvictCounter           = metrics.GetOrCreateCounter("witness_cache_evict_total")
 	witnessCacheCoalesceDropCounter    = metrics.GetOrCreateCounter("witness_cache_coalesce_drop_total")
 
-	witnessCacheBytesResidentGauge   = metrics.GetOrCreateGauge("witness_cache_bytes_resident")
 	witnessCacheEntriesResidentGauge = metrics.GetOrCreateGauge("witness_cache_entries_resident")
 
 	witnessCacheBuildDuration = metrics.GetOrCreateHistogram("witness_cache_build_duration_seconds")
