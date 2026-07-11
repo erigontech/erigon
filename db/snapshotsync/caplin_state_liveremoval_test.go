@@ -17,7 +17,9 @@
 package snapshotsync
 
 import (
+	"sync"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
 
@@ -57,6 +59,71 @@ func TestCaplinStateRemoveOverlapsDefersUnlinkWhileViewOpen(t *testing.T) {
 
 	require.NoFileExists(t, subSeg, "covered subset must be unlinked once the pinning view closes")
 	require.NoFileExists(t, subIdx)
+}
+
+// Many readers churning View() + segment reads concurrently with RemoveOverlaps must never
+// crash or observe a torn generation: a reader's pin keeps its files alive until it releases (I3), and
+// every retired file is unlinked once all readers drain. -race is the real oracle here — the
+// CL side otherwise relies entirely on the shared core's EL race tests.
+func TestCaplinStateReadersRaceRemoveOverlaps(t *testing.T) {
+	if testing.Short() {
+		t.Skip()
+	}
+	logger := log.New()
+	dirs := datadir.New(t.TempDir())
+	table := kv.PendingDepositsDump
+	typ := mustCaplinStateType(t, table)
+
+	writeCaplinStateFixture(t, dirs.SnapCaplin, table, 0, 200_000, logger) // covering superset (kept, covers slot 0)
+	var subSegs []string
+	for from := uint64(0); from < 200_000; from += 50_000 {
+		seg, _ := writeCaplinStateFixture(t, dirs.SnapCaplin, table, from, from+50_000, logger) // covered subsets (retired)
+		subSegs = append(subSegs, seg)
+	}
+
+	s := openTestCaplinStateSnapshots(t, dirs, table, logger)
+
+	read := func() {
+		v := s.View()
+		if seg, ok := v.VisibleSegment(0, typ); ok {
+			g := seg.src.MakeGetter() // touches the Decompressor reclaim would close
+			g.Reset(0)
+			if g.HasNext() {
+				g.Next(nil)
+			}
+		}
+		v.Close()
+	}
+
+	var wg sync.WaitGroup
+	stop := make(chan struct{})
+	for r := 0; r < 8; r++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for {
+				select {
+				case <-stop:
+					return
+				default:
+					read()
+				}
+			}
+		}()
+	}
+	time.Sleep(20 * time.Millisecond) // let readers warm up so they churn Views when retirement hits
+
+	require.NoError(t, s.RemoveOverlaps())
+
+	time.Sleep(20 * time.Millisecond)
+	close(stop)
+	wg.Wait()
+
+	s.View().Close() // final drain collapses the generation chain and reclaims every retired file
+	require.Equal(t, s.gens.current.Load(), s.gens.oldest, "generation chain must collapse once readers drain")
+	for _, f := range subSegs {
+		require.NoFileExists(t, f, "retired subset must be unlinked after all readers drain")
+	}
 }
 
 // Close is shutdown-only: it closes fds after readers drain but must never unlink, or a normal

@@ -67,6 +67,10 @@ Sorts data before database insertion to reduce write amplification:
 - Piece size: 2MB default
 - Verification on download
 
+### Visibility & retirement (`snapshotsync/visible_generations.go`)
+
+Reader-visible snapshot sets (EL block snapshots in `snapshots.go`, CL caplin state in `caplin_state_snapshots.go`) publish immutable, refcounted *generations* through the shared payload-opaque core `visibleGenerations[P]`. Readers pin a generation (`View`/`acquire`); a file is disposed only after every pinning reader drains (`refcnt == 0`). Disposition is split: `retired` → unlink from disk (permanent removal: `RemoveOverlaps`, future merge cleanup); `detached` → close fds only, file stays on disk (shutdown `Close`, re-open stale cleanup). Never unlink a dirty segment directly outside a drain-gated `publish`/`recalcVisibleFiles`. CL state keys visibility by the `CaplinStateType` enum whose `String()` must equal the on-disk `kv.*` table name. `state/aggregator.go` keeps its own equivalent per-file refcount chain, not yet folded onto this core.
+
 ## Runtime settings (`snapshots/erigondb.toml`)
 
 Per-datadir settings that travel with a snapshot set rather than the binary, resolved by `state.ResolveErigonDBSettings` (`state/erigondb_settings.go`). A downloaded `erigondb.toml` is synced snapshot metadata and is never rewritten, so a producer's published values survive on consumers.

@@ -155,18 +155,6 @@ func NewCaplinStateSnapshots(cfg ethconfig.BlocksFreezing, beaconCfg *clparams.B
 		log.Debug("[dbg] NewCaplinSnapshots created with empty ChainName", "stack", dbg.Stack())
 	}
 
-	// BeaconBlocks := &segments{
-	// 	DirtySegments: btree.NewBTreeGOptions[*DirtySegment](DirtySegmentLess, btree.Options{Degree: 128, NoLocks: false}),
-	// }
-	// BlobSidecars := &segments{
-	// 	DirtySegments: btree.NewBTreeGOptions[*DirtySegment](DirtySegmentLess, btree.Options{Degree: 128, NoLocks: false}),
-	// }
-	// Segments := make(map[string]*segments)
-	// for k := range snapshotTypes.KeyValueGetters {
-	// 	Segments[k] = &segments{
-	// 		DirtySegments: btree.NewBTreeGOptions[*DirtySegment](DirtySegmentLess, btree.Options{Degree: 128, NoLocks: false}),
-	// 	}
-	// }
 	dirty := make(map[CaplinStateType]*btree.BTreeG[*DirtySegment])
 	types := make([]CaplinStateType, 0, len(snapshotTypes.KeyValueGetters))
 	for k := range snapshotTypes.KeyValueGetters {
@@ -200,13 +188,11 @@ func (s *CaplinStateSnapshots) LS() {
 	defer view.Close()
 
 	var stats seg.Stats
-	for _, roTx := range view.roTxs {
-		if roTx != nil {
-			for _, sn := range roTx.Segments {
-				d := sn.src.Decompressor
-				s.logger.Info("[agg] ", "f", d.FileName(), "words", d.Count(), "dictOnDisk", common.ByteCount(d.SerializedTotalDictSize()), "dictMem", common.ByteCount(d.DictMemSize()))
-				stats.Add(d)
-			}
+	for _, segs := range view.visible.payload.segments {
+		for _, sn := range segs {
+			d := sn.src.Decompressor
+			s.logger.Info("[agg] ", "f", d.FileName(), "words", d.Count(), "dictOnDisk", common.ByteCount(d.SerializedTotalDictSize()), "dictMem", common.ByteCount(d.DictMemSize()))
+			stats.Add(d)
 		}
 	}
 	s.logger.Info("[agg] total", "words", stats.Words, "dictOnDisk", common.ByteCount(stats.Dict), "dictMem", common.ByteCount(stats.DictMem))
@@ -218,17 +204,13 @@ func (s *CaplinStateSnapshots) SegFileNames(from, to uint64) []string {
 
 	var res []string
 
-	for _, roTx := range view.roTxs {
-		if roTx == nil {
-			continue
-		}
-		for _, seg := range roTx.Segments {
+	for _, segs := range view.visible.payload.segments {
+		for _, seg := range segs {
 			if seg.from >= to || seg.to <= from {
 				continue
 			}
 			res = append(res, seg.src.filePath)
 		}
-
 	}
 	return res
 }
@@ -586,7 +568,6 @@ func (s *CaplinStateSnapshots) detachNotInList(protect []string) []*DirtySegment
 type CaplinStateView struct {
 	s       *CaplinStateSnapshots
 	visible *generation[caplinStateVisible] // the pinned generation; released once by Close
-	roTxs   map[CaplinStateType]*RoTx
 	closed  bool
 }
 
@@ -594,12 +575,7 @@ func (s *CaplinStateSnapshots) View() *CaplinStateView {
 	if s == nil {
 		return nil
 	}
-	g := s.gens.acquire()
-	v := &CaplinStateView{s: s, visible: g, roTxs: make(map[CaplinStateType]*RoTx)}
-	for _, t := range s.types {
-		v.roTxs[t] = g.payload.segments[t].BeginRo() // non-owning children; the View owns the single pin
-	}
-	return v
+	return &CaplinStateView{s: s, visible: s.gens.acquire()}
 }
 
 func (v *CaplinStateView) Close() {
