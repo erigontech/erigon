@@ -30,8 +30,9 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/erigontech/erigon/execution/rlp/internal/rlpstruct"
 	"github.com/holiman/uint256"
+
+	"github.com/erigontech/erigon/execution/rlp/internal/rlpstruct"
 )
 
 //lint:ignore ST1012 EOL is not an error.
@@ -659,8 +660,7 @@ func NewStream(r io.Reader, inputLimit uint64) *Stream {
 	return s
 }
 
-// NewStreamFromPool returns a pooled Stream reading from r. The caller MUST
-// return it via PutStream once done. Pair as:
+// NewStreamFromPool returns a pooled Stream:
 //
 //	s := rlp.NewStreamFromPool(r, limit)
 //	defer rlp.PutStream(s)
