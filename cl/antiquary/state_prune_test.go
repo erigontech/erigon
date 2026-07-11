@@ -18,6 +18,7 @@ package antiquary
 
 import (
 	"context"
+	"math"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -289,21 +290,44 @@ func TestStatePruneKillSwitch(t *testing.T) {
 	a.statePruneBoundaryFn = func(string) uint64 { return 50 }
 
 	a.statePruneDisabled = true
-	a.pruneFrozenStateTables(ctx)
+	a.pruneFrozenStateTables(ctx, math.MaxUint64)
 	require.Equal(t, slotRange(0, 100), tableSlots(t, db, kv.BlockRoot))
 	require.Zero(t, pruneMarker(t, db, kv.BlockRoot))
 
 	// an already-expired timeout override must stop the pass before any delete
 	a.statePruneDisabled = false
 	a.statePruneTimeout = time.Nanosecond
-	a.pruneFrozenStateTables(ctx)
+	a.pruneFrozenStateTables(ctx, math.MaxUint64)
 	require.Equal(t, slotRange(0, 100), tableSlots(t, db, kv.BlockRoot))
 	require.Zero(t, pruneMarker(t, db, kv.BlockRoot))
 
 	a.statePruneTimeout = 0
-	a.pruneFrozenStateTables(ctx)
+	a.pruneFrozenStateTables(ctx, math.MaxUint64)
 	require.Equal(t, slotRange(50, 100), tableSlots(t, db, kv.BlockRoot))
 	require.Equal(t, uint64(50), pruneMarker(t, db, kv.BlockRoot))
+}
+
+func TestPruneFrozenStateTablesCapsBoundaryToFlushed(t *testing.T) {
+	db := memdb.NewTestDB(t, dbcfg.ChainDB)
+	seedStateSlots(t, db, kv.BlockRoot, slotRange(0, 100))
+	ctx := context.Background()
+	stateSn := snapshotsync.NewCaplinStateSnapshots(ethconfig.BlocksFreezing{}, &clparams.MainnetBeaconConfig, datadir.New(t.TempDir()), snapshotsync.MakeCaplinStateSnapshotsTypes(db), log.New())
+	a := NewAntiquary(ctx, nil, nil, nil, &clparams.MainnetBeaconConfig, datadir.New(t.TempDir()), nil, db, stateSn, nil, nil, nil, log.New(), true, true, true, false, nil)
+	a.statePruneBoundaryFn = func(string) uint64 { return 80 }
+
+	// Coverage says 80, but a resumed reconstruction has only re-flushed rows
+	// below 30 so far. The pass must stop at 30 and leave [30,80) for later
+	// passes rather than jump the marker to 80 and strand the rows the
+	// reconstruction still writes below coverage.
+	a.pruneFrozenStateTables(ctx, 30)
+	require.Equal(t, slotRange(30, 100), tableSlots(t, db, kv.BlockRoot))
+	require.Equal(t, uint64(30), pruneMarker(t, db, kv.BlockRoot))
+
+	// Once the rest of the below-coverage window is flushed, the next pass
+	// resumes from 30 and drains up to coverage.
+	a.pruneFrozenStateTables(ctx, 80)
+	require.Equal(t, slotRange(80, 100), tableSlots(t, db, kv.BlockRoot))
+	require.Equal(t, uint64(80), pruneMarker(t, db, kv.BlockRoot))
 }
 
 func TestStatePruneWiredIntoAntiquaryCycle(t *testing.T) {

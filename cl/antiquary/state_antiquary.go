@@ -399,7 +399,7 @@ func (s *Antiquary) IncrementBeaconState(ctx context.Context, to uint64) error {
 			stateAntiquaryCollector = newBeaconStatesCollector(s.cfg, s.dirs.Tmp, s.logger)
 			changedValidators = &sync.Map{}
 			lastCommitSlot = slot
-			s.pruneFrozenStateTables(ctx)
+			s.pruneFrozenStateTables(ctx, s.currentState.Slot())
 		}
 		slashingOccurred = false // Set this to false at the beginning of each slot.
 
@@ -597,7 +597,7 @@ func (s *Antiquary) IncrementBeaconState(ctx context.Context, to uint64) error {
 	}
 	// At tip this is the only prune site that runs on every call: the in-loop
 	// site needs a maxSlotsPerCommit batch and the snapgen site a fresh dump.
-	s.pruneFrozenStateTables(ctx)
+	s.pruneFrozenStateTables(ctx, s.currentState.Slot())
 
 	if s.snapgen {
 		blocksPerStatefulFile := uint64(snaptype.CaplinMergeLimit * 5)
@@ -631,7 +631,7 @@ func (s *Antiquary) IncrementBeaconState(ctx context.Context, to uint64) error {
 			return err
 		}
 		// Prune only after OpenFolder: coverage must include the just-frozen range.
-		s.pruneFrozenStateTables(ctx)
+		s.pruneFrozenStateTables(ctx, s.currentState.Slot())
 		if s.downloader != nil {
 			paths := s.stateSn.SegFileNames(0, to)
 			// Notify bittorent to seed the new snapshots

@@ -41,14 +41,21 @@ func statePruneBudget(cfg *clparams.BeaconChainConfig, backlogSlots uint64) time
 	return min(base+time.Duration(backlogSlots/100)*200*time.Millisecond, maxBudget)
 }
 
-func (s *Antiquary) pruneFrozenStateTables(ctx context.Context) {
+// flushedThrough caps the prune boundary to the highest slot already re-written
+// to the DB. A resumed reconstruction re-flushes the below-coverage window in
+// batches; without the cap an early pass would jump the marker to full coverage
+// and strand the rows later batches still write below it.
+func (s *Antiquary) pruneFrozenStateTables(ctx context.Context, flushedThrough uint64) {
 	if s.statePruneDisabled || s.stateSn == nil {
 		return
 	}
 	tables := s.stateSn.TypeNames()
-	boundaryFn := s.statePruneBoundaryFn
-	if boundaryFn == nil {
-		boundaryFn = s.stateSn.ContiguousCoverageEnd
+	coverageFn := s.statePruneBoundaryFn
+	if coverageFn == nil {
+		coverageFn = s.stateSn.ContiguousCoverageEnd
+	}
+	boundaryFn := func(table string) uint64 {
+		return min(coverageFn(table), flushedThrough)
 	}
 	budget := statePruneBudget(s.cfg, s.statePruneBacklog(ctx, tables, boundaryFn))
 	if s.statePruneTimeout > 0 {
