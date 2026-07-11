@@ -45,14 +45,15 @@ func TestCaplinStateUnindexedSegmentInvisible(t *testing.T) {
 
 	s := openTestCaplinStateSnapshots(t, dirs, table, logger)
 
-	require.Equal(t, []Range{{from: 0, to: 100_000}}, s.coveredRangesForType(table),
+	typ := mustCaplinStateType(t, table)
+	require.Equal(t, []Range{{from: 0, to: 100_000}}, s.coveredRangesForType(typ),
 		"un-indexed segment must not be a covered (visible) range")
 
 	view := s.View()
 	defer view.Close()
-	_, servedIndexed := view.VisibleSegment(50_000, table)
+	_, servedIndexed := view.VisibleSegment(50_000, typ)
 	require.True(t, servedIndexed, "indexed range must serve from the snapshot")
-	_, servedUnindexed := view.VisibleSegment(120_000, table)
+	_, servedUnindexed := view.VisibleSegment(120_000, typ)
 	require.False(t, servedUnindexed, "un-indexed range must fall through to the DB, not the snapshot")
 }
 
@@ -69,6 +70,6 @@ func TestCaplinStateIndexFoundWhenDatadirPathContainsSeg(t *testing.T) {
 
 	s := openTestCaplinStateSnapshots(t, dirs, table, logger)
 
-	require.Equal(t, []Range{{from: 0, to: 100_000}}, s.coveredRangesForType(table),
+	require.Equal(t, []Range{{from: 0, to: 100_000}}, s.coveredRangesForType(mustCaplinStateType(t, table)),
 		`index in a datadir whose path contains ".seg" must still be found`)
 }

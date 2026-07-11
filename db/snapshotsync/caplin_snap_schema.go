@@ -26,7 +26,8 @@ func NewCaplinSchema(dirs datadir.Dirs, stepSize uint64, stateTypes SnapshotType
 	dataVer := snaptype.BeaconBlocks.Versions()
 	accessorVer := snaptype.BeaconBlocks.Indexes()[0].Version
 	stateSchemaVersion := state.NewE2SnapSchemaVersion(dataVer, accessorVer)
-	for table := range stateTypes.KeyValueGetters {
+	for typ := range stateTypes.KeyValueGetters {
+		table := typ.String()
 		statemp[table] = state.NewE2SnapSchemaWithStepAndDir(dirs.SnapCaplin, table, []string{table}, stepSize, stateSchemaVersion)
 	}
 

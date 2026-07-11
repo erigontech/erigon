@@ -229,7 +229,8 @@ func touchFiles(t *testing.T, dirs datadir.Dirs, ranges []snapRange) {
 	}
 	stateSnapTypes := snapshotsync.MakeCaplinStateSnapshotsTypes(nil)
 
-	for table := range stateSnapTypes.KeyValueGetters {
+	for typ := range stateSnapTypes.KeyValueGetters {
+		table := typ.String()
 		// caplin/v1.1-000000-010500-ActiveValidatorIndicies.idx
 		// caplin/v1.1-000000-010500-ActiveValidatorIndicies.seg
 

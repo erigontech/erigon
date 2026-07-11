@@ -30,7 +30,7 @@ func TestCaplinStateCloseWhatNotInListDropsUnopenedStub(t *testing.T) {
 	stale := &DirtySegment{Range: Range{1000, 2000}, filePath: filepath.Join("snapshots", "drop.seg")}
 	tree.Set(kept)
 	tree.Set(stale)
-	s := &CaplinStateSnapshots{dirty: map[string]*btree.BTreeG[*DirtySegment]{"test": tree}}
+	s := &CaplinStateSnapshots{dirty: map[CaplinStateType]*btree.BTreeG[*DirtySegment]{CaplinBlockRoot: tree}}
 
 	s.closeWhatNotInList([]string{"keep.seg"})
 

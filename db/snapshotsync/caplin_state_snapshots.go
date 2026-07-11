@@ -95,44 +95,13 @@ func getKvGetterForStateTable(db kv.RoDB, tableName string) KeyValueGetter {
 }
 
 func MakeCaplinStateSnapshotsTypes(db kv.RoDB) SnapshotTypes {
+	getters := make(map[CaplinStateType]KeyValueGetter, caplinStateTypeCount)
+	for t := CaplinStateType(0); t < caplinStateTypeCount; t++ {
+		getters[t] = getKvGetterForStateTable(db, t.String())
+	}
 	return SnapshotTypes{
-		KeyValueGetters: map[string]KeyValueGetter{
-			kv.ValidatorEffectiveBalance:     getKvGetterForStateTable(db, kv.ValidatorEffectiveBalance),
-			kv.ValidatorSlashings:            getKvGetterForStateTable(db, kv.ValidatorSlashings),
-			kv.ValidatorBalance:              getKvGetterForStateTable(db, kv.ValidatorBalance),
-			kv.StateEvents:                   getKvGetterForStateTable(db, kv.StateEvents),
-			kv.ActiveValidatorIndicies:       getKvGetterForStateTable(db, kv.ActiveValidatorIndicies),
-			kv.StateRoot:                     getKvGetterForStateTable(db, kv.StateRoot),
-			kv.BlockRoot:                     getKvGetterForStateTable(db, kv.BlockRoot),
-			kv.SlotData:                      getKvGetterForStateTable(db, kv.SlotData),
-			kv.EpochData:                     getKvGetterForStateTable(db, kv.EpochData),
-			kv.InactivityScores:              getKvGetterForStateTable(db, kv.InactivityScores),
-			kv.NextSyncCommittee:             getKvGetterForStateTable(db, kv.NextSyncCommittee),
-			kv.CurrentSyncCommittee:          getKvGetterForStateTable(db, kv.CurrentSyncCommittee),
-			kv.Eth1DataVotes:                 getKvGetterForStateTable(db, kv.Eth1DataVotes),
-			kv.IntraRandaoMixes:              getKvGetterForStateTable(db, kv.IntraRandaoMixes),
-			kv.RandaoMixes:                   getKvGetterForStateTable(db, kv.RandaoMixes),
-			kv.BalancesDump:                  getKvGetterForStateTable(db, kv.BalancesDump),
-			kv.EffectiveBalancesDump:         getKvGetterForStateTable(db, kv.EffectiveBalancesDump),
-			kv.PendingConsolidations:         getKvGetterForStateTable(db, kv.PendingConsolidations),
-			kv.PendingPartialWithdrawals:     getKvGetterForStateTable(db, kv.PendingPartialWithdrawals),
-			kv.PendingDeposits:               getKvGetterForStateTable(db, kv.PendingDeposits),
-			kv.PendingConsolidationsDump:     getKvGetterForStateTable(db, kv.PendingConsolidationsDump),
-			kv.PendingPartialWithdrawalsDump: getKvGetterForStateTable(db, kv.PendingPartialWithdrawalsDump),
-			kv.PendingDepositsDump:           getKvGetterForStateTable(db, kv.PendingDepositsDump),
-			// GLOAS (EIP-7732)
-			kv.Builders:                          getKvGetterForStateTable(db, kv.Builders),
-			kv.BuildersDump:                      getKvGetterForStateTable(db, kv.BuildersDump),
-			kv.BuilderPendingWithdrawals:         getKvGetterForStateTable(db, kv.BuilderPendingWithdrawals),
-			kv.BuilderPendingWithdrawalsDump:     getKvGetterForStateTable(db, kv.BuilderPendingWithdrawalsDump),
-			kv.PayloadExpectedWithdrawals:        getKvGetterForStateTable(db, kv.PayloadExpectedWithdrawals),
-			kv.PayloadExpectedWithdrawalsDump:    getKvGetterForStateTable(db, kv.PayloadExpectedWithdrawalsDump),
-			kv.ExecutionPayloadAvailabilityTable: getKvGetterForStateTable(db, kv.ExecutionPayloadAvailabilityTable),
-			kv.BuilderPendingPaymentsTable:       getKvGetterForStateTable(db, kv.BuilderPendingPaymentsTable),
-			kv.PtcWindowTable:                    getKvGetterForStateTable(db, kv.PtcWindowTable),
-			kv.LatestExecutionPayloadBidTable:    getKvGetterForStateTable(db, kv.LatestExecutionPayloadBidTable),
-		},
-		Compression: map[string]bool{},
+		KeyValueGetters: getters,
+		Compression:     map[CaplinStateType]bool{},
 	}
 }
 
@@ -151,8 +120,8 @@ type CaplinStateSnapshots struct {
 	// BeaconBlocks *segments
 	// BlobSidecars *segments
 	// Segments      map[string]*segments
-	dirtyLock sync.RWMutex                            // guards `dirty` field
-	dirty     map[string]*btree.BTreeG[*DirtySegment] // ordered map `type.Enum()` -> DirtySegments
+	dirtyLock sync.RWMutex                                     // guards `dirty` field
+	dirty     map[CaplinStateType]*btree.BTreeG[*DirtySegment] // ordered map type -> DirtySegments
 
 	visibleLock sync.RWMutex // guards  `visible` field
 	visible     sync.Map
@@ -173,8 +142,8 @@ type CaplinStateSnapshots struct {
 type KeyValueGetter func(numId uint64) ([]byte, []byte, error)
 
 type SnapshotTypes struct {
-	KeyValueGetters map[string]KeyValueGetter
-	Compression     map[string]bool
+	KeyValueGetters map[CaplinStateType]KeyValueGetter
+	Compression     map[CaplinStateType]bool
 }
 
 // NewCaplinStateSnapshots - opens all snapshots. But to simplify everything:
@@ -199,7 +168,7 @@ func NewCaplinStateSnapshots(cfg ethconfig.BlocksFreezing, beaconCfg *clparams.B
 	// 		DirtySegments: btree.NewBTreeGOptions[*DirtySegment](DirtySegmentLess, btree.Options{Degree: 128, NoLocks: false}),
 	// 	}
 	// }
-	dirty := make(map[string]*btree.BTreeG[*DirtySegment])
+	dirty := make(map[CaplinStateType]*btree.BTreeG[*DirtySegment])
 	for k := range snapshotTypes.KeyValueGetters {
 		dirty[k] = btree.NewBTreeGOptions[*DirtySegment](DirtySegmentLess, btree.Options{Degree: 128, NoLocks: false})
 	}
@@ -265,7 +234,7 @@ func (s *CaplinStateSnapshots) BlocksAvailable() uint64 {
 	return min(s.segmentsMax.Load(), s.idxMax.Load())
 }
 
-func (s *CaplinStateSnapshots) coveredRangesForType(name string) []Range {
+func (s *CaplinStateSnapshots) coveredRangesForType(name CaplinStateType) []Range {
 	s.visibleLock.RLock()
 	defer s.visibleLock.RUnlock()
 
@@ -319,7 +288,11 @@ func (s *CaplinStateSnapshots) OpenList(fileNames []string, optimistic bool) err
 	for _, fName := range fileNames {
 		f, _, _ := snaptype.ParseFileName(s.dir, fName)
 
-		dirtySegments, ok := s.dirty[f.CaplinTypeString]
+		typ, ok := ParseCaplinStateType(f.CaplinTypeString)
+		if !ok {
+			continue
+		}
+		dirtySegments, ok := s.dirty[typ]
 		if !ok {
 			continue
 		}
@@ -462,7 +435,7 @@ func (s *CaplinStateSnapshots) recalcVisibleFiles() {
 	// 	s.visible[k] = getNewVisibleSegments(s.dirty[k])
 	// }
 	s.visible.Range(func(k, v any) bool {
-		s.visible.Store(k, getNewVisibleSegments(s.dirty[k.(string)]))
+		s.visible.Store(k, getNewVisibleSegments(s.dirty[k.(CaplinStateType)]))
 		return true
 	})
 }
@@ -590,7 +563,7 @@ func (s *CaplinStateSnapshots) closeWhatNotInList(l []string) {
 
 type CaplinStateView struct {
 	s      *CaplinStateSnapshots
-	roTxs  map[string]*RoTx
+	roTxs  map[CaplinStateType]*RoTx
 	closed bool
 }
 
@@ -601,16 +574,13 @@ func (s *CaplinStateSnapshots) View() *CaplinStateView {
 	s.visibleSegmentsLock.RLock()
 	defer s.visibleSegmentsLock.RUnlock()
 
-	v := &CaplinStateView{s: s, roTxs: make(map[string]*RoTx)}
+	v := &CaplinStateView{s: s, roTxs: make(map[CaplinStateType]*RoTx)}
 	// BeginRo increments refcount - which is contended
 	s.dirtySegmentsLock.RLock()
 	defer s.dirtySegmentsLock.RUnlock()
 
-	// for k, segments := range s.visible {
-	// 	v.roTxs[k] = segments.BeginRo()
-	// }
 	s.visible.Range(func(k, val any) bool {
-		v.roTxs[k.(string)] = val.(VisibleSegments).BeginRo()
+		v.roTxs[k.(CaplinStateType)] = val.(VisibleSegments).BeginRo()
 		return true
 	})
 	return v
@@ -630,11 +600,7 @@ func (v *CaplinStateView) Close() {
 	v.closed = true
 }
 
-func (v *CaplinStateView) VisibleSegments(tbl string) VisibleSegments {
-	// if v.s == nil || v.s.visible[tbl] == nil {
-	// 	return nil
-	// }
-	// return v.s.visible[tbl]
+func (v *CaplinStateView) VisibleSegments(tbl CaplinStateType) VisibleSegments {
 	if v.s == nil {
 		return nil
 	}
@@ -644,7 +610,7 @@ func (v *CaplinStateView) VisibleSegments(tbl string) VisibleSegments {
 	return nil
 }
 
-func (v *CaplinStateView) VisibleSegment(slot uint64, tbl string) (*VisibleSegment, bool) {
+func (v *CaplinStateView) VisibleSegment(slot uint64, tbl CaplinStateType) (*VisibleSegment, bool) {
 	for _, seg := range v.VisibleSegments(tbl) {
 		if !(slot >= seg.from && slot < seg.to) {
 			continue
@@ -798,13 +764,17 @@ func planStateDump(coverage map[string][]Range, toSlot, blocksPerFile uint64) []
 
 func (s *CaplinStateSnapshots) DumpCaplinState(ctx context.Context, toSlot, blocksPerFile uint64, salt uint32, dirs datadir.Dirs, workers int, lvl log.Lvl, logger log.Logger) error {
 	coverage := make(map[string][]Range, len(s.snapshotTypes.KeyValueGetters))
-	for name := range s.snapshotTypes.KeyValueGetters {
-		coverage[name] = s.coveredRangesForType(name)
+	for typ := range s.snapshotTypes.KeyValueGetters {
+		coverage[typ.String()] = s.coveredRangesForType(typ)
 	}
 
 	for _, job := range planStateDump(coverage, toSlot, blocksPerFile) {
+		typ, ok := ParseCaplinStateType(job.name)
+		if !ok {
+			continue
+		}
 		logger.Log(lvl, "Dumping "+job.name, "from", job.from, "to", job.to)
-		if err := dumpCaplinState(ctx, job.name, s.snapshotTypes.KeyValueGetters[job.name], job.from, job.to, blocksPerFile, salt, dirs, workers, lvl, logger, s.snapshotTypes.Compression[job.name]); err != nil {
+		if err := dumpCaplinState(ctx, job.name, s.snapshotTypes.KeyValueGetters[typ], job.from, job.to, blocksPerFile, salt, dirs, workers, lvl, logger, s.snapshotTypes.Compression[typ]); err != nil {
 			if errors.Is(err, errIncompleteStateRange) {
 				logger.Warn("[Caplin] skipping incomplete state range, will retry after reconstruction", "type", job.name, "from", job.from, "to", job.to, "err", err)
 				continue
@@ -831,7 +801,7 @@ func (s *CaplinStateSnapshots) BuildMissingIndices(ctx context.Context, logger l
 		files := filesTree.Items()
 		_, ok := s.snapshotTypes.KeyValueGetters[caplinType]
 		if !ok {
-			s.logger.Warn("no kv getter for caplin state snapshot type", "type", caplinType)
+			s.logger.Warn("no kv getter for caplin state snapshot type", "type", caplinType.String())
 			continue
 		}
 		for _, df := range files {
@@ -864,10 +834,10 @@ func (s *CaplinStateSnapshots) BuildMissingIndices(ctx context.Context, logger l
 	return s.OpenFolder()
 }
 
-func (s *CaplinStateSnapshots) Get(tbl string, slot uint64) ([]byte, error) {
+func (s *CaplinStateSnapshots) Get(tbl CaplinStateType, slot uint64) ([]byte, error) {
 	defer func() {
 		if rec := recover(); rec != nil {
-			panic(fmt.Sprintf("Get(%s, %d), %s, %s\n", tbl, slot, rec, debug.Stack()))
+			panic(fmt.Sprintf("Get(%s, %d), %s, %s\n", tbl.String(), slot, rec, debug.Stack()))
 		}
 	}()
 

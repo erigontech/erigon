@@ -1388,7 +1388,7 @@ func (c *DumpStateSnapshots) Run(ctx *Context) error {
 	if err := stateSn.OpenFolder(); err != nil {
 		return err
 	}
-	r, _ := stateSn.Get(kv.BlockRoot, 999424)
+	r, _ := stateSn.Get(snapshotsync.CaplinBlockRoot, 999424)
 	fmt.Printf("%x\n", r)
 
 	if err := stateSn.DumpCaplinState(ctx, to, c.StepSize, salt, dirs, runtime.NumCPU(), log.LvlInfo, log.Root()); err != nil {
@@ -1397,7 +1397,7 @@ func (c *DumpStateSnapshots) Run(ctx *Context) error {
 	if err := stateSn.OpenFolder(); err != nil {
 		return err
 	}
-	r, _ = stateSn.Get(kv.BlockRoot, 999424)
+	r, _ = stateSn.Get(snapshotsync.CaplinBlockRoot, 999424)
 	fmt.Printf("%x\n", r)
 
 	return nil

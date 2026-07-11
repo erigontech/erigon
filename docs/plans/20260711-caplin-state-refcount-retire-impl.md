@@ -136,21 +136,29 @@ Give CL state types a first-class enum (like `snaptype.Enum`) so visibility is
 `[]VisibleSegments` indexed by enum, not `map[string]`. Pure representation refactor, no
 behavior change — existing caplin-state tests are the oracle.
 
-- [ ] Define `CaplinStateType` enum over the current 34 state types, with `String()` and a
-      `ParseCaplinStateType(name string)`. **On-disk compat is load-bearing**: `String()` must
-      return the *exact* current type-name strings (`kv.BlockRoot`="BlockRoot", `kv.StateRoot`,
-      `kv.ValidatorBalance`, … — the names embedded in `v1.1-<from>-<to>-<Name>.seg`). A
-      mismatch means `OpenFolder` won't find existing files. Add a test asserting round-trip
-      `ParseCaplinStateType(t.String()) == t` for all 34, and that the names equal today's `kv.*` constants.
-- [ ] Convert the string-keyed collections to enum-indexed: `snapshotTypes.KeyValueGetters`
-      (`map[string]` → indexed by enum), `dirty` (`map[string]*btree` → enum-indexed),
-      `Get`/`VisibleSegment`/`coveredRangesForType`/`TypeNames` signatures (string → `CaplinStateType`).
-      Keep filenames and DB access by name via `String()`/the associated `kv` table.
-- [ ] **Reader bridge stays exact**: `state_accessors.GetValFnTxAndSnapshot` and the historical
-      reader address tables by `kv` table string; map string↔enum at that boundary so reads are
-      byte-identical. `DumpCaplinState`/`planStateDump` file naming uses `String()`.
-- [ ] Audit every caller of the converted signatures (antiquary collector, historical reader,
-      prune #22396's table list if merged) — all compile and behave unchanged.
+- [x] Define `CaplinStateType` enum over the current 33 state types (the map had 33, not 34),
+      with `String()` and a `ParseCaplinStateType(name string)`. **On-disk compat is load-bearing**:
+      `String()` returns the *exact* current type-name strings (`kv.BlockRoot`="BlockRoot",
+      `kv.StateRoot`, `kv.ValidatorBalance`, … — the names embedded in `v1.1-<from>-<to>-<Name>.seg`),
+      backed by the `kv.*` constants so the name table can't drift from file/DB naming. A mismatch
+      means `OpenFolder` won't find existing files. Round-trip test asserts
+      `ParseCaplinStateType(t.String()) == t` for all types and that names equal `kv.*` constants
+      via an independent oracle map (`caplin_state_type_test.go`).
+- [x] Convert the string-keyed collections to enum-indexed: `snapshotTypes.KeyValueGetters`
+      (`map[string]` → `map[CaplinStateType]`), `dirty` (`map[string]*btree` → `map[CaplinStateType]`),
+      `visible` sync.Map + `CaplinStateView.roTxs` (enum-keyed),
+      `Get`/`VisibleSegment`/`VisibleSegments`/`coveredRangesForType` signatures (string →
+      `CaplinStateType`). Filenames/DB access stay by name via `String()`/`ParseCaplinStateType`
+      at the `OpenList`/`NewCaplinSchema` boundaries. (No `TypeNames` symbol existed.)
+- [x] **Reader bridge stays exact**: `state_accessors.GetValFnTxAndSnapshot` maps its `table`
+      string → enum via `ParseCaplinStateType` (unknown → fall through to DB, byte-identical);
+      antiquary uses `CaplinStateEvents`. `DumpCaplinState` builds the plan's string-labelled
+      coverage via `String()`; `planStateDump`/`dumpCaplinState` stay label-based so their tests
+      are unchanged.
+- [x] Audited every caller of the converted signatures (antiquary collector, historical reader,
+      capcli, `NewCaplinSchema`, publishable-check, `snapshots_cmd`) — all compile and behave
+      unchanged; `db/snapshotsync` + `cl/antiquary` + `cl/persistence/state` tests green,
+      `make erigon` builds, `make lint` clean.
 
 Acceptance: all `db/snapshotsync` + `cl/antiquary` + `cl/persistence/state` tests green;
 `make erigon` builds; no snapshot re-dump on an existing datadir (names unchanged).

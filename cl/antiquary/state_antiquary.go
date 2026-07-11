@@ -143,7 +143,7 @@ func FillStaticValidatorsTableIfNeeded(ctx context.Context, logger log.Logger, s
 			log.Info("[Caplin-Archive] Filled validators table", "progress", fmt.Sprintf("%d/%d", slot, stateSn.BlocksAvailable()))
 		default:
 		}
-		seg, ok := stateSnRoTx.VisibleSegment(slot, kv.StateEvents)
+		seg, ok := stateSnRoTx.VisibleSegment(slot, snapshotsync.CaplinStateEvents)
 		if !ok {
 			return false, fmt.Errorf("segment not found for slot %d", slot)
 		}

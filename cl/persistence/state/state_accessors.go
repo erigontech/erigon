@@ -32,10 +32,11 @@ type GetValFn func(table string, key []byte) ([]byte, error)
 func GetValFnTxAndSnapshot(tx kv.Tx, snapshotRoTx *snapshotsync.CaplinStateView) GetValFn {
 	return func(table string, key []byte) ([]byte, error) {
 		if snapshotRoTx != nil {
-			slot := uint64(binary.BigEndian.Uint32(key))
-			segment, ok := snapshotRoTx.VisibleSegment(slot, table)
-			if ok {
-				return segment.Get(slot)
+			if typ, ok := snapshotsync.ParseCaplinStateType(table); ok {
+				slot := uint64(binary.BigEndian.Uint32(key))
+				if segment, found := snapshotRoTx.VisibleSegment(slot, typ); found {
+					return segment.Get(slot)
+				}
 			}
 		}
 		return tx.GetOne(table, key)
