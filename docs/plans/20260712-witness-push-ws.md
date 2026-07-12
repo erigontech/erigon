@@ -101,10 +101,10 @@ Behind-tip catch-up and any gap (drop, reorg, cache miss) → plain `debug_execu
 - Create: `rpc/jsonrpc/witness_feed.go`
 - Create: `rpc/jsonrpc/witness_feed_test.go`
 
-- [ ] write failing tests: publish reaches two concurrent subscribers; unsubscribe stops delivery and is idempotent; publish with zero subscribers is a no-op; overflow — publish 6 into an unread cap-4 channel, assert the reader gets the newest 4 (oldest 2 dropped); concurrent publish/subscribe/unsubscribe under `-race`
-- [ ] confirm the tests fail for the right reason (type/behavior missing), then implement `witnessFeed` per Technical Details (plain struct, cap-4 channels, drain-one-then-send overflow, rate-limited `log.Debug` on drop)
-- [ ] refactor pass with tests green
-- [ ] run `go test ./rpc/jsonrpc/ -run TestWitnessFeed -count=1 -race`; `make lint` until clean
+- [x] write failing tests: publish reaches two concurrent subscribers; unsubscribe stops delivery and is idempotent; publish with zero subscribers is a no-op; overflow — publish 6 into an unread cap-4 channel, assert the reader gets the newest 4 (oldest 2 dropped); concurrent publish/subscribe/unsubscribe under `-race`
+- [x] confirm the tests fail for the right reason (type/behavior missing), then implement `witnessFeed` per Technical Details (plain struct, cap-4 channels, drain-one-then-send overflow, rate-limited `log.Debug` on drop)
+- [x] refactor pass with tests green
+- [x] run `go test ./rpc/jsonrpc/ -run TestWitnessFeed -count=1 -race`; `make lint` until clean
 
 ### Task 2: feed rides on the cache; builder publishes after insert (TDD)
 
