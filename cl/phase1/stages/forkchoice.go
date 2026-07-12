@@ -381,7 +381,6 @@ func postForkchoiceOperations(ctx context.Context, tx kv.RwTx, logger log.Logger
 			return fmt.Errorf("failed to dump beacon state on disk: %w", err)
 		}
 
-		// Persist the finalized state so a restart can resume from a locally-provable anchor
 		if err := saveFinalizedStateOnDiskIfNeeded(cfg.forkChoice, cfg.beaconCfg, cfg.dirs, headState.Slot()); err != nil {
 			return fmt.Errorf("failed to save finalized state on disk: %w", err)
 		}

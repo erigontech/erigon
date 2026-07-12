@@ -44,14 +44,17 @@ func ReadOrFetchLatestBeaconState(ctx context.Context, dirs datadir.Dirs, beacon
 		}
 		log.Warn("[Checkpoint Sync] Remote checkpoint sync failed, attempting to read local finalized state", "err", err)
 
-		// Fallback: try to read the local finalized state from disk
-		localState, localErr := ReadLocalFinalizedState(dirs, beaconCfg)
+		// Fallback: read the local finalized state as a last resort, but still reject a
+		// foreign-network file — a remote outage must not let a different network's state anchor
+		// the node. Staleness is tolerated here: a same-network finalized anchor beats failing to
+		// start when remote is unreachable.
+		localState, localErr := readSameNetworkFinalizedState(dirs, beaconCfg, genesisDB)
 		if localErr == nil {
 			log.Info("[Checkpoint Sync] Successfully loaded local finalized state", "slot", localState.Slot())
 			return localState, nil
 		}
-		log.Error("[Checkpoint Sync] No local finalized state available either", "err", localErr)
-		return nil, fmt.Errorf("remote checkpoint sync failed: %w, and no local finalized state: %w", err, localErr)
+		log.Error("[Checkpoint Sync] No usable local finalized state available either", "err", localErr)
+		return nil, fmt.Errorf("remote checkpoint sync failed: %w, and no usable local finalized state: %w", err, localErr)
 	}
 
 	// Non-remote sync path (disabled checkpoint sync or devnet)
@@ -67,6 +70,24 @@ func ReadOrFetchLatestBeaconState(ctx context.Context, dirs datadir.Dirs, beacon
 // ReadLocalFinalizedState reads the node's own most-recently-finalized state directly from disk.
 func ReadLocalFinalizedState(dirs datadir.Dirs, beaconCfg *clparams.BeaconChainConfig) (*state.CachingBeaconState, error) {
 	return readLocalStateFile(dirs, beaconCfg, clparams.LatestFinalizedStateFileName, "finalized")
+}
+
+// readSameNetworkFinalizedState reads the local finalized state, returning it only when its
+// GenesisValidatorsRoot matches the configured genesis so a foreign-network file can never anchor
+// the node. Unlike the primary resume path it does not apply the staleness horizon.
+func readSameNetworkFinalizedState(dirs datadir.Dirs, beaconCfg *clparams.BeaconChainConfig, genesisDB genesisdb.GenesisDB) (*state.CachingBeaconState, error) {
+	localState, err := ReadLocalFinalizedState(dirs, beaconCfg)
+	if err != nil {
+		return nil, err
+	}
+	genesisState, err := genesisDB.ReadGenesisState()
+	if err != nil {
+		return nil, fmt.Errorf("could not read genesis state to validate local finalized state: %w", err)
+	}
+	if localState.GenesisValidatorsRoot() != genesisState.GenesisValidatorsRoot() {
+		return nil, errors.New("local finalized state is from a different network")
+	}
+	return localState, nil
 }
 
 // tryResumeFromLocalFinalizedState returns the node's own most-recently-finalized state when it is a
@@ -158,11 +179,9 @@ func resolveResumeHorizonSlots(beaconCfg *clparams.BeaconChainConfig, resumeMaxS
 }
 
 // stateWithinResumeHorizon reports whether a locally-finalized state at localSlot is recent
-// enough to resume from. The horizon is a data-availability feasibility bound: forward-syncing
-// the anchor to head needs peers to serve sidecars in the DA retention window, so an anchor
-// older than horizonSlots would stall. When the current slot can't be derived (unset
-// secondsPerSlot, or now before genesis) or the local state is at/ahead of the current slot,
-// resume is allowed.
+// enough to resume from, given horizonSlots (see resolveResumeHorizonSlots). When the current
+// slot can't be derived (unset secondsPerSlot, or now before genesis) or the local state is
+// at/ahead of the current slot, resume is allowed.
 func stateWithinResumeHorizon(localSlot, genesisTime, nowUnix, secondsPerSlot, horizonSlots uint64) bool {
 	if secondsPerSlot == 0 || nowUnix < genesisTime {
 		return true

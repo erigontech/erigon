@@ -70,13 +70,27 @@ func TestSaveFinalizedStateOnDisk(t *testing.T) {
 		assert.Equal(t, wantRoot, gotRoot)
 	})
 
+	t.Run("persists on a non-zero cadence boundary", func(t *testing.T) {
+		dirs := datadir.New(t.TempDir())
+		fc := mock_services.NewForkChoiceStorageMock(t)
+		fc.FinalizedCheckpointVal = solid.Checkpoint{Epoch: 3, Root: finalizedRoot}
+		fc.StateAtBlockRootVal[finalizedRoot] = st
+
+		onCadence := beaconCfg.SlotsPerEpoch * 5
+		require.NoError(t, saveFinalizedStateOnDiskIfNeeded(fc, beaconCfg, dirs, onCadence))
+
+		_, err := checkpoint_sync.ReadLocalFinalizedState(dirs, beaconCfg)
+		require.NoError(t, err)
+	})
+
 	t.Run("off-cadence writes nothing", func(t *testing.T) {
 		dirs := datadir.New(t.TempDir())
 		fc := mock_services.NewForkChoiceStorageMock(t)
 		fc.FinalizedCheckpointVal = solid.Checkpoint{Epoch: 3, Root: finalizedRoot}
 		fc.StateAtBlockRootVal[finalizedRoot] = st
 
-		require.NoError(t, saveFinalizedStateOnDiskIfNeeded(fc, beaconCfg, dirs, 1))
+		offCadence := beaconCfg.SlotsPerEpoch*5 + 1
+		require.NoError(t, saveFinalizedStateOnDiskIfNeeded(fc, beaconCfg, dirs, offCadence))
 
 		_, err := checkpoint_sync.ReadLocalFinalizedState(dirs, beaconCfg)
 		require.Error(t, err)
