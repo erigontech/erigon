@@ -68,6 +68,13 @@ func unfoldStorageBase(base *HexPatriciaHashed, accPrefix []byte) error {
 	if len(branch) < 4 {
 		return fmt.Errorf("unfoldStorageBase: corrupt branch record at %x: %d bytes", accPrefix, len(branch))
 	}
+	// afterMap == 0 is a tombstone left by a prior single-child collapse (or full delete): the record
+	// has no children, so its live storage top is a deeper extension carried on the account leaf, not
+	// here. Seeding an empty base from it would drop that survivor on a later re-expansion; treat it as
+	// "no branch" so the caller rebuilds from the account leaf's storage root instead.
+	if branch[2] == 0 && branch[3] == 0 {
+		return errStorageBaseNotBranch
+	}
 	base.branchBefore[0] = true
 	return base.decodeBranchIntoRow(0, d+1, branch[2:], false)
 }
