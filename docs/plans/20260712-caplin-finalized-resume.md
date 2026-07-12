@@ -188,11 +188,11 @@ EL forward through a gap — no "Downloading Execution History".
 
 ### Task 7: Verify acceptance criteria
 
-- [ ] verify: default node resumes from the finalized file when fresh + GVR matches; falls back to remote when absent/stale/foreign
-- [ ] verify: a finalized anchor is used everywhere (no head-state bootstrap remains); grep confirms `LatestStateFileName` has no readers
-- [ ] run `make lint` (repeat until clean) and `make erigon integration`
-- [ ] run `go test ./cl/phase1/core/checkpoint_sync/...`
-- [ ] run the focused new tests in `cl/phase1/stages/` (full stages package is slow)
+- [x] verify: default node resumes from the finalized file when fresh + GVR matches; falls back to remote when absent/stale/foreign
+- [x] verify: a finalized anchor is used everywhere (no head-state bootstrap remains); grep confirms `LatestStateFileName` has no readers
+- [x] run `make lint` (repeat until clean) and `make erigon integration`
+- [x] run `go test ./cl/phase1/core/checkpoint_sync/...`
+- [x] run the focused new tests in `cl/phase1/stages/` (full stages package is slow)
 
 ### Task 8: Final — documentation and plan close-out
 
