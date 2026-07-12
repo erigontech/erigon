@@ -522,6 +522,9 @@ func (s *Sentinel) listenForPeers() {
 
 		peerInfo, _, err := p2p.ConvertToAddrInfo(node)
 		if err != nil {
+			if errors.Is(err, p2p.ErrNoTCPPort) {
+				continue
+			}
 			log.Debug("[Sentinel] Could not convert to peer info", "err", err)
 			continue
 		}

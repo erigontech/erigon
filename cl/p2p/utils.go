@@ -15,6 +15,8 @@ import (
 	"github.com/erigontech/erigon/p2p/enode"
 )
 
+var ErrNoTCPPort = errors.New("node does not provide a tcp port")
+
 func ConvertToInterfacePubkey(pubkey *ecdsa.PublicKey) (crypto.PubKey, error) {
 	xVal, yVal := new(secp256k1.FieldVal), new(secp256k1.FieldVal)
 	overflows := xVal.SetByteSlice(pubkey.X.Bytes())
@@ -46,7 +48,7 @@ func ConvertToAddrInfo(node *enode.Node) (*peer.AddrInfo, multiaddr.Multiaddr, e
 
 func ConvertToSingleMultiAddr(node *enode.Node) (multiaddr.Multiaddr, error) {
 	if node.TCP() == 0 {
-		return nil, fmt.Errorf("node %s does not provide a tcp port", node.ID())
+		return nil, fmt.Errorf("%w: %s", ErrNoTCPPort, node.ID())
 	}
 	pubkey := node.Pubkey()
 	assertedKey, err := ConvertToInterfacePubkey(pubkey)

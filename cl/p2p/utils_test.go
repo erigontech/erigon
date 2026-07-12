@@ -17,6 +17,7 @@
 package p2p
 
 import (
+	"errors"
 	"net"
 	"testing"
 
@@ -33,6 +34,7 @@ func TestConvertToSingleMultiAddrRejectsNodeWithoutTcpPort(t *testing.T) {
 
 	_, err = ConvertToSingleMultiAddr(noTcp)
 	require.Error(t, err)
+	require.True(t, errors.Is(err, ErrNoTCPPort))
 }
 
 func TestConvertToMultiAddrSkipsNodesWithoutTcpPort(t *testing.T) {
@@ -45,4 +47,14 @@ func TestConvertToMultiAddrSkipsNodesWithoutTcpPort(t *testing.T) {
 
 	require.Len(t, multiAddrs, 1)
 	require.Contains(t, multiAddrs[0].String(), "/tcp/30303")
+}
+
+func TestConvertToSingleMultiAddrRejectsInvalidIP(t *testing.T) {
+	key, err := crypto.GenerateKey()
+	require.NoError(t, err)
+	invalidIP := enode.NewV4(&key.PublicKey, nil, 30303, 30301)
+
+	_, err = ConvertToSingleMultiAddr(invalidIP)
+	require.Error(t, err)
+	require.False(t, errors.Is(err, ErrNoTCPPort))
 }

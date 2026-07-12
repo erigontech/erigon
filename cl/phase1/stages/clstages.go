@@ -276,13 +276,12 @@ func ConsensusClStages(ctx context.Context,
 						return err
 					}
 					if cfg.state.Slot() == 0 {
-						// Initialize syncedData so Syncing() returns false at genesis.
-						// Without this, the VC gets 503 "beacon node is syncing" forever.
-						if err := cfg.syncedData.OnHeadStateWithBlockRoot(cfg.state, startingRoot); err != nil {
-							return fmt.Errorf("failed to set genesis head state: %w", err)
+						if genesisIsAtChainTip(cfg.ethClock.GetCurrentSlot()) {
+							if err := cfg.syncedData.OnHeadStateWithBlockRoot(cfg.state, startingRoot); err != nil {
+								return fmt.Errorf("failed to set genesis head state: %w", err)
+							}
+							cfg.forkChoice.SetSynced(true)
 						}
-						// Mark forkchoice as synced so OnAttestation processes attestations.
-						cfg.forkChoice.SetSynced(true)
 						// Write genesis beacon block to DB so block production can find the parent block.
 						if err := writeGenesisBeaconBlock(ctx, cfg); err != nil {
 							return fmt.Errorf("failed to write genesis beacon block: %w", err)
@@ -392,6 +391,10 @@ func ConsensusClStages(ctx context.Context,
 			},
 		},
 	}
+}
+
+func genesisIsAtChainTip(currentSlot uint64) bool {
+	return currentSlot == 0
 }
 
 // writeGenesisBeaconBlock writes a synthetic genesis beacon block to the DB.
