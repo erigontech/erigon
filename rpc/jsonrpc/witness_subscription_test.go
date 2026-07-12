@@ -65,6 +65,29 @@ func TestWitnessSubscriptionNilCache(t *testing.T) {
 	require.Contains(t, err.Error(), "debug_executionWitness")
 }
 
+func TestWitnessSubscriptionNoNotifier(t *testing.T) {
+	api := &DebugAPIImpl{witnessCache: newWitnessResultCache(4)}
+	sub, err := api.ExecutionWitnesses(context.Background(), nil)
+	require.ErrorIs(t, err, rpc.ErrNotificationsUnsupported)
+	require.NotNil(t, sub)
+}
+
+func TestWitnessNotificationWireKeys(t *testing.T) {
+	b, err := json.Marshal(WitnessNotification{
+		BlockNumber: hexutil.Uint64(7),
+		BlockHash:   hashN(0x33),
+		Witness:     json.RawMessage(`{"state":[]}`),
+	})
+	require.NoError(t, err)
+
+	var m map[string]json.RawMessage
+	require.NoError(t, json.Unmarshal(b, &m))
+	for _, k := range []string{"blockNumber", "blockHash", "witness"} {
+		_, ok := m[k]
+		require.Truef(t, ok, "wire payload must carry key %q for non-Go subscribers", k)
+	}
+}
+
 func TestWitnessSubscriptionDelivers(t *testing.T) {
 	cache := newWitnessResultCache(4)
 	api := &DebugAPIImpl{witnessCache: cache}

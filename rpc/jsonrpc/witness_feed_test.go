@@ -98,6 +98,13 @@ func TestWitnessFeedOverflowDropsOldest(t *testing.T) {
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("overflow kept %v want newest %v", got, want)
 	}
+
+	f.mu.Lock()
+	dropped := f.dropped
+	f.mu.Unlock()
+	if dropped != 2 {
+		t.Fatalf("recorded %d drops want 2", dropped)
+	}
 }
 
 func TestWitnessFeedConcurrent(t *testing.T) {
@@ -143,4 +150,11 @@ func TestWitnessFeedConcurrent(t *testing.T) {
 	time.Sleep(100 * time.Millisecond)
 	close(stop)
 	wg.Wait()
+
+	f.mu.Lock()
+	remaining := len(f.subs)
+	f.mu.Unlock()
+	if remaining != 0 {
+		t.Fatalf("subscribers leaked: %d still registered after all workers stopped", remaining)
+	}
 }

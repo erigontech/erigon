@@ -93,7 +93,6 @@ func (f *witnessFeed) send(ch chan witnessPush, p witnessPush) {
 	select {
 	case ch <- p:
 	default:
-		f.recordDrop()
 	}
 }
 
