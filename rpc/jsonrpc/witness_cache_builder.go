@@ -141,7 +141,7 @@ func NewWitnessCacheBuilderAPI(
 	if !enable {
 		return nil, nil
 	}
-	cache := newWitnessResultCache(cfg.WitnessCacheBlocks)
+	cache := newWitnessResultCache(cfg.WitnessCacheBlocks, int(cfg.WitnessCacheMaxMB)*bytesPerMB, false, false)
 	base := NewBaseApi(filters, stateCache, blockReader, cfg.WithDatadir, cfg.EvmCallTimeout, engine, cfg.Dirs, bridgeReader, cfg.BlockRangeLimit, cfg.GetLogsMaxResults)
 	impl := NewPrivateDebugAPI(base, db, eth, cfg.Gascap, cfg.GethCompatibility)
 	impl.witnessCache = cache

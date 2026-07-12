@@ -164,7 +164,7 @@ func TestWitnessCacheBuilderParity(t *testing.T) {
 
 	onDemand := NewPrivateDebugAPI(newBaseApiForTest(m), m.DB, nil, 0, false)
 
-	cache := newWitnessResultCache(96)
+	cache := newWitnessResultCache(96, 0, false, false)
 	builder := NewPrivateDebugAPI(newBaseApiForTest(m), m.DB, nil, 0, false)
 	builder.witnessCache = cache
 

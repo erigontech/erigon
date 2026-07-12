@@ -85,11 +85,11 @@ Benefit: minimal nodes serve recent-block witnesses with zero commitment-history
 - Modify: `rpc/jsonrpc/debug_execution_witness.go` (call-site at `:767` if needed)
 - Create/Modify: `rpc/jsonrpc/witness_cache_test.go`
 
-- [ ] convert `witnessResultCache` from a type alias to a wrapper struct embedding the `*lru.Cache[...]` pointer so promoted `.Add`/`.Get`/`.Contains`/`.Len` still resolve at `witness_cache_builder.go:189/288/289` and `debug_execution_witness.go:767`
-- [ ] add mode fields (`headCapture bool`, `cacheOnly bool`) and plumb through `newWitnessResultCache`; add accessors used by builder + serve (single source of truth, no duplicated booleans)
-- [ ] add resident-bytes accounting off `len(cachedJSON)` (result struct `debug_execution_witness.go:538-558`) with byte-cap eviction via `lru.NewWithEvict`; evict on whichever of count(≤96)/bytes binds first
-- [ ] write tests: byte-cap evicts when bytes exceed `maxMB` even below the count cap; count cap still applies when `maxMB==0`; eviction is oldest-out; a hash re-add refreshes recency; mode fields round-trip
-- [ ] run tests - must pass before next task
+- [x] convert `witnessResultCache` from a type alias to a wrapper struct embedding the `*lru.Cache[...]` pointer so promoted `.Add`/`.Get`/`.Contains`/`.Len` still resolve at `witness_cache_builder.go:189/288/289` and `debug_execution_witness.go:767`
+- [x] add mode fields (`headCapture bool`, `cacheOnly bool`) and plumb through `newWitnessResultCache`; add accessors used by builder + serve (single source of truth, no duplicated booleans)
+- [x] add resident-bytes accounting off `len(cachedJSON)` (result struct `debug_execution_witness.go:538-558`) with byte-cap eviction via `lru.NewWithEvict`; evict on whichever of count(≤96)/bytes binds first
+- [x] write tests: byte-cap evicts when bytes exceed `maxMB` even below the count cap; count cap still applies when `maxMB==0`; eviction is oldest-out; a hash re-add refreshes recency; mode fields round-trip
+- [x] run tests - must pass before next task
 
 ### Task 3: Dual-tx commitment-latest ⊕ plain-history split reader
 
