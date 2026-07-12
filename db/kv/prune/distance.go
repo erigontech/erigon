@@ -18,7 +18,6 @@ package prune
 
 import (
 	"fmt"
-	"math"
 	"strconv"
 	"strings"
 )
@@ -28,11 +27,9 @@ const (
 	historyDistanceAliasHint = `a block count or "keep-all"`
 )
 
-// ParseBlocksDistance parses a --prune.distance.blocks value. It accepts a
-// decimal block count, the named sentinels ("keep-post-merge" →
-// KeepPostMergeBlocksPruneMode, "keep-all" → KeepAllBlocksPruneMode), or an
-// empty string (returns 0, meaning unset).
-func ParseBlocksDistance(s string) (uint64, error) {
+// ParseBlocksDistance parses a block-distance value: a decimal count,
+// "keep-post-merge", "keep-all", or empty ("" → 0, unset).
+func ParseBlocksDistance(s, flagName string) (uint64, error) {
 	switch normalizeDistanceAlias(s) {
 	case "":
 		return 0, nil
@@ -41,22 +38,40 @@ func ParseBlocksDistance(s string) (uint64, error) {
 	case "keep-all":
 		return uint64(KeepAllBlocksPruneMode), nil
 	default:
-		return parseDistanceNumber(s, "--prune.distance.blocks", blocksDistanceAliasHint)
+		return parseDistanceNumber(s, "--"+flagName, blocksDistanceAliasHint)
 	}
 }
 
-// ParseHistoryDistance parses a --prune.distance value. It accepts a decimal
-// block count, the "keep-all" alias (keep all state history), or an empty
-// string (returns 0, meaning unset). The block-only "keep-post-merge" policy
-// is rejected: chain history-expiry has no meaning for state history.
-func ParseHistoryDistance(s string) (uint64, error) {
+// ParseHistoryDistance parses a state-history distance value: a decimal count,
+// "keep-all", or empty ("" → 0, unset).
+func ParseHistoryDistance(s, flagName string) (uint64, error) {
+	return parseStateHistoryDistance(s, "--"+flagName, KeepPostMergeBlocksPruneMode)
+}
+
+// ParseCommitmentHistoryDistance parses a commitment-history distance value;
+// "keep-all" maps to KeepAllBlocksPruneMode (its default).
+func ParseCommitmentHistoryDistance(s, flagName string) (uint64, error) {
+	return parseStateHistoryDistance(s, "--"+flagName, KeepAllBlocksPruneMode)
+}
+
+// ParseReceiptsDistance parses a receipts distance value; "keep-all" maps to
+// KeepAllReceiptsPruneMode, distinct from the KeepAllBlocksPruneMode follow-history default.
+func ParseReceiptsDistance(s, flagName string) (uint64, error) {
+	return parseStateHistoryDistance(s, "--"+flagName, KeepAllReceiptsPruneMode)
+}
+
+// parseStateHistoryDistance parses a state-history-style distance flag: a decimal
+// block count, "keep-all" (→ keepAll), or an empty string (→ 0, unset). Unlike
+// Blocks, "keep-post-merge" is rejected — chain history-expiry is meaningless for
+// state.
+func parseStateHistoryDistance(s, flag string, keepAll Distance) (uint64, error) {
 	switch normalizeDistanceAlias(s) {
 	case "":
 		return 0, nil
 	case "keep-all":
-		return math.MaxUint64, nil
+		return uint64(keepAll), nil
 	default:
-		return parseDistanceNumber(s, "--prune.distance", historyDistanceAliasHint)
+		return parseDistanceNumber(s, flag, historyDistanceAliasHint)
 	}
 }
 

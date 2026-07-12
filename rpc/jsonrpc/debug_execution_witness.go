@@ -612,7 +612,7 @@ func (api *BaseAPI) buildAccessedState(
 	ibs := state.New(recordingState)
 
 	// Get header for block context
-	header := block.Header()
+	header := block.HeaderNoCopy()
 
 	// Create EVM block context
 	blockCtx := transactions.NewEVMBlockContext(engine, header, true /* requireCanonical */, tx, api._blockReader, chainConfig)
@@ -1921,7 +1921,7 @@ func execBlockStatelessly(result *ExecutionWitnessResult, block *types.Block, ch
 
 	// Create the in-block state with the witness stateless as reader
 	ibs := state.New(stateless)
-	header := block.Header()
+	header := block.HeaderNoCopy()
 	blockNum := block.NumberU64()
 
 	// Create EVM block context - pass header.Coinbase as the author/beneficiary
