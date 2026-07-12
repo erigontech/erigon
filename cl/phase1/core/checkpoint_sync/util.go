@@ -89,6 +89,23 @@ func readLocalStateFile(dirs datadir.Dirs, beaconCfg *clparams.BeaconChainConfig
 	return bs, nil
 }
 
+// stateWithinResumeHorizon reports whether a locally-finalized state at localSlot is recent
+// enough to resume from. The horizon is a data-availability feasibility bound: forward-syncing
+// the anchor to head needs peers to serve sidecars in the DA retention window, so an anchor
+// older than horizonSlots would stall. When the current slot can't be derived (unset
+// secondsPerSlot, or now before genesis) or the local state is at/ahead of the current slot,
+// resume is allowed.
+func stateWithinResumeHorizon(localSlot, genesisTime, nowUnix, secondsPerSlot, horizonSlots uint64) bool {
+	if secondsPerSlot == 0 || nowUnix < genesisTime {
+		return true
+	}
+	currentSlot := (nowUnix - genesisTime) / secondsPerSlot
+	if localSlot >= currentSlot {
+		return true
+	}
+	return currentSlot-localSlot <= horizonSlots
+}
+
 // FetchFinalizedEnvelope fetches the finalized execution payload envelope from the checkpoint sync endpoint.
 func FetchFinalizedEnvelope(ctx context.Context, beaconCfg *clparams.BeaconChainConfig, caplinConfig clparams.CaplinConfig) *cltypes.SignedExecutionPayloadEnvelope {
 	hasCustomCheckpointURL := len(clparams.ConfigurableCheckpointsURLs) > 0

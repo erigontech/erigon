@@ -222,6 +222,41 @@ func TestReadLocalFinalizedState_Absent(t *testing.T) {
 	require.Nil(t, got)
 }
 
+func TestStateWithinResumeHorizon(t *testing.T) {
+	const (
+		genesisTime    = uint64(1_000_000)
+		secondsPerSlot = uint64(12)
+		horizonSlots   = uint64(100)
+	)
+	// slotToNow returns a now-unix at which the current slot equals wantCurrentSlot.
+	slotToNow := func(wantCurrentSlot uint64) uint64 {
+		return genesisTime + wantCurrentSlot*secondsPerSlot
+	}
+
+	tests := []struct {
+		name           string
+		localSlot      uint64
+		nowUnix        uint64
+		secondsPerSlot uint64
+		want           bool
+	}{
+		{"equal", 500, slotToNow(500), secondsPerSlot, true},
+		{"one-behind", 499, slotToNow(500), secondsPerSlot, true},
+		{"exactly-at-horizon", 400, slotToNow(500), secondsPerSlot, true},
+		{"just-beyond", 399, slotToNow(500), secondsPerSlot, false},
+		{"far-beyond", 100, slotToNow(500), secondsPerSlot, false},
+		{"local-ahead", 600, slotToNow(500), secondsPerSlot, true},
+		{"now-before-genesis", 500, genesisTime - 1, secondsPerSlot, true},
+		{"zero-seconds-per-slot", 100, slotToNow(500), 0, true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := stateWithinResumeHorizon(tt.localSlot, genesisTime, tt.nowUnix, tt.secondsPerSlot, horizonSlots)
+			assert.Equal(t, tt.want, got)
+		})
+	}
+}
+
 func TestLocalCheckpointSyncFromGenesis(t *testing.T) {
 	_, st, _ := tests.GetPhase0Random()
 	f := afero.NewMemMapFs()

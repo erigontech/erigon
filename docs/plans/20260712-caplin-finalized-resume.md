@@ -121,9 +121,9 @@ EL forward through a gap — no "Downloading Execution History".
 - Modify: `cl/phase1/core/checkpoint_sync/util.go`
 - Modify: `cl/phase1/core/checkpoint_sync/checkpoint_sync_test.go`
 
-- [ ] add `stateWithinResumeHorizon(localSlot, genesisTime, nowUnix, secondsPerSlot, horizonSlots uint64) bool`: guard `secondsPerSlot==0` and `nowUnix<genesisTime` → true; `localSlot>=currentSlot` → true; else `currentSlot-localSlot <= horizonSlots`
-- [ ] write `TestStateWithinResumeHorizon` table: equal, one-behind, exactly-at-horizon, just-beyond, far-beyond, local-ahead, now-before-genesis, zero-seconds-per-slot
-- [ ] run tests — must pass before next task
+- [x] add `stateWithinResumeHorizon(localSlot, genesisTime, nowUnix, secondsPerSlot, horizonSlots uint64) bool`: guard `secondsPerSlot==0` and `nowUnix<genesisTime` → true; `localSlot>=currentSlot` → true; else `currentSlot-localSlot <= horizonSlots`
+- [x] write `TestStateWithinResumeHorizon` table: equal, one-behind, exactly-at-horizon, just-beyond, far-beyond, local-ahead, now-before-genesis, zero-seconds-per-slot
+- [x] run tests — must pass before next task
 
 ### Task 3: Resume-horizon default + config knob (DA-feasibility bound)
 
