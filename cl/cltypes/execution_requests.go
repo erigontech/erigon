@@ -81,9 +81,11 @@ func (e *ExecutionRequests) ensureLists() {
 func (e *ExecutionRequests) EncodingSizeSSZ() int {
 	e.ensureLists()
 	if e.effectiveVersion() < clparams.GloasVersion {
-		return e.Deposits.EncodingSizeSSZ() + e.Withdrawals.EncodingSizeSSZ() + e.Consolidations.EncodingSizeSSZ()
+		// 3 variable-length fields → 3 × 4-byte offsets
+		return 3*4 + e.Deposits.EncodingSizeSSZ() + e.Withdrawals.EncodingSizeSSZ() + e.Consolidations.EncodingSizeSSZ()
 	}
-	return e.Deposits.EncodingSizeSSZ() + e.Withdrawals.EncodingSizeSSZ() + e.Consolidations.EncodingSizeSSZ() + e.BuilderDeposits.EncodingSizeSSZ() + e.BuilderExits.EncodingSizeSSZ()
+	// 5 variable-length fields → 5 × 4-byte offsets
+	return 5*4 + e.Deposits.EncodingSizeSSZ() + e.Withdrawals.EncodingSizeSSZ() + e.Consolidations.EncodingSizeSSZ() + e.BuilderDeposits.EncodingSizeSSZ() + e.BuilderExits.EncodingSizeSSZ()
 }
 
 func (e *ExecutionRequests) EncodeSSZ(buf []byte) ([]byte, error) {
