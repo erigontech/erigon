@@ -87,22 +87,22 @@ func TestProcessHeaderBatch(t *testing.T) {
 
 func TestWitnessCacheShouldBuild(t *testing.T) {
 	cases := []struct {
-		name     string
-		num      uint64
-		single   bool
-		lastSeen uint64
-		frozen   uint64
-		want     bool
+		name          string
+		num           uint64
+		single        bool
+		freshest      uint64
+		alreadyCached bool
+		want          bool
 	}{
-		{"clean single advance", 10, true, 10, 9, true},
-		{"already built", 10, true, 10, 10, false},
-		{"multi-header reorg batch", 10, false, 10, 9, false},
-		{"superseded by newer tip", 10, true, 11, 9, false},
-		{"stale reorg below frozen", 8, true, 8, 10, false},
+		{"clean single advance", 10, true, 10, false, true},
+		{"already cached", 10, true, 10, true, false},
+		{"multi-header catch-up batch", 10, false, 10, false, false},
+		{"superseded by newer tip", 10, true, 11, false, false},
+		{"reorged head, uncached hash rebuilds", 8, true, 8, false, true},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			require.Equal(t, tc.want, shouldBuild(tc.num, tc.single, tc.lastSeen, tc.frozen))
+			require.Equal(t, tc.want, shouldBuild(tc.num, tc.single, tc.freshest, tc.alreadyCached))
 		})
 	}
 }

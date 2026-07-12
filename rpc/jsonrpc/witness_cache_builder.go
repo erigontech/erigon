@@ -63,11 +63,12 @@ func decideCommittedHead(committedHead, num uint64, canonicalHash, wantHash comm
 	return headBuild
 }
 
-// shouldBuild is the tip-gate: build only a clean single-block advance to the newest
-// header seen that has not already been built. Multi-header (reorg/catch-up) batches,
-// a superseded tip, and an already-built number all fall through to on-demand.
-func shouldBuild(num uint64, singleHeaderBatch bool, lastSeen, frozen uint64) bool {
-	return singleHeaderBatch && num > frozen && num == lastSeen
+// shouldBuild gates eager building: a single-header advance to the freshest header in the
+// batch whose hash isn't cached yet. Keying on the cached hash rather than a high-water
+// block number lets a reorged head — a new hash at an already-built height — still be
+// rebuilt. Multi-header (catch-up) batches and a superseded tip fall through to on-demand.
+func shouldBuild(num uint64, singleHeaderBatch bool, freshest uint64, alreadyCached bool) bool {
+	return singleHeaderBatch && num == freshest && !alreadyCached
 }
 
 // waitCommittedHead blocks until the committed head reaches num, then returns the open
@@ -148,14 +149,12 @@ func NewWitnessCacheBuilderAPI(
 }
 
 // RunWitnessCacheBuilder consumes canonical-header batches and eagerly builds the
-// legacy-mode witness for the freshest tip into the shared cache, reconciling the cache
-// against every batch so reorgs evict stale entries. It runs until ctx is done or the
-// header channel closes. A nil cache is a no-op.
+// legacy-mode witness for the freshest tip into the shared cache. It runs until ctx is
+// done or the header channel closes. A nil cache is a no-op.
 func RunWitnessCacheBuilder(ctx context.Context, dbg *DebugAPIImpl, headerCh <-chan [][]byte) {
 	if dbg.witnessCache == nil {
 		return
 	}
-	var frozen, lastSeen uint64
 	for {
 		select {
 		case <-ctx.Done():
@@ -168,9 +167,9 @@ func RunWitnessCacheBuilder(ctx context.Context, dbg *DebugAPIImpl, headerCh <-c
 			if !valid {
 				continue
 			}
-			lastSeen = max(lastSeen, newest.num)
 			// Coalesce: drain queued batches to the freshest tip, then build only that
-			// newest header.
+			// newest header. freshest is per-burst so a reorg to a lower tip is not masked.
+			freshest := newest.num
 			for draining := true; draining; {
 				select {
 				case b2, open := <-headerCh:
@@ -181,18 +180,16 @@ func RunWitnessCacheBuilder(ctx context.Context, dbg *DebugAPIImpl, headerCh <-c
 					if n2, s2, v2 := processHeaderBatch(b2); v2 {
 						witnessCacheCoalesceDropCounter.Inc()
 						newest, single = n2, s2
-						lastSeen = max(lastSeen, n2.num)
+						freshest = max(freshest, n2.num)
 					}
 				default:
 					draining = false
 				}
 			}
-			if !shouldBuild(newest.num, single, lastSeen, frozen) {
+			if !shouldBuild(newest.num, single, freshest, dbg.witnessCache.Contains(newest.hash)) {
 				continue
 			}
-			if dbg.buildAndCache(ctx, newest.num, newest.hash) {
-				frozen = newest.num
-			} else if ctx.Err() != nil {
+			if !dbg.buildAndCache(ctx, newest.num, newest.hash) && ctx.Err() != nil {
 				return
 			}
 		}
