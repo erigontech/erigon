@@ -445,7 +445,7 @@ func (api *BaseAPI) checkPruneField(tx kv.Tx, block uint64, field func(*prune.Mo
 }
 
 // checkReceiptsAvailable checks if receipts are available for the given block.
-// In case --persist.receipts which makes all historical receipts available even when state history is pruned.
+// In case --prune.include-receipts which makes all historical receipts available even when state history is pruned.
 func (api *BaseAPI) checkReceiptsAvailable(ctx context.Context, tx kv.Tx, block uint64) error {
 	persistReceipts, err := kvcfg.PersistReceipts.Enabled(tx)
 	if err != nil {

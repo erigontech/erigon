@@ -2,9 +2,12 @@
 
 ### Breaking Changes
 
-#### `--persist.receipts`: historical receipts cache now off by default in all prune modes
+#### `--prune.include-receipts`: historical receipts cache now off by default in all prune modes
 
-The historical ("fat") receipts cache is no longer enabled by default on non-archive nodes. Previously `--persist.receipts` defaulted on for every prune mode except `archive`; it now defaults off everywhere. The consensus layer was the consumer that justified retaining these receipts on pruned nodes, and it no longer needs them ([#21617](https://github.com/erigontech/erigon/issues/21617)).
+The historical ("fat") receipts cache is no longer enabled by default on non-archive nodes. Previously
+`--prune.include-receipts` (formerly `--persist.receipts`, still accepted as an alias) defaulted on for every prune mode
+except `archive`; it now defaults off everywhere. The consensus layer was the consumer that justified retaining these
+receipts on pruned nodes, and it no longer needs them ([#21617](https://github.com/erigontech/erigon/issues/21617)).
 
 **What changed:**
 
@@ -15,11 +18,35 @@ The historical ("fat") receipts cache is no longer enabled by default on non-arc
 | `blocks` | on | off |
 | `minimal` | on | off |
 
-Receipts and logs stay available within a node's retention window regardless: without the cache they are re-executed on demand from state history, so `eth_getLogs` and `eth_getBlockReceipts` keep working, at higher latency. For `full` and `minimal` nodes the availability window is unchanged (receipts follow the state-history window either way). For `blocks` nodes the cache previously made receipts and logs queryable back to genesis; without it they follow the state-history window (last 262,144 blocks) — pass `--persist.receipts` if you rely on full-range `eth_getLogs`.
+Receipts and logs stay available within a node's retention window regardless: without the cache they are re-executed on
+demand from state history, so `eth_getLogs` and `eth_getBlockReceipts` keep working, at higher latency. For `full` and
+`minimal` nodes the availability window is unchanged (receipts follow the state-history window either way). For `blocks`
+nodes the cache previously made receipts and logs queryable back to genesis; without it they follow the state-history
+window (last 262,144 blocks) — pass `--prune.include-receipts` if you rely on full-range `eth_getLogs`.
 
-**Migration:** existing datadirs are unaffected — `--persist.receipts` is recorded at datadir creation and the stored value wins, so a node already syncing with the cache keeps it. Such a node now logs a startup notice that `--persist.receipts` differs from the value stored in the datadir; pass `--persist.receipts` explicitly to silence it. Only newly-created `full`/`minimal`/`blocks` datadirs start without the cache; pass `--persist.receipts` on a fresh datadir to opt back in.
+**Migration:** existing datadirs are unaffected — the receipts-cache setting is recorded at datadir creation and the
+stored value wins, so a node already syncing with the cache keeps it. Such a node now logs a startup notice that
+`--prune.include-receipts` differs from the value stored in the datadir; pass `--prune.include-receipts` explicitly to
+silence it. Only newly-created `full`/`minimal`/`blocks` datadirs start without the cache; pass
+`--prune.include-receipts` on a fresh datadir to opt back in.
 
 (#22296) — by @yperbasis
+
+---
+
+#### CLI: receipts and commitment-history pruning flags moved under `--prune.*`
+
+The receipt cache and commitment history now share the `--prune.*` naming used by the rest of the pruning flags. All
+former names keep working as aliases, and stored datadir settings are unaffected.
+
+- `--persist.receipts` → `--prune.include-receipts` (alias: `--persist.receipts`, `--experiment.persist.receipts.v2`).
+- New `--prune.receipts.distance` (alias: `--persist.receipts.distance`) bounds how far back the receipt cache is kept:
+  a block count, `keep-all`, or empty/`0` (default) to follow the state-history window. Requires
+  `--prune.include-receipts`. Snapshots older than the window are skipped at download time.
+- `--prune.commitment-history.distance` now also accepts `keep-all` (in addition to a block count); empty or `0` still
+  keeps everything.
+
+(#22349) — by @AskAlexSharov
 
 ---
 
