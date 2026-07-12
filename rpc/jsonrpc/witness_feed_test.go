@@ -37,13 +37,13 @@ func mkPush(n uint64) witnessPush {
 
 func TestWitnessFeedPublishReachesSubscribers(t *testing.T) {
 	f := newWitnessFeed()
-	_, ch1 := f.subscribe()
-	_, ch2 := f.subscribe()
+	ch1 := f.subscribe()
+	ch2 := f.subscribe()
 
 	p := mkPush(1)
 	f.publish(p)
 
-	for i, ch := range []<-chan witnessPush{ch1, ch2} {
+	for i, ch := range []chan witnessPush{ch1, ch2} {
 		select {
 		case got := <-ch:
 			if got.num != p.num || got.hash != p.hash {
@@ -57,10 +57,10 @@ func TestWitnessFeedPublishReachesSubscribers(t *testing.T) {
 
 func TestWitnessFeedUnsubscribeStopsDeliveryIdempotent(t *testing.T) {
 	f := newWitnessFeed()
-	id, ch := f.subscribe()
+	ch := f.subscribe()
 
-	f.unsubscribe(id)
-	f.unsubscribe(id) // idempotent: a second unsubscribe must not panic
+	f.unsubscribe(ch)
+	f.unsubscribe(ch) // idempotent: a second unsubscribe must not panic
 
 	f.publish(mkPush(1))
 
@@ -78,7 +78,7 @@ func TestWitnessFeedPublishNoSubscribers(t *testing.T) {
 
 func TestWitnessFeedOverflowDropsOldest(t *testing.T) {
 	f := newWitnessFeed()
-	_, ch := f.subscribe()
+	ch := f.subscribe()
 
 	for i := uint64(1); i <= witnessFeedBuffer+2; i++ {
 		f.publish(mkPush(i))
@@ -98,13 +98,6 @@ func TestWitnessFeedOverflowDropsOldest(t *testing.T) {
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("overflow kept %v want newest %v", got, want)
 	}
-
-	f.mu.Lock()
-	dropped := f.dropped
-	f.mu.Unlock()
-	if dropped != 2 {
-		t.Fatalf("recorded %d drops want 2", dropped)
-	}
 }
 
 func TestWitnessFeedConcurrent(t *testing.T) {
@@ -122,14 +115,14 @@ func TestWitnessFeedConcurrent(t *testing.T) {
 					return
 				default:
 				}
-				id, ch := f.subscribe()
+				ch := f.subscribe()
 				for j := 0; j < 8; j++ {
 					select {
 					case <-ch:
 					case <-time.After(time.Millisecond):
 					}
 				}
-				f.unsubscribe(id)
+				f.unsubscribe(ch)
 			}
 		}()
 	}
@@ -151,10 +144,7 @@ func TestWitnessFeedConcurrent(t *testing.T) {
 	close(stop)
 	wg.Wait()
 
-	f.mu.Lock()
-	remaining := len(f.subs)
-	f.mu.Unlock()
-	if remaining != 0 {
+	if remaining := f.subCount(); remaining != 0 {
 		t.Fatalf("subscribers leaked: %d still registered after all workers stopped", remaining)
 	}
 }

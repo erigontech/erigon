@@ -22,9 +22,7 @@ import (
 	"fmt"
 
 	"github.com/erigontech/erigon/common"
-	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/hexutil"
-	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/rpc"
 )
 
@@ -65,37 +63,17 @@ func (api *DebugAPIImpl) ExecutionWitnesses(ctx context.Context, opts *WitnessSu
 	if api.witnessCache == nil {
 		return nil, fmt.Errorf("executionWitnesses subscription requires the embedded eager witness cache (start the node with --witness.cache.blocks); use debug_executionWitness for on-demand witnesses")
 	}
-	notifier, supported := rpc.NotifierFromContext(ctx)
-	if !supported {
-		return &rpc.Subscription{}, rpc.ErrNotificationsUnsupported
-	}
-
-	id, ch := api.witnessCache.feed.subscribe()
-	rpcSub := notifier.CreateSubscription()
-
-	go func() {
-		defer dbg.LogPanic()
-		defer api.witnessCache.feed.unsubscribe(id)
-
-		for {
-			select {
-			case p := <-ch:
-				n := WitnessNotification{
-					BlockNumber: hexutil.Uint64(p.num),
-					BlockHash:   p.hash,
-					Witness:     p.json,
-				}
-				if err := notifier.Notify(rpcSub.ID, n); err != nil {
-					log.Warn("[witness-feed] notify subscriber", "err", err)
-					return
-				}
-			case <-rpcSub.Err():
-				return
-			case <-notifier.Closed():
-				return
-			}
-		}
-	}()
-
-	return rpcSub, nil
+	return subscribeRPC(ctx,
+		func() (<-chan witnessPush, func(), error) {
+			ch := api.witnessCache.subscribe()
+			return ch, func() { api.witnessCache.unsubscribe(ch) }, nil
+		},
+		func(emit func(payload any), p witnessPush) {
+			emit(WitnessNotification{
+				BlockNumber: hexutil.Uint64(p.num),
+				BlockHash:   p.hash,
+				Witness:     p.json,
+			})
+		},
+		"[witness-feed] witness push channel was closed")
 }

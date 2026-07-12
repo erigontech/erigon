@@ -290,10 +290,7 @@ func (api *DebugAPIImpl) buildAndCache(ctx context.Context, num uint64, hash com
 	return true
 }
 
-// storeWitness inserts the pre-marshaled witness into the cache and publishes the same
-// bytes to the cache's feed, so a push shares the cached bytes with no re-marshaling.
 func (api *DebugAPIImpl) storeWitness(num uint64, hash common.Hash, enc []byte) {
-	api.witnessCache.Add(hash, &ExecutionWitnessResult{cachedJSON: enc})
-	api.witnessCache.feed.publish(witnessPush{num: num, hash: hash, json: enc})
+	api.witnessCache.store(num, hash, enc)
 	witnessCacheEntriesResidentGauge.SetInt(api.witnessCache.Len())
 }

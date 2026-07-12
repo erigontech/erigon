@@ -1244,7 +1244,7 @@ func TestExecutionWitnessCacheServe(t *testing.T) {
 
 	t.Run("legacy hit returns cached pointer", func(t *testing.T) {
 		cache := newWitnessResultCache(96)
-		cache.Add(block1Hash, sentinel)
+		cache.lru.Add(block1Hash, sentinel)
 		api.witnessCache = cache
 		t.Cleanup(func() { api.witnessCache = nil })
 
@@ -1257,7 +1257,7 @@ func TestExecutionWitnessCacheServe(t *testing.T) {
 
 	t.Run("canonical request bypasses the cache", func(t *testing.T) {
 		cache := newWitnessResultCache(96)
-		cache.Add(block1Hash, sentinel)
+		cache.lru.Add(block1Hash, sentinel)
 		api.witnessCache = cache
 		t.Cleanup(func() { api.witnessCache = nil })
 

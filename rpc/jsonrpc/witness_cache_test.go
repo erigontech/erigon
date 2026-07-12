@@ -43,13 +43,13 @@ func TestNewWitnessResultCacheClampsBlocks(t *testing.T) {
 	for n := 0; n < int(witnessCacheMaxBlocks)+100; n++ {
 		var h common.Hash
 		h[0], h[1] = byte(n), byte(n>>8)
-		c.Add(h, mkResult())
+		c.lru.Add(h, mkResult())
 	}
 	require.Equal(t, int(witnessCacheMaxBlocks), c.Len(),
 		"entry count is clamped to witnessCacheMaxBlocks")
 
 	c1 := newWitnessResultCache(1)
-	c1.Add(hashN(1), mkResult())
-	c1.Add(hashN(2), mkResult())
+	c1.lru.Add(hashN(1), mkResult())
+	c1.lru.Add(hashN(2), mkResult())
 	require.Equal(t, 1, c1.Len(), "a sub-cap size is honored, not clamped up")
 }

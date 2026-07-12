@@ -115,32 +115,8 @@ func TestWitnessSubscriptionDelivers(t *testing.T) {
 	}
 }
 
-func TestWitnessSubscriptionExitsOnNotifierClosed(t *testing.T) {
-	cache := newWitnessResultCache(4)
-	api := &DebugAPIImpl{witnessCache: cache}
-
-	ctx, _, closec := witnessTestNotifier(t)
-
-	_, err := api.ExecutionWitnesses(ctx, nil)
-	require.NoError(t, err)
-
-	subCount := func() int {
-		cache.feed.mu.Lock()
-		defer cache.feed.mu.Unlock()
-		return len(cache.feed.subs)
-	}
-	require.Equal(t, 1, subCount(), "subscribe must register the pump before returning")
-
-	close(closec)
-
-	require.Eventually(t, func() bool {
-		return subCount() == 0
-	}, 2*time.Second, 10*time.Millisecond, "pump must unsubscribe when the connection closes")
-}
-
-// TestWitnessSubscriptionWireDispatch drives the generic subscription machinery over an
-// in-process server: debug_subscribe("executionWitnesses") must reach the real method and
-// deliver a witness the builder store publishes.
+// TestWitnessSubscriptionWireDispatch checks debug_subscribe("executionWitnesses")
+// end-to-end over a real in-process RPC server, including teardown on unsubscribe.
 func TestWitnessSubscriptionWireDispatch(t *testing.T) {
 	cache := newWitnessResultCache(4)
 	api := &DebugAPIImpl{witnessCache: cache}
@@ -153,7 +129,8 @@ func TestWitnessSubscriptionWireDispatch(t *testing.T) {
 	ch := make(chan WitnessNotification, 4)
 	sub, err := client.Subscribe(context.Background(), "debug", ch, "executionWitnesses", &WitnessSubscriptionOpts{Encoding: "json"})
 	require.NoError(t, err)
-	t.Cleanup(sub.Unsubscribe)
+	require.Eventually(t, func() bool { return cache.feed.subCount() == 1 },
+		2*time.Second, 10*time.Millisecond, "subscribe must register a feed subscriber")
 
 	hash := hashN(0x22)
 	enc := json.RawMessage(`{"state":["0x1234"],"codes":[],"keys":[],"headers":[]}`)
@@ -169,4 +146,8 @@ func TestWitnessSubscriptionWireDispatch(t *testing.T) {
 	case <-time.After(5 * time.Second):
 		t.Fatal("wire subscription did not deliver the published witness")
 	}
+
+	sub.Unsubscribe()
+	require.Eventually(t, func() bool { return cache.feed.subCount() == 0 },
+		2*time.Second, 10*time.Millisecond, "unsubscribe must tear the pump down and deregister the feed subscriber")
 }

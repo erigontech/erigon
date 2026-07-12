@@ -148,15 +148,12 @@ func buildTestChainHeader(t *testing.T, m *execmoduletester.ExecModuleTester, bl
 	return hash, headerRLP
 }
 
-// TestWitnessCacheStorePublishes asserts the build-success store tail both inserts the
-// witness into the cache and delivers the identical pre-marshaled bytes to a feed
-// subscriber, so a push shares the cached bytes with zero re-marshaling.
 func TestWitnessCacheStorePublishes(t *testing.T) {
 	cache := newWitnessResultCache(96)
 	api := &DebugAPIImpl{witnessCache: cache}
 
-	id, ch := cache.feed.subscribe()
-	defer cache.feed.unsubscribe(id)
+	ch := cache.subscribe()
+	defer cache.unsubscribe(ch)
 
 	hash := hashN(0x42)
 	enc := json.RawMessage(`{"state":["0x01"],"codes":[],"keys":[],"headers":[]}`)

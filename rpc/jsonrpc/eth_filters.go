@@ -150,15 +150,13 @@ func (api *APIImpl) GetFilterLogs(_ context.Context, index string) ([]*types.Log
 	return []*types.Log{}, nil
 }
 
-// subscribeRPC runs the shared subscription skeleton: guard checks, subscription
-// creation, and a goroutine that pumps items from the filter channel into notify until
-// the channel closes or the client goes away. subscribe is called inside the goroutine
-// and must return the item channel plus an unsubscribe func. notify receives an emit
-// func that sends a payload to the client, logging on failure.
-func subscribeRPC[T any](ctx context.Context, apiFilters *rpchelper.Filters, subscribe func() (<-chan T, func(), error), notify func(emit func(payload any), item T), closedWarn string) (*rpc.Subscription, error) {
-	if apiFilters == nil {
-		return &rpc.Subscription{}, rpc.ErrNotificationsUnsupported
-	}
+// subscribeRPC runs the shared subscription skeleton: subscription creation and a
+// goroutine that pumps items from the source channel into notify until the channel
+// closes or the client goes away. Callers guard their own preconditions before
+// calling. subscribe is called inside the goroutine and must return the item channel
+// plus an unsubscribe func. notify receives an emit func that sends a payload to the
+// client, logging on failure.
+func subscribeRPC[T any](ctx context.Context, subscribe func() (<-chan T, func(), error), notify func(emit func(payload any), item T), closedWarn string) (*rpc.Subscription, error) {
 	notifier, supported := rpc.NotifierFromContext(ctx)
 	if !supported {
 		return &rpc.Subscription{}, rpc.ErrNotificationsUnsupported
@@ -198,7 +196,10 @@ func subscribeRPC[T any](ctx context.Context, apiFilters *rpchelper.Filters, sub
 
 // NewHeads send a notification each time a new (header) block is appended to the chain.
 func (api *APIImpl) NewHeads(ctx context.Context) (*rpc.Subscription, error) {
-	return subscribeRPC(ctx, api.filters,
+	if api.filters == nil {
+		return &rpc.Subscription{}, rpc.ErrNotificationsUnsupported
+	}
+	return subscribeRPC(ctx,
 		func() (<-chan *types.Header, func(), error) {
 			headers, id := api.filters.SubscribeNewHeads(32, rpchelper.ProtocolWS)
 			return headers, func() { api.filters.UnsubscribeHeads(id) }, nil
@@ -222,7 +223,10 @@ func (api *APIImpl) NewPendingTransactionsWithBody(ctx context.Context) (*rpc.Su
 }
 
 func (api *APIImpl) subscribePendingTransactions(ctx context.Context, chanSize int, fullTx bool) (*rpc.Subscription, error) {
-	return subscribeRPC(ctx, api.filters,
+	if api.filters == nil {
+		return &rpc.Subscription{}, rpc.ErrNotificationsUnsupported
+	}
+	return subscribeRPC(ctx,
 		func() (<-chan []types.Transaction, func(), error) {
 			txsCh, id := api.filters.SubscribePendingTxs(chanSize, rpchelper.ProtocolWS)
 			return txsCh, func() { api.filters.UnsubscribePendingTxs(id) }, nil
@@ -243,7 +247,10 @@ func (api *APIImpl) subscribePendingTransactions(ctx context.Context, chanSize i
 
 // Logs send a notification each time a new log appears.
 func (api *APIImpl) Logs(ctx context.Context, crit filters.FilterCriteria) (*rpc.Subscription, error) {
-	return subscribeRPC(ctx, api.filters,
+	if api.filters == nil {
+		return &rpc.Subscription{}, rpc.ErrNotificationsUnsupported
+	}
+	return subscribeRPC(ctx,
 		func() (<-chan *types.Log, func(), error) {
 			logs, id, err := api.filters.SubscribeLogs(api.SubscribeLogsChannelSize, crit, rpchelper.ProtocolWS)
 			if err != nil {
@@ -261,7 +268,10 @@ func (api *APIImpl) Logs(ctx context.Context, crit filters.FilterCriteria) (*rpc
 
 // TransactionReceipts send a notification each time a new receipt appears.
 func (api *APIImpl) TransactionReceipts(ctx context.Context, crit filters.ReceiptsFilterCriteria) (*rpc.Subscription, error) {
-	return subscribeRPC(ctx, api.filters,
+	if api.filters == nil {
+		return &rpc.Subscription{}, rpc.ErrNotificationsUnsupported
+	}
+	return subscribeRPC(ctx,
 		func() (<-chan *remoteproto.SubscribeReceiptsReply, func(), error) {
 			receipts, id, err := api.filters.SubscribeReceipts(api.SubscribeLogsChannelSize, crit)
 			if err != nil {

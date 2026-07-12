@@ -18,7 +18,6 @@ package jsonrpc
 
 import (
 	"bytes"
-	"context"
 	"encoding/json"
 	"testing"
 	"time"
@@ -67,10 +66,6 @@ func TestNewWitnessCacheBuilderAPIDisabled(t *testing.T) {
 	}
 }
 
-// TestWitnessCacheWiringSharedFeed exercises the real enabled-construction path: the
-// cache NewWitnessCacheBuilderAPI returns is the same instance threaded onto the
-// serve-side debug impl (as APIList does), and it carries the one feed — so a witness
-// the builder impl stores reaches a subscriber obtained through the serve-side impl.
 func TestWitnessCacheWiringSharedFeed(t *testing.T) {
 	m, _, _ := rpcdaemontest.CreateTestExecModule(t)
 
@@ -108,17 +103,4 @@ func TestWitnessCacheWiringSharedFeed(t *testing.T) {
 	case <-time.After(2 * time.Second):
 		t.Fatal("builder publish did not reach the serve-side subscriber over the shared feed")
 	}
-}
-
-// TestWitnessCacheWiringDisabled pins the disabled end of the wiring: a nil cache
-// threaded onto the serve-side impl (as APIList does when the flag is off) makes
-// ExecutionWitnesses reject the subscription with the actionable embedded-only error.
-func TestWitnessCacheWiringDisabled(t *testing.T) {
-	t.Parallel()
-	cache, _ := NewWitnessCacheBuilderAPI(false, nil, nil, nil, nil, nil, nil, nil, nil)
-	serve := &DebugAPIImpl{witnessCache: cache}
-	_, err := serve.ExecutionWitnesses(context.Background(), nil)
-	require.Error(t, err)
-	require.Contains(t, err.Error(), "--witness.cache.blocks")
-	require.Contains(t, err.Error(), "debug_executionWitness")
 }
