@@ -147,12 +147,12 @@ EL forward through a gap — no "Downloading Execution History".
 - Modify: `cl/phase1/stages/clstages.go`
 - Create: `cl/phase1/stages/finalized_state_save_test.go`
 
-- [ ] add pure `writeFinalizedStateFile(dirs datadir.Dirs, st *state.CachingBeaconState) error`: snappy-encode and atomic-write — temp file in the SAME dir (`dirs.CaplinLatest`) then `os.Rename` to `finalized.ssz_snappy`
-- [ ] add `saveFinalizedStateOnDiskIfNeeded(fc forkchoice.ForkChoiceStorageReader, dirs datadir.Dirs, headSlot uint64) error`: gate on existing cadence `headSlot%(SlotsPerEpoch*5)==0`; fetch `fc.GetStateAtBlockRoot(fc.FinalizedCheckpoint().Root, true)`; on error log at debug and return nil; else `writeFinalizedStateFile` (do NOT add a `Cfg` last-finalized-epoch field)
-- [ ] call `saveFinalizedStateOnDiskIfNeeded` at ALL FOUR save sites: `forkchoice.go:358`, `forward_sync.go:229`, `forward_sync.go:247`, `clstages.go:265`
-- [ ] write `TestWriteFinalizedStateFile_RoundTrip` (pure, no fork choice)
-- [ ] write `TestSaveFinalizedStateOnDisk` using the generated `ForkChoiceStorageReader` mock (`mock_services/forkchoice_mock.go`): assert file round-trips to the finalized state's root, and a `GetStateAtBlockRoot` error does not propagate
-- [ ] run tests — must pass before next task
+- [x] add pure `writeFinalizedStateFile(dirs datadir.Dirs, st *state.CachingBeaconState) error`: snappy-encode and atomic-write — temp file in the SAME dir (`dirs.CaplinLatest`) then `os.Rename` to `finalized.ssz_snappy`
+- [x] add `saveFinalizedStateOnDiskIfNeeded(fc forkchoice.ForkChoiceStorageReader, beaconCfg *clparams.BeaconChainConfig, dirs datadir.Dirs, headSlot uint64) error`: gate on existing cadence `headSlot%(SlotsPerEpoch*5)==0`; fetch `fc.GetStateAtBlockRoot(fc.FinalizedCheckpoint().Root, true)`; on error log at debug and return nil; else `writeFinalizedStateFile` (do NOT add a `Cfg` last-finalized-epoch field). `beaconCfg` added to signature for the `SlotsPerEpoch` cadence gate.
+- [x] call `saveFinalizedStateOnDiskIfNeeded` at ALL FOUR save sites: `forkchoice.go:358`, `forward_sync.go:229`, `forward_sync.go:247`, `clstages.go:265`
+- [x] write `TestWriteFinalizedStateFile_RoundTrip` (pure, no fork choice)
+- [x] write `TestSaveFinalizedStateOnDisk` using the generated `ForkChoiceStorageReader` mock (`mock_services/forkchoice_mock.go`): assert file round-trips to the finalized state's root, and a `GetStateAtBlockRoot` miss does not propagate
+- [x] run tests — must pass before next task
 
 ### Task 5: Prefer the finalized state in ReadOrFetchLatestBeaconState (read-side)
 

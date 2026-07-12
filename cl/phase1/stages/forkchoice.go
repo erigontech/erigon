@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"path/filepath"
 	"runtime"
 	"slices"
 	"sync/atomic"
@@ -19,11 +20,14 @@ import (
 	"github.com/erigontech/erigon/cl/phase1/core/caches"
 	"github.com/erigontech/erigon/cl/phase1/core/state"
 	"github.com/erigontech/erigon/cl/phase1/core/state/shuffling"
+	"github.com/erigontech/erigon/cl/phase1/forkchoice"
 	"github.com/erigontech/erigon/cl/utils"
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/dbg"
+	"github.com/erigontech/erigon/common/dir"
 	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/execution/engineapi/engine_types"
 	"github.com/erigontech/erigon/execution/types"
@@ -314,6 +318,54 @@ func saveHeadStateOnDiskIfNeeded(cfg *Cfg, headState *state.CachingBeaconState) 
 	return nil
 }
 
+// writeFinalizedStateFile snappy-encodes st and atomically replaces the finalized-state resume
+// file. The temp file lives in the same directory as the target so os.Rename is atomic.
+func writeFinalizedStateFile(dirs datadir.Dirs, st *state.CachingBeaconState) error {
+	dat, err := utils.EncodeSSZSnappy(st)
+	if err != nil {
+		return fmt.Errorf("failed to encode ssz snappy: %w", err)
+	}
+	if err := os.MkdirAll(dirs.CaplinLatest, 0755); err != nil {
+		return fmt.Errorf("failed to create directory: %w", err)
+	}
+	tmp, err := os.CreateTemp(dirs.CaplinLatest, clparams.LatestFinalizedStateFileName+".tmp-*")
+	if err != nil {
+		return fmt.Errorf("failed to create temp finalized state file: %w", err)
+	}
+	tmpName := tmp.Name()
+	defer func() { _ = dir.RemoveFile(tmpName) }()
+	if _, err := tmp.Write(dat); err != nil {
+		tmp.Close()
+		return fmt.Errorf("failed to write finalized state to disk: %w", err)
+	}
+	if err := tmp.Close(); err != nil {
+		return fmt.Errorf("failed to close finalized state temp file: %w", err)
+	}
+	if err := os.Rename(tmpName, filepath.Join(dirs.CaplinLatest, clparams.LatestFinalizedStateFileName)); err != nil {
+		return fmt.Errorf("failed to rename finalized state file: %w", err)
+	}
+	return nil
+}
+
+// saveFinalizedStateOnDiskIfNeeded persists the node's own most-recently-finalized state so a
+// later restart can resume from a locally-provable, reorg-immune anchor. It reuses the head-state
+// save cadence. Fetching the finalized state is best-effort: a miss or error is non-fatal.
+func saveFinalizedStateOnDiskIfNeeded(fc forkchoice.ForkChoiceStorageReader, beaconCfg *clparams.BeaconChainConfig, dirs datadir.Dirs, headSlot uint64) error {
+	epochFrequency := uint64(5)
+	if headSlot%(beaconCfg.SlotsPerEpoch*epochFrequency) != 0 {
+		return nil
+	}
+	st, err := fc.GetStateAtBlockRoot(fc.FinalizedCheckpoint().Root, true)
+	if err != nil {
+		log.Debug("[Caplin] could not fetch finalized state to persist (non-fatal)", "err", err)
+		return nil
+	}
+	if st == nil {
+		return nil
+	}
+	return writeFinalizedStateFile(dirs, st)
+}
+
 // postForkchoiceOperations performs the post fork choice operations such as updating the head state, producing and caching attestation data,
 // these sets of operations can take as long as they need to run, as by-now we are already synced.
 func postForkchoiceOperations(ctx context.Context, tx kv.RwTx, logger log.Logger, cfg *Cfg, headSlot uint64, headRoot common.Hash) error {
@@ -358,6 +410,11 @@ func postForkchoiceOperations(ctx context.Context, tx kv.RwTx, logger log.Logger
 		// Save the head state on disk for eventual node restarts without checkpoint sync
 		if err := saveHeadStateOnDiskIfNeeded(cfg, headState); err != nil {
 			return fmt.Errorf("failed to save head state on disk: %w", err)
+		}
+
+		// Persist the finalized state so a restart can resume from a locally-provable anchor
+		if err := saveFinalizedStateOnDiskIfNeeded(cfg.forkChoice, cfg.beaconCfg, cfg.dirs, headState.Slot()); err != nil {
+			return fmt.Errorf("failed to save finalized state on disk: %w", err)
 		}
 
 		// Shuffle validator set for the next epoch

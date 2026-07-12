@@ -264,6 +264,9 @@ func ConsensusClStages(ctx context.Context,
 					if err := saveHeadStateOnDiskIfNeeded(cfg, cfg.state); err != nil {
 						return err
 					}
+					if err := saveFinalizedStateOnDiskIfNeeded(cfg.forkChoice, cfg.beaconCfg, cfg.dirs, cfg.state.Slot()); err != nil {
+						return err
+					}
 					// We only download historical blocks once
 					cfg.hasDownloaded = true
 					stateRoot, err := cfg.state.HashSSZ()

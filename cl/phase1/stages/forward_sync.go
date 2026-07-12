@@ -232,6 +232,10 @@ func processDownloadedBlockBatches(ctx context.Context, logger log.Logger, cfg *
 						err = fmt.Errorf("failed to save head state: %w", err)
 						return
 					}
+					if err = saveFinalizedStateOnDiskIfNeeded(cfg.forkChoice, cfg.beaconCfg, cfg.dirs, st.Slot()); err != nil {
+						err = fmt.Errorf("failed to save finalized state: %w", err)
+						return
+					}
 				}
 			}
 			continue
@@ -248,6 +252,10 @@ func processDownloadedBlockBatches(ctx context.Context, logger log.Logger, cfg *
 				}
 				if err = saveHeadStateOnDiskIfNeeded(cfg, st); err != nil {
 					err = fmt.Errorf("failed to save head state: %w", err)
+					return
+				}
+				if err = saveFinalizedStateOnDiskIfNeeded(cfg.forkChoice, cfg.beaconCfg, cfg.dirs, st.Slot()); err != nil {
+					err = fmt.Errorf("failed to save finalized state: %w", err)
 					return
 				}
 			}
