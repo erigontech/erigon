@@ -268,6 +268,7 @@ func TestFloorStatePruneMarkers(t *testing.T) {
 	db := memdb.NewTestDB(t, dbcfg.ChainDB)
 	ctx := context.Background()
 	stateSn := snapshotsync.NewCaplinStateSnapshots(ethconfig.BlocksFreezing{}, &clparams.MainnetBeaconConfig, datadir.New(t.TempDir()), snapshotsync.MakeCaplinStateSnapshotsTypes(db), log.New())
+	t.Cleanup(stateSn.Close)
 	a := NewAntiquary(ctx, nil, nil, nil, &clparams.MainnetBeaconConfig, datadir.New(t.TempDir()), nil, db, stateSn, nil, nil, nil, log.New(), true, true, true, false, nil)
 	require.NoError(t, db.Update(ctx, func(tx kv.RwTx) error {
 		if err := state_accessors.SetStatePruneProgress(tx, kv.BlockRoot, 100); err != nil {
@@ -286,6 +287,7 @@ func TestStatePruneKillSwitch(t *testing.T) {
 	seedStateSlots(t, db, kv.BlockRoot, slotRange(0, 100))
 	ctx := context.Background()
 	stateSn := snapshotsync.NewCaplinStateSnapshots(ethconfig.BlocksFreezing{}, &clparams.MainnetBeaconConfig, datadir.New(t.TempDir()), snapshotsync.MakeCaplinStateSnapshotsTypes(db), log.New())
+	t.Cleanup(stateSn.Close)
 	a := NewAntiquary(ctx, nil, nil, nil, &clparams.MainnetBeaconConfig, datadir.New(t.TempDir()), nil, db, stateSn, nil, nil, nil, log.New(), true, true, true, false, nil)
 	a.statePruneBoundaryFn = func(string) uint64 { return 50 }
 
@@ -294,10 +296,14 @@ func TestStatePruneKillSwitch(t *testing.T) {
 	require.Equal(t, slotRange(0, 100), tableSlots(t, db, kv.BlockRoot))
 	require.Zero(t, pruneMarker(t, db, kv.BlockRoot))
 
-	// an already-expired timeout override must stop the pass before any delete
+	// an expired timeout override must stop the pass before any delete; an
+	// already-cancelled parent makes the deadline expire deterministically
+	// instead of racing a nanosecond timer
 	a.statePruneDisabled = false
 	a.statePruneTimeout = time.Nanosecond
-	a.pruneFrozenStateTables(ctx, math.MaxUint64)
+	expiredCtx, cancelExpired := context.WithCancel(ctx)
+	cancelExpired()
+	a.pruneFrozenStateTables(expiredCtx, math.MaxUint64)
 	require.Equal(t, slotRange(0, 100), tableSlots(t, db, kv.BlockRoot))
 	require.Zero(t, pruneMarker(t, db, kv.BlockRoot))
 
@@ -312,6 +318,7 @@ func TestPruneFrozenStateTablesCapsBoundaryToFlushed(t *testing.T) {
 	seedStateSlots(t, db, kv.BlockRoot, slotRange(0, 100))
 	ctx := context.Background()
 	stateSn := snapshotsync.NewCaplinStateSnapshots(ethconfig.BlocksFreezing{}, &clparams.MainnetBeaconConfig, datadir.New(t.TempDir()), snapshotsync.MakeCaplinStateSnapshotsTypes(db), log.New())
+	t.Cleanup(stateSn.Close)
 	a := NewAntiquary(ctx, nil, nil, nil, &clparams.MainnetBeaconConfig, datadir.New(t.TempDir()), nil, db, stateSn, nil, nil, nil, log.New(), true, true, true, false, nil)
 	a.statePruneBoundaryFn = func(string) uint64 { return 80 }
 
@@ -346,6 +353,7 @@ func TestStatePruneWiredIntoAntiquaryCycle(t *testing.T) {
 		ctx := context.Background()
 		vt := state_accessors.NewStaticValidatorTable()
 		stateSn := snapshotsync.NewCaplinStateSnapshots(ethconfig.BlocksFreezing{}, &clparams.MainnetBeaconConfig, datadir.New(t.TempDir()), snapshotsync.MakeCaplinStateSnapshotsTypes(db), log.New())
+		t.Cleanup(stateSn.Close)
 		a := NewAntiquary(ctx, nil, preState, vt, &clparams.MainnetBeaconConfig, datadir.New(t.TempDir()), nil, db, stateSn, nil, reader, sn, log.New(), true, true, true, false, nil)
 		a.maxSlotsPerCommit = 8
 		a.statePruneDisabled = disabled

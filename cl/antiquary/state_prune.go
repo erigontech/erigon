@@ -89,6 +89,7 @@ func (s *Antiquary) statePruneBacklog(ctx context.Context, tables []string, boun
 		}
 		return nil
 	}); err != nil {
+		s.logger.Warn("[Antiquary] Failed to compute state prune backlog", "err", err)
 		return 0
 	}
 	return backlog
