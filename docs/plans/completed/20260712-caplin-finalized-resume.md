@@ -196,8 +196,8 @@ EL forward through a gap — no "Downloading Execution History".
 
 ### Task 8: Final — documentation and plan close-out
 
-- [ ] update `cl/CLAUDE.md` / `cl/phase1/forkchoice/CLAUDE.md` only if a new invariant needs recording (the anchor-must-be-finalized invariant)
-- [ ] move this plan to `docs/plans/completed/`
+- [x] update `cl/CLAUDE.md` / `cl/phase1/forkchoice/CLAUDE.md` only if a new invariant needs recording (the anchor-must-be-finalized invariant)
+- [x] move this plan to `docs/plans/completed/`
 
 ## Post-Completion
 
