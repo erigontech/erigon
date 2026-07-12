@@ -68,6 +68,10 @@ func unfoldStorageBase(base *HexPatriciaHashed, accPrefix []byte) error {
 	if len(branch) < 4 {
 		return fmt.Errorf("unfoldStorageBase: corrupt branch record at %x: %d bytes", accPrefix, len(branch))
 	}
+	// A childless record is a collapse tombstone; rebuild from the account leaf, not this empty base.
+	if BranchData(branch).ChildCount() == 0 {
+		return errStorageBaseNotBranch
+	}
 	base.branchBefore[0] = true
 	return base.decodeBranchIntoRow(0, d+1, branch[2:], false)
 }
