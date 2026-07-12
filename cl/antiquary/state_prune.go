@@ -57,9 +57,9 @@ func (s *Antiquary) pruneFrozenStateTables(ctx context.Context, flushedThrough u
 	boundaryFn := func(table string) uint64 {
 		return min(coverageFn(table), flushedThrough)
 	}
-	budget := statePruneBudget(s.cfg, s.statePruneBacklog(ctx, tables, boundaryFn))
-	if s.statePruneTimeout > 0 {
-		budget = s.statePruneTimeout
+	budget := s.statePruneTimeout
+	if budget <= 0 {
+		budget = statePruneBudget(s.cfg, s.statePruneBacklog(ctx, tables, boundaryFn))
 	}
 	ctx, cancel := context.WithTimeout(ctx, budget)
 	defer cancel()

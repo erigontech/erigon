@@ -75,6 +75,9 @@ func pruneMarker(t *testing.T, db kv.RwDB, table string) uint64 {
 }
 
 func slotRange(from, to uint64) []uint64 {
+	if to <= from {
+		return nil
+	}
 	slots := make([]uint64, 0, to-from)
 	for s := from; s < to; s++ {
 		slots = append(slots, s)
