@@ -153,30 +153,24 @@ func VerifyCommitmentInclusionProof(commitment common.Bytes48, commitmentInclusi
 	if commitmentInclusionProof == nil || commitmentInclusionProof.Length() < bodyDepth+int(commitmentsDepth) {
 		return false
 	}
-	var buf [64]byte
+	var curr common.Hash
 	// Start by constructing the commitments subtree
 	for i := uint64(0); i < commitmentsDepth; i++ {
-		curr := commitmentInclusionProof.Get(int(i))
+		curr = commitmentInclusionProof.Get(int(i))
 		if (commitmentIndex / utils.PowerOf2(i) % 2) == 1 {
-			copy(buf[:32], curr[:])
-			copy(buf[32:], value[:])
+			value = utils.Sha256(curr[:], value[:])
 		} else {
-			copy(buf[:32], value[:])
-			copy(buf[32:], curr[:])
+			value = utils.Sha256(value[:], curr[:])
 		}
-		value = utils.Sha256(buf[:])
 	}
 	// Construct up the block giga tree
 	for i := uint64(0); i < uint64(bodyDepth); i++ {
-		curr := commitmentInclusionProof.Get(int(i + commitmentsDepth))
+		curr = commitmentInclusionProof.Get(int(i + commitmentsDepth))
 		if (bIndex / utils.PowerOf2(i) % 2) == 1 {
-			copy(buf[:32], curr[:])
-			copy(buf[32:], value[:])
+			value = utils.Sha256(curr[:], value[:])
 		} else {
-			copy(buf[:32], value[:])
-			copy(buf[32:], curr[:])
+			value = utils.Sha256(value[:], curr[:])
 		}
-		value = utils.Sha256(buf[:])
 	}
 	return value == bodyRoot
 }
