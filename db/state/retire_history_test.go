@@ -350,9 +350,10 @@ func TestRetire_SkipsDirtyButNotVisibleFile(t *testing.T) {
 	require.Equal(t, 2, accountsHist.dirtyFiles.Len(), "invisible subsumed file must not be retired")
 }
 
-// A cutoff reaching the visible tip would retire every file — a collapsed retention window is
-// a caller bug, so Retire must refuse rather than wipe the node's history.
-func TestRetire_RefusesWindowTooSmall(t *testing.T) {
+// A cutoff reaching the visible tip would retire every file. That happens benignly when the
+// unfrozen head outruns the prune distance, so Retire skips the entity (keeping its files) and
+// retries once the tip advances — it must not error and poison retirement of the healthy ones.
+func TestRetire_SkipsWindowTooSmall(t *testing.T) {
 	stepSize, stepsInFrozenFile := uint64(10), uint64(2)
 	agg := testDbAndAggregatorSmallFrozen(t, stepSize, stepsInFrozenFile)
 
@@ -366,7 +367,7 @@ func TestRetire_RefusesWindowTooSmall(t *testing.T) {
 	require.Equal(t, 2, accountsHist.dirtyFiles.Len())
 
 	n, err := aggRetire(t, agg, kv.RetireCutoffs{Default: 3 * stepSize})
-	require.Error(t, err)
+	require.NoError(t, err)
 	require.Zero(t, n)
 	require.Equal(t, 2, accountsHist.dirtyFiles.Len(), "no files retired when the window is too small")
 }

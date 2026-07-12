@@ -1479,10 +1479,12 @@ func (s *BaseRoSnapshots) RetireFilesBelow(typ snaptype.Type, blockTo uint64, on
 	defer v.Close()
 	segs := v.Segments(typ)
 
-	// Paranoia: retire deletes files. blockTo past the newest visible segment means the
-	// retention window collapsed and every file would be retired — refuse rather than wipe them.
+	// blockTo past the newest visible segment would retire every file. Benign when transactions
+	// lag headers by more than the prune distance (pruneTo is headers-based via FrozenBlocks):
+	// skip this cycle and retry once the visible tx tip advances, rather than erroring every
+	// cycle in the background retire goroutine.
 	if len(segs) > 0 && blockTo > segs[len(segs)-1].To() {
-		return false, fmt.Errorf("retire refused: blockTo %d past visible tip %d for %s (window too small; would retire all files)", blockTo, segs[len(segs)-1].To(), typ)
+		return false, nil
 	}
 
 	var names, paths []string

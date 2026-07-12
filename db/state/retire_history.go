@@ -18,11 +18,21 @@ package state
 
 import (
 	"context"
-	"fmt"
 
 	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/db/kv"
 )
+
+// cutoffInRetireWindow reports whether cutoffTxNum falls strictly inside the entity's visible
+// range: above the oldest file (something to retire) and below the tip (the newest survives).
+// A cutoff at/above the tip would wipe every file — benign when the unfrozen head outruns the
+// prune distance — so callers skip and retry once the tip advances rather than poisoning the batch.
+func cutoffInRetireWindow(files visibleFiles, cutoffTxNum uint64) bool {
+	if len(files) == 0 {
+		return false
+	}
+	return cutoffTxNum > files.StartTxNum() && cutoffTxNum < files.EndTxNum()
+}
 
 // entirelyBeforeStep returns the dirty source files backing the visible files entirely
 // below cutoff step — selecting over visible (not dirty), so retire drops only what the
@@ -89,14 +99,8 @@ func (at *AggregatorRoTx) Retire(ctx context.Context, cutoffs kv.RetireCutoffs) 
 		if cutoffStep == 0 {
 			continue
 		}
-		if len(dt.ht.files) == 0 {
+		if !cutoffInRetireWindow(dt.ht.files, cutoffTxNum) {
 			continue
-		}
-		if cutoffTxNum <= dt.ht.files.StartTxNum() {
-			continue
-		}
-		if tip := dt.ht.files.EndTxNum(); cutoffTxNum >= tip {
-			return 0, fmt.Errorf("retire refused: cutoff %d >= %s tip %d (would retire all its files)", cutoffTxNum, dt.name, tip)
 		}
 		d, agedList := dt.ht.filesBeforeStep(cutoffStep)
 		deleted = append(deleted, d...)
@@ -110,14 +114,8 @@ func (at *AggregatorRoTx) Retire(ctx context.Context, cutoffs kv.RetireCutoffs) 
 		if cutoffStep == 0 {
 			continue
 		}
-		if len(iit.files) == 0 {
+		if !cutoffInRetireWindow(iit.files, cutoffs.Default) {
 			continue
-		}
-		if cutoffs.Default <= iit.files.StartTxNum() {
-			continue
-		}
-		if tip := iit.files.EndTxNum(); cutoffs.Default >= tip {
-			return 0, fmt.Errorf("retire refused: cutoff %d >= %s tip %d (would retire all its files)", cutoffs.Default, iit.ii.FilenameBase, tip)
 		}
 		d, agedList := iit.filesBeforeStep(cutoffStep)
 		deleted = append(deleted, d...)

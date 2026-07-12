@@ -467,9 +467,10 @@ func TestRetireFilesBelowSkipsDirtyButNotVisible(t *testing.T) {
 	require.Equal(2, s.dirty[txEnum].Len())
 }
 
-// A blockTo past the visible tip means the retention window collapsed — retiring would wipe
-// every file, so Retire must refuse rather than proceed on a bad cutoff.
-func TestRetireFilesBelowRefusesWindowTooSmall(t *testing.T) {
+// A blockTo past the visible tip would wipe every file. That happens benignly when transactions
+// lag headers by more than the prune distance, so Retire skips this cycle (keeping the files)
+// and retries once the visible tip advances — it must not error in the background retire loop.
+func TestRetireFilesBelowSkipsWindowTooSmall(t *testing.T) {
 	logger := log.New()
 	dir := t.TempDir()
 	require := require.New(t)
@@ -487,7 +488,7 @@ func TestRetireFilesBelowRefusesWindowTooSmall(t *testing.T) {
 	require.Equal(2, s.dirty[txEnum].Len())
 
 	retired, err := s.RetireFilesBelow(snaptype2.Transactions, 3*mergeLimit, func([]string) error { return nil })
-	require.Error(err)
+	require.NoError(err)
 	require.False(retired)
 	require.Equal(2, s.dirty[txEnum].Len())
 }
