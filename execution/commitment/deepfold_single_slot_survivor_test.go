@@ -57,9 +57,9 @@ func TestDeepFold_SingleSlotSurvivorNotLoaded(t *testing.T) {
 	f0 := findAddressForHexPrefix([]byte{0}, 203)
 	ff := findAddressForHexPrefix([]byte{0xf}, 204)
 
-	survLoc := storageLocsForNibble(0x1, 1, 1)[0]      // one untouched slot under nibble 1
-	delB := storageLocsForNibble(0x2, 700, 1000)       // 700 slots under nibble 2
-	delC := storageLocsForNibble(0x3, 700, 1000000)    // 700 slots under nibble 3
+	survLoc := storageLocsForNibble(0x1, 1, 1)[0]   // one untouched slot under nibble 1
+	delB := storageLocsForNibble(0x2, 700, 1000)    // 700 slots under nibble 2
+	delC := storageLocsForNibble(0x3, 700, 1000000) // 700 slots under nibble 3
 
 	b1 := NewUpdateBuilder().
 		Balance(addrHex(w), 100).Balance(addrHex(s1), 5).
