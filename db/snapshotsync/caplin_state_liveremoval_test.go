@@ -142,6 +142,31 @@ func TestCaplinStateCloseRemovesNoFiles(t *testing.T) {
 	require.FileExists(t, idxPath, "Close must never unlink state index files")
 }
 
+// Close must not close fds of segments an older, still-pinned view references. A view pins g0;
+// a re-open publishes g1 over the same still-dirty segment; Close then publishes an empty g2.
+// The g0 view can still reach the shared DirtySegment, so its fds must stay open until it
+// drains — gating the close on the outgoing generation alone would be a use-after-close.
+func TestCaplinStateCloseKeepsFdsForPinnedOlderGeneration(t *testing.T) {
+	logger := log.New()
+	dirs := datadir.New(t.TempDir())
+	table := kv.BlockRoot
+	typ := mustCaplinStateType(t, table)
+
+	writeCaplinStateFixture(t, dirs.SnapCaplin, table, 0, 100_000, logger)
+
+	s := openTestCaplinStateSnapshots(t, dirs, table, logger)
+
+	v := s.View() // pins g0
+	defer v.Close()
+	require.NoError(t, s.OpenFolder()) // publishes g1 over the same still-dirty segment; g0 stays pinned
+
+	s.Close() // publishes empty g2; g0 still pinned, so the chain has not drained
+
+	segs := v.VisibleSegments(typ)
+	require.NotEmpty(t, segs, "pinned view must still see its segment")
+	require.NotNil(t, segs[0].src.Decompressor, "Close must not close fds a pinned older generation references")
+}
+
 // OpenList publishes exactly one generation, even when it both detaches a stale file and opens
 // a new one, so no reader ever observes a transient set with the stale file gone but the new
 // file not yet visible. Pinning the pre-reopen generation lets the chain length measure the

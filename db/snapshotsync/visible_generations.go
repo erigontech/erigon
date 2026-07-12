@@ -54,6 +54,13 @@ func (g *visibleGenerations[P]) current() P {
 	return g.visible.Load().payload
 }
 
+// drained reports whether no generation is pinned: after a publish, the chain has collapsed to
+// the single current generation, so no reader can still reach an older generation's segments.
+// Caller must hold lock (oldest is lock-guarded).
+func (g *visibleGenerations[P]) drained() bool {
+	return g.oldest == g.visible.Load()
+}
+
 // acquire pins the current generation. Load and increment are not atomic together, so after
 // incrementing we re-check the generation is still current; if superseded mid-pin we drop
 // the stale pin and retry (hazard-pointer style).

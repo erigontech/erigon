@@ -234,9 +234,11 @@ func (s *CaplinStateSnapshots) coveredRangesForType(name CaplinStateType) []Rang
 }
 
 // Close tears down the snapshot set on shutdown: it detaches every segment from dirty,
-// publishes an empty generation, then closes their fds directly — but only if no reader still
-// pins the outgoing generation. It must never unlink, or a normal shutdown would delete the
-// whole on-disk state snapshot set.
+// publishes an empty generation, then closes their fds directly. It never unlinks, so a normal
+// shutdown preserves the on-disk state snapshot set. The fds are closed only once the whole
+// generation chain has drained — an older still-pinned generation can reference these same
+// segments, and closing them would nil a Decompressor out from under that reader; at shutdown
+// leaking those fds beats a use-after-close.
 func (s *CaplinStateSnapshots) Close() {
 	if s == nil {
 		return
@@ -245,15 +247,14 @@ func (s *CaplinStateSnapshots) Close() {
 	defer s.dirtyLock.Unlock()
 
 	detached := s.detachNotInList(nil)
-	prev := s._visibleFiles.visible.Load()
 	s.recalcVisibleFiles(nil)
 
-	if prev != nil && prev.refcnt.Load() != 0 {
-		s.logger.Warn("[caplin-state] Close called with live readers; leaving fds open", "refcnt", prev.refcnt.Load())
-	} else {
+	if s._visibleFiles.drained() {
 		for _, sn := range detached {
 			sn.close()
 		}
+	} else {
+		s.logger.Warn("[caplin-state] Close called with live readers; leaving fds open")
 	}
 }
 
