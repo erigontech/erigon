@@ -59,23 +59,32 @@ func ReadOrFetchLatestBeaconState(ctx context.Context, dirs datadir.Dirs, beacon
 
 // ReadLocalHeadState reads the head state directly from disk without falling back to genesis.
 func ReadLocalHeadState(dirs datadir.Dirs, beaconCfg *clparams.BeaconChainConfig) (*state.CachingBeaconState, error) {
-	statePath := filepath.Join(dirs.CaplinLatest, clparams.LatestStateFileName)
+	return readLocalStateFile(dirs, beaconCfg, clparams.LatestStateFileName, "head")
+}
+
+// ReadLocalFinalizedState reads the node's own most-recently-finalized state directly from disk.
+func ReadLocalFinalizedState(dirs datadir.Dirs, beaconCfg *clparams.BeaconChainConfig) (*state.CachingBeaconState, error) {
+	return readLocalStateFile(dirs, beaconCfg, clparams.LatestFinalizedStateFileName, "finalized")
+}
+
+func readLocalStateFile(dirs datadir.Dirs, beaconCfg *clparams.BeaconChainConfig, fileName, kind string) (*state.CachingBeaconState, error) {
+	statePath := filepath.Join(dirs.CaplinLatest, fileName)
 	snappyEncoded, err := afero.ReadFile(afero.NewOsFs(), statePath)
 	if err != nil {
-		return nil, fmt.Errorf("could not read local head state file: %w", err)
+		return nil, fmt.Errorf("could not read local %s state file: %w", kind, err)
 	}
 	decompressed, err := utils.DecompressSnappy(snappyEncoded, false)
 	if err != nil {
-		return nil, fmt.Errorf("local head state is corrupt: %w", err)
+		return nil, fmt.Errorf("local %s state is corrupt: %w", kind, err)
 	}
 	slot, err := utils.ExtractSlotFromSerializedBeaconState(decompressed)
 	if err != nil {
-		return nil, fmt.Errorf("could not extract slot from local head state: %w", err)
+		return nil, fmt.Errorf("could not extract slot from local %s state: %w", kind, err)
 	}
 	bs := state.New(beaconCfg)
 	epoch := slot / beaconCfg.SlotsPerEpoch
 	if err := bs.DecodeSSZ(decompressed, int(beaconCfg.GetCurrentStateVersion(epoch))); err != nil {
-		return nil, fmt.Errorf("could not decode local head state: %w", err)
+		return nil, fmt.Errorf("could not decode local %s state: %w", kind, err)
 	}
 	return bs, nil
 }

@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"testing"
 	"time"
 
@@ -18,6 +20,7 @@ import (
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/phase1/core/state"
 	"github.com/erigontech/erigon/cl/utils"
+	"github.com/erigontech/erigon/db/datadir"
 	chainspec "github.com/erigontech/erigon/execution/chain/spec"
 )
 
@@ -189,6 +192,34 @@ func TestLocalCheckpointSyncFromFile(t *testing.T) {
 	require.NoError(t, err)
 
 	assert.Equal(t, wantRoot, haveRoot)
+}
+
+func TestReadLocalFinalizedState_RoundTrip(t *testing.T) {
+	_, st, _ := tests.GetPhase0Random()
+	dirs := datadir.New(t.TempDir())
+
+	enc, err := st.EncodeSSZ(nil)
+	require.NoError(t, err)
+	enc = utils.CompressSnappy(enc)
+	statePath := filepath.Join(dirs.CaplinLatest, clparams.LatestFinalizedStateFileName)
+	require.NoError(t, os.WriteFile(statePath, enc, 0o644))
+
+	got, err := ReadLocalFinalizedState(dirs, &clparams.MainnetBeaconConfig)
+	require.NoError(t, err)
+	require.NotNil(t, got)
+
+	wantRoot, err := st.HashSSZ()
+	require.NoError(t, err)
+	gotRoot, err := got.HashSSZ()
+	require.NoError(t, err)
+	assert.Equal(t, wantRoot, gotRoot)
+}
+
+func TestReadLocalFinalizedState_Absent(t *testing.T) {
+	dirs := datadir.New(t.TempDir())
+	got, err := ReadLocalFinalizedState(dirs, &clparams.MainnetBeaconConfig)
+	require.Error(t, err)
+	require.Nil(t, got)
 }
 
 func TestLocalCheckpointSyncFromGenesis(t *testing.T) {

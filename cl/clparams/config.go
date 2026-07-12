@@ -41,6 +41,11 @@ import (
 
 var LatestStateFileName = "latest.ssz_snappy"
 
+// LatestFinalizedStateFileName holds the node's own most-recently-finalized beacon state, used to
+// resume from a locally-provable finalized anchor on restart. Kept distinct from LatestStateFileName
+// so a head state is never misread as finalized.
+var LatestFinalizedStateFileName = "finalized.ssz_snappy"
+
 type CaplinConfig struct {
 	// Archive related config
 	ArchiveBlocks             bool
