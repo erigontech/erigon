@@ -26,8 +26,13 @@ const witnessCacheMaxBlocks = 96
 
 // witnessResultCache maps a canonical block hash to its pre-marshaled legacy-mode
 // witness. Keying by hash makes reorgs self-evicting — a reorged hash is never
-// requested again and ages out via the LRU — so no reconcile step is needed.
-type witnessResultCache = lru.Cache[common.Hash, *ExecutionWitnessResult]
+// requested again and ages out via the LRU — so no reconcile step is needed. It
+// carries the push feed so the single cache instance both impls share also carries
+// the one feed: a non-nil cache always has a non-nil feed.
+type witnessResultCache struct {
+	*lru.Cache[common.Hash, *ExecutionWitnessResult]
+	feed *witnessFeed
+}
 
 func newWitnessResultCache(blocks uint) *witnessResultCache {
 	if blocks > witnessCacheMaxBlocks {
@@ -37,5 +42,5 @@ func newWitnessResultCache(blocks uint) *witnessResultCache {
 	if err != nil {
 		panic(err)
 	}
-	return c
+	return &witnessResultCache{Cache: c, feed: newWitnessFeed()}
 }

@@ -113,10 +113,10 @@ Behind-tip catch-up and any gap (drop, reorg, cache miss) → plain `debug_execu
 - Modify: `rpc/jsonrpc/witness_cache_builder.go`
 - Modify: `rpc/jsonrpc/witness_cache_builder_test.go`
 
-- [ ] write failing test: the build-success path (extract the existing store tail into a small `storeWitness(num, hash, enc)` helper on the API if that is the cheapest seam) both inserts into the cache and delivers the IDENTICAL `json.RawMessage` bytes to a subscriber on the cache's feed (`bytes.Equal` on the cached and pushed payloads)
-- [ ] implement: `newWitnessResultCache` constructs the feed as a cache field (embed the LRU pointer if the type is currently an alias — `.Add/.Get/.Len` call sites must not change); builder publishes `(num, hash, enc)` immediately after `witnessCache.Add` — cache non-nil implies feed non-nil, no nil-feed branch
-- [ ] refactor pass; confirm no behavior change to existing builder/cache tests and ZERO edits outside `rpc/jsonrpc/`
-- [ ] run `go test ./rpc/jsonrpc/ -run 'TestWitness' -count=1`; `make lint` until clean
+- [x] write failing test: the build-success path (extract the existing store tail into a small `storeWitness(num, hash, enc)` helper on the API if that is the cheapest seam) both inserts into the cache and delivers the IDENTICAL `json.RawMessage` bytes to a subscriber on the cache's feed (`bytes.Equal` on the cached and pushed payloads)
+- [x] implement: `newWitnessResultCache` constructs the feed as a cache field (embed the LRU pointer if the type is currently an alias — `.Add/.Get/.Len` call sites must not change); builder publishes `(num, hash, enc)` immediately after `witnessCache.Add` — cache non-nil implies feed non-nil, no nil-feed branch
+- [x] refactor pass; confirm no behavior change to existing builder/cache tests and ZERO edits outside `rpc/jsonrpc/`
+- [x] run `go test ./rpc/jsonrpc/ -run 'TestWitness' -count=1`; `make lint` until clean
 
 ### Task 3: `debug_subscribe("executionWitnesses")` endpoint + pump (TDD)
 
