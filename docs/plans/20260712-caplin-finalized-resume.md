@@ -132,12 +132,12 @@ EL forward through a gap — no "Downloading Execution History".
 - Modify: `cmd/utils/flags.go`
 - Modify: `cl/phase1/core/checkpoint_sync/util.go`
 
-- [ ] add `ResumeMaxStalenessEpochs uint64` to `clparams.CaplinConfig` (0 = computed default)
-- [ ] add flag `caplin.resume-max-staleness-epochs` in `cmd/utils/flags.go`, wired into the Caplin config assembly (default `0`)
-- [ ] resolve the effective horizon at the use site: default = active fork's sidecar retention (`MinEpochsForBlobSidecarsRequests*SlotsPerEpoch` pre-Fulu; data-column-sidecar retention Fulu+); if a user value exceeds the retention window, log a warning and clamp to it
-- [ ] document inline that the bound is DA-feasibility (not weak-subjectivity)
-- [ ] (tests for honor/clamp are exercised in Task 5's `TestResumeHorizonHonorsAndClampsConfig`)
-- [ ] run `make erigon` — flag wiring compiles before next task
+- [x] add `ResumeMaxStalenessEpochs uint64` to `clparams.CaplinConfig` (0 = computed default)
+- [x] add flag `caplin.resume-max-staleness-epochs` in `cmd/utils/flags.go`, wired into the Caplin config assembly (default `0`)
+- [x] resolve the effective horizon at the use site: default = active fork's sidecar retention (`MinEpochsForBlobSidecarsRequests*SlotsPerEpoch` pre-Fulu; data-column-sidecar retention Fulu+); if a user value exceeds the retention window, log a warning and clamp to it
+- [x] document inline that the bound is DA-feasibility (not weak-subjectivity)
+- [x] (tests for honor/clamp are exercised in Task 5's `TestResumeHorizonHonorsAndClampsConfig`)
+- [x] run `make erigon` — flag wiring compiles before next task
 
 ### Task 4: Persist the finalized state on the save cadence (write-side)
 

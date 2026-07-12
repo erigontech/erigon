@@ -89,6 +89,31 @@ func readLocalStateFile(dirs datadir.Dirs, beaconCfg *clparams.BeaconChainConfig
 	return bs, nil
 }
 
+// resolveResumeHorizonSlots returns the maximum staleness, in slots, a locally-finalized state
+// may have and still be resumed from. The bound is data-availability feasibility, NOT
+// weak-subjectivity: we resume from our own finalized (reorg-immune) state, so the only limit is
+// that forward-syncing the anchor to head needs peers to serve sidecars within the DA retention
+// window. The default is therefore the active fork's sidecar retention — blob sidecars pre-Fulu,
+// data-column sidecars Fulu+. A user override (resumeMaxStalenessEpochs) larger than that window
+// would leave the node unable to fetch the data it needs to catch up, so it is clamped down.
+func resolveResumeHorizonSlots(beaconCfg *clparams.BeaconChainConfig, resumeMaxStalenessEpochs, currentEpoch uint64) uint64 {
+	retentionEpochs := beaconCfg.MinEpochsForBlobSidecarsRequests
+	if beaconCfg.GetCurrentStateVersion(currentEpoch).AfterOrEqual(clparams.FuluVersion) {
+		retentionEpochs = beaconCfg.MinEpochsForDataColumnSidecarsRequests
+	}
+	retentionSlots := retentionEpochs * beaconCfg.SlotsPerEpoch
+	if resumeMaxStalenessEpochs == 0 {
+		return retentionSlots
+	}
+	requestedSlots := resumeMaxStalenessEpochs * beaconCfg.SlotsPerEpoch
+	if requestedSlots > retentionSlots {
+		log.Warn("[Checkpoint Sync] caplin.resume-max-staleness-epochs exceeds the sidecar-retention window; clamping",
+			"requestedEpochs", resumeMaxStalenessEpochs, "retentionEpochs", retentionEpochs)
+		return retentionSlots
+	}
+	return requestedSlots
+}
+
 // stateWithinResumeHorizon reports whether a locally-finalized state at localSlot is recent
 // enough to resume from. The horizon is a data-availability feasibility bound: forward-syncing
 // the anchor to head needs peers to serve sidecars in the DA retention window, so an anchor
