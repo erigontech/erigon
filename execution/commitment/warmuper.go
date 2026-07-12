@@ -116,7 +116,10 @@ func (w *Warmuper) Start() {
 
 	for i := 0; i < w.numWorkers; i++ {
 		w.g.Go(func() error {
-			trieCtx, cleanup := w.ctxFactory()
+			trieCtx, cleanup, err := w.makeTrieCtx()
+			if err != nil {
+				return err
+			}
 			if cleanup != nil {
 				defer cleanup()
 			}
@@ -145,6 +148,34 @@ func (w *Warmuper) Start() {
 		w.mu.Unlock()
 		return nil
 	})
+}
+
+// makeTrieCtx runs ctxFactory without letting a blocked factory (e.g. waiting
+// on the read-tx semaphore) hold CloseAndWait hostage: it gives up as soon as
+// w.ctx is cancelled, and a factory result arriving after that is cleaned up
+// by the factory goroutine itself.
+func (w *Warmuper) makeTrieCtx() (PatriciaContext, func(), error) {
+	type result struct {
+		trieCtx PatriciaContext
+		cleanup func()
+	}
+	res := make(chan result)
+	go func() {
+		trieCtx, cleanup := w.ctxFactory()
+		select {
+		case res <- result{trieCtx, cleanup}:
+		case <-w.ctx.Done():
+			if cleanup != nil {
+				cleanup()
+			}
+		}
+	}()
+	select {
+	case r := <-res:
+		return r.trieCtx, r.cleanup, nil
+	case <-w.ctx.Done():
+		return nil, nil, w.ctx.Err()
+	}
 }
 
 // warmupKey performs the actual warmup for a single key by reading data to warm MDBX page cache.

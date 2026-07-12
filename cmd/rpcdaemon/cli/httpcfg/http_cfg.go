@@ -18,6 +18,7 @@ package httpcfg
 
 import (
 	"net"
+	"runtime"
 	"time"
 
 	"github.com/erigontech/erigon/db/datadir"
@@ -26,6 +27,12 @@ import (
 	"github.com/erigontech/erigon/rpc/rpccfg"
 	"github.com/erigontech/erigon/rpc/rpchelper"
 )
+
+// DefaultDBReadConcurrency is the default MDBX read-tx semaphore size;
+// rationale in DBReadConcurrencyFlag's usage.
+func DefaultDBReadConcurrency() int {
+	return min(max(10, runtime.GOMAXPROCS(-1)*64), 9_000)
+}
 
 type HttpCfg struct {
 	Enabled bool

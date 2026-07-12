@@ -23,7 +23,6 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
-	"runtime"
 	"syscall"
 	"time"
 
@@ -232,7 +231,7 @@ func runDatadirMode(ctx context.Context, logger log.Logger, dataDir, privAPI, lo
 		WithDatadir:       true,
 		PrivateApiAddr:    privAPI,
 		TxPoolApiAddr:     privAPI, // inherit from private API, same as rpcdaemon
-		DBReadConcurrency: min(max(10, runtime.GOMAXPROCS(-1)*64), 9_000),
+		DBReadConcurrency: httpcfg.DefaultDBReadConcurrency(),
 	}
 
 	db, backend, txPool, mining, stateCache, blockReader, engine, ff, bridgeReader, heimdallReader, err :=

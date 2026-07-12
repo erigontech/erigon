@@ -34,6 +34,7 @@ import (
 	"github.com/gofrs/flock"
 	"golang.org/x/sync/semaphore"
 
+	"github.com/erigontech/erigon/cmd/rpcdaemon/cli/httpcfg"
 	"github.com/erigontech/erigon/cmd/utils"
 	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/log/v3"
@@ -292,6 +293,13 @@ func (n *Node) DataDir() string {
 	return n.config.Dirs.DataDir
 }
 
+func roTxsLimit(dbReadConcurrency int) int64 {
+	if dbReadConcurrency > 0 {
+		return int64(dbReadConcurrency)
+	}
+	return int64(httpcfg.DefaultDBReadConcurrency())
+}
+
 func OpenDatabase(ctx context.Context, config *nodecfg.Config, label kv.Label, name string, readonly bool, logger log.Logger) (kv.RwDB, error) {
 	switch label {
 	case dbcfg.ChainDB:
@@ -318,11 +326,7 @@ func OpenDatabase(ctx context.Context, config *nodecfg.Config, label kv.Label, n
 
 	logger.Info("Opening Database", "label", name, "path", dbPath)
 	openFunc := func(exclusive bool) (kv.RwDB, error) {
-		roTxLimit := int64(32)
-		if config.Http.DBReadConcurrency > 0 {
-			roTxLimit = int64(config.Http.DBReadConcurrency)
-		}
-		roTxsLimiter := semaphore.NewWeighted(roTxLimit) // 1 less than max to allow unlocking to happen
+		roTxsLimiter := semaphore.NewWeighted(roTxsLimit(config.Http.DBReadConcurrency))
 		opts := mdbx.New(label, logger).
 			Path(dbPath).
 			GrowthStep(16 * datasize.MB).
