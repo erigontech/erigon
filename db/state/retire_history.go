@@ -23,10 +23,8 @@ import (
 	"github.com/erigontech/erigon/db/kv"
 )
 
-// cutoffInRetireWindow reports whether cutoffTxNum falls strictly inside the entity's visible
-// range: above the oldest file (something to retire) and below the tip (the newest survives).
-// A cutoff at/above the tip would wipe every file — benign when the unfrozen head outruns the
-// prune distance — so callers skip and retry once the tip advances rather than poisoning the batch.
+// cutoffInRetireWindow reports whether cutoffTxNum is strictly inside the visible range:
+// something below it to retire, at least the newest file above it to keep.
 func cutoffInRetireWindow(files visibleFiles, cutoffTxNum uint64) bool {
 	if len(files) == 0 {
 		return false

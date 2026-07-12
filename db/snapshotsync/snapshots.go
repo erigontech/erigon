@@ -1479,11 +1479,8 @@ func (s *BaseRoSnapshots) RetireFilesBelow(typ snaptype.Type, blockTo uint64, on
 	defer v.Close()
 	segs := v.Segments(typ)
 
-	// blockTo past the newest visible segment would retire every file. Benign when transactions
-	// lag headers by more than the prune distance (pruneTo is headers-based via FrozenBlocks):
-	// skip this cycle and retry once the visible tx tip advances, rather than erroring every
-	// cycle in the background retire goroutine.
-	if len(segs) > 0 && blockTo > segs[len(segs)-1].To() {
+	wouldRetireEveryFile := len(segs) > 0 && blockTo > segs[len(segs)-1].To()
+	if wouldRetireEveryFile {
 		return false, nil
 	}
 
