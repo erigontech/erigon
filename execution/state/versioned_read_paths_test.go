@@ -170,7 +170,7 @@ func TestVersionedRead_C1_RevivalViaBalance(t *testing.T) {
 
 // Regression for the refresh* wrappers' missing outcomeReturnZero case: after a
 // self-destruct, the per-field refresh (refreshBalance/refreshNonce/
-// refreshIncarnation/refreshCodeHash, used by refreshVersionedAccount to rebuild
+// refreshIncarnation/refreshCodeHash, the per-field account refresh that rebuilds
 // an account) must return the typed ZERO, not the caller's stale pre-destruct
 // value. Returning the stale value gives the rebuilt account a phantom pre-SD
 // codeHash/balance, so the codeHash-change check compares the stale value
@@ -385,7 +385,7 @@ func TestVersionedRead_G8_StorageFallbackEmptyReader(t *testing.T) {
 // the caller's currentBalance is a behavioral divergence that breaks
 // integration tests (wrong trie root in execution/engineapi).
 //
-// This test calls refreshVersionedAccount-style scenarios by going
+// This test calls per-field-account-refresh-style scenarios by going
 // through getVersionedAccount which triggers refreshBalance/refreshNonce/
 // refreshCodeHash/refreshIncarnation with the storage-read account's
 // fields as defaultV.  Asserts that subsequent reads through the
@@ -394,9 +394,9 @@ func TestVersionedRead_G8_StorageFallbackEmptyReader(t *testing.T) {
 func TestVersionedRead_G4_RefreshRecordsTypedDefaultInReadSet(t *testing.T) {
 	t.Parallel()
 
-	// emptyReader returns nil account — refreshVersionedAccount won't
+	// emptyReader returns nil account — the per-field refresh won't
 	// run for nil-account paths.  We need a reader that returns a
-	// non-nil account so refreshVersionedAccount's per-field refresh*
+	// non-nil account so the per-field refresh*
 	// calls run with non-zero defaultV.
 	r := &refreshReader{
 		account: &accounts.Account{
@@ -510,21 +510,30 @@ func TestVersionedRead_E2_MapReadDifferentVersionPanics(t *testing.T) {
 	// Two writes at different versions; the later version wins in versionMap.
 	mvhm.WriteBalance(addr, Version{TxIndex: 2, Incarnation: 0}, *uint256.NewInt(10), true)
 
-	// Manually seed readSet with a stale version (TxIndex 1) so that the
-	// pr.Version != vr.Version branch fires.
+	// Manually seed readSet with a stale version (TxIndex 1).
 	ibs.versionedReads.SetBalance(addr, VersionedRead[uint256.Int]{
 		ReadHeader: ReadHeader{Source: MapRead, Version: Version{TxIndex: 1, Incarnation: 0}},
 		Val:        *uint256.NewInt(99),
 	})
 
-	defer func() {
-		r := recover()
-		require.NotNil(t, r, "must panic on version mismatch")
-		err, ok := r.(error)
-		require.True(t, ok, "panic must carry an error")
-		assert.ErrorIs(t, err, ErrDependency, "panic carries ErrDependency")
-	}()
-	_, _ = ibs.GetBalance(addr)
+	// Read-once (Block-STM): a path already recorded this execution attempt is
+	// served from the read-set without re-probing the version map, so a repeat
+	// read no longer aborts eagerly. The stale read is caught at commit —
+	// ValidateVersion re-checks it against the newer version-map write (TxIndex 2)
+	// and returns VersionInvalid, which is what drives re-execution.
+	got, err := ibs.GetBalance(addr)
+	require.NoError(t, err)
+	assert.Equal(t, *uint256.NewInt(99), got, "read-once returns the recorded value")
+
+	var io VersionedIO
+	ibs.MergeTxIOInto(&io)
+	valid := mvhm.ValidateVersion(10, &io, func(rv, wv Version) VersionValidity {
+		if rv == wv {
+			return VersionValid
+		}
+		return VersionInvalid
+	}, false, "")
+	assert.Equal(t, VersionInvalid, valid, "commit-time validation catches the stale read")
 }
 
 // F: MVReadResultDependency status (versionMap saw an in-progress dep at a

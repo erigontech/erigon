@@ -53,6 +53,36 @@ Keep `sdProbe` — it is the parallel self-destruct probe cache.
   `versionedWriteCollector` type (tests still reference it); the intermittent
   `bbbb` reconcile-drop.
 
+## Follow-up 5 — warm-read throughput (iterative, aligned with early-detection + pause)
+
+`noMaterialize` routes every read through `versionedReadCore`, which re-probes the
+version map under a **single global `RWMutex`** (versionmap.go). On warm/repeat-read
+cells the reader-counter atomic bounces across workers — profiling `warm-extcodehash`
+showed `RWMutex.RLock` + its `atomic.Int32.Add` at ~17% of samples, paid ~5×/op
+(`Empty()` alone does 4 field probes). Result: warm-family cells sit ~2.2× behind
+geth (and further behind reth), where a warm access is a lock-free resident-map hit.
+Pre-`noMaterialize` (resident `stateObject`) these were geth-comparable, so the
+throughput is recoverable.
+
+Target operating model: **early detection + pause on the _write_ side** — when a
+write publishes, it detects the in-flight txs that already read the now-stale value
+and pauses/reschedules them, so **readers no longer re-probe the version map under
+lock on every access**. That moves detection off the read hot path and makes readers
+a cheap, lock-free resident hit. Iterate toward that:
+
+- Give readers a resident, decoded, interned-handle-keyed warm view (the erigon
+  analogue of revm's `CacheState` / geth's `stateObjects`), hit directly without the
+  per-read `versionedReadCore` re-probe + global `RWMutex`.
+- Move conflict detection to write-publish (identify + pause dependent readers)
+  instead of pull-based re-probing on every read.
+- Cut redundant reads en route (`Empty()`'s 4 probes → 1 for the no-own-write case).
+- Measure each iteration against geth/reth per-op cost; keep iterating until the
+  warm family is geth-comparable (Gap A) and chip at the Go-vs-Rust ceiling (Gap B).
+
+Mind intern costs: `accounts.Address`/`CodeHash` are `unique.Handle`; `unique.Make`
+is a global intern-map + GC-weak-handle op per call (the CALL family re-interns per
+op) — geth/reth don't pay this; the resident view should key on the interned handle.
+
 ## Low-risk quick win
 
 Follow-up 4's `versionedWriteCollector` removal touches no commit path and can be

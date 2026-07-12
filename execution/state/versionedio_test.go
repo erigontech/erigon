@@ -564,11 +564,16 @@ func TestVersionedIO_RemovedDependencyFallsThroughToStorage(t *testing.T) {
 		Val:        *uint256.NewInt(0xBB),
 	})
 
+	// Read-once (Block-STM): the repeat read is served from the read-set without
+	// re-probing, so it returns the recorded MapRead value rather than eagerly
+	// falling through to storage. The removed dependency (a MapRead whose
+	// version-map cell is now gone) is caught at commit — validateReadImpl
+	// invalidates a MapRead that resolves to MVReadResultNone (verified in
+	// validateReadImpl; exercised end-to-end by the parallel exec tests + hive) —
+	// which re-executes the tx and then falls through to the underlying storage.
 	got, err := ibs.GetState(addr, key)
 	require.NoError(t, err)
-	require.Equal(t, storageVal, got,
-		"a read whose version-map dependency was removed must fall through to "+
-			"the underlying storage value, not abort or return the stale MapRead")
+	require.Equal(t, *uint256.NewInt(0xBB), got, "read-once returns the recorded value")
 }
 
 // TestIBSVersionedWrites_SelfdestructRetainsBalanceDropsOtherPaths verifies
@@ -885,10 +890,10 @@ func TestStripBalanceWrite_NilAddress(t *testing.T) {
 // These verify what reads the IBS produces when applying different write types.
 // The direct finalize path must produce equivalent reads for BAL correctness.
 //
-// Key insight: refreshVersionedAccount (the source of BalancePath reads) only
+// Key insight: the per-field account refresh (the source of BalancePath reads) only
 // runs for accounts that ALREADY EXIST in the stateReader or version map.
 // For newly-created accounts, GetOrNewStateObject calls createObject which
-// skips refreshVersionedAccount. This is the normal case for accounts born
+// skips the per-field account refresh. This is the normal case for accounts born
 // in the current block (e.g. contract CREATE).
 
 // accountStateReader returns pre-configured accounts for specific addresses.
@@ -917,7 +922,7 @@ func newAccountStateReader(addrs ...accounts.Address) *accountStateReader {
 
 // TestApplyVersionedWrites_BalanceWriteGeneratesBalanceRead verifies that a
 // BalancePath write through ApplyVersionedWrites generates a BalancePath read
-// (via refreshVersionedAccount in GetOrNewStateObject) for an existing account.
+// (via the per-field account refresh in GetOrNewStateObject) for an existing account.
 func TestApplyVersionedWrites_BalanceWriteGeneratesBalanceRead(t *testing.T) {
 	t.Parallel()
 
@@ -941,7 +946,7 @@ func TestApplyVersionedWrites_BalanceWriteGeneratesBalanceRead(t *testing.T) {
 // TestApplyVersionedWrites_StorageWriteGeneratesBalanceRead verifies that a
 // StoragePath write through ApplyVersionedWrites also generates a BalancePath
 // read. This is because setState calls GetOrNewStateObject which triggers
-// refreshVersionedAccount. The direct finalize path must replicate this.
+// the per-field account refresh. The direct finalize path must replicate this.
 func TestApplyVersionedWrites_StorageWriteGeneratesBalanceRead(t *testing.T) {
 	t.Parallel()
 
@@ -1026,7 +1031,7 @@ func TestApplyVersionedWrites_MultipleAccountsAllGetBalanceReads(t *testing.T) {
 
 // TestApplyVersionedWrites_NewAccountNoBalanceRead verifies that for accounts
 // that DON'T exist in the DB (newly created in this block), ApplyVersionedWrites
-// does NOT generate a BalancePath read. refreshVersionedAccount is skipped
+// does NOT generate a BalancePath read. The per-field account refresh is skipped
 // because createObject is called instead.
 func TestApplyVersionedWrites_NewAccountNoBalanceRead(t *testing.T) {
 	t.Parallel()
@@ -1067,7 +1072,7 @@ func hasRead(reads ReadSet, addr accounts.Address, path AccountPath) bool {
 }
 
 // When a prior tx wrote a sub-field (e.g. BalancePath via AddBalance) without
-// writing AddressPath, refreshVersionedAccount promotes the sub-field version
+// writing AddressPath, the per-field account refresh promotes the sub-field version
 // onto accountRead's AddressPath stamp. The validator's vm.Read(AddressPath)
 // must not invalidate that stamp — otherwise OCC re-execution races
 // identically until the retry budget exhausts.
@@ -1089,7 +1094,7 @@ func TestAccountRead_BalancePathPromotion_DoesNotInvalidate(t *testing.T) {
 	ibs.SetVersion(0)
 	ibs.SetVersionMap(vm)
 
-	// Simulate refreshVersionedAccount's promoted return value:
+	// Simulate the per-field account refresh's promoted return value:
 	// BalancePath at (0,0) bumped (source, version) above the
 	// account-record's own.
 	acc := accounts.NewAccount()

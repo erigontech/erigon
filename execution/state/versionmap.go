@@ -95,6 +95,9 @@ func (k AccountKey) String() string {
 // look like address-level operations (DeleteAll, StorageKeys) are pure
 // iterations of per-field operations.
 type AddressEntry struct {
+	// mu guards this account's cell maps. Held RLock for reads (readFloor and
+	// the per-path scans) and Lock for writes (putCell / Delete / markFlag).
+	mu             sync.RWMutex
 	Address        *btree.Map[int, *WriteCell[*accounts.Account]]
 	SelfDestruct   *btree.Map[int, *WriteCell[bool]]
 	Balance        *btree.Map[int, *WriteCell[uint256.Int]]
@@ -107,7 +110,7 @@ type AddressEntry struct {
 	Storage        map[accounts.StorageKey]*btree.Map[int, *WriteCell[uint256.Int]]
 }
 
-// putCell sets or updates a typed cell at txIdx. Caller must hold vm.mu.Lock().
+// putCell sets or updates a typed cell at txIdx. Caller must hold e.mu.Lock().
 // Returns the (possibly newly-created) cell map for the caller to assign back
 // to its AddressEntry field. `getCell` is the per-T pool fetcher (e.g.
 // getCellBalance for the BalancePath); it is a static function-value, so
@@ -150,19 +153,31 @@ func markCellFlag[T any](cells *btree.Map[int, *WriteCell[T]], txIdx int, flag s
 }
 
 type VersionMap struct {
-	mu     sync.RWMutex
-	s      map[accounts.Address]*AddressEntry
+	// s maps address → *AddressEntry as a sync.Map so account lookup is
+	// lock-free on the read hot path (no shared reader-counter to contend on).
+	// Each AddressEntry carries its own RWMutex guarding that account's cells,
+	// so reads/writes of different accounts never contend — the global RWMutex
+	// this replaced serialised every access. Per-read conflict detection is
+	// unchanged; only the lock granularity moved from global to per-account.
+	s      sync.Map // accounts.Address -> *AddressEntry
 	trace  bool
 	HasBAL bool // When true, all significant writes are pre-populated from BAL
 }
 
 func NewVersionMap(changes []*types.AccountChanges) *VersionMap {
 	vm := &VersionMap{
-		s:      map[accounts.Address]*AddressEntry{},
 		HasBAL: len(changes) > 0,
 	}
 	vm.WriteChanges(changes)
 	return vm
+}
+
+// load returns the AddressEntry for addr, or nil when absent. Lock-free.
+func (vm *VersionMap) load(addr accounts.Address) *AddressEntry {
+	if e, ok := vm.s.Load(addr); ok {
+		return e.(*AddressEntry)
+	}
+	return nil
 }
 
 func (vm *VersionMap) SetTrace(trace bool) {
@@ -174,10 +189,13 @@ func (vm *VersionMap) SetTrace(trace bool) {
 // selfdestructed contract, matching DomainDelPrefix behaviour from the
 // sequential path.
 func (vm *VersionMap) StorageKeys(addr accounts.Address) []accounts.StorageKey {
-	vm.mu.RLock()
-	defer vm.mu.RUnlock()
-	e, ok := vm.s[addr]
-	if !ok || len(e.Storage) == 0 {
+	e := vm.load(addr)
+	if e == nil {
+		return nil
+	}
+	e.mu.RLock()
+	defer e.mu.RUnlock()
+	if len(e.Storage) == 0 {
 		return nil
 	}
 	keys := make([]accounts.StorageKey, 0, len(e.Storage))
@@ -216,87 +234,87 @@ func (vm *VersionMap) WriteChanges(changes []*types.AccountChanges) {
 // runtime data.(T) assertion path through these.
 
 func (vm *VersionMap) WriteAddress(addr accounts.Address, v Version, value *accounts.Account, complete bool) {
-	vm.mu.Lock()
-	defer vm.mu.Unlock()
 	e := vm.entryOrCreate(addr)
+	e.mu.Lock()
+	defer e.mu.Unlock()
 	e.Address = putCell(e.Address, addr, AddressPath, v.TxIndex, v.Incarnation, flagFor(complete), value, getCellAccount)
 }
 
 func (vm *VersionMap) WriteSelfDestruct(addr accounts.Address, v Version, value bool, complete bool) {
-	vm.mu.Lock()
-	defer vm.mu.Unlock()
 	e := vm.entryOrCreate(addr)
+	e.mu.Lock()
+	defer e.mu.Unlock()
 	e.SelfDestruct = putCell(e.SelfDestruct, addr, SelfDestructPath, v.TxIndex, v.Incarnation, flagFor(complete), value, getCellSelfDestruct)
 }
 
 func (vm *VersionMap) WriteBalance(addr accounts.Address, v Version, value uint256.Int, complete bool) {
-	vm.mu.Lock()
-	defer vm.mu.Unlock()
 	e := vm.entryOrCreate(addr)
+	e.mu.Lock()
+	defer e.mu.Unlock()
 	e.Balance = putCell(e.Balance, addr, BalancePath, v.TxIndex, v.Incarnation, flagFor(complete), value, getCellBalance)
 }
 
 func (vm *VersionMap) WriteNonce(addr accounts.Address, v Version, value uint64, complete bool) {
-	vm.mu.Lock()
-	defer vm.mu.Unlock()
 	e := vm.entryOrCreate(addr)
+	e.mu.Lock()
+	defer e.mu.Unlock()
 	e.Nonce = putCell(e.Nonce, addr, NoncePath, v.TxIndex, v.Incarnation, flagFor(complete), value, getCellNonce)
 }
 
 func (vm *VersionMap) WriteIncarnation(addr accounts.Address, v Version, value uint64, complete bool) {
-	vm.mu.Lock()
-	defer vm.mu.Unlock()
 	e := vm.entryOrCreate(addr)
+	e.mu.Lock()
+	defer e.mu.Unlock()
 	e.Incarnation = putCell(e.Incarnation, addr, IncarnationPath, v.TxIndex, v.Incarnation, flagFor(complete), value, getCellIncarnation)
 }
 
 func (vm *VersionMap) WriteCode(addr accounts.Address, v Version, value accounts.Code, complete bool) {
-	vm.mu.Lock()
-	defer vm.mu.Unlock()
 	e := vm.entryOrCreate(addr)
+	e.mu.Lock()
+	defer e.mu.Unlock()
 	e.Code = putCell(e.Code, addr, CodePath, v.TxIndex, v.Incarnation, flagFor(complete), value, getCellCode)
 }
 
 func (vm *VersionMap) WriteCodeHash(addr accounts.Address, v Version, value accounts.CodeHash, complete bool) {
-	vm.mu.Lock()
-	defer vm.mu.Unlock()
 	e := vm.entryOrCreate(addr)
+	e.mu.Lock()
+	defer e.mu.Unlock()
 	e.CodeHash = putCell(e.CodeHash, addr, CodeHashPath, v.TxIndex, v.Incarnation, flagFor(complete), value, getCellCodeHash)
 }
 
 func (vm *VersionMap) WriteCodeSize(addr accounts.Address, v Version, value int, complete bool) {
-	vm.mu.Lock()
-	defer vm.mu.Unlock()
 	e := vm.entryOrCreate(addr)
+	e.mu.Lock()
+	defer e.mu.Unlock()
 	e.CodeSize = putCell(e.CodeSize, addr, CodeSizePath, v.TxIndex, v.Incarnation, flagFor(complete), value, getCellCodeSize)
 }
 
 func (vm *VersionMap) WriteCreateContract(addr accounts.Address, v Version, value bool, complete bool) {
-	vm.mu.Lock()
-	defer vm.mu.Unlock()
 	e := vm.entryOrCreate(addr)
+	e.mu.Lock()
+	defer e.mu.Unlock()
 	e.CreateContract = putCell(e.CreateContract, addr, CreateContractPath, v.TxIndex, v.Incarnation, flagFor(complete), value, getCellCreateContract)
 }
 
 func (vm *VersionMap) WriteStorage(addr accounts.Address, key accounts.StorageKey, v Version, value uint256.Int, complete bool) {
-	vm.mu.Lock()
-	defer vm.mu.Unlock()
 	e := vm.entryOrCreate(addr)
+	e.mu.Lock()
+	defer e.mu.Unlock()
 	if e.Storage == nil {
 		e.Storage = map[accounts.StorageKey]*btree.Map[int, *WriteCell[uint256.Int]]{}
 	}
 	e.Storage[key] = putCell(e.Storage[key], addr, StoragePath, v.TxIndex, v.Incarnation, flagFor(complete), value, getCellStorage)
 }
 
-// entryOrCreate looks up the AddressEntry for addr, creating it if absent.
-// Caller must hold vm.mu.Lock().
+// entryOrCreate returns the AddressEntry for addr, creating it if absent. The
+// returned pointer is stable for the map's lifetime; the caller locks e.mu for
+// the cell mutation. Self-synchronised via sync.Map — no caller lock required.
 func (vm *VersionMap) entryOrCreate(addr accounts.Address) *AddressEntry {
-	e, ok := vm.s[addr]
-	if !ok {
-		e = &AddressEntry{}
-		vm.s[addr] = e
+	if e, ok := vm.s.Load(addr); ok {
+		return e.(*AddressEntry)
 	}
-	return e
+	e, _ := vm.s.LoadOrStore(addr, &AddressEntry{})
+	return e.(*AddressEntry)
 }
 
 func flagFor(complete bool) statusFlag {
@@ -321,12 +339,12 @@ func readFloor[T any](vm *VersionMap, addr accounts.Address, txIdx int, sel func
 	if vm == nil {
 		return val, res, false
 	}
-	vm.mu.RLock()
-	defer vm.mu.RUnlock()
-	e, present := vm.s[addr]
-	if !present {
+	e := vm.load(addr)
+	if e == nil {
 		return val, res, false
 	}
+	e.mu.RLock()
+	defer e.mu.RUnlock()
 	cells := sel(e)
 	if cells == nil {
 		return val, res, false
@@ -437,13 +455,12 @@ func (vm *VersionMap) LatestTxIndex(addr accounts.Address, path AccountPath, key
 	if vm == nil {
 		return 0, false
 	}
-	vm.mu.RLock()
-	defer vm.mu.RUnlock()
-
-	e, ok := vm.s[addr]
-	if !ok {
+	e := vm.load(addr)
+	if e == nil {
 		return 0, false
 	}
+	e.mu.RLock()
+	defer e.mu.RUnlock()
 
 	fk := UnknownDep
 	switch path {
@@ -534,11 +551,13 @@ func (vm *VersionMap) AnyDoneSelfDestructEquals(addr accounts.Address, txIdxLimi
 	if vm == nil {
 		return false
 	}
-	vm.mu.RLock()
-	defer vm.mu.RUnlock()
-
-	e, present := vm.s[addr]
-	if !present || e.SelfDestruct == nil {
+	e := vm.load(addr)
+	if e == nil {
+		return false
+	}
+	e.mu.RLock()
+	defer e.mu.RUnlock()
+	if e.SelfDestruct == nil {
 		return false
 	}
 	found := false
@@ -568,70 +587,73 @@ func (vm *VersionMap) FlushVersionedWrites(writes *WriteSet, complete bool, trac
 	if writes == nil {
 		return
 	}
-	vm.mu.Lock()
-	defer vm.mu.Unlock()
 	flag := flagFor(complete)
-	for addr, vw := range writes.address {
-		e := vm.entryOrCreate(addr)
-		e.Address = putCell(e.Address, addr, AddressPath, vw.Version.TxIndex, vw.Version.Incarnation, flag, vw.Val, getCellAccount)
-	}
-	for addr, vw := range writes.selfDestruct {
-		e := vm.entryOrCreate(addr)
-		e.SelfDestruct = putCell(e.SelfDestruct, addr, SelfDestructPath, vw.Version.TxIndex, vw.Version.Incarnation, flag, vw.Val, getCellSelfDestruct)
-	}
-	for addr, vw := range writes.balance {
-		e := vm.entryOrCreate(addr)
-		e.Balance = putCell(e.Balance, addr, BalancePath, vw.Version.TxIndex, vw.Version.Incarnation, flag, vw.Val, getCellBalance)
-	}
-	for addr, vw := range writes.nonce {
-		e := vm.entryOrCreate(addr)
-		e.Nonce = putCell(e.Nonce, addr, NoncePath, vw.Version.TxIndex, vw.Version.Incarnation, flag, vw.Val, getCellNonce)
-	}
-	for addr, vw := range writes.incarnation {
-		e := vm.entryOrCreate(addr)
-		e.Incarnation = putCell(e.Incarnation, addr, IncarnationPath, vw.Version.TxIndex, vw.Version.Incarnation, flag, vw.Val, getCellIncarnation)
-	}
-	for addr, vw := range writes.code {
-		e := vm.entryOrCreate(addr)
-		e.Code = putCell(e.Code, addr, CodePath, vw.Version.TxIndex, vw.Version.Incarnation, flag, vw.Val, getCellCode)
-	}
-	for addr, vw := range writes.codeHash {
-		e := vm.entryOrCreate(addr)
-		e.CodeHash = putCell(e.CodeHash, addr, CodeHashPath, vw.Version.TxIndex, vw.Version.Incarnation, flag, vw.Val, getCellCodeHash)
-	}
-	for addr, vw := range writes.codeSize {
-		e := vm.entryOrCreate(addr)
-		e.CodeSize = putCell(e.CodeSize, addr, CodeSizePath, vw.Version.TxIndex, vw.Version.Incarnation, flag, vw.Val, getCellCodeSize)
-	}
-	for addr, vw := range writes.createContract {
-		e := vm.entryOrCreate(addr)
-		e.CreateContract = putCell(e.CreateContract, addr, CreateContractPath, vw.Version.TxIndex, vw.Version.Incarnation, flag, vw.Val, getCellCreateContract)
-	}
-	for addr, inner := range writes.storage {
-		e := vm.entryOrCreate(addr)
-		if e.Storage == nil {
-			e.Storage = map[accounts.StorageKey]*btree.Map[int, *WriteCell[uint256.Int]]{}
+	// Flush per account under that account's lock so all of a tx's writes to one
+	// account (e.g. AddressPath + CodePath) become visible atomically — the
+	// property the former global lock guaranteed, now scoped to the account. A
+	// reader of a different account never contends. Cross-account partial
+	// visibility is resolved by commit-time ValidateVersion.
+	seen := make(map[accounts.Address]struct{})
+	writes.forEachAddr(func(addr accounts.Address) {
+		if _, dup := seen[addr]; dup {
+			return
 		}
-		for key, vw := range inner {
-			e.Storage[key] = putCell(e.Storage[key], addr, StoragePath, vw.Version.TxIndex, vw.Version.Incarnation, flag, vw.Val, getCellStorage)
+		seen[addr] = struct{}{}
+		e := vm.entryOrCreate(addr)
+		e.mu.Lock()
+		if vw, ok := writes.address[addr]; ok {
+			e.Address = putCell(e.Address, addr, AddressPath, vw.Version.TxIndex, vw.Version.Incarnation, flag, vw.Val, getCellAccount)
 		}
-	}
+		if vw, ok := writes.selfDestruct[addr]; ok {
+			e.SelfDestruct = putCell(e.SelfDestruct, addr, SelfDestructPath, vw.Version.TxIndex, vw.Version.Incarnation, flag, vw.Val, getCellSelfDestruct)
+		}
+		if vw, ok := writes.balance[addr]; ok {
+			e.Balance = putCell(e.Balance, addr, BalancePath, vw.Version.TxIndex, vw.Version.Incarnation, flag, vw.Val, getCellBalance)
+		}
+		if vw, ok := writes.nonce[addr]; ok {
+			e.Nonce = putCell(e.Nonce, addr, NoncePath, vw.Version.TxIndex, vw.Version.Incarnation, flag, vw.Val, getCellNonce)
+		}
+		if vw, ok := writes.incarnation[addr]; ok {
+			e.Incarnation = putCell(e.Incarnation, addr, IncarnationPath, vw.Version.TxIndex, vw.Version.Incarnation, flag, vw.Val, getCellIncarnation)
+		}
+		if vw, ok := writes.code[addr]; ok {
+			e.Code = putCell(e.Code, addr, CodePath, vw.Version.TxIndex, vw.Version.Incarnation, flag, vw.Val, getCellCode)
+		}
+		if vw, ok := writes.codeHash[addr]; ok {
+			e.CodeHash = putCell(e.CodeHash, addr, CodeHashPath, vw.Version.TxIndex, vw.Version.Incarnation, flag, vw.Val, getCellCodeHash)
+		}
+		if vw, ok := writes.codeSize[addr]; ok {
+			e.CodeSize = putCell(e.CodeSize, addr, CodeSizePath, vw.Version.TxIndex, vw.Version.Incarnation, flag, vw.Val, getCellCodeSize)
+		}
+		if vw, ok := writes.createContract[addr]; ok {
+			e.CreateContract = putCell(e.CreateContract, addr, CreateContractPath, vw.Version.TxIndex, vw.Version.Incarnation, flag, vw.Val, getCellCreateContract)
+		}
+		if inner, ok := writes.storage[addr]; ok {
+			if e.Storage == nil {
+				e.Storage = map[accounts.StorageKey]*btree.Map[int, *WriteCell[uint256.Int]]{}
+			}
+			for key, vw := range inner {
+				e.Storage[key] = putCell(e.Storage[key], addr, StoragePath, vw.Version.TxIndex, vw.Version.Incarnation, flag, vw.Val, getCellStorage)
+			}
+		}
+		e.mu.Unlock()
+	})
 }
 
 func (vm *VersionMap) MarkEstimate(addr accounts.Address, path AccountPath, key accounts.StorageKey, txIdx int) {
-	vm.mu.Lock()
-	defer vm.mu.Unlock()
-	vm.markFlag(addr, path, key, txIdx, FlagEstimate)
+	e := vm.load(addr)
+	if e == nil {
+		panic(fmt.Errorf("markFlag: no entry for addr %x, path %s, txIdx %d", addr, path, txIdx))
+	}
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	markFlag(e, addr, path, key, txIdx, FlagEstimate)
 }
 
 // markFlag updates the flag on an existing (addr, path, key, txIdx) cell.
-// Caller must hold vm.mu.Lock(). Panics if no cell is present at txIdx —
+// Caller must hold e.mu.Lock(). Panics if no cell is present at txIdx —
 // MarkEstimate requires a prior write.
-func (vm *VersionMap) markFlag(addr accounts.Address, path AccountPath, key accounts.StorageKey, txIdx int, flag statusFlag) {
-	e, ok := vm.s[addr]
-	if !ok {
-		panic(fmt.Errorf("markFlag: no entry for addr %x, path %s, txIdx %d", addr, path, txIdx))
-	}
+func markFlag(e *AddressEntry, addr accounts.Address, path AccountPath, key accounts.StorageKey, txIdx int, flag statusFlag) {
 	msg := fmt.Sprintf("markFlag: missing cell. addr=%x path=%s key=%x txIdx=%d", addr, path, key, txIdx)
 	switch path {
 	case AddressPath:
@@ -660,15 +682,15 @@ func (vm *VersionMap) markFlag(addr accounts.Address, path AccountPath, key acco
 }
 
 func (vm *VersionMap) Delete(addr accounts.Address, path AccountPath, key accounts.StorageKey, txIdx int, checkExists bool) {
-	vm.mu.Lock()
-	defer vm.mu.Unlock()
-	e, ok := vm.s[addr]
-	if !ok {
+	e := vm.load(addr)
+	if e == nil {
 		if !checkExists {
 			return
 		}
 		panic(errors.New("path must already exist"))
 	}
+	e.mu.Lock()
+	defer e.mu.Unlock()
 	var hasField bool
 	switch path {
 	case AddressPath:
@@ -750,12 +772,12 @@ func (vm *VersionMap) Delete(addr accounts.Address, path AccountPath, key accoun
 }
 
 func (vm *VersionMap) DeleteAll(addr accounts.Address, txIdx int) {
-	vm.mu.Lock()
-	defer vm.mu.Unlock()
-	e, ok := vm.s[addr]
-	if !ok {
+	e := vm.load(addr)
+	if e == nil {
 		return
 	}
+	e.mu.Lock()
+	defer e.mu.Unlock()
 	if e.Address != nil {
 		if c, ok := e.Address.Delete(txIdx); ok {
 			releaseCellAccount(c)

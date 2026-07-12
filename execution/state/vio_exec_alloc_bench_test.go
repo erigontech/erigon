@@ -127,7 +127,7 @@ func BenchmarkVersionedExecReads(b *testing.B) {
 // it does NOT reproduce the warm-extcodehash benchmarkoor cell's refresh path —
 // with only field cells and an empty reader, readAccount returns nil and Empty()
 // short-circuits on the absent path (getVersionedAccount returns before
-// refreshVersionedAccount). Making it hit refresh needs a populated reader, not
+// the per-field account refresh). Making it hit refresh needs a populated reader, not
 // just versionMap cells; the real warm-refresh + SelfDestruct-probe cost of the
 // 20x outlier must be measured on the benchmarkoor cell (per the perf skill),
 // not here. Retained as an absent/existence-read + SD-probe alloc baseline.

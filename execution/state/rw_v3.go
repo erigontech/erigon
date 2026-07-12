@@ -1031,7 +1031,9 @@ type BlockStateCache struct {
 
 	// committed holds pre-block state, lazily populated on first read.
 	// These values are returned by CachedReaderV3 for GetCommittedState.
-	committedAccounts map[accounts.Address]*accounts.Account
+	// committedAccounts is write-once-per-key (an immutable pre-block view),
+	// so it is a sync.Map for lock-free reads off the shared mu hot path.
+	committedAccounts sync.Map // accounts.Address -> *accounts.Account (nil ptr = absent)
 	committedStorage  map[accounts.Address]map[accounts.StorageKey][]byte
 
 	// current holds the latest state including intra-block writes.
@@ -1087,11 +1089,10 @@ type bcWriteOp struct {
 
 func NewBlockStateCache() *BlockStateCache {
 	return &BlockStateCache{
-		committedAccounts: make(map[accounts.Address]*accounts.Account),
-		committedStorage:  make(map[accounts.Address]map[accounts.StorageKey][]byte),
-		currentAccounts:   make(map[accounts.Address][]byte),
-		currentStorage:    make(map[accounts.Address]map[accounts.StorageKey][]byte),
-		currentCode:       make(map[accounts.Address][]byte),
+		committedStorage: make(map[accounts.Address]map[accounts.StorageKey][]byte),
+		currentAccounts:  make(map[accounts.Address][]byte),
+		currentStorage:   make(map[accounts.Address]map[accounts.StorageKey][]byte),
+		currentCode:      make(map[accounts.Address][]byte),
 	}
 }
 
@@ -1099,17 +1100,16 @@ func NewBlockStateCache() *BlockStateCache {
 
 // GetCommittedAccount returns the pre-block account, or (nil, false) if not cached.
 func (c *BlockStateCache) GetCommittedAccount(addr accounts.Address) (*accounts.Account, bool) {
-	c.mu.RLock()
-	acc, ok := c.committedAccounts[addr]
-	c.mu.RUnlock()
-	return acc, ok
+	v, ok := c.committedAccounts.Load(addr)
+	if !ok {
+		return nil, false
+	}
+	return v.(*accounts.Account), true
 }
 
 // PutCommittedAccount caches a pre-block account. Nil = doesn't exist.
 func (c *BlockStateCache) PutCommittedAccount(addr accounts.Address, acc *accounts.Account) {
-	c.mu.Lock()
-	c.committedAccounts[addr] = acc
-	c.mu.Unlock()
+	c.committedAccounts.Store(addr, acc)
 }
 
 // GetCommittedStorage returns the pre-block storage value, or (nil, false) if not cached.
@@ -1206,15 +1206,15 @@ func (c *BlockStateCache) GetCurrentAccount(addr accounts.Address) ([]byte, bool
 		c.mu.RUnlock()
 		return enc, true
 	}
+	c.mu.RUnlock()
 	// Fall back to serializing the committed account.
-	if acc, ok := c.committedAccounts[addr]; ok {
-		c.mu.RUnlock()
+	if v, ok := c.committedAccounts.Load(addr); ok {
+		acc := v.(*accounts.Account)
 		if acc == nil {
 			return nil, true
 		}
 		return accounts.SerialiseV3(acc), true
 	}
-	c.mu.RUnlock()
 	return nil, false
 }
 

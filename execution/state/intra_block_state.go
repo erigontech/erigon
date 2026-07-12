@@ -189,9 +189,16 @@ type IntraBlockState struct {
 	// at the block level.  Per-path typed maps give single-level lookups for
 	// non-storage paths; the AccountKey{Path,Key} struct allocation is gone
 	// from the probe hot path.
-	versionMap          *VersionMap
-	versionedWrites     WriteSet
-	versionedReads      ReadSet
+	versionMap      *VersionMap
+	versionedWrites WriteSet
+	versionedReads  ReadSet
+	// committedBase memoizes the per-tx committed (pre-block) account fallback
+	// used by versionedAccountBase when the versionMap has no cell for addr.
+	// The committed view is block-immutable and this branch is only reached on
+	// a versionMap miss (a written account returns via the write-set), so the
+	// cached pointer is safe to share across the tx's read-only callers. Reset
+	// per tx.
+	committedBase       map[accounts.Address]*accounts.Account
 	accountReadDuration time.Duration
 	accountReadCount    int64
 	storageReadDuration time.Duration
@@ -392,6 +399,7 @@ func (sdb *IntraBlockState) Reset() {
 	sdb.accessList.Reset()
 	sdb.transientStorage = newTransientStorage()
 	sdb.versionMap = nil
+	clear(sdb.committedBase)
 	// Read side rebinds to a fresh empty set: VersionedReads() at end of
 	// tx hands the per-path maps to result.TxIn, so rebinding leaves the
 	// handed-over maps intact while the next tx lazily reallocs.
@@ -524,7 +532,7 @@ func (sdb *IntraBlockState) Exist(addr accounts.Address) (exists bool, err error
 	}
 
 	// Existence needs only the base record + self-destruct gate, not the
-	// per-field overlay, so skip refreshVersionedAccount.
+	// per-field overlay.
 	// Same-tx self-destruct: the account is still alive (EIP-6780).
 	// Cross-tx self-destruct: versionedAccountBase returns nil.
 	readAccount, _, _, err := sdb.versionedAccountBase(addr, true)
@@ -554,8 +562,8 @@ func (sdb *IntraBlockState) Empty(addr accounts.Address) (empty bool, err error)
 	}
 	// Existence + the self-destruct/revival gate, without reconstructing the
 	// whole account: the EIP-161 verdict needs only the current balance, nonce
-	// and code hash, read per-field below (short-circuiting), so the
-	// refreshVersionedAccount overlay + account allocation are avoided.
+	// and code hash, read per-field below (short-circuiting), so the per-field
+	// overlay and a full-account allocation are avoided.
 	account, _, _, err := sdb.versionedAccountBase(addr, true)
 	if err != nil {
 		return false, err
@@ -1090,20 +1098,30 @@ func (sdb *IntraBlockState) versionedAccountBase(addr accounts.Address, readStor
 
 	if readAccount == nil {
 		if readStorage {
-			if dbg.TraceDomainIO || (dbg.TraceTransactionIO && (sdb.trace || dbg.TraceAccount(addr.Handle()))) {
-				sdb.stateReader.SetTrace(true, fmt.Sprintf("%d (%d.%d)", sdb.blockNum, sdb.txIndex, sdb.version))
-			}
-			var readStart time.Time
-			if dbg.KVReadLevelledMetrics {
-				readStart = time.Now()
-			}
-			readAccount, err = sdb.stateReader.ReadAccountData(addr)
-			if dbg.KVReadLevelledMetrics {
-				sdb.accountReadDuration += time.Since(readStart)
-				sdb.accountReadCount++
+			if cached, ok := sdb.committedBase[addr]; ok {
+				readAccount = cached
+			} else {
+				if dbg.TraceDomainIO || (dbg.TraceTransactionIO && (sdb.trace || dbg.TraceAccount(addr.Handle()))) {
+					sdb.stateReader.SetTrace(true, fmt.Sprintf("%d (%d.%d)", sdb.blockNum, sdb.txIndex, sdb.version))
+				}
+				var readStart time.Time
+				if dbg.KVReadLevelledMetrics {
+					readStart = time.Now()
+				}
+				readAccount, err = sdb.stateReader.ReadAccountData(addr)
+				if dbg.KVReadLevelledMetrics {
+					sdb.accountReadDuration += time.Since(readStart)
+					sdb.accountReadCount++
+				}
+				sdb.stateReader.SetTrace(false, "")
+				if err == nil {
+					if sdb.committedBase == nil {
+						sdb.committedBase = make(map[accounts.Address]*accounts.Account)
+					}
+					sdb.committedBase[addr] = readAccount
+				}
 			}
 			source = StorageRead
-			sdb.stateReader.SetTrace(false, "")
 		}
 
 		if readAccount == nil || err != nil {
@@ -1112,7 +1130,7 @@ func (sdb *IntraBlockState) versionedAccountBase(addr accounts.Address, readStor
 
 		// CachedReaderV3 bypasses the versionMap, so a prior in-block SD'd
 		// address still returns its pre-SD record. Without this gate the
-		// stale nonce/codeHash flows through refreshVersionedAccount (which
+		// stale nonce/codeHash flows through the per-field refresh (which
 		// only overwrites fields a versionMap cell exists for), so Empty()
 		// returns false and the EVM misses CallNewAccountGas.
 		if destroyed, _, revived := sdb.versionMap.AccountLifecycle(addr, sdb.txIndex); destroyed && !revived {
@@ -1279,7 +1297,8 @@ func (sdb *IntraBlockState) SetCode(addr accounts.Address, code []byte, reason t
 	origHash := stateObject.original.CodeHash
 	if sdb.versionMap != nil {
 		// so.data/so.original are the base record and miss a prior-tx
-		// CodeHashPath-only write now that refreshVersionedAccount is gone.
+		// CodeHashPath-only write (the per-field reads no longer rebuild a
+		// full account).
 		// baseCodeHash ("what this SetCode saw") = the current cell, including
 		// this tx's own earlier code writes. origHash (the cumulative net-zero
 		// baseline) = the versionMap floor at txIndex — the tx-start value,

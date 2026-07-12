@@ -618,19 +618,26 @@ func TestVersionMapMarkEstimate(t *testing.T) {
 		mvhm.MarkEstimate(h.Address, h.Path, h.Key, 1)
 	}
 
-	defer func() {
-		if r := recover(); r == nil {
-			t.Errorf("The code did not panic")
-		} else {
-			t.Log("Recovered in f", r)
-		}
-	}()
-
-	// Tx2 read again should get default (empty) vals because its dependency Tx1 is marked as estimate
+	// Read-once (Block-STM): states[2] already recorded its state/balance reads
+	// above, so the repeat reads are served from the read-set and no longer abort
+	// eagerly when Tx1's writes are marked ESTIMATE. The estimate dependency is
+	// caught at commit — ValidateVersion re-reads Tx1's now-Estimate balance cell
+	// (MVReadResultDependency) and returns VersionInvalid, which drives re-execution.
 	v, err = states[2].GetState(addr, key)
 	assert.NoError(t, err)
 	assert.Equal(t, u256.U64(1), v)
-	states[2].GetBalance(addr)
+	_, err = states[2].GetBalance(addr)
+	assert.NoError(t, err)
+
+	var io2 VersionedIO
+	states[2].MergeTxIOInto(&io2)
+	valid := mvhm.ValidateVersion(2, &io2, func(rv, wv Version) VersionValidity {
+		if rv == wv {
+			return VersionValid
+		}
+		return VersionInvalid
+	}, false, "")
+	assert.Equal(t, VersionInvalid, valid, "commit-time validation catches the ESTIMATE dependency")
 
 	// Tx1 read again should get Tx0 vals
 	v, err = states[1].GetState(addr, key)
