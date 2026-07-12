@@ -27,8 +27,6 @@ object instead of individual files. This deletes both atomics from `FilesItem`, 
 Scope decisions (confirmed with user):
 
 - **Reclaim inline on head-drain.**
-- **Ignore the forkable subsystem entirely** (`forkable*.go`, `proto_forkable.go`,
-  `snap_repo.go`) — not used.
 
 ## Design
 
