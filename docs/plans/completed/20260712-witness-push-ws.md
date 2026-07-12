@@ -149,8 +149,8 @@ Behind-tip catch-up and any gap (drop, reorg, cache miss) → plain `debug_execu
 
 ### Task 6: wrap-up
 
-- [ ] confirm the wire-contract section of this plan matches final code (PR 3 consumes it verbatim)
-- [ ] update checkboxes to final state; move this plan to `docs/plans/completed/`
+- [x] confirm the wire-contract section of this plan matches final code (PR 3 consumes it verbatim)
+- [x] update checkboxes to final state; move this plan to `docs/plans/completed/`
 
 ## Post-Completion
 
