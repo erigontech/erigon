@@ -70,7 +70,6 @@ import (
 	"github.com/erigontech/erigon/db/snaptype"
 	"github.com/erigontech/erigon/db/state"
 	"github.com/erigontech/erigon/db/state/statecfg"
-	"github.com/erigontech/erigon/diagnostics/diaglib"
 	"github.com/erigontech/erigon/diagnostics/mem"
 	"github.com/erigontech/erigon/execution/builder"
 	"github.com/erigontech/erigon/execution/cache"
@@ -1450,10 +1449,8 @@ func (s *Ethereum) Start() error {
 	}
 
 	if chainspec.IsChainPoS(s.chainConfig, currentTDProvider) {
-		diaglib.Send(diaglib.SyncStageList{StagesList: diaglib.InitStagesFromList(s.pipelineStagedSync.StagesIdsList())})
 		go s.execModule.Start(s.sentryCtx, hook)
 	} else if s.chainConfig.Bor != nil {
-		diaglib.Send(diaglib.SyncStageList{StagesList: diaglib.InitStagesFromList(s.stagedSync.StagesIdsList())})
 		s.bgComponentsEg.Go(func() error {
 			defer s.logger.Info("[polygon.sync] exeuction server start goroutine completed")
 			s.execModule.Start(s.sentryCtx, hook)

@@ -30,7 +30,6 @@ import (
 	"net"
 	"slices"
 	"sort"
-	"strconv"
 	"sync"
 	"sync/atomic"
 	"syscall"
@@ -46,7 +45,6 @@ import (
 	"github.com/erigontech/erigon/common/dir"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/datadir"
-	"github.com/erigontech/erigon/diagnostics/diaglib"
 	"github.com/erigontech/erigon/execution/rlp"
 	"github.com/erigontech/erigon/node/direct"
 	"github.com/erigontech/erigon/node/gointerfaces"
@@ -719,32 +717,11 @@ func runPeer(
 			logger.Error("[p2p] Unknown message code", "code", msg.Code, "peer", hex.EncodeToString(peerID[:]))
 		}
 
-		if diaglib.TypeOf(diaglib.PeerStatisticMsgUpdate{}).Enabled() {
-			msgType := eth.ToProto[protocol][msg.Code]
-			trackPeerStatistics(peerInfo.peer.Fullname(), peerInfo.peer.ID().String(), true, msgType.String(), cap.String(), int(msg.Size))
-		}
-
 		msg.Discard()
 		peerInfo.ClearDeadlines(time.Now(), givePermit)
 	}
 }
 
-func trackPeerStatistics(peerName string, peerID string, inbound bool, msgType string, msgCap string, bytes int) {
-	isDiagEnabled := diaglib.TypeOf(diaglib.PeerStatisticMsgUpdate{}).Enabled()
-	if isDiagEnabled {
-		stats := diaglib.PeerStatisticMsgUpdate{
-			PeerName: peerName,
-			PeerID:   peerID,
-			Inbound:  inbound,
-			MsgType:  msgType,
-			MsgCap:   msgCap,
-			Bytes:    bytes,
-			PeerType: "Sentry",
-		}
-
-		diaglib.Send(stats)
-	}
-}
 func runWitPeer(
 	ctx context.Context,
 	peerID [64]byte,
@@ -1354,10 +1331,7 @@ func (ss *GrpcServer) writePeer(logPrefix string, peerInfo *PeerInfo, msgID sent
 		default:
 		}
 
-		protocolName, protocolVersion := ss.protocolForMessageID(msgID)
-		if diaglib.TypeOf(diaglib.PeerStatisticMsgUpdate{}).Enabled() {
-			trackPeerStatistics(peerInfo.peer.Fullname(), peerInfo.peer.ID().String(), false, msgID.String(), protocolName+"/"+strconv.FormatUint(uint64(protocolVersion), 10), len(data))
-		}
+		protocolName, _ := ss.protocolForMessageID(msgID)
 
 		// Select the rw for the message's subprotocol. eth and wit live on
 		// the same RLPx connection but at different code offsets — writing
