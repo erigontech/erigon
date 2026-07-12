@@ -228,10 +228,6 @@ func processDownloadedBlockBatches(ctx context.Context, logger log.Logger, cfg *
 						err = fmt.Errorf("failed to dump state: %w", err)
 						return
 					}
-					if err = saveHeadStateOnDiskIfNeeded(cfg, st); err != nil {
-						err = fmt.Errorf("failed to save head state: %w", err)
-						return
-					}
 					if err = saveFinalizedStateOnDiskIfNeeded(cfg.forkChoice, cfg.beaconCfg, cfg.dirs, st.Slot()); err != nil {
 						err = fmt.Errorf("failed to save finalized state: %w", err)
 						return
@@ -248,10 +244,6 @@ func processDownloadedBlockBatches(ctx context.Context, logger log.Logger, cfg *
 			if err == nil && st != nil {
 				if err = cfg.forkChoice.DumpBeaconStateOnDisk(st); err != nil {
 					err = fmt.Errorf("failed to dump state: %w", err)
-					return
-				}
-				if err = saveHeadStateOnDiskIfNeeded(cfg, st); err != nil {
-					err = fmt.Errorf("failed to save head state: %w", err)
 					return
 				}
 				if err = saveFinalizedStateOnDiskIfNeeded(cfg.forkChoice, cfg.beaconCfg, cfg.dirs, st.Slot()); err != nil {

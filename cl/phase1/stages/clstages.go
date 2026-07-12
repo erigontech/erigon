@@ -261,9 +261,6 @@ func ConsensusClStages(ctx context.Context,
 					return ChainTipSync
 				},
 				ActionFunc: func(ctx context.Context, logger log.Logger, cfg *Cfg, args Args) error {
-					if err := saveHeadStateOnDiskIfNeeded(cfg, cfg.state); err != nil {
-						return err
-					}
 					if err := saveFinalizedStateOnDiskIfNeeded(cfg.forkChoice, cfg.beaconCfg, cfg.dirs, cfg.state.Slot()); err != nil {
 						return err
 					}

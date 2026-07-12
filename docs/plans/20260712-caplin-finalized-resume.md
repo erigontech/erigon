@@ -179,12 +179,12 @@ EL forward through a gap — no "Downloading Execution History".
 - Modify: `cl/phase1/stages/clstages.go`
 - Modify: `cl/phase1/core/checkpoint_sync/checkpoint_sync_test.go`
 
-- [ ] point the remote-failure fallback (`util.go:41`) at the finalized file (error if absent)
-- [ ] point `NewLocalCheckpointSyncer` (`local_checkpoint_syncer.go:30`) at the finalized file, falling back to genesis when absent (fixes its latent head-as-finalized bootstrap)
-- [ ] grep `LatestStateFileName`; confirm zero remaining production readers, then remove the head-state write (`saveHeadStateOnDiskIfNeeded` + its four call sites)
-- [ ] write `TestLocalCheckpointSyncFromFinalizedFile` (mirror of `TestLocalCheckpointSyncFromFile`)
-- [ ] write `TestLocalCheckpointSyncFallsBackToGenesisWhenAbsent`
-- [ ] update existing local-sync tests to the new file; run tests — must pass before next task
+- [x] point the remote-failure fallback (`util.go:41`) at the finalized file (error if absent)
+- [x] point `NewLocalCheckpointSyncer` (`local_checkpoint_syncer.go:30`) at the finalized file, falling back to genesis when absent (fixes its latent head-as-finalized bootstrap)
+- [x] grep `LatestStateFileName`; confirm zero remaining production readers, then remove the head-state write (`saveHeadStateOnDiskIfNeeded` + its four call sites)
+- [x] write `TestLocalCheckpointSyncFromFinalizedFile` (mirror of `TestLocalCheckpointSyncFromFile`)
+- [x] write `TestLocalCheckpointSyncFallsBackToGenesisWhenAbsent`
+- [x] update existing local-sync tests to the new file; run tests — must pass before next task
 
 ### Task 7: Verify acceptance criteria
 

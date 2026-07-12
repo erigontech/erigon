@@ -171,13 +171,13 @@ func TestRemoteCheckpointSyncRejectsHTML(t *testing.T) {
 	require.Contains(t, err.Error(), "unexpected content-type")
 }
 
-func TestLocalCheckpointSyncFromFile(t *testing.T) {
+func TestLocalCheckpointSyncFromFinalizedFile(t *testing.T) {
 	_, st, _ := tests.GetPhase0Random()
 	f := afero.NewMemMapFs()
 	enc, err := st.EncodeSSZ(nil)
 	enc = utils.CompressSnappy(enc)
 	require.NoError(t, err)
-	require.NoError(t, afero.WriteFile(f, clparams.LatestStateFileName, enc, 0o644))
+	require.NoError(t, afero.WriteFile(f, clparams.LatestFinalizedStateFileName, enc, 0o644))
 
 	genesisState, err := st.Copy()
 	require.NoError(t, err)
@@ -389,7 +389,7 @@ func TestResumeHorizonHonorsAndClampsConfig(t *testing.T) {
 	assert.Equal(t, retention, resolveResumeHorizonSlots(cfg, cfg.MinEpochsForBlobSidecarsRequests+1000, 0), "a value above the window is clamped down")
 }
 
-func TestLocalCheckpointSyncFromGenesis(t *testing.T) {
+func TestLocalCheckpointSyncFallsBackToGenesisWhenAbsent(t *testing.T) {
 	_, st, _ := tests.GetPhase0Random()
 	f := afero.NewMemMapFs()
 

@@ -39,11 +39,8 @@ import (
 	executiontypes "github.com/erigontech/erigon/execution/types"
 )
 
-var LatestStateFileName = "latest.ssz_snappy"
-
 // LatestFinalizedStateFileName holds the node's own most-recently-finalized beacon state, used to
-// resume from a locally-provable finalized anchor on restart. Kept distinct from LatestStateFileName
-// so a head state is never misread as finalized.
+// resume from a locally-provable finalized anchor on restart.
 var LatestFinalizedStateFileName = "finalized.ssz_snappy"
 
 type CaplinConfig struct {

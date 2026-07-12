@@ -19,8 +19,8 @@ import (
 )
 
 // ReadOrFetchLatestBeaconState reads the latest beacon state from disk or fetches it from the network.
-// If remote checkpoint sync fails, it falls back to the local head state on disk.
-// If no local head state is available, it returns an error.
+// If remote checkpoint sync fails, it falls back to the local finalized state on disk.
+// If no local finalized state is available, it returns an error.
 func ReadOrFetchLatestBeaconState(ctx context.Context, dirs datadir.Dirs, beaconCfg *clparams.BeaconChainConfig, caplinConfig clparams.CaplinConfig, genesisDB genesisdb.GenesisDB) (*state.CachingBeaconState, error) {
 	var syncer CheckpointSyncer
 	// Allow remote checkpoint sync for devnets when the user explicitly provides a checkpoint sync URL.
@@ -42,16 +42,16 @@ func ReadOrFetchLatestBeaconState(ctx context.Context, dirs datadir.Dirs, beacon
 		if errors.Is(err, context.Canceled) {
 			return nil, err
 		}
-		log.Warn("[Checkpoint Sync] Remote checkpoint sync failed, attempting to read local head state", "err", err)
+		log.Warn("[Checkpoint Sync] Remote checkpoint sync failed, attempting to read local finalized state", "err", err)
 
-		// Fallback: try to read the local head state from disk
-		localState, localErr := ReadLocalHeadState(dirs, beaconCfg)
+		// Fallback: try to read the local finalized state from disk
+		localState, localErr := ReadLocalFinalizedState(dirs, beaconCfg)
 		if localErr == nil {
-			log.Info("[Checkpoint Sync] Successfully loaded local head state", "slot", localState.Slot())
+			log.Info("[Checkpoint Sync] Successfully loaded local finalized state", "slot", localState.Slot())
 			return localState, nil
 		}
-		log.Error("[Checkpoint Sync] No local head state available either", "err", localErr)
-		return nil, fmt.Errorf("remote checkpoint sync failed: %w, and no local head state: %w", err, localErr)
+		log.Error("[Checkpoint Sync] No local finalized state available either", "err", localErr)
+		return nil, fmt.Errorf("remote checkpoint sync failed: %w, and no local finalized state: %w", err, localErr)
 	}
 
 	// Non-remote sync path (disabled checkpoint sync or devnet)
@@ -62,11 +62,6 @@ func ReadOrFetchLatestBeaconState(ctx context.Context, dirs datadir.Dirs, beacon
 	}
 	syncer = NewLocalCheckpointSyncer(genesisState, afero.NewBasePathFs(aferoFs, dirs.CaplinLatest))
 	return syncer.GetLatestBeaconState(ctx)
-}
-
-// ReadLocalHeadState reads the head state directly from disk without falling back to genesis.
-func ReadLocalHeadState(dirs datadir.Dirs, beaconCfg *clparams.BeaconChainConfig) (*state.CachingBeaconState, error) {
-	return readLocalStateFile(dirs, beaconCfg, clparams.LatestStateFileName, "head")
 }
 
 // ReadLocalFinalizedState reads the node's own most-recently-finalized state directly from disk.

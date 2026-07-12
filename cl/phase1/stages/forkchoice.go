@@ -292,32 +292,6 @@ func emitNextPaylodAttributesEvent(cfg *Cfg, headSlot uint64, headRoot common.Ha
 	return nil
 }
 
-// saveHeadStateOnDiskIfNeeded saves the head state on disk for eventual node restarts without checkpoint sync.
-func saveHeadStateOnDiskIfNeeded(cfg *Cfg, headState *state.CachingBeaconState) error {
-	epochFrequency := uint64(5)
-	if headState.Slot()%(cfg.beaconCfg.SlotsPerEpoch*epochFrequency) == 0 {
-		dat, err := utils.EncodeSSZSnappy(headState)
-		if err != nil {
-			return fmt.Errorf("failed to encode ssz snappy: %w", err)
-		}
-		// Write the head state to disk
-		fileToWriteTo := fmt.Sprintf("%s/%s", cfg.dirs.CaplinLatest, clparams.LatestStateFileName)
-
-		// Create the directory if it doesn't exist
-		err = os.MkdirAll(cfg.dirs.CaplinLatest, 0o755)
-		if err != nil {
-			return fmt.Errorf("failed to create directory: %w", err)
-		}
-
-		// Write the data to the file
-		err = os.WriteFile(fileToWriteTo, dat, 0o644)
-		if err != nil {
-			return fmt.Errorf("failed to write head state to disk: %w", err)
-		}
-	}
-	return nil
-}
-
 // writeFinalizedStateFile snappy-encodes st and atomically replaces the finalized-state resume
 // file. The temp file lives in the same directory as the target so os.Rename is atomic.
 func writeFinalizedStateFile(dirs datadir.Dirs, st *state.CachingBeaconState) error {
@@ -405,11 +379,6 @@ func postForkchoiceOperations(ctx context.Context, tx kv.RwTx, logger log.Logger
 		// Dump the head state on disk for ease of chain reorgs
 		if err := cfg.forkChoice.DumpBeaconStateOnDisk(headState); err != nil {
 			return fmt.Errorf("failed to dump beacon state on disk: %w", err)
-		}
-
-		// Save the head state on disk for eventual node restarts without checkpoint sync
-		if err := saveHeadStateOnDiskIfNeeded(cfg, headState); err != nil {
-			return fmt.Errorf("failed to save head state on disk: %w", err)
 		}
 
 		// Persist the finalized state so a restart can resume from a locally-provable anchor
