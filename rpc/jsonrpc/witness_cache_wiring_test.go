@@ -16,7 +16,20 @@
 
 package jsonrpc
 
-import "testing"
+import (
+	"bytes"
+	"context"
+	"encoding/json"
+	"testing"
+	"time"
+
+	"github.com/stretchr/testify/require"
+
+	"github.com/erigontech/erigon/cmd/rpcdaemon/cli/httpcfg"
+	"github.com/erigontech/erigon/cmd/rpcdaemon/rpcdaemontest"
+	"github.com/erigontech/erigon/common/hexutil"
+	"github.com/erigontech/erigon/rpc/rpccfg"
+)
 
 func TestWitnessCacheShouldEnable(t *testing.T) {
 	t.Parallel()
@@ -52,4 +65,60 @@ func TestNewWitnessCacheBuilderAPIDisabled(t *testing.T) {
 	if impl != nil {
 		t.Fatalf("disabled builder returned non-nil impl")
 	}
+}
+
+// TestWitnessCacheWiringSharedFeed exercises the real enabled-construction path: the
+// cache NewWitnessCacheBuilderAPI returns is the same instance threaded onto the
+// serve-side debug impl (as APIList does), and it carries the one feed — so a witness
+// the builder impl stores reaches a subscriber obtained through the serve-side impl.
+func TestWitnessCacheWiringSharedFeed(t *testing.T) {
+	m, _, _ := rpcdaemontest.CreateTestExecModule(t)
+
+	cfg := &httpcfg.HttpCfg{
+		WitnessCacheBlocks: 8,
+		EvmCallTimeout:     rpccfg.DefaultEvmCallTimeout,
+		Dirs:               m.Dirs,
+	}
+	cache, builder := NewWitnessCacheBuilderAPI(true, m.DB, nil, nil, m.StateCache, m.BlockReader, cfg, m.Engine, nil)
+	require.NotNil(t, cache, "enabled builder must return a cache")
+	require.NotNil(t, builder, "enabled builder must return an impl")
+	require.Same(t, cache, builder.witnessCache, "builder impl shares the returned cache")
+	require.NotNil(t, cache.feed, "an enabled cache always carries a feed")
+
+	serve := &DebugAPIImpl{witnessCache: cache}
+
+	ctx, resc, closec := witnessTestNotifier(t)
+	defer close(closec)
+
+	sub, err := serve.ExecutionWitnesses(ctx, &WitnessSubscriptionOpts{Encoding: "json"})
+	require.NoError(t, err)
+	require.NotNil(t, sub)
+
+	hash := hashN(0x55)
+	enc := json.RawMessage(`{"state":["0xfeed"],"codes":[],"keys":[],"headers":[]}`)
+	builder.storeWitness(21, hash, enc)
+
+	select {
+	case v := <-resc:
+		n, ok := v.(WitnessNotification)
+		require.Truef(t, ok, "notification payload must be WitnessNotification, got %T", v)
+		require.Equal(t, hexutil.Uint64(21), n.BlockNumber)
+		require.Equal(t, hash, n.BlockHash)
+		require.True(t, bytes.Equal(enc, n.Witness), "witness bytes must reach the serve-side subscriber verbatim")
+	case <-time.After(2 * time.Second):
+		t.Fatal("builder publish did not reach the serve-side subscriber over the shared feed")
+	}
+}
+
+// TestWitnessCacheWiringDisabled pins the disabled end of the wiring: a nil cache
+// threaded onto the serve-side impl (as APIList does when the flag is off) makes
+// ExecutionWitnesses reject the subscription with the actionable embedded-only error.
+func TestWitnessCacheWiringDisabled(t *testing.T) {
+	t.Parallel()
+	cache, _ := NewWitnessCacheBuilderAPI(false, nil, nil, nil, nil, nil, nil, nil, nil)
+	serve := &DebugAPIImpl{witnessCache: cache}
+	_, err := serve.ExecutionWitnesses(context.Background(), nil)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "--witness.cache.blocks")
+	require.Contains(t, err.Error(), "debug_executionWitness")
 }

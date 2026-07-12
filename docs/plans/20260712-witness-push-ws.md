@@ -135,9 +135,9 @@ Behind-tip catch-up and any gap (drop, reorg, cache miss) → plain `debug_execu
 **Files:**
 - Modify: `rpc/jsonrpc/witness_cache_wiring_test.go`
 
-- [ ] write failing wiring test (enabled path needs a non-nil `&httpcfg.HttpCfg{WitnessCacheBlocks: N}` or `newWitnessResultCache` nil-derefs): with the cache enabled, the builder's publish reaches a subscriber obtained through `debugImpl.witnessCache` — same feed instance end to end; with the cache disabled, `ExecutionWitnesses` returns the embedded-only error
-- [ ] make it pass — expected to require NO production edits beyond Tasks 2-3 (the cache carries the feed); if a production edit turns out to be needed, stop and re-check Task 2's construction site before adding plumbing
-- [ ] run `go test ./rpc/jsonrpc/ -run 'TestWitness' -count=1`; `make lint` until clean
+- [x] write failing wiring test (enabled path needs a non-nil `&httpcfg.HttpCfg{WitnessCacheBlocks: N}` or `newWitnessResultCache` nil-derefs): with the cache enabled, the builder's publish reaches a subscriber obtained through `debugImpl.witnessCache` — same feed instance end to end; with the cache disabled, `ExecutionWitnesses` returns the embedded-only error
+- [x] make it pass — expected to require NO production edits beyond Tasks 2-3 (the cache carries the feed); if a production edit turns out to be needed, stop and re-check Task 2's construction site before adding plumbing
+- [x] run `go test ./rpc/jsonrpc/ -run 'TestWitness' -count=1`; `make lint` until clean
 
 ### Task 5: verify acceptance criteria
 
