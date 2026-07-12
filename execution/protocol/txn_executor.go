@@ -731,6 +731,13 @@ func (st *TxnExecutor) verifyAuthorities(auths []types.Authorization, contractCr
 		if len(auths) == 0 {
 			return nil, stateIgasRefund, errors.New("SetCode transaction must have at least one authorization")
 		}
+		isAmsterdam := st.evm.ChainRules().IsAmsterdam
+		refundSkippedAuth := func() {
+			if isAmsterdam {
+				st.state.AddRefund(params.AccountWriteCostEIP8038)
+				stateIgasRefund += params.StateGasNewAccount + params.StateGasAuthBase
+			}
+		}
 		var b [32]byte
 		data := bytes.NewBuffer(nil)
 		for i, auth := range auths {
@@ -739,6 +746,7 @@ func (st *TxnExecutor) verifyAuthorities(auths []types.Authorization, contractCr
 			// 1. chainId check
 			if !auth.ChainID.IsZero() && chainID != auth.ChainID.String() {
 				log.Debug("invalid chainID, skipping", "chainId", auth.ChainID, "auth index", i)
+				refundSkippedAuth()
 				continue
 			}
 
@@ -746,6 +754,7 @@ func (st *TxnExecutor) verifyAuthorities(auths []types.Authorization, contractCr
 			authorityPtr, err := auth.RecoverSigner(data, b[:])
 			if err != nil {
 				log.Trace("authority recover failed, skipping", "err", err, "auth index", i)
+				refundSkippedAuth()
 				continue
 			}
 			authority := accounts.InternAddress(*authorityPtr)
@@ -770,6 +779,7 @@ func (st *TxnExecutor) verifyAuthorities(auths []types.Authorization, contractCr
 				}
 				if !ok {
 					log.Debug("authority code is not empty or not delegated, skipping", "auth index", i)
+					refundSkippedAuth()
 					continue
 				}
 				hasDelegation = true
@@ -782,6 +792,7 @@ func (st *TxnExecutor) verifyAuthorities(auths []types.Authorization, contractCr
 			}
 			if authorityNonce != auth.Nonce {
 				log.Trace("invalid nonce, skipping", "auth index", i)
+				refundSkippedAuth()
 				continue
 			}
 
@@ -794,8 +805,9 @@ func (st *TxnExecutor) verifyAuthorities(auths []types.Authorization, contractCr
 			if err != nil {
 				return nil, stateIgasRefund, fmt.Errorf("%w: %w", ErrTxnExecutionFailed, err)
 			}
-			if st.evm.ChainRules().IsAmsterdam {
+			if isAmsterdam {
 				if exists {
+					st.state.AddRefund(params.AccountWriteCostEIP8038)
 					stateIgasRefund += params.StateGasNewAccount
 				}
 				if hasDelegation || auth.Address == (common.Address{}) {
@@ -844,6 +856,8 @@ func (st *TxnExecutor) calcIntrinsicGas(contractCreation bool, auths []types.Aut
 		AccessListLen:      uint64(len(accessTuples)),
 		StorageKeysLen:     uint64(accessTuples.StorageKeys()),
 		IsContractCreation: contractCreation,
+		IsSelfTransfer:     !contractCreation && st.msg.To() == st.msg.From(),
+		HasValue:           !st.msg.Value().IsZero(),
 		IsEIP2:             rules.IsHomestead,
 		IsEIP2028:          rules.IsIstanbul,
 		IsEIP3860:          vmConfig.HasEip3860(rules),
@@ -851,5 +865,6 @@ func (st *TxnExecutor) calcIntrinsicGas(contractCreation bool, auths []types.Aut
 		IsEIP7976:          rules.IsAmsterdam,
 		IsEIP7981:          rules.IsAmsterdam,
 		IsEIP8037:          rules.IsAmsterdam,
+		IsEIP2780:          rules.IsAmsterdam,
 	})
 }

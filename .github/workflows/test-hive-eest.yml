@@ -13,6 +13,7 @@ jobs:
   test-hive-eest:
     runs-on:
       group: hive
+    timeout-minutes: 60
     name: test-hive-eest (${{ matrix.shard }}, ${{ matrix.exec_mode }})
     strategy:
       # In merge_group: cancel sibling shards on first failure so ci-gate's
@@ -96,12 +97,13 @@ jobs:
             exec_mode: parallel
           # Glamsterdam devnet: BAL EIPs against devnet fixtures
           - sim: consume-engine
-            sim-limit: ".*(7708|7778|7843|7928|7954|7976|7981|8024|8037).*"
+            sim-limit: ".*(2780|7708|7778|7843|7928|7954|7976|7981|7997|8024|8037|8038|8246|8282).*"
             shard: glamsterdam-devnet
             fixtures-tarball: eest_devnet
             extra-hive-flags: "--sim.loglevel=3 --client.checktimelimit=300s"
             erigon-extra-flags: "--experimental.bal"
-            max-failures: 0
+            # TODO: reduce to 0 (glamsterdam-devnet-6 EIPs WIP)
+            max-failures: 720
             exec_mode: parallel
     steps:
       - name: Clean docker system
@@ -123,6 +125,7 @@ jobs:
         uses: actions/checkout@v7
         with:
           path: erigon-full
+          persist-credentials: false
 
       - name: Read pinned Hive ref
         id: hive-version
@@ -134,6 +137,7 @@ jobs:
           repository: ethereum/hive
           ref: ${{ steps.hive-version.outputs.ref }}
           path: hive
+          persist-credentials: false
 
       - name: Conditional Docker Login
         # Only login if we can. Workflow works without it but we want to avoid

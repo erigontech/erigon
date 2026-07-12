@@ -127,9 +127,8 @@ func runEngineBatches(t *testing.T, mode runMode, workers int, batches []engineB
 		ms.SetConcurrentCommitment(true)
 	}
 	roots := make([][]byte, len(batches))
-	var blob []byte
 	for i, b := range batches {
-		roots[i], blob = processModeBatchState(t, ms, mode, workers, b.keys, b.upds, blob)
+		roots[i] = processModeBatch(t, ms, mode, workers, b.keys, b.upds)
 	}
 	return roots, ms
 }
