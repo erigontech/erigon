@@ -71,11 +71,11 @@ Benefit: minimal nodes serve recent-block witnesses with zero commitment-history
 - Modify: `node/cli/flags.go`
 - Modify: `cmd/rpcdaemon/cli/config.go`
 
-- [ ] add `WitnessCacheHeadCaptureFlag` (`--witness.cache.head-capture`, bool, default false) and `WitnessCacheMaxMBFlag` (`--witness.cache.maxmb`, uint, default 0 = count-only) next to `WitnessCacheBlocksFlag` in `cmd/utils/flags.go:447`
-- [ ] add `WitnessCacheHeadCapture bool` and `WitnessCacheMaxMB uint` to `HttpCfg` in `cmd/rpcdaemon/cli/httpcfg/http_cfg.go` (beside `WitnessCacheBlocks:80`)
-- [ ] register both flags in `node/cli/default_flags.go` (beside `&utils.WitnessCacheBlocksFlag:100`); set the fields in `node/cli/flags.go` (beside `:497`); register in the standalone daemon `cmd/rpcdaemon/cli/config.go:139` for flag parity (head-capture is embedded-only at runtime — document that the standalone daemon parses but does not act on it)
-- [ ] write tests: config parsing sets both new fields from flags (default + set); existing `witness.cache.blocks` behavior unchanged
-- [ ] run tests - must pass before next task
+- [x] add `WitnessCacheHeadCaptureFlag` (`--witness.cache.head-capture`, bool, default false) and `WitnessCacheMaxMBFlag` (`--witness.cache.maxmb`, uint, default 0 = count-only) next to `WitnessCacheBlocksFlag` in `cmd/utils/flags.go:447`
+- [x] add `WitnessCacheHeadCapture bool` and `WitnessCacheMaxMB uint` to `HttpCfg` in `cmd/rpcdaemon/cli/httpcfg/http_cfg.go` (beside `WitnessCacheBlocks:80`)
+- [x] register both flags in `node/cli/default_flags.go` (beside `&utils.WitnessCacheBlocksFlag:100`); set the fields in `node/cli/flags.go` (beside `:497`); register in the standalone daemon `cmd/rpcdaemon/cli/config.go:139` for flag parity (head-capture is embedded-only at runtime — document that the standalone daemon parses but does not act on it)
+- [x] write tests: config parsing sets both new fields from flags (default + set); existing `witness.cache.blocks` behavior unchanged
+- [x] run tests - must pass before next task
 
 ### Task 2: Convert the cache alias to a struct with mode + resident-bytes cap
 
