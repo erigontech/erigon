@@ -41,8 +41,8 @@ func encodeStringRLP(payload []byte) []byte {
 func BenchmarkStreamBytes_64B(b *testing.B) {
 	payload := bytes.Repeat([]byte{0xab}, 64)
 	encoded := encodeStringRLP(payload)
-	stream, done := NewStreamFromPool(bytes.NewReader(encoded), uint64(len(encoded)))
-	defer done()
+	stream := NewStreamFromPool(bytes.NewReader(encoded), uint64(len(encoded)))
+	defer PutStream(stream)
 	b.ResetTimer()
 	b.ReportAllocs()
 	for i := 0; i < b.N; i++ {
@@ -58,8 +58,8 @@ func BenchmarkStreamBytes_64B(b *testing.B) {
 func BenchmarkStreamBytes_4KB(b *testing.B) {
 	payload := bytes.Repeat([]byte{0xab}, 4096)
 	encoded := encodeStringRLP(payload)
-	stream, done := NewStreamFromPool(bytes.NewReader(encoded), uint64(len(encoded)))
-	defer done()
+	stream := NewStreamFromPool(bytes.NewReader(encoded), uint64(len(encoded)))
+	defer PutStream(stream)
 	b.ResetTimer()
 	b.ReportAllocs()
 	for i := 0; i < b.N; i++ {
@@ -75,8 +75,8 @@ func BenchmarkStreamBytes_4KB(b *testing.B) {
 func BenchmarkStreamReadBytes_64B(b *testing.B) {
 	payload := bytes.Repeat([]byte{0xab}, 64)
 	encoded := encodeStringRLP(payload)
-	stream, done := NewStreamFromPool(bytes.NewReader(encoded), uint64(len(encoded)))
-	defer done()
+	stream := NewStreamFromPool(bytes.NewReader(encoded), uint64(len(encoded)))
+	defer PutStream(stream)
 	dst := make([]byte, 64)
 	b.ResetTimer()
 	b.ReportAllocs()
