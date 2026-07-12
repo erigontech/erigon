@@ -61,8 +61,11 @@ func ComputeShuffledIndex(conf *clparams.BeaconChainConfig, ind, ind_count uint6
 
 func ComputeShuffledIndexPreInputs(conf *clparams.BeaconChainConfig, seed [32]byte) [][32]byte {
 	ret := make([][32]byte, conf.ShuffleRoundCount)
+	var buf [33]byte
+	copy(buf[:32], seed[:])
 	for i := range ret {
-		ret[i] = utils.Sha256(append(seed[:], byte(i)))
+		buf[32] = byte(i)
+		ret[i] = utils.Sha256(buf[:])
 	}
 	return ret
 }
