@@ -241,6 +241,23 @@ func NewCommitmentReplayStateReader(ttx, tx kv.TemporalTx, tsd sd, plainStateAsO
 	}
 }
 
+// NewHeadCaptureStateReader composes the dual-tx reader used by minimal-node
+// witness head-capture. The CommitmentDomain resolves from pinnedParentTx's
+// latest state — the parent(B) commitment plane held by a pinned RO snapshot,
+// the only source a minimal node has for parent commitment — while
+// account/storage/code resolve from committedTx's history at plainStateAsOf.
+// withHistory=false so the build's own SharedDomains accumulates branch writes
+// in its in-memory batch (discarded on Close, never flushed to the real DB).
+func NewHeadCaptureStateReader(pinnedParentTx kv.TemporalTx, pinnedSD sd, committedTx kv.TemporalTx, plainStateAsOf uint64) *CommitmentReplayStateReader {
+	return &CommitmentReplayStateReader{
+		NewCommitmentSplitStateReader(
+			NewLatestStateReader(pinnedParentTx, pinnedSD),
+			NewHistoryStateReader(committedTx, plainStateAsOf),
+			false,
+		),
+	}
+}
+
 func (crsr *CommitmentReplayStateReader) Clone(tx kv.TemporalTx) StateReader {
 	// commitmentReader (LatestStateReader) gets the new tx so warmup goroutines
 	// use a fresh read-only transaction on the temp DB.

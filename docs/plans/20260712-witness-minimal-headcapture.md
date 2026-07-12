@@ -97,11 +97,11 @@ Benefit: minimal nodes serve recent-block witnesses with zero commitment-history
 - Modify: `execution/commitment/commitmentdb/reader.go`
 - Modify: `execution/commitment/commitmentdb/reader_test.go` (create if absent)
 
-- [ ] add a constructor that composes, via `NewCommitmentSplitStateReader` (`:226`), a `LatestStateReader` bound to a **pinned parent tx** (commitment domain only) with a `HistoryStateReader` bound to a **separate committed tx** at a caller-supplied `plainStateAsOf` txNum (account/storage/code) — a dual-tx variant of `CommitmentReplayStateReader` (`:234`); `withHistory=false`
-- [ ] confirm `PutBranch` no-ops for this reader (history-mode false path) so the build's own SharedDomains discards branch writes on `Close`
-- [ ] write tests: commitment reads resolve from the pinned tx's latest; plain reads resolve from the committed tx's history at the given txNum; two different `plainStateAsOf` values (parent vs block-end) route correctly; values returned are copies (no retained mmap alias)
-- [ ] write tests: `WithHistory()==false`; unknown/empty keys behave as the underlying readers
-- [ ] run tests - must pass before next task
+- [x] add a constructor that composes, via `NewCommitmentSplitStateReader` (`:226`), a `LatestStateReader` bound to a **pinned parent tx** (commitment domain only) with a `HistoryStateReader` bound to a **separate committed tx** at a caller-supplied `plainStateAsOf` txNum (account/storage/code) — a dual-tx variant of `CommitmentReplayStateReader` (`:234`); `withHistory=false` (`NewHeadCaptureStateReader`)
+- [x] confirm `PutBranch` no-ops for this reader (history-mode false path) so the build's own SharedDomains discards branch writes on `Close` — with `withHistory=false`, `PutBranch` takes the DomainPut path into the build's own throwaway in-memory batch (discarded on `Close`, never flushed to the DB); test `TestHeadCaptureStateReader_PutBranchWritesToBatch` pins that routing
+- [x] write tests: commitment reads resolve from the pinned tx's latest; plain reads resolve from the committed tx's history at the given txNum; two different `plainStateAsOf` values (parent vs block-end) route correctly; values returned are copies (no retained mmap alias — verified at the `TrieContext.Branch` ownership boundary)
+- [x] write tests: `WithHistory()==false`; unknown/empty keys behave as the underlying readers
+- [x] run tests - must pass before next task
 
 ### Task 4: Head-capture build path (swap only the commitment reader)
 
