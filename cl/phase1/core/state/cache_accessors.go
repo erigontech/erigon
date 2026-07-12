@@ -465,7 +465,7 @@ func (b *CachingBeaconState) GetAttestingIndicies(
 			)
 		}
 
-		attestingIndices := []uint64{}
+		attestingIndices := make([]uint64, 0, len(committee))
 		for i, member := range committee {
 			bitIndex := i % 8
 			sliceIndex := i / 8
