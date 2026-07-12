@@ -60,8 +60,8 @@ func TestVisibleGenerationsPublishDrainedDeletesImmediately(t *testing.T) {
 	lock.Unlock()
 
 	require.NoFileExists(path0)
-	require.Same(g.current.Load(), g.oldest, "chain collapses when nothing is pinned")
-	require.Equal(1, g.currentPayload())
+	require.Same(g.visible.Load(), g.oldest, "chain collapses when nothing is pinned")
+	require.Equal(1, g.current())
 }
 
 // A publish while a reader pins the outgoing generation defers unlink of its retired files
@@ -84,12 +84,12 @@ func TestVisibleGenerationsPublishDefersWhilePinned(t *testing.T) {
 	lock.Unlock()
 
 	require.FileExists(path0)
-	require.NotSame(g.current.Load(), g.oldest, "chain retains the pinned older generation")
+	require.NotSame(g.visible.Load(), g.oldest, "chain retains the pinned older generation")
 
 	g.release(pin)
 
 	require.NoFileExists(path0)
-	require.Same(g.current.Load(), g.oldest, "chain collapses once the last pin drops")
+	require.Same(g.visible.Load(), g.oldest, "chain collapses once the last pin drops")
 }
 
 type hazardPayload struct {
@@ -156,7 +156,7 @@ func TestVisibleGenerationsHazardRetry(t *testing.T) {
 	if missing.Load() {
 		require.Failf("pinned generation's backing file was unlinked", "path=%s", *missingPath.Load())
 	}
-	require.Same(g.current.Load(), g.oldest, "chain must collapse to a single node once readers drain")
+	require.Same(g.visible.Load(), g.oldest, "chain must collapse to a single node once readers drain")
 
 	segByGen[rounds].close()
 }

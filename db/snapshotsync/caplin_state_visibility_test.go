@@ -69,10 +69,10 @@ func TestCaplinStateViewPinsGeneration(t *testing.T) {
 	s := openTestCaplinStateSnapshots(t, dirs, table, logger)
 	typ := mustCaplinStateType(t, table)
 
-	require.Equal(t, s.gens.current.Load(), s.gens.oldest, "chain must be collapsed before opening a view")
+	require.Equal(t, s._visibleFiles.visible.Load(), s._visibleFiles.oldest, "chain must be collapsed before opening a view")
 
 	view := s.View()
-	pinned := s.gens.current.Load()
+	pinned := s._visibleFiles.visible.Load()
 	require.Equal(t, int32(1), pinned.refcnt.Load(), "View must pin the current generation")
 	require.Len(t, view.VisibleSegments(typ), 1, "view sees the generation it acquired")
 
@@ -80,7 +80,7 @@ func TestCaplinStateViewPinsGeneration(t *testing.T) {
 	writeCaplinStateFixture(t, dirs.SnapCaplin, table, 100_000, 150_000, logger)
 	require.NoError(t, s.OpenFolder())
 
-	require.NotEqual(t, pinned, s.gens.current.Load(), "OpenFolder must publish a new generation")
+	require.NotEqual(t, pinned, s._visibleFiles.visible.Load(), "OpenFolder must publish a new generation")
 	require.Equal(t, int32(1), pinned.refcnt.Load(), "the open view keeps its generation pinned across republish")
 	seg, ok := view.VisibleSegment(50_000, typ)
 	require.True(t, ok)
@@ -89,7 +89,7 @@ func TestCaplinStateViewPinsGeneration(t *testing.T) {
 
 	view.Close()
 	require.Equal(t, int32(0), pinned.refcnt.Load(), "Close releases the pin")
-	require.Equal(t, s.gens.current.Load(), s.gens.oldest, "chain collapses once the view drains")
+	require.Equal(t, s._visibleFiles.visible.Load(), s._visibleFiles.oldest, "chain collapses once the view drains")
 
 	view2 := s.View()
 	defer view2.Close()

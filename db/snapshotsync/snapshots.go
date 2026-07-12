@@ -494,9 +494,9 @@ type BaseRoSnapshots struct {
 	types []snaptype.Type //immutable
 	enums []snaptype.Enum //immutable
 
-	dirtyLock sync.RWMutex // guards `dirty` and the generation chain (publish/reclaim)
-	dirty     DirtyFiles   // ordered map `type.Enum()` -> DirtySegments
-	gens      visibleGenerations[blockVisible]
+	dirtyLock     sync.RWMutex // guards `dirty` and the generation chain (publish/reclaim)
+	dirty         DirtyFiles   // ordered map `type.Enum()` -> DirtySegments
+	_visibleFiles visibleGenerations[blockVisible]
 
 	dir               string
 	segmentsMinByType map[snaptype.Enum]*atomic.Uint64 // min block number per segment type
@@ -575,7 +575,7 @@ func newRoSnapshots(cfg ethconfig.BlocksFreezing, snapDir string, types []snapty
 	for _, snapType := range types {
 		s.dirty[snapType.Enum()] = btree.NewBTreeGOptions[*DirtySegment](DirtySegmentLess, btree.Options{Degree: 128, NoLocks: false})
 	}
-	s.gens.init(&s.dirtyLock, blockVisible{segments: make([]VisibleSegments, snaptype.MaxEnum)})
+	s._visibleFiles.init(&s.dirtyLock, blockVisible{segments: make([]VisibleSegments, snaptype.MaxEnum)})
 
 	for _, t := range s.enums {
 		u := &atomic.Uint64{}
@@ -594,7 +594,7 @@ func (s *BaseRoSnapshots) Dir() string                   { return s.dir }
 func (s *BaseRoSnapshots) DownloadReady() bool           { return s.downloadReady.Load() }
 func (s *BaseRoSnapshots) SegmentsReady() bool           { return s.segmentsReady.Load() }
 func (s *BaseRoSnapshots) IndicesMax() uint64            { return s.idxMax.Load() }
-func (s *BaseRoSnapshots) SegmentsMax() uint64           { return s.gens.currentPayload().segmentsMax }
+func (s *BaseRoSnapshots) SegmentsMax() uint64           { return s._visibleFiles.current().segmentsMax }
 func (s *BaseRoSnapshots) SegmentsMinByType(t snaptype.Enum) (min uint64, ok bool) {
 	if s == nil {
 		return 0, false
@@ -849,7 +849,7 @@ func (s *BaseRoSnapshots) recalcVisibleFiles(alignMin bool, retired []*DirtySegm
 		}
 	}
 
-	s.gens.publish(blockVisible{segments: visible, segmentsMax: segmentsMax}, retired)
+	s._visibleFiles.publish(blockVisible{segments: visible, segmentsMax: segmentsMax}, retired)
 }
 
 func closeAndRemoveSegments(segs []*DirtySegment) {
@@ -872,7 +872,7 @@ func (s *BaseRoSnapshots) idxAvailability() uint64 {
 	}
 
 	var maxIdx uint64
-	visible := s.gens.currentPayload().segments[s.enums[0]]
+	visible := s._visibleFiles.current().segments[s.enums[0]]
 	if len(visible) > 0 {
 		maxIdx = visible[len(visible)-1].to - 1
 	}
@@ -908,7 +908,7 @@ func (s *BaseRoSnapshots) dirtyIdxAvailability(segtype snaptype.Enum) uint64 {
 }
 
 func (s *BaseRoSnapshots) visibleIdxAvailability(segtype snaptype.Enum) (maxVisibleIdx uint64) {
-	visibleFiles := s.gens.currentPayload().segments[segtype]
+	visibleFiles := s._visibleFiles.current().segments[segtype]
 	if len(visibleFiles) > 0 {
 		maxVisibleIdx = visibleFiles[len(visibleFiles)-1].to - 1
 	}
@@ -1126,7 +1126,7 @@ func (s *BaseRoSnapshots) Close() {
 
 	// Publish the empty generation before reading the outgoing one's refcnt, so a concurrent
 	// lock-free View() re-check fails its pin on it and retries onto the empty generation.
-	prev := s.gens.current.Load()
+	prev := s._visibleFiles.visible.Load()
 	s.recalcVisibleFiles(s.alignMin, nil)
 
 	// Close fds only when no reader still pins the outgoing generation; closing a segment
@@ -1511,7 +1511,7 @@ type View struct {
 }
 
 func (s *BaseRoSnapshots) View() *View {
-	v := s.gens.acquire()
+	v := s._visibleFiles.acquire()
 	view := &View{s: s, visible: v, baseSegType: snaptype2.Transactions} // Transactions is the last segment to be processed, so it's the most reliable.
 	for _, t := range s.enums {
 		view.segments[t] = v.payload.segments[t].BeginRo() // non-owning children; the View owns the single pin
@@ -1523,7 +1523,7 @@ func (v *View) Close() {
 	if v == nil || v.s == nil {
 		return
 	}
-	v.s.gens.release(v.visible)
+	v.s._visibleFiles.release(v.visible)
 	v.s = nil
 }
 
@@ -1538,9 +1538,9 @@ func (s *View) WithBaseSegType(t snaptype.Type) *View {
 var noop = func() {}
 
 func (s *BaseRoSnapshots) ViewType(t snaptype.Type) *RoTx {
-	v := s.gens.acquire()
+	v := s._visibleFiles.acquire()
 	rotx := v.payload.segments[t.Enum()].BeginRo()
-	rotx.release = func() { s.gens.release(v) }
+	rotx.release = func() { s._visibleFiles.release(v) }
 	return rotx
 }
 

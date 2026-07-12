@@ -114,7 +114,7 @@ func TestCaplinStateReadersRaceRemoveOverlaps(t *testing.T) {
 	wg.Wait()
 
 	s.View().Close() // final drain collapses the generation chain and reclaims every retired file
-	require.Equal(t, s.gens.current.Load(), s.gens.oldest, "generation chain must collapse once readers drain")
+	require.Equal(t, s._visibleFiles.visible.Load(), s._visibleFiles.oldest, "generation chain must collapse once readers drain")
 	for _, f := range subSegs {
 		require.NoFileExists(t, f, "retired subset must be unlinked after all readers drain")
 	}
@@ -159,14 +159,14 @@ func TestCaplinStateOpenListSinglePublishNoTransient(t *testing.T) {
 
 	v := s.View() // pin so the pre-reopen generation cannot be reclaimed
 	defer v.Close()
-	pinned := s.gens.current.Load()
-	require.Equal(t, pinned, s.gens.oldest, "chain must be collapsed to the pinned generation")
+	pinned := s._visibleFiles.visible.Load()
+	require.Equal(t, pinned, s._visibleFiles.oldest, "chain must be collapsed to the pinned generation")
 
 	writeCaplinStateFixture(t, dirs.SnapCaplin, table, 100_000, 150_000, logger) // B (new)
 
-	// Drop C from the open list to make it stale. Excluding it drives the same detach
-	// path as an on-disk removal, without unlinking a still-mmapped segment (which
-	// Windows forbids).
+	// Drop C from the open list to make it stale. Excluding it drives the same retire path
+	// as an on-disk removal; the pinned generation defers its reclaim until v closes, and
+	// reclaim closes the segment before unlinking, so no still-mmapped file is unlinked.
 	cName := filepath.Base(cSeg)
 	var kept []string
 	for _, f := range listAllSegFilesInDir(dirs.SnapCaplin) {
@@ -176,8 +176,8 @@ func TestCaplinStateOpenListSinglePublishNoTransient(t *testing.T) {
 	}
 	require.NoError(t, s.OpenList(kept, true))
 
-	require.NotEqual(t, pinned, s.gens.current.Load(), "OpenList must publish a new generation")
-	require.Same(t, s.gens.current.Load(), pinned.next,
+	require.NotEqual(t, pinned, s._visibleFiles.visible.Load(), "OpenList must publish a new generation")
+	require.Same(t, s._visibleFiles.visible.Load(), pinned.next,
 		"OpenList must publish exactly one generation: the pinned gen links directly to it, no transient in between")
 	require.Equal(t, []Range{{from: 0, to: 100_000}, {from: 100_000, to: 150_000}}, s.coveredRangesForType(typ),
 		"published generation shows A+B (new B present, stale C gone) — never a transient missing B")

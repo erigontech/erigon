@@ -28,7 +28,7 @@ import (
 )
 
 // TestViewHotPathNoExtraAllocs gates the reader hot path against allocation regressions from
-// the generic visibleGenerations core: acquire/currentPayload/release must monomorphize to
+// the generic visibleGenerations core: acquire/current/release must monomorphize to
 // concrete types and box nothing. The only heap allocations are the ones that predate the
 // refactor — the *View / *RoTx values and the standalone-release closure. A jump means the
 // payload started escaping through an interface.

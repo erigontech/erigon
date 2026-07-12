@@ -565,15 +565,15 @@ func TestOpenAllSnapshot(t *testing.T) {
 		defer s.Close()
 		err := s.OpenFolder()
 		require.NoError(err)
-		require.NotNil(s.gens.currentPayload().segments[snaptype2.Enums.Headers])
-		require.Empty(s.gens.currentPayload().segments[snaptype2.Enums.Headers])
+		require.NotNil(s._visibleFiles.current().segments[snaptype2.Enums.Headers])
+		require.Empty(s._visibleFiles.current().segments[snaptype2.Enums.Headers])
 		s.Close()
 
 		createFile(step, step*2, snaptype2.Bodies)
 		s = NewBaseRoSnapshots(cfg, dir, snaptype2.BlockSnapshotTypes, true, logger)
 		defer s.Close()
-		require.NotNil(s.gens.currentPayload().segments[snaptype2.Enums.Bodies])
-		require.Empty(s.gens.currentPayload().segments[snaptype2.Enums.Bodies])
+		require.NotNil(s._visibleFiles.current().segments[snaptype2.Enums.Bodies])
+		require.Empty(s._visibleFiles.current().segments[snaptype2.Enums.Bodies])
 		s.Close()
 
 		createFile(step, step*2, snaptype2.Headers)
@@ -581,7 +581,7 @@ func TestOpenAllSnapshot(t *testing.T) {
 		s = NewBaseRoSnapshots(cfg, dir, snaptype2.BlockSnapshotTypes, true, logger)
 		err = s.OpenFolder()
 		require.NoError(err)
-		require.NotNil(s.gens.currentPayload().segments[snaptype2.Enums.Headers])
+		require.NotNil(s._visibleFiles.current().segments[snaptype2.Enums.Headers])
 		require.NoError(s.OpenSegments(snaptype2.BlockSnapshotTypes, true))
 		// require.Equal(1, len(getSegs(snaptype2.Enums.Headers]))
 		s.Close()
@@ -594,8 +594,8 @@ func TestOpenAllSnapshot(t *testing.T) {
 
 		err = s.OpenFolder()
 		require.NoError(err)
-		require.NotNil(s.gens.currentPayload().segments[snaptype2.Enums.Headers])
-		require.Len(s.gens.currentPayload().segments[snaptype2.Enums.Headers], 2)
+		require.NotNil(s._visibleFiles.current().segments[snaptype2.Enums.Headers])
+		require.Len(s._visibleFiles.current().segments[snaptype2.Enums.Headers], 2)
 
 		view := s.View()
 		defer view.Close()
@@ -618,8 +618,8 @@ func TestOpenAllSnapshot(t *testing.T) {
 		err = s.OpenFolder()
 		require.NoError(err)
 		defer s.Close()
-		require.NotNil(s.gens.currentPayload().segments[snaptype2.Enums.Headers])
-		require.Len(s.gens.currentPayload().segments[snaptype2.Enums.Headers], 2)
+		require.NotNil(s._visibleFiles.current().segments[snaptype2.Enums.Headers])
+		require.Len(s._visibleFiles.current().segments[snaptype2.Enums.Headers], 2)
 
 		createFile(step, step*2-step/5, snaptype2.Headers)
 		createFile(step, step*2-step/5, snaptype2.Bodies)
@@ -831,9 +831,9 @@ func TestCalculateVisibleSegments(t *testing.T) {
 		idx := s.idxAvailability()
 		require.Equal(2_500_000-1, int(idx))
 
-		require.Len(s.gens.currentPayload().segments[snaptype2.Enums.Headers], 5)
-		require.Len(s.gens.currentPayload().segments[snaptype2.Enums.Bodies], 5)
-		require.Len(s.gens.currentPayload().segments[snaptype2.Enums.Transactions], 5)
+		require.Len(s._visibleFiles.current().segments[snaptype2.Enums.Headers], 5)
+		require.Len(s._visibleFiles.current().segments[snaptype2.Enums.Bodies], 5)
+		require.Len(s._visibleFiles.current().segments[snaptype2.Enums.Transactions], 5)
 
 		require.Equal(7, s.dirty[snaptype2.Enums.Headers].Len())
 		require.Equal(6, s.dirty[snaptype2.Enums.Bodies].Len())
@@ -848,9 +848,9 @@ func TestCalculateVisibleSegments(t *testing.T) {
 		idx := s.idxAvailability()
 		require.Equal(2_500_000-1, int(idx))
 
-		require.Len(s.gens.currentPayload().segments[snaptype2.Enums.Headers], 5)
-		require.Len(s.gens.currentPayload().segments[snaptype2.Enums.Bodies], 5)
-		require.Len(s.gens.currentPayload().segments[snaptype2.Enums.Transactions], 5)
+		require.Len(s._visibleFiles.current().segments[snaptype2.Enums.Headers], 5)
+		require.Len(s._visibleFiles.current().segments[snaptype2.Enums.Bodies], 5)
+		require.Len(s._visibleFiles.current().segments[snaptype2.Enums.Transactions], 5)
 
 		// dirty retains gapped files; visible is still filtered by RecalcVisibleSegments.
 		require.Equal(7, s.dirty[snaptype2.Enums.Headers].Len())
@@ -866,9 +866,9 @@ func TestCalculateVisibleSegments(t *testing.T) {
 		idx := s.idxAvailability()
 		require.Equal(2_500_000-1, int(idx))
 
-		require.Len(s.gens.currentPayload().segments[snaptype2.Enums.Headers], 5)
-		require.Len(s.gens.currentPayload().segments[snaptype2.Enums.Bodies], 5)
-		require.Len(s.gens.currentPayload().segments[snaptype2.Enums.Transactions], 5)
+		require.Len(s._visibleFiles.current().segments[snaptype2.Enums.Headers], 5)
+		require.Len(s._visibleFiles.current().segments[snaptype2.Enums.Bodies], 5)
+		require.Len(s._visibleFiles.current().segments[snaptype2.Enums.Transactions], 5)
 
 		// dirty retains overlapping files; visible is still filtered by RecalcVisibleSegments.
 		require.Equal(7, s.dirty[snaptype2.Enums.Headers].Len())
@@ -902,7 +902,7 @@ func TestCalculateVisibleSegmentsWhenGapsInIdx(t *testing.T) {
 	idx := s.idxAvailability()
 	require.Equal(500_000-1, int(idx))
 
-	require.Len(s.gens.currentPayload().segments[snaptype2.Enums.Headers], 1)
+	require.Len(s._visibleFiles.current().segments[snaptype2.Enums.Headers], 1)
 	require.Equal(3, s.dirty[snaptype2.Enums.Headers].Len())
 }
 
@@ -1095,7 +1095,7 @@ func TestOpenFolderPromotesCovering(t *testing.T) {
 	require.Equal(2, s.dirty[snaptype2.Enums.Headers].Len())
 	require.Equal(2, s.dirty[snaptype2.Enums.Bodies].Len())
 
-	visibleTxn := s.gens.currentPayload().segments[snaptype2.Enums.Transactions]
+	visibleTxn := s._visibleFiles.current().segments[snaptype2.Enums.Transactions]
 	require.Len(visibleTxn, 2)
 	require.Equal(uint64(0), visibleTxn[0].from)
 	require.Equal(uint64(500_000), visibleTxn[0].to)
@@ -1107,7 +1107,7 @@ func TestOpenFolderPromotesCovering(t *testing.T) {
 	createTestIdxFile(t, 0, 1_000_000, snaptype2.Enums.Transactions, dir, version.V1_0, logger)
 
 	require.NoError(s.OpenFolder())
-	visibleTxnAfter := s.gens.currentPayload().segments[snaptype2.Enums.Transactions]
+	visibleTxnAfter := s._visibleFiles.current().segments[snaptype2.Enums.Transactions]
 	require.Len(visibleTxnAfter, 1)
 	require.Equal(uint64(0), visibleTxnAfter[0].from)
 	require.Equal(uint64(1_000_000), visibleTxnAfter[0].to)
@@ -1147,7 +1147,7 @@ func TestOverlapNoTruncation(t *testing.T) {
 	defer s.Close()
 
 	require.NoError(s.OpenFolder())
-	visibleTxn := s.gens.currentPayload().segments[snaptype2.Enums.Transactions]
+	visibleTxn := s._visibleFiles.current().segments[snaptype2.Enums.Transactions]
 
 	require.Len(visibleTxn, 2)
 	require.Equal(uint64(0), visibleTxn[0].from)
@@ -1179,7 +1179,7 @@ func TestVisibilityOnlyRecomputeKeepsHiddenDirty(t *testing.T) {
 	s := NewBaseRoSnapshots(cfg, dir, snaptype2.BlockSnapshotTypes, true, logger)
 	defer s.Close()
 	require.NoError(s.OpenFolder())
-	require.Len(s.gens.currentPayload().segments[snaptype2.Enums.Headers], 2)
+	require.Len(s._visibleFiles.current().segments[snaptype2.Enums.Headers], 2)
 
 	subPath := filepath.Join(dir, snaptype.SegmentFileName(version.V1_0, 0, 500_000, snaptype2.Headers.Enum()))
 	_, err := os.Stat(subPath)
@@ -1187,16 +1187,16 @@ func TestVisibilityOnlyRecomputeKeepsHiddenDirty(t *testing.T) {
 
 	// Add an indexed covering [0,1m) that subsumes both subs in the visible set. This is a
 	// pure visibility-only recompute: no segment leaves dirty.
-	before := s.gens.current.Load()
+	before := s._visibleFiles.visible.Load()
 	createFile(0, 1_000_000, snaptype2.Headers)
 	createFile(0, 1_000_000, snaptype2.Bodies)
 	createFile(0, 1_000_000, snaptype2.Transactions)
 	require.NoError(s.OpenFolder())
 
 	// Visible collapses to the single covering segment...
-	require.Len(s.gens.currentPayload().segments[snaptype2.Enums.Headers], 1)
-	require.Equal(uint64(0), s.gens.currentPayload().segments[snaptype2.Enums.Headers][0].from)
-	require.Equal(uint64(1_000_000), s.gens.currentPayload().segments[snaptype2.Enums.Headers][0].to)
+	require.Len(s._visibleFiles.current().segments[snaptype2.Enums.Headers], 1)
+	require.Equal(uint64(0), s._visibleFiles.current().segments[snaptype2.Enums.Headers][0].from)
+	require.Equal(uint64(1_000_000), s._visibleFiles.current().segments[snaptype2.Enums.Headers][0].to)
 
 	// ...but the hidden subs are NOT retired: still in dirty, still on disk, and the
 	// outgoing generation retired nothing.
