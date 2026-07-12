@@ -22,15 +22,57 @@ import (
 	"time"
 )
 
-// A ctxFactory can block indefinitely (e.g. waiting for a read-tx semaphore
-// slot). CloseAndWait must still return, and the factory's resources must be
-// released once it eventually completes.
+// Once CloseAndWait returns, the caller may reclaim exclusive use of state the
+// factory reads, so no factory code may still be running. Run with -race: a
+// factory outliving shutdown races with the post-CloseAndWait write below.
+func TestWarmuperFactoryMustNotOutliveCloseAndWait(t *testing.T) {
+	t.Parallel()
+	factoryEntered := make(chan struct{})
+	release := make(chan struct{})
+	readBack := make(chan int, 1)
+	var callerOwned int
+	factory := func(ctx context.Context) (PatriciaContext, func()) {
+		close(factoryEntered)
+		select {
+		case <-release:
+		case <-ctx.Done():
+		}
+		readBack <- callerOwned
+		return nil, nil
+	}
+	w := NewWarmuper(context.Background(), WarmupConfig{
+		Enabled:    true,
+		CtxFactory: factory,
+		NumWorkers: 1,
+		MaxDepth:   WarmupMaxDepth,
+	})
+	w.Start()
+	<-factoryEntered
+
+	done := make(chan struct{})
+	go func() {
+		w.CloseAndWait()
+		close(done)
+	}()
+	select {
+	case <-done:
+	case <-time.After(10 * time.Second):
+		t.Fatal("CloseAndWait hung")
+	}
+
+	close(release)
+	callerOwned = 1
+	<-readBack
+}
+
+// A ctxFactory may block (e.g. waiting for a read-tx semaphore slot) but must
+// honor ctx: Close cancels it, CloseAndWait returns, and the factory's cleanup
+// still runs.
 func TestWarmuperCloseAndWaitWithBlockedCtxFactory(t *testing.T) {
 	t.Parallel()
-	release := make(chan struct{})
 	cleaned := make(chan struct{})
-	factory := func() (PatriciaContext, func()) {
-		<-release
+	factory := func(ctx context.Context) (PatriciaContext, func()) {
+		<-ctx.Done()
 		return nil, func() { close(cleaned) }
 	}
 	w := NewWarmuper(context.Background(), WarmupConfig{
@@ -49,13 +91,12 @@ func TestWarmuperCloseAndWaitWithBlockedCtxFactory(t *testing.T) {
 	select {
 	case <-done:
 	case <-time.After(10 * time.Second):
-		t.Fatal("CloseAndWait hung on a ctxFactory that never returned")
+		t.Fatal("CloseAndWait hung on a ctxFactory blocked until cancellation")
 	}
 
-	close(release)
 	select {
 	case <-cleaned:
-	case <-time.After(10 * time.Second):
-		t.Fatal("cleanup of the late ctxFactory result was never called")
+	default:
+		t.Fatal("factory cleanup did not run before CloseAndWait returned")
 	}
 }

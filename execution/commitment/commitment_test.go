@@ -44,7 +44,7 @@ func (n *noopPatriciaContext) Account(plainKey []byte) (*Update, error) { return
 func (n *noopPatriciaContext) Storage(plainKey []byte) (*Update, error) { return nil, nil }
 func (n *noopPatriciaContext) TxNum() uint64                            { return 0 }
 
-func noopCtxFactory() (PatriciaContext, func()) {
+func noopCtxFactory(context.Context) (PatriciaContext, func()) {
 	return &noopPatriciaContext{}, nil
 }
 
@@ -87,9 +87,9 @@ func (g *gatedPatriciaContext) TxNum() uint64                                 { 
 
 // slowCtxFactory makes the first worker a slow straggler that holds one key across many
 // batch resets while the rest run fast, so the producer's arena reset races its in-flight reads.
-func slowCtxFactory(stall time.Duration) TrieContextFactory {
+func slowCtxFactory(stall time.Duration) WarmupTrieContextFactory {
 	var n atomic.Int32
-	return func() (PatriciaContext, func()) {
+	return func(context.Context) (PatriciaContext, func()) {
 		if n.Add(1) == 1 {
 			return &gatedPatriciaContext{sleep: stall, descend: true}, nil
 		}
@@ -99,8 +99,8 @@ func slowCtxFactory(stall time.Duration) TrieContextFactory {
 
 // gatedCtxFactory returns a factory whose contexts signal entered then block on
 // release inside Branch, for deterministic single-worker ordering tests.
-func gatedCtxFactory(entered, release chan struct{}) TrieContextFactory {
-	return func() (PatriciaContext, func()) {
+func gatedCtxFactory(entered, release chan struct{}) WarmupTrieContextFactory {
+	return func(context.Context) (PatriciaContext, func()) {
 		return &gatedPatriciaContext{entered: entered, release: release}, nil
 	}
 }
@@ -216,9 +216,9 @@ func TestHashSort_WarmupLap(t *testing.T) {
 
 // gatedStragglerFactory makes the first worker block inside Branch on release (holding its
 // first key) while every other worker runs fast, so exactly one ring slot stays occupied.
-func gatedStragglerFactory(entered, release chan struct{}) TrieContextFactory {
+func gatedStragglerFactory(entered, release chan struct{}) WarmupTrieContextFactory {
 	var n atomic.Int32
-	return func() (PatriciaContext, func()) {
+	return func(context.Context) (PatriciaContext, func()) {
 		if n.Add(1) == 1 {
 			return &gatedPatriciaContext{entered: entered, release: release}, nil
 		}

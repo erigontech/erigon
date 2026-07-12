@@ -560,8 +560,12 @@ func (sdc *SharedDomainsCommitmentContext) ComputeCommitment(ctx context.Context
 			// Each worker writes its branch updates through a private collector
 			// so concurrent PutBranch calls never race; collectors are drained
 			// after Process and merged into the main writer below.
-			warmupConfig.CtxFactory, drainCollectors = sdc.concurrentTrieContextFactory(ctx, sdc.paraTrieDB, workerPin, txNum)
-			trie.SetTrieContextFactory(warmupConfig.CtxFactory)
+			var concurrentFactory commitment.WarmupTrieContextFactory
+			concurrentFactory, drainCollectors = sdc.concurrentTrieContextFactory(ctx, sdc.paraTrieDB, workerPin, txNum)
+			warmupConfig.CtxFactory = concurrentFactory
+			trie.SetTrieContextFactory(func() (commitment.PatriciaContext, func()) {
+				return concurrentFactory(ctx)
+			})
 		default:
 			// Serial: this factory only serves page-cache warmup, which does not
 			// compute the root, so its reads need no generation pin. (Streaming is
@@ -663,14 +667,25 @@ func beginWorkerRo(ctx context.Context, db kv.TemporalRoDB, pin kv.TemporalFiles
 	return db.BeginTemporalRo(ctx)
 }
 
-func (sdc *SharedDomainsCommitmentContext) warmupTrieContextFactory(ctx context.Context, db kv.TemporalRoDB, txNum uint64) commitment.TrieContextFactory {
+// beginRoCancellableBy opens a read tx under beginCtx but aborts the open when
+// warmuperCtx is cancelled, so a factory blocked opening its tx cannot wedge
+// warmuper shutdown.
+func beginRoCancellableBy(warmuperCtx, beginCtx context.Context, begin func(context.Context) (kv.TemporalTx, error)) (kv.TemporalTx, error) {
+	ctx, cancel := context.WithCancel(beginCtx)
+	defer cancel()
+	stop := context.AfterFunc(warmuperCtx, cancel)
+	defer stop()
+	return begin(ctx)
+}
+
+func (sdc *SharedDomainsCommitmentContext) warmupTrieContextFactory(ctx context.Context, db kv.TemporalRoDB, txNum uint64) commitment.WarmupTrieContextFactory {
 	// avoid races like this
 	stepSize := sdc.sharedDomains.StepSize()
 	// Warmup is best-effort: never queue on the read-tx semaphore. A blocking
 	// acquire here can starve execution workers of slots and stall shutdown.
 	ctx = kv.WithNonBlockingAcquire(ctx)
-	return func() (commitment.PatriciaContext, func()) {
-		roTx, err := db.BeginTemporalRo(ctx) //nolint:gocritic
+	return func(warmuperCtx context.Context) (commitment.PatriciaContext, func()) {
+		roTx, err := beginRoCancellableBy(warmuperCtx, ctx, db.BeginTemporalRo)
 		if err != nil {
 			return &errorTrieContext{err: err}, func() {}
 		}
@@ -705,13 +720,15 @@ func (sdc *SharedDomainsCommitmentContext) warmupTrieContextFactory(ctx context.
 // concurrentTrieContextFactory is like warmupTrieContextFactory but blocking, and also creates a per-goroutine
 // etl.Collector for each context so that PutBranch writes are isolated (no shared writer race).
 // Returns the factory and a drain function that collects all created collectors.
-func (sdc *SharedDomainsCommitmentContext) concurrentTrieContextFactory(ctx context.Context, db kv.TemporalRoDB, pin kv.TemporalFilesPin, txNum uint64) (commitment.TrieContextFactory, func() []*etl.Collector) {
+func (sdc *SharedDomainsCommitmentContext) concurrentTrieContextFactory(ctx context.Context, db kv.TemporalRoDB, pin kv.TemporalFilesPin, txNum uint64) (commitment.WarmupTrieContextFactory, func() []*etl.Collector) {
 	stepSize := sdc.sharedDomains.StepSize()
 	var mu sync.Mutex
 	var collectors []*etl.Collector
 
-	factory := func() (commitment.PatriciaContext, func()) {
-		roTx, err := beginWorkerRo(ctx, db, pin) //nolint:gocritic
+	factory := func(warmuperCtx context.Context) (commitment.PatriciaContext, func()) {
+		roTx, err := beginRoCancellableBy(warmuperCtx, ctx, func(beginCtx context.Context) (kv.TemporalTx, error) {
+			return beginWorkerRo(beginCtx, db, pin)
+		})
 		if err != nil {
 			return &errorTrieContext{err: err}, func() {}
 		}

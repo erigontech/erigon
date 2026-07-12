@@ -210,7 +210,7 @@ func encodeCellRow(tb testing.TB, size int) (row []*cell, bm uint16, enc BranchD
 
 // testWarmuper builds a Warmuper with the constant test config (Enabled, MaxDepth 64,
 // LogPrefix "test"), varying only the context factory and worker count.
-func testWarmuper(ctx context.Context, factory TrieContextFactory, workers int) *Warmuper {
+func testWarmuper(ctx context.Context, factory WarmupTrieContextFactory, workers int) *Warmuper {
 	return NewWarmuper(ctx, WarmupConfig{
 		Enabled:    true,
 		CtxFactory: factory,

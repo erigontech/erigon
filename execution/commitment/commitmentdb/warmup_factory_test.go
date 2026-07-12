@@ -19,10 +19,12 @@ package commitmentdb
 import (
 	"context"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/execution/commitment"
 )
 
 type stubSharedDomains struct{ sd }
@@ -47,8 +49,49 @@ func TestWarmupTrieContextFactoryUsesNonBlockingReadTxAcquire(t *testing.T) {
 	db := &beginRoRecordingDB{}
 	sdc := &SharedDomainsCommitmentContext{sharedDomains: stubSharedDomains{}}
 
-	_, cleanup := sdc.warmupTrieContextFactory(context.Background(), db, 0)()
+	_, cleanup := sdc.warmupTrieContextFactory(context.Background(), db, 0)(context.Background())
 	defer cleanup()
 
 	require.True(t, db.sawNonBlocking, "warmup BeginTemporalRo must use non-blocking semaphore acquire")
+}
+
+type blockingBeginDB struct {
+	kv.TemporalRoDB
+}
+
+func (db *blockingBeginDB) BeginTemporalRo(ctx context.Context) (kv.TemporalTx, error) {
+	<-ctx.Done()
+	return nil, ctx.Err()
+}
+
+// A factory blocked opening its read tx (e.g. parked on the read-tx semaphore)
+// must unblock when the warmuper shuts down, or CloseAndWait hangs.
+func TestWarmupFactoriesUnblockBeginOnWarmuperClose(t *testing.T) {
+	t.Parallel()
+	sdc := &SharedDomainsCommitmentContext{sharedDomains: stubSharedDomains{}}
+	concurrent, _ := sdc.concurrentTrieContextFactory(context.Background(), &blockingBeginDB{}, nil, 0)
+	factories := map[string]commitment.WarmupTrieContextFactory{
+		"warmup":     sdc.warmupTrieContextFactory(context.Background(), &blockingBeginDB{}, 0),
+		"concurrent": concurrent,
+	}
+	for name, factory := range factories {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			warmuperCtx, cancel := context.WithCancel(context.Background())
+			done := make(chan struct{})
+			go func() {
+				trieCtx, cleanup := factory(warmuperCtx)
+				defer cleanup()
+				_, err := trieCtx.Account(nil)
+				require.ErrorIs(t, err, context.Canceled)
+				close(done)
+			}()
+			cancel()
+			select {
+			case <-done:
+			case <-time.After(10 * time.Second):
+				t.Fatal("factory did not honor warmuper ctx cancellation")
+			}
+		})
+	}
 }

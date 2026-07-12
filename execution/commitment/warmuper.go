@@ -34,11 +34,17 @@ import (
 // TrieContextFactory creates new PatriciaContext instances for parallel warmup.
 type TrieContextFactory func() (PatriciaContext, func())
 
+// WarmupTrieContextFactory creates the PatriciaContext for a warmup worker. It
+// runs synchronously in the worker, so no factory code outlives CloseAndWait;
+// in exchange the factory must honor ctx and return promptly once it is
+// cancelled (a nil context is fine then), or CloseAndWait hangs.
+type WarmupTrieContextFactory func(ctx context.Context) (PatriciaContext, func())
+
 // WarmupConfig contains configuration for pre-warming MDBX page cache
 // during commitment processing.
 type WarmupConfig struct {
 	Enabled    bool
-	CtxFactory TrieContextFactory
+	CtxFactory WarmupTrieContextFactory
 	NumWorkers int
 	MaxDepth   int
 	LogPrefix  string
@@ -56,7 +62,7 @@ type WarmupStats struct {
 type Warmuper struct {
 	ctx        context.Context
 	cancel     context.CancelFunc
-	ctxFactory TrieContextFactory
+	ctxFactory WarmupTrieContextFactory
 	maxDepth   int
 	numWorkers int
 	logPrefix  string
@@ -116,12 +122,12 @@ func (w *Warmuper) Start() {
 
 	for i := 0; i < w.numWorkers; i++ {
 		w.g.Go(func() error {
-			trieCtx, cleanup, err := w.makeTrieCtx()
-			if err != nil {
-				return err
-			}
+			trieCtx, cleanup := w.ctxFactory(w.ctx)
 			if cleanup != nil {
 				defer cleanup()
+			}
+			if trieCtx == nil {
+				return w.ctx.Err()
 			}
 
 			for {
@@ -148,34 +154,6 @@ func (w *Warmuper) Start() {
 		w.mu.Unlock()
 		return nil
 	})
-}
-
-// makeTrieCtx runs ctxFactory without letting a blocked factory (e.g. waiting
-// on the read-tx semaphore) hold CloseAndWait hostage: it gives up as soon as
-// w.ctx is cancelled, and a factory result arriving after that is cleaned up
-// by the factory goroutine itself.
-func (w *Warmuper) makeTrieCtx() (PatriciaContext, func(), error) {
-	type result struct {
-		trieCtx PatriciaContext
-		cleanup func()
-	}
-	res := make(chan result)
-	go func() {
-		trieCtx, cleanup := w.ctxFactory()
-		select {
-		case res <- result{trieCtx, cleanup}:
-		case <-w.ctx.Done():
-			if cleanup != nil {
-				cleanup()
-			}
-		}
-	}()
-	select {
-	case r := <-res:
-		return r.trieCtx, r.cleanup, nil
-	case <-w.ctx.Done():
-		return nil, nil, w.ctx.Err()
-	}
 }
 
 // warmupKey performs the actual warmup for a single key by reading data to warm MDBX page cache.
