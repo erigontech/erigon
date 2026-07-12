@@ -100,9 +100,9 @@ var (
 		Value: ethconfig.Defaults.NetworkID,
 	}
 	PersistReceiptsV2Flag = cli.BoolFlag{
-		Name:    "persist.receipts",
-		Aliases: []string{"experiment.persist.receipts.v2"},
-		Usage:   "Download historical Receipts. If disabled: using state-history to re-exec transactions and generate Receipts - all RPC: eth_getLogs, eth_getBlockReceipts will work (just higher latency)",
+		Name:    "prune.include-receipts",
+		Aliases: []string{"experiment.persist.receipts.v2", "persist.receipts"},
+		Usage:   "Download historical Receipts (stored on disk as the rcache domain: snapshots/history/*rcache*.v). If disabled: using state-history to re-exec transactions and generate Receipts - all RPC: eth_getLogs, eth_getBlockReceipts will work (just higher latency)",
 		Value:   ethconfig.Defaults.PersistReceiptsCacheV2,
 	}
 	DevValidatorSeedFlag = cli.StringFlag{
@@ -1113,9 +1113,14 @@ var (
 		Usage:   "Enables blazing fast eth_getProof for executed block",
 		Aliases: []string{"experimental.commitment-history", "prune.experimental.include-commitment-history"},
 	}
-	CommitmentHistoryDistanceFlag = cli.Uint64Flag{
+	CommitmentHistoryDistanceFlag = cli.StringFlag{
 		Name:  "prune.commitment-history.distance",
-		Usage: "Keep commitment history only for the latest N blocks. Older snapshots are skipped at download time. 0 (default) keeps everything. Requires --prune.include-commitment-history.",
+		Usage: "Keep commitment history only for the latest N blocks, or \"keep-all\". Older snapshots are skipped at download time. Empty or 0 (default) keeps everything. Requires --prune.include-commitment-history",
+	}
+	PersistReceiptsDistanceFlag = cli.StringFlag{
+		Name:    "prune.receipts.distance",
+		Aliases: []string{"persist.receipts.distance"},
+		Usage:   "Keep the receipt cache only for the latest N blocks, or \"keep-all\" to keep it all. Empty or 0 (default) follows the state-history window (NOT keep-all). Older snapshots are skipped at download time. Requires --prune.include-receipts",
 	}
 	AlwaysGenerateChangesetsFlag = cli.BoolFlag{
 		Name:  "experimental.always-generate-changesets",
