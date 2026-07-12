@@ -30,9 +30,9 @@ jobs:
     - name: Set reference data dir based on branch
       run: |
         # For pull_request events base_ref is the target branch name; for push/dispatch parse from ref.
-        BRANCH="${{ github.base_ref }}"
+        BRANCH="$GITHUB_BASE_REF"
         if [ -z "$BRANCH" ]; then
-          BRANCH="${{ github.ref }}"
+          BRANCH="$GITHUB_REF"
           BRANCH="${BRANCH#refs/heads/}"
         fi
         if [[ "$BRANCH" == release/* ]]; then
@@ -67,7 +67,7 @@ jobs:
         
         # Launch the testbed Erigon instance & test its ability to maintain sync for 2 minutes
         python3 $ERIGON_QA_PATH/test_system/qa-tests/tip-tracking/run_and_check_tip_tracking.py \
-          ${{ env.ERIGON_REFERENCE_DATA_DIR }}/../ $ERIGON_REFERENCE_DATA_DIR 120 $TOTAL_TIME_SECONDS Erigon3 $CHAIN
+          $ERIGON_REFERENCE_DATA_DIR/../ $ERIGON_REFERENCE_DATA_DIR 120 $TOTAL_TIME_SECONDS Erigon3 $CHAIN
         
         # Capture monitoring script exit status
         test_exit_status=$?
@@ -150,13 +150,13 @@ jobs:
         python3 $ERIGON_QA_PATH/test_system/qa-tests/uploads/upload_test_results.py \
           --repo erigon \
           --commit $(git rev-parse HEAD) \
-          --branch ${{ github.ref_name }} \
+          --branch "$GITHUB_REF_NAME" \
           --test_name tip-tracking \
           --chain $CHAIN \
-          --runner ${{ runner.name }} \
+          --runner "$RUNNER_NAME" \
           --db_version $db_version \
           --outcome $TEST_RESULT \
-          --result_file ${{ github.workspace }}/result-$CHAIN.json
+          --result_file "$GITHUB_WORKSPACE/result-$CHAIN.json"
 
     - name: Upload test results
       if: ${{ always() && steps.test_step.outputs.test_executed == 'true' }}

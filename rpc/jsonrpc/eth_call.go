@@ -308,10 +308,15 @@ func (api *APIImpl) EstimateGas(ctx context.Context, argsOrNil *ethapi2.CallArgs
 		if err != nil {
 			return 0, errors.New("getCodeSize failed")
 		}
+		// A transfer to a codeless recipient has a fixed, gas-independent cost, so a
+		// single trial at the ceiling yields the exact estimate: return its actual gas
+		// used rather than a hardcoded TxGas. This stays correct across forks,
+		// including EIP-2780's re-priced transfers (self=12000, zero-value=15000,
+		// account creation adds NEW_ACCOUNT state gas).
 		if codeSize == 0 {
-			failed, _, err := doCall(ctx, caller, params.TxGas, engine)
+			failed, result, err := doCall(ctx, caller, hi, engine)
 			if err == nil && !failed {
-				return hexutil.Uint64(params.TxGas), nil
+				return hexutil.Uint64(result.ReceiptGasUsed), nil
 			}
 		}
 	}

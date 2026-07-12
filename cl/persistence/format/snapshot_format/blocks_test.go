@@ -23,8 +23,11 @@ import (
 
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
+	"github.com/erigontech/erigon/cl/cltypes/solid"
 	"github.com/erigontech/erigon/cl/persistence/format/snapshot_format"
 	"github.com/erigontech/erigon/cl/utils"
+	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/execution/types"
 	"github.com/stretchr/testify/require"
 )
 
@@ -114,4 +117,64 @@ func TestBlockSnapshotEncoding(t *testing.T) {
 		}
 		require.Equal(t, hash3, hash2)
 	}
+}
+
+// TestPreMergeBellatrixBlockSkipsExecutionLookup is a regression test for the
+// Caplin archive infinite retry loop at the Bellatrix transition.
+//
+// Pre-Merge Bellatrix blocks carry a default (all-zero) execution payload
+// header, including BlockNumber=0 and BlockHash=0x0000...0000. Before the fix,
+// ReadBlockFromSnapshot unconditionally tried to fetch EL transactions for any
+// post-Altair block, causing "transactions not found for block 0" errors that
+// looped forever during historical state reconstruction.
+//
+// The fix checks for a zero BlockHash (matching the consensus spec's
+// is_execution_enabled semantics) and skips the EL lookup entirely.
+func TestPreMergeBellatrixBlockSkipsExecutionLookup(t *testing.T) {
+	// Create a Bellatrix block with a default (all-zero) execution payload.
+	// This represents a pre-Merge Bellatrix block where execution is not yet enabled.
+	preMergeBlock := cltypes.NewSignedBeaconBlock(&clparams.MainnetBeaconConfig, clparams.BellatrixVersion)
+	preMergeBlock.Block.Slot = 4636672 // First Bellatrix slot on mainnet
+	// ExecutionPayload fields are already zero-valued (BlockNumber=0, BlockHash=0x0)
+
+	// Write the block to snapshot format
+	var b bytes.Buffer
+	_, err := snapshot_format.WriteBlockForSnapshot(&b, preMergeBlock, nil)
+	require.NoError(t, err)
+
+	// Use a mock execution reader that panics if called.
+	// If the fix is correct, ReadBlockFromSnapshot should detect the zero BlockHash
+	// and skip the execution lookup entirely.
+	panicReader := &panicOnCallBlockReader{}
+
+	// Read it back — this must NOT attempt to fetch EL transactions
+	readBack, err := snapshot_format.ReadBlockFromSnapshot(&b, panicReader, &clparams.MainnetBeaconConfig)
+	require.NoError(t, err)
+	require.NotNil(t, readBack)
+
+	// The block should have the correct version and slot
+	require.Equal(t, clparams.BellatrixVersion, readBack.Version())
+	require.Equal(t, uint64(4636672), readBack.Block.Slot)
+
+	// Execution payload should preserve zero values
+	require.Equal(t, uint64(0), readBack.Block.Body.ExecutionPayload.BlockNumber)
+	require.Equal(t, common.Hash{}, readBack.Block.Body.ExecutionPayload.BlockHash)
+}
+
+// panicOnCallBlockReader is a mock ExecutionBlockReaderByNumber that panics
+// if Transactions or Withdrawals is called. Used to verify that the code
+// correctly skips EL lookups for pre-Merge blocks.
+type panicOnCallBlockReader struct{}
+
+func (p *panicOnCallBlockReader) Transactions(number uint64, hash common.Hash) (*solid.TransactionsSSZ, error) {
+	panic("Transactions should not be called for pre-Merge Bellatrix blocks with zero BlockHash")
+}
+
+func (p *panicOnCallBlockReader) Withdrawals(number uint64, hash common.Hash) (*solid.ListSSZ[*cltypes.Withdrawal], error) {
+	panic("Withdrawals should not be called for pre-Merge Bellatrix blocks with zero BlockHash")
+}
+
+func (p *panicOnCallBlockReader) SetBeaconChainConfig(*clparams.BeaconChainConfig) {}
+
+func (p *panicOnCallBlockReader) CacheBody(blockNumber uint64, transactions [][]byte, withdrawals []*types.Withdrawal) {
 }
