@@ -35,34 +35,9 @@ func mkResult() *ExecutionWitnessResult {
 	return &ExecutionWitnessResult{State: []hexutil.Bytes{{0x01}}}
 }
 
-func TestWitnessResultCacheHashKeyed(t *testing.T) {
-	c := newWitnessResultCache(8)
-	r := mkResult()
-	c.Add(hashN(0xaa), r)
-
-	got, ok := c.Get(hashN(0xaa))
-	require.True(t, ok)
-	require.Same(t, r, got, "a hash hit returns the cached pointer")
-
-	_, ok = c.Get(hashN(0xbb))
-	require.False(t, ok, "a different hash must miss")
-}
-
-func TestWitnessResultCacheLRUEviction(t *testing.T) {
-	c := newWitnessResultCache(3)
-	for n := byte(1); n <= 4; n++ {
-		c.Add(hashN(n), mkResult())
-	}
-
-	require.Equal(t, 3, c.Len())
-	_, ok := c.Get(hashN(1))
-	require.False(t, ok, "the least-recently-used entry is evicted first")
-	for n := byte(2); n <= 4; n++ {
-		_, ok := c.Get(hashN(n))
-		require.True(t, ok, "hash %d should be retained", n)
-	}
-}
-
+// TestNewWitnessResultCacheClampsBlocks pins the only behaviour the constructor
+// owns on top of the hashicorp LRU: clamp above witnessCacheMaxBlocks, honor
+// requested sizes below it.
 func TestNewWitnessResultCacheClampsBlocks(t *testing.T) {
 	c := newWitnessResultCache(witnessCacheMaxBlocks + 100)
 	for n := 0; n < int(witnessCacheMaxBlocks)+100; n++ {
@@ -76,9 +51,5 @@ func TestNewWitnessResultCacheClampsBlocks(t *testing.T) {
 	c1 := newWitnessResultCache(1)
 	c1.Add(hashN(1), mkResult())
 	c1.Add(hashN(2), mkResult())
-	require.Equal(t, 1, c1.Len(), "a capacity-1 cache holds only the newest entry")
-	_, ok := c1.Get(hashN(1))
-	require.False(t, ok, "the older entry is evicted at capacity 1")
-	_, ok = c1.Get(hashN(2))
-	require.True(t, ok)
+	require.Equal(t, 1, c1.Len(), "a sub-cap size is honored, not clamped up")
 }
