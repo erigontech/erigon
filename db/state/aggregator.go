@@ -617,7 +617,6 @@ func (a *Aggregator) WaitForFiles() {
 }
 
 func (a *Aggregator) Close() {
-	a.WaitForFiles()
 	if !a.background.BeginClose() { // idempotent: safe to call Close multiple times
 		return
 	}
@@ -1092,8 +1091,8 @@ func (a *Aggregator) reorgSafeBlockAndStep(ctx context.Context) (reorgSafeBlock 
 	return reorgSafeBlock, reorgSafeStep, ok
 }
 
-func (a *Aggregator) BuildFiles(toTxNum uint64) (err error) {
-	finished := a.buildFilesInBackground(toTxNum, true)
+func (a *Aggregator) BuildFiles(ctx context.Context, toTxNum uint64) (err error) {
+	finished := a.buildFilesInBackground(ctx, toTxNum, true)
 	if !(a.buildingFiles.Load() || a.mergingFiles.Load()) {
 		return nil
 	}
@@ -1105,6 +1104,8 @@ Loop:
 		select {
 		case <-a.ctx.Done():
 			return a.ctx.Err()
+		case <-ctx.Done():
+			return ctx.Err()
 		case <-finished:
 			break Loop
 		case <-logEvery.C:
@@ -2089,11 +2090,11 @@ func (a *Aggregator) SetProduceMod(produce bool) {
 }
 
 func (a *Aggregator) BuildFilesInBackground(txNum uint64) chan struct{} {
-	return a.buildFilesInBackground(txNum, true)
+	return a.buildFilesInBackground(a.ctx, txNum, true)
 }
 
 // Returns channel which is closed when aggregation is done
-func (a *Aggregator) buildFilesInBackground(txNum uint64, doMerge bool) chan struct{} {
+func (a *Aggregator) buildFilesInBackground(ctx context.Context, txNum uint64, doMerge bool) chan struct{} {
 	fin := make(chan struct{})
 
 	if dbg.NoBackgroundMaintenance() {
