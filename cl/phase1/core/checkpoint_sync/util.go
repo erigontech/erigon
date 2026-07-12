@@ -116,11 +116,8 @@ func tryResumeFromLocalFinalizedState(dirs datadir.Dirs, beaconCfg *clparams.Bea
 	secondsPerSlot := beaconCfg.SecondsPerSlot
 	nowUnix := uint64(time.Now().Unix())
 	localSlot := localFinalized.Slot()
-	var currentEpoch uint64
-	if secondsPerSlot != 0 && nowUnix >= genesisTime {
-		currentEpoch = ((nowUnix - genesisTime) / secondsPerSlot) / beaconCfg.SlotsPerEpoch
-	}
-	horizonSlots := resolveResumeHorizonSlots(beaconCfg, caplinConfig.ResumeMaxStalenessEpochs, currentEpoch)
+	anchorEpoch := localSlot / beaconCfg.SlotsPerEpoch
+	horizonSlots := resolveResumeHorizonSlots(beaconCfg, caplinConfig.ResumeMaxStalenessEpochs, anchorEpoch)
 	if !stateWithinResumeHorizon(localSlot, genesisTime, nowUnix, secondsPerSlot, horizonSlots) {
 		log.Info("[Checkpoint Sync] Local finalized state is too stale to resume from; using remote", "reason", "stale",
 			"slot", localSlot, "horizonSlots", horizonSlots)
@@ -157,12 +154,13 @@ func readLocalStateFile(dirs datadir.Dirs, beaconCfg *clparams.BeaconChainConfig
 // may have and still be resumed from. The bound is data-availability feasibility, NOT
 // weak-subjectivity: we resume from our own finalized (reorg-immune) state, so the only limit is
 // that forward-syncing the anchor to head needs peers to serve sidecars within the DA retention
-// window. The default is therefore the active fork's sidecar retention — blob sidecars pre-Fulu,
-// data-column sidecars Fulu+. A user override (resumeMaxStalenessEpochs) larger than that window
-// would leave the node unable to fetch the data it needs to catch up, so it is clamped down.
-func resolveResumeHorizonSlots(beaconCfg *clparams.BeaconChainConfig, resumeMaxStalenessEpochs, currentEpoch uint64) uint64 {
+// window. The binding sidecar is the anchor's own (the oldest one the catch-up needs), so the
+// default is the anchor fork's sidecar retention — blob sidecars pre-Fulu, data-column sidecars
+// Fulu+. A user override (resumeMaxStalenessEpochs) larger than that window would leave the node
+// unable to fetch the data it needs to catch up, so it is clamped down.
+func resolveResumeHorizonSlots(beaconCfg *clparams.BeaconChainConfig, resumeMaxStalenessEpochs, anchorEpoch uint64) uint64 {
 	retentionEpochs := beaconCfg.MinEpochsForBlobSidecarsRequests
-	if beaconCfg.GetCurrentStateVersion(currentEpoch).AfterOrEqual(clparams.FuluVersion) {
+	if beaconCfg.GetCurrentStateVersion(anchorEpoch).AfterOrEqual(clparams.FuluVersion) {
 		retentionEpochs = beaconCfg.MinEpochsForDataColumnSidecarsRequests
 	}
 	retentionSlots := retentionEpochs * beaconCfg.SlotsPerEpoch
