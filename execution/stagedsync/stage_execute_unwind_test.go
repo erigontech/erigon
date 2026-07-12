@@ -34,6 +34,7 @@ import (
 	dbstate "github.com/erigontech/erigon/db/state"
 	"github.com/erigontech/erigon/db/state/changeset"
 	"github.com/erigontech/erigon/db/state/execctx"
+	"github.com/erigontech/erigon/execution/cache"
 	"github.com/erigontech/erigon/execution/chain/networkname"
 	"github.com/erigontech/erigon/execution/stagedsync/stages"
 	"github.com/erigontech/erigon/node/ethconfig"
@@ -96,6 +97,10 @@ func TestUnwindExecutionStage_PrunesUncommittedOverlayWrite(t *testing.T) {
 	require.NoError(t, err)
 	defer doms.Close()
 	doms.SetChangesetAccumulator(&changeset.StateChangeSet{})
+
+	// Enable state cache to verify it is also pruned/unwound correctly
+	stateCache := cache.NewDefaultStateCache()
+	doms.SetStateCache(stateCache)
 
 	const (
 		committedBlock = uint64(5) // execution-stage progress (last flushed block)
