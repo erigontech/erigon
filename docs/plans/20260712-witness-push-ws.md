@@ -141,11 +141,11 @@ Behind-tip catch-up and any gap (drop, reorg, cache miss) → plain `debug_execu
 
 ### Task 5: verify acceptance criteria
 
-- [ ] fresh-only stateless semantics confirmed against the Overview (no replay, no per-subscriber state beyond the channel)
-- [ ] `git diff --stat awskii/witness-cache` touches ONLY `rpc/jsonrpc/` files plus this plan; `git diff awskii/witness-cache -- cmd/ node/` is EMPTY; **zero new flags, zero new metric series** (grep the diff for `metrics.` and flag registrations)
-- [ ] full package: `go test ./rpc/jsonrpc/ -count=1 -timeout 30m`
-- [ ] `make lint` repeatedly until clean twice in a row
-- [ ] re-read the wire contract section — request/notification shapes match the implementation exactly (field names, casing)
+- [x] fresh-only stateless semantics confirmed against the Overview (no replay, no per-subscriber state beyond the channel)
+- [x] `git diff --stat awskii/witness-cache` touches ONLY `rpc/jsonrpc/` files plus this plan; `git diff awskii/witness-cache -- cmd/ node/` is EMPTY; **zero new flags, zero new metric series** (grep the diff for `metrics.` and flag registrations)
+- [x] full package: `go test ./rpc/jsonrpc/ -count=1 -timeout 30m`
+- [x] `make lint` repeatedly until clean twice in a row
+- [x] re-read the wire contract section — request/notification shapes match the implementation exactly (field names, casing)
 
 ### Task 6: wrap-up
 
