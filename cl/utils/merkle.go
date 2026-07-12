@@ -23,9 +23,9 @@ func IsValidMerkleBranch(leaf common.Hash, branch []common.Hash, depth uint64, i
 	value := leaf
 	for i := uint64(0); i < depth; i++ {
 		if (index / PowerOf2(i) % 2) == 1 {
-			value = Sha256(append(branch[i][:], value[:]...))
+			value = Sha256(branch[i][:], value[:])
 		} else {
-			value = Sha256(append(value[:], branch[i][:]...))
+			value = Sha256(value[:], branch[i][:])
 		}
 	}
 	return value == root

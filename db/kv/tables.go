@@ -295,6 +295,7 @@ var (
 	PruneHistory           = []byte("pruneHistory")
 	PruneBlocks            = []byte("pruneBlocks")
 	PruneCommitmentHistory = []byte("pruneCommitmentHistory")
+	PruneReceipts          = []byte("pruneReceipts")
 
 	DBSchemaVersionKey = []byte("dbVersion")
 	GenesisKey         = []byte("genesis")

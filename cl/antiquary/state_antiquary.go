@@ -36,6 +36,7 @@ import (
 	"github.com/erigontech/erigon/cl/phase1/core/state/raw"
 	"github.com/erigontech/erigon/cl/transition"
 	"github.com/erigontech/erigon/cl/transition/impl/eth2"
+	"github.com/erigontech/erigon/cl/utils"
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
@@ -352,6 +353,7 @@ func (s *Antiquary) IncrementBeaconState(ctx context.Context, to uint64) error {
 	progressTimer := time.NewTicker(1 * time.Minute)
 	defer progressTimer.Stop()
 	prevSlot := slot
+	startSlot := slot
 	first := false
 	timeBeforeCommit := 30 * time.Minute
 	blocksProcessed := 0
@@ -580,7 +582,16 @@ func (s *Antiquary) IncrementBeaconState(ctx context.Context, to uint64) error {
 		// We now do some post-processing on the state.
 		select {
 		case <-progressTimer.C:
-			log.Log(logLvl, "[Caplin-Archive] Historical States reconstruction", "slot", slot, "blk/sec", fmt.Sprintf("%.2f", float64(slot-prevSlot)/60))
+			slotsPerSec := float64(slot-prevSlot) / time.Minute.Seconds()
+			progress := 0.0
+			if to > startSlot {
+				progress = float64(slot-startSlot) / float64(to-startSlot) * 100
+			}
+			log.Log(logLvl, "[Caplin-Archive] Historical States reconstruction",
+				"slot", slot, "to", to,
+				"slots/sec", fmt.Sprintf("%.2f", slotsPerSec),
+				"progress", fmt.Sprintf("%.1f%%", progress),
+				"eta", utils.ETA(to-slot, slotsPerSec))
 			prevSlot = slot
 		default:
 		}
