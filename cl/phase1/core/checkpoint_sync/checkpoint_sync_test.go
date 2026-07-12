@@ -18,8 +18,10 @@ import (
 	"github.com/erigontech/erigon/cl/antiquary/tests"
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
+	"github.com/erigontech/erigon/cl/persistence/genesisdb"
 	"github.com/erigontech/erigon/cl/phase1/core/state"
 	"github.com/erigontech/erigon/cl/utils"
+	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/db/datadir"
 	chainspec "github.com/erigontech/erigon/execution/chain/spec"
 )
@@ -255,6 +257,136 @@ func TestStateWithinResumeHorizon(t *testing.T) {
 			assert.Equal(t, tt.want, got)
 		})
 	}
+}
+
+func setupResumeScaffold(t *testing.T) (datadir.Dirs, *state.CachingBeaconState, genesisdb.GenesisDB) {
+	t.Helper()
+	_, base, _ := tests.GetPhase0Random()
+	dirs := datadir.New(t.TempDir())
+
+	genesisState, err := base.Copy()
+	require.NoError(t, err)
+	db := genesisdb.NewGenesisDB(&clparams.MainnetBeaconConfig, dirs.CaplinGenesis)
+	require.NoError(t, db.Initialize(genesisState))
+
+	finalized, err := base.Copy()
+	require.NoError(t, err)
+	return dirs, finalized, db
+}
+
+func writeFinalizedStateForTest(t *testing.T, dirs datadir.Dirs, st *state.CachingBeaconState) {
+	t.Helper()
+	enc, err := st.EncodeSSZ(nil)
+	require.NoError(t, err)
+	path := filepath.Join(dirs.CaplinLatest, clparams.LatestFinalizedStateFileName)
+	require.NoError(t, os.WriteFile(path, utils.CompressSnappy(enc), 0o644))
+}
+
+func makeFresh(st *state.CachingBeaconState) {
+	st.SetGenesisTime(uint64(time.Now().Unix()) - st.Slot()*clparams.MainnetBeaconConfig.SecondsPerSlot)
+}
+
+func distinctRemoteState(t *testing.T, base *state.CachingBeaconState) *state.CachingBeaconState {
+	t.Helper()
+	remote, err := base.Copy()
+	require.NoError(t, err)
+	remote.AddEth1DataVote(cltypes.NewEth1Data())
+	return remote
+}
+
+func assertSameRoot(t *testing.T, want, got *state.CachingBeaconState) {
+	t.Helper()
+	wantRoot, err := want.HashSSZ()
+	require.NoError(t, err)
+	gotRoot, err := got.HashSSZ()
+	require.NoError(t, err)
+	assert.Equal(t, wantRoot, gotRoot)
+}
+
+func TestResumeFromFreshFinalizedStateSkipsRemote(t *testing.T) {
+	dirs, finalized, db := setupResumeScaffold(t)
+	makeFresh(finalized)
+	writeFinalizedStateForTest(t, dirs, finalized)
+
+	sent := false
+	mockServer := newMockHttpServer(distinctRemoteState(t, finalized), &sent)
+	defer mockServer.Close()
+	clparams.ConfigurableCheckpointsURLs = []string{mockServer.URL}
+
+	caplinConfig := clparams.CaplinConfig{NetworkId: chainspec.MainnetChainID}
+	got, err := ReadOrFetchLatestBeaconState(context.Background(), dirs, &clparams.MainnetBeaconConfig, caplinConfig, db)
+	require.NoError(t, err)
+	require.NotNil(t, got)
+	assert.False(t, sent, "remote checkpoint sync must not be hit when a fresh local finalized state is present")
+	assertSameRoot(t, finalized, got)
+}
+
+func TestStaleFinalizedStateFetchesRemote(t *testing.T) {
+	dirs, finalized, db := setupResumeScaffold(t)
+	cfg := &clparams.MainnetBeaconConfig
+	staleGap := cfg.MinEpochsForBlobSidecarsRequests*cfg.SlotsPerEpoch + 10_000
+	finalized.SetGenesisTime(uint64(time.Now().Unix()) - (finalized.Slot()+staleGap)*cfg.SecondsPerSlot)
+	writeFinalizedStateForTest(t, dirs, finalized)
+
+	remoteState := distinctRemoteState(t, finalized)
+	sent := false
+	mockServer := newMockHttpServer(remoteState, &sent)
+	defer mockServer.Close()
+	clparams.ConfigurableCheckpointsURLs = []string{mockServer.URL}
+
+	caplinConfig := clparams.CaplinConfig{NetworkId: chainspec.MainnetChainID}
+	got, err := ReadOrFetchLatestBeaconState(context.Background(), dirs, cfg, caplinConfig, db)
+	require.NoError(t, err)
+	require.NotNil(t, got)
+	assert.True(t, sent, "a finalized state beyond the resume horizon must fall through to remote")
+	assertSameRoot(t, remoteState, got)
+}
+
+func TestForeignFinalizedStateFetchesRemote(t *testing.T) {
+	dirs, finalized, db := setupResumeScaffold(t)
+	makeFresh(finalized)
+	finalized.SetGenesisValidatorsRoot(common.HexToHash("0x0102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f20"))
+	writeFinalizedStateForTest(t, dirs, finalized)
+
+	remoteState := distinctRemoteState(t, finalized)
+	sent := false
+	mockServer := newMockHttpServer(remoteState, &sent)
+	defer mockServer.Close()
+	clparams.ConfigurableCheckpointsURLs = []string{mockServer.URL}
+
+	caplinConfig := clparams.CaplinConfig{NetworkId: chainspec.MainnetChainID}
+	got, err := ReadOrFetchLatestBeaconState(context.Background(), dirs, &clparams.MainnetBeaconConfig, caplinConfig, db)
+	require.NoError(t, err)
+	require.NotNil(t, got)
+	assert.True(t, sent, "a finalized state from a different network (GVR mismatch) must fall through to remote")
+	assertSameRoot(t, remoteState, got)
+}
+
+func TestAbsentFinalizedStateFetchesRemote(t *testing.T) {
+	dirs, finalized, db := setupResumeScaffold(t)
+	// Deliberately do NOT write the finalized state file.
+
+	remoteState := distinctRemoteState(t, finalized)
+	sent := false
+	mockServer := newMockHttpServer(remoteState, &sent)
+	defer mockServer.Close()
+	clparams.ConfigurableCheckpointsURLs = []string{mockServer.URL}
+
+	caplinConfig := clparams.CaplinConfig{NetworkId: chainspec.MainnetChainID}
+	got, err := ReadOrFetchLatestBeaconState(context.Background(), dirs, &clparams.MainnetBeaconConfig, caplinConfig, db)
+	require.NoError(t, err)
+	require.NotNil(t, got)
+	assert.True(t, sent, "with no local finalized state, checkpoint sync must fetch remote (today's behavior)")
+	assertSameRoot(t, remoteState, got)
+}
+
+func TestResumeHorizonHonorsAndClampsConfig(t *testing.T) {
+	cfg := &clparams.MainnetBeaconConfig
+	retention := cfg.MinEpochsForBlobSidecarsRequests * cfg.SlotsPerEpoch
+
+	assert.Equal(t, retention, resolveResumeHorizonSlots(cfg, 0, 0), "0 resolves to the sidecar-retention window")
+	assert.Equal(t, uint64(10)*cfg.SlotsPerEpoch, resolveResumeHorizonSlots(cfg, 10, 0), "a value below the window is honored")
+	assert.Equal(t, retention, resolveResumeHorizonSlots(cfg, cfg.MinEpochsForBlobSidecarsRequests+1000, 0), "a value above the window is clamped down")
 }
 
 func TestLocalCheckpointSyncFromGenesis(t *testing.T) {

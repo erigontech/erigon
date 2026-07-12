@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"path/filepath"
+	"time"
 
 	"github.com/spf13/afero"
 
@@ -27,6 +28,12 @@ func ReadOrFetchLatestBeaconState(ctx context.Context, dirs datadir.Dirs, beacon
 	remoteSync := !caplinConfig.DisabledCheckpointSync && (!caplinConfig.IsDevnet() || hasCustomCheckpointURL)
 
 	if remoteSync {
+		// Prefer resuming from our own most-recently-finalized state (local, reorg-immune) so the
+		// node comes up at a finalized anchor at/below the EL head — no network fetch, no EL backfill.
+		if localFinalized := tryResumeFromLocalFinalizedState(dirs, beaconCfg, caplinConfig, genesisDB); localFinalized != nil {
+			return localFinalized, nil
+		}
+
 		syncer := NewRemoteCheckpointSync(beaconCfg, caplinConfig.NetworkId)
 		st, err := syncer.GetLatestBeaconState(ctx)
 		if err == nil {
@@ -65,6 +72,47 @@ func ReadLocalHeadState(dirs datadir.Dirs, beaconCfg *clparams.BeaconChainConfig
 // ReadLocalFinalizedState reads the node's own most-recently-finalized state directly from disk.
 func ReadLocalFinalizedState(dirs datadir.Dirs, beaconCfg *clparams.BeaconChainConfig) (*state.CachingBeaconState, error) {
 	return readLocalStateFile(dirs, beaconCfg, clparams.LatestFinalizedStateFileName, "finalized")
+}
+
+// tryResumeFromLocalFinalizedState returns the node's own most-recently-finalized state when it is a
+// safe local resume anchor, or nil to fall through to remote checkpoint sync. It is safe when the file
+// is present, its GenesisValidatorsRoot matches the configured genesis (same network), and it is within
+// the data-availability resume horizon. Any failure is logged and yields nil (non-fatal fall-through).
+func tryResumeFromLocalFinalizedState(dirs datadir.Dirs, beaconCfg *clparams.BeaconChainConfig, caplinConfig clparams.CaplinConfig, genesisDB genesisdb.GenesisDB) *state.CachingBeaconState {
+	localFinalized, err := ReadLocalFinalizedState(dirs, beaconCfg)
+	if err != nil {
+		log.Info("[Checkpoint Sync] No local finalized state to resume from; using remote", "reason", "absent", "err", err)
+		return nil
+	}
+
+	genesisState, err := genesisDB.ReadGenesisState()
+	if err != nil {
+		log.Warn("[Checkpoint Sync] Could not read genesis state to validate local finalized state; using remote", "err", err)
+		return nil
+	}
+	if localFinalized.GenesisValidatorsRoot() != genesisState.GenesisValidatorsRoot() {
+		log.Info("[Checkpoint Sync] Local finalized state is from a different network; using remote", "reason", "gvr-mismatch",
+			"local", localFinalized.GenesisValidatorsRoot(), "want", genesisState.GenesisValidatorsRoot())
+		return nil
+	}
+
+	genesisTime := localFinalized.GenesisTime()
+	secondsPerSlot := beaconCfg.SecondsPerSlot
+	nowUnix := uint64(time.Now().Unix())
+	localSlot := localFinalized.Slot()
+	var currentEpoch uint64
+	if secondsPerSlot != 0 && nowUnix >= genesisTime {
+		currentEpoch = ((nowUnix - genesisTime) / secondsPerSlot) / beaconCfg.SlotsPerEpoch
+	}
+	horizonSlots := resolveResumeHorizonSlots(beaconCfg, caplinConfig.ResumeMaxStalenessEpochs, currentEpoch)
+	if !stateWithinResumeHorizon(localSlot, genesisTime, nowUnix, secondsPerSlot, horizonSlots) {
+		log.Info("[Checkpoint Sync] Local finalized state is too stale to resume from; using remote", "reason", "stale",
+			"slot", localSlot, "horizonSlots", horizonSlots)
+		return nil
+	}
+
+	log.Info("[Checkpoint Sync] Resuming from local finalized state", "slot", localSlot)
+	return localFinalized
 }
 
 func readLocalStateFile(dirs datadir.Dirs, beaconCfg *clparams.BeaconChainConfig, fileName, kind string) (*state.CachingBeaconState, error) {

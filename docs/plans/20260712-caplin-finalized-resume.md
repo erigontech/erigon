@@ -160,14 +160,14 @@ EL forward through a gap — no "Downloading Execution History".
 - Modify: `cl/phase1/core/checkpoint_sync/util.go`
 - Modify: `cl/phase1/core/checkpoint_sync/checkpoint_sync_test.go`
 
-- [ ] in the `remoteSync` branch, before the remote fetch: read the finalized state; if present AND `GenesisValidatorsRoot()` matches the configured genesis (`genesisDB.ReadGenesisState().GenesisValidatorsRoot()`) AND within the resume horizon, return it and skip the remote fetch; else fall through to today's remote path
-- [ ] log at info: resumed slot, or the fall-through reason (absent / stale / GVR mismatch)
-- [ ] write `TestResumeFromFreshFinalizedStateSkipsRemote` (fresh file → remote mock not hit, returned root == finalized root)
-- [ ] write `TestStaleFinalizedStateFetchesRemote` (beyond horizon → remote hit)
-- [ ] write `TestForeignFinalizedStateFetchesRemote` (GVR mismatch → remote hit)
-- [ ] write `TestAbsentFinalizedStateFetchesRemote` (no file → remote hit, today's behavior)
-- [ ] write `TestResumeHorizonHonorsAndClampsConfig` (custom `ResumeMaxStalenessEpochs` honored; over-large clamped to sidecar-retention window)
-- [ ] run tests — must pass before next task
+- [x] in the `remoteSync` branch, before the remote fetch: read the finalized state; if present AND `GenesisValidatorsRoot()` matches the configured genesis (`genesisDB.ReadGenesisState().GenesisValidatorsRoot()`) AND within the resume horizon, return it and skip the remote fetch; else fall through to today's remote path
+- [x] log at info: resumed slot, or the fall-through reason (absent / stale / GVR mismatch)
+- [x] write `TestResumeFromFreshFinalizedStateSkipsRemote` (fresh file → remote mock not hit, returned root == finalized root)
+- [x] write `TestStaleFinalizedStateFetchesRemote` (beyond horizon → remote hit)
+- [x] write `TestForeignFinalizedStateFetchesRemote` (GVR mismatch → remote hit)
+- [x] write `TestAbsentFinalizedStateFetchesRemote` (no file → remote hit, today's behavior)
+- [x] write `TestResumeHorizonHonorsAndClampsConfig` (custom `ResumeMaxStalenessEpochs` honored; over-large clamped to sidecar-retention window)
+- [x] run tests — must pass before next task
 
 ### Task 6: Route all resume paths to the finalized file; retire the head-state save
 
