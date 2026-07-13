@@ -37,7 +37,9 @@ import (
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/dbcfg"
 	"github.com/erigontech/erigon/db/kv/mdbx"
+	"github.com/erigontech/erigon/db/kv/order"
 	"github.com/erigontech/erigon/db/kv/rawdbv3"
+	"github.com/erigontech/erigon/db/kv/stream"
 	"github.com/erigontech/erigon/db/kv/temporal"
 	"github.com/erigontech/erigon/db/state"
 	"github.com/erigontech/erigon/db/state/changeset"
@@ -1738,5 +1740,74 @@ func TestSharedDomain_TouchChangedKeysFromHistory(t *testing.T) {
 		}
 		require.NoError(t, err)
 		require.Equal(t, expectedRootHash, rootHash)
+	}
+}
+
+// Deleting an already-absent key must not record a history/inverted-index
+// entry. Without the guard, an empty->empty delete writes a redundant row,
+// which makes history depend on how often callers re-issue such deletes (e.g.
+// EIP-161 empty-account touches of the identity precompile 0x04) — differing
+// between serial and parallel execution while roots agree. DomainDel is only
+// ever invoked for Accounts, Code and Storage, so all three are covered.
+func TestSharedDomain_DeleteAbsentKeyIsNoop(t *testing.T) {
+	if testing.Short() {
+		t.Skip()
+	}
+	t.Parallel()
+
+	addr := common.HexToAddress("0x0000000000000000000000000000000000000004")
+	slot := common.HexToHash("0x5ac7102aad1a639901bc2657323aaed9e90e40c550747c49170f1c82fd664e4f")
+
+	acc := accounts3.Account{Nonce: 1, Balance: *uint256.NewInt(1000)}
+	cases := []struct {
+		name   string
+		domain kv.Domain
+		idx    kv.InvertedIdx
+		key    []byte
+		value  []byte
+	}{
+		{"accounts", kv.AccountsDomain, kv.AccountsHistoryIdx, addr[:], accounts3.SerialiseV3(&acc)},
+		{"storage", kv.StorageDomain, kv.StorageHistoryIdx, composite(addr[:], slot[:]), []byte{0x01, 0x02, 0x03, 0x04}},
+		{"code", kv.CodeDomain, kv.CodeHistoryIdx, addr[:], []byte{0x60, 0x00, 0x60, 0x00}},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			db := newTestDb(t, 100)
+			ctx := t.Context()
+			rwTx, err := db.BeginTemporalRw(ctx)
+			require.NoError(t, err)
+			defer rwTx.Rollback()
+
+			domains, err := execctx.NewSharedDomains(ctx, rwTx, log.New())
+			require.NoError(t, err)
+			defer domains.Close()
+
+			const createTxNum, deleteTxNum uint64 = 1, 2
+
+			domains.SetTxNum(createTxNum)
+			require.NoError(t, domains.DomainPut(tc.domain, rwTx, tc.key, tc.value, createTxNum, nil))
+
+			domains.SetTxNum(deleteTxNum)
+			require.NoError(t, domains.DomainDel(tc.domain, rwTx, tc.key, deleteTxNum, nil))
+
+			// Redundant deletes of the now-absent key, exercising both prevVal paths:
+			// nil (resolved via GetLatest) and an explicit empty slice (parallel apply path).
+			domains.SetTxNum(3)
+			require.NoError(t, domains.DomainDel(tc.domain, rwTx, tc.key, 3, nil))
+			domains.SetTxNum(4)
+			require.NoError(t, domains.DomainDel(tc.domain, rwTx, tc.key, 4, []byte{}))
+
+			require.NoError(t, domains.Flush(ctx, rwTx))
+
+			it, err := rwTx.IndexRange(tc.idx, tc.key, 0, -1, order.Asc, -1)
+			require.NoError(t, err)
+			txNums, err := stream.ToArrayU64(it)
+			require.NoError(t, err)
+
+			require.Equal(t, []uint64{createTxNum, deleteTxNum}, txNums,
+				"only the create and the real delete must be recorded; redundant deletes of an absent key must be no-ops")
+		})
 	}
 }
