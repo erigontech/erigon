@@ -162,3 +162,76 @@ func setupBlobsTest(t *testing.T) blobsTestFixture {
 		versionedHash: versionedHash,
 	}
 }
+
+// blobSidecarsEnvelope captures the full response shape for blob_sidecars.
+type blobSidecarsEnvelope struct {
+	Version             *string         `json:"version"`
+	ExecutionOptimistic *bool           `json:"execution_optimistic"`
+	Finalized           *bool           `json:"finalized"`
+	Data                json.RawMessage `json:"data"`
+}
+
+// TestBlobSidecarsResponseEnvelope verifies that GET /eth/v1/beacon/blob_sidecars/{block_id}
+// returns the required envelope fields (version, execution_optimistic, finalized) per the
+// Beacon API specification. This is a regression test for the missing envelope fields bug.
+func TestBlobSidecarsResponseEnvelope(t *testing.T) {
+	f := setupBlobsTest(t)
+
+	// Set up frozen snapshots with actual blob data.
+	f.handler.caplinSnapshots = frozenBlobSnapshotReader{
+		frozenBlobsExclusive: f.slot + 1,
+		sidecars: []*cltypes.BlobSidecar{
+			{Index: 0, Blob: cltypes.Blob{1}},
+		},
+	}
+
+	server := httptest.NewServer(f.handler.mux)
+	defer server.Close()
+
+	resp, err := http.Get(server.URL + "/eth/v1/beacon/blob_sidecars/" + strconv.FormatUint(f.slot, 10))
+	require.NoError(t, err)
+	defer resp.Body.Close()
+	require.Equal(t, http.StatusOK, resp.StatusCode)
+
+	var envelope blobSidecarsEnvelope
+	require.NoError(t, json.NewDecoder(resp.Body).Decode(&envelope))
+
+	// All three envelope fields must be present (non-nil pointers).
+	require.NotNil(t, envelope.Version, "response must include 'version'")
+	require.NotNil(t, envelope.ExecutionOptimistic, "response must include 'execution_optimistic'")
+	require.NotNil(t, envelope.Finalized, "response must include 'finalized'")
+	require.NotNil(t, envelope.Data, "response must include 'data'")
+
+	// Verify values.
+	require.Equal(t, "electra", *envelope.Version)
+	require.False(t, *envelope.ExecutionOptimistic)
+}
+
+// TestBlobSidecarsEmptyResponseEnvelope verifies that even when no blobs are found,
+// the response envelope still includes all required fields.
+func TestBlobSidecarsEmptyResponseEnvelope(t *testing.T) {
+	f := setupBlobsTest(t)
+
+	// No snapshots, no blob storage data for this block → empty response.
+	f.handler.caplinSnapshots = frozenBlobSnapshotReader{frozenBlobsExclusive: f.slot + 1}
+
+	server := httptest.NewServer(f.handler.mux)
+	defer server.Close()
+
+	resp, err := http.Get(server.URL + "/eth/v1/beacon/blob_sidecars/" + strconv.FormatUint(f.slot, 10))
+	require.NoError(t, err)
+	defer resp.Body.Close()
+	require.Equal(t, http.StatusOK, resp.StatusCode)
+
+	var envelope blobSidecarsEnvelope
+	require.NoError(t, json.NewDecoder(resp.Body).Decode(&envelope))
+
+	// All envelope fields must still be present even with empty data.
+	require.NotNil(t, envelope.Version, "empty response must include 'version'")
+	require.NotNil(t, envelope.ExecutionOptimistic, "empty response must include 'execution_optimistic'")
+	require.NotNil(t, envelope.Finalized, "empty response must include 'finalized'")
+	require.NotNil(t, envelope.Data, "empty response must include 'data'")
+
+	require.Equal(t, "electra", *envelope.Version)
+	require.False(t, *envelope.ExecutionOptimistic)
+}

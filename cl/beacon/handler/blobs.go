@@ -76,9 +76,17 @@ func (a *ApiHandler) GetEthV1BeaconBlobSidecars(w http.ResponseWriter, r *http.R
 	if err != nil {
 		return nil, err
 	}
+
+	version := a.ethClock.StateVersionByEpoch(*slot / a.beaconChainCfg.SlotsPerEpoch)
+	isOptimistic := a.forkchoiceStore.IsRootOptimistic(blockRoot)
+	isFinalized := canonicalRoot == blockRoot && *slot <= a.forkchoiceStore.FinalizedSlot()
+
 	resp := solid.NewStaticListSSZ[*cltypes.BlobSidecar](696969, blobSidecarSSZLenght)
 	if !found {
-		return beaconhttp.NewBeaconResponse(resp), nil
+		return beaconhttp.NewBeaconResponse(resp).
+			WithFinalized(isFinalized).
+			WithVersion(version).
+			WithOptimistic(isOptimistic), nil
 	}
 	if len(strIdxs) == 0 {
 		for _, v := range out {
@@ -100,7 +108,10 @@ func (a *ApiHandler) GetEthV1BeaconBlobSidecars(w http.ResponseWriter, r *http.R
 		}
 	}
 
-	return beaconhttp.NewBeaconResponse(resp), nil
+	return beaconhttp.NewBeaconResponse(resp).
+		WithFinalized(isFinalized).
+		WithVersion(version).
+		WithOptimistic(isOptimistic), nil
 }
 
 func (a *ApiHandler) readBlobSidecars(ctx context.Context, slot uint64, blockRoot, canonicalRoot common.Hash) ([]*cltypes.BlobSidecar, bool, error) {
