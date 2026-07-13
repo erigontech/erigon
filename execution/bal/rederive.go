@@ -79,13 +79,24 @@ func RederiveBlockAccessList(
 		}
 		ibs.SetTxContext(blockNum, i)
 		evm := protocol.CreateEVM(cfg, hashFn, engine, accounts.NilAddress, ibs, header, vmCfg)
+		stopCancelWatch := context.AfterFunc(ctx, evm.Cancel)
 		receipt, err := protocol.ApplyTransactionWithEVM(cfg, engine, gp, ibs, noopWriter, header, txn, gasUsed, vmCfg, evm)
 		if err != nil {
+			stopCancelWatch()
 			return nil, fmt.Errorf("bal.RederiveBlockAccessList: replay tx %d of block %d: %w", i, blockNum, err)
+		}
+		stopCancelWatch()
+		if evm.Cancelled() {
+			return nil, fmt.Errorf("bal.RederiveBlockAccessList: execution aborted replaying tx %d of block %d: %w", i, blockNum, ctx.Err())
 		}
 		ibs.MergeTxIOInto(balIO)
 		ibs.ResetVersionedIO()
 		receipts = append(receipts, receipt)
+	}
+	select {
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	default:
 	}
 	ibs.SetTxContext(blockNum, len(txns))
 	ibs.ResetVersionedIO()
