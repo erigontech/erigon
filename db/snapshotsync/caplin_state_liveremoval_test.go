@@ -165,6 +165,13 @@ func TestCaplinStateCloseKeepsFdsForPinnedOlderGeneration(t *testing.T) {
 	segs := v.VisibleSegments(typ)
 	require.NotEmpty(t, segs, "pinned view must still see its segment")
 	require.NotNil(t, segs[0].src.Decompressor, "Close must not close fds a pinned older generation references")
+
+	// Close leaves these fds open while the view pins the generation; release the pin and close
+	// them so Windows can unlink the still-mmapped files at t.TempDir cleanup (POSIX unlinks regardless).
+	v.Close()
+	for _, seg := range segs {
+		seg.src.close()
+	}
 }
 
 // OpenList publishes exactly one generation, even when it both detaches a stale file and opens
