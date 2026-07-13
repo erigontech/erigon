@@ -70,6 +70,13 @@ type TemporalMemBatch struct {
 
 	domainWriters [kv.DomainLen]*DomainBufferedWriter
 	iiWriters     []*InvertedIndexBufferedWriter
+	// iiMem is the queryable local copy of standalone inverted-index writes
+	// (index -> key -> ascending txNums). The ii writers are write-only etl
+	// buffers, so without this IndexRange can't answer in-flight queries for
+	// standalone indices (traces, logs) the way it can for domain-backed ones
+	// via the domain history. Populated by IndexAdd only when inMemHistoryReads
+	// is set — the same gate under which the domain history above is retained.
+	iiMem map[kv.InvertedIdx]map[string][]uint64
 
 	pastDomainWriters [kv.DomainLen][]*DomainBufferedWriter
 	pastIIWriters     []*InvertedIndexBufferedWriter
@@ -106,6 +113,7 @@ func NewTemporalMemBatch(tx kv.TemporalTx, ioMetrics any) *TemporalMemBatch {
 		storage:           btree2.NewMap[string, []dataWithTxNum](128),
 		metrics:           ioMetrics.(*kvmetrics.DomainMetrics),
 		inMemHistoryReads: true,
+		iiMem:             map[kv.InvertedIdx]map[string][]uint64{},
 	}
 	aggTx := AggTx(tx)
 	sd.stepSize = aggTx.StepSize()
@@ -492,10 +500,10 @@ func (sd *TemporalMemBatch) memHistoryRange(domain kv.Domain, fromTs, toTs int, 
 	return pairs
 }
 
-// IndexRange returns the txNums at which key k changed in [fromTs, toTs),
-// merging the in-flight in-memory history with the committed inverted index.
-// Only domain-backed indices contribute in-memory txNums; standalone indices
-// (logs, traces) fall back to committed. Only used by the RPC test harness.
+// IndexRange returns the txNums at which key k appears in [fromTs, toTs),
+// merging the in-flight in-memory index with the committed inverted index.
+// Domain-backed indices derive their in-memory txNums from the domain history;
+// standalone indices (logs, traces) read them from the local ii collection.
 func (sd *TemporalMemBatch) IndexRange(name kv.InvertedIdx, k []byte, fromTs, toTs int, asc order.By, limit int, roTx kv.Tx) (stream.U64, error) {
 	committed, err := AggTx(roTx).IndexRange(name, k, fromTs, toTs, asc, limit, roTx)
 	if err != nil {
@@ -505,23 +513,46 @@ func (sd *TemporalMemBatch) IndexRange(name kv.InvertedIdx, k []byte, fromTs, to
 		return committed, nil
 	}
 	at := AggTx(roTx)
-	var domain kv.Domain
+	var memTs []uint64
 	found := false
 	for i := range at.d {
 		if at.d[i].d.HistoryIdx == name {
-			domain = kv.Domain(i)
+			memTs = sd.memIndexTxNums(kv.Domain(i), k, fromTs, toTs, asc)
 			found = true
 			break
 		}
 	}
 	if !found {
-		return committed, nil
+		memTs = sd.memIndexTxNumsII(name, k, fromTs, toTs, asc)
 	}
-	memTs := sd.memIndexTxNums(domain, k, fromTs, toTs, asc)
 	if len(memTs) == 0 {
 		return committed, nil
 	}
 	return stream.Union[uint64](stream.Array(memTs), committed, asc, limit), nil
+}
+
+// memIndexTxNumsII reads the local standalone inverted-index collection for the
+// txNums of key k in [fromTs, toTs), deduplicated and ordered per asc.
+func (sd *TemporalMemBatch) memIndexTxNumsII(name kv.InvertedIdx, k []byte, fromTs, toTs int, asc order.By) []uint64 {
+	sd.latestStateLock.RLock()
+	defer sd.latestStateLock.RUnlock()
+	txNums := sd.iiMem[name][common.ToStringZeroCopy(k)]
+	out := make([]uint64, 0, len(txNums))
+	for _, tn := range txNums {
+		if !idxTxNumInRange(tn, fromTs, toTs, asc) {
+			continue
+		}
+		if len(out) > 0 && out[len(out)-1] == tn {
+			continue // ascending append order makes duplicates consecutive
+		}
+		out = append(out, tn)
+	}
+	if asc == order.Desc {
+		for i, j := 0, len(out)-1; i < j; i, j = i+1, j-1 {
+			out[i], out[j] = out[j], out[i]
+		}
+	}
+	return out
 }
 
 func (sd *TemporalMemBatch) memIndexTxNums(domain kv.Domain, k []byte, fromTs, toTs int, asc order.By) []uint64 {
@@ -536,14 +567,9 @@ func (sd *TemporalMemBatch) memIndexTxNums(domain kv.Domain, k []byte, fromTs, t
 	}
 	out := make([]uint64, 0, len(entries))
 	for i := range entries {
-		tn := entries[i].txNum
-		if fromTs >= 0 && tn < uint64(fromTs) {
-			continue
+		if tn := entries[i].txNum; idxTxNumInRange(tn, fromTs, toTs, asc) {
+			out = append(out, tn)
 		}
-		if toTs >= 0 && tn >= uint64(toTs) {
-			continue
-		}
-		out = append(out, tn)
 	}
 	if asc == order.Desc {
 		for i, j := 0, len(out)-1; i < j; i, j = i+1, j-1 {
@@ -551,6 +577,15 @@ func (sd *TemporalMemBatch) memIndexTxNums(domain kv.Domain, k []byte, fromTs, t
 		}
 	}
 	return out
+}
+
+// idxTxNumInRange applies the inverted-index range bounds: asc = [fromTs, toTs),
+// desc = (toTs, fromTs]. A negative bound is unbounded.
+func idxTxNumInRange(tn uint64, fromTs, toTs int, asc order.By) bool {
+	if asc == order.Asc {
+		return (fromTs < 0 || tn >= uint64(fromTs)) && (toTs < 0 || tn < uint64(toTs))
+	}
+	return (fromTs < 0 || tn <= uint64(fromTs)) && (toTs < 0 || tn > uint64(toTs))
 }
 
 type memKVPair struct{ k, v []byte }
@@ -630,6 +665,7 @@ func (sd *TemporalMemBatch) ClearRam() {
 	}
 
 	sd.storage = btree2.NewMap[string, []dataWithTxNum](128)
+	sd.iiMem = map[kv.InvertedIdx]map[string][]uint64{}
 	sd.unwindToTxNum = 0
 	sd.unwindChangeset = nil
 	sd.unwindChangesetRaw = nil
@@ -865,6 +901,24 @@ func (sd *TemporalMemBatch) Unwind(unwindToTxNum uint64, changeset *[kv.DomainLe
 			sd.storage.Set(e.key, e.kept)
 		}
 	}
+	for table, byKey := range sd.iiMem {
+		for k, txNums := range byKey {
+			kept := txNums[:0]
+			for _, tn := range txNums {
+				if tn <= unwindToTxNum {
+					kept = append(kept, tn)
+				}
+			}
+			if len(kept) == 0 {
+				delete(byKey, k)
+			} else {
+				byKey[k] = kept
+			}
+		}
+		if len(byKey) == 0 {
+			delete(sd.iiMem, table)
+		}
+	}
 
 	var unwindChangeset *[kv.DomainLen]map[string]kv.DomainEntryDiff
 	var unwindChangesetRaw *[kv.DomainLen][]kv.DomainEntryDiff
@@ -895,10 +949,27 @@ func (sd *TemporalMemBatch) Unwind(unwindToTxNum uint64, changeset *[kv.DomainLe
 func (sd *TemporalMemBatch) IndexAdd(table kv.InvertedIdx, key []byte, txNum uint64) (err error) {
 	for _, writer := range sd.iiWriters {
 		if writer.name == table {
+			if sd.inMemHistoryReads {
+				sd.iiMemAdd(table, key, txNum)
+			}
 			return writer.Add(key, txNum)
 		}
 	}
 	panic(fmt.Errorf("unknown index %s", table))
+}
+
+func (sd *TemporalMemBatch) iiMemAdd(table kv.InvertedIdx, key []byte, txNum uint64) {
+	sd.latestStateLock.Lock()
+	defer sd.latestStateLock.Unlock()
+	byKey := sd.iiMem[table]
+	if byKey == nil {
+		byKey = map[string][]uint64{}
+		sd.iiMem[table] = byKey
+	}
+	ks := string(key)
+	// IndexAdd is called in ascending txNum order during execution, so append
+	// keeps each key's txNum slice sorted.
+	byKey[ks] = append(byKey[ks], txNum)
 }
 
 func (sd *TemporalMemBatch) Close() {
