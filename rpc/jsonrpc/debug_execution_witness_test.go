@@ -543,6 +543,16 @@ func TestExecutionWitnessCacheOnlyServe(t *testing.T) {
 		require.Nil(t, result, "a cache-only miss must not build a witness")
 	})
 
+	t.Run("canonical mode returns canonical-unavailable, not out-of-window", func(t *testing.T) {
+		api.witnessCache = newWitnessResultCache(96, 0, true /*headCapture*/, true /*cacheOnly*/)
+		t.Cleanup(func() { api.witnessCache = nil })
+
+		canonical := "canonical"
+		result, err := api.ExecutionWitness(ctx, rpc.BlockNumberOrHash{BlockNumber: &bn}, &canonical)
+		require.ErrorIs(t, err, errWitnessCanonicalUnavailable)
+		require.Nil(t, result, "a cache-only node never builds a canonical witness")
+	})
+
 	t.Run("by-number hit serves cached pointer", func(t *testing.T) {
 		cache := newWitnessResultCache(96, 0, true, true)
 		cache.Add(block1Hash, sentinel)

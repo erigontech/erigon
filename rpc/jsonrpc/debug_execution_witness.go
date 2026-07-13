@@ -737,9 +737,13 @@ func (api *DebugAPIImpl) ExecutionWitness(ctx context.Context, blockNrOrHash rpc
 	}
 
 	// A cache-only node (head-capture minimal: no commitment history) never recomputes
-	// from history — a miss is out-of-window, and a by-hash request for a reorged-out
-	// block is reported distinctly so callers can tell the two apart.
+	// from history — a miss is out-of-window, a by-hash request for a reorged-out block is
+	// reported distinctly, and a canonical-mode request is rejected distinctly since the
+	// cache only ever builds legacy witnesses.
 	if api.witnessCache != nil && api.witnessCache.CacheOnly() {
+		if resolvedMode != witnessModeLegacy {
+			return nil, errWitnessCanonicalUnavailable
+		}
 		if reorgedAway {
 			return nil, errWitnessReorgedAway
 		}
@@ -810,10 +814,12 @@ var errWitnessVerifyFailed = errors.New("witness stateless verification failed")
 // serve miss returns one of these typed errors instead of falling through to a build.
 // errWitnessOutOfWindow covers a block that was never cached, aged out, or is ahead of
 // the tip; errWitnessReorgedAway is the distinct case of a by-hash request whose block
-// number is no longer canonical (the hash was reorged out).
+// number is no longer canonical (the hash was reorged out); errWitnessCanonicalUnavailable
+// covers a canonical-mode request, which the legacy-only cache never builds.
 var (
-	errWitnessOutOfWindow = errors.New("debug_executionWitness: requested block is outside the head-capture cache window")
-	errWitnessReorgedAway = errors.New("debug_executionWitness: requested block hash was reorged away and is no longer canonical")
+	errWitnessOutOfWindow          = errors.New("debug_executionWitness: requested block is outside the head-capture cache window")
+	errWitnessReorgedAway          = errors.New("debug_executionWitness: requested block hash was reorged away and is no longer canonical")
+	errWitnessCanonicalUnavailable = errors.New("debug_executionWitness: canonical witness mode is unavailable on a cache-only node (serves legacy only)")
 )
 
 // headCaptureSource carries the pinned-parent commitment plane for a minimal-node

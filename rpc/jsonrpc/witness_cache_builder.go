@@ -440,11 +440,6 @@ func (api *DebugAPIImpl) tryHeadCaptureBuild(ctx context.Context, committedTx kv
 	var pinHash common.Hash
 	if havePin {
 		pinNum, pinHash = pin.num, pin.hash
-		// Guard against pin drift: the pinned snapshot's committed Finish must still equal
-		// the height it was tagged at, else its commitment-latest is not parent(B).
-		if finish, ferr := stages.GetStageProgress(pin.tx, stages.Finish); ferr != nil || finish != pinNum {
-			havePin = false
-		}
 	}
 	if decidePin(havePin, pinNum, pinHash, num, parentHash) != pinUsable {
 		witnessCacheBuildFailOtherCounter.Inc()
