@@ -30,7 +30,6 @@ import (
 	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/rawdb"
-	"github.com/erigontech/erigon/db/state/kvmetrics"
 	"github.com/erigontech/erigon/db/state/statecfg"
 	"github.com/erigontech/erigon/execution/commitment/commitmentdb"
 	"github.com/erigontech/erigon/execution/protocol/params"
@@ -399,18 +398,6 @@ func TestResolveWitnessMode(t *testing.T) {
 	})
 }
 
-// fakeHeadCaptureSD is a no-op SharedDomains surface for exercising the reader
-// selection without a real database; only AsGetter is invoked at construction
-// (its returned getter is never read in these tests).
-type fakeHeadCaptureSD struct{}
-
-func (fakeHeadCaptureSD) SetTxNum(uint64)                                         {}
-func (fakeHeadCaptureSD) AsGetter(kv.TemporalTx) kv.TemporalGetter                { return nil }
-func (fakeHeadCaptureSD) AsPutDel(kv.TemporalTx) kv.TemporalPutDel                { return nil }
-func (fakeHeadCaptureSD) MergeMetrics(kvmetrics.Source, *kvmetrics.DomainMetrics) {}
-func (fakeHeadCaptureSD) StepSize() uint64                                        { return 1 }
-func (fakeHeadCaptureSD) Metrics() *kvmetrics.DomainMetrics                       { return nil }
-
 // TestWitnessReaderComposition pins the per-phase reader the two build phases install:
 // head-capture reads commitment from the pinned parent and plain state at the phase's
 // txNum (block-end for collapse detection, parent for the trie), while the durable path
@@ -422,7 +409,7 @@ func TestWitnessReaderComposition(t *testing.T) {
 		firstTxNumInBlock = uint64(500)
 		endTxNum          = uint64(1000)
 	)
-	hc := &headCaptureSource{pinnedSD: fakeHeadCaptureSD{}}
+	hc := &headCaptureSource{}
 
 	collapse := collapseReaderFor(hc, nil, firstTxNumInBlock, endTxNum)
 	hcCollapse, ok := collapse.(*commitmentdb.CommitmentReplayStateReader)
@@ -438,7 +425,7 @@ func TestWitnessReaderComposition(t *testing.T) {
 	asOf, ok = hcTrie.PlainStateAsOf()
 	require.True(t, ok)
 	require.Equal(t, firstTxNumInBlock, asOf, "trie phase reads plain state at the parent")
-	require.False(t, trie.WithHistory())
+	require.True(t, trie.WithHistory(), "trie phase is read-only: PutBranch must no-op during witness capture")
 
 	durableCollapse := collapseReaderFor(nil, nil, firstTxNumInBlock, endTxNum)
 	splitReader, ok := durableCollapse.(*commitmentdb.SplitStateReader)

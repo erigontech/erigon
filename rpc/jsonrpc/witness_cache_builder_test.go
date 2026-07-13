@@ -31,6 +31,7 @@ import (
 	"github.com/erigontech/erigon/db/state/statecfg"
 	"github.com/erigontech/erigon/execution/execmodule/execmoduletester"
 	"github.com/erigontech/erigon/execution/rlp"
+	"github.com/erigontech/erigon/execution/stagedsync/stages"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/rpc"
 )
@@ -144,6 +145,134 @@ func buildTestChainHeader(t *testing.T, m *execmoduletester.ExecModuleTester, bl
 	})
 	require.NoError(t, err)
 	return hash, headerRLP
+}
+
+func TestDecidePin(t *testing.T) {
+	t.Parallel()
+	parent := hashN(0x11)
+	other := hashN(0x22)
+	cases := []struct {
+		name                string
+		havePin             bool
+		pinNum              uint64
+		pinHash             common.Hash
+		blockNum            uint64
+		canonicalParentHash common.Hash
+		want                pinVerdict
+	}{
+		{"no pin yet (cold start)", false, 0, common.Hash{}, 5, parent, pinStale},
+		{"pin at B-1 with canonical hash builds", true, 4, parent, 5, parent, pinUsable},
+		{"pin lags by two (tip jumped a coalesced gap)", true, 3, parent, 5, parent, pinStale},
+		{"pin rolled ahead of the parent", true, 5, parent, 5, parent, pinStale},
+		{"pin at B-1 but parent reorged to a new hash", true, 4, other, 5, parent, pinStale},
+		{"genesis block has no parent to pin", true, 0, parent, 0, parent, pinStale},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			require.Equal(t, tc.want, decidePin(tc.havePin, tc.pinNum, tc.pinHash, tc.blockNum, tc.canonicalParentHash))
+		})
+	}
+}
+
+// TestOpenRollingPin pins the current committed head against a real temporal DB and
+// asserts the pin tags that head's number and canonical hash; close is idempotent.
+func TestOpenRollingPin(t *testing.T) {
+	m, _, _ := rpcdaemontest.CreateTestExecModule(t)
+	ctx := context.Background()
+
+	pin, err := openRollingPin(ctx, m.DB)
+	require.NoError(t, err)
+	require.NotNil(t, pin)
+
+	roTx, err := m.DB.BeginTemporalRo(ctx)
+	require.NoError(t, err)
+	defer roTx.Rollback()
+	head, err := stages.GetStageProgress(roTx, stages.Finish)
+	require.NoError(t, err)
+	require.Equal(t, head, pin.num, "pin tags the committed head")
+	wantHash, err := rawdb.ReadCanonicalHash(roTx, head)
+	require.NoError(t, err)
+	require.Equal(t, wantHash, pin.hash, "pin tags the head's canonical hash")
+
+	pin.close()
+	pin.close() // idempotent
+}
+
+// TestBuildAndCacheHeadCaptureStalePin drives the head-capture build with no held pin.
+// The parent-commitment gate rejects it, so nothing is cached and the pin is
+// re-established at the committed head for the next block.
+func TestBuildAndCacheHeadCaptureStalePin(t *testing.T) {
+	previousSchema := statecfg.Schema
+	statecfg.EnableHistoricalCommitment()
+	t.Cleanup(func() { statecfg.Schema = previousSchema })
+
+	m, _, _ := rpcdaemontest.CreateTestExecModule(t)
+	ctx := context.Background()
+	require.NoError(t, m.DB.Update(ctx, func(tx kv.RwTx) error {
+		return rawdb.WriteDBCommitmentHistoryEnabled(tx, true)
+	}))
+
+	api := NewPrivateDebugAPI(newBaseApiForTest(m), m.DB, nil, 0, false)
+	api.witnessCache = newWitnessResultCache(96, 0, true, true)
+
+	const blockNum = uint64(3)
+	hash, _ := buildTestChainHeader(t, m, blockNum)
+
+	next := api.buildAndCacheHeadCapture(ctx, nil, blockNum, hash)
+	defer next.close()
+
+	require.False(t, api.witnessCache.Contains(hash), "a stale (nil) pin must cache nothing")
+	require.Equal(t, 0, api.witnessCache.Len())
+	require.NotNil(t, next, "the pin is re-established at the committed head")
+}
+
+// TestBuildAndCacheHeadCaptureHappyPath commits blocks 1..B-1, pins that snapshot as
+// parent(B), commits B, then builds B's witness head-capture. The pinned-parent build
+// must populate the cache and be byte-identical to the durable on-demand build that reads
+// the same parent commitment from history.
+func TestBuildAndCacheHeadCaptureHappyPath(t *testing.T) {
+	previousSchema := statecfg.Schema
+	statecfg.EnableHistoricalCommitment()
+	t.Cleanup(func() { statecfg.Schema = previousSchema })
+
+	m, testChain := rpcdaemontest.CreateTestExecModuleNoInsert(t)
+	ctx := context.Background()
+	require.NoError(t, m.DB.Update(ctx, func(tx kv.RwTx) error {
+		return rawdb.WriteDBCommitmentHistoryEnabled(tx, true)
+	}))
+
+	const buildNum = uint64(6)
+	require.NoError(t, m.InsertChain(testChain.Slice(0, int(buildNum)-1)))
+
+	pin, err := openRollingPin(ctx, m.DB)
+	require.NoError(t, err)
+	require.NotNil(t, pin)
+	require.Equal(t, buildNum-1, pin.num, "pin sits one block behind the block to build")
+
+	require.NoError(t, m.InsertChain(testChain.Slice(int(buildNum)-1, int(buildNum))))
+
+	hash, _ := buildTestChainHeader(t, m, buildNum)
+
+	api := NewPrivateDebugAPI(newBaseApiForTest(m), m.DB, nil, 0, false)
+	api.witnessCache = newWitnessResultCache(96, 0, true, true)
+
+	onDemand := NewPrivateDebugAPI(newBaseApiForTest(m), m.DB, nil, 0, false)
+	bn := rpc.BlockNumber(buildNum)
+	want, err := onDemand.ExecutionWitness(ctx, rpc.BlockNumberOrHash{BlockNumber: &bn}, nil)
+	require.NoError(t, err, "durable on-demand build must succeed")
+
+	next := api.buildAndCacheHeadCapture(ctx, pin, buildNum, hash)
+	defer next.close()
+
+	cached, ok := api.witnessCache.Get(hash)
+	require.True(t, ok, "head-capture build must populate the cache")
+
+	wantBytes, err := want.MarshalFastJSON()
+	require.NoError(t, err)
+	gotBytes, err := cached.MarshalFastJSON()
+	require.NoError(t, err)
+	require.Equal(t, wantBytes, gotBytes, "head-capture witness must match the durable on-demand build")
 }
 
 // TestWitnessCacheBuilderParity drives the full builder path against the test exec

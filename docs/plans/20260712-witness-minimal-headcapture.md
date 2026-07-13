@@ -122,12 +122,12 @@ Benefit: minimal nodes serve recent-block witnesses with zero commitment-history
 - Modify: `rpc/jsonrpc/witness_cache_builder.go`
 - Modify: `rpc/jsonrpc/witness_cache_builder_test.go` (create if absent)
 
-- [ ] add rolling-pin state: at most one held parent `kv.TemporalTx` with `(num, hash)` identity; helpers to open a pin at the current committed head and to roll it forward
-- [ ] KEEP `waitCommittedHead` (`:79`) — it supplies the committed ≥B tx for plain history (including block-end at `endTxNum`, which is unavailable pre-commit); the pinned B-1 tx supplies commitment-latest. Route both into the Task-4 build
-- [ ] before trusting the pin as parent, assert its committed `Finish == B-1` and `ReadCanonicalHash(B-1) == pinnedHash`; keep the `ReadCanonicalHash(B) == wantHash` / `decideCommittedHead` (`:56`) gate so a losing-fork head is never cached; on canonical mismatch at/below the pin, drop and re-pin from the current committed head
-- [ ] route `buildAndCache` (`:247`) through the head-capture build when mode is head-capture; release both txs immediately after each build, then roll the pin forward
-- [ ] write tests: happy path consumes pinned parent + committed tx and rolls forward; `Finish==B-1` assertion rejects a mispinned tx; reorg drops and re-pins; the full head-capture `buildAndCache` populates the cache on success and caches nothing on gate failure (the cross-task cache assertion deferred from Task 4 lands here); tip jump >1 coalesces/skips → out-of-window, no crash (use a fake TemporalRoDB / in-mem fixture)
-- [ ] run tests - must pass before next task
+- [x] add rolling-pin state: at most one held parent `kv.TemporalTx` with `(num, hash)` identity; helpers to open a pin at the current committed head and to roll it forward (`rollingPin`, `openRollingPin`, `close`)
+- [x] KEEP `waitCommittedHead` (`:79`) — it supplies the committed ≥B tx for plain history (including block-end at `endTxNum`, which is unavailable pre-commit); the pinned B-1 tx supplies commitment-latest. Route both into the Task-4 build (`buildAndCacheHeadCapture` → `buildWitnessResultHeadCapture`)
+- [x] before trusting the pin as parent, assert its committed `Finish == B-1` and `ReadCanonicalHash(B-1) == pinnedHash`; keep the `ReadCanonicalHash(B) == wantHash` / `decideCommittedHead` (`:56`) gate so a losing-fork head is never cached; on canonical mismatch at/below the pin, drop and re-pin from the current committed head (`tryHeadCaptureBuild` reads pin Finish + `decidePin`; re-pin in `buildAndCacheHeadCapture`)
+- [x] route `buildAndCache` (`:247`) through the head-capture build when mode is head-capture; release both txs immediately after each build, then roll the pin forward (`RunWitnessCacheBuilder` routes on `HeadCapture()`)
+- [x] write tests: happy path consumes pinned parent + committed tx and rolls forward; `Finish==B-1` assertion rejects a mispinned tx; reorg drops and re-pins; the full head-capture `buildAndCache` populates the cache on success and caches nothing on gate failure (the cross-task cache assertion deferred from Task 4 lands here); tip jump >1 coalesces/skips → out-of-window, no crash (`TestDecidePin`, `TestOpenRollingPin`, `TestBuildAndCacheHeadCaptureHappyPath`, `TestBuildAndCacheHeadCaptureStalePin`)
+- [x] run tests - must pass before next task
 
 ### Task 6: Enablement wiring (decouple from commitment history)
 

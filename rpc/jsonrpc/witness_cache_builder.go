@@ -118,6 +118,77 @@ func waitCommittedHead(ctx context.Context, db kv.TemporalRoDB, num uint64, hash
 	}
 }
 
+// rollingPin is the one-block-lag parent snapshot the head-capture builder holds: an
+// open RO temporal tx whose commitment-latest is the parent(B) commitment plane when it
+// is pinned at B-1, tagged with the (num, hash) it was opened at. Owned solely by the
+// builder goroutine; released and re-opened as the tip rolls forward.
+type rollingPin struct {
+	tx   kv.TemporalTx
+	num  uint64
+	hash common.Hash
+}
+
+// close rolls back the pinned tx and clears it, so a second call is a no-op.
+func (p *rollingPin) close() {
+	if p != nil && p.tx != nil {
+		p.tx.Rollback()
+		p.tx = nil
+	}
+}
+
+// openRollingPin opens a fresh RO temporal tx pinned at the current committed head and
+// tags it with that head's (num, canonical hash); the tx's commitment-latest is that
+// head's commitment plane. It returns (nil,nil) before any block has committed (num 0)
+// or when the head has no canonical hash. The caller owns the returned tx.
+func openRollingPin(ctx context.Context, db kv.TemporalRoDB) (*rollingPin, error) {
+	// The tx is handed to the caller on success and rolled back on every other branch,
+	// so a deferred rollback is inapplicable.
+	tx, err := db.BeginTemporalRo(ctx) //nolint:gocritic
+	if err != nil {
+		return nil, err
+	}
+	num, err := stages.GetStageProgress(tx, stages.Finish)
+	if err != nil {
+		tx.Rollback()
+		return nil, err
+	}
+	if num == 0 {
+		tx.Rollback()
+		return nil, nil
+	}
+	hash, err := rawdb.ReadCanonicalHash(tx, num)
+	if err != nil {
+		tx.Rollback()
+		return nil, err
+	}
+	if hash == (common.Hash{}) {
+		tx.Rollback()
+		return nil, nil
+	}
+	return &rollingPin{tx: tx, num: num, hash: hash}, nil
+}
+
+// pinVerdict is decidePin's ruling on whether the held rolling pin can serve as the
+// commitment parent of block B.
+type pinVerdict int
+
+const (
+	pinUsable pinVerdict = iota // pin sits at B-1 with a still-canonical hash; build B with it
+	pinStale                    // pin missing, off by more than one block, or reorged; drop and skip B
+)
+
+// decidePin reports whether a rolling pin held at (pinNum, pinHash) is a valid commitment
+// parent for block B: it must sit exactly one block back (pinNum == B-1) and its hash must
+// still be canonical at B-1 (canonicalParentHash). No pin, a pin off by more than one block
+// (tip jumped past a coalesced gap), or a reorged parent all read as stale — B is skipped to
+// out-of-window and the pin is re-established at the committed head.
+func decidePin(havePin bool, pinNum uint64, pinHash common.Hash, blockNum uint64, canonicalParentHash common.Hash) pinVerdict {
+	if !havePin || blockNum == 0 || pinNum != blockNum-1 || pinHash != canonicalParentHash {
+		return pinStale
+	}
+	return pinUsable
+}
+
 // WitnessCacheShouldEnable is the embedded-wiring gate: the eager cache runs only
 // when a positive block count is requested and the datadir was built with commitment
 // history (without it every build errors, so the cache would stay empty).
@@ -155,6 +226,11 @@ func RunWitnessCacheBuilder(ctx context.Context, dbg *DebugAPIImpl, headerCh <-c
 	if dbg.witnessCache == nil {
 		return
 	}
+	headCapture := dbg.witnessCache.HeadCapture()
+	// pin is the one-block-lag parent snapshot for head-capture builds; nil in the
+	// durable path. The deferred close releases whichever pin is held at shutdown.
+	var pin *rollingPin
+	defer func() { pin.close() }()
 	for {
 		select {
 		case <-ctx.Done():
@@ -187,6 +263,13 @@ func RunWitnessCacheBuilder(ctx context.Context, dbg *DebugAPIImpl, headerCh <-c
 				}
 			}
 			if !shouldBuild(newest.num, single, freshest, dbg.witnessCache.Contains(newest.hash)) {
+				continue
+			}
+			if headCapture {
+				pin = dbg.buildAndCacheHeadCapture(ctx, pin, newest.num, newest.hash)
+				if ctx.Err() != nil {
+					return
+				}
 				continue
 			}
 			if !dbg.buildAndCache(ctx, newest.num, newest.hash) && ctx.Err() != nil {
@@ -269,6 +352,101 @@ func (api *DebugAPIImpl) buildAndCache(ctx context.Context, num uint64, hash com
 	}
 	start := time.Now()
 	result, err := api.buildWitnessResult(ctx, tx, nil, info, witnessModeLegacy)
+	witnessCacheBuildDuration.ObserveDuration(start)
+	if err != nil {
+		if errors.Is(err, errWitnessVerifyFailed) {
+			witnessCacheBuildFailVerifyCounter.Inc()
+		} else {
+			witnessCacheBuildFailOtherCounter.Inc()
+		}
+		log.Warn("[witness-cache] build witness", "block", num, "err", err)
+		return false
+	}
+	enc, err := result.MarshalFastJSON()
+	if err != nil {
+		witnessCacheBuildFailOtherCounter.Inc()
+		log.Warn("[witness-cache] marshal witness", "block", num, "err", err)
+		return false
+	}
+	api.witnessCache.Add(hash, &ExecutionWitnessResult{cachedJSON: enc})
+	witnessCacheEntriesResidentGauge.SetInt(api.witnessCache.Len())
+	witnessCacheBuildOKCounter.Inc()
+	return true
+}
+
+// buildAndCacheHeadCapture builds block B's witness on a minimal (no commitment-history)
+// node: the held rolling pin (at B-1) supplies parent commitment-latest and waitCommittedHead
+// supplies the committed >=B tx for plain history. It validates the pin is a canonical parent
+// of B; a stale pin (tip jumped, reorg, or none yet) skips B to out-of-window and caches
+// nothing. It returns the pin to hold next: rolled forward to the committed head after a build
+// or a skip, the unchanged pin on a transient wait error / reorg-before-commit, or nil if
+// re-pinning failed.
+func (api *DebugAPIImpl) buildAndCacheHeadCapture(ctx context.Context, pin *rollingPin, num uint64, hash common.Hash) *rollingPin {
+	committedTx, ok, err := waitCommittedHead(ctx, api.db, num, hash)
+	if err != nil {
+		if ctx.Err() == nil {
+			log.Warn("[witness-cache] wait committed head", "block", num, "err", err)
+			witnessCacheBuildFailOtherCounter.Inc()
+		}
+		return pin
+	}
+	if !ok {
+		return pin
+	}
+	defer committedTx.Rollback()
+
+	api.tryHeadCaptureBuild(ctx, committedTx, pin, num, hash)
+
+	// Release the consumed pin and re-establish it at the committed head for B+1, whether
+	// the build succeeded, the pin was stale, or a gate failed.
+	pin.close()
+	next, err := openRollingPin(ctx, api.db)
+	if err != nil {
+		if ctx.Err() == nil {
+			log.Warn("[witness-cache] roll pin forward", "block", num, "err", err)
+		}
+		return nil
+	}
+	return next
+}
+
+// tryHeadCaptureBuild validates the pin as canonical parent(B) and, when valid, builds B's
+// head-capture witness against the committed tx and caches it by hash. It returns true only
+// when a witness was built and cached; a stale pin or any gate failure returns false and
+// caches nothing (fail-closed → out-of-window).
+func (api *DebugAPIImpl) tryHeadCaptureBuild(ctx context.Context, committedTx kv.TemporalTx, pin *rollingPin, num uint64, hash common.Hash) bool {
+	if num == 0 {
+		return false
+	}
+	parentHash, err := rawdb.ReadCanonicalHash(committedTx, num-1)
+	if err != nil {
+		witnessCacheBuildFailOtherCounter.Inc()
+		return false
+	}
+	havePin := pin != nil
+	var pinNum uint64
+	var pinHash common.Hash
+	if havePin {
+		pinNum, pinHash = pin.num, pin.hash
+		// Guard against pin drift: the pinned snapshot's committed Finish must still equal
+		// the height it was tagged at, else its commitment-latest is not parent(B).
+		if finish, ferr := stages.GetStageProgress(pin.tx, stages.Finish); ferr != nil || finish != pinNum {
+			havePin = false
+		}
+	}
+	if decidePin(havePin, pinNum, pinHash, num, parentHash) != pinUsable {
+		witnessCacheBuildFailOtherCounter.Inc()
+		return false
+	}
+
+	info, err := api.resolveWitnessBlock(ctx, committedTx, rpc.BlockNumberOrHashWithHash(hash, false))
+	if err != nil {
+		log.Warn("[witness-cache] resolve block", "block", num, "err", err)
+		witnessCacheBuildFailOtherCounter.Inc()
+		return false
+	}
+	start := time.Now()
+	result, err := api.buildWitnessResultHeadCapture(ctx, committedTx, pin.tx, info, witnessModeLegacy)
 	witnessCacheBuildDuration.ObserveDuration(start)
 	if err != nil {
 		if errors.Is(err, errWitnessVerifyFailed) {

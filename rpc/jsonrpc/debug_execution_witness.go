@@ -786,11 +786,10 @@ var errWitnessVerifyFailed = errors.New("witness stateless verification failed")
 
 // headCaptureSource carries the pinned-parent commitment plane for a minimal-node
 // witness build: pinnedParentTx's commitment-latest is parent(B) commitment, read
-// through pinnedSD — a SharedDomains bound to that tx with an empty in-memory batch,
-// so latest reads fall through to the pinned snapshot rather than the build's own fold.
+// directly via tx.GetLatest so it bypasses the build's own commitment fold and the
+// aggregator-shared branch cache (which the fold mutates).
 type headCaptureSource struct {
 	pinnedParentTx kv.TemporalTx
-	pinnedSD       commitmentdb.SharedDomainsGetter
 }
 
 // collapseReaderFor selects the collapse-detection state reader: plain state at block
@@ -798,17 +797,18 @@ type headCaptureSource struct {
 // parent-block history txNum (durable).
 func collapseReaderFor(hc *headCaptureSource, tx kv.TemporalTx, firstTxNumInBlock, endTxNum uint64) commitmentdb.StateReader {
 	if hc != nil {
-		return commitmentdb.NewHeadCaptureStateReader(hc.pinnedParentTx, hc.pinnedSD, tx, endTxNum)
+		return commitmentdb.NewHeadCaptureStateReader(hc.pinnedParentTx, tx, endTxNum)
 	}
 	return commitmentdb.NewSplitHistoryReader(tx, firstTxNumInBlock, endTxNum, false /* withHistory */)
 }
 
 // trieReaderFor selects the witness-trie state reader: plain state at the parent
 // (firstTxNumInBlock) in both modes, commitment from the pinned parent latest
-// (head-capture) or the same parent history txNum (durable).
+// (head-capture) or the same parent history txNum (durable). Both report
+// WithHistory()==true so the read-only witness-capture fold does not write branches.
 func trieReaderFor(hc *headCaptureSource, tx kv.TemporalTx, firstTxNumInBlock uint64) commitmentdb.StateReader {
 	if hc != nil {
-		return commitmentdb.NewHeadCaptureStateReader(hc.pinnedParentTx, hc.pinnedSD, tx, firstTxNumInBlock)
+		return commitmentdb.NewHeadCaptureTrieStateReader(hc.pinnedParentTx, tx, firstTxNumInBlock)
 	}
 	return commitmentdb.NewHistoryStateReader(tx, firstTxNumInBlock)
 }
@@ -817,15 +817,11 @@ func trieReaderFor(hc *headCaptureSource, tx kv.TemporalTx, firstTxNumInBlock ui
 // from a pinned RO snapshot (pinnedParentTx's commitment-latest) instead of commitment
 // history, for minimal nodes that keep no commitment history. Plain account/storage/code
 // state is read from committedTx's history exactly as the durable path does; only the
-// commitment source changes. A dedicated SharedDomains over the pinned tx supplies clean
-// (empty-mem) latest reads the build's own fold cannot perturb.
+// commitment source changes. The pinned commitment plane is read directly via
+// tx.GetLatest so the build's own fold and the aggregator-shared branch cache cannot
+// perturb it.
 func (api *DebugAPIImpl) buildWitnessResultHeadCapture(ctx context.Context, committedTx, pinnedParentTx kv.TemporalTx, info *witnessBlockInfo, mode witnessMode) (*ExecutionWitnessResult, error) {
-	pinnedSD, err := execctx.NewSharedDomains(ctx, pinnedParentTx, log.New(), execctx.WithoutDeferredBranchUpdates(), execctx.WithSequentialCommitment())
-	if err != nil {
-		return nil, err
-	}
-	defer pinnedSD.Close()
-	hc := &headCaptureSource{pinnedParentTx: pinnedParentTx, pinnedSD: pinnedSD}
+	hc := &headCaptureSource{pinnedParentTx: pinnedParentTx}
 	return api.buildWitnessResult(ctx, committedTx, hc, info, mode)
 }
 

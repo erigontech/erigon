@@ -23,7 +23,6 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/db/kv"
-	"github.com/erigontech/erigon/db/state/kvmetrics"
 )
 
 // --- fakes: exercise reader routing without a real temporal DB ------------
@@ -38,53 +37,20 @@ type getLatestCall struct {
 	key    []byte
 }
 
-type fakeGetter struct {
-	values map[string]getVal
-	calls  []getLatestCall
-}
-
-func (g *fakeGetter) GetLatest(name kv.Domain, k []byte) ([]byte, kv.Step, error) {
-	g.calls = append(g.calls, getLatestCall{name, append([]byte(nil), k...)})
-	if gv, ok := g.values[fmt.Sprintf("%d/%x", name, k)]; ok {
-		return gv.v, gv.step, nil
-	}
-	return nil, 0, nil
-}
-
-func (g *fakeGetter) HasPrefix(kv.Domain, []byte) ([]byte, []byte, bool, error) {
-	return nil, nil, false, nil
-}
-
-func (g *fakeGetter) StepsInFiles(...kv.Domain) kv.Step { return 0 }
-
-type fakeCommitmentSD struct {
-	getter        *fakeGetter
-	asGetterTx    kv.TemporalTx
-	asGetterCalls int
-}
-
-func (s *fakeCommitmentSD) AsGetter(tx kv.TemporalTx) kv.TemporalGetter {
-	s.asGetterCalls++
-	s.asGetterTx = tx
-	return s.getter
-}
-
-func (s *fakeCommitmentSD) SetTxNum(uint64)                                         {}
-func (s *fakeCommitmentSD) AsPutDel(kv.TemporalTx) kv.TemporalPutDel                { return nil }
-func (s *fakeCommitmentSD) MergeMetrics(kvmetrics.Source, *kvmetrics.DomainMetrics) {}
-func (s *fakeCommitmentSD) StepSize() uint64                                        { return 1 }
-func (s *fakeCommitmentSD) Metrics() *kvmetrics.DomainMetrics                       { return nil }
-
 type asOfCall struct {
 	domain kv.Domain
 	key    []byte
 	ts     uint64
 }
 
+// fakeTemporalTx serves commitment reads from GetLatest (the pinned-parent latest
+// plane) and plain reads from GetAsOf (committed history), recording both.
 type fakeTemporalTx struct {
 	kv.TemporalTx
-	values map[string][]byte
-	calls  []asOfCall
+	values   map[string][]byte // GetAsOf (history) values
+	latest   map[string]getVal // GetLatest (pinned latest) values
+	calls    []asOfCall
+	getCalls []getLatestCall
 }
 
 func (tx *fakeTemporalTx) GetAsOf(d kv.Domain, k []byte, ts uint64) ([]byte, bool, error) {
@@ -93,6 +59,14 @@ func (tx *fakeTemporalTx) GetAsOf(d kv.Domain, k []byte, ts uint64) ([]byte, boo
 		return v, true, nil
 	}
 	return nil, false, nil
+}
+
+func (tx *fakeTemporalTx) GetLatest(d kv.Domain, k []byte) ([]byte, kv.Step, error) {
+	tx.getCalls = append(tx.getCalls, getLatestCall{d, append([]byte(nil), k...)})
+	if gv, ok := tx.latest[fmt.Sprintf("%d/%x", d, k)]; ok {
+		return gv.v, gv.step, nil
+	}
+	return nil, 0, nil
 }
 
 type putBranchCall struct {
@@ -119,10 +93,6 @@ func (p *fakePutDel) DomainDelPrefix(kv.Domain, []byte, uint64) error   { return
 
 func key(d kv.Domain, k []byte) string { return fmt.Sprintf("%d/%x", d, k) }
 
-func newFakeGetter(vals map[string]getVal) *fakeGetter {
-	return &fakeGetter{values: vals}
-}
-
 // --- tests ----------------------------------------------------------------
 
 func TestHeadCaptureStateReader_Routing(t *testing.T) {
@@ -137,11 +107,9 @@ func TestHeadCaptureStateReader_Routing(t *testing.T) {
 	codeKey := []byte{0xce}
 	codeVal := []byte{0x33}
 
-	getter := newFakeGetter(map[string]getVal{
+	pinnedTx := &fakeTemporalTx{latest: map[string]getVal{
 		key(kv.CommitmentDomain, commKey): {v: commVal, step: 7},
-	})
-	sd := &fakeCommitmentSD{getter: getter}
-	pinnedTx := &fakeTemporalTx{}
+	}}
 	committedTx := &fakeTemporalTx{values: map[string][]byte{
 		key(kv.AccountsDomain, accKey): accVal,
 		key(kv.StorageDomain, storKey): storVal,
@@ -149,20 +117,16 @@ func TestHeadCaptureStateReader_Routing(t *testing.T) {
 	}}
 
 	const plainAsOf = uint64(1000)
-	reader := NewHeadCaptureStateReader(pinnedTx, sd, committedTx, plainAsOf)
+	reader := NewHeadCaptureStateReader(pinnedTx, committedTx, plainAsOf)
 
-	// Commitment reader is bound to the pinned parent tx's latest state.
-	require.Equal(t, 1, sd.asGetterCalls)
-	require.Same(t, pinnedTx, sd.asGetterTx)
-
-	// Commitment reads resolve from the pinned tx's latest (via the getter).
+	// Commitment reads resolve from the pinned tx's latest, read directly (not history).
 	v, step, err := reader.Read(kv.CommitmentDomain, commKey, 1)
 	require.NoError(t, err)
 	require.Equal(t, commVal, v)
 	require.Equal(t, kv.Step(7), step)
-	require.Len(t, getter.calls, 1)
-	require.Equal(t, kv.CommitmentDomain, getter.calls[0].domain)
-	require.Equal(t, commKey, getter.calls[0].key)
+	require.Len(t, pinnedTx.getCalls, 1)
+	require.Equal(t, kv.CommitmentDomain, pinnedTx.getCalls[0].domain)
+	require.Equal(t, commKey, pinnedTx.getCalls[0].key)
 	// A commitment read never touches either tx's history.
 	require.Empty(t, pinnedTx.calls)
 	require.Empty(t, committedTx.calls)
@@ -186,8 +150,8 @@ func TestHeadCaptureStateReader_Routing(t *testing.T) {
 		require.Equal(t, plainAsOf, c.ts)
 	}
 	require.Empty(t, pinnedTx.calls)
-	// No extra commitment-getter calls from the plain reads.
-	require.Len(t, getter.calls, 1)
+	// No extra pinned-latest reads from the plain reads.
+	require.Len(t, pinnedTx.getCalls, 1)
 }
 
 func TestHeadCaptureStateReader_PlainStateAsOfRouting(t *testing.T) {
@@ -196,12 +160,10 @@ func TestHeadCaptureStateReader_PlainStateAsOfRouting(t *testing.T) {
 	accKey := []byte{0xa0}
 
 	mkReader := func(asOf uint64) (*CommitmentReplayStateReader, *fakeTemporalTx) {
-		getter := newFakeGetter(nil)
-		sd := &fakeCommitmentSD{getter: getter}
 		committedTx := &fakeTemporalTx{values: map[string][]byte{
 			key(kv.AccountsDomain, accKey): {byte(asOf)},
 		}}
-		return NewHeadCaptureStateReader(&fakeTemporalTx{}, sd, committedTx, asOf), committedTx
+		return NewHeadCaptureStateReader(&fakeTemporalTx{}, committedTx, asOf), committedTx
 	}
 
 	// Two build phases read plain state at different txNums: parent vs block-end.
@@ -221,21 +183,22 @@ func TestHeadCaptureStateReader_PlainStateAsOfRouting(t *testing.T) {
 	require.Equal(t, blockEndTxNum, endTx.calls[0].ts)
 }
 
-func TestHeadCaptureStateReader_WithHistoryFalse(t *testing.T) {
+func TestHeadCaptureStateReader_WithHistory(t *testing.T) {
 	t.Parallel()
 
-	reader := NewHeadCaptureStateReader(&fakeTemporalTx{}, &fakeCommitmentSD{getter: newFakeGetter(nil)}, &fakeTemporalTx{}, 1)
-	require.False(t, reader.WithHistory())
+	// Collapse-detection reader: PutBranch must write (fold builds post-state).
+	require.False(t, NewHeadCaptureStateReader(&fakeTemporalTx{}, &fakeTemporalTx{}, 1).WithHistory())
+	// Trie/witness-capture reader: read-only, PutBranch must no-op.
+	require.True(t, NewHeadCaptureTrieStateReader(&fakeTemporalTx{}, &fakeTemporalTx{}, 1).WithHistory())
 }
 
 func TestHeadCaptureStateReader_UnknownKeys(t *testing.T) {
 	t.Parallel()
 
-	getter := newFakeGetter(nil) // empty: every key misses
-	sd := &fakeCommitmentSD{getter: getter}
+	pinnedTx := &fakeTemporalTx{}    // empty: GetLatest returns not-found
 	committedTx := &fakeTemporalTx{} // empty: GetAsOf returns not-found
 
-	reader := NewHeadCaptureStateReader(&fakeTemporalTx{}, sd, committedTx, 1)
+	reader := NewHeadCaptureStateReader(pinnedTx, committedTx, 1)
 
 	v, _, err := reader.Read(kv.CommitmentDomain, []byte{0xde, 0xad}, 1)
 	require.NoError(t, err)
@@ -247,13 +210,13 @@ func TestHeadCaptureStateReader_UnknownKeys(t *testing.T) {
 }
 
 // TestHeadCaptureStateReader_PutBranchWritesToBatch confirms that because the
-// reader reports WithHistory()==false, TrieContext.PutBranch does NOT take the
-// history no-op path but writes the branch to the build's own SharedDomains
+// collapse-detection reader reports WithHistory()==false, TrieContext.PutBranch does
+// NOT take the history no-op path but writes the branch to the build's own SharedDomains
 // putter (its in-memory batch, discarded on Close — never flushed to the DB).
 func TestHeadCaptureStateReader_PutBranchWritesToBatch(t *testing.T) {
 	t.Parallel()
 
-	reader := NewHeadCaptureStateReader(&fakeTemporalTx{}, &fakeCommitmentSD{getter: newFakeGetter(nil)}, &fakeTemporalTx{}, 1)
+	reader := NewHeadCaptureStateReader(&fakeTemporalTx{}, &fakeTemporalTx{}, 1)
 	putter := &fakePutDel{}
 	tc := &TrieContext{stateReader: reader, putter: putter, txNum: 42}
 
@@ -270,6 +233,20 @@ func TestHeadCaptureStateReader_PutBranchWritesToBatch(t *testing.T) {
 	require.Equal(t, prev, putter.puts[0].prev)
 }
 
+// TestHeadCaptureTrieStateReader_PutBranchNoOps confirms the trie-phase reader
+// (WithHistory()==true) makes PutBranch a no-op, so the read-only witness-capture
+// fold does not write branches into the build's batch.
+func TestHeadCaptureTrieStateReader_PutBranchNoOps(t *testing.T) {
+	t.Parallel()
+
+	reader := NewHeadCaptureTrieStateReader(&fakeTemporalTx{}, &fakeTemporalTx{}, 1)
+	putter := &fakePutDel{}
+	tc := &TrieContext{stateReader: reader, putter: putter, txNum: 42}
+
+	require.NoError(t, tc.PutBranch([]byte{0xaa}, []byte{1, 2, 3}, []byte{9}))
+	require.Empty(t, putter.puts, "trie-phase PutBranch must no-op")
+}
+
 // TestHeadCaptureStateReader_BranchCopiesData verifies the value read through the
 // composed reader is owned by the trie-context boundary: mutating the source (or
 // the returned slice) after Branch does not corrupt the other, so no live mmap
@@ -279,10 +256,10 @@ func TestHeadCaptureStateReader_BranchCopiesData(t *testing.T) {
 
 	prefix := []byte{0xaa}
 	source := []byte{1, 2, 3}
-	getter := newFakeGetter(map[string]getVal{
+	pinnedTx := &fakeTemporalTx{latest: map[string]getVal{
 		key(kv.CommitmentDomain, prefix): {v: source, step: 5},
-	})
-	reader := NewHeadCaptureStateReader(&fakeTemporalTx{}, &fakeCommitmentSD{getter: getter}, &fakeTemporalTx{}, 1)
+	}}
+	reader := NewHeadCaptureStateReader(pinnedTx, &fakeTemporalTx{}, 1)
 
 	ctx := NewTrieContextRo(reader, 1)
 	branch, step, err := ctx.Branch(prefix)

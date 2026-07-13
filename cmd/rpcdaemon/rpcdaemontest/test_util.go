@@ -125,6 +125,23 @@ func genTestChainOnce(t *testing.T) {
 }
 
 func CreateTestExecModule(t *testing.T) (*execmoduletester.ExecModuleTester, *blockgen.ChainPack, []*blockgen.ChainPack) {
+	m, testChain := CreateTestExecModuleNoInsert(t)
+
+	if err := m.InsertChain(testOrphanedChain); err != nil {
+		t.Fatal(err)
+	}
+	if err := m.InsertChain(testChain); err != nil {
+		t.Fatal(err)
+	}
+
+	return m, testChain, []*blockgen.ChainPack{testOrphanedChain}
+}
+
+// CreateTestExecModuleNoInsert builds a fresh exec module with the same genesis as
+// CreateTestExecModule but inserts no blocks, so a caller can drive insertion
+// incrementally (e.g. to hold an RO snapshot pinned mid-chain). It returns the module
+// and the canonical testChain the caller inserts.
+func CreateTestExecModuleNoInsert(t *testing.T) (*execmoduletester.ExecModuleTester, *blockgen.ChainPack) {
 	genTestChainOnce(t)
 
 	addresses := makeTestAddresses()
@@ -139,14 +156,7 @@ func CreateTestExecModule(t *testing.T) (*execmoduletester.ExecModuleTester, *bl
 	}
 	m := execmoduletester.New(t, execmoduletester.WithGenesisSpec(gspec), execmoduletester.WithKey(addresses.key))
 
-	if err := m.InsertChain(testOrphanedChain); err != nil {
-		t.Fatal(err)
-	}
-	if err := m.InsertChain(testChain); err != nil {
-		t.Fatal(err)
-	}
-
-	return m, testChain, []*blockgen.ChainPack{testOrphanedChain}
+	return m, testChain
 }
 
 func generateChain(
