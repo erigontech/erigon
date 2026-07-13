@@ -182,8 +182,9 @@ func execBlock(ctx context0.Context, sd *execctx.SharedDomains, parentSD *execct
 
 	interrupt := cfg.interrupt
 	const amount = 50
+	filtration := &filtrationStats{}
 	for {
-		txns, err := getNextTransactions(ctx, cfg, chainID, current.Header, ba.CumulativeGasUsed(), amount, executionAt, yielded, filterReader, filterWriter, logger)
+		txns, err := getNextTransactions(ctx, cfg, chainID, current.Header, ba.CumulativeGasUsed(), amount, executionAt, yielded, filterReader, filterWriter, logger, filtration)
 		if err != nil {
 			return err
 		}
@@ -210,6 +211,7 @@ func execBlock(ctx context0.Context, sd *execctx.SharedDomains, parentSD *execct
 			}
 		}
 	}
+	logger.Info("Block txn filtration", append([]any{"block", current.Header.Number.Uint64()}, filtration.logArgs()...)...)
 
 	metrics.UpdateBlockProducerProductionDelay(current.ParentHeaderTime, current.Header.Number.Uint64(), logger)
 
@@ -257,6 +259,7 @@ func getNextTransactions(
 	simStateReader state.StateReader,
 	simStateWriter state.StateWriter,
 	logger log.Logger,
+	stats *filtrationStats,
 ) ([]types.Transaction, error) {
 	availableRlpSpace := cfg.builderState.BuiltBlock.AvailableRlpSpace(cfg.chainConfig)
 	remainingBlobGas := uint64(0)
@@ -290,7 +293,7 @@ func getNextTransactions(
 	}
 
 	blockNum := executionAt + 1
-	txns, err := filterBadTransactions(allTxns, chainID, cfg.chainConfig, blockNum, header, simStateReader, simStateWriter, logger)
+	txns, err := filterBadTransactions(allTxns, chainID, cfg.chainConfig, blockNum, header, simStateReader, simStateWriter, logger, stats)
 	if err != nil {
 		return nil, err
 	}
@@ -329,7 +332,45 @@ func getNextTransactions(
 	return txns, nil
 }
 
-func filterBadTransactions(transactions []types.Transaction, chainID *uint256.Int, config *chain.Config, blockNumber uint64, header *types.Header, simStateReader state.StateReader, simStateWriter state.StateWriter, logger log.Logger) ([]types.Transaction, error) {
+// filtrationStats accumulates txpool-filtration outcomes across all batches of a
+// single block build, so the builder can log one concise summary instead of a
+// per-batch line.
+type filtrationStats struct {
+	filtered      int
+	badChainID    int
+	noSender      int
+	noAccount     int
+	nonceTooLow   int
+	notEOA        int
+	feeTooLow     int
+	overflow      int
+	balanceTooLow int
+}
+
+func (s *filtrationStats) dropped() int {
+	return s.badChainID + s.noSender + s.noAccount + s.nonceTooLow + s.notEOA + s.feeTooLow + s.overflow + s.balanceTooLow
+}
+
+// logArgs returns key/value pairs for the summary, omitting zero-valued drop reasons.
+func (s *filtrationStats) logArgs() []any {
+	args := []any{"filtered", s.filtered, "dropped", s.dropped()}
+	add := func(k string, v int) {
+		if v > 0 {
+			args = append(args, k, v)
+		}
+	}
+	add("bad_chain_id", s.badChainID)
+	add("no_sender", s.noSender)
+	add("no_account", s.noAccount)
+	add("nonce_too_low", s.nonceTooLow)
+	add("not_eoa", s.notEOA)
+	add("fee_too_low", s.feeTooLow)
+	add("overflow", s.overflow)
+	add("balance_too_low", s.balanceTooLow)
+	return args
+}
+
+func filterBadTransactions(transactions []types.Transaction, chainID *uint256.Int, config *chain.Config, blockNumber uint64, header *types.Header, simStateReader state.StateReader, simStateWriter state.StateWriter, logger log.Logger, stats *filtrationStats) ([]types.Transaction, error) {
 	initialCnt := len(transactions)
 	var filtered []types.Transaction
 	gasBailout := false
@@ -448,7 +489,18 @@ func filterBadTransactions(transactions []types.Transaction, chainID *uint256.In
 		filtered = append(filtered, transaction)
 		transactions = transactions[1:]
 	}
-	logger.Info("Filtration", "initial", initialCnt, "no sender", noSenderCnt, "no account", noAccountCnt, "nonce too low", nonceTooLowCnt, "nonceTooHigh", missedTxs, "sender not EOA", notEOACnt, "fee too low", feeTooLowCnt, "overflow", overflowCnt, "balance too low", balanceTooLowCnt, "bad chain id", badChainId, "filtered", len(filtered))
+	logger.Debug("Filtration", "initial", initialCnt, "no sender", noSenderCnt, "no account", noAccountCnt, "nonce too low", nonceTooLowCnt, "nonceTooHigh", missedTxs, "sender not EOA", notEOACnt, "fee too low", feeTooLowCnt, "overflow", overflowCnt, "balance too low", balanceTooLowCnt, "bad chain id", badChainId, "filtered", len(filtered))
+	if stats != nil {
+		stats.filtered += len(filtered)
+		stats.badChainID += badChainId
+		stats.noSender += noSenderCnt
+		stats.noAccount += noAccountCnt
+		stats.nonceTooLow += nonceTooLowCnt
+		stats.notEOA += notEOACnt
+		stats.feeTooLow += feeTooLowCnt
+		stats.overflow += overflowCnt
+		stats.balanceTooLow += balanceTooLowCnt
+	}
 	return filtered, nil
 }
 

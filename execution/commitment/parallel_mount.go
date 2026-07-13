@@ -10,30 +10,12 @@ import (
 	"time"
 
 	"golang.org/x/sync/errgroup"
-
-	"github.com/erigontech/erigon/common"
 )
 
 var cmtTiming = os.Getenv("ERIGON_CMT_TIMING") == "1"
 
 // deepStorageThreshold is the touched-slot count above which an account's storage subtree folds concurrently instead of streaming through its worker.
 const deepStorageThreshold = 1_000
-
-// unfoldRootWall unfolds base at the root until row 0 forms the top-nibble mount wall,
-// consuming at most one nibble per step: a restored root extension sharing the probe's
-// leading nibble would otherwise unfold several levels at once and misplace the wall.
-func unfoldRootWall(ctx context.Context, base *HexPatriciaHashed) error {
-	zero := []byte{0}
-	for u := base.needUnfolding(zero); u > 0; u = base.needUnfolding(zero) {
-		if err := ctx.Err(); err != nil {
-			return err
-		}
-		if err := base.unfold(zero, min(u, 1)); err != nil {
-			return err
-		}
-	}
-	return nil
-}
 
 // seedRootBase synthesizes a row-0 wall when the on-disk root has no branch, so foldMounted stops
 // at the mount boundary and returns cells excluding the mount nibble for empty and non-empty bases alike.
@@ -106,8 +88,14 @@ func (p *ParallelPatriciaHashed) processMounted(ctx context.Context, updates *Up
 		tStart = time.Now()
 	}
 
-	if err := unfoldRootWall(ctx, base); err != nil {
-		return nil, fmt.Errorf("processMounted: unfold root: %w", err)
+	zero := []byte{0}
+	for u := base.needUnfolding(zero); u > 0; u = base.needUnfolding(zero) {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
+		if err := base.unfold(zero, u); err != nil {
+			return nil, fmt.Errorf("processMounted: unfold root: %w", err)
+		}
 	}
 	seedRootBase(base)
 	if cmtTiming {
@@ -151,7 +139,7 @@ func (p *ParallelPatriciaHashed) processMounted(ctx context.Context, updates *Up
 			path := make([]byte, 0, 144)
 			path = append(path, byte(ni))
 			path = append(path, ch.ext...)
-			buildErr := dfsSubtreeDeep(w, ch, path, func(n *prefixNode, pth []byte, accountFresh bool) (common.Hash, error) {
+			buildErr := dfsSubtreeDeep(w, ch, path, func(n *prefixNode, pth []byte, accountFresh bool) (cell, error) {
 				return foldStorageRoot(gctx, foldSem, p.newStorageWorker, pu, n, pth, accountFresh)
 			})
 			if buildErr != nil {
@@ -205,6 +193,8 @@ func (p *ParallelPatriciaHashed) processMounted(ctx context.Context, updates *Up
 			return nil, fmt.Errorf("processMounted: root fold: %w", err)
 		}
 	}
+	// fold() only sets rootPresent on a multi-child root fold, so set it here for the EncodeCurrentState/SetState round-trip.
+	base.rootPresent = !base.root.IsEmpty()
 	if deferred := base.TakeDeferredUpdates(); len(deferred) > 0 {
 		pu.appendDeferred(deferred)
 	}
@@ -256,21 +246,41 @@ func (p *ParallelPatriciaHashed) newStorageWorker() (*HexPatriciaHashed, func())
 	return newDeferredStorageWorker(&p.workerPool, p.trieCtxFactory, traceW)
 }
 
-// setAccountStorageRoot sets the account leaf's storage root to sr; computeCellHash uses cell.hash as the storageRoot when no storage cell was processed.
-func setAccountStorageRoot(w *HexPatriciaHashed, accHash []byte, sr common.Hash) {
+// setAccountStorageRoot writes the folded storage-root cell sr onto the account leaf.
+func setAccountStorageRoot(w *HexPatriciaHashed, accHash []byte, sr cell) {
 	var c *cell
 	if w.activeRows == 0 {
 		c = &w.root
 	} else {
 		c = &w.grid[w.activeRows-1][accHash[w.currentKeyLen]]
 	}
-	// sr already covers the whole storage subtree, so a stale storage plain key on this cell must
-	// go, or computeCellHash rehashes it as a singleton from the stale slot and discards sr.
+	// Drop any stale storage plain key so computeCellHash does not rehash the account's storage from
+	// a leftover slot instead of sr.
 	c.storageAddrLen = 0
 	c.StorageLen = 0
 	c.Flags &^= StorageUpdate
 	c.loaded &^= cellLoadStorage
-	c.hash = sr
-	c.hashLen = 32
+	// Carry sr's navigation onto the account leaf: a single-child collapse's extension (or a single
+	// leaf's plain key) must persist, or a later re-touch unfolds to a storage-root branch record the
+	// collapse never wrote. computeCellHash reads c.extLen as the storage-root extension, so a hash-only
+	// root (multi-child or empty) must clear any extension a prior single-child collapse left on a reused
+	// cell, otherwise the leaf hashes extension(oldExt, sr.hash) instead of sr.hash.
+	if sr.storageAddrLen > 0 {
+		c.storageAddrLen = sr.storageAddrLen
+		copy(c.storageAddr[:], sr.storageAddr[:sr.storageAddrLen])
+		c.StorageLen = sr.StorageLen
+		if sr.StorageLen > 0 {
+			copy(c.Storage[:], sr.Storage[:sr.StorageLen])
+		}
+		c.loaded |= sr.loaded & cellLoadStorage
+	}
+	c.extLen = sr.extLen
+	if sr.extLen > 0 {
+		copy(c.extension[:], sr.extension[:sr.extLen])
+	}
+	c.hashLen = sr.hashLen
+	if sr.hashLen > 0 {
+		copy(c.hash[:], sr.hash[:sr.hashLen])
+	}
 	c.stateHashLen = 0
 }

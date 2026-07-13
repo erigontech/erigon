@@ -29,7 +29,6 @@ import (
 	"strings"
 	"sync"
 	"sync/atomic"
-	"time"
 
 	"github.com/tidwall/btree"
 
@@ -38,6 +37,7 @@ import (
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/background"
 	"github.com/erigontech/erigon/common/dbg"
+	"github.com/erigontech/erigon/common/length"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv"
@@ -396,7 +396,8 @@ func openIdxIfNeedForCaplinState(s *DirtySegment, filePath string) (err error) {
 
 	s.indexes = make([]*recsplit.Index, 1)
 
-	filePath = strings.ReplaceAll(filePath, ".seg", ".idx")
+	// Swap only the trailing extension — the datadir path itself may contain ".seg".
+	filePath = strings.TrimSuffix(filePath, ".seg") + ".idx"
 	index, err := recsplit.OpenIndex(filePath)
 	if err != nil {
 		return fmt.Errorf("%w, fileName: %s", err, filePath)
@@ -433,6 +434,9 @@ func (s *CaplinStateSnapshots) recalcVisibleFiles() {
 		newVisibleSegments := make(VisibleSegments, 0, dirtySegments.Len())
 		dirtySegments.Walk(func(segments []*DirtySegment) bool {
 			for _, sn := range segments {
+				// An un-indexed segment (a .seg published before its .idx) must never
+				// become visible: it has no index to serve a read yet would shadow the DB
+				// for its range. This gate is what keeps the publish-before-index window safe.
 				if !isIndexed(sn) {
 					continue
 				}
@@ -650,6 +654,11 @@ func (v *CaplinStateView) VisibleSegment(slot uint64, tbl string) (*VisibleSegme
 	return nil, false
 }
 
+// errIncompleteStateRange signals that a mandatory-dense state table (block/state
+// roots) has a missing entry in the range being dumped, so the range must not be
+// frozen yet.
+var errIncompleteStateRange = errors.New("state range not fully reconstructed")
+
 func dumpCaplinState(ctx context.Context, snapName string, kvGetter KeyValueGetter, fromSlot uint64, toSlot, blocksPerFile uint64, salt uint32, dirs datadir.Dirs, workers int, lvl log.Lvl, logger log.Logger, compress bool) error {
 	tmpDir, snapDir := dirs.Tmp, dirs.SnapCaplin
 
@@ -666,12 +675,25 @@ func dumpCaplinState(ctx context.Context, snapName string, kvGetter KeyValueGett
 	}
 	defer sn.Close()
 
+	// block_roots/state_roots are written every slot; an empty entry means the DB
+	// range isn't fully reconstructed. Freezing it writes a blank word that then
+	// permanently shadows the DB (snapshots take read precedence), so refuse.
+	mustBeDense := snapName == kv.BlockRoot || snapName == kv.StateRoot
+
 	// Generate .seg file, which is just the list of beacon blocks.
 	for i := fromSlot; i < toSlot; i++ {
 		// read root.
 		_, dump, err := kvGetter(i)
 		if err != nil {
 			return err
+		}
+		if mustBeDense && len(dump) != length.Hash {
+			// An empty entry is a not-yet-reconstructed slot (retry later); a
+			// non-empty entry of the wrong length is corruption (surface it).
+			if len(dump) != 0 {
+				return fmt.Errorf("%s slot %d: corrupt root, %d bytes (want %d)", snapName, i, len(dump), length.Hash)
+			}
+			return fmt.Errorf("%w: %s slot %d", errIncompleteStateRange, snapName, i)
 		}
 		if i%20_000 == 0 {
 			logger.Log(lvl, "Dumping "+snapName, "progress", i)
@@ -694,9 +716,6 @@ func dumpCaplinState(ctx context.Context, snapName string, kvGetter KeyValueGett
 	}
 	// Generate .idx file, which is the slot => offset mapping.
 	p := &background.Progress{}
-
-	// Ugly hack to wait for fsync
-	time.Sleep(15 * time.Second)
 
 	return simpleIdx(ctx, f, salt, tmpDir, p, lvl, logger)
 }
@@ -786,6 +805,10 @@ func (s *CaplinStateSnapshots) DumpCaplinState(ctx context.Context, toSlot, bloc
 	for _, job := range planStateDump(coverage, toSlot, blocksPerFile) {
 		logger.Log(lvl, "Dumping "+job.name, "from", job.from, "to", job.to)
 		if err := dumpCaplinState(ctx, job.name, s.snapshotTypes.KeyValueGetters[job.name], job.from, job.to, blocksPerFile, salt, dirs, workers, lvl, logger, s.snapshotTypes.Compression[job.name]); err != nil {
+			if errors.Is(err, errIncompleteStateRange) {
+				logger.Warn("[Caplin] skipping incomplete state range, will retry after reconstruction", "type", job.name, "from", job.from, "to", job.to, "err", err)
+				continue
+			}
 			return err
 		}
 	}

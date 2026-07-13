@@ -551,7 +551,7 @@ func TestAssembleBlock(t *testing.T) {
 	require.NoError(t, err)
 	payloadId, err := assembleBlock(ctx, exec, &builder.Parameters{
 		ParentHash:            chainPack.TopBlock.Hash(),
-		Timestamp:             chainPack.TopBlock.Header().Time + 1,
+		Timestamp:             chainPack.TopBlock.Time() + 1,
 		PrevRandao:            chainPack.TopBlock.Header().MixDigest,
 		SuggestedFeeRecipient: common.Address{1},
 		Withdrawals:           make([]*types.Withdrawal, 0),
@@ -593,7 +593,7 @@ func TestAssembleBlockWithFreshlyAddedTxns(t *testing.T) {
 	require.NoError(t, err)
 	payloadId, err := assembleBlock(ctx, exec, &builder.Parameters{
 		ParentHash:            chainPack.TopBlock.Hash(),
-		Timestamp:             chainPack.TopBlock.Header().Time + 1,
+		Timestamp:             chainPack.TopBlock.Time() + 1,
 		PrevRandao:            chainPack.TopBlock.Header().MixDigest,
 		SuggestedFeeRecipient: common.Address{1},
 		Withdrawals:           make([]*types.Withdrawal, 0),
@@ -766,7 +766,7 @@ func TestAssembleEmptyBlock(t *testing.T) {
 	// Don't add any txns to pool — assemble empty block.
 	payloadId, err := assembleBlock(ctx, exec, &builder.Parameters{
 		ParentHash:            chainPack.TopBlock.Hash(),
-		Timestamp:             chainPack.TopBlock.Header().Time + 1,
+		Timestamp:             chainPack.TopBlock.Time() + 1,
 		PrevRandao:            chainPack.TopBlock.Header().MixDigest,
 		SuggestedFeeRecipient: common.Address{1},
 		Withdrawals:           make([]*types.Withdrawal, 0),
@@ -806,7 +806,7 @@ func TestAssembleBlockWithStateVerification(t *testing.T) {
 
 	payloadId, err := assembleBlock(ctx, exec, &builder.Parameters{
 		ParentHash:            chainPack.TopBlock.Hash(),
-		Timestamp:             chainPack.TopBlock.Header().Time + 1,
+		Timestamp:             chainPack.TopBlock.Time() + 1,
 		PrevRandao:            chainPack.TopBlock.Header().MixDigest,
 		SuggestedFeeRecipient: common.Address{1},
 		Withdrawals:           make([]*types.Withdrawal, 0),
@@ -829,7 +829,7 @@ func TestAssembleBlockWithStateVerification(t *testing.T) {
 	addTwoTxnsToPool(ctx, 3, t, m, txpool, baseFee)
 	payloadId2, err := assembleBlock(ctx, exec, &builder.Parameters{
 		ParentHash:            block.Hash(),
-		Timestamp:             block.Header().Time + 1,
+		Timestamp:             block.Time() + 1,
 		PrevRandao:            block.Header().MixDigest,
 		SuggestedFeeRecipient: common.Address{1},
 		Withdrawals:           make([]*types.Withdrawal, 0),
@@ -885,7 +885,7 @@ func TestAssembleBlockWithContractCreation(t *testing.T) {
 	// Assemble block.
 	payloadId, err := assembleBlock(ctx, exec, &builder.Parameters{
 		ParentHash:            chainPack.TopBlock.Hash(),
-		Timestamp:             chainPack.TopBlock.Header().Time + 1,
+		Timestamp:             chainPack.TopBlock.Time() + 1,
 		PrevRandao:            chainPack.TopBlock.Header().MixDigest,
 		SuggestedFeeRecipient: common.Address{1},
 		Withdrawals:           make([]*types.Withdrawal, 0),
@@ -956,7 +956,7 @@ func TestAssembleBlockGasOverflow(t *testing.T) {
 	// Assemble block 2 — should be gas-limited.
 	payloadId, err := assembleBlock(ctx, exec, &builder.Parameters{
 		ParentHash:            chainPack.TopBlock.Hash(),
-		Timestamp:             chainPack.TopBlock.Header().Time + 1,
+		Timestamp:             chainPack.TopBlock.Time() + 1,
 		PrevRandao:            chainPack.TopBlock.Header().MixDigest,
 		SuggestedFeeRecipient: common.Address{1},
 		Withdrawals:           make([]*types.Withdrawal, 0),
@@ -1050,7 +1050,7 @@ func TestAssembleBlockMixedTxTypes(t *testing.T) {
 	// Assemble block.
 	payloadId, err := assembleBlock(ctx, exec, &builder.Parameters{
 		ParentHash:            chainPack.TopBlock.Hash(),
-		Timestamp:             chainPack.TopBlock.Header().Time + 1,
+		Timestamp:             chainPack.TopBlock.Time() + 1,
 		PrevRandao:            chainPack.TopBlock.Header().MixDigest,
 		SuggestedFeeRecipient: common.Address{1},
 		Withdrawals:           make([]*types.Withdrawal, 0),
@@ -1142,7 +1142,7 @@ func TestAssembleBlockWithWithdrawalRequest(t *testing.T) {
 	beaconRoot := randomHash()
 	payloadId, err := assembleBlock(ctx, exec, &builder.Parameters{
 		ParentHash:            chainPack.TopBlock.Hash(),
-		Timestamp:             chainPack.TopBlock.Header().Time + 1,
+		Timestamp:             chainPack.TopBlock.Time() + 1,
 		PrevRandao:            randomHash(),
 		SuggestedFeeRecipient: common.Address{1},
 		Withdrawals:           make([]*types.Withdrawal, 0),
@@ -1255,7 +1255,7 @@ func TestAssembleBlockAmsterdamForkTransition(t *testing.T) {
 		require.NoError(t, addErr)
 		require.Equal(t, "success", r.Errors[0])
 
-		ts := topBlock.Header().Time + 1
+		ts := topBlock.Time() + 1
 		require.Less(t, ts, amsterdamTime) // still pre-Amsterdam
 		var prevRandao, beaconRoot common.Hash
 		_, _ = rand.Read(prevRandao[:])
@@ -1280,7 +1280,7 @@ func TestAssembleBlockAmsterdamForkTransition(t *testing.T) {
 		baseFee = block.BaseFee().Uint64()
 	}
 
-	require.Less(t, topBlock.Header().Time, amsterdamTime, "pre-Amsterdam blocks should have timestamp < amsterdamTime")
+	require.Less(t, topBlock.Time(), amsterdamTime, "pre-Amsterdam blocks should have timestamp < amsterdamTime")
 
 	// Add a contract deployment tx to the pool — exercises state gas (EIP-8037)
 	// more than simple EOA transfers.
@@ -1327,7 +1327,7 @@ func TestAssembleBlockAmsterdamForkTransition(t *testing.T) {
 	block, err := getAssembledBlock(ctx, exec, payloadId)
 	require.NoError(t, err)
 	require.NotNil(t, block, "first Amsterdam block should be built successfully")
-	require.True(t, cfg.IsAmsterdam(block.Header().Time), "block should be an Amsterdam block")
+	require.True(t, cfg.IsAmsterdam(block.Time()), "block should be an Amsterdam block")
 	require.GreaterOrEqual(t, len(block.Transactions()), 1, "block should contain txpool txns")
 
 	// Insert, validate, and update fork choice.
@@ -1515,7 +1515,7 @@ func TestAssembleBlockStateGasLimit(t *testing.T) {
 	parentBeaconBlockRoot := randomHash()
 	payloadId, err := assembleBlock(ctx, exec, &builder.Parameters{
 		ParentHash:            chainPack.TopBlock.Hash(),
-		Timestamp:             chainPack.TopBlock.Header().Time + 1,
+		Timestamp:             chainPack.TopBlock.Time() + 1,
 		PrevRandao:            randomHash(),
 		SuggestedFeeRecipient: common.Address{1},
 		Withdrawals:           make([]*types.Withdrawal, 0),
@@ -1626,7 +1626,7 @@ func TestAssembleBlockStateGasLimitSSTORE(t *testing.T) {
 	parentBeaconBlockRoot := randomHash()
 	payloadId, err := assembleBlock(ctx, exec, &builder.Parameters{
 		ParentHash:            chainPack.TopBlock.Hash(),
-		Timestamp:             chainPack.TopBlock.Header().Time + 1,
+		Timestamp:             chainPack.TopBlock.Time() + 1,
 		PrevRandao:            randomHash(),
 		SuggestedFeeRecipient: common.Address{1},
 		Withdrawals:           make([]*types.Withdrawal, 0),
@@ -1748,7 +1748,7 @@ func TestAssembleBlockGasPoolSnapshotRestoreBug(t *testing.T) {
 	parentBeaconBlockRoot := randomHash()
 	payloadId, err := assembleBlock(ctx, exec, &builder.Parameters{
 		ParentHash:            chainPack.TopBlock.Hash(),
-		Timestamp:             chainPack.TopBlock.Header().Time + 1,
+		Timestamp:             chainPack.TopBlock.Time() + 1,
 		PrevRandao:            randomHash(),
 		SuggestedFeeRecipient: common.Address{1},
 		Withdrawals:           make([]*types.Withdrawal, 0),
@@ -1880,7 +1880,7 @@ func TestAssembleBlockGasPoolMultiBatchInitBug(t *testing.T) {
 	parentBeaconBlockRoot := randomHash()
 	payloadId, err := assembleBlock(ctx, exec, &builder.Parameters{
 		ParentHash:            chainPack.TopBlock.Hash(),
-		Timestamp:             chainPack.TopBlock.Header().Time + 1,
+		Timestamp:             chainPack.TopBlock.Time() + 1,
 		PrevRandao:            randomHash(),
 		SuggestedFeeRecipient: common.Address{1},
 		Withdrawals:           make([]*types.Withdrawal, 0),
