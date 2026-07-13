@@ -61,7 +61,7 @@ var (
 	errUint256Large  = errors.New("rlp: value too large for uint256")
 
 	streamPool = sync.Pool{
-		New: func() interface{} { return new(Stream) },
+		New: func() any { return new(Stream) },
 	}
 )
 
@@ -101,7 +101,7 @@ type Decoder interface {
 // panics cause by huge value sizes. If you need an input limit, use
 //
 //	NewStream(r, limit).Decode(val)
-func Decode(r io.Reader, val interface{}) error {
+func Decode(r io.Reader, val any) error {
 	stream := NewStreamFromPool(r, 0)
 	defer PutStream(stream)
 
@@ -110,7 +110,7 @@ func Decode(r io.Reader, val interface{}) error {
 
 // DecodeBytes parses RLP data from b into val. Please see package-level documentation for
 // the decoding rules. The input must contain exactly one value and no trailing data.
-func DecodeBytes(b []byte, val interface{}) error {
+func DecodeBytes(b []byte, val any) error {
 	stream := NewBytesStream(b)
 	defer PutStream(stream)
 
@@ -990,7 +990,7 @@ func (s *Stream) Uint256Bytes() ([]byte, error) {
 // Decode decodes a value and stores the result in the value pointed
 // to by val. Please see the documentation for the Decode function
 // to learn about the decoding rules.
-func (s *Stream) Decode(val interface{}) error {
+func (s *Stream) Decode(val any) error {
 	if val == nil {
 		return errDecodeIntoNil
 	}
