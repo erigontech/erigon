@@ -17,6 +17,7 @@
 package cache
 
 import (
+	"encoding/binary"
 	"sync"
 	"testing"
 
@@ -130,7 +131,7 @@ func TestCodeCache_PutIfAbsentAtomicWithPut(t *testing.T) {
 	fresh := []byte{0xaa, 1, 2, 3}
 	stale := []byte{0xbb, 4, 5, 6}
 	for round := 0; round < 20000; round++ {
-		cc.Delete(addr)
+		binary.BigEndian.PutUint64(addr[1:], uint64(round))
 		var wg sync.WaitGroup
 		wg.Add(2)
 		go func() { defer wg.Done(); cc.Put(addr, fresh, 20) }()

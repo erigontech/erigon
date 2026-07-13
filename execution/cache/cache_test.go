@@ -867,11 +867,10 @@ func TestCodeCache_PutWithCodeHashIfAbsent(t *testing.T) {
 // clobber it — the prefetch-vs-flush staleness this cache guards against.
 func TestDomainCache_PutIfAbsentAtomicWithPut(t *testing.T) {
 	c := NewDomainCacheMode(1*datasize.MB, ModeEvictLRU)
-	addr := makeAddr(1)
 	fresh := []byte("fresh")
 	stale := []byte("stale")
 	for round := 0; round < 20000; round++ {
-		c.Delete(addr)
+		addr := makeAddr(round)
 		var wg sync.WaitGroup
 		wg.Add(2)
 		go func() { defer wg.Done(); c.Put(addr, fresh, 20) }()
@@ -904,23 +903,25 @@ func TestDomainCache_DeleteAtomicWithPut_NoSizeDrift(t *testing.T) {
 	}
 }
 
-// Same invariant for the lazy stale-drop inside GetWithTxNum, the other
-// unstriped Remove path.
+// The lazy stale-drop inside GetWithTxNum removes entries; an unstriped
+// Remove racing put's read-modify-write double-subtracts the displaced
+// entry's size. Exactly one live entry remains after every round, so drift
+// shows as a size mismatch.
 func TestDomainCache_StaleDropAtomicWithPut_NoSizeDrift(t *testing.T) {
 	c := NewDomainCacheMode(1*datasize.MB, ModeEvictLRU)
 	addr := makeAddr(1)
 	v1 := []byte("value-one")
 	v2 := []byte("value-two")
+	wantSize := int64(len(addr) + len(v1) + 24)
 	for round := 0; round < 20000; round++ {
 		c.Put(addr, v1, 10)
-		c.Unwind(5) // epoch bump makes the entry above stale (txNum 10 >= floor 5)
+		c.Unwind(5)
 		var wg sync.WaitGroup
 		wg.Add(2)
 		go func() { defer wg.Done(); c.Put(addr, v2, 20) }()
 		go func() { defer wg.Done(); c.Get(addr) }()
 		wg.Wait()
-		c.Delete(addr)
-		require.Zero(t, c.SizeBytes(), "round %d: size accounting drifted", round)
+		require.Equal(t, wantSize, c.SizeBytes(), "round %d: size accounting drifted", round)
 	}
 }
 

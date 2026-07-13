@@ -399,7 +399,8 @@ func (c *GenericCache[T]) Delete(key []byte) {
 
 // dropStale removes key's entry under its put stripe: the re-check keeps an
 // entry a concurrent put revived, and striping the Remove stops it
-// double-subtracting the displaced size against put's update delta.
+// double-subtracting the displaced size against put's update delta (once via
+// OnEvict, once via the delta).
 func (c *GenericCache[T]) dropStale(h uint64, key []byte) {
 	mu := &c.putStripes[h&(putStripeCount-1)]
 	mu.Lock()
