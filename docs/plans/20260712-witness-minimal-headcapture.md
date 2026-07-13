@@ -179,11 +179,11 @@ Benefit: minimal nodes serve recent-block witnesses with zero commitment-history
 - [x] run tests - must pass before next task
 
 ### Task 10: Verify acceptance criteria
-- [ ] verify all Overview requirements: minimal node serves last-N witnesses, cache-only, out-of-window on miss, no commitment history required
-- [ ] verify edge cases: reorg drop/re-pin, tip jump >1, restart (cold cache re-warms forward), byte-cap eviction, dual-tx binding
-- [ ] run full unit suite: `go test ./rpc/jsonrpc/... ./execution/commitment/...`
-- [ ] run `go test -race ./rpc/jsonrpc/...` on the builder
-- [ ] `make lint` (or the repo lint target) clean
+- [x] verify all Overview requirements: minimal node serves last-N witnesses, cache-only, out-of-window on miss, no commitment history required (TestBuildAndCacheHeadCaptureHappyPath byte-identical to durable, TestExecutionWitnessCacheOnlyServe hit+miss, TestGetWitnessHeadCaptureOutOfWindow, TestWitnessCacheMode/head-capture, TestWitnessCacheShouldEnable 8-combo)
+- [x] verify edge cases: reorg drop/re-pin (TestBuildAndCacheHeadCaptureReorgDropsLosingFork, TestDecidePin/parent-reorged), tip jump >1 (TestDecidePin/pin-lags-by-two, TestBuildAndCacheHeadCaptureStalePin), restart cold cache (TestDecidePin/no-pin-cold-start + empty-cache miss → out-of-window), byte-cap eviction (TestWitnessResultCacheByteCapEvicts), dual-tx binding (TestWitnessReaderComposition, TestHeadCaptureStateReader_Routing)
+- [x] run full unit suite: `go test ./rpc/jsonrpc/... ./execution/commitment/...` — all `ok`
+- [x] run `go test -race ./rpc/jsonrpc/...` on the builder — `ok` (28.5s, no data races)
+- [x] `make lint` (or the repo lint target) clean — `go tool golangci-lint run --config ./.golangci.yml` on all changed packages: 0 issues
 
 ### Task 11: Update documentation
 - [ ] document the two new flags and the head-capture mode (tip-only, cache-only, cold-after-restart) in the relevant flag/RPC docs
