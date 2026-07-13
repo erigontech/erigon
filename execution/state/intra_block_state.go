@@ -898,6 +898,18 @@ func (sdb *IntraBlockState) writeBalanceVersioned(addr accounts.Address, update 
 		if err != nil {
 			return err
 		}
+		// A destroyed-then-revived account's transient is rebuilt from the base
+		// record and lags this tx's own balance write, so SetBalance's journal
+		// entry would capture a stale prev and a revert would restore the wrong
+		// balance. Seed the live balance first. The base==nil create path never
+		// read balance, so leave it untouched (avoids widening the OCC read-set).
+		if base != nil {
+			cur, _, err := sdb.getBalance(addr)
+			if err != nil {
+				return err
+			}
+			stateObject.setBalance(cur)
+		}
 		stateObject.SetBalance(update, wasCommited, reason)
 		sdb.recordWriteBalance(addr, update)
 		return nil
@@ -2939,9 +2951,12 @@ func (sdb *IntraBlockState) reconstructCellFlags(obj *stateObject, addr accounts
 	// code from this tx's own Code write, else the versionMap floor cell, so
 	// object code reads (GetDelegatedDesignation, stateObject.Code()) agree with
 	// the cells — matching the refresh-and-sync the fall-through getStateObject
-	// path performs for accounts it materializes from scratch.
+	// path performs for accounts it materializes from scratch. An own write is
+	// authoritative even when it clears code to empty (EIP-7702 delegation
+	// clearing writes nil bytes / EmptyCodeHash); falling through to the floor
+	// there would resurrect the prior-tx delegation.
 	if _, isDirty := sdb.journal.dirties[addr]; isDirty {
-		if vw, ok := sdb.versionedWrites.GetCode(addr); ok && vw.Val.Bytes != nil {
+		if vw, ok := sdb.versionedWrites.GetCode(addr); ok {
 			obj.code = vw.Val
 			obj.data.CodeHash = vw.Val.Hash
 			return

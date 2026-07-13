@@ -690,7 +690,11 @@ func versionedReadCore(s *IntraBlockState, addr accounts.Address, path AccountPa
 		r.outcome = outcomeStorageRead
 		r.so = so
 		r.hdr = hdr
-		r.recordVR = true
+		// A field read whose account resolved from this tx's own AddressPath
+		// write (WriteSetRead) carries no cross-tx dependency; recording it
+		// would make the validator (floored below the tx's own writes) return
+		// None and wrongly invalidate the tx. Same rule as accountRead.
+		r.recordVR = hdr.Source != WriteSetRead
 		r.source = hdr.Source
 		r.version = hdr.Version
 		return
