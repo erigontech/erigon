@@ -585,8 +585,6 @@ func executeParallelWithCheck(tb testing.TB, pe *parallelExecutor, tasks []exec.
 		return nil, nil
 	}
 
-	ctx, cancel := context.WithCancel(context.Background())
-
 	applyResults := make(chan applyResult, 1000)
 
 	pe.execRequests <- &execRequest{0, common.Hash{}, nil, nil, tasks, applyResults, nil, profile, nil}
@@ -600,8 +598,9 @@ func executeParallelWithCheck(tb testing.TB, pe *parallelExecutor, tasks []exec.
 		}
 	}
 
-	cancel()
-	pe.wait(ctx)
+	if err := pe.wait(); err != nil {
+		return result, err
+	}
 
 	if check != nil {
 		err = check(pe)

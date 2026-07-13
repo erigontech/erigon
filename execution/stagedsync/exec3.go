@@ -47,6 +47,7 @@ import (
 	"github.com/erigontech/erigon/execution/receipts"
 	"github.com/erigontech/erigon/execution/stagedsync/stages"
 	"github.com/erigontech/erigon/execution/state"
+	"github.com/erigontech/erigon/execution/tests/chaos_monkey"
 	"github.com/erigontech/erigon/execution/tracing"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/node/shards"
@@ -540,8 +541,10 @@ func (te *txExecutor) executeBlocks(ctx context.Context, startBlockNum uint64, m
 		// Closing here would race with the exec loop sending results.
 		defer func() {
 			if rec := recover(); rec != nil {
-				err = fmt.Errorf("exec blocks panic: %s", rec)
-			} else if err != nil && !errors.Is(err, context.Canceled) {
+				err = fmt.Errorf("exec blocks panic: %v", rec)
+				return
+			}
+			if err = common.NilIfCanceled(err); err != nil {
 				err = fmt.Errorf("exec blocks error: %w", err)
 			} else {
 				te.logger.Debug("[" + te.logPrefix + "] exec blocks exit")
@@ -553,6 +556,14 @@ func (te *txExecutor) executeBlocks(ctx context.Context, startBlockNum uint64, m
 		// race this send select and panic on "send on closed channel".
 		if blockRequests != nil {
 			defer close(blockRequests)
+		}
+
+		// Test-only chaos injection (gated by the ChaosMonkey flag): reproduce
+		// executeBlocks failing before it dispatches any block.
+		if te.cfg.syncCfg.ChaosMonkey && te.enableChaosMonkey {
+			if chaosErr := chaos_monkey.ThrowPreExecutionError(); chaosErr != nil {
+				return chaosErr
+			}
 		}
 
 		// Open a thread-local roTx for block metadata and StepsInFiles.
