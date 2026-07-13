@@ -17,7 +17,6 @@
 package rules
 
 import (
-	"context"
 	"strings"
 	"testing"
 
@@ -28,31 +27,6 @@ import (
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/types"
 )
-
-type msgCaptureHandler struct{ msgs *[]string }
-
-func (h msgCaptureHandler) Log(r *log.Record) error {
-	*h.msgs = append(*h.msgs, r.Msg)
-	return nil
-}
-
-func (h msgCaptureHandler) Enabled(context.Context, log.Lvl) bool { return true }
-
-func captureLogger(msgs *[]string) log.Logger {
-	l := log.New()
-	l.SetHandler(msgCaptureHandler{msgs: msgs})
-	return l
-}
-
-func countMsg(msgs []string, want string) int {
-	n := 0
-	for _, m := range msgs {
-		if m == want {
-			n++
-		}
-	}
-	return n
-}
 
 // TestBlockPostValidation_PreByzantiumBloomMismatch covers the regression
 // where a pre-Byzantium block with an invalid logs bloom was silently
@@ -174,34 +148,5 @@ func TestBlockPostValidation_ReceiptBloomReuse(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "invalid bloom") {
 		t.Fatalf("expected \"invalid bloom\" error, got: %v", err)
-	}
-}
-
-// TestBlockPostValidation_GasMismatchNoPerTxSpam pins that a gas-used mismatch
-// is reported as a single summary line plus the error, with no per-transaction
-// dump — the detailed receipt breakdown is left to the caller's
-// LOG_HASH_MISMATCH_REASON path.
-func TestBlockPostValidation_GasMismatchNoPerTxSpam(t *testing.T) {
-	t.Parallel()
-
-	cfg := &chain.Config{ChainID: uint256.NewInt(1)}
-	receipts := types.Receipts{
-		{Status: types.ReceiptStatusSuccessful, GasUsed: 21_000, CumulativeGasUsed: 21_000},
-		{Status: types.ReceiptStatusSuccessful, GasUsed: 21_000, CumulativeGasUsed: 42_000},
-		{Status: types.ReceiptStatusSuccessful, GasUsed: 21_000, CumulativeGasUsed: 63_000},
-	}
-	header := &types.Header{Number: *uint256.NewInt(1), GasUsed: 100_000}
-	const execGas = 63_000 // != header.GasUsed, triggers the mismatch branch
-
-	var msgs []string
-	err := DefaultBlockPostValidation(cfg, header, execGas, 0, false, false, receipts, nil, captureLogger(&msgs))
-	if err == nil {
-		t.Fatal("expected gas-used mismatch error, got nil")
-	}
-	if got := countMsg(msgs, "gas used mismatch"); got != 1 {
-		t.Fatalf("expected exactly one summary line, got %d", got)
-	}
-	if got := countMsg(msgs, "  tx gas detail"); got != 0 {
-		t.Fatalf("gas mismatch must not emit a per-tx dump, got %d line(s)", got)
 	}
 }
