@@ -3195,7 +3195,6 @@ func (be *blockExecutor) scheduleExecution(ctx context.Context, pe *parallelExec
 	// at index < N is in flight. Lower-indexed workers' flushes land at
 	// indices visible to N's reads via vm.Read's floor(N-1); higher-indexed
 	// ones don't. Non-deferred txs keep dispatching via pending.
-	// invariant across the drain (it only moves deferred->pending): hoist out of the predicate.
 	drainMaxValidated := be.validateTasks.maxComplete()
 	drainMinIP := be.execTasks.minInProgress()
 	be.execTasks.drainDeferredIfReady(func(tx int) bool {
