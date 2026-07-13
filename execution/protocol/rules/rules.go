@@ -199,7 +199,6 @@ type EngineWriter interface {
 }
 
 var alwaysSkipReceiptCheck = dbg.EnvBool("EXEC_SKIP_RECEIPT_CHECK", false)
-var dumpGasMismatchDetail = dbg.EnvBool("EXEC_DUMP_GAS_MISMATCH_DETAIL", false)
 
 func DefaultBlockPostValidation(chainConfig *chain.Config, header *types.Header,
 	gasUsed, blobGasUsed uint64, checkReceipts, checkBloom bool,
@@ -207,7 +206,7 @@ func DefaultBlockPostValidation(chainConfig *chain.Config, header *types.Header,
 	if gasUsed != header.GasUsed {
 		logger.Warn("gas used mismatch", "block", header.Number.Uint64(), "header", header.GasUsed, "execution", gasUsed,
 			"diff", int64(gasUsed)-int64(header.GasUsed), "txCount", len(txns), "receiptCount", len(receipts))
-		if dumpGasMismatchDetail {
+		if log.Lvl(dbg.ExecTerseLoggerLevel) >= log.LvlDebug {
 			var cumGas uint64
 			for i, r := range receipts {
 				txGas := r.GasUsed
