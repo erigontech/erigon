@@ -100,6 +100,7 @@ var DefaultFlags = []cli.Flag{
 	&utils.RpcGasCapFlag,
 	&utils.RpcBlockRangeLimit,
 	&utils.RpcGetLogsMaxResults,
+	&utils.RpcLogQueryLimit,
 	&utils.RpcBatchLimit,
 	&utils.RpcReturnDataLimit,
 	&utils.AllowUnprotectedTxs,
