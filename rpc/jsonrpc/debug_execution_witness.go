@@ -740,6 +740,12 @@ func (api *DebugAPIImpl) ExecutionWitness(ctx context.Context, blockNrOrHash rpc
 		return nil, err
 	}
 	if !commitmentHistoryEnabled {
+		// A head-capture minimal node keeps no commitment history and serves
+		// cache-only: a miss is out-of-window, never an on-demand recompute
+		// (the typed error/reorg buckets land in the cache-only serve path).
+		if api.witnessCache != nil && api.witnessCache.HeadCapture() {
+			return nil, fmt.Errorf("debug_executionWitness: block not in head-capture cache window")
+		}
 		return nil, fmt.Errorf("debug_executionWitness requires commitment history: restart the node with --prune.experimental.include-commitment-history")
 	}
 
@@ -748,7 +754,7 @@ func (api *DebugAPIImpl) ExecutionWitness(ctx context.Context, blockNrOrHash rpc
 		return nil, err
 	}
 
-	return api.buildWitnessResult(ctx, tx, info, resolvedMode)
+	return api.buildWitnessResult(ctx, tx, nil, info, resolvedMode)
 }
 
 // serveFromWitnessCache returns a cached legacy-mode witness when the eager cache
@@ -778,12 +784,59 @@ func (api *DebugAPIImpl) serveFromWitnessCache(ctx context.Context, tx kv.Tempor
 // build errors; the on-demand handler surfaces it as a normal error.
 var errWitnessVerifyFailed = errors.New("witness stateless verification failed")
 
+// headCaptureSource carries the pinned-parent commitment plane for a minimal-node
+// witness build: pinnedParentTx's commitment-latest is parent(B) commitment, read
+// through pinnedSD — a SharedDomains bound to that tx with an empty in-memory batch,
+// so latest reads fall through to the pinned snapshot rather than the build's own fold.
+type headCaptureSource struct {
+	pinnedParentTx kv.TemporalTx
+	pinnedSD       commitmentdb.SharedDomainsGetter
+}
+
+// collapseReaderFor selects the collapse-detection state reader: plain state at block
+// end in both modes, commitment from the pinned parent latest (head-capture) or the
+// parent-block history txNum (durable).
+func collapseReaderFor(hc *headCaptureSource, tx kv.TemporalTx, firstTxNumInBlock, endTxNum uint64) commitmentdb.StateReader {
+	if hc != nil {
+		return commitmentdb.NewHeadCaptureStateReader(hc.pinnedParentTx, hc.pinnedSD, tx, endTxNum)
+	}
+	return commitmentdb.NewSplitHistoryReader(tx, firstTxNumInBlock, endTxNum, false /* withHistory */)
+}
+
+// trieReaderFor selects the witness-trie state reader: plain state at the parent
+// (firstTxNumInBlock) in both modes, commitment from the pinned parent latest
+// (head-capture) or the same parent history txNum (durable).
+func trieReaderFor(hc *headCaptureSource, tx kv.TemporalTx, firstTxNumInBlock uint64) commitmentdb.StateReader {
+	if hc != nil {
+		return commitmentdb.NewHeadCaptureStateReader(hc.pinnedParentTx, hc.pinnedSD, tx, firstTxNumInBlock)
+	}
+	return commitmentdb.NewHistoryStateReader(tx, firstTxNumInBlock)
+}
+
+// buildWitnessResultHeadCapture builds a block's witness with parent commitment read
+// from a pinned RO snapshot (pinnedParentTx's commitment-latest) instead of commitment
+// history, for minimal nodes that keep no commitment history. Plain account/storage/code
+// state is read from committedTx's history exactly as the durable path does; only the
+// commitment source changes. A dedicated SharedDomains over the pinned tx supplies clean
+// (empty-mem) latest reads the build's own fold cannot perturb.
+func (api *DebugAPIImpl) buildWitnessResultHeadCapture(ctx context.Context, committedTx, pinnedParentTx kv.TemporalTx, info *witnessBlockInfo, mode witnessMode) (*ExecutionWitnessResult, error) {
+	pinnedSD, err := execctx.NewSharedDomains(ctx, pinnedParentTx, log.New(), execctx.WithoutDeferredBranchUpdates(), execctx.WithSequentialCommitment())
+	if err != nil {
+		return nil, err
+	}
+	defer pinnedSD.Close()
+	hc := &headCaptureSource{pinnedParentTx: pinnedParentTx, pinnedSD: pinnedSD}
+	return api.buildWitnessResult(ctx, committedTx, hc, info, mode)
+}
+
 // buildWitnessResult runs the witness-building pipeline for an already-resolved block
 // against an open temporal tx: re-execute to record accesses, fold the commitment trie,
 // collect ancestor headers, verify statelessly, then append the legacy empty-storage node
 // and sort. It is the single seam shared by the on-demand handler and the eager cache
-// builder, so both produce byte-identical results; never fork the build logic.
-func (api *DebugAPIImpl) buildWitnessResult(ctx context.Context, tx kv.TemporalTx, info *witnessBlockInfo, mode witnessMode) (*ExecutionWitnessResult, error) {
+// builder, so both produce byte-identical results; never fork the build logic. A non-nil
+// hc redirects only the commitment-domain reads to a pinned parent snapshot (head-capture);
+// nil is the durable-history path.
+func (api *DebugAPIImpl) buildWitnessResult(ctx context.Context, tx kv.TemporalTx, hc *headCaptureSource, info *witnessBlockInfo, mode witnessMode) (*ExecutionWitnessResult, error) {
 	blockNum := info.BlockNum
 	block := info.Block
 	firstTxNumInBlock := info.FirstTxNumInBlock
@@ -834,16 +887,20 @@ func (api *DebugAPIImpl) buildWitnessResult(ctx context.Context, tx kv.TemporalT
 	expectedParentRoot = parentHeader.Root
 	log.Debug("expected parent root", "stateRoot", expectedParentRoot)
 
-	commitmentStartingTxNum := tx.Debug().HistoryStartFrom(kv.CommitmentDomain)
-	if firstTxNumInBlock < commitmentStartingTxNum {
-		return nil, fmt.Errorf("commitment history pruned: start %d, last tx: %d", commitmentStartingTxNum, firstTxNumInBlock)
+	// Head-capture reads parent commitment from the pinned snapshot, not commitment
+	// history, so the history-availability check only applies to the durable path.
+	if hc == nil {
+		commitmentStartingTxNum := tx.Debug().HistoryStartFrom(kv.CommitmentDomain)
+		if firstTxNumInBlock < commitmentStartingTxNum {
+			return nil, fmt.Errorf("commitment history pruned: start %d, last tx: %d", commitmentStartingTxNum, firstTxNumInBlock)
+		}
 	}
 
 	if accessed.isEmpty() { // nothing touched, return empty witness
 		return result, nil
 	}
 
-	siblingPaths, err := detectCollapseSiblings(ctx, tx, domains, sdCtx,
+	siblingPaths, err := detectCollapseSiblings(ctx, tx, hc, domains, sdCtx,
 		firstTxNumInBlock, endTxNum, blockNum, parentNum,
 		block.Root(), accessed, mode)
 	if err != nil {
@@ -852,7 +909,7 @@ func (api *DebugAPIImpl) buildWitnessResult(ctx context.Context, tx kv.TemporalT
 
 	// Materialize exclusion-proof branches for strict sparse-trie verifiers in legacy/default
 	// mode; canonical mode stays minimal to match the reference witness.
-	nodes, err := buildWitnessTrie(ctx, tx, domains, sdCtx, firstTxNumInBlock, expectedParentRoot, siblingPaths, accessed, mode != witnessModeCanonical)
+	nodes, err := buildWitnessTrie(ctx, tx, hc, domains, sdCtx, firstTxNumInBlock, expectedParentRoot, siblingPaths, accessed, mode != witnessModeCanonical)
 	if err != nil {
 		return nil, err
 	}
@@ -1132,6 +1189,7 @@ func collectAccessedState(rs *RecordingState, mode witnessMode) *accessedState {
 func detectCollapseSiblings(
 	ctx context.Context,
 	tx kv.TemporalTx,
+	hc *headCaptureSource,
 	domains *execctx.SharedDomains,
 	sdCtx *commitmentdb.SharedDomainsCommitmentContext,
 	firstTxNumInBlock, endTxNum, blockNum, parentNum uint64,
@@ -1139,9 +1197,10 @@ func detectCollapseSiblings(
 	accessed *accessedState,
 	mode witnessMode,
 ) (siblingPaths [][]byte, err error) {
-	// Set up split reader: commitment from block beginning, plain state from block end.
-	// withHistory=false so branch updates are written using PutBranch().
-	splitStateReader := commitmentdb.NewSplitHistoryReader(tx, firstTxNumInBlock, endTxNum, false /* withHistory */)
+	// Set up split reader: commitment from block beginning (durable) or the pinned
+	// parent snapshot (head-capture), plain state from block end. withHistory=false
+	// so branch updates are written using PutBranch().
+	splitStateReader := collapseReaderFor(hc, tx, firstTxNumInBlock, endTxNum)
 	sdCtx.SetCustomHistoryStateReader(splitStateReader)
 	_, seekBlockNum, err := domains.SeekCommitment(ctx, tx)
 	if err != nil {
@@ -1210,6 +1269,7 @@ func detectCollapseSiblings(
 func buildWitnessTrie(
 	ctx context.Context,
 	tx kv.TemporalTx,
+	hc *headCaptureSource,
 	domains *execctx.SharedDomains,
 	sdCtx *commitmentdb.SharedDomainsCommitmentContext,
 	firstTxNumInBlock uint64,
@@ -1220,7 +1280,7 @@ func buildWitnessTrie(
 ) (encodedNodes []hexutil.Bytes, err error) {
 	encodedNodes = []hexutil.Bytes{}
 
-	sdCtx.SetHistoryStateReader(tx, firstTxNumInBlock)
+	sdCtx.SetCustomHistoryStateReader(trieReaderFor(hc, tx, firstTxNumInBlock))
 	if _, _, err := domains.SeekCommitment(ctx, tx); err != nil {
 		return nil, fmt.Errorf("failed to reset commitment for regular witness: %w", err)
 	}

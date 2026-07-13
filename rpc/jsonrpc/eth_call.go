@@ -774,7 +774,7 @@ func (api *BaseAPI) getWitness(ctx context.Context, db kv.TemporalRoDB, blockNrO
 	defer domains.Close()
 	sdCtx := domains.GetCommitmentContext()
 
-	siblingPaths, err := detectCollapseSiblings(ctx, tx, domains, sdCtx,
+	siblingPaths, err := detectCollapseSiblings(ctx, tx, nil, domains, sdCtx,
 		firstTxNumInBlock, endTxNum, blockNr, parentNum,
 		block.Root(), accessed, witnessModeLegacy)
 	if err != nil {

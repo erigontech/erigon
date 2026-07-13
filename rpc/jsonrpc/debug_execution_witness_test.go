@@ -18,15 +18,24 @@ package jsonrpc
 
 import (
 	"bytes"
+	"context"
 	"strings"
 	"testing"
 
 	"github.com/holiman/uint256"
+	"github.com/stretchr/testify/require"
 
+	"github.com/erigontech/erigon/cmd/rpcdaemon/rpcdaemontest"
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/hexutil"
+	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/rawdb"
+	"github.com/erigontech/erigon/db/state/kvmetrics"
+	"github.com/erigontech/erigon/db/state/statecfg"
+	"github.com/erigontech/erigon/execution/commitment/commitmentdb"
 	"github.com/erigontech/erigon/execution/protocol/params"
 	"github.com/erigontech/erigon/execution/types/accounts"
+	"github.com/erigontech/erigon/rpc"
 )
 
 // fakeStateReader is a minimal state.StateReader backed by an in-memory account
@@ -388,4 +397,92 @@ func TestResolveWitnessMode(t *testing.T) {
 			t.Errorf("default should be legacy, got %v", got)
 		}
 	})
+}
+
+// fakeHeadCaptureSD is a no-op SharedDomains surface for exercising the reader
+// selection without a real database; only AsGetter is invoked at construction
+// (its returned getter is never read in these tests).
+type fakeHeadCaptureSD struct{}
+
+func (fakeHeadCaptureSD) SetTxNum(uint64)                                         {}
+func (fakeHeadCaptureSD) AsGetter(kv.TemporalTx) kv.TemporalGetter                { return nil }
+func (fakeHeadCaptureSD) AsPutDel(kv.TemporalTx) kv.TemporalPutDel                { return nil }
+func (fakeHeadCaptureSD) MergeMetrics(kvmetrics.Source, *kvmetrics.DomainMetrics) {}
+func (fakeHeadCaptureSD) StepSize() uint64                                        { return 1 }
+func (fakeHeadCaptureSD) Metrics() *kvmetrics.DomainMetrics                       { return nil }
+
+// TestWitnessReaderComposition pins the per-phase reader the two build phases install:
+// head-capture reads commitment from the pinned parent and plain state at the phase's
+// txNum (block-end for collapse detection, parent for the trie), while the durable path
+// reads both planes from a single committed tx.
+func TestWitnessReaderComposition(t *testing.T) {
+	t.Parallel()
+
+	const (
+		firstTxNumInBlock = uint64(500)
+		endTxNum          = uint64(1000)
+	)
+	hc := &headCaptureSource{pinnedSD: fakeHeadCaptureSD{}}
+
+	collapse := collapseReaderFor(hc, nil, firstTxNumInBlock, endTxNum)
+	hcCollapse, ok := collapse.(*commitmentdb.CommitmentReplayStateReader)
+	require.True(t, ok, "head-capture collapse phase must install the dual-tx reader")
+	asOf, ok := hcCollapse.PlainStateAsOf()
+	require.True(t, ok)
+	require.Equal(t, endTxNum, asOf, "collapse detection reads plain state at block end")
+	require.False(t, collapse.WithHistory())
+
+	trie := trieReaderFor(hc, nil, firstTxNumInBlock)
+	hcTrie, ok := trie.(*commitmentdb.CommitmentReplayStateReader)
+	require.True(t, ok, "head-capture trie phase must install the dual-tx reader")
+	asOf, ok = hcTrie.PlainStateAsOf()
+	require.True(t, ok)
+	require.Equal(t, firstTxNumInBlock, asOf, "trie phase reads plain state at the parent")
+	require.False(t, trie.WithHistory())
+
+	durableCollapse := collapseReaderFor(nil, nil, firstTxNumInBlock, endTxNum)
+	splitReader, ok := durableCollapse.(*commitmentdb.SplitStateReader)
+	require.True(t, ok, "durable collapse phase installs the split-history reader")
+	asOf, ok = splitReader.PlainStateAsOf()
+	require.True(t, ok)
+	require.Equal(t, endTxNum, asOf, "durable collapse reads plain state at block end")
+
+	durableTrie := trieReaderFor(nil, nil, firstTxNumInBlock)
+	historyReader, ok := durableTrie.(*commitmentdb.HistoryStateReader)
+	require.True(t, ok, "durable trie phase installs a plain history reader")
+	require.Equal(t, firstTxNumInBlock, historyReader.AsOf())
+}
+
+// TestBuildWitnessResultHeadCapture_FailsClosedOnBadParent drives the head-capture build
+// with a tip-pinned tx used as the parent of an older block, so the pinned commitment
+// plane does not match parent(B). The build must fail a validation gate and return no
+// result — a wrong witness is never produced.
+func TestBuildWitnessResultHeadCapture_FailsClosedOnBadParent(t *testing.T) {
+	previousSchema := statecfg.Schema
+	statecfg.EnableHistoricalCommitment()
+	t.Cleanup(func() { statecfg.Schema = previousSchema })
+
+	m, _, _ := rpcdaemontest.CreateTestExecModule(t)
+	ctx := context.Background()
+
+	require.NoError(t, m.DB.Update(ctx, func(tx kv.RwTx) error {
+		return rawdb.WriteDBCommitmentHistoryEnabled(tx, true)
+	}))
+
+	api := NewPrivateDebugAPI(newBaseApiForTest(m), m.DB, nil, 0, false)
+
+	tx, err := api.db.BeginTemporalRo(ctx)
+	require.NoError(t, err)
+	defer tx.Rollback()
+
+	// Block 3 is a non-empty old block; a tx pinned at the committed tip carries the
+	// wrong parent commitment for it.
+	const blockNum = uint64(3)
+	bn := rpc.BlockNumber(blockNum)
+	info, err := api.resolveWitnessBlock(ctx, tx, rpc.BlockNumberOrHash{BlockNumber: &bn})
+	require.NoError(t, err)
+
+	result, err := api.buildWitnessResultHeadCapture(ctx, tx, tx, info, witnessModeLegacy)
+	require.Error(t, err, "a mispinned parent must fail a validation gate")
+	require.Nil(t, result, "no witness is produced on gate failure")
 }

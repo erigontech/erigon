@@ -109,12 +109,12 @@ Benefit: minimal nodes serve recent-block witnesses with zero commitment-history
 - Modify: `rpc/jsonrpc/debug_execution_witness.go`
 - Create/Modify: `rpc/jsonrpc/debug_execution_witness_test.go`
 
-- [ ] add a head-capture variant of `buildWitnessResult` (`:786`) that takes both the pinned parent tx and the committed ≥B tx and installs the Task-3 dual-tx reader in `detectCollapseSiblings` (replacing `NewSplitHistoryReader` at `:1144`, keeping plain @ `endTxNum`) and in `buildWitnessTrie` (replacing `SetHistoryStateReader` at `:1223`, plain @ `firstTxNumInBlock`); commitment side reads the pinned parent latest in both phases
-- [ ] bind the build's SharedDomains to the committed ≥B tx and confirm `SeekCommitment` resolves the parent `KeyCommitmentState` via the pinned tx's commitment-latest (the dual-tx binding)
-- [ ] keep the accessed/read-set collection unchanged (re-execute B via history at `firstTxNumInBlock` on the committed tx) — only commitment sourcing changes
-- [ ] keep the three validation gates non-bypassable; on any gate failure return an error so nothing is cached; guard the `ExecutionWitness` hard gate (`:743`) by head-capture mode so it is not hit on minimal
-- [ ] write tests (task-verifiable only): the dual-tx reader is installed on both the collapse-detection and trie phases with the correct per-phase `plainStateAsOf` (assert reader composition/txNums); a build whose `expectedBlockRoot`/`witnessRoot` gate fails returns an error and yields no result
-- [ ] run tests - must pass before next task
+- [x] add a head-capture variant of `buildWitnessResult` (`buildWitnessResultHeadCapture`) that takes both the pinned parent tx and the committed ≥B tx and installs the Task-3 dual-tx reader in `detectCollapseSiblings` (via `collapseReaderFor`, plain @ `endTxNum`) and in `buildWitnessTrie` (via `trieReaderFor`, plain @ `firstTxNumInBlock`); commitment side reads the pinned parent latest in both phases
+- [x] bind the build's SharedDomains to the committed ≥B tx and confirm `SeekCommitment` resolves the parent `KeyCommitmentState` via the pinned tx's commitment-latest (the dual-tx binding — proven by the fail-closed gate reading the pinned tx's commitment blockNum)
+- [x] keep the accessed/read-set collection unchanged (re-execute B via history at `firstTxNumInBlock` on the committed tx) — only commitment sourcing changes
+- [x] keep the three validation gates non-bypassable; on any gate failure return an error so nothing is cached; guard the `ExecutionWitness` hard gate by head-capture mode so it is not hit on minimal
+- [x] write tests (task-verifiable only): the dual-tx reader is installed on both the collapse-detection and trie phases with the correct per-phase `plainStateAsOf` (`TestWitnessReaderComposition`); a build whose parent-commitment gate fails returns an error and yields no result (`TestBuildWitnessResultHeadCapture_FailsClosedOnBadParent`)
+- [x] run tests - must pass before next task
 
 ### Task 5: Rolling one-block-lag pin lifecycle (keep waitCommittedHead)
 

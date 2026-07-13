@@ -53,6 +53,12 @@ type sd interface {
 	Metrics() *kvmetrics.DomainMetrics
 }
 
+// SharedDomainsGetter is the SharedDomains surface the latest-state commitment
+// reader needs. Exported alias of the internal sd interface so callers outside
+// this package (the witness head-capture build) can name the pinned-parent
+// SharedDomains type; *execctx.SharedDomains satisfies it.
+type SharedDomainsGetter = sd
+
 type SharedDomainsCommitmentContext struct {
 	sharedDomains sd
 	updates       *commitment.Updates

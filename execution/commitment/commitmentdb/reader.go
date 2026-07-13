@@ -125,6 +125,9 @@ func (r *HistoryStateReader) Read(d kv.Domain, plainKey []byte, stepSize uint64)
 	return enc, kv.Step(r.limitReadAsOfTxNum / stepSize), nil
 }
 
+// AsOf reports the history txNum this reader resolves state at.
+func (r *HistoryStateReader) AsOf() uint64 { return r.limitReadAsOfTxNum }
+
 func (r *HistoryStateReader) Clone(tx kv.TemporalTx) StateReader {
 	return NewHistoryStateReader(tx, r.limitReadAsOfTxNum)
 }
@@ -199,6 +202,15 @@ func NewSplitHistoryReader(tx kv.TemporalTx, commitmentAsOf uint64, dataAsOf uin
 
 func (r *SplitStateReader) WithHistory() bool {
 	return r.withHistory
+}
+
+// PlainStateAsOf reports the history txNum the plain-state (account/storage/code)
+// reader resolves at, when that reader is history-backed (ok=false otherwise).
+func (r *SplitStateReader) PlainStateAsOf() (uint64, bool) {
+	if h, ok := r.plainStateReader.(*HistoryStateReader); ok {
+		return h.limitReadAsOfTxNum, true
+	}
+	return 0, false
 }
 
 func (r *SplitStateReader) CheckDataAvailable(_ kv.Domain, _ kv.Step) error {

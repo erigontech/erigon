@@ -268,7 +268,7 @@ func (api *DebugAPIImpl) buildAndCache(ctx context.Context, num uint64, hash com
 		return false
 	}
 	start := time.Now()
-	result, err := api.buildWitnessResult(ctx, tx, info, witnessModeLegacy)
+	result, err := api.buildWitnessResult(ctx, tx, nil, info, witnessModeLegacy)
 	witnessCacheBuildDuration.ObserveDuration(start)
 	if err != nil {
 		if errors.Is(err, errWitnessVerifyFailed) {
