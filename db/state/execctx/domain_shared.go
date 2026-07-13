@@ -1043,10 +1043,7 @@ func (sd *SharedDomains) Commit(ctx context.Context, tx kv.RwTx, validate ...fun
 			}
 		case kv.AccountsDomain:
 			if len(u.val) == 0 {
-				// Tombstone rather than delete: a live negative defends the key
-				// against a straddling pre-delete read-fill re-inserting the old
-				// value (PutIfAbsent only defers to live entries).
-				sd.stateCache.Put(kv.AccountsDomain, u.key, nil, u.txN)
+				sd.stateCache.Delete(kv.AccountsDomain, u.key)
 				sd.stateCache.Delete(kv.CodeDomain, u.key)
 				sd.stateCache.DeleteAddrCodeHash(u.key)
 			} else {
@@ -1055,7 +1052,7 @@ func (sd *SharedDomains) Commit(ctx context.Context, tx kv.RwTx, validate ...fun
 			}
 		case kv.StorageDomain:
 			if len(u.val) == 0 {
-				sd.stateCache.Put(kv.StorageDomain, u.key, nil, u.txN)
+				sd.stateCache.Delete(kv.StorageDomain, u.key)
 			} else {
 				sd.stateCache.Put(kv.StorageDomain, u.key, u.val, u.txN)
 			}
