@@ -290,7 +290,7 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 			return err
 		}
 		if !notChanged {
-			logger.Warn("--persist.receipts differs from the value stored in the datadir; using the stored value (changing it requires a fresh datadir)", "inDB", config.PersistReceiptsCacheV2, "inConfig", inConfig)
+			logger.Warn("--prune.include-receipts differs from the value stored in the datadir; using the stored value (changing it requires a fresh datadir)", "inDB", config.PersistReceiptsCacheV2, "inConfig", inConfig)
 		}
 		if config.PersistReceiptsCacheV2 {
 			statecfg.EnableHistoricalRCache()
