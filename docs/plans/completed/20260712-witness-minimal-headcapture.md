@@ -186,9 +186,9 @@ Benefit: minimal nodes serve recent-block witnesses with zero commitment-history
 - [x] `make lint` (or the repo lint target) clean — `go tool golangci-lint run --config ./.golangci.yml` on all changed packages: 0 issues
 
 ### Task 11: Update documentation
-- [ ] document the two new flags and the head-capture mode (tip-only, cache-only, cold-after-restart) in the relevant flag/RPC docs
-- [ ] update CLAUDE.md / notes only if a new load-bearing pattern was discovered
-- [ ] move this plan to `docs/plans/completed/`
+- [x] document the two new flags and the head-capture mode (tip-only, cache-only, cold-after-restart) in the relevant flag/RPC docs — added a "Head-capture serving (minimal nodes)" section to `docs/plans/witness-legacy-mode-spec.md` (flags, cache-only/tip-only/by-hash-canonical/cold-after-restart/eth_getWitness semantics), corrected the now-conditional "requires commitment history" statements, and extended the code map; flag `Usage` strings in `cmd/utils/flags.go` remain the primary CLI docs (Task 1)
+- [x] update CLAUDE.md / notes only if a new load-bearing pattern was discovered — no repo CLAUDE.md change needed; the load-bearing pin-read pattern (pinned-parent commitment via raw `tx.GetLatest`, not a SharedDomains getter) is already captured in memory `project_witness_headcapture_pin_read.md`, and the serving mode is now documented in the spec doc
+- [x] move this plan to `docs/plans/completed/`
 
 ## Post-Completion
 *Items requiring external systems/datadirs or manual action — informational only, no checkboxes.*
