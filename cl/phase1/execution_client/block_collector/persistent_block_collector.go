@@ -40,7 +40,7 @@ import (
 // Flush drops the whole database directory only when the file has grown past
 // this size; smaller databases are cleared in place so chain-tip flushes don't
 // recreate the directory on every block.
-var dropDBSizeThreshold = 1 * datasize.GB
+var dropDBSizeThreshold = uint64(1 * datasize.GB)
 
 // PersistentBlockCollector stores downloaded blocks to an MDBX database
 // so they survive restarts. The database is cleared after successful loading.
@@ -180,7 +180,6 @@ func (p *PersistentBlockCollector) Flush(ctx context.Context) error {
 	var lastCommittedHeight uint64
 	gapDetected := false
 	hasRows := false
-	var dbSize uint64
 
 	// resolvePending picks the variant from `pending` whose BlockHash matches
 	// next.ParentHash. With one variant (no ambiguity) or next == nil (end of
@@ -202,13 +201,6 @@ func (p *PersistentBlockCollector) Flush(ctx context.Context) error {
 	}
 
 	if err := p.db.View(ctx, func(tx kv.Tx) error {
-		if sizer, ok := tx.(interface{ DBSize() (uint64, error) }); ok {
-			var err error
-			if dbSize, err = sizer.DBSize(); err != nil {
-				return err
-			}
-		}
-
 		cursor, err := tx.Cursor(kv.Headers)
 		if err != nil {
 			return err
@@ -360,7 +352,7 @@ func (p *PersistentBlockCollector) Flush(ctx context.Context) error {
 		return nil
 	}
 
-	if dbSize <= dropDBSizeThreshold.Bytes() {
+	if p.dbSize() <= dropDBSizeThreshold {
 		if err := p.db.Update(ctx, func(tx kv.RwTx) error {
 			return tx.ClearTable(kv.Headers)
 		}); err != nil {
@@ -384,6 +376,21 @@ func (p *PersistentBlockCollector) Flush(ctx context.Context) error {
 	p.db = db
 
 	return nil
+}
+
+// dbSize returns the current database file size, or 0 when unavailable —
+// which routes cleanup to the safe clear-in-place path.
+func (p *PersistentBlockCollector) dbSize() uint64 {
+	sizer, ok := p.db.(interface{ DBSize() (uint64, error) })
+	if !ok {
+		return 0
+	}
+	size, err := sizer.DBSize()
+	if err != nil {
+		p.logger.Warn("[BlockCollector] Failed to read database size", "err", err)
+		return 0
+	}
+	return size
 }
 
 func (p *PersistentBlockCollector) decodeBlock(v []byte) (*types.Block, []byte, error) {
