@@ -20,7 +20,6 @@ import (
 	"context"
 	"encoding/binary"
 	"fmt"
-	"strings"
 	"time"
 
 	"github.com/erigontech/erigon/common/dbg"
@@ -288,7 +287,7 @@ func DownloadAndIndexSnapshotsIfNeed(s *StageState, ctx context.Context, tx kv.R
 	}
 
 	if temporal, ok := tx.(*temporal.RwTx); ok {
-		temporal.ForceReopenAggCtx() // otherwise next stages will not see just-indexed-files
+		temporal.ForceReopenUnderlyingFilesTx() // otherwise next stages will not see just-indexed-files
 	}
 
 	// It's ok to notify before tx.Commit(), because RPCDaemon does read list of files by gRPC (not by reading from db)
@@ -310,7 +309,7 @@ func DownloadAndIndexSnapshotsIfNeed(s *StageState, ctx context.Context, tx kv.R
 	}
 
 	if temporal, ok := tx.(*temporal.RwTx); ok {
-		temporal.ForceReopenAggCtx() // otherwise next stages will not see just-indexed-files
+		temporal.ForceReopenUnderlyingFilesTx() // otherwise next stages will not see just-indexed-files
 	}
 
 	// In E3, the post-execution state is in domain files. After FillDBFromSnapshots,
@@ -517,43 +516,14 @@ func retireBlockSnapshots(ctx context.Context, cfg SnapshotsCfg, logger log.Logg
 		return false, nil
 	}
 
-	// Keep at least 2 block snapshots as we do not want FrozenBlocks to be 0
 	pruneTo := cfg.prune.Blocks.PruneTo(headNumber)
-
 	if pruneTo > executionProgress {
 		return false, nil
 	}
 
-	//TODO: push-down this logic into `blockRetire`: instead of work on raw file names - we must work on dirtySegments. Instead of calling downloader.Del(file) we must call `downloader.Del(dirtySegment.Paths(snapDir)`
-	snapshotFileNames := cfg.blockReader.FrozenFiles()
-	filesDeleted := false
-	// Prune blocks snapshots if necessary
-	for _, file := range snapshotFileNames {
-		if !cfg.prune.Blocks.Enabled() || headNumber == 0 || !strings.Contains(file, "transactions") {
-			continue
-		}
-
-		// take the snapshot file name and parse it to get the "from"
-		info, _, ok := snaptype.ParseFileName(cfg.dirs.Snap, file)
-		if !ok {
-			continue
-		}
-		if info.To >= pruneTo {
-			continue
-		}
-		if info.To-info.From != snaptype.Erigon2MergeLimit {
-			continue
-		}
-		err = cfg.getSeederClient().Delete(ctx, []string{file})
-		if err != nil {
-			return filesDeleted, err
-		}
-		if err := cfg.blockReader.Snapshots().Delete(file); err != nil {
-			return filesDeleted, err
-		}
-		filesDeleted = true
-	}
-	return filesDeleted, nil
+	return cfg.blockRetire.RetireTransactionFiles(pruneTo, func(files []string) error {
+		return cfg.getSeederClient().Delete(ctx, files)
+	})
 }
 
 // readCommitmentBlockFromDB reads the commitment domain's "state" key via a

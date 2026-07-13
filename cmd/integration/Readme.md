@@ -164,13 +164,13 @@ erigon snapshots integrity --datadir /erigon-data/ --check=BorCheckpoints
 ## Compact chaindata in-place
 
 ```sh
-src=/erigon-data/chaindata && ./build/bin/mdbx_copy -c -u "$src" "${src}/mdbx.dat.tmp" && mv "${src}/mdbx.dat.tmp" "${src}/mdbx.dat" || rm -f "${src}/mdbx.dat.tmp"
+src=/erigon-data/mainnet_stepsize4_regen/chaindata/ && ./build/bin/mdbx_copy -c -u "$src" "${src}/mdbx.dat.tmp" && mv "${src}/mdbx.dat.tmp" "${src}/mdbx.dat" || rm -f "${src}/mdbx.dat.tmp"
 ```
 
 ## See tables size
  
 ```sh
-./build/bin/mdbx_stat -efa  /erigon-data/caplin/indexing | awk '
+./build/bin/mdbx_stat -efa  /erigon-data/chaindta | awk '
     BEGIN { pagesize = 4096 }
     /^  Pagesize:/ { pagesize = $2 }
     /^Status of/ { table = $3 }
