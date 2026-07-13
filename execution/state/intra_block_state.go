@@ -997,12 +997,15 @@ func (sdb *IntraBlockState) getVersionedAccount(addr accounts.Address, readStora
 	if sdb.eip8246 && readAccount == nil {
 		if destructed, sdRes, ok := sdb.versionMap.ReadSelfDestruct(addr, sdb.txIndex); ok && sdRes.Status() == MVReadResultDone && destructed {
 			destructTxIndex := sdRes.DepIdx()
+			// Only a genuine re-creation (a later CreateAccount, which writes
+			// AddressPath) skips reconstruction. Later Balance/Nonce/CodeHash
+			// writes are updates to the still-preserved account, not a revival:
+			// reconstruct it and let eip8246PreservedAccount overlay the latest
+			// balance, so e.g. an account funded after its SELFDESTRUCT still
+			// reads as existing — matching serial.
 			revived := false
-			for _, p := range []AccountPath{AddressPath, BalancePath, NoncePath, CodeHashPath} {
-				if hi, ok := sdb.versionMap.LatestTxIndex(addr, p, accounts.NilKey, sdb.txIndex-1); ok && hi > destructTxIndex {
-					revived = true
-					break
-				}
+			if hi, ok := sdb.versionMap.LatestTxIndex(addr, AddressPath, accounts.NilKey, sdb.txIndex-1); ok && hi > destructTxIndex {
+				revived = true
 			}
 			if !revived {
 				preserved, err := sdb.eip8246PreservedAccount(addr)
@@ -2002,6 +2005,11 @@ func updateAccount(eip161Enabled bool, isAura bool, stateWriter StateWriter, add
 		stateObject.data.Incarnation = 0
 		stateObject.code = accounts.Code{}
 		stateObject.deleted = false
+		// SELFDESTRUCT clears code and nonce; record those cleared values into
+		// the version map (end-of-tx, matching serial) so a later tx's
+		// EXTCODEHASH reads empty rather than the pre-SD deployed hash.
+		stateObject.db.recordWriteCodeHash(addr, accounts.EmptyCodeHash)
+		stateObject.db.recordWriteNonce(addr, 0, tracing.NonceChangeUnspecified)
 		if err := stateWriter.CreateContract(addr); err != nil {
 			return err
 		}
@@ -2096,6 +2104,19 @@ func (sdb *IntraBlockState) FinalizeTx(chainRules *chain.Rules, stateWriter Stat
 			for key := range so.dirtyStorage {
 				sdb.recordWriteStorage(addr, key, uint256.Int{})
 			}
+		}
+
+		// EIP-8246: a balance-preserving SELFDESTRUCT leaves the account alive
+		// (balance kept, code/nonce/storage cleared). The block assembler reuses
+		// one IBS across txs without Reset, so replace the destroyed object with
+		// a clean balance-only one — done after the storage/BAL cleanup above,
+		// which still needs the selfdestructed marker. Otherwise a later tx's
+		// CREATE2 at this address sees a stale selfdestructed flag and drops the
+		// preserved balance, building an invalid block.
+		if so.selfdestructed && !so.deleted {
+			preserved := accounts.NewAccount()
+			preserved.Balance = so.data.Balance
+			sdb.stateObjects[addr] = newObject(sdb, addr, &preserved, &preserved)
 		}
 
 		so.newlyCreated = false
