@@ -96,7 +96,7 @@ func ReadRabbits(out []uint64, r io.Reader) ([]uint64, error) {
 		return nil, err
 	}
 
-	if length > math.MaxInt {
+	if length > uint64(math.MaxInt) {
 		return nil, fmt.Errorf("rabbit: encoded length %d overflows int", length)
 	}
 	if uint64(cap(out)) < length {
