@@ -780,11 +780,12 @@ type Getter struct {
 	posEntries []posEntry // cached d.posDict.entries, avoids pointer chain on hot path
 	data       []byte
 	//less hot fields
-	posTables   []posTable // posArena.tables; only used for the subtable path
-	patternDict *patternTable
-	d           *Decompressor
-	fName       string
-	trace       bool
+	posTables     []posTable // posArena.tables; only used for the subtable path
+	patternDict   *patternTable
+	d             *Decompressor
+	fName         string
+	trace         bool
+	residencyGate bool
 }
 
 func (g *Getter) MadvNormal() MadvDisabler {
@@ -935,6 +936,9 @@ func (g *Getter) DataLen() int {
 func (g *Getter) Reset(offset uint64) {
 	g.dataP = offset
 	g.dataBit = 0
+	if g.residencyGate {
+		g.ensureResident(offset)
+	}
 }
 
 func (g *Getter) HasNext() bool {

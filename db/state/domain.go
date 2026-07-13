@@ -1566,7 +1566,9 @@ func (d *Domain) dataReader(f *seg.Decompressor) *seg.Reader {
 	if !strings.Contains(f.FileName(), ".kv") {
 		panic("assert: miss-use " + f.FileName())
 	}
-	return seg.NewReader(f.MakeGetter(), d.Compression)
+	g := f.MakeGetter()
+	g.EnableResidencyGate()
+	return seg.NewReader(g, d.Compression)
 }
 func (d *Domain) dataWriter(f *seg.Compressor, forceNoCompress bool) *seg.Writer {
 	if !strings.Contains(f.FileName(), ".kv") {
