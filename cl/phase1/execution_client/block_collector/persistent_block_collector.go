@@ -37,6 +37,11 @@ import (
 	"github.com/erigontech/erigon/execution/types"
 )
 
+// Flush drops the whole database directory only when the file has grown past
+// this size; smaller databases are cleared in place so chain-tip flushes don't
+// recreate the directory on every block.
+var dropDBSizeThreshold = 1 * datasize.GB
+
 // PersistentBlockCollector stores downloaded blocks to an MDBX database
 // so they survive restarts. The database is cleared after successful loading.
 type PersistentBlockCollector struct {
@@ -174,6 +179,8 @@ func (p *PersistentBlockCollector) Flush(ctx context.Context) error {
 	var pendingHeight uint64
 	var lastCommittedHeight uint64
 	gapDetected := false
+	hasRows := false
+	var dbSize uint64
 
 	// resolvePending picks the variant from `pending` whose BlockHash matches
 	// next.ParentHash. With one variant (no ambiguity) or next == nil (end of
@@ -195,6 +202,13 @@ func (p *PersistentBlockCollector) Flush(ctx context.Context) error {
 	}
 
 	if err := p.db.View(ctx, func(tx kv.Tx) error {
+		if sizer, ok := tx.(interface{ DBSize() (uint64, error) }); ok {
+			var err error
+			if dbSize, err = sizer.DBSize(); err != nil {
+				return err
+			}
+		}
+
 		cursor, err := tx.Cursor(kv.Headers)
 		if err != nil {
 			return err
@@ -205,6 +219,7 @@ func (p *PersistentBlockCollector) Flush(ctx context.Context) error {
 			if err != nil {
 				return err
 			}
+			hasRows = true
 
 			block, bal, err := p.decodeBlock(v)
 			if err != nil {
@@ -313,7 +328,7 @@ func (p *PersistentBlockCollector) Flush(ctx context.Context) error {
 		// about stopping, but skipping cleanup would leave already-inserted
 		// rows in place and the next Flush would re-read and re-insert them.
 		cutoff := max(lastCommittedHeight+1, minInsertableBlockNumber)
-		if err := p.db.Update(context.Background(), func(tx kv.RwTx) error {
+		if err := p.db.Update(ctx, func(tx kv.RwTx) error {
 			cursor, err := tx.RwCursor(kv.Headers)
 			if err != nil {
 				return err
@@ -341,7 +356,19 @@ func (p *PersistentBlockCollector) Flush(ctx context.Context) error {
 		return nil
 	}
 
-	// No gap: drop the whole DB — cheaper than walking keys.
+	if !hasRows {
+		return nil
+	}
+
+	if dbSize <= dropDBSizeThreshold.Bytes() {
+		if err := p.db.Update(ctx, func(tx kv.RwTx) error {
+			return tx.ClearTable(kv.Headers)
+		}); err != nil {
+			p.logger.Warn("[BlockCollector] Failed to clear consumed blocks", "err", err)
+		}
+		return nil
+	}
+
 	p.db.Close()
 
 	if err := dir.RemoveAll(p.persistDir); err != nil {
