@@ -74,11 +74,11 @@ func TestDiff64Effective(t *testing.T) {
 		validatorOffset := i * 121
 		newNum := i + 32
 		oldNum := i + 12
-		binary.BigEndian.PutUint64(expected[i*8:], uint64(newNum))
-		binary.BigEndian.PutUint64(new[validatorOffset+80:], uint64(newNum))
+		binary.LittleEndian.PutUint64(expected[i*8:], uint64(newNum))
+		binary.LittleEndian.PutUint64(new[validatorOffset+80:], uint64(newNum))
 		if i < len(old)/121 {
-			binary.BigEndian.PutUint64(previous[i*8:], uint64(oldNum))
-			binary.BigEndian.PutUint64(old[validatorOffset+80:], uint64(oldNum))
+			binary.LittleEndian.PutUint64(previous[i*8:], uint64(oldNum))
+			binary.LittleEndian.PutUint64(old[validatorOffset+80:], uint64(oldNum))
 		}
 	}
 
