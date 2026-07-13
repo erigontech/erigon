@@ -856,7 +856,13 @@ func (sd *SharedDomains) Close() {
 // Commit to also keep the cache warm.
 func (sd *SharedDomains) Flush(ctx context.Context, tx kv.RwTx) error {
 	defer mxFlushTook.ObserveDuration(time.Now())
-	return sd.flushMem(ctx, tx)
+	if err := sd.flushMem(ctx, tx); err != nil {
+		return err
+	}
+	if sd.branchCache != nil {
+		sd.branchCache.Clear()
+	}
+	return nil
 }
 
 func (sd *SharedDomains) flushMem(ctx context.Context, tx kv.RwTx, opts ...kv.FlushOption) error {

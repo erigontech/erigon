@@ -67,3 +67,47 @@ func TestBranchCacheCommitRefreshesAfterReadThrough(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, []byte("v2-branch-bytes"), v, "fresh SD must read the latest committed branch, not the stale read-through entry")
 }
+
+func TestBranchCacheFlushInvalidatesReadThrough(t *testing.T) {
+	stepSize := uint64(100)
+	db := newTestDb(t, stepSize)
+	ctx := t.Context()
+	logger := log.New()
+	key := []byte{0x0a, 0x0b}
+
+	write := func(val []byte, step uint64, prev []byte, readFirst bool, flush bool) {
+		rwTx, err := db.BeginTemporalRw(ctx)
+		require.NoError(t, err)
+		defer rwTx.Rollback()
+		sd, err := execctx.NewSharedDomains(ctx, rwTx, logger)
+		require.NoError(t, err)
+		defer sd.Close()
+
+		if readFirst {
+			got, _, err := sd.GetLatest(kv.CommitmentDomain, rwTx, key)
+			require.NoError(t, err)
+			require.Equal(t, prev, got)
+		}
+		require.NoError(t, sd.DomainPut(kv.CommitmentDomain, rwTx, key, val, step, prev))
+		if flush {
+			require.NoError(t, sd.Flush(ctx, rwTx))
+			require.NoError(t, rwTx.Commit())
+			return
+		}
+		require.NoError(t, sd.Commit(ctx, rwTx))
+	}
+
+	write([]byte("v1-branch-bytes"), 1, nil, false, false)
+	write([]byte("v2-branch-bytes"), 2, []byte("v1-branch-bytes"), true, true)
+
+	rwTx, err := db.BeginTemporalRw(ctx)
+	require.NoError(t, err)
+	defer rwTx.Rollback()
+	sd, err := execctx.NewSharedDomains(ctx, rwTx, logger)
+	require.NoError(t, err)
+	defer sd.Close()
+
+	v, _, err := sd.GetLatest(kv.CommitmentDomain, rwTx, key)
+	require.NoError(t, err)
+	require.Equal(t, []byte("v2-branch-bytes"), v)
+}
