@@ -618,7 +618,12 @@ func (txTask *TxTask) Execute(evm *vm.EVM,
 	// Prepare read set, write set and balanceIncrease set and send for serialisation
 	if result.Err == nil {
 		txTask.BalanceIncreaseSet = ibs.BalanceIncreaseSet()
-		if ibs.IsVersioned() {
+		// Genesis (block 0, txIndex -1) resolves `ibs` to the throwaway versioned
+		// IBS that GenesisToBlock builds, whatever the executor. Its writes reach
+		// the executor only through MakeWriteSet(stateWriter); the FinalizedWrites
+		// write-set is not applied for it, so keep genesis on the MakeWriteSet path.
+		isGenesis := txTask.TxIndex == -1 && txTask.BlockNumber() == 0
+		if ibs.IsVersioned() && !isGenesis {
 			result.TxOut = ibs.FinalizedWrites()
 		} else {
 			if err = ibs.MakeWriteSet(rules, stateWriter); err != nil {
