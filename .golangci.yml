@@ -91,7 +91,6 @@ linters:
           skipRecvDeref: true
     modernize:
       disable: # each disabled analyzer has an existing backlog; enable it once its findings are cleared
-        - any
         - atomictypes
         - forvar
         - mapsloop
@@ -107,6 +106,8 @@ linters:
         - stringscutprefix
         - testingcontext
         - waitgroupgo
+        - waitgroup
+        - fmtappendf
     govet:
       enable:
         - nilness
@@ -124,6 +125,9 @@ linters:
       - legacy
       - std-error-handling
     rules:
+      - linters:
+          - modernize
+        path: _grpc\.pb\.go
       - linters:
           - errcheck
         text: not checked

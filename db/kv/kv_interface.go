@@ -475,6 +475,18 @@ type TemporalTx interface {
 	AggTx() any
 }
 
+// TemporalFilesPin holds a consistent aggregator file snapshot so that multiple
+// read txns opened from it (BeginTemporalRo) all observe the same file
+// generation, even after newer generations are published. Concurrent readers
+// spawned from one commitment tx use this to avoid reading a domain from a file
+// generation inconsistent with the in-memory overlay that tx was built against.
+// Release with Close. A temporal tx exposes it via an optional `Pin()
+// TemporalFilesPin` method (type-asserted; not all backends can pin files).
+type TemporalFilesPin interface {
+	BeginTemporalRo(ctx context.Context) (TemporalTx, error)
+	Close()
+}
+
 // TemporalDebugTx - set of slow low-level funcs for debug purposes
 type TemporalDebugTx interface {
 	RangeLatest(domain Domain, from, to []byte, limit int) (stream.KV, error)
