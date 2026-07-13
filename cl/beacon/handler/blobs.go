@@ -193,9 +193,9 @@ func (a *ApiHandler) GetEthV1DebugBeaconDataColumnSidecars(w http.ResponseWriter
 	version := a.ethClock.StateVersionByEpoch(*slot / a.beaconChainCfg.SlotsPerEpoch)
 	return beaconhttp.NewBeaconResponse(dataColumnSidecars).
 		WithHeader("Eth-Consensus-Version", version.String()).
+		WithFinalized(canonicalRoot == blockRoot && *slot <= a.forkchoiceStore.FinalizedSlot()).
 		WithVersion(version).
-		WithOptimistic(a.forkchoiceStore.IsRootOptimistic(blockRoot)).
-		WithFinalized(canonicalRoot == blockRoot && *slot <= a.forkchoiceStore.FinalizedSlot()), nil
+		WithOptimistic(a.forkchoiceStore.IsRootOptimistic(blockRoot)), nil
 }
 
 func (a *ApiHandler) GetEthV1BeaconBlobs(w http.ResponseWriter, r *http.Request) (*beaconhttp.BeaconResponse, error) {
@@ -288,8 +288,8 @@ func (a *ApiHandler) GetEthV1BeaconBlobs(w http.ResponseWriter, r *http.Request)
 	}
 	if !found {
 		return beaconhttp.NewBeaconResponse(blobs).
-			WithOptimistic(a.forkchoiceStore.IsRootOptimistic(blockRoot)).
-			WithFinalized(canonicalRoot == blockRoot && *slot <= a.forkchoiceStore.FinalizedSlot()), nil
+			WithFinalized(canonicalRoot == blockRoot && *slot <= a.forkchoiceStore.FinalizedSlot()).
+			WithOptimistic(a.forkchoiceStore.IsRootOptimistic(blockRoot)), nil
 	}
 	for _, index := range indicies {
 		if index >= uint64(len(blobSidecars)) {
@@ -300,6 +300,6 @@ func (a *ApiHandler) GetEthV1BeaconBlobs(w http.ResponseWriter, r *http.Request)
 	}
 
 	return beaconhttp.NewBeaconResponse(blobs).
-		WithOptimistic(a.forkchoiceStore.IsRootOptimistic(blockRoot)).
-		WithFinalized(canonicalRoot == blockRoot && *slot <= a.forkchoiceStore.FinalizedSlot()), nil
+		WithFinalized(canonicalRoot == blockRoot && *slot <= a.forkchoiceStore.FinalizedSlot()).
+		WithOptimistic(a.forkchoiceStore.IsRootOptimistic(blockRoot)), nil
 }

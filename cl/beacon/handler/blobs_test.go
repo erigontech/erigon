@@ -30,6 +30,7 @@ import (
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/persistence/beacon_indicies"
+	forkchoicemock "github.com/erigontech/erigon/cl/phase1/forkchoice/mock_services"
 	"github.com/erigontech/erigon/cl/utils"
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/log/v3"
@@ -51,6 +52,7 @@ func (r frozenBlobSnapshotReader) ReadBlobSidecars(slot uint64) ([]*cltypes.Blob
 
 type blobsTestFixture struct {
 	handler       *ApiHandler
+	fcu           *forkchoicemock.ForkChoiceStorageMock
 	slot          uint64
 	versionedHash common.Hash
 }
@@ -136,7 +138,7 @@ func requestBeaconBlobs(t *testing.T, baseURL string, f blobsTestFixture) *http.
 func setupBlobsTest(t *testing.T) blobsTestFixture {
 	t.Helper()
 
-	db, blocks, _, _, _, handler, _, _, _, _ := setupTestingHandler(t, clparams.ElectraVersion, log.Root(), false)
+	db, blocks, _, _, _, handler, _, _, fcu, _ := setupTestingHandler(t, clparams.ElectraVersion, log.Root(), false)
 	block := blocks[0]
 	slot := block.Block.Slot
 
@@ -158,6 +160,7 @@ func setupBlobsTest(t *testing.T) blobsTestFixture {
 
 	return blobsTestFixture{
 		handler:       handler,
+		fcu:           fcu,
 		slot:          slot,
 		versionedHash: versionedHash,
 	}
@@ -173,9 +176,13 @@ type blobSidecarsEnvelope struct {
 
 // TestBlobSidecarsResponseEnvelope verifies that GET /eth/v1/beacon/blob_sidecars/{block_id}
 // returns the required envelope fields (version, execution_optimistic, finalized) per the
-// Beacon API specification. This is a regression test for the missing envelope fields bug.
+// Beacon API specification. This test checks the non-finalized and optimistic state.
 func TestBlobSidecarsResponseEnvelope(t *testing.T) {
 	f := setupBlobsTest(t)
+
+	// Set up forkchoice mock to simulate non-finalized and optimistic block.
+	f.fcu.IsRootOptimisticVal = true
+	f.fcu.FinalizedSlotVal = f.slot - 1
 
 	// Set up frozen snapshots with actual blob data.
 	f.handler.caplinSnapshots = frozenBlobSnapshotReader{
@@ -204,13 +211,18 @@ func TestBlobSidecarsResponseEnvelope(t *testing.T) {
 
 	// Verify values.
 	require.Equal(t, "electra", *envelope.Version)
-	require.False(t, *envelope.ExecutionOptimistic)
+	require.True(t, *envelope.ExecutionOptimistic, "execution_optimistic must be true")
+	require.False(t, *envelope.Finalized, "finalized must be false")
 }
 
 // TestBlobSidecarsEmptyResponseEnvelope verifies that even when no blobs are found,
-// the response envelope still includes all required fields.
+// the response envelope still includes all required fields. This test checks the finalized and non-optimistic state.
 func TestBlobSidecarsEmptyResponseEnvelope(t *testing.T) {
 	f := setupBlobsTest(t)
+
+	// Set up forkchoice mock to simulate finalized and non-optimistic block.
+	f.fcu.IsRootOptimisticVal = false
+	f.fcu.FinalizedSlotVal = f.slot + 1
 
 	// No snapshots, no blob storage data for this block → empty response.
 	f.handler.caplinSnapshots = frozenBlobSnapshotReader{frozenBlobsExclusive: f.slot + 1}
@@ -232,6 +244,8 @@ func TestBlobSidecarsEmptyResponseEnvelope(t *testing.T) {
 	require.NotNil(t, envelope.Finalized, "empty response must include 'finalized'")
 	require.NotNil(t, envelope.Data, "empty response must include 'data'")
 
+	// Verify values.
 	require.Equal(t, "electra", *envelope.Version)
-	require.False(t, *envelope.ExecutionOptimistic)
+	require.False(t, *envelope.ExecutionOptimistic, "execution_optimistic must be false")
+	require.True(t, *envelope.Finalized, "finalized must be true")
 }
