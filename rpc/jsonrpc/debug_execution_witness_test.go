@@ -29,6 +29,7 @@ import (
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/kv/prune"
 	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/db/state/statecfg"
 	"github.com/erigontech/erigon/execution/commitment/commitmentdb"
@@ -599,6 +600,17 @@ func TestExecutionWitnessCacheOnlyServe(t *testing.T) {
 
 		_, err = api.ExecutionWitness(ctx, byHash, nil)
 		require.ErrorIs(t, err, errWitnessReorgedAway)
+
+		// requireCanonical: true must still land in the reorged-away bucket, not the generic
+		// out-of-window one: the serve path owns the canonical check for the orphan signal.
+		byHashRequireCanonical := rpc.BlockNumberOrHash{BlockHash: &forkHash, RequireCanonical: true}
+		result, hit, reorgedAway = api.serveFromWitnessCache(ctx, tx, byHashRequireCanonical, witnessModeLegacy)
+		require.False(t, hit)
+		require.True(t, reorgedAway, "requireCanonical must not collapse an orphan into a plain miss")
+		require.Nil(t, result)
+
+		_, err = api.ExecutionWitness(ctx, byHashRequireCanonical, nil)
+		require.ErrorIs(t, err, errWitnessReorgedAway)
 	})
 }
 
@@ -611,6 +623,27 @@ func TestGetWitnessHeadCaptureOutOfWindow(t *testing.T) {
 
 	base := newBaseApiForTest(m)
 	base.witnessCache = newWitnessResultCache(96, 0, true /*headCapture*/, true /*cacheOnly*/)
+	api := newEthApiForTest(base, m.DB, nil, nil)
+
+	bn := rpc.BlockNumber(1)
+	_, err := api.GetWitness(ctx, rpc.BlockNumberOrHash{BlockNumber: &bn})
+	require.ErrorIs(t, err, errWitnessOutOfWindow)
+}
+
+// TestGetWitnessHeadCaptureOutOfWindowWhenPruned pins that eth_getWitness on a head-capture
+// minimal node returns the typed out-of-window error even for a block below the state-history
+// prune horizon: the head-capture check must precede the prune-history gate so an old request
+// gets one typed signal instead of a prune-history error.
+func TestGetWitnessHeadCaptureOutOfWindowWhenPruned(t *testing.T) {
+	m, _, _ := rpcdaemontest.CreateTestExecModule(t)
+	ctx := context.Background()
+
+	base := newBaseApiForTest(m)
+	base.witnessCache = newWitnessResultCache(96, 0, true /*headCapture*/, true /*cacheOnly*/)
+	// A history-distance prune mode that leaves block 1 below the prune horizon, so the
+	// prune-history gate would fire first if it were still ahead of the head-capture check.
+	mode := prune.Mode{Initialised: true, History: prune.Distance(1)}
+	base._pruneMode.Store(&mode)
 	api := newEthApiForTest(base, m.DB, nil, nil)
 
 	bn := rpc.BlockNumber(1)

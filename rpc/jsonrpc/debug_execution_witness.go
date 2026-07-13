@@ -777,7 +777,13 @@ func (api *DebugAPIImpl) serveFromWitnessCache(ctx context.Context, tx kv.Tempor
 	if api.witnessCache == nil || mode != witnessModeLegacy {
 		return nil, false, false
 	}
-	num, hash, _, err := rpchelper.GetBlockNumber(ctx, blockNrOrHash, tx, api._blockReader, api.filters)
+	// Resolve without requiring canonical even when the request set requireCanonical: this
+	// function owns the by-hash canonical check below so it can flag a reorged-out orphan
+	// distinctly. A caller's requireCanonical would instead error out here, collapsing the
+	// orphan into a plain miss and losing the reorged-away signal.
+	resolve := blockNrOrHash
+	resolve.RequireCanonical = false
+	num, hash, _, err := rpchelper.GetBlockNumber(ctx, resolve, tx, api._blockReader, api.filters)
 	if err != nil {
 		witnessCacheMissCounter.Inc()
 		return nil, false, false

@@ -93,23 +93,55 @@ func TestProcessHeaderBatch(t *testing.T) {
 func TestWitnessCacheShouldBuild(t *testing.T) {
 	cases := []struct {
 		name          string
-		num           uint64
 		single        bool
-		freshest      uint64
 		alreadyCached bool
 		want          bool
 	}{
-		{"clean single advance", 10, true, 10, false, true},
-		{"already cached", 10, true, 10, true, false},
-		{"multi-header catch-up batch", 10, false, 10, false, false},
-		{"superseded by newer tip", 10, true, 11, false, false},
-		{"reorged head, uncached hash rebuilds", 8, true, 8, false, true},
+		{"clean single advance", true, false, true},
+		{"already cached", true, true, false},
+		{"multi-header catch-up batch", false, false, false},
+		{"reorged head, uncached hash rebuilds", true, false, true},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			require.Equal(t, tc.want, shouldBuild(tc.num, tc.single, tc.freshest, tc.alreadyCached))
+			require.Equal(t, tc.want, shouldBuild(tc.single, tc.alreadyCached))
 		})
 	}
+}
+
+// TestCoalesceTip drives the header-batch coalescer. A burst of catch-up headers must
+// collapse to the tip, and — the head-capture cache-only case — a within-burst reorg to a
+// lower canonical head must leave the coalesced tip at the new lower height, not stay pinned
+// to the higher block that was superseded.
+func TestCoalesceTip(t *testing.T) {
+	t.Run("empty channel keeps the initial header", func(t *testing.T) {
+		ch := make(chan [][]byte)
+		newest, single := coalesceTip(headerRef{num: 5}, true, ch)
+		require.Equal(t, uint64(5), newest.num)
+		require.True(t, single)
+	})
+
+	t.Run("catch-up burst collapses to the highest tip", func(t *testing.T) {
+		h6, _ := encodeSyntheticHeader(t, 6)
+		h7, hash7 := encodeSyntheticHeader(t, 7)
+		ch := make(chan [][]byte, 4)
+		ch <- [][]byte{h6}
+		ch <- [][]byte{h7}
+		newest, single := coalesceTip(headerRef{num: 5}, true, ch)
+		require.Equal(t, uint64(7), newest.num, "coalesce advances to the freshest queued tip")
+		require.Equal(t, hash7, newest.hash)
+		require.True(t, single)
+	})
+
+	t.Run("within-burst reorg to a lower tip ends at the new tip", func(t *testing.T) {
+		h6, hash6 := encodeSyntheticHeader(t, 6)
+		ch := make(chan [][]byte, 4)
+		ch <- [][]byte{h6}
+		newest, single := coalesceTip(headerRef{num: 7}, true, ch)
+		require.Equal(t, uint64(6), newest.num, "the current tip after a reorg to a lower height is 6, not the superseded 7")
+		require.Equal(t, hash6, newest.hash)
+		require.True(t, single)
+	})
 }
 
 func TestWitnessCacheDecideCommittedHead(t *testing.T) {

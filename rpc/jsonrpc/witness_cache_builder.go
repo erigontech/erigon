@@ -63,12 +63,13 @@ func decideCommittedHead(committedHead, num uint64, canonicalHash, wantHash comm
 	return headBuild
 }
 
-// shouldBuild gates eager building: a single-header advance to the freshest header in the
-// batch whose hash isn't cached yet. Keying on the cached hash rather than a high-water
-// block number lets a reorged head — a new hash at an already-built height — still be
-// rebuilt. Multi-header (catch-up) batches and a superseded tip fall through to on-demand.
-func shouldBuild(num uint64, singleHeaderBatch bool, freshest uint64, alreadyCached bool) bool {
-	return singleHeaderBatch && num == freshest && !alreadyCached
+// shouldBuild gates eager building: a single-header advance to the coalesced tip whose hash
+// isn't cached yet. Keying on the cached hash rather than a high-water block number lets a
+// reorged head — a new hash at an already-built height, or a lower canonical head after a
+// within-burst reorg — still be built. Multi-header (catch-up) batches fall through to
+// on-demand.
+func shouldBuild(singleHeaderBatch, alreadyCached bool) bool {
+	return singleHeaderBatch && !alreadyCached
 }
 
 // waitCommittedHead blocks until the committed head reaches num, then returns the open
@@ -255,26 +256,8 @@ func RunWitnessCacheBuilder(ctx context.Context, dbg *DebugAPIImpl, headerCh <-c
 			if !valid {
 				continue
 			}
-			// Coalesce: drain queued batches to the freshest tip, then build only that
-			// newest header. freshest is per-burst so a reorg to a lower tip is not masked.
-			freshest := newest.num
-			for draining := true; draining; {
-				select {
-				case b2, open := <-headerCh:
-					if !open {
-						draining = false
-						break
-					}
-					if n2, s2, v2 := processHeaderBatch(b2); v2 {
-						witnessCacheCoalesceDropCounter.Inc()
-						newest, single = n2, s2
-						freshest = max(freshest, n2.num)
-					}
-				default:
-					draining = false
-				}
-			}
-			if !shouldBuild(newest.num, single, freshest, dbg.witnessCache.Contains(newest.hash)) {
+			newest, single = coalesceTip(newest, single, headerCh)
+			if !shouldBuild(single, dbg.witnessCache.Contains(newest.hash)) {
 				continue
 			}
 			if headCapture {
@@ -289,6 +272,31 @@ func RunWitnessCacheBuilder(ctx context.Context, dbg *DebugAPIImpl, headerCh <-c
 			}
 		}
 	}
+}
+
+// coalesceTip drains any already-queued header batches without blocking and returns the
+// most recently delivered canonical head plus whether that final batch was a single-header
+// advance. Starting from an already-decoded (newest, single), it folds in every queued
+// batch so a burst of catch-up headers builds only the tip; a within-burst reorg to a lower
+// height ends with newest at the new (lower) tip, which the committed-head canonical gate
+// validates downstream.
+func coalesceTip(newest headerRef, single bool, headerCh <-chan [][]byte) (headerRef, bool) {
+	for draining := true; draining; {
+		select {
+		case b2, open := <-headerCh:
+			if !open {
+				draining = false
+				break
+			}
+			if n2, s2, v2 := processHeaderBatch(b2); v2 {
+				witnessCacheCoalesceDropCounter.Inc()
+				newest, single = n2, s2
+			}
+		default:
+			draining = false
+		}
+	}
+	return newest, single
 }
 
 // headerRef is a canonical block's number and hash, decoded from a header batch.
