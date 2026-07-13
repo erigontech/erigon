@@ -3209,6 +3209,9 @@ func (be *blockExecutor) scheduleExecution(ctx context.Context, pe *parallelExec
 	// now (gate-rejected retry, or fresh with no free slot) are held aside and
 	// re-added after the loop so they aren't re-taken in the same call.
 	dispatch := func() (dispatched int) {
+		if be.execTasks.minPending() < 0 {
+			return 0
+		}
 		budget := pe.in.Capacity() - pe.in.NewTasksLen()
 		var holdBack sort.IntSlice
 		for be.execTasks.minPending() >= 0 {
