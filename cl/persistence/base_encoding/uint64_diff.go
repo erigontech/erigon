@@ -134,9 +134,11 @@ const (
 
 // AppendEffectiveBalances appends each validator's 8-byte effective balance, tightly packed, to dst.
 func AppendEffectiveBalances(dst, validatorSetSSZ []byte) []byte {
-	dst = slices.Grow(dst, len(validatorSetSSZ)/validatorSSZSize*8)
-	for i := effectiveBalanceOffset; i+8 <= len(validatorSetSSZ); i += validatorSSZSize {
-		dst = append(dst, validatorSetSSZ[i:i+8]...)
+	validators := len(validatorSetSSZ) / validatorSSZSize
+	dst = slices.Grow(dst, validators*8)
+	for i := 0; i < validators; i++ {
+		off := i*validatorSSZSize + effectiveBalanceOffset
+		dst = append(dst, validatorSetSSZ[off:off+8]...)
 	}
 	return dst
 }

@@ -114,6 +114,16 @@ func TestAppendEffectiveBalances(t *testing.T) {
 
 		require.Equal(t, expected, AppendEffectiveBalances(nil, ssz))
 	}
+
+	// a truncated trailing record (past the effective-balance offset) must be ignored
+	twoValidators := make([]byte, 2*vSize)
+	binary.LittleEndian.PutUint64(twoValidators[80:], 111)
+	binary.LittleEndian.PutUint64(twoValidators[vSize+80:], 222)
+	withPartialTail := append(twoValidators, make([]byte, 90)...)
+	expected := make([]byte, 16)
+	binary.LittleEndian.PutUint64(expected[0:], 111)
+	binary.LittleEndian.PutUint64(expected[8:], 222)
+	require.Equal(t, expected, AppendEffectiveBalances(nil, withPartialTail))
 }
 
 func TestDiffValidators(t *testing.T) {
