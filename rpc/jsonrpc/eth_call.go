@@ -671,6 +671,11 @@ func (api *BaseAPI) getWitness(ctx context.Context, db kv.TemporalRoDB, blockNrO
 		return nil, err
 	}
 	if !commitmentHistoryEnabled {
+		// A head-capture minimal node keeps no commitment history and cannot build this
+		// RLP/uncached witness on demand; report out-of-window rather than a hard gate.
+		if api.witnessCache != nil && api.witnessCache.HeadCapture() {
+			return nil, errWitnessOutOfWindow
+		}
 		return nil, fmt.Errorf("eth_getWitness requires commitment history: restart the node with --prune.experimental.include-commitment-history")
 	}
 

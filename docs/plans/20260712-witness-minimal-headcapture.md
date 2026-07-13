@@ -150,11 +150,11 @@ Benefit: minimal nodes serve recent-block witnesses with zero commitment-history
 - Modify: `rpc/jsonrpc/eth_call.go`
 - Modify: `rpc/jsonrpc/debug_execution_witness_test.go`
 
-- [ ] add a typed out-of-window error (two buckets: out-of-window vs reorged-away) returned by `ExecutionWitness` (`:722`) when `cacheOnly` is set and the cache misses — never fall through to the history recompute
-- [ ] in `serveFromWitnessCache` (`:758`), require canonical on by-hash resolves (re-check `ReadCanonicalHash(num)==hash` against the serve tx before `Get`) so a still-resident orphan is not served as canonical; by-number serving unchanged
-- [ ] `eth_getWitness` (`eth_call.go:648`): in head-capture mode return the typed out-of-window error (it is RLP/uncached and cannot recompute without history) rather than the current hard gate; leave the history-node behavior unchanged
-- [ ] write tests: cache hit → served; cache miss in cache-only mode → out-of-window (no recompute); by-hash orphan → out-of-window; by-number → freshest canonical; full/archive mode still recomputes on miss (backward compat); eth_getWitness on head-capture → out-of-window
-- [ ] run tests - must pass before next task
+- [x] add a typed out-of-window error (two buckets: out-of-window vs reorged-away) returned by `ExecutionWitness` (`:722`) when `cacheOnly` is set and the cache misses — never fall through to the history recompute (`errWitnessOutOfWindow`/`errWitnessReorgedAway`)
+- [x] in `serveFromWitnessCache` (`:758`), require canonical on by-hash resolves (re-check `CanonicalHash(num)==hash` against the serve tx before `Get`) so a still-resident orphan is not served as canonical; by-number serving unchanged (extra `reorgedAway` return carries the orphan bucket to the caller)
+- [x] `eth_getWitness` (`eth_call.go:648`): in head-capture mode return the typed out-of-window error (it is RLP/uncached and cannot recompute without history) rather than the current hard gate; leave the history-node behavior unchanged (`witnessCache` moved to `BaseAPI` so the eth serve path shares the single mode source of truth)
+- [x] write tests: cache hit → served; cache miss in cache-only mode → out-of-window (no recompute); by-hash orphan → out-of-window; by-number → freshest canonical; full/archive mode still recomputes on miss (backward compat, `TestExecutionWitnessCacheServe`); eth_getWitness on head-capture → out-of-window (`TestExecutionWitnessCacheOnlyServe`, `TestGetWitnessHeadCaptureOutOfWindow`)
+- [x] run tests - must pass before next task
 
 ### Task 8: Reorg, fail-closed, and mmap-pin race tests
 

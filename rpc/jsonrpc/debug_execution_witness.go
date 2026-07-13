@@ -731,8 +731,19 @@ func (api *DebugAPIImpl) ExecutionWitness(ctx context.Context, blockNrOrHash rpc
 	}
 	defer tx.Rollback()
 
-	if cached, ok := api.serveFromWitnessCache(ctx, tx, blockNrOrHash, resolvedMode); ok {
+	cached, ok, reorgedAway := api.serveFromWitnessCache(ctx, tx, blockNrOrHash, resolvedMode)
+	if ok {
 		return cached, nil
+	}
+
+	// A cache-only node (head-capture minimal: no commitment history) never recomputes
+	// from history — a miss is out-of-window, and a by-hash request for a reorged-out
+	// block is reported distinctly so callers can tell the two apart.
+	if api.witnessCache != nil && api.witnessCache.CacheOnly() {
+		if reorgedAway {
+			return nil, errWitnessReorgedAway
+		}
+		return nil, errWitnessOutOfWindow
 	}
 
 	commitmentHistoryEnabled, _, err := rawdb.ReadDBCommitmentHistoryEnabled(tx)
@@ -740,12 +751,6 @@ func (api *DebugAPIImpl) ExecutionWitness(ctx context.Context, blockNrOrHash rpc
 		return nil, err
 	}
 	if !commitmentHistoryEnabled {
-		// A head-capture minimal node keeps no commitment history and serves
-		// cache-only: a miss is out-of-window, never an on-demand recompute
-		// (the typed error/reorg buckets land in the cache-only serve path).
-		if api.witnessCache != nil && api.witnessCache.HeadCapture() {
-			return nil, fmt.Errorf("debug_executionWitness: block not in head-capture cache window")
-		}
 		return nil, fmt.Errorf("debug_executionWitness requires commitment history: restart the node with --prune.experimental.include-commitment-history")
 	}
 
@@ -759,16 +764,33 @@ func (api *DebugAPIImpl) ExecutionWitness(ctx context.Context, blockNrOrHash rpc
 
 // serveFromWitnessCache returns a cached legacy-mode witness when the eager cache
 // is enabled and holds an exact (num, hash) match for the requested block. A nil
-// cache, a canonical request, an unresolvable block, or a miss all report ok=false
-// so the caller falls through to the unchanged on-demand build.
-func (api *DebugAPIImpl) serveFromWitnessCache(ctx context.Context, tx kv.TemporalTx, blockNrOrHash rpc.BlockNumberOrHash, mode witnessMode) (*ExecutionWitnessResult, bool) {
+// cache, a canonical request, an unresolvable block, or a miss all report hit=false
+// so the caller falls through to the unchanged on-demand build (or, in cache-only mode,
+// to the typed out-of-window error). A by-hash request whose block number is no longer
+// canonical never serves its still-resident entry; reorgedAway then flags the distinct
+// orphan case so the cache-only caller can report it separately from a plain miss.
+func (api *DebugAPIImpl) serveFromWitnessCache(ctx context.Context, tx kv.TemporalTx, blockNrOrHash rpc.BlockNumberOrHash, mode witnessMode) (result *ExecutionWitnessResult, hit, reorgedAway bool) {
 	if api.witnessCache == nil || mode != witnessModeLegacy {
-		return nil, false
+		return nil, false, false
 	}
-	_, hash, _, err := rpchelper.GetBlockNumber(ctx, blockNrOrHash, tx, api._blockReader, api.filters)
+	num, hash, _, err := rpchelper.GetBlockNumber(ctx, blockNrOrHash, tx, api._blockReader, api.filters)
 	if err != nil {
 		witnessCacheMissCounter.Inc()
-		return nil, false
+		return nil, false, false
+	}
+	// A by-hash request can resolve to a still-resident but reorged-out block; require the
+	// hash to be canonical at its height before serving so an orphan is never returned as
+	// canonical. By-number resolves are canonical by construction.
+	if _, byHash := blockNrOrHash.Hash(); byHash {
+		canonical, canonicalOK, err := api._blockReader.CanonicalHash(ctx, tx, num)
+		if err != nil {
+			witnessCacheMissCounter.Inc()
+			return nil, false, false
+		}
+		if canonical != hash {
+			witnessCacheMissCounter.Inc()
+			return nil, false, canonicalOK // a canonical hash exists but differs → orphan
+		}
 	}
 	result, ok := api.witnessCache.Get(hash)
 	if ok {
@@ -776,13 +798,23 @@ func (api *DebugAPIImpl) serveFromWitnessCache(ctx context.Context, tx kv.Tempor
 	} else {
 		witnessCacheMissCounter.Inc()
 	}
-	return result, ok
+	return result, ok, false
 }
 
 // errWitnessVerifyFailed wraps a stateless-verification failure from the shared build
 // seam so the eager cache builder can classify build_fail_verify separately from other
 // build errors; the on-demand handler surfaces it as a normal error.
 var errWitnessVerifyFailed = errors.New("witness stateless verification failed")
+
+// Cache-only serving (head-capture minimal node) never recomputes from history, so a
+// serve miss returns one of these typed errors instead of falling through to a build.
+// errWitnessOutOfWindow covers a block that was never cached, aged out, or is ahead of
+// the tip; errWitnessReorgedAway is the distinct case of a by-hash request whose block
+// number is no longer canonical (the hash was reorged out).
+var (
+	errWitnessOutOfWindow = errors.New("debug_executionWitness: requested block is outside the head-capture cache window")
+	errWitnessReorgedAway = errors.New("debug_executionWitness: requested block hash was reorged away and is no longer canonical")
+)
 
 // headCaptureSource carries the pinned-parent commitment plane for a minimal-node
 // witness build: pinnedParentTx's commitment-latest is parent(B) commitment, read
