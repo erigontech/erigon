@@ -53,7 +53,6 @@ import (
 	"github.com/erigontech/erigon/db/snapshotsync/blocksnapshots"
 	"github.com/erigontech/erigon/db/snaptype"
 	"github.com/erigontech/erigon/db/snaptype2"
-	"github.com/erigontech/erigon/diagnostics/metrics"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/rlp"
 	"github.com/erigontech/erigon/execution/stagedsync/stages"
@@ -337,8 +336,6 @@ func (br *BlockRetire) MergeBlocks(
 	return
 }
 
-var mxPruneTookBor = metrics.GetOrCreateSummary(`prune_seconds{type="bor"}`)
-
 func (br *BlockRetire) PruneAncientBlocks(tx kv.RwTx, limit int, timeout time.Duration) (deleted int, err error) {
 	if br.blockReader.FreezingCfg().KeepBlocks {
 		return deleted, nil
@@ -362,8 +359,6 @@ func (br *BlockRetire) PruneAncientBlocks(tx kv.RwTx, limit int, timeout time.Du
 	if br.chainConfig.Bor != nil {
 		if canDeleteTo := CanDeleteTo(currentProgress, br.blockReader.FrozenBorBlocks(true)); canDeleteTo > 0 {
 			deletedBorBlocks, err = func() (int, error) {
-				defer mxPruneTookBor.ObserveDuration(time.Now())
-
 				return bordb.PruneHeimdall(context.Background(),
 					br.heimdallStore, br.bridgeStore, nil, canDeleteTo, limit)
 			}()
