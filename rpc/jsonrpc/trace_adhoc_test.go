@@ -320,7 +320,7 @@ func TestReplayTransaction(t *testing.T) {
 	m, _, _ := rpcdaemontest.CreateTestExecModule(t)
 	api := NewTraceAPI(newBaseApiForTest(m), m.OverlayDB(), &httpcfg.HttpCfg{})
 	var txnHash common.Hash
-	if err := m.DB.View(context.Background(), func(tx kv.Tx) error {
+	if err := m.OverlayDB().View(context.Background(), func(tx kv.Tx) error {
 		b, err := m.BlockReader.BlockByNumber(m.Ctx, tx, 6)
 		if err != nil {
 			return err

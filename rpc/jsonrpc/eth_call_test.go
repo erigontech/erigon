@@ -725,7 +725,7 @@ func chainWithDeployedContractAndConfig(t *testing.T, cfg *chain.Config) (*execm
 	_, fillerPublicKeys, err := generatePseudoRandomECDSAKeyPairs(rng, nFillerAccounts)
 	require.NoError(t, err)
 
-	db := m.DB
+	db := m.OverlayDB()
 
 	var contractAddr common.Address
 
