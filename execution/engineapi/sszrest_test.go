@@ -41,9 +41,12 @@ func newTestEngineServer(cfg *chain.Config, consuming bool) *EngineServer {
 	return NewEngineServer(log.New(), cfg, nil, nil, false, true, false, consuming, nil, nil, 0, 0)
 }
 
-func newSSZRequest(method, path string, body []byte) *http.Request {
+func newSSZRequest(method, path, fork string, body []byte) *http.Request {
 	req := httptest.NewRequest(method, path, bytes.NewReader(body))
 	req.Header.Set("Content-Type", sszRestContentType)
+	if fork != "" {
+		req.Header.Set("Eth-Execution-Version", fork)
+	}
 	return req
 }
 
@@ -537,7 +540,7 @@ func TestSSZRESTPayloadStatusDecodeResetsOptionals(t *testing.T) {
 
 func TestSSZRESTCapabilitiesRoute(t *testing.T) {
 	srv := newTestEngineServer(allForksConfig(), false)
-	req := httptest.NewRequest(http.MethodGet, "/engine/v2/capabilities", nil)
+	req := httptest.NewRequest(http.MethodGet, "/engine/v1/capabilities", nil)
 	rec := httptest.NewRecorder()
 	srv.SSZRESTHandler().ServeHTTP(rec, req)
 
@@ -564,7 +567,7 @@ func TestSSZRESTCapabilitiesRoute(t *testing.T) {
 
 func TestSSZRESTIdentityRoute(t *testing.T) {
 	srv := newTestEngineServer(&chain.Config{}, false)
-	req := httptest.NewRequest(http.MethodGet, "/engine/v2/identity", nil)
+	req := httptest.NewRequest(http.MethodGet, "/engine/v1/identity", nil)
 	req.Header.Set("X-Engine-Client-Version", "LH/v9.9.9")
 	rec := httptest.NewRecorder()
 	srv.SSZRESTHandler().ServeHTTP(rec, req)
@@ -577,31 +580,44 @@ func TestSSZRESTIdentityRoute(t *testing.T) {
 	require.Equal(t, "EG", versions[0].Code)
 }
 
+// Unscoped endpoints ignore Eth-Execution-Version, even a bogus value, per the spec.
+func TestSSZRESTUnscopedIgnoreForkHeader(t *testing.T) {
+	srv := newTestEngineServer(allForksConfig(), false)
+	for _, path := range []string{"/engine/v1/capabilities", "/engine/v1/identity"} {
+		req := httptest.NewRequest(http.MethodGet, path, nil)
+		req.Header.Set("Eth-Execution-Version", "not-a-fork")
+		rec := httptest.NewRecorder()
+		srv.SSZRESTHandler().ServeHTTP(rec, req)
+		require.Equal(t, http.StatusOK, rec.Code, path)
+		require.Equal(t, "application/json", rec.Header().Get("Content-Type"), path)
+	}
+}
+
 func TestSSZRESTRoutingErrors(t *testing.T) {
 	srv := newTestEngineServer(allForksConfig(), false)
 	for _, tc := range []struct {
 		name        string
 		method      string
 		path        string
+		fork        string
 		contentType string
 		code        int
 		problem     string
 	}{
-		{"legacy 764 payloads endpoint", http.MethodPost, "/engine/v1/payloads", sszRestContentType, http.StatusNotFound, problemMethodNotFound},
-		{"legacy 764 forkchoice endpoint", http.MethodPost, "/engine/v1/forkchoice", sszRestContentType, http.StatusNotFound, problemMethodNotFound},
-		{"legacy 764 capabilities endpoint", http.MethodPost, "/engine/v1/capabilities", sszRestContentType, http.StatusNotFound, problemMethodNotFound},
-		{"unknown fork", http.MethodPost, "/engine/v2/foobar/payloads", sszRestContentType, http.StatusBadRequest, problemUnsupportedFork},
-		{"trailing slash", http.MethodPost, "/engine/v2/cancun/payloads/", sszRestContentType, http.StatusNotFound, problemMethodNotFound},
-		{"method mismatch on capabilities", http.MethodPost, "/engine/v2/capabilities", sszRestContentType, http.StatusNotFound, problemMethodNotFound},
-		{"wrong content type", http.MethodPost, "/engine/v2/cancun/payloads", "application/json", http.StatusUnsupportedMediaType, problemUnsupportedMediaType},
-		{"bad ssz body", http.MethodPost, "/engine/v2/cancun/payloads", sszRestContentType, http.StatusBadRequest, problemSSZDecodeError},
-		{"bad payload id", http.MethodGet, "/engine/v2/cancun/payloads/not-an-id", "", http.StatusBadRequest, problemInvalidRequest},
-		{"bodies range missing params", http.MethodGet, "/engine/v2/cancun/bodies", "", http.StatusBadRequest, problemInvalidRequest},
-		{"bodies range zero count", http.MethodGet, "/engine/v2/cancun/bodies?from=1&count=0", "", http.StatusUnprocessableEntity, problemInvalidBody},
-		{"bodies range too large", http.MethodGet, "/engine/v2/cancun/bodies?from=1&count=33", "", http.StatusRequestEntityTooLarge, problemRequestTooLarge},
-		{"bodies hash too many", http.MethodPost, "/engine/v2/cancun/bodies/hash", sszRestContentType, http.StatusRequestEntityTooLarge, problemRequestTooLarge},
-		{"blobs unknown revision", http.MethodPost, "/engine/v2/blobs/v9", sszRestContentType, http.StatusNotFound, problemMethodNotFound},
-		{"blobs too many hashes", http.MethodPost, "/engine/v2/blobs/v1", sszRestContentType, http.StatusRequestEntityTooLarge, problemRequestTooLarge},
+		{"unknown top-level endpoint", http.MethodPost, "/engine/v1/foobar", "cancun", sszRestContentType, http.StatusNotFound, problemMethodNotFound},
+		{"unknown fork header", http.MethodPost, "/engine/v1/payloads", "foobar", sszRestContentType, http.StatusBadRequest, problemUnsupportedFork},
+		{"missing fork header", http.MethodPost, "/engine/v1/payloads", "", sszRestContentType, http.StatusBadRequest, problemUnsupportedFork},
+		{"trailing slash", http.MethodPost, "/engine/v1/payloads/", "cancun", sszRestContentType, http.StatusNotFound, problemMethodNotFound},
+		{"method mismatch on capabilities", http.MethodPost, "/engine/v1/capabilities", "", sszRestContentType, http.StatusNotFound, problemMethodNotFound},
+		{"wrong content type", http.MethodPost, "/engine/v1/payloads", "cancun", "application/json", http.StatusUnsupportedMediaType, problemUnsupportedMediaType},
+		{"bad ssz body", http.MethodPost, "/engine/v1/payloads", "cancun", sszRestContentType, http.StatusBadRequest, problemSSZDecodeError},
+		{"bad payload id", http.MethodGet, "/engine/v1/payloads/not-an-id", "cancun", "", http.StatusBadRequest, problemInvalidRequest},
+		{"bodies range missing params", http.MethodGet, "/engine/v1/bodies", "cancun", "", http.StatusBadRequest, problemInvalidRequest},
+		{"bodies range zero count", http.MethodGet, "/engine/v1/bodies?from=1&count=0", "cancun", "", http.StatusUnprocessableEntity, problemInvalidBody},
+		{"bodies range too large", http.MethodGet, "/engine/v1/bodies?from=1&count=33", "cancun", "", http.StatusRequestEntityTooLarge, problemRequestTooLarge},
+		{"bodies hash too many", http.MethodPost, "/engine/v1/bodies/hash", "cancun", sszRestContentType, http.StatusRequestEntityTooLarge, problemRequestTooLarge},
+		{"blobs unknown revision", http.MethodPost, "/engine/v1/blobs/v9", "", sszRestContentType, http.StatusNotFound, problemMethodNotFound},
+		{"blobs too many hashes", http.MethodPost, "/engine/v1/blobs/v1", "", sszRestContentType, http.StatusRequestEntityTooLarge, problemRequestTooLarge},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			var body []byte
@@ -617,6 +633,9 @@ func TestSSZRESTRoutingErrors(t *testing.T) {
 			if tc.contentType != "" {
 				req.Header.Set("Content-Type", tc.contentType)
 			}
+			if tc.fork != "" {
+				req.Header.Set("Eth-Execution-Version", tc.fork)
+			}
 			rec := httptest.NewRecorder()
 			srv.SSZRESTHandler().ServeHTTP(rec, req)
 			require.Equal(t, tc.code, rec.Code)
@@ -630,7 +649,7 @@ func TestSSZRESTRoutingErrors(t *testing.T) {
 func TestSSZRESTUnscheduledFork(t *testing.T) {
 	srv := newTestEngineServer(&chain.Config{ShanghaiTime: common.NewUint64(0), CancunTime: common.NewUint64(0)}, false)
 	rec := httptest.NewRecorder()
-	srv.SSZRESTHandler().ServeHTTP(rec, newSSZRequest(http.MethodPost, "/engine/v2/amsterdam/payloads", nil))
+	srv.SSZRESTHandler().ServeHTTP(rec, newSSZRequest(http.MethodPost, "/engine/v1/payloads", "amsterdam", nil))
 	require.Equal(t, http.StatusBadRequest, rec.Code)
 	require.Equal(t, problemUnsupportedFork, problemType(t, rec))
 }
@@ -644,7 +663,7 @@ func TestSSZRESTNewPayloadDispatch(t *testing.T) {
 	require.NoError(t, err)
 
 	rec := httptest.NewRecorder()
-	srv.SSZRESTHandler().ServeHTTP(rec, newSSZRequest(http.MethodPost, "/engine/v2/paris/payloads", body))
+	srv.SSZRESTHandler().ServeHTTP(rec, newSSZRequest(http.MethodPost, "/engine/v1/payloads", "paris", body))
 
 	require.Equal(t, http.StatusOK, rec.Code)
 	require.Equal(t, sszRestContentType, rec.Header().Get("Content-Type"))
@@ -655,8 +674,8 @@ func TestSSZRESTNewPayloadDispatch(t *testing.T) {
 }
 
 // A forkchoice with payload attributes whose timestamp belongs to a different
-// fork than the URL must be rejected with 400 unsupported-fork.
-func TestSSZRESTForkchoiceURLForkMustMatchAttributes(t *testing.T) {
+// fork than the Eth-Execution-Version header must be rejected with 400 unsupported-fork.
+func TestSSZRESTForkchoiceHeaderForkMustMatchAttributes(t *testing.T) {
 	srv := newTestEngineServer(allForksConfig(), true)
 	root := common.HexToHash("0x04")
 	attrs := &engine_types.PayloadAttributes{
@@ -669,7 +688,7 @@ func TestSSZRESTForkchoiceURLForkMustMatchAttributes(t *testing.T) {
 	require.NoError(t, err)
 
 	rec := httptest.NewRecorder()
-	srv.SSZRESTHandler().ServeHTTP(rec, newSSZRequest(http.MethodPost, "/engine/v2/cancun/forkchoice", body))
+	srv.SSZRESTHandler().ServeHTTP(rec, newSSZRequest(http.MethodPost, "/engine/v1/forkchoice", "cancun", body))
 	require.Equal(t, http.StatusBadRequest, rec.Code)
 	require.Equal(t, problemUnsupportedFork, problemType(t, rec))
 }
@@ -679,7 +698,7 @@ func TestSSZRESTBlobsPoolDisabled(t *testing.T) {
 	body, err := encodeHashListRequest([]common.Hash{common.HexToHash("0x01")}, sszMaxGetBlobHashes)
 	require.NoError(t, err)
 	rec := httptest.NewRecorder()
-	srv.SSZRESTHandler().ServeHTTP(rec, newSSZRequest(http.MethodPost, "/engine/v2/blobs/v1", body))
+	srv.SSZRESTHandler().ServeHTTP(rec, newSSZRequest(http.MethodPost, "/engine/v1/blobs/v1", "", body))
 	require.Equal(t, http.StatusNoContent, rec.Code)
 	require.Empty(t, rec.Body.Bytes())
 }
@@ -753,8 +772,9 @@ func TestSSZRESTExecutionRequestsBound(t *testing.T) {
 func TestSSZRESTReadBodyNonSizeError(t *testing.T) {
 	// a non-size read error (truncated body / client disconnect) is 400, not 413
 	srv := newTestEngineServer(allForksConfig(), false)
-	req := httptest.NewRequest(http.MethodPost, "/engine/v2/cancun/forkchoice", iotest.ErrReader(errors.New("boom")))
+	req := httptest.NewRequest(http.MethodPost, "/engine/v1/forkchoice", iotest.ErrReader(errors.New("boom")))
 	req.Header.Set("Content-Type", sszRestContentType)
+	req.Header.Set("Eth-Execution-Version", "cancun")
 	rec := httptest.NewRecorder()
 	srv.SSZRESTHandler().ServeHTTP(rec, req)
 	require.Equal(t, http.StatusBadRequest, rec.Code)

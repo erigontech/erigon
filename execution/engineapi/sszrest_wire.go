@@ -168,7 +168,7 @@ const (
 	sszMaxBytesPerExecutionRequest = 1 << 30 // MAX_BYTES_PER_EXECUTION_REQUEST
 )
 
-// ExecutionPayloadEnvelope is the request body of POST /{fork}/payloads.
+// ExecutionPayloadEnvelope is the request body of POST /payloads.
 // parent_beacon_block_root exists since Cancun, execution_requests since
 // Prague; expected blob versioned hashes are recomputed from the transactions.
 func newPayloadEnvelopeSchema(version clparams.StateVersion, payload *engine_types.ExecutionPayload, parentRoot *common.Hash, requests *solid.TransactionsSSZ) []any {
@@ -217,7 +217,7 @@ func blobVersionedHashesFromTxs(txs []hexutil.Bytes) []common.Hash {
 	return hashes
 }
 
-// ForkchoiceUpdate is the request body of POST /{fork}/forkchoice.
+// ForkchoiceUpdate is the request body of POST /forkchoice.
 // custody_columns (Optional[Bitvector[CELLS_PER_EXT_BLOB]]) exists since Amsterdam.
 func forkchoiceUpdateSchema(version clparams.StateVersion, state *engine_types.ForkChoiceState, attrs *solid.ListSSZ[*engine_types.PayloadAttributes], custody *solid.ByteListSSZ) []any {
 	if version < clparams.GloasVersion {
@@ -322,7 +322,7 @@ func newBlobsBundleSSZ(b *engine_types.BlobsBundle, version clparams.StateVersio
 	return b
 }
 
-// BuiltPayload is the response of GET /{fork}/payloads/{payloadId}:
+// BuiltPayload is the response of GET /payloads/{payloadId}:
 // {payload, block_value, blobs_bundle, execution_requests, should_override_builder},
 // with blobs_bundle and should_override_builder since Cancun and
 // execution_requests since Prague.
@@ -501,7 +501,7 @@ func (e *sszBodyEntry) HashSSZ() ([32]byte, error) { return [32]byte{}, nil }
 
 func (*sszBodyEntry) Clone() clonable.Clonable { return &sszBodyEntry{} }
 
-// The response of POST /{fork}/bodies/hash and GET /{fork}/bodies is
+// The response of POST /bodies/hash and GET /bodies is
 // BodiesResponse {entries: List[BodyEntry, MAX_BODIES_REQUEST]}; nil bodies
 // become available=false.
 func encodeBodiesResponse(bodies []*engine_types.ExecutionPayloadBodyV2, version clparams.StateVersion) ([]byte, error) {

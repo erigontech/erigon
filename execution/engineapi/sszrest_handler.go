@@ -29,6 +29,7 @@ const (
 	sszRestContentType = "application/octet-stream"
 	jsonContentType    = "application/json"
 	problemContentType = "application/problem+json"
+	engineForkHeader   = "Eth-Execution-Version"
 )
 
 // RFC 7807 problem types, written as relative URIs per the spec.
@@ -56,28 +57,28 @@ func (e *EngineServer) SSZRESTHandler() http.Handler {
 func (e *EngineServer) handleSSZREST(w http.ResponseWriter, r *http.Request) {
 	parts := strings.Split(strings.TrimPrefix(r.URL.Path, "/"), "/")
 	// an empty last segment (e.g. a trailing slash) matches no route
-	if len(parts) < 3 || parts[0] != "engine" || parts[1] != "v2" || parts[len(parts)-1] == "" {
+	if len(parts) < 3 || parts[0] != "engine" || parts[1] != "v1" || parts[len(parts)-1] == "" {
 		writeProblem(w, http.StatusNotFound, problemMethodNotFound, "")
 		return
 	}
 	rest := parts[2:]
-	switch {
-	case rest[0] == "capabilities":
+	switch rest[0] {
+	case "capabilities":
 		if len(rest) == 1 && r.Method == http.MethodGet {
 			e.handleSSZCapabilities(w)
 			return
 		}
-	case rest[0] == "identity":
+	case "identity":
 		if len(rest) == 1 && r.Method == http.MethodGet {
 			e.handleSSZIdentity(w, r)
 			return
 		}
-	case rest[0] == "blobs":
+	case "blobs":
 		if len(rest) == 2 && r.Method == http.MethodPost {
 			e.handleSSZGetBlobs(w, r, rest[1])
 			return
 		}
-	default:
+	case "payloads", "forkchoice", "bodies":
 		e.handleSSZForkScoped(w, r, rest)
 		return
 	}
@@ -85,23 +86,22 @@ func (e *EngineServer) handleSSZREST(w http.ResponseWriter, r *http.Request) {
 }
 
 func (e *EngineServer) handleSSZForkScoped(w http.ResponseWriter, r *http.Request, rest []string) {
-	forkName := rest[0]
+	forkName := r.Header.Get(engineForkHeader)
 	version, ok := engineForkVersion(forkName)
 	if !ok || !forkScheduled(e.config, forkName) {
-		writeProblem(w, http.StatusBadRequest, problemUnsupportedFork, fmt.Sprintf("unsupported fork %q", forkName))
+		writeProblem(w, http.StatusBadRequest, problemUnsupportedFork, fmt.Sprintf("unsupported %s %q", engineForkHeader, forkName))
 		return
 	}
-	sub := rest[1:]
 	switch {
-	case len(sub) == 1 && sub[0] == "payloads" && r.Method == http.MethodPost:
+	case len(rest) == 1 && rest[0] == "payloads" && r.Method == http.MethodPost:
 		e.handleSSZNewPayload(w, r, forkName, version)
-	case len(sub) == 2 && sub[0] == "payloads" && r.Method == http.MethodGet:
-		e.handleSSZGetPayload(w, r, forkName, version, sub[1])
-	case len(sub) == 1 && sub[0] == "forkchoice" && r.Method == http.MethodPost:
+	case len(rest) == 2 && rest[0] == "payloads" && r.Method == http.MethodGet:
+		e.handleSSZGetPayload(w, r, forkName, version, rest[1])
+	case len(rest) == 1 && rest[0] == "forkchoice" && r.Method == http.MethodPost:
 		e.handleSSZForkchoice(w, r, forkName, version)
-	case len(sub) == 2 && sub[0] == "bodies" && sub[1] == "hash" && r.Method == http.MethodPost:
+	case len(rest) == 2 && rest[0] == "bodies" && rest[1] == "hash" && r.Method == http.MethodPost:
 		e.handleSSZBodiesByHash(w, r, forkName, version)
-	case len(sub) == 1 && sub[0] == "bodies" && r.Method == http.MethodGet:
+	case len(rest) == 1 && rest[0] == "bodies" && r.Method == http.MethodGet:
 		e.handleSSZBodiesByRange(w, r, forkName, version)
 	default:
 		writeProblem(w, http.StatusNotFound, problemMethodNotFound, "")
@@ -285,11 +285,11 @@ func (e *EngineServer) handleSSZForkchoice(w http.ResponseWriter, r *http.Reques
 		e.logger.Debug("[SSZ-REST] ignoring custody columns update", "fork", forkName)
 	}
 	if attrs != nil {
-		// the URL fork is load-bearing for payload builds only: it must match
+		// the header fork is load-bearing for payload builds only: it must match
 		// the fork the new payload would belong to
 		if attrsFork := forkNameAtTime(e.config, uint64(attrs.Timestamp)); attrsFork != forkName {
 			writeProblem(w, http.StatusBadRequest, problemUnsupportedFork,
-				fmt.Sprintf("payload attributes timestamp belongs to fork %q, not URL fork %q", attrsFork, forkName))
+				fmt.Sprintf("payload attributes timestamp belongs to fork %q, not header fork %q", attrsFork, forkName))
 			return
 		}
 	}
@@ -329,7 +329,7 @@ func (e *EngineServer) handleSSZBodiesByHash(w http.ResponseWriter, r *http.Requ
 		writeEngineProblem(w, err)
 		return
 	}
-	// blocks outside the URL fork's time range come back as available=false
+	// blocks outside the header fork's time range come back as available=false
 	entries := make([]*engine_types.ExecutionPayloadBodyV2, len(blockHashes))
 	for i := range blockHashes {
 		if i >= len(bodies) || bodies[i] == nil {
@@ -375,7 +375,7 @@ func (e *EngineServer) handleSSZBodiesByRange(w http.ResponseWriter, r *http.Req
 	}
 	// The response is truncated at the latest known block: GetPayloadBodiesByRange
 	// stops at head and trims trailing nils, so past-head blocks are omitted rather
-	// than padded with available=false. In-range blocks outside the URL fork's time
+	// than padded with available=false. In-range blocks outside the header fork's time
 	// range still come back as available=false.
 	entries := make([]*engine_types.ExecutionPayloadBodyV2, len(bodies))
 	for i := range bodies {
