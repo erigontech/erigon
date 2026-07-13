@@ -136,12 +136,12 @@ Benefit: minimal nodes serve recent-block witnesses with zero commitment-history
 - Modify: `node/eth/backend.go`
 - Modify: `rpc/jsonrpc/witness_cache_wiring_test.go`
 
-- [ ] change `WitnessCacheShouldEnable` (`:124`) to `(blocks uint, commitmentHistoryEnabled, headCapture bool) bool` = `blocks>0 && (commitmentHistoryEnabled || headCapture)`; update the sole production call site (`backend.go:1200`)
-- [ ] in `node/eth/backend.go:1190-1205`, stop force-disabling when `ReadDBCommitmentHistoryEnabled` is false but head-capture is on; in that branch construct the rolling-pin builder and set the cache `cacheOnly=true`/`headCapture=true`; pass `WitnessCacheMaxMB` through `NewWitnessCacheBuilderAPI`/`newWitnessResultCache`
-- [ ] preserve the full/archive path unchanged: commitment history present → existing recompute-on-miss + cache, `cacheOnly=false`
-- [ ] update `TestWitnessCacheShouldEnable` in `rpc/jsonrpc/witness_cache_wiring_test.go` (this is the test that fails to compile on the 2→3-arg change) to the 8-combination truth table
-- [ ] write tests: construction selects cache-only mode iff `headCapture && !commitmentHistory`; full/archive stays recompute-capable
-- [ ] run tests - must pass before next task
+- [x] change `WitnessCacheShouldEnable` (`:124`) to `(blocks uint, commitmentHistoryEnabled, headCapture bool) bool` = `blocks>0 && (commitmentHistoryEnabled || headCapture)`; update the sole production call site (`backend.go:1200`)
+- [x] in `node/eth/backend.go:1190-1205`, stop force-disabling when `ReadDBCommitmentHistoryEnabled` is false but head-capture is on; in that branch construct the rolling-pin builder and set the cache `cacheOnly=true`/`headCapture=true`; pass `WitnessCacheMaxMB` through `NewWitnessCacheBuilderAPI`/`newWitnessResultCache` (decision extracted to `WitnessCacheMode`; head-capture mode threaded via a new `headCapture` arg to `NewWitnessCacheBuilderAPI`)
+- [x] preserve the full/archive path unchanged: commitment history present → existing recompute-on-miss + cache, `cacheOnly=false` (`WitnessCacheMode` returns `headCapture=false` whenever commitment history is present, even with the flag on)
+- [x] update `TestWitnessCacheShouldEnable` in `rpc/jsonrpc/witness_cache_wiring_test.go` (this is the test that fails to compile on the 2→3-arg change) to the 8-combination truth table
+- [x] write tests: construction selects cache-only mode iff `headCapture && !commitmentHistory` (`TestWitnessCacheMode`, `TestNewWitnessCacheBuilderAPISelectsMode`); full/archive stays recompute-capable
+- [x] run tests - must pass before next task
 
 ### Task 7: Cache-only serve path + out-of-window + by-hash canonical check
 

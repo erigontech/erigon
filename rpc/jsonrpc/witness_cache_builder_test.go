@@ -24,6 +24,7 @@ import (
 	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/require"
 
+	"github.com/erigontech/erigon/cmd/rpcdaemon/cli/httpcfg"
 	"github.com/erigontech/erigon/cmd/rpcdaemon/rpcdaemontest"
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/db/kv"
@@ -273,6 +274,26 @@ func TestBuildAndCacheHeadCaptureHappyPath(t *testing.T) {
 	gotBytes, err := cached.MarshalFastJSON()
 	require.NoError(t, err)
 	require.Equal(t, wantBytes, gotBytes, "head-capture witness must match the durable on-demand build")
+}
+
+// TestNewWitnessCacheBuilderAPISelectsMode pins that the head-capture argument routes
+// straight into the shared cache's mode fields: head-capture construction yields a
+// cache-only, head-capture cache; durable construction yields a recompute-capable one.
+func TestNewWitnessCacheBuilderAPISelectsMode(t *testing.T) {
+	m, _ := rpcdaemontest.CreateTestExecModuleNoInsert(t)
+	cfg := &httpcfg.HttpCfg{WitnessCacheBlocks: 8, Dirs: m.Dirs}
+
+	headCapture, hcImpl := NewWitnessCacheBuilderAPI(true, true, m.DB, nil, nil, m.StateCache, m.BlockReader, cfg, m.Engine, nil)
+	require.NotNil(t, headCapture)
+	require.NotNil(t, hcImpl)
+	require.True(t, headCapture.HeadCapture(), "head-capture construction must set HeadCapture")
+	require.True(t, headCapture.CacheOnly(), "head-capture construction must set CacheOnly")
+
+	durable, durImpl := NewWitnessCacheBuilderAPI(true, false, m.DB, nil, nil, m.StateCache, m.BlockReader, cfg, m.Engine, nil)
+	require.NotNil(t, durable)
+	require.NotNil(t, durImpl)
+	require.False(t, durable.HeadCapture(), "durable construction must stay recompute-capable")
+	require.False(t, durable.CacheOnly(), "durable construction must stay recompute-capable")
 }
 
 // TestWitnessCacheBuilderParity drives the full builder path against the test exec

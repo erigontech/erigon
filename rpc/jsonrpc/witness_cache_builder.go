@@ -190,10 +190,22 @@ func decidePin(havePin bool, pinNum uint64, pinHash common.Hash, blockNum uint64
 }
 
 // WitnessCacheShouldEnable is the embedded-wiring gate: the eager cache runs only
-// when a positive block count is requested and the datadir was built with commitment
-// history (without it every build errors, so the cache would stay empty).
-func WitnessCacheShouldEnable(blocks uint, commitmentHistoryEnabled bool) bool {
-	return blocks > 0 && commitmentHistoryEnabled
+// when a positive block count is requested and the node can build witnesses at all —
+// either the datadir carries commitment history (durable recompute) or head-capture is
+// enabled (pinned-parent build on a minimal node). Without either, every build errors
+// and the cache would stay empty.
+func WitnessCacheShouldEnable(blocks uint, commitmentHistoryEnabled, headCapture bool) bool {
+	return blocks > 0 && (commitmentHistoryEnabled || headCapture)
+}
+
+// WitnessCacheMode resolves the eager-cache wiring decision: whether to enable it and,
+// if so, whether it runs in head-capture (cache-only, pinned-parent) mode. Head-capture
+// engages only when commitment history is absent and the flag is set; a datadir with
+// commitment history keeps the durable recompute path even if the flag is on.
+func WitnessCacheMode(blocks uint, commitmentHistoryEnabled, headCaptureFlag bool) (enable, headCapture bool) {
+	enable = WitnessCacheShouldEnable(blocks, commitmentHistoryEnabled, headCaptureFlag)
+	headCapture = enable && !commitmentHistoryEnabled && headCaptureFlag
+	return enable, headCapture
 }
 
 // NewWitnessCacheBuilderAPI builds the shared witness cache plus a builder-owned
@@ -203,7 +215,7 @@ func WitnessCacheShouldEnable(blocks uint, commitmentHistoryEnabled bool) bool {
 // RunWitnessCacheBuilder. When enable is false it returns (nil, nil) and the caller
 // leaves the cache disabled.
 func NewWitnessCacheBuilderAPI(
-	enable bool,
+	enable, headCapture bool,
 	db kv.TemporalRoDB, eth rpchelper.ApiBackend,
 	filters *rpchelper.Filters, stateCache kvcache.Cache,
 	blockReader services.FullBlockReader, cfg *httpcfg.HttpCfg,
@@ -212,7 +224,7 @@ func NewWitnessCacheBuilderAPI(
 	if !enable {
 		return nil, nil
 	}
-	cache := newWitnessResultCache(cfg.WitnessCacheBlocks, int(cfg.WitnessCacheMaxMB)*bytesPerMB, false, false)
+	cache := newWitnessResultCache(cfg.WitnessCacheBlocks, int(cfg.WitnessCacheMaxMB)*bytesPerMB, headCapture, headCapture)
 	base := NewBaseApi(filters, stateCache, blockReader, cfg.WithDatadir, cfg.EvmCallTimeout, engine, cfg.Dirs, bridgeReader, cfg.BlockRangeLimit, cfg.GetLogsMaxResults)
 	impl := NewPrivateDebugAPI(base, db, eth, cfg.Gascap, cfg.GethCompatibility)
 	impl.witnessCache = cache
