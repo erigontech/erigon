@@ -147,6 +147,8 @@ func (c *CallContext) put() {
 	// idle in the pool; unique.Handle values keep interned entries alive.
 	c.cachedKey = accounts.NilKey
 	c.cachedAddr = accounts.NilAddress
+	c.input = nil
+	c.Contract = Contract{}
 	contextPool.Put(c)
 }
 
