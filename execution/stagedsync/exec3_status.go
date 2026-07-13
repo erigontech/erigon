@@ -15,25 +15,25 @@ type ExecutionStat struct {
 // complete/inProgress use dense []bool (O(1)) rather than sorted []int: completions
 // arrive out of tx order, so slice insert/delete would be O(n²) per block.
 type execStatusList struct {
-	pending       []int
-	deferred      []int // txs whose retry waits on a directed-delay predicate
-	inProg        []bool
-	comp          []bool
-	dependency    map[int]map[int]bool
-	blocker       map[int]map[int]bool
-	inProgCnt     int
-	compCnt       int
-	completeUpTo  int // completeUpTo-1 == maxComplete (contiguous-from-zero complete prefix)
-	minInProgHint int // lower bound on the lowest in-progress index; lazily advanced on query
+	pending           []int
+	deferred          []int // txs whose retry waits on a directed-delay predicate
+	inProgress        []bool
+	complete          []bool
+	dependency        map[int]map[int]bool
+	blocker           map[int]map[int]bool
+	inProgressCnt     int
+	completeCnt       int
+	completeUpTo      int // completeUpTo-1 == maxComplete (contiguous-from-zero complete prefix)
+	minInProgressHint int // lower bound on the lowest in-progress index; lazily advanced on query
 }
 
 func (m *execStatusList) ensureLen(tx int) {
-	if tx < len(m.comp) {
+	if tx < len(m.complete) {
 		return
 	}
-	grow := tx + 1 - len(m.comp)
-	m.comp = append(m.comp, make([]bool, grow)...)
-	m.inProg = append(m.inProg, make([]bool, grow)...)
+	grow := tx + 1 - len(m.complete)
+	m.complete = append(m.complete, make([]bool, grow)...)
+	m.inProgress = append(m.inProgress, make([]bool, grow)...)
 }
 
 func insertInList(l []int, v int) []int {
@@ -59,12 +59,12 @@ func (m *execStatusList) takeNextPending() int {
 	x := m.pending[0]
 	m.pending = m.pending[1:]
 	m.ensureLen(x)
-	if !m.inProg[x] {
-		m.inProg[x] = true
-		m.inProgCnt++
+	if !m.inProgress[x] {
+		m.inProgress[x] = true
+		m.inProgressCnt++
 	}
-	if x < m.minInProgHint {
-		m.minInProgHint = x
+	if x < m.minInProgressHint {
+		m.minInProgressHint = x
 	}
 
 	return x
@@ -112,37 +112,49 @@ func (m *execStatusList) drainDeferredIfReady(ready func(tx int) bool) {
 
 func (m *execStatusList) setInProgress(tx int) {
 	m.ensureLen(tx)
-	if !m.inProg[tx] {
-		m.inProg[tx] = true
-		m.inProgCnt++
+	if !m.inProgress[tx] {
+		m.inProgress[tx] = true
+		m.inProgressCnt++
 	}
-	if tx < m.minInProgHint {
-		m.minInProgHint = tx
+	if tx < m.minInProgressHint {
+		m.minInProgressHint = tx
 	}
 }
 
-func (m *execStatusList) inProgressCount() int { return m.inProgCnt }
+func (m *execStatusList) setComplete(tx int) {
+	m.ensureLen(tx)
+	if !m.complete[tx] {
+		m.complete[tx] = true
+		m.completeCnt++
+	}
+	if tx == m.completeUpTo {
+		for m.completeUpTo < len(m.complete) && m.complete[m.completeUpTo] {
+			m.completeUpTo++
+		}
+	}
+}
+
+func (m *execStatusList) inProgressCount() int { return m.inProgressCnt }
 
 // minInProgress returns the lowest in-progress tx index, or -1 if empty.
 func (m *execStatusList) minInProgress() int {
-	if m.inProgCnt == 0 {
+	if m.inProgressCnt == 0 {
 		return -1
 	}
-	// in-progress txs are always >= completeUpTo, so jump the hint past the known
-	// complete prefix, then lazily advance it past cleared entries. The hint only
-	// moves backward when a lower index is (re-)dispatched, so queries amortize O(1).
-	if m.minInProgHint < m.completeUpTo {
-		m.minInProgHint = m.completeUpTo
+	// in-progress txs are >= completeUpTo; advancing the hint lazily from there
+	// (it only moves back when a lower index is re-dispatched) is amortized O(1).
+	if m.minInProgressHint < m.completeUpTo {
+		m.minInProgressHint = m.completeUpTo
 	}
-	for m.minInProgHint < len(m.inProg) && !m.inProg[m.minInProgHint] {
-		m.minInProgHint++
+	for m.minInProgressHint < len(m.inProgress) && !m.inProgress[m.minInProgressHint] {
+		m.minInProgressHint++
 	}
-	return m.minInProgHint
+	return m.minInProgressHint
 }
 
 func removeFromList(l []int, v int, expect bool) []int {
 	x := sort.SearchInts(l, v)
-	if x == -1 || x >= len(l) || l[x] != v {
+	if x >= len(l) || l[x] != v {
 		if expect {
 			panic(errors.New("should not happen - element expected in list"))
 		}
@@ -162,17 +174,17 @@ func removeFromList(l []int, v int, expect bool) []int {
 
 func (m *execStatusList) markComplete(tx int) {
 	m.ensureLen(tx)
-	if !m.inProg[tx] {
+	if !m.inProgress[tx] {
 		panic(errors.New("should not happen - element expected in list"))
 	}
-	m.inProg[tx] = false
-	m.inProgCnt--
-	if !m.comp[tx] {
-		m.comp[tx] = true
-		m.compCnt++
+	m.inProgress[tx] = false
+	m.inProgressCnt--
+	if !m.complete[tx] {
+		m.complete[tx] = true
+		m.completeCnt++
 	}
 	if tx == m.completeUpTo {
-		for m.completeUpTo < len(m.comp) && m.comp[m.completeUpTo] {
+		for m.completeUpTo < len(m.complete) && m.complete[m.completeUpTo] {
 			m.completeUpTo++
 		}
 	}
@@ -187,7 +199,7 @@ func (m *execStatusList) minPending() int {
 }
 
 func (m *execStatusList) countComplete() int {
-	return m.compCnt
+	return m.completeCnt
 }
 
 func (m *execStatusList) addDependency(blocker int, dependent int) bool {
@@ -252,15 +264,15 @@ func (m *execStatusList) removeDependency(tx int) {
 }
 
 func (m *execStatusList) clearInProgress(tx int) {
-	if tx >= len(m.inProg) || !m.inProg[tx] {
+	if tx >= len(m.inProgress) || !m.inProgress[tx] {
 		panic(errors.New("should not happen - element expected in list"))
 	}
-	m.inProg[tx] = false
-	m.inProgCnt--
+	m.inProgress[tx] = false
+	m.inProgressCnt--
 }
 
 func (m *execStatusList) checkInProgress(tx int) bool {
-	return tx >= 0 && tx < len(m.inProg) && m.inProg[tx]
+	return tx >= 0 && tx < len(m.inProgress) && m.inProgress[tx]
 }
 
 func (m *execStatusList) checkPending(tx int) bool {
@@ -273,7 +285,7 @@ func (m *execStatusList) checkPending(tx int) bool {
 }
 
 func (m *execStatusList) checkComplete(tx int) bool {
-	return tx >= 0 && tx < len(m.comp) && m.comp[tx]
+	return tx >= 0 && tx < len(m.complete) && m.complete[tx]
 }
 
 // getRevalidationRange: this range will be all tasks from tx (inclusive) that are not currently in progress up to the
@@ -301,9 +313,9 @@ func (m *execStatusList) pushPendingSet(set []int) {
 }
 
 func (m *execStatusList) clearComplete(tx int) {
-	if tx >= 0 && tx < len(m.comp) && m.comp[tx] {
-		m.comp[tx] = false
-		m.compCnt--
+	if tx >= 0 && tx < len(m.complete) && m.complete[tx] {
+		m.complete[tx] = false
+		m.completeCnt--
 	}
 	if tx < m.completeUpTo {
 		m.completeUpTo = tx
@@ -315,8 +327,8 @@ func (m *execStatusList) clearPending(tx int) {
 }
 
 func (m *execStatusList) completeList() []int {
-	out := make([]int, 0, m.compCnt)
-	for i, v := range m.comp {
+	out := make([]int, 0, m.completeCnt)
+	for i, v := range m.complete {
 		if v {
 			out = append(out, i)
 		}
@@ -325,8 +337,8 @@ func (m *execStatusList) completeList() []int {
 }
 
 func (m *execStatusList) inProgressList() []int {
-	out := make([]int, 0, m.inProgCnt)
-	for i, v := range m.inProg {
+	out := make([]int, 0, m.inProgressCnt)
+	for i, v := range m.inProgress {
 		if v {
 			out = append(out, i)
 		}

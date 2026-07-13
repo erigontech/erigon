@@ -1577,7 +1577,7 @@ func TestParallelResumeReconstructsPriorReceipts(t *testing.T) {
 	}
 	be.tasks = []*execTask{eTask}
 	be.results = []*execResult{nil}
-	be.execTasks.inProgress = []int{0}
+	be.execTasks.setInProgress(0)
 
 	tVersion := &taskVersion{
 		execTask: eTask,
@@ -1650,7 +1650,7 @@ func TestParallelResumeReconstructionFailureIsNonFatal(t *testing.T) {
 	}
 	be.tasks = []*execTask{eTask}
 	be.results = []*execResult{nil}
-	be.execTasks.inProgress = []int{0}
+	be.execTasks.setInProgress(0)
 
 	tVersion := &taskVersion{
 		execTask: eTask,
@@ -1724,8 +1724,8 @@ func TestParallelFinalizeMissingPrevReceiptErrors(t *testing.T) {
 	// tx 0 was "finalized" without a receipt — the invariant nextResult
 	// relies on for the in-memory prev-receipt lookup is broken.
 	be.finalizedResults[0] = &execResult{TxResult: &exec.TxResult{Task: tVersion0}}
-	be.execTasks.complete = []int{0}
-	be.execTasks.inProgress = []int{1}
+	be.execTasks.setComplete(0)
+	be.execTasks.setInProgress(1)
 
 	txResult1 := &exec.TxResult{
 		Task: tVersion1,
