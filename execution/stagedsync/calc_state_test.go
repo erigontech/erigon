@@ -18,6 +18,7 @@ package stagedsync
 
 import (
 	"bytes"
+	"context"
 	"testing"
 
 	"github.com/holiman/uint256"
@@ -26,6 +27,9 @@ import (
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/empty"
+	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/commitment"
 	"github.com/erigontech/erigon/execution/state"
 	"github.com/erigontech/erigon/execution/types/accounts"
@@ -817,4 +821,79 @@ func TestEIP8246_NormalizeApply_PreVsPost_BalanceHandling(t *testing.T) {
 		commitment.BalanceUpdate|commitment.NonceUpdate|commitment.CodeUpdate,
 		postGot.Flags,
 		"post-8246: preserved-balance self-destruct emits an account UPDATE, NOT DeleteUpdate")
+}
+
+// applySDToDomains seeds a pre-block contract into real domains, runs the
+// production normalize+apply pipeline for its self-destruct ending the tx with
+// postSDBalance (eip8246=true), and returns the accounts-domain record left
+// behind. useBlockCache selects the parallel-executor route (writes buffered
+// in a BlockStateCache and flushed at block end) vs direct domain writes.
+func applySDToDomains(t *testing.T, postSDBalance uint256.Int, useBlockCache bool) []byte {
+	t.Helper()
+	tx, domains := setup2CacheTest(t)
+	addr := accounts.InternAddress(common.HexToAddress("0x8246E"))
+	original := sdEIP8246Original()
+	addrVal := addr.Value()
+	require.NoError(t, domains.DomainPut(kv.AccountsDomain, tx, addrVal[:], accounts.SerialiseV3(original), 0, nil))
+	ver := state.Version{TxIndex: 0, Incarnation: 0}
+	rawWrites := newWS().
+		inc(addr, ver, original.Incarnation).
+		selfDestruct(addr, ver, true).
+		bal(addr, ver, postSDBalance).
+		build()
+	vm := state.NewVersionMap(nil)
+	vm.WriteIncarnation(addr, ver, original.Incarnation, true)
+	vm.WriteSelfDestruct(addr, ver, true, true)
+	vm.WriteBalance(addr, ver, postSDBalance, true)
+	stateReader := &preBlockReader{addr: addr, acc: original}
+	normalized := normalizeWriteSet(rawWrites, vm, 0, 0, stateReader, nil, true, false, true)
+	rs := state.NewStateV3(domains, false, log.New())
+	var blockCache *state.BlockStateCache
+	if useBlockCache {
+		blockCache = state.NewBlockStateCache()
+	}
+	err := rs.ApplyStateWrites(context.Background(), tx, 1, 1, normalized, nil, &chain.Rules{IsAmsterdam: true}, blockCache)
+	require.NoError(t, err)
+	if useBlockCache {
+		require.NoError(t, blockCache.Flush(domains, tx))
+	}
+	enc, _, err := domains.GetLatest(kv.AccountsDomain, tx, addrVal[:])
+	require.NoError(t, err)
+	return enc
+}
+
+// The commitment calculator and the domain applier consume the same normalized
+// write set independently; the calculator deletes the leaf for a zero-balance
+// EIP-8246 self-destruct (tested above), so the applier must delete the domain
+// record too. A live empty-account record would be invisible to the import
+// root but surface as a phantom account to every as-of reader (witness
+// generation, proofs, next-block reads).
+func TestEIP8246_ApplySDWrites_ZeroBalanceDeletesDomainRecord(t *testing.T) {
+	if testing.Short() {
+		t.Skip("requires mdbx")
+	}
+	for _, useBlockCache := range []bool{true, false} {
+		name := "direct"
+		if useBlockCache {
+			name = "blockCache"
+		}
+		t.Run(name, func(t *testing.T) {
+			enc := applySDToDomains(t, uint256.Int{}, useBlockCache)
+			assert.Empty(t, enc,
+				"zero-balance EIP-8246 self-destruct must delete the accounts-domain record, got %x", enc)
+		})
+	}
+}
+
+func TestEIP8246_ApplySDWrites_PreservedBalanceLeavesBalanceOnlyRecord(t *testing.T) {
+	if testing.Short() {
+		t.Skip("requires mdbx")
+	}
+	postSDBalance := *uint256.NewInt(5)
+	enc := applySDToDomains(t, postSDBalance, true)
+	require.NotEmpty(t, enc, "preserved-balance EIP-8246 self-destruct must leave an account record")
+	expected := accounts.NewAccount()
+	expected.Balance = postSDBalance
+	assert.Equal(t, accounts.SerialiseV3(&expected), enc,
+		"record must be balance-only: nonce, code hash and incarnation cleared")
 }

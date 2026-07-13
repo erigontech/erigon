@@ -122,6 +122,10 @@
   max-allowed-failures: 0
   exec3-parallel: true
   no-ramdisk: true
+- shard: zkevm-witness
+  workers: 8
+  # TODO: reduce to 0 (glamsterdam-devnet-6 EIPs WIP)
+  max-allowed-failures: 52
 - shard: blocktests-stable-race-pre-cancun-sequential
   workers: 12
   max-allowed-failures: 0
@@ -167,4 +171,4 @@
 - shard: zkevm-witness-race
   workers: 8
   # TODO: reduce to 0 (glamsterdam-devnet-6 EIPs WIP)
-  max-allowed-failures: 486
+  max-allowed-failures: 52
