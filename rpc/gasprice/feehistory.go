@@ -351,7 +351,7 @@ func (oracle *Oracle) FeeHistory(ctx context.Context, blocks int, unresolvedLast
 	// to using the main backend sequentially; the others exit immediately to
 	// avoid concurrent access on the shared transaction.
 	g, fetchCtx := errgroup.WithContext(ctx)
-	var seqOnce int32 // CAS flag: 0 = available, 1 = sequential mode claimed
+	var seqOnce atomic.Int32 // CAS flag: 0 = available, 1 = sequential mode claimed
 	for range maxBlockFetchers {
 		g.Go(func() error {
 			localBackend, cleanup, forkErr := oracle.backend.Fork(fetchCtx)
@@ -361,7 +361,7 @@ func (oracle *Oracle) FeeHistory(ctx context.Context, blocks int, unresolvedLast
 			if localBackend == nil {
 				// Fork not supported: allow exactly one goroutine to proceed
 				// sequentially on the shared backend; the others exit.
-				if !atomic.CompareAndSwapInt32(&seqOnce, 0, 1) {
+				if !seqOnce.CompareAndSwap(0, 1) {
 					return nil
 				}
 				localBackend = oracle.backend
