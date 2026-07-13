@@ -83,13 +83,16 @@ def _iter_scannable(text: str):
     fence = None
     for ln in text.splitlines(keepends=True):
         stripped = ln.lstrip()
-        m = re.match(r"(```+|~~~+)", stripped)
+        m = re.match(r"(`{3,}|~{3,})", stripped)
         if m:
-            tok = m.group(1)[0] * 3
+            char, length = m.group(1)[0], len(m.group(1))
             if fence is None:
-                fence = tok
-            elif stripped.startswith(fence):
+                # opening fence (an info string may follow, e.g. ```python)
+                fence = (char, length)
+            elif char == fence[0] and length >= fence[1] and stripped[length:].strip() == "":
+                # closing fence: same char, at least as long, nothing else on the line
                 fence = None
+            # a shorter/different fence marker while open is just code content
             yield ln, True
             continue
         yield ln, fence is not None

@@ -25,9 +25,11 @@ def _fix(body, relpath="fundamentals/page.md", prefix="/v3.4"):
         vroot = os.path.join(d, "versioned_docs", "version-v3.4")
         fp = os.path.join(vroot, relpath)
         os.makedirs(os.path.dirname(fp), exist_ok=True)
-        open(fp, "w").write(body)
+        with open(fp, "w", encoding="utf-8") as fh:
+            fh.write(body)
         found = fal.scan(os.path.join(d, "versioned_docs"), check=False)
-        return open(fp).read(), sum(found.values(), [])
+        with open(fp, encoding="utf-8") as fh:
+            return fh.read(), sum(found.values(), [])
 
 
 class SyntaxCoverage(unittest.TestCase):
@@ -103,6 +105,23 @@ class EdgeCases(unittest.TestCase):
         out, _ = _fix(body)
         self.assertIn("[x](/v3.4/get-started/foo)", out)   # prose fixed
         self.assertIn("[y](/get-started/bar)", out)         # code sample untouched
+
+    def test_skips_four_backtick_fence_with_inner_triple(self):
+        # a 4-backtick fence whose body contains a 3-backtick line must not
+        # close early at the inner ``` (regression for the fence-length bug)
+        body = (
+            "before [a](/get-started/x)\n"
+            "````md\n"
+            "```\n"
+            "[b](/get-started/y)\n"
+            "```\n"
+            "````\n"
+            "after [c](/get-started/z)\n"
+        )
+        out, _ = _fix(body)
+        self.assertIn("[a](/v3.4/get-started/x)", out)   # prose before fixed
+        self.assertIn("[b](/get-started/y)", out)         # inside 4-fence untouched
+        self.assertIn("[c](/v3.4/get-started/z)", out)   # prose after fixed
 
     def test_same_page_anchor_localized(self):
         out, _ = _fix("[s](/fundamentals/page#sec)", relpath="fundamentals/page.md")
