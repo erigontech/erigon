@@ -3214,11 +3214,21 @@ func (be *blockExecutor) scheduleExecution(ctx context.Context, pe *parallelExec
 		}
 		budget := pe.in.Capacity() - pe.in.NewTasksLen()
 		var holdBack sort.IntSlice
-		for be.execTasks.minPending() >= 0 {
-			nextTx := be.execTasks.takeNextPending()
+		for {
+			nextTx := be.execTasks.minPending()
+			if nextTx < 0 {
+				break
+			}
+			incarnation := be.txIncarnations[nextTx]
+			// A fresh tx needs a free input-channel slot. If none, leave it in
+			// pending (peek, don't take): taking then re-inserting the lowest
+			// index at the front would be O(pending) shift churn per call.
+			if incarnation == 0 && budget <= 0 {
+				break
+			}
+			be.execTasks.takeNextPending()
 			execTask := be.tasks[nextTx]
 			isNextValidated := nextTx == maxValidated+1
-			incarnation := be.txIncarnations[nextTx]
 
 			if !isNextValidated && incarnation > 0 {
 				txIndex := execTask.Version().TxIndex
@@ -3247,12 +3257,6 @@ func (be *blockExecutor) scheduleExecution(ctx context.Context, pe *parallelExec
 			}
 
 			if incarnation == 0 {
-				// Fresh tx needs a free channel slot; stop once the queue is full
-				// (remaining pending stay put — no take-all/push-back churn).
-				if budget <= 0 {
-					holdBack = append(holdBack, nextTx)
-					break
-				}
 				tv.version = execTask.Version()
 				if !pe.in.TryAdd(tv) {
 					holdBack = append(holdBack, nextTx)
