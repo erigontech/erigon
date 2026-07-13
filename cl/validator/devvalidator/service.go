@@ -325,7 +325,7 @@ func (s *Service) proposeBlock(ctx context.Context, slot uint64, key *ValidatorK
 	// Submit the signed block. For Deneb+, wrap in DenebSignedBeaconBlock
 	// with empty blob sidecars.
 	versionStr := version.String()
-	var submitBody interface{} = block
+	var submitBody any = block
 	if version >= clparams.DenebVersion {
 		submitBody = &cltypes.DenebSignedBeaconBlock{
 			SignedBlock: block,

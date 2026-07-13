@@ -43,3 +43,9 @@ rules:
   # tracked in #21132.
   secrets-inherit:
     disable: true
+
+  # This workflow must build and publish an image for every triggering commit;
+  # a concurrency group would cancel intermediate queued runs and skip images.
+  concurrency-limits:
+    ignore:
+      - ci-cd-main-branch-docker-images.yml
