@@ -893,7 +893,13 @@ func (sdb *IntraBlockState) writeBalanceVersioned(addr accounts.Address, update 
 	if err != nil {
 		return err
 	}
-	if base == nil || sdb.accountLifecycle(addr) {
+	// noMaterialize is false only on the single-IBS block-assembler path, which
+	// accumulates state across txs while ResetVersionedIO clears versionedWrites
+	// between them. Balance carried solely by versionedWrites would be lost to
+	// the next tx there, so materialize it onto the stateObject (which survives
+	// ResetVersionedIO) — matching the nonce path. Parallel workers
+	// (noMaterialize) keep the cache-free fast path below.
+	if base == nil || sdb.accountLifecycle(addr) || !sdb.noMaterialize {
 		stateObject, err := sdb.GetOrNewStateObject(addr)
 		if err != nil {
 			return err
