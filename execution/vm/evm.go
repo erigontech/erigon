@@ -224,11 +224,12 @@ func (evm *EVM) chargeTopLevelFrameGas(gasRemaining mdgas.MdGas, addr accounts.A
 	var topLvlFrameStateGas int64
 	var topLvlFrameStateGasSpill uint64
 	if topLevelNewAccount {
-		var ok bool
-		gasRemaining, topLvlFrameStateGasSpill, ok = useMdGas(gasRemaining, params.StateGasNewAccount, mdgas.StateGas, nil, tracing.GasChangeIgnored)
+		charged, spill, ok := useMdGas(gasRemaining, params.StateGasNewAccount, mdgas.StateGas, nil, tracing.GasChangeIgnored)
 		if !ok {
 			return gasRemaining, topLvlFrameStateGas, 0, ErrOutOfGas
 		}
+		gasRemaining = charged
+		topLvlFrameStateGasSpill = spill
 		topLvlFrameStateGas = int64(params.StateGasNewAccount)
 	}
 	if !isPrecompile {
