@@ -267,7 +267,7 @@ func NewTestDB(tb testing.TB, label kv.Label) kv.TemporalRwDB {
 	dirs := datadir.New(tb.TempDir())
 	agg := state.NewTest(dirs).DisableHistory().MustOpen(context.Background(), db)
 	tb.Cleanup(agg.Close)
-	tdb, _ := New(db, agg)
+	tdb, _ := New(db, agg, nil)
 	return tdb
 }
 
