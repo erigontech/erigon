@@ -17,6 +17,7 @@
 package rules
 
 import (
+	"context"
 	"strings"
 	"testing"
 
@@ -27,6 +28,31 @@ import (
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/types"
 )
+
+type msgCaptureHandler struct{ msgs *[]string }
+
+func (h msgCaptureHandler) Log(r *log.Record) error {
+	*h.msgs = append(*h.msgs, r.Msg)
+	return nil
+}
+
+func (h msgCaptureHandler) Enabled(context.Context, log.Lvl) bool { return true }
+
+func captureLogger(msgs *[]string) log.Logger {
+	l := log.New()
+	l.SetHandler(msgCaptureHandler{msgs: msgs})
+	return l
+}
+
+func countMsg(msgs []string, want string) int {
+	n := 0
+	for _, m := range msgs {
+		if m == want {
+			n++
+		}
+	}
+	return n
+}
 
 // TestBlockPostValidation_PreByzantiumBloomMismatch covers the regression
 // where a pre-Byzantium block with an invalid logs bloom was silently
@@ -148,5 +174,41 @@ func TestBlockPostValidation_ReceiptBloomReuse(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "invalid bloom") {
 		t.Fatalf("expected \"invalid bloom\" error, got: %v", err)
+	}
+}
+
+// TestBlockPostValidation_GasMismatchDetailGated pins that a gas-used mismatch
+// logs a single summary line by default and only spews the per-transaction
+// breakdown when explicitly opted in.
+func TestBlockPostValidation_GasMismatchDetailGated(t *testing.T) {
+	cfg := &chain.Config{ChainID: uint256.NewInt(1)}
+	receipts := types.Receipts{
+		{Status: types.ReceiptStatusSuccessful, GasUsed: 21_000, CumulativeGasUsed: 21_000},
+		{Status: types.ReceiptStatusSuccessful, GasUsed: 21_000, CumulativeGasUsed: 42_000},
+		{Status: types.ReceiptStatusSuccessful, GasUsed: 21_000, CumulativeGasUsed: 63_000},
+	}
+	header := &types.Header{Number: *uint256.NewInt(1), GasUsed: 100_000}
+	const execGas = 63_000 // != header.GasUsed, triggers the mismatch branch
+
+	var msgs []string
+	err := DefaultBlockPostValidation(cfg, header, execGas, 0, false, false, receipts, nil, captureLogger(&msgs))
+	if err == nil {
+		t.Fatal("expected gas-used mismatch error, got nil")
+	}
+	if got := countMsg(msgs, "gas used mismatch"); got != 1 {
+		t.Fatalf("expected exactly one summary line, got %d", got)
+	}
+	if got := countMsg(msgs, "  tx gas detail"); got != 0 {
+		t.Fatalf("per-tx gas detail must be suppressed by default, got %d line(s)", got)
+	}
+
+	old := dumpGasMismatchDetail
+	dumpGasMismatchDetail = true
+	defer func() { dumpGasMismatchDetail = old }()
+
+	var opted []string
+	_ = DefaultBlockPostValidation(cfg, header, execGas, 0, false, false, receipts, nil, captureLogger(&opted))
+	if got := countMsg(opted, "  tx gas detail"); got != len(receipts) {
+		t.Fatalf("opt-in should emit one detail line per receipt: want %d, got %d", len(receipts), got)
 	}
 }
