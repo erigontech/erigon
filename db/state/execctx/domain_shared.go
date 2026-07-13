@@ -1585,6 +1585,12 @@ func (sd *SharedDomains) HistoryRange(ctx context.Context, domain kv.Domain, fro
 	return sd.mem.HistoryRange(ctx, domain, fromTs, toTs, asc, limit, roTx)
 }
 
+// IndexRange returns the txNums at which key k changed in [fromTs, toTs),
+// merging in-flight in-memory history with the committed inverted index.
+func (sd *SharedDomains) IndexRange(name kv.InvertedIdx, k []byte, fromTs, toTs int, asc order.By, limit int, roTx kv.Tx) (stream.U64, error) {
+	return sd.mem.IndexRange(name, k, fromTs, toTs, asc, limit, roTx)
+}
+
 // DomainPut
 // Optimizations:
 //   - user can provide `prevVal != nil` - then it will not read prev value from storage

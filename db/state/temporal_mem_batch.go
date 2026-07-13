@@ -463,6 +463,67 @@ func (sd *TemporalMemBatch) memHistoryRange(domain kv.Domain, fromTs, toTs int, 
 	return pairs
 }
 
+// IndexRange returns the txNums at which key k changed in [fromTs, toTs),
+// merging the in-flight in-memory history with the committed inverted index.
+// Only domain-backed indices contribute in-memory txNums; standalone indices
+// (logs, traces) fall back to committed. Only used by the RPC test harness.
+func (sd *TemporalMemBatch) IndexRange(name kv.InvertedIdx, k []byte, fromTs, toTs int, asc order.By, limit int, roTx kv.Tx) (stream.U64, error) {
+	committed, err := AggTx(roTx).IndexRange(name, k, fromTs, toTs, asc, limit, roTx)
+	if err != nil {
+		return nil, err
+	}
+	if !sd.inMemHistoryReads {
+		return committed, nil
+	}
+	at := AggTx(roTx)
+	var domain kv.Domain
+	found := false
+	for i := range at.d {
+		if at.d[i].d.HistoryIdx == name {
+			domain = kv.Domain(i)
+			found = true
+			break
+		}
+	}
+	if !found {
+		return committed, nil
+	}
+	memTs := sd.memIndexTxNums(domain, k, fromTs, toTs, asc)
+	if len(memTs) == 0 {
+		return committed, nil
+	}
+	return stream.Union[uint64](stream.Array(memTs), committed, asc, limit), nil
+}
+
+func (sd *TemporalMemBatch) memIndexTxNums(domain kv.Domain, k []byte, fromTs, toTs int, asc order.By) []uint64 {
+	sd.latestStateLock.RLock()
+	defer sd.latestStateLock.RUnlock()
+	ks := common.ToStringZeroCopy(k)
+	var entries []dataWithTxNum
+	if domain == kv.StorageDomain {
+		entries, _ = sd.storage.Get(ks)
+	} else {
+		entries = sd.domains[domain][ks]
+	}
+	out := make([]uint64, 0, len(entries))
+	for i := range entries {
+		tn := entries[i].txNum
+		if fromTs >= 0 && tn < uint64(fromTs) {
+			continue
+		}
+		if toTs >= 0 && tn >= uint64(toTs) {
+			continue
+		}
+		out = append(out, tn)
+	}
+	if asc == order.Desc {
+		for i, j := 0, len(out)-1; i < j; i, j = i+1, j-1 {
+			out[i], out[j] = out[j], out[i]
+		}
+	}
+	return out
+}
+
 type memKVPair struct{ k, v []byte }
 
 type memKVIter struct {

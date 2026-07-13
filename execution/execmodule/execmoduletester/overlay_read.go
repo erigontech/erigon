@@ -115,6 +115,10 @@ func (t *sdRoTx) HistoryRange(name kv.Domain, fromTs, toTs int, asc order.By, li
 	return t.sd.HistoryRange(context.Background(), name, fromTs, toTs, asc, limit, t.base)
 }
 
+func (t *sdRoTx) IndexRange(name kv.InvertedIdx, k []byte, fromTs, toTs int, asc order.By, limit int) (stream.U64, error) {
+	return t.sd.IndexRange(name, k, fromTs, toTs, asc, limit, t.base)
+}
+
 func (t *sdRoTx) Rollback() {
 	t.base.Rollback()
 }
