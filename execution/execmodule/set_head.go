@@ -163,9 +163,12 @@ func (e *ExecModule) SetHead(ctx context.Context, targetBlock uint64) error {
 		return fmt.Errorf("failed to commit shared domains: %w", err)
 	}
 
-	// Clear the published overlay: the last FCU's SharedDomains now points at the
-	// unwound-away tip, so readers must fall through to the raw DB this unwind
-	// just committed instead of serving stale overlay state.
+	// The direct unwind above superseded any in-flight background-commit
+	// generations and the current context (they describe the unwound-away tip),
+	// so drop them and clear the published overlay. Readers and the next FCU
+	// then rebuild from the raw DB this unwind just committed.
+	e.closeAllGens()
+	e.closeModuleContext()
 	if dispatcher := e.pipelineExecutor.Dispatcher(); dispatcher != nil {
 		dispatcher.PublishOverlay(nil)
 	}
