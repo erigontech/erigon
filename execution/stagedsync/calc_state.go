@@ -158,7 +158,7 @@ func (cs *calcState) ensureAccount(addr accounts.Address) *calcAccountState {
 // recreate) revives it by clearing Deleted. A zero field write does not revive
 // a self-destructed address; for a non-self-destructed address any field write
 // — even zero — means it is alive (clears Deleted).
-func (cs *calcState) ApplyWrites(writes *state.WriteSet) {
+func (cs *calcState) ApplyWrites(writes *state.WriteSet, eip8246 bool) {
 	sdThisCall := make(map[accounts.Address]bool)
 	for addr, vw := range writes.SelfDestructs() {
 		sdThisCall[addr] = vw.Val
@@ -233,7 +233,9 @@ func (cs *calcState) ApplyWrites(writes *state.WriteSet) {
 	// though IBS emits the pre-SD IncarnationPath/BalancePath values.
 	for addr := range sdThisCall {
 		if acc, ok := cs.accounts[addr]; ok && acc.Deleted {
-			acc.Balance = uint256.Int{}
+			if !eip8246 {
+				acc.Balance = uint256.Int{}
+			}
 			acc.Nonce = 0
 			acc.CodeHash = empty.CodeHash
 			acc.Incarnation = 0
@@ -343,7 +345,10 @@ func (cs *calcState) LoadFromBALUpTo(bal types.BlockAccessList, maxTxIndex uint3
 			}
 		}
 	}
-	cs.ApplyWrites(writes)
+	// eip8246 is moot here: the BAL WriteSet carries no SelfDestruct entries, so
+	// ApplyWrites' SD-balance-zeroing never fires; deletion is handled by the
+	// EIP-161 empty-removal pass below.
+	cs.ApplyWrites(writes, false)
 
 	// EIP-161: a touched account whose merged block-end state is empty is
 	// removed from the trie. The BAL carries no deletion marker, so reconstruct

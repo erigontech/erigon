@@ -1985,6 +1985,13 @@ type VersionedIO struct {
 	inputs   []versionedReadSet
 	outputs  []*WriteSet // write sets that should be checked during validation
 	accessed []AccessSet
+	eip8246  bool // EIP-8246: SELFDESTRUCT no longer burns, so a same-tx SD account keeps its balance in the BAL
+}
+
+func (io *VersionedIO) SetEIP8246(v bool) {
+	if io != nil {
+		io.eip8246 = v
+	}
 }
 
 func NewVersionedIO(numTx int) *VersionedIO {
@@ -2261,7 +2268,7 @@ func (io *VersionedIO) AsBlockAccessList() types.BlockAccessList {
 				if addr.IsNil() {
 					continue
 				}
-				ensureAccountState(ac, addr).applyWriteBalance(w.Val, w.Version.blockAccessIndex())
+				ensureAccountState(ac, addr).applyWriteBalance(w.Val, w.Version.blockAccessIndex(), io.eip8246)
 			}
 			for addr, w := range writes.Nonces() {
 				if addr.IsNil() {
@@ -2505,15 +2512,15 @@ func (account *accountState) applyWriteSelfDestruct(val bool, accessIndex uint32
 	}
 }
 
-func (account *accountState) applyWriteBalance(val uint256.Int, accessIndex uint32) {
+func (account *accountState) applyWriteBalance(val uint256.Int, accessIndex uint32, eip8246 bool) {
 	{
 		// account.selfDestructed is set only for a same-tx deleting SELFDESTRUCT
 		// (the EIP-6780 new-contract case); a non-zero balance written in that
 		// tx — a transfer to the pending-destroyed account, or the finalize-time
 		// priority fee — burns when the account is destroyed at end of tx, so per
 		// EIP-7928 its post-tx balance is zero. Writes from LATER transactions are
-		// real state changes and pass through unchanged.
-		if account.selfDestructed && accessIndex == account.selfDestructedAt && !val.IsZero() {
+		// real state changes and pass through unchanged. EIP-8246 removes the burn.
+		if !eip8246 && account.selfDestructed && accessIndex == account.selfDestructedAt && !val.IsZero() {
 			val.Clear()
 		}
 		// If we haven't seen a balance and the first write is zero, treat it

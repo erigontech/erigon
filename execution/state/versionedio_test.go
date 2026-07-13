@@ -588,7 +588,7 @@ func TestIBSVersionedWrites_SelfdestructRetainsBalanceDropsOtherPaths(t *testing
 	require.NoError(t, ibs.SetBalance(addr, *uint256.NewInt(0), tracing.BalanceChangeUnspecified))
 
 	// Selfdestruct: records SelfDestructPath=true, IncarnationPath, BalancePath=0.
-	destructed, err := ibs.Selfdestruct(addr)
+	destructed, err := ibs.Selfdestruct(addr, false)
 	require.NoError(t, err)
 	require.True(t, destructed)
 
@@ -1233,6 +1233,63 @@ func TestGetVersionedAccount_SameTxMetamorphicRecreate_ReturnsAccount(t *testing
 			"getVersionedAccount must surface the re-created account, not nil")
 	require.Equal(t, uint64(2), account.Incarnation,
 		"the re-created account's Incarnation should reflect the CREATE2 (not the pre-SD value)")
+}
+
+// TestVersionedRead_EIP8246_PriorTxSelfDestructReadsAsPreserved verifies that
+// under EIP-8246 a concurrent tx reading an account self-destructed by a prior
+// tx sees it preserved (balance kept, empty code, exists) rather than zeroed —
+// the parallel-exec equivalent of serial's balance-preserving finalize. Without
+// this, a later tx's BALANCE/EXTCODEHASH of the SD'd account diverge from serial
+// (0 vs preserved), flipping SSTORE new-slot classification and block state gas.
+func TestVersionedRead_EIP8246_PriorTxSelfDestructReadsAsPreserved(t *testing.T) {
+	t.Parallel()
+
+	addr := accounts.InternAddress(common.HexToAddress("0x8246A"))
+	realCodeHash := accounts.InternCodeHash(common.HexToHash("0x31537ad3f3619e1f93aac0ddfdb0d8a0013bd170b427d81dd5abbee4f3f5248e"))
+	preserved := *uint256.NewInt(1)
+
+	newIBS := func(eip8246 bool) *IntraBlockState {
+		reader := newAccountStateReader(addr)
+		reader.accounts[addr].Nonce = 1
+		reader.accounts[addr].CodeHash = realCodeHash
+		reader.accounts[addr].Balance = preserved
+
+		vm := NewVersionMap(nil)
+		sdVer := Version{TxIndex: 3, Incarnation: 0}
+		vm.WriteSelfDestruct(addr, sdVer, true, true)
+		vm.WriteBalance(addr, sdVer, preserved, true)
+		vm.WriteIncarnation(addr, sdVer, uint64(1), true)
+		vm.WriteCodeHash(addr, sdVer, accounts.EmptyCodeHash, true)
+
+		ibs := New(reader)
+		ibs.SetTxContext(0, 4)
+		ibs.SetVersion(0)
+		ibs.SetVersionMap(vm)
+		ibs.eip8246 = eip8246
+		return ibs
+	}
+
+	ibs := newIBS(true)
+	bal, err := ibs.GetBalance(addr)
+	require.NoError(t, err)
+	require.Equal(t, preserved, bal, "EIP-8246: SD'd account keeps its balance for a concurrent reader")
+	exists, err := ibs.Exist(addr)
+	require.NoError(t, err)
+	require.True(t, exists, "EIP-8246: balance-preserving SD'd account still exists")
+	empty, err := ibs.Empty(addr)
+	require.NoError(t, err)
+	require.False(t, empty, "EIP-8246: account with a preserved non-zero balance is not empty")
+	ch, err := ibs.GetCodeHash(addr)
+	require.NoError(t, err)
+	require.Equal(t, accounts.EmptyCodeHash, ch, "EIP-8246: SD removes code, so the codehash reads as empty (not the pre-SD hash, not nil)")
+
+	pre := newIBS(false)
+	preBal, err := pre.GetBalance(addr)
+	require.NoError(t, err)
+	require.True(t, preBal.IsZero(), "pre-EIP-8246: SD burns the balance for a concurrent reader")
+	preExists, err := pre.Exist(addr)
+	require.NoError(t, err)
+	require.False(t, preExists, "pre-EIP-8246: SD'd account does not exist")
 }
 
 // EIP-7928 net-zero guard: a slot that is read and then written back to the

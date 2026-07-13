@@ -234,7 +234,7 @@ func TestApplyWrites_IncarnationPath(t *testing.T) {
 		inc(addr, state.Version{}, uint64(1)).
 		selfDestruct(addr, state.Version{}, true).
 		build()
-	cs.ApplyWrites(writes)
+	cs.ApplyWrites(writes, false)
 
 	acc, ok := cs.accounts[addr]
 	require.True(t, ok, "ensureAccount should have created an entry")
@@ -266,7 +266,7 @@ func TestApplyWrites_BalancePathClearsDeleted(t *testing.T) {
 		selfDestruct(addr, state.Version{}, true).
 		bal(addr, state.Version{}, *uint256.NewInt(42)).
 		build()
-	cs.ApplyWrites(writes)
+	cs.ApplyWrites(writes, false)
 
 	acc, ok := cs.accounts[addr]
 	require.True(t, ok)
@@ -378,7 +378,7 @@ func TestSDOfPreExistingContract_FullPipeline(t *testing.T) {
 	vm.WriteBalance(addr, ver, uint256.Int{}, true)
 
 	stateReader := &preBlockReader{addr: addr, acc: original}
-	normalized := normalizeWriteSet(rawWrites, vm, 0, 0, stateReader, nil, true, false)
+	normalized := normalizeWriteSet(rawWrites, vm, 0, 0, stateReader, nil, true, false, false)
 
 	// SD-aware filtering: only SelfDestructPath survives in the normalized
 	// writeset for the SD'd address. The raw IncarnationPath/BalancePath
@@ -403,7 +403,7 @@ func TestSDOfPreExistingContract_FullPipeline(t *testing.T) {
 
 	// Drive ApplyWrites + FlushToUpdates.
 	cs := newTestCalcState()
-	cs.ApplyWrites(normalized)
+	cs.ApplyWrites(normalized, false)
 
 	acc, ok := cs.accounts[addr]
 	require.True(t, ok)
@@ -487,7 +487,7 @@ func TestSDStorageCascade_EmitsPerSlotDeletes(t *testing.T) {
 		build()
 
 	stateReader := &preBlockReader{addr: addr, acc: original}
-	normalized := normalizeWriteSet(rawWrites, vm, 0, 0, stateReader, nil, true, false)
+	normalized := normalizeWriteSet(rawWrites, vm, 0, 0, stateReader, nil, true, false, false)
 
 	// Sanity: normalizeWriteSet should have appended one StoragePath=0
 	// entry per slot in vm.StorageKeys(addr) — this is the load-bearing
@@ -505,7 +505,7 @@ func TestSDStorageCascade_EmitsPerSlotDeletes(t *testing.T) {
 	assert.Equal(t, 2, storageZeroCount,
 		"normalizeWriteSet must emit one StoragePath=0 entry per vm.StorageKeys(addr) — this is the storage cascade")
 
-	cs.ApplyWrites(normalized)
+	cs.ApplyWrites(normalized, false)
 
 	updates := newTestUpdates()
 	cs.FlushToUpdates(updates)
@@ -562,7 +562,7 @@ func TestSDOfPreExistingContract_DeletesUntouchedSlots(t *testing.T) {
 		inc(addr, state.Version{}, uint64(3)).
 		selfDestruct(addr, state.Version{}, true).
 		bal(addr, state.Version{}, uint256.Int{}).
-		build())
+		build(), false)
 
 	updates := newTestUpdates()
 	cs.FlushToUpdates(updates)
@@ -618,7 +618,7 @@ func TestNormalizeWriteSet_GenesisBypassRetainsEmptyAccount(t *testing.T) {
 	vm.WriteNonce(zeroAddr, ver, uint64(0), true)
 	vm.WriteCodeHash(zeroAddr, ver, accounts.EmptyCodeHash, true)
 
-	normalized := normalizeWriteSet(rawWrites, vm, 0, 0, nil, nil, false, false)
+	normalized := normalizeWriteSet(rawWrites, vm, 0, 0, nil, nil, false, false, false)
 
 	for h := range normalized.AllHeaders() {
 		assert.NotEqual(t, state.SelfDestructPath, h.Path,
@@ -626,7 +626,7 @@ func TestNormalizeWriteSet_GenesisBypassRetainsEmptyAccount(t *testing.T) {
 	}
 
 	cs := newTestCalcState()
-	cs.ApplyWrites(normalized)
+	cs.ApplyWrites(normalized, false)
 	acc, ok := cs.accounts[zeroAddr]
 	require.True(t, ok)
 	assert.False(t, acc.Deleted)
@@ -657,7 +657,7 @@ func TestNormalizeWriteSet_PostGenesisEmptyAccountTriggersEIP161(t *testing.T) {
 	vm.WriteNonce(addr, ver, uint64(0), true)
 	vm.WriteCodeHash(addr, ver, accounts.EmptyCodeHash, true)
 
-	normalized := normalizeWriteSet(rawWrites, vm, 0, 0, nil, nil, true, false)
+	normalized := normalizeWriteSet(rawWrites, vm, 0, 0, nil, nil, true, false, false)
 
 	sdSeen := false
 	if w, ok := normalized.GetSelfDestruct(addr); ok {
@@ -666,7 +666,7 @@ func TestNormalizeWriteSet_PostGenesisEmptyAccountTriggersEIP161(t *testing.T) {
 	require.True(t, sdSeen, "emptyRemoval=true must emit SelfDestructPath=true for empty account")
 
 	cs := newTestCalcState()
-	cs.ApplyWrites(normalized)
+	cs.ApplyWrites(normalized, false)
 	acc, ok := cs.accounts[addr]
 	require.True(t, ok)
 	assert.True(t, acc.Deleted)

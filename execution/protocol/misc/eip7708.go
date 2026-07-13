@@ -92,6 +92,11 @@ func LogSelfDestructedAccounts(ibs evmtypes.IntraBlockState, sender accounts.Add
 	if !rules.IsAmsterdam || rules.IsEIPDisabled(7708) {
 		return
 	}
+	if !rules.IsEIPDisabled(8246) {
+		// EIP-8246 removes the SELFDESTRUCT burn, so a selfdestructed account
+		// keeps its residual balance and there is nothing to log as burned.
+		return
+	}
 	// Emit burn logs for selfdestructed accounts that hold a positive balance at
 	// finalization time (EIP-7708 case 2: funded after selfdestruct).
 	//

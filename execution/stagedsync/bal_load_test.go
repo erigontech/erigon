@@ -181,7 +181,7 @@ func TestLoadFromBAL_MatchesApplyWrites(t *testing.T) {
 	incWrites.SetCode(addrC, &state.VersionedWrite[accounts.Code]{WriteHeader: bal2(addrC, state.CodePath), Val: accounts.NewCode(codeC)})
 	incWrites.SetBalance(addrE, &state.VersionedWrite[uint256.Int]{WriteHeader: bal2(addrE, state.BalancePath), Val: *uint256.NewInt(200)})
 	incWrites.SetBalance(addrE, &state.VersionedWrite[uint256.Int]{WriteHeader: bal2(addrE, state.BalancePath), Val: *uint256.NewInt(500)})
-	csInc.ApplyWrites(incWrites)
+	csInc.ApplyWrites(incWrites, false)
 
 	assert.Equal(t, csInc.accounts, csBAL.accounts, "accounts: BAL load diverged from the write stream")
 	assert.Equal(t, csInc.storageState, csBAL.storageState, "storageState: BAL load diverged from the write stream")

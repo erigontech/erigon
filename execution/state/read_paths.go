@@ -197,38 +197,49 @@ func versionedReadCore(s *IntraBlockState, addr accounts.Address, path AccountPa
 		}
 		if !revived && path != CodePath {
 			sdVersion := Version{TxIndex: destructTxIndex, Incarnation: sdRes.Incarnation()}
-			if commited {
-				r.outcome = outcomeReturnZero
-				r.source = MapRead
-				r.version = sdVersion
-				return
-			}
-			// Match main's `versionedWrite(addr, SelfDestructPath, key)`: the
-			// own-write lookup is keyed by `key`, so for a StoragePath read
-			// (key=slot) it never matches the per-address SelfDestructPath write
-			// (stored under NilKey) and the slot reads as the post-SD zero — a
-			// fresh contract's slots are empty. Only an account-field read
-			// (key=NilKey) consults the SelfDestructPath own-write; a same-tx
-			// SelfDestructPath=false there means the account was revived, so we
-			// fall through.
-			sd, sdOK := false, false
-			if key == accounts.NilKey {
-				sd, sdOK = s.versionedWriteSelfDestruct(addr)
-			}
-			if !sdOK || sd {
+			if s.eip8246 && !commited && (path == BalancePath || path == CodeHashPath || path == IncarnationPath) {
+				// EIP-8246 removes the SELFDESTRUCT burn: a destroyed account keeps
+				// its balance and stays alive, so a concurrent reader must see the
+				// live account, not a zeroed one. Record the SelfDestructPath
+				// dependency for validation, then fall through to the actual value.
 				s.versionedReads.SetSelfDestruct(addr, VersionedRead[bool]{
 					ReadHeader: ReadHeader{Source: MapRead, Version: sdVersion},
 					Val:        true,
 				})
-				r.outcome = outcomeReturnZero
-				r.source = MapRead
-				r.version = sdVersion
-				return
+			} else {
+				if commited {
+					r.outcome = outcomeReturnZero
+					r.source = MapRead
+					r.version = sdVersion
+					return
+				}
+				// Match main's `versionedWrite(addr, SelfDestructPath, key)`: the
+				// own-write lookup is keyed by `key`, so for a StoragePath read
+				// (key=slot) it never matches the per-address SelfDestructPath write
+				// (stored under NilKey) and the slot reads as the post-SD zero — a
+				// fresh contract's slots are empty. Only an account-field read
+				// (key=NilKey) consults the SelfDestructPath own-write; a same-tx
+				// SelfDestructPath=false there means the account was revived, so we
+				// fall through.
+				sd, sdOK := false, false
+				if key == accounts.NilKey {
+					sd, sdOK = s.versionedWriteSelfDestruct(addr)
+				}
+				if !sdOK || sd {
+					s.versionedReads.SetSelfDestruct(addr, VersionedRead[bool]{
+						ReadHeader: ReadHeader{Source: MapRead, Version: sdVersion},
+						Val:        true,
+					})
+					r.outcome = outcomeReturnZero
+					r.source = MapRead
+					r.version = sdVersion
+					return
+				}
+				// SelfDestructPath write exists with Val==false: fall through with
+				// destructedVersion recorded so the stale-readSet dependency check
+				// can use it.
+				destructedVersion = Version{TxIndex: destructTxIndex}
 			}
-			// SelfDestructPath write exists with Val==false: fall through with
-			// destructedVersion recorded so the stale-readSet dependency check
-			// can use it.
-			destructedVersion = Version{TxIndex: destructTxIndex}
 		}
 	}
 
