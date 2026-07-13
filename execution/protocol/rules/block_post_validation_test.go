@@ -24,7 +24,6 @@ import (
 	"github.com/holiman/uint256"
 
 	"github.com/erigontech/erigon/common"
-	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/types"
@@ -178,10 +177,13 @@ func TestBlockPostValidation_ReceiptBloomReuse(t *testing.T) {
 	}
 }
 
-// TestBlockPostValidation_GasMismatchDetailGated pins that a gas-used mismatch
-// logs a single summary line at the default terse level and only emits the
-// per-transaction breakdown once exec verbosity is raised to debug.
-func TestBlockPostValidation_GasMismatchDetailGated(t *testing.T) {
+// TestBlockPostValidation_GasMismatchNoPerTxSpam pins that a gas-used mismatch
+// is reported as a single summary line plus the error, with no per-transaction
+// dump — the detailed receipt breakdown is left to the caller's
+// LOG_HASH_MISMATCH_REASON path.
+func TestBlockPostValidation_GasMismatchNoPerTxSpam(t *testing.T) {
+	t.Parallel()
+
 	cfg := &chain.Config{ChainID: uint256.NewInt(1)}
 	receipts := types.Receipts{
 		{Status: types.ReceiptStatusSuccessful, GasUsed: 21_000, CumulativeGasUsed: 21_000},
@@ -191,10 +193,6 @@ func TestBlockPostValidation_GasMismatchDetailGated(t *testing.T) {
 	header := &types.Header{Number: *uint256.NewInt(1), GasUsed: 100_000}
 	const execGas = 63_000 // != header.GasUsed, triggers the mismatch branch
 
-	old := dbg.ExecTerseLoggerLevel
-	defer func() { dbg.ExecTerseLoggerLevel = old }()
-
-	dbg.ExecTerseLoggerLevel = int(log.LvlWarn)
 	var msgs []string
 	err := DefaultBlockPostValidation(cfg, header, execGas, 0, false, false, receipts, nil, captureLogger(&msgs))
 	if err == nil {
@@ -204,13 +202,6 @@ func TestBlockPostValidation_GasMismatchDetailGated(t *testing.T) {
 		t.Fatalf("expected exactly one summary line, got %d", got)
 	}
 	if got := countMsg(msgs, "  tx gas detail"); got != 0 {
-		t.Fatalf("per-tx gas detail must be suppressed at the default terse level, got %d line(s)", got)
-	}
-
-	dbg.ExecTerseLoggerLevel = int(log.LvlDebug)
-	var opted []string
-	_ = DefaultBlockPostValidation(cfg, header, execGas, 0, false, false, receipts, nil, captureLogger(&opted))
-	if got := countMsg(opted, "  tx gas detail"); got != len(receipts) {
-		t.Fatalf("debug terse level should emit one detail line per receipt: want %d, got %d", len(receipts), got)
+		t.Fatalf("gas mismatch must not emit a per-tx dump, got %d line(s)", got)
 	}
 }
