@@ -49,9 +49,11 @@ import (
 	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/db/rawdb/blockio"
 	"github.com/erigontech/erigon/db/services"
+	"github.com/erigontech/erigon/db/snapshotsync/blocksnapshots"
 	"github.com/erigontech/erigon/db/snapshotsync/freezeblocks"
 	"github.com/erigontech/erigon/db/snaptype"
 	dbstate "github.com/erigontech/erigon/db/state"
+	"github.com/erigontech/erigon/db/state/execctx"
 	"github.com/erigontech/erigon/execution/builder"
 	"github.com/erigontech/erigon/execution/cache"
 	"github.com/erigontech/erigon/execution/chain"
@@ -137,7 +139,8 @@ type ExecModuleTester struct {
 
 	HistoryV3      bool
 	cfg            ethconfig.Config
-	BlockSnapshots *freezeblocks.RoSnapshots
+	BlockSnapshots *blocksnapshots.RoSnapshots
+	blockRetire    services.BlockRetire
 	BlockReader    services.FullBlockReader
 	ReceiptsReader *receipts.Generator
 	posStagedSync  *stagedsync.Sync
@@ -148,6 +151,9 @@ func (emt *ExecModuleTester) Close() {
 	emt.cancel()
 	if err := emt.bgComponentsEg.Wait(); err != nil && emt.tb != nil {
 		require.Equal(emt.tb, context.Canceled, err) // upon waiting for clean exit we should get ctx cancelled
+	}
+	if emt.blockRetire != nil {
+		emt.blockRetire.Close()
 	}
 	if emt.Engine != nil {
 		emt.Engine.Close()
@@ -338,6 +344,12 @@ func WithFcuBackgroundCommit() Option {
 	}
 }
 
+func WithFcuForegroundCommit() Option {
+	return func(opts *options) {
+		opts.fcuBackgroundCommit = false
+	}
+}
+
 // WithAlwaysGenerateChangesets pins --experimental.always-generate-changesets
 // regardless of the tester default: true for tests that reorg deeper than
 // MaxReorgDepth, false for tests that rely on the windowed-changesets
@@ -345,6 +357,15 @@ func WithFcuBackgroundCommit() Option {
 func WithAlwaysGenerateChangesets(v bool) Option {
 	return func(opts *options) {
 		opts.alwaysGenerateChangesets = &v
+	}
+}
+
+// WithMaxReorgDepth pins syncCfg.MaxReorgDepth so the changeset window
+// (maxBlockNum-MaxReorgDepth) can be placed mid-batch — leaving earlier blocks
+// pre-window (BAL-fold candidates) and later blocks window (per-block changeset).
+func WithMaxReorgDepth(d uint64) Option {
+	return func(opts *options) {
+		opts.maxReorgDepth = &d
 	}
 }
 
@@ -373,6 +394,7 @@ type options struct {
 	fcuBackgroundCommit      bool
 	fcuBackgroundPrune       bool
 	alwaysGenerateChangesets *bool
+	maxReorgDepth            *uint64
 	sentryProtocol           uint
 }
 
@@ -380,11 +402,12 @@ func applyOptions(opts []Option) options {
 	defaultKey, _ := crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f291")
 	defaultPruneMode := prune.MockMode
 	opt := options{
-		key:             defaultKey,
-		pruneMode:       &defaultPruneMode,
-		chainConfig:     chain.TestChainBerlinConfig,
-		experimentalBAL: false,
-		sentryProtocol:  direct.ETH68,
+		key:                 defaultKey,
+		pruneMode:           &defaultPruneMode,
+		chainConfig:         chain.TestChainBerlinConfig,
+		experimentalBAL:     false,
+		sentryProtocol:      direct.ETH68,
+		fcuBackgroundCommit: true,
 	}
 	for _, o := range opts {
 		o(&opt)
@@ -447,6 +470,9 @@ func New(tb testing.TB, opts ...Option) *ExecModuleTester {
 	if opt.alwaysGenerateChangesets != nil {
 		cfg.AlwaysGenerateChangesets = *opt.alwaysGenerateChangesets
 	}
+	if opt.maxReorgDepth != nil {
+		cfg.Sync.MaxReorgDepth = *opt.maxReorgDepth
+	}
 	cfg.PersistReceiptsCacheV2 = true
 	cfg.ChaosMonkey = false
 	cfg.Snapshot.ChainName = gspec.Config.ChainName
@@ -489,7 +515,7 @@ func New(tb testing.TB, opts ...Option) *ExecModuleTester {
 	}
 
 	erigonGrpcServer := remotedbserver.NewKvServer(ctx, db, nil, nil, nil, logger)
-	allSnapshots := freezeblocks.NewRoSnapshots(cfg.Snapshot, dirs.Snap, logger)
+	allSnapshots := blocksnapshots.NewRoSnapshots(cfg.Snapshot, dirs.Snap, logger)
 	allBorSnapshots := heimdall.NewRoSnapshots(cfg.Snapshot, dirs.Snap, logger)
 
 	br := freezeblocks.NewBlockReader(allSnapshots, allBorSnapshots)
@@ -657,7 +683,8 @@ func New(tb testing.TB, opts ...Option) *ExecModuleTester {
 		logger,
 	)
 
-	blockRetire := freezeblocks.NewBlockRetire(1, dirs, mock.BlockReader, blockWriter, mock.DB, nil, nil, mock.ChainConfig, &cfg, mock.Notifications.Events, nil, logger)
+	blockRetire := freezeblocks.NewBlockRetire(mock.Ctx, 1, dirs, mock.BlockReader, blockWriter, mock.DB, nil, nil, mock.ChainConfig, &cfg, mock.Notifications.Events, nil, logger)
+	mock.blockRetire = blockRetire
 	mock.Sync = stagedsync.New(
 		cfg.Sync,
 		stagedsync.DefaultStages(
@@ -748,6 +775,13 @@ func New(tb testing.TB, opts ...Option) *ExecModuleTester {
 	)
 	mock.ForkValidator = mock.ExecModule.ForkValidator()
 
+	// Mirror production (node/eth/backend.go): readers fall back to the
+	// published in-flight SharedDomains when no foreground context is active,
+	// so consensus-table reads see not-yet-committed state under background
+	// commit instead of a stale raw DB.
+	mock.ExecModule.SetPublishedSD(mock.Notifications.Events.LatestSD)
+	mock.StateCache.SetPublishedSD(mock.Notifications.Events.LatestSD)
+
 	mock.StreamWg.Add(1)
 	mock.bgComponentsEg.Go(func() error {
 		mock.sentriesClient.RecvMessageLoop(mock.Ctx, mock.SentryClient, &mock.ReceiveWg)
@@ -796,6 +830,14 @@ func (emt *ExecModuleTester) EnableLogs() {
 }
 
 func (emt *ExecModuleTester) Cfg() ethconfig.Config { return emt.cfg }
+
+// PublishedSD returns the latest published SharedDomains (the tip after the
+// last FCU). Pass it to blockgen.GenerateChain when building on the tip so the
+// generator reads the tip's in-flight state under background commit instead of
+// a lagging raw DB.
+func (emt *ExecModuleTester) PublishedSD() *execctx.SharedDomains {
+	return emt.Notifications.Events.LatestSD()
+}
 
 func (emt *ExecModuleTester) insertPoSBlocks(chain *blockgen.ChainPack) error {
 	wr := chainreader.NewChainReaderEth1(emt.ChainConfig, emt.ExecModule, time.Hour)

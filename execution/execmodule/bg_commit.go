@@ -144,7 +144,15 @@ func (e *ExecModule) commitWorker() {
 // runCommit flushes + commits one generation's delta in a foreground-free
 // window. Called only by commitWorker.
 func (e *ExecModule) runCommit(gen *commitGen) {
-	e.waitForegroundIdle()
+	// Hold the foreground semaphore for the whole flush+commit+prune, not just
+	// wait for idle: prune physically collates/removes domain history, and a
+	// foreground FCU acquiring mid-prune could run a reorg unwind against
+	// half-pruned state and re-execute to a wrong (empty) root.
+	if err := e.fgAcquire(e.bacgroundCtx); err != nil {
+		e.markGenCommitted(gen)
+		return
+	}
+	defer e.fgRelease()
 	err := e.runPostForkchoice(gen.sd, gen.roTx, gen.finishProgressBefore, gen.isSynced, gen.initialCycle)
 	if err != nil && !errors.Is(err, context.Canceled) {
 		e.logger.Error("background commit failed", "err", err)
@@ -168,7 +176,23 @@ func (e *ExecModule) runCommit(gen *commitGen) {
 func (e *ExecModule) markGenCommitted(gen *commitGen) {
 	e.fgMu.Lock()
 	gen.committed = true
+	e.uncommittedGens--
 	e.fgMu.Unlock()
+}
+
+// maxInFlightCommits bounds the not-yet-committed generation chain. Each
+// in-flight generation adds a level to the block-overlay parent chain that
+// foreground reads walk, so an unbounded chain degrades every read; the bound
+// also forces a foreground-idle window (via commitBacklogFull → Busy) so the
+// commit worker can never be starved by back-to-back FCUs.
+const maxInFlightCommits = 4
+
+// commitBacklogFull reports whether the not-yet-committed generation chain has
+// reached maxInFlightCommits.
+func (e *ExecModule) commitBacklogFull() bool {
+	e.fgMu.Lock()
+	defer e.fgMu.Unlock()
+	return e.uncommittedGens >= maxInFlightCommits
 }
 
 // latestGen returns the newest in-flight generation — the parent a new
@@ -187,6 +211,7 @@ func (e *ExecModule) latestGen() *execctx.SharedDomains {
 func (e *ExecModule) addGen(gen *commitGen) {
 	e.fgMu.Lock()
 	e.gens = append(e.gens, gen)
+	e.uncommittedGens++
 	e.fgMu.Unlock()
 }
 
@@ -219,4 +244,5 @@ func (e *ExecModule) closeAllGens() {
 		g.sd.Close()
 	}
 	e.gens = nil
+	e.uncommittedGens = 0
 }

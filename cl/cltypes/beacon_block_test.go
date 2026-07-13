@@ -28,6 +28,7 @@ import (
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/hexutil"
 	chainspec "github.com/erigontech/erigon/execution/chain/spec"
 	"github.com/erigontech/erigon/execution/types"
 )
@@ -153,6 +154,257 @@ func TestBeaconBodyGetExecutionRequestsListDenebNil(t *testing.T) {
 
 	requests := body.GetExecutionRequestsList()
 	require.Nil(t, requests)
+}
+
+func TestGetExecutionRequestsListGloasBuilderRequests(t *testing.T) {
+	cfg := clparams.MainnetBeaconConfig
+	requests := NewExecutionRequestsWithVersion(&cfg, clparams.GloasVersion)
+	builderDeposit := &solid.BuilderDepositRequest{
+		Amount: 123,
+	}
+	builderDeposit.PubKey[0] = 0x11
+	builderDeposit.WithdrawalCredentials[0] = byte(cfg.BuilderWithdrawalPrefix)
+	builderDeposit.Signature[0] = 0x22
+	builderExit := &solid.BuilderExitRequest{
+		SourceAddress: common.HexToAddress("0x0000000000000000000000000000000000001234"),
+	}
+	builderExit.PubKey[0] = 0x33
+	requests.BuilderDeposits.Append(builderDeposit)
+	requests.BuilderExits.Append(builderExit)
+
+	list := GetExecutionRequestsList(&cfg, requests)
+	require.Len(t, list, 2)
+	require.Equal(t, byte(cfg.BuilderDepositRequestType), list[0][0])
+	require.Equal(t, byte(cfg.BuilderExitRequestType), list[1][0])
+
+	encodedDeposit, err := builderDeposit.EncodeSSZ(nil)
+	require.NoError(t, err)
+	encodedExit, err := builderExit.EncodeSSZ(nil)
+	require.NoError(t, err)
+	require.Equal(t, append(hexutil.Bytes{byte(cfg.BuilderDepositRequestType)}, encodedDeposit...), list[0])
+	require.Equal(t, append(hexutil.Bytes{byte(cfg.BuilderExitRequestType)}, encodedExit...), list[1])
+}
+
+func TestDecodeExecutionRequestsListGloasAllTypes(t *testing.T) {
+	cfg := clparams.MainnetBeaconConfig
+	deposit := &solid.DepositRequest{Amount: 1, Index: 2}
+	deposit.PubKey[0] = 0x11
+	withdrawal := &solid.WithdrawalRequest{SourceAddress: common.HexToAddress("0x0000000000000000000000000000000000001234"), Amount: 3}
+	withdrawal.ValidatorPubKey[0] = 0x22
+	consolidation := &solid.ConsolidationRequest{SourceAddress: common.HexToAddress("0x0000000000000000000000000000000000005678")}
+	consolidation.SourcePubKey[0] = 0x33
+	consolidation.TargetPubKey[0] = 0x44
+	builderDeposit := &solid.BuilderDepositRequest{Amount: 4}
+	builderDeposit.PubKey[0] = 0x55
+	builderDeposit.WithdrawalCredentials[0] = byte(cfg.BuilderWithdrawalPrefix)
+	builderExit := &solid.BuilderExitRequest{SourceAddress: common.HexToAddress("0x0000000000000000000000000000000000009abc")}
+	builderExit.PubKey[0] = 0x66
+
+	encodedDeposit, err := deposit.EncodeSSZ(nil)
+	require.NoError(t, err)
+	encodedWithdrawal, err := withdrawal.EncodeSSZ(nil)
+	require.NoError(t, err)
+	encodedConsolidation, err := consolidation.EncodeSSZ(nil)
+	require.NoError(t, err)
+	encodedBuilderDeposit, err := builderDeposit.EncodeSSZ(nil)
+	require.NoError(t, err)
+	encodedBuilderExit, err := builderExit.EncodeSSZ(nil)
+	require.NoError(t, err)
+
+	out, err := DecodeExecutionRequestsList(&cfg, []hexutil.Bytes{
+		append(hexutil.Bytes{byte(cfg.DepositRequestType)}, encodedDeposit...),
+		append(hexutil.Bytes{byte(cfg.WithdrawalRequestType)}, encodedWithdrawal...),
+		append(hexutil.Bytes{byte(cfg.ConsolidationRequestType)}, encodedConsolidation...),
+		append(hexutil.Bytes{byte(cfg.BuilderDepositRequestType)}, encodedBuilderDeposit...),
+		append(hexutil.Bytes{byte(cfg.BuilderExitRequestType)}, encodedBuilderExit...),
+	}, clparams.GloasVersion)
+	require.NoError(t, err)
+
+	require.Equal(t, uint64(1), out.Deposits.Get(0).Amount)
+	require.Equal(t, withdrawal.SourceAddress, out.Withdrawals.Get(0).SourceAddress)
+	require.Equal(t, consolidation.SourceAddress, out.Consolidations.Get(0).SourceAddress)
+	require.Equal(t, uint64(4), out.BuilderDeposits.Get(0).Amount)
+	require.Equal(t, builderExit.SourceAddress, out.BuilderExits.Get(0).SourceAddress)
+}
+
+func TestDecodeExecutionRequestsListRejectsInvalidShape(t *testing.T) {
+	cfg := clparams.MainnetBeaconConfig
+	emptyDeposits, err := solid.NewStaticListSSZ[*solid.DepositRequest](1, solid.SizeDepositRequest).EncodeSSZ(nil)
+	require.NoError(t, err)
+	emptyWithdrawals, err := solid.NewStaticListSSZ[*solid.WithdrawalRequest](1, solid.SizeWithdrawalRequest).EncodeSSZ(nil)
+	require.NoError(t, err)
+	emptyBuilderDeposits, err := solid.NewStaticListSSZ[*solid.BuilderDepositRequest](int(cfg.MaxBuilderDepositRequestsPerPayload), solid.SizeBuilderDepositRequest).EncodeSSZ(nil)
+	require.NoError(t, err)
+
+	for _, tc := range []struct {
+		name     string
+		version  clparams.StateVersion
+		requests []hexutil.Bytes
+	}{
+		{
+			name:     "empty entry",
+			version:  clparams.GloasVersion,
+			requests: []hexutil.Bytes{{}},
+		},
+		{
+			name:     "type only entry",
+			version:  clparams.GloasVersion,
+			requests: []hexutil.Bytes{{byte(cfg.DepositRequestType)}},
+		},
+		{
+			name:    "duplicate",
+			version: clparams.GloasVersion,
+			requests: []hexutil.Bytes{
+				append(hexutil.Bytes{byte(cfg.DepositRequestType)}, emptyDeposits...),
+				append(hexutil.Bytes{byte(cfg.DepositRequestType)}, emptyDeposits...),
+			},
+		},
+		{
+			name:    "out of order",
+			version: clparams.GloasVersion,
+			requests: []hexutil.Bytes{
+				append(hexutil.Bytes{byte(cfg.WithdrawalRequestType)}, emptyWithdrawals...),
+				append(hexutil.Bytes{byte(cfg.DepositRequestType)}, emptyDeposits...),
+			},
+		},
+		{
+			name:     "unknown",
+			version:  clparams.GloasVersion,
+			requests: []hexutil.Bytes{{0xff, 0x00}},
+		},
+		{
+			name:     "builder before gloas",
+			version:  clparams.FuluVersion,
+			requests: []hexutil.Bytes{append(hexutil.Bytes{byte(cfg.BuilderDepositRequestType)}, emptyBuilderDeposits...)},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := DecodeExecutionRequestsList(&cfg, tc.requests, tc.version)
+			require.Error(t, err)
+		})
+	}
+}
+
+func TestGetExecutionRequestsListPreGloasOmitsBuilderRequests(t *testing.T) {
+	cfg := clparams.MainnetBeaconConfig
+	requests := NewExecutionRequestsWithVersion(&cfg, clparams.FuluVersion)
+	requests.BuilderDeposits.Append(&solid.BuilderDepositRequest{Amount: 1})
+	requests.BuilderExits.Append(&solid.BuilderExitRequest{})
+
+	require.Empty(t, GetExecutionRequestsList(&cfg, requests))
+}
+
+func TestExecutionRequestsJSONRejectsPreGloasBuilderRequests(t *testing.T) {
+	cfg := clparams.MainnetBeaconConfig
+	requests := NewExecutionRequestsWithVersion(&cfg, clparams.FuluVersion)
+
+	err := requests.UnmarshalJSON([]byte(`{"deposits":[],"withdrawals":[],"consolidations":[],"builder_deposits":[{"pubkey":"0x000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000","withdrawal_credentials":"0x0000000000000000000000000000000000000000000000000000000000000000","amount":"1","signature":"0x000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000"}],"builder_exits":[]}`))
+	require.Error(t, err)
+}
+
+func TestExecutionRequestsJSONTreatsNullListsAsEmpty(t *testing.T) {
+	cfg := clparams.MainnetBeaconConfig
+	requests := NewExecutionRequestsWithVersion(&cfg, clparams.FuluVersion)
+
+	require.NotPanics(t, func() {
+		err := requests.UnmarshalJSON([]byte(`{"deposits":null,"withdrawals":null,"consolidations":null,"builder_deposits":null,"builder_exits":null}`))
+		require.NoError(t, err)
+	})
+	require.Equal(t, 0, requests.Deposits.Len())
+	require.Equal(t, 0, requests.Withdrawals.Len())
+	require.Equal(t, 0, requests.Consolidations.Len())
+	require.Equal(t, 0, requests.BuilderDeposits.Len())
+	require.Equal(t, 0, requests.BuilderExits.Len())
+}
+
+func TestExecutionRequestsMarshalJSONOmitsBuilderRequestsBeforeGloas(t *testing.T) {
+	cfg := clparams.MainnetBeaconConfig
+	requests := NewExecutionRequestsWithVersion(&cfg, clparams.FuluVersion)
+
+	body, err := json.Marshal(requests)
+	require.NoError(t, err)
+
+	require.NotContains(t, string(body), "builder_deposits")
+	require.NotContains(t, string(body), "builder_exits")
+}
+
+func TestExecutionRequestsMarshalJSONIncludesBuilderRequestsAtGloas(t *testing.T) {
+	cfg := clparams.MainnetBeaconConfig
+	requests := NewExecutionRequestsWithVersion(&cfg, clparams.GloasVersion)
+
+	body, err := json.Marshal(requests)
+	require.NoError(t, err)
+
+	require.Contains(t, string(body), "builder_deposits")
+	require.Contains(t, string(body), "builder_exits")
+}
+
+func TestNewExecutionRequestsDefaultIsPreGloas(t *testing.T) {
+	cfg := clparams.MainnetBeaconConfig
+
+	requests := NewExecutionRequests(&cfg)
+	gloasRequests := NewExecutionRequestsWithVersion(&cfg, clparams.GloasVersion)
+	requestsRoot, err := requests.HashSSZ()
+	require.NoError(t, err)
+	gloasRequestsRoot, err := gloasRequests.HashSSZ()
+	require.NoError(t, err)
+
+	require.NotEqual(t, gloasRequestsRoot, requestsRoot)
+}
+
+func TestExecutionRequestsZeroValueIsPreGloas(t *testing.T) {
+	cfg := clparams.MainnetBeaconConfig
+	zero := &ExecutionRequests{cfg: &cfg}
+	constructed := NewExecutionRequests(&cfg)
+
+	zeroRoot, err := zero.HashSSZ()
+	require.NoError(t, err)
+	constructedRoot, err := constructed.HashSSZ()
+	require.NoError(t, err)
+
+	require.Equal(t, constructedRoot, zeroRoot)
+}
+
+func TestExecutionRequestsNilConfigPanics(t *testing.T) {
+	require.Panics(t, func() {
+		_ = NewExecutionRequests(nil)
+	})
+	require.Panics(t, func() {
+		_, _ = (&ExecutionRequests{}).HashSSZ()
+	})
+}
+
+func TestExecutionRequestsCloneCopiesLists(t *testing.T) {
+	cfg := clparams.MainnetBeaconConfig
+	requests := NewExecutionRequestsWithVersion(&cfg, clparams.GloasVersion)
+	requests.Deposits.Append(&solid.DepositRequest{Amount: 1})
+	requests.Withdrawals.Append(&solid.WithdrawalRequest{Amount: 2})
+	requests.Consolidations.Append(&solid.ConsolidationRequest{SourceAddress: common.HexToAddress("0x0000000000000000000000000000000000001234")})
+	requests.BuilderDeposits.Append(&solid.BuilderDepositRequest{Amount: 3})
+	requests.BuilderExits.Append(&solid.BuilderExitRequest{SourceAddress: common.HexToAddress("0x0000000000000000000000000000000000005678")})
+
+	cloned := requests.Clone().(*ExecutionRequests)
+	require.Equal(t, requests.Deposits.Get(0), cloned.Deposits.Get(0))
+	require.Equal(t, requests.Withdrawals.Get(0), cloned.Withdrawals.Get(0))
+	require.Equal(t, requests.Consolidations.Get(0), cloned.Consolidations.Get(0))
+	require.Equal(t, requests.BuilderDeposits.Get(0), cloned.BuilderDeposits.Get(0))
+	require.Equal(t, requests.BuilderExits.Get(0), cloned.BuilderExits.Get(0))
+	require.NotSame(t, requests.Deposits.Get(0), cloned.Deposits.Get(0))
+	require.NotSame(t, requests.Withdrawals.Get(0), cloned.Withdrawals.Get(0))
+	require.NotSame(t, requests.Consolidations.Get(0), cloned.Consolidations.Get(0))
+	require.NotSame(t, requests.BuilderDeposits.Get(0), cloned.BuilderDeposits.Get(0))
+	require.NotSame(t, requests.BuilderExits.Get(0), cloned.BuilderExits.Get(0))
+
+	cloned.Deposits.Get(0).Amount = 10
+	cloned.Withdrawals.Get(0).Amount = 20
+	cloned.Consolidations.Get(0).SourceAddress = common.HexToAddress("0x0000000000000000000000000000000000009999")
+	cloned.BuilderDeposits.Get(0).Amount = 30
+	cloned.BuilderExits.Get(0).SourceAddress = common.HexToAddress("0x0000000000000000000000000000000000008888")
+	require.Equal(t, uint64(1), requests.Deposits.Get(0).Amount)
+	require.Equal(t, uint64(2), requests.Withdrawals.Get(0).Amount)
+	require.Equal(t, common.HexToAddress("0x0000000000000000000000000000000000001234"), requests.Consolidations.Get(0).SourceAddress)
+	require.Equal(t, uint64(3), requests.BuilderDeposits.Get(0).Amount)
+	require.Equal(t, common.HexToAddress("0x0000000000000000000000000000000000005678"), requests.BuilderExits.Get(0).SourceAddress)
 }
 
 // TestNewBeaconBody_VersionSpecificFields verifies that NewBeaconBody creates

@@ -230,11 +230,12 @@ type ExecModule struct {
 	// see bg_commit.go). fgMu guards fgCount + gens; fgIdle is signalled
 	// when fgCount reaches zero so the commit worker can run in a
 	// foreground-free window.
-	fgMu     sync.Mutex
-	fgCount  int
-	fgIdle   *sync.Cond
-	gens     []*commitGen
-	commitCh chan *commitGen
+	fgMu            sync.Mutex
+	fgCount         int
+	fgIdle          *sync.Cond
+	gens            []*commitGen
+	uncommittedGens int
+	commitCh        chan *commitGen
 	// commitWorker lifecycle: commitWorkerStop signals the worker to drain
 	// and exit; commitWg tracks it so shutdown (WaitIdle) waits for the
 	// worker — and its in-flight commit txs — to finish before DB-close.
@@ -794,7 +795,7 @@ func (e *ExecModule) Start(ctx context.Context, hook *stageloop.Hook) {
 		}
 		e.forkValidator.NotifyCurrentHeight(progress)
 		return nil
-	}); err != nil {
+	}); err != nil && !errors.Is(err, context.Canceled) {
 		e.logger.Warn("Could not notify fork validator of current height", "err", err)
 	}
 }

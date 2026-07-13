@@ -408,9 +408,18 @@ func InitPraguePreDeploys(db kv.TemporalRwDB, config *chain.Config, logger log.L
 // Blocks created by GenerateChain do not contain valid proof of work
 // values. Inserting them into BlockChain requires use of FakePow or
 // a similar non-validating proof of work implementation.
-func GenerateChain(config *chain.Config, parent *types.Block, engine rules.Engine, db kv.TemporalRoDB, n int, gen func(int, *BlockGen)) (*ChainPack, error) {
+// GenerateChain builds n blocks on top of parent. The optional readSD is the
+// latest published SharedDomains: pass it when parent is the current tip so the
+// generator reads the tip's in-flight (not-yet-committed) state via the domain
+// chain instead of a raw DB that lags under background commit. Omit it for
+// historical-parent builds, which read committed state through their own SD.
+func GenerateChain(config *chain.Config, parent *types.Block, engine rules.Engine, db kv.TemporalRoDB, n int, gen func(int, *BlockGen), readSD ...*execctx.SharedDomains) (*ChainPack, error) {
 	if config == nil {
 		config = chain.AllProtocolChanges
+	}
+	var parentSD *execctx.SharedDomains
+	if len(readSD) > 0 {
+		parentSD = readSD[0]
 	}
 	headers, blocks, receipts := make([]*types.Header, n), make(types.Blocks, n), make([]types.Receipts, n)
 	chainreader := &FakeChainReader{Cfg: config, current: parent}
@@ -427,6 +436,9 @@ func GenerateChain(config *chain.Config, parent *types.Block, engine rules.Engin
 		return nil, err
 	}
 	defer domains.Close()
+	if parentSD != nil {
+		domains.SetParent(parentSD)
+	}
 	latestTxNum, _, err := domains.SeekCommitment(ctx, tx)
 	if err != nil {
 		return nil, err
@@ -435,9 +447,12 @@ func GenerateChain(config *chain.Config, parent *types.Block, engine rules.Engin
 	stateReader := state.NewReaderV3(domains.AsGetter(tx))
 	stateWriter := state.NewWriter(domains.AsPutDel(tx), nil, latestTxNum)
 
-	txNum, err := rawdbv3.TxNums.Max(ctx, tx, parent.NumberU64())
-	if err != nil {
-		return nil, err
+	txNum := latestTxNum
+	if parentSD == nil {
+		txNum, err = rawdbv3.TxNums.Max(ctx, tx, parent.NumberU64())
+		if err != nil {
+			return nil, err
+		}
 	}
 	txNumIncrement := func() {
 		txNum++

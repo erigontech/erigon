@@ -77,7 +77,7 @@ func TestGetBlockReceiptsFrozenBlocks(t *testing.T) {
 		tx, err := types.SignTx(types.NewTransaction(block.TxNonce(devp2pTestAddr), common.Address{1}, uint256.NewInt(1), params.TxGas, uint256.NewInt(m.Genesis.BaseFee().Uint64()), nil), *signer, devp2pTestKey)
 		require.NoError(t, err)
 		block.AddTx(tx)
-	})
+	}, m.PublishedSD())
 	require.NoError(t, err)
 	require.NoError(t, m.InsertChain(generated))
 	// Freeze the first segment's blocks into a snapshot file and prune them from

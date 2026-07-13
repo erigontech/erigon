@@ -54,10 +54,7 @@ type tailLRU struct {
 }
 
 func newTailLRU(maxCapacity uint32) *tailLRU {
-	start := uint32(tailStartCapacity)
-	if start > maxCapacity {
-		start = maxCapacity
-	}
+	start := min(uint32(tailStartCapacity), maxCapacity)
 	t := &tailLRU{maxCap: maxCapacity}
 	t.reserved = int64(start) * tailEntryBytes
 	cachebudget.Global.Take(t.reserved) // initial slice is small; take it unconditionally
@@ -102,10 +99,7 @@ func (t *tailLRU) maybeGrow() {
 	if curCap >= t.maxCap || old.Len() < int(curCap) {
 		return
 	}
-	newCap := curCap * tailGrowFactor
-	if newCap > t.maxCap {
-		newCap = t.maxCap
-	}
+	newCap := min(curCap*tailGrowFactor, t.maxCap)
 	delta := int64(newCap-curCap) * tailEntryBytes
 	if !cachebudget.Global.Reserve(delta) {
 		return
@@ -130,10 +124,7 @@ func (t *tailLRU) Remove(key uint64) {
 func (t *tailLRU) reset() {
 	t.resizeMu.Lock()
 	defer t.resizeMu.Unlock()
-	start := uint32(tailStartCapacity)
-	if start > t.maxCap {
-		start = t.maxCap
-	}
+	start := min(uint32(tailStartCapacity), t.maxCap)
 	cachebudget.Global.Release(t.reserved - int64(start)*tailEntryBytes)
 	t.reserved = int64(start) * tailEntryBytes
 	t.curCap.Store(start)
