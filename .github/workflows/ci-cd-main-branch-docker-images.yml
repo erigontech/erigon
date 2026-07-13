@@ -26,6 +26,7 @@ on:
 jobs:
 
   Build:
+    name: Build and publish docker image
     # runs-on: ubuntu-latest
     runs-on: [devops-01-self-hosted]
     environment: dockerhub-publish
@@ -207,3 +208,22 @@ jobs:
               fi
               echo "Done."
             done
+
+      - name: Notify Discord on failure
+        # Alert only on the automated main-branch builds; manual dispatch runs
+        # are watched by whoever triggered them. No-op when the webhook is unset.
+        if: ${{ failure() && github.event_name == 'push' }}
+        env:
+          DISCORD_WEBHOOK: ${{ secrets.DISCORD_WEBHOOK }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          BRANCH: ${{ github.ref_name }}
+        run: |
+          if [ -z "${DISCORD_WEBHOOK:-}" ]; then
+            echo "DISCORD_WEBHOOK not set — skipping Discord notification."
+            exit 0
+          fi
+          msg=":x: **CI-CD docker image build failed** on branch \`${BRANCH}\`\nRun: ${RUN_URL}"
+          payload=$(jq -nc --arg c "$msg" '{content: $c}')
+          curl -sS -f -H "Content-Type: application/json" -d "$payload" "$DISCORD_WEBHOOK" \
+            && echo "Discord notified." \
+            || echo "::warning::Discord notification failed (webhook unreachable or invalid)."
