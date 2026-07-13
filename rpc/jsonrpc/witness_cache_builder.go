@@ -23,6 +23,7 @@ import (
 
 	"github.com/erigontech/erigon/cmd/rpcdaemon/cli/httpcfg"
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/kvcache"
@@ -343,11 +344,23 @@ func decodeHeaderRefs(batch [][]byte) ([]headerRef, error) {
 	return refs, nil
 }
 
+// recoverWitnessBuild converts a panic in the witness build pipeline (EVM re-exec, commitment
+// fold, RLP decode) into a logged cache-miss. The on-demand RPC handler recovers such panics in
+// rpc/service.go; the builder goroutine runs in an errgroup with no recover, so without this an
+// unrecovered panic on one block would crash the whole node instead of failing that block.
+func recoverWitnessBuild(block uint64) {
+	if r := recover(); r != nil {
+		witnessCacheBuildFailOtherCounter.Inc()
+		log.Error("[witness-cache] build panic", "block", block, "panic", r, "stack", dbg.Stack())
+	}
+}
+
 // buildAndCache waits for num to commit, builds its legacy witness against the committed
 // tx via the shared buildWitnessResult seam, and stores it. It returns false without
 // caching on a reorg-away, a build error (so the block falls through to on-demand), or
 // shutdown; the caller checks ctx to distinguish shutdown.
 func (api *DebugAPIImpl) buildAndCache(ctx context.Context, num uint64, hash common.Hash) bool {
+	defer recoverWitnessBuild(num)
 	tx, ok, err := waitCommittedHead(ctx, api.db, num, hash)
 	if err != nil {
 		if ctx.Err() == nil {
@@ -435,6 +448,7 @@ func (api *DebugAPIImpl) buildAndCacheHeadCapture(ctx context.Context, pin *roll
 // when a witness was built and cached; a stale pin or any gate failure returns false and
 // caches nothing (fail-closed → out-of-window).
 func (api *DebugAPIImpl) tryHeadCaptureBuild(ctx context.Context, committedTx kv.TemporalTx, pin *rollingPin, num uint64, hash common.Hash) bool {
+	defer recoverWitnessBuild(num)
 	if num == 0 {
 		return false
 	}

@@ -604,3 +604,12 @@ func TestRollingPinStableUnderTipAdvance(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, pinAt, finish, "the held pin still resolves its original snapshot after the churn")
 }
+
+// A panic in the build pipeline must be contained so the builder goroutine (which runs in an
+// errgroup with no recover) degrades to a cache-miss instead of crashing the node.
+func TestRecoverWitnessBuildContainsPanic(t *testing.T) {
+	require.NotPanics(t, func() {
+		defer recoverWitnessBuild(42)
+		panic("simulated build pipeline panic")
+	})
+}
