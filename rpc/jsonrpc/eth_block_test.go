@@ -29,6 +29,7 @@ import (
 	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/db/kv/kvcache"
 	"github.com/erigontech/erigon/db/kv/prune"
+	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/execution/execmodule/execmoduletester"
 	"github.com/erigontech/erigon/execution/rlp"
@@ -55,16 +56,18 @@ func TestGetBlockByNumberWithLatestTag(t *testing.T) {
 func TestGetBlockByNumberWithLatestTag_WithHeadHashInDb(t *testing.T) {
 	m, _, _ := rpcdaemontest.CreateTestExecModule(t)
 	ctx := context.Background()
+	latestBlockHash := common.HexToHash("0x6804117de2f3e6ee32953e78ced1db7b20214e0d8c745a03b8fecf7cc8ee76ef")
+	var latestBlock *types.Block
+	require.NoError(t, m.OverlayDB().View(ctx, func(rtx kv.Tx) (err error) {
+		latestBlock, err = m.BlockReader.BlockByHash(ctx, rtx, latestBlockHash)
+		return err
+	}))
+	require.NotNil(t, latestBlock, "couldn't retrieve latest block")
+
 	tx, err := m.DB.BeginRw(ctx)
 	require.NoError(t, err)
 	defer tx.Rollback()
 
-	latestBlockHash := common.HexToHash("0x6804117de2f3e6ee32953e78ced1db7b20214e0d8c745a03b8fecf7cc8ee76ef")
-	latestBlock, err := m.BlockReader.BlockByHash(ctx, tx, latestBlockHash)
-	if err != nil {
-		tx.Rollback()
-		t.Errorf("couldn't retrieve latest block")
-	}
 	rawdb.WriteHeaderNumber(tx, latestBlockHash, latestBlock.NonceU64())
 	rawdb.WriteForkchoiceHead(tx, latestBlockHash)
 	if safedHeadBlock := rawdb.ReadForkchoiceHead(tx); safedHeadBlock == (common.Hash{}) {
@@ -129,16 +132,18 @@ func TestGetBlockByNumber_WithFinalizedTag_NoFinalizedBlockInDb(t *testing.T) {
 func TestGetBlockByNumber_WithFinalizedTag_WithFinalizedBlockInDb(t *testing.T) {
 	m, _, _ := rpcdaemontest.CreateTestExecModule(t)
 	ctx := context.Background()
+	latestBlockHash := common.HexToHash("0x6804117de2f3e6ee32953e78ced1db7b20214e0d8c745a03b8fecf7cc8ee76ef")
+	var latestBlock *types.Block
+	require.NoError(t, m.OverlayDB().View(ctx, func(rtx kv.Tx) (err error) {
+		latestBlock, err = m.BlockReader.BlockByHash(ctx, rtx, latestBlockHash)
+		return err
+	}))
+	require.NotNil(t, latestBlock, "couldn't retrieve latest block")
+
 	tx, err := m.DB.BeginRw(ctx)
 	require.NoError(t, err)
 	defer tx.Rollback()
 
-	latestBlockHash := common.HexToHash("0x6804117de2f3e6ee32953e78ced1db7b20214e0d8c745a03b8fecf7cc8ee76ef")
-	latestBlock, err := m.BlockReader.BlockByHash(ctx, tx, latestBlockHash)
-	if err != nil {
-		tx.Rollback()
-		t.Errorf("couldn't retrieve latest block")
-	}
 	rawdb.WriteHeaderNumber(tx, latestBlockHash, latestBlock.NonceU64())
 	rawdb.WriteForkchoiceFinalized(tx, latestBlockHash)
 	if safedFinalizedBlock := rawdb.ReadForkchoiceFinalized(tx); safedFinalizedBlock == (common.Hash{}) {
@@ -173,16 +178,18 @@ func TestGetBlockByNumber_WithSafeTag_NoSafeBlockInDb(t *testing.T) {
 func TestGetBlockByNumber_WithSafeTag_WithSafeBlockInDb(t *testing.T) {
 	m, _, _ := rpcdaemontest.CreateTestExecModule(t)
 	ctx := context.Background()
+	latestBlockHash := common.HexToHash("0x6804117de2f3e6ee32953e78ced1db7b20214e0d8c745a03b8fecf7cc8ee76ef")
+	var latestBlock *types.Block
+	require.NoError(t, m.OverlayDB().View(ctx, func(rtx kv.Tx) (err error) {
+		latestBlock, err = m.BlockReader.BlockByHash(ctx, rtx, latestBlockHash)
+		return err
+	}))
+	require.NotNil(t, latestBlock, "couldn't retrieve latest block")
+
 	tx, err := m.DB.BeginRw(ctx)
 	require.NoError(t, err)
 	defer tx.Rollback()
 
-	latestBlockHash := common.HexToHash("0x6804117de2f3e6ee32953e78ced1db7b20214e0d8c745a03b8fecf7cc8ee76ef")
-	latestBlock, err := m.BlockReader.BlockByHash(ctx, tx, latestBlockHash)
-	if err != nil {
-		tx.Rollback()
-		t.Errorf("couldn't retrieve latest block")
-	}
 	rawdb.WriteHeaderNumber(tx, latestBlockHash, latestBlock.NonceU64())
 	rawdb.WriteForkchoiceSafe(tx, latestBlockHash)
 	if safedSafeBlock := rawdb.ReadForkchoiceSafe(tx); safedSafeBlock == (common.Hash{}) {
