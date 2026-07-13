@@ -1568,7 +1568,10 @@ Snapshots are organised into several subdirectories. The main ones are:
 
 - You can replay a single historical transaction without re-executing its block.
 - If an account changes V1 → V2 → V1 within one block, `debug_getModifiedAccountsByNumber` correctly returns it.
-- Erigon stores compact per-transaction receipt *metadata* — cumulative gas used, blob gas used, log index — in a **required** receipt domain. Full receipts (with logs) live in a separate cache domain that is **off by default** in every prune mode (opt in with `--persist.receipts`). When a full receipt isn't cached, it is reconstructed on demand, re-deriving logs by re-execution.
+- Erigon stores compact per-transaction receipt *metadata* — cumulative gas used, blob gas used, log index — in a
+  **required** receipt domain. Full receipts (with logs) live in a separate cache domain that is **off by default** in
+  every prune mode (opt in with `--prune.include-receipts`). When a full receipt isn't cached, it is reconstructed on
+  demand, re-deriving logs by re-execution.
 
 ## What does it cost on disk?
 
@@ -1648,7 +1651,11 @@ In order to switch type of node, you must first delete the `/chaindata` folder i
 :::tip
 **Persisting receipts**, which are pre-calculated receipts, increase the requests-per-second (RPS) and improve the latency and throughput of all receipts and logs-related RPC calls.
 
-As of v3.6 they are disabled by default in every pruning mode (previously they were enabled by default for all modes except Archive); enable them with the flag `--persist.receipts`. Without them, receipts and logs are re-derived on demand from state history, so the related RPC calls keep working within the node's state-history window, just with higher latency. On a Historical Blocks node, persisted receipts additionally extend receipts and logs availability from the state-history window back to genesis.
+As of v3.6 they are disabled by default in every pruning mode (previously they were enabled by default for all modes
+except Archive); enable them with the flag `--prune.include-receipts` (the former `--persist.receipts` still works as an
+alias). Without them, receipts and logs are re-derived on demand from state history, so the related RPC calls keep
+working within the node's state-history window, just with higher latency. On a Historical Blocks node, persisted
+receipts additionally extend receipts and logs availability from the state-history window back to genesis.
 :::
 
 :::note[Breaking change in v3.5]
@@ -1675,7 +1682,15 @@ The Minimal Node configuration (`--prune.mode=minimal`) is the smallest possible
 
 ## Blocks node
 
-The Blocks Node configuration (`--prune.mode=blocks`) keeps the **full block and transaction history** — every block back to genesis — while pruning **state history**. It retains state only within the EIP-8252 window (the last 262,144 blocks), the same state-retention as a Full Node, but unlike a Full Node it never prunes older blocks. This suits users who need complete historical **block and transaction data** — for research, indexing, or block explorers — without paying the disk cost of an archive node's full historical **state**. For full-range **receipts and logs** (`eth_getLogs` / `eth_getBlockReceipts` back to genesis), add `--persist.receipts`; without it they are served only within the state-history window (the last 262,144 blocks).
+The Blocks Node configuration (`--prune.mode=blocks`) keeps the **full block and transaction history** — every block
+back to genesis — while pruning **state history**. It retains state only within the EIP-8252 window (the last 262,144
+blocks), the same state-retention as a Full Node, but unlike a Full Node it never prunes older blocks. This suits users
+who need complete historical **block and transaction data** — for research, indexing, or block explorers — without
+paying the disk cost of an archive node's full historical **state**. For full-range **receipts and logs**
+(`eth_getLogs` / `eth_getBlockReceipts` back to genesis), add
+`--prune.include-receipts --prune.receipts.distance=keep-all`; with `--prune.include-receipts` alone the receipt cache
+follows the state-history window (the last 262,144 blocks), and without it receipts are re-derived from state history
+within that same window.
 
 ---
 
@@ -1842,6 +1857,8 @@ In addition, Caplin can backfill recent blobs for an op-node or other uses with 
 
 * `--caplin.blobs-immediate-backfill`: Backfills the last 18 days' worth of blobs to quickly populate historical blob data for operational needs or analytics.
 
+With state archival enabled, Caplin's indexing database (`<datadir>/caplin/indexing`) is pruned automatically: state rows already frozen into snapshots are deleted on the antiquary cadence, so the database holds only the un-frozen tail. The `mdbx.dat` file does not shrink when rows are pruned — freed pages are reused, bounding future growth. Set `CAPLIN_STATE_PRUNE_DISABLE=true` to turn pruning off.
+
 ### PeerDAS Data Column Retention
 
 For nodes participating in PeerDAS (EIP-7594), Caplin retains data column sidecars for a configurable window:
@@ -1924,8 +1941,8 @@ These flags cover the general behavior and configuration of the Erigon client.
   * Default: `false`
 * `--ethstats value`: The reporting URL for an ethstats service.
 * `--trusted-setup-file value`: Absolute path to a `trusted_setup.json` file.
-* `--persist.receipts, --experiment.persist.receipts.v2`: Downloads historical receipts.
-  * Default: `true` for minimal and full nodes, `false` for archive nodes
+* `--prune.include-receipts, --persist.receipts, --experiment.persist.receipts.v2`: Downloads and caches historical receipts. Without it, receipts and logs are re-derived on demand from state history, so the related RPC calls still work, just with higher latency.
+  * Default: `false` (disabled) in every prune mode
 
 ### Database and Caching
 
@@ -1965,6 +1982,10 @@ Flags for managing how old chain data is handled and stored. See [Snapshots Mana
   * Default: unset (retention follows `--prune.mode`)
 * `--prune.include-commitment-history, --prune.experimental.include-commitment-history, --experimental.commitment-history`: Enables fast `eth_getProof` for executed blocks by storing commitment history. Requires +32 GB RAM. See [`eth_getProof`](/interacting-with-erigon/eth#eth_getproof).
   * Default: `false`
+* `--prune.commitment-history.distance value`: Keeps commitment history for the latest `N` blocks, or `keep-all`. Empty or `0` (default) keeps everything. Requires `--prune.include-commitment-history`.
+  * Default: unset (empty / `0`, keeps everything)
+* `--prune.receipts.distance, --persist.receipts.distance value`: Keeps the receipt cache for the latest `N` blocks, or `keep-all`. Empty or `0` (default) follows the state-history window. Requires `--prune.include-receipts`.
+  * Default: unset (empty / `0`, follows the state-history window)
 * `--snap.skip-state-snapshot-download`: Skips state download and starts from genesis.
   * Default: `false`
 * `--snap.keepblocks`: Workaround/debug — keeps ancient blocks in the DB instead of moving them into snapshots (useful for debugging).
@@ -2424,6 +2445,8 @@ Erigon supports configuration through environment variables, primarily for exper
 * `NO_MERGE` - Disables merging operations (flag equivalent: `--exec.no-merge`)
 * `PRUNE_TOTAL_DIFFICULTY` - Controls total difficulty pruning (default: `true`)
 * `MAX_REORG_DEPTH` - Sets maximum reorganization depth (default: `96`)
+* `CAPLIN_STATE_PRUNE_DISABLE` - Disables pruning of Caplin's state indexing DB after ranges are frozen into snapshots (default: `false`)
+* `CAPLIN_STATE_PRUNE_TIMEOUT` - Overrides the per-pass time budget for Caplin state pruning (a duration, e.g. `500ms`; default derived from the chain's slot time)
 
 **Execution and Processing:**
 

@@ -109,7 +109,7 @@ func StageCustomTraceCfg(produce []string, db kv.TemporalRwDB, dirs datadir.Dirs
 func SpawnCustomTrace(cfg CustomTraceCfg, ctx context.Context, logger log.Logger) error {
 	if cfg.Produce.RCacheDomain {
 		if err := cfg.db.View(context.Background(), func(tx kv.Tx) error {
-			return kvcfg.PersistReceipts.MustBeEnabled(tx, "you must enable `--persist.receipts` flag in db. remove chaindata and start erigon with this flag")
+			return kvcfg.PersistReceipts.MustBeEnabled(tx, "you must enable `--prune.include-receipts` flag in db. remove chaindata and start erigon with this flag")
 		}); err != nil {
 			panic(err)
 		}

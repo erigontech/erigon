@@ -116,15 +116,16 @@ type FullBlockReader interface {
 // BlockRetire - freezing blocks: moving old data from DB to snapshot files
 type BlockRetire interface {
 	PruneAncientBlocks(tx kv.RwTx, limit int, timeout time.Duration) (deleted int, err error)
-	RetireBlocksInBackground(
+	BuildFilesInBackground(
 		ctx context.Context,
-		miBlockNum uint64,
+		minBlockNum uint64,
 		maxBlockNum uint64,
 		lvl log.Lvl,
 		seeder downloader.SeederClient,
 		onFinishRetire func() error,
 		onDone func()) bool
 	BuildMissedIndicesIfNeed(ctx context.Context, logPrefix string, notifier DBEventNotifier) error
+	RetireTransactionFiles(blockTo uint64, onDelete func(l []string) error) (bool, error)
 	SetWorkers(workers int)
 	GetWorkers() int
 	Close()
@@ -139,7 +140,7 @@ type BlockSnapshots interface {
 	OpenFolder() error
 	OpenSegments(types []snaptype.Type, alignMin bool) error
 	SegmentsMax() uint64
-	Delete(fileNames ...string) error
+	RetireFilesAbove(blockNum uint64, onDelete func(l []string) error) error
 	Types() []snaptype.Type
 	Close()
 	DownloadComplete()

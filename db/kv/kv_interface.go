@@ -52,8 +52,14 @@ Naming:
  Stream - high-level iterator-like api over Table/InvertedIndex/History/Domain. Server-side-streaming-friendly. See package `stream`
 
 Methods Naming:
- Prune: delete old data
+ Prune: delete old data from DB (db rows already written to files)
  Unwind: delete recent data
+ Collate: read one step of data out of the db, ready to write into a file
+ BuildFiles: write (and index) collated steps into new immutable files
+ Merge: fold adjacent visible files into a bigger one - only produces a new file; the small inputs become garbage
+ Retire: drop old visible files past the prune window; unlink deferred until no reader references them
+   Merge and Retire read/delete only visible files. Invisible garbage (subsumed/overlapping) is dropped by a
+   separate clean-up: RemoveOverlaps / cleanAfterMerge (also the "clean garbage" CLI tools).
  Get: exact match of criteria
  Range: [from, to). from=nil means StartOfTable, to=nil means EndOfTable, rangeLimit=-1 means Unlimited
      Range is analog of SQL's: SELECT * FROM Table WHERE k>=from AND k<to ORDER BY k ASC/DESC LIMIT n
@@ -473,6 +479,18 @@ type TemporalTx interface {
 
 	Debug() TemporalDebugTx
 	AggTx() any
+}
+
+// TemporalFilesPin holds a consistent aggregator file snapshot so that multiple
+// read txns opened from it (BeginTemporalRo) all observe the same file
+// generation, even after newer generations are published. Concurrent readers
+// spawned from one commitment tx use this to avoid reading a domain from a file
+// generation inconsistent with the in-memory overlay that tx was built against.
+// Release with Close. A temporal tx exposes it via an optional `Pin()
+// TemporalFilesPin` method (type-asserted; not all backends can pin files).
+type TemporalFilesPin interface {
+	BeginTemporalRo(ctx context.Context) (TemporalTx, error)
+	Close()
 }
 
 // TemporalDebugTx - set of slow low-level funcs for debug purposes

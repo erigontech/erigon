@@ -76,12 +76,16 @@ jobs:
 
       - name: Print configuration (for logs)
         shell: bash
+        env:
+          RUN_ID: ${{ steps.vars.outputs.run_id }}
+          NETWORK: ${{ steps.vars.outputs.network }}
+          RUN_GETH: ${{ steps.vars.outputs.run_geth }}
         run: |
           set -euo pipefail
-          echo "Run ID:             ${{ steps.vars.outputs.run_id }}"
-          echo "Network:            ${{ steps.vars.outputs.network }}"
+          echo "Run ID:             $RUN_ID"
+          echo "Network:            $NETWORK"
           echo "Run Erigon:         true"
-          echo "Run Geth:           ${{ steps.vars.outputs.run_geth }}"
+          echo "Run Geth:           $RUN_GETH"
 
   test:
     name: Benchmark Historic ${{ matrix.client }}
@@ -107,9 +111,9 @@ jobs:
       - name: Set reference data dir based on branch
         run: |
           # For pull_request events base_ref is the target branch name; for push/dispatch parse from ref.
-          BRANCH="${{ github.base_ref }}"
+          BRANCH="$GITHUB_BASE_REF"
           if [ -z "$BRANCH" ]; then
-            BRANCH="${{ github.ref }}"
+            BRANCH="$GITHUB_REF"
             BRANCH="${BRANCH#refs/heads/}"
           fi
           if [[ "$BRANCH" == release/* ]]; then
@@ -131,10 +135,12 @@ jobs:
 
       - name: Checkout RPC Tests Repository
         if: matrix.client == 'erigon' || needs.setup.outputs.run_geth == 'true'
+        env:
+          RUNNER_WS: ${{ runner.workspace }}
         run: |
-          rm -rf ${{runner.workspace}}/rpc-tests
-          git -c advice.detachedHead=false clone --depth 1 --branch v2.4.0 https://github.com/erigontech/rpc-tests ${{runner.workspace}}/rpc-tests
-          cd ${{runner.workspace}}/rpc-tests
+          rm -rf "$RUNNER_WS/rpc-tests"
+          git -c advice.detachedHead=false clone --depth 1 --branch v2.4.0 https://github.com/erigontech/rpc-tests "$RUNNER_WS/rpc-tests"
+          cd "$RUNNER_WS/rpc-tests"
           make rpc_perf
 
       - name: Set up job-scoped build temp dir
@@ -263,13 +269,15 @@ jobs:
       - name: Run RPC Performance Tests
         id: test_step
         if: matrix.client == 'erigon' || needs.setup.outputs.run_geth == 'true'
+        env:
+          RUNNER_WS: ${{ runner.workspace }}
         run: |
           set +e # Disable exit on error
-          
+
           failed_test=0
-          
-          if [ "${{ matrix.client }}" == "erigon" ]; then
-            commit=$(git -C ${{runner.workspace}}/erigon rev-parse --short HEAD)
+
+          if [ "$CLIENT" == "erigon" ]; then
+            commit=$(git -C "$RUNNER_WS/erigon" rev-parse --short HEAD)
           else
             commit=$(git -C $GETH_INSTALL_DIR rev-parse --short HEAD)
           fi
@@ -353,7 +361,7 @@ jobs:
             echo "Save test result on DB"
 
             if [ "$client" == "erigon" ]; then
-              branch_name=${{ github.ref_name }}
+              branch_name="$GITHUB_REF_NAME"
               commit_hash=$(git -C $workspace/erigon rev-parse HEAD)
             else
               branch_name="release"
@@ -373,7 +381,7 @@ jobs:
               --commit $commit_hash \
               --test_name rpc-performance-test-$client${{ (matrix.client == 'erigon' && github.event.inputs.exec_mode == 'parallel' && '-parallel') || (matrix.client == 'erigon' && github.event.inputs.exec_mode == 'serial' && '-serial') || '' }}-$method \
               --chain $CHAIN \
-              --runner ${{ runner.name }} \
+              --runner "$RUNNER_NAME" \
               --db_version $db_version \
               --outcome $outcome \
               --result_file $result_dir/$result_file
@@ -392,16 +400,16 @@ jobs:
           }
 
           # Launch the RPC performance test runner
-          run_perf ${{runner.workspace}} $CHAIN eth_call stress_test_eth_call_001_14M 1:1,100:30,1000:20,10000:20,20000:20 $CLIENT
-          run_perf ${{runner.workspace}} $CHAIN eth_getLogs stress_test_eth_getLogs_15M 1:1,100:30,1000:20,10000:20,20000:20 $CLIENT
-          run_perf ${{runner.workspace}} $CHAIN eth_getBalance stress_test_eth_getBalance_15M 1:1,100:30,1000:20,10000:20,20000:20 $CLIENT
-          run_perf ${{runner.workspace}} $CHAIN eth_getBlockByHash stress_test_eth_getBlockByHash_14M 1:1,100:30,1000:20,2500:20 $CLIENT
-          run_perf ${{runner.workspace}} $CHAIN eth_getBlockByNumber stress_test_eth_getBlockByNumber_13M 1:1,100:30,1000:20,2500:20 $CLIENT
-          run_perf ${{runner.workspace}} $CHAIN eth_getTransactionByHash stress_test_eth_getTransactionByHash_13M 1:1,100:30,1000:20,10000:20 $CLIENT
-          run_perf ${{runner.workspace}} $CHAIN eth_getTransactionReceipt stress_test_eth_getTransactionReceipt_14M 1:1,100:30,1000:20,5000:20,10000:20,20000:20 $CLIENT
-          run_perf ${{runner.workspace}} $CHAIN eth_createAccessList stress_test_eth_createAccessList_16M 1:1,100:30,1000:20,10000:20,20000:20 $CLIENT          
-          run_perf ${{runner.workspace}} $CHAIN debug_traceTransaction stress_test_debug_trace_transaction_21M 1:1,100:30,1000:20,2500:20 $CLIENT          
-          run_perf ${{runner.workspace}} $CHAIN debug_storageRangeAt stress_test_debug_storageRangeAt_20M 1:1,100:30,1000:20,1800:20 $CLIENT          
+          run_perf "$RUNNER_WS" $CHAIN eth_call stress_test_eth_call_001_14M 1:1,100:30,1000:20,10000:20,20000:20 $CLIENT
+          run_perf "$RUNNER_WS" $CHAIN eth_getLogs stress_test_eth_getLogs_15M 1:1,100:30,1000:20,10000:20,20000:20 $CLIENT
+          run_perf "$RUNNER_WS" $CHAIN eth_getBalance stress_test_eth_getBalance_15M 1:1,100:30,1000:20,10000:20,20000:20 $CLIENT
+          run_perf "$RUNNER_WS" $CHAIN eth_getBlockByHash stress_test_eth_getBlockByHash_14M 1:1,100:30,1000:20,2500:20 $CLIENT
+          run_perf "$RUNNER_WS" $CHAIN eth_getBlockByNumber stress_test_eth_getBlockByNumber_13M 1:1,100:30,1000:20,2500:20 $CLIENT
+          run_perf "$RUNNER_WS" $CHAIN eth_getTransactionByHash stress_test_eth_getTransactionByHash_13M 1:1,100:30,1000:20,10000:20 $CLIENT
+          run_perf "$RUNNER_WS" $CHAIN eth_getTransactionReceipt stress_test_eth_getTransactionReceipt_14M 1:1,100:30,1000:20,5000:20,10000:20,20000:20 $CLIENT
+          run_perf "$RUNNER_WS" $CHAIN eth_createAccessList stress_test_eth_createAccessList_16M 1:1,100:30,1000:20,10000:20,20000:20 $CLIENT          
+          run_perf "$RUNNER_WS" $CHAIN debug_traceTransaction stress_test_debug_trace_transaction_21M 1:1,100:30,1000:20,2500:20 $CLIENT          
+          run_perf "$RUNNER_WS" $CHAIN debug_storageRangeAt stress_test_debug_storageRangeAt_20M 1:1,100:30,1000:20,1800:20 $CLIENT          
           
           # Save the subsection reached status
           
@@ -439,8 +447,10 @@ jobs:
 
       - name: Restore Erigon Chaindata Directory
         if: always() && matrix.client == 'erigon' && steps.save_chaindata_step.outputs.datadir_saved == 'true'
+        env:
+          SAVE_CHAINDATA_OUTCOME: ${{ steps.save_chaindata_step.outcome }}
         run: |
-          if [ -d "$ERIGON_TESTBED_AREA/chaindata-prev" ] && [ "${{ steps.save_chaindata_step.outcome }}" == "success" ]; then
+          if [ -d "$ERIGON_TESTBED_AREA/chaindata-prev" ] && [ "$SAVE_CHAINDATA_OUTCOME" == "success" ]; then
           rm -rf $ERIGON_REFERENCE_DATA_DIR/chaindata
           echo "Restore chaindata"
           mv $ERIGON_TESTBED_AREA/chaindata-prev $ERIGON_REFERENCE_DATA_DIR/chaindata
@@ -475,8 +485,10 @@ jobs:
 
       - name: Action to check failure condition
         if: failure()
+        env:
+          TEST_EXECUTED: ${{ steps.test_step.outputs.test_executed }}
         run: |
-          if [ "${{ steps.test_step.outputs.test_executed }}" != "true" ]; then
+          if [ "$TEST_EXECUTED" != "true" ]; then
             echo "::error::Test not executed, workflow failed for infrastructure reasons"
           fi
           exit 1

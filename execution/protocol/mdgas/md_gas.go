@@ -51,24 +51,21 @@ type FullMdGas struct {
 	Blob uint64
 }
 
-// MdGasUsage reports per-frame gas usage with a signed State component.
-// State is the net state-gas charged minus inline state-gas refunds
-// credited (per EIP-8037): it goes negative when refunds in a frame
-// exceed its own charges — i.e. an SSTORE/CREATE clear refund inside
-// a callee that matches a charge an ancestor made (sharing storage via
-// CALLCODE/DELEGATECALL, or against a tx-level intrinsic state charge).
+// MdGasUsage reports per-frame gas usage.
 type MdGasUsage struct {
-	Regular uint64
-	State   int64
+	Regular    uint64
+	State      int64 // can be negative due to state clearing (e.g. SSTORE clear)
+	StateSpill uint64
 }
 
 // PlusIntrinsic folds an intrinsic-gas MdGas into the frame-usage report,
-// preserving signed semantics on State so a net state refund stays
+// preserving signed semantics on State so a net state refill stays
 // negative in the combined value.
 func (u MdGasUsage) PlusIntrinsic(igas MdGas) MdGasUsage {
 	return MdGasUsage{
-		Regular: u.Regular + igas.Regular,
-		State:   u.State + int64(igas.State),
+		Regular:    u.Regular + igas.Regular,
+		State:      u.State + int64(igas.State),
+		StateSpill: u.StateSpill,
 	}
 }
 
