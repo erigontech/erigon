@@ -178,8 +178,8 @@ func (c *StateCache) putCodeWithHash(addr, code, codeHash []byte, txNum uint64, 
 	}
 }
 
-// HasLiveCode reports whether addr has a live code-cache binding a
-// conditional put would defer to; see CodeCache.ContainsLive.
+// HasLiveCode reports whether addr resolves to live code bytes; see
+// CodeCache.ContainsLive.
 func (c *StateCache) HasLiveCode(addr []byte) bool {
 	cc, ok := c.caches[kv.CodeDomain].(*CodeCache)
 	return ok && cc.ContainsLive(addr)

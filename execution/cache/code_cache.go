@@ -84,10 +84,6 @@ type versionedAddressID struct {
 	codeHash [32]byte
 	txNum    uint64
 	epoch    uint32
-	// deleted marks a live no-code binding — the code-cache analogue of a
-	// domain tombstone: a valid negative on read that conditional binds defer
-	// to (see the Cache interface's no-Delete note).
-	deleted bool
 }
 
 type addrCodeHashEntry struct {
@@ -296,9 +292,6 @@ func (c *CodeCache) GetWithTxNum(addr []byte) ([]byte, uint64, bool) {
 		return nil, 0, false
 	}
 	c.addrHits.Add(1)
-	if vID.deleted {
-		return nil, vID.txNum, true
-	}
 
 	ce, ok := c.hashToCode.Get(vID.addrID)
 	if !ok || len(ce.code) == 0 {
@@ -345,13 +338,6 @@ func (c *CodeCache) PutIfAbsent(addr []byte, code []byte, txNum uint64) {
 // cold code can't both Add and permanently inflate codeSize.
 func (c *CodeCache) putCode(addr []byte, code []byte, keyHash [32]byte, txNum uint64, overwriteAddr bool) {
 	if len(code) == 0 {
-		// An authoritative nil put is a deletion — bind a live no-code marker.
-		// Conditional nil puts stay no-ops.
-		if overwriteAddr && len(addr) > 0 {
-			c.addrBindMu.Lock()
-			c.addrToHash.Add(common.BytesToAddress(addr), versionedAddressID{deleted: true, txNum: txNum, epoch: c.coh.Epoch()})
-			c.addrBindMu.Unlock()
-		}
 		return
 	}
 	ep := c.coh.Epoch()
@@ -375,18 +361,14 @@ func (c *CodeCache) putCode(addr []byte, code []byte, keyHash [32]byte, txNum ui
 		&c.coh, &c.codeSize, 8, &c.putStripes[uint8(codeID)])
 }
 
-// ContainsLive reports whether addr has a live binding a conditional put
-// would defer to — servable code bytes or a no-code deletion marker — without
-// touching hit/miss counters or LRU recency. Prefetchers probe it to skip the
-// keccak+copy work of preparing a conditional put that such a binding would
-// no-op; advisory only.
+// ContainsLive reports whether addr resolves to live code bytes through the
+// addr→code binding, without touching hit/miss counters or LRU recency.
+// Prefetchers probe it to skip the keccak+copy work of preparing a conditional
+// put that a live binding would no-op; advisory only.
 func (c *CodeCache) ContainsLive(addr []byte) bool {
 	vID, ok := c.addrToHash.Peek(common.BytesToAddress(addr))
 	if !ok || c.isStale(vID.txNum, vID.epoch) {
 		return false
-	}
-	if vID.deleted {
-		return true
 	}
 	ce, ok := c.hashToCode.Peek(vID.addrID)
 	if !ok || len(ce.code) == 0 || c.isStale(ce.txNum, ce.epoch) {
