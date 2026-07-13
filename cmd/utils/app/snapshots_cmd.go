@@ -1612,7 +1612,7 @@ func doIntegrity(ctx context.Context, cliCtx *cli.Command) error {
 
 	blockReader, _ := blockRetire.IO()
 	heimdallStore, _ := blockRetire.BorStore()
-	db, err := temporal.New(chainDB, agg, blockReader.Snapshots())
+	db, err := temporal.New(chainDB, agg, res.BlockSnaps)
 	if err != nil {
 		return err
 	}

@@ -26,7 +26,7 @@ import (
 	"github.com/erigontech/erigon/db/kv/dbcfg"
 	"github.com/erigontech/erigon/db/kv/memdb"
 	"github.com/erigontech/erigon/db/kv/temporal"
-	"github.com/erigontech/erigon/db/services"
+	"github.com/erigontech/erigon/db/snapshotsync/blocksnapshots"
 	"github.com/erigontech/erigon/db/state"
 )
 
@@ -41,12 +41,12 @@ func NewTestDBWithStepSize(tb testing.TB, dirs datadir.Dirs, stepSize uint64) kv
 
 // NewTestDBWithBlocks is NewTestDB plus a block-snapshots peer, so tests can
 // exercise the tx block-files view.
-func NewTestDBWithBlocks(tb testing.TB, dirs datadir.Dirs, blockSnaps services.BlockSnapshots) kv.TemporalRwDB {
+func NewTestDBWithBlocks(tb testing.TB, dirs datadir.Dirs, blockSnaps *blocksnapshots.RoSnapshots) kv.TemporalRwDB {
 	return newTestDB(tb, dirs, config3.DefaultStepSize, blockSnaps)
 }
 
 // nolint:thelper
-func newTestDB(tb testing.TB, dirs datadir.Dirs, stepSize uint64, blockSnaps services.BlockSnapshots) kv.TemporalRwDB {
+func newTestDB(tb testing.TB, dirs datadir.Dirs, stepSize uint64, blockSnaps *blocksnapshots.RoSnapshots) kv.TemporalRwDB {
 	if tb != nil {
 		tb.Helper()
 	}

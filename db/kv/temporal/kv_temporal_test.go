@@ -14,7 +14,6 @@ import (
 	"github.com/erigontech/erigon/db/kv/dbcfg"
 	"github.com/erigontech/erigon/db/kv/memdb"
 	"github.com/erigontech/erigon/db/kv/order"
-	"github.com/erigontech/erigon/db/services"
 	"github.com/erigontech/erigon/db/snapshotsync/blocksnapshots"
 	"github.com/erigontech/erigon/db/state"
 	"github.com/erigontech/erigon/db/state/execctx"
@@ -233,13 +232,12 @@ func TestTemporalTx_PinsBlockFilesView(t *testing.T) {
 		agg := state.NewTest(dirs).StepSize(1).MustOpen(ctx, mdbxDb)
 		t.Cleanup(agg.Close)
 
-		var blockSnaps services.BlockSnapshots
+		var blockSnaps *blocksnapshots.RoSnapshots
 		if withBlocks {
 			cfg := ethconfig.Defaults.Snapshot
 			cfg.ChainName = networkname.Mainnet
-			sn := blocksnapshots.NewRoSnapshots(cfg, dirs.Snap, log.New())
-			t.Cleanup(sn.Close)
-			blockSnaps = sn
+			blockSnaps = blocksnapshots.NewRoSnapshots(cfg, dirs.Snap, log.New())
+			t.Cleanup(blockSnaps.Close)
 		}
 
 		db, err := New(mdbxDb, agg, blockSnaps)

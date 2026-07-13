@@ -31,7 +31,6 @@ import (
 	"github.com/erigontech/erigon/db/kv/memdb"
 	"github.com/erigontech/erigon/db/kv/order"
 	"github.com/erigontech/erigon/db/kv/stream"
-	"github.com/erigontech/erigon/db/services"
 	"github.com/erigontech/erigon/db/snapshotsync/blocksnapshots"
 	"github.com/erigontech/erigon/db/state"
 	"github.com/erigontech/erigon/db/version"
@@ -81,26 +80,24 @@ type DB struct {
 	stateFiles *state.Aggregator
 	// blockFiles: block snapshots, the peer of stateFiles. Optional; nil for
 	// state-only tools, in which case block reads fall back to their own view.
-	blockFiles services.BlockSnapshots
+	blockFiles *blocksnapshots.RoSnapshots
 }
 
 // New wires the temporal DB over a raw kv.RwDB, its state aggregator, and the
 // (optional) block snapshots — the block-data peer of stateFiles. Pass nil
 // blockSnaps for state-only tools.
-func New(db kv.RwDB, agg *state.Aggregator, blockSnaps services.BlockSnapshots) (*DB, error) {
+func New(db kv.RwDB, agg *state.Aggregator, blockSnaps *blocksnapshots.RoSnapshots) (*DB, error) {
 	return &DB{RwDB: db, stateFiles: agg, blockFiles: blockSnaps}, nil
 }
 
-func (db *DB) Agg() any                                { return db.stateFiles }
-func (db *DB) BlockSnapshots() services.BlockSnapshots { return db.blockFiles }
+func (db *DB) Agg() any { return db.stateFiles }
 
 // beginBlockFilesRo pins the block-files view for a tx, or nil if unset.
 func (db *DB) beginBlockFilesRo() *blocksnapshots.View {
-	sn, ok := db.blockFiles.(*blocksnapshots.RoSnapshots)
-	if !ok {
+	if db.blockFiles == nil {
 		return nil
 	}
-	return sn.View()
+	return db.blockFiles.View()
 }
 func (db *DB) InternalDB() kv.RwDB       { return db.RwDB }
 func (db *DB) Debug() kv.TemporalDebugDB { return kv.TemporalDebugDB(db) }
