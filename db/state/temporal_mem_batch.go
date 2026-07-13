@@ -17,6 +17,7 @@
 package state
 
 import (
+	"bytes"
 	"context"
 	"encoding/binary"
 	"errors"
@@ -30,6 +31,8 @@ import (
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/kv/order"
+	"github.com/erigontech/erigon/db/kv/stream"
 	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/db/state/changeset"
 	"github.com/erigontech/erigon/db/state/execctx"
@@ -319,6 +322,141 @@ func (sd *TemporalMemBatch) GetAsOf(domain kv.Domain, key []byte, ts uint64) (v 
 		}
 	}
 	return unwoundLatest(domain, keyS)
+}
+
+// RangeAsOf returns domain values over [fromKey, toKey) as of txNum ts, merging
+// the in-memory (not-yet-committed) history with committed DB+files. In-memory
+// values take precedence per key; keys deleted or not yet created as of ts are
+// omitted. Only used by the RPC test harness to read the in-flight tip.
+func (sd *TemporalMemBatch) RangeAsOf(ctx context.Context, domain kv.Domain, fromKey, toKey []byte, ts uint64, asc order.By, limit int, roTx kv.Tx) (stream.KV, error) {
+	committed, err := AggTx(roTx).RangeAsOf(ctx, roTx, domain, fromKey, toKey, ts, asc, limit)
+	if err != nil {
+		return nil, err
+	}
+	if !sd.inMemHistoryReads {
+		return committed, nil
+	}
+	mem := sd.memRangeAsOf(domain, fromKey, toKey, ts, asc)
+	if len(mem) == 0 {
+		return committed, nil
+	}
+	merged := stream.UnionKV(&memKVIter{pairs: mem}, committed, -1)
+	return &liveLimitKV{inner: merged, limit: limit}, nil
+}
+
+// memRangeAsOf collects the in-memory latest history for domain over
+// [fromKey, toKey), resolved as of ts. Tombstones (empty value) are kept so
+// they mask committed rows; keys with no in-memory entry at or before ts are
+// omitted so committed state supplies them.
+func (sd *TemporalMemBatch) memRangeAsOf(domain kv.Domain, fromKey, toKey []byte, ts uint64, asc order.By) []memKVPair {
+	sd.latestStateLock.RLock()
+	defer sd.latestStateLock.RUnlock()
+	inRange := func(k string) bool {
+		if fromKey != nil && k < string(fromKey) {
+			return false
+		}
+		if toKey != nil && k >= string(toKey) {
+			return false
+		}
+		return true
+	}
+	var pairs []memKVPair
+	collect := func(k string, entries []dataWithTxNum) {
+		if !inRange(k) {
+			return
+		}
+		if v, ok := asOfEntry(entries, ts); ok {
+			pairs = append(pairs, memKVPair{k: []byte(k), v: v})
+		}
+	}
+	if domain == kv.StorageDomain {
+		sd.storage.Scan(func(k string, entries []dataWithTxNum) bool {
+			collect(k, entries)
+			return true
+		})
+	} else {
+		for k, entries := range sd.domains[domain] {
+			collect(k, entries)
+		}
+	}
+	sort.Slice(pairs, func(i, j int) bool {
+		if asc == order.Asc {
+			return bytes.Compare(pairs[i].k, pairs[j].k) < 0
+		}
+		return bytes.Compare(pairs[i].k, pairs[j].k) > 0
+	})
+	return pairs
+}
+
+// asOfEntry returns the value in effect at ts from a txNum-ascending history
+// (the entry with the greatest txNum < ts). ok is false when ts precedes the
+// first entry, i.e. the key did not exist yet.
+func asOfEntry(entries []dataWithTxNum, ts uint64) ([]byte, bool) {
+	for i := range entries {
+		if ts > entries[i].txNum && (i == len(entries)-1 || ts <= entries[i+1].txNum) {
+			return entries[i].data, true
+		}
+	}
+	return nil, false
+}
+
+type memKVPair struct{ k, v []byte }
+
+type memKVIter struct {
+	pairs []memKVPair
+	i     int
+}
+
+func (m *memKVIter) HasNext() bool { return m.i < len(m.pairs) }
+func (m *memKVIter) Close()        {}
+func (m *memKVIter) Next() ([]byte, []byte, error) {
+	p := m.pairs[m.i]
+	m.i++
+	return p.k, p.v, nil
+}
+
+// liveLimitKV drops tombstone (empty-value) rows from the merged stream and
+// stops after limit live rows (limit < 0 means unlimited).
+type liveLimitKV struct {
+	inner stream.KV
+	limit int
+	seen  int
+	k, v  []byte
+	ready bool
+	err   error
+}
+
+func (m *liveLimitKV) advance() {
+	if m.ready || m.err != nil {
+		return
+	}
+	if m.limit >= 0 && m.seen >= m.limit {
+		return
+	}
+	for m.inner.HasNext() {
+		k, v, err := m.inner.Next()
+		if err != nil {
+			m.err = err
+			return
+		}
+		if len(v) == 0 {
+			continue
+		}
+		m.k, m.v, m.ready = k, v, true
+		return
+	}
+}
+
+func (m *liveLimitKV) HasNext() bool { m.advance(); return m.ready || m.err != nil }
+func (m *liveLimitKV) Close()        { m.inner.Close() }
+func (m *liveLimitKV) Next() ([]byte, []byte, error) {
+	m.advance()
+	if m.err != nil {
+		return nil, nil, m.err
+	}
+	m.ready = false
+	m.seen++
+	return m.k, m.v, nil
 }
 
 func (sd *TemporalMemBatch) SizeEstimate() uint64 {

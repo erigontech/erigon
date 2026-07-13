@@ -35,6 +35,7 @@ import (
 	"github.com/erigontech/erigon/db/kv/membatchwithdb"
 	"github.com/erigontech/erigon/db/kv/order"
 	"github.com/erigontech/erigon/db/kv/rawdbv3"
+	"github.com/erigontech/erigon/db/kv/stream"
 	"github.com/erigontech/erigon/db/state/changeset"
 	"github.com/erigontech/erigon/db/state/kvmetrics"
 	"github.com/erigontech/erigon/db/state/statecfg"
@@ -1570,6 +1571,12 @@ func (sd *SharedDomains) DomainLogMetrics() map[kv.Domain][]any {
 
 func (sd *SharedDomains) GetAsOf(domain kv.Domain, key []byte, ts uint64) (v []byte, ok bool, err error) {
 	return sd.mem.GetAsOf(domain, key, ts)
+}
+
+// RangeAsOf returns domain values over [fromKey, toKey) as of ts, merging the
+// in-flight in-memory history with committed DB+files.
+func (sd *SharedDomains) RangeAsOf(ctx context.Context, domain kv.Domain, fromKey, toKey []byte, ts uint64, asc order.By, limit int, roTx kv.Tx) (stream.KV, error) {
+	return sd.mem.RangeAsOf(ctx, domain, fromKey, toKey, ts, asc, limit, roTx)
 }
 
 // DomainPut

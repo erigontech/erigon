@@ -20,6 +20,8 @@ import (
 	"context"
 
 	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/kv/order"
+	"github.com/erigontech/erigon/db/kv/stream"
 	"github.com/erigontech/erigon/db/state/execctx"
 )
 
@@ -103,6 +105,10 @@ func (t *sdRoTx) GetAsOf(name kv.Domain, k []byte, ts uint64) ([]byte, bool, err
 		return v, ok, err
 	}
 	return t.TemporalTx.GetAsOf(name, k, ts)
+}
+
+func (t *sdRoTx) RangeAsOf(name kv.Domain, fromKey, toKey []byte, ts uint64, asc order.By, limit int) (stream.KV, error) {
+	return t.sd.RangeAsOf(context.Background(), name, fromKey, toKey, ts, asc, limit, t.base)
 }
 
 func (t *sdRoTx) Rollback() {
