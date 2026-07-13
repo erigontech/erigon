@@ -21,6 +21,7 @@ import (
 	"context"
 	"encoding"
 	"errors"
+	"maps"
 	"reflect"
 	"strconv"
 	"strings"
@@ -116,9 +117,7 @@ func WithInfo[T comparable](info map[any]any) domainFeature {
 			if d.info == nil {
 				d.info = make(map[any]any)
 			}
-			for key, value := range info {
-				d.info[key] = value
-			}
+			maps.Copy(d.info, info)
 		}
 	})
 }
