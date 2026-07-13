@@ -313,18 +313,36 @@ func TestGetLogs_LogQueryLimitExceeded(t *testing.T) {
 	}
 }
 
-// TestGetLogs_LogQueryLimitUnlimited verifies that logQueryLimit=0 disables the
-// addresses/topics cap.
-func TestGetLogs_LogQueryLimitUnlimited(t *testing.T) {
+// TestGetLogs_LogQueryLimitAtLimit verifies that filters with exactly
+// logQueryLimit addresses or topic alternatives are accepted.
+func TestGetLogs_LogQueryLimitAtLimit(t *testing.T) {
 	m, _, _ := rpcdaemontest.CreateTestExecModule(t)
-	ethApi := newEthApiForTest(newBaseApiWithLimits(m, 0, 0, 0), m.DB, nil, nil)
+	ethApi := newEthApiForTest(newBaseApiWithLimits(m, 0, 0, 2), m.DB, nil, nil)
 	_, err := ethApi.GetLogs(context.Background(), filters.FilterCriteria{
 		FromBlock: big.NewInt(0),
 		ToBlock:   big.NewInt(10),
-		Addresses: make(common.Addresses, 1500),
-		Topics:    [][]common.Hash{make([]common.Hash, 1500)},
+		Addresses: make(common.Addresses, 2),
+		Topics:    [][]common.Hash{make([]common.Hash, 2)},
 	})
 	require.NoError(t, err)
+}
+
+// TestGetLogs_LogQueryLimitUnlimited verifies that logQueryLimit<=0 disables the
+// addresses/topics cap.
+func TestGetLogs_LogQueryLimitUnlimited(t *testing.T) {
+	for _, limit := range []int{0, -1} {
+		t.Run(fmt.Sprintf("limit=%d", limit), func(t *testing.T) {
+			m, _, _ := rpcdaemontest.CreateTestExecModule(t)
+			ethApi := newEthApiForTest(newBaseApiWithLimits(m, 0, 0, limit), m.DB, nil, nil)
+			_, err := ethApi.GetLogs(context.Background(), filters.FilterCriteria{
+				FromBlock: big.NewInt(0),
+				ToBlock:   big.NewInt(10),
+				Addresses: make(common.Addresses, 1500),
+				Topics:    [][]common.Hash{make([]common.Hash, 1500)},
+			})
+			require.NoError(t, err)
+		})
+	}
 }
 
 // TestGetLatestLogs_LogCountExceedsMaxResults verifies that erigon_getLatestLogs
