@@ -73,7 +73,7 @@ func TestGetBlockByNumberWithLatestTag_WithHeadHashInDb(t *testing.T) {
 	}
 	tx.Commit()
 
-	api := newEthApiForTest(newBaseApiForTest(m), m.OverlayDB(), nil, nil)
+	api := newEthApiForTest(newBaseApiForTest(m), m.DB, nil, nil)
 	block, err := api.GetBlockByNumber(ctx, rpc.LatestBlockNumber, false)
 	if err != nil {
 		t.Errorf("error retrieving block by number: %s", err)
@@ -147,7 +147,7 @@ func TestGetBlockByNumber_WithFinalizedTag_WithFinalizedBlockInDb(t *testing.T) 
 	}
 	tx.Commit()
 
-	api := newEthApiForTest(newBaseApiForTest(m), m.OverlayDB(), nil, nil)
+	api := newEthApiForTest(newBaseApiForTest(m), m.DB, nil, nil)
 	block, err := api.GetBlockByNumber(ctx, rpc.FinalizedBlockNumber, false)
 	if err != nil {
 		t.Errorf("error retrieving block by number: %s", err)
@@ -191,7 +191,7 @@ func TestGetBlockByNumber_WithSafeTag_WithSafeBlockInDb(t *testing.T) {
 	}
 	tx.Commit()
 
-	api := newEthApiForTest(newBaseApiForTest(m), m.OverlayDB(), nil, nil)
+	api := newEthApiForTest(newBaseApiForTest(m), m.DB, nil, nil)
 	block, err := api.GetBlockByNumber(ctx, rpc.SafeBlockNumber, false)
 	if err != nil {
 		t.Errorf("error retrieving block by number: %s", err)

@@ -562,7 +562,7 @@ func TestEthConfig(t *testing.T) {
 			require.NoError(t, err)
 			m := execmoduletester.New(t, execmoduletester.WithGenesisSpec(&genesis), execmoduletester.WithKey(key))
 			defer m.Close()
-			eth := newEthApiForTest(newBaseApiForTest(m), m.OverlayDB(), nil, nil)
+			eth := newEthApiForTest(newBaseApiForTest(m), m.DB, nil, nil)
 			if test.head != nil {
 				tx, err := m.DB.BeginTemporalRw(ctx)
 				require.NoError(t, err)
