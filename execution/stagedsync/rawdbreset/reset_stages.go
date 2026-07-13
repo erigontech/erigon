@@ -377,7 +377,6 @@ func FillDBFromSnapshots(logPrefix string, ctx context.Context, tx kv.RwTx, dirs
 			}
 
 			_ = tx.ClearTable(kv.MaxTxNum)
-			dbgFirstAppend := true
 			if err := blockReader.IterateFrozenBodies(tx, func(blockNum, baseTxNum, txAmount uint64) error {
 				select {
 				case <-ctx.Done():
@@ -396,10 +395,6 @@ func FillDBFromSnapshots(logPrefix string, ctx context.Context, tx kv.RwTx, dirs
 					return nil // This can actually happen as FrozenBlocks() is SegmentIdMax() and not the last .seg
 				}
 				if blockNum >= pruneMarkerBlockThreshold || blockNum == 0 {
-					if dbgFirstAppend {
-						logger.Info("[dbg] FillDBFromSnapshots Bodies: first MaxTxNum append", "blockNum", blockNum, "baseTxNum", baseTxNum, "txAmount", txAmount, "maxTxNum", maxTxNum)
-						dbgFirstAppend = false
-					}
 					if err := rawdbv3.TxNums.Append(tx, blockNum, maxTxNum); err != nil {
 						return fmt.Errorf("%w. blockNum=%d, maxTxNum=%d", err, blockNum, maxTxNum)
 					}
