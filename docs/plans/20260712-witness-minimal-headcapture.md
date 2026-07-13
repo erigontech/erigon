@@ -162,11 +162,11 @@ Benefit: minimal nodes serve recent-block witnesses with zero commitment-history
 - Modify: `rpc/jsonrpc/witness_cache_builder_test.go`
 - Modify: `rpc/jsonrpc/debug_execution_witness_test.go`
 
-- [ ] reorg unit test: a losing-fork block's pinned context is dropped at the canonical-hash gate and only the winning hash is cached; a by-hash request for a reorged-out height returns out-of-window
-- [ ] fail-closed test: an incomplete/stale parent view fails `witnessRoot==expectedParentRoot` (or `expectedBlockRoot`) and the block becomes out-of-window — assert nothing is cached and no wrong witness is ever returned
-- [ ] mmap-pin race/soak test: hold the rolling pin + committed tx while simulating snapshot merges / tip advance; assert consistent reads and no use-after-free; run under `go test -race`
-- [ ] root-neutrality guard test: constructing/running the head-capture builder performs no writes on any canonical commitment context (read-only mode)
-- [ ] run tests (including `-race` on the builder package) - must pass before next task
+- [x] reorg unit test: a losing-fork block's pinned context is dropped at the canonical-hash gate and only the winning hash is cached; a by-hash request for a reorged-out height returns out-of-window (`TestBuildAndCacheHeadCaptureReorgDropsLosingFork`)
+- [x] fail-closed test: an incomplete/stale parent view fails `witnessRoot==expectedParentRoot` (or `expectedBlockRoot`) and the block becomes out-of-window — assert nothing is cached and no wrong witness is ever returned (`TestHeadCaptureFailClosedYieldsOutOfWindow`)
+- [x] mmap-pin race/soak test: hold the rolling pin + committed tx while simulating snapshot merges / tip advance; assert consistent reads and no use-after-free; run under `go test -race` (`TestRollingPinStableUnderTipAdvance`)
+- [x] root-neutrality guard test: constructing/running the head-capture builder performs no writes on any canonical commitment context (read-only mode) (`TestHeadCaptureBuildIsRootNeutral`)
+- [x] run tests (including `-race` on the builder package) - must pass before next task
 
 ### Task 9: Pure witness-set parity diff helper
 

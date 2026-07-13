@@ -17,7 +17,9 @@
 package jsonrpc
 
 import (
+	"bytes"
 	"context"
+	"fmt"
 	"testing"
 	"time"
 
@@ -30,6 +32,7 @@ import (
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/db/state/statecfg"
+	"github.com/erigontech/erigon/execution/commitment"
 	"github.com/erigontech/erigon/execution/execmodule/execmoduletester"
 	"github.com/erigontech/erigon/execution/rlp"
 	"github.com/erigontech/erigon/execution/stagedsync/stages"
@@ -347,4 +350,225 @@ func TestWitnessCacheBuilderParity(t *testing.T) {
 	gotBytes, err := cached.MarshalFastJSON()
 	require.NoError(t, err)
 	require.Equal(t, wantBytes, gotBytes, "builder-path witness must be byte-identical to on-demand")
+}
+
+// insertHeadCaptureChain enables historical commitment, builds a module with no inserted
+// blocks, commits blocks 1..buildNum-1, pins that snapshot as parent(buildNum), then commits
+// buildNum. It returns the module, the still-open parent pin, and buildNum's canonical hash —
+// the shared setup for the head-capture builder tests.
+func insertHeadCaptureChain(t *testing.T, ctx context.Context, buildNum uint64) (*execmoduletester.ExecModuleTester, *rollingPin, common.Hash) {
+	t.Helper()
+	previousSchema := statecfg.Schema
+	statecfg.EnableHistoricalCommitment()
+	t.Cleanup(func() { statecfg.Schema = previousSchema })
+
+	m, testChain := rpcdaemontest.CreateTestExecModuleNoInsert(t)
+	require.NoError(t, m.DB.Update(ctx, func(tx kv.RwTx) error {
+		return rawdb.WriteDBCommitmentHistoryEnabled(tx, true)
+	}))
+
+	require.NoError(t, m.InsertChain(testChain.Slice(0, int(buildNum)-1)))
+	pin, err := openRollingPin(ctx, m.DB)
+	require.NoError(t, err)
+	require.NotNil(t, pin)
+	require.Equal(t, buildNum-1, pin.num, "pin sits one block behind the block to build")
+
+	require.NoError(t, m.InsertChain(testChain.Slice(int(buildNum)-1, int(buildNum))))
+	hash, _ := buildTestChainHeader(t, m, buildNum)
+	return m, pin, hash
+}
+
+// writeForkHeader stores a non-canonical fork header at height num (a copy of the canonical
+// one with a perturbed Extra) and returns its hash, which resolves by-hash to num but is not
+// canonical there — a reorged-out sibling.
+func writeForkHeader(t *testing.T, ctx context.Context, m *execmoduletester.ExecModuleTester, num uint64) common.Hash {
+	t.Helper()
+	var hdr *types.Header
+	require.NoError(t, m.DB.View(ctx, func(tx kv.Tx) error {
+		var err error
+		hdr, err = m.BlockReader.HeaderByNumber(ctx, tx, num)
+		return err
+	}))
+	require.NotNil(t, hdr)
+	fork := types.CopyHeader(hdr)
+	fork.Extra = append(append([]byte{}, fork.Extra...), 0xff)
+	require.NoError(t, m.DB.Update(ctx, func(tx kv.RwTx) error {
+		return rawdb.WriteHeader(tx, fork)
+	}))
+	return fork.Hash()
+}
+
+// TestBuildAndCacheHeadCaptureReorgDropsLosingFork drives the head-capture builder against a
+// losing-fork head: a non-canonical hash at height B is dropped at the committed-head
+// canonical gate, caching nothing and leaving the pin intact, while the winning canonical
+// hash — built with that same pin — is cached. A by-hash request for the reorged-out sibling
+// then returns the typed reorged-away error, never the resident winning entry.
+func TestBuildAndCacheHeadCaptureReorgDropsLosingFork(t *testing.T) {
+	ctx := context.Background()
+	const buildNum = uint64(6)
+	m, pin, canonHash := insertHeadCaptureChain(t, ctx, buildNum)
+
+	forkHash := writeForkHeader(t, ctx, m, buildNum)
+	require.NotEqual(t, canonHash, forkHash)
+
+	api := NewPrivateDebugAPI(newBaseApiForTest(m), m.DB, nil, 0, false)
+	api.witnessCache = newWitnessResultCache(96, 0, true, true)
+
+	pinAfterLosing := api.buildAndCacheHeadCapture(ctx, pin, buildNum, forkHash)
+	require.Same(t, pin, pinAfterLosing, "a losing-fork head is dropped before the pin is consumed")
+	require.False(t, api.witnessCache.Contains(forkHash), "a losing-fork hash is never cached")
+	require.Equal(t, 0, api.witnessCache.Len(), "the canonical gate caches nothing for a losing fork")
+
+	next := api.buildAndCacheHeadCapture(ctx, pinAfterLosing, buildNum, canonHash)
+	defer next.close()
+	require.True(t, api.witnessCache.Contains(canonHash), "the winning canonical hash is cached")
+	require.False(t, api.witnessCache.Contains(forkHash), "the losing fork stays absent")
+
+	_, err := api.ExecutionWitness(ctx, rpc.BlockNumberOrHashWithHash(forkHash, false), nil)
+	require.ErrorIs(t, err, errWitnessReorgedAway, "a by-hash request for the reorged-out sibling is out-of-window, never served")
+}
+
+// TestHeadCaptureBuildIsRootNeutral asserts the head-capture build path is read-only: a full
+// build against a valid pin leaves the committed commitment plane (Finish stage and the
+// commitment-state latest) byte-identical, so it can never perturb the canonical root.
+func TestHeadCaptureBuildIsRootNeutral(t *testing.T) {
+	ctx := context.Background()
+	const buildNum = uint64(6)
+	m, pin, hash := insertHeadCaptureChain(t, ctx, buildNum)
+
+	beforeFinish, beforeState := readCommittedCommitmentState(t, ctx, m.DB)
+
+	api := NewPrivateDebugAPI(newBaseApiForTest(m), m.DB, nil, 0, false)
+	api.witnessCache = newWitnessResultCache(96, 0, true, true)
+
+	next := api.buildAndCacheHeadCapture(ctx, pin, buildNum, hash)
+	defer next.close()
+	require.True(t, api.witnessCache.Contains(hash), "sanity: the head-capture build must succeed")
+
+	afterFinish, afterState := readCommittedCommitmentState(t, ctx, m.DB)
+	require.Equal(t, beforeFinish, afterFinish, "the read-only builder must not advance the Finish stage")
+	require.Equal(t, beforeState, afterState, "the read-only builder must not write to the canonical commitment domain")
+}
+
+// readCommittedCommitmentState reads the committed head's Finish stage and the
+// commitment-domain latest state key through a fresh RO tx.
+func readCommittedCommitmentState(t *testing.T, ctx context.Context, db kv.TemporalRoDB) (uint64, []byte) {
+	t.Helper()
+	tx, err := db.BeginTemporalRo(ctx)
+	require.NoError(t, err)
+	defer tx.Rollback()
+	finish, err := stages.GetStageProgress(tx, stages.Finish)
+	require.NoError(t, err)
+	state, _, err := tx.GetLatest(kv.CommitmentDomain, commitment.KeyCommitmentState)
+	require.NoError(t, err)
+	return finish, common.Copy(state)
+}
+
+// TestRollingPinStableUnderTipAdvance is the mmap-pin race/soak guard (run under -race):
+// while the rolling pin is held, a writer advances the tip and fresh RO readers churn
+// independent snapshots. The held pin must keep resolving its original committed snapshot —
+// Finish, canonical hash, and commitment-state latest all unchanged — with no use-after-free.
+func TestRollingPinStableUnderTipAdvance(t *testing.T) {
+	previousSchema := statecfg.Schema
+	statecfg.EnableHistoricalCommitment()
+	t.Cleanup(func() { statecfg.Schema = previousSchema })
+
+	m, testChain := rpcdaemontest.CreateTestExecModuleNoInsert(t)
+	ctx := context.Background()
+	require.NoError(t, m.DB.Update(ctx, func(tx kv.RwTx) error {
+		return rawdb.WriteDBCommitmentHistoryEnabled(tx, true)
+	}))
+
+	const pinAt = uint64(4)
+	require.NoError(t, m.InsertChain(testChain.Slice(0, int(pinAt))))
+	pin, err := openRollingPin(ctx, m.DB)
+	require.NoError(t, err)
+	require.NotNil(t, pin)
+	require.Equal(t, pinAt, pin.num)
+	defer pin.close()
+
+	baseHash, err := rawdb.ReadCanonicalHash(pin.tx, pinAt)
+	require.NoError(t, err)
+	baseState, _, err := pin.tx.GetLatest(kv.CommitmentDomain, commitment.KeyCommitmentState)
+	require.NoError(t, err)
+	baseState = common.Copy(baseState)
+
+	stop := make(chan struct{})
+	errCh := make(chan error, 2)
+
+	// Reader of the held pin: the pin owns its tx, so only this goroutine touches pin.tx.
+	go func() {
+		for {
+			select {
+			case <-stop:
+				errCh <- nil
+				return
+			default:
+			}
+			finish, e := stages.GetStageProgress(pin.tx, stages.Finish)
+			if e != nil {
+				errCh <- e
+				return
+			}
+			if finish != pinAt {
+				errCh <- fmt.Errorf("held pin Finish drifted to %d, want %d", finish, pinAt)
+				return
+			}
+			h, e := rawdb.ReadCanonicalHash(pin.tx, pinAt)
+			if e != nil {
+				errCh <- e
+				return
+			}
+			if h != baseHash {
+				errCh <- fmt.Errorf("held pin canonical hash drifted at %d", pinAt)
+				return
+			}
+			s, _, e := pin.tx.GetLatest(kv.CommitmentDomain, commitment.KeyCommitmentState)
+			if e != nil {
+				errCh <- e
+				return
+			}
+			if !bytes.Equal(s, baseState) {
+				errCh <- fmt.Errorf("held pin commitment-state latest drifted")
+				return
+			}
+		}
+	}()
+
+	// Fresh readers churn independent snapshots concurrently with the writer.
+	go func() {
+		for {
+			select {
+			case <-stop:
+				errCh <- nil
+				return
+			default:
+			}
+			// Rolled back explicitly at the end of each iteration; a deferred rollback
+			// would accumulate across the loop and is inapplicable here.
+			rtx, e := m.DB.BeginTemporalRo(ctx) //nolint:gocritic
+			if e != nil {
+				errCh <- e
+				return
+			}
+			_, e = stages.GetStageProgress(rtx, stages.Finish)
+			rtx.Rollback()
+			if e != nil {
+				errCh <- e
+				return
+			}
+		}
+	}()
+
+	// Advance the tip (sole writer) while the pin is held and both readers run.
+	for b := int(pinAt); b < int(pinAt)+3; b++ {
+		require.NoError(t, m.InsertChain(testChain.Slice(b, b+1)))
+	}
+	close(stop)
+	require.NoError(t, <-errCh)
+	require.NoError(t, <-errCh)
+
+	finish, err := stages.GetStageProgress(pin.tx, stages.Finish)
+	require.NoError(t, err)
+	require.Equal(t, pinAt, finish, "the held pin still resolves its original snapshot after the churn")
 }

@@ -475,6 +475,45 @@ func TestBuildWitnessResultHeadCapture_FailsClosedOnBadParent(t *testing.T) {
 	require.Nil(t, result, "no witness is produced on gate failure")
 }
 
+// TestHeadCaptureFailClosedYieldsOutOfWindow is the end-to-end fail-closed guard: a stale
+// parent view (the committed tip pinned as the parent of an older block) fails a witness
+// validation gate, so the build returns an error and no result. On a cache-only head-capture
+// node nothing is cached and the block serves out-of-window — a wrong witness is never
+// produced and a miss never falls through to a history recompute.
+func TestHeadCaptureFailClosedYieldsOutOfWindow(t *testing.T) {
+	previousSchema := statecfg.Schema
+	statecfg.EnableHistoricalCommitment()
+	t.Cleanup(func() { statecfg.Schema = previousSchema })
+
+	m, _, _ := rpcdaemontest.CreateTestExecModule(t)
+	ctx := context.Background()
+	require.NoError(t, m.DB.Update(ctx, func(tx kv.RwTx) error {
+		return rawdb.WriteDBCommitmentHistoryEnabled(tx, true)
+	}))
+
+	api := NewPrivateDebugAPI(newBaseApiForTest(m), m.DB, nil, 0, false)
+	api.witnessCache = newWitnessResultCache(96, 0, true /*headCapture*/, true /*cacheOnly*/)
+
+	tx, err := api.db.BeginTemporalRo(ctx)
+	require.NoError(t, err)
+	defer tx.Rollback()
+
+	const blockNum = uint64(3)
+	bn := rpc.BlockNumber(blockNum)
+	info, err := api.resolveWitnessBlock(ctx, tx, rpc.BlockNumberOrHash{BlockNumber: &bn})
+	require.NoError(t, err)
+
+	// The tip-pinned tx carries block 13's commitment, not parent(3): a validation gate fails.
+	result, err := api.buildWitnessResultHeadCapture(ctx, tx, tx, info, witnessModeLegacy)
+	require.Error(t, err, "a stale parent view must fail a validation gate")
+	require.Nil(t, result, "no wrong witness is produced on gate failure")
+	require.Equal(t, 0, api.witnessCache.Len(), "a gate failure caches nothing")
+
+	served, err := api.ExecutionWitness(ctx, rpc.BlockNumberOrHash{BlockNumber: &bn}, nil)
+	require.ErrorIs(t, err, errWitnessOutOfWindow, "cache-only never recomputes a failed block from history")
+	require.Nil(t, served)
+}
+
 // TestExecutionWitnessCacheOnlyServe pins the Task 7 cache-only serve contract for a
 // head-capture minimal node (no commitment history, never recomputes): a by-number miss
 // is out-of-window, a by-number hit serves the cached pointer, and a by-hash request for
