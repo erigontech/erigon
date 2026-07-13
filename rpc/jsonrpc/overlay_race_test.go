@@ -73,7 +73,7 @@ func newOverlayAheadTestAPI(t *testing.T) (base *BaseAPI, m *execmoduletester.Ex
 	require.NoError(t, m.InsertChain(c))
 
 	ctx := m.Ctx
-	overlayRoTx, err := m.DB.BeginTemporalRo(ctx)
+	overlayRoTx, err := m.OverlayDB().BeginTemporalRo(ctx)
 	require.NoError(t, err)
 	t.Cleanup(overlayRoTx.Rollback)
 	doms, err := execctx.NewSharedDomains(ctx, overlayRoTx, m.Log)

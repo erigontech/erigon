@@ -56,7 +56,7 @@ func TestCallBlockParallelMatchesSequential(t *testing.T) {
 	const blockNum = uint64(6) // block 6 has 32 txs (case i=5 in test chain generation)
 	traceTypes := []string{TraceTypeTrace}
 
-	tx, err := m.DB.BeginTemporalRo(ctx)
+	tx, err := m.OverlayDB().BeginTemporalRo(ctx)
 	require.NoError(t, err)
 	defer tx.Rollback()
 

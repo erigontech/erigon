@@ -105,7 +105,7 @@ func TestCapabilities(t *testing.T) {
 		}
 		require.NoError(t, tx.Commit())
 
-		roTx, err := m.DB.BeginTemporalRo(ctx)
+		roTx, err := m.OverlayDB().BeginTemporalRo(ctx)
 		require.NoError(t, err)
 		defer roTx.Rollback()
 		head, err := stages.GetStageProgress(roTx, stages.Execution)

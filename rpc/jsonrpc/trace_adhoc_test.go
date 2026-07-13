@@ -471,7 +471,7 @@ func TestOeTracer(t *testing.T) {
 // returns its binary encoding together with the sender and recipient addresses.
 func rawTxFromBlock(t *testing.T, m *execmoduletester.ExecModuleTester, blockNum uint64) (encoded []byte, from, to accounts.Address) {
 	t.Helper()
-	if err := m.DB.View(context.Background(), func(tx kv.Tx) error {
+	if err := m.OverlayDB().View(context.Background(), func(tx kv.Tx) error {
 		b, err := m.BlockReader.BlockByNumber(m.Ctx, tx, blockNum)
 		if err != nil {
 			return err

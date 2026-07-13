@@ -398,7 +398,7 @@ func TestGetProof(t *testing.T) {
 			require.NoError(t, err)
 			require.NotNil(t, proof)
 
-			tx, err := m.DB.BeginTemporalRo(context.Background())
+			tx, err := m.OverlayDB().BeginTemporalRo(context.Background())
 			require.NoError(t, err)
 			defer tx.Rollback()
 			header, err := api.headerByNumber(context.Background(), rpc.BlockNumber(tt.blockNum), tx)
@@ -432,7 +432,7 @@ func TestGetProof(t *testing.T) {
 func TestGetBlockByTimestampLatestTime(t *testing.T) {
 	ctx := context.Background()
 	m, _, _ := rpcdaemontest.CreateTestExecModule(t)
-	tx, err := m.DB.BeginTemporalRo(ctx)
+	tx, err := m.OverlayDB().BeginTemporalRo(ctx)
 	require.NoError(t, err)
 	defer tx.Rollback()
 	api := NewErigonAPI(newBaseApiForTest(m), m.OverlayDB(), nil)
@@ -459,7 +459,7 @@ func TestGetBlockByTimestampLatestTime(t *testing.T) {
 func TestGetBlockByTimestampOldestTime(t *testing.T) {
 	ctx := context.Background()
 	m, _, _ := rpcdaemontest.CreateTestExecModule(t)
-	tx, err := m.DB.BeginTemporalRo(ctx)
+	tx, err := m.OverlayDB().BeginTemporalRo(ctx)
 	require.NoError(t, err)
 	defer tx.Rollback()
 	api := NewErigonAPI(newBaseApiForTest(m), m.OverlayDB(), nil)
@@ -487,7 +487,7 @@ func TestGetBlockByTimestampOldestTime(t *testing.T) {
 func TestGetBlockByTimeHigherThanLatestBlock(t *testing.T) {
 	ctx := context.Background()
 	m, _, _ := rpcdaemontest.CreateTestExecModule(t)
-	tx, err := m.DB.BeginTemporalRo(ctx)
+	tx, err := m.OverlayDB().BeginTemporalRo(ctx)
 	require.NoError(t, err)
 	defer tx.Rollback()
 	api := NewErigonAPI(newBaseApiForTest(m), m.OverlayDB(), nil)
@@ -515,7 +515,7 @@ func TestGetBlockByTimeHigherThanLatestBlock(t *testing.T) {
 func TestGetBlockByTimeMiddle(t *testing.T) {
 	ctx := context.Background()
 	m, _, _ := rpcdaemontest.CreateTestExecModule(t)
-	tx, err := m.DB.BeginTemporalRo(ctx)
+	tx, err := m.OverlayDB().BeginTemporalRo(ctx)
 	require.NoError(t, err)
 	defer tx.Rollback()
 	api := NewErigonAPI(newBaseApiForTest(m), m.OverlayDB(), nil)
@@ -548,7 +548,7 @@ func TestGetBlockByTimeMiddle(t *testing.T) {
 func TestGetBlockByTimestamp(t *testing.T) {
 	ctx := context.Background()
 	m, _, _ := rpcdaemontest.CreateTestExecModule(t)
-	tx, err := m.DB.BeginTemporalRo(ctx)
+	tx, err := m.OverlayDB().BeginTemporalRo(ctx)
 	require.NoError(t, err)
 	defer tx.Rollback()
 	api := NewErigonAPI(newBaseApiForTest(m), m.OverlayDB(), nil)

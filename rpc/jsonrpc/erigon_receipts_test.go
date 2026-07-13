@@ -206,7 +206,7 @@ func TestGetBlockReceiptsByBlockHash(t *testing.T) {
 		3: `[]`,
 		4: `[]`,
 	}
-	err := m.DB.View(m.Ctx, func(tx kv.Tx) error {
+	err := m.OverlayDB().View(m.Ctx, func(tx kv.Tx) error {
 		for i := uint64(0); i <= rawdb.ReadCurrentHeader(tx).Number.Uint64(); i++ {
 			block := rawdb.ReadHeaderByNumber(tx, i)
 
