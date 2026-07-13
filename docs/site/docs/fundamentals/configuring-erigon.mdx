@@ -439,6 +439,10 @@ Flags for configuring the parallel block execution engine.
   * Default: `true`
 * `--exec.state-cache`: Enable the executor's domain-shared read cache. Equivalent to `USE_STATE_CACHE=true`. Disable for cold-read performance measurements.
   * Default: `true`
+* `--experimental.parallel-commitment` (experimental): Build the commitment (Patricia) trie with a fully parallel hasher (`ParallelPatriciaHashed`). Opt-in performance experiment.
+  * Default: `false`
+* `--experimental.streaming-commitment` (experimental): Build the commitment trie with a streaming committer that overlaps trie folding with block execution (`StreamingCommitter`). Takes precedence over `--experimental.parallel-commitment` when both are set.
+  * Default: `false`
 
 ### Caplin (Consensus Layer)
 

@@ -48,7 +48,7 @@ Usage:
 
 Flags:
       --datadir string                              path to Erigon working directory
-      --db.read.concurrency int                     Does limit amount of parallel db reads. Default: equal to GOMAXPROCS (or number of CPU) (default 1408)
+      --db.read.concurrency int                     Ceiling on concurrent open DB read transactions (MDBX read-tx semaphore). Default scales as min(max(10, GOMAXPROCS*64), 9000)
       --diagnostics.disabled                        Disable diagnostics
       --diagnostics.endpoint.addr string            Diagnostics HTTP server listening interface (default "127.0.0.1")
       --diagnostics.endpoint.port uint              Diagnostics HTTP server listening port (default 6062)
