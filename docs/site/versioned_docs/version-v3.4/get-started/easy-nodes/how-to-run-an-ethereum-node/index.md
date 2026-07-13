@@ -9,7 +9,7 @@ sidebar_position: 1
 
 ## 1. Prerequisites Check
 
-1. Confirm your machine meets the necessary [Hardware Requirements](/get-started/hardware-requirements) based on your desired prune mode.
+1. Confirm your machine meets the necessary [Hardware Requirements](/v3.4/get-started/hardware-requirements) based on your desired prune mode.
 2. **Install Docker**:
    * For Linux, install [Docker Engine](https://docs.docker.com/engine/install).
    * For macOS or Windows, install [Docker Desktop](https://docs.docker.com/desktop/).
@@ -65,13 +65,13 @@ docker compose up
 
 * `--chain=mainnet` specifies to run on Ethereum mainnet
 * Add `--prune.mode=minimal` to run minimal [Prune Mode](/v3.4/fundamentals/prune-modes) or `--prune.mode=archive` to run an archive node
-* `--http.addr=0.0.0.0 --http.api=eth,web3,net,debug,trace,txpool` to use RPC and e.g. be able to connect your [web3 wallet](/fundamentals/web3-wallet)
+* `--http.addr=0.0.0.0 --http.api=eth,web3,net,debug,trace,txpool` to use RPC and e.g. be able to connect your [web3 wallet](/v3.4/fundamentals/web3-wallet)
 * `--torrent.download.rate` sets the torrent download rate cap. The default is `512mb` (megabytes per second). During initial sync Erigon will use the full allowance — on a dedicated machine this is fine, but if you share the machine with other work you may want to lower it (e.g. `--torrent.download.rate=128mb`). Set `--torrent.download.rate=Inf` to remove the limit entirely.
 
-When you get familiar with running Erigon from CLI you may also consider [staking](/staking/caplin) and/or running an Ethereum node with an [external Consensus Layer](/get-started/easy-nodes/how-to-run-an-ethereum-node/ethereum-with-an-external-cl).
+When you get familiar with running Erigon from CLI you may also consider [staking](/v3.4/staking/caplin) and/or running an Ethereum node with an [external Consensus Layer](/v3.4/get-started/easy-nodes/how-to-run-an-ethereum-node/ethereum-with-an-external-cl).
 
 :::tip
 Press `Ctrl+C` in your terminal to stop Erigon.
 :::
 
-Additional flags can be added to [configure](/fundamentals/configuring-erigon/) Erigon with several options.
+Additional flags can be added to [configure](/v3.4/fundamentals/configuring-erigon/) Erigon with several options.
