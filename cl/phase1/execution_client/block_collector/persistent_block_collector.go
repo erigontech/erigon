@@ -316,9 +316,6 @@ func (p *PersistentBlockCollector) Flush(ctx context.Context) error {
 	if gapDetected {
 		// Prune only rows the caller is done with; rows past the gap stay so a
 		// future re-download of the missing range unblocks the next Flush.
-		// Use a non-cancelable context: if ctx was cancelled the caller cares
-		// about stopping, but skipping cleanup would leave already-inserted
-		// rows in place and the next Flush would re-read and re-insert them.
 		cutoff := max(lastCommittedHeight+1, minInsertableBlockNumber)
 		if err := p.db.Update(ctx, func(tx kv.RwTx) error {
 			cursor, err := tx.RwCursor(kv.Headers)
