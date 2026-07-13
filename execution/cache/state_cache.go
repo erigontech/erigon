@@ -266,6 +266,15 @@ func (c *StateCache) put(domain kv.Domain, key []byte, value []byte, txNum uint6
 	}
 }
 
+// Delete removes the data for the given domain and key.
+func (c *StateCache) Delete(domain kv.Domain, key []byte) {
+	cache := c.caches[domain]
+	if cache == nil {
+		return
+	}
+	cache.Delete(key)
+}
+
 // Clear removes all mutable entries from all caches.
 func (c *StateCache) Clear() {
 	for _, cache := range c.caches {

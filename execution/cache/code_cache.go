@@ -539,6 +539,11 @@ func (c *CodeCache) PutCodeSizeByCodeHash(codeHash []byte, size int, txNum uint6
 		&c.coh, &c.codeSizeEntries, 1, &c.putStripes[uint8(hcs)])
 }
 
+// Delete removes the address → code mapping for addr.
+func (c *CodeCache) Delete(addr []byte) {
+	c.addrToHash.Remove(common.BytesToAddress(addr))
+}
+
 // Clear hard-resets every layer and the epoch/floor. Use on Reset /
 // fork-validation paths where no entry may carry over.
 func (c *CodeCache) Clear() {
