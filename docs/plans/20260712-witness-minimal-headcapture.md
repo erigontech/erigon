@@ -174,9 +174,9 @@ Benefit: minimal nodes serve recent-block witnesses with zero commitment-history
 - Create: `rpc/jsonrpc/witness_parity.go`
 - Create: `rpc/jsonrpc/witness_parity_test.go`
 
-- [ ] add a pure exported helper comparing two witness node sets by raw node bytes (RLP = node identity), returning `{ byteIdentical bool, erigonOnly, rethOnly int, codesEqual, keysEqual bool }` — no datadir, no I/O, no skip
-- [ ] write tests with synthetic witnesses: identical sets → `byteIdentical`, `erigonOnly==0`; a dropped node → `erigonOnly>0`; differing codes/keys flagged; empty/degenerate inputs handled
-- [ ] run tests - must pass before next task
+- [x] add a pure exported helper comparing two witness node sets by raw node bytes (RLP = node identity), returning `{ byteIdentical bool, erigonOnly, rethOnly int, codesEqual, keysEqual bool }` — no datadir, no I/O, no skip (`CompareWitnessNodeSets`/`WitnessParity`)
+- [x] write tests with synthetic witnesses: identical sets → `byteIdentical`, `erigonOnly==0`; a dropped node → `erigonOnly>0`; differing codes/keys flagged; empty/degenerate inputs handled (`TestCompareWitnessNodeSets`, `TestCompareWitnessNodeSetsDistinguishesByFullBytes`)
+- [x] run tests - must pass before next task
 
 ### Task 10: Verify acceptance criteria
 - [ ] verify all Overview requirements: minimal node serves last-N witnesses, cache-only, out-of-window on miss, no commitment history required
