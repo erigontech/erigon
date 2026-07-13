@@ -371,7 +371,6 @@ func FillDBFromSnapshots(logPrefix string, ctx context.Context, tx kv.RwTx, dirs
 
 		case stages.Bodies:
 			firstTxNum := blockReader.FirstTxnNumNotInSnapshots(tx)
-			logger.Info("[dbg] FillDBFromSnapshots Bodies: setting txnum base", "logPrefix", logPrefix, "firstTxNum", firstTxNum, "frozenBlocks", blockReader.FrozenBlocks(), "blocksAvailable", blocksAvailable)
 			if err := tx.ResetSequence(kv.EthTx, firstTxNum); err != nil {
 				return err
 			}
