@@ -435,22 +435,9 @@ func SyncSnapshots(
 			log.Debug(fmt.Sprintf("[%s] filtering", logPrefix), "toBlock", toBlock, "toStep", toStep, "toTxNum", toTxNum)
 			// we downloaded extra seg files during the header chain download (the ones containing the toBlock)
 			// so that we can correctly calculate toTxNum above (now we should delete these)
-			var toDeleteSeg, toDeleteDownloader []string
-			for _, f := range blockReader.FrozenFiles() {
-				fileInfo, stateFile, ok := snaptype.ParseFileName("", f)
-				if !ok || stateFile || strings.HasPrefix(fileInfo.Name(), "salt") || fileInfo.To < toBlock {
-					continue
-				}
-				toDeleteSeg = append(toDeleteSeg, f)
-				toDeleteDownloader = append(toDeleteDownloader, f, strings.Replace(f, ".seg", ".idx", 1))
-			}
-			log.Debug(fmt.Sprintf("[%s] deleting", logPrefix), "toDeleteSeg", toDeleteSeg, "toDeleteDownloader", toDeleteDownloader)
-			err = snapshotDownloader.Delete(ctx, toDeleteDownloader)
-			if err != nil {
-				return err
-			}
-			err = blockReader.Snapshots().Delete(toDeleteSeg...)
-			if err != nil {
+			if err = blockReader.Snapshots().RetireFilesAbove(toBlock, func(files []string) error {
+				return snapshotDownloader.Delete(ctx, files)
+			}); err != nil {
 				return err
 			}
 			// re-open headers and bodies with alignMin=false after deletes,

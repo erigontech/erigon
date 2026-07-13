@@ -25,8 +25,8 @@ import (
 var typeInitFunctions = []func(){}
 var typeInitMutex = sync.Mutex{}
 
-func LocalTypeInit(localIdInitialiser func(govalue interface{}) TypeId,
-	publicIdInitialiser func(domainValue interface{}, id []byte, idVersion Version) (TypeId, error)) {
+func LocalTypeInit(localIdInitialiser func(govalue any) TypeId,
+	publicIdInitialiser func(domainValue any, id []byte, idVersion Version) (TypeId, error)) {
 	typeInitMutex.Lock()
 	if NewLocalTypeId == nil {
 		NewLocalTypeId = localIdInitialiser
@@ -38,7 +38,7 @@ func LocalTypeInit(localIdInitialiser func(govalue interface{}) TypeId,
 	typeInitMutex.Unlock()
 }
 
-var NewLocalTypeId func(govalue interface{}) TypeId
+var NewLocalTypeId func(govalue any) TypeId
 
 var typeIds = map[string]TypeId{}
 var typeIdsMutex = &sync.RWMutex{}
@@ -132,7 +132,7 @@ func (a TypeArray) String() string {
 	return fmt.Sprintf("%s", argTypes)
 }
 
-func (a TypeArray) Type(at interface{}) TypeId {
+func (a TypeArray) Type(at any) TypeId {
 	return a[at.(int)]
 }
 
@@ -153,24 +153,24 @@ func (m TypeMap) String() string {
 	return fmt.Sprintf("%s", argTypes)
 }
 
-func (m TypeMap) Type(at interface{}) TypeId {
+func (m TypeMap) Type(at any) TypeId {
 	return m[at.(string)]
 }
 
 type ArgTypes interface {
 	Len() int
 	String() string
-	Type(at interface{}) TypeId
+	Type(at any) TypeId
 }
 
 type Args interface {
-	Arg(key interface{}) interface{}
+	Arg(key any) any
 	Len() int
 }
 
-type ArgArray []interface{}
+type ArgArray []any
 
-func (a ArgArray) Arg(at interface{}) interface{} {
+func (a ArgArray) Arg(at any) any {
 	return a[at.(int)]
 }
 
@@ -178,9 +178,9 @@ func (a ArgArray) Len() int {
 	return len(a)
 }
 
-type ArgMap map[string]interface{}
+type ArgMap map[string]any
 
-func (m ArgMap) Arg(at interface{}) interface{} {
+func (m ArgMap) Arg(at any) any {
 	return m[at.(string)]
 }
 
@@ -207,7 +207,7 @@ var Trace = false
 var typeids = map[reflect.Type]TypeId{}
 var typeidsMutex = &sync.RWMutex{}
 
-func TypeIdOf(govalue interface{}) TypeId {
+func TypeIdOf(govalue any) TypeId {
 	var err error
 	var gotype reflect.Type
 	var ok bool
@@ -329,7 +329,7 @@ func (info *typeInfo) LocalType() reflect.Type {
 	return info.localType
 }
 
-func TypeIdValues(typeIds interface{}) []TypeId {
+func TypeIdValues(typeIds any) []TypeId {
 	s := reflect.ValueOf(typeIds)
 
 	if s.Kind() == reflect.Pointer {
