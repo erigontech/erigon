@@ -885,9 +885,23 @@ func (emt *ExecModuleTester) insertPoSBlocks(chain *blockgen.ChainPack) error {
 
 	tipHash := chain.TopBlock.Hash()
 
-	status, verr, _, err := wr.UpdateForkChoice(emt.Ctx, tipHash, tipHash, tipHash)
-	if err != nil {
-		return err
+	// Busy means the background-commit backlog is full; the real CL retries the
+	// FCU, giving the commit worker a foreground-idle window to drain. Mirror
+	// that here instead of failing the insert.
+	var status execmodule.ExecutionStatus
+	var verr *string
+	for {
+		status, verr, _, err = wr.UpdateForkChoice(emt.Ctx, tipHash, tipHash, tipHash)
+		if err != nil {
+			return err
+		}
+		if status != execmodule.ExecutionStatusBusy {
+			break
+		}
+		if emt.Ctx.Err() != nil {
+			return emt.Ctx.Err()
+		}
+		time.Sleep(time.Millisecond)
 	}
 
 	if status != execmodule.ExecutionStatusSuccess {
