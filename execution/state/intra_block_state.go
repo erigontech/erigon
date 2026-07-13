@@ -2045,7 +2045,15 @@ func (sdb *IntraBlockState) CreateAccount(addr accounts.Address, contractCreatio
 		sdb.journal.dirty(addr)
 	}
 	if previous != nil && !previous.selfdestructed {
-		newObj.data.Balance.Set(&previous.data.Balance)
+		// versionedAccountBase returns the base record without overlaying this
+		// tx's own field writes, so previous.data.Balance can lag an in-block
+		// credit (e.g. genesis Constructor allocs: AddBalance then SysCreate).
+		// Carry the current balance so the credit survives the create.
+		curBal, _, err := sdb.getBalance(addr)
+		if err != nil {
+			return err
+		}
+		newObj.data.Balance.Set(&curBal)
 	}
 	newObj.data.PrevIncarnation = prevInc
 
