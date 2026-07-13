@@ -555,7 +555,7 @@ func GenesisWithoutStateToBlock(g *types.Genesis) (head *types.Header, withdrawa
 		}
 	}
 
-	// these fields need to be overriden for Bor running in a kurtosis devnet
+	// these fields need to be overridden for Bor running in a kurtosis devnet
 	if g.Config != nil && g.Config.Bor != nil && g.Config.ChainID.Uint64() == polygonchain.BorKurtosisDevnetChainId {
 		withdrawals = []*types.Withdrawal{}
 		head.BlobGasUsed = new(uint64)

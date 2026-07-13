@@ -244,7 +244,7 @@ func unwindExec3State(ctx context.Context,
 		//TODO: This is broken - becuase it does not handle the way value changes
 		// for previous steps are represented - they will pass nil values here
 		// which will look like a delete (12/11/25 - I've not fixed this as it has
-		// been here for a while and I'm not sure what if anything recieves these
+		// been here for a while and I'm not sure what if anything receives these
 		// changes at what it does with them)
 		if len(k) == length.Addr {
 			if len(v) > 0 {
