@@ -72,6 +72,9 @@ jobs:
           client-id: ${{ vars.RELEASE_BOT_APP_ID }}
           private-key: ${{ secrets.RELEASE_BOT_APP_KEY }}
           repositories: "erigon"
+          # Scope the token to only what this workflow needs (create a ref),
+          # instead of inheriting all the App's installation permissions.
+          permission-contents: write
 
       - name: Create branch
         id: result
