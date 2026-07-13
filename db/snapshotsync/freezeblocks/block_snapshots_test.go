@@ -85,11 +85,10 @@ func TestBlockReaderPrefersTxBlockView(t *testing.T) {
 	require.True(t, okTx, "reader must resolve the retired segment via the tx's pinned view")
 }
 
-// TestFirstTxnNumNotInSnapshotsIgnoresTxView pins the whole-extent invariant:
-// FirstTxnNumNotInSnapshots reads the live snapshots, so a tx pinning an empty/stale
-// block-files view must not change its result. Regression for the txnum-base collapse
-// (base→0) that corrupted MaxTxNum once the tx-pinned view was enabled.
-func TestFirstTxnNumNotInSnapshotsIgnoresTxView(t *testing.T) {
+// TestFirstTxnNumNotInSnapshotsUsesTxView: FirstTxnNumNotInSnapshots resolves the
+// transactions extent through the tx's pinned block-files view, like the block read
+// methods — falling back to the live set when the tx pins none.
+func TestFirstTxnNumNotInSnapshotsUsesTxView(t *testing.T) {
 	logger := log.New()
 	dir := t.TempDir()
 	cfg := ethconfig.Defaults.Snapshot
@@ -105,17 +104,22 @@ func TestFirstTxnNumNotInSnapshotsIgnoresTxView(t *testing.T) {
 	require.NoError(t, snapshots.OpenFolder())
 	blockReader := NewBlockReader(snapshots, nil)
 
-	want := blockReader.FirstTxnNumNotInSnapshots(nil)
-	require.NotZero(t, want, "sanity: live snapshots must yield a non-zero first txnum")
+	// nil tx -> live snapshots.
+	live := blockReader.FirstTxnNumNotInSnapshots(nil)
+	require.NotZero(t, live, "sanity: live snapshots must yield a non-zero first txnum")
 
-	// A tx whose pinned view is empty must not change the answer.
+	// A tx pinning the live view resolves the same extent.
+	liveTx := blockFilesTxStub{view: snapshots.View()}
+	defer liveTx.view.Close()
+	require.Equal(t, live, blockReader.FirstTxnNumNotInSnapshots(liveTx))
+
+	// A tx pinning an empty view resolves through it and sees no transactions segment.
 	empty := blocksnapshots.NewRoSnapshots(cfg, t.TempDir(), logger)
 	defer empty.Close()
-	staleTx := blockFilesTxStub{view: empty.View()}
-	defer staleTx.view.Close()
-
-	require.Equal(t, want, blockReader.FirstTxnNumNotInSnapshots(staleTx),
-		"must read live r.sn, not the tx's empty pinned view")
+	emptyTx := blockFilesTxStub{view: empty.View()}
+	defer emptyTx.view.Close()
+	require.Zero(t, blockReader.FirstTxnNumNotInSnapshots(emptyTx),
+		"must resolve through the tx's pinned (empty) view, not the live set")
 }
 
 func TestDumpRangeErrorsWhenRangeAlreadyClaimed(t *testing.T) {

@@ -1337,25 +1337,24 @@ func (r *BlockReader) TxnLookup(_ context.Context, tx kv.Getter, txnHash common.
 	return blockNum, txNum, ok, nil
 }
 
-func (r *BlockReader) FirstTxnNumNotInSnapshots(_ kv.Getter) uint64 {
-	blocksAvailable := r.sn.BlocksAvailable()
-	sn, ok, close := r.sn.ViewSingleFile(snaptype2.Transactions, blocksAvailable)
-	if !ok {
-		log.Warn("[dbg] FirstTxnNumNotInSnapshots: no transactions segment covers blocksAvailable", "blocksAvailable", blocksAvailable, "segmentsMax", r.sn.SegmentsMax(), "indicesMax", r.sn.IndicesMax())
+func (r *BlockReader) FirstTxnNumNotInSnapshots(tx kv.Getter) uint64 {
+	view, release := r.view(tx)
+	defer release()
+
+	segs := view.Segments(snaptype2.Transactions)
+	if len(segs) == 0 {
 		return 0
 	}
-	defer close()
-
-	baseDataID := sn.Src().Index(snaptype2.Indexes.TxnHash).BaseDataID()
-	count := uint64(sn.Src().Count())
-	lastTxnID := baseDataID + count
-	log.Info("[dbg] FirstTxnNumNotInSnapshots", "blocksAvailable", blocksAvailable, "segFrom", sn.From(), "segTo", sn.To(), "baseDataID", baseDataID, "count", count, "firstTxNum", lastTxnID)
-	return lastTxnID
+	last := segs[len(segs)-1].Src()
+	if last == nil {
+		return 0
+	}
+	return last.Index(snaptype2.Indexes.TxnHash).BaseDataID() + uint64(last.Count())
 }
 
-func (r *BlockReader) IterateFrozenBodies(_ kv.Getter, f func(blockNum, baseTxNum, txCount uint64) error) error {
-	view := r.sn.View()
-	defer view.Close()
+func (r *BlockReader) IterateFrozenBodies(tx kv.Getter, f func(blockNum, baseTxNum, txCount uint64) error) error {
+	view, release := r.view(tx)
+	defer release()
 	for _, sn := range view.Bodies() {
 		defer sn.Src().MadvSequential().DisableReadAhead()
 
@@ -1377,7 +1376,7 @@ func (r *BlockReader) IterateFrozenBodies(_ kv.Getter, f func(blockNum, baseTxNu
 	return nil
 }
 
-func (r *BlockReader) IntegrityTxnID(ctx context.Context, _ kv.Getter, failFast bool) error {
+func (r *BlockReader) IntegrityTxnID(ctx context.Context, failFast bool) error {
 	defer log.Info("[integrity] BlocksTxnID done")
 	view := r.sn.View()
 	defer view.Close()
