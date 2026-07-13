@@ -470,6 +470,7 @@ func setEmbeddedRpcDaemon(ctx *cli.Context, cfg *nodecfg.Config, logger log.Logg
 		Gascap:              ctx.Uint64(utils.RpcGasCapFlag.Name),
 		BlockRangeLimit:     ctx.Int(utils.RpcBlockRangeLimit.Name),
 		GetLogsMaxResults:   ctx.Int(utils.RpcGetLogsMaxResults.Name),
+		LogQueryLimit:       ctx.Int(utils.RpcLogQueryLimit.Name),
 		Feecap:              ctx.Float64(utils.RPCGlobalTxFeeCapFlag.Name),
 		MaxTraces:           ctx.Uint64(utils.TraceMaxtracesFlag.Name),
 		TraceCompatibility:  ctx.Bool(utils.RpcTraceCompatFlag.Name),
