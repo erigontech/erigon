@@ -242,6 +242,12 @@ func (e *ExecModule) closeAllGens() {
 	for _, g := range e.gens {
 		g.sd.SetParent(nil)
 		g.sd.Close()
+		// Roll back the generation's read tx: committed gens already had it
+		// rolled back in runCommit (Rollback is idempotent), but a never-committed
+		// gen would otherwise leak an open MDBX reader and wedge DB.Close.
+		if g.roTx != nil {
+			g.roTx.Rollback()
+		}
 	}
 	e.gens = nil
 	e.uncommittedGens = 0
