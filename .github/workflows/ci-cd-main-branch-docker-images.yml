@@ -54,7 +54,6 @@ jobs:
         ##   latest image:    erigontech/erigon:${tag_name}${latest_suffix}
         ##   commit id image: erigontech/erigon:${tag_name}-${short_commit_id}
         env:
-          CHECKOUT_REF: ${{ inputs.checkout_ref }}
           BRANCH_REF: ${{ inputs.checkout_ref == '' && github.ref_name || inputs.checkout_ref }}
         run: |
           branch_name="$BRANCH_REF"
@@ -73,7 +72,7 @@ jobs:
               ;;
             * )
               # use last string after last slash '/' by default if branch contains slash:
-              export tag_name=$(echo $CHECKOUT_REF | sed -e  's/.*\///g' );
+              export tag_name=$(echo "$branch_name" | sed -e 's/.*\///g');
               export keep_images=0;
               export latest_suffix=''
               export binaries="erigon"
