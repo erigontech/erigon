@@ -66,7 +66,7 @@ func newTestBackend(t *testing.T) *execmoduletester.ExecModuleTester {
 			t.Fatalf("failed to create tx: %v", txErr)
 		}
 		b.AddTx(tx)
-	})
+	}, m.PublishedSD())
 	if err != nil {
 		t.Error(err)
 	}
@@ -90,7 +90,7 @@ func TestSuggestPrice(t *testing.T) {
 	m := newTestBackend(t) //, big.NewInt(16), c.pending)
 	baseApi := jsonrpc.NewBaseApi(nil, kvcache.NewSimple(), m.BlockReader, false, rpccfg.DefaultEvmCallTimeout, m.Engine, m.Dirs, nil, 0, 0)
 
-	tx, err := m.DB.BeginTemporalRo(m.Ctx)
+	tx, err := m.OverlayDB().BeginTemporalRo(m.Ctx)
 	require.NoError(t, err)
 	defer tx.Rollback()
 
@@ -384,7 +384,7 @@ func TestSuggestTipCap_SparseBlocks(t *testing.T) {
 			}
 			b.AddTx(tx)
 		}
-	})
+	}, m.PublishedSD())
 	require.NoError(t, err)
 	require.NoError(t, m.InsertChain(ch))
 
@@ -396,7 +396,7 @@ func TestSuggestTipCap_SparseBlocks(t *testing.T) {
 	baseApi := jsonrpc.NewBaseApi(nil, kvcache.NewSimple(), m.BlockReader, false,
 		rpccfg.DefaultEvmCallTimeout, m.Engine, m.Dirs, nil, 0, 0)
 
-	dbTx, txErr := m.DB.BeginTemporalRo(m.Ctx)
+	dbTx, txErr := m.OverlayDB().BeginTemporalRo(m.Ctx)
 	require.NoError(t, txErr)
 	defer dbTx.Rollback()
 
@@ -422,7 +422,7 @@ func TestSuggestTipCap_AllEmptyBlocks(t *testing.T) {
 	ch, err := blockgen.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, totalBlocks, func(_ int, b *blockgen.BlockGen) {
 		b.SetCoinbase(common.Address{1})
 		// no transactions — all blocks are empty
-	})
+	}, m.PublishedSD())
 	require.NoError(t, err)
 	require.NoError(t, m.InsertChain(ch))
 
@@ -434,7 +434,7 @@ func TestSuggestTipCap_AllEmptyBlocks(t *testing.T) {
 	baseApi := jsonrpc.NewBaseApi(nil, kvcache.NewSimple(), m.BlockReader, false,
 		rpccfg.DefaultEvmCallTimeout, m.Engine, m.Dirs, nil, 0, 0)
 
-	dbTx, txErr := m.DB.BeginTemporalRo(m.Ctx)
+	dbTx, txErr := m.OverlayDB().BeginTemporalRo(m.Ctx)
 	require.NoError(t, txErr)
 	defer dbTx.Rollback()
 

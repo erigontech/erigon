@@ -68,7 +68,7 @@ func newOverlayAheadTestAPI(t *testing.T) (base *BaseAPI, m *execmoduletester.Ex
 
 	c, err := blockgen.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, overlayRaceChainSize, func(i int, gen *blockgen.BlockGen) {
 		gen.SetCoinbase(common.Address{1})
-	})
+	}, m.PublishedSD())
 	require.NoError(t, err)
 	require.NoError(t, m.InsertChain(c))
 
@@ -150,7 +150,7 @@ func marshalOverlayRaceTestTx(t *testing.T, txn types.Transaction) []byte {
 func TestGetBlockByTimestamp_SeesOverlayHead(t *testing.T) {
 	t.Parallel()
 	base, m, overlayHeader := newOverlayAheadTestAPI(t)
-	api := NewErigonAPI(base, m.DB, nil)
+	api := NewErigonAPI(base, m.OverlayDB(), nil)
 
 	resp, err := api.GetBlockByTimestamp(m.Ctx, rpc.Timestamp(overlayHeader.Time), false)
 	require.NoError(t, err)
@@ -171,7 +171,7 @@ func TestGetTransactionByHash_PendingTx_UsesOverlayHead(t *testing.T) {
 	pool := &overlayRaceTxPoolClient{
 		transactionsReply: &txpoolproto.TransactionsReply{RlpTxs: [][]byte{marshalOverlayRaceTestTx(t, pendingTxn)}},
 	}
-	api := newEthApiForTest(base, m.DB, pool, nil)
+	api := newEthApiForTest(base, m.OverlayDB(), pool, nil)
 
 	got, err := api.GetTransactionByHash(m.Ctx, pendingTxn.Hash())
 	require.NoError(t, err)
@@ -201,7 +201,7 @@ func TestTxPoolContent_UsesOverlayHead(t *testing.T) {
 	t.Parallel()
 	base, m, overlayHeader := newOverlayAheadTestAPI(t)
 	pool, txn := newOverlayRacePendingPool(t, m)
-	api := NewTxPoolAPI(base, m.DB, pool)
+	api := NewTxPoolAPI(base, m.OverlayDB(), pool)
 
 	content, err := api.Content(m.Ctx)
 	require.NoError(t, err)
@@ -217,7 +217,7 @@ func TestTxPoolContentFrom_UsesOverlayHead(t *testing.T) {
 	t.Parallel()
 	base, m, overlayHeader := newOverlayAheadTestAPI(t)
 	pool, txn := newOverlayRacePendingPool(t, m)
-	api := NewTxPoolAPI(base, m.DB, pool)
+	api := NewTxPoolAPI(base, m.OverlayDB(), pool)
 
 	content, err := api.ContentFrom(m.Ctx, m.Address)
 	require.NoError(t, err)

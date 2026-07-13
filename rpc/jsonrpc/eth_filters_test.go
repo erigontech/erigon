@@ -53,8 +53,8 @@ func TestSubscriptionsRequireFiltersAndNotifier(t *testing.T) {
 	stateCache := kvcache.New(kvcache.DefaultCoherentConfig)
 
 	apis := map[string]*APIImpl{
-		"withFilters": newEthApiForTest(newBaseApiWithFiltersForTest(ff, stateCache, m), m.DB, nil, nil),
-		"nilFilters":  newEthApiForTest(newBaseApiForTest(m), m.DB, nil, nil),
+		"withFilters": newEthApiForTest(newBaseApiWithFiltersForTest(ff, stateCache, m), m.OverlayDB(), nil, nil),
+		"nilFilters":  newEthApiForTest(newBaseApiForTest(m), m.OverlayDB(), nil, nil),
 	}
 	for apiName, api := range apis {
 		// ctx carries no rpc notifier, so every subscription method must refuse
@@ -85,7 +85,7 @@ func TestNewFilters(t *testing.T) {
 	ctx, conn := rpcdaemontest.CreateTestGrpcConn(t, execmoduletester.New(t))
 	mining := txpoolproto.NewMiningClient(conn)
 	ff := rpchelper.New(ctx, rpchelper.DefaultFiltersConfig, nil, nil, mining, func() {}, m.Log, nil)
-	api := newEthApiForTest(newBaseApiWithFiltersForTest(ff, stateCache, m), m.DB, nil, nil)
+	api := newEthApiForTest(newBaseApiWithFiltersForTest(ff, stateCache, m), m.OverlayDB(), nil, nil)
 
 	ptf, err := api.NewPendingTransactionFilter(ctx)
 	assert.NoError(err)
@@ -167,7 +167,7 @@ func TestBlockFilterGetFilterChangesInitiallyEmpty(t *testing.T) {
 	ctx, conn := rpcdaemontest.CreateTestGrpcConn(t, execmoduletester.New(t))
 	mining := txpoolproto.NewMiningClient(conn)
 	ff := rpchelper.New(ctx, rpchelper.DefaultFiltersConfig, nil, nil, mining, func() {}, m.Log, nil)
-	api := newEthApiForTest(newBaseApiWithFiltersForTest(ff, stateCache, m), m.DB, nil, nil)
+	api := newEthApiForTest(newBaseApiWithFiltersForTest(ff, stateCache, m), m.OverlayDB(), nil, nil)
 
 	// Create a new block filter
 	bf, err := api.NewBlockFilter(ctx)
@@ -195,7 +195,7 @@ func TestCompositeFiltersGetFilterChangesInitiallyEmpty(t *testing.T) {
 	ctx, conn := rpcdaemontest.CreateTestGrpcConn(t, execmoduletester.New(t))
 	mining := txpoolproto.NewMiningClient(conn)
 	ff := rpchelper.New(ctx, rpchelper.DefaultFiltersConfig, nil, nil, mining, func() {}, m.Log, nil)
-	api := newEthApiForTest(newBaseApiWithFiltersForTest(ff, stateCache, m), m.DB, nil, nil)
+	api := newEthApiForTest(newBaseApiWithFiltersForTest(ff, stateCache, m), m.OverlayDB(), nil, nil)
 
 	// Create all three filter types
 	ptf, err := api.NewPendingTransactionFilter(ctx)
@@ -250,7 +250,7 @@ func TestPendingTxsFilterChangesReturnsAllBatches(t *testing.T) {
 	mining := txpoolproto.NewMiningClient(conn)
 	ff := rpchelper.New(ctx, rpchelper.DefaultFiltersConfig, nil, nil, mining, func() {}, m.Log, nil)
 	stateCache := kvcache.New(kvcache.DefaultCoherentConfig)
-	api := newEthApiForTest(newBaseApiWithFiltersForTest(ff, stateCache, m), m.DB, nil, nil)
+	api := newEthApiForTest(newBaseApiWithFiltersForTest(ff, stateCache, m), m.OverlayDB(), nil, nil)
 
 	ptf, err := api.NewPendingTransactionFilter(ctx)
 	require.NoError(t, err)
@@ -287,7 +287,7 @@ func TestGetFilterChangesReturnsFilterNotFoundForUnknownID(t *testing.T) {
 	ctx, conn := rpcdaemontest.CreateTestGrpcConn(t, execmoduletester.New(t))
 	mining := txpoolproto.NewMiningClient(conn)
 	ff := rpchelper.New(ctx, rpchelper.DefaultFiltersConfig, nil, nil, mining, func() {}, m.Log, nil)
-	api := newEthApiForTest(newBaseApiWithFiltersForTest(ff, stateCache, m), m.DB, nil, nil)
+	api := newEthApiForTest(newBaseApiWithFiltersForTest(ff, stateCache, m), m.OverlayDB(), nil, nil)
 
 	// Use a bogus id that does not correspond to any subscription
 	_, err := api.GetFilterChanges(ctx, "0xdeadbeefcafebabe")

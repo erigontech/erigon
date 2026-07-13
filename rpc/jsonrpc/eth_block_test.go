@@ -43,7 +43,7 @@ import (
 // Gets the latest block number with the latest tag
 func TestGetBlockByNumberWithLatestTag(t *testing.T) {
 	m, _, _ := rpcdaemontest.CreateTestExecModule(t)
-	api := newEthApiForTest(newBaseApiForTest(m), m.DB, nil, nil)
+	api := newEthApiForTest(newBaseApiForTest(m), m.OverlayDB(), nil, nil)
 	b, err := api.GetBlockByNumber(context.Background(), rpc.LatestBlockNumber, false)
 	expected := common.HexToHash("0x9c47d5780744fa24ccdb1543a9b715e53431d5560b9e460b8b7a68f7c58310ae")
 	if err != nil {
@@ -73,7 +73,7 @@ func TestGetBlockByNumberWithLatestTag_WithHeadHashInDb(t *testing.T) {
 	}
 	tx.Commit()
 
-	api := newEthApiForTest(newBaseApiForTest(m), m.DB, nil, nil)
+	api := newEthApiForTest(newBaseApiForTest(m), m.OverlayDB(), nil, nil)
 	block, err := api.GetBlockByNumber(ctx, rpc.LatestBlockNumber, false)
 	if err != nil {
 		t.Errorf("error retrieving block by number: %s", err)
@@ -103,7 +103,7 @@ func TestGetBlockByNumberWithPendingTag(t *testing.T) {
 		RplBlock: rlpBlock,
 	})
 
-	api := newEthApiForTest(newBaseApiWithFiltersForTest(ff, stateCache, m), m.DB, nil, nil)
+	api := newEthApiForTest(newBaseApiWithFiltersForTest(ff, stateCache, m), m.OverlayDB(), nil, nil)
 	b, err := api.GetBlockByNumber(context.Background(), rpc.PendingBlockNumber, false)
 	if err != nil {
 		t.Errorf("error getting block number with pending tag: %s", err)
@@ -115,7 +115,7 @@ func TestGetBlockByNumberWithPendingTag(t *testing.T) {
 func TestGetBlockByNumber_WithFinalizedTag_NoFinalizedBlockInDb(t *testing.T) {
 	m, _, _ := rpcdaemontest.CreateTestExecModule(t)
 	ctx := context.Background()
-	api := newEthApiForTest(newBaseApiForTest(m), m.DB, nil, nil)
+	api := newEthApiForTest(newBaseApiForTest(m), m.OverlayDB(), nil, nil)
 	_, err := api.GetBlockByNumber(ctx, rpc.FinalizedBlockNumber, false)
 	if err != nil {
 		var customErr *rpc.CustomError
@@ -147,7 +147,7 @@ func TestGetBlockByNumber_WithFinalizedTag_WithFinalizedBlockInDb(t *testing.T) 
 	}
 	tx.Commit()
 
-	api := newEthApiForTest(newBaseApiForTest(m), m.DB, nil, nil)
+	api := newEthApiForTest(newBaseApiForTest(m), m.OverlayDB(), nil, nil)
 	block, err := api.GetBlockByNumber(ctx, rpc.FinalizedBlockNumber, false)
 	if err != nil {
 		t.Errorf("error retrieving block by number: %s", err)
@@ -159,7 +159,7 @@ func TestGetBlockByNumber_WithFinalizedTag_WithFinalizedBlockInDb(t *testing.T) 
 func TestGetBlockByNumber_WithSafeTag_NoSafeBlockInDb(t *testing.T) {
 	m, _, _ := rpcdaemontest.CreateTestExecModule(t)
 	ctx := context.Background()
-	api := newEthApiForTest(newBaseApiForTest(m), m.DB, nil, nil)
+	api := newEthApiForTest(newBaseApiForTest(m), m.OverlayDB(), nil, nil)
 	_, err := api.GetBlockByNumber(ctx, rpc.SafeBlockNumber, false)
 	if err != nil {
 		var customErr *rpc.CustomError
@@ -191,7 +191,7 @@ func TestGetBlockByNumber_WithSafeTag_WithSafeBlockInDb(t *testing.T) {
 	}
 	tx.Commit()
 
-	api := newEthApiForTest(newBaseApiForTest(m), m.DB, nil, nil)
+	api := newEthApiForTest(newBaseApiForTest(m), m.OverlayDB(), nil, nil)
 	block, err := api.GetBlockByNumber(ctx, rpc.SafeBlockNumber, false)
 	if err != nil {
 		t.Errorf("error retrieving block by number: %s", err)
@@ -204,7 +204,7 @@ func TestGetBlockTransactionCountByHash(t *testing.T) {
 	m, _, _ := rpcdaemontest.CreateTestExecModule(t)
 	ctx := context.Background()
 
-	api := newEthApiForTest(newBaseApiForTest(m), m.DB, nil, nil)
+	api := newEthApiForTest(newBaseApiForTest(m), m.OverlayDB(), nil, nil)
 	blockHash := common.HexToHash("0x6804117de2f3e6ee32953e78ced1db7b20214e0d8c745a03b8fecf7cc8ee76ef")
 
 	tx, err := m.DB.BeginRw(ctx)
@@ -236,7 +236,7 @@ func TestGetBlockTransactionCountByHash(t *testing.T) {
 func TestGetBlockTransactionCountByHash_ZeroTx(t *testing.T) {
 	m, _, _ := rpcdaemontest.CreateTestExecModule(t)
 	ctx := context.Background()
-	api := newEthApiForTest(newBaseApiForTest(m), m.DB, nil, nil)
+	api := newEthApiForTest(newBaseApiForTest(m), m.OverlayDB(), nil, nil)
 	blockHash := common.HexToHash("0x5883164d4100b95e1d8e931b8b9574586a1dea7507941e6ad3c1e3a2591485fd")
 
 	tx, err := m.DB.BeginRw(ctx)
@@ -268,7 +268,7 @@ func TestGetBlockTransactionCountByHash_ZeroTx(t *testing.T) {
 func TestGetBlockTransactionCountByNumber(t *testing.T) {
 	m, _, _ := rpcdaemontest.CreateTestExecModule(t)
 	ctx := context.Background()
-	api := newEthApiForTest(newBaseApiForTest(m), m.DB, nil, nil)
+	api := newEthApiForTest(newBaseApiForTest(m), m.OverlayDB(), nil, nil)
 	blockHash := common.HexToHash("0x6804117de2f3e6ee32953e78ced1db7b20214e0d8c745a03b8fecf7cc8ee76ef")
 
 	tx, err := m.DB.BeginRw(ctx)
@@ -300,7 +300,7 @@ func TestGetBlockTransactionCountByNumber(t *testing.T) {
 func TestGetBlockTransactionCountByNumber_ZeroTx(t *testing.T) {
 	m, _, _ := rpcdaemontest.CreateTestExecModule(t)
 	ctx := context.Background()
-	api := newEthApiForTest(newBaseApiForTest(m), m.DB, nil, nil)
+	api := newEthApiForTest(newBaseApiForTest(m), m.OverlayDB(), nil, nil)
 
 	blockHash := common.HexToHash("0x5883164d4100b95e1d8e931b8b9574586a1dea7507941e6ad3c1e3a2591485fd")
 
@@ -342,7 +342,7 @@ func TestGetBlockByNumber_BlockPruneGating(t *testing.T) {
 	setup := func(t *testing.T, pm prune.Mode) *APIImpl {
 		t.Helper()
 		m := execmoduletester.New(t, execmoduletester.WithPruneMode(pm))
-		c, err := blockgen.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, chainSize, func(_ int, _ *blockgen.BlockGen) {})
+		c, err := blockgen.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, chainSize, func(_ int, _ *blockgen.BlockGen) {}, m.PublishedSD())
 		require.NoError(t, err)
 		require.NoError(t, m.InsertChain(c))
 
@@ -354,7 +354,7 @@ func TestGetBlockByNumber_BlockPruneGating(t *testing.T) {
 		require.NoError(t, err)
 		require.NoError(t, tx.Commit())
 
-		return newEthApiForTest(newBaseApiForTest(m), m.DB, nil, nil)
+		return newEthApiForTest(newBaseApiForTest(m), m.OverlayDB(), nil, nil)
 	}
 
 	legacyFull := prune.Mode{

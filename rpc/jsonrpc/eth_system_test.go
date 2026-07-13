@@ -87,7 +87,7 @@ func TestCapabilities(t *testing.T) {
 				t.Fatal(txErr)
 			}
 			b.AddTx(tx)
-		})
+		}, m.PublishedSD())
 		require.NoError(t, err)
 		require.NoError(t, m.InsertChain(c))
 
@@ -111,7 +111,7 @@ func TestCapabilities(t *testing.T) {
 		head, err := stages.GetStageProgress(roTx, stages.Execution)
 		require.NoError(t, err)
 
-		return newEthApiForTest(newBaseApiForTest(m), m.DB, nil, nil), head
+		return newEthApiForTest(newBaseApiForTest(m), m.OverlayDB(), nil, nil), head
 	}
 
 	setupAPIWithMerge := func(t *testing.T, mergeAt uint64, persistReceipts bool) *APIImpl {
@@ -134,7 +134,7 @@ func TestCapabilities(t *testing.T) {
 				t.Fatal(txErr)
 			}
 			b.AddTx(tx)
-		})
+		}, m.PublishedSD())
 		require.NoError(t, err)
 		require.NoError(t, m.InsertChain(c))
 		ctx := t.Context()
@@ -148,7 +148,7 @@ func TestCapabilities(t *testing.T) {
 			require.NoError(t, kvcfg.PersistReceipts.ForceWrite(dbTx, true))
 		}
 		require.NoError(t, dbTx.Commit())
-		return newEthApiForTest(newBaseApiForTest(m), m.DB, nil, nil)
+		return newEthApiForTest(newBaseApiForTest(m), m.OverlayDB(), nil, nil)
 	}
 
 	oldest := func(t *testing.T, f CapabilityField) uint64 {
@@ -409,7 +409,7 @@ func TestCapabilities(t *testing.T) {
 		require.NoError(t, rawdb.WriteDBCommitmentHistoryEnabled(dbTx, false))
 		require.NoError(t, dbTx.Commit())
 
-		api := newEthApiForTest(newBaseApiForTest(m), m.DB, nil, nil)
+		api := newEthApiForTest(newBaseApiForTest(m), m.OverlayDB(), nil, nil)
 		result, err := api.Capabilities(ctx)
 		require.NoError(t, err)
 		require.Equal(t, uint64(0), uint64(result.Head.Number))
@@ -446,7 +446,7 @@ func TestGasPrice(t *testing.T) {
 		t.Run(testCase.description, func(t *testing.T) {
 			m := createGasPriceTestKV(t, testCase.chainSize)
 			defer m.DB.Close()
-			eth := newEthApiForTest(newBaseApiForTest(m), m.DB, nil, nil)
+			eth := newEthApiForTest(newBaseApiForTest(m), m.OverlayDB(), nil, nil)
 
 			ctx := context.Background()
 			result, err := eth.GasPrice(ctx)
@@ -562,7 +562,7 @@ func TestEthConfig(t *testing.T) {
 			require.NoError(t, err)
 			m := execmoduletester.New(t, execmoduletester.WithGenesisSpec(&genesis), execmoduletester.WithKey(key))
 			defer m.Close()
-			eth := newEthApiForTest(newBaseApiForTest(m), m.DB, nil, nil)
+			eth := newEthApiForTest(newBaseApiForTest(m), m.OverlayDB(), nil, nil)
 			if test.head != nil {
 				tx, err := m.DB.BeginTemporalRw(ctx)
 				require.NoError(t, err)
@@ -600,7 +600,7 @@ func TestBaseFee(t *testing.T) {
 			Config: chain.TestChainBerlinConfig,
 			Alloc:  types.GenesisAlloc{addr: {Balance: big.NewInt(math.MaxInt64)}},
 		}), execmoduletester.WithKey(key))
-		api := newEthApiForTest(newBaseApiForTest(m), m.DB, nil, nil)
+		api := newEthApiForTest(newBaseApiForTest(m), m.OverlayDB(), nil, nil)
 		result, err := api.BaseFee(context.Background())
 		require.NoError(t, err)
 		require.Nil(t, result)
@@ -612,7 +612,7 @@ func TestBaseFee(t *testing.T) {
 			Config: chain.TestChainOsakaConfig,
 			Alloc:  types.GenesisAlloc{addr: {Balance: big.NewInt(math.MaxInt64)}},
 		}), execmoduletester.WithKey(key))
-		api := newEthApiForTest(newBaseApiForTest(m), m.DB, nil, nil)
+		api := newEthApiForTest(newBaseApiForTest(m), m.OverlayDB(), nil, nil)
 		result, err := api.BaseFee(context.Background())
 		require.NoError(t, err)
 		require.NotNil(t, result)
@@ -631,7 +631,7 @@ func TestBlobBaseFee(t *testing.T) {
 			Config: chain.TestChainBerlinConfig,
 			Alloc:  types.GenesisAlloc{addr: {Balance: big.NewInt(math.MaxInt64)}},
 		}), execmoduletester.WithKey(key))
-		api := newEthApiForTest(newBaseApiForTest(m), m.DB, nil, nil)
+		api := newEthApiForTest(newBaseApiForTest(m), m.OverlayDB(), nil, nil)
 		result, err := api.BlobBaseFee(context.Background())
 		require.NoError(t, err)
 		require.Nil(t, result)
@@ -643,7 +643,7 @@ func TestBlobBaseFee(t *testing.T) {
 			Config: chain.TestChainOsakaConfig,
 			Alloc:  types.GenesisAlloc{addr: {Balance: big.NewInt(math.MaxInt64)}},
 		}), execmoduletester.WithKey(key))
-		api := newEthApiForTest(newBaseApiForTest(m), m.DB, nil, nil)
+		api := newEthApiForTest(newBaseApiForTest(m), m.OverlayDB(), nil, nil)
 		result, err := api.BlobBaseFee(context.Background())
 		require.NoError(t, err)
 		require.NotNil(t, result)
@@ -670,7 +670,7 @@ func createGasPriceTestKV(t *testing.T, chainSize int) *execmoduletester.ExecMod
 			t.Fatalf("failed to create tx: %v", txErr)
 		}
 		b.AddTx(tx)
-	})
+	}, m.PublishedSD())
 	if err != nil {
 		t.Error(err)
 	}

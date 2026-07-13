@@ -109,7 +109,7 @@ func NewSimulatedBackendWithConfig(t *testing.T, alloc types.GenesisAlloc, confi
 		m:            m,
 		prependBlock: m.Genesis,
 		getHeader: func(hash common.Hash, number uint64) (h *types.Header, err error) {
-			err = m.DB.View(context.Background(), func(tx kv.Tx) error {
+			err = m.OverlayDB().View(context.Background(), func(tx kv.Tx) error {
 				h, err = m.BlockReader.Header(context.Background(), tx, hash, number)
 				return nil
 			})
@@ -173,7 +173,7 @@ func (b *SimulatedBackend) Rollback() {
 }
 
 func (b *SimulatedBackend) emptyPendingBlock() {
-	blockChain, _ := blockgen.GenerateChain(b.m.ChainConfig, b.prependBlock, b.m.Engine, b.m.DB, 1, func(int, *blockgen.BlockGen) {})
+	blockChain, _ := blockgen.GenerateChain(b.m.ChainConfig, b.prependBlock, b.m.Engine, b.m.DB, 1, func(int, *blockgen.BlockGen) {}, b.m.PublishedSD())
 	b.pendingBlock = blockChain.Blocks[0]
 	b.pendingReceipts = blockChain.Receipts[0]
 	b.pendingHeader = blockChain.Headers[0]
@@ -182,7 +182,7 @@ func (b *SimulatedBackend) emptyPendingBlock() {
 	if b.pendingReaderTx != nil {
 		b.pendingReaderTx.Rollback()
 	}
-	tx, err := b.m.DB.BeginTemporalRo(context.Background()) //nolint:gocritic
+	tx, err := b.m.OverlayDB().BeginTemporalRo(context.Background()) //nolint:gocritic
 	if err != nil {
 		panic(err)
 	}
@@ -203,7 +203,7 @@ func (b *SimulatedBackend) stateByBlockNumber(db kv.TemporalTx, blockNumber *uin
 func (b *SimulatedBackend) CodeAt(ctx context.Context, contract common.Address, blockNumber *uint256.Int) ([]byte, error) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
-	tx, err := b.m.DB.BeginTemporalRo(context.Background())
+	tx, err := b.m.OverlayDB().BeginTemporalRo(context.Background())
 	if err != nil {
 		return nil, err
 	}
@@ -216,7 +216,7 @@ func (b *SimulatedBackend) CodeAt(ctx context.Context, contract common.Address, 
 func (b *SimulatedBackend) BalanceAt(ctx context.Context, contract common.Address, blockNumber *uint256.Int) (*uint256.Int, error) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
-	tx, err := b.m.DB.BeginTemporalRo(context.Background())
+	tx, err := b.m.OverlayDB().BeginTemporalRo(context.Background())
 	if err != nil {
 		return nil, err
 	}
@@ -230,7 +230,7 @@ func (b *SimulatedBackend) BalanceAt(ctx context.Context, contract common.Addres
 func (b *SimulatedBackend) NonceAt(ctx context.Context, contract common.Address, blockNumber *uint256.Int) (uint64, error) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
-	tx, err := b.m.DB.BeginTemporalRo(context.Background())
+	tx, err := b.m.OverlayDB().BeginTemporalRo(context.Background())
 	if err != nil {
 		return 0, err
 	}
@@ -244,7 +244,7 @@ func (b *SimulatedBackend) NonceAt(ctx context.Context, contract common.Address,
 func (b *SimulatedBackend) StorageAt(ctx context.Context, contract common.Address, key common.Hash, blockNumber *uint256.Int) ([]byte, error) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
-	tx, err := b.m.DB.BeginTemporalRo(context.Background())
+	tx, err := b.m.OverlayDB().BeginTemporalRo(context.Background())
 	if err != nil {
 		return nil, err
 	}
@@ -263,7 +263,7 @@ func (b *SimulatedBackend) TransactionReceipt(ctx context.Context, txHash common
 	b.mu.Lock()
 	defer b.mu.Unlock()
 
-	tx, err := b.m.DB.BeginTemporalRo(context.Background())
+	tx, err := b.m.OverlayDB().BeginTemporalRo(context.Background())
 	if err != nil {
 		return nil, err
 	}
@@ -307,7 +307,7 @@ func (b *SimulatedBackend) TransactionByHash(ctx context.Context, txHash common.
 	b.mu.Lock()
 	defer b.mu.Unlock()
 
-	tx, err := b.m.DB.BeginRo(ctx)
+	tx, err := b.m.OverlayDB().BeginRo(ctx)
 	if err != nil {
 		return nil, false, err
 	}
@@ -354,7 +354,7 @@ func (b *SimulatedBackend) BlockByHash(ctx context.Context, hash common.Hash) (*
 	if hash == b.pendingBlock.Hash() {
 		return b.pendingBlock, nil
 	}
-	tx, err := b.m.DB.BeginRo(ctx)
+	tx, err := b.m.OverlayDB().BeginRo(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -388,7 +388,7 @@ func (b *SimulatedBackend) blockByNumberNoLock(ctx context.Context, number *uint
 		return b.prependBlock, nil
 	}
 
-	tx, err := b.m.DB.BeginRo(context.Background())
+	tx, err := b.m.OverlayDB().BeginRo(context.Background())
 	if err != nil {
 		return nil, err
 	}
@@ -413,7 +413,7 @@ func (b *SimulatedBackend) HeaderByHash(ctx context.Context, hash common.Hash) (
 	if hash == b.pendingBlock.Hash() {
 		return b.pendingBlock.Header(), nil
 	}
-	tx, err := b.m.DB.BeginRo(context.Background())
+	tx, err := b.m.OverlayDB().BeginRo(context.Background())
 	if err != nil {
 		return nil, err
 	}
@@ -439,7 +439,7 @@ func (b *SimulatedBackend) HeaderByHash(ctx context.Context, hash common.Hash) (
 func (b *SimulatedBackend) HeaderByNumber(ctx context.Context, number *uint256.Int) (*types.Header, error) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
-	tx, err := b.m.DB.BeginRo(context.Background())
+	tx, err := b.m.OverlayDB().BeginRo(context.Background())
 	if err != nil {
 		return nil, err
 	}
@@ -464,7 +464,7 @@ func (b *SimulatedBackend) TransactionCount(ctx context.Context, blockHash commo
 	if blockHash == b.pendingBlock.Hash() {
 		return uint(b.pendingBlock.Transactions().Len()), nil
 	}
-	tx, err := b.m.DB.BeginRo(context.Background())
+	tx, err := b.m.OverlayDB().BeginRo(context.Background())
 	if err != nil {
 		return 0, err
 	}
@@ -498,7 +498,7 @@ func (b *SimulatedBackend) TransactionInBlock(ctx context.Context, blockHash com
 
 		return transactions[index], nil
 	}
-	tx, err := b.m.DB.BeginRo(context.Background())
+	tx, err := b.m.OverlayDB().BeginRo(context.Background())
 	if err != nil {
 		return nil, err
 	}
@@ -572,7 +572,7 @@ func (b *SimulatedBackend) CallContract(ctx context.Context, call bind.CallMsg, 
 		return nil, errBlockNumberUnsupported
 	}
 	var res *evmtypes.ExecutionResult
-	if err := b.m.DB.ViewTemporal(context.Background(), func(tx kv.TemporalTx) (err error) {
+	if err := b.m.OverlayDB().ViewTemporal(context.Background(), func(tx kv.TemporalTx) (err error) {
 		s := state.New(b.m.NewStateReader(tx))
 		res, err = b.callContract(ctx, call, b.pendingBlock, s)
 		if err != nil {
@@ -814,7 +814,7 @@ func (b *SimulatedBackend) SendTransaction(ctx context.Context, txn types.Transa
 			block.AddTxWithChain(b.getHeader, b.m.Engine, txn)
 		}
 		block.AddTxWithChain(b.getHeader, b.m.Engine, txn)
-	})
+	}, b.m.PublishedSD())
 	if err != nil {
 		return err
 	}
@@ -859,7 +859,7 @@ func (b *SimulatedBackend) AdjustTime(adjustment time.Duration) error {
 			block.AddTxWithChain(b.getHeader, b.m.Engine, txn)
 		}
 		block.OffsetTime(int64(adjustment.Seconds()))
-	})
+	}, b.m.PublishedSD())
 	if err != nil {
 		return err
 	}

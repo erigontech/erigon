@@ -37,6 +37,7 @@ import (
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/common/u256"
 	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/state/execctx"
 	"github.com/erigontech/erigon/execution/abi/bind"
 	"github.com/erigontech/erigon/execution/abi/bind/backends"
 	"github.com/erigontech/erigon/execution/builder"
@@ -113,11 +114,11 @@ func genTestChainOnce(t *testing.T) {
 		defer contractBackend.Close()
 
 		var err error
-		testOrphanedChain, err = blockgen.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 5, func(i int, block *blockgen.BlockGen) {})
+		testOrphanedChain, err = blockgen.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 5, func(i int, block *blockgen.BlockGen) {}, m.PublishedSD())
 		if err != nil {
 			t.Fatalf("rpcdaemontest: failed to generate orphaned chain: %v", err)
 		}
-		testChain, err = generateChain(&addresses, m.ChainConfig, m.Genesis, m.Engine, m.DB, contractBackend)
+		testChain, err = generateChain(&addresses, m.ChainConfig, m.Genesis, m.Engine, m.DB, contractBackend, m.PublishedSD())
 		if err != nil {
 			t.Fatalf("rpcdaemontest: failed to generate chain: %v", err)
 		}
@@ -156,6 +157,7 @@ func generateChain(
 	engine rules.Engine,
 	db kv.TemporalRwDB,
 	contractBackend *backends.SimulatedBackend,
+	readSD ...*execctx.SharedDomains,
 ) (*blockgen.ChainPack, error) {
 	var (
 		key      = addresses.key
@@ -339,7 +341,7 @@ func generateChain(
 			block.AddTx(txn)
 		}
 		contractBackend.Commit()
-	})
+	}, readSD...)
 }
 
 func computeMappingStorageKey(addr common.Address, slot uint64) common.Hash {
@@ -559,7 +561,7 @@ func CreateTestExecModuleForTraces(t *testing.T) *execmoduletester.ExecModuleTes
 		tx, _ := types.SignTx(types.NewTransaction(0, a2,
 			&u256.Num0, 50000, &u256.Num1, []byte{0x01, 0x00, 0x01, 0x00}), *types.LatestSignerForChainID(nil), key)
 		b.AddTx(tx)
-	})
+	}, m.PublishedSD())
 	if err != nil {
 		t.Fatalf("generate blocks: %v", err)
 	}
@@ -668,7 +670,7 @@ func CreateTestExecModuleForTracesCollision(t *testing.T) *execmoduletester.Exec
 		tx, _ = types.SignTx(types.NewTransaction(2, bb,
 			&u256.Num0, 100000, &u256.Num1, nil), *types.LatestSignerForChainID(nil), key)
 		b.AddTx(tx)
-	})
+	}, m.PublishedSD())
 	if err != nil {
 		t.Fatalf("generate blocks: %v", err)
 	}

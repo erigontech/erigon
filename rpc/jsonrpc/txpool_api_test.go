@@ -41,7 +41,7 @@ func TestTxPoolContent(t *testing.T) {
 	require := require.New(t)
 	chain, err := blockgen.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 1, func(i int, b *blockgen.BlockGen) {
 		b.SetCoinbase(common.Address{1})
-	})
+	}, m.PublishedSD())
 	require.NoError(err)
 	err = m.InsertChain(chain)
 	require.NoError(err)
@@ -49,7 +49,7 @@ func TestTxPoolContent(t *testing.T) {
 	ctx, conn := rpcdaemontest.CreateTestGrpcConn(t, m)
 	txPool := txpoolproto.NewTxpoolClient(conn)
 	ff := rpchelper.New(ctx, rpchelper.DefaultFiltersConfig, nil, txPool, txpoolproto.NewMiningClient(conn), func() {}, m.Log, nil)
-	api := NewTxPoolAPI(NewBaseApi(ff, kvcache.New(kvcache.DefaultCoherentConfig), m.BlockReader, false, rpccfg.DefaultEvmCallTimeout, m.Engine, m.Dirs, nil, 0, 0), m.DB, txPool)
+	api := NewTxPoolAPI(NewBaseApi(ff, kvcache.New(kvcache.DefaultCoherentConfig), m.BlockReader, false, rpccfg.DefaultEvmCallTimeout, m.Engine, m.Dirs, nil, 0, 0), m.OverlayDB(), txPool)
 
 	expectValue := uint64(1234)
 	txn, err := types.SignTx(types.NewTransaction(0, common.Address{1}, uint256.NewInt(expectValue), params.TxGas, uint256.NewInt(10*common.GWei), nil), *types.LatestSignerForChainID(m.ChainConfig.ChainID), m.Key)

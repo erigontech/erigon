@@ -148,6 +148,13 @@ type ExecModuleTester struct {
 }
 
 func (emt *ExecModuleTester) Close() {
+	// Drain and stop the background-commit worker (and its in-flight commit tx)
+	// before closing the DB, mirroring production shutdown. Otherwise DB.Close
+	// can race a commit still writing, which deadlocks. Must run before cancel()
+	// so WaitIdle can still acquire the foreground semaphore.
+	if emt.ExecModule != nil {
+		emt.ExecModule.WaitIdle(emt.Ctx)
+	}
 	emt.cancel()
 	if err := emt.bgComponentsEg.Wait(); err != nil && emt.tb != nil {
 		require.Equal(emt.tb, context.Canceled, err) // upon waiting for clean exit we should get ctx cancelled
