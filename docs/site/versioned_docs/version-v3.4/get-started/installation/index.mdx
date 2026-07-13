@@ -121,7 +121,7 @@ _(Note: The container itself is built on multi-platform Linux architectures (lin
 * Images are stored at [https://hub.docker.com/r/erigontech/erigon](https://hub.docker.com/r/erigontech/erigon).
 
 :::warning
-**Windows**: note that Docker on Windows is affected by [WSL2 Performance and Data Storage](/get-started/installation/#install-wsl).
+**Windows**: note that Docker on Windows is affected by [WSL2 Performance and Data Storage](#install-wsl).
 :::
 
 #### **Download and start Erigon in Docker**
@@ -164,7 +164,7 @@ docker run -it erigontech/erigon:v{ERIGON_VERSION} --chain=hoodi --prune.mode=mi
 
 * `-v` connects a folder on your computer to the container (must have authorization)
 * `-it` lets you see what's happening and interact with Erigon
-* `--chain=hoodi` specifies which [network](/fundamentals/supported-networks) to sync
+* `--chain=hoodi` specifies which [network](/v3.4/fundamentals/supported-networks) to sync
 * `--prune.mode=minimal` tells Erigon to use minimal [Prune Mode](/v3.4/fundamentals/prune-modes)
 * `--datadir` tells Erigon where to store data inside the container
 
@@ -521,7 +521,7 @@ WSL enables you to run a complete GNU/Linux environment natively within Windows,
 
 **Building Erigon**
 
-Once WSL2 is set up, you can build and run Erigon exactly as you would on a regular [Linux/macOS](/get-started/installation/#linuxmacos) distribution.
+Once WSL2 is set up, you can build and run Erigon exactly as you would on a regular [Linux/macOS](#linuxmacos) distribution.
 
 **Performance and Data Storage**
 
@@ -553,4 +553,4 @@ If you need to connect to Erigon from an external network (e.g., opening a port 
 
 </details>
 
-Once you have Erigon installed, you can see [Basic Usage](/fundamentals/basic-usage) to configure your node and confirm it is syncing.
+Once you have Erigon installed, you can see [Basic Usage](/v3.4/fundamentals/basic-usage) to configure your node and confirm it is syncing.

@@ -9,7 +9,7 @@ sidebar_position: 2
 
 ## 1. Prerequisites Check
 
-1. Confirm your machine meets the necessary [Hardware Requirements](/get-started/hardware-requirements) based on your desired prune mode.
+1. Confirm your machine meets the necessary [Hardware Requirements](/v3.4/get-started/hardware-requirements) based on your desired prune mode.
 2. **Install Docker**:
    * For Linux, install [Docker Engine](https://docs.docker.com/engine/install).
    * For macOS or Windows, install [Docker Desktop](https://docs.docker.com/desktop/).
@@ -65,13 +65,13 @@ docker compose up
 
 * `--chain=gnosis` specifies to run on Gnosis Chain, use `--chain=chiado` for Chiado testnet
 * Add `--prune.mode=minimal` to run minimal [Prune Mode](/v3.4/fundamentals/prune-modes) or `--prune.mode=archive` to run an archive node
-* `--http.addr="0.0.0.0" --http.api=eth,web3,net,debug,trace,txpool` to use RPC and e.g. be able to connect your [web3 wallet](/fundamentals/web3-wallet)
+* `--http.addr="0.0.0.0" --http.api=eth,web3,net,debug,trace,txpool` to use RPC and e.g. be able to connect your [web3 wallet](/v3.4/fundamentals/web3-wallet)
 * `--torrent.download.rate=512mb` to increase download speed. While the default downloading speed is 128mb, with this flag Erigon will use as much download speed as it can, up to a maximum of 512 megabytes per second. This means it will try to download data as quickly as possible, but it won't exceed the 512 MB/s limit you've set
 
-When you get familiar with running Erigon from CLI you may also consider [staking](/staking/caplin) and/or run a Gnosis node with an [external Consensus Layer](/get-started/easy-nodes/how-to-run-a-gnosis-chain-node/gnosis-with-an-external-cl).
+When you get familiar with running Erigon from CLI you may also consider [staking](/v3.4/staking/caplin) and/or run a Gnosis node with an [external Consensus Layer](/v3.4/get-started/easy-nodes/how-to-run-a-gnosis-chain-node/gnosis-with-an-external-cl).
 
 :::tip
 Press `Ctrl+C` in your terminal to stop Erigon.
 :::
 
-Additional flags can be added to [configure](/fundamentals/configuring-erigon/) Erigon with several options.
+Additional flags can be added to [configure](/v3.4/fundamentals/configuring-erigon/) Erigon with several options.
