@@ -925,11 +925,20 @@ func (emt *ExecModuleTester) InsertChain(chain *blockgen.ChainPack) error {
 	if err := emt.insertPoSBlocks(chain); err != nil {
 		return err
 	}
-	roTx, err := emt.DB.BeginRo(emt.Ctx)
+	baseTx, err := emt.DB.BeginTemporalRo(emt.Ctx)
 	if err != nil {
 		return err
 	}
-	defer roTx.Rollback()
+	defer baseTx.Rollback()
+	// Under background commit the just-inserted block metadata (header, stage
+	// progress, head hash) lives in the published SharedDomains overlay before
+	// it lands in the raw DB, so read through the overlay when one is published.
+	var roTx kv.Tx = baseTx
+	if sd := emt.PublishedSD(); sd != nil {
+		if v := sd.BlockOverlayTemporalTx(baseTx); v != nil {
+			roTx = v
+		}
+	}
 	// Check if the latest header was imported or rolled back
 	if rawdb.ReadHeader(roTx, chain.TopBlock.Hash(), chain.TopBlock.NumberU64()) == nil {
 		return fmt.Errorf("did not import block %d %x", chain.TopBlock.NumberU64(), chain.TopBlock.Hash())
