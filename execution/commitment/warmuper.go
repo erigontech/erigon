@@ -34,10 +34,11 @@ import (
 // TrieContextFactory creates new PatriciaContext instances for parallel warmup.
 type TrieContextFactory func() (PatriciaContext, func())
 
-// WarmupTrieContextFactory creates the PatriciaContext for a warmup worker. It
-// runs synchronously in the worker, so no factory code outlives CloseAndWait;
-// in exchange the factory must honor ctx and return promptly once it is
-// cancelled (a nil context is fine then), or CloseAndWait hangs.
+// WarmupTrieContextFactory creates the PatriciaContext for a warmup worker.
+// It runs synchronously in the worker with the warmuper's lifecycle ctx, so no
+// factory code outlives CloseAndWait; in exchange the factory must honor ctx
+// and return promptly once it is cancelled (e.g. a read-tx open blocked on the
+// read-tx semaphore must abort), or CloseAndWait hangs.
 type WarmupTrieContextFactory func(ctx context.Context) (PatriciaContext, func())
 
 // WarmupConfig contains configuration for pre-warming MDBX page cache

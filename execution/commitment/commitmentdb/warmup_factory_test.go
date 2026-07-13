@@ -49,7 +49,7 @@ func TestWarmupTrieContextFactoryUsesNonBlockingReadTxAcquire(t *testing.T) {
 	db := &beginRoRecordingDB{}
 	sdc := &SharedDomainsCommitmentContext{sharedDomains: stubSharedDomains{}}
 
-	_, cleanup := sdc.warmupTrieContextFactory(context.Background(), db, 0)(context.Background())
+	_, cleanup := sdc.warmupTrieContextFactory(db, 0)(t.Context())
 	defer cleanup()
 
 	require.True(t, db.sawNonBlocking, "warmup BeginTemporalRo must use non-blocking semaphore acquire")
@@ -69,26 +69,26 @@ func (db *blockingBeginDB) BeginTemporalRo(ctx context.Context) (kv.TemporalTx, 
 func TestWarmupFactoriesUnblockBeginOnWarmuperClose(t *testing.T) {
 	t.Parallel()
 	sdc := &SharedDomainsCommitmentContext{sharedDomains: stubSharedDomains{}}
-	concurrent, _ := sdc.concurrentTrieContextFactory(context.Background(), &blockingBeginDB{}, nil, 0)
+	concurrent, _ := sdc.concurrentTrieContextFactory(&blockingBeginDB{}, nil, 0)
 	factories := map[string]commitment.WarmupTrieContextFactory{
-		"warmup":     sdc.warmupTrieContextFactory(context.Background(), &blockingBeginDB{}, 0),
+		"warmup":     sdc.warmupTrieContextFactory(&blockingBeginDB{}, 0),
 		"concurrent": concurrent,
 	}
 	for name, factory := range factories {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
-			warmuperCtx, cancel := context.WithCancel(context.Background())
-			done := make(chan struct{})
+			ctx, cancel := context.WithCancel(t.Context())
+			errCh := make(chan error, 1)
 			go func() {
-				trieCtx, cleanup := factory(warmuperCtx)
+				trieCtx, cleanup := factory(ctx)
 				defer cleanup()
 				_, err := trieCtx.Account(nil)
-				require.ErrorIs(t, err, context.Canceled)
-				close(done)
+				errCh <- err
 			}()
 			cancel()
 			select {
-			case <-done:
+			case err := <-errCh:
+				require.ErrorIs(t, err, context.Canceled)
 			case <-time.After(10 * time.Second):
 				t.Fatal("factory did not honor warmuper ctx cancellation")
 			}
