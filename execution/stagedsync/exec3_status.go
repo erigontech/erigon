@@ -2,6 +2,7 @@ package stagedsync
 
 import (
 	"errors"
+	"slices"
 	"sort"
 	"time"
 )
@@ -28,12 +29,12 @@ type execStatusList struct {
 }
 
 func (m *execStatusList) ensureLen(tx int) {
-	if tx < len(m.complete) {
+	n := tx + 1
+	if n <= len(m.complete) {
 		return
 	}
-	grow := tx + 1 - len(m.complete)
-	m.complete = append(m.complete, make([]bool, grow)...)
-	m.inProgress = append(m.inProgress, make([]bool, grow)...)
+	m.complete = slices.Grow(m.complete, n-len(m.complete))[:n]
+	m.inProgress = slices.Grow(m.inProgress, n-len(m.inProgress))[:n]
 }
 
 func insertInList(l []int, v int) []int {
