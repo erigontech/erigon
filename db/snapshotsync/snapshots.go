@@ -811,14 +811,6 @@ func (s *BaseRoSnapshots) recalcVisibleFiles(alignMin bool, retired []*DirtySegm
 		s.idxMax.Store(s.idxAvailability())
 	}()
 
-	if dbg.TraceDeletion && len(retired) > 0 {
-		names := make([]string, len(retired))
-		for i, sn := range retired {
-			names[i] = sn.FileName()
-		}
-		log.Warn("[removing] retiring block segments (deferred unlink)", "files", names, "stack", dbg.Stack())
-	}
-
 	visible := make([]VisibleSegments, snaptype.MaxEnum) // create new pointer - only new readers will see it. old-alive readers will continue use previous pointer
 	maxVisibleBlocks := make([]uint64, 0, len(s.types))
 
