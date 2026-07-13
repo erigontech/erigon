@@ -49,7 +49,7 @@ func APIList(db kv.TemporalRoDB, eth rpchelper.ApiBackend, txPool txpoolproto.Tx
 	logger log.Logger, bridgeReader bridgeReader, spanProducersReader spanProducersReader,
 	testingEntry *rpc.API,
 ) (list []rpc.API) {
-	base := NewBaseApi(filters, stateCache, blockReader, cfg.WithDatadir, cfg.EvmCallTimeout, engine, cfg.Dirs, bridgeReader, cfg.BlockRangeLimit, cfg.GetLogsMaxResults)
+	base := NewBaseApi(filters, stateCache, blockReader, cfg.WithDatadir, cfg.EvmCallTimeout, engine, cfg.Dirs, bridgeReader, cfg.BlockRangeLimit, cfg.GetLogsMaxResults, cfg.LogQueryLimit)
 	ethImpl := NewEthAPI(base, db, eth, txPool, mining, NewEthApiConfig(cfg), logger)
 	erigonImpl := NewErigonAPI(base, db, eth)
 	txpoolImpl := NewTxPoolAPI(base, db, txPool)
