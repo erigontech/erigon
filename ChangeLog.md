@@ -31,7 +31,7 @@ v3.5.2 is a bugfix release recommended for all users, and especially for anyone 
 
 ---
 
-# Erigon v3.5.1 — Tidal Tails — TBD
+# Erigon v3.5.1 — Tidal Tails — 2026-07-10
 
 v3.5.1 is a bugfix release recommended for all users. It is a drop-in upgrade from 3.5.0 — no re-sync required.
 
