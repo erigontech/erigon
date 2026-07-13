@@ -163,6 +163,13 @@ func (e *ExecModule) SetHead(ctx context.Context, targetBlock uint64) error {
 		return fmt.Errorf("failed to commit shared domains: %w", err)
 	}
 
+	// Clear the published overlay: the last FCU's SharedDomains now points at the
+	// unwound-away tip, so readers must fall through to the raw DB this unwind
+	// just committed instead of serving stale overlay state.
+	if dispatcher := e.pipelineExecutor.Dispatcher(); dispatcher != nil {
+		dispatcher.PublishOverlay(nil)
+	}
+
 	e.logger.Info("SetHead: successfully rewound chain", "targetBlock", targetBlock, "previousHead", currentHead)
 	return nil
 }
