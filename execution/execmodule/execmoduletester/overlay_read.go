@@ -111,6 +111,10 @@ func (t *sdRoTx) RangeAsOf(name kv.Domain, fromKey, toKey []byte, ts uint64, asc
 	return t.sd.RangeAsOf(context.Background(), name, fromKey, toKey, ts, asc, limit, t.base)
 }
 
+func (t *sdRoTx) HistoryRange(name kv.Domain, fromTs, toTs int, asc order.By, limit int) (stream.KV, error) {
+	return t.sd.HistoryRange(context.Background(), name, fromTs, toTs, asc, limit, t.base)
+}
+
 func (t *sdRoTx) Rollback() {
 	t.base.Rollback()
 }

@@ -1579,6 +1579,12 @@ func (sd *SharedDomains) RangeAsOf(ctx context.Context, domain kv.Domain, fromKe
 	return sd.mem.RangeAsOf(ctx, domain, fromKey, toKey, ts, asc, limit, roTx)
 }
 
+// HistoryRange returns keys changed in [fromTs, toTs) with their pre-range
+// value, merging in-flight in-memory history with committed.
+func (sd *SharedDomains) HistoryRange(ctx context.Context, domain kv.Domain, fromTs, toTs int, asc order.By, limit int, roTx kv.Tx) (stream.KV, error) {
+	return sd.mem.HistoryRange(ctx, domain, fromTs, toTs, asc, limit, roTx)
+}
+
 // DomainPut
 // Optimizations:
 //   - user can provide `prevVal != nil` - then it will not read prev value from storage

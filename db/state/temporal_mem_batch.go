@@ -400,6 +400,69 @@ func asOfEntry(entries []dataWithTxNum, ts uint64) ([]byte, bool) {
 	return nil, false
 }
 
+// HistoryRange returns one entry per key changed in [fromTs, toTs), each with
+// its value just before the range, merging in-memory history with committed.
+// In-memory keys take precedence. Only used by the RPC test harness.
+func (sd *TemporalMemBatch) HistoryRange(ctx context.Context, domain kv.Domain, fromTs, toTs int, asc order.By, limit int, roTx kv.Tx) (stream.KV, error) {
+	committed, err := AggTx(roTx).HistoryRange(domain, fromTs, toTs, asc, limit, roTx)
+	if err != nil {
+		return nil, err
+	}
+	if !sd.inMemHistoryReads {
+		return committed, nil
+	}
+	mem := sd.memHistoryRange(domain, fromTs, toTs, asc, roTx)
+	if len(mem) == 0 {
+		return committed, nil
+	}
+	return stream.UnionKV(&memKVIter{pairs: mem}, committed, limit), nil
+}
+
+// memHistoryRange collects keys changed in [fromTs, toTs) from the in-memory
+// history, each paired with its pre-range value (in-memory value just before
+// fromTs, falling back to committed state when the key predates its in-memory
+// history). Empty pre-values are kept — they mean "did not exist before".
+func (sd *TemporalMemBatch) memHistoryRange(domain kv.Domain, fromTs, toTs int, asc order.By, roTx kv.Tx) []memKVPair {
+	sd.latestStateLock.RLock()
+	defer sd.latestStateLock.RUnlock()
+	from, to := uint64(fromTs), uint64(toTs)
+	var pairs []memKVPair
+	collect := func(k string, entries []dataWithTxNum) {
+		changed := false
+		for i := range entries {
+			if entries[i].txNum >= from && entries[i].txNum < to {
+				changed = true
+				break
+			}
+		}
+		if !changed {
+			return
+		}
+		pre, ok := asOfEntry(entries, from)
+		if !ok {
+			pre, _, _ = AggTx(roTx).GetAsOf(domain, common.ToBytesZeroCopy(k), from, roTx)
+		}
+		pairs = append(pairs, memKVPair{k: []byte(k), v: pre})
+	}
+	if domain == kv.StorageDomain {
+		sd.storage.Scan(func(k string, entries []dataWithTxNum) bool {
+			collect(k, entries)
+			return true
+		})
+	} else {
+		for k, entries := range sd.domains[domain] {
+			collect(k, entries)
+		}
+	}
+	sort.Slice(pairs, func(i, j int) bool {
+		if asc == order.Asc {
+			return bytes.Compare(pairs[i].k, pairs[j].k) < 0
+		}
+		return bytes.Compare(pairs[i].k, pairs[j].k) > 0
+	})
+	return pairs
+}
+
 type memKVPair struct{ k, v []byte }
 
 type memKVIter struct {
