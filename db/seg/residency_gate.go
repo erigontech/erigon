@@ -67,6 +67,9 @@ func (g *Getter) residencyRegion(offset uint64) (region []byte, fileOffset int64
 }
 
 func (g *Getter) ensureResident(offset uint64) {
+	if residencyWindow <= 0 { // RESIDENCY_WINDOW_PAGES=0 disables the gate
+		return
+	}
 	region, fileOffset := g.residencyRegion(offset)
 	if region == nil {
 		return
