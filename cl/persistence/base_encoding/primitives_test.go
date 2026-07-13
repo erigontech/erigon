@@ -82,9 +82,12 @@ func TestDiff64Effective(t *testing.T) {
 		}
 	}
 
+	require.Equal(t, previous, AppendEffectiveBalances(nil, old))
+	require.Equal(t, expected, AppendEffectiveBalances(nil, new))
+
 	var b bytes.Buffer
 
-	err := ComputeCompressedSerializedEffectiveBalancesDiff(&b, old, new)
+	err := ComputeCompressedSerializedUint64ListDiff(&b, AppendEffectiveBalances(nil, old), AppendEffectiveBalances(nil, new))
 	require.NoError(t, err)
 
 	out := b.Bytes()
@@ -92,6 +95,25 @@ func TestDiff64Effective(t *testing.T) {
 	require.NoError(t, err)
 
 	require.Equal(t, expected, new2)
+}
+
+func TestAppendEffectiveBalances(t *testing.T) {
+	const vSize = 121
+	require.Empty(t, AppendEffectiveBalances(nil, nil))
+
+	for _, validators := range []int{1, 800} {
+		ssz := make([]byte, validators*vSize)
+		expected := make([]byte, validators*8)
+		for i := range ssz {
+			ssz[i] = byte(i*7 + 1) // noise in non-effective-balance fields
+		}
+		for i := 0; i < validators; i++ {
+			binary.LittleEndian.PutUint64(ssz[i*vSize+80:], uint64(i+32))
+			binary.LittleEndian.PutUint64(expected[i*8:], uint64(i+32))
+		}
+
+		require.Equal(t, expected, AppendEffectiveBalances(nil, ssz))
+	}
 }
 
 func TestDiffValidators(t *testing.T) {

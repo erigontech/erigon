@@ -250,7 +250,7 @@ func (s *Antiquary) IncrementBeaconState(ctx context.Context, to uint64) error {
 	// Use this as the event slot (it will be incremented by 1 each time we process a block)
 	slot := s.currentState.Slot() + 1
 
-	var prevValSet []byte
+	var prevEffectiveBalances, newEffectiveBalances []byte
 	events := state_accessors.NewStateEvents()
 	slashingOccurred := false
 	// setup the events handler for historical states replay.
@@ -458,9 +458,8 @@ func (s *Antiquary) IncrementBeaconState(ctx context.Context, to uint64) error {
 			}
 			continue
 		}
-		// We now compute the difference between the two balances.
-		prevValSet = prevValSet[:0]
-		prevValSet = append(prevValSet, s.currentState.RawValidatorSet()...)
+		// snapshot before TransitionState mutates the validator buffer in place
+		prevEffectiveBalances = base_encoding.AppendEffectiveBalances(prevEffectiveBalances[:0], s.currentState.RawValidatorSet())
 
 		fullValidation := slot%1000 == 0 || first
 		blockRewardsCollector := &eth2.BlockRewardsCollector{}
@@ -561,7 +560,8 @@ func (s *Antiquary) IncrementBeaconState(ctx context.Context, to uint64) error {
 		isEpochCrossed := prevEpoch != state.Epoch(s.currentState)
 
 		if prevValidatorSetLength != s.currentState.ValidatorLength() || isEpochCrossed {
-			if err := stateAntiquaryCollector.collectEffectiveBalancesDiffs(ctx, slot, prevValSet, s.currentState.RawValidatorSet()); err != nil {
+			newEffectiveBalances = base_encoding.AppendEffectiveBalances(newEffectiveBalances[:0], s.currentState.RawValidatorSet())
+			if err := stateAntiquaryCollector.collectEffectiveBalancesDiffs(ctx, slot, prevEffectiveBalances, newEffectiveBalances); err != nil {
 				return err
 			}
 			if s.currentState.Version() >= clparams.AltairVersion {

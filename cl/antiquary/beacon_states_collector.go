@@ -522,8 +522,8 @@ func (i *beaconStatesCollector) collectBalancesDiffs(ctx context.Context, slot u
 	return antiquateBytesListDiff(ctx, base_encoding.Encode64ToBytes4(slot), old, new, i.buf, i.balancesCollector, base_encoding.ComputeCompressedSerializedUint64ListDiff)
 }
 
-func (i *beaconStatesCollector) collectEffectiveBalancesDiffs(ctx context.Context, slot uint64, oldValidatorSetSSZ, newValidatorSetSSZ []byte) error {
-	return antiquateBytesListDiff(ctx, base_encoding.Encode64ToBytes4(slot), oldValidatorSetSSZ, newValidatorSetSSZ, i.buf, i.effectiveBalanceCollector, base_encoding.ComputeCompressedSerializedEffectiveBalancesDiff)
+func (i *beaconStatesCollector) collectEffectiveBalancesDiffs(ctx context.Context, slot uint64, oldEffectiveBalances, newEffectiveBalances []byte) error {
+	return antiquateBytesListDiff(ctx, base_encoding.Encode64ToBytes4(slot), oldEffectiveBalances, newEffectiveBalances, i.buf, i.effectiveBalanceCollector, base_encoding.ComputeCompressedSerializedUint64ListDiff)
 }
 
 func (i *beaconStatesCollector) collectInactivityScores(slot uint64, inactivityScores []byte) error {
