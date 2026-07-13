@@ -156,6 +156,9 @@ func (ba *BlockAssembler) Initialize(ibs *state.IntraBlockState, tx kv.TemporalT
 	}
 	if ba.HasBAL() {
 		ibs.MergeTxIOInto(ba.balIO)
+		// Publish block-init writes (EIP-4788, etc.) to the versionMap so the
+		// first tx observes them across the ResetVersionedIO below.
+		ibs.FlushWritesToVersionMap()
 		ibs.ResetVersionedIO()
 	}
 	return nil
@@ -205,9 +208,16 @@ func (ba *BlockAssembler) AddTransactions(
 	// CommitBlock in AssembleBlock writes all final state correctly.
 	writer := state.NewNoopWriter()
 	recordTxIO := func() {
+		// EIP-6780: zero storage of an account created+destructed in this tx so
+		// the BAL records net-zero reads (the stateObject-based wipe no longer
+		// runs on the cache-free builder path).
+		ibs.ApplyEIP6780StorageWipe()
 		if ba.HasBAL() {
 			ibs.MergeTxIOInto(ba.balIO)
 		}
+		// Publish this tx's writes to the versionMap so the next tx observes them;
+		// ResetVersionedIO below clears the per-tx write set used for BAL recording.
+		ibs.FlushWritesToVersionMap()
 		ibs.ResetVersionedIO()
 	}
 	clearTxIO := func() {

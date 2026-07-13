@@ -893,13 +893,7 @@ func (sdb *IntraBlockState) writeBalanceVersioned(addr accounts.Address, update 
 	if err != nil {
 		return err
 	}
-	// noMaterialize is false only on the single-IBS block-assembler path, which
-	// accumulates state across txs while ResetVersionedIO clears versionedWrites
-	// between them. Balance carried solely by versionedWrites would be lost to
-	// the next tx there, so materialize it onto the stateObject (which survives
-	// ResetVersionedIO) — matching the nonce path. Parallel workers
-	// (noMaterialize) keep the cache-free fast path below.
-	if base == nil || sdb.accountLifecycle(addr) || !sdb.noMaterialize {
+	if base == nil || sdb.accountLifecycle(addr) {
 		stateObject, err := sdb.GetOrNewStateObject(addr)
 		if err != nil {
 			return err
@@ -2448,6 +2442,28 @@ func (sdb *IntraBlockState) FinalizedWrites() *WriteSet {
 func (sdb *IntraBlockState) MergeTxIOInto(io *VersionedIO) {
 	version := Version{BlockNum: sdb.blockNum, TxIndex: sdb.txIndex, Incarnation: sdb.version}
 	io.mergeTx(version, sdb.versionedReads, sdb.VersionedWrites())
+}
+
+// FlushWritesToVersionMap publishes the current tx's writes into this IBS's own
+// versionMap, positioned by each write's (txIndex, incarnation). The single-IBS
+// block assembler resets the per-tx versionedWrites between txs (for per-tx BAL
+// recording), so without this a later tx would not observe an earlier tx's state
+// — the versionMap is the cross-tx carrier, matching how the parallel executor
+// persists each committed tx before the next reads it.
+func (sdb *IntraBlockState) FlushWritesToVersionMap() {
+	if sdb.versionMap == nil {
+		return
+	}
+	sdb.versionMap.FlushVersionedWrites(&sdb.versionedWrites, true, "")
+}
+
+// ApplyEIP6780StorageWipe zeroes the current tx's storage writes for any account
+// it both created and self-destructed (EIP-6780/EIP-7928), so the BAL records the
+// slots as reads (net-zero) rather than changes. On the noMaterialize builder path
+// this replaces the stateObject-driven wipe MakeWriteSet performs; it is derived
+// purely from the CreateContract/SelfDestruct write cells.
+func (sdb *IntraBlockState) ApplyEIP6780StorageWipe() {
+	sdb.versionedWrites.zeroSameTxCreateDestructStorage()
 }
 
 func (sdb *IntraBlockState) Print(chainRules chain.Rules, all bool) {
