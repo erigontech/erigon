@@ -22,7 +22,6 @@ import (
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv"
-	"github.com/erigontech/erigon/db/kv/temporal"
 	"github.com/erigontech/erigon/db/kv/temporal/temporaltest"
 	"github.com/erigontech/erigon/db/snapshotsync/blocksnapshots"
 	"github.com/erigontech/erigon/execution/chain/networkname"
@@ -54,12 +53,11 @@ func BenchmarkBeginTemporalRo(b *testing.B) {
 
 	b.Run("WithBlockSnaps", func(b *testing.B) {
 		dirs := datadir.New(b.TempDir())
-		db := temporaltest.NewTestDB(b, dirs)
 		cfg := ethconfig.Defaults.Snapshot
 		cfg.ChainName = networkname.Mainnet
 		sn := blocksnapshots.NewRoSnapshots(cfg, dirs.Snap, log.New())
 		defer sn.Close()
-		db.(*temporal.DB).SetBlockSnapshots(sn)
+		db := temporaltest.NewTestDBWithBlocks(b, dirs, sn)
 		loop(b, db)
 	})
 }

@@ -1348,12 +1348,11 @@ func doRollbackSnapshotsToBlock(ctx context.Context, blockNum uint64, prompt boo
 		return err
 	}
 	defer clean()
-	db, err := temporal.New(chainDB, agg)
+	db, err := temporal.New(chainDB, agg, res.BlockSnaps)
 	if err != nil {
 		return err
 	}
 	defer db.Close()
-	db.SetBlockSnapshots(res.BlockSnaps)
 	tx, err := db.BeginTemporalRo(ctx)
 	if err != nil {
 		return err
@@ -1611,15 +1610,13 @@ func doIntegrity(ctx context.Context, cliCtx *cli.Command) error {
 	defer blockRetire.MadvNormal().DisableReadAhead()
 	defer agg.MadvNormal().DisableReadAhead()
 
-	db, err := temporal.New(chainDB, agg)
+	blockReader, _ := blockRetire.IO()
+	heimdallStore, _ := blockRetire.BorStore()
+	db, err := temporal.New(chainDB, agg, blockReader.Snapshots())
 	if err != nil {
 		return err
 	}
 	defer db.Close()
-
-	blockReader, _ := blockRetire.IO()
-	heimdallStore, _ := blockRetire.BorStore()
-	db.SetBlockSnapshots(blockReader.Snapshots())
 
 	var commitmentHistoryEnabled bool
 	if err := chainDB.View(ctx, func(tx kv.Tx) error {
@@ -1818,12 +1815,11 @@ func doCheckCommitmentHistAtBlk(ctx context.Context, cliCtx *cli.Command, logger
 	defer clean()
 	defer blockRetire.MadvNormal().DisableReadAhead()
 	defer agg.MadvNormal().DisableReadAhead()
-	db, err := temporal.New(chainDB, agg)
+	db, err := temporal.New(chainDB, agg, res.BlockSnaps)
 	if err != nil {
 		return err
 	}
 	defer db.Close()
-	db.SetBlockSnapshots(res.BlockSnaps)
 	blockReader, _ := blockRetire.IO()
 	blockNum := cliCtx.Uint64("block")
 	if err = integrity.CheckCommitmentHistAtBlk(ctx, db, blockReader, blockNum, log.LvlInfo, logger); err != nil {
@@ -1844,12 +1840,11 @@ func doCheckStateRootByHistory(ctx context.Context, cliCtx *cli.Command, logger 
 		return err
 	}
 	defer clean()
-	db, err := temporal.New(chainDB, agg)
+	db, err := temporal.New(chainDB, agg, res.BlockSnaps)
 	if err != nil {
 		return err
 	}
 	defer db.Close()
-	db.SetBlockSnapshots(res.BlockSnaps)
 	blockReader, _ := blockRetire.IO()
 	from := cliCtx.Uint64("from")
 	to := cliCtx.Uint64("to")
@@ -1890,12 +1885,11 @@ func doCheckRCacheRootAtBlk(ctx context.Context, cliCtx *cli.Command, logger log
 	blockRetire, agg := res.BlockRetire, res.Aggregator
 	defer blockRetire.MadvNormal().DisableReadAhead()
 	defer agg.MadvNormal().DisableReadAhead()
-	db, err := temporal.New(chainDB, agg)
+	db, err := temporal.New(chainDB, agg, res.BlockSnaps)
 	if err != nil {
 		return err
 	}
 	defer db.Close()
-	db.SetBlockSnapshots(res.BlockSnaps)
 	blockReader, _ := blockRetire.IO()
 	blockNum := cliCtx.Uint64("block")
 	failFast := cliCtx.Bool("failFast")
@@ -1919,12 +1913,11 @@ func doCheckRCacheRootAtBlkRange(ctx context.Context, cliCtx *cli.Command, logge
 	blockRetire, agg := res.BlockRetire, res.Aggregator
 	defer blockRetire.MadvNormal().DisableReadAhead()
 	defer agg.MadvNormal().DisableReadAhead()
-	db, err := temporal.New(chainDB, agg)
+	db, err := temporal.New(chainDB, agg, res.BlockSnaps)
 	if err != nil {
 		return err
 	}
 	defer db.Close()
-	db.SetBlockSnapshots(res.BlockSnaps)
 	blockReader, _ := blockRetire.IO()
 
 	from := cliCtx.Uint64("from")
@@ -1974,7 +1967,7 @@ func doVerifyState(ctx context.Context, cliCtx *cli.Command, logger log.Logger) 
 	agg := openAgg(ctx, dirs, chainDB, logger)
 	defer agg.Close()
 	defer agg.MadvNormal().DisableReadAhead()
-	db, err := temporal.New(chainDB, agg)
+	db, err := temporal.New(chainDB, agg, nil)
 	if err != nil {
 		return err
 	}
@@ -2003,12 +1996,11 @@ func doVerifyHistory(ctx context.Context, cliCtx *cli.Command, logger log.Logger
 	blockReader := freezeblocks.NewBlockReader(snaps.BlockSnaps, snaps.BorSnaps)
 
 	agg := snaps.Aggregator
-	db, err := temporal.New(chainDB, agg)
+	db, err := temporal.New(chainDB, agg, snaps.BlockSnaps)
 	if err != nil {
 		return err
 	}
 	defer db.Close()
-	db.SetBlockSnapshots(snaps.BlockSnaps)
 
 	engine := rulesconfig.CreateRulesEngineBareBones(ctx, chainConfig, logger)
 
@@ -2687,12 +2679,11 @@ func doBlkTxNum(ctx context.Context, cliCtx *cli.Command) error {
 	}
 	defer clean()
 
-	db, err := temporal.New(chainDB, agg)
+	db, err := temporal.New(chainDB, agg, res.BlockSnaps)
 	if err != nil {
 		return err
 	}
 	defer db.Close()
-	db.SetBlockSnapshots(res.BlockSnaps)
 
 	tx, err := db.BeginTemporalRo(ctx)
 	if err != nil {
@@ -2964,11 +2955,10 @@ func doIndicesCommand(ctx context.Context, cliCtx *cli.Command, dirs datadir.Dir
 		return err
 	}
 
-	temporalDb, err := temporal.New(chainDB, agg)
+	temporalDb, err := temporal.New(chainDB, agg, res.BlockSnaps)
 	if err != nil {
 		return err
 	}
-	temporalDb.SetBlockSnapshots(res.BlockSnaps)
 
 	err = temporalDb.BuildMissedAccessors(ctx, estimate.IndexSnapshot.Workers())
 	if err != nil {
@@ -3508,11 +3498,10 @@ func doRetireCommand(ctx context.Context, cliCtx *cli.Command, dirs datadir.Dirs
 
 	logger.Info("Pruning has ended", "deleted blocks", allDeletedBlocks)
 
-	db, err = temporal.New(db, agg)
+	db, err = temporal.New(db, agg, res.BlockSnaps)
 	if err != nil {
 		return err
 	}
-	db.(*temporal.DB).SetBlockSnapshots(res.BlockSnaps)
 
 	logger.Info("Work on state history snapshots")
 	indexWorkers := estimate.IndexSnapshot.Workers()

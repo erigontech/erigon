@@ -525,11 +525,10 @@ func RemoteServices(ctx context.Context, cfg *httpcfg.HttpCfg, logger log.Logger
 		}
 		onNewSnapshot()
 
-		db, err = temporal.New(rawDB, agg)
+		db, err = temporal.New(rawDB, agg, allSnapshots)
 		if err != nil {
 			return nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, err
 		}
-		db.(*temporal.DB).SetBlockSnapshots(allSnapshots)
 		stateCache = kvcache.NewSimple()
 	}
 	// If DB can't be configured - used PrivateApiAddr as remote DB

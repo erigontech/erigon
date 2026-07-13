@@ -80,18 +80,16 @@ type DB struct {
 	kv.RwDB
 	stateFiles *state.Aggregator
 	// blockFiles: block snapshots, the peer of stateFiles. Optional; nil for
-	// state-only tools. Set via SetBlockSnapshots.
+	// state-only tools, in which case block reads fall back to their own view.
 	blockFiles services.BlockSnapshots
 }
 
-func New(db kv.RwDB, agg *state.Aggregator) (*DB, error) {
-	return &DB{RwDB: db, stateFiles: agg}, nil
+// New wires the temporal DB over a raw kv.RwDB, its state aggregator, and the
+// (optional) block snapshots — the block-data peer of stateFiles. Pass nil
+// blockSnaps for state-only tools.
+func New(db kv.RwDB, agg *state.Aggregator, blockSnaps services.BlockSnapshots) (*DB, error) {
+	return &DB{RwDB: db, stateFiles: agg, blockFiles: blockSnaps}, nil
 }
-
-// SetBlockSnapshots wires the (optional) block snapshots — the block-data peer of
-// stateFiles. Call once at startup, before any tx is opened. Left nil by
-// state-only tools, in which case block reads fall back to their own view.
-func (db *DB) SetBlockSnapshots(sn services.BlockSnapshots) { db.blockFiles = sn }
 
 func (db *DB) Agg() any                                { return db.stateFiles }
 func (db *DB) BlockSnapshots() services.BlockSnapshots { return db.blockFiles }

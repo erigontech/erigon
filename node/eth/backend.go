@@ -1349,11 +1349,10 @@ func SetUpBlockReader(ctx context.Context, db kv.RwDB, dirs datadir.Dirs, snConf
 		logger.Debug("[rpc] download of segments not complete yet. please wait StageSnapshots to finish")
 	}
 
-	temporalDb, err := temporal.New(db, agg)
+	temporalDb, err := temporal.New(db, agg, allSnapshots)
 	if err != nil {
 		return nil, nil, nil, nil, nil, nil, nil, err
 	}
-	temporalDb.SetBlockSnapshots(allSnapshots)
 
 	blockWriter := blockio.NewBlockWriter()
 

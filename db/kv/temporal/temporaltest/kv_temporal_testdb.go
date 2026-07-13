@@ -26,15 +26,27 @@ import (
 	"github.com/erigontech/erigon/db/kv/dbcfg"
 	"github.com/erigontech/erigon/db/kv/memdb"
 	"github.com/erigontech/erigon/db/kv/temporal"
+	"github.com/erigontech/erigon/db/services"
 	"github.com/erigontech/erigon/db/state"
 )
 
 // nolint:thelper
 func NewTestDB(tb testing.TB, dirs datadir.Dirs) kv.TemporalRwDB {
-	return NewTestDBWithStepSize(tb, dirs, config3.DefaultStepSize)
+	return newTestDB(tb, dirs, config3.DefaultStepSize, nil)
 }
 
 func NewTestDBWithStepSize(tb testing.TB, dirs datadir.Dirs, stepSize uint64) kv.TemporalRwDB {
+	return newTestDB(tb, dirs, stepSize, nil)
+}
+
+// NewTestDBWithBlocks is NewTestDB plus a block-snapshots peer, so tests can
+// exercise the tx block-files view.
+func NewTestDBWithBlocks(tb testing.TB, dirs datadir.Dirs, blockSnaps services.BlockSnapshots) kv.TemporalRwDB {
+	return newTestDB(tb, dirs, config3.DefaultStepSize, blockSnaps)
+}
+
+// nolint:thelper
+func newTestDB(tb testing.TB, dirs datadir.Dirs, stepSize uint64, blockSnaps services.BlockSnapshots) kv.TemporalRwDB {
 	if tb != nil {
 		tb.Helper()
 	}
@@ -59,7 +71,7 @@ func NewTestDBWithStepSize(tb testing.TB, dirs datadir.Dirs, stepSize uint64) kv
 		tb.Cleanup(agg.Close)
 	}
 
-	db, err := temporal.New(rawDB, agg)
+	db, err := temporal.New(rawDB, agg, blockSnaps)
 	if err != nil {
 		panic(err)
 	}

@@ -14,6 +14,7 @@ import (
 	"github.com/erigontech/erigon/db/kv/dbcfg"
 	"github.com/erigontech/erigon/db/kv/memdb"
 	"github.com/erigontech/erigon/db/kv/order"
+	"github.com/erigontech/erigon/db/services"
 	"github.com/erigontech/erigon/db/snapshotsync/blocksnapshots"
 	"github.com/erigontech/erigon/db/state"
 	"github.com/erigontech/erigon/db/state/execctx"
@@ -31,7 +32,7 @@ func TestTemporalTx_HasPrefix_StorageDomain(t *testing.T) {
 	agg := state.NewTest(dirs).StepSize(stepSize).MustOpen(ctx, mdbxDb)
 	defer agg.Close()
 
-	temporalDb, err := New(mdbxDb, agg)
+	temporalDb, err := New(mdbxDb, agg, nil)
 	require.NoError(t, err)
 	defer temporalDb.Close()
 
@@ -219,34 +220,40 @@ func TestTemporalTx_HasPrefix_StorageDomain(t *testing.T) {
 	}
 }
 
-// TestTemporalTx_PinsBlockFilesView pins the SetBlockSnapshots contract: once
-// block snapshots are wired, every temporal tx pins its own block-files view
-// (the peer of aggtx); with none wired, block reads keep their own view.
+// TestTemporalTx_PinsBlockFilesView: with block snapshots wired at construction,
+// every temporal tx pins its own block-files view (the peer of aggtx); with none
+// wired, block reads keep their own view.
 func TestTemporalTx_PinsBlockFilesView(t *testing.T) {
 	t.Parallel()
 	ctx := t.Context()
 
-	mdbxDb := memdb.NewTestDB(t, dbcfg.ChainDB)
-	dirs := datadir.New(t.TempDir())
-	agg := state.NewTest(dirs).StepSize(1).MustOpen(ctx, mdbxDb)
-	defer agg.Close()
+	newDB := func(withBlocks bool) *DB {
+		mdbxDb := memdb.NewTestDB(t, dbcfg.ChainDB)
+		dirs := datadir.New(t.TempDir())
+		agg := state.NewTest(dirs).StepSize(1).MustOpen(ctx, mdbxDb)
+		t.Cleanup(agg.Close)
 
-	temporalDb, err := New(mdbxDb, agg)
-	require.NoError(t, err)
-	defer temporalDb.Close()
+		var blockSnaps services.BlockSnapshots
+		if withBlocks {
+			cfg := ethconfig.Defaults.Snapshot
+			cfg.ChainName = networkname.Mainnet
+			sn := blocksnapshots.NewRoSnapshots(cfg, dirs.Snap, log.New())
+			t.Cleanup(sn.Close)
+			blockSnaps = sn
+		}
 
-	roTx, err := temporalDb.BeginTemporalRo(ctx)
+		db, err := New(mdbxDb, agg, blockSnaps)
+		require.NoError(t, err)
+		t.Cleanup(db.Close)
+		return db
+	}
+
+	roTx, err := newDB(false).BeginTemporalRo(ctx)
 	require.NoError(t, err)
 	defer roTx.Rollback()
 	require.Nil(t, roTx.(*Tx).blocktx)
 
-	cfg := ethconfig.Defaults.Snapshot
-	cfg.ChainName = networkname.Mainnet
-	sn := blocksnapshots.NewRoSnapshots(cfg, dirs.Snap, log.New())
-	defer sn.Close()
-	temporalDb.SetBlockSnapshots(sn)
-
-	roTx2, err := temporalDb.BeginTemporalRo(ctx)
+	roTx2, err := newDB(true).BeginTemporalRo(ctx)
 	require.NoError(t, err)
 	defer roTx2.Rollback()
 	require.NotNil(t, roTx2.(*Tx).blocktx)
@@ -261,7 +268,7 @@ func TestTemporalTx_RangeAsOf_StorageDomain(t *testing.T) {
 	stepSize := uint64(1)
 	agg := state.NewTest(dirs).StepSize(stepSize).MustOpen(ctx, mdbxDb)
 	defer agg.Close()
-	temporalDb, err := New(mdbxDb, agg)
+	temporalDb, err := New(mdbxDb, agg, nil)
 	require.NoError(t, err)
 	defer temporalDb.Close()
 
