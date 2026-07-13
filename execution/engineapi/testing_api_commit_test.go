@@ -172,6 +172,20 @@ func TestCommitBlockV1(t *testing.T) {
 		assert.False(t, rec.fcuCalled)
 	})
 
+	t.Run("extraData longer than 32 bytes", func(t *testing.T) {
+		t.Parallel()
+		api, rec, _ := newEnv(defaultAssembled())
+		tooLong := hexutil.Bytes(make([]byte, 33))
+		hash, err := api.CommitBlockV1(context.Background(), validPayloadAttrs(parentTimestamp), nil, &tooLong)
+		require.Error(t, err)
+		assert.Equal(t, common.Hash{}, hash)
+		var rpcErr *rpc.InvalidParamsError
+		require.ErrorAs(t, err, &rpcErr)
+		assert.Contains(t, rpcErr.Message, "extraData")
+		assert.Empty(t, rec.inserted)
+		assert.False(t, rec.fcuCalled)
+	})
+
 	t.Run("happy path commits block and sets head", func(t *testing.T) {
 		t.Parallel()
 		api, rec, _ := newEnv(defaultAssembled())
@@ -205,6 +219,22 @@ func TestCommitBlockV1(t *testing.T) {
 		assert.Equal(t, []byte("overridden-extra"), captured.ExtraData)
 		require.True(t, rec.fcuCalled)
 		assert.Equal(t, blockHash, rec.fcuHead)
+	})
+
+	t.Run("nil extraData builds with empty extra data", func(t *testing.T) {
+		t.Parallel()
+		api, _, stub := newEnv(defaultAssembled())
+		var captured *builder.Parameters
+		stub.assembleBlockFunc = func(_ context.Context, params *builder.Parameters) (execmodule.AssembleBlockResult, error) {
+			captured = params
+			return execmodule.AssembleBlockResult{PayloadID: 7, Busy: false}, nil
+		}
+
+		_, err := api.CommitBlockV1(context.Background(), validPayloadAttrs(parentTimestamp), nil, nil)
+		require.NoError(t, err)
+		require.NotNil(t, captured)
+		require.NotNil(t, captured.ExtraData, "nil extraData must force empty extra data, not the builder's configured default")
+		assert.Empty(t, captured.ExtraData)
 	})
 
 	t.Run("insert failure leaves head untouched", func(t *testing.T) {
@@ -256,7 +286,9 @@ func TestCommitBlockV1(t *testing.T) {
 		hash, err := api.CommitBlockV1(context.Background(), validPayloadAttrs(parentTimestamp), nil, nil)
 		require.Error(t, err)
 		assert.Equal(t, common.Hash{}, hash)
-		require.Equal(t, -38002, err.(rpc.Error).ErrorCode())
+		var rpcErr rpc.Error
+		require.ErrorAs(t, err, &rpcErr)
+		require.Equal(t, -38002, rpcErr.ErrorCode())
 	})
 
 	t.Run("reorg too deep returns engine error code", func(t *testing.T) {
@@ -267,7 +299,9 @@ func TestCommitBlockV1(t *testing.T) {
 		hash, err := api.CommitBlockV1(context.Background(), validPayloadAttrs(parentTimestamp), nil, nil)
 		require.Error(t, err)
 		assert.Equal(t, common.Hash{}, hash)
-		require.Equal(t, -38006, err.(rpc.Error).ErrorCode())
+		var rpcErr rpc.Error
+		require.ErrorAs(t, err, &rpcErr)
+		require.Equal(t, -38006, rpcErr.ErrorCode())
 	})
 
 	t.Run("bad block on fork choice returns error", func(t *testing.T) {

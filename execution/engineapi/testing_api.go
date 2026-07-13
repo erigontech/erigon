@@ -38,6 +38,7 @@ import (
 	"github.com/erigontech/erigon/execution/engineapi/engine_helpers"
 	"github.com/erigontech/erigon/execution/engineapi/engine_types"
 	"github.com/erigontech/erigon/execution/execmodule"
+	"github.com/erigontech/erigon/execution/protocol/params"
 	"github.com/erigontech/erigon/execution/state"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/accounts"
@@ -60,7 +61,10 @@ type TestingAPI interface {
 	// CommitBlockV1 builds a block on top of the current canonical head, inserts it into the
 	// chain, and sets it as the new head — the equivalent of BuildBlockV1 followed by
 	// engine_newPayload + engine_forkchoiceUpdated in a single call. Returns the hash of the
-	// committed block. On any failure the canonical head is left unchanged.
+	// committed block. On any failure the canonical head is left unchanged, with one
+	// exception: the fork choice update runs asynchronously in the execution module, so a
+	// busy error returned when the slot budget expires mid fork choice does not stop the
+	// head from advancing afterwards.
 	// The transactions parameter follows the same semantics as BuildBlockV1.
 	CommitBlockV1(ctx context.Context, payloadAttributes *engine_types.PayloadAttributes, transactions *[]hexutil.Bytes, extraData *hexutil.Bytes) (common.Hash, error)
 }
@@ -89,12 +93,12 @@ func (t *testingImpl) decodeTxnProvider(ctx context.Context, transactions *[]hex
 	if t.db != nil {
 		dbTx, err := t.db.BeginTemporalRo(ctx)
 		if err != nil {
-			return nil, fmt.Errorf("testing_buildBlockV1: could not begin temporal transaction: %w", err)
+			return nil, fmt.Errorf("could not begin temporal transaction: %w", err)
 		}
 		defer dbTx.Rollback()
 		sd, err := execctx.NewSharedDomains(ctx, dbTx, t.logger, execctx.WithoutDeferredBranchUpdates())
 		if err != nil {
-			return nil, fmt.Errorf("testing_buildBlockV1: NewSharedDomains error: %w", err)
+			return nil, fmt.Errorf("NewSharedDomains error: %w", err)
 		}
 		defer sd.Close()
 		reader = state.NewReaderV3(sd.AsGetter(dbTx))
@@ -118,7 +122,7 @@ func (t *testingImpl) decodeTxnProvider(ctx context.Context, transactions *[]hex
 			if reader != nil {
 				acc, err := reader.ReadAccountData(accounts.InternAddress(sender.Value()))
 				if err != nil {
-					return nil, fmt.Errorf("testing_buildBlockV1: ReadAccountData error: %w", err)
+					return nil, fmt.Errorf("ReadAccountData error: %w", err)
 				}
 				if acc != nil {
 					stateNonce = acc.Nonce
@@ -193,6 +197,8 @@ func (t *testingImpl) CommitBlockV1(
 		return common.Hash{}, &rpc.InvalidParamsError{Message: "payloadAttributes must not be null"}
 	}
 
+	deadline := t.slotDeadline(ctx)
+
 	parentHeader := t.server.chainRW.CurrentHeader(ctx)
 	if parentHeader == nil {
 		return common.Hash{}, errors.New("no canonical head available")
@@ -204,7 +210,6 @@ func (t *testingImpl) CommitBlockV1(
 		return common.Hash{}, err
 	}
 
-	deadline := t.slotDeadline(ctx)
 	assembled, _, err := t.assembleTestingBlock(ctx, parentHeader.Hash(), parentHeader, payloadAttributes, transactions, extraData, deadline)
 	if err != nil {
 		return common.Hash{}, err
@@ -221,9 +226,11 @@ func (t *testingImpl) CommitBlockV1(
 		}
 	}
 
-	t.server.lock.Lock()
-	err = t.server.chainRW.InsertBlock(ctx, block, encodedBAL)
-	t.server.lock.Unlock()
+	err = func() error {
+		t.server.lock.Lock()
+		defer t.server.lock.Unlock()
+		return t.server.chainRW.InsertBlock(ctx, block, encodedBAL)
+	}()
 	if err != nil {
 		return common.Hash{}, err
 	}
@@ -319,6 +326,10 @@ func (t *testingImpl) assembleTestingBlock(
 		return nil, 0, &rpc.InvalidParamsError{Message: "payload timestamp must be greater than parent block timestamp"}
 	}
 
+	if extraData != nil && uint64(len(*extraData)) > params.MaximumExtraDataSize {
+		return nil, 0, &rpc.InvalidParamsError{Message: fmt.Sprintf("extraData longer than %d bytes (%d)", params.MaximumExtraDataSize, len(*extraData))}
+	}
+
 	// Validate withdrawals presence.
 	if err := t.server.checkWithdrawalsPresence(timestamp, payloadAttributes.Withdrawals); err != nil {
 		return nil, 0, err
@@ -369,12 +380,15 @@ func (t *testingImpl) assembleTestingBlock(
 	}
 
 	// Build the AssembleBlock parameters (mirrors forkchoiceUpdated logic).
+	// ExtraData always overrides the builder's configured default (which varies by
+	// erigon version) to keep testing_ block hashes deterministic, matching geth.
 	assembleParams := &builder.Parameters{
 		ParentHash:            parentHash,
 		Timestamp:             timestamp,
 		PrevRandao:            payloadAttributes.PrevRandao,
 		SuggestedFeeRecipient: payloadAttributes.SuggestedFeeRecipient,
 		CustomTxnProvider:     customProvider,
+		ExtraData:             []byte{},
 	}
 	if extraData != nil {
 		assembleParams.ExtraData = *extraData

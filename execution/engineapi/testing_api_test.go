@@ -44,9 +44,10 @@ import (
 
 // ---------------------------------------------------------------------------
 // Minimal stub implementing execmodule.ExecutionModule for unit tests.
-// Only the methods called by BuildBlockV1 (GetHeader, AssembleBlock,
-// GetAssembledBlock) are wired to configurable closures; everything else
-// is a no-op that satisfies the interface.
+// The methods called by BuildBlockV1 and CommitBlockV1 (GetHeader,
+// AssembleBlock, GetAssembledBlock, CurrentHeader, InsertBlocks,
+// ValidateChain, UpdateForkChoice, GetForkChoice) are wired to configurable
+// closures; everything else is a no-op that satisfies the interface.
 // ---------------------------------------------------------------------------
 
 type stubExecutionModule struct {
@@ -433,6 +434,21 @@ func TestBuildBlockV1(t *testing.T) {
 		assert.Contains(t, rpcErr.Message, "payload timestamp must be greater than parent")
 	})
 
+	t.Run("extraData longer than 32 bytes", func(t *testing.T) {
+		t.Parallel()
+		stub := &stubExecutionModule{
+			getHeaderFunc: getHeaderReturning(parentHash, parentHdr),
+		}
+		api := newTestingAPI(allForksChainConfig(), stub)
+		tooLong := hexutil.Bytes(make([]byte, 33))
+		resp, err := api.BuildBlockV1(context.Background(), parentHash, validPayloadAttrs(parentTimestamp), nil, &tooLong)
+		require.Nil(t, resp)
+		require.Error(t, err)
+		var rpcErr *rpc.InvalidParamsError
+		require.ErrorAs(t, err, &rpcErr)
+		assert.Contains(t, rpcErr.Message, "extraData")
+	})
+
 	t.Run("missing parentBeaconBlockRoot for Cancun+", func(t *testing.T) {
 		t.Parallel()
 		stub := &stubExecutionModule{
@@ -657,6 +673,28 @@ func TestBuildBlockV1(t *testing.T) {
 		require.NotNil(t, captured)
 		assert.Equal(t, []byte("overridden-extra"), captured.ExtraData)
 		assert.Equal(t, hexutil.Bytes("overridden-extra"), resp.ExecutionPayload.ExtraData)
+	})
+
+	t.Run("nil extraData builds with empty extra data", func(t *testing.T) {
+		t.Parallel()
+		var captured *builder.Parameters
+		stub := &stubExecutionModule{
+			getHeaderFunc: getHeaderReturning(parentHash, parentHdr),
+			assembleBlockFunc: func(_ context.Context, params *builder.Parameters) (execmodule.AssembleBlockResult, error) {
+				captured = params
+				return execmodule.AssembleBlockResult{PayloadID: 1, Busy: false}, nil
+			},
+			getAssembledBlockFunc: func(_ context.Context, _ uint64) (execmodule.AssembledBlockResult, error) {
+				blk := makeAssembledBlock(common.Hash{0x01}, parentHash, common.Hash{}, 101, parentTimestamp+1, []byte{}, 30_000_000, 0, 0, 0)
+				return execmodule.AssembledBlockResult{Block: blk, BlockValue: uint256.NewInt(0), Busy: false}, nil
+			},
+		}
+		api := newTestingAPI(allForksChainConfig(), stub)
+		_, err := api.BuildBlockV1(context.Background(), parentHash, validPayloadAttrs(parentTimestamp), nil, nil)
+		require.NoError(t, err)
+		require.NotNil(t, captured)
+		require.NotNil(t, captured.ExtraData, "nil extraData must force empty extra data, not the builder's configured default")
+		assert.Empty(t, captured.ExtraData)
 	})
 
 	t.Run("missing withdrawals for Shanghai", func(t *testing.T) {
