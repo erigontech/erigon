@@ -17,12 +17,13 @@
 package cli
 
 import (
+	"context"
 	"fmt"
 	"time"
 
 	"github.com/c2h5oh/datasize"
 	"github.com/spf13/pflag"
-	"github.com/urfave/cli/v2"
+	"github.com/urfave/cli/v3"
 
 	"github.com/erigontech/erigon/cmd/rpcdaemon/cli/httpcfg"
 	"github.com/erigontech/erigon/cmd/utils"
@@ -82,13 +83,13 @@ var (
 				minimal: Keep only latest state`,
 		Value: "full",
 	}
-	PruneDistanceFlag = cli.Uint64Flag{
+	PruneDistanceFlag = cli.StringFlag{
 		Name:  "prune.distance",
-		Usage: `Keep state history for the latest N blocks (default: everything)`,
+		Usage: `Keep state history for the latest N blocks, or "keep-all" to keep everything. If unset, retention follows --prune.mode`,
 	}
-	PruneBlocksDistanceFlag = cli.Uint64Flag{
+	PruneBlocksDistanceFlag = cli.StringFlag{
 		Name:  "prune.distance.blocks",
-		Usage: `Keep block history for the latest N blocks (default: everything)`,
+		Usage: `Keep block history for the latest N blocks, or a named policy: "keep-post-merge" (prune pre-merge blocks only) or "keep-all" (keep every block). If unset, retention follows --prune.mode`,
 	}
 	StateStreamDisableFlag = cli.BoolFlag{
 		Name:  "state.stream.disable",
@@ -206,6 +207,11 @@ var (
 		Usage: "Maximum number of topics per subscription to filter logs by.",
 		Value: rpchelper.DefaultFiltersConfig.RpcSubscriptionFiltersMaxTopics,
 	}
+	RpcSubscriptionFiltersTimeoutFlag = cli.DurationFlag{
+		Name:  "rpc.subscription.filters.timeout",
+		Usage: "Timeout before idle filters are evicted. Defaults to 5m; set to 0 to disable eviction.",
+		Value: rpchelper.DefaultFiltersConfig.RpcSubscriptionFiltersTimeout,
+	}
 )
 
 // BuildEthConfig applies all CLI flags to the ethconfig.Config. This is the single
@@ -213,42 +219,41 @@ var (
 // and then applies the remaining flags defined in this package.
 //
 // After this function returns, the config is fully populated from CLI flags.
-func BuildEthConfig(ctx *cli.Context, nodeCfg *nodecfg.Config, cfg *ethconfig.Config, logger log.Logger) {
-	utils.SetEthConfig(ctx, nodeCfg, cfg, logger)
+func BuildEthConfig(nodeCtx context.Context, ctx *cli.Command, nodeCfg *nodecfg.Config, cfg *ethconfig.Config, logger log.Logger) {
+	utils.SetEthConfig(nodeCtx, ctx, nodeCfg, cfg, logger)
 	applyRemainingEthFlags(ctx, cfg, logger)
 }
 
 // ApplyFlagsForEthConfig is kept for backward compatibility. New code should use BuildEthConfig.
 // Deprecated: use BuildEthConfig instead.
-func ApplyFlagsForEthConfig(ctx *cli.Context, cfg *ethconfig.Config, logger log.Logger) {
+func ApplyFlagsForEthConfig(ctx *cli.Command, cfg *ethconfig.Config, logger log.Logger) {
 	applyRemainingEthFlags(ctx, cfg, logger)
 }
 
-func applyRemainingEthFlags(ctx *cli.Context, cfg *ethconfig.Config, logger log.Logger) {
+func applyRemainingEthFlags(ctx *cli.Command, cfg *ethconfig.Config, logger log.Logger) {
 	chainId := cfg.NetworkID
 	if cfg.Genesis != nil {
 		chainId = cfg.Genesis.Config.ChainID.Uint64()
 	}
 	_ = chainId
 
-	blockDistance := ctx.Uint64(PruneBlocksDistanceFlag.Name)
-	distance := ctx.Uint64(PruneDistanceFlag.Name)
+	blockDistance := mustDistance(prune.ParseBlocksDistance(ctx.String(PruneBlocksDistanceFlag.Name), PruneBlocksDistanceFlag.Name))
+	distance := mustDistance(prune.ParseHistoryDistance(ctx.String(PruneDistanceFlag.Name), PruneDistanceFlag.Name))
 
-	// check if the prune.mode flag is not set to archive
-	persistenceReceiptsV2 := ctx.String(PruneModeFlag.Name) != prune.ArchiveMode.String()
+	cfg.PersistReceiptsCacheV2 = ctx.Bool(utils.PersistReceiptsV2Flag.Name)
 
-	// overwrite receipts persistence if the flag is set
-	if ctx.IsSet(utils.PersistReceiptsV2Flag.Name) {
-		persistenceReceiptsV2 = ctx.Bool(utils.PersistReceiptsV2Flag.Name)
+	commitmentHistoryOlder := mustDistance(prune.ParseCommitmentHistoryDistance(ctx.String(utils.CommitmentHistoryDistanceFlag.Name), utils.CommitmentHistoryDistanceFlag.Name))
+	receiptsDistance := mustDistance(prune.ParseReceiptsDistance(ctx.String(utils.PersistReceiptsDistanceFlag.Name), utils.PersistReceiptsDistanceFlag.Name))
+	if ctx.IsSet(utils.PersistReceiptsDistanceFlag.Name) && !cfg.PersistReceiptsCacheV2 {
+		utils.Fatalf("--%s requires --%s", utils.PersistReceiptsDistanceFlag.Name, utils.PersistReceiptsV2Flag.Name)
 	}
-
-	if persistenceReceiptsV2 {
-		cfg.PersistReceiptsCacheV2 = true
-	}
-
-	mode, err := prune.FromCli(ctx.String(PruneModeFlag.Name), distance, blockDistance)
+	mode, err := prune.FromCli(ctx.String(PruneModeFlag.Name), distance, blockDistance, commitmentHistoryOlder, receiptsDistance)
 	if err != nil {
 		utils.Fatalf(fmt.Sprintf("error while parsing mode: %v", err))
+	}
+
+	if err := mode.Validate(); err != nil {
+		utils.Fatalf("%v", err)
 	}
 
 	cfg.Prune = mode
@@ -320,12 +325,22 @@ func applyRemainingEthFlags(ctx *cli.Context, cfg *ethconfig.Config, logger log.
 
 func ApplyFlagsForEthConfigCobra(f *pflag.FlagSet, cfg *ethconfig.Config) {
 	pruneMode := cobraStringValueOrDefault(f, PruneModeFlag.Name, PruneModeFlag.Value)
-	pruneBlockDistance := cobraUint64ValueOrDefault(f, PruneBlocksDistanceFlag.Name, PruneBlocksDistanceFlag.Value)
-	pruneDistance := cobraUint64ValueOrDefault(f, PruneDistanceFlag.Name, PruneDistanceFlag.Value)
+	pruneBlockDistance := mustDistance(prune.ParseBlocksDistance(cobraStringValueOrDefault(f, PruneBlocksDistanceFlag.Name, PruneBlocksDistanceFlag.Value), PruneBlocksDistanceFlag.Name))
+	pruneDistance := mustDistance(prune.ParseHistoryDistance(cobraStringValueOrDefault(f, PruneDistanceFlag.Name, PruneDistanceFlag.Value), PruneDistanceFlag.Name))
 
-	mode, err := prune.FromCli(pruneMode, pruneDistance, pruneBlockDistance)
+	commitmentHistoryOlder := mustDistance(prune.ParseCommitmentHistoryDistance(cobraStringValueOrDefault(f, utils.CommitmentHistoryDistanceFlag.Name, ""), utils.CommitmentHistoryDistanceFlag.Name))
+	receiptsDistance := mustDistance(prune.ParseReceiptsDistance(cobraStringValueOrDefault(f, utils.PersistReceiptsDistanceFlag.Name, ""), utils.PersistReceiptsDistanceFlag.Name))
+	if f.Changed(utils.PersistReceiptsDistanceFlag.Name) && !cobraBoolValueOrDefault(f, utils.PersistReceiptsV2Flag.Name, utils.PersistReceiptsV2Flag.Value) {
+		utils.Fatalf("--%s requires --%s", utils.PersistReceiptsDistanceFlag.Name, utils.PersistReceiptsV2Flag.Name)
+	}
+
+	mode, err := prune.FromCli(pruneMode, pruneDistance, pruneBlockDistance, commitmentHistoryOlder, receiptsDistance)
 	if err != nil {
 		utils.Fatalf(fmt.Sprintf("error while parsing mode: %v", err))
+	}
+
+	if err := mode.Validate(); err != nil {
+		utils.Fatalf("%v", err)
 	}
 
 	cfg.Prune = mode
@@ -366,17 +381,6 @@ func cobraStringValueOrDefault(f *pflag.FlagSet, name, fallback string) string {
 	return v
 }
 
-func cobraUint64ValueOrDefault(f *pflag.FlagSet, name string, fallback uint64) uint64 {
-	if f.Lookup(name) == nil {
-		return fallback
-	}
-	v, err := f.GetUint64(name)
-	if err != nil {
-		utils.Fatalf("failed to read --%s: %v", name, err)
-	}
-	return v
-}
-
 func cobraBoolValueOrDefault(f *pflag.FlagSet, name string, fallback bool) bool {
 	if f.Lookup(name) == nil {
 		return fallback
@@ -388,7 +392,15 @@ func cobraBoolValueOrDefault(f *pflag.FlagSet, name string, fallback bool) bool 
 	return v
 }
 
-func ApplyFlagsForNodeConfig(ctx *cli.Context, cfg *nodecfg.Config, logger log.Logger) {
+// mustDistance fatals on a prune-distance parse error and returns the value.
+func mustDistance(v uint64, err error) uint64 {
+	if err != nil {
+		utils.Fatalf("%v", err)
+	}
+	return v
+}
+
+func ApplyFlagsForNodeConfig(ctx *cli.Command, cfg *nodecfg.Config, logger log.Logger) {
 	setPrivateApi(ctx, cfg)
 	setEmbeddedRpcDaemon(ctx, cfg, logger)
 	cfg.DatabaseVerbosity = kv.DBVerbosityLvl(ctx.Int(DatabaseVerbosityFlag.Name))
@@ -404,7 +416,7 @@ func ApplyFlagsForNodeConfig(ctx *cli.Context, cfg *nodecfg.Config, logger log.L
 	}
 }
 
-func setEmbeddedRpcDaemon(ctx *cli.Context, cfg *nodecfg.Config, logger log.Logger) {
+func setEmbeddedRpcDaemon(ctx *cli.Command, cfg *nodecfg.Config, logger log.Logger) {
 	jwtSecretPath := ctx.String(utils.JWTSecretPath.Name)
 	if jwtSecretPath == "" {
 		jwtSecretPath = cfg.Dirs.DataDir + "/jwt.hex"
@@ -431,7 +443,7 @@ func setEmbeddedRpcDaemon(ctx *cli.Context, cfg *nodecfg.Config, logger log.Logg
 		HttpListenAddress:        ctx.String(utils.HTTPListenAddrFlag.Name),
 		HttpPort:                 ctx.Int(utils.HTTPPortFlag.Name),
 		AuthRpcHTTPListenAddress: ctx.String(utils.AuthRpcAddr.Name),
-		AuthRpcPort:              ctx.Int(utils.AuthRpcPort.Name),
+		AuthRpcPort:              int(ctx.Uint(utils.AuthRpcPort.Name)),
 		JWTSecretPath:            jwtSecretPath,
 		TraceRequests:            ctx.Bool(utils.HTTPTraceFlag.Name),
 		DebugSingleRequest:       ctx.Bool(utils.HTTPDebugSingleFlag.Name),
@@ -466,12 +478,13 @@ func setEmbeddedRpcDaemon(ctx *cli.Context, cfg *nodecfg.Config, logger log.Logg
 			RpcSubscriptionFiltersMaxTxs:       ctx.Int(RpcSubscriptionFiltersMaxTxsFlag.Name),
 			RpcSubscriptionFiltersMaxAddresses: ctx.Int(RpcSubscriptionFiltersMaxAddressesFlag.Name),
 			RpcSubscriptionFiltersMaxTopics:    ctx.Int(RpcSubscriptionFiltersMaxTopicsFlag.Name),
+			RpcSubscriptionFiltersTimeout:      ctx.Duration(RpcSubscriptionFiltersTimeoutFlag.Name),
 		},
-		Gascap:              ctx.Uint64(utils.RpcGasCapFlag.Name),
+		Gascap:              utils.RpcGasCap(ctx),
 		BlockRangeLimit:     ctx.Int(utils.RpcBlockRangeLimit.Name),
 		GetLogsMaxResults:   ctx.Int(utils.RpcGetLogsMaxResults.Name),
 		Feecap:              ctx.Float64(utils.RPCGlobalTxFeeCapFlag.Name),
-		MaxTraces:           ctx.Uint64(utils.TraceMaxtracesFlag.Name),
+		MaxTraces:           uint64(ctx.Uint(utils.TraceMaxtracesFlag.Name)),
 		TraceCompatibility:  ctx.Bool(utils.RpcTraceCompatFlag.Name),
 		GethCompatibility:   ctx.Bool(utils.RpcGethCompatFlag.Name),
 		BatchLimit:          ctx.Int(utils.RpcBatchLimit.Name),
@@ -538,14 +551,19 @@ func setEmbeddedRpcDaemon(ctx *cli.Context, cfg *nodecfg.Config, logger log.Logg
 
 // setPrivateApi populates configuration fields related to the remote
 // read-only interface to the database
-func setPrivateApi(ctx *cli.Context, cfg *nodecfg.Config) {
+func setPrivateApi(ctx *cli.Command, cfg *nodecfg.Config) {
 	cfg.PrivateApiAddr = ctx.String(PrivateApiAddr.Name)
-	cfg.PrivateApiRateLimit = uint32(ctx.Uint64(PrivateApiRateLimit.Name))
-	maxRateLimit := uint32(kv.ReadersLimit - 128) // leave some readers for P2P
-	if cfg.PrivateApiRateLimit > maxRateLimit {
+	rateLimit := ctx.Int(PrivateApiRateLimit.Name)
+	maxRateLimit := int(kv.ReadersLimit - 128) // leave some readers for P2P
+	switch {
+	case rateLimit < 0:
+		log.Warn("private.api.ratelimit cannot be negative", "force", 0)
+		rateLimit = 0
+	case rateLimit > maxRateLimit:
 		log.Warn("private.api.ratelimit is too big", "force", maxRateLimit)
-		cfg.PrivateApiRateLimit = maxRateLimit
+		rateLimit = maxRateLimit
 	}
+	cfg.PrivateApiRateLimit = uint32(rateLimit)
 	if ctx.Bool(utils.TLSFlag.Name) {
 		certFile := ctx.String(utils.TLSCertFlag.Name)
 		keyFile := ctx.String(utils.TLSKeyFlag.Name)

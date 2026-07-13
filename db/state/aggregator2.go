@@ -28,10 +28,13 @@ type AggOpts struct { //nolint:gocritic
 	erigondbDomainStepsInFrozenFile uint64
 	reorgBlockDepth                 uint64
 
-	genSaltIfNeed   bool
-	sanityOldNaming bool // prevent start directory with old file names
-	disableFsync    bool // for tests speed
-	disableHistory  bool // for temp/inmem aggregator instances
+	referencesInCommitmentBranches *bool // nil = leave global schema default untouched
+
+	genSaltIfNeed      bool
+	sanityOldNaming    bool // prevent start directory with old file names
+	disableFsync       bool // for tests speed
+	disableHistory     bool // for temp/inmem aggregator instances
+	disableBranchCache bool // for one-shot aggregators with no cross-block reuse (e.g. genesis)
 }
 
 func New(dirs datadir.Dirs) AggOpts { //nolint:gocritic
@@ -72,9 +75,14 @@ func (opts AggOpts) Open(ctx context.Context, db kv.RoDB) (*Aggregator, error) {
 	a.erigondbDomainStepsInFrozenFile = opts.erigondbDomainStepsInFrozenFile
 
 	a.disableHistory = opts.disableHistory
+	a.branchCacheDisabled = opts.disableBranchCache
 	a.disableFsync = opts.disableFsync
 
 	a.savedSalt = salt
+
+	if opts.referencesInCommitmentBranches != nil {
+		a.applyReferencesInCommitmentBranches(*opts.referencesInCommitmentBranches)
+	}
 
 	if err := a.ConfigureDomains(); err != nil {
 		return nil, err
@@ -115,22 +123,28 @@ func (opts AggOpts) GenSaltIfNeed(v bool) AggOpts { opts.genSaltIfNeed = v; retu
 func (opts AggOpts) Logger(l log.Logger) AggOpts  { opts.logger = l; return opts }            //nolint:gocritic
 func (opts AggOpts) DisableFsync() AggOpts        { opts.disableFsync = true; return opts }   //nolint:gocritic
 func (opts AggOpts) DisableHistory() AggOpts      { opts.disableHistory = true; return opts } //nolint:gocritic
+func (opts AggOpts) DisableBranchCache() AggOpts { //nolint:gocritic
+	opts.disableBranchCache = true
+	return opts
+}
 func (opts AggOpts) SanityOldNaming() AggOpts { //nolint:gocritic
 	opts.sanityOldNaming = true
 	return opts
 }
 
-// WithErigonDBSettings assigns pre-resolved DB settings (stepSize, stepsInFrozenFile).
+// WithErigonDBSettings assigns pre-resolved DB settings.
 func (opts AggOpts) WithErigonDBSettings(s *ErigonDBSettings) AggOpts { //nolint:gocritic
 	opts.stepSize = s.StepSize
 	opts.stepsInFrozenFile = s.StepsInFrozenFile
+	refs := s.RefsInCommitmentBranches()
+	opts.referencesInCommitmentBranches = &refs
 	return opts
 }
 
 type workersCfg struct {
 	mu              sync.Mutex
-	allowEditing    bool // false while a long op holds the lock; Preset* writes are no-ops
-	merge           int  // usually 1
+	editLocks       int // >0 while background build/merge pins config; Preset* writes are no-ops
+	merge           int // usually 1
 	collateAndBuild int
 }
 
@@ -143,7 +157,7 @@ func (w *workersCfg) getMerge() int {
 func (w *workersCfg) setMerge(n int) {
 	w.mu.Lock()
 	defer w.mu.Unlock()
-	if w.allowEditing {
+	if w.editLocks == 0 {
 		w.merge = n
 	}
 }
@@ -157,30 +171,34 @@ func (w *workersCfg) getCollateAndBuild() int {
 func (w *workersCfg) setCollateAndBuild(n int) {
 	w.mu.Lock()
 	defer w.mu.Unlock()
-	if w.allowEditing {
+	if w.editLocks == 0 {
 		w.collateAndBuild = n
 	}
 }
 
-// trySet runs fn under mu only if allowEditing is true.
+// trySet runs fn under mu only while editing is unlocked (no background op holds it).
 func (w *workersCfg) trySet(fn func()) {
 	w.mu.Lock()
 	defer w.mu.Unlock()
-	if w.allowEditing {
+	if w.editLocks == 0 {
 		fn()
 	}
 }
 
+// lockEditing is reentrant: overlapping build/merge ops each hold a lock, and
+// editing stays disabled until the last one releases it.
 func (w *workersCfg) lockEditing() {
 	w.mu.Lock()
 	defer w.mu.Unlock()
-	w.allowEditing = false
+	w.editLocks++
 }
 
 func (w *workersCfg) unlockEditing() {
 	w.mu.Lock()
 	defer w.mu.Unlock()
-	w.allowEditing = true
+	if w.editLocks > 0 {
+		w.editLocks--
+	}
 }
 
 func CheckSnapshotsCompatibility(d datadir.Dirs) error {

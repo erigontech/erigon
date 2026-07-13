@@ -34,6 +34,7 @@ func (f *ForkChoiceStore) OnAttesterSlashing(attesterSlashing *cltypes.AttesterS
 		return nil
 	}
 	f.mu.Lock()
+	defer f.drainQueuedWork()
 	defer f.mu.Unlock()
 
 	if f.syncedDataManager.Syncing() {
@@ -121,7 +122,7 @@ func (f *ForkChoiceStore) onProcessAttesterSlashing(attesterSlashing *cltypes.At
 	}
 	if anySlashed {
 		f.operationsPool.AttesterSlashingsPool.Insert(pool.ComputeKeyForAttesterSlashing(attesterSlashing), attesterSlashing)
-		f.emitters.Operation().SendAttesterSlashing(attesterSlashing)
+		f.queueEmit(func() { f.emitters.Operation().SendAttesterSlashing(attesterSlashing) })
 	}
 	return nil
 }

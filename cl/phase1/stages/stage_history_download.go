@@ -18,6 +18,7 @@ package stages
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"math"
 	"sync/atomic"
@@ -354,8 +355,14 @@ func SpawnStageHistoryDownload(cfg StageHistoryReconstructionCfg, ctx context.Co
 						"ETA", (time.Duration(remaining/speed) * time.Second).String(),
 						"blk/sec", fmt.Sprintf("%.1f", speed))
 				} else {
+					// Beacon history downloads backward; lowestBlockToReach (the CL
+					// snapshot boundary) is only an estimate of the floor — a full or
+					// archive backfill keeps going below it toward genesis. Clamp the
+					// total to the work done so the X/Y display never runs past 100%.
+					beaconDone := highestBlockSeen - currProgress
+					beaconTotal := max(highestBlockSeen-lowestBlockToReach, beaconDone)
 					log.Info("Downloading Beacon History", "progress",
-						fmt.Sprintf("%d/%d", highestBlockSeen-currProgress, highestBlockSeen-lowestBlockToReach),
+						fmt.Sprintf("%d/%d", beaconDone, beaconTotal),
 						"blk/sec", fmt.Sprintf("%.1f", speed))
 				}
 				// More UX-friendly logging
@@ -372,7 +379,9 @@ func SpawnStageHistoryDownload(cfg StageHistoryReconstructionCfg, ctx context.Co
 
 		for !cfg.downloader.Finished() {
 			if err := cfg.downloader.RequestMore(ctx); err != nil {
-				log.Warn("closing backfilling routine", "err", err)
+				if !errors.Is(err, context.Canceled) {
+					log.Warn("closing backfilling routine", "err", err)
+				}
 				return
 			}
 		}

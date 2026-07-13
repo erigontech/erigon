@@ -19,6 +19,9 @@ package kv
 import (
 	"context"
 	"errors"
+	"fmt"
+	"slices"
+	"strings"
 	"sync"
 	"time"
 	"unsafe"
@@ -432,7 +435,6 @@ func (s Step) ToTxNum(stepSize uint64) uint64 { return uint64(s) * stepSize }
 type (
 	Domain      uint16
 	InvertedIdx uint16
-	ForkableId  uint16
 )
 
 type TemporalGetter interface {
@@ -471,9 +473,18 @@ type TemporalTx interface {
 
 	Debug() TemporalDebugTx
 	AggTx() any
+}
 
-	AggForkablesTx(ForkableId) any // any forkableId, returns that group
-	Unmarked(ForkableId) UnmarkedTx
+// TemporalFilesPin holds a consistent aggregator file snapshot so that multiple
+// read txns opened from it (BeginTemporalRo) all observe the same file
+// generation, even after newer generations are published. Concurrent readers
+// spawned from one commitment tx use this to avoid reading a domain from a file
+// generation inconsistent with the in-memory overlay that tx was built against.
+// Release with Close. A temporal tx exposes it via an optional `Pin()
+// TemporalFilesPin` method (type-asserted; not all backends can pin files).
+type TemporalFilesPin interface {
+	BeginTemporalRo(ctx context.Context) (TemporalTx, error)
+	Close()
 }
 
 // TemporalDebugTx - set of slow low-level funcs for debug purposes
@@ -498,8 +509,10 @@ type TemporalDebugTx interface {
 	DomainProgress(domain Domain) (txNum uint64)
 	IIProgress(name InvertedIdx) (txNum uint64)
 	StepSize() uint64
+	// Retire retires frozen history files entirely below their
+	// per-domain cutoff (deferred deletion).
+	Retire(ctx context.Context, cutoffs RetireCutoffs) (retiredCount int, err error)
 	Dirs() datadir.Dirs
-	AllForkableIds() []ForkableId
 
 	NewMemBatch(ioMetrics any) TemporalMemBatch
 }
@@ -507,14 +520,35 @@ type TemporalDebugTx interface {
 type TemporalDebugDB interface {
 	DomainTables(names ...Domain) []string
 	InvertedIdxTables(names ...InvertedIdx) []string
-	ForkableTables(names ...ForkableId) []string
 	BuildMissedAccessors(ctx context.Context, workers int) error
-	ReloadFiles() error
 	EnableReadAhead() TemporalDebugDB
 	DisableReadAhead()
 
 	Files() []string
 	MergeLoop(ctx context.Context) error
+}
+
+// FlushConfig holds optional behaviour for TemporalMemBatch.Flush, populated by
+// FlushOption values.
+type FlushConfig struct {
+	// DomainCallbacks, if set for a domain, is invoked per (key,value,step,txNum)
+	// tuple during Flush so a downstream cache (e.g. the BranchCache) can stay in
+	// sync. txNum is the value's write txNum, for tx-precise unwind invalidation.
+	DomainCallbacks map[Domain]func(k []byte, v []byte, step Step, txNum uint64)
+}
+
+// FlushOption configures a TemporalMemBatch.Flush call.
+type FlushOption func(*FlushConfig)
+
+// WithFlushCallback registers cb to receive every (key, value, step, txNum)
+// tuple of the given domain during Flush.
+func WithFlushCallback(domain Domain, cb func(k []byte, v []byte, step Step, txNum uint64)) FlushOption {
+	return func(c *FlushConfig) {
+		if c.DomainCallbacks == nil {
+			c.DomainCallbacks = make(map[Domain]func(k []byte, v []byte, step Step, txNum uint64))
+		}
+		c.DomainCallbacks[domain] = cb
+	}
 }
 
 type TemporalMemBatch interface {
@@ -529,9 +563,8 @@ type TemporalMemBatch interface {
 	HasPrefix(domain Domain, prefix []byte, roTx Tx) ([]byte, []byte, bool, error)
 	HasPrefixInRAM(domain Domain, prefix []byte) bool
 	SizeEstimate() uint64
-	Flush(ctx context.Context, tx RwTx) error
+	Flush(ctx context.Context, tx RwTx, opts ...FlushOption) error
 	Close()
-	PutForkable(id ForkableId, num Num, v []byte) error
 	DiscardWrites(domain Domain)
 	Unwind(txNumUnwindTo uint64, changeset *[DomainLen][]DomainEntryDiff)
 	GetAsOf(domain Domain, key []byte, ts uint64) (v []byte, ok bool, err error)
@@ -552,8 +585,6 @@ type TemporalRwTx interface {
 	RwTx
 	TemporalTx
 	TemporalPutDel
-
-	UnmarkedRw(ForkableId) UnmarkedRwTx
 
 	PruneSmallBatches(ctx context.Context, timeout time.Duration) (haveMore bool, err error)
 	Unwind(ctx context.Context, txNumUnwindTo uint64, changeset *[DomainLen][]DomainEntryDiff) error
@@ -597,6 +628,14 @@ type TxnId uint64 // internal auto-increment ID. can't cast to eth-network canon
 
 type HasSpaceDirty interface {
 	SpaceDirty() (uint64, uint64, error)
+}
+
+// HasDeleteRange deletes all keys in [from, to) (to==nil deletes through the
+// last key) and returns the number removed. mdbx implements it as a native bulk
+// B-tree cut — far faster than per-key deletion; other backends may emulate it
+// by iterating, so hot-path callers should prefer the mdbx-backed tx.
+type HasDeleteRange interface {
+	DeleteRange(table string, from, to []byte) (uint64, error)
 }
 
 // BucketMigrator used for buckets migration, don't use it in usual app code
@@ -758,4 +797,42 @@ type Closer interface {
 type OnFilesChange func(frozenFileNames []string)
 type SnapshotNotifier interface {
 	OnFilesChange(onChange OnFilesChange, onDelete OnFilesChange)
+}
+
+// RetireCutoffs is the txNum below which frozen history files are retired,
+// per domain (PerDomain, falling back to Default for other domains and standalone
+// indices); a 0 cutoff keeps the entity. The aggregator floors each txNum to its
+// file step — callers stay in txNum, the block↔txNum boundary's unit.
+type RetireCutoffs struct {
+	Default   uint64
+	PerDomain map[Domain]uint64
+}
+
+// IsNoop reports whether every cutoff is 0, so nothing would be retired.
+func (c RetireCutoffs) IsNoop() bool {
+	if c.Default != 0 {
+		return false
+	}
+	for _, txNum := range c.PerDomain {
+		if txNum != 0 {
+			return false
+		}
+	}
+	return true
+}
+
+// String renders the cutoffs in steps (txNum/stepSize) for readable logs.
+func (c RetireCutoffs) String(stepSize uint64) string {
+	names := make([]Domain, 0, len(c.PerDomain))
+	for name := range c.PerDomain {
+		names = append(names, name)
+	}
+	slices.Sort(names)
+
+	var sb strings.Builder
+	fmt.Fprintf(&sb, "default=%d", Step(c.Default/stepSize))
+	for _, name := range names {
+		fmt.Fprintf(&sb, " %s=%d", name, Step(c.PerDomain[name]/stepSize))
+	}
+	return sb.String()
 }

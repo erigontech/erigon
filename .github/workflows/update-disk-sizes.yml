@@ -1,14 +1,17 @@
 name: Docs - Update disk sizes
 
 # Triggers after a successful sync-from-scratch run (full or minimal node).
+# Archive sizes are not handled here: they are read manually from the Grafana
+# dashboard and committed by hand in a dedicated monthly PR.
 # Downloads the disk-usage artifacts, updates docs/site/src/data/disk-sizes.json,
-# and opens (or updates) a draft PR against the measured run's branch.
+# and opens (or updates) a draft PR against a pinned base branch (release/3.5).
 on:
-  # zizmor: ignore[dangerous-triggers] no checkout of triggering run's head; BASE_BRANCH is pinned to release/3.4 for workflow_run events
+  # zizmor: ignore[dangerous-triggers] no checkout of triggering run's head; BASE_BRANCH is pinned to release/3.5 for workflow_run events
   workflow_run:
     workflows:
       - "QA - Sync from scratch"
       - "QA - Sync from scratch (minimal node)"
+      - "QA - Sync from scratch (full node)"
     types:
       - completed
     branches:
@@ -22,7 +25,8 @@ on:
       base_branch:
         description: "Base branch to update"
         required: true
-        default: "release/3.4"
+        # Official docs branch — bump at each release cutover (e.g. 3.5 → 3.6).
+        default: "release/3.5"
       prune_mode:
         description: "Prune mode measured in that run"
         required: true
@@ -81,14 +85,22 @@ jobs:
             printf 'prune_mode=%s\n' "$INPUT_PRUNE_MODE" >> "$GITHUB_OUTPUT"
             printf 'source_run_id=%s\n' "$INPUT_RUN_ID" >> "$GITHUB_OUTPUT"
             printf 'base_branch=%s\n' "$INPUT_BASE_BRANCH" >> "$GITHUB_OUTPUT"
-          elif [[ "$WORKFLOW_RUN_NAME" == *"minimal"* ]]; then
-            printf 'prune_mode=minimal\n' >> "$GITHUB_OUTPUT"
-            printf 'source_run_id=%s\n' "$WORKFLOW_RUN_ID" >> "$GITHUB_OUTPUT"
-            printf 'base_branch=release/3.4\n' >> "$GITHUB_OUTPUT"
           else
-            printf 'prune_mode=full\n' >> "$GITHUB_OUTPUT"
+            # Map the producing workflow → the mode it measured:
+            #   "QA - Sync from scratch (minimal node)" → minimal
+            #   "QA - Sync from scratch (full node)"    → full
+            if [[ "$WORKFLOW_RUN_NAME" == *"minimal"* ]]; then
+              MODE=minimal
+            elif [[ "$WORKFLOW_RUN_NAME" == *"full node"* ]]; then
+              MODE=full
+            else
+              echo "::error::Unexpected producing workflow: $WORKFLOW_RUN_NAME"
+              exit 1
+            fi
+            printf 'prune_mode=%s\n' "$MODE" >> "$GITHUB_OUTPUT"
             printf 'source_run_id=%s\n' "$WORKFLOW_RUN_ID" >> "$GITHUB_OUTPUT"
-            printf 'base_branch=release/3.4\n' >> "$GITHUB_OUTPUT"
+            # Official docs branch — bump at each release cutover (e.g. 3.5 → 3.6).
+            printf 'base_branch=release/3.5\n' >> "$GITHUB_OUTPUT"
           fi
 
       - name: Generate GitHub App token
@@ -100,7 +112,7 @@ jobs:
           repositories: "erigon"
 
       - name: Checkout base branch
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
         with:
           ref: ${{ steps.determine.outputs.base_branch }}
           token: ${{ steps.app_token.outputs.token }}

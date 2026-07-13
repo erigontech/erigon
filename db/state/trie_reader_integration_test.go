@@ -47,7 +47,7 @@ func TestTrieReader_IntegrationWithRealData(t *testing.T) {
 	totalTxs := uint64(stepSize * totalSteps)
 
 	db, agg := testDbAndAggregatorv3(t, stepSize)
-	agg.ForTestReplaceKeysInValues(kv.CommitmentDomain, false)
+	agg.ForTestReferencesInCommitmentBranches(kv.CommitmentDomain, false)
 
 	ctx := t.Context()
 	rwTx, err := db.BeginTemporalRw(ctx)

@@ -364,6 +364,9 @@ func (b *CachingBeaconState) ComputeNextSyncCommittee() (*solid.SyncCommittee, e
 	//math.MaxUint8
 	activeValidatorIndicies := b.GetActiveValidatorsIndices(epoch)
 	activeValidatorCount := uint64(len(activeValidatorIndicies))
+	if activeValidatorCount == 0 {
+		return nil, fmt.Errorf("cannot compute next sync committee: no active validators at epoch %d", epoch)
+	}
 	mixPosition := (epoch + beaconConfig.EpochsPerHistoricalVector - beaconConfig.MinSeedLookahead - 1) %
 		beaconConfig.EpochsPerHistoricalVector
 	// Input for the seed hash.
@@ -373,6 +376,17 @@ func (b *CachingBeaconState) ComputeNextSyncCommittee() (*solid.SyncCommittee, e
 	syncCommitteeSize := int(beaconConfig.SyncCommitteeSize)
 	syncCommitteePubKeys := make([]common.Bytes48, 0, syncCommitteeSize)
 	preInputs := shuffling.ComputeShuffledIndexPreInputs(b.BeaconConfig(), seed)
+	maxEffectiveBalance := beaconConfig.MaxEffectiveBalanceForVersion(b.Version())
+	isElectra := b.Version() >= clparams.ElectraVersion
+	// Electra hashes seed+i/16 (one hash per 16 indices), pre-Electra seed+i/32.
+	groupSize := uint64(32)
+	if isElectra {
+		groupSize = 16
+	}
+	var buf [40]byte
+	copy(buf[:32], seed[:])
+	var cachedHash [32]byte
+	cachedGroup := ^uint64(0)
 	for len(syncCommitteePubKeys) < syncCommitteeSize {
 		shuffledIndex, err := shuffling.ComputeShuffledIndex(
 			b.BeaconConfig(),
@@ -391,27 +405,21 @@ func (b *CachingBeaconState) ComputeNextSyncCommittee() (*solid.SyncCommittee, e
 		if err != nil {
 			return nil, err
 		}
-		if b.Version() >= clparams.ElectraVersion {
-			// electra and after
-			// random_bytes = hash(seed + uint_to_bytes(i // 16))
-			// offset = i % 16 * 2
-			// random_value = bytes_to_uint64(random_bytes[offset:offset + 2])
-			buf := make([]byte, 8)
-			binary.LittleEndian.PutUint64(buf, i/16)
-			input := append(seed[:], buf...)
-			randomBytes := utils.Sha256(input)
+		// random_bytes = hash(seed + uint_to_bytes(i // groupSize)); one hash covers a whole group.
+		if group := i / groupSize; group != cachedGroup {
+			binary.LittleEndian.PutUint64(buf[32:], group)
+			cachedHash = optimizedHashFunc(buf[:])
+			cachedGroup = group
+		}
+		if isElectra {
 			offset := (i % 16) * 2
-			randomValue := binary.LittleEndian.Uint16(randomBytes[offset : offset+2])
-			if validator.EffectiveBalance()*math.MaxUint16 >= beaconConfig.MaxEffectiveBalanceForVersion(b.Version())*uint64(randomValue) {
+			randomValue := binary.LittleEndian.Uint16(cachedHash[offset : offset+2])
+			if validator.EffectiveBalance()*math.MaxUint16 >= maxEffectiveBalance*uint64(randomValue) {
 				syncCommitteePubKeys = append(syncCommitteePubKeys, validator.PublicKey())
 			}
 		} else {
-			// Compute random byte.
-			buf := make([]byte, 8)
-			binary.LittleEndian.PutUint64(buf, i/32)
-			input := append(seed[:], buf...)
-			randomByte := uint64(utils.Sha256(input)[i%32])
-			if validator.EffectiveBalance()*math.MaxUint8 >= beaconConfig.MaxEffectiveBalanceForVersion(b.Version())*randomByte {
+			randomByte := uint64(cachedHash[i%32])
+			if validator.EffectiveBalance()*math.MaxUint8 >= maxEffectiveBalance*randomByte {
 				syncCommitteePubKeys = append(syncCommitteePubKeys, validator.PublicKey())
 			}
 		}
@@ -462,7 +470,7 @@ func (b *CachingBeaconState) GetAttestingIndicies(
 			)
 		}
 
-		attestingIndices := []uint64{}
+		attestingIndices := make([]uint64, 0, len(committee))
 		for i, member := range committee {
 			bitIndex := i % 8
 			sliceIndex := i / 8

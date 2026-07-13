@@ -314,7 +314,7 @@ func (st *TxnExecutor) preCheck(gasBailout bool, intrinsicGasResult mdgas.Intrin
 		}
 	}
 
-	regularContribution, stateContribution := InclusionContributions(st.msg.Gas(), intrinsicGasResult, rules.IsAmsterdam)
+	regularContribution, stateContribution := InclusionContributions(st.msg.Gas(), rules.IsAmsterdam)
 	if err := CheckBlockGasInclusion(st.gp, regularContribution, stateContribution); err != nil {
 		return err
 	}
@@ -381,7 +381,7 @@ func (st *TxnExecutor) ApplyFrame() (*evmtypes.ExecutionResult, error) {
 
 	// set code tx
 	auths := msg.Authorizations()
-	verifiedAuthorities, stateIgasRefund, err := st.verifyAuthorities(auths, contractCreation, rules.ChainID.String())
+	verifiedAuthorities, stateIgasRefill, err := st.verifyAuthorities(auths, contractCreation, rules.ChainID.String())
 	if err != nil {
 		return nil, err
 	}
@@ -410,11 +410,11 @@ func (st *TxnExecutor) ApplyFrame() (*evmtypes.ExecutionResult, error) {
 		State:   intrinsicGasResult.StateGas,
 	}
 	st.gasRemaining = mdgas.SplitTxnGasLimit(st.msg.Gas(), imdGas, rules)
-	// EIP-8037 × EIP-7702: authority-exists refund moves from intrinsic state
+	// EIP-8037 × EIP-7702: authority-exists refill moves from intrinsic state
 	// gas into the reservoir so execution-time state ops can draw from it.
-	if stateIgasRefund > 0 && rules.IsAmsterdam {
-		imdGas.State -= stateIgasRefund
-		st.gasRemaining.State += stateIgasRefund
+	if stateIgasRefill > 0 && rules.IsAmsterdam {
+		imdGas.State -= stateIgasRefill
+		st.gasRemaining.State += stateIgasRefill
 	}
 
 	// Execute the preparatory steps for txn execution which includes:
@@ -433,7 +433,6 @@ func (st *TxnExecutor) ApplyFrame() (*evmtypes.ExecutionResult, error) {
 		ReceiptGasUsed:      st.txnGasUsed,
 		BlockRegularGasUsed: st.blockRegularGasUsed,
 		BlockStateGasUsed:   st.blockStateGasUsed,
-		IntrinsicGas:        intrinsicGasResult,
 		Err:                 vmerr,
 		Reverted:            errors.Is(vmerr, vm.ErrExecutionReverted),
 		ReturnData:          ret,
@@ -546,7 +545,7 @@ func (st *TxnExecutor) Execute(refunds bool, gasBailout bool) (result *evmtypes.
 		return nil, fmt.Errorf("%w: have %d, want %d", ErrIntrinsicGas, st.msg.Gas(), intrinsicGas)
 	}
 
-	verifiedAuthorities, stateIgasRefund, err := st.verifyAuthorities(auths, contractCreation, rules.ChainID.String())
+	verifiedAuthorities, stateIgasRefill, err := st.verifyAuthorities(auths, contractCreation, rules.ChainID.String())
 	if err != nil {
 		return nil, err
 	}
@@ -556,9 +555,9 @@ func (st *TxnExecutor) Execute(refunds bool, gasBailout bool) (result *evmtypes.
 		State:   intrinsicGasResult.StateGas,
 	}
 	st.gasRemaining = mdgas.SplitTxnGasLimit(st.msg.Gas(), imdGas, rules)
-	if rules.IsAmsterdam && stateIgasRefund > 0 {
-		imdGas.State -= stateIgasRefund
-		st.gasRemaining.State += stateIgasRefund
+	if rules.IsAmsterdam && stateIgasRefill > 0 {
+		imdGas.State -= stateIgasRefill
+		st.gasRemaining.State += stateIgasRefill
 	}
 
 	if t := st.evm.Config().Tracer; t != nil && t.OnGasChange != nil {
@@ -601,7 +600,7 @@ func (st *TxnExecutor) Execute(refunds bool, gasBailout bool) (result *evmtypes.
 		// nonce to calculate the address of the contract that is being created
 		// It does get incremented inside the `Create` call, after the computation
 		// of the contract's address, but before the execution of the code.
-		ret, _, st.gasRemaining, gasUsed, vmerr = st.evm.Create(sender, st.data, st.gasRemaining, st.value, nil, bailout)
+		ret, _, st.gasRemaining, gasUsed, _, vmerr = st.evm.Create(sender, st.data, st.gasRemaining, st.value, nil, bailout)
 	} else {
 		ret, st.gasRemaining, gasUsed, vmerr = st.evm.Call(sender, st.to(), st.data, st.gasRemaining, st.value, bailout)
 	}
@@ -614,7 +613,7 @@ func (st *TxnExecutor) Execute(refunds bool, gasBailout bool) (result *evmtypes.
 		if rules.IsAmsterdam {
 			combined := gasUsed.PlusIntrinsic(imdGas)
 			st.blockStateGasUsed = combined.StateClamped()
-			st.blockRegularGasUsed = max(combined.Regular, intrinsicGasResult.FloorGasCost)
+			st.blockRegularGasUsed = combined.Regular
 			st.txnGasUsedB4Refunds = combined.Total()
 			refund := min(st.txnGasUsedB4Refunds/refundQuotient, st.state.GetRefund())
 			st.txnGasUsed = max(intrinsicGasResult.FloorGasCost, st.txnGasUsedB4Refunds-refund)
@@ -633,7 +632,7 @@ func (st *TxnExecutor) Execute(refunds bool, gasBailout bool) (result *evmtypes.
 	} else if rules.IsAmsterdam {
 		combined := gasUsed.PlusIntrinsic(imdGas)
 		st.blockStateGasUsed = combined.StateClamped()
-		st.blockRegularGasUsed = max(combined.Regular, intrinsicGasResult.FloorGasCost)
+		st.blockRegularGasUsed = combined.Regular
 		st.txnGasUsedB4Refunds = combined.Total()
 		st.txnGasUsed = max(st.txnGasUsedB4Refunds, intrinsicGasResult.FloorGasCost)
 	} else {
@@ -699,7 +698,6 @@ func (st *TxnExecutor) Execute(refunds bool, gasBailout bool) (result *evmtypes.
 		BlockRegularGasUsed: st.blockRegularGasUsed,
 		BlockStateGasUsed:   st.blockStateGasUsed,
 		MaxGasUsed:          max(st.txnGasUsedB4Refunds, intrinsicGasResult.FloorGasCost),
-		IntrinsicGas:        intrinsicGasResult,
 		Err:                 vmerr,
 		Reverted:            errors.Is(vmerr, vm.ErrExecutionReverted),
 		ReturnData:          ret,
@@ -719,17 +717,25 @@ func (st *TxnExecutor) Execute(refunds bool, gasBailout bool) (result *evmtypes.
 }
 
 func (st *TxnExecutor) verifyAuthorities(auths []types.Authorization, contractCreation bool, chainID string) ([]accounts.Address, uint64, error) {
-	var stateIgasRefund uint64
+	var stateIgasRefill uint64
 	verifiedAuthorities := make([]accounts.Address, 0)
 	if auths != nil {
 		if !st.evm.ChainRules().IsPrague {
-			return nil, stateIgasRefund, errors.New("SetCode transaction not allowed before Prague fork")
+			return nil, stateIgasRefill, errors.New("SetCode transaction not allowed before Prague fork")
 		}
 		if contractCreation {
-			return nil, stateIgasRefund, errors.New("contract creation not allowed with type4 txs")
+			return nil, stateIgasRefill, errors.New("contract creation not allowed with type4 txs")
 		}
 		if len(auths) == 0 {
-			return nil, stateIgasRefund, errors.New("SetCode transaction must have at least one authorization")
+			return nil, stateIgasRefill, errors.New("SetCode transaction must have at least one authorization")
+		}
+		isAmsterdam := st.evm.ChainRules().IsAmsterdam
+		preTxDelegates := make(map[accounts.Address]bool)
+		refundSkippedAuth := func() {
+			if isAmsterdam {
+				st.state.AddRefund(params.AccountWriteCostEIP8038)
+				stateIgasRefill += params.StateGasNewAccount + params.StateGasAuthBase
+			}
 		}
 		var b [32]byte
 		data := bytes.NewBuffer(nil)
@@ -739,6 +745,7 @@ func (st *TxnExecutor) verifyAuthorities(auths []types.Authorization, contractCr
 			// 1. chainId check
 			if !auth.ChainID.IsZero() && chainID != auth.ChainID.String() {
 				log.Debug("invalid chainID, skipping", "chainId", auth.ChainID, "auth index", i)
+				refundSkippedAuth()
 				continue
 			}
 
@@ -746,6 +753,7 @@ func (st *TxnExecutor) verifyAuthorities(auths []types.Authorization, contractCr
 			authorityPtr, err := auth.RecoverSigner(data, b[:])
 			if err != nil {
 				log.Trace("authority recover failed, skipping", "err", err, "auth index", i)
+				refundSkippedAuth()
 				continue
 			}
 			authority := accounts.InternAddress(*authorityPtr)
@@ -760,16 +768,17 @@ func (st *TxnExecutor) verifyAuthorities(auths []types.Authorization, contractCr
 			// 4. authority code should be empty or already delegated
 			codeHash, err := st.state.GetCodeHash(authority)
 			if err != nil {
-				return nil, stateIgasRefund, fmt.Errorf("%w: %w", ErrTxnExecutionFailed, err)
+				return nil, stateIgasRefill, fmt.Errorf("%w: %w", ErrTxnExecutionFailed, err)
 			}
 			hasDelegation := false
 			if !codeHash.IsEmpty() {
 				_, ok, err := st.state.GetDelegatedDesignation(authority)
 				if err != nil {
-					return nil, stateIgasRefund, fmt.Errorf("%w: %w", ErrTxnExecutionFailed, err)
+					return nil, stateIgasRefill, fmt.Errorf("%w: %w", ErrTxnExecutionFailed, err)
 				}
 				if !ok {
 					log.Debug("authority code is not empty or not delegated, skipping", "auth index", i)
+					refundSkippedAuth()
 					continue
 				}
 				hasDelegation = true
@@ -778,28 +787,43 @@ func (st *TxnExecutor) verifyAuthorities(auths []types.Authorization, contractCr
 			// 5. nonce check
 			authorityNonce, err := st.state.GetNonce(authority)
 			if err != nil {
-				return nil, stateIgasRefund, fmt.Errorf("%w: %w", ErrTxnExecutionFailed, err)
+				return nil, stateIgasRefill, fmt.Errorf("%w: %w", ErrTxnExecutionFailed, err)
 			}
 			if authorityNonce != auth.Nonce {
 				log.Trace("invalid nonce, skipping", "auth index", i)
+				refundSkippedAuth()
 				continue
 			}
 
-			// 6. Refund intrinsic state gas the auth wasn't going to spend:
+			// 6. Refill intrinsic state gas the auth wasn't going to spend:
 			//    NEW_ACCOUNT for existing account leaves, AUTH_BASE when no new
 			//    delegation-indicator bytes are written — either overwriting an
 			//    existing indicator or clearing against `0x0`. Pre-Amsterdam
 			//    keeps the legacy regular-gas refund (EIP-7702).
 			exists, err := st.state.Exist(authority)
 			if err != nil {
-				return nil, stateIgasRefund, fmt.Errorf("%w: %w", ErrTxnExecutionFailed, err)
+				return nil, stateIgasRefill, fmt.Errorf("%w: %w", ErrTxnExecutionFailed, err)
 			}
-			if st.evm.ChainRules().IsAmsterdam {
+			if isAmsterdam {
 				if exists {
-					stateIgasRefund += params.StateGasNewAccount
+					st.state.AddRefund(params.AccountWriteCostEIP8038)
+					stateIgasRefill += params.StateGasNewAccount
 				}
-				if hasDelegation || auth.Address == (common.Address{}) {
-					stateIgasRefund += params.StateGasAuthBase
+				preTxDelegated, seen := preTxDelegates[authority]
+				if !seen {
+					preTxDelegated = hasDelegation
+					preTxDelegates[authority] = preTxDelegated
+				}
+				if auth.Address == (common.Address{}) {
+					// clearing delegation doesn't write new bytes
+					stateIgasRefill += params.StateGasAuthBase
+					if hasDelegation && !preTxDelegated {
+						// also clear same authority's delegation set earlier in this tx
+						stateIgasRefill += params.StateGasAuthBase
+					}
+				} else if hasDelegation || preTxDelegated {
+					// overwriting a delegate doesn't write new bytes
+					stateIgasRefill += params.StateGasAuthBase
 				}
 			} else if exists {
 				st.state.AddRefund(params.PerEmptyAccountCost - params.PerAuthBaseCost)
@@ -808,22 +832,22 @@ func (st *TxnExecutor) verifyAuthorities(auths []types.Authorization, contractCr
 			// 7. set authority code
 			if auth.Address == (common.Address{}) {
 				if err := st.state.SetCode(authority, nil, tracing.CodeChangeAuthorizationClear); err != nil {
-					return nil, stateIgasRefund, fmt.Errorf("%w: %w", ErrTxnExecutionFailed, err)
+					return nil, stateIgasRefill, fmt.Errorf("%w: %w", ErrTxnExecutionFailed, err)
 				}
 			} else {
 				if err := st.state.SetCode(authority, types.AddressToDelegation(accounts.InternAddress(auth.Address)), tracing.CodeChangeAuthorization); err != nil {
-					return nil, stateIgasRefund, fmt.Errorf("%w: %w", ErrTxnExecutionFailed, err)
+					return nil, stateIgasRefill, fmt.Errorf("%w: %w", ErrTxnExecutionFailed, err)
 				}
 			}
 
 			// 8. increase the nonce of authority
 			if err := st.state.SetNonce(authority, authorityNonce+1, tracing.NonceChangeAuthorization); err != nil {
-				return nil, stateIgasRefund, fmt.Errorf("%w: %w", ErrTxnExecutionFailed, err)
+				return nil, stateIgasRefill, fmt.Errorf("%w: %w", ErrTxnExecutionFailed, err)
 			}
 		}
 	}
 
-	return verifiedAuthorities, stateIgasRefund, nil
+	return verifiedAuthorities, stateIgasRefill, nil
 }
 
 func (st *TxnExecutor) refundGas() {
@@ -844,6 +868,8 @@ func (st *TxnExecutor) calcIntrinsicGas(contractCreation bool, auths []types.Aut
 		AccessListLen:      uint64(len(accessTuples)),
 		StorageKeysLen:     uint64(accessTuples.StorageKeys()),
 		IsContractCreation: contractCreation,
+		IsSelfTransfer:     !contractCreation && st.msg.To() == st.msg.From(),
+		HasValue:           !st.msg.Value().IsZero(),
 		IsEIP2:             rules.IsHomestead,
 		IsEIP2028:          rules.IsIstanbul,
 		IsEIP3860:          vmConfig.HasEip3860(rules),
@@ -851,5 +877,6 @@ func (st *TxnExecutor) calcIntrinsicGas(contractCreation bool, auths []types.Aut
 		IsEIP7976:          rules.IsAmsterdam,
 		IsEIP7981:          rules.IsAmsterdam,
 		IsEIP8037:          rules.IsAmsterdam,
+		IsEIP2780:          rules.IsAmsterdam,
 	})
 }

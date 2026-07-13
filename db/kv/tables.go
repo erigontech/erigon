@@ -156,6 +156,11 @@ const (
 	TblCodeHistoryVals = "CodeHistoryVals"
 	TblCodeIdx         = "CodeIdx"
 
+	// TblCodeCache holds decompressed contract code keyed by keccak(code), the
+	// persistent backing tier for the in-memory code cache so reads skip the
+	// CodeDomain decompression across restarts. Immutable (content-addressed).
+	TblCodeCache = "CodeCache"
+
 	TblCommitmentVals        = "CommitmentVals"
 	TblCommitmentHistoryKeys = "CommitmentHistoryKeys"
 	TblCommitmentHistoryVals = "CommitmentHistoryVals"
@@ -285,9 +290,11 @@ var (
 	// ExperimentalGetProofsLayout is used to keep track whether we store indices to facilitate eth_getProof
 	CommitmentLayoutFlagKey = []byte("CommitmentLayouFlag")
 
-	PruneTypeOlder = []byte("older")
-	PruneHistory   = []byte("pruneHistory")
-	PruneBlocks    = []byte("pruneBlocks")
+	PruneTypeOlder         = []byte("older")
+	PruneHistory           = []byte("pruneHistory")
+	PruneBlocks            = []byte("pruneBlocks")
+	PruneCommitmentHistory = []byte("pruneCommitmentHistory")
+	PruneReceipts          = []byte("pruneReceipts")
 
 	DBSchemaVersionKey = []byte("dbVersion")
 	GenesisKey         = []byte("genesis")
@@ -362,6 +369,7 @@ var ChaindataTables = []string{
 	TblCodeHistoryKeys,
 	TblCodeHistoryVals,
 	TblCodeIdx,
+	TblCodeCache,
 
 	TblCommitmentVals,
 	TblCommitmentHistoryKeys,
@@ -840,13 +848,6 @@ func String2Domain(in string) (Domain, error) {
 		return RCacheDomain, nil
 	default:
 		return Domain(MaxUint16), fmt.Errorf("unknown name: %s", in)
-	}
-}
-
-func String2Forkable(in string) (ForkableId, error) {
-	switch in {
-	default:
-		return ForkableId(MaxUint16), fmt.Errorf("unknown forkable name: %s", in)
 	}
 }
 

@@ -323,14 +323,13 @@ func (srv *Server) Self() (ln *enode.Node) {
 // It blocks until all active connections have been closed.
 func (srv *Server) Stop() {
 	srv.lock.Lock()
-	if !srv.running.Load() {
+	if !srv.running.CompareAndSwap(true, false) {
 		if srv.nodedb != nil {
 			srv.nodedb.Close()
 		}
 		srv.lock.Unlock()
 		return
 	}
-	srv.running.Store(false)
 	srv.quitFunc()
 	if srv.listener != nil {
 		// this unblocks listener Accept
@@ -473,6 +472,22 @@ func (srv *Server) setupLocalNode() error {
 		ip, _ := srv.NAT.ExternalIP()
 		srv.localnode.SetStaticIP(ip)
 		srv.updateLocalNodeStaticAddrCache()
+	case nat.STUN:
+		// STUN-discovered IPs can change while running, so keep re-resolving.
+		tracker := &externalIPTracker{
+			nat: srv.NAT,
+			set: func(ip net.IP) {
+				srv.localnode.SetStaticIP(ip)
+				srv.updateLocalNodeStaticAddrCache()
+			},
+			logger: srv.logger,
+		}
+		srv.loopWG.Add(1)
+		go func() {
+			defer dbg.LogPanic()
+			defer srv.loopWG.Done()
+			tracker.run(srv.quit, externalIPRefreshInterval)
+		}()
 	default:
 		// Ask the router about the IP. This takes a while and blocks startup,
 		// do it in the background.

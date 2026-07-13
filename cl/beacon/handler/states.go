@@ -510,7 +510,7 @@ func (a *ApiHandler) GetEthV1BeaconStatesPendingConsolidations(w http.ResponseWr
 		var ok bool
 		pendingConsolidations, ok = a.forkchoiceStore.GetPendingConsolidations(blockRoot)
 		if !ok {
-			return nil, beaconhttp.NewEndpointError(http.StatusNotFound, fmt.Errorf("no pending	 consolidations found for block root: %x", blockRoot))
+			return nil, beaconhttp.NewEndpointError(http.StatusNotFound, fmt.Errorf("no pending consolidations found for block root: %x", blockRoot))
 		}
 		// If we have the pending consolidations in memory, we can return them directly.
 	} else {
@@ -522,7 +522,10 @@ func (a *ApiHandler) GetEthV1BeaconStatesPendingConsolidations(w http.ResponseWr
 		}
 	}
 
+	version := a.ethClock.StateVersionByEpoch(*slot / a.beaconChainCfg.SlotsPerEpoch)
 	return newBeaconResponse(pendingConsolidations).
+		WithHeader("Eth-Consensus-Version", version.String()).
+		WithVersion(version).
 		WithOptimistic(isOptimistic).
 		WithFinalized(canonicalRoot == blockRoot && *slot <= a.forkchoiceStore.FinalizedSlot()), nil
 }
@@ -569,7 +572,7 @@ func (a *ApiHandler) GetEthV1BeaconStatesPendingDeposits(w http.ResponseWriter, 
 		var ok bool
 		pendingDeposits, ok = a.forkchoiceStore.GetPendingDeposits(blockRoot)
 		if !ok {
-			return nil, beaconhttp.NewEndpointError(http.StatusNotFound, fmt.Errorf("no pending	 deposits found for block root: %x", blockRoot))
+			return nil, beaconhttp.NewEndpointError(http.StatusNotFound, fmt.Errorf("no pending deposits found for block root: %x", blockRoot))
 		}
 	} else {
 		stateView := a.caplinStateSnapshots.View()
@@ -580,7 +583,10 @@ func (a *ApiHandler) GetEthV1BeaconStatesPendingDeposits(w http.ResponseWriter, 
 		}
 	}
 
+	version := a.ethClock.StateVersionByEpoch(*slot / a.beaconChainCfg.SlotsPerEpoch)
 	return newBeaconResponse(pendingDeposits).
+		WithHeader("Eth-Consensus-Version", version.String()).
+		WithVersion(version).
 		WithOptimistic(isOptimistic).
 		WithFinalized(canonicalRoot == blockRoot && *slot <= a.forkchoiceStore.FinalizedSlot()), nil
 }

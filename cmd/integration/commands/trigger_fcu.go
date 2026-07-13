@@ -39,7 +39,7 @@ This is specially useful on devnets where there are network constraints (e.g. fe
 	Args: cobra.ArbitraryArgs,
 	Run: func(cmd *cobra.Command, args []string) {
 		logger := debug.SetupCobra(cmd, "integration")
-		ctx, _ := common.RootContext()
+		ctx := cmd.Context()
 		dirs := datadir.New(datadirCli)
 		jwt := filepath.Join(dirs.DataDir, "jwt.hex")
 

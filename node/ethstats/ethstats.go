@@ -563,7 +563,7 @@ func (s *Service) assembleBlockStats(block *types.Block, td *uint256.Int) *block
 		Number:     block.Header().Number,
 		Hash:       block.Hash(),
 		ParentHash: block.Header().ParentHash,
-		Timestamp:  new(big.Int).SetUint64(block.Header().Time),
+		Timestamp:  new(big.Int).SetUint64(block.Time()),
 		Miner:      block.Header().Coinbase,
 		GasUsed:    block.Header().GasUsed,
 		GasLimit:   block.Header().GasLimit,

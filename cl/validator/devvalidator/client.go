@@ -33,7 +33,7 @@ type beaconResponse struct {
 }
 
 // get performs a GET request and unmarshals the `data` field into dst.
-func (c *BeaconClient) get(ctx context.Context, path string, dst interface{}) error {
+func (c *BeaconClient) get(ctx context.Context, path string, dst any) error {
 	url := c.baseURL + path
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
@@ -60,7 +60,7 @@ func (c *BeaconClient) get(ctx context.Context, path string, dst interface{}) er
 }
 
 // post performs a POST request with a JSON body.
-func (c *BeaconClient) post(ctx context.Context, path string, body interface{}) error {
+func (c *BeaconClient) post(ctx context.Context, path string, body any) error {
 	url := c.baseURL + path
 	jsonBody, err := json.Marshal(body)
 	if err != nil {
@@ -89,7 +89,7 @@ func (c *BeaconClient) post(ctx context.Context, path string, body interface{}) 
 // postAndDecode performs a POST request with a JSON body and unmarshals the
 // response `data` field into dst. This is needed for endpoints like
 // /eth/v1/validator/duties/attester/{epoch} which are POST-only per spec.
-func (c *BeaconClient) postAndDecode(ctx context.Context, path string, body interface{}, dst interface{}) error {
+func (c *BeaconClient) postAndDecode(ctx context.Context, path string, body any, dst any) error {
 	url := c.baseURL + path
 	jsonBody, err := json.Marshal(body)
 	if err != nil {
@@ -122,7 +122,7 @@ func (c *BeaconClient) postAndDecode(ctx context.Context, path string, body inte
 }
 
 // postJSON performs a POST request with a JSON body and Eth-Consensus-Version header.
-func (c *BeaconClient) postJSON(ctx context.Context, path string, body interface{}, version string) error {
+func (c *BeaconClient) postJSON(ctx context.Context, path string, body any, version string) error {
 	url := c.baseURL + path
 	jsonBody, err := json.Marshal(body)
 	if err != nil {

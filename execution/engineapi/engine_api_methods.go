@@ -25,7 +25,6 @@ import (
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/hexutil"
-	"github.com/erigontech/erigon/db/version"
 	"github.com/erigontech/erigon/execution/engineapi/engine_helpers"
 	"github.com/erigontech/erigon/execution/engineapi/engine_types"
 	"github.com/erigontech/erigon/rpc"
@@ -243,22 +242,9 @@ func (e *EngineServer) GetPayloadBodiesByRangeV2(ctx context.Context, start, cou
 // See https://github.com/ethereum/execution-apis/blob/main/src/engine/identification.md#engine_getclientversionv1
 func (e *EngineServer) GetClientVersionV1(ctx context.Context, callerVersion *engine_types.ClientVersionV1) ([]engine_types.ClientVersionV1, error) {
 	if callerVersion != nil {
-		e.logger.Info("[GetClientVersionV1] Received request from" + callerVersion.String())
+		e.logger.Info("[GetClientVersionV1] Received request from " + callerVersion.String())
 	}
-	commitString := version.GitCommit
-	if len(commitString) >= 8 {
-		commitString = commitString[:8]
-	} else {
-		commitString = "00000000" // shouldn't be triggered
-	}
-	result := make([]engine_types.ClientVersionV1, 1)
-	result[0] = engine_types.ClientVersionV1{
-		Code:    version.ClientCode,
-		Name:    version.ClientName,
-		Version: version.VersionWithCommit(version.GitCommit),
-		Commit:  "0x" + commitString,
-	}
-	return result, nil
+	return []engine_types.ClientVersionV1{engine_types.LocalClientVersionV1()}, nil
 }
 
 func (e *EngineServer) ExchangeCapabilities(fromCl []string) []string {
