@@ -30,8 +30,9 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/erigontech/erigon/execution/rlp/internal/rlpstruct"
 	"github.com/holiman/uint256"
+
+	"github.com/erigontech/erigon/execution/rlp/internal/rlpstruct"
 )
 
 //lint:ignore ST1012 EOL is not an error.
@@ -101,26 +102,22 @@ type Decoder interface {
 //
 //	NewStream(r, limit).Decode(val)
 func Decode(r io.Reader, val interface{}) error {
-	stream := streamPool.Get().(*Stream)
-	defer streamPool.Put(stream)
+	stream := NewStreamFromPool(r, 0)
+	defer PutStream(stream)
 
-	stream.Reset(r, 0)
 	return stream.Decode(val)
 }
 
 // DecodeBytes parses RLP data from b into val. Please see package-level documentation for
 // the decoding rules. The input must contain exactly one value and no trailing data.
 func DecodeBytes(b []byte, val interface{}) error {
-	r := (*sliceReader)(&b)
+	stream := NewBytesStream(b)
+	defer PutStream(stream)
 
-	stream := streamPool.Get().(*Stream)
-	defer streamPool.Put(stream)
-
-	stream.Reset(r, uint64(len(b)))
 	if err := stream.Decode(val); err != nil {
 		return err
 	}
-	if len(b) > 0 {
+	if stream.Remaining() > 0 {
 		return ErrMoreThanOneValue
 	}
 	return nil
@@ -184,12 +181,9 @@ func addErrorContext(err error, ctx string) error {
 // DecodeBytesPartial parses RLP data from b into val.
 // Unlike DecodeBytes, it does not require that all bytes are consumed.
 func DecodeBytesPartial(b []byte, val any) error {
-	r := (*sliceReader)(&b)
+	stream := NewBytesStream(b)
+	defer PutStream(stream)
 
-	stream := streamPool.Get().(*Stream)
-	defer streamPool.Put(stream)
-
-	stream.Reset(r, uint64(len(b)))
 	return stream.Decode(val)
 }
 
@@ -659,13 +653,14 @@ func NewStream(r io.Reader, inputLimit uint64) *Stream {
 	return s
 }
 
-// NewStreamFromPool returns a Stream from the pool.
-func NewStreamFromPool(r io.Reader, inputLimit uint64) (stream *Stream, done func()) {
-	stream = streamPool.Get().(*Stream)
+// NewStreamFromPool returns a pooled Stream:
+//
+//	s := rlp.NewStreamFromPool(r, limit)
+//	defer rlp.PutStream(s)
+func NewStreamFromPool(r io.Reader, inputLimit uint64) *Stream {
+	stream := streamPool.Get().(*Stream)
 	stream.Reset(r, inputLimit)
-	return stream, func() {
-		streamPool.Put(stream)
-	}
+	return stream
 }
 
 // NewBytesStream returns a pooled Stream reading from b. The caller MUST
@@ -683,6 +678,7 @@ func NewBytesStream(b []byte) *Stream {
 // PutStream returns a Stream to the pool.
 func PutStream(stream *Stream) {
 	stream.sliceRdr = nil // release caller's backing array
+	stream.r = nil        // release caller's reader (may hold a large backing slice)
 	streamPool.Put(stream)
 }
 
