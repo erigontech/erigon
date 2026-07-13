@@ -205,7 +205,7 @@ func RemoveFilesByMask(path string) error {
 
 func RemoveFile(path string) error {
 	if dbg.TraceDeletion {
-		log.Debug("[removing] removing file", "path", path, "stack", dbg.Stack())
+		log.Warn("[removing] removing file", "path", path, "stack", dbg.Stack())
 	}
 
 	if err := os.Remove(path); err != nil { //nolint
@@ -222,7 +222,7 @@ func RemoveFile(path string) error {
 
 func RemoveAll(path string) error {
 	if dbg.TraceDeletion {
-		log.Debug("[removing] removing dir", "path", path, "stack", dbg.Stack())
+		log.Warn("[removing] removing dir", "path", path, "stack", dbg.Stack())
 	}
 	return os.RemoveAll(path) //nolint
 }

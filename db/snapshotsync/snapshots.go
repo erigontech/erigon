@@ -816,7 +816,7 @@ func (s *BaseRoSnapshots) recalcVisibleFiles(alignMin bool, retired []*DirtySegm
 		for i, sn := range retired {
 			names[i] = sn.FileName()
 		}
-		log.Debug("[removing] retiring block segments (deferred unlink)", "files", names, "stack", dbg.Stack())
+		log.Warn("[removing] retiring block segments (deferred unlink)", "files", names, "stack", dbg.Stack())
 	}
 
 	visible := make([]VisibleSegments, snaptype.MaxEnum) // create new pointer - only new readers will see it. old-alive readers will continue use previous pointer
