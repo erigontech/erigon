@@ -1168,7 +1168,7 @@ func TestDUFormatJSON_EmptyResult(t *testing.T) {
 	err := duFormatJSON(&buf, result)
 	require.NoError(t, err)
 
-	var decoded map[string]interface{}
+	var decoded map[string]any
 	err = json.Unmarshal(buf.Bytes(), &decoded)
 	require.NoError(t, err)
 	require.Equal(t, "unknown", decoded["chain"])

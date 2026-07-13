@@ -342,7 +342,7 @@ func (api *BaseAPI) blockWithSenders(ctx context.Context, tx kv.Tx, hash common.
 func (api *BaseAPI) headerNumberByHash(ctx context.Context, tx kv.Tx, hash common.Hash) (uint64, error) {
 	if api.blocksLRU != nil {
 		if it, ok := api.blocksLRU.Get(hash); ok && it != nil {
-			return it.Header().Number.Uint64(), nil
+			return it.NumberU64(), nil
 		}
 	}
 	number, err := api._blockReader.HeaderNumber(ctx, tx, hash)
@@ -365,7 +365,7 @@ func (api *BaseAPI) headerByNumberOrHash(ctx context.Context, tx kv.Tx, blockNrO
 	}
 	if api.blocksLRU != nil {
 		if it, ok := api.blocksLRU.Get(hash); ok && it != nil {
-			return it.Header(), isLatest, nil
+			return it.HeaderNoCopy(), isLatest, nil
 		}
 	}
 
@@ -386,7 +386,7 @@ func (api *BaseAPI) headerByNumber(ctx context.Context, number rpc.BlockNumber, 
 
 	if api.blocksLRU != nil {
 		if it, ok := api.blocksLRU.Get(h); ok && it != nil {
-			return it.Header(), nil
+			return it.HeaderNoCopy(), nil
 		}
 	}
 	overlayTx := api.filters.WithOverlay(tx)
@@ -396,7 +396,7 @@ func (api *BaseAPI) headerByNumber(ctx context.Context, number rpc.BlockNumber, 
 func (api *BaseAPI) headerByHash(ctx context.Context, hash common.Hash, tx kv.Tx) (*types.Header, error) {
 	if api.blocksLRU != nil {
 		if it, ok := api.blocksLRU.Get(hash); ok && it != nil {
-			return it.Header(), nil
+			return it.HeaderNoCopy(), nil
 		}
 	}
 
@@ -448,7 +448,7 @@ func (api *BaseAPI) checkPruneField(tx kv.Tx, block uint64, field func(*prune.Mo
 }
 
 // checkReceiptsAvailable checks if receipts are available for the given block.
-// In case --persist.receipts which makes all historical receipts available even when state history is pruned.
+// In case --prune.include-receipts which makes all historical receipts available even when state history is pruned.
 func (api *BaseAPI) checkReceiptsAvailable(ctx context.Context, tx kv.Tx, block uint64) error {
 	persistReceipts, err := kvcfg.PersistReceipts.Enabled(tx)
 	if err != nil {

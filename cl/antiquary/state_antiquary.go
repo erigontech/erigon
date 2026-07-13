@@ -36,6 +36,7 @@ import (
 	"github.com/erigontech/erigon/cl/phase1/core/state/raw"
 	"github.com/erigontech/erigon/cl/transition"
 	"github.com/erigontech/erigon/cl/transition/impl/eth2"
+	"github.com/erigontech/erigon/cl/utils"
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
@@ -155,7 +156,7 @@ func FillStaticValidatorsTableIfNeeded(ctx context.Context, logger log.Logger, s
 			continue
 		}
 		event := state_accessors.NewStateEventsFromBytes(buf)
-		state_accessors.ReplayEvents(
+		if err := state_accessors.ReplayEvents(
 			func(validatorIndex uint64, validator solid.Validator) error {
 				return validatorsTable.AddValidator(validator, validatorIndex, slot)
 			},
@@ -178,7 +179,9 @@ func FillStaticValidatorsTableIfNeeded(ctx context.Context, logger log.Logger, s
 				return validatorsTable.AddSlashed(validatorIndex, slot, slashed)
 			},
 			event,
-		)
+		); err != nil {
+			return false, fmt.Errorf("replay validator events at slot %d: %w", slot, err)
+		}
 		lastSlot = slot
 	}
 	validatorsTable.SetSlot(lastSlot)
@@ -224,13 +227,17 @@ func (s *Antiquary) IncrementBeaconState(ctx context.Context, to uint64) error {
 			return err
 		}
 		// Mark all validators as touched because we just initizialized the whole state.
+		var addErr error
 		s.currentState.ForEachValidator(func(v solid.Validator, index, total int) bool {
 			changedValidators.Store(uint64(index), struct{}{})
-			if err = s.validatorsTable.AddValidator(v, uint64(index), 0); err != nil {
+			if addErr = s.validatorsTable.AddValidator(v, uint64(index), 0); addErr != nil {
 				return false
 			}
 			return true
 		})
+		if addErr != nil {
+			return fmt.Errorf("genesis validators table init: %w", addErr)
+		}
 	}
 	s.validatorsTable.SetSlot(s.currentState.Slot())
 
@@ -338,6 +345,7 @@ func (s *Antiquary) IncrementBeaconState(ctx context.Context, to uint64) error {
 	progressTimer := time.NewTicker(1 * time.Minute)
 	defer progressTimer.Stop()
 	prevSlot := slot
+	startSlot := slot
 	first := false
 	timeBeforeCommit := 30 * time.Minute
 	blocksProcessed := 0
@@ -378,6 +386,12 @@ func (s *Antiquary) IncrementBeaconState(ctx context.Context, to uint64) error {
 		return rwTx.Commit()
 	}
 	lastCommitSlot := slot
+
+	// A restored table shorter than the state it tracks is truncated; fail rather
+	// than silently mis-handle validators past the cut.
+	if got, want := s.validatorsTable.Length(), s.currentState.ValidatorLength(); got < want {
+		return fmt.Errorf("static validators table has %d entries, state at slot %d has %d validators (truncated table)", got, s.currentState.Slot(), want)
+	}
 
 	for ; slot < to && startLoop.Add(timeBeforeCommit).After(time.Now()); slot++ {
 		// Bound each mdbx commit: once maxSlotsPerCommit slots have accumulated,
@@ -559,7 +573,16 @@ func (s *Antiquary) IncrementBeaconState(ctx context.Context, to uint64) error {
 		// We now do some post-processing on the state.
 		select {
 		case <-progressTimer.C:
-			log.Log(logLvl, "[Caplin-Archive] Historical States reconstruction", "slot", slot, "blk/sec", fmt.Sprintf("%.2f", float64(slot-prevSlot)/60))
+			slotsPerSec := float64(slot-prevSlot) / time.Minute.Seconds()
+			progress := 0.0
+			if to > startSlot {
+				progress = float64(slot-startSlot) / float64(to-startSlot) * 100
+			}
+			log.Log(logLvl, "[Caplin-Archive] Historical States reconstruction",
+				"slot", slot, "to", to,
+				"slots/sec", fmt.Sprintf("%.2f", slotsPerSec),
+				"progress", fmt.Sprintf("%.1f%%", progress),
+				"eta", utils.ETA(to-slot, slotsPerSec))
 			prevSlot = slot
 		default:
 		}

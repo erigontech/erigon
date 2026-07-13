@@ -54,7 +54,7 @@ type Domain interface {
 	RootId() DomainId
 	Name() string
 
-	CompareTo(other interface{}) int
+	CompareTo(other any) int
 	Matches(other Domain) bool
 	Equals(other Domain) bool
 	String() string
@@ -75,7 +75,7 @@ func (f DomainFactoryFunc) New(context context.Context) (Domain, error) {
 	return f(context)
 }
 
-func CompareDomains(a, b interface{}) int {
+func CompareDomains(a, b any) int {
 	ad := a.(Domain)
 	bd := b.(Domain)
 	return bytes.Compare(unique.Handle[ident](ad.Id()).Value().asBytes(), unique.Handle[ident](bd.Id()).Value().asBytes())
@@ -102,7 +102,7 @@ func withFeature[T any](applicator func(t *T)) domainFeature {
 	var t T
 	return domainFeature{
 		target:     reflect.TypeOf(t),
-		applicator: func(t interface{}) { applicator(t.(*T)) },
+		applicator: func(t any) { applicator(t.(*T)) },
 	}
 }
 
@@ -114,7 +114,7 @@ func WithInfo[T comparable](info map[any]any) domainFeature {
 	return withFeature[domain[T]](func(d *domain[T]) {
 		if len(info) > 0 {
 			if d.info == nil {
-				d.info = make(map[interface{}]interface{})
+				d.info = make(map[any]any)
 			}
 			for key, value := range info {
 				d.info[key] = value
@@ -215,7 +215,7 @@ func newDomain[T comparable](rootId ident, incarnation Incarnation, features ...
 		return domain, nil
 	}
 
-	var info map[interface{}]interface{}
+	var info map[any]any
 
 	d := &domain[T]{
 		id:          id,
@@ -237,7 +237,7 @@ func (d *domain[T]) Equals(domain Domain) bool {
 	return d.CompareTo(domain) == 0
 }
 
-func (d *domain[T]) CompareTo(other interface{}) int {
+func (d *domain[T]) CompareTo(other any) int {
 	if other == nil {
 		return 1
 	}
@@ -349,7 +349,7 @@ func (d *domain[T]) Source() string {
 	return ""
 }
 
-func (d *domain[T]) InfoValue(key interface{}) interface{} {
+func (d *domain[T]) InfoValue(key any) any {
 	if d.info != nil {
 		value, ok := d.info[key]
 		if ok {
@@ -364,9 +364,9 @@ func (d *domain[T]) IdGenerator() IdGenerator[T] {
 	return d.idGenerator
 }
 
-func (d *domain[T]) NewId(generationContext context.Context, entity ...interface{}) (Id, error) {
+func (d *domain[T]) NewId(generationContext context.Context, entity ...any) (Id, error) {
 	if d.idGenerator != nil {
-		var e interface{}
+		var e any
 
 		if len(entity) > 0 {
 			e = entity[0]

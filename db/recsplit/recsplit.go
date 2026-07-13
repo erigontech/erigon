@@ -1176,7 +1176,7 @@ func (rs *RecSplit) ForceCollisionOnce() {
 
 // bucketResultPool is a package-level sync.Pool for reusing bucketResult instances
 var bucketResultPool = &sync.Pool{
-	New: func() interface{} {
+	New: func() any {
 		return &bucketResult{}
 	},
 }
