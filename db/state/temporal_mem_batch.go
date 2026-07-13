@@ -388,6 +388,35 @@ func (sd *TemporalMemBatch) memRangeAsOf(domain kv.Domain, fromKey, toKey []byte
 	return pairs
 }
 
+// HistorySeek returns the in-memory historical value of key as of ts: the value
+// just before the first recorded change at or after ts. ok is true when the key
+// has such a change in memory; a creation event yields (non-nil empty, true).
+// Returns (nil, false) when ts is past all in-memory changes so the caller can
+// fall back to committed history.
+func (sd *TemporalMemBatch) HistorySeek(domain kv.Domain, key []byte, ts uint64) ([]byte, bool, error) {
+	if !sd.inMemHistoryReads {
+		return nil, false, nil
+	}
+	sd.latestStateLock.RLock()
+	defer sd.latestStateLock.RUnlock()
+	ks := common.ToStringZeroCopy(key)
+	var entries []dataWithTxNum
+	if domain == kv.StorageDomain {
+		entries, _ = sd.storage.Get(ks)
+	} else {
+		entries = sd.domains[domain][ks]
+	}
+	for i := range entries {
+		if entries[i].txNum >= ts {
+			if i == 0 {
+				return []byte{}, true, nil
+			}
+			return entries[i-1].data, true, nil
+		}
+	}
+	return nil, false, nil
+}
+
 // asOfEntry returns the value in effect at ts from a txNum-ascending history
 // (the entry with the greatest txNum < ts). ok is false when ts precedes the
 // first entry, i.e. the key did not exist yet.

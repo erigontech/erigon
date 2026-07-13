@@ -563,6 +563,7 @@ type TemporalMemBatch interface {
 	RangeAsOf(ctx context.Context, domain Domain, fromKey, toKey []byte, ts uint64, asc order.By, limit int, roTx Tx) (stream.KV, error)
 	HistoryRange(ctx context.Context, domain Domain, fromTs, toTs int, asc order.By, limit int, roTx Tx) (stream.KV, error)
 	IndexRange(name InvertedIdx, k []byte, fromTs, toTs int, asc order.By, limit int, roTx Tx) (stream.U64, error)
+	HistorySeek(domain Domain, key []byte, ts uint64) (v []byte, ok bool, err error)
 	HasPrefix(domain Domain, prefix []byte, roTx Tx) ([]byte, []byte, bool, error)
 	HasPrefixInRAM(domain Domain, prefix []byte) bool
 	SizeEstimate() uint64

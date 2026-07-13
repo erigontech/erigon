@@ -119,6 +119,13 @@ func (t *sdRoTx) IndexRange(name kv.InvertedIdx, k []byte, fromTs, toTs int, asc
 	return t.sd.IndexRange(name, k, fromTs, toTs, asc, limit, t.base)
 }
 
+func (t *sdRoTx) HistorySeek(name kv.Domain, k []byte, ts uint64) ([]byte, bool, error) {
+	if v, ok, err := t.sd.HistorySeek(name, k, ts); err != nil || ok {
+		return v, ok, err
+	}
+	return t.TemporalTx.HistorySeek(name, k, ts)
+}
+
 func (t *sdRoTx) Rollback() {
 	t.base.Rollback()
 }

@@ -1591,6 +1591,11 @@ func (sd *SharedDomains) IndexRange(name kv.InvertedIdx, k []byte, fromTs, toTs 
 	return sd.mem.IndexRange(name, k, fromTs, toTs, asc, limit, roTx)
 }
 
+// HistorySeek returns the in-flight in-memory historical value of key as of ts.
+func (sd *SharedDomains) HistorySeek(domain kv.Domain, key []byte, ts uint64) ([]byte, bool, error) {
+	return sd.mem.HistorySeek(domain, key, ts)
+}
+
 // DomainPut
 // Optimizations:
 //   - user can provide `prevVal != nil` - then it will not read prev value from storage
