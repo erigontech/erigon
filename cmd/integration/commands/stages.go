@@ -705,6 +705,24 @@ func stageExec(db kv.TemporalRwDB, ctx context.Context, logger log.Logger) error
 		}
 	}()
 
+	if unwind > 0 {
+		u := sync.NewUnwindState(stages.Execution, s.BlockNumber-unwind, s.BlockNumber, true, false)
+		doms, err := execctx.NewSharedDomains(ctx, tx, logger)
+		if err != nil {
+			return err
+		}
+		defer doms.Close()
+		if err := stagedsync.UnwindExecutionStage(u, s, doms, tx, ctx, cfg, logger); err != nil {
+			return err
+		}
+		if err := doms.Flush(ctx, tx); err != nil {
+			return err
+		}
+		err = tx.Commit()
+		tx = nil
+		return err
+	}
+
 	if pruneTo > 0 {
 		p, err := sync.PruneStageState(stages.Execution, s.BlockNumber, tx, true)
 		if err != nil {
