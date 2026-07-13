@@ -2036,6 +2036,21 @@ func (sdb *IntraBlockState) CreateAccount(addr accounts.Address, contractCreatio
 		}
 	}
 
+	// Capture the address's current balance BEFORE createObject writes the fresh
+	// zero-balance record. versionedAccountBase returns the base record without
+	// overlaying this tx's own field writes, so previous.data.Balance can lag
+	// either an in-block credit (genesis Constructor: AddBalance then SysCreate)
+	// or a committed prefund (CREATE at a pre-funded address). Reading after
+	// createObject would see the just-written zero and drop the balance.
+	var carryBalance uint256.Int
+	carryBalanceValid := previous != nil && !previous.selfdestructed
+	if carryBalanceValid {
+		b, _, err := sdb.getBalance(addr)
+		if err != nil {
+			return err
+		}
+		carryBalance = b
+	}
 	newObj := sdb.createObject(addr, previous)
 	if previous != nil && previous.selfdestructed {
 		// resetObjectChange.dirtied() returns false, so without this the
@@ -2044,16 +2059,8 @@ func (sdb *IntraBlockState) CreateAccount(addr accounts.Address, contractCreatio
 		// dirty here.
 		sdb.journal.dirty(addr)
 	}
-	if previous != nil && !previous.selfdestructed {
-		// versionedAccountBase returns the base record without overlaying this
-		// tx's own field writes, so previous.data.Balance can lag an in-block
-		// credit (e.g. genesis Constructor allocs: AddBalance then SysCreate).
-		// Carry the current balance so the credit survives the create.
-		curBal, _, err := sdb.getBalance(addr)
-		if err != nil {
-			return err
-		}
-		newObj.data.Balance.Set(&curBal)
+	if carryBalanceValid {
+		newObj.data.Balance.Set(&carryBalance)
 	}
 	newObj.data.PrevIncarnation = prevInc
 
