@@ -450,7 +450,7 @@ func (api *DebugAPIImpl) tryHeadCaptureBuild(ctx context.Context, committedTx kv
 		pinNum, pinHash = pin.num, pin.hash
 	}
 	if decidePin(havePin, pinNum, pinHash, num, parentHash) != pinUsable {
-		witnessCacheBuildFailOtherCounter.Inc()
+		witnessCacheStalePinSkipCounter.Inc()
 		return false
 	}
 
