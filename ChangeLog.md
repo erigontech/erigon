@@ -18,7 +18,7 @@ Aligns Erigon with the `eth_simulateV1` error code specification ([NethermindEth
 
 ---
 
-# Erigon v3.5.2 — Tidal Tails — TBD
+# Erigon v3.5.2 — Tidal Tails — 2026-07-13
 
 v3.5.2 is a bugfix release recommended for all users, and especially for anyone running 3.5.1 — it fixes a sync-halting trie-root regression introduced there (#22399). It is a drop-in upgrade from 3.5.1 — no re-sync required.
 
