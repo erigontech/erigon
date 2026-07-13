@@ -110,7 +110,7 @@ jobs:
         env:
           BUILD_VERSION: "${{ steps.def_docker_vars.outputs.tag_name }}-${{ steps.getCommitId.outputs.short_commit_id }}"
           BUILD_VERSION_LATEST: "${{ steps.def_docker_vars.outputs.tag_name }}${{ steps.def_docker_vars.outputs.latest_suffix }}"
-          DOCKER_PUBLISH_CONDITION: ${{ steps.def_docker_vars.outputs.keep_images > 0 && format('--tag {0}:{1} ', env.DOCKER_URL, env.BUILD_VERSION) || '' }}
+          DOCKER_PUBLISH_CONDITION: ${{ steps.def_docker_vars.outputs.keep_images > 0 && format('--tag {0}:{1}-{2} ', env.DOCKERHUB_REPOSITORY, steps.def_docker_vars.outputs.tag_name, steps.getCommitId.outputs.short_commit_id) || '' }}
           DOCKER_URL: ${{ env.DOCKERHUB_REPOSITORY }}
           DOCKERFILE_PATH: Dockerfile
           BINARIES: ${{ steps.def_docker_vars.outputs.binaries }}
@@ -149,7 +149,7 @@ jobs:
         env:
           BUILD_VERSION: "${{ steps.def_docker_vars.outputs.tag_name }}-${{ steps.getCommitId.outputs.short_commit_id }}"
           BUILD_VERSION_LATEST: "${{ steps.def_docker_vars.outputs.tag_name }}${{ steps.def_docker_vars.outputs.latest_suffix }}"
-          BUILD_VERSION_CONDITION: ${{ steps.def_docker_vars.outputs.keep_images > 0 && format('{0}:{1} ',env.DOCKER_URL,env.BUILD_VERSION) || '' }}
+          BUILD_VERSION_CONDITION: ${{ steps.def_docker_vars.outputs.keep_images > 0 && format('{0}:{1}-{2} ', env.DOCKERHUB_REPOSITORY, steps.def_docker_vars.outputs.tag_name, steps.getCommitId.outputs.short_commit_id) || '' }}
           DOCKER_URL: ${{ env.DOCKERHUB_REPOSITORY }}
           TAG_KEY: ${{ steps.def_docker_vars.outputs.tag_name }}
           KEEP_IMAGES: ${{ steps.def_docker_vars.outputs.keep_images }}
