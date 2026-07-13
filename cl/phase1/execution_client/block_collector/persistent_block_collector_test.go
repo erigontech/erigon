@@ -19,6 +19,7 @@ package block_collector
 import (
 	"context"
 	"encoding/binary"
+	"os"
 	"path/filepath"
 	"testing"
 
@@ -306,6 +307,67 @@ func TestFlushDropsRowsBelowFrozen(t *testing.T) {
 
 	require.Equal(t, []uint64{3}, h.insertedNumbers())
 	require.Equal(t, 0, countRowsAtOrAbove(t, h.collector.db, 0))
+}
+
+// plantMarker writes a sentinel file into the collector's persistDir; it
+// survives Flush only if Flush did not RemoveAll the directory.
+func plantMarker(t *testing.T, h *flushTestHarness) string {
+	t.Helper()
+	marker := filepath.Join(h.collector.persistDir, "marker")
+	require.NoError(t, os.WriteFile(marker, []byte("x"), 0o644))
+	return marker
+}
+
+func TestFlushEmptyDBKeepsDirectory(t *testing.T) {
+	// At chain-tip Flush runs on every block with an empty DB; it must not
+	// drop and recreate the directory each time.
+	h := newFlushTestHarness(t, 0)
+	marker := plantMarker(t, h)
+
+	require.NoError(t, h.collector.Flush(t.Context()))
+
+	require.Empty(t, h.inserted)
+	require.FileExists(t, marker)
+}
+
+func TestFlushSmallDBClearsRowsInPlace(t *testing.T) {
+	h := newFlushTestHarness(t, 0)
+
+	b1 := makeBeaconBlock(t, 1, 'a', common.Hash{})
+	b2 := makeBeaconBlock(t, 2, 'a', blockHash(b1))
+	require.NoError(t, h.collector.AddBlock(b1))
+	require.NoError(t, h.collector.AddBlock(b2))
+	marker := plantMarker(t, h)
+
+	require.NoError(t, h.collector.Flush(t.Context()))
+
+	require.Equal(t, []uint64{1, 2}, h.insertedNumbers())
+	require.Equal(t, 0, countRowsAtOrAbove(t, h.collector.db, 0))
+	require.FileExists(t, marker)
+}
+
+func TestFlushDropsDBOverSizeThreshold(t *testing.T) {
+	origThreshold := dropDBSizeThreshold
+	dropDBSizeThreshold = 0 // any non-empty database exceeds it
+	t.Cleanup(func() { dropDBSizeThreshold = origThreshold })
+
+	h := newFlushTestHarness(t, 0)
+
+	b1 := makeBeaconBlock(t, 1, 'a', common.Hash{})
+	b2 := makeBeaconBlock(t, 2, 'a', blockHash(b1))
+	require.NoError(t, h.collector.AddBlock(b1))
+	require.NoError(t, h.collector.AddBlock(b2))
+	marker := plantMarker(t, h)
+
+	require.NoError(t, h.collector.Flush(t.Context()))
+
+	require.Equal(t, []uint64{1, 2}, h.insertedNumbers())
+	require.NoFileExists(t, marker)
+
+	// The reopened database is functional.
+	b3 := makeBeaconBlock(t, 3, 'a', blockHash(b2))
+	require.NoError(t, h.collector.AddBlock(b3))
+	require.True(t, h.collector.HasBlock(3))
 }
 
 // TestFlushDrivesFCUPerBatch verifies the per-batch FCU pattern: when Flush()

@@ -306,8 +306,14 @@ type RwTx struct {
 	tx
 }
 
-func (tx *tx) ForceReopenAggCtx() {
-	tx.aggtx.Close()
+func (tx *tx) ForceReopenUnderlyingFilesTx() {
+	if tx.blocktx != nil {
+		tx.blocktx.Close()
+	}
+	tx.blocktx = tx.db.beginBlockFilesRo()
+	if tx.aggtx != nil {
+		tx.aggtx.Close()
+	}
 	tx.aggtx = tx.Agg().BeginFilesRo()
 }
 func (tx *tx) FreezeInfo() kv.FreezeInfo { return tx.aggtx }
@@ -321,7 +327,7 @@ func (tx *tx) StepsInFiles(entitySet ...kv.Domain) kv.Step {
 	return tx.aggtx.StepsInFiles(entitySet...)
 }
 func (tx *tx) Retire(ctx context.Context, cutoffs kv.RetireCutoffs) (int, error) {
-	return tx.Agg().Retire(ctx, cutoffs)
+	return tx.aggtx.Retire(ctx, cutoffs)
 }
 
 func (tx *tx) Rollback() {

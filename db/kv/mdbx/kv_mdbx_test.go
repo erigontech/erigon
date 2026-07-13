@@ -681,6 +681,22 @@ func TestDupDelete(t *testing.T) {
 	assert.Zero(t, count)
 }
 
+func TestDBSizeWithoutTx(t *testing.T) {
+	db := BaseCaseDB(t)
+
+	size, err := db.(*MdbxKV).DBSize()
+	require.NoError(t, err)
+	require.Greater(t, size, uint64(0))
+
+	var txSize uint64
+	require.NoError(t, db.View(t.Context(), func(tx kv.Tx) error {
+		var err error
+		txSize, err = tx.(*MdbxTx).DBSize()
+		return err
+	}))
+	require.Equal(t, txSize, size)
+}
+
 func TestBeginRoAfterClose(t *testing.T) {
 	db := New(dbcfg.ChainDB, log.New()).InMem(t, t.TempDir()).MustOpen()
 	db.Close()

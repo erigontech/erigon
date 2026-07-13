@@ -65,7 +65,7 @@ type DownloadComplete struct{ Path string }
 
 type eventProvider struct {
 	name     string
-	received []interface{}
+	received []any
 	mu       sync.Mutex
 	tracker  *orderTracker
 }
@@ -102,10 +102,10 @@ func (p *eventProvider) HandleFileDeleted(evt FileDeleted) {
 	p.tracker.record(p.name + ":FileDeleted:" + evt.Path)
 }
 
-func (p *eventProvider) getReceived() []interface{} {
+func (p *eventProvider) getReceived() []any {
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	out := make([]interface{}, len(p.received))
+	out := make([]any, len(p.received))
 	copy(out, p.received)
 	return out
 }
