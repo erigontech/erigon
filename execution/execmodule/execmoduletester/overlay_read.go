@@ -92,6 +92,11 @@ type sdRoTx struct {
 	sd   *execctx.SharedDomains
 }
 
+// PublishedSharedDomains exposes the published SharedDomains this tx reads
+// through, so a consumer building a fresh SharedDomains (e.g. eth_getProof) can
+// chain it as a parent to see the in-flight tip under background commit.
+func (t *sdRoTx) PublishedSharedDomains() *execctx.SharedDomains { return t.sd }
+
 func (t *sdRoTx) GetLatest(name kv.Domain, k []byte) ([]byte, kv.Step, error) {
 	return t.sd.GetLatest(name, t.base, k)
 }

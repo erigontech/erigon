@@ -504,6 +504,19 @@ func (api *APIImpl) getProof(ctx context.Context, roTx kv.TemporalTx, address co
 		if _, _, err := domains.SeekCommitment(context.Background(), roTx); err != nil {
 			return nil, err
 		}
+	} else if p, ok := tx.(interface {
+		PublishedSharedDomains() *execctx.SharedDomains
+	}); ok {
+		// Requested block is the tip. Under background commit its commitment
+		// still lives in the published SharedDomains, so chain the fresh domains
+		// to it and seek commitment through the chain to build the proof against
+		// the in-flight trie root.
+		if psd := p.PublishedSharedDomains(); psd != nil {
+			domains.SetParent(psd)
+			if _, _, err := domains.SeekCommitment(context.Background(), roTx); err != nil {
+				return nil, err
+			}
+		}
 	}
 
 	// touch account
