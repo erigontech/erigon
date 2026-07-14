@@ -93,7 +93,10 @@ func (e *ExecModule) captureScopedReadView(ctx context.Context, wantHash common.
 	}
 	e.fgMu.Unlock()
 
-	roTx, err := e.db.BeginTemporalRo(ctx) //nolint:gocritic // handed to the returned view, which owns Rollback; guard below covers all error/panic paths before handoff
+	// Bind the roTx to the long-lived background context, not the request ctx:
+	// the view is handed to the async build, which outlives this call — a
+	// request-scoped ctx would be cancelled on return and fail the build's reads.
+	roTx, err := e.db.BeginTemporalRo(e.bacgroundCtx) //nolint:gocritic // handed to the returned view, which owns Rollback; guard below covers all error/panic paths before handoff
 	if err != nil {
 		return nil, err
 	}
