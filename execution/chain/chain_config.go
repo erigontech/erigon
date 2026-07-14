@@ -145,9 +145,10 @@ type Config struct {
 	AllowAA bool
 }
 
-// IsEIPDisabled returns true if the given EIP number is in the DisabledEIPs list.
-func (c *Config) IsEIPDisabled(eip int) bool {
-	return slices.Contains(c.DisabledEIPs, eip)
+// IsEIPEnabled reports whether the given EIP is active: its parent fork gates it
+// elsewhere, and it has not been listed as an exception in DisabledEIPs.
+func (c *Config) IsEIPEnabled(eip int) bool {
+	return !slices.Contains(c.DisabledEIPs, eip)
 }
 
 // IsL2 returns whether this chain config carries L2-chain-specific config,
@@ -371,7 +372,7 @@ func (c *Config) IsSpuriousDragon(num uint64) bool {
 // IsEIP161Enabled reports whether EIP-161 empty-account clearing applies at num:
 // Spurious Dragon is active and EIP-161 has not been disabled.
 func (c *Config) IsEIP161Enabled(num uint64) bool {
-	return c.IsSpuriousDragon(num) && !c.IsEIPDisabled(161)
+	return c.IsSpuriousDragon(num) && c.IsEIPEnabled(161)
 }
 
 // IsByzantium returns whether num is either equal to the Byzantium fork block or greater.
@@ -870,23 +871,24 @@ type Rules struct {
 	L2Version uint64
 }
 
-// IsEIPDisabled returns true if the given EIP number has been disabled for this chain.
-func (r *Rules) IsEIPDisabled(eip int) bool {
-	return slices.Contains(r.DisabledEIPs, eip)
+// IsEIPEnabled reports whether the given EIP is active for this chain: it has not
+// been listed as an exception in DisabledEIPs.
+func (r *Rules) IsEIPEnabled(eip int) bool {
+	return !slices.Contains(r.DisabledEIPs, eip)
 }
 
 // IsEIP161Enabled reports whether EIP-161 is in effect: the Spurious Dragon fork
 // is active and EIP-161 is not disabled (genesis/pre-state loads disable it via
 // DisabledEIPs to retain declared empty accounts).
 func (r *Rules) IsEIP161Enabled() bool {
-	return r.IsSpuriousDragon && !r.IsEIPDisabled(161)
+	return r.IsSpuriousDragon && r.IsEIPEnabled(161)
 }
 
 // IsEIP170Enabled reports whether EIP-170 (the contract code-size limit) is
 // enabled: Spurious Dragon is active and EIP-170 is not disabled (Gnosis/Chiado
 // disable it via DisabledEIPs).
 func (r *Rules) IsEIP170Enabled() bool {
-	return r.IsSpuriousDragon && !r.IsEIPDisabled(170)
+	return r.IsSpuriousDragon && r.IsEIPEnabled(170)
 }
 
 // isForked returns whether a fork scheduled at block s is active at the given head block.
