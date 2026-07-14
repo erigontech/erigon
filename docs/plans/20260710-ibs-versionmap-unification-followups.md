@@ -138,10 +138,16 @@ so a later tx's write (e.g. the accumulating coinbase fee) sees the running valu
 Any new BAL-producing/replaying path that forgets this produces wrong BALs on the
 cache-free model — a footgun re-armed at every such site.
 
-Solidify:
-- Extract one shared block-replay / BAL-construction helper that owns the
-  `MergeTxIOInto` → `FlushWritesToVersionMap` → `ResetVersionedIO` sequence, so no
-  caller can forget the per-tx flush. The four sites collapse onto it.
+Solidify — this needs a **whole-process audit**, not just a shared helper:
+- Audit every call site that crosses a tx/phase boundary in the versionedio model
+  (parallel executor, `chain_makers`, block builder, `bal/rederive.go`, plus any the
+  audit surfaces) — enumerate exactly what each must call and in what order today.
+- **Internalize `FlushWritesToVersionMap`.** The per-tx flush must stop being a
+  separate call a site has to remember. Fold it into the tx-boundary operation
+  itself (part of `MergeTxIOInto`/commit or `ResetVersionedIO`) so crossing a tx
+  boundary is a single call the caller cannot get wrong — collapsing today's
+  `MergeTxIOInto` → `FlushWritesToVersionMap` → `ResetVersionedIO` dance. Simplify
+  the required call surface down to that one operation.
 - Land follow-ups 1–3 (genesis, serial, map-drop) so the mixed model — the source
   of the risk — goes away entirely.
 - Until then, treat any change to a legacy/stateObject path, or any `main` merge in
