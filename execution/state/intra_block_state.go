@@ -1609,7 +1609,7 @@ func (sdb *IntraBlockState) Selfdestruct(addr accounts.Address, preserveBalance 
 		fmt.Printf("%d (%d.%d) SelfDestruct %x\n", sdb.blockNum, sdb.txIndex, sdb.version, addr)
 	}
 	if sdb.versionMap != nil {
-		return sdb.selfdestructVersioned(addr)
+		return sdb.selfdestructVersioned(addr, preserveBalance)
 	}
 	stateObject, err := sdb.getStateObject(addr, true)
 	if err != nil {
@@ -1659,7 +1659,7 @@ func (sdb *IntraBlockState) Selfdestruct(addr accounts.Address, preserveBalance 
 // this tx's own versioned writes, never a cached object. An already-materialized
 // stateObject is kept in step for the so.data-based commit paths (genesis
 // FinalizeTx, RPC).
-func (sdb *IntraBlockState) selfdestructVersioned(addr accounts.Address) (bool, error) {
+func (sdb *IntraBlockState) selfdestructVersioned(addr accounts.Address, preserveBalance bool) (bool, error) {
 	base, _, _, err := sdb.versionedAccountBase(addr, true)
 	if err != nil {
 		return false, err
@@ -1692,19 +1692,34 @@ func (sdb *IntraBlockState) selfdestructVersioned(addr accounts.Address) (bool, 
 		wasCommited: !sdb.hasWrite(addr, SelfDestructPath, accounts.NilKey),
 	})
 
-	if sdb.tracingHooks != nil && sdb.tracingHooks.OnBalanceChange != nil && !prevBalance.IsZero() {
+	if !preserveBalance && sdb.tracingHooks != nil && sdb.tracingHooks.OnBalanceChange != nil && !prevBalance.IsZero() {
 		sdb.tracingHooks.OnBalanceChange(addr, prevBalance, zeroBalance, tracing.BalanceDecreaseSelfdestruct)
 	}
 
 	if so, ok := sdb.stateObjects[addr]; ok {
 		so.markSelfdestructed()
 		so.createdContract = false
-		so.data.Balance.Clear()
+		if !preserveBalance {
+			so.data.Balance.Clear()
+		}
 	}
 
-	sdb.recordWriteIncarnation(addr, inc)
 	sdb.recordWriteSelfDestruct(addr, true)
-	sdb.recordWriteBalance(addr, uint256.Int{})
+	if !preserveBalance {
+		// Pre-EIP-8246: SELFDESTRUCT burns the balance and the account is deleted;
+		// keep the pre-destruct incarnation for the storage-delete cascade.
+		sdb.recordWriteIncarnation(addr, inc)
+		sdb.recordWriteBalance(addr, uint256.Int{})
+		return true, nil
+	}
+	// EIP-8246: the balance is preserved but code, nonce and incarnation are
+	// cleared, leaving a balance-only account. Record the cleared cells so a later
+	// tx reconstructing the preserved account reads empty code / zero nonce, and a
+	// re-creation bumps the incarnation from 0 (matching serial), not the stale
+	// pre-destruct value.
+	sdb.recordWriteIncarnation(addr, 0)
+	sdb.recordWriteNonce(addr, 0, tracing.NonceChangeUnspecified)
+	sdb.recordWriteCodeHash(addr, accounts.EmptyCodeHash)
 
 	return true, nil
 }
