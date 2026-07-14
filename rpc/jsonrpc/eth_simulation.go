@@ -33,10 +33,10 @@ import (
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/consensuschain"
 	"github.com/erigontech/erigon/db/datadir"
+	"github.com/erigontech/erigon/db/dbservices"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/order"
 	"github.com/erigontech/erigon/db/kv/rawdbv3"
-	"github.com/erigontech/erigon/db/services"
 	"github.com/erigontech/erigon/db/state/execctx"
 	"github.com/erigontech/erigon/db/state/kvmetrics"
 	"github.com/erigontech/erigon/execution/chain"
@@ -215,7 +215,7 @@ type simulator struct {
 	dirs              datadir.Dirs
 	engine            protocolrules.EngineReader
 	txNumReader       rawdbv3.TxNumsReader
-	blockReader       services.FullBlockReader
+	blockReader       dbservices.FullBlockReader
 	logger            log.Logger
 	gasPool           *protocol.GasPool
 	returnDataLimit   int
@@ -233,7 +233,7 @@ func newSimulator(
 	dirs datadir.Dirs,
 	engine protocolrules.EngineReader,
 	txNumReader rawdbv3.TxNumsReader,
-	blockReader services.FullBlockReader,
+	blockReader dbservices.FullBlockReader,
 	logger log.Logger,
 	gasCap uint64,
 	returnDataLimit int,
@@ -861,7 +861,7 @@ func (s *simulator) simulateCall(
 }
 
 type simulatedCanonicalReader struct {
-	canonicalReader services.CanonicalReader
+	canonicalReader dbservices.CanonicalReader
 	headers         []*types.Header
 }
 
@@ -886,7 +886,7 @@ func (s *simulatedCanonicalReader) BadHeaderNumber(context.Context, kv.Getter, c
 	return nil, errors.New("bad header not found")
 }
 
-func (s *simulator) newSimulatedCanonicalReader(headers []*types.Header) services.CanonicalReader {
+func (s *simulator) newSimulatedCanonicalReader(headers []*types.Header) dbservices.CanonicalReader {
 	return &simulatedCanonicalReader{s.blockReader, headers}
 }
 
