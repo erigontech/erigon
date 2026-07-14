@@ -125,30 +125,24 @@ history:  account.0-8.ef    account.8-16.ef       (key, latestValue, {ts})
 Clients: to derive their own format of Latest State from "The History" 
 ```
 
-| Problem              | After                                                                                                                                                               |
-|----------------------|---------------------------------------------------------------------------------------------------------------------------------------------------------------------|
-| P1: no compaction    | Latest State doesn't need to be content-addressable anymore. All files will get "forever immutability" property (`.v` and `.ef` already have it)                    |
-| P2: no repair points | Every shard boundary is a "save point" can start re-execution from there at any time                                                                                |
-| P3: politics         | Spec = covers only history. Clients can derive any format of Latest State (or None - exec will work)                                                                |
-| P4: verification     | Free redundancy: span N's `latestValue(K)` == span N+1's first pre-value of K                                                                                       |
-| P5: hash what        | Can hash `(key, ts, value)` data-stream (maybe without MerkleTree). `Shard N+1` will have own `hash` (of state history) and we will hook it with `Shard N`'s `hash` |
+| Problem              | After                                                                                                                                                                                              |
+|----------------------|----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| P1: no compaction    | Latest State doesn't need to be content-addressable anymore. All files will get "forever immutability" property (`.v` and `.ef` already have it)                                                   |
+| P2: no repair points | Every shard boundary is a "save point" can start re-execution from there at any time                                                                                                               |
+| P3: politics         | Spec = covers only history. Clients can derive any format of Latest State (or None - exec will work)                                                                                               |
+| P4: verification     | Free redundancy: span N's `latestValue(K)` == span N+1's first pre-value of K                                                                                                                      |
+| P5: hash what        | `(key, ts, value)` data-stream: is very fundamental thing. Means can `hash` it instead of files (maybe without MerkleTree). `Shard N+1`'s `hash` (of state history) can hook to `Shard N`'s `hash` |
 
 ### Limitations
 
 Large values: can create
 
 - Prune old files: old `LatestValues` can't be pruned - means can't store them in `.ef`. No problem: can create new file
-  type `.lv` sharded as `.ef` - account.8-16.lv
+  type `.lv` sharded as `.ef` - `account.8-16.lv`. But still "never-pruning and never-compaction" `.lv` files - is the
+  Cost. But it's cold-storage (probably even RPC will not touch it). Does it means users will have incentive to delete
+  it?
 - Latest State derived format ideas: whole or partial (instead of storing last large file - can fallback to history),
   store it in db or files, read-amplification-driven or write-amp, etc...
-
-## 5. Context
-
-- **Determinism is load-bearing** Content-addressing needs byte-identical producers: fixed span boundaries, fixed
-  enumeration order (key-major, ts-ascending), fixed encodings, deterministic (or no) compression. Ship a conformance
-  suite: input stream → expected hashes.
-- **Everything else stays local**: btrees, recsplit/bloom accessors, salts, caches, serving LSM, mutable tail DB. The
-  spec is three columns per span, nothing more.
 
 ## FAQ
 
