@@ -1335,6 +1335,121 @@ func TestAssembleBlockAmsterdamForkTransition(t *testing.T) {
 	require.NoError(t, err)
 }
 
+// TestGetPayloadBodiesRegenerateBlockAccessLists verifies the payload-bodies
+// getters serve stored BALs as-is and, once the stored rows are pruned (kept
+// only for the reorg window), regenerate them by re-execution —
+// engine_getPayloadBodiesBy*V2 must serve BALs for the weak subjectivity period.
+func TestGetPayloadBodiesRegenerateBlockAccessLists(t *testing.T) {
+	t.Parallel()
+	ctx := t.Context()
+	privKey, err := crypto.GenerateKey()
+	require.NoError(t, err)
+	senderAddr := crypto.PubkeyToAddress(privKey.PublicKey)
+	genesis := &types.Genesis{
+		Config: chain.AllProtocolChanges,
+		Alloc: types.GenesisAlloc{
+			senderAddr: {Balance: new(big.Int).Exp(big.NewInt(10), big.NewInt(18), nil)},
+		},
+	}
+	m := execmoduletester.New(t, execmoduletester.WithGenesisSpec(genesis), execmoduletester.WithKey(privKey))
+	signer := types.LatestSignerForChainID(m.ChainConfig.ChainID)
+	baseFee := uint256.NewInt(m.Genesis.BaseFee().Uint64())
+	chainPack, err := blockgen.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 2, func(i int, b *blockgen.BlockGen) {
+		txn, err := types.SignTx(types.NewTransaction(uint64(i), common.Address{1}, uint256.NewInt(10_000), 50_000, baseFee, nil), *signer, privKey)
+		require.NoError(t, err)
+		b.AddTx(txn)
+	})
+	require.NoError(t, err)
+	err = m.InsertChain(chainPack)
+	require.NoError(t, err)
+	hashes := []common.Hash{chainPack.Blocks[0].Hash(), chainPack.Blocks[1].Hash()}
+	stored, err := m.ExecModule.GetPayloadBodiesByHash(ctx, hashes)
+	require.NoError(t, err)
+	require.Len(t, stored, 2)
+	for i, pb := range stored {
+		require.NotNil(t, pb)
+		require.Equal(t, chainPack.BlockAccessLists[i], pb.BlockAccessList, "stored block %d", i+1)
+	}
+	err = m.DB.Update(ctx, func(tx kv.RwTx) error {
+		return tx.ForEach(kv.BlockAccessList, nil, func(k, _ []byte) error {
+			return tx.Delete(kv.BlockAccessList, k)
+		})
+	})
+	require.NoError(t, err)
+	err = m.DB.View(ctx, func(tx kv.Tx) error {
+		count, err := tx.Count(kv.BlockAccessList)
+		require.NoError(t, err)
+		require.Zero(t, count, "stored BALs should be fully pruned")
+		return nil
+	})
+	require.NoError(t, err)
+	byHash, err := m.ExecModule.GetPayloadBodiesByHash(ctx, hashes)
+	require.NoError(t, err)
+	require.Len(t, byHash, 2)
+	for i, pb := range byHash {
+		require.NotNil(t, pb)
+		require.Equal(t, chainPack.BlockAccessLists[i], pb.BlockAccessList, "byHash block %d", i+1)
+	}
+	byRange, err := m.ExecModule.GetPayloadBodiesByRange(ctx, 1, 2)
+	require.NoError(t, err)
+	require.Len(t, byRange, 2)
+	for i, pb := range byRange {
+		require.NotNil(t, pb)
+		require.Equal(t, chainPack.BlockAccessLists[i], pb.BlockAccessList, "byRange block %d", i+1)
+	}
+}
+
+// TestGetPayloadBodiesNonCanonicalBlockAccessList verifies that payload-bodies
+// requests for non-canonical blocks degrade the blockAccessList to null instead
+// of failing the batch: BALs can only be re-derived from canonical state.
+func TestGetPayloadBodiesNonCanonicalBlockAccessList(t *testing.T) {
+	t.Parallel()
+	ctx := t.Context()
+	privKeyA, err := crypto.GenerateKey()
+	require.NoError(t, err)
+	privKeyB, err := crypto.GenerateKey()
+	require.NoError(t, err)
+	addrA := crypto.PubkeyToAddress(privKeyA.PublicKey)
+	addrB := crypto.PubkeyToAddress(privKeyB.PublicKey)
+	genesis := &types.Genesis{
+		Config: chain.AllProtocolChanges,
+		Alloc: types.GenesisAlloc{
+			addrA: {Balance: new(big.Int).Exp(big.NewInt(10), big.NewInt(18), nil)},
+			addrB: {Balance: new(big.Int).Exp(big.NewInt(10), big.NewInt(18), nil)},
+		},
+	}
+	m := execmoduletester.New(t, execmoduletester.WithGenesisSpec(genesis), execmoduletester.WithKey(privKeyA))
+	signer := types.LatestSignerForChainID(m.ChainConfig.ChainID)
+	baseFee := uint256.NewInt(m.Genesis.BaseFee().Uint64())
+	canonical, err := blockgen.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 2, func(i int, b *blockgen.BlockGen) {
+		txn, err := types.SignTx(types.NewTransaction(uint64(i), common.Address{1}, uint256.NewInt(10_000), 50_000, baseFee, nil), *signer, privKeyA)
+		require.NoError(t, err)
+		b.AddTx(txn)
+	})
+	require.NoError(t, err)
+	fork, err := blockgen.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 2, func(i int, b *blockgen.BlockGen) {
+		txn, err := types.SignTx(types.NewTransaction(uint64(i), common.Address{2}, uint256.NewInt(20_000), 50_000, baseFee, nil), *signer, privKeyB)
+		require.NoError(t, err)
+		b.AddTx(txn)
+	})
+	require.NoError(t, err)
+	require.NotEqual(t, canonical.Blocks[0].Hash(), fork.Blocks[0].Hash())
+	err = m.InsertChain(canonical)
+	require.NoError(t, err)
+	// Insert the fork blocks without a fork choice update so they stay
+	// non-canonical, with no stored BAL sidecar.
+	insertRes, err := insertBlocks(ctx, m.ExecModule, fork.Blocks)
+	require.NoError(t, err)
+	require.Equal(t, execmodule.ExecutionStatusSuccess, insertRes)
+	byHash, err := m.ExecModule.GetPayloadBodiesByHash(ctx, []common.Hash{fork.Blocks[0].Hash(), fork.Blocks[1].Hash()})
+	require.NoError(t, err)
+	require.Len(t, byHash, 2)
+	for i, pb := range byHash {
+		require.NotNil(t, pb)
+		require.Nil(t, pb.BlockAccessList, "fork block %d", i+1)
+	}
+}
+
 // TestNotificationDispatchForegroundCommit verifies that after FCU returns
 // Success with the default foreground commit path:
 // 1. Header notifications have been dispatched (subscribers receive them)
