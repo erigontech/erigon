@@ -70,7 +70,8 @@ func TestBlockReaderPrefersTxBlockView(t *testing.T) {
 	// Pin a view, then retire the [0, mergeLimit) tx segment from the live set.
 	tx := blockFilesTxStub{view: snapshots.View()}
 	defer tx.view.Close()
-	require.NoError(t, snapshots.Delete(snaptype.SegmentFileName(ver, 0, testMergeLimit, snaptype2.Transactions.Enum())))
+	_, err := snapshots.RetireFilesBelow(snaptype2.Transactions, testMergeLimit+1, nil)
+	require.NoError(t, err)
 
 	const blk = testMergeLimit / 2 // inside the retired [0, mergeLimit) segment
 
@@ -85,10 +86,9 @@ func TestBlockReaderPrefersTxBlockView(t *testing.T) {
 	require.True(t, okTx, "reader must resolve the retired segment via the tx's pinned view")
 }
 
-// TestFirstTxnNumNotInSnapshotsUsesTxView: FirstTxnNumNotInSnapshots resolves the
-// transactions extent through the tx's pinned block-files view, like the block read
-// methods — falling back to the live set when the tx pins none.
-func TestFirstTxnNumNotInSnapshotsUsesTxView(t *testing.T) {
+// The minimal/full-node step: expire old transaction segments (handing their files to the
+// seeder), keeping recent ones and the other block types.
+func TestRetireMergedTransactionFilesBelow(t *testing.T) {
 	logger := log.New()
 	dir := t.TempDir()
 	cfg := ethconfig.Defaults.Snapshot
@@ -102,24 +102,36 @@ func TestFirstTxnNumNotInSnapshotsUsesTxView(t *testing.T) {
 		createTestSegmentFile(t, testMergeLimit, 2*testMergeLimit, typ.Enum(), dir, ver, logger)
 	}
 	require.NoError(t, snapshots.OpenFolder())
-	blockReader := NewBlockReader(snapshots, nil)
 
-	// nil tx -> live snapshots.
-	live := blockReader.FirstTxnNumNotInSnapshots(nil)
-	require.NotZero(t, live, "sanity: live snapshots must yield a non-zero first txnum")
+	var deleted []string
+	retired, err := snapshots.RetireFilesBelow(snaptype2.Transactions, testMergeLimit+testMergeLimit/2, func(files []string) error {
+		deleted = append(deleted, files...)
+		return nil
+	})
+	require.NoError(t, err)
+	require.True(t, retired)
 
-	// A tx pinning the live view resolves the same extent.
-	liveTx := blockFilesTxStub{view: snapshots.View()}
-	defer liveTx.view.Close()
-	require.Equal(t, live, blockReader.FirstTxnNumNotInSnapshots(liveTx))
+	// The seeder is told about the [0, mergeLimit) tx segment: its .seg + both indexes.
+	require.ElementsMatch(t, []string{
+		snaptype.SegmentFileName(ver, 0, testMergeLimit, snaptype2.Transactions.Enum()),
+		snaptype.IdxFileName(ver, 0, testMergeLimit, snaptype2.Transactions.Enum().String()),
+		snaptype.IdxFileName(ver, 0, testMergeLimit, snaptype2.Indexes.TxnHash2BlockNum.Name),
+	}, deleted)
 
-	// A tx pinning an empty view resolves through it and sees no transactions segment.
-	empty := blocksnapshots.NewRoSnapshots(cfg, t.TempDir(), logger)
-	defer empty.Close()
-	emptyTx := blockFilesTxStub{view: empty.View()}
-	defer emptyTx.view.Close()
-	require.Zero(t, blockReader.FirstTxnNumNotInSnapshots(emptyTx),
-		"must resolve through the tx's pinned (empty) view, not the live set")
+	// Gone from the live set...
+	_, ok, rel := snapshots.BaseRoSnapshots.ViewSingleFile(snaptype2.Transactions, testMergeLimit/2)
+	rel()
+	require.False(t, ok, "retired tx segment must be gone from the live set")
+
+	// ...the [mergeLimit, 2*mergeLimit) tx segment stays (its range ends at the cutoff)...
+	_, ok, rel = snapshots.BaseRoSnapshots.ViewSingleFile(snaptype2.Transactions, testMergeLimit)
+	rel()
+	require.True(t, ok, "tx segment at/above the cutoff must be kept")
+
+	// ...and headers of the same range are untouched.
+	_, ok, rel = snapshots.BaseRoSnapshots.ViewSingleFile(snaptype2.Headers, testMergeLimit/2)
+	rel()
+	require.True(t, ok, "only transaction segments are retired")
 }
 
 func TestDumpRangeErrorsWhenRangeAlreadyClaimed(t *testing.T) {
