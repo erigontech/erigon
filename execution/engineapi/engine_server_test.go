@@ -36,7 +36,6 @@ import (
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/kvcache"
-	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/execmodule/execmoduletester"
 	"github.com/erigontech/erigon/execution/tests/blockgen"
@@ -50,13 +49,14 @@ import (
 )
 
 // Do 1 step to start txPool
-func oneBlockSteps(m *execmoduletester.ExecModuleTester, require *require.Assertions, blocks int) {
+func oneBlockSteps(m *execmoduletester.ExecModuleTester, require *require.Assertions, blocks int) *blockgen.ChainPack {
 	chain, err := blockgen.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, blocks, func(i int, b *blockgen.BlockGen) {
 		b.SetCoinbase(common.Address{1})
 	})
 	require.NoError(err)
 	err = m.InsertChain(chain)
 	require.NoError(err)
+	return chain
 }
 
 // Do 1 step to start txPool
@@ -290,64 +290,34 @@ func TestGetBlobsV3(t *testing.T) {
 	}
 }
 
-func canonicalHashAt(t *testing.T, db kv.TemporalRoDB, blockNum uint64) common.Hash {
-	t.Helper()
-	var hash common.Hash
-	err := db.View(context.Background(), func(tx kv.Tx) error {
-		var err error
-		hash, err = rawdb.ReadCanonicalHash(tx, blockNum)
-		return err
-	})
-	require.NoError(t, err)
-	return hash
-}
-
-func writeBlockAccessListBytes(t *testing.T, db kv.TemporalRwDB, blockHash common.Hash, blockNum uint64, balBytes []byte) {
-	t.Helper()
-	err := db.Update(context.Background(), func(tx kv.RwTx) error {
-		return rawdb.WriteBlockAccessListBytes(tx, blockHash, blockNum, balBytes)
-	})
-	require.NoError(t, err)
-}
-
 func TestGetPayloadBodiesByHashV2(t *testing.T) {
 	mockSentry := execmoduletester.New(t, execmoduletester.WithTxPool(), execmoduletester.WithChainConfig(chain.AllProtocolChanges))
 	req := require.New(t)
-	oneBlockStep(mockSentry, req)
+	// Insert a block carrying its BAL through the unified InsertChain path (BAL
+	// stored in the overlay, flushed at commit); serving must reflect that BAL.
+	chain := oneBlockSteps(mockSentry, req, 1)
 
 	executionRpc := mockSentry.ExecModule
 	maxReorgDepth := ethconfig.Defaults.MaxReorgDepth
 	engineServer := NewEngineServer(mockSentry.Log, mockSentry.ChainConfig, executionRpc, nil, false, false, false, true, nil, nil, ethconfig.Defaults.FcuTimeout, maxReorgDepth)
 
-	const blockNum = 1
-	blockHash := canonicalHashAt(t, mockSentry.DB, blockNum)
+	blockHash := chain.Blocks[0].Hash()
 	req.NotEqual(common.Hash{}, blockHash)
+	req.NotEmpty(chain.BlockAccessLists[0], "Amsterdam block must carry a BAL from GenerateChain")
 
 	ctx := context.Background()
 
-	// Amsterdam-enabled chains always have a BAL written by GenerateChain
 	bodies, err := engineServer.GetPayloadBodiesByHashV2(ctx, []common.Hash{blockHash})
 	req.NoError(err)
 	req.Len(bodies, 1)
 	req.NotNil(bodies[0])
-	req.NotEmpty(bodies[0].BlockAccessList)
-
-	// Overwrite with a non-empty BAL and verify it's returned
-	balBytes := []byte{0x01, 0x02, 0x03}
-	writeBlockAccessListBytes(t, mockSentry.DB, blockHash, blockNum, balBytes)
-
-	bodies, err = engineServer.GetPayloadBodiesByHashV2(ctx, []common.Hash{blockHash})
-	req.NoError(err)
-	req.Len(bodies, 1)
-	req.NotNil(bodies[0])
-	req.NotNil(bodies[0].BlockAccessList)
-	req.Equal(hexutil.Bytes(balBytes), bodies[0].BlockAccessList)
+	req.Equal(hexutil.Bytes(chain.BlockAccessLists[0]), bodies[0].BlockAccessList)
 }
 
 func TestGetPayloadBodiesByRangeV2(t *testing.T) {
 	mockSentry := execmoduletester.New(t, execmoduletester.WithTxPool(), execmoduletester.WithChainConfig(chain.AllProtocolChanges))
 	req := require.New(t)
-	oneBlockSteps(mockSentry, req, 2)
+	chain := oneBlockSteps(mockSentry, req, 2)
 
 	executionRpc := mockSentry.ExecModule
 	maxReorgDepth := ethconfig.Defaults.MaxReorgDepth
@@ -357,35 +327,17 @@ func TestGetPayloadBodiesByRangeV2(t *testing.T) {
 		start = 1
 		count = 2
 	)
-	blockHash1 := canonicalHashAt(t, mockSentry.DB, start)
-	blockHash2 := canonicalHashAt(t, mockSentry.DB, start+1)
-	req.NotEqual(common.Hash{}, blockHash1)
-	req.NotEqual(common.Hash{}, blockHash2)
+	req.NotEmpty(chain.BlockAccessLists[0], "Amsterdam block must carry a BAL from GenerateChain")
+	req.NotEmpty(chain.BlockAccessLists[1], "Amsterdam block must carry a BAL from GenerateChain")
 
 	ctx := context.Background()
 
-	// Amsterdam-enabled chains always have a BAL written by GenerateChain
+	// Serving must reflect the BALs inserted with the blocks (unified path).
 	bodies, err := engineServer.GetPayloadBodiesByRangeV2(ctx, start, count)
 	req.NoError(err)
 	req.Len(bodies, 2)
 	req.NotNil(bodies[0])
 	req.NotNil(bodies[1])
-	req.NotEmpty(bodies[0].BlockAccessList)
-	req.NotEmpty(bodies[1].BlockAccessList)
-
-	// Overwrite with non-empty BALs and verify they're returned
-	balBytes1 := []byte{0x01, 0x02, 0x03}
-	balBytes2 := []byte{0x04, 0x05, 0x06}
-	writeBlockAccessListBytes(t, mockSentry.DB, blockHash1, start, balBytes1)
-	writeBlockAccessListBytes(t, mockSentry.DB, blockHash2, start+1, balBytes2)
-
-	bodies, err = engineServer.GetPayloadBodiesByRangeV2(ctx, start, count)
-	req.NoError(err)
-	req.Len(bodies, 2)
-	req.NotNil(bodies[0])
-	req.NotNil(bodies[1])
-	req.NotNil(bodies[0].BlockAccessList)
-	req.NotNil(bodies[1].BlockAccessList)
-	req.Equal(hexutil.Bytes(balBytes1), bodies[0].BlockAccessList)
-	req.Equal(hexutil.Bytes(balBytes2), bodies[1].BlockAccessList)
+	req.Equal(hexutil.Bytes(chain.BlockAccessLists[0]), bodies[0].BlockAccessList)
+	req.Equal(hexutil.Bytes(chain.BlockAccessLists[1]), bodies[1].BlockAccessList)
 }

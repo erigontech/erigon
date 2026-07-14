@@ -792,6 +792,7 @@ func (r RawBlock) AsBlock() (*Block, error) {
 		}
 	}
 	b.transactions = txs
+	b.blockAccessList = r.BlockAccessList
 
 	return b, nil
 }
@@ -802,6 +803,12 @@ type Block struct {
 	uncles       []*Header
 	transactions Transactions
 	withdrawals  []*Withdrawal
+
+	// blockAccessList is the RLP-encoded EIP-7928 Block Access List sidecar
+	// carried with the payload (nil pre-Amsterdam). It is NOT part of the block's
+	// RLP/consensus encoding or hash — never add it to EncodeRLP/DecodeRLP/
+	// payloadSize. The header's BlockAccessListHash is the consensus commitment.
+	blockAccessList []byte
 
 	// binaryTransactions optionally caches the transactions' encodings (e.g. from
 	// an engine_newPayload payload) so RawBody() can skip re-encoding them.
@@ -1365,6 +1372,13 @@ func (b *Block) ParentBeaconBlockRoot() *common.Hash { return b.header.ParentBea
 func (b *Block) RequestsHash() *common.Hash          { return b.header.RequestsHash }
 func (b *Block) BlockAccessListHash() *common.Hash   { return b.header.BlockAccessListHash }
 
+// BlockAccessList returns the RLP-encoded EIP-7928 BAL sidecar carried with the
+// payload (nil when absent). It is not part of the block's RLP encoding or hash.
+func (b *Block) BlockAccessList() []byte { return b.blockAccessList }
+
+// SetBlockAccessList attaches the RLP-encoded BAL sidecar to the block.
+func (b *Block) SetBlockAccessList(bal []byte) { b.blockAccessList = bal }
+
 // Header returns a deep-copy of the entire block header using CopyHeader()
 func (b *Block) Header() *Header       { return CopyHeader(b.header) }
 func (b *Block) HeaderNoCopy() *Header { return b.header }
@@ -1525,10 +1539,11 @@ func (b *Block) Copy() *Block {
 	}
 
 	newB := &Block{
-		header:       CopyHeader(b.header),
-		uncles:       uncles,
-		transactions: CopyTxs(b.transactions),
-		withdrawals:  withdrawals,
+		header:          CopyHeader(b.header),
+		uncles:          uncles,
+		transactions:    CopyTxs(b.transactions),
+		withdrawals:     withdrawals,
+		blockAccessList: common.Copy(b.blockAccessList),
 	}
 	szCopy := b.size.Load()
 	newB.size.Store(szCopy)
@@ -1542,10 +1557,11 @@ func (b *Block) WithSeal(header *Header) *Block {
 	headerCopy.mutable = false
 	headerCopy.hash.Store(nil) // invalidate cached hash
 	return &Block{
-		header:       headerCopy,
-		transactions: b.transactions,
-		uncles:       b.uncles,
-		withdrawals:  b.withdrawals,
+		header:          headerCopy,
+		transactions:    b.transactions,
+		uncles:          b.uncles,
+		withdrawals:     b.withdrawals,
+		blockAccessList: b.blockAccessList,
 	}
 }
 
