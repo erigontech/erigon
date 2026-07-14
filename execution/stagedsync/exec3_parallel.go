@@ -3195,39 +3195,44 @@ func (be *blockExecutor) scheduleExecution(ctx context.Context, pe *parallelExec
 	// at index < N is in flight. Lower-indexed workers' flushes land at
 	// indices visible to N's reads via vm.Read's floor(N-1); higher-indexed
 	// ones don't. Non-deferred txs keep dispatching via pending.
+	drainMaxValidated := be.validateTasks.maxComplete()
+	drainMinIP := be.execTasks.minInProgress()
 	be.execTasks.drainDeferredIfReady(func(tx int) bool {
-		if be.validateTasks.maxComplete() < tx-1 {
-			return false
-		}
-		minIP := be.execTasks.minInProgress()
-		return minIP < 0 || minIP >= tx
+		return drainMaxValidated >= tx-1 && (drainMinIP < 0 || drainMinIP >= tx)
 	})
 
-	toExecute := make(sort.IntSlice, 0, 2)
-
-	for be.execTasks.minPending() >= 0 {
-		toExecute = append(toExecute, be.execTasks.takeNextPending())
-	}
-
-	// Forward-progress safety net: pending empty + no workers in flight
-	// means nothing will drive a subsequent maxComplete advance. Force-
-	// drain so the exec loop doesn't block on rws.ResultCh forever.
-	if len(toExecute) == 0 && be.execTasks.inProgressCount() == 0 {
-		be.execTasks.drainDeferred()
-		for be.execTasks.minPending() >= 0 {
-			toExecute = append(toExecute, be.execTasks.takeNextPending())
-		}
-	}
-
 	maxValidated := be.validateTasks.maxComplete()
-	for i := 0; i < len(toExecute); i++ {
-		nextTx := toExecute[i]
-		execTask := be.tasks[nextTx]
-		isNextValidated := nextTx == maxValidated+1
-		if !isNextValidated {
-			txIndex := execTask.Version().TxIndex
-			if be.txIncarnations[nextTx] > 0 &&
-				(be.execTasks.isBlocked(nextTx) || !be.blockIO.HasReads(txIndex) ||
+
+	// dispatch drains pending, enqueuing each tx. Budget bounds only fresh
+	// (incarnation 0) enqueues, which occupy an input-channel slot; retries go
+	// to the retry heap (unbounded) and don't consume budget. Txs that can't go
+	// now (gate-rejected retry, or fresh with no free slot) are held aside and
+	// re-added after the loop so they aren't re-taken in the same call.
+	dispatch := func() (dispatched int) {
+		if be.execTasks.minPending() < 0 {
+			return 0
+		}
+		budget := pe.in.Capacity() - pe.in.NewTasksLen()
+		var holdBack sort.IntSlice
+		for {
+			nextTx := be.execTasks.minPending()
+			if nextTx < 0 {
+				break
+			}
+			incarnation := be.txIncarnations[nextTx]
+			// A fresh tx needs a free input-channel slot. If none, leave it in
+			// pending (peek, don't take): taking then re-inserting the lowest
+			// index at the front would be O(pending) shift churn per call.
+			if incarnation == 0 && budget <= 0 {
+				break
+			}
+			be.execTasks.takeNextPending()
+			execTask := be.tasks[nextTx]
+			isNextValidated := nextTx == maxValidated+1
+
+			if !isNextValidated && incarnation > 0 {
+				txIndex := execTask.Version().TxIndex
+				if be.execTasks.isBlocked(nextTx) || !be.blockIO.HasReads(txIndex) ||
 					be.versionMap.ValidateVersion(txIndex, be.blockIO,
 						func(_, writtenVersion state.Version) state.VersionValidity {
 							wi := writtenVersion.TxIndex + 1
@@ -3237,54 +3242,61 @@ func (be *blockExecutor) scheduleExecution(ctx context.Context, pe *parallelExec
 								return state.VersionValid
 							}
 							return state.VersionInvalid
-						}, false, "") != state.VersionValid) {
-				be.execTasks.pushPending(nextTx)
-				continue
-			}
-		}
-
-		tv := &taskVersion{
-			execTask:   execTask,
-			versionMap: be.versionMap,
-			profile:    be.profile,
-			stats:      be.stats,
-			statsMutex: &be.Mutex,
-		}
-
-		if incarnation := be.txIncarnations[nextTx]; incarnation == 0 {
-			tv.version = execTask.Version()
-			// Use TryAdd to avoid blocking the execLoop goroutine.
-			// If the input queue is full, return remaining tasks to
-			// pending — they will be scheduled on the next call to
-			// scheduleExecution (triggered by each processed result).
-			if !pe.in.TryAdd(tv) {
-				be.execTasks.pushPending(nextTx)
-				for j := i + 1; j < len(toExecute); j++ {
-					be.execTasks.pushPending(toExecute[j])
+						}, false, "") != state.VersionValid {
+					holdBack = append(holdBack, nextTx)
+					continue
 				}
-				return
 			}
-		} else {
-			version := execTask.Version()
-			version.Incarnation = incarnation
-			tv.version = version
-			pe.in.ReTry(tv)
-		}
 
-		// Commit side-effects only after successful enqueue. Record whether
-		// this dispatch runs against fully settled input (every predecessor
-		// already validated) so a genuine error from it can be classified
-		// without re-execution — see the settledInput field doc.
-		be.settledInput[nextTx] = isNextValidated
-		if !isNextValidated {
-			be.cntSpecExec++
-		}
+			tv := &taskVersion{
+				execTask:   execTask,
+				versionMap: be.versionMap,
+				profile:    be.profile,
+				stats:      be.stats,
+				statsMutex: &be.Mutex,
+			}
 
-		if dbg.TraceTransactionIO && be.txIncarnations[nextTx] > 1 {
-			fmt.Println(be.blockNum, "EXEC", nextTx, be.txIncarnations[nextTx], "maxValidated", maxValidated, be.blockIO.HasReads(nextTx), "failed", be.execFailed[nextTx], "aborted", be.execAborted[nextTx])
-		}
+			if incarnation == 0 {
+				tv.version = execTask.Version()
+				if !pe.in.TryAdd(tv) {
+					holdBack = append(holdBack, nextTx)
+					break
+				}
+				budget--
+			} else {
+				version := execTask.Version()
+				version.Incarnation = incarnation
+				tv.version = version
+				pe.in.ReTry(tv)
+			}
 
-		be.cntExec++
+			// Commit side-effects only after successful enqueue. Record whether
+			// this dispatch runs against fully settled input (every predecessor
+			// already validated) so a genuine error from it can be classified
+			// without re-execution — see the settledInput field doc.
+			be.settledInput[nextTx] = isNextValidated
+			if !isNextValidated {
+				be.cntSpecExec++
+			}
+			if dbg.TraceTransactionIO && be.txIncarnations[nextTx] > 1 {
+				fmt.Println(be.blockNum, "EXEC", nextTx, be.txIncarnations[nextTx], "maxValidated", maxValidated, be.blockIO.HasReads(nextTx), "failed", be.execFailed[nextTx], "aborted", be.execAborted[nextTx])
+			}
+			be.cntExec++
+			dispatched++
+		}
+		for _, tx := range holdBack {
+			be.execTasks.pushPending(tx)
+		}
+		return dispatched
+	}
+
+	// Forward-progress net: release deferred (past its predicate) only when nothing
+	// dispatched, pending is empty, and nothing is in flight. Guarded on empty
+	// pending because the next-to-validate tx is never gate-rejected, so non-empty
+	// pending is always dispatchable — the net must not force-drain past it.
+	if dispatch() == 0 && be.execTasks.minPending() < 0 && be.execTasks.inProgressCount() == 0 {
+		be.execTasks.drainDeferred()
+		dispatch()
 	}
 }
 
