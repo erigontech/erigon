@@ -22,16 +22,17 @@ import (
 	"unsafe"
 
 	"github.com/erigontech/erigon/common/dbg"
+	"github.com/erigontech/erigon/common/iouring"
 	"github.com/erigontech/erigon/common/mmap"
 )
 
 var pageSize = os.Getpagesize()
 
 // residencyWindow is how many bytes from the reset offset the gate ensures are
-// resident. A compressed word's on-disk extent is at most a page or two, so a
-// couple of pages covers effectively every value across all state domains.
-// Tunable via env (RESIDENCY_WINDOW_PAGES) to experiment (e.g. =1) without a rebuild.
-var residencyWindow = dbg.EnvInt("RESIDENCY_WINDOW_PAGES", 2) * pageSize
+// resident. State reads are scattered, so warming beyond the page holding the
+// read is pure read-amplification; the default of one page covers the read
+// itself and nothing more. Tunable via env (RESIDENCY_WINDOW_PAGES) without a rebuild.
+var residencyWindow = dbg.EnvInt("RESIDENCY_WINDOW_PAGES", 1) * pageSize
 
 // warmConcurrency bounds how many goroutines may be blocked in a warming read
 // at once. Acquiring parks the goroutine (freeing its P) when full; the read
@@ -62,7 +63,7 @@ func (g *Getter) residencyRegion(offset uint64) (region []byte, fileOffset int64
 		return nil, 0
 	}
 	aligned := absStart &^ (pageSize - 1)
-	end := min(absStart+residencyWindow, len(full))
+	end := min(aligned+residencyWindow, len(full))
 	return full[aligned:end], int64(aligned)
 }
 
@@ -80,10 +81,15 @@ func (g *Getter) ensureResident(offset uint64) {
 	g.warm(fileOffset, len(region))
 }
 
-// warm reads the byte range into a scratch buffer to pull it into the page
-// cache, so the following mmap access is a minor fault rather than a blocking
-// disk fault. Best-effort: on any error the mmap access simply faults as before.
+// warm pulls the byte range into the page cache so the following mmap access is
+// a minor fault rather than a blocking disk fault. It prefers io_uring (whose
+// io_uring_enter releases the goroutine's P during the read); if io_uring is
+// unavailable or its ring pool is exhausted it falls back to a semaphore-bounded
+// blocking pread. Best-effort: on any error the mmap access simply faults as before.
 func (g *Getter) warm(fileOffset int64, n int) {
+	if iouring.WarmOne(int(g.d.f.Fd()), fileOffset, n) {
+		return
+	}
 	warmSem <- struct{}{}
 	buf := warmBufPool.Get().(*[]byte)
 	_, _ = g.d.f.ReadAt((*buf)[:n], fileOffset)
