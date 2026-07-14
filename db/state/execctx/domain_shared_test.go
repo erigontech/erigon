@@ -1654,9 +1654,8 @@ func TestDomainSameTxNumUpdate_HistoryKeepsFirstPrev(t *testing.T) {
 			require.Equal(t, v1, got, "GetAsOf(11) must see the final txNum-10 value")
 			got, ok, err = rwTx.GetAsOf(kv.AccountsDomain, key, 5)
 			require.NoError(t, err)
-			if ok {
-				require.Empty(t, got, "GetAsOf(5) is before the first write")
-			}
+			require.False(t, ok, "the key was created at txNum 5, so before it there is nothing to find")
+			require.Empty(t, got, "GetAsOf(5) is before the first write")
 		})
 	}
 }
