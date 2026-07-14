@@ -291,11 +291,11 @@ var (
 
 // EIP-8282 - The Builder Deposit Addresses
 // Nick's-method derived address from the builder deposit contract deployment transaction.
-var BuilderDepositAddress = accounts.InternAddress(common.HexToAddress("0x00006AE84ed173D4394de5E28F9ED56b28008282"))
+var BuilderDepositAddress = accounts.InternAddress(common.HexToAddress("0x0000BFF46984E3725691FA540A8C7589300D8282"))
 
 // EIP-8282 - The Builder Exit Addresses
 // Nick's-method derived address from the builder exit contract deployment transaction.
-var BuilderExitAddress = accounts.InternAddress(common.HexToAddress("0x000014574A74c805590AFF9499fc7A690f008282"))
+var BuilderExitAddress = accounts.InternAddress(common.HexToAddress("0x000064D678505AD48F8CCB093BC65613800E8282"))
 
 // See EIP-7840: Add blob schedule to EL config files
 type BlobConfig struct {
