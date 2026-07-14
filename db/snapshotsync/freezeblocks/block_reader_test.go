@@ -230,13 +230,9 @@ func TestBlockRetireFallback(t *testing.T) {
 	require.NoError(t, err)
 	require.True(t, hasEnough)
 
-	// Manually close snapshots here to simulate a node restart.
-	// The deferred Close() serves only as a fallback safety guard in case of early test failure.
-	snapshots.Close()
-
-	// Simulate a restart after a merged transaction segment landed on disk, but
-	// before its indexes were fully built. The smaller indexed subsegments must
-	// remain visible until the covering segment becomes indexed.
+	// Simulate a restart after a merged transaction segment landed on disk but before
+	// its indexes were built: the smaller indexed subsegments must stay visible until
+	// the covering segment is indexed. reopenedSnapshots below is the fresh open.
 	createTestSegmentOnlyFile(t, 1, 2000, snaptype2.Enums.Transactions, dirs.Snap, ver, logger)
 
 	reopenedSnapshots := blocksnapshots.NewRoSnapshots(snapshots.Cfg(), dirs.Snap, logger)
