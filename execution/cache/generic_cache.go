@@ -103,8 +103,7 @@ type GenericCache[T any] struct {
 	hits         atomic.Uint64
 	misses       atomic.Uint64
 	inserts      atomic.Uint64
-	evictions    atomic.Uint64
-	removals     atomic.Uint64 // intentional removals, netted out of evictions at print time
+	evictions    atomic.Uint64 // capacity evictions only, counted from Add's evicted return (see newShards)
 	dropped      atomic.Uint64
 	staleEvicted atomic.Uint64 // stale entries detected on read after an unwind; dropped unless a racing put revived them
 
@@ -179,7 +178,9 @@ func newGenericCacheEntries[T any](capacityBytes datasize.ByteSize, capacityEntr
 // removal (capacity eviction, Remove) accounts through it. Freelru picks
 // eviction victims per shard (hash bits 16+), which the put stripes (bits 0-7)
 // don't cover, so any subtraction computed outside the callback races a
-// cross-stripe eviction of the same entry.
+// cross-stripe eviction of the same entry. The callback must not feed the
+// evictions metric — it also fires for intentional Removes — so capacity
+// evictions are counted from Add's evicted return at the call sites.
 func (c *GenericCache[T]) newShards(capacity uint32) *freelru.ShardedLRU[uint64, entry[T]] {
 	lru, err := freelru.NewSharded[uint64, entry[T]](capacity, u64identity)
 	if err != nil {
@@ -187,7 +188,6 @@ func (c *GenericCache[T]) newShards(capacity uint32) *freelru.ShardedLRU[uint64,
 	}
 	lru.SetOnEvict(func(_ uint64, e entry[T]) {
 		c.currentSize.Add(-int64(e.size))
-		c.evictions.Add(1)
 	})
 	return lru
 }
@@ -223,10 +223,12 @@ func (c *GenericCache[T]) maybeGrow() {
 	for i := range c.putStripes {
 		c.putStripes[i].Lock()
 	}
-	copied := 0
+	copied, evicted := 0, 0
 	for _, k := range old.Keys() {
 		if v, ok := old.Get(k); ok {
-			next.Add(k, v)
+			if next.Add(k, v) {
+				evicted++
+			}
 			copied++
 		}
 	}
@@ -235,8 +237,9 @@ func (c *GenericCache[T]) maybeGrow() {
 	for i := range c.putStripes {
 		c.putStripes[i].Unlock()
 	}
+	c.evictions.Add(uint64(evicted))
 	c.reservedBytes += delta
-	log.Debug("[cache] jump-grow", "fromSlots", curCap, "toSlots", newCap, "copied", copied,
+	log.Debug("[cache] jump-grow", "fromSlots", curCap, "toSlots", newCap, "copied", copied, "evicted", evicted,
 		"alloc", fenceStart.Sub(start), "fenced", time.Since(fenceStart))
 }
 
@@ -356,8 +359,10 @@ func (c *GenericCache[T]) putStriped(key []byte, value T, txNum uint64, overwrit
 		if !overwrite && !c.coh.IsStale(existing.txNum, existing.epoch) {
 			return false
 		}
-		c.removeLocked(lru, h)
-		lru.Add(h, entry[T]{key: existing.key, val: value, size: newSize, txNum: txNum, epoch: ep})
+		lru.Remove(h)
+		if lru.Add(h, entry[T]{key: existing.key, val: value, size: newSize, txNum: txNum, epoch: ep}) {
+			c.evictions.Add(1)
+		}
 		c.currentSize.Add(int64(newSize))
 		return false
 	}
@@ -393,23 +398,15 @@ func (c *GenericCache[T]) putStriped(key []byte, value T, txNum uint64, overwrit
 	// hash): remove the colliding entry first so OnEvict accounts for it —
 	// freelru.Add would replace it in place without firing OnEvict.
 	if hasExisting {
-		c.removeLocked(lru, h)
+		lru.Remove(h)
 	}
 	keyCopy := common.Copy(key)
-	lru.Add(h, entry[T]{key: keyCopy, val: value, size: newSize, txNum: txNum, epoch: ep})
+	if lru.Add(h, entry[T]{key: keyCopy, val: value, size: newSize, txNum: txNum, epoch: ep}) {
+		c.evictions.Add(1)
+	}
 	c.currentSize.Add(int64(newSize))
 	c.inserts.Add(1)
 	return needGrow
-}
-
-// removeLocked removes h under the caller-held stripe, deferring the size
-// subtraction to OnEvict (see newShards). The removal is counted separately so
-// PrintStatsAndReset can net intentional removals out of the evictions metric —
-// decrementing evictions here would underflow across a concurrent stats reset.
-func (c *GenericCache[T]) removeLocked(lru *freelru.ShardedLRU[uint64, entry[T]], h uint64) {
-	if lru.Remove(h) {
-		c.removals.Add(1)
-	}
 }
 
 // Delete removes the data for the given key. Runs under the key's put stripe
@@ -422,7 +419,7 @@ func (c *GenericCache[T]) Delete(key []byte) {
 	defer mu.Unlock()
 	lru := c.data.Load()
 	if existing, ok := lru.Get(h); ok && bytes.Equal(existing.key, key) {
-		c.removeLocked(lru, h)
+		lru.Remove(h)
 	}
 }
 
@@ -435,7 +432,7 @@ func (c *GenericCache[T]) dropStale(h uint64, key []byte) {
 	defer mu.Unlock()
 	lru := c.data.Load()
 	if e, ok := lru.Get(h); ok && bytes.Equal(e.key, key) && c.coh.IsStale(e.txNum, e.epoch) {
-		c.removeLocked(lru, h)
+		lru.Remove(h)
 	}
 }
 
@@ -509,17 +506,7 @@ func (c *GenericCache[T]) PrintStatsAndReset(name string) {
 	hits := c.hits.Swap(0)
 	misses := c.misses.Swap(0)
 	inserts := c.inserts.Swap(0)
-	// Snapshot removals before evictions: OnEvict bumps evictions before the
-	// removal is counted, so this order keeps every captured removal paired with
-	// a captured eviction. The clamp absorbs a removal deferred to the next
-	// interval.
-	removals := c.removals.Swap(0)
 	evictions := c.evictions.Swap(0)
-	if evictions >= removals {
-		evictions -= removals
-	} else {
-		evictions = 0
-	}
 	dropped := c.dropped.Swap(0)
 	staleEvicted := c.staleEvicted.Swap(0)
 	total := hits + misses
