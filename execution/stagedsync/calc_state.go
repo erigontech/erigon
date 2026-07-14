@@ -309,8 +309,8 @@ func finalChangeUpTo[T hasTxIndex](changes []T, maxTxIndex uint32) (T, bool) {
 // delete here: after the field changes and lazy-loaded pre-block fields are
 // merged, a touched all-zero account is marked Deleted so FlushToUpdates removes
 // its leaf instead of writing a zero-valued one. Storage reads are ignored.
-func (cs *calcState) LoadFromBAL(bal types.BlockAccessList, emptyRemoval, isAura bool) {
-	cs.LoadFromBALUpTo(bal, math.MaxUint32, emptyRemoval, isAura)
+func (cs *calcState) LoadFromBAL(bal types.BlockAccessList, emptyRemoval bool, isAura bool, eip8246 bool) {
+	cs.LoadFromBALUpTo(bal, math.MaxUint32, emptyRemoval, isAura, eip8246)
 }
 
 // LoadFromBALUpTo is LoadFromBAL restricted to changes at tx index ≤ maxTxIndex,
@@ -318,7 +318,7 @@ func (cs *calcState) LoadFromBAL(bal types.BlockAccessList, emptyRemoval, isAura
 // mid-block step boundary (checkpoint) from the same per-tx BAL, then fold the
 // remainder — the BAL carries every change's tx index, so no re-execution is
 // needed. maxTxIndex == math.MaxUint32 is the whole block (== LoadFromBAL).
-func (cs *calcState) LoadFromBALUpTo(bal types.BlockAccessList, maxTxIndex uint32, emptyRemoval, isAura bool) {
+func (cs *calcState) LoadFromBALUpTo(bal types.BlockAccessList, maxTxIndex uint32, emptyRemoval bool, isAura bool, eip8246 bool) {
 	writes := &state.WriteSet{}
 	for _, ac := range bal {
 		addr := ac.Address
@@ -345,10 +345,7 @@ func (cs *calcState) LoadFromBALUpTo(bal types.BlockAccessList, maxTxIndex uint3
 			}
 		}
 	}
-	// eip8246 is moot here: the BAL WriteSet carries no SelfDestruct entries, so
-	// ApplyWrites' SD-balance-zeroing never fires; deletion is handled by the
-	// EIP-161 empty-removal pass below.
-	cs.ApplyWrites(writes, false)
+	cs.ApplyWrites(writes, eip8246)
 
 	// EIP-161: a touched account whose merged block-end state is empty is
 	// removed from the trie. The BAL carries no deletion marker, so reconstruct

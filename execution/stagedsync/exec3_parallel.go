@@ -1768,6 +1768,7 @@ type blockRequest struct {
 	// step-boundary checkpoint the atomic fold doesn't emit.
 	firstTxNum uint64
 	lastTxNum  uint64
+	blockTime  uint64
 	bal        types.BlockAccessList
 }
 
