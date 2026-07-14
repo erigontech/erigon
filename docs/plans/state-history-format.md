@@ -120,8 +120,6 @@ history:  account.0-8.ef    account.8-16.ef       (key, latestValue, {ts})
                                                   for keys changed in [8,16)
 
 Clients: to derive their own format of Latest State from "The History" 
-
-Large values: can create new file type `.lv` sharded as `.ef` - account.8-16.lv
 ```
 
 | Problem              | After                                                                                                                                            |
@@ -133,22 +131,16 @@ Large values: can create new file type `.lv` sharded as `.ef` - account.8-16.lv
 
 ### Limitations
 
-- Pruning: old `.lv` files can't be deleted. Can prune: `.v`, `.ef`
-- Latest State format ideas: whole or partial (instead of storing last large file - can fallback to history), store it
-  in db or files, read-amplification-driven or write-amp, etc...
+Large values: can create
+
+- Prune old files: old `LatestValues` can't be pruned - means can't store them in `.ef`. No problem: can create new file
+  type `.lv` sharded as `.ef` - account.8-16.lv
+- Latest State derived format ideas: whole or partial (instead of storing last large file - can fallback to history),
+  store it in db or files, read-amplification-driven or write-amp, etc...
 
 ## 5. Context
 
-- **Safe-deletion table** — the operational contract:
-
-| Operation                         | How                                                                               |
-|-----------------------------------|-----------------------------------------------------------------------------------|
-| Forget old history                | `rm` old `.v` + `.ef` (keep `.lv`); suffix-closure keeps the rest self-sufficient |
-| Undo recent data (bug/deep reorg) | `rm` recent spans, re-fold latest, re-execute the tail                            |
-| Repair corrupted latest store     | re-fold from spans — local, no re-execution                                       |
-| Excise a range inside a file      | never — file span = blast radius; cap it in the spec                              |
-
-- **Determinism is load-bearing.** Content-addressing needs byte-identical producers: fixed span boundaries, fixed
+- **Determinism is load-bearing** Content-addressing needs byte-identical producers: fixed span boundaries, fixed
   enumeration order (key-major, ts-ascending), fixed encodings, deterministic (or no) compression. Ship a conformance
   suite: input stream → expected hashes.
 - **Everything else stays local**: btrees, recsplit/bloom accessors, salts, caches, serving LSM, mutable tail DB. The
