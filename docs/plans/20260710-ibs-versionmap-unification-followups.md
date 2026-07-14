@@ -6,6 +6,13 @@ them from the PR description.
 
 Context: [20260709-versionedio-single-source-bal-occ.md](20260709-versionedio-single-source-bal-occ.md).
 
+End state: a **single versionedio processing model** for all execution, with no
+`stateObject`. This is not OCC-dependent — OCC (conflict detection + incarnation
+retry) is purely a parallel concern; run serially, the exact same versionedio path
+executes and simply never produces a conflict. So there is no "serial vs parallel"
+commit split to preserve: serial, parallel, genesis, and RPC all commit through the
+write-set, and `noMaterialize` becomes the behaviour rather than a flag.
+
 ## Delivered in this PR
 
 The parallel execution worker runs without a `stateObject` cache: create/write
@@ -33,29 +40,30 @@ the stateObjects populated for `FinalizeTx`. But it is a **hard blocker for the
 map-drop**: once `noMaterialize` is the default and the resident stateObject is
 gone, `FinalizeTx` finds no stateObjects → empty genesis.
 
-Two resolutions:
-- **(A) De-version genesis** — `state.New(r)` instead of `NewWithVersionMap`.
-  Genesis is a single deterministic setup with no OCC/concurrency need; dropping
-  the versionMap makes `IsVersioned()` false and removes the `isGenesis` guard
-  entirely. Minimal and honest, *if* nothing in genesis (`SysCreate`/EIP-6780
-  constructor execution) depends on the versioned read path.
-- **(B) Finish the port** — move onto `FinalizedWrites().Apply(sd, tx, 0, 1, nil,
-  &chain.Rules{}, nil, false)` (genesis records every field as a cell, so the
-  `blockCache == nil` branch has the data) and set `noMaterialize` on the genesis
-  IBS, dropping `FinalizeTx`→writer and the guard. This is the builder's model.
+Resolution: finish the port. Genesis commits via the write-set, like the builder —
+move onto `FinalizedWrites().Apply(sd, tx, 0, 1, nil, &chain.Rules{}, nil, false)`
+(genesis records every field as a cell, so the `blockCache == nil` branch has the
+data), set `noMaterialize` on the genesis IBS, and drop the `FinalizeTx`→writer
+commit and the `isGenesis` guard. There is no "keep genesis on the stateObject
+path" alternative: the goal is a single versionedio processing model with no
+stateObject at all, so every path — genesis included — commits through the
+write-set.
 
-High blast radius either way: this computes the genesis root of every chain.
-Caveat for (B) — the returned IBS is a carrier re-consumed by three executors with
-different commit mechanisms (`txtask.go`, `historical_trace_worker.go`, and
-`rpchelper/commitment.go` which discards it); `WriteGenesisState` commits via a
-`NoopWriter` and `WriteGenesisBesideState` writes only block metadata. Confirm the
-block-0 commit path for each consumer before setting `noMaterialize`.
+High blast radius: this computes the genesis root of every chain. The returned IBS
+is a carrier re-consumed by three executors with different commit mechanisms
+(`txtask.go`, `historical_trace_worker.go`, and `rpchelper/commitment.go` which
+discards it); `WriteGenesisState` commits via a `NoopWriter` and
+`WriteGenesisBesideState` writes only block metadata. Confirm the block-0 commit
+path for each consumer before setting `noMaterialize`.
 
 ## Follow-up 2 — serial executor off stateObjects
 
-The serial path fundamentally uses `FinalizeTx` / `MakeWriteSet` / `CommitBlock`
-over `stateObjects`. Migrating it to the write-set commit path is the large piece
-that (with follow-up 1) unblocks removing the maps.
+Today the serial path still commits via `FinalizeTx` / `MakeWriteSet` /
+`CommitBlock` over `stateObjects` — a leftover, not a requirement. Running serially
+is just the versionedio path with no conflicts, so there is nothing OCC-specific it
+needs: the serial executor runs the same write-set commit as the parallel worker
+(`noMaterialize` on), and conflict detection/retry simply never fires. This is the
+large piece that (with follow-up 1) unblocks removing the maps.
 
 ## Follow-up 3 — drop the parallel-path maps
 
