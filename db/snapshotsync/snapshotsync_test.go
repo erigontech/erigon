@@ -23,10 +23,10 @@ import (
 
 	"github.com/stretchr/testify/assert"
 
+	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv"
-	"github.com/erigontech/erigon/db/kv/dbcfg"
-	"github.com/erigontech/erigon/db/kv/memdb"
 	"github.com/erigontech/erigon/db/kv/prune"
+	"github.com/erigontech/erigon/db/kv/temporal/temporaltest"
 	"github.com/erigontech/erigon/db/services"
 	"github.com/erigontech/erigon/db/snapcfg"
 	"github.com/erigontech/erigon/db/snaptype"
@@ -36,7 +36,7 @@ import (
 
 func beginTestRoTx(t *testing.T) kv.Tx {
 	t.Helper()
-	tx, err := memdb.NewTestDB(t, dbcfg.ChainDB).BeginRo(context.Background())
+	tx, err := temporaltest.NewTestDB(t, datadir.New(t.TempDir())).BeginRo(context.Background())
 	if err != nil {
 		t.Fatal(err)
 	}

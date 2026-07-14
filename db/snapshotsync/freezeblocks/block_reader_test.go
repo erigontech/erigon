@@ -114,18 +114,16 @@ func requireSegmentFilesExist(t *testing.T, dir string, ver snaptype.Version, fr
 // we cannot retire blocks because the history is not contiguous.
 func TestBlockRetireSkipsOnGap(t *testing.T) {
 	tmpDir := t.TempDir()
-	db := memdb.NewTestDB(t, dbcfg.ChainDB)
+	db := temporaltest.NewTestDB(t, datadir.New(tmpDir))
 	logger := log.New()
 
-	cfg := ethconfig.Defaults.Snapshot
-	cfg.ChainName = networkname.Mainnet
-	snapshots := blocksnapshots.NewRoSnapshots(cfg, tmpDir, logger)
 	ver := version.V1_0
 	createTestSegmentFile(t, 1, 1000, snaptype2.Enums.Headers, tmpDir, ver, logger)
 	createTestSegmentFile(t, 1, 1000, snaptype2.Enums.Bodies, tmpDir, ver, logger)
 	createTestSegmentFile(t, 1, 1000, snaptype2.Enums.Transactions, tmpDir, ver, logger)
+
+	snapshots := db.(HasBlockFiles).DebugBlockFiles()
 	require.NoError(t, snapshots.OpenFolder())
-	defer snapshots.Close()
 	require.Equal(t, uint64(999), snapshots.SegmentsMax())
 
 	rwTx, err := db.BeginRw(t.Context())
@@ -155,18 +153,15 @@ func TestBlockRetireSkipsOnGap(t *testing.T) {
 // This is the correct, contiguous state where we can transition retired blocks.
 func TestBlockRetireContiguous(t *testing.T) {
 	tmpDir := t.TempDir()
-	db := memdb.NewTestDB(t, dbcfg.ChainDB)
+	db := temporaltest.NewTestDB(t, datadir.New(tmpDir))
 	logger := log.New()
 
-	cfg := ethconfig.Defaults.Snapshot
-	cfg.ChainName = networkname.Mainnet
-	snapshots := blocksnapshots.NewRoSnapshots(cfg, tmpDir, logger)
 	ver := version.V1_0
 	createTestSegmentFile(t, 1, 1000, snaptype2.Enums.Headers, tmpDir, ver, logger)
 	createTestSegmentFile(t, 1, 1000, snaptype2.Enums.Bodies, tmpDir, ver, logger)
 	createTestSegmentFile(t, 1, 1000, snaptype2.Enums.Transactions, tmpDir, ver, logger)
+	snapshots := db.(HasBlockFiles).DebugBlockFiles()
 	require.NoError(t, snapshots.OpenFolder())
-	defer snapshots.Close()
 	require.Equal(t, uint64(999), snapshots.SegmentsMax())
 
 	rwTx, err := db.BeginRw(t.Context())
@@ -198,11 +193,9 @@ func TestBlockRetireContiguous(t *testing.T) {
 // is deleted or indexed, the visibility should remain stable.
 func TestBlockRetireFallback(t *testing.T) {
 	tmpDir := t.TempDir()
-	db := memdb.NewTestDB(t, dbcfg.ChainDB)
+	db := temporaltest.NewTestDB(t, datadir.New(tmpDir))
 	logger := log.New()
 
-	cfg := ethconfig.Defaults.Snapshot
-	cfg.ChainName = networkname.Mainnet
 	ver := version.V1_0
 	createTestSegmentFile(t, 1, 1000, snaptype2.Enums.Headers, tmpDir, ver, logger)
 	createTestSegmentFile(t, 1, 1000, snaptype2.Enums.Bodies, tmpDir, ver, logger)
@@ -211,8 +204,7 @@ func TestBlockRetireFallback(t *testing.T) {
 	createTestSegmentFile(t, 1000, 2000, snaptype2.Enums.Bodies, tmpDir, ver, logger)
 	createTestSegmentFile(t, 1000, 2000, snaptype2.Enums.Transactions, tmpDir, ver, logger)
 
-	snapshots := blocksnapshots.NewRoSnapshots(cfg, tmpDir, logger)
-	defer snapshots.Close()
+	snapshots := db.(HasBlockFiles).DebugBlockFiles()
 	require.NoError(t, snapshots.OpenFolder())
 	require.Equal(t, uint64(1999), snapshots.SegmentsMax())
 
@@ -249,7 +241,7 @@ func TestBlockRetireFallback(t *testing.T) {
 	// remain visible until the covering segment becomes indexed.
 	createTestSegmentOnlyFile(t, 1, 2000, snaptype2.Enums.Transactions, tmpDir, ver, logger)
 
-	reopenedSnapshots := blocksnapshots.NewRoSnapshots(cfg, tmpDir, logger)
+	reopenedSnapshots := blocksnapshots.NewRoSnapshots(snapshots.Cfg(), tmpDir, logger)
 	defer reopenedSnapshots.Close() // fallback safety guard in case of early test failure
 	require.NoError(t, reopenedSnapshots.OpenFolder())
 	require.Equal(t, uint64(1999), reopenedSnapshots.SegmentsMax())
@@ -272,7 +264,7 @@ func TestBlockRetireFallback(t *testing.T) {
 	unindexedOverlap := filepath.Join(tmpDir, snaptype.SegmentFileName(ver, 1, 2000, snaptype2.Enums.Transactions))
 	require.NoError(t, dir.RemoveFile(unindexedOverlap))
 
-	restoredSnapshots := blocksnapshots.NewRoSnapshots(cfg, tmpDir, logger)
+	restoredSnapshots := blocksnapshots.NewRoSnapshots(snapshots.Cfg(), tmpDir, logger)
 	require.NoError(t, restoredSnapshots.OpenFolder())
 	defer restoredSnapshots.Close()
 	require.Equal(t, uint64(1999), restoredSnapshots.SegmentsMax())
@@ -351,54 +343,40 @@ func TestBlockRetireAllOverlapped(t *testing.T) {
 
 // TestBlockReaderGenesisBlockWithSnapshots tests that the genesis block is always read from the database, even when snapshots exist
 func TestBlockReaderGenesisBlockWithSnapshots(t *testing.T) {
-	db := temporaltest.NewTestDB(t, datadir.New(t.TempDir()))
-	blockReader := NewBlockReader(db.(HasBlockFiles).DebugBlockFiles(), nil)
-
-	tmpDir := t.TempDir()
+	dirs := datadir.New(t.TempDir())
 	logger := log.New()
+
+	// Snapshot segments (blocks 1..1000) must exist before the temporal DB opens
+	// them, so its block-files view (shared with the reader) includes them.
+	ver := version.V1_0
+	createTestSegmentFile(t, 1, 1000, snaptype2.Enums.Headers, dirs.Snap, ver, logger)
+	createTestSegmentFile(t, 1, 1000, snaptype2.Enums.Bodies, dirs.Snap, ver, logger)
+	createTestSegmentFile(t, 1, 1000, snaptype2.Enums.Transactions, dirs.Snap, ver, logger)
+
+	db := temporaltest.NewTestDB(t, dirs)
+	snapshots := db.(HasBlockFiles).DebugBlockFiles()
+	blockReader := NewBlockReader(snapshots, nil)
+	require.Greater(t, snapshots.BlocksAvailable(), uint64(0))
 
 	tx, err := db.BeginRo(t.Context())
 	require.NoError(t, err)
-	defer tx.Rollback()
-
 	genesisHash, err := rawdb.ReadCanonicalHash(tx, 0)
 	require.NoError(t, err)
-	assert.Equal(t, genesisHash, (common.Hash{})) // genesis hash should be empty
+	assert.Equal(t, genesisHash, common.Hash{}) // genesis hash should be empty
+	tx.Rollback()
 
 	// create minimal genesis block for testing
-	tx.Rollback()
 	rwTx, err := db.BeginRw(t.Context())
 	require.NoError(t, err)
 	defer rwTx.Rollback()
-
 	genesisHeader := &types.Header{}
 	genesisHash = genesisHeader.Hash()
-	err = rawdb.WriteHeader(rwTx, genesisHeader)
-	require.NoError(t, err)
-	err = rawdb.WriteCanonicalHash(rwTx, genesisHash, 0)
-	require.NoError(t, err)
-	err = rawdb.WriteHeadHeaderHash(rwTx, genesisHash)
-	require.NoError(t, err)
-	err = rwTx.Commit()
-	require.NoError(t, err)
+	require.NoError(t, rawdb.WriteHeader(rwTx, genesisHeader))
+	require.NoError(t, rawdb.WriteCanonicalHash(rwTx, genesisHash, 0))
+	require.NoError(t, rawdb.WriteHeadHeaderHash(rwTx, genesisHash))
+	require.NoError(t, rwTx.Commit())
 
-	// create snapshots file for testing starting from block 1
-	cfg := ethconfig.Defaults.Snapshot
-	cfg.ChainName = networkname.Mainnet
-	snapshots := blocksnapshots.NewRoSnapshots(cfg, tmpDir, logger)
-	ver := version.V1_0
-	createTestSegmentFile(t, 1, 1000, snaptype2.Enums.Headers, tmpDir, ver, logger)
-	createTestSegmentFile(t, 1, 1000, snaptype2.Enums.Bodies, tmpDir, ver, logger)
-	createTestSegmentFile(t, 1, 1000, snaptype2.Enums.Transactions, tmpDir, ver, logger)
-
-	err = snapshots.OpenFolder()
-	require.NoError(t, err)
-	defer snapshots.Close()
-
-	blocksAvailable := snapshots.BlocksAvailable()
-	assert.Greater(t, blocksAvailable, uint64(0))
-
-	// Try to read genesis block (block 0) when snapshots exist.This should read from database not snapshots
+	// Read genesis (block 0) with snapshots present: must come from the DB, not snapshots.
 	tx, err = db.BeginRo(t.Context())
 	require.NoError(t, err)
 	defer tx.Rollback()
@@ -524,10 +502,8 @@ func TestCanonicalHashCache_SnapshotPath(t *testing.T) {
 		to       = uint64(1000)
 		blockNum = from // first block in the segment; OrdinalLookup(from-from)=OrdinalLookup(0)
 	)
-	tmpDir := t.TempDir()
+	dirs := datadir.New(t.TempDir())
 	logger := log.New()
-	db := memdb.NewTestDB(t, dbcfg.ChainDB)
-
 	ver := version.V1_0
 
 	// Build a header and RLP-encode it.
@@ -538,10 +514,10 @@ func TestCanonicalHashCache_SnapshotPath(t *testing.T) {
 	word := append([]byte{0}, rlpBytes...)
 
 	// Write the headers segment with a single valid entry.
-	segPath := filepath.Join(tmpDir, snaptype.SegmentFileName(ver, from, to, snaptype2.Enums.Headers))
+	segPath := filepath.Join(dirs.Snap, snaptype.SegmentFileName(ver, from, to, snaptype2.Enums.Headers))
 	compressCfg := seg.DefaultCfg
 	compressCfg.MinPatternScore = 100
-	c, err := seg.NewCompressor(t.Context(), "test", segPath, tmpDir, compressCfg, log.LvlDebug, logger)
+	c, err := seg.NewCompressor(t.Context(), "test", segPath, dirs.Snap, compressCfg, log.LvlDebug, logger)
 	require.NoError(t, err)
 	c.DisableFsync()
 	require.NoError(t, c.AddWord(word))
@@ -549,11 +525,11 @@ func TestCanonicalHashCache_SnapshotPath(t *testing.T) {
 	c.Close()
 
 	// Build index with BaseDataID=from so OrdinalLookup(blockNum-from)=OrdinalLookup(0).
-	idxPath := filepath.Join(tmpDir, snaptype.IdxFileName(ver, from, to, snaptype2.Enums.Headers.String()))
+	idxPath := filepath.Join(dirs.Snap, snaptype.IdxFileName(ver, from, to, snaptype2.Enums.Headers.String()))
 	idx, err := recsplit.NewRecSplit(recsplit.RecSplitArgs{
 		KeyCount:   1,
 		BucketSize: 10,
-		TmpDir:     tmpDir,
+		TmpDir:     dirs.Snap,
 		IndexFile:  idxPath,
 		LeafSize:   8,
 		BaseDataID: from,
@@ -566,24 +542,16 @@ func TestCanonicalHashCache_SnapshotPath(t *testing.T) {
 	idx.Close()
 
 	// Bodies and Transactions segments are required for OpenFolder to recognise the range.
-	createTestSegmentFile(t, from, to, snaptype2.Enums.Bodies, tmpDir, ver, logger)
-	createTestSegmentFile(t, from, to, snaptype2.Enums.Transactions, tmpDir, ver, logger)
+	createTestSegmentFile(t, from, to, snaptype2.Enums.Bodies, dirs.Snap, ver, logger)
+	createTestSegmentFile(t, from, to, snaptype2.Enums.Transactions, dirs.Snap, ver, logger)
 
-	cfg := ethconfig.Defaults.Snapshot
-	cfg.ChainName = networkname.Mainnet
-	snapshots := blocksnapshots.NewRoSnapshots(cfg, tmpDir, logger)
-	require.NoError(t, snapshots.OpenFolder())
-	defer snapshots.Close()
-
-	blockReader := NewBlockReader(snapshots, nil)
+	db := temporaltest.NewTestDB(t, dirs)
+	blockReader := NewBlockReader(db.(HasBlockFiles).DebugBlockFiles(), nil)
 
 	// No canonical hash written to DB → CanonicalHash must fall through to snapshot path.
-	roTx, err := db.BeginRo(context.Background())
+	tx, err := db.BeginRo(context.Background())
 	require.NoError(t, err)
-	defer roTx.Rollback()
-	view := snapshots.View()
-	defer view.Close()
-	tx := blockFilesTxStub{Getter: roTx, view: view}
+	defer tx.Rollback()
 
 	// First call: DB miss → snapshot read → cache populated.
 	hash1, ok, err := blockReader.CanonicalHash(context.Background(), tx, blockNum)
