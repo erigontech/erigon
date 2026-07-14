@@ -102,7 +102,7 @@ func (t *spanBlockProducersTracker) Run(ctx context.Context) error {
 	}
 }
 
-// Anticipates a new span to be observe and fully processed withing the given timeout period.
+// Anticipates a new span to be observe and fully processed within the given timeout period.
 // Returns true if a new span was processed, false if no new span was processed
 func (t *spanBlockProducersTracker) AnticipateNewSpanWithTimeout(ctx context.Context, timeout time.Duration) (bool, error) {
 	select {

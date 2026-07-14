@@ -25,8 +25,8 @@ import (
 	"github.com/erigontech/erigon/common"
 	dir2 "github.com/erigontech/erigon/common/dir"
 	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/db/dbservices"
 	"github.com/erigontech/erigon/db/fromdb"
-	"github.com/erigontech/erigon/db/services"
 	"github.com/erigontech/erigon/db/snapshotsync"
 	"github.com/erigontech/erigon/db/snaptype"
 	"github.com/erigontech/erigon/polygon/heimdall"
@@ -41,7 +41,7 @@ func (br *BlockRetire) retireBorBlocks(
 	minBlockNum uint64,
 	maxBlockNum uint64,
 	lvl log.Lvl,
-	seeder services.SeederClient,
+	seeder dbservices.SeederClient,
 ) (bool, error) {
 	select {
 	case <-ctx.Done():
@@ -112,7 +112,7 @@ func (br *BlockRetire) retireBorBlocks(
 func (br *BlockRetire) MergeBorBlocks(
 	ctx context.Context,
 	lvl log.Lvl,
-	seeder services.SeederClient,
+	seeder dbservices.SeederClient,
 ) (mergedBlocks bool, err error) {
 	notifier, logger, _, tmpDir, db, workers := br.notifier, br.logger, br.blockReader, br.tmpDir, br.db, int(br.workers.Load())
 	snapshots := br.borSnapshots()

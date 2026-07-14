@@ -601,7 +601,7 @@ func (s *Sentinel) onConnection(_ network.Network, conn network.Conn) {
 			// Handshake had a transport error AND returned invalid — keep anyway.
 			s.peers.RecordHandshakeFailure(peerId)
 		} else {
-			// we were able to succesfully connect, so add this peer to our pool
+			// we were able to successfully connect, so add this peer to our pool
 			s.peers.AddPeer(peerId)
 
 			log.Trace("[Sentinel] Peer validated and added", "peer", peerId)

@@ -33,13 +33,13 @@ import (
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/common/math"
 	"github.com/erigontech/erigon/db/datadir"
+	"github.com/erigontech/erigon/db/dbservices"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/kvcache"
 	"github.com/erigontech/erigon/db/kv/kvcfg"
 	"github.com/erigontech/erigon/db/kv/prune"
 	"github.com/erigontech/erigon/db/kv/rawdbv3"
 	"github.com/erigontech/erigon/db/rawdb"
-	"github.com/erigontech/erigon/db/services"
 	"github.com/erigontech/erigon/execution/bal"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/protocol/misc"
@@ -150,9 +150,9 @@ type BaseAPI struct {
 	_pruneMode                atomic.Pointer[prune.Mode]
 	_commitmentHistoryEnabled atomic.Pointer[bool]
 
-	_blockReader services.FullBlockReader
+	_blockReader dbservices.FullBlockReader
 	_txNumReader rawdbv3.TxNumsReader
-	_txnReader   services.TxnReader
+	_txnReader   dbservices.TxnReader
 	_engine      rules.EngineReader
 
 	bridgeReader bridgeReader
@@ -167,7 +167,7 @@ type BaseAPI struct {
 	balRegenerator      *bal.Regenerator
 }
 
-func NewBaseApi(f *rpchelper.Filters, stateCache kvcache.Cache, blockReader services.FullBlockReader, singleNodeMode bool, evmCallTimeout time.Duration, engine rules.Engine, dirs datadir.Dirs, bridgeReader bridgeReader, rangeLimit int, getLogsMaxResults int, logQueryLimit int) *BaseAPI {
+func NewBaseApi(f *rpchelper.Filters, stateCache kvcache.Cache, blockReader dbservices.FullBlockReader, singleNodeMode bool, evmCallTimeout time.Duration, engine rules.Engine, dirs datadir.Dirs, bridgeReader bridgeReader, rangeLimit int, getLogsMaxResults int, logQueryLimit int) *BaseAPI {
 	var (
 		blocksLRUSize = 128 // ~32Mb
 	)
