@@ -748,8 +748,10 @@ func (pe *parallelExecutor) execImpl(ctx context.Context, execStage *StageState,
 						continue
 					}
 
-					if pe.cfg.chainConfig.IsAmsterdam(applyResult.BlockTime) || pe.cfg.experimentalBAL {
-						if err = ProcessBAL(rwTx, lastHeader, applyResult.TxIO, pe.cfg.chainConfig.IsAmsterdam(applyResult.BlockTime), pe.cfg.experimentalBAL, pe.cfg.dirs.DataDir, pe.logger); err != nil {
+					isAmsterdam := pe.cfg.chainConfig.IsAmsterdam(applyResult.BlockTime)
+					if isAmsterdam || pe.cfg.experimentalBAL {
+						err = ProcessBAL(rwTx, lastHeader, applyResult.TxIO, isAmsterdam, pe.cfg.experimentalBAL, pe.cfg.dirs.DataDir, pe.logger)
+						if err != nil {
 							failInfra(err)
 							continue
 						}
@@ -1766,6 +1768,7 @@ type blockRequest struct {
 	// step-boundary checkpoint the atomic fold doesn't emit.
 	firstTxNum uint64
 	lastTxNum  uint64
+	blockTime  uint64
 	bal        types.BlockAccessList
 }
 
@@ -2073,11 +2076,8 @@ func (result *execResult) finalizeTx(
 	vm *state.VersionMap,
 	stateReader state.StateReader,
 ) (*types.Receipt, state.ReadSet, *state.WriteSet, error) {
-	burntAddr := result.ExecutionResult.BurntContractAddress
-	hasBurnt := !burntAddr.IsNil()
-
-	// Engine post-apply message (e.g., AuRa system calls, EIP-7708 burn logs).
-	if err := result.runPostApplyMessageOnMinIBS(task, txTask, engine, vm, stateReader, hasBurnt, burntAddr); err != nil {
+	// Engine post-apply message (e.g. Bor fee-transfer logs).
+	if err := result.runPostApplyMessageOnMinIBS(task, txTask, engine, vm, stateReader); err != nil {
 		return nil, state.ReadSet{}, nil, err
 	}
 
@@ -2090,33 +2090,15 @@ func (result *execResult) finalizeTx(
 }
 
 // runPostApplyMessageOnMinIBS runs the engine's PostApplyMessage callback
-// (e.g. AuRa system calls, EIP-7708 burn-log emission via
-// LogSelfDestructedAccounts) and appends any resulting logs to result.Logs.
-//
-// This is the load-bearing IntraBlockState use in finalizeTxSimple's
-// post-execution path. It exists to:
-//
-//  1. Read SD'd accounts and their residual balances
-//     (ibs.GetRemovedAccountsWithBalance) so LogSelfDestructedAccounts can
-//     emit EIP-7708 burn logs.
-//  2. Provide a log buffer (ibs.AddLog → ibs.GetLogs) so logs emitted by
-//     postApplyMessageFunc reach the receipt.
-//  3. Run AddBalance bookkeeping for the priority-fee credit so the SD'd
-//     coinbase carries FeeTipped at the time LogSelfDestructedAccounts
-//     inspects it.
-//
-// All three dependencies are slated for removal under #21138 — once the
-// SD-with-balance signal is explicit on ExecutionResult and
-// LogSelfDestructedAccounts returns logs as a value, this method becomes
-// IBS-free and the minimal IBS construction below disappears.
+// (e.g. Bor's AddFeeTransferLog) on a minimal IntraBlockState that serves as
+// the log buffer, and appends the emitted logs to result.Logs so they reach
+// the receipt.
 func (result *execResult) runPostApplyMessageOnMinIBS(
 	task *taskVersion,
 	txTask *exec.TxTask,
 	engine rules.Engine,
 	vm *state.VersionMap,
 	stateReader state.StateReader,
-	hasBurnt bool,
-	burntAddr accounts.Address,
 ) error {
 	if engine == nil {
 		return nil
@@ -2125,11 +2107,9 @@ func (result *execResult) runPostApplyMessageOnMinIBS(
 	if postApplyMessageFunc == nil {
 		return nil
 	}
-
 	blockNum := task.Version().BlockNum
 	txIndex := task.Version().TxIndex
 	chainRules := txTask.EvmBlockContext.Rules(txTask.Config)
-
 	execResult := result.ExecutionResult
 	cbReader := state.NewVersionedStateReader(txIndex, state.ReadSet{}, vm, stateReader)
 	coinbase, err := cbReader.ReadAccountData(result.Coinbase)
@@ -2143,45 +2123,9 @@ func (result *execResult) runPostApplyMessageOnMinIBS(
 	if err != nil {
 		return err
 	}
-
-	// PostApplyMessage needs an IBS — create a minimal one.
 	ibs := state.New(state.NewVersionedStateReader(txIndex, result.TxIn, vm, stateReader))
 	ibs.SetTxContext(blockNum, txIndex)
-	if err := ibs.ApplyVersionedWrites(result.TxOut); err != nil {
-		return err
-	}
-
-	// Mirror serial-exec's txn_executor.go post-message fee distribution
-	// (AddBalance(coinbase, tip) / AddBalance(burnt, burn)) AFTER applying
-	// TxOut. The parallel worker ran with shouldDelayFeeCalc=true, so the
-	// fees aren't in TxOut; the finalize accumulates them onto the
-	// version-map base separately. But the post-apply IBS handed to
-	// postApplyMessageFunc only sees TxOut — without crediting the fees
-	// here it underrepresents the coinbase's balance to LogSelfDestructedAccounts.
-	//
-	// The EIP-7708 case 2 path is the load-bearing one: when the coinbase
-	// is itself a contract that SELFDESTRUCTs during the tx, ApplyVersionedWrites
-	// has marked it selfdestructed with balance=0; AddBalance leaves the
-	// selfdestruct flag intact (Selfdestruct only fires on the addr→clear
-	// transition, not on subsequent balance writes) and restores the priority
-	// fee as residual balance. LogSelfDestructedAccounts' GetRemovedAccountsWithBalance
-	// then reports {coinbase, FeeTipped} and emits the Burn log — matching
-	// serial-exec exactly. https://github.com/erigontech/erigon/issues/21136
-	if err := ibs.AddBalance(result.Coinbase, result.ExecutionResult.FeeTipped, tracing.BalanceIncreaseRewardTransactionFee); err != nil {
-		return err
-	}
-	if hasBurnt && txTask.Config.IsLondon(blockNum) {
-		if err := ibs.AddBalance(burntAddr, result.ExecutionResult.FeeBurnt, tracing.BalanceDecreaseGasBuy); err != nil {
-			return err
-		}
-	}
 	postApplyMessageFunc(ibs, message.From(), result.Coinbase, &execResult, chainRules)
-
-	// Capture PostApplyMessage side effects (logs) — e.g. EIP-7708 Burn
-	// logs from LogSelfDestructedAccounts. Without this they're stranded
-	// on the post-apply ibs and never make it into the receipt, so the
-	// validating consumer recomputes a different receipts root and the
-	// block is rejected as a BadBlock.
 	result.Logs = append(result.Logs, ibs.GetLogs(txTask.TxIndex, txTask.TxHash(), blockNum, txTask.BlockHash())...)
 	return nil
 }
@@ -2881,7 +2825,7 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 					}
 					// Mirror txtask.go's genesis rules-clobber so empty allocs (AuRa ZeroAddress) survive.
 					emptyRemoval := be.blockNum != 0 && pe.cfg.chainConfig.IsEIP161Enabled(be.blockNum)
-					txResult.writes = normalizeWriteSet(rawWrites, be.versionMap, txVersion.TxIndex, resultIncarnation, stateReader, domainStorageKeys, emptyRemoval, pe.cfg.chainConfig.Aura != nil)
+					txResult.writes = normalizeWriteSet(rawWrites, be.versionMap, txVersion.TxIndex, resultIncarnation, stateReader, domainStorageKeys, emptyRemoval, pe.cfg.chainConfig.Aura != nil, txTask.Rules().IsAmsterdam)
 				}
 
 				// Snapshot the finalized result before pushing — prevents
@@ -3336,7 +3280,7 @@ func MergeVersionedWrites(prev, next *state.WriteSet) *state.WriteSet {
 // isn't silent.
 var codePathRecoveryHashMismatch = metrics.GetOrCreateCounter("exec3_codepath_recovery_hash_mismatch")
 
-func normalizeWriteSet(writes *state.WriteSet, vm *state.VersionMap, txIndex int, incarnation int, stateReader state.StateReader, domainStorageKeys func(addr accounts.Address) []accounts.StorageKey, emptyRemoval bool, isAura bool) *state.WriteSet {
+func normalizeWriteSet(writes *state.WriteSet, vm *state.VersionMap, txIndex int, incarnation int, stateReader state.StateReader, domainStorageKeys func(addr accounts.Address) []accounts.StorageKey, emptyRemoval bool, isAura bool, eip8246 bool) *state.WriteSet {
 	filtered := &state.WriteSet{}
 	if writes == nil {
 		return filtered
@@ -3405,8 +3349,15 @@ func normalizeWriteSet(writes *state.WriteSet, vm *state.VersionMap, txIndex int
 		// explicit StoragePath=0 delete for every slot via sdStorageSlots).
 		if sdSet[h.Address] {
 			switch h.Path {
-			case state.BalancePath, state.NoncePath, state.IncarnationPath, state.CodeHashPath, state.CodePath, state.StoragePath:
+			case state.NoncePath, state.IncarnationPath, state.CodeHashPath, state.CodePath, state.StoragePath:
 				continue
+			case state.BalancePath:
+				// EIP-8246 keeps the post-SD balance so the calculator can
+				// preserve a balance-only account (or delete it when zero);
+				// pre-8246 drops it so the account is purely deleted.
+				if !eip8246 {
+					continue
+				}
 			}
 		}
 		switch h.Path {
