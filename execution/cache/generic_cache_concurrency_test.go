@@ -24,6 +24,8 @@ import (
 
 	"github.com/c2h5oh/datasize"
 	"github.com/stretchr/testify/require"
+
+	"github.com/erigontech/erigon/common/maphash"
 )
 
 // TestGenericCache_ConcurrentPutAcrossGrow guards the jump-grow data race:
@@ -185,4 +187,36 @@ func TestGenericCache_PutIfAbsentDefersAcrossGrow(t *testing.T) {
 		require.Equal(t, fresh, v, "round %d: PutIfAbsent bypassed the live entry across a grow", round)
 		c.Close()
 	}
+}
+
+// A capacity eviction is a size-subtracting writer the put stripes cannot
+// serialize: freelru picks its victim per shard (hash bits 16+), so an insert
+// on one stripe can evict a key whose own update — on another stripe — is
+// between its Get and Add; delta accounting against the pre-eviction size then
+// double-subtracts. Capacity 1 collapses freelru to a single shard, making any
+// two keys same-shard; the keys are chosen to differ in their put stripe. Each
+// hit leaks negative size; drift accumulates and shows after the settle
+// deletes.
+func TestGenericCache_CapacityEvictionAtomicWithPut_NoSizeDrift(t *testing.T) {
+	c := newGenericCacheEntries(1*datasize.MB, 1, func(v []byte) int { return len(v) }, ModeEvictLRU)
+	a := makeAddr(1)
+	var b []byte
+	for i := 2; ; i++ {
+		b = makeAddr(i)
+		if maphash.Hash(a)&(putStripeCount-1) != maphash.Hash(b)&(putStripeCount-1) {
+			break
+		}
+	}
+	v := []byte("value-one")
+	for round := 0; round < 100000; round++ {
+		c.Put(b, v, 10)
+		var wg sync.WaitGroup
+		wg.Add(2)
+		go func() { defer wg.Done(); c.Put(a, v, 10) }() // insert → evicts b (cap 1)
+		go func() { defer wg.Done(); c.Put(b, v, 20) }() // same-key update path
+		wg.Wait()
+	}
+	c.Delete(a)
+	c.Delete(b)
+	require.Zero(t, c.SizeBytes(), "capacity eviction raced the update-path delta")
 }

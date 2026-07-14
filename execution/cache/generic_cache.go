@@ -173,7 +173,11 @@ func newGenericCacheEntries[T any](capacityBytes datasize.ByteSize, capacityEntr
 }
 
 // newShards builds a sharded LRU of the given capacity with this cache's evict
-// callback wired, so currentSize follows capacity-driven eviction and Remove.
+// callback wired. The callback is the sole subtractor of currentSize — every
+// removal (capacity eviction, Remove) accounts through it. Freelru picks
+// eviction victims per shard (hash bits 16+), which the put stripes (bits 0-7)
+// don't cover, so any subtraction computed outside the callback races a
+// cross-stripe eviction of the same entry.
 func (c *GenericCache[T]) newShards(capacity uint32) *freelru.ShardedLRU[uint64, entry[T]] {
 	lru, err := freelru.NewSharded[uint64, entry[T]](capacity, u64identity)
 	if err != nil {
@@ -334,15 +338,16 @@ func (c *GenericCache[T]) putLocked(key []byte, value T, txNum uint64, overwrite
 	lru := c.data.Load()
 	existing, hasExisting := lru.Get(h)
 
-	// Existing key — update in place. Reuse the stored key buffer to
-	// avoid an extra allocation; the freshly-decoded value replaces the
-	// old one.
+	// Existing key — update by remove-then-add (see newShards for why a size
+	// delta would be wrong). Reuse the stored key buffer to avoid an extra
+	// allocation; the freshly-decoded value replaces the old one.
 	if hasExisting && bytes.Equal(existing.key, key) {
 		if !overwrite && !c.coh.IsStale(existing.txNum, existing.epoch) {
 			return false
 		}
+		c.removeLocked(lru, h)
 		lru.Add(h, entry[T]{key: existing.key, val: value, size: newSize, txNum: txNum, epoch: ep})
-		c.currentSize.Add(int64(newSize - existing.size))
+		c.currentSize.Add(int64(newSize))
 		return false
 	}
 
@@ -371,11 +376,10 @@ func (c *GenericCache[T]) putLocked(key []byte, value T, txNum uint64, overwrite
 	// balcache.go / db/state/cache.go accept.
 
 	// hasExisting here means a 64-bit maphash collision (different key, same
-	// hash): freelru.Add replaces the colliding entry in place WITHOUT firing
-	// OnEvict, so subtract the displaced size now — otherwise currentSize drifts
-	// up by it permanently.
+	// hash): remove the colliding entry first so OnEvict accounts for it —
+	// freelru.Add would replace it in place without firing OnEvict.
 	if hasExisting {
-		c.currentSize.Add(-int64(existing.size))
+		c.removeLocked(lru, h)
 	}
 	keyCopy := common.Copy(key)
 	lru.Add(h, entry[T]{key: keyCopy, val: value, size: newSize, txNum: txNum, epoch: ep})
@@ -384,9 +388,18 @@ func (c *GenericCache[T]) putLocked(key []byte, value T, txNum uint64, overwrite
 	return needGrow
 }
 
-// Delete removes the data for the given key. Runs under the key's put stripe:
-// an unstriped Remove racing put's read-modify-write would double-subtract the
-// displaced entry's size (once via OnEvict, once via put's update delta).
+// removeLocked removes h under the caller-held stripe, deferring the size
+// subtraction to OnEvict (see newShards). The evictions metric is compensated:
+// an intentional removal is not a capacity eviction.
+func (c *GenericCache[T]) removeLocked(lru *freelru.ShardedLRU[uint64, entry[T]], h uint64) {
+	if lru.Remove(h) {
+		c.evictions.Add(^uint64(0))
+	}
+}
+
+// Delete removes the data for the given key. Runs under the key's put stripe
+// so the check-then-remove is atomic against same-key puts and excluded from
+// generation swaps (maybeGrow, Clear), which fence via the stripes.
 func (c *GenericCache[T]) Delete(key []byte) {
 	h := maphash.Hash(key)
 	mu := &c.putStripes[h&(putStripeCount-1)]
@@ -394,21 +407,20 @@ func (c *GenericCache[T]) Delete(key []byte) {
 	defer mu.Unlock()
 	lru := c.data.Load()
 	if existing, ok := lru.Get(h); ok && bytes.Equal(existing.key, key) {
-		lru.Remove(h)
+		c.removeLocked(lru, h)
 	}
 }
 
 // dropStale removes key's entry under its put stripe: the re-check keeps an
-// entry a concurrent put revived, and striping the Remove stops it
-// double-subtracting the displaced size against put's update delta (once via
-// OnEvict, once via the delta).
+// entry a concurrent put revived, and the stripe keeps the removal out of
+// generation swaps.
 func (c *GenericCache[T]) dropStale(h uint64, key []byte) {
 	mu := &c.putStripes[h&(putStripeCount-1)]
 	mu.Lock()
 	defer mu.Unlock()
 	lru := c.data.Load()
 	if e, ok := lru.Get(h); ok && bytes.Equal(e.key, key) && c.coh.IsStale(e.txNum, e.epoch) {
-		lru.Remove(h)
+		c.removeLocked(lru, h)
 	}
 }
 
