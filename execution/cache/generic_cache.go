@@ -336,12 +336,15 @@ func (c *GenericCache[T]) putLocked(key []byte, value T, txNum uint64, overwrite
 	h := maphash.Hash(key)
 	valBytes := c.sizeFunc(value)
 	newSize := len(key) + valBytes + 24
-	ep := c.coh.Epoch()
 
 	mu := &c.putStripes[h&(putStripeCount-1)]
 	mu.Lock()
 	defer mu.Unlock()
 
+	// Sample the epoch under the stripe: Clear resets the epoch counter inside
+	// the fence, so a stamp read outside could alias a future epoch and let a
+	// dead-fork entry survive a later unwind.
+	ep := c.coh.Epoch()
 	lru := c.data.Load()
 	existing, hasExisting := lru.Get(h)
 

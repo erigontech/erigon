@@ -21,6 +21,7 @@ import (
 	"sync"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/c2h5oh/datasize"
 	"github.com/stretchr/testify/require"
@@ -219,4 +220,39 @@ func TestGenericCache_CapacityEvictionAtomicWithPut_NoSizeDrift(t *testing.T) {
 	c.Delete(a)
 	c.Delete(b)
 	require.Zero(t, c.SizeBytes(), "capacity eviction raced the update-path delta")
+}
+
+// A put samples the coherence epoch and then contends for its stripe; a Clear
+// that wins the stripe first resets the epoch counter, so the put would stamp
+// a pre-Clear epoch onto an entry landing in the post-Clear generation. Once
+// a later unwind re-reaches that epoch value, the entry aliases the live
+// epoch and serves dead-fork state despite its txNum being at or above the
+// floor.
+//
+// The test holds the key's stripe to park Clear on it (before the reset,
+// which runs inside the fence) and then the put behind it; waits beyond 1ms
+// put the mutex in starvation mode, so unlocking hands the stripe FIFO to
+// Clear first.
+func TestGenericCache_ClearRacingPut_EpochAlias(t *testing.T) {
+	c := NewGenericCache[[]byte](64*datasize.MB, func(v []byte) int { return len(v) }, ModeEvictLRU)
+	defer c.Close()
+	c.Unwind(300) // epoch 0 -> 1
+
+	key := []byte("epoch-alias-key")
+	mu := &c.putStripes[maphash.Hash(key)&(putStripeCount-1)]
+	mu.Lock()
+
+	var wg sync.WaitGroup
+	wg.Add(2)
+	go func() { defer wg.Done(); c.Clear() }()
+	time.Sleep(5 * time.Millisecond)
+	go func() { defer wg.Done(); c.Put(key, []byte("dead-fork-value"), 200) }()
+	time.Sleep(5 * time.Millisecond)
+	mu.Unlock()
+	wg.Wait()
+
+	c.Unwind(150) // epoch 0 -> 1 again, floor 150
+
+	_, ok := c.Get(key)
+	require.False(t, ok, "entry at txNum 200 outlived an unwind to 150: its pre-Clear epoch stamp aliases the live epoch")
 }
