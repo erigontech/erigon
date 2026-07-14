@@ -140,12 +140,8 @@ func (aa AccessSet) Merge(other AccessSet) AccessSet {
 		return aa
 	}
 	dst := make(AccessSet, len(aa)+len(other))
-	for addr, opt := range aa {
-		dst[addr] = opt
-	}
-	for addr, opt := range other {
-		dst[addr] = opt
-	}
+	maps.Copy(dst, aa)
+	maps.Copy(dst, other)
 	return dst
 }
 
@@ -2474,9 +2470,7 @@ func (sdb *IntraBlockState) AccessedAddresses() AccessSet {
 		return nil
 	}
 	out := make(AccessSet, len(sdb.addressAccess))
-	for addr, opts := range sdb.addressAccess {
-		out[addr] = opts
-	}
+	maps.Copy(out, sdb.addressAccess)
 	sdb.recordAccess = false
 	sdb.addressAccess = nil
 	return out

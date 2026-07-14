@@ -2088,9 +2088,7 @@ func (io *VersionedIO) RecordAccesses(txVersion Version, addresses AccessSet) {
 		io.accessed = append(io.accessed, make([]AccessSet, txVersion.TxIndex+2-len(io.accessed))...)
 	}
 	dest := make(AccessSet, len(addresses))
-	for addr, opt := range addresses {
-		dest[addr] = opt
-	}
+	maps.Copy(dest, addresses)
 	io.accessed[txVersion.TxIndex+1] = dest
 }
 

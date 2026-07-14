@@ -206,17 +206,6 @@ func DefaultBlockPostValidation(chainConfig *chain.Config, header *types.Header,
 	if gasUsed != header.GasUsed {
 		logger.Warn("gas used mismatch", "block", header.Number.Uint64(), "header", header.GasUsed, "execution", gasUsed,
 			"diff", int64(gasUsed)-int64(header.GasUsed), "txCount", len(txns), "receiptCount", len(receipts))
-		var cumGas uint64
-		for i, r := range receipts {
-			txGas := r.GasUsed
-			cumGas += txGas
-			var txHash string
-			if i < len(txns) {
-				txHash = txns[i].Hash().Hex()[:18]
-			}
-			logger.Warn("  tx gas detail", "block", header.Number.Uint64(), "txIdx", i, "txHash", txHash,
-				"gasUsed", txGas, "cumGasUsed", r.CumulativeGasUsed, "computedCumGas", cumGas, "status", r.Status)
-		}
 		return fmt.Errorf("gas used by execution: %d, in header: %d, headerNum=%d, %x",
 			gasUsed, header.GasUsed, header.Number.Uint64(), header.Hash())
 	}

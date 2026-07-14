@@ -266,7 +266,6 @@ func fetchPayload(t testing.TB, blockTag string) []byte {
 
 func TestGzipHandlerLatency(t *testing.T) {
 	for _, blk := range historicalBlocks {
-		blk := blk
 		t.Run(blk.desc, func(t *testing.T) {
 			payload := fetchPayload(t, blk.tag)
 			if payload == nil {
@@ -290,7 +289,6 @@ func TestRPCDaemonLatency(t *testing.T) {
 	var sb strings.Builder
 
 	for _, blk := range historicalBlocks {
-		blk := blk
 		t.Run(blk.desc, func(t *testing.T) {
 			stat := measureRPCLatency(t, rpcEndpoint, blk.tag)
 			line := fmt.Sprintf("%-52s  %s\n", blk.desc, stat)
