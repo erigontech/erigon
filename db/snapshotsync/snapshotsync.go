@@ -26,12 +26,11 @@ import (
 	"time"
 
 	"github.com/erigontech/erigon/common/log/v3"
-	"github.com/erigontech/erigon/db/downloader"
+	"github.com/erigontech/erigon/db/dbservices"
 	"github.com/erigontech/erigon/db/downloader/downloadergrpc"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/prune"
 	"github.com/erigontech/erigon/db/kv/rawdbv3"
-	"github.com/erigontech/erigon/db/services"
 	"github.com/erigontech/erigon/db/snapcfg"
 	"github.com/erigontech/erigon/db/snaptype"
 	"github.com/erigontech/erigon/db/snaptype2"
@@ -52,7 +51,7 @@ const (
 )
 
 func BuildDownloadRequest(
-	downloadRequest []services.DownloadRequest,
+	downloadRequest []dbservices.DownloadRequest,
 	logTarget string,
 ) *downloaderproto.DownloadRequest {
 	req := &downloaderproto.DownloadRequest{
@@ -71,8 +70,8 @@ func BuildDownloadRequest(
 // RequestSnapshotsDownload - builds the snapshots download request and downloads them
 func RequestSnapshotsDownload(
 	ctx context.Context,
-	downloadRequest []services.DownloadRequest,
-	downloaderClient downloader.Client,
+	downloadRequest []dbservices.DownloadRequest,
+	downloaderClient dbservices.DownloaderClient,
 	logTarget string,
 ) error {
 	// start seed large .seg of large size
@@ -188,12 +187,11 @@ func buildBlackListForPruning(
 }
 
 type blockReader interface {
-	Snapshots() services.BlockSnapshots
-	BorSnapshots() services.BlockSnapshots
+	Snapshots() dbservices.BlockSnapshots
+	BorSnapshots() dbservices.BlockSnapshots
 	IterateFrozenBodies(tx kv.Getter, _ func(blockNum uint64, baseTxNum uint64, txCount uint64) error) error
 	FreezingCfg() ethconfig.BlocksFreezing
 	AllTypes() []snaptype.Type
-	FrozenFiles() (list []string)
 	TxnumReader() rawdbv3.TxNumsReader
 }
 
@@ -409,7 +407,7 @@ func SyncSnapshots(
 	tx kv.RwTx,
 	blockReader blockReader,
 	cc *chain.Config,
-	snapshotDownloader downloader.Client,
+	snapshotDownloader dbservices.DownloaderClient,
 	syncCfg ethconfig.Sync,
 	stepSize uint64,
 ) error {
@@ -462,7 +460,7 @@ func SyncSnapshots(
 
 		// send all hashes to the Downloader service
 		preverifiedBlockSnapshots := snapCfg.Preverified
-		downloadRequest := make([]services.DownloadRequest, 0, len(preverifiedBlockSnapshots.Items))
+		downloadRequest := make([]dbservices.DownloadRequest, 0, len(preverifiedBlockSnapshots.Items))
 
 		blockPrune, historyPrune := computeBlocksToPrune(blockReader, prune)
 		blackListForPruning := make(map[string]struct{})
@@ -561,7 +559,7 @@ func SyncSnapshots(
 				continue
 			}
 
-			downloadRequest = append(downloadRequest, services.DownloadRequest{
+			downloadRequest = append(downloadRequest, dbservices.DownloadRequest{
 				Path:        p.Name,
 				TorrentHash: p.Hash,
 			})

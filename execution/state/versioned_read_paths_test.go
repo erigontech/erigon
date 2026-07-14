@@ -65,7 +65,7 @@ func TestVersionedRead_B_DeletedStateObjectReturnsDefault(t *testing.T) {
 	ibs.CreateAccount(addr, true)
 	err := ibs.SetBalance(addr, *uint256.NewInt(50), 0)
 	require.NoError(t, err)
-	_, err = ibs.Selfdestruct(addr)
+	_, err = ibs.Selfdestruct(addr, false)
 	require.NoError(t, err)
 	// After Selfdestruct, GetBalance on the same address returns zero per
 	// EIP semantics (deleted in this tx).

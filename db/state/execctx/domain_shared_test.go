@@ -62,7 +62,7 @@ func newTestDb(tb testing.TB, stepSize uint64) kv.TemporalRwDB {
 	tb.Cleanup(agg.Close)
 	err := agg.OpenFolder()
 	require.NoError(tb, err)
-	tdb, err := temporal.New(db, agg)
+	tdb, err := temporal.New(db, agg, nil)
 	require.NoError(tb, err)
 	return tdb
 }
@@ -1593,6 +1593,69 @@ func TestDomainPut_HistoryCorrectness(t *testing.T) {
 			}
 			require.Equal(t, expectedChanges, actualEntries,
 				"history entries (%d) should equal actual value changes (%d)", actualEntries, expectedChanges)
+		})
+	}
+}
+
+// History records the value as of BEFORE a txNum, so when a key is written
+// more than once at the same txNum only the first write's prev is correct.
+// The parallel executor's block cache flushes an EIP-8246 balance-preserving
+// SELFDESTRUCT as DomainDel followed by DomainPut at one txNum; recording the
+// put's intermediate "deleted" prev makes GetAsOf(ts <= txNum) lose the
+// pre-existing account.
+func TestDomainSameTxNumUpdate_HistoryKeepsFirstPrev(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct {
+		name   string
+		second func(domains *execctx.SharedDomains, rwTx kv.TemporalRwTx, key []byte, v1 []byte) error
+	}{
+		{name: "del-then-put", second: func(domains *execctx.SharedDomains, rwTx kv.TemporalRwTx, key []byte, v1 []byte) error {
+			err := domains.DomainDel(kv.AccountsDomain, rwTx, key, 10, nil)
+			if err != nil {
+				return err
+			}
+			return domains.DomainPut(kv.AccountsDomain, rwTx, key, v1, 10, nil)
+		}},
+		{name: "put-then-put", second: func(domains *execctx.SharedDomains, rwTx kv.TemporalRwTx, key []byte, v1 []byte) error {
+			interim := accounts3.Account{Nonce: 7, Balance: *uint256.NewInt(7), CodeHash: accounts.EmptyCodeHash}
+			err := domains.DomainPut(kv.AccountsDomain, rwTx, key, accounts3.SerialiseV3(&interim), 10, nil)
+			if err != nil {
+				return err
+			}
+			return domains.DomainPut(kv.AccountsDomain, rwTx, key, v1, 10, nil)
+		}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			ctx := t.Context()
+			db := newTestDb(t, 1000)
+			rwTx, err := db.BeginTemporalRw(ctx)
+			require.NoError(t, err)
+			defer rwTx.Rollback()
+			domains, err := execctx.NewSharedDomains(ctx, rwTx, log.New())
+			require.NoError(t, err)
+			defer domains.Close()
+			key := make([]byte, length.Addr)
+			key[0] = 0xAB
+			acc0 := accounts3.Account{Nonce: 0, Balance: *uint256.NewInt(1), CodeHash: accounts.EmptyCodeHash}
+			v0 := accounts3.SerialiseV3(&acc0)
+			acc1 := accounts3.Account{Nonce: 0, Balance: *uint256.NewInt(2), CodeHash: accounts.EmptyCodeHash}
+			v1 := accounts3.SerialiseV3(&acc1)
+			require.NoError(t, domains.DomainPut(kv.AccountsDomain, rwTx, key, v0, 5, nil))
+			require.NoError(t, tc.second(domains, rwTx, key, v1))
+			require.NoError(t, domains.Flush(ctx, rwTx))
+			got, ok, err := rwTx.GetAsOf(kv.AccountsDomain, key, 10)
+			require.NoError(t, err)
+			require.True(t, ok, "value before txNum 10 must exist (written at txNum 5)")
+			require.Equal(t, v0, got, "GetAsOf(10) must see the txNum-5 value, not the same-txNum intermediate")
+			got, ok, err = rwTx.GetAsOf(kv.AccountsDomain, key, 11)
+			require.NoError(t, err)
+			require.True(t, ok)
+			require.Equal(t, v1, got, "GetAsOf(11) must see the final txNum-10 value")
+			got, ok, err = rwTx.GetAsOf(kv.AccountsDomain, key, 5)
+			require.NoError(t, err)
+			require.False(t, ok, "the key was created at txNum 5, so before it there is nothing to find")
+			require.Empty(t, got, "GetAsOf(5) is before the first write")
 		})
 	}
 }

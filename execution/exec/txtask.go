@@ -599,13 +599,6 @@ func (txTask *TxTask) Execute(evm *vm.EVM,
 		}()
 
 		if result.Err == nil {
-			// Capture residual-balance selfdestructs before SoftFinalise clears the
-			// journal.  These are accounts selfdestructed in this tx that also received
-			// ETH after the SELFDESTRUCT opcode (EIP-7708 case 2).  SoftFinalise calls
-			// clearJournalAndRefund, so GetRemovedAccountsWithBalance returns nothing
-			// afterwards.
-			result.ExecutionResult.SelfDestructedWithBalance = ibs.GetRemovedAccountsWithBalance()
-
 			// The versionMap path produces its write-set from the recorded IO
 			// after the switch; only the serial path clears pending changes here.
 			if !ibs.IsVersioned() {

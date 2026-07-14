@@ -42,7 +42,7 @@ func TestSelfdestructParallel_NoMaterialize(t *testing.T) {
 	ibs.SetTxContext(100, 5)
 	ibs.SetVersion(0)
 
-	destroyed, err := ibs.Selfdestruct(addr)
+	destroyed, err := ibs.Selfdestruct(addr, false)
 	require.NoError(t, err)
 	assert.True(t, destroyed, "existing account should be destroyed")
 
@@ -73,13 +73,13 @@ func TestSelfdestructParallel_RepeatedSameTx(t *testing.T) {
 	ibs.SetTxContext(100, 5)
 	ibs.SetVersion(0)
 
-	destroyed, err := ibs.Selfdestruct(addr)
+	destroyed, err := ibs.Selfdestruct(addr, false)
 	require.NoError(t, err)
 	require.True(t, destroyed)
 
 	require.NoError(t, ibs.AddBalance(addr, *uint256.NewInt(30), tracing.BalanceChangeUnspecified))
 
-	destroyed, err = ibs.Selfdestruct(addr)
+	destroyed, err = ibs.Selfdestruct(addr, false)
 	require.NoError(t, err)
 	assert.True(t, destroyed, "repeat same-tx SELFDESTRUCT should still report destroyed")
 
@@ -87,33 +87,6 @@ func TestSelfdestructParallel_RepeatedSameTx(t *testing.T) {
 	bal, ok := writes.GetBalance(addr)
 	require.True(t, ok)
 	assert.True(t, bal.Val.IsZero(), "balance credited between the two SELFDESTRUCTs must be re-cleared")
-}
-
-// TestSelfdestructParallel_ResidualBalanceBurnList verifies that a balance
-// credited after SELFDESTRUCT (EIP-7708 case 2) is reported by
-// GetRemovedAccountsWithBalance on the parallel path, where the self-destruct
-// left no cached stateObject.
-func TestSelfdestructParallel_ResidualBalanceBurnList(t *testing.T) {
-	addr := accounts.InternAddress([20]byte{0xDE, 0xAD})
-	acc := accounts.NewAccount()
-	acc.Balance = *uint256.NewInt(100)
-	acc.Nonce = 1
-
-	reader := &sdAccountReader{addr: addr, account: &acc}
-	ibs := NewWithVersionMap(reader, NewVersionMap(nil))
-	ibs.SetTxContext(100, 5)
-	ibs.SetVersion(0)
-
-	destroyed, err := ibs.Selfdestruct(addr)
-	require.NoError(t, err)
-	require.True(t, destroyed)
-
-	require.NoError(t, ibs.AddBalance(addr, *uint256.NewInt(50), tracing.BalanceChangeUnspecified))
-
-	removed := ibs.GetRemovedAccountsWithBalance()
-	require.Len(t, removed, 1, "residual-balance self-destruct must be in the burn list")
-	assert.Equal(t, addr.Value(), removed[0].Address)
-	assert.Equal(t, uint256.NewInt(50), &removed[0].Balance)
 }
 
 // TestSelfdestructParallel_AbsentAccount verifies that self-destructing an
@@ -127,7 +100,7 @@ func TestSelfdestructParallel_AbsentAccount(t *testing.T) {
 	ibs.SetTxContext(100, 5)
 	ibs.SetVersion(0)
 
-	destroyed, err := ibs.Selfdestruct(addr)
+	destroyed, err := ibs.Selfdestruct(addr, false)
 	require.NoError(t, err)
 	assert.False(t, destroyed, "absent account cannot be destroyed")
 	assert.Empty(t, ibs.stateObjects, "absent-account Selfdestruct must not materialize a stateObject")

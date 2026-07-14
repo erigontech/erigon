@@ -141,7 +141,7 @@ func newTestAction(addr accounts.Address, r *rand.Rand) testAction {
 		{
 			name: "Selfdestruct",
 			fn: func(a testAction, s *IntraBlockState) {
-				s.Selfdestruct(addr)
+				s.Selfdestruct(addr, false)
 			},
 		},
 		{
@@ -480,7 +480,7 @@ func TestVersionMapReadWriteDelete(t *testing.T) {
 	// Materialize explicitly here — as Tx1 does — so FinalizeTx's updateAccount
 	// marks the object deleted and the post-finalize read observes the wipe.
 	states[3].GetOrNewStateObject(addr)
-	states[3].Selfdestruct(addr)
+	states[3].Selfdestruct(addr, false)
 
 	// Within Tx 3, the state should not change before finalize
 	v, err = states[3].GetState(addr, key)
@@ -543,7 +543,7 @@ func TestVersionMapRevert(t *testing.T) {
 	assert.Equal(t, u256.U64(200), b)
 	assert.Equal(t, u256.U64(1), v)
 
-	states[1].Selfdestruct(addr)
+	states[1].Selfdestruct(addr, false)
 
 	states[1].RevertToSnapshot(snapshot, nil)
 	states[1].PopSnapshot(snapshot)
@@ -949,12 +949,12 @@ func TestApplyVersionedWrites(t *testing.T) {
 	sClean.ApplyVersionedWrites(states[2].VersionedWrites())
 
 	// Tx3 write
-	states[3].Selfdestruct(addr2)
+	states[3].Selfdestruct(addr2, false)
 	states[3].SetCode(addr1, code, tracing.CodeChangeUnspecified)
 	states[3].FinalizeTx(&chain.Rules{}, NewWriter(domains.AsPutDel(tx), nil, 0))
 	states[3].versionMap.FlushVersionedWrites(states[3].VersionedWrites(), true, "")
 
-	sSingleProcess.Selfdestruct(addr2)
+	sSingleProcess.Selfdestruct(addr2, false)
 	sSingleProcess.SetCode(addr1, code, tracing.CodeChangeUnspecified)
 
 	sClean.ApplyVersionedWrites(states[3].VersionedWrites())

@@ -57,7 +57,7 @@ import (
 // isn't silent.
 var codePathRecoveryHashMismatch = metrics.GetOrCreateCounter("exec3_codepath_recovery_hash_mismatch")
 
-func (writes *WriteSet) Normalize(vm *VersionMap, txIndex int, incarnation int, stateReader StateReader, domainStorageKeys func(addr accounts.Address) []accounts.StorageKey, emptyRemoval bool, isAura bool) *WriteSet {
+func (writes *WriteSet) Normalize(vm *VersionMap, txIndex int, incarnation int, stateReader StateReader, domainStorageKeys func(addr accounts.Address) []accounts.StorageKey, emptyRemoval bool, isAura bool, eip8246 bool) *WriteSet {
 	filtered := &WriteSet{}
 	if writes == nil {
 		return filtered
@@ -126,8 +126,15 @@ func (writes *WriteSet) Normalize(vm *VersionMap, txIndex int, incarnation int, 
 		// explicit StoragePath=0 delete for every slot via sdStorageSlots).
 		if sdSet[h.Address] {
 			switch h.Path {
-			case BalancePath, NoncePath, IncarnationPath, CodeHashPath, CodePath, StoragePath:
+			case NoncePath, IncarnationPath, CodeHashPath, CodePath, StoragePath:
 				continue
+			case BalancePath:
+				// EIP-8246 keeps the post-SD balance so the calculator can
+				// preserve a balance-only account (or delete it when zero);
+				// pre-8246 drops it so the account is purely deleted.
+				if !eip8246 {
+					continue
+				}
 			}
 		}
 		switch h.Path {
