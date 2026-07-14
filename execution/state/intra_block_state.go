@@ -2085,7 +2085,7 @@ func (sdb *IntraBlockState) FinalizeTx(chainRules *chain.Rules, stateWriter Stat
 			continue
 		}
 
-		if err := updateAccount(chainRules.IsEIP161Enabled(), chainRules.IsAura, stateWriter, addr, so, true, sdb.trace, sdb.tracingHooks, false, chainRules.IsAmsterdam && !chainRules.IsEIPDisabled(8246)); err != nil {
+		if err := updateAccount(chainRules.IsEIP161Enabled(), chainRules.IsAura, stateWriter, addr, so, true, sdb.trace, sdb.tracingHooks, false, chainRules.IsAmsterdam); err != nil {
 			return err
 		}
 
@@ -2175,7 +2175,7 @@ func (sdb *IntraBlockState) CommitOverrideDirtyAccounts(chainRules *chain.Rules,
 		if !exists || so.deleted {
 			continue
 		}
-		if err := updateAccount(false, chainRules.IsAura, stateWriter, addr, so, true, sdb.trace, sdb.tracingHooks, true, chainRules.IsAmsterdam && !chainRules.IsEIPDisabled(8246)); err != nil {
+		if err := updateAccount(false, chainRules.IsAura, stateWriter, addr, so, true, sdb.trace, sdb.tracingHooks, true, chainRules.IsAmsterdam); err != nil {
 			return err
 		}
 	}
@@ -2217,7 +2217,7 @@ func (sdb *IntraBlockState) MakeWriteSet(chainRules *chain.Rules, stateWriter St
 		if dbg.TraceTransactionIO && (sdb.trace || dbg.TraceAccount(addr.Handle())) {
 			fmt.Printf("%d (%d.%d) Update Account %x\n", sdb.blockNum, sdb.txIndex, sdb.version, addr)
 		}
-		if err := updateAccount(chainRules.IsEIP161Enabled(), chainRules.IsAura, stateWriter, addr, stateObject, isDirty, sdb.trace, sdb.tracingHooks, true, chainRules.IsAmsterdam && !chainRules.IsEIPDisabled(8246)); err != nil {
+		if err := updateAccount(chainRules.IsEIP161Enabled(), chainRules.IsAura, stateWriter, addr, stateObject, isDirty, sdb.trace, sdb.tracingHooks, true, chainRules.IsAmsterdam); err != nil {
 			return err
 		}
 		// Per EIP-6780 + EIP-7928: a SELFDESTRUCT against a SAME-TX created
@@ -2314,7 +2314,7 @@ func (sdb *IntraBlockState) Prepare(rules *chain.Rules, sender, coinbase account
 	if dbg.TraceTransactionIO && (sdb.trace || dbg.TraceAccount(sender.Handle()) || !dst.IsNil() && dbg.TraceAccount(dst.Handle())) {
 		fmt.Printf("%d (%d.%d) ibs.Prepare: sender: %x, coinbase: %x, dest: %x, %x, %v, %v, %v\n", sdb.blockNum, sdb.txIndex, sdb.version, sender, coinbase, dst, precompiles, list, rules, authorities)
 	}
-	sdb.eip8246 = rules.IsAmsterdam && !rules.IsEIPDisabled(8246)
+	sdb.eip8246 = rules.IsAmsterdam
 	if rules.IsBerlin {
 		// Clear out any leftover from previous executions
 		sdb.accessList.Reset()

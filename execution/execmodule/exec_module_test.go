@@ -54,6 +54,7 @@ import (
 	"github.com/erigontech/erigon/execution/state/contracts"
 	"github.com/erigontech/erigon/execution/tests/blockgen"
 	"github.com/erigontech/erigon/execution/types"
+	"github.com/erigontech/erigon/execution/types/accounts"
 	"github.com/erigontech/erigon/node/gointerfaces/txpoolproto"
 )
 
@@ -2072,6 +2073,27 @@ func TestEIP8246NoBurnLogWhenCoinbaseSelfDestructs(t *testing.T) {
 
 	// Insert + validate + FCU proves the state root is computed correctly.
 	err = insertValidateAndUfc1By1(ctx, m.ExecModule, chainPack.Blocks)
+	require.NoError(t, err)
+
+	// EIP-8246 preserves the self-destructed coinbase: the priority fee
+	// credited at finalization is retained (pre-8246 the account was deleted
+	// and the fee burned), and the record is balance-only — nonce, code hash
+	// and storage cleared.
+	err = m.DB.ViewTemporal(ctx, func(tx kv.TemporalTx) error {
+		enc, _, err := tx.GetLatest(kv.AccountsDomain, coinbaseAddr[:])
+		if err != nil {
+			return err
+		}
+		require.NotEmpty(t, enc, "the self-destructed coinbase must be preserved, not deleted")
+		var acc accounts.Account
+		require.NoError(t, accounts.DeserialiseV3(&acc, enc))
+		require.False(t, acc.Balance.IsZero(), "the credited priority fee must not be burned")
+		expected := accounts.NewAccount()
+		expected.Balance = acc.Balance
+		require.Equal(t, accounts.SerialiseV3(&expected), enc,
+			"the preserved coinbase must be a balance-only record")
+		return nil
+	})
 	require.NoError(t, err)
 }
 

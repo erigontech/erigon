@@ -336,8 +336,7 @@ func (cc *commitmentCalculator) handleMessage(ctx context.Context, msg applyResu
 		// the lazy-load path and never leaks into the trie fold path.
 		if !r.writes.IsEmpty() {
 			cc.asOfReader.txNum = r.txNum
-			eip8246 := r.rules.IsAmsterdam && !r.rules.IsEIPDisabled(8246)
-			cc.state.ApplyWrites(r.writes, eip8246)
+			cc.state.ApplyWrites(r.writes, r.rules.IsAmsterdam)
 		}
 
 		// A folded-ahead block already emitted its interior step checkpoints from
