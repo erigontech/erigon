@@ -25,7 +25,6 @@ import (
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/log/v3"
-	"github.com/erigontech/erigon/db/downloader"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/rawdbv3"
 	"github.com/erigontech/erigon/db/rawdb"
@@ -322,7 +321,7 @@ func NewDefaultStages(ctx context.Context,
 	cfg *ethconfig.Config,
 	controlServer *sentry_multi_client.MultiClient,
 	notifications *shards.Notifications,
-	snapDownloader downloader.Client,
+	snapDownloader services.DownloaderClient,
 	blockReader services.FullBlockReader,
 	blockRetire services.BlockRetire,
 	tracer *tracers.Tracer,
@@ -353,7 +352,7 @@ func NewPipelineStages(ctx context.Context,
 	cfg *ethconfig.Config,
 	controlServer *sentry_multi_client.MultiClient,
 	notifications *shards.Notifications,
-	snapDownloader downloader.Client,
+	snapDownloader services.DownloaderClient,
 	blockReader services.FullBlockReader,
 	blockRetire services.BlockRetire,
 	tracer *tracers.Tracer,

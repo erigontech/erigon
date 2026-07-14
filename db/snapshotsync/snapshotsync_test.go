@@ -65,7 +65,9 @@ type fakeBlockReader struct {
 	bodies    []frozenBody
 }
 
-func (f *fakeBlockReader) Snapshots() services.BlockSnapshots { return fakeSnapshots{max: f.frozenMax} }
+func (f *fakeBlockReader) Snapshots() services.BlockSnapshots {
+	return fakeSnapshots{max: f.frozenMax}
+}
 
 func (f *fakeBlockReader) IterateFrozenBodies(_ kv.Getter, fn func(blockNum, baseTxNum, txCount uint64) error) error {
 	for _, b := range f.bodies {

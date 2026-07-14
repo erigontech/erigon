@@ -436,6 +436,11 @@ var (
 		Usage: "Maximum number of logs returned by eth_getLogs, erigon_getLogs, erigon_getLatestLogs (0 = unlimited)",
 		Value: 20_000,
 	}
+	RpcLogQueryLimit = cli.IntFlag{
+		Name:  "rpc.logs.querylimit",
+		Usage: "Maximum number of alternative addresses or topics allowed per search position in eth_getLogs filter criteria (<=0 = unlimited)",
+		Value: 1_000,
+	}
 	RpcTraceCompatFlag = cli.BoolFlag{
 		Name:  "trace.compat",
 		Usage: "Bug for bug compatibility with OE for trace_ routines",

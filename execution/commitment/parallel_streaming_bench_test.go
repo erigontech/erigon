@@ -280,7 +280,6 @@ func Benchmark_StorageConcurrency(b *testing.B) {
 						b.StartTimer()
 						var eg errgroup.Group
 						for _, r := range rs {
-							r := r
 							eg.Go(r.process)
 						}
 						require.NoError(b, eg.Wait())
