@@ -595,7 +595,10 @@ type HasBlockFilesRoTx interface {
 }
 
 func (m *MemoryMutation) BlockFilesRoTx() *blocksnapshots.View {
-	return m.db.(HasBlockFilesRoTx).BlockFilesRoTx()
+	if p, ok := m.db.(HasBlockFilesRoTx); ok {
+		return p.BlockFilesRoTx()
+	}
+	return nil
 }
 
 func (m *MemoryMutation) Count(bucket string) (uint64, error) {

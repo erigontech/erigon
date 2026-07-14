@@ -22,7 +22,7 @@
 //   - Local: in-process torrent client (default)
 //   - Remote: connects to external downloader via gRPC
 //
-// Consumers access it through the downloader.Client interface, which abstracts
+// Consumers access it through the services.DownloaderClient interface, which abstracts
 // both modes behind Download/Seed/Delete operations.
 package downloader
 
