@@ -2001,11 +2001,11 @@ func updateAccount(eip161Enabled bool, isAura bool, stateWriter StateWriter, add
 		stateObject.data.Incarnation = 0
 		stateObject.code = accounts.Code{}
 		stateObject.deleted = false
-		// SELFDESTRUCT clears code and nonce; record those cleared values into
-		// the version map (end-of-tx, matching serial) so a later tx's
-		// EXTCODEHASH reads empty rather than the pre-SD deployed hash.
-		stateObject.db.recordWriteCodeHash(addr, accounts.EmptyCodeHash)
-		stateObject.db.recordWriteNonce(addr, 0, tracing.NonceChangeUnspecified)
+		// Supersede Selfdestruct's pre-destruct IncarnationPath: extraction keeps
+		// incarnation for self-destructed accounts (unlike nonce/code/codeHash,
+		// which the extraction filter drops), and a later CREATE2 must see the
+		// persisted balance-only record's 0 in every execution mode.
+		stateObject.db.recordWriteIncarnation(addr, 0)
 		if err := stateWriter.CreateContract(addr); err != nil {
 			return err
 		}

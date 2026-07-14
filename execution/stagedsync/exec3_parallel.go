@@ -748,9 +748,9 @@ func (pe *parallelExecutor) execImpl(ctx context.Context, execStage *StageState,
 						continue
 					}
 
-					if pe.cfg.chainConfig.IsAmsterdam(applyResult.BlockTime) || pe.cfg.experimentalBAL {
-						applyResult.TxIO.SetEIP8246(pe.cfg.chainConfig.IsAmsterdam(applyResult.BlockTime) && !pe.cfg.chainConfig.IsEIPDisabled(8246))
-						err = ProcessBAL(rwTx, lastHeader, applyResult.TxIO, pe.cfg.chainConfig.IsAmsterdam(applyResult.BlockTime), pe.cfg.experimentalBAL, pe.cfg.dirs.DataDir, pe.logger)
+					isAmsterdam := pe.cfg.chainConfig.IsAmsterdam(applyResult.BlockTime)
+					if isAmsterdam || pe.cfg.experimentalBAL {
+						err = ProcessBAL(rwTx, lastHeader, applyResult.TxIO, isAmsterdam, pe.cfg.experimentalBAL, pe.cfg.dirs.DataDir, pe.logger)
 						if err != nil {
 							failInfra(err)
 							continue

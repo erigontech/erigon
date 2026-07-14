@@ -26,6 +26,7 @@ import (
 
 	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/db/state/execctx"
+	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/state"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/accounts"
@@ -162,6 +163,7 @@ func TestHandleMessage_TxResultPinsAsOfReaderTxNum(t *testing.T) {
 
 	// First txResult: txNum jumps from 0 to 12345.
 	cc.handleMessage(context.Background(), &txResult{
+		rules:  &chain.Rules{},
 		txNum:  12345,
 		writes: someWrites,
 	})
@@ -173,6 +175,7 @@ func TestHandleMessage_TxResultPinsAsOfReaderTxNum(t *testing.T) {
 	// Subsequent txResult: txNum advances to 12346. Verifies the field
 	// is updated on every txResult, not just the first one.
 	cc.handleMessage(context.Background(), &txResult{
+		rules:  &chain.Rules{},
 		txNum:  12346,
 		writes: someWrites,
 	})
@@ -186,6 +189,7 @@ func TestHandleMessage_TxResultPinsAsOfReaderTxNum(t *testing.T) {
 	// so updating txNum would be wasted work and could mask real
 	// regressions in producers that drop writes.
 	cc.handleMessage(context.Background(), &txResult{
+		rules:  &chain.Rules{},
 		txNum:  12347,
 		writes: nil,
 	})

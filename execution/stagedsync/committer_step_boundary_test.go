@@ -100,6 +100,7 @@ func TestHandleMessage_StepBoundaryCheckpointMidBlock(t *testing.T) {
 		cc.handleMessage(ctx, &txResult{
 			blockNum: blockNum,
 			txNum:    txNum,
+			rules:    &chain.Rules{},
 			writes:   nonceBalanceWrites(addr, txNum, bal),
 		})
 	}
@@ -164,6 +165,7 @@ func TestHandleMessage_StepCheckpointInPerBlockMode(t *testing.T) {
 		cc.handleMessage(ctx, &txResult{
 			blockNum: blockNum,
 			txNum:    txNum,
+			rules:    &chain.Rules{},
 			writes:   nonceBalanceWrites(addr, txNum, bal),
 		})
 	}
@@ -218,6 +220,7 @@ func TestHandleMessage_PartialBlockComputeFailureNotSwallowed(t *testing.T) {
 		buf := accounts.SerialiseV3(&acc)
 		require.NoError(t, doms.DomainPut(kv.AccountsDomain, tx, addrBytes, buf, txNum, nil))
 		cc.handleMessage(ctx, &txResult{
+			rules:    &chain.Rules{},
 			blockNum: 1,
 			txNum:    txNum,
 			writes:   nonceBalanceWrites(addr, txNum, bal),
@@ -304,7 +307,7 @@ func runBlockEndingOnStepEdge(t *testing.T, edgeTxHasWrites bool) stepEdgeOutcom
 			require.NoError(t, doms.DomainPut(kv.AccountsDomain, tx, addrBytes, buf, txNum, nil))
 			writes = nonceBalanceWrites(addr, txNum, bal)
 		}
-		cc.handleMessage(ctx, &txResult{blockNum: 1, txNum: txNum, writes: writes})
+		cc.handleMessage(ctx, &txResult{blockNum: 1, txNum: txNum, rules: &chain.Rules{}, writes: writes})
 	}
 
 	for txNum := uint64(1); txNum < edgeTxNum; txNum++ {
@@ -398,6 +401,7 @@ func TestHandleMessage_StepBoundaryDoesNotPolluteLiveChangeset(t *testing.T) {
 		buf := accounts.SerialiseV3(&acc)
 		require.NoError(t, doms.DomainPut(kv.AccountsDomain, tx, addrBytes, buf, txNum, nil))
 		cc.handleMessage(ctx, &txResult{
+			rules:    &chain.Rules{},
 			blockNum: 1,
 			txNum:    txNum,
 			writes:   nonceBalanceWrites(addr, txNum, bal),
@@ -457,6 +461,7 @@ func TestHandleMessage_StepBoundaryRecordsIntoOwnChangesetInWindow(t *testing.T)
 		buf := accounts.SerialiseV3(&acc)
 		require.NoError(t, doms.DomainPut(kv.AccountsDomain, tx, addrBytes, buf, txNum, nil))
 		cc.handleMessage(ctx, &txResult{
+			rules:     &chain.Rules{},
 			blockNum:  1,
 			blockHash: blockHash,
 			txNum:     txNum,
@@ -501,6 +506,7 @@ func TestHandleMessage_PreWindowPerBlockComputeDoesNotPolluteLiveChangeset(t *te
 		buf := accounts.SerialiseV3(&acc)
 		require.NoError(t, doms.DomainPut(kv.AccountsDomain, tx, addrBytes, buf, txNum, nil))
 		cc.handleMessage(ctx, &txResult{
+			rules:    &chain.Rules{},
 			blockNum: 1,
 			txNum:    txNum,
 			writes:   nonceBalanceWrites(addr, txNum, bal),
@@ -661,7 +667,7 @@ func feedBlock1Shadow(t *testing.T, n uint64, balRoot []byte) commitmentResult {
 		addrBytes := make([]byte, length.Addr)
 		rnd.Read(addrBytes)
 		addr := accounts.InternAddress([20]byte(addrBytes))
-		cc.handleMessage(ctx, &txResult{blockNum: 1, txNum: txNum, writes: nonceBalanceWrites(addr, txNum, *uint256.NewInt(txNum * 1000))})
+		cc.handleMessage(ctx, &txResult{rules: &chain.Rules{}, blockNum: 1, txNum: txNum, writes: nonceBalanceWrites(addr, txNum, *uint256.NewInt(txNum * 1000))})
 	}
 	cc.foldedAhead[1] = true
 	cc.balRoots[1] = balRoot

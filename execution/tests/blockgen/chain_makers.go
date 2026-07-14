@@ -641,7 +641,6 @@ func GenerateChain(config *chain.Config, parent *types.Block, engine rules.Engin
 			var bal types.BlockAccessList
 			var balBytes []byte
 			if config.IsAmsterdam(b.header.Time) && !config.IsEIPDisabled(7928) {
-				b.blockIO.SetEIP8246(config.IsAmsterdam(b.header.Time) && !config.IsEIPDisabled(8246))
 				bal = b.blockIO.AsBlockAccessList()
 				balHash := bal.Hash()
 				b.header.BlockAccessListHash = &balHash
