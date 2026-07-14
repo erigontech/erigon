@@ -42,10 +42,14 @@ func CheckReceiptsNoDups(ctx context.Context, sc SamplerCfg, db kv.TemporalRoDB,
 	}
 
 	log.Info("[integrity] ReceiptsNoDups starting", "fromBlock", fromBlock, "toBlock", toBlock)
-	return parallelChunkCheck(ctx, sc.NewSampler(), fromBlock, toBlock, db, blockReader, failFast, string(ReceiptsNoDups), ReceiptsNoDupsRange)
+	// parallelChunkCheck slices [fromBlock, toBlock), so convert the latest covered block to an exclusive upper bound.
+	return parallelChunkCheck(ctx, sc.NewSampler(), fromBlock, toBlock+1, db, blockReader, failFast, string(ReceiptsNoDups), ReceiptsNoDupsRange)
 }
 
 func checkCumGas(ctx context.Context, fromBlock, toBlock uint64, db kv.TemporalRoDB, blockReader services.FullBlockReader, failFast bool) (err error) {
+	if fromBlock >= toBlock {
+		return nil
+	}
 	tx, err := db.BeginTemporalRo(ctx)
 	if err != nil {
 		return err
@@ -56,12 +60,7 @@ func checkCumGas(ctx context.Context, fromBlock, toBlock uint64, db kv.TemporalR
 	if err != nil {
 		return err
 	}
-
-	if toBlock > 0 {
-		toBlock-- // [fromBlock,toBlock)
-	}
-
-	toTxNum, err := txNumsReader.Max(ctx, tx, toBlock)
+	toTxNum, err := txNumsReader.Max(ctx, tx, toBlock-1)
 	if err != nil {
 		return err
 	}
@@ -127,6 +126,9 @@ func checkCumGas(ctx context.Context, fromBlock, toBlock uint64, db kv.TemporalR
 }
 
 func checkLogIdx(ctx context.Context, fromBlock, toBlock uint64, db kv.TemporalRoDB, blockReader services.FullBlockReader, failFast bool) (err error) {
+	if fromBlock >= toBlock {
+		return nil
+	}
 	tx, err := db.BeginTemporalRo(ctx)
 	if err != nil {
 		return err
@@ -137,12 +139,7 @@ func checkLogIdx(ctx context.Context, fromBlock, toBlock uint64, db kv.TemporalR
 	if err != nil {
 		return err
 	}
-
-	if toBlock > 0 {
-		toBlock-- // [fromBlock,toBlock)
-	}
-
-	toTxNum, err := txNumsReader.Max(ctx, tx, toBlock)
+	toTxNum, err := txNumsReader.Max(ctx, tx, toBlock-1)
 	if err != nil {
 		return err
 	}
