@@ -17,6 +17,7 @@
 package accounts
 
 import (
+	"bytes"
 	"fmt"
 	"io"
 	"math/bits"
@@ -26,6 +27,7 @@ import (
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/empty"
+	"github.com/erigontech/erigon/common/length"
 	"github.com/erigontech/erigon/execution/rlp"
 )
 
@@ -639,6 +641,38 @@ func DeserialiseV3(a *Account, enc []byte) error {
 		a.Incarnation = common.BytesToUint64(enc[pos : pos+incBytes])
 	}
 	return nil
+}
+
+// DeserialiseV3CodeHash extracts just the codeHash field from a
+// SerialiseV3-encoded account, skipping the full decode (balance parse,
+// codeHash interning) that DeserialiseV3 pays. It parses only up to and
+// including the codeHash field — later fields are not validated. Returns a
+// subslice of enc — valid only while enc is — or nil when the record is
+// malformed up to that field or the account has no code (including
+// non-canonical spellings of the empty or zero sentinel, which
+// CodeHash.IsEmpty treats as no-code).
+func DeserialiseV3CodeHash(enc []byte) []byte {
+	pos := 0
+	for range 2 { // skip the length-prefixed nonce and balance fields
+		if pos >= len(enc) {
+			return nil
+		}
+		pos += 1 + int(enc[pos])
+	}
+	if pos >= len(enc) {
+		return nil
+	}
+	codeHashBytes := int(enc[pos])
+	pos++
+	if codeHashBytes != length.Hash || pos+codeHashBytes > len(enc) {
+		return nil
+	}
+	h := enc[pos : pos+codeHashBytes]
+	var zero common.Hash
+	if bytes.Equal(h, zero[:]) || bytes.Equal(h, empty.CodeHash[:]) {
+		return nil
+	}
+	return h
 }
 
 func SerialiseV3(a *Account) []byte {
