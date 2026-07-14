@@ -349,6 +349,7 @@ func TestBlockReaderGenesisBlockWithSnapshots(t *testing.T) {
 	require.Greater(t, snapshots.BlocksAvailable(), uint64(0))
 
 	tx, err := db.BeginRo(t.Context())
+	defer tx.Rollback()
 	require.NoError(t, err)
 	genesisHash, err := rawdb.ReadCanonicalHash(tx, 0)
 	require.NoError(t, err)
