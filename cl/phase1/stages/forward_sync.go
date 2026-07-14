@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"math"
 	"sort"
 	"sync/atomic"
 	"time"
@@ -265,6 +266,37 @@ func processDownloadedBlockBatches(ctx context.Context, logger log.Logger, cfg *
 	return
 }
 
+// boundedDuration converts a number of seconds into a time.Duration, guarding
+// against the int64 nanosecond overflow that would otherwise wrap to garbage.
+func boundedDuration(seconds float64) time.Duration {
+	if seconds <= 0 {
+		return 0
+	}
+	if maxSeconds := float64(math.MaxInt64) / float64(time.Second); seconds > maxSeconds {
+		return time.Duration(math.MaxInt64)
+	}
+	return time.Duration(seconds) * time.Second
+}
+
+// forwardSyncProgress derives the forward-sync distance and ETA for logging.
+// currentSlot can overshoot chainTipSlot and dip below prevProgress on reorgs,
+// so the differences are clamped to keep the unsigned math from underflowing.
+func forwardSyncProgress(chainTipSlot, currentSlot, prevProgress, secondsPerSlot uint64, secsPerLog int) (distFromChainTip, estimatedTimeRemaining time.Duration) {
+	var slotsRemaining uint64
+	if chainTipSlot > currentSlot {
+		slotsRemaining = chainTipSlot - currentSlot
+	}
+	distFromChainTip = boundedDuration(float64(slotsRemaining) * float64(secondsPerSlot))
+
+	estimatedTimeRemaining = 999 * time.Hour
+	if currentSlot > prevProgress && secsPerLog > 0 {
+		if rate := float64(currentSlot-prevProgress) / float64(secsPerLog); rate > 0 {
+			estimatedTimeRemaining = boundedDuration(float64(slotsRemaining) / rate)
+		}
+	}
+	return
+}
+
 // forwardSync (MAIN ROUTINE FOR ForwardSync) performs the forward synchronization of beacon blocks.
 func forwardSync(ctx context.Context, logger log.Logger, cfg *Cfg, args Args) error {
 	var (
@@ -370,18 +402,10 @@ func forwardSync(ctx context.Context, logger log.Logger, cfg *Cfg, args Args) er
 			return ctx.Err()
 		case <-logTicker.C:
 			// Log progress at regular intervals
-			progressMade := chainTipSlot - currentSlot.Load()
-			distFromChainTip := time.Duration(progressMade*cfg.beaconCfg.SecondsPerSlot) * time.Second
-			timeProgress := currentSlot.Load() - prevProgress
-			estimatedTimeRemaining := 999 * time.Hour
-			if timeProgress > 0 {
-				estimatedTimeRemaining = time.Duration(float64(progressMade)/(float64(currentSlot.Load()-prevProgress)/float64(secsPerLog))) * time.Second
-			}
-			if distFromChainTip < 0 || estimatedTimeRemaining < 0 {
-				continue
-			}
-			prevProgress = currentSlot.Load()
-			logger.Info("[Caplin] Forward Sync", "progress", currentSlot.Load(), "distance-from-chain-tip", distFromChainTip, "estimated-time-remaining", estimatedTimeRemaining)
+			cur := currentSlot.Load()
+			distFromChainTip, estimatedTimeRemaining := forwardSyncProgress(chainTipSlot, cur, prevProgress, cfg.beaconCfg.SecondsPerSlot, secsPerLog)
+			prevProgress = cur
+			logger.Info("[Caplin] Forward Sync", "progress", cur, "distance-from-chain-tip", distFromChainTip, "estimated-time-remaining", estimatedTimeRemaining)
 		default:
 		}
 	}
