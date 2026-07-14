@@ -12,8 +12,8 @@ import (
 
 // buildSyncCommitteeMessage constructs the JSON body for a single
 // SyncCommitteeMessage submitted to /eth/v1/beacon/pool/sync_committees.
-func buildSyncCommitteeMessage(slot uint64, blockRoot common.Hash, validatorIndex uint64, sig common.Bytes96) map[string]interface{} {
-	return map[string]interface{}{
+func buildSyncCommitteeMessage(slot uint64, blockRoot common.Hash, validatorIndex uint64, sig common.Bytes96) map[string]any {
+	return map[string]any{
 		"slot":              strconv.FormatUint(slot, 10),
 		"beacon_block_root": blockRoot.Hex(),
 		"validator_index":   strconv.FormatUint(validatorIndex, 10),
@@ -57,8 +57,8 @@ func (s *Service) maybeSyncCommittee(ctx context.Context, slot uint64) {
 
 	syncSubcommitteeSize := s.cfg.SyncCommitteeSize / s.cfg.SyncCommitteeSubnetCount
 
-	msgs := make([]interface{}, 0, len(duties))
-	contributions := make([]interface{}, 0, len(duties))
+	msgs := make([]any, 0, len(duties))
+	contributions := make([]any, 0, len(duties))
 	for _, duty := range duties {
 		validatorIndex, parseErr := strconv.ParseUint(duty.ValidatorIndex, 10, 64)
 		if parseErr != nil {
@@ -108,9 +108,9 @@ func (s *Service) buildContributions(
 	committeeIndicesStr []string,
 	syncSubcommitteeSize uint64,
 	sig common.Bytes96,
-) []interface{} {
+) []any {
 	seenSubcommittees := map[uint64]struct{}{}
-	out := make([]interface{}, 0, len(committeeIndicesStr))
+	out := make([]any, 0, len(committeeIndicesStr))
 	for _, posStr := range committeeIndicesStr {
 		pos, err := strconv.ParseUint(posStr, 10, 64)
 		if err != nil || syncSubcommitteeSize == 0 {

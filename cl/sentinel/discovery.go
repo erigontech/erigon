@@ -523,7 +523,7 @@ func (s *Sentinel) listenForPeers() {
 
 		peerInfo, _, err := p2p.ConvertToAddrInfo(node)
 		if err != nil {
-			log.Error("[Sentinel] Could not convert to peer info", "err", err)
+			log.Debug("[Sentinel] Could not convert to peer info", "err", err)
 			continue
 		}
 		s.pidToEnr.Store(peerInfo.ID, node)
