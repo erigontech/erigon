@@ -62,7 +62,7 @@ func TestWorker_ChainReader_SeesOverlayHeader(t *testing.T) {
 	t.Cleanup(agg.Close)
 	require.NoError(t, agg.OpenFolder())
 
-	db, err := temporal.New(rawDB, agg, nil)
+	db, err := temporal.New(rawDB, agg)
 	require.NoError(t, err)
 
 	roTx, err := db.BeginTemporalRo(t.Context())
@@ -129,7 +129,7 @@ func TestWorker_ChainReader_NoOverlayStillWorks(t *testing.T) {
 	t.Cleanup(agg.Close)
 	require.NoError(t, agg.OpenFolder())
 
-	db, err := temporal.New(rawDB, agg, nil)
+	db, err := temporal.New(rawDB, agg)
 	require.NoError(t, err)
 
 	rwTx, err := db.BeginTemporalRw(t.Context())

@@ -21,6 +21,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"math/big"
 	"reflect"
 	"testing"
 
@@ -44,6 +45,7 @@ import (
 	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/db/state/statecfg"
 	"github.com/erigontech/erigon/execution/builder"
+	"github.com/erigontech/erigon/execution/chain"
 	chainspec "github.com/erigontech/erigon/execution/chain/spec"
 	"github.com/erigontech/erigon/execution/execmodule"
 	"github.com/erigontech/erigon/execution/stagedsync/stages"
@@ -89,7 +91,7 @@ func TestTraceBlockByNumber(t *testing.T) {
 	}
 	m, _, _ := rpcdaemontest.CreateTestExecModule(t)
 	stateCache := kvcache.New(kvcache.DefaultCoherentConfig)
-	baseApi := NewBaseApi(nil, stateCache, m.BlockReader, false, rpccfg.DefaultEvmCallTimeout, m.Engine, m.Dirs, nil, 0, 0)
+	baseApi := NewBaseApi(nil, stateCache, m.BlockReader, false, rpccfg.DefaultEvmCallTimeout, m.Engine, m.Dirs, nil, 0, 0, 0)
 	ethApi := newEthApiForTest(baseApi, m.DB, nil, nil)
 	api := NewPrivateDebugAPI(baseApi, m.DB, nil, 0, false)
 	for _, tt := range debugTraceTransactionTests {
@@ -250,6 +252,226 @@ func TestTraceErrorPathsWriteNoStream(t *testing.T) {
 		require.NoError(t, s.Flush())
 		require.Empty(t, buf.Bytes(), "stream must be empty on early error")
 	})
+
+	from := common.Address{0xFF}
+	to := common.Address{0x01}
+	gas := hexutil.Uint64(21000)
+	gasPrice := hexutil.Big(*big.NewInt(1e9))
+	traceCallArgs := ethapi.CallArgs{From: &from, To: &to, Gas: &gas, GasPrice: &gasPrice}
+	for _, tc := range []struct {
+		name   string
+		tracer string
+	}{
+		{"streaming", ""},
+		{"callTracer", "callTracer"},
+	} {
+		t.Run("TraceCall_execution_error_"+tc.name, func(t *testing.T) {
+			var cfg *tracersConfig.TraceConfig
+			if tc.tracer != "" {
+				name := tc.tracer
+				cfg = &tracersConfig.TraceConfig{Tracer: &name}
+			}
+			buf, s := newStream()
+			err := api.TraceCall(m.Ctx, traceCallArgs, rpc.BlockNumberOrHashWithNumber(1), cfg, s)
+			require.Error(t, err)
+			require.NoError(t, s.Flush())
+			require.Empty(t, buf.Bytes(), "stream must be empty on execution error so handler omits result field")
+		})
+	}
+
+	tracer := "callTracer"
+	timeout := "garbage"
+	badTimeoutCfg := &tracersConfig.TraceConfig{Tracer: &tracer, Timeout: &timeout}
+
+	t.Run("TraceTransaction_bad_timeout", func(t *testing.T) {
+		buf, s := newStream()
+		err := api.TraceTransaction(m.Ctx, common.HexToHash(debugTraceTransactionTests[0].txHash), badTimeoutCfg, s)
+		require.Error(t, err)
+		require.NoError(t, s.Flush())
+		require.Empty(t, buf.Bytes(), "stream must be empty on AssembleTracer error so handler omits result field")
+	})
+
+	t.Run("TraceCall_bad_timeout", func(t *testing.T) {
+		buf, s := newStream()
+		err := api.TraceCall(m.Ctx, traceCallArgs, rpc.BlockNumberOrHashWithNumber(1), badTimeoutCfg, s)
+		require.Error(t, err)
+		require.NoError(t, s.Flush())
+		require.Empty(t, buf.Bytes(), "stream must be empty on AssembleTracer error so handler omits result field")
+	})
+}
+
+func (c *baseFeeTestChain) debugAPI() *DebugAPIImpl {
+	return NewPrivateDebugAPI(newBaseApiForTest(c.m), c.m.DB, nil, 0, false)
+}
+
+// callDebugTraceCall invokes debug_traceCall with the given args and
+// BlockOverrides, and returns the call's return data.
+func callDebugTraceCall(t *testing.T, api *DebugAPIImpl, args ethapi.CallArgs, overrides *ethapi.BlockOverrides) string {
+	t.Helper()
+
+	var buf bytes.Buffer
+	s := jsonstream.New(jsoniter.NewStream(jsoniter.ConfigDefault, &buf, 4096))
+	err := api.TraceCall(context.Background(), args, rpc.BlockNumberOrHashWithNumber(rpc.LatestBlockNumber), &tracersConfig.TraceConfig{
+		BlockOverrides: overrides,
+	}, s)
+	require.NoError(t, err)
+	require.NoError(t, s.Flush())
+
+	var er ethapi.ExecutionResult
+	require.NoError(t, json.Unmarshal(buf.Bytes(), &er))
+	return er.ReturnValue
+}
+
+func TestDebugTraceCallBlockOverridesBaseFeeAffectsGasPrice(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow test")
+	}
+
+	c := newBaseFeeTestChain(t, chain.AllProtocolChanges)
+	contractAddr := c.deployOpcodeContract(t, opGasprice)
+
+	args := ethapi.CallArgs{
+		From:                 &c.bankAddress,
+		To:                   &contractAddr,
+		Gas:                  newUint64(100_000),
+		MaxFeePerGas:         (*hexutil.Big)(big.NewInt(100)),
+		MaxPriorityFeePerGas: (*hexutil.Big)(big.NewInt(2)),
+	}
+	returnValue := callDebugTraceCall(t, c.debugAPI(), args, &ethapi.BlockOverrides{
+		BaseFeePerGas: (*hexutil.Big)(big.NewInt(10)),
+	})
+	// effective gas price = BaseFeePerGas(10) + MaxPriorityFeePerGas(2) = 12 = 0xc
+	require.Equal(t, "0x000000000000000000000000000000000000000000000000000000000000000c", returnValue)
+}
+
+func TestDebugTraceCallBlockOverridesOtherFieldsAffectOpcodes(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow test")
+	}
+
+	for _, tc := range blockOverrideOpcodeCases() {
+		t.Run(tc.name, func(t *testing.T) {
+			c := newBaseFeeTestChain(t, chain.AllProtocolChanges)
+			contractAddr := c.deployOpcodeContract(t, tc.opcode)
+
+			args := ethapi.CallArgs{From: &c.bankAddress, To: &contractAddr}
+			returnValue := callDebugTraceCall(t, c.debugAPI(), args, tc.override)
+			require.Equal(t, hexutil.Bytes(tc.expected).String(), returnValue)
+		})
+	}
+}
+
+// TestTxResultFieldStreamLazy verifies the lazy-write semantics of LazyFieldStream
+// with prependSeparator=true (the per-tx result field case).
+func TestTxResultFieldStreamLazy(t *testing.T) {
+	newInner := func() (*bytes.Buffer, jsonstream.Stream) {
+		var buf bytes.Buffer
+		return &buf, jsonstream.New(jsoniter.NewStream(jsoniter.ConfigDefault, &buf, 4096))
+	}
+
+	t.Run("no_writes_when_unused", func(t *testing.T) {
+		buf, inner := newInner()
+		_ = jsonstream.NewLazyFieldStream(inner, "result", true)
+		require.NoError(t, inner.Flush())
+		require.Empty(t, buf.Bytes())
+	})
+
+	t.Run("writes_separator_and_field_on_first_value", func(t *testing.T) {
+		buf, inner := newInner()
+		lazy := jsonstream.NewLazyFieldStream(inner, "result", true)
+		lazy.WriteNil()
+		require.NoError(t, inner.Flush())
+		require.Equal(t, `,"result":null`, buf.String())
+	})
+
+	t.Run("field_written_only_once", func(t *testing.T) {
+		buf, inner := newInner()
+		lazy := jsonstream.NewLazyFieldStream(inner, "result", true)
+		lazy.WriteArrayStart()
+		lazy.WriteString("a")
+		lazy.WriteMore()
+		lazy.WriteString("b")
+		lazy.WriteArrayEnd()
+		require.NoError(t, inner.Flush())
+		require.Equal(t, `,"result":["a","b"]`, buf.String())
+	})
+}
+
+// TestTraceBlockErrorBeforeWrite verifies traceBlock produces valid JSON when AssembleTracer fails
+// before any write (inner.Written stays false): each tx object has "error" but no "result" field.
+func TestTraceBlockErrorBeforeWrite(t *testing.T) {
+	m, _, _ := rpcdaemontest.CreateTestExecModule(t)
+	api := NewPrivateDebugAPI(newBaseApiForTest(m), m.DB, nil, 0, false)
+	ethApi := newEthApiForTest(newBaseApiForTest(m), m.DB, nil, nil)
+
+	tx, err := ethApi.GetTransactionByHash(m.Ctx, common.HexToHash(debugTraceTransactionTests[0].txHash))
+	require.NoError(t, err)
+	require.NotNil(t, tx)
+	blockNum := rpc.BlockNumber(tx.BlockNumber.ToInt().Uint64())
+
+	// Invalid timeout makes AssembleTracer fail before any write to inner, so inner.Written stays
+	// false and the error handler writes only the "error" field inside the tx object.
+	tracer := "callTracer"
+	timeout := "garbage"
+	cfg := &tracersConfig.TraceConfig{Tracer: &tracer, Timeout: &timeout}
+
+	var buf bytes.Buffer
+	s := jsonstream.NewStackStream(jsoniter.NewStream(jsoniter.ConfigDefault, &buf, 4096))
+	require.NoError(t, api.TraceBlockByNumber(m.Ctx, blockNum, cfg, s))
+	require.NoError(t, s.Flush())
+
+	var entries []json.RawMessage
+	require.NoError(t, json.Unmarshal(buf.Bytes(), &entries), "traceBlock output is not valid JSON: %s", buf.String())
+	require.NotEmpty(t, entries)
+	for i, entry := range entries {
+		var obj map[string]json.RawMessage
+		require.NoError(t, json.Unmarshal(entry, &obj), "tx entry %d is not a JSON object", i)
+		require.Contains(t, obj, "txHash", "tx entry %d missing txHash", i)
+		require.Contains(t, obj, "error", "tx entry %d: error must be inside the tx object, not at array level", i)
+		require.NotContains(t, obj, "result", "tx entry %d: result must not be written when error occurs before any write", i)
+	}
+}
+
+// TestTraceBlockErrorAfterWrite exercises the Written==true close path: when a tracer starts
+// writing to the result field before an error occurs, CloseIfOpen must seal the partial JSON
+// back to the tx-object level so the overall output remains valid.
+func TestTraceBlockErrorAfterWrite(t *testing.T) {
+	var buf bytes.Buffer
+	s := jsonstream.New(&buf)
+	inner := jsonstream.NewLazyFieldStream(s, "result", true)
+
+	// Replicate the per-tx structure of the traceBlock loop.
+	s.WriteArrayStart()
+	s.WriteObjectStart()
+	s.WriteObjectField("txHash")
+	s.WriteString("0xdeadbeef")
+	inner.ResetField()
+
+	// Simulate TraceTx writing a partial result before returning an error:
+	// the first write to inner triggers ensure() and sets Written=true.
+	inner.WriteObjectStart()
+	inner.WriteObjectField("from")
+	inner.WriteString("0xabcd")
+	// Replicate the traceBlock error handler.
+	inner.CloseIfOpen()
+	s.WriteMore()
+	s.WriteObjectField("error")
+	s.WriteString("partial write error")
+	s.WriteObjectEnd()
+
+	s.WriteArrayEnd()
+	require.NoError(t, s.Flush())
+
+	var entries []json.RawMessage
+	require.NoError(t, json.Unmarshal(buf.Bytes(), &entries), "traceBlock output is not valid JSON: %s", buf.String())
+	require.Len(t, entries, 1)
+	var obj map[string]json.RawMessage
+	require.NoError(t, json.Unmarshal(entries[0], &obj), "tx entry is not a JSON object")
+	require.Contains(t, obj, "txHash")
+	require.Contains(t, obj, "result", "result must be present when Written=true before error")
+	require.Contains(t, obj, "error", "error must be inside the tx object, not at array level")
+	var resultObj map[string]json.RawMessage
+	require.NoError(t, json.Unmarshal(obj["result"], &resultObj), "result must be valid JSON after CloseIfOpen: %s", obj["result"])
 }
 
 func TestTraceTransactionNoRefund(t *testing.T) {
@@ -831,6 +1053,40 @@ func TestGetRawTransaction(t *testing.T) {
 		}
 	}
 	require.True(testedOnce, "Test flow didn't touch the target flow")
+}
+
+func TestGetRawReceipts(t *testing.T) {
+	m, _, _ := rpcdaemontest.CreateTestExecModule(t)
+	api := NewPrivateDebugAPI(newBaseApiForTest(m), m.DB, nil, 5000000, false)
+	ctx := context.Background()
+
+	require := require.New(t)
+	tx, err := m.DB.BeginTemporalRo(ctx)
+	require.NoError(err)
+	defer tx.Rollback()
+	number := *rawdb.ReadCurrentBlockNumber(tx)
+
+	testedNonEmpty := false
+	for i := uint64(0); i <= number; i++ {
+		block, err := api.blockByNumberWithSenders(ctx, tx, i)
+		require.NoError(err)
+		receipts, err := api.getReceipts(ctx, tx, block)
+		require.NoError(err)
+		expected := make([]hexutil.Bytes, len(receipts))
+		for j, receipt := range receipts {
+			b, err := receipt.MarshalBinary()
+			require.NoError(err)
+			expected[j] = b
+		}
+
+		raw, err := api.GetRawReceipts(ctx, rpc.BlockNumberOrHashWithNumber(rpc.BlockNumber(i)))
+		require.NoError(err)
+		require.Equal(expected, raw)
+		if len(raw) > 0 {
+			testedNonEmpty = true
+		}
+	}
+	require.True(testedNonEmpty, "test chain has no receipts")
 }
 
 func TestExecutionWitness(t *testing.T) {

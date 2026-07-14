@@ -65,6 +65,7 @@ import (
 	"github.com/erigontech/erigon/db/rawdb/blockio"
 	"github.com/erigontech/erigon/db/services"
 	"github.com/erigontech/erigon/db/snapcfg"
+	"github.com/erigontech/erigon/db/snapshotsync/blocksnapshots"
 	"github.com/erigontech/erigon/db/snapshotsync/freezeblocks"
 	"github.com/erigontech/erigon/db/snaptype"
 	"github.com/erigontech/erigon/db/state"
@@ -72,6 +73,7 @@ import (
 	"github.com/erigontech/erigon/diagnostics/diaglib"
 	"github.com/erigontech/erigon/diagnostics/mem"
 	"github.com/erigontech/erigon/execution/builder"
+	"github.com/erigontech/erigon/execution/cache"
 	"github.com/erigontech/erigon/execution/chain"
 	chainspec "github.com/erigontech/erigon/execution/chain/spec"
 	"github.com/erigontech/erigon/execution/engineapi"
@@ -196,7 +198,7 @@ type Ethereum struct {
 	blockBuilderNotifyNewTxns chan struct{}
 	components                *nodebuilder.Builder
 
-	blockSnapshots *freezeblocks.RoSnapshots
+	blockSnapshots *blocksnapshots.RoSnapshots
 	blockReader    services.FullBlockReader
 	blockWriter    *blockio.BlockWriter
 	kvRPC          *remotedbserver.KvServer
@@ -288,7 +290,7 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 			return err
 		}
 		if !notChanged {
-			logger.Warn("--persist.receipt changed since the last run, enabling historical receipts cache. full resync will be required to use the new configuration. if you do not need this feature, ignore this warning.", "inDB", config.PersistReceiptsCacheV2, "inConfig", inConfig)
+			logger.Warn("--prune.include-receipts differs from the value stored in the datadir; using the stored value (changing it requires a fresh datadir)", "inDB", config.PersistReceiptsCacheV2, "inConfig", inConfig)
 		}
 		if config.PersistReceiptsCacheV2 {
 			statecfg.EnableHistoricalRCache()
@@ -302,9 +304,6 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 		// These globals are read by 80+ call sites; the config fields are the source of truth.
 		if config.KeepExecutionProofs {
 			statecfg.EnableHistoricalCommitment()
-		}
-		if config.ExperimentalConcurrentCommitment {
-			statecfg.ExperimentalConcurrentCommitment = true
 		}
 		if config.ExperimentalParallelCommitment {
 			statecfg.ExperimentalParallelCommitment = true
@@ -346,6 +345,15 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 		stopNode: func() error {
 			return stack.Close()
 		},
+	}
+
+	// Seed erigondb.toml with the first-start commitment regime (--commitment.plainValues)
+	// before genesis-root computation. On a legacy datadir GenesisToBlock resolves erigondb
+	// settings against the real dir and would create erigondb.toml with the default regime,
+	// which the later flag-aware resolve in SetUpBlockReader then reads as pre-existing and
+	// drops the flag. Seeding here first makes --commitment.plainValues stick.
+	if _, err := state.ResolveErigonDBSettingsWithRefsDefault(dirs, logger, config.Snapshot.NoDownloader, config.CommitmentRefsFirstStart()); err != nil {
+		return nil, err
 	}
 
 	var chainConfig *chain.Config
@@ -764,6 +772,7 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 		backend.polygonBridge,
 		httpRpcCfg.BlockRangeLimit,
 		httpRpcCfg.GetLogsMaxResults,
+		httpRpcCfg.LogQueryLimit,
 	)
 	ethApiConfig := &jsonrpc.EthApiConfig{
 		GasCap:                      httpRpcCfg.Gascap,
@@ -794,9 +803,9 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 	if config.MCPAddress != "" {
 		go func() {
 			logger.Info("serve MCP on", "addr", config.MCPAddress)
-			mcpErr := mcpServer.ServeSSE(config.MCPAddress)
+			mcpErr := mcpServer.ServeSSE(ctx, config.MCPAddress)
 			if mcpErr != nil {
-				logger.Error("mcpServer.ServeSSE", "err", err)
+				logger.Error("mcpServer.ServeSSE", "err", mcpErr)
 				return
 			}
 		}()
@@ -924,9 +933,9 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 	// snapshots not in that set could cause issues. That's an unsolved issue and probably requires
 	// always resetting before resuming/starting a sync.
 	var afterSnapshotDownload func(ctx context.Context) error
-	if backend.components.Downloader != nil && backend.components.Downloader.Downloader != nil {
+	if dp := backend.components.Downloader; dp != nil && dp.Downloader != nil {
 		afterSnapshotDownload = func(ctx context.Context) (err error) {
-			incomplete, err := backend.components.Downloader.Downloader.AddTorrentsFromDisk(ctx)
+			incomplete, err := dp.AddTorrentsFromDisk(ctx)
 			if err != nil {
 				err = fmt.Errorf("adding torrents from disk: %w", err)
 				return
@@ -964,6 +973,14 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 		Accumulator:    backend.notifications.Accumulator,
 		RecentReceipts: backend.notifications.RecentReceipts,
 	}
+	// Test harnesses (e.g. EngineApiTester) set StateCacheBudget small so each
+	// per-fixture ExecModule doesn't allocate the full production cache; 0 keeps
+	// the production default.
+	var domainStateCache *cache.StateCache
+	if config.StateCacheBudget > 0 {
+		b := config.StateCacheBudget
+		domainStateCache = cache.NewStateCache(b, b, b, b)
+	}
 	backend.execModule = execmodule.NewExecModule(
 		ctx,
 		blockReader,
@@ -975,6 +992,7 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 		hook,
 		accum,
 		execmoduleCache,
+		domainStateCache,
 		logger,
 		backend.engine,
 		config.Sync,
@@ -1113,11 +1131,17 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 	}
 
 	if !dbg.NoBackgroundMaintenance() {
-		go func() {
-			if err := temporalDb.Debug().MergeLoop(ctx); err != nil {
-				logger.Error("snapashot merge loop error", "err", err)
+		// Track the MergeLoop goroutine in bgComponentsEg so that Stop() →
+		// bgComponentsEg.Wait() waits for it to exit before chainDB.Close().
+		// Without this, there is a data race between the goroutine reading
+		// Aggregator fields (in wg.TryAdd) and Close() writing them after
+		// wg.Wait() returns.
+		backend.bgComponentsEg.Go(func() error {
+			if err := temporalDb.Debug().MergeLoop(ctx); err != nil && !errors.Is(err, context.Canceled) {
+				logger.Error("snapshot merge loop error", "err", err)
 			}
-		}()
+			return nil
+		})
 	}
 
 	return backend, nil
@@ -1270,9 +1294,9 @@ func (s *Ethereum) NodesInfo(limit int) (*remoteproto.NodesInfoReply, error) {
 	return nodesInfo, nil
 }
 
-func SetUpBlockReader(ctx context.Context, db kv.RwDB, dirs datadir.Dirs, snConfig *ethconfig.Config, chainConfig *chain.Config, dbReadConcurrency int, logger log.Logger, blockSnapBuildSema *semaphore.Weighted) (*freezeblocks.BlockReader, *blockio.BlockWriter, *freezeblocks.RoSnapshots, *heimdall.RoSnapshots, bridge.Store, heimdall.Store, kv.TemporalRwDB, error) {
+func SetUpBlockReader(ctx context.Context, db kv.RwDB, dirs datadir.Dirs, snConfig *ethconfig.Config, chainConfig *chain.Config, dbReadConcurrency int, logger log.Logger, blockSnapBuildSema *semaphore.Weighted) (*freezeblocks.BlockReader, *blockio.BlockWriter, *blocksnapshots.RoSnapshots, *heimdall.RoSnapshots, bridge.Store, heimdall.Store, kv.TemporalRwDB, error) {
 	snConfig.Snapshot.ChainName = chainConfig.ChainName
-	allSnapshots := freezeblocks.NewRoSnapshots(snConfig.Snapshot, dirs.Snap, logger)
+	allSnapshots := blocksnapshots.NewRoSnapshots(snConfig.Snapshot, dirs.Snap, logger)
 
 	var allBorSnapshots *heimdall.RoSnapshots
 	var bridgeStore bridge.Store
@@ -1291,7 +1315,7 @@ func SetUpBlockReader(ctx context.Context, db kv.RwDB, dirs datadir.Dirs, snConf
 		return nil, nil, nil, nil, nil, nil, nil, err
 	}
 
-	erigonDBSettings, err := state.ResolveErigonDBSettings(dirs, logger, snConfig.Snapshot.NoDownloader)
+	erigonDBSettings, err := state.ResolveErigonDBSettingsWithRefsDefault(dirs, logger, snConfig.Snapshot.NoDownloader, snConfig.CommitmentRefsFirstStart())
 	if err != nil {
 		return nil, nil, nil, nil, nil, nil, nil, err
 	}
@@ -1330,6 +1354,7 @@ func SetUpBlockReader(ctx context.Context, db kv.RwDB, dirs datadir.Dirs, snConf
 	if err != nil {
 		return nil, nil, nil, nil, nil, nil, nil, err
 	}
+	temporalDb.SetBlockSnapshots(allSnapshots)
 
 	blockWriter := blockio.NewBlockWriter()
 
@@ -1548,13 +1573,9 @@ func (s *Ethereum) Stop() error {
 		}
 	}
 
-	// Drain the fire-and-forget background block-snapshot merge goroutine for
-	// shutdown hygiene; the merge itself touches neither chainDB nor snapshots,
-	// so the wait is bounded.
-	if s.components != nil && s.components.Storage != nil && s.components.Storage.BlockRetire != nil {
-		mergeCtx, mergeCancel := context.WithTimeout(context.Background(), 30*time.Second)
-		s.components.Storage.BlockRetire.WaitForMerges(mergeCtx)
-		mergeCancel()
+	// Drain the in-flight block retire before chainDB.Close.
+	if s.components != nil && s.components.Storage != nil {
+		s.components.Storage.Close()
 	}
 
 	s.chainDB.Close()

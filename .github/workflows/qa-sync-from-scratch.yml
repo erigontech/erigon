@@ -14,6 +14,7 @@ concurrency:
 
 jobs:
   sync-from-scratch-test:
+    name: sync-from-scratch-test-${{ matrix.chain }}
     runs-on: [self-hosted, qa, long-running]
     timeout-minutes: 1440  # 24 hours
     strategy:
@@ -78,7 +79,7 @@ jobs:
 
         # Run Erigon, wait sync and check ability to maintain sync
         python3 $ERIGON_QA_PATH/test_system/qa-tests/tip-tracking/run_and_check_tip_tracking.py \
-          ${{ github.workspace }}/build/bin $ERIGON_DATA_DIR $TRACKING_TIME_SECONDS $TOTAL_TIME_SECONDS Erigon3 $CHAIN
+          "$GITHUB_WORKSPACE/build/bin" $ERIGON_DATA_DIR $TRACKING_TIME_SECONDS $TOTAL_TIME_SECONDS Erigon3 $CHAIN
 
         # Capture monitoring script exit status
         test_exit_status=$?
@@ -113,12 +114,12 @@ jobs:
         python3 $ERIGON_QA_PATH/test_system/qa-tests/uploads/upload_test_results.py \
           --repo erigon \
           --commit $(git rev-parse HEAD) \
-          --branch ${{ github.ref_name }} \
+          --branch "$GITHUB_REF_NAME" \
           --test_name sync-from-scratch \
           --chain $CHAIN \
-          --runner ${{ runner.name }} \
+          --runner "$RUNNER_NAME" \
           --outcome $TEST_RESULT \
-          --result_file ${{ github.workspace }}/result-$CHAIN.json
+          --result_file "$GITHUB_WORKSPACE/result-$CHAIN.json"
 
     - name: Upload test results
       if: ${{ always() && steps.test_step.outputs.test_executed == 'true' }}
@@ -153,16 +154,18 @@ jobs:
     - name: Run RPC Integration Tests
       id: rpc_test_step
       if: ${{ matrix.rpc_tests_supported && steps.test_step.outputs.TEST_RESULT == 'success' }}
+      env:
+        RUNNER_WS: ${{ runner.workspace }}
       run: |
         commit=$(git rev-parse --short HEAD)
-        RPC_TEST_RESULT_DIR="${{ github.workspace }}/rpc-test-results/${CHAIN}_$(date +%Y%m%d_%H%M%S)_post_sync_${commit}"
+        RPC_TEST_RESULT_DIR="$GITHUB_WORKSPACE/rpc-test-results/${CHAIN}_$(date +%Y%m%d_%H%M%S)_post_sync_${commit}"
         echo "RPC_TEST_RESULT_DIR=$RPC_TEST_RESULT_DIR" >> $GITHUB_ENV
 
         set +e
-        ${{ github.workspace }}/.github/workflows/scripts/run_rpc_tests_local.sh \
+        "$GITHUB_WORKSPACE/.github/workflows/scripts/run_rpc_tests_local.sh" \
           --datadir "$ERIGON_DATA_DIR" \
           --chain "$CHAIN" \
-          --workspace "${{ runner.workspace }}" \
+          --workspace "$RUNNER_WS" \
           --result-dir "$RPC_TEST_RESULT_DIR" \
           --skip-backup
         rpc_exit_status=$?
@@ -194,12 +197,12 @@ jobs:
         python3 $ERIGON_QA_PATH/test_system/qa-tests/uploads/upload_test_results.py \
           --repo erigon \
           --commit $(git rev-parse HEAD) \
-          --branch ${{ github.ref_name }} \
+          --branch "$GITHUB_REF_NAME" \
           --test_name rpc-integration-tests \
           --chain $CHAIN \
-          --runner ${{ runner.name }} \
+          --runner "$RUNNER_NAME" \
           --outcome $RPC_TEST_RESULT \
-          --result_file ${{ env.RPC_TEST_RESULT_DIR }}/results/test_report.json
+          --result_file "$RPC_TEST_RESULT_DIR/results/test_report.json"
 
     - name: Clean up Erigon data directory
       if: always()

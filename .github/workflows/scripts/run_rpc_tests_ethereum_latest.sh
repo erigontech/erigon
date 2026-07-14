@@ -25,9 +25,6 @@ fi
 # Disabled tests for Ethereum mainnet
 DISABLED_TEST_LIST=(
    debug_traceBlockByNumber/test_30.json # huge JSON response => slow diff
-   debug_traceBlockByNumber/test_43.json # flaky test
-   debug_traceCall/test_22.json
-   debug_traceCall/test_38.json # see https://github.com/erigontech/erigon-qa/issues/274
    debug_traceCallMany
    erigon_
    eth_callBundle

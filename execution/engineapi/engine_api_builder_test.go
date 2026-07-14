@@ -250,7 +250,7 @@ func TestEngineApiBlockGasOverflowSpillsToNextBlock(t *testing.T) {
 	logger := testlog.Logger(t, log.LvlDebug)
 	genesis, coinbaseKey, err := engineapitester.DefaultEngineApiTesterGenesis()
 	require.NoError(t, err)
-	genesis.GasLimit = 150_000 // ~7 simple transfers at 21K gas each
+	genesis.GasLimit = 1_400_000 // ~7 account-creating transfers at ~200K state gas each
 	eat, err := engineapitester.InitialiseEngineApiTester(ctx, engineapitester.EngineApiTesterInitArgs{
 		Logger:      logger,
 		DataDir:     t.TempDir(),
@@ -263,36 +263,36 @@ func TestEngineApiBlockGasOverflowSpillsToNextBlock(t *testing.T) {
 		require.NoError(t, err)
 	})
 	eat.Run(t, func(ctx context.Context, t *testing.T, eat engineapitester.EngineApiTester) {
-		receiver := common.HexToAddress("0x42")
-
-		// Submit 10 simple transfers.
-		var txHashes []common.Hash
-		for i := 0; i < 10; i++ {
-			txn, err := eat.Transactor.SubmitSimpleTransfer(eat.CoinbaseKey, receiver, big.NewInt(100))
-			require.NoError(t, err)
-			txHashes = append(txHashes, txn.Hash())
+		// Distinct fresh recipients so every transfer is account-creating and costs the same.
+		receivers := make([]common.Address, 10)
+		for i := range receivers {
+			receivers[i] = common.BigToAddress(big.NewInt(int64(0x1000 + i)))
 		}
-
-		// Block 2: should be gas-limited, not all 10 fit.
+		// Submit 10 simple transfers.
+		for _, receiver := range receivers {
+			_, err := eat.Transactor.SubmitSimpleTransfer(eat.CoinbaseKey, receiver, big.NewInt(100))
+			require.NoError(t, err)
+		}
+		// Block 2: gas-limited to 7 of the 10.
 		p1, err := eat.MockCl.BuildCanonicalBlock(ctx)
 		require.NoError(t, err)
 		b2TxCount := len(p1.ExecutionPayload.Transactions)
-		require.Greater(t, b2TxCount, 0)
-		require.Less(t, b2TxCount, 10)
-
-		// Block 3: remaining transactions spill over.
+		require.Equal(t, 7, b2TxCount)
+		// Block 3: the remaining 3 spill over.
 		p2, err := eat.MockCl.BuildCanonicalBlock(ctx)
 		require.NoError(t, err)
 		b3TxCount := len(p2.ExecutionPayload.Transactions)
-		require.Greater(t, b3TxCount, 0)
-
+		require.Equal(t, 3, b3TxCount)
 		// All 10 transactions should be included across the 2 blocks.
 		require.Equal(t, 10, b2TxCount+b3TxCount)
-
-		// Verify cumulative balance.
-		balance, err := eat.RpcApiClient.GetBalance(receiver, rpc.LatestBlock)
-		require.NoError(t, err)
-		require.Equal(t, big.NewInt(1000), balance) // 10 * 100
+		// Verify cumulative balance across the distinct recipients.
+		total := big.NewInt(0)
+		for _, receiver := range receivers {
+			balance, err := eat.RpcApiClient.GetBalance(receiver, rpc.LatestBlock)
+			require.NoError(t, err)
+			total.Add(total, balance)
+		}
+		require.Equal(t, big.NewInt(1000), total) // 10 * 100
 	})
 }
 
@@ -302,18 +302,18 @@ func TestEngineApiBlockGasOverflowSpillsToNextBlock(t *testing.T) {
 // resulting block respects the CL target as a cap.
 //
 // Setup picks numbers so the two values produce distinguishable block contents:
-//   - parent gas limit = 42_000 (room for two 21K-gas transfers)
-//   - static --miner.gaslimit = 21_000 (would cap the block at one transfer)
-//   - CL targetGasLimit = 42_000 (room for two transfers)
+//   - parent gas limit = 490_000 (room for two account-creating transfers)
+//   - static --miner.gaslimit = 225_000 (would cap the block at one transfer)
+//   - CL targetGasLimit = 490_000 (room for two transfers)
 //
 // Three transfers are submitted; only two must fit. If the static target won,
-// the block would gas-limit at ~41_960 and contain a single transfer.
+// the block would gas-limit at ~489_520 and contain a single transfer.
 // See https://github.com/ethereum/execution-apis/pull/796.
 func TestEngineApiV4TargetGasLimitOverridesMinerGasLimit(t *testing.T) {
 	ctx := t.Context()
 	logger := testlog.Logger(t, log.LvlDebug)
-	const targetGasLimit uint64 = 42_000
-	const minerGasLimit uint64 = 21_000
+	const targetGasLimit uint64 = 490_000
+	const minerGasLimit uint64 = 225_000
 	genesis, coinbaseKey, err := engineapitester.DefaultEngineApiTesterGenesis()
 	require.NoError(t, err)
 	genesis.GasLimit = targetGasLimit
@@ -333,10 +333,13 @@ func TestEngineApiV4TargetGasLimitOverridesMinerGasLimit(t *testing.T) {
 		require.NoError(t, err)
 	})
 	eat.Run(t, func(ctx context.Context, t *testing.T, eat engineapitester.EngineApiTester) {
-		receiver := common.HexToAddress("0x42")
-		// Submit 3 transfers; only 2 should fit under the CL-supplied 42K cap.
-		for i := 0; i < 3; i++ {
-			_, err := eat.Transactor.SubmitSimpleTransfer(eat.CoinbaseKey, receiver, big.NewInt(int64(i+1)))
+		receivers := []common.Address{
+			common.HexToAddress("0x42"),
+			common.HexToAddress("0x43"),
+			common.HexToAddress("0x44"),
+		}
+		for _, receiver := range receivers {
+			_, err := eat.Transactor.SubmitSimpleTransfer(eat.CoinbaseKey, receiver, big.NewInt(1))
 			require.NoError(t, err)
 		}
 		payload, err := eat.MockCl.BuildCanonicalBlock(ctx)

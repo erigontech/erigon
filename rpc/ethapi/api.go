@@ -20,6 +20,7 @@
 package ethapi
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"math/big"
@@ -286,6 +287,7 @@ func (args *CallArgs) ToTransaction(globalGasCap uint64, baseFee *uint256.Int) (
 			TipCap:     *msg.TipCap(),
 			AccessList: al,
 		}
+	// Unlike Geth, an explicit accessList with gasPrice produces type 1 rather than dropping the list.
 	case args.AccessList != nil:
 		al := types.AccessList{}
 		if args.AccessList != nil {
@@ -495,6 +497,50 @@ func RPCMarshalBlockExDeprecated(block *types.Block, inclTx bool, fullTx bool, b
 	return fields, nil
 }
 
+// SignTransactionResult represents a RLP-encoded transaction paired with its JSON form.
+type SignTransactionResult struct {
+	Raw hexutil.Bytes   `json:"raw"`
+	Tx  *RPCTransaction `json:"tx"`
+}
+
+func (r SignTransactionResult) MarshalJSON() ([]byte, error) {
+	if r.Tx == nil {
+		return nil, errors.New("nil transaction")
+	}
+	type plain struct {
+		Raw hexutil.Bytes   `json:"raw"`
+		Tx  json.RawMessage `json:"tx"`
+	}
+	txBytes, err := json.Marshal(r.Tx)
+	if err != nil {
+		return nil, err
+	}
+	var m map[string]json.RawMessage
+	if err := json.Unmarshal(txBytes, &m); err != nil {
+		return nil, err
+	}
+	for _, k := range []string{"blockHash", "blockNumber", "blockTimestamp", "transactionIndex", "from"} {
+		delete(m, k)
+	}
+	nullVal := json.RawMessage("null")
+	for _, k := range []string{"gasPrice", "maxFeePerGas", "maxPriorityFeePerGas"} {
+		if _, ok := m[k]; !ok {
+			m[k] = nullVal
+		}
+	}
+	zeroHex := json.RawMessage(`"0x0"`)
+	for _, k := range []string{"v", "r", "s"} {
+		if v, ok := m[k]; !ok || string(v) == "null" {
+			m[k] = zeroHex
+		}
+	}
+	stripped, err := json.Marshal(m)
+	if err != nil {
+		return nil, err
+	}
+	return json.Marshal(plain{Raw: r.Raw, Tx: stripped})
+}
+
 // RPCTransaction represents a transaction that will serialize to the RPC representation of a transaction
 type RPCTransaction struct {
 	BlockHash            *common.Hash               `json:"blockHash"`
@@ -556,9 +602,12 @@ func NewRPCTransaction(txn types.Transaction, blockHash common.Hash, blockTime u
 
 	if txn.Type() == types.LegacyTxType {
 		if !v.IsZero() { // skip chain id derivation in case of call simulation (where v,r,s are zero)
-			chainId = types.DeriveChainId(v)
+			var err error
+			chainId, err = types.DeriveChainId(v)
 			// if a legacy transaction has an EIP-155 chain id, include it explicitly, otherwise chain id is not included
-			if !chainId.IsZero() {
+			if err != nil {
+				log.Warn("[rpc] chain id derivation", "err", err)
+			} else if !chainId.IsZero() {
 				result.ChainID = (*hexutil.Big)(chainId.ToBig())
 			}
 		}

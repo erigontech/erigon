@@ -36,7 +36,6 @@ import (
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/vm"
 	"github.com/erigontech/erigon/execution/vm/evmtypes"
-	"github.com/erigontech/erigon/node/ethconfig"
 	"github.com/erigontech/erigon/p2p/forkid"
 	"github.com/erigontech/erigon/rpc"
 	"github.com/erigontech/erigon/rpc/gasprice"
@@ -160,7 +159,7 @@ func (api *APIImpl) Capabilities(ctx context.Context) (*CapabilitiesResult, erro
 
 	var receiptsField CapabilityField
 	if persistReceipts {
-		// --persist.receipts widens past state-history pruning (receipts are written to
+		// --prune.include-receipts widens past state-history pruning (receipts are written to
 		// RCacheDomain at execution time, not re-derived from state). The remaining bound
 		// is block-body availability: eth_getBlockReceipts walks block.Transactions(), and
 		// getLogsV3 reads log indexes whose snapshots follow prune.Blocks (see
@@ -168,7 +167,7 @@ func (api *APIImpl) Capabilities(ctx context.Context) (*CapabilitiesResult, erro
 		// blocksOldest with the same DeleteStrategy as blocks.
 		receiptsField = avail(blocksOldest, pruneMode.Blocks)
 	} else {
-		// Without --persist.receipts, receipts are re-executed on demand, requiring both state
+		// Without --prune.include-receipts, receipts are re-executed on demand, requiring both state
 		// history and the block body. Use the more restrictive of the two oldest-block bounds.
 		if blocksOldest > stateOldest {
 			receiptsField = avail(blocksOldest, pruneMode.Blocks)
@@ -272,15 +271,15 @@ func (api *APIImpl) GasPrice(ctx context.Context) (*hexutil.Big, error) {
 		return nil, err
 	}
 	defer tx.Rollback()
-	oracle := gasprice.NewOracle(NewGasPriceOracleBackend(api.db, tx, api.BaseAPI), ethconfig.Defaults.GPO, api.gasCache, nil, api.logger.New("app", "gasPriceOracle"))
+	oracle := api.newGasOracle(tx)
 	tipcap, err := oracle.SuggestTipCap(ctx)
-	gasResult := uint256.NewInt(0)
-
-	gasResult.Set(tipcap)
 	if err != nil {
 		return nil, err
 	}
-	if head := rawdb.ReadCurrentHeader(tx); head != nil && head.BaseFee != nil {
+	gasResult := uint256.NewInt(0)
+	gasResult.Set(tipcap)
+	overlayTx := api.filters.WithTemporalOverlay(tx)
+	if head := rawdb.ReadCurrentHeader(overlayTx); head != nil && head.BaseFee != nil {
 		gasResult.Add(tipcap, head.BaseFee)
 	}
 
@@ -294,7 +293,7 @@ func (api *APIImpl) MaxPriorityFeePerGas(ctx context.Context) (*hexutil.Big, err
 		return nil, err
 	}
 	defer tx.Rollback()
-	oracle := gasprice.NewOracle(NewGasPriceOracleBackend(api.db, tx, api.BaseAPI), ethconfig.Defaults.GPO, api.gasCache, nil, api.logger.New("app", "gasPriceOracle"))
+	oracle := api.newGasOracle(tx)
 	tipcap, err := oracle.SuggestTipCap(ctx)
 	if err != nil {
 		return nil, err
@@ -317,7 +316,7 @@ func (api *APIImpl) FeeHistory(ctx context.Context, blockCount rpc.DecimalOrHex,
 		return nil, err
 	}
 	defer tx.Rollback()
-	oracle := gasprice.NewOracle(NewGasPriceOracleBackend(api.db, tx, api.BaseAPI), ethconfig.Defaults.GPO, api.gasCache, api.feeHistoryCache, api.logger.New("app", "gasPriceOracle"))
+	oracle := api.newGasOracle(tx)
 
 	oldest, reward, baseFee, gasUsed, blobBaseFee, blobGasUsedRatio, err := oracle.FeeHistory(ctx, int(blockCount), lastBlock, rewardPercentiles)
 	if err != nil {
@@ -356,13 +355,13 @@ func (api *APIImpl) FeeHistory(ctx context.Context, blockCount rpc.DecimalOrHex,
 
 // BlobBaseFee returns the base fee for blob gas at the current head.
 func (api *APIImpl) BlobBaseFee(ctx context.Context) (*hexutil.Big, error) {
-	// read current header
 	tx, err := api.db.BeginTemporalRo(ctx)
 	if err != nil {
 		return nil, err
 	}
 	defer tx.Rollback()
-	header := rawdb.ReadCurrentHeader(tx)
+	overlayTx := api.filters.WithTemporalOverlay(tx)
+	header := rawdb.ReadCurrentHeader(overlayTx)
 	if header == nil || header.ExcessBlobGas == nil {
 		return nil, nil
 	}
@@ -383,13 +382,13 @@ func (api *APIImpl) BlobBaseFee(ctx context.Context) (*hexutil.Big, error) {
 
 // BaseFee returns the base fee at the current head.
 func (api *APIImpl) BaseFee(ctx context.Context) (*hexutil.Big, error) {
-	// read current header
 	tx, err := api.db.BeginTemporalRo(ctx)
 	if err != nil {
 		return nil, err
 	}
 	defer tx.Rollback()
-	header := rawdb.ReadCurrentHeader(tx)
+	overlayTx := api.filters.WithTemporalOverlay(tx)
+	header := rawdb.ReadCurrentHeader(overlayTx)
 	if header == nil {
 		return nil, nil
 	}
