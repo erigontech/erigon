@@ -507,7 +507,9 @@ func (c *CodeCache) PutCodeSizeByCodeHash(codeHash []byte, size int, txNum uint6
 
 // Delete removes the address → code mapping for addr.
 func (c *CodeCache) Delete(addr []byte) {
+	c.addrBindMu.Lock()
 	c.addrToHash.Remove(common.BytesToAddress(addr))
+	c.addrBindMu.Unlock()
 }
 
 // Clear hard-resets every layer and the epoch/floor. Use on Reset /

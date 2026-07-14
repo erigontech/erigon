@@ -1043,41 +1043,15 @@ func (sd *SharedDomains) Commit(ctx context.Context, tx kv.RwTx, validate ...fun
 	}
 	for i := range pending {
 		u := &pending[i]
-		switch u.domain {
-		case kv.CommitmentDomain:
+		if u.domain == kv.CommitmentDomain {
 			if len(u.val) == 0 {
 				sd.branchCache.Invalidate(u.key)
 			} else {
 				sd.branchCache.Put(u.key, u.val, uint64(u.step), u.txN)
 			}
-		case kv.AccountsDomain:
-			if len(u.val) == 0 {
-				sd.stateCache.Delete(kv.AccountsDomain, u.key)
-				sd.stateCache.Delete(kv.CodeDomain, u.key)
-				sd.stateCache.DeleteAddrCodeHash(u.key)
-			} else {
-				sd.stateCache.Put(kv.AccountsDomain, u.key, u.val, u.txN)
-				sd.stateCache.DeleteAddrCodeHash(u.key)
-			}
-		case kv.StorageDomain:
-			if len(u.val) == 0 {
-				sd.stateCache.Delete(kv.StorageDomain, u.key)
-			} else {
-				sd.stateCache.Put(kv.StorageDomain, u.key, u.val, u.txN)
-			}
-		case kv.CodeDomain:
-			if len(u.val) == 0 {
-				sd.stateCache.Delete(kv.CodeDomain, u.key)
-			} else {
-				// Validated committed code: populate the addr layer AND the
-				// content-addressed codeHash->code map, keyed by keccak(v) so each
-				// entry is self-consistent by construction. The read-fill path
-				// (PutCodeWithHash on a cold GetLatest, below) populates the same
-				// way — both key on keccak(v), never a separately-read account
-				// codeHash, so the shared map only ever holds self-consistent entries.
-				sd.stateCache.PutCodeWithHash(u.key, u.val, crypto.Keccak256(u.val), u.txN)
-			}
+			continue
 		}
+		sd.stateCache.Apply(u.domain, u.key, u.val, u.txN)
 	}
 	return nil
 }
@@ -1257,26 +1231,20 @@ func (sd *SharedDomains) getLatestMetered(domain kv.Domain, tx kv.TemporalTx, k 
 		return nil, 0, fmt.Errorf("storage %x read error: %w", k, err)
 	}
 
-	// Populate state cache on successful read. Stamp with an upper bound on the
-	// value's write txNum (the read only gives us the file/step it came from):
-	// the last txNum of that step. An unwind below this bound can't leave the
-	// value stale, so frozen-step reads stay warm across unwinds while
-	// recent-step reads are dropped.
-	if sd.stateCache != nil {
+	// Snapshot freshness is rechecked while the fill is serialized against
+	// committed cache updates.
+	if sd.stateCache != nil && sd.stateCache.GetCache(domain) != nil {
+		snapshotProgress := tx.Debug().DomainProgress(domain)
 		readTxNum := (uint64(step)+1)*sd.StepSize() - 1
 		if domain == kv.CodeDomain {
 			if len(v) > 0 {
-				// This SD getter is the single place that populates the code cache
-				// on a read. Key the content-addressed entry by the code's OWN hash,
-				// keccak(v) — NEVER a separately-read account codeHash, which under
-				// parallel exec can be a skewed/cross-account value and would poison
-				// the shared codeHash->code map for every account sharing that hash.
-				// keccak(v) makes every cached entry self-consistent, so a skewed
-				// account read can never produce a bad entry.
-				sd.stateCache.PutCodeWithHash(k, v, crypto.Keccak256(v), readTxNum)
+				sd.stateCache.PutCodeWithHashIfFresh(k, v, crypto.Keccak256(v), readTxNum, snapshotProgress)
 			}
 		} else {
-			sd.stateCache.Put(domain, k, v, readTxNum)
+			if len(v) == 0 {
+				readTxNum = snapshotProgress
+			}
+			sd.stateCache.PutIfFresh(domain, k, v, readTxNum, snapshotProgress)
 		}
 	}
 	// Only cache a branch when the read's txN is known: a txN=0 entry would
@@ -1460,7 +1428,7 @@ func (sd *SharedDomains) codeHashForAddr(tx kv.TemporalTx, addr []byte, txNum ui
 		// repeat lookups skip the whole resolve() chain. txNum is a
 		// conservative upper bound (>= the resolved account's write txNum), so
 		// the mapping drops on any unwind that reverts that account.
-		sd.stateCache.PutAddrCodeHash(addr, fixed, txNum)
+		sd.stateCache.PutAddrCodeHashIfFresh(addr, fixed, txNum, tx.Debug().DomainProgress(kv.AccountsDomain))
 	}
 	return h
 }

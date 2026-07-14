@@ -19,10 +19,12 @@ package cache
 import (
 	"bytes"
 	"strings"
+	"sync"
 
 	"github.com/c2h5oh/datasize"
 
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
@@ -52,7 +54,9 @@ const (
 // Account and Storage use GenericCache.
 // Code uses CodeCache (two-level for deduplication).
 type StateCache struct {
-	caches [kv.DomainLen]Cache
+	caches          [kv.DomainLen]Cache
+	admissionMu     sync.RWMutex
+	appliedProgress [kv.DomainLen]uint64
 }
 
 // NewStateCache creates a new StateCache with the specified byte capacities.
@@ -109,7 +113,7 @@ func NewDefaultStateCache() *StateCache {
 }
 
 // Get retrieves data for the given domain and key.
-// Returns (value, true) on cache hit — including (nil, true) for deleted keys —
+// Returns (value, true) on cache hit — including (nil, true) for cached negatives —
 // and (nil, false) on cache miss.
 func (c *StateCache) Get(domain kv.Domain, key []byte) ([]byte, bool) {
 	cache := c.caches[domain]
@@ -152,9 +156,13 @@ func (c *StateCache) PutCodeWithHash(addr, code, codeHash []byte, txNum uint64) 
 	c.putCodeWithHash(addr, code, codeHash, txNum, true)
 }
 
-// PutCodeWithHashIfAbsent is PutCodeWithHash with if-absent binding semantics
-// (see Cache.PutIfAbsent).
-func (c *StateCache) PutCodeWithHashIfAbsent(addr, code, codeHash []byte, txNum uint64) {
+// PutCodeWithHashIfFresh conditionally fills code from a current snapshot.
+func (c *StateCache) PutCodeWithHashIfFresh(addr, code, codeHash []byte, txNum, snapshotProgress uint64) {
+	c.admissionMu.RLock()
+	defer c.admissionMu.RUnlock()
+	if snapshotProgress < c.appliedProgress[kv.CodeDomain] {
+		return
+	}
 	c.putCodeWithHash(addr, code, codeHash, txNum, false)
 }
 
@@ -203,10 +211,7 @@ func (c *StateCache) GetAddrCodeHash(addr []byte) ([32]byte, bool) {
 	return cc.GetAddrCodeHash(addr)
 }
 
-// PutAddrCodeHash records the addr → codeHash mapping in the addr-keyed
-// LRU above SD. Callers that have just decoded an account record should
-// call this so subsequent lookups skip the account-domain read.
-func (c *StateCache) PutAddrCodeHash(addr []byte, h [32]byte, txNum uint64) {
+func (c *StateCache) putAddrCodeHash(addr []byte, h [32]byte, txNum uint64) {
 	cc, ok := c.caches[kv.CodeDomain].(*CodeCache)
 	if !ok {
 		return
@@ -214,10 +219,17 @@ func (c *StateCache) PutAddrCodeHash(addr []byte, h [32]byte, txNum uint64) {
 	cc.PutAddrCodeHash(addr, h, txNum)
 }
 
-// DeleteAddrCodeHash drops the addr → codeHash mapping. Used by
-// invalidation paths (SELFDESTRUCT / CREATE2-replace / unwind diffsets)
-// where the account's codeHash has been mutated.
-func (c *StateCache) DeleteAddrCodeHash(addr []byte) {
+// PutAddrCodeHashIfFresh conditionally fills a mapping from a current account snapshot.
+func (c *StateCache) PutAddrCodeHashIfFresh(addr []byte, h [32]byte, txNum, snapshotProgress uint64) {
+	c.admissionMu.RLock()
+	defer c.admissionMu.RUnlock()
+	if snapshotProgress < c.appliedProgress[kv.AccountsDomain] {
+		return
+	}
+	c.putAddrCodeHash(addr, h, txNum)
+}
+
+func (c *StateCache) deleteAddrCodeHash(addr []byte) {
 	cc, ok := c.caches[kv.CodeDomain].(*CodeCache)
 	if !ok {
 		return
@@ -231,8 +243,13 @@ func (c *StateCache) Put(domain kv.Domain, key []byte, value []byte, txNum uint6
 	c.put(domain, key, value, txNum, true)
 }
 
-// PutIfAbsent is Put with if-absent semantics (see Cache.PutIfAbsent).
-func (c *StateCache) PutIfAbsent(domain kv.Domain, key []byte, value []byte, txNum uint64) {
+// PutIfFresh conditionally fills a domain from a current snapshot.
+func (c *StateCache) PutIfFresh(domain kv.Domain, key []byte, value []byte, txNum, snapshotProgress uint64) {
+	c.admissionMu.RLock()
+	defer c.admissionMu.RUnlock()
+	if snapshotProgress < c.appliedProgress[domain] {
+		return
+	}
 	c.put(domain, key, value, txNum, false)
 }
 
@@ -260,12 +277,67 @@ func (c *StateCache) Delete(domain kv.Domain, key []byte) {
 	cache.Delete(key)
 }
 
+// Apply makes a committed domain update authoritative for subsequent fills.
+func (c *StateCache) Apply(domain kv.Domain, key, value []byte, txNum uint64) {
+	var codeHash []byte
+	if domain == kv.CodeDomain && len(value) > 0 {
+		codeHash = crypto.Keccak256(value)
+	}
+
+	c.admissionMu.Lock()
+	defer c.admissionMu.Unlock()
+	cache := c.caches[domain]
+	if cache == nil {
+		return
+	}
+	c.noteApplied(domain, txNum)
+
+	switch domain {
+	case kv.AccountsDomain:
+		putOrDelete(cache, key, value, txNum)
+		c.deleteAddrCodeHash(key)
+		if len(value) == 0 {
+			c.noteApplied(kv.CodeDomain, txNum)
+			if codeCache := c.caches[kv.CodeDomain]; codeCache != nil {
+				codeCache.Delete(key)
+			}
+		}
+	case kv.CodeDomain:
+		if len(value) == 0 {
+			cache.Delete(key)
+		} else if codeCache, ok := cache.(*CodeCache); ok {
+			codeCache.PutWithCodeHash(key, common.Copy(value), codeHash, txNum)
+		}
+	default:
+		putOrDelete(cache, key, value, txNum)
+	}
+}
+
+func putOrDelete(cache Cache, key, value []byte, txNum uint64) {
+	if len(value) == 0 {
+		cache.Delete(key)
+		return
+	}
+	cache.Put(key, common.Copy(value), txNum)
+}
+
+func (c *StateCache) noteApplied(domain kv.Domain, txNum uint64) {
+	if txNum > c.appliedProgress[domain] {
+		c.appliedProgress[domain] = txNum
+	}
+}
+
 // Clear removes all mutable entries from all caches.
 func (c *StateCache) Clear() {
+	c.admissionMu.Lock()
+	defer c.admissionMu.Unlock()
 	for _, cache := range c.caches {
 		if cache != nil {
 			cache.Clear()
 		}
+	}
+	for i := range c.appliedProgress {
+		c.appliedProgress[i] = 0
 	}
 }
 
@@ -285,9 +357,16 @@ func (c *StateCache) Close() {
 // and drops stale entries lazily on read. This is the sole cache-invalidation
 // path on unwind — the executor never touches the cache during forward execution.
 func (c *StateCache) Unwind(unwindToTxNum uint64) {
+	c.admissionMu.Lock()
+	defer c.admissionMu.Unlock()
 	for _, cache := range c.caches {
 		if cache != nil {
 			cache.Unwind(unwindToTxNum)
+		}
+	}
+	for i := range c.appliedProgress {
+		if c.appliedProgress[i] > unwindToTxNum {
+			c.appliedProgress[i] = unwindToTxNum
 		}
 	}
 }

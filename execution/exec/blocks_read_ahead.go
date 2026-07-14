@@ -85,31 +85,27 @@ type cachePopulatingGetter struct {
 	g        kv.TemporalGetter
 	sc       *cache.StateCache
 	stepSize uint64 // for the read txNum upper bound (last txNum of the read's step)
+	progress func(kv.Domain) uint64
+}
+
+func newCachePopulatingGetter(ttx kv.TemporalTx, sc *cache.StateCache) *cachePopulatingGetter {
+	return &cachePopulatingGetter{g: ttx, sc: sc, stepSize: ttx.Debug().StepSize(), progress: ttx.Debug().DomainProgress}
 }
 
 func (cpg *cachePopulatingGetter) GetLatest(name kv.Domain, k []byte) ([]byte, kv.Step, error) {
 	v, step, err := cpg.g.GetLatest(name, k)
-	if err == nil && cpg.sc != nil {
-		// If-absent writes only: this runs in a fire-and-forget goroutine over a
-		// committed snapshot, so an unconditional Put racing an FCU flush's
-		// cache-apply could replace the flushed value with the pre-flush one.
-		if name == kv.CodeDomain && len(v) > 0 {
-			// Key the content cache by the code's OWN hash, never a separately
-			// read account codeHash: under parallel/speculative exec that hash
-			// can be skewed or cross-account, and a (hash, code) pair that
-			// doesn't satisfy keccak(code)==hash poisons every account sharing
-			// the hash. keccak(v) makes each entry self-consistent.
-			cpg.sc.PutCodeWithHashIfAbsent(k, v, crypto.Keccak256(v), (uint64(step)+1)*cpg.stepSize-1)
+	if err == nil && cpg.sc != nil && cpg.progress != nil {
+		snapshotProgress := cpg.progress(name)
+		if name == kv.CodeDomain {
+			if len(v) > 0 {
+				cpg.sc.PutCodeWithHashIfFresh(k, v, crypto.Keccak256(v), (uint64(step)+1)*cpg.stepSize-1, snapshotProgress)
+			}
 		} else {
-			// Cache including nil/empty results: a probe returning no
-			// bytes is a valid negative answer (missing account, empty
-			// storage slot; empty code lands here too but CodeCache drops
-			// zero-length puts) and caching it lets repeated probes
-			// skip the file accessor stack. Mirrors revm's CacheAccount
-			// { account: None, status: LoadedNotExisting } pattern.
-			// Stamp with an upper bound on the value's write txNum (last txNum
-			// of the step it came from) so unwind invalidation is correct.
-			cpg.sc.PutIfAbsent(name, k, v, (uint64(step)+1)*cpg.stepSize-1)
+			txNum := (uint64(step)+1)*cpg.stepSize - 1
+			if len(v) == 0 {
+				txNum = snapshotProgress
+			}
+			cpg.sc.PutIfFresh(name, k, v, txNum, snapshotProgress)
 		}
 	}
 	return v, step, err
@@ -229,7 +225,7 @@ func (bra *BlockReadAheader) warmBody(ctx context.Context, db kv.RoDB, header *t
 				}
 				var getter kv.TemporalGetter = ttx
 				if bra.stateCache != nil {
-					getter = &cachePopulatingGetter{g: ttx, sc: bra.stateCache, stepSize: ttx.Debug().StepSize()}
+					getter = newCachePopulatingGetter(ttx, bra.stateCache)
 				}
 				stateReader := state.NewReaderV3(getter)
 
@@ -300,7 +296,7 @@ func (bra *BlockReadAheader) warmBody(ctx context.Context, db kv.RoDB, header *t
 			var getter kv.TemporalGetter = ttx
 			var cpg *cachePopulatingGetter
 			if bra.stateCache != nil {
-				cpg = &cachePopulatingGetter{g: ttx, sc: bra.stateCache, stepSize: ttx.Debug().StepSize()}
+				cpg = newCachePopulatingGetter(ttx, bra.stateCache)
 				getter = cpg
 			}
 			stateReader := state.NewReaderV3(getter)

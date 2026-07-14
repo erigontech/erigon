@@ -881,3 +881,67 @@ func TestDomainCache_PutIfAbsentAtomicWithPut(t *testing.T) {
 		require.Equal(t, fresh, v, "round %d: PutIfAbsent raced past a concurrent Put", round)
 	}
 }
+
+func TestStateCache_AppliedProgressLifecycle(t *testing.T) {
+	b := 1 * datasize.MB
+	sc := NewStateCache(b, b, b, b)
+	t.Cleanup(sc.Close)
+	require.Zero(t, sc.appliedProgress[kv.AccountsDomain])
+
+	sc.Apply(kv.AccountsDomain, makeAddr(1), makeValue(1), 20)
+	sc.Apply(kv.AccountsDomain, makeAddr(2), makeValue(2), 10)
+	require.Equal(t, uint64(20), sc.appliedProgress[kv.AccountsDomain])
+	require.Zero(t, sc.appliedProgress[kv.StorageDomain])
+
+	sc.Unwind(15)
+	require.Equal(t, uint64(15), sc.appliedProgress[kv.AccountsDomain])
+
+	sc.Clear()
+	require.Zero(t, sc.appliedProgress[kv.AccountsDomain])
+}
+
+func TestStateCache_StaleSnapshotCannotFillAfterDelete(t *testing.T) {
+	b := 1 * datasize.MB
+	sc := NewStateCache(b, b, b, b)
+	t.Cleanup(sc.Close)
+
+	key := makeAddr(1)
+	stale := makeValue(1)
+	sc.Apply(kv.AccountsDomain, key, stale, 10)
+	sc.Apply(kv.AccountsDomain, key, nil, 20)
+	_, ok := sc.Get(kv.AccountsDomain, key)
+	require.False(t, ok, "an authoritative deletion must physically remove the entry")
+
+	sc.PutIfFresh(kv.AccountsDomain, key, stale, 10, 10)
+	_, ok = sc.Get(kv.AccountsDomain, key)
+	require.False(t, ok, "a snapshot older than the deletion must not fill afterward")
+}
+
+func TestStateCache_ApplyDeleteAtomicWithFill(t *testing.T) {
+	b := 1 * datasize.MB
+	sc := NewStateCache(b, b, b, b)
+	t.Cleanup(sc.Close)
+
+	progressKey := makeAddr(1)
+	key := makeAddr(2)
+	value := makeValue(1)
+	for round := range 20000 {
+		snapshotProgress := uint64(round*2 + 1)
+		sc.Apply(kv.AccountsDomain, progressKey, value, snapshotProgress)
+
+		var wg sync.WaitGroup
+		wg.Add(2)
+		go func() {
+			defer wg.Done()
+			sc.Apply(kv.AccountsDomain, key, nil, snapshotProgress+1)
+		}()
+		go func() {
+			defer wg.Done()
+			sc.PutIfFresh(kv.AccountsDomain, key, value, snapshotProgress, snapshotProgress)
+		}()
+		wg.Wait()
+
+		_, ok := sc.Get(kv.AccountsDomain, key)
+		require.False(t, ok, "round %d: stale fill survived the authoritative delete", round)
+	}
+}
