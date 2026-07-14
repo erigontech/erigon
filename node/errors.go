@@ -31,7 +31,7 @@ var (
 )
 
 // StopError is returned if a Node fails to stop either any of its registered
-// services or itself.
+// dbservices or itself.
 type StopError struct {
 	Server   error
 	Services map[reflect.Type]error
@@ -39,5 +39,5 @@ type StopError struct {
 
 // Error generates a textual representation of the stop error.
 func (e *StopError) Error() string {
-	return fmt.Sprintf("server: %v, services: %v", e.Server, e.Services)
+	return fmt.Sprintf("server: %v, dbservices: %v", e.Server, e.Services)
 }

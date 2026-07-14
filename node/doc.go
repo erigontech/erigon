@@ -20,7 +20,7 @@
 /*
 Package node sets up multi-protocol Ethereum nodes.
 
-In the model exposed by this package, a node is a collection of services which use shared
+In the model exposed by this package, a node is a collection of dbservices which use shared
 resources to provide RPC APIs. Services can also offer devp2p protocols, which are wired
 up to the devp2p network when the node instance is started.
 
@@ -71,7 +71,7 @@ across restarts. Node also loads static and trusted node lists and ensures that 
 about other hosts is persisted.
 
 JSON-RPC servers which run HTTP, WebSocket or IPC can be started on a Node. RPC modules
-offered by registered services will be offered on those endpoints. Users can restrict any
+offered by registered dbservices will be offered on those endpoints. Users can restrict any
 endpoint to a subset of RPC modules. Node itself offers the "debug", "admin" and "web3"
 modules.
 

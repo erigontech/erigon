@@ -31,11 +31,11 @@ import (
 	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/common/math"
+	"github.com/erigontech/erigon/db/dbservices"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/dbutils"
 	"github.com/erigontech/erigon/db/kv/kvcache"
 	"github.com/erigontech/erigon/db/rawdb"
-	"github.com/erigontech/erigon/db/services"
 	"github.com/erigontech/erigon/db/state/execctx"
 	"github.com/erigontech/erigon/execution/builder"
 	"github.com/erigontech/erigon/execution/cache"
@@ -184,7 +184,7 @@ func (c *CacheView) HasStorage(address common.Address) (bool, error) {
 type ExecModule struct {
 	bacgroundCtx context.Context
 	// Snapshots + MDBX
-	blockReader services.FullBlockReader
+	blockReader dbservices.FullBlockReader
 
 	// MDBX database
 	db kv.TemporalRwDB // main database
@@ -238,7 +238,7 @@ var _ ExecutionModule = (*ExecModule)(nil) // compile-time interface check
 
 func NewExecModule(
 	ctx context.Context,
-	blockReader services.FullBlockReader,
+	blockReader dbservices.FullBlockReader,
 	db kv.TemporalRwDB,
 	pipelineExecutor *PipelineExecutor,
 	currentBlockNumber uint64,

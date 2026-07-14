@@ -74,7 +74,7 @@ func NewServer(batchConcurrency uint, traceRequests, debugSingleRequest, disable
 		disableStreaming: disableStreaming, traceRequests: traceRequests, debugSingleRequest: debugSingleRequest, logger: logger, rpcSlowLogThreshold: rpcSlowLogThreshold}
 	server.run.Store(true)
 	// Register the default service providing meta information about the RPC service such
-	// as the services and methods it offers.
+	// as the dbservices and methods it offers.
 	rpcService := &RPCService{server: server}
 	server.RegisterName(MetadataApi, rpcService)
 	return server
@@ -174,7 +174,7 @@ type RPCService struct {
 	server *Server
 }
 
-// Modules returns the list of RPC services with their version number
+// Modules returns the list of RPC dbservices with their version number
 func (s *RPCService) Modules() map[string]string {
 	s.server.services.mu.Lock()
 	defer s.server.services.mu.Unlock()

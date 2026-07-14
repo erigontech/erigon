@@ -48,7 +48,7 @@ type PeerBanner interface {
 }
 
 // GossipManager is responsible for managing the gossip subscriptions and publications
-// making sure that this module is simple and don't depend on network services pkg
+// making sure that this module is simple and don't depend on network dbservices pkg
 type GossipManager struct {
 	// configs
 	beaconConfig  *clparams.BeaconChainConfig
@@ -183,7 +183,7 @@ func (g *GossipManager) newPubsubValidator(service serviceintf.Service[any], con
 		}
 		err = service.ProcessMessage(ctx, subnetId, msgObj)
 		if errors.Is(err, synced_data.ErrNotSynced) || (err != nil && strings.Contains(err.Error(), "ignore")) {
-			// services.ErrIgnore is a big package. To avoid circular dependency, we use a simple string check.
+			// dbservices.ErrIgnore is a big package. To avoid circular dependency, we use a simple string check.
 			log.Trace("[GossipManager] ignore message", "topic", name, "err", err)
 			g.stats.addIgnore(name)
 			return pubsub.ValidationIgnore

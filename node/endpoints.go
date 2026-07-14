@@ -101,7 +101,7 @@ func isIgnoredHttpServerError(serveErr error) bool {
 }
 
 // checkModuleAvailability checks that all names given in modules are actually
-// available API services. It assumes that the MetadataApi module ("rpc") is always available;
+// available API dbservices. It assumes that the MetadataApi module ("rpc") is always available;
 // the registration of this "rpc" module happens in NewServer() and is thus common to all endpoints.
 func checkModuleAvailability(modules []string, apis []rpc.API) (bad, available []string) {
 	availableSet := make(map[string]struct{})

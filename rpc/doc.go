@@ -22,7 +22,7 @@ Package rpc implements bi-directional JSON-RPC 2.0 on multiple transports.
 
 It provides access to the exported methods of an object across a network or other I/O
 connection. After creating a server or client instance, objects can be registered to make
-them visible as 'services'. Exported methods that follow specific conventions can be
+them visible as 'dbservices'. Exported methods that follow specific conventions can be
 called remotely. It also has support for the publish/subscribe pattern.
 
 # RPC Methods

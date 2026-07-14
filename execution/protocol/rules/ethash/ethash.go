@@ -448,7 +448,7 @@ type Ethash struct {
 }
 
 // New creates a full sized ethash PoW scheme and starts a background thread for
-// remote mining, also optionally notifying a batch of remote services of new work
+// remote mining, also optionally notifying a batch of remote dbservices of new work
 // packages.
 func New(config ethashcfg.Config, noverify bool) *Ethash {
 	if config.Log == nil {

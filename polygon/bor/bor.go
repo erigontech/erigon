@@ -42,9 +42,9 @@ import (
 	"github.com/erigontech/erigon/common/empty"
 	"github.com/erigontech/erigon/common/length"
 	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/db/dbservices"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/rawdb"
-	"github.com/erigontech/erigon/db/services"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/protocol/misc"
 	"github.com/erigontech/erigon/execution/protocol/params"
@@ -292,7 +292,7 @@ type Bor struct {
 	mutex       sync.Mutex
 	chainConfig *chain.Config     // Chain config
 	config      *borcfg.BorConfig // Rules engine configuration parameters for bor rules
-	blockReader services.FullBlockReader
+	blockReader dbservices.FullBlockReader
 
 	Signatures   *lru.ARCCache[common.Hash, accounts.Address] // Signatures of recent blocks to speed up mining
 	Dependencies *lru.ARCCache[common.Hash, [][]int]
@@ -323,7 +323,7 @@ type signer struct {
 // New creates a Matic Bor rules engine.
 func New(
 	chainConfig *chain.Config,
-	blockReader services.FullBlockReader,
+	blockReader dbservices.FullBlockReader,
 	spanner Spanner,
 	genesisContracts StateReceiver,
 	logger log.Logger,
@@ -375,8 +375,8 @@ func New(
 	return c
 }
 
-// NewRo is used by the rpcdaemon and tests which need read only access to the provided data services
-func NewRo(chainConfig *chain.Config, blockReader services.FullBlockReader, logger log.Logger) *Bor {
+// NewRo is used by the rpcdaemon and tests which need read only access to the provided data dbservices
+func NewRo(chainConfig *chain.Config, blockReader dbservices.FullBlockReader, logger log.Logger) *Bor {
 	// get bor config
 	borConfig := chainConfig.Bor.(*borcfg.BorConfig)
 

@@ -24,6 +24,8 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/libp2p/go-libp2p/core/peer"
+
 	"github.com/erigontech/erigon/cl/beacon/beaconevents"
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
@@ -33,7 +35,6 @@ import (
 	"github.com/erigontech/erigon/cl/utils/eth_clock"
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/log/v3"
-	"github.com/libp2p/go-libp2p/core/peer"
 )
 
 // seenPayloadAttestationKey tracks seen attestations per (slot, validatorIndex).
@@ -172,7 +173,7 @@ func (s *payloadAttestationService) ProcessMessage(ctx context.Context, _ *uint6
 	// [REJECT] signature verification
 	if err := s.forkchoiceStore.OnPayloadAttestationMessage(msg, false); err != nil {
 		// Preserve IGNORE vs REJECT distinction from forkchoice
-		// forkchoice.ErrIgnore != services.ErrIgnore, so we need to convert
+		// forkchoice.ErrIgnore != dbservices.ErrIgnore, so we need to convert
 		if errors.Is(err, forkchoice.ErrIgnore) {
 			return fmt.Errorf("%w: %v", ErrIgnore, err)
 		}

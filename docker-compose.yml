@@ -1,7 +1,7 @@
 # Erigon by default is "all in one binary" solution, but it's possible start TxPool as separated processes.
 # Same true about: JSON RPC layer (RPCDaemon), p2p layer (Sentry), history download layer (Downloader), consensus.
-# Don't start services as separated processes unless you have clear reason for it: resource limiting, scale, replace by your own implementation, security.
-# This file is an example: how to start Erigon's services as separated processes.
+# Don't start dbservices as separated processes unless you have clear reason for it: resource limiting, scale, replace by your own implementation, security.
+# This file is an example: how to start Erigon's dbservices as separated processes.
 
 # Default: --datadir=/home/erigon/.local/share/erigon
 # Default UID: 1000

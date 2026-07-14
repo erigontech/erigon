@@ -36,7 +36,7 @@ import (
 
 // Dirs is the file system folder the node should use for any data storage
 // requirements. The configured data directory will not be directly shared with
-// registered services, instead those can use utility methods to create/access
+// registered dbservices, instead those can use utility methods to create/access
 // databases or flat files
 type Dirs struct {
 	DataDir          string
