@@ -34,13 +34,13 @@ import (
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/background"
+	"github.com/erigontech/erigon/common/concurrent"
 	"github.com/erigontech/erigon/common/dbg"
 	dir2 "github.com/erigontech/erigon/common/dir"
 	"github.com/erigontech/erigon/common/estimate"
 	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/datadir"
-	"github.com/erigontech/erigon/db/downloader"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/db/rawdb/blockio"
@@ -49,6 +49,7 @@ import (
 	"github.com/erigontech/erigon/db/services"
 	"github.com/erigontech/erigon/db/snapcfg"
 	"github.com/erigontech/erigon/db/snapshotsync"
+	"github.com/erigontech/erigon/db/snapshotsync/blocksnapshots"
 	"github.com/erigontech/erigon/db/snaptype"
 	"github.com/erigontech/erigon/db/snaptype2"
 	"github.com/erigontech/erigon/diagnostics/metrics"
@@ -67,19 +68,6 @@ var (
 	BorDataNotReadyTimeout = 5 * time.Minute
 )
 
-type RoSnapshots struct {
-	snapshotsync.RoSnapshots
-}
-
-// NewRoSnapshots - opens all snapshots. But to simplify everything:
-//   - it opens snapshots only on App start and immutable after
-//   - all snapshots of given blocks range must exist - to make this blocks range available
-//   - gaps are not allowed
-//   - segment have [from:to) semantic
-func NewRoSnapshots(cfg ethconfig.BlocksFreezing, snapDir string, logger log.Logger) *RoSnapshots {
-	return &RoSnapshots{*snapshotsync.NewRoSnapshots(cfg, snapDir, snaptype2.BlockSnapshotTypes, true, logger)}
-}
-
 // headers
 // value: first_byte_of_header_hash + header_rlp
 // header_hash       -> headers_segment_offset
@@ -92,37 +80,6 @@ func NewRoSnapshots(cfg ethconfig.BlocksFreezing, snapDir string, logger log.Log
 // value: first_byte_of_transaction_hash + sender_address + transaction_rlp
 // transaction_hash  -> transactions_segment_offset
 // transaction_hash  -> block_number
-
-func SegmentsCaplin(dir string, minBlock uint64) (res []snaptype.FileInfo, missingSnapshots []snapshotsync.Range, err error) {
-	list, err := snaptype.Segments(dir)
-	if err != nil {
-		return nil, missingSnapshots, err
-	}
-
-	{
-		var l, lSidecars []snaptype.FileInfo
-		var m []snapshotsync.Range
-		for _, f := range list {
-			if f.Type.Enum() != snaptype.CaplinEnums.BeaconBlocks && f.Type.Enum() != snaptype.CaplinEnums.BlobSidecars {
-				continue
-			}
-			if f.Type.Enum() == snaptype.CaplinEnums.BlobSidecars {
-				lSidecars = append(lSidecars, f) // blobs are an exception
-				continue
-			}
-			l = append(l, f)
-		}
-		l, m = snapshotsync.NoGaps(snapshotsync.NoOverlaps(l))
-		if len(m) > 0 {
-			lst := m[len(m)-1]
-			log.Debug("[snapshots] see gap", "type", snaptype.CaplinEnums.BeaconBlocks, "from", lst.From())
-		}
-		res = append(res, l...)
-		res = append(res, lSidecars...)
-		missingSnapshots = append(missingSnapshots, m...)
-	}
-	return res, missingSnapshots, nil
-}
 
 func chooseSegmentEnd(from, to uint64, snapType snaptype.Enum, snCfg *snapcfg.Cfg) uint64 {
 	blocksPerFile := snapcfg.MergeLimitFromCfg(snCfg, snapType, from)
@@ -162,9 +119,15 @@ type BlockRetire struct {
 	heimdallStore         heimdall.Store
 	bridgeStore           bridge.Store
 	borDataNotReadyBefore time.Time
+
+	// Close cancels the in-flight retire (ctx/stopFn) and waits for it (background).
+	background concurrent.ClosingWaitGroup
+	ctx        context.Context
+	stopFn     context.CancelFunc
 }
 
 func NewBlockRetire(
+	ctx context.Context,
 	compressWorkers int,
 	dirs datadir.Dirs,
 	blockReader services.FullBlockReader,
@@ -199,6 +162,7 @@ func NewBlockRetire(
 		bridgeStore:           bridgeStore,
 		borDataNotReadyBefore: time.Now(),
 	}
+	r.ctx, r.stopFn = context.WithCancel(ctx)
 	r.workers.Store(int32(compressWorkers))
 	return r
 }
@@ -226,9 +190,9 @@ func (br *BlockRetire) BorStore() (heimdall.Store, bridge.Store) {
 	return br.heimdallStore, br.bridgeStore
 }
 
-func (br *BlockRetire) Writer() *RoSnapshots { return br.blockReader.Snapshots().(*RoSnapshots) }
-
-func (br *BlockRetire) snapshots() *RoSnapshots { return br.blockReader.Snapshots().(*RoSnapshots) }
+func (br *BlockRetire) snapshots() *blocksnapshots.RoSnapshots {
+	return br.blockReader.Snapshots().(*blocksnapshots.RoSnapshots)
+}
 
 func (br *BlockRetire) borSnapshots() *heimdall.RoSnapshots {
 	return br.blockReader.BorSnapshots().(*heimdall.RoSnapshots)
@@ -290,12 +254,12 @@ func (br *BlockRetire) dbHasEnoughDataForBlocksRetire(ctx context.Context) (bool
 	return !haveGap, nil
 }
 
-func (br *BlockRetire) retireBlocks(
+func (br *BlockRetire) buildFiles(
 	ctx context.Context,
 	minBlockNum uint64,
 	maxBlockNum uint64,
 	lvl log.Lvl,
-	seeder downloader.SeederClient,
+	seeder services.SeederClient,
 ) (bool, error) {
 	select {
 	case <-ctx.Done():
@@ -317,7 +281,7 @@ func (br *BlockRetire) retireBlocks(
 		logger.Log(lvl, "[snapshots] Retire Blocks", "range",
 			fmt.Sprintf("%s-%s", common.PrettyCounter(blockFrom), common.PrettyCounter(blockTo)))
 		// in future we will do it in background
-		if err := DumpBlocks(ctx, blockFrom, blockTo, br.chainConfig, tmpDir, snapshots.Dir(), db, int(workers), lvl, logger, blockReader, br.snCfg, &snapshots.RoSnapshots); err != nil {
+		if err := DumpBlocks(ctx, blockFrom, blockTo, br.chainConfig, tmpDir, snapshots.Dir(), db, int(workers), lvl, logger, blockReader, br.snCfg, &snapshots.BaseRoSnapshots); err != nil {
 			return ok, fmt.Errorf("DumpBlocks: %w", err)
 		}
 
@@ -337,7 +301,7 @@ func (br *BlockRetire) retireBlocks(
 func (br *BlockRetire) MergeBlocks(
 	ctx context.Context,
 	lvl log.Lvl,
-	seeder downloader.SeederClient,
+	seeder services.SeederClient,
 ) (merged bool, err error) {
 	notifier, logger, _, tmpDir, db, workers := br.notifier, br.logger, br.blockReader, br.tmpDir, br.db, br.workers.Load()
 	snapshots := br.snapshots()
@@ -359,7 +323,7 @@ func (br *BlockRetire) MergeBlocks(
 
 		return seeder.Seed(ctx, mergedFileNames)
 	}
-	if err = merger.Merge(ctx, &snapshots.RoSnapshots, snapshots.Types(), rangesToMerge, snapshots.Dir(), true /* doIndex */, onMerge, seeder.Delete); err != nil {
+	if err = merger.Merge(ctx, &snapshots.BaseRoSnapshots, snapshots.Types(), rangesToMerge, snapshots.Dir(), true /* doIndex */, onMerge, seeder.Delete); err != nil {
 		return false, err
 	}
 
@@ -415,12 +379,12 @@ func (br *BlockRetire) PruneAncientBlocks(tx kv.RwTx, limit int, timeout time.Du
 	return deleted + deletedBorBlocks, nil
 }
 
-func (br *BlockRetire) RetireBlocksInBackground(
+func (br *BlockRetire) BuildFilesInBackground(
 	ctx context.Context,
 	minBlockNum,
 	maxBlockNum uint64,
 	lvl log.Lvl,
-	seeder downloader.SeederClient,
+	seeder services.SeederClient,
 	onFinishRetire func() error,
 	onDone func(),
 ) bool {
@@ -432,20 +396,28 @@ func (br *BlockRetire) RetireBlocksInBackground(
 		return false
 	}
 
-	go func() {
+	started := br.background.TryGo(func() {
 		defer onDone()
 		defer br.working.Store(false)
+
+		// Cancel on either the caller's ctx or Close (br.ctx).
+		ctx, cancel := context.WithCancel(ctx)
+		defer cancel()
+		stopOnClose := context.AfterFunc(br.ctx, cancel)
+		defer stopOnClose()
 
 		if br.snBuildAllowed != nil {
 			//we are inside own goroutine - it's fine to block here
 			if err := br.snBuildAllowed.Acquire(ctx, 1); err != nil {
-				br.logger.Warn("[snapshots] retire blocks", "err", err)
+				if !errors.Is(err, context.Canceled) && !errors.Is(err, common.ErrStopped) {
+					br.logger.Warn("[snapshots] retire blocks", "err", err)
+				}
 				return
 			}
 			defer br.snBuildAllowed.Release(1)
 		}
 
-		err := br.RetireBlocks(ctx, minBlockNum, maxBlockNum, lvl, seeder, onFinishRetire)
+		err := br.BuildFiles(ctx, minBlockNum, maxBlockNum, lvl, seeder, onFinishRetire)
 		if errors.Is(err, heimdall.ErrHeimdallDataIsNotReady) {
 			br.borDataNotReadyBefore = time.Now().Add(BorDataNotReadyTimeout)
 			br.logger.Debug("[snapshots] bor data is not ready to be retired", "nextAttemptAt", br.borDataNotReadyBefore)
@@ -456,20 +428,38 @@ func (br *BlockRetire) RetireBlocksInBackground(
 			return
 		}
 		if err != nil {
+			if errors.Is(err, context.Canceled) || errors.Is(err, common.ErrStopped) {
+				br.logger.Debug("[snapshots] retire blocks canceled", "err", err)
+				return
+			}
 			br.logger.Error("[snapshots] retire blocks", "err", err)
 			return
 		}
-	}()
+	})
+	if !started { // Close has latched; no retire was started
+		br.working.Store(false)
+		return false
+	}
 
 	return true
 }
 
-func (br *BlockRetire) RetireBlocks(
+// Close cancels the in-flight background retire and waits for it, so the DB and
+// snapshots can be torn down safely afterwards. Idempotent.
+func (br *BlockRetire) Close() {
+	if !br.background.BeginClose() {
+		return
+	}
+	br.stopFn()
+	br.background.Wait()
+}
+
+func (br *BlockRetire) BuildFiles(
 	ctx context.Context,
 	requestedMinBlockNum uint64,
 	requestedMaxBlockNum uint64,
 	lvl log.Lvl,
-	seeder downloader.SeederClient,
+	seeder services.SeederClient,
 	onFinish func() error,
 ) error {
 	if requestedMaxBlockNum > br.maxScheduledBlock.Load() {
@@ -481,7 +471,7 @@ func (br *BlockRetire) RetireBlocks(
 		return nil
 	}
 
-	if err := br.BuildMissedIndicesIfNeed(ctx, "RetireBlocks", br.notifier); err != nil {
+	if err := br.BuildMissedIndicesIfNeed(ctx, "BuildFiles", br.notifier); err != nil {
 		return err
 	}
 
@@ -508,7 +498,7 @@ func (br *BlockRetire) RetireBlocks(
 		var ok, okBor bool
 		minBlockNum := max(br.blockReader.FrozenBlocks(), requestedMinBlockNum)
 		maxBlockNum := br.maxScheduledBlock.Load()
-		ok, err = br.retireBlocks(ctx, minBlockNum, maxBlockNum, lvl, seeder)
+		ok, err = br.buildFiles(ctx, minBlockNum, maxBlockNum, lvl, seeder)
 		if err != nil {
 			return err
 		}
@@ -539,20 +529,27 @@ func (br *BlockRetire) BuildMissedIndicesIfNeed(ctx context.Context, logPrefix s
 	}
 
 	if br.chainConfig.Bor != nil {
-		if err := br.borSnapshots().RoSnapshots.BuildMissedIndices(ctx, logPrefix, notifier, br.dirs, br.chainConfig, br.logger); err != nil {
+		if err := br.borSnapshots().BaseRoSnapshots.BuildMissedIndices(ctx, logPrefix, notifier, br.dirs, br.chainConfig, br.logger); err != nil {
 			return err
 		}
 	}
 
 	return nil
 }
+
+// RetireTransactionFiles expires transaction segments ending below blockTo — the
+// minimal/full-node step that drops old bodies once state no longer needs them.
+func (br *BlockRetire) RetireTransactionFiles(blockTo uint64, onDelete func(l []string) error) (bool, error) {
+	return br.snapshots().RetireFilesBelow(snaptype2.Transactions, blockTo, onDelete)
+}
+
 func (br *BlockRetire) RemoveOverlaps(onDelete func(l []string) error) error {
 	if err := br.snapshots().RemoveOverlaps(onDelete); err != nil {
 		return err
 	}
 
 	if br.chainConfig.Bor != nil {
-		if err := br.borSnapshots().RoSnapshots.RemoveOverlaps(onDelete); err != nil {
+		if err := br.borSnapshots().BaseRoSnapshots.RemoveOverlaps(onDelete); err != nil {
 			return err
 		}
 	}
@@ -562,7 +559,7 @@ func (br *BlockRetire) RemoveOverlaps(onDelete func(l []string) error) error {
 func (br *BlockRetire) MadvNormal() *BlockRetire {
 	br.snapshots().MadvNormal()
 	if br.chainConfig.Bor != nil {
-		br.borSnapshots().RoSnapshots.MadvNormal()
+		br.borSnapshots().BaseRoSnapshots.MadvNormal()
 	}
 	return br
 }
@@ -570,12 +567,19 @@ func (br *BlockRetire) MadvNormal() *BlockRetire {
 func (br *BlockRetire) DisableReadAhead() {
 	br.snapshots().DisableReadAhead()
 	if br.chainConfig.Bor != nil {
-		br.borSnapshots().RoSnapshots.DisableReadAhead()
+		br.borSnapshots().BaseRoSnapshots.DisableReadAhead()
 	}
 }
 
-func DumpBlocks(ctx context.Context, blockFrom, blockTo uint64, chainConfig *chain.Config, tmpDir, snapDir string, chainDB kv.RoDB, workers int, lvl log.Lvl, logger log.Logger, blockReader services.FullBlockReader, snCfg *snapcfg.Cfg, inProgress *snapshotsync.RoSnapshots) error {
-	firstTxNum := blockReader.FirstTxnNumNotInSnapshots()
+func DumpBlocks(ctx context.Context, blockFrom, blockTo uint64, chainConfig *chain.Config, tmpDir, snapDir string, chainDB kv.RoDB, workers int, lvl log.Lvl, logger log.Logger, blockReader services.FullBlockReader, snCfg *snapcfg.Cfg, inProgress *snapshotsync.BaseRoSnapshots) error {
+	var firstTxNum uint64
+	if err := chainDB.View(ctx, func(tx kv.Tx) error {
+		firstTxNum = blockReader.FirstTxnNumNotInSnapshots(tx)
+		return nil
+	}); err != nil {
+		return err
+	}
+
 	for i := blockFrom; i < blockTo; i = chooseSegmentEnd(i, blockTo, snaptype2.Enums.Headers, snCfg) {
 		lastTxNum, err := dumpBlocksRange(ctx, i, chooseSegmentEnd(i, blockTo, snaptype2.Enums.Headers, snCfg), tmpDir, snapDir, firstTxNum, chainDB, chainConfig, workers, lvl, logger, inProgress)
 		if err != nil {
@@ -586,7 +590,7 @@ func DumpBlocks(ctx context.Context, blockFrom, blockTo uint64, chainConfig *cha
 	return nil
 }
 
-func dumpBlocksRange(ctx context.Context, blockFrom, blockTo uint64, tmpDir, snapDir string, firstTxNum uint64, chainDB kv.RoDB, chainConfig *chain.Config, workers int, lvl log.Lvl, logger log.Logger, inProgress *snapshotsync.RoSnapshots) (lastTxNum uint64, err error) {
+func dumpBlocksRange(ctx context.Context, blockFrom, blockTo uint64, tmpDir, snapDir string, firstTxNum uint64, chainDB kv.RoDB, chainConfig *chain.Config, workers int, lvl log.Lvl, logger log.Logger, inProgress *snapshotsync.BaseRoSnapshots) (lastTxNum uint64, err error) {
 	logEvery := time.NewTicker(20 * time.Second)
 	defer logEvery.Stop()
 
@@ -627,7 +631,7 @@ var BlockCompressCfg = seg.Cfg{
 	Workers:              1,
 }
 
-func dumpRange(ctx context.Context, f snaptype.FileInfo, dumper dumpFunc, firstKey firstKeyGetter, chainDB kv.RoDB, chainConfig *chain.Config, tmpDir string, workers int, lvl log.Lvl, logger log.Logger, inProgress *snapshotsync.RoSnapshots) (uint64, error) {
+func dumpRange(ctx context.Context, f snaptype.FileInfo, dumper dumpFunc, firstKey firstKeyGetter, chainDB kv.RoDB, chainConfig *chain.Config, tmpDir string, workers int, lvl log.Lvl, logger log.Logger, inProgress *snapshotsync.BaseRoSnapshots) (uint64, error) {
 	// Claim this (type, range) so a concurrent OpenFolder doesn't pick up the
 	// .seg before its index is built and race our BuildIndexes below.
 	if inProgress != nil {
@@ -770,11 +774,11 @@ func DumpTxs(ctx context.Context, db kv.RoDB, chainConfig *chain.Config, blockFr
 		}
 
 		if doWarmup && !warmupSenders.Load() && blockNum%1_000 == 0 {
-			clean := kv.ReadAhead(warmupCtx, db, warmupSenders, kv.Senders, hexutil.EncodeTs(blockNum), 10_000)
+			clean := kv.ReadAheadDeprecated(warmupCtx, db, warmupSenders, kv.Senders, hexutil.EncodeTs(blockNum), 10_000)
 			defer clean()
 		}
 		if doWarmup && !warmupTxs.Load() && blockNum%1_000 == 0 {
-			clean := kv.ReadAhead(warmupCtx, db, warmupTxs, kv.EthTx, body.BaseTxnID.Bytes(), 100*10_000)
+			clean := kv.ReadAheadDeprecated(warmupCtx, db, warmupTxs, kv.EthTx, body.BaseTxnID.Bytes(), 100*10_000)
 			defer clean()
 		}
 		senders, err := rawdb.ReadSenders(tx, h, blockNum)
@@ -1045,7 +1049,7 @@ func DumpBodies(ctx context.Context, db kv.RoDB, _ *chain.Config, blockFrom, blo
 	return lastTxNum, nil
 }
 
-func ForEachHeader(ctx context.Context, s *RoSnapshots, walker func(header *types.Header) error) error {
+func ForEachHeader(ctx context.Context, s *blocksnapshots.RoSnapshots, walker func(header *types.Header) error) error {
 	word := make([]byte, 0, 2*4096)
 
 	view := s.View()
@@ -1072,35 +1076,6 @@ func ForEachHeader(ctx context.Context, s *RoSnapshots, walker func(header *type
 	}
 
 	return nil
-}
-
-type View struct {
-	base *snapshotsync.View
-}
-
-func (s *RoSnapshots) View() *View {
-	return &View{base: s.RoSnapshots.View().WithBaseSegType(snaptype2.Transactions)}
-}
-
-func (v *View) Close() {
-	v.base.Close()
-}
-
-func (v *View) Headers() []*snapshotsync.VisibleSegment { return v.base.Segments(snaptype2.Headers) }
-func (v *View) Bodies() []*snapshotsync.VisibleSegment  { return v.base.Segments(snaptype2.Bodies) }
-func (v *View) Txs() []*snapshotsync.VisibleSegment {
-	return v.base.Segments(snaptype2.Transactions)
-}
-
-func (v *View) HeadersSegment(blockNum uint64) (*snapshotsync.VisibleSegment, bool) {
-	return v.base.Segment(snaptype2.Headers, blockNum)
-}
-
-func (v *View) BodiesSegment(blockNum uint64) (*snapshotsync.VisibleSegment, bool) {
-	return v.base.Segment(snaptype2.Bodies, blockNum)
-}
-func (v *View) TxsSegment(blockNum uint64) (*snapshotsync.VisibleSegment, bool) {
-	return v.base.Segment(snaptype2.Transactions, blockNum)
 }
 
 func RemoveIncompatibleIndices(dirs datadir.Dirs) error {

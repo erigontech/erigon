@@ -13,14 +13,17 @@ import (
 
 	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/dir"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/datadir"
+	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/dbcfg"
 	"github.com/erigontech/erigon/db/kv/mdbx"
 	"github.com/erigontech/erigon/db/kv/temporal"
+	"github.com/erigontech/erigon/db/rawdb/rawtemporaldb"
 	dbstate "github.com/erigontech/erigon/db/state"
 	"github.com/erigontech/erigon/db/state/execctx"
 	"github.com/erigontech/erigon/execution/chain"
@@ -29,10 +32,12 @@ import (
 	"github.com/erigontech/erigon/execution/exec"
 	"github.com/erigontech/erigon/execution/protocol"
 	"github.com/erigontech/erigon/execution/protocol/rules"
+	"github.com/erigontech/erigon/execution/protocol/rules/ethash"
 	"github.com/erigontech/erigon/execution/state"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/accounts"
 	"github.com/erigontech/erigon/execution/vm"
+	"github.com/erigontech/erigon/execution/vm/evmtypes"
 )
 
 type OpType int
@@ -57,7 +62,7 @@ type testExecTask struct {
 	ctx          context.Context
 	ops          []Op
 	readMap      state.ReadSet
-	writeMap     state.WriteSet
+	writeMap     *state.WriteSet
 	sender       accounts.Address
 	nonce        int
 	dependencies []int
@@ -86,7 +91,7 @@ func NewTestExecTask(txIdx int, ops []Op, sender accounts.Address, nonce int) *t
 		ctx:          context.Background(),
 		ops:          ops,
 		readMap:      state.ReadSet{},
-		writeMap:     state.WriteSet{},
+		writeMap:     &state.WriteSet{},
 		sender:       sender,
 		nonce:        nonce,
 		dependencies: []int{},
@@ -118,7 +123,7 @@ func (t *testExecTask) Execute(evm *vm.EVM,
 	version := t.Version()
 
 	t.readMap = state.ReadSet{}
-	t.writeMap = state.WriteSet{}
+	t.writeMap = &state.WriteSet{}
 
 	dep := -1
 
@@ -127,19 +132,23 @@ func (t *testExecTask) Execute(evm *vm.EVM,
 
 		switch op.opType {
 		case readType:
-			if _, ok := t.writeMap[k.addr][state.AccountKey{Path: k.path, Key: k.key}]; ok {
+			if t.writeMap.Has(state.WriteHeader{Address: k.addr, Path: k.path, Key: k.key}) {
 				sleepWithContext(t.ctx, op.duration) //nolint:errcheck
 				continue
 			}
 
 			result := ibs.ReadVersion(k.addr, k.path, k.key, version.TxIndex)
 
-			val := result.Value()
-
-			if i == 0 && val != nil && (val.(int) != t.nonce) {
-				return &exec.TxResult{Err: protocol.ErrExecAbortError{
-					DependencyTxIndex: -1,
-					OriginError:       fmt.Errorf("invalid nonce: got: %d, expected: %d", val.(int), t.nonce)}}
+			// op[0] is always a NoncePath read; peek the versionMap value (no
+			// extra recorded read) and abort on a nonce mismatch.
+			if i == 0 {
+				if vm := ibs.VersionMap(); vm != nil {
+					if nonce, _, ok := vm.ReadNonce(k.addr, version.TxIndex); ok && int(nonce) != t.nonce {
+						return &exec.TxResult{Err: protocol.ErrExecAbortError{
+							DependencyTxIndex: -1,
+							OriginError:       fmt.Errorf("invalid nonce: got: %d, expected: %d", nonce, t.nonce)}}
+					}
+				}
 			}
 
 			if result.Status() == state.MVReadResultDependency {
@@ -158,9 +167,9 @@ func (t *testExecTask) Execute(evm *vm.EVM,
 
 			sleepWithContext(t.ctx, op.duration) //nolint:errcheck
 
-			t.readMap.Set(state.VersionedRead{Address: k.addr, Path: k.path, Key: k.key, Source: readKind, Version: state.Version{TxIndex: result.DepIdx(), Incarnation: result.Incarnation()}})
+			t.readMap.SetHeader(k.addr, k.path, k.key, state.ReadHeader{Source: readKind, Version: state.Version{TxIndex: result.DepIdx(), Incarnation: result.Incarnation()}})
 		case writeType:
-			t.writeMap.Set(state.VersionedWrite{Address: k.addr, Path: k.path, Key: k.key, Version: version, Val: op.val})
+			testWriteSetInt(t.writeMap, k.addr, k.path, k.key, version, op.val)
 		case otherType:
 			sleepWithContext(t.ctx, op.duration) //nolint:errcheck
 		default:
@@ -175,15 +184,8 @@ func (t *testExecTask) Execute(evm *vm.EVM,
 	return &exec.TxResult{}
 }
 
-func (t *testExecTask) VersionedWrites(_ *state.IntraBlockState) state.VersionedWrites {
-	writes := make(state.VersionedWrites, 0, t.writeMap.Len())
-
-	t.writeMap.Scan(func(v *state.VersionedWrite) bool {
-		writes = append(writes, v)
-		return true
-	})
-
-	return writes
+func (t *testExecTask) VersionedWrites(_ *state.IntraBlockState) *state.WriteSet {
+	return t.writeMap
 }
 
 func (t *testExecTask) VersionedReads(_ *state.IntraBlockState) state.ReadSet {
@@ -501,7 +503,7 @@ func runParallel(tb testing.TB, tasks []exec.Task, validation propertyCheck, met
 	assert.NoError(tb, err)
 	defer agg.Close()
 
-	db, err := temporal.New(rawDb, agg)
+	db, err := temporal.New(rawDb, agg, nil)
 	assert.NoError(tb, err)
 
 	tx, err := db.BeginTemporalRo(context.Background()) //nolint:gocritic
@@ -626,7 +628,7 @@ func runParallelGetMetadata(tb testing.TB, tasks []exec.Task, validation propert
 	assert.NoError(tb, err)
 	defer agg.Close()
 
-	db, err := temporal.New(rawDb, agg)
+	db, err := temporal.New(rawDb, agg, nil)
 	assert.NoError(tb, err)
 
 	tx, err := db.BeginTemporalRo(context.Background()) //nolint:gocritic
@@ -687,7 +689,7 @@ func runProfileAndExecute(tb testing.TB, tasks []exec.Task, validation propertyC
 	assert.NoError(tb, err)
 	defer agg.Close()
 
-	db, err := temporal.New(rawDb, agg)
+	db, err := temporal.New(rawDb, agg, nil)
 	assert.NoError(tb, err)
 
 	chainSpec, _ := chainspec.ChainSpecByName(networkname.Mainnet)
@@ -1230,13 +1232,12 @@ func dexPostValidation(pe *parallelExecutor) error {
 		if blockStatus.validateTasks.maxComplete() == len(blockStatus.tasks) {
 			for i, inputs := range blockStatus.result.TxIO.Inputs() {
 				var err error
-				inputs.Scan(func(input *state.VersionedRead) bool {
-					if input.Version.TxIndex != i-1 {
-						err = fmt.Errorf("Blk %d, Tx %d should depend on tx %d, but it actually depends on %d", blockNum, i, i-1, input.Version.TxIndex)
-						return false
+				for hdr := range inputs.AllHeaders() {
+					if hdr.Version.TxIndex != i-1 {
+						err = fmt.Errorf("Blk %d, Tx %d should depend on tx %d, but it actually depends on %d", blockNum, i, i-1, hdr.Version.TxIndex)
+						break
 					}
-					return true
-				})
+				}
 				if err != nil {
 					return err
 				}
@@ -1348,4 +1349,394 @@ func BenchmarkDexScenarioWithMetadata(b *testing.B) {
 	}
 
 	testExecutorCombWithMetadata(b, totalTxs, numReads, numWrites, numNonIO, taskRunner, logger)
+}
+
+func TestFailCandidate_Consider(t *testing.T) {
+	commitErr := func(b uint64) error { return fmt.Errorf("wrong root block %d", b) }
+	execErr := func(b uint64) error { return fmt.Errorf("invalid block %d", b) }
+
+	hashOf := func(b uint64) common.Hash { return common.Hash{byte(b)} }
+
+	t.Run("earliest block wins across streams regardless of arrival order", func(t *testing.T) {
+		var fc failCandidate
+		fc.consider(8, hashOf(8), true, execErr(8))    // exec-fail at 8 seen first
+		fc.consider(5, hashOf(5), false, commitErr(5)) // earlier commit-fail at 5 seen later
+		assert.True(t, fc.set)
+		assert.Equal(t, uint64(5), fc.block)
+		assert.False(t, fc.exec)
+		// The winning candidate's hash rides along, so a !initialCycle wrong-root
+		// unwind marks the implicated block, not whatever exec last applied.
+		assert.Equal(t, hashOf(5), fc.blockHash)
+	})
+
+	t.Run("same block: exec verdict supersedes commit wrong-root", func(t *testing.T) {
+		var fc failCandidate
+		fc.consider(7, hashOf(7), false, commitErr(7))
+		fc.consider(7, hashOf(7), true, execErr(7))
+		assert.Equal(t, uint64(7), fc.block)
+		assert.True(t, fc.exec)
+	})
+
+	t.Run("a later commit-fail does not override an earlier exec-fail", func(t *testing.T) {
+		var fc failCandidate
+		fc.consider(4, hashOf(4), true, execErr(4))
+		fc.consider(9, hashOf(9), false, commitErr(9))
+		assert.Equal(t, uint64(4), fc.block)
+		assert.True(t, fc.exec)
+	})
+
+	t.Run("a later same-block commit-fail does not downgrade an exec-fail", func(t *testing.T) {
+		var fc failCandidate
+		fc.consider(6, hashOf(6), true, execErr(6))
+		fc.consider(6, hashOf(6), false, commitErr(6))
+		assert.Equal(t, uint64(6), fc.block)
+		assert.True(t, fc.exec)
+	})
+}
+
+// newResumeTestDB builds the temporal DB stack the resume tests run against.
+func newResumeTestDB(t *testing.T) kv.TemporalRwDB {
+	if runtime.GOOS == "windows" {
+		t.Skip("mdbx InMem test databases are not supported on windows")
+	}
+	logger := log.New()
+	dirs := datadir.New(t.TempDir())
+	rawDb := mdbx.New(dbcfg.ChainDB, logger).InMem(t, dirs.Chaindata).MustOpen()
+	t.Cleanup(rawDb.Close)
+
+	agg, err := dbstate.NewTest(dirs).StepSize(16).Logger(logger).Open(context.Background(), rawDb)
+	require.NoError(t, err)
+	t.Cleanup(agg.Close)
+
+	db, err := temporal.New(rawDb, agg, nil)
+	require.NoError(t, err)
+	return db
+}
+
+func seedResumeTestDB(t *testing.T, db kv.TemporalRwDB, seed func(putter kv.TemporalPutDel) error) {
+	err := db.UpdateTemporal(context.Background(), func(rwTx kv.TemporalRwTx) error {
+		domains, err := execctx.NewSharedDomains(context.Background(), rwTx, log.New())
+		if err != nil {
+			return err
+		}
+		defer domains.Close()
+		if err := seed(domains.AsPutDel(rwTx)); err != nil {
+			return err
+		}
+		return domains.Flush(context.Background(), rwTx)
+	})
+	require.NoError(t, err)
+}
+
+// newResumeTestExec opens a read view over db (call after seeding) and wires a
+// parallelExecutor around it.
+func newResumeTestExec(t *testing.T, db kv.TemporalRwDB, config *chain.Config) (*parallelExecutor, kv.TemporalTx) {
+	logger := log.New()
+	roTx, err := db.BeginTemporalRo(context.Background())
+	require.NoError(t, err)
+	t.Cleanup(roTx.Rollback)
+
+	domains, err := execctx.NewSharedDomains(context.Background(), roTx, logger)
+	require.NoError(t, err)
+	t.Cleanup(domains.Close)
+
+	pe := &parallelExecutor{
+		txExecutor: txExecutor{
+			cfg: ExecuteBlockCfg{
+				chainConfig: config,
+				db:          db,
+				engine:      ethash.NewFaker(),
+			},
+			doms:   domains,
+			rs:     state.NewStateV3Buffered(state.NewStateV3(domains, false, logger)),
+			logger: logger,
+		},
+	}
+	return pe, roTx
+}
+
+func TestParallelResumeBoundaryOffsets(t *testing.T) {
+	assert := assert.New(t)
+	db := newResumeTestDB(t)
+
+	// Write mock receipt for transaction 0 in the database at txNum = 1
+	seedResumeTestDB(t, db, func(putter kv.TemporalPutDel) error {
+		return rawtemporaldb.AppendReceipt(putter, 5, 21000, 12000, 1)
+	})
+
+	chainSpec, _ := chainspec.ChainSpecByName(networkname.Mainnet)
+
+	signedTx := signSelfSendTx(t, 0, 0, 1, 21000, chainSpec.Config, 0)
+
+	// Create a task list that resumes mid-block
+	// First task has TxIndex = 1 (not -1/0), so isPartial will be true
+	txTask := &exec.TxTask{
+		Header: &types.Header{
+			Number: *uint256.NewInt(1),
+		},
+		TxNum:   2,
+		TxIndex: 1,
+		Config:  chainSpec.Config,
+		Txs: []types.Transaction{
+			signedTx,
+			signedTx,
+		},
+	}
+
+	pe, roTx := newResumeTestExec(t, db, chainSpec.Config)
+
+	gasPool := new(protocol.GasPool).AddGas(10_000_000)
+
+	be := newBlockExec(0, common.Hash{}, gasPool, nil, make(chan applyResult, 1), nil, false, nil)
+	eTask := &execTask{
+		Task:  txTask,
+		index: 0,
+	}
+	be.tasks = []*execTask{eTask}
+	be.results = []*execResult{nil}
+	be.execTasks.inProgress = []int{0}
+
+	tVersion := &taskVersion{
+		execTask: eTask,
+		version: state.Version{
+			BlockNum:    0,
+			TxIndex:     1,
+			Incarnation: 1,
+			TxNum:       2,
+		},
+	}
+
+	txResult := &exec.TxResult{
+		Task: tVersion,
+		ExecutionResult: evmtypes.ExecutionResult{
+			ReceiptGasUsed: 10000,
+		},
+	}
+
+	res, err := be.nextResult(context.Background(), pe, txResult, roTx)
+	assert.NoError(err)
+	assert.NotNil(res)
+
+	// Verify that the fallback database query ran and set the correct offset values:
+	// cumulativeGasUsed should be cumGasUsed (21000) + current receipt gas used (10000) = 31000
+	// firstLogIndex should be logIndexAfterTx from DB = 5
+	assert.NotNil(txResult.Receipt)
+	assert.Equal(uint64(31000), txResult.Receipt.CumulativeGasUsed)
+	assert.Equal(uint32(5), txResult.Receipt.FirstLogIndexWithinBlock)
+	assert.Equal(uint64(12000), be.blobGasUsed)
+
+	// The resumed block is flagged partial; with no prefix reconstruction
+	// (blockNum 0 skips it) its receipts stay incomplete, which is what gates
+	// RecentReceipts.Add in the apply loop.
+	assert.True(res.isPartial)
+	assert.False(res.receiptsComplete)
+}
+
+// TestParallelResumeReconstructsPriorReceipts pins the block-end prefix
+// reconstruction for resumed blocks: receipts of transactions executed in an
+// earlier batch are re-derived so that engine.Finalize and the notification
+// cache see the complete set, mirroring the serial executor.
+func TestParallelResumeReconstructsPriorReceipts(t *testing.T) {
+	assert := assert.New(t)
+	db := newResumeTestDB(t)
+
+	config := chain.TestChainBerlinConfig
+	tx0 := signSelfSendTx(t, 0, 0, 1, 21000, config, 0)
+	tx1 := signSelfSendTx(t, 1, 0, 1, 21000, config, 0)
+
+	// Fund the sender at txNum 0 and store tx0's receipt values at txNum 1,
+	// simulating a batch that committed mid-block after tx0.
+	seedResumeTestDB(t, db, func(putter kv.TemporalPutDel) error {
+		acc := accounts.NewAccount()
+		acc.Balance = *uint256.NewInt(1_000_000_000)
+		if err := putter.DomainPut(kv.AccountsDomain, senderIsCoinbaseKey.rawAddress[:], accounts.SerialiseV3(&acc), 0, nil); err != nil {
+			return err
+		}
+		return rawtemporaldb.AppendReceipt(putter, 0, 21000, 0, 1)
+	})
+
+	txTask := &exec.TxTask{
+		Header: &types.Header{
+			Number:   *uint256.NewInt(1),
+			GasLimit: 10_000_000,
+		},
+		TxNum:   2,
+		TxIndex: 1,
+		Config:  config,
+		Txs:     []types.Transaction{tx0, tx1},
+	}
+
+	pe, roTx := newResumeTestExec(t, db, config)
+
+	gasPool := new(protocol.GasPool).AddGas(10_000_000)
+
+	be := newBlockExec(1, common.Hash{}, gasPool, nil, make(chan applyResult, 4), nil, false, nil)
+	eTask := &execTask{
+		Task:  txTask,
+		index: 0,
+	}
+	be.tasks = []*execTask{eTask}
+	be.results = []*execResult{nil}
+	be.execTasks.inProgress = []int{0}
+
+	tVersion := &taskVersion{
+		execTask: eTask,
+		version: state.Version{
+			BlockNum:    1,
+			TxIndex:     1,
+			Incarnation: 1,
+			TxNum:       2,
+		},
+	}
+
+	txResult := &exec.TxResult{
+		Task: tVersion,
+		ExecutionResult: evmtypes.ExecutionResult{
+			ReceiptGasUsed: 10000,
+		},
+	}
+
+	res, err := be.nextResult(context.Background(), pe, txResult, roTx)
+	assert.NoError(err)
+	assert.NotNil(res)
+
+	assert.True(res.isPartial)
+	assert.True(res.receiptsComplete)
+	if assert.Len(res.Receipts, 2) {
+		assert.Equal(uint(0), res.Receipts[0].TransactionIndex)
+		assert.Equal(uint64(21000), res.Receipts[0].CumulativeGasUsed)
+		assert.Equal(uint(1), res.Receipts[1].TransactionIndex)
+		assert.Equal(uint64(31000), res.Receipts[1].CumulativeGasUsed)
+	}
+}
+
+// TestParallelResumeReconstructionFailureIsNonFatal pins the failure policy when
+// prior receipts cannot be reconstructed: reconstruction is best-effort, so the
+// batch proceeds (prior receipts absent, block left not receipts-complete)
+// rather than halting the node mid-step. See reconstructPriorReceipts.
+func TestParallelResumeReconstructionFailureIsNonFatal(t *testing.T) {
+	assert := assert.New(t)
+	db := newResumeTestDB(t)
+
+	config := chain.TestChainBerlinConfig
+	tx0 := signSelfSendTx(t, 0, 0, 1, 21000, config, 0)
+	tx1 := signSelfSendTx(t, 1, 0, 1, 21000, config, 0)
+
+	// Store tx0's receipt values but leave the sender unfunded: the RCacheV2
+	// probe misses and the prefix replay fails on insufficient funds.
+	seedResumeTestDB(t, db, func(putter kv.TemporalPutDel) error {
+		return rawtemporaldb.AppendReceipt(putter, 0, 21000, 0, 1)
+	})
+
+	txTask := &exec.TxTask{
+		Header: &types.Header{
+			Number:   *uint256.NewInt(1),
+			GasLimit: 10_000_000,
+		},
+		TxNum:   2,
+		TxIndex: 1,
+		Config:  config,
+		Txs:     []types.Transaction{tx0, tx1},
+	}
+
+	pe, roTx := newResumeTestExec(t, db, config)
+
+	gasPool := new(protocol.GasPool).AddGas(10_000_000)
+
+	be := newBlockExec(1, common.Hash{}, gasPool, nil, make(chan applyResult, 4), nil, false, nil)
+	eTask := &execTask{
+		Task:  txTask,
+		index: 0,
+	}
+	be.tasks = []*execTask{eTask}
+	be.results = []*execResult{nil}
+	be.execTasks.inProgress = []int{0}
+
+	tVersion := &taskVersion{
+		execTask: eTask,
+		version: state.Version{
+			BlockNum:    1,
+			TxIndex:     1,
+			Incarnation: 1,
+			TxNum:       2,
+		},
+	}
+
+	txResult := &exec.TxResult{
+		Task: tVersion,
+		ExecutionResult: evmtypes.ExecutionResult{
+			ReceiptGasUsed: 10000,
+		},
+	}
+
+	res, err := be.nextResult(context.Background(), pe, txResult, roTx)
+	assert.NoError(err)
+	if assert.NotNil(res) {
+		assert.False(res.receiptsComplete)
+	}
+}
+
+// TestParallelFinalizeMissingPrevReceiptErrors pins the failure mode when the
+// in-order finalize invariant is broken: a missing previous receipt must fail
+// loudly instead of silently writing zero-based offsets — the corruption class
+// the resume-boundary fallback eliminates.
+func TestParallelFinalizeMissingPrevReceiptErrors(t *testing.T) {
+	assert := assert.New(t)
+	db := newResumeTestDB(t)
+
+	config := chain.TestChainBerlinConfig
+	signedTx := signSelfSendTx(t, 0, 0, 1, 21000, config, 0)
+
+	header := &types.Header{
+		Number:   *uint256.NewInt(1),
+		GasLimit: 10_000_000,
+	}
+	mkTask := func(index, txIndex int, txNum uint64) (*execTask, *taskVersion) {
+		eTask := &execTask{
+			Task: &exec.TxTask{
+				Header:  header,
+				TxNum:   txNum,
+				TxIndex: txIndex,
+				Config:  config,
+				Txs:     []types.Transaction{signedTx, signedTx, signedTx},
+			},
+			index: index,
+		}
+		return eTask, &taskVersion{
+			execTask: eTask,
+			version: state.Version{
+				TxIndex:     txIndex,
+				Incarnation: 1,
+				TxNum:       txNum,
+			},
+		}
+	}
+	eTask0, tVersion0 := mkTask(0, 1, 2)
+	eTask1, tVersion1 := mkTask(1, 2, 3)
+
+	pe, roTx := newResumeTestExec(t, db, config)
+
+	gasPool := new(protocol.GasPool).AddGas(10_000_000)
+
+	be := newBlockExec(0, common.Hash{}, gasPool, nil, make(chan applyResult, 1), nil, false, nil)
+	be.tasks = []*execTask{eTask0, eTask1}
+	be.results = []*execResult{nil, nil}
+	// tx 0 was "finalized" without a receipt — the invariant nextResult
+	// relies on for the in-memory prev-receipt lookup is broken.
+	be.finalizedResults[0] = &execResult{TxResult: &exec.TxResult{Task: tVersion0}}
+	be.execTasks.complete = []int{0}
+	be.execTasks.inProgress = []int{1}
+
+	txResult1 := &exec.TxResult{
+		Task: tVersion1,
+		ExecutionResult: evmtypes.ExecutionResult{
+			ReceiptGasUsed: 10000,
+		},
+	}
+
+	res, err := be.nextResult(context.Background(), pe, txResult1, roTx)
+	// The message must name the block-level tx index (prev tx = TxIndex 1),
+	// not the batch-local task index (0).
+	assert.ErrorContains(err, "missing finalized receipt for tx 1")
+	assert.Nil(res)
 }

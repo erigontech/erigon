@@ -18,6 +18,7 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -29,7 +30,7 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/urfave/cli/v2"
+	"github.com/urfave/cli/v3"
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/hexutil"
@@ -64,7 +65,7 @@ var zkevmTestCommand = cli.Command{
 	},
 }
 
-func zkevmTestCmd(ctx *cli.Context) error {
+func zkevmTestCmd(_ context.Context, ctx *cli.Command) error {
 	path := ctx.Args().First()
 	if path == "" {
 		return errors.New("path argument required")
@@ -249,7 +250,7 @@ func runWitnessTest(test *testutil.WitnessBlockTest) error {
 		return fmt.Errorf("commit commitment history flag: %w", err)
 	}
 
-	baseApi := jsonrpc.NewBaseApi(nil, m.StateCache, m.BlockReader, false, rpccfg.DefaultEvmCallTimeout, m.Engine, m.Dirs, nil, 0, 0)
+	baseApi := jsonrpc.NewBaseApi(nil, m.StateCache, m.BlockReader, false, rpccfg.DefaultEvmCallTimeout, m.Engine, m.Dirs, nil, 0, 0, 0)
 	debugApi := jsonrpc.NewPrivateDebugAPI(baseApi, m.DB, nil, 0, false)
 	canonicalMode := "canonical"
 

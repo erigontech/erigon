@@ -12,6 +12,7 @@ linters:
     - gochecksumtype
     - gocritic
     - gosmopolitan
+    - modernize
     - nilnesserr
     - prealloc
     - reassign
@@ -88,6 +89,22 @@ linters:
           rules: rules.go
         underef:
           skipRecvDeref: true
+    modernize:
+      disable: # each disabled analyzer has an existing backlog; enable it once its findings are cleared
+        - omitzero
+        - rangeint
+        - reflecttypefor
+        - slicesbackward
+        - slicescontains
+        - slicessort
+        - stditerators
+        - stringsbuilder
+        - stringscut
+        - stringscutprefix
+        - testingcontext
+        - waitgroupgo
+        - waitgroup
+        - fmtappendf
     govet:
       enable:
         - nilness
@@ -105,6 +122,9 @@ linters:
       - legacy
       - std-error-handling
     rules:
+      - linters:
+          - modernize
+        path: _grpc\.pb\.go
       - linters:
           - errcheck
         text: not checked

@@ -92,6 +92,9 @@ type Domain struct {
 
 	// Long-lived commitment-branch cache; non-nil only on the commitment domain.
 	branchCache *commitment.BranchCache
+	// Adaptive pin controller, co-located with branchCache so pin residency ages
+	// by block-access recency across all SharedDomains rather than per-SD.
+	adaptivePinController *commitment.AdaptivePinController
 
 	// _testBuildAccessorHook - test-only: called with the recsplit before the build loop in buildHashMapAccessor
 	_testBuildAccessorHook func(rs *recsplit.RecSplit)
@@ -145,6 +148,12 @@ func (d *Domain) SetChecker(checker *DependencyIntegrityChecker) {
 // owning Aggregator's lifetime.
 func (d *Domain) BranchCache() *commitment.BranchCache {
 	return d.branchCache
+}
+
+// AdaptivePinController returns the aggregator-lifetime pin controller
+// co-located with BranchCache. Non-nil only on the commitment domain.
+func (d *Domain) AdaptivePinController() *commitment.AdaptivePinController {
+	return d.adaptivePinController
 }
 
 // kvWriteVersion is the version stamped on a new .kv file: the domain's KVWriteVersion hook if set, else DataKV.Current.
@@ -314,14 +323,14 @@ func (dt *DomainRoTx) NewWriter() *DomainBufferedWriter { return dt.newWriter(dt
 // It's ok if some files was open earlier.
 // If some file already open: noop.
 // If some file already open but not in provided list: close and remove from `files` field.
-func (d *Domain) OpenList(scanResult ScanDirsResult) error {
-	if err := d.History.openList(scanResult.iiFiles, scanResult.historyFiles, scanResult.accessorFiles); err != nil {
+func (d *Domain) OpenList(ctx context.Context, scanResult ScanDirsResult) error {
+	if err := d.History.openList(ctx, scanResult.iiFiles, scanResult.historyFiles, scanResult.accessorFiles); err != nil {
 		return err
 	}
 
 	d.closeWhatNotInList(scanResult.domainFiles)
 	d.scanDirtyFiles(scanResult.domainFiles)
-	if err := d.openDirtyFiles(scanResult.domainFiles); err != nil {
+	if err := d.openDirtyFiles(ctx, scanResult.domainFiles); err != nil {
 		return fmt.Errorf("Domain(%s).openList: %w", d.FilenameBase, err)
 	}
 	d.protectFromHistoryFilesAheadOfDomainFiles()
@@ -335,11 +344,11 @@ func (d *Domain) protectFromHistoryFilesAheadOfDomainFiles() {
 	d.closeFilesAfterStep(kv.Step(d.dirtyFilesEndTxNumMinimax() / d.stepSize))
 }
 
-func (d *Domain) openFolder(r *ScanDirsResult) error {
+func (d *Domain) openFolder(ctx context.Context, r *ScanDirsResult) error {
 	if d.Disable {
 		return nil
 	}
-	return d.OpenList(*r)
+	return d.OpenList(ctx, *r)
 }
 
 func (d *Domain) closeFilesAfterStep(lowerBound kv.Step) {
@@ -1309,7 +1318,7 @@ func (d *Domain) integrateDirtyFiles(sf StaticFiles, txNumFrom, txNumTo uint64) 
 
 // unwind is similar to prune but the difference is that it restores domain values from the history as of txFrom
 // context Flush should be managed by caller.
-func (dt *DomainRoTx) unwind(ctx context.Context, rwTx kv.RwTx, step, txNumUnwindTo, currentFilesEndStep uint64, domainDiffs []kv.DomainEntryDiff) error {
+func (dt *DomainRoTx) unwind(ctx context.Context, rwTx kv.RwTx, step, txNumUnwindTo uint64, domainDiffs []kv.DomainEntryDiff) error {
 	// fmt.Printf("[domain][%s] unwinding domain to txNum=%d, step %d\n", d.filenameBase, txNumUnwindTo, step)
 	d := dt.d
 
@@ -1335,17 +1344,8 @@ func (dt *DomainRoTx) unwind(ctx context.Context, rwTx kv.RwTx, step, txNumUnwin
 	//                       empty tombstone to prevent getLatestFromDb falling through to files
 	//                       (which have no concept of deletions) and returning stale data
 	//   - non-empty      → restore the actual previous value
-	//
-	// The step tag for restored entries must be BEYOND the filed range, otherwise
-	// getLatestFromDb will discard them (step covered by files → fall through to
-	// files which have the pre-unwind value). Use the larger of the natural step
-	// and the first unfiled step. See #20169.
-	unwindStep := step
-	if currentFilesEndStep > unwindStep {
-		unwindStep = currentFilesEndStep
-	}
 	unwindStepBytes := make([]byte, 8)
-	binary.BigEndian.PutUint64(unwindStepBytes, ^uint64(unwindStep))
+	binary.BigEndian.PutUint64(unwindStepBytes, ^uint64(step))
 
 	for i := range domainDiffs {
 		keyStr, value := domainDiffs[i].Key, domainDiffs[i].Value
@@ -1383,8 +1383,8 @@ func (dt *DomainRoTx) unwind(ctx context.Context, rwTx kv.RwTx, step, txNumUnwin
 		// A key changed at several steps in the range has one diff per step, sorted
 		// by key then descending step; only the lowest step's value is the value at
 		// txNumUnwindTo. Restore once, on the last (lowest-step) diff — else the
-		// DupSort table keeps several dups at unwindStep and getLatestFromDb returns
-		// the smallest. nil = different step, skip; []byte{} = absent, write tombstone.
+		// DupSort table keeps several dups at the unwind step and getLatestFromDb
+		// returns the smallest. nil = different step, skip; []byte{} = absent, write tombstone.
 		lastForKey := i+1 == len(domainDiffs) || domainDiffs[i+1].Key[:len(domainDiffs[i+1].Key)-8] != keyStr[:len(keyStr)-8]
 		if value != nil && lastForKey {
 			if err := valsCursor.Put(fullKey, append(unwindStepBytes, value...)); err != nil {

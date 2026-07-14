@@ -25,8 +25,8 @@ import (
 	"github.com/erigontech/erigon/common"
 	dir2 "github.com/erigontech/erigon/common/dir"
 	"github.com/erigontech/erigon/common/log/v3"
-	"github.com/erigontech/erigon/db/downloader"
 	"github.com/erigontech/erigon/db/fromdb"
+	"github.com/erigontech/erigon/db/services"
 	"github.com/erigontech/erigon/db/snapshotsync"
 	"github.com/erigontech/erigon/db/snaptype"
 	"github.com/erigontech/erigon/polygon/heimdall"
@@ -41,7 +41,7 @@ func (br *BlockRetire) retireBorBlocks(
 	minBlockNum uint64,
 	maxBlockNum uint64,
 	lvl log.Lvl,
-	seeder downloader.SeederClient,
+	seeder services.SeederClient,
 ) (bool, error) {
 	select {
 	case <-ctx.Done():
@@ -112,7 +112,7 @@ func (br *BlockRetire) retireBorBlocks(
 func (br *BlockRetire) MergeBorBlocks(
 	ctx context.Context,
 	lvl log.Lvl,
-	seeder downloader.SeederClient,
+	seeder services.SeederClient,
 ) (mergedBlocks bool, err error) {
 	notifier, logger, _, tmpDir, db, workers := br.notifier, br.logger, br.blockReader, br.tmpDir, br.db, int(br.workers.Load())
 	snapshots := br.borSnapshots()
@@ -131,7 +131,7 @@ func (br *BlockRetire) MergeBorBlocks(
 		}
 		return seeder.Seed(ctx, mergedFiles)
 	}
-	if err := merger.Merge(ctx, &snapshots.RoSnapshots, heimdall.SnapshotTypes(), rangesToMerge, snapshots.Dir(), true /* doIndex */, onMerge, seeder.Delete); err != nil {
+	if err := merger.Merge(ctx, &snapshots.BaseRoSnapshots, heimdall.SnapshotTypes(), rangesToMerge, snapshots.Dir(), true /* doIndex */, onMerge, seeder.Delete); err != nil {
 		return false, err
 	}
 

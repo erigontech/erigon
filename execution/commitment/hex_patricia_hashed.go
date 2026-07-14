@@ -140,6 +140,7 @@ type HexPatriciaHashed struct {
 	ctx           PatriciaContext
 	hashAuxBuffer [128]byte     // buffer to compute cell hash or write hash-related things
 	cellHashBuf   common.Hash   // shared scratch buffer for hashKey calls (avoids per-cell allocation)
+	leafHashBuf   [33]byte      // shared scratch for leaf hash prefixing (avoids per-leaf escape)
 	auxBuffer     *bytes.Buffer // auxiliary buffer used during branch updates encoding
 	branchEncoder *BranchEncoder
 
@@ -167,7 +168,12 @@ type HexPatriciaHashed struct {
 	//processing metrics
 	metrics       *Metrics
 	depthsToTxNum [129]uint64 // endTxNum of file with branch data for that depth
-	hadToLoadL    map[uint64]skipStat
+
+	// lastUpdateCellWasEmpty reports whether the most recent updateCell stamped a key
+	// into an empty cell — i.e. the key is absent from the pre-state trie, so nothing
+	// can exist on disk beneath it.
+	lastUpdateCellWasEmpty bool
+	hadToLoadL             map[uint64]skipStat
 }
 
 // Clones current trie state to allow concurrent processing.
@@ -756,13 +762,12 @@ func (hph *HexPatriciaHashed) completeLeafHash(buf []byte, compactLen int, key [
 	if canEmbed {
 		buf = hph.auxBuffer.Bytes()
 	} else {
-		var hashBuf [33]byte
-		hashBuf[0] = 0x80 + length.Hash
-		if _, err := hph.keccak.Read(hashBuf[1:]); err != nil {
+		hph.leafHashBuf[0] = 0x80 + length.Hash
+		if _, err := hph.keccak.Read(hph.leafHashBuf[1:]); err != nil {
 			return nil, err
 		}
-		buf = append(buf, hashBuf[:]...)
-		hph.witness.emitLeaf(hashBuf[1:])
+		buf = append(buf, hph.leafHashBuf[:]...)
+		hph.witness.emitLeaf(hph.leafHashBuf[1:])
 	}
 	return buf, nil
 }
@@ -2173,6 +2178,7 @@ func (hph *HexPatriciaHashed) updateCell(plainKey, hashedKey []byte, u *Update) 
 		}
 
 		hph.deleteCell(hashedKey)
+		hph.lastUpdateCellWasEmpty = false
 		return nil
 	}
 
@@ -2193,6 +2199,7 @@ func (hph *HexPatriciaHashed) updateCell(plainKey, hashedKey []byte, u *Update) 
 			fmt.Fprintf(hph.traceW, "updateCell setting (%d, %x, depth=%d)\n", row, nibble, depth)
 		}
 	}
+	hph.lastUpdateCellWasEmpty = cell.IsEmpty()
 	if cell.hashedExtLen == 0 {
 		copy(cell.hashedExtension[:], hashedKey[depth:])
 		cell.hashedExtLen = int16(len(hashedKey)) - depth

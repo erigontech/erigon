@@ -476,7 +476,7 @@ func UnwindExecutionStage(u *UnwindState, s *StageState, doms *execctx.SharedDom
 	return nil
 }
 
-func PruneExecutionStage(ctx context.Context, s *PruneState, tx kv.RwTx, cfg ExecuteBlockCfg, timeout time.Duration, logger log.Logger) (err error) {
+func PruneExecutionStage(ctx context.Context, s *PruneState, tx kv.TemporalRwTx, cfg ExecuteBlockCfg, timeout time.Duration, logger log.Logger) (err error) {
 	if dbg.NoPrune() {
 		return s.Done(tx)
 	}
@@ -500,10 +500,7 @@ func PruneExecutionStage(ctx context.Context, s *PruneState, tx kv.RwTx, cfg Exe
 		if agg, ok := hasAgg.Agg().(*state.Aggregator); ok && agg != nil {
 			// Each 100 prunable steps adds 200ms. 1000-step backlog -> +2s.
 			extra := time.Duration(agg.MaxPrunableStepsBacklog()/100) * 200 * time.Millisecond
-			stagePruneTimeout = baseTimeout + extra
-			if stagePruneTimeout > maxTimeout {
-				stagePruneTimeout = maxTimeout
-			}
+			stagePruneTimeout = min(baseTimeout+extra, maxTimeout)
 		}
 	}
 	if timeout > 0 && timeout > stagePruneTimeout {
@@ -584,24 +581,23 @@ func PruneExecutionStage(ctx context.Context, s *PruneState, tx kv.RwTx, cfg Exe
 		}
 	}
 
-	agg := cfg.db.(state.HasAgg).Agg().(*state.Aggregator)
-	mxExecStepsInDB.Set(rawdbhelpers.IdxStepsCountV3(tx, agg.StepSize()) * 100)
+	mxExecStepsInDB.Set(rawdbhelpers.IdxStepsCountV3(tx, tx.Debug().StepSize()) * 100)
 
-	cutoffStep, cutoffOk, err := historyRetireCutoffStep(ctx, tx, cfg.blockReader, cfg.prune, agg.StepSize(), s.ForwardProgress)
+	cutoffs, err := historyRetireCutoffs(ctx, tx, cfg.blockReader, cfg.prune, s.ForwardProgress)
 	if err != nil {
 		return err
 	}
-	if cutoffOk {
+	if !cutoffs.IsNoop() {
 		if pruneTimeout := remainingPruneTimeout(); pruneTimeout > 0 {
-			logger.Debug(fmt.Sprintf("[%s] history file retirement cutoff", s.LogPrefix()), "cutoffStep", cutoffStep, "willRetire", cutoffOk)
-			if _, err := agg.RetireOldHistoryFiles(ctx, cutoffStep); err != nil {
+			logger.Debug(fmt.Sprintf("[%s] history file retirement", s.LogPrefix()), "cutoffs", cutoffs.String(tx.Debug().StepSize()))
+			if _, err := tx.Debug().Retire(ctx, cutoffs); err != nil {
 				return err
 			}
 		}
 	}
 
 	if pruneTimeout := remainingPruneTimeout(); pruneTimeout > 0 {
-		if _, err := tx.(kv.TemporalRwTx).PruneSmallBatches(ctx, pruneTimeout); err != nil {
+		if _, err := tx.PruneSmallBatches(ctx, pruneTimeout); err != nil {
 			return err
 		}
 	}
@@ -619,21 +615,48 @@ func PruneExecutionStage(ctx context.Context, s *PruneState, tx kv.RwTx, cfg Exe
 	return nil
 }
 
-// historyRetireCutoffStep converts the History retention distance into a step
-// boundary for RetireOldHistoryFiles. ok is false when there's nothing to
-// retire yet.
-func historyRetireCutoffStep(ctx context.Context, tx kv.Tx, blockReader services.FullBlockReader, pm prune.Mode, stepSize, forwardProgress uint64) (cutoffStep kv.Step, ok bool, err error) {
-	if !pm.History.Enabled() {
-		return 0, false, nil
-	}
-	cutoffBlock := pm.History.PruneTo(forwardProgress)
-	if cutoffBlock == 0 {
-		return 0, false, nil
-	}
-	cutoffTxNum, err := blockReader.TxnumReader().Min(ctx, tx, cutoffBlock)
+// historyRetireCutoffs maps the prune mode to per-domain retirement cutoffs, in
+// txNum — the aggregator floors each to its file step. CommitmentDomain uses its
+// own --prune.commitment-history.distance window; RCacheDomain follows the
+// general history window by default, or its own --prune.receipts.distance
+// window when set (keep-all retires nothing).
+func historyRetireCutoffs(ctx context.Context, tx kv.Tx, blockReader services.FullBlockReader, pm prune.Mode, forwardProgress uint64) (cutoffs kv.RetireCutoffs, err error) {
+	historyTxNum, err := blockAmountRetireCutoffTxNum(ctx, tx, blockReader, pm.History, forwardProgress)
 	if err != nil {
-		return 0, false, err
+		return kv.RetireCutoffs{}, err
 	}
-	cutoffStep = kv.Step(cutoffTxNum / stepSize)
-	return cutoffStep, cutoffStep > 0, nil
+	commitmentTxNum, err := blockAmountRetireCutoffTxNum(ctx, tx, blockReader, pm.CommitmentHistoryAmount(), forwardProgress)
+	if err != nil {
+		return kv.RetireCutoffs{}, err
+	}
+	rcacheTxNum := historyTxNum
+	switch receipts := pm.ReceiptsAmount(); {
+	case receipts == prune.KeepAllReceiptsPruneMode:
+		rcacheTxNum = 0 // explicit keep-all overrides the follow-history default
+	case receipts.Enabled():
+		rcacheTxNum, err = blockAmountRetireCutoffTxNum(ctx, tx, blockReader, receipts, forwardProgress)
+		if err != nil {
+			return kv.RetireCutoffs{}, err
+		}
+	}
+	return kv.RetireCutoffs{
+		Default: historyTxNum,
+		PerDomain: map[kv.Domain]uint64{
+			kv.CommitmentDomain: commitmentTxNum,
+			kv.RCacheDomain:     rcacheTxNum,
+		},
+	}, nil
+}
+
+// blockAmountRetireCutoffTxNum resolves a retention window to the txNum below
+// which frozen files may be retired; 0 means retire nothing.
+func blockAmountRetireCutoffTxNum(ctx context.Context, tx kv.Tx, blockReader services.FullBlockReader, ba prune.BlockAmount, forwardProgress uint64) (uint64, error) {
+	if ba == nil || !ba.Enabled() {
+		return 0, nil
+	}
+	cutoffBlock := ba.PruneTo(forwardProgress)
+	if cutoffBlock == 0 {
+		return 0, nil
+	}
+	return blockReader.TxnumReader().Min(ctx, tx, cutoffBlock)
 }

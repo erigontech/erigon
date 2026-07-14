@@ -22,28 +22,23 @@ import (
 
 	"github.com/stretchr/testify/require"
 
-	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv"
-	"github.com/erigontech/erigon/db/kv/dbcfg"
-	"github.com/erigontech/erigon/db/kv/mdbx"
 	"github.com/erigontech/erigon/db/kv/prune"
 	"github.com/erigontech/erigon/db/kv/rawdbv3"
+	"github.com/erigontech/erigon/db/kv/temporal/temporaltest"
 	"github.com/erigontech/erigon/db/snapshotsync/freezeblocks"
-	"github.com/erigontech/erigon/execution/chain/networkname"
-	"github.com/erigontech/erigon/node/ethconfig"
 )
 
-// TestHistoryRetireCutoffStep_ConvertsBlockDistanceToStep pins the
-// block-distance-to-step conversion PruneExecutionStage relies on.
-func TestHistoryRetireCutoffStep_ConvertsBlockDistanceToStep(t *testing.T) {
-	logger := log.New()
+// TestRetireCutoffs_ConvertsBlockDistanceToTxNum pins the per-domain
+// block-distance-to-txNum conversion: Default drives most domains, CommitmentDomain
+// gets its own window, RCacheDomain follows the history window by default or its
+// own receipts window when set. The aggregator floors txNum to its file step, so
+// this layer stays in txNum.
+func TestRetireCutoffs_ConvertsBlockDistanceToTxNum(t *testing.T) {
 	dirs := datadir.New(t.TempDir())
-	db := mdbx.New(dbcfg.ChainDB, logger).InMem(t, dirs.Chaindata).MustOpen()
-	t.Cleanup(db.Close)
-
-	snaps := freezeblocks.NewRoSnapshots(ethconfig.BlocksFreezing{ChainName: networkname.Mainnet}, dirs.Snap, logger)
-	t.Cleanup(snaps.Close)
+	db := temporaltest.NewTestDB(t, dirs)
+	snaps := db.(freezeblocks.HasBlockFiles).DebugBlockFiles()
 	br := freezeblocks.NewBlockReader(snaps, nil)
 
 	ctx := context.Background()
@@ -51,42 +46,86 @@ func TestHistoryRetireCutoffStep_ConvertsBlockDistanceToStep(t *testing.T) {
 	require.NoError(t, err)
 	defer tx.Rollback()
 
-	// block b owns txNum 10*b, matching stepSize below, for easy boundary math.
-	const perBlock, stepSize = uint64(10), uint64(10)
+	// block b owns txNums [10*b, 10*b+9], so Min(b) = 10*b.
+	const perBlock = uint64(10)
 	const forward = uint64(30)
 	for b := uint64(0); b <= forward; b++ {
 		require.NoError(t, rawdbv3.TxNums.Append(tx, b, b*perBlock+perBlock-1))
 	}
 
-	t.Run("History disabled -> no cutoff", func(t *testing.T) {
-		_, ok, err := historyRetireCutoffStep(ctx, tx, br, prune.ArchiveMode, stepSize, forward)
+	t.Run("archive -> nothing retirable", func(t *testing.T) {
+		cutoffs, err := historyRetireCutoffs(ctx, tx, br, prune.ArchiveMode, forward)
 		require.NoError(t, err)
-		require.False(t, ok)
+		require.True(t, cutoffs.IsNoop())
 	})
 
-	t.Run("not enough history accumulated yet -> no cutoff", func(t *testing.T) {
+	t.Run("history not accumulated yet -> nothing retirable", func(t *testing.T) {
 		pm := prune.Mode{Initialised: true, History: prune.Distance(1_000_000)}
-		_, ok, err := historyRetireCutoffStep(ctx, tx, br, pm, stepSize, forward)
+		cutoffs, err := historyRetireCutoffs(ctx, tx, br, pm, forward)
 		require.NoError(t, err)
-		require.False(t, ok)
+		require.True(t, cutoffs.IsNoop())
 	})
 
-	t.Run("finite distance -> correct step boundary", func(t *testing.T) {
-		// PruneTo(30, Distance(10)) = block 20; Min(20) = txNum 200; step = 20.
+	t.Run("finite history -> default txNum, commitment keep-all, rcache follows history", func(t *testing.T) {
+		// PruneTo(30, Distance(10)) = block 20; Min(20) = txNum 200.
 		pm := prune.Mode{Initialised: true, History: prune.Distance(10)}
-		cutoffStep, ok, err := historyRetireCutoffStep(ctx, tx, br, pm, stepSize, forward)
+		cutoffs, err := historyRetireCutoffs(ctx, tx, br, pm, forward)
 		require.NoError(t, err)
-		require.True(t, ok)
-		require.Equal(t, kv.Step(20), cutoffStep)
+		require.False(t, cutoffs.IsNoop())
+		require.Equal(t, uint64(200), cutoffs.Default)
+		require.Equal(t, uint64(0), cutoffs.PerDomain[kv.CommitmentDomain], "keep-all commitment -> no cutoff")
+		require.Equal(t, uint64(200), cutoffs.PerDomain[kv.RCacheDomain], "rcache follows the history window")
 	})
 
-	t.Run("cutoff rounds down to step 0 -> no cutoff", func(t *testing.T) {
-		// PruneTo(30, Distance(29)) = block 1; Min(1) = txNum 10; with a large
-		// stepSize that floors to step 0, which must count as "nothing yet".
-		pm := prune.Mode{Initialised: true, History: prune.Distance(29)}
-		cutoffStep, ok, err := historyRetireCutoffStep(ctx, tx, br, pm, 1000, forward)
+	t.Run("finite history + finite commitment -> independent cutoffs", func(t *testing.T) {
+		// history Distance(10) -> block 20, txNum 200; commitment Distance(5) ->
+		// block 25, txNum 250 (a narrower window is retired more aggressively).
+		pm := prune.Mode{Initialised: true, History: prune.Distance(10), CommitmentHistory: prune.Distance(5)}
+		cutoffs, err := historyRetireCutoffs(ctx, tx, br, pm, forward)
 		require.NoError(t, err)
-		require.False(t, ok)
-		require.Equal(t, kv.Step(0), cutoffStep)
+		require.False(t, cutoffs.IsNoop())
+		require.Equal(t, uint64(200), cutoffs.Default)
+		require.Equal(t, uint64(250), cutoffs.PerDomain[kv.CommitmentDomain])
+	})
+
+	t.Run("archive history + finite commitment -> commitment only", func(t *testing.T) {
+		// History keep-all -> Default 0; commitment Distance(20) -> block 10, txNum 100.
+		pm := prune.Mode{Initialised: true, History: prune.KeepAllBlocksPruneMode, CommitmentHistory: prune.Distance(20)}
+		cutoffs, err := historyRetireCutoffs(ctx, tx, br, pm, forward)
+		require.NoError(t, err)
+		require.False(t, cutoffs.IsNoop())
+		require.Equal(t, uint64(0), cutoffs.Default)
+		require.Equal(t, uint64(100), cutoffs.PerDomain[kv.CommitmentDomain])
+	})
+
+	t.Run("finite history + finite receipts -> rcache uses its own window", func(t *testing.T) {
+		// history Distance(10) -> block 20, txNum 200; receipts Distance(5) ->
+		// block 25, txNum 250 (a narrower window is retired more aggressively).
+		pm := prune.Mode{Initialised: true, History: prune.Distance(10), Receipts: prune.Distance(5)}
+		cutoffs, err := historyRetireCutoffs(ctx, tx, br, pm, forward)
+		require.NoError(t, err)
+		require.False(t, cutoffs.IsNoop())
+		require.Equal(t, uint64(200), cutoffs.Default)
+		require.Equal(t, uint64(250), cutoffs.PerDomain[kv.RCacheDomain], "rcache uses its own receipts window, not the history one")
+	})
+
+	t.Run("finite history + keep-all receipts -> rcache retires nothing", func(t *testing.T) {
+		// history Distance(10) -> block 20, txNum 200; receipts keep-all overrides
+		// the follow-history default so rcache is kept in full (cutoff 0).
+		pm := prune.Mode{Initialised: true, History: prune.Distance(10), Receipts: prune.KeepAllReceiptsPruneMode}
+		cutoffs, err := historyRetireCutoffs(ctx, tx, br, pm, forward)
+		require.NoError(t, err)
+		require.Equal(t, uint64(200), cutoffs.Default)
+		require.Equal(t, uint64(0), cutoffs.PerDomain[kv.RCacheDomain], "explicit keep-all overrides follow-history")
+	})
+
+	t.Run("archive history + finite receipts -> rcache only", func(t *testing.T) {
+		// History keep-all -> Default 0; receipts Distance(20) -> block 10, txNum 100.
+		pm := prune.Mode{Initialised: true, History: prune.KeepAllBlocksPruneMode, Receipts: prune.Distance(20)}
+		cutoffs, err := historyRetireCutoffs(ctx, tx, br, pm, forward)
+		require.NoError(t, err)
+		require.False(t, cutoffs.IsNoop())
+		require.Equal(t, uint64(0), cutoffs.Default)
+		require.Equal(t, uint64(100), cutoffs.PerDomain[kv.RCacheDomain])
 	})
 }

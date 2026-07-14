@@ -1,0 +1,231 @@
+// Copyright 2024 The Erigon Authors
+// This file is part of Erigon.
+//
+// Erigon is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Erigon is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
+
+package mdbx
+
+import (
+	"bytes"
+	"encoding/binary"
+	"sort"
+	"testing"
+
+	"github.com/c2h5oh/datasize"
+	"github.com/stretchr/testify/require"
+
+	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/kv/dbcfg"
+	"github.com/erigontech/erigon/db/kv/order"
+)
+
+// Keys sharing a 32-byte prefix and differing only in a 4-byte suffix: the
+// clustered shape that byte interpolation over the first 32 bytes can't split.
+func clusteredKey(i int) []byte {
+	k := make([]byte, 36)
+	for j := 0; j < 32; j++ {
+		k[j] = 0xCC
+	}
+	binary.BigEndian.PutUint32(k[32:], uint32(i))
+	return k
+}
+
+func TestSplitBucketByCount(t *testing.T) {
+	const table, n, chunks = "T", 100_000, 16
+	db := New(dbcfg.ChainDB, log.New()).InMem(t, t.TempDir()).WithTableCfg(func(_ kv.TableCfg) kv.TableCfg {
+		return kv.TableCfg{table: kv.TableCfgItem{}}
+	}).MapSize(512 * datasize.MB).MustOpen()
+	t.Cleanup(db.Close)
+
+	require.NoError(t, db.Update(t.Context(), func(tx kv.RwTx) error {
+		c, err := tx.RwCursor(table)
+		require.NoError(t, err)
+		defer c.Close()
+		for i := 0; i < n; i++ {
+			require.NoError(t, c.Append(clusteredKey(i), []byte{1}))
+		}
+		return nil
+	}))
+
+	require.NoError(t, db.View(t.Context(), func(tx kv.Tx) error {
+		bounds, err := tx.(kv.DBWithDistributionSupport).DistributeCursors(table, nil, chunks)
+		require.NoError(t, err)
+
+		require.Greater(t, len(bounds), 2, "must split clustered keys into many ranges, not one")
+		require.Nil(t, bounds[0])
+		require.Nil(t, bounds[len(bounds)-1])
+		require.True(t, sort.SliceIsSorted(bounds[1:len(bounds)-1], func(a, b int) bool {
+			return bytes.Compare(bounds[1+a], bounds[1+b]) < 0
+		}), "interior boundaries must be strictly increasing")
+
+		per, total := n/(len(bounds)-1), 0
+		for i := 0; i+1 < len(bounds); i++ {
+			it, err := tx.Range(table, bounds[i], bounds[i+1], order.Asc, -1)
+			require.NoError(t, err)
+			cnt := 0
+			for it.HasNext() {
+				_, _, err := it.Next()
+				require.NoError(t, err)
+				cnt++
+			}
+			it.Close()
+			total += cnt
+			require.InDelta(t, per, cnt, float64(per), "range %d holds %d keys, want ~%d", i, cnt, per)
+		}
+		require.Equal(t, n, total, "ranges must cover every key exactly once")
+		return nil
+	}))
+}
+
+// A DupSort table's tx.Cursor returns *MdbxDupSortCursor, not *MdbxCursor, so
+// the split must extract the raw cursor from either type instead of asserting one.
+func TestSplitBucketByCountDupSort(t *testing.T) {
+	const table, keys, dupsPerKey, chunks = "T", 50_000, 4, 16
+	db := New(dbcfg.ChainDB, log.New()).InMem(t, t.TempDir()).WithTableCfg(func(_ kv.TableCfg) kv.TableCfg {
+		return kv.TableCfg{table: kv.TableCfgItem{Flags: kv.DupSort}}
+	}).MapSize(512 * datasize.MB).MustOpen()
+	t.Cleanup(db.Close)
+
+	require.NoError(t, db.Update(t.Context(), func(tx kv.RwTx) error {
+		c, err := tx.RwCursorDupSort(table)
+		require.NoError(t, err)
+		defer c.Close()
+		key, val := make([]byte, 8), make([]byte, 8)
+		for i := 0; i < keys; i++ {
+			binary.BigEndian.PutUint64(key, uint64(i))
+			for j := 0; j < dupsPerKey; j++ {
+				binary.BigEndian.PutUint64(val, uint64(j))
+				require.NoError(t, c.AppendDup(key, val))
+			}
+		}
+		return nil
+	}))
+
+	require.NoError(t, db.View(t.Context(), func(tx kv.Tx) error {
+		bounds, err := tx.(kv.DBWithDistributionSupport).DistributeCursors(table, nil, chunks)
+		require.NoError(t, err)
+		require.Greater(t, len(bounds), 2, "must split into many ranges")
+		require.Nil(t, bounds[0])
+		require.Nil(t, bounds[len(bounds)-1])
+		require.True(t, sort.SliceIsSorted(bounds[1:len(bounds)-1], func(a, b int) bool {
+			return bytes.Compare(bounds[1+a], bounds[1+b]) < 0
+		}), "interior boundaries must be strictly increasing")
+
+		seen := 0
+		for i := 0; i+1 < len(bounds); i++ {
+			it, err := tx.Range(table, bounds[i], bounds[i+1], order.Asc, -1)
+			require.NoError(t, err)
+			for it.HasNext() {
+				_, _, err := it.Next()
+				require.NoError(t, err)
+				seen++
+			}
+			it.Close()
+		}
+		require.Equal(t, keys*dupsPerKey, seen, "ranges must cover every (key,val) once")
+		return nil
+	}))
+}
+
+// A from near the table end leaves the range with far fewer positions than the
+// requested cursor count, so DistributeCursors leaves surplus cursors unset.
+// Reading an unset cursor reports ENODATA, which must be treated as "no more
+// positions", not propagated as an error.
+func TestSplitBucketByCountFewerPositions(t *testing.T) {
+	const table, n = "T", 200_000
+	db := New(dbcfg.ChainDB, log.New()).InMem(t, t.TempDir()).WithTableCfg(func(_ kv.TableCfg) kv.TableCfg {
+		return kv.TableCfg{table: kv.TableCfgItem{}}
+	}).MapSize(512 * datasize.MB).MustOpen()
+	t.Cleanup(db.Close)
+
+	require.NoError(t, db.Update(t.Context(), func(tx kv.RwTx) error {
+		c, err := tx.RwCursor(table)
+		require.NoError(t, err)
+		defer c.Close()
+		k := make([]byte, 8)
+		for i := 0; i < n; i++ {
+			binary.BigEndian.PutUint64(k, uint64(i))
+			require.NoError(t, c.Append(k, []byte{1}))
+		}
+		return nil
+	}))
+
+	require.NoError(t, db.View(t.Context(), func(tx kv.Tx) error {
+		from := make([]byte, 8)
+		binary.BigEndian.PutUint64(from, uint64(n-5)) // only ~5 positions left, but n_cap is far larger
+		bounds, err := tx.(kv.DBWithDistributionSupport).DistributeCursors(table, from, 4096)
+		require.NoError(t, err) // unset surplus cursors must not surface as an error
+		require.GreaterOrEqual(t, len(bounds), 2)
+		require.Equal(t, from, bounds[0])
+		require.Nil(t, bounds[len(bounds)-1])
+		return nil
+	}))
+}
+
+// TestSplitBucketByCountDupSortSkew proves DistributeCursors splits a DupSort
+// table at MAIN-KEY granularity: distribution runs at deepness Depth-2 (branch
+// level, above the per-key dup subtrees) so it never faults cold leaves on a
+// table >> RAM, but the price is that it cannot balance a skewed table — one hot
+// key with a large dup run lands entirely in a single chunk. Coverage stays
+// exact; only balance suffers. Splitting within a key's dups would need
+// deepness = full height + dup height, i.e. faulting the leaves this avoids.
+func TestSplitBucketByCountDupSortSkew(t *testing.T) {
+	const table, coldKeys, hotDups = "T", 1000, 200_000
+	db := New(dbcfg.ChainDB, log.New()).InMem(t, t.TempDir()).WithTableCfg(func(_ kv.TableCfg) kv.TableCfg {
+		return kv.TableCfg{table: kv.TableCfgItem{Flags: kv.DupSort}}
+	}).MapSize(512 * datasize.MB).MustOpen()
+	t.Cleanup(db.Close)
+
+	require.NoError(t, db.Update(t.Context(), func(tx kv.RwTx) error {
+		c, err := tx.RwCursorDupSort(table)
+		require.NoError(t, err)
+		defer c.Close()
+		key, val := make([]byte, 8), make([]byte, 8)
+		for d := 0; d < hotDups; d++ { // key 0 is hot: many dups
+			binary.BigEndian.PutUint64(val, uint64(d))
+			require.NoError(t, c.AppendDup(key, val))
+		}
+		binary.BigEndian.PutUint64(val, 0)
+		for i := 1; i <= coldKeys; i++ { // keys 1..coldKeys: one value each
+			binary.BigEndian.PutUint64(key, uint64(i))
+			require.NoError(t, c.AppendDup(key, val))
+		}
+		return nil
+	}))
+
+	require.NoError(t, db.View(t.Context(), func(tx kv.Tx) error {
+		bounds, err := tx.(kv.DBWithDistributionSupport).DistributeCursors(table, nil, 64)
+		require.NoError(t, err)
+
+		total, maxChunk := 0, 0
+		for i := 0; i+1 < len(bounds); i++ {
+			it, err := tx.Range(table, bounds[i], bounds[i+1], order.Asc, -1)
+			require.NoError(t, err)
+			cnt := 0
+			for it.HasNext() {
+				_, _, err := it.Next()
+				require.NoError(t, err)
+				cnt++
+			}
+			it.Close()
+			total += cnt
+			maxChunk = max(maxChunk, cnt)
+		}
+		require.Equal(t, hotDups+coldKeys, total, "coverage must be exact: every (key,dup) once")
+		require.GreaterOrEqual(t, maxChunk, hotDups, "hot key's dups are not split across chunks")
+		t.Logf("skewed dupsort: %d chunks, largest holds %d/%d items (no intra-key split)", len(bounds)-1, maxChunk, total)
+		return nil
+	}))
+}

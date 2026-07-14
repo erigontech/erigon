@@ -32,8 +32,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/c2h5oh/datasize"
-
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/background"
 	"github.com/erigontech/erigon/common/dbg"
@@ -41,6 +39,7 @@ import (
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/common/mmap"
 	"github.com/erigontech/erigon/common/murmur3"
+	"github.com/erigontech/erigon/db/bufiopool"
 	"github.com/erigontech/erigon/db/datastruct/fusefilter"
 	"github.com/erigontech/erigon/db/etl"
 	"github.com/erigontech/erigon/db/recsplit/eliasfano16"
@@ -288,7 +287,7 @@ func NewRecSplit(args RecSplitArgs, logger log.Logger) (*RecSplit, error) {
 		if err != nil {
 			return nil, err
 		}
-		rs.offsetWriter = getBufioWriter(rs.offsetFile)
+		rs.offsetWriter = bufiopool.Writer(rs.offsetFile)
 	}
 	if rs.enums && args.KeyCount > 0 && rs.lessFalsePositives {
 		if rs.dataStructureVersion == 0 {
@@ -296,7 +295,7 @@ func NewRecSplit(args RecSplitArgs, logger log.Logger) (*RecSplit, error) {
 			if err != nil {
 				return nil, err
 			}
-			rs.existenceWV0 = getBufioWriter(rs.existenceFV0)
+			rs.existenceWV0 = bufiopool.Writer(rs.existenceFV0)
 		}
 
 	}
@@ -382,7 +381,7 @@ func (rs *RecSplit) Close() {
 		rs.existenceFV0 = nil
 	}
 	if rs.existenceWV0 != nil {
-		putBufioWriter(rs.existenceWV0)
+		bufiopool.PutWriter(rs.existenceWV0)
 		rs.existenceWV0 = nil
 	}
 	if rs.existenceFV1 != nil {
@@ -402,7 +401,7 @@ func (rs *RecSplit) Close() {
 		rs.offsetFile = nil
 	}
 	if rs.offsetWriter != nil {
-		putBufioWriter(rs.offsetWriter)
+		bufiopool.PutWriter(rs.offsetWriter)
 		rs.offsetWriter = nil
 	}
 	if rs.offsetEf != nil {
@@ -940,8 +939,8 @@ func (rs *RecSplit) Build(ctx context.Context) error {
 	}
 
 	defer rs.indexF.Close()
-	rs.indexW = getBufioWriter(rs.indexF)
-	defer putBufioWriter(rs.indexW)
+	rs.indexW = bufiopool.Writer(rs.indexF)
+	defer bufiopool.PutWriter(rs.indexW)
 	// 1 byte: dataStructureVersion, 7 bytes: app-specific minimal dataID (of current shard)
 	binary.BigEndian.PutUint64(rs.numBuf[:], rs.baseDataID)
 	rs.numBuf[0] = uint8(rs.dataStructureVersion)
@@ -1113,9 +1112,9 @@ func (rs *RecSplit) flushExistenceFilter() error {
 		if _, err := rs.existenceFV0.Seek(0, io.SeekStart); err != nil {
 			return err
 		}
-		r := getBufioReader(rs.existenceFV0)
+		r := bufiopool.Reader(rs.existenceFV0)
 		_, copyErr := io.CopyN(rs.indexW, r, int64(rs.keysAdded))
-		putBufioReader(r)
+		bufiopool.PutReader(r)
 		if copyErr != nil {
 			return copyErr
 		}
@@ -1177,7 +1176,7 @@ func (rs *RecSplit) ForceCollisionOnce() {
 
 // bucketResultPool is a package-level sync.Pool for reusing bucketResult instances
 var bucketResultPool = &sync.Pool{
-	New: func() interface{} {
+	New: func() any {
 		return &bucketResult{}
 	},
 }
@@ -1472,29 +1471,3 @@ func (rs *RecSplit) buildWithWorkers(ctx context.Context) error {
 	}
 	return producerErr
 }
-
-// Erigon doesn't create tons of bufio readers/writers, but it has tons of
-// parallel small unit-tests which each create many small files and bufio
-// readers/writers — pooling avoids the allocation pressure in that scenario.
-var (
-	bufioWriterPool = sync.Pool{New: func() any { return bufio.NewWriterSize(nil, int(512*datasize.KB)) }}
-	bufioReaderPool = sync.Pool{New: func() any { return bufio.NewReaderSize(nil, int(512*datasize.KB)) }}
-)
-
-func getBufioWriter(w io.Writer) *bufio.Writer {
-	bw := bufioWriterPool.Get().(*bufio.Writer)
-	bw.Reset(w)
-	return bw
-}
-
-// Reset(nil) before Put is required: without it the pool entry retains a
-// reference to the underlying io.Writer/io.Reader, keeping it alive until the
-// next GC cycle or until the entry is reused — whichever comes first.
-func putBufioWriter(w *bufio.Writer) { w.Reset(nil); bufioWriterPool.Put(w) }
-
-func getBufioReader(r io.Reader) *bufio.Reader {
-	br := bufioReaderPool.Get().(*bufio.Reader)
-	br.Reset(r)
-	return br
-}
-func putBufioReader(r *bufio.Reader) { r.Reset(nil); bufioReaderPool.Put(r) }

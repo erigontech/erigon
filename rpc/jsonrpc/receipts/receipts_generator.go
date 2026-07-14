@@ -632,7 +632,7 @@ func (g *Generator) GetReceipts(ctx context.Context, cfg *chain.Config, tx kv.Te
 	// Hence, we need commitment history to correctly compute the `root` field for pre-Byzantium receipts
 	if dbg.AssertEnabled && (opts.CommitmentHistoryEnabled || cfg.IsByzantium(blockNum)) {
 		computedReceiptsRoot := types.DeriveSha(receipts)
-		blockReceiptsRoot := block.Header().ReceiptHash
+		blockReceiptsRoot := block.ReceiptHash()
 		if computedReceiptsRoot != blockReceiptsRoot {
 			panic(fmt.Sprintf("assert: computedReceiptsRoot=%s, blockReceiptsRoot=%s", computedReceiptsRoot.Hex(), blockReceiptsRoot.Hex()))
 		}

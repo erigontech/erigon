@@ -27,8 +27,9 @@ import (
 	"time"
 
 	"github.com/c2h5oh/datasize"
-	"github.com/erigontech/erigon/db/datadir"
 	"golang.org/x/sync/semaphore"
+
+	"github.com/erigontech/erigon/db/datadir"
 
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/backoff"
@@ -41,6 +42,7 @@ import (
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/dbutils"
 	"github.com/erigontech/erigon/db/services"
+	"github.com/erigontech/erigon/execution/bal"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/protocol/rules"
 	"github.com/erigontech/erigon/execution/rlp"
@@ -166,9 +168,11 @@ type MultiClient struct {
 	logger                           log.Logger
 	getReceiptsActiveGoroutineNumber *semaphore.Weighted
 	ethApiWrapper                    eth.ReceiptsGetter
+	balGenerator                     eth.BlockAccessListGetter
 }
 
-var _ eth.ReceiptsGetter = new(receipts.Generator) // compile-time interface-check
+var _ eth.ReceiptsGetter = new(receipts.Generator)     // compile-time interface-check
+var _ eth.BlockAccessListGetter = new(bal.Regenerator) // compile-time interface-check
 
 func NewMultiClient(
 	dirs datadir.Dirs,
@@ -200,6 +204,7 @@ func NewMultiClient(
 		logger:                           logger,
 		getReceiptsActiveGoroutineNumber: semaphore.NewWeighted(1),
 		ethApiWrapper:                    receipts.NewGenerator(dirs, blockReader, engine, nil, 5*time.Minute),
+		balGenerator:                     bal.NewRegenerator(blockReader, engine, logger),
 	}
 
 	return cs, nil
@@ -250,8 +255,8 @@ func (cs *MultiClient) getBlockHeaders66(ctx context.Context, inreq *sentryproto
 	}
 	_, err = sentry.SendMessageById(ctx, &outreq, &grpc.EmptyCallOption{})
 	if err != nil {
-		if !libsentry.IsPeerNotFoundErr(err) {
-			return fmt.Errorf("send header response 66: %w", err)
+		if libsentry.IsPeerNotFoundErr(err) {
+			return nil
 		}
 		return fmt.Errorf("send header response 66: %w", err)
 	}
@@ -260,20 +265,22 @@ func (cs *MultiClient) getBlockHeaders66(ctx context.Context, inreq *sentryproto
 }
 
 // getBlockAccessLists71 answers an inbound eth/71 GetBlockAccessLists request
-// (EIP-8159) by looking up stored BALs from rawdb and replying with a
-// BlockAccessLists response positionally aligned to the request.
+// (EIP-8159) by looking up stored BALs from rawdb — regenerating pruned ones
+// via re-execution — and replying with a BlockAccessLists response positionally
+// aligned to the request.
 func (cs *MultiClient) getBlockAccessLists71(ctx context.Context, inreq *sentryproto.InboundMessage, sentry sentryproto.SentryClient) error {
 	var query eth.GetBlockAccessListsPacket66
 	if err := rlp.DecodeBytes(inreq.Data, &query); err != nil {
 		return fmt.Errorf("decoding getBlockAccessLists71: %w, data: %x", err, inreq.Data)
 	}
-	tx, err := cs.db.BeginRo(ctx)
+	tx, err := cs.db.BeginTemporalRo(ctx)
 	if err != nil {
 		return err
 	}
 	defer tx.Rollback()
-	response := eth.AnswerGetBlockAccessListsQuery(tx, query.GetBlockAccessListsPacket, cs.blockReader)
-	tx.Rollback()
+	response := eth.AnswerGetBlockAccessListsQuery(ctx, cs.ChainConfig, tx, query.GetBlockAccessListsPacket, cs.blockReader, cs.balGenerator)
+	// Encode before releasing the tx: stored BALs are mdbx-backed slices only
+	// valid while the tx is open.
 	b, err := rlp.EncodeToBytes(&eth.BlockAccessListsPacket66{
 		RequestId:              query.RequestId,
 		BlockAccessListsPacket: response,
@@ -281,6 +288,7 @@ func (cs *MultiClient) getBlockAccessLists71(ctx context.Context, inreq *sentryp
 	if err != nil {
 		return fmt.Errorf("encode BlockAccessLists response: %w", err)
 	}
+	tx.Rollback()
 	outreq := sentryproto.SendMessageByIdRequest{
 		PeerId: inreq.PeerId,
 		Data: &sentryproto.OutboundMessageData{

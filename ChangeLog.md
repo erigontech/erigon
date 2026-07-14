@@ -2,6 +2,54 @@
 
 ### Breaking Changes
 
+#### `--prune.include-receipts`: historical receipts cache now off by default in all prune modes
+
+The historical ("fat") receipts cache is no longer enabled by default on non-archive nodes. Previously
+`--prune.include-receipts` (formerly `--persist.receipts`, still accepted as an alias) defaulted on for every prune mode
+except `archive`; it now defaults off everywhere. The consensus layer was the consumer that justified retaining these
+receipts on pruned nodes, and it no longer needs them ([#21617](https://github.com/erigontech/erigon/issues/21617)).
+
+**What changed:**
+
+| `--prune.mode` | Before | After |
+|---|---|---|
+| `archive` | off | off |
+| `full` | on | off |
+| `blocks` | on | off |
+| `minimal` | on | off |
+
+Receipts and logs stay available within a node's retention window regardless: without the cache they are re-executed on
+demand from state history, so `eth_getLogs` and `eth_getBlockReceipts` keep working, at higher latency. For `full` and
+`minimal` nodes the availability window is unchanged (receipts follow the state-history window either way). For `blocks`
+nodes the cache previously made receipts and logs queryable back to genesis; without it they follow the state-history
+window (last 262,144 blocks) — pass `--prune.include-receipts` if you rely on full-range `eth_getLogs`.
+
+**Migration:** existing datadirs are unaffected — the receipts-cache setting is recorded at datadir creation and the
+stored value wins, so a node already syncing with the cache keeps it. Such a node now logs a startup notice that
+`--prune.include-receipts` differs from the value stored in the datadir; pass `--prune.include-receipts` explicitly to
+silence it. Only newly-created `full`/`minimal`/`blocks` datadirs start without the cache; pass
+`--prune.include-receipts` on a fresh datadir to opt back in.
+
+(#22296) — by @yperbasis
+
+---
+
+#### CLI: receipts and commitment-history pruning flags moved under `--prune.*`
+
+The receipt cache and commitment history now share the `--prune.*` naming used by the rest of the pruning flags. All
+former names keep working as aliases, and stored datadir settings are unaffected.
+
+- `--persist.receipts` → `--prune.include-receipts` (alias: `--persist.receipts`, `--experiment.persist.receipts.v2`).
+- New `--prune.receipts.distance` (alias: `--persist.receipts.distance`) bounds how far back the receipt cache is kept:
+  a block count, `keep-all`, or empty/`0` (default) to follow the state-history window. Requires
+  `--prune.include-receipts`. Snapshots older than the window are skipped at download time.
+- `--prune.commitment-history.distance` now also accepts `keep-all` (in addition to a block count); empty or `0` still
+  keeps everything.
+
+(#22349) — by @AskAlexSharov
+
+---
+
 #### JSON-RPC: block-number strings must use the `0x` hex format
 
 Quoted decimal strings (e.g., `"3"`) are no longer accepted as block-number
@@ -36,11 +84,27 @@ Aligns Erigon with the `eth_simulateV1` error code specification ([NethermindEth
 
 - If your tooling matches on error code `-32602` to detect base-fee-too-low conditions in `eth_simulateV1` responses, update it to match `-38012` instead.
 
+---
+
+#### JSON-RPC: idle polling filters are evicted after 5 minutes
+
+Filters created with `eth_newFilter`, `eth_newBlockFilter`, and `eth_newPendingTransactionFilter` are now evicted when not polled for 5 minutes, matching geth's stale-filter deadline. Previously they lived — and kept buffering data — until `eth_uninstallFilter` or a restart.
+
+**What changed:**
+
+| Aspect | Before | After |
+|---|---|---|
+| Idle polling filter | kept until uninstalled or restart | evicted after 5 minutes without a poll |
+| `eth_getFilterChanges` / `eth_getFilterLogs` on an evicted id | — | `filter not found` |
+
+**Migration:** poll more often than the timeout, or recreate the filter when `filter not found` is returned (as with geth). Tune with `--rpc.subscription.filters.timeout`; set it to 0 to restore the previous keep-forever behavior. (#22261 by @onelapahead)
+
 ### Added
 
 #### CLI & Operations
 
 - `--prune.distance.blocks` now accepts readable policy names — `keep-post-merge` and `keep-all` — instead of the raw `MaxUint64`-based magic numbers (`18446744073709551615` / `18446744073709551614`); `--prune.distance` likewise accepts `keep-all`. Numeric values still work (#22119) — by @yperbasis
+- `--rpc.subscription.filters.timeout` — deadline for evicting idle RPC polling filters (default 5m; 0 disables). New `subscriptions_active` gauge and `subscriptions_created_total` / `subscriptions_unsubscribed_total` / `subscriptions_reaped_total` counters track the filter lifecycle (#22261) — by @onelapahead
 
 ---
 

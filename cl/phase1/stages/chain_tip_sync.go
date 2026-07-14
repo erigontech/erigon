@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"maps"
 	"sort"
 	"time"
 
@@ -374,9 +375,7 @@ func fetchParentEnvelopes(ctx context.Context, cfg *Cfg, roots [][32]byte) map[c
 			log.Debug("[chainTipSync] envelope fetch attempt failed", "err", err, "attempt", attempt+1, "remaining", len(remaining))
 			continue
 		}
-		for k, v := range result {
-			envelopes[k] = v
-		}
+		maps.Copy(envelopes, result)
 		// Recalculate remaining
 		var stillMissing [][32]byte
 		for _, root := range remaining {

@@ -22,5 +22,5 @@ type EventManager interface {
 
 	IsActive() bool
 
-	EventBus(key interface{}) *ManagedEventBus
+	EventBus(key any) *ManagedEventBus
 }

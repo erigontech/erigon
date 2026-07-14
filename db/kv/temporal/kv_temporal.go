@@ -31,6 +31,7 @@ import (
 	"github.com/erigontech/erigon/db/kv/memdb"
 	"github.com/erigontech/erigon/db/kv/order"
 	"github.com/erigontech/erigon/db/kv/stream"
+	"github.com/erigontech/erigon/db/snapshotsync/blocksnapshots"
 	"github.com/erigontech/erigon/db/state"
 	"github.com/erigontech/erigon/db/version"
 )
@@ -77,27 +78,30 @@ var ( // Compile time interface checks
 type DB struct {
 	kv.RwDB
 	stateFiles *state.Aggregator
-	forkaggs   []*state.ForkableAgg
+	// blockFiles: block snapshots, the peer of stateFiles. Optional; nil for
+	// state-only tools, in which case block reads fall back to their own view.
+	blockFiles *blocksnapshots.RoSnapshots
 }
 
-func New(db kv.RwDB, agg *state.Aggregator, forkaggs ...*state.ForkableAgg) (*DB, error) {
-	tdb := &DB{RwDB: db, stateFiles: agg}
-	if len(forkaggs) > 0 {
-		arr := make([]*state.ForkableAgg, 0)
-		for _, forkagg := range forkaggs {
-			if forkagg == nil {
-				continue
-			}
-			arr = append(arr, forkagg)
-		}
-		tdb.forkaggs = arr
-	}
-	return tdb, nil
+// New wires the temporal DB over a raw kv.RwDB, its state aggregator, and the
+// (optional) block snapshots — the block-data peer of stateFiles. Pass nil
+// blockSnaps for state-only tools.
+func New(db kv.RwDB, agg *state.Aggregator, blockSnaps *blocksnapshots.RoSnapshots) (*DB, error) {
+	return &DB{RwDB: db, stateFiles: agg, blockFiles: blockSnaps}, nil
 }
-func (db *DB) Agg() any                         { return db.stateFiles }
-func (db *DB) ForkableAgg(id kv.ForkableId) any { return db.forkaggs[db.searchForkableAggIdx(id)] }
-func (db *DB) InternalDB() kv.RwDB              { return db.RwDB }
-func (db *DB) Debug() kv.TemporalDebugDB        { return kv.TemporalDebugDB(db) }
+
+func (db *DB) Agg() any                                     { return db.stateFiles }
+func (db *DB) DebugBlockFiles() *blocksnapshots.RoSnapshots { return db.blockFiles }
+
+// beginBlockFilesRo pins the block-files view for a tx, or nil if unset.
+func (db *DB) beginBlockFilesRo() *blocksnapshots.View {
+	if db.blockFiles == nil {
+		return nil
+	}
+	return db.blockFiles.View()
+}
+func (db *DB) InternalDB() kv.RwDB       { return db.RwDB }
+func (db *DB) Debug() kv.TemporalDebugDB { return kv.TemporalDebugDB(db) }
 
 func (db *DB) BeginTemporalRo(ctx context.Context) (kv.TemporalTx, error) {
 	kvTx, err := db.RwDB.BeginRo(ctx) //nolint:gocritic
@@ -107,15 +111,39 @@ func (db *DB) BeginTemporalRo(ctx context.Context) (kv.TemporalTx, error) {
 	tx := &Tx{Tx: kvTx, tx: tx{db: db, ctx: ctx}}
 
 	tx.aggtx = db.stateFiles.BeginFilesRo()
+	tx.blocktx = db.beginBlockFilesRo()
 
-	if len(db.forkaggs) > 0 {
-		tx.forkaggs = make([]*state.ForkableAggTemporalTx, len(db.forkaggs))
-		for i, forkagg := range db.forkaggs {
-			tx.forkaggs[i] = forkagg.BeginTemporalTx()
-		}
-	}
 	return tx, nil
 }
+
+// temporalFilesPin implements kv.TemporalFilesPin: it holds a consistent
+// aggregator file snapshot and opens read txns bound to it.
+type temporalFilesPin struct {
+	db  *DB
+	agg *state.AggregatorFilesPin
+}
+
+// Pin returns a kv.TemporalFilesPin holding this tx's aggregator file snapshot;
+// read txns opened from it stay on that generation. Independent of this tx's
+// lifetime — release with Close.
+func (tx *tx) Pin() kv.TemporalFilesPin {
+	return &temporalFilesPin{db: tx.db, agg: tx.aggtx.Pin()}
+}
+
+func (p *temporalFilesPin) BeginTemporalRo(ctx context.Context) (kv.TemporalTx, error) {
+	kvTx, err := p.db.RwDB.BeginRo(ctx) //nolint:gocritic
+	if err != nil {
+		return nil, err
+	}
+	// Commitment workers read only state domains through aggtx, never forkable
+	// data, so the worker tx needs the pinned file snapshot and nothing else.
+	tx := &Tx{Tx: kvTx, tx: tx{db: p.db, ctx: ctx}}
+	tx.aggtx = p.agg.BeginFilesRo()
+	return tx, nil
+}
+
+func (p *temporalFilesPin) Close() { p.agg.Close() }
+
 func (db *DB) ViewTemporal(ctx context.Context, f func(tx kv.TemporalTx) error) error {
 	tx, err := db.BeginTemporalRo(ctx)
 	if err != nil {
@@ -141,12 +169,7 @@ func (db *DB) View(ctx context.Context, f func(tx kv.Tx) error) error {
 func (db *DB) newRwTx(kvTx kv.RwTx, ctx context.Context) *RwTx {
 	tx := &RwTx{RwTx: kvTx, tx: tx{db: db, ctx: ctx}}
 	tx.aggtx = db.stateFiles.BeginFilesRo()
-	if len(db.forkaggs) > 0 {
-		tx.forkaggs = make([]*state.ForkableAggTemporalTx, len(db.forkaggs))
-		for i, forkagg := range db.forkaggs {
-			tx.forkaggs[i] = forkagg.BeginTemporalTx()
-		}
-	}
+	tx.blocktx = db.beginBlockFilesRo()
 	return tx
 }
 
@@ -230,22 +253,10 @@ func (db *DB) Close() {
 		db.stateFiles.Close()
 	}
 	db.RwDB.Close()
-	for _, forkagg := range db.forkaggs {
-		forkagg.Close()
-	}
 }
 
 func (db *DB) OnFilesChange(onChange, onDel kv.OnFilesChange) {
 	db.stateFiles.OnFilesChange(onChange, onDel)
-}
-
-func (db *DB) searchForkableAggIdx(forkableId kv.ForkableId) int {
-	for i, forkagg := range db.forkaggs {
-		if forkagg.IsForkablePresent(forkableId) {
-			return i
-		}
-	}
-	panic(fmt.Sprintf("forkable not found: %d", forkableId))
 }
 
 func NewTestDB(tb testing.TB, label kv.Label) kv.TemporalRwDB {
@@ -254,7 +265,7 @@ func NewTestDB(tb testing.TB, label kv.Label) kv.TemporalRwDB {
 	dirs := datadir.New(tb.TempDir())
 	agg := state.NewTest(dirs).DisableHistory().MustOpen(context.Background(), db)
 	tb.Cleanup(agg.Close)
-	tdb, _ := New(db, agg)
+	tdb, _ := New(db, agg, nil)
 	return tdb
 }
 
@@ -272,7 +283,7 @@ func NewTestTx(tb testing.TB) (kv.TemporalRwDB, kv.TemporalRwTx) {
 type tx struct {
 	db               *DB
 	aggtx            *state.AggregatorRoTx
-	forkaggs         []*state.ForkableAggTemporalTx
+	blocktx          *blocksnapshots.View
 	resourcesToClose []kv.Closer
 	ctx              context.Context
 	mu               sync.RWMutex
@@ -288,16 +299,28 @@ type RwTx struct {
 	tx
 }
 
-func (tx *tx) ForceReopenAggCtx() {
-	tx.aggtx.Close()
+func (tx *tx) ForceReopenUnderlyingFilesTx() {
+	if tx.blocktx != nil {
+		tx.blocktx.Close()
+	}
+	tx.blocktx = tx.db.beginBlockFilesRo()
+	if tx.aggtx != nil {
+		tx.aggtx.Close()
+	}
 	tx.aggtx = tx.Agg().BeginFilesRo()
 }
 func (tx *tx) FreezeInfo() kv.FreezeInfo { return tx.aggtx }
 
 func (tx *tx) AggTx() any             { return tx.aggtx }
 func (tx *tx) Agg() *state.Aggregator { return tx.db.stateFiles }
+
+// BlockFilesRoTx returns the tx's pinned block-files view, or nil if unset.
+func (tx *tx) BlockFilesRoTx() *blocksnapshots.View { return tx.blocktx }
 func (tx *tx) StepsInFiles(entitySet ...kv.Domain) kv.Step {
 	return tx.aggtx.StepsInFiles(entitySet...)
+}
+func (tx *tx) Retire(ctx context.Context, cutoffs kv.RetireCutoffs) (int, error) {
+	return tx.aggtx.Retire(ctx, cutoffs)
 }
 
 func (tx *tx) Rollback() {
@@ -332,6 +355,22 @@ func (tx *Tx) LockDBInRam() error {
 	return nil
 }
 
+// DistributeCursors forwards to the underlying mdbx engine. Like DeleteRange, it
+// fails loud on a non-mdbx inner rather than silently degrading (none exists today).
+func (tx *Tx) DistributeCursors(table string, from []byte, n int) ([][]byte, error) {
+	if s, ok := tx.Tx.(kv.DBWithDistributionSupport); ok {
+		return s.DistributeCursors(table, from, n)
+	}
+	return nil, fmt.Errorf("DistributeCursors not supported by %T", tx.Tx)
+}
+
+func (tx *RwTx) DistributeCursors(table string, from []byte, n int) ([][]byte, error) {
+	if s, ok := tx.RwTx.(kv.DBWithDistributionSupport); ok {
+		return s.DistributeCursors(table, from, n)
+	}
+	return nil, fmt.Errorf("DistributeCursors not supported by %T", tx.RwTx)
+}
+
 func (tx *Tx) Apply(ctx context.Context, f func(tx kv.Tx) error) error {
 	tx.tx.mu.RLock()
 	applyTx := tx.Tx
@@ -342,40 +381,20 @@ func (tx *Tx) Apply(ctx context.Context, f func(tx kv.Tx) error) error {
 	return applyTx.Apply(ctx, f)
 }
 
-func (tx *tx) searchForkableAggIdx(forkableId kv.ForkableId) int {
-	for i, forkagg := range tx.forkaggs {
-		if forkagg.IsForkablePresent(forkableId) {
-			return i
-		}
-	}
-	panic(fmt.Sprintf("forkable not found: %d", forkableId))
-}
-
-func (tx *Tx) AggForkablesTx(id kv.ForkableId) any {
-	return tx.forkaggs[tx.searchForkableAggIdx(id)]
-}
-
-func (tx *Tx) Unmarked(id kv.ForkableId) kv.UnmarkedTx {
-	return newUnmarkedTx(tx.Tx, tx.forkaggs[tx.searchForkableAggIdx(id)].Unmarked(id))
-}
-
-func (tx *RwTx) Unmarked(id kv.ForkableId) kv.UnmarkedTx {
-	return newUnmarkedTx(tx.RwTx, tx.forkaggs[tx.searchForkableAggIdx(id)].Unmarked(id))
-}
-
-func (tx *RwTx) UnmarkedRw(id kv.ForkableId) kv.UnmarkedRwTx {
-	return newUnmarkedTx(tx.RwTx, tx.forkaggs[tx.searchForkableAggIdx(id)].Unmarked(id))
-}
-
-func (tx *RwTx) AggForkablesTx(id kv.ForkableId) any {
-	return tx.forkaggs[tx.searchForkableAggIdx(id)]
-}
-
 func (tx *RwTx) WarmupDB(force bool) error {
 	if mdbxTx, ok := tx.RwTx.(*mdbx.MdbxTx); ok {
 		return mdbxTx.WarmupDB(force)
 	}
 	return nil
+}
+
+func (tx *RwTx) DeleteRange(table string, from, to []byte) (uint64, error) {
+	if dr, ok := tx.RwTx.(kv.HasDeleteRange); ok {
+		return dr.DeleteRange(table, from, to)
+	}
+	// No non-mdbx temporal backend exists (mdbx's native range-delete is used
+	// above); fail loud rather than carry an unexercised, DupSort-unsafe emulation.
+	return 0, fmt.Errorf("DeleteRange not supported by %T", tx.RwTx)
 }
 
 func (tx *RwTx) LockDBInRam() error {
@@ -442,6 +461,7 @@ func (rwtx *RwTx) AsyncClone(asyncTx kv.RwTx) *asyncClone {
 			tx: tx{
 				db:               rwtx.db,
 				aggtx:            rwtx.aggtx,
+				blocktx:          rwtx.blocktx,
 				resourcesToClose: nil,
 				ctx:              rwtx.ctx,
 			}}}
@@ -462,8 +482,8 @@ func (tx *tx) autoClose() {
 		closer.Close()
 	}
 	tx.aggtx.Close()
-	for _, f := range tx.forkaggs {
-		f.Close()
+	if tx.blocktx != nil {
+		tx.blocktx.Close()
 	}
 }
 
@@ -679,27 +699,8 @@ func (db *DB) DomainTables(domain ...kv.Domain) []string {
 func (db *DB) InvertedIdxTables(domain ...kv.InvertedIdx) []string {
 	return db.stateFiles.InvertedIdxTables(domain...)
 }
-func (db *DB) ForkableTables(names ...kv.ForkableId) (tables []string) {
-	for _, name := range names {
-		tables = append(tables, db.forkaggs[db.searchForkableAggIdx(name)].Tables()...)
-
-	}
-	return
-}
-func (db *DB) ReloadFiles() error { return db.stateFiles.ReloadFiles() }
 func (db *DB) BuildMissedAccessors(ctx context.Context, workers int) (err error) {
-	if err = db.stateFiles.BuildMissedAccessors(ctx, workers); err != nil {
-		return
-	}
-
-	if len(db.forkaggs) > 0 {
-		for _, forkagg := range db.forkaggs {
-			if err = forkagg.BuildMissedAccessors(ctx, workers); err != nil {
-				return
-			}
-		}
-	}
-	return
+	return db.stateFiles.BuildMissedAccessors(ctx, workers)
 }
 func (db *DB) EnableReadAhead() kv.TemporalDebugDB {
 	db.stateFiles.MadvNormal()
@@ -735,34 +736,12 @@ func (tx *RwTx) CurrentDomainVersion(domain kv.Domain) version.Version {
 	return tx.aggtx.CurrentDomainVersion(domain)
 }
 func (tx *RwTx) PruneSmallBatches(ctx context.Context, timeout time.Duration) (haveMore bool, err error) {
-	if len(tx.forkaggs) > 0 {
-		timeTaken := time.Now()
-		for i := 0; i < len(tx.forkaggs); i++ {
-			hasMore, err := tx.forkaggs[i].PruneSmallBatches(ctx, timeout, tx.RwTx)
-			if err != nil {
-				return true, err
-			}
-			if time.Since(timeTaken) > timeout {
-				return true, nil
-			}
-			haveMore = haveMore || hasMore
-		}
-		timeout -= time.Since(timeTaken)
-	}
-
-	hasMore, err := tx.aggtx.PruneSmallBatches(ctx, timeout, tx.RwTx)
-	if err != nil {
-		return
-	}
-	return haveMore || hasMore, nil
+	return tx.aggtx.PruneSmallBatches(ctx, timeout, tx.RwTx)
 }
 func (tx *RwTx) Unwind(ctx context.Context, txNumUnwindTo uint64, changeset *[kv.DomainLen][]kv.DomainEntryDiff) error {
 	return tx.aggtx.Unwind(ctx, tx.RwTx, txNumUnwindTo, changeset)
 }
 
-func (tx *tx) ForkableAggTx(id kv.ForkableId) any {
-	return tx.forkaggs[tx.searchForkableAggIdx(id)]
-}
 func (tx *tx) historyStartFrom(name kv.Domain, roTx kv.Tx) uint64 {
 	return tx.aggtx.HistoryStartFrom(name, roTx)
 }
@@ -795,16 +774,4 @@ func (tx *tx) stepSize() uint64 {
 func (tx *Tx) StepSize() uint64 { return tx.stepSize() }
 func (tx *RwTx) StepSize() uint64 {
 	return tx.stepSize()
-}
-func (tx *Tx) AllForkableIds() (ids []kv.ForkableId) {
-	for _, forkagg := range tx.tx.forkaggs {
-		ids = append(ids, forkagg.Ids()...)
-	}
-	return
-}
-func (tx *RwTx) AllForkableIds() (ids []kv.ForkableId) {
-	for _, forkagg := range tx.tx.forkaggs {
-		ids = append(ids, forkagg.Ids()...)
-	}
-	return
 }

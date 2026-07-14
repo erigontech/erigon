@@ -177,7 +177,7 @@ func TestBuilderStaleSnapshotMustNotPoisonBranchCache(t *testing.T) {
 	gasPrice := uint256.NewInt(m.Genesis.BaseFee().Uint64())
 	chainPack, err := blockgen.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 4, func(i int, gen *blockgen.BlockGen) {
 		transfer := func(to common.Address) {
-			txn, err := types.SignTx(types.NewTransaction(gen.TxNonce(m.Address), to, uint256.NewInt(10_000), params.TxGas, gasPrice, nil), *signer, m.Key)
+			txn, err := types.SignTx(types.NewTransaction(gen.TxNonce(m.Address), to, uint256.NewInt(10_000), params.TxGas+params.StateGasNewAccount, gasPrice, nil), *signer, m.Key)
 			require.NoError(t, err)
 			gen.AddTx(txn)
 		}
@@ -279,7 +279,7 @@ func TestWithoutBranchCacheNeverTouchesSharedCache(t *testing.T) {
 	signer := types.LatestSignerForChainID(m.ChainConfig.ChainID)
 	gasPrice := uint256.NewInt(m.Genesis.BaseFee().Uint64())
 	chainPack, err := blockgen.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 2, func(i int, gen *blockgen.BlockGen) {
-		txn, err := types.SignTx(types.NewTransaction(gen.TxNonce(m.Address), common.Address{0xAA, byte(i)}, uint256.NewInt(10_000), params.TxGas, gasPrice, nil), *signer, m.Key)
+		txn, err := types.SignTx(types.NewTransaction(gen.TxNonce(m.Address), common.Address{0xAA, byte(i)}, uint256.NewInt(10_000), params.TxGas+params.StateGasNewAccount, gasPrice, nil), *signer, m.Key)
 		require.NoError(t, err)
 		gen.AddTx(txn)
 	})

@@ -37,6 +37,7 @@ import (
 	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/db/services"
 	"github.com/erigontech/erigon/db/state/execctx"
+	"github.com/erigontech/erigon/execution/bal"
 	"github.com/erigontech/erigon/execution/builder"
 	"github.com/erigontech/erigon/execution/cache"
 	"github.com/erigontech/erigon/execution/chain"
@@ -100,11 +101,6 @@ func GetBlockHashFromMissingSegmentError(err error) (common.Hash, bool) {
 // OnNewBlock is intentionally a no-op: in the embedded (non-remote) rpcdaemon
 // the SD is the authoritative source, so the coherent cache's state-tracking
 // machinery is unnecessary.
-//
-// This shim predates SharedDomains' current capabilities and will be simplified
-// as part of #19623 (2-cache IBS rationalization) once the StateReader/CacheView
-// interfaces stabilize. See also #19798 (event stream extraction) and #19855
-// (TransactionState/BlockState separation).
 type Cache struct {
 	execModule  *ExecModule
 	publishedSD func() *execctx.SharedDomains // returns the latest published SD from Events (for background commit)
@@ -216,7 +212,8 @@ type ExecModule struct {
 	config  *chain.Config
 	syncCfg ethconfig.Sync
 	// rules engine
-	engine rules.Engine
+	engine         rules.Engine
+	balRegenerator *bal.Regenerator
 
 	fcuBackgroundPrune      bool
 	fcuBackgroundCommit     bool
@@ -231,7 +228,9 @@ type ExecModule struct {
 	publishedSD    func() *execctx.SharedDomains // fallback for background commit
 
 	// stateCache is a cache for state data (accounts, storage, code)
-	stateCache  *cache.StateCache
+	stateCache *cache.StateCache
+	// codeStore is the persistent codehash-keyed code cache (in-mem + MDBX backing).
+	codeStore   *cache.CodeStore
 	readAheader *exec.BlockReadAheader
 
 	stopNode func() error
@@ -268,6 +267,10 @@ func NewExecModule(
 	if domainCache == nil {
 		domainCache = cache.NewDefaultStateCache()
 	}
+	var codeStore *cache.CodeStore
+	if dbg.UseCodeStore {
+		codeStore = cache.NewCodeStore(cache.DefaultCodeStoreMemBytes, cache.DefaultCodeStoreTableBytes)
+	}
 	forkValidator := newForkValidator(ctx, currentBlockNumber, pipelineExecutor, blockReader, syncCfg.MaxReorgDepth)
 
 	em := &ExecModule{
@@ -283,12 +286,14 @@ func NewExecModule(
 		hook:                    hook,
 		accum:                   accum,
 		engine:                  engine,
+		balRegenerator:          bal.NewRegenerator(blockReader, engine, logger),
 		syncCfg:                 syncCfg,
 		bacgroundCtx:            ctx,
 		fcuBackgroundPrune:      fcuBackgroundPrune,
 		fcuBackgroundCommit:     fcuBackgroundCommit,
 		onlySnapDownloadOnStart: onlySnapDownloadOnStart,
 		stateCache:              domainCache,
+		codeStore:               codeStore,
 		readAheader:             readAheader,
 		stopNode:                stopNode,
 	}
@@ -538,10 +543,9 @@ func (e *ExecModule) ValidateChain(ctx context.Context, blockHash common.Hash, b
 	if err != nil {
 		return ValidationResult{}, err
 	}
-	// NOTE: do NOT defer doms.Close(). On the success path, ownership of
-	// doms transfers to forkValidator.sharedDom inside ValidatePayload —
-	// later phases (MergeExtendingFork, NotifyCurrentHeight) close it.
-	// We Close explicitly only on the early-return error paths below.
+	// Do not defer doms.Close(): on the success path ownership transfers to
+	// forkValidator.sharedDom inside ValidatePayload and later phases close it,
+	// so we Close explicitly only on the early-return error paths below.
 	doms.SetInMemHistoryReads(inMemHistoryReads)
 
 	if err := doms.InitBlockOverlay(roTx, roTx.Debug().Dirs().Tmp); err != nil {
@@ -550,7 +554,12 @@ func (e *ExecModule) ValidateChain(ctx context.Context, blockHash common.Hash, b
 	}
 	var tx kv.TemporalRwTx = doms.BlockOverlay()
 
-	// Chain to the canonical generation so head-extending reads and fork unwind sets resolve via the parent link.
+	// Chain the validation SD to the canonical generation (e.currentContext) for
+	// any payload with a parent, not just head-extending ones: head-extending
+	// payloads read its not-yet-committed domain state instead of stale MDBX, and
+	// fork payloads reach the canonical generation's pastChangesAccumulator (via
+	// GetDiffset's parent chain) to build the unwind set — without the link the
+	// unwind runs empty, leaving the BranchCache unmasked and corrupting the root.
 	if e.currentContext != nil {
 		doms.SetParent(e.currentContext)
 	}
@@ -571,6 +580,7 @@ func (e *ExecModule) ValidateChain(ctx context.Context, blockHash common.Hash, b
 
 	// Set state cache in SharedDomains for use during state reading
 	doms.SetStateCache(e.stateCache)
+	doms.SetCodeStore(e.codeStore)
 	if err = e.unwindToCommonCanonical(doms, tx, header); err != nil {
 		doms.Close()
 		return ValidationResult{}, err
@@ -706,7 +716,7 @@ func (e *ExecModule) Start(ctx context.Context, hook *stageloop.Hook) {
 		}
 		e.forkValidator.NotifyCurrentHeight(progress)
 		return nil
-	}); err != nil {
+	}); err != nil && !errors.Is(err, context.Canceled) {
 		e.logger.Warn("Could not notify fork validator of current height", "err", err)
 	}
 }
