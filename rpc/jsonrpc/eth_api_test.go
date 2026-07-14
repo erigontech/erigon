@@ -43,11 +43,16 @@ import (
 )
 
 func newBaseApiForTest(m *execmoduletester.ExecModuleTester) *BaseAPI {
-	return NewBaseApi(nil, m.StateCache, m.BlockReader, false, rpccfg.DefaultEvmCallTimeout, m.Engine, m.Dirs, nil, 0, 0, 0)
+	return NewBaseApi(nil, m.StateCache, m.BlockReader, m.Engine, nil, &BaseApiConfig{Dirs: m.Dirs})
 }
 
 func newBaseApiWithLimits(m *execmoduletester.ExecModuleTester, rangeLimit, maxResults, logQueryLimit int) *BaseAPI {
-	return NewBaseApi(nil, m.StateCache, m.BlockReader, false, rpccfg.DefaultEvmCallTimeout, m.Engine, m.Dirs, nil, rangeLimit, maxResults, logQueryLimit)
+	return NewBaseApi(nil, m.StateCache, m.BlockReader, m.Engine, nil, &BaseApiConfig{
+		Dirs:              m.Dirs,
+		BlockRangeLimit:   rangeLimit,
+		GetLogsMaxResults: maxResults,
+		LogQueryLimit:     logQueryLimit,
+	})
 }
 
 func newEthApiForTest(base *BaseAPI, db kv.TemporalRoDB, txPool txpoolproto.TxpoolClient, mining txpoolproto.MiningClient) *APIImpl {
@@ -62,6 +67,20 @@ func newEthApiForTest(base *BaseAPI, db kv.TemporalRoDB, txPool txpoolproto.Txpo
 		RpcTxSyncMaxTimeout:         1 * time.Minute,
 	}
 	return NewEthAPI(base, db, nil, txPool, mining, cfg, log.New())
+}
+
+func TestNewBaseApiEvmCallTimeout(t *testing.T) {
+	m, _, _ := rpcdaemontest.CreateTestExecModule(t)
+
+	t.Run("zero is normalized to default", func(t *testing.T) {
+		base := NewBaseApi(nil, m.StateCache, m.BlockReader, m.Engine, nil, &BaseApiConfig{Dirs: m.Dirs})
+		assert.Equal(t, rpccfg.DefaultEvmCallTimeout, base.evmCallTimeout)
+	})
+
+	t.Run("explicit value is preserved", func(t *testing.T) {
+		base := NewBaseApi(nil, m.StateCache, m.BlockReader, m.Engine, nil, &BaseApiConfig{Dirs: m.Dirs, EvmCallTimeout: 42 * time.Second})
+		assert.Equal(t, 42*time.Second, base.evmCallTimeout)
+	})
 }
 
 func TestGetBalanceChangesInBlock(t *testing.T) {
@@ -89,7 +108,7 @@ func TestGetBalanceChangesInBlock(t *testing.T) {
 func TestGetTransactionReceipt(t *testing.T) {
 	m, _, _ := rpcdaemontest.CreateTestExecModule(t)
 	stateCache := kvcache.New(kvcache.DefaultCoherentConfig)
-	api := newEthApiForTest(NewBaseApi(nil, stateCache, m.BlockReader, false, rpccfg.DefaultEvmCallTimeout, m.Engine, m.Dirs, nil, 0, 0, 0), m.DB, nil, nil)
+	api := newEthApiForTest(NewBaseApi(nil, stateCache, m.BlockReader, m.Engine, nil, &BaseApiConfig{Dirs: m.Dirs}), m.DB, nil, nil)
 	// Call GetTransactionReceipt for transaction which is not in the database
 	if _, err := api.GetTransactionReceipt(context.Background(), common.Hash{}); err != nil {
 		t.Errorf("calling GetTransactionReceipt with empty hash: %v", err)

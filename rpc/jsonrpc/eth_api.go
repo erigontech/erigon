@@ -54,6 +54,7 @@ import (
 	"github.com/erigontech/erigon/rpc/filters"
 	"github.com/erigontech/erigon/rpc/gasprice"
 	"github.com/erigontech/erigon/rpc/jsonrpc/receipts"
+	"github.com/erigontech/erigon/rpc/rpccfg"
 	"github.com/erigontech/erigon/rpc/rpchelper"
 )
 
@@ -167,17 +168,29 @@ type BaseAPI struct {
 	balRegenerator      *bal.Regenerator
 }
 
-func NewBaseApi(f *rpchelper.Filters, stateCache kvcache.Cache, blockReader dbservices.FullBlockReader, singleNodeMode bool, evmCallTimeout time.Duration, engine rules.Engine, dirs datadir.Dirs, bridgeReader bridgeReader, rangeLimit int, getLogsMaxResults int, logQueryLimit int) *BaseAPI {
-	var (
-		blocksLRUSize = 128 // ~32Mb
-	)
+type BaseApiConfig struct {
+	SingleNodeMode    bool
+	EvmCallTimeout    time.Duration // 0 → rpccfg.DefaultEvmCallTimeout
+	Dirs              datadir.Dirs
+	BlockRangeLimit   int
+	GetLogsMaxResults int
+	LogQueryLimit     int
+}
+
+func NewBaseApi(f *rpchelper.Filters, stateCache kvcache.Cache, blockReader dbservices.FullBlockReader, engine rules.Engine, bridgeReader bridgeReader, conf *BaseApiConfig) *BaseAPI {
+	blocksLRUSize := 128 // ~32Mb
 	// if RPCDaemon deployed as independent process: increase cache sizes
-	if !singleNodeMode {
+	if !conf.SingleNodeMode {
 		blocksLRUSize *= 5
 	}
 	blocksLRU, err := lru.New[common.Hash, *types.Block](blocksLRUSize)
 	if err != nil {
 		panic(err)
+	}
+
+	evmCallTimeout := conf.EvmCallTimeout
+	if evmCallTimeout == 0 {
+		evmCallTimeout = rpccfg.DefaultEvmCallTimeout
 	}
 
 	return &BaseAPI{
@@ -189,14 +202,14 @@ func NewBaseApi(f *rpchelper.Filters, stateCache kvcache.Cache, blockReader dbse
 		_txNumReader:        blockReader.TxnumReader(),
 		evmCallTimeout:      evmCallTimeout,
 		_engine:             engine,
-		receiptsGenerator:   receipts.NewGenerator(dirs, blockReader, engine, stateCache, evmCallTimeout, f),
+		receiptsGenerator:   receipts.NewGenerator(conf.Dirs, blockReader, engine, stateCache, evmCallTimeout, f),
 		borReceiptGenerator: receipts.NewBorGenerator(blockReader, engine, stateCache, f),
 		balRegenerator:      bal.NewRegenerator(blockReader, engine, log.Root()),
-		dirs:                dirs,
+		dirs:                conf.Dirs,
 		bridgeReader:        bridgeReader,
-		blockRangeLimit:     rangeLimit,
-		getLogsMaxResults:   getLogsMaxResults,
-		logQueryLimit:       logQueryLimit,
+		blockRangeLimit:     conf.BlockRangeLimit,
+		getLogsMaxResults:   conf.GetLogsMaxResults,
+		logQueryLimit:       conf.LogQueryLimit,
 	}
 }
 
