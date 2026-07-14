@@ -20,12 +20,8 @@ import (
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv"
-	"github.com/erigontech/erigon/db/kv/dbcfg"
-	"github.com/erigontech/erigon/db/kv/mdbx"
-	"github.com/erigontech/erigon/db/kv/temporal"
 	"github.com/erigontech/erigon/db/kv/temporal/temporaltest"
 	"github.com/erigontech/erigon/db/rawdb/rawtemporaldb"
-	dbstate "github.com/erigontech/erigon/db/state"
 	"github.com/erigontech/erigon/db/state/execctx"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/chain/networkname"
@@ -496,16 +492,7 @@ func runParallel(tb testing.TB, tasks []exec.Task, validation propertyCheck, met
 	defer dir.RemoveAll(tmpDir)
 
 	dirs := datadir.New(tmpDir)
-	rawDb := mdbx.New(dbcfg.ChainDB, logger).InMem(tb, dirs.Chaindata).MustOpen()
-
-	defer rawDb.Close()
-
-	agg, err := dbstate.NewTest(dirs).StepSize(16).Logger(logger).Open(context.Background(), rawDb)
-	assert.NoError(tb, err)
-	defer agg.Close()
-
-	db, err := temporal.New(rawDb, agg, nil)
-	assert.NoError(tb, err)
+	db := temporaltest.NewTestDB(tb, dirs)
 
 	tx, err := db.BeginTemporalRo(context.Background()) //nolint:gocritic
 	assert.NoError(tb, err)
@@ -613,6 +600,7 @@ func executeParallelWithCheck(tb testing.TB, pe *parallelExecutor, tasks []exec.
 
 func runParallelGetMetadata(tb testing.TB, tasks []exec.Task, validation propertyCheck) map[int]map[int]bool {
 	tb.Helper()
+	ctx := tb.Context()
 
 	logger := log.Root()
 
@@ -623,20 +611,13 @@ func runParallelGetMetadata(tb testing.TB, tasks []exec.Task, validation propert
 	defer dir.RemoveAll(tmpDir)
 
 	dirs := datadir.New(tmpDir)
-	rawDb := mdbx.New(dbcfg.ChainDB, logger).InMem(tb, dirs.Chaindata).MustOpen()
-	defer rawDb.Close()
-	agg, err := dbstate.NewTest(dirs).StepSize(16).Logger(logger).Open(context.Background(), rawDb)
-	assert.NoError(tb, err)
-	defer agg.Close()
+	db := temporaltest.NewTestDB(tb, dirs)
 
-	db, err := temporal.New(rawDb, agg, nil)
-	assert.NoError(tb, err)
-
-	tx, err := db.BeginTemporalRo(context.Background()) //nolint:gocritic
+	tx, err := db.BeginTemporalRo(ctx) //nolint:gocritic
 	assert.NoError(tb, err)
 	defer tx.Rollback()
 
-	domains, err := execctx.NewSharedDomains(context.Background(), tx, log.New())
+	domains, err := execctx.NewSharedDomains(ctx, tx, log.New())
 	assert.NoError(tb, err)
 	defer domains.Close()
 
@@ -655,7 +636,7 @@ func runParallelGetMetadata(tb testing.TB, tasks []exec.Task, validation propert
 		workerCount: runtime.NumCPU() - 1,
 	}
 
-	executorContext, executorCancel, err := pe.run(context.Background())
+	executorContext, executorCancel, err := pe.run(ctx)
 	defer executorCancel(nil)
 	assert.NoError(tb, err, "error occur during parallel init")
 
@@ -683,15 +664,7 @@ func runProfileAndExecute(tb testing.TB, tasks []exec.Task, validation propertyC
 	defer dir.RemoveAll(tmpDir)
 
 	dirs := datadir.New(tmpDir)
-	rawDb := mdbx.New(dbcfg.ChainDB, logger).InMem(tb, dirs.Chaindata).MustOpen()
-	defer rawDb.Close()
-
-	agg, err := dbstate.NewTest(dirs).StepSize(16).Logger(logger).Open(context.Background(), rawDb)
-	assert.NoError(tb, err)
-	defer agg.Close()
-
-	db, err := temporal.New(rawDb, agg, nil)
-	assert.NoError(tb, err)
+	db := temporaltest.NewTestDB(tb, dirs)
 
 	chainSpec, _ := chainspec.ChainSpecByName(networkname.Mainnet)
 
