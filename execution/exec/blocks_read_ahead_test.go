@@ -17,6 +17,7 @@
 package exec
 
 import (
+	"context"
 	"testing"
 
 	"github.com/c2h5oh/datasize"
@@ -26,6 +27,22 @@ import (
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/execution/cache"
 )
+
+// A cancelled wait can return while a warmup is still in flight — the gauge
+// convention only holds for a drained return, so callers about to bump the
+// cache epoch (or Clear) must be able to tell the two apart.
+func TestWaitForWarmupReportsDrained(t *testing.T) {
+	bra := &BlockReadAheader{}
+	require.True(t, bra.WaitForWarmup(context.Background()), "nothing in flight — drained")
+
+	bra.warmWg.Add(1)
+	cancelled, cancel := context.WithCancel(context.Background())
+	cancel()
+	require.False(t, bra.WaitForWarmup(cancelled), "cancelled wait with a live warmup must report undrained")
+
+	bra.warmWg.Done()
+	require.True(t, bra.WaitForWarmup(context.Background()), "drained after the warmup finished")
+}
 
 // stubTemporalGetter stands in for the committed-state snapshot a warmup
 // goroutine reads: every GetLatest returns the same fixed value.

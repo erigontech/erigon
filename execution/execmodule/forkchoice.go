@@ -363,8 +363,10 @@ func (e *ExecModule) updateForkChoice(ctx context.Context, originalBlockHash, sa
 	// Drain any warmup a preceding newPayload spawned: its Puts reflect a
 	// pre-FCU snapshot and must land before this FCU's unwind epoch-bump and
 	// flush cache-apply, not after them (no new warmup starts while we hold
-	// the semaphore).
-	e.drainReadAhead()
+	// the semaphore). An interrupted drain means shutdown — bail.
+	if !e.drainReadAhead() {
+		return sendForkchoiceErrorWithoutWaiting(e.logger, outcomeCh, e.bacgroundCtx.Err(), false)
+	}
 
 	var validationError string
 

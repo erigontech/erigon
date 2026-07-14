@@ -151,7 +151,7 @@ func (bra *BlockReadAheader) AddHeaderAndBody(ctx context.Context, db kv.RoDB, h
 		if !bra.warming.CompareAndSwap(false, true) {
 			return
 		}
-		// Ordering makes "WaitForWarmup returned ⟹ gauge is zero" hold on its
+		// Ordering makes "WaitForWarmup drained ⟹ gauge is zero" hold on its
 		// own: WarmupStarted only after warmWg.Add, WarmupDone before
 		// warmWg.Done (defers run LIFO). StateCache.Unwind asserts on the gauge.
 		bra.warmWg.Add(1)
@@ -168,10 +168,13 @@ func (bra *BlockReadAheader) AddHeaderAndBody(ctx context.Context, db kv.RoDB, h
 	}
 }
 
-// WaitForWarmup blocks until any in-flight warmBody goroutine finishes or
-// the context is cancelled. Call before closing the database to avoid
-// waitTxsAllDoneOnClose hangs.
-func (bra *BlockReadAheader) WaitForWarmup(ctx context.Context) {
+// WaitForWarmup blocks until any in-flight warmBody goroutine finishes or the
+// context is cancelled, reporting whether the warmup fully drained. False
+// means a warmup may still be running — callers about to bump the cache epoch
+// or Clear must treat it as a failed precondition. Call before closing the
+// database to avoid waitTxsAllDoneOnClose hangs (that caller may ignore the
+// result: it only needs a bounded wait).
+func (bra *BlockReadAheader) WaitForWarmup(ctx context.Context) bool {
 	done := make(chan struct{})
 	go func() {
 		bra.warmWg.Wait()
@@ -179,7 +182,9 @@ func (bra *BlockReadAheader) WaitForWarmup(ctx context.Context) {
 	}()
 	select {
 	case <-done:
+		return true
 	case <-ctx.Done():
+		return false
 	}
 }
 
