@@ -153,22 +153,23 @@ func VerifyCommitmentInclusionProof(commitment common.Bytes48, commitmentInclusi
 	if commitmentInclusionProof == nil || commitmentInclusionProof.Length() < bodyDepth+int(commitmentsDepth) {
 		return false
 	}
+	var curr common.Hash
 	// Start by constructing the commitments subtree
 	for i := uint64(0); i < commitmentsDepth; i++ {
-		curr := commitmentInclusionProof.Get(int(i))
+		curr = commitmentInclusionProof.Get(int(i))
 		if (commitmentIndex / utils.PowerOf2(i) % 2) == 1 {
-			value = utils.Sha256(append(curr[:], value[:]...))
+			value = utils.Sha256(curr[:], value[:])
 		} else {
-			value = utils.Sha256(append(value[:], curr[:]...))
+			value = utils.Sha256(value[:], curr[:])
 		}
 	}
 	// Construct up the block giga tree
 	for i := uint64(0); i < uint64(bodyDepth); i++ {
-		curr := commitmentInclusionProof.Get(int(i + commitmentsDepth))
+		curr = commitmentInclusionProof.Get(int(i + commitmentsDepth))
 		if (bIndex / utils.PowerOf2(i) % 2) == 1 {
-			value = utils.Sha256(append(curr[:], value[:]...))
+			value = utils.Sha256(curr[:], value[:])
 		} else {
-			value = utils.Sha256(append(value[:], curr[:]...))
+			value = utils.Sha256(value[:], curr[:])
 		}
 	}
 	return value == bodyRoot

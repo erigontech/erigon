@@ -327,6 +327,11 @@ func BenchmarkPruneSmallBatches(b *testing.B) {
 	// Populate data: write enough txs to span several steps
 	maxTx := stepSize * 50
 	keysCount := uint64(100)
+	if testing.Short() {
+		// The full setup's sd.mem/ETL flush stalls under CI page-cache pressure; shrink it (#22361).
+		maxTx = stepSize * 4
+		keysCount = 20
+	}
 
 	rwTx, err := db.BeginTemporalRw(ctx)
 	require.NoError(b, err)

@@ -28,7 +28,7 @@ type Cloneable[T any] interface {
 
 type event interface {
 	HasSource() bool
-	Source() interface{}
+	Source() any
 
 	SourceId() app.Id
 	HasSourceId() bool
@@ -36,7 +36,7 @@ type event interface {
 
 	Context() context.Context
 
-	setSource(source interface{})
+	setSource(source any)
 	setContext(context context.Context)
 }
 
@@ -45,7 +45,7 @@ type Event[E event] interface {
 	event
 
 	WithContext(context context.Context) E
-	WithSource(source interface{}) E
+	WithSource(source any) E
 }
 
 type UndeliveredEvent struct {
@@ -53,11 +53,11 @@ type UndeliveredEvent struct {
 
 type BaseEvent[E event] struct {
 	event
-	source  interface{}
+	source  any
 	context context.Context `json:"-"`
 }
 
-func NewBaseEvent[E event](eventContext context.Context, derived E, source interface{}) *BaseEvent[E] {
+func NewBaseEvent[E event](eventContext context.Context, derived E, source any) *BaseEvent[E] {
 	return &BaseEvent[E]{derived, source, eventContext}
 }
 
@@ -69,7 +69,7 @@ func (event *BaseEvent[E]) HasSource() bool {
 	return event.source != nil
 }
 
-func (event *BaseEvent[E]) Source() interface{} {
+func (event *BaseEvent[E]) Source() any {
 	return event.source
 }
 
@@ -103,11 +103,11 @@ func (event *BaseEvent[E]) HasSourceId() bool {
 	return event.SourceId() != nil
 }
 
-func (event *BaseEvent[E]) setSource(source interface{}) {
+func (event *BaseEvent[E]) setSource(source any) {
 	event.source = source
 }
 
-func (event *BaseEvent[E]) WithSource(source interface{}) E {
+func (event *BaseEvent[E]) WithSource(source any) E {
 	withSource := event.event.(Event[E]).Clone()
 	withSource.setSource(source)
 	return withSource

@@ -46,6 +46,9 @@ func (s *RoSnapshots) View() *View {
 }
 
 func (v *View) Close() {
+	if v == nil {
+		return
+	}
 	v.base.Close()
 }
 

@@ -198,7 +198,7 @@ func generateCache(dest []uint32, epoch uint64, seed []byte) {
 	rows := int(size) / hashBytes
 
 	// Start a monitoring goroutine to report progress on low end devices
-	var progress uint32
+	var progress atomic.Uint32
 
 	done := make(chan struct{})
 	defer close(done)
@@ -209,7 +209,7 @@ func generateCache(dest []uint32, epoch uint64, seed []byte) {
 			case <-done:
 				return
 			case <-time.After(3 * time.Second):
-				logger.Info("Generating ethash verification cache", "percentage", atomic.LoadUint32(&progress)*100/uint32(rows)/4, "elapsed", common.PrettyDuration(time.Since(start)))
+				logger.Info("Generating ethash verification cache", "percentage", progress.Load()*100/uint32(rows)/4, "elapsed", common.PrettyDuration(time.Since(start)))
 			}
 		}
 	}()
@@ -220,7 +220,7 @@ func generateCache(dest []uint32, epoch uint64, seed []byte) {
 	keccak512(cache, seed)
 	for offset := uint64(hashBytes); offset < size; offset += hashBytes {
 		keccak512(cache[offset:], cache[offset-hashBytes:offset])
-		atomic.AddUint32(&progress, 1)
+		progress.Add(1)
 	}
 	// Use a low-round version of randmemohash
 	tempRef := bytes64Pool.Get().(*[]byte)
@@ -237,7 +237,7 @@ func generateCache(dest []uint32, epoch uint64, seed []byte) {
 			subtle.XORBytes(temp, cache[srcOff:srcOff+hashBytes], cache[xorOff:xorOff+hashBytes])
 			keccak512(cache[dstOff:], temp)
 
-			atomic.AddUint32(&progress, 1)
+			progress.Add(1)
 		}
 	}
 	// Swap the byte order on big endian systems and return
@@ -355,7 +355,7 @@ func generateDataset(dest []uint32, epoch uint64, cache []uint32) {
 	var pend sync.WaitGroup
 	pend.Add(threads)
 
-	var progress uint64
+	var progress atomic.Uint64
 	for i := 0; i < threads; i++ {
 		go func(id int) {
 			defer dbg.LogPanic()
@@ -378,7 +378,7 @@ func generateDataset(dest []uint32, epoch uint64, cache []uint32) {
 					copy(dataset[index*hashBytes:], item)
 				})
 
-				if status := atomic.AddUint64(&progress, 1); status%percent == 0 {
+				if status := progress.Add(1); status%percent == 0 {
 					logger.Info("Generating DAG in progress", "percentage", (status*100)/(size/hashBytes), "elapsed", common.PrettyDuration(time.Since(start)))
 				}
 			}
