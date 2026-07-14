@@ -813,7 +813,7 @@ func New(tb testing.TB, opts ...Option) *ExecModuleTester {
 	return mock
 }
 
-func mockDownloader(ctrl *gomock.Controller, snapRoot string) downloader.Client {
+func mockDownloader(ctrl *gomock.Controller, snapRoot string) services.DownloaderClient {
 	snapDownloader := downloaderproto.NewMockDownloaderClient(ctrl)
 
 	snapDownloader.EXPECT().

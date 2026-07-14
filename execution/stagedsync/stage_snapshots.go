@@ -26,7 +26,6 @@ import (
 	"github.com/erigontech/erigon/common/estimate"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/datadir"
-	"github.com/erigontech/erigon/db/downloader"
 	"github.com/erigontech/erigon/db/downloader/downloadercfg"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/prune"
@@ -51,7 +50,7 @@ type SnapshotsCfg struct {
 	chainConfig        *chain.Config
 	dirs               datadir.Dirs
 	blockRetire        services.BlockRetire
-	snapshotDownloader downloader.Client
+	snapshotDownloader services.DownloaderClient
 	blockReader        services.FullBlockReader
 	notifier           *shards.Notifications
 	caplin             bool
@@ -67,9 +66,9 @@ type SnapshotsCfg struct {
 }
 
 // Returns a seeder client for block management, a noop implementation if no downloader is attached.
-func (me *SnapshotsCfg) getSeederClient() downloader.SeederClient {
+func (me *SnapshotsCfg) getSeederClient() services.SeederClient {
 	if me.snapshotDownloader == nil {
-		return downloader.NoopSeederClient{}
+		return services.NoopSeederClient{}
 	}
 	return me.snapshotDownloader
 }
@@ -79,7 +78,7 @@ func StageSnapshotsCfg(db kv.TemporalRwDB,
 	syncConfig ethconfig.Sync,
 	dirs datadir.Dirs,
 	blockRetire services.BlockRetire,
-	snapshotDownloader downloader.Client,
+	snapshotDownloader services.DownloaderClient,
 	blockReader services.FullBlockReader,
 	notifier *shards.Notifications,
 	caplin bool,

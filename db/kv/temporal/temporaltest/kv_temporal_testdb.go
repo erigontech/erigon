@@ -20,6 +20,7 @@ import (
 	"context"
 	"testing"
 
+	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/config3"
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv"
@@ -28,25 +29,20 @@ import (
 	"github.com/erigontech/erigon/db/kv/temporal"
 	"github.com/erigontech/erigon/db/snapshotsync/blocksnapshots"
 	"github.com/erigontech/erigon/db/state"
+	"github.com/erigontech/erigon/node/ethconfig"
 )
 
 // nolint:thelper
 func NewTestDB(tb testing.TB, dirs datadir.Dirs) kv.TemporalRwDB {
-	return newTestDB(tb, dirs, config3.DefaultStepSize, nil)
+	return newTestDB(tb, dirs, config3.DefaultStepSize)
 }
 
 func NewTestDBWithStepSize(tb testing.TB, dirs datadir.Dirs, stepSize uint64) kv.TemporalRwDB {
-	return newTestDB(tb, dirs, stepSize, nil)
-}
-
-// NewTestDBWithBlocks is NewTestDB plus a block-snapshots peer, so tests can
-// exercise the tx block-files view.
-func NewTestDBWithBlocks(tb testing.TB, dirs datadir.Dirs, blockSnaps *blocksnapshots.RoSnapshots) kv.TemporalRwDB {
-	return newTestDB(tb, dirs, config3.DefaultStepSize, blockSnaps)
+	return newTestDB(tb, dirs, stepSize)
 }
 
 // nolint:thelper
-func newTestDB(tb testing.TB, dirs datadir.Dirs, stepSize uint64, blockSnaps *blocksnapshots.RoSnapshots) kv.TemporalRwDB {
+func newTestDB(tb testing.TB, dirs datadir.Dirs, stepSize uint64) kv.TemporalRwDB {
 	if tb != nil {
 		tb.Helper()
 	}
@@ -62,16 +58,25 @@ func newTestDB(tb testing.TB, dirs datadir.Dirs, stepSize uint64, blockSnaps *bl
 		rawDB = memdb.New(nil, dirs.DataDir, dbcfg.ChainDB)
 	}
 
-	agg := state.NewTest(dirs).StepSize(stepSize).MustOpen(ctx, rawDB)
-	if err := agg.OpenFolder(); err != nil {
+	blockSnapCfg := ethconfig.Defaults.Snapshot
+	blockSnapshots := blocksnapshots.NewRoSnapshots(blockSnapCfg, dirs.Snap, log.Root())
+	if tb != nil {
+		tb.Cleanup(blockSnapshots.Close)
+	}
+	if err := blockSnapshots.OpenFolder(); err != nil {
 		panic(err)
 	}
 
+	stateSnapshots := state.NewTest(dirs).StepSize(stepSize).MustOpen(ctx, rawDB)
 	if tb != nil {
-		tb.Cleanup(agg.Close)
+		tb.Cleanup(stateSnapshots.Close)
 	}
 
-	db, err := temporal.New(rawDB, agg, blockSnaps)
+	if err := stateSnapshots.OpenFolder(); err != nil {
+		panic(err)
+	}
+
+	db, err := temporal.New(rawDB, stateSnapshots, blockSnapshots)
 	if err != nil {
 		panic(err)
 	}

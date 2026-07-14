@@ -19,13 +19,9 @@ package temporal_test
 import (
 	"testing"
 
-	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/temporal/temporaltest"
-	"github.com/erigontech/erigon/db/snapshotsync/blocksnapshots"
-	"github.com/erigontech/erigon/execution/chain/networkname"
-	"github.com/erigontech/erigon/node/ethconfig"
 )
 
 // BenchmarkBeginTemporalRo measures the per-tx open cost. When block snapshots are
@@ -45,19 +41,9 @@ func BenchmarkBeginTemporalRo(b *testing.B) {
 			tx.Rollback()
 		}
 	}
-
-	b.Run("NoBlockSnaps", func(b *testing.B) {
-		db := temporaltest.NewTestDB(b, datadir.New(b.TempDir()))
-		loop(b, db)
-	})
-
 	b.Run("WithBlockSnaps", func(b *testing.B) {
 		dirs := datadir.New(b.TempDir())
-		cfg := ethconfig.Defaults.Snapshot
-		cfg.ChainName = networkname.Mainnet
-		sn := blocksnapshots.NewRoSnapshots(cfg, dirs.Snap, log.New())
-		defer sn.Close()
-		db := temporaltest.NewTestDBWithBlocks(b, dirs, sn)
+		db := temporaltest.NewTestDB(b, dirs)
 		loop(b, db)
 	})
 }

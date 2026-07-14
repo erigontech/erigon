@@ -185,7 +185,7 @@ type Ethereum struct {
 	syncUnwindOrder    stagedsync.UnwindOrder
 	syncPruneOrder     stagedsync.PruneOrder
 
-	downloaderClient downloader.Client
+	downloaderClient services.DownloaderClient
 
 	notifications *shards.Notifications
 

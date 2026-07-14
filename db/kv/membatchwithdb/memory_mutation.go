@@ -33,6 +33,7 @@ import (
 	"github.com/erigontech/erigon/db/kv/mdbx"
 	"github.com/erigontech/erigon/db/kv/order"
 	"github.com/erigontech/erigon/db/kv/stream"
+	"github.com/erigontech/erigon/db/snapshotsync/blocksnapshots"
 )
 
 var _ kv.TemporalRwTx = &MemoryMutation{}
@@ -587,6 +588,14 @@ func (m *MemoryMutation) Close() {
 
 func (m *MemoryMutation) BucketSize(bucket string) (uint64, error) {
 	return m.memTx.BucketSize(bucket)
+}
+
+type blockFilesRoTxProvider interface {
+	BlockFilesRoTx() *blocksnapshots.View
+}
+
+func (m *MemoryMutation) BlockFilesRoTx() *blocksnapshots.View {
+	return m.memTx.(blockFilesRoTxProvider).BlockFilesRoTx()
 }
 
 func (m *MemoryMutation) Count(bucket string) (uint64, error) {

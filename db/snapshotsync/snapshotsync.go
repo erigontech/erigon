@@ -26,7 +26,6 @@ import (
 	"time"
 
 	"github.com/erigontech/erigon/common/log/v3"
-	"github.com/erigontech/erigon/db/downloader"
 	"github.com/erigontech/erigon/db/downloader/downloadergrpc"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/prune"
@@ -72,7 +71,7 @@ func BuildDownloadRequest(
 func RequestSnapshotsDownload(
 	ctx context.Context,
 	downloadRequest []services.DownloadRequest,
-	downloaderClient downloader.Client,
+	downloaderClient services.DownloaderClient,
 	logTarget string,
 ) error {
 	// start seed large .seg of large size
@@ -409,7 +408,7 @@ func SyncSnapshots(
 	tx kv.RwTx,
 	blockReader blockReader,
 	cc *chain.Config,
-	snapshotDownloader downloader.Client,
+	snapshotDownloader services.DownloaderClient,
 	syncCfg ethconfig.Sync,
 	stepSize uint64,
 ) error {
