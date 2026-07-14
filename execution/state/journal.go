@@ -221,7 +221,7 @@ func (ch resetObjectChange) dirtied() (accounts.Address, bool) {
 	// (createObjectChange.revert deletes; resetObjectChange.revert swaps
 	// back to prev). Dirty tracking must be identical, otherwise the
 	// recreated address is missed from journal.dirties and downstream
-	// consumers (FinalizeTx, GetRemovedAccountsWithBalance, MakeWriteSet)
+	// consumers (FinalizeTx, MakeWriteSet)
 	// silently skip it.
 	//
 	// Manifests under parallel-exec when tx1 SD's an address and tx2 hits

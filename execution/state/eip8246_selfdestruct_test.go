@@ -14,10 +14,10 @@ import (
 
 // EIP-8246 removes the SELFDESTRUCT balance burn, leaving a destroyed account
 // alive as a balance-only account. These tests cover that behavior inside
-// IntraBlockState: recording the cleared code/nonce so concurrent readers see
-// them, reconstructing a preserved account on the versioned-read path, and
-// resetting the in-memory object at end-of-tx so the block assembler's shared
-// IBS carries the preserved balance into a later tx.
+// IntraBlockState: reconstructing a preserved account on the versioned-read
+// path, resetting the in-memory object at end-of-tx so the block assembler's
+// shared IBS carries the preserved balance into a later tx, and keeping the
+// re-created incarnation aligned across execution modes.
 
 // A destroyed-preserved contract's deployed code hash and nonce must not reach
 // a later tx. Extraction drops nonce/code/codeHash for self-destructed
@@ -36,7 +36,7 @@ func TestEIP8246_PreservedSD_ReadsAsEmptyCodeAccountInLaterTx(t *testing.T) {
 	tx0.eip8246 = true
 	require.NoError(t, tx0.CreateAccount(addr, true))
 	require.NoError(t, tx0.SetBalance(addr, preserved, tracing.BalanceChangeUnspecified))
-	require.NoError(t, tx0.SetCode(addr, []byte{0x60, 0x00}, tracing.CodeChangeUnspecified))
+	require.NoError(t, tx0.SetCode(addr, []byte("deployed runtime code"), tracing.CodeChangeUnspecified))
 	_, err := tx0.Selfdestruct(addr, true)
 	require.NoError(t, err)
 	require.NoError(t, tx0.MakeWriteSet(&chain.Rules{IsAmsterdam: true}, NewNoopWriter()))

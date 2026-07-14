@@ -1261,7 +1261,7 @@ func TestVersionedRead_EIP8246_PriorTxSelfDestructReadsAsPreserved(t *testing.T)
 		tx3.eip8246 = eip8246
 		require.NoError(t, tx3.CreateAccount(addr, true))
 		require.NoError(t, tx3.SetBalance(addr, preserved, tracing.BalanceChangeUnspecified))
-		require.NoError(t, tx3.SetCode(addr, []byte{0x60, 0x00}, tracing.CodeChangeUnspecified))
+		require.NoError(t, tx3.SetCode(addr, []byte("deployed runtime code"), tracing.CodeChangeUnspecified))
 		_, err := tx3.Selfdestruct(addr, eip8246)
 		require.NoError(t, err)
 		require.NoError(t, tx3.MakeWriteSet(&chain.Rules{IsAmsterdam: eip8246}, NewNoopWriter()))

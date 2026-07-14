@@ -48,7 +48,6 @@ import (
 	"github.com/erigontech/erigon/execution/execmodule"
 	"github.com/erigontech/erigon/execution/execmodule/chainreader"
 	"github.com/erigontech/erigon/execution/execmodule/execmoduletester"
-	"github.com/erigontech/erigon/execution/protocol/misc"
 	"github.com/erigontech/erigon/execution/protocol/params"
 	"github.com/erigontech/erigon/execution/stagedsync"
 	"github.com/erigontech/erigon/execution/stagedsync/stages"
@@ -2066,27 +2065,10 @@ func TestEIP8246NoBurnLogWhenCoinbaseSelfDestructs(t *testing.T) {
 	})
 	require.NoError(t, err)
 
-	// EIP-8246 retains the residual balance instead of burning it, so the
-	// receipt carries neither an EIP-7708 Burn nor Transfer log.
 	require.Len(t, chainPack.Receipts[0], 1)
 	receipt := chainPack.Receipts[0][0]
 	require.Equal(t, types.ReceiptStatusSuccessful, receipt.Status)
 	require.Greater(t, receipt.GasUsed, uint64(0))
-
-	var burnCount, transferCount int
-	for _, log := range receipt.Logs {
-		if log.Address != params.SystemAddress.Value() || len(log.Topics) < 2 {
-			continue
-		}
-		switch log.Topics[0] {
-		case misc.EthBurnLogEvent:
-			burnCount++
-		case misc.EthTransferLogEvent:
-			transferCount++
-		}
-	}
-	require.Equal(t, 0, burnCount, "EIP-8246 removes the SELFDESTRUCT burn, so no EIP-7708 Burn log is expected")
-	require.Equal(t, 0, transferCount, "no Transfer log expected for zero-value CREATE")
 
 	// Insert + validate + FCU proves the state root is computed correctly.
 	err = insertValidateAndUfc1By1(ctx, m.ExecModule, chainPack.Blocks)

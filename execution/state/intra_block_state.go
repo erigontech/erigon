@@ -2123,24 +2123,6 @@ func (sdb *IntraBlockState) FinalizeTx(chainRules *chain.Rules, stateWriter Stat
 	return nil
 }
 
-// GetRemovedAccountsWithBalance returns a list of accounts scheduled for
-// removal which still have positive balance. The purpose of this function is
-// to handle a corner case of EIP-7708 where a self-destructed account might
-// still receive funds between sending/burning its previous balance and actual
-// removal. In this case the burning of these remaining balances still need to
-// be logged.
-// Specification EIP-7708: https://eips.ethereum.org/EIPS/eip-7708
-func (sdb *IntraBlockState) GetRemovedAccountsWithBalance() (list []evmtypes.AddressAndBalance) {
-	for addr := range sdb.journal.dirties {
-		if obj, exist := sdb.stateObjects[addr]; exist && obj.selfdestructed {
-			if balance := obj.Balance(); !balance.IsZero() {
-				list = append(list, evmtypes.AddressAndBalance{Address: obj.address.Value(), Balance: balance})
-			}
-		}
-	}
-	return list
-}
-
 func (sdb *IntraBlockState) SoftFinalise() {
 	for addr := range sdb.journal.dirties {
 		_, exist := sdb.stateObjects[addr]
@@ -3022,12 +3004,9 @@ func (sdb *IntraBlockState) ApplyVersionedWrites(writes *WriteSet) error {
 			}
 			if vw.Val {
 				// Ensure the state object exists before calling Selfdestruct.
-				// For newly-created accounts (e.g. coinbase born via CREATE in the
-				// same transaction, with no pre-block DB entry), getStateObject
-				// returns nil and Selfdestruct silently no-ops.  This matters for
-				// the EIP-7708 finalize IBS: without a stateObject, the account will
-				// not be marked as selfdestructed and GetRemovedAccountsWithBalance
-				// will miss it, omitting the residual-balance burn log.
+				// For newly-created accounts (with no pre-block DB entry)
+				// getStateObject returns nil and Selfdestruct silently no-ops, so
+				// materialize the object first to keep the selfdestructed marking.
 				if _, err := sdb.GetOrNewStateObject(addr); err != nil {
 					return err
 				}
