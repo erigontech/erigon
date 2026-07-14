@@ -629,7 +629,7 @@ func testForkIDSplit(t *testing.T, protocol uint) {
 	startHandshake(ctx, s1.GetStatus(), p2pNoFork, protocol, errc)
 	startHandshake(ctx, s2.GetStatus(), p2pProFork, protocol, errc)
 
-	for i := 0; i < 2; i++ {
+	for range 2 {
 		select {
 		case err := <-errc:
 			if err != nil {
@@ -647,7 +647,7 @@ func testForkIDSplit(t *testing.T, protocol uint) {
 	startHandshake(ctx, s1.GetStatus(), p2pNoFork, protocol, errc)
 	startHandshake(ctx, s2.GetStatus(), p2pProFork, protocol, errc)
 
-	for i := 0; i < 2; i++ {
+	for range 2 {
 		select {
 		case err := <-errc:
 			if err != nil {
@@ -667,7 +667,7 @@ func testForkIDSplit(t *testing.T, protocol uint) {
 	startHandshake(ctx, s2.GetStatus(), p2pProFork, protocol, errc)
 
 	var successes int
-	for i := 0; i < 2; i++ {
+	for range 2 {
 		select {
 		case err := <-errc:
 			if err == nil {
@@ -944,7 +944,7 @@ func TestRunPeer_NewBlockHashesFloodKicksPeer(t *testing.T) {
 		assert.Equal(t, p2p.PeerErrorInvalidMessage, peerErr.Code)
 	}
 
-	for i := 0; i < newBlockHashesBurst+10; i++ {
+	for range newBlockHashesBurst + 10 {
 		select {
 		case rw.readCh <- freshNewBlockHashesMsg(t, 1):
 		case peerErr := <-errCh:
@@ -984,11 +984,11 @@ func TestRunPeer_NormalNewBlockHashesForwarded(t *testing.T) {
 		errCh <- runPeer(t.Context(), peerID, peerCap, rw, peerInfo, send, hasSubscribers, logger)
 	}()
 
-	for i := 0; i < want; i++ {
+	for range want {
 		rw.readCh <- freshNewBlockHashesMsg(t, 1)
 	}
 
-	for i := 0; i < want; i++ {
+	for range want {
 		select {
 		case <-sent:
 		case peerErr := <-errCh:

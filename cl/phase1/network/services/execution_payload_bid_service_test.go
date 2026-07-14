@@ -112,7 +112,7 @@ func newBidParentState(cfg *clparams.BeaconChainConfig, dependentRoot common.Has
 	s.SetSlot(100)
 	s.SetBlockRootAt(63, dependentRoot)
 	s.SetFinalizedCheckpoint(solid.Checkpoint{Epoch: 2})
-	for i := 0; i < 8; i++ {
+	for i := range 8 {
 		var pk common.Bytes48
 		pk[0] = byte(i)
 		s.AddValidator(solid.NewValidatorFromParameters(pk, common.Hash{}, 0, false, 0, 0, cfg.FarFutureEpoch, cfg.FarFutureEpoch), cfg.EffectiveBalanceIncrement)
@@ -121,7 +121,7 @@ func newBidParentState(cfg *clparams.BeaconChainConfig, dependentRoot common.Has
 	s.SetCurrentEpochParticipationFlags(make(cltypes.ParticipationFlagsList, 8))
 	s.SetProposerLookahead(solid.NewUint64VectorSSZ(int((cfg.MinSeedLookahead + 1) * cfg.SlotsPerEpoch)))
 	builders := solid.NewStaticListSSZ[*cltypes.Builder](64, 73)
-	for i := 0; i < 64; i++ {
+	for range 64 {
 		builders.Append(&cltypes.Builder{
 			Version:           cfg.PayloadBuilderVersion,
 			Balance:           cfg.MinDepositAmount + 1_000_000_000,
@@ -749,7 +749,7 @@ func TestExecutionPayloadBidServicePendingQueueCapConcurrent(t *testing.T) {
 	service.pendingCount.Store(maxPendingBids - 5)
 
 	var wg sync.WaitGroup
-	for i := 0; i < 100; i++ {
+	for i := range 100 {
 		wg.Add(1)
 		go func(idx int) {
 			defer wg.Done()

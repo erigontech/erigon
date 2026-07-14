@@ -40,7 +40,7 @@ func (tr *TRand) RandUint256() *uint256.Int {
 
 func (tr *TRand) RandBytes(size int) []byte {
 	arr := make([]byte, size)
-	for i := 0; i < size; i++ {
+	for i := range size {
 		arr[i] = byte(tr.rnd.Intn(256))
 	}
 	return arr
@@ -212,7 +212,7 @@ const RUNS = 1
 func TestTestingStruct(t *testing.T) {
 	tr := NewTRand()
 	var buf bytes.Buffer
-	for i := 0; i < RUNS; i++ {
+	for range RUNS {
 
 		enc := randTestingStruct(tr)
 		buf.Reset()

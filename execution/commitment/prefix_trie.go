@@ -112,7 +112,7 @@ func (t *prefixTrie) Reset() {
 
 func commonPrefixLen(a, b []byte) int {
 	n := min(len(b), len(a))
-	for i := 0; i < n; i++ {
+	for i := range n {
 		if a[i] != b[i] {
 			return i
 		}

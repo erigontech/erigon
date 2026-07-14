@@ -12,7 +12,7 @@ func TestAggregateSignatureCached(t *testing.T) {
 	bls.LoadPublicKeyIntoCache(convertHexToPublicKey("a491d1b0ecd9bb917989f0e74f0dea0422eac4a873e5e2644f368dffb9a6e20fd6e10c1b77654d067c0618f6e5a7f79a"), true)
 	bls.LoadPublicKeyIntoCache(convertHexToPublicKey("b301803f8b5ac4a1133581fc676dfedc60d891dd5fa99028805e5ea5b08d3491af75d0707adab3b70c6a6a580217bf81"), false)
 
-	for i := 0; i < 10; i++ {
+	for range 10 {
 		valid, err := bls.VerifyAggregate(
 			convertHexToSignature("9712c3edd73a209c742b8250759db12549b3eaf43b5ca61376d9f30e2747dbcf842d8b2ac0901d2a093713e20284a7670fcf6954e9ab93de991bb9b313e664785a075fc285806fa5224c82bde146561b446ccfc706a64b8579513cfc4ff1d930"),
 			convertHexToMessage("abababababababababababababababababababababababababababababababab"),
