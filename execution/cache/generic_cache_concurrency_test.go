@@ -262,3 +262,36 @@ func TestGenericCache_ClearRacingPut_EpochAlias(t *testing.T) {
 	_, ok := c.Get(key)
 	require.False(t, ok, "entry at txNum 200 outlived an unwind to 150: its pre-Clear epoch stamp aliases the live epoch")
 }
+
+// Intentional removals are netted out of the evictions metric; doing that by
+// decrementing the shared counter races PrintStatsAndReset's Swap(0) — the
+// swap can land between OnEvict's increment and the decrement, underflowing
+// the counter to ~1.8e19 for the next interval. The sampler plays the stats
+// reset against a Delete hammer and must never observe an absurd value.
+func TestGenericCache_StatsResetAtomicWithDelete_NoEvictionsUnderflow(t *testing.T) {
+	c := NewGenericCache[[]byte](1*datasize.MB, func(v []byte) int { return len(v) }, ModeEvictLRU)
+	defer c.Close()
+	key := []byte("metrics-key")
+	stop := make(chan struct{})
+	var wg sync.WaitGroup
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		for {
+			select {
+			case <-stop:
+				return
+			default:
+			}
+			c.Put(key, []byte{1}, 1)
+			c.Delete(key)
+		}
+	}()
+	defer wg.Wait()
+	defer close(stop)
+	for i := 0; i < 1_000_000; i++ {
+		if ev := c.evictions.Swap(0); ev > 1<<40 {
+			t.Fatalf("stats reset racing an intentional removal underflowed the evictions counter: %d", ev)
+		}
+	}
+}

@@ -104,6 +104,7 @@ type GenericCache[T any] struct {
 	misses       atomic.Uint64
 	inserts      atomic.Uint64
 	evictions    atomic.Uint64
+	removals     atomic.Uint64 // intentional removals, netted out of evictions at print time
 	dropped      atomic.Uint64
 	staleEvicted atomic.Uint64 // entries dropped lazily on read after an unwind
 
@@ -402,11 +403,12 @@ func (c *GenericCache[T]) putLocked(key []byte, value T, txNum uint64, overwrite
 }
 
 // removeLocked removes h under the caller-held stripe, deferring the size
-// subtraction to OnEvict (see newShards). The evictions metric is compensated:
-// an intentional removal is not a capacity eviction.
+// subtraction to OnEvict (see newShards). The removal is counted separately so
+// PrintStatsAndReset can net intentional removals out of the evictions metric —
+// decrementing evictions here would underflow across a concurrent stats reset.
 func (c *GenericCache[T]) removeLocked(lru *freelru.ShardedLRU[uint64, entry[T]], h uint64) {
 	if lru.Remove(h) {
-		c.evictions.Add(^uint64(0))
+		c.removals.Add(1)
 	}
 }
 
@@ -507,7 +509,17 @@ func (c *GenericCache[T]) PrintStatsAndReset(name string) {
 	hits := c.hits.Swap(0)
 	misses := c.misses.Swap(0)
 	inserts := c.inserts.Swap(0)
+	// Snapshot removals before evictions: OnEvict bumps evictions before the
+	// removal is counted, so this order keeps every captured removal paired with
+	// a captured eviction. The clamp absorbs a removal deferred to the next
+	// interval.
+	removals := c.removals.Swap(0)
 	evictions := c.evictions.Swap(0)
+	if evictions >= removals {
+		evictions -= removals
+	} else {
+		evictions = 0
+	}
 	dropped := c.dropped.Swap(0)
 	staleEvicted := c.staleEvicted.Swap(0)
 	total := hits + misses
