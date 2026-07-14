@@ -154,16 +154,20 @@ func (bra *BlockReadAheader) AddHeaderAndBody(ctx context.Context, db kv.RoDB, h
 		// Ordering makes "WaitForWarmup drained ⟹ gauge is zero" hold on its
 		// own: WarmupStarted only after warmWg.Add, WarmupDone before
 		// warmWg.Done (defers run LIFO). StateCache.Unwind asserts on the gauge.
+		// The cache pointer is captured once so the Started/Done pair and the
+		// warmup's puts all bind to the same gauge even if SetStateCache races
+		// the launch.
 		bra.warmWg.Add(1)
-		if bra.stateCache != nil {
-			bra.stateCache.WarmupStarted()
+		sc := bra.stateCache
+		if sc != nil {
+			sc.WarmupStarted()
 		}
 		go func() {
 			defer bra.warmWg.Done()
-			if bra.stateCache != nil {
-				defer bra.stateCache.WarmupDone()
+			if sc != nil {
+				defer sc.WarmupDone()
 			}
-			bra.warmBody(ctx, db, header, body, 8) // use 8 workers for warming
+			bra.warmBody(ctx, db, sc, header, body, 8) // use 8 workers for warming
 		}()
 	}
 }
@@ -199,7 +203,9 @@ func (bra *BlockReadAheader) AddSenders(senders []byte, blockHash common.Hash) {
 // It reads: To accounts, To account code, To account storage from access lists,
 // and block-level access lists. Each worker creates its own transaction.
 // Only one warmBody can run at a time - concurrent calls are no-ops.
-func (bra *BlockReadAheader) warmBody(ctx context.Context, db kv.RoDB, header *types.Header, body *types.Body, workers int) {
+// sc is the launch-time cache snapshot (see AddHeaderAndBody), nil to warm the
+// OS page cache only.
+func (bra *BlockReadAheader) warmBody(ctx context.Context, db kv.RoDB, sc *cache.StateCache, header *types.Header, body *types.Body, workers int) {
 	defer bra.warming.Store(false)
 
 	if !dbg.ReadAhead {
@@ -261,8 +267,8 @@ func (bra *BlockReadAheader) warmBody(ctx context.Context, db kv.RoDB, header *t
 					return nil
 				}
 				var getter kv.TemporalGetter = ttx
-				if bra.stateCache != nil {
-					getter = newCachePopulatingGetter(ttx, bra.stateCache)
+				if sc != nil {
+					getter = newCachePopulatingGetter(ttx, sc)
 				}
 				stateReader := state.NewReaderV3(getter)
 
@@ -332,8 +338,8 @@ func (bra *BlockReadAheader) warmBody(ctx context.Context, db kv.RoDB, header *t
 			}
 			var getter kv.TemporalGetter = ttx
 			var cpg *cachePopulatingGetter
-			if bra.stateCache != nil {
-				cpg = newCachePopulatingGetter(ttx, bra.stateCache)
+			if sc != nil {
+				cpg = newCachePopulatingGetter(ttx, sc)
 				getter = cpg
 			}
 			stateReader := state.NewReaderV3(getter)
