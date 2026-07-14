@@ -130,62 +130,68 @@ func TestGenericCache_PutNotLostAcrossGrow(t *testing.T) {
 	}
 }
 
-// A conditional put must keep deferring to a live entry across a grow: if the
-// resize ever publishes a generation the entry hasn't reached yet, a
-// PutIfAbsent arriving in that gap finds the key absent and inserts its
-// (stale) value — the writer class the if-absent semantics exist to close.
-// The prober watches for the generation swap and bursts conditional puts the
-// moment it lands, mimicking a fill thread that starts a put mid-resize.
+// A conditional put must keep deferring to a live entry across a grow. The
+// vulnerable writer class: a put of a brand-new key that lands in the
+// retiring generation after the copy snapshotted Keys() is lost on the swap,
+// and a follow-up PutIfAbsent finds the key absent and installs its stale
+// value as live. With the fence the put either lands pre-fence (and is
+// migrated — Keys() is taken with every stripe held) or lands in the new
+// generation; either way the conditional put defers.
 //
-// The cache is seeded below any capacity pressure with the hot key inserted
-// last — the LRU victim is always an older seed key, so the hot key cannot be
-// evicted and a stale value at the end can only have come through a resize
-// gap. The grow is forced by lowering curCap: reaching Len >= startCap
-// organically needs every freelru shard full, which would make the hot key
-// evictable and the signal ambiguous.
+// A writer hammers fresh keys while the grow swaps generations; every key
+// that straddled the swap is then probed with a stale conditional put. The
+// grow is forced by lowering curCap over a lightly-populated cache, so
+// capacity eviction cannot explain a missing key.
 func TestGenericCache_PutIfAbsentDefersAcrossGrow(t *testing.T) {
 	fresh := []byte("fresh-value")
 	stale := []byte("stale-value")
-	for round := 0; round < 50; round++ {
+	for round := 0; round < 100; round++ {
 		c := NewGenericCache[[]byte](64*datasize.MB, func(v []byte) int { return len(v) }, ModeEvictLRU)
 		key := make([]byte, 8)
-		for i := 0; i < 512; i++ {
+		for i := 0; i < 256; i++ {
 			binary.BigEndian.PutUint64(key, uint64(1+i))
 			c.Put(key, []byte{1}, 1)
 		}
-		hot := []byte("hot-key")
-		c.Put(hot, fresh, 10)
+		before := c.data.Load()
+		c.curCap.Store(uint32(c.Len()))
 
+		var candidates [][]byte
 		stop := make(chan struct{})
 		var wg sync.WaitGroup
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			before := c.data.Load()
-			for {
+			for j := 0; ; j++ {
 				select {
 				case <-stop:
 					return
 				default:
 				}
+				k := make([]byte, 9)
+				k[0] = 0xfe
+				binary.BigEndian.PutUint64(k[1:], uint64(j))
+				c.Put(k, fresh, 10)
+				candidates = append(candidates, k)
 				if c.data.Load() != before {
-					for j := 0; j < 4096; j++ {
-						c.PutIfAbsent(hot, stale, 5)
-					}
 					return
 				}
 			}
 		}()
 
-		c.curCap.Store(uint32(c.Len()))
 		binary.BigEndian.PutUint64(key, 0)
 		c.Put(key, []byte{1}, 1) // insert at the lowered cap → triggers the grow
-
 		close(stop)
 		wg.Wait()
-		v, ok := c.Get(hot)
-		require.True(t, ok, "round %d: hot key missing", round)
-		require.Equal(t, fresh, v, "round %d: PutIfAbsent bypassed the live entry across a grow", round)
+
+		for _, k := range candidates {
+			c.PutIfAbsent(k, stale, 5)
+		}
+		for i, k := range candidates {
+			v, ok := c.Get(k)
+			require.True(t, ok, "round %d: candidate %d missing", round, i)
+			require.Equal(t, fresh, v,
+				"round %d: candidate %d: PutIfAbsent installed a stale value over a put lost in the retiring generation", round, i)
+		}
 		c.Close()
 	}
 }
