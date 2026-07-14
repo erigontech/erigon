@@ -36,9 +36,9 @@ import (
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/common/math"
 	"github.com/erigontech/erigon/common/u256"
-	"github.com/erigontech/erigon/db/dbservices"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/rawdb"
+	"github.com/erigontech/erigon/db/services"
 	"github.com/erigontech/erigon/execution/abi"
 	"github.com/erigontech/erigon/execution/abi/bind"
 	"github.com/erigontech/erigon/execution/chain"
@@ -129,10 +129,10 @@ func NewSimulatedBackend(t *testing.T, alloc types.GenesisAlloc, gasLimit uint64
 	return b
 }
 
-func (b *SimulatedBackend) DB() kv.TemporalRwDB                     { return b.m.DB }
-func (b *SimulatedBackend) HistoryV3() bool                         { return b.m.HistoryV3 }
-func (b *SimulatedBackend) Engine() rules.Engine                    { return b.m.Engine }
-func (b *SimulatedBackend) BlockReader() dbservices.FullBlockReader { return b.m.BlockReader }
+func (b *SimulatedBackend) DB() kv.TemporalRwDB                   { return b.m.DB }
+func (b *SimulatedBackend) HistoryV3() bool                       { return b.m.HistoryV3 }
+func (b *SimulatedBackend) Engine() rules.Engine                  { return b.m.Engine }
+func (b *SimulatedBackend) BlockReader() services.FullBlockReader { return b.m.BlockReader }
 
 // Close terminates the underlying blockchain's update loop.
 func (b *SimulatedBackend) Close() {

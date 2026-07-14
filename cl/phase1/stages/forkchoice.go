@@ -28,7 +28,7 @@ import (
 	"github.com/erigontech/erigon/execution/types"
 )
 
-// computeAndNotifyServicesOfNewForkChoice calculates the new head of the fork choice and notifies relevant dbservices.
+// computeAndNotifyServicesOfNewForkChoice calculates the new head of the fork choice and notifies relevant services.
 // It updates the fork choice if possible and sets the status in the RPC. It returns the head slot, head root, and any error encountered.
 func computeAndNotifyServicesOfNewForkChoice(ctx context.Context, logger log.Logger, cfg *Cfg) (headSlot uint64, headRoot common.Hash, err error) {
 	// Advance the forkchoice store's internal clock so that epoch-boundary
@@ -374,7 +374,7 @@ func doForkchoiceRoutine(ctx context.Context, logger log.Logger, cfg *Cfg, args 
 		err      error
 	)
 	if headSlot, headRoot, err = computeAndNotifyServicesOfNewForkChoice(ctx, logger, cfg); err != nil {
-		return fmt.Errorf("failed to compute and notify dbservices of new fork choice: %w", err)
+		return fmt.Errorf("failed to compute and notify services of new fork choice: %w", err)
 	}
 
 	tx, err := cfg.indiciesDB.BeginRw(ctx)

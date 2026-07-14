@@ -21,8 +21,8 @@ import (
 
 	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/log/v3"
-	"github.com/erigontech/erigon/db/dbservices"
 	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/services"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/exec"
 	"github.com/erigontech/erigon/execution/protocol/rules"
@@ -36,7 +36,7 @@ type BuilderFinishCfg struct {
 	engine                rules.Engine
 	sealCancel            chan struct{}
 	builderState          BuilderState
-	blockReader           dbservices.FullBlockReader
+	blockReader           services.FullBlockReader
 	latestBlockBuiltStore *LatestBlockBuiltStore
 }
 
@@ -45,7 +45,7 @@ func StageBuilderFinishCfg(
 	engine rules.Engine,
 	builderState BuilderState,
 	sealCancel chan struct{},
-	blockReader dbservices.FullBlockReader,
+	blockReader services.FullBlockReader,
 	latestBlockBuiltStore *LatestBlockBuiltStore,
 ) BuilderFinishCfg {
 	return BuilderFinishCfg{

@@ -33,10 +33,10 @@ import (
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/log/v3"
-	"github.com/erigontech/erigon/db/dbservices"
 	"github.com/erigontech/erigon/db/integrity"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/rawdbv3"
+	"github.com/erigontech/erigon/db/services"
 	"github.com/erigontech/erigon/db/state/execctx"
 	"github.com/erigontech/erigon/execution/commitment"
 	"github.com/erigontech/erigon/execution/commitment/commitmentdb"
@@ -69,7 +69,7 @@ func WithChartsPageSize(n uint64) Opt {
 	}
 }
 
-func New(logger log.Logger, db kv.TemporalRoDB, br dbservices.FullBlockReader, outputDir string, opts ...Opt) Backtester {
+func New(logger log.Logger, db kv.TemporalRoDB, br services.FullBlockReader, outputDir string, opts ...Opt) Backtester {
 	bt := Backtester{
 		logger:          logger,
 		db:              db,
@@ -87,7 +87,7 @@ func New(logger log.Logger, db kv.TemporalRoDB, br dbservices.FullBlockReader, o
 type Backtester struct {
 	logger          log.Logger
 	db              kv.TemporalRoDB
-	blockReader     dbservices.FullBlockReader
+	blockReader     services.FullBlockReader
 	outputDir       string
 	paraTrie        bool
 	trieWarmup      bool

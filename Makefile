@@ -514,7 +514,7 @@ $(GOBINREL)/protoc: | $(GOBINREL)
 $(GOBINREL)/protoc-gen-go: | $(GOBINREL)
 	$(GOINSTALL) google.golang.org/protobuf/cmd/protoc-gen-go
 
-# 'protoc-gen-go-grpc' tool generates grpc dbservices
+# 'protoc-gen-go-grpc' tool generates grpc services
 $(GOBINREL)/protoc-gen-go-grpc: | $(GOBINREL)
 	$(GOINSTALL) google.golang.org/grpc/cmd/protoc-gen-go-grpc@latest
 

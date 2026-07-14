@@ -233,7 +233,7 @@ func TestLifecycleLifeCycle(t *testing.T) {
 	started := make(map[string]bool)
 	stopped := make(map[string]bool)
 
-	// Create a batch of instrumented dbservices
+	// Create a batch of instrumented services
 	lifecycles := map[string]Lifecycle{
 		"A": &InstrumentedService{
 			startHook: func() { started["A"] = true },
@@ -252,7 +252,7 @@ func TestLifecycleLifeCycle(t *testing.T) {
 	for _, lifecycle := range lifecycles {
 		stack.RegisterLifecycle(lifecycle)
 	}
-	// Start the node and check that all dbservices are running
+	// Start the node and check that all services are running
 	if err := stack.Start(); err != nil {
 		t.Fatalf("failed to start protocol stack: %v", err)
 	}
@@ -264,7 +264,7 @@ func TestLifecycleLifeCycle(t *testing.T) {
 			t.Fatalf("service %s: freshly started service already stopped", id)
 		}
 	}
-	// Stop the node and check that all dbservices have been stopped
+	// Stop the node and check that all services have been stopped
 	if err := stack.Close(); err != nil {
 		t.Fatalf("failed to stop protocol stack: %v", err)
 	}
@@ -291,7 +291,7 @@ func TestLifecycleStartupError(t *testing.T) {
 	started := make(map[string]bool)
 	stopped := make(map[string]bool)
 
-	// Create a batch of instrumented dbservices
+	// Create a batch of instrumented services
 	lifecycles := map[string]Lifecycle{
 		"A": &InstrumentedService{
 			startHook: func() { started["A"] = true },
@@ -316,7 +316,7 @@ func TestLifecycleStartupError(t *testing.T) {
 	failer := &InstrumentedService{start: failure}
 	stack.RegisterLifecycle(failer)
 
-	// Start the protocol stack and ensure all started dbservices stop
+	// Start the protocol stack and ensure all started services stop
 	if err := stack.Start(); !errors.Is(err, failure) {
 		t.Fatalf("stack startup failure mismatch: have %v, want %v", err, failure)
 	}
@@ -341,7 +341,7 @@ func TestLifecycleTerminationGuarantee(t *testing.T) {
 	started := make(map[string]bool)
 	stopped := make(map[string]bool)
 
-	// Create a batch of instrumented dbservices
+	// Create a batch of instrumented services
 	lifecycles := map[string]Lifecycle{
 		"A": &InstrumentedService{
 			startHook: func() { started["A"] = true },

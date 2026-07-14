@@ -30,10 +30,10 @@ import (
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/log/v3"
-	"github.com/erigontech/erigon/db/dbservices"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/rawdbv3"
 	"github.com/erigontech/erigon/db/rawdb"
+	"github.com/erigontech/erigon/db/services"
 	"github.com/erigontech/erigon/db/snaptype"
 	"github.com/erigontech/erigon/execution/rlp"
 	"github.com/erigontech/erigon/execution/types"
@@ -44,17 +44,17 @@ import (
 	"github.com/erigontech/erigon/p2p"
 )
 
-var _ dbservices.FullBlockReader = &RemoteBackend{}
+var _ services.FullBlockReader = &RemoteBackend{}
 
 type RemoteBackend struct {
 	remoteEthBackend remoteproto.ETHBACKENDClient
 	log              log.Logger
 	version          gointerfaces.Version
 	db               kv.RoDB
-	blockReader      dbservices.FullBlockReader
+	blockReader      services.FullBlockReader
 }
 
-func NewRemoteBackend(client remoteproto.ETHBACKENDClient, db kv.RoDB, blockReader dbservices.FullBlockReader) *RemoteBackend {
+func NewRemoteBackend(client remoteproto.ETHBACKENDClient, db kv.RoDB, blockReader services.FullBlockReader) *RemoteBackend {
 	return &RemoteBackend{
 		remoteEthBackend: client,
 		version:          gointerfaces.VersionFromProto(privateapi.EthBackendAPIVersion),
@@ -109,10 +109,10 @@ func (back *RemoteBackend) BlockByHash(ctx context.Context, db kv.Tx, hash commo
 	return block, err
 }
 func (back *RemoteBackend) TxsV3Enabled() bool { panic("not implemented") }
-func (back *RemoteBackend) Snapshots() dbservices.BlockSnapshots {
+func (back *RemoteBackend) Snapshots() services.BlockSnapshots {
 	return back.blockReader.Snapshots()
 }
-func (back *RemoteBackend) BorSnapshots() dbservices.BlockSnapshots { panic("not implemented") }
+func (back *RemoteBackend) BorSnapshots() services.BlockSnapshots { panic("not implemented") }
 
 func (back *RemoteBackend) Ready(ctx context.Context) <-chan error {
 	return back.blockReader.Ready(ctx)

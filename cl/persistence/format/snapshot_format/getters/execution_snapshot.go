@@ -26,21 +26,21 @@ import (
 	"github.com/erigontech/erigon/cl/cltypes/solid"
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/ssz"
-	"github.com/erigontech/erigon/db/dbservices"
 	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/services"
 	"github.com/erigontech/erigon/execution/types"
 )
 
 type ExecutionSnapshotReader struct {
 	ctx context.Context
 
-	blockReader dbservices.FullBlockReader
+	blockReader services.FullBlockReader
 	beaconCfg   *clparams.BeaconChainConfig
 
 	db kv.RoDB
 }
 
-func NewExecutionSnapshotReader(ctx context.Context, blockReader dbservices.FullBlockReader, db kv.RoDB) *ExecutionSnapshotReader {
+func NewExecutionSnapshotReader(ctx context.Context, blockReader services.FullBlockReader, db kv.RoDB) *ExecutionSnapshotReader {
 	return &ExecutionSnapshotReader{ctx: ctx, blockReader: blockReader, db: db}
 }
 

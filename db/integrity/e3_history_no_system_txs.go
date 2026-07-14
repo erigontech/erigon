@@ -27,15 +27,15 @@ import (
 
 	"github.com/erigontech/erigon/common/estimate"
 	"github.com/erigontech/erigon/common/log/v3"
-	"github.com/erigontech/erigon/db/dbservices"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/order"
 	"github.com/erigontech/erigon/db/kv/rawdbv3"
+	"github.com/erigontech/erigon/db/services"
 	"github.com/erigontech/erigon/db/state"
 )
 
 // History - usually don't have anything attributed to 1-st system txs (except genesis)
-func HistoryCheckNoSystemTxs(ctx context.Context, db kv.TemporalRwDB, blockReader dbservices.FullBlockReader) error {
+func HistoryCheckNoSystemTxs(ctx context.Context, db kv.TemporalRwDB, blockReader services.FullBlockReader) error {
 	defer func(t time.Time) { log.Info("[integrity] HistoryNoSystemTxs done", "took", time.Since(t)) }(time.Now())
 	count := atomic.Uint64{}
 	logEvery := time.NewTicker(20 * time.Second)

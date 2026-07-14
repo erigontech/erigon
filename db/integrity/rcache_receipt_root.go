@@ -21,9 +21,9 @@ import (
 	"fmt"
 
 	"github.com/erigontech/erigon/common/log/v3"
-	"github.com/erigontech/erigon/db/dbservices"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/rawdb"
+	"github.com/erigontech/erigon/db/services"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/types"
 )
@@ -36,7 +36,7 @@ import (
 // the 32-byte intermediate state root (PostState), which Erigon does not
 // compute or persist at execution time, so RCache cannot reconstruct the
 // canonical receipt root for those blocks.
-func CheckReceiptRootIntegrity(ctx context.Context, sc SamplerCfg, db kv.TemporalRoDB, blockReader dbservices.FullBlockReader, cc *chain.Config, failFast bool, logger log.Logger) (err error) {
+func CheckReceiptRootIntegrity(ctx context.Context, sc SamplerCfg, db kv.TemporalRoDB, blockReader services.FullBlockReader, cc *chain.Config, failFast bool, logger log.Logger) (err error) {
 	defer func() {
 		logger.Info("[integrity] ReceiptRootIntegrity: done", "err", err)
 	}()
@@ -70,7 +70,7 @@ func CheckReceiptRootIntegrity(ctx context.Context, sc SamplerCfg, db kv.Tempora
 // reconstructing receipts from RCache and comparing against the block header.
 // Pre-Byzantium blocks cannot be verified (see CheckReceiptRootIntegrity); for
 // such a block this logs a warning and returns nil.
-func CheckRCacheRootAtBlk(ctx context.Context, db kv.TemporalRoDB, blockReader dbservices.FullBlockReader, cc *chain.Config, blockNum uint64, failFast bool, logger log.Logger) error {
+func CheckRCacheRootAtBlk(ctx context.Context, db kv.TemporalRoDB, blockReader services.FullBlockReader, cc *chain.Config, blockNum uint64, failFast bool, logger log.Logger) error {
 	if cc.ByzantiumBlock != nil && blockNum < *cc.ByzantiumBlock {
 		logger.Warn("[integrity] check-rcache-root-at-blk: skipping pre-Byzantium block (no PostState in RCache)",
 			"block", blockNum, "byzantium", *cc.ByzantiumBlock)
@@ -82,7 +82,7 @@ func CheckRCacheRootAtBlk(ctx context.Context, db kv.TemporalRoDB, blockReader d
 // CheckRCacheRootAtBlkRange verifies receipt roots over [from, to) using
 // sampling. Pre-Byzantium blocks are skipped; if `from` falls below Byzantium
 // it is clamped up with a warning.
-func CheckRCacheRootAtBlkRange(ctx context.Context, sc SamplerCfg, db kv.TemporalRoDB, blockReader dbservices.FullBlockReader, cc *chain.Config, from, to uint64, failFast bool, logger log.Logger) error {
+func CheckRCacheRootAtBlkRange(ctx context.Context, sc SamplerCfg, db kv.TemporalRoDB, blockReader services.FullBlockReader, cc *chain.Config, from, to uint64, failFast bool, logger log.Logger) error {
 	if from >= to {
 		logger.Info("[integrity] check-rcache-root-at-blk-range: empty range, skipping", "from", from, "to", to)
 		return nil
@@ -105,7 +105,7 @@ func CheckRCacheRootAtBlkRange(ctx context.Context, sc SamplerCfg, db kv.Tempora
 // blocks. It opens a single ReceiptCacheV2Stream covering [fromBlock, toBlock]
 // and walks blocks in lockstep with the stream's txNum cursor, so we avoid one
 // stream + one Min query per block.
-func checkRCacheRootAtBlkChunk(ctx context.Context, fromBlock, toBlock uint64, db kv.TemporalRoDB, blockReader dbservices.FullBlockReader, failFast bool) (err error) {
+func checkRCacheRootAtBlkChunk(ctx context.Context, fromBlock, toBlock uint64, db kv.TemporalRoDB, blockReader services.FullBlockReader, failFast bool) (err error) {
 	if fromBlock > toBlock {
 		panic(fmt.Sprintf("fromBlock(%d) > toBlock(%d)", fromBlock, toBlock))
 	}

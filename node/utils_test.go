@@ -33,7 +33,7 @@ func NewNoop() *Noop {
 	return noop
 }
 
-// Set of dbservices all wrapping the base NoopLifecycle resulting in the same method
+// Set of services all wrapping the base NoopLifecycle resulting in the same method
 // signatures but different outer types.
 type Noop struct{ NoopLifecycle }
 

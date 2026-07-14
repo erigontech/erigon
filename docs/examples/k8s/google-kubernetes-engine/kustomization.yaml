@@ -8,5 +8,5 @@ patchesJson6902:
       version: v1
 resources:
   - ../base
-  - ../base/dbservices
+  - ../base/services
   - podmonitoring.yaml

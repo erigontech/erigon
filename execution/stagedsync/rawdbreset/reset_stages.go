@@ -28,20 +28,20 @@ import (
 	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/datadir"
-	"github.com/erigontech/erigon/db/dbservices"
 	"github.com/erigontech/erigon/db/etl"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/backup"
 	"github.com/erigontech/erigon/db/kv/rawdbv3"
 	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/db/rawdb/blockio"
+	"github.com/erigontech/erigon/db/services"
 	"github.com/erigontech/erigon/db/snaptype"
 	dbstate "github.com/erigontech/erigon/db/state"
 	"github.com/erigontech/erigon/execution/stagedsync/stages"
 	"github.com/erigontech/erigon/execution/types"
 )
 
-func ResetState(db kv.TemporalRwDB, ctx context.Context, dirs datadir.Dirs, br dbservices.FullBlockReader, logger log.Logger) error {
+func ResetState(db kv.TemporalRwDB, ctx context.Context, dirs datadir.Dirs, br services.FullBlockReader, logger log.Logger) error {
 	// don't reset senders here
 	if err := db.Update(ctx, ResetWitnesses); err != nil {
 		return err
@@ -91,7 +91,7 @@ func ResetState(db kv.TemporalRwDB, ctx context.Context, dirs datadir.Dirs, br d
 // from peers. The stale TD records are independently keyed by hash and do
 // not affect canonical assignment, and FillDBFromSnapshots rewrites the
 // snapshot-range TDs as it walks the frozen headers.
-func ResetCanonicalAndRefillFromSnapshots(ctx context.Context, db kv.TemporalRwDB, dirs datadir.Dirs, br dbservices.FullBlockReader, logger log.Logger) error {
+func ResetCanonicalAndRefillFromSnapshots(ctx context.Context, db kv.TemporalRwDB, dirs datadir.Dirs, br services.FullBlockReader, logger log.Logger) error {
 	return db.Update(ctx, func(tx kv.RwTx) error {
 		if err := tx.ClearTable(kv.HeaderCanonical); err != nil {
 			return fmt.Errorf("clear canonical hash table: %w", err)
@@ -108,7 +108,7 @@ func ResetCanonicalAndRefillFromSnapshots(ctx context.Context, db kv.TemporalRwD
 	})
 }
 
-func ResetBlocks(db kv.RwDB, tx kv.RwTx, br dbservices.FullBlockReader, bw *blockio.BlockWriter, dirs datadir.Dirs, logger log.Logger) error {
+func ResetBlocks(db kv.RwDB, tx kv.RwTx, br services.FullBlockReader, bw *blockio.BlockWriter, dirs datadir.Dirs, logger log.Logger) error {
 	// keep Genesis
 	if err := rawdb.TruncateBlocks(context.Background(), tx, 1); err != nil {
 		return err
@@ -280,7 +280,7 @@ func Reset(ctx context.Context, db kv.RwDB, stagesList ...stages.SyncStage) erro
 	})
 }
 
-func FillDBFromSnapshots(logPrefix string, ctx context.Context, tx kv.RwTx, dirs datadir.Dirs, blockReader dbservices.FullBlockReader, logger log.Logger) error {
+func FillDBFromSnapshots(logPrefix string, ctx context.Context, tx kv.RwTx, dirs datadir.Dirs, blockReader services.FullBlockReader, logger log.Logger) error {
 	blocksAvailable := blockReader.FrozenBlocks()
 	logEvery := time.NewTicker(20 * time.Second)
 	defer logEvery.Stop()
@@ -425,7 +425,7 @@ const (
 	pruneMarkerSafeThreshold = snaptype.Erigon2MergeLimit * 1.5 // 1.5x the merge limit
 )
 
-func GetPruneMarkerSafeThreshold(blockReader dbservices.FullBlockReader) uint64 {
+func GetPruneMarkerSafeThreshold(blockReader services.FullBlockReader) uint64 {
 	snapProgress := min(blockReader.FrozenBorBlocks(false), blockReader.FrozenBlocks())
 	if blockReader.BorSnapshots() == nil {
 		snapProgress = blockReader.FrozenBlocks()

@@ -6,7 +6,7 @@ import (
 	"iter"
 	"path/filepath"
 
-	"github.com/erigontech/erigon/db/dbservices"
+	"github.com/erigontech/erigon/db/services"
 	"github.com/erigontech/erigon/node/gointerfaces/downloaderproto"
 )
 
@@ -89,4 +89,4 @@ func NewRpcClient(inner downloaderproto.DownloaderClient, rootDir string) *RpcCl
 	return &RpcClient{inner: inner, rootDir: rootDir}
 }
 
-var _ dbservices.DownloaderClient = (*RpcClient)(nil)
+var _ services.DownloaderClient = (*RpcClient)(nil)

@@ -26,13 +26,13 @@ import (
 	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/common/log/v3"
-	"github.com/erigontech/erigon/db/dbservices"
 	"github.com/erigontech/erigon/db/etl"
 	"github.com/erigontech/erigon/db/kv"
 	mdbx2 "github.com/erigontech/erigon/db/kv/mdbx"
 	"github.com/erigontech/erigon/db/kv/prune"
 	"github.com/erigontech/erigon/db/kv/rawdbv3"
 	"github.com/erigontech/erigon/db/rawdb"
+	"github.com/erigontech/erigon/db/services"
 	"github.com/erigontech/erigon/db/state"
 	"github.com/erigontech/erigon/execution/stagedsync/stages"
 	"github.com/erigontech/erigon/execution/types"
@@ -41,13 +41,13 @@ import (
 type TxLookupCfg struct {
 	prune       prune.Mode
 	tmpdir      string
-	blockReader dbservices.FullBlockReader
+	blockReader services.FullBlockReader
 }
 
 func StageTxLookupCfg(
 	prune prune.Mode,
 	tmpdir string,
-	blockReader dbservices.FullBlockReader,
+	blockReader services.FullBlockReader,
 ) TxLookupCfg {
 	return TxLookupCfg{
 		prune:       prune,

@@ -7,9 +7,9 @@ import (
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/log/v3"
-	"github.com/erigontech/erigon/db/dbservices"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/rawdb"
+	"github.com/erigontech/erigon/db/services"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/types"
 )
@@ -17,11 +17,11 @@ import (
 type ChainReaderImpl struct {
 	config      *chain.Config
 	tx          kv.Tx
-	blockReader dbservices.FullBlockReader
+	blockReader services.FullBlockReader
 	logger      log.Logger
 }
 
-func NewChainReader(config *chain.Config, tx kv.Tx, blockReader dbservices.FullBlockReader, logger log.Logger) *ChainReaderImpl {
+func NewChainReader(config *chain.Config, tx kv.Tx, blockReader services.FullBlockReader, logger log.Logger) *ChainReaderImpl {
 	return &ChainReaderImpl{config, tx, blockReader, logger}
 }
 

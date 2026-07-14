@@ -445,7 +445,7 @@ func TestAnswerGetReceiptsQueryCacheOnly70_EmptyQuery(t *testing.T) {
 	}
 }
 
-// mockHeaderReader implements dbservices.HeaderReader for TestAnswerGetBlockHeadersQuery*.
+// mockHeaderReader implements services.HeaderReader for TestAnswerGetBlockHeadersQuery*.
 // It exposes a canonical chain keyed by block number; each block's hash is derived
 // deterministically from its number so the ancestor walk works both ways.
 type mockHeaderReader struct {
@@ -536,7 +536,7 @@ func TestAnswerGetBlockHeadersQuery_HashModeSkip(t *testing.T) {
 
 // --- eth/71 AnswerGetBlockAccessListsQuery tests ---
 
-// balHeaderReader satisfies dbservices.HeaderReader for BAL handler tests by
+// balHeaderReader satisfies services.HeaderReader for BAL handler tests by
 // resolving hash → block number from a fixed map and panicking on every other
 // method (they're not called by AnswerGetBlockAccessListsQuery).
 type balHeaderReader map[common.Hash]uint64

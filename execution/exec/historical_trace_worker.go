@@ -32,9 +32,9 @@ import (
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/consensuschain"
 	"github.com/erigontech/erigon/db/datadir"
-	"github.com/erigontech/erigon/db/dbservices"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/rawdbv3"
+	"github.com/erigontech/erigon/db/services"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/protocol"
 	"github.com/erigontech/erigon/execution/protocol/aa"
@@ -344,7 +344,7 @@ func (rw *HistoricalTraceWorker) ResetTx(chainTx kv.TemporalTx) {
 type ExecArgs struct {
 	ChainDB     kv.TemporalRoDB
 	Genesis     *types.Genesis
-	BlockReader dbservices.FullBlockReader
+	BlockReader services.FullBlockReader
 	Engine      rules.Engine
 	Dirs        datadir.Dirs
 	ChainConfig *chain.Config
@@ -663,7 +663,7 @@ func CustomTraceMapReduce(ctx context.Context, fromBlock, toBlock uint64, consum
 	return nil
 }
 
-func BlockWithSenders(ctx context.Context, db kv.RoDB, tx kv.Tx, blockReader dbservices.BlockReader, blockNum uint64) (b *types.Block, err error) {
+func BlockWithSenders(ctx context.Context, db kv.RoDB, tx kv.Tx, blockReader services.BlockReader, blockNum uint64) (b *types.Block, err error) {
 	select {
 	case <-ctx.Done():
 		return nil, ctx.Err()

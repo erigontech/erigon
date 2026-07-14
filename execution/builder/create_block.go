@@ -27,9 +27,9 @@ import (
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/log/v3"
-	"github.com/erigontech/erigon/db/dbservices"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/rawdb"
+	"github.com/erigontech/erigon/db/services"
 	"github.com/erigontech/erigon/db/state/execctx"
 	"github.com/erigontech/erigon/execution/builder/buildercfg"
 	"github.com/erigontech/erigon/execution/chain"
@@ -63,7 +63,7 @@ type BuilderCreateBlockCfg struct {
 	chainConfig            *chain.Config
 	engine                 rules.Engine
 	blockBuilderParameters *Parameters
-	blockReader            dbservices.FullBlockReader
+	blockReader            services.FullBlockReader
 }
 
 func StageBuilderCreateBlockCfg(
@@ -71,7 +71,7 @@ func StageBuilderCreateBlockCfg(
 	chainConfig *chain.Config,
 	engine rules.Engine,
 	blockBuilderParameters *Parameters,
-	blockReader dbservices.FullBlockReader,
+	blockReader services.FullBlockReader,
 ) BuilderCreateBlockCfg {
 	return BuilderCreateBlockCfg{
 		builder:                builder,

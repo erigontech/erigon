@@ -24,8 +24,8 @@ import (
 	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/consensuschain"
-	"github.com/erigontech/erigon/db/dbservices"
 	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/services"
 	dbstate "github.com/erigontech/erigon/db/state"
 	"github.com/erigontech/erigon/db/state/execctx"
 	"github.com/erigontech/erigon/execution/chain"
@@ -43,7 +43,7 @@ import (
 type PipelineExecutor struct {
 	sync                    *stagedsync.Sync
 	db                      kv.TemporalRwDB
-	blockReader             dbservices.FullBlockReader
+	blockReader             services.FullBlockReader
 	chainConfig             *chain.Config
 	engine                  rules.Engine
 	validationSync          *stagedsync.Sync
@@ -60,7 +60,7 @@ type PipelineExecutor struct {
 func NewPipelineExecutor(
 	sync *stagedsync.Sync,
 	db kv.TemporalRwDB,
-	blockReader dbservices.FullBlockReader,
+	blockReader services.FullBlockReader,
 	chainConfig *chain.Config,
 	engine rules.Engine,
 	validationSync *stagedsync.Sync,

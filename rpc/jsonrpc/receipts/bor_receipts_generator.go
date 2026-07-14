@@ -7,11 +7,11 @@ import (
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/hexutil"
-	"github.com/erigontech/erigon/db/dbservices"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/kvcache"
 	"github.com/erigontech/erigon/db/kv/rawdbv3"
 	"github.com/erigontech/erigon/db/rawdb/rawtemporaldb"
+	"github.com/erigontech/erigon/db/services"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/protocol"
 	"github.com/erigontech/erigon/execution/protocol/rules"
@@ -26,13 +26,13 @@ import (
 
 type BorGenerator struct {
 	receiptCache *lru.Cache[common.Hash, *types.Receipt]
-	blockReader  dbservices.FullBlockReader
+	blockReader  services.FullBlockReader
 	engine       rules.EngineReader
 	stateCache   kvcache.Cache
 	filters      *rpchelper.Filters
 }
 
-func NewBorGenerator(blockReader dbservices.FullBlockReader,
+func NewBorGenerator(blockReader services.FullBlockReader,
 	engine rules.EngineReader, stateCache kvcache.Cache, filters ...*rpchelper.Filters) *BorGenerator {
 	receiptCache, err := lru.New[common.Hash, *types.Receipt](receiptsCacheLimit)
 	if err != nil {

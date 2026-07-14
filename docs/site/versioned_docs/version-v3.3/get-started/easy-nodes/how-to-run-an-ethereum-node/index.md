@@ -21,7 +21,7 @@ Follow these steps to configure and launch the All-in-One Client. Erigon uses it
 Create a new file named `docker-compose.yml` in a directory where you want to manage your Erigon setup, and paste the following content into it:
 
 ```sh
-dbservices:
+services:
   erigon:
     image: erigontech/erigon:v3.2.2
     container_name: erigon-node

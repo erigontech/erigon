@@ -41,7 +41,7 @@ import (
 	"github.com/erigontech/erigon/node/gointerfaces/remoteproto"
 )
 
-// generate the messages and dbservices
+// generate the messages and services
 type remoteOpts struct {
 	remoteKV    remoteproto.KVClient
 	log         log.Logger

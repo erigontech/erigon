@@ -23,17 +23,17 @@ import (
 	"math/big"
 
 	"github.com/erigontech/erigon/common"
-	"github.com/erigontech/erigon/db/dbservices"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/rawdb"
+	"github.com/erigontech/erigon/db/services"
 	"github.com/erigontech/erigon/execution/rlp"
 )
 
 type HeadersCfg struct {
-	blockReader dbservices.FullBlockReader
+	blockReader services.FullBlockReader
 }
 
-func StageHeadersCfg(blockReader dbservices.FullBlockReader) HeadersCfg {
+func StageHeadersCfg(blockReader services.FullBlockReader) HeadersCfg {
 	return HeadersCfg{
 		blockReader: blockReader,
 	}

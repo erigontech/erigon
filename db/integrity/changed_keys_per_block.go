@@ -23,10 +23,10 @@ import (
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/log/v3"
-	"github.com/erigontech/erigon/db/dbservices"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/order"
 	"github.com/erigontech/erigon/db/kv/stream"
+	"github.com/erigontech/erigon/db/services"
 )
 
 // ChangedKeysPerBlockIdx holds pre-built per-domain key change indices for a block window.
@@ -45,7 +45,7 @@ type ChangedKeysPerBlockIdx [kv.DomainLen]*ChangedKeysPerBlock
 // NewChangedKeysPerBlockIdx scans HistoryKeyTxNumRange once per domain for the txNum
 // range covering [fromBlockNum, toBlockNum) blocks and returns the resulting index.
 // The index is fully in-memory.
-func NewChangedKeysPerBlockIdx(ctx context.Context, tx kv.TemporalTx, br dbservices.FullBlockReader, fromBlockNum, toBlockNum uint64, logger log.Logger) (*ChangedKeysPerBlockIdx, error) {
+func NewChangedKeysPerBlockIdx(ctx context.Context, tx kv.TemporalTx, br services.FullBlockReader, fromBlockNum, toBlockNum uint64, logger log.Logger) (*ChangedKeysPerBlockIdx, error) {
 	domains := []kv.Domain{kv.AccountsDomain, kv.StorageDomain, kv.CodeDomain}
 	start := time.Now()
 	fromTxNum, err := br.TxnumReader().Min(ctx, tx, fromBlockNum)
@@ -193,7 +193,7 @@ type TxNumToBlock struct {
 
 // NewTxNumToBlock builds a TxNumToBlock for [fromBlockNum, toBlockNum) by reading
 // MaxTxNum for each block from the provided reader.
-func NewTxNumToBlock(ctx context.Context, tx kv.Tx, br dbservices.FullBlockReader, fromBlockNum, toBlockNum uint64) (*TxNumToBlock, error) {
+func NewTxNumToBlock(ctx context.Context, tx kv.Tx, br services.FullBlockReader, fromBlockNum, toBlockNum uint64) (*TxNumToBlock, error) {
 	r := br.TxnumReader()
 	windowLen := int(toBlockNum - fromBlockNum)
 	m := &TxNumToBlock{

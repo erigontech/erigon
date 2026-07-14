@@ -35,9 +35,9 @@ import (
 	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/common/math"
-	"github.com/erigontech/erigon/db/dbservices"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/rawdb"
+	"github.com/erigontech/erigon/db/services"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/execmodule/execmoduletester"
 	"github.com/erigontech/erigon/execution/rlp"
@@ -52,7 +52,7 @@ import (
 // A BlockTest checks handling of entire blocks.
 type BlockTest struct {
 	json            btJSON
-	br              dbservices.FullBlockReader
+	br              services.FullBlockReader
 	ExperimentalBAL bool
 }
 

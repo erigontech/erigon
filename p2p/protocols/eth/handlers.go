@@ -28,15 +28,15 @@ import (
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/empty"
 	"github.com/erigontech/erigon/common/log/v3"
-	"github.com/erigontech/erigon/db/dbservices"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/rawdb"
+	"github.com/erigontech/erigon/db/services"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/rlp"
 	"github.com/erigontech/erigon/execution/types"
 )
 
-func AnswerGetBlockHeadersQuery(db kv.Tx, query *GetBlockHeadersPacket, blockReader dbservices.HeaderReader) ([]*types.Header, error) {
+func AnswerGetBlockHeadersQuery(db kv.Tx, query *GetBlockHeadersPacket, blockReader services.HeaderReader) ([]*types.Header, error) {
 	hashMode := query.Origin.Hash != (common.Hash{})
 	first := true
 	maxNonCanonical := uint64(100)
@@ -145,7 +145,7 @@ func AnswerGetBlockHeadersQuery(db kv.Tx, query *GetBlockHeadersPacket, blockRea
 	return headers, nil
 }
 
-func AnswerGetBlockBodiesQuery(db kv.Tx, query GetBlockBodiesPacket, blockReader dbservices.HeaderAndBodyReader) []rlp.RawValue { //nolint:unparam
+func AnswerGetBlockBodiesQuery(db kv.Tx, query GetBlockBodiesPacket, blockReader services.HeaderAndBodyReader) []rlp.RawValue { //nolint:unparam
 	// Gather blocks until the fetch or network limits is reached
 	var bytes int
 	bodies := make([]rlp.RawValue, 0, len(query))
@@ -191,7 +191,7 @@ var notAvailableSentinel = rlp.RawValue{0x80}
 // size, MaxBlockAccessListsServe caps the disk-lookup count. When a limit is
 // reached, the response is truncated (not padded with 0x80) — the peer sees a
 // shorter array than requested, same convention as the BlockBodies handler.
-func AnswerGetBlockAccessListsQuery(db kv.Tx, query GetBlockAccessListsPacket, blockReader dbservices.HeaderReader) []rlp.RawValue { //nolint:unparam
+func AnswerGetBlockAccessListsQuery(db kv.Tx, query GetBlockAccessListsPacket, blockReader services.HeaderReader) []rlp.RawValue { //nolint:unparam
 	var bytes int
 	bals := make([]rlp.RawValue, 0, len(query))
 
@@ -364,7 +364,7 @@ func encodeBlockReceiptsWithLimit(receipts types.Receipts, totalBytes int, opts 
 	return encoded, len(encoded), true, nil
 }
 
-func AnswerGetReceiptsQuery(ctx context.Context, cfg *chain.Config, receiptsGetter ReceiptsGetter, br dbservices.HeaderAndBodyReader, db kv.TemporalTx, query GetReceiptsPacket, cached *CachedReceipts, opts ReceiptQueryOpts) ([]rlp.RawValue, bool, error) {
+func AnswerGetReceiptsQuery(ctx context.Context, cfg *chain.Config, receiptsGetter ReceiptsGetter, br services.HeaderAndBodyReader, db kv.TemporalTx, query GetReceiptsPacket, cached *CachedReceipts, opts ReceiptQueryOpts) ([]rlp.RawValue, bool, error) {
 	var (
 		numBytes     int
 		receipts     []rlp.RawValue

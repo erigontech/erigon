@@ -23,11 +23,11 @@ import (
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/log/v3"
-	"github.com/erigontech/erigon/db/dbservices"
 	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/services"
 )
 
-func SnapBlocksRead(ctx context.Context, db kv.TemporalRoDB, blockReader dbservices.FullBlockReader, from, to uint64, failFast bool) error {
+func SnapBlocksRead(ctx context.Context, db kv.TemporalRoDB, blockReader services.FullBlockReader, from, to uint64, failFast bool) error {
 	defer log.Info("[integrity] Blocks: done")
 	logEvery := time.NewTicker(10 * time.Second)
 	defer logEvery.Stop()

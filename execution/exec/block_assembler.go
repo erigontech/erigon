@@ -22,13 +22,13 @@ import (
 	"github.com/erigontech/erigon/execution/vm"
 	"github.com/erigontech/erigon/execution/vm/evmtypes"
 
-	"github.com/erigontech/erigon/db/dbservices"
+	"github.com/erigontech/erigon/db/services"
 )
 
 type AssemblerCfg struct {
 	ChainConfig     *chain.Config
 	Engine          rules.Engine
-	BlockReader     dbservices.FullBlockReader
+	BlockReader     services.FullBlockReader
 	ExperimentalBAL bool
 }
 

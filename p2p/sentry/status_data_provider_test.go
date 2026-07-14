@@ -11,18 +11,18 @@ import (
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/log/v3"
-	"github.com/erigontech/erigon/db/dbservices"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/dbcfg"
 	"github.com/erigontech/erigon/db/kv/memdb"
 	"github.com/erigontech/erigon/db/rawdb"
+	"github.com/erigontech/erigon/db/services"
 	"github.com/erigontech/erigon/execution/types"
 )
 
 // --- test helpers ---
 
 type testBlockReader struct {
-	dbservices.FullBlockReader
+	services.FullBlockReader
 }
 
 func (r *testBlockReader) MinimumBlockAvailable(context.Context, kv.Tx) (uint64, error) {

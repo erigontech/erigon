@@ -14,13 +14,13 @@ import (
 	"github.com/erigontech/erigon/common/log/v3"
 )
 
-// RegisterGossipServices registers all the gossip dbservices with the given gossip manager.
+// RegisterGossipServices registers all the gossip services with the given gossip manager.
 // Put it in a separate file to avoid circular dependency because it depends on many big packages.
 func RegisterGossipServices(
 	gm *gossip.GossipManager,
 	forkChoiceReader forkchoice.ForkChoiceStorageReader,
 	ethClock eth_clock.EthereumClock,
-	// dbservices
+	// services
 	blockService services.BlockService,
 	attesterSlashingService services.AttesterSlashingService,
 	blobService services.BlobSidecarsService,
@@ -45,7 +45,7 @@ func RegisterGossipServices(
 		expired += e
 	}
 
-	// register dbservices
+	// register services
 	add(gossip.RegisterGossipService(gm, blockService, withRateLimiterByPeer(1, 2)))
 	add(gossip.RegisterGossipService(gm, syncContributionService, waitReady, withRateLimiterByPeer(8, 16)))
 	add(gossip.RegisterGossipService(gm, aggregateAndProofService, waitReady, withRateLimiterByPeer(8, 16)))
@@ -64,7 +64,7 @@ func RegisterGossipServices(
 	add(gossip.RegisterGossipService(gm, proposerPreferencesService, waitReady, withBeginVersion(clparams.GloasVersion), withRateLimiterByPeer(2, 4)))
 	add(gossip.RegisterGossipService(gm, executionPayloadBidService, waitReady, withBeginVersion(clparams.GloasVersion), withRateLimiterByPeer(8, 16)))
 
-	log.Info("[GossipManager] Registered dbservices", "subscribed", subscribed, "expired", expired)
+	log.Info("[GossipManager] Registered services", "subscribed", subscribed, "expired", expired)
 }
 
 func withHeadSlotReady(forkChoiceReader forkchoice.ForkChoiceStorageReader, ethClock eth_clock.EthereumClock) gossip.ConditionFunc {

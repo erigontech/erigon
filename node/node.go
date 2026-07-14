@@ -49,7 +49,7 @@ import (
 	"github.com/erigontech/erigon/node/nodecfg"
 )
 
-// Node is a container on which dbservices can be registered.
+// Node is a container on which services can be registered.
 type Node struct {
 	config        *nodecfg.Config
 	logger        log.Logger
@@ -59,7 +59,7 @@ type Node struct {
 	state         int           // Tracks state of node lifecycle
 
 	lock       sync.Mutex
-	lifecycles []Lifecycle // All registered backends, dbservices, and auxiliary dbservices that have a lifecycle
+	lifecycles []Lifecycle // All registered backends, services, and auxiliary services that have a lifecycle
 
 	databases []kv.Closer
 }
@@ -101,7 +101,7 @@ func New(ctx context.Context, conf *nodecfg.Config, logger log.Logger) (*Node, e
 	return node, nil
 }
 
-// Start starts all registered lifecycles, RPC dbservices and p2p networking.
+// Start starts all registered lifecycles, RPC services and p2p networking.
 // Node can only be started once.
 func (n *Node) Start() error {
 	n.startStopLock.Lock()
@@ -205,7 +205,7 @@ func containsLifecycle(lfs []Lifecycle, l Lifecycle) bool {
 	return slices.Contains(lfs, l)
 }
 
-// stopServices terminates running dbservices, RPC and p2p networking.
+// stopServices terminates running services, RPC and p2p networking.
 // It is the inverse of Start.
 func (n *Node) stopServices(running []Lifecycle) error {
 	//n.stopRPC()

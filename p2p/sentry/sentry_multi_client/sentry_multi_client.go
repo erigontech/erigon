@@ -39,9 +39,9 @@ import (
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/log/v3"
-	"github.com/erigontech/erigon/db/dbservices"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/dbutils"
+	"github.com/erigontech/erigon/db/services"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/protocol/rules"
 	"github.com/erigontech/erigon/execution/rlp"
@@ -160,7 +160,7 @@ type MultiClient struct {
 	db                 kv.TemporalRoDB
 	WitnessBuffer      *stagedsync.WitnessBuffer
 	Engine             rules.Engine
-	blockReader        dbservices.FullBlockReader
+	blockReader        services.FullBlockReader
 	statusDataProvider StatusGetter
 	logPeerInfo        bool
 
@@ -177,7 +177,7 @@ func NewMultiClient(
 	chainConfig *chain.Config,
 	engine rules.Engine,
 	sentries []sentryproto.SentryClient,
-	blockReader dbservices.FullBlockReader,
+	blockReader services.FullBlockReader,
 	statusDataProvider StatusGetter,
 	logPeerInfo bool,
 	enableWitProtocol bool,

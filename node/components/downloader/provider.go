@@ -22,7 +22,7 @@
 //   - Local: in-process torrent client (default)
 //   - Remote: connects to external downloader via gRPC
 //
-// Consumers access it through the dbservices.DownloaderClient interface, which abstracts
+// Consumers access it through the services.DownloaderClient interface, which abstracts
 // both modes behind Download/Seed/Delete operations.
 package downloader
 
@@ -33,10 +33,10 @@ import (
 
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/datadir"
-	"github.com/erigontech/erigon/db/dbservices"
 	dl "github.com/erigontech/erigon/db/downloader"
 	"github.com/erigontech/erigon/db/downloader/downloadercfg"
 	"github.com/erigontech/erigon/db/downloader/downloadergrpc"
+	"github.com/erigontech/erigon/db/services"
 	"github.com/erigontech/erigon/node/ethconfig"
 	"github.com/erigontech/erigon/node/gointerfaces/downloaderproto"
 )
@@ -47,8 +47,8 @@ import (
 // After Initialize, the Client field is ready for consumers to use.
 type Provider struct {
 	// Public fields — accessible by consumers via the component dependency graph.
-	Downloader *dl.Downloader              // nil when using external downloader
-	Client     dbservices.DownloaderClient // always set after Initialize (local or remote)
+	Downloader *dl.Downloader            // nil when using external downloader
+	Client     services.DownloaderClient // always set after Initialize (local or remote)
 
 	// Configuration
 	cfg         *downloadercfg.Cfg

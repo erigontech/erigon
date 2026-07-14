@@ -54,7 +54,7 @@ const MaxTxTTL = 60 * time.Second
 
 // KvServiceAPIVersion - use it to track changes in API
 // 1.1.0 - added pending transactions, add methods eth_getRawTransactionByHash, eth_retRawTransactionByBlockHashAndIndex, eth_retRawTransactionByBlockNumberAndIndex| Yes     |                                            |
-// 1.2.0 - Added separated dbservices for mining and txpool methods
+// 1.2.0 - Added separated services for mining and txpool methods
 // 2.0.0 - Rename all buckets
 // 3.0.0 - ??
 // 4.0.0 - Server send tx.ViewID() after open tx

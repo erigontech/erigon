@@ -173,7 +173,7 @@ func (s *payloadAttestationService) ProcessMessage(ctx context.Context, _ *uint6
 	// [REJECT] signature verification
 	if err := s.forkchoiceStore.OnPayloadAttestationMessage(msg, false); err != nil {
 		// Preserve IGNORE vs REJECT distinction from forkchoice
-		// forkchoice.ErrIgnore != dbservices.ErrIgnore, so we need to convert
+		// forkchoice.ErrIgnore != services.ErrIgnore, so we need to convert
 		if errors.Is(err, forkchoice.ErrIgnore) {
 			return fmt.Errorf("%w: %v", ErrIgnore, err)
 		}

@@ -46,8 +46,8 @@ import (
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/datadir"
-	"github.com/erigontech/erigon/db/dbservices"
 	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/services"
 	"github.com/erigontech/erigon/execution/chain"
 	chainspec "github.com/erigontech/erigon/execution/chain/spec"
 	execp2p "github.com/erigontech/erigon/execution/p2p"
@@ -110,7 +110,7 @@ type Config struct {
 	// BlockReader supplies current header/body access to
 	// StatusDataProvider when refreshing status messages on new-head
 	// notifications. Both modes.
-	BlockReader dbservices.FullBlockReader
+	BlockReader services.FullBlockReader
 
 	// --- Local-mode only ---
 

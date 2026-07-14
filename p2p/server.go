@@ -550,7 +550,7 @@ func (srv *Server) setupDiscovery(ctx context.Context) error {
 	srv.localnode.SetFallbackUDP(realaddr.Port)
 	srv.updateLocalNodeStaticAddrCache()
 
-	// Start discovery dbservices.
+	// Start discovery services.
 	if srv.Config.DiscoveryV4 {
 		cfg := discover.Config{
 			PrivateKey:  srv.PrivateKey,

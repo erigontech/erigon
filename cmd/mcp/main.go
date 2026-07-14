@@ -238,7 +238,7 @@ func runDatadirMode(ctx context.Context, logger log.Logger, dataDir, privAPI, lo
 	db, backend, txPool, mining, stateCache, blockReader, engine, ff, bridgeReader, heimdallReader, err :=
 		cli.RemoteServices(ctx, cfg, logger, rootCancel)
 	if err != nil {
-		return fmt.Errorf("failed to initialize datadir dbservices: %w", err)
+		return fmt.Errorf("failed to initialize datadir services: %w", err)
 	}
 	defer db.Close()
 	if engine != nil {

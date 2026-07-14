@@ -118,7 +118,7 @@ type ApiHandler struct {
 	slotWaitedForAttestationProduction *lru.Cache[uint64, struct{}]
 	aggregatePool                      aggregation.AggregationPool
 
-	// dbservices
+	// services
 	syncCommitteeMessagesService     services.SyncCommitteeMessagesService
 	syncContributionAndProofsService services.SyncContributionService
 	aggregateAndProofsService        services.AggregateAndProofService

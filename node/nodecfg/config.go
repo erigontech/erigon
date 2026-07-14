@@ -48,7 +48,7 @@ const (
 
 // Config represents a small collection of configuration values to fine tune the
 // P2P network layer of a protocol stack. These values can be further extended by
-// all registered dbservices.
+// all registered services.
 type Config struct {
 	// Name sets the instance name of the node. It must not contain the / character and is
 	// used in the devp2p node identifier. The instance name of Erigon is "erigon". If no
@@ -64,7 +64,7 @@ type Config struct {
 
 	// Dirs is the file system folder the node should use for any data storage
 	// requirements. The configured data directory will not be directly shared with
-	// registered dbservices, instead those can use utility methods to create/access
+	// registered services, instead those can use utility methods to create/access
 	// databases or flat files. This enables ephemeral nodes which can fully reside
 	// in memory.
 	Dirs datadir.Dirs

@@ -355,7 +355,7 @@ func newGzipHandler(next http.Handler) http.Handler {
 }
 
 // RegisterApisFromWhitelist checks the given modules' availability, generates a whitelist based on the allowed modules,
-// and then registers all of the APIs exposed by the dbservices.
+// and then registers all of the APIs exposed by the services.
 func RegisterApisFromWhitelist(apis []rpc.API, modules []string, srv *rpc.Server, exposeAll bool, logger log.Logger) error {
 	if bad, available := checkModuleAvailability(modules, apis); len(bad) > 0 {
 		logger.Error("Non-existing modules in HTTP API list, please remove it", "non-existing", bad, "existing", available)
@@ -365,7 +365,7 @@ func RegisterApisFromWhitelist(apis []rpc.API, modules []string, srv *rpc.Server
 	for _, module := range modules {
 		whitelist[module] = true
 	}
-	// Register all the APIs exposed by the dbservices
+	// Register all the APIs exposed by the services
 	for _, api := range apis {
 		if exposeAll || whitelist[api.Namespace] || (len(whitelist) == 0 && api.Public) {
 			if err := srv.RegisterName(api.Namespace, api.Service); err != nil {

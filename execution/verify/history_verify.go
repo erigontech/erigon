@@ -10,8 +10,8 @@ import (
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/consensuschain"
-	"github.com/erigontech/erigon/db/dbservices"
 	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/services"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/protocol"
 	"github.com/erigontech/erigon/execution/protocol/rules"
@@ -32,7 +32,7 @@ import (
 // Workers controls the number of parallel goroutines. Each worker opens its own
 // TemporalTx and processes blocks from a shared counter.
 func NewHistoryVerifier(
-	blockReader dbservices.FullBlockReader,
+	blockReader services.FullBlockReader,
 	chainConfig *chain.Config,
 	engine rules.Engine,
 	workers int,

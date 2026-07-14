@@ -4,8 +4,8 @@ import (
 	"context"
 
 	"github.com/erigontech/erigon/common"
-	"github.com/erigontech/erigon/db/dbservices"
 	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/services"
 	"github.com/erigontech/erigon/execution/p2p"
 	"github.com/erigontech/erigon/execution/types"
 )
@@ -14,7 +14,7 @@ var _ p2p.BbdHeaderReader = (*headerReader)(nil)
 
 type headerReader struct {
 	db          kv.RoDB
-	blockReader dbservices.HeaderReader
+	blockReader services.HeaderReader
 }
 
 func (hr headerReader) HeaderByHash(ctx context.Context, hash common.Hash) (h *types.Header, err error) {
