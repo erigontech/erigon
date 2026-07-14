@@ -137,28 +137,18 @@ Clients: to derive their own format of Latest State from "The History"
 
 Large values: can create
 
-- Prune old files: old `LatestValues` can't be pruned - means can't store them in `.ef`. No problem: can create new file
-  type `.lv` sharded as `.ef` - `account.8-16.lv`. But still "never-pruning and never-compaction" `.lv` files - is the
-  Cost. But it's cold-storage (probably even RPC will not touch it). Does it means users will have incentive to delete
-  it?
-- Latest State derived format ideas: whole or partial (instead of storing last large file - can fallback to history),
-  store it in db or files, read-amplification-driven or write-amp, etc...
+- Old `Latest State` can't be pruned in this schema. It means can't store vals in `.ef`. No problem: can create new file
+  type `.lv` sharded as `.ef` - `account.8-16.lv`
+- But still "never-pruning and never-compaction" `.lv` files - is the Cost. But it's cold-storage (probably even RPC
+  will not touch it).
+- Does "no `.lv` pruning" - means users will have incentive to delete it?
+- Does "no `.lv` pruning" - means attack-vector of bloating?
 
-## FAQ
+### Latest State derived format ideas
 
-**Why pre-values? A post-value log folds forward from genesis.**
-Networks delete *old* data, not new. Post-value logs are prefix-closed: dropping the beginning needs a checkpoint that
-must be re-materialized as the prune point moves. Pre-value + latest is suffix-closed: prune = `rm`. With `.lv`, each
-span carries post-values at its boundary anyway — pre-values inside the span, post-values sampled at boundaries: the
-good half of both.
-
-**Isn't storing latest twice wasteful?**
-It converts a global mandatory artifact (canonical `.kv` LSM, frozen compaction) into a per-span column plus a local
-free-form cache. Bytes comparable to today's pre-compaction reality; the flexibility and repairability are not.
-
-**Why would other clients adopt one client's files?**
-They adopt three flat, spec'd, verifiable columns of `(key, ts, value)` — a file format, not an engine. What each client
-builds from it is out of scope by design. That separation is the adoption strategy.
+- whole or partial (instead of storing last large file - can fallback to history)
+- store it in db or files
+- read-amplification-driven or write-amp
 
 ## Erigon's far plans (not related to State Spec)
 
