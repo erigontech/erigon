@@ -180,3 +180,39 @@ func TestEIP8246_CreateAfterPreservedSD_IncarnationAndBalanceAcrossModes(t *test
 		require.Equal(t, preserved, bal, "assembler re-creation must carry the preserved balance")
 	})
 }
+
+// Account-level reconstruction of a preserved account must agree with the
+// field-level reads: a later tx's Nonce/CodeHash map entries overlay the
+// reconstructed account exactly like a later balance write does, so a caller
+// materializing the account through getStateObject sees the same fields a
+// per-path read returns.
+func TestEIP8246_PreservedAccount_OverlaysLaterFieldWrites(t *testing.T) {
+	t.Parallel()
+	addr := accounts.InternAddress(common.HexToAddress("0x8246F"))
+	laterCodeHash := accounts.InternCodeHash(common.HexToHash("0x31537ad3f3619e1f93aac0ddfdb0d8a0013bd170b427d81dd5abbee4f3f5248e"))
+	reader := newAccountStateReader()
+	vm := NewVersionMap(nil)
+	sdVer := Version{TxIndex: 0}
+	vm.WriteSelfDestruct(addr, sdVer, true, true)
+	vm.WriteBalance(addr, sdVer, *uint256.NewInt(1), true)
+	vm.WriteIncarnation(addr, sdVer, 0, true)
+	laterVer := Version{TxIndex: 1}
+	vm.WriteNonce(addr, laterVer, 7, true)
+	vm.WriteCodeHash(addr, laterVer, laterCodeHash, true)
+	ibs := New(reader)
+	ibs.SetTxContext(0, 2)
+	ibs.SetVersion(0)
+	ibs.SetVersionMap(vm)
+	ibs.eip8246 = true
+	fieldNonce, err := ibs.GetNonce(addr)
+	require.NoError(t, err)
+	fieldCodeHash, err := ibs.GetCodeHash(addr)
+	require.NoError(t, err)
+	obj, err := ibs.getStateObject(addr, false)
+	require.NoError(t, err)
+	require.NotNil(t, obj, "the preserved account must materialize")
+	require.Equal(t, fieldNonce, obj.data.Nonce, "account-level nonce must agree with the field-level read")
+	require.Equal(t, fieldCodeHash, obj.data.CodeHash, "account-level code hash must agree with the field-level read")
+	require.Equal(t, uint64(7), obj.data.Nonce)
+	require.Equal(t, laterCodeHash, obj.data.CodeHash)
+}

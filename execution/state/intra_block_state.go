@@ -959,8 +959,10 @@ func (sdb *IntraBlockState) TouchAccount(addr accounts.Address) error {
 
 // eip8246PreservedAccount reconstructs the live account a prior tx left behind
 // when EIP-8246 removed the SELFDESTRUCT burn: the balance survives, code and
-// nonce are cleared. Returns nil when the balance was moved out, leaving an
-// empty account that EIP-161 removes.
+// nonce are cleared at destruction, and any later per-field map writes overlay
+// the reconstruction so account-level reads agree with the field-level ones.
+// Returns nil when the balance was moved out, leaving an empty account that
+// EIP-161 removes.
 func (sdb *IntraBlockState) eip8246PreservedAccount(addr accounts.Address) (*accounts.Account, error) {
 	bal, _, _, err := readBalance(sdb, addr)
 	if err != nil {
@@ -971,6 +973,18 @@ func (sdb *IntraBlockState) eip8246PreservedAccount(addr accounts.Address) (*acc
 	}
 	acc := accounts.NewAccount()
 	acc.Balance = bal
+	nonce, _, _, err := readNonce(sdb, addr)
+	if err != nil {
+		return nil, err
+	}
+	acc.Nonce = nonce
+	codeHash, _, _, err := readCodeHash(sdb, addr)
+	if err != nil {
+		return nil, err
+	}
+	if codeHash != accounts.NilCodeHash && !codeHash.IsZero() {
+		acc.CodeHash = codeHash
+	}
 	return &acc, nil
 }
 
@@ -997,8 +1011,8 @@ func (sdb *IntraBlockState) getVersionedAccount(addr accounts.Address, readStora
 			// AddressPath) skips reconstruction. Later Balance/Nonce/CodeHash
 			// writes are updates to the still-preserved account, not a revival:
 			// reconstruct it and let eip8246PreservedAccount overlay the latest
-			// balance, so e.g. an account funded after its SELFDESTRUCT still
-			// reads as existing — matching serial.
+			// balance, nonce and code hash, so e.g. an account funded after its
+			// SELFDESTRUCT still reads as existing — matching serial.
 			revived := false
 			if hi, ok := sdb.versionMap.LatestTxIndex(addr, AddressPath, accounts.NilKey, sdb.txIndex-1); ok && hi > destructTxIndex {
 				revived = true
