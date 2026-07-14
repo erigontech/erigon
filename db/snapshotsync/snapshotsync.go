@@ -26,7 +26,6 @@ import (
 	"time"
 
 	"github.com/erigontech/erigon/common/log/v3"
-	"github.com/erigontech/erigon/db/downloader"
 	"github.com/erigontech/erigon/db/downloader/downloadergrpc"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/prune"
@@ -72,7 +71,7 @@ func BuildDownloadRequest(
 func RequestSnapshotsDownload(
 	ctx context.Context,
 	downloadRequest []services.DownloadRequest,
-	downloaderClient downloader.Client,
+	downloaderClient services.DownloaderClient,
 	logTarget string,
 ) error {
 	// start seed large .seg of large size
@@ -193,7 +192,6 @@ type blockReader interface {
 	IterateFrozenBodies(tx kv.Getter, _ func(blockNum uint64, baseTxNum uint64, txCount uint64) error) error
 	FreezingCfg() ethconfig.BlocksFreezing
 	AllTypes() []snaptype.Type
-	FrozenFiles() (list []string)
 	TxnumReader() rawdbv3.TxNumsReader
 }
 
@@ -409,7 +407,7 @@ func SyncSnapshots(
 	tx kv.RwTx,
 	blockReader blockReader,
 	cc *chain.Config,
-	snapshotDownloader downloader.Client,
+	snapshotDownloader services.DownloaderClient,
 	syncCfg ethconfig.Sync,
 	stepSize uint64,
 ) error {
@@ -435,22 +433,9 @@ func SyncSnapshots(
 			log.Debug(fmt.Sprintf("[%s] filtering", logPrefix), "toBlock", toBlock, "toStep", toStep, "toTxNum", toTxNum)
 			// we downloaded extra seg files during the header chain download (the ones containing the toBlock)
 			// so that we can correctly calculate toTxNum above (now we should delete these)
-			var toDeleteSeg, toDeleteDownloader []string
-			for _, f := range blockReader.FrozenFiles() {
-				fileInfo, stateFile, ok := snaptype.ParseFileName("", f)
-				if !ok || stateFile || strings.HasPrefix(fileInfo.Name(), "salt") || fileInfo.To < toBlock {
-					continue
-				}
-				toDeleteSeg = append(toDeleteSeg, f)
-				toDeleteDownloader = append(toDeleteDownloader, f, strings.Replace(f, ".seg", ".idx", 1))
-			}
-			log.Debug(fmt.Sprintf("[%s] deleting", logPrefix), "toDeleteSeg", toDeleteSeg, "toDeleteDownloader", toDeleteDownloader)
-			err = snapshotDownloader.Delete(ctx, toDeleteDownloader)
-			if err != nil {
-				return err
-			}
-			err = blockReader.Snapshots().Delete(toDeleteSeg...)
-			if err != nil {
+			if err = blockReader.Snapshots().RetireFilesAbove(toBlock, func(files []string) error {
+				return snapshotDownloader.Delete(ctx, files)
+			}); err != nil {
 				return err
 			}
 			// re-open headers and bodies with alignMin=false after deletes,

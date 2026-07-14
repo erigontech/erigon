@@ -185,7 +185,7 @@ type Ethereum struct {
 	syncUnwindOrder    stagedsync.UnwindOrder
 	syncPruneOrder     stagedsync.PruneOrder
 
-	downloaderClient downloader.Client
+	downloaderClient services.DownloaderClient
 
 	notifications *shards.Notifications
 
@@ -772,6 +772,7 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 		backend.polygonBridge,
 		httpRpcCfg.BlockRangeLimit,
 		httpRpcCfg.GetLogsMaxResults,
+		httpRpcCfg.LogQueryLimit,
 	)
 	ethApiConfig := &jsonrpc.EthApiConfig{
 		GasCap:                      httpRpcCfg.Gascap,
@@ -1349,11 +1350,10 @@ func SetUpBlockReader(ctx context.Context, db kv.RwDB, dirs datadir.Dirs, snConf
 		logger.Debug("[rpc] download of segments not complete yet. please wait StageSnapshots to finish")
 	}
 
-	temporalDb, err := temporal.New(db, agg)
+	temporalDb, err := temporal.New(db, agg, allSnapshots)
 	if err != nil {
 		return nil, nil, nil, nil, nil, nil, nil, err
 	}
-	temporalDb.SetBlockSnapshots(allSnapshots)
 
 	blockWriter := blockio.NewBlockWriter()
 

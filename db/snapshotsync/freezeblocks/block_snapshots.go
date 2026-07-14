@@ -41,7 +41,6 @@ import (
 	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/datadir"
-	"github.com/erigontech/erigon/db/downloader"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/db/rawdb/blockio"
@@ -260,7 +259,7 @@ func (br *BlockRetire) buildFiles(
 	minBlockNum uint64,
 	maxBlockNum uint64,
 	lvl log.Lvl,
-	seeder downloader.SeederClient,
+	seeder services.SeederClient,
 ) (bool, error) {
 	select {
 	case <-ctx.Done():
@@ -302,7 +301,7 @@ func (br *BlockRetire) buildFiles(
 func (br *BlockRetire) MergeBlocks(
 	ctx context.Context,
 	lvl log.Lvl,
-	seeder downloader.SeederClient,
+	seeder services.SeederClient,
 ) (merged bool, err error) {
 	notifier, logger, _, tmpDir, db, workers := br.notifier, br.logger, br.blockReader, br.tmpDir, br.db, br.workers.Load()
 	snapshots := br.snapshots()
@@ -385,7 +384,7 @@ func (br *BlockRetire) BuildFilesInBackground(
 	minBlockNum,
 	maxBlockNum uint64,
 	lvl log.Lvl,
-	seeder downloader.SeederClient,
+	seeder services.SeederClient,
 	onFinishRetire func() error,
 	onDone func(),
 ) bool {
@@ -460,7 +459,7 @@ func (br *BlockRetire) BuildFiles(
 	requestedMinBlockNum uint64,
 	requestedMaxBlockNum uint64,
 	lvl log.Lvl,
-	seeder downloader.SeederClient,
+	seeder services.SeederClient,
 	onFinish func() error,
 ) error {
 	if requestedMaxBlockNum > br.maxScheduledBlock.Load() {
@@ -537,6 +536,13 @@ func (br *BlockRetire) BuildMissedIndicesIfNeed(ctx context.Context, logPrefix s
 
 	return nil
 }
+
+// RetireTransactionFiles expires transaction segments ending below blockTo — the
+// minimal/full-node step that drops old bodies once state no longer needs them.
+func (br *BlockRetire) RetireTransactionFiles(blockTo uint64, onDelete func(l []string) error) (bool, error) {
+	return br.snapshots().RetireFilesBelow(snaptype2.Transactions, blockTo, onDelete)
+}
+
 func (br *BlockRetire) RemoveOverlaps(onDelete func(l []string) error) error {
 	if err := br.snapshots().RemoveOverlaps(onDelete); err != nil {
 		return err
