@@ -106,7 +106,7 @@ type GenericCache[T any] struct {
 	evictions    atomic.Uint64
 	removals     atomic.Uint64 // intentional removals, netted out of evictions at print time
 	dropped      atomic.Uint64
-	staleEvicted atomic.Uint64 // entries dropped lazily on read after an unwind
+	staleEvicted atomic.Uint64 // stale entries detected on read after an unwind; dropped unless a racing put revived them
 
 	sizeFunc func(T) int
 }
