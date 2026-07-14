@@ -185,6 +185,7 @@ func RootCommand() (*cobra.Command, *httpcfg.HttpCfg) {
 	rootCmd.PersistentFlags().DurationVar(&cfg.RpcFiltersConfig.RpcSubscriptionFiltersTimeout, "rpc.subscription.filters.timeout", rpchelper.DefaultFiltersConfig.RpcSubscriptionFiltersTimeout, "Timeout before idle filters are evicted. Defaults to 5m; set to 0 to disable eviction.")
 	rootCmd.PersistentFlags().IntVar(&cfg.BlockRangeLimit, utils.RpcBlockRangeLimit.Name, utils.RpcBlockRangeLimit.Value, utils.RpcBlockRangeLimit.Usage)
 	rootCmd.PersistentFlags().IntVar(&cfg.GetLogsMaxResults, utils.RpcGetLogsMaxResults.Name, utils.RpcGetLogsMaxResults.Value, utils.RpcGetLogsMaxResults.Usage)
+	rootCmd.PersistentFlags().IntVar(&cfg.LogQueryLimit, utils.RpcLogQueryLimit.Name, utils.RpcLogQueryLimit.Value, utils.RpcLogQueryLimit.Usage)
 	rootCmd.PersistentFlags().IntVar(&cfg.BatchLimit, utils.RpcBatchLimit.Name, utils.RpcBatchLimit.Value, utils.RpcBatchLimit.Usage)
 	rootCmd.PersistentFlags().IntVar(&cfg.ReturnDataLimit, utils.RpcReturnDataLimit.Name, utils.RpcReturnDataLimit.Value, utils.RpcReturnDataLimit.Usage)
 	rootCmd.PersistentFlags().BoolVar(&cfg.AllowUnprotectedTxs, utils.AllowUnprotectedTxs.Name, utils.AllowUnprotectedTxs.Value, utils.AllowUnprotectedTxs.Usage)
@@ -740,6 +741,7 @@ func startRegularRpcServer(ctx context.Context, cfg *httpcfg.HttpCfg, rpcAPI []r
 		"ws", cfg.WebsocketEnabled,
 		"rpc.blockrange.limit", cfg.BlockRangeLimit,
 		"rpc.logs.maxresults", cfg.GetLogsMaxResults,
+		"rpc.logs.querylimit", cfg.LogQueryLimit,
 	}
 
 	if cfg.SocketServerEnabled {

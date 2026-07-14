@@ -95,7 +95,7 @@ func BenchmarkSuggestTipCap(b *testing.B) {
 	defer m.Close()
 
 	baseApi := jsonrpc.NewBaseApi(nil, kvcache.NewSimple(), m.BlockReader, false,
-		rpccfg.DefaultEvmCallTimeout, m.Engine, m.Dirs, nil, 0, 0)
+		rpccfg.DefaultEvmCallTimeout, m.Engine, m.Dirs, nil, 0, 0, 0)
 
 	cases := []struct {
 		name        string
@@ -159,7 +159,7 @@ func BenchmarkFeeHistory(b *testing.B) {
 	defer m.Close()
 
 	baseApi := jsonrpc.NewBaseApi(nil, kvcache.NewSimple(), m.BlockReader, false,
-		rpccfg.DefaultEvmCallTimeout, m.Engine, m.Dirs, nil, 0, 0)
+		rpccfg.DefaultEvmCallTimeout, m.Engine, m.Dirs, nil, 0, 0, 0)
 
 	gasCache := jsonrpc.NewGasPriceCache()
 

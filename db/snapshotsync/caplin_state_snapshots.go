@@ -265,6 +265,15 @@ func (s *CaplinStateSnapshots) BlocksAvailable() uint64 {
 	return min(s.segmentsMax.Load(), s.idxMax.Load())
 }
 
+func (s *CaplinStateSnapshots) TypeNames() []string {
+	names := make([]string, 0, len(s.snapshotTypes.KeyValueGetters))
+	for name := range s.snapshotTypes.KeyValueGetters {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	return names
+}
+
 func (s *CaplinStateSnapshots) coveredRangesForType(name string) []Range {
 	s.visibleLock.RLock()
 	defer s.visibleLock.RUnlock()
@@ -282,6 +291,23 @@ func (s *CaplinStateSnapshots) coveredRangesForType(name string) []Range {
 		ranges = append(ranges, seg.Range)
 	}
 	return ranges
+}
+
+// ContiguousCoverageEnd returns the end of the unbroken visible-segment run that
+// starts at slot 0 for the given type, or 0 when coverage is not rooted at genesis.
+func (s *CaplinStateSnapshots) ContiguousCoverageEnd(typeName string) uint64 {
+	ranges := s.coveredRangesForType(typeName)
+	sort.Slice(ranges, func(i, j int) bool { return ranges[i].from < ranges[j].from })
+	var end uint64
+	for _, r := range ranges {
+		if r.from > end {
+			break
+		}
+		if r.to > end {
+			end = r.to
+		}
+	}
+	return end
 }
 
 func (s *CaplinStateSnapshots) Close() {

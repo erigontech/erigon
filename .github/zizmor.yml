@@ -5,12 +5,6 @@ rules:
   unpinned-uses:
     disable: true
 
-  # Pre-existing template-injection findings need a dedicated cleanup pass;
-  # tracked in issue #21132. Files not listed here still get full coverage.
-  template-injection:
-    ignore:
-      - release.yml
-
   # Cache-poisoning (artipacked) findings in these workflows are intentional;
   # tracked in issue #21132.
   cache-poisoning:

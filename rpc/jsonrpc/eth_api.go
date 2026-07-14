@@ -160,13 +160,14 @@ type BaseAPI struct {
 	evmCallTimeout      time.Duration
 	blockRangeLimit     int
 	getLogsMaxResults   int
+	logQueryLimit       int
 	dirs                datadir.Dirs
 	receiptsGenerator   *receipts.Generator
 	borReceiptGenerator *receipts.BorGenerator
 	balRegenerator      *bal.Regenerator
 }
 
-func NewBaseApi(f *rpchelper.Filters, stateCache kvcache.Cache, blockReader services.FullBlockReader, singleNodeMode bool, evmCallTimeout time.Duration, engine rules.Engine, dirs datadir.Dirs, bridgeReader bridgeReader, rangeLimit int, getLogsMaxResults int) *BaseAPI {
+func NewBaseApi(f *rpchelper.Filters, stateCache kvcache.Cache, blockReader services.FullBlockReader, singleNodeMode bool, evmCallTimeout time.Duration, engine rules.Engine, dirs datadir.Dirs, bridgeReader bridgeReader, rangeLimit int, getLogsMaxResults int, logQueryLimit int) *BaseAPI {
 	var (
 		blocksLRUSize = 128 // ~32Mb
 	)
@@ -195,6 +196,7 @@ func NewBaseApi(f *rpchelper.Filters, stateCache kvcache.Cache, blockReader serv
 		bridgeReader:        bridgeReader,
 		blockRangeLimit:     rangeLimit,
 		getLogsMaxResults:   getLogsMaxResults,
+		logQueryLimit:       logQueryLimit,
 	}
 }
 
