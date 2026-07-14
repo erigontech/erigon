@@ -1,8 +1,7 @@
 # IBS versionMap-unification — follow-up tasks
 
 Tracks the work deferred after the cache-free parallel-execution change
-(`noMaterialize`) landed. File these as issues when the PR is delivered and link
-them from the PR description.
+(`noMaterialize`) landed. Tracking issue: erigontech/erigon#22458.
 
 Context: [20260709-versionedio-single-source-bal-occ.md](20260709-versionedio-single-source-bal-occ.md).
 
