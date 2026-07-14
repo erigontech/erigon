@@ -18,6 +18,7 @@ package cache
 
 import (
 	"bytes"
+	"encoding/binary"
 	"sync"
 	"testing"
 
@@ -868,8 +869,11 @@ func TestDomainCache_PutIfAbsentAtomicWithPut(t *testing.T) {
 	c := NewDomainCacheMode(1*datasize.MB, ModeEvictLRU)
 	fresh := []byte("fresh")
 	stale := []byte("stale")
+	addr := make([]byte, 20)
 	for round := range 20000 {
-		addr := makeAddr(round)
+		// Full-width round: the race only has teeth on a never-seen key, and
+		// makeAddr would truncate it to a byte.
+		binary.BigEndian.PutUint64(addr[1:], uint64(round))
 		var wg sync.WaitGroup
 		wg.Add(2)
 		go func() { defer wg.Done(); c.Put(addr, fresh, 20) }()
