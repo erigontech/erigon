@@ -202,12 +202,12 @@ func (h *handler) handleBatch(msgs []*jsonrpcMessage) {
 		// see withoutGzipStreamingHook for why the hook must not reach them.
 		cp.ctx = withoutGzipStreamingHook(cp.ctx)
 		// All goroutines will place results right to this array. Because requests order must match reply orders.
-		answersWithNils := make([][]byte, len(msgs))
+		answersWithNils := make([][]byte, len(calls))
 		// Bounded parallelism pattern explanation https://blog.golang.org/pipelines#TOC_9.
 		boundedConcurrency := make(chan struct{}, h.maxBatchConcurrency)
 		defer close(boundedConcurrency)
 		wg := sync.WaitGroup{}
-		wg.Add(len(msgs))
+		wg.Add(len(calls))
 		for i := range calls {
 			boundedConcurrency <- struct{}{}
 			go func(i int) {
