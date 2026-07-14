@@ -866,11 +866,10 @@ func TestCodeCache_PutWithCodeHashIfAbsent(t *testing.T) {
 // clobber it — the prefetch-vs-flush staleness this cache guards against.
 func TestDomainCache_PutIfAbsentAtomicWithPut(t *testing.T) {
 	c := NewDomainCacheMode(1*datasize.MB, ModeEvictLRU)
-	addr := makeAddr(1)
 	fresh := []byte("fresh")
 	stale := []byte("stale")
 	for round := 0; round < 20000; round++ {
-		c.Delete(addr)
+		addr := makeAddr(round)
 		var wg sync.WaitGroup
 		wg.Add(2)
 		go func() { defer wg.Done(); c.Put(addr, fresh, 20) }()
@@ -879,5 +878,71 @@ func TestDomainCache_PutIfAbsentAtomicWithPut(t *testing.T) {
 		v, ok := c.Get(addr)
 		require.True(t, ok)
 		require.Equal(t, fresh, v, "round %d: PutIfAbsent raced past a concurrent Put", round)
+	}
+}
+
+// A Delete racing an update-in-place put must not double-subtract the
+// displaced entry's size: freelru's OnEvict subtracts it for the Remove, and
+// put's update delta subtracts it again unless the two writers share the
+// key's stripe.
+func TestDomainCache_DeleteAtomicWithPut_NoSizeDrift(t *testing.T) {
+	c := NewDomainCacheMode(1*datasize.MB, ModeEvictLRU)
+	addr := makeAddr(1)
+	v1 := []byte("value-one")
+	v2 := []byte("value-two")
+	for round := 0; round < 20000; round++ {
+		c.Put(addr, v1, 10)
+		var wg sync.WaitGroup
+		wg.Add(2)
+		go func() { defer wg.Done(); c.Put(addr, v2, 20) }()
+		go func() { defer wg.Done(); c.Delete(addr) }()
+		wg.Wait()
+		c.Delete(addr)
+		require.Zero(t, c.SizeBytes(), "round %d: size accounting drifted", round)
+	}
+}
+
+// The lazy stale-drop inside GetWithTxNum removes entries; an unstriped
+// Remove racing put's read-modify-write double-subtracts the displaced
+// entry's size. Exactly one live entry remains after every round, so drift
+// shows as a size mismatch.
+func TestDomainCache_StaleDropAtomicWithPut_NoSizeDrift(t *testing.T) {
+	c := NewDomainCacheMode(1*datasize.MB, ModeEvictLRU)
+	addr := makeAddr(1)
+	v1 := []byte("value-one")
+	v2 := []byte("value-two")
+	wantSize := int64(len(addr) + len(v1) + 24)
+	for round := 0; round < 20000; round++ {
+		c.Put(addr, v1, 10)
+		c.Unwind(5)
+		var wg sync.WaitGroup
+		wg.Add(2)
+		go func() { defer wg.Done(); c.Put(addr, v2, 20) }()
+		go func() { defer wg.Done(); c.Get(addr) }()
+		wg.Wait()
+		require.Equal(t, wantSize, c.SizeBytes(), "round %d: size accounting drifted", round)
+	}
+}
+
+// A Clear racing a put must not leave phantom bytes: unless Clear excludes
+// writers via the put stripes, a put that loaded the retiring generation
+// lands its entry where no reader sees it and adds the entry's size after
+// Clear zeroed the counter — inflating SizeBytes for an invisible entry.
+func TestDomainCache_ClearAtomicWithPut_NoSizeDrift(t *testing.T) {
+	c := NewDomainCacheMode(1*datasize.MB, ModeEvictLRU)
+	addr := makeAddr(1)
+	v1 := []byte("value-one")
+	entrySize := int64(len(addr) + len(v1) + 24)
+	for round := 0; round < 20000; round++ {
+		var wg sync.WaitGroup
+		wg.Add(2)
+		go func() { defer wg.Done(); c.Put(addr, v1, 10) }()
+		go func() { defer wg.Done(); c.Clear() }()
+		wg.Wait()
+		wantSize := int64(0)
+		if _, ok := c.Get(addr); ok {
+			wantSize = entrySize
+		}
+		require.Equal(t, wantSize, c.SizeBytes(), "round %d: size accounting drifted", round)
 	}
 }
