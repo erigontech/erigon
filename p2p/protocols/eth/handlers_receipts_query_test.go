@@ -24,9 +24,9 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv"
-	"github.com/erigontech/erigon/db/kv/dbcfg"
-	"github.com/erigontech/erigon/db/kv/temporal"
+	"github.com/erigontech/erigon/db/kv/temporal/temporaltest"
 	"github.com/erigontech/erigon/db/services"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/rlp"
@@ -93,7 +93,7 @@ func TestAnswerGetReceiptsQuery_EndsResponseWhenBlockUnreadable(t *testing.T) {
 
 func answerQuery(t *testing.T, f *receiptsQueryFixture) ([]rlp.RawValue, bool, error) {
 	t.Helper()
-	db := temporal.NewTestDB(t, dbcfg.ChainDB)
+	db := temporaltest.NewTestDB(t, datadir.New(t.TempDir()))
 	tx, err := db.BeginTemporalRo(context.Background())
 	require.NoError(t, err)
 	defer tx.Rollback()

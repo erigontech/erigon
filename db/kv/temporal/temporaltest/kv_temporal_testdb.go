@@ -34,6 +34,18 @@ import (
 )
 
 // nolint:thelper
+func NewTestTx(tb testing.TB) (kv.TemporalRwDB, kv.TemporalRwTx) {
+	tb.Helper()
+	db := NewTestDB(tb, datadir.New(tb.TempDir()))
+	tx, err := db.BeginTemporalRw(context.Background()) //nolint:gocritic
+	if err != nil {
+		tb.Fatal(err)
+	}
+	tb.Cleanup(tx.Rollback)
+	return db, tx
+}
+
+// nolint:thelper
 func NewTestDB(tb testing.TB, dirs datadir.Dirs) kv.TemporalRwDB {
 	return newTestDB(tb, dirs, config3.DefaultStepSize)
 }

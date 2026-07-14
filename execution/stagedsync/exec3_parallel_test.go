@@ -23,6 +23,7 @@ import (
 	"github.com/erigontech/erigon/db/kv/dbcfg"
 	"github.com/erigontech/erigon/db/kv/mdbx"
 	"github.com/erigontech/erigon/db/kv/temporal"
+	"github.com/erigontech/erigon/db/kv/temporal/temporaltest"
 	"github.com/erigontech/erigon/db/rawdb/rawtemporaldb"
 	dbstate "github.com/erigontech/erigon/db/state"
 	"github.com/erigontech/erigon/db/state/execctx"
@@ -1399,17 +1400,9 @@ func newResumeTestDB(t *testing.T) kv.TemporalRwDB {
 	if runtime.GOOS == "windows" {
 		t.Skip("mdbx InMem test databases are not supported on windows")
 	}
-	logger := log.New()
 	dirs := datadir.New(t.TempDir())
-	rawDb := mdbx.New(dbcfg.ChainDB, logger).InMem(t, dirs.Chaindata).MustOpen()
-	t.Cleanup(rawDb.Close)
-
-	agg, err := dbstate.NewTest(dirs).StepSize(16).Logger(logger).Open(context.Background(), rawDb)
-	require.NoError(t, err)
-	t.Cleanup(agg.Close)
-
-	db, err := temporal.New(rawDb, agg, nil)
-	require.NoError(t, err)
+	db := temporaltest.NewTestDBWithStepSize(t, dirs, 16)
+	t.Cleanup(db.Close)
 	return db
 }
 
