@@ -17,6 +17,7 @@
 package commands
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"sort"
@@ -44,8 +45,15 @@ func init() {
 	withDataDir2(distributionCmd)
 	withHistoryDomain(distributionCmd)
 
+	duplicatesCmd.Flags().Uint64Var(&fromStep, "from", 0, "step from which to scan history")
+	duplicatesCmd.Flags().Uint64Var(&toStep, "to", 1e18, "step up to which to scan history")
+	duplicatesCmd.Flags().StringVar(&historyDomain, "domain", "", "restrict scan to one domain (accounts, storage, code, commitment, receipt, rcache); default: all present")
+	duplicatesCmd.Flags().IntVar(&dupSamples, "samples", 3, "number of example keys with duplicates to print per domain")
+	withDataDir2(duplicatesCmd)
+
 	historyCmd.AddCommand(printCmd)
 	historyCmd.AddCommand(distributionCmd)
+	historyCmd.AddCommand(duplicatesCmd)
 
 	rootCmd.AddCommand(historyCmd)
 }
@@ -64,6 +72,7 @@ var (
 	toStep        uint64
 	historyKey    string
 	historyDomain string
+	dupSamples    int
 )
 
 var historyCmd = &cobra.Command{
@@ -220,6 +229,134 @@ var distributionCmd = &cobra.Command{
 			}
 
 			fmt.Printf("%d percentile distribution: %d (example key: 0x%x)\n", percentiles[i].P, percentiles[i].Value, percentiles[i].ExampleKey)
+		}
+	},
+}
+
+// histDupScan counts, per domain, how many history entries repeat the previous
+// value for the same key. HistoryDump yields entries grouped by key and ordered
+// by txNum, so a consecutive equal value is a redundant row (an as-of read
+// collapses it away). Pure and stateless w.r.t. storage — fed one entry at a time.
+type histDupScan struct {
+	sampleLimit int
+
+	prevKey  []byte
+	prevVal  []byte
+	havePrev bool
+	curDup   bool
+
+	Entries      uint64
+	DistinctKeys uint64
+	KeysWithDup  uint64
+	DupPairs     uint64
+	SampleKeys   [][]byte
+}
+
+func (s *histDupScan) observe(key, val []byte) {
+	s.Entries++
+	if s.havePrev && bytes.Equal(key, s.prevKey) {
+		if bytes.Equal(val, s.prevVal) {
+			s.DupPairs++
+			if !s.curDup {
+				s.curDup = true
+				if len(s.SampleKeys) < s.sampleLimit {
+					s.SampleKeys = append(s.SampleKeys, common.Copy(key))
+				}
+			}
+		}
+	} else {
+		s.closeKey()
+		s.DistinctKeys++
+		s.curDup = false
+	}
+	s.prevKey = append(s.prevKey[:0], key...)
+	s.prevVal = append(s.prevVal[:0], val...)
+	s.havePrev = true
+}
+
+func (s *histDupScan) closeKey() {
+	if s.curDup {
+		s.KeysWithDup++
+	}
+}
+
+func (s *histDupScan) finish() { s.closeKey() }
+
+func historyDomainNames() []string {
+	names := make([]string, 0, kv.DomainLen)
+	for d := kv.Domain(0); d < kv.DomainLen; d++ {
+		names = append(names, d.String())
+	}
+	return names
+}
+
+func scanDomainDuplicates(ctx context.Context, dirs datadir.Dirs, name string, logger log.Logger) (*histDupScan, error) {
+	history, settings, err := openHistory(ctx, dirs, name, toStep, logger)
+	if err != nil {
+		return nil, err
+	}
+	defer history.Close()
+
+	roTx := history.BeginFilesRoForDebug()
+	defer roTx.Close()
+
+	scan := &histDupScan{sampleLimit: dupSamples}
+	if err := roTx.HistoryDump(
+		int(fromStep)*int(settings.StepSize),
+		int(toStep)*int(settings.StepSize),
+		nil,
+		func(key []byte, _ uint64, val []byte) { scan.observe(key, val) },
+	); err != nil {
+		return nil, err
+	}
+	scan.finish()
+	return scan, nil
+}
+
+var duplicatesCmd = &cobra.Command{
+	Use:   "duplicates",
+	Short: "Report keys whose history has consecutive duplicate (redundant) values, per domain",
+	Run: func(cmd *cobra.Command, args []string) {
+		logger := debug.SetupCobra(cmd, "integration")
+
+		dirs, l, err := datadir.New(datadirCli).MustFlock()
+		if err != nil {
+			logger.Error("Opening Datadir", "error", err)
+			return
+		}
+		defer l.Unlock()
+
+		names := historyDomainNames()
+		if historyDomain != "" {
+			names = []string{historyDomain}
+		}
+
+		ctx := cmd.Context()
+		var withDup []string
+		for _, name := range names {
+			scan, err := scanDomainDuplicates(ctx, dirs, name, logger)
+			if err != nil {
+				logger.Warn("skipping domain", "domain", name, "err", err)
+				continue
+			}
+			if scan.Entries == 0 {
+				fmt.Printf("domain=%-11s no history entries (disabled or empty)\n", name)
+				continue
+			}
+			pct := float64(scan.DupPairs) * 100 / float64(scan.Entries)
+			fmt.Printf("domain=%-11s entries=%-12d distinctKeys=%-12d keysWithDup=%-10d dupPairs=%-10d (%.2f%% of entries)\n",
+				name, scan.Entries, scan.DistinctKeys, scan.KeysWithDup, scan.DupPairs, pct)
+			if scan.DupPairs > 0 {
+				withDup = append(withDup, name)
+				for _, k := range scan.SampleKeys {
+					fmt.Printf("    example key with duplicates: %x\n", k)
+				}
+			}
+		}
+		if len(withDup) == 0 {
+			fmt.Println("no consecutive duplicate history values found")
+		} else {
+			fmt.Printf("domains with duplicate history values: %v\n", withDup)
 		}
 	},
 }
