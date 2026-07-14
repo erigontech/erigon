@@ -207,7 +207,7 @@ func TestAggregatorV3_ReplaceCommittedKeys(t *testing.T) {
 	require.NoError(t, err)
 	defer domains.Close()
 
-	var latestCommitTxNum uint64
+	var latestCommitTxNum atomic.Uint64
 	commit := func(txn uint64) error {
 		err = domains.Flush(ctx, tx)
 		require.NoError(t, err)
@@ -222,7 +222,7 @@ func TestAggregatorV3_ReplaceCommittedKeys(t *testing.T) {
 
 		domains, err = execctx.NewSharedDomains(t.Context(), tx, log.New())
 		require.NoError(t, err)
-		atomic.StoreUint64(&latestCommitTxNum, txn)
+		latestCommitTxNum.Store(txn)
 		return nil
 	}
 

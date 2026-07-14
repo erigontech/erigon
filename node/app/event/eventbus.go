@@ -18,6 +18,7 @@ package event
 
 import (
 	"fmt"
+	"maps"
 	"reflect"
 	"sync"
 	"sync/atomic"
@@ -85,9 +86,7 @@ func (hmap *handlerMap) clone() *handlerMap {
 		nextArgInterfaces: make(map[reflect.Type]int, len(hmap.nextArgInterfaces)),
 		nextArgMap:        make(map[reflect.Type]*handlerMap, len(hmap.nextArgMap)),
 	}
-	for k, v := range hmap.nextArgInterfaces {
-		cloned.nextArgInterfaces[k] = v
-	}
+	maps.Copy(cloned.nextArgInterfaces, hmap.nextArgInterfaces)
 	if len(hmap.handlers) > 0 {
 		cloned.handlers = make([]*eventHandler, len(hmap.handlers))
 		copy(cloned.handlers, hmap.handlers)
