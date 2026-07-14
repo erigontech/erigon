@@ -99,7 +99,6 @@ type FullBlockReader interface {
 
 	FrozenBlocks() uint64
 	FrozenBorBlocks(align bool) uint64
-	FrozenFiles() (list []string)
 	FreezingCfg() ethconfig.BlocksFreezing
 	CanPruneTo(currentBlockInDB uint64) (canPruneBlocksTo uint64)
 

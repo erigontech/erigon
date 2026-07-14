@@ -21,7 +21,6 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
-	"slices"
 	"sort"
 
 	lru "github.com/hashicorp/golang-lru/v2"
@@ -143,7 +142,6 @@ func (r *RemoteBlockReader) BorSnapshots() services.BlockSnapshots { panic("not 
 func (r *RemoteBlockReader) AllTypes() []snaptype.Type             { panic("not implemented") }
 func (r *RemoteBlockReader) FrozenBlocks() uint64                  { panic("not supported") }
 func (r *RemoteBlockReader) FrozenBorBlocks(align bool) uint64     { panic("not supported") }
-func (r *RemoteBlockReader) FrozenFiles() (list []string)          { panic("not supported") }
 func (r *RemoteBlockReader) FreezingCfg() ethconfig.BlocksFreezing { panic("not supported") }
 
 func (r *RemoteBlockReader) HeaderByHash(ctx context.Context, tx kv.Getter, hash common.Hash) (*types.Header, error) {
@@ -501,14 +499,6 @@ func (r *BlockReader) FrozenBorBlocks(align bool) uint64 {
 	}
 
 	return frozen
-}
-func (r *BlockReader) FrozenFiles() []string {
-	files := r.sn.Files()
-	if r.borSn != nil {
-		files = append(files, r.borSn.Files()...)
-	}
-	slices.Sort(files)
-	return files
 }
 func (r *BlockReader) FreezingCfg() ethconfig.BlocksFreezing { return r.sn.Cfg() }
 
