@@ -153,6 +153,26 @@ Solidify — this needs a **whole-process audit**, not just a shared helper:
 - Until then, treat any change to a legacy/stateObject path, or any `main` merge in
   the BAL/versionedio area, as requiring the per-tx-flush + access-model audit.
 
+## North star — split IBS into a tx context and a block context
+
+Several refactor iterations out (past follow-ups 1–6), the destination these steps
+converge toward: **remove `IntraBlockState` as a monolith** and replace it with two
+scoped abstractions with a simplified API for clients (executors, builder,
+regenerator, RPC) and the interpreter:
+
+- **block context** — owns the versionMap, the committed/domain view, and
+  block-wide accumulation (BAL, block IO); publishes and commits.
+- **tx context** — owns one tx's reads/writes/journal/access/transient storage,
+  scoped to a single tx; on close it publishes into the block context.
+
+In this model Follow-up 6's flush internalization is subsumed rather than
+implemented: the per-tx flush is no longer a call at all — **closing a tx context
+_is_ publishing into the block context**, because the tx→block boundary is a real
+object boundary instead of a sequence a caller drives on a shared IBS. The mixed
+model, the manual `Flush`/`Merge`/`Reset` dance, and the "which paths remember to
+flush" footgun all disappear together. This is a direction, not a task — the
+earlier follow-ups are the iterations that make it reachable.
+
 ## Low-risk quick win
 
 Follow-up 4's `versionedWriteCollector` removal touches no commit path and can be
