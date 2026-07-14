@@ -93,8 +93,8 @@ latest:   ◄──────── account.0-16.kv ────────�
 - **Seed-what-you-use** Same files used by serving RPC requests and initial Syncing/Seeding. No re-packing, no
   double-space, no tar-balls. This is very important property! Because Users/Operators have reason to keep history -
   because they using it. Without this property - rational operators delete the network copy.
-- **We made seeding cheap**: BitTorrent has nice feature "any HTTP Server can be a Peer": S3/R2 bucket + CDN can support
-  Network. It's way cheaper than have server with running Erigon.
+- **We made seeding cheap**: BitTorrent has nice feature "any HTTP Server can be a Peer". Means "S3/R2 bucket + CDN" can
+  support Network. It's way cheaper than have server with running Erigon.
 
 ### 3.3 Problems
 
@@ -155,7 +155,7 @@ One extra value per (key, span-it-changed-in): noise for hot keys, ~2× for a ke
 - **Safe-deletion table** — the operational contract:
 
   | Operation | How |
-                        |---|---|
+                                  |---|---|
   | Forget old history | `rm` old spans (`.ef+.v+.lv`); suffix-closure keeps the rest self-sufficient |
   | Undo recent data (bug/deep reorg) | `rm` recent spans, re-fold latest, re-execute the tail |
   | Repair corrupted latest store | re-fold from spans — local, no re-execution |
