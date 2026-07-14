@@ -37,10 +37,6 @@ import (
 	"github.com/erigontech/erigon/txnprovider"
 )
 
-// SDProvider returns the latest published SharedDomains from FCU, or nil if none.
-// Used by the builder to read uncommitted state during background commits.
-type SDProvider func() *execctx.SharedDomains
-
 // Builder runs the three block-building steps (createBlock, execBlock, finishBlock) directly
 // without staged-sync machinery. Its Build method satisfies BlockBuilderFunc and can
 // be passed directly to ExecModule.
@@ -59,7 +55,6 @@ type Builder struct {
 	txnProvider           txnprovider.TxnProvider
 	sealCancel            chan struct{}
 	latestBlockBuiltStore *LatestBlockBuiltStore
-	sdProvider            SDProvider
 	logger                log.Logger
 }
 
@@ -77,7 +72,6 @@ func NewBuilder(
 	txnProvider txnprovider.TxnProvider,
 	sealCancel chan struct{},
 	latestBlockBuiltStore *LatestBlockBuiltStore,
-	sdProvider SDProvider,
 	logger log.Logger,
 ) *Builder {
 	return &Builder{
@@ -95,7 +89,6 @@ func NewBuilder(
 		txnProvider:           txnProvider,
 		sealCancel:            sealCancel,
 		latestBlockBuiltStore: latestBlockBuiltStore,
-		sdProvider:            sdProvider,
 		logger:                logger,
 	}
 }
@@ -124,21 +117,22 @@ func (b *Builder) Build(param *Parameters, interrupt *atomic.Bool) (result *type
 		BuiltBlock:      &exec.AssembledBlock{},
 	}
 
-	tx, err := b.db.BeginTemporalRo(b.ctx)
-	if err != nil {
-		return nil, err
+	// Read only through the scoped, by-block read view captured by AssembleBlock
+	// (pinned to param.ParentHash): its roTx is the consistent committed-state
+	// snapshot and its head SharedDomains carries the in-flight tip state. The
+	// builder never opens its own db.BeginTemporalRo nor reads the mutable global
+	// published SD. The view's roTx is released by the BlockBuilder goroutine.
+	view := param.ScopedView
+	if view == nil {
+		return nil, fmt.Errorf("builder: nil scoped read view")
 	}
-	defer tx.Rollback()
+	tx := view.Tx()
 
-	// When a published SD is available (background commit in progress), create
-	// a child SD that reads domain state from the parent's mem batch and table
-	// data from the parent's overlay. The child's own writes are local and
+	// Create a child SD that reads domain state from the head's mem batch and
+	// table data from its overlay. The child's own writes are local and
 	// discarded after block construction.
 	var compositeTx kv.TemporalTx = tx
-	var parentSD *execctx.SharedDomains
-	if b.sdProvider != nil {
-		parentSD = b.sdProvider()
-	}
+	parentSD := view.HeadSD()
 	if parentSD != nil {
 		if overlay := parentSD.BlockOverlay(); overlay != nil {
 			compositeTx = overlay.NewReadView(tx)

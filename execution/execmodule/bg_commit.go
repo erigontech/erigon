@@ -20,6 +20,7 @@ import (
 	"context"
 	"errors"
 
+	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/state/execctx"
 )
@@ -41,6 +42,8 @@ import (
 type commitGen struct {
 	sd                   *execctx.SharedDomains
 	roTx                 kv.TemporalTx
+	blockHash            common.Hash // the FCU head this generation's state is for
+	blockNum             uint64
 	finishProgressBefore uint64
 	isSynced             bool
 	initialCycle         bool

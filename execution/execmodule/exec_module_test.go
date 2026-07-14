@@ -847,6 +847,49 @@ func TestAssembleBlockWithStateVerification(t *testing.T) {
 	require.NoError(t, err)
 }
 
+// TestAssembleBlockRejectsWrongParent verifies AssembleBlock pins to the
+// requested ParentHash: a request whose parent is not the current head returns
+// Busy (the CL retries) rather than building on the wrong block, while a request
+// on the real head builds a block extending exactly that parent.
+func TestAssembleBlockRejectsWrongParent(t *testing.T) {
+	t.Parallel()
+	ctx := t.Context()
+	m := execmoduletester.New(t, execmoduletester.WithTxPool(), execmoduletester.WithChainConfig(chain.AllProtocolChanges))
+	exec := m.ExecModule
+
+	chainPack, err := blockgen.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 1, func(i int, gen *blockgen.BlockGen) {
+		gen.SetCoinbase(common.Address{1})
+	}, m.PublishedSD())
+	require.NoError(t, err)
+	require.NoError(t, m.InsertChain(chainPack))
+	head := chainPack.TopBlock
+
+	mkParams := func(parent common.Hash) *builder.Parameters {
+		return &builder.Parameters{
+			ParentHash:            parent,
+			Timestamp:             head.Time() + 1,
+			PrevRandao:            head.Header().MixDigest,
+			SuggestedFeeRecipient: common.Address{1},
+			Withdrawals:           make([]*types.Withdrawal, 0),
+			ParentBeaconBlockRoot: func() *common.Hash { h := randomHash(); return &h }(),
+		}
+	}
+
+	// Wrong parent → Busy, no block built (call directly, not via the retryBusy helper).
+	res, err := exec.AssembleBlock(ctx, mkParams(randomHash()))
+	require.NoError(t, err)
+	require.True(t, res.Busy, "assemble on a non-head parent must return Busy")
+
+	// Correct parent → builds a block extending exactly that parent.
+	payloadId, err := assembleBlock(ctx, exec, mkParams(head.Hash()))
+	require.NoError(t, err)
+	block, err := getAssembledBlock(ctx, exec, payloadId)
+	require.NoError(t, err)
+	require.NotNil(t, block)
+	require.Equal(t, head.Hash(), block.ParentHash(), "assembled block must extend the requested parent")
+	require.Equal(t, head.NumberU64()+1, block.NumberU64())
+}
+
 func TestAssembleBlockWithContractCreation(t *testing.T) {
 	t.Parallel()
 	ctx := t.Context()

@@ -35,15 +35,28 @@ type BlockBuilder struct {
 	syncCond  *sync.Cond
 	result    *types.BlockWithReceipts
 	err       error
+	view      ScopedReadView // pinned by-block read snapshot; released when the build goroutine exits
 }
+
+// Cancel signals the build to stop; the goroutine then exits and releases its
+// scoped read view. Non-blocking (used on eviction).
+func (b *BlockBuilder) Cancel() { b.interrupt.Store(true) }
 
 func NewBlockBuilder(build BlockBuilderFunc, param *Parameters, maxBuildTimeSecs uint64) *BlockBuilder {
 	builder := new(BlockBuilder)
 	builder.syncCond = sync.NewCond(new(sync.Mutex))
+	builder.view = param.ScopedView
 	terminated := make(chan struct{})
 
 	go func() {
 		defer close(terminated)
+		// Release the pinned read snapshot (its roTx) when the build goroutine
+		// exits — on success, error, timeout-driven Stop, or panic. Idempotent.
+		defer func() {
+			if builder.view != nil {
+				builder.view.Release()
+			}
+		}()
 		var result *types.BlockWithReceipts
 		var err error
 

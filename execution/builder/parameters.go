@@ -18,13 +18,31 @@ package builder
 
 import (
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/state/execctx"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/txnprovider"
 )
 
+// ScopedReadView is a consistent, by-block read snapshot handed to the builder
+// so it reads the exact block it builds on (never the raw DB directly nor a
+// mutable global). Implemented by execmodule.ScopedReadView. The build owns it
+// and releases it when it finishes.
+type ScopedReadView interface {
+	Tx() kv.TemporalTx
+	HeadSD() *execctx.SharedDomains
+	BlockHash() common.Hash
+	BlockNum() uint64
+	Release()
+}
+
 // Parameters for PoS block building
 // See also https://github.com/ethereum/execution-apis/blob/main/src/engine/amsterdam.md#payloadattributesv4
 type Parameters struct {
+	// ScopedView is the consistent read snapshot pinned to ParentHash. Set by
+	// AssembleBlock; the build reads only through it and releases it on finish.
+	ScopedView ScopedReadView
+
 	PayloadId             uint64
 	ParentHash            common.Hash
 	Timestamp             uint64

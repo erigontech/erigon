@@ -18,6 +18,7 @@ package execmodule
 
 import (
 	"context"
+	"errors"
 	"reflect"
 
 	"github.com/holiman/uint256"
@@ -44,6 +45,11 @@ func (e *ExecModule) evictOldBuilders() {
 
 	// remove old builders so that at most MaxBuilders - 1 remain
 	for i := 0; i <= len(e.builders)-engine_helpers.MaxBuilders; i++ {
+		if bldr := e.builders[ids[i]]; bldr != nil {
+			// Cancel so the build goroutine exits and releases its scoped read
+			// view (pinned roTx) rather than leaking it past eviction.
+			bldr.Cancel()
+		}
 		delete(e.builders, ids[i])
 	}
 }
@@ -67,6 +73,19 @@ func (e *ExecModule) AssembleBlock(ctx context.Context, params *builder.Paramete
 		}
 	}
 
+	// Pin a consistent, by-block read snapshot for the requested parent while we
+	// hold the foreground semaphore (settled state, no commit mid-flight). If the
+	// head is not yet at ParentHash, signal Busy so the CL retries rather than
+	// building on the wrong block. The build reads only through this view — never
+	// the raw DB directly nor the mutable global published SD.
+	view, err := e.captureScopedReadView(ctx, params.ParentHash)
+	if err != nil {
+		if errors.Is(err, errHeadMismatch) {
+			return AssembleBlockResult{Busy: true}, nil
+		}
+		return AssembleBlockResult{}, err
+	}
+
 	// Initiate payload building
 	e.evictOldBuilders()
 
@@ -74,7 +93,11 @@ func (e *ExecModule) AssembleBlock(ctx context.Context, params *builder.Paramete
 	params.PayloadId = e.nextPayloadId
 	e.lastParameters = params
 
-	e.builders[e.nextPayloadId] = builder.NewBlockBuilder(e.builderFunc, params, e.config.SecondsPerSlot()/4)
+	// Carry the view on a per-build copy so it never enters e.lastParameters
+	// (which the duplicate-request check DeepEquals).
+	buildParams := *params
+	buildParams.ScopedView = view
+	e.builders[e.nextPayloadId] = builder.NewBlockBuilder(e.builderFunc, &buildParams, e.config.SecondsPerSlot()/4)
 	e.logger.Info("[ForkChoiceUpdated] BlockBuilder added", "payload", e.nextPayloadId)
 
 	return AssembleBlockResult{PayloadID: e.nextPayloadId}, nil

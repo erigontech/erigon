@@ -700,7 +700,6 @@ func New(tb testing.TB, opts ...Option) *ExecModuleTester {
 		mock.TxPool,
 		miningCancel,
 		latestBlockBuiltStore,
-		nil, /*sdProvider*/
 		logger,
 	)
 

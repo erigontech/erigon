@@ -875,7 +875,6 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 		txnProvider,
 		backend.miningSealingQuit,
 		latestBlockBuiltStore,
-		backend.notifications.Events.LatestSD,
 		logger,
 	)
 	backend.pendingBlocks = blkBuilder.PendingBlockCh()

@@ -736,6 +736,8 @@ func (e *ExecModule) updateForkChoice(ctx context.Context, originalBlockHash, sa
 			bgGen = &commitGen{
 				sd:                   currentContext,
 				roTx:                 roTx,
+				blockHash:            blockHash,
+				blockNum:             fcuHeader.Number.Uint64(),
 				finishProgressBefore: finishProgressBefore,
 				isSynced:             isSynced,
 				initialCycle:         initialCycle,
