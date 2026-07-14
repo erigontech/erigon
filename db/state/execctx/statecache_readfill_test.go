@@ -81,9 +81,6 @@ func newSmallStateCache() *cache.StateCache {
 // the maxStep-bounded DB read, and the ASSERT_STATE_CACHE comparison must not
 // blame the cache for it.
 func TestAssertStateCache_NoFalsePanicDuringInFlightUnwind(t *testing.T) {
-	if testing.Short() {
-		t.Skip()
-	}
 	// Mutates dbg.AssertStateCache — must not run in parallel with tests that
 	// read it on the SD read path.
 
@@ -179,9 +176,6 @@ func TestAssertStateCache_NoFalsePanicDuringInFlightUnwindStepZero(t *testing.T)
 // in-flight unwind the bounded DB read can even return the not-yet-deleted
 // dying row.
 func TestReadFill_DoesNotClobberLiveEntry(t *testing.T) {
-	if testing.Short() {
-		t.Skip()
-	}
 	t.Parallel()
 
 	const stepSize = uint64(16)
@@ -218,9 +212,6 @@ func TestReadFill_DoesNotClobberLiveEntry(t *testing.T) {
 // progress at observation time, not a synthetic step-0 bound that survives
 // every unwind.
 func TestReadFill_NegativeStampedWithProgress(t *testing.T) {
-	if testing.Short() {
-		t.Skip()
-	}
 	t.Parallel()
 
 	const stepSize = uint64(16)
