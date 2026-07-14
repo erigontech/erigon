@@ -30,8 +30,6 @@ import (
 	"github.com/erigontech/erigon/common/dir"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/datadir"
-	"github.com/erigontech/erigon/db/kv/dbcfg"
-	"github.com/erigontech/erigon/db/kv/memdb"
 	"github.com/erigontech/erigon/db/kv/temporal/temporaltest"
 	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/db/recsplit"
@@ -113,14 +111,14 @@ func requireSegmentFilesExist(t *testing.T, dir string, ver snaptype.Version, fr
 // in the snapshots and the first block still present in the database. If this gap exists,
 // we cannot retire blocks because the history is not contiguous.
 func TestBlockRetireSkipsOnGap(t *testing.T) {
-	tmpDir := t.TempDir()
-	db := temporaltest.NewTestDB(t, datadir.New(tmpDir))
+	dirs := datadir.New(t.TempDir())
+	db := temporaltest.NewTestDB(t, dirs)
 	logger := log.New()
 
 	ver := version.V1_0
-	createTestSegmentFile(t, 1, 1000, snaptype2.Enums.Headers, tmpDir, ver, logger)
-	createTestSegmentFile(t, 1, 1000, snaptype2.Enums.Bodies, tmpDir, ver, logger)
-	createTestSegmentFile(t, 1, 1000, snaptype2.Enums.Transactions, tmpDir, ver, logger)
+	createTestSegmentFile(t, 1, 1000, snaptype2.Enums.Headers, dirs.Snap, ver, logger)
+	createTestSegmentFile(t, 1, 1000, snaptype2.Enums.Bodies, dirs.Snap, ver, logger)
+	createTestSegmentFile(t, 1, 1000, snaptype2.Enums.Transactions, dirs.Snap, ver, logger)
 
 	snapshots := db.(HasBlockFiles).DebugBlockFiles()
 	require.NoError(t, snapshots.OpenFolder())
@@ -152,14 +150,14 @@ func TestBlockRetireSkipsOnGap(t *testing.T) {
 // to proceed when the database block history starts exactly where the snapshots end.
 // This is the correct, contiguous state where we can transition retired blocks.
 func TestBlockRetireContiguous(t *testing.T) {
-	tmpDir := t.TempDir()
-	db := temporaltest.NewTestDB(t, datadir.New(tmpDir))
+	dirs := datadir.New(t.TempDir())
+	db := temporaltest.NewTestDB(t, dirs)
 	logger := log.New()
 
 	ver := version.V1_0
-	createTestSegmentFile(t, 1, 1000, snaptype2.Enums.Headers, tmpDir, ver, logger)
-	createTestSegmentFile(t, 1, 1000, snaptype2.Enums.Bodies, tmpDir, ver, logger)
-	createTestSegmentFile(t, 1, 1000, snaptype2.Enums.Transactions, tmpDir, ver, logger)
+	createTestSegmentFile(t, 1, 1000, snaptype2.Enums.Headers, dirs.Snap, ver, logger)
+	createTestSegmentFile(t, 1, 1000, snaptype2.Enums.Bodies, dirs.Snap, ver, logger)
+	createTestSegmentFile(t, 1, 1000, snaptype2.Enums.Transactions, dirs.Snap, ver, logger)
 	snapshots := db.(HasBlockFiles).DebugBlockFiles()
 	require.NoError(t, snapshots.OpenFolder())
 	require.Equal(t, uint64(999), snapshots.SegmentsMax())
@@ -192,24 +190,24 @@ func TestBlockRetireContiguous(t *testing.T) {
 // running without getting stuck (fixes issue #21472). Once the unindexed covering segment
 // is deleted or indexed, the visibility should remain stable.
 func TestBlockRetireFallback(t *testing.T) {
-	tmpDir := t.TempDir()
-	db := temporaltest.NewTestDB(t, datadir.New(tmpDir))
+	dirs := datadir.New(t.TempDir())
+	db := temporaltest.NewTestDB(t, dirs)
 	logger := log.New()
 
 	ver := version.V1_0
-	createTestSegmentFile(t, 1, 1000, snaptype2.Enums.Headers, tmpDir, ver, logger)
-	createTestSegmentFile(t, 1, 1000, snaptype2.Enums.Bodies, tmpDir, ver, logger)
-	createTestSegmentFile(t, 1, 1000, snaptype2.Enums.Transactions, tmpDir, ver, logger)
-	createTestSegmentFile(t, 1000, 2000, snaptype2.Enums.Headers, tmpDir, ver, logger)
-	createTestSegmentFile(t, 1000, 2000, snaptype2.Enums.Bodies, tmpDir, ver, logger)
-	createTestSegmentFile(t, 1000, 2000, snaptype2.Enums.Transactions, tmpDir, ver, logger)
+	createTestSegmentFile(t, 1, 1000, snaptype2.Enums.Headers, dirs.Snap, ver, logger)
+	createTestSegmentFile(t, 1, 1000, snaptype2.Enums.Bodies, dirs.Snap, ver, logger)
+	createTestSegmentFile(t, 1, 1000, snaptype2.Enums.Transactions, dirs.Snap, ver, logger)
+	createTestSegmentFile(t, 1000, 2000, snaptype2.Enums.Headers, dirs.Snap, ver, logger)
+	createTestSegmentFile(t, 1000, 2000, snaptype2.Enums.Bodies, dirs.Snap, ver, logger)
+	createTestSegmentFile(t, 1000, 2000, snaptype2.Enums.Transactions, dirs.Snap, ver, logger)
 
 	snapshots := db.(HasBlockFiles).DebugBlockFiles()
 	require.NoError(t, snapshots.OpenFolder())
 	require.Equal(t, uint64(1999), snapshots.SegmentsMax())
 
-	requireSegmentFilesExist(t, tmpDir, ver, 1, 1000, snaptype2.Enums.Headers, snaptype2.Enums.Bodies, snaptype2.Enums.Transactions)
-	requireSegmentFilesExist(t, tmpDir, ver, 1000, 2000, snaptype2.Enums.Headers, snaptype2.Enums.Bodies, snaptype2.Enums.Transactions)
+	requireSegmentFilesExist(t, dirs.Snap, ver, 1, 1000, snaptype2.Enums.Headers, snaptype2.Enums.Bodies, snaptype2.Enums.Transactions)
+	requireSegmentFilesExist(t, dirs.Snap, ver, 1000, 2000, snaptype2.Enums.Headers, snaptype2.Enums.Bodies, snaptype2.Enums.Transactions)
 
 	rwTx, err := db.BeginRw(t.Context())
 	require.NoError(t, err)
@@ -239,14 +237,14 @@ func TestBlockRetireFallback(t *testing.T) {
 	// Simulate a restart after a merged transaction segment landed on disk, but
 	// before its indexes were fully built. The smaller indexed subsegments must
 	// remain visible until the covering segment becomes indexed.
-	createTestSegmentOnlyFile(t, 1, 2000, snaptype2.Enums.Transactions, tmpDir, ver, logger)
+	createTestSegmentOnlyFile(t, 1, 2000, snaptype2.Enums.Transactions, dirs.Snap, ver, logger)
 
-	reopenedSnapshots := blocksnapshots.NewRoSnapshots(snapshots.Cfg(), tmpDir, logger)
+	reopenedSnapshots := blocksnapshots.NewRoSnapshots(snapshots.Cfg(), dirs.Snap, logger)
 	defer reopenedSnapshots.Close() // fallback safety guard in case of early test failure
 	require.NoError(t, reopenedSnapshots.OpenFolder())
 	require.Equal(t, uint64(1999), reopenedSnapshots.SegmentsMax())
-	requireSegmentFilesExist(t, tmpDir, ver, 1, 1000, snaptype2.Enums.Transactions)
-	requireSegmentFilesExist(t, tmpDir, ver, 1000, 2000, snaptype2.Enums.Transactions)
+	requireSegmentFilesExist(t, dirs.Snap, ver, 1, 1000, snaptype2.Enums.Transactions)
+	requireSegmentFilesExist(t, dirs.Snap, ver, 1000, 2000, snaptype2.Enums.Transactions)
 
 	blockReader = NewBlockReader(reopenedSnapshots, nil)
 	br = &BlockRetire{
@@ -261,10 +259,10 @@ func TestBlockRetireFallback(t *testing.T) {
 	reopenedSnapshots.Close()
 
 	// Removing the unindexed overlap leaves the same indexed subsegments visible.
-	unindexedOverlap := filepath.Join(tmpDir, snaptype.SegmentFileName(ver, 1, 2000, snaptype2.Enums.Transactions))
+	unindexedOverlap := filepath.Join(dirs.Snap, snaptype.SegmentFileName(ver, 1, 2000, snaptype2.Enums.Transactions))
 	require.NoError(t, dir.RemoveFile(unindexedOverlap))
 
-	restoredSnapshots := blocksnapshots.NewRoSnapshots(snapshots.Cfg(), tmpDir, logger)
+	restoredSnapshots := blocksnapshots.NewRoSnapshots(snapshots.Cfg(), dirs.Snap, logger)
 	require.NoError(t, restoredSnapshots.OpenFolder())
 	defer restoredSnapshots.Close()
 	require.Equal(t, uint64(1999), restoredSnapshots.SegmentsMax())
@@ -286,8 +284,8 @@ func TestBlockRetireFallback(t *testing.T) {
 // fall back to their indexed subsegments and maintain the correct visible range, allowing
 // block retirement to proceed (related to issue #21472).
 func TestBlockRetireAllOverlapped(t *testing.T) {
-	tmpDir := t.TempDir()
-	db := memdb.NewTestDB(t, dbcfg.ChainDB)
+	dirs := datadir.New(t.TempDir())
+	db := temporaltest.NewTestDB(t, dirs)
 	logger := log.New()
 
 	cfg := ethconfig.Defaults.Snapshot
@@ -296,12 +294,11 @@ func TestBlockRetireAllOverlapped(t *testing.T) {
 
 	// Create indexed subsegments for all types.
 	for _, enum := range []snaptype.Enum{snaptype2.Enums.Headers, snaptype2.Enums.Bodies, snaptype2.Enums.Transactions} {
-		createTestSegmentFile(t, 1, 1000, enum, tmpDir, ver, logger)
-		createTestSegmentFile(t, 1000, 2000, enum, tmpDir, ver, logger)
+		createTestSegmentFile(t, 1, 1000, enum, dirs.Snap, ver, logger)
+		createTestSegmentFile(t, 1000, 2000, enum, dirs.Snap, ver, logger)
 	}
 
-	snapshots := blocksnapshots.NewRoSnapshots(cfg, tmpDir, logger)
-	defer snapshots.Close()
+	snapshots := db.(HasBlockFiles).DebugBlockFiles()
 	require.NoError(t, snapshots.OpenFolder())
 	require.Equal(t, uint64(1999), snapshots.SegmentsMax())
 
@@ -322,10 +319,10 @@ func TestBlockRetireAllOverlapped(t *testing.T) {
 	// RecalcVisibleSegments must fall back to indexed subsegments for every
 	// type, and SegmentsMax must take the correct minimum.
 	for _, enum := range []snaptype.Enum{snaptype2.Enums.Headers, snaptype2.Enums.Bodies, snaptype2.Enums.Transactions} {
-		createTestSegmentOnlyFile(t, 1, 2000, enum, tmpDir, ver, logger)
+		createTestSegmentOnlyFile(t, 1, 2000, enum, dirs.Snap, ver, logger)
 	}
 
-	reopened := blocksnapshots.NewRoSnapshots(cfg, tmpDir, logger)
+	reopened := blocksnapshots.NewRoSnapshots(cfg, dirs.Snap, logger)
 	require.NoError(t, reopened.OpenFolder())
 	defer reopened.Close()
 	require.Equal(t, uint64(1999), reopened.SegmentsMax())
