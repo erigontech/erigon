@@ -52,7 +52,6 @@ var cmdResetState = &cobra.Command{
 			logger.Error("Opening DB", "error", err)
 			return
 		}
-		ctx := cmd.Context()
 		defer db.Close()
 
 		sn, borSn, _, _, _, _, err := allSnapshots(ctx, db, logger)
