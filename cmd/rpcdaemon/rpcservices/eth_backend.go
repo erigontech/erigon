@@ -123,7 +123,6 @@ func (back *RemoteBackend) FrozenBlocks() uint64      { return back.blockReader.
 func (back *RemoteBackend) FrozenBorBlocks(align bool) uint64 {
 	return back.blockReader.FrozenBorBlocks(align)
 }
-func (back *RemoteBackend) FrozenFiles() (list []string) { return back.blockReader.FrozenFiles() }
 func (back *RemoteBackend) CanonicalBodyForStorage(ctx context.Context, tx kv.Getter, blockNum uint64) (body *types.BodyForStorage, err error) {
 	return back.blockReader.CanonicalBodyForStorage(ctx, tx, blockNum)
 }
