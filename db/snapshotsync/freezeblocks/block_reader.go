@@ -530,7 +530,6 @@ func (r *BlockReader) viewSingleFile(tx kv.Getter, t snaptype.Type, blockNum uin
 		seg, ok := bv.Segment(t, blockNum)
 		return seg, ok, func() {}
 	}
-	panic(1)
 	return r.sn.ViewSingleFile(t, blockNum)
 }
 
@@ -540,7 +539,6 @@ func (r *BlockReader) viewType(tx kv.Getter, t snaptype.Type) ([]*snapshotsync.V
 	if bv := txBlockView(tx); bv != nil {
 		return bv.Segments(t), func() {}
 	}
-	panic(2)
 	rotx := r.sn.ViewType(t)
 	return rotx.Segments, rotx.Close
 }
@@ -551,7 +549,6 @@ func (r *BlockReader) view(tx kv.Getter) (*blocksnapshots.View, func()) {
 	if bv := txBlockView(tx); bv != nil {
 		return bv, func() {}
 	}
-	panic(2)
 	v := r.sn.View()
 	return v, v.Close
 }
