@@ -59,9 +59,10 @@ type entry[T any] struct {
 // GenericCache is a sharded, LRU-evicting bounded cache for key-value
 // data. Eviction mode is fixed at construction (see policy.go).
 type GenericCache[T any] struct {
-	// data is the sharded LRU, replaced wholesale on a jump-grow with every
-	// put stripe held and the new generation fully copied — no write lands in
-	// a retired generation and no reader sees a partial one (see maybeGrow).
+	// data is the sharded LRU, replaced wholesale only with every put stripe
+	// held — on a jump-grow (fully copied generation) and on Clear (fresh
+	// empty one) — so no write lands in a retired generation and no reader
+	// sees a partial copy (see maybeGrow, Clear).
 	data      atomic.Pointer[freelru.ShardedLRU[uint64, entry[T]]]
 	capacityB datasize.ByteSize
 	mode      Mode
@@ -415,10 +416,10 @@ func (c *GenericCache[T]) dropStale(h uint64, key []byte) {
 // unwindFloor) coherence pair: with no entries left, no stale (txNum, epoch)
 // can survive, so a fresh floor keeps subsequent Puts at the live epoch
 // serviceable. Mirrors CodeCache.Clear (which already did this — the two had
-// drifted).
+// drifted). The counter reset and the generation swap run with every put
+// stripe held — like maybeGrow's — so a racing put can neither land in the
+// retired generation nor add its size after the reset.
 func (c *GenericCache[T]) Clear() {
-	c.currentSize.Store(0)
-	c.coh.Init()
 	// Shrink back to the start size and return the grown budget to the envelope,
 	// keeping the cache adaptive across fork-validation/reset (it regrows on
 	// demand). A no-op Purge would leave the grown slot array resident.
@@ -428,8 +429,17 @@ func (c *GenericCache[T]) Clear() {
 		cachebudget.Global.Release(c.reservedBytes - int64(c.startCap)*c.avgEntryBytes)
 		c.reservedBytes = int64(c.startCap) * c.avgEntryBytes
 	}
+	next := c.newShards(c.startCap) // allocate before excluding writers
+	for i := range c.putStripes {
+		c.putStripes[i].Lock()
+	}
+	c.currentSize.Store(0)
+	c.coh.Init()
 	c.curCap.Store(c.startCap)
-	c.data.Store(c.newShards(c.startCap))
+	c.data.Store(next)
+	for i := range c.putStripes {
+		c.putStripes[i].Unlock()
+	}
 }
 
 // Close returns this cache's envelope reservation so later caches can grow into

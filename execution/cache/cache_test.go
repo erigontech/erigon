@@ -925,6 +925,29 @@ func TestDomainCache_StaleDropAtomicWithPut_NoSizeDrift(t *testing.T) {
 	}
 }
 
+// A Clear racing a put must not leave phantom bytes: unless Clear excludes
+// writers via the put stripes, a put that loaded the retiring generation
+// lands its entry where no reader sees it and adds the entry's size after
+// Clear zeroed the counter — inflating SizeBytes for an invisible entry.
+func TestDomainCache_ClearAtomicWithPut_NoSizeDrift(t *testing.T) {
+	c := NewDomainCacheMode(1*datasize.MB, ModeEvictLRU)
+	addr := makeAddr(1)
+	v1 := []byte("value-one")
+	entrySize := int64(len(addr) + len(v1) + 24)
+	for round := 0; round < 20000; round++ {
+		var wg sync.WaitGroup
+		wg.Add(2)
+		go func() { defer wg.Done(); c.Put(addr, v1, 10) }()
+		go func() { defer wg.Done(); c.Clear() }()
+		wg.Wait()
+		wantSize := int64(0)
+		if _, ok := c.Get(addr); ok {
+			wantSize = entrySize
+		}
+		require.Equal(t, wantSize, c.SizeBytes(), "round %d: size accounting drifted", round)
+	}
+}
+
 func TestCodeCache_ContainsLive(t *testing.T) {
 	cc := NewCodeCache(1*datasize.MB, 1*datasize.MB)
 	addr := makeAddr(1)
