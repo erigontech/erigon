@@ -18,7 +18,6 @@ package seg
 
 import (
 	"os"
-	"sync"
 	"unsafe"
 
 	"github.com/erigontech/erigon/common/dbg"
@@ -34,20 +33,10 @@ var pageSize = os.Getpagesize()
 // itself and nothing more. Tunable via env (RESIDENCY_WINDOW_PAGES) without a rebuild.
 var residencyWindow = dbg.EnvInt("RESIDENCY_WINDOW_PAGES", 1) * pageSize
 
-// warmConcurrency bounds how many goroutines may be blocked in a warming read
-// at once. Acquiring parks the goroutine (freeing its P) when full; the read
-// itself goes through Go's syscall path, so a slow read hands the P off too.
-var warmSem = make(chan struct{}, 512)
-
-var warmBufPool = sync.Pool{New: func() any {
-	b := make([]byte, residencyWindow+pageSize)
-	return &b
-}}
-
 // EnableResidencyGate makes this getter probe page-cache residency on Reset and
-// warm cold pages with a bounded blocking read before the value is decompressed
-// off the mapping — turning would-be blocking mmap page faults into read()s that
-// release the goroutine's P. Intended for random-access readers over state .kv files.
+// warm cold pages via io_uring before the value is decompressed off the mapping —
+// turning would-be blocking mmap page faults into io_uring reads that release the
+// goroutine's P. Intended for random-access readers over state .kv files.
 func (g *Getter) EnableResidencyGate() { g.residencyGate = true }
 
 // residencyRegion returns the page-aligned mmap slice covering the word extent
@@ -81,18 +70,10 @@ func (g *Getter) ensureResident(offset uint64) {
 	g.warm(fileOffset, len(region))
 }
 
-// warm pulls the byte range into the page cache so the following mmap access is
-// a minor fault rather than a blocking disk fault. It prefers io_uring (whose
-// io_uring_enter releases the goroutine's P during the read); if io_uring is
-// unavailable or its ring pool is exhausted it falls back to a semaphore-bounded
-// blocking pread. Best-effort: on any error the mmap access simply faults as before.
+// warm pulls the byte range into the page cache via io_uring so the following
+// mmap access is a minor fault rather than a blocking disk fault; io_uring_enter
+// releases the goroutine's P for the duration of the read. There is no fallback —
+// if io_uring is unavailable the process exits on the first warm (see iouring.WarmOne).
 func (g *Getter) warm(fileOffset int64, n int) {
-	if iouring.WarmOne(int(g.d.f.Fd()), fileOffset, n) {
-		return
-	}
-	warmSem <- struct{}{}
-	buf := warmBufPool.Get().(*[]byte)
-	_, _ = g.d.f.ReadAt((*buf)[:n], fileOffset)
-	warmBufPool.Put(buf)
-	<-warmSem
+	iouring.WarmOne(int(g.d.f.Fd()), fileOffset, n)
 }
