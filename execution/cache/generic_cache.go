@@ -398,11 +398,15 @@ func (c *GenericCache[T]) putStriped(key []byte, value T, txNum uint64, overwrit
 		if !overwrite && !c.coh.IsStale(existing.txNum, existing.epoch) {
 			return false
 		}
+		// Reserve the new size before the removal: the byte counter must never
+		// transiently under-state usage, or a concurrent ModeNoOp admission on
+		// another stripe over-admits past the budget. Over-stating is safe — at
+		// worst a new key is dropped, which is within "drop new keys when full".
+		c.currentSize.Add(int64(newSize))
 		lru.Remove(h)
 		if lru.Add(h, entry[T]{key: existing.key, val: value, size: newSize, txNum: txNum, epoch: ep}) {
 			c.evictions.Add(1)
 		}
-		c.currentSize.Add(int64(newSize))
 		return false
 	}
 
@@ -435,7 +439,9 @@ func (c *GenericCache[T]) putStriped(key []byte, value T, txNum uint64, overwrit
 
 	// hasExisting here means a 64-bit maphash collision (different key, same
 	// hash): remove the colliding entry first so OnEvict accounts for it —
-	// freelru.Add would replace it in place without firing OnEvict.
+	// freelru.Add would replace it in place without firing OnEvict. The size
+	// is reserved before the removal (see the update path above).
+	c.currentSize.Add(int64(newSize))
 	if hasExisting {
 		lru.Remove(h)
 	}
@@ -443,7 +449,6 @@ func (c *GenericCache[T]) putStriped(key []byte, value T, txNum uint64, overwrit
 	if lru.Add(h, entry[T]{key: keyCopy, val: value, size: newSize, txNum: txNum, epoch: ep}) {
 		c.evictions.Add(1)
 	}
-	c.currentSize.Add(int64(newSize))
 	c.inserts.Add(1)
 	return needGrow
 }

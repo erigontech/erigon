@@ -196,6 +196,39 @@ func TestGenericCache_PutIfAbsentDefersAcrossGrow(t *testing.T) {
 	}
 }
 
+// A ModeNoOp admission must never observe the byte counter mid-update: the
+// update path removes the old entry before adding the new one, and a
+// concurrent insert on another stripe that reads the transient dip passes the
+// budget check and lands over capacity — breaking "drop new keys when full"
+// with a key that should never have been admitted. The counter is reserved
+// before the removal, so the budget is transiently over-stated (at worst
+// dropping a new key) and never under-stated.
+func TestGenericCache_ModeNoOpAdmissionAtomicWithUpdate(t *testing.T) {
+	a := []byte("key-a-aaaaaaaaaaaaaa")
+	var b []byte
+	for i := 0; ; i++ {
+		cand := []byte("key-b-bbbbbbbbbbbbb" + string(rune('a'+i%26)))
+		if maphash.Hash(a)&(putStripeCount-1) != maphash.Hash(cand)&(putStripeCount-1) {
+			b = cand
+			break
+		}
+	}
+	v := []byte("valuevalu") // entry size 20+9+24 = 53: the budget fits exactly one entry
+	c := newGenericCacheEntries(datasize.ByteSize(53), 8, func(v []byte) int { return len(v) }, ModeNoOp)
+	c.Put(a, v, 1)
+	for round := 0; round < 200000; round++ {
+		var wg sync.WaitGroup
+		wg.Add(2)
+		go func() { defer wg.Done(); c.Put(a, v, 2) }()
+		go func() { defer wg.Done(); c.Put(b, v, 1) }()
+		wg.Wait()
+		if _, ok := c.Get(b); ok {
+			t.Fatalf("round %d: ModeNoOp admitted a key past a full budget (SizeBytes=%d, capacityB=%d)",
+				round, c.SizeBytes(), c.CapacityBytes())
+		}
+	}
+}
+
 // A grow must migrate every entry. Left to pick its own geometry per
 // generation, freelru chooses more, smaller shards as capacity rises, and a
 // new shard that overfills during the copy silently evicts — keys clustered
