@@ -18,18 +18,38 @@ oracle, `execution/tests`, and BAL hive (`eest-devnet` 2572/0).
 
 ## Follow-up 1 — genesis commit via the write-set
 
-Move `ComputeGenesisCommitment` off `FinalizeTx`→`stateObjects` (walked over a
-throwaway tmpDB) onto `FinalizedWrites().Apply(sd, tx, 0, 1, nil, &chain.Rules{},
-nil, false)` — genesis records every field as a cell (versionMap is non-nil), so
-`WriteSet.Apply` (the `blockCache == nil` branch) has the data. High blast radius:
-this computes the genesis root of every chain.
+Genesis is an **incomplete port to the versioned IO model**:
+`ComputeGenesisCommitment` builds the IBS with `NewWithVersionMap(r,
+&state.VersionMap{})` (so `IsVersioned()` is true and reads go through the
+versioned model), but its **write side was never ported** — it still commits via
+`FinalizeTx`→`stateObjects`→`stateWriter`, and the `FinalizedWrites` write-set it
+produces is never applied. The `isGenesis` guard in `txtask.go` (`txTask.TxIndex ==
+-1 && BlockNumber() == 0`) exists purely to route this "versioned" IBS back onto
+`MakeWriteSet`; that guard is a mask, and the serial-genesis regression (broadening
+the `IsVersioned()` branch produced an empty genesis root) was this bug surfacing.
 
-Caveat — the returned IBS is a state carrier re-consumed by three executors with
+This is **not an active bug today** — it works because `noMaterialize=false` keeps
+the stateObjects populated for `FinalizeTx`. But it is a **hard blocker for the
+map-drop**: once `noMaterialize` is the default and the resident stateObject is
+gone, `FinalizeTx` finds no stateObjects → empty genesis.
+
+Two resolutions:
+- **(A) De-version genesis** — `state.New(r)` instead of `NewWithVersionMap`.
+  Genesis is a single deterministic setup with no OCC/concurrency need; dropping
+  the versionMap makes `IsVersioned()` false and removes the `isGenesis` guard
+  entirely. Minimal and honest, *if* nothing in genesis (`SysCreate`/EIP-6780
+  constructor execution) depends on the versioned read path.
+- **(B) Finish the port** — move onto `FinalizedWrites().Apply(sd, tx, 0, 1, nil,
+  &chain.Rules{}, nil, false)` (genesis records every field as a cell, so the
+  `blockCache == nil` branch has the data) and set `noMaterialize` on the genesis
+  IBS, dropping `FinalizeTx`→writer and the guard. This is the builder's model.
+
+High blast radius either way: this computes the genesis root of every chain.
+Caveat for (B) — the returned IBS is a carrier re-consumed by three executors with
 different commit mechanisms (`txtask.go`, `historical_trace_worker.go`, and
 `rpchelper/commitment.go` which discards it); `WriteGenesisState` commits via a
 `NoopWriter` and `WriteGenesisBesideState` writes only block metadata. Confirm the
-block-0 commit path for each consumer before setting `noMaterialize` on the
-genesis IBS.
+block-0 commit path for each consumer before setting `noMaterialize`.
 
 ## Follow-up 2 — serial executor off stateObjects
 
