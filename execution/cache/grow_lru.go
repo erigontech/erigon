@@ -78,6 +78,9 @@ func (g *growLRU[V]) newShards(capacity uint32) *freelru.ShardedLRU[uint64, V] {
 
 func (g *growLRU[V]) Get(key uint64) (V, bool) { return g.cur.Load().Get(key) }
 
+// Peek is Get without the LRU recency bump, for side-effect-free probes.
+func (g *growLRU[V]) Peek(key uint64) (V, bool) { return g.cur.Load().Peek(key) }
+
 func (g *growLRU[V]) Add(key uint64, value V) {
 	lru := g.cur.Load()
 	if curCap := g.curCap.Load(); curCap < g.maxCap && lru.Len() >= int(curCap) {
