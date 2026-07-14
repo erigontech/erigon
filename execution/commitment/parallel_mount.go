@@ -53,7 +53,7 @@ func (hph *HexPatriciaHashed) mountTo(root *HexPatriciaHashed, nibble int) {
 	hph.mounted = true
 	hph.mountWall = root.currentKeyLen + 1
 	for row := 0; row <= hph.activeRows; row++ {
-		for nib := 0; nib < len(hph.grid[row]); nib++ {
+		for nib := range len(hph.grid[row]) {
 			hph.grid[row][nib] = root.grid[row][nib]
 		}
 	}

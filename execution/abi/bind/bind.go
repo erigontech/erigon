@@ -107,7 +107,7 @@ func Bind(types []string, abis []string, bytecodes []string, fsigs []map[string]
 		// isLib is the map used to flag each encountered library as such
 		isLib = make(map[string]struct{})
 	)
-	for i := 0; i < len(types); i++ {
+	for i := range types {
 		// Parse the actual ABI to generate the binding for
 		evmABI, err := abi.JSON(strings.NewReader(abis[i]))
 		if err != nil {
@@ -252,7 +252,7 @@ func Bind(types []string, abis []string, bytecodes []string, fsigs []map[string]
 		}
 	}
 	// Check if that type has already been identified as a library
-	for i := 0; i < len(types); i++ {
+	for i := range types {
 		_, ok := isLib[types[i]]
 		contracts[types[i]].Library = ok
 	}

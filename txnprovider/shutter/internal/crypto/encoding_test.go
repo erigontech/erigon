@@ -30,7 +30,7 @@ import (
 
 func encryptedMessage() *EncryptedMessage {
 	blocks := []Block{}
-	for i := 0; i < 3; i++ {
+	for i := range 3 {
 		s := bytes.Repeat([]byte{byte(i)}, 32)
 		var b Block
 		copy(b[:], s)

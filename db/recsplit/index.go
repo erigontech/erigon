@@ -217,7 +217,7 @@ func (idx *Index) init() (err error) {
 	startSeedLen := int(idx.data[offset])
 	offset++
 	idx.startSeed = make([]uint64, startSeedLen)
-	for i := 0; i < startSeedLen; i++ {
+	for i := range startSeedLen {
 		idx.startSeed[i] = binary.BigEndian.Uint64(idx.data[offset:])
 		offset += 8
 	}
@@ -282,7 +282,7 @@ func (idx *Index) init() (err error) {
 	golombParamSize := binary.BigEndian.Uint16(idx.data[offset:])
 	offset += 4
 	idx.golombRice = make([]uint32, golombParamSize)
-	for i := uint16(0); i < golombParamSize; i++ {
+	for i := range golombParamSize {
 		if i == 0 {
 			idx.golombRice[i] = (bijMemo[i] << 27) | bijMemo[i]
 		} else if i <= idx.leafSize {

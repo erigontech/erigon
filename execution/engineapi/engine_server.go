@@ -1309,7 +1309,7 @@ func waitForResponse(maxWait time.Duration, waitCondnF func() (bool, error)) (bo
 	}
 	checkInterval := 10 * time.Millisecond
 	maxChecks := int64(maxWait) / int64(checkInterval)
-	for i := int64(0); i < maxChecks; i++ {
+	for range maxChecks {
 		time.Sleep(checkInterval)
 		shouldWait, err = waitCondnF()
 		if err != nil || !shouldWait {

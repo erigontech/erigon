@@ -792,7 +792,7 @@ func TestFinalizeTxSimple_SenderIsCoinbase_AccumulatedAcrossTxs(t *testing.T) {
 	vm := state.NewVersionMap(nil)
 	reader := baseScenario.makeReader()
 
-	for txIdx := 0; txIdx < numTxs; txIdx++ {
+	for txIdx := range numTxs {
 		s := senderIsCoinbaseScenario(t, 0, preBlockBal, tip, false)
 
 		// Stamp each TxOut entry with this iteration's Version before

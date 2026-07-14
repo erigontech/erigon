@@ -206,7 +206,7 @@ func (bra *BlockReadAheader) warmBody(ctx context.Context, db kv.RoDB, header *t
 		// Pre-divide work: each worker gets a dedicated range of BAL entries
 		entriesPerWorker := (balLen + balWorkers - 1) / balWorkers
 
-		for w := 0; w < balWorkers; w++ {
+		for w := range balWorkers {
 			start := w * entriesPerWorker
 			end := min(start+entriesPerWorker, balLen)
 			if start >= balLen {
@@ -370,7 +370,7 @@ func BlocksReadAhead(ctx context.Context, workers int, db kv.RoDB, engine rules.
 	const readAheadBlocks = 500
 	readAhead := make(chan uint64, readAheadBlocks)
 	g, gCtx := errgroup.WithContext(ctx)
-	for workerNum := 0; workerNum < workers; workerNum++ {
+	for range workers {
 		g.Go(func() (err error) {
 			var bn uint64
 			var ok bool

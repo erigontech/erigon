@@ -1242,7 +1242,7 @@ func TestAssembleBlockAmsterdamForkTransition(t *testing.T) {
 	// Build 3 pre-Amsterdam blocks via the builder (timestamps 1, 2, 3).
 	topBlock := m.Genesis
 	baseFee := topBlock.BaseFee().Uint64()
-	for i := 0; i < 3; i++ {
+	for i := range 3 {
 		nonce := uint64(i)
 		tx, txErr := types.SignTx(
 			types.NewTransaction(nonce, common.Address{1}, uint256.NewInt(10_000), params.TxGas, uint256.NewInt(baseFee), nil),

@@ -2096,7 +2096,7 @@ func (io *VersionedIO) Merge(other *VersionedIO) *VersionedIO {
 	mergedLen := max(io.Len(), other.Len())
 	merged := NewVersionedIO(mergedLen - 1)
 
-	for i := 0; i < mergedLen; i++ {
+	for i := range mergedLen {
 		if i < len(io.inputs) {
 			if i < len(other.inputs) {
 				merged.inputs[i] = io.inputs[i].Merge(other.inputs[i])

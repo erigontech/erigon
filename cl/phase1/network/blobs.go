@@ -56,7 +56,7 @@ func BlobsIdentifiersFromBlocks(blocks []*cltypes.SignedBeaconBlock, cfg *clpara
 		if ids.Len()+kzgCommitments > cfg.MaxRequestBlobSidecarsByVersion(block.Version()) {
 			break
 		}
-		for i := 0; i < kzgCommitments; i++ {
+		for i := range kzgCommitments {
 			ids.Append(&cltypes.BlobIdentifier{
 				BlockRoot: blockRoot,
 				Index:     uint64(i),

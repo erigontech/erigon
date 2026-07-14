@@ -289,7 +289,7 @@ func (s *simulator) sanitizeSimulatedBlocks(blocks []SimulatedBlock) ([]Simulate
 			// Fill the gap with empty blocks.
 			gap := diff - 1
 			// Assign block number to the empty blocks.
-			for i := uint64(0); i < gap; i++ {
+			for i := range gap {
 				n := prevNumber + i + 1
 				t := prevTimestamp + timestampIncrement
 				b := SimulatedBlock{

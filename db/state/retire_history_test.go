@@ -267,7 +267,7 @@ func TestRetire_ReclaimConcurrent(t *testing.T) {
 
 	var wg sync.WaitGroup
 	stop := make(chan struct{})
-	for i := 0; i < 16; i++ {
+	for range 16 {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()

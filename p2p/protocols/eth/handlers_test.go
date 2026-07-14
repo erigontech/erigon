@@ -320,7 +320,7 @@ func TestAnswerGetReceiptsQueryCacheOnly70_LastBlockIncomplete(t *testing.T) {
 	hash1 := common.HexToHash("0x01")
 	// Create receipts with large log data to force truncation
 	var bigReceipts types.Receipts
-	for i := 0; i < 20; i++ {
+	for i := range 20 {
 		bigReceipts = append(bigReceipts, makeReceipt(uint64(i+1)*100, 1024*1024)) // 1MB log data each
 	}
 	getter := &mockReceiptsGetter{
@@ -362,7 +362,7 @@ func TestAnswerGetReceiptsQueryCacheOnly70_MultipleBlocksTruncatesLast(t *testin
 	// First block: small receipts that fit easily
 	// Second block: very large receipts that force truncation
 	var bigReceipts types.Receipts
-	for i := 0; i < 20; i++ {
+	for i := range 20 {
 		bigReceipts = append(bigReceipts, makeReceipt(uint64(i+1)*100, 1024*1024))
 	}
 	getter := &mockReceiptsGetter{
@@ -637,7 +637,7 @@ func TestAnswerGetBlockAccessListsQuery_SoftSizeLimit(t *testing.T) {
 
 	reader := balHeaderReader{}
 	query := make(GetBlockAccessListsPacket, 0, 5)
-	for i := 0; i < 5; i++ {
+	for i := range 5 {
 		h := common.Hash{byte(i + 1)}
 		num := uint64(1000 + i)
 		reader[h] = num

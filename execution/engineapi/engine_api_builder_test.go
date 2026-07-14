@@ -96,7 +96,7 @@ func TestEngineApiMultiBlockSequence(t *testing.T) {
 	eat.Run(t, func(ctx context.Context, t *testing.T, eat engineapitester.EngineApiTester) {
 		receiver := common.HexToAddress("0x42")
 
-		for i := 0; i < 5; i++ {
+		for range 5 {
 			txn, err := eat.Transactor.SubmitSimpleTransfer(eat.CoinbaseKey, receiver, big.NewInt(1000))
 			require.NoError(t, err)
 

@@ -57,7 +57,7 @@ func buildAccountStorageTrie() *Trie {
 	tr := newEmpty()
 	var preimage [4]byte
 	var keys []string
-	for b := uint32(0); b < 10; b++ {
+	for b := range uint32(10) {
 		binary.BigEndian.PutUint32(preimage[:], b)
 		keys = append(keys, string(crypto.Keccak256(preimage[:])))
 	}

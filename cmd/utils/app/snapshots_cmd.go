@@ -2343,7 +2343,7 @@ func checkStateSnapshotFiles(dirs datadir.Dirs, persistReceiptCache, commitmentH
 		if err != nil {
 			return fmt.Errorf("%w: failed to replace version in %s: %v", ErrSnapParseFilename, res.Name(), err)
 		}
-		for snapType := kv.Domain(0); snapType < kv.DomainLen; snapType++ {
+		for snapType := range kv.DomainLen {
 			// skip rcache check if this datadir doesn't produce it
 			if snapType == kv.RCacheDomain && !persistReceiptCache {
 				continue

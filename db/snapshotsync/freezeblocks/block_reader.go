@@ -1176,7 +1176,7 @@ func (r *BlockReader) txsFromSnapshot(baseTxnID uint64, txCount uint32, txsSeg *
 	}
 	gg := txsSeg.Src().MakeGetter()
 	gg.Reset(txnOffset)
-	for i := uint32(0); i < txCount; i++ {
+	for i := range txCount {
 		if !gg.HasNext() {
 			return nil, nil, nil
 		}

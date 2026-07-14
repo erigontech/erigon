@@ -1254,7 +1254,7 @@ func CheckStateVerify(ctx context.Context, db kv.TemporalRoDB, failFast bool, fr
 			// Collect all previous files for no-op write detection.
 			var nextFile state.VisibleFile
 			var prevFiles []state.VisibleFile
-			for j := 0; j < len(files); j++ {
+			for j := range files {
 				if files[j].StartRootNum() == file.EndRootNum() && strings.HasSuffix(files[j].Fullpath(), ".kv") {
 					nextFile = files[j]
 				}

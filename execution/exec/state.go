@@ -581,7 +581,7 @@ func NewWorkersPool(ctx context.Context, accumulator *shards.Accumulator, backgr
 	rws = NewResultsQueue(resultsSize, workerCount)
 
 	g, gctx := errgroup.WithContext(ctx)
-	for i := 0; i < workerCount; i++ {
+	for i := range workerCount {
 		reconWorkers[i] = NewWorker(gctx, background, metrics, chainDb, in, blockReader, chainConfig, genesis, rws, engine, dirs, logger)
 
 		if rs != nil {
@@ -597,7 +597,7 @@ func NewWorkersPool(ctx context.Context, accumulator *shards.Accumulator, backgr
 		}
 	}
 	if background {
-		for i := 0; i < workerCount; i++ {
+		for i := range workerCount {
 			g.Go(func() error {
 				return reconWorkers[i].Run()
 			})
