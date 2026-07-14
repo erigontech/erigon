@@ -1170,6 +1170,8 @@ func (sd *SharedDomains) getLatestMetered(domain kv.Domain, tx kv.TemporalTx, k 
 	if sd.stateCache != nil {
 		v, cTxNum, ok := sd.stateCache.GetWithTxNum(domain, k)
 		// The cache stamps txNums — divide to get the step the entry reflects.
+		// An empty value is stamped with the domain's progress at fill time, so
+		// its cStep is progress-derived, not the step of any deletion.
 		cStep := kv.Step(cTxNum / sd.StepSize())
 		if ok && !servableUnderBound(cStep, maxStep) {
 			ok = false
