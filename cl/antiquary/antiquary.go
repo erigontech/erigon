@@ -19,7 +19,6 @@ package antiquary
 import (
 	"context"
 	"math"
-
 	"sync/atomic"
 	"time"
 
@@ -33,10 +32,11 @@ import (
 	state_accessors "github.com/erigontech/erigon/cl/persistence/state"
 	"github.com/erigontech/erigon/cl/phase1/core/state"
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/datadir"
-	"github.com/erigontech/erigon/db/downloader"
 	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/services"
 	"github.com/erigontech/erigon/db/snapshotsync"
 	"github.com/erigontech/erigon/db/snapshotsync/freezeblocks"
 	"github.com/erigontech/erigon/db/snaptype"
@@ -61,7 +61,7 @@ type Antiquary struct {
 	mainDB                         kv.RwDB                  // this is the main DB
 	blobStorage                    blob_storage.BlobStorage // this is the blob storage
 	dirs                           datadir.Dirs
-	downloader                     downloader.Client
+	downloader                     services.DownloaderClient
 	logger                         log.Logger
 	sn                             *freezeblocks.CaplinSnapshots
 	stateSn                        *snapshotsync.CaplinStateSnapshots
@@ -83,9 +83,14 @@ type Antiquary struct {
 	// mdbx transaction. A very large commit overflows libmdbx's gc_fill_returned
 	// while serializing the transaction's retired-page list; bounding it avoids that.
 	maxSlotsPerCommit uint64
+
+	statePruneStartIdx   int
+	statePruneDisabled   bool
+	statePruneTimeout    time.Duration
+	statePruneBoundaryFn func(table string) uint64
 }
 
-func NewAntiquary(ctx context.Context, blobStorage blob_storage.BlobStorage, genesisState *state.CachingBeaconState, validatorsTable *state_accessors.StaticValidatorTable, cfg *clparams.BeaconChainConfig, dirs datadir.Dirs, downloaderClient downloader.Client, mainDB kv.RwDB, stateSn *snapshotsync.CaplinStateSnapshots, sn *freezeblocks.CaplinSnapshots, reader freezeblocks.BeaconSnapshotReader, syncedData synced_data.SyncedData, logger log.Logger, states, blocks, blobs, snapgen bool, snBuildSema *semaphore.Weighted) *Antiquary {
+func NewAntiquary(ctx context.Context, blobStorage blob_storage.BlobStorage, genesisState *state.CachingBeaconState, validatorsTable *state_accessors.StaticValidatorTable, cfg *clparams.BeaconChainConfig, dirs datadir.Dirs, downloaderClient services.DownloaderClient, mainDB kv.RwDB, stateSn *snapshotsync.CaplinStateSnapshots, sn *freezeblocks.CaplinSnapshots, reader freezeblocks.BeaconSnapshotReader, syncedData synced_data.SyncedData, logger log.Logger, states, blocks, blobs, snapgen bool, snBuildSema *semaphore.Weighted) *Antiquary {
 	backfilled := &atomic.Bool{}
 	blobBackfilled := &atomic.Bool{}
 	backfilled.Store(false)
@@ -112,7 +117,9 @@ func NewAntiquary(ctx context.Context, blobStorage blob_storage.BlobStorage, gen
 		stateSn:         stateSn,
 		syncedData:      syncedData,
 
-		maxSlotsPerCommit: stateAntiquaryMaxSlotsPerCommit,
+		maxSlotsPerCommit:  stateAntiquaryMaxSlotsPerCommit,
+		statePruneDisabled: dbg.EnvBool("CAPLIN_STATE_PRUNE_DISABLE", false),
+		statePruneTimeout:  dbg.EnvDuration("CAPLIN_STATE_PRUNE_TIMEOUT", 0),
 	}
 }
 

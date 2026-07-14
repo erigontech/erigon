@@ -522,7 +522,7 @@ func New(tb testing.TB, opts ...Option) *ExecModuleTester {
 	}
 
 	erigonGrpcServer := remotedbserver.NewKvServer(ctx, db, nil, nil, nil, logger)
-	allSnapshots := blocksnapshots.NewRoSnapshots(cfg.Snapshot, dirs.Snap, logger)
+	allSnapshots := db.(freezeblocks.HasBlockFiles).DebugBlockFiles()
 	allBorSnapshots := heimdall.NewRoSnapshots(cfg.Snapshot, dirs.Snap, logger)
 
 	br := freezeblocks.NewBlockReader(allSnapshots, allBorSnapshots)
@@ -835,7 +835,7 @@ func New(tb testing.TB, opts ...Option) *ExecModuleTester {
 	return mock
 }
 
-func mockDownloader(ctrl *gomock.Controller, snapRoot string) downloader.Client {
+func mockDownloader(ctrl *gomock.Controller, snapRoot string) services.DownloaderClient {
 	snapDownloader := downloaderproto.NewMockDownloaderClient(ctrl)
 
 	snapDownloader.EXPECT().

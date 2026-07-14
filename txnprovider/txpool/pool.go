@@ -23,6 +23,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"maps"
 	"math"
 	"sync"
 	"sync/atomic"
@@ -1933,9 +1934,7 @@ func (p *TxPool) sweepDormantQueued(ctx context.Context, currentBlock uint64, lo
 
 		// Snapshot the map for DB persistence while still holding the lock.
 		snapshot = make(map[uint64]uint64, len(p.senderLastActivity))
-		for k, v := range p.senderLastActivity {
-			snapshot[k] = v
-		}
+		maps.Copy(snapshot, p.senderLastActivity)
 	}()
 
 	if evictedSenders > 0 {

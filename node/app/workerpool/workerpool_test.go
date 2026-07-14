@@ -35,7 +35,6 @@ func TestExample(t *testing.T) {
 
 	rspChan := make(chan string, len(requests))
 	for _, r := range requests {
-		r := r
 		wp.Submit(func() {
 			rspChan <- r
 		})

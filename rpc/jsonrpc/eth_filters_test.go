@@ -44,7 +44,7 @@ import (
 func newBaseApiWithFiltersForTest(f *rpchelper.Filters, _ *kvcache.Coherent, m *execmoduletester.ExecModuleTester) *BaseAPI {
 	// Use the SD-wired state cache so reads observe the in-flight tip under
 	// background commit, not a plain coherent cache fed by stale notifications.
-	return NewBaseApi(f, m.StateCache, m.BlockReader, false, rpccfg.DefaultEvmCallTimeout, m.Engine, m.Dirs, nil, 0, 0)
+	return NewBaseApi(f, m.StateCache, m.BlockReader, false, rpccfg.DefaultEvmCallTimeout, m.Engine, m.Dirs, nil, 0, 0, 0)
 }
 
 func TestSubscriptionsRequireFiltersAndNotifier(t *testing.T) {

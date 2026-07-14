@@ -185,6 +185,7 @@ func RootCommand() (*cobra.Command, *httpcfg.HttpCfg) {
 	rootCmd.PersistentFlags().DurationVar(&cfg.RpcFiltersConfig.RpcSubscriptionFiltersTimeout, "rpc.subscription.filters.timeout", rpchelper.DefaultFiltersConfig.RpcSubscriptionFiltersTimeout, "Timeout before idle filters are evicted. Defaults to 5m; set to 0 to disable eviction.")
 	rootCmd.PersistentFlags().IntVar(&cfg.BlockRangeLimit, utils.RpcBlockRangeLimit.Name, utils.RpcBlockRangeLimit.Value, utils.RpcBlockRangeLimit.Usage)
 	rootCmd.PersistentFlags().IntVar(&cfg.GetLogsMaxResults, utils.RpcGetLogsMaxResults.Name, utils.RpcGetLogsMaxResults.Value, utils.RpcGetLogsMaxResults.Usage)
+	rootCmd.PersistentFlags().IntVar(&cfg.LogQueryLimit, utils.RpcLogQueryLimit.Name, utils.RpcLogQueryLimit.Value, utils.RpcLogQueryLimit.Usage)
 	rootCmd.PersistentFlags().IntVar(&cfg.BatchLimit, utils.RpcBatchLimit.Name, utils.RpcBatchLimit.Value, utils.RpcBatchLimit.Usage)
 	rootCmd.PersistentFlags().IntVar(&cfg.ReturnDataLimit, utils.RpcReturnDataLimit.Name, utils.RpcReturnDataLimit.Value, utils.RpcReturnDataLimit.Usage)
 	rootCmd.PersistentFlags().BoolVar(&cfg.AllowUnprotectedTxs, utils.AllowUnprotectedTxs.Name, utils.AllowUnprotectedTxs.Value, utils.AllowUnprotectedTxs.Usage)
@@ -357,7 +358,7 @@ func EmbeddedServices(ctx context.Context,
 // `cfg.WithDatadir` (mode when it on 1 machine with Erigon)
 func RemoteServices(ctx context.Context, cfg *httpcfg.HttpCfg, logger log.Logger, rootCancel context.CancelFunc) (
 	db kv.TemporalRoDB, eth rpchelper.ApiBackend, txPool txpoolproto.TxpoolClient, mining txpoolproto.MiningClient,
-	stateCache kvcache.Cache, blockReader services.FullBlockReader, engine rules.EngineReader,
+	stateCache kvcache.Cache, blockReader services.FullBlockReader, engine rules.Engine,
 	ff *rpchelper.Filters, bridgeReader BridgeReader, heimdallReader HeimdallReader, err error) {
 	if !cfg.WithDatadir && cfg.PrivateApiAddr == "" {
 		return nil, nil, nil, nil, nil, nil, nil, ff, nil, nil, errors.New("either remote db or local db must be specified")
@@ -525,7 +526,7 @@ func RemoteServices(ctx context.Context, cfg *httpcfg.HttpCfg, logger log.Logger
 		}
 		onNewSnapshot()
 
-		db, err = temporal.New(rawDB, agg)
+		db, err = temporal.New(rawDB, agg, allSnapshots)
 		if err != nil {
 			return nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, err
 		}
@@ -608,12 +609,12 @@ func RemoteServices(ctx context.Context, cfg *httpcfg.HttpCfg, logger log.Logger
 				return nil, nil, nil, nil, nil, nil, nil, ff, nil, nil, err
 			}
 			if cc.TerminalTotalDifficulty != nil {
-				engine = merge.New(engine.(rules.Engine)) // the Merge
+				engine = merge.New(engine) // the Merge
 			}
 		} else {
 			engine = ethash.NewFaker()
 			if cc.TerminalTotalDifficulty != nil {
-				engine = merge.New(engine.(rules.Engine)) // the Merge
+				engine = merge.New(engine) // the Merge
 			}
 		}
 	} else {
@@ -740,6 +741,7 @@ func startRegularRpcServer(ctx context.Context, cfg *httpcfg.HttpCfg, rpcAPI []r
 		"ws", cfg.WebsocketEnabled,
 		"rpc.blockrange.limit", cfg.BlockRangeLimit,
 		"rpc.logs.maxresults", cfg.GetLogsMaxResults,
+		"rpc.logs.querylimit", cfg.LogQueryLimit,
 	}
 
 	if cfg.SocketServerEnabled {
@@ -1175,8 +1177,11 @@ func (e *remoteRulesEngine) Prepare(_ rules.ChainHeaderReader, _ *types.Header, 
 	panic("remoteRulesEngine.Prepare not supported")
 }
 
-func (e *remoteRulesEngine) Finalize(_ *chain.Config, _ *types.Header, _ *state.IntraBlockState, _ []*types.Header, _ types.Receipts, _ []*types.Withdrawal, _ rules.ChainReader, _ rules.SystemCall, skipReceiptsEval bool, _ log.Logger) (types.FlatRequests, error) {
-	panic("remoteRulesEngine.Finalize not supported")
+func (e *remoteRulesEngine) Finalize(config *chain.Config, header *types.Header, state *state.IntraBlockState, uncles []*types.Header, receipts types.Receipts, withdrawals []*types.Withdrawal, chain rules.ChainReader, syscall rules.SystemCall, skipReceiptsEval bool, logger log.Logger) (types.FlatRequests, error) {
+	if err := e.validateEngineReady(); err != nil {
+		return nil, err
+	}
+	return e.engine.Finalize(config, header, state, uncles, receipts, withdrawals, chain, syscall, skipReceiptsEval, logger)
 }
 
 func (e *remoteRulesEngine) FinalizeAndAssemble(_ *chain.Config, _ *types.Header, _ *state.IntraBlockState, _ types.Transactions, _ []*types.Header, _ types.Receipts, _ []*types.Withdrawal, _ rules.ChainReader, _ rules.SystemCall, _ rules.Call, _ log.Logger) (*types.Block, types.FlatRequests, error) {

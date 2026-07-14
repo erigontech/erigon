@@ -176,6 +176,9 @@ func createBlock(ctx context.Context, sd *execctx.SharedDomains, tx kv.TemporalT
 
 	header.Coinbase = coinbase.Value()
 	header.Extra = cfg.builder.BuilderConfig.ExtraData
+	if cfg.blockBuilderParameters != nil && cfg.blockBuilderParameters.ExtraData != nil {
+		header.Extra = cfg.blockBuilderParameters.ExtraData
+	}
 
 	logger.Info(fmt.Sprintf("[%s] Start building", logPrefix), "block", executionAt+1, "baseFee", header.BaseFee, "gasLimit", header.GasLimit)
 	ibs := state.New(state.NewReaderV3(sd.AsGetter(tx)))

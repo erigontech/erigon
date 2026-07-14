@@ -37,6 +37,7 @@ import (
 	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/db/services"
 	"github.com/erigontech/erigon/db/state/execctx"
+	"github.com/erigontech/erigon/execution/bal"
 	"github.com/erigontech/erigon/execution/builder"
 	"github.com/erigontech/erigon/execution/cache"
 	"github.com/erigontech/erigon/execution/chain"
@@ -212,7 +213,8 @@ type ExecModule struct {
 	config  *chain.Config
 	syncCfg ethconfig.Sync
 	// rules engine
-	engine rules.Engine
+	engine         rules.Engine
+	balRegenerator *bal.Regenerator
 
 	fcuBackgroundPrune      bool
 	fcuBackgroundCommit     bool
@@ -302,6 +304,7 @@ func NewExecModule(
 		hook:                    hook,
 		accum:                   accum,
 		engine:                  engine,
+		balRegenerator:          bal.NewRegenerator(blockReader, engine, logger),
 		syncCfg:                 syncCfg,
 		bacgroundCtx:            ctx,
 		fcuBackgroundPrune:      fcuBackgroundPrune,
