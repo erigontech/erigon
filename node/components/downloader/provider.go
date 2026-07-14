@@ -36,8 +36,9 @@ import (
 	dl "github.com/erigontech/erigon/db/downloader"
 	"github.com/erigontech/erigon/db/downloader/downloadercfg"
 	"github.com/erigontech/erigon/db/downloader/downloadergrpc"
+	"github.com/erigontech/erigon/db/services"
 	"github.com/erigontech/erigon/node/ethconfig"
-	downloaderproto "github.com/erigontech/erigon/node/gointerfaces/downloaderproto"
+	"github.com/erigontech/erigon/node/gointerfaces/downloaderproto"
 )
 
 // Provider holds the Downloader's runtime state. It implements the component
@@ -46,8 +47,8 @@ import (
 // After Initialize, the Client field is ready for consumers to use.
 type Provider struct {
 	// Public fields — accessible by consumers via the component dependency graph.
-	Downloader *dl.Downloader // nil when using external downloader
-	Client     dl.Client      // always set after Initialize (local or remote)
+	Downloader *dl.Downloader            // nil when using external downloader
+	Client     services.DownloaderClient // always set after Initialize (local or remote)
 
 	// Configuration
 	cfg         *downloadercfg.Cfg
