@@ -83,7 +83,7 @@ type Client struct {
 	methodAllowList AllowList
 	batchLimit      int // batch size limit
 
-	idCounter uint32
+	idCounter atomic.Uint32
 
 	// This function, if non-nil, is called when the connection is lost.
 	reconnectFunc reconnectFunc
@@ -249,7 +249,7 @@ func (c *Client) RegisterName(name string, receiver any) error {
 }
 
 func (c *Client) nextID() json.RawMessage {
-	id := atomic.AddUint32(&c.idCounter, 1)
+	id := c.idCounter.Add(1)
 	return strconv.AppendUint(nil, uint64(id), 10)
 }
 

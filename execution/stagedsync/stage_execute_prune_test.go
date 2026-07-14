@@ -22,17 +22,12 @@ import (
 
 	"github.com/stretchr/testify/require"
 
-	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv"
-	"github.com/erigontech/erigon/db/kv/dbcfg"
-	"github.com/erigontech/erigon/db/kv/mdbx"
 	"github.com/erigontech/erigon/db/kv/prune"
 	"github.com/erigontech/erigon/db/kv/rawdbv3"
-	"github.com/erigontech/erigon/db/snapshotsync/blocksnapshots"
+	"github.com/erigontech/erigon/db/kv/temporal/temporaltest"
 	"github.com/erigontech/erigon/db/snapshotsync/freezeblocks"
-	"github.com/erigontech/erigon/execution/chain/networkname"
-	"github.com/erigontech/erigon/node/ethconfig"
 )
 
 // TestRetireCutoffs_ConvertsBlockDistanceToTxNum pins the per-domain
@@ -41,13 +36,9 @@ import (
 // own receipts window when set. The aggregator floors txNum to its file step, so
 // this layer stays in txNum.
 func TestRetireCutoffs_ConvertsBlockDistanceToTxNum(t *testing.T) {
-	logger := log.New()
 	dirs := datadir.New(t.TempDir())
-	db := mdbx.New(dbcfg.ChainDB, logger).InMem(t, dirs.Chaindata).MustOpen()
-	t.Cleanup(db.Close)
-
-	snaps := blocksnapshots.NewRoSnapshots(ethconfig.BlocksFreezing{ChainName: networkname.Mainnet}, dirs.Snap, logger)
-	t.Cleanup(snaps.Close)
+	db := temporaltest.NewTestDB(t, dirs)
+	snaps := db.(freezeblocks.HasBlockFiles).DebugBlockFiles()
 	br := freezeblocks.NewBlockReader(snaps, nil)
 
 	ctx := context.Background()

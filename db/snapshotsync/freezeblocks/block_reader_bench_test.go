@@ -46,17 +46,15 @@ import (
 	"testing"
 
 	lru "github.com/hashicorp/golang-lru/v2"
-	uint256 "github.com/holiman/uint256"
+	"github.com/holiman/uint256"
 
 	"github.com/erigontech/erigon/common"
-	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv/dbcfg"
 	"github.com/erigontech/erigon/db/kv/memdb"
+	"github.com/erigontech/erigon/db/kv/temporal/temporaltest"
 	"github.com/erigontech/erigon/db/rawdb"
-	"github.com/erigontech/erigon/db/snapshotsync/blocksnapshots"
-	"github.com/erigontech/erigon/execution/chain/networkname"
 	"github.com/erigontech/erigon/execution/types"
-	"github.com/erigontech/erigon/node/ethconfig"
 )
 
 const benchBlockCount = 1_000
@@ -195,14 +193,8 @@ func BenchmarkCanonicalHash_RealSnapshot(b *testing.B) {
 		b.Skipf("snapshot dir not accessible: %v", err)
 	}
 
-	logger := log.New()
-	cfg := ethconfig.Defaults.Snapshot
-	cfg.ChainName = networkname.Mainnet
-	snapshots := blocksnapshots.NewRoSnapshots(cfg, snapDir, logger)
-	if err := snapshots.OpenFolder(); err != nil {
-		b.Fatal(err)
-	}
-	defer snapshots.Close()
+	db := temporaltest.NewTestDB(b, datadir.New(b.TempDir()))
+	snapshots := db.(HasBlockFiles).DebugBlockFiles()
 
 	available := snapshots.BlocksAvailable()
 	if available == 0 {
@@ -212,7 +204,6 @@ func BenchmarkCanonicalHash_RealSnapshot(b *testing.B) {
 	blockReader := NewBlockReader(snapshots, nil)
 
 	// Use an empty memdb so every lookup misses the DB and falls through to snapshots.
-	db := memdb.NewTestDB(b, dbcfg.ChainDB)
 	tx, err := db.BeginRo(context.Background())
 	if err != nil {
 		b.Fatal(err)
@@ -261,14 +252,8 @@ func BenchmarkCanonicalHash_RealSnapshot_MainEquivalent(b *testing.B) {
 		b.Skipf("snapshot dir not accessible: %v", err)
 	}
 
-	logger := log.New()
-	cfg := ethconfig.Defaults.Snapshot
-	cfg.ChainName = networkname.Mainnet
-	snapshots := blocksnapshots.NewRoSnapshots(cfg, snapDir, logger)
-	if err := snapshots.OpenFolder(); err != nil {
-		b.Fatal(err)
-	}
-	defer snapshots.Close()
+	db := temporaltest.NewTestDB(b, datadir.New(b.TempDir()))
+	snapshots := db.(HasBlockFiles).DebugBlockFiles()
 
 	available := snapshots.BlocksAvailable()
 	if available == 0 {
@@ -277,7 +262,6 @@ func BenchmarkCanonicalHash_RealSnapshot_MainEquivalent(b *testing.B) {
 
 	blockReader := NewBlockReader(snapshots, nil)
 
-	db := memdb.NewTestDB(b, dbcfg.ChainDB)
 	ctx := context.Background()
 	tx, err := db.BeginRo(ctx)
 	if err != nil {
@@ -329,14 +313,8 @@ func BenchmarkCanonicalHash_RealSnapshot_Cold(b *testing.B) {
 		b.Skipf("snapshot dir not accessible: %v", err)
 	}
 
-	logger := log.New()
-	cfg := ethconfig.Defaults.Snapshot
-	cfg.ChainName = networkname.Mainnet
-	snapshots := blocksnapshots.NewRoSnapshots(cfg, snapDir, logger)
-	if err := snapshots.OpenFolder(); err != nil {
-		b.Fatal(err)
-	}
-	defer snapshots.Close()
+	db := temporaltest.NewTestDB(b, datadir.New(b.TempDir()))
+	snapshots := db.(HasBlockFiles).DebugBlockFiles()
 
 	available := snapshots.BlocksAvailable()
 	if available == 0 {
@@ -345,7 +323,6 @@ func BenchmarkCanonicalHash_RealSnapshot_Cold(b *testing.B) {
 
 	blockReader := NewBlockReader(snapshots, nil)
 
-	db := memdb.NewTestDB(b, dbcfg.ChainDB)
 	tx, err := db.BeginRo(context.Background())
 	if err != nil {
 		b.Fatal(err)
