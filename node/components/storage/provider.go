@@ -35,7 +35,6 @@ import (
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/log/v3"
-	"github.com/erigontech/erigon/db/downloader"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/rawdb/blockio"
 	"github.com/erigontech/erigon/db/services"
@@ -98,7 +97,7 @@ type Deps struct {
 	DBEventNotifier services.DBEventNotifier
 
 	// Downloader client for file-change callbacks (may be nil).
-	DownloaderClient downloader.Client
+	DownloaderClient services.DownloaderClient
 
 	SegmentsBuildLimiter *semaphore.Weighted
 	Logger               log.Logger

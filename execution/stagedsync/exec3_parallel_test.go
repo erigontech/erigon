@@ -503,7 +503,7 @@ func runParallel(tb testing.TB, tasks []exec.Task, validation propertyCheck, met
 	assert.NoError(tb, err)
 	defer agg.Close()
 
-	db, err := temporal.New(rawDb, agg)
+	db, err := temporal.New(rawDb, agg, nil)
 	assert.NoError(tb, err)
 
 	tx, err := db.BeginTemporalRo(context.Background()) //nolint:gocritic
@@ -628,7 +628,7 @@ func runParallelGetMetadata(tb testing.TB, tasks []exec.Task, validation propert
 	assert.NoError(tb, err)
 	defer agg.Close()
 
-	db, err := temporal.New(rawDb, agg)
+	db, err := temporal.New(rawDb, agg, nil)
 	assert.NoError(tb, err)
 
 	tx, err := db.BeginTemporalRo(context.Background()) //nolint:gocritic
@@ -689,7 +689,7 @@ func runProfileAndExecute(tb testing.TB, tasks []exec.Task, validation propertyC
 	assert.NoError(tb, err)
 	defer agg.Close()
 
-	db, err := temporal.New(rawDb, agg)
+	db, err := temporal.New(rawDb, agg, nil)
 	assert.NoError(tb, err)
 
 	chainSpec, _ := chainspec.ChainSpecByName(networkname.Mainnet)
@@ -1408,7 +1408,7 @@ func newResumeTestDB(t *testing.T) kv.TemporalRwDB {
 	require.NoError(t, err)
 	t.Cleanup(agg.Close)
 
-	db, err := temporal.New(rawDb, agg)
+	db, err := temporal.New(rawDb, agg, nil)
 	require.NoError(t, err)
 	return db
 }

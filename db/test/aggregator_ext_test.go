@@ -143,7 +143,7 @@ func TestAggregatorV3_RestartOnFiles(t *testing.T) {
 	t.Cleanup(newAgg.Close)
 	require.NoError(t, newAgg.OpenFolder())
 
-	db, _ = temporal.New(newDb, newAgg)
+	db, _ = temporal.New(newDb, newAgg, nil)
 
 	tx, err = db.BeginTemporalRw(t.Context())
 	require.NoError(t, err)
@@ -207,7 +207,7 @@ func TestAggregatorV3_ReplaceCommittedKeys(t *testing.T) {
 	require.NoError(t, err)
 	defer domains.Close()
 
-	var latestCommitTxNum uint64
+	var latestCommitTxNum atomic.Uint64
 	commit := func(txn uint64) error {
 		err = domains.Flush(ctx, tx)
 		require.NoError(t, err)
@@ -222,7 +222,7 @@ func TestAggregatorV3_ReplaceCommittedKeys(t *testing.T) {
 
 		domains, err = execctx.NewSharedDomains(t.Context(), tx, log.New())
 		require.NoError(t, err)
-		atomic.StoreUint64(&latestCommitTxNum, txn)
+		latestCommitTxNum.Store(txn)
 		return nil
 	}
 
@@ -739,7 +739,7 @@ func TestAggregatorV3_BuildFiles_WithReorgDepth(t *testing.T) {
 	t.Cleanup(agg.Close)
 	err := agg.OpenFolder()
 	require.NoError(t, err)
-	tdb, err := temporal.New(db, agg)
+	tdb, err := temporal.New(db, agg, nil)
 	require.NoError(t, err)
 	t.Cleanup(tdb.Close)
 	tx, err := tdb.BeginTemporalRw(ctx)

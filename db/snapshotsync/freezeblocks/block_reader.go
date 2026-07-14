@@ -21,7 +21,6 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
-	"slices"
 	"sort"
 
 	lru "github.com/hashicorp/golang-lru/v2"
@@ -143,7 +142,6 @@ func (r *RemoteBlockReader) BorSnapshots() services.BlockSnapshots { panic("not 
 func (r *RemoteBlockReader) AllTypes() []snaptype.Type             { panic("not implemented") }
 func (r *RemoteBlockReader) FrozenBlocks() uint64                  { panic("not supported") }
 func (r *RemoteBlockReader) FrozenBorBlocks(align bool) uint64     { panic("not supported") }
-func (r *RemoteBlockReader) FrozenFiles() (list []string)          { panic("not supported") }
 func (r *RemoteBlockReader) FreezingCfg() ethconfig.BlocksFreezing { panic("not supported") }
 
 func (r *RemoteBlockReader) HeaderByHash(ctx context.Context, tx kv.Getter, hash common.Hash) (*types.Header, error) {
@@ -502,29 +500,24 @@ func (r *BlockReader) FrozenBorBlocks(align bool) uint64 {
 
 	return frozen
 }
-func (r *BlockReader) FrozenFiles() []string {
-	files := r.sn.Files()
-	if r.borSn != nil {
-		files = append(files, r.borSn.Files()...)
-	}
-	slices.Sort(files)
-	return files
-}
 func (r *BlockReader) FreezingCfg() ethconfig.BlocksFreezing { return r.sn.Cfg() }
 
 func (r *BlockReader) HeadersRange(ctx context.Context, walker func(header *types.Header) error) error {
 	return ForEachHeader(ctx, r.sn, walker)
 }
 
-// blockFilesRoTxProvider is a tx (e.g. a temporal tx) exposing a block-files view
+// HasBlockFilesRoTx is a tx (e.g. a temporal tx) exposing a block-files view
 // pinned for its lifetime.
-type blockFilesRoTxProvider interface {
+type HasBlockFilesRoTx interface {
 	BlockFilesRoTx() *blocksnapshots.View
+}
+type HasBlockFiles interface {
+	DebugBlockFiles() *blocksnapshots.RoSnapshots
 }
 
 // txBlockView returns the block-files view pinned by tx, or nil.
 func txBlockView(tx kv.Getter) *blocksnapshots.View {
-	if v, ok := tx.(blockFilesRoTxProvider); ok {
+	if v, ok := tx.(HasBlockFilesRoTx); ok {
 		return v.BlockFilesRoTx()
 	}
 	return nil
@@ -1338,14 +1331,18 @@ func (r *BlockReader) TxnLookup(_ context.Context, tx kv.Getter, txnHash common.
 }
 
 func (r *BlockReader) FirstTxnNumNotInSnapshots(tx kv.Getter) uint64 {
-	sn, ok, close := r.viewSingleFile(tx, snaptype2.Transactions, r.sn.BlocksAvailable())
-	if !ok {
+	view, release := r.view(tx)
+	defer release()
+
+	segs := view.Segments(snaptype2.Transactions)
+	if len(segs) == 0 {
 		return 0
 	}
-	defer close()
-
-	lastTxnID := sn.Src().Index(snaptype2.Indexes.TxnHash).BaseDataID() + uint64(sn.Src().Count())
-	return lastTxnID
+	last := segs[len(segs)-1].Src()
+	if last == nil {
+		return 0
+	}
+	return last.Index(snaptype2.Indexes.TxnHash).BaseDataID() + uint64(last.Count())
 }
 
 func (r *BlockReader) IterateFrozenBodies(tx kv.Getter, f func(blockNum, baseTxNum, txCount uint64) error) error {
@@ -1372,10 +1369,10 @@ func (r *BlockReader) IterateFrozenBodies(tx kv.Getter, f func(blockNum, baseTxN
 	return nil
 }
 
-func (r *BlockReader) IntegrityTxnID(ctx context.Context, tx kv.Getter, failFast bool) error {
+func (r *BlockReader) IntegrityTxnID(ctx context.Context, failFast bool) error {
 	defer log.Info("[integrity] BlocksTxnID done")
-	view, release := r.view(tx)
-	defer release()
+	view := r.sn.View()
+	defer view.Close()
 
 	var expectedFirstTxnID uint64
 	for i, snb := range view.Bodies() {
@@ -1526,9 +1523,9 @@ func (r *BlockReader) ensureHeaderNumber(n uint64, seg *snapshotsync.VisibleSegm
 	return nil
 }
 
-func (r *BlockReader) Integrity(ctx context.Context, tx kv.Getter) error {
-	view, release := r.view(tx)
-	defer release()
+func (r *BlockReader) Integrity(ctx context.Context, _ kv.Getter) error {
+	view := r.sn.View()
+	defer view.Close()
 	for _, seg := range view.Headers() {
 		if err := r.ensureHeaderNumber(seg.From(), seg); err != nil {
 			return err
