@@ -595,7 +595,7 @@ type blockFilesRoTxProvider interface {
 }
 
 func (m *MemoryMutation) BlockFilesRoTx() *blocksnapshots.View {
-	return m.memTx.(blockFilesRoTxProvider).BlockFilesRoTx()
+	return m.db.(blockFilesRoTxProvider).BlockFilesRoTx()
 }
 
 func (m *MemoryMutation) Count(bucket string) (uint64, error) {
