@@ -100,14 +100,14 @@ func BenchmarkFindMergeRange(t *testing.B) {
 	t.Run("big", func(t *testing.B) {
 		for j := 0; j < t.N; j++ {
 			var RangesOld []Range
-			for i := 0; i < 24; i++ {
+			for i := range 24 {
 				RangesOld = append(RangesOld, NewRange(uint64(i*100_000), uint64((i+1)*100_000)))
 			}
 			merger.FindMergeRanges(RangesOld, uint64(24*100_000))
 
 			var RangesNew []Range
 			start := uint64(19_000_000)
-			for i := uint64(0); i < 24; i++ {
+			for i := range uint64(24) {
 				RangesNew = append(RangesNew, NewRange(start+(i*100_000), start+((i+1)*100_000)))
 			}
 			merger.FindMergeRanges(RangesNew, uint64(24*100_000))
@@ -117,14 +117,14 @@ func BenchmarkFindMergeRange(t *testing.B) {
 	t.Run("small", func(t *testing.B) {
 		for j := 0; j < t.N; j++ {
 			var RangesOld Ranges
-			for i := uint64(0); i < 240; i++ {
+			for i := range uint64(240) {
 				RangesOld = append(RangesOld, NewRange(i*10_000, (i+1)*10_000))
 			}
 			merger.FindMergeRanges(RangesOld, uint64(240*10_000))
 
 			var RangesNew Ranges
 			start := uint64(19_000_000)
-			for i := uint64(0); i < 240; i++ {
+			for i := range uint64(240) {
 				RangesNew = append(RangesNew, NewRange(start+i*10_000, start+(i+1)*10_000))
 			}
 			merger.FindMergeRanges(RangesNew, uint64(240*10_000))
@@ -138,7 +138,7 @@ func TestFindMergeRange(t *testing.T) {
 	merger.DisableFsync()
 	t.Run("big", func(t *testing.T) {
 		var RangesOld []Range
-		for i := 0; i < 24; i++ {
+		for i := range 24 {
 			RangesOld = append(RangesOld, NewRange(uint64(i*100_000), uint64((i+1)*100_000)))
 		}
 		found := merger.FindMergeRanges(RangesOld, uint64(24*100_000))
@@ -152,7 +152,7 @@ func TestFindMergeRange(t *testing.T) {
 
 		var RangesNew []Range
 		start := uint64(99_000_000)
-		for i := uint64(0); i < 24; i++ {
+		for i := range uint64(24) {
 			RangesNew = append(RangesNew, NewRange(start+(i*100_000), start+((i+1)*100_000)))
 		}
 		found = merger.FindMergeRanges(RangesNew, uint64(24*100_000))
@@ -163,15 +163,15 @@ func TestFindMergeRange(t *testing.T) {
 
 	t.Run("small", func(t *testing.T) {
 		var RangesOld Ranges
-		for i := uint64(0); i < 240; i++ {
+		for i := range uint64(240) {
 			RangesOld = append(RangesOld, NewRange(i*10_000, (i+1)*10_000))
 		}
 		found := merger.FindMergeRanges(RangesOld, uint64(240*10_000))
 		var expect Ranges
-		for i := uint64(0); i < 4; i++ {
+		for i := range uint64(4) {
 			expect = append(expect, NewRange(i*snaptype.Erigon2OldMergeLimit, (i+1)*snaptype.Erigon2OldMergeLimit))
 		}
-		for i := uint64(0); i < 4; i++ {
+		for i := range uint64(4) {
 			expect = append(expect, NewRange(2_000_000+i*snaptype.Erigon2MergeLimit, 2_000_000+(i+1)*snaptype.Erigon2MergeLimit))
 		}
 
@@ -179,12 +179,12 @@ func TestFindMergeRange(t *testing.T) {
 
 		var RangesNew Ranges
 		start := uint64(99_000_000)
-		for i := uint64(0); i < 240; i++ {
+		for i := range uint64(240) {
 			RangesNew = append(RangesNew, NewRange(start+i*10_000, start+(i+1)*10_000))
 		}
 		found = merger.FindMergeRanges(RangesNew, uint64(240*10_000))
 		expect = nil
-		for i := uint64(0); i < 24; i++ {
+		for i := range uint64(24) {
 			expect = append(expect, NewRange(start+i*snaptype.Erigon2MergeLimit, start+(i+1)*snaptype.Erigon2MergeLimit))
 		}
 
@@ -212,7 +212,7 @@ func TestMergeSnapshots(t *testing.T) {
 
 	N := uint64(70)
 
-	for i := uint64(0); i < N; i++ {
+	for i := range N {
 		createFile(i*10_000, (i+1)*10_000)
 	}
 	s := NewBaseRoSnapshots(ethconfig.BlocksFreezing{ChainName: networkname.Mainnet}, dir, snaptype2.BlockSnapshotTypes, true, logger)
@@ -306,7 +306,7 @@ func TestMergeSnapshots(t *testing.T) {
 func TestMergeSkipsPreClaimedRange(t *testing.T) {
 	logger := log.New()
 	dir, require := t.TempDir(), require.New(t)
-	for i := uint64(0); i < 4; i++ {
+	for i := range uint64(4) {
 		for _, snT := range snaptype2.BlockSnapshotTypes {
 			createTestSegmentFile(t, i*10_000, (i+1)*10_000, snT.Enum(), dir, version.V1_0, logger)
 		}
@@ -357,7 +357,7 @@ func TestDeleteSnapshots(t *testing.T) {
 
 	N := uint64(70)
 
-	for i := uint64(0); i < N; i++ {
+	for i := range N {
 		createFile(i*10_000, (i+1)*10_000)
 	}
 	s := NewBaseRoSnapshots(ethconfig.BlocksFreezing{ChainName: networkname.Mainnet}, dir, snaptype2.BlockSnapshotTypes, true, logger)
@@ -553,7 +553,7 @@ func TestRemoveOverlaps(t *testing.T) {
 	// 100_000 - 200_000 => 1 file
 	// 200_000 - 210_000, ... , 220_000 - 230_000 => 3 files
 
-	for i := uint64(0); i < 5; i++ {
+	for i := range uint64(5) {
 		createFile(i*10_000, (i+1)*10_000)
 	}
 
@@ -565,7 +565,7 @@ func TestRemoveOverlaps(t *testing.T) {
 
 	createFile(100_000, 200_000)
 
-	for i := uint64(0); i < 3; i++ {
+	for i := range uint64(3) {
 		createFile(200_000+i*10_000, 200_000+(i+1)*10_000)
 	}
 
@@ -941,13 +941,13 @@ func TestCalculateVisibleSegments(t *testing.T) {
 		createTestSegmentFile(t, from, to, name.Enum(), dir, version.V1_0, logger)
 	}
 
-	for i := uint64(0); i < 7; i++ {
+	for i := range uint64(7) {
 		createFile(i*500_000, (i+1)*500_000, snaptype2.Headers)
 	}
-	for i := uint64(0); i < 6; i++ {
+	for i := range uint64(6) {
 		createFile(i*500_000, (i+1)*500_000, snaptype2.Bodies)
 	}
-	for i := uint64(0); i < 5; i++ {
+	for i := range uint64(5) {
 		createFile(i*500_000, (i+1)*500_000, snaptype2.Transactions)
 	}
 	cfg := ethconfig.BlocksFreezing{ChainName: networkname.Mainnet}
@@ -1012,7 +1012,7 @@ func TestCalculateVisibleSegmentsWhenGapsInIdx(t *testing.T) {
 		createTestSegmentFile(t, from, to, name.Enum(), dir, version.V1_0, logger)
 	}
 
-	for i := uint64(0); i < 3; i++ {
+	for i := range uint64(3) {
 		createFile(i*500_000, (i+1)*500_000, snaptype2.Headers)
 		createFile(i*500_000, (i+1)*500_000, snaptype2.Bodies)
 		createFile(i*500_000, (i+1)*500_000, snaptype2.Transactions)
@@ -1047,7 +1047,7 @@ func TestSegmentsMaxDerivedFromVisible(t *testing.T) {
 	require.Equal(uint64(0), s.SegmentsMax())
 	s.Close()
 
-	for i := uint64(0); i < 3; i++ {
+	for i := range uint64(3) {
 		createFile(i*500_000, (i+1)*500_000, snaptype2.Headers)
 		createFile(i*500_000, (i+1)*500_000, snaptype2.Bodies)
 		createFile(i*500_000, (i+1)*500_000, snaptype2.Transactions)
@@ -1074,7 +1074,7 @@ func TestViewPinsGeneration(t *testing.T) {
 	createFile := func(from, to uint64, name snaptype.Type) {
 		createTestSegmentFile(t, from, to, name.Enum(), dir, version.V1_0, logger)
 	}
-	for i := uint64(0); i < 2; i++ {
+	for i := range uint64(2) {
 		createFile(i*500_000, (i+1)*500_000, snaptype2.Headers)
 		createFile(i*500_000, (i+1)*500_000, snaptype2.Bodies)
 		createFile(i*500_000, (i+1)*500_000, snaptype2.Transactions)

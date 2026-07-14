@@ -1507,7 +1507,7 @@ func batchVerifyAttestations(
 			}
 		}(idx)
 	}
-	for i := 0; i < len(indexedAttestations); i++ {
+	for range indexedAttestations {
 		result := <-c
 		if result.err != nil {
 			return false, result.err

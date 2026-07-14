@@ -52,7 +52,7 @@ func callBlockRewardAbi(contractAddr common.Address, syscall rules.SystemCall, b
 	beneficiariesRes := res[0].([]common.Address)
 	rewardsBig := res[1].([]*big.Int)
 	rewardsU256 := make([]*uint256.Int, len(rewardsBig))
-	for i := 0; i < len(rewardsBig); i++ {
+	for i := range rewardsBig {
 		var overflow bool
 		rewardsU256[i], overflow = uint256.FromBig(rewardsBig[i])
 		if overflow {

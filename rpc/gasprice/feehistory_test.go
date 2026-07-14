@@ -41,7 +41,7 @@ func TestFeeHistory(t *testing.T) {
 	}
 
 	overMaxQuery := make([]float64, 101)
-	for i := 0; i < 101; i++ {
+	for i := range 101 {
 		overMaxQuery[i] = float64(1)
 	}
 

@@ -142,7 +142,7 @@ func runStateTestsParallel(ctx *cli.Command, cfg vm.Config, files []string, work
 	}
 	close(fileCh)
 
-	for w := uint64(0); w < workers; w++ {
+	for range workers {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()

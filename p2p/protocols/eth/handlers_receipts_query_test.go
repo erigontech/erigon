@@ -118,7 +118,7 @@ func newReceiptsQueryFixture(t *testing.T, n int) *receiptsQueryFixture {
 		getter: &queryTestReceiptsGetter{receipts: map[common.Hash]types.Receipts{}, errs: map[common.Hash]error{}},
 	}
 	parent := common.Hash{}
-	for i := 0; i < n; i++ {
+	for i := range n {
 		header := &types.Header{
 			ParentHash:  parent,
 			ReceiptHash: common.Hash{0xde, 0xad},

@@ -32,7 +32,7 @@ import (
 // instead of panicking with an integer divide-by-zero (i % activeValidatorCount).
 func TestComputeNextSyncCommittee_ZeroActiveValidators(t *testing.T) {
 	s := state.New(&clparams.MainnetBeaconConfig)
-	for i := 0; i < 100; i++ {
+	for i := range 100 {
 		var pk [48]byte
 		binary.BigEndian.PutUint64(pk[:], uint64(i))
 		v := solid.NewValidator()

@@ -424,8 +424,7 @@ func doHistoryMap(ctx context.Context, consumer TraceConsumer, cfg *ExecArgs, in
 	mapGroup, ctx := errgroup.WithContext(ctx)
 	// we all errors in background workers (except ctx.Cancel), because applyLoop will detect this error anyway.
 	// and in applyLoop all errors are critical
-	for i := 0; i < workerCount; i++ {
-		i := i
+	for i := range workerCount {
 		workers[i] = NewHistoricalTraceWorker(ctx, consumer, in, out, true, cfg, logger)
 		mapGroup.Go(func() error {
 			return workers[i].Run()

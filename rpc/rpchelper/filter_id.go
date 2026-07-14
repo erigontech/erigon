@@ -42,7 +42,7 @@ func generateSubscriptionID() SubscriptionID {
 	hex := hex.NewEncoder(sb)
 	binary.LittleEndian.PutUint64(id[:], globalSubscriptionId.Add(1))
 	// try 4 times to generate an id
-	for i := 0; i < 4; i++ {
+	for range 4 {
 		_, err := rand.Read(id[8:])
 		if err == nil {
 			break

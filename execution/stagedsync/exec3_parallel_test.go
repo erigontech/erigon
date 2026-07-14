@@ -267,7 +267,7 @@ func taskFactory(numTask int, sender Sender, readsPerT int, writesPerT int, nonI
 
 	senderNonces := make(map[accounts.Address]int)
 
-	for i := 0; i < numTask; i++ {
+	for i := range numTask {
 		s := sender(i)
 
 		// Set first two ops to always read and write nonce
@@ -283,7 +283,7 @@ func taskFactory(numTask int, sender Sender, readsPerT int, writesPerT int, nonI
 			ops = append(ops, Op{opType: readType})
 		}
 
-		for j := 0; j < nonIOPerT; j++ {
+		for range nonIOPerT {
 			ops = append(ops, Op{opType: otherType})
 		}
 
