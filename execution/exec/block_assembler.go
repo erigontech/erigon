@@ -408,6 +408,12 @@ func (ba *BlockAssembler) AssembleBlock(stateReader state.StateReader, ibs *stat
 	if ba.HasBAL() {
 		// Record finalize system call I/O (EIP-7002, EIP-7251, etc.)
 		ibs.MergeTxIOInto(ba.balIO)
+		// Publish finalize-phase writes to the versionMap, mirroring the init and
+		// per-tx phases: the versioned commit loop normalizes each phase against the
+		// map and prefers the map value, so a finalize update to an address already
+		// written earlier in the block (fee recipient, withdrawal target) must be
+		// visible there or the commit reuses the stale pre-finalize value.
+		ibs.FlushWritesToVersionMap()
 		ibs.ResetVersionedIO()
 		ba.BlockAccessList = ba.balIO.AsBlockAccessList()
 		// Only embed the BAL hash in the header for Amsterdam+ chains.
