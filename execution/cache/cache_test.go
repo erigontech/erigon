@@ -890,7 +890,7 @@ func TestDomainCache_DeleteAtomicWithPut_NoSizeDrift(t *testing.T) {
 	addr := makeAddr(1)
 	v1 := []byte("value-one")
 	v2 := []byte("value-two")
-	for round := 0; round < 20000; round++ {
+	for round := range 20000 {
 		c.Put(addr, v1, 10)
 		var wg sync.WaitGroup
 		wg.Add(2)
@@ -912,7 +912,7 @@ func TestDomainCache_StaleDropAtomicWithPut_NoSizeDrift(t *testing.T) {
 	v1 := []byte("value-one")
 	v2 := []byte("value-two")
 	wantSize := int64(len(addr) + len(v1) + 24)
-	for round := 0; round < 20000; round++ {
+	for round := range 20000 {
 		c.Put(addr, v1, 10)
 		c.Unwind(5)
 		var wg sync.WaitGroup
@@ -933,7 +933,7 @@ func TestDomainCache_ClearAtomicWithPut_NoSizeDrift(t *testing.T) {
 	addr := makeAddr(1)
 	v1 := []byte("value-one")
 	entrySize := int64(len(addr) + len(v1) + 24)
-	for round := 0; round < 20000; round++ {
+	for round := range 20000 {
 		var wg sync.WaitGroup
 		wg.Add(2)
 		go func() { defer wg.Done(); c.Put(addr, v1, 10) }()

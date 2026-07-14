@@ -69,7 +69,7 @@ func TestGenericCache_PutNotLostAcrossGrow(t *testing.T) {
 		binary.BigEndian.PutUint64(b, n)
 		return b
 	}
-	for round := 0; round < 50; round++ {
+	for round := range 50 {
 		c := NewGenericCache[[]byte](64*datasize.MB, func(v []byte) int { return len(v) }, ModeEvictLRU)
 		hot := []byte("hot-key")
 		c.Put(hot, value(0), 1)
@@ -118,7 +118,7 @@ func TestGenericCache_PutNotLostAcrossGrow(t *testing.T) {
 		// Cross the grow threshold so maybeGrow swaps the generation while the
 		// hot-key writer runs.
 		key := make([]byte, 8)
-		for i := 0; i < 3*genericCacheStartCapacity; i++ {
+		for i := range 3 * genericCacheStartCapacity {
 			binary.BigEndian.PutUint64(key, uint64(1+i))
 			c.Put(key, []byte{1}, 1)
 		}
@@ -145,10 +145,10 @@ func TestGenericCache_PutNotLostAcrossGrow(t *testing.T) {
 func TestGenericCache_PutIfAbsentDefersAcrossGrow(t *testing.T) {
 	fresh := []byte("fresh-value")
 	stale := []byte("stale-value")
-	for round := 0; round < 100; round++ {
+	for round := range 100 {
 		c := NewGenericCache[[]byte](64*datasize.MB, func(v []byte) int { return len(v) }, ModeEvictLRU)
 		key := make([]byte, 8)
-		for i := 0; i < 256; i++ {
+		for i := range 256 {
 			binary.BigEndian.PutUint64(key, uint64(1+i))
 			c.Put(key, []byte{1}, 1)
 		}
@@ -216,7 +216,7 @@ func TestGenericCache_ModeNoOpAdmissionAtomicWithUpdate(t *testing.T) {
 	v := []byte("valuevalu") // entry size 20+9+24 = 53: the budget fits exactly one entry
 	c := newGenericCacheEntries(datasize.ByteSize(53), 8, func(v []byte) int { return len(v) }, ModeNoOp)
 	c.Put(a, v, 1)
-	for round := 0; round < 200000; round++ {
+	for round := range 200000 {
 		var wg sync.WaitGroup
 		wg.Add(2)
 		go func() { defer wg.Done(); c.Put(a, v, 2) }()
@@ -298,7 +298,7 @@ func TestGenericCache_CapacityEvictionAtomicWithPut_NoSizeDrift(t *testing.T) {
 		}
 	}
 	v := []byte("value-one")
-	for round := 0; round < 100000; round++ {
+	for range 100000 {
 		c.Put(b, v, 10)
 		var wg sync.WaitGroup
 		wg.Add(2)
@@ -373,7 +373,7 @@ func TestGenericCache_StatsResetAtomicWithDelete_NoPhantomEvictions(t *testing.T
 		}
 	}()
 	total := uint64(0)
-	for i := 0; i < 1_000_000; i++ {
+	for range 1_000_000 {
 		total += c.evictions.Swap(0)
 	}
 	close(stop)
