@@ -196,6 +196,56 @@ func TestGenericCache_PutIfAbsentDefersAcrossGrow(t *testing.T) {
 	}
 }
 
+// A grow must migrate every entry. Left to pick its own geometry per
+// generation, freelru chooses more, smaller shards as capacity rises, and a
+// new shard that overfills during the copy silently evicts — keys clustered
+// on the shard-selection bits vanish across a "grow", and a follow-up
+// conditional put can install a stale value in the hole. Seeding writes the
+// clustered keys after the pad so they are the newest in their shard and
+// cannot be seeding-eviction victims; only the migration can lose them.
+func TestGenericCache_GrowMigrationLossless(t *testing.T) {
+	c := NewGenericCacheWithAvg[[]byte](4*datasize.MB, 256, func(v []byte) int { return len(v) }, ModeEvictLRU)
+	defer c.Close()
+
+	// Keys sharing hash bits 16-23 land in one shard of any generation with up
+	// to 256 shards.
+	target := (maphash.Hash([]byte("cluster-seed")) >> 16) & 255
+	var clustered [][]byte
+	for i := 0; len(clustered) < 24; i++ {
+		k := make([]byte, 8)
+		binary.BigEndian.PutUint64(k, uint64(i))
+		if (maphash.Hash(k)>>16)&255 == target {
+			clustered = append(clustered, k)
+		}
+	}
+	pad := make([]byte, 9)
+	for j := 0; c.Len() < genericCacheStartCapacity-len(clustered); j++ {
+		binary.BigEndian.PutUint64(pad[1:], uint64(j))
+		c.Put(pad, []byte{1}, 1)
+	}
+	for _, k := range clustered {
+		c.Put(k, []byte("fresh"), 10)
+	}
+	for j := 1 << 20; c.Len() < genericCacheStartCapacity; j++ {
+		binary.BigEndian.PutUint64(pad[1:], uint64(j))
+		c.Put(pad, []byte{1}, 1)
+		if j > 1<<21 {
+			t.Fatal("seeding could not fill the cache to the grow threshold")
+		}
+	}
+	before := c.data.Load()
+	c.Put([]byte("grow-trigger"), []byte{1}, 1)
+	require.NotEqual(t, before, c.data.Load(), "grow did not happen")
+
+	lost := 0
+	for _, k := range clustered {
+		if _, ok := c.Get(k); !ok {
+			lost++
+		}
+	}
+	require.Zero(t, lost, "grow migration evicted clustered entries: per-shard capacity shrank across the swap")
+}
+
 // A capacity eviction is a size-subtracting writer the put stripes cannot
 // serialize: freelru picks its victim per shard (hash bits 16+), so an insert
 // on one stripe can evict a key whose own update — on another stripe — is
