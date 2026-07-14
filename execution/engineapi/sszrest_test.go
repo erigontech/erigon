@@ -5,17 +5,18 @@ package engineapi
 
 import (
 	"bytes"
+	"encoding/binary"
+	"encoding/json"
 	"errors"
 	"net/http"
 	"net/http/httptest"
-	"strings"
 	"testing"
+	"testing/iotest"
 
+	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/cl/clparams"
-	"github.com/erigontech/erigon/cl/cltypes/solid"
-	ssz2 "github.com/erigontech/erigon/cl/ssz"
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/common/log/v3"
@@ -23,15 +24,261 @@ import (
 	"github.com/erigontech/erigon/execution/engineapi/engine_helpers"
 	"github.com/erigontech/erigon/execution/engineapi/engine_types"
 	"github.com/erigontech/erigon/execution/types"
+	"github.com/erigontech/erigon/rpc"
 )
 
-func TestSSZRESTCapabilitiesCodecRoundTrip(t *testing.T) {
-	enc, err := encodeCapabilities([]string{"engine_newPayloadV1", "POST /engine/v1/payloads"})
-	require.NoError(t, err)
+func allForksConfig() *chain.Config {
+	return &chain.Config{
+		ShanghaiTime:  common.NewUint64(100),
+		CancunTime:    common.NewUint64(200),
+		PragueTime:    common.NewUint64(300),
+		OsakaTime:     common.NewUint64(400),
+		AmsterdamTime: common.NewUint64(500),
+	}
+}
 
-	out, err := decodeCapabilities(enc, 0)
+func newTestEngineServer(cfg *chain.Config, consuming bool) *EngineServer {
+	return NewEngineServer(log.New(), cfg, nil, nil, false, true, false, consuming, nil, nil, 0, 0)
+}
+
+func newSSZRequest(method, path, fork string, body []byte) *http.Request {
+	req := httptest.NewRequest(method, path, bytes.NewReader(body))
+	req.Header.Set("Content-Type", sszRestContentType)
+	if fork != "" {
+		req.Header.Set("Eth-Execution-Version", fork)
+	}
+	return req
+}
+
+func problemType(t *testing.T, rec *httptest.ResponseRecorder) string {
+	t.Helper()
+	require.Equal(t, "application/problem+json", rec.Header().Get("Content-Type"))
+	var problem struct {
+		Type string `json:"type"`
+	}
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &problem))
+	return problem.Type
+}
+
+func TestSSZRESTForkRegistry(t *testing.T) {
+	for name, want := range map[string]clparams.StateVersion{
+		"paris":     clparams.BellatrixVersion,
+		"shanghai":  clparams.CapellaVersion,
+		"cancun":    clparams.DenebVersion,
+		"prague":    clparams.ElectraVersion,
+		"osaka":     clparams.FuluVersion,
+		"amsterdam": clparams.GloasVersion,
+	} {
+		got, ok := engineForkVersion(name)
+		require.True(t, ok, name)
+		require.Equal(t, want, got, name)
+	}
+	_, ok := engineForkVersion("bellatrix")
+	require.False(t, ok)
+}
+
+func TestSSZRESTForkNameAtTime(t *testing.T) {
+	cfg := allForksConfig()
+	for ts, want := range map[uint64]string{
+		0:   "paris",
+		99:  "paris",
+		100: "shanghai",
+		250: "cancun",
+		350: "prague",
+		450: "osaka",
+		500: "amsterdam",
+		999: "amsterdam",
+	} {
+		require.Equal(t, want, forkNameAtTime(cfg, ts), "ts=%d", ts)
+	}
+}
+
+func TestSSZRESTSupportedForkNames(t *testing.T) {
+	require.Equal(t, []string{"paris"}, supportedForkNames(&chain.Config{}))
+	require.Equal(t,
+		[]string{"paris", "shanghai", "cancun", "prague", "osaka", "amsterdam"},
+		supportedForkNames(allForksConfig()))
+	require.Equal(t,
+		[]string{"paris", "shanghai", "cancun"},
+		supportedForkNames(&chain.Config{ShanghaiTime: common.NewUint64(0), CancunTime: common.NewUint64(0)}))
+}
+
+func TestSSZRESTNewPayloadEnvelopeRoundTrip(t *testing.T) {
+	for _, version := range []clparams.StateVersion{
+		clparams.BellatrixVersion,
+		clparams.CapellaVersion,
+		clparams.DenebVersion,
+		clparams.ElectraVersion,
+		clparams.FuluVersion,
+		clparams.GloasVersion,
+	} {
+		t.Run(version.String(), func(t *testing.T) {
+			payload := engine_types.NewExecutionPayloadSSZ(version)
+			if version >= clparams.GloasVersion {
+				slot := hexutil.Uint64(123)
+				payload.SlotNumber = &slot
+				bal := hexutil.Bytes{0x01, 0x02, 0x03}
+				payload.BlockAccessList = &bal
+			}
+			root := common.HexToHash("0xaa")
+			requests := []hexutil.Bytes{{0x00, 0x01}, {0x01, 0x02}}
+
+			enc, err := encodeNewPayloadEnvelope(version, payload, root, requests)
+			require.NoError(t, err)
+
+			outPayload, outRoot, outRequests, err := decodeNewPayloadEnvelope(enc, version)
+			require.NoError(t, err)
+
+			payloadBytes, err := payload.EncodeSSZ(nil)
+			require.NoError(t, err)
+			switch {
+			case version < clparams.DenebVersion:
+				// {payload} — just an offset plus the payload bytes
+				require.Len(t, enc, 4+len(payloadBytes))
+				require.Equal(t, common.Hash{}, outRoot)
+				require.Empty(t, outRequests)
+			case version < clparams.ElectraVersion:
+				// {payload, parent_beacon_block_root}
+				require.Len(t, enc, 4+32+len(payloadBytes))
+				require.Equal(t, root, outRoot)
+				require.Empty(t, outRequests)
+			default:
+				// {payload, parent_beacon_block_root, execution_requests}
+				require.Equal(t, root, outRoot)
+				require.Equal(t, requests, outRequests)
+			}
+			if version >= clparams.GloasVersion {
+				require.NotNil(t, outPayload.SlotNumber)
+				require.Equal(t, hexutil.Uint64(123), *outPayload.SlotNumber)
+				require.NotNil(t, outPayload.BlockAccessList)
+				require.Equal(t, hexutil.Bytes{0x01, 0x02, 0x03}, *outPayload.BlockAccessList)
+			}
+			require.Equal(t, payload.BlockHash, outPayload.BlockHash)
+		})
+	}
+}
+
+func TestSSZRESTBlobVersionedHashesFromTxs(t *testing.T) {
+	hashes := blobVersionedHashesFromTxs(nil)
+	require.NotNil(t, hashes)
+	require.Empty(t, hashes)
+
+	// undecodable transactions yield an empty (non-nil) list and no panic;
+	// newPayload re-decodes and reports INVALID itself
+	hashes = blobVersionedHashesFromTxs([]hexutil.Bytes{{0xff, 0xfe}})
+	require.NotNil(t, hashes)
+	require.Empty(t, hashes)
+}
+
+func TestSSZRESTForkchoiceUpdateRoundTrip(t *testing.T) {
+	state := engine_types.ForkChoiceState{
+		HeadHash:           common.HexToHash("0x01"),
+		SafeBlockHash:      common.HexToHash("0x02"),
+		FinalizedBlockHash: common.HexToHash("0x03"),
+	}
+
+	t.Run("paris no attributes", func(t *testing.T) {
+		enc, err := encodeForkchoiceUpdate(clparams.BellatrixVersion, &state, nil, nil)
+		require.NoError(t, err)
+		outState, outAttrs, outCustody, err := decodeForkchoiceUpdate(enc, clparams.BellatrixVersion)
+		require.NoError(t, err)
+		require.Equal(t, state, outState)
+		require.Nil(t, outAttrs)
+		require.Nil(t, outCustody)
+	})
+
+	t.Run("prague attributes use the cancun schema", func(t *testing.T) {
+		root := common.HexToHash("0x04")
+		attrs := &engine_types.PayloadAttributes{
+			Timestamp:             350,
+			PrevRandao:            common.HexToHash("0x05"),
+			SuggestedFeeRecipient: common.HexToAddress("0x06"),
+			Withdrawals:           []*types.Withdrawal{{Index: 1, Validator: 2, Address: common.HexToAddress("0x07"), Amount: 3}},
+			ParentBeaconBlockRoot: &root,
+		}
+		attrs.SSZVersion = clparams.ElectraVersion
+		// timestamp(8) + prev_randao(32) + fee_recipient(20) + withdrawals offset(4) + root(32) + one withdrawal(44)
+		attrBytes, err := attrs.EncodeSSZ(nil)
+		require.NoError(t, err)
+		require.Len(t, attrBytes, 140)
+
+		enc, err := encodeForkchoiceUpdate(clparams.ElectraVersion, &state, attrs, nil)
+		require.NoError(t, err)
+		_, outAttrs, outCustody, err := decodeForkchoiceUpdate(enc, clparams.ElectraVersion)
+		require.NoError(t, err)
+		require.Nil(t, outCustody)
+		require.NotNil(t, outAttrs)
+		require.NotNil(t, outAttrs.ParentBeaconBlockRoot)
+		require.Equal(t, root, *outAttrs.ParentBeaconBlockRoot)
+		require.Nil(t, outAttrs.SlotNumber)
+		require.Nil(t, outAttrs.TargetGasLimit)
+		require.Len(t, outAttrs.Withdrawals, 1)
+	})
+
+	t.Run("amsterdam attributes and custody columns", func(t *testing.T) {
+		root := common.HexToHash("0x04")
+		slot := hexutil.Uint64(456)
+		targetGasLimit := hexutil.Uint64(36000000)
+		attrs := &engine_types.PayloadAttributes{
+			Timestamp:             500,
+			SuggestedFeeRecipient: common.HexToAddress("0x06"),
+			ParentBeaconBlockRoot: &root,
+			SlotNumber:            &slot,
+			TargetGasLimit:        &targetGasLimit,
+		}
+		attrs.SSZVersion = clparams.GloasVersion
+		custody := bytes.Repeat([]byte{0xab}, 16)
+
+		enc, err := encodeForkchoiceUpdate(clparams.GloasVersion, &state, attrs, custody)
+		require.NoError(t, err)
+		outState, outAttrs, outCustody, err := decodeForkchoiceUpdate(enc, clparams.GloasVersion)
+		require.NoError(t, err)
+		require.Equal(t, state, outState)
+		require.NotNil(t, outAttrs)
+		require.NotNil(t, outAttrs.SlotNumber)
+		require.Equal(t, slot, *outAttrs.SlotNumber)
+		require.NotNil(t, outAttrs.TargetGasLimit)
+		require.Equal(t, targetGasLimit, *outAttrs.TargetGasLimit)
+		require.Equal(t, custody, outCustody)
+	})
+
+	t.Run("amsterdam without custody columns", func(t *testing.T) {
+		enc, err := encodeForkchoiceUpdate(clparams.GloasVersion, &state, nil, nil)
+		require.NoError(t, err)
+		_, outAttrs, outCustody, err := decodeForkchoiceUpdate(enc, clparams.GloasVersion)
+		require.NoError(t, err)
+		require.Nil(t, outAttrs)
+		require.Nil(t, outCustody)
+	})
+}
+
+// Pin the exact wire examples from execution-apis#793. Example A: a VALID
+// PayloadStatus with latest_valid_hash present and no validation_error is 41 bytes.
+func TestSSZRESTPayloadStatusSpecExample(t *testing.T) {
+	latest := common.HexToHash("0xcd")
+	status := &engine_types.PayloadStatus{Status: engine_types.ValidStatus, LatestValidHash: &latest}
+	enc, err := status.EncodeSSZ(nil)
 	require.NoError(t, err)
-	require.Equal(t, []string{"engine_newPayloadV1", "POST /engine/v1/payloads"}, out)
+	require.Len(t, enc, 41)
+	require.Equal(t, byte(0), enc[0])
+	require.Equal(t, uint32(9), binary.LittleEndian.Uint32(enc[1:5]))
+	require.Equal(t, uint32(41), binary.LittleEndian.Uint32(enc[5:9]))
+	require.Equal(t, latest[:], enc[9:41])
+
+	// Example B: INVALID with validation_error "bad state root" and no
+	// latest_valid_hash is 27 bytes; note the inner 4-byte offset before the text.
+	invalid := &engine_types.PayloadStatus{
+		Status:          engine_types.InvalidStatus,
+		ValidationError: engine_types.NewStringifiedErrorFromString("bad state root"),
+	}
+	encB, err := invalid.EncodeSSZ(nil)
+	require.NoError(t, err)
+	require.Len(t, encB, 27)
+	require.Equal(t, byte(1), encB[0])
+	require.Equal(t, uint32(9), binary.LittleEndian.Uint32(encB[1:5]))  // offset[latest_valid_hash]
+	require.Equal(t, uint32(9), binary.LittleEndian.Uint32(encB[5:9]))  // offset[validation_error]
+	require.Equal(t, uint32(4), binary.LittleEndian.Uint32(encB[9:13])) // inner String offset
+	require.Equal(t, []byte("bad state root"), encB[13:27])
 }
 
 func TestSSZRESTPayloadStatusEnumRoundTrip(t *testing.T) {
@@ -43,6 +290,9 @@ func TestSSZRESTPayloadStatusEnumRoundTrip(t *testing.T) {
 	}
 	enc, err := wire.EncodeSSZ(nil)
 	require.NoError(t, err)
+	// validation_error is Optional[String] = List[List[byte, 1024], 1]:
+	// present means a 4-byte inner offset precedes the message bytes
+	require.Equal(t, append([]byte{4, 0, 0, 0}, []byte("no")...), enc[41:])
 
 	var out engine_types.PayloadStatus
 	require.NoError(t, out.DecodeSSZ(enc, 0))
@@ -50,59 +300,155 @@ func TestSSZRESTPayloadStatusEnumRoundTrip(t *testing.T) {
 	require.NotNil(t, out.LatestValidHash)
 	require.Equal(t, latest, *out.LatestValidHash)
 	require.Equal(t, "no", out.ValidationError.Error().Error())
+
+	// absent validation_error stays distinguishable from an empty message
+	noErr := &engine_types.PayloadStatus{Status: engine_types.SyncingStatus}
+	enc, err = noErr.EncodeSSZ(nil)
+	require.NoError(t, err)
+	var out2 engine_types.PayloadStatus
+	require.NoError(t, out2.DecodeSSZ(enc, 0))
+	require.Equal(t, engine_types.SyncingStatus, out2.Status)
+	require.Nil(t, out2.LatestValidHash)
+	require.Nil(t, out2.ValidationError)
 }
 
-func TestSSZRESTRequestCodecsRoundTrip(t *testing.T) {
+func TestSSZRESTForkchoiceResponseRoundTrip(t *testing.T) {
+	latest := common.HexToHash("0x11")
+	payloadID := hexutil.Bytes{1, 2, 3, 4, 5, 6, 7, 8}
+	resp := &engine_types.ForkChoiceUpdatedResponse{
+		PayloadStatus: &engine_types.PayloadStatus{Status: engine_types.ValidStatus, LatestValidHash: &latest},
+		PayloadId:     &payloadID,
+	}
+	enc, err := encodeForkchoiceResponse(resp)
+	require.NoError(t, err)
+	out, err := decodeForkchoiceResponse(enc)
+	require.NoError(t, err)
+	require.Equal(t, engine_types.ValidStatus, out.PayloadStatus.Status)
+	require.Equal(t, latest, *out.PayloadStatus.LatestValidHash)
+	require.Equal(t, payloadID, *out.PayloadId)
+
+	resp.PayloadId = nil
+	resp.PayloadStatus = &engine_types.PayloadStatus{Status: engine_types.SyncingStatus}
+	enc, err = encodeForkchoiceResponse(resp)
+	require.NoError(t, err)
+	out, err = decodeForkchoiceResponse(enc)
+	require.NoError(t, err)
+	require.Equal(t, engine_types.SyncingStatus, out.PayloadStatus.Status)
+	require.Nil(t, out.PayloadId)
+}
+
+func TestSSZRESTBuiltPayloadRoundTrip(t *testing.T) {
+	blockValue := uint256.NewInt(112233).ToBig()
+	bundle := &engine_types.BlobsBundle{
+		Commitments: []hexutil.Bytes{bytes.Repeat([]byte{0x01}, sszKZGBytes)},
+		Proofs:      []hexutil.Bytes{bytes.Repeat([]byte{0x02}, sszKZGBytes)},
+		Blobs:       []hexutil.Bytes{bytes.Repeat([]byte{0x03}, sszBlobBytes)},
+	}
+	requests := []hexutil.Bytes{{0x00, 0xaa}, {0x01, 0xbb}}
+
 	for _, tc := range []struct {
-		name    string
-		version clparams.StateVersion
-		encode  func(clparams.StateVersion) ([]byte, error)
-		decode  func([]byte, clparams.StateVersion) error
+		version      clparams.StateVersion
+		wantSOB      bool
+		wantBundle   bool
+		wantRequests bool
 	}{
-		{"newPayloadV1", clparams.BellatrixVersion, encodeEmptyNewPayloadRequest, decodeEmptyNewPayloadRequest},
-		{"newPayloadV2", clparams.CapellaVersion, encodeEmptyNewPayloadRequest, decodeEmptyNewPayloadRequest},
-		{"newPayloadV3", clparams.DenebVersion, encodeEmptyNewPayloadRequest, decodeEmptyNewPayloadRequest},
-		{"newPayloadV5", clparams.GloasVersion, encodeEmptyNewPayloadRequest, decodeEmptyNewPayloadRequest},
-		{"forkchoiceV1", clparams.BellatrixVersion, encodeEmptyForkchoiceRequest, decodeEmptyForkchoiceRequest},
-		{"forkchoiceV4", clparams.GloasVersion, encodeEmptyForkchoiceRequest, decodeEmptyForkchoiceRequest},
+		{clparams.BellatrixVersion, false, false, false},
+		{clparams.CapellaVersion, false, false, false},
+		{clparams.DenebVersion, true, true, false},
+		{clparams.ElectraVersion, true, true, true},
+		{clparams.FuluVersion, true, true, true},
+		{clparams.GloasVersion, true, true, true},
 	} {
-		t.Run(tc.name, func(t *testing.T) {
-			enc, err := tc.encode(tc.version)
+		t.Run(tc.version.String(), func(t *testing.T) {
+			payload := engine_types.NewExecutionPayloadSSZ(tc.version)
+			if tc.version >= clparams.GloasVersion {
+				slot := hexutil.Uint64(7)
+				payload.SlotNumber = &slot
+				bal := hexutil.Bytes{0x0a}
+				payload.BlockAccessList = &bal
+			}
+			resp := &engine_types.GetPayloadResponse{
+				ExecutionPayload:      payload,
+				BlockValue:            (*hexutil.Big)(blockValue),
+				ShouldOverrideBuilder: true,
+			}
+			if tc.wantBundle {
+				resp.BlobsBundle = bundle
+			}
+			if tc.wantRequests {
+				resp.ExecutionRequests = requests
+			}
+			enc, err := encodeBuiltPayload(resp, tc.version)
 			require.NoError(t, err)
-			require.NoError(t, tc.decode(enc, tc.version))
+			out, err := decodeBuiltPayload(enc, tc.version)
+			require.NoError(t, err)
+			require.Equal(t, blockValue, out.BlockValue.ToInt())
+			require.Equal(t, payload.BlockHash, out.ExecutionPayload.BlockHash)
+			require.Equal(t, tc.wantSOB, out.ShouldOverrideBuilder)
+			if tc.wantBundle {
+				require.NotNil(t, out.BlobsBundle)
+				require.Equal(t, bundle.Commitments, out.BlobsBundle.Commitments)
+			}
+			if tc.wantRequests {
+				require.Equal(t, requests, out.ExecutionRequests)
+			}
+			if tc.version >= clparams.GloasVersion {
+				require.NotNil(t, out.ExecutionPayload.BlockAccessList)
+				require.Equal(t, hexutil.Bytes{0x0a}, *out.ExecutionPayload.BlockAccessList)
+			}
 		})
 	}
 }
 
-func TestSSZRESTBeaconChainConfigPrefersRuntimeConfig(t *testing.T) {
-	cfg := clparams.MainnetBeaconConfig
-	cfg.BuilderDepositRequestType = 0x7a
-	srv := NewEngineServer(log.New(), &chain.Config{ChainName: "mainnet"}, nil, nil, false, true, false, false, nil, nil, 0, 0)
-	srv.SetBeaconChainConfig(&cfg)
+func TestSSZRESTBodiesResponseRoundTrip(t *testing.T) {
+	withdrawal := &types.Withdrawal{Index: 1, Validator: 2, Address: common.HexToAddress("0x03"), Amount: 4}
+	body := &engine_types.ExecutionPayloadBodyV2{
+		Transactions:    []hexutil.Bytes{{0x01, 0x02}},
+		Withdrawals:     []*types.Withdrawal{withdrawal},
+		BlockAccessList: hexutil.Bytes{0xba, 0x11},
+	}
 
-	require.Same(t, &cfg, srv.beaconChainConfig())
+	for _, tc := range []struct {
+		version         clparams.StateVersion
+		wantWithdrawals bool
+		wantBAL         bool
+	}{
+		{clparams.BellatrixVersion, false, false},
+		{clparams.DenebVersion, true, false},
+		{clparams.FuluVersion, true, false},
+		{clparams.GloasVersion, true, true},
+	} {
+		t.Run(tc.version.String(), func(t *testing.T) {
+			enc, err := encodeBodiesResponse([]*engine_types.ExecutionPayloadBodyV2{body, nil}, tc.version)
+			require.NoError(t, err)
+			// BodiesResponse is a single-field container: the body opens with a
+			// 4-byte offset (=4) to the wrapped entries list.
+			require.Equal(t, uint32(4), binary.LittleEndian.Uint32(enc[:4]))
+			entries, err := decodeBodiesResponse(enc, tc.version)
+			require.NoError(t, err)
+			require.Len(t, entries, 2)
+
+			require.True(t, entries[0].Available)
+			require.Equal(t, body.Transactions, entries[0].Transactions)
+			if tc.wantWithdrawals {
+				require.Len(t, entries[0].Withdrawals, 1)
+				require.Equal(t, *withdrawal, *entries[0].Withdrawals[0])
+			} else {
+				require.Empty(t, entries[0].Withdrawals)
+			}
+			if tc.wantBAL {
+				require.Equal(t, body.BlockAccessList, entries[0].BlockAccessList)
+			} else {
+				require.Empty(t, entries[0].BlockAccessList)
+			}
+
+			require.False(t, entries[1].Available)
+			require.Empty(t, entries[1].Transactions)
+		})
+	}
 }
 
-func encodeEmptyNewPayloadRequest(version clparams.StateVersion) ([]byte, error) {
-	return encodeNewPayloadRequest(version, engine_types.NewExecutionPayloadSSZ(version), solid.NewHashList(sszMaxBlobHashes), common.Hash{}, &solid.TransactionsSSZ{})
-}
-
-func decodeEmptyNewPayloadRequest(buf []byte, version clparams.StateVersion) error {
-	_, _, _, _, err := decodeNewPayloadRequest(buf, version)
-	return err
-}
-
-func encodeEmptyForkchoiceRequest(version clparams.StateVersion) ([]byte, error) {
-	state := engine_types.ForkChoiceState{}
-	return encodeForkchoiceRequest(version, &state, nil)
-}
-
-func decodeEmptyForkchoiceRequest(buf []byte, version clparams.StateVersion) error {
-	_, _, err := decodeForkchoiceRequest(buf, version)
-	return err
-}
-
-func TestSSZRESTGetBlobsCodecsRoundTrip(t *testing.T) {
+func TestSSZRESTBlobsResponseRoundTrip(t *testing.T) {
 	blob := bytes.Repeat([]byte{0x11}, sszBlobBytes)
 	proof := bytes.Repeat([]byte{0x22}, sszKZGBytes)
 	proofs := make([]hexutil.Bytes, sszCellsPerExtBlob)
@@ -110,266 +456,273 @@ func TestSSZRESTGetBlobsCodecsRoundTrip(t *testing.T) {
 		proofs[i] = proof
 	}
 
-	for _, tc := range []struct {
-		name string
-		enc  func() ([]byte, error)
-		dec  func([]byte) error
-	}{
-		{
-			name: "v1",
-			enc: func() ([]byte, error) {
-				return encodeGetBlobsV1Response([]*engine_types.BlobAndProofV1{{Blob: blob, Proof: proof}, nil})
-			},
-			dec: func(buf []byte) error {
-				return ssz2.UnmarshalSSZ(buf, 0, solid.NewStaticListSSZ[*engine_types.BlobAndProofV1](sszMaxGetBlobHashes, sszBlobBytes+sszKZGBytes))
-			},
-		},
-		{
-			name: "v2",
-			enc: func() ([]byte, error) {
-				return encodeGetBlobsV2Response([]*engine_types.BlobAndProofV2{{Blob: blob, CellProofs: proofs}, nil})
-			},
-			dec: func(buf []byte) error {
-				return ssz2.UnmarshalSSZ(buf, 0, solid.NewDynamicListSSZ[*engine_types.BlobAndProofV2](sszMaxGetBlobHashes))
-			},
-		},
-		{
-			name: "v3",
-			enc: func() ([]byte, error) {
-				return encodeGetBlobsV3Response([]*engine_types.BlobAndProofV2{{Blob: blob, CellProofs: proofs}, nil})
-			},
-			dec: func(buf []byte) error {
-				return ssz2.UnmarshalSSZ(buf, 0, solid.NewDynamicListSSZ[*engine_types.NullableBlobAndProofV2](sszMaxGetBlobHashes))
-			},
-		},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			enc, err := tc.enc()
-			require.NoError(t, err)
-			require.NoError(t, tc.dec(enc))
-		})
+	t.Run("v1", func(t *testing.T) {
+		enc, err := encodeBlobsV1Response([]*engine_types.BlobAndProofV1{{Blob: blob, Proof: proof}, nil})
+		require.NoError(t, err)
+		// BlobsV1Response is a single-field container wrapping the entries list.
+		require.Equal(t, uint32(4), binary.LittleEndian.Uint32(enc[:4]))
+		out, err := decodeBlobsV1Response(enc)
+		require.NoError(t, err)
+		require.Len(t, out, 2)
+		require.NotNil(t, out[0])
+		require.Equal(t, hexutil.Bytes(blob), out[0].Blob)
+		require.Equal(t, hexutil.Bytes(proof), out[0].Proof)
+		require.Nil(t, out[1])
+	})
+
+	t.Run("v2", func(t *testing.T) {
+		enc, err := encodeBlobsV2Response([]*engine_types.BlobAndProofV2{{Blob: blob, CellProofs: proofs}, nil})
+		require.NoError(t, err)
+		// BlobsV2Response (shared by /v3) is a single-field container.
+		require.Equal(t, uint32(4), binary.LittleEndian.Uint32(enc[:4]))
+		out, err := decodeBlobsV2Response(enc)
+		require.NoError(t, err)
+		require.Len(t, out, 2)
+		require.NotNil(t, out[0])
+		require.Equal(t, hexutil.Bytes(blob), out[0].Blob)
+		require.Len(t, out[0].CellProofs, sszCellsPerExtBlob)
+		require.Nil(t, out[1])
+	})
+}
+
+func TestSSZRESTHashListRequestRoundTrip(t *testing.T) {
+	hashes := []common.Hash{common.HexToHash("0xaa"), common.HexToHash("0xbb")}
+	for _, limit := range []int{sszMaxBodiesRequest, sszMaxGetBlobHashes} {
+		enc, err := encodeHashListRequest(hashes, limit)
+		require.NoError(t, err)
+		// single-field container: a 4-byte offset (=4) precedes the hash list body
+		require.Equal(t, uint32(4), binary.LittleEndian.Uint32(enc[:4]))
+		require.Len(t, enc, 4+len(hashes)*32)
+		out, err := decodeHashListRequest(enc, limit)
+		require.NoError(t, err)
+		require.Equal(t, hashes, out)
 	}
+
+	// an empty request is just the 4-byte offset, no hashes
+	enc, err := encodeHashListRequest(nil, sszMaxBodiesRequest)
+	require.NoError(t, err)
+	require.Len(t, enc, 4)
+	out, err := decodeHashListRequest(enc, sszMaxBodiesRequest)
+	require.NoError(t, err)
+	require.Empty(t, out)
+
+	// decode enforces the limit itself, independent of any caller-side size guard
+	oversized, err := encodeHashListRequest(make([]common.Hash, sszMaxBodiesRequest+1), sszMaxBodiesRequest+1)
+	require.NoError(t, err)
+	_, err = decodeHashListRequest(oversized, sszMaxBodiesRequest)
+	require.Error(t, err)
+}
+
+// A reused PayloadStatus must not leak optional fields from a previous decode.
+func TestSSZRESTPayloadStatusDecodeResetsOptionals(t *testing.T) {
+	latest := common.HexToHash("0xab")
+	full := &engine_types.PayloadStatus{
+		Status:          engine_types.InvalidStatus,
+		LatestValidHash: &latest,
+		ValidationError: engine_types.NewStringifiedErrorFromString("bad"),
+	}
+	encFull, err := full.EncodeSSZ(nil)
+	require.NoError(t, err)
+	bare := &engine_types.PayloadStatus{Status: engine_types.SyncingStatus}
+	encBare, err := bare.EncodeSSZ(nil)
+	require.NoError(t, err)
+
+	var reused engine_types.PayloadStatus
+	require.NoError(t, reused.DecodeSSZ(encFull, 0))
+	require.NotNil(t, reused.LatestValidHash)
+	require.NotNil(t, reused.ValidationError)
+
+	require.NoError(t, reused.DecodeSSZ(encBare, 0))
+	require.Equal(t, engine_types.SyncingStatus, reused.Status)
+	require.Nil(t, reused.LatestValidHash)
+	require.Nil(t, reused.ValidationError)
 }
 
 func TestSSZRESTCapabilitiesRoute(t *testing.T) {
-	srv := NewEngineServer(log.New(), &chain.Config{}, nil, nil, false, true, false, false, nil, nil, 0, 0)
-	body, err := encodeCapabilities([]string{"engine_newPayloadV1"})
-	require.NoError(t, err)
-
-	req := httptest.NewRequest(http.MethodPost, "/engine/v1/capabilities", bytes.NewReader(body))
+	srv := newTestEngineServer(allForksConfig(), false)
+	req := httptest.NewRequest(http.MethodGet, "/engine/v1/capabilities", nil)
 	rec := httptest.NewRecorder()
 	srv.SSZRESTHandler().ServeHTTP(rec, req)
 
 	require.Equal(t, http.StatusOK, rec.Code)
-	require.Equal(t, sszRestContentType, rec.Header().Get("Content-Type"))
-	resp, err := decodeCapabilities(rec.Body.Bytes(), 0)
-	require.NoError(t, err)
-	require.Contains(t, resp, "engine_newPayloadV1")
-	require.Contains(t, resp, "POST /engine/v4/payloads")
-	require.NotContains(t, resp, "engine_exchangeCapabilities")
+	require.Equal(t, "application/json", rec.Header().Get("Content-Type"))
+	var caps struct {
+		SupportedForks         []string            `json:"supported_forks"`
+		ForkScopedEndpoints    []string            `json:"fork_scoped_endpoints"`
+		IndependentlyVersioned map[string][]string `json:"independently_versioned"`
+		UnscopedEndpoints      []string            `json:"unscoped_endpoints"`
+		Limits                 map[string]uint64   `json:"limits"`
+	}
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &caps))
+	require.Equal(t, []string{"paris", "shanghai", "cancun", "prague", "osaka", "amsterdam"}, caps.SupportedForks)
+	require.Equal(t, []string{"payloads", "forkchoice", "bodies"}, caps.ForkScopedEndpoints)
+	require.Equal(t, []string{"v1", "v2", "v3"}, caps.IndependentlyVersioned["blobs"])
+	require.Equal(t, []string{"capabilities", "identity"}, caps.UnscopedEndpoints)
+	// pin the spec's MAX_* values: MAX_BODIES_REQUEST, MAX_VERSIONED_HASHES_PER_REQUEST,
+	// MAX_REQUEST_BODY_SIZE (2**26 = 64 MiB).
+	require.Equal(t, uint64(32), caps.Limits["bodies.max_count"])
+	require.Equal(t, uint64(128), caps.Limits["blobs.max_versioned_hashes"])
+	require.Equal(t, uint64(67108864), caps.Limits["payload.max_bytes"])
 }
 
-func TestSSZRESTAdvertisedRoutes(t *testing.T) {
-	srv := NewEngineServer(log.New(), &chain.Config{}, nil, nil, false, true, false, false, nil, nil, 0, 0)
-	for _, route := range []struct {
-		method string
-		path   string
-		code   int
+func TestSSZRESTIdentityRoute(t *testing.T) {
+	srv := newTestEngineServer(&chain.Config{}, false)
+	req := httptest.NewRequest(http.MethodGet, "/engine/v1/identity", nil)
+	req.Header.Set("X-Engine-Client-Version", "LH/v9.9.9")
+	rec := httptest.NewRecorder()
+	srv.SSZRESTHandler().ServeHTTP(rec, req)
+
+	require.Equal(t, http.StatusOK, rec.Code)
+	require.Equal(t, "application/json", rec.Header().Get("Content-Type"))
+	var versions []engine_types.ClientVersionV1
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &versions))
+	require.Len(t, versions, 1)
+	require.Equal(t, "EG", versions[0].Code)
+}
+
+// Unscoped endpoints ignore Eth-Execution-Version, even a bogus value, per the spec.
+func TestSSZRESTUnscopedIgnoreForkHeader(t *testing.T) {
+	srv := newTestEngineServer(allForksConfig(), false)
+	for _, path := range []string{"/engine/v1/capabilities", "/engine/v1/identity"} {
+		req := httptest.NewRequest(http.MethodGet, path, nil)
+		req.Header.Set("Eth-Execution-Version", "not-a-fork")
+		rec := httptest.NewRecorder()
+		srv.SSZRESTHandler().ServeHTTP(rec, req)
+		require.Equal(t, http.StatusOK, rec.Code, path)
+		require.Equal(t, "application/json", rec.Header().Get("Content-Type"), path)
+	}
+}
+
+func TestSSZRESTRoutingErrors(t *testing.T) {
+	srv := newTestEngineServer(allForksConfig(), false)
+	for _, tc := range []struct {
+		name        string
+		method      string
+		path        string
+		fork        string
+		contentType string
+		code        int
+		problem     string
 	}{
-		{http.MethodPost, "/engine/v1/payloads", http.StatusBadRequest},
-		{http.MethodPost, "/engine/v2/payloads", http.StatusBadRequest},
-		{http.MethodPost, "/engine/v3/payloads", http.StatusBadRequest},
-		{http.MethodPost, "/engine/v4/payloads", http.StatusBadRequest},
-		{http.MethodPost, "/engine/v5/payloads", http.StatusBadRequest},
-		{http.MethodGet, "/engine/v1/payloads/not-a-payload-id", http.StatusBadRequest},
-		{http.MethodGet, "/engine/v2/payloads/not-a-payload-id", http.StatusBadRequest},
-		{http.MethodGet, "/engine/v3/payloads/not-a-payload-id", http.StatusBadRequest},
-		{http.MethodGet, "/engine/v4/payloads/not-a-payload-id", http.StatusBadRequest},
-		{http.MethodGet, "/engine/v5/payloads/not-a-payload-id", http.StatusBadRequest},
-		{http.MethodGet, "/engine/v6/payloads/not-a-payload-id", http.StatusBadRequest},
-		{http.MethodPost, "/engine/v1/forkchoice", http.StatusBadRequest},
-		{http.MethodPost, "/engine/v2/forkchoice", http.StatusBadRequest},
-		{http.MethodPost, "/engine/v3/forkchoice", http.StatusBadRequest},
-		{http.MethodPost, "/engine/v4/forkchoice", http.StatusBadRequest},
-		{http.MethodPost, "/engine/v1/blobs", http.StatusBadRequest},
-		{http.MethodPost, "/engine/v2/blobs", http.StatusBadRequest},
-		{http.MethodPost, "/engine/v3/blobs", http.StatusBadRequest},
-		{http.MethodPost, "/engine/v1/client/version", http.StatusBadRequest},
+		{"unknown top-level endpoint", http.MethodPost, "/engine/v1/foobar", "cancun", sszRestContentType, http.StatusNotFound, problemMethodNotFound},
+		{"unknown fork header", http.MethodPost, "/engine/v1/payloads", "foobar", sszRestContentType, http.StatusBadRequest, problemUnsupportedFork},
+		{"missing fork header", http.MethodPost, "/engine/v1/payloads", "", sszRestContentType, http.StatusBadRequest, problemUnsupportedFork},
+		{"trailing slash", http.MethodPost, "/engine/v1/payloads/", "cancun", sszRestContentType, http.StatusNotFound, problemMethodNotFound},
+		{"method mismatch on capabilities", http.MethodPost, "/engine/v1/capabilities", "", sszRestContentType, http.StatusNotFound, problemMethodNotFound},
+		{"wrong content type", http.MethodPost, "/engine/v1/payloads", "cancun", "application/json", http.StatusUnsupportedMediaType, problemUnsupportedMediaType},
+		{"bad ssz body", http.MethodPost, "/engine/v1/payloads", "cancun", sszRestContentType, http.StatusBadRequest, problemSSZDecodeError},
+		{"bad payload id", http.MethodGet, "/engine/v1/payloads/not-an-id", "cancun", "", http.StatusBadRequest, problemInvalidRequest},
+		{"bodies range missing params", http.MethodGet, "/engine/v1/bodies", "cancun", "", http.StatusBadRequest, problemInvalidRequest},
+		{"bodies range zero count", http.MethodGet, "/engine/v1/bodies?from=1&count=0", "cancun", "", http.StatusUnprocessableEntity, problemInvalidBody},
+		{"bodies range too large", http.MethodGet, "/engine/v1/bodies?from=1&count=33", "cancun", "", http.StatusRequestEntityTooLarge, problemRequestTooLarge},
+		{"bodies hash too many", http.MethodPost, "/engine/v1/bodies/hash", "cancun", sszRestContentType, http.StatusRequestEntityTooLarge, problemRequestTooLarge},
+		{"blobs unknown revision", http.MethodPost, "/engine/v1/blobs/v9", "", sszRestContentType, http.StatusNotFound, problemMethodNotFound},
+		{"blobs too many hashes", http.MethodPost, "/engine/v1/blobs/v1", "", sszRestContentType, http.StatusRequestEntityTooLarge, problemRequestTooLarge},
 	} {
-		t.Run(route.method+" "+route.path, func(t *testing.T) {
-			req := httptest.NewRequest(route.method, route.path, strings.NewReader("bad-ssz"))
+		t.Run(tc.name, func(t *testing.T) {
+			var body []byte
+			switch tc.name {
+			case "bad ssz body":
+				body = []byte("bad-ssz")
+			case "bodies hash too many":
+				body = bytes.Repeat([]byte{0x01}, (sszMaxBodiesRequest+1)*32)
+			case "blobs too many hashes":
+				body = bytes.Repeat([]byte{0x01}, (sszMaxGetBlobHashes+1)*32)
+			}
+			req := httptest.NewRequest(tc.method, tc.path, bytes.NewReader(body))
+			if tc.contentType != "" {
+				req.Header.Set("Content-Type", tc.contentType)
+			}
+			if tc.fork != "" {
+				req.Header.Set("Eth-Execution-Version", tc.fork)
+			}
 			rec := httptest.NewRecorder()
 			srv.SSZRESTHandler().ServeHTTP(rec, req)
-			require.Equal(t, route.code, rec.Code)
+			require.Equal(t, tc.code, rec.Code)
+			require.Equal(t, tc.problem, problemType(t, rec))
 		})
 	}
 }
 
-func TestSSZRESTEndpointVersionMapping(t *testing.T) {
-	for _, tc := range []struct {
-		name string
-		fn   func(int) (clparams.StateVersion, bool)
-		in   int
-		want clparams.StateVersion
-	}{
-		{"newPayloadV1", sszNewPayloadVersion, 1, clparams.BellatrixVersion},
-		{"newPayloadV2", sszNewPayloadVersion, 2, clparams.CapellaVersion},
-		{"newPayloadV3", sszNewPayloadVersion, 3, clparams.DenebVersion},
-		{"newPayloadV4", sszNewPayloadVersion, 4, clparams.ElectraVersion},
-		{"newPayloadV5", sszNewPayloadVersion, 5, clparams.GloasVersion},
-		{"getPayloadV1", sszGetPayloadVersion, 1, clparams.BellatrixVersion},
-		{"getPayloadV2", sszGetPayloadVersion, 2, clparams.CapellaVersion},
-		{"getPayloadV3", sszGetPayloadVersion, 3, clparams.DenebVersion},
-		{"getPayloadV4", sszGetPayloadVersion, 4, clparams.ElectraVersion},
-		{"getPayloadV5", sszGetPayloadVersion, 5, clparams.FuluVersion},
-		{"getPayloadV6", sszGetPayloadVersion, 6, clparams.GloasVersion},
-		{"forkchoiceV1", sszForkchoiceVersion, 1, clparams.BellatrixVersion},
-		{"forkchoiceV2", sszForkchoiceVersion, 2, clparams.CapellaVersion},
-		{"forkchoiceV3", sszForkchoiceVersion, 3, clparams.DenebVersion},
-		{"forkchoiceV4", sszForkchoiceVersion, 4, clparams.GloasVersion},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			got, ok := tc.fn(tc.in)
-			require.True(t, ok)
-			require.Equal(t, tc.want, got)
-		})
-	}
+// A fork that is valid but not scheduled on this chain must be rejected
+// with 400 unsupported-fork.
+func TestSSZRESTUnscheduledFork(t *testing.T) {
+	srv := newTestEngineServer(&chain.Config{ShanghaiTime: common.NewUint64(0), CancunTime: common.NewUint64(0)}, false)
+	rec := httptest.NewRecorder()
+	srv.SSZRESTHandler().ServeHTTP(rec, newSSZRequest(http.MethodPost, "/engine/v1/payloads", "amsterdam", nil))
+	require.Equal(t, http.StatusBadRequest, rec.Code)
+	require.Equal(t, problemUnsupportedFork, problemType(t, rec))
 }
 
-func TestSSZRESTNewPayloadV5UsesGloasPayloadSchema(t *testing.T) {
-	payload := engine_types.NewExecutionPayloadSSZ(clparams.GloasVersion)
-	slot := hexutil.Uint64(123)
-	payload.SlotNumber = &slot
-	bal := hexutil.Bytes{0x01, 0x02, 0x03}
-	payload.BlockAccessList = &bal
-
-	enc, err := encodeNewPayloadRequest(clparams.GloasVersion, payload, solid.NewHashList(sszMaxBlobHashes), common.Hash{}, &solid.TransactionsSSZ{})
+// An empty (but well-formed) Paris payload travels through decode and dispatch
+// and comes back as an SSZ INVALID status ("invalid block hash") over HTTP 200.
+func TestSSZRESTNewPayloadDispatch(t *testing.T) {
+	srv := newTestEngineServer(allForksConfig(), true)
+	payload := engine_types.NewExecutionPayloadSSZ(clparams.BellatrixVersion)
+	body, err := encodeNewPayloadEnvelope(clparams.BellatrixVersion, payload, common.Hash{}, nil)
 	require.NoError(t, err)
 
-	wireVersion, ok := sszNewPayloadVersion(5)
-	require.True(t, ok)
-	out, _, _, _, err := decodeNewPayloadRequest(enc, wireVersion)
-	require.NoError(t, err)
+	rec := httptest.NewRecorder()
+	srv.SSZRESTHandler().ServeHTTP(rec, newSSZRequest(http.MethodPost, "/engine/v1/payloads", "paris", body))
 
-	require.NotNil(t, out.SlotNumber)
-	require.Equal(t, hexutil.Uint64(123), *out.SlotNumber)
-	require.NotNil(t, out.BlockAccessList)
-	require.Equal(t, hexutil.Bytes{0x01, 0x02, 0x03}, *out.BlockAccessList)
+	require.Equal(t, http.StatusOK, rec.Code)
+	require.Equal(t, sszRestContentType, rec.Header().Get("Content-Type"))
+	var status engine_types.PayloadStatus
+	require.NoError(t, status.DecodeSSZ(rec.Body.Bytes(), 0))
+	require.Equal(t, engine_types.InvalidStatus, status.Status)
+	require.Contains(t, status.ValidationError.Error().Error(), "invalid block hash")
 }
 
-func TestSSZRESTForkchoiceV4UsesGloasPayloadAttributesSchema(t *testing.T) {
-	slotNumber := hexutil.Uint64(456)
-	targetGasLimit := hexutil.Uint64(36000000)
+// A forkchoice with payload attributes whose timestamp belongs to a different
+// fork than the Eth-Execution-Version header must be rejected with 400 unsupported-fork.
+func TestSSZRESTForkchoiceHeaderForkMustMatchAttributes(t *testing.T) {
+	srv := newTestEngineServer(allForksConfig(), true)
+	root := common.HexToHash("0x04")
 	attrs := &engine_types.PayloadAttributes{
-		Timestamp:             1,
-		SuggestedFeeRecipient: common.HexToAddress("0x1234"),
-		Withdrawals:           nil,
-		SlotNumber:            &slotNumber,
-		TargetGasLimit:        &targetGasLimit,
-		SSZVersion:            clparams.GloasVersion,
+		Timestamp:             150, // shanghai era
+		SuggestedFeeRecipient: common.HexToAddress("0x06"),
+		ParentBeaconBlockRoot: &root,
 	}
-	state := engine_types.ForkChoiceState{}
-	enc, err := encodeForkchoiceRequest(clparams.GloasVersion, &state, attrs)
+	attrs.SSZVersion = clparams.DenebVersion
+	body, err := encodeForkchoiceUpdate(clparams.DenebVersion, &engine_types.ForkChoiceState{}, attrs, nil)
 	require.NoError(t, err)
 
-	wireVersion, ok := sszForkchoiceVersion(4)
-	require.True(t, ok)
-	_, engineAttrs, err := decodeForkchoiceRequest(enc, wireVersion)
-	require.NoError(t, err)
-
-	require.NotNil(t, engineAttrs)
-	require.NotNil(t, engineAttrs.SlotNumber)
-	require.Equal(t, hexutil.Uint64(456), *engineAttrs.SlotNumber)
-	require.NotNil(t, engineAttrs.TargetGasLimit)
-	require.Equal(t, hexutil.Uint64(36000000), *engineAttrs.TargetGasLimit)
+	rec := httptest.NewRecorder()
+	srv.SSZRESTHandler().ServeHTTP(rec, newSSZRequest(http.MethodPost, "/engine/v1/forkchoice", "cancun", body))
+	require.Equal(t, http.StatusBadRequest, rec.Code)
+	require.Equal(t, problemUnsupportedFork, problemType(t, rec))
 }
 
-func TestExecutionRequestsFromListDecodesGloasBuilderRequests(t *testing.T) {
-	builderDeposit := &solid.BuilderDepositRequest{Amount: 123}
-	builderDeposit.PubKey[0] = 0x11
-	builderDeposit.WithdrawalCredentials[0] = 0x01
-	builderDeposit.Signature[0] = 0x22
-	builderExit := &solid.BuilderExitRequest{SourceAddress: common.HexToAddress("0x0000000000000000000000000000000000001234")}
-	builderExit.PubKey[0] = 0x33
-	encodedDeposit, err := builderDeposit.EncodeSSZ(nil)
+func TestSSZRESTBlobsPoolDisabled(t *testing.T) {
+	srv := newTestEngineServer(allForksConfig(), true)
+	body, err := encodeHashListRequest([]common.Hash{common.HexToHash("0x01")}, sszMaxGetBlobHashes)
 	require.NoError(t, err)
-	encodedExit, err := builderExit.EncodeSSZ(nil)
-	require.NoError(t, err)
-
-	requests, err := executionRequestsFromList(&clparams.MainnetBeaconConfig, []hexutil.Bytes{
-		append(hexutil.Bytes{types.BuilderDepositRequestType}, encodedDeposit...),
-		append(hexutil.Bytes{types.BuilderExitRequestType}, encodedExit...),
-	}, clparams.GloasVersion)
-	require.NoError(t, err)
-
-	require.Equal(t, 1, requests.BuilderDeposits.Len())
-	require.Equal(t, 1, requests.BuilderExits.Len())
-	require.Equal(t, uint64(123), requests.BuilderDeposits.Get(0).Amount)
-	require.Equal(t, builderExit.SourceAddress, requests.BuilderExits.Get(0).SourceAddress)
+	rec := httptest.NewRecorder()
+	srv.SSZRESTHandler().ServeHTTP(rec, newSSZRequest(http.MethodPost, "/engine/v1/blobs/v1", "", body))
+	require.Equal(t, http.StatusNoContent, rec.Code)
+	require.Empty(t, rec.Body.Bytes())
 }
 
-func TestExecutionRequestsFromListRejectsInvalidOrdering(t *testing.T) {
-	emptyDeposits, err := solid.NewStaticListSSZ[*solid.DepositRequest](1, solid.SizeDepositRequest).EncodeSSZ(nil)
-	require.NoError(t, err)
-	emptyWithdrawals, err := solid.NewStaticListSSZ[*solid.WithdrawalRequest](1, solid.SizeWithdrawalRequest).EncodeSSZ(nil)
-	require.NoError(t, err)
-
+func TestSSZRESTErrorMapping(t *testing.T) {
 	for _, tc := range []struct {
-		name     string
-		requests []hexutil.Bytes
+		err     error
+		code    int
+		problem string
 	}{
-		{
-			name:     "empty",
-			requests: []hexutil.Bytes{{}},
-		},
-		{
-			name: "duplicate",
-			requests: []hexutil.Bytes{
-				append(hexutil.Bytes{types.DepositRequestType}, emptyDeposits...),
-				append(hexutil.Bytes{types.DepositRequestType}, emptyDeposits...),
-			},
-		},
-		{
-			name: "out of order",
-			requests: []hexutil.Bytes{
-				append(hexutil.Bytes{types.WithdrawalRequestType}, emptyWithdrawals...),
-				append(hexutil.Bytes{types.DepositRequestType}, emptyDeposits...),
-			},
-		},
-		{
-			name:     "unknown",
-			requests: []hexutil.Bytes{{0xff, 0x00}},
-		},
+		{&engine_helpers.UnknownPayloadErr, http.StatusNotFound, problemUnknownPayload},
+		{&engine_helpers.InvalidForkchoiceStateErr, http.StatusConflict, problemInvalidForkchoice},
+		{&engine_helpers.InvalidPayloadAttributesErr, http.StatusUnprocessableEntity, problemInvalidAttributes},
+		{&engine_helpers.TooLargeRequestErr, http.StatusRequestEntityTooLarge, problemRequestTooLarge},
+		{&engine_helpers.ReorgTooDeepErr, http.StatusConflict, problemReorgTooDeep},
+		{&rpc.UnsupportedForkError{Message: "no"}, http.StatusBadRequest, problemUnsupportedFork},
+		{&rpc.InvalidParamsError{Message: "no"}, http.StatusUnprocessableEntity, problemInvalidBody},
+		{errors.New("boom"), http.StatusInternalServerError, problemInternal},
 	} {
-		t.Run(tc.name, func(t *testing.T) {
-			_, err := executionRequestsFromList(&clparams.MainnetBeaconConfig, tc.requests, clparams.GloasVersion)
-			require.Error(t, err)
-		})
+		rec := httptest.NewRecorder()
+		writeEngineProblem(rec, tc.err)
+		require.Equal(t, tc.code, rec.Code)
+		require.Equal(t, tc.problem, problemType(t, rec))
 	}
-}
-
-func TestEncodeGetPayloadResponseIgnoresExecutionRequestsBeforeElectra(t *testing.T) {
-	for _, version := range []clparams.StateVersion{clparams.CapellaVersion, clparams.DenebVersion} {
-		t.Run(version.String(), func(t *testing.T) {
-			resp := &engine_types.GetPayloadResponse{
-				ExecutionPayload:  engine_types.NewExecutionPayloadSSZ(version),
-				ExecutionRequests: []hexutil.Bytes{{0xff, 0x00}},
-			}
-
-			_, err := encodeGetPayloadResponse(&clparams.MainnetBeaconConfig, resp, version)
-			require.NoError(t, err)
-		})
-	}
-}
-
-func TestExchangeCapabilitiesAdvertisesJSONRPCAndSSZREST(t *testing.T) {
-	srv := NewEngineServer(log.New(), &chain.Config{}, nil, nil, false, true, false, false, nil, nil, 0, 0)
-	caps := srv.ExchangeCapabilities([]string{"engine_newPayloadV1"})
-	require.Contains(t, caps, "engine_newPayloadV1")
-	require.Contains(t, caps, "engine_getPayloadV6")
-	require.Contains(t, caps, "POST /engine/v1/capabilities")
-	require.Contains(t, caps, "GET /engine/v6/payloads/{payload_id}")
-	require.NotContains(t, caps, "engine_exchangeCapabilities")
 }
 
 func TestSSZRESTGetPayloadIDPathParsing(t *testing.T) {
@@ -381,19 +734,49 @@ func TestSSZRESTGetPayloadIDPathParsing(t *testing.T) {
 	require.Error(t, err)
 }
 
-func TestSSZRESTErrorMapping(t *testing.T) {
-	for _, tc := range []struct {
-		err  error
-		code int
-	}{
-		{&engine_helpers.UnknownPayloadErr, http.StatusNotFound},
-		{&engine_helpers.InvalidForkchoiceStateErr, http.StatusConflict},
-		{&engine_helpers.InvalidPayloadAttributesErr, http.StatusUnprocessableEntity},
-		{&engine_helpers.TooLargeRequestErr, http.StatusRequestEntityTooLarge},
-		{errors.New("boom"), http.StatusInternalServerError},
-	} {
-		rec := httptest.NewRecorder()
-		writeEngineError(rec, tc.err)
-		require.Equal(t, tc.code, rec.Code)
+func TestExchangeCapabilitiesDropsLegacySSZEndpoints(t *testing.T) {
+	srv := newTestEngineServer(&chain.Config{}, false)
+	caps := srv.ExchangeCapabilities([]string{"engine_newPayloadV1"})
+	require.Contains(t, caps, "engine_newPayloadV1")
+	require.Contains(t, caps, "engine_getPayloadV6")
+	require.NotContains(t, caps, "engine_exchangeCapabilities")
+	for _, capability := range caps {
+		require.NotContains(t, capability, "/engine/v")
 	}
+}
+
+func TestSSZRESTExecutionRequestsBound(t *testing.T) {
+	// execution_requests is bounded at MAX_EXECUTION_REQUESTS_PER_PAYLOAD (256);
+	// a longer list must be rejected on decode.
+	mkRequests := func(n int) []hexutil.Bytes {
+		reqs := make([]hexutil.Bytes, n)
+		for i := range reqs {
+			reqs[i] = hexutil.Bytes{byte(i)}
+		}
+		return reqs
+	}
+	payload := engine_types.NewExecutionPayloadSSZ(clparams.ElectraVersion)
+
+	enc, err := encodeNewPayloadEnvelope(clparams.ElectraVersion, payload, common.Hash{}, mkRequests(256))
+	require.NoError(t, err)
+	_, _, out, err := decodeNewPayloadEnvelope(enc, clparams.ElectraVersion)
+	require.NoError(t, err)
+	require.Len(t, out, 256)
+
+	enc, err = encodeNewPayloadEnvelope(clparams.ElectraVersion, payload, common.Hash{}, mkRequests(257))
+	require.NoError(t, err)
+	_, _, _, err = decodeNewPayloadEnvelope(enc, clparams.ElectraVersion)
+	require.Error(t, err)
+}
+
+func TestSSZRESTReadBodyNonSizeError(t *testing.T) {
+	// a non-size read error (truncated body / client disconnect) is 400, not 413
+	srv := newTestEngineServer(allForksConfig(), false)
+	req := httptest.NewRequest(http.MethodPost, "/engine/v1/forkchoice", iotest.ErrReader(errors.New("boom")))
+	req.Header.Set("Content-Type", sszRestContentType)
+	req.Header.Set("Eth-Execution-Version", "cancun")
+	rec := httptest.NewRecorder()
+	srv.SSZRESTHandler().ServeHTTP(rec, req)
+	require.Equal(t, http.StatusBadRequest, rec.Code)
+	require.Equal(t, problemInvalidRequest, problemType(t, rec))
 }
