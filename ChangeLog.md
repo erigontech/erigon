@@ -18,7 +18,20 @@ Aligns Erigon with the `eth_simulateV1` error code specification ([NethermindEth
 
 ---
 
-# Erigon v3.5.1 — Tidal Tails — TBD
+# Erigon v3.5.2 — Tidal Tails — 2026-07-13
+
+v3.5.2 is a bugfix release recommended for all users, and especially for anyone running 3.5.1 — it fixes a sync-halting trie-root regression introduced there (#22399). It is a drop-in upgrade from 3.5.1 — no re-sync required.
+
+**Bugfixes**
+
+- db/state: clear the StateCache on `SharedDomains` unwind below the reorg window (#22402) by @Sahil-4555 — after the v3.5.1 changeset-isolation backport, a block that failed execution within the reorg window did a disk-noop overlay unwind that left dirty, uncommitted writes in the state cache; on the next run execution read those stale values instead of the database, producing a deterministic trie-root mismatch that halted sync. Closes #22399.
+- rpc, node: fix the nil-pointer panic in the gzip batch flush race (#22383) by @lupin012 — a gzipped JSON-RPC batch with two or more streamable methods invoked the shared gzip-streaming flush hook concurrently from per-call goroutines; `gzipResponseWriter.Flush` is not concurrency-safe, so the calls raced on the underlying gzip writer and could dereference a nil flate compressor, crashing the node. Closes #22334.
+
+**Full Changelog**: https://github.com/erigontech/erigon/compare/v3.5.1...v3.5.2
+
+---
+
+# Erigon v3.5.1 — Tidal Tails — 2026-07-10
 
 v3.5.1 is a bugfix release recommended for all users. It is a drop-in upgrade from 3.5.0 — no re-sync required.
 

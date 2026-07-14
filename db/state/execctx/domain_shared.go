@@ -512,6 +512,9 @@ func (sd *SharedDomains) GetDiffset(tx kv.RwTx, blockHash common.Hash, blockNumb
 
 func (sd *SharedDomains) Unwind(txNumUnwindTo uint64, changeset *[kv.DomainLen][]kv.DomainEntryDiff) {
 	sd.mem.Unwind(txNumUnwindTo, changeset)
+	if sd.stateCache != nil {
+		sd.stateCache.Clear()
+	}
 }
 
 func (sd *SharedDomains) Trace() bool {

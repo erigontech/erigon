@@ -126,3 +126,42 @@ func TestHandlerDoesNotDoubleWriteNull(t *testing.T) {
 	}
 
 }
+
+// TestRunMethodFlushHookNilFunc pins the invariant that runMethod must not panic when the
+// gzip-streaming hook stored on the context is a typed nil func(), not just an untyped nil.
+// The normal masking path (withoutGzipStreamingHook) stores an untyped nil so the type
+// assertion fails outright, but runMethod's guard should not depend on callers always doing
+// that correctly.
+func TestRunMethodFlushHookNilFunc(t *testing.T) {
+	msg := jsonrpcMessage{
+		Version: "2.0",
+		ID:      []byte{49},
+		Method:  "test_test",
+		Params:  []byte("[]"),
+	}
+
+	dummyFunc := func(stream jsonstream.Stream) error {
+		stream.WriteEmptyObject()
+		return nil
+	}
+
+	cb := &callback{
+		fn:         reflect.ValueOf(dummyFunc),
+		streamable: true,
+	}
+
+	args, err := parsePositionalArguments(msg.Params, cb.argTypes)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	ctx := context.WithValue(context.Background(), httpFlusherContextKey{}, (func())(nil))
+
+	var buf bytes.Buffer
+	stream := jsonstream.New(jsoniter.NewStream(jsoniter.ConfigDefault, &buf, 4096))
+
+	h := handler{}
+	assert.NotPanics(t, func() {
+		h.runMethod(ctx, &msg, cb, args, stream)
+	})
+}
