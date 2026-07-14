@@ -323,17 +323,17 @@ func (c *GenericCache[T]) PutIfAbsent(key []byte, value T, txNum uint64) {
 }
 
 func (c *GenericCache[T]) put(key []byte, value T, txNum uint64, overwrite bool) {
-	if c.putLocked(key, value, txNum, overwrite) {
+	if c.putStriped(key, value, txNum, overwrite) {
 		// Grow outside the stripe — maybeGrow takes every stripe.
 		c.maybeGrow()
 	}
 }
 
-// putLocked performs the write under the key's stripe and reports whether the
+// putStriped performs the write under the key's stripe and reports whether the
 // insert landed in a full LRU with ceiling headroom, i.e. the caller should
 // grow. Detection stays on the insert path — Len locks every shard, too costly
 // per warm update.
-func (c *GenericCache[T]) putLocked(key []byte, value T, txNum uint64, overwrite bool) bool {
+func (c *GenericCache[T]) putStriped(key []byte, value T, txNum uint64, overwrite bool) bool {
 	h := maphash.Hash(key)
 	valBytes := c.sizeFunc(value)
 	newSize := len(key) + valBytes + 24
