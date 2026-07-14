@@ -23,8 +23,8 @@ import (
 
 	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/db/dbservices"
 	"github.com/erigontech/erigon/db/kv"
-	"github.com/erigontech/erigon/db/services"
 	"github.com/erigontech/erigon/db/state/execctx"
 	"github.com/erigontech/erigon/execution/builder/buildercfg"
 	"github.com/erigontech/erigon/execution/chain"
@@ -51,7 +51,7 @@ type Builder struct {
 	builderCfg            *buildercfg.BuilderConfig
 	chainConfig           *chain.Config
 	engine                rules.Engine
-	blockReader           services.FullBlockReader
+	blockReader           dbservices.FullBlockReader
 	executeBlockCfg       stagedsync.ExecuteBlockCfg
 	notifier              stagedsync.ChainEventNotifier
 	vmConfig              *vm.Config
@@ -69,7 +69,7 @@ func NewBuilder(
 	builderCfg *buildercfg.BuilderConfig,
 	chainConfig *chain.Config,
 	engine rules.Engine,
-	blockReader services.FullBlockReader,
+	blockReader dbservices.FullBlockReader,
 	executeBlockCfg stagedsync.ExecuteBlockCfg,
 	notifier stagedsync.ChainEventNotifier,
 	vmConfig *vm.Config,
