@@ -31,7 +31,6 @@ import (
 	"github.com/erigontech/erigon/db/kv/memdb"
 	"github.com/erigontech/erigon/db/kv/order"
 	"github.com/erigontech/erigon/db/kv/stream"
-	"github.com/erigontech/erigon/db/services"
 	"github.com/erigontech/erigon/db/snapshotsync/blocksnapshots"
 	"github.com/erigontech/erigon/db/state"
 	"github.com/erigontech/erigon/db/version"
@@ -80,32 +79,26 @@ type DB struct {
 	kv.RwDB
 	stateFiles *state.Aggregator
 	// blockFiles: block snapshots, the peer of stateFiles. Optional; nil for
-	// state-only tools. Set via SetBlockSnapshots.
-	blockFiles services.BlockSnapshots
+	// state-only tools, in which case block reads fall back to their own view.
+	blockFiles *blocksnapshots.RoSnapshots
 }
 
-func New(db kv.RwDB, agg *state.Aggregator) (*DB, error) {
-	return &DB{RwDB: db, stateFiles: agg}, nil
+// New wires the temporal DB over a raw kv.RwDB, its state aggregator, and the
+// (optional) block snapshots — the block-data peer of stateFiles. Pass nil
+// blockSnaps for state-only tools.
+func New(db kv.RwDB, agg *state.Aggregator, blockSnaps *blocksnapshots.RoSnapshots) (*DB, error) {
+	return &DB{RwDB: db, stateFiles: agg, blockFiles: blockSnaps}, nil
 }
 
-// SetBlockSnapshots wires the (optional) block snapshots. Call once at startup,
-// before any tx is opened.
-//
-// TODO: currently a no-op so this change is behavior-preserving (blockFiles stays
-// nil → reads keep using their own view, not the temporal tx's). Enable by
-// assigning db.blockFiles = sn here — a single-line change, no call-site churn.
-func (db *DB) SetBlockSnapshots(sn services.BlockSnapshots) {}
-
-func (db *DB) Agg() any                                { return db.stateFiles }
-func (db *DB) BlockSnapshots() services.BlockSnapshots { return db.blockFiles }
+func (db *DB) Agg() any                                     { return db.stateFiles }
+func (db *DB) DebugBlockFiles() *blocksnapshots.RoSnapshots { return db.blockFiles }
 
 // beginBlockFilesRo pins the block-files view for a tx, or nil if unset.
 func (db *DB) beginBlockFilesRo() *blocksnapshots.View {
-	sn, ok := db.blockFiles.(*blocksnapshots.RoSnapshots)
-	if !ok {
+	if db.blockFiles == nil {
 		return nil
 	}
-	return sn.View()
+	return db.blockFiles.View()
 }
 func (db *DB) InternalDB() kv.RwDB       { return db.RwDB }
 func (db *DB) Debug() kv.TemporalDebugDB { return kv.TemporalDebugDB(db) }
@@ -272,7 +265,7 @@ func NewTestDB(tb testing.TB, label kv.Label) kv.TemporalRwDB {
 	dirs := datadir.New(tb.TempDir())
 	agg := state.NewTest(dirs).DisableHistory().MustOpen(context.Background(), db)
 	tb.Cleanup(agg.Close)
-	tdb, _ := New(db, agg)
+	tdb, _ := New(db, agg, nil)
 	return tdb
 }
 
