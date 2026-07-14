@@ -118,6 +118,35 @@ Mind intern costs: `accounts.Address`/`CodeHash` are `unique.Handle`; `unique.Ma
 is a global intern-map + GC-weak-handle op per call (the CALL family re-interns per
 op) — geth/reth don't pay this; the resident view should key on the interned handle.
 
+## Follow-up 6 — solidify the transitional model; retire legacy-path reliance
+
+The versionedio model is only half-established: the parallel executor and block
+builder are on it, but genesis, the serial executor, RPC, and the BAL regenerator
+still lean on `stateObjects` / legacy commit code. **Every one of those points is a
+live correctness risk until migrated** — they can silently diverge on the
+`noMaterialize` path, and merges with `main` (which keeps evolving the legacy/BAL
+code) either drop subtle correctness commits or expose incompatibilities. This PR
+hit that class twice: the access-set model reconciliation, and the BAL regenerator
+missing the per-tx versionMap flush.
+
+The BAL path is the sharpest example. BAL is produced or replayed in at least four
+places — the parallel executor, `chain_makers`, the block builder
+(`block_assembler.go`), and `bal/rederive.go` — and each must independently
+reproduce the same cross-tx discipline: **flush each phase's writes to the
+versionMap between phases** (`FlushWritesToVersionMap` / `FlushVersionedWrites`),
+so a later tx's write (e.g. the accumulating coinbase fee) sees the running value.
+Any new BAL-producing/replaying path that forgets this produces wrong BALs on the
+cache-free model — a footgun re-armed at every such site.
+
+Solidify:
+- Extract one shared block-replay / BAL-construction helper that owns the
+  `MergeTxIOInto` → `FlushWritesToVersionMap` → `ResetVersionedIO` sequence, so no
+  caller can forget the per-tx flush. The four sites collapse onto it.
+- Land follow-ups 1–3 (genesis, serial, map-drop) so the mixed model — the source
+  of the risk — goes away entirely.
+- Until then, treat any change to a legacy/stateObject path, or any `main` merge in
+  the BAL/versionedio area, as requiring the per-tx-flush + access-model audit.
+
 ## Low-risk quick win
 
 Follow-up 4's `versionedWriteCollector` removal touches no commit path and can be
