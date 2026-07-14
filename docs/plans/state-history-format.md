@@ -1,7 +1,7 @@
 # A Common File Format for Blockchain State History
 
 Proposal: standardize a small set of **immutable, content-addressable files** carrying a blockchain's state history.
-Clients distribute them p2p and derive every other data structure locally
+Clients distribute them p2p and derive every other data structure locally.
 
 ---
 
@@ -87,10 +87,9 @@ latest:   ◄──────── account.0-16.kv ────────�
 ### 3.2 What this already gets right
 
 - **Prune = `rm old_chunks`.** `GetAsOf(k, ts)` reads the *first change after ts* (a pre-value) or fallback to Latest
-  Value (`.kv`) — so
-  `{Latest State .kv} + {history after X}` is self-sufficient ("suffix-closure")
+  Value (`.kv`) — so `{Latest State .kv} + {history after X}` is self-sufficient ("suffix-closure")
 - **It's small**: History doesn't store copy of Latest State. Block Execution on Chain Tip doesn't read History.
-- **Seed-what-you-use** Same files used by serving RPC requests and initial Syncing/Seeding. No re-packing, no
+- **Seed-what-you-use**: Same files used by serving RPC requests and initial Syncing/Seeding. No re-packing, no
   double-space, no tar-balls. This is very important property! Because Users/Operators have reason to keep history -
   because they using it. Without this property - rational operators delete the network copy.
 - **We made seeding cheap**: BitTorrent has nice feature "any HTTP Server can be a Peer". Means "S3/R2 bucket + CDN" can
@@ -98,24 +97,18 @@ latest:   ◄──────── account.0-16.kv ────────�
 
 ### 3.3 Problems
 
-**P1 — Latest state is not derivable.** Pre-values say what a key *was*, never what it *became*: the current value
-exists only in `.kv`. A buggy/corrupt `.kv` can't be rebuilt from history — only by re-executing blocks.
+**P1 - we have merge, but no compaction** `.kv` must be content-addressed - means stay immutable for long time. Also
+after compaction - impossible remove recent files (rest `.kv` files don't have enough keys after compaction).
 
-**P2 - no compaction**  `.kv` must be content-addressed - means canonical - means `LSM-like compaction` impossible. And
-unbounded span is an attack/blast-radius problem: file span = minimum unit of repair and re-verification.
+**P2 — remove recent files works - but limited**: can drop recent (small) `.kv` files - execution will work. But last
+`.kv` file is very big (5 years of Eth history) - if we delete it we will start exec from 0.
 
-**P3 — Unbounded merge destroys repair points.** The only repair primitive is "delete files above X, re-execute" — it
-works at file granularity. Merge `.kv` toward one 8-year file and there is nothing left to delete: a bug in recent data
-means rebuilding everything. (Capped ladders give free save points: masking levels above X = exact state at X.)
+**P3 — Latest-state format is politically unspecifiable.** - it's the most performance-sensitive, engine-specific part
+of every client; no two teams will agree on generic layout.
 
-**P4 — Latest-state format is politically unspecifiable.** The latest store is the most performance-sensitive,
-engine-specific part of every client; no two teams will agree on its layout, so a spec containing it stalls. Old `.kv`
-is also big, cold, laid out by update-time — clients legitimately want freedom to reshape it.
+**P4 — How to verify files?** by content-only (not just checksum files)
 
-**P5 — Verification is bootstrap-by-trust.** File hashes come from a registry the client ships; no in-band check against
-consensus.
-
-## 4. Proposal: put latest values into .ef file
+## 4. Proposal: put latest values into .ef file and exclude .kv from Spec
 
 ```
 ts →   0                  8                  16
@@ -126,40 +119,34 @@ history:  account.0-8.ef    account.8-16.ef       (key, latestValue, {ts})
                                                   account.8-16.ef carries state@16
                                                   for keys changed in [8,16)
 
-Latest Values (for Blocks Execution on Chain Tip) is derived from `.ef` files - Clients can have their own format
+Clients: to derive their own format of Latest State from "The History" 
 
-large values: optional account.8-16.lv, same enumeration order as .ef — keeps .ef small
+Large values: can create new file type `.lv` sharded as `.ef` - account.8-16.lv
 ```
 
-| Problem                  | After                                                                                                                                                                                                                            |
-|--------------------------|----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
-| P1: `.kv` not derivable  | `.kv` = pure cache. Repair = local re-fold (hours), never re-execution.                                                                                                                                                          |
-| P2: no compaction        | Canonical spans are ts-disjoint, union-merge only. The serving LSM is local — **every client compacts whenever/however it wants**; content-addressing untouched.                                                                 |
-| P3: no repair points     | Every retained span boundary is a save point, independent of local compaction.                                                                                                                                                   |
-| P4: unspecifiable latest | Latest state **leaves the spec surface**. Spec = span package only; each client's latest store is its own business. Asking teams to read a file, not adopt a database.                                                           |
-| P5: trust-bootstrap      | Free redundancy: span N's `latestValue(K)` == span N+1's first pre-value of K. Spans cross-check each other; records chain against per-block BAL commitments (EIP-7928). Verify against headers + predecessor span, no registry. |
+| Problem              | After                                                                                                                                            |
+|----------------------|--------------------------------------------------------------------------------------------------------------------------------------------------|
+| P1: no compaction    | Latest State doesn't need to be content-addressable anymore. All files will get "forever immutability" property (`.v` and `.ef` already have it) |
+| P2: no repair points | Every shard boundary is a "save point" can start re-execution from there at any time                                                             |
+| P3: politics         | Spec = covers only history. Clients can derive any format of Latest State (or None - exec will work)                                             |
+| P4: verification     | Free redundancy: span N's `latestValue(K)` == span N+1's first pre-value of K                                                                    |
 
-### Cost
+### Limitations
 
-One extra value per (key, span-it-changed-in): noise for hot keys, ~2× for a key touched once ever. Mitigations:
-
-- Not new duplication — exactly what un-compacted chunk `.kv` stores today; net-new bytes = values compaction would have
-  dropped.
-- Suffix-closure still applies: `.lv` prunes with its span. Only archives pay full boundary-value history.
+- Pruning: old `.lv` files can't be deleted. Can prune: `.v`, `.ef`
+- Latest State format ideas: whole or partial (instead of storing last large file - can fallback to history), store it
+  in db or files, read-amplification-driven or write-amp, etc...
 
 ## 5. Context
 
-- **Era files proved the shape**: one span of the block stream + beacon state at the boundary — self-sufficient,
-  immutable, cross-client. This is era applied to execution state:
-  `.ef+.v` play blocks, `.lv` plays the state snapshot.
 - **Safe-deletion table** — the operational contract:
 
-  | Operation | How |
-                                  |---|---|
-  | Forget old history | `rm` old spans (`.ef+.v+.lv`); suffix-closure keeps the rest self-sufficient |
-  | Undo recent data (bug/deep reorg) | `rm` recent spans, re-fold latest, re-execute the tail |
-  | Repair corrupted latest store | re-fold from spans — local, no re-execution |
-  | Excise a range inside a file | never — file span = blast radius; cap it in the spec |
+| Operation                         | How                                                                               |
+|-----------------------------------|-----------------------------------------------------------------------------------|
+| Forget old history                | `rm` old `.v` + `.ef` (keep `.lv`); suffix-closure keeps the rest self-sufficient |
+| Undo recent data (bug/deep reorg) | `rm` recent spans, re-fold latest, re-execute the tail                            |
+| Repair corrupted latest store     | re-fold from spans — local, no re-execution                                       |
+| Excise a range inside a file      | never — file span = blast radius; cap it in the spec                              |
 
 - **Determinism is load-bearing.** Content-addressing needs byte-identical producers: fixed span boundaries, fixed
   enumeration order (key-major, ts-ascending), fixed encodings, deterministic (or no) compression. Ship a conformance
@@ -183,7 +170,7 @@ free-form cache. Bytes comparable to today's pre-compaction reality; the flexibi
 They adopt three flat, spec'd, verifiable columns of `(key, ts, value)` — a file format, not an engine. What each client
 builds from it is out of scope by design. That separation is the adoption strategy.
 
-### Erigon's far plans (not related to State Spec)
+## Erigon's far plans (not related to State Spec)
 
 - **Shard `.kv` into ~1g**: to reduce Write-amplification (and amount of free space needed) of Merge
 - **Shard history by Gas or GB's, not blocks/txNums** Bloatnet produced wildly unequal shards. Required manual Erigon
