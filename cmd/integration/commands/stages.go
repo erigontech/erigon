@@ -100,8 +100,8 @@ func makeStageCmd(use string, stageFn func(kv.TemporalRwDB, context.Context, log
 			if debugVerbosity {
 				cmd.Flags().Set(logging.LogConsoleVerbosityFlag.Name, "debug")
 			}
-			logger := debug.SetupCobra(cmd, "integration")
-			db, err := openDB(dbCfg(dbcfg.ChainDB, chaindata), applyMigrations, chain, logger)
+			logger, ctx := debug.SetupCobra(cmd, "integration"), cmd.Context()
+			db, err := openDB(ctx, dbCfg(dbcfg.ChainDB, chaindata), applyMigrations, chain, logger)
 			if err != nil {
 				return fmt.Errorf("opening DB: %w", err)
 			}
@@ -154,8 +154,8 @@ var cmdPrintTableSizes = &cobra.Command{
 	Use:   "print_table_sizes",
 	Short: "",
 	Run: func(cmd *cobra.Command, args []string) {
-		logger := debug.SetupCobra(cmd, "integration")
-		db, err := openDB(dbCfg(dbcfg.ChainDB, chaindata), false, chain, logger)
+		logger, ctx := debug.SetupCobra(cmd, "integration"), cmd.Context()
+		db, err := openDB(ctx, dbCfg(dbcfg.ChainDB, chaindata), false, chain, logger)
 		if err != nil {
 			logger.Error("Opening DB", "error", err)
 			return
@@ -247,12 +247,12 @@ var cmdRunMigrations = &cobra.Command{
 	Use:   "run_migrations",
 	Short: "",
 	Run: func(cmd *cobra.Command, args []string) {
-		logger := debug.SetupCobra(cmd, "integration")
+		logger, ctx := debug.SetupCobra(cmd, "integration"), cmd.Context()
 		migrateDB := func(label kv.Label, path string) {
 			logger.Info("Opening DB", "label", label, "path", path)
 			// Non-accede and exclusive mode - to apply creation of new tables if needed.
 			cfg := dbCfg(label, path).RemoveFlags(mdbx.Accede).Exclusive(true)
-			db, err := openDB(cfg, true, chain, logger)
+			db, err := openDB(ctx, cfg, true, chain, logger)
 			if err != nil {
 				logger.Error("Opening DB", "error", err)
 				return
