@@ -27,8 +27,9 @@ import (
 	"time"
 
 	"github.com/c2h5oh/datasize"
-	"github.com/erigontech/erigon/db/datadir"
 	"golang.org/x/sync/semaphore"
+
+	"github.com/erigontech/erigon/db/datadir"
 
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/backoff"
