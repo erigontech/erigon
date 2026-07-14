@@ -44,6 +44,7 @@ import (
 	"github.com/erigontech/erigon/execution/types/accounts"
 	"github.com/erigontech/erigon/node/ethconfig"
 	"github.com/erigontech/erigon/rpc"
+	"github.com/erigontech/erigon/rpc/requests"
 )
 
 func TestEngineApiBuiltBlockStateMatchesValidation(t *testing.T) {
@@ -686,6 +687,115 @@ func TestEngineApiBALGlamsterdamCreate2OntoFundedAddress(t *testing.T) {
 			requireProxyCreditPreserved(t, eat, bal, proxy)
 		}
 	})
+}
+
+// TestEngineApiEIP8246PreservedBalanceSurvivesCreate2Recreate builds one block
+// with two txs against a CREATE2 factory using the same salt and initcode: tx1
+// creates a contract whose initcode self-destructs to itself (EIP-8246 leaves a
+// balance-only account), tx2 re-creates at the same address with more value.
+// The assembler runs both txs on one shared IntraBlockState, so a stale
+// selfdestructed marker from tx1 would drop the preserved balance in tx2's
+// CREATE2 and produce an invalid block: newPayload validation (fresh state per
+// tx) computes the preserved sum and rejects the assembled root.
+func TestEngineApiEIP8246PreservedBalanceSurvivesCreate2Recreate(t *testing.T) {
+	if !dbg.Exec3Parallel {
+		t.Skip("requires parallel exec")
+	}
+	ctx := t.Context()
+	logger := testlog.Logger(t, log.LvlDebug)
+	senderKey, err := crypto.GenerateKey()
+	require.NoError(t, err)
+	senderAddr := crypto.PubkeyToAddress(senderKey.PublicKey)
+	// Runtime: copy calldata to memory and CREATE2(callvalue, mem[0:cds], salt=0).
+	//   CALLDATASIZE PUSH0 PUSH0 CALLDATACOPY PUSH0 CALLDATASIZE PUSH0 CALLVALUE CREATE2 STOP
+	factoryAddr := common.HexToAddress("0xfac70000000000000000000000000000000000fa")
+	factoryCode := common.FromHex("0x365f5f375f365f34f500")
+	// Initcode: ADDRESS SELFDESTRUCT — self-destruct to self during creation.
+	initCode := common.FromHex("0x30ff")
+	genesis, coinbaseKey, err := engineapitester.DefaultEngineApiTesterGenesis()
+	require.NoError(t, err)
+	genesis.Alloc[senderAddr] = types.GenesisAccount{
+		Balance: new(big.Int).Exp(big.NewInt(10), big.NewInt(20), nil), // 100 ETH
+	}
+	genesis.Alloc[factoryAddr] = types.GenesisAccount{
+		Code:    factoryCode,
+		Balance: big.NewInt(0),
+		Nonce:   1,
+	}
+	eat, err := engineapitester.InitialiseEngineApiTester(ctx, engineapitester.EngineApiTesterInitArgs{
+		Logger:      logger,
+		DataDir:     t.TempDir(),
+		Genesis:     genesis,
+		CoinbaseKey: coinbaseKey,
+	})
+	require.NoError(t, err)
+	t.Cleanup(func() {
+		err := eat.Close()
+		require.NoError(t, err)
+	})
+	createdAddr := create2Addr(factoryAddr, [32]byte{}, initCode)
+	valueTx1 := big.NewInt(1_000_000)
+	valueTx2 := big.NewInt(500_000)
+	eat.Run(t, func(ctx context.Context, t *testing.T, eat engineapitester.EngineApiTester) {
+		txn1, err := submitFactoryCall(eat, senderKey, factoryAddr, valueTx1, initCode)
+		require.NoError(t, err)
+		txn2, err := submitFactoryCall(eat, senderKey, factoryAddr, valueTx2, initCode)
+		require.NoError(t, err)
+		payload, err := eat.MockCl.BuildCanonicalBlock(ctx)
+		require.NoError(t, err, "assembled block must validate: a dropped preserved balance surfaces as an INVALID payload")
+		err = eat.TxnInclusionVerifier.VerifyTxnsInclusion(ctx, payload.ExecutionPayload, txn1.Hash(), txn2.Hash())
+		require.NoError(t, err)
+		balance, err := eat.RpcApiClient.GetBalance(createdAddr, rpc.LatestBlock)
+		require.NoError(t, err)
+		expected := new(big.Int).Add(valueTx1, valueTx2)
+		require.Equal(t, expected, balance,
+			"EIP-8246: tx1's preserved balance must survive tx2's CREATE2 at the same address")
+		code, err := eat.RpcApiClient.GetCode(createdAddr, rpc.LatestBlock)
+		require.NoError(t, err)
+		require.Empty(t, code, "the self-destructed account is balance-only")
+	})
+}
+
+// submitFactoryCall sends a value-bearing call to the CREATE2 factory carrying
+// the initcode as calldata, mirroring Transactor.CreateSimpleTransfer's
+// nonce/gas handling for data-bearing txs.
+func submitFactoryCall(eat engineapitester.EngineApiTester, from *ecdsa.PrivateKey, to common.Address, value *big.Int, data []byte) (types.Transaction, error) {
+	client := eat.RpcApiClient
+	fromAddr := crypto.PubkeyToAddress(from.PublicKey)
+	valueU256, _ := uint256.FromBig(value)
+	nonce, err := client.GetTransactionCount(fromAddr, rpc.PendingBlock)
+	if err != nil {
+		return nil, err
+	}
+	gasPrice, err := client.GasPrice()
+	if err != nil {
+		return nil, err
+	}
+	gasPriceU256, _ := uint256.FromBig(gasPrice)
+	gasLimit, err := client.EstimateGas(bind.CallMsg{From: fromAddr, To: &to, Value: valueU256, Data: data}, requests.BlockNumbers.Pending)
+	if err != nil {
+		return nil, err
+	}
+	txn := &types.LegacyTx{
+		CommonTx: types.CommonTx{
+			Nonce:    nonce.Uint64(),
+			GasLimit: gasLimit * 2,
+			To:       &to,
+			Value:    *valueU256,
+			Data:     data,
+		},
+		GasPrice: *gasPriceU256,
+	}
+	signer := types.LatestSignerForChainID(eat.Transactor.ChainId())
+	signedTxn, err := types.SignTx(txn, *signer, from)
+	if err != nil {
+		return nil, err
+	}
+	_, err = client.SendTransaction(signedTxn)
+	if err != nil {
+		return nil, err
+	}
+	return signedTxn, nil
 }
 
 // creditWei is the fixed amount dispersed to each proxy while it is still empty
