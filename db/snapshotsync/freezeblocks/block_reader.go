@@ -1447,6 +1447,9 @@ func (r *BlockReader) CurrentBlock(db kv.Tx) (*types.Block, error) {
 	if err != nil {
 		return nil, fmt.Errorf("failed HeaderNumber: %w", err)
 	}
+	if headNumber == nil {
+		return nil, nil
+	}
 	block, _, err := r.blockWithSenders(context.Background(), db, headHash, *headNumber, true)
 	return block, err
 }

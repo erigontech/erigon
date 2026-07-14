@@ -268,8 +268,10 @@ func missingBlocks(chainDB kv.RwDB, blocks []*types.Block, blockReader services.
 	})
 
 	for i, block := range blocks {
-		// If we're behind the chain head, only check block, state is available at head
-		if headBlock.NumberU64() > block.NumberU64() {
+		// No durable head yet (e.g. only genesis, or the head's commit is still
+		// in flight under background commit): nothing is behind us, so fall
+		// through to the per-block presence check.
+		if headBlock != nil && headBlock.NumberU64() > block.NumberU64() {
 			if !ChainHasBlock(chainDB, block) {
 				return blocks[i:]
 			}
@@ -444,6 +446,11 @@ func InsertChain(ethereum *eth.Ethereum, chain *blockgen.ChainPack, setHead bool
 			}
 		}
 	}
+
+	// UpdateForkChoice commits in the background; drain it so this file's
+	// header/TD/canonical state is durable in the raw DB before the next file's
+	// side-chain TD/head reads (and the final head write) observe it.
+	ethereum.ExecutionModule().WaitCommitsDrained()
 
 	return ethereum.ChainDB().Update(ethereum.SentryCtx(), func(tx kv.RwTx) error {
 		rawdb.WriteHeadBlockHash(tx, lvh)
