@@ -218,8 +218,16 @@ func (s *Antiquary) IncrementBeaconState(ctx context.Context, to uint64) error {
 	stateAntiquaryCollector := newBeaconStatesCollector(s.cfg, s.dirs.Tmp, s.logger)
 	defer stateAntiquaryCollector.close()
 
+	freshState := s.currentState == nil
 	if err := s.initializeStateAntiquaryIfNeeded(ctx, tx); err != nil {
 		return err
+	}
+	if freshState {
+		// A reconstruction resumed with backoff can re-flush rows the prune
+		// marker already passed; floor the markers so those rows stay prunable.
+		if err := s.floorStatePruneMarkers(ctx, s.currentState.Slot()); err != nil {
+			return err
+		}
 	}
 	if s.currentState.Slot() == s.genesisState.Slot() {
 		// Collect genesis state if we are at genesis
@@ -405,6 +413,7 @@ func (s *Antiquary) IncrementBeaconState(ctx context.Context, to uint64) error {
 			stateAntiquaryCollector = newBeaconStatesCollector(s.cfg, s.dirs.Tmp, s.logger)
 			changedValidators = &sync.Map{}
 			lastCommitSlot = slot
+			s.pruneFrozenStateTables(ctx, s.currentState.Slot())
 		}
 		slashingOccurred = false // Set this to false at the beginning of each slot.
 
@@ -609,6 +618,9 @@ func (s *Antiquary) IncrementBeaconState(ctx context.Context, to uint64) error {
 			return err
 		}
 	}
+	// At tip this is the only prune site that runs on every call: the in-loop
+	// site needs a maxSlotsPerCommit batch and the snapgen site a fresh dump.
+	s.pruneFrozenStateTables(ctx, s.currentState.Slot())
 
 	if s.snapgen {
 		blocksPerStatefulFile := uint64(snaptype.CaplinMergeLimit * 5)
@@ -641,6 +653,8 @@ func (s *Antiquary) IncrementBeaconState(ctx context.Context, to uint64) error {
 		if err := s.stateSn.OpenFolder(); err != nil {
 			return err
 		}
+		// Prune only after OpenFolder: coverage must include the just-frozen range.
+		s.pruneFrozenStateTables(ctx, s.currentState.Slot())
 		if s.downloader != nil {
 			paths := s.stateSn.SegFileNames(0, to)
 			// Notify bittorent to seed the new snapshots
