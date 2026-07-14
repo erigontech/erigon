@@ -55,9 +55,9 @@ func TestClampProgress(t *testing.T) {
 		wantProcessed, wantTotal uint64
 	}{
 		{"normal", 100, 20, 60, 40, 80},
-		{"floor above top", 100, 150, 60, 0, 0},
+		{"floor above top", 100, 150, 60, 40, 40},
 		{"current above top", 100, 20, 200, 0, 80},
-		{"current below floor", 100, 20, 5, 80, 80},
+		{"current below floor grows total", 100, 20, 5, 95, 95},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
