@@ -173,7 +173,7 @@ func (ma *meterArbiter) tickMeters() {
 // of uncounted events and processes them on each tick.  It uses the
 // sync/atomic package to manage uncounted events.
 type ewma struct {
-	uncounted atomic.Int64 // /!\ this should be the first member to ensure 64-bit alignment
+	uncounted atomic.Int64
 	alpha     float64
 	rate      float64
 	init      bool
