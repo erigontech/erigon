@@ -20,6 +20,7 @@ import (
 	"bytes"
 	"sync"
 	"sync/atomic"
+	"time"
 
 	"github.com/c2h5oh/datasize"
 	"github.com/elastic/go-freelru"
@@ -215,13 +216,17 @@ func (c *GenericCache[T]) maybeGrow() {
 	if !cachebudget.Global.Reserve(delta) {
 		return
 	}
+	start := time.Now()
 	next := c.newShards(newCap) // allocate before excluding writers
+	fenceStart := time.Now()
 	for i := range c.putStripes {
 		c.putStripes[i].Lock()
 	}
+	copied := 0
 	for _, k := range old.Keys() {
 		if v, ok := old.Get(k); ok {
 			next.Add(k, v)
+			copied++
 		}
 	}
 	c.data.Store(next)
@@ -230,6 +235,8 @@ func (c *GenericCache[T]) maybeGrow() {
 		c.putStripes[i].Unlock()
 	}
 	c.reservedBytes += delta
+	log.Debug("[cache] jump-grow", "fromSlots", curCap, "toSlots", newCap, "copied", copied,
+		"alloc", fenceStart.Sub(start), "fenced", time.Since(fenceStart))
 }
 
 // DomainCache wraps GenericCache[[]byte] to implement the Cache interface.
