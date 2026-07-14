@@ -29,8 +29,10 @@ import (
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/dir"
 	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv/dbcfg"
 	"github.com/erigontech/erigon/db/kv/memdb"
+	"github.com/erigontech/erigon/db/kv/temporal/temporaltest"
 	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/db/recsplit"
 	"github.com/erigontech/erigon/db/seg"
@@ -349,8 +351,10 @@ func TestBlockRetireAllOverlapped(t *testing.T) {
 
 // TestBlockReaderGenesisBlockWithSnapshots tests that the genesis block is always read from the database, even when snapshots exist
 func TestBlockReaderGenesisBlockWithSnapshots(t *testing.T) {
+	db := temporaltest.NewTestDB(t, datadir.New(t.TempDir()))
+	blockReader := NewBlockReader(db.(HasBlockFiles).DebugBlockFiles(), nil)
+
 	tmpDir := t.TempDir()
-	db := memdb.NewTestDB(t, dbcfg.ChainDB)
 	logger := log.New()
 
 	tx, err := db.BeginRo(t.Context())
@@ -394,8 +398,6 @@ func TestBlockReaderGenesisBlockWithSnapshots(t *testing.T) {
 	blocksAvailable := snapshots.BlocksAvailable()
 	assert.Greater(t, blocksAvailable, uint64(0))
 
-	blockReader := NewBlockReader(snapshots, nil)
-
 	// Try to read genesis block (block 0) when snapshots exist.This should read from database not snapshots
 	tx, err = db.BeginRo(t.Context())
 	require.NoError(t, err)
@@ -424,8 +426,8 @@ func TestBlockReaderGenesisBlockWithSnapshots(t *testing.T) {
 }
 
 func TestCanonicalHashCache_DBHit(t *testing.T) {
-	db := memdb.NewTestDB(t, dbcfg.ChainDB)
-	logger := log.New()
+	db := temporaltest.NewTestDB(t, datadir.New(t.TempDir()))
+	blockReader := NewBlockReader(db.(HasBlockFiles).DebugBlockFiles(), nil)
 
 	// Write a canonical hash to the DB
 	rwTx, err := db.BeginRw(context.Background())
@@ -435,12 +437,6 @@ func TestCanonicalHashCache_DBHit(t *testing.T) {
 	expectedHash := header.Hash()
 	require.NoError(t, rawdb.WriteCanonicalHash(rwTx, expectedHash, 0))
 	require.NoError(t, rwTx.Commit())
-
-	cfg := ethconfig.Defaults.Snapshot
-	cfg.ChainName = networkname.Mainnet
-	snapshots := blocksnapshots.NewRoSnapshots(cfg, t.TempDir(), logger)
-	defer snapshots.Close()
-	blockReader := NewBlockReader(snapshots, nil)
 
 	tx, err := db.BeginRo(context.Background())
 	require.NoError(t, err)
@@ -464,14 +460,8 @@ func TestCanonicalHashCache_DBHit(t *testing.T) {
 }
 
 func TestCanonicalHashCache_Miss(t *testing.T) {
-	db := memdb.NewTestDB(t, dbcfg.ChainDB)
-	logger := log.New()
-
-	cfg := ethconfig.Defaults.Snapshot
-	cfg.ChainName = networkname.Mainnet
-	snapshots := blocksnapshots.NewRoSnapshots(cfg, t.TempDir(), logger)
-	defer snapshots.Close()
-	blockReader := NewBlockReader(snapshots, nil)
+	db := temporaltest.NewTestDB(t, datadir.New(t.TempDir()))
+	blockReader := NewBlockReader(db.(HasBlockFiles).DebugBlockFiles(), nil)
 
 	tx, err := db.BeginRo(context.Background())
 	require.NoError(t, err)
@@ -489,8 +479,8 @@ func TestCanonicalHashCache_Miss(t *testing.T) {
 }
 
 func TestCanonicalHashCache_MultipleBlocks(t *testing.T) {
-	db := memdb.NewTestDB(t, dbcfg.ChainDB)
-	logger := log.New()
+	db := temporaltest.NewTestDB(t, datadir.New(t.TempDir()))
+	blockReader := NewBlockReader(db.(HasBlockFiles).DebugBlockFiles(), nil)
 
 	// Write multiple canonical hashes
 	rwTx, err := db.BeginRw(context.Background())
@@ -504,13 +494,6 @@ func TestCanonicalHashCache_MultipleBlocks(t *testing.T) {
 		require.NoError(t, rawdb.WriteCanonicalHash(rwTx, hashes[i], i))
 	}
 	require.NoError(t, rwTx.Commit())
-
-	cfg := ethconfig.Defaults.Snapshot
-	cfg.ChainName = networkname.Mainnet
-	snapshots := blocksnapshots.NewRoSnapshots(cfg, t.TempDir(), logger)
-	defer snapshots.Close()
-	blockReader := NewBlockReader(snapshots, nil)
-
 	tx, err := db.BeginRo(context.Background())
 	require.NoError(t, err)
 	defer tx.Rollback()
@@ -595,9 +578,12 @@ func TestCanonicalHashCache_SnapshotPath(t *testing.T) {
 	blockReader := NewBlockReader(snapshots, nil)
 
 	// No canonical hash written to DB → CanonicalHash must fall through to snapshot path.
-	tx, err := db.BeginRo(context.Background())
+	roTx, err := db.BeginRo(context.Background())
 	require.NoError(t, err)
-	defer tx.Rollback()
+	defer roTx.Rollback()
+	view := snapshots.View()
+	defer view.Close()
+	tx := blockFilesTxStub{Getter: roTx, view: view}
 
 	// First call: DB miss → snapshot read → cache populated.
 	hash1, ok, err := blockReader.CanonicalHash(context.Background(), tx, blockNum)

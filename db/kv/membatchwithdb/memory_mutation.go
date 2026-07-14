@@ -590,12 +590,12 @@ func (m *MemoryMutation) BucketSize(bucket string) (uint64, error) {
 	return m.memTx.BucketSize(bucket)
 }
 
-type blockFilesRoTxProvider interface {
+type HasBlockFilesRoTx interface {
 	BlockFilesRoTx() *blocksnapshots.View
 }
 
 func (m *MemoryMutation) BlockFilesRoTx() *blocksnapshots.View {
-	return m.db.(blockFilesRoTxProvider).BlockFilesRoTx()
+	return m.db.(HasBlockFilesRoTx).BlockFilesRoTx()
 }
 
 func (m *MemoryMutation) Count(bucket string) (uint64, error) {

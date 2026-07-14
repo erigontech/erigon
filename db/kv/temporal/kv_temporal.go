@@ -90,7 +90,8 @@ func New(db kv.RwDB, agg *state.Aggregator, blockSnaps *blocksnapshots.RoSnapsho
 	return &DB{RwDB: db, stateFiles: agg, blockFiles: blockSnaps}, nil
 }
 
-func (db *DB) Agg() any { return db.stateFiles }
+func (db *DB) Agg() any                                     { return db.stateFiles }
+func (db *DB) DebugBlockFiles() *blocksnapshots.RoSnapshots { return db.blockFiles }
 
 // beginBlockFilesRo pins the block-files view for a tx, or nil if unset.
 func (db *DB) beginBlockFilesRo() *blocksnapshots.View {

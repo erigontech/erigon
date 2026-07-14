@@ -29,6 +29,7 @@ import (
 	"github.com/erigontech/erigon/db/kv/temporal"
 	"github.com/erigontech/erigon/db/snapshotsync/blocksnapshots"
 	"github.com/erigontech/erigon/db/state"
+	"github.com/erigontech/erigon/execution/chain/networkname"
 	"github.com/erigontech/erigon/node/ethconfig"
 )
 
@@ -59,6 +60,7 @@ func newTestDB(tb testing.TB, dirs datadir.Dirs, stepSize uint64) kv.TemporalRwD
 	}
 
 	blockSnapCfg := ethconfig.Defaults.Snapshot
+	blockSnapCfg.ChainName = networkname.Test
 	blockSnapshots := blocksnapshots.NewRoSnapshots(blockSnapCfg, dirs.Snap, log.Root())
 	if tb != nil {
 		tb.Cleanup(blockSnapshots.Close)
