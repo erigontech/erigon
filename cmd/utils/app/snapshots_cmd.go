@@ -70,6 +70,7 @@ import (
 	"github.com/erigontech/erigon/db/services"
 	"github.com/erigontech/erigon/db/snapshotsync"
 	"github.com/erigontech/erigon/db/snapshotsync/blocksnapshots"
+	"github.com/erigontech/erigon/db/snapshotsync/caplinsnapschema"
 	"github.com/erigontech/erigon/db/snapshotsync/freezeblocks"
 	"github.com/erigontech/erigon/db/snaptype"
 	"github.com/erigontech/erigon/db/snaptype2"
@@ -2076,7 +2077,7 @@ func CheckBorChain(chainName string) bool {
 
 func checkIfCaplinSnapshotsPublishable(dirs datadir.Dirs, emptyOk bool) error {
 	stateSnapTypes := snapshotsync.MakeCaplinStateSnapshotsTypes(nil)
-	caplinSchema := snapshotsync.NewCaplinSchema(dirs, 1000, stateSnapTypes)
+	caplinSchema := caplinsnapschema.NewCaplinSchema(dirs, 1000, stateSnapTypes)
 
 	//to := int64(-1)
 	for _, snapt := range snaptype.CaplinSnapshotTypes {
