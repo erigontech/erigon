@@ -300,10 +300,34 @@ func scanDomainDuplicates(ctx context.Context, dirs datadir.Dirs, name string, l
 	roTx := history.BeginFilesRoForDebug()
 	defer roTx.Close()
 
+	if dupSamples < 0 {
+		return nil, fmt.Errorf("--samples must be >= 0")
+	}
+	if toStep < fromStep {
+		return nil, fmt.Errorf("--to (%d) must be >= --from (%d)", toStep, fromStep)
+	}
+
+	stepSize := settings.StepSize
+	if stepSize == 0 {
+		return nil, fmt.Errorf("invalid stepSize=0")
+	}
+	maxInt := int(^uint(0) >> 1)
+	maxStepForInt := uint64(maxInt) / stepSize
+	if fromStep > maxStepForInt {
+		return nil, fmt.Errorf("--from too large (from=%d, stepSize=%d)", fromStep, stepSize)
+	}
+	fromTxNum := int(fromStep * stepSize)
+
+	// Use -1 to mean "unbounded" (per HistoryDump contract) when --to doesn't fit in int.
+	toTxNum := -1
+	if toStep <= maxStepForInt {
+		toTxNum = int(toStep * stepSize)
+	}
+
 	scan := &histDupScan{sampleLimit: dupSamples}
 	if err := roTx.HistoryDump(
-		int(fromStep)*int(settings.StepSize),
-		int(toStep)*int(settings.StepSize),
+		fromTxNum,
+		toTxNum,
 		nil,
 		func(key []byte, _ uint64, val []byte) { scan.observe(key, val) },
 	); err != nil {
