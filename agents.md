@@ -85,7 +85,7 @@ These rules apply project-wide — to every contributor and every automated agen
 
 ### Why skips are dangerous
 
-A failing test is a real failure to be diagnosed and fixed. Skipping it converts a loud "this is broken" signal into silence, then into a later surprise for whoever removes the skip and finds the bug still there. Concrete case: `#21153` removed a `t.Skip` for `TestGeneratedTraceApiCollision` documenting a known parallel-exec CREATE2-reincarnation bug that was never actually fixed (the inline comment claimed a fix on a branch that never merged), so removing it red'd CI across downstream PRs.
+A failing test is a real failure to be diagnosed and fixed. Skipping it converts a loud "this is broken" signal into silence, then into a later surprise for whoever removes the skip and finds the bug still there. Concrete case: `#21153` removed a `t.Skip` for `TestGeneratedTraceApiCollision` documenting a known parallel-exec CREATE2-reincarnation bug that was never actually fixed (the inline comment claimed a fix on a branch that never merged), so removing it broke CI across downstream PRs.
 
 ### Valid reasons a skip may exist
 
@@ -101,7 +101,7 @@ For the first two reasons, the skip carries an inline comment linking the tracki
 
 ### Rule for automated agents (LLM assistants etc.)
 
-**Automated agents must never add a skip to hide unsupported behavior, a failure, or a flake** — not with a "the user can review it" framing, not as an `AskUserQuestion` option, not as a "tactical unblock" in a text answer, not behind a conditional or env-var gate. The sole standing exception is the canonical `testing.Short()` guard described above, for genuinely long-running tests.
+**Automated agents must never, on their own initiative, add a skip to hide unsupported behavior, a failure, or a flake** — not with a "the user can review it" framing, not as an `AskUserQuestion` option, not as a "tactical unblock" in a text answer, not behind a conditional or env-var gate. The sole standing exception is the canonical `testing.Short()` guard described above, for genuinely long-running tests.
 
 When an agent encounters a failing test:
 - Investigate: read logs, reproduce locally, narrow to a minimal repro
