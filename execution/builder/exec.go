@@ -238,6 +238,7 @@ func execBlock(ctx context0.Context, sd *execctx.SharedDomains, tx kv.TemporalTx
 	if ibs.IsVersioned() {
 		blockCtx := protocol.NewEVMBlockContext(current.Header, protocol.GetHashFn(current.Header, nil), cfg.engine, accounts.NilAddress, cfg.chainConfig)
 		blockRules := blockCtx.Rules(cfg.chainConfig)
+		var domainKeysErr error
 		domainStorageKeys := func(addr accounts.Address) []accounts.StorageKey {
 			av := addr.Value()
 			const addrLen, hashLen = 20, 32
@@ -248,6 +249,7 @@ func execBlock(ctx context0.Context, sd *execctx.SharedDomains, tx kv.TemporalTx
 				}
 				return true, nil
 			}); iterErr != nil {
+				domainKeysErr = iterErr
 				return nil
 			}
 			return keys
@@ -259,6 +261,9 @@ func execBlock(ctx context0.Context, sd *execctx.SharedDomains, tx kv.TemporalTx
 				continue
 			}
 			normalized := ws.Normalize(ibs.VersionMap(), i-1, 0, stateReader, domainStorageKeys, emptyRemoval, isAura)
+			if domainKeysErr != nil {
+				return fmt.Errorf("iterate storage prefix for block write normalization: %w", domainKeysErr)
+			}
 			if err := normalized.Apply(sd, tx, blockHeight, txNum, nil, blockRules, nil, false); err != nil {
 				return fmt.Errorf("apply versioned block writes: %w", err)
 			}

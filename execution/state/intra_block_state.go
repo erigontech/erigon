@@ -2661,9 +2661,7 @@ func (sdb *IntraBlockState) AccessedAddresses() AccessSet {
 		return nil
 	}
 	out := make(AccessSet, len(access))
-	for addr, opts := range access {
-		out[addr] = opts
-	}
+	maps.Copy(out, access)
 	sdb.recordAccess = false
 	sdb.versionedReads.access = nil
 	return out

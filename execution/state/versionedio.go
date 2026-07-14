@@ -418,9 +418,7 @@ func (s *ReadSet) mergeFrom(src ReadSet) {
 		if s.access == nil {
 			s.access = make(AccessSet, len(src.access))
 		}
-		for a, opts := range src.access {
-			s.access[a] = opts
-		}
+		maps.Copy(s.access, src.access)
 	}
 }
 

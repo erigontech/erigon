@@ -218,7 +218,9 @@ func (ch resetObjectChange) revert(s *IntraBlockState) error {
 	if current, ok := s.stateObjects[ch.account]; ok && current != ch.prev {
 		current.release()
 	}
-	if !s.noMaterialize {
+	if s.noMaterialize {
+		delete(s.stateObjects, ch.account)
+	} else {
 		s.setStateObject(ch.account, ch.prev)
 	}
 	// Restore the account-record writes the recreation overwrote back to the
