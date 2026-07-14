@@ -77,10 +77,11 @@ func TestCompressParallelBatchingRoundTrip(t *testing.T) {
 	for i := range words {
 		require.Equalf(t, words[i], got[i], "round-trip mismatch at word %d", i)
 	}
+	singleSum := checksum(single)
 
 	for _, workers := range []int{2, 4, 8} {
 		parallel := compressTo(workers)
-		require.Equalf(t, readBack(single), readBack(parallel), "decoded words differ at Workers=%d", workers)
-		require.Equalf(t, checksum(single), checksum(parallel), "output not byte-identical at Workers=%d", workers)
+		require.Equalf(t, got, readBack(parallel), "decoded words differ at Workers=%d", workers)
+		require.Equalf(t, singleSum, checksum(parallel), "output not byte-identical at Workers=%d", workers)
 	}
 }
