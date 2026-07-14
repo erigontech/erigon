@@ -16,7 +16,12 @@
 
 package merkle_tree
 
-import "github.com/erigontech/erigon/cl/utils"
+import (
+	"errors"
+	"math"
+
+	"github.com/erigontech/erigon/cl/utils"
+)
 
 // MerkleizeProgressive computes the progressive Merkle tree root specified by
 // EIP-7916. Successive right-hand subtrees have capacities 1, 4, 16, 64, ...
@@ -41,6 +46,10 @@ func merkleizeProgressive(chunks [][32]byte, numLeaves uint64) ([32]byte, error)
 	left, err := MerkleizeVector(subtree, numLeaves)
 	if err != nil {
 		return [32]byte{}, err
+	}
+
+	if numLeaves > math.MaxUint64/4 {
+		return [32]byte{}, errors.New("progressive tree capacity overflow")
 	}
 
 	right, err := merkleizeProgressive(chunks[subtreeLen:], numLeaves*4)
