@@ -1172,7 +1172,7 @@ func (a *Aggregator) mergeLoopStep(ctx context.Context, toTxNum uint64) (somethi
 		return false, nil
 	}
 
-	outs, err := aggTx.FilesInRange(r)
+	outs, err := aggTx.filesInRange(r)
 	if err != nil {
 		return false, err
 	}
@@ -1894,7 +1894,7 @@ func (at *AggregatorRoTx) findMergeRange(maxEndTxNum, stepSize, stepsInFrozenFil
 	return r
 }
 
-func (at *AggregatorRoTx) mergeFiles(ctx context.Context, files *FilesForMerge, r *Ranges) (mf *MergeResult, err error) {
+func (at *AggregatorRoTx) mergeFiles(ctx context.Context, files *visibleFilesForMerge, r *Ranges) (mf *MergeResult, err error) {
 	mf = &MergeResult{}
 	g, ctx := errgroup.WithContext(ctx)
 	g.SetLimit(at.a.workers.getMerge())
@@ -2388,7 +2388,47 @@ func closeAndRemoveFiles(files []*FilesItem) {
 }
 
 func (a *Aggregator) BeginFilesRo() *AggregatorRoTx {
-	v := a.acquireVisibleFiles()
+	return a.beginFilesRoOn(a.acquireVisibleFiles())
+}
+
+// AggregatorFilesPin is a refcounted hold on one visible-file generation.
+// AggregatorRoTx values opened from it via BeginFilesRo all observe that same
+// snapshot, regardless of newer generations published meanwhile — so concurrent
+// readers derived from a single commitment tx never diverge across file
+// generations. It outlives the tx it was pinned from; release with Close.
+type AggregatorFilesPin struct {
+	a *Aggregator
+	v *aggregatorVisible
+}
+
+// Pin takes an independent refcount on this tx's visible-file generation so
+// consistent read txns can be spawned from it for the pin's lifetime. The
+// generation cannot be reclaimed between the load and the bump because this tx
+// already holds a pin on it.
+func (at *AggregatorRoTx) Pin() *AggregatorFilesPin {
+	at.visible.refcnt.Add(1)
+	return &AggregatorFilesPin{a: at.a, v: at.visible}
+}
+
+// BeginFilesRo opens a fresh AggregatorRoTx (its own cursors) pinned to the
+// pin's generation.
+func (p *AggregatorFilesPin) BeginFilesRo() *AggregatorRoTx {
+	p.v.refcnt.Add(1)
+	return p.a.beginFilesRoOn(p.v)
+}
+
+// Close releases the pin's refcount on the generation.
+func (p *AggregatorFilesPin) Close() {
+	if p.a != nil {
+		p.a.releaseVisibleFiles(p.v)
+		p.a, p.v = nil, nil
+	}
+}
+
+// beginFilesRoOn builds an AggregatorRoTx with fresh per-domain/per-index cursors
+// over the already-pinned visible generation v (caller owns the refcnt on v,
+// released by AggregatorRoTx.Close).
+func (a *Aggregator) beginFilesRoOn(v *aggregatorVisible) *AggregatorRoTx {
 	ac := &AggregatorRoTx{
 		a:        a,
 		visible:  v,

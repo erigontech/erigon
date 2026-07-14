@@ -21,6 +21,7 @@ import (
 	"errors"
 	"testing"
 
+	"github.com/klauspost/compress/zstd"
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/cl/clparams"
@@ -83,6 +84,34 @@ func TestWriteBlockRoot(t *testing.T) {
 	canonicalRoot, err = ReadCanonicalBlockRoot(tx, *retrievedSlot)
 	require.NoError(t, err)
 	require.Equal(t, common.Hash(blockRoot), canonicalRoot)
+}
+
+func TestWriteBeaconBlockStoresCompleteZstdFrame(t *testing.T) {
+	db := setupTestDB(t)
+	defer db.Close()
+	tx, err := db.BeginRw(context.Background())
+	require.NoError(t, err)
+	defer tx.Rollback()
+
+	block := cltypes.NewSignedBeaconBlock(&clparams.MainnetBeaconConfig, clparams.Phase0Version)
+	block.Block.Slot = 42
+	block.EncodingSizeSSZ()
+
+	blockRoot, err := block.Block.HashSSZ()
+	require.NoError(t, err)
+	require.NoError(t, WriteBeaconBlock(context.Background(), tx, block))
+
+	stored, err := tx.GetOne(kv.BeaconBlocks, dbutils.BlockBodyKey(block.Block.Slot, blockRoot))
+	require.NoError(t, err)
+	require.NotEmpty(t, stored)
+
+	dec, err := zstd.NewReader(nil)
+	require.NoError(t, err)
+	defer dec.Close()
+	// DecodeAll reads the whole frame to EOF, so it fails on the unterminated frame
+	// a Flush()-only encoder leaves behind — pinning that WriteBeaconBlock closes it.
+	_, err = dec.DecodeAll(stored, nil)
+	require.NoError(t, err)
 }
 
 func TestReadParentBlockRoot(t *testing.T) {

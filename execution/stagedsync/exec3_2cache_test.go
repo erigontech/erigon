@@ -61,7 +61,7 @@ func setup2CacheTest(t *testing.T) (kv.TemporalRwTx, *execctx.SharedDomains) {
 	require.NoError(t, err)
 	t.Cleanup(agg.Close)
 
-	db, err := temporal.New(rawDb, agg)
+	db, err := temporal.New(rawDb, agg, nil)
 	require.NoError(t, err)
 
 	tx, err := db.BeginTemporalRw(context.Background()) //nolint:gocritic

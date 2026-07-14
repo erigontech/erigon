@@ -380,11 +380,9 @@ func IsSeedableExtension(name string) bool {
 	return false
 }
 
-const Erigon3SeedableSteps = 64
-
 // Use-cases:
-//   - produce and seed snapshots earlier on chain tip. reduce depnedency on "good peers with history" at p2p-network.
-//     Some networks have no much archive peers, also ConsensusLayer clients are not-good(not-incentivised) at serving history.
+//   - produce and seed snapshots earlier on chain tip. reduce dependency on "good peers with history" at p2p-network.
+//     Some networks don't have many archive peers, also ConsensusLayer clients are not-good(not-incentivised) at serving history.
 //   - avoiding having too much files:
 //     more files(shards) - means "more metadata", "more lookups for non-indexed queries", "more dictionaries", "more bittorrent connections", ...
 //     less files - means small files will be removed after merge (no peers for this files).

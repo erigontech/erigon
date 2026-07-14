@@ -19,6 +19,7 @@ package jsonrpc
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"math/big"
 	"testing"
 
@@ -228,7 +229,7 @@ func TestGetBlockReceiptsByBlockHash(t *testing.T) {
 // requested block range exceeds rangeLimit.
 func TestGetLogs_RangeLimitExceeded(t *testing.T) {
 	m, _, _ := rpcdaemontest.CreateTestExecModule(t)
-	ethApi := newEthApiForTest(newBaseApiWithLimits(m, 5, 0), m.DB, nil, nil)
+	ethApi := newEthApiForTest(newBaseApiWithLimits(m, 5, 0, 0), m.DB, nil, nil)
 	_, err := ethApi.GetLogs(context.Background(), filters.FilterCriteria{
 		FromBlock: big.NewInt(0),
 		ToBlock:   big.NewInt(10),
@@ -245,7 +246,7 @@ func TestGetLogs_RangeLimitExceeded(t *testing.T) {
 // range is within rangeLimit.
 func TestGetLogs_RangeLimitOk(t *testing.T) {
 	m, _, _ := rpcdaemontest.CreateTestExecModule(t)
-	ethApi := newEthApiForTest(newBaseApiWithLimits(m, 11, 0), m.DB, nil, nil)
+	ethApi := newEthApiForTest(newBaseApiWithLimits(m, 11, 0, 0), m.DB, nil, nil)
 	logs, err := ethApi.GetLogs(context.Background(), filters.FilterCriteria{
 		FromBlock: big.NewInt(0),
 		ToBlock:   big.NewInt(10),
@@ -258,7 +259,7 @@ func TestGetLogs_RangeLimitOk(t *testing.T) {
 // unlimited (0).
 func TestGetLogs_MaxResultsOk(t *testing.T) {
 	m, _, _ := rpcdaemontest.CreateTestExecModule(t)
-	ethApi := newEthApiForTest(newBaseApiWithLimits(m, 0, 0), m.DB, nil, nil)
+	ethApi := newEthApiForTest(newBaseApiWithLimits(m, 0, 0, 0), m.DB, nil, nil)
 	logs, err := ethApi.GetLogs(context.Background(), filters.FilterCriteria{
 		FromBlock: big.NewInt(0),
 		ToBlock:   big.NewInt(10),
@@ -271,7 +272,7 @@ func TestGetLogs_MaxResultsOk(t *testing.T) {
 // when the matching log count exceeds maxResults.
 func TestGetLogs_MaxResultsExceeded(t *testing.T) {
 	m, _, contractAddr, _ := chainWithDeployedContract(t)
-	ethApi := newEthApiForTest(newBaseApiWithLimits(m, 0, 1), m.DB, nil, nil)
+	ethApi := newEthApiForTest(newBaseApiWithLimits(m, 0, 1, 0), m.DB, nil, nil)
 	_, err := ethApi.GetLogs(context.Background(), filters.FilterCriteria{
 		FromBlock: big.NewInt(0),
 		ToBlock:   big.NewInt(rpc.LatestBlockNumber.Int64()),
@@ -285,11 +286,70 @@ func TestGetLogs_MaxResultsExceeded(t *testing.T) {
 	assert.Equal(t, errExceedLogResults+": 1", rpcErr.Error())
 }
 
+// TestGetLogs_LogQueryLimitExceeded verifies that eth_getLogs returns invalid params
+// when the filter has more addresses, or more alternatives in one topic position,
+// than logQueryLimit.
+func TestGetLogs_LogQueryLimitExceeded(t *testing.T) {
+	cases := []struct {
+		name string
+		crit filters.FilterCriteria
+	}{
+		{"addresses", filters.FilterCriteria{Addresses: make(common.Addresses, 3)}},
+		{"topics", filters.FilterCriteria{Topics: [][]common.Hash{make([]common.Hash, 3)}}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			m, _, _ := rpcdaemontest.CreateTestExecModule(t)
+			ethApi := newEthApiForTest(newBaseApiWithLimits(m, 0, 0, 2), m.DB, nil, nil)
+			tc.crit.FromBlock, tc.crit.ToBlock = big.NewInt(0), big.NewInt(10)
+			_, err := ethApi.GetLogs(context.Background(), tc.crit)
+			require.Error(t, err)
+
+			var rpcErr rpc.Error
+			require.ErrorAs(t, err, &rpcErr)
+			assert.Equal(t, rpc.ErrCodeInvalidParams, rpcErr.ErrorCode())
+			assert.Equal(t, fmt.Sprintf(errExceedLogQueryLimit, 2), rpcErr.Error())
+		})
+	}
+}
+
+// TestGetLogs_LogQueryLimitAtLimit verifies that filters with exactly
+// logQueryLimit addresses or topic alternatives are accepted.
+func TestGetLogs_LogQueryLimitAtLimit(t *testing.T) {
+	m, _, _ := rpcdaemontest.CreateTestExecModule(t)
+	ethApi := newEthApiForTest(newBaseApiWithLimits(m, 0, 0, 2), m.DB, nil, nil)
+	_, err := ethApi.GetLogs(context.Background(), filters.FilterCriteria{
+		FromBlock: big.NewInt(0),
+		ToBlock:   big.NewInt(10),
+		Addresses: make(common.Addresses, 2),
+		Topics:    [][]common.Hash{make([]common.Hash, 2)},
+	})
+	require.NoError(t, err)
+}
+
+// TestGetLogs_LogQueryLimitUnlimited verifies that logQueryLimit<=0 disables the
+// addresses/topics cap.
+func TestGetLogs_LogQueryLimitUnlimited(t *testing.T) {
+	for _, limit := range []int{0, -1} {
+		t.Run(fmt.Sprintf("limit=%d", limit), func(t *testing.T) {
+			m, _, _ := rpcdaemontest.CreateTestExecModule(t)
+			ethApi := newEthApiForTest(newBaseApiWithLimits(m, 0, 0, limit), m.DB, nil, nil)
+			_, err := ethApi.GetLogs(context.Background(), filters.FilterCriteria{
+				FromBlock: big.NewInt(0),
+				ToBlock:   big.NewInt(10),
+				Addresses: make(common.Addresses, 1500),
+				Topics:    [][]common.Hash{make([]common.Hash, 1500)},
+			})
+			require.NoError(t, err)
+		})
+	}
+}
+
 // TestGetLatestLogs_LogCountExceedsMaxResults verifies that erigon_getLatestLogs
 // returns an error when the requested logCount exceeds getLogsMaxResults.
 func TestGetLatestLogs_LogCountExceedsMaxResults(t *testing.T) {
 	m, _, _ := rpcdaemontest.CreateTestExecModule(t)
-	api := NewErigonAPI(newBaseApiWithLimits(m, 0, 5), m.DB, nil)
+	api := NewErigonAPI(newBaseApiWithLimits(m, 0, 5, 0), m.DB, nil)
 	_, err := api.GetLatestLogs(context.Background(), filters.FilterCriteria{}, filters.LogFilterOptions{
 		LogCount: 10,
 	})
@@ -301,7 +361,7 @@ func TestGetLatestLogs_LogCountExceedsMaxResults(t *testing.T) {
 // returns an error when the requested blockCount exceeds rangeLimit.
 func TestGetLatestLogs_BlockCountExceedsRangeLimit(t *testing.T) {
 	m, _, _ := rpcdaemontest.CreateTestExecModule(t)
-	api := NewErigonAPI(newBaseApiWithLimits(m, 5, 0), m.DB, nil)
+	api := NewErigonAPI(newBaseApiWithLimits(m, 5, 0, 0), m.DB, nil)
 	_, err := api.GetLatestLogs(context.Background(), filters.FilterCriteria{}, filters.LogFilterOptions{
 		BlockCount: 10,
 	})
@@ -314,7 +374,7 @@ func TestGetLatestLogs_BlockCountExceedsRangeLimit(t *testing.T) {
 // no logCount/blockCount is specified.
 func TestGetLatestLogs_ExplicitRangeExceedsLimit(t *testing.T) {
 	m, _, _ := rpcdaemontest.CreateTestExecModule(t)
-	api := NewErigonAPI(newBaseApiWithLimits(m, 5, 0), m.DB, nil)
+	api := NewErigonAPI(newBaseApiWithLimits(m, 5, 0, 0), m.DB, nil)
 	_, err := api.GetLatestLogs(context.Background(), filters.FilterCriteria{
 		FromBlock: big.NewInt(0),
 		ToBlock:   big.NewInt(10),
@@ -329,7 +389,7 @@ func TestGetLatestLogs_ExplicitRangeExceedsLimit(t *testing.T) {
 func TestGetLatestLogs_ExplicitRangeWithLogCount_NoRangeCheck(t *testing.T) {
 	m, _, _ := rpcdaemontest.CreateTestExecModule(t)
 	// rangeLimit=5, but logCount is set so the range check should be skipped.
-	api := NewErigonAPI(newBaseApiWithLimits(m, 5, 0), m.DB, nil)
+	api := NewErigonAPI(newBaseApiWithLimits(m, 5, 0, 0), m.DB, nil)
 	_, err := api.GetLatestLogs(context.Background(), filters.FilterCriteria{
 		FromBlock: big.NewInt(0),
 		ToBlock:   big.NewInt(10),
@@ -345,7 +405,7 @@ func TestGetLatestLogs_ExplicitRangeWithLogCount_NoRangeCheck(t *testing.T) {
 func TestGetLatestLogs_ExplicitRangeWithBlockCount_NoRangeCheck(t *testing.T) {
 	m, _, _ := rpcdaemontest.CreateTestExecModule(t)
 	// rangeLimit=5, blockCount=3 (≤5 so ok), explicit range 0-10 is skipped.
-	api := NewErigonAPI(newBaseApiWithLimits(m, 5, 0), m.DB, nil)
+	api := NewErigonAPI(newBaseApiWithLimits(m, 5, 0, 0), m.DB, nil)
 	_, err := api.GetLatestLogs(context.Background(), filters.FilterCriteria{
 		FromBlock: big.NewInt(0),
 		ToBlock:   big.NewInt(10),

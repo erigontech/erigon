@@ -111,8 +111,8 @@ func (ctx *TxnParseContext) decodeTxn(txBytes []byte) (types.Transaction, error)
 	// Legacy transactions: full RLP list starting with 0xc0..0xff
 	if txBytes[0] >= 0xc0 {
 		ctx.bytesReader.Reset(txBytes)
-		s, done := rlp.NewStreamFromPool(&ctx.bytesReader, uint64(len(txBytes)))
-		defer done()
+		s := rlp.NewStreamFromPool(&ctx.bytesReader, uint64(len(txBytes)))
+		defer rlp.PutStream(s)
 		legacy := &types.LegacyTx{}
 		if err := legacy.DecodeRLP(s); err != nil {
 			return nil, err
@@ -137,8 +137,8 @@ func (ctx *TxnParseContext) decodeTxn(txBytes []byte) (types.Transaction, error)
 	}
 
 	ctx.bytesReader.Reset(txBytes[1:]) // skip type byte
-	s, done := rlp.NewStreamFromPool(&ctx.bytesReader, uint64(len(txBytes)-1))
-	defer done()
+	s := rlp.NewStreamFromPool(&ctx.bytesReader, uint64(len(txBytes)-1))
+	defer rlp.PutStream(s)
 	if err := txn.DecodeRLP(s); err != nil {
 		return nil, err
 	}

@@ -6,6 +6,7 @@ import (
 	"iter"
 	"path/filepath"
 
+	"github.com/erigontech/erigon/db/services"
 	"github.com/erigontech/erigon/node/gointerfaces/downloaderproto"
 )
 
@@ -88,28 +89,4 @@ func NewRpcClient(inner downloaderproto.DownloaderClient, rootDir string) *RpcCl
 	return &RpcClient{inner: inner, rootDir: rootDir}
 }
 
-var _ Client = (*RpcClient)(nil)
-
-// Full Client also allowing blocking on downloads. Simplified interface rather than using GRPC directly.
-type Client interface {
-	SeederClient
-	// Request files be downloaded. Returns when the download is complete. Downloader seeds. Note
-	// that we have services.DownloadRequest per path, but haven't yet incorporated the download
-	// "target name" into the API here.
-	Download(context.Context, *downloaderproto.DownloadRequest) error
-}
-
-// Seed and Delete methods, used by pruning and block retiring.
-type SeederClient interface {
-	// Seed generated file. Downloader will hash.
-	Seed(_ context.Context, paths []string) error
-	// Remove files from the Downloader.
-	Delete(_ context.Context, paths []string) error
-}
-
-// A Seeder client that does nothing when delete or seed is requested, a common configuration pattern.
-type NoopSeederClient struct{}
-
-func (NoopSeederClient) Seed(context.Context, []string) error { return nil }
-
-func (NoopSeederClient) Delete(context.Context, []string) error { return nil }
+var _ services.DownloaderClient = (*RpcClient)(nil)
