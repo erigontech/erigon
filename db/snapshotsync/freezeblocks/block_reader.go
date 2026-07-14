@@ -506,15 +506,18 @@ func (r *BlockReader) HeadersRange(ctx context.Context, walker func(header *type
 	return ForEachHeader(ctx, r.sn, walker)
 }
 
-// blockFilesRoTxProvider is a tx (e.g. a temporal tx) exposing a block-files view
+// HasBlockFilesRoTx is a tx (e.g. a temporal tx) exposing a block-files view
 // pinned for its lifetime.
-type blockFilesRoTxProvider interface {
+type HasBlockFilesRoTx interface {
 	BlockFilesRoTx() *blocksnapshots.View
+}
+type HasBlockFiles interface {
+	DebugBlockFiles() *blocksnapshots.RoSnapshots
 }
 
 // txBlockView returns the block-files view pinned by tx, or nil.
 func txBlockView(tx kv.Getter) *blocksnapshots.View {
-	if v, ok := tx.(blockFilesRoTxProvider); ok {
+	if v, ok := tx.(HasBlockFilesRoTx); ok {
 		return v.BlockFilesRoTx()
 	}
 	return nil
