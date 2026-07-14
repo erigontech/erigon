@@ -190,6 +190,61 @@ func TestAllocConstructor(t *testing.T) {
 	assert.Equal(u256.U64(0x01c9), storage1)
 }
 
+// A genesis alloc carrying storage but otherwise EIP-161-empty must still be materialized as a present account (so its storage never sits under an absent account).
+func TestGenesisStorageBearingEmptyAccountIsPresent(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow test")
+	}
+	t.Parallel()
+	require := require.New(t)
+	assert := assert.New(t)
+
+	address := accounts.InternAddress(common.HexToAddress("0x00000000000000000000000000000000c0ffee01"))
+	slot := common.HexToHash("0x0000000000000000000000000000000000000000000000000000000000000001")
+	genSpec := &types.Genesis{
+		Config: chain.AllProtocolChanges,
+		Alloc: types.GenesisAlloc{
+			address.Value(): {Balance: big.NewInt(0), Storage: map[common.Hash]common.Hash{slot: common.HexToHash("0x2a")}},
+		},
+	}
+
+	key, _ := crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f291")
+	m := execmoduletester.New(t, execmoduletester.WithGenesisSpec(genSpec), execmoduletester.WithKey(key))
+
+	ctx := context.Background()
+	tx, err := m.DB.BeginTemporalRo(ctx)
+	require.NoError(err)
+	defer tx.Rollback()
+
+	// Ground truth for DomainDel's guard: the accounts domain must hold a
+	// non-empty entry for this address (not dangling storage under an absent account).
+	av := address.Value()
+	acc, _, err := tx.GetLatest(kv.AccountsDomain, av[:])
+	require.NoError(err)
+	require.NotEmpty(acc, "storage-bearing empty alloc must produce a present accounts-domain entry")
+
+	// High-level view agrees: account exists, storage is set, balance/nonce/code stay empty.
+	reader, err := rpchelper.CreateHistoryStateReader(ctx, tx, 1, 0, rawdbv3.TxNums)
+	require.NoError(err)
+	st := state.New(reader)
+
+	exist, err := st.Exist(address)
+	require.NoError(err)
+	assert.True(exist, "storage-bearing empty account must exist")
+
+	bal, err := st.GetBalance(address)
+	require.NoError(err)
+	assert.True(bal.IsZero(), "balance stays zero")
+
+	nonce, err := st.GetNonce(address)
+	require.NoError(err)
+	assert.Zero(nonce, "nonce stays zero")
+
+	got, err := st.GetState(address, accounts.InternKey(slot))
+	require.NoError(err)
+	assert.Equal(u256.U64(0x2a), got, "storage slot must be readable")
+}
+
 // See https://github.com/erigontech/erigon/pull/11264
 func TestDecodeBalance0(t *testing.T) {
 	genesisData, err := os.ReadFile("./genesis_test.json")

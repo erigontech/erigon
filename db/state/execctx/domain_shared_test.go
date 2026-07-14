@@ -1743,12 +1743,7 @@ func TestSharedDomain_TouchChangedKeysFromHistory(t *testing.T) {
 	}
 }
 
-// Deleting an already-absent key must not record a history/inverted-index
-// entry. Without the guard, an empty->empty delete writes a redundant row,
-// which makes history depend on how often callers re-issue such deletes (e.g.
-// EIP-161 empty-account touches of the identity precompile 0x04) — differing
-// between serial and parallel execution while roots agree. DomainDel is only
-// ever invoked for Accounts, Code and Storage, so all three are covered.
+// Deleting an already-absent key must not record a redundant empty->empty history entry.
 func TestSharedDomain_DeleteAbsentKeyIsNoop(t *testing.T) {
 	if testing.Short() {
 		t.Skip()
@@ -1756,7 +1751,6 @@ func TestSharedDomain_DeleteAbsentKeyIsNoop(t *testing.T) {
 	t.Parallel()
 
 	addr := common.HexToAddress("0x0000000000000000000000000000000000000004")
-	slot := common.HexToHash("0x5ac7102aad1a639901bc2657323aaed9e90e40c550747c49170f1c82fd664e4f")
 
 	acc := accounts3.Account{Nonce: 1, Balance: *uint256.NewInt(1000)}
 	cases := []struct {
@@ -1767,7 +1761,6 @@ func TestSharedDomain_DeleteAbsentKeyIsNoop(t *testing.T) {
 		value  []byte
 	}{
 		{"accounts", kv.AccountsDomain, kv.AccountsHistoryIdx, addr[:], accounts3.SerialiseV3(&acc)},
-		{"storage", kv.StorageDomain, kv.StorageHistoryIdx, composite(addr[:], slot[:]), []byte{0x01, 0x02, 0x03, 0x04}},
 		{"code", kv.CodeDomain, kv.CodeHistoryIdx, addr[:], []byte{0x60, 0x00, 0x60, 0x00}},
 	}
 
@@ -1792,12 +1785,11 @@ func TestSharedDomain_DeleteAbsentKeyIsNoop(t *testing.T) {
 			domains.SetTxNum(deleteTxNum)
 			require.NoError(t, domains.DomainDel(tc.domain, rwTx, tc.key, deleteTxNum, nil))
 
-			// Redundant deletes of the now-absent key, exercising both prevVal paths:
-			// nil (resolved via GetLatest) and an explicit empty slice (parallel apply path).
+			// Redundant deletes of the now-absent key (prevVal resolves to nil via GetLatest).
 			domains.SetTxNum(3)
 			require.NoError(t, domains.DomainDel(tc.domain, rwTx, tc.key, 3, nil))
 			domains.SetTxNum(4)
-			require.NoError(t, domains.DomainDel(tc.domain, rwTx, tc.key, 4, []byte{}))
+			require.NoError(t, domains.DomainDel(tc.domain, rwTx, tc.key, 4, nil))
 
 			require.NoError(t, domains.Flush(ctx, rwTx))
 

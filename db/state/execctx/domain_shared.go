@@ -1648,12 +1648,6 @@ func (sd *SharedDomains) DomainDel(domain kv.Domain, tx kv.TemporalTx, k []byte,
 		}
 	}
 
-	// Deleting an already-absent key is a no-op — recording it would append a
-	// redundant empty->empty history row (mirrors domainPut's equal-value elision).
-	if len(prevVal) == 0 {
-		return nil
-	}
-
 	switch domain {
 	case kv.AccountsDomain:
 		if err := sd.DomainDelPrefix(kv.StorageDomain, tx, k, txNum); err != nil {
@@ -1661,6 +1655,9 @@ func (sd *SharedDomains) DomainDel(domain kv.Domain, tx kv.TemporalTx, k []byte,
 		}
 		if err := sd.DomainDel(kv.CodeDomain, tx, k, txNum, nil); err != nil {
 			return err
+		}
+		if prevVal == nil {
+			return nil
 		}
 		// State cache is refreshed on flush only — see DomainPut. The flush
 		// callback handles the empty-value (delete) case for accounts, code
@@ -1672,6 +1669,9 @@ func (sd *SharedDomains) DomainDel(domain kv.Domain, tx kv.TemporalTx, k []byte,
 	case kv.StorageDomain:
 		// State cache refreshed on flush only — see DomainPut.
 	case kv.CodeDomain:
+		if prevVal == nil {
+			return nil
+		}
 		// State cache refreshed on flush only — see DomainPut.
 	default:
 		//noop
