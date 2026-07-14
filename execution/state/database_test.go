@@ -128,7 +128,7 @@ func TestCreate2Revive(t *testing.T) {
 		t.Fatalf("generate blocks: %v", err)
 	}
 
-	err = m.DB.ViewTemporal(context.Background(), func(tx kv.TemporalTx) error {
+	err = m.OverlayDB().ViewTemporal(context.Background(), func(tx kv.TemporalTx) error {
 		st := state.New(m.NewStateReader(tx))
 		if exist, err := st.Exist(address); err != nil {
 			t.Error(err)
@@ -149,7 +149,7 @@ func TestCreate2Revive(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	err = m.DB.ViewTemporal(context.Background(), func(tx kv.TemporalTx) error {
+	err = m.OverlayDB().ViewTemporal(context.Background(), func(tx kv.TemporalTx) error {
 		st := state.New(m.NewStateReader(tx))
 		if exist, err := st.Exist(accounts.InternAddress(contractAddress)); err != nil {
 			t.Error(err)
@@ -167,7 +167,7 @@ func TestCreate2Revive(t *testing.T) {
 
 	var key2 accounts.StorageKey
 	var check2 uint256.Int
-	err = m.DB.ViewTemporal(context.Background(), func(tx kv.TemporalTx) error {
+	err = m.OverlayDB().ViewTemporal(context.Background(), func(tx kv.TemporalTx) error {
 		st := state.New(m.NewStateReader(tx))
 		if exist, err := st.Exist(create2address); err != nil {
 			t.Error(err)
@@ -189,7 +189,7 @@ func TestCreate2Revive(t *testing.T) {
 	if err = m.InsertChain(chain.Slice(2, 3)); err != nil {
 		t.Fatal(err)
 	}
-	err = m.DB.ViewTemporal(context.Background(), func(tx kv.TemporalTx) error {
+	err = m.OverlayDB().ViewTemporal(context.Background(), func(tx kv.TemporalTx) error {
 		st := state.New(m.NewStateReader(tx))
 		if exist, err := st.Exist(create2address); err != nil {
 			t.Error(err)
@@ -204,7 +204,7 @@ func TestCreate2Revive(t *testing.T) {
 	if err = m.InsertChain(chain.Slice(3, 4)); err != nil {
 		t.Fatal(err)
 	}
-	err = m.DB.ViewTemporal(context.Background(), func(tx kv.TemporalTx) error {
+	err = m.OverlayDB().ViewTemporal(context.Background(), func(tx kv.TemporalTx) error {
 		st := state.New(m.NewStateReader(tx))
 		if exist, err := st.Exist(create2address); err != nil {
 			t.Error(err)
@@ -347,7 +347,7 @@ func TestCreate2Polymorth(t *testing.T) {
 		t.Fatalf("generate blocks: %v", err)
 	}
 
-	err = m.DB.ViewTemporal(context.Background(), func(tx kv.TemporalTx) error {
+	err = m.OverlayDB().ViewTemporal(context.Background(), func(tx kv.TemporalTx) error {
 
 		st := state.New(m.NewStateReader(tx))
 		if exist, err := st.Exist(address); err != nil {
@@ -369,7 +369,7 @@ func TestCreate2Polymorth(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	err = m.DB.ViewTemporal(context.Background(), func(tx kv.TemporalTx) error {
+	err = m.OverlayDB().ViewTemporal(context.Background(), func(tx kv.TemporalTx) error {
 		st := state.New(m.NewStateReader(tx))
 		if exist, err := st.Exist(accounts.InternAddress(contractAddress)); err != nil {
 			t.Error(err)
@@ -385,7 +385,7 @@ func TestCreate2Polymorth(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	err = m.DB.ViewTemporal(context.Background(), func(tx kv.TemporalTx) error {
+	err = m.OverlayDB().ViewTemporal(context.Background(), func(tx kv.TemporalTx) error {
 		st := state.New(m.NewStateReader(tx))
 		if exist, err := st.Exist(create2address); err != nil {
 			t.Error(err)
@@ -416,7 +416,7 @@ func TestCreate2Polymorth(t *testing.T) {
 	if err = m.InsertChain(chain.Slice(2, 3)); err != nil {
 		t.Fatal(err)
 	}
-	err = m.DB.ViewTemporal(context.Background(), func(tx kv.TemporalTx) error {
+	err = m.OverlayDB().ViewTemporal(context.Background(), func(tx kv.TemporalTx) error {
 		st := state.New(m.NewStateReader(tx))
 		if exist, err := st.Exist(create2address); err != nil {
 			t.Error(err)
@@ -431,7 +431,7 @@ func TestCreate2Polymorth(t *testing.T) {
 	if err = m.InsertChain(chain.Slice(3, 4)); err != nil {
 		t.Fatal(err)
 	}
-	err = m.DB.ViewTemporal(context.Background(), func(tx kv.TemporalTx) error {
+	err = m.OverlayDB().ViewTemporal(context.Background(), func(tx kv.TemporalTx) error {
 		st := state.New(m.NewStateReader(tx))
 		if exist, err := st.Exist(create2address); err != nil {
 			t.Error(err)
@@ -462,7 +462,7 @@ func TestCreate2Polymorth(t *testing.T) {
 	if err = m.InsertChain(chain.Slice(4, 5)); err != nil {
 		t.Fatal(err)
 	}
-	err = m.DB.ViewTemporal(context.Background(), func(tx kv.TemporalTx) error {
+	err = m.OverlayDB().ViewTemporal(context.Background(), func(tx kv.TemporalTx) error {
 		st := state.New(m.NewStateReader(tx))
 		if exist, err := st.Exist(create2address); err != nil {
 			t.Error(err)
@@ -582,7 +582,7 @@ func TestReorgOverSelfDestruct(t *testing.T) {
 		t.Fatalf("generate long blocks")
 	}
 
-	err = m.DB.ViewTemporal(context.Background(), func(tx kv.TemporalTx) error {
+	err = m.OverlayDB().ViewTemporal(context.Background(), func(tx kv.TemporalTx) error {
 
 		st := state.New(m.NewStateReader(tx))
 		if exist, err := st.Exist(address); err != nil {
@@ -605,7 +605,7 @@ func TestReorgOverSelfDestruct(t *testing.T) {
 
 	var key0 = accounts.ZeroKey
 	var correctValueX uint256.Int
-	err = m.DB.ViewTemporal(context.Background(), func(tx kv.TemporalTx) error {
+	err = m.OverlayDB().ViewTemporal(context.Background(), func(tx kv.TemporalTx) error {
 		st := state.New(m.NewStateReader(tx))
 		if exist, err := st.Exist(accounts.InternAddress(contractAddress)); err != nil {
 			t.Error(err)
@@ -626,7 +626,7 @@ func TestReorgOverSelfDestruct(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	err = m.DB.ViewTemporal(context.Background(), func(tx kv.TemporalTx) error {
+	err = m.OverlayDB().ViewTemporal(context.Background(), func(tx kv.TemporalTx) error {
 		st := state.New(m.NewStateReader(tx))
 		if exist, err := st.Exist(accounts.InternAddress(contractAddress)); err != nil {
 			t.Error(err)
@@ -640,7 +640,7 @@ func TestReorgOverSelfDestruct(t *testing.T) {
 	if err = m.InsertChain(longerChain.Slice(1, 4)); err != nil {
 		t.Fatal(err)
 	}
-	err = m.DB.ViewTemporal(context.Background(), func(tx kv.TemporalTx) error {
+	err = m.OverlayDB().ViewTemporal(context.Background(), func(tx kv.TemporalTx) error {
 		st := state.New(m.NewStateReader(tx))
 		if exist, err := st.Exist(accounts.InternAddress(contractAddress)); err != nil {
 			t.Error(err)
@@ -739,7 +739,7 @@ func TestReorgOverStateChange(t *testing.T) {
 		t.Fatalf("generate longer blocks: %v", err)
 	}
 
-	err = m.DB.ViewTemporal(context.Background(), func(tx kv.TemporalTx) error {
+	err = m.OverlayDB().ViewTemporal(context.Background(), func(tx kv.TemporalTx) error {
 		st := state.New(m.NewStateReader(tx))
 		if exist, err := st.Exist(address); err != nil {
 			t.Error(err)
@@ -763,7 +763,7 @@ func TestReorgOverStateChange(t *testing.T) {
 
 	var key0 = accounts.ZeroKey
 	var correctValueX uint256.Int
-	err = m.DB.ViewTemporal(context.Background(), func(tx kv.TemporalTx) error {
+	err = m.OverlayDB().ViewTemporal(context.Background(), func(tx kv.TemporalTx) error {
 		st := state.New(m.NewStateReader(tx))
 		if exist, err := st.Exist(accounts.InternAddress(contractAddress)); err != nil {
 			t.Error(err)
@@ -788,7 +788,7 @@ func TestReorgOverStateChange(t *testing.T) {
 	if err = m.InsertChain(longerChain.Slice(1, 3)); err != nil {
 		t.Fatal(err)
 	}
-	err = m.DB.ViewTemporal(context.Background(), func(tx kv.TemporalTx) error {
+	err = m.OverlayDB().ViewTemporal(context.Background(), func(tx kv.TemporalTx) error {
 		st := state.New(m.NewStateReader(tx))
 		if exist, err := st.Exist(accounts.InternAddress(contractAddress)); err != nil {
 			t.Error(err)
@@ -881,7 +881,7 @@ func TestCreateOnExistingStorage(t *testing.T) {
 		t.Fatalf("generate blocks: %v", err)
 	}
 
-	err = m.DB.ViewTemporal(context.Background(), func(tx kv.TemporalTx) error {
+	err = m.OverlayDB().ViewTemporal(context.Background(), func(tx kv.TemporalTx) error {
 		st := state.New(m.NewStateReader(tx))
 		if exist, err := st.Exist(address); err != nil {
 			t.Error(err)
@@ -902,7 +902,7 @@ func TestCreateOnExistingStorage(t *testing.T) {
 
 	var key0 = accounts.ZeroKey
 	var check0 uint256.Int
-	err = m.DB.ViewTemporal(context.Background(), func(tx kv.TemporalTx) error {
+	err = m.OverlayDB().ViewTemporal(context.Background(), func(tx kv.TemporalTx) error {
 		st := state.New(m.NewStateReader(tx))
 		if exist, err := st.Exist(accounts.InternAddress(contractAddress)); err != nil {
 			t.Error(err)
@@ -1031,7 +1031,7 @@ func TestEip2200Gas(t *testing.T) {
 	}
 
 	var balanceBefore uint256.Int
-	err = m.DB.ViewTemporal(context.Background(), func(tx kv.TemporalTx) error {
+	err = m.OverlayDB().ViewTemporal(context.Background(), func(tx kv.TemporalTx) error {
 		st := state.New(m.NewStateReader(tx))
 		if exist, err := st.Exist(address); err != nil {
 			t.Error(err)
@@ -1053,7 +1053,7 @@ func TestEip2200Gas(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	err = m.DB.ViewTemporal(context.Background(), func(tx kv.TemporalTx) error {
+	err = m.OverlayDB().ViewTemporal(context.Background(), func(tx kv.TemporalTx) error {
 		st := state.New(m.NewStateReader(tx))
 		if exist, err := st.Exist(accounts.InternAddress(contractAddress)); err != nil {
 			t.Error(err)
@@ -1131,7 +1131,7 @@ func TestWrongIncarnation(t *testing.T) {
 		t.Fatalf("generate blocks: %v", err)
 	}
 
-	err = m.DB.ViewTemporal(context.Background(), func(tx kv.TemporalTx) error {
+	err = m.OverlayDB().ViewTemporal(context.Background(), func(tx kv.TemporalTx) error {
 		st := state.New(m.NewStateReader(tx))
 		if exist, err := st.Exist(address); err != nil {
 			t.Error(err)
@@ -1152,7 +1152,7 @@ func TestWrongIncarnation(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	err = m.DB.ViewTemporal(context.Background(), func(tx kv.TemporalTx) error {
+	err = m.OverlayDB().ViewTemporal(context.Background(), func(tx kv.TemporalTx) error {
 		stateReader := m.NewStateReader(tx)
 		acc, err := stateReader.ReadAccountData(accounts.InternAddress(contractAddress))
 		if err != nil {
@@ -1180,7 +1180,7 @@ func TestWrongIncarnation(t *testing.T) {
 	if err = m.InsertChain(chain.Slice(1, 2)); err != nil {
 		t.Fatal(err)
 	}
-	err = m.DB.ViewTemporal(context.Background(), func(tx kv.TemporalTx) error {
+	err = m.OverlayDB().ViewTemporal(context.Background(), func(tx kv.TemporalTx) error {
 		stateReader := m.NewStateReader(tx)
 		acc, err := stateReader.ReadAccountData(accounts.InternAddress(contractAddress))
 		if err != nil {
@@ -1291,7 +1291,7 @@ func TestWrongIncarnation2(t *testing.T) {
 		t.Fatalf("generate longer blocks: %v", err)
 	}
 
-	err = m.DB.ViewTemporal(context.Background(), func(tx kv.TemporalTx) error {
+	err = m.OverlayDB().ViewTemporal(context.Background(), func(tx kv.TemporalTx) error {
 		st := state.New(m.NewStateReader(tx))
 		if exist, err := st.Exist(address); err != nil {
 			t.Error(err)
@@ -1312,7 +1312,7 @@ func TestWrongIncarnation2(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	err = m.DB.ViewTemporal(context.Background(), func(tx kv.TemporalTx) error {
+	err = m.OverlayDB().ViewTemporal(context.Background(), func(tx kv.TemporalTx) error {
 		st := state.New(m.NewStateReader(tx))
 		if exist, err := st.Exist(accounts.InternAddress(contractAddress)); err != nil {
 			t.Error(err)
@@ -1339,7 +1339,7 @@ func TestWrongIncarnation2(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	err = m.DB.ViewTemporal(context.Background(), func(tx kv.TemporalTx) error {
+	err = m.OverlayDB().ViewTemporal(context.Background(), func(tx kv.TemporalTx) error {
 		stateReader := m.NewStateReader(tx)
 		acc, err := stateReader.ReadAccountData(accounts.InternAddress(contractAddress))
 		if err != nil {
@@ -1634,7 +1634,7 @@ func TestRecreateAndRewind(t *testing.T) {
 
 	var key0 = accounts.ZeroKey
 	var check0 uint256.Int
-	err = m.DB.ViewTemporal(context.Background(), func(tx kv.TemporalTx) error {
+	err = m.OverlayDB().ViewTemporal(context.Background(), func(tx kv.TemporalTx) error {
 		st := state.New(m.NewStateReader(tx))
 		if exist, err := st.Exist(accounts.InternAddress(phoenixAddress)); err != nil {
 			t.Error(err)
@@ -1654,7 +1654,7 @@ func TestRecreateAndRewind(t *testing.T) {
 	if err = m.InsertChain(chain.Slice(2, chain.Length())); err != nil {
 		t.Fatal(err)
 	}
-	err = m.DB.ViewTemporal(context.Background(), func(tx kv.TemporalTx) error {
+	err = m.OverlayDB().ViewTemporal(context.Background(), func(tx kv.TemporalTx) error {
 
 		st := state.New(m.NewStateReader(tx))
 		if exist, err := st.Exist(accounts.InternAddress(phoenixAddress)); err != nil {
@@ -1676,7 +1676,7 @@ func TestRecreateAndRewind(t *testing.T) {
 	if err = m.InsertChain(longerChain); err != nil {
 		t.Fatal(err)
 	}
-	err = m.DB.ViewTemporal(context.Background(), func(tx kv.TemporalTx) error {
+	err = m.OverlayDB().ViewTemporal(context.Background(), func(tx kv.TemporalTx) error {
 		st := state.New(m.NewStateReader(tx))
 		if exist, err := st.Exist(accounts.InternAddress(phoenixAddress)); err != nil {
 			t.Error(err)
@@ -1747,6 +1747,9 @@ func TestTxLookupUnwind(t *testing.T) {
 	if err = m.InsertChain(chain2); err != nil {
 		t.Fatal(err)
 	}
+	// Count is unsupported on the block-overlay tx; drain the background commit
+	// and count on the raw DB instead.
+	m.ExecModule.WaitCommitsDrained()
 	var count uint64
 	if err = m.DB.ViewTemporal(context.Background(), func(tx kv.TemporalTx) error {
 		var e error

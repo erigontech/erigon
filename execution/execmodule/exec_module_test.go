@@ -417,6 +417,7 @@ func TestUpdateForkChoiceForwardExecutesAfterStateAheadRecovery(t *testing.T) {
 	res2, err := updateForkChoice(ctx, m.ExecModule, tip)
 	require.NoError(t, err)
 	require.Equal(t, execmodule.ExecutionStatusSuccess, res2.Status, "second FCU should execute forward to the tip")
+	m.ExecModule.WaitCommitsDrained()
 	require.NoError(t, m.DB.ViewTemporal(ctx, func(tx kv.TemporalTx) error {
 		execProg, err := stages.GetStageProgress(tx, stages.Execution)
 		require.NoError(t, err)
@@ -493,7 +494,7 @@ func TestReorgBackAndForwardIntoCanonicalChain(t *testing.T) {
 
 			// Let the last FCU's commit and prune (foreground or background)
 			// settle before reading the committed head.
-			m.ExecModule.WaitIdle(ctx)
+			m.ExecModule.WaitCommitsDrained()
 			require.NoError(t, m.DB.ViewTemporal(ctx, func(tx kv.TemporalTx) error {
 				require.Equal(t, headerAt(chainLen).Hash(), rawdb.ReadHeadBlockHash(tx), "head must be at canonical tip")
 				return nil
@@ -2041,6 +2042,7 @@ func TestInsertBlocksWithBatchedFCU(t *testing.T) {
 		// After each batch's FCU, TxNums + execution must have advanced to
 		// the batch tip. The next batch's first block reads its parent's TD
 		// from this committed state.
+		m.ExecModule.WaitCommitsDrained()
 		require.NoError(t, m.DB.ViewTemporal(ctx, func(tx kv.TemporalTx) error {
 			lastTxNumBlock, _, err := rawdbv3.TxNums.Last(tx)
 			require.NoError(t, err)
@@ -2317,6 +2319,7 @@ func TestUpdateForkChoiceShallowReorgAfterLargeBatchExec(t *testing.T) {
 		"shallow reorg of %d blocks after a %d-block batch must succeed; status=%s validationError=%q",
 		reorgDepth, chainLen, fcuRes.Status, fcuRes.ValidationError)
 
+	m.ExecModule.WaitCommitsDrained()
 	require.NoError(t, m.DB.ViewTemporal(ctx, func(tx kv.TemporalTx) error {
 		execProg, err := stages.GetStageProgress(tx, stages.Execution)
 		require.NoError(t, err)
@@ -2439,7 +2442,7 @@ func runBALFoldAheadChangeset(t *testing.T, foldAhead, shadow bool) balFoldResul
 	require.Equal(t, execmodule.ExecutionStatusSuccess, fcuRes.Status,
 		"batch with fold-ahead=%v must execute cleanly; validationError=%q", foldAhead, fcuRes.ValidationError)
 
-	m.ExecModule.WaitIdle(ctx)
+	m.ExecModule.WaitCommitsDrained()
 
 	res := balFoldResult{
 		windowCommitmentKeys: map[uint64][]string{},
@@ -2483,7 +2486,7 @@ func runBALFoldAheadChangeset(t *testing.T, foldAhead, shadow bool) balFoldResul
 	back, err := updateForkChoice(ctx, m.ExecModule, canonical.Blocks[reorgBackTo-1].Header())
 	require.NoError(t, err)
 	require.Equal(t, execmodule.ExecutionStatusSuccess, back.Status, "reorg back must succeed")
-	m.ExecModule.WaitIdle(ctx)
+	m.ExecModule.WaitCommitsDrained()
 	require.NoError(t, m.DB.ViewTemporal(ctx, func(tx kv.TemporalTx) error {
 		execProg, err := stages.GetStageProgress(tx, stages.Execution)
 		require.NoError(t, err)
@@ -2496,7 +2499,7 @@ func runBALFoldAheadChangeset(t *testing.T, foldAhead, shadow bool) balFoldResul
 	require.Equal(t, execmodule.ExecutionStatusSuccess, fwd.Status,
 		"forward re-exec after unwind must reach the correct root (fold-ahead=%v); validationError=%q",
 		foldAhead, fwd.ValidationError)
-	m.ExecModule.WaitIdle(ctx)
+	m.ExecModule.WaitCommitsDrained()
 	require.NoError(t, m.DB.ViewTemporal(ctx, func(tx kv.TemporalTx) error {
 		execProg, err := stages.GetStageProgress(tx, stages.Execution)
 		require.NoError(t, err)

@@ -291,7 +291,7 @@ func createDumpTestKV(t *testing.T, chainConfig *chain.Config, chainSize int) *e
 			t.Fatalf("failed to create tx: %v", txErr)
 		}
 		b.AddTx(tx)
-	})
+	}, m.PublishedSD())
 	if err != nil {
 		t.Fatal(err)
 	}

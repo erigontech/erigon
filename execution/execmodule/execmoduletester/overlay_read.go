@@ -40,7 +40,7 @@ type sdRoDB struct {
 }
 
 func (d *sdRoDB) BeginTemporalRo(ctx context.Context) (kv.TemporalTx, error) {
-	base, err := d.TemporalRoDB.BeginTemporalRo(ctx)
+	base, err := d.TemporalRoDB.BeginTemporalRo(ctx) //nolint:gocritic // base is wrapped and returned; caller owns Rollback
 	if err != nil {
 		return nil, err
 	}

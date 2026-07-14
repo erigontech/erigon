@@ -153,6 +153,7 @@ func TestUpdateForkChoiceBadBlockMidBatchThenRecovery(t *testing.T) {
 	_, err = updateForkChoice(ctx, m.ExecModule, block13.Header())
 	require.NoError(t, err)
 
+	m.ExecModule.WaitCommitsDrained()
 	var acc accounts.Account
 	require.NoError(t, m.DB.ViewTemporal(ctx, func(tx kv.TemporalTx) error {
 		v, _, err := tx.GetLatest(kv.AccountsDomain, senderAddr[:])
@@ -243,6 +244,7 @@ func TestUpdateForkChoiceBadBlockAtLongBatchTailThenRecovery(t *testing.T) {
 	_, err = updateForkChoice(ctx, m.ExecModule, forkTip.Header())
 	require.NoError(t, err)
 
+	m.ExecModule.WaitCommitsDrained()
 	var acc accounts.Account
 	require.NoError(t, m.DB.ViewTemporal(ctx, func(tx kv.TemporalTx) error {
 		v, _, err := tx.GetLatest(kv.AccountsDomain, senderAddr[:])

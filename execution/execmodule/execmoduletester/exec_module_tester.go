@@ -974,6 +974,10 @@ func (emt *ExecModuleTester) InsertChain(chain *blockgen.ChainPack) error {
 	if rawdb.ReadHeadBlockHash(roTx) != chain.TopBlock.Hash() {
 		return fmt.Errorf("did not import block %d %x", chain.TopBlock.NumberU64(), chain.TopBlock.Hash())
 	}
+	// Under background commit InsertChain returns before its commit lands. Drain
+	// it before returning so a following operation (a reorg's unwind, a raw-DB
+	// read) cannot race the still-in-flight commit of the chain just inserted.
+	emt.ExecModule.WaitCommitsDrained()
 	return nil
 }
 

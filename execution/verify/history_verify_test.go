@@ -63,7 +63,7 @@ func TestHistoryVerification_SimpleBlocks(t *testing.T) {
 		batchEnd := min(batchStart+batchSize, numBlocks)
 		chainResult, err := blockgen.GenerateChain(m.ChainConfig, parent, m.Engine, m.DB, batchEnd-batchStart, func(i int, b *blockgen.BlockGen) {
 			b.SetCoinbase(common.Address{1})
-		})
+		}, m.PublishedSD())
 		require.NoError(t, err)
 		require.NoError(t, m.InsertChain(chainResult))
 		parent = chainResult.TopBlock
@@ -159,7 +159,7 @@ func TestHistoryVerification_WithUserTransactions(t *testing.T) {
 			b.AddTx(signed)
 			nonce++
 		}
-	})
+	}, m.PublishedSD())
 	require.NoError(t, err)
 	require.NoError(t, m.InsertChain(chainResult))
 	t.Logf("Inserted %d blocks with 2 user txs each", numBlocks)

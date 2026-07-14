@@ -154,6 +154,10 @@ func (b *SimulatedBackend) Commit() {
 	}); err != nil {
 		panic(err)
 	}
+	// Make the just-committed block durable before generating the next pending
+	// block on it: the generation below reads prependBlock's committed state
+	// with a fresh SharedDomains, so it must not race the background commit.
+	b.m.ExecModule.WaitCommitsDrained()
 	//nolint:prealloc
 	var allLogs []*types.Log
 	for _, r := range b.pendingReceipts {
@@ -173,7 +177,7 @@ func (b *SimulatedBackend) Rollback() {
 }
 
 func (b *SimulatedBackend) emptyPendingBlock() {
-	blockChain, _ := blockgen.GenerateChain(b.m.ChainConfig, b.prependBlock, b.m.Engine, b.m.DB, 1, func(int, *blockgen.BlockGen) {}, b.m.PublishedSD())
+	blockChain, _ := blockgen.GenerateChain(b.m.ChainConfig, b.prependBlock, b.m.Engine, b.m.DB, 1, func(int, *blockgen.BlockGen) {})
 	b.pendingBlock = blockChain.Blocks[0]
 	b.pendingReceipts = blockChain.Receipts[0]
 	b.pendingHeader = blockChain.Headers[0]
@@ -814,7 +818,7 @@ func (b *SimulatedBackend) SendTransaction(ctx context.Context, txn types.Transa
 			block.AddTxWithChain(b.getHeader, b.m.Engine, txn)
 		}
 		block.AddTxWithChain(b.getHeader, b.m.Engine, txn)
-	}, b.m.PublishedSD())
+	})
 	if err != nil {
 		return err
 	}
@@ -859,7 +863,7 @@ func (b *SimulatedBackend) AdjustTime(adjustment time.Duration) error {
 			block.AddTxWithChain(b.getHeader, b.m.Engine, txn)
 		}
 		block.OffsetTime(int64(adjustment.Seconds()))
-	}, b.m.PublishedSD())
+	})
 	if err != nil {
 		return err
 	}

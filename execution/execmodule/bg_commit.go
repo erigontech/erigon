@@ -177,6 +177,19 @@ func (e *ExecModule) markGenCommitted(gen *commitGen) {
 	e.fgMu.Lock()
 	gen.committed = true
 	e.uncommittedGens--
+	if e.uncommittedGens == 0 {
+		e.fgIdle.Broadcast()
+	}
+	e.fgMu.Unlock()
+}
+
+// WaitCommitsDrained blocks until every enqueued background commit has landed;
+// unlike WaitIdle it leaves the commit worker running, so it is repeatable.
+func (e *ExecModule) WaitCommitsDrained() {
+	e.fgMu.Lock()
+	for e.uncommittedGens > 0 {
+		e.fgIdle.Wait()
+	}
 	e.fgMu.Unlock()
 }
 
@@ -195,16 +208,22 @@ func (e *ExecModule) commitBacklogFull() bool {
 	return e.uncommittedGens >= maxInFlightCommits
 }
 
-// latestGen returns the newest in-flight generation — the parent a new
-// foreground SharedDomains chains to so its reads see not-yet-committed
-// domain state. nil when the chain is empty.
+// latestGen returns the newest not-yet-committed generation to chain a new
+// SharedDomains onto — a committed generation's state is already in the raw DB,
+// so chaining to it adds nothing and masks direct-DB reads. The single FIFO
+// commit worker commits in enqueue order, so a committed newest generation
+// means all are committed: read straight from the DB.
 func (e *ExecModule) latestGen() *execctx.SharedDomains {
 	e.fgMu.Lock()
 	defer e.fgMu.Unlock()
 	if len(e.gens) == 0 {
 		return nil
 	}
-	return e.gens[len(e.gens)-1].sd
+	last := e.gens[len(e.gens)-1]
+	if last.committed {
+		return nil
+	}
+	return last.sd
 }
 
 // addGen appends a new in-flight generation to the chain.
