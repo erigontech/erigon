@@ -2486,6 +2486,14 @@ func (at *AggregatorRoTx) GetLatest(domain kv.Domain, k []byte, tx kv.Tx) (v []b
 	return at.getLatest(domain, k, tx, math.MaxUint64, nil, time.Time{})
 }
 
+// PrefetchLeaves batch-warms (io_uring) the file leaves the given keys will touch
+// in the domain. Best-effort; called from the commitment warmup path.
+func (at *AggregatorRoTx) PrefetchLeaves(domain kv.Domain, keys [][]byte) {
+	if at.d[domain] != nil {
+		at.d[domain].PrefetchLeaves(keys)
+	}
+}
+
 func (at *AggregatorRoTx) MeteredGetLatest(domain kv.Domain, k []byte, tx kv.Tx, maxStep kv.Step, metrics *changeset.DomainMetrics, start time.Time) (v []byte, step kv.Step, ok bool, err error) {
 	return at.getLatest(domain, k, tx, maxStep, metrics, start)
 }

@@ -38,6 +38,7 @@ import (
 	"github.com/erigontech/erigon/common/background"
 	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/dir"
+	"github.com/erigontech/erigon/common/iouring"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/datastruct/btindex"
@@ -1403,6 +1404,43 @@ func (dt *DomainRoTx) unwind(ctx context.Context, rwTx kv.RwTx, step, txNumUnwin
 // of file where the value is stored (not exact step when kv has been set)
 //
 // maxTxNum, if > 0, filters out files with bigger txnums from search
+// PrefetchLeaves warms, in one deep io_uring wave, the .kv leaf byte-ranges that
+// the given keys' lookups will touch — resolved index-only (btree keysBlob +
+// existence filter, no .kv read). Turns the fold's ~QD2 scattered cold reads into
+// a QD128 batch. Best-effort; must run on a dedicated (single-goroutine) DomainRoTx
+// since it borrows the reusable readers (read-only: LocateLeaf/AbsOffset/Fd only).
+func (dt *DomainRoTx) PrefetchLeaves(keys [][]byte) {
+	if len(dt.files) == 0 || !dt.d.Accessors.Has(statecfg.AccessorBTree) {
+		return
+	}
+	useExistence := dt.d.Accessors.Has(statecfg.AccessorExistence)
+	reqs := make([]iouring.Req, 0, len(keys))
+	for _, k := range keys {
+		hi, _ := dt.ht.iit.hashKey(k)
+		for i := len(dt.files) - 1; i >= 0; i-- {
+			if useExistence && dt.files[i].src.existence != nil && !dt.files[i].src.existence.ContainsHash(hi) {
+				continue
+			}
+			bt := dt.statelessBtree(i)
+			if bt == nil {
+				continue
+			}
+			off, ln, ok := bt.LocateLeaf(k)
+			if !ok {
+				continue
+			}
+			rd := dt.reusableReader(i)
+			absOff := rd.AbsOffset(uint64(off))
+			if absOff < 0 {
+				continue
+			}
+			reqs = append(reqs, iouring.Req{Fd: rd.Fd(), Off: absOff, Len: ln})
+			break // first existence-passing file = most likely location
+		}
+	}
+	iouring.WarmMany(reqs)
+}
+
 func (dt *DomainRoTx) getLatestFromFiles(k []byte, maxTxNum uint64) (v []byte, found bool, fileStartTxNum uint64, fileEndTxNum uint64, err error) {
 	if len(dt.files) == 0 {
 		return
@@ -1566,7 +1604,9 @@ func (d *Domain) dataReader(f *seg.Decompressor) *seg.Reader {
 	if !strings.Contains(f.FileName(), ".kv") {
 		panic("assert: miss-use " + f.FileName())
 	}
-	return seg.NewReader(f.MakeGetter(), d.Compression)
+	g := f.MakeGetter()
+	g.EnableResidencyGate()
+	return seg.NewReader(g, d.Compression)
 }
 func (d *Domain) dataWriter(f *seg.Compressor, forceNoCompress bool) *seg.Writer {
 	if !strings.Contains(f.FileName(), ".kv") {
@@ -1711,6 +1751,11 @@ func (dt *DomainRoTx) GetLatest(key []byte, roTx kv.Tx) ([]byte, kv.Step, bool, 
 func (dt *DomainRoTx) getLatest(key []byte, roTx kv.Tx, maxStep kv.Step, metrics *changeset.DomainMetrics, start time.Time) ([]byte, kv.Step, bool, error) {
 	if dt.d.Disable {
 		return nil, 0, false, nil
+	}
+
+	if glConcEnabled && dt.name == kv.CommitmentDomain {
+		glEnter()
+		defer glExit()
 	}
 
 	var v []byte

@@ -26,7 +26,13 @@ import (
 	"sync/atomic"
 
 	"github.com/erigontech/erigon/common/dbg"
+	"github.com/erigontech/erigon/execution/commitment/nibbles"
 )
+
+// IOURING_PREFETCH=true batch-warms (deep io_uring) the .kv leaves of all touched
+// keys' branch prefixes before the fold, turning the fold's ~QD2 scattered cold
+// reads into one QD128 wave.
+var iouringPrefetch = dbg.EnvBool("IOURING_PREFETCH", false)
 
 // ParallelPatriciaHashed is the trie-side of the parallel commitment pipeline.
 type ParallelPatriciaHashed struct {
@@ -269,6 +275,10 @@ func (p *ParallelPatriciaHashed) Process(
 		defer warmuper.CloseAndWait()
 	}
 
+	if iouringPrefetch {
+		p.prefetchTouchedLeaves(pu)
+	}
+
 	rh, mErr := p.processMounted(ctx, updates)
 	if mErr != nil {
 		pu.deferredMu.Lock()
@@ -297,6 +307,38 @@ func (p *ParallelPatriciaHashed) Process(
 	}
 	flushTrieStateRates()
 	return out, nil
+}
+
+// prefetchTouchedLeaves enumerates the branch prefixes of every touched key and
+// batch-warms their commitment .kv leaves in one deep io_uring wave before the
+// fold, so the fold's reads hit warm cache instead of scattering ~QD2 cold reads.
+func (p *ParallelPatriciaHashed) prefetchTouchedLeaves(pu *parallelUpdate) {
+	if pu == nil || pu.trie == nil || pu.trie.root == nil {
+		return
+	}
+	ctx, cleanup := p.trieCtxFactory()
+	if cleanup != nil {
+		defer cleanup()
+	}
+	pf, ok := ctx.(interface{ PrefetchLeaves([][]byte) })
+	if !ok {
+		return
+	}
+	prefixes := make([][]byte, 0, 1<<16)
+	var prev []byte
+	_ = dfsSubtree(pu.trie.root, nil, func(hashedKey, plainKey []byte, update *Update) error {
+		start := 0
+		ml := min(len(prev), len(hashedKey))
+		for start < ml && prev[start] == hashedKey[start] {
+			start++
+		}
+		for d := start; d <= len(hashedKey); d++ {
+			prefixes = append(prefixes, nibbles.HexToCompact(hashedKey[:d]))
+		}
+		prev = append(prev[:0], hashedKey...)
+		return nil
+	})
+	pf.PrefetchLeaves(prefixes)
 }
 
 // dfsSubtree visits the subtree in nibble order, emitting each node before its children; the hashedKey passed to fn is mutated in place and must not be retained.

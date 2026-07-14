@@ -588,6 +588,22 @@ func (d *Decompressor) Close() {
 
 func (d *Decompressor) FilePath() string { return d.filePath }
 func (d *Decompressor) FileName() string { return d.fileName }
+
+// Fd returns the underlying file descriptor (for io_uring prefetch).
+func (d *Decompressor) Fd() int { return int(d.f.Fd()) }
+
+// AbsOffset converts a getter offset (as returned by the btree offsets / used by
+// Getter.Reset) into an absolute file offset suitable for pread/io_uring.
+func (g *Getter) AbsOffset(off uint64) int64 {
+	if len(g.data) == 0 || len(g.d.mmapHandle1) == 0 {
+		return -1
+	}
+	base := int64(uintptr(unsafe.Pointer(&g.data[0])) - uintptr(unsafe.Pointer(&g.d.mmapHandle1[0])))
+	return base + int64(off)
+}
+
+// Fd returns the underlying file descriptor of the getter's decompressor.
+func (g *Getter) Fd() int { return g.d.Fd() }
 func (d *Decompressor) GetMetadata() []byte {
 	if !d.hasMetadata {
 		panic("no metadata stored")
@@ -781,11 +797,12 @@ type Getter struct {
 	posEntries []posEntry // cached d.posDict.entries, avoids pointer chain on hot path
 	data       []byte
 	//less hot fields
-	posTables   []posTable // posArena.tables; only used for the subtable path
-	patternDict *patternTable
-	d           *Decompressor
-	fName       string
-	trace       bool
+	posTables     []posTable // posArena.tables; only used for the subtable path
+	patternDict   *patternTable
+	d             *Decompressor
+	fName         string
+	trace         bool
+	residencyGate bool
 }
 
 func (g *Getter) MadvNormal() MadvDisabler {
@@ -936,6 +953,9 @@ func (g *Getter) DataLen() int {
 func (g *Getter) Reset(offset uint64) {
 	g.dataP = offset
 	g.dataBit = 0
+	if g.residencyGate {
+		g.ensureResident(offset)
+	}
 }
 
 func (g *Getter) HasNext() bool {

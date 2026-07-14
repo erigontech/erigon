@@ -520,6 +520,7 @@ func (sdc *SharedDomainsCommitmentContext) trieContextFactory(ctx context.Contex
 		warmupCtx := &TrieContext{
 			getter:   sdc.sharedDomains.AsGetter(roTx),
 			putter:   sdc.sharedDomains.AsPutDel(roTx),
+			roTx:     roTx,
 			stepSize: stepSize,
 			txNum:    txNum,
 		}
@@ -559,6 +560,7 @@ func (sdc *SharedDomainsCommitmentContext) concurrentTrieContextFactory(ctx cont
 		warmupCtx := &TrieContext{
 			getter:         sdc.sharedDomains.AsGetter(roTx),
 			putter:         sdc.sharedDomains.AsPutDel(roTx),
+			roTx:           roTx,
 			stepSize:       stepSize,
 			txNum:          txNum,
 			localCollector: collector,
@@ -819,6 +821,7 @@ func (sdc *SharedDomainsCommitmentContext) restorePatriciaState(value []byte) (u
 type TrieContext struct {
 	getter   kv.TemporalGetter
 	putter   kv.TemporalPutDel
+	roTx     kv.TemporalTx // for batched io_uring leaf prefetch via AggTx
 	txNum    uint64
 	blockNum uint64
 
@@ -826,6 +829,20 @@ type TrieContext struct {
 	trace          bool
 	stateReader    StateReader
 	localCollector *etl.Collector // per-goroutine collector for concurrent PutBranch
+}
+
+// PrefetchLeaves batch-warms the commitment .kv leaves for the given branch
+// prefixes via the aggregator's io_uring prefetch. Best-effort no-op if the tx
+// or aggregator doesn't support it.
+func (sdc *TrieContext) PrefetchLeaves(prefixes [][]byte) {
+	if sdc.roTx == nil {
+		return
+	}
+	if p, ok := sdc.roTx.AggTx().(interface {
+		PrefetchLeaves(kv.Domain, [][]byte)
+	}); ok {
+		p.PrefetchLeaves(kv.CommitmentDomain, prefixes)
+	}
 }
 
 // NewTrieContextRo creates a read-only TrieContext suitable for TrieReader lookups.

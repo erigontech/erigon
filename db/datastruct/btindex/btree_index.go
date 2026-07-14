@@ -693,6 +693,39 @@ func (b *BtIndex) Get(lookup []byte, gr *seg.Reader) (k, v []byte, offsetInFile 
 	return lookup, v, offsetInFile, found, nil
 }
 
+// prefetchWindowBytes is the tight .kv window warmed per prefix — sized to cover
+// the target value + the few neighbour records the interpolation search touches,
+// NOT the whole M-record leaf (which would read-amplify ~10x).
+var prefetchWindowBytes = dbg.EnvInt("PREFETCH_WINDOW_BYTES", 12288)
+
+// LocateLeaf returns a tight .kv getter-offset window around where prefix's value
+// most likely sits, using only the in-memory index (keysBlob pivots + offt +
+// interpolation), with no .kv read. Feeds batched io_uring prefetch.
+func (b *BtIndex) LocateLeaf(prefix []byte) (getterOffset int64, byteLen int, ok bool) {
+	bp := b.bplus
+	if b.Empty() || bp == nil {
+		return 0, 0, false
+	}
+	l, r, klo, khi := bp.bs(prefix)
+	cnt := bp.offt.Count()
+	if cnt == 0 || l >= cnt {
+		return 0, 0, false
+	}
+	// Interpolate to the target's likely record index; back up one record so the
+	// search's converging probes are covered too.
+	m := l
+	if r > l && len(klo) > 0 && len(khi) > 0 {
+		m = interpMid(prefix, klo, khi, l, r)
+	}
+	if m >= cnt {
+		m = cnt - 1
+	}
+	if m > l {
+		m--
+	}
+	return int64(bp.offt.Get(m)), prefetchWindowBytes, true
+}
+
 // Seek moves cursor to position where key >= x.
 // Then if x == nil - first key returned
 //
