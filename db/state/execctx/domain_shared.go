@@ -208,11 +208,13 @@ func NewSharedDomains(ctx context.Context, tx kv.TemporalTx, logger log.Logger, 
 	// aggregator). The duck-typed BranchCacheProvider lookup avoids
 	// importing db/state directly — db/state already imports execctx, so
 	// the reverse import would create a cycle.
-	var branchCache *commitment.BranchCache
-	if p, ok := tx.AggTx().(commitment.BranchCacheProvider); ok {
-		branchCache = p.BranchCache()
+	if !o.disableSharedBranchCache {
+		var branchCache *commitment.BranchCache
+		if p, ok := tx.AggTx().(commitment.BranchCacheProvider); ok {
+			branchCache = p.BranchCache()
+		}
+		sd.branchCache = branchCache
 	}
-	sd.branchCache = branchCache
 	if p, ok := tx.AggTx().(kvmetrics.MetricsCollectorProvider); ok {
 		sd.collector = p.MetricsCollector()
 	}
@@ -220,8 +222,11 @@ func NewSharedDomains(ctx context.Context, tx kv.TemporalTx, logger log.Logger, 
 
 	// The pin controller is aggregator-scoped (co-located with branchCache) so pin
 	// residency ages by block-access recency across all SharedDomains, not per-SD.
-	if p, ok := tx.AggTx().(commitment.AdaptivePinControllerProvider); ok {
-		sd.adaptivePinController = p.AdaptivePinController()
+	// Skip it too when the shared cache is detached (speculative builder domains).
+	if !o.disableSharedBranchCache {
+		if p, ok := tx.AggTx().(commitment.AdaptivePinControllerProvider); ok {
+			sd.adaptivePinController = p.AdaptivePinController()
+		}
 	}
 
 	_, blockNum, err := sd.SeekCommitment(ctx, tx)

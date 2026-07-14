@@ -145,7 +145,11 @@ func (b *Builder) Build(param *Parameters, interrupt *atomic.Bool) (result *type
 		}
 	}
 
-	sd, err := execctx.NewSharedDomains(b.ctx, compositeTx, b.logger, execctx.WithoutDeferredBranchUpdates())
+	// The build is speculative and discarded; detach it from the aggregator's
+	// shared commitment BranchCache so its commitment computation neither races
+	// the live node's concurrent background commit nor pollutes the cache with
+	// speculative branches. Reads resolve through sd.mem / parentSD / MDBX.
+	sd, err := execctx.NewSharedDomains(b.ctx, compositeTx, b.logger, execctx.WithoutDeferredBranchUpdates(), execctx.WithoutSharedBranchCache())
 	if err != nil {
 		return nil, err
 	}
