@@ -14,9 +14,9 @@ import (
 	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/length"
 	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/db/dbservices"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/dbutils"
-	"github.com/erigontech/erigon/db/services"
 	"github.com/erigontech/erigon/execution/cache"
 	"github.com/erigontech/erigon/execution/protocol/rules"
 	"github.com/erigontech/erigon/execution/state"
@@ -366,7 +366,7 @@ func (bra *BlockReadAheader) ReadBlockWithSenders(blockHash common.Hash) (*types
 	return types.NewBlockFromStorage(header.Hash(), header, body.Transactions, body.Uncles, body.Withdrawals), true
 }
 
-func BlocksReadAhead(ctx context.Context, workers int, db kv.RoDB, engine rules.Engine, blockReader services.FullBlockReader) (chan uint64, context.CancelFunc) {
+func BlocksReadAhead(ctx context.Context, workers int, db kv.RoDB, engine rules.Engine, blockReader dbservices.FullBlockReader) (chan uint64, context.CancelFunc) {
 	const readAheadBlocks = 500
 	readAhead := make(chan uint64, readAheadBlocks)
 	g, gCtx := errgroup.WithContext(ctx)
@@ -412,7 +412,7 @@ func BlocksReadAhead(ctx context.Context, workers int, db kv.RoDB, engine rules.
 		_ = g.Wait()
 	}
 }
-func blocksReadAheadFunc(ctx context.Context, tx kv.Tx, blockNum uint64, engine rules.Engine, blockReader services.FullBlockReader) error {
+func blocksReadAheadFunc(ctx context.Context, tx kv.Tx, blockNum uint64, engine rules.Engine, blockReader dbservices.FullBlockReader) error {
 	block, err := blockReader.BlockByNumber(ctx, tx, blockNum)
 	if err != nil {
 		return err
