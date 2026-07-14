@@ -49,8 +49,6 @@ func TestUnwindExecutionStage_PrunesUncommittedOverlayWrite(t *testing.T) {
 	dirs := datadir.New(t.TempDir())
 	db := temporaltest.NewTestDBWithStepSize(t, dirs, 10_000)
 
-	// Block reader backed only by MDBX — thex unwind range is at the tip, above
-	// any frozen snapshot boundary, so no snapshots are needed.
 	snaps := db.(freezeblocks.HasBlockFiles).DebugBlockFiles()
 	br := freezeblocks.NewBlockReader(snaps, nil)
 
