@@ -26,6 +26,7 @@ import (
 	"github.com/erigontech/erigon/common/clonable"
 	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/common/length"
+	"github.com/erigontech/erigon/common/math"
 )
 
 // ByteListSSZ is a variable-length SSZ byte list (ByteList[N]) with a
@@ -103,7 +104,7 @@ func (b *ByteListSSZ) HashSSZ() ([32]byte, error) {
 	chunkLimit := (b.limit + 31) / 32
 
 	// Pack the data into 32-byte chunks and merkleize with the chunk limit.
-	leafCount := merkle_tree.NextPowerOfTwo(uint64((len(b.data) + 31) / length.Hash))
+	leafCount := math.NextPowerOfTwo(uint64((len(b.data) + 31) / length.Hash))
 	if leafCount == 0 {
 		leafCount = 1
 	}

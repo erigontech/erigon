@@ -42,6 +42,7 @@ import (
 	"github.com/erigontech/erigon/common/empty"
 	"github.com/erigontech/erigon/common/length"
 	"github.com/erigontech/erigon/common/log/v3"
+	math2 "github.com/erigontech/erigon/common/math"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/db/services"
@@ -1180,7 +1181,7 @@ func (c *Bor) GetRootHash(ctx context.Context, tx kv.Tx, start, end uint64) (str
 }
 
 func ComputeHeadersRootHash(blockHeaders []*types.Header) ([]byte, error) {
-	headers := make([][32]byte, NextPowerOfTwo(uint64(len(blockHeaders))))
+	headers := make([][32]byte, math2.NextPowerOfTwo(uint64(len(blockHeaders))))
 	for i := 0; i < len(blockHeaders); i++ {
 		blockHeader := blockHeaders[i]
 		header := crypto.Keccak256(AppendBytes32(
