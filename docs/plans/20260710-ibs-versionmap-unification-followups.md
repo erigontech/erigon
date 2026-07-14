@@ -6,22 +6,30 @@ them from the PR description.
 
 Context: [20260709-versionedio-single-source-bal-occ.md](20260709-versionedio-single-source-bal-occ.md).
 
-End state: a **single versionedio processing model** for all execution, with no
-`stateObject`. This is not OCC-dependent — OCC (conflict detection + incarnation
-retry) is purely a parallel concern; run serially, the exact same versionedio path
-executes and simply never produces a conflict. So there is no "serial vs parallel"
-commit split to preserve: serial, parallel, genesis, and RPC all commit through the
-write-set, and `noMaterialize` becomes the behaviour rather than a flag.
+End state: a **single versionedio processing model** for all execution and block
+building, with no `stateObject`. This is not OCC-dependent — OCC (conflict
+detection + incarnation retry) is purely a parallel concern; run serially, the
+exact same versionedio path executes and simply never produces a conflict. So
+there is no "serial vs parallel" commit split to preserve: serial, parallel,
+genesis, block building, and RPC all commit through the write-set.
+
+`noMaterialize` is not a first-class concept — it is redundant with the
+parallel-execution decision. `EXEC_PARALLEL` (`dbg.Exec3Parallel ||
+cfg.experimentalBAL` at `stage_execute.go`) selects the `parallelExecutor`, whose
+`taskVersion.Reset` sets the flag; so the rule is simply **`EXEC_PARALLEL=true` ⇒
+versionedio only**. The bespoke flag is a transitional artifact and is deleted once
+serial moves onto the same path (follow-ups 1–3), leaving versionedio everywhere.
 
 ## Delivered in this PR
 
-The parallel execution worker runs without a `stateObject` cache: create/write
-flows record only versioned-write cells and committed reads resolve from the
-state reader, with the tx's own CreateContract / SelfDestruct / Code cells
-reconstructed onto a transient object. Gated by `IntraBlockState.noMaterialize`,
-set only at the parallel worker (`taskVersion.Reset`). genesis / RPC / serial
-keep the flag off and are unchanged. Validated: `state -race`, reincarnation
-oracle, `execution/tests`, and BAL hive (`eest-devnet` 2572/0).
+The parallel executor (the `EXEC_PARALLEL=true` path) runs without a `stateObject`
+cache: create/write flows record only versioned-write cells and committed reads
+resolve from the state reader, with the tx's own CreateContract / SelfDestruct /
+Code cells reconstructed onto a transient object. Block building uses the same
+versionedio commit. Serial execution, genesis, and RPC still commit via
+`stateObjects` — the remaining leftovers the follow-ups below remove. Validated:
+`state -race`, reincarnation oracle, `execution/tests`, and BAL hive
+(`eest-devnet` 2572/0).
 
 ## Follow-up 1 — genesis commit via the write-set
 
