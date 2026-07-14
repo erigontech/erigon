@@ -46,7 +46,7 @@ var cmdResetState = &cobra.Command{
 	Use:   "reset_state",
 	Short: "Reset StateStages (5,6,7,8,9,10) and buckets",
 	Run: func(cmd *cobra.Command, args []string) {
-		logger := debug.SetupCobra(cmd, "integration")
+		logger, ctx := debug.SetupCobra(cmd, "integration"), cmd.Context()
 		db, err := openDB(ctx, dbCfg(dbcfg.ChainDB, chaindata), true, chain, logger)
 		if err != nil {
 			logger.Error("Opening DB", "error", err)
