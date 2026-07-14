@@ -1814,9 +1814,7 @@ func (a *ApiHandler) broadcastBlock(ctx context.Context, blk *cltypes.SignedBeac
 				}
 
 				cellsAndProof := peerdasutils.CellsAndKZGProofs{}
-				for i := range cells {
-					cellsAndProof.Blobs = append(cellsAndProof.Blobs, cells[i])
-				}
+				cellsAndProof.Blobs = append(cellsAndProof.Blobs, cells...)
 				for j := 0; j < len(bundle.KzgProofs); j++ {
 					cellsAndProof.Proofs = append(cellsAndProof.Proofs, cltypes.KZGProof(bundle.KzgProofs[j]))
 				}

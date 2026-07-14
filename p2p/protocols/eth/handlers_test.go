@@ -766,7 +766,7 @@ func TestAnswerGetBlockAccessListsQuery_RegenerationBudget(t *testing.T) {
 	storedBal := []byte{0xc3, 0x01, 0x02, 0x03}
 	regenBal := []byte{0xc3, 0x04, 0x05, 0x06}
 	query := make(GetBlockAccessListsPacket, 0, storedCount+regenCount)
-	for i := 0; i < storedCount; i++ {
+	for i := range storedCount {
 		h := common.Hash{0xaa, byte(i)}
 		num := uint64(100 + i)
 		reader[h] = num
@@ -775,7 +775,7 @@ func TestAnswerGetBlockAccessListsQuery_RegenerationBudget(t *testing.T) {
 		}
 		query = append(query, h)
 	}
-	for i := 0; i < regenCount; i++ {
+	for i := range regenCount {
 		h := common.Hash{0xbb, byte(i)}
 		num := uint64(200 + i)
 		reader[h] = num
