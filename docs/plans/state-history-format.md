@@ -108,6 +108,9 @@ of every client; no two teams will agree on generic layout.
 
 **P4 — How to verify files?** by content-only (not just checksum files)
 
+**P5 — Unclear which hash store on chain** Adding disk-format to Spec: means freeze it forever. Even if we do - which
+files to hash? Or maybe which data to hash?
+
 ## 4. Proposal: put latest values into .ef file and exclude .kv from Spec
 
 ```
@@ -122,12 +125,13 @@ history:  account.0-8.ef    account.8-16.ef       (key, latestValue, {ts})
 Clients: to derive their own format of Latest State from "The History" 
 ```
 
-| Problem              | After                                                                                                                                            |
-|----------------------|--------------------------------------------------------------------------------------------------------------------------------------------------|
-| P1: no compaction    | Latest State doesn't need to be content-addressable anymore. All files will get "forever immutability" property (`.v` and `.ef` already have it) |
-| P2: no repair points | Every shard boundary is a "save point" can start re-execution from there at any time                                                             |
-| P3: politics         | Spec = covers only history. Clients can derive any format of Latest State (or None - exec will work)                                             |
-| P4: verification     | Free redundancy: span N's `latestValue(K)` == span N+1's first pre-value of K                                                                    |
+| Problem              | After                                                                                                                                                               |
+|----------------------|---------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| P1: no compaction    | Latest State doesn't need to be content-addressable anymore. All files will get "forever immutability" property (`.v` and `.ef` already have it)                    |
+| P2: no repair points | Every shard boundary is a "save point" can start re-execution from there at any time                                                                                |
+| P3: politics         | Spec = covers only history. Clients can derive any format of Latest State (or None - exec will work)                                                                |
+| P4: verification     | Free redundancy: span N's `latestValue(K)` == span N+1's first pre-value of K                                                                                       |
+| P5: hash what        | Can hash `(key, ts, value)` data-stream (maybe without MerkleTree). `Shard N+1` will have own `hash` (of state history) and we will hook it with `Shard N`'s `hash` |
 
 ### Limitations
 
