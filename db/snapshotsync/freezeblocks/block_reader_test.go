@@ -307,9 +307,6 @@ func TestBlockRetireAllOverlapped(t *testing.T) {
 	nextHeader := &types.Header{Number: *uint256.NewInt(2000)}
 	require.NoError(t, rawdb.WriteHeader(rwTx, nextHeader))
 	require.NoError(t, rwTx.Commit())
-	// Manually close snapshots here to simulate a node restart.
-	// The deferred Close() serves only as a fallback safety guard in case of early test failure.
-	snapshots.Close()
 
 	// Add unindexed covering segments for ALL types. With alignMin=true,
 	// RecalcVisibleSegments must fall back to indexed subsegments for every
