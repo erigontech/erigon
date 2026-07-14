@@ -79,8 +79,8 @@ func (bra *BlockReadAheader) SetStateCache(sc *cache.StateCache) {
 // stack cost on the EVM's first touch of any prefetched address.
 //
 // For the CodeDomain the wrapper also populates the codeHashToCode
-// (codeHash→bytes) + size-cache layers via PutCodeWithHash, keyed by the
-// code's own keccak hash so every cached pair is self-consistent.
+// (codeHash→bytes) + size-cache layers via PutCodeWithHashIfAbsent, keyed by
+// the code's own keccak hash so every cached pair is self-consistent.
 type cachePopulatingGetter struct {
 	g        kv.TemporalGetter
 	sc       *cache.StateCache
