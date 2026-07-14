@@ -118,6 +118,62 @@ func TestAssertStateCache_NoFalsePanicDuringInFlightUnwind(t *testing.T) {
 	require.Equal(t, v1, v, "the cache serves the restored value")
 }
 
+// Same invariant with the unwound key bound at step 0 — a young chain's whole
+// state lives there. A step-0 bound must not read as "no bound": the assert
+// must stay silenced while MDBX still holds the dying step-0 row, and the
+// cache serves the correct negative (the key was created inside the unwound
+// range, so the delete-shape diff restores nothing).
+func TestAssertStateCache_NoFalsePanicDuringInFlightUnwindStepZero(t *testing.T) {
+	// Mutates dbg.AssertStateCache — must not run in parallel with tests that
+	// read it on the SD read path.
+
+	const stepSize = uint64(16)
+	ctx := t.Context()
+	db := newTestDb(t, stepSize)
+	sc := newSmallStateCache()
+
+	key := make([]byte, 20)
+	key[0] = 0xbb
+	v1 := encAccount(1)
+
+	rwTx, err := db.BeginTemporalRw(ctx)
+	require.NoError(t, err)
+	defer rwTx.Rollback()
+	sd, err := execctx.NewSharedDomains(ctx, rwTx, log.New())
+	require.NoError(t, err)
+	defer sd.Close()
+	sd.SetTxNum(5)
+	require.NoError(t, sd.DomainPut(kv.AccountsDomain, rwTx, key, v1, 5, nil))
+	require.NoError(t, sd.Commit(ctx, rwTx))
+
+	stepBytes := make([]byte, 8)
+	binary.BigEndian.PutUint64(stepBytes, ^uint64(0))
+	var diffs [kv.DomainLen][]kv.DomainEntryDiff
+	diffs[kv.AccountsDomain] = []kv.DomainEntryDiff{{Key: string(key) + string(stepBytes), Value: nil}}
+
+	roTx, err := db.BeginTemporalRo(ctx)
+	require.NoError(t, err)
+	defer roTx.Rollback()
+	sd2, err := execctx.NewSharedDomains(ctx, roTx, log.New())
+	require.NoError(t, err)
+	defer sd2.Close()
+	sd2.SetStateCacheForTest(sc)
+
+	sc.Put(kv.AccountsDomain, key, nil, 2)
+	sd2.Unwind(3, &diffs)
+
+	old := dbg.AssertStateCache
+	dbg.AssertStateCache = true
+	t.Cleanup(func() { dbg.AssertStateCache = old })
+
+	var v []byte
+	require.NotPanics(t, func() {
+		v, _, err = sd2.GetLatest(kv.AccountsDomain, roTx, key)
+	}, "assert must not fire when the in-flight unwind bound is at step 0")
+	require.NoError(t, err)
+	require.Empty(t, v, "the cache serves the correct negative")
+}
+
 // The read-fill after a fall-through read must not replace a live cache
 // entry: it never carries newer information than a flush-apply, and during an
 // in-flight unwind the bounded DB read can even return the not-yet-deleted

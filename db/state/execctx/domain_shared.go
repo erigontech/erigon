@@ -21,7 +21,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"math"
 	"runtime"
 	"sync"
 	"sync/atomic"
@@ -1097,10 +1096,6 @@ func (sd *SharedDomains) GetLatestContext(ctx context.Context, domain kv.Domain,
 	return sd.getLatestMetered(domain, tx, k, kvmetrics.MetricsFromContext(ctx))
 }
 
-// noStepBound is the maxStep of a read the mem overlay published no per-key
-// in-flight-unwind bound for: every step is servable.
-const noStepBound = kv.Step(math.MaxUint64)
-
 // servableUnderBound gates a cached entry against an in-flight unwind's
 // per-key maxStep: a hit above the bound would diverge from the bounded read
 // the cache-disabled path takes (the epoch floor usually drops such entries
@@ -1129,7 +1124,7 @@ func (sd *SharedDomains) getLatestMetered(domain kv.Domain, tx kv.TemporalTx, k 
 			wm = sd.reqMetrics
 		}
 	}
-	maxStep := noStepBound
+	maxStep := kv.NoStepBound
 
 	// Check mem batch first - it has the current transaction's uncommitted state.
 	// No need to populate stateCache here — mem is checked first on every read,
@@ -1140,7 +1135,7 @@ func (sd *SharedDomains) getLatestMetered(domain kv.Domain, tx kv.TemporalTx, k 
 		}
 		return v, step, nil
 	} else {
-		if step > 0 {
+		if step < maxStep {
 			maxStep = step
 		}
 	}
@@ -1153,7 +1148,7 @@ func (sd *SharedDomains) getLatestMetered(domain kv.Domain, tx kv.TemporalTx, k 
 			}
 			return v, step, nil
 		} else {
-			if step > 0 && step < maxStep {
+			if step < maxStep {
 				maxStep = step
 			}
 		}
@@ -1192,7 +1187,7 @@ func (sd *SharedDomains) getLatestMetered(domain kv.Domain, tx kv.TemporalTx, k 
 			// key (in-flight unwind): MDBX still holds the not-yet-deleted dying
 			// rows inside the bound, so the "authoritative" read can return
 			// dead-fork bytes and blame the cache for a legitimate hit.
-			if dbg.AssertStateCache && maxStep == noStepBound {
+			if dbg.AssertStateCache && maxStep == kv.NoStepBound {
 				// Fetch authoritative value from the backing tx and panic on any divergence.
 				// sd.mem and sd.parent.mem were already checked above and missed, so the
 				// backing tx is the single source of truth for this key at this point.
