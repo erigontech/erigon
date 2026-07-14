@@ -272,7 +272,7 @@ func coverWordByPatterns(trace bool, input []byte, mf3 *patricia.ACMatcher, outp
 	return output, patterns, uncovered, cells
 }
 
-func coverWordsByPatternsWorker(trace bool, inputCh chan *CompressionWord, outCh chan *CompressionWord, completion *sync.WaitGroup, ac *patricia.AhoCorasick, inputSize, outputSize *atomic.Uint64, posMap *posCounter) {
+func coverWordsByPatternsWorker(trace bool, inputCh chan []*CompressionWord, outCh chan []*CompressionWord, completion *sync.WaitGroup, ac *patricia.AhoCorasick, inputSize, outputSize *atomic.Uint64, posMap *posCounter) {
 	defer completion.Done()
 	var output = make([]byte, 0, 256)
 	var uncovered = make([]int, 256)
@@ -280,17 +280,20 @@ func coverWordsByPatternsWorker(trace bool, inputCh chan *CompressionWord, outCh
 	var cells = make([]DynamicCell, 0, 256)
 	mf3 := patricia.NewACMatcher(ac)
 	var numBuf [binary.MaxVarintLen64]byte
-	for compW := range inputCh {
-		wordLen := uint64(len(compW.word))
-		n := binary.PutUvarint(numBuf[:], wordLen)
-		output = append(output[:0], numBuf[:n]...) // Prepend with the encoding of length
-		output, patterns, uncovered, cells = coverWordByPatterns(trace, compW.word, mf3, output, uncovered, patterns, cells, posMap)
-		compW.word = append(compW.word[:0], output...)
-		outCh <- compW
-		inputSize.Add(1 + wordLen)
-		outputSize.Add(uint64(len(output)))
-		posMap.add(wordLen + 1)
-		posMap.add(0)
+	// Words within a batch are consecutive, so the matcher's prefix-resume survives across the batch.
+	for batch := range inputCh {
+		for _, compW := range batch {
+			wordLen := uint64(len(compW.word))
+			n := binary.PutUvarint(numBuf[:], wordLen)
+			output = append(output[:0], numBuf[:n]...) // Prepend with the encoding of length
+			output, patterns, uncovered, cells = coverWordByPatterns(trace, compW.word, mf3, output, uncovered, patterns, cells, posMap)
+			compW.word = append(compW.word[:0], output...)
+			inputSize.Add(1 + wordLen)
+			outputSize.Add(uint64(len(output)))
+			posMap.add(wordLen + 1)
+			posMap.add(0)
+		}
+		outCh <- batch
 	}
 }
 
@@ -352,7 +355,8 @@ func compressWithPatternCandidates(ctx context.Context, trace bool, cfg Cfg, log
 	if lvl < log.LvlTrace {
 		logger.Log(lvl, fmt.Sprintf("[%s] dictionary file parsed", logPrefix), "entries", len(code2pattern))
 	}
-	ch := make(chan *CompressionWord, 10_000)
+	const coverBatchSize = 512 // consecutive words per batch — preserves matcher prefix-resume while still load-balancing across workers
+	ch := make(chan []*CompressionWord, cfg.Workers*4)
 	inputSize, outputSize := &atomic.Uint64{}, &atomic.Uint64{}
 
 	var collectors []*etl.Collector
@@ -361,7 +365,7 @@ func compressWithPatternCandidates(ctx context.Context, trace bool, cfg Cfg, log
 			c.Close()
 		}
 	}()
-	out := make(chan *CompressionWord, 1024)
+	out := make(chan []*CompressionWord, cfg.Workers*8) // larger than ch so workers can always offload and keep draining ch
 	var compressionQueue CompressionQueue
 	heap.Init(&compressionQueue)
 	queueLimit := 128 * 1024
@@ -384,6 +388,11 @@ func compressWithPatternCandidates(ctx context.Context, trace bool, cfg Cfg, log
 			wg.Add(1)
 			go coverWordsByPatternsWorker(trace, ch, out, &wg, ac, inputSize, outputSize, posMap)
 		}
+	}
+	var curBatch []*CompressionWord // consecutive words accumulating for the next batch
+	var freeList []*CompressionWord // written words available for reuse
+	if cfg.Workers > 1 {
+		curBatch = make([]*CompressionWord, 0, coverBatchSize)
 	}
 	t := time.Now()
 
@@ -419,35 +428,40 @@ func compressWithPatternCandidates(ctx context.Context, trace bool, cfg Cfg, log
 		}
 
 		if cfg.Workers > 1 {
-			// take processed words in non-blocking way and push them to the queue
+			// take processed batches in non-blocking way and push their words to the queue
 		outer:
 			for {
 				select {
-				case compW := <-out:
-					heap.Push(&compressionQueue, compW)
+				case batch := <-out:
+					for _, w := range batch {
+						heap.Push(&compressionQueue, w)
+					}
 				default:
 					break outer
 				}
 			}
-			// take processed words in blocking way until either:
-			// 1. compressionQueue is below the limit so that new words can be allocated
-			// 2. there is word in order on top of the queue which can be written down and reused
-			for compressionQueue.Len() >= queueLimit && compressionQueue[0].order < outCount {
+			// Over the queue limit and the next-to-write word hasn't come back yet:
+			// block draining results until it arrives, instead of allocating more work.
+			for compressionQueue.Len() >= queueLimit && compressionQueue[0].order > outCount {
 				// Blocking wait to receive some outputs until the top of queue can be processed
-				compW := <-out
-				heap.Push(&compressionQueue, compW)
+				batch := <-out
+				for _, w := range batch {
+					heap.Push(&compressionQueue, w)
+				}
 			}
-			var compW *CompressionWord
-			// Either take the word from the top, write it down and reuse for the next unprocessed word
-			// Or allocate new word
-			if compressionQueue.Len() > 0 && compressionQueue[0].order == outCount {
-				compW = heap.Pop(&compressionQueue).(*CompressionWord)
+			// Write any in-order words at the top of the queue, recycling them onto freeList
+			for compressionQueue.Len() > 0 && compressionQueue[0].order == outCount {
+				w := heap.Pop(&compressionQueue).(*CompressionWord)
 				outCount++
-				// Write to intermediate file
-				if _, e := intermediateW.Write(compW.word); e != nil {
+				if _, e := intermediateW.Write(w.word); e != nil {
 					return e
 				}
-				// Reuse compW for the next word
+				freeList = append(freeList, w)
+			}
+			var compW *CompressionWord
+			if k := len(freeList); k > 0 {
+				compW = freeList[k-1]
+				freeList = freeList[:k-1]
 			} else {
 				compW = &CompressionWord{}
 			}
@@ -460,7 +474,11 @@ func compressWithPatternCandidates(ctx context.Context, trace bool, cfg Cfg, log
 				heap.Push(&compressionQueue, compW) // Push to the queue directly, bypassing compression
 			} else if compression {
 				compW.word = append(compW.word[:0], v...)
-				ch <- compW // Send for compression
+				curBatch = append(curBatch, compW)
+				if len(curBatch) >= coverBatchSize {
+					ch <- curBatch // Send for compression
+					curBatch = make([]*CompressionWord, 0, coverBatchSize)
+				}
 			} else {
 				// Prepend word with encoding of length + zero byte, which indicates no patterns to be found in this word
 				wordLen := uint64(len(v))
@@ -507,6 +525,9 @@ func compressWithPatternCandidates(ctx context.Context, trace bool, cfg Cfg, log
 	}); err != nil {
 		return err
 	}
+	if len(curBatch) > 0 {
+		ch <- curBatch // flush the final partial batch
+	}
 	close(ch)
 	// Drain the out queue if necessary
 	if inCount > outCount {
@@ -521,10 +542,12 @@ func compressWithPatternCandidates(ctx context.Context, trace bool, cfg Cfg, log
 				return e
 			}
 		}
-		for compW := range out {
-			heap.Push(&compressionQueue, compW)
+		for batch := range out {
+			for _, w := range batch {
+				heap.Push(&compressionQueue, w)
+			}
 			for compressionQueue.Len() > 0 && compressionQueue[0].order == outCount {
-				compW = heap.Pop(&compressionQueue).(*CompressionWord)
+				compW := heap.Pop(&compressionQueue).(*CompressionWord)
 				outCount++
 				if outCount == inCount {
 					close(out)
