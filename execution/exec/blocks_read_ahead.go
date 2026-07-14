@@ -84,7 +84,13 @@ func (bra *BlockReadAheader) SetStateCache(sc *cache.StateCache) {
 type cachePopulatingGetter struct {
 	g        kv.TemporalGetter
 	sc       *cache.StateCache
-	stepSize uint64 // for the read txNum upper bound (last txNum of the read's step)
+	progress func(kv.Domain) uint64 // domain progress source for stamping negative fills
+	stepSize uint64                 // for the read txNum upper bound (last txNum of the read's step)
+}
+
+func newCachePopulatingGetter(tx kv.TemporalTx, sc *cache.StateCache) *cachePopulatingGetter {
+	debug := tx.Debug()
+	return &cachePopulatingGetter{g: tx, sc: sc, progress: debug.DomainProgress, stepSize: debug.StepSize()}
 }
 
 func (cpg *cachePopulatingGetter) GetLatest(name kv.Domain, k []byte) ([]byte, kv.Step, error) {
@@ -108,8 +114,15 @@ func (cpg *cachePopulatingGetter) GetLatest(name kv.Domain, k []byte) ([]byte, k
 			// skip the file accessor stack. Mirrors revm's CacheAccount
 			// { account: None, status: LoadedNotExisting } pattern.
 			// Stamp with an upper bound on the value's write txNum (last txNum
-			// of the step it came from) so unwind invalidation is correct.
-			cpg.sc.PutIfAbsent(name, k, v, (uint64(step)+1)*cpg.stepSize-1)
+			// of the step it came from) so unwind invalidation is correct. A
+			// negative carries no step — stamp it with the domain's progress
+			// at observation time so any unwind drops it (as the SD read-fill
+			// does).
+			readTxNum := (uint64(step)+1)*cpg.stepSize - 1
+			if len(v) == 0 && name != kv.CodeDomain && cpg.sc.GetCache(name) != nil {
+				readTxNum = cpg.progress(name)
+			}
+			cpg.sc.PutIfAbsent(name, k, v, readTxNum)
 		}
 	}
 	return v, step, err
@@ -229,7 +242,7 @@ func (bra *BlockReadAheader) warmBody(ctx context.Context, db kv.RoDB, header *t
 				}
 				var getter kv.TemporalGetter = ttx
 				if bra.stateCache != nil {
-					getter = &cachePopulatingGetter{g: ttx, sc: bra.stateCache, stepSize: ttx.Debug().StepSize()}
+					getter = newCachePopulatingGetter(ttx, bra.stateCache)
 				}
 				stateReader := state.NewReaderV3(getter)
 
@@ -300,7 +313,7 @@ func (bra *BlockReadAheader) warmBody(ctx context.Context, db kv.RoDB, header *t
 			var getter kv.TemporalGetter = ttx
 			var cpg *cachePopulatingGetter
 			if bra.stateCache != nil {
-				cpg = &cachePopulatingGetter{g: ttx, sc: bra.stateCache, stepSize: ttx.Debug().StepSize()}
+				cpg = newCachePopulatingGetter(ttx, bra.stateCache)
 				getter = cpg
 			}
 			stateReader := state.NewReaderV3(getter)
