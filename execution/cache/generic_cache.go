@@ -361,6 +361,9 @@ func (c *GenericCache[T]) putLocked(key []byte, value T, txNum uint64, overwrite
 	}
 
 	curCap := c.curCap.Load()
+	// The insert lands before the grow (which must run outside the stripe), so
+	// it and any racers until the swap evict at the pre-grow cap — a transient
+	// bounded by the grow window, not a regression of the grow-first ordering.
 	needGrow := c.mode != ModeNoOp && curCap < c.maxCap && lru.Len() >= int(curCap)
 
 	// In ModeEvictLRU the byte budget is enforced through the entry-count cap,
