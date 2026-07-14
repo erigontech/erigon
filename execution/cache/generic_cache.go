@@ -324,6 +324,15 @@ func (c *GenericCache[T]) Get(key []byte) (T, bool) {
 // maxStep — the same coherence the BranchCache read applies for commitment.
 func (c *GenericCache[T]) GetWithTxNum(key []byte) (T, uint64, bool) {
 	h := maphash.Hash(key)
+	// Snapshot coherence before loading the generation: judged against the live
+	// state instead, a Clear landing between the load and the staleness check
+	// re-inits coherence (fresh epoch, lifted floor) and revalidates a dead
+	// entry captured from the retiring generation. Paired with Clear re-initing
+	// only after its swap, an old-generation entry is always judged by a
+	// pre-init snapshot that still carries the unwind. A live entry judged by a
+	// pre-Clear snapshot only degrades to a miss (dropStale re-checks and keeps
+	// it).
+	coh := c.coh.Snapshot()
 	lru := c.data.Load()
 	e, ok := lru.Get(h)
 	if !ok || !bytes.Equal(e.key, key) {
@@ -339,7 +348,7 @@ func (c *GenericCache[T]) GetWithTxNum(key []byte) (T, uint64, bool) {
 	// dead block — e.g. an EIP-4788 beacon-root write in the block-begin system
 	// tx — and must be dropped; >= not > (the surviving block's last txNum is
 	// floor-1, so this never drops a live entry).
-	if c.coh.IsStale(e.txNum, e.epoch) {
+	if coh.IsStale(e.txNum, e.epoch) {
 		c.dropStale(h, key)
 		c.staleEvicted.Add(1)
 		c.misses.Add(1)
@@ -503,10 +512,14 @@ func (c *GenericCache[T]) Clear() {
 		c.putStripes[i].Lock()
 	}
 	c.currentSize.Store(0)
-	c.coh.Init()
 	c.shardCount = shards
 	c.curCap.Store(c.startCap)
 	c.data.Store(next)
+	// Re-init coherence only after the swap: paired with GetWithTxNum's
+	// snapshot-before-load ordering, an entry captured from the retiring
+	// generation is then always judged by pre-init coherence that still
+	// carries the unwind.
+	c.coh.Init()
 	for i := range c.putStripes {
 		c.putStripes[i].Unlock()
 	}
