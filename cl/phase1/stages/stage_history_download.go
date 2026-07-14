@@ -96,13 +96,17 @@ func elBackfillFinished(slot, elBlock, destinationSlot, destinationBlock uint64)
 	return false
 }
 
-// clampProgress derives (processed, total) for a backwards download whose floor
-// and current position track live counters that can drift above the frozen
-// highestBlockSeen; clamping keeps the unsigned math from underflowing to ~2^64.
+// clampProgress derives (processed, total) for a backwards download, guarding the
+// unsigned subtractions against underflow when the floor and current counters
+// drift past the frozen highestBlockSeen. total grows to at least processed so a
+// backfill continuing below the floor estimate keeps advancing while the display
+// stays within 100%.
 func clampProgress(highestBlockSeen, floor, current uint64) (processed, total uint64) {
+	current = min(current, highestBlockSeen)
 	floor = min(floor, highestBlockSeen)
-	current = min(max(current, floor), highestBlockSeen)
-	return highestBlockSeen - current, highestBlockSeen - floor
+	processed = highestBlockSeen - current
+	total = max(highestBlockSeen-floor, processed)
+	return
 }
 
 // historyDownloadProgress derives EL history-download progress and ETA for
