@@ -81,36 +81,38 @@ When skipping TDD for one of these reasons, say so explicitly in the PR descript
 
 ## Test skips
 
-These rules apply project-wide — to every contributor and to every automated agent (LLM coding assistants, CI bots, etc.) working in this repository.
+These rules apply project-wide — to every contributor and every automated agent (LLM coding assistants, CI bots, etc.).
 
 ### Why skips are dangerous
 
-A failing test is a real failure that must be diagnosed and fixed. Skipping it hides the failure and pushes the cost onto whoever later removes the skip — at which point the underlying bug is still there and now also surprises them. Skipping converts a loud "this is broken" signal into silence, then back into surprise. Concrete case: `#21153` removed a `t.Skip` for `TestGeneratedTraceApiCollision` that had documented a known parallel-exec SD/CREATE2-reincarnation bug; the underlying bug was never actually fixed (the comment said "fixed on `exec3/remove-rwtx-threading` branch" — that branch's fix never merged), so removing the skip suddenly red'd CI across downstream PRs (notably #21017).
+A failing test is a real failure to be diagnosed and fixed. Skipping it converts a loud "this is broken" signal into silence, then into a later surprise for whoever removes the skip and finds the bug still there. Concrete case: `#21153` removed a `t.Skip` for `TestGeneratedTraceApiCollision` documenting a known parallel-exec CREATE2-reincarnation bug that was never actually fixed (the inline comment claimed a fix on a branch that never merged), so removing it broke CI across downstream PRs.
 
-### Two valid reasons a skip may exist
+### Valid reasons a skip may exist
 
-Both apply to human contributors. Both require an explicit, linked tracking issue. Neither permits an automated agent to add the skip on its own.
+The first two reasons require an explicit, linked tracking issue and apply to human contributors; an automated agent may not invoke them on its own initiative (only when a user explicitly directs it — see below). The third is test-suite partitioning and applies to every contributor, including automated agents.
 
-1. **External test suites we import where we can't pass all the tests** — typically because we haven't done the corresponding development yet (e.g., an upstream Ethereum spec test for a feature we haven't implemented). The skip documents the gap rather than hiding a regression.
+1. **External test suites we import where we can't pass all the tests** — usually a feature we haven't implemented yet (e.g. an upstream Ethereum spec test). The skip documents the gap rather than hiding a regression.
 
-2. **Flaky tests** — partially valid, with very low (not zero) tolerance. The general rule for flakes is **reproduce locally and fix**. Only after a serious attempt at local repro and root-cause analysis (not "I ran it three times and it passed") should a skip be considered. The tracking issue must include the local-repro investigation attached, and the test owner accepts responsibility for un-skipping once the flake is fixed.
+2. **Flaky tests** — partially valid, with very low (not zero) tolerance. The rule is **reproduce locally and fix**; a skip is a last resort only after serious root-cause analysis (not "I ran it three times and it passed"), with that investigation attached to the tracking issue. The test owner is responsible for un-skipping once the flake is fixed.
 
-In both cases the skip carries an inline comment with the linked tracking issue, and the issue gets closed by removing the skip — not by closing the issue with the skip still in place.
+3. **Long-running tests excluded from short mode** — a test too slow or resource-heavy for the quick `-short` suite may use the canonical guard `if testing.Short() { t.Skip("...") }` (message such as `"long-running test"`). It must still run in the full (non-`-short`) suite, the guard must depend only on `testing.Short()`, and no tracking issue is needed because this partitions the suite rather than hiding a defect. Never add the guard in response to a failure, hang, or flake.
+
+For the first two reasons, the skip carries an inline comment linking the tracking issue, which is closed by removing the skip — not by closing it with the skip still in place.
 
 ### Rule for automated agents (LLM assistants etc.)
 
-**Automated agents must never add a skip. Period.** Not even with a "the user can review it" framing. Not as an option in `AskUserQuestion` menus. Not as a "tactical unblock" suggestion in text answers. Not behind any conditional or env-var gate.
+**Automated agents must never, on their own initiative, add a skip to hide unsupported behavior, a failure, or a flake** — not with a "the user can review it" framing, not as an `AskUserQuestion` option, not as a "tactical unblock" in a text answer, not behind a conditional or env-var gate. The sole standing exception is the canonical `testing.Short()` guard described above, for genuinely long-running tests.
 
 When an agent encounters a failing test:
-- Investigate the failure: read logs, reproduce locally, narrow to a minimal repro
+- Investigate: read logs, reproduce locally, narrow to a minimal repro
 - Fix the underlying bug
-- If the agent genuinely can't fix it in-session, the correct outcomes are: (a) escalate to the user with the investigation findings, or (b) report it as a tracked blocker — never (c) skip it
+- If genuinely unfixable in-session: (a) escalate with the findings, or (b) report a tracked blocker — never (c) skip it
 
-If a flaky test is blocking the agent's own CI iteration, the agent reproduces locally and either fixes the flake or hands off to the user with the repro recipe. Adding a skip "just to get CI green" is exactly the pattern that produced #21153's surprise.
+If a flaky test blocks the agent's own CI iteration, the agent reproduces locally and either fixes it or hands off with the repro recipe. Adding a skip "just to get CI green" is exactly the pattern that produced #21153's surprise.
 
-Applies to all forms of test muting: `t.Skip`, `t.SkipNow`, `t.Skipf`, `SkipLoad`, `bt.SkipLoad`, build-tag exclusions, conditional bypasses behind `dbg.*` env flags, removing tests from a runner matrix without a tracking issue. **All off-limits for automated agents.**
+Except for that `testing.Short()` convention, this applies to all forms of test muting: `t.Skip`, `t.SkipNow`, `t.Skipf`, `SkipLoad`, `bt.SkipLoad`, build-tag exclusions, conditional bypasses behind `dbg.*` env flags, and removing tests from a runner matrix without a tracking issue. **All are off-limits for automated agents.**
 
-If a user explicitly directs an agent to add a skip in the current turn (overriding this rule for a specific case), the agent should still flag the trade-off and ensure a tracking issue exists.
+If a user explicitly directs an agent to add any other skip in the current turn (overriding this rule for a specific case), the agent should still flag the trade-off and ensure a tracking issue exists.
 
 ## Conventions
 
