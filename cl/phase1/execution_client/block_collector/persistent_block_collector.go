@@ -127,7 +127,7 @@ func (p *PersistentBlockCollector) AddBlock(block *cltypes.BeaconBlock) error {
 	}
 
 	// Store in database (skip if already exists)
-	return p.db.Update(context.Background(), func(tx kv.RwTx) error {
+	return p.db.UpdateNosync(context.Background(), func(tx kv.RwTx) error {
 		return tx.Put(kv.Headers, key, encodedBlock)
 	})
 }
@@ -154,7 +154,7 @@ func (p *PersistentBlockCollector) AddGloasBlock(block *cltypes.BeaconBlock, env
 		return fmt.Errorf("failed to create payload key: %w", err)
 	}
 
-	return p.db.Update(context.Background(), func(tx kv.RwTx) error {
+	return p.db.UpdateNosync(context.Background(), func(tx kv.RwTx) error {
 		return tx.Put(kv.Headers, key, encodedBlock)
 	})
 }
