@@ -82,10 +82,18 @@ func (d *DataColumnSidecar) tryInit() {
 func (d *DataColumnSidecar) tryInitWithVersion(version clparams.StateVersion) {
 	cfg := clparams.GetBeaconConfig()
 	if d.Column == nil {
-		d.Column = solid.NewStaticListSSZ[*Cell](int(cfg.MaxBlobCommittmentsPerBlock), BytesPerCell)
+		if version >= clparams.GloasVersion {
+			d.Column = solid.NewStaticProgressiveListSSZ[*Cell](BytesPerCell)
+		} else {
+			d.Column = solid.NewStaticListSSZ[*Cell](int(cfg.MaxBlobCommittmentsPerBlock), BytesPerCell)
+		}
 	}
 	if d.KzgProofs == nil {
-		d.KzgProofs = solid.NewStaticListSSZ[*KZGProof](int(cfg.MaxBlobCommittmentsPerBlock), 48)
+		if version >= clparams.GloasVersion {
+			d.KzgProofs = solid.NewStaticProgressiveListSSZ[*KZGProof](48)
+		} else {
+			d.KzgProofs = solid.NewStaticListSSZ[*KZGProof](int(cfg.MaxBlobCommittmentsPerBlock), 48)
+		}
 	}
 	// Pre-Gloas fields (Fulu and earlier)
 	if version < clparams.GloasVersion {
@@ -104,6 +112,8 @@ func (d *DataColumnSidecar) tryInitWithVersion(version clparams.StateVersion) {
 
 func (d *DataColumnSidecar) DecodeSSZ(buf []byte, version int) error {
 	d.version = clparams.StateVersion(version)
+	d.Column = nil
+	d.KzgProofs = nil
 	d.tryInitWithVersion(d.version)
 	return ssz2.UnmarshalSSZ(buf, version, d.getSchemaForVersion(d.version)...)
 }
