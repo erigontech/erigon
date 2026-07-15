@@ -43,7 +43,7 @@ func WithOption[T any](applicator func(t *T) bool) Option {
 
 func ApplyOptions[T any](t *T, options []Option) (remaining []Option) {
 	for _, opt := range options {
-		if opt.Target() == reflect.TypeOf(t).Elem() {
+		if opt.Target() == reflect.TypeFor[T]() {
 			if opt.Apply(t) {
 				continue
 			}
