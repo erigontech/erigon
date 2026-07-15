@@ -186,6 +186,48 @@ func TestCanonicalRootsStartFresh(t *testing.T) {
 	require.Zero(c.roots[3].cache.Len())
 }
 
+func TestRetainedRootsShareCacheBudgets(t *testing.T) {
+	require := require.New(t)
+	cfg := DefaultCoherentConfig
+	cfg.CacheSize = 21
+	cfg.CodeCacheSize = 21
+	cfg.NewBlockWait = 0
+	c := New(cfg)
+
+	addVersion := func(version uint64, addr [20]byte) {
+		c.OnNewBlock(&remoteproto.StateChangeBatch{
+			StateVersionId: version,
+			ChangeBatch: []*remoteproto.StateChange{{
+				Direction: remoteproto.Direction_FORWARD,
+				Changes: []*remoteproto.AccountChange{{
+					Action:  remoteproto.Action_UPSERT_CODE,
+					Address: gointerfaces.ConvertAddressToH160(addr),
+					Data:    []byte{byte(version)},
+					Code:    []byte{byte(version)},
+				}},
+			}},
+		})
+	}
+
+	addVersion(1, [20]byte{1})
+	addVersion(2, [20]byte{2})
+	require.Len(c.roots, 2)
+
+	var stateSize, codeSize int
+	for _, root := range c.roots {
+		root.cache.Scan(func(element *Element) bool {
+			stateSize += element.Size()
+			return true
+		})
+		root.codeCache.Scan(func(element *Element) bool {
+			codeSize += element.Size()
+			return true
+		})
+	}
+	require.LessOrEqual(stateSize, int(cfg.CacheSize.Bytes()))
+	require.LessOrEqual(codeSize, int(cfg.CodeCacheSize.Bytes()))
+}
+
 // Batch-fed storage entries must be stored under the key shape readers use:
 // address+location (see state.CachedReader3.ReadAccountStorage).
 func TestOnNewBlockStorageKeysMatchReaders(t *testing.T) {

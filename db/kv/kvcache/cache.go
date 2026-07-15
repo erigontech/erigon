@@ -234,6 +234,10 @@ func (c *Coherent) advanceRoot(stateVersionID uint64) (r *CoherentRoot) {
 	// unwind — https://github.com/erigontech/erigon/issues/22276), so
 	// inherited entries could stay stale forever. Fresh roots bound any
 	// producer gap to one version.
+	for _, root := range c.roots {
+		root.cache.Clear()
+		root.codeCache.Clear()
+	}
 	c.stateEvict.Init()
 	c.codeEvict.Init()
 	c.evictRoots()
