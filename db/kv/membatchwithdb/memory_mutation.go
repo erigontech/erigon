@@ -44,7 +44,7 @@ type MemoryMutation struct {
 	// Read views created via NewReadView share this pointer so they synchronize
 	// with the parent's writers.
 	mu               *sync.RWMutex
-	memTx            kv.RwTx
+	memTx            *memStore // concrete type is load-bearing — see newReadViewMut
 	memDb            kv.RwDB
 	deletedEntries   map[string]map[string]struct{}
 	deletedDups      map[string]map[string]map[string]struct{}
@@ -545,7 +545,7 @@ func (m *MemoryMutation) Commit() error {
 }
 
 // Safe to close while read views are still iterating: the memStore backing
-// makes Rollback a no-op on the data (asserted in newReadViewMut).
+// makes Rollback a no-op on the data (see newReadViewMut).
 func (m *MemoryMutation) Rollback() {
 	m.memTx.Rollback()
 	m.memDb.Close()
@@ -1020,14 +1020,12 @@ func (m *MemoryMutation) NewReadView(tx kv.Tx) kv.TemporalTx {
 
 // newReadViewMut is the internal constructor that returns the full
 // *MemoryMutation. Used by NewTemporalReadView which needs to embed it.
+//
+// Read views stay safe under a concurrent parent Close only because the
+// pure-Go memStore's Rollback/Close are no-ops on its data — memTx's type
+// enforces that backing. A real-DB-backed memTx would invalidate cursors
+// mid-iteration and need refcount/drain logic at the parent's Close.
 func (m *MemoryMutation) newReadViewMut(tx kv.Tx) *MemoryMutation {
-	// Read views stay safe under a concurrent parent Close only because the
-	// pure-Go memStore's Rollback/Close are no-ops on its data; a real-DB-backed
-	// memTx would invalidate cursors mid-iteration. Relaxing this assertion
-	// requires refcount/drain logic at the parent's Close.
-	if _, ok := m.memTx.(*memStore); !ok {
-		panic(fmt.Sprintf("MemoryMutation.newReadViewMut: shared-tx read views require pure-Go memStore backing; got %T (use NewMemoryBatch)", m.memTx))
-	}
 	var dbTx kv.TemporalTx
 	if t, ok := tx.(kv.TemporalTx); ok {
 		dbTx = t
