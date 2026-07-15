@@ -882,11 +882,11 @@ func (sd *TemporalMemBatch) flushWriters(ctx context.Context, tx kv.RwTx) error 
 		aggTx.d[di].closeValsCursor() //TODO: why?
 		w.Close()
 	}
-	for _, v := range slices.Backward(sd.pastIIWriters) {
-		if err := v.Flush(ctx, tx); err != nil {
+	for _, writer := range slices.Backward(sd.pastIIWriters) {
+		if err := writer.Flush(ctx, tx); err != nil {
 			return err
 		}
-		v.close()
+		writer.close()
 	}
 	for _, w := range sd.iiWriters {
 		if w == nil {

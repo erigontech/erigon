@@ -223,9 +223,9 @@ func (u *BitList) Bits() int {
 	// The most significant bit is present in the last byte in the array.
 	var last byte
 	var byteLen int
-	for i, v := range slices.Backward(u.u) {
-		if v != 0 {
-			last = v
+	for i, b := range slices.Backward(u.u) {
+		if b != 0 {
+			last = b
 			byteLen = i + 1
 			break
 		}

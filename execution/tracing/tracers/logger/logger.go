@@ -347,8 +347,8 @@ func WriteTrace(writer io.Writer, logs []StructLog) {
 
 		if len(log.Stack) > 0 {
 			fmt.Fprintln(writer, "Stack:")
-			for i, v := range slices.Backward(log.Stack) {
-				fmt.Fprintf(writer, "%08d  %x\n", len(log.Stack)-i-1, math.PaddedBigBytes(v, 32))
+			for i, val := range slices.Backward(log.Stack) {
+				fmt.Fprintf(writer, "%08d  %x\n", len(log.Stack)-i-1, math.PaddedBigBytes(val, 32))
 			}
 		}
 		if len(log.Memory) > 0 {

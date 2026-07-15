@@ -227,8 +227,8 @@ func (e *ExecModule) GetBodiesByRange(ctx context.Context, start, count uint64) 
 	}
 	// Remove trailing nil values as per spec
 	// See point 4 in https://github.com/ethereum/execution-apis/blob/main/src/engine/shanghai.md#specification-4
-	for i, bodie := range slices.Backward(bodies) {
-		if bodie == nil {
+	for i, body := range slices.Backward(bodies) {
+		if body == nil {
 			bodies = bodies[:i]
 		} else {
 			break
@@ -337,8 +337,8 @@ func (e *ExecModule) GetPayloadBodiesByRange(ctx context.Context, start, count u
 		})
 	}
 	// Remove trailing nil values
-	for i, bodie := range slices.Backward(bodies) {
-		if bodie == nil {
+	for i, body := range slices.Backward(bodies) {
+		if body == nil {
 			bodies = bodies[:i]
 		} else {
 			break

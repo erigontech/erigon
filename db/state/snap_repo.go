@@ -222,9 +222,10 @@ func (f *SnapshotRepo) CloseFilesAfterRootNum(after RootNum) {
 }
 
 func (f *SnapshotRepo) CloseVisibleFilesAfterRootNum(after RootNum) {
-	var i int
-	for _, v := range slices.Backward(f.current) {
-		if v.endTxNum <= uint64(after) {
+	i := -1
+	for idx, item := range slices.Backward(f.current) {
+		if item.endTxNum <= uint64(after) {
+			i = idx
 			break
 		}
 	}
@@ -480,9 +481,9 @@ func getFreezingRange(rootFrom, rootTo RootNum, cfg *SnapshotConfig) (freezeFrom
 	if from%mergeLimit == 0 {
 		maxJump = mergeLimit
 	} else {
-		for _, v := range slices.Backward(cfg.MergeStages) {
-			if from%v == 0 {
-				maxJump = v
+		for _, stage := range slices.Backward(cfg.MergeStages) {
+			if from%stage == 0 {
+				maxJump = stage
 				break
 			}
 		}
@@ -499,9 +500,9 @@ func getFreezingRange(rootFrom, rootTo RootNum, cfg *SnapshotConfig) (freezeFrom
 	case jump >= cfg.MergeStages[0]:
 		// else find if a merge step can be used
 		// assuming merge step multiple of each other
-		for _, v := range slices.Backward(cfg.MergeStages) {
-			if jump >= v {
-				_freezeTo = _freezeFrom + v
+		for _, stage := range slices.Backward(cfg.MergeStages) {
+			if jump >= stage {
+				_freezeTo = _freezeFrom + stage
 				break
 			}
 		}

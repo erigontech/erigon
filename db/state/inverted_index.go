@@ -671,18 +671,18 @@ func (iit *InvertedIndexRoTx) iterateRangeOnFiles(key []byte, startTxNum, endTxN
 		ii:          iit,
 	}
 	if asc {
-		for _, v := range slices.Backward(iit.files) {
+		for _, f := range slices.Backward(iit.files) {
 			// [from,to) && from < to
-			if endTxNum >= 0 && int(v.startTxNum) >= endTxNum {
+			if endTxNum >= 0 && int(f.startTxNum) >= endTxNum {
 				continue
 			}
-			if startTxNum >= 0 && v.endTxNum <= uint64(startTxNum) {
+			if startTxNum >= 0 && f.endTxNum <= uint64(startTxNum) {
 				break
 			}
-			if v.src.index.KeyCount() == 0 {
+			if f.src.index.KeyCount() == 0 {
 				continue
 			}
-			it.stack = append(it.stack, v)
+			it.stack = append(it.stack, f)
 			it.stack[len(it.stack)-1].getter = it.stack[len(it.stack)-1].src.decompressor.MakeGetter()
 			it.stack[len(it.stack)-1].reader = it.stack[len(it.stack)-1].src.index.Reader()
 			it.hasNext = true

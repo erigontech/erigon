@@ -180,8 +180,8 @@ type cleanupHandle struct {
 func (h *cleanupHandle) close() error {
 	h.once.Do(func() {
 		var errs []error
-		for _, v := range slices.Backward(h.cleanups) {
-			err := v()
+		for _, cleanup := range slices.Backward(h.cleanups) {
+			err := cleanup()
 			if err != nil {
 				errs = append(errs, err)
 			}

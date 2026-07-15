@@ -270,9 +270,9 @@ func (s *Multi) correctSet(blockHash common.Hash) (ValidatorSet, bool) {
 func (s *Multi) correctSetByNumber(parentNumber uint64) (uint64, ValidatorSet) {
 	// get correct set by block number, along with block number at which
 	// this set was activated.
-	for _, v := range slices.Backward(s.sorted) {
-		if v.num <= parentNumber+1 {
-			return v.num, v.set
+	for _, entry := range slices.Backward(s.sorted) {
+		if entry.num <= parentNumber+1 {
+			return entry.num, entry.set
 		}
 	}
 	panic("constructor validation ensures that there is at least one validator set for block 0; block 0 is less than any uint; qed")

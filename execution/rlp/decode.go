@@ -135,8 +135,8 @@ func (e *decodeError) Error() string {
 	ctx := ""
 	if len(e.ctx) > 0 {
 		ctx = ", decoding into "
-		for _, v := range slices.Backward(e.ctx) {
-			ctx += v
+		for _, c := range slices.Backward(e.ctx) {
+			ctx += c
 		}
 	}
 	return fmt.Sprintf("rlp: %s for %v%s", e.msg, e.typ, ctx)

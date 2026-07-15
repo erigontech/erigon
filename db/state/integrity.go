@@ -80,13 +80,13 @@ func (at *AggregatorRoTx) IntegrityInvertedIndexAllValuesAreInRange(ctx context.
 
 func (dt *DomainRoTx) IntegrityDomainFilesWithKey(k []byte) (res []string, err error) {
 	hi, lo := dt.ht.iit.hashKey(k)
-	for i, v := range slices.Backward(dt.files) {
+	for i, f := range slices.Backward(dt.files) {
 		_, ok, _, err := dt.getLatestFromFile(i, k, hi, lo)
 		if err != nil {
 			return res, err
 		}
 		if ok {
-			res = append(res, v.src.decompressor.FileName())
+			res = append(res, f.src.decompressor.FileName())
 		}
 	}
 	return res, nil
