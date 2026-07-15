@@ -277,10 +277,11 @@ func addSszTests() {
 		With("SignedProposerPreferences", sszStaticTestByEmptyObject(&cltypes.SignedProposerPreferences{
 			Message: &cltypes.ProposerPreferences{},
 		}, runAfterVersion(clparams.GloasVersion))).
-		// Types with fixtures but no Go SSZ implementation
-		With("DepositMessage", spectest.UnimplementedHandler).
-		With("ForkData", spectest.UnimplementedHandler).
+		With("DepositMessage", sszStaticTestByEmptyObject(&depositMessage{})).
+		With("Eth1Block", sszStaticTestByEmptyObject(&validatorEth1Block{})).
+		With("ForkData", sszStaticTestByEmptyObject(&forkData{})).
 		With("HistoricalBatch", spectest.UnimplementedHandler).
-		With("PowBlock", spectest.UnimplementedHandler).
-		With("SigningData", spectest.UnimplementedHandler)
+		With("PartialDataColumnGroupID", sszStaticTestByEmptyObject(&partialDataColumnGroupID{})).
+		With("PowBlock", sszStaticTestByEmptyObject(&powBlock{})).
+		With("SigningData", sszStaticTestByEmptyObject(&signingData{}))
 }
