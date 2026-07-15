@@ -31,9 +31,10 @@ import (
 	"github.com/erigontech/erigon/common/ssz"
 )
 
-// maxStackLeaves
-// distributions from mainnet: calls=100000 maxStackLeaves=16 stackHit=96063 heapMiss=3937 leaves="2:12753(12.75%) 3:8044(8.04%) 4:16466(16.47%) 5:54864(54.86%) 13:3936(3.94%) 17:3937(3.94%)" coverageIfStack="4(128B):37.263% 8(256B):92.127% 16(512B):96.063% 32(1024B):100.000%"
-const maxStackLeaves = 16
+// maxStackLeaves sizes an on-stack leaf buffer that covers the common SSZ schemas.
+// Bigger schemas fall back to the heap on purpose: the array is zeroed on every
+// call, so widening it to fit the rare ones taxes all the others.
+const maxStackLeaves = 8
 
 // HashTreeRoot returns the hash for a given schema of objects.
 // IMPORTANT: DATA TYPE MUST IMPLEMENT HASHABLE
@@ -42,13 +43,11 @@ func HashTreeRoot(schema ...any) ([32]byte, error) {
 	var stack [maxStackLeaves * length.Hash]byte // stack-allocation for most of cases
 	size := NextPowerOfTwo(uint64(len(schema) * length.Hash))
 	var leaves []byte
-	stackHit := size <= uint64(len(stack))
-	if stackHit {
+	if size <= uint64(len(stack)) {
 		leaves = stack[:size]
 	} else {
 		leaves = make([]byte, size)
 	}
-	htrObserve(len(schema), stackHit)
 	pos := 0
 
 	// Iterate over each element in the schema
