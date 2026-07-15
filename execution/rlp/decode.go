@@ -708,11 +708,9 @@ func (s *Stream) Bytes() ([]byte, error) {
 	}
 }
 
-// BytesView reads an RLP string like Bytes, but when the stream reads from an
-// in-memory byte slice it returns a view aliasing the input instead of a copy.
-// The result is only valid while the input stays unmodified, so callers must not
-// retain it or hand it to a decoder that keeps sub-slices of its input.
-func (s *Stream) BytesView() ([]byte, error) {
+// ViewBytes is Bytes, zero-copy when the stream reads from a byte slice.
+// The result aliases the input, so callers must not retain it.
+func (s *Stream) ViewBytes() ([]byte, error) {
 	sr, bytesBacked := s.r.(*sliceReader)
 	if !bytesBacked {
 		return s.Bytes()
