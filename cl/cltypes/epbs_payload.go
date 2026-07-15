@@ -242,7 +242,7 @@ func (i *IndexedPayloadAttestation) EncodingSizeSSZ() int {
 }
 
 func (i *IndexedPayloadAttestation) HashSSZ() ([32]byte, error) {
-	return merkle_tree.HashTreeRoot(i.AttestingIndices, i.Data, i.Signature[:])
+	return merkle_tree.ProgressiveContainerRootAll(i.AttestingIndices, i.Data, i.Signature[:])
 }
 
 func (i *IndexedPayloadAttestation) Clone() clonable.Clonable {
@@ -427,7 +427,7 @@ func NewExecutionPayloadEnvelope(cfg *clparams.BeaconChainConfig) *ExecutionPayl
 }
 
 func (e *ExecutionPayloadEnvelope) HashSSZ() ([32]byte, error) {
-	return merkle_tree.HashTreeRoot(
+	return merkle_tree.ProgressiveContainerRootAll(
 		e.Payload,
 		e.ExecutionRequests,
 		e.BuilderIndex,
