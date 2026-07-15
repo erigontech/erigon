@@ -242,12 +242,12 @@ Added `caplin` to the matrix in `.github/workflows/test-kurtosis-assertoor.yml`:
 ```yaml
 matrix:
   include:
-    - suite: regular
-      package_args: .github/workflows/kurtosis/regular-assertoor.io
+    - suite: regular-erigon-mixed-el
+      package_args: .github/workflows/kurtosis/regular-erigon-mixed-el.io
       docker_binaries: "erigon"
       ethereum_package_branch: "5.0.1"
-    - suite: pectra
-      package_args: .github/workflows/kurtosis/pectra.io
+    - suite: pectra-erigon-mixed-el
+      package_args: .github/workflows/kurtosis/pectra-erigon-mixed-el.io
       docker_binaries: "erigon"
       ethereum_package_branch: "5.0.1"
     - suite: caplin

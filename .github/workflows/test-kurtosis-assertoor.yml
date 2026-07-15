@@ -6,7 +6,7 @@ env:
   # Pinned versions of third-party containers — bump here when upgrading.
   # These are cached via actions/cache (docker save/load) to avoid re-pulling
   # on every run and to eliminate Docker Hub rate-limit exposure.
-  # LIGHTHOUSE_IMAGE, TEKU_IMAGE, LIGHTHOUSE_VC_IMAGE and the ASSERTOOR_* tags are
+  # LIGHTHOUSE_IMAGE, TEKU_IMAGE, and the ASSERTOOR_* tags are
   # loaded at job start from the suite .io files (single source of truth) by the
   # "Load image versions" step, so they can't drift from what kurtosis runs. The
   # remaining third-party tags below aren't pinned in any .io, so they stay here.
@@ -204,20 +204,18 @@ jobs:
 
       - name: Load image versions from the .io files (single source of truth)
         run: |
-          reg=.github/workflows/kurtosis/regular-assertoor.io
+          reg=.github/workflows/kurtosis/regular-erigon-mixed-el.io
           assertoor=$(yq -e '.assertoor_params.image' "$reg")
-          pectra=$(yq -e '.assertoor_params.image' .github/workflows/kurtosis/pectra.io)
-          glamsterdam=$(yq -e '.assertoor_params.image' .github/workflows/kurtosis/glamsterdam-erigon-el.io)
+          pectra=$(yq -e '.assertoor_params.image' .github/workflows/kurtosis/pectra-erigon-mixed-el.io)
+          glamsterdam=$(yq -e '.assertoor_params.image' .github/workflows/kurtosis/glamsterdam-erigon-mixed-el.io)
           lighthouse=$(yq -e '.participants_matrix.cl[] | select(.cl_type == "lighthouse") | .cl_image' "$reg")
           teku=$(yq -e '.participants_matrix.cl[] | select(.cl_type == "teku") | .cl_image' "$reg")
-          lighthouse_vc=$(yq -e '.participants[] | select(.vc_type == "lighthouse") | .vc_image' .github/workflows/kurtosis/caplin-minimal-assertoor.io)
           {
             echo "ASSERTOOR_IMAGE=$assertoor"
             echo "ASSERTOOR_PECTRA_IMAGE=$pectra"
             echo "ASSERTOOR_GLAMSTERDAM_IMAGE=$glamsterdam"
             echo "LIGHTHOUSE_IMAGE=$lighthouse"
             echo "TEKU_IMAGE=$teku"
-            echo "LIGHTHOUSE_VC_IMAGE=$lighthouse_vc"
           } >> "$GITHUB_ENV"
 
       - name: Check whether third-party containers are already cached
@@ -225,7 +223,7 @@ jobs:
         uses: actions/cache/restore@v6
         with:
           path: /tmp/docker-cache
-          key: docker-cl-${{ env.LIGHTHOUSE_IMAGE }}-${{ env.LIGHTHOUSE_VC_IMAGE }}-${{ env.TEKU_IMAGE }}-${{ env.ASSERTOOR_IMAGE }}-kurtosis-${{ env.KURTOSIS_VERSION }}-${{ env.KURTOSIS_VECTOR_IMAGE }}-${{ env.KURTOSIS_FLUENTBIT_IMAGE }}-${{ env.KURTOSIS_CURL_JQ_IMAGE }}-${{ env.KURTOSIS_TRAEFIK_IMAGE }}-${{ env.KURTOSIS_ALPINE_IMAGE }}-${{ env.ETH2_VAL_TOOLS_IMAGE }}-${{ env.ASSERTOOR_PECTRA_IMAGE }}-${{ env.ASSERTOOR_GLAMSTERDAM_IMAGE }}
+          key: docker-cl-${{ env.LIGHTHOUSE_IMAGE }}-${{ env.TEKU_IMAGE }}-${{ env.ASSERTOOR_IMAGE }}-kurtosis-${{ env.KURTOSIS_VERSION }}-${{ env.KURTOSIS_VECTOR_IMAGE }}-${{ env.KURTOSIS_FLUENTBIT_IMAGE }}-${{ env.KURTOSIS_CURL_JQ_IMAGE }}-${{ env.KURTOSIS_TRAEFIK_IMAGE }}-${{ env.KURTOSIS_ALPINE_IMAGE }}-${{ env.ETH2_VAL_TOOLS_IMAGE }}-${{ env.ASSERTOOR_PECTRA_IMAGE }}-${{ env.ASSERTOOR_GLAMSTERDAM_IMAGE }}
           lookup-only: true
 
       - name: Pull third-party containers
@@ -241,7 +239,6 @@ jobs:
             return 1
           }
           pull "${LIGHTHOUSE_IMAGE}"
-          pull "${LIGHTHOUSE_VC_IMAGE}"
           pull "${TEKU_IMAGE}"
           pull "${ASSERTOOR_IMAGE}"
           pull "${ASSERTOOR_PECTRA_IMAGE}"
@@ -256,7 +253,6 @@ jobs:
           pull "${KURTOSIS_ALPINE_IMAGE}"
           pull "${ETH2_VAL_TOOLS_IMAGE}"
           docker save "${LIGHTHOUSE_IMAGE}" -o /tmp/docker-cache/lighthouse.tar
-          docker save "${LIGHTHOUSE_VC_IMAGE}" -o /tmp/docker-cache/lighthouse-vc.tar
           docker save "${TEKU_IMAGE}" -o /tmp/docker-cache/teku.tar
           docker save "${ASSERTOOR_IMAGE}" -o /tmp/docker-cache/assertoor.tar
           docker save "${ASSERTOOR_PECTRA_IMAGE}" -o /tmp/docker-cache/assertoor-pectra.tar
@@ -276,7 +272,7 @@ jobs:
         uses: actions/cache/save@v6
         with:
           path: /tmp/docker-cache
-          key: docker-cl-${{ env.LIGHTHOUSE_IMAGE }}-${{ env.LIGHTHOUSE_VC_IMAGE }}-${{ env.TEKU_IMAGE }}-${{ env.ASSERTOOR_IMAGE }}-kurtosis-${{ env.KURTOSIS_VERSION }}-${{ env.KURTOSIS_VECTOR_IMAGE }}-${{ env.KURTOSIS_FLUENTBIT_IMAGE }}-${{ env.KURTOSIS_CURL_JQ_IMAGE }}-${{ env.KURTOSIS_TRAEFIK_IMAGE }}-${{ env.KURTOSIS_ALPINE_IMAGE }}-${{ env.ETH2_VAL_TOOLS_IMAGE }}-${{ env.ASSERTOOR_PECTRA_IMAGE }}-${{ env.ASSERTOOR_GLAMSTERDAM_IMAGE }}
+          key: docker-cl-${{ env.LIGHTHOUSE_IMAGE }}-${{ env.TEKU_IMAGE }}-${{ env.ASSERTOOR_IMAGE }}-kurtosis-${{ env.KURTOSIS_VERSION }}-${{ env.KURTOSIS_VECTOR_IMAGE }}-${{ env.KURTOSIS_FLUENTBIT_IMAGE }}-${{ env.KURTOSIS_CURL_JQ_IMAGE }}-${{ env.KURTOSIS_TRAEFIK_IMAGE }}-${{ env.KURTOSIS_ALPINE_IMAGE }}-${{ env.ETH2_VAL_TOOLS_IMAGE }}-${{ env.ASSERTOOR_PECTRA_IMAGE }}-${{ env.ASSERTOOR_GLAMSTERDAM_IMAGE }}
 
       - name: Check whether buildkit image is already cached
         id: cache-buildkit-image
@@ -325,7 +321,7 @@ jobs:
       matrix:
         # test_timeout_minutes is a per-suite wall-clock cap for the Kurtosis+assertoor
         # step. Observed happy-path durations are roughly:
-        #   glamsterdam / caplin-minimal ~12 min, pectra ~30 min, regular ~34 min.
+        #   glamsterdam ~12 min, pectra ~30 min, regular ~34 min.
         # The caps below give ~1.5–2x of the happy path so real regressions still
         # pass but pathological hangs (e.g. a node that silently stops proposing)
         # fail in reasonable time instead of burning hours.
@@ -336,54 +332,42 @@ jobs:
         # and run concurrently — wall-clock unchanged, runner-minutes doubled.
         # All entries share the single erigon image built by build-erigon-image.
         include:
-          - suite: regular
-            package_args: .github/workflows/kurtosis/regular-assertoor.io
+          - suite: regular-erigon-mixed-el
+            package_args: .github/workflows/kurtosis/regular-erigon-mixed-el.io
             ethereum_package_branch: "5.0.1"
             test_timeout_minutes: 50
             exec_mode: serial
-          - suite: regular
-            package_args: .github/workflows/kurtosis/regular-assertoor.io
+          - suite: regular-erigon-mixed-el
+            package_args: .github/workflows/kurtosis/regular-erigon-mixed-el.io
             ethereum_package_branch: "5.0.1"
             test_timeout_minutes: 50
             exec_mode: parallel
-          - suite: pectra
-            package_args: .github/workflows/kurtosis/pectra.io
+          - suite: pectra-erigon-mixed-el
+            package_args: .github/workflows/kurtosis/pectra-erigon-mixed-el.io
             ethereum_package_branch: "5.0.1"
             test_timeout_minutes: 45
             exec_mode: serial
-          - suite: pectra
-            package_args: .github/workflows/kurtosis/pectra.io
+          - suite: pectra-erigon-mixed-el
+            package_args: .github/workflows/kurtosis/pectra-erigon-mixed-el.io
             ethereum_package_branch: "5.0.1"
             test_timeout_minutes: 45
             exec_mode: parallel
-          - suite: glamsterdam-erigon-el
-            package_args: .github/workflows/kurtosis/glamsterdam-erigon-el.io
+          - suite: glamsterdam-erigon-mixed-el
+            package_args: .github/workflows/kurtosis/glamsterdam-erigon-mixed-el.io
             # Pinned to 6.1.0 rather than main: commit 835dd9b on main introduced GpuConfig,
             # a Starlark built-in that requires Kurtosis CLI >=1.18.1, breaking Starlark eval.
             # Unpin to main once CI is upgraded to Kurtosis 1.18.1.
             ethereum_package_branch: "6.1.0"
             test_timeout_minutes: 20
             exec_mode: parallel
-          - suite: glamsterdam-erigon-el-cl
-            package_args: .github/workflows/kurtosis/glamsterdam-erigon-el-cl.io
+          - suite: glamsterdam-caplin-mixed-two-cl
+            package_args: .github/workflows/kurtosis/glamsterdam-caplin-mixed-two-cl.io
             ethereum_package_branch: "6.1.0"
             test_timeout_minutes: 20
             exec_mode: parallel
-          - suite: glamsterdam-erigon-el-cl-prysm
-            package_args: .github/workflows/kurtosis/glamsterdam-erigon-el-cl-prysm.io
+          - suite: glamsterdam-caplin-mixed-three-cl
+            package_args: .github/workflows/kurtosis/glamsterdam-caplin-mixed-three-cl.io
             ethereum_package_branch: "6.1.0"
-            test_timeout_minutes: 20
-            exec_mode: parallel
-          - suite: caplin-minimal
-            package_args: .github/workflows/kurtosis/caplin-minimal-assertoor.io
-            ethereum_package_url: "github.com/erigontech/ethereum-package"
-            ethereum_package_branch: "erigontech/fix-caplin-launcher"
-            test_timeout_minutes: 20
-            exec_mode: serial
-          - suite: caplin-minimal
-            package_args: .github/workflows/kurtosis/caplin-minimal-assertoor.io
-            ethereum_package_url: "github.com/erigontech/ethereum-package"
-            ethereum_package_branch: "erigontech/fix-caplin-launcher"
             test_timeout_minutes: 20
             exec_mode: parallel
 
@@ -409,20 +393,18 @@ jobs:
 
       - name: Load image versions from the .io files (single source of truth)
         run: |
-          reg=.github/workflows/kurtosis/regular-assertoor.io
+          reg=.github/workflows/kurtosis/regular-erigon-mixed-el.io
           assertoor=$(yq -e '.assertoor_params.image' "$reg")
-          pectra=$(yq -e '.assertoor_params.image' .github/workflows/kurtosis/pectra.io)
-          glamsterdam=$(yq -e '.assertoor_params.image' .github/workflows/kurtosis/glamsterdam-erigon-el.io)
+          pectra=$(yq -e '.assertoor_params.image' .github/workflows/kurtosis/pectra-erigon-mixed-el.io)
+          glamsterdam=$(yq -e '.assertoor_params.image' .github/workflows/kurtosis/glamsterdam-erigon-mixed-el.io)
           lighthouse=$(yq -e '.participants_matrix.cl[] | select(.cl_type == "lighthouse") | .cl_image' "$reg")
           teku=$(yq -e '.participants_matrix.cl[] | select(.cl_type == "teku") | .cl_image' "$reg")
-          lighthouse_vc=$(yq -e '.participants[] | select(.vc_type == "lighthouse") | .vc_image' .github/workflows/kurtosis/caplin-minimal-assertoor.io)
           {
             echo "ASSERTOOR_IMAGE=$assertoor"
             echo "ASSERTOOR_PECTRA_IMAGE=$pectra"
             echo "ASSERTOOR_GLAMSTERDAM_IMAGE=$glamsterdam"
             echo "LIGHTHOUSE_IMAGE=$lighthouse"
             echo "TEKU_IMAGE=$teku"
-            echo "LIGHTHOUSE_VC_IMAGE=$lighthouse_vc"
           } >> "$GITHUB_ENV"
 
       - name: Restore cached third-party containers
@@ -430,13 +412,12 @@ jobs:
         uses: actions/cache@v6
         with:
           path: /tmp/docker-cache
-          key: docker-cl-${{ env.LIGHTHOUSE_IMAGE }}-${{ env.LIGHTHOUSE_VC_IMAGE }}-${{ env.TEKU_IMAGE }}-${{ env.ASSERTOOR_IMAGE }}-kurtosis-${{ env.KURTOSIS_VERSION }}-${{ env.KURTOSIS_VECTOR_IMAGE }}-${{ env.KURTOSIS_FLUENTBIT_IMAGE }}-${{ env.KURTOSIS_CURL_JQ_IMAGE }}-${{ env.KURTOSIS_TRAEFIK_IMAGE }}-${{ env.KURTOSIS_ALPINE_IMAGE }}-${{ env.ETH2_VAL_TOOLS_IMAGE }}-${{ env.ASSERTOOR_PECTRA_IMAGE }}-${{ env.ASSERTOOR_GLAMSTERDAM_IMAGE }}
+          key: docker-cl-${{ env.LIGHTHOUSE_IMAGE }}-${{ env.TEKU_IMAGE }}-${{ env.ASSERTOOR_IMAGE }}-kurtosis-${{ env.KURTOSIS_VERSION }}-${{ env.KURTOSIS_VECTOR_IMAGE }}-${{ env.KURTOSIS_FLUENTBIT_IMAGE }}-${{ env.KURTOSIS_CURL_JQ_IMAGE }}-${{ env.KURTOSIS_TRAEFIK_IMAGE }}-${{ env.KURTOSIS_ALPINE_IMAGE }}-${{ env.ETH2_VAL_TOOLS_IMAGE }}-${{ env.ASSERTOOR_PECTRA_IMAGE }}-${{ env.ASSERTOOR_GLAMSTERDAM_IMAGE }}
 
       - name: Load cached containers into daemon
         if: steps.cache-cl-images.outputs.cache-hit == 'true'
         run: |
           docker load -i /tmp/docker-cache/lighthouse.tar
-          docker load -i /tmp/docker-cache/lighthouse-vc.tar
           docker load -i /tmp/docker-cache/teku.tar
           docker load -i /tmp/docker-cache/assertoor.tar
           docker load -i /tmp/docker-cache/assertoor-pectra.tar
@@ -464,7 +445,6 @@ jobs:
             return 1
           }
           pull "${LIGHTHOUSE_IMAGE}"
-          pull "${LIGHTHOUSE_VC_IMAGE}"
           pull "${TEKU_IMAGE}"
           pull "${ASSERTOOR_IMAGE}"
           pull "${ASSERTOOR_PECTRA_IMAGE}"
@@ -479,7 +459,6 @@ jobs:
           pull "${KURTOSIS_ALPINE_IMAGE}"
           pull "${ETH2_VAL_TOOLS_IMAGE}"
           docker save "${LIGHTHOUSE_IMAGE}" -o /tmp/docker-cache/lighthouse.tar
-          docker save "${LIGHTHOUSE_VC_IMAGE}" -o /tmp/docker-cache/lighthouse-vc.tar
           docker save "${TEKU_IMAGE}" -o /tmp/docker-cache/teku.tar
           docker save "${ASSERTOOR_IMAGE}" -o /tmp/docker-cache/assertoor.tar
           docker save "${ASSERTOOR_PECTRA_IMAGE}" -o /tmp/docker-cache/assertoor-pectra.tar
