@@ -237,6 +237,20 @@ func (v *ValidatorSet) HashSSZ() ([32]byte, error) {
 	return crypto.Sha256(coreRoot[:], lengthRoot[:]), nil
 }
 
+func (v *ValidatorSet) HashSSZProgressive() ([32]byte, error) {
+	roots := make([][32]byte, v.l)
+	hashBuffer := make([]byte, 8*32)
+	for i := range roots {
+		if err := v.Get(i).CopyHashBufferTo(hashBuffer); err != nil {
+			return [32]byte{}, err
+		}
+		if err := merkle_tree.MerkleRootFromFlatLeaves(hashBuffer, roots[i][:]); err != nil {
+			return [32]byte{}, err
+		}
+	}
+	return merkle_tree.ProgressiveListRoot(roots, uint64(v.l))
+}
+
 func (v *ValidatorSet) Set(idx int, val Validator) {
 	if idx >= v.l {
 		panic("ValidatorSet -- Set: out of bounds")
