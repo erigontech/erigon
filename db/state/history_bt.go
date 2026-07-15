@@ -39,15 +39,35 @@ import (
 // recsplit .vi read works, minus the MPHF.
 //
 // The stored key is txNum||key but physical order is key-major, so the bt is
-// keyed on the re-packed key||txNum form.
+// keyed on an order-preserving encoding of (key, txNum) — see vibtAppendKey.
+
+// vibtAppendKey appends an order-preserving, self-delimiting encoding of key:
+// every 0x00 byte is escaped as {0x00,0xff} and the key is terminated by
+// {0x00,0x00}. This makes byte-comparison of the encoded (key,txNum) match the
+// physical (key,txNum) key-major order of .v even for variable-length keys where
+// one key is a prefix of another (raw concatenation is only order-preserving for
+// equal-length keys — e.g. commitment's variable-length trie-node prefixes break
+// it). The trailing txNum is appended after the terminator so key ordering fully
+// precedes txNum.
+func vibtAppendKey(dst, key []byte) []byte {
+	for _, b := range key {
+		if b == 0 {
+			dst = append(dst, 0x00, 0xff)
+		} else {
+			dst = append(dst, b)
+		}
+	}
+	return append(dst, 0x00, 0x00)
+}
 
 func vibtRepackAnchorKey(storedKey, buf []byte) []byte {
-	buf = append(buf[:0], storedKey[8:]...)
+	// storedKey = 8-byte BE txNum || key
+	buf = vibtAppendKey(buf[:0], storedKey[8:])
 	return append(buf, storedKey[:8]...)
 }
 
 func vibtProbeKey(key []byte, txNum uint64, buf []byte) []byte {
-	buf = append(buf[:0], key...)
+	buf = vibtAppendKey(buf[:0], key)
 	var ts [8]byte
 	binary.BigEndian.PutUint64(ts[:], txNum)
 	return append(buf, ts[:]...)
