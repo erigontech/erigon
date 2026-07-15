@@ -171,9 +171,11 @@ func DecodeRLPTransaction(s *rlp.Stream, blobTxnsAreWrappedWithBlobs bool) (Tran
 		}
 		txn = legacy
 	case rlp.String:
-		// Decode the EIP-2718 typed txn envelope.
+		// Decode the EIP-2718 typed txn envelope. The view is only re-parsed
+		// below and every decoder copies out the fields it keeps, so the
+		// envelope never outlives the caller's buffer.
 		var b []byte
-		if b, err = s.Bytes(); err != nil {
+		if b, err = s.BytesView(); err != nil {
 			return nil, err
 		}
 		if len(b) == 0 {

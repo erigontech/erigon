@@ -469,6 +469,7 @@ func compareTransactions(t *testing.T, a, b Transaction) {
 	check(t, "Tx.GetTo", a.GetTo(), b.GetTo())
 	check(t, "Tx.GetData", a.GetData(), b.GetData())
 	check(t, "Tx.GetAccessList", a.GetAccessList(), b.GetAccessList())
+	check(t, "Tx.GetAuthorizations", a.GetAuthorizations(), b.GetAuthorizations())
 	check(t, "Tx.V", v1, v2)
 	check(t, "Tx.R", r1, r2)
 	check(t, "Tx.S", s1, s2)
@@ -559,6 +560,40 @@ func TestTransactionEncodeDecodeRLP(t *testing.T) {
 			t.Errorf("error: DecodeRLPTransaction: %v", err)
 		}
 		compareTransactions(t, enc, dec)
+	}
+}
+
+// TestDecodeTransactionDoesNotAliasInput pins the invariant that lets
+// DecodeRLPTransaction pass a zero-copy view of the typed-transaction envelope
+// to UnmarshalTransactionFromBinary: a decoder must copy out every field it
+// keeps, never retain a sub-slice of its input. Decoding happens straight from
+// reusable buffers that the caller is free to overwrite afterwards.
+func TestDecodeTransactionDoesNotAliasInput(t *testing.T) {
+	tr := NewTRand()
+	var buf bytes.Buffer
+	for range RUNS {
+		txn := tr.RandTransaction(-1)
+		buf.Reset()
+		if err := txn.EncodeRLP(&buf); err != nil {
+			if txn.Type() >= BlobTxType && errors.Is(err, ErrNilToFieldTx) {
+				continue
+			}
+			t.Fatalf("error: Transaction.EncodeRLP(): %v", err)
+		}
+		scribbled, pristine := bytes.Clone(buf.Bytes()), buf.Bytes()
+
+		fromScribbled, err := DecodeTransaction(scribbled)
+		if err != nil {
+			t.Fatalf("error: DecodeTransaction(): %v", err)
+		}
+		for i := range scribbled {
+			scribbled[i] = 0xFF
+		}
+		fromPristine, err := DecodeTransaction(pristine)
+		if err != nil {
+			t.Fatalf("error: DecodeTransaction(): %v", err)
+		}
+		compareTransactions(t, fromPristine, fromScribbled)
 	}
 }
 
@@ -734,6 +769,109 @@ func BenchmarkSetCodeTxRLP(b *testing.B) {
 		buf.Reset()
 		txn.EncodeRLP(&buf)
 	}
+}
+
+var benchTxTypes = []struct {
+	name   string
+	txType int
+}{
+	{"Legacy", LegacyTxType},
+	{"AccessList", AccessListTxType},
+	{"DynamicFee", DynamicFeeTxType},
+	{"Blob", BlobTxType},
+	{"SetCode", SetCodeTxType},
+}
+
+// randCallTransaction returns a transaction of the given type that has a non-nil
+// To, i.e. a call rather than a contract creation. Blob transactions cannot
+// encode without one. The seed is fixed so that payload sizes stay comparable
+// across runs.
+func randCallTransaction(b *testing.B, txType int) Transaction {
+	b.Helper()
+	tr := &TRand{rnd: rand.New(rand.NewSource(1))}
+	for range 100 {
+		if txn := tr.RandTransaction(txType); txn.GetTo() != nil {
+			return txn
+		}
+	}
+	b.Fatalf("no transaction of type %d with a non-nil To", txType)
+	return nil
+}
+
+func encodeTxRLP(b *testing.B, txn Transaction) []byte {
+	b.Helper()
+	var buf bytes.Buffer
+	if err := txn.EncodeRLP(&buf); err != nil {
+		b.Fatal(err)
+	}
+	return buf.Bytes()
+}
+
+func encodeTxBinary(b *testing.B, txn Transaction) []byte {
+	b.Helper()
+	var buf bytes.Buffer
+	if err := txn.MarshalBinary(&buf); err != nil {
+		b.Fatal(err)
+	}
+	return buf.Bytes()
+}
+
+// BenchmarkDecodeTransactionRLP covers the encoding transactions have inside a
+// block body and in snapshot files: typed transactions are wrapped in an RLP
+// string envelope.
+func BenchmarkDecodeTransactionRLP(b *testing.B) {
+	for _, tt := range benchTxTypes {
+		b.Run(tt.name, func(b *testing.B) {
+			enc := encodeTxRLP(b, randCallTransaction(b, tt.txType))
+			b.ReportAllocs()
+			for b.Loop() {
+				if _, err := DecodeTransaction(enc); err != nil {
+					b.Fatal(err)
+				}
+			}
+		})
+	}
+}
+
+// BenchmarkUnmarshalTransactionFromBinary covers the canonical EIP-2718
+// encoding used on the wire and by the RPC API: no envelope.
+func BenchmarkUnmarshalTransactionFromBinary(b *testing.B) {
+	for _, tt := range benchTxTypes {
+		b.Run(tt.name, func(b *testing.B) {
+			enc := encodeTxBinary(b, randCallTransaction(b, tt.txType))
+			b.ReportAllocs()
+			for b.Loop() {
+				if _, err := UnmarshalTransactionFromBinary(enc, false); err != nil {
+					b.Fatal(err)
+				}
+			}
+		})
+	}
+}
+
+func BenchmarkDecodeOptionalAddress(b *testing.B) {
+	run := func(b *testing.B, addr *common.Address) {
+		b.Helper()
+		var buf bytes.Buffer
+		if err := EncodeOptionalAddress(addr, &buf, make([]byte, 21)); err != nil {
+			b.Fatal(err)
+		}
+		enc := buf.Bytes()
+		b.ReportAllocs()
+		var dst *common.Address
+		for b.Loop() {
+			s := rlp.NewBytesStream(enc)
+			if err := DecodeOptionalAddress(&dst, s); err != nil {
+				b.Fatal(err)
+			}
+			rlp.PutStream(s)
+		}
+	}
+	b.Run("Address", func(b *testing.B) {
+		addr := common.HexToAddress("0x000000000000000000000000000000000000dEaD")
+		run(b, &addr)
+	})
+	b.Run("Nil", func(b *testing.B) { run(b, nil) })
 }
 
 func BenchmarkWithdrawalRLP(b *testing.B) {
