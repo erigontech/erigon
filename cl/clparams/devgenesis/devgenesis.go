@@ -34,7 +34,7 @@ func DeriveKey(seed string, index uint64) (*bls.PrivateKey, error) {
 // DeriveKeys derives N deterministic BLS keypairs from a seed.
 func DeriveKeys(seed string, count int) ([]*bls.PrivateKey, error) {
 	keys := make([]*bls.PrivateKey, count)
-	for i := 0; i < count; i++ {
+	for i := range count {
 		var err error
 		keys[i], err = DeriveKey(seed, uint64(i))
 		if err != nil {
@@ -131,7 +131,7 @@ func BuildGenesisState(
 
 	// Add validators.
 	maxEffectiveBalance := cfg.MaxEffectiveBalance
-	for i := 0; i < validatorCount; i++ {
+	for i := range validatorCount {
 		pubkey := keys[i].PublicKey()
 		pubkeyCompressed := bls.CompressPublicKey(pubkey)
 		var pubkeyBytes [48]byte
@@ -165,7 +165,7 @@ func BuildGenesisState(
 	if version >= clparams.AltairVersion {
 		committeeSize := int(cfg.SyncCommitteeSize)
 		committeePubkeys := make([]common.Bytes48, committeeSize)
-		for i := 0; i < committeeSize; i++ {
+		for i := range committeeSize {
 			committeePubkeys[i] = allPubkeys[i%len(allPubkeys)]
 		}
 		// Compute aggregate pubkey (needed for sync committee verification).

@@ -457,7 +457,7 @@ func TestCanonicalHashCache_MultipleBlocks(t *testing.T) {
 	defer rwTx.Rollback()
 
 	hashes := make([]common.Hash, 5)
-	for i := uint64(0); i < 5; i++ {
+	for i := range uint64(5) {
 		header := &types.Header{Number: *uint256.NewInt(i)}
 		hashes[i] = header.Hash()
 		require.NoError(t, rawdb.WriteCanonicalHash(rwTx, hashes[i], i))
@@ -468,7 +468,7 @@ func TestCanonicalHashCache_MultipleBlocks(t *testing.T) {
 	defer tx.Rollback()
 
 	// Read all blocks — results come from DB, not snapshots, so the cache stays empty.
-	for i := uint64(0); i < 5; i++ {
+	for i := range uint64(5) {
 		hash, ok, err := blockReader.CanonicalHash(context.Background(), tx, i)
 		require.NoError(t, err)
 		assert.True(t, ok)
@@ -476,7 +476,7 @@ func TestCanonicalHashCache_MultipleBlocks(t *testing.T) {
 	}
 
 	// DB results should NOT be cached (only snapshot data is immutable and cacheable)
-	for i := uint64(0); i < 5; i++ {
+	for i := range uint64(5) {
 		_, found := blockReader.canonicalHashCache.Get(i)
 		assert.False(t, found, "block %d should not be cached (DB data)", i)
 	}

@@ -37,12 +37,12 @@ func TestGenericCache_ConcurrentPutAcrossGrow(t *testing.T) {
 	const workers = 8
 	const perWorker = 20_000
 	var wg sync.WaitGroup
-	for w := 0; w < workers; w++ {
+	for w := range workers {
 		wg.Add(1)
 		go func(base int) {
 			defer wg.Done()
 			key := make([]byte, 8)
-			for i := 0; i < perWorker; i++ {
+			for i := range perWorker {
 				binary.BigEndian.PutUint64(key, uint64(base*perWorker+i))
 				c.Put(key, []byte{byte(i)}, uint64(i))
 				c.Get(key)

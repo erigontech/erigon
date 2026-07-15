@@ -167,7 +167,7 @@ func BenchmarkCall(b *testing.B) {
 	tmpdir := b.TempDir()
 
 	for b.Loop() {
-		for j := 0; j < 400; j++ {
+		for range 400 {
 			_, _, _ = Execute(code, cpurchase, cfg, tmpdir)
 			_, _, _ = Execute(code, creceived, cfg, tmpdir)
 			_, _, _ = Execute(code, refund, cfg, tmpdir)
@@ -685,7 +685,7 @@ func BenchmarkEVM_SWAP1(b *testing.B) {
 			byte(vm.PUSH0), // PUSH0
 			byte(vm.PUSH0), // PUSH0
 		}
-		for i := uint64(0); i < n; i++ {
+		for range n {
 			contract = append(contract, byte(vm.SWAP1))
 		}
 		return contract

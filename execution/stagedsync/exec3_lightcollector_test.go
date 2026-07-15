@@ -150,7 +150,7 @@ func TestLightCollectorNoncePreservationCrossBlock(t *testing.T) {
 	require.NoError(t, err)
 
 	// TX 2-5: A receives transfers (balance-only, nonce unchanged from block origin=10)
-	for i := 0; i < 4; i++ {
+	for i := range 4 {
 		lc := state.NewLightCollector()
 		err = lc.UpdateAccountData(addr, blockOrigin,
 			&accounts.Account{Nonce: 10, Balance: *uint256.NewInt(uint64(4800 + (i+1)*100))})

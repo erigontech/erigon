@@ -146,7 +146,7 @@ func u8Slice(in []byte) ([]uint64, bool) {
 		return nil, false
 	}
 	res := make([]uint64, len(in))
-	for i := 0; i < len(res); i++ {
+	for i := range res {
 		res[i] = uint64(in[i] % 32)
 	}
 	return res, true
@@ -157,7 +157,7 @@ func u256Slice(in []byte) ([]uint256.Int, bool) {
 		return nil, false
 	}
 	res := make([]uint256.Int, len(in))
-	for i := 0; i < len(res); i++ {
+	for i := range res {
 		res[i].SetUint64(uint64(in[i] % 32))
 	}
 	return res, true
@@ -200,7 +200,7 @@ func poolsFromFuzzBytes(rawTxnNonce, rawValues, rawTips, rawFeeCap, rawSender []
 	sendersInfo = map[uint64]*sender{}
 	senderIDs = map[common.Address]uint64{}
 	senders := make(Addresses, 20*len(senderNonce))
-	for i := 0; i < len(senderNonce); i++ {
+	for i := range senderNonce {
 		senderID := uint64(i + 1) //non-zero expected
 		binary.BigEndian.PutUint64(senders.At(i%senders.Len()), senderID)
 		sendersInfo[senderID] = newSender(senderNonce[i], senderBalance[i%len(senderBalance)])
