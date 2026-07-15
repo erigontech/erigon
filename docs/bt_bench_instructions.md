@@ -20,6 +20,10 @@ Let SRC = the synced datadir on that server (read-only source of truth).
 ## 3. Regen bt accessors on arm D (builds .bt/.kvei for IIs, .vbt/.vanchor for paged history)
     AGG_II_BT=true ./build/bin/erigon seg index --datadir=/data/bt_sepolia
 (env warns "use ERIGON_ prefix" — harmless, bare name still applies. Takes ~15 min for full Sepolia.)
+NOTE: if you regen'd previously on this datadir, delete stale accessors first
+(the .vbt/.vanchor anchor-key format changed for variable-length keys):
+    rm -f /data/bt_sepolia/snapshots/accessor/*.vbt /data/bt_sepolia/snapshots/accessor/*.vanchor
+A fresh mirror from SRC (step 2) has none, so this only matters on a re-run.
 
 ## 4. VERIFY commitment history got bt (this is the whole point of this server)
     ACC=/data/bt_sepolia/snapshots/accessor
