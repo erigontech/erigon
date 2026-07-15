@@ -31,12 +31,22 @@ import (
 	"github.com/erigontech/erigon/common/ssz"
 )
 
+// maxStackLeaves is enough for every fixed schema we hash; bigger ones fall back to the heap.
+const maxStackLeaves = 16
+
 // HashTreeRoot returns the hash for a given schema of objects.
 // IMPORTANT: DATA TYPE MUST IMPLEMENT HASHABLE
 // SUPPORTED PRIMITIVES: uint64, *uint64 and []byte
 func HashTreeRoot(schema ...any) ([32]byte, error) {
 	// Calculate the total number of leaves needed based on the schema length
-	leaves := make([]byte, NextPowerOfTwo(uint64(len(schema)*length.Hash)))
+	var stack [maxStackLeaves * length.Hash]byte
+	size := NextPowerOfTwo(uint64(len(schema) * length.Hash))
+	var leaves []byte
+	if size <= uint64(len(stack)) {
+		leaves = stack[:size]
+	} else {
+		leaves = make([]byte, size)
+	}
 	pos := 0
 
 	// Iterate over each element in the schema
@@ -70,7 +80,7 @@ func HashTreeRoot(schema ...any) ([32]byte, error) {
 			copy(leaves[pos:], root[:])
 		default:
 			// If the element does not match any supported types, panic with an error message
-			panic(fmt.Sprintf("Can't create TreeRoot: unsported type %T at index %d", i, obj))
+			panic(fmt.Sprintf("Can't create TreeRoot: unsported type %T at index %d", obj, i))
 		}
 
 		// Move the position pointer to the next leaf
