@@ -1462,7 +1462,7 @@ func traceKey(key accounts.StorageKey) bool {
 }
 
 func (sdb *IntraBlockState) Trace() bool {
-	return sdb.trace
+	return sdb.trace || dbg.Trace
 }
 
 func (sdb *IntraBlockState) BlockNumber() uint64 {

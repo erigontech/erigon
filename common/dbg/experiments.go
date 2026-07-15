@@ -96,15 +96,19 @@ var (
 
 	MergeThrottleMs = EnvInt("ERIGON_MERGE_THROTTLE_MS", 0)
 
+	// Trace is the umbrella switch: TRACE=true force-enables opcode + gas tracing
+	// for every tx (it makes IntraBlockState.Trace() true and turns on the
+	// instruction/gas sub-flags below), for debugging a single fixture end-to-end.
+	Trace                 = EnvBool("TRACE", false)
 	TraceAccounts         = EnvStrings("TRACE_ACCOUNTS", ",", nil)
 	TraceStateKeys        = EnvStrings("TRACE_STATE_KEYS", ",", nil)
-	TraceInstructions     = EnvBool("TRACE_INSTRUCTIONS", false)
+	TraceInstructions     = EnvBool("TRACE_INSTRUCTIONS", false) || Trace
 	TraceTransactionIO    = EnvBool("TRACE_TRANSACTION_IO", false)
 	TraceDomainIO         = EnvBool("TRACE_DOMAIN_IO", false)
 	TraceNoopIO           = EnvBool("TRACE_NOOP_IO", false)
 	TraceLogs             = EnvBool("TRACE_LOGS", false)
-	TraceGas              = EnvBool("TRACE_GAS", false)
-	TraceDynamicGas       = EnvBool("TRACE_DYNAMIC_GAS", false)
+	TraceGas              = EnvBool("TRACE_GAS", false) || Trace
+	TraceDynamicGas       = EnvBool("TRACE_DYNAMIC_GAS", false) || Trace
 	TraceApply            = EnvBool("TRACE_APPLY", false)
 	TraceTouchKey         = EnvBool("TRACE_TOUCH_KEY", false)
 	TraceBlockAccessLists = EnvBool("TRACE_BLOCK_ACCESS_LISTS", false)
