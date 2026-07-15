@@ -20,7 +20,6 @@ import (
 	"context"
 	"encoding/binary"
 	"fmt"
-	"slices"
 	"sync"
 
 	"github.com/c2h5oh/datasize"
