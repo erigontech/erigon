@@ -520,6 +520,37 @@ func ReadBodyWithTransactions(db kv.Getter, hash common.Hash, number uint64) (*t
 	return body, nil
 }
 
+// ReadBodyTxnHashes returns the block's txn hashes without decoding the
+// transactions. A nil slice means the body was not found.
+func ReadBodyTxnHashes(db kv.Getter, hash common.Hash, number uint64) ([]common.Hash, error) {
+	body, firstTxId, txCount := ReadBody(db, hash, number)
+	if body == nil {
+		return nil, nil
+	}
+	return CanonicalTransactionHashes(db, firstTxId, txCount)
+}
+
+// CanonicalTransactionHashes hashes each stored txn RLP in place of decoding it.
+func CanonicalTransactionHashes(db kv.Getter, txnID uint64, amount uint32) ([]common.Hash, error) {
+	if amount == 0 {
+		return []common.Hash{}, nil
+	}
+	hashes := make([]common.Hash, amount)
+	i := uint32(0)
+	if err := db.ForAmount(kv.EthTx, hexutil.EncodeTs(txnID), amount, func(k, v []byte) error {
+		h, err := types.TxnHashFromRLP(v)
+		if err != nil {
+			return err
+		}
+		hashes[i] = h
+		i++
+		return nil
+	}); err != nil {
+		return nil, err
+	}
+	return hashes[:i], nil // db may return fewer than the requested "amount"
+}
+
 func RawTransactionsRange(db kv.Getter, from, to uint64) (res [][]byte, err error) {
 	blockKey := make([]byte, dbutils.NumberLength+length.Hash)
 	encNum := make([]byte, 8)

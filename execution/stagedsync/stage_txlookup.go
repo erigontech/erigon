@@ -115,12 +115,12 @@ func txnLookupTransform(logPrefix string, tx kv.RwTx, blockFrom, blockTo uint64,
 	data := make([]byte, 16)
 	return etl.Transform(logPrefix, tx, kv.HeaderCanonical, kv.TxLookup, cfg.tmpdir, func(k, v []byte, next etl.ExtractNextFunc) error {
 		blocknum, blockHash := binary.BigEndian.Uint64(k), common.CastToHash(v)
-		body, err := cfg.blockReader.BodyWithTransactions(ctx, tx, blockHash, blocknum)
+		txnHashes, err := cfg.blockReader.TxnHashes(ctx, tx, blockHash, blocknum)
 		if err != nil {
 			return err
 		}
-		if body == nil { // tolerate such an error, because likely it's corner-case - and not critical one
-			log.Warn(fmt.Sprintf("[%s] transform: empty block body %d, hash %x", logPrefix, blocknum, v))
+		if txnHashes == nil { // tolerate such an error, because likely it's corner-case - and not critical one
+			log.Warn(fmt.Sprintf("[%s] transform: no txn hashes for block %d, hash %x - missing body, segment or index", logPrefix, blocknum, v))
 			return nil
 		}
 
@@ -131,10 +131,9 @@ func txnLookupTransform(logPrefix string, tx kv.RwTx, blockFrom, blockTo uint64,
 
 		binary.BigEndian.PutUint64(data[:8], blocknum)
 
-		for i, txn := range body.Transactions {
+		for i, txnHash := range txnHashes {
 			binary.BigEndian.PutUint64(data[8:], firstTxNumInBlock+uint64(i)+1)
-			txHash := txn.Hash()
-			if err := next(k, txHash[:], data); err != nil {
+			if err := next(k, txnHash[:], data); err != nil {
 				return err
 			}
 		}
