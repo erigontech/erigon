@@ -58,6 +58,8 @@ type ForkChoiceStorageMock struct {
 
 	ParticipationVal map[uint64]*solid.ParticipationBitList
 
+	IsRootOptimisticVal bool
+
 	StateAtBlockRootVal          map[common.Hash]*state.CachingBeaconState
 	StateAtSlotVal               map[uint64]*state.CachingBeaconState
 	GetSyncCommitteesVal         map[uint64][2]*solid.SyncCommittee
@@ -522,7 +524,7 @@ func (f *ForkChoiceStorageMock) ProcessAttestingIndicies(
 }
 
 func (f *ForkChoiceStorageMock) IsRootOptimistic(root common.Hash) bool {
-	return false
+	return f.IsRootOptimisticVal
 }
 
 func (f *ForkChoiceStorageMock) IsHeadOptimistic() bool {
