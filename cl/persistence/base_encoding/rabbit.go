@@ -123,6 +123,18 @@ func ReadRabbits(out []uint64, r io.Reader) ([]uint64, error) {
 			for i := current; i < current+count; i++ {
 				out = append(out, i)
 			}
+			if uint64(len(out)) == length {
+				// WriteRabbits stops right after the run that completes the output,
+				// so anything past this point is trailing data.
+				switch _, err := readNum(); {
+				case errors.Is(err, io.EOF):
+					return out, nil
+				case err != nil:
+					return nil, err
+				default:
+					return nil, errors.New("rabbit: trailing data after the final contiguous run")
+				}
+			}
 		}
 		current += count
 		active = !active
@@ -131,7 +143,7 @@ func ReadRabbits(out []uint64, r io.Reader) ([]uint64, error) {
 		return nil, fmt.Errorf("rabbit: decoded %d elements, header declared %d", len(out), length)
 	}
 	// WriteRabbits always emits a contiguous-run count last, so a stream that stops
-	// while one is still expected is truncated or has trailing junk.
+	// while one is still expected is truncated.
 	if active {
 		return nil, errors.New("rabbit: stream ends without a trailing contiguous-run count")
 	}

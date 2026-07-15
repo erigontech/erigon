@@ -120,7 +120,7 @@ func TestRabbitReadMalformed(t *testing.T) {
 		},
 		{
 			name:    "gap overflows the index space",
-			payload: leScalars(2, 2, math.MaxUint64),
+			payload: leScalars(3, 2, math.MaxUint64),
 			wantErr: "index overflow",
 		},
 		{
@@ -131,7 +131,12 @@ func TestRabbitReadMalformed(t *testing.T) {
 		{
 			name:    "stream ends on a gap run",
 			payload: leScalars(4, 3, 2, 1, 7),
-			wantErr: "trailing contiguous-run count",
+			wantErr: "trailing data",
+		},
+		{
+			name:    "trailing zero-length runs after the final contiguous run",
+			payload: leScalars(4, 3, 2, 1, 0, 0),
+			wantErr: "trailing data",
 		},
 	}
 	for _, tt := range tests {
