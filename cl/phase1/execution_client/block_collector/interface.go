@@ -36,6 +36,6 @@ type BlockCollector interface {
 // payloadKey returns the key for the payload: just the block number.
 // Using only the block number ensures that reorged blocks overwrite
 // the previous entry, keeping the collector in sync with the canonical chain.
-func payloadKey(payload *cltypes.Eth1Block) ([]byte, error) {
-	return dbutils.EncodeBlockNumber(payload.BlockNumber), nil
+func payloadKey(payload *cltypes.Eth1Block) []byte {
+	return dbutils.EncodeBlockNumber(payload.BlockNumber)
 }
