@@ -30,7 +30,7 @@ import (
 func BenchmarkWriteRabbits(b *testing.B) {
 	// sparse list with many non-contiguous runs -> many scalar writes
 	list := make([]uint64, 0, 100000)
-	for i := uint64(0); i < 100000; i++ {
+	for i := range uint64(100000) {
 		list = append(list, i*3)
 	}
 	var w bytes.Buffer
