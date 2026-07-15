@@ -19,6 +19,7 @@ package state
 import (
 	"context"
 	"encoding/binary"
+	"path/filepath"
 
 	"github.com/erigontech/erigon/common/background"
 	"github.com/erigontech/erigon/common/log/v3"
@@ -75,6 +76,10 @@ func buildVIBt(ctx context.Context, vDecomp *seg.Decompressor, pageCompressed bo
 	// directly would apply pattern compression and misparse on read.
 	w := seg.NewWriter(comp, seg.CompressNone)
 
+	_, anchorName := filepath.Split(anchorPath)
+	p := ps.AddNew(anchorName, uint64(vDecomp.Count()))
+	defer ps.Delete(p)
+
 	g := seg.NewReader(vDecomp.MakeGetter(), seg.CompressNone)
 	g.Reset(0)
 	var pageOff uint64
@@ -101,6 +106,7 @@ func buildVIBt(ctx context.Context, vDecomp *seg.Decompressor, pageCompressed bo
 			}
 		}
 		pageOff = nextOff
+		p.Processed.Add(1)
 		select {
 		case <-ctx.Done():
 			return ctx.Err()
