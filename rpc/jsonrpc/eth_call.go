@@ -433,8 +433,6 @@ func (api *APIImpl) GetProof(ctx context.Context, address common.Address, storag
 	blockNumber, _, isLatest, err := rpchelper.GetCanonicalBlockNumber(ctx, blockNrOrHash, roTx, api._blockReader, nil)
 	if err != nil {
 		return nil, err
-	} else if blockNumber == 0 {
-		return nil, errors.New("block not found")
 	}
 
 	err = api.BaseAPI.checkPruneHistory(ctx, roTx, blockNumber)
