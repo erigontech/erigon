@@ -507,6 +507,45 @@ func TestCreateAccount_FundedThenCreated_SyntheticReadKeepsPreTxBalance(t *testi
 		"the synthetic creation BalancePath read must keep the pre-tx balance (0); the CREATE2 re-creation must not overwrite it with the in-tx funded balance")
 }
 
+// A balance read flagged internal (a value-bearing CALL rejected inside a
+// STATICCALL) must not survive as the BAL baseline when the same pre-funded
+// address is CREATE2-deployed later in the tx: CreateAccount promotes the
+// internal read so the unchanged balance nets to zero, instead of leaving the
+// write baseline-less and emitting a spurious BalanceChange.
+func TestCreateAccount_InternalBalanceReadPromotedOnCreate_NoSpuriousBalanceChange(t *testing.T) {
+	t.Parallel()
+
+	addr := accounts.InternAddress(common.HexToAddress("0xf00ded"))
+	reader := newAccountStateReader(addr)
+	reader.accounts[addr].Balance = *uint256.NewInt(7)
+
+	ibs := New(reader)
+	ibs.SetVersionMap(NewVersionMap(nil))
+	ibs.SetTxContext(0, 0)
+	ibs.SetVersion(0)
+
+	// The rejected value-CALL reads the target's balance during gas calc;
+	// MarkReadsInternal then flags that read as conflict-detection only.
+	_, err := ibs.GetBalance(addr)
+	require.NoError(t, err)
+	ibs.MarkReadsInternal(addr)
+
+	// The parent frame CREATE2-deploys to that same pre-funded address.
+	require.NoError(t, ibs.CreateAccount(addr, true))
+
+	io := NewVersionedIO(1)
+	io.RecordReads(Version{TxIndex: 0}, ibs.VersionedReads())
+	io.RecordWrites(Version{TxIndex: 0}, ibs.VersionedWrites(false))
+	bal := io.AsBlockAccessList()
+
+	for _, ac := range bal {
+		if ac.Address == addr {
+			require.Empty(t, ac.BalanceChanges,
+				"balance is unchanged (7->7); the promoted read is the baseline so EELS emits no BalanceChange\n%s", bal.DebugString())
+		}
+	}
+}
+
 // TestVersionedIO_CreatedAccountEmptyCodeChangeOmitted is the regression test
 // for the eip8037 same_tx_create_then_clear_double_auth_base_refill BAL
 // mismatch. An EIP-7702 authority that did not exist pre-block (nil AddressPath

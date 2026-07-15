@@ -575,6 +575,12 @@ func DecodeBlockAccessListBytes(data []byte) (BlockAccessList, error) {
 	if err := decodeBlockAccessList(&bal, stream); err != nil {
 		return nil, err
 	}
+	// The payload must be exactly one RLP list; trailing bytes (e.g. 0xc000) are
+	// malformed input, not a valid empty list. Keep the error unwrapped so callers
+	// classify it as undecodable rather than an EIP-7928 rule violation.
+	if _, _, err := stream.Kind(); !errors.Is(err, io.EOF) {
+		return nil, errors.New("trailing bytes after block access list")
+	}
 	return bal, nil
 }
 

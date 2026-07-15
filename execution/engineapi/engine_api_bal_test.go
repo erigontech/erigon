@@ -1195,5 +1195,8 @@ func TestEngineApiNewPayloadBALMalformedVsInvalid(t *testing.T) {
 		status, err := sendWithBAL(duplicateAccounts)
 		require.NoError(t, err)
 		require.Equal(t, enginetypes.InvalidStatus, status.Status)
+		require.NotNil(t, status.ValidationError)
+		require.ErrorContains(t, status.ValidationError.Error(), "access list",
+			"INVALID must originate from block-access-list validation, not e.g. a block-hash mismatch")
 	})
 }

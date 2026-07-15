@@ -285,6 +285,8 @@ func TestDecodeBlockAccessListBytesMalformedVsInvalid(t *testing.T) {
 		"empty input":     {},
 		"string not list": {0x80},
 		"truncated list":  {0xc1},
+		"trailing byte":   {0xc0, 0x00},
+		"trailing list":   {0xc0, 0xc0},
 	}
 	for name, data := range malformed {
 		_, err := DecodeBlockAccessListBytes(data)
