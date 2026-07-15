@@ -333,6 +333,7 @@ func (c *StateCache) Apply(domain kv.Domain, key, value []byte, txNum uint64) {
 	case kv.CodeDomain:
 		if len(value) == 0 {
 			cache.Delete(key)
+			c.deleteAddrCodeHash(key)
 		} else if codeCache, ok := cache.(*CodeCache); ok {
 			codeCache.PutWithCodeHash(key, value, codeHash, txNum)
 		}

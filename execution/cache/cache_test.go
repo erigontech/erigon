@@ -1019,3 +1019,20 @@ func TestStateCache_ApplyDeleteAtomicWithFill(t *testing.T) {
 		require.False(t, ok, "round %d: stale fill survived the authoritative delete", round)
 	}
 }
+
+func TestStateCache_ApplyCodeDeleteDropsAddrCodeHash(t *testing.T) {
+	b := 1 * datasize.MB
+	sc := NewStateCache(b, b, b, b)
+	t.Cleanup(sc.Close)
+
+	addr := makeAddr(1)
+	var h [32]byte
+	h[0] = 0xaa
+	sc.PutAddrCodeHashIfFresh(addr, h, 10, 0)
+	_, ok := sc.GetAddrCodeHash(addr)
+	require.True(t, ok)
+
+	sc.Apply(kv.CodeDomain, addr, nil, 20)
+	_, ok = sc.GetAddrCodeHash(addr)
+	require.False(t, ok, "a code deletion must drop the derived addr→codeHash mapping")
+}
