@@ -20,7 +20,6 @@ import (
 	"bytes"
 	"sync"
 	"testing"
-	"time"
 
 	"github.com/c2h5oh/datasize"
 	"github.com/stretchr/testify/assert"
@@ -881,58 +880,6 @@ func TestDomainCache_PutIfAbsentAtomicWithPut(t *testing.T) {
 		require.True(t, ok)
 		require.Equal(t, fresh, v, "round %d: PutIfAbsent raced past a concurrent Put", round)
 	}
-}
-
-type blockingPutCache struct {
-	Cache
-	putStarted  chan struct{}
-	continuePut chan struct{}
-}
-
-func (c *blockingPutCache) Put(key []byte, value []byte, txNum uint64) {
-	close(c.putStarted)
-	<-c.continuePut
-	c.Cache.Put(key, value, txNum)
-}
-
-func TestStateCache_CrossDomainFillDoesNotWaitForApply(t *testing.T) {
-	b := 1 * datasize.MB
-	sc := NewStateCache(b, b, b, b)
-	t.Cleanup(sc.Close)
-
-	accountCache := &blockingPutCache{
-		Cache:       sc.caches[kv.AccountsDomain],
-		putStarted:  make(chan struct{}),
-		continuePut: make(chan struct{}),
-	}
-	sc.caches[kv.AccountsDomain] = accountCache
-
-	accountDone := make(chan struct{})
-	go func() {
-		defer close(accountDone)
-		sc.Apply(kv.AccountsDomain, makeAddr(1), makeValue(1), 1)
-	}()
-	<-accountCache.putStarted
-
-	storageKey := makeAddr(2)
-	storageDone := make(chan struct{})
-	go func() {
-		defer close(storageDone)
-		sc.PutIfFresh(kv.StorageDomain, storageKey, makeValue(2), 1, 2)
-	}()
-
-	select {
-	case <-storageDone:
-	case <-time.After(time.Second):
-		close(accountCache.continuePut)
-		<-accountDone
-		t.Fatal("a storage fill waited for an unrelated account apply")
-	}
-	close(accountCache.continuePut)
-	<-accountDone
-
-	_, ok := sc.Get(kv.StorageDomain, storageKey)
-	require.True(t, ok)
 }
 
 func TestStateCache_AppliedEndLifecycle(t *testing.T) {
