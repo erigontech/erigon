@@ -43,9 +43,11 @@ import (
 	"github.com/erigontech/erigon/db/kv/kvcache"
 	"github.com/erigontech/erigon/db/kv/rawdbv3"
 	"github.com/erigontech/erigon/db/rawdb"
+	"github.com/erigontech/erigon/db/state/execctx"
 	"github.com/erigontech/erigon/db/state/statecfg"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/commitment/trie"
+	"github.com/erigontech/erigon/execution/execmodule"
 	"github.com/erigontech/erigon/execution/execmodule/execmoduletester"
 	"github.com/erigontech/erigon/execution/protocol"
 	"github.com/erigontech/erigon/execution/protocol/params"
@@ -436,44 +438,40 @@ func TestGetProofPinsReadSnapshot(t *testing.T) {
 		statecfg.Schema = previousSchema
 	})
 
-	m, bankAddress, _, receiverAddress := chainWithDeployedContract(t)
-	api := newEthApiForTest(newBaseApiForTest(m), m.DB, nil, nil)
+	m, _, contractAddress, _ := chainWithDeployedContract(t)
 
 	roTx, err := m.DB.BeginTemporalRo(m.Ctx)
 	require.NoError(t, err)
 	defer roTx.Rollback()
 
-	parent, err := m.BlockReader.BlockByNumber(m.Ctx, roTx, 6)
+	publishedDomains, err := execctx.NewSharedDomains(m.Ctx, roTx, m.Log)
 	require.NoError(t, err)
-	require.NotNil(t, parent)
+	defer publishedDomains.Close()
 
-	next, err := blockgen.GenerateChain(m.ChainConfig, parent, m.Engine, m.DB, 1, func(_ int, block *blockgen.BlockGen) {
-		txn, err := types.SignTx(&types.LegacyTx{
-			CommonTx: types.CommonTx{
-				Nonce:    block.TxNonce(bankAddress),
-				To:       &receiverAddress,
-				GasLimit: 21_000,
-				Value:    *uint256.NewInt(1),
-			},
-			GasPrice: *uint256.NewInt(1_000_000_000_000),
-		}, *types.LatestSignerForChainID(nil), m.Key)
-		require.NoError(t, err)
-		block.AddTx(txn)
-	})
-	require.NoError(t, err)
-	require.NoError(t, m.InsertChain(next))
+	storageKey := common.Hash{}
+	compositeKey := make([]byte, 0, len(contractAddress)+len(storageKey))
+	compositeKey = append(compositeKey, contractAddress[:]...)
+	compositeKey = append(compositeKey, storageKey[:]...)
+	require.NoError(t, publishedDomains.DomainPut(kv.StorageDomain, roTx, compositeKey, []byte{3}, 1, nil))
+
+	stateCache := &execmodule.Cache{}
+	stateCache.SetPublishedSD(func() *execctx.SharedDomains { return publishedDomains })
+	base := newBaseApiForTest(m)
+	base.stateCache = stateCache
+	api := newEthApiForTest(base, m.DB, nil, nil)
 
 	proof, err := api.getProof(
 		m.Ctx,
 		roTx,
-		bankAddress,
-		nil,
+		contractAddress,
+		[]StorageKeysInfo{{Hash: storageKey, KeyLength: len(storageKey)}},
 		6,
 		true,
 		log.New(),
 	)
 	require.NoError(t, err)
 	require.NotNil(t, proof)
+	require.Equal(t, uint64(2), (*big.Int)(proof.StorageProof[0].Value).Uint64())
 }
 
 func TestGetBlockByTimestampLatestTime(t *testing.T) {

@@ -567,9 +567,14 @@ func (api *APIImpl) getProof(ctx context.Context, roTx kv.TemporalTx, address co
 		}
 	}
 
-	reader, err := rpchelper.CreateStateReaderFromBlockNumber(ctx, roTx, blockNumber, isLatest, 0, api.stateCache, api._txNumReader)
-	if err != nil {
-		return nil, err
+	var reader state.StateReader
+	if isLatest {
+		reader = rpchelper.NewLatestStateReader(roTx)
+	} else {
+		reader, err = rpchelper.CreateHistoryStateReader(ctx, roTx, blockNumber+1, 0, api._txNumReader)
+		if err != nil {
+			return nil, err
+		}
 	}
 
 	// get storage key proofs
