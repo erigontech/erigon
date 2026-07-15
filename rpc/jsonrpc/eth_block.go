@@ -343,7 +343,8 @@ func (api *APIImpl) GetBlockTransactionCountByNumber(ctx context.Context, blockN
 		return &n, nil
 	}
 
-	blockNum, blockHash, _, err := rpchelper.GetBlockNumber(ctx, rpc.BlockNumberOrHashWithNumber(blockNr), tx, api._blockReader, api.filters)
+	overlayTx := api.filters.WithOverlay(tx)
+	blockNum, blockHash, _, err := rpchelper.GetBlockNumber(ctx, rpc.BlockNumberOrHashWithNumber(blockNr), overlayTx, api._blockReader, nil)
 	if err != nil {
 		if errors.As(err, &rpc.BlockNotFoundErr{}) {
 			return nil, nil // not error, see https://github.com/erigontech/erigon/issues/1645
@@ -356,7 +357,6 @@ func (api *APIImpl) GetBlockTransactionCountByNumber(ctx context.Context, blockN
 		return nil, err
 	}
 
-	overlayTx := api.filters.WithOverlay(tx)
 	latestBlockNumber, err := rpchelper.GetLatestBlockNumber(overlayTx)
 	if err != nil {
 		return nil, err
@@ -400,7 +400,8 @@ func (api *APIImpl) GetBlockTransactionCountByHash(ctx context.Context, blockHas
 	}
 	defer tx.Rollback()
 
-	blockNum, _, _, err := rpchelper.GetBlockNumber(ctx, rpc.BlockNumberOrHash{BlockHash: &blockHash}, tx, api._blockReader, api.filters)
+	overlayTx := api.filters.WithOverlay(tx)
+	blockNum, _, _, err := rpchelper.GetBlockNumber(ctx, rpc.BlockNumberOrHash{BlockHash: &blockHash}, overlayTx, api._blockReader, nil)
 	if err != nil {
 		// (Compatibility) Every other node just return `null` for when the block does not exist.
 		log.Debug("eth_getBlockTransactionCountByHash GetBlockNumber failed", "err", err)
@@ -412,7 +413,7 @@ func (api *APIImpl) GetBlockTransactionCountByHash(ctx context.Context, blockHas
 		return nil, err
 	}
 
-	_, txCount, err := api._blockReader.Body(ctx, api.filters.WithOverlay(tx), blockHash, blockNum)
+	_, txCount, err := api._blockReader.Body(ctx, overlayTx, blockHash, blockNum)
 	if err != nil {
 		return nil, err
 	}

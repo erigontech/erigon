@@ -627,19 +627,25 @@ type AccountResult struct {
 
 // GetRawHeader implements debug_getRawHeader - returns a an RLP-encoded header, given a block number or hash
 func (api *DebugAPIImpl) GetRawHeader(ctx context.Context, blockNrOrHash rpc.BlockNumberOrHash) (hexutil.Bytes, error) {
+	if number, ok := blockNrOrHash.Number(); ok && number == rpc.PendingBlockNumber {
+		if block := api.pendingBlock(); block != nil {
+			return rlp.EncodeToBytes(block.Header())
+		}
+	}
 	tx, err := api.db.BeginTemporalRo(ctx)
 	if err != nil {
 		return nil, err
 	}
 	defer tx.Rollback()
-	n, h, _, err := rpchelper.GetBlockNumber(ctx, blockNrOrHash, tx, api._blockReader, api.filters)
+	overlayTx := api.filters.WithOverlay(tx)
+	n, h, _, err := rpchelper.GetBlockNumber(ctx, blockNrOrHash, overlayTx, api._blockReader, nil)
 	if err != nil {
 		if errors.As(err, &rpc.BlockNotFoundErr{}) {
 			return nil, nil // waiting for spec: not error, see Geth and https://github.com/erigontech/erigon/issues/1645
 		}
 		return nil, err
 	}
-	header, err := api._blockReader.Header(ctx, api.filters.WithOverlay(tx), h, n)
+	header, err := api._blockReader.Header(ctx, overlayTx, h, n)
 	if err != nil {
 		return nil, err
 	}
