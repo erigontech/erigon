@@ -126,6 +126,10 @@ func (b *ByteListSSZ) HashSSZ() ([32]byte, error) {
 	return result, nil
 }
 
+func (b *ByteListSSZ) HashSSZProgressive() ([32]byte, error) {
+	return merkle_tree.ProgressiveBasicListRoot(b.data, uint64(len(b.data)))
+}
+
 // Bytes returns a copy of the underlying data.
 func (b *ByteListSSZ) Bytes() []byte {
 	return common.Copy(b.data)
