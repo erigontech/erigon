@@ -18,6 +18,7 @@ package event
 
 import (
 	"fmt"
+	"maps"
 	"reflect"
 	"sync"
 	"sync/atomic"
@@ -85,9 +86,7 @@ func (hmap *handlerMap) clone() *handlerMap {
 		nextArgInterfaces: make(map[reflect.Type]int, len(hmap.nextArgInterfaces)),
 		nextArgMap:        make(map[reflect.Type]*handlerMap, len(hmap.nextArgMap)),
 	}
-	for k, v := range hmap.nextArgInterfaces {
-		cloned.nextArgInterfaces[k] = v
-	}
+	maps.Copy(cloned.nextArgInterfaces, hmap.nextArgInterfaces)
 	if len(hmap.handlers) > 0 {
 		cloned.handlers = make([]*eventHandler, len(hmap.handlers))
 		copy(cloned.handlers, hmap.handlers)
@@ -304,7 +303,7 @@ func (bus *eventBus) doSubscribe(fn any, handler *eventHandler) error {
 	argCount := fnType.NumIn()
 	currentMap := root
 
-	for argIndex := 0; argIndex < argCount; argIndex++ {
+	for argIndex := range argCount {
 		argType := fnType.In(argIndex)
 
 		if nextMap, ok := currentMap.nextArgMap[argType]; ok {
@@ -362,7 +361,7 @@ func (bus *eventBus) HasCallback(types ...reflect.Type) bool {
 	argCount := len(types)
 	currentMap := bus.handlerMap.Load()
 
-	for argIndex := 0; argIndex < argCount; argIndex++ {
+	for argIndex := range argCount {
 		argType := types[argIndex]
 
 		nextArgMap := currentMap.nextArgMap
@@ -401,7 +400,7 @@ func (bus *eventBus) Unsubscribe(fn any) error {
 	currentMap := root
 	prevMaps := make([]*handlerMap, 0, argCount)
 
-	for argIndex := 0; argIndex < argCount; argIndex++ {
+	for argIndex := range argCount {
 		argType := fnType.In(argIndex)
 
 		if nextMap, ok := currentMap.nextArgMap[argType]; ok {

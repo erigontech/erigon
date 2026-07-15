@@ -61,7 +61,7 @@ func newTestBackendN(tb testing.TB, n int) *execmoduletester.ExecModuleTester {
 	m := execmoduletester.New(tb, execmoduletester.WithGenesisSpec(gspec), execmoduletester.WithKey(key))
 	ch, err := blockgen.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, n, func(i int, b *blockgen.BlockGen) {
 		b.SetCoinbase(common.Address{1})
-		for j := 0; j < txsPerBlock; j++ {
+		for j := range txsPerBlock {
 			gasPrice := uint256.NewInt(uint64(j+1) * uint64(common.GWei))
 			tx, txErr := types.SignTx(
 				types.NewTransaction(b.TxNonce(addr), common.HexToAddress("deadbeef"),
@@ -95,7 +95,7 @@ func BenchmarkSuggestTipCap(b *testing.B) {
 	defer m.Close()
 
 	baseApi := jsonrpc.NewBaseApi(nil, kvcache.NewSimple(), m.BlockReader, false,
-		rpccfg.DefaultEvmCallTimeout, m.Engine, m.Dirs, nil, 0, 0)
+		rpccfg.DefaultEvmCallTimeout, m.Engine, m.Dirs, nil, 0, 0, 0)
 
 	cases := []struct {
 		name        string
@@ -159,7 +159,7 @@ func BenchmarkFeeHistory(b *testing.B) {
 	defer m.Close()
 
 	baseApi := jsonrpc.NewBaseApi(nil, kvcache.NewSimple(), m.BlockReader, false,
-		rpccfg.DefaultEvmCallTimeout, m.Engine, m.Dirs, nil, 0, 0)
+		rpccfg.DefaultEvmCallTimeout, m.Engine, m.Dirs, nil, 0, 0, 0)
 
 	gasCache := jsonrpc.NewGasPriceCache()
 

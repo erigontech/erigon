@@ -1,9 +1,10 @@
-package snapshotsync
+package caplinsnapschema
 
 import (
 	"fmt"
 
 	"github.com/erigontech/erigon/db/datadir"
+	"github.com/erigontech/erigon/db/snapshotsync"
 	"github.com/erigontech/erigon/db/snaptype"
 	"github.com/erigontech/erigon/db/state"
 )
@@ -13,7 +14,7 @@ type CaplinSchema struct {
 	state         map[string]state.SnapNameSchema
 }
 
-func NewCaplinSchema(dirs datadir.Dirs, stepSize uint64, stateTypes SnapshotTypes) CaplinSchema {
+func NewCaplinSchema(dirs datadir.Dirs, stepSize uint64, stateTypes snapshotsync.SnapshotTypes) CaplinSchema {
 	blockAndBlobs := make(map[snaptype.Enum]state.SnapNameSchema)
 	for _, snapt := range snaptype.CaplinSnapshotTypes {
 		dataVer := snapt.Versions()

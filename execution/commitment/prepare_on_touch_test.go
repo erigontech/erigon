@@ -34,7 +34,7 @@ func newPreparedSplits(t testing.TB, factory TrieContextFactory) *preparedSplits
 	if bclean != nil {
 		ps.cleanups = append(ps.cleanups, bclean)
 	}
-	for i := 0; i < 16; i++ {
+	for i := range 16 {
 		w := NewHexPatriciaHashed(length.Addr, nil, DefaultTrieConfig())
 		w.mountTo(base, i)
 		wctx, wclean := factory(context.Background())
@@ -58,7 +58,7 @@ func (ps *preparedSplits) touch(hk, pk []byte, upd *Update) error {
 func (ps *preparedSplits) process() ([]byte, error) {
 	ctx := context.Background()
 	var cells [16]cell
-	for i := 0; i < 16; i++ {
+	for i := range 16 {
 		if !ps.present[i] {
 			continue
 		}
@@ -69,7 +69,7 @@ func (ps *preparedSplits) process() ([]byte, error) {
 		cells[i] = c
 	}
 	base := ps.base
-	for nib := 0; nib < 16; nib++ {
+	for nib := range 16 {
 		if !ps.present[nib] {
 			continue
 		}

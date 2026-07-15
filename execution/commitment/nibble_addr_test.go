@@ -69,7 +69,7 @@ func findAddressForNibble(targetNibble int, seed int) []byte {
 	var addr [20]byte
 	// Use seed * large prime to separate search spaces for different seeds.
 	counter := uint64(seed) * 1_000_003
-	for iter := 0; iter < maxAddrSearchIters; iter++ {
+	for range maxAddrSearchIters {
 		binary.BigEndian.PutUint64(addr[:8], counter)
 		h := crypto.Keccak256(addr[:])
 		if int(h[0]>>4) == targetNibble {
@@ -98,7 +98,7 @@ func findAddressForHexPrefix(nibblePrefix []byte, seed int) []byte {
 	}
 	var addr [20]byte
 	counter := uint64(seed)*2_654_435_761 + 1
-	for iter := 0; iter < maxAddrSearchIters; iter++ {
+	for range maxAddrSearchIters {
 		binary.BigEndian.PutUint64(addr[:8], counter)
 		h := crypto.Keccak256(addr[:])
 		match := true

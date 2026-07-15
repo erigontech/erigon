@@ -121,7 +121,7 @@ func (n *DuoNode) EncodeRLP(w io.Writer) error {
 	i1, i2 := n.childrenIdx()
 	children[i1] = n.child1
 	children[i2] = n.child2
-	for i := 0; i < 17; i++ {
+	for i := range 17 {
 		if i != int(i1) && i != int(i2) {
 			children[i] = ValueNode(nil)
 		}

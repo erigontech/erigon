@@ -91,7 +91,7 @@ func TestTraceBlockByNumber(t *testing.T) {
 	}
 	m, _, _ := rpcdaemontest.CreateTestExecModule(t)
 	stateCache := kvcache.New(kvcache.DefaultCoherentConfig)
-	baseApi := NewBaseApi(nil, stateCache, m.BlockReader, false, rpccfg.DefaultEvmCallTimeout, m.Engine, m.Dirs, nil, 0, 0)
+	baseApi := NewBaseApi(nil, stateCache, m.BlockReader, false, rpccfg.DefaultEvmCallTimeout, m.Engine, m.Dirs, nil, 0, 0, 0)
 	ethApi := newEthApiForTest(baseApi, m.DB, nil, nil)
 	api := NewPrivateDebugAPI(baseApi, m.DB, nil, 0, false)
 	for _, tt := range debugTraceTransactionTests {
@@ -1032,7 +1032,7 @@ func TestGetRawTransaction(t *testing.T) {
 		t.Error("TestSentry doesn't have enough blocks for this test")
 	}
 	var testedOnce = false
-	for i := uint64(0); i < number; i++ {
+	for i := range number {
 		tx, err := m.DB.BeginRo(ctx)
 		require.NoError(err)
 		defer tx.Rollback()

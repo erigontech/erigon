@@ -62,7 +62,7 @@ func newTestDb(tb testing.TB, stepSize uint64) kv.TemporalRwDB {
 	tb.Cleanup(agg.Close)
 	err := agg.OpenFolder()
 	require.NoError(tb, err)
-	tdb, err := temporal.New(db, agg)
+	tdb, err := temporal.New(db, agg, nil)
 	require.NoError(tb, err)
 	return tdb
 }
@@ -117,7 +117,7 @@ Loop:
 	var blockNum uint64
 	for ; i < int(maxTx); i++ {
 		txNum := uint64(i)
-		for accs := 0; accs < 256; accs++ {
+		for accs := range 256 {
 			acc := accounts3.Account{
 				Nonce:       txNum,
 				Balance:     *uint256.NewInt(uint64(i*10e6) + uint64(accs*10e2)),
@@ -283,7 +283,7 @@ func TestNewSharedDomains_StateAheadOfBlocks(t *testing.T) {
 	require.NoError(err)
 
 	addr := make([]byte, length.Addr)
-	for i := uint64(0); i < 4; i++ {
+	for i := range uint64(4) {
 		addr[0] = byte(i)
 		acc := accounts.Account{
 			Nonce:   i,
@@ -367,7 +367,7 @@ func TestSharedDomain_RepeatedUnwindAcrossStepBoundary(t *testing.T) {
 		for bn := from; bn <= to; bn++ {
 			cs := &changeset.StateChangeSet{}
 			doms.SetChangesetAccumulator(cs)
-			for i := 0; i < 8; i++ {
+			for i := range 8 {
 				addr[0] = byte(i)
 				addr[1] = byte(bn)
 				acc := accounts3.Account{Nonce: bn, Balance: *uint256.NewInt(bn*1000 + uint64(i))}
@@ -494,7 +494,7 @@ func TestSharedDomain_MergeUnwindAcrossStepBoundary(t *testing.T) {
 		doms.SetChangesetAccumulator(cs)
 		// Write the same 8 addresses every block so each key accumulates
 		// values at both step 0 and step 1.
-		for i := 0; i < 8; i++ {
+		for i := range 8 {
 			addr[0] = byte(i)
 			acc := accounts3.Account{Nonce: bn, Balance: *uint256.NewInt(bn*1000 + uint64(i))}
 			pv, _, err := doms.GetLatest(kv.AccountsDomain, rwTx, addr)
@@ -652,7 +652,7 @@ func TestSharedDomain_UnwindAcrossStepBoundary(t *testing.T) {
 		cs := &changeset.StateChangeSet{}
 		doms.SetChangesetAccumulator(cs)
 		// Write a handful of account updates so commitment has real branches.
-		for i := 0; i < 8; i++ {
+		for i := range 8 {
 			addr[0] = byte(i)
 			addr[1] = byte(bn)
 			acc := accounts3.Account{Nonce: bn, Balance: *uint256.NewInt(bn*1000 + uint64(i))}
@@ -925,7 +925,7 @@ func TestSharedDomain_StorageIter(t *testing.T) {
 	var blockNum uint64
 	for ; i < int(maxTx); i++ {
 		txNum := uint64(i)
-		for accs := 0; accs < noaccounts; accs++ {
+		for accs := range noaccounts {
 			acc := accounts3.Account{
 				Nonce:       uint64(i),
 				Balance:     *uint256.NewInt(uint64(i*10e6) + uint64(accs*10e2)),
@@ -942,7 +942,7 @@ func TestSharedDomain_StorageIter(t *testing.T) {
 			require.NoError(t, err)
 			binary.BigEndian.PutUint64(l0[16:24], uint64(accs))
 
-			for locs := 0; locs < 1000; locs++ {
+			for locs := range 1000 {
 				binary.BigEndian.PutUint64(l0[24:], uint64(locs))
 				pv, _, err := domains.GetLatest(kv.AccountsDomain, rwTx, append(k0, l0...))
 				require.NoError(t, err)
@@ -994,7 +994,7 @@ func TestSharedDomain_StorageIter(t *testing.T) {
 
 	txNum, _, err := domains.SeekCommitment(ctx, rwTx)
 	require.NoError(t, err)
-	for accs := 0; accs < noaccounts; accs++ {
+	for accs := range noaccounts {
 		k0[0] = byte(accs)
 		pv, _, err := domains.GetLatest(kv.AccountsDomain, rwTx, k0)
 		require.NoError(t, err)
@@ -1084,7 +1084,7 @@ func TestSharedDomain_IteratePrefix(t *testing.T) {
 		return buf
 	}
 	addr := acc(1)
-	for i := uint64(0); i < stepSize; i++ {
+	for i := range stepSize {
 		txNum := i
 		if err = domains.DomainPut(kv.AccountsDomain, rwTx, addr, acc(i), txNum, nil); err != nil {
 			panic(err)
@@ -1529,7 +1529,7 @@ func TestDomainPut_HistoryCorrectness(t *testing.T) {
 			}
 
 			// Execute writes in txNum order
-			for txNum := uint64(0); txNum < totalTxs; txNum++ {
+			for txNum := range totalTxs {
 				if writes[txNum] < 0 {
 					continue
 				}
@@ -1571,7 +1571,7 @@ func TestDomainPut_HistoryCorrectness(t *testing.T) {
 			// (i.e. no duplicate history entries for consecutive identical values).
 			expectedChanges := 0
 			var prevWrittenVal []byte
-			for txNum := uint64(0); txNum < totalTxs; txNum++ {
+			for txNum := range totalTxs {
 				if writes[txNum] < 0 {
 					continue
 				}
@@ -1593,6 +1593,69 @@ func TestDomainPut_HistoryCorrectness(t *testing.T) {
 			}
 			require.Equal(t, expectedChanges, actualEntries,
 				"history entries (%d) should equal actual value changes (%d)", actualEntries, expectedChanges)
+		})
+	}
+}
+
+// History records the value as of BEFORE a txNum, so when a key is written
+// more than once at the same txNum only the first write's prev is correct.
+// The parallel executor's block cache flushes an EIP-8246 balance-preserving
+// SELFDESTRUCT as DomainDel followed by DomainPut at one txNum; recording the
+// put's intermediate "deleted" prev makes GetAsOf(ts <= txNum) lose the
+// pre-existing account.
+func TestDomainSameTxNumUpdate_HistoryKeepsFirstPrev(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct {
+		name   string
+		second func(domains *execctx.SharedDomains, rwTx kv.TemporalRwTx, key []byte, v1 []byte) error
+	}{
+		{name: "del-then-put", second: func(domains *execctx.SharedDomains, rwTx kv.TemporalRwTx, key []byte, v1 []byte) error {
+			err := domains.DomainDel(kv.AccountsDomain, rwTx, key, 10, nil)
+			if err != nil {
+				return err
+			}
+			return domains.DomainPut(kv.AccountsDomain, rwTx, key, v1, 10, nil)
+		}},
+		{name: "put-then-put", second: func(domains *execctx.SharedDomains, rwTx kv.TemporalRwTx, key []byte, v1 []byte) error {
+			interim := accounts3.Account{Nonce: 7, Balance: *uint256.NewInt(7), CodeHash: accounts.EmptyCodeHash}
+			err := domains.DomainPut(kv.AccountsDomain, rwTx, key, accounts3.SerialiseV3(&interim), 10, nil)
+			if err != nil {
+				return err
+			}
+			return domains.DomainPut(kv.AccountsDomain, rwTx, key, v1, 10, nil)
+		}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			ctx := t.Context()
+			db := newTestDb(t, 1000)
+			rwTx, err := db.BeginTemporalRw(ctx)
+			require.NoError(t, err)
+			defer rwTx.Rollback()
+			domains, err := execctx.NewSharedDomains(ctx, rwTx, log.New())
+			require.NoError(t, err)
+			defer domains.Close()
+			key := make([]byte, length.Addr)
+			key[0] = 0xAB
+			acc0 := accounts3.Account{Nonce: 0, Balance: *uint256.NewInt(1), CodeHash: accounts.EmptyCodeHash}
+			v0 := accounts3.SerialiseV3(&acc0)
+			acc1 := accounts3.Account{Nonce: 0, Balance: *uint256.NewInt(2), CodeHash: accounts.EmptyCodeHash}
+			v1 := accounts3.SerialiseV3(&acc1)
+			require.NoError(t, domains.DomainPut(kv.AccountsDomain, rwTx, key, v0, 5, nil))
+			require.NoError(t, tc.second(domains, rwTx, key, v1))
+			require.NoError(t, domains.Flush(ctx, rwTx))
+			got, ok, err := rwTx.GetAsOf(kv.AccountsDomain, key, 10)
+			require.NoError(t, err)
+			require.True(t, ok, "value before txNum 10 must exist (written at txNum 5)")
+			require.Equal(t, v0, got, "GetAsOf(10) must see the txNum-5 value, not the same-txNum intermediate")
+			got, ok, err = rwTx.GetAsOf(kv.AccountsDomain, key, 11)
+			require.NoError(t, err)
+			require.True(t, ok)
+			require.Equal(t, v1, got, "GetAsOf(11) must see the final txNum-10 value")
+			got, ok, err = rwTx.GetAsOf(kv.AccountsDomain, key, 5)
+			require.NoError(t, err)
+			require.False(t, ok, "the key was created at txNum 5, so before it there is nothing to find")
+			require.Empty(t, got, "GetAsOf(5) is before the first write")
 		})
 	}
 }

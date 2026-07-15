@@ -33,7 +33,7 @@ func MerkleizeVector(elements [][32]byte, length uint64) ([32]byte, error) {
 	if len(elements) == 0 {
 		return ZeroHashes[depth], nil
 	}
-	for i := uint8(0); i < depth; i++ {
+	for i := range depth {
 		// Sequential
 		layerLen := len(elements)
 		if layerLen%2 == 1 {

@@ -150,7 +150,7 @@ func runZkevmTestsParallel(root string, files []string, re *regexp.Regexp, tm *t
 	}
 	close(fileCh)
 
-	for w := uint64(0); w < workers; w++ {
+	for range workers {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
@@ -250,7 +250,7 @@ func runWitnessTest(test *testutil.WitnessBlockTest) error {
 		return fmt.Errorf("commit commitment history flag: %w", err)
 	}
 
-	baseApi := jsonrpc.NewBaseApi(nil, m.StateCache, m.BlockReader, false, rpccfg.DefaultEvmCallTimeout, m.Engine, m.Dirs, nil, 0, 0)
+	baseApi := jsonrpc.NewBaseApi(nil, m.StateCache, m.BlockReader, false, rpccfg.DefaultEvmCallTimeout, m.Engine, m.Dirs, nil, 0, 0, 0)
 	debugApi := jsonrpc.NewPrivateDebugAPI(baseApi, m.DB, nil, 0, false)
 	canonicalMode := "canonical"
 

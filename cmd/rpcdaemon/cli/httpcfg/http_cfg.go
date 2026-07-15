@@ -69,6 +69,7 @@ type HttpCfg struct {
 	Gascap                            uint64
 	BlockRangeLimit                   int
 	GetLogsMaxResults                 int
+	LogQueryLimit                     int
 	Feecap                            float64
 	MaxTraces                         uint64
 	WebsocketPort                     int
