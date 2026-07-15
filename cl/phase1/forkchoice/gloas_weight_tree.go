@@ -360,7 +360,6 @@ func (t *gloasWeightTree) recompute(root common.Hash) {
 			t.weightSeen[item.root] = struct{}{}
 			t.weightStack = append(t.weightStack, gloasWeightStackItem{root: item.root, visited: true})
 			for _, child := range slices.Backward(node.children) {
-
 				if _, ok := t.weightSeen[child]; ok {
 					continue
 				}

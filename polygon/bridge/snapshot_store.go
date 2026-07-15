@@ -235,7 +235,6 @@ func (s *SnapshotStore) BlockEventIdsRange(ctx context.Context, blockHash common
 	segments := tx.Segments
 
 	for _, sn := range slices.Backward(segments) {
-
 		if sn.From() > blockNum {
 			continue
 		}
@@ -333,7 +332,6 @@ func (s *SnapshotStore) events(ctx context.Context, start, end, blockNumber uint
 
 func (s *SnapshotStore) borBlockByEventHash(txnHash common.Hash, segments []*snapshotsync.VisibleSegment, buf []byte) (blockNum uint64, ok bool, err error) {
 	for _, sn := range slices.Backward(segments) {
-
 		idxBorTxnHash := sn.Src().Index()
 
 		if idxBorTxnHash == nil {

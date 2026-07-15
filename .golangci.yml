@@ -90,7 +90,7 @@ linters:
         underef:
           skipRecvDeref: true
     modernize:
-      disable: # each disabled backlog has an existing backlog; enable it once its findings are cleared
+      disable: # each disabled analyzer has an existing backlog; enable it once its findings are cleared
         - slicessort
         - stditerators
         - stringsbuilder

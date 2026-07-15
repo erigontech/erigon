@@ -730,7 +730,6 @@ type BeaconChainConfig struct {
 func (b *BeaconChainConfig) GetBlobParameters(epoch uint64) BlobParameters {
 	// Iterate through schedule in desc order
 	for _, entry := range slices.Backward(b.BlobSchedule) {
-
 		if epoch >= entry.Epoch {
 			return entry
 		}

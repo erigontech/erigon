@@ -350,7 +350,6 @@ func (bbd *BackwardBlockDownloader) downloadHeaderChainBackwards(
 		// collect the headers batch into the etl and check for a connecting point
 		headers := resp.Data
 		for _, header := range slices.Backward(headers) {
-
 			headerNum := header.Number.Uint64()
 			if headerNum == 0 {
 				break

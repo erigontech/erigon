@@ -141,7 +141,6 @@ func (s *SpanSnapshotStore) snapshotsReverseForEach(f func(span Span) (stop bool
 	segments := tx.Segments
 	// walk the segment files backwards
 	for _, sn := range slices.Backward(segments) {
-
 		idx := sn.Src().Index()
 		if idx == nil || idx.KeyCount() == 0 {
 			continue
@@ -239,7 +238,6 @@ func (s *SpanSnapshotStore) Entity(ctx context.Context, id uint64) (*Span, bool,
 	segments := tx.Segments
 
 	for _, sn := range slices.Backward(segments) {
-
 		idx := sn.Src().Index()
 
 		if idx == nil || idx.KeyCount() == 0 {
@@ -352,7 +350,6 @@ func (s *CheckpointSnapshotStore) Entity(ctx context.Context, id uint64) (*Check
 	segments := tx.Segments
 
 	for _, sn := range slices.Backward(segments) {
-
 		index := sn.Src().Index()
 
 		if index == nil || index.KeyCount() == 0 || id < index.BaseDataID() {
@@ -562,7 +559,6 @@ func snapshotStoreRangeFromBlockNum[T Entity](
 
 OUTER:
 	for _, sn := range slices.Backward(segments) {
-
 		idx := sn.Src().Index()
 		if idx == nil || idx.KeyCount() == 0 {
 			continue

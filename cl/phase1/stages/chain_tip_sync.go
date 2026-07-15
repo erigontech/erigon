@@ -584,7 +584,6 @@ func verifyUnverifiedGloasPayloads(ctx context.Context, cfg *Cfg) {
 
 	swept := 0
 	for _, item := range slices.Backward(blocks) {
-
 		if cfg.forkChoice.IsPayloadVerified(item.root) {
 			continue
 		}
