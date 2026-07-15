@@ -26,6 +26,7 @@ import (
 	"github.com/erigontech/erigon/cl/phase1/core/state"
 	"github.com/erigontech/erigon/cl/spectest/spectest"
 	"github.com/erigontech/erigon/cl/transition/impl/eth2/statechange"
+	"github.com/erigontech/erigon/common/clonable"
 )
 
 type RewardsCore struct{}
@@ -34,6 +35,8 @@ type rewardDeltas struct {
 	rewards   []uint64
 	penalties []uint64
 }
+
+func (*rewardDeltas) Clone() clonable.Clonable { return &rewardDeltas{} }
 
 func (d *rewardDeltas) DecodeSSZ(buf []byte, _ int) error {
 	if len(buf) < 8 {
