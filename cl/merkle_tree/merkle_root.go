@@ -31,7 +31,8 @@ import (
 	"github.com/erigontech/erigon/common/ssz"
 )
 
-// maxStackLeaves is enough for every fixed schema we hash; bigger ones fall back to the heap.
+// maxStackLeaves
+// distributions from mainnet: calls=100000 maxStackLeaves=16 stackHit=96063 heapMiss=3937 leaves="2:12753(12.75%) 3:8044(8.04%) 4:16466(16.47%) 5:54864(54.86%) 13:3936(3.94%) 17:3937(3.94%)" coverageIfStack="4(128B):37.263% 8(256B):92.127% 16(512B):96.063% 32(1024B):100.000%"
 const maxStackLeaves = 16
 
 // HashTreeRoot returns the hash for a given schema of objects.
