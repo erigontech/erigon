@@ -130,10 +130,18 @@ func (s *PartialDataColumnSidecar) init() {
 		s.CellsPresentBitmap = solid.NewBitList(0, int(cfg.MaxBlobCommittmentsPerBlock))
 	}
 	if s.PartialColumn == nil {
-		s.PartialColumn = solid.NewStaticListSSZ[*Cell](int(cfg.MaxBlobCommittmentsPerBlock), BytesPerCell)
+		if s.version >= clparams.GloasVersion {
+			s.PartialColumn = solid.NewStaticProgressiveListSSZ[*Cell](BytesPerCell)
+		} else {
+			s.PartialColumn = solid.NewStaticListSSZ[*Cell](int(cfg.MaxBlobCommittmentsPerBlock), BytesPerCell)
+		}
 	}
 	if s.KzgProofs == nil {
-		s.KzgProofs = solid.NewStaticListSSZ[*KZGProof](int(cfg.MaxBlobCommittmentsPerBlock), 48)
+		if s.version >= clparams.GloasVersion {
+			s.KzgProofs = solid.NewStaticProgressiveListSSZ[*KZGProof](48)
+		} else {
+			s.KzgProofs = solid.NewStaticListSSZ[*KZGProof](int(cfg.MaxBlobCommittmentsPerBlock), 48)
+		}
 	}
 	if s.Header == nil {
 		s.Header = solid.NewDynamicListSSZ[*PartialDataColumnHeader](1)
@@ -144,6 +152,8 @@ func (s *PartialDataColumnSidecar) Version() clparams.StateVersion { return s.ve
 
 func (s *PartialDataColumnSidecar) SetVersion(v clparams.StateVersion) {
 	s.version = v
+	s.PartialColumn = nil
+	s.KzgProofs = nil
 	s.init()
 }
 
@@ -162,6 +172,8 @@ func (s *PartialDataColumnSidecar) EncodeSSZ(buf []byte) ([]byte, error) {
 
 func (s *PartialDataColumnSidecar) DecodeSSZ(buf []byte, version int) error {
 	s.version = clparams.StateVersion(version)
+	s.PartialColumn = nil
+	s.KzgProofs = nil
 	s.init()
 	return ssz2.UnmarshalSSZ(buf, version, s.getSchema()...)
 }
@@ -178,6 +190,21 @@ func (s *PartialDataColumnSidecar) EncodingSizeSSZ() int {
 }
 
 func (s *PartialDataColumnSidecar) HashSSZ() ([32]byte, error) {
+	if s.version >= clparams.GloasVersion {
+		bitmapRoot, err := s.CellsPresentBitmap.HashSSZProgressive()
+		if err != nil {
+			return [32]byte{}, err
+		}
+		partialColumnRoot, err := s.PartialColumn.HashSSZProgressive(nil)
+		if err != nil {
+			return [32]byte{}, err
+		}
+		proofsRoot, err := s.KzgProofs.HashSSZProgressive(nil)
+		if err != nil {
+			return [32]byte{}, err
+		}
+		return merkle_tree.HashTreeRoot(bitmapRoot, partialColumnRoot, proofsRoot)
+	}
 	return merkle_tree.HashTreeRoot(s.getSchema()...)
 }
 
