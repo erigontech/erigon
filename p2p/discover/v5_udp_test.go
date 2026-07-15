@@ -102,6 +102,35 @@ func startLocalhostV5(t *testing.T, cfg Config) *UDPv5 {
 	return udp
 }
 
+// This test checks that trace logging follows the configured log level.
+func TestUDPv5_traceFollowsLogLevel(t *testing.T) {
+	t.Parallel()
+
+	for _, tc := range []struct {
+		level log.Lvl
+		want  bool
+	}{
+		{log.LvlTrace, true},
+		{log.LvlInfo, false},
+	} {
+		db, _ := enode.OpenDB("")
+		key := newkey()
+		udp, err := newUDPv5(t.Context(), newpipe(), enode.NewLocalNode(db, key), Config{
+			PrivateKey:   key,
+			Log:          testlog.Logger(t, tc.level),
+			ValidSchemes: enode.ValidSchemesForTesting,
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if udp.trace != tc.want {
+			t.Errorf("level %v: trace = %v, want %v", tc.level, udp.trace, tc.want)
+		}
+		udp.Close()
+		db.Close()
+	}
+}
+
 // This test checks that incoming PING calls are handled correctly.
 func TestUDPv5_pingHandling(t *testing.T) {
 	t.Parallel()
