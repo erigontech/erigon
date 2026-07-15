@@ -180,7 +180,7 @@ func (p *PersistentBlockCollector) encodeBlock(payload *cltypes.Eth1Block, paren
 
 // AddBlock bursts end at Flush; dropping outlier-sized scratch there keeps one
 // huge payload from staying resident for the collector's lifetime.
-const maxRetainedScratchCap = 1 << 20
+const maxRetainedScratchCap = int(datasize.MB)
 
 func (p *PersistentBlockCollector) releaseOversizedScratch() {
 	if cap(p.encodeBlockBuf) > maxRetainedScratchCap {
