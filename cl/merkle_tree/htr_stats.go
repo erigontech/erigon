@@ -29,7 +29,7 @@ import (
 )
 
 const (
-	htrStatsLogEvery = 10_000
+	htrStatsLogEvery = 100
 	htrHistMax       = 64 // leaf counts >= this land in the overflow bucket
 )
 
