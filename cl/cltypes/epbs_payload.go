@@ -126,7 +126,7 @@ type PayloadAttestation struct {
 }
 
 func (p *PayloadAttestation) HashSSZ() ([32]byte, error) {
-	return merkle_tree.HashTreeRoot(p.AggregationBits, p.Data, p.Signature[:])
+	return merkle_tree.ProgressiveContainerRootAll(p.AggregationBits, p.Data, p.Signature[:])
 }
 
 func (p *PayloadAttestation) EncodingSizeSSZ() int {
@@ -275,7 +275,11 @@ type ExecutionPayloadBid struct {
 }
 
 func (e *ExecutionPayloadBid) HashSSZ() ([32]byte, error) {
-	return merkle_tree.HashTreeRoot(
+	blobRoot, err := e.BlobKzgCommitments.HashSSZProgressive(nil)
+	if err != nil {
+		return [32]byte{}, err
+	}
+	return merkle_tree.ProgressiveContainerRootAll(
 		e.ParentBlockHash[:],
 		e.ParentBlockRoot[:],
 		e.BlockHash[:],
@@ -286,7 +290,7 @@ func (e *ExecutionPayloadBid) HashSSZ() ([32]byte, error) {
 		e.Slot,
 		e.Value,
 		e.ExecutionPayment,
-		&e.BlobKzgCommitments,
+		blobRoot[:],
 		e.ExecutionRequestsRoot[:],
 	)
 }

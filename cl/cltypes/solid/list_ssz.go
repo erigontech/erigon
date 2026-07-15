@@ -133,6 +133,22 @@ func (l *ListSSZ[T]) HashSSZ() ([32]byte, error) {
 	return l.root, err
 }
 
+func (l *ListSSZ[T]) HashSSZProgressive(hashElement func(T) ([32]byte, error)) ([32]byte, error) {
+	roots := make([][32]byte, len(l.list))
+	for i, element := range l.list {
+		var err error
+		if hashElement == nil {
+			roots[i], err = element.HashSSZ()
+		} else {
+			roots[i], err = hashElement(element)
+		}
+		if err != nil {
+			return [32]byte{}, err
+		}
+	}
+	return merkle_tree.ProgressiveListRoot(roots, uint64(len(l.list)))
+}
+
 func (l *ListSSZ[T]) Clone() clonable.Clonable {
 	if l.static {
 		return NewStaticListSSZ[T](l.limit, l.bytesPerElement)

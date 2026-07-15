@@ -147,6 +147,14 @@ func (i *IndexedAttestation) HashSSZ() ([32]byte, error) {
 	return merkle_tree.HashTreeRoot(i.AttestingIndices, i.Data, i.Signature[:])
 }
 
+func (i *IndexedAttestation) HashSSZProgressive() ([32]byte, error) {
+	indices, err := i.AttestingIndices.HashSSZProgressive()
+	if err != nil {
+		return [32]byte{}, err
+	}
+	return merkle_tree.ProgressiveContainerRootAll(indices[:], i.Data, i.Signature[:])
+}
+
 func IsSlashableAttestationData(d1, d2 *solid.AttestationData) bool {
 	return (!d1.Equal(d2) && d1.Target.Epoch == d2.Target.Epoch) ||
 		(d1.Source.Epoch < d2.Source.Epoch && d2.Target.Epoch < d1.Target.Epoch)

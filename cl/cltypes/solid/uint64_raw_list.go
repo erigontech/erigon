@@ -171,6 +171,10 @@ func (arr *RawUint64List) HashSSZ() ([32]byte, error) {
 	return arr.cachedHash, nil
 }
 
+func (arr *RawUint64List) HashSSZProgressive() ([32]byte, error) {
+	return merkle_tree.ProgressiveBasicListRoot(arr.Bytes(), uint64(len(arr.u)))
+}
+
 func (arr *RawUint64List) Pop() uint64 {
 	panic("k")
 }
