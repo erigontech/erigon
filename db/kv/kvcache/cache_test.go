@@ -49,7 +49,6 @@ func TestEvictionInUnexpectedOrder(t *testing.T) {
 	c.selectOrCreateRoot(2)
 	require.Len(c.roots, 1)
 	require.Zero(int(c.latestStateVersionID))
-	require.False(c.roots[2].isCanonical)
 
 	c.add([]byte{1}, nil, c.roots[2], 2)
 	require.Zero(c.stateEvict.Len())
@@ -57,7 +56,6 @@ func TestEvictionInUnexpectedOrder(t *testing.T) {
 	c.advanceRoot(2)
 	require.Len(c.roots, 1)
 	require.Equal(2, int(c.latestStateVersionID))
-	require.True(c.roots[2].isCanonical)
 
 	c.add([]byte{1}, nil, c.roots[2], 2)
 	require.Equal(1, c.stateEvict.Len())
@@ -65,7 +63,6 @@ func TestEvictionInUnexpectedOrder(t *testing.T) {
 	c.selectOrCreateRoot(5)
 	require.Len(c.roots, 2)
 	require.Equal(2, int(c.latestStateVersionID))
-	require.False(c.roots[5].isCanonical)
 
 	c.add([]byte{2}, nil, c.roots[5], 5) // not added to evict list
 	require.Equal(1, c.stateEvict.Len())
@@ -75,32 +72,26 @@ func TestEvictionInUnexpectedOrder(t *testing.T) {
 	c.selectOrCreateRoot(6)
 	require.Len(c.roots, 3)
 	require.Equal(2, int(c.latestStateVersionID))
-	require.False(c.roots[6].isCanonical) // parrent exists, but parent has isCanonical=false
 
 	c.advanceRoot(3)
 	require.Len(c.roots, 4)
 	require.Equal(3, int(c.latestStateVersionID))
-	require.True(c.roots[3].isCanonical)
 
 	c.advanceRoot(4)
 	require.Len(c.roots, 5)
 	require.Equal(4, int(c.latestStateVersionID))
-	require.True(c.roots[4].isCanonical)
 
 	c.selectOrCreateRoot(5)
 	require.Len(c.roots, 5)
 	require.Equal(4, int(c.latestStateVersionID))
-	require.False(c.roots[5].isCanonical)
 
 	c.advanceRoot(5)
 	require.Len(c.roots, 5)
 	require.Equal(5, int(c.latestStateVersionID))
-	require.True(c.roots[5].isCanonical)
 
 	c.advanceRoot(100)
 	require.Len(c.roots, 6)
 	require.Equal(100, int(c.latestStateVersionID))
-	require.True(c.roots[100].isCanonical)
 
 	//c.add([]byte{1}, nil, c.roots[2], 2)
 	require.Equal(0, c.latestStateView.cache.Len())
@@ -192,7 +183,6 @@ func TestCanonicalRootsStartFresh(t *testing.T) {
 	require.Equal(1, c.roots[2].cache.Len())
 
 	c.OnNewBlock(&remoteproto.StateChangeBatch{StateVersionId: 3})
-	require.True(c.roots[3].isCanonical)
 	require.Zero(c.roots[3].cache.Len())
 }
 

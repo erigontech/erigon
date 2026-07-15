@@ -84,14 +84,6 @@ type CacheView interface {
 // High-level guaranties:
 // - Keys/Values returned by cache are valid/immutable until end of db transaction
 // - CacheView is always coherent with given db transaction -
-//
-// Rules of set view.isCanonical value:
-//   - only OnNewBlock method can set view.isCanonical=true (from StateChanges)
-//   - roots created by View (readers ahead of their batch) stay non-canonical
-//
-// Rules of filling cache.stateEvict:
-//   - changes in Canonical View SHOULD reflect in stateEvict
-//   - changes in Non-Canonical View SHOULD NOT reflect in stateEvict
 type Coherent struct {
 	codeEvictLen         metrics.Gauge
 	codeKeys             metrics.Gauge
@@ -118,7 +110,6 @@ type CoherentRoot struct {
 	ready           chan struct{} // close when ready
 	readyChanClosed atomic.Bool   // quick check if ready channel is closed
 	closeOnce       sync.Once     // protecting `ready` field from double-close
-	isCanonical     bool
 }
 
 // CoherentView - dumb object, which proxy all requests to Coherent object.
@@ -258,8 +249,6 @@ func (c *Coherent) advanceRoot(stateVersionID uint64) (r *CoherentRoot) {
 			return true
 		})
 	}
-	r.isCanonical = true
-
 	c.evictRoots()
 	c.latestStateVersionID = stateVersionID
 	c.latestStateView = r
