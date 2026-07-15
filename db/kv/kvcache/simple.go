@@ -106,8 +106,6 @@ type SimpleView struct {
 
 func (c *SimpleView) Get(k []byte) ([]byte, error) { return c.cache.Get(k, c.tx, 0) }
 
-// GetAsOf satisfies the optional capability rpchelper.CreateHistoryCachedStateReader
-// asserts; the cache holds latest-state only, so historical reads always fall through.
 func (c *SimpleView) GetAsOf(key []byte, ts uint64) (v []byte, ok bool, err error) {
 	return nil, false, nil
 }

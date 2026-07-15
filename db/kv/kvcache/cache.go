@@ -55,6 +55,7 @@ type Cache interface {
 }
 type CacheView interface {
 	Get(k []byte) ([]byte, error)
+	GetAsOf(key []byte, ts uint64) (v []byte, ok bool, err error)
 	GetCode(k []byte) ([]byte, error)
 	HasStorage(address common.Address) (bool, error)
 }
@@ -132,8 +133,6 @@ func (c *CoherentView) Get(k []byte) ([]byte, error) {
 	return c.cache.Get(k, c.tx, c.stateVersionID)
 }
 
-// GetAsOf satisfies the optional capability rpchelper.CreateHistoryCachedStateReader
-// asserts; the cache holds latest-state only, so historical reads always fall through.
 func (c *CoherentView) GetAsOf(key []byte, ts uint64) (v []byte, ok bool, err error) {
 	return nil, false, nil
 }
