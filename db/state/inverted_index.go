@@ -483,8 +483,6 @@ type InvertedIndexRoTx struct {
 	salt              *uint32
 	stepSize          uint64
 	stepsInFrozenFile uint64
-
-	reUsableSeq multiencseq.SequenceReader // re-usable instance, to reduce allocations
 }
 
 // hashKey - change of salt will require re-gen of indices
@@ -528,6 +526,8 @@ func (iit *InvertedIndexRoTx) seekInFiles(key []byte, txNum uint64) (found bool,
 		return false, 0, nil
 	}
 
+	var seq multiencseq.SequenceReader
+
 	hi, lo := iit.hashKey(key)
 	if iit.seekInFilesCache == nil {
 		iit.seekInFilesCache = iit.visible.newSeekInFilesCache()
@@ -564,8 +564,8 @@ func (iit *InvertedIndexRoTx) seekInFiles(key []byte, txNum uint64) (found bool,
 		}
 		encodedSeq, _ := g.Next(nil)
 
-		iit.reUsableSeq.Reset(iit.files[i].startTxNum, encodedSeq)
-		equalOrHigherTxNum, _, found = iit.reUsableSeq.Seek(txNum)
+		seq.Reset(iit.files[i].startTxNum, encodedSeq)
+		equalOrHigherTxNum, _, found = seq.Seek(txNum)
 		if !found {
 			continue
 		}
