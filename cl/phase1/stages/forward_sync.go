@@ -388,8 +388,11 @@ func forwardSync(ctx context.Context, logger log.Logger, cfg *Cfg, args Args) er
 			cur := currentSlot.Load()
 			slotsRemaining, ratePerSec := forwardSyncProgress(chainTipSlot, cur, prevProgress, secsPerLog)
 			prevProgress = cur
+			// distance-from-chain-tip is the ETA at the chain's own production rate
+			// (one slot per SecondsPerSlot), which also saturates instead of overflowing.
+			chainRatePerSec := 1.0 / float64(cfg.beaconCfg.SecondsPerSlot)
 			logger.Info("[Caplin] Forward Sync", "progress", cur,
-				"distance-from-chain-tip", time.Duration(slotsRemaining*cfg.beaconCfg.SecondsPerSlot)*time.Second,
+				"distance-from-chain-tip", utils.ETA(slotsRemaining, chainRatePerSec),
 				"estimated-time-remaining", utils.ETA(slotsRemaining, ratePerSec))
 		default:
 		}
