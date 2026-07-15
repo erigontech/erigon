@@ -378,10 +378,8 @@ func (c *CodeCache) GetAddrCodeHash(addr []byte) ([32]byte, bool) {
 	return e.hash, true
 }
 
-// PutAddrCodeHash records the addr → codeHash mapping. Called from the
-// account-decode populate path inside SD.codeHashForAddr; also called by
-// readAhead's BAL prefetch when it learns the codeHash from the decoded
-// account record. txNum stamps the mapping for unwind invalidation.
+// PutAddrCodeHash records the addr → codeHash mapping. txNum stamps the
+// mapping for unwind invalidation.
 func (c *CodeCache) PutAddrCodeHash(addr []byte, h [32]byte, txNum uint64) {
 	c.addrToCodeHash.Add(common.BytesToAddress(addr), addrCodeHashEntry{hash: h, txNum: txNum, epoch: c.coh.Epoch()})
 }
