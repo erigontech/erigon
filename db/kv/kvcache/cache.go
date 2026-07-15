@@ -236,18 +236,6 @@ func (c *Coherent) advanceRoot(stateVersionID uint64) (r *CoherentRoot) {
 	// producer gap to one version.
 	c.stateEvict.Init()
 	c.codeEvict.Init()
-	r.cache.Walk(func(items []*Element) bool {
-		for _, i := range items {
-			c.stateEvict.PushFront(i)
-		}
-		return true
-	})
-	r.codeCache.Walk(func(items []*Element) bool {
-		for _, i := range items {
-			c.codeEvict.PushFront(i)
-		}
-		return true
-	})
 	c.evictRoots()
 	c.latestStateVersionID = stateVersionID
 	c.latestStateView = r
