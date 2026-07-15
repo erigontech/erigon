@@ -816,9 +816,6 @@ func (sdb *IntraBlockState) GetCodeHash(addr accounts.Address) (accounts.CodeHas
 		if cw, ok := sdb.versionedWrites.GetCode(addr); ok && len(cw.Val.Bytes) > 0 {
 			return accounts.InternCodeHash(crypto.HashData(cw.Val.Bytes)), nil
 		}
-		if ch, cerr := sdb.committedCodeHash(addr); cerr == nil && ch != accounts.EmptyCodeHash && !ch.IsZero() {
-			return ch, nil
-		}
 	}
 	if sdb.eip8246 && hash == accounts.NilCodeHash {
 		// A prior tx's EIP-8246 SELFDESTRUCT leaves an existing empty-code
