@@ -548,39 +548,47 @@ func (b *BeaconBody) HashSSZ() ([32]byte, error) {
 }
 
 func (b *BeaconBody) hashSSZGloas() ([32]byte, error) {
-	proposerSlashings, err := b.ProposerSlashings.HashSSZProgressive(nil)
+	schema, err := b.gloasHashSchema()
 	if err != nil {
 		return [32]byte{}, err
+	}
+	return merkle_tree.ProgressiveContainerRootAll(schema...)
+}
+
+func (b *BeaconBody) gloasHashSchema() ([]any, error) {
+	proposerSlashings, err := b.ProposerSlashings.HashSSZProgressive(nil)
+	if err != nil {
+		return nil, err
 	}
 	attesterSlashings, err := b.AttesterSlashings.HashSSZProgressive(func(slashing *AttesterSlashing) ([32]byte, error) {
 		return slashing.HashSSZProgressive()
 	})
 	if err != nil {
-		return [32]byte{}, err
+		return nil, err
 	}
 	attestations, err := b.Attestations.HashSSZProgressive(func(att *solid.Attestation) ([32]byte, error) {
 		return att.HashSSZProgressive()
 	})
 	if err != nil {
-		return [32]byte{}, err
+		return nil, err
 	}
 	deposits, err := b.Deposits.HashSSZProgressive(nil)
 	if err != nil {
-		return [32]byte{}, err
+		return nil, err
 	}
 	voluntaryExits, err := b.VoluntaryExits.HashSSZProgressive(nil)
 	if err != nil {
-		return [32]byte{}, err
+		return nil, err
 	}
 	executionChanges, err := b.ExecutionChanges.HashSSZProgressive(nil)
 	if err != nil {
-		return [32]byte{}, err
+		return nil, err
 	}
 	payloadAttestations, err := b.PayloadAttestations.HashSSZProgressive(nil)
 	if err != nil {
-		return [32]byte{}, err
+		return nil, err
 	}
-	return merkle_tree.ProgressiveContainerRootAll(
+	return []any{
 		b.RandaoReveal[:],
 		b.Eth1Data,
 		b.Graffiti[:],
@@ -594,7 +602,7 @@ func (b *BeaconBody) hashSSZGloas() ([32]byte, error) {
 		b.SignedExecutionPayloadBid,
 		payloadAttestations[:],
 		b.ParentExecutionRequests,
-	)
+	}, nil
 }
 
 func (b *BeaconBody) getSchema(storage bool) []any {
@@ -634,6 +642,29 @@ func (b *BeaconBody) ExecutionPayloadMerkleProof() ([][32]byte, error) {
 		return nil, errors.New("execution payload merkle proof not available for GLOAS blocks")
 	}
 	return merkle_tree.MerkleProof(4, 9, b.getSchema(false)...)
+}
+
+func (b *BeaconBody) ExecutionBlockHashMerkleProof() ([][32]byte, error) {
+	if b.Version < clparams.GloasVersion || b.SignedExecutionPayloadBid == nil || b.SignedExecutionPayloadBid.Message == nil {
+		return nil, errors.New("execution block hash merkle proof requires a GLOAS execution payload bid")
+	}
+	bidProof, err := b.SignedExecutionPayloadBid.Message.ParentBlockHashMerkleProof()
+	if err != nil {
+		return nil, err
+	}
+	signedBidProof, err := merkle_tree.MerkleProof(1, 0, b.SignedExecutionPayloadBid.Message, b.SignedExecutionPayloadBid.Signature[:])
+	if err != nil {
+		return nil, err
+	}
+	schema, err := b.gloasHashSchema()
+	if err != nil {
+		return nil, err
+	}
+	bodyProof, err := merkle_tree.ProgressiveContainerProofAll(10, schema...)
+	if err != nil {
+		return nil, err
+	}
+	return append(append(bidProof, signedBidProof...), bodyProof...), nil
 }
 
 func (b *BeaconBody) KzgCommitmentMerkleProof(index int) ([][32]byte, error) {
