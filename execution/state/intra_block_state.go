@@ -584,6 +584,16 @@ func (sdb *IntraBlockState) Empty(addr accounts.Address) (empty bool, err error)
 		return true, nil
 	}
 
+	// EIP-6780: an account self-destructed in THIS tx stays alive until end-of-tx
+	// cleanup, so it must not read as empty (it had code — it executed SELFDESTRUCT).
+	// main encodes this via its resident stateObject; on the noMaterialize path the
+	// self-destruct has already cleared the versioned nonce/code-hash/balance cells,
+	// so recognize the own-tx SelfDestruct write directly. Cross-tx destructs are
+	// handled above by versionedAccountBase returning nil.
+	if sdb.hasWrite(addr, SelfDestructPath, accounts.NilKey) {
+		return false, nil
+	}
+
 	return sdb.emptyFromVersionedFields(addr, account)
 }
 
