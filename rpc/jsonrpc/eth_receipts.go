@@ -144,7 +144,7 @@ func exceedsLogQueryLimit(crit filters.FilterCriteria, limit int) bool {
 // filters — see rpchelper.GetBlockNumber): callers scan logs through the same tx.
 func (api *BaseAPI) resolveLogsRange(ctx context.Context, tx kv.Tx, crit filters.FilterCriteria, checkFuture bool) (begin, end uint64, err error) {
 	if crit.BlockHash != nil {
-		block, err := api.blockByHashWithSenders(ctx, tx, *crit.BlockHash)
+		block, err := api._blockReader.BlockByHash(ctx, tx, *crit.BlockHash)
 		if err != nil {
 			return 0, 0, err
 		}

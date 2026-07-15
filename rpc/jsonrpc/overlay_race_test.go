@@ -19,6 +19,7 @@ package jsonrpc
 import (
 	"bytes"
 	"context"
+	"fmt"
 	"strconv"
 	"testing"
 
@@ -43,6 +44,7 @@ import (
 	"github.com/erigontech/erigon/node/gointerfaces/txpoolproto"
 	"github.com/erigontech/erigon/node/shards"
 	"github.com/erigontech/erigon/rpc"
+	"github.com/erigontech/erigon/rpc/filters"
 	"github.com/erigontech/erigon/rpc/rpchelper"
 )
 
@@ -310,6 +312,17 @@ func TestDebugAccountAt_OverlayHeadHash_CommittedView(t *testing.T) {
 	result, err := api.AccountAt(m.Ctx, overlayHeader.Hash(), 0, m.Address)
 	require.NoError(t, err, "an in-flight (uncommitted) head hash must read as unknown, not error")
 	require.Nil(t, result)
+}
+
+func TestGetLogsBlockHashUsesCommittedView(t *testing.T) {
+	t.Parallel()
+	base, m, overlayHeader := newOverlayAheadTestAPI(t)
+	api := newEthApiForTest(base, m.DB, nil, nil)
+	hash := overlayHeader.Hash()
+
+	logs, err := api.GetLogs(m.Ctx, filters.FilterCriteria{BlockHash: &hash})
+	require.EqualError(t, err, fmt.Sprintf("block not found: %x", hash))
+	require.Nil(t, logs)
 }
 
 // TestTxPoolContentFrom_UsesOverlayHead pins that txpool_contentFrom reads the
