@@ -464,8 +464,8 @@ func (s VisibleSegments) BeginRo() *RoTx {
 
 type RoTx struct {
 	Segments VisibleSegments
-	// release drops the pin for a standalone RoTx (ViewType/ViewSingleFile). nil for the
-	// per-type children inside a View, whose single pin is dropped by View.Close.
+	// release drops the pin for a standalone RoTx (ViewType/ViewSingleFile); nil when the
+	// caller pins the generation itself (caplin's views).
 	release func()
 }
 

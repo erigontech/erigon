@@ -1308,3 +1308,25 @@ func TestCloseAndDropNotProtected(t *testing.T) {
 	require.Contains(t, survivors, protected)
 	require.NotContains(t, survivors, stale)
 }
+
+func TestViewSegmentsOfUnmanagedType(t *testing.T) {
+	logger := log.New()
+	dir, require := t.TempDir(), require.New(t)
+	for _, snT := range snaptype2.BlockSnapshotTypes {
+		createTestSegmentFile(t, 0, 10_000, snT.Enum(), dir, version.V1_0, logger)
+	}
+	s := NewBaseRoSnapshots(ethconfig.BlocksFreezing{ChainName: networkname.Mainnet}, dir, snaptype2.BlockSnapshotTypes, snaptype2.Transactions, true, logger)
+	defer s.Close()
+	require.NoError(s.OpenFolder())
+
+	v := s.View()
+	defer v.Close()
+	require.NotEmpty(v.Segments(snaptype2.Transactions))
+
+	// A type this collection doesn't manage reads as empty rather than panicking.
+	require.NotPanics(func() {
+		require.Empty(v.Segments(snaptype.BeaconBlocks))
+		_, ok := v.Segment(snaptype.BeaconBlocks, 0)
+		require.False(ok)
+	})
+}
