@@ -42,11 +42,13 @@ func HashTreeRoot(schema ...any) ([32]byte, error) {
 	var stack [maxStackLeaves * length.Hash]byte
 	size := NextPowerOfTwo(uint64(len(schema) * length.Hash))
 	var leaves []byte
-	if size <= uint64(len(stack)) {
+	stackHit := size <= uint64(len(stack))
+	if stackHit {
 		leaves = stack[:size]
 	} else {
 		leaves = make([]byte, size)
 	}
+	htrObserve(len(schema), stackHit)
 	pos := 0
 
 	// Iterate over each element in the schema
