@@ -305,6 +305,9 @@ func (c *StateCache) Delete(domain kv.Domain, key []byte) {
 func (c *StateCache) Apply(domain kv.Domain, key, value []byte, txNum uint64) {
 	var codeHash []byte
 	if domain == kv.CodeDomain && len(value) > 0 {
+		// Copy before hashing so the stored bytes and codeHash come from the
+		// same snapshot of the caller-owned buffer.
+		value = common.Copy(value)
 		codeHash = crypto.Keccak256(value)
 	}
 
@@ -331,7 +334,7 @@ func (c *StateCache) Apply(domain kv.Domain, key, value []byte, txNum uint64) {
 		if len(value) == 0 {
 			cache.Delete(key)
 		} else if codeCache, ok := cache.(*CodeCache); ok {
-			codeCache.PutWithCodeHash(key, common.Copy(value), codeHash, txNum)
+			codeCache.PutWithCodeHash(key, value, codeHash, txNum)
 		}
 	default:
 		putOrDelete(cache, key, value, txNum)
