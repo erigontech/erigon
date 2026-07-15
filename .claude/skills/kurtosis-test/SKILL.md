@@ -75,8 +75,8 @@ The image tag must be **exactly** `test/erigon:current` because every
 docker build -t test/erigon:current --build-arg BINARIES="erigon caplin" .
 ```
 
-`caplin` is required in `BINARIES` because some configs (e.g.
-`caplin-minimal-assertoor.io`) use erigon as the CL via the same image.
+`caplin` is required in `BINARIES` because the caplin suites (e.g.
+`glamsterdam-caplin-mixed-two-cl.io`) run erigon as the CL via the same image.
 
 Always rebuild before each run — the same approach the CI uses. BuildKit's layer cache
 makes the no-op rebuild fast, and the fix → rebuild → rerun loop necessarily picks up
@@ -95,17 +95,15 @@ user to confirm.
 
 | Config file | `--package@branch` |
 |---|---|
-| `regular-assertoor.io` | `github.com/ethpandaops/ethereum-package@5.0.1` |
-| `pectra.io` | `github.com/ethpandaops/ethereum-package@5.0.1` |
-| `glamsterdam.io` | `github.com/ethpandaops/ethereum-package@6.1.0` |
+| `regular-erigon-mixed-el.io`, `pectra-erigon-mixed-el.io` | `github.com/ethpandaops/ethereum-package@5.0.1` |
+| `glamsterdam-*.io` and `fusaka-*.io` (the `-erigon-mixed-el` and caplin suites) | `github.com/ethpandaops/ethereum-package@6.1.0` |
 | `caplin-assertoor.io` | `github.com/erigontech/ethereum-package@erigontech/fix-caplin-launcher` |
-| `caplin-minimal-assertoor.io` | `github.com/erigontech/ethereum-package@erigontech/fix-caplin-launcher` |
 | (other / user-supplied) | default `5.0.1`, prompt user if unsure |
 
-Note: `glamsterdam` is pinned to `6.1.0` rather than `main` because `main` introduced
-the `GpuConfig` Starlark built-in which requires kurtosis CLI ≥ 1.18.1. Caplin suites
-(`caplin-assertoor.io`, `caplin-minimal-assertoor.io`) require the `erigontech` fork —
-do not let them fall back to the default `5.0.1`.
+Note: the `glamsterdam-*` and `fusaka-*` suites are pinned to `6.1.0` rather than `main`
+because `main` introduced the `GpuConfig` Starlark built-in which requires kurtosis CLI
+≥ 1.18.1. `caplin-assertoor.io` requires the `erigontech` fork — do not let it fall back
+to the default `5.0.1`.
 
 ## Start the testnet
 
@@ -115,11 +113,11 @@ CONFIG="$1"
 
 # Map config basename → ethereum-package branch (mirrors the table above).
 case "$(basename "$CONFIG")" in
-  glamsterdam.io)
+  glamsterdam-*.io|fusaka-*.io)
     PACKAGE_REF="github.com/ethpandaops/ethereum-package@6.1.0" ;;
-  caplin-assertoor.io|caplin-minimal-assertoor.io)
+  caplin-assertoor.io)
     PACKAGE_REF="github.com/erigontech/ethereum-package@erigontech/fix-caplin-launcher" ;;
-  regular-assertoor.io|pectra.io)
+  regular-erigon-mixed-el.io|pectra-erigon-mixed-el.io)
     PACKAGE_REF="github.com/ethpandaops/ethereum-package@5.0.1" ;;
   *)
     PACKAGE_REF="github.com/ethpandaops/ethereum-package@5.0.1" ;;
@@ -201,7 +199,7 @@ while [ "$(date +%s)" -lt "$end" ]; do
     echo "[$(date -u +%H:%M:%S)] RPC unreachable or invalid response — retrying"
   fi
   # Only declare a stall after seeing at least one block. Many configs set
-  # genesis_delay > stall_window (e.g. glamsterdam.io: 20s delay vs 18s window
+  # genesis_delay > stall_window (e.g. glamsterdam-erigon-mixed-el.io: 20s delay vs 18s window
   # at 6s slots), so the pre-genesis gap would otherwise trip a false stall.
   if [ "$prev" -gt 0 ] && [ "$(date +%s)" -gt "$stall_deadline" ]; then
     outcome="STALL: chain not progressing for >${stall_window}s (last height=$prev)"
@@ -370,7 +368,7 @@ docker image prune -f
 | `eth_blockNumber` returns `0x0` forever | Validators didn't start; check `vc-*` service logs; verify keystore mounting |
 | Connection refused on assertoor port | Service still booting; or `assertoor` not in `additional_services` in the YAML |
 | `kurtosis service logs` truncates very long logs | Use `kurtosis enclave dump` for the full per-service log files |
-| `caplin-minimal` config fails with "binary not found" | Confirm `BINARIES="erigon caplin"` in the docker build args |
+| A `caplin` suite fails with "binary not found" | Confirm `BINARIES="erigon caplin"` in the docker build args |
 | `eth_blockNumber` advances but assertoor reports timeout | Slot time / preset mismatch; check `seconds_per_slot` and `preset` in YAML |
 | Erigon image stale despite rebuild | `docker image rm test/erigon:current && docker build ...` to force; check BuildKit cache scope |
 | Port already allocated | Another enclave is running — `kurtosis enclave ls` then `kurtosis enclave rm -f <old>` |
