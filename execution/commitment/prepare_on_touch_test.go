@@ -22,7 +22,7 @@ type preparedSplits struct {
 func newPreparedSplits(t testing.TB, factory TrieContextFactory) *preparedSplits {
 	t.Helper()
 	base := NewHexPatriciaHashed(length.Addr, nil, DefaultTrieConfig())
-	bctx, bclean := factory()
+	bctx, bclean := factory(context.Background())
 	base.ResetContext(bctx)
 	base.branchEncoder.setDeferUpdates(true)
 	base.SetLeaveDeferredForCaller(true)
@@ -37,7 +37,7 @@ func newPreparedSplits(t testing.TB, factory TrieContextFactory) *preparedSplits
 	for i := 0; i < 16; i++ {
 		w := NewHexPatriciaHashed(length.Addr, nil, DefaultTrieConfig())
 		w.mountTo(base, i)
-		wctx, wclean := factory()
+		wctx, wclean := factory(context.Background())
 		w.ResetContext(wctx)
 		w.branchEncoder.setDeferUpdates(true)
 		w.SetLeaveDeferredForCaller(true)

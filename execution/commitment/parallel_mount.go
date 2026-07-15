@@ -67,7 +67,7 @@ func (p *ParallelPatriciaHashed) processMounted(ctx context.Context, updates *Up
 		return nil, fmt.Errorf("processMounted: nil template")
 	}
 	if base.ctx == nil && p.trieCtxFactory != nil {
-		bctx, cleanup := p.trieCtxFactory()
+		bctx, cleanup := p.trieCtxFactory(ctx)
 		if cleanup != nil {
 			defer cleanup()
 		}
@@ -123,7 +123,7 @@ func (p *ParallelPatriciaHashed) processMounted(ctx context.Context, updates *Up
 			} else {
 				w.traceW = nil
 			}
-			wctx, cleanup := p.trieCtxFactory()
+			wctx, cleanup := p.trieCtxFactory(gctx)
 			if cleanup != nil {
 				defer cleanup()
 			}
@@ -238,12 +238,12 @@ func printMountTiming(tStart, tUnfolded, tWorkers time.Time, buildDur, foldDur *
 	}
 }
 
-func (p *ParallelPatriciaHashed) newStorageWorker() (*HexPatriciaHashed, func()) {
+func (p *ParallelPatriciaHashed) newStorageWorker(ctx context.Context) (*HexPatriciaHashed, func()) {
 	var traceW io.Writer
 	if p.template != nil {
 		traceW = p.template.traceW
 	}
-	return newDeferredStorageWorker(&p.workerPool, p.trieCtxFactory, traceW)
+	return newDeferredStorageWorker(ctx, &p.workerPool, p.trieCtxFactory, traceW)
 }
 
 // setAccountStorageRoot writes the folded storage-root cell sr onto the account leaf.

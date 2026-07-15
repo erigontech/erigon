@@ -560,12 +560,10 @@ func (sdc *SharedDomainsCommitmentContext) ComputeCommitment(ctx context.Context
 			// Each worker writes its branch updates through a private collector
 			// so concurrent PutBranch calls never race; collectors are drained
 			// after Process and merged into the main writer below.
-			var concurrentFactory commitment.WarmupTrieContextFactory
+			var concurrentFactory commitment.TrieContextFactory
 			concurrentFactory, drainCollectors = sdc.concurrentTrieContextFactory(sdc.paraTrieDB, workerPin, txNum)
 			warmupConfig.CtxFactory = concurrentFactory
-			trie.SetTrieContextFactory(func() (commitment.PatriciaContext, func()) {
-				return concurrentFactory(ctx)
-			})
+			trie.SetTrieContextFactory(concurrentFactory)
 		default:
 			// Serial: this factory only serves page-cache warmup, which does not
 			// compute the root, so its reads need no generation pin. (Streaming is
@@ -667,7 +665,7 @@ func beginWorkerRo(ctx context.Context, db kv.TemporalRoDB, pin kv.TemporalFiles
 	return db.BeginTemporalRo(ctx)
 }
 
-func (sdc *SharedDomainsCommitmentContext) warmupTrieContextFactory(db kv.TemporalRoDB, txNum uint64) commitment.WarmupTrieContextFactory {
+func (sdc *SharedDomainsCommitmentContext) warmupTrieContextFactory(db kv.TemporalRoDB, txNum uint64) commitment.TrieContextFactory {
 	// avoid races like this
 	stepSize := sdc.sharedDomains.StepSize()
 	return func(ctx context.Context) (commitment.PatriciaContext, func()) {
@@ -709,7 +707,7 @@ func (sdc *SharedDomainsCommitmentContext) warmupTrieContextFactory(db kv.Tempor
 // concurrentTrieContextFactory is like warmupTrieContextFactory but blocking, and also creates a per-goroutine
 // etl.Collector for each context so that PutBranch writes are isolated (no shared writer race).
 // Returns the factory and a drain function that collects all created collectors.
-func (sdc *SharedDomainsCommitmentContext) concurrentTrieContextFactory(db kv.TemporalRoDB, pin kv.TemporalFilesPin, txNum uint64) (commitment.WarmupTrieContextFactory, func() []*etl.Collector) {
+func (sdc *SharedDomainsCommitmentContext) concurrentTrieContextFactory(db kv.TemporalRoDB, pin kv.TemporalFilesPin, txNum uint64) (commitment.TrieContextFactory, func() []*etl.Collector) {
 	stepSize := sdc.sharedDomains.StepSize()
 	var mu sync.Mutex
 	var collectors []*etl.Collector

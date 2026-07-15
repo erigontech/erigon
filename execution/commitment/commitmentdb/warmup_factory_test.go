@@ -70,7 +70,7 @@ func TestWarmupFactoriesUnblockBeginOnWarmuperClose(t *testing.T) {
 	t.Parallel()
 	sdc := &SharedDomainsCommitmentContext{sharedDomains: stubSharedDomains{}}
 	concurrent, _ := sdc.concurrentTrieContextFactory(&blockingBeginDB{}, nil, 0)
-	factories := map[string]commitment.WarmupTrieContextFactory{
+	factories := map[string]commitment.TrieContextFactory{
 		"warmup":     sdc.warmupTrieContextFactory(&blockingBeginDB{}, 0),
 		"concurrent": concurrent,
 	}

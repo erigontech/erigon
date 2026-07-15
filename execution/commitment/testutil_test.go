@@ -212,9 +212,8 @@ func encodeCellRow(tb testing.TB, size int) (row []*cell, bm uint16, enc BranchD
 // LogPrefix "test"), varying only the context factory and worker count.
 func testWarmuper(ctx context.Context, factory TrieContextFactory, workers int) *Warmuper {
 	return NewWarmuper(ctx, WarmupConfig{
-		Enabled: true,
-		// mock factories return instantly, so they have no use for the warmuper ctx
-		CtxFactory: func(context.Context) (PatriciaContext, func()) { return factory() },
+		Enabled:    true,
+		CtxFactory: factory,
 		NumWorkers: workers,
 		MaxDepth:   64,
 		LogPrefix:  "test",

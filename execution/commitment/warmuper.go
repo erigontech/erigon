@@ -31,21 +31,17 @@ import (
 	"github.com/erigontech/erigon/execution/commitment/nibbles"
 )
 
-// TrieContextFactory creates new PatriciaContext instances for parallel warmup.
-type TrieContextFactory func() (PatriciaContext, func())
-
-// WarmupTrieContextFactory creates the PatriciaContext for a warmup worker.
-// It runs synchronously in the worker with the warmuper's lifecycle ctx, so no
-// factory code outlives CloseAndWait; in exchange the factory must honor ctx
-// and return promptly once it is cancelled (e.g. a read-tx open blocked on the
-// read-tx semaphore must abort), or CloseAndWait hangs.
-type WarmupTrieContextFactory func(ctx context.Context) (PatriciaContext, func())
+// TrieContextFactory creates new PatriciaContext instances for parallel trie processing.
+// The factory must honor ctx and return promptly once it is cancelled (e.g. a read-tx
+// open blocked on the read-tx semaphore must abort), so callers waiting on their workers
+// to exit — such as Warmuper.CloseAndWait — cannot hang.
+type TrieContextFactory func(ctx context.Context) (PatriciaContext, func())
 
 // WarmupConfig contains configuration for pre-warming MDBX page cache
 // during commitment processing.
 type WarmupConfig struct {
 	Enabled    bool
-	CtxFactory WarmupTrieContextFactory
+	CtxFactory TrieContextFactory
 	NumWorkers int
 	MaxDepth   int
 	LogPrefix  string
@@ -63,7 +59,7 @@ type WarmupStats struct {
 type Warmuper struct {
 	ctx        context.Context
 	cancel     context.CancelFunc
-	ctxFactory WarmupTrieContextFactory
+	ctxFactory TrieContextFactory
 	maxDepth   int
 	numWorkers int
 	logPrefix  string

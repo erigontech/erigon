@@ -335,7 +335,7 @@ func (p *ParallelPatriciaHashed) Process(
 		p.deferredForCaller = pu.deferredCombined
 		pu.deferredCombined = nil
 		pu.deferredMu.Unlock()
-	} else if aErr := p.applyDeferredUpdates(pu); aErr != nil {
+	} else if aErr := p.applyDeferredUpdates(ctx, pu); aErr != nil {
 		return nil, aErr
 	}
 
@@ -378,7 +378,7 @@ func dfsSubtree(node *prefixNode, path []byte, fn func(hashedKey, plainKey []byt
 }
 
 // applyDeferredUpdates applies the merged deferred branch updates, returning every entry to the pool on success or failure.
-func (p *ParallelPatriciaHashed) applyDeferredUpdates(pu *parallelUpdate) error {
+func (p *ParallelPatriciaHashed) applyDeferredUpdates(ctx context.Context, pu *parallelUpdate) error {
 	pu.deferredMu.Lock()
 	deferred := pu.deferredCombined
 	pu.deferredCombined = nil
@@ -393,7 +393,7 @@ func (p *ParallelPatriciaHashed) applyDeferredUpdates(pu *parallelUpdate) error 
 		}
 	}()
 
-	applyCtx, cleanup := p.trieCtxFactory()
+	applyCtx, cleanup := p.trieCtxFactory(ctx)
 	if cleanup != nil {
 		defer cleanup()
 	}
