@@ -2,6 +2,7 @@ package types
 
 import (
 	"bytes"
+	"errors"
 	"reflect"
 	"strings"
 	"testing"
@@ -243,5 +244,71 @@ func TestBlockAccessListRejectsEmptySlotChanges(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "empty slot changes") {
 		t.Fatalf("expected 'empty slot changes' error, but got: %v", err)
+	}
+}
+
+// balTestAccountRLP hand-encodes a minimal AccountChanges entry: a 20-byte
+// address whose last byte is lastAddrByte, followed by five empty change/read
+// lists (storage changes, storage reads, balance, nonce, code changes).
+func balTestAccountRLP(lastAddrByte byte) []byte {
+	acc := []byte{0xda, 0x94}
+	addr := make([]byte, 20)
+	addr[19] = lastAddrByte
+	acc = append(acc, addr...)
+	return append(acc, 0xc0, 0xc0, 0xc0, 0xc0, 0xc0)
+}
+
+func balTestWrapList(items ...[]byte) []byte {
+	var content []byte
+	for _, item := range items {
+		content = append(content, item...)
+	}
+	if len(content) >= 56 {
+		panic("balTestWrapList supports short lists only")
+	}
+	return append([]byte{0xc0 + byte(len(content))}, content...)
+}
+
+func TestDecodeBlockAccessListBytesMalformedVsInvalid(t *testing.T) {
+	valid, err := DecodeBlockAccessListBytes(balTestWrapList(balTestAccountRLP(1), balTestAccountRLP(2)))
+	if err != nil {
+		t.Fatalf("valid two-account list: %v", err)
+	}
+	if len(valid) != 2 {
+		t.Fatalf("valid two-account list: got %d accounts, want 2", len(valid))
+	}
+	emptyBal, err := DecodeBlockAccessListBytes([]byte{0xc0})
+	if err != nil || emptyBal == nil || len(emptyBal) != 0 {
+		t.Fatalf("empty list: bal=%v err=%v", emptyBal, err)
+	}
+	malformed := map[string][]byte{
+		"empty input":     {},
+		"string not list": {0x80},
+		"truncated list":  {0xc1},
+	}
+	for name, data := range malformed {
+		_, err := DecodeBlockAccessListBytes(data)
+		if err == nil {
+			t.Fatalf("%s: expected error", name)
+		}
+		if errors.Is(err, ErrInvalidBlockAccessList) {
+			t.Fatalf("%s: malformed RLP must not map to ErrInvalidBlockAccessList: %v", name, err)
+		}
+	}
+	emptySlotChanges := append([]byte{0xdd, 0x94}, make([]byte, 20)...)
+	emptySlotChanges = append(emptySlotChanges, 0xc3, 0xc2, 0x01, 0xc0, 0xc0, 0xc0, 0xc0, 0xc0)
+	semanticallyInvalid := map[string][]byte{
+		"duplicate address":  balTestWrapList(balTestAccountRLP(1), balTestAccountRLP(1)),
+		"descending address": balTestWrapList(balTestAccountRLP(2), balTestAccountRLP(1)),
+		"empty slot changes": balTestWrapList(emptySlotChanges),
+	}
+	for name, data := range semanticallyInvalid {
+		_, err := DecodeBlockAccessListBytes(data)
+		if err == nil {
+			t.Fatalf("%s: expected error", name)
+		}
+		if !errors.Is(err, ErrInvalidBlockAccessList) {
+			t.Fatalf("%s: expected ErrInvalidBlockAccessList, got: %v", name, err)
+		}
 	}
 }

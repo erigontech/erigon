@@ -567,12 +567,13 @@ func (w *DomainBufferedWriter) addValue(k, value []byte, step kv.Step) error {
 
 // DomainRoTx allows accesing the same domain from multiple go-routines
 type DomainRoTx struct {
-	files    visibleFiles
-	visible  *domainVisible
-	name     kv.Domain
-	stepSize uint64
-	ht       *HistoryRoTx
-	salt     *uint32
+	files             visibleFiles
+	visible           *domainVisible
+	name              kv.Domain
+	stepSize          uint64
+	stepsInFrozenFile uint64
+	ht                *HistoryRoTx
+	salt              *uint32
 
 	d *Domain
 
@@ -644,13 +645,14 @@ func (d *Domain) beginForTests() *DomainRoTx {
 // aggregatorVisible generation, avoiding a torn cross-entity read
 func (d *Domain) beginFilesRo(dv *domainVisible, hf visibleFiles, hiv *iiVisible) *DomainRoTx {
 	return &DomainRoTx{
-		name:     d.Name,
-		stepSize: d.stepSize,
-		d:        d,
-		ht:       d.History.beginFilesRo(hf, hiv),
-		visible:  dv,
-		files:    dv.files,
-		salt:     d.salt.Load(),
+		name:              d.Name,
+		stepSize:          d.stepSize,
+		stepsInFrozenFile: d.stepsInFrozenFile,
+		d:                 d,
+		ht:                d.History.beginFilesRo(hf, hiv),
+		visible:           dv,
+		files:             dv.files,
+		salt:              d.salt.Load(),
 	}
 }
 

@@ -759,15 +759,14 @@ func (e *ExecModule) HasBlock(ctx context.Context, blockHash *common.Hash, _ *ui
 	if *num <= e.blockReader.FrozenBlocks() {
 		return true, nil
 	}
-	dbKey := dbutils.HeaderKey(*num, *blockHash)
-	has, err := tx.Has(kv.Headers, dbKey)
+	has, err := tx.Has(kv.Headers, dbutils.HeaderKey(*num, *blockHash))
 	if err != nil {
 		return false, err
 	}
 	if !has {
 		return false, nil
 	}
-	has, err = tx.Has(kv.BlockBody, dbKey)
+	has, err = tx.Has(kv.BlockBody, dbutils.HeaderKey(*num, *blockHash))
 	if err != nil {
 		return false, err
 	}
