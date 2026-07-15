@@ -37,7 +37,7 @@ import (
 // -race, this must stay clean.
 func TestGenericCache_ConcurrentPutAcrossGrow(t *testing.T) {
 	// Budget well above the start size (1024 slots) so maybeGrow fires repeatedly.
-	c := NewGenericCache[[]byte](64*datasize.MB, func(v []byte) int { return len(v) }, ModeEvictLRU)
+	c := closeOnCleanup(t, NewGenericCache[[]byte](64*datasize.MB, func(v []byte) int { return len(v) }, ModeEvictLRU))
 
 	const workers = 8
 	const perWorker = 20_000
