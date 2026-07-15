@@ -39,3 +39,5 @@ assertoor_params:
   run_stability_check: false
   run_block_proposal_check: true
   image: ethpandaops/assertoor:v0.1.3
+  tests:
+    - file: https://raw.githubusercontent.com/ethpandaops/assertoor-test/master/assertoor-tests/blob-transactions-test.yaml
