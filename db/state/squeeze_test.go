@@ -77,7 +77,7 @@ func generateInputData(tb testing.TB, keySize, valueSize, keyCount int) ([][]byt
 	keys := make([][]byte, keyCount)
 
 	bk, bv := make([]byte, keySize), make([]byte, valueSize)
-	for i := 0; i < keyCount; i++ {
+	for i := range keyCount {
 		n, err := rnd.Read(bk)
 		require.Equal(tb, keySize, n)
 		require.NoError(tb, err)
@@ -174,10 +174,10 @@ func testDbAggregatorWithNoFiles(tb testing.TB, txCount int, cfg *testAggConfig)
 	tb.Logf("keys %d vals %d\n", len(keys), len(vals))
 
 	var txNum, blockNum uint64
-	for i := 0; i < len(vals); i++ {
+	for i := range vals {
 		txNum = uint64(i)
 
-		for j := 0; j < len(keys); j++ {
+		for j := range keys {
 			acc := accounts.Account{
 				Nonce:       uint64(i),
 				Balance:     *uint256.NewInt(uint64(i * 100_000)),
@@ -451,7 +451,7 @@ func makeCodeValue(idx uint64) []byte {
 	binary.BigEndian.PutUint64(buf[1:], idx)
 	h := sha256.Sum256(buf[:])
 	// Fill code with hash-derived bytes, repeating as needed
-	for i := 0; i < size; i++ {
+	for i := range size {
 		code[i] = h[i%len(h)]
 	}
 	return code
@@ -460,13 +460,13 @@ func makeCodeValue(idx uint64) []byte {
 func TestMakeAccountAddr_NibbleDistribution(t *testing.T) {
 	nibbles := make(map[byte]int, 16)
 	const count = 1000
-	for i := uint64(0); i < count; i++ {
+	for i := range uint64(count) {
 		addr := makeAccountAddr(i)
 		firstNibble := addr[0] >> 4
 		nibbles[firstNibble]++
 	}
 	// All 16 nibble values must be present
-	for n := byte(0); n < 16; n++ {
+	for n := range byte(16) {
 		require.Positive(t, nibbles[n], "missing first nibble %x in %d generated keys", n, count)
 	}
 	t.Logf("nibble distribution over %d keys: %v", count, nibbles)
@@ -710,7 +710,7 @@ func TestGenerateCommitmentRebuildData(t *testing.T) {
 		lastRoot    []byte
 	)
 
-	for txNum := uint64(0); txNum < totalTxs; txNum++ {
+	for txNum := range totalTxs {
 		// Write accounts batch
 		for i := uint64(0); i < accPerTx && accIdx < numAccounts; i++ {
 			addr := makeAccountAddr(accIdx)

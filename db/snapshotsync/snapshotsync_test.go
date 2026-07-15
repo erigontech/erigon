@@ -23,11 +23,11 @@ import (
 
 	"github.com/stretchr/testify/assert"
 
+	"github.com/erigontech/erigon/db/dbservices"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/dbcfg"
 	"github.com/erigontech/erigon/db/kv/memdb"
 	"github.com/erigontech/erigon/db/kv/prune"
-	"github.com/erigontech/erigon/db/services"
 	"github.com/erigontech/erigon/db/snapcfg"
 	"github.com/erigontech/erigon/db/snaptype"
 	"github.com/erigontech/erigon/execution/chain"
@@ -51,7 +51,7 @@ type frozenBody struct {
 }
 
 type fakeSnapshots struct {
-	services.BlockSnapshots
+	dbservices.BlockSnapshots
 	max uint64
 }
 
@@ -65,7 +65,7 @@ type fakeBlockReader struct {
 	bodies    []frozenBody
 }
 
-func (f *fakeBlockReader) Snapshots() services.BlockSnapshots {
+func (f *fakeBlockReader) Snapshots() dbservices.BlockSnapshots {
 	return fakeSnapshots{max: f.frozenMax}
 }
 

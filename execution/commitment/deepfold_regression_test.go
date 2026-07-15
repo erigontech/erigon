@@ -38,7 +38,7 @@ func whaleSurvivorCorpus(keepWholeNibble bool) (pk [][]byte, upds []Update, k2 [
 	addr, _, _, _, pk, upds, groups = whaleByNibble(30_000)
 
 	surv := -1
-	for x := 0; x < 16; x++ {
+	for x := range 16 {
 		if len(groups[x]) >= 2 {
 			surv = x
 			break
@@ -49,7 +49,7 @@ func whaleSurvivorCorpus(keepWholeNibble bool) (pk [][]byte, upds []Update, k2 [
 	u2 = []Update{{Flags: BalanceUpdate | NonceUpdate}}
 	u2[0].Balance.SetUint64(99)
 	u2[0].Nonce = 7
-	for x := 0; x < 16; x++ {
+	for x := range 16 {
 		for i, kv := range groups[x] {
 			if x == surv && (keepWholeNibble || i == 0) {
 				continue // keep the survivor(s)
@@ -191,7 +191,7 @@ func TestStreaming_ExtensionToppedMountSplit(t *testing.T) {
 	seed := NewUpdateBuilder()
 	seed.Balance(addrHex(a), 10)
 	seed.Balance(addrHex(b), 20)
-	for n := 0; n < 16; n++ {
+	for n := range 16 {
 		if n == 7 {
 			continue
 		}

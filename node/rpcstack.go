@@ -194,6 +194,11 @@ var gzPool = sync.Pool{
 	New: func() any { w, _ := gzip.NewWriterLevel(io.Discard, gzip.BestSpeed); return w },
 }
 
+func putGzip(gz *gzip.Writer) {
+	gz.Reset(io.Discard)
+	gzPool.Put(gz)
+}
+
 var libdeflateWarnOnce sync.Once
 var libdeflateCompressWarnOnce sync.Once
 var libdeflateDisabled atomic.Bool
@@ -267,7 +272,7 @@ func (w *gzipResponseWriter) Flush() {
 
 func writeStdlibGzip(w http.ResponseWriter, src []byte, status int) {
 	gz := gzPool.Get().(*gzip.Writer)
-	defer gzPool.Put(gz)
+	defer putGzip(gz)
 	gz.Reset(w)
 	w.Header().Set("Content-Encoding", "gzip")
 	w.Header().Del("Content-Length")
@@ -318,7 +323,7 @@ func sendGzipResponse(w http.ResponseWriter, grw *gzipResponseWriter) {
 	defer pool.PutBuffer(grw.buf)
 
 	if grw.gzw != nil {
-		defer gzPool.Put(grw.gzw)
+		defer putGzip(grw.gzw)
 		defer grw.gzw.Close() //nolint:errcheck
 		return
 	}

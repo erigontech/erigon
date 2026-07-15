@@ -31,11 +31,11 @@ import (
 	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/common/math"
+	"github.com/erigontech/erigon/db/dbservices"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/dbutils"
 	"github.com/erigontech/erigon/db/kv/kvcache"
 	"github.com/erigontech/erigon/db/rawdb"
-	"github.com/erigontech/erigon/db/services"
 	"github.com/erigontech/erigon/db/state/execctx"
 	"github.com/erigontech/erigon/execution/bal"
 	"github.com/erigontech/erigon/execution/builder"
@@ -185,7 +185,7 @@ func (c *CacheView) HasStorage(address common.Address) (bool, error) {
 type ExecModule struct {
 	bacgroundCtx context.Context
 	// Snapshots + MDBX
-	blockReader services.FullBlockReader
+	blockReader dbservices.FullBlockReader
 
 	// MDBX database
 	db kv.TemporalRwDB // main database
@@ -240,7 +240,7 @@ var _ ExecutionModule = (*ExecModule)(nil) // compile-time interface check
 
 func NewExecModule(
 	ctx context.Context,
-	blockReader services.FullBlockReader,
+	blockReader dbservices.FullBlockReader,
 	db kv.TemporalRwDB,
 	pipelineExecutor *PipelineExecutor,
 	currentBlockNumber uint64,
@@ -759,14 +759,15 @@ func (e *ExecModule) HasBlock(ctx context.Context, blockHash *common.Hash, _ *ui
 	if *num <= e.blockReader.FrozenBlocks() {
 		return true, nil
 	}
-	has, err := tx.Has(kv.Headers, dbutils.HeaderKey(*num, *blockHash))
+	dbKey := dbutils.HeaderKey(*num, *blockHash)
+	has, err := tx.Has(kv.Headers, dbKey)
 	if err != nil {
 		return false, err
 	}
 	if !has {
 		return false, nil
 	}
-	has, err = tx.Has(kv.BlockBody, dbutils.HeaderKey(*num, *blockHash))
+	has, err = tx.Has(kv.BlockBody, dbKey)
 	if err != nil {
 		return false, err
 	}

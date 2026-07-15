@@ -425,7 +425,7 @@ func TestPayloadAttestationServicePendingQueueCapConcurrent(t *testing.T) {
 	service.pendingCount.Store(maxPendingAttestations - 5)
 
 	var wg sync.WaitGroup
-	for i := 0; i < 100; i++ {
+	for i := range 100 {
 		wg.Add(1)
 		go func(idx int) {
 			defer wg.Done()

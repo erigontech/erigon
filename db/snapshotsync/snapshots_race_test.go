@@ -57,7 +57,7 @@ func TestRemoveOverlapsDefersUnlinkWhileViewOpen(t *testing.T) {
 		createTestSegmentFile(t, 0, 10_000, snT.Enum(), dir, version.V1_0, logger)
 	}
 
-	s := NewBaseRoSnapshots(ethconfig.BlocksFreezing{ChainName: networkname.Mainnet}, dir, snaptype2.BlockSnapshotTypes, true, logger)
+	s := NewBaseRoSnapshots(ethconfig.BlocksFreezing{ChainName: networkname.Mainnet}, dir, snaptype2.BlockSnapshotTypes, snaptype2.Transactions, true, logger)
 	defer s.Close()
 	require.NoError(s.OpenFolder())
 
@@ -96,7 +96,7 @@ func TestRemoveOverlapsProtectsPendingRetired(t *testing.T) {
 			createTestSegmentFile(t, from, from+1_000, snT.Enum(), dir, version.V1_0, logger)
 		}
 	}
-	s := NewBaseRoSnapshots(ethconfig.BlocksFreezing{ChainName: networkname.Mainnet}, dir, snaptype2.BlockSnapshotTypes, true, logger)
+	s := NewBaseRoSnapshots(ethconfig.BlocksFreezing{ChainName: networkname.Mainnet}, dir, snaptype2.BlockSnapshotTypes, snaptype2.Transactions, true, logger)
 	defer s.Close()
 	require.NoError(s.OpenFolder())
 
@@ -173,7 +173,7 @@ func TestReadersRaceRetire(t *testing.T) {
 		createTestSegmentFile(t, 0, 10_000, snT.Enum(), dir, verOf(i), logger)
 	}
 
-	s := NewBaseRoSnapshots(ethconfig.BlocksFreezing{ChainName: networkname.Mainnet}, dir, snaptype2.BlockSnapshotTypes, true, logger)
+	s := NewBaseRoSnapshots(ethconfig.BlocksFreezing{ChainName: networkname.Mainnet}, dir, snaptype2.BlockSnapshotTypes, snaptype2.Transactions, true, logger)
 	defer s.Close()
 	require.NoError(s.OpenFolder())
 
@@ -214,7 +214,7 @@ func TestReadersRaceRetire(t *testing.T) {
 
 	var wg sync.WaitGroup
 	stop := make(chan struct{})
-	for r := 0; r < 8; r++ {
+	for range 8 {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()

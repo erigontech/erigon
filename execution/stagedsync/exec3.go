@@ -701,6 +701,7 @@ func (te *txExecutor) executeBlocks(ctx context.Context, startBlockNum uint64, m
 					stateRoot:  header.Root,
 					firstTxNum: blockStartTxNum,
 					lastTxNum:  inputTxNum - 1,
+					blockTime:  header.Time,
 					bal:        dbBAL,
 				}:
 				case <-ctx.Done():

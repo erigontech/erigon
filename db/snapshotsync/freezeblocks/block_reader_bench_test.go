@@ -103,7 +103,7 @@ func BenchmarkCanonicalHash_MDBXLookup(b *testing.B) {
 		b.Fatal(err)
 	}
 	defer rwTx.Rollback() //nolint:gocritic
-	for i := uint64(0); i < benchBlockCount; i++ {
+	for i := range uint64(benchBlockCount) {
 		if err := rawdb.WriteCanonicalHash(rwTx, realisticHeader(i).Hash(), i); err != nil {
 			b.Fatal(err)
 		}
@@ -137,7 +137,7 @@ func BenchmarkCanonicalHash_MDBXLookup(b *testing.B) {
 // RLP decode from the memory-mapped snapshot file), which is not measured here.
 func BenchmarkCanonicalHash_HeaderHash_Realistic(b *testing.B) {
 	headers := make([]*types.Header, benchBlockCount)
-	for i := uint64(0); i < benchBlockCount; i++ {
+	for i := range uint64(benchBlockCount) {
 		headers[i] = realisticHeader(i)
 	}
 	b.ResetTimer()
@@ -157,7 +157,7 @@ func BenchmarkCanonicalHash_LRUCacheHit(b *testing.B) {
 	if err != nil {
 		b.Fatal(err)
 	}
-	for i := uint64(0); i < benchBlockCount; i++ {
+	for i := range uint64(benchBlockCount) {
 		cache.Add(i, realisticHeader(i).Hash())
 	}
 
