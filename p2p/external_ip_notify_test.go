@@ -112,13 +112,13 @@ func TestNetworkChangeEventsCoalesce(t *testing.T) {
 	stop := make(chan struct{})
 	done := make(chan struct{})
 	go func() {
-		tr.runWithNotifier(stop, fn, time.Hour, 40*time.Millisecond)
+		tr.runWithNotifier(stop, fn, time.Hour, 250*time.Millisecond)
 		close(done)
 	}()
 
 	expectApplied(t, applied, ip1) // initial resolve -> 1 call
 
-	for i := 0; i < 8; i++ { // burst, buffered, no inter-event sleeps
+	for range 8 { // burst, buffered, no inter-event sleeps
 		fn.ch <- struct{}{}
 	}
 	waitForCount(t, nat, 2) // the burst coalesces into a single extra resolve

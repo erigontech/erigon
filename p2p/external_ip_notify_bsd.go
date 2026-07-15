@@ -24,6 +24,7 @@ import (
 
 	"golang.org/x/sys/unix"
 
+	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/log/v3"
 )
 
@@ -40,7 +41,7 @@ type routeNotifier struct {
 func newNetChangeNotifier(logger log.Logger) netChangeNotifier {
 	fd, err := unix.Socket(unix.AF_ROUTE, unix.SOCK_RAW, unix.AF_UNSPEC)
 	if err != nil {
-		logger.Debug("p2p: route notifier unavailable, using periodic external IP refresh only", "err", err)
+		logger.Debug(notifierUnavailableMsg, "err", err)
 		return noopNotifier{}
 	}
 	unix.CloseOnExec(fd)
@@ -48,7 +49,7 @@ func newNetChangeNotifier(logger log.Logger) netChangeNotifier {
 	// without it Close could block forever on a blocked read.
 	if err := unix.SetsockoptTimeval(fd, unix.SOL_SOCKET, unix.SO_RCVTIMEO, &unix.Timeval{Sec: 1}); err != nil {
 		_ = unix.Close(fd)
-		logger.Debug("p2p: route receive timeout setup failed, using periodic external IP refresh only", "err", err)
+		logger.Debug(notifierUnavailableMsg, "err", err)
 		return noopNotifier{}
 	}
 
@@ -73,6 +74,7 @@ func (n *routeNotifier) Close() error {
 }
 
 func (n *routeNotifier) loop(logger log.Logger) {
+	defer dbg.LogPanic()
 	defer close(n.stopped)
 	defer func() { _ = unix.Close(n.fd) }()
 
@@ -89,7 +91,17 @@ func (n *routeNotifier) loop(logger log.Logger) {
 			if errors.Is(err, unix.EAGAIN) || errors.Is(err, unix.EINTR) {
 				continue
 			}
-			logger.Debug("p2p: route read failed, disabling event-driven external IP refresh", "err", err)
+			if errors.Is(err, unix.ENOBUFS) {
+				// The kernel dropped route messages because we fell behind. A
+				// drop means state we didn't see changed, so signal a refresh
+				// and keep watching rather than reverting to poll-only.
+				select {
+				case n.events <- struct{}{}:
+				default:
+				}
+				continue
+			}
+			logger.Debug(notifierReadFailedMsg, "err", err)
 			return
 		}
 		if nr <= 0 {

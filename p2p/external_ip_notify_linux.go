@@ -24,6 +24,7 @@ import (
 
 	"golang.org/x/sys/unix"
 
+	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/log/v3"
 )
 
@@ -40,7 +41,7 @@ type netlinkNotifier struct {
 func newNetChangeNotifier(logger log.Logger) netChangeNotifier {
 	fd, err := unix.Socket(unix.AF_NETLINK, unix.SOCK_RAW|unix.SOCK_CLOEXEC, unix.NETLINK_ROUTE)
 	if err != nil {
-		logger.Debug("p2p: netlink notifier unavailable, using periodic external IP refresh only", "err", err)
+		logger.Debug(notifierUnavailableMsg, "err", err)
 		return noopNotifier{}
 	}
 	addr := &unix.SockaddrNetlink{
@@ -49,14 +50,14 @@ func newNetChangeNotifier(logger log.Logger) netChangeNotifier {
 	}
 	if err := unix.Bind(fd, addr); err != nil {
 		_ = unix.Close(fd)
-		logger.Debug("p2p: netlink bind failed, using periodic external IP refresh only", "err", err)
+		logger.Debug(notifierUnavailableMsg, "err", err)
 		return noopNotifier{}
 	}
 	// A receive timeout lets the read wake periodically to observe Close;
 	// without it Close could block forever on a blocked read.
 	if err := unix.SetsockoptTimeval(fd, unix.SOL_SOCKET, unix.SO_RCVTIMEO, &unix.Timeval{Sec: 1}); err != nil {
 		_ = unix.Close(fd)
-		logger.Debug("p2p: netlink receive timeout setup failed, using periodic external IP refresh only", "err", err)
+		logger.Debug(notifierUnavailableMsg, "err", err)
 		return noopNotifier{}
 	}
 
@@ -81,6 +82,7 @@ func (n *netlinkNotifier) Close() error {
 }
 
 func (n *netlinkNotifier) loop(logger log.Logger) {
+	defer dbg.LogPanic()
 	defer close(n.stopped)
 	defer func() { _ = unix.Close(n.fd) }()
 
@@ -97,7 +99,17 @@ func (n *netlinkNotifier) loop(logger log.Logger) {
 			if errors.Is(err, unix.EAGAIN) || errors.Is(err, unix.EINTR) {
 				continue
 			}
-			logger.Debug("p2p: netlink read failed, disabling event-driven external IP refresh", "err", err)
+			if errors.Is(err, unix.ENOBUFS) {
+				// The kernel dropped multicast messages because we fell behind.
+				// A drop means state we didn't see changed, so signal a refresh
+				// and keep watching rather than reverting to poll-only.
+				select {
+				case n.events <- struct{}{}:
+				default:
+				}
+				continue
+			}
+			logger.Debug(notifierReadFailedMsg, "err", err)
 			return
 		}
 		if nr < unix.NLMSG_HDRLEN {

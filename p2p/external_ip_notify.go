@@ -22,6 +22,13 @@ import "time"
 // interface flap emits many) into a single re-resolve once the link settles.
 const defaultEventDebounce = 3 * time.Second
 
+// Per-OS notifiers share these messages so logs read the same everywhere; the
+// "err" field carries the platform-specific cause.
+const (
+	notifierUnavailableMsg = "network-change notifier unavailable, using periodic external IP refresh only"
+	notifierReadFailedMsg  = "network-change notifier read failed, disabling event-driven external IP refresh"
+)
+
 // netChangeNotifier watches OS network-configuration changes. Events delivers a
 // coalesced signal to reconsider the external IP; it never carries an address,
 // so this path cannot be used to move the advertised endpoint. Platforms with

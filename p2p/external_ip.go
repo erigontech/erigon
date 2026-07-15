@@ -69,7 +69,7 @@ func (t *externalIPTracker) refresh() bool {
 
 // logFailure reports a resolution failure loudly the first time, then quietly
 // while it persists, so a flapping link or a down STUN server cannot spam logs.
-func (t *externalIPTracker) logFailure(msg string, ctx ...interface{}) {
+func (t *externalIPTracker) logFailure(msg string, ctx ...any) {
 	if t.failing {
 		t.logger.Debug(msg, ctx...)
 		return
