@@ -82,21 +82,28 @@ func (v *ScopedReadView) Release() {
 // caller can return Busy instead of reading the wrong block. The returned view
 // owns the roTx — the caller must Release it.
 func (e *ExecModule) captureScopedReadView(ctx context.Context, wantHash common.Hash) (*ScopedReadView, error) {
+	// Capture the head generation and the base roTx atomically under fgMu, so the
+	// roTx's committed snapshot is coordinated with the captured generation set:
+	// markGenCommitted runs under fgMu strictly after the DB commit, so a datum is
+	// either in the captured head's mem chain or already visible in this roTx —
+	// never in neither. Binding to the background context (not the request ctx)
+	// keeps the roTx valid for the async build, which outlives this call.
 	e.fgMu.Lock()
 	var head *execctx.SharedDomains
 	var headHash common.Hash
 	var headNum uint64
 	if n := len(e.gens); n > 0 {
-		if last := e.gens[n-1]; !last.committed {
-			head, headHash, headNum = last.sd, last.blockHash, last.blockNum
-		}
+		// Use the newest generation's retained SD as the head regardless of
+		// commit status: its mem is kept after commit (drainCommittedGens no-op)
+		// and it is the same SD the txpool reads via the published SD, so the
+		// builder and the pool process the identical block state. Reads resolve
+		// mem-first over the coordinated roTx, so a committed generation's mem
+		// simply shadows the (equal) committed DB.
+		last := e.gens[n-1]
+		head, headHash, headNum = last.sd, last.blockHash, last.blockNum
 	}
-	e.fgMu.Unlock()
-
-	// Bind the roTx to the long-lived background context, not the request ctx:
-	// the view is handed to the async build, which outlives this call — a
-	// request-scoped ctx would be cancelled on return and fail the build's reads.
 	roTx, err := e.db.BeginTemporalRo(e.bacgroundCtx) //nolint:gocritic // handed to the returned view, which owns Rollback; guard below covers all error/panic paths before handoff
+	e.fgMu.Unlock()
 	if err != nil {
 		return nil, err
 	}
@@ -115,7 +122,7 @@ func (e *ExecModule) captureScopedReadView(ctx context.Context, wantHash common.
 		return &ScopedReadView{roTx: roTx, headSD: head, blockHash: wantHash, blockNum: headNum}, nil
 	}
 
-	// No uncommitted generation: the committed DB is the head. Confirm wantHash
+	// No in-flight generation: the committed DB is the head. Confirm wantHash
 	// is canonical at its number in this snapshot.
 	num, err := e.blockReader.HeaderNumber(ctx, roTx, wantHash)
 	if err != nil {

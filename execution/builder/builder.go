@@ -134,8 +134,12 @@ func (b *Builder) Build(param *Parameters, interrupt *atomic.Bool) (result *type
 	var compositeTx kv.TemporalTx = tx
 	parentSD := view.HeadSD()
 	if parentSD != nil {
-		if overlay := parentSD.BlockOverlay(); overlay != nil {
-			compositeTx = overlay.NewReadView(tx)
+		// Read block metadata (and stage progress) through the full parent
+		// generation chain, not just parentSD's local overlay — otherwise block
+		// data held in an ancestor generation is missed and executionAt reads
+		// stale, which desyncs the builder from the txpool's head.
+		if v := parentSD.BlockOverlayTemporalTx(tx); v != nil {
+			compositeTx = v
 		}
 	}
 
