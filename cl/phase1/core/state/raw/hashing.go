@@ -44,7 +44,11 @@ func (b *BeaconState) HashSSZ() (out [32]byte, err error) {
 		endIndex = StateLeafSizeFulu * 32
 	}
 	if b.Version() >= clparams.GloasVersion {
-		endIndex = StateLeafSizeGloas * 32
+		schema := make([]any, StateLeafSizeGloas)
+		for i := range schema {
+			schema[i] = b.leaves[i*32 : (i+1)*32]
+		}
+		return merkle_tree.ProgressiveContainerRootAll(schema...)
 	}
 	err = merkle_tree.MerkleRootFromFlatLeaves(b.leaves[:endIndex], out[:])
 	return
@@ -144,19 +148,30 @@ type beaconStateHasher struct {
 	jobs map[StateLeafIndex]any
 }
 
-func (p *beaconStateHasher) run() {
+type beaconStateHashJob func() ([32]byte, error)
+
+func (p *beaconStateHasher) run() error {
 	var wg sync.WaitGroup
 	if p.jobs == nil {
 		p.jobs = make(map[StateLeafIndex]any)
 	}
 
+	errs := make(chan error, len(p.jobs))
 	for idx, job := range p.jobs {
 		wg.Go(func() {
 			switch obj := job.(type) {
 			case ssz.HashableSSZ:
 				root, err := obj.HashSSZ()
 				if err != nil {
-					panic(err)
+					errs <- err
+					return
+				}
+				p.b.updateLeaf(idx, root)
+			case beaconStateHashJob:
+				root, err := obj()
+				if err != nil {
+					errs <- err
+					return
 				}
 				p.b.updateLeaf(idx, root)
 			case uint64:
@@ -168,6 +183,11 @@ func (p *beaconStateHasher) run() {
 		})
 	}
 	wg.Wait()
+	close(errs)
+	for err := range errs {
+		return err
+	}
+	return nil
 }
 
 func (p *beaconStateHasher) add(idx StateLeafIndex, job any) {
@@ -179,6 +199,10 @@ func (p *beaconStateHasher) add(idx StateLeafIndex, job any) {
 		p.jobs = make(map[StateLeafIndex]any)
 	}
 	p.jobs[idx] = job
+}
+
+func (p *beaconStateHasher) addHash(idx StateLeafIndex, job beaconStateHashJob) {
+	p.add(idx, job)
 }
 
 func (b *BeaconState) computeDirtyLeaves() error {
@@ -195,8 +219,15 @@ func (b *BeaconState) computeDirtyLeaves() error {
 	beaconStateHasher.add(Eth1DataLeafIndex, b.eth1Data)
 	beaconStateHasher.add(Eth1DataVotesLeafIndex, b.eth1DataVotes)
 	beaconStateHasher.add(Eth1DepositIndexLeafIndex, b.eth1DepositIndex)
-	beaconStateHasher.add(ValidatorsLeafIndex, b.validators)
-	beaconStateHasher.add(BalancesLeafIndex, b.balances)
+	if b.version >= clparams.GloasVersion {
+		beaconStateHasher.addHash(ValidatorsLeafIndex, b.validators.HashSSZProgressive)
+		beaconStateHasher.addHash(BalancesLeafIndex, func() ([32]byte, error) {
+			return merkle_tree.ProgressiveBasicListRoot(b.balances.Bytes(), uint64(b.balances.Length()))
+		})
+	} else {
+		beaconStateHasher.add(ValidatorsLeafIndex, b.validators)
+		beaconStateHasher.add(BalancesLeafIndex, b.balances)
+	}
 	beaconStateHasher.add(RandaoMixesLeafIndex, b.randaoMixes)
 	beaconStateHasher.add(SlashingsLeafIndex, b.slashings)
 	// Special case for Participation, if phase0 use attestation format, otherwise use bitlist format.
@@ -204,8 +235,13 @@ func (b *BeaconState) computeDirtyLeaves() error {
 		beaconStateHasher.add(PreviousEpochParticipationLeafIndex, b.previousEpochAttestations)
 		beaconStateHasher.add(CurrentEpochParticipationLeafIndex, b.currentEpochAttestations)
 	} else {
-		beaconStateHasher.add(PreviousEpochParticipationLeafIndex, b.previousEpochParticipation)
-		beaconStateHasher.add(CurrentEpochParticipationLeafIndex, b.currentEpochParticipation)
+		if b.version >= clparams.GloasVersion {
+			beaconStateHasher.addHash(PreviousEpochParticipationLeafIndex, b.previousEpochParticipation.HashSSZProgressive)
+			beaconStateHasher.addHash(CurrentEpochParticipationLeafIndex, b.currentEpochParticipation.HashSSZProgressive)
+		} else {
+			beaconStateHasher.add(PreviousEpochParticipationLeafIndex, b.previousEpochParticipation)
+			beaconStateHasher.add(CurrentEpochParticipationLeafIndex, b.currentEpochParticipation)
+		}
 	}
 
 	// Field(17): JustificationBits
@@ -218,7 +254,13 @@ func (b *BeaconState) computeDirtyLeaves() error {
 
 	if b.version >= clparams.AltairVersion {
 		// Altair fields
-		beaconStateHasher.add(InactivityScoresLeafIndex, b.inactivityScores)
+		if b.version >= clparams.GloasVersion {
+			beaconStateHasher.addHash(InactivityScoresLeafIndex, func() ([32]byte, error) {
+				return merkle_tree.ProgressiveBasicListRoot(b.inactivityScores.Bytes(), uint64(b.inactivityScores.Length()))
+			})
+		} else {
+			beaconStateHasher.add(InactivityScoresLeafIndex, b.inactivityScores)
+		}
 		beaconStateHasher.add(CurrentSyncCommitteeLeafIndex, b.currentSyncCommittee)
 		beaconStateHasher.add(NextSyncCommitteeLeafIndex, b.nextSyncCommittee)
 	}
@@ -247,9 +289,15 @@ func (b *BeaconState) computeDirtyLeaves() error {
 		beaconStateHasher.add(EarliestExitEpochLeafIndex, b.earliestExitEpoch)
 		beaconStateHasher.add(ConsolidationBalanceToConsumeLeafIndex, b.consolidationBalanceToConsume)
 		beaconStateHasher.add(EarliestConsolidationEpochLeafIndex, b.earliestConsolidationEpoch)
-		beaconStateHasher.add(PendingDepositsLeafIndex, b.pendingDeposits)
-		beaconStateHasher.add(PendingPartialWithdrawalsLeafIndex, b.pendingPartialWithdrawals)
-		beaconStateHasher.add(PendingConsolidationsLeafIndex, b.pendingConsolidations)
+		if b.version >= clparams.GloasVersion {
+			beaconStateHasher.addHash(PendingDepositsLeafIndex, func() ([32]byte, error) { return b.pendingDeposits.HashSSZProgressive(nil) })
+			beaconStateHasher.addHash(PendingPartialWithdrawalsLeafIndex, func() ([32]byte, error) { return b.pendingPartialWithdrawals.HashSSZProgressive(nil) })
+			beaconStateHasher.addHash(PendingConsolidationsLeafIndex, func() ([32]byte, error) { return b.pendingConsolidations.HashSSZProgressive(nil) })
+		} else {
+			beaconStateHasher.add(PendingDepositsLeafIndex, b.pendingDeposits)
+			beaconStateHasher.add(PendingPartialWithdrawalsLeafIndex, b.pendingPartialWithdrawals)
+			beaconStateHasher.add(PendingConsolidationsLeafIndex, b.pendingConsolidations)
+		}
 	}
 
 	if b.version >= clparams.FuluVersion {
@@ -257,19 +305,17 @@ func (b *BeaconState) computeDirtyLeaves() error {
 	}
 
 	if b.version >= clparams.GloasVersion {
-		beaconStateHasher.add(BuildersLeafIndex, b.builders)
+		beaconStateHasher.addHash(BuildersLeafIndex, func() ([32]byte, error) { return b.builders.HashSSZProgressive(nil) })
 		beaconStateHasher.add(NextWithdrawalBuilderIndexLeafIndex, b.nextWithdrawalBuilderIndex)
 		beaconStateHasher.add(ExecutionPayloadAvailabilityLeafIndex, b.executionPayloadAvailability)
 		beaconStateHasher.add(BuilderPendingPaymentsLeafIndex, b.builderPendingPayments)
-		beaconStateHasher.add(BuilderPendingWithdrawalsLeafIndex, b.builderPendingWithdrawals)
+		beaconStateHasher.addHash(BuilderPendingWithdrawalsLeafIndex, func() ([32]byte, error) { return b.builderPendingWithdrawals.HashSSZProgressive(nil) })
 		beaconStateHasher.add(LatestExecutionPayloadBidLeafIndex, b.latestExecutionPayloadBid)
-		beaconStateHasher.add(PayloadExpectedWithdrawalsLeafIndex, b.payloadExpectedWithdrawals)
+		beaconStateHasher.addHash(PayloadExpectedWithdrawalsLeafIndex, func() ([32]byte, error) { return b.payloadExpectedWithdrawals.HashSSZProgressive(nil) })
 		beaconStateHasher.add(PtcWindowLeafIndex, b.ptcWindow)
 	}
 
-	beaconStateHasher.run()
-
-	return nil
+	return beaconStateHasher.run()
 }
 
 // updateLeaf updates the leaf with the new value and marks it as clean. It's safe to call this function concurrently.

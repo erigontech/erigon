@@ -147,6 +147,10 @@ func (u *ParticipationBitList) HashSSZ() ([32]byte, error) {
 	return crypto.Sha256(baseRoot[:], lengthRoot[:]), nil
 }
 
+func (u *ParticipationBitList) HashSSZProgressive() ([32]byte, error) {
+	return merkle_tree.ProgressiveBasicListRoot(u.Bytes(), uint64(u.l))
+}
+
 func (arr *ParticipationBitList) getBaseHash(xs []byte, depth uint8) error {
 	elements := arr.u
 	offset := 32*(arr.l/32) + 32
