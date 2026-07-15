@@ -18,57 +18,39 @@ package stages
 
 import (
 	"testing"
-	"time"
 )
 
-// currentSlot can overshoot the captured chainTipSlot; the distance/ETA math
-// must not underflow into a ~2^64 slot count and overflow time.Duration.
+// currentSlot can overshoot the captured chainTipSlot; slotsRemaining must clamp
+// to 0 rather than underflow into a ~2^64 slot count.
 func TestForwardSyncProgress_CurrentSlotPastChainTip(t *testing.T) {
-	dist, eta := forwardSyncProgress(1_000_000, 1_000_050, 999_900, 12, 30)
-	if dist != 0 {
-		t.Fatalf("distFromChainTip = %s, want 0 when current slot is past the tip", dist)
+	slotsRemaining, ratePerSec := forwardSyncProgress(1_000_000, 1_000_050, 999_900, 30)
+	if slotsRemaining != 0 {
+		t.Fatalf("slotsRemaining = %d, want 0 when current slot is past the tip", slotsRemaining)
 	}
-	if eta < 0 {
-		t.Fatalf("ETA must not be negative, got %s", eta)
+	if ratePerSec < 0 {
+		t.Fatalf("ratePerSec must not be negative, got %g", ratePerSec)
 	}
 }
 
-// A reorg can drop currentSlot below prevProgress; the rate denominator must not
-// underflow and drive the ETA to a garbage value.
+// A reorg can drop currentSlot below prevProgress; the rate must clamp to 0
+// rather than underflow the slots-processed denominator.
 func TestForwardSyncProgress_ReorgBelowPrevProgress(t *testing.T) {
-	dist, eta := forwardSyncProgress(1_000_000, 900_000, 950_000, 12, 30)
-	if dist < 0 {
-		t.Fatalf("distFromChainTip must not be negative, got %s", dist)
+	slotsRemaining, ratePerSec := forwardSyncProgress(1_000_000, 900_000, 950_000, 30)
+	if slotsRemaining != 100_000 {
+		t.Fatalf("slotsRemaining = %d, want 100000", slotsRemaining)
 	}
-	if want := 999 * time.Hour; eta != want {
-		t.Fatalf("ETA = %s, want %s (default when no forward progress)", eta, want)
+	if ratePerSec != 0 {
+		t.Fatalf("ratePerSec = %g, want 0 when current slot is below prev progress", ratePerSec)
 	}
 }
 
-// Normal case: distance is slots-remaining × seconds-per-slot, ETA scales with rate.
+// Normal case: slotsRemaining is the tip gap, rate is slots processed per second.
 func TestForwardSyncProgress_Normal(t *testing.T) {
-	dist, eta := forwardSyncProgress(1_000_000, 900_000, 899_700, 12, 30)
-	if want := 100_000 * 12 * time.Second; dist != want {
-		t.Fatalf("distFromChainTip = %s, want %s", dist, want)
+	slotsRemaining, ratePerSec := forwardSyncProgress(1_000_000, 900_000, 899_700, 30)
+	if slotsRemaining != 100_000 {
+		t.Fatalf("slotsRemaining = %d, want 100000", slotsRemaining)
 	}
-	// rate = (900000-899700)/30 = 10 slots/s; eta = 100000/10 = 10000s.
-	if want := 10_000 * time.Second; eta != want {
-		t.Fatalf("ETA = %s, want %s", eta, want)
-	}
-}
-
-func TestBoundedDuration(t *testing.T) {
-	if got := boundedDuration(-5); got != 0 {
-		t.Fatalf("boundedDuration(negative) = %s, want 0", got)
-	}
-	if got := boundedDuration(0); got != 0 {
-		t.Fatalf("boundedDuration(0) = %s, want 0", got)
-	}
-	if got := boundedDuration(42); got != 42*time.Second {
-		t.Fatalf("boundedDuration(42) = %s, want 42s", got)
-	}
-	// Absurdly large second count must saturate, not wrap negative.
-	if got := boundedDuration(1e18); got != time.Duration(1<<63-1) {
-		t.Fatalf("boundedDuration(1e18) = %s, want max duration", got)
+	if ratePerSec != 10 { // (900000-899700)/30
+		t.Fatalf("ratePerSec = %g, want 10", ratePerSec)
 	}
 }
