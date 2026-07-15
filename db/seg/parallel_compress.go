@@ -1017,7 +1017,7 @@ func extractPatternsInSuperstrings(ctx context.Context, superstringCh chan []uin
 		} else {
 			lcp = lcp[:n]
 		}
-		for i := 0; i < n; i++ {
+		for i := range n {
 			/* If the current suffix is at n-1, then we don’t
 			   have next substring to consider. So lcp is not
 			   defined for this substring, we put zero. */

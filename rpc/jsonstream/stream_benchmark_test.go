@@ -103,7 +103,7 @@ func benchmarkLargeArray(b *testing.B, s Stream) {
 	b.Helper()
 	for b.Loop() {
 		s.WriteArrayStart()
-		for j := 0; j < 1000; j++ {
+		for j := range 1000 {
 			if j > 0 {
 				s.WriteMore()
 			}

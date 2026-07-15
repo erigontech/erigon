@@ -77,10 +77,10 @@ func TestSais16EdgeCases(t *testing.T) {
 func TestSais16Superstring(t *testing.T) {
 	var buf []int32
 	rng := rand.New(rand.NewSource(99))
-	for iter := 0; iter < 300; iter++ {
+	for range 300 {
 		var code []uint16 // one symbol per cell
 		nwords := 1 + rng.Intn(8)
-		for w := 0; w < nwords; w++ {
+		for range nwords {
 			for k := rng.Intn(6); k > 0; k-- {
 				code = append(code, uint16(rng.Intn(256))+1)
 			}

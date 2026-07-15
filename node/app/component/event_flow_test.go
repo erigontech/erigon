@@ -65,7 +65,7 @@ type DownloadComplete struct{ Path string }
 
 type eventProvider struct {
 	name     string
-	received []interface{}
+	received []any
 	mu       sync.Mutex
 	tracker  *orderTracker
 }
@@ -102,10 +102,10 @@ func (p *eventProvider) HandleFileDeleted(evt FileDeleted) {
 	p.tracker.record(p.name + ":FileDeleted:" + evt.Path)
 }
 
-func (p *eventProvider) getReceived() []interface{} {
+func (p *eventProvider) getReceived() []any {
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	out := make([]interface{}, len(p.received))
+	out := make([]any, len(p.received))
 	copy(out, p.received)
 	return out
 }
@@ -191,7 +191,7 @@ func TestEventLoadCompleteness(t *testing.T) {
 	require.NoError(t, bus.SubscribeAsync(handler))
 
 	const N = 10000
-	for i := 0; i < N; i++ {
+	for range N {
 		bus.Publish(FileCreated{Path: "file"})
 	}
 
@@ -211,7 +211,7 @@ func TestEventLoadMultipleSubscribers(t *testing.T) {
 	require.NoError(t, bus.SubscribeAsync(handler2))
 
 	const N = 5000
-	for i := 0; i < N; i++ {
+	for range N {
 		bus.Publish(FileCreated{Path: "file"})
 	}
 
@@ -268,7 +268,7 @@ func TestSyncHandlerTotalOrdering(t *testing.T) {
 	var order []int
 	var mu sync.Mutex
 
-	for i := 0; i < 5; i++ {
+	for i := range 5 {
 		idx := i
 		handler := func(evt FileCreated) {
 			mu.Lock()

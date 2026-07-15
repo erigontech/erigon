@@ -31,7 +31,7 @@ import (
 func genTransactions(n uint64) Transactions {
 	txs := Transactions{}
 
-	for i := uint64(0); i < n; i++ {
+	for i := range n {
 		tx := NewTransaction(i, common.Address{}, uint256.NewInt(1000+i), 10+i, uint256.NewInt(1000+i), fmt.Appendf(nil, "hello%d", i))
 		txs = append(txs, tx)
 	}
@@ -41,7 +41,7 @@ func genTransactions(n uint64) Transactions {
 
 func TestEncodeUint(t *testing.T) {
 	t.Parallel()
-	for i := 0; i < 64000; i++ {
+	for i := range 64000 {
 		bbOld := bytes.NewBuffer(make([]byte, 10))
 		bbNew := bytes.NewBuffer(make([]byte, 10))
 		bbOld.Reset()

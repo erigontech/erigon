@@ -126,7 +126,7 @@ func VerifyMultipleSignatures(sigs [][]byte, msgs [][]byte, pubKeys [][]byte) (b
 	mulP1Aff := make([]*blst.P1Affine, length)
 	rawMsgs := make([]blst.Message, length)
 
-	for i := 0; i < length; i++ {
+	for i := range length {
 		pk, err := newPublicKeyFromBytes(pubKeys[i], false)
 		if err != nil {
 			return false, err

@@ -449,7 +449,7 @@ func TestGetBlockByTimestampLatestTime(t *testing.T) {
 		}
 	}
 
-	block, err := api.GetBlockByTimestamp(ctx, rpc.Timestamp(latestBlock.Header().Time), false)
+	block, err := api.GetBlockByTimestamp(ctx, rpc.Timestamp(latestBlock.Time()), false)
 	require.NoError(t, err)
 
 	require.Equal(t, response["timestamp"], block["timestamp"])
@@ -477,7 +477,7 @@ func TestGetBlockByTimestampOldestTime(t *testing.T) {
 		}
 	}
 
-	block, err := api.GetBlockByTimestamp(ctx, rpc.Timestamp(oldestBlock.Header().Time), false)
+	block, err := api.GetBlockByTimestamp(ctx, rpc.Timestamp(oldestBlock.Time()), false)
 	require.NoError(t, err)
 
 	require.Equal(t, response["timestamp"], block["timestamp"])
@@ -505,7 +505,7 @@ func TestGetBlockByTimeHigherThanLatestBlock(t *testing.T) {
 		}
 	}
 
-	block, err := api.GetBlockByTimestamp(ctx, rpc.Timestamp(latestBlock.Header().Time+999999999999), false)
+	block, err := api.GetBlockByTimestamp(ctx, rpc.Timestamp(latestBlock.Time()+999999999999), false)
 	require.NoError(t, err)
 
 	require.Equal(t, response["timestamp"], block["timestamp"])
@@ -539,7 +539,7 @@ func TestGetBlockByTimeMiddle(t *testing.T) {
 		}
 	}
 
-	block, err := api.GetBlockByTimestamp(ctx, rpc.Timestamp(middleBlock.Header().Time), false)
+	block, err := api.GetBlockByTimestamp(ctx, rpc.Timestamp(middleBlock.Time()), false)
 	require.NoError(t, err)
 	require.Equal(t, response["timestamp"], block["timestamp"])
 	require.Equal(t, response["hash"], block["hash"])
@@ -567,7 +567,7 @@ func TestGetBlockByTimestamp(t *testing.T) {
 		}
 	}
 
-	block, err := api.GetBlockByTimestamp(ctx, rpc.Timestamp(pickedBlock.Header().Time), false)
+	block, err := api.GetBlockByTimestamp(ctx, rpc.Timestamp(pickedBlock.Time()), false)
 	require.NoError(t, err)
 
 	require.Equal(t, response["timestamp"], block["timestamp"])
@@ -654,7 +654,7 @@ func generatePseudoRandomECDSAKeyPairs(rand io.Reader, n int) ([]*ecdsa.PrivateK
 	privateKeys := make([]*ecdsa.PrivateKey, n)
 	publicKeys := make([]*ecdsa.PublicKey, n)
 	var err error
-	for i := 0; i < n; i++ {
+	for i := range n {
 		privateKeys[i], err = generatePseudoRandomECDSAKey(rand)
 		if err != nil {
 			return nil, nil, err

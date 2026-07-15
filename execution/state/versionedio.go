@@ -2081,9 +2081,7 @@ func (io *VersionedIO) RecordAccesses(txVersion Version, addresses AccessSet) {
 		io.accessed = append(io.accessed, make([]AccessSet, txVersion.TxIndex+2-len(io.accessed))...)
 	}
 	dest := make(AccessSet, len(addresses))
-	for addr, opt := range addresses {
-		dest[addr] = opt
-	}
+	maps.Copy(dest, addresses)
 	io.accessed[txVersion.TxIndex+1] = dest
 }
 
@@ -2098,7 +2096,7 @@ func (io *VersionedIO) Merge(other *VersionedIO) *VersionedIO {
 	mergedLen := max(io.Len(), other.Len())
 	merged := NewVersionedIO(mergedLen - 1)
 
-	for i := 0; i < mergedLen; i++ {
+	for i := range mergedLen {
 		if i < len(io.inputs) {
 			if i < len(other.inputs) {
 				merged.inputs[i] = io.inputs[i].Merge(other.inputs[i])
@@ -2163,6 +2161,9 @@ func (io *VersionedIO) mergeTx(version Version, reads ReadSet, writes *WriteSet,
 	}
 }
 
+// AsBlockAccessList assembles the EIP-7928 block access list. EIP-7928 and
+// EIP-8246 both activate with Amsterdam, so balance writes always use the
+// no-burn SELFDESTRUCT semantics.
 func (io *VersionedIO) AsBlockAccessList() types.BlockAccessList {
 	if io == nil {
 		return nil
@@ -2252,10 +2253,10 @@ func (io *VersionedIO) AsBlockAccessList() types.BlockAccessList {
 			// burn (zeroing a non-zero balance written by the destroying tx) fires
 			// — the priority is explicit in loop order.
 			for addr, w := range writes.SelfDestructs() {
-				if addr.IsNil() {
+				if addr.IsNil() || !w.Val {
 					continue
 				}
-				ensureAccountState(ac, addr).applyWriteSelfDestruct(w.Val, w.Version.blockAccessIndex())
+				ensureAccountState(ac, addr)
 			}
 			for addr, w := range writes.Balances() {
 				if addr.IsNil() {
@@ -2355,8 +2356,6 @@ type accountState struct {
 	code                    *fieldTracker[accounts.Code]
 	balanceValue            *uint256.Int                        // tracks latest seen balance
 	initialBalanceValue     *uint256.Int                        // tracks pre-block balance for net-zero detection
-	selfDestructed          bool                                //
-	selfDestructedAt        uint32                              // access index of the selfdestruct
 	storageReadValues       map[accounts.StorageKey]uint256.Int // original read values for net-zero detection
 	nonRevertableUserAccess bool                                // true if a user tx (txIndex >= 0) has non-revertable access
 }
@@ -2498,24 +2497,8 @@ func (account *accountState) applyWriteCode(val accounts.Code, accessIndex uint3
 	account.code.recordWrite(accessIndex, val)
 }
 
-func (account *accountState) applyWriteSelfDestruct(val bool, accessIndex uint32) {
-	if val {
-		account.selfDestructed = true
-		account.selfDestructedAt = accessIndex
-	}
-}
-
 func (account *accountState) applyWriteBalance(val uint256.Int, accessIndex uint32) {
 	{
-		// account.selfDestructed is set only for a same-tx deleting SELFDESTRUCT
-		// (the EIP-6780 new-contract case); a non-zero balance written in that
-		// tx — a transfer to the pending-destroyed account, or the finalize-time
-		// priority fee — burns when the account is destroyed at end of tx, so per
-		// EIP-7928 its post-tx balance is zero. Writes from LATER transactions are
-		// real state changes and pass through unchanged.
-		if account.selfDestructed && accessIndex == account.selfDestructedAt && !val.IsZero() {
-			val.Clear()
-		}
 		// If we haven't seen a balance and the first write is zero, treat it
 		// as a touch only when the pre-block balance is (or is implicitly) zero:
 		//   - No prior read: the account wasn't accessed before, so its

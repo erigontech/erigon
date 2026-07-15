@@ -144,7 +144,7 @@ func TestChangedKeysPerBlock_KeysSharedAcrossBlocks(t *testing.T) {
 
 	require.Equal(t, 1, idx.NumKeys()) // "x" stored exactly once
 	require.Equal(t, 50, idx.NumBlocks())
-	for blockNum := uint64(0); blockNum < 50; blockNum++ {
+	for blockNum := range uint64(50) {
 		require.Equal(t, []string{"x"}, keysForBlock(idx, blockNum))
 	}
 }

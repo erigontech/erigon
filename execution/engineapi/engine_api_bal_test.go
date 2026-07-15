@@ -703,7 +703,7 @@ func TestEngineApiBALParallelConsistencyStress(t *testing.T) {
 		_, err = eat.MockCl.BuildCanonicalBlock(ctx)
 		require.NoError(t, err, "block 1 (deploy shared Changer) must build cleanly")
 
-		for blockIdx := 0; blockIdx < numBlocks; blockIdx++ {
+		for blockIdx := range numBlocks {
 			// Each sender does one simple transfer (fully independent state).
 			for i, key := range senderKeys {
 				// Distinct receiver per (sender, block) to avoid nonce/collision.

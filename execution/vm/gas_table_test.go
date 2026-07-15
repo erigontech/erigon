@@ -249,6 +249,78 @@ func TestEIP8038SStore(t *testing.T) {
 	}
 }
 
+// TestCallNewAccountSpillBefore63of64 pins the EIP-8037 charge order for a value
+// CALL to a dead account: the NEW_ACCOUNT state charge (spilling into regular gas
+// when the reservoir can't cover it) is applied before the 63/64 child allowance,
+// per EELS amsterdam call(). With the reverse order a caller forwarding ~all gas
+// would OOG the whole frame on the spill.
+func TestCallNewAccountSpillBefore63of64(t *testing.T) {
+	t.Parallel()
+	// CALL(gas(), 0xdeadbeef, value=1, no args/ret); store success at mem[0]; return 32 bytes.
+	callerCode := "0x60006000600060006001" +
+		"7300000000000000000000000000000000deadbeef" +
+		"5af1" +
+		"600052" +
+		"60206000f3"
+	callee := accounts.InternAddress(common.HexToAddress("0x00000000000000000000000000000000deadbeef"))
+	// Leftover gas is hand-computed against the Amsterdam jump table (EELS pin):
+	// pre-CALL opcodes 20, warm base 100, cold access 2900, CALL_VALUE 10300,
+	// tail 15; NEW_ACCOUNT 183600; empty callee returns callGas + 2300 stipend.
+	for _, tt := range []struct {
+		name            string
+		pool            mdgas.MdGas
+		leftoverRegular uint64
+		leftoverState   uint64
+	}{
+		{
+			// zero reservoir → full NEW_ACCOUNT spills to regular.
+			// base = 500000-20-100-2900-10300-183600 = 303080; callGas = 303080 - 303080/64 = 298345;
+			// leftover = 4735 + 298345 + 2300 - 15 = 305365.
+			name:            "zero reservoir, full spill",
+			pool:            mdgas.MdGas{Regular: 500_000, State: 0},
+			leftoverRegular: 305_365,
+			leftoverState:   0,
+		},
+		{
+			// funded reservoir → no spill; base = 500000-20-100-13200 = 486680;
+			// callGas = 486680 - 486680/64 = 479076; leftover = 7604 + 479076 + 2300 - 15 = 488965.
+			name:            "funded reservoir, no spill",
+			pool:            mdgas.MdGas{Regular: 500_000, State: 200_000},
+			leftoverRegular: 488_965,
+			leftoverState:   200_000 - 183_600,
+		},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			tx, sd := testTemporalTxSD(t)
+			txNum, _, err := sd.SeekCommitment(t.Context(), tx)
+			require.NoError(t, err)
+			r, w := state.NewReaderV3(sd.AsGetter(tx)), state.NewWriter(sd.AsPutDel(tx), nil, txNum)
+			s := state.New(r)
+			caller := accounts.InternAddress(common.BytesToAddress([]byte("contract")))
+			s.CreateAccount(caller, true)
+			s.SetCode(caller, hexutil.MustDecode(callerCode), tracing.CodeChangeUnspecified)
+			vmctx := evmtypes.BlockContext{
+				CanTransfer: func(evmtypes.IntraBlockState, accounts.Address, uint256.Int) (bool, error) { return true, nil },
+				Transfer: func(evmtypes.IntraBlockState, accounts.Address, accounts.Address, uint256.Int, bool, *chain.Rules) error {
+					return nil
+				},
+			}
+			_ = s.CommitBlock(vmctx.Rules(chain.AllProtocolChanges), w)
+			vmenv := vm.NewEVM(vmctx, evmtypes.TxContext{}, s, chain.AllProtocolChanges, vm.Config{})
+			ret, gas, _, err := vmenv.Call(accounts.ZeroAddress, caller, nil, tt.pool, uint256.Int{}, false /* bailout */)
+			require.NoError(t, err, "outer frame must not OOG: NEW_ACCOUNT spill must precede the 63/64 computation")
+			require.Len(t, ret, 32)
+			require.Equal(t, byte(1), ret[31], "inner CALL must succeed")
+			require.Equal(t, tt.leftoverRegular, gas.Regular, "leftover regular gas")
+			require.Equal(t, tt.leftoverState, gas.State, "leftover state gas")
+			exists, err := vmenv.IntraBlockState().Exist(callee)
+			require.NoError(t, err)
+			require.True(t, exists, "callee account must have been created")
+		})
+	}
+}
+
 var createGasTests = []struct {
 	code    string
 	eip3860 bool

@@ -409,7 +409,7 @@ func (tds *TrieDbState) buildAccountAddressReads() ([][]byte, [][]byte) {
 	}
 
 	// Check if sorting is correct
-	for i := 0; i < len(sortedAccountAddresses); i++ {
+	for i := range sortedAccountAddresses {
 		addrHash := sortedAccountAddressHashes[i]
 		accountAddress := sortedAccountAddresses[i]
 		computedHash := crypto.Keccak256(accountAddress)

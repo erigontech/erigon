@@ -39,10 +39,10 @@ import (
 	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/common/math"
+	"github.com/erigontech/erigon/db/dbservices"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/kvcache"
 	"github.com/erigontech/erigon/db/rawdb"
-	"github.com/erigontech/erigon/db/services"
 	"github.com/erigontech/erigon/execution/builder"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/engineapi/engine_block_downloader"
@@ -135,10 +135,10 @@ func (e *EngineServer) Start(
 	ctx context.Context,
 	httpConfig *httpcfg.HttpCfg,
 	db kv.TemporalRoDB,
-	blockReader services.FullBlockReader,
+	blockReader dbservices.FullBlockReader,
 	filters *rpchelper.Filters,
 	stateCache kvcache.Cache,
-	engineReader rules.EngineReader,
+	engine rules.Engine,
 	eth rpchelper.ApiBackend,
 	mining txpoolproto.MiningClient,
 	events *shards.Events,
@@ -155,7 +155,7 @@ func (e *EngineServer) Start(
 			return nil
 		})
 	}
-	base := jsonrpc.NewBaseApi(filters, stateCache, blockReader, httpConfig.WithDatadir, httpConfig.EvmCallTimeout, engineReader, httpConfig.Dirs, nil, httpConfig.BlockRangeLimit, httpConfig.GetLogsMaxResults)
+	base := jsonrpc.NewBaseApi(filters, stateCache, blockReader, httpConfig.WithDatadir, httpConfig.EvmCallTimeout, engine, httpConfig.Dirs, nil, httpConfig.BlockRangeLimit, httpConfig.GetLogsMaxResults, httpConfig.LogQueryLimit)
 	ethImpl := jsonrpc.NewEthAPI(base, db, eth, e.txpool, mining, jsonrpc.NewEthApiConfig(httpConfig), e.logger)
 
 	apiList := []rpc.API{
@@ -1309,7 +1309,7 @@ func waitForResponse(maxWait time.Duration, waitCondnF func() (bool, error)) (bo
 	}
 	checkInterval := 10 * time.Millisecond
 	maxChecks := int64(maxWait) / int64(checkInterval)
-	for i := int64(0); i < maxChecks; i++ {
+	for range maxChecks {
 		time.Sleep(checkInterval)
 		shouldWait, err = waitCondnF()
 		if err != nil || !shouldWait {

@@ -67,7 +67,7 @@ func (tr *TRand) RandBig() *big.Int {
 
 func (tr *TRand) RandBytes(size int) []byte {
 	arr := make([]byte, size)
-	for i := 0; i < size; i++ {
+	for i := range size {
 		arr[i] = byte(tr.rnd.Intn(256))
 	}
 	return arr
@@ -137,7 +137,7 @@ func (tr *TRand) RandHeaderReflectAllFields(skipFields ...string) *Header {
 	headerValue := reflect.ValueOf(h)
 	headerElem := headerValue.Elem()
 	numField := headerElem.Type().NumField()
-	for i := 0; i < numField; i++ {
+	for i := range numField {
 		field := headerElem.Field(i)
 		if !field.CanSet() {
 			continue
@@ -183,7 +183,7 @@ func (tr *TRand) RandHeaderReflectAllFields(skipFields ...string) *Header {
 func (tr *TRand) RandAccessTuple() AccessTuple {
 	n := tr.RandIntInRange(1, 5)
 	sk := make([]common.Hash, n)
-	for i := 0; i < n; i++ {
+	for i := range n {
 		sk[i] = tr.RandHash()
 	}
 	return AccessTuple{
@@ -194,7 +194,7 @@ func (tr *TRand) RandAccessTuple() AccessTuple {
 
 func (tr *TRand) RandAccessList(size int) AccessList {
 	al := make([]AccessTuple, size)
-	for i := 0; i < size; i++ {
+	for i := range size {
 		al[i] = tr.RandAccessTuple()
 	}
 	return al
@@ -202,7 +202,7 @@ func (tr *TRand) RandAccessList(size int) AccessList {
 
 func (tr *TRand) RandAuthorizations(size int) []Authorization {
 	auths := make([]Authorization, size)
-	for i := 0; i < size; i++ {
+	for i := range size {
 		auths[i] = Authorization{
 			ChainID: *tr.RandUint256(),
 			Address: tr.RandAddress(),
@@ -317,7 +317,7 @@ func (tr *TRand) RandTransaction(_type int) Transaction {
 
 func (tr *TRand) RandHashes(size int) []common.Hash {
 	hashes := make([]common.Hash, size)
-	for i := 0; i < size; i++ {
+	for i := range size {
 		hashes[i] = tr.RandHash()
 	}
 	return hashes
@@ -325,7 +325,7 @@ func (tr *TRand) RandHashes(size int) []common.Hash {
 
 func (tr *TRand) RandTransactions(size int) []Transaction {
 	txns := make([]Transaction, size)
-	for i := 0; i < size; i++ {
+	for i := range size {
 		txns[i] = tr.RandTransaction(-1)
 	}
 	return txns
@@ -333,7 +333,7 @@ func (tr *TRand) RandTransactions(size int) []Transaction {
 
 func (tr *TRand) RandRawTransactions(size int) [][]byte {
 	txns := make([][]byte, size)
-	for i := 0; i < size; i++ {
+	for i := range size {
 		txns[i] = tr.RandBytes(tr.RandIntInRange(1, 512))
 	}
 	return txns
@@ -341,7 +341,7 @@ func (tr *TRand) RandRawTransactions(size int) [][]byte {
 
 func (tr *TRand) RandRLPTransactions(size int) [][]byte {
 	txns := make([][]byte, size)
-	for i := 0; i < size; i++ {
+	for i := range size {
 		txn := make([]byte, 512)
 		txSize := tr.RandIntInRange(1, 500)
 		encodedSize := rlp.EncodeStringToBuf(tr.RandBytes(txSize), txn)
@@ -352,7 +352,7 @@ func (tr *TRand) RandRLPTransactions(size int) [][]byte {
 
 func (tr *TRand) RandHeaders(size int) []*Header {
 	uncles := make([]*Header, size)
-	for i := 0; i < size; i++ {
+	for i := range size {
 		uncles[i] = tr.RandHeader()
 	}
 	return uncles
@@ -360,7 +360,7 @@ func (tr *TRand) RandHeaders(size int) []*Header {
 
 func (tr *TRand) RandWithdrawals(size int) []*Withdrawal {
 	withdrawals := make([]*Withdrawal, size)
-	for i := 0; i < size; i++ {
+	for i := range size {
 		withdrawals[i] = tr.RandWithdrawal()
 	}
 	return withdrawals
@@ -482,7 +482,7 @@ func compareHeaders(t *testing.T, a, b []*Header) error {
 		return fmt.Errorf("uncles len mismatch: expected: %v, got: %v", auLen, buLen)
 	}
 
-	for i := 0; i < auLen; i++ {
+	for i := range auLen {
 		checkHeaders(t, a[i], b[i])
 	}
 	return nil
@@ -496,7 +496,7 @@ func compareWithdrawals(t *testing.T, a, b []*Withdrawal) error {
 		return fmt.Errorf("withdrawals len mismatch: expected: %v, got: %v", awLen, bwLen)
 	}
 
-	for i := 0; i < awLen; i++ {
+	for i := range awLen {
 		checkWithdrawals(t, a[i], b[i])
 	}
 	return nil
@@ -510,7 +510,7 @@ func compareRawBodies(t *testing.T, a, b *RawBody) error {
 		return fmt.Errorf("transactions len mismatch: expected: %v, got: %v", atLen, btLen)
 	}
 
-	for i := 0; i < atLen; i++ {
+	for i := range atLen {
 		if !isEqualBytes(a.Transactions[i], b.Transactions[i]) {
 			return fmt.Errorf("byte transactions are not equal")
 		}
@@ -529,7 +529,7 @@ func compareBodies(t *testing.T, a, b *Body) error {
 		return fmt.Errorf("txns len mismatch: expected: %v, got: %v", atLen, btLen)
 	}
 
-	for i := 0; i < atLen; i++ {
+	for i := range atLen {
 		compareTransactions(t, a.Transactions[i], b.Transactions[i])
 	}
 
@@ -542,7 +542,7 @@ func compareBodies(t *testing.T, a, b *Body) error {
 func TestTransactionEncodeDecodeRLP(t *testing.T) {
 	tr := NewTRand()
 	var buf bytes.Buffer
-	for i := 0; i < RUNS; i++ {
+	for range RUNS {
 		enc := tr.RandTransaction(-1)
 		buf.Reset()
 		if err := enc.EncodeRLP(&buf); err != nil {
@@ -565,7 +565,7 @@ func TestTransactionEncodeDecodeRLP(t *testing.T) {
 func TestHeaderEncodeDecodeRLP(t *testing.T) {
 	tr := NewTRand()
 	var buf bytes.Buffer
-	for i := 0; i < RUNS; i++ {
+	for range RUNS {
 		enc := tr.RandHeader()
 		buf.Reset()
 		if err := enc.EncodeRLP(&buf); err != nil {
@@ -587,7 +587,7 @@ func TestHeaderEncodeDecodeRLP(t *testing.T) {
 func TestRawBodyEncodeDecodeRLP(t *testing.T) {
 	tr := NewTRand()
 	var buf bytes.Buffer
-	for i := 0; i < RUNS; i++ {
+	for range RUNS {
 		enc := tr.RandRawBody()
 		buf.Reset()
 		if err := enc.EncodeRLP(&buf); err != nil {
@@ -611,7 +611,7 @@ func TestRawBodyEncodeDecodeRLP(t *testing.T) {
 func TestBodyEncodeDecodeRLP(t *testing.T) {
 	tr := NewTRand()
 	var buf bytes.Buffer
-	for i := 0; i < RUNS; i++ {
+	for range RUNS {
 		enc := tr.RandBody()
 		buf.Reset()
 		if err := enc.EncodeRLP(&buf); err != nil {
@@ -637,7 +637,7 @@ func TestBodyEncodeDecodeRLP(t *testing.T) {
 func TestWithdrawalEncodeDecodeRLP(t *testing.T) {
 	tr := NewTRand()
 	var buf bytes.Buffer
-	for i := 0; i < RUNS; i++ {
+	for range RUNS {
 		enc := tr.RandWithdrawal()
 		buf.Reset()
 		if err := enc.EncodeRLP(&buf); err != nil {
@@ -767,7 +767,7 @@ func (tr *TRand) RandLogFixed() *Log {
 func (tr *TRand) RandReceipt() *Receipt {
 	numLogs := tr.RandIntInRange(1, 5)
 	logs := make(Logs, numLogs)
-	for i := 0; i < numLogs; i++ {
+	for i := range numLogs {
 		logs[i] = tr.RandLog()
 	}
 	return &Receipt{
