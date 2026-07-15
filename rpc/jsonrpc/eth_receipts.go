@@ -47,8 +47,8 @@ var (
 	errExceedBlockRange                = "query block range exceeds server limit, narrow your filter"
 	errBlockRangeIntoFuture            = "block range extends beyond current head block"
 	errBlockHashWithRange              = "can't specify fromBlock/toBlock with blockHash"
-	errExceedMaxTopics                 = "exceed max topics"
-	errExceedLogQueryLimit             = "exceed max addresses or topics per search position"
+	errExceedMaxTopics                 = fmt.Sprintf("query exceeds the maximum of %d topics", maxTopics)
+	errExceedLogQueryLimit             = "query exceeds the maximum of %d addresses or topics per search position"
 	errExceedLogResults                = "query returns too many logs, narrow your filter"
 	errRequestedBlockCountExceedsLimit = "requested blockCount exceeds server limit"
 	errRequestedLogCountExceedsLimit   = "requested logCount exceeds server limit"
@@ -56,8 +56,7 @@ var (
 
 const (
 	// The maximum number of topic criteria allowed, vm.LOG4 - vm.LOG0
-	maxTopics     = 4
-	logQueryLimit = 1000
+	maxTopics = 4
 )
 
 // getReceipts - checking in-mem cache, or else fallback to db, or else fallback to re-exec of block to re-gen receipts
@@ -86,6 +85,23 @@ func (api *BaseAPI) getCachedReceipts(ctx context.Context, hash common.Hash) (ty
 	return api.receiptsGenerator.GetCachedReceipts(ctx, hash)
 }
 
+// exceedsLogQueryLimit reports whether the filter has more addresses, or more
+// alternatives in one topic position, than limit allows (<=0 = unlimited).
+func exceedsLogQueryLimit(crit filters.FilterCriteria, limit int) bool {
+	if limit <= 0 {
+		return false
+	}
+	if len(crit.Addresses) > limit {
+		return true
+	}
+	for _, topics := range crit.Topics {
+		if len(topics) > limit {
+			return true
+		}
+	}
+	return false
+}
+
 // GetLogs implements eth_getLogs. Returns an array of logs matching a given filter object.
 func (api *APIImpl) GetLogs(ctx context.Context, crit filters.FilterCriteria) (types.RPCLogs, error) {
 	var begin, end uint64
@@ -101,13 +117,8 @@ func (api *APIImpl) GetLogs(ctx context.Context, crit filters.FilterCriteria) (t
 		return nil, &rpc.CustomError{Message: errExceedMaxTopics, Code: rpc.ErrCodeInvalidParams}
 	}
 
-	if len(crit.Addresses) > logQueryLimit {
-		return nil, &rpc.CustomError{Message: errExceedLogQueryLimit, Code: rpc.ErrCodeInvalidParams}
-	}
-	for _, topics := range crit.Topics {
-		if len(topics) > logQueryLimit {
-			return nil, &rpc.CustomError{Message: errExceedLogQueryLimit, Code: rpc.ErrCodeInvalidParams}
-		}
+	if exceedsLogQueryLimit(crit, api.logQueryLimit) {
+		return nil, &rpc.CustomError{Message: fmt.Sprintf(errExceedLogQueryLimit, api.logQueryLimit), Code: rpc.ErrCodeInvalidParams}
 	}
 
 	if crit.BlockHash != nil {

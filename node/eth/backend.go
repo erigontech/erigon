@@ -764,6 +764,7 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 		backend.polygonBridge,
 		httpRpcCfg.BlockRangeLimit,
 		httpRpcCfg.GetLogsMaxResults,
+		httpRpcCfg.LogQueryLimit,
 	)
 	ethApiConfig := &jsonrpc.EthApiConfig{
 		GasCap:                      httpRpcCfg.Gascap,
