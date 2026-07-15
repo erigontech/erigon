@@ -1953,12 +1953,13 @@ func (result *execResult) calcFees(
 		}
 	}
 	oldCoinbaseBalance := newCoinbaseBalance
-	// Burn the tip only for an actual SELFDESTRUCT of a contract coinbase.
+	// Before EIP-8246, burn the tip only for an actual SELFDESTRUCT of a contract coinbase.
 	// DeleteAccount also emits SelfDestructPath=true for EIP-161 empty-removal of
 	// a touched EOA coinbase, where the delayed tip must still be credited (it
 	// re-creates the account) to match serial.
 	coinbaseWasContract := !coinbaseEmptyCodeHash || coinbaseHasCodeHashWrite || coinbaseCreatedContract
-	if !(coinbaseSelfdestructed && coinbaseWasContract) {
+	burnCoinbaseTip := !chainRules.IsAmsterdam && coinbaseSelfdestructed && coinbaseWasContract
+	if !burnCoinbaseTip {
 		newCoinbaseBalance.Add(&newCoinbaseBalance, &result.ExecutionResult.FeeTipped)
 	}
 	oldBurntBalance := newBurntBalance
