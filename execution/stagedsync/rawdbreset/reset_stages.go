@@ -343,13 +343,16 @@ func FillDBFromSnapshots(logPrefix string, ctx context.Context, tx kv.RwTx, dirs
 						}
 					}
 				}
-				select {
-				case <-ctx.Done():
-					return ctx.Err()
-				case <-logEvery.C:
-					logger.Info(fmt.Sprintf("[%s] Total difficulty index: %s/%s", logPrefix,
-						common.PrettyCounter(header.Number.Uint64()), common.PrettyCounter(blockReader.FrozenBlocks())))
-				default:
+
+				if blockNum%10_000 == 0 {
+					select {
+					case <-ctx.Done():
+						return ctx.Err()
+					case <-logEvery.C:
+						logger.Info(fmt.Sprintf("[%s] Total difficulty index: %s/%s", logPrefix,
+							common.PrettyCounter(header.Number.Uint64()), common.PrettyCounter(blockReader.FrozenBlocks())))
+					default:
+					}
 				}
 				return nil
 			}); err != nil {
@@ -377,12 +380,14 @@ func FillDBFromSnapshots(logPrefix string, ctx context.Context, tx kv.RwTx, dirs
 
 			_ = tx.ClearTable(kv.MaxTxNum)
 			if err := blockReader.IterateFrozenBodies(tx, func(blockNum, baseTxNum, txAmount uint64) error {
-				select {
-				case <-ctx.Done():
-					return ctx.Err()
-				case <-logEvery.C:
-					logger.Info(fmt.Sprintf("[%s] MaxTxNums index: %s/%s", logPrefix, common.PrettyCounter(blockNum), common.PrettyCounter(blockReader.FrozenBlocks())))
-				default:
+				if blockNum%10_000 == 0 {
+					select {
+					case <-ctx.Done():
+						return ctx.Err()
+					case <-logEvery.C:
+						logger.Info(fmt.Sprintf("[%s] MaxTxNums index: %s/%s", logPrefix, common.PrettyCounter(blockNum), common.PrettyCounter(blockReader.FrozenBlocks())))
+					default:
+					}
 				}
 				if baseTxNum+txAmount == 0 {
 					panic(baseTxNum + txAmount) //uint-underflow
