@@ -1237,6 +1237,24 @@ func (ii *InvertedIndex) maxTxNumInDB(tx kv.Tx) uint64 {
 	return 0
 }
 
+func (ii *InvertedIndex) progressAndVisibleEndInDB(tx kv.Tx) (uint64, uint64) {
+	lst, _ := kv.LastKey(tx, ii.KeysTable)
+	if len(lst) == 0 {
+		return 0, 0
+	}
+	txNum := binary.BigEndian.Uint64(lst)
+	if txNum == math.MaxUint64 {
+		return txNum, txNum
+	}
+	return txNum, txNum + 1
+}
+
 func (iit *InvertedIndexRoTx) Progress(tx kv.Tx) uint64 {
 	return max(iit.files.EndTxNum(), iit.ii.maxTxNumInDB(tx))
+}
+
+func (iit *InvertedIndexRoTx) progressAndVisibleEnd(tx kv.Tx) (uint64, uint64) {
+	filesEnd := iit.files.EndTxNum()
+	dbProgress, dbEnd := iit.ii.progressAndVisibleEndInDB(tx)
+	return max(filesEnd, dbProgress), max(filesEnd, dbEnd)
 }

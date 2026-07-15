@@ -253,6 +253,9 @@ func (tx *tx) Retire(ctx context.Context, cutoffs kv.RetireCutoffs) (int, error)
 }
 func (tx *tx) DomainFiles(domain ...kv.Domain) kv.VisibleFiles { panic("not implemented") }
 func (tx *tx) DomainProgress(domain kv.Domain) uint64          { panic("not implemented") }
+func (tx *tx) DomainProgressAndVisibleEnd(domain kv.Domain) (uint64, uint64, bool) {
+	return 0, 0, false
+}
 func (tx *tx) GetLatestFromDB(domain kv.Domain, k []byte) (v []byte, step kv.Step, found bool, err error) {
 	panic("not implemented")
 }

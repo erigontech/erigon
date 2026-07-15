@@ -2488,6 +2488,14 @@ func (at *AggregatorRoTx) DomainProgress(name kv.Domain, tx kv.Tx) uint64 {
 	}
 	return at.d[name].ht.iit.Progress(tx)
 }
+func (at *AggregatorRoTx) DomainProgressAndVisibleEnd(name kv.Domain, tx kv.Tx) (uint64, uint64, bool) {
+	d := at.d[name]
+	if d.d.HistoryDisabled {
+		return 0, 0, false
+	}
+	progress, visibleEnd := d.ht.iit.progressAndVisibleEnd(tx)
+	return progress, visibleEnd, true
+}
 func (at *AggregatorRoTx) IIProgress(name kv.InvertedIdx, tx kv.Tx) uint64 {
 	return at.searchII(name).Progress(tx)
 }

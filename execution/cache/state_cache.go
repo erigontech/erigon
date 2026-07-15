@@ -18,6 +18,7 @@ package cache
 
 import (
 	"bytes"
+	"math"
 	"strings"
 	"sync"
 
@@ -54,9 +55,9 @@ const (
 // Account and Storage use GenericCache.
 // Code uses CodeCache (two-level for deduplication).
 type StateCache struct {
-	caches          [kv.DomainLen]Cache
-	admissionMu     sync.RWMutex
-	appliedProgress [kv.DomainLen]uint64
+	caches      [kv.DomainLen]Cache
+	admissionMu sync.RWMutex
+	appliedEnd  [kv.DomainLen]uint64
 }
 
 // NewStateCache creates a new StateCache with the specified byte capacities.
@@ -157,10 +158,10 @@ func (c *StateCache) PutCodeWithHash(addr, code, codeHash []byte, txNum uint64) 
 }
 
 // PutCodeWithHashIfFresh conditionally fills code from a current snapshot.
-func (c *StateCache) PutCodeWithHashIfFresh(addr, code, codeHash []byte, txNum, snapshotProgress uint64) {
+func (c *StateCache) PutCodeWithHashIfFresh(addr, code, codeHash []byte, txNum, snapshotEnd uint64) {
 	c.admissionMu.RLock()
 	defer c.admissionMu.RUnlock()
-	if snapshotProgress < c.appliedProgress[kv.CodeDomain] {
+	if snapshotEnd < c.appliedEnd[kv.CodeDomain] {
 		return
 	}
 	c.putCodeWithHash(addr, code, codeHash, txNum, false)
@@ -220,10 +221,10 @@ func (c *StateCache) putAddrCodeHash(addr []byte, h [32]byte, txNum uint64) {
 }
 
 // PutAddrCodeHashIfFresh conditionally fills a mapping from a current account snapshot.
-func (c *StateCache) PutAddrCodeHashIfFresh(addr []byte, h [32]byte, txNum, snapshotProgress uint64) {
+func (c *StateCache) PutAddrCodeHashIfFresh(addr []byte, h [32]byte, txNum, snapshotEnd uint64) {
 	c.admissionMu.RLock()
 	defer c.admissionMu.RUnlock()
-	if snapshotProgress < c.appliedProgress[kv.AccountsDomain] {
+	if snapshotEnd < c.appliedEnd[kv.AccountsDomain] {
 		return
 	}
 	c.putAddrCodeHash(addr, h, txNum)
@@ -244,10 +245,10 @@ func (c *StateCache) Put(domain kv.Domain, key []byte, value []byte, txNum uint6
 }
 
 // PutIfFresh conditionally fills a domain from a current snapshot.
-func (c *StateCache) PutIfFresh(domain kv.Domain, key []byte, value []byte, txNum, snapshotProgress uint64) {
+func (c *StateCache) PutIfFresh(domain kv.Domain, key []byte, value []byte, txNum, snapshotEnd uint64) {
 	c.admissionMu.RLock()
 	defer c.admissionMu.RUnlock()
-	if snapshotProgress < c.appliedProgress[domain] {
+	if snapshotEnd < c.appliedEnd[domain] {
 		return
 	}
 	c.put(domain, key, value, txNum, false)
@@ -322,8 +323,12 @@ func putOrDelete(cache Cache, key, value []byte, txNum uint64) {
 }
 
 func (c *StateCache) noteApplied(domain kv.Domain, txNum uint64) {
-	if txNum > c.appliedProgress[domain] {
-		c.appliedProgress[domain] = txNum
+	end := txNum
+	if end < math.MaxUint64 {
+		end++
+	}
+	if end > c.appliedEnd[domain] {
+		c.appliedEnd[domain] = end
 	}
 }
 
@@ -336,8 +341,8 @@ func (c *StateCache) Clear() {
 			cache.Clear()
 		}
 	}
-	for i := range c.appliedProgress {
-		c.appliedProgress[i] = 0
+	for i := range c.appliedEnd {
+		c.appliedEnd[i] = 0
 	}
 }
 
@@ -364,9 +369,9 @@ func (c *StateCache) Unwind(unwindToTxNum uint64) {
 			cache.Unwind(unwindToTxNum)
 		}
 	}
-	for i := range c.appliedProgress {
-		if c.appliedProgress[i] > unwindToTxNum {
-			c.appliedProgress[i] = unwindToTxNum
+	for i := range c.appliedEnd {
+		if c.appliedEnd[i] > unwindToTxNum {
+			c.appliedEnd[i] = unwindToTxNum
 		}
 	}
 }

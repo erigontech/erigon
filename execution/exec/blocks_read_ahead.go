@@ -82,30 +82,33 @@ func (bra *BlockReadAheader) SetStateCache(sc *cache.StateCache) {
 // (codeHash→bytes) + size-cache layers via PutCodeWithHash, keyed by the
 // code's own keccak hash so every cached pair is self-consistent.
 type cachePopulatingGetter struct {
-	g        kv.TemporalGetter
-	sc       *cache.StateCache
-	stepSize uint64 // for the read txNum upper bound (last txNum of the read's step)
-	progress func(kv.Domain) uint64
+	g              kv.TemporalGetter
+	sc             *cache.StateCache
+	stepSize       uint64 // for the read txNum upper bound (last txNum of the read's step)
+	progressBounds func(kv.Domain) (uint64, uint64, bool)
 }
 
 func newCachePopulatingGetter(ttx kv.TemporalTx, sc *cache.StateCache) *cachePopulatingGetter {
-	return &cachePopulatingGetter{g: ttx, sc: sc, stepSize: ttx.Debug().StepSize(), progress: ttx.Debug().DomainProgress}
+	return &cachePopulatingGetter{g: ttx, sc: sc, stepSize: ttx.Debug().StepSize(), progressBounds: ttx.Debug().DomainProgressAndVisibleEnd}
 }
 
 func (cpg *cachePopulatingGetter) GetLatest(name kv.Domain, k []byte) ([]byte, kv.Step, error) {
 	v, step, err := cpg.g.GetLatest(name, k)
-	if err == nil && cpg.sc != nil && cpg.progress != nil {
-		snapshotProgress := cpg.progress(name)
+	if err == nil && cpg.sc != nil && cpg.progressBounds != nil {
+		snapshotProgress, snapshotEnd, ok := cpg.progressBounds(name)
+		if !ok {
+			return v, step, nil
+		}
 		if name == kv.CodeDomain {
 			if len(v) > 0 {
-				cpg.sc.PutCodeWithHashIfFresh(k, v, crypto.Keccak256(v), (uint64(step)+1)*cpg.stepSize-1, snapshotProgress)
+				cpg.sc.PutCodeWithHashIfFresh(k, v, crypto.Keccak256(v), (uint64(step)+1)*cpg.stepSize-1, snapshotEnd)
 			}
 		} else {
 			txNum := (uint64(step)+1)*cpg.stepSize - 1
 			if len(v) == 0 {
 				txNum = snapshotProgress
 			}
-			cpg.sc.PutIfFresh(name, k, v, txNum, snapshotProgress)
+			cpg.sc.PutIfFresh(name, k, v, txNum, snapshotEnd)
 		}
 	}
 	return v, step, err

@@ -882,22 +882,22 @@ func TestDomainCache_PutIfAbsentAtomicWithPut(t *testing.T) {
 	}
 }
 
-func TestStateCache_AppliedProgressLifecycle(t *testing.T) {
+func TestStateCache_AppliedEndLifecycle(t *testing.T) {
 	b := 1 * datasize.MB
 	sc := NewStateCache(b, b, b, b)
 	t.Cleanup(sc.Close)
-	require.Zero(t, sc.appliedProgress[kv.AccountsDomain])
+	require.Zero(t, sc.appliedEnd[kv.AccountsDomain])
 
 	sc.Apply(kv.AccountsDomain, makeAddr(1), makeValue(1), 20)
 	sc.Apply(kv.AccountsDomain, makeAddr(2), makeValue(2), 10)
-	require.Equal(t, uint64(20), sc.appliedProgress[kv.AccountsDomain])
-	require.Zero(t, sc.appliedProgress[kv.StorageDomain])
+	require.Equal(t, uint64(21), sc.appliedEnd[kv.AccountsDomain])
+	require.Zero(t, sc.appliedEnd[kv.StorageDomain])
 
 	sc.Unwind(15)
-	require.Equal(t, uint64(15), sc.appliedProgress[kv.AccountsDomain])
+	require.Equal(t, uint64(15), sc.appliedEnd[kv.AccountsDomain])
 
 	sc.Clear()
-	require.Zero(t, sc.appliedProgress[kv.AccountsDomain])
+	require.Zero(t, sc.appliedEnd[kv.AccountsDomain])
 }
 
 func TestStateCache_StaleSnapshotCannotFillAfterDelete(t *testing.T) {
@@ -912,9 +912,29 @@ func TestStateCache_StaleSnapshotCannotFillAfterDelete(t *testing.T) {
 	_, ok := sc.Get(kv.AccountsDomain, key)
 	require.False(t, ok, "an authoritative deletion must physically remove the entry")
 
-	sc.PutIfFresh(kv.AccountsDomain, key, stale, 10, 10)
+	sc.PutIfFresh(kv.AccountsDomain, key, stale, 10, 11)
 	_, ok = sc.Get(kv.AccountsDomain, key)
 	require.False(t, ok, "a snapshot older than the deletion must not fill afterward")
+}
+
+func TestStateCache_FileEndSnapshotCannotFillAtAppliedTx(t *testing.T) {
+	b := 1 * datasize.MB
+	sc := NewStateCache(b, b, b, b)
+	t.Cleanup(sc.Close)
+
+	key := makeAddr(1)
+	stale := makeValue(1)
+	sc.Apply(kv.AccountsDomain, key, nil, 100)
+
+	sc.PutIfFresh(kv.AccountsDomain, key, stale, 99, 100)
+	_, ok := sc.Get(kv.AccountsDomain, key)
+	require.False(t, ok, "a [0,100) snapshot does not contain the applied tx 100")
+
+	fresh := makeValue(2)
+	sc.PutIfFresh(kv.AccountsDomain, key, fresh, 100, 101)
+	got, ok := sc.Get(kv.AccountsDomain, key)
+	require.True(t, ok)
+	require.Equal(t, fresh, got)
 }
 
 func TestStateCache_ApplyDeleteAtomicWithFill(t *testing.T) {
@@ -926,18 +946,19 @@ func TestStateCache_ApplyDeleteAtomicWithFill(t *testing.T) {
 	key := makeAddr(2)
 	value := makeValue(1)
 	for round := range 20000 {
-		snapshotProgress := uint64(round*2 + 1)
-		sc.Apply(kv.AccountsDomain, progressKey, value, snapshotProgress)
+		appliedTxNum := uint64(round*2 + 1)
+		snapshotEnd := appliedTxNum + 1
+		sc.Apply(kv.AccountsDomain, progressKey, value, appliedTxNum)
 
 		var wg sync.WaitGroup
 		wg.Add(2)
 		go func() {
 			defer wg.Done()
-			sc.Apply(kv.AccountsDomain, key, nil, snapshotProgress+1)
+			sc.Apply(kv.AccountsDomain, key, nil, snapshotEnd)
 		}()
 		go func() {
 			defer wg.Done()
-			sc.PutIfFresh(kv.AccountsDomain, key, value, snapshotProgress, snapshotProgress)
+			sc.PutIfFresh(kv.AccountsDomain, key, value, appliedTxNum, snapshotEnd)
 		}()
 		wg.Wait()
 

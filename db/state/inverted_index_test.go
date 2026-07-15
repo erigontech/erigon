@@ -87,6 +87,36 @@ func testDbAndInvertedIndex(tb testing.TB, aggStep uint64, logger log.Logger) (k
 	return db, ii
 }
 
+func TestInvertedIndexProgressAndVisibleEnd(t *testing.T) {
+	db, ii := testDbAndInvertedIndex(t, 16, log.New())
+	tx, err := db.BeginRw(t.Context())
+	require.NoError(t, err)
+	defer tx.Rollback()
+
+	iit := ii.beginForTests()
+	defer iit.Close()
+	progress, visibleEnd := iit.progressAndVisibleEnd(tx)
+	require.Zero(t, progress)
+	require.Zero(t, visibleEnd)
+
+	var txNum [8]byte
+	require.NoError(t, tx.Put(ii.KeysTable, txNum[:], []byte{1}))
+	progress, visibleEnd = iit.progressAndVisibleEnd(tx)
+	require.Zero(t, progress)
+	require.Equal(t, uint64(1), visibleEnd)
+
+	binary.BigEndian.PutUint64(txNum[:], 100)
+	require.NoError(t, tx.Put(ii.KeysTable, txNum[:], []byte{1}))
+	progress, visibleEnd = iit.progressAndVisibleEnd(tx)
+	require.Equal(t, uint64(100), progress)
+	require.Equal(t, uint64(101), visibleEnd)
+
+	iit.files = visibleFiles{{endTxNum: 200}}
+	progress, visibleEnd = iit.progressAndVisibleEnd(tx)
+	require.Equal(t, uint64(200), progress)
+	require.Equal(t, uint64(200), visibleEnd)
+}
+
 func TestInvIndexPruningCorrectness(t *testing.T) {
 	t.Parallel()
 
