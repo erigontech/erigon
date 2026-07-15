@@ -41,6 +41,7 @@ type ListSSZ[T EncodableHashableSSZ] struct {
 	// then we can cache its size instead of calling EncodeSizeSSZ on
 	// an always newly created object
 	bytesPerElement int
+	progressive     bool
 	// We can keep hash_tree_root result cached
 	root common.Hash
 }
@@ -59,6 +60,14 @@ func NewStaticListSSZ[T EncodableHashableSSZ](limit int, bytesPerElement int) *L
 		static:          true,
 		bytesPerElement: bytesPerElement,
 	}
+}
+
+func NewDynamicProgressiveListSSZ[T EncodableHashableSSZ]() *ListSSZ[T] {
+	return &ListSSZ[T]{list: make([]T, 0), progressive: true}
+}
+
+func NewStaticProgressiveListSSZ[T EncodableHashableSSZ](bytesPerElement int) *ListSSZ[T] {
+	return &ListSSZ[T]{list: make([]T, 0), static: true, bytesPerElement: bytesPerElement, progressive: true}
 }
 
 func (l ListSSZ[T]) MarshalJSON() ([]byte, error) {
@@ -104,10 +113,18 @@ func (l *ListSSZ[T]) EncodeSSZ(buf []byte) (dst []byte, err error) {
 }
 
 func (l *ListSSZ[T]) DecodeSSZ(buf []byte, version int) (err error) {
+	limit := uint64(l.limit)
+	if l.progressive {
+		if l.static && l.bytesPerElement > 0 {
+			limit = uint64(len(buf) / l.bytesPerElement)
+		} else {
+			limit = uint64(len(buf) / 4)
+		}
+	}
 	if l.static {
-		l.list, err = ssz.DecodeStaticList[T](buf, 0, uint32(len(buf)), uint32(l.bytesPerElement), uint64(l.limit), version)
+		l.list, err = ssz.DecodeStaticList[T](buf, 0, uint32(len(buf)), uint32(l.bytesPerElement), limit, version)
 	} else {
-		l.list, err = ssz.DecodeDynamicList[T](buf, 0, uint32(len(buf)), uint64(l.limit), version)
+		l.list, err = ssz.DecodeDynamicList[T](buf, 0, uint32(len(buf)), limit, version)
 	}
 	l.root = common.Hash{}
 	return
@@ -129,7 +146,11 @@ func (l *ListSSZ[T]) HashSSZ() ([32]byte, error) {
 		return l.root, nil
 	}
 	var err error
-	l.root, err = merkle_tree.ListObjectSSZRoot(l.list, uint64(l.limit))
+	if l.progressive {
+		l.root, err = l.HashSSZProgressive(nil)
+	} else {
+		l.root, err = merkle_tree.ListObjectSSZRoot(l.list, uint64(l.limit))
+	}
 	return l.root, err
 }
 
@@ -150,6 +171,12 @@ func (l *ListSSZ[T]) HashSSZProgressive(hashElement func(T) ([32]byte, error)) (
 }
 
 func (l *ListSSZ[T]) Clone() clonable.Clonable {
+	if l.progressive {
+		if l.static {
+			return NewStaticProgressiveListSSZ[T](l.bytesPerElement)
+		}
+		return NewDynamicProgressiveListSSZ[T]()
+	}
 	if l.static {
 		return NewStaticListSSZ[T](l.limit, l.bytesPerElement)
 	}
@@ -228,6 +255,7 @@ func (l *ListSSZ[T]) ShallowCopy() *ListSSZ[T] {
 		limit:           l.limit,
 		static:          l.static,
 		bytesPerElement: l.bytesPerElement,
+		progressive:     l.progressive,
 		root:            common.Hash(common.Copy(l.root[:])),
 	}
 	copy(cpy.list, l.list)
