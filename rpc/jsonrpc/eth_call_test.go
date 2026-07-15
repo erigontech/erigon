@@ -39,6 +39,7 @@ import (
 	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/db/dbservices"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/kvcache"
 	"github.com/erigontech/erigon/db/kv/rawdbv3"
@@ -429,6 +430,36 @@ func TestGetProof(t *testing.T) {
 			}
 		})
 	}
+}
+
+type missingHeaderBlockReader struct {
+	dbservices.FullBlockReader
+}
+
+func (missingHeaderBlockReader) HeaderByNumber(context.Context, kv.Getter, uint64) (*types.Header, error) {
+	return nil, nil
+}
+
+func TestGetProofMissingHeader(t *testing.T) {
+	previousSchema := statecfg.Schema
+	statecfg.EnableHistoricalCommitment()
+	t.Cleanup(func() {
+		statecfg.Schema = previousSchema
+	})
+
+	m, bankAddr, _, _ := chainWithDeployedContract(t)
+	base := newBaseApiForTest(m)
+	base._blockReader = missingHeaderBlockReader{FullBlockReader: base._blockReader}
+	api := newEthApiForTest(base, m.DB, nil, nil)
+
+	proof, err := api.GetProof(
+		context.Background(),
+		bankAddr,
+		nil,
+		bnhPtr(rpc.BlockNumberOrHashWithNumber(6)),
+	)
+	require.EqualError(t, err, "header not found for block 6")
+	require.Nil(t, proof)
 }
 
 func TestGetProofPinsReadSnapshot(t *testing.T) {
