@@ -931,9 +931,16 @@ func (h *History) BeginFilesRoForDebug() *HistoryRoTx {
 }
 
 func (h *History) beginFilesRo(files visibleFiles, iv *iiVisible) *HistoryRoTx {
-	return &HistoryRoTx{
+	ht := &HistoryRoTx{}
+	h.initFilesRo(ht, &InvertedIndexRoTx{}, files, iv)
+	return ht
+}
+
+func (h *History) initFilesRo(ht *HistoryRoTx, iit *InvertedIndexRoTx, files visibleFiles, iv *iiVisible) {
+	h.InvertedIndex.initFilesRo(iit, iv)
+	*ht = HistoryRoTx{
 		h:        h,
-		iit:      h.InvertedIndex.beginFilesRo(iv),
+		iit:      iit,
 		files:    files,
 		stepSize: h.stepSize,
 	}
