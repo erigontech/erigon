@@ -14,7 +14,6 @@ rules:
       - qa-rpc-integration-tests.yml
       - qa-sync-from-scratch.yml
       - test-kurtosis-assertoor.yml
-      - test-kurtosis-gloas.yml
 
   # create-github-app-token steps scope `repositories:` but not per-permission
   # scopes, so the app token inherits blanket installation permissions.

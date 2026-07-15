@@ -207,7 +207,7 @@ jobs:
           reg=.github/workflows/kurtosis/regular-assertoor.io
           assertoor=$(yq -e '.assertoor_params.image' "$reg")
           pectra=$(yq -e '.assertoor_params.image' .github/workflows/kurtosis/pectra.io)
-          glamsterdam=$(yq -e '.assertoor_params.image' .github/workflows/kurtosis/glamsterdam.io)
+          glamsterdam=$(yq -e '.assertoor_params.image' .github/workflows/kurtosis/glamsterdam-erigon-el.io)
           lighthouse=$(yq -e '.participants_matrix.cl[] | select(.cl_type == "lighthouse") | .cl_image' "$reg")
           teku=$(yq -e '.participants_matrix.cl[] | select(.cl_type == "teku") | .cl_image' "$reg")
           lighthouse_vc=$(yq -e '.participants[] | select(.vc_type == "lighthouse") | .vc_image' .github/workflows/kurtosis/caplin-minimal-assertoor.io)
@@ -356,11 +356,21 @@ jobs:
             ethereum_package_branch: "5.0.1"
             test_timeout_minutes: 45
             exec_mode: parallel
-          - suite: glamsterdam
-            package_args: .github/workflows/kurtosis/glamsterdam.io
+          - suite: glamsterdam-erigon-el
+            package_args: .github/workflows/kurtosis/glamsterdam-erigon-el.io
             # Pinned to 6.1.0 rather than main: commit 835dd9b on main introduced GpuConfig,
             # a Starlark built-in that requires Kurtosis CLI >=1.18.1, breaking Starlark eval.
             # Unpin to main once CI is upgraded to Kurtosis 1.18.1.
+            ethereum_package_branch: "6.1.0"
+            test_timeout_minutes: 20
+            exec_mode: parallel
+          - suite: glamsterdam-erigon-el-cl
+            package_args: .github/workflows/kurtosis/glamsterdam-erigon-el-cl.io
+            ethereum_package_branch: "6.1.0"
+            test_timeout_minutes: 20
+            exec_mode: parallel
+          - suite: glamsterdam-erigon-el-cl-prysm
+            package_args: .github/workflows/kurtosis/glamsterdam-erigon-el-cl-prysm.io
             ethereum_package_branch: "6.1.0"
             test_timeout_minutes: 20
             exec_mode: parallel
@@ -402,7 +412,7 @@ jobs:
           reg=.github/workflows/kurtosis/regular-assertoor.io
           assertoor=$(yq -e '.assertoor_params.image' "$reg")
           pectra=$(yq -e '.assertoor_params.image' .github/workflows/kurtosis/pectra.io)
-          glamsterdam=$(yq -e '.assertoor_params.image' .github/workflows/kurtosis/glamsterdam.io)
+          glamsterdam=$(yq -e '.assertoor_params.image' .github/workflows/kurtosis/glamsterdam-erigon-el.io)
           lighthouse=$(yq -e '.participants_matrix.cl[] | select(.cl_type == "lighthouse") | .cl_image' "$reg")
           teku=$(yq -e '.participants_matrix.cl[] | select(.cl_type == "teku") | .cl_image' "$reg")
           lighthouse_vc=$(yq -e '.participants[] | select(.vc_type == "lighthouse") | .vc_image' .github/workflows/kurtosis/caplin-minimal-assertoor.io)
