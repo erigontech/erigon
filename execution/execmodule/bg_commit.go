@@ -229,6 +229,18 @@ func (e *ExecModule) latestGen() *execctx.SharedDomains {
 	return last.sd
 }
 
+// beginCoordinatedRo opens a base RO tx under fgMu so its committed snapshot
+// reflects every generation markGenCommitted has recorded — markGenCommitted runs
+// under fgMu strictly after the DB commit, so a datum dropped from the parent
+// chain as committed is guaranteed visible in this tx. Handed to SharedDomains as
+// their read coordinator; exec/validation readers open through it instead of an
+// ad-hoc BeginTemporalRo that could straddle a background commit.
+func (e *ExecModule) beginCoordinatedRo(ctx context.Context) (kv.TemporalTx, error) {
+	e.fgMu.Lock()
+	defer e.fgMu.Unlock()
+	return e.db.BeginTemporalRo(ctx)
+}
+
 // addGen appends a new in-flight generation to the chain.
 func (e *ExecModule) addGen(gen *commitGen) {
 	e.fgMu.Lock()

@@ -416,6 +416,7 @@ func (e *ExecModule) updateForkChoice(ctx context.Context, originalBlockHash, sa
 		}
 	}
 	if currentContext != nil {
+		currentContext.SetReadCoordinator(e.beginCoordinatedRo)
 		currentContext.SetInMemHistoryReads(inMemHistoryReads)
 		// Wire the state cache so canonical execution reads benefit from
 		// the per-execution Account/Storage/Code cache. Previously only

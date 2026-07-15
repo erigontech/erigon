@@ -125,6 +125,14 @@ type SharedDomains struct {
 	// to read from the FCU's published SD without writing to it.
 	parent *SharedDomains
 
+	// readCoordinator, when set, opens a base RO tx coordinated with the
+	// background-commit generation set: opened while holding the commit mutex so
+	// the tx's committed snapshot reflects every generation the parent chain has
+	// dropped as committed. Readers that need an underlying-DB base call
+	// BeginCoordinatedRo instead of opening an ad-hoc BeginTemporalRo, so a datum
+	// is always in the mem chain or this tx — never neither.
+	readCoordinator func(context.Context) (kv.TemporalTx, error)
+
 	// stateCache is an optional cache for state data (accounts, storage, code)
 	stateCache *cache.StateCache
 
@@ -684,7 +692,29 @@ func (sd *SharedDomains) InMemHistoryReads() bool          { return sd.mem.InMem
 // SetParent sets a parent SD for read-through domain chaining. Domain reads
 // that miss in the local mem batch will check the parent's mem batch before
 // falling through to the underlying tx/aggregator.
-func (sd *SharedDomains) SetParent(parent *SharedDomains) { sd.parent = parent }
+func (sd *SharedDomains) SetParent(parent *SharedDomains) {
+	sd.parent = parent
+	// Inherit the parent's read coordinator so a child SD built for a read pass
+	// opens coordinated base txns without the caller re-wiring it.
+	if parent != nil && sd.readCoordinator == nil {
+		sd.readCoordinator = parent.readCoordinator
+	}
+}
+
+// SetReadCoordinator wires the coordinated base-tx opener (see readCoordinator).
+func (sd *SharedDomains) SetReadCoordinator(fn func(context.Context) (kv.TemporalTx, error)) {
+	sd.readCoordinator = fn
+}
+
+// BeginCoordinatedRo opens a base RO tx coordinated with the generation set (see
+// readCoordinator). Falls back to a plain tx from db when no coordinator is set
+// (non-bg-commit setups), so callers can use it unconditionally.
+func (sd *SharedDomains) BeginCoordinatedRo(ctx context.Context, db kv.TemporalRoDB) (kv.TemporalTx, error) {
+	if sd.readCoordinator != nil {
+		return sd.readCoordinator(ctx)
+	}
+	return db.BeginTemporalRo(ctx)
+}
 
 // BlockOverlay returns the in-memory overlay for block-level metadata (headers, bodies,
 // canonical hashes, TD, stage progress, forkchoice markers). Callers can use this
@@ -721,6 +751,17 @@ func (sd *SharedDomains) BlockOverlayTemporalTx(roTx kv.TemporalTx) kv.TemporalT
 		return nil
 	}
 	return overlay.NewTemporalReadView(base)
+}
+
+// ParentBlockOverlayTemporalTx returns the block-overlay read view of the parent
+// chain only (excluding this SD's own overlay), or nil when there is no parent.
+// A reader derives its overlay base from this so the base and the chain it later
+// walks via BlockOverlayTemporalTx are the same generations — they cannot diverge.
+func (sd *SharedDomains) ParentBlockOverlayTemporalTx(roTx kv.TemporalTx) kv.TemporalTx {
+	if sd.parent == nil {
+		return nil
+	}
+	return sd.parent.BlockOverlayTemporalTx(roTx)
 }
 
 // InitBlockOverlay creates (or replaces) the block-level metadata overlay backed by

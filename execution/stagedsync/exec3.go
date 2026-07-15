@@ -555,19 +555,25 @@ func (te *txExecutor) executeBlocks(ctx context.Context, startBlockNum uint64, m
 			defer close(blockRequests)
 		}
 
-		// Open a thread-local roTx for block metadata and StepsInFiles.
-		// Must NOT use the stageloop's rwTx — it's thread-bound.
-		execRoTx, err := te.cfg.db.BeginTemporalRo(ctx)
+		// Open a thread-local base roTx for block metadata and StepsInFiles,
+		// coordinated with the background-commit generation set so a generation
+		// dropped from the parent chain as committed is visible here (never
+		// neither). Must NOT use the stageloop's rwTx — it's thread-bound.
+		execRoTx, err := te.doms.BeginCoordinatedRo(ctx, te.cfg.db)
 		if err != nil {
 			return fmt.Errorf("executeBlocks: open roTx: %w", err)
 		}
 		defer execRoTx.Rollback()
 
-		var blockTx kv.Tx
-		if overlay := te.doms.BlockOverlay(); overlay != nil {
-			blockTx = overlay.NewReadView(execRoTx)
-		} else {
-			blockTx = execRoTx
+		// Resolve block metadata memory-first: walk the block-overlay chain
+		// (local overlay + parent generations' overlays), falling through to the
+		// goroutine-local execRoTx for the underlying DB read only on a miss —
+		// mirroring how domain-state reads chain sd.mem → parents → tx. The parent
+		// chain must be layered ahead of the tx so an uncommitted ancestor
+		// generation's block data stays visible until its commit lands.
+		var blockTx kv.Tx = execRoTx
+		if v := te.doms.BlockOverlayTemporalTx(execRoTx); v != nil {
+			blockTx = v
 		}
 
 		// Use the max of all state domain steps (not just commitment) to

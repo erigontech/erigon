@@ -602,27 +602,15 @@ func (e *ExecModule) ValidateChain(ctx context.Context, blockHash common.Hash, b
 	// Do not defer doms.Close(): on the success path ownership transfers to
 	// forkValidator.sharedDom inside ValidatePayload and later phases close it,
 	// so we Close explicitly only on the early-return error paths below.
+	doms.SetReadCoordinator(e.beginCoordinatedRo)
 	doms.SetInMemHistoryReads(inMemHistoryReads)
-
-	// Back the validation overlay by the newest in-flight commit generation
-	// (gate item 2) so block-data reads cascade through its overlay instead
-	// of a stale DB while a background commit is in flight.
-	valOverlayBase := kv.TemporalTx(roTx)
-	if parent := e.latestGen(); parent != nil {
-		if v := parent.BlockOverlayTemporalTx(roTx); v != nil {
-			valOverlayBase = v
-		}
-	}
-	if err := doms.InitBlockOverlay(valOverlayBase, roTx.Debug().Dirs().Tmp); err != nil {
-		doms.Close()
-		return ValidationResult{}, fmt.Errorf("ValidateChain: init block overlay: %w", err)
-	}
-	var tx kv.TemporalRwTx = doms.BlockOverlay()
 
 	// Chain the validation SD to the latest in-memory canonical generation:
 	// e.currentContext when present, otherwise the newest in-flight commit
 	// generation (gate item 2 — the prior FCU cleared currentContext and
-	// handed its SD to the background commit).
+	// handed its SD to the background commit). This parent link is the single
+	// lookup path: the overlay base below is derived from it so block-data reads
+	// and domain-state reads traverse the identical generation chain.
 	//
 	// The parent link serves two roles:
 	//
@@ -641,10 +629,29 @@ func (e *ExecModule) ValidateChain(ctx context.Context, blockHash common.Hash, b
 	// key the unwound canonical blocks touched, and TemporalMemBatch.getLatest
 	// resolves those from the unwind set before ever consulting the parent.
 	if e.currentContext != nil {
+		// Refresh the in-progress top's parent to the current in-flight tip so
+		// its chain reaches generations pushed since currentContext was created;
+		// otherwise its stale/nil parent leaves in-flight block data unreachable.
+		if parent := e.latestGen(); parent != nil {
+			e.currentContext.SetParent(parent)
+		}
 		doms.SetParent(e.currentContext)
 	} else if parent := e.latestGen(); parent != nil {
 		doms.SetParent(parent)
 	}
+
+	// Back the validation overlay by the SD's OWN parent chain (gate item 2) so
+	// block-data reads cascade through the same generations that domain-state
+	// reads do — never a separate, divergent capture.
+	valOverlayBase := kv.TemporalTx(roTx)
+	if v := doms.ParentBlockOverlayTemporalTx(roTx); v != nil {
+		valOverlayBase = v
+	}
+	if err := doms.InitBlockOverlay(valOverlayBase, roTx.Debug().Dirs().Tmp); err != nil {
+		doms.Close()
+		return ValidationResult{}, fmt.Errorf("ValidateChain: init block overlay: %w", err)
+	}
+	var tx kv.TemporalRwTx = doms.BlockOverlay()
 
 	// Flush block overlay data (headers, bodies, TDs from InsertBlocks) into
 	// the validation overlay so unwindToCommonCanonical and ValidatePayload —

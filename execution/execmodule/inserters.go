@@ -89,6 +89,7 @@ func (e *ExecModule) InsertBlocks(ctx context.Context, blocks []*types.RawBlock)
 		// the parent-TD read below sees a previous FCU's not-yet-committed
 		// block data instead of a stale DB.
 		if sd != nil {
+			sd.SetReadCoordinator(e.beginCoordinatedRo)
 			if parent := e.latestGen(); parent != nil {
 				sd.SetParent(parent)
 			}
