@@ -401,7 +401,7 @@ func TestTransactionPriceNonceSort(t *testing.T) {
 	t.Parallel()
 	// Generate a batch of accounts to start with
 	keys := make([]*ecdsa.PrivateKey, 25)
-	for i := 0; i < len(keys); i++ {
+	for i := range keys {
 		keys[i], _ = crypto.GenerateKey()
 	}
 	signer := LatestSignerForChainID(nil)
@@ -411,7 +411,7 @@ func TestTransactionPriceNonceSort(t *testing.T) {
 	groups := TransactionsGroupedBySender{}
 	for start, key := range keys {
 		addr := crypto.PubkeyToAddress(key.PublicKey)
-		for i := 0; i < 25; i++ {
+		for i := range 25 {
 			tx, _ := SignTx(NewTransaction(uint64(start+i), common.Address{}, uint256.NewInt(100), 100, uint256.NewInt(uint64(start+i)), nil), *signer, key)
 
 			j, ok := idx[addr]
@@ -438,7 +438,7 @@ func TestTransactionCoding(t *testing.T) {
 		recipient = common.HexToAddress("095e7baea6a6c7c4c2dfeb977efac326af552d87")
 		accesses  = AccessList{{Address: addr, StorageKeys: []common.Hash{{0}}}}
 	)
-	for i := uint64(0); i < 500; i++ {
+	for i := range uint64(500) {
 		var txdata Transaction
 		switch i % 5 {
 		case 0:
@@ -613,7 +613,7 @@ func randIntInRange(_min, _max int) int {
 
 func randAddr() *common.Address {
 	var a common.Address
-	for j := 0; j < 20; j++ {
+	for j := range 20 {
 		a[j] = byte(rand.Intn(255))
 	}
 	return &a
@@ -621,7 +621,7 @@ func randAddr() *common.Address {
 
 func randHash() common.Hash {
 	var h common.Hash
-	for i := 0; i < 32; i++ {
+	for i := range 32 {
 		h[i] = byte(rand.Intn(255))
 	}
 	return h
@@ -629,7 +629,7 @@ func randHash() common.Hash {
 
 func randHashes(n int) []common.Hash {
 	h := make([]common.Hash, n)
-	for i := 0; i < n; i++ {
+	for i := range n {
 		h[i] = randHash()
 	}
 	return h
@@ -638,7 +638,7 @@ func randHashes(n int) []common.Hash {
 func randAccessList() AccessList {
 	size := randIntInRange(4, 10)
 	var result AccessList
-	for i := 0; i < size; i++ {
+	for range size {
 		var tup AccessTuple
 
 		tup.Address = *randAddr()
@@ -685,9 +685,9 @@ func randByte() byte {
 
 func newRandCommitments(size int) BlobKzgs {
 	var result BlobKzgs
-	for i := 0; i < size; i++ {
+	for range size {
 		var arr [LEN_48]byte
-		for j := 0; j < LEN_48; j++ {
+		for j := range LEN_48 {
 			arr[j] = randByte()
 		}
 		result = append(result, arr)
@@ -697,9 +697,9 @@ func newRandCommitments(size int) BlobKzgs {
 
 func newRandProofs(size int) KZGProofs {
 	var result KZGProofs
-	for i := 0; i < size; i++ {
+	for range size {
 		var arr [LEN_48]byte
-		for j := 0; j < LEN_48; j++ {
+		for j := range LEN_48 {
 			arr[j] = randByte()
 		}
 		result = append(result, arr)
@@ -709,9 +709,9 @@ func newRandProofs(size int) KZGProofs {
 
 func newRandBlobs(size int) Blobs {
 	var result Blobs
-	for i := 0; i < size; i++ {
+	for range size {
 		var arr [params.BlobSize]byte
-		for j := 0; j < params.BlobSize; j++ {
+		for j := range params.BlobSize {
 			arr[j] = randByte()
 		}
 		result = append(result, arr)
@@ -731,7 +731,7 @@ func newRandBlobWrapper() *BlobTxWrapper {
 }
 
 func populateBlobTxs() {
-	for i := 0; i < N; i++ {
+	for i := range N {
 		dummyBlobTxs[i] = newRandBlobTx()
 	}
 }
@@ -739,7 +739,7 @@ func populateBlobTxs() {
 func TestBlobTxEncodeDecode(t *testing.T) {
 	rand.Seed(time.Now().UnixNano())
 	populateBlobTxs()
-	for i := 0; i < N; i++ {
+	for i := range N {
 		// printSTX(dummyBlobTxs[i])
 
 		tx, err := encodeDecodeBinary(dummyBlobTxs[i])

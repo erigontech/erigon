@@ -136,7 +136,7 @@ func (bs *BlobStore) ReadBlobSidecars(ctx context.Context, slot uint64, blockRoo
 	kzgCommitmentsLength := binary.LittleEndian.Uint32(val)
 
 	var blobSidecars []*cltypes.BlobSidecar
-	for i := uint32(0); i < kzgCommitmentsLength; i++ {
+	for i := range kzgCommitmentsLength {
 		_, filePath := blobSidecarFilePath(slot, uint64(i), blockRoot)
 		file, err := bs.fs.Open(filePath)
 		if err != nil {
@@ -226,7 +226,7 @@ func (bs *BlobStore) RemoveBlobSidecars(ctx context.Context, slot uint64, blockR
 		return nil
 	}
 	kzgCommitmentsLength := binary.LittleEndian.Uint32(val)
-	for i := uint32(0); i < kzgCommitmentsLength; i++ {
+	for i := range kzgCommitmentsLength {
 		_, filePath := blobSidecarFilePath(slot, uint64(i), blockRoot)
 		if err := bs.fs.Remove(filePath); err != nil {
 			return err

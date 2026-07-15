@@ -194,7 +194,7 @@ func TestWriteTransactions_SequentialTxnIDs(t *testing.T) {
 	defer tx.Rollback()
 
 	txs := make([]types.Transaction, 5)
-	for i := 0; i < 5; i++ {
+	for i := range 5 {
 		txs[i] = types.NewTransaction(uint64(i), common.HexToAddress("0x1234"), uint256.NewInt(uint64(i*100)), 21000, uint256.NewInt(1000000000), []byte{})
 	}
 
@@ -204,7 +204,7 @@ func TestWriteTransactions_SequentialTxnIDs(t *testing.T) {
 	require.NoError(t, err)
 
 	// Verify each transaction was stored with the correct sequential ID
-	for i := 0; i < 5; i++ {
+	for i := range 5 {
 		expectedTxnID := baseTxnID.At(i)
 		key := make([]byte, 8)
 		binary.BigEndian.PutUint64(key, expectedTxnID)
@@ -252,7 +252,7 @@ func TestWriteTransactions_UniqueKeys(t *testing.T) {
 	defer tx.Rollback()
 
 	txs := make([]types.Transaction, 5)
-	for i := 0; i < 5; i++ {
+	for i := range 5 {
 		txs[i] = types.NewTransaction(uint64(i), common.HexToAddress("0x1234"), uint256.NewInt(uint64(i*100)), 21000, uint256.NewInt(1000000000), []byte{})
 	}
 
@@ -264,7 +264,7 @@ func TestWriteTransactions_UniqueKeys(t *testing.T) {
 	usedKeys := make(map[string]bool)
 	keysList := make([][]byte, 0, 5)
 
-	for i := 0; i < 5; i++ {
+	for i := range 5 {
 		expectedTxnID := baseTxnID.At(i)
 		key := make([]byte, 8)
 		binary.BigEndian.PutUint64(key, expectedTxnID)
@@ -1316,7 +1316,7 @@ func checkReceiptsRLP(have, want types.Receipts) error {
 	if len(have) != len(want) {
 		return fmt.Errorf("receipts sizes mismatch: have %d, want %d", len(have), len(want))
 	}
-	for i := 0; i < len(want); i++ {
+	for i := range want {
 		rlpHave, err := rlp.EncodeToBytes(have[i])
 		if err != nil {
 			return err

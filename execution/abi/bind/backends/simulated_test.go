@@ -1075,7 +1075,7 @@ func TestSimulatedBackend_PendingAndCallContractAmsterdamDefaultGas(t *testing.T
 	const sstoresPerCall = 448
 
 	runtime := program.New()
-	for i := 0; i < sstoresPerCall; i++ {
+	for i := range sstoresPerCall {
 		runtime.Sstore(i, 1)
 	}
 	runtime.Op(vm.STOP)

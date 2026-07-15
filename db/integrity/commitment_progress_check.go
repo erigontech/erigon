@@ -4,11 +4,11 @@ import (
 	"context"
 	"fmt"
 
+	"github.com/erigontech/erigon/db/dbservices"
 	"github.com/erigontech/erigon/db/kv"
-	"github.com/erigontech/erigon/db/services"
 )
 
-func CheckStateProgress(ctx context.Context, db kv.TemporalRoDB, blockReader services.FullBlockReader, failFast bool) (err error) {
+func CheckStateProgress(ctx context.Context, db kv.TemporalRoDB, blockReader dbservices.FullBlockReader, failFast bool) (err error) {
 	// state files should not be ahead of blocks files
 	tx, err := db.BeginTemporalRo(ctx)
 	if err != nil {

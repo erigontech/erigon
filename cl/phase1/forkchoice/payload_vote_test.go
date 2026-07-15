@@ -494,7 +494,7 @@ func ptcVoteThreshold() int {
 
 func ptcVotes(trueVotes, falseVotes int) [clparams.PtcSize]int8 {
 	var votes [clparams.PtcSize]int8
-	for i := 0; i < trueVotes; i++ {
+	for i := range trueVotes {
 		votes[i] = boolToVote(true)
 	}
 	for i := trueVotes; i < trueVotes+falseVotes; i++ {

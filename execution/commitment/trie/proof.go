@@ -386,7 +386,7 @@ func decodeRef(buf []byte) (Node, []byte, error) {
 
 func decodeFull(elems []byte) (*FullNode, error) {
 	n := &FullNode{}
-	for i := 0; i < 16; i++ {
+	for i := range 16 {
 		var err error
 		n.Children[i], elems, err = decodeRef(elems)
 		if err != nil {

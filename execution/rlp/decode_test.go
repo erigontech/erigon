@@ -1060,7 +1060,7 @@ func BenchmarkDecodeIntSliceReuse(b *testing.B) {
 
 func encodeTestSlice(n uint) []byte {
 	s := make([]uint, n)
-	for i := uint(0); i < n; i++ {
+	for i := range n {
 		s[i] = i
 	}
 	b, err := EncodeToBytes(s)

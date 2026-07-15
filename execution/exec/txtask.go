@@ -598,13 +598,6 @@ func (txTask *TxTask) Execute(evm *vm.EVM,
 		}()
 
 		if result.Err == nil {
-			// Capture residual-balance selfdestructs before SoftFinalise clears the
-			// journal.  These are accounts selfdestructed in this tx that also received
-			// ETH after the SELFDESTRUCT opcode (EIP-7708 case 2).  SoftFinalise calls
-			// clearJournalAndRefund, so GetRemovedAccountsWithBalance returns nothing
-			// afterwards.
-			result.ExecutionResult.SelfDestructedWithBalance = ibs.GetRemovedAccountsWithBalance()
-
 			// TODO these can be removed - use result instead
 			// Update the state with pending changes
 			ibs.SoftFinalise()
@@ -949,6 +942,7 @@ func (q *QueueWithRetry) Release() {
 		<-q.newTasks
 	}
 	// Clear retry heap, keep backing array.
+	clear(q.retires)
 	q.retires = q.retires[:0]
 	q.parked = q.newTasks
 	q.newTasks = nil

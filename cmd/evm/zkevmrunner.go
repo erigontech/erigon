@@ -150,7 +150,7 @@ func runZkevmTestsParallel(root string, files []string, re *regexp.Regexp, tm *t
 	}
 	close(fileCh)
 
-	for w := uint64(0); w < workers; w++ {
+	for range workers {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
