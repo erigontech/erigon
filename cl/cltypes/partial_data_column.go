@@ -203,7 +203,7 @@ func (s *PartialDataColumnSidecar) HashSSZ() ([32]byte, error) {
 		if err != nil {
 			return [32]byte{}, err
 		}
-		return merkle_tree.HashTreeRoot(bitmapRoot, partialColumnRoot, proofsRoot)
+		return merkle_tree.HashTreeRoot(bitmapRoot[:], partialColumnRoot[:], proofsRoot[:])
 	}
 	return merkle_tree.HashTreeRoot(s.getSchema()...)
 }
