@@ -173,7 +173,7 @@ func TestDefaultGraffiti(t *testing.T) {
 
 		a := &ApiHandler{engine: engine, version: "1.2.3"}
 		var wg sync.WaitGroup
-		for i := 0; i < 16; i++ {
+		for range 16 {
 			wg.Add(1)
 			go func() {
 				defer wg.Done()

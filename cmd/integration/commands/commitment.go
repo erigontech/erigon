@@ -894,7 +894,7 @@ func benchSnapshotsHistoryLookup(ctx context.Context, tx kv.TemporalTx, historyF
 
 		// Generate random sample of txnums within this file's range
 		sampledTxNums := make([]uint64, sampleCount)
-		for i := 0; i < sampleCount; i++ {
+		for i := range sampleCount {
 			// Generate random txnum in [startTxNum, endTxNum)
 			sampledTxNums[i] = startTxNum + uint64(rng.Int63n(int64(txnumRange)))
 		}
@@ -987,7 +987,7 @@ func benchMdbxHistoryLookup(ctx context.Context, tx kv.TemporalTx, compactKey []
 
 	// Generate random txnums in [minTxNum, maxTxNum)
 	sampledTxNums := make([]uint64, sampleCount)
-	for i := 0; i < sampleCount; i++ {
+	for i := range sampleCount {
 		sampledTxNums[i] = minTxNum + uint64(rng.Int63n(int64(txnumRange)))
 	}
 

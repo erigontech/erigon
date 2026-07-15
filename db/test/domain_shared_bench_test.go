@@ -80,17 +80,17 @@ func Benchmark_SharedDomains_GetLatest(t *testing.B) {
 	rnd := newRnd(4500)
 
 	keys := make([][]byte, 8)
-	for i := 0; i < len(keys); i++ {
+	for i := range keys {
 		keys[i] = make([]byte, length.Addr)
 		rnd.Read(keys[i])
 	}
 
 	var txNum, blockNum uint64
-	for i := uint64(0); i < maxTx; i++ {
+	for i := range maxTx {
 		txNum = i
 		v := make([]byte, 8)
 		binary.BigEndian.PutUint64(v, i)
-		for j := 0; j < len(keys); j++ {
+		for j := range keys {
 			err := domains.DomainPut(kv.AccountsDomain, rwTx, keys[j], v, txNum, nil)
 			require.NoError(t, err)
 		}
@@ -123,7 +123,7 @@ func Benchmark_SharedDomains_GetLatest(t *testing.B) {
 	t.Run("GetLatest", func(b *testing.B) {
 		t.ReportAllocs()
 		for ik := 0; ik < t.N; ik++ {
-			for i := 0; i < len(keys); i++ {
+			for i := range keys {
 				v, _, err := rwTx.GetLatest(kv.AccountsDomain, keys[i])
 				require.Equalf(t, latest, v, "unexpected %d, wanted %d", binary.BigEndian.Uint64(v), maxTx-1)
 				require.NoError(t, err)
@@ -133,7 +133,7 @@ func Benchmark_SharedDomains_GetLatest(t *testing.B) {
 	t.Run("HistorySeek", func(b *testing.B) {
 		t.ReportAllocs()
 		for ik := 0; ik < t.N; ik++ {
-			for i := 0; i < len(keys); i++ {
+			for i := range keys {
 				ts := uint64(rnd.IntN(int(maxTx)))
 				v, ok, err := rwTx.HistorySeek(kv.AccountsDomain, keys[i], ts)
 
@@ -268,7 +268,7 @@ func generateAccountUpdates(r *rndGen, totalTx, keyTxsLimit uint64) []upd {
 	updates := make([]upd, 0)
 	usedTxNums := make(map[uint64]bool)
 
-	for i := uint64(0); i < keyTxsLimit; i++ {
+	for i := range keyTxsLimit {
 		txNum := generateRandomTxNum(r, totalTx, usedTxNums)
 		jitter := r.IntN(10e7)
 		acc := accounts3.Account{
@@ -292,7 +292,7 @@ func generateArbitraryValueUpdates(r *rndGen, totalTx, keyTxsLimit, maxSize uint
 	usedTxNums := make(map[uint64]bool)
 	//maxStorageSize := 24 * (1 << 10) // limit on contract code
 
-	for i := uint64(0); i < keyTxsLimit; i++ {
+	for range keyTxsLimit {
 		txNum := generateRandomTxNum(r, totalTx, usedTxNums)
 
 		value := make([]byte, r.IntN(int(maxSize)))
@@ -400,7 +400,7 @@ func generateSharedDomainsUpdatesForBench(b *testing.B, domains *execctx.SharedD
 		return []byte(generateRandomKey(rnd, keyMaxLen)), false
 	}
 
-	for j := uint64(0); j < keysCount; j++ {
+	for range keysCount {
 		key, existed := getKey()
 
 		r := rnd.IntN(101)

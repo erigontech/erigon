@@ -60,7 +60,7 @@ func DeriveFieldsForBorReceipt(receipt *types.Receipt, blockHash common.Hash, bl
 	receipt.BlockNumber = uint256.NewInt(blockNumber)
 
 	logIndex := 0
-	for i := 0; i < len(receipts); i++ {
+	for i := range receipts {
 		logIndex += len(receipts[i].Logs)
 	}
 
