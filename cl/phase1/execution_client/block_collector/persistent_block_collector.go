@@ -20,9 +20,11 @@ import (
 	"context"
 	"encoding/binary"
 	"fmt"
+	"slices"
 	"sync"
 
 	"github.com/c2h5oh/datasize"
+	"github.com/golang/snappy"
 
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
@@ -30,6 +32,7 @@ import (
 	"github.com/erigontech/erigon/cl/utils"
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/dir"
+	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/dbcfg"
@@ -52,6 +55,9 @@ type PersistentBlockCollector struct {
 	engine         execution_client.ExecutionEngine
 
 	mu sync.Mutex
+	// encodeBlock scratch buffers; guarded by mu.
+	encodeBlockBuf   []byte
+	blockCompressBuf []byte
 }
 
 func openPersistentDB(ctx context.Context, logger log.Logger, persistDir string) (kv.RwDB, error) {
@@ -109,7 +115,7 @@ func (p *PersistentBlockCollector) AddBlock(block *cltypes.BeaconBlock) error {
 
 	// Encode the block
 	payload := block.Body.ExecutionPayload
-	encodedBlock, err := encodeBlock(payload, block.ParentRoot, block.Body.GetExecutionRequestsList())
+	encodedBlock, err := p.encodeBlock(payload, block.ParentRoot, block.Body.GetExecutionRequestsList())
 	if err != nil {
 		return fmt.Errorf("failed to encode block: %w", err)
 	}
@@ -138,7 +144,7 @@ func (p *PersistentBlockCollector) AddGloasBlock(block *cltypes.BeaconBlock, env
 
 	payload := envelope.Message.Payload
 	executionRequestsList := cltypes.GetExecutionRequestsList(p.beaconChainCfg, envelope.Message.ExecutionRequests)
-	encodedBlock, err := encodeBlock(payload, block.ParentRoot, executionRequestsList)
+	encodedBlock, err := p.encodeBlock(payload, block.ParentRoot, executionRequestsList)
 	if err != nil {
 		return fmt.Errorf("failed to encode gloas block: %w", err)
 	}
@@ -151,6 +157,28 @@ func (p *PersistentBlockCollector) AddGloasBlock(block *cltypes.BeaconBlock, env
 	return p.db.Update(context.Background(), func(tx kv.RwTx) error {
 		return tx.Put(kv.Headers, key, encodedBlock)
 	})
+}
+
+// encodeBlock serializes the block value: snappy(version + parentRoot +
+// [requestsHash +] SSZ(payload)). The result aliases p.blockCompressBuf and is
+// valid only until the next call, so it must go to a copying sink (tx.Put copies).
+// Callers must hold p.mu.
+func (p *PersistentBlockCollector) encodeBlock(payload *cltypes.Eth1Block, parentRoot common.Hash, executionRequestsList []hexutil.Bytes) ([]byte, error) {
+	p.encodeBlockBuf = slices.Grow(p.encodeBlockBuf[:0], 1+32+32+payload.EncodingSizeSSZ())
+	p.encodeBlockBuf = append(p.encodeBlockBuf, byte(payload.Version()))
+	p.encodeBlockBuf = append(p.encodeBlockBuf, parentRoot[:]...)
+	if executionRequestsList != nil {
+		requestsHash := cltypes.ComputeExecutionRequestHash(executionRequestsList)
+		p.encodeBlockBuf = append(p.encodeBlockBuf, requestsHash[:]...)
+	}
+	var err error
+	p.encodeBlockBuf, err = payload.EncodeSSZ(p.encodeBlockBuf)
+	if err != nil {
+		return nil, fmt.Errorf("error encoding execution payload during download: %s", err)
+	}
+
+	p.blockCompressBuf = slices.Grow(p.blockCompressBuf[:0], snappy.MaxEncodedLen(len(p.encodeBlockBuf)))
+	return snappy.Encode(p.blockCompressBuf[:cap(p.blockCompressBuf)], p.encodeBlockBuf), nil
 }
 
 // Flush loads all collected blocks into the execution engine and clears the database.

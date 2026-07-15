@@ -21,14 +21,11 @@ import (
 	"errors"
 	"fmt"
 	"sync"
-	"testing"
 	"time"
 
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv"
-	"github.com/erigontech/erigon/db/kv/dbcfg"
 	"github.com/erigontech/erigon/db/kv/mdbx"
-	"github.com/erigontech/erigon/db/kv/memdb"
 	"github.com/erigontech/erigon/db/kv/order"
 	"github.com/erigontech/erigon/db/kv/stream"
 	"github.com/erigontech/erigon/db/snapshotsync/blocksnapshots"
@@ -257,27 +254,6 @@ func (db *DB) Close() {
 
 func (db *DB) OnFilesChange(onChange, onDel kv.OnFilesChange) {
 	db.stateFiles.OnFilesChange(onChange, onDel)
-}
-
-func NewTestDB(tb testing.TB, label kv.Label) kv.TemporalRwDB {
-	tb.Helper()
-	db := memdb.NewTestDB(tb, label)
-	dirs := datadir.New(tb.TempDir())
-	agg := state.NewTest(dirs).DisableHistory().MustOpen(context.Background(), db)
-	tb.Cleanup(agg.Close)
-	tdb, _ := New(db, agg, nil)
-	return tdb
-}
-
-func NewTestTx(tb testing.TB) (kv.TemporalRwDB, kv.TemporalRwTx) {
-	tb.Helper()
-	db := NewTestDB(tb, dbcfg.ChainDB)
-	tx, err := db.BeginTemporalRw(context.Background()) //nolint:gocritic
-	if err != nil {
-		tb.Fatal(err)
-	}
-	tb.Cleanup(tx.Rollback)
-	return db, tx
 }
 
 type tx struct {
