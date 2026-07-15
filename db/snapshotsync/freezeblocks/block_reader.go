@@ -1116,7 +1116,7 @@ func BodyForTxnFromSnapshot(blockHeight uint64, sn *snapshotsync.VisibleSegment,
 		return nil, buf, nil
 	}
 	b := &types.BodyOnlyTxn{}
-	if err := rlp.DecodeBytesPartial(buf, b); err != nil {
+	if err := b.DecodeRLPBytes(buf); err != nil {
 		return nil, buf, err
 	}
 
@@ -1357,7 +1357,7 @@ func (r *BlockReader) IterateFrozenBodies(tx kv.Getter, f func(blockNum, baseTxN
 		var b types.BodyOnlyTxn
 		for g.HasNext() {
 			buf, _ = g.Next(buf[:0])
-			if err := rlp.DecodeBytesPartial(buf, &b); err != nil {
+			if err := b.DecodeRLPBytes(buf); err != nil {
 				return err
 			}
 			if err := f(blockNum, b.BaseTxnID.U64(), uint64(b.TxCount)); err != nil {
