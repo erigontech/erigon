@@ -733,11 +733,11 @@ func (tx *Tx) DomainProgress(domain kv.Domain) uint64 {
 func (tx *RwTx) DomainProgress(domain kv.Domain) uint64 {
 	return tx.aggtx.DomainProgress(domain, tx.RwTx)
 }
-func (tx *Tx) DomainProgressAndVisibleEnd(domain kv.Domain) (uint64, uint64, bool) {
-	return tx.aggtx.DomainProgressAndVisibleEnd(domain, tx.Tx)
+func (tx *Tx) DomainVisibleEnd(domain kv.Domain) (uint64, bool) {
+	return tx.aggtx.DomainVisibleEnd(domain, tx.Tx)
 }
-func (tx *RwTx) DomainProgressAndVisibleEnd(domain kv.Domain) (uint64, uint64, bool) {
-	return tx.aggtx.DomainProgressAndVisibleEnd(domain, tx.RwTx)
+func (tx *RwTx) DomainVisibleEnd(domain kv.Domain) (uint64, bool) {
+	return tx.aggtx.DomainVisibleEnd(domain, tx.RwTx)
 }
 func (tx *Tx) IIProgress(domain kv.InvertedIdx) uint64 {
 	return tx.aggtx.IIProgress(domain, tx.Tx)

@@ -1253,8 +1253,7 @@ func (iit *InvertedIndexRoTx) Progress(tx kv.Tx) uint64 {
 	return max(iit.files.EndTxNum(), iit.ii.maxTxNumInDB(tx))
 }
 
-func (iit *InvertedIndexRoTx) progressAndVisibleEnd(tx kv.Tx) (uint64, uint64) {
-	filesEnd := iit.files.EndTxNum()
-	dbProgress, dbEnd := iit.ii.progressAndVisibleEndInDB(tx)
-	return max(filesEnd, dbProgress), max(filesEnd, dbEnd)
+func (iit *InvertedIndexRoTx) visibleEnd(tx kv.Tx) uint64 {
+	_, dbEnd := iit.ii.progressAndVisibleEndInDB(tx)
+	return max(iit.files.EndTxNum(), dbEnd)
 }

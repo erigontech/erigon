@@ -1234,7 +1234,7 @@ func (sd *SharedDomains) getLatestMetered(domain kv.Domain, tx kv.TemporalTx, k 
 	// Snapshot freshness is rechecked while the fill is serialized against
 	// committed cache updates.
 	if sd.stateCache != nil && sd.stateCache.GetCache(domain) != nil {
-		if snapshotProgress, snapshotEnd, ok := tx.Debug().DomainProgressAndVisibleEnd(domain); ok {
+		if snapshotEnd, ok := tx.Debug().DomainVisibleEnd(domain); ok {
 			readTxNum := (uint64(step)+1)*sd.StepSize() - 1
 			if domain == kv.CodeDomain {
 				if len(v) > 0 {
@@ -1242,7 +1242,7 @@ func (sd *SharedDomains) getLatestMetered(domain kv.Domain, tx kv.TemporalTx, k 
 				}
 			} else {
 				if len(v) == 0 {
-					readTxNum = snapshotProgress
+					readTxNum = snapshotEnd
 				}
 				sd.stateCache.PutIfFresh(domain, k, v, readTxNum, snapshotEnd)
 			}
@@ -1429,7 +1429,7 @@ func (sd *SharedDomains) codeHashForAddr(tx kv.TemporalTx, addr []byte, txNum ui
 		// repeat lookups skip the whole resolve() chain. txNum is a
 		// conservative upper bound (>= the resolved account's write txNum), so
 		// the mapping drops on any unwind that reverts that account.
-		if _, snapshotEnd, ok := tx.Debug().DomainProgressAndVisibleEnd(kv.AccountsDomain); ok {
+		if snapshotEnd, ok := tx.Debug().DomainVisibleEnd(kv.AccountsDomain); ok {
 			sd.stateCache.PutAddrCodeHashIfFresh(addr, fixed, txNum, snapshotEnd)
 		}
 	}

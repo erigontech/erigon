@@ -513,9 +513,9 @@ type TemporalDebugTx interface {
 	HistoryStartFrom(domainName Domain) uint64
 
 	DomainProgress(domain Domain) (txNum uint64)
-	// DomainProgressAndVisibleEnd returns DomainProgress and the exact exclusive
-	// frontier used for cache admission. ok is false without history.
-	DomainProgressAndVisibleEnd(domain Domain) (progress, visibleEnd uint64, ok bool)
+	// DomainVisibleEnd returns the domain's exact exclusive frontier used for
+	// cache-fill admission. ok is false without history.
+	DomainVisibleEnd(domain Domain) (visibleEnd uint64, ok bool)
 	IIProgress(name InvertedIdx) (txNum uint64)
 	StepSize() uint64
 	// Retire retires frozen history files entirely below their
