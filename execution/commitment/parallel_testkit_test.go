@@ -160,31 +160,13 @@ func processRoot(t *testing.T, trie Trie, ut *Updates) []byte {
 
 func processModeBatch(t *testing.T, ms *MockState, mode runMode, workers int, keys [][]byte, upds []Update) []byte {
 	t.Helper()
-	root, _ := processModeBatchState(t, ms, mode, workers, keys, upds, nil)
-	return root
-}
-
-// processModeBatchState folds one batch through the engine's production restart lifecycle:
-// the trie is restored from blob (the previous batch's EncodeCurrentState output, nil for
-// the first batch) before Process, and the new state blob is returned alongside the root.
-// State that never reaches a branch record — a propagate-folded root — survives batches
-// only through this blob.
-func processModeBatchState(t *testing.T, ms *MockState, mode runMode, workers int, keys [][]byte, upds []Update, blob []byte) ([]byte, []byte) {
-	t.Helper()
 	ctx := context.Background()
 	require.NoError(t, ms.applyPlainUpdates(keys, upds))
-
-	encoded := func(tr *HexPatriciaHashed) []byte {
-		out, err := tr.EncodeCurrentState(nil)
-		require.NoError(t, err)
-		return out
-	}
 
 	switch mode {
 	case modeParallel:
 		tr := newParTrie(t, ms, workers)
 		defer tr.Release()
-		require.NoError(t, tr.RootTrie().SetState(blob))
 		ut := NewUpdates(ModeParallel, t.TempDir(), KeyToHexNibbleHash)
 		defer ut.Close()
 		for i, k := range keys {
@@ -195,25 +177,16 @@ func processModeBatchState(t *testing.T, ms *MockState, mode runMode, workers in
 				c.update = &upds[i]
 			})
 		}
-		return processRoot(t, tr, ut), encoded(tr.RootTrie())
+		return processRoot(t, tr, ut)
 	case modeStreaming, modeStreamingScheduled:
-		sc := NewStreamingCommitter(mockTrieCtxFactory(ms), length.Addr, DefaultTrieConfig())
+		sc := newStreamCommitter(t, ms, workers, mode == modeStreamingScheduled)
 		defer sc.Release()
-		sc.SetNumWorkers(workers)
-		tmpl := NewHexPatriciaHashed(length.Addr, ms, DefaultTrieConfig())
-		defer tmpl.Release()
-		require.NoError(t, tmpl.SetState(blob))
-		sc.SeedRootFrom(tmpl)
-		if mode == modeStreamingScheduled {
-			require.NoError(t, sc.StartScheduler(context.Background()))
-		}
 		for _, k := range keys {
 			sc.TouchKey(KeyToHexNibbleHash(k), k, nil)
 		}
 		r, err := sc.Process(ctx)
 		require.NoError(t, err)
-		sc.PromoteRootInto(tmpl)
-		return common.Copy(r), encoded(tmpl)
+		return common.Copy(r)
 	case modeStreamingPublic:
 		cfg := DefaultTrieConfig()
 		cfg.Variant = VariantStreamingHexPatricia
@@ -224,18 +197,16 @@ func processModeBatchState(t *testing.T, ms *MockState, mode runMode, workers in
 		pt.SetNumWorkers(workers)
 		pt.SetTrieContextFactory(mockTrieCtxFactory(ms))
 		pt.ResetContext(ms)
-		require.NoError(t, pt.RootTrie().SetState(blob))
 		for _, key := range keys {
 			ut.TouchPlainKey(string(key), nil, ut.TouchAccount)
 		}
-		return processRoot(t, trie, ut), encoded(pt.RootTrie())
+		return processRoot(t, trie, ut)
 	default:
 		tr := newSeqTrie(t, ms)
 		defer tr.Release()
-		require.NoError(t, tr.SetState(blob))
 		ut := WrapKeyUpdates(t, ModeDirect, KeyToHexNibbleHash, keys, upds)
 		defer ut.Close()
-		return processRoot(t, tr, ut), encoded(tr)
+		return processRoot(t, tr, ut)
 	}
 }
 
@@ -248,17 +219,15 @@ func engineRoot(t *testing.T, mode runMode, workers int, keys [][]byte, upds []U
 	return processModeBatch(t, ms, mode, workers, keys, upds), ms
 }
 
-// Folds two batches into one MockState so batch-1 branches become on-disk state for
-// batch-2, with the trie state blob carried across the batches (encode/restore cycle).
+// Folds two batches into one MockState so batch-1 branches become on-disk state for batch-2.
 func incrementalRoot(t *testing.T, mode runMode, workers int, k1 [][]byte, u1 []Update, k2 [][]byte, u2 []Update) ([]byte, *MockState) {
 	t.Helper()
 	ms := NewMockState(t)
 	if mode != modeSeq {
 		ms.SetConcurrentCommitment(true)
 	}
-	_, blob := processModeBatchState(t, ms, mode, workers, k1, u1, nil)
-	root, _ := processModeBatchState(t, ms, mode, workers, k2, u2, blob)
-	return root, ms
+	processModeBatch(t, ms, mode, workers, k1, u1)
+	return processModeBatch(t, ms, mode, workers, k2, u2), ms
 }
 
 func requireRootParity(t *testing.T, keys [][]byte, upds []Update, workers int) []byte {
@@ -439,11 +408,11 @@ func buildWitnessCorpus(tb testing.TB, ms *MockState, hph *HexPatriciaHashed, ac
 	tb.Helper()
 	builder := NewUpdateBuilder()
 	addrs := make([][]byte, 0, accts)
-	for i := 0; i < accts; i++ {
+	for i := range accts {
 		a, _ := generateKeyWithHashedPrefix(nil, length.Addr)
 		addrs = append(addrs, a)
 		builder.Balance(common.Bytes2Hex(a), uint64(i+1))
-		for j := 0; j < slots; j++ {
+		for j := range slots {
 			slot := slotHashBytes(j)
 			builder.Storage(common.Bytes2Hex(a), common.Bytes2Hex(slot), common.Bytes2Hex(slot))
 		}
@@ -458,7 +427,7 @@ func buildWitnessCorpus(tb testing.TB, ms *MockState, hph *HexPatriciaHashed, ac
 func touchAccountsSlots(u *Updates, addrs [][]byte, slots int) {
 	for _, a := range addrs {
 		u.TouchPlainKey(string(a), nil, u.TouchAccount)
-		for j := 0; j < slots; j++ {
+		for j := range slots {
 			u.TouchPlainKey(string(storageKey(a, slotHashBytes(j))), nil, u.TouchStorage)
 		}
 	}

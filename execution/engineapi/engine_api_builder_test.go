@@ -96,7 +96,7 @@ func TestEngineApiMultiBlockSequence(t *testing.T) {
 	eat.Run(t, func(ctx context.Context, t *testing.T, eat engineapitester.EngineApiTester) {
 		receiver := common.HexToAddress("0x42")
 
-		for i := 0; i < 5; i++ {
+		for range 5 {
 			txn, err := eat.Transactor.SubmitSimpleTransfer(eat.CoinbaseKey, receiver, big.NewInt(1000))
 			require.NoError(t, err)
 
@@ -250,7 +250,7 @@ func TestEngineApiBlockGasOverflowSpillsToNextBlock(t *testing.T) {
 	logger := testlog.Logger(t, log.LvlDebug)
 	genesis, coinbaseKey, err := engineapitester.DefaultEngineApiTesterGenesis()
 	require.NoError(t, err)
-	genesis.GasLimit = 1_300_000 // ~7 account-creating transfers at ~184K state gas each
+	genesis.GasLimit = 1_400_000 // ~7 account-creating transfers at ~200K state gas each
 	eat, err := engineapitester.InitialiseEngineApiTester(ctx, engineapitester.EngineApiTesterInitArgs{
 		Logger:      logger,
 		DataDir:     t.TempDir(),
@@ -302,17 +302,17 @@ func TestEngineApiBlockGasOverflowSpillsToNextBlock(t *testing.T) {
 // resulting block respects the CL target as a cap.
 //
 // Setup picks numbers so the two values produce distinguishable block contents:
-//   - parent gas limit = 367_400 (room for two account-creating transfers)
+//   - parent gas limit = 490_000 (room for two account-creating transfers)
 //   - static --miner.gaslimit = 225_000 (would cap the block at one transfer)
-//   - CL targetGasLimit = 367_400 (room for two transfers)
+//   - CL targetGasLimit = 490_000 (room for two transfers)
 //
 // Three transfers are submitted; only two must fit. If the static target won,
-// the block would gas-limit at ~367_040 and contain a single transfer.
+// the block would gas-limit at ~489_520 and contain a single transfer.
 // See https://github.com/ethereum/execution-apis/pull/796.
 func TestEngineApiV4TargetGasLimitOverridesMinerGasLimit(t *testing.T) {
 	ctx := t.Context()
 	logger := testlog.Logger(t, log.LvlDebug)
-	const targetGasLimit uint64 = 367_400
+	const targetGasLimit uint64 = 490_000
 	const minerGasLimit uint64 = 225_000
 	genesis, coinbaseKey, err := engineapitester.DefaultEngineApiTesterGenesis()
 	require.NoError(t, err)
@@ -685,6 +685,77 @@ func TestEngineApiBALGlamsterdamCreate2OntoFundedAddress(t *testing.T) {
 		for _, proxy := range proxies {
 			requireProxyCreditPreserved(t, eat, bal, proxy)
 		}
+	})
+}
+
+// TestEngineApiEIP8246PreservedBalanceSurvivesCreate2Recreate builds one block
+// with two calls to SelfDestructFactory using the same salt: each CREATE2-
+// deploys SelfDestructInConstructor, whose constructor self-destructs to
+// itself, so under EIP-8246 the first call leaves a balance-only account and
+// the second re-creates over it with more value. The assembler runs both txs
+// on one shared IntraBlockState, so a stale selfdestructed marker from tx1
+// would drop the preserved balance in tx2's CREATE2 and produce an invalid
+// block: newPayload validation (fresh state per tx) computes the preserved sum
+// and rejects the assembled root.
+func TestEngineApiEIP8246PreservedBalanceSurvivesCreate2Recreate(t *testing.T) {
+	if !dbg.Exec3Parallel {
+		t.Skip("requires parallel exec")
+	}
+	ctx := t.Context()
+	logger := testlog.Logger(t, log.LvlDebug)
+	senderKey, err := crypto.GenerateKey()
+	require.NoError(t, err)
+	senderAddr := crypto.PubkeyToAddress(senderKey.PublicKey)
+	genesis, coinbaseKey, err := engineapitester.DefaultEngineApiTesterGenesis()
+	require.NoError(t, err)
+	genesis.Alloc[senderAddr] = types.GenesisAccount{
+		Balance: new(big.Int).Exp(big.NewInt(10), big.NewInt(20), nil), // 100 ETH
+	}
+	eat, err := engineapitester.InitialiseEngineApiTester(ctx, engineapitester.EngineApiTesterInitArgs{
+		Logger:      logger,
+		DataDir:     t.TempDir(),
+		Genesis:     genesis,
+		CoinbaseKey: coinbaseKey,
+	})
+	require.NoError(t, err)
+	t.Cleanup(func() {
+		err := eat.Close()
+		require.NoError(t, err)
+	})
+	valueTx1 := big.NewInt(1_000_000)
+	valueTx2 := big.NewInt(500_000)
+	salt := [32]byte{0x82, 0x46}
+	eat.Run(t, func(ctx context.Context, t *testing.T, eat engineapitester.EngineApiTester) {
+		chainID := eat.ChainId()
+		factoryAuth, err := bind.NewKeyedTransactorWithChainID(eat.CoinbaseKey, chainID)
+		require.NoError(t, err)
+		factoryAuth.GasLimit = params.MaxTxnGasLimit
+		factoryAddr, _, factory, err := contracts.DeploySelfDestructFactory(factoryAuth, eat.ContractBackend)
+		require.NoError(t, err)
+		_, err = eat.MockCl.BuildCanonicalBlock(ctx)
+		require.NoError(t, err)
+		deployAuth, err := bind.NewKeyedTransactorWithChainID(senderKey, chainID)
+		require.NoError(t, err)
+		deployAuth.GasLimit = 1_000_000
+		deployAuth.Value = valueTx1
+		txn1, err := factory.Deploy(deployAuth, salt)
+		require.NoError(t, err)
+		deployAuth.Value = valueTx2
+		txn2, err := factory.Deploy(deployAuth, salt)
+		require.NoError(t, err)
+		payload, err := eat.MockCl.BuildCanonicalBlock(ctx)
+		require.NoError(t, err, "assembled block must validate: a dropped preserved balance surfaces as an INVALID payload")
+		err = eat.TxnInclusionVerifier.VerifyTxnsInclusion(ctx, payload.ExecutionPayload, txn1.Hash(), txn2.Hash())
+		require.NoError(t, err)
+		createdAddr := create2Addr(factoryAddr, salt, common.FromHex(contracts.SelfDestructInConstructorBin))
+		balance, err := eat.RpcApiClient.GetBalance(createdAddr, rpc.LatestBlock)
+		require.NoError(t, err)
+		expected := new(big.Int).Add(valueTx1, valueTx2)
+		require.Equal(t, expected, balance,
+			"EIP-8246: tx1's preserved balance must survive tx2's CREATE2 at the same address")
+		code, err := eat.RpcApiClient.GetCode(createdAddr, rpc.LatestBlock)
+		require.NoError(t, err)
+		require.Empty(t, code, "the self-destructed account is balance-only")
 	})
 }
 

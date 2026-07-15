@@ -496,10 +496,7 @@ func (cell *cell) fillFromLowerCell(lowCell *cell, lowDepth int16, preExtension 
 	}
 	if lowCell.hashLen > 0 {
 		if (lowCell.accountAddrLen == 0 && lowDepth < 64) || (lowCell.storageAddrLen == 0 && lowDepth > 64) {
-			// Extension is related to either accounts branch node, or storage branch node, we prepend it by preExtension | nibble.
-			// The same nibbles are the unfold navigation path, so hashedExtension must stay in sync
-			// (like foldBranch does), or the cell demands an on-disk branch record that a propagate
-			// fold never writes.
+			// Extension is related to either accounts branch node, or storage branch node, we prepend it by preExtension | nibble
 			if len(preExtension) > 0 {
 				copy(cell.extension[:], preExtension)
 			}
@@ -508,8 +505,6 @@ func (cell *cell) fillFromLowerCell(lowCell *cell, lowDepth int16, preExtension 
 				copy(cell.extension[1+len(preExtension):], lowCell.extension[:lowCell.extLen])
 			}
 			cell.extLen = lowCell.extLen + 1 + int16(len(preExtension))
-			copy(cell.hashedExtension[:], cell.extension[:cell.extLen])
-			cell.hashedExtLen = cell.extLen
 		} else {
 			// Extension is related to a storage branch node, so we copy it upwards as is
 			cell.extLen = lowCell.extLen
@@ -1275,14 +1270,9 @@ func (hph *HexPatriciaHashed) needUnfolding(hashedKey []byte) int16 {
 		}
 		cell = &hph.root
 	} else {
-		depth = hph.depths[hph.activeRows-1]
-		// Guard before indexing: a probe key shorter than the row's depth (an unfold can
-		// consume several extension nibbles at once) needs no further unfolding.
-		if int16(len(hashedKey)) <= depth {
-			return 0
-		}
 		nibble := int(hashedKey[hph.currentKeyLen])
 		cell = &hph.grid[hph.activeRows-1][nibble]
+		depth = hph.depths[hph.activeRows-1]
 		if hph.traceW != nil {
 			fmt.Fprintf(hph.traceW, "currentKey [%x] needUnfolding cell (%d, %x, depth=%d) cell.hash=[%x]\n", hph.currentKey[:hph.currentKeyLen], hph.activeRows-1, nibble, depth, cell.hash[:cell.hashLen])
 		}
@@ -1339,7 +1329,7 @@ func (hph *HexPatriciaHashed) PrintGrid() {
 	fmt.Printf("GRID:\n")
 	for row := 0; row < hph.activeRows; row++ {
 		fmt.Printf("row %d depth %d:\n", row, hph.depths[row])
-		for col := 0; col < 16; col++ {
+		for col := range 16 {
 			cell := &hph.grid[row][col]
 			if cell.hashedExtLen > 0 || cell.accountAddrLen > 0 {
 				var cellHash []byte
@@ -1528,7 +1518,7 @@ func (hph *HexPatriciaHashed) unfold(hashedKey []byte, unfolding int16) error {
 		hph.currentKeyLen++
 	}
 	row := hph.activeRows
-	for i := 0; i < 16; i++ {
+	for i := range 16 {
 		hph.grid[row][i].reset()
 	}
 	hph.touchMap[row], hph.afterMap[row], hph.branchBefore[row] = 0, 0, false
@@ -1907,9 +1897,6 @@ func (hph *HexPatriciaHashed) foldPropagate(row int, nibble, upDepth, depth int1
 		// any modifications
 		if row == 0 {
 			hph.rootTouched = true
-			// A propagate fold leaves exactly one survivor, so the root exists; without this
-			// the next unfold reads touched && !present and deletes the whole subtree.
-			hph.rootPresent = true
 		} else {
 			// Modification is propagated upwards
 			hph.touchMap[row-1] |= uint16(1) << nibble
@@ -2128,7 +2115,7 @@ func (hph *HexPatriciaHashed) detectCollapseBeforeDelete(hashedKey []byte) {
 
 	// Find the sibling nibble (the other set bit in afterMap)
 	siblingNibble := -1
-	for i := 0; i < 16; i++ {
+	for i := range 16 {
 		if hph.afterMap[parentRow]&(1<<i) != 0 && i != deleteNibble {
 			siblingNibble = i
 			break
@@ -2768,7 +2755,7 @@ func (s *state) Encode(buf []byte) ([]byte, error) {
 		return nil, fmt.Errorf("encode root: %w", err)
 	}
 	d := make([]byte, len(s.Depths))
-	for i := 0; i < len(s.Depths); i++ {
+	for i := range len(s.Depths) {
 		d[i] = byte(s.Depths[i])
 	}
 	if n, err := ee.Write(d); err != nil || n != len(s.Depths) {
@@ -2782,7 +2769,7 @@ func (s *state) Encode(buf []byte) ([]byte, error) {
 	}
 
 	var before1, before2 uint64
-	for i := 0; i < 64; i++ {
+	for i := range 64 {
 		if s.BranchBefore[i] {
 			before1 |= 1 << i
 		}
@@ -2830,7 +2817,7 @@ func (s *state) Decode(buf []byte) error {
 	if err := binary.Read(aux, binary.BigEndian, &d); err != nil {
 		return fmt.Errorf("depths: %w", err)
 	}
-	for i := 0; i < len(s.Depths); i++ {
+	for i := range len(s.Depths) {
 		s.Depths[i] = int16(d[i])
 	}
 	if err := binary.Read(aux, binary.BigEndian, &s.TouchMap); err != nil {
@@ -2847,7 +2834,7 @@ func (s *state) Decode(buf []byte) error {
 		return fmt.Errorf("branchBefore2: %w", err)
 	}
 
-	for i := 0; i < 64; i++ {
+	for i := range 64 {
 		if branch1&(1<<i) != 0 {
 			s.BranchBefore[i] = true
 		}
@@ -2996,7 +2983,7 @@ func (hph *HexPatriciaHashed) SetState(buf []byte) error {
 		hph.rootPresent = false
 		hph.activeRows = 0
 
-		for i := 0; i < len(hph.depths); i++ {
+		for i := range len(hph.depths) {
 			hph.depths[i] = 0
 			hph.branchBefore[i] = false
 			hph.touchMap[i] = 0
@@ -3045,19 +3032,7 @@ func (hph *HexPatriciaHashed) SetState(buf []byte) error {
 			return err
 		}
 		hph.root.setFromUpdate(update)
-	}
-	// A leaf root's navigation path is derivable but not reliably persisted: without it a
-	// wall probe sees an unfoldable root and the mount paths overwrite the leaf in place.
-	if hph.root.accountAddrLen > 0 || hph.root.storageAddrLen > 0 {
-		hph.root.hashedExtLen = 0
-		if err := hph.root.deriveHashedKeys(0, hph.keccak, hph.accountKeyLen, hph.cellHashBuf[:]); err != nil {
-			return err
-		}
-	}
-	// Blobs written before propagate folds set rootPresent carry false for non-empty
-	// roots; a non-empty root is present by definition.
-	if !hph.root.IsEmpty() {
-		hph.rootPresent = true
+		//hph.root.deriveHashedKeys(0, hph.keccak, hph.accountKeyLen)
 	}
 
 	return nil

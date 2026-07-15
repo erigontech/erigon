@@ -41,7 +41,7 @@ func TestFeeHistory(t *testing.T) {
 	}
 
 	overMaxQuery := make([]float64, 101)
-	for i := 0; i < 101; i++ {
+	for i := range 101 {
 		overMaxQuery[i] = float64(1)
 	}
 
@@ -80,7 +80,7 @@ func TestFeeHistory(t *testing.T) {
 			m := newTestBackend(t) //, big.NewInt(16), c.pending)
 			defer m.Close()
 
-			baseApi := jsonrpc.NewBaseApi(nil, kvcache.NewSimple(), m.BlockReader, false, rpccfg.DefaultEvmCallTimeout, m.Engine, m.Dirs, nil, 0, 0)
+			baseApi := jsonrpc.NewBaseApi(nil, kvcache.NewSimple(), m.BlockReader, false, rpccfg.DefaultEvmCallTimeout, m.Engine, m.Dirs, nil, 0, 0, 0)
 			tx, err := m.DB.BeginTemporalRo(m.Ctx)
 			require.NoError(t, err)
 			defer tx.Rollback()

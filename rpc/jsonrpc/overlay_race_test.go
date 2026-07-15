@@ -29,10 +29,10 @@ import (
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/hexutil"
+	"github.com/erigontech/erigon/db/dbservices"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/kvcache"
 	"github.com/erigontech/erigon/db/rawdb"
-	"github.com/erigontech/erigon/db/services"
 	"github.com/erigontech/erigon/db/state/execctx"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/execmodule/execmoduletester"
@@ -119,7 +119,7 @@ func newOverlayAheadTestAPIWithEvents(t *testing.T) (base *BaseAPI, m *execmodul
 }
 
 type unpublishOverlayBlockReader struct {
-	services.FullBlockReader
+	dbservices.FullBlockReader
 	events      *shards.Events
 	blockNumber uint64
 }

@@ -49,13 +49,13 @@ import (
 	"github.com/erigontech/erigon/execution/execmodule"
 	"github.com/erigontech/erigon/execution/execmodule/chainreader"
 	"github.com/erigontech/erigon/execution/execmodule/execmoduletester"
-	"github.com/erigontech/erigon/execution/protocol/misc"
 	"github.com/erigontech/erigon/execution/protocol/params"
 	"github.com/erigontech/erigon/execution/stagedsync"
 	"github.com/erigontech/erigon/execution/stagedsync/stages"
 	"github.com/erigontech/erigon/execution/state/contracts"
 	"github.com/erigontech/erigon/execution/tests/blockgen"
 	"github.com/erigontech/erigon/execution/types"
+	"github.com/erigontech/erigon/execution/types/accounts"
 	"github.com/erigontech/erigon/node/gointerfaces/remoteproto"
 	"github.com/erigontech/erigon/node/gointerfaces/txpoolproto"
 )
@@ -553,7 +553,7 @@ func TestAssembleBlock(t *testing.T) {
 	require.NoError(t, err)
 	payloadId, err := assembleBlock(ctx, exec, &builder.Parameters{
 		ParentHash:            chainPack.TopBlock.Hash(),
-		Timestamp:             chainPack.TopBlock.Header().Time + 1,
+		Timestamp:             chainPack.TopBlock.Time() + 1,
 		PrevRandao:            chainPack.TopBlock.Header().MixDigest,
 		SuggestedFeeRecipient: common.Address{1},
 		Withdrawals:           make([]*types.Withdrawal, 0),
@@ -595,7 +595,7 @@ func TestAssembleBlockWithFreshlyAddedTxns(t *testing.T) {
 	require.NoError(t, err)
 	payloadId, err := assembleBlock(ctx, exec, &builder.Parameters{
 		ParentHash:            chainPack.TopBlock.Hash(),
-		Timestamp:             chainPack.TopBlock.Header().Time + 1,
+		Timestamp:             chainPack.TopBlock.Time() + 1,
 		PrevRandao:            chainPack.TopBlock.Header().MixDigest,
 		SuggestedFeeRecipient: common.Address{1},
 		Withdrawals:           make([]*types.Withdrawal, 0),
@@ -788,7 +788,7 @@ func TestAssembleEmptyBlock(t *testing.T) {
 	// Don't add any txns to pool — assemble empty block.
 	payloadId, err := assembleBlock(ctx, exec, &builder.Parameters{
 		ParentHash:            chainPack.TopBlock.Hash(),
-		Timestamp:             chainPack.TopBlock.Header().Time + 1,
+		Timestamp:             chainPack.TopBlock.Time() + 1,
 		PrevRandao:            chainPack.TopBlock.Header().MixDigest,
 		SuggestedFeeRecipient: common.Address{1},
 		Withdrawals:           make([]*types.Withdrawal, 0),
@@ -828,7 +828,7 @@ func TestAssembleBlockWithStateVerification(t *testing.T) {
 
 	payloadId, err := assembleBlock(ctx, exec, &builder.Parameters{
 		ParentHash:            chainPack.TopBlock.Hash(),
-		Timestamp:             chainPack.TopBlock.Header().Time + 1,
+		Timestamp:             chainPack.TopBlock.Time() + 1,
 		PrevRandao:            chainPack.TopBlock.Header().MixDigest,
 		SuggestedFeeRecipient: common.Address{1},
 		Withdrawals:           make([]*types.Withdrawal, 0),
@@ -851,7 +851,7 @@ func TestAssembleBlockWithStateVerification(t *testing.T) {
 	addTwoTxnsToPool(ctx, 3, t, m, txpool, baseFee)
 	payloadId2, err := assembleBlock(ctx, exec, &builder.Parameters{
 		ParentHash:            block.Hash(),
-		Timestamp:             block.Header().Time + 1,
+		Timestamp:             block.Time() + 1,
 		PrevRandao:            block.Header().MixDigest,
 		SuggestedFeeRecipient: common.Address{1},
 		Withdrawals:           make([]*types.Withdrawal, 0),
@@ -907,7 +907,7 @@ func TestAssembleBlockWithContractCreation(t *testing.T) {
 	// Assemble block.
 	payloadId, err := assembleBlock(ctx, exec, &builder.Parameters{
 		ParentHash:            chainPack.TopBlock.Hash(),
-		Timestamp:             chainPack.TopBlock.Header().Time + 1,
+		Timestamp:             chainPack.TopBlock.Time() + 1,
 		PrevRandao:            chainPack.TopBlock.Header().MixDigest,
 		SuggestedFeeRecipient: common.Address{1},
 		Withdrawals:           make([]*types.Withdrawal, 0),
@@ -978,7 +978,7 @@ func TestAssembleBlockGasOverflow(t *testing.T) {
 	// Assemble block 2 — should be gas-limited.
 	payloadId, err := assembleBlock(ctx, exec, &builder.Parameters{
 		ParentHash:            chainPack.TopBlock.Hash(),
-		Timestamp:             chainPack.TopBlock.Header().Time + 1,
+		Timestamp:             chainPack.TopBlock.Time() + 1,
 		PrevRandao:            chainPack.TopBlock.Header().MixDigest,
 		SuggestedFeeRecipient: common.Address{1},
 		Withdrawals:           make([]*types.Withdrawal, 0),
@@ -1072,7 +1072,7 @@ func TestAssembleBlockMixedTxTypes(t *testing.T) {
 	// Assemble block.
 	payloadId, err := assembleBlock(ctx, exec, &builder.Parameters{
 		ParentHash:            chainPack.TopBlock.Hash(),
-		Timestamp:             chainPack.TopBlock.Header().Time + 1,
+		Timestamp:             chainPack.TopBlock.Time() + 1,
 		PrevRandao:            chainPack.TopBlock.Header().MixDigest,
 		SuggestedFeeRecipient: common.Address{1},
 		Withdrawals:           make([]*types.Withdrawal, 0),
@@ -1164,7 +1164,7 @@ func TestAssembleBlockWithWithdrawalRequest(t *testing.T) {
 	beaconRoot := randomHash()
 	payloadId, err := assembleBlock(ctx, exec, &builder.Parameters{
 		ParentHash:            chainPack.TopBlock.Hash(),
-		Timestamp:             chainPack.TopBlock.Header().Time + 1,
+		Timestamp:             chainPack.TopBlock.Time() + 1,
 		PrevRandao:            randomHash(),
 		SuggestedFeeRecipient: common.Address{1},
 		Withdrawals:           make([]*types.Withdrawal, 0),
@@ -1264,7 +1264,7 @@ func TestAssembleBlockAmsterdamForkTransition(t *testing.T) {
 	// Build 3 pre-Amsterdam blocks via the builder (timestamps 1, 2, 3).
 	topBlock := m.Genesis
 	baseFee := topBlock.BaseFee().Uint64()
-	for i := 0; i < 3; i++ {
+	for i := range 3 {
 		nonce := uint64(i)
 		tx, txErr := types.SignTx(
 			types.NewTransaction(nonce, common.Address{1}, uint256.NewInt(10_000), params.TxGas, uint256.NewInt(baseFee), nil),
@@ -1277,7 +1277,7 @@ func TestAssembleBlockAmsterdamForkTransition(t *testing.T) {
 		require.NoError(t, addErr)
 		require.Equal(t, "success", r.Errors[0])
 
-		ts := topBlock.Header().Time + 1
+		ts := topBlock.Time() + 1
 		require.Less(t, ts, amsterdamTime) // still pre-Amsterdam
 		var prevRandao, beaconRoot common.Hash
 		_, _ = rand.Read(prevRandao[:])
@@ -1302,7 +1302,7 @@ func TestAssembleBlockAmsterdamForkTransition(t *testing.T) {
 		baseFee = block.BaseFee().Uint64()
 	}
 
-	require.Less(t, topBlock.Header().Time, amsterdamTime, "pre-Amsterdam blocks should have timestamp < amsterdamTime")
+	require.Less(t, topBlock.Time(), amsterdamTime, "pre-Amsterdam blocks should have timestamp < amsterdamTime")
 
 	// Add a contract deployment tx to the pool — exercises state gas (EIP-8037)
 	// more than simple EOA transfers.
@@ -1349,7 +1349,7 @@ func TestAssembleBlockAmsterdamForkTransition(t *testing.T) {
 	block, err := getAssembledBlock(ctx, exec, payloadId)
 	require.NoError(t, err)
 	require.NotNil(t, block, "first Amsterdam block should be built successfully")
-	require.True(t, cfg.IsAmsterdam(block.Header().Time), "block should be an Amsterdam block")
+	require.True(t, cfg.IsAmsterdam(block.Time()), "block should be an Amsterdam block")
 	require.GreaterOrEqual(t, len(block.Transactions()), 1, "block should contain txpool txns")
 
 	// Insert, validate, and update fork choice.
@@ -1416,6 +1416,121 @@ func TestStateChangeVersionMatchesCommitted(t *testing.T) {
 				require.Equal(t, committed, lastAnnounced, "announced StateVersionId must equal committed PlainStateVersion")
 			})
 		}
+	}
+}
+
+// TestGetPayloadBodiesRegenerateBlockAccessLists verifies the payload-bodies
+// getters serve stored BALs as-is and, once the stored rows are pruned (kept
+// only for the reorg window), regenerate them by re-execution —
+// engine_getPayloadBodiesBy*V2 must serve BALs for the weak subjectivity period.
+func TestGetPayloadBodiesRegenerateBlockAccessLists(t *testing.T) {
+	t.Parallel()
+	ctx := t.Context()
+	privKey, err := crypto.GenerateKey()
+	require.NoError(t, err)
+	senderAddr := crypto.PubkeyToAddress(privKey.PublicKey)
+	genesis := &types.Genesis{
+		Config: chain.AllProtocolChanges,
+		Alloc: types.GenesisAlloc{
+			senderAddr: {Balance: new(big.Int).Exp(big.NewInt(10), big.NewInt(18), nil)},
+		},
+	}
+	m := execmoduletester.New(t, execmoduletester.WithGenesisSpec(genesis), execmoduletester.WithKey(privKey))
+	signer := types.LatestSignerForChainID(m.ChainConfig.ChainID)
+	baseFee := uint256.NewInt(m.Genesis.BaseFee().Uint64())
+	chainPack, err := blockgen.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 2, func(i int, b *blockgen.BlockGen) {
+		txn, err := types.SignTx(types.NewTransaction(uint64(i), common.Address{1}, uint256.NewInt(10_000), 50_000, baseFee, nil), *signer, privKey)
+		require.NoError(t, err)
+		b.AddTx(txn)
+	})
+	require.NoError(t, err)
+	err = m.InsertChain(chainPack)
+	require.NoError(t, err)
+	hashes := []common.Hash{chainPack.Blocks[0].Hash(), chainPack.Blocks[1].Hash()}
+	stored, err := m.ExecModule.GetPayloadBodiesByHash(ctx, hashes)
+	require.NoError(t, err)
+	require.Len(t, stored, 2)
+	for i, pb := range stored {
+		require.NotNil(t, pb)
+		require.Equal(t, chainPack.BlockAccessLists[i], pb.BlockAccessList, "stored block %d", i+1)
+	}
+	err = m.DB.Update(ctx, func(tx kv.RwTx) error {
+		return tx.ForEach(kv.BlockAccessList, nil, func(k, _ []byte) error {
+			return tx.Delete(kv.BlockAccessList, k)
+		})
+	})
+	require.NoError(t, err)
+	err = m.DB.View(ctx, func(tx kv.Tx) error {
+		count, err := tx.Count(kv.BlockAccessList)
+		require.NoError(t, err)
+		require.Zero(t, count, "stored BALs should be fully pruned")
+		return nil
+	})
+	require.NoError(t, err)
+	byHash, err := m.ExecModule.GetPayloadBodiesByHash(ctx, hashes)
+	require.NoError(t, err)
+	require.Len(t, byHash, 2)
+	for i, pb := range byHash {
+		require.NotNil(t, pb)
+		require.Equal(t, chainPack.BlockAccessLists[i], pb.BlockAccessList, "byHash block %d", i+1)
+	}
+	byRange, err := m.ExecModule.GetPayloadBodiesByRange(ctx, 1, 2)
+	require.NoError(t, err)
+	require.Len(t, byRange, 2)
+	for i, pb := range byRange {
+		require.NotNil(t, pb)
+		require.Equal(t, chainPack.BlockAccessLists[i], pb.BlockAccessList, "byRange block %d", i+1)
+	}
+}
+
+// TestGetPayloadBodiesNonCanonicalBlockAccessList verifies that payload-bodies
+// requests for non-canonical blocks degrade the blockAccessList to null instead
+// of failing the batch: BALs can only be re-derived from canonical state.
+func TestGetPayloadBodiesNonCanonicalBlockAccessList(t *testing.T) {
+	t.Parallel()
+	ctx := t.Context()
+	privKeyA, err := crypto.GenerateKey()
+	require.NoError(t, err)
+	privKeyB, err := crypto.GenerateKey()
+	require.NoError(t, err)
+	addrA := crypto.PubkeyToAddress(privKeyA.PublicKey)
+	addrB := crypto.PubkeyToAddress(privKeyB.PublicKey)
+	genesis := &types.Genesis{
+		Config: chain.AllProtocolChanges,
+		Alloc: types.GenesisAlloc{
+			addrA: {Balance: new(big.Int).Exp(big.NewInt(10), big.NewInt(18), nil)},
+			addrB: {Balance: new(big.Int).Exp(big.NewInt(10), big.NewInt(18), nil)},
+		},
+	}
+	m := execmoduletester.New(t, execmoduletester.WithGenesisSpec(genesis), execmoduletester.WithKey(privKeyA))
+	signer := types.LatestSignerForChainID(m.ChainConfig.ChainID)
+	baseFee := uint256.NewInt(m.Genesis.BaseFee().Uint64())
+	canonical, err := blockgen.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 2, func(i int, b *blockgen.BlockGen) {
+		txn, err := types.SignTx(types.NewTransaction(uint64(i), common.Address{1}, uint256.NewInt(10_000), 50_000, baseFee, nil), *signer, privKeyA)
+		require.NoError(t, err)
+		b.AddTx(txn)
+	})
+	require.NoError(t, err)
+	fork, err := blockgen.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 2, func(i int, b *blockgen.BlockGen) {
+		txn, err := types.SignTx(types.NewTransaction(uint64(i), common.Address{2}, uint256.NewInt(20_000), 50_000, baseFee, nil), *signer, privKeyB)
+		require.NoError(t, err)
+		b.AddTx(txn)
+	})
+	require.NoError(t, err)
+	require.NotEqual(t, canonical.Blocks[0].Hash(), fork.Blocks[0].Hash())
+	err = m.InsertChain(canonical)
+	require.NoError(t, err)
+	// Insert the fork blocks without a fork choice update so they stay
+	// non-canonical, with no stored BAL sidecar.
+	insertRes, err := insertBlocks(ctx, m.ExecModule, fork.Blocks)
+	require.NoError(t, err)
+	require.Equal(t, execmodule.ExecutionStatusSuccess, insertRes)
+	byHash, err := m.ExecModule.GetPayloadBodiesByHash(ctx, []common.Hash{fork.Blocks[0].Hash(), fork.Blocks[1].Hash()})
+	require.NoError(t, err)
+	require.Len(t, byHash, 2)
+	for i, pb := range byHash {
+		require.NotNil(t, pb)
+		require.Nil(t, pb.BlockAccessList, "fork block %d", i+1)
 	}
 }
 
@@ -1596,7 +1711,7 @@ func TestAssembleBlockStateGasLimit(t *testing.T) {
 	parentBeaconBlockRoot := randomHash()
 	payloadId, err := assembleBlock(ctx, exec, &builder.Parameters{
 		ParentHash:            chainPack.TopBlock.Hash(),
-		Timestamp:             chainPack.TopBlock.Header().Time + 1,
+		Timestamp:             chainPack.TopBlock.Time() + 1,
 		PrevRandao:            randomHash(),
 		SuggestedFeeRecipient: common.Address{1},
 		Withdrawals:           make([]*types.Withdrawal, 0),
@@ -1707,7 +1822,7 @@ func TestAssembleBlockStateGasLimitSSTORE(t *testing.T) {
 	parentBeaconBlockRoot := randomHash()
 	payloadId, err := assembleBlock(ctx, exec, &builder.Parameters{
 		ParentHash:            chainPack.TopBlock.Hash(),
-		Timestamp:             chainPack.TopBlock.Header().Time + 1,
+		Timestamp:             chainPack.TopBlock.Time() + 1,
 		PrevRandao:            randomHash(),
 		SuggestedFeeRecipient: common.Address{1},
 		Withdrawals:           make([]*types.Withdrawal, 0),
@@ -1829,7 +1944,7 @@ func TestAssembleBlockGasPoolSnapshotRestoreBug(t *testing.T) {
 	parentBeaconBlockRoot := randomHash()
 	payloadId, err := assembleBlock(ctx, exec, &builder.Parameters{
 		ParentHash:            chainPack.TopBlock.Hash(),
-		Timestamp:             chainPack.TopBlock.Header().Time + 1,
+		Timestamp:             chainPack.TopBlock.Time() + 1,
 		PrevRandao:            randomHash(),
 		SuggestedFeeRecipient: common.Address{1},
 		Withdrawals:           make([]*types.Withdrawal, 0),
@@ -1961,7 +2076,7 @@ func TestAssembleBlockGasPoolMultiBatchInitBug(t *testing.T) {
 	parentBeaconBlockRoot := randomHash()
 	payloadId, err := assembleBlock(ctx, exec, &builder.Parameters{
 		ParentHash:            chainPack.TopBlock.Hash(),
-		Timestamp:             chainPack.TopBlock.Header().Time + 1,
+		Timestamp:             chainPack.TopBlock.Time() + 1,
 		PrevRandao:            randomHash(),
 		SuggestedFeeRecipient: common.Address{1},
 		Withdrawals:           make([]*types.Withdrawal, 0),
@@ -1979,14 +2094,15 @@ func TestAssembleBlockGasPoolMultiBatchInitBug(t *testing.T) {
 	require.NoError(t, insertValidateAndUfc1By1(ctx, exec, []*types.Block{block}))
 }
 
-func TestEIP7708BurnLogWhenCoinbaseSelfDestructs(t *testing.T) {
-	// Regression test for https://github.com/erigontech/erigon/issues/19951
+func TestEIP8246NoBurnLogWhenCoinbaseSelfDestructs(t *testing.T) {
+	// Regression test for https://github.com/erigontech/erigon/issues/19951.
 	//
-	// When the coinbase is a contract that self-destructs during execution,
-	// EIP-7708 requires a Burn log for the residual balance (priority fee)
-	// credited after the SELFDESTRUCT. Post-EIP-6780 SELFDESTRUCT only
-	// deletes contracts created in the same transaction, so we CREATE a
-	// contract at the pre-computed coinbase address whose init code
+	// A contract self-destructs at the coinbase address and is then credited the
+	// priority fee at finalization. EIP-8246 removes the SELFDESTRUCT burn, so the
+	// coinbase is preserved holding that residual balance and no EIP-7708 Burn log
+	// is emitted (pre-8246 the residual was burned and logged). Post-EIP-6780
+	// SELFDESTRUCT only deletes contracts created in the same transaction, so we
+	// CREATE a contract at the pre-computed coinbase address whose init code
 	// immediately SELFDESTRUCTs to the caller.
 	ctx := t.Context()
 	privKey, err := crypto.GenerateKey()
@@ -2031,44 +2147,34 @@ func TestEIP7708BurnLogWhenCoinbaseSelfDestructs(t *testing.T) {
 	})
 	require.NoError(t, err)
 
-	// Verify the receipt contains an EIP-7708 Burn log.
 	require.Len(t, chainPack.Receipts[0], 1)
 	receipt := chainPack.Receipts[0][0]
 	require.Equal(t, types.ReceiptStatusSuccessful, receipt.Status)
 	require.Greater(t, receipt.GasUsed, uint64(0))
 
-	var burnLog *types.Log
-	var burnCount, transferCount int
-	for _, log := range receipt.Logs {
-		if log.Address != params.SystemAddress.Value() || len(log.Topics) < 2 {
-			continue
-		}
-		switch log.Topics[0] {
-		case misc.EthBurnLogEvent:
-			burnLog = log
-			burnCount++
-		case misc.EthTransferLogEvent:
-			transferCount++
-		}
-	}
-	require.Equal(t, 1, burnCount, "expected exactly one EIP-7708 Burn log")
-	require.Equal(t, 0, transferCount, "no Transfer log expected for zero-value CREATE")
-	require.Equal(t, coinbaseAddr.Hash(), burnLog.Topics[1],
-		"burn log should reference the coinbase address")
-
-	// Burnt amount = priority fee = gasUsed × effectiveTip.
-	// Use the actual block baseFee (EIP-1559 adjusts it from genesis).
-	blockBaseFee := chainPack.Headers[0].BaseFee.Uint64()
-	expectedBurn := new(uint256.Int).Mul(
-		uint256.NewInt(receipt.GasUsed),
-		uint256.NewInt(gasPrice-blockBaseFee),
-	)
-	burnBytes := expectedBurn.Bytes32()
-	require.Equal(t, burnBytes[:], []byte(burnLog.Data),
-		"burn amount should equal the priority fee credited to coinbase")
-
 	// Insert + validate + FCU proves the state root is computed correctly.
 	err = insertValidateAndUfc1By1(ctx, m.ExecModule, chainPack.Blocks)
+	require.NoError(t, err)
+
+	// EIP-8246 preserves the self-destructed coinbase: the priority fee
+	// credited at finalization is retained (pre-8246 the account was deleted
+	// and the fee burned), and the record is balance-only — nonce, code hash
+	// and storage cleared.
+	err = m.DB.ViewTemporal(ctx, func(tx kv.TemporalTx) error {
+		enc, _, err := tx.GetLatest(kv.AccountsDomain, coinbaseAddr[:])
+		if err != nil {
+			return err
+		}
+		require.NotEmpty(t, enc, "the self-destructed coinbase must be preserved, not deleted")
+		var acc accounts.Account
+		require.NoError(t, accounts.DeserialiseV3(&acc, enc))
+		require.False(t, acc.Balance.IsZero(), "the credited priority fee must not be burned")
+		expected := accounts.NewAccount()
+		expected.Balance = acc.Balance
+		require.Equal(t, accounts.SerialiseV3(&expected), enc,
+			"the preserved coinbase must be a balance-only record")
+		return nil
+	})
 	require.NoError(t, err)
 }
 

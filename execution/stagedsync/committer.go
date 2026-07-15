@@ -336,7 +336,7 @@ func (cc *commitmentCalculator) handleMessage(ctx context.Context, msg applyResu
 		// the lazy-load path and never leaks into the trie fold path.
 		if !r.writes.IsEmpty() {
 			cc.asOfReader.txNum = r.txNum
-			cc.state.ApplyWrites(r.writes)
+			cc.state.ApplyWrites(r.writes, r.rules.IsAmsterdam)
 		}
 
 		// A folded-ahead block already emitted its interior step checkpoints from
@@ -536,15 +536,16 @@ func (cc *commitmentCalculator) foldBlockFromBAL(ctx context.Context, pb *pendin
 	// IsEIP161Enabled (not IsSpuriousDragon) so a chain with EIP-161 in disabledEIPs
 	// keeps empty leaves in the fold exactly as exec does.
 	emptyRemoval := req.blockNum != 0 && cc.chainConfig.IsEIP161Enabled(req.blockNum)
+	eip8246 := cc.chainConfig.IsAmsterdam(req.blockTime)
 	// A block straddling an unfrozen step edge must leave a commitment checkpoint
 	// at that edge (else the step's commitment .kv lags its account/storage .kv).
 	// The per-tx BAL lets the fold checkpoint mid-block, so a straddling block
 	// stays on the fold path instead of dropping to the incremental one.
-	if err := cc.foldStepCheckpoints(ctx, req, emptyRemoval); err != nil {
+	if err := cc.foldStepCheckpoints(ctx, req, emptyRemoval, eip8246); err != nil {
 		cc.fail(ctx, br, err)
 		return
 	}
-	rh, err := cc.foldBALToRoot(ctx, req, math.MaxUint32, emptyRemoval, targetOf(br))
+	rh, err := cc.foldBALToRoot(ctx, req, math.MaxUint32, emptyRemoval, eip8246, targetOf(br))
 	if err != nil {
 		cc.fail(ctx, br, fmt.Errorf("BAL-driven fold block %d: %w", req.blockNum, err))
 		return
@@ -577,7 +578,7 @@ func (cc *commitmentCalculator) foldBlockFromBAL(ctx context.Context, pb *pendin
 // the edge. computeRootFromUpdates saves the checkpoint (ComputeCommitmentLocked
 // with saveStateAfter); the returned root is discarded — there is no header to
 // verify mid-block. Runs before the block-end fold so that builds on it.
-func (cc *commitmentCalculator) foldStepCheckpoints(ctx context.Context, req *blockRequest, emptyRemoval bool) error {
+func (cc *commitmentCalculator) foldStepCheckpoints(ctx context.Context, req *blockRequest, emptyRemoval bool, eip8246 bool) error {
 	ss := cc.doms.StepSize()
 	if ss == 0 {
 		return nil
@@ -587,7 +588,7 @@ func (cc *commitmentCalculator) foldStepCheckpoints(ctx context.Context, req *bl
 			continue
 		}
 		stepBr := &blockResult{BlockNum: req.blockNum, BlockHash: req.blockHash, lastTxNum: edge}
-		if _, err := cc.foldBALToRoot(ctx, req, uint32(edge-req.firstTxNum), emptyRemoval, targetOf(stepBr)); err != nil {
+		if _, err := cc.foldBALToRoot(ctx, req, uint32(edge-req.firstTxNum), emptyRemoval, eip8246, targetOf(stepBr)); err != nil {
 			return fmt.Errorf("BAL-driven step-checkpoint at txNum %d: %w", edge, err)
 		}
 	}
@@ -597,10 +598,10 @@ func (cc *commitmentCalculator) foldStepCheckpoints(ctx context.Context, req *bl
 // foldBALToRoot builds a calcState from the BAL restricted to maxTxIndex,
 // flushes it to a fresh updates buffer, and computes the root at t. Shared by
 // the block-end fold and the mid-block step checkpoints so the two can't drift.
-func (cc *commitmentCalculator) foldBALToRoot(ctx context.Context, req *blockRequest, maxTxIndex uint32, emptyRemoval bool, t commitTarget) ([]byte, error) {
+func (cc *commitmentCalculator) foldBALToRoot(ctx context.Context, req *blockRequest, maxTxIndex uint32, emptyRemoval bool, eip8246 bool, t commitTarget) ([]byte, error) {
 	reader := &asOfStateReader{sd: cc.doms, roTx: cc.roTx, txNum: t.lastTxNum + 1}
 	balState := newCalcState(reader, cc.logger, cc.logPrefix)
-	balState.LoadFromBALUpTo(req.bal, maxTxIndex, emptyRemoval, cc.chainConfig.Aura != nil)
+	balState.LoadFromBALUpTo(req.bal, maxTxIndex, emptyRemoval, cc.chainConfig.Aura != nil, eip8246)
 	if err := balState.LazyLoadErr(); err != nil {
 		return nil, fmt.Errorf("lazy-load: %w", err)
 	}
@@ -774,9 +775,7 @@ func (cc *commitmentCalculator) compute(ctx context.Context, t commitTarget, m c
 func (cc *commitmentCalculator) computeIsolated(ctx context.Context, t commitTarget) ([]byte, error) {
 	cc.doms.LockChangesetAccumulator()
 	defer cc.doms.UnlockChangesetAccumulator()
-	prev := cc.doms.GetChangesetAccumulatorLocked()
-	cc.doms.SetChangesetAccumulatorLocked(nil)
-	defer cc.doms.SetChangesetAccumulatorLocked(prev)
+	defer cc.doms.DetachChangesetAccumulatorLocked()()
 
 	rh, err := cc.doms.ComputeCommitmentLocked(ctx, cc.roTx, true, t.blockNum, t.lastTxNum, cc.logPrefix, nil)
 	if err != nil {
@@ -816,12 +815,14 @@ func (cc *commitmentCalculator) computeAndCheck(ctx context.Context, br *blockRe
 // update under a nil accumulator — a pre-window block's branch deltas must
 // not pend into the first window block's changeset-routed compute.
 func (cc *commitmentCalculator) flushPendingUpdatesWithoutChangeset(ctx context.Context, br *blockResult) {
-	cc.doms.LockChangesetAccumulator()
-	prev := cc.doms.GetChangesetAccumulatorLocked()
-	cc.doms.SetChangesetAccumulatorLocked(nil)
-	err := cc.doms.FlushPendingUpdatesLocked(ctx, cc.roTx)
-	cc.doms.SetChangesetAccumulatorLocked(prev)
-	cc.doms.UnlockChangesetAccumulator()
+	// The closure bounds the locked window: publish must stay outside it —
+	// the send can block on the apply loop, which contends on changesetMu.
+	err := func() error {
+		cc.doms.LockChangesetAccumulator()
+		defer cc.doms.UnlockChangesetAccumulator()
+		defer cc.doms.DetachChangesetAccumulatorLocked()()
+		return cc.doms.FlushPendingUpdatesLocked(ctx, cc.roTx)
+	}()
 	if err != nil {
 		cc.publish(ctx, commitmentResult{
 			blockNum: br.BlockNum,
@@ -901,19 +902,16 @@ func (cc *commitmentCalculator) computeWithBlockAccumulator(ctx context.Context,
 		return cc.doms.ComputeCommitmentLocked(ctx, cc.roTx, true, t.blockNum, t.lastTxNum, cc.logPrefix, nil)
 	}
 	// LOAD-BEARING swap under the outer lock (already taken above). The
-	// Set/restore dance below mutates the global current-accumulator
-	// pointer; the deferred branch writes from block N-1 (flushed inside
+	// swap below mutates the global current-accumulator pointer; the
+	// deferred branch writes from block N-1 (flushed inside
 	// ComputeCommitmentLocked → FlushPendingUpdatesLocked) AND the [state]
 	// marker write at end of compute also touch that same global pointer
 	// and the per-domain diff fields. Holding changesetMu through all of
 	// it serializes against the apply goroutine's DomainPut/DomainDel.
 	//
-	// Inside the lock we must use the *Locked variants of Get/Set/Compute
-	// — the public counterparts re-acquire the same Mutex and would
-	// self-deadlock.
-	prev := cc.doms.GetChangesetAccumulatorLocked()
-	cc.doms.SetChangesetAccumulatorLocked(cs)
-	defer cc.doms.SetChangesetAccumulatorLocked(prev)
+	// Inside the lock we must use the *Locked variants — the public
+	// counterparts re-acquire the same Mutex and would self-deadlock.
+	defer cc.doms.SwapChangesetAccumulatorLocked(cs)()
 	return cc.doms.ComputeCommitmentLocked(ctx, cc.roTx, true, t.blockNum, t.lastTxNum, cc.logPrefix, nil)
 }
 

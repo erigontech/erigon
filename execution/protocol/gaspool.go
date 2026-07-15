@@ -24,7 +24,6 @@ import (
 	"math"
 	"sync"
 
-	"github.com/erigontech/erigon/execution/protocol/mdgas"
 	"github.com/erigontech/erigon/execution/protocol/params"
 )
 
@@ -186,42 +185,22 @@ func CheckBlockGasInclusion(gp *GasPool, regularGas, stateGas uint64) error {
 	return nil
 }
 
-// InclusionContributions returns the per-dimension gas contributions for
-// the EIP-8037 block-pool inclusion check, given the tx's declared gas_limit
-// and the precomputed intrinsic gas result.
+// InclusionContributions returns the per-dimension gas the EIP-8037 block-pool
+// inclusion check must reserve for a tx with the given declared gas_limit.
+// Callers feed the result to CheckBlockGasInclusion.
 //
 // Pre-Amsterdam: only the regular dimension is exercised; state is 0.
-// Amsterdam onwards, derived from the EIP-8037 reservoir model:
+// Amsterdam onwards, the full gas_limit must fit in each remaining reservoir
+// (EIP-8037 check_transaction), with the regular side bounded by the EIP-7825
+// per-tx gas cap:
 //
-//	regular_contribution = max(min(TX_MAX, tx.gas - intrinsic.state), intrinsic.FloorGasCost)
-//	state_contribution   = tx.gas - intrinsic.regular
-//
-// Subtracting the other dimension's intrinsic from tx.gas before checking
-// against this dimension's reservoir is what lets a tx with a high gas_limit
-// (e.g. a creation paying intrinsic.state up front, or an EIP-7702 tx paying
-// per-auth state cost) still be includable when the un-subtracted gas_limit
-// would over-budget this dimension. The max-with-FloorGasCost on the regular
-// side mirrors block accounting's `max(combined.Regular, FloorGasCost)`:
-// realized regular consumption can't go below the floor, so the inclusion
-// check shouldn't either.
-func InclusionContributions(gas uint64, intrinsic mdgas.IntrinsicGasCalcResult, isAmsterdam bool) (uint64, uint64) {
+//	regular = min(MaxTxnGasLimit, tx.gas)
+//	state   = tx.gas
+func InclusionContributions(gas uint64, isAmsterdam bool) (uint64, uint64) {
 	if !isAmsterdam {
 		return gas, 0
 	}
-	var regularContribution, stateContribution uint64
-	if gas >= intrinsic.StateGas {
-		regularContribution = gas - intrinsic.StateGas
-	}
-	if regularContribution > params.MaxTxnGasLimit {
-		regularContribution = params.MaxTxnGasLimit
-	}
-	if regularContribution < intrinsic.FloorGasCost {
-		regularContribution = intrinsic.FloorGasCost
-	}
-	if gas >= intrinsic.RegularGas {
-		stateContribution = gas - intrinsic.RegularGas
-	}
-	return regularContribution, stateContribution
+	return min(params.MaxTxnGasLimit, gas), gas
 }
 
 // BlobGas returns the blob gas remaining.

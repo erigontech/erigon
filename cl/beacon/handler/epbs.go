@@ -481,7 +481,7 @@ func (a *ApiHandler) PostEthV1BeaconPoolPayloadAttestations(w http.ResponseWrite
 		}
 		count := len(octets) / msgSize
 		req = make([]*cltypes.PayloadAttestationMessage, 0, count)
-		for i := 0; i < count; i++ {
+		for i := range count {
 			msg := &cltypes.PayloadAttestationMessage{}
 			if err := msg.DecodeSSZ(octets[i*msgSize:(i+1)*msgSize], int(clparams.GloasVersion)); err != nil {
 				beaconhttp.NewEndpointError(http.StatusBadRequest,

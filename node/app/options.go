@@ -22,10 +22,10 @@ import (
 
 type Option struct {
 	target     reflect.Type
-	applicator func(t interface{}) bool
+	applicator func(t any) bool
 }
 
-func (o Option) Apply(t interface{}) bool {
+func (o Option) Apply(t any) bool {
 	return o.applicator(t)
 }
 
@@ -37,7 +37,7 @@ func WithOption[T any](applicator func(t *T) bool) Option {
 	var t T
 	return Option{
 		target:     reflect.TypeOf(t),
-		applicator: func(t interface{}) bool { return applicator(t.(*T)) },
+		applicator: func(t any) bool { return applicator(t.(*T)) },
 	}
 }
 
