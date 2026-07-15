@@ -18,11 +18,8 @@ package jsonrpc
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"time"
-
-	"github.com/holiman/uint256"
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/dbg"
@@ -207,7 +204,7 @@ func (api *DebugAPIImpl) traceBlock(ctx context.Context, blockNrOrHash rpc.Block
 				}
 
 				var _gasUsed uint64
-				_gasUsed, err = transactions.TraceTx(ctx, engine, txn, msg, blockCtx, txCtx, &block.Header().Number, block.Hash(), txnIndex, ibs, config, chainConfig, inner, api.evmCallTimeout, precompiles)
+				_gasUsed, err = transactions.TraceTx(ctx, engine, txn, msg, blockCtx, txCtx, &block.HeaderNoCopy().Number, block.Hash(), txnIndex, ibs, config, chainConfig, inner, api.evmCallTimeout, precompiles)
 				gasUsed += _gasUsed
 			}
 		}
@@ -355,7 +352,7 @@ func (api *DebugAPIImpl) TraceTransaction(ctx context.Context, hash common.Hash,
 	txCtx.TxHash = hash
 
 	// Trace the transaction and return
-	_, err = transactions.TraceTx(ctx, engine, block.Transactions()[txnIndex], msg, blockCtx, txCtx, &block.Header().Number, block.Hash(), txnIndex, ibs, config, chainConfig, stream, api.evmCallTimeout, precompiles)
+	_, err = transactions.TraceTx(ctx, engine, block.Transactions()[txnIndex], msg, blockCtx, txCtx, &block.HeaderNoCopy().Number, block.Hash(), txnIndex, ibs, config, chainConfig, stream, api.evmCallTimeout, precompiles)
 	return err
 }
 
@@ -406,22 +403,12 @@ func (api *DebugAPIImpl) TraceCall(ctx context.Context, args ethapi.CallArgs, bl
 	}
 	ibs := state.New(stateReader)
 
-	var baseFee *uint256.Int
-	if header.BaseFee != nil {
-		baseFee = new(uint256.Int).Set(header.BaseFee)
+	baseFee, err := overrideBaseFee(config, header.BaseFee)
+	if err != nil {
+		return err
 	}
-
-	if config != nil && config.BlockOverrides != nil {
-		if config.BlockOverrides.BaseFeePerGas != nil && baseFee != nil {
-			overflow := baseFee.SetFromBig(config.BlockOverrides.BaseFeePerGas.ToInt())
-			if overflow {
-				return errors.New("BlockOverrides.BaseFee uint256 overflow")
-			}
-		}
-
-		if config.BlockOverrides.BlobBaseFee != nil {
-			args.MaxFeePerBlobGas = config.BlockOverrides.BlobBaseFee
-		}
+	if config != nil && config.BlockOverrides != nil && config.BlockOverrides.BlobBaseFee != nil {
+		args.MaxFeePerBlobGas = config.BlockOverrides.BlobBaseFee
 	}
 
 	msg, err := args.ToMessage(api.GasCap, baseFee)

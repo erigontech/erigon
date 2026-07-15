@@ -33,7 +33,7 @@ func MerkleizeVector(elements [][32]byte, length uint64) ([32]byte, error) {
 	if len(elements) == 0 {
 		return ZeroHashes[depth], nil
 	}
-	for i := uint8(0); i < depth; i++ {
+	for i := range depth {
 		// Sequential
 		layerLen := len(elements)
 		if layerLen%2 == 1 {
@@ -77,7 +77,10 @@ func BitvectorRootWithLimit(bits []byte, limit uint64) ([32]byte, error) {
 }
 
 func packBits(bytes []byte) [][32]byte {
-	var chunks [][32]byte
+	if len(bytes) == 0 {
+		return nil
+	}
+	chunks := make([][32]byte, 0, (len(bytes)+31)/32)
 	for i := 0; i < len(bytes); i += 32 {
 		var chunk [32]byte
 		copy(chunk[:], bytes[i:])

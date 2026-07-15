@@ -80,7 +80,7 @@ type Error struct {
 // error then it will be used directly, if not, it will be passed to
 // fmt.Errorf("%v"). The stacktrace will point to the line of code that
 // called New.
-func NewError(e interface{}) *Error {
+func NewError(e any) *Error {
 	var err error
 
 	switch e := e.(type) {
@@ -102,7 +102,7 @@ func NewError(e interface{}) *Error {
 // error then it will be used directly, if not, it will be passed to
 // fmt.Errorf("%v"). The skip parameter indicates how far up the stack
 // to start the stacktrace. 0 is from the current call, 1 from its caller, etc.
-func WrapError(e interface{}, skip int) *Error {
+func WrapError(e any, skip int) *Error {
 	if e == nil {
 		return nil
 	}
@@ -132,7 +132,7 @@ func WrapError(e interface{}, skip int) *Error {
 // error message when calling Error(). The skip parameter indicates how far
 // up the stack to start the stacktrace. 0 is from the current call,
 // 1 from its caller, etc.
-func WrapPrefix(e interface{}, prefix string, skip int) *Error {
+func WrapPrefix(e any, prefix string, skip int) *Error {
 	if e == nil {
 		return nil
 	}
@@ -154,7 +154,7 @@ func WrapPrefix(e interface{}, prefix string, skip int) *Error {
 // Errorf creates a new error with the given message. You can use it
 // as a drop-in replacement for fmt.Errorf() to provide descriptive
 // errors in return values.
-func Errorf(format string, a ...interface{}) *Error {
+func Errorf(format string, a ...any) *Error {
 	return WrapError(fmt.Errorf(format, a...), 1)
 }
 
@@ -225,7 +225,7 @@ func (err *Error) TypeName() string {
 	return reflect.TypeOf(err.Err).Name()
 }
 
-func UnexpectedTypeError(expected interface{}, actual interface{}, message ...string) error {
+func UnexpectedTypeError(expected any, actual any, message ...string) error {
 	var expectedTypeName string
 	var actualTypeName string
 

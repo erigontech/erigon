@@ -26,6 +26,7 @@ import (
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/crypto"
+	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/protocol/params"
 	"github.com/erigontech/erigon/execution/tracing"
 	"github.com/erigontech/erigon/execution/types"
@@ -504,6 +505,45 @@ func TestCreateAccount_FundedThenCreated_SyntheticReadKeepsPreTxBalance(t *testi
 	require.True(t, ok, "a synthetic BalancePath read must be recorded for the created account")
 	require.True(t, vr.Val.IsZero(),
 		"the synthetic creation BalancePath read must keep the pre-tx balance (0); the CREATE2 re-creation must not overwrite it with the in-tx funded balance")
+}
+
+// A balance read flagged internal (a value-bearing CALL rejected inside a
+// STATICCALL) must not survive as the BAL baseline when the same pre-funded
+// address is CREATE2-deployed later in the tx: CreateAccount promotes the
+// internal read so the unchanged balance nets to zero, instead of leaving the
+// write baseline-less and emitting a spurious BalanceChange.
+func TestCreateAccount_InternalBalanceReadPromotedOnCreate_NoSpuriousBalanceChange(t *testing.T) {
+	t.Parallel()
+
+	addr := accounts.InternAddress(common.HexToAddress("0xf00ded"))
+	reader := newAccountStateReader(addr)
+	reader.accounts[addr].Balance = *uint256.NewInt(7)
+
+	ibs := New(reader)
+	ibs.SetVersionMap(NewVersionMap(nil))
+	ibs.SetTxContext(0, 0)
+	ibs.SetVersion(0)
+
+	// The rejected value-CALL reads the target's balance during gas calc;
+	// MarkReadsInternal then flags that read as conflict-detection only.
+	_, err := ibs.GetBalance(addr)
+	require.NoError(t, err)
+	ibs.MarkReadsInternal(addr)
+
+	// The parent frame CREATE2-deploys to that same pre-funded address.
+	require.NoError(t, ibs.CreateAccount(addr, true))
+
+	io := NewVersionedIO(1)
+	io.RecordReads(Version{TxIndex: 0}, ibs.VersionedReads())
+	io.RecordWrites(Version{TxIndex: 0}, ibs.VersionedWrites(false))
+	bal := io.AsBlockAccessList()
+
+	for _, ac := range bal {
+		if ac.Address == addr {
+			require.Empty(t, ac.BalanceChanges,
+				"balance is unchanged (7->7); the promoted read is the baseline so EELS emits no BalanceChange\n%s", bal.DebugString())
+		}
+	}
 }
 
 // TestVersionedIO_CreatedAccountEmptyCodeChangeOmitted is the regression test
@@ -1312,21 +1352,26 @@ func TestVersionedRead_EIP8246_PriorTxSelfDestructReadsAsPreserved(t *testing.T)
 	t.Parallel()
 
 	addr := accounts.InternAddress(common.HexToAddress("0x8246A"))
-	realCodeHash := accounts.InternCodeHash(common.HexToHash("0x31537ad3f3619e1f93aac0ddfdb0d8a0013bd170b427d81dd5abbee4f3f5248e"))
 	preserved := *uint256.NewInt(1)
 
+	// Post-EIP-6780 a self-destructed account was created in the same tx, so it
+	// has no pre-block record, and extraction drops its nonce/code/codeHash
+	// writes — the map carries only what a real destroying tx publishes.
 	newIBS := func(eip8246 bool) *IntraBlockState {
-		reader := newAccountStateReader(addr)
-		reader.accounts[addr].Nonce = 1
-		reader.accounts[addr].CodeHash = realCodeHash
-		reader.accounts[addr].Balance = preserved
-
+		reader := newAccountStateReader()
 		vm := NewVersionMap(nil)
-		sdVer := Version{TxIndex: 3, Incarnation: 0}
-		vm.WriteSelfDestruct(addr, sdVer, true, true)
-		vm.WriteBalance(addr, sdVer, preserved, true)
-		vm.WriteIncarnation(addr, sdVer, uint64(1), true)
-		vm.WriteCodeHash(addr, sdVer, accounts.EmptyCodeHash, true)
+		tx3 := New(reader)
+		tx3.SetTxContext(0, 3)
+		tx3.SetVersion(0)
+		tx3.SetVersionMap(vm)
+		tx3.eip8246 = eip8246
+		require.NoError(t, tx3.CreateAccount(addr, true))
+		require.NoError(t, tx3.SetBalance(addr, preserved, tracing.BalanceChangeUnspecified))
+		require.NoError(t, tx3.SetCode(addr, []byte("deployed runtime code"), tracing.CodeChangeUnspecified))
+		_, err := tx3.Selfdestruct(addr, eip8246)
+		require.NoError(t, err)
+		require.NoError(t, tx3.MakeWriteSet(&chain.Rules{IsAmsterdam: eip8246}, NewNoopWriter()))
+		vm.FlushVersionedWrites(tx3.VersionedWrites(false), true, "")
 
 		ibs := New(reader)
 		ibs.SetTxContext(0, 4)
@@ -1402,11 +1447,10 @@ func TestUpdateWrite_StorageReadThenWriteDifferentValue_BecomesWrite(t *testing.
 		"a real write supersedes the recorded read")
 }
 
-// TestAsBlockAccessList_SelfdestructedAccountRecordsBalanceToZero verifies the
-// EIP-7928 rule for in-transaction SELFDESTRUCT: an account destroyed within a
-// tx that had a positive pre-tx balance MUST record a balance change to zero —
-// even when a later same-tx transfer leaves a non-zero final balance write.
-func TestAsBlockAccessList_SelfdestructedAccountRecordsBalanceToZero(t *testing.T) {
+// EIP-7928 and EIP-8246 activate together, so a same-tx SELFDESTRUCT no longer
+// burns: the account's balance write records as-is, and a destroyed account
+// touched without net changes still gets its (empty) BAL entry.
+func TestAsBlockAccessList_SelfdestructNoBurn(t *testing.T) {
 	t.Parallel()
 	addr := accounts.InternAddress(common.HexToAddress("0x9e1989c1ba17e9b8fdae0b5d43a2b0c676a2070f"))
 	io := NewVersionedIO(1)
@@ -1420,32 +1464,22 @@ func TestAsBlockAccessList_SelfdestructedAccountRecordsBalanceToZero(t *testing.
 	bal := io.AsBlockAccessList()
 	require.Len(t, bal, 1)
 	require.Equal(t, addr, bal[0].Address)
-	require.Len(t, bal[0].BalanceChanges, 1,
-		"destroyed account with positive pre-tx balance must record a balance change to zero")
-	require.Equal(t, uint32(1), bal[0].BalanceChanges[0].Index)
-	require.True(t, bal[0].BalanceChanges[0].Value.IsZero(),
-		"recorded post-balance must be zero for an account destroyed in-tx")
+	require.Len(t, bal[0].BalanceChanges, 1)
+	require.Equal(t, uint64(1), bal[0].BalanceChanges[0].Value.Uint64(),
+		"the balance write records as-is: EIP-8246 removed the destroy-time burn")
 }
 
-// TestAsBlockAccessList_SelfdestructedZeroPreBalanceNoBalanceChange verifies the
-// EIP-7928 counterpart: same-tx SELFDESTRUCT of an account with a zero pre-tx
-// balance must NOT produce a balance change entry.
-func TestAsBlockAccessList_SelfdestructedZeroPreBalanceNoBalanceChange(t *testing.T) {
+func TestAsBlockAccessList_SelfdestructTouchKeepsEntry(t *testing.T) {
 	t.Parallel()
 	addr := accounts.InternAddress(common.HexToAddress("0x2222"))
 	io := NewVersionedIO(1)
-	readSets := ReadSet{}
-	readSets.SetBalance(addr, VersionedRead[uint256.Int]{Val: *uint256.NewInt(0)})
-	io.RecordReads(Version{TxIndex: 0}, readSets)
 	io.RecordWrites(Version{TxIndex: 0}, newWriteSet(
-		&VersionedWrite[uint256.Int]{WriteHeader: WriteHeader{Address: addr, Path: BalancePath, Version: Version{TxIndex: 0}}, Val: *uint256.NewInt(1)},
 		&VersionedWrite[bool]{WriteHeader: WriteHeader{Address: addr, Path: SelfDestructPath, Version: Version{TxIndex: 0}}, Val: true},
 	))
 	bal := io.AsBlockAccessList()
-	require.Len(t, bal, 1)
+	require.Len(t, bal, 1, "a destroyed account with no net changes is still a touched BAL entry")
 	require.Equal(t, addr, bal[0].Address)
-	require.Empty(t, bal[0].BalanceChanges,
-		"destroyed account with zero pre-tx balance must not record a balance change")
+	require.Empty(t, bal[0].BalanceChanges)
 }
 
 func TestEIP161EmptyRemoval(t *testing.T) {
@@ -1787,4 +1821,44 @@ func TestSetAccountBalanceOrDelete_IncarnationPathOnly_AppendBalanceNotFullAccou
 	require.False(t, ok, "NoncePath must NOT be re-emitted from stale snapshot")
 	_, ok = result.GetCodeHash(addr)
 	require.False(t, ok, "CodeHashPath must NOT be re-emitted from stale snapshot")
+}
+
+// A mid-block read of a cleared delegation's code hash must not poison
+// initialCodeEmpty and drop the clearing tx's real code change.
+func TestVersionedIO_MidBlockEmptyCodeHashReadMustNotDropRealClear(t *testing.T) {
+	t.Parallel()
+
+	addr := accounts.InternAddress(common.HexToAddress("0xdead7702"))
+	delegation := accounts.NewCode([]byte{0xef, 0x01, 0x00, 0x11, 0x22})
+
+	io := NewVersionedIO(2)
+
+	// tx0: auth processing reads the authority's pre-tx (non-empty) code hash,
+	// then clears the delegation and bumps the nonce.
+	reads0 := ReadSet{}
+	reads0.SetCodeHash(addr, VersionedRead[accounts.CodeHash]{Val: delegation.Hash})
+	io.RecordReads(Version{TxIndex: 0}, reads0)
+	io.RecordWrites(Version{TxIndex: 0}, newWriteSet(
+		&VersionedWrite[uint64]{WriteHeader: WriteHeader{Address: addr, Path: NoncePath, Version: Version{TxIndex: 0}}, Val: uint64(5)},
+		&VersionedWrite[accounts.Code]{WriteHeader: WriteHeader{Address: addr, Path: CodePath, Version: Version{TxIndex: 0}}, Val: accounts.Code{}},
+	))
+
+	// tx1: reads the (now cleared) code hash mid-block.
+	reads1 := ReadSet{}
+	reads1.SetCodeHash(addr, VersionedRead[accounts.CodeHash]{Val: accounts.EmptyCodeHash})
+	io.RecordReads(Version{TxIndex: 1}, reads1)
+
+	bal := io.AsBlockAccessList()
+
+	found := false
+	for _, ac := range bal {
+		if ac.Address == addr {
+			found = true
+			require.Len(t, ac.CodeChanges, 1,
+				"the delegation clear is a real pre!=post code change and must stay in the BAL\n%s", bal.DebugString())
+			require.Equal(t, uint32(1), ac.CodeChanges[0].Index)
+			require.Empty(t, ac.CodeChanges[0].Bytecode)
+		}
+	}
+	require.True(t, found, "authority account must appear in BAL")
 }

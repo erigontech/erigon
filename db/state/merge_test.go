@@ -1470,7 +1470,7 @@ func TestInvIndexMergeFiles_SharedKey(t *testing.T) {
 	defer tx.Rollback()
 
 	ps := background.NewProgressSet()
-	for step := kv.Step(0); step < kv.Step(numFiles); step++ {
+	for step := range kv.Step(numFiles) {
 		require.NoError(t, ii.collateBuildIntegrate(ctx, step, tx, ps))
 	}
 

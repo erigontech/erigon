@@ -100,9 +100,9 @@ var (
 		Value: ethconfig.Defaults.NetworkID,
 	}
 	PersistReceiptsV2Flag = cli.BoolFlag{
-		Name:    "persist.receipts",
-		Aliases: []string{"experiment.persist.receipts.v2"},
-		Usage:   "Download historical Receipts. If disabled: using state-history to re-exec transactions and generate Receipts - all RPC: eth_getLogs, eth_getBlockReceipts will work (just higher latency)",
+		Name:    "prune.include-receipts",
+		Aliases: []string{"experiment.persist.receipts.v2", "persist.receipts"},
+		Usage:   "Download historical Receipts (stored on disk as the rcache domain: snapshots/history/*rcache*.v). If disabled: using state-history to re-exec transactions and generate Receipts - all RPC: eth_getLogs, eth_getBlockReceipts will work (just higher latency)",
 		Value:   ethconfig.Defaults.PersistReceiptsCacheV2,
 	}
 	DevValidatorSeedFlag = cli.StringFlag{
@@ -435,6 +435,11 @@ var (
 		Name:  "rpc.logs.maxresults",
 		Usage: "Maximum number of logs returned by eth_getLogs, erigon_getLogs, erigon_getLatestLogs (0 = unlimited)",
 		Value: 20_000,
+	}
+	RpcLogQueryLimit = cli.IntFlag{
+		Name:  "rpc.logs.querylimit",
+		Usage: "Maximum number of alternative addresses or topics allowed per search position in eth_getLogs filter criteria (<=0 = unlimited)",
+		Value: 1_000,
 	}
 	RpcTraceCompatFlag = cli.BoolFlag{
 		Name:  "trace.compat",
@@ -1113,9 +1118,14 @@ var (
 		Usage:   "Enables blazing fast eth_getProof for executed block",
 		Aliases: []string{"experimental.commitment-history", "prune.experimental.include-commitment-history"},
 	}
-	CommitmentHistoryDistanceFlag = cli.Uint64Flag{
+	CommitmentHistoryDistanceFlag = cli.StringFlag{
 		Name:  "prune.commitment-history.distance",
-		Usage: "Keep commitment history only for the latest N blocks. Older snapshots are skipped at download time. 0 (default) keeps everything. Requires --prune.include-commitment-history.",
+		Usage: "Keep commitment history only for the latest N blocks, or \"keep-all\". Older snapshots are skipped at download time. Empty or 0 (default) keeps everything. Requires --prune.include-commitment-history",
+	}
+	PersistReceiptsDistanceFlag = cli.StringFlag{
+		Name:    "prune.receipts.distance",
+		Aliases: []string{"persist.receipts.distance"},
+		Usage:   "Keep the receipt cache only for the latest N blocks, or \"keep-all\" to keep it all. Empty or 0 (default) follows the state-history window (NOT keep-all). Older snapshots are skipped at download time. Requires --prune.include-receipts",
 	}
 	AlwaysGenerateChangesetsFlag = cli.BoolFlag{
 		Name:  "experimental.always-generate-changesets",
@@ -1187,12 +1197,12 @@ var (
 	}
 	ExecNoPruneFlag = cli.BoolFlag{
 		Name:  "exec.no-prune",
-		Usage: "Disable all DB pruning: state-aggregator (Domain/InvertedIndex/forkable) plus stage-level pruning (Execution: ChangeSets3/BlockAccessList; TxLookup; WitnessProcessing; Snapshots: PruneAncientBlocks/canonical markers/retirement) (equivalent to NO_PRUNE=true). Diagnostic / perf-comparison use only.",
+		Usage: "Disable all DB pruning: state-aggregator (Domain/InvertedIndex) plus stage-level pruning (Execution: ChangeSets3/BlockAccessList; TxLookup; WitnessProcessing; Snapshots: PruneAncientBlocks/canonical markers/retirement) (equivalent to NO_PRUNE=true). Diagnostic / perf-comparison use only.",
 		Value: false,
 	}
 	ExecNoBackgroundMaintenanceFlag = cli.BoolFlag{
 		Name:  "exec.no-background-maintenance",
-		Usage: "Suppress background state-aggregator (Domain/Hist/II + forkable) file build/merge and E2 block-snapshot retirement goroutines so execution is not perturbed by housekeeping work (legacy env var: NO_BACKGROUND_E3_BUILD=true). Diagnostic / focused-performance-testing use only — NOT an operational setting.",
+		Usage: "Suppress background state-aggregator (Domain/Hist/II) file build/merge and E2 block-snapshot retirement goroutines so execution is not perturbed by housekeeping work (legacy env var: NO_BACKGROUND_E3_BUILD=true). Diagnostic / focused-performance-testing use only — NOT an operational setting.",
 		Value: false,
 	}
 )
@@ -1376,6 +1386,7 @@ func NewP2PConfig(
 		MaxPendingPeers:   maxPendPeers,
 		NAT:               nat.Any(),
 		NoDiscovery:       nodiscover,
+		DiscoveryV5:       !nodiscover,
 		PrivateKey:        serverKey,
 		Name:              nodeName,
 		NodeDatabase:      enodeDBPath,
@@ -2213,10 +2224,7 @@ func setDevnetEthConfig(ctx *cli.Command, cfg *ethconfig.Config, logger log.Logg
 	beaconCfg.DenebForkEpoch = 0
 	beaconCfg.ElectraForkEpoch = 0
 	beaconCfg.FuluForkEpoch = 0
-	slotTime := uint64(ctx.Int(DevSlotTimeFlag.Name))
-	if slotTime < 2 {
-		slotTime = 2
-	}
+	slotTime := max(uint64(ctx.Int(DevSlotTimeFlag.Name)), 2)
 	beaconCfg.SecondsPerSlot = slotTime
 	beaconCfg.InitializeForkSchedule()
 	genesisTime := uint64(time.Now().Unix())

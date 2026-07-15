@@ -2,6 +2,7 @@ package stagedsync
 
 import (
 	"fmt"
+	"math"
 
 	"github.com/holiman/uint256"
 
@@ -10,6 +11,7 @@ import (
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/execution/commitment"
 	"github.com/erigontech/erigon/execution/state"
+	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/accounts"
 )
 
@@ -276,6 +278,87 @@ func (cs *calcState) deleteStorageSubtree(addr accounts.Address) {
 		}
 		if cs.logger != nil {
 			cs.logger.Warn("["+cs.logPrefix+"] commitmentCalculator: SD storage enumeration failed", "addr", addr, "err", err)
+		}
+	}
+}
+
+// hasTxIndex is the BAL change-element constraint: every change
+// (*BalanceChange/*NonceChange/*CodeChange/*StorageChange) carries the tx index
+// within the block at which it was written.
+type hasTxIndex interface{ GetIndex() uint32 }
+
+// finalChangeUpTo returns the latest change whose tx index is ≤ maxTxIndex — the
+// field's value as of that point in the block, for a mid-block (step-boundary)
+// checkpoint fold. Indices are strictly increasing (BlockAccessList.Validate), so
+// a reverse scan stops at the first in-range element. maxTxIndex == MaxUint32
+// selects the block-end value (the whole block).
+func finalChangeUpTo[T hasTxIndex](changes []T, maxTxIndex uint32) (T, bool) {
+	for i := len(changes) - 1; i >= 0; i-- {
+		if changes[i].GetIndex() <= maxTxIndex {
+			return changes[i], true
+		}
+	}
+	var zero T
+	return zero, false
+}
+
+// LoadFromBAL populates calcState from an EIP-7928 Block Access List rather
+// than the per-tx VersionedWrites stream: it takes each field's block-end value
+// and feeds the existing ApplyWrites. The BAL carries no deletion marker, so an
+// account whose block-end state is empty (EIP-161) must be reconstructed as a
+// delete here: after the field changes and lazy-loaded pre-block fields are
+// merged, a touched all-zero account is marked Deleted so FlushToUpdates removes
+// its leaf instead of writing a zero-valued one. Storage reads are ignored.
+func (cs *calcState) LoadFromBAL(bal types.BlockAccessList, emptyRemoval bool, isAura bool, eip8246 bool) {
+	cs.LoadFromBALUpTo(bal, math.MaxUint32, emptyRemoval, isAura, eip8246)
+}
+
+// LoadFromBALUpTo is LoadFromBAL restricted to changes at tx index ≤ maxTxIndex,
+// i.e. the state as of that point within the block. Used to fold a block up to a
+// mid-block step boundary (checkpoint) from the same per-tx BAL, then fold the
+// remainder — the BAL carries every change's tx index, so no re-execution is
+// needed. maxTxIndex == math.MaxUint32 is the whole block (== LoadFromBAL).
+func (cs *calcState) LoadFromBALUpTo(bal types.BlockAccessList, maxTxIndex uint32, emptyRemoval bool, isAura bool, eip8246 bool) {
+	writes := &state.WriteSet{}
+	for _, ac := range bal {
+		addr := ac.Address
+		if bc, ok := finalChangeUpTo(ac.BalanceChanges, maxTxIndex); ok {
+			writes.SetBalance(addr, &state.VersionedWrite[uint256.Int]{
+				WriteHeader: state.WriteHeader{Address: addr, Path: state.BalancePath}, Val: bc.Value,
+			})
+		}
+		if nc, ok := finalChangeUpTo(ac.NonceChanges, maxTxIndex); ok {
+			writes.SetNonce(addr, &state.VersionedWrite[uint64]{
+				WriteHeader: state.WriteHeader{Address: addr, Path: state.NoncePath}, Val: nc.Value,
+			})
+		}
+		if cc, ok := finalChangeUpTo(ac.CodeChanges, maxTxIndex); ok {
+			writes.SetCode(addr, &state.VersionedWrite[accounts.Code]{
+				WriteHeader: state.WriteHeader{Address: addr, Path: state.CodePath}, Val: accounts.NewCode(cc.Bytecode),
+			})
+		}
+		for _, sc := range ac.StorageChanges {
+			if chg, ok := finalChangeUpTo(sc.Changes, maxTxIndex); ok {
+				writes.SetStorage(addr, sc.Slot, &state.VersionedWrite[uint256.Int]{
+					WriteHeader: state.WriteHeader{Address: addr, Path: state.StoragePath, Key: sc.Slot}, Val: chg.Value,
+				})
+			}
+		}
+	}
+	cs.ApplyWrites(writes, eip8246)
+
+	// EIP-161: a touched account whose merged block-end state is empty is
+	// removed from the trie. The BAL carries no deletion marker, so reconstruct
+	// it here, gated exactly as the incremental path (normalizeWriteSet).
+	for _, ac := range bal {
+		acc := cs.accounts[ac.Address]
+		if acc == nil || !acc.dirty || acc.Deleted {
+			continue
+		}
+		if acc.Balance.IsZero() && acc.Nonce == 0 && acc.CodeHash == empty.CodeHash &&
+			state.EIP161EmptyRemoval(emptyRemoval, isAura, ac.Address) {
+			acc.Deleted = true
+			acc.Incarnation = 0
 		}
 	}
 }

@@ -617,10 +617,10 @@ func TestConcurrent(t *testing.T) {
 	l.SetHandler(SyncHandler(concurrentCaptureTestHandler{res: res[:], ctxLen: ctxLen}))
 	var wg sync.WaitGroup
 	wg.Add(goroutines)
-	for i := 0; i < goroutines; i++ {
+	for i := range goroutines {
 		go func(idx int) {
 			defer wg.Done()
-			for j := 0; j < 10000; j++ {
+			for range 10000 {
 				l.Info("test message", "goroutine_idx", idx)
 			}
 		}(i)

@@ -90,7 +90,7 @@ func generateKV(tb testing.TB, tmp string, keySize, valueSize, keyCount int, log
 	collector := etl.NewCollector(btindex.BtreeLogPrefix+" genCompress", tb.TempDir(), etl.NewSortableBuffer(bufSize), logger)
 	defer collector.Close()
 
-	for i := 0; i < keyCount; i++ {
+	for i := range keyCount {
 		key := make([]byte, keySize)
 		n, err := rnd.Read(key)
 		require.Equal(tb, keySize, n)
@@ -162,13 +162,13 @@ func TestReferencesInCommitmentBranchesConcurrent(t *testing.T) {
 	wg.Add(2)
 	go func() {
 		defer wg.Done()
-		for i := 0; i < iters; i++ {
+		for i := range iters {
 			agg.applyReferencesInCommitmentBranches(i%2 == 0)
 		}
 	}()
 	go func() {
 		defer wg.Done()
-		for i := 0; i < iters; i++ {
+		for range iters {
 			_ = agg.referencesInCommitmentBranches()
 		}
 	}()
@@ -187,7 +187,7 @@ func TestFilesAmountConcurrent(t *testing.T) {
 	wg.Add(2)
 	go func() {
 		defer wg.Done()
-		for i := 0; i < iters; i++ {
+		for i := range iters {
 			item := &FilesItem{startTxNum: uint64(i), endTxNum: uint64(i + 1)}
 			agg.dirtyFilesLock.Lock()
 			d.dirtyFiles.Set(item)
@@ -199,7 +199,7 @@ func TestFilesAmountConcurrent(t *testing.T) {
 	}()
 	go func() {
 		defer wg.Done()
-		for i := 0; i < iters; i++ {
+		for range iters {
 			_ = agg.FilesAmount()
 		}
 	}()
@@ -215,7 +215,7 @@ func generateInputData(tb testing.TB, keySize, valueSize, keyCount int) ([][]byt
 	keys := make([][]byte, keyCount)
 
 	bk, bv := make([]byte, keySize), make([]byte, valueSize)
-	for i := 0; i < keyCount; i++ {
+	for i := range keyCount {
 		n, err := rnd.Read(bk)
 		require.Equal(tb, keySize, n)
 		require.NoError(tb, err)
@@ -545,34 +545,6 @@ func generateCommitmentHistoryAndIndexFiles(t *testing.T, dirs datadir.Dirs, ran
 	})
 	defer idxRepo.Close()
 	populateFiles2(t, dirs, idxRepo, ranges)
-}
-
-// TestAggregator_CommittedTxNumGuard verifies the stepFullyCommitted predicate
-// used by buildFilesInBackground: a step S should only be collated when
-// committedTxNum+1 >= firstTxNum(S+1), meaning all txNums in step S have been
-// committed to the DB. ComputeCommitment writes the last txNum of the block
-// (e.g. firstTxNum(S+1)-1 when the step boundary aligns with a block), so
-// the +1 avoids an off-by-one that would delay collation unnecessarily.
-func TestAggregator_CommittedTxNumGuard(t *testing.T) {
-	t.Parallel()
-	stepSize := uint64(100)
-
-	// Step 5 covers txNums [500, 600). firstTxNum(6) = 600.
-	assert.False(t, stepFullyCommitted(550, 5, stepSize),
-		"guard should block: committed txNum is mid-step")
-	assert.True(t, stepFullyCommitted(0, 5, stepSize),
-		"guard should be bypassed when committedTxNum is 0 (no commitment)")
-	assert.False(t, stepFullyCommitted(598, 5, stepSize),
-		"guard should block: committed txNum is 1 before last txNum of step")
-
-	// committedTxNum = 599 = lastTxNumOfStep(5) = firstTxNum(6)-1
-	// This is the value ComputeCommitment writes at the step boundary.
-	assert.True(t, stepFullyCommitted(599, 5, stepSize),
-		"guard should allow: committed txNum is last txNum of the step")
-	assert.True(t, stepFullyCommitted(600, 5, stepSize),
-		"guard should allow: committed txNum is past the step")
-	assert.True(t, stepFullyCommitted(1000, 5, stepSize),
-		"guard should allow: committed txNum is well past the step")
 }
 
 // TestAggregator_BuildFiles_GapRefuses verifies that buildFilesInBackground

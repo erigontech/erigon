@@ -30,6 +30,8 @@ const BuilderExitRequestType byte = 0x04
 const DepositRequestDataLen = 192       // BLSPubKeyLen + WithdrawalCredentialsLen + 8 + BLSSigLen + 8
 const WithdrawalRequestDataLen = 76     // addr + pubkey + amt
 const ConsolidationRequestDataLen = 116 // addr + sourcePubkey + targetPubkey
+const BuilderDepositRequestDataLen = 184
+const BuilderExitRequestDataLen = 68
 
 var KnownRequestTypes = []byte{DepositRequestType, WithdrawalRequestType, ConsolidationRequestType, BuilderDepositRequestType, BuilderExitRequestType}
 

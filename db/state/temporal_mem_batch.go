@@ -65,13 +65,11 @@ type TemporalMemBatch struct {
 	domains         [kv.DomainLen]map[string][]dataWithTxNum
 	storage         *btree2.Map[string, []dataWithTxNum] // TODO: replace hardcoded domain name to per-config configuration of available Guarantees/AccessMethods (range vs get)
 
-	domainWriters   [kv.DomainLen]*DomainBufferedWriter
-	iiWriters       []*InvertedIndexBufferedWriter
-	forkableWriters map[kv.ForkableId]kv.BufferedWriter
+	domainWriters [kv.DomainLen]*DomainBufferedWriter
+	iiWriters     []*InvertedIndexBufferedWriter
 
-	pastDomainWriters   [kv.DomainLen][]*DomainBufferedWriter
-	pastIIWriters       []*InvertedIndexBufferedWriter
-	pastForkableWriters map[kv.ForkableId][]kv.BufferedWriter
+	pastDomainWriters [kv.DomainLen][]*DomainBufferedWriter
+	pastIIWriters     []*InvertedIndexBufferedWriter
 
 	currentChangesAccumulator *changeset.StateChangeSet
 	// pastChangesAccumulator is read by the parallel commitment calculator
@@ -120,11 +118,6 @@ func NewTemporalMemBatch(tx kv.TemporalTx, ioMetrics any) *TemporalMemBatch {
 		sd.domainWriters[id] = d.NewWriter()
 	}
 
-	sd.forkableWriters = make(map[kv.ForkableId]kv.BufferedWriter)
-	for _, id := range tx.Debug().AllForkableIds() {
-		sd.forkableWriters[id] = tx.Unmarked(id).BufferedWriter()
-	}
-
 	return sd
 }
 
@@ -132,23 +125,31 @@ func (sd *TemporalMemBatch) SetInMemHistoryReads(v bool) { sd.inMemHistoryReads 
 func (sd *TemporalMemBatch) InMemHistoryReads() bool     { return sd.inMemHistoryReads }
 
 func (sd *TemporalMemBatch) DomainPut(domain kv.Domain, k string, v []byte, txNum uint64, preval []byte) error {
-	sd.putLatest(domain, k, v, txNum)
-	return sd.putHistory(domain, common.ToBytesZeroCopy(k), v, txNum, preval)
+	sameTxNumUpdate := sd.putLatest(domain, k, v, txNum)
+	return sd.putHistory(domain, common.ToBytesZeroCopy(k), v, txNum, preval, sameTxNumUpdate)
 }
 
 func (sd *TemporalMemBatch) DomainDel(domain kv.Domain, k string, txNum uint64, preval []byte) error {
-	sd.putLatest(domain, k, nil, txNum)
-	return sd.putHistory(domain, common.ToBytesZeroCopy(k), nil, txNum, preval)
+	sameTxNumUpdate := sd.putLatest(domain, k, nil, txNum)
+	return sd.putHistory(domain, common.ToBytesZeroCopy(k), nil, txNum, preval, sameTxNumUpdate)
 }
 
-func (sd *TemporalMemBatch) putHistory(domain kv.Domain, k, v []byte, txNum uint64, preval []byte) error {
+func (sd *TemporalMemBatch) putHistory(domain kv.Domain, k, v []byte, txNum uint64, preval []byte, sameTxNumUpdate bool) error {
+	// A same-txNum update only rewrites the value: history and the unwind diff
+	// record the value as of BEFORE txNum, which the first write already did —
+	// this write's preval is the intra-txNum intermediate, not a real prev.
+	if sameTxNumUpdate {
+		return sd.domainWriters[domain].addValue(k, v, kv.Step(txNum/sd.stepSize))
+	}
 	if len(v) == 0 {
 		return sd.domainWriters[domain].DeleteWithPrev(k, txNum, preval)
 	}
 	return sd.domainWriters[domain].PutWithPrev(k, v, txNum, preval)
 }
 
-func (sd *TemporalMemBatch) putLatest(domain kv.Domain, key string, val []byte, txNum uint64) {
+// putLatest reports whether this write is a same-txNum update of the key,
+// replacing the key's last entry in place instead of appending a version.
+func (sd *TemporalMemBatch) putLatest(domain kv.Domain, key string, val []byte, txNum uint64) (sameTxNumUpdate bool) {
 	sd.latestStateLock.Lock()
 	defer sd.latestStateLock.Unlock()
 
@@ -181,7 +182,12 @@ func (sd *TemporalMemBatch) putLatest(domain kv.Domain, key string, val []byte, 
 	putValueSize := 0
 	if domain == kv.StorageDomain {
 		if old, ok := sd.storage.Get(key); ok {
-			if sd.inMemHistoryReads {
+			if old[len(old)-1].txNum == txNum {
+				sameTxNumUpdate = true
+				putValueSize += len(val) - len(old[len(old)-1].data)
+				old[len(old)-1] = valWithStep
+				sd.storage.Set(key, old)
+			} else if sd.inMemHistoryReads {
 				sd.storage.Set(key, append(old, valWithStep))
 				putValueSize += len(val)
 			} else {
@@ -196,11 +202,16 @@ func (sd *TemporalMemBatch) putLatest(domain kv.Domain, key string, val []byte, 
 		}
 
 		updateMetrics(domain, putKeySize, putValueSize)
-		return
+		return sameTxNumUpdate
 	}
 
 	if old, ok := sd.domains[domain][key]; ok {
-		if sd.inMemHistoryReads {
+		if old[len(old)-1].txNum == txNum {
+			sameTxNumUpdate = true
+			putValueSize += len(val) - len(old[len(old)-1].data)
+			old[len(old)-1] = valWithStep
+			sd.domains[domain][key] = old
+		} else if sd.inMemHistoryReads {
 			sd.domains[domain][key] = append(old, valWithStep)
 			putValueSize += len(val)
 		} else {
@@ -215,6 +226,7 @@ func (sd *TemporalMemBatch) putLatest(domain kv.Domain, key string, val []byte, 
 	}
 
 	updateMetrics(domain, putKeySize, putValueSize)
+	return sameTxNumUpdate
 }
 
 func (sd *TemporalMemBatch) GetLatest(domain kv.Domain, key []byte) (v []byte, step kv.Step, ok bool) {
@@ -617,14 +629,6 @@ func (sd *TemporalMemBatch) IndexAdd(table kv.InvertedIdx, key []byte, txNum uin
 	panic(fmt.Errorf("unknown index %s", table))
 }
 
-func (sd *TemporalMemBatch) PutForkable(id kv.ForkableId, num kv.Num, v []byte) error {
-	f, ok := sd.forkableWriters[id]
-	if !ok {
-		return fmt.Errorf("forkable not found: %s", Registry.Name(id))
-	}
-	return f.Put(num, v)
-}
-
 func (sd *TemporalMemBatch) Close() {
 	for _, d := range sd.domainWriters {
 		if d != nil {
@@ -641,14 +645,6 @@ func (sd *TemporalMemBatch) Close() {
 	}
 	for _, iiWriter := range sd.pastIIWriters {
 		iiWriter.close()
-	}
-	for _, fWriter := range sd.forkableWriters {
-		fWriter.Close()
-	}
-	for _, fs := range sd.pastForkableWriters {
-		for _, f := range fs {
-			f.Close()
-		}
 	}
 	sd.ClearRam()
 }
@@ -683,16 +679,6 @@ func (sd *TemporalMemBatch) Merge(o kv.TemporalMemBatch) error {
 	other.iiWriters = nil
 	sd.pastIIWriters = append(sd.pastIIWriters, other.pastIIWriters...)
 	other.pastIIWriters = nil
-
-	for id, writer := range other.forkableWriters {
-		sd.pastForkableWriters[id] = append(sd.pastForkableWriters[id], writer)
-	}
-	other.forkableWriters = nil
-
-	for id, writers := range other.pastForkableWriters {
-		sd.pastForkableWriters[id] = append(sd.pastForkableWriters[id], writers...)
-	}
-	other.pastForkableWriters = nil
 
 	if sd.currentChangesAccumulator != nil {
 		return fmt.Errorf("can't merge to batch with non-nil currentChangesAccumulator")
@@ -909,23 +895,6 @@ func (sd *TemporalMemBatch) flushWriters(ctx context.Context, tx kv.RwTx) error 
 			return err
 		}
 		w.close()
-	}
-	for _, ws := range sd.pastForkableWriters {
-		for i := len(ws) - 1; i >= 0; i-- {
-			if err := ws[i].Flush(ctx, tx); err != nil {
-				return err
-			}
-			ws[i].Close()
-		}
-	}
-	for _, w := range sd.forkableWriters {
-		if w == nil {
-			continue
-		}
-		if err := w.Flush(ctx, tx); err != nil {
-			return err
-		}
-		w.Close()
 	}
 	return nil
 }

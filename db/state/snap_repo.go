@@ -46,10 +46,6 @@ type SnapshotRepo struct {
 	logger log.Logger
 }
 
-func NewSnapshotRepoForForkable(id kv.ForkableId, logger log.Logger) *SnapshotRepo {
-	return NewSnapshotRepo(Registry.Name(id), FromForkable(id), Registry.SnapshotConfig(id), logger)
-}
-
 func NewSnapshotRepo(name string, entity UniversalEntity, cfg *SnapshotConfig, logger log.Logger) *SnapshotRepo {
 	return &SnapshotRepo{
 		dirtyFiles: newDirtyFiles(),
@@ -192,7 +188,7 @@ func (f *SnapshotRepo) DirtyFilesWithNoHashAccessors() (l []*FilesItem) {
 	files := make([]string, accCount)
 
 	return fileItemsWithMissedAccessors(f.dirtyFiles.Items(), f.stepSize, func(fromStep, toStep kv.Step) []string {
-		for i := uint16(0); i < accCount; i++ {
+		for i := range accCount {
 			files[i], _ = p.AccessorIdxFile(v, RootNum(fromStep.ToTxNum(ss)), RootNum(toStep.ToTxNum(ss)), i)
 		}
 		return files

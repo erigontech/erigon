@@ -109,7 +109,7 @@ func gatedCtxFactory(entered, release chan struct{}) TrieContextFactory {
 // (0x00-0x0F), with the index encoded in the trailing nibbles so keys are distinct.
 func genNibbleKeys(n, keyLen int) [][]byte {
 	keys := make([][]byte, n)
-	for i := 0; i < n; i++ {
+	for i := range n {
 		k := make([]byte, keyLen)
 		v := i
 		for j := keyLen - 1; j >= 0; j-- {
@@ -131,6 +131,7 @@ func TestHashSort_WarmupArenaNoRace(t *testing.T) {
 
 	forEachMode(t, func(t *testing.T, mode Mode) {
 		ut := NewUpdates(mode, t.TempDir(), keyHasherNoop)
+		forceDirectSpill(ut) // these tests pin the arena/etl path
 		for _, k := range genNibbleKeys(numKeys, keyLen) {
 			ut.TouchPlainKey(string(k), []byte("v"), ut.TouchStorage)
 		}
@@ -162,6 +163,7 @@ func TestHashSort_NilWarmuper(t *testing.T) {
 
 	forEachMode(t, func(t *testing.T, mode Mode) {
 		ut := NewUpdates(mode, t.TempDir(), keyHasherNoop)
+		forceDirectSpill(ut) // these tests pin the arena/etl path
 		for _, k := range genNibbleKeys(numKeys, keyLen) {
 			ut.TouchPlainKey(string(k), []byte("v"), ut.TouchStorage)
 		}
@@ -188,6 +190,7 @@ func TestHashSort_WarmupLap(t *testing.T) {
 
 	forEachMode(t, func(t *testing.T, mode Mode) {
 		ut := NewUpdates(mode, t.TempDir(), keyHasherNoop)
+		forceDirectSpill(ut) // these tests pin the arena/etl path
 		for _, k := range genNibbleKeys(numKeys, keyLen) {
 			ut.TouchPlainKey(string(k), []byte("v"), ut.TouchStorage)
 		}
@@ -235,6 +238,7 @@ func TestHashSort_WaitBufferFreeErrorKeepsArenaInvariant(t *testing.T) {
 
 	forEachMode(t, func(t *testing.T, mode Mode) {
 		ut := NewUpdates(mode, t.TempDir(), keyHasherNoop)
+		forceDirectSpill(ut) // these tests pin the arena/etl path
 		for _, k := range genNibbleKeys(numKeys, keyLen) {
 			ut.TouchPlainKey(string(k), []byte("v"), ut.TouchStorage)
 		}
@@ -482,7 +486,7 @@ func TestBranchData_MergeHexBranchesEmptyBranches(t *testing.T) {
 func TestDecodeBranchWithLeafHashes(t *testing.T) {
 	row, bm := generateCellRow(t, 16)
 
-	for i := 0; i < len(row); i++ {
+	for i := range row {
 		if row[i].accountAddrLen > 0 {
 			rand.Read(row[i].stateHash[:])
 			row[i].stateHashLen = 32
@@ -672,13 +676,13 @@ func TestUpdates_TouchPlainKey(t *testing.T) {
 		{common.FromHex("97c780315e7820752006b7a918ce7ec023df263a87a715b64d5ab445e1782a760a974aaaaaaa1f81dfb7f1425f7d8358332af195"), []byte("value1")},
 		{common.FromHex("97c780315e7820752006b7a918ce7ec023df263a87a715b64d5ab445e1782a760a974f8810551f81dfb7f1425f7d835838888885"), []byte("value1")},
 	}
-	for i := 0; i < len(upds); i++ {
+	for i := range upds {
 		utUpdate.TouchPlainKey(string(upds[i].key), upds[i].val, utUpdate.TouchStorage)
 		utDirect.TouchPlainKey(string(upds[i].key), upds[i].val, utDirect.TouchStorage)
 	}
 
 	uniqUpds := make(map[string]tc)
-	for i := 0; i < len(upds); i++ {
+	for i := range upds {
 		uniqUpds[string(upds[i].key)] = upds[i]
 	}
 	sortedUniqUpds := make([]tc, 0, len(uniqUpds))

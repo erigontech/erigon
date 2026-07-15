@@ -197,7 +197,7 @@ func versionedReadCore(s *IntraBlockState, addr accounts.Address, path AccountPa
 		}
 		if !revived && path != CodePath {
 			sdVersion := Version{TxIndex: destructTxIndex, Incarnation: sdRes.Incarnation()}
-			if s.eip8246 && !commited && (path == BalancePath || path == CodeHashPath || path == IncarnationPath) {
+			if s.eip8246 && (path == BalancePath || path == CodeHashPath || path == IncarnationPath) {
 				// EIP-8246 removes the SELFDESTRUCT burn: a destroyed account keeps
 				// its balance and stays alive, so a concurrent reader must see the
 				// live account, not a zeroed one. Record the SelfDestructPath
