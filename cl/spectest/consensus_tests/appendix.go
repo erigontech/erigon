@@ -61,6 +61,10 @@ func init() {
 	TestFormats.Add("fork_choice").
 		With("get_head", &ForkChoice{}).
 		With("on_block", &ForkChoice{}).
+		With("on_attestation", &ForkChoice{}).
+		With("on_payload_attestation_message", &ForkChoice{}).
+		With("payload_data_availability", &ForkChoice{}).
+		With("payload_timeliness", &ForkChoice{}).
 		With("on_merge_block", &ForkChoice{}).
 		With("ex_ante", &ForkChoice{}).
 		With("on_execution_payload_envelope", &ForkChoice{}).
