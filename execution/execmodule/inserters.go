@@ -24,7 +24,6 @@ import (
 
 	"github.com/holiman/uint256"
 
-	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/db/state/execctx"
 	"github.com/erigontech/erigon/execution/commitment/commitmentdb"
@@ -85,7 +84,7 @@ func (e *ExecModule) InsertBlocks(ctx context.Context, blocks []*types.RawBlock)
 			}
 			e.logger.Info("ethereumExecutionModule.InsertBlocks: state ahead of blocks, proceeding with catch-up", "err", err)
 		}
-		// Chain to the newest in-flight commit generation (gate item 2) so
+		// Chain to the newest in-flight commit generation so
 		// the parent-TD read below sees a previous FCU's not-yet-committed
 		// block data instead of a stale DB.
 		if sd != nil {
@@ -99,13 +98,7 @@ func (e *ExecModule) InsertBlocks(ctx context.Context, blocks []*types.RawBlock)
 		e.lock.Unlock()
 	}
 	if sd.BlockOverlay() == nil {
-		overlayBase := kv.TemporalTx(roTx)
-		if parent := e.latestGen(); parent != nil {
-			if v := parent.BlockOverlayTemporalTx(roTx); v != nil {
-				overlayBase = v
-			}
-		}
-		if err := sd.InitBlockOverlay(overlayBase, roTx.Debug().Dirs().Tmp); err != nil {
+		if err := sd.InitBlockOverlay(e.overlayBaseFor(roTx), roTx.Debug().Dirs().Tmp); err != nil {
 			return 0, fmt.Errorf("ethereumExecutionModule.InsertBlocks: %w", err)
 		}
 	} else {

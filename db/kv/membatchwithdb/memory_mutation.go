@@ -1098,13 +1098,6 @@ func (m *MemoryMutation) SetDomainGetterFactory(f func(tx kv.TemporalTx) kv.Temp
 	m.domainGetterFor = f
 }
 
-// HasOverlayDomainGetter reports whether this read view routes domain reads
-// through a SharedDomains-backed getter — i.e. it is an overlay view of an
-// in-flight async-commit generation. Callers use this to bypass caches whose
-// coherency is keyed to the committed DB and would otherwise serve a value
-// lagging a not-yet-landed background commit.
-func (m *MemoryMutation) HasOverlayDomainGetter() bool { return m.domainGetter != nil }
-
 // OverlayTemporalReadView extends an overlay read view with kv.TemporalTx
 // support. It embeds a *MemoryMutation for all overlay-aware KV methods
 // (GetOne, Cursor, etc.) and delegates temporal methods (GetLatest, GetAsOf,

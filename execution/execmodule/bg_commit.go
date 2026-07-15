@@ -25,16 +25,11 @@ import (
 	"github.com/erigontech/erigon/db/state/execctx"
 )
 
-// Background commit / foreground-priority coordination (gate item 2).
-//
-// Base intent: foreground execution (FCU / ValidateChain / InsertBlocks /
-// AssembleBlock / SetHead) is NEVER blocked on the DB. The post-FCU
-// flush+commit+prune runs on a single background goroutine that yields to
-// foreground: a commit starts only in a foreground-free window, so the
-// commit RwTx never overlaps a foreground roTx and never pins MDBX pages
-// (which would grow the freelist / DB file). An in-flight commit is never
-// aborted — a foreground op that arrives mid-commit simply makes the *next*
-// commit wait. See project_fcu_semaphore_decouple_plan.
+// Background commit coordination: the post-FCU flush+commit+prune runs on a
+// single background goroutine in a foreground-free window, so the commit RwTx
+// never overlaps a foreground roTx (which would pin MDBX pages and grow the
+// freelist). An in-flight commit is never aborted; a foreground op arriving
+// mid-commit makes the next commit wait.
 
 // commitGen is one in-flight background-commit unit: the SharedDomains of a
 // completed FCU whose domain state must be flushed + committed off the
@@ -161,13 +156,9 @@ func (e *ExecModule) runCommit(gen *commitGen) {
 	}
 	defer e.fgRelease()
 
-	// A stale epoch means the generation set was discarded (SetHead unwind) while
-	// this gen sat queued — its SharedDomains is closed, so skip it rather than
-	// commit a closed SD. The epoch bump and this check both hold the semaphore.
-	e.fgMu.Lock()
-	stale := gen.epoch != e.genEpoch
-	e.fgMu.Unlock()
-	if stale {
+	// A superseded generation had its set discarded (SetHead unwind) while it sat
+	// queued — its SharedDomains is closed, so skip it rather than commit a closed SD.
+	if e.genSuperseded(gen) {
 		return
 	}
 
@@ -189,12 +180,9 @@ func (e *ExecModule) runCommit(gen *commitGen) {
 		return
 	}
 	e.markGenCommitted(gen)
-	// NOTE: the worker does NOT touch the published overlay (Events.LatestSD).
-	// Publishing the latest executed block's SharedDomains is a foreground
-	// concern, owned by updateForkChoice (dispatchNotificationsFromOverlay).
-	// A background commit landing does not change "what the latest block is",
-	// so it must not republish — doing so previously nil'd LatestSD whenever
-	// the worker caught up, leaving the block builder / RPC caches blind.
+	// The worker must not touch the published SD (Events.LatestSD): what the
+	// latest block is stays a foreground concern (updateForkChoice), and a commit
+	// landing does not change it.
 }
 
 // markGenCommitted records that a generation's commit has landed. The
@@ -254,6 +242,18 @@ func (e *ExecModule) latestGen() *execctx.SharedDomains {
 	return last.sd
 }
 
+// overlayBaseFor wraps roTx with the newest in-flight generation's block overlay
+// when one exists, so block-data reads (headers, bodies, TDs) see a not-yet-committed
+// FCU's writes instead of a stale DB. Returns roTx unchanged when there is none.
+func (e *ExecModule) overlayBaseFor(roTx kv.TemporalTx) kv.TemporalTx {
+	if parent := e.latestGen(); parent != nil {
+		if v := parent.BlockOverlayTemporalTx(roTx); v != nil {
+			return v
+		}
+	}
+	return roTx
+}
+
 // beginCoordinatedRo opens a base RO tx under fgMu so its committed snapshot
 // reflects every generation markGenCommitted has recorded — markGenCommitted runs
 // under fgMu strictly after the DB commit, so a datum dropped from the parent
@@ -266,6 +266,14 @@ func (e *ExecModule) beginCoordinatedRo(ctx context.Context) (kv.TemporalTx, err
 	return e.db.BeginTemporalRo(ctx)
 }
 
+// genSuperseded reports whether gen's set was discarded (via closeAllGens bumping
+// genEpoch) since it was enqueued. The epoch bump and this check both hold fgMu.
+func (e *ExecModule) genSuperseded(gen *commitGen) bool {
+	e.fgMu.Lock()
+	defer e.fgMu.Unlock()
+	return gen.epoch != e.genEpoch
+}
+
 // addGen appends a new in-flight generation to the chain.
 func (e *ExecModule) addGen(gen *commitGen) {
 	e.fgMu.Lock()
@@ -275,23 +283,11 @@ func (e *ExecModule) addGen(gen *commitGen) {
 	e.fgMu.Unlock()
 }
 
-// drainCommittedGens is intentionally a no-op for now (model A).
-//
-// Each generation's SharedDomains.mem is kept after commit (FlushKeepMem) so
-// the generation stays a stable, self-contained snapshot — it may still be
-// Events.LatestSD, or a parent in some reader's chain. Freeing one mid-run
-// would need to prove no consumer (block builder, RPC cache, txpool) is still
-// reading it; LatestSD hands out a bare pointer, so that proof needs a
-// refcount / scoped-read primitive we have not built yet. Until then,
-// generations are released as a unit at shutdown by closeAllGens.
-//
-// Precise per-generation freeing — a refcounted/scoped-read lifetime, or a
-// shallow COW snapshot decoupled from the generation — is the explicit
-// memory-coordination follow-up (next optimization phase). The call site is
-// kept as the documented hook for that work.
-func (e *ExecModule) drainCommittedGens() {
-	// no-op — see closeAllGens and the memory-coordination follow-up
-}
+// drainCommittedGens is a no-op: committed generations' mem is retained (they
+// may still be a parent in a reader's chain) and freed as a unit at shutdown by
+// closeAllGens. Precise per-generation freeing needs a refcount keyed on a
+// publication id — tracked in erigontech/erigon#22494.
+func (e *ExecModule) drainCommittedGens() {}
 
 // closeAllGens detaches + closes every remaining generation. Called only at
 // shutdown (after the commit worker has stopped) to release the generations

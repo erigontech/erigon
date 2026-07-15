@@ -228,10 +228,8 @@ type ExecModule struct {
 	currentContext *execctx.SharedDomains
 	publishedSD    func() *execctx.SharedDomains // fallback for background commit
 
-	// Background-commit / foreground-priority coordination (gate item 2 —
-	// see bg_commit.go). fgMu guards fgCount + gens; fgIdle is signalled
-	// when fgCount reaches zero so the commit worker can run in a
-	// foreground-free window.
+	// fgMu guards fgCount + gens; fgIdle is signalled when fgCount reaches zero
+	// so the commit worker can run in a foreground-free window (see bg_commit.go).
 	fgMu            sync.Mutex
 	fgCount         int
 	fgIdle          *sync.Cond
@@ -332,7 +330,7 @@ func NewExecModule(
 		stateCache.execModule = em
 	}
 
-	// Start the background-commit worker (gate item 2). It pulls completed
+	// Start the background-commit worker. It pulls completed
 	// generations off commitCh and commits each in a foreground-free
 	// window. The buffered channel keeps the foreground FCU's hand-off
 	// non-blocking. WaitIdle stops the worker before DB-close.
@@ -512,7 +510,7 @@ func (e *ExecModule) ValidateChain(ctx context.Context, blockHash common.Hash, b
 
 	e.hook.LastNewBlockSeen(blockNumber) // used by eth_syncing
 	// currentContext is nil while a background commit holds the previous
-	// FCU's SD (gate item 2) — guard the access.
+	// FCU's SD — guard the access.
 	if e.currentContext != nil {
 		e.currentContext.ResetPendingUpdates()
 	}
@@ -555,12 +553,7 @@ func (e *ExecModule) ValidateChain(ctx context.Context, blockHash common.Hash, b
 			return ValidationResult{}, err
 		}
 		defer roTx.Rollback()
-		var src kv.TemporalTx = roTx
-		if parent := e.latestGen(); parent != nil {
-			if v := parent.BlockOverlayTemporalTx(roTx); v != nil {
-				src = v
-			}
-		}
+		src := e.overlayBaseFor(roTx)
 		header, err = e.blockReader.Header(ctx, src, blockHash, blockNumber)
 		if err != nil {
 			return ValidationResult{}, err
@@ -612,7 +605,7 @@ func (e *ExecModule) ValidateChain(ctx context.Context, blockHash common.Hash, b
 
 	// Chain the validation SD to the latest in-memory canonical generation:
 	// e.currentContext when present, otherwise the newest in-flight commit
-	// generation (gate item 2 — the prior FCU cleared currentContext and
+	// generation (the prior FCU cleared currentContext and
 	// handed its SD to the background commit). This parent link is the single
 	// lookup path: the overlay base below is derived from it so block-data reads
 	// and domain-state reads traverse the identical generation chain.
@@ -645,7 +638,7 @@ func (e *ExecModule) ValidateChain(ctx context.Context, blockHash common.Hash, b
 		doms.SetParent(parent)
 	}
 
-	// Back the validation overlay by the SD's OWN parent chain (gate item 2) so
+	// Back the validation overlay by the SD's OWN parent chain so
 	// block-data reads cascade through the same generations that domain-state
 	// reads do — never a separate, divergent capture.
 	valOverlayBase := kv.TemporalTx(roTx)
