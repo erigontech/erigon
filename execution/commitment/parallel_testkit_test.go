@@ -408,11 +408,11 @@ func buildWitnessCorpus(tb testing.TB, ms *MockState, hph *HexPatriciaHashed, ac
 	tb.Helper()
 	builder := NewUpdateBuilder()
 	addrs := make([][]byte, 0, accts)
-	for i := 0; i < accts; i++ {
+	for i := range accts {
 		a, _ := generateKeyWithHashedPrefix(nil, length.Addr)
 		addrs = append(addrs, a)
 		builder.Balance(common.Bytes2Hex(a), uint64(i+1))
-		for j := 0; j < slots; j++ {
+		for j := range slots {
 			slot := slotHashBytes(j)
 			builder.Storage(common.Bytes2Hex(a), common.Bytes2Hex(slot), common.Bytes2Hex(slot))
 		}
@@ -427,7 +427,7 @@ func buildWitnessCorpus(tb testing.TB, ms *MockState, hph *HexPatriciaHashed, ac
 func touchAccountsSlots(u *Updates, addrs [][]byte, slots int) {
 	for _, a := range addrs {
 		u.TouchPlainKey(string(a), nil, u.TouchAccount)
-		for j := 0; j < slots; j++ {
+		for j := range slots {
 			u.TouchPlainKey(string(storageKey(a, slotHashBytes(j))), nil, u.TouchStorage)
 		}
 	}

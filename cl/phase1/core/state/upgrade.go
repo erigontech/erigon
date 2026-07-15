@@ -269,7 +269,7 @@ func (b *CachingBeaconState) UpgradeToFulu() error {
 		if err != nil {
 			return err
 		}
-		for j := 0; j < len(proposerIndices); j++ {
+		for j := range proposerIndices {
 			lookahead.Set(i*int(b.BeaconConfig().SlotsPerEpoch)+j, proposerIndices[j])
 		}
 	}

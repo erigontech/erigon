@@ -85,7 +85,7 @@ var readDomains = &cobra.Command{
 
 		var readFromDomain string
 		var addrs [][]byte
-		for i := 0; i < len(args); i++ {
+		for i := range args {
 			if i == 0 {
 				switch s := strings.ToLower(args[i]); s {
 				case "account", "storage", "code", "commitment":

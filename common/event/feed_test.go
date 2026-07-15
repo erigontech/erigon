@@ -116,7 +116,7 @@ func TestFeed(t *testing.T) {
 	const n = 1000
 	done.Add(n)
 	subscribed.Add(n)
-	for i := 0; i < n; i++ {
+	for i := range n {
 		go subscriber(i)
 	}
 	subscribed.Wait()
@@ -145,7 +145,7 @@ func TestFeedSubscribeSameChannel(t *testing.T) {
 		done.Done()
 	}
 	expectRecv := func(wantValue, n int) {
-		for i := 0; i < n; i++ {
+		for range n {
 			if v := <-ch; v != wantValue {
 				t.Errorf("received %d, want %d", v, wantValue)
 			}
@@ -184,7 +184,7 @@ func TestFeedSubscribeBlockedPost(t *testing.T) {
 
 	feed.Subscribe(ch1)
 	wg.Add(nsends)
-	for i := 0; i < nsends; i++ {
+	for range nsends {
 		go func() {
 			feed.Send(99)
 			wg.Done()
@@ -221,7 +221,7 @@ func TestFeedUnsubscribeBlockedPost(t *testing.T) {
 
 	// Queue up some Sends. None of these can make progress while bchan isn't read.
 	wg.Add(nsends)
-	for i := 0; i < nsends; i++ {
+	for range nsends {
 		go func() {
 			feed.Send(99)
 			wg.Done()
@@ -319,7 +319,7 @@ func BenchmarkFeedSend1000(b *testing.B) {
 		done.Done()
 	}
 	done.Add(nsubs)
-	for i := 0; i < nsubs; i++ {
+	for range nsubs {
 		ch := make(chan int, 200)
 		feed.Subscribe(ch)
 		go subscriber(ch)

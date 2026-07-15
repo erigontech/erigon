@@ -128,7 +128,7 @@ func BenchmarkPoolCycle_TxBatch(b *testing.B) {
 	sender := accounts.InternAddress([20]byte{0xaa})
 	contract := accounts.InternAddress([20]byte{0xbb})
 	keys := make([]accounts.StorageKey, slotsPerTx)
-	for i := 0; i < slotsPerTx; i++ {
+	for i := range slotsPerTx {
 		var k common.Hash
 		k[0] = byte(i)
 		k[1] = byte(i >> 8)
@@ -153,7 +153,7 @@ func BenchmarkPoolCycle_TxBatch(b *testing.B) {
 		s.SetNonce(sender, vwn)
 
 		// Many storage writes to a single contract
-		for i := 0; i < slotsPerTx; i++ {
+		for i := range slotsPerTx {
 			vws := getVWStorage()
 			vws.WriteHeader = WriteHeader{Address: contract, Path: StoragePath, Key: keys[i]}
 			vws.Val = slot

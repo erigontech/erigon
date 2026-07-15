@@ -161,6 +161,10 @@ func (rs *StateV3) applyVersionedWrites(roTx kv.TemporalTx, blockNum, txNum uint
 				if dbg.TraceApply && (rs.trace.Load() || dbg.TraceAccount(addr.Handle())) {
 					fmt.Printf("%d apply:del code+storage: %x\n", blockNum, addr)
 				}
+				// An EIP-8246 self-destruct keeps its balance write; the record
+				// survives only when a non-zero balance is left to preserve.
+				sdPreservedBalance := d.balance != nil && !d.balance.IsZero()
+				pureDelete := !sdPreservedBalance && d.nonce == nil && d.incarnation == nil && d.codeHash == nil
 				if blockCache != nil {
 					// Route the account+code delete and storage-prefix wipe through
 					// the cache so they're recorded in writeLog order. A later
@@ -173,7 +177,7 @@ func (rs *StateV3) applyVersionedWrites(roTx kv.TemporalTx, blockNum, txNum uint
 					if !domains.InlineTouchKeyDisabled() {
 						domains.GetCommitmentContext().TouchKey(kv.AccountsDomain, string(address[:]), nil)
 					}
-					if d.balance == nil && d.nonce == nil && d.incarnation == nil && d.codeHash == nil {
+					if pureDelete {
 						if dbg.TraceApply && (rs.trace.Load() || dbg.TraceAccount(addr.Handle())) {
 							fmt.Printf("%d apply:del account: %x\n", blockNum, addr)
 						}
@@ -186,8 +190,7 @@ func (rs *StateV3) applyVersionedWrites(roTx kv.TemporalTx, blockNum, txNum uint
 					if err := domains.DomainDelPrefix(kv.StorageDomain, roTx, address[:], txNum); err != nil {
 						return err
 					}
-					// Pure delete: no account fields means DeleteAccount was called.
-					if d.balance == nil && d.nonce == nil && d.incarnation == nil && d.codeHash == nil {
+					if pureDelete {
 						if dbg.TraceApply && (rs.trace.Load() || dbg.TraceAccount(addr.Handle())) {
 							fmt.Printf("%d apply:del account: %x\n", blockNum, addr)
 						}
@@ -217,15 +220,19 @@ func (rs *StateV3) applyVersionedWrites(roTx kv.TemporalTx, blockNum, txNum uint
 				// fields. Without this, an unchanged field would silently reset
 				// to zero. See TestLightCollectorNoncePreservation* for the
 				// scenario this defends against.
+				// Exception: a self-destructed account's base stays empty — the
+				// destruction cleared every field, so nothing may be resurrected.
 				acc := accounts.NewAccount()
-				if blockCache != nil {
-					if enc, ok := blockCache.GetCurrentAccount(addr); ok && len(enc) > 0 {
-						_ = accounts.DeserialiseV3(&acc, enc)
+				if !d.selfDestruct {
+					if blockCache != nil {
+						if enc, ok := blockCache.GetCurrentAccount(addr); ok && len(enc) > 0 {
+							_ = accounts.DeserialiseV3(&acc, enc)
+						} else if enc0, _, err := domains.GetLatest(kv.AccountsDomain, roTx, address[:]); err == nil && len(enc0) > 0 {
+							_ = accounts.DeserialiseV3(&acc, enc0)
+						}
 					} else if enc0, _, err := domains.GetLatest(kv.AccountsDomain, roTx, address[:]); err == nil && len(enc0) > 0 {
 						_ = accounts.DeserialiseV3(&acc, enc0)
 					}
-				} else if enc0, _, err := domains.GetLatest(kv.AccountsDomain, roTx, address[:]); err == nil && len(enc0) > 0 {
-					_ = accounts.DeserialiseV3(&acc, enc0)
 				}
 				if d.balance != nil {
 					acc.Balance = *d.balance

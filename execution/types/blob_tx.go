@@ -227,7 +227,7 @@ func blobVersionedHashesSize(hashes []common.Hash) int {
 }
 
 func encodeBlobVersionedHashes(hashes []common.Hash, w io.Writer, b []byte) error {
-	for i := 0; i < len(hashes); i++ {
+	for i := range hashes {
 		if err := rlp.EncodeString(hashes[i][:], w, b); err != nil {
 			return err
 		}

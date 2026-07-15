@@ -1814,9 +1814,7 @@ func (a *ApiHandler) broadcastBlock(ctx context.Context, blk *cltypes.SignedBeac
 				}
 
 				cellsAndProof := peerdasutils.CellsAndKZGProofs{}
-				for i := 0; i < len(cells); i++ {
-					cellsAndProof.Blobs = append(cellsAndProof.Blobs, cells[i])
-				}
+				cellsAndProof.Blobs = append(cellsAndProof.Blobs, cells...)
 				for j := 0; j < len(bundle.KzgProofs); j++ {
 					cellsAndProof.Proofs = append(cellsAndProof.Proofs, cltypes.KZGProof(bundle.KzgProofs[j]))
 				}
@@ -2293,7 +2291,7 @@ func (a *ApiHandler) electraMergedAttestationCandidates(s abstract.BeaconState) 
 	for root := range pool {
 		mergedCandidates[root] = []*solid.Attestation{}
 		maxAtts := min(maxAttsPerDataRoot[root], int(a.beaconChainCfg.MaxAttestations)) // limit the max attestations to the max attestations
-		for i := 0; i < maxAtts; i++ {
+		for i := range maxAtts {
 			att := mergeAttByCommittees(root, i)
 			if att == nil {
 				// No more attestations to merge for this root at higher indices, so we can stop checking

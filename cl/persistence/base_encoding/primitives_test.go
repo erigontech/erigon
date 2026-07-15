@@ -38,7 +38,7 @@ func TestDiff64(t *testing.T) {
 	old := make([]byte, 800000)
 	new := make([]byte, 800008)
 	inc := 1
-	for i := 0; i < 80; i++ {
+	for i := range 80 {
 		if i%9 == 0 {
 			inc++
 		}
@@ -70,7 +70,7 @@ func TestDiff64Effective(t *testing.T) {
 	new := make([]byte, sizeNew*121)
 	previous := make([]byte, sizeOld*8)
 	expected := make([]byte, sizeNew*8)
-	for i := 0; i < sizeNew; i++ {
+	for i := range sizeNew {
 		validatorOffset := i * 121
 		newNum := i + 32
 		oldNum := i + 12
@@ -107,7 +107,7 @@ func TestAppendEffectiveBalances(t *testing.T) {
 	for i := range ssz {
 		ssz[i] = byte(i*7 + 1) // noise in non-effective-balance fields
 	}
-	for i := 0; i < validators; i++ {
+	for i := range validators {
 		binary.LittleEndian.PutUint64(ssz[i*vSize+80:], uint64(i+32))
 		binary.LittleEndian.PutUint64(packed[i*8:], uint64(i+32))
 	}

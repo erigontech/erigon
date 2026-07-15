@@ -214,7 +214,7 @@ func GetPhase0Random() ([]*cltypes.SignedBeaconBlock, *state.CachingBeaconState,
 func GetBellatrixRandom() ([]*cltypes.SignedBeaconBlock, *state.CachingBeaconState, *state.CachingBeaconState) {
 	ret := make([]*cltypes.SignedBeaconBlock, 0, 96)
 	// format for blocks is blocks_{i}.ssz_snappy where i is the index of the block, starting from 0 to 95 included.
-	for i := 0; i < 96; i++ {
+	for i := range 96 {
 		block := cltypes.NewSignedBeaconBlock(&clparams.MainnetBeaconConfig, clparams.BellatrixVersion)
 		// Lets do te
 		b, err := bellatrixFS.ReadFile("test_data/bellatrix/blocks_" + strconv.Itoa(i) + ".ssz_snappy")

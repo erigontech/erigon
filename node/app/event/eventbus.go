@@ -303,7 +303,7 @@ func (bus *eventBus) doSubscribe(fn any, handler *eventHandler) error {
 	argCount := fnType.NumIn()
 	currentMap := root
 
-	for argIndex := 0; argIndex < argCount; argIndex++ {
+	for argIndex := range argCount {
 		argType := fnType.In(argIndex)
 
 		if nextMap, ok := currentMap.nextArgMap[argType]; ok {
@@ -361,7 +361,7 @@ func (bus *eventBus) HasCallback(types ...reflect.Type) bool {
 	argCount := len(types)
 	currentMap := bus.handlerMap.Load()
 
-	for argIndex := 0; argIndex < argCount; argIndex++ {
+	for argIndex := range argCount {
 		argType := types[argIndex]
 
 		nextArgMap := currentMap.nextArgMap
@@ -400,7 +400,7 @@ func (bus *eventBus) Unsubscribe(fn any) error {
 	currentMap := root
 	prevMaps := make([]*handlerMap, 0, argCount)
 
-	for argIndex := 0; argIndex < argCount; argIndex++ {
+	for argIndex := range argCount {
 		argType := fnType.In(argIndex)
 
 		if nextMap, ok := currentMap.nextArgMap[argType]; ok {

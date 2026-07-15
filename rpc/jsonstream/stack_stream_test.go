@@ -703,7 +703,7 @@ func TestStackStream_ExtremeNesting(t *testing.T) {
 	const nestingDepth = 50
 
 	// Open nested objects
-	for i := 0; i < nestingDepth; i++ {
+	for i := range nestingDepth {
 		ss.WriteObjectStart()
 		ss.WriteObjectField(fmt.Sprintf("level%d", i))
 	}
@@ -712,7 +712,7 @@ func TestStackStream_ExtremeNesting(t *testing.T) {
 	ss.WriteString("deep value")
 
 	// Close all objects
-	for i := 0; i < nestingDepth; i++ {
+	for range nestingDepth {
 		ss.WriteObjectEnd()
 	}
 

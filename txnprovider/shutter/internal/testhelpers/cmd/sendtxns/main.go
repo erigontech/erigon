@@ -104,7 +104,7 @@ func sendTxns(ctx context.Context, logger log.Logger, fromPkFile, fromStr, toStr
 	if fromStr != crypto.PubkeyToAddress(from.PublicKey).String() {
 		panic(fmt.Sprintf("from address mismatch: %s != %s", fromStr, crypto.PubkeyToAddress(from.PublicKey).String()))
 	}
-	for i := 0; i < count; i++ {
+	for range count {
 		txn, err := transactor.SubmitSimpleTransfer(from, to, amount)
 		if err != nil {
 			if strings.Contains(err.Error(), "failed to get transaction count: Invalid params") {

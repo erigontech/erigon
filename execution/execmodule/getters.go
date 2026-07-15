@@ -201,7 +201,7 @@ func (e *ExecModule) GetBodiesByRange(ctx context.Context, start, count uint64) 
 	defer cleanup()
 
 	bodies := make([]*types.RawBody, 0, count)
-	for i := uint64(0); i < count; i++ {
+	for i := range count {
 		hash, err := e.canonicalHash(ctx, tx, start+i)
 		if err != nil {
 			return nil, fmt.Errorf("ethereumExecutionModule.GetBodiesByRange: ReadCanonicalHash error %w", err)
@@ -295,7 +295,7 @@ func (e *ExecModule) GetPayloadBodiesByRange(ctx context.Context, start, count u
 	defer cleanup()
 
 	bodies := make([]*PayloadBody, 0, count)
-	for i := uint64(0); i < count; i++ {
+	for i := range count {
 		blockNum := start + i
 		hash, err := e.canonicalHash(ctx, tx, blockNum)
 		if err != nil {
