@@ -34,9 +34,12 @@ func (o Option) Target() reflect.Type {
 }
 
 func WithOption[T any](applicator func(t *T) bool) Option {
-	var t T
+	target := reflect.TypeFor[T]()
+	if target == reflect.TypeFor[any]() {
+		target = nil
+	}
 	return Option{
-		target:     reflect.TypeOf(t),
+		target:     target,
 		applicator: func(t any) bool { return applicator(t.(*T)) },
 	}
 }
