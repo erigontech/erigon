@@ -26,6 +26,7 @@ import (
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/crypto"
+	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/protocol/params"
 	"github.com/erigontech/erigon/execution/tracing"
 	"github.com/erigontech/erigon/execution/types"
@@ -588,7 +589,7 @@ func TestIBSVersionedWrites_SelfdestructRetainsBalanceDropsOtherPaths(t *testing
 	require.NoError(t, ibs.SetBalance(addr, *uint256.NewInt(0), tracing.BalanceChangeUnspecified))
 
 	// Selfdestruct: records SelfDestructPath=true, IncarnationPath, BalancePath=0.
-	destructed, err := ibs.Selfdestruct(addr)
+	destructed, err := ibs.Selfdestruct(addr, false)
 	require.NoError(t, err)
 	require.True(t, destructed)
 
@@ -1235,6 +1236,68 @@ func TestGetVersionedAccount_SameTxMetamorphicRecreate_ReturnsAccount(t *testing
 		"the re-created account's Incarnation should reflect the CREATE2 (not the pre-SD value)")
 }
 
+// TestVersionedRead_EIP8246_PriorTxSelfDestructReadsAsPreserved verifies that
+// under EIP-8246 a concurrent tx reading an account self-destructed by a prior
+// tx sees it preserved (balance kept, empty code, exists) rather than zeroed —
+// the parallel-exec equivalent of serial's balance-preserving finalize. Without
+// this, a later tx's BALANCE/EXTCODEHASH of the SD'd account diverge from serial
+// (0 vs preserved), flipping SSTORE new-slot classification and block state gas.
+func TestVersionedRead_EIP8246_PriorTxSelfDestructReadsAsPreserved(t *testing.T) {
+	t.Parallel()
+
+	addr := accounts.InternAddress(common.HexToAddress("0x8246A"))
+	preserved := *uint256.NewInt(1)
+
+	// Post-EIP-6780 a self-destructed account was created in the same tx, so it
+	// has no pre-block record, and extraction drops its nonce/code/codeHash
+	// writes — the map carries only what a real destroying tx publishes.
+	newIBS := func(eip8246 bool) *IntraBlockState {
+		reader := newAccountStateReader()
+		vm := NewVersionMap(nil)
+		tx3 := New(reader)
+		tx3.SetTxContext(0, 3)
+		tx3.SetVersion(0)
+		tx3.SetVersionMap(vm)
+		tx3.eip8246 = eip8246
+		require.NoError(t, tx3.CreateAccount(addr, true))
+		require.NoError(t, tx3.SetBalance(addr, preserved, tracing.BalanceChangeUnspecified))
+		require.NoError(t, tx3.SetCode(addr, []byte("deployed runtime code"), tracing.CodeChangeUnspecified))
+		_, err := tx3.Selfdestruct(addr, eip8246)
+		require.NoError(t, err)
+		require.NoError(t, tx3.MakeWriteSet(&chain.Rules{IsAmsterdam: eip8246}, NewNoopWriter()))
+		vm.FlushVersionedWrites(tx3.VersionedWrites(false), true, "")
+
+		ibs := New(reader)
+		ibs.SetTxContext(0, 4)
+		ibs.SetVersion(0)
+		ibs.SetVersionMap(vm)
+		ibs.eip8246 = eip8246
+		return ibs
+	}
+
+	ibs := newIBS(true)
+	bal, err := ibs.GetBalance(addr)
+	require.NoError(t, err)
+	require.Equal(t, preserved, bal, "EIP-8246: SD'd account keeps its balance for a concurrent reader")
+	exists, err := ibs.Exist(addr)
+	require.NoError(t, err)
+	require.True(t, exists, "EIP-8246: balance-preserving SD'd account still exists")
+	empty, err := ibs.Empty(addr)
+	require.NoError(t, err)
+	require.False(t, empty, "EIP-8246: account with a preserved non-zero balance is not empty")
+	ch, err := ibs.GetCodeHash(addr)
+	require.NoError(t, err)
+	require.Equal(t, accounts.EmptyCodeHash, ch, "EIP-8246: SD removes code, so the codehash reads as empty (not the pre-SD hash, not nil)")
+
+	pre := newIBS(false)
+	preBal, err := pre.GetBalance(addr)
+	require.NoError(t, err)
+	require.True(t, preBal.IsZero(), "pre-EIP-8246: SD burns the balance for a concurrent reader")
+	preExists, err := pre.Exist(addr)
+	require.NoError(t, err)
+	require.False(t, preExists, "pre-EIP-8246: SD'd account does not exist")
+}
+
 // EIP-7928 net-zero guard: a slot that is read and then written back to the
 // same value must stay a read in the BAL, not become a write. The filter
 // lives in accountState.applyWriteStorage (the helper addStorageUpdate only
@@ -1278,11 +1341,10 @@ func TestUpdateWrite_StorageReadThenWriteDifferentValue_BecomesWrite(t *testing.
 		"a real write supersedes the recorded read")
 }
 
-// TestAsBlockAccessList_SelfdestructedAccountRecordsBalanceToZero verifies the
-// EIP-7928 rule for in-transaction SELFDESTRUCT: an account destroyed within a
-// tx that had a positive pre-tx balance MUST record a balance change to zero —
-// even when a later same-tx transfer leaves a non-zero final balance write.
-func TestAsBlockAccessList_SelfdestructedAccountRecordsBalanceToZero(t *testing.T) {
+// EIP-7928 and EIP-8246 activate together, so a same-tx SELFDESTRUCT no longer
+// burns: the account's balance write records as-is, and a destroyed account
+// touched without net changes still gets its (empty) BAL entry.
+func TestAsBlockAccessList_SelfdestructNoBurn(t *testing.T) {
 	t.Parallel()
 	addr := accounts.InternAddress(common.HexToAddress("0x9e1989c1ba17e9b8fdae0b5d43a2b0c676a2070f"))
 	io := NewVersionedIO(1)
@@ -1296,32 +1358,22 @@ func TestAsBlockAccessList_SelfdestructedAccountRecordsBalanceToZero(t *testing.
 	bal := io.AsBlockAccessList()
 	require.Len(t, bal, 1)
 	require.Equal(t, addr, bal[0].Address)
-	require.Len(t, bal[0].BalanceChanges, 1,
-		"destroyed account with positive pre-tx balance must record a balance change to zero")
-	require.Equal(t, uint32(1), bal[0].BalanceChanges[0].Index)
-	require.True(t, bal[0].BalanceChanges[0].Value.IsZero(),
-		"recorded post-balance must be zero for an account destroyed in-tx")
+	require.Len(t, bal[0].BalanceChanges, 1)
+	require.Equal(t, uint64(1), bal[0].BalanceChanges[0].Value.Uint64(),
+		"the balance write records as-is: EIP-8246 removed the destroy-time burn")
 }
 
-// TestAsBlockAccessList_SelfdestructedZeroPreBalanceNoBalanceChange verifies the
-// EIP-7928 counterpart: same-tx SELFDESTRUCT of an account with a zero pre-tx
-// balance must NOT produce a balance change entry.
-func TestAsBlockAccessList_SelfdestructedZeroPreBalanceNoBalanceChange(t *testing.T) {
+func TestAsBlockAccessList_SelfdestructTouchKeepsEntry(t *testing.T) {
 	t.Parallel()
 	addr := accounts.InternAddress(common.HexToAddress("0x2222"))
 	io := NewVersionedIO(1)
-	readSets := ReadSet{}
-	readSets.SetBalance(addr, VersionedRead[uint256.Int]{Val: *uint256.NewInt(0)})
-	io.RecordReads(Version{TxIndex: 0}, readSets)
 	io.RecordWrites(Version{TxIndex: 0}, newWriteSet(
-		&VersionedWrite[uint256.Int]{WriteHeader: WriteHeader{Address: addr, Path: BalancePath, Version: Version{TxIndex: 0}}, Val: *uint256.NewInt(1)},
 		&VersionedWrite[bool]{WriteHeader: WriteHeader{Address: addr, Path: SelfDestructPath, Version: Version{TxIndex: 0}}, Val: true},
 	))
 	bal := io.AsBlockAccessList()
-	require.Len(t, bal, 1)
+	require.Len(t, bal, 1, "a destroyed account with no net changes is still a touched BAL entry")
 	require.Equal(t, addr, bal[0].Address)
-	require.Empty(t, bal[0].BalanceChanges,
-		"destroyed account with zero pre-tx balance must not record a balance change")
+	require.Empty(t, bal[0].BalanceChanges)
 }
 
 func TestEIP161EmptyRemoval(t *testing.T) {

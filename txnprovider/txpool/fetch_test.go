@@ -764,7 +764,7 @@ func (s *retrySentryServer) HandShake(context.Context, *emptypb.Empty) (*sentryp
 
 func testRlps(num int) [][]byte {
 	rlps := make([][]byte, num)
-	for i := 0; i < num; i++ {
+	for i := range num {
 		rlps[i] = []byte{1}
 	}
 	return rlps

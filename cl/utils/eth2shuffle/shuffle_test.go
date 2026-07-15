@@ -108,7 +108,7 @@ func TestAgainstSpec(t *testing.T) {
 				hashFn := getStandardHashFn()
 
 				st.Run("PermuteIndex", func(it *testing.T) {
-					for i := uint64(0); i < listSize; i++ {
+					for i := range listSize {
 						// calculate the permuted index. (i.e. shuffle single index)
 						permuted := eth2shuffle.PermuteIndex(hashFn, rounds, i, listSize, seed)
 						// compare with expectation
@@ -120,7 +120,7 @@ func TestAgainstSpec(t *testing.T) {
 
 				st.Run("UnpermuteIndex", func(it *testing.T) {
 					// for each index, test un-permuting
-					for i := uint64(0); i < listSize; i++ {
+					for i := range listSize {
 						// calculate the un-permuted index. (i.e. un-shuffle single index)
 						unpermuted := eth2shuffle.UnpermuteIndex(hashFn, rounds, i, listSize, seed)
 						// compare with expectation
@@ -137,7 +137,7 @@ func TestAgainstSpec(t *testing.T) {
 					// shuffle!
 					eth2shuffle.ShuffleList(hashFn, testInput, rounds, seed)
 					// compare shuffled list to expected output
-					for i := uint64(0); i < listSize; i++ {
+					for i := range listSize {
 						if testInput[i] != shuffleOut[i] {
 							it.FailNow()
 						}
@@ -151,7 +151,7 @@ func TestAgainstSpec(t *testing.T) {
 					// un-shuffle!
 					eth2shuffle.UnshuffleList(hashFn, testInput, rounds, seed)
 					// compare shuffled list to original input
-					for i := uint64(0); i < listSize; i++ {
+					for i := range listSize {
 						if testInput[i] != shuffleIn[i] {
 							it.FailNow()
 						}

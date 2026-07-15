@@ -263,7 +263,7 @@ func (t *ethereumClockImpl) xorDigestWithBlobParams(digest *common.Bytes4, epoch
 	binary.LittleEndian.PutUint64(blobParamsBytes[:8], blobParams.Epoch)
 	binary.LittleEndian.PutUint64(blobParamsBytes[8:], blobParams.MaxBlobsPerBlock)
 	blobParamsHash := utils.Sha256(blobParamsBytes)
-	for i := 0; i < 4; i++ {
+	for i := range 4 {
 		digest[i] ^= blobParamsHash[i]
 	}
 }

@@ -130,7 +130,7 @@ func EligibleValidatorsIndicies(b abstract.BeaconState) (eligibleValidators []ui
 	}
 	previousEpoch := PreviousEpoch(b)
 	// Iterate over all validators and include the active ones that have flag_index enabled and are not slashed.
-	for i := 0; i < numThreads; i++ {
+	for i := range numThreads {
 		workerID := i
 		wp.AddWork(func() error {
 			from := workerID * shardSize

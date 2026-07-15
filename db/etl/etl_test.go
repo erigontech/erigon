@@ -368,7 +368,7 @@ func TestTransformDoubleOnLoad(t *testing.T) {
 
 func generateTestData(t *testing.T, db kv.Putter, bucket string, count int) {
 	t.Helper()
-	for i := 0; i < count; i++ {
+	for i := range count {
 		k := fmt.Appendf(nil, "%10d-key-%010d", i, i)
 		v := fmt.Appendf(nil, "val-%099d", i)
 		err := db.Put(bucket, k, v)
@@ -798,7 +798,7 @@ func TestMixedProvidersMergeSortFiles(t *testing.T) {
 
 	// Build file provider
 	fileBuf := NewSortableBuffer(BufferOptimalSize)
-	for i := 0; i < 5; i++ {
+	for i := range 5 {
 		k := fmt.Appendf(nil, "a%02d", i)
 		v := fmt.Appendf(nil, "file-val-%02d", i)
 		fileBuf.Put(k, v)
@@ -809,7 +809,7 @@ func TestMixedProvidersMergeSortFiles(t *testing.T) {
 
 	// Build memory provider
 	memBuf := NewSortableBuffer(BufferOptimalSize)
-	for i := 0; i < 5; i++ {
+	for i := range 5 {
 		k := fmt.Appendf(nil, "b%02d", i)
 		v := fmt.Appendf(nil, "mem-val-%02d", i)
 		memBuf.Put(k, v)
@@ -837,11 +837,11 @@ func TestMixedProvidersMergeSortFiles(t *testing.T) {
 	require.Len(t, results, 10)
 
 	// Verify sorted order and correct values
-	for i := 0; i < 5; i++ {
+	for i := range 5 {
 		assert.Equal(t, fmt.Sprintf("a%02d", i), string(results[i].key), "file key %d", i)
 		assert.Equal(t, fmt.Sprintf("file-val-%02d", i), string(results[i].value), "file val %d", i)
 	}
-	for i := 0; i < 5; i++ {
+	for i := range 5 {
 		assert.Equal(t, fmt.Sprintf("b%02d", i), string(results[5+i].key), "mem key %d", i)
 		assert.Equal(t, fmt.Sprintf("mem-val-%02d", i), string(results[5+i].value), "mem val %d", i)
 	}
@@ -893,7 +893,7 @@ func TestMixedProvidersInterleavedKeys(t *testing.T) {
 
 	require.Len(t, keys, 10)
 	// Verify interleaved order
-	for i := 0; i < 10; i++ {
+	for i := range 10 {
 		assert.Equal(t, fmt.Sprintf("key-%04d", i), keys[i])
 		if i%2 == 0 {
 			assert.Equal(t, fmt.Sprintf("file-%04d", i), vals[i])
@@ -1457,7 +1457,7 @@ func makeSortedBuffer(keySize, valSize, n int) *sortableBuffer {
 	buf := NewSortableBuffer(256 * datasize.MB)
 	key := make([]byte, keySize)
 	val := make([]byte, valSize)
-	for i := 0; i < n; i++ {
+	for range n {
 		rand.Read(key)
 		rand.Read(val)
 		buf.Put(key, val)
@@ -1505,19 +1505,19 @@ func TestVmtouchMmap(t *testing.T) {
 	vmtouch("AFTER first Next() (initMmap + madvise)")
 
 	// Read 25%
-	for i := 0; i < n/4-1; i++ {
+	for range n/4 - 1 {
 		provider.Next()
 	}
 	vmtouch("AFTER 25%")
 
 	// Read to 50%
-	for i := 0; i < n/4; i++ {
+	for range n / 4 {
 		provider.Next()
 	}
 	vmtouch("AFTER 50%")
 
 	// Read to 75%
-	for i := 0; i < n/4; i++ {
+	for range n / 4 {
 		provider.Next()
 	}
 	vmtouch("AFTER 75%")

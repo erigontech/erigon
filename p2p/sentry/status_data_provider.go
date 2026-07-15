@@ -27,9 +27,9 @@ import (
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/db/dbservices"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/rawdb"
-	"github.com/erigontech/erigon/db/services"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/node/gointerfaces"
@@ -52,7 +52,7 @@ type ChainHead struct {
 
 type StatusDataProvider struct {
 	db          kv.RoDB
-	blockReader services.FullBlockReader
+	blockReader dbservices.FullBlockReader
 
 	networkId   uint64
 	genesisHash common.Hash
@@ -78,7 +78,7 @@ func NewStatusDataProvider(
 	genesis *types.Block,
 	networkId uint64,
 	logger log.Logger,
-	blockReader services.FullBlockReader,
+	blockReader dbservices.FullBlockReader,
 ) *StatusDataProvider {
 	s := &StatusDataProvider{
 		db:          db,

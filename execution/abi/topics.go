@@ -110,7 +110,7 @@ func genIntType(rule int64, size uint) []byte {
 		// extended to length.Hash bytes.
 		topic = [length.Hash]byte{255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255}
 	}
-	for i := uint(0); i < size; i++ {
+	for i := range size {
 		topic[length.Hash-i-1] = byte(rule >> (i * 8))
 	}
 	return topic[:]

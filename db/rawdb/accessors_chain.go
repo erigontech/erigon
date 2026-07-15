@@ -627,7 +627,7 @@ func ReadSenders(db kv.Getter, hash common.Hash, number uint64) ([]common.Addres
 		return nil, fmt.Errorf("readSenders failed: %w", err)
 	}
 	senders := make([]common.Address, len(data)/length.Addr)
-	for i := 0; i < len(senders); i++ {
+	for i := range senders {
 		copy(senders[i][:], data[i*length.Addr:])
 	}
 	return senders, nil

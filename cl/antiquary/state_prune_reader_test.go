@@ -119,7 +119,7 @@ func TestPruneStateHistoricalReadsServedFromSegments(t *testing.T) {
 	// to make the whole [0, boundary) range freezable, as it is in production.
 	require.NoError(t, db.Update(ctx, func(tx kv.RwTx) error {
 		for _, table := range []string{kv.BlockRoot, kv.StateRoot} {
-			for slot := uint64(0); slot < boundary; slot++ {
+			for slot := range boundary {
 				key := base_encoding.Encode64ToBytes4(slot)
 				v, err := tx.GetOne(table, key)
 				if err != nil {
@@ -225,7 +225,7 @@ func TestPruneStateBalancesForwardAndReverseDumpPaths(t *testing.T) {
 
 	balancesAt := func(slot uint64) []byte {
 		raw := make([]byte, valCount*8)
-		for v := uint64(0); v < valCount; v++ {
+		for v := range valCount {
 			binary.LittleEndian.PutUint64(raw[v*8:], 32_000_000_000+v*1_000+slot*13)
 		}
 		return raw
@@ -297,7 +297,7 @@ func TestPruneStateBalancesForwardAndReverseDumpPaths(t *testing.T) {
 		require.NotNil(t, balances)
 		expected := balancesAt(slot)
 		require.Equal(t, int(valCount), balances.Length())
-		for v := uint64(0); v < valCount; v++ {
+		for v := range valCount {
 			require.Equal(t, binary.LittleEndian.Uint64(expected[v*8:]), balances.Get(int(v)))
 		}
 	}
