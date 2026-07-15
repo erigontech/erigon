@@ -23,6 +23,7 @@ import (
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/db/state/execctx"
 )
 
@@ -122,20 +123,19 @@ func (e *ExecModule) captureScopedReadView(ctx context.Context, wantHash common.
 		return &ScopedReadView{roTx: roTx, headSD: head, blockHash: wantHash, blockNum: headNum}, nil
 	}
 
-	// No in-flight generation: the committed DB is the head. Confirm wantHash
-	// is canonical at its number in this snapshot.
+	// No in-flight generation: the committed DB is the head. Require wantHash to
+	// BE the current head, not merely canonical at its own height — an older
+	// canonical ancestor is canonical but is not the tip, and building on it
+	// would only fail the async builder's parent check later. Signal Busy so the
+	// caller retries against the real head instead.
+	if headHash := rawdb.ReadHeadBlockHash(roTx); headHash != wantHash {
+		return nil, errHeadMismatch
+	}
 	num, err := e.blockReader.HeaderNumber(ctx, roTx, wantHash)
 	if err != nil {
 		return nil, err
 	}
 	if num == nil {
-		return nil, errHeadMismatch
-	}
-	canon, err := e.canonicalHash(ctx, roTx, *num)
-	if err != nil {
-		return nil, err
-	}
-	if canon != wantHash {
 		return nil, errHeadMismatch
 	}
 	handedOff = true

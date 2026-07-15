@@ -47,7 +47,8 @@ type commitGen struct {
 	finishProgressBefore uint64
 	isSynced             bool
 	initialCycle         bool
-	committed            bool // guarded by ExecModule.fgMu
+	committed            bool   // guarded by ExecModule.fgMu
+	epoch                uint64 // genEpoch at enqueue; a stale epoch means superseded+closed
 }
 
 // fgTryAcquire acquires the foreground semaphore non-blocking and, on
@@ -147,22 +148,46 @@ func (e *ExecModule) commitWorker() {
 // runCommit flushes + commits one generation's delta in a foreground-free
 // window. Called only by commitWorker.
 func (e *ExecModule) runCommit(gen *commitGen) {
-	// Hold the foreground semaphore for the whole flush+commit+prune, not just
-	// wait for idle: prune physically collates/removes domain history, and a
-	// foreground FCU acquiring mid-prune could run a reorg unwind against
-	// half-pruned state and re-execute to a wrong (empty) root.
+	// Hold the foreground semaphore across flush+commit+prune so it is
+	// coordinated with foreground tx opening — a foreground unwind then always
+	// opens against a consistent db/file view. This full exclusion is the current
+	// coordination mechanism; making the background pausable so foreground has
+	// priority (rather than blocking it) is tracked follow-up work.
 	if err := e.fgAcquire(e.bacgroundCtx); err != nil {
-		e.markGenCommitted(gen)
+		// Could not acquire (shutdown-cancelled ctx): the commit did not run, so
+		// do NOT mark it committed — pretending it landed would drop the delta.
+		// The FCU's state is re-derivable on restart.
 		return
 	}
 	defer e.fgRelease()
-	err := e.runPostForkchoice(gen.sd, gen.roTx, gen.finishProgressBefore, gen.isSynced, gen.initialCycle)
-	if err != nil && !errors.Is(err, context.Canceled) {
-		e.logger.Error("background commit failed", "err", err)
+
+	// A stale epoch means the generation set was discarded (SetHead unwind) while
+	// this gen sat queued — its SharedDomains is closed, so skip it rather than
+	// commit a closed SD. The epoch bump and this check both hold the semaphore.
+	e.fgMu.Lock()
+	stale := gen.epoch != e.genEpoch
+	e.fgMu.Unlock()
+	if stale {
+		return
 	}
+
+	err := e.runPostForkchoice(gen.sd, gen.roTx, gen.finishProgressBefore, gen.isSynced, gen.initialCycle)
 	// roTx is rolled back inside runForkchoiceFlushCommit between Flush and
 	// Commit; this is a safety net (Rollback is idempotent).
 	gen.roTx.Rollback()
+	if err != nil {
+		if errors.Is(err, context.Canceled) {
+			// Shutdown cancelled the commit; leave the gen un-retired (re-derived
+			// on restart) rather than mark a commit that did not land.
+			return
+		}
+		// A durable commit failed for a non-shutdown reason: the block was already
+		// reported VALID to the CL, so silently dropping its state would diverge
+		// from consensus. This is unrecoverable in-process — fail hard rather than
+		// retire the generation as if it committed.
+		e.logger.Crit("background commit failed; cannot retire generation", "block", gen.blockNum, "hash", gen.blockHash, "err", err)
+		return
+	}
 	e.markGenCommitted(gen)
 	// NOTE: the worker does NOT touch the published overlay (Events.LatestSD).
 	// Publishing the latest executed block's SharedDomains is a foreground
@@ -244,6 +269,7 @@ func (e *ExecModule) beginCoordinatedRo(ctx context.Context) (kv.TemporalTx, err
 // addGen appends a new in-flight generation to the chain.
 func (e *ExecModule) addGen(gen *commitGen) {
 	e.fgMu.Lock()
+	gen.epoch = e.genEpoch
 	e.gens = append(e.gens, gen)
 	e.uncommittedGens++
 	e.fgMu.Unlock()
@@ -273,6 +299,9 @@ func (e *ExecModule) drainCommittedGens() {
 func (e *ExecModule) closeAllGens() {
 	e.fgMu.Lock()
 	defer e.fgMu.Unlock()
+	// Invalidate any generation still queued for commit: the worker compares its
+	// gen's epoch against this and skips a superseded (now-closed) one.
+	e.genEpoch++
 	for _, g := range e.gens {
 		g.sd.SetParent(nil)
 		g.sd.Close()

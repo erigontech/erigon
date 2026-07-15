@@ -890,6 +890,46 @@ func TestAssembleBlockRejectsWrongParent(t *testing.T) {
 	require.Equal(t, head.NumberU64()+1, block.NumberU64())
 }
 
+// TestAssembleBlockRejectsOldCanonicalParent verifies AssembleBlock rejects a
+// parent that is canonical at its own height but is not the current head: it
+// must return Busy rather than build on a stale ancestor (which the async
+// builder would then fail its parent check against).
+func TestAssembleBlockRejectsOldCanonicalParent(t *testing.T) {
+	t.Parallel()
+	ctx := t.Context()
+	m := execmoduletester.New(t, execmoduletester.WithTxPool(), execmoduletester.WithChainConfig(chain.AllProtocolChanges))
+	exec := m.ExecModule
+
+	chainPack, err := blockgen.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 2, func(i int, gen *blockgen.BlockGen) {
+		gen.SetCoinbase(common.Address{1})
+	}, m.PublishedSD())
+	require.NoError(t, err)
+	require.NoError(t, insertValidateAndUfc1By1(ctx, exec, chainPack.Blocks))
+	head := chainPack.TopBlock       // block 2 — the head
+	oldParent := chainPack.Blocks[0] // block 1 — canonical, but not the head
+
+	mkParams := func(parent common.Hash) *builder.Parameters {
+		return &builder.Parameters{
+			ParentHash:            parent,
+			Timestamp:             head.Time() + 1,
+			PrevRandao:            head.Header().MixDigest,
+			SuggestedFeeRecipient: common.Address{1},
+			Withdrawals:           make([]*types.Withdrawal, 0),
+			ParentBeaconBlockRoot: func() *common.Hash { h := randomHash(); return &h }(),
+		}
+	}
+
+	res, err := exec.AssembleBlock(ctx, mkParams(oldParent.Hash()))
+	require.NoError(t, err)
+	require.True(t, res.Busy, "assemble on an old canonical ancestor must return Busy")
+
+	payloadId, err := assembleBlock(ctx, exec, mkParams(head.Hash()))
+	require.NoError(t, err)
+	block, err := getAssembledBlock(ctx, exec, payloadId)
+	require.NoError(t, err)
+	require.Equal(t, head.Hash(), block.ParentHash(), "assembled block must extend the head")
+}
+
 func TestAssembleBlockWithContractCreation(t *testing.T) {
 	t.Parallel()
 	ctx := t.Context()

@@ -237,7 +237,12 @@ type ExecModule struct {
 	fgIdle          *sync.Cond
 	gens            []*commitGen
 	uncommittedGens int
-	commitCh        chan *commitGen
+	// genEpoch is bumped (under fgMu) whenever the generation set is discarded
+	// wholesale (closeAllGens, e.g. a SetHead unwind). A commit worker holding a
+	// generation from an earlier epoch skips it rather than committing an
+	// already-closed SharedDomains.
+	genEpoch uint64
+	commitCh chan *commitGen
 	// commitWorker lifecycle: commitWorkerStop signals the worker to drain
 	// and exit; commitWg tracks it so shutdown (WaitIdle) waits for the
 	// worker — and its in-flight commit txs — to finish before DB-close.
