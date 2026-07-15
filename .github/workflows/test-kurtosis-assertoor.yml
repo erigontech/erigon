@@ -221,6 +221,17 @@ jobs:
             echo "GENESIS_GENERATOR_IMAGE=$genesis"
             echo "GENESIS_GENERATOR_GLAMSTERDAM_IMAGE=$genesis_glamsterdam"
           } >> "$GITHUB_ENV"
+          # Cache-consistency guard: suites in a group share one cached assertoor/genesis
+          # tag; a divergent pin silently drops to a live pull (cache key unchanged).
+          err=""
+          [ "$(yq -e '.ethereum_genesis_generator_params.image' .github/workflows/kurtosis/pectra-erigon-mixed-el.io)" = "$genesis" ] \
+            || err="pectra-erigon-mixed-el.io genesis-generator != regular's ($genesis)"
+          for f in .github/workflows/kurtosis/glamsterdam-*.io .github/workflows/kurtosis/fusaka-caplin-*.io; do
+            { [ "$(yq -e '.assertoor_params.image' "$f")" = "$glamsterdam" ] \
+              && [ "$(yq -e '.ethereum_genesis_generator_params.image' "$f")" = "$genesis_glamsterdam" ]; } \
+              || err="$f assertoor/genesis-generator != glamsterdam-erigon-mixed-el.io"
+          done
+          [ -z "$err" ] || { echo "::error::kurtosis cache-consistency: $err; reconcile the .io files or extend the cache key"; exit 1; }
 
       - name: Check whether third-party containers are already cached
         id: cache-cl-images
@@ -428,6 +439,17 @@ jobs:
             echo "GENESIS_GENERATOR_IMAGE=$genesis"
             echo "GENESIS_GENERATOR_GLAMSTERDAM_IMAGE=$genesis_glamsterdam"
           } >> "$GITHUB_ENV"
+          # Cache-consistency guard: suites in a group share one cached assertoor/genesis
+          # tag; a divergent pin silently drops to a live pull (cache key unchanged).
+          err=""
+          [ "$(yq -e '.ethereum_genesis_generator_params.image' .github/workflows/kurtosis/pectra-erigon-mixed-el.io)" = "$genesis" ] \
+            || err="pectra-erigon-mixed-el.io genesis-generator != regular's ($genesis)"
+          for f in .github/workflows/kurtosis/glamsterdam-*.io .github/workflows/kurtosis/fusaka-caplin-*.io; do
+            { [ "$(yq -e '.assertoor_params.image' "$f")" = "$glamsterdam" ] \
+              && [ "$(yq -e '.ethereum_genesis_generator_params.image' "$f")" = "$genesis_glamsterdam" ]; } \
+              || err="$f assertoor/genesis-generator != glamsterdam-erigon-mixed-el.io"
+          done
+          [ -z "$err" ] || { echo "::error::kurtosis cache-consistency: $err; reconcile the .io files or extend the cache key"; exit 1; }
 
       - name: Restore cached third-party containers
         id: cache-cl-images

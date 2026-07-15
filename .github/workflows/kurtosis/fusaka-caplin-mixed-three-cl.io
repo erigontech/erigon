@@ -40,4 +40,4 @@ assertoor_params:
   run_block_proposal_check: true
   image: ethpandaops/assertoor:v0.1.3
   tests:
-    - file: https://raw.githubusercontent.com/ethpandaops/assertoor-test/master/assertoor-tests/blob-transactions-test.yaml
+    - file: https://raw.githubusercontent.com/ethpandaops/assertoor-test/374b6e40298bd4236ea9ed062141853f1ccd89fb/assertoor-tests/blob-transactions-test.yaml
