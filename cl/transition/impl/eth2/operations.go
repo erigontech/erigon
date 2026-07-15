@@ -621,6 +621,38 @@ func (I *impl) ProcessExecutionPayloadBid(s abstract.BeaconState, block cltypes.
 // payment, and updates latest_block_hash. This is the spec's apply_parent_execution_payload.
 // [New in Gloas:EIP7732]
 func (I *impl) ApplyParentExecutionPayload(s abstract.BeaconState, requests *cltypes.ExecutionRequests) error {
+	if requests == nil {
+		return errors.New("ApplyParentExecutionPayload: nil execution requests")
+	}
+	cfg := s.BeaconConfig()
+	withdrawalCount, consolidationCount, builderDepositCount, builderExitCount := 0, 0, 0, 0
+	if requests.Withdrawals != nil {
+		withdrawalCount = requests.Withdrawals.Len()
+	}
+	if requests.Consolidations != nil {
+		consolidationCount = requests.Consolidations.Len()
+	}
+	if requests.BuilderDeposits != nil {
+		builderDepositCount = requests.BuilderDeposits.Len()
+	}
+	if requests.BuilderExits != nil {
+		builderExitCount = requests.BuilderExits.Len()
+	}
+	requestCounts := []struct {
+		name  string
+		count int
+		limit uint64
+	}{
+		{"withdrawal", withdrawalCount, cfg.MaxWithdrawalRequestsPerPayload},
+		{"consolidation", consolidationCount, cfg.MaxConsolidationRequestsPerPayload},
+		{"builder deposit", builderDepositCount, cfg.MaxBuilderDepositRequestsPerPayload},
+		{"builder exit", builderExitCount, cfg.MaxBuilderExitRequestsPerPayload},
+	}
+	for _, requestCount := range requestCounts {
+		if uint64(requestCount.count) > requestCount.limit {
+			return fmt.Errorf("ApplyParentExecutionPayload: too many %s requests: %d > %d", requestCount.name, requestCount.count, requestCount.limit)
+		}
+	}
 	parentBid := s.GetLatestExecutionPayloadBid()
 	// Process execution requests (deposits, withdrawals, consolidations)
 	if requests.Deposits != nil {
