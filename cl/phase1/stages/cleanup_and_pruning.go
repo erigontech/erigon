@@ -2,6 +2,7 @@ package stages
 
 import (
 	"context"
+	"time"
 
 	"github.com/erigontech/erigon/cl/persistence/beacon_indicies"
 	"github.com/erigontech/erigon/common/log/v3"
@@ -9,6 +10,8 @@ import (
 
 // cleanupAndPruning cleans up the database and prunes old data.
 func cleanupAndPruning(ctx context.Context, logger log.Logger, cfg *Cfg, args Args) error {
+	t := time.Now()
+	defer func() { log.Warn("[dbg] cleanupAndPruning", "took", time.Since(t)) }()
 	tx, err := cfg.indiciesDB.BeginRw(ctx)
 	if err != nil {
 		return err
