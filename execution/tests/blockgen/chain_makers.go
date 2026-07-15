@@ -678,7 +678,7 @@ func GenerateChain(config *chain.Config, parent *types.Block, engine rules.Engin
 	}
 
 	blockAccessLists := make([][]byte, n)
-	for i := 0; i < n; i++ {
+	for i := range n {
 		ibs := state.New(stateReader)
 		if dbg.TraceBlock(uint64(i)) {
 			ibs.SetTrace(true)

@@ -567,13 +567,12 @@ func (w *DomainBufferedWriter) addValue(k, value []byte, step kv.Step) error {
 
 // DomainRoTx allows accesing the same domain from multiple go-routines
 type DomainRoTx struct {
-	files             visibleFiles
-	visible           *domainVisible
-	name              kv.Domain
-	stepSize          uint64
-	stepsInFrozenFile uint64
-	ht                *HistoryRoTx
-	salt              *uint32
+	files    visibleFiles
+	visible  *domainVisible
+	name     kv.Domain
+	stepSize uint64
+	ht       *HistoryRoTx
+	salt     *uint32
 
 	d *Domain
 
@@ -641,18 +640,25 @@ func (d *Domain) beginForTests() *DomainRoTx {
 	return d.beginFilesRo(dv, hv, iv)
 }
 
-// beginFilesRo lets Aggregator.BeginFilesRo pass a snapshot pinned to a single
-// aggregatorVisible generation, avoiding a torn cross-entity read
 func (d *Domain) beginFilesRo(dv *domainVisible, hf visibleFiles, hiv *iiVisible) *DomainRoTx {
-	return &DomainRoTx{
-		name:              d.Name,
-		stepSize:          d.stepSize,
-		stepsInFrozenFile: d.stepsInFrozenFile,
-		d:                 d,
-		ht:                d.History.beginFilesRo(hf, hiv),
-		visible:           dv,
-		files:             dv.files,
-		salt:              d.salt.Load(),
+	dt := &DomainRoTx{}
+	d.initFilesRo(dt, &HistoryRoTx{}, &InvertedIndexRoTx{}, dv, hf, hiv)
+	return dt
+}
+
+// initFilesRo builds into caller-provided storage, letting Aggregator.BeginFilesRo back a
+// whole tx from one allocation. dv/hf/hiv must come from a single aggregatorVisible
+// generation, else the read is torn across entities.
+func (d *Domain) initFilesRo(dt *DomainRoTx, ht *HistoryRoTx, iit *InvertedIndexRoTx, dv *domainVisible, hf visibleFiles, hiv *iiVisible) {
+	d.History.initFilesRo(ht, iit, hf, hiv)
+	*dt = DomainRoTx{
+		name:     d.Name,
+		stepSize: d.stepSize,
+		d:        d,
+		ht:       ht,
+		visible:  dv,
+		files:    dv.files,
+		salt:     d.salt.Load(),
 	}
 }
 

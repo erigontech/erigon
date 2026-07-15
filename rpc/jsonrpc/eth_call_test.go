@@ -654,7 +654,7 @@ func generatePseudoRandomECDSAKeyPairs(rand io.Reader, n int) ([]*ecdsa.PrivateK
 	privateKeys := make([]*ecdsa.PrivateKey, n)
 	publicKeys := make([]*ecdsa.PublicKey, n)
 	var err error
-	for i := 0; i < n; i++ {
+	for i := range n {
 		privateKeys[i], err = generatePseudoRandomECDSAKey(rand)
 		if err != nil {
 			return nil, nil, err

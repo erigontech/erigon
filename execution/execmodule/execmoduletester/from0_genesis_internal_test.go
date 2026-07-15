@@ -298,7 +298,7 @@ func runBranchCacheCoherentAcrossBatches(t *testing.T) {
 	signer := types.LatestSignerForChainID(emt.ChainConfig.ChainID)
 	gen, err := blockgen.GenerateChain(emt.ChainConfig, emt.Genesis, emt.Engine, emt.DB, 12, func(i int, b *blockgen.BlockGen) {
 		b.SetCoinbase(common.Address{1})
-		for j := 0; j < 3; j++ {
+		for j := range 3 {
 			to := common.BytesToAddress([]byte{byte(i + 1), byte(j + 1), 0xab})
 			tx, txErr := types.SignTx(
 				types.NewTransaction(b.TxNonce(keyAddr), to, uint256.NewInt(1_000_000), params.TxGas, uint256.NewInt(1), nil),

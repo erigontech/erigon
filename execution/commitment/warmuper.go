@@ -182,7 +182,7 @@ func (w *Warmuper) warmupKey(trieCtx PatriciaContext, hashedKey []byte, startDep
 
 		// Find position of our child's data
 		pos := 2
-		for n := 0; n < nextNibble; n++ {
+		for n := range nextNibble {
 			if bitmap&(uint16(1)<<n) != 0 {
 				if pos >= len(branchData) {
 					break

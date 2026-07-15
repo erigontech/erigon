@@ -245,7 +245,7 @@ func TestBlockValidatorWaitMultipleTimes(t *testing.T) {
 	bv := &blockValidator{done: make(chan error, 1)}
 	bv.done <- nil // simulate goroutine completion
 
-	for i := 0; i < 3; i++ {
+	for i := range 3 {
 		done := make(chan error, 1)
 		go func() {
 			done <- bv.Wait()

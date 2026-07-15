@@ -150,7 +150,7 @@ func TestHistoryVerification_WithUserTransactions(t *testing.T) {
 	chainResult, err := blockgen.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, numBlocks, func(i int, b *blockgen.BlockGen) {
 		b.SetCoinbase(common.Address{1})
 		// Add 2 ETH transfers per block.
-		for j := 0; j < 2; j++ {
+		for range 2 {
 			tx := types.NewTransaction(nonce, recipient, uint256.NewInt(1), 21000, uint256.NewInt(875000000), nil)
 			signed, signErr := types.SignTx(tx, *signer, key)
 			if signErr != nil {

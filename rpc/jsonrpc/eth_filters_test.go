@@ -119,7 +119,7 @@ func TestLogsSubscribeAndUnsubscribe_WithoutConcurrentMapIssue(t *testing.T) {
 
 	// generate some random topics
 	topics := make([][]common.Hash, 0)
-	for i := 0; i < 10; i++ {
+	for range 10 {
 		bytes := make([]byte, length.Hash)
 		rand.Read(bytes)
 		toAdd := []common.Hash{common.BytesToHash(bytes)}
@@ -128,7 +128,7 @@ func TestLogsSubscribeAndUnsubscribe_WithoutConcurrentMapIssue(t *testing.T) {
 
 	// generate some addresses
 	addresses := make([]common.Address, 0)
-	for i := 0; i < 10; i++ {
+	for range 10 {
 		bytes := make([]byte, length.Addr)
 		rand.Read(bytes)
 		addresses = append(addresses, common.BytesToAddress(bytes))
@@ -143,7 +143,7 @@ func TestLogsSubscribeAndUnsubscribe_WithoutConcurrentMapIssue(t *testing.T) {
 
 	// make a lot of subscriptions
 	wg := sync.WaitGroup{}
-	for i := 0; i < 1000; i++ {
+	for i := range 1000 {
 		wg.Add(1)
 		go func(idx int) {
 			_, id, _ := ff.SubscribeLogs(32, crit, "")

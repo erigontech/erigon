@@ -1032,7 +1032,7 @@ func TestGetRawTransaction(t *testing.T) {
 		t.Error("TestSentry doesn't have enough blocks for this test")
 	}
 	var testedOnce = false
-	for i := uint64(0); i < number; i++ {
+	for i := range number {
 		tx, err := m.OverlayDB().BeginRo(ctx)
 		require.NoError(err)
 		defer tx.Rollback()

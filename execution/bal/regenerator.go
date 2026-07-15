@@ -27,9 +27,9 @@ import (
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/db/dbservices"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/rawdbv3"
-	"github.com/erigontech/erigon/db/services"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/exec"
 	"github.com/erigontech/erigon/execution/protocol/rules"
@@ -47,7 +47,7 @@ var (
 // rpc/jsonrpc/receipts.Generator: caching and history-env preparation live
 // here, the replay itself is RederiveBlockAccessList.
 type Regenerator struct {
-	blockReader    services.FullBlockReader
+	blockReader    dbservices.FullBlockReader
 	txNumReader    rawdbv3.TxNumsReader
 	engine         rules.Engine
 	cache          *lru.Cache[common.Hash, []byte]
@@ -56,7 +56,7 @@ type Regenerator struct {
 	logger         log.Logger
 }
 
-func NewRegenerator(blockReader services.FullBlockReader, engine rules.Engine, logger log.Logger) *Regenerator {
+func NewRegenerator(blockReader dbservices.FullBlockReader, engine rules.Engine, logger log.Logger) *Regenerator {
 	cache, err := lru.New[common.Hash, []byte](balsCacheLimit)
 	if err != nil {
 		panic(err)

@@ -36,9 +36,9 @@ import (
 	"github.com/erigontech/erigon/cmd/utils"
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/db/dbservices"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/rawdb"
-	"github.com/erigontech/erigon/db/services"
 	"github.com/erigontech/erigon/execution/execmodule"
 	"github.com/erigontech/erigon/execution/execmodule/chainreader"
 	"github.com/erigontech/erigon/execution/protocol/rules/ethash"
@@ -260,7 +260,7 @@ func ChainHasBlock(chainDB kv.RwDB, block *types.Block) bool {
 	return chainHasBlock
 }
 
-func missingBlocks(chainDB kv.RwDB, blocks []*types.Block, blockReader services.FullBlockReader) []*types.Block {
+func missingBlocks(chainDB kv.RwDB, blocks []*types.Block, blockReader dbservices.FullBlockReader) []*types.Block {
 	var headBlock *types.Block
 	chainDB.View(context.Background(), func(tx kv.Tx) (err error) {
 		headBlock, err = blockReader.CurrentBlock(tx)

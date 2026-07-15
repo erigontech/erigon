@@ -313,7 +313,6 @@ func (b *BackwardBeaconDownloader) processResponses(ctx context.Context, respons
 			log.Trace("[BackwardBeaconDownloader] root mismatch", "slot", block.Block.Slot, "got", common.Hash(blockRoot), "expected", b.expectedRoot)
 			continue
 		}
-		log.Debug("[BackwardBeaconDownloader] block matched", "slot", block.Block.Slot, "root", common.Hash(blockRoot))
 		matched = true
 
 		var envelope *cltypes.SignedExecutionPayloadEnvelope

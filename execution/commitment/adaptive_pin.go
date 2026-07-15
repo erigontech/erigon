@@ -373,7 +373,7 @@ func pickPromotionCandidates(misses map[[32]byte]uint64, threshold uint64, maxN 
 		}
 	}
 	if len(pool) > maxN {
-		for i := 0; i < maxN; i++ {
+		for i := range maxN {
 			best := i
 			for j := i + 1; j < len(pool); j++ {
 				if pool[j].n > pool[best].n {

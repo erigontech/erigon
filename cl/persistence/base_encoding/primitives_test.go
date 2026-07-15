@@ -38,7 +38,7 @@ func TestDiff64(t *testing.T) {
 	old := make([]byte, 800000)
 	new := make([]byte, 800008)
 	inc := 1
-	for i := 0; i < 80; i++ {
+	for i := range 80 {
 		if i%9 == 0 {
 			inc++
 		}
@@ -70,7 +70,7 @@ func TestDiff64Effective(t *testing.T) {
 	new := make([]byte, sizeNew*121)
 	previous := make([]byte, sizeOld*8)
 	expected := make([]byte, sizeNew*8)
-	for i := 0; i < sizeNew; i++ {
+	for i := range sizeNew {
 		validatorOffset := i * 121
 		newNum := i + 32
 		oldNum := i + 12

@@ -365,7 +365,7 @@ func findAddressWithMatchingStorageKeyPrefix(targetKey common.Hash, slot uint64,
 	// We need to match the first nNibbles of that hashed value.
 	targetHashedKey := crypto.Keccak256Hash(targetKey[:])
 	targetNibbles := make([]byte, nNibbles)
-	for i := 0; i < nNibbles; i++ {
+	for i := range nNibbles {
 		if i%2 == 0 {
 			targetNibbles[i] = targetHashedKey[i/2] >> 4
 		} else {
@@ -384,7 +384,7 @@ func findAddressWithMatchingStorageKeyPrefix(targetKey common.Hash, slot uint64,
 
 		// Compare nibbles of the hashed storage key (the actual trie path)
 		match := true
-		for i := 0; i < nNibbles; i++ {
+		for i := range nNibbles {
 			var nibble byte
 			if i%2 == 0 {
 				nibble = hashedStorageKey[i/2] >> 4

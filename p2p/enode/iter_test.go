@@ -96,7 +96,7 @@ func checkNodes(t *testing.T, nodes []*Node, wantLen int) {
 // within the context's deadline.
 // see: iter_integration_test.go
 func TestFairMixOnce(t *testing.T) {
-	for i := 0; i < 10; i++ {
+	for range 10 {
 		testMixerFairness(t)
 	}
 }

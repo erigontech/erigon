@@ -39,7 +39,7 @@ func TestConnectSemaphoreInitialized(t *testing.T) {
 	require.NotNil(t, s.connectSem, "connectSem must not be nil after construction")
 
 	// We should be able to acquire exactly goRoutinesOpeningPeerConnections tokens.
-	for i := 0; i < goRoutinesOpeningPeerConnections; i++ {
+	for i := range goRoutinesOpeningPeerConnections {
 		ok := s.connectSem.TryAcquire(1)
 		assert.True(t, ok, "TryAcquire should succeed for token %d of %d", i+1, goRoutinesOpeningPeerConnections)
 	}
@@ -49,7 +49,7 @@ func TestConnectSemaphoreInitialized(t *testing.T) {
 	assert.False(t, ok, "TryAcquire should fail when semaphore is at capacity")
 
 	// Release all so the semaphore is left clean.
-	for i := 0; i < goRoutinesOpeningPeerConnections; i++ {
+	for range goRoutinesOpeningPeerConnections {
 		s.connectSem.Release(1)
 	}
 }
@@ -86,7 +86,7 @@ func TestConnectSemaphoreBoundsConcurrency(t *testing.T) {
 	}
 
 	done := make(chan struct{}, totalGoroutines)
-	for i := 0; i < totalGoroutines; i++ {
+	for range totalGoroutines {
 		go func() {
 			defer func() { done <- struct{}{} }()
 
@@ -108,7 +108,7 @@ func TestConnectSemaphoreBoundsConcurrency(t *testing.T) {
 		}()
 	}
 
-	for i := 0; i < totalGoroutines; i++ {
+	for range totalGoroutines {
 		select {
 		case <-done:
 		case <-ctx.Done():
@@ -140,7 +140,7 @@ func TestConnectSemaphoreReleaseAndReacquire(t *testing.T) {
 	sem := semaphore.NewWeighted(int64(goRoutinesOpeningPeerConnections))
 
 	// Exhaust all tokens.
-	for i := 0; i < goRoutinesOpeningPeerConnections; i++ {
+	for i := range goRoutinesOpeningPeerConnections {
 		ok := sem.TryAcquire(1)
 		require.True(t, ok, "should acquire token %d", i+1)
 	}
@@ -160,7 +160,7 @@ func TestConnectSemaphoreReleaseAndReacquire(t *testing.T) {
 	assert.False(t, ok, "semaphore should be exhausted again after re-acquire")
 
 	// Clean up.
-	for i := 0; i < goRoutinesOpeningPeerConnections; i++ {
+	for range goRoutinesOpeningPeerConnections {
 		sem.Release(1)
 	}
 }

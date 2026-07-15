@@ -27,10 +27,10 @@ import (
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/db/dbservices"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/membatchwithdb"
 	"github.com/erigontech/erigon/db/rawdb"
-	"github.com/erigontech/erigon/db/services"
 	"github.com/erigontech/erigon/db/state/execctx"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/exec"
@@ -52,7 +52,7 @@ type BuilderExecCfg struct {
 	notifier     stagedsync.ChainEventNotifier
 	chainConfig  *chain.Config
 	engine       rules.Engine
-	blockReader  services.FullBlockReader
+	blockReader  dbservices.FullBlockReader
 	vmConfig     *vm.Config
 	tmpdir       string
 	interrupt    *atomic.Bool
@@ -70,7 +70,7 @@ func StageBuilderExecCfg(
 	interrupt *atomic.Bool,
 	payloadId uint64,
 	txnProvider txnprovider.TxnProvider,
-	blockReader services.FullBlockReader,
+	blockReader dbservices.FullBlockReader,
 ) BuilderExecCfg {
 	return BuilderExecCfg{
 		builderState: builderState,

@@ -49,7 +49,7 @@ func TestUDPv5_lookupE2E(t *testing.T) {
 
 	const N = 5
 	var nodes []*UDPv5
-	for i := 0; i < N; i++ {
+	for range N {
 		var cfg Config
 		if len(nodes) > 0 {
 			bn := nodes[0].Self()
