@@ -756,7 +756,6 @@ func (e *ExecModule) HasBlock(ctx context.Context, blockHash *common.Hash, _ *ui
 	if num == nil {
 		return false, nil
 	}
-
 	if *num <= e.blockReader.FrozenBlocks() {
 		return true, nil
 	}

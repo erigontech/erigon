@@ -86,8 +86,9 @@ type beaconStatesCollector struct {
 	builderPendingWithdrawalsWriter  *base_encoding.SSZQueueEncoder[*cltypes.BuilderPendingWithdrawal]
 	payloadExpectedWithdrawalsWriter *base_encoding.SSZQueueEncoder[*cltypes.Withdrawal]
 
-	buf        *bytes.Buffer
-	compressor *zstd.Encoder
+	buf           *bytes.Buffer
+	compressor    *zstd.Encoder
+	effBalScratch []byte
 
 	beaconCfg *clparams.BeaconChainConfig
 	logger    log.Logger
@@ -271,7 +272,8 @@ func (i *beaconStatesCollector) collectEffectiveBalancesDump(slot uint64, uncomp
 	i.buf.Reset()
 	i.compressor.Reset(i.buf)
 
-	if _, err := i.compressor.Write(base_encoding.AppendEffectiveBalances(nil, uncompressed)); err != nil {
+	i.effBalScratch = base_encoding.AppendEffectiveBalances(i.effBalScratch[:0], uncompressed)
+	if _, err := i.compressor.Write(i.effBalScratch); err != nil {
 		return err
 	}
 
