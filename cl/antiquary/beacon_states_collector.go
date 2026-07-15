@@ -271,12 +271,8 @@ func (i *beaconStatesCollector) collectEffectiveBalancesDump(slot uint64, uncomp
 	i.buf.Reset()
 	i.compressor.Reset(i.buf)
 
-	validatorSetSize := 121
-	for j := 0; j < len(uncompressed)/validatorSetSize; j++ {
-		// 80:88
-		if _, err := i.compressor.Write(uncompressed[j*validatorSetSize+80 : j*validatorSetSize+88]); err != nil {
-			return err
-		}
+	if _, err := i.compressor.Write(base_encoding.AppendEffectiveBalances(nil, uncompressed)); err != nil {
+		return err
 	}
 
 	if err := i.compressor.Close(); err != nil {

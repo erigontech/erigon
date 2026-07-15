@@ -258,7 +258,6 @@ func (s *Antiquary) IncrementBeaconState(ctx context.Context, to uint64) error {
 	// Use this as the event slot (it will be incremented by 1 each time we process a block)
 	slot := s.currentState.Slot() + 1
 
-	var prevEffectiveBalances, newEffectiveBalances []byte
 	events := state_accessors.NewStateEvents()
 	slashingOccurred := false
 	// setup the events handler for historical states replay.
@@ -401,6 +400,7 @@ func (s *Antiquary) IncrementBeaconState(ctx context.Context, to uint64) error {
 		return fmt.Errorf("static validators table has %d entries, state at slot %d has %d validators (truncated table)", got, s.currentState.Slot(), want)
 	}
 
+	var prevEffectiveBalances, newEffectiveBalances []byte
 	for ; slot < to && startLoop.Add(timeBeforeCommit).After(time.Now()); slot++ {
 		// Bound each mdbx commit: once maxSlotsPerCommit slots have accumulated,
 		// flush + commit them and start a fresh collector, so no single commit

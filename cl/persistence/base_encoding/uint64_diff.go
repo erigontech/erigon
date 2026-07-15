@@ -73,7 +73,6 @@ func ComputeCompressedSerializedUint64ListDiff(w io.Writer, old, new []byte) err
 
 	delta := func(i int) uint64 {
 		if i+8 > len(old) {
-			// The remaining new values were not in the old slice
 			return binary.LittleEndian.Uint64(new[i:])
 		}
 		return binary.LittleEndian.Uint64(new[i:i+8]) - binary.LittleEndian.Uint64(old[i:i+8])
@@ -94,15 +93,12 @@ func ComputeCompressedSerializedUint64ListDiff(w io.Writer, old, new []byte) err
 	if err := binary.Write(w, binary.BigEndian, uint32(len(repeatedPattern))); err != nil {
 		return err
 	}
-	temp := make([]byte, 8)
+	temp := make([]byte, 12)
 
 	// Write the repeated pattern
 	for _, entry := range repeatedPattern {
 		binary.BigEndian.PutUint32(temp[:4], entry.count)
-		if _, err := compressor.Write(temp[:4]); err != nil {
-			return err
-		}
-		binary.BigEndian.PutUint64(temp, entry.val)
+		binary.BigEndian.PutUint64(temp[4:], entry.val)
 		if _, err := compressor.Write(temp); err != nil {
 			return err
 		}
@@ -189,7 +185,7 @@ func ComputeCompressedSerializedValidatorSetListDiff(w io.Writer, old, new []byt
 		return errors.New("old list is longer than new list")
 	}
 
-	validatorLength := 121
+	validatorLength := validatorSSZSize
 	if len(old)%validatorLength != 0 {
 		return fmt.Errorf("old list is not a multiple of validator length got %d", len(old))
 	}
@@ -226,7 +222,7 @@ func ApplyCompressedSerializedValidatorListDiff(in, out []byte, diff []byte, rev
 
 	reader := bytes.NewReader(diff)
 
-	currValidator := make([]byte, 121)
+	currValidator := make([]byte, validatorSSZSize)
 
 	for {
 		var index uint32
@@ -246,11 +242,11 @@ func ApplyCompressedSerializedValidatorListDiff(in, out []byte, diff []byte, rev
 		if n == 0 {
 			break
 		}
-		if n != 121 {
-			return nil, fmt.Errorf("read %d bytes, expected 121", n)
+		if n != validatorSSZSize {
+			return nil, fmt.Errorf("read %d bytes, expected %d", n, validatorSSZSize)
 		}
 		// overwrite the validator
-		copy(out[index*121:], currValidator)
+		copy(out[index*validatorSSZSize:], currValidator)
 	}
 	for {
 		n, err := io.ReadFull(reader, currValidator)
@@ -260,8 +256,8 @@ func ApplyCompressedSerializedValidatorListDiff(in, out []byte, diff []byte, rev
 		if n == 0 {
 			break
 		}
-		if n != 121 {
-			return nil, fmt.Errorf("read %d bytes, expected 121", n)
+		if n != validatorSSZSize {
+			return nil, fmt.Errorf("read %d bytes, expected %d", n, validatorSSZSize)
 		}
 		out = append(out, currValidator...)
 	}
