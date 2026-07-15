@@ -759,6 +759,85 @@ func TestEngineApiEIP8246PreservedBalanceSurvivesCreate2Recreate(t *testing.T) {
 	})
 }
 
+func TestEngineApiAccountLifecycleFinalizationConsistency(t *testing.T) {
+	ctx := t.Context()
+	logger := testlog.Logger(t, log.LvlDebug)
+	genesis, coinbaseKey, err := engineapitester.DefaultEngineApiTesterGenesis()
+	require.NoError(t, err)
+	genesis.Config.AmsterdamTime = nil
+
+	salt := [32]byte{}
+	factoryAddr := types.CreateAddress(crypto.PubkeyToAddress(coinbaseKey.PublicKey), 0)
+	coinbase := create2Addr(factoryAddr, salt, common.FromHex(contracts.SelfDestructInConstructorBin))
+	genesis.Coinbase = coinbase
+
+	senderKeys := make([]*ecdsa.PrivateKey, 3)
+	funds := new(big.Int).Exp(big.NewInt(10), big.NewInt(20), nil)
+	for i := range senderKeys {
+		senderKeys[i], err = crypto.GenerateKey()
+		require.NoError(t, err)
+		genesis.Alloc[crypto.PubkeyToAddress(senderKeys[i].PublicKey)] = types.GenesisAccount{Balance: funds}
+	}
+
+	eat, err := engineapitester.InitialiseEngineApiTester(ctx, engineapitester.EngineApiTesterInitArgs{
+		Logger: logger, DataDir: t.TempDir(), Genesis: genesis, CoinbaseKey: coinbaseKey,
+	})
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, eat.Close()) })
+
+	eat.Run(t, func(ctx context.Context, t *testing.T, eat engineapitester.EngineApiTester) {
+		chainID := eat.ChainId()
+		deployAuth, err := bind.NewKeyedTransactorWithChainID(coinbaseKey, chainID)
+		require.NoError(t, err)
+		deployAuth.GasLimit = params.MaxTxnGasLimit
+		deployedFactoryAddr, _, factory, err := contracts.DeploySelfDestructFactory(deployAuth, eat.ContractBackend)
+		require.NoError(t, err)
+		require.Equal(t, factoryAddr, deployedFactoryAddr)
+		_, err = eat.MockCl.BuildCanonicalBlock(ctx)
+		require.NoError(t, err)
+
+		disperseAuth, err := bind.NewKeyedTransactorWithChainID(coinbaseKey, chainID)
+		require.NoError(t, err)
+		disperseAuth.GasLimit = params.MaxTxnGasLimit
+		_, _, disperse, err := contracts.DeployDisperse(disperseAuth, eat.ContractBackend)
+		require.NoError(t, err)
+		_, err = eat.MockCl.BuildCanonicalBlock(ctx)
+		require.NoError(t, err)
+
+		destroyAuth, err := bind.NewKeyedTransactorWithChainID(senderKeys[0], chainID)
+		require.NoError(t, err)
+		destroyAuth.GasLimit = 1_000_000
+		destroyAuth.GasPrice = big.NewInt(5_000_000_000)
+		destroyTx, err := factory.Deploy(destroyAuth, salt)
+		require.NoError(t, err)
+
+		fundAuth, err := bind.NewKeyedTransactorWithChainID(senderKeys[1], chainID)
+		require.NoError(t, err)
+		fundAuth.GasLimit = 1_000_000
+		fundAuth.GasPrice = big.NewInt(4_000_000_000)
+		fundAuth.Value = big.NewInt(7)
+		fundTx, err := disperse.DisperseEther(fundAuth, []common.Address{coinbase}, []*big.Int{big.NewInt(7)})
+		require.NoError(t, err)
+
+		recreateAuth, err := bind.NewKeyedTransactorWithChainID(senderKeys[2], chainID)
+		require.NoError(t, err)
+		recreateAuth.GasLimit = 1_000_000
+		recreateAuth.GasPrice = big.NewInt(3_000_000_000)
+		recreateTx, err := factory.Deploy(recreateAuth, salt)
+		require.NoError(t, err)
+
+		payload, err := eat.MockCl.BuildCanonicalBlock(ctx)
+		require.NoError(t, err)
+		gotHashes := make([]common.Hash, len(payload.ExecutionPayload.Transactions))
+		for i, encoded := range payload.ExecutionPayload.Transactions {
+			txn, err := types.DecodeTransaction(encoded)
+			require.NoError(t, err)
+			gotHashes[i] = txn.Hash()
+		}
+		require.Equal(t, []common.Hash{destroyTx.Hash(), fundTx.Hash(), recreateTx.Hash()}, gotHashes)
+	})
+}
+
 // creditWei is the fixed amount dispersed to each proxy while it is still empty
 // (0.000256 ETH, the constant seen on glamsterdam-devnet-5).
 var creditWei = uint256.NewInt(256_000_000_000_000)

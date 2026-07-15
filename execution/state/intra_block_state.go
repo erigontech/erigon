@@ -2832,9 +2832,9 @@ func (sdb *IntraBlockState) ResetVersionedReads() {
 // VersionedWrites returns a frozen typed snapshot of this tx's writes. With
 // checkDirty, a non-dirty address's writes are dropped (and deleted from the
 // version map). Under self-destruct only SelfDestruct/Balance/Incarnation/
-// Storage are kept (the BAL needs residual balance, resurrection needs the
-// prior incarnation, and the calculator needs per-slot deletes); Nonce/Code/
-// CodeHash/CodeSize/Address/CreateContract are dropped.
+// Storage/CreateContract are kept (the BAL needs residual balance,
+// resurrection needs the prior incarnation, and fee finalization needs the
+// creation marker); Nonce/Code/CodeHash/CodeSize/Address are dropped.
 func (sdb *IntraBlockState) VersionedWrites(checkDirty bool) *WriteSet {
 	src := &sdb.versionedWrites
 	out := &WriteSet{}
@@ -2868,6 +2868,9 @@ func (sdb *IntraBlockState) VersionedWrites(checkDirty bool) *WriteSet {
 				out.SetStorage(addr, k, cloneVW(vw))
 			}
 		}
+		if vw, ok := src.createContract[addr]; ok {
+			out.SetCreateContract(addr, cloneVW(vw))
+		}
 		if !sd {
 			if vw, ok := src.address[addr]; ok {
 				out.SetAddress(addr, cloneVW(vw))
@@ -2883,9 +2886,6 @@ func (sdb *IntraBlockState) VersionedWrites(checkDirty bool) *WriteSet {
 			}
 			if vw, ok := src.codeSize[addr]; ok {
 				out.SetCodeSize(addr, cloneVW(vw))
-			}
-			if vw, ok := src.createContract[addr]; ok {
-				out.SetCreateContract(addr, cloneVW(vw))
 			}
 		}
 	}

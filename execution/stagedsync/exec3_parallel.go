@@ -1931,6 +1931,7 @@ func (result *execResult) calcFees(
 	}
 	coinbaseEmptyCodeHash := coinbaseAcc == nil || coinbaseAcc.IsEmptyCodeHash()
 	coinbaseSelfdestructed := false
+	coinbaseCreatedContract := false
 	if bw, ok := result.TxOut.GetBalance(result.Coinbase); ok {
 		newCoinbaseBalance = bw.Val
 	}
@@ -1943,6 +1944,9 @@ func (result *execResult) calcFees(
 	if sw, ok := result.TxOut.GetSelfDestruct(result.Coinbase); ok {
 		coinbaseSelfdestructed = sw.Val
 	}
+	if cw, ok := result.TxOut.GetCreateContract(result.Coinbase); ok {
+		coinbaseCreatedContract = cw.Val
+	}
 	if hasBurnt {
 		if bw, ok := result.TxOut.GetBalance(burntAddr); ok {
 			newBurntBalance = bw.Val
@@ -1953,7 +1957,7 @@ func (result *execResult) calcFees(
 	// DeleteAccount also emits SelfDestructPath=true for EIP-161 empty-removal of
 	// a touched EOA coinbase, where the delayed tip must still be credited (it
 	// re-creates the account) to match serial.
-	coinbaseWasContract := !coinbaseEmptyCodeHash || coinbaseHasCodeHashWrite
+	coinbaseWasContract := !coinbaseEmptyCodeHash || coinbaseHasCodeHashWrite || coinbaseCreatedContract
 	if !(coinbaseSelfdestructed && coinbaseWasContract) {
 		newCoinbaseBalance.Add(&newCoinbaseBalance, &result.ExecutionResult.FeeTipped)
 	}

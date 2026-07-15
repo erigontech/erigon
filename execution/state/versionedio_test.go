@@ -572,18 +572,17 @@ func TestVersionedIO_RemovedDependencyFallsThroughToStorage(t *testing.T) {
 			"the underlying storage value, not abort or return the stale MapRead")
 }
 
-// TestIBSVersionedWrites_SelfdestructRetainsBalanceDropsOtherPaths verifies
-// that IntraBlockState.VersionedWrites retains SelfDestructPath, BalancePath
-// (including non-zero residual balances — EIP-7708 case 2), and IncarnationPath
-// after selfdestruct, and drops NoncePath/CodePath which selfdestruct resets.
-func TestIBSVersionedWrites_SelfdestructRetainsBalanceDropsOtherPaths(t *testing.T) {
+// TestIBSVersionedWrites_SelfdestructRetainsMetadataDropsResetPaths verifies
+// that IntraBlockState.VersionedWrites retains deletion metadata and drops
+// account fields reset by selfdestruct.
+func TestIBSVersionedWrites_SelfdestructRetainsMetadataDropsResetPaths(t *testing.T) {
 	t.Parallel()
 
 	addr := accounts.InternAddress(common.HexToAddress("0xdead"))
 	ibs := NewWithVersionMap(&minimalStateReader{}, NewVersionMap(nil))
 	ibs.SetTxContext(1, 0)
 
-	// Establish nonce and code before selfdestruct — these should be dropped.
+	require.NoError(t, ibs.CreateAccount(addr, true))
 	require.NoError(t, ibs.SetNonce(addr, 5, tracing.NonceChangeUnspecified))
 	require.NoError(t, ibs.SetCode(addr, []byte{0x60, 0x00}, tracing.CodeChangeUnspecified))
 	require.NoError(t, ibs.SetBalance(addr, *uint256.NewInt(0), tracing.BalanceChangeUnspecified))
@@ -611,6 +610,7 @@ func TestIBSVersionedWrites_SelfdestructRetainsBalanceDropsOtherPaths(t *testing
 	require.True(t, pathSet[SelfDestructPath], "SelfDestructPath must be retained")
 	require.True(t, pathSet[IncarnationPath], "IncarnationPath must be retained")
 	require.True(t, pathSet[BalancePath], "BalancePath (non-zero residual) must be retained")
+	require.True(t, pathSet[CreateContractPath], "CreateContractPath must be retained")
 
 	// Dropped paths — selfdestruct resets nonce and code, so they must not appear.
 	require.False(t, pathSet[NoncePath], "NoncePath must be dropped after selfdestruct")
