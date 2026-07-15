@@ -1360,6 +1360,12 @@ func (s *WriteSet) DelNonce(addr accounts.Address) {
 		delete(s.nonce, addr)
 	}
 }
+func (s *WriteSet) DelIncarnation(addr accounts.Address) {
+	if vw, ok := s.incarnation[addr]; ok {
+		releaseVWIncarnation(vw)
+		delete(s.incarnation, addr)
+	}
+}
 func (s *WriteSet) DelSelfDestruct(addr accounts.Address) {
 	if vw, ok := s.selfDestruct[addr]; ok {
 		releaseVWSelfDestruct(vw)
@@ -1414,6 +1420,12 @@ func (s *WriteSet) updateStorage(addr accounts.Address, key accounts.StorageKey,
 
 func (s *WriteSet) updateNonce(addr accounts.Address, val uint64) {
 	if vw, ok := s.nonce[addr]; ok {
+		vw.Val = val
+	}
+}
+
+func (s *WriteSet) updateIncarnation(addr accounts.Address, val uint64) {
+	if vw, ok := s.incarnation[addr]; ok {
 		vw.Val = val
 	}
 }

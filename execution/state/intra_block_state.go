@@ -1685,12 +1685,25 @@ func (sdb *IntraBlockState) selfdestructVersioned(addr accounts.Address, preserv
 		inc = vw.Val
 	}
 
-	sdb.journal.append(selfdestructChange{
-		account:     addr,
-		prev:        prev,
-		prevbalance: prevBalance,
-		wasCommited: !sdb.hasWrite(addr, SelfDestructPath, accounts.NilKey),
-	})
+	sd := selfdestructChange{
+		account:         addr,
+		prev:            prev,
+		prevbalance:     prevBalance,
+		wasCommited:     !sdb.hasWrite(addr, SelfDestructPath, accounts.NilKey),
+		preserveBalance: preserveBalance,
+	}
+	// Capture the pre-destruct versioned-write state of the cells the self-destruct
+	// clears below, so a revert restores them rather than the cleared values.
+	if vw, ok := sdb.versionedWrites.GetIncarnation(addr); ok {
+		sd.hadIncarnation, sd.prevIncarnation = true, vw.Val
+	}
+	if vw, ok := sdb.versionedWrites.GetNonce(addr); ok {
+		sd.hadNonce, sd.prevNonce = true, vw.Val
+	}
+	if vw, ok := sdb.versionedWrites.GetCodeHash(addr); ok {
+		sd.hadCodeHash, sd.prevCodeHash = true, vw.Val
+	}
+	sdb.journal.append(sd)
 
 	if !preserveBalance && sdb.tracingHooks != nil && sdb.tracingHooks.OnBalanceChange != nil && !prevBalance.IsZero() {
 		sdb.tracingHooks.OnBalanceChange(addr, prevBalance, zeroBalance, tracing.BalanceDecreaseSelfdestruct)
