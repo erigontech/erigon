@@ -65,11 +65,15 @@ func gossipBLSToExecutionChangeHandler(t *testing.T, root fs.FS, c spectest.Test
 	}
 	seen := make(map[uint64]struct{})
 	for i, message := range meta.Messages {
+		messageTime, ok := gossipMessageTime(meta.CurrentTimeMS, message.OffsetMS)
+		if !ok {
+			return fmt.Errorf("message %d time overflows", i)
+		}
 		change := &cltypes.SignedBLSToExecutionChange{}
 		if err := spectest.ReadSszOld(root, change, c.Version(), message.Message+".ssz_snappy"); err != nil {
 			return err
 		}
-		result := validateGossipBLSToExecutionChange(beaconState, change, meta.CurrentTimeMS+message.OffsetMS, config.CapellaForkEpoch, seen)
+		result := validateGossipBLSToExecutionChange(beaconState, change, messageTime, config.CapellaForkEpoch, seen)
 		if result != message.Expected {
 			return gossipResultError(i, message, result)
 		}
@@ -142,11 +146,15 @@ func gossipSyncCommitteeMessageHandler(t *testing.T, root fs.FS, c spectest.Test
 	}
 	seen := make(map[syncCommitteeMessageKey]struct{})
 	for i, message := range meta.Messages {
+		messageTime, ok := gossipMessageTime(meta.CurrentTimeMS, message.OffsetMS)
+		if !ok {
+			return fmt.Errorf("message %d time overflows", i)
+		}
 		syncMessage := &cltypes.SyncCommitteeMessage{}
 		if err := spectest.ReadSszOld(root, syncMessage, c.Version(), message.Message+".ssz_snappy"); err != nil {
 			return err
 		}
-		result := validateGossipSyncCommitteeMessage(beaconState, syncMessage, message.SubnetID, meta.CurrentTimeMS+message.OffsetMS, seen)
+		result := validateGossipSyncCommitteeMessage(beaconState, syncMessage, message.SubnetID, messageTime, seen)
 		if result != message.Expected {
 			return gossipResultError(i, message, result)
 		}
@@ -214,13 +222,17 @@ func gossipSyncContributionHandler(t *testing.T, root fs.FS, c spectest.TestCase
 	seenContributions := make(map[syncContributionKey][][]byte)
 	seenAggregators := make(map[syncContributionAggregatorKey]struct{})
 	for i, message := range meta.Messages {
+		messageTime, ok := gossipMessageTime(meta.CurrentTimeMS, message.OffsetMS)
+		if !ok {
+			return fmt.Errorf("message %d time overflows", i)
+		}
 		contribution := &cltypes.Contribution{}
 		contribution.SetAggregationBitsSize(int(beaconState.BeaconConfig().SyncCommitteeSize / beaconState.BeaconConfig().SyncCommitteeSubnetCount / 8))
 		signedContribution := &cltypes.SignedContributionAndProof{Message: &cltypes.ContributionAndProof{Contribution: contribution}}
 		if err := spectest.ReadSszOld(root, signedContribution, c.Version(), message.Message+".ssz_snappy"); err != nil {
 			return err
 		}
-		result := validateGossipSyncContribution(beaconState, signedContribution, meta.CurrentTimeMS+message.OffsetMS, seenContributions, seenAggregators)
+		result := validateGossipSyncContribution(beaconState, signedContribution, messageTime, seenContributions, seenAggregators)
 		if result != message.Expected {
 			return gossipResultError(i, message, result)
 		}
@@ -252,7 +264,11 @@ func validateGossipSyncContribution(
 	if !gossipBitsHaveParticipants(contribution.AggregationBits) {
 		return "reject"
 	}
-	modulo := max(uint64(1), beaconState.BeaconConfig().SyncCommitteeSize/beaconState.BeaconConfig().SyncCommitteeSubnetCount/beaconState.BeaconConfig().TargetAggregatorsPerSyncSubcommittee)
+	config := beaconState.BeaconConfig()
+	if config.SyncCommitteeSubnetCount == 0 || config.TargetAggregatorsPerSyncSubcommittee == 0 {
+		return "reject"
+	}
+	modulo := max(uint64(1), config.SyncCommitteeSize/config.SyncCommitteeSubnetCount/config.TargetAggregatorsPerSyncSubcommittee)
 	selectionProofHash := utils.Sha256(message.SelectionProof[:])
 	if binary.LittleEndian.Uint64(selectionProofHash[:8])%modulo != 0 {
 		return "reject"
@@ -260,7 +276,10 @@ func validateGossipSyncContribution(
 	if message.AggregatorIndex >= uint64(beaconState.ValidatorLength()) {
 		return "reject"
 	}
-	subcommitteePublicKeys := gossipSyncSubcommitteePublicKeys(beaconState, contribution.SubcommitteeIndex)
+	subcommitteePublicKeys, ok := gossipSyncSubcommitteePublicKeys(beaconState, contribution.SubcommitteeIndex)
+	if !ok || len(contribution.AggregationBits)*8 != len(subcommitteePublicKeys) {
+		return "reject"
+	}
 	aggregatorPublicKey, err := beaconState.ValidatorPublicKey(int(message.AggregatorIndex))
 	if err != nil || !slices.Contains(subcommitteePublicKeys, aggregatorPublicKey) {
 		return "reject"
@@ -328,21 +347,48 @@ func gossipSlotIsCurrent(beaconState *state.CachingBeaconState, slot uint64, cur
 }
 
 func gossipCurrentSlot(beaconState *state.CachingBeaconState, currentTimeMS uint64) (uint64, bool) {
+	if beaconState.GenesisTime() > ^uint64(0)/1000 {
+		return 0, false
+	}
 	genesisTimeMS := beaconState.GenesisTime() * 1000
-	if currentTimeMS < genesisTimeMS {
+	if currentTimeMS < genesisTimeMS || beaconState.BeaconConfig().SecondsPerSlot == 0 {
 		return 0, false
 	}
 	return (currentTimeMS - genesisTimeMS) / (beaconState.BeaconConfig().SecondsPerSlot * 1000), true
 }
 
-func gossipSyncSubcommitteePublicKeys(beaconState *state.CachingBeaconState, subcommitteeIndex uint64) []common.Bytes48 {
+func gossipSyncSubcommitteePublicKeys(beaconState *state.CachingBeaconState, subcommitteeIndex uint64) ([]common.Bytes48, bool) {
+	config := beaconState.BeaconConfig()
+	if config.SyncCommitteeSubnetCount == 0 || config.SyncCommitteeSize%config.SyncCommitteeSubnetCount != 0 {
+		return nil, false
+	}
 	committee := beaconState.CurrentSyncCommittee()
-	if beaconState.BeaconConfig().SyncCommitteePeriod(beaconState.Slot()) != beaconState.BeaconConfig().SyncCommitteePeriod(beaconState.Slot()+1) {
+	if beaconState.Slot() == ^uint64(0) {
+		return nil, false
+	}
+	if config.SyncCommitteePeriod(beaconState.Slot()) != config.SyncCommitteePeriod(beaconState.Slot()+1) {
 		committee = beaconState.NextSyncCommittee()
 	}
-	subcommitteeSize := beaconState.BeaconConfig().SyncCommitteeSize / beaconState.BeaconConfig().SyncCommitteeSubnetCount
+	if committee == nil {
+		return nil, false
+	}
+	subcommitteeSize := config.SyncCommitteeSize / config.SyncCommitteeSubnetCount
+	if subcommitteeSize == 0 || subcommitteeIndex > ^uint64(0)/subcommitteeSize {
+		return nil, false
+	}
 	start := subcommitteeIndex * subcommitteeSize
-	return committee.GetCommittee()[start : start+subcommitteeSize]
+	publicKeys := committee.GetCommittee()
+	if start > uint64(len(publicKeys)) || subcommitteeSize > uint64(len(publicKeys))-start {
+		return nil, false
+	}
+	return publicKeys[start : start+subcommitteeSize], true
+}
+
+func gossipMessageTime(currentTimeMS, offsetMS uint64) (uint64, bool) {
+	if offsetMS > ^uint64(0)-currentTimeMS {
+		return 0, false
+	}
+	return currentTimeMS + offsetMS, true
 }
 
 func markGossipSyncContributionSeen(
