@@ -755,11 +755,11 @@ func (e *ExecModule) updateForkChoice(ctx context.Context, originalBlockHash, sa
 		// commit.
 		var commitTimings []any
 		if e.fcuBackgroundCommit {
-			// Hand the commit to the background worker: it commits in a
-			// foreground-idle window (commitWorker → waitForegroundIdle) so the
-			// commit RwTx never overlaps a foreground roTx, and the generation is
-			// on the chain so the next FCU's SD reads its not-yet-committed domain
-			// state via SetParent instead of waiting.
+			// Hand the commit to the background worker: it acquires the foreground
+			// semaphore before committing so the commit RwTx never overlaps a
+			// foreground roTx, and the generation is on the chain so the next FCU's
+			// SD reads its not-yet-committed domain state via SetParent instead of
+			// waiting.
 			roTx = nil
 			currentContext = nil
 			e.enqueueCommit(bgGen)

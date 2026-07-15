@@ -93,17 +93,6 @@ func (e *ExecModule) leaveForeground() {
 	e.fgMu.Unlock()
 }
 
-// waitForegroundIdle blocks until no foreground operation is active. The
-// commit worker calls it before each commit so the commit RwTx runs in a
-// foreground-free window — no foreground roTx open to pin MDBX pages.
-func (e *ExecModule) waitForegroundIdle() {
-	e.fgMu.Lock()
-	for e.fgCount > 0 {
-		e.fgIdle.Wait()
-	}
-	e.fgMu.Unlock()
-}
-
 // enqueueCommit hands a completed generation to the background commit
 // worker. Non-blocking by design (buffered channel) so the foreground FCU
 // is never blocked handing off its commit.
