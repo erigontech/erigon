@@ -205,7 +205,9 @@ func addSszTests() {
 			}, withTestJson())).
 		With("Attestation", sszStaticTestNewObjectByFunc(
 			func(v clparams.StateVersion) *solid.Attestation {
-				return &solid.Attestation{}
+				attestation := &solid.Attestation{}
+				attestation.SetVersion(v)
+				return attestation
 			}, withTestJson())).
 		With("SyncCommitteeMessage", sszStaticTestByEmptyObject(&cltypes.SyncCommitteeMessage{}, withTestJson())).
 		With("VoluntaryExit", sszStaticTestByEmptyObject(&cltypes.VoluntaryExit{}, withTestJson())).
