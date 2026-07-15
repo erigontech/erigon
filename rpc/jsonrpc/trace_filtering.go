@@ -345,7 +345,7 @@ func (api *TraceAPIImpl) Filter(ctx context.Context, req TraceFilterRequest, gas
 			return err
 		}
 		if headNumber == nil {
-			return errors.New("current header number not found")
+			return errors.New("head header not found")
 		}
 		toBlock = *headNumber
 	} else {

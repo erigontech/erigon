@@ -1143,7 +1143,7 @@ var (
 	}
 	FcuBackgroundCommitFlag = cli.BoolFlag{
 		Name:  "fcu.background.commit",
-		Usage: "Return FCU response before MDBX flush+commit lands (commit runs in background; remote rpcdaemon 'latest' lags ~50ms, stays consistent)",
+		Usage: "Return FCU response before MDBX flush+commit lands (commit runs in background; remote rpcdaemon 'latest' stays consistent but can lag for the commit duration)",
 		Value: ethconfig.Defaults.FcuBackgroundCommit,
 	}
 	MCPDisableFlag = cli.BoolFlag{

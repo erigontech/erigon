@@ -56,8 +56,7 @@ func CheckBlockExecuted(tx kv.Tx, blockNumber uint64) error {
 	return nil
 }
 
-// GetBlockNumber resolves a block number, hash, or tag ("latest", "safe",
-// "finalized", "pending") to a concrete block number and hash.
+// GetBlockNumber resolves a block number, hash, or tag to a concrete block number and hash.
 //
 // filters controls which view tags resolve against. Pass the API's Filters to
 // resolve through the block overlay, which includes a head whose commit is
