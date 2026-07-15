@@ -131,7 +131,7 @@ func (api *ErigonImpl) GetLogs(ctx context.Context, crit filters.FilterCriteria)
 
 	} else {
 		var err error
-		begin, end, err = logRangeLatestOnly(tx, crit)
+		begin, end, err = logRangeLatestOnly(api.filters.WithOverlay(tx), crit)
 		if err != nil {
 			return nil, err
 		}
@@ -208,7 +208,7 @@ func (api *ErigonImpl) GetLatestLogs(ctx context.Context, crit filters.FilterCri
 		begin = header.Number.Uint64()
 		end = header.Number.Uint64()
 	} else {
-		begin, end, err = logRangeLatestOnly(tx, crit)
+		begin, end, err = logRangeLatestOnly(api.filters.WithOverlay(tx), crit)
 		if err != nil {
 			return nil, err
 		}
