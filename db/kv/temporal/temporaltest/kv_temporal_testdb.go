@@ -37,7 +37,7 @@ import (
 func NewTestTx(tb testing.TB) (kv.TemporalRwDB, kv.TemporalRwTx) {
 	tb.Helper()
 	db := NewTestDB(tb, datadir.New(tb.TempDir()))
-	tx, err := db.BeginTemporalRw(context.Background()) //nolint:gocritic
+	tx, err := db.BeginTemporalRw(tb.Context()) //nolint:gocritic
 	if err != nil {
 		tb.Fatal(err)
 	}

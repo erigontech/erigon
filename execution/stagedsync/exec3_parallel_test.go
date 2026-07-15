@@ -16,7 +16,6 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/common"
-	"github.com/erigontech/erigon/common/dir"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv"
@@ -484,21 +483,16 @@ func checkNoDroppedTx(pe *parallelExecutor) error {
 
 func runParallel(tb testing.TB, tasks []exec.Task, validation propertyCheck, metadata bool, logger log.Logger) time.Duration {
 	tb.Helper()
+	ctx := tb.Context()
 
-	tmpDir, err := os.MkdirTemp("", "erigon-parallel-test-*")
-	if err != nil {
-		tb.Fatal(err)
-	}
-	defer dir.RemoveAll(tmpDir)
-
-	dirs := datadir.New(tmpDir)
+	dirs := datadir.New(tb.TempDir())
 	db := temporaltest.NewTestDB(tb, dirs)
 
-	tx, err := db.BeginTemporalRo(context.Background()) //nolint:gocritic
+	tx, err := db.BeginTemporalRo(ctx) //nolint:gocritic
 	assert.NoError(tb, err)
 	defer tx.Rollback()
 
-	domains, err := execctx.NewSharedDomains(context.Background(), tx, log.New())
+	domains, err := execctx.NewSharedDomains(ctx, tx, log.New())
 	assert.NoError(tb, err)
 	defer domains.Close()
 
@@ -519,7 +513,7 @@ func runParallel(tb testing.TB, tasks []exec.Task, validation propertyCheck, met
 		workerCount: runtime.NumCPU() - 1,
 	}
 
-	executorContext, executorCancel, err := pe.run(context.Background())
+	executorContext, executorCancel, err := pe.run(ctx)
 
 	assert.NoError(tb, err, "error occur during parallel init")
 	assert.NoError(tb, executorContext.Err(), "error occur during parallel init")
@@ -604,13 +598,7 @@ func runParallelGetMetadata(tb testing.TB, tasks []exec.Task, validation propert
 
 	logger := log.Root()
 
-	tmpDir, err := os.MkdirTemp("", "erigon-parallel-meta-*")
-	if err != nil {
-		tb.Fatal(err)
-	}
-	defer dir.RemoveAll(tmpDir)
-
-	dirs := datadir.New(tmpDir)
+	dirs := datadir.New(tb.TempDir())
 	db := temporaltest.NewTestDB(tb, dirs)
 
 	tx, err := db.BeginTemporalRo(ctx) //nolint:gocritic
@@ -656,23 +644,18 @@ func runParallelGetMetadata(tb testing.TB, tasks []exec.Task, validation propert
 // Uses a single DB stack for both passes, halving the MDBX/aggregator/temporal setup cost.
 func runProfileAndExecute(tb testing.TB, tasks []exec.Task, validation propertyCheck, logger log.Logger) time.Duration {
 	tb.Helper()
+	ctx := tb.Context()
 
-	tmpDir, err := os.MkdirTemp("", "erigon-parallel-meta-test-*")
-	if err != nil {
-		tb.Fatal(err)
-	}
-	defer dir.RemoveAll(tmpDir)
-
-	dirs := datadir.New(tmpDir)
+	dirs := datadir.New(tb.TempDir())
 	db := temporaltest.NewTestDB(tb, dirs)
 
 	chainSpec, _ := chainspec.ChainSpecByName(networkname.Mainnet)
 
 	// newExecutor creates a fresh domains/state/executor on the shared DB.
 	newExecutor := func() (*parallelExecutor, context.Context, context.CancelCauseFunc, func()) {
-		tx, err := db.BeginTemporalRo(context.Background()) //nolint:gocritic
+		tx, err := db.BeginTemporalRo(ctx) //nolint:gocritic
 		assert.NoError(tb, err)
-		domains, err := execctx.NewSharedDomains(context.Background(), tx, log.New())
+		domains, err := execctx.NewSharedDomains(ctx, tx, log.New())
 		assert.NoError(tb, err)
 
 		pe := &parallelExecutor{
@@ -685,7 +668,7 @@ func runProfileAndExecute(tb testing.TB, tasks []exec.Task, validation propertyC
 			workerCount: runtime.NumCPU() - 1,
 		}
 
-		executorCtx, executorCancel, err := pe.run(context.Background())
+		executorCtx, executorCancel, err := pe.run(ctx)
 		assert.NoError(tb, err, "error during parallel init")
 
 		cleanup := func() {
@@ -728,7 +711,7 @@ func runProfileAndExecute(tb testing.TB, tasks []exec.Task, validation propertyC
 	}
 
 	start := time.Now()
-	_, err = executeParallelWithCheck(tb, pe, tasks, false, validation, true)
+	_, err := executeParallelWithCheck(tb, pe, tasks, false, validation, true)
 	assert.NoError(tb, err, "error during metadata execution pass")
 
 	finalWriteSet := map[accounts.Address]map[state.AccountKey]time.Duration{}
