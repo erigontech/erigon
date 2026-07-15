@@ -20,6 +20,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 
+	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
 	"github.com/erigontech/erigon/cl/merkle_tree"
 	ssz2 "github.com/erigontech/erigon/cl/ssz"
@@ -35,6 +36,14 @@ type AggregateAndProof struct {
 	AggregatorIndex uint64             `json:"aggregator_index,string"`
 	Aggregate       *solid.Attestation `json:"aggregate"`
 	SelectionProof  common.Bytes96     `json:"selection_proof"`
+	version         clparams.StateVersion
+}
+
+func (a *AggregateAndProof) SetVersion(version clparams.StateVersion) {
+	a.version = version
+	if a.Aggregate != nil {
+		a.Aggregate.SetVersion(version)
+	}
 }
 
 func (a *AggregateAndProof) EncodeSSZ(dst []byte) ([]byte, error) {
@@ -46,6 +55,7 @@ func (a *AggregateAndProof) Static() bool {
 }
 
 func (a *AggregateAndProof) DecodeSSZ(buf []byte, version int) error {
+	a.version = clparams.StateVersion(version)
 	a.Aggregate = new(solid.Attestation)
 	return ssz2.UnmarshalSSZ(buf, version, &a.AggregatorIndex, a.Aggregate, a.SelectionProof[:])
 }
@@ -55,12 +65,23 @@ func (a *AggregateAndProof) EncodingSizeSSZ() int {
 }
 
 func (a *AggregateAndProof) HashSSZ() ([32]byte, error) {
+	if a.Aggregate != nil {
+		a.Aggregate.SetVersion(a.version)
+	}
 	return merkle_tree.HashTreeRoot(a.AggregatorIndex, a.Aggregate, a.SelectionProof[:])
 }
 
 type SignedAggregateAndProof struct {
 	Message   *AggregateAndProof `json:"message"`
 	Signature common.Bytes96     `json:"signature"`
+	version   clparams.StateVersion
+}
+
+func (a *SignedAggregateAndProof) SetVersion(version clparams.StateVersion) {
+	a.version = version
+	if a.Message != nil {
+		a.Message.SetVersion(version)
+	}
 }
 
 func (a *SignedAggregateAndProof) EncodeSSZ(dst []byte) ([]byte, error) {
@@ -68,6 +89,7 @@ func (a *SignedAggregateAndProof) EncodeSSZ(dst []byte) ([]byte, error) {
 }
 
 func (a *SignedAggregateAndProof) DecodeSSZ(buf []byte, version int) error {
+	a.version = clparams.StateVersion(version)
 	a.Message = new(AggregateAndProof)
 	return ssz2.UnmarshalSSZ(buf, version, a.Message, a.Signature[:])
 }
@@ -77,6 +99,9 @@ func (a *SignedAggregateAndProof) EncodingSizeSSZ() int {
 }
 
 func (a *SignedAggregateAndProof) HashSSZ() ([32]byte, error) {
+	if a.Message != nil {
+		a.Message.SetVersion(a.version)
+	}
 	return merkle_tree.HashTreeRoot(a.Message, a.Signature[:])
 }
 
