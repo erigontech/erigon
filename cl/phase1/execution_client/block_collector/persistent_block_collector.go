@@ -170,7 +170,7 @@ func (p *PersistentBlockCollector) encodeBlock(payload *cltypes.Eth1Block, paren
 	}
 	encoded, err := payload.EncodeSSZ(p.encodeBlockBuf)
 	if err != nil {
-		return nil, fmt.Errorf("error encoding execution payload during download: %s", err)
+		return nil, fmt.Errorf("error encoding execution payload during download: %w", err)
 	}
 	p.encodeBlockBuf = encoded
 
