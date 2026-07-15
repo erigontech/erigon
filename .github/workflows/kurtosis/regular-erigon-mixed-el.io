@@ -14,6 +14,8 @@ network_params:
   shard_committee_period: 1
   seconds_per_slot: 8
 
+ethereum_genesis_generator_params:
+  image: ethpandaops/ethereum-genesis-generator:4.0.4
 additional_services:
   - assertoor
 assertoor_params:

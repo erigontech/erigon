@@ -17,6 +17,8 @@ network_params:
   seconds_per_slot: 8
   genesis_delay: 90
 
+ethereum_genesis_generator_params:
+  image: ethpandaops/ethereum-genesis-generator:4.0.4
 additional_services:
   - assertoor
   # - dora

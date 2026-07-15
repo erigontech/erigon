@@ -237,29 +237,28 @@ kurtosis service logs caplin-test cl-1-caplin-erigon 2>&1 | grep "finalizedEpoch
 
 ### CI Integration (test-kurtosis-assertoor.yml)
 
-Added `caplin` to the matrix in `.github/workflows/test-kurtosis-assertoor.yml`:
+Caplin is exercised by the `*-caplin-*` suites in the `assertoor_test` matrix in
+`.github/workflows/test-kurtosis-assertoor.yml` (caplin runs as erigon's CL via the shared
+image):
 
 ```yaml
 matrix:
   include:
-    - suite: regular-erigon-mixed-el
-      package_args: .github/workflows/kurtosis/regular-erigon-mixed-el.io
-      docker_binaries: "erigon"
-      ethereum_package_branch: "5.0.1"
-    - suite: pectra-erigon-mixed-el
-      package_args: .github/workflows/kurtosis/pectra-erigon-mixed-el.io
-      docker_binaries: "erigon"
-      ethereum_package_branch: "5.0.1"
-    - suite: caplin
-      package_args: .github/workflows/kurtosis/caplin-assertoor.io
-      docker_binaries: "erigon caplin"
-      ethereum_package_branch: "main"
+    - suite: glamsterdam-caplin-mixed-two-cl
+      package_args: .github/workflows/kurtosis/glamsterdam-caplin-mixed-two-cl.io
+      ethereum_package_branch: "6.1.0"
+      exec_mode: parallel
+    - suite: fusaka-caplin-mixed-three-cl
+      package_args: .github/workflows/kurtosis/fusaka-caplin-mixed-three-cl.io
+      ethereum_package_branch: "6.1.0"
+      exec_mode: parallel
 ```
 
-Key changes to the workflow:
-- `docker_binaries` matrix variable → passed as `BINARIES` build-arg to Dockerfile
-- `ethereum_package_branch` matrix variable → per-suite branch selection
-- Per-suite cache scopes to avoid cache conflicts between different BINARIES
+Key points:
+- A single erigon base image is built once with `BINARIES="erigon caplin"` and shared across
+  the whole matrix as a run-scoped artifact (no per-suite `docker_binaries`).
+- `ethereum_package_branch` selects the ethereum-package version per suite.
+- `exec_mode` (serial/parallel) runs each suite under the chosen execution mode.
 
 ### Verified Test Results (2026-03-12)
 
