@@ -122,15 +122,10 @@ type (
 		prev        bool // whether account had already selfdestructed
 		prevbalance uint256.Int
 		wasCommited bool
-		// EIP-8246 preserve-balance SELFDESTRUCT clears the versioned nonce, code
-		// hash and incarnation cells (selfdestructVersioned). Capture their pre-
-		// destruct versioned-write state so a revert restores them instead of
-		// leaving the account clobbered (wrong nonce/code in the trie root and BAL).
+		// selfdestructVersioned clears the versioned incarnation cell. Capture its
+		// pre-destruct versioned-write state so a revert restores it instead of
+		// leaving the account at incarnation 0 (wrong in the trie root and BAL).
 		preserveBalance bool
-		hadNonce        bool
-		prevNonce       uint64
-		hadCodeHash     bool
-		prevCodeHash    accounts.CodeHash
 		hadIncarnation  bool
 		prevIncarnation uint64
 	}
@@ -288,25 +283,13 @@ func (ch selfdestructChange) revert(s *IntraBlockState) error {
 				s.versionedWrites.updateBalance(ch.account, ch.prevbalance)
 			}
 		}
-		// selfdestructVersioned clears incarnation on both paths, and nonce + code
-		// hash on the EIP-8246 preserve-balance path. Restore each to its pre-destruct
-		// versioned value, or drop the write if the self-destruct created it.
+		// selfdestructVersioned clears the incarnation cell on both paths. Restore
+		// it to its pre-destruct versioned value, or drop the write if the
+		// self-destruct created it.
 		if ch.hadIncarnation {
 			s.versionedWrites.updateIncarnation(ch.account, ch.prevIncarnation)
 		} else {
 			s.versionedWrites.DelIncarnation(ch.account)
-		}
-		if ch.preserveBalance {
-			if ch.hadNonce {
-				s.versionedWrites.updateNonce(ch.account, ch.prevNonce)
-			} else {
-				s.versionedWrites.DelNonce(ch.account)
-			}
-			if ch.hadCodeHash {
-				s.versionedWrites.updateCodeHash(ch.account, ch.prevCodeHash)
-			} else {
-				s.versionedWrites.DelCodeHash(ch.account)
-			}
 		}
 	}
 	return nil

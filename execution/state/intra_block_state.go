@@ -1712,16 +1712,10 @@ func (sdb *IntraBlockState) selfdestructVersioned(addr accounts.Address, preserv
 		wasCommited:     !sdb.hasWrite(addr, SelfDestructPath, accounts.NilKey),
 		preserveBalance: preserveBalance,
 	}
-	// Capture the pre-destruct versioned-write state of the cells the self-destruct
-	// clears below, so a revert restores them rather than the cleared values.
+	// Capture the pre-destruct versioned incarnation write, which the self-destruct
+	// clears below, so a revert restores it rather than the cleared value.
 	if vw, ok := sdb.versionedWrites.GetIncarnation(addr); ok {
 		sd.hadIncarnation, sd.prevIncarnation = true, vw.Val
-	}
-	if vw, ok := sdb.versionedWrites.GetNonce(addr); ok {
-		sd.hadNonce, sd.prevNonce = true, vw.Val
-	}
-	if vw, ok := sdb.versionedWrites.GetCodeHash(addr); ok {
-		sd.hadCodeHash, sd.prevCodeHash = true, vw.Val
 	}
 	sdb.journal.append(sd)
 
@@ -1745,14 +1739,13 @@ func (sdb *IntraBlockState) selfdestructVersioned(addr accounts.Address, preserv
 		sdb.recordWriteBalance(addr, uint256.Int{})
 		return true, nil
 	}
-	// EIP-8246: the balance is preserved but code, nonce and incarnation are
-	// cleared, leaving a balance-only account. Record the cleared cells so a later
-	// tx reconstructing the preserved account reads empty code / zero nonce, and a
-	// re-creation bumps the incarnation from 0 (matching serial), not the stale
-	// pre-destruct value.
+	// EIP-8246: the balance is preserved, leaving a balance-only account, and a
+	// re-creation bumps the incarnation from 0 (matching serial). Nonce and code
+	// hash are not written here: extraction already drops them for a
+	// self-destructed account, so the reconstruction reads empty code / zero
+	// nonce. Writing explicit zero cells instead made a same-tx re-creation at the
+	// address read them and abort with a phantom collision.
 	sdb.recordWriteIncarnation(addr, 0)
-	sdb.recordWriteNonce(addr, 0, tracing.NonceChangeUnspecified)
-	sdb.recordWriteCodeHash(addr, accounts.EmptyCodeHash)
 
 	return true, nil
 }

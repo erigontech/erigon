@@ -10,13 +10,14 @@ import (
 	"github.com/erigontech/erigon/execution/types/accounts"
 )
 
-// A same-tx-created contract bumps its nonce (e.g. it CREATEs a child), then
-// SELFDESTRUCTs (EIP-8246 preserve: recordWriteNonce(0) OVERWRITES the existing
-// nonce versionedWrite 2->0), then the destruction is REVERTED. selfdestructChange.revert
-// must restore the pre-destruct nonce (2), not leave the clobbered 0 — otherwise the
-// reverted account's nonce is wrong in state root and BAL (bal_dirty_account_selfdestruct
-// [...destruction_reverts]).
-func TestEIP8246_SelfdestructVersioned_RevertRestoresBumpedNonce(t *testing.T) {
+// A same-tx-created contract bumps its nonce (e.g. it CREATEs a child) and then
+// SELFDESTRUCTs (EIP-8246 preserve-balance). The versioned self-destruct must
+// NOT clear the nonce/code cells: the account is alive until finalize, and a
+// same-tx re-creation at the address reads those cells for its collision check —
+// zeroing them there is invisible to the collision but zeroing the versioned
+// WRITE made the re-creation abort with a phantom collision. It must also survive
+// a revert with the bumped nonce intact.
+func TestEIP8246_SelfdestructVersioned_PreservesBumpedNonce(t *testing.T) {
 	t.Parallel()
 	addr := accounts.InternAddress(common.HexToAddress("0x8246F"))
 	reader := newAccountStateReader()
@@ -36,11 +37,11 @@ func TestEIP8246_SelfdestructVersioned_RevertRestoresBumpedNonce(t *testing.T) {
 	require.NoError(t, err)
 	n, err := ibs.GetNonce(addr)
 	require.NoError(t, err)
-	require.Equal(t, uint64(0), n, "nonce is cleared while the self-destruct is in effect")
+	require.Equal(t, uint64(2), n, "preserve-balance self-destruct must not clobber the bumped nonce")
 
 	ibs.RevertToSnapshot(snap, nil)
 
 	n, err = ibs.GetNonce(addr)
 	require.NoError(t, err)
-	require.Equal(t, uint64(2), n, "reverting the self-destruct must restore the pre-destruct bumped nonce, not the clobbered 0")
+	require.Equal(t, uint64(2), n, "reverting the self-destruct leaves the bumped nonce intact")
 }
