@@ -130,5 +130,10 @@ func ReadRabbits(out []uint64, r io.Reader) ([]uint64, error) {
 	if uint64(len(out)) != length {
 		return nil, fmt.Errorf("rabbit: decoded %d elements, header declared %d", len(out), length)
 	}
+	// WriteRabbits always emits a contiguous-run count last, so a stream that stops
+	// while one is still expected is truncated or has trailing junk.
+	if active {
+		return nil, errors.New("rabbit: stream ends without a trailing contiguous-run count")
+	}
 	return out, nil
 }
