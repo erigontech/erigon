@@ -33,6 +33,7 @@ import (
 	"github.com/erigontech/erigon/cl/phase1/execution_client/block_collector"
 	"github.com/erigontech/erigon/cl/phase1/forkchoice"
 	"github.com/erigontech/erigon/cl/phase1/network"
+	"github.com/erigontech/erigon/cl/utils"
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
@@ -110,22 +111,6 @@ func clampProgress(highestBlockSeen, floor, current uint64) (processed, total ui
 	floor = min(floor, highestBlockSeen)
 	processed = highestBlockSeen - current
 	total = max(highestBlockSeen-floor, processed)
-	return
-}
-
-// historyDownloadProgress derives EL history-download progress and ETA for
-// logging, guarding both the unsigned subtractions and the time.Duration
-// (int64 ns) multiplication against overflow.
-func historyDownloadProgress(highestBlockSeen, lowestBlockToReach, currentBlock uint64, speed float64) (processed, toprocess uint64, eta time.Duration) {
-	processed, toprocess = clampProgress(highestBlockSeen, max(lowestBlockToReach, 1), currentBlock)
-	if speed > 0 {
-		secs := float64(toprocess-processed) / speed
-		if maxSecs := float64(math.MaxInt64) / float64(time.Second); secs > maxSecs {
-			eta = time.Duration(math.MaxInt64)
-		} else {
-			eta = time.Duration(secs) * time.Second
-		}
-	}
 	return
 }
 
@@ -372,10 +357,11 @@ func SpawnStageHistoryDownload(cfg StageHistoryReconstructionCfg, ctx context.Co
 				logger.Debug(logMsg, logArgs...)
 
 				if !isDownloadingForBeacon {
-					processed, toprocess, eta := historyDownloadProgress(highestBlockSeen, lowestBlockToReach, uint64(currEth1Progress.Load()), speed)
+					// Genesis block (0) is never collected, so the lowest reachable EL block is 1.
+					processed, toprocess := clampProgress(highestBlockSeen, max(lowestBlockToReach, 1), uint64(currEth1Progress.Load()))
 					log.Info("Downloading Execution History", "progress",
 						fmt.Sprintf("%d/%d", processed, toprocess),
-						"ETA", eta.String(),
+						"ETA", utils.ETA(toprocess-processed, speed),
 						"blk/sec", fmt.Sprintf("%.1f", speed))
 				} else {
 					processed, toprocess := clampProgress(highestBlockSeen, lowestBlockToReach, currProgress)

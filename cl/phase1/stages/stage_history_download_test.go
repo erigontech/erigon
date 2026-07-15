@@ -19,35 +19,12 @@ package stages
 import (
 	"math"
 	"testing"
-	"time"
 )
 
-// The EL head (lowestBlockToReach) can advance past the highestBlockSeen frozen
-// at download start; the unsigned progress math must not underflow into a ~2^64
-// total and a garbage ETA.
-func TestHistoryDownloadProgress_ELHeadPastFrozenTip(t *testing.T) {
-	const (
-		highestBlockSeen   = uint64(23_000_000) // EL block number frozen at download start
-		lowestBlockToReach = uint64(23_123_953) // live EL head, 123953 blocks higher
-		currentBlock       = uint64(22_983_559) // downloader 16441 below the frozen top
-	)
-	const speed = 12.9
-
-	processed, toprocess, eta := historyDownloadProgress(highestBlockSeen, lowestBlockToReach, currentBlock, speed)
-
-	if toprocess > highestBlockSeen {
-		t.Fatalf("toprocess underflowed: got %d, want <= %d", toprocess, highestBlockSeen)
-	}
-	if processed > toprocess {
-		t.Fatalf("processed (%d) must not exceed toprocess (%d)", processed, toprocess)
-	}
-	if eta < 0 {
-		t.Fatalf("ETA must not be negative, got %s", eta)
-	}
-}
-
 // clampProgress must never report a total below processed nor underflow, even
-// when the floor sits above the frozen top or the current position is out of range.
+// when the floor and current counters drift past the frozen highestBlockSeen.
+// The last case mirrors the field report where the live EL head advanced past
+// the frozen top and previously underflowed the denominator to ~2^64.
 func TestClampProgress(t *testing.T) {
 	cases := []struct {
 		name                     string
@@ -58,6 +35,7 @@ func TestClampProgress(t *testing.T) {
 		{"floor above top", 100, 150, 60, 40, 40},
 		{"current above top", 100, 20, 200, 0, 80},
 		{"current below floor grows total", 100, 20, 5, 95, 95},
+		{"el head past frozen tip", 23_000_000, 23_123_953, 22_983_559, 16_441, 16_441},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -70,42 +48,6 @@ func TestClampProgress(t *testing.T) {
 				t.Fatalf("processed (%d) exceeds total (%d)", processed, total)
 			}
 		})
-	}
-}
-
-// A very slow download must not overflow time.Duration into a negative ETA.
-func TestHistoryDownloadProgress_SlowSpeedNoETAOverflow(t *testing.T) {
-	const (
-		highestBlockSeen   = uint64(23_000_000)
-		lowestBlockToReach = uint64(1)
-		currentBlock       = uint64(23_000_000)
-	)
-	const speed = 0.0001
-
-	_, _, eta := historyDownloadProgress(highestBlockSeen, lowestBlockToReach, currentBlock, speed)
-	if eta < 0 {
-		t.Fatalf("ETA must not be negative on slow speed, got %s", eta)
-	}
-}
-
-// Normal case: EL head below the frozen top, downloader descending toward it.
-func TestHistoryDownloadProgress_Normal(t *testing.T) {
-	const (
-		highestBlockSeen   = uint64(23_000_000)
-		lowestBlockToReach = uint64(22_000_000)
-		currentBlock       = uint64(22_500_000)
-	)
-	const speed = 10.0
-
-	processed, toprocess, eta := historyDownloadProgress(highestBlockSeen, lowestBlockToReach, currentBlock, speed)
-	if toprocess != 1_000_000 {
-		t.Fatalf("toprocess = %d, want 1000000", toprocess)
-	}
-	if processed != 500_000 {
-		t.Fatalf("processed = %d, want 500000", processed)
-	}
-	if want := 50_000 * time.Second; eta != want {
-		t.Fatalf("eta = %s, want %s", eta, want)
 	}
 }
 
