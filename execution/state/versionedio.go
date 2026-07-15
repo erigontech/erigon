@@ -2240,10 +2240,11 @@ func (io *VersionedIO) AsBlockAccessList() types.BlockAccessList {
 				continue
 			}
 			account := ensureAccountState(ac, addr)
-			// An empty pre-block code hash means pre-block code was empty, so a same-tx
-			// code set-then-clear (e.g. an EIP-7702 delegation set then cleared) nets to
-			// empty and must not be recorded as a code change (see applyToCode).
-			if tr.Val == accounts.EmptyCodeHash || tr.Val == (accounts.CodeHash{}) {
+			// A pre-block-empty code hash marks the baseline empty so applyToCode drops a
+			// net-zero same-tx set-then-clear. Only an empty read seen before any code
+			// change is the pre-block value — a later read of an already-cleared delegation
+			// also reads empty and must not poison the baseline into dropping that clear.
+			if tr.Val.IsEmpty() && len(account.code.changes.entries) == 0 {
 				account.initialCodeEmpty = true
 			}
 		}

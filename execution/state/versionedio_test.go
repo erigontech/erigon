@@ -1783,3 +1783,43 @@ func TestSetAccountBalanceOrDelete_IncarnationPathOnly_AppendBalanceNotFullAccou
 	_, ok = result.GetCodeHash(addr)
 	require.False(t, ok, "CodeHashPath must NOT be re-emitted from stale snapshot")
 }
+
+// A mid-block read of a cleared delegation's code hash must not poison
+// initialCodeEmpty and drop the clearing tx's real code change.
+func TestVersionedIO_MidBlockEmptyCodeHashReadMustNotDropRealClear(t *testing.T) {
+	t.Parallel()
+
+	addr := accounts.InternAddress(common.HexToAddress("0xdead7702"))
+	delegation := accounts.NewCode([]byte{0xef, 0x01, 0x00, 0x11, 0x22})
+
+	io := NewVersionedIO(2)
+
+	// tx0: auth processing reads the authority's pre-tx (non-empty) code hash,
+	// then clears the delegation and bumps the nonce.
+	reads0 := ReadSet{}
+	reads0.SetCodeHash(addr, VersionedRead[accounts.CodeHash]{Val: delegation.Hash})
+	io.RecordReads(Version{TxIndex: 0}, reads0)
+	io.RecordWrites(Version{TxIndex: 0}, newWriteSet(
+		&VersionedWrite[uint64]{WriteHeader: WriteHeader{Address: addr, Path: NoncePath, Version: Version{TxIndex: 0}}, Val: uint64(5)},
+		&VersionedWrite[accounts.Code]{WriteHeader: WriteHeader{Address: addr, Path: CodePath, Version: Version{TxIndex: 0}}, Val: accounts.Code{}},
+	))
+
+	// tx1: reads the (now cleared) code hash mid-block.
+	reads1 := ReadSet{}
+	reads1.SetCodeHash(addr, VersionedRead[accounts.CodeHash]{Val: accounts.EmptyCodeHash})
+	io.RecordReads(Version{TxIndex: 1}, reads1)
+
+	bal := io.AsBlockAccessList()
+
+	found := false
+	for _, ac := range bal {
+		if ac.Address == addr {
+			found = true
+			require.Len(t, ac.CodeChanges, 1,
+				"the delegation clear is a real pre!=post code change and must stay in the BAL\n%s", bal.DebugString())
+			require.Equal(t, uint32(1), ac.CodeChanges[0].Index)
+			require.Empty(t, ac.CodeChanges[0].Bytecode)
+		}
+	}
+	require.True(t, found, "authority account must appear in BAL")
+}
