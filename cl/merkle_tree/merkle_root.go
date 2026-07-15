@@ -142,6 +142,25 @@ func ProgressiveContainerRootAll(schema ...any) ([32]byte, error) {
 	return ProgressiveContainerRoot(activeFields, schema...)
 }
 
+func ProgressiveContainerProofAll(fieldIndex int, schema ...any) ([][32]byte, error) {
+	if fieldIndex < 0 || fieldIndex >= len(schema) {
+		return nil, errors.New("progressive container field index out of range")
+	}
+	roots, err := progressiveSchemaRoots(schema)
+	if err != nil {
+		return nil, err
+	}
+	proof, err := progressiveProof(roots, fieldIndex, 1)
+	if err != nil {
+		return nil, err
+	}
+	var activeRoot [32]byte
+	for i := range schema {
+		activeRoot[i/8] |= 1 << uint(i%8)
+	}
+	return append(proof, activeRoot), nil
+}
+
 func ProgressiveListRoot(roots [][32]byte, listLength uint64) ([32]byte, error) {
 	root, err := MerkleizeProgressive(roots)
 	if err != nil {
@@ -187,6 +206,56 @@ func merkleizeProgressive(chunks [][32]byte, numLeaves uint64) ([32]byte, error)
 		return [32]byte{}, err
 	}
 	return hashPair(left, right), nil
+}
+
+func progressiveProof(chunks [][32]byte, target int, numLeaves uint64) ([][32]byte, error) {
+	if target < 0 || target >= len(chunks) {
+		return nil, errors.New("progressive proof target out of range")
+	}
+	count := min(len(chunks), int(numLeaves))
+	left := append([][32]byte(nil), chunks[:count]...)
+	leftRoot, err := MerkleizeVector(append([][32]byte(nil), left...), numLeaves)
+	if err != nil {
+		return nil, err
+	}
+	if numLeaves > ^uint64(0)/4 {
+		return nil, errors.New("progressive merkle tree is too large")
+	}
+	rightRoot, err := merkleizeProgressive(append([][32]byte(nil), chunks[count:]...), numLeaves*4)
+	if err != nil {
+		return nil, err
+	}
+	if target < count {
+		proof, err := vectorProof(left, target, int(numLeaves))
+		if err != nil {
+			return nil, err
+		}
+		return append(proof, rightRoot), nil
+	}
+	proof, err := progressiveProof(chunks[count:], target-count, numLeaves*4)
+	if err != nil {
+		return nil, err
+	}
+	return append(proof, leftRoot), nil
+}
+
+func vectorProof(chunks [][32]byte, target, capacity int) ([][32]byte, error) {
+	if capacity < 1 || target < 0 || target >= len(chunks) || len(chunks) > capacity {
+		return nil, errors.New("vector proof target out of range")
+	}
+	nodes := make([][32]byte, capacity)
+	copy(nodes, chunks)
+	proof := make([][32]byte, 0, GetDepth(uint64(capacity)))
+	for len(nodes) > 1 {
+		proof = append(proof, nodes[target^1])
+		next := make([][32]byte, len(nodes)/2)
+		for i := range next {
+			next[i] = hashPair(nodes[i*2], nodes[i*2+1])
+		}
+		nodes = next
+		target /= 2
+	}
+	return proof, nil
 }
 
 func progressiveSchemaRoots(schema []any) ([][32]byte, error) {

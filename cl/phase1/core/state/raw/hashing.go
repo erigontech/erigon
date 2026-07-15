@@ -76,7 +76,11 @@ func (b *BeaconState) CurrentSyncCommitteeBranch() ([][32]byte, error) {
 		leafSize = StateLeafSizeFulu
 	}
 	if b.Version() >= clparams.GloasVersion {
-		leafSize = StateLeafSizeGloas
+		schema := make([]any, StateLeafSizeGloas)
+		for i := range schema {
+			schema[i] = b.leaves[i*32 : (i+1)*32]
+		}
+		return merkle_tree.ProgressiveContainerProofAll(22, schema...)
 	}
 
 	schema := []any{}
@@ -102,7 +106,11 @@ func (b *BeaconState) NextSyncCommitteeBranch() ([][32]byte, error) {
 		leafSize = StateLeafSizeFulu
 	}
 	if b.Version() >= clparams.GloasVersion {
-		leafSize = StateLeafSizeGloas
+		schema := make([]any, StateLeafSizeGloas)
+		for i := range schema {
+			schema[i] = b.leaves[i*32 : (i+1)*32]
+		}
+		return merkle_tree.ProgressiveContainerProofAll(23, schema...)
 	}
 
 	schema := []any{}
@@ -127,7 +135,15 @@ func (b *BeaconState) FinalityRootBranch() ([][32]byte, error) {
 		leafSize = StateLeafSizeFulu
 	}
 	if b.Version() >= clparams.GloasVersion {
-		leafSize = StateLeafSizeGloas
+		schema := make([]any, StateLeafSizeGloas)
+		for i := range schema {
+			schema[i] = b.leaves[i*32 : (i+1)*32]
+		}
+		proof, err := merkle_tree.ProgressiveContainerProofAll(20, schema...)
+		if err != nil {
+			return nil, err
+		}
+		return append([][32]byte{merkle_tree.Uint64Root(b.finalizedCheckpoint.Epoch)}, proof...), nil
 	}
 
 	schema := []any{}
