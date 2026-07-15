@@ -3046,6 +3046,9 @@ func (sdb *IntraBlockState) ApplyVersionedWrites(writes *WriteSet) error {
 				sdb.recordWriteSelfDestruct(addr, false)
 			}
 		case CreateContractPath:
+			if sw, ok := writes.GetSelfDestruct(addr); ok && sw.Val {
+				continue
+			}
 			// Contract creation: set createdContract flag on the stateObject.
 			so, err := sdb.GetOrNewStateObject(addr)
 			if err != nil {

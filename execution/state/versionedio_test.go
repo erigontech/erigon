@@ -1044,6 +1044,32 @@ func TestApplyVersionedWrites_NewAccountNoBalanceRead(t *testing.T) {
 		"newly-created account (not in DB) should NOT generate a BalancePath read")
 }
 
+func TestApplyVersionedWrites_SelfDestructDominatesCreateContract(t *testing.T) {
+	t.Parallel()
+
+	addr := accounts.InternAddress(common.HexToAddress("0xF600"))
+	vm := NewVersionMap(nil)
+	ibs := New(NewVersionedStateReader(0, ReadSet{}, vm, &minimalStateReader{}))
+	ibs.SetTxContext(1, 0)
+	ibs.SetVersionMap(vm)
+
+	writes := &WriteSet{}
+	writes.SetSelfDestruct(addr, &VersionedWrite[bool]{
+		WriteHeader: WriteHeader{Address: addr, Path: SelfDestructPath},
+		Val:         true,
+	})
+	writes.SetCreateContract(addr, &VersionedWrite[bool]{
+		WriteHeader: WriteHeader{Address: addr, Path: CreateContractPath},
+		Val:         true,
+	})
+
+	require.NoError(t, ibs.ApplyVersionedWrites(writes))
+	stateObject := ibs.stateObjects[addr]
+	require.NotNil(t, stateObject)
+	require.True(t, stateObject.selfdestructed)
+	require.False(t, stateObject.createdContract)
+}
+
 // recordTouch records an address-level ephemeral access for txIndex via the
 // access map (accesses feed the BAL through RecordAccesses).
 func recordTouch(io *VersionedIO, txIndex int, addr accounts.Address, revertable bool) {
