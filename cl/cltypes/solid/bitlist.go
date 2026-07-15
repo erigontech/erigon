@@ -188,6 +188,16 @@ func (u *BitList) HashSSZ() ([32]byte, error) {
 	return merkle_tree.BitlistRootWithLimit(u.u[:u.l], uint64(u.c))
 }
 
+func (u *BitList) HashSSZProgressive() ([32]byte, error) {
+	bitLength := u.Bits()
+	packed := append([]byte(nil), u.Bytes()...)
+	if bitLength < len(packed)*8 {
+		packed[bitLength/8] &^= 1 << uint(bitLength%8)
+	}
+	packed = packed[:(bitLength+7)/8]
+	return merkle_tree.ProgressiveBitlistRoot(packed, uint64(bitLength))
+}
+
 // EncodeSSZ appends the underlying byte slice of the BitList to the destination byte slice.
 // It returns the resulting byte slice.
 func (u *BitList) EncodeSSZ(dst []byte) ([]byte, error) {

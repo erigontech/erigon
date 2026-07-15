@@ -17,6 +17,7 @@
 package merkle_tree
 
 import (
+	"crypto/sha256"
 	"encoding/binary"
 	"errors"
 	"fmt"
@@ -99,6 +100,131 @@ func HashTreeRoot(schema ...any) ([32]byte, error) {
 
 	// Convert the bytes of the resulting hash into a [32]byte and return it
 	return common.BytesToHash(leaves[:length.Hash]), nil
+}
+
+func ProgressiveContainerRoot(activeFields []bool, schema ...any) ([32]byte, error) {
+	if len(activeFields) == 0 || len(activeFields) > 256 || !activeFields[len(activeFields)-1] {
+		return [32]byte{}, errors.New("invalid progressive container active fields")
+	}
+	roots, err := progressiveSchemaRoots(schema)
+	if err != nil {
+		return [32]byte{}, err
+	}
+	chunks := make([][32]byte, len(activeFields))
+	rootIndex := 0
+	var activeRoot [32]byte
+	for i, active := range activeFields {
+		if !active {
+			continue
+		}
+		if rootIndex >= len(roots) {
+			return [32]byte{}, errors.New("progressive container has fewer fields than active bits")
+		}
+		chunks[i] = roots[rootIndex]
+		activeRoot[i/8] |= 1 << uint(i%8)
+		rootIndex++
+	}
+	if rootIndex != len(roots) {
+		return [32]byte{}, errors.New("progressive container has more fields than active bits")
+	}
+	root, err := MerkleizeProgressive(chunks)
+	if err != nil {
+		return [32]byte{}, err
+	}
+	return hashPair(root, activeRoot), nil
+}
+
+func ProgressiveContainerRootAll(schema ...any) ([32]byte, error) {
+	activeFields := make([]bool, len(schema))
+	for i := range activeFields {
+		activeFields[i] = true
+	}
+	return ProgressiveContainerRoot(activeFields, schema...)
+}
+
+func ProgressiveListRoot(roots [][32]byte, listLength uint64) ([32]byte, error) {
+	root, err := MerkleizeProgressive(roots)
+	if err != nil {
+		return [32]byte{}, err
+	}
+	return hashPair(root, Uint64Root(listLength)), nil
+}
+
+func ProgressiveBitlistRoot(packed []byte, bitLength uint64) ([32]byte, error) {
+	chunks := make([][32]byte, (len(packed)+31)/32)
+	for i := range packed {
+		chunks[i/32][i%32] = packed[i]
+	}
+	return ProgressiveListRoot(chunks, bitLength)
+}
+
+func ProgressiveBasicListRoot(packed []byte, listLength uint64) ([32]byte, error) {
+	chunks := make([][32]byte, (len(packed)+31)/32)
+	for i := range packed {
+		chunks[i/32][i%32] = packed[i]
+	}
+	return ProgressiveListRoot(chunks, listLength)
+}
+
+func MerkleizeProgressive(chunks [][32]byte) ([32]byte, error) {
+	return merkleizeProgressive(chunks, 1)
+}
+
+func merkleizeProgressive(chunks [][32]byte, numLeaves uint64) ([32]byte, error) {
+	if len(chunks) == 0 {
+		return [32]byte{}, nil
+	}
+	count := min(uint64(len(chunks)), numLeaves)
+	left, err := MerkleizeVector(chunks[:count], numLeaves)
+	if err != nil {
+		return [32]byte{}, err
+	}
+	if numLeaves > ^uint64(0)/4 {
+		return [32]byte{}, errors.New("progressive merkle tree is too large")
+	}
+	right, err := merkleizeProgressive(chunks[count:], numLeaves*4)
+	if err != nil {
+		return [32]byte{}, err
+	}
+	return hashPair(left, right), nil
+}
+
+func progressiveSchemaRoots(schema []any) ([][32]byte, error) {
+	roots := make([][32]byte, len(schema))
+	for i, element := range schema {
+		switch obj := element.(type) {
+		case uint64:
+			binary.LittleEndian.PutUint64(roots[i][:], obj)
+		case *uint64:
+			binary.LittleEndian.PutUint64(roots[i][:], *obj)
+		case []byte:
+			if len(obj) < length.Hash {
+				copy(roots[i][:], obj)
+				continue
+			}
+			root, err := BytesRoot(obj)
+			if err != nil {
+				return nil, err
+			}
+			roots[i] = root
+		case ssz.HashableSSZ:
+			root, err := obj.HashSSZ()
+			if err != nil {
+				return nil, err
+			}
+			roots[i] = root
+		default:
+			panic(fmt.Sprintf("Can't create TreeRoot: unsported type %T at index %d", i, obj))
+		}
+	}
+	return roots, nil
+}
+
+func hashPair(left, right [32]byte) [32]byte {
+	var pair [64]byte
+	copy(pair[:32], left[:])
+	copy(pair[32:], right[:])
+	return sha256.Sum256(pair[:])
 }
 
 // HashByteSlice is gohashtree HashBytSlice but using our hopefully safer header conversion

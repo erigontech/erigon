@@ -154,7 +154,27 @@ func (e *ExecutionRequests) HashSSZ() ([32]byte, error) {
 	if e.effectiveVersion() < clparams.GloasVersion {
 		return merkle_tree.HashTreeRoot(e.Deposits, e.Withdrawals, e.Consolidations)
 	}
-	return merkle_tree.HashTreeRoot(e.Deposits, e.Withdrawals, e.Consolidations, e.BuilderDeposits, e.BuilderExits)
+	deposits, err := e.Deposits.HashSSZProgressive(nil)
+	if err != nil {
+		return [32]byte{}, err
+	}
+	withdrawals, err := e.Withdrawals.HashSSZProgressive(nil)
+	if err != nil {
+		return [32]byte{}, err
+	}
+	consolidations, err := e.Consolidations.HashSSZProgressive(nil)
+	if err != nil {
+		return [32]byte{}, err
+	}
+	builderDeposits, err := e.BuilderDeposits.HashSSZProgressive(nil)
+	if err != nil {
+		return [32]byte{}, err
+	}
+	builderExits, err := e.BuilderExits.HashSSZProgressive(nil)
+	if err != nil {
+		return [32]byte{}, err
+	}
+	return merkle_tree.ProgressiveContainerRootAll(deposits[:], withdrawals[:], consolidations[:], builderDeposits[:], builderExits[:])
 }
 
 func (e *ExecutionRequests) Static() bool {

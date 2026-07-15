@@ -155,6 +155,17 @@ func (a *Attestation) HashSSZ() (o [32]byte, err error) {
 	return merkle_tree.HashTreeRoot(a.AggregationBits, a.Data, a.Signature[:])
 }
 
+func (a *Attestation) HashSSZProgressive() ([32]byte, error) {
+	aggregationBitsRoot, err := a.AggregationBits.HashSSZProgressive()
+	if err != nil {
+		return [32]byte{}, err
+	}
+	if a.CommitteeBits != nil {
+		return merkle_tree.ProgressiveContainerRootAll(aggregationBitsRoot[:], a.Data, a.Signature[:], a.CommitteeBits)
+	}
+	return merkle_tree.ProgressiveContainerRootAll(aggregationBitsRoot[:], a.Data, a.Signature[:])
+}
+
 // Clone creates a new clone of the Attestation instance.
 func (a *Attestation) Clone() clonable.Clonable {
 	return &Attestation{}

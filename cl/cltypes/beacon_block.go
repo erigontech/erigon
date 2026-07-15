@@ -509,7 +509,60 @@ func (b *BeaconBody) Blinded() (*BlindedBeaconBody, error) {
 
 func (b *BeaconBody) HashSSZ() ([32]byte, error) {
 	b.ensureNilFields()
+	if b.Version >= clparams.GloasVersion {
+		return b.hashSSZGloas()
+	}
 	return merkle_tree.HashTreeRoot(b.getSchema(false)...)
+}
+
+func (b *BeaconBody) hashSSZGloas() ([32]byte, error) {
+	proposerSlashings, err := b.ProposerSlashings.HashSSZProgressive(nil)
+	if err != nil {
+		return [32]byte{}, err
+	}
+	attesterSlashings, err := b.AttesterSlashings.HashSSZProgressive(func(slashing *AttesterSlashing) ([32]byte, error) {
+		return slashing.HashSSZProgressive()
+	})
+	if err != nil {
+		return [32]byte{}, err
+	}
+	attestations, err := b.Attestations.HashSSZProgressive(func(att *solid.Attestation) ([32]byte, error) {
+		return att.HashSSZProgressive()
+	})
+	if err != nil {
+		return [32]byte{}, err
+	}
+	deposits, err := b.Deposits.HashSSZProgressive(nil)
+	if err != nil {
+		return [32]byte{}, err
+	}
+	voluntaryExits, err := b.VoluntaryExits.HashSSZProgressive(nil)
+	if err != nil {
+		return [32]byte{}, err
+	}
+	executionChanges, err := b.ExecutionChanges.HashSSZProgressive(nil)
+	if err != nil {
+		return [32]byte{}, err
+	}
+	payloadAttestations, err := b.PayloadAttestations.HashSSZProgressive(nil)
+	if err != nil {
+		return [32]byte{}, err
+	}
+	return merkle_tree.ProgressiveContainerRootAll(
+		b.RandaoReveal[:],
+		b.Eth1Data,
+		b.Graffiti[:],
+		proposerSlashings[:],
+		attesterSlashings[:],
+		attestations[:],
+		deposits[:],
+		voluntaryExits[:],
+		b.SyncAggregate,
+		executionChanges[:],
+		b.SignedExecutionPayloadBid,
+		payloadAttestations[:],
+		b.ParentExecutionRequests,
+	)
 }
 
 func (b *BeaconBody) getSchema(storage bool) []any {
