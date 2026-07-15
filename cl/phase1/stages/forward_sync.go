@@ -183,17 +183,8 @@ func processDownloadedBlockBatches(ctx context.Context, logger log.Logger, cfg *
 				return highestBlockProcessed, nil
 			}
 			if errors.Is(err, forkchoice.ErrNotFinalizedDescendant) {
-				// Block is on a different fork than our finalized chain.
-				// Common on devnets with stalled finality where the beacon API
-				// may return blocks from different forks at different slots.
-				// Skip this block but still advance progress so the downloader
-				// doesn't retry the same slot range indefinitely.
-				logger.Debug("[Caplin] forward sync: block not on finalized chain, skipping", "blockSlot", block.Block.Slot)
-				if newHighestBlockProcessed < block.Block.Slot {
-					newHighestBlockProcessed = block.Block.Slot
-				}
-				err = nil
-				continue
+				logger.Debug("[Caplin] forward sync: block not on finalized chain, will retry", "blockSlot", block.Block.Slot)
+				return progressAfterNotFinalizedDescendant(highestBlockProcessed, newHighestBlockProcessed), nil
 			}
 			// Return an error if block processing fails
 			err = fmt.Errorf("bad blocks segment received: %w", err)
@@ -279,6 +270,10 @@ func forwardSyncProgress(chainTipSlot, currentSlot, prevProgress uint64, secsPer
 		ratePerSec = float64(currentSlot-prevProgress) / float64(secsPerLog)
 	}
 	return
+}
+
+func progressAfterNotFinalizedDescendant(initial, accepted uint64) uint64 {
+	return max(initial, accepted)
 }
 
 // forwardSync (MAIN ROUTINE FOR ForwardSync) performs the forward synchronization of beacon blocks.

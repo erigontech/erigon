@@ -1,4 +1,4 @@
-// Copyright 2024 The Erigon Authors
+// Copyright 2026 The Erigon Authors
 // This file is part of Erigon.
 //
 // Erigon is free software: you can redistribute it and/or modify
@@ -18,6 +18,8 @@ package stages
 
 import (
 	"testing"
+
+	"github.com/stretchr/testify/require"
 )
 
 // currentSlot can overshoot the captured chainTipSlot; slotsRemaining must clamp
@@ -52,5 +54,25 @@ func TestForwardSyncProgress_Normal(t *testing.T) {
 	}
 	if ratePerSec != 10 { // (900000-899700)/30
 		t.Fatalf("ratePerSec = %g, want 10", ratePerSec)
+	}
+}
+
+func TestProgressAfterNotFinalizedDescendant(t *testing.T) {
+	tests := []struct {
+		name     string
+		initial  uint64
+		accepted uint64
+		want     uint64
+	}{
+		{name: "first block rejected", initial: 1_280, accepted: 1_280, want: 1_280},
+		{name: "keep accepted prefix", initial: 1_280, accepted: 1_412, want: 1_412},
+		{name: "ignore stale accepted slot", initial: 1_280, accepted: 1_279, want: 1_280},
+		{name: "maximum slot", initial: ^uint64(0) - 1, accepted: ^uint64(0), want: ^uint64(0)},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			require.Equal(t, tt.want, progressAfterNotFinalizedDescendant(tt.initial, tt.accepted))
+		})
 	}
 }
