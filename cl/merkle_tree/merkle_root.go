@@ -39,8 +39,7 @@ const maxStackLeaves = 16
 // IMPORTANT: DATA TYPE MUST IMPLEMENT HASHABLE
 // SUPPORTED PRIMITIVES: uint64, *uint64 and []byte
 func HashTreeRoot(schema ...any) ([32]byte, error) {
-	// Calculate the total number of leaves needed based on the schema length
-	var stack [maxStackLeaves * length.Hash]byte
+	var stack [maxStackLeaves * length.Hash]byte // stack-allocation for most of cases
 	size := NextPowerOfTwo(uint64(len(schema) * length.Hash))
 	var leaves []byte
 	stackHit := size <= uint64(len(stack))
