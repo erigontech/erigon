@@ -50,9 +50,17 @@ type gossipMessage struct {
 	Reason   string `yaml:"reason"`
 }
 
+type gossipConfig struct {
+	CapellaForkEpoch uint64 `yaml:"CAPELLA_FORK_EPOCH"`
+}
+
 func gossipBLSToExecutionChangeHandler(t *testing.T, root fs.FS, c spectest.TestCase) error {
 	beaconState, meta, err := readGossipStateAndMeta(root, c)
 	if err != nil {
+		return err
+	}
+	var config gossipConfig
+	if err := spectest.ReadYml(root, "config.yaml", &config); err != nil {
 		return err
 	}
 	seen := make(map[uint64]struct{})
@@ -61,7 +69,7 @@ func gossipBLSToExecutionChangeHandler(t *testing.T, root fs.FS, c spectest.Test
 		if err := spectest.ReadSszOld(root, change, c.Version(), message.Message+".ssz_snappy"); err != nil {
 			return err
 		}
-		result := validateGossipBLSToExecutionChange(beaconState, change, seen)
+		result := validateGossipBLSToExecutionChange(beaconState, change, meta.CurrentTimeMS+message.OffsetMS, config.CapellaForkEpoch, seen)
 		if result != message.Expected {
 			return gossipResultError(i, message, result)
 		}
@@ -72,9 +80,19 @@ func gossipBLSToExecutionChangeHandler(t *testing.T, root fs.FS, c spectest.Test
 	return nil
 }
 
-func validateGossipBLSToExecutionChange(beaconState *state.CachingBeaconState, signedChange *cltypes.SignedBLSToExecutionChange, seen map[uint64]struct{}) string {
+func validateGossipBLSToExecutionChange(
+	beaconState *state.CachingBeaconState,
+	signedChange *cltypes.SignedBLSToExecutionChange,
+	currentTimeMS uint64,
+	capellaForkEpoch uint64,
+	seen map[uint64]struct{},
+) string {
 	if signedChange == nil || signedChange.Message == nil {
 		return "reject"
+	}
+	currentSlot, ok := gossipCurrentSlot(beaconState, currentTimeMS)
+	if !ok || currentSlot/beaconState.BeaconConfig().SlotsPerEpoch < capellaForkEpoch {
+		return "ignore"
 	}
 	change := signedChange.Message
 	if _, ok := seen[change.ValidatorIndex]; ok {
@@ -305,11 +323,16 @@ func readGossipStateAndMeta(root fs.FS, c spectest.TestCase) (*state.CachingBeac
 }
 
 func gossipSlotIsCurrent(beaconState *state.CachingBeaconState, slot uint64, currentTimeMS uint64) bool {
+	currentSlot, ok := gossipCurrentSlot(beaconState, currentTimeMS)
+	return ok && slot == currentSlot
+}
+
+func gossipCurrentSlot(beaconState *state.CachingBeaconState, currentTimeMS uint64) (uint64, bool) {
 	genesisTimeMS := beaconState.GenesisTime() * 1000
 	if currentTimeMS < genesisTimeMS {
-		return false
+		return 0, false
 	}
-	return slot == (currentTimeMS-genesisTimeMS)/(beaconState.BeaconConfig().SecondsPerSlot*1000)
+	return (currentTimeMS - genesisTimeMS) / (beaconState.BeaconConfig().SecondsPerSlot * 1000), true
 }
 
 func gossipSyncSubcommitteePublicKeys(beaconState *state.CachingBeaconState, subcommitteeIndex uint64) []common.Bytes48 {
