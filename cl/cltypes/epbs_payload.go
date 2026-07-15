@@ -275,11 +275,27 @@ type ExecutionPayloadBid struct {
 }
 
 func (e *ExecutionPayloadBid) HashSSZ() ([32]byte, error) {
-	blobRoot, err := e.BlobKzgCommitments.HashSSZProgressive(nil)
+	schema, err := e.hashSchema()
 	if err != nil {
 		return [32]byte{}, err
 	}
-	return merkle_tree.ProgressiveContainerRootAll(
+	return merkle_tree.ProgressiveContainerRootAll(schema...)
+}
+
+func (e *ExecutionPayloadBid) ParentBlockHashMerkleProof() ([][32]byte, error) {
+	schema, err := e.hashSchema()
+	if err != nil {
+		return nil, err
+	}
+	return merkle_tree.ProgressiveContainerProofAll(0, schema...)
+}
+
+func (e *ExecutionPayloadBid) hashSchema() ([]any, error) {
+	blobRoot, err := e.BlobKzgCommitments.HashSSZProgressive(nil)
+	if err != nil {
+		return nil, err
+	}
+	return []any{
 		e.ParentBlockHash[:],
 		e.ParentBlockRoot[:],
 		e.BlockHash[:],
@@ -292,7 +308,7 @@ func (e *ExecutionPayloadBid) HashSSZ() ([32]byte, error) {
 		e.ExecutionPayment,
 		blobRoot[:],
 		e.ExecutionRequestsRoot[:],
-	)
+	}, nil
 }
 
 func (e *ExecutionPayloadBid) EncodingSizeSSZ() int {
