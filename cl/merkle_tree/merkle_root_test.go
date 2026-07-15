@@ -39,6 +39,11 @@ func TestHashTreeRoot(t *testing.T) {
 	require.Equal(t, common.Hash(root), common.HexToHash("0x9f684cf34c4ac8eb9056051f93498c552b59de6b0977c453ee099be68e58d90c"))
 }
 
+func TestHashTreeRootEmptySchema(t *testing.T) {
+	_, err := merkle_tree.HashTreeRoot()
+	require.Error(t, err)
+}
+
 func TestHashTreeRootTxs(t *testing.T) {
 	txs := [][]byte{
 		{1, 2, 3},
