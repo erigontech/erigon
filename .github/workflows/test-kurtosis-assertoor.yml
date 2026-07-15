@@ -370,6 +370,16 @@ jobs:
             ethereum_package_branch: "6.1.0"
             test_timeout_minutes: 20
             exec_mode: parallel
+          - suite: fusaka-caplin-mixed-three-cl
+            package_args: .github/workflows/kurtosis/fusaka-caplin-mixed-three-cl.io
+            ethereum_package_branch: "6.1.0"
+            test_timeout_minutes: 20
+            exec_mode: serial
+          - suite: fusaka-caplin-mixed-three-cl
+            package_args: .github/workflows/kurtosis/fusaka-caplin-mixed-three-cl.io
+            ethereum_package_branch: "6.1.0"
+            test_timeout_minutes: 20
+            exec_mode: parallel
 
     steps:
       - name: Fast checkout git repository
