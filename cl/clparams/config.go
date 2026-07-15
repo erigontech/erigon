@@ -1081,7 +1081,7 @@ var MainnetBeaconConfig BeaconChainConfig = BeaconChainConfig{
 	MaxDepositRequestsPerPayload:          8192,
 	MaxWithdrawalRequestsPerPayload:       16,
 	MaxConsolidationRequestsPerPayload:    2,
-	MaxBuilderDepositRequestsPerPayload:   256,
+	MaxBuilderDepositRequestsPerPayload:   64,
 	MaxBuilderExitRequestsPerPayload:      16,
 	MinSlashingPenaltyQuotientElectra:     4096,
 	WhistleBlowerRewardQuotientElectra:    4096,
