@@ -322,6 +322,25 @@ func BenchmarkEncodeBlock(b *testing.B) {
 	}
 }
 
+func BenchmarkBodyOnlyTxnDecodeRLPBytes(b *testing.B) {
+	var buf bytes.Buffer
+	if err := rlp.Encode(&buf, &BodyForStorage{BaseTxnID: BaseTxnID(1234567), TxCount: 250}); err != nil {
+		b.Fatal(err)
+	}
+	enc := buf.Bytes()
+
+	var out BodyOnlyTxn
+	b.ReportAllocs()
+	for b.Loop() {
+		if err := out.DecodeRLPBytes(enc); err != nil {
+			b.Fatal(err)
+		}
+	}
+	if out.BaseTxnID != BaseTxnID(1234567) || out.TxCount != 250 {
+		b.Fatalf("unexpected decode result: %+v", out)
+	}
+}
+
 func BenchmarkDecodeBlock(b *testing.B) {
 	block := makeBenchBlock()
 	encoded, err := rlp.EncodeToBytes(block)

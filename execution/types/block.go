@@ -723,15 +723,24 @@ func (b *BodyOnlyTxn) DecodeRLP(s *rlp.Stream) error {
 	if err != nil {
 		return err
 	}
-	// decode BaseTxId
-	if err = s.Decode(&b.BaseTxnID); err != nil {
+	baseTxnID, err := s.Uint64()
+	if err != nil {
 		return err
 	}
-	// decode TxCount
-	if err = s.Decode(&b.TxCount); err != nil {
+	txCount, err := s.Uint32()
+	if err != nil {
 		return err
 	}
+	b.BaseTxnID, b.TxCount = BaseTxnID(baseTxnID), txCount
 	return nil
+}
+
+// DecodeRLPBytes skips the reflect-based decoder that rlp.DecodeBytesPartial needs to
+// reach DecodeRLP, which costs more than the decode itself.
+func (b *BodyOnlyTxn) DecodeRLPBytes(buf []byte) error {
+	s := rlp.NewBytesStream(buf)
+	defer rlp.PutStream(s)
+	return b.DecodeRLP(s)
 }
 
 type BodyForStorage struct {
