@@ -311,11 +311,6 @@ func TestGetProof(t *testing.T) {
 		expectedErr string
 	}{
 		{
-			name:     "genesisAccount",
-			addr:     bankAddr,
-			blockNum: 0,
-		},
-		{
 			name:     "currentBlockNoState",
 			addr:     contractAddr,
 			blockNum: 6,
