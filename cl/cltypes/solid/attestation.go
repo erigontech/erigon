@@ -43,6 +43,11 @@ type Attestation struct {
 	Data            *AttestationData `json:"data"`
 	Signature       common.Bytes96   `json:"signature"`
 	CommitteeBits   *BitVector       `json:"committee_bits,omitempty"` // Electra EIP-7549
+	version         clparams.StateVersion
+}
+
+func (a *Attestation) SetVersion(version clparams.StateVersion) {
+	a.version = version
 }
 
 func (a *Attestation) GetCommitteeIndexFromBits() (uint64, error) {
@@ -75,6 +80,7 @@ func (a *Attestation) Copy() *Attestation {
 	*new.Data = *a.Data
 	copy(new.Signature[:], a.Signature[:])
 	new.CommitteeBits = a.CommitteeBits.Copy()
+	new.version = a.version
 	return new
 }
 
@@ -104,6 +110,7 @@ func (a *Attestation) DecodeSSZ(buf []byte, version int) error {
 // If cfg is nil, mainnet defaults are used.
 func (a *Attestation) DecodeSSZWithConfig(buf []byte, version int, cfg *clparams.BeaconChainConfig) error {
 	clversion := clparams.StateVersion(version)
+	a.version = clversion
 	if clversion.AfterOrEqual(clparams.ElectraVersion) {
 		// The CommitteeBits size depends on MAX_COMMITTEES_PER_SLOT which differs between
 		// mainnet (64) and the minimal preset (4). Instead of hardcoding 64, infer the
@@ -148,6 +155,9 @@ func (a *Attestation) EncodeSSZ(dst []byte) ([]byte, error) {
 
 // HashSSZ hashes the Attestation instance using SSZ.
 func (a *Attestation) HashSSZ() (o [32]byte, err error) {
+	if a.version >= clparams.GloasVersion {
+		return a.HashSSZProgressive()
+	}
 	if a.CommitteeBits != nil {
 		// Electra case
 		return merkle_tree.HashTreeRoot(a.AggregationBits, a.Data, a.Signature[:], a.CommitteeBits)
