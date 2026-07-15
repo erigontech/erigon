@@ -905,19 +905,16 @@ type HistoryRoTx struct {
 	h   *History
 	iit *InvertedIndexRoTx
 
-	files             visibleFiles // have no garbage (canDelete=true, overlaps, etc...)
-	getters           []*seg.Reader
-	readers           []*recsplit.IndexReader
-	stepSize          uint64
-	stepsInFrozenFile uint64
-
-	trace bool
+	files    visibleFiles // have no garbage (canDelete=true, overlaps, etc...)
+	getters  []*seg.Reader
+	readers  []*recsplit.IndexReader
+	stepSize uint64
 
 	valsC    kv.Cursor
 	valsCDup kv.CursorDupSort
 
-	_bufTs           []byte
-	snappyReadBuffer []byte
+	_bufTs              []byte
+	blockCompressionBuf []byte
 }
 
 func (h *History) beginForTests() *HistoryRoTx {
@@ -935,12 +932,10 @@ func (h *History) BeginFilesRoForDebug() *HistoryRoTx {
 
 func (h *History) beginFilesRo(files visibleFiles, iv *iiVisible) *HistoryRoTx {
 	return &HistoryRoTx{
-		h:                 h,
-		iit:               h.InvertedIndex.beginFilesRo(iv),
-		files:             files,
-		stepSize:          h.stepSize,
-		stepsInFrozenFile: h.stepsInFrozenFile,
-		trace:             false,
+		h:        h,
+		iit:      h.InvertedIndex.beginFilesRo(iv),
+		files:    files,
+		stepSize: h.stepSize,
 	}
 }
 
@@ -1188,7 +1183,7 @@ func (ht *HistoryRoTx) historySeekInFiles(key []byte, txNum uint64) ([]byte, boo
 	}
 
 	if compressedPageValuesCount > 1 {
-		v, ht.snappyReadBuffer = seg.GetFromPage(historyKey, v, ht.snappyReadBuffer, true)
+		v, ht.blockCompressionBuf = seg.GetFromPage(historyKey, v, ht.blockCompressionBuf, true)
 	}
 	return v, true, nil
 }
