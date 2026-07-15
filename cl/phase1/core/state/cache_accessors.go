@@ -359,7 +359,6 @@ func (b *CachingBeaconState) ComputeNextSyncCommittee() (*solid.SyncCommittee, e
 
 	// pre-gloas computation
 	beaconConfig := b.BeaconConfig()
-	optimizedHashFunc := utils.OptimizedSha256NotThreadSafe()
 	epoch := Epoch(b) + 1
 	//math.MaxUint8
 	activeValidatorIndicies := b.GetActiveValidatorsIndices(epoch)
@@ -394,7 +393,7 @@ func (b *CachingBeaconState) ComputeNextSyncCommittee() (*solid.SyncCommittee, e
 			activeValidatorCount,
 			seed,
 			preInputs,
-			optimizedHashFunc,
+			utils.Sha256,
 		)
 		if err != nil {
 			return nil, err
@@ -408,7 +407,7 @@ func (b *CachingBeaconState) ComputeNextSyncCommittee() (*solid.SyncCommittee, e
 		// random_bytes = hash(seed + uint_to_bytes(i // groupSize)); one hash covers a whole group.
 		if group := i / groupSize; group != cachedGroup {
 			binary.LittleEndian.PutUint64(buf[32:], group)
-			cachedHash = optimizedHashFunc(buf[:])
+			cachedHash = utils.Sha256(buf[:])
 			cachedGroup = group
 		}
 		if isElectra {

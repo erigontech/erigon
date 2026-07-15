@@ -31,9 +31,8 @@ import (
 )
 
 func BenchmarkLambdaShuffledIndex(b *testing.B) {
-	keccakOptimized := utils.OptimizedSha256NotThreadSafe()
 	eth2ShuffleHash := func(data []byte) []byte {
-		hashed := keccakOptimized(data)
+		hashed := utils.Sha256(data)
 		return hashed[:]
 	}
 	seed := [32]byte{2, 35, 6}
@@ -46,13 +45,11 @@ func BenchmarkLambdaShuffledIndex(b *testing.B) {
 // Faster by ~40%, the effects of it will be felt mostly on computation of the proposer index.
 func BenchmarkErigonShuffledIndex(b *testing.B) {
 	s := state.New(&clparams.MainnetBeaconConfig)
-	keccakOptimized := utils.OptimizedSha256NotThreadSafe()
-
 	seed := [32]byte{2, 35, 6}
 	preInputs := shuffling.ComputeShuffledIndexPreInputs(s.BeaconConfig(), seed)
 
 	for b.Loop() {
-		shuffling.ComputeShuffledIndex(s.BeaconConfig(), 10, 1000, seed, preInputs, keccakOptimized)
+		shuffling.ComputeShuffledIndex(s.BeaconConfig(), 10, 1000, seed, preInputs, utils.Sha256)
 	}
 }
 

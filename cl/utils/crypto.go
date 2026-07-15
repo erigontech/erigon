@@ -30,8 +30,32 @@ var hasherPool = sync.Pool{
 	},
 }
 
+// sha256StackBuf holds data+extras for the SSZ hashing calls, which concatenate
+// two 32-byte roots. Inputs above it are streamed through the pooled hasher.
+const sha256StackBuf = 64
+
 // General purpose Sha256
 func Sha256(data []byte, extras ...[]byte) [32]byte {
+	if len(extras) == 0 {
+		return sha256.Sum256(data)
+	}
+	total := len(data)
+	for _, extra := range extras {
+		total += len(extra)
+	}
+	if total > sha256StackBuf {
+		return sha256Streamed(data, extras...)
+	}
+	var buf [sha256StackBuf]byte
+	n := copy(buf[:], data)
+	for _, extra := range extras {
+		n += copy(buf[n:], extra)
+	}
+	return sha256.Sum256(buf[:n])
+}
+
+// sha256Streamed hashes inputs too large for Sha256's stack buffer.
+func sha256Streamed(data []byte, extras ...[]byte) [32]byte {
 	h, ok := hasherPool.Get().(hash.Hash)
 	if !ok {
 		h = sha256.New()
@@ -47,20 +71,4 @@ func Sha256(data []byte, extras ...[]byte) [32]byte {
 	}
 	h.Sum(b[:0])
 	return b
-}
-
-// Optimized Sha256, avoid pool.put/pool.get, meant for intensive operations.
-// this version is not thread safe
-func OptimizedSha256NotThreadSafe() HashFunc {
-	h := sha256.New()
-	var b [32]byte
-	return func(data []byte, extras ...[]byte) [32]byte {
-		h.Reset()
-		h.Write(data)
-		for _, extra := range extras {
-			h.Write(extra)
-		}
-		h.Sum(b[:0])
-		return b
-	}
 }

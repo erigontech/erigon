@@ -1,4 +1,4 @@
-// Copyright 2024 The Erigon Authors
+// Copyright 2026 The Erigon Authors
 // This file is part of Erigon.
 //
 // Erigon is free software: you can redistribute it and/or modify
@@ -17,55 +17,111 @@
 package utils_test
 
 import (
+	"bytes"
+	"crypto/sha256"
+	"fmt"
+	"sync"
 	"testing"
 
 	"github.com/erigontech/erigon/cl/utils"
 )
 
-func TestKeccak256(t *testing.T) {
-	data := []byte("test data")
-	extras := [][]byte{
-		[]byte("extra1"),
-		[]byte("extra2"),
+func bytesOfLen(n int, seed byte) []byte {
+	b := make([]byte, n)
+	for i := range b {
+		b[i] = seed + byte(i)
 	}
+	return b
+}
 
-	expectedHash := utils.Sha256(data, extras...)
-	hashFunc := utils.OptimizedSha256NotThreadSafe()
-	expectedOptimizedHash := hashFunc(data, extras...)
-
-	// Test Keccak256 function
-	hash := utils.Sha256(data, extras...)
-	if hash != expectedHash {
-		t.Errorf("Keccak256 returned an incorrect hash. Expected: %x, Got: %x", expectedHash, hash)
-	}
-
-	// Test OptimizedKeccak256 function
-	optimizedHash := hashFunc(data, extras...)
-	if optimizedHash != expectedOptimizedHash {
-		t.Errorf("OptimizedKeccak256 returned an incorrect hash. Expected: %x, Got: %x", expectedOptimizedHash, optimizedHash)
+// Sha256 must equal the digest of data concatenated with extras, at every size.
+// Sizes straddle the internal stack-buffer boundary.
+func TestSha256EqualsStdlibOfConcat(t *testing.T) {
+	sizes := []int{0, 1, 31, 32, 33, 63, 64, 65, 127, 128, 1000}
+	for _, dataLen := range sizes {
+		for _, nExtras := range []int{0, 1, 2, 3} {
+			extraLens := sizes
+			if nExtras == 0 {
+				extraLens = []int{0} // no extras are built, so their size is irrelevant
+			}
+			for _, extraLen := range extraLens {
+				data := bytesOfLen(dataLen, 0x10)
+				var extras [][]byte
+				var concat bytes.Buffer
+				concat.Write(data)
+				for i := range nExtras {
+					e := bytesOfLen(extraLen, byte(0x40+i))
+					extras = append(extras, e)
+					concat.Write(e)
+				}
+				want := sha256.Sum256(concat.Bytes())
+				name := fmt.Sprintf("data=%d/extras=%dx%d", dataLen, nExtras, extraLen)
+				t.Run(name, func(t *testing.T) {
+					if got := utils.Sha256(data, extras...); got != want {
+						t.Errorf("Sha256 = %x, want %x", got, want)
+					}
+				})
+			}
+		}
 	}
 }
 
-func TestOptimizedKeccak256NotThreadSafe(t *testing.T) {
-	data := []byte("test data")
-	extras := [][]byte{
-		[]byte("extra1"),
-		[]byte("extra2"),
+// Sha256 is shared by the shuffling hot paths, which previously each held a
+// private hasher, so it must stay correct under concurrent use on both the
+// stack and the pooled path.
+func TestSha256Concurrent(t *testing.T) {
+	small, smallExtra := bytesOfLen(32, 1), bytesOfLen(32, 2)
+	big, bigExtra := bytesOfLen(500, 3), bytesOfLen(500, 4)
+	wantSmall := utils.Sha256(small, smallExtra)
+	wantBig := utils.Sha256(big, bigExtra)
+
+	var wg sync.WaitGroup
+	for range 8 {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for range 500 {
+				if got := utils.Sha256(small, smallExtra); got != wantSmall {
+					t.Errorf("stack path = %x, want %x", got, wantSmall)
+					return
+				}
+				if got := utils.Sha256(big, bigExtra); got != wantBig {
+					t.Errorf("pooled path = %x, want %x", got, wantBig)
+					return
+				}
+			}
+		}()
 	}
+	wg.Wait()
+}
 
-	expectedHash := utils.Sha256(data, extras...)
-	hashFunc := utils.OptimizedSha256NotThreadSafe()
-	expectedOptimizedHash := hashFunc(data, extras...)
-
-	// Test OptimizedKeccak256NotThreadSafe function
-	hash := utils.Sha256(data, extras...)
-	if hash != expectedHash {
-		t.Errorf("Keccak256 returned an incorrect hash. Expected: %x, Got: %x", expectedHash, hash)
+// A nil extra must hash the same as no extra at all.
+func TestSha256NilExtra(t *testing.T) {
+	data := bytesOfLen(32, 1)
+	if got, want := utils.Sha256(data, nil), sha256.Sum256(data); got != want {
+		t.Errorf("Sha256(data, nil) = %x, want %x", got, want)
 	}
+}
 
-	// Test OptimizedKeccak256NotThreadSafe function
-	optimizedHash := hashFunc(data, extras...)
-	if optimizedHash != expectedOptimizedHash {
-		t.Errorf("OptimizedKeccak256NotThreadSafe returned an incorrect hash. Expected: %x, Got: %x", expectedOptimizedHash, optimizedHash)
+// Repeated calls must not leak state between invocations.
+func TestSha256Repeatable(t *testing.T) {
+	a, b := bytesOfLen(32, 2), bytesOfLen(32, 3)
+	first := utils.Sha256(a, b)
+	for range 100 {
+		if got := utils.Sha256(a, b); got != first {
+			t.Fatalf("Sha256 not repeatable: %x != %x", got, first)
+		}
+		utils.Sha256(bytesOfLen(500, 9), bytesOfLen(500, 8)) // dirty the pooled hasher
+	}
+}
+
+func TestSha256AllocFree(t *testing.T) {
+	a, b := bytesOfLen(32, 4), bytesOfLen(32, 5)
+	if n := testing.AllocsPerRun(200, func() { utils.Sha256(a, b) }); n != 0 {
+		t.Errorf("Sha256(32B, 32B) allocs = %v, want 0", n)
+	}
+	big := bytesOfLen(4096, 6)
+	if n := testing.AllocsPerRun(200, func() { utils.Sha256(big) }); n != 0 {
+		t.Errorf("Sha256(4096B) allocs = %v, want 0", n)
 	}
 }
