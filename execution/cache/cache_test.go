@@ -290,7 +290,7 @@ func TestCodeCache_AddrCapacityLimit(t *testing.T) {
 	}
 
 	c := NewCodeCache(1024*1024, 1024*28) // 1MB code, ~1024 addr LRU entries
-	for i := 0; i < 1100; i++ {
+	for i := range 1100 {
 		c.Put(wideAddr(i), wideCode(i), 0)
 	}
 
@@ -580,7 +580,7 @@ func TestDomainCache_ConcurrentAccess(t *testing.T) {
 
 	// Writer goroutine
 	go func() {
-		for i := 0; i < 100; i++ {
+		for i := range 100 {
 			c.Put(makeAddr(i), makeValue(i), 0)
 		}
 		done <- true
@@ -588,7 +588,7 @@ func TestDomainCache_ConcurrentAccess(t *testing.T) {
 
 	// Reader goroutine
 	go func() {
-		for i := 0; i < 100; i++ {
+		for i := range 100 {
 			c.Get(makeAddr(i))
 		}
 		done <- true
@@ -605,7 +605,7 @@ func TestCodeCache_ConcurrentAccess(t *testing.T) {
 
 	// Writer goroutine
 	go func() {
-		for i := 0; i < 100; i++ {
+		for i := range 100 {
 			c.Put(makeAddr(i), makeCode(i), 0)
 		}
 		done <- true
@@ -613,7 +613,7 @@ func TestCodeCache_ConcurrentAccess(t *testing.T) {
 
 	// Reader goroutine
 	go func() {
-		for i := 0; i < 100; i++ {
+		for i := range 100 {
 			c.Get(makeAddr(i))
 		}
 		done <- true
@@ -870,7 +870,7 @@ func TestDomainCache_PutIfAbsentAtomicWithPut(t *testing.T) {
 	addr := makeAddr(1)
 	fresh := []byte("fresh")
 	stale := []byte("stale")
-	for round := 0; round < 20000; round++ {
+	for round := range 20000 {
 		c.Delete(addr)
 		var wg sync.WaitGroup
 		wg.Add(2)

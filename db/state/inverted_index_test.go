@@ -215,7 +215,7 @@ func TestInvIndexPruningCorrectness(t *testing.T) {
 			defer ic.Close()
 
 			// this should prune exactly pruneLimit*pruneIter transactions
-			for i := 0; i < pruneIters; i++ {
+			for i := range pruneIters {
 				stat, err := ic.HashSeekingPrune(t.Context(), tx, 0, 1000, pruneLimit, logEvery, true, nil, nil, prune.DefaultStorageMode)
 				require.NoError(t, err)
 				t.Logf("[%d] stats: %v", i, stat)
@@ -619,7 +619,7 @@ func TestInvIndex_PruneRollingCursorProgress(t *testing.T) {
 		defer ic.Close()
 		w := ic.NewWriter()
 		defer w.close()
-		for k := uint64(0); k < keyCount; k++ {
+		for k := range uint64(keyCount) {
 			var key [8]byte
 			binary.BigEndian.PutUint64(key[:], k)
 			require.NoError(t, w.Add(key[:], txNum))

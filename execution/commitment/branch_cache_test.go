@@ -42,7 +42,7 @@ func TestBranchCache_AccountTrunkRouting(t *testing.T) {
 
 	// Flood the tail well past capacity with deep (5-nibble) keys; the resident
 	// trunk entry must not be evicted.
-	for i := 0; i < 100; i++ {
+	for i := range 100 {
 		c.Put([]byte{0x10, byte(i), byte(i)}, []byte{byte(i)}, 0, 100) // odd flag, 5 nibbles → tail
 	}
 	got, _, ok = c.Get(trunkKey)
@@ -115,7 +115,7 @@ func TestBranchCache_RootSurvivesEvictionPressure(t *testing.T) {
 	c.Put(rootKey, []byte("ROOT-PERSISTS"), 0, 0)
 
 	// Stuff the tail well past capacity
-	for i := 0; i < 100; i++ {
+	for i := range 100 {
 		c.Put([]byte{byte(i), byte(i)}, []byte{byte(i)}, 0, 0)
 	}
 
@@ -317,14 +317,14 @@ func TestBranchCache_ShardedTailUnwindAcrossShards(t *testing.T) {
 	// test run may have consumed — this test asserts the unwind floor, not growth.
 	const n = 64
 	const watermark = 32
-	for i := 0; i < n; i++ {
+	for i := range n {
 		prefix := []byte{0x01, byte(i), byte(i >> 8)}
 		c.Put(prefix, []byte{byte(i)}, 0, uint64(i))
 	}
 
 	c.Unwind(watermark)
 
-	for i := 0; i < n; i++ {
+	for i := range n {
 		prefix := []byte{0x01, byte(i), byte(i >> 8)}
 		_, _, ok := c.Get(prefix)
 		if uint64(i) >= watermark {
@@ -348,11 +348,11 @@ func TestBranchCache_ConcurrentTailGrow(t *testing.T) {
 		perWorker = 2000 // 16k distinct deep keys >> 512 → forces maybeGrow
 	)
 	var wg sync.WaitGroup
-	for w := 0; w < workers; w++ {
+	for w := range workers {
 		wg.Add(1)
 		go func(w int) {
 			defer wg.Done()
-			for i := 0; i < perWorker; i++ {
+			for i := range perWorker {
 				// odd flag (0x10) + 3 bytes → 7 nibbles → tail; unique per (w,i).
 				key := []byte{0x10, byte(w), byte(i), byte(i >> 8)}
 				c.Put(key, []byte{byte(i)}, 0, 100)

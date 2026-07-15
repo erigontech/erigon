@@ -194,7 +194,7 @@ func TestAPI(t *testing.T) {
 
 	get := func(key [20]byte, expectTxnID uint64) (res [1]chan []byte) {
 		wg := sync.WaitGroup{}
-		for i := 0; i < len(res); i++ {
+		for i := range len(res) {
 			wg.Add(1)
 			res[i] = make(chan []byte, 1) // Buffered channel to prevent deadlock
 			go func(out chan []byte) {

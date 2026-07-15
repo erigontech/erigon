@@ -176,7 +176,7 @@ func decodeCapabilities(buf []byte, version int) ([]string, error) {
 	}
 	offsets := make([]uint32, count+1)
 	offsets[count] = uint32(len(buf))
-	for i := 0; i < count; i++ {
+	for i := range count {
 		offsets[i] = binary.LittleEndian.Uint32(buf[i*4:])
 		if i > 0 && offsets[i] < offsets[i-1] {
 			return nil, fmt.Errorf("capabilities: non-monotonic offset %d", i)
@@ -186,7 +186,7 @@ func decodeCapabilities(buf []byte, version int) ([]string, error) {
 		}
 	}
 	out := make([]string, 0, count)
-	for i := 0; i < count; i++ {
+	for i := range count {
 		capability := solid.NewByteListSSZ(sszMaxCapabilityNameBytes)
 		if err := capability.DecodeSSZ(buf[offsets[i]:offsets[i+1]], version); err != nil {
 			return nil, err

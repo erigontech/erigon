@@ -126,7 +126,7 @@ func runBlockTestsParallel(ctx *cli.Command, files []string, workers uint64) ([]
 	}
 	close(fileCh)
 
-	for w := uint64(0); w < workers; w++ {
+	for range workers {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()

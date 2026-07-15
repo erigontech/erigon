@@ -242,13 +242,13 @@ func BenchmarkHash(b *testing.B) {
 
 	// Create a realistic account trie to hash
 	addresses := make([][20]byte, b.N)
-	for i := 0; i < len(addresses); i++ {
-		for j := 0; j < len(addresses[i]); j++ {
+	for i := range addresses {
+		for j := range len(addresses[i]) {
 			addresses[i][j] = byte(random.Intn(256))
 		}
 	}
 	accounts := make([][]byte, len(addresses))
-	for i := 0; i < len(accounts); i++ {
+	for i := range accounts {
 		var (
 			nonce   = uint64(random.Int63())
 			balance = new(big.Int).Rand(random, new(big.Int).Exp(common.Big2, common.Big256, nil))
@@ -259,7 +259,7 @@ func BenchmarkHash(b *testing.B) {
 	}
 	// Insert the accounts into the trie and hash it
 	trie := newEmpty()
-	for i := 0; i < len(addresses); i++ {
+	for i := range addresses {
 		trie.Update(crypto.Keccak256(addresses[i][:]), accounts[i])
 	}
 	b.ResetTimer()
@@ -305,7 +305,7 @@ func TestDeepHash(t *testing.T) {
 
 func genRandomByteArrayOfLen(length uint) []byte {
 	array := make([]byte, length)
-	for i := uint(0); i < length; i++ {
+	for i := range length {
 		array[i] = byte(rand.Intn(256))
 	}
 	return array
@@ -355,16 +355,16 @@ func TestCodeNodeValid(t *testing.T) {
 	numberOfAccounts := 20
 
 	addresses := make([][20]byte, numberOfAccounts)
-	for i := 0; i < len(addresses); i++ {
+	for i := range addresses {
 		addresses[i] = getAddressForIndex(i)
 	}
 	codeValues := make([][]byte, len(addresses))
-	for i := 0; i < len(addresses); i++ {
+	for i := range addresses {
 		codeValues[i] = genRandomByteArrayOfLen(128)
 		insertAccountWithCode(t, trie, random, addresses[i], codeValues[i])
 	}
 
-	for i := 0; i < len(addresses); i++ {
+	for i := range addresses {
 		value, gotValue := trie.GetAccountCode(crypto.Keccak256(addresses[i][:]))
 		assert.True(t, gotValue, "should receive code value")
 		assert.True(t, bytes.Equal(value, codeValues[i]), "should receive the right code")

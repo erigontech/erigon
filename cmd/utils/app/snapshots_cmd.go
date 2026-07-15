@@ -53,6 +53,7 @@ import (
 	"github.com/erigontech/erigon/db/config3"
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/datastruct/btindex"
+	"github.com/erigontech/erigon/db/dbservices"
 	"github.com/erigontech/erigon/db/downloader/webseeds"
 	"github.com/erigontech/erigon/db/etl"
 	"github.com/erigontech/erigon/db/fromdb"
@@ -67,7 +68,6 @@ import (
 	"github.com/erigontech/erigon/db/rawdb/blockio"
 	"github.com/erigontech/erigon/db/recsplit"
 	"github.com/erigontech/erigon/db/seg"
-	"github.com/erigontech/erigon/db/services"
 	"github.com/erigontech/erigon/db/snapshotsync"
 	"github.com/erigontech/erigon/db/snapshotsync/blocksnapshots"
 	"github.com/erigontech/erigon/db/snapshotsync/caplinsnapschema"
@@ -2343,7 +2343,7 @@ func checkStateSnapshotFiles(dirs datadir.Dirs, persistReceiptCache, commitmentH
 		if err != nil {
 			return fmt.Errorf("%w: failed to replace version in %s: %v", ErrSnapParseFilename, res.Name(), err)
 		}
-		for snapType := kv.Domain(0); snapType < kv.DomainLen; snapType++ {
+		for snapType := range kv.DomainLen {
 			// skip rcache check if this datadir doesn't produce it
 			if snapType == kv.RCacheDomain && !persistReceiptCache {
 				continue
@@ -3466,7 +3466,7 @@ func doRetireCommand(ctx context.Context, cliCtx *cli.Command, dirs datadir.Dirs
 		blocksInSnapshots = min(blocksInSnapshots, blockReader.FrozenBorBlocks(false))
 	}
 	logger.Info("retiring blocks", "from", blocksInSnapshots, "to", to)
-	if err := br.BuildFiles(ctx, blocksInSnapshots, to, log.LvlInfo, services.NoopSeederClient{}, nil); err != nil {
+	if err := br.BuildFiles(ctx, blocksInSnapshots, to, log.LvlInfo, dbservices.NoopSeederClient{}, nil); err != nil {
 		return err
 	}
 

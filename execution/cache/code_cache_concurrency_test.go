@@ -45,7 +45,7 @@ func TestCodeCache_ConcurrentPutSameCode_NoSizeDrift(t *testing.T) {
 	const workers = 64
 	var wg sync.WaitGroup
 	wg.Add(workers)
-	for i := 0; i < workers; i++ {
+	for range workers {
 		go func() {
 			defer wg.Done()
 			cc.PutWithCodeHash(addr, code, codeHash, 1)
@@ -102,7 +102,7 @@ func TestCodeCache_ConcurrentDistinctPuts_RespectCap(t *testing.T) {
 	const workers = 128
 	var wg sync.WaitGroup
 	wg.Add(workers)
-	for i := 0; i < workers; i++ {
+	for i := range workers {
 		go func(n int) {
 			defer wg.Done()
 			code := make([]byte, 256)
@@ -129,7 +129,7 @@ func TestCodeCache_PutIfAbsentAtomicWithPut(t *testing.T) {
 	addr[0] = 0xcd
 	fresh := []byte{0xaa, 1, 2, 3}
 	stale := []byte{0xbb, 4, 5, 6}
-	for round := 0; round < 20000; round++ {
+	for round := range 20000 {
 		cc.Delete(addr)
 		var wg sync.WaitGroup
 		wg.Add(2)

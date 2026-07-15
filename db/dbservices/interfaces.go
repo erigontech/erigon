@@ -14,7 +14,7 @@
 // You should have received a copy of the GNU Lesser General Public License
 // along with Erigon. If not, see <http://www.gnu.org/licenses/>.
 
-package services
+package dbservices
 
 import (
 	"context"
@@ -165,7 +165,7 @@ type SeederClient interface {
 type DownloaderClient interface {
 	SeederClient
 	// Request files be downloaded. Returns when the download is complete. Downloader seeds. Note
-	// that we have services.DownloadRequest per path, but haven't yet incorporated the download
+	// that we have dbservices.DownloadRequest per path, but haven't yet incorporated the download
 	// "target name" into the API here.
 	Download(context.Context, *downloaderproto.DownloadRequest) error
 }
