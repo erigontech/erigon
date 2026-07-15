@@ -55,6 +55,7 @@ func init() {
 		With("proposer_lookahead", ProposerLookaheadTest).
 		With("historical_summaries_update", historicalSummariesUpdateTest).
 		With("builder_pending_payments", builderPendingPaymentsTest).
+		With("pending_deposits_churn", pendingDepositTest).
 		With("ptc_window", ptcWindowTest)
 	TestFormats.Add("finality").
 		With("finality", FinalityFinality)
@@ -87,6 +88,7 @@ func init() {
 		WithFn("block_header", operationBlockHeaderHandler).
 		WithFn("deposit", operationDepositHandler).
 		WithFn("voluntary_exit", operationVoluntaryExitHandler).
+		WithFn("voluntary_exit_churn", operationVoluntaryExitHandler).
 		WithFn("sync_aggregate", operationSyncAggregateHandler).
 		WithFn("withdrawals", operationWithdrawalHandler).
 		WithFn("bls_to_execution_change", operationSignedBlsChangeHandler).
