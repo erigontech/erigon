@@ -1477,11 +1477,11 @@ func (sd *SharedDomains) codeHashForAddr(tx kv.TemporalTx, addr []byte, txNum ui
 	// on flush. Route mem-first; the LRU is a committed-state layer that may only
 	// answer once mem has missed.
 	if v, _, ok := sd.mem.GetLatest(kv.AccountsDomain, addr); ok {
-		return decodeAccountCodeHash(v)
+		return accounts.DeserialiseV3CodeHash(v)
 	}
 	for p := sd.parent; p != nil; p = p.parent {
 		if v, _, ok := p.mem.GetLatest(kv.AccountsDomain, addr); ok {
-			return decodeAccountCodeHash(v)
+			return accounts.DeserialiseV3CodeHash(v)
 		}
 	}
 
@@ -1502,14 +1502,14 @@ func (sd *SharedDomains) codeHashForAddr(tx kv.TemporalTx, addr []byte, txNum ui
 	resolve := func() []byte {
 		if sd.stateCache != nil {
 			if v, ok := sd.stateCache.Get(kv.AccountsDomain, addr); ok {
-				return decodeAccountCodeHash(v)
+				return accounts.DeserialiseV3CodeHash(v)
 			}
 		}
 		v, _, err := tx.GetLatest(kv.AccountsDomain, addr)
 		if err != nil || len(v) == 0 {
 			return nil
 		}
-		return decodeAccountCodeHash(v)
+		return accounts.DeserialiseV3CodeHash(v)
 	}
 
 	h := resolve()
@@ -1525,28 +1525,6 @@ func (sd *SharedDomains) codeHashForAddr(tx kv.TemporalTx, addr []byte, txNum ui
 		sd.stateCache.PutAddrCodeHash(addr, fixed, txNum)
 	}
 	return h
-}
-
-// decodeAccountCodeHash extracts the codeHash from an account's encoded
-// (DecodeForStorage) bytes. Returns nil on decode error or when the account
-// has no code (empty codeHash).
-func decodeAccountCodeHash(enc []byte) []byte {
-	if len(enc) == 0 {
-		return nil
-	}
-	var acc accounts.Account
-	// AccountsDomain values are SerialiseV3-encoded, so they must be decoded
-	// with DeserialiseV3. DecodeForStorage is the legacy MDBX bitmask format
-	// with an incompatible binary layout; applied to V3 bytes it silently
-	// misparses and leaves CodeHash empty.
-	if err := accounts.DeserialiseV3(&acc, enc); err != nil {
-		return nil
-	}
-	if acc.CodeHash.IsEmpty() {
-		return nil
-	}
-	h := acc.CodeHash.Value()
-	return h[:]
 }
 
 func (sd *SharedDomains) Metrics() *kvmetrics.DomainMetrics {

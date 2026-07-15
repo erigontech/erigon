@@ -176,7 +176,7 @@ func (ac *AccountChanges) DecodeRLP(s *rlp.Stream) error {
 	ac.CodeChanges = codes
 
 	if err := ac.validate(); err != nil {
-		return err
+		return fmt.Errorf("%w: %w", ErrInvalidBlockAccessList, err)
 	}
 
 	return s.ListEnd()
@@ -512,6 +512,11 @@ func encodingSizeHashList(hashes []accounts.StorageKey) int {
 	return rlp.ListPrefixLen(size) + size
 }
 
+// ErrInvalidBlockAccessList marks a block access list that is well-formed RLP
+// but violates EIP-7928 ordering or uniqueness rules. Callers use it to
+// distinguish an invalid list from undecodable input.
+var ErrInvalidBlockAccessList = errors.New("invalid block access list")
+
 func decodeBlockAccessList(out *BlockAccessList, s *rlp.Stream) error {
 	var err error
 	var size uint64
@@ -538,7 +543,7 @@ func decodeBlockAccessList(out *BlockAccessList, s *rlp.Stream) error {
 		}
 		address := ac.Address.Value()
 		if hasPrev && bytes.Compare(prevAddr[:], address[:]) >= 0 {
-			err = fmt.Errorf("block access list addresses must be strictly increasing (prev=%s current=%s)", prevAddr.Hex(), address.Hex())
+			err = fmt.Errorf("%w: addresses must be strictly increasing (prev=%s current=%s)", ErrInvalidBlockAccessList, prevAddr.Hex(), address.Hex())
 			break
 		}
 		acCopy := ac
@@ -569,6 +574,12 @@ func DecodeBlockAccessListBytes(data []byte) (BlockAccessList, error) {
 	var bal BlockAccessList
 	if err := decodeBlockAccessList(&bal, stream); err != nil {
 		return nil, err
+	}
+	// The payload must be exactly one RLP list; trailing bytes (e.g. 0xc000) are
+	// malformed input, not a valid empty list. Keep the error unwrapped so callers
+	// classify it as undecodable rather than an EIP-7928 rule violation.
+	if _, _, err := stream.Kind(); !errors.Is(err, io.EOF) {
+		return nil, errors.New("trailing bytes after block access list")
 	}
 	return bal, nil
 }
@@ -609,7 +620,7 @@ func decodeSlotChangesList(s *rlp.Stream) ([]*SlotChanges, error) {
 		}
 		slot := sc.Slot.Value()
 		if hasPrev && bytes.Compare(prevSlot[:], slot[:]) >= 0 {
-			err = fmt.Errorf("storage slot list must be strictly increasing (prev=%x current=%x)", prevSlot, sc.Slot)
+			err = fmt.Errorf("%w: storage slot list must be strictly increasing (prev=%x current=%x)", ErrInvalidBlockAccessList, prevSlot, sc.Slot)
 			break
 		}
 		out = append(out, sc)
@@ -624,7 +635,7 @@ func decodeSlotChangesList(s *rlp.Stream) ([]*SlotChanges, error) {
 		return nil, err
 	}
 	if err := validateSlotChangeList(out); err != nil {
-		return nil, err
+		return nil, fmt.Errorf("%w: %w", ErrInvalidBlockAccessList, err)
 	}
 	return out, nil
 }
@@ -653,7 +664,7 @@ func decodeStorageChanges(s *rlp.Stream) ([]*StorageChange, error) {
 		return nil, err
 	}
 	if err := validateStorageChangeEntries(out); err != nil {
-		return nil, err
+		return nil, fmt.Errorf("%w: %w", ErrInvalidBlockAccessList, err)
 	}
 	return out, nil
 }
@@ -682,7 +693,7 @@ func decodeBalanceChanges(s *rlp.Stream) ([]*BalanceChange, error) {
 		return nil, err
 	}
 	if err := validateBalanceChangeList(out); err != nil {
-		return nil, err
+		return nil, fmt.Errorf("%w: %w", ErrInvalidBlockAccessList, err)
 	}
 	return out, nil
 }
@@ -704,7 +715,7 @@ func decodeNonceChanges(s *rlp.Stream) ([]*NonceChange, error) {
 			break
 		}
 		if hasLast && change.Index <= lastIdx {
-			err = fmt.Errorf("nonce change indices must be strictly increasing (prev=%d current=%d)", lastIdx, change.Index)
+			err = fmt.Errorf("%w: nonce change indices must be strictly increasing (prev=%d current=%d)", ErrInvalidBlockAccessList, lastIdx, change.Index)
 			break
 		}
 		out = append(out, change)
@@ -719,7 +730,7 @@ func decodeNonceChanges(s *rlp.Stream) ([]*NonceChange, error) {
 		return nil, err
 	}
 	if err := validateNonceChangeList(out); err != nil {
-		return nil, err
+		return nil, fmt.Errorf("%w: %w", ErrInvalidBlockAccessList, err)
 	}
 	return out, nil
 }
@@ -746,7 +757,7 @@ func decodeCodeChanges(s *rlp.Stream) ([]*CodeChange, error) {
 			break
 		}
 		if hasLast && change.Index <= lastIdx {
-			err = fmt.Errorf("code change indices must be strictly increasing (prev=%d current=%d)", lastIdx, change.Index)
+			err = fmt.Errorf("%w: code change indices must be strictly increasing (prev=%d current=%d)", ErrInvalidBlockAccessList, lastIdx, change.Index)
 			break
 		}
 		lastIdx = change.Index
@@ -756,7 +767,7 @@ func decodeCodeChanges(s *rlp.Stream) ([]*CodeChange, error) {
 		return nil, err
 	}
 	if err := validateCodeChangeList(out); err != nil {
-		return nil, err
+		return nil, fmt.Errorf("%w: %w", ErrInvalidBlockAccessList, err)
 	}
 	return out, nil
 }
@@ -790,7 +801,7 @@ func decodeStorageKeys(s *rlp.Stream) ([]accounts.StorageKey, error) {
 		return nil, err
 	}
 	if err := validateStorageReads(hashes); err != nil {
-		return nil, err
+		return nil, fmt.Errorf("%w: %w", ErrInvalidBlockAccessList, err)
 	}
 	return hashes, nil
 }
