@@ -53,6 +53,8 @@ func BenchmarkEncodeBlock(b *testing.B) {
 		payload := benchPayload(tc.txCount, tc.txSize)
 		b.Run(tc.name, func(b *testing.B) {
 			p := &PersistentBlockCollector{}
+			p.mu.Lock()
+			defer p.mu.Unlock()
 			b.ReportAllocs()
 			for b.Loop() {
 				if _, err := p.encodeBlock(payload, parentRoot, nil); err != nil {
