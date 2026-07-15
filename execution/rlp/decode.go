@@ -708,6 +708,41 @@ func (s *Stream) Bytes() ([]byte, error) {
 	}
 }
 
+// ViewBytes is Bytes, zero-copy for RLP strings on a stream from NewBytesStream:
+// the result aliases the input, so callers must not retain it. Everything else
+// copies - any other reader, and single-byte values, which an RLP string does not
+// hold verbatim.
+func (s *Stream) ViewBytes() ([]byte, error) {
+	sr, viewable := s.r.(*sliceReader)
+	if !viewable {
+		return s.Bytes()
+	}
+	kind, size, err := s.Kind()
+	if err != nil {
+		return nil, err
+	}
+	switch kind {
+	case Byte:
+		s.kind = -1 // rearm Kind
+		return []byte{s.byteval}, nil
+	case String:
+		if err = s.willRead(size); err != nil {
+			return nil, err
+		}
+		if uint64(len(*sr)) < size {
+			return nil, io.ErrUnexpectedEOF
+		}
+		b := (*sr)[:size:size]
+		*sr = (*sr)[size:]
+		if size == 1 && b[0] < 128 {
+			return nil, ErrCanonSize
+		}
+		return b, nil
+	default:
+		return nil, ErrExpectedString
+	}
+}
+
 // ReadBytes decodes the next RLP value and stores the result in b.
 // The value size must match len(b) exactly.
 func (s *Stream) ReadBytes(b []byte) error {
