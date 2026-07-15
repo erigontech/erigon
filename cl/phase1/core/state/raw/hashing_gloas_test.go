@@ -55,3 +55,32 @@ func TestGloasBeaconStateUsesProgressiveHashing(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, expected, actual)
 }
+
+func TestSetVersionAcrossGloasInvalidatesRoots(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		from clparams.StateVersion
+		to   clparams.StateVersion
+	}{
+		{name: "upgrade", from: clparams.FuluVersion, to: clparams.GloasVersion},
+		{name: "downgrade", from: clparams.GloasVersion, to: clparams.FuluVersion},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			cfg := clparams.MainnetBeaconConfig
+			state := New(&cfg)
+			state.SetVersion(tc.from)
+			_, err := state.HashSSZ()
+			require.NoError(t, err)
+
+			state.SetVersion(tc.to)
+			actual, err := state.HashSSZ()
+			require.NoError(t, err)
+
+			fresh := New(&cfg)
+			fresh.SetVersion(tc.to)
+			expected, err := fresh.HashSSZ()
+			require.NoError(t, err)
+			require.Equal(t, expected, actual)
+		})
+	}
+}
