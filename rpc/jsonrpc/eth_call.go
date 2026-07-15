@@ -474,6 +474,9 @@ func (api *APIImpl) getProof(ctx context.Context, roTx kv.TemporalTx, address co
 	if err != nil {
 		return nil, err
 	}
+	if header == nil {
+		return nil, fmt.Errorf("header not found for block %d", blockNrOrHash.BlockNumber.Uint64())
+	}
 
 	domains, err := execctx.NewSharedDomains(ctx, tx, log.New(), execctx.WithoutDeferredBranchUpdates(), execctx.WithSequentialCommitment())
 	if err != nil {
