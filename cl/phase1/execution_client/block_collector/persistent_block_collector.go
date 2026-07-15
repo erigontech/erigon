@@ -33,6 +33,7 @@ import (
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/dir"
 	"github.com/erigontech/erigon/common/hexutil"
+	"github.com/erigontech/erigon/common/length"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/dbcfg"
@@ -120,15 +121,9 @@ func (p *PersistentBlockCollector) AddBlock(block *cltypes.BeaconBlock) error {
 		return fmt.Errorf("failed to encode block: %w", err)
 	}
 
-	// Create key for sorting (block number + hash)
-	key, err := payloadKey(payload)
-	if err != nil {
-		return fmt.Errorf("failed to create payload key: %w", err)
-	}
-
 	// Store in database (skip if already exists)
 	return p.db.Update(context.Background(), func(tx kv.RwTx) error {
-		return tx.Put(kv.Headers, key, encodedBlock)
+		return tx.Put(kv.Headers, payloadKey(payload), encodedBlock)
 	})
 }
 
@@ -149,36 +144,51 @@ func (p *PersistentBlockCollector) AddGloasBlock(block *cltypes.BeaconBlock, env
 		return fmt.Errorf("failed to encode gloas block: %w", err)
 	}
 
-	key, err := payloadKey(payload)
-	if err != nil {
-		return fmt.Errorf("failed to create payload key: %w", err)
-	}
-
 	return p.db.Update(context.Background(), func(tx kv.RwTx) error {
-		return tx.Put(kv.Headers, key, encodedBlock)
+		return tx.Put(kv.Headers, payloadKey(payload), encodedBlock)
 	})
 }
 
+// Stored-value prefix: version byte + beacon parent root; Electra+ values also
+// embed the execution-requests hash. decodeBlock parses the same layout.
+const (
+	blockPrefixLen        = 1 + length.Hash
+	electraBlockPrefixLen = blockPrefixLen + length.Hash
+)
+
 // encodeBlock serializes the block value: snappy(version + parentRoot +
 // [requestsHash +] SSZ(payload)). The result aliases p.blockCompressBuf and is
-// valid only until the next call, so it must go to a copying sink (tx.Put copies).
-// Callers must hold p.mu.
+// valid only until the next call, so callers must copy it or fully consume it
+// before encoding again. Callers must hold p.mu.
 func (p *PersistentBlockCollector) encodeBlock(payload *cltypes.Eth1Block, parentRoot common.Hash, executionRequestsList []hexutil.Bytes) ([]byte, error) {
-	p.encodeBlockBuf = slices.Grow(p.encodeBlockBuf[:0], 1+32+32+payload.EncodingSizeSSZ())
+	p.encodeBlockBuf = slices.Grow(p.encodeBlockBuf[:0], electraBlockPrefixLen+payload.EncodingSizeSSZ())
 	p.encodeBlockBuf = append(p.encodeBlockBuf, byte(payload.Version()))
 	p.encodeBlockBuf = append(p.encodeBlockBuf, parentRoot[:]...)
-	if executionRequestsList != nil {
+	if payload.Version() >= clparams.ElectraVersion {
 		requestsHash := cltypes.ComputeExecutionRequestHash(executionRequestsList)
 		p.encodeBlockBuf = append(p.encodeBlockBuf, requestsHash[:]...)
 	}
-	var err error
-	p.encodeBlockBuf, err = payload.EncodeSSZ(p.encodeBlockBuf)
+	encoded, err := payload.EncodeSSZ(p.encodeBlockBuf)
 	if err != nil {
 		return nil, fmt.Errorf("error encoding execution payload during download: %s", err)
 	}
+	p.encodeBlockBuf = encoded
 
-	p.blockCompressBuf = slices.Grow(p.blockCompressBuf[:0], snappy.MaxEncodedLen(len(p.encodeBlockBuf)))
-	return snappy.Encode(p.blockCompressBuf[:cap(p.blockCompressBuf)], p.encodeBlockBuf), nil
+	p.blockCompressBuf = snappy.Encode(p.blockCompressBuf[:cap(p.blockCompressBuf)], p.encodeBlockBuf)
+	return p.blockCompressBuf, nil
+}
+
+// AddBlock bursts end at Flush; dropping outlier-sized scratch there keeps one
+// huge payload from staying resident for the collector's lifetime.
+const maxRetainedScratchCap = 1 << 20
+
+func (p *PersistentBlockCollector) releaseOversizedScratch() {
+	if cap(p.encodeBlockBuf) > maxRetainedScratchCap {
+		p.encodeBlockBuf = nil
+	}
+	if cap(p.blockCompressBuf) > maxRetainedScratchCap {
+		p.blockCompressBuf = nil
+	}
 }
 
 // Flush loads all collected blocks into the execution engine and clears the database.
@@ -192,6 +202,7 @@ func (p *PersistentBlockCollector) encodeBlock(payload *cltypes.Eth1Block, paren
 func (p *PersistentBlockCollector) Flush(ctx context.Context) error {
 	p.mu.Lock()
 	defer p.mu.Unlock()
+	defer p.releaseOversizedScratch()
 
 	if p.db == nil {
 		return fmt.Errorf("database not initialized")
@@ -356,7 +367,7 @@ func (p *PersistentBlockCollector) Flush(ctx context.Context) error {
 					return err
 				}
 				if len(k) < 8 {
-					// Defensive: payloadKey always produces 40-byte keys.
+					// Defensive: payloadKey always produces 8-byte keys.
 					continue
 				}
 				if binary.BigEndian.Uint64(k[:8]) >= cutoff {
@@ -427,22 +438,22 @@ func (p *PersistentBlockCollector) decodeBlock(v []byte) (*types.Block, []byte, 
 	if err != nil {
 		return nil, nil, err
 	}
-	if len(v) < 33 {
-		return nil, nil, fmt.Errorf("persistent block value too short: have %d, want at least 33", len(v))
+	if len(v) < blockPrefixLen {
+		return nil, nil, fmt.Errorf("persistent block value too short: have %d, want at least %d", len(v), blockPrefixLen)
 	}
 
 	version := clparams.StateVersion(v[0])
-	parentRoot := common.BytesToHash(v[1:33])
+	parentRoot := common.BytesToHash(v[1:blockPrefixLen])
 	requestsHash := common.Hash{}
 
 	if version >= clparams.ElectraVersion {
-		if len(v) < 65 {
-			return nil, nil, fmt.Errorf("persistent block value too short for execution requests: have %d, want at least 65", len(v))
+		if len(v) < electraBlockPrefixLen {
+			return nil, nil, fmt.Errorf("persistent block value too short for execution requests: have %d, want at least %d", len(v), electraBlockPrefixLen)
 		}
-		requestsHash = common.BytesToHash(v[33:65])
-		v = v[65:]
+		requestsHash = common.BytesToHash(v[blockPrefixLen:electraBlockPrefixLen])
+		v = v[electraBlockPrefixLen:]
 	} else {
-		v = v[33:]
+		v = v[blockPrefixLen:]
 	}
 
 	executionPayload := cltypes.NewEth1Block(version, p.beaconChainCfg)

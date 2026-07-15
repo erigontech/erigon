@@ -20,8 +20,6 @@ import (
 	"math/rand/v2"
 	"testing"
 
-	"github.com/holiman/uint256"
-
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/common"
@@ -31,15 +29,6 @@ import (
 // benchPayload builds a Deneb execution payload carrying txCount transactions
 // of txSize incompressible bytes each.
 func benchPayload(txCount, txSize int) *cltypes.Eth1Block {
-	var zero uint64
-	zeroHash := common.Hash{}
-	header := &types.Header{
-		Number:                *uint256.NewInt(12345),
-		BaseFee:               uint256.NewInt(1),
-		BlobGasUsed:           &zero,
-		ExcessBlobGas:         &zero,
-		ParentBeaconBlockRoot: &zeroHash,
-	}
 	rnd := rand.NewChaCha8([32]byte{42})
 	txs := make([][]byte, txCount)
 	for i := range txs {
@@ -47,7 +36,7 @@ func benchPayload(txCount, txSize int) *cltypes.Eth1Block {
 		rnd.Read(txs[i])
 	}
 	body := &types.RawBody{Transactions: txs, Withdrawals: []*types.Withdrawal{}}
-	return cltypes.NewEth1BlockFromHeaderAndBody(header, body, &clparams.MainnetBeaconConfig)
+	return cltypes.NewEth1BlockFromHeaderAndBody(makeTestHeader(12345, common.Hash{}, nil), body, &clparams.MainnetBeaconConfig)
 }
 
 func BenchmarkEncodeBlock(b *testing.B) {

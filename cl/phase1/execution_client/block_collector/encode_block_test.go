@@ -46,15 +46,16 @@ func TestEncodeDecodeBlockRoundTrip(t *testing.T) {
 	c := &PersistentBlockCollector{beaconChainCfg: &clparams.MainnetBeaconConfig}
 
 	parent := common.HexToHash("0xaa")
-	b1 := makeBeaconBlock(t, 1, 0x01, parent, signedTestTx(t, 0))
-	b2 := makeBeaconBlock(t, 2, 0x02, blockHash(b1), signedTestTx(t, 1), signedTestTx(t, 2))
+	tx0, tx1, tx2 := signedTestTx(t, 0), signedTestTx(t, 1), signedTestTx(t, 2)
+	b1 := makeBeaconBlock(t, 1, 0x01, parent, tx0)
+	b2 := makeBeaconBlock(t, 2, 0x02, blockHash(b1), tx1, tx2)
 
 	for _, tc := range []struct {
 		bb  *cltypes.BeaconBlock
 		txs []types.Transaction
 	}{
-		{b1, []types.Transaction{signedTestTx(t, 0)}},
-		{b2, []types.Transaction{signedTestTx(t, 1), signedTestTx(t, 2)}},
+		{b1, []types.Transaction{tx0}},
+		{b2, []types.Transaction{tx1, tx2}},
 	} {
 		payload := tc.bb.Body.ExecutionPayload
 		encoded, err := c.encodeBlock(payload, tc.bb.ParentRoot, tc.bb.Body.GetExecutionRequestsList())
