@@ -1036,3 +1036,29 @@ func TestStateCache_ApplyCodeDeleteDropsAddrCodeHash(t *testing.T) {
 	_, ok = sc.GetAddrCodeHash(addr)
 	require.False(t, ok, "a code deletion must drop the derived addr→codeHash mapping")
 }
+
+func TestStateCache_AccountDeleteBlocksStaleCodeFill(t *testing.T) {
+	b := 1 * datasize.MB
+	sc := NewStateCache(b, b, b, b)
+	t.Cleanup(sc.Close)
+
+	addr := makeAddr(1)
+	code := makeCode(1)
+	codeHash := crypto.Keccak256(code)
+
+	sc.Apply(kv.CodeDomain, addr, code, 10)
+	_, ok := sc.Get(kv.CodeDomain, addr)
+	require.True(t, ok)
+
+	sc.Apply(kv.AccountsDomain, addr, nil, 20)
+	_, ok = sc.Get(kv.CodeDomain, addr)
+	require.False(t, ok, "an account deletion must drop the addr→code binding")
+
+	sc.PutCodeWithHashIfFresh(addr, code, codeHash, 10, 20)
+	_, ok = sc.Get(kv.CodeDomain, addr)
+	require.False(t, ok, "a snapshot without the account deletion must not refill its code")
+
+	sc.PutCodeWithHashIfFresh(addr, code, codeHash, 21, 21)
+	_, ok = sc.Get(kv.CodeDomain, addr)
+	require.True(t, ok, "a snapshot containing the account deletion is admissible")
+}
