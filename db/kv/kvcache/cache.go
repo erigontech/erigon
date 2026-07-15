@@ -193,6 +193,14 @@ func New(cfg CoherentConfig) *Coherent {
 	}
 }
 
+func newCoherentRoot() *CoherentRoot {
+	return &CoherentRoot{
+		ready:     make(chan struct{}),
+		cache:     btree2.NewBTreeG(Less),
+		codeCache: btree2.NewBTreeG(Less),
+	}
+}
+
 // selectOrCreateRoot - used for usual getting root
 func (c *Coherent) selectOrCreateRoot(versionID uint64) *CoherentRoot {
 	c.lock.Lock()
@@ -202,11 +210,7 @@ func (c *Coherent) selectOrCreateRoot(versionID uint64) *CoherentRoot {
 		return r
 	}
 
-	r = &CoherentRoot{
-		ready:     make(chan struct{}),
-		cache:     btree2.NewBTreeG(Less),
-		codeCache: btree2.NewBTreeG(Less),
-	}
+	r = newCoherentRoot()
 	c.roots[versionID] = r
 	return r
 }
@@ -221,7 +225,7 @@ func (c *Coherent) advanceRoot(stateVersionID uint64) (r *CoherentRoot) {
 	}
 
 	if !rootExists {
-		r = &CoherentRoot{ready: make(chan struct{})}
+		r = newCoherentRoot()
 		c.roots[stateVersionID] = r
 	}
 
@@ -232,23 +236,18 @@ func (c *Coherent) advanceRoot(stateVersionID uint64) (r *CoherentRoot) {
 	// producer gap to one version.
 	c.stateEvict.Init()
 	c.codeEvict.Init()
-	if r.cache == nil {
-		r.cache = btree2.NewBTreeG(Less)
-		r.codeCache = btree2.NewBTreeG(Less)
-	} else {
-		r.cache.Walk(func(items []*Element) bool {
-			for _, i := range items {
-				c.stateEvict.PushFront(i)
-			}
-			return true
-		})
-		r.codeCache.Walk(func(items []*Element) bool {
-			for _, i := range items {
-				c.codeEvict.PushFront(i)
-			}
-			return true
-		})
-	}
+	r.cache.Walk(func(items []*Element) bool {
+		for _, i := range items {
+			c.stateEvict.PushFront(i)
+		}
+		return true
+	})
+	r.codeCache.Walk(func(items []*Element) bool {
+		for _, i := range items {
+			c.codeEvict.PushFront(i)
+		}
+		return true
+	})
 	c.evictRoots()
 	c.latestStateVersionID = stateVersionID
 	c.latestStateView = r
