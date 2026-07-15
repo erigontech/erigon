@@ -19,6 +19,7 @@
 package p2p
 
 import (
+	"runtime"
 	"sync"
 	"unsafe"
 
@@ -27,33 +28,34 @@ import (
 	"github.com/erigontech/erigon/common/log/v3"
 )
 
-var (
-	modiphlpapi          = windows.NewLazySystemDLL("iphlpapi.dll")
-	procNotifyAddrChange = modiphlpapi.NewProc("NotifyAddrChange")
-	procCancelIPChange   = modiphlpapi.NewProc("CancelIPChangeNotify")
-)
+// addrChangeCallback is registered once for the whole process. A
+// windows.NewCallback trampoline is never freed, so it must not be allocated
+// per notifier; the owning notifier is recovered from the caller context.
+var addrChangeCallback = windows.NewCallback(onUnicastIPAddressChange)
 
-// addrChangeNotifier signals on IP address changes via the IP Helper
-// NotifyAddrChange API, cancelled through a manual-reset event.
+// addrChangeNotifier signals on unicast IP address changes via the IP Helper
+// NotifyUnicastIpAddressChange API. Cancellation is synchronous —
+// CancelMibChangeNotify2 waits for any in-flight callback to return and
+// guarantees none fires afterwards — so no OVERLAPPED buffer or manual event
+// handshake is needed.
 type addrChangeNotifier struct {
-	events      chan struct{}
-	cancelEvent windows.Handle
-	stopped     chan struct{}
-	closeOnce   sync.Once
+	events    chan struct{}
+	handle    windows.Handle
+	pinner    runtime.Pinner
+	closeOnce sync.Once
 }
 
 func newNetChangeNotifier(logger log.Logger) netChangeNotifier {
-	cancelEvent, err := windows.CreateEvent(nil, 1, 0, nil) // manual-reset, nonsignaled
+	n := &addrChangeNotifier{events: make(chan struct{}, 1)}
+	// The OS retains the caller context until CancelMibChangeNotify2, so pin n
+	// to keep it alive and unmoved for the callback to dereference.
+	n.pinner.Pin(n)
+	err := windows.NotifyUnicastIpAddressChange(windows.AF_UNSPEC, addrChangeCallback, unsafe.Pointer(n), false, &n.handle)
 	if err != nil {
-		logger.Debug("p2p: address-change notifier unavailable, using periodic external IP refresh only", "err", err)
+		n.pinner.Unpin()
+		logger.Debug(notifierUnavailableMsg, "err", err)
 		return noopNotifier{}
 	}
-	n := &addrChangeNotifier{
-		events:      make(chan struct{}, 1),
-		cancelEvent: cancelEvent,
-		stopped:     make(chan struct{}),
-	}
-	go n.loop(logger)
 	return n
 }
 
@@ -61,46 +63,20 @@ func (n *addrChangeNotifier) Events() <-chan struct{} { return n.events }
 
 func (n *addrChangeNotifier) Close() error {
 	n.closeOnce.Do(func() {
-		windows.SetEvent(n.cancelEvent)
-		<-n.stopped
-		windows.CloseHandle(n.cancelEvent)
+		windows.CancelMibChangeNotify2(n.handle)
+		n.pinner.Unpin()
 	})
 	return nil
 }
 
-func (n *addrChangeNotifier) loop(logger log.Logger) {
-	defer close(n.stopped)
-
-	notifyEvent, err := windows.CreateEvent(nil, 0, 0, nil) // auto-reset, nonsignaled
-	if err != nil {
-		logger.Debug("p2p: address-change event creation failed, using periodic external IP refresh only", "err", err)
-		return
+// onUnicastIPAddressChange is the process-wide notify callback. It runs on an OS
+// thread-pool thread, so it does nothing but a non-blocking send to the owning
+// notifier's channel; the debounced refresh loop does the real work.
+func onUnicastIPAddressChange(callerContext, row, notificationType uintptr) uintptr {
+	n := (*addrChangeNotifier)(unsafe.Pointer(callerContext))
+	select {
+	case n.events <- struct{}{}:
+	default:
 	}
-	defer windows.CloseHandle(notifyEvent)
-
-	for {
-		var handle windows.Handle
-		overlapped := &windows.Overlapped{HEvent: notifyEvent}
-		r, _, _ := procNotifyAddrChange.Call(uintptr(unsafe.Pointer(&handle)), uintptr(unsafe.Pointer(overlapped)))
-		if errno := windows.Errno(r); errno != 0 && errno != windows.ERROR_IO_PENDING {
-			logger.Debug("p2p: NotifyAddrChange failed, using periodic external IP refresh only", "err", errno)
-			return
-		}
-
-		s, err := windows.WaitForMultipleObjects([]windows.Handle{n.cancelEvent, notifyEvent}, false, windows.INFINITE)
-		// Only an address change (second handle) continues the loop; a Close
-		// cancel (first handle), an error, or any unexpected result tears down
-		// the pending notification and stops.
-		if err != nil || s != windows.WAIT_OBJECT_0+1 {
-			if err != nil {
-				logger.Debug("p2p: address-change wait failed", "err", err)
-			}
-			procCancelIPChange.Call(uintptr(unsafe.Pointer(overlapped)))
-			return
-		}
-		select {
-		case n.events <- struct{}{}:
-		default:
-		}
-	}
+	return 0
 }
