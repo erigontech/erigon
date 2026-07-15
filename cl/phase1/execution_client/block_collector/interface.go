@@ -18,12 +18,8 @@ package block_collector
 
 import (
 	"context"
-	"fmt"
 
 	"github.com/erigontech/erigon/cl/cltypes"
-	"github.com/erigontech/erigon/cl/utils"
-	"github.com/erigontech/erigon/common"
-	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/db/kv/dbutils"
 )
 
@@ -35,32 +31,6 @@ type BlockCollector interface {
 	AddGloasBlock(block *cltypes.BeaconBlock, envelope *cltypes.SignedExecutionPayloadEnvelope) error
 	Flush(ctx context.Context) error
 	HasBlock(blockNumber uint64) bool
-}
-
-// serializes block value
-func encodeBlock(payload *cltypes.Eth1Block, parentRoot common.Hash, executionRequestsList []hexutil.Bytes) ([]byte, error) {
-	encodedPayload, err := payload.EncodeSSZ(nil)
-	if err != nil {
-		return nil, fmt.Errorf("error encoding execution payload during download: %s", err)
-	}
-	if executionRequestsList != nil {
-		// electra version
-		requestsHash := cltypes.ComputeExecutionRequestHash(executionRequestsList)
-		// version + parentRoot + requestsHash + encodedPayload
-		buf := make([]byte, 1+32+32+len(encodedPayload))
-		buf[0] = byte(payload.Version())
-		copy(buf[1:], parentRoot[:])
-		copy(buf[33:], requestsHash[:])
-		copy(buf[65:], encodedPayload)
-		return utils.CompressSnappy(buf), nil
-	}
-	// Use snappy compression that the temporary files do not take too much disk.
-	// version + parentRoot + encodedPayload
-	buf := make([]byte, 1+32+len(encodedPayload))
-	buf[0] = byte(payload.Version())
-	copy(buf[1:], parentRoot[:])
-	copy(buf[33:], encodedPayload)
-	return utils.CompressSnappy(buf), nil
 }
 
 // payloadKey returns the key for the payload: just the block number.
