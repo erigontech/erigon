@@ -268,6 +268,104 @@ func TestStreamRaw(t *testing.T) {
 	}
 }
 
+// TestStreamViewBytes pins the aliasing contract that separates ViewBytes from
+// Bytes: for an RLP string on a bytes-backed stream the result must share memory
+// with the input. Single-byte values are exempt, see TestStreamViewBytesSingleByte.
+func TestStreamViewBytes(t *testing.T) {
+	input := unhex("8401020304")
+
+	s := NewBytesStream(input)
+	defer PutStream(s)
+	b, err := s.ViewBytes()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := unhex("01020304"); !bytes.Equal(b, want) {
+		t.Fatalf("content mismatch: got %x, want %x", b, want)
+	}
+	if &b[0] != &input[1] {
+		t.Fatal("ViewBytes must alias a bytes-backed input, not copy it")
+	}
+	if cap(b) != len(b) {
+		t.Fatalf("view cap %d must be clamped to len %d so appends cannot scribble the input", cap(b), len(b))
+	}
+	if s.Remaining() != 0 {
+		t.Fatalf("stream not advanced past the value: %d bytes remaining", s.Remaining())
+	}
+}
+
+// TestStreamViewBytesSingleByte pins the exception to the aliasing contract: a
+// single-byte value is encoded as its own type tag, so there is no separate content
+// in the input to alias and ViewBytes must allocate, exactly as Bytes does.
+func TestStreamViewBytesSingleByte(t *testing.T) {
+	s := NewBytesStream(unhex("05"))
+	defer PutStream(s)
+	b, err := s.ViewBytes()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(b, []byte{0x05}) {
+		t.Fatalf("content mismatch: got %x, want 05", b)
+	}
+	if s.Remaining() != 0 {
+		t.Fatalf("stream not advanced past the value: %d bytes remaining", s.Remaining())
+	}
+}
+
+func TestStreamViewBytesFallsBackToCopy(t *testing.T) {
+	input := unhex("8401020304")
+
+	s := NewStream(bytes.NewReader(input), 0)
+	b, err := s.ViewBytes()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := unhex("01020304"); !bytes.Equal(b, want) {
+		t.Fatalf("content mismatch: got %x, want %x", b, want)
+	}
+}
+
+func TestStreamViewBytesAdvancesAcrossValues(t *testing.T) {
+	s := NewBytesStream(unhex("C88301020483050607"))
+	defer PutStream(s)
+	if _, err := s.List(); err != nil {
+		t.Fatal(err)
+	}
+	for i, want := range []string{"010204", "050607"} {
+		b, err := s.ViewBytes()
+		if err != nil {
+			t.Fatalf("value %d: %v", i, err)
+		}
+		if !bytes.Equal(b, unhex(want)) {
+			t.Fatalf("value %d: got %x, want %s", i, b, want)
+		}
+	}
+	if err := s.ListEnd(); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestStreamViewBytesErrors(t *testing.T) {
+	tests := []struct {
+		name    string
+		input   string
+		wantErr error
+	}{
+		{"list", "C50102030405", ErrExpectedString},
+		{"non-canonical size", "8105", ErrCanonSize},
+		{"size exceeds input", "840102", ErrValueTooLarge},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			s := NewBytesStream(unhex(tt.input))
+			defer PutStream(s)
+			if _, err := s.ViewBytes(); !errors.Is(err, tt.wantErr) {
+				t.Fatalf("got %v, want %v", err, tt.wantErr)
+			}
+		})
+	}
+}
+
 func TestDecodeErrors(t *testing.T) {
 	r := bytes.NewReader(nil)
 
