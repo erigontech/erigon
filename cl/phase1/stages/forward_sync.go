@@ -135,6 +135,7 @@ func processDownloadedBlockBatches(ctx context.Context, logger log.Logger, cfg *
 	newHighestBlockProcessed = highestBlockProcessed
 	// Iterate over each block in the sorted list
 	for _, block := range blocks {
+		acceptedBeforeBlock := newHighestBlockProcessed
 		// Compute the hash of the current block
 		blockRoot, err = block.Block.HashSSZ()
 		if err != nil {
@@ -203,6 +204,10 @@ func processDownloadedBlockBatches(ctx context.Context, logger log.Logger, cfg *
 				// FULL block: update forkchoice with the envelope (updates eth2Roots, persists to disk).
 				if fceErr := cfg.forkChoice.OnExecutionPayload(ctx, env, false, false); fceErr != nil {
 					logger.Warn("[Caplin] forward sync: failed to process GLOAS envelope", "slot", block.Block.Slot, "err", fceErr)
+					if errors.Is(fceErr, forkchoice.ErrInvalidExecutionPayloadEnvelope) {
+						return progressAfterInvalidEnvelope(acceptedBeforeBlock, fceErr)
+					}
+					return acceptedBeforeBlock, fceErr
 				} else if shouldInsert {
 					if err = cfg.blockCollector.AddGloasBlock(block.Block, env); err != nil {
 						err = fmt.Errorf("failed to add gloas block to collector: %w", err)
@@ -270,6 +275,10 @@ func forwardSyncProgress(chainTipSlot, currentSlot, prevProgress uint64, secsPer
 		ratePerSec = float64(currentSlot-prevProgress) / float64(secsPerLog)
 	}
 	return
+}
+
+func progressAfterInvalidEnvelope(accepted uint64, cause error) (uint64, error) {
+	return accepted, fmt.Errorf("%w: %w", network2.ErrInvalidPeerChain, cause)
 }
 
 func progressAfterNotFinalizedDescendant(initial, accepted uint64, cause error) (uint64, error) {

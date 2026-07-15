@@ -616,7 +616,7 @@ func fetchEnvelopesFromBeaconAPI(
 			sem <- struct{}{}
 			defer func() { <-sem }()
 
-			reqURL := fmt.Sprintf("%s/eth/v1/beacon/execution_payload_envelope/%d", baseURL, slot)
+			reqURL := fmt.Sprintf("%s/eth/v1/beacon/execution_payload_envelopes/%d", baseURL, slot)
 			req, err := http.NewRequestWithContext(ctx, "GET", reqURL, nil)
 			if err != nil {
 				return
@@ -638,6 +638,10 @@ func fetchEnvelopesFromBeaconAPI(
 			}
 			if err := envelope.DecodeSSZ(body, int(clparams.GloasVersion)); err != nil {
 				log.Debug("[ForwardBeaconDownloader] HTTP envelope decode failed", "slot", slot, "err", err)
+				return
+			}
+			if envelope.Message == nil || envelope.Message.BeaconBlockRoot != root {
+				log.Debug("[ForwardBeaconDownloader] HTTP envelope root mismatch", "slot", slot, "requested", common.Hash(root))
 				return
 			}
 			results[idx] = envResult{hash: common.Hash(root), envelope: envelope}

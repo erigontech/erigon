@@ -46,6 +46,8 @@ import (
 // and queues the execution block for later EL insertion.
 var errELBehind = errors.New("EL behind: payload not processable yet")
 
+var ErrInvalidExecutionPayloadEnvelope = errors.New("invalid execution payload envelope")
+
 // validateEnvelopeAgainstBlock validates the envelope against the block and state.
 // This includes:
 //   - bid matching (slot, builder_index, block_hash)
@@ -376,7 +378,7 @@ func (f *ForkChoiceStore) applyEnvelopeLocked(ctx context.Context, signedEnvelop
 	// Validate envelope against block (bid matching + signature verification)
 	if validatePayload {
 		if err := f.validateEnvelopeAgainstBlock(signedEnvelope, block, blockState); err != nil {
-			return false, fmt.Errorf("OnExecutionPayload: envelope validation failed: %w", err)
+			return false, fmt.Errorf("OnExecutionPayload: envelope validation failed: %w: %w", ErrInvalidExecutionPayloadEnvelope, err)
 		}
 	}
 
@@ -414,7 +416,7 @@ func (f *ForkChoiceStore) applyEnvelopeLocked(ctx context.Context, signedEnvelop
 	// Always use ValidatingMachine so that signature verification and all spec checks run,
 	// regardless of whether the EL-level validatePayload flag is set.
 	if err := transition.ValidatingMachine.ProcessExecutionPayloadEnvelope(blockState, signedEnvelope); err != nil {
-		return false, fmt.Errorf("OnExecutionPayload: failed to verify execution payload: %w", err)
+		return false, fmt.Errorf("OnExecutionPayload: failed to verify execution payload: %w: %w", ErrInvalidExecutionPayloadEnvelope, err)
 	}
 
 	// Update eth2Roots mapping for FCU

@@ -17,12 +17,19 @@
 package network
 
 import (
+	"context"
 	"errors"
 	"fmt"
+	"net/http"
+	"net/http/httptest"
 	"testing"
 	"time"
 
 	"github.com/stretchr/testify/require"
+
+	"github.com/erigontech/erigon/cl/clparams"
+	"github.com/erigontech/erigon/cl/cltypes"
+	"github.com/erigontech/erigon/common"
 )
 
 func TestRecordInvalidPeerChainResult(t *testing.T) {
@@ -70,4 +77,64 @@ func TestRecordInvalidPeerChainResult(t *testing.T) {
 		require.True(t, downloader.recordInvalidPeerChainResultLocked(100, ErrInvalidPeerChain, false))
 		require.False(t, downloader.httpPreferred.Load())
 	})
+}
+
+func TestFetchEnvelopesFromBeaconAPIUsesPluralEndpoint(t *testing.T) {
+	cfg := &clparams.MainnetBeaconConfig
+	block := cltypes.NewSignedBeaconBlock(cfg, clparams.GloasVersion)
+	block.Block.Slot = 1_218
+	root, err := block.Block.HashSSZ()
+	require.NoError(t, err)
+
+	envelope := &cltypes.SignedExecutionPayloadEnvelope{
+		Message: cltypes.NewExecutionPayloadEnvelope(cfg),
+	}
+	envelope.Message.BeaconBlockRoot = root
+	body, err := envelope.EncodeSSZ(nil)
+	require.NoError(t, err)
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		require.Equal(t, "/eth/v1/beacon/execution_payload_envelopes/1218", r.URL.Path)
+		w.Header().Set("Content-Type", "application/octet-stream")
+		_, err := w.Write(body)
+		require.NoError(t, err)
+	}))
+	defer server.Close()
+
+	received := make(map[common.Hash]*cltypes.SignedExecutionPayloadEnvelope)
+	fetched := fetchEnvelopesFromBeaconAPI(
+		context.Background(), server.URL, []*cltypes.SignedBeaconBlock{block}, [][32]byte{root}, received, cfg,
+	)
+
+	require.Equal(t, 1, fetched)
+	require.Contains(t, received, common.Hash(root))
+}
+
+func TestFetchEnvelopesFromBeaconAPIRejectsMismatchedRoot(t *testing.T) {
+	cfg := &clparams.MainnetBeaconConfig
+	block := cltypes.NewSignedBeaconBlock(cfg, clparams.GloasVersion)
+	block.Block.Slot = 1_218
+	root, err := block.Block.HashSSZ()
+	require.NoError(t, err)
+
+	envelope := &cltypes.SignedExecutionPayloadEnvelope{
+		Message: cltypes.NewExecutionPayloadEnvelope(cfg),
+	}
+	envelope.Message.BeaconBlockRoot = common.Hash{1}
+	body, err := envelope.EncodeSSZ(nil)
+	require.NoError(t, err)
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, err := w.Write(body)
+		require.NoError(t, err)
+	}))
+	defer server.Close()
+
+	received := make(map[common.Hash]*cltypes.SignedExecutionPayloadEnvelope)
+	fetched := fetchEnvelopesFromBeaconAPI(
+		context.Background(), server.URL, []*cltypes.SignedBeaconBlock{block}, [][32]byte{root}, received, cfg,
+	)
+
+	require.Zero(t, fetched)
+	require.Empty(t, received)
 }

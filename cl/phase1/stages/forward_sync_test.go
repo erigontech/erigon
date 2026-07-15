@@ -83,3 +83,12 @@ func TestProgressAfterNotFinalizedDescendant(t *testing.T) {
 		})
 	}
 }
+
+func TestProgressAfterInvalidEnvelope(t *testing.T) {
+	cause := errors.New("invalid envelope signature")
+	progress, err := progressAfterInvalidEnvelope(1_217, cause)
+
+	require.Equal(t, uint64(1_217), progress)
+	require.True(t, errors.Is(err, network2.ErrInvalidPeerChain))
+	require.True(t, errors.Is(err, cause))
+}
