@@ -754,10 +754,8 @@ func (e *ExecModule) HasBlock(ctx context.Context, blockHash *common.Hash, _ *ui
 
 	num, _ := e.blockReader.HeaderNumber(ctx, tx, *blockHash)
 	if num == nil {
-		log.Warn("[dbg] HasBlock", "num", nil, "hash", *blockHash)
 		return false, nil
 	}
-	log.Warn("[dbg] HasBlock", "num", num, "hash", *blockHash)
 
 	if *num <= e.blockReader.FrozenBlocks() {
 		return true, nil
