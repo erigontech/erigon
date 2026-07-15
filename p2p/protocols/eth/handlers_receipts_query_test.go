@@ -25,9 +25,9 @@ import (
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/db/datadir"
+	"github.com/erigontech/erigon/db/dbservices"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/temporal/temporaltest"
-	"github.com/erigontech/erigon/db/services"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/rlp"
 	"github.com/erigontech/erigon/execution/types"
@@ -118,7 +118,7 @@ func newReceiptsQueryFixture(t *testing.T, n int) *receiptsQueryFixture {
 		getter: &queryTestReceiptsGetter{receipts: map[common.Hash]types.Receipts{}, errs: map[common.Hash]error{}},
 	}
 	parent := common.Hash{}
-	for i := 0; i < n; i++ {
+	for i := range n {
 		header := &types.Header{
 			ParentHash:  parent,
 			ReceiptHash: common.Hash{0xde, 0xad},
@@ -146,7 +146,7 @@ func (f *receiptsQueryFixture) encoded(t *testing.T, blockIdx int) rlp.RawValue 
 }
 
 type queryTestBlockReader struct {
-	services.HeaderAndBodyReader
+	dbservices.HeaderAndBodyReader
 	numbers    map[common.Hash]uint64
 	numberErrs map[common.Hash]error
 	blocks     map[common.Hash]*types.Block

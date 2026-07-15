@@ -126,7 +126,7 @@ func induceSubL_32(text []int32, sa, freq, bucket []int32) {
 	sa[b] = int32(k)
 	b++
 
-	for i := 0; i < len(sa); i++ {
+	for i := range sa {
 		j := int(sa[i])
 		if j == 0 {
 			continue
@@ -229,7 +229,7 @@ func assignID_32(text []int32, sa []int32, numLMS int) int {
 			n := int(n)
 			this := text[j:][:n]
 			last := text[lastPos:][:n]
-			for i := 0; i < n; i++ {
+			for i := range n {
 				if this[i] != last[i] {
 					goto New
 				}
@@ -309,7 +309,7 @@ func induceL_32(text []int32, sa, freq, bucket []int32) {
 	sa[b] = int32(k)
 	b++
 
-	for i := 0; i < len(sa); i++ {
+	for i := range sa {
 		j := int(sa[i])
 		if j <= 0 {
 			continue

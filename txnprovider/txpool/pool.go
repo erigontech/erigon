@@ -1156,7 +1156,7 @@ func (p *TxPool) validateBlobTxn(txn *TxnSlot, isLocal bool) txpoolcfg.DiscardRe
 		}
 	}
 
-	for i := 0; i < len(commitments); i++ {
+	for i := range commitments {
 		if libkzg.KZGToVersionedHash(commitments[i]) != libkzg.VersionedHash(blobHashes[i]) {
 			return txpoolcfg.BlobHashCheckFail
 		}
@@ -2362,7 +2362,7 @@ func (p *TxPool) Run(ctx context.Context) error {
 			}
 		case announcements := <-p.newPendingTxns:
 			go func() {
-				for i := 0; i < 16; i++ { // drain more events from channel, then merge and dedup them
+				for range 16 { // drain more events from channel, then merge and dedup them
 					select {
 					case a := <-p.newPendingTxns:
 						announcements.AppendOther(a)

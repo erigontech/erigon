@@ -386,7 +386,7 @@ func TestFlushDrivesFCUPerBatch(t *testing.T) {
 	// (two per-batch + one final after the tail insert).
 	prev := common.Hash{}
 	blocks := make([]*cltypes.BeaconBlock, 7)
-	for i := 0; i < 7; i++ {
+	for i := range 7 {
 		blocks[i] = makeBeaconBlock(t, uint64(i+1), 'a', prev)
 		require.NoError(t, h.collector.AddBlock(blocks[i]))
 		prev = blockHash(blocks[i])
@@ -413,7 +413,7 @@ func TestFlushSingleFCUWhenBelowBatchSize(t *testing.T) {
 
 	prev := common.Hash{}
 	var last *cltypes.BeaconBlock
-	for i := 0; i < 3; i++ {
+	for i := range 3 {
 		b := makeBeaconBlock(t, uint64(i+1), 'a', prev)
 		require.NoError(t, h.collector.AddBlock(b))
 		prev = blockHash(b)

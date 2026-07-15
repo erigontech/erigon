@@ -132,7 +132,7 @@ func TestHeimdallStoreEntity(t *testing.T) {
 	t.Cleanup(heimdallStore.Close)
 	err = heimdallStore.Prepare(t.Context())
 	require.NoError(t, err)
-	for i := 0; i < len(spanDataForTesting); i++ {
+	for i := range spanDataForTesting {
 		expectedSpan := spanDataForTesting[i]
 		actualSpan, ok, err := heimdallStore.spans.Entity(t.Context(), expectedSpan.RawId())
 		require.NoError(t, err)
@@ -199,7 +199,7 @@ func TestHeimdallStoreEntityWithSpanRotations(t *testing.T) {
 	t.Cleanup(heimdallStore.Close)
 	err = heimdallStore.Prepare(t.Context())
 	require.NoError(t, err)
-	for i := 0; i < len(spanDataWithRotations); i++ {
+	for i := range spanDataWithRotations {
 		expectedSpan := spanDataWithRotations[i]
 		actualSpan, ok, err := heimdallStore.spans.Entity(t.Context(), expectedSpan.RawId())
 		require.NoError(t, err)

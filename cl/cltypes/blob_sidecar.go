@@ -155,7 +155,7 @@ func VerifyCommitmentInclusionProof(commitment common.Bytes48, commitmentInclusi
 	}
 	var curr common.Hash
 	// Start by constructing the commitments subtree
-	for i := uint64(0); i < commitmentsDepth; i++ {
+	for i := range commitmentsDepth {
 		curr = commitmentInclusionProof.Get(int(i))
 		if (commitmentIndex / utils.PowerOf2(i) % 2) == 1 {
 			value = utils.Sha256(curr[:], value[:])

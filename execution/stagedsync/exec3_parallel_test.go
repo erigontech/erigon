@@ -264,7 +264,7 @@ func taskFactory(numTask int, sender Sender, readsPerT int, writesPerT int, nonI
 
 	senderNonces := make(map[accounts.Address]int)
 
-	for i := 0; i < numTask; i++ {
+	for i := range numTask {
 		s := sender(i)
 
 		// Set first two ops to always read and write nonce
@@ -280,7 +280,7 @@ func taskFactory(numTask int, sender Sender, readsPerT int, writesPerT int, nonI
 			ops = append(ops, Op{opType: readType})
 		}
 
-		for j := 0; j < nonIOPerT; j++ {
+		for range nonIOPerT {
 			ops = append(ops, Op{opType: otherType})
 		}
 
@@ -441,11 +441,11 @@ func checkNoStatusOverlap(pe *parallelExecutor) error {
 	defer pe.RUnlock()
 
 	for blockNum, blockStatus := range pe.blockExecutors {
-		for _, tx := range blockStatus.execTasks.complete {
+		for _, tx := range blockStatus.execTasks.completeList() {
 			seen[tx] = "complete"
 		}
 
-		for _, tx := range blockStatus.execTasks.inProgress {
+		for _, tx := range blockStatus.execTasks.inProgressList() {
 			if v, ok := seen[tx]; ok {
 				return fmt.Errorf("blk %d, tx %v is in both %v and inProgress", blockNum, v, tx)
 			}
@@ -1460,7 +1460,7 @@ func TestParallelResumeBoundaryOffsets(t *testing.T) {
 	}
 	be.tasks = []*execTask{eTask}
 	be.results = []*execResult{nil}
-	be.execTasks.inProgress = []int{0}
+	be.execTasks.setInProgress(0)
 
 	tVersion := &taskVersion{
 		execTask: eTask,
@@ -1543,7 +1543,7 @@ func TestParallelResumeReconstructsPriorReceipts(t *testing.T) {
 	}
 	be.tasks = []*execTask{eTask}
 	be.results = []*execResult{nil}
-	be.execTasks.inProgress = []int{0}
+	be.execTasks.setInProgress(0)
 
 	tVersion := &taskVersion{
 		execTask: eTask,
@@ -1616,7 +1616,7 @@ func TestParallelResumeReconstructionFailureIsNonFatal(t *testing.T) {
 	}
 	be.tasks = []*execTask{eTask}
 	be.results = []*execResult{nil}
-	be.execTasks.inProgress = []int{0}
+	be.execTasks.setInProgress(0)
 
 	tVersion := &taskVersion{
 		execTask: eTask,
@@ -1690,8 +1690,8 @@ func TestParallelFinalizeMissingPrevReceiptErrors(t *testing.T) {
 	// tx 0 was "finalized" without a receipt — the invariant nextResult
 	// relies on for the in-memory prev-receipt lookup is broken.
 	be.finalizedResults[0] = &execResult{TxResult: &exec.TxResult{Task: tVersion0}}
-	be.execTasks.complete = []int{0}
-	be.execTasks.inProgress = []int{1}
+	be.execTasks.setComplete(0)
+	be.execTasks.setInProgress(1)
 
 	txResult1 := &exec.TxResult{
 		Task: tVersion1,
