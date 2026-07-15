@@ -30,8 +30,9 @@ var hasherPool = sync.Pool{
 	},
 }
 
-// sha256StackBuf holds data+extras for the SSZ hashing calls, which concatenate
-// two 32-byte roots. Inputs above it are streamed through the pooled hasher.
+// sha256StackBuf bounds the concatenation of data+extras, sized for the SSZ calls
+// that join two 32-byte roots. Longer concatenations go to the pooled hasher
+// instead; a lone data argument needs no buffer and is hashed at any size.
 const sha256StackBuf = 64
 
 // General purpose Sha256

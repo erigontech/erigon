@@ -115,10 +115,22 @@ func TestSha256Repeatable(t *testing.T) {
 	}
 }
 
+// The pooled path still allocates its digest through the hash.Hash interface. No
+// caller reaches it today, so pin that it stays the exception rather than spreading.
+func TestSha256StreamedPathAllocs(t *testing.T) {
+	big, extra := bytesOfLen(4096, 7), bytesOfLen(32, 8)
+	if n := testing.AllocsPerRun(200, func() { utils.Sha256(big, extra) }); n != 1 {
+		t.Errorf("Sha256(4096B, 32B) allocs = %v, want 1 (pooled path)", n)
+	}
+}
+
 func TestSha256AllocFree(t *testing.T) {
 	a, b := bytesOfLen(32, 4), bytesOfLen(32, 5)
 	if n := testing.AllocsPerRun(200, func() { utils.Sha256(a, b) }); n != 0 {
 		t.Errorf("Sha256(32B, 32B) allocs = %v, want 0", n)
+	}
+	if boundary := bytesOfLen(32, 9); testing.AllocsPerRun(200, func() { utils.Sha256(boundary, boundary) }) != 0 {
+		t.Errorf("Sha256 at the 64B boundary must stay on the stack path")
 	}
 	big := bytesOfLen(4096, 6)
 	if n := testing.AllocsPerRun(200, func() { utils.Sha256(big) }); n != 0 {
