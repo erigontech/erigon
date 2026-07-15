@@ -17,28 +17,350 @@
 package consensus_tests
 
 import (
+	"bytes"
+	"encoding/binary"
 	"fmt"
 	"io/fs"
+	"slices"
 	"testing"
 
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
 	"github.com/erigontech/erigon/cl/fork"
 	"github.com/erigontech/erigon/cl/phase1/core/state"
+	"github.com/erigontech/erigon/cl/phase1/network/subnets"
 	"github.com/erigontech/erigon/cl/spectest/spectest"
+	"github.com/erigontech/erigon/cl/utils"
 	"github.com/erigontech/erigon/cl/utils/bls"
+	"github.com/erigontech/erigon/common"
 )
 
 // gossipMeta represents the meta.yaml structure for gossip networking tests.
 type gossipMeta struct {
-	Topic    string          `yaml:"topic"`
-	Messages []gossipMessage `yaml:"messages"`
+	Topic         string          `yaml:"topic"`
+	CurrentTimeMS uint64          `yaml:"current_time_ms"`
+	Messages      []gossipMessage `yaml:"messages"`
 }
 
 type gossipMessage struct {
+	OffsetMS uint64 `yaml:"offset_ms"`
+	SubnetID uint64 `yaml:"subnet_id"`
 	Message  string `yaml:"message"`
 	Expected string `yaml:"expected"`
 	Reason   string `yaml:"reason"`
+}
+
+func gossipBLSToExecutionChangeHandler(t *testing.T, root fs.FS, c spectest.TestCase) error {
+	beaconState, meta, err := readGossipStateAndMeta(root, c)
+	if err != nil {
+		return err
+	}
+	seen := make(map[uint64]struct{})
+	for i, message := range meta.Messages {
+		change := &cltypes.SignedBLSToExecutionChange{}
+		if err := spectest.ReadSszOld(root, change, c.Version(), message.Message+".ssz_snappy"); err != nil {
+			return err
+		}
+		result := validateGossipBLSToExecutionChange(beaconState, change, seen)
+		if result != message.Expected {
+			return gossipResultError(i, message, result)
+		}
+		if result == "valid" {
+			seen[change.Message.ValidatorIndex] = struct{}{}
+		}
+	}
+	return nil
+}
+
+func validateGossipBLSToExecutionChange(beaconState *state.CachingBeaconState, signedChange *cltypes.SignedBLSToExecutionChange, seen map[uint64]struct{}) string {
+	if signedChange == nil || signedChange.Message == nil {
+		return "reject"
+	}
+	change := signedChange.Message
+	if _, ok := seen[change.ValidatorIndex]; ok {
+		return "ignore"
+	}
+	validator, err := beaconState.ValidatorForValidatorIndex(int(change.ValidatorIndex))
+	if err != nil {
+		return "reject"
+	}
+	withdrawalCredentials := validator.WithdrawalCredentials()
+	if withdrawalCredentials[0] != byte(beaconState.BeaconConfig().BLSWithdrawalPrefixByte) {
+		return "reject"
+	}
+	hashedFrom := utils.Sha256(change.From[:])
+	if !bytes.Equal(withdrawalCredentials[1:], hashedFrom[1:]) {
+		return "reject"
+	}
+	domain, err := fork.ComputeDomain(
+		beaconState.BeaconConfig().DomainBLSToExecutionChange[:],
+		utils.Uint32ToBytes4(uint32(beaconState.BeaconConfig().GenesisForkVersion)),
+		beaconState.GenesisValidatorsRoot(),
+	)
+	if err != nil {
+		return "reject"
+	}
+	signingRoot, err := fork.ComputeSigningRoot(change, domain)
+	if err != nil {
+		return "reject"
+	}
+	valid, err := bls.Verify(signedChange.Signature[:], signingRoot[:], change.From[:])
+	if err != nil || !valid {
+		return "reject"
+	}
+	return "valid"
+}
+
+type syncCommitteeMessageKey struct {
+	slot           uint64
+	validatorIndex uint64
+	subnetID       uint64
+}
+
+func gossipSyncCommitteeMessageHandler(t *testing.T, root fs.FS, c spectest.TestCase) error {
+	beaconState, meta, err := readGossipStateAndMeta(root, c)
+	if err != nil {
+		return err
+	}
+	seen := make(map[syncCommitteeMessageKey]struct{})
+	for i, message := range meta.Messages {
+		syncMessage := &cltypes.SyncCommitteeMessage{}
+		if err := spectest.ReadSszOld(root, syncMessage, c.Version(), message.Message+".ssz_snappy"); err != nil {
+			return err
+		}
+		result := validateGossipSyncCommitteeMessage(beaconState, syncMessage, message.SubnetID, meta.CurrentTimeMS+message.OffsetMS, seen)
+		if result != message.Expected {
+			return gossipResultError(i, message, result)
+		}
+		if result == "valid" {
+			seen[syncCommitteeMessageKey{syncMessage.Slot, syncMessage.ValidatorIndex, message.SubnetID}] = struct{}{}
+		}
+	}
+	return nil
+}
+
+func validateGossipSyncCommitteeMessage(
+	beaconState *state.CachingBeaconState,
+	message *cltypes.SyncCommitteeMessage,
+	subnetID uint64,
+	currentTimeMS uint64,
+	seen map[syncCommitteeMessageKey]struct{},
+) string {
+	if message == nil || !gossipSlotIsCurrent(beaconState, message.Slot, currentTimeMS) {
+		return "ignore"
+	}
+	if message.ValidatorIndex >= uint64(beaconState.ValidatorLength()) {
+		return "reject"
+	}
+	validSubnets, err := subnets.ComputeSubnetsForSyncCommittee(beaconState, message.ValidatorIndex)
+	if err != nil || !slices.Contains(validSubnets, subnetID) {
+		return "reject"
+	}
+	key := syncCommitteeMessageKey{message.Slot, message.ValidatorIndex, subnetID}
+	if _, ok := seen[key]; ok {
+		return "ignore"
+	}
+	publicKey, err := beaconState.ValidatorPublicKey(int(message.ValidatorIndex))
+	if err != nil {
+		return "reject"
+	}
+	domain, err := beaconState.GetDomain(beaconState.BeaconConfig().DomainSyncCommittee, message.Slot/beaconState.BeaconConfig().SlotsPerEpoch)
+	if err != nil {
+		return "reject"
+	}
+	signingRoot := utils.Sha256(message.BeaconBlockRoot[:], domain)
+	valid, err := bls.Verify(message.Signature[:], signingRoot[:], publicKey[:])
+	if err != nil || !valid {
+		return "reject"
+	}
+	return "valid"
+}
+
+type syncContributionKey struct {
+	slot              uint64
+	beaconBlockRoot   common.Hash
+	subcommitteeIndex uint64
+}
+
+type syncContributionAggregatorKey struct {
+	aggregatorIndex   uint64
+	slot              uint64
+	subcommitteeIndex uint64
+}
+
+func gossipSyncContributionHandler(t *testing.T, root fs.FS, c spectest.TestCase) error {
+	beaconState, meta, err := readGossipStateAndMeta(root, c)
+	if err != nil {
+		return err
+	}
+	seenContributions := make(map[syncContributionKey][][]byte)
+	seenAggregators := make(map[syncContributionAggregatorKey]struct{})
+	for i, message := range meta.Messages {
+		contribution := &cltypes.Contribution{}
+		contribution.SetAggregationBitsSize(int(beaconState.BeaconConfig().SyncCommitteeSize / beaconState.BeaconConfig().SyncCommitteeSubnetCount / 8))
+		signedContribution := &cltypes.SignedContributionAndProof{Message: &cltypes.ContributionAndProof{Contribution: contribution}}
+		if err := spectest.ReadSszOld(root, signedContribution, c.Version(), message.Message+".ssz_snappy"); err != nil {
+			return err
+		}
+		result := validateGossipSyncContribution(beaconState, signedContribution, meta.CurrentTimeMS+message.OffsetMS, seenContributions, seenAggregators)
+		if result != message.Expected {
+			return gossipResultError(i, message, result)
+		}
+		if result == "valid" {
+			markGossipSyncContributionSeen(signedContribution.Message, seenContributions, seenAggregators)
+		}
+	}
+	return nil
+}
+
+func validateGossipSyncContribution(
+	beaconState *state.CachingBeaconState,
+	signedContribution *cltypes.SignedContributionAndProof,
+	currentTimeMS uint64,
+	seenContributions map[syncContributionKey][][]byte,
+	seenAggregators map[syncContributionAggregatorKey]struct{},
+) string {
+	if signedContribution == nil || signedContribution.Message == nil || signedContribution.Message.Contribution == nil {
+		return "reject"
+	}
+	message := signedContribution.Message
+	contribution := message.Contribution
+	if !gossipSlotIsCurrent(beaconState, contribution.Slot, currentTimeMS) {
+		return "ignore"
+	}
+	if contribution.SubcommitteeIndex >= beaconState.BeaconConfig().SyncCommitteeSubnetCount {
+		return "reject"
+	}
+	if !gossipBitsHaveParticipants(contribution.AggregationBits) {
+		return "reject"
+	}
+	modulo := max(uint64(1), beaconState.BeaconConfig().SyncCommitteeSize/beaconState.BeaconConfig().SyncCommitteeSubnetCount/beaconState.BeaconConfig().TargetAggregatorsPerSyncSubcommittee)
+	selectionProofHash := utils.Sha256(message.SelectionProof[:])
+	if binary.LittleEndian.Uint64(selectionProofHash[:8])%modulo != 0 {
+		return "reject"
+	}
+	if message.AggregatorIndex >= uint64(beaconState.ValidatorLength()) {
+		return "reject"
+	}
+	subcommitteePublicKeys := gossipSyncSubcommitteePublicKeys(beaconState, contribution.SubcommitteeIndex)
+	aggregatorPublicKey, err := beaconState.ValidatorPublicKey(int(message.AggregatorIndex))
+	if err != nil || !slices.Contains(subcommitteePublicKeys, aggregatorPublicKey) {
+		return "reject"
+	}
+	contributionKey := syncContributionKey{contribution.Slot, contribution.BeaconBlockRoot, contribution.SubcommitteeIndex}
+	for _, seenBits := range seenContributions[contributionKey] {
+		if gossipBitsSuperset(seenBits, contribution.AggregationBits) {
+			return "ignore"
+		}
+	}
+	aggregatorKey := syncContributionAggregatorKey{message.AggregatorIndex, contribution.Slot, contribution.SubcommitteeIndex}
+	if _, ok := seenAggregators[aggregatorKey]; ok {
+		return "ignore"
+	}
+	selectionData := &cltypes.SyncAggregatorSelectionData{Slot: contribution.Slot, SubcommitteeIndex: contribution.SubcommitteeIndex}
+	domain, err := beaconState.GetDomain(beaconState.BeaconConfig().DomainSyncCommitteeSelectionProof, contribution.Slot/beaconState.BeaconConfig().SlotsPerEpoch)
+	if err != nil {
+		return "reject"
+	}
+	signingRoot, err := fork.ComputeSigningRoot(selectionData, domain)
+	if err != nil || !gossipSignatureValid(message.SelectionProof[:], signingRoot[:], aggregatorPublicKey[:]) {
+		return "reject"
+	}
+	domain, err = beaconState.GetDomain(beaconState.BeaconConfig().DomainContributionAndProof, contribution.Slot/beaconState.BeaconConfig().SlotsPerEpoch)
+	if err != nil {
+		return "reject"
+	}
+	signingRoot, err = fork.ComputeSigningRoot(message, domain)
+	if err != nil || !gossipSignatureValid(signedContribution.Signature[:], signingRoot[:], aggregatorPublicKey[:]) {
+		return "reject"
+	}
+	participantPublicKeys := make([][]byte, 0, len(subcommitteePublicKeys))
+	for index, publicKey := range subcommitteePublicKeys {
+		if utils.IsBitOn(contribution.AggregationBits, index) {
+			participantPublicKeys = append(participantPublicKeys, publicKey[:])
+		}
+	}
+	domain, err = beaconState.GetDomain(beaconState.BeaconConfig().DomainSyncCommittee, contribution.Slot/beaconState.BeaconConfig().SlotsPerEpoch)
+	if err != nil {
+		return "reject"
+	}
+	signingRoot = utils.Sha256(contribution.BeaconBlockRoot[:], domain)
+	valid, err := bls.VerifyAggregate(contribution.Signature[:], signingRoot[:], participantPublicKeys)
+	if err != nil || !valid {
+		return "reject"
+	}
+	return "valid"
+}
+
+func readGossipStateAndMeta(root fs.FS, c spectest.TestCase) (*state.CachingBeaconState, gossipMeta, error) {
+	beaconState, err := spectest.ReadBeaconState(root, c.Version(), "state.ssz_snappy")
+	if err != nil {
+		return nil, gossipMeta{}, err
+	}
+	var meta gossipMeta
+	if err := spectest.ReadMeta(root, "meta.yaml", &meta); err != nil {
+		return nil, gossipMeta{}, err
+	}
+	return beaconState, meta, nil
+}
+
+func gossipSlotIsCurrent(beaconState *state.CachingBeaconState, slot uint64, currentTimeMS uint64) bool {
+	genesisTimeMS := beaconState.GenesisTime() * 1000
+	if currentTimeMS < genesisTimeMS {
+		return false
+	}
+	return slot == (currentTimeMS-genesisTimeMS)/(beaconState.BeaconConfig().SecondsPerSlot*1000)
+}
+
+func gossipSyncSubcommitteePublicKeys(beaconState *state.CachingBeaconState, subcommitteeIndex uint64) []common.Bytes48 {
+	committee := beaconState.CurrentSyncCommittee()
+	if beaconState.BeaconConfig().SyncCommitteePeriod(beaconState.Slot()) != beaconState.BeaconConfig().SyncCommitteePeriod(beaconState.Slot()+1) {
+		committee = beaconState.NextSyncCommittee()
+	}
+	subcommitteeSize := beaconState.BeaconConfig().SyncCommitteeSize / beaconState.BeaconConfig().SyncCommitteeSubnetCount
+	start := subcommitteeIndex * subcommitteeSize
+	return committee.GetCommittee()[start : start+subcommitteeSize]
+}
+
+func markGossipSyncContributionSeen(
+	message *cltypes.ContributionAndProof,
+	seenContributions map[syncContributionKey][][]byte,
+	seenAggregators map[syncContributionAggregatorKey]struct{},
+) {
+	contribution := message.Contribution
+	contributionKey := syncContributionKey{contribution.Slot, contribution.BeaconBlockRoot, contribution.SubcommitteeIndex}
+	seenContributions[contributionKey] = append(seenContributions[contributionKey], bytes.Clone(contribution.AggregationBits))
+	seenAggregators[syncContributionAggregatorKey{message.AggregatorIndex, contribution.Slot, contribution.SubcommitteeIndex}] = struct{}{}
+}
+
+func gossipBitsHaveParticipants(bits []byte) bool {
+	for _, value := range bits {
+		if value != 0 {
+			return true
+		}
+	}
+	return false
+}
+
+func gossipBitsSuperset(superset, subset []byte) bool {
+	if len(superset) != len(subset) {
+		return false
+	}
+	for index := range subset {
+		if superset[index]&subset[index] != subset[index] {
+			return false
+		}
+	}
+	return true
+}
+
+func gossipSignatureValid(signature, signingRoot, publicKey []byte) bool {
+	valid, err := bls.Verify(signature, signingRoot, publicKey)
+	return err == nil && valid
+}
+
+func gossipResultError(index int, message gossipMessage, result string) error {
+	return fmt.Errorf("message %d (%s): expected %q but got %q", index, message.Message, message.Expected, result)
 }
 
 func gossipAttesterSlashingHandler(t *testing.T, root fs.FS, c spectest.TestCase) error {

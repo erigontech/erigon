@@ -123,7 +123,10 @@ func init() {
 		WithFn("compute_columns_for_custody_group", TestComputeColumnsForCustodyGroup).
 		WithFn("get_custody_groups", TestGetCustodyGroups).
 		WithFn("gossip_attester_slashing", gossipAttesterSlashingHandler).
-		WithFn("gossip_proposer_slashing", gossipProposerSlashingHandler)
+		WithFn("gossip_bls_to_execution_change", gossipBLSToExecutionChangeHandler).
+		WithFn("gossip_proposer_slashing", gossipProposerSlashingHandler).
+		WithFn("gossip_sync_committee_message", gossipSyncCommitteeMessageHandler).
+		WithFn("gossip_sync_committee_contribution_and_proof", gossipSyncContributionHandler)
 
 	addSszTests()
 }
