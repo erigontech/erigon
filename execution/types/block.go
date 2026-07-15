@@ -990,14 +990,15 @@ func (bfs *BodyForStorage) DecodeRLP(s *rlp.Stream) error {
 		return err
 	}
 
-	// decode BaseTxId
-	if err = s.Decode(&bfs.BaseTxnID); err != nil {
+	baseTxnID, err := s.Uint64()
+	if err != nil {
 		return err
 	}
-	// decode TxCount
-	if err = s.Decode(&bfs.TxCount); err != nil {
+	txCount, err := s.Uint32()
+	if err != nil {
 		return err
 	}
+	bfs.BaseTxnID, bfs.TxCount = BaseTxnID(baseTxnID), txCount
 	// decode Uncles
 	if err := decodeUncles(&bfs.Uncles, s); err != nil {
 		return err
