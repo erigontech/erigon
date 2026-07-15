@@ -472,8 +472,6 @@ type InvertedIndexRoTx struct {
 
 	seekInFilesCache *IISeekInFilesCache
 
-	// TODO: retrofit recent optimization in main and reenable the next line
-	// ef *multiencseq.SequenceBuilder // re-usable
 	salt              *uint32
 	stepSize          uint64
 	stepsInFrozenFile uint64

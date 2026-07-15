@@ -11,10 +11,10 @@ import (
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/dbservices"
 	"github.com/erigontech/erigon/db/kv"
-	"github.com/erigontech/erigon/db/kv/dbcfg"
-	"github.com/erigontech/erigon/db/kv/temporal"
+	"github.com/erigontech/erigon/db/kv/temporal/temporaltest"
 	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/execution/rlp"
 	"github.com/erigontech/erigon/execution/types"
@@ -279,7 +279,7 @@ func (m *balHeaderNumberReader) HeaderNumber(_ context.Context, _ kv.Getter, has
 func TestGetBlockAccessLists71_AnswersAndSends(t *testing.T) {
 	ctx := context.Background()
 
-	db := temporal.NewTestDB(t, dbcfg.ChainDB)
+	db := temporaltest.NewTestDB(t, datadir.New(t.TempDir()))
 	rwTx, err := db.BeginRw(ctx)
 	if err != nil {
 		t.Fatalf("begin rw: %v", err)

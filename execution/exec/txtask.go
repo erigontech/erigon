@@ -942,6 +942,7 @@ func (q *QueueWithRetry) Release() {
 		<-q.newTasks
 	}
 	// Clear retry heap, keep backing array.
+	clear(q.retires)
 	q.retires = q.retires[:0]
 	q.parked = q.newTasks
 	q.newTasks = nil
