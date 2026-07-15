@@ -293,13 +293,6 @@ func (n *Node) DataDir() string {
 	return n.config.Dirs.DataDir
 }
 
-func roTxsLimit(dbReadConcurrency int) int64 {
-	if dbReadConcurrency > 0 {
-		return int64(dbReadConcurrency)
-	}
-	return int64(httpcfg.DefaultDBReadConcurrency())
-}
-
 func OpenDatabase(ctx context.Context, config *nodecfg.Config, label kv.Label, name string, readonly bool, logger log.Logger) (kv.RwDB, error) {
 	switch label {
 	case dbcfg.ChainDB:
@@ -326,7 +319,7 @@ func OpenDatabase(ctx context.Context, config *nodecfg.Config, label kv.Label, n
 
 	logger.Info("Opening Database", "label", name, "path", dbPath)
 	openFunc := func(exclusive bool) (kv.RwDB, error) {
-		roTxsLimiter := semaphore.NewWeighted(roTxsLimit(config.Http.DBReadConcurrency))
+		roTxsLimiter := semaphore.NewWeighted(httpcfg.RoTxsLimit(config.Http.DBReadConcurrency, dbg.Exec3Workers))
 		opts := mdbx.New(label, logger).
 			Path(dbPath).
 			GrowthStep(16 * datasize.MB).

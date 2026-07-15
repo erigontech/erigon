@@ -100,3 +100,37 @@ func TestWarmuperCloseAndWaitWithBlockedCtxFactory(t *testing.T) {
 		t.Fatal("factory cleanup did not run before CloseAndWait returned")
 	}
 }
+
+// A factory yielding no PatriciaContext while the warmuper ctx is still live is
+// a defect, not a shutdown: the worker must fail the group so producers unblock,
+// instead of exiting successfully and leaving w.work with no consumer — which
+// hangs WarmKey once the buffer fills.
+func TestWarmuperNilFactoryResultUnblocksProducers(t *testing.T) {
+	t.Parallel()
+	factory := func(ctx context.Context) (PatriciaContext, func()) {
+		return nil, nil // no context, but ctx is NOT cancelled
+	}
+	const numWorkers = 2
+	w := NewWarmuper(context.Background(), WarmupConfig{
+		Enabled:    true,
+		CtxFactory: factory,
+		NumWorkers: numWorkers,
+		MaxDepth:   WarmupMaxDepth,
+	})
+	w.Start()
+
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		key := make([]byte, 32)
+		for i := range numWorkers * 64 * 3 {
+			w.WarmKey(key, 0, uint64(i))
+		}
+	}()
+
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("WarmKey blocked: workers exited on a nil factory result without cancelling the group")
+	}
+}

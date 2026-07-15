@@ -19,6 +19,7 @@ package commitment
 import (
 	"context"
 	"encoding/binary"
+	"errors"
 	"fmt"
 	"sync"
 	"sync/atomic"
@@ -124,7 +125,10 @@ func (w *Warmuper) Start() {
 				defer cleanup()
 			}
 			if trieCtx == nil {
-				return w.ctx.Err()
+				if err := w.ctx.Err(); err != nil {
+					return err
+				}
+				return errors.New("warmup trie context factory returned nil PatriciaContext")
 			}
 
 			for {

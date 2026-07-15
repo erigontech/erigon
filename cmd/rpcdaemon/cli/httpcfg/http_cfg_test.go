@@ -29,3 +29,25 @@ func TestDefaultDBReadConcurrency(t *testing.T) {
 	// read tx; fewer semaphore slots than workers deadlocks the exec pipeline.
 	require.Greater(t, DefaultDBReadConcurrency(), runtime.NumCPU())
 }
+
+func TestRoTxsLimit(t *testing.T) {
+	t.Parallel()
+	defaultLimit := int64(DefaultDBReadConcurrency())
+	floor := func(workers int) int64 { return int64(workers + 1 + dbReadTxsReserved) }
+	for _, tc := range []struct {
+		name         string
+		cfg, workers int
+		want         int64
+	}{
+		{"default passes through when above floor", 0, 4, defaultLimit},
+		{"high explicit value passes through", 5000, 8, 5000},
+		{"low explicit value raised to floor", 8, 64, floor(64)},
+		{"explicit value equal to worker count raised", 8, 8, floor(8)},
+		{"default floored below worker count", 0, int(defaultLimit) + 1, floor(int(defaultLimit) + 1)},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			require.Equal(t, tc.want, RoTxsLimit(tc.cfg, tc.workers))
+		})
+	}
+}
