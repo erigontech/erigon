@@ -25,9 +25,6 @@ import (
 	"github.com/erigontech/erigon/common/ssz"
 )
 
-var NO_GENESIS_TIME_ERR error = errors.New("genesis time is not set")
-var NO_VALIDATOR_ROOT_HASH error = errors.New("genesis validators root is not set")
-
 func ComputeDomain(
 	domainType []byte,
 	currentVersion [4]byte,
