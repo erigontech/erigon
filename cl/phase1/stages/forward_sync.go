@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"math"
 	"sort"
 	"sync/atomic"
 	"time"
@@ -20,6 +19,7 @@ import (
 	"github.com/erigontech/erigon/cl/phase1/execution_client"
 	"github.com/erigontech/erigon/cl/phase1/forkchoice"
 	network2 "github.com/erigontech/erigon/cl/phase1/network"
+	"github.com/erigontech/erigon/cl/utils"
 	"github.com/erigontech/erigon/cl/utils/bls"
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/hexutil"
@@ -266,33 +266,16 @@ func processDownloadedBlockBatches(ctx context.Context, logger log.Logger, cfg *
 	return
 }
 
-// boundedDuration converts a number of seconds into a time.Duration, guarding
-// against the int64 nanosecond overflow that would otherwise wrap to garbage.
-func boundedDuration(seconds float64) time.Duration {
-	if seconds <= 0 {
-		return 0
-	}
-	if maxSeconds := float64(math.MaxInt64) / float64(time.Second); seconds > maxSeconds {
-		return time.Duration(math.MaxInt64)
-	}
-	return time.Duration(seconds) * time.Second
-}
-
-// forwardSyncProgress derives the forward-sync distance and ETA for logging.
-// currentSlot can overshoot chainTipSlot and dip below prevProgress on reorgs,
-// so the differences are clamped to keep the unsigned math from underflowing.
-func forwardSyncProgress(chainTipSlot, currentSlot, prevProgress, secondsPerSlot uint64, secsPerLog int) (distFromChainTip, estimatedTimeRemaining time.Duration) {
-	var slotsRemaining uint64
+// forwardSyncProgress returns the slots still to sync and the observed sync rate
+// in slots/sec. currentSlot can overshoot chainTipSlot and dip below prevProgress
+// on reorgs, so both differences are clamped to keep the unsigned math from
+// underflowing.
+func forwardSyncProgress(chainTipSlot, currentSlot, prevProgress uint64, secsPerLog int) (slotsRemaining uint64, ratePerSec float64) {
 	if chainTipSlot > currentSlot {
 		slotsRemaining = chainTipSlot - currentSlot
 	}
-	distFromChainTip = boundedDuration(float64(slotsRemaining) * float64(secondsPerSlot))
-
-	estimatedTimeRemaining = 999 * time.Hour
 	if currentSlot > prevProgress && secsPerLog > 0 {
-		if rate := float64(currentSlot-prevProgress) / float64(secsPerLog); rate > 0 {
-			estimatedTimeRemaining = boundedDuration(float64(slotsRemaining) / rate)
-		}
+		ratePerSec = float64(currentSlot-prevProgress) / float64(secsPerLog)
 	}
 	return
 }
@@ -403,9 +386,11 @@ func forwardSync(ctx context.Context, logger log.Logger, cfg *Cfg, args Args) er
 		case <-logTicker.C:
 			// Log progress at regular intervals
 			cur := currentSlot.Load()
-			distFromChainTip, estimatedTimeRemaining := forwardSyncProgress(chainTipSlot, cur, prevProgress, cfg.beaconCfg.SecondsPerSlot, secsPerLog)
+			slotsRemaining, ratePerSec := forwardSyncProgress(chainTipSlot, cur, prevProgress, secsPerLog)
 			prevProgress = cur
-			logger.Info("[Caplin] Forward Sync", "progress", cur, "distance-from-chain-tip", distFromChainTip, "estimated-time-remaining", estimatedTimeRemaining)
+			logger.Info("[Caplin] Forward Sync", "progress", cur,
+				"distance-from-chain-tip", time.Duration(slotsRemaining*cfg.beaconCfg.SecondsPerSlot)*time.Second,
+				"estimated-time-remaining", utils.ETA(slotsRemaining, ratePerSec))
 		default:
 		}
 	}
