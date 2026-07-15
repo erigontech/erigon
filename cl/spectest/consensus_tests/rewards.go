@@ -23,6 +23,7 @@ import (
 	"slices"
 	"testing"
 
+	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/phase1/core/state"
 	"github.com/erigontech/erigon/cl/spectest/spectest"
 	"github.com/erigontech/erigon/cl/transition/impl/eth2/statechange"
@@ -69,6 +70,9 @@ func (b *RewardsCore) Run(t *testing.T, root fs.FS, c spectest.TestCase) error {
 	if err != nil {
 		return err
 	}
+	if preState.Version() == clparams.Phase0Version {
+		return runPhase0Rewards(root, c, preState)
+	}
 	validatorCount := preState.ValidatorLength()
 	eligible := state.EligibleValidatorsIndicies(preState)
 	participation := statechange.GetUnslashedIndiciesSet(
@@ -112,6 +116,150 @@ func (b *RewardsCore) Run(t *testing.T, root fs.FS, c spectest.TestCase) error {
 		return err
 	}
 	return compareRewardDeltas(root, c, "inactivity_penalty_deltas.ssz_snappy", have)
+}
+
+func runPhase0Rewards(root fs.FS, c spectest.TestCase, beaconState *state.CachingBeaconState) error {
+	validatorCount := beaconState.ValidatorLength()
+	eligible := state.EligibleValidatorsIndicies(beaconState)
+	matching := make([][]bool, 3)
+	for flagIndex := range matching {
+		matching[flagIndex] = make([]bool, validatorCount)
+	}
+	for validatorIndex := range validatorCount {
+		var values [3]bool
+		var err error
+		values[0], err = beaconState.ValidatorIsPreviousMatchingSourceAttester(validatorIndex)
+		if err != nil {
+			return err
+		}
+		values[1], err = beaconState.ValidatorIsPreviousMatchingTargetAttester(validatorIndex)
+		if err != nil {
+			return err
+		}
+		values[2], err = beaconState.ValidatorIsPreviousMatchingHeadAttester(validatorIndex)
+		if err != nil {
+			return err
+		}
+		validator, err := beaconState.ValidatorForValidatorIndex(validatorIndex)
+		if err != nil {
+			return err
+		}
+		if validator.Slashed() {
+			continue
+		}
+		for flagIndex := range values {
+			matching[flagIndex][validatorIndex] = values[flagIndex]
+		}
+	}
+
+	for flagIndex, name := range []string{"source_deltas.ssz_snappy", "target_deltas.ssz_snappy", "head_deltas.ssz_snappy"} {
+		have, err := phase0ComponentRewardDeltas(beaconState, eligible, matching[flagIndex])
+		if err != nil {
+			return err
+		}
+		if err := compareRewardDeltas(root, c, name, have); err != nil {
+			return err
+		}
+	}
+
+	have, err := phase0InclusionDelayRewardDeltas(beaconState, matching[0])
+	if err != nil {
+		return err
+	}
+	if err := compareRewardDeltas(root, c, "inclusion_delay_deltas.ssz_snappy", have); err != nil {
+		return err
+	}
+	have, err = phase0InactivityRewardDeltas(beaconState, eligible, matching[1])
+	if err != nil {
+		return err
+	}
+	return compareRewardDeltas(root, c, "inactivity_penalty_deltas.ssz_snappy", have)
+}
+
+func phase0ComponentRewardDeltas(beaconState *state.CachingBeaconState, eligible []uint64, matching []bool) (*rewardDeltas, error) {
+	validatorCount := beaconState.ValidatorLength()
+	deltas := &rewardDeltas{rewards: make([]uint64, validatorCount), penalties: make([]uint64, validatorCount)}
+	increment := beaconState.BeaconConfig().EffectiveBalanceIncrement
+	attestingBalance := increment
+	var sum uint64
+	for validatorIndex, isMatching := range matching {
+		if !isMatching {
+			continue
+		}
+		effectiveBalance, err := beaconState.ValidatorEffectiveBalance(validatorIndex)
+		if err != nil {
+			return nil, err
+		}
+		sum += effectiveBalance
+	}
+	attestingBalance = max(attestingBalance, sum)
+	activeIncrements := beaconState.GetTotalActiveBalance() / increment
+	if activeIncrements == 0 {
+		return nil, fmt.Errorf("active balance has no effective balance increments")
+	}
+	for _, validatorIndex := range eligible {
+		baseReward, err := beaconState.BaseReward(validatorIndex)
+		if err != nil {
+			return nil, err
+		}
+		if matching[validatorIndex] {
+			if state.InactivityLeaking(beaconState) {
+				deltas.rewards[validatorIndex] = baseReward
+			} else {
+				deltas.rewards[validatorIndex] = baseReward * (attestingBalance / increment) / activeIncrements
+			}
+		} else {
+			deltas.penalties[validatorIndex] = baseReward
+		}
+	}
+	return deltas, nil
+}
+
+func phase0InclusionDelayRewardDeltas(beaconState *state.CachingBeaconState, matchingSource []bool) (*rewardDeltas, error) {
+	deltas := &rewardDeltas{rewards: make([]uint64, beaconState.ValidatorLength()), penalties: make([]uint64, beaconState.ValidatorLength())}
+	for validatorIndex, isMatching := range matchingSource {
+		if !isMatching {
+			continue
+		}
+		attestation, err := beaconState.ValidatorMinPreviousInclusionDelayAttestation(validatorIndex)
+		if err != nil {
+			return nil, err
+		}
+		if attestation == nil || attestation.InclusionDelay == 0 || attestation.ProposerIndex >= uint64(beaconState.ValidatorLength()) {
+			return nil, fmt.Errorf("invalid inclusion delay attestation for validator %d", validatorIndex)
+		}
+		baseReward, err := beaconState.BaseReward(uint64(validatorIndex))
+		if err != nil {
+			return nil, err
+		}
+		proposerReward := baseReward / beaconState.BeaconConfig().ProposerRewardQuotient
+		deltas.rewards[attestation.ProposerIndex] += proposerReward
+		deltas.rewards[validatorIndex] += (baseReward - proposerReward) / attestation.InclusionDelay
+	}
+	return deltas, nil
+}
+
+func phase0InactivityRewardDeltas(beaconState *state.CachingBeaconState, eligible []uint64, matchingTarget []bool) (*rewardDeltas, error) {
+	deltas := &rewardDeltas{rewards: make([]uint64, beaconState.ValidatorLength()), penalties: make([]uint64, beaconState.ValidatorLength())}
+	if !state.InactivityLeaking(beaconState) {
+		return deltas, nil
+	}
+	for _, validatorIndex := range eligible {
+		baseReward, err := beaconState.BaseReward(validatorIndex)
+		if err != nil {
+			return nil, err
+		}
+		proposerReward := baseReward / beaconState.BeaconConfig().ProposerRewardQuotient
+		deltas.penalties[validatorIndex] = beaconState.BeaconConfig().BaseRewardsPerEpoch*baseReward - proposerReward
+		validator, err := beaconState.ValidatorForValidatorIndex(int(validatorIndex))
+		if err != nil {
+			return nil, err
+		}
+		if validator.Slashed() || !matchingTarget[validatorIndex] {
+			deltas.penalties[validatorIndex] += validator.EffectiveBalance() * state.FinalityDelay(beaconState) / beaconState.BeaconConfig().InactivityPenaltyQuotient
+		}
+	}
+	return deltas, nil
 }
 
 func flagRewardDeltas(
