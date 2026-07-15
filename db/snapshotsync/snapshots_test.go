@@ -1309,6 +1309,22 @@ func TestCloseAndDropNotProtected(t *testing.T) {
 	require.NotContains(t, survivors, stale)
 }
 
+func TestNewRoSnapshotsRejectsBadBaseSegType(t *testing.T) {
+	logger := log.New()
+	dir, require := t.TempDir(), require.New(t)
+	cfg := ethconfig.BlocksFreezing{ChainName: networkname.Mainnet}
+
+	require.PanicsWithValue("baseSegType is nil", func() {
+		NewBaseRoSnapshots(cfg, dir, snaptype2.BlockSnapshotTypes, nil, true, logger)
+	})
+
+	// BeaconBlocks is a registered type, but not one this collection manages, so
+	// Ranges would silently report nothing.
+	require.PanicsWithValue("baseSegType beaconblocks is not in types", func() {
+		NewBaseRoSnapshots(cfg, dir, snaptype2.BlockSnapshotTypes, snaptype.BeaconBlocks, true, logger)
+	})
+}
+
 func TestViewSegmentsOfUnmanagedType(t *testing.T) {
 	logger := log.New()
 	dir, require := t.TempDir(), require.New(t)

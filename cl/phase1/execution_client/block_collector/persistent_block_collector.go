@@ -114,14 +114,12 @@ func (p *PersistentBlockCollector) AddBlock(block *cltypes.BeaconBlock) error {
 		return fmt.Errorf("database not initialized")
 	}
 
-	// Encode the block
 	payload := block.Body.ExecutionPayload
 	encodedBlock, err := p.encodeBlock(payload, block.ParentRoot, block.Body.GetExecutionRequestsList())
 	if err != nil {
 		return fmt.Errorf("failed to encode block: %w", err)
 	}
 
-	// Store in database (skip if already exists)
 	return p.db.Update(context.Background(), func(tx kv.RwTx) error {
 		return tx.Put(kv.Headers, payloadKey(payload), encodedBlock)
 	})
@@ -161,8 +159,7 @@ const (
 // valid only until the next call, so callers must copy it or fully consume it
 // before encoding again. Callers must hold p.mu.
 func (p *PersistentBlockCollector) encodeBlock(payload *cltypes.Eth1Block, parentRoot common.Hash, executionRequestsList []hexutil.Bytes) ([]byte, error) {
-	p.encodeBlockBuf = slices.Grow(p.encodeBlockBuf[:0], electraBlockPrefixLen+payload.EncodingSizeSSZ())
-	p.encodeBlockBuf = append(p.encodeBlockBuf, byte(payload.Version()))
+	p.encodeBlockBuf = append(p.encodeBlockBuf[:0], byte(payload.Version()))
 	p.encodeBlockBuf = append(p.encodeBlockBuf, parentRoot[:]...)
 	if payload.Version() >= clparams.ElectraVersion {
 		requestsHash := cltypes.ComputeExecutionRequestHash(executionRequestsList)

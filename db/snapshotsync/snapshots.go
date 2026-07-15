@@ -575,6 +575,12 @@ func newRoSnapshots(cfg ethconfig.BlocksFreezing, snapDir string, types []snapty
 	for i, t := range types {
 		enums[i] = t.Enum()
 	}
+	if baseSegType == nil {
+		panic("baseSegType is nil")
+	}
+	if !slices.Contains(enums, baseSegType.Enum()) {
+		panic(fmt.Sprintf("baseSegType %s is not in types", baseSegType.Name()))
+	}
 	snCfg := snapcfg.KnownCfgOrDevnet(cfg.ChainName)
 	s := &BaseRoSnapshots{dir: snapDir, cfg: cfg, snCfg: snCfg, logger: logger,
 		types: types, enums: enums, baseSegType: baseSegType,
