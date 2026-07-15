@@ -279,12 +279,13 @@ func (e *EngineBlockDownloader) retryBusy(ctx context.Context, label string, cal
 	logEvery := time.NewTicker(5 * time.Second)
 	defer logEvery.Stop()
 	for err == nil && status == execmodule.ExecutionStatusBusy {
+		if err := common.Sleep(ctx, 50*time.Millisecond); err != nil {
+			return status, validationErr, lastValidHash, err
+		}
 		select {
-		case <-ctx.Done():
-			return status, validationErr, lastValidHash, ctx.Err()
 		case <-logEvery.C:
 			e.logger.Debug("[EngineBlockDownloader] execution busy - retrying", "label", label)
-		case <-time.After(50 * time.Millisecond):
+		default:
 		}
 		status, validationErr, lastValidHash, err = call()
 	}
