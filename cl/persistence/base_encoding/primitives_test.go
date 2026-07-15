@@ -107,7 +107,7 @@ func TestAppendEffectiveBalances(t *testing.T) {
 	for i := range ssz {
 		ssz[i] = byte(i*7 + 1) // noise in non-effective-balance fields
 	}
-	for i := 0; i < validators; i++ {
+	for i := range validators {
 		binary.LittleEndian.PutUint64(ssz[i*vSize+80:], uint64(i+32))
 		binary.LittleEndian.PutUint64(packed[i*8:], uint64(i+32))
 	}
