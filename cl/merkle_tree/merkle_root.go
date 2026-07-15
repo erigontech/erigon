@@ -40,6 +40,9 @@ const maxStackLeaves = 32
 // IMPORTANT: DATA TYPE MUST IMPLEMENT HASHABLE
 // SUPPORTED PRIMITIVES: uint64, *uint64 and []byte
 func HashTreeRoot(schema ...any) ([32]byte, error) {
+	if len(schema) == 0 {
+		return [32]byte{}, errors.New("empty schema")
+	}
 	var stack [maxStackLeaves * length.Hash]byte // stack-allocation for most of cases
 	size := NextPowerOfTwo(uint64(len(schema) * length.Hash))
 	var leaves []byte
@@ -81,7 +84,7 @@ func HashTreeRoot(schema ...any) ([32]byte, error) {
 			copy(leaves[pos:], root[:])
 		default:
 			// If the element does not match any supported types, panic with an error message
-			panic(fmt.Sprintf("Can't create TreeRoot: unsported type %T at index %d", obj, i))
+			panic(fmt.Sprintf("Can't create TreeRoot: unsupported type %T at index %d", obj, i))
 		}
 
 		// Move the position pointer to the next leaf
