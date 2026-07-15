@@ -88,8 +88,9 @@ func TestProcessBuilderDepositRequestTopsUpExistingBuilder(t *testing.T) {
 
 	machine := &eth2.Impl{}
 	err := machine.ProcessBuilderDepositRequest(s, &solid.BuilderDepositRequest{
-		PubKey: pubkey,
-		Amount: 25,
+		PubKey:                pubkey,
+		WithdrawalCredentials: common.Hash{byte(cfg.BuilderWithdrawalPrefix)},
+		Amount:                25,
 	})
 
 	require.NoError(t, err)
@@ -113,8 +114,9 @@ func TestProcessBuilderDepositRequestRejectsBalanceOverflow(t *testing.T) {
 
 	machine := &eth2.Impl{}
 	err := machine.ProcessBuilderDepositRequest(s, &solid.BuilderDepositRequest{
-		PubKey: pubkey,
-		Amount: 1,
+		PubKey:                pubkey,
+		WithdrawalCredentials: common.Hash{byte(cfg.BuilderWithdrawalPrefix)},
+		Amount:                1,
 	})
 
 	require.Error(t, err)
