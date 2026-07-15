@@ -140,8 +140,8 @@ func (s *SpanSnapshotStore) snapshotsReverseForEach(f func(span Span) (stop bool
 	defer tx.Close()
 	segments := tx.Segments
 	// walk the segment files backwards
-	for i := len(segments) - 1; i >= 0; i-- {
-		sn := segments[i]
+	for _, sn := range slices.Backward(segments) {
+
 		idx := sn.Src().Index()
 		if idx == nil || idx.KeyCount() == 0 {
 			continue
@@ -196,11 +196,11 @@ func (s *SpanSnapshotStore) LastFrozenEntityId() (uint64, bool, error) {
 	}
 	// find the last segment which has a built non-empty index
 	var lastSegment *snapshotsync.VisibleSegment
-	for i := len(segments) - 1; i >= 0; i-- {
-		if segments[i].Src().Index() != nil {
-			gg := segments[i].Src().MakeGetter()
+	for _, segment := range slices.Backward(segments) {
+		if segment.Src().Index() != nil {
+			gg := segment.Src().MakeGetter()
 			if gg.HasNext() {
-				lastSegment = segments[i]
+				lastSegment = segment
 				break
 			}
 		}
@@ -238,8 +238,8 @@ func (s *SpanSnapshotStore) Entity(ctx context.Context, id uint64) (*Span, bool,
 	defer tx.Close()
 	segments := tx.Segments
 
-	for i := len(segments) - 1; i >= 0; i-- {
-		sn := segments[i]
+	for _, sn := range slices.Backward(segments) {
+
 		idx := sn.Src().Index()
 
 		if idx == nil || idx.KeyCount() == 0 {
@@ -351,8 +351,8 @@ func (s *CheckpointSnapshotStore) Entity(ctx context.Context, id uint64) (*Check
 	defer tx.Close()
 	segments := tx.Segments
 
-	for i := len(segments) - 1; i >= 0; i-- {
-		sn := segments[i]
+	for _, sn := range slices.Backward(segments) {
+
 		index := sn.Src().Index()
 
 		if index == nil || index.KeyCount() == 0 || id < index.BaseDataID() {
@@ -389,11 +389,11 @@ func (s *CheckpointSnapshotStore) LastFrozenEntityId() (uint64, bool, error) {
 	}
 	// find the last segment which has a built non-empty index
 	var lastSegment *snapshotsync.VisibleSegment
-	for i := len(segments) - 1; i >= 0; i-- {
-		if segments[i].Src().Index() != nil {
-			gg := segments[i].Src().MakeGetter()
+	for _, segment := range slices.Backward(segments) {
+		if segment.Src().Index() != nil {
+			gg := segment.Src().MakeGetter()
 			if gg.HasNext() {
-				lastSegment = segments[i]
+				lastSegment = segment
 				break
 			}
 		}
@@ -561,8 +561,8 @@ func snapshotStoreRangeFromBlockNum[T Entity](
 	var snapshotEntities []T
 
 OUTER:
-	for i := len(segments) - 1; i >= 0; i-- {
-		sn := segments[i]
+	for _, sn := range slices.Backward(segments) {
+
 		idx := sn.Src().Index()
 		if idx == nil || idx.KeyCount() == 0 {
 			continue

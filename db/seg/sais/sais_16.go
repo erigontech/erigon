@@ -11,6 +11,8 @@
 
 package sais
 
+import "slices"
+
 func sais_16_32(text []uint16, textMax int, sa, tmp []int32) {
 	if len(sa) != len(text) || len(tmp) < textMax {
 		panic("sais: misuse of sais_16_32")
@@ -93,8 +95,8 @@ func placeLMS_16_32(text []uint16, sa, freq, bucket []int32) int {
 	lastB := int32(-1)
 
 	c0, c1, isTypeS := uint16(0), uint16(0), false
-	for i := len(text) - 1; i >= 0; i-- {
-		c0, c1 = text[i], c0
+	for i, t := range slices.Backward(text) {
+		c0, c1 = t, c0
 		if c0 < c1 {
 			isTypeS = true
 		} else if c0 > c1 && isTypeS {
@@ -195,8 +197,8 @@ func length_16_32(text []uint16, sa []int32, numLMS int) {
 	end := 0
 
 	c0, c1, isTypeS := uint16(0), uint16(0), false
-	for i := len(text) - 1; i >= 0; i-- {
-		c0, c1 = text[i], c0
+	for i, t := range slices.Backward(text) {
+		c0, c1 = t, c0
 		if c0 < c1 {
 			isTypeS = true
 		} else if c0 > c1 && isTypeS {
@@ -253,8 +255,8 @@ func unmap_16_32(text []uint16, sa []int32, numLMS int) {
 	j := len(unmap)
 
 	c0, c1, isTypeS := uint16(0), uint16(0), false
-	for i := len(text) - 1; i >= 0; i-- {
-		c0, c1 = text[i], c0
+	for i, t := range slices.Backward(text) {
+		c0, c1 = t, c0
 		if c0 < c1 {
 			isTypeS = true
 		} else if c0 > c1 && isTypeS {

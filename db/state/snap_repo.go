@@ -3,6 +3,7 @@ package state
 import (
 	"fmt"
 	"path/filepath"
+	"slices"
 
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/datastruct/btindex"
@@ -222,8 +223,8 @@ func (f *SnapshotRepo) CloseFilesAfterRootNum(after RootNum) {
 
 func (f *SnapshotRepo) CloseVisibleFilesAfterRootNum(after RootNum) {
 	var i int
-	for i = len(f.current) - 1; i >= 0; i-- {
-		if f.current[i].endTxNum <= uint64(after) {
+	for _, v := range slices.Backward(f.current) {
+		if v.endTxNum <= uint64(after) {
 			break
 		}
 	}
@@ -479,9 +480,9 @@ func getFreezingRange(rootFrom, rootTo RootNum, cfg *SnapshotConfig) (freezeFrom
 	if from%mergeLimit == 0 {
 		maxJump = mergeLimit
 	} else {
-		for i := len(cfg.MergeStages) - 1; i >= 0; i-- {
-			if from%cfg.MergeStages[i] == 0 {
-				maxJump = cfg.MergeStages[i]
+		for _, v := range slices.Backward(cfg.MergeStages) {
+			if from%v == 0 {
+				maxJump = v
 				break
 			}
 		}
@@ -498,9 +499,9 @@ func getFreezingRange(rootFrom, rootTo RootNum, cfg *SnapshotConfig) (freezeFrom
 	case jump >= cfg.MergeStages[0]:
 		// else find if a merge step can be used
 		// assuming merge step multiple of each other
-		for i := len(cfg.MergeStages) - 1; i >= 0; i-- {
-			if jump >= cfg.MergeStages[i] {
-				_freezeTo = _freezeFrom + cfg.MergeStages[i]
+		for _, v := range slices.Backward(cfg.MergeStages) {
+			if jump >= v {
+				_freezeTo = _freezeFrom + v
 				break
 			}
 		}

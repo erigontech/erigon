@@ -25,6 +25,7 @@ import (
 	"maps"
 	"math/big"
 	"os"
+	"slices"
 	"strings"
 
 	"github.com/holiman/uint256"
@@ -346,8 +347,8 @@ func WriteTrace(writer io.Writer, logs []StructLog) {
 
 		if len(log.Stack) > 0 {
 			fmt.Fprintln(writer, "Stack:")
-			for i := len(log.Stack) - 1; i >= 0; i-- {
-				fmt.Fprintf(writer, "%08d  %x\n", len(log.Stack)-i-1, math.PaddedBigBytes(log.Stack[i], 32))
+			for i, v := range slices.Backward(log.Stack) {
+				fmt.Fprintf(writer, "%08d  %x\n", len(log.Stack)-i-1, math.PaddedBigBytes(v, 32))
 			}
 		}
 		if len(log.Memory) > 0 {

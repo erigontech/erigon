@@ -22,6 +22,7 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
+	"slices"
 	"time"
 
 	"github.com/erigontech/erigon/common"
@@ -89,11 +90,11 @@ func (s *SnapshotStore) LastFrozenEventBlockNum() uint64 {
 	}
 	// find the last segment which has a built non-empty index
 	var lastSegment *snapshotsync.VisibleSegment
-	for i := len(segments) - 1; i >= 0; i-- {
-		if segments[i].Src().Index() != nil {
-			gg := segments[i].Src().MakeGetter()
+	for _, segment := range slices.Backward(segments) {
+		if segment.Src().Index() != nil {
+			gg := segment.Src().MakeGetter()
 			if gg.HasNext() {
-				lastSegment = segments[i]
+				lastSegment = segment
 				break
 			}
 		}
@@ -164,11 +165,11 @@ func (s *SnapshotStore) LastFrozenEventId() uint64 {
 	}
 	// find the last segment which has a built non-empty index
 	var lastSegment *snapshotsync.VisibleSegment
-	for i := len(segments) - 1; i >= 0; i-- {
-		if segments[i].Src().Index() != nil {
-			gg := segments[i].Src().MakeGetter()
+	for _, segment := range slices.Backward(segments) {
+		if segment.Src().Index() != nil {
+			gg := segment.Src().MakeGetter()
 			if gg.HasNext() {
-				lastSegment = segments[i]
+				lastSegment = segment
 				break
 			}
 		}
@@ -233,8 +234,8 @@ func (s *SnapshotStore) BlockEventIdsRange(ctx context.Context, blockHash common
 	defer tx.Close()
 	segments := tx.Segments
 
-	for i := len(segments) - 1; i >= 0; i-- {
-		sn := segments[i]
+	for _, sn := range slices.Backward(segments) {
+
 		if sn.From() > blockNum {
 			continue
 		}
@@ -290,15 +291,15 @@ func (s *SnapshotStore) events(ctx context.Context, start, end, blockNumber uint
 	var buf []byte
 	var result [][]byte
 
-	for i := len(segments) - 1; i >= 0; i-- {
-		if segments[i].From() > blockNumber {
+	for _, segment := range slices.Backward(segments) {
+		if segment.From() > blockNumber {
 			continue
 		}
-		if segments[i].To() <= blockNumber {
+		if segment.To() <= blockNumber {
 			break
 		}
 
-		gg0 := segments[i].Src().MakeGetter()
+		gg0 := segment.Src().MakeGetter()
 
 		if !gg0.HasNext() {
 			continue
@@ -331,8 +332,8 @@ func (s *SnapshotStore) events(ctx context.Context, start, end, blockNumber uint
 }
 
 func (s *SnapshotStore) borBlockByEventHash(txnHash common.Hash, segments []*snapshotsync.VisibleSegment, buf []byte) (blockNum uint64, ok bool, err error) {
-	for i := len(segments) - 1; i >= 0; i-- {
-		sn := segments[i]
+	for _, sn := range slices.Backward(segments) {
+
 		idxBorTxnHash := sn.Src().Index()
 
 		if idxBorTxnHash == nil {

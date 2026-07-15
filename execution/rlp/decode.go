@@ -27,6 +27,7 @@ import (
 	"fmt"
 	"io"
 	"reflect"
+	"slices"
 	"strings"
 	"sync"
 
@@ -134,8 +135,8 @@ func (e *decodeError) Error() string {
 	ctx := ""
 	if len(e.ctx) > 0 {
 		ctx = ", decoding into "
-		for i := len(e.ctx) - 1; i >= 0; i-- {
-			ctx += e.ctx[i]
+		for _, v := range slices.Backward(e.ctx) {
+			ctx += v
 		}
 	}
 	return fmt.Sprintf("rlp: %s for %v%s", e.msg, e.typ, ctx)
