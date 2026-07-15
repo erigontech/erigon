@@ -17,7 +17,6 @@
 package accounts
 
 import (
-	"bytes"
 	"fmt"
 	"io"
 	"math/bits"
@@ -668,8 +667,7 @@ func DeserialiseV3CodeHash(enc []byte) []byte {
 		return nil
 	}
 	h := enc[pos : pos+codeHashBytes]
-	var zero common.Hash
-	if bytes.Equal(h, zero[:]) || bytes.Equal(h, empty.CodeHash[:]) {
+	if ch := common.Hash(h); ch == (common.Hash{}) || ch == empty.CodeHash {
 		return nil
 	}
 	return h
