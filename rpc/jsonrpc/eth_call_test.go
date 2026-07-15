@@ -468,7 +468,8 @@ func TestGetProofPinsReadSnapshot(t *testing.T) {
 		roTx,
 		bankAddress,
 		nil,
-		rpc.BlockNumberOrHashWithNumber(6),
+		6,
+		true,
 		log.New(),
 	)
 	require.NoError(t, err)

@@ -430,14 +430,14 @@ func (api *APIImpl) GetProof(ctx context.Context, address common.Address, storag
 
 	// nil filters: resolve on the committed view — getProof gates on and reads
 	// the same plain roTx (see rpchelper.GetBlockNumber).
-	requestedBlockNr, _, _, err := rpchelper.GetCanonicalBlockNumber(ctx, blockNrOrHash, roTx, api._blockReader, nil)
+	blockNumber, _, isLatest, err := rpchelper.GetCanonicalBlockNumber(ctx, blockNrOrHash, roTx, api._blockReader, nil)
 	if err != nil {
 		return nil, err
-	} else if requestedBlockNr == 0 {
+	} else if blockNumber == 0 {
 		return nil, errors.New("block not found")
 	}
 
-	err = api.BaseAPI.checkPruneHistory(ctx, roTx, uint64(requestedBlockNr))
+	err = api.BaseAPI.checkPruneHistory(ctx, roTx, blockNumber)
 	if err != nil {
 		return nil, err
 	}
@@ -447,10 +447,10 @@ func (api *APIImpl) GetProof(ctx context.Context, address common.Address, storag
 		storageKeysConverted[i].Hash.SetBytes(s)
 		storageKeysConverted[i].KeyLength = len(s)
 	}
-	return api.getProof(ctx, roTx, address, storageKeysConverted, rpc.BlockNumberOrHashWithNumber(rpc.BlockNumber(requestedBlockNr)), api.logger)
+	return api.getProof(ctx, roTx, address, storageKeysConverted, blockNumber, isLatest, api.logger)
 }
 
-func (api *APIImpl) getProof(ctx context.Context, roTx kv.TemporalTx, address common.Address, storageKeys []StorageKeysInfo, blockNrOrHash rpc.BlockNumberOrHash, logger log.Logger) (*accounts.AccProofResult, error) {
+func (api *APIImpl) getProof(ctx context.Context, roTx kv.TemporalTx, address common.Address, storageKeys []StorageKeysInfo, blockNumber uint64, isLatest bool, logger log.Logger) (*accounts.AccProofResult, error) {
 
 	// Output key encoding is a bit special: if the input was a 32-byte hash, it is
 	// returned as such. Otherwise, we apply the QUANTITY encoding mandated by the
@@ -468,7 +468,7 @@ func (api *APIImpl) getProof(ctx context.Context, roTx kv.TemporalTx, address co
 	}
 
 	// get the root hash from header to validate proofs along the way
-	header, err := api._blockReader.HeaderByNumber(ctx, roTx, blockNrOrHash.BlockNumber.Uint64())
+	header, err := api._blockReader.HeaderByNumber(ctx, roTx, blockNumber)
 	if err != nil {
 		return nil, err
 	}
@@ -481,17 +481,9 @@ func (api *APIImpl) getProof(ctx context.Context, roTx kv.TemporalTx, address co
 	domains.DetachBranchCache()
 	sdCtx := domains.GetCommitmentContext()
 
-	// Committed view: the proof computation below reads the same plain roTx.
-	latestBlock, err := rpchelper.GetLatestBlockNumber(roTx)
-	if err != nil {
-		return nil, err
-	}
-	if latestBlock < blockNrOrHash.BlockNumber.Uint64() {
-		return nil, fmt.Errorf("block number is in the future latest=%d requested=%d", latestBlock, blockNrOrHash.BlockNumber.Uint64())
-	}
-	if blockNrOrHash.BlockNumber.Uint64() < latestBlock {
+	if !isLatest {
 		// Get first txnum of blockNumber+1 to ensure that correct state root will be restored as of blockNumber has been executed
-		lastTxnInBlock, err := api._txNumReader.Min(ctx, roTx, blockNrOrHash.BlockNumber.Uint64()+1)
+		lastTxnInBlock, err := api._txNumReader.Min(ctx, roTx, blockNumber+1)
 		if err != nil {
 			return nil, err
 		}
@@ -575,7 +567,7 @@ func (api *APIImpl) getProof(ctx context.Context, roTx kv.TemporalTx, address co
 		}
 	}
 
-	reader, err := rpchelper.CreateStateReader(ctx, roTx, api._blockReader, blockNrOrHash, 0, nil, api.stateCache, api._txNumReader)
+	reader, err := rpchelper.CreateStateReaderFromBlockNumber(ctx, roTx, blockNumber, isLatest, 0, api.stateCache, api._txNumReader)
 	if err != nil {
 		return nil, err
 	}
