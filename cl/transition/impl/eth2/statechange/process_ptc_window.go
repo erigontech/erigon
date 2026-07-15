@@ -39,7 +39,7 @@ func ProcessPtcWindow(s abstract.BeaconState) error {
 
 	// Build a new window, shifting entries forward by one epoch.
 	newWindow := solid.NewUint64VectorOfVectors(totalSlots, int(cfg.PtcSize))
-	for i := 0; i < lastEpochStart; i++ {
+	for i := range lastEpochStart {
 		newWindow.Set(i, ptcWindow.Get(i+int(slotsPerEpoch)))
 	}
 
@@ -48,7 +48,7 @@ func ProcessPtcWindow(s abstract.BeaconState) error {
 	nextEpoch := currentEpoch + cfg.MinSeedLookahead + 1
 	nextEpochStartSlot := nextEpoch * slotsPerEpoch
 
-	for i := uint64(0); i < slotsPerEpoch; i++ {
+	for i := range slotsPerEpoch {
 		ptc, err := s.ComputePTC(nextEpochStartSlot + i)
 		if err != nil {
 			return err

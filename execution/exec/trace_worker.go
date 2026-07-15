@@ -20,8 +20,8 @@ import (
 	"fmt"
 
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/db/dbservices"
 	"github.com/erigontech/erigon/db/kv"
-	"github.com/erigontech/erigon/db/services"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/protocol"
 	"github.com/erigontech/erigon/execution/protocol/aa"
@@ -47,7 +47,7 @@ type Resetable interface {
 type TraceWorker struct {
 	stateReader  *state.HistoryReaderV3
 	engine       rules.EngineReader
-	headerReader services.HeaderReader
+	headerReader dbservices.HeaderReader
 	tx           kv.Getter
 	chainConfig  *chain.Config
 	tracer       GenericTracer
@@ -64,7 +64,7 @@ type TraceWorker struct {
 	vmConfig  *vm.Config
 }
 
-func NewTraceWorker(tx kv.TemporalTx, cc *chain.Config, engine rules.EngineReader, br services.HeaderReader, tracer GenericTracer) *TraceWorker {
+func NewTraceWorker(tx kv.TemporalTx, cc *chain.Config, engine rules.EngineReader, br dbservices.HeaderReader, tracer GenericTracer) *TraceWorker {
 	stateReader := state.NewHistoryReaderV3(tx, 0)
 
 	ie := &TraceWorker{

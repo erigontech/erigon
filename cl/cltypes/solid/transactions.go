@@ -98,7 +98,7 @@ func (t *TransactionsSSZ) DecodeSSZ(buf []byte, _ int) error {
 	}
 	maxBytesPerTransaction := t.maxBytes()
 	t.underlying = make([][]byte, length)
-	for i := uint32(0); i < length; i++ {
+	for i := range length {
 		offsetPosition := i * 4
 		startTx := ssz.DecodeOffset(buf[offsetPosition:])
 		if startTx < firstOffset {

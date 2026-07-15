@@ -165,7 +165,7 @@ func MerkleProof(depth, proofIndex int, schema ...any) ([][32]byte, error) {
 		schema = append(schema, make([]byte, 32))
 	}
 
-	for i := 0; i < depth; i++ {
+	for i := range depth {
 		// Hash the left branch
 		if proofIndex >= int(currentSizeDepth)/2 {
 			proof[depth-i-1], err = HashTreeRoot(schema[0 : currentSizeDepth/2]...)

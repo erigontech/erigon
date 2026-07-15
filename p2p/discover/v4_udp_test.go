@@ -223,7 +223,7 @@ func TestUDPv4_responseTimeouts(t *testing.T) {
 		nilErr     = make(chan error, nReqs) // for requests that get a reply
 		timeoutErr = make(chan error, nReqs) // for requests that time out
 	)
-	for i := 0; i < nReqs; i++ {
+	for i := range nReqs {
 		// Create a matcher for a random request in udp.loop. Requests
 		// with ptype <= 128 will not get a reply and should time out.
 		// For all other requests, a reply is scheduled to arrive
@@ -255,7 +255,7 @@ func TestUDPv4_responseTimeouts(t *testing.T) {
 		recvDeadline        = time.After(20 * time.Second)
 		nTimeoutsRecv, nNil = 0, 0
 	)
-	for i := 0; i < nReqs; i++ {
+	for i := range nReqs {
 		select {
 		case err := <-timeoutErr:
 			if err != errTimeout {
@@ -311,7 +311,7 @@ func TestUDPv4_findnode(t *testing.T) {
 	nodes := &nodesByDistance{target: testTarget.ID()}
 	live := make(map[enode.ID]bool)
 	numCandidates := 2 * bucketSize
-	for i := 0; i < numCandidates; i++ {
+	for i := range numCandidates {
 		key := newkey()
 		ip := net.IP{10, 13, 0, byte(i)}
 		n := enode.NewV4(&key.PublicKey, ip, 0, 2000)
@@ -364,7 +364,7 @@ func TestUDPv4_findnodeLivenessCheck(t *testing.T) {
 
 	// Add nodes that have NOT been validated live.
 	numCandidates := bucketSize
-	for i := 0; i < numCandidates; i++ {
+	for i := range numCandidates {
 		key := newkey()
 		ip := net.IP{10, 13, 0, byte(i)}
 		n := enode.NewV4(&key.PublicKey, ip, 0, 2000)

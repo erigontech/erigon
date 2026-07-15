@@ -268,7 +268,7 @@ func (s *Service) proposeBlock(ctx context.Context, slot uint64, key *ValidatorK
 
 	var blockResponse json.RawMessage
 	var getErr error
-	for attempt := 0; attempt < 5; attempt++ {
+	for range 5 {
 		getErr = s.client.get(ctx, path, &blockResponse)
 		if getErr == nil {
 			break

@@ -32,11 +32,11 @@ import (
 	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/common/length"
 	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/db/dbservices"
 	"github.com/erigontech/erigon/db/etl"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/dbutils"
 	"github.com/erigontech/erigon/db/kv/prune"
-	"github.com/erigontech/erigon/db/services"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/exec"
 	"github.com/erigontech/erigon/execution/protocol/rules"
@@ -52,11 +52,11 @@ type SendersCfg struct {
 	badBlockHalt    bool
 	tmpdir          string
 	chainConfig     *chain.Config
-	blockReader     services.FullBlockReader
+	blockReader     dbservices.FullBlockReader
 	readAheader     *exec.BlockReadAheader
 }
 
-func StageSendersCfg(chainCfg *chain.Config, syncCfg ethconfig.Sync, badBlockHalt bool, tmpdir string, prune prune.Mode, blockReader services.FullBlockReader, readAheader *exec.BlockReadAheader) SendersCfg {
+func StageSendersCfg(chainCfg *chain.Config, syncCfg ethconfig.Sync, badBlockHalt bool, tmpdir string, prune prune.Mode, blockReader dbservices.FullBlockReader, readAheader *exec.BlockReadAheader) SendersCfg {
 	const sendersBatchSize = 1000
 	return SendersCfg{
 		batchSize:       sendersBatchSize,

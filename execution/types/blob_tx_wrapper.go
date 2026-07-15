@@ -199,7 +199,7 @@ func (blobs Blobs) ComputeCommitmentsAndProofs() (commitments []KZGCommitment, v
 	versionedHashes = make([]common.Hash, len(blobs))
 
 	kzgCtx := libkzg.Ctx()
-	for i := 0; i < len(blobs); i++ {
+	for i := range blobs {
 		commitment, err := kzgCtx.BlobToKZGCommitment((*goethkzg.Blob)(&blobs[i]), 1 /*numGoRoutines*/)
 		if err != nil {
 			return nil, nil, nil, fmt.Errorf("could not convert blob to commitment: %w", err)

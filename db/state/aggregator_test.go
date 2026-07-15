@@ -90,7 +90,7 @@ func generateKV(tb testing.TB, tmp string, keySize, valueSize, keyCount int, log
 	collector := etl.NewCollector(btindex.BtreeLogPrefix+" genCompress", tb.TempDir(), etl.NewSortableBuffer(bufSize), logger)
 	defer collector.Close()
 
-	for i := 0; i < keyCount; i++ {
+	for i := range keyCount {
 		key := make([]byte, keySize)
 		n, err := rnd.Read(key)
 		require.Equal(tb, keySize, n)
@@ -162,13 +162,13 @@ func TestReferencesInCommitmentBranchesConcurrent(t *testing.T) {
 	wg.Add(2)
 	go func() {
 		defer wg.Done()
-		for i := 0; i < iters; i++ {
+		for i := range iters {
 			agg.applyReferencesInCommitmentBranches(i%2 == 0)
 		}
 	}()
 	go func() {
 		defer wg.Done()
-		for i := 0; i < iters; i++ {
+		for range iters {
 			_ = agg.referencesInCommitmentBranches()
 		}
 	}()
@@ -187,7 +187,7 @@ func TestFilesAmountConcurrent(t *testing.T) {
 	wg.Add(2)
 	go func() {
 		defer wg.Done()
-		for i := 0; i < iters; i++ {
+		for i := range iters {
 			item := &FilesItem{startTxNum: uint64(i), endTxNum: uint64(i + 1)}
 			agg.dirtyFilesLock.Lock()
 			d.dirtyFiles.Set(item)
@@ -199,7 +199,7 @@ func TestFilesAmountConcurrent(t *testing.T) {
 	}()
 	go func() {
 		defer wg.Done()
-		for i := 0; i < iters; i++ {
+		for range iters {
 			_ = agg.FilesAmount()
 		}
 	}()
@@ -215,7 +215,7 @@ func generateInputData(tb testing.TB, keySize, valueSize, keyCount int) ([][]byt
 	keys := make([][]byte, keyCount)
 
 	bk, bv := make([]byte, keySize), make([]byte, valueSize)
-	for i := 0; i < keyCount; i++ {
+	for i := range keyCount {
 		n, err := rnd.Read(bk)
 		require.Equal(tb, keySize, n)
 		require.NoError(tb, err)
