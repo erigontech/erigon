@@ -56,8 +56,28 @@ const (
 // Code uses CodeCache (two-level for deduplication).
 type StateCache struct {
 	caches      [kv.DomainLen]Cache
-	admissionMu sync.RWMutex
+	admissionMu [kv.DomainLen]sync.RWMutex
 	appliedEnd  [kv.DomainLen]uint64
+}
+
+func (c *StateCache) admissionLock(domain kv.Domain) *sync.RWMutex {
+	// Account updates also invalidate address-keyed code state.
+	if domain == kv.CodeDomain {
+		domain = kv.AccountsDomain
+	}
+	return &c.admissionMu[domain]
+}
+
+func (c *StateCache) lockAllAdmissions() {
+	for i := range c.admissionMu {
+		c.admissionMu[i].Lock()
+	}
+}
+
+func (c *StateCache) unlockAllAdmissions() {
+	for i := len(c.admissionMu) - 1; i >= 0; i-- {
+		c.admissionMu[i].Unlock()
+	}
 }
 
 // NewStateCache creates a new StateCache with the specified byte capacities.
@@ -159,8 +179,9 @@ func (c *StateCache) PutCodeWithHash(addr, code, codeHash []byte, txNum uint64) 
 
 // PutCodeWithHashIfFresh conditionally fills code from a current snapshot.
 func (c *StateCache) PutCodeWithHashIfFresh(addr, code, codeHash []byte, txNum, snapshotEnd uint64) {
-	c.admissionMu.RLock()
-	defer c.admissionMu.RUnlock()
+	mu := c.admissionLock(kv.CodeDomain)
+	mu.RLock()
+	defer mu.RUnlock()
 	if snapshotEnd < c.appliedEnd[kv.CodeDomain] {
 		return
 	}
@@ -222,8 +243,9 @@ func (c *StateCache) putAddrCodeHash(addr []byte, h [32]byte, txNum uint64) {
 
 // PutAddrCodeHashIfFresh conditionally fills a mapping from a current account snapshot.
 func (c *StateCache) PutAddrCodeHashIfFresh(addr []byte, h [32]byte, txNum, snapshotEnd uint64) {
-	c.admissionMu.RLock()
-	defer c.admissionMu.RUnlock()
+	mu := c.admissionLock(kv.AccountsDomain)
+	mu.RLock()
+	defer mu.RUnlock()
 	if snapshotEnd < c.appliedEnd[kv.AccountsDomain] {
 		return
 	}
@@ -246,8 +268,9 @@ func (c *StateCache) Put(domain kv.Domain, key []byte, value []byte, txNum uint6
 
 // PutIfFresh conditionally fills a domain from a current snapshot.
 func (c *StateCache) PutIfFresh(domain kv.Domain, key []byte, value []byte, txNum, snapshotEnd uint64) {
-	c.admissionMu.RLock()
-	defer c.admissionMu.RUnlock()
+	mu := c.admissionLock(domain)
+	mu.RLock()
+	defer mu.RUnlock()
 	if snapshotEnd < c.appliedEnd[domain] {
 		return
 	}
@@ -285,8 +308,9 @@ func (c *StateCache) Apply(domain kv.Domain, key, value []byte, txNum uint64) {
 		codeHash = crypto.Keccak256(value)
 	}
 
-	c.admissionMu.Lock()
-	defer c.admissionMu.Unlock()
+	mu := c.admissionLock(domain)
+	mu.Lock()
+	defer mu.Unlock()
 	cache := c.caches[domain]
 	if cache == nil {
 		return
@@ -334,8 +358,8 @@ func (c *StateCache) noteApplied(domain kv.Domain, txNum uint64) {
 
 // Clear removes all mutable entries from all caches.
 func (c *StateCache) Clear() {
-	c.admissionMu.Lock()
-	defer c.admissionMu.Unlock()
+	c.lockAllAdmissions()
+	defer c.unlockAllAdmissions()
 	for _, cache := range c.caches {
 		if cache != nil {
 			cache.Clear()
@@ -362,8 +386,8 @@ func (c *StateCache) Close() {
 // and drops stale entries lazily on read. This is the sole cache-invalidation
 // path on unwind — the executor never touches the cache during forward execution.
 func (c *StateCache) Unwind(unwindToTxNum uint64) {
-	c.admissionMu.Lock()
-	defer c.admissionMu.Unlock()
+	c.lockAllAdmissions()
+	defer c.unlockAllAdmissions()
 	for _, cache := range c.caches {
 		if cache != nil {
 			cache.Unwind(unwindToTxNum)
