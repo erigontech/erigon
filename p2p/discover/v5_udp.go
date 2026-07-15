@@ -148,8 +148,8 @@ type callTimeout struct {
 }
 
 // ListenV5 listens on the given connection.
-func ListenV5(conn UDPConn, ln *enode.LocalNode, cfg Config) (*UDPv5, error) {
-	t, err := newUDPv5(conn, ln, cfg)
+func ListenV5(ctx context.Context, conn UDPConn, ln *enode.LocalNode, cfg Config) (*UDPv5, error) {
+	t, err := newUDPv5(ctx, conn, ln, cfg)
 	if err != nil {
 		return nil, err
 	}
@@ -161,7 +161,7 @@ func ListenV5(conn UDPConn, ln *enode.LocalNode, cfg Config) (*UDPv5, error) {
 }
 
 // newUDPv5 creates a UDPv5 transport, but doesn't start any goroutines.
-func newUDPv5(conn UDPConn, ln *enode.LocalNode, cfg Config) (*UDPv5, error) {
+func newUDPv5(ctx context.Context, conn UDPConn, ln *enode.LocalNode, cfg Config) (*UDPv5, error) {
 	closeCtx, cancelCloseCtx := context.WithCancel(context.Background())
 	cfg = cfg.withDefaults()
 	t := &UDPv5{
@@ -192,7 +192,7 @@ func newUDPv5(conn UDPConn, ln *enode.LocalNode, cfg Config) (*UDPv5, error) {
 		closeCtx:       closeCtx,
 		cancelCloseCtx: cancelCloseCtx,
 
-		trace: false, //todo: accept external `ctx` (root ctx) and do log.Enabled(log.Trace) on it
+		trace: cfg.Log.Enabled(ctx, log.LvlTrace),
 	}
 	t.talk = newTalkSystem(t)
 	tab, err := newTable(t, t.db, cfg)
