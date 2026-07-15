@@ -1229,12 +1229,8 @@ func (ii *InvertedIndex) minTxNumInDB(tx kv.Tx) uint64 {
 }
 
 func (ii *InvertedIndex) maxTxNumInDB(tx kv.Tx) uint64 {
-	lst, _ := kv.LastKey(tx, ii.KeysTable)
-	if len(lst) > 0 {
-		lstInDb := binary.BigEndian.Uint64(lst)
-		return lstInDb
-	}
-	return 0
+	txNum, _ := ii.progressAndVisibleEndInDB(tx)
+	return txNum
 }
 
 func (ii *InvertedIndex) progressAndVisibleEndInDB(tx kv.Tx) (uint64, uint64) {
