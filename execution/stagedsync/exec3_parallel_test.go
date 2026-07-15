@@ -1358,7 +1358,6 @@ func newResumeTestDB(t *testing.T) kv.TemporalRwDB {
 	}
 	dirs := datadir.New(t.TempDir())
 	db := temporaltest.NewTestDBWithStepSize(t, dirs, 16)
-	t.Cleanup(db.Close)
 	return db
 }
 
