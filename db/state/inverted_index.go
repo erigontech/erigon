@@ -413,7 +413,13 @@ func (ii *InvertedIndex) beginForTests() *InvertedIndexRoTx {
 }
 
 func (ii *InvertedIndex) beginFilesRo(iv *iiVisible) *InvertedIndexRoTx {
-	return &InvertedIndexRoTx{
+	iit := &InvertedIndexRoTx{}
+	ii.initFilesRo(iit, iv)
+	return iit
+}
+
+func (ii *InvertedIndex) initFilesRo(iit *InvertedIndexRoTx, iv *iiVisible) {
+	*iit = InvertedIndexRoTx{
 		ii:                ii,
 		visible:           iv,
 		files:             iv.files,
