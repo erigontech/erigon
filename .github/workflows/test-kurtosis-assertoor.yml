@@ -534,7 +534,7 @@ jobs:
         uses: ethpandaops/kurtosis-assertoor-github-action@v1
         with:
             kurtosis_version: "${{ env.KURTOSIS_VERSION }}"
-            enclave_name: "kurtosis-${{ matrix.suite }}-${{ matrix.exec_mode }}-${{ github.run_id }}"
+            enclave_name: "${{ matrix.suite }}-${{ matrix.exec_mode }}-${{ github.run_id }}"
             ethereum_package_url: "github.com/ethpandaops/ethereum-package"
             ethereum_package_args: "${{ matrix.package_args }}"
             ethereum_package_branch: "${{ matrix.ethereum_package_branch }}"
@@ -554,7 +554,7 @@ jobs:
         continue-on-error: true
         run: |
           set -eu
-          enclave_name="kurtosis-${{ matrix.suite }}-${{ matrix.exec_mode }}-${{ github.run_id }}"
+          enclave_name="${{ matrix.suite }}-${{ matrix.exec_mode }}-${{ github.run_id }}"
           dump_dir="${RUNNER_TEMP}/kurtosis-dump-${{ matrix.suite }}-${{ matrix.exec_mode }}"
           kurtosis enclave dump "$enclave_name" "$dump_dir" || true
 
