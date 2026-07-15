@@ -184,7 +184,7 @@ func processDownloadedBlockBatches(ctx context.Context, logger log.Logger, cfg *
 			}
 			if errors.Is(err, forkchoice.ErrNotFinalizedDescendant) {
 				logger.Debug("[Caplin] forward sync: block not on finalized chain, will retry", "blockSlot", block.Block.Slot)
-				return progressAfterNotFinalizedDescendant(highestBlockProcessed, newHighestBlockProcessed), nil
+				return progressAfterNotFinalizedDescendant(highestBlockProcessed, newHighestBlockProcessed, err)
 			}
 			// Return an error if block processing fails
 			err = fmt.Errorf("bad blocks segment received: %w", err)
@@ -272,8 +272,8 @@ func forwardSyncProgress(chainTipSlot, currentSlot, prevProgress uint64, secsPer
 	return
 }
 
-func progressAfterNotFinalizedDescendant(initial, accepted uint64) uint64 {
-	return max(initial, accepted)
+func progressAfterNotFinalizedDescendant(initial, accepted uint64, cause error) (uint64, error) {
+	return max(initial, accepted), fmt.Errorf("%w: %w", network2.ErrInvalidPeerChain, cause)
 }
 
 // forwardSync (MAIN ROUTINE FOR ForwardSync) performs the forward synchronization of beacon blocks.

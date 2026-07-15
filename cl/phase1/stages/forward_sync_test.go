@@ -17,9 +17,13 @@
 package stages
 
 import (
+	"errors"
 	"testing"
 
 	"github.com/stretchr/testify/require"
+
+	"github.com/erigontech/erigon/cl/phase1/forkchoice"
+	network2 "github.com/erigontech/erigon/cl/phase1/network"
 )
 
 // currentSlot can overshoot the captured chainTipSlot; slotsRemaining must clamp
@@ -72,7 +76,10 @@ func TestProgressAfterNotFinalizedDescendant(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			require.Equal(t, tt.want, progressAfterNotFinalizedDescendant(tt.initial, tt.accepted))
+			progress, err := progressAfterNotFinalizedDescendant(tt.initial, tt.accepted, forkchoice.ErrNotFinalizedDescendant)
+			require.Equal(t, tt.want, progress)
+			require.True(t, errors.Is(err, network2.ErrInvalidPeerChain))
+			require.True(t, errors.Is(err, forkchoice.ErrNotFinalizedDescendant))
 		})
 	}
 }

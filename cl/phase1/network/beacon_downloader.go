@@ -48,6 +48,8 @@ type ProcessFn func(
 	newHighestSlotProcessed uint64,
 	err error)
 
+var ErrInvalidPeerChain = errors.New("invalid peer chain")
+
 type ForwardBeaconDownloader struct {
 	ctx                   context.Context
 	highestSlotProcessed  uint64
@@ -329,6 +331,7 @@ Process:
 	var highestSlotProcessed uint64
 	var err error
 	if highestSlotProcessed, err = f.process(f.highestSlotProcessed, processBlocks, envelopes); err != nil {
+		f.recordInvalidPeerChainResultLocked(highestSlotProcessed, err, pid != "http-fallback")
 		if pid != "http-fallback" {
 			f.rpc.BanPeer(pid)
 		}
@@ -338,6 +341,18 @@ Process:
 		f.highestSlotProcessed = highestSlotProcessed
 		f.highestSlotUpdateTime = time.Now()
 	}
+}
+
+func (f *ForwardBeaconDownloader) recordInvalidPeerChainResultLocked(highestSlotProcessed uint64, err error, preferHTTP bool) bool {
+	if !errors.Is(err, ErrInvalidPeerChain) {
+		return false
+	}
+	if highestSlotProcessed > f.highestSlotProcessed {
+		f.highestSlotProcessed = highestSlotProcessed
+		f.highestSlotUpdateTime = time.Now()
+	}
+	f.httpPreferred.Store(preferHTTP && f.httpFallbackURL != "")
+	return true
 }
 
 // anyGloasBlock returns true if any block in the list is GLOAS version or later.
