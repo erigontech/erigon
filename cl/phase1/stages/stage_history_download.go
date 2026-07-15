@@ -96,6 +96,35 @@ func elBackfillFinished(slot, elBlock, destinationSlot, destinationBlock uint64)
 	return false
 }
 
+// clampProgress derives (processed, total) for a backwards download, guarding the
+// unsigned subtractions against underflow when the floor and current counters
+// drift past the frozen highestBlockSeen. total grows to at least processed so a
+// backfill continuing below the floor estimate keeps advancing while the display
+// stays within 100%.
+func clampProgress(highestBlockSeen, floor, current uint64) (processed, total uint64) {
+	current = min(current, highestBlockSeen)
+	floor = min(floor, highestBlockSeen)
+	processed = highestBlockSeen - current
+	total = max(highestBlockSeen-floor, processed)
+	return
+}
+
+// historyDownloadProgress derives EL history-download progress and ETA for
+// logging, guarding both the unsigned subtractions and the time.Duration
+// (int64 ns) multiplication against overflow.
+func historyDownloadProgress(highestBlockSeen, lowestBlockToReach, currentBlock uint64, speed float64) (processed, toprocess uint64, eta time.Duration) {
+	processed, toprocess = clampProgress(highestBlockSeen, max(lowestBlockToReach, 1), currentBlock)
+	if speed > 0 {
+		secs := float64(toprocess-processed) / speed
+		if maxSecs := float64(math.MaxInt64) / float64(time.Second); secs > maxSecs {
+			eta = time.Duration(math.MaxInt64)
+		} else {
+			eta = time.Duration(secs) * time.Second
+		}
+	}
+	return
+}
+
 // SpawnStageBeaconsForward spawn the beacon forward stage
 func SpawnStageHistoryDownload(cfg StageHistoryReconstructionCfg, ctx context.Context, logger log.Logger) error {
 	// Wait for execution engine to be ready.
@@ -339,20 +368,15 @@ func SpawnStageHistoryDownload(cfg StageHistoryReconstructionCfg, ctx context.Co
 				logger.Debug(logMsg, logArgs...)
 
 				if !isDownloadingForBeacon {
-					// Genesis block (0) is never collected, so the lowest reachable
-					// EL block number is 1. Clamp to avoid an off-by-one that makes
-					// progress stall at N-1/N.
-					effectiveLowest := max(lowestBlockToReach, 1)
-					toprocess := highestBlockSeen - effectiveLowest
-					processed := highestBlockSeen - uint64(currEth1Progress.Load())
-					remaining := float64(toprocess - processed)
+					processed, toprocess, eta := historyDownloadProgress(highestBlockSeen, lowestBlockToReach, uint64(currEth1Progress.Load()), speed)
 					log.Info("Downloading Execution History", "progress",
 						fmt.Sprintf("%d/%d", processed, toprocess),
-						"ETA", (time.Duration(remaining/speed) * time.Second).String(),
+						"ETA", eta.String(),
 						"blk/sec", fmt.Sprintf("%.1f", speed))
 				} else {
+					processed, toprocess := clampProgress(highestBlockSeen, lowestBlockToReach, currProgress)
 					log.Info("Downloading Beacon History", "progress",
-						fmt.Sprintf("%d/%d", highestBlockSeen-currProgress, highestBlockSeen-lowestBlockToReach),
+						fmt.Sprintf("%d/%d", processed, toprocess),
 						"blk/sec", fmt.Sprintf("%.1f", speed))
 				}
 				// More UX-friendly logging
