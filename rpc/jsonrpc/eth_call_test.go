@@ -429,6 +429,52 @@ func TestGetProof(t *testing.T) {
 	}
 }
 
+func TestGetProofPinsReadSnapshot(t *testing.T) {
+	previousSchema := statecfg.Schema
+	statecfg.EnableHistoricalCommitment()
+	t.Cleanup(func() {
+		statecfg.Schema = previousSchema
+	})
+
+	m, bankAddress, _, receiverAddress := chainWithDeployedContract(t)
+	api := newEthApiForTest(newBaseApiForTest(m), m.DB, nil, nil)
+
+	roTx, err := m.DB.BeginTemporalRo(m.Ctx)
+	require.NoError(t, err)
+	defer roTx.Rollback()
+
+	parent, err := m.BlockReader.BlockByNumber(m.Ctx, roTx, 6)
+	require.NoError(t, err)
+	require.NotNil(t, parent)
+
+	next, err := blockgen.GenerateChain(m.ChainConfig, parent, m.Engine, m.DB, 1, func(_ int, block *blockgen.BlockGen) {
+		txn, err := types.SignTx(&types.LegacyTx{
+			CommonTx: types.CommonTx{
+				Nonce:    block.TxNonce(bankAddress),
+				To:       &receiverAddress,
+				GasLimit: 21_000,
+				Value:    *uint256.NewInt(1),
+			},
+			GasPrice: *uint256.NewInt(1_000_000_000_000),
+		}, *types.LatestSignerForChainID(nil), m.Key)
+		require.NoError(t, err)
+		block.AddTx(txn)
+	})
+	require.NoError(t, err)
+	require.NoError(t, m.InsertChain(next))
+
+	proof, err := api.getProof(
+		m.Ctx,
+		roTx,
+		bankAddress,
+		nil,
+		rpc.BlockNumberOrHashWithNumber(6),
+		log.New(),
+	)
+	require.NoError(t, err)
+	require.NotNil(t, proof)
+}
+
 func TestGetBlockByTimestampLatestTime(t *testing.T) {
 	ctx := context.Background()
 	m, _, _ := rpcdaemontest.CreateTestExecModule(t)
