@@ -39,6 +39,7 @@ import (
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/common/murmur3"
 	"github.com/erigontech/erigon/db/datadir"
+	"github.com/erigontech/erigon/db/datastruct/btindex"
 	"github.com/erigontech/erigon/db/datastruct/existence"
 	"github.com/erigontech/erigon/db/etl"
 	"github.com/erigontech/erigon/db/kv"
@@ -152,6 +153,25 @@ func (ii *InvertedIndex) efAccessorFileNameMask(fromStep, toStep kv.Step) string
 	return fmt.Sprintf("*-%s.%d-%d.efi", ii.FilenameBase, fromStep, toStep)
 }
 
+func (ii *InvertedIndex) efBtAccessorNewFilePath(fromStep, toStep kv.Step) string {
+	if fromStep == toStep {
+		panic(fmt.Sprintf("assert: fromStep(%d) == toStep(%d)", fromStep, toStep))
+	}
+	return filepath.Join(ii.dirs.SnapAccessors, fmt.Sprintf("%s-%s.%d-%d.bt", ii.FileVersion.AccessorBT.String(), ii.FilenameBase, fromStep, toStep))
+}
+func (ii *InvertedIndex) efBtAccessorFileNameMask(fromStep, toStep kv.Step) string {
+	return fmt.Sprintf("*-%s.%d-%d.bt", ii.FilenameBase, fromStep, toStep)
+}
+func (ii *InvertedIndex) efExistenceIdxNewFilePath(fromStep, toStep kv.Step) string {
+	if fromStep == toStep {
+		panic(fmt.Sprintf("assert: fromStep(%d) == toStep(%d)", fromStep, toStep))
+	}
+	return filepath.Join(ii.dirs.SnapAccessors, fmt.Sprintf("%s-%s.%d-%d.kvei", ii.FileVersion.AccessorKVEI.String(), ii.FilenameBase, fromStep, toStep))
+}
+func (ii *InvertedIndex) efExistenceIdxFileNameMask(fromStep, toStep kv.Step) string {
+	return fmt.Sprintf("*-%s.%d-%d.kvei", ii.FilenameBase, fromStep, toStep)
+}
+
 var invIdxExistenceForceInMem = dbg.EnvBool("INV_IDX_EXISTENCE_MEM", false)
 
 func (ii *InvertedIndex) openHashMapAccessor(fPath string) (*recsplit.Index, error) {
@@ -251,6 +271,27 @@ func (ii *InvertedIndex) missedMapAccessors(source []*FilesItem, dl dirListing) 
 	})
 }
 
+func (ii *InvertedIndex) missedBtreeAccessors(source []*FilesItem, dl dirListing) (l []*FilesItem) {
+	if !ii.Accessors.Has(statecfg.AccessorBTree) {
+		return nil
+	}
+	return fileItemsWithMissedAccessors(source, ii.stepSize, func(fromStep, toStep kv.Step) []string {
+		btF, _, _, err := version.MatchVersionedFile(ii.efBtAccessorFileNameMask(fromStep, toStep), dl.names, dl.dir)
+		if err != nil {
+			panic(err)
+		}
+		files := []string{btF}
+		if ii.Accessors.Has(statecfg.AccessorExistence) {
+			exF, _, _, err := version.MatchVersionedFile(ii.efExistenceIdxFileNameMask(fromStep, toStep), dl.names, dl.dir)
+			if err != nil {
+				panic(err)
+			}
+			files = append(files, exF)
+		}
+		return files
+	})
+}
+
 func (ii *InvertedIndex) buildEfAccessor(ctx context.Context, item *FilesItem, ps *background.ProgressSet) (err error) {
 	fromStep, toStep := item.StepRange(ii.stepSize)
 	if item.decompressor == nil {
@@ -280,11 +321,23 @@ func (iit *InvertedIndexRoTx) dataWriter(f *seg.Compressor, forceNoCompress bool
 	return iit.ii.dataWriter(f, forceNoCompress)
 }
 
-// BuildMissedAccessors - produce .efi/.vi/.kvi from .ef/.v/.kv
+// BuildMissedAccessors - produce .efi/.bt/.kvei from .ef
 func (ii *InvertedIndex) BuildMissedAccessors(ctx context.Context, g *errgroup.Group, ps *background.ProgressSet, iiFiles *MissedAccessorIIFiles) {
 	for _, item := range iiFiles.missedMapAccessors() {
 		g.Go(func() error {
 			return ii.buildEfAccessor(ctx, item, ps)
+		})
+	}
+	for _, item := range iiFiles.missedBtreeAccessors() {
+		g.Go(func() error {
+			if item.decompressor == nil {
+				fromStep, toStep := item.StepRange(ii.stepSize)
+				ii.logger.Warn(fmt.Sprintf("[dbg] BuildMissedAccessors: item with nil decompressor %s %d-%d", ii.FilenameBase, fromStep, toStep))
+			}
+			fromStep, toStep := item.StepRange(ii.stepSize)
+			idxPath := ii.efBtAccessorNewFilePath(fromStep, toStep)
+			existencePath := ii.efExistenceIdxNewFilePath(fromStep, toStep)
+			return btindex.BuildBtreeIndexWithDecompressor(idxPath, existencePath, ii.dataReader(item.decompressor), ps, ii.dirs.Tmp, *ii.salt.Load(), ii.logger, ii.noFsync, ii.Accessors)
 		})
 	}
 }
@@ -463,12 +516,13 @@ func (mr *MergeRange) Equal(other *MergeRange) bool {
 }
 
 type InvertedIndexRoTx struct {
-	ii      *InvertedIndex
-	name    kv.InvertedIdx
-	files   visibleFiles
-	visible *iiVisible
-	getters []*seg.Reader
-	readers []*recsplit.IndexReader
+	ii        *InvertedIndex
+	name      kv.InvertedIdx
+	files     visibleFiles
+	visible   *iiVisible
+	getters   []*seg.Reader
+	readers   []*recsplit.IndexReader
+	btReaders []*btindex.BtIndex
 
 	seekInFilesCache *IISeekInFilesCache
 
@@ -510,6 +564,16 @@ func (iit *InvertedIndexRoTx) statelessIdxReader(i int) *recsplit.IndexReader {
 	return r
 }
 
+func (iit *InvertedIndexRoTx) statelessBtree(i int) *btindex.BtIndex {
+	if iit.btReaders == nil {
+		iit.btReaders = make([]*btindex.BtIndex, len(iit.files))
+	}
+	if iit.btReaders[i] == nil {
+		iit.btReaders[i] = iit.files[i].src.bindex
+	}
+	return iit.btReaders[i]
+}
+
 func (iit *InvertedIndexRoTx) seekInFiles(key []byte, txNum uint64) (found bool, equalOrHigherTxNum uint64, err error) {
 	if len(iit.files) == 0 {
 		return false, 0, nil
@@ -545,18 +609,32 @@ func (iit *InvertedIndexRoTx) seekInFiles(key []byte, txNum uint64) (found bool,
 		if iit.files[i].endTxNum <= txNum {
 			continue
 		}
-		offset, ok := iit.statelessIdxReader(i).TwoLayerLookupByHash(hi, lo)
-		if !ok {
-			continue
+		var encodedSeq []byte
+		if iit.ii.Accessors.Has(statecfg.AccessorBTree) {
+			if iit.ii.Accessors.Has(statecfg.AccessorExistence) && iit.files[i].src.existence != nil && !iit.files[i].src.existence.ContainsHash(hi) {
+				continue
+			}
+			k, v, _, ok, err := iit.statelessBtree(i).Get(key, iit.statelessGetter(i))
+			if err != nil {
+				return false, 0, err
+			}
+			if !ok || !bytes.Equal(k, key) {
+				continue
+			}
+			encodedSeq = v
+		} else {
+			offset, ok := iit.statelessIdxReader(i).TwoLayerLookupByHash(hi, lo)
+			if !ok {
+				continue
+			}
+			g := iit.statelessGetter(i)
+			g.Reset(offset)
+			k, _ := g.Next(nil)
+			if !bytes.Equal(k, key) {
+				continue
+			}
+			encodedSeq, _ = g.Next(nil)
 		}
-
-		g := iit.statelessGetter(i)
-		g.Reset(offset)
-		k, _ := g.Next(nil)
-		if !bytes.Equal(k, key) {
-			continue
-		}
-		encodedSeq, _ := g.Next(nil)
 
 		iit.reUsableSeq.Reset(iit.files[i].startTxNum, encodedSeq)
 		equalOrHigherTxNum, _, found = iit.reUsableSeq.Seek(txNum)
@@ -565,7 +643,7 @@ func (iit *InvertedIndexRoTx) seekInFiles(key []byte, txNum uint64) (found bool,
 		}
 
 		if equalOrHigherTxNum < iit.files[i].startTxNum || equalOrHigherTxNum >= iit.files[i].endTxNum {
-			return false, equalOrHigherTxNum, fmt.Errorf("inverted_index(%s) at (%x, %d) returned value %d, but it out-of-bounds %d-%d. it may signal that .ef file is broke - can detect by `erigon snapshots integrity --check=InvertedIndex`, or re-download files", g.FileName(), key, txNum, iit.files[i].startTxNum, iit.files[i].endTxNum, equalOrHigherTxNum)
+			return false, equalOrHigherTxNum, fmt.Errorf("inverted_index(%s) at (%x, %d) returned value %d, but it out-of-bounds %d-%d. it may signal that .ef file is broke - can detect by `erigon snapshots integrity --check=InvertedIndex`, or re-download files", iit.statelessGetter(i).FileName(), key, txNum, iit.files[i].startTxNum, iit.files[i].endTxNum, equalOrHigherTxNum)
 		}
 		if iit.seekInFilesCache != nil && equalOrHigherTxNum-txNum > 0 { // > 0 to improve cache hit-rate
 			iit.seekInFilesCache.Add(hi, iiSeekInFilesCacheItem{requested: txNum, found: equalOrHigherTxNum})
@@ -1058,6 +1136,7 @@ type InvertedFiles struct {
 	decomp    *seg.Decompressor
 	index     *recsplit.Index
 	existence *existence.Filter
+	bindex    *btindex.BtIndex
 }
 
 func (sf InvertedFiles) CleanupOnError() {
@@ -1066,6 +1145,12 @@ func (sf InvertedFiles) CleanupOnError() {
 	}
 	if sf.index != nil {
 		sf.index.Close()
+	}
+	if sf.bindex != nil {
+		sf.bindex.Close()
+	}
+	if sf.existence != nil {
+		sf.existence.Close()
 	}
 }
 
@@ -1085,6 +1170,7 @@ func (ii *InvertedIndex) buildFiles(ctx context.Context, step kv.Step, coll Inve
 	var (
 		decomp          *seg.Decompressor
 		mapAccessor     *recsplit.Index
+		btAccessor      *btindex.BtIndex
 		existenceFilter *existence.Filter
 		err             error
 	)
@@ -1099,6 +1185,9 @@ func (ii *InvertedIndex) buildFiles(ctx context.Context, step kv.Step, coll Inve
 			}
 			if mapAccessor != nil {
 				mapAccessor.Close()
+			}
+			if btAccessor != nil {
+				btAccessor.Close()
 			}
 			if existenceFilter != nil {
 				existenceFilter.Close()
@@ -1123,17 +1212,33 @@ func (ii *InvertedIndex) buildFiles(ctx context.Context, step kv.Step, coll Inve
 		return InvertedFiles{}, fmt.Errorf("open %s decompressor: %w", ii.FilenameBase, err)
 	}
 
-	if err := ii.buildMapAccessor(ctx, step, step+1, decomp, ps); err != nil {
-		return InvertedFiles{}, fmt.Errorf("build %s efi: %w", ii.FilenameBase, err)
-	}
 	if ii.Accessors.Has(statecfg.AccessorHashMap) {
+		if err := ii.buildMapAccessor(ctx, step, step+1, decomp, ps); err != nil {
+			return InvertedFiles{}, fmt.Errorf("build %s efi: %w", ii.FilenameBase, err)
+		}
 		if mapAccessor, err = ii.openHashMapAccessor(ii.efAccessorNewFilePath(step, step+1)); err != nil {
 			return InvertedFiles{}, err
 		}
 	}
+	if ii.Accessors.Has(statecfg.AccessorBTree) {
+		if btAccessor, err = ii.buildBtreeAccessor(step, step+1, decomp, ps); err != nil {
+			return InvertedFiles{}, fmt.Errorf("build %s bt: %w", ii.FilenameBase, err)
+		}
+		if ii.Accessors.Has(statecfg.AccessorExistence) {
+			if existenceFilter, err = existence.OpenFilter(ii.efExistenceIdxNewFilePath(step, step+1), false); err != nil {
+				return InvertedFiles{}, err
+			}
+		}
+	}
 
 	closeComp = false
-	return InvertedFiles{decomp: decomp, index: mapAccessor, existence: existenceFilter}, nil
+	return InvertedFiles{decomp: decomp, index: mapAccessor, existence: existenceFilter, bindex: btAccessor}, nil
+}
+
+func (ii *InvertedIndex) buildBtreeAccessor(fromStep, toStep kv.Step, data *seg.Decompressor, ps *background.ProgressSet) (*btindex.BtIndex, error) {
+	idxPath := ii.efBtAccessorNewFilePath(fromStep, toStep)
+	existencePath := ii.efExistenceIdxNewFilePath(fromStep, toStep)
+	return btindex.CreateBtreeIndexWithDecompressor(idxPath, existencePath, btindex.DefaultBtreeM, ii.dataReader(data), *ii.salt.Load(), ps, ii.dirs.Tmp, ii.logger, ii.noFsync, ii.Accessors)
 }
 
 func (ii *InvertedIndex) buildMapAccessor(ctx context.Context, fromStep, toStep kv.Step, data *seg.Decompressor, ps *background.ProgressSet) error {
@@ -1200,6 +1305,7 @@ func (ii *InvertedIndex) integrateDirtyFiles(sf InvertedFiles, txNumFrom, txNumT
 	fi.decompressor = sf.decomp
 	fi.index = sf.index
 	fi.existence = sf.existence
+	fi.bindex = sf.bindex
 	ii.dirtyFiles.Set(fi)
 }
 

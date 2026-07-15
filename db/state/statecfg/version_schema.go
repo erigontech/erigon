@@ -2,10 +2,29 @@ package statecfg
 
 import (
 	"github.com/erigontech/erigon/db/snaptype"
+	"github.com/erigontech/erigon/db/version"
 )
 
 func InitSchemas() {
 	InitSchemasGen()
+
+	// Inverted-index B-tree accessor versions are not emitted by the bumper
+	// generator (which only knows the recsplit `.efi`), so set them here.
+	for _, iiVer := range []*IIVersionTypes{
+		&Schema.AccountsDomain.Hist.IiCfg.FileVersion,
+		&Schema.StorageDomain.Hist.IiCfg.FileVersion,
+		&Schema.CodeDomain.Hist.IiCfg.FileVersion,
+		&Schema.CommitmentDomain.Hist.IiCfg.FileVersion,
+		&Schema.ReceiptDomain.Hist.IiCfg.FileVersion,
+		&Schema.RCacheDomain.Hist.IiCfg.FileVersion,
+		&Schema.LogAddrIdx.FileVersion,
+		&Schema.LogTopicIdx.FileVersion,
+		&Schema.TracesFromIdx.FileVersion,
+		&Schema.TracesToIdx.FileVersion,
+	} {
+		iiVer.AccessorBT = version.Versions{Current: version.V1_0, MinSupported: version.V1_0}
+		iiVer.AccessorKVEI = version.Versions{Current: version.V1_0, MinSupported: version.V1_0}
+	}
 
 	SchemeMinSupportedVersions = map[string]map[string]snaptype.Version{
 		"accounts": {

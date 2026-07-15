@@ -197,6 +197,7 @@ func (f *historyDirtyFilesRoTx) filesWithMissedAccessors(dl dirListing) *MissedA
 		ii: f.ii.filesWithMissedAccessors(dl),
 		files: map[statecfg.Accessors][]*FilesItem{
 			statecfg.AccessorHashMap: f.h.missedMapAccessors(f.files, dl),
+			statecfg.AccessorBTree:   f.h.missedBtreeAccessors(f.files, dl),
 		},
 	}
 }
@@ -227,6 +228,7 @@ func (f *iiDirtyFilesRoTx) filesWithMissedAccessors(dl dirListing) (mf *MissedAc
 	return &MissedAccessorIIFiles{
 		files: map[statecfg.Accessors][]*FilesItem{
 			statecfg.AccessorHashMap: f.ii.missedMapAccessors(f.files, dl),
+			statecfg.AccessorBTree:   f.ii.missedBtreeAccessors(f.files, dl),
 		},
 	}
 }
@@ -323,6 +325,10 @@ func (m *MissedAccessorHistoryFiles) missedMapAccessors() []*FilesItem {
 	return m.files[statecfg.AccessorHashMap]
 }
 
+func (m *MissedAccessorHistoryFiles) missedBtreeAccessors() []*FilesItem {
+	return m.files[statecfg.AccessorBTree]
+}
+
 func (m *MissedAccessorHistoryFiles) IsEmpty() bool {
 	if m == nil {
 		return true
@@ -341,6 +347,10 @@ type MissedAccessorIIFiles struct {
 
 func (m *MissedAccessorIIFiles) missedMapAccessors() []*FilesItem {
 	return m.files[statecfg.AccessorHashMap]
+}
+
+func (m *MissedAccessorIIFiles) missedBtreeAccessors() []*FilesItem {
+	return m.files[statecfg.AccessorBTree]
 }
 
 func (m *MissedAccessorIIFiles) IsEmpty() bool {

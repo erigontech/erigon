@@ -928,6 +928,126 @@ func filledHistory(tb testing.TB, largeValues bool, logger log.Logger) (kv.RwDB,
 	return db, h, txs
 }
 
+func testDbAndHistoryPaged(tb testing.TB, logger log.Logger) (kv.RwDB, *History) {
+	tb.Helper()
+	dirs := datadir.New(tb.TempDir())
+	db := mdbx.New(dbcfg.ChainDB, logger).InMem(tb, dirs.Chaindata).MustOpen()
+	tb.Cleanup(db.Close)
+	salt := uint32(1)
+	cfg := statecfg.Schema.AccountsDomain
+	cfg.Hist.IiCfg.Accessors = statecfg.AccessorHashMap
+	cfg.Hist.Accessors = statecfg.AccessorHashMap
+	cfg.Hist.HistoryLargeValues = false
+	cfg.Hist.IiCfg.Compression = seg.CompressNone
+	cfg.Hist.Compression = seg.CompressNone
+	cfg.Hist.CompressorCfg = seg.DefaultCfg.WithValuesOnCompressedPage(4)
+	h, err := NewHistory(cfg.Hist, 16, config3.DefaultStepsInFrozenFile, dirs, logger)
+	require.NoError(tb, err)
+	tb.Cleanup(h.Close)
+	h.salt.Store(&salt)
+	h.DisableFsync()
+	return db, h
+}
+
+// TestHistoryVIBtMatchesRecsplit builds a paged history with the recsplit .vi,
+// records its historySeekInFiles answers, then builds the page-anchor bt over the
+// same .v files, flips the accessor to bt, reopens, and asserts the bt reads
+// match the recsplit reads exactly.
+func TestHistoryVIBtMatchesRecsplit(t *testing.T) {
+	t.Parallel()
+	logger := log.New()
+	ctx := t.Context()
+	db, h := testDbAndHistoryPaged(t, logger)
+	const txs = uint64(64)
+
+	mkKey := func(keyNum uint64) []byte {
+		var k [8]byte
+		binary.BigEndian.PutUint64(k[:], keyNum)
+		k[0] = 1
+		return k[:]
+	}
+
+	func() {
+		tx, err := db.BeginRw(ctx)
+		require.NoError(t, err)
+		defer tx.Rollback()
+		hc := h.beginForTests()
+		defer hc.Close()
+		writer := hc.NewWriter()
+		defer writer.close()
+		var prevVal [9][]byte
+		for txNum := uint64(1); txNum <= txs; txNum++ {
+			for keyNum := uint64(1); keyNum <= 8; keyNum++ {
+				if txNum%keyNum == 0 {
+					var v [8]byte
+					binary.BigEndian.PutUint64(v[:], txNum/keyNum)
+					v[0] = 255
+					require.NoError(t, writer.AddPrevValue(mkKey(keyNum), txNum, prevVal[keyNum]))
+					prevVal[keyNum] = append([]byte{}, v[:]...)
+				}
+			}
+		}
+		require.NoError(t, writer.Flush(ctx, tx))
+		require.NoError(t, tx.Commit())
+	}()
+
+	// collate + merge: merged/frozen .v files are page-compressed (collated step
+	// files are not — see history.go collate), which is what vi→bt needs.
+	collateAndMergeHistory(t, db, h, txs, false)
+
+	type kase struct {
+		keyNum, txNum uint64
+		wantV         []byte
+		wantOk        bool
+	}
+	var cases []kase
+	func() {
+		hc := h.beginForTests()
+		defer hc.Close()
+		for keyNum := uint64(1); keyNum <= 8; keyNum++ {
+			for txNum := uint64(1); txNum <= txs; txNum++ {
+				v, ok, err := hc.historySeekInFiles(mkKey(keyNum), txNum)
+				if err != nil {
+					continue // txNum outside stable file coverage; not part of the differential
+				}
+				cases = append(cases, kase{keyNum, txNum, append([]byte{}, v...), ok})
+			}
+		}
+	}()
+	require.NotEmpty(t, cases)
+	// paging is what makes vi→bt applicable — assert the .v is actually paged.
+	sawPaged := false
+	for _, item := range h.dirtyFiles.Items() {
+		if item.decompressor == nil || item.decompressor.CompressedPageValuesCount() <= 1 {
+			continue // skip non-paged (unmerged) step files
+		}
+		sawPaged = true
+		require.NoError(t, h.buildVIBtAccessor(ctx, item, background.NewProgressSet()))
+	}
+	require.True(t, sawPaged, "expected page-compressed (merged) .v files")
+
+	h.Accessors = statecfg.AccessorBTree
+	scanRes, err := scanDirs(h.dirs)
+	require.NoError(t, err)
+	require.NoError(t, h.openFolder(ctx, scanRes))
+
+	hc := h.beginForTests()
+	defer hc.Close()
+	compared := 0
+	for _, c := range cases {
+		v, ok, err := hc.historySeekInFiles(mkKey(c.keyNum), c.txNum)
+		if err != nil {
+			continue // serving file is non-paged (no bt accessor built) — expected skip
+		}
+		require.Equalf(t, c.wantOk, ok, "found mismatch key=%d tx=%d", c.keyNum, c.txNum)
+		if ok {
+			require.Equalf(t, c.wantV, v, "value mismatch key=%d tx=%d", c.keyNum, c.txNum)
+		}
+		compared++
+	}
+	require.Greaterf(t, compared, 20, "expected a meaningful number of bt reads, got %d", compared)
+}
+
 func checkHistoryHistory(t *testing.T, h *History, txs uint64) {
 	t.Helper()
 	// Check the history

@@ -118,6 +118,7 @@ type FilesItem struct {
 	decompressor         *seg.Decompressor
 	index                *recsplit.Index
 	bindex               *btindex.BtIndex
+	anchorDecomp         *seg.Decompressor // paged-history vi→bt only: data file the bindex indexes (page-anchor keys)
 	existence            *existence.Filter
 	startTxNum, endTxNum uint64 //[startTxNum, endTxNum)
 
@@ -214,6 +215,10 @@ func (i *FilesItem) closeFiles() {
 	i.index = nil
 	i.bindex.Close()
 	i.bindex = nil
+	if i.anchorDecomp != nil {
+		i.anchorDecomp.Close()
+		i.anchorDecomp = nil
+	}
 	i.existence.Close()
 	i.existence = nil
 }
@@ -267,6 +272,16 @@ func (i *FilesItem) closeFilesAndRemove() {
 			log.Trace("remove after close", "err", err, "file", i.bindex.FileName())
 		}
 		i.bindex = nil
+	}
+	if i.anchorDecomp != nil {
+		i.anchorDecomp.Close()
+		if err := dir.RemoveFile(i.anchorDecomp.FilePath()); err != nil {
+			log.Trace("remove after close", "err", err, "file", i.anchorDecomp.FileName())
+		}
+		if err := dir.RemoveFile(i.anchorDecomp.FilePath() + ".torrent"); err != nil {
+			log.Trace("remove after close", "err", err, "file", i.anchorDecomp.FileName())
+		}
+		i.anchorDecomp = nil
 	}
 	if i.existence != nil {
 		i.existence.Close()
@@ -528,7 +543,7 @@ func (h *History) openDirtyFiles(ctx context.Context, dataEntries, accessorEntri
 			}
 		}
 
-		if item.index == nil {
+		if item.index == nil && h.Accessors.Has(statecfg.AccessorHashMap) {
 			fNameMask := h.vAccessorFileNameMask(fromStep, toStep)
 			fPath, fileVer, ok, err := version.MatchVersionedFile(fNameMask, accessorEntries, h.dirs.SnapAccessors)
 			if err != nil {
@@ -541,6 +556,28 @@ func (h *History) openDirtyFiles(ctx context.Context, dataEntries, accessorEntri
 				if item.index, err = h.openHashMapAccessor(fPath); err != nil {
 					h.logger.Warn("[agg] History.openDirtyFiles", "err", err, "f", fName)
 					// don't interrupt on error. other files may be good
+				}
+			}
+		}
+
+		if item.bindex == nil && h.Accessors.Has(statecfg.AccessorBTree) {
+			anchorMask := h.vAnchorFileNameMask(fromStep, toStep)
+			anchorPath, _, anchorOk, err := version.MatchVersionedFile(anchorMask, accessorEntries, h.dirs.SnapAccessors)
+			if err != nil {
+				h.logger.Warn("[agg] History.openDirtyFiles", "err", err, "f", filepath.Base(anchorPath))
+			}
+			btMask := h.vBtAccessorFileNameMask(fromStep, toStep)
+			btPath, _, btOk, err := version.MatchVersionedFile(btMask, accessorEntries, h.dirs.SnapAccessors)
+			if err != nil {
+				h.logger.Warn("[agg] History.openDirtyFiles", "err", err, "f", filepath.Base(btPath))
+			}
+			if anchorOk && btOk {
+				if item.anchorDecomp, err = seg.NewDecompressor(anchorPath); err != nil {
+					h.logger.Warn("[agg] History.openDirtyFiles", "err", err, "f", filepath.Base(anchorPath))
+				} else if item.bindex, err = btindex.OpenBtreeIndexWithDecompressor(btPath, btindex.DefaultBtreeM, seg.NewReader(item.anchorDecomp.MakeGetter(), seg.CompressNone)); err != nil {
+					h.logger.Warn("[agg] History.openDirtyFiles", "err", err, "f", filepath.Base(btPath))
+					item.anchorDecomp.Close()
+					item.anchorDecomp = nil
 				}
 			}
 		}
@@ -608,6 +645,40 @@ func (ii *InvertedIndex) openDirtyFiles(ctx context.Context, dataEntries, access
 				fName := filepath.Base(fPath)
 				ii.FileVersion.AccessorEFI.MustSupport(fileVer, fName)
 				if item.index, err = ii.openHashMapAccessor(fPath); err != nil {
+					ii.logger.Warn("[agg] InvertedIndex.openDirtyFiles", "err", err, "f", fName)
+					// don't interrupt on error. other files may be good
+				}
+			}
+		}
+
+		if item.bindex == nil && ii.Accessors.Has(statecfg.AccessorBTree) {
+			fNameMask := ii.efBtAccessorFileNameMask(fromStep, toStep)
+			fPath, fileVer, ok, err := version.MatchVersionedFile(fNameMask, accessorEntries, ii.dirs.SnapAccessors)
+			if err != nil {
+				fName := filepath.Base(fPath)
+				ii.logger.Warn("[agg] InvertedIndex.openDirtyFiles", "err", err, "f", fName)
+			}
+			if ok {
+				fName := filepath.Base(fPath)
+				ii.FileVersion.AccessorBT.MustSupport(fileVer, fName)
+				if item.bindex, err = btindex.OpenBtreeIndexWithDecompressor(fPath, btindex.DefaultBtreeM, ii.dataReader(item.decompressor)); err != nil {
+					ii.logger.Warn("[agg] InvertedIndex.openDirtyFiles", "err", err, "f", fName)
+					// don't interrupt on error. other files may be good
+				}
+			}
+		}
+
+		if item.existence == nil && ii.Accessors.Has(statecfg.AccessorExistence) {
+			fNameMask := ii.efExistenceIdxFileNameMask(fromStep, toStep)
+			fPath, fileVer, ok, err := version.MatchVersionedFile(fNameMask, accessorEntries, ii.dirs.SnapAccessors)
+			if err != nil {
+				fName := filepath.Base(fPath)
+				ii.logger.Warn("[agg] InvertedIndex.openDirtyFiles", "err", err, "f", fName)
+			}
+			if ok {
+				fName := filepath.Base(fPath)
+				ii.FileVersion.AccessorKVEI.MustSupport(fileVer, fName)
+				if item.existence, err = existence.OpenFilter(fPath, false); err != nil {
 					ii.logger.Warn("[agg] InvertedIndex.openDirtyFiles", "err", err, "f", fName)
 					// don't interrupt on error. other files may be good
 				}

@@ -33,6 +33,7 @@ import (
 	"github.com/erigontech/erigon/common/background"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/datadir"
+	"github.com/erigontech/erigon/db/datastruct/btindex"
 	"github.com/erigontech/erigon/db/datastruct/existence"
 	"github.com/erigontech/erigon/db/etl"
 	"github.com/erigontech/erigon/db/kv"
@@ -111,6 +112,19 @@ func (h *History) vFileNameMask(fromStep, toStep kv.Step) string {
 }
 func (h *History) vAccessorFileNameMask(fromStep, toStep kv.Step) string {
 	return fmt.Sprintf("*-%s.%d-%d.vi", h.FilenameBase, fromStep, toStep)
+}
+
+func (h *History) vBtAccessorNewFilePath(fromStep, toStep kv.Step) string {
+	return filepath.Join(h.dirs.SnapAccessors, fmt.Sprintf("v1.0-%s.%d-%d.vbt", h.FilenameBase, fromStep, toStep))
+}
+func (h *History) vBtAccessorFileNameMask(fromStep, toStep kv.Step) string {
+	return fmt.Sprintf("*-%s.%d-%d.vbt", h.FilenameBase, fromStep, toStep)
+}
+func (h *History) vAnchorNewFilePath(fromStep, toStep kv.Step) string {
+	return filepath.Join(h.dirs.SnapAccessors, fmt.Sprintf("v1.0-%s.%d-%d.vanchor", h.FilenameBase, fromStep, toStep))
+}
+func (h *History) vAnchorFileNameMask(fromStep, toStep kv.Step) string {
+	return fmt.Sprintf("*-%s.%d-%d.vanchor", h.FilenameBase, fromStep, toStep)
 }
 
 func (h *History) openHashMapAccessor(fPath string) (*recsplit.Index, error) {
@@ -196,10 +210,31 @@ func (h *History) missedMapAccessors(source []*FilesItem, dl dirListing) (l []*F
 	})
 }
 
+func (h *History) missedBtreeAccessors(source []*FilesItem, dl dirListing) (l []*FilesItem) {
+	if !h.Accessors.Has(statecfg.AccessorBTree) {
+		return nil
+	}
+	return fileItemsWithMissedAccessors(source, h.stepSize, func(fromStep, toStep kv.Step) []string {
+		btF, _, _, err := version.MatchVersionedFile(h.vBtAccessorFileNameMask(fromStep, toStep), dl.names, dl.dir)
+		if err != nil {
+			panic(err)
+		}
+		anchorF, _, _, err := version.MatchVersionedFile(h.vAnchorFileNameMask(fromStep, toStep), dl.names, dl.dir)
+		if err != nil {
+			panic(err)
+		}
+		return []string{btF, anchorF}
+	})
+}
+
 func (h *History) buildVi(ctx context.Context, item *FilesItem, ps *background.ProgressSet) (err error) {
 	if item.decompressor == nil {
 		fromStep, toStep := item.StepRange(h.stepSize)
 		return fmt.Errorf("buildVI: passed item with nil decompressor %s %d-%d", h.FilenameBase, fromStep, toStep)
+	}
+
+	if h.Accessors.Has(statecfg.AccessorBTree) {
+		return h.buildVIBtAccessor(ctx, item, ps)
 	}
 
 	search := &FilesItem{startTxNum: item.startTxNum, endTxNum: item.endTxNum}
@@ -219,6 +254,19 @@ func (h *History) buildVi(ctx context.Context, item *FilesItem, ps *background.P
 		return fmt.Errorf("buildVI: %w", err)
 	}
 	return nil
+}
+
+// buildVIBtAccessor builds the page-anchor {anchor, .bt} accessor pair over a
+// page-compressed history .v (the vi→bt experiment). Only valid for paged .v.
+func (h *History) buildVIBtAccessor(ctx context.Context, item *FilesItem, ps *background.ProgressSet) error {
+	if item.decompressor.CompressedPageValuesCount() <= 1 {
+		fromStep, toStep := item.StepRange(h.stepSize)
+		return fmt.Errorf("buildVIBt: %s.%d-%d .v is not page-compressed; vi→bt requires paging", h.FilenameBase, fromStep, toStep)
+	}
+	fromStep, toStep := item.StepRange(h.stepSize)
+	anchorPath := h.vAnchorNewFilePath(fromStep, toStep)
+	btPath := h.vBtAccessorNewFilePath(fromStep, toStep)
+	return buildVIBt(ctx, item.decompressor, true, anchorPath, btPath, h.dirs.Tmp, *h.salt.Load(), ps, h.logger, h.noFsync)
 }
 
 func (h *History) buildVI(ctx context.Context, historyIdxPath string, hist, efHist *seg.Decompressor, efBaseTxNum uint64, ps *background.ProgressSet) error {
@@ -346,6 +394,11 @@ func (h *History) buildVI(ctx context.Context, historyIdxPath string, hist, efHi
 func (h *History) BuildMissedAccessors(ctx context.Context, g *errgroup.Group, ps *background.ProgressSet, historyFiles *MissedAccessorHistoryFiles) {
 	h.InvertedIndex.BuildMissedAccessors(ctx, g, ps, historyFiles.ii)
 	for _, item := range historyFiles.missedMapAccessors() {
+		g.Go(func() error {
+			return h.buildVi(ctx, item, ps)
+		})
+	}
+	for _, item := range historyFiles.missedBtreeAccessors() {
 		g.Go(func() error {
 			return h.buildVi(ctx, item, ps)
 		})
@@ -908,8 +961,12 @@ type HistoryRoTx struct {
 	files             visibleFiles // have no garbage (canDelete=true, overlaps, etc...)
 	getters           []*seg.Reader
 	readers           []*recsplit.IndexReader
+	btReaders         []*btindex.BtIndex
+	anchorGetters     []*seg.Reader
 	stepSize          uint64
 	stepsInFrozenFile uint64
+
+	_viProbeBuf, _viStoredBuf []byte
 
 	trace bool
 
@@ -971,6 +1028,26 @@ func (ht *HistoryRoTx) statelessIdxReader(i int) *recsplit.IndexReader {
 		ht.readers[i] = r
 	}
 	return r
+}
+
+func (ht *HistoryRoTx) statelessBtree(i int) *btindex.BtIndex {
+	if ht.btReaders == nil {
+		ht.btReaders = make([]*btindex.BtIndex, len(ht.files))
+	}
+	if ht.btReaders[i] == nil {
+		ht.btReaders[i] = ht.files[i].src.bindex
+	}
+	return ht.btReaders[i]
+}
+
+func (ht *HistoryRoTx) statelessAnchorGetter(i int) *seg.Reader {
+	if ht.anchorGetters == nil {
+		ht.anchorGetters = make([]*seg.Reader, len(ht.files))
+	}
+	if ht.anchorGetters[i] == nil {
+		ht.anchorGetters[i] = seg.NewReader(ht.files[i].src.anchorDecomp.MakeGetter(), seg.CompressNone)
+	}
+	return ht.anchorGetters[i]
 }
 
 func (ht *HistoryRoTx) canHashPruneUntil(tx kv.Tx, untilTx uint64) (can bool, txTo uint64) {
@@ -1163,6 +1240,14 @@ func (ht *HistoryRoTx) historySeekInFiles(key []byte, txNum uint64) ([]byte, boo
 	if !ok {
 		log.Warn("historySeekInFiles: file not found", "key", key, "txNum", txNum, "histTxNum", histTxNum, "ssize", ht.h.stepSize)
 		return nil, false, fmt.Errorf("hist file not found: key=%x, %s.%d-%d", key, ht.h.FilenameBase, histTxNum/ht.h.stepSize, histTxNum/ht.h.stepSize)
+	}
+	if ht.h.Accessors.Has(statecfg.AccessorBTree) {
+		var v []byte
+		var found bool
+		v, ht._viProbeBuf, ht._viStoredBuf, ht.snappyReadBuffer, found, err = vibtSeek(
+			ht.statelessBtree(historyItem.i), ht.statelessAnchorGetter(historyItem.i), ht.statelessGetter(historyItem.i),
+			key, histTxNum, true, ht._viProbeBuf, ht._viStoredBuf, ht.snappyReadBuffer)
+		return v, found, err
 	}
 	reader := ht.statelessIdxReader(historyItem.i)
 	if reader.Empty() {
@@ -1480,6 +1565,23 @@ func (ht *HistoryRoTx) HistoryDump(fromTxNum, toTxNum int, keyToDump *[]byte, du
 				viFile, ok := ht.getFile(txNum)
 				if !ok {
 					return fmt.Errorf("HistoryDump: no .vi %s file found for [%x]", ht.iit.name, txNum)
+				}
+
+				if ht.h.Accessors.Has(statecfg.AccessorBTree) {
+					var v []byte
+					var found bool
+					var seekErr error
+					v, ht._viProbeBuf, ht._viStoredBuf, histKeyBuf, found, seekErr = vibtSeek(
+						ht.statelessBtree(viFile.i), ht.statelessAnchorGetter(viFile.i), ht.statelessGetter(viFile.i),
+						key, txNum, true, ht._viProbeBuf, ht._viStoredBuf, histKeyBuf)
+					if seekErr != nil {
+						return seekErr
+					}
+					if !found {
+						return fmt.Errorf("HistoryDump: failed to resolve offset in .vbt %s file for key [%x]", viFile.Fullpath(), key)
+					}
+					dumpTo(key, txNum, v)
+					continue
 				}
 
 				viReader := ht.statelessIdxReader(viFile.i)

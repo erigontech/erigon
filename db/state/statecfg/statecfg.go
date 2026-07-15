@@ -128,8 +128,10 @@ type HistVersionTypes struct {
 }
 
 type IIVersionTypes struct {
-	DataEF      version.Versions
-	AccessorEFI version.Versions
+	DataEF       version.Versions
+	AccessorEFI  version.Versions
+	AccessorBT   version.Versions
+	AccessorKVEI version.Versions
 }
 
 type BlockDataVersionTypes struct {

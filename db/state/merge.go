@@ -733,11 +733,23 @@ func (iit *InvertedIndexRoTx) mergeFiles(ctx context.Context, files []*FilesItem
 	}
 	ps.Delete(p)
 
-	if err := iit.ii.buildMapAccessor(ctx, fromStep, toStep, outItem.decompressor, ps); err != nil {
-		return nil, fmt.Errorf("merge %s buildHashMapAccessor [%d-%d]: %w", iit.ii.FilenameBase, startTxNum, endTxNum, err)
+	if iit.ii.Accessors.Has(statecfg.AccessorHashMap) {
+		if err := iit.ii.buildMapAccessor(ctx, fromStep, toStep, outItem.decompressor, ps); err != nil {
+			return nil, fmt.Errorf("merge %s buildHashMapAccessor [%d-%d]: %w", iit.ii.FilenameBase, startTxNum, endTxNum, err)
+		}
+		if outItem.index, err = iit.ii.openHashMapAccessor(iit.ii.efAccessorNewFilePath(fromStep, toStep)); err != nil {
+			return nil, err
+		}
 	}
-	if outItem.index, err = iit.ii.openHashMapAccessor(iit.ii.efAccessorNewFilePath(fromStep, toStep)); err != nil {
-		return nil, err
+	if iit.ii.Accessors.Has(statecfg.AccessorBTree) {
+		if outItem.bindex, err = iit.ii.buildBtreeAccessor(fromStep, toStep, outItem.decompressor, ps); err != nil {
+			return nil, fmt.Errorf("merge %s buildBtreeAccessor [%d-%d]: %w", iit.ii.FilenameBase, startTxNum, endTxNum, err)
+		}
+		if iit.ii.Accessors.Has(statecfg.AccessorExistence) {
+			if outItem.existence, err = existence.OpenFilter(iit.ii.efExistenceIdxNewFilePath(fromStep, toStep), false); err != nil {
+				return nil, err
+			}
+		}
 	}
 
 	closeItem = false

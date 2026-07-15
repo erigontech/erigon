@@ -78,9 +78,30 @@ const MaxNonFuriousDirtySpacePerTx = 64 * datasize.MB
 
 var dbgCommBtIndex = dbg.EnvBool("AGG_COMMITMENT_BT", false)
 
+// dbgIIBtIndex serves inverted indices from B-tree accessors (+existence filter)
+// instead of the recsplit .efi, to compare historical-RPC latency of the two.
+var dbgIIBtIndex = dbg.EnvBool("AGG_II_BT", false)
+
 func init() {
 	if dbgCommBtIndex {
 		Schema.CommitmentDomain.Accessors = AccessorBTree | AccessorExistence
+	}
+	if dbgIIBtIndex {
+		Schema.AccountsDomain.Hist.IiCfg.Accessors = AccessorBTree | AccessorExistence
+		Schema.StorageDomain.Hist.IiCfg.Accessors = AccessorBTree | AccessorExistence
+		Schema.CodeDomain.Hist.IiCfg.Accessors = AccessorBTree | AccessorExistence
+		Schema.CommitmentDomain.Hist.IiCfg.Accessors = AccessorBTree | AccessorExistence
+		Schema.ReceiptDomain.Hist.IiCfg.Accessors = AccessorBTree | AccessorExistence
+		Schema.RCacheDomain.Hist.IiCfg.Accessors = AccessorBTree | AccessorExistence
+		Schema.LogAddrIdx.Accessors = AccessorBTree | AccessorExistence
+		Schema.LogTopicIdx.Accessors = AccessorBTree | AccessorExistence
+		Schema.TracesFromIdx.Accessors = AccessorBTree | AccessorExistence
+		Schema.TracesToIdx.Accessors = AccessorBTree | AccessorExistence
+
+		// history .v → page-anchor bt (only paged domains: their .v stores keys).
+		Schema.AccountsDomain.Hist.Accessors = AccessorBTree
+		Schema.CommitmentDomain.Hist.Accessors = AccessorBTree
+		Schema.RCacheDomain.Hist.Accessors = AccessorBTree
 	}
 	InitSchemas()
 }

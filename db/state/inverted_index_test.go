@@ -23,11 +23,14 @@ import (
 	"fmt"
 	"math"
 	"os"
+	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"golang.org/x/sync/errgroup"
 
 	"github.com/erigontech/erigon/db/kv/prune"
 
@@ -62,7 +65,7 @@ func testDbAndInvertedIndex(tb testing.TB, aggStep uint64, logger log.Logger) (k
 		}
 	}).MustOpen()
 	salt := uint32(1)
-	cfg := statecfg.InvIdxCfg{FilenameBase: "inv", KeysTable: keysTable, ValuesTable: indexTable, FileVersion: statecfg.IIVersionTypes{DataEF: version.V1_0_standart, AccessorEFI: version.V1_0_standart}}
+	cfg := statecfg.InvIdxCfg{FilenameBase: "inv", KeysTable: keysTable, ValuesTable: indexTable, FileVersion: statecfg.IIVersionTypes{DataEF: version.V1_0_standart, AccessorEFI: version.V1_0_standart, AccessorBT: version.V1_0_standart, AccessorKVEI: version.V1_0_standart}}
 	cfg.Accessors = statecfg.AccessorHashMap
 	ii, err := NewInvertedIndex(cfg, aggStep, config3.DefaultStepsInFrozenFile, dirs, logger)
 	require.NoError(tb, err)
@@ -85,6 +88,162 @@ func testDbAndInvertedIndex(tb testing.TB, aggStep uint64, logger log.Logger) (k
 	ii.salt.Store(&salt)
 	ii.DisableFsync()
 	return db, ii
+}
+
+func TestInvIndexBTreeAccessor(t *testing.T) {
+	t.Parallel()
+
+	logger := log.New()
+	db, ii := testDbAndInvertedIndex(t, 16, logger)
+	ii.Accessors = statecfg.AccessorBTree | statecfg.AccessorExistence
+	ctx := t.Context()
+
+	require.NoError(t, db.Update(ctx, func(tx kv.RwTx) error {
+		ic := ii.beginForTests()
+		defer ic.Close()
+		writer := ic.NewWriter()
+		defer writer.close()
+		for txNum := uint64(1); txNum <= 15; txNum++ {
+			for keyNum := uint64(1); keyNum <= 4; keyNum++ {
+				if txNum%keyNum == 0 {
+					var k [8]byte
+					binary.BigEndian.PutUint64(k[:], keyNum)
+					require.NoError(t, writer.Add(k[:], txNum))
+				}
+			}
+		}
+		return writer.Flush(ctx, tx)
+	}))
+
+	tx, err := db.BeginRw(ctx)
+	require.NoError(t, err)
+	defer tx.Rollback()
+	require.NoError(t, ii.collateBuildIntegrate(ctx, 0, tx, background.NewProgressSet()))
+
+	iit := ii.beginForTests()
+	defer iit.Close()
+	var k [8]byte
+	binary.BigEndian.PutUint64(k[:], 2)
+	found, equalOrHigher, err := iit.seekInFiles(k[:], 3)
+	require.NoError(t, err)
+	require.True(t, found)
+	require.Equal(t, uint64(4), equalOrHigher)
+}
+
+func TestInvIndexBTreeMissedAccessor(t *testing.T) {
+	t.Parallel()
+
+	logger := log.New()
+	db, ii := testDbAndInvertedIndex(t, 16, logger)
+	ii.Accessors = statecfg.AccessorBTree | statecfg.AccessorExistence
+	ctx := t.Context()
+
+	require.NoError(t, db.Update(ctx, func(tx kv.RwTx) error {
+		ic := ii.beginForTests()
+		defer ic.Close()
+		writer := ic.NewWriter()
+		defer writer.close()
+		for txNum := uint64(1); txNum <= 15; txNum++ {
+			for keyNum := uint64(1); keyNum <= 4; keyNum++ {
+				if txNum%keyNum == 0 {
+					var k [8]byte
+					binary.BigEndian.PutUint64(k[:], keyNum)
+					require.NoError(t, writer.Add(k[:], txNum))
+				}
+			}
+		}
+		return writer.Flush(ctx, tx)
+	}))
+
+	tx, err := db.BeginRw(ctx)
+	require.NoError(t, err)
+	defer tx.Rollback()
+	require.NoError(t, ii.collateBuildIntegrate(ctx, 0, tx, background.NewProgressSet()))
+
+	countAccessors := func() (bt, kvei int) {
+		entries, err := os.ReadDir(ii.dirs.SnapAccessors)
+		require.NoError(t, err)
+		for _, e := range entries {
+			switch {
+			case strings.HasSuffix(e.Name(), ".bt"):
+				bt++
+			case strings.HasSuffix(e.Name(), ".kvei"):
+				kvei++
+			}
+		}
+		return bt, kvei
+	}
+
+	bt, kvei := countAccessors()
+	require.Equal(t, 1, bt)
+	require.Equal(t, 1, kvei)
+
+	entries, err := os.ReadDir(ii.dirs.SnapAccessors)
+	require.NoError(t, err)
+	for _, e := range entries {
+		if strings.HasSuffix(e.Name(), ".bt") || strings.HasSuffix(e.Name(), ".kvei") {
+			require.NoError(t, dir.RemoveFile(filepath.Join(ii.dirs.SnapAccessors, e.Name())))
+		}
+	}
+	bt, kvei = countAccessors()
+	require.Equal(t, 0, bt)
+	require.Equal(t, 0, kvei)
+
+	dirtyRo := ii.DebugBeginDirtyFilesRo()
+	defer dirtyRo.Close()
+	missed := dirtyRo.filesWithMissedAccessors(readDirNames(ii.dirs.SnapAccessors))
+	require.False(t, missed.IsEmpty())
+
+	g, gctx := errgroup.WithContext(ctx)
+	ii.BuildMissedAccessors(gctx, g, background.NewProgressSet(), missed)
+	require.NoError(t, g.Wait())
+
+	bt, kvei = countAccessors()
+	require.Equal(t, 1, bt)
+	require.Equal(t, 1, kvei)
+}
+
+func TestInvIndexBTreeMerge(t *testing.T) {
+	if testing.Short() {
+		t.Skip("long-running test")
+	}
+	t.Parallel()
+
+	logger := log.New()
+	db, ii := testDbAndInvertedIndex(t, 16, logger)
+	ii.Accessors = statecfg.AccessorBTree | statecfg.AccessorExistence
+	ctx := t.Context()
+
+	const txs, module = uint64(1000), uint64(31)
+	require.NoError(t, db.Update(ctx, func(tx kv.RwTx) error {
+		ic := ii.beginForTests()
+		defer ic.Close()
+		writer := ic.NewWriter()
+		defer writer.close()
+		for txNum := uint64(1); txNum <= txs; txNum++ {
+			for keyNum := uint64(1); keyNum <= module; keyNum++ {
+				if txNum%keyNum == 0 {
+					var k [8]byte
+					binary.BigEndian.PutUint64(k[:], keyNum)
+					require.NoError(t, writer.Add(k[:], txNum))
+				}
+			}
+		}
+		return writer.Flush(ctx, tx)
+	}))
+
+	mergeInverted(t, db, ii, txs)
+
+	// A merged bt file must still serve seeks: key 2 changes on even txNums,
+	// so the first txNum >= 17 is 18.
+	ic := ii.beginForTests()
+	defer ic.Close()
+	var k [8]byte
+	binary.BigEndian.PutUint64(k[:], 2)
+	found, equalOrHigher, err := ic.seekInFiles(k[:], 17)
+	require.NoError(t, err)
+	require.True(t, found)
+	require.Equal(t, uint64(18), equalOrHigher)
 }
 
 func TestInvIndexPruningCorrectness(t *testing.T) {
