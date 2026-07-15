@@ -1214,7 +1214,12 @@ func (c *BlockStateCache) GetCurrentAccount(addr accounts.Address) ([]byte, bool
 		return enc, true
 	}
 	c.mu.RUnlock()
-	// Fall back to serializing the committed account.
+	// The committed fallback runs after releasing mu, so the two reads are not one
+	// point-in-time snapshot. That is safe because committedAccounts is a
+	// write-once immutable pre-block view (a sync.Map for lock-free reads): a
+	// concurrent WriteAccount can only add a currentAccounts entry we'd miss —
+	// which the RLock-then-fallback ordering can't prevent regardless — never tear
+	// a committed value.
 	if v, ok := c.committedAccounts.Load(addr); ok {
 		acc := v.(*accounts.Account)
 		if acc == nil {

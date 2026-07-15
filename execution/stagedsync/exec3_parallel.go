@@ -2795,6 +2795,7 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 					// committed for addr (sd.mem + domain files), so a self-destruct
 					// emits the full StoragePath=0 cascade — covers genesis-allocated
 					// and prior-block storage that vm.StorageKeys doesn't see.
+					var domainKeysErr error
 					domainStorageKeys := func(addr accounts.Address) []accounts.StorageKey {
 						av := addr.Value()
 						const addrLen, hashLen = 20, 32 // StorageDomain composite key = addr ++ slotHash
@@ -2805,15 +2806,17 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 							}
 							return true, nil
 						}); iterErr != nil {
-							// Non-fatal: fall back to vm.StorageKeys-only. A missed slot
-							// surfaces as a wrong-trie-root, not a silent corruption.
-							pe.logger.Warn("[parallel] domainStorageKeys iterate failed", "addr", av, "err", iterErr)
+							domainKeysErr = iterErr
+							return nil
 						}
 						return keys
 					}
 					// Mirror txtask.go's genesis rules-clobber so empty allocs (AuRa ZeroAddress) survive.
 					emptyRemoval := be.blockNum != 0 && pe.cfg.chainConfig.IsEIP161Enabled(be.blockNum)
 					txResult.writes = rawWrites.Normalize(be.versionMap, txVersion.TxIndex, resultIncarnation, stateReader, domainStorageKeys, emptyRemoval, pe.cfg.chainConfig.Aura != nil, txTask.Rules().IsAmsterdam)
+					if domainKeysErr != nil {
+						return nil, fmt.Errorf("[parallel] iterate storage prefix for block write normalization: %w", domainKeysErr)
+					}
 				}
 
 				// Snapshot the finalized result before pushing — prevents
@@ -3008,7 +3011,7 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 			if tt, ok := lastResult.Task.(*taskVersion).Task.(*exec.TxTask); ok {
 				// Syscalls share the main ibs so their writes (EIP-7002/7251
 				// dequeue, EIP-4788 beacon root) land in ibs.VersionedWrites
-				// and then in finalizeWrites via MakeWriteSet. If we instead
+				// and then in finalizeWrites via Normalize below. If we instead
 				// create a separate syscallIBS in historic mode, the syscall
 				// writes land only in BlockStateCache and never reach the
 				// commitment calculator's txResult feed — producing a wrong
@@ -3040,7 +3043,7 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 
 				// syscallIBS == ibs unconditionally now; no separate write
 				// propagation needed — syscall writes flow through
-				// ibs.MakeWriteSet into finalizeWrites below.
+				// ibs.VersionedWrites() + Normalize into finalizeWrites below.
 
 				be.blockIO.RecordReads(finalVersion, ibs.VersionedReads())
 
@@ -3055,6 +3058,7 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 				// so.data via MakeWriteSet. This keeps the parallel commit sourced
 				// solely from versionedWrites so the write-path stateObject is
 				// redundant.
+				var domainKeysErr error
 				domainStorageKeys := func(addr accounts.Address) []accounts.StorageKey {
 					av := addr.Value()
 					const addrLen, hashLen = 20, 32
@@ -3065,12 +3069,16 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 						}
 						return true, nil
 					}); iterErr != nil {
-						pe.logger.Warn("[parallel] finalize domainStorageKeys iterate failed", "addr", av, "err", iterErr)
+						domainKeysErr = iterErr
+						return nil
 					}
 					return keys
 				}
 				emptyRemoval := be.blockNum != 0 && pe.cfg.chainConfig.IsEIP161Enabled(be.blockNum)
 				finalizeWrites = ivw.Normalize(be.versionMap, finalVersion.TxIndex, finalVersion.Incarnation, reader, domainStorageKeys, emptyRemoval, pe.cfg.chainConfig.Aura != nil, pe.cfg.chainConfig.IsAmsterdam(tt.Header.Time))
+				if domainKeysErr != nil {
+					return nil, fmt.Errorf("[parallel] finalize iterate storage prefix for block write normalization: %w", domainKeysErr)
+				}
 				be.applyCount += finalizeWrites.Count()
 
 				// Apply finalize writes to the BlockStateCache.

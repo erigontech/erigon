@@ -373,7 +373,7 @@ func (s *ReadSet) Delete(addr accounts.Address) {
 func (s ReadSet) Len() int {
 	n := len(s.address) + len(s.balance) + len(s.nonce) + len(s.incarnation) +
 		len(s.selfDestruct) + len(s.createContract) +
-		len(s.code) + len(s.codeHash) + len(s.codeSize)
+		len(s.code) + len(s.codeHash) + len(s.codeSize) + len(s.access)
 	for _, inner := range s.storage {
 		n += len(inner)
 	}

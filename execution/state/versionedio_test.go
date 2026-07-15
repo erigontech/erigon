@@ -575,6 +575,15 @@ func TestVersionedIO_RemovedDependencyFallsThroughToStorage(t *testing.T) {
 	got, err := ibs.GetState(addr, key)
 	require.NoError(t, err)
 	require.Equal(t, *uint256.NewInt(0xBB), got, "read-once returns the recorded value")
+
+	// The recorded MapRead points at Tx1's now-removed cell, so at commit it
+	// resolves to MVReadResultNone and must be invalidated (which re-executes the
+	// tx so it falls through to storage). Without this the stale read commits.
+	valid := validateRead(ibs.versionMap, 2, addr, StoragePath, key, MapRead,
+		Version{TxIndex: 1, Incarnation: 0}, *uint256.NewInt(0xBB), liveStorage, eqUint256,
+		func(rv, wv Version) VersionValidity { return VersionValid }, false, "")
+	require.Equal(t, VersionInvalid, valid,
+		"a MapRead whose version-map cell was removed must invalidate at commit")
 }
 
 // TestIBSVersionedWrites_SelfdestructRetainsBalanceDropsOtherPaths verifies
@@ -944,11 +953,10 @@ func TestApplyVersionedWrites_BalanceWriteGeneratesBalanceRead(t *testing.T) {
 	require.True(t, hasRead(reads, addr, BalancePath), "BalancePath write must generate a BalancePath read for existing accounts")
 }
 
-// TestApplyVersionedWrites_StorageWriteGeneratesBalanceRead verifies that a
-// StoragePath write through ApplyVersionedWrites also generates a BalancePath
-// read. This is because setState calls GetOrNewStateObject which triggers
-// the per-field account refresh. The direct finalize path must replicate this.
-func TestApplyVersionedWrites_StorageWriteGeneratesBalanceRead(t *testing.T) {
+// TestApplyVersionedWrites_StorageWriteNoBalanceRead verifies the lean
+// footprint: a StoragePath write through ApplyVersionedWrites no longer drags in
+// a whole-account refresh, so it records no BalancePath read.
+func TestApplyVersionedWrites_StorageWriteNoBalanceRead(t *testing.T) {
 	t.Parallel()
 
 	addr := accounts.InternAddress(common.HexToAddress("0xF000"))
@@ -973,9 +981,10 @@ func TestApplyVersionedWrites_StorageWriteGeneratesBalanceRead(t *testing.T) {
 		"StoragePath write must not generate a spurious BalancePath read")
 }
 
-// TestApplyVersionedWrites_NonceWriteGeneratesBalanceRead verifies that a
-// NoncePath write generates a BalancePath read for an existing account.
-func TestApplyVersionedWrites_NonceWriteGeneratesBalanceRead(t *testing.T) {
+// TestApplyVersionedWrites_NonceWriteNoBalanceRead verifies the lean footprint:
+// a NoncePath write no longer drags in a whole-account refresh, so it records no
+// BalancePath read.
+func TestApplyVersionedWrites_NonceWriteNoBalanceRead(t *testing.T) {
 	t.Parallel()
 
 	addr := accounts.InternAddress(common.HexToAddress("0xF100"))
@@ -997,10 +1006,11 @@ func TestApplyVersionedWrites_NonceWriteGeneratesBalanceRead(t *testing.T) {
 		"NoncePath write must not generate a spurious BalancePath read")
 }
 
-// TestApplyVersionedWrites_MultipleAccountsAllGetBalanceReads verifies that
-// when multiple existing accounts have writes of different types, ALL accounts
-// get BalancePath reads.
-func TestApplyVersionedWrites_MultipleAccountsAllGetBalanceReads(t *testing.T) {
+// TestApplyVersionedWrites_MultipleAccountsOnlyBalanceWriteReadsBalance verifies
+// the lean footprint: when multiple existing accounts have writes of different
+// types, only the balance write reads its prior balance (the net-zero baseline);
+// nonce/storage writes record no BalancePath read.
+func TestApplyVersionedWrites_MultipleAccountsOnlyBalanceWriteReadsBalance(t *testing.T) {
 	t.Parallel()
 
 	addrA := accounts.InternAddress(common.HexToAddress("0xF200"))

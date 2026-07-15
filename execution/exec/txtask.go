@@ -115,9 +115,11 @@ type TxResult struct {
 	TraceTos   map[accounts.Address]struct{}
 
 	// CollectorWrites holds collector-format writes (all 4 account fields per
-	// address) produced by MakeWriteSet during worker execution. Used by the
-	// parallel finalize path to skip full IBS reconstruction: fee-calc balance
-	// adjustments are applied directly to these writes.
+	// address) produced during worker execution, with fee-calc balance
+	// adjustments folded in during finalize. It is not the commit source — the
+	// parallel commit builds its write set from the versionMap — so this is
+	// vestigial and slated for removal once the last self-referential fee update
+	// is dropped.
 	CollectorWrites *state.WriteSet
 }
 

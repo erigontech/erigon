@@ -175,6 +175,12 @@ type (
 	}
 	touchAccount struct {
 		account accounts.Address
+		// The touch records a BalancePath=0 versioned write; capture whether it
+		// created that cell (vs updated an existing one) and the prior value so
+		// revert undoes it, keeping the versioned write-set in step without any
+		// dirties re-processing.
+		wasCommited bool
+		prev        uint256.Int
 	}
 
 	// Changes to the access list
@@ -308,6 +314,18 @@ func (ch touchAccount) revert(s *IntraBlockState) error {
 	// branched on it (e.g. Empty() returning true vs false).  Removing the
 	// read-set entry causes ValidateVersion to miss the dependency, allowing
 	// stale reads to pass validation and produce incorrect results.
+	//
+	// The touch's BalancePath=0 write must be undone, though: leaving it orphaned
+	// lets Normalize's EIP-161 pass delete an account whose touch was rolled back.
+	// Mirror balanceChange.revert — drop the write if the touch created it, else
+	// restore the prior value.
+	if s.versionMap != nil {
+		if ch.wasCommited {
+			s.versionedWrites.DelBalance(ch.account)
+		} else if _, ok := s.versionedWrites.GetBalance(ch.account); ok {
+			s.versionedWrites.updateBalance(ch.account, ch.prev)
+		}
+	}
 	return nil
 }
 

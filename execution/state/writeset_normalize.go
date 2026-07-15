@@ -271,7 +271,7 @@ func (writes *WriteSet) Normalize(vm *VersionMap, txIndex int, incarnation int, 
 	// For addresses that appear in the raw WriteSet but don't have account-level
 	// writes in the output, emit account field entries. Serial's MakeWriteSet
 	// always calls UpdateAccountData for every dirty object — the commitment
-	// needs the full account  This covers:
+	// needs the full account state. This covers:
 	// - Addresses with only storage writes (no balance/nonce changes)
 	// - Addresses whose storage writes were all filtered as no-ops
 	//   (the object was still dirty in the IBS)

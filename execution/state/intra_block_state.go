@@ -401,6 +401,11 @@ func (sdb *IntraBlockState) Reset() {
 	sdb.accessList.Reset()
 	sdb.transientStorage = newTransientStorage()
 	sdb.versionMap = nil
+	// noMaterialize is meaningful only alongside a versionMap; clear it with the
+	// map so a reused IBS can't run unversioned with the stateObject cache still
+	// suppressed (which would silently drop writes). The versioned worker re-sets
+	// both right after Reset; the block assembler never calls Reset mid-block.
+	sdb.noMaterialize = false
 	clear(sdb.committedBase)
 	// Read side rebinds to a fresh empty set: VersionedReads() at end of
 	// tx hands the per-path maps to result.TxIn, so rebinding leaves the
@@ -1064,11 +1069,24 @@ func (sdb *IntraBlockState) touchAccount(addr accounts.Address) {
 // needed for state clearing and trie consistency.
 func (sdb *IntraBlockState) TouchAccount(addr accounts.Address) error {
 	markTouched := func() {
+		if dbg.TraceTransactionIO && (sdb.trace || dbg.TraceAccount(addr.Handle())) {
+			fmt.Printf("%d (%d.%d) Touch %x\n", sdb.blockNum, sdb.txIndex, sdb.version, addr)
+		}
+		if sdb.versionMap != nil {
+			// Versioned path: pair the BalancePath=0 write with a journal entry
+			// that reverts it, so the write-set stays in step through reverts
+			// without any dirties re-processing (deprecated on this path).
+			prevWrite, had := sdb.versionedWrites.GetBalance(addr)
+			ch := touchAccount{account: addr, wasCommited: !had}
+			if had {
+				ch.prev = prevWrite.Val
+			}
+			sdb.recordWriteBalance(addr, uint256.Int{})
+			sdb.journal.append(ch)
+			return
+		}
 		sdb.recordWriteBalance(addr, uint256.Int{})
 		if _, ok := sdb.journal.dirties[addr]; !ok {
-			if dbg.TraceTransactionIO && (sdb.trace || dbg.TraceAccount(addr.Handle())) {
-				fmt.Printf("%d (%d.%d) Touch %x\n", sdb.blockNum, sdb.txIndex, sdb.version, addr)
-			}
 			sdb.touchAccount(addr)
 		}
 	}
@@ -1352,15 +1370,18 @@ func (sdb *IntraBlockState) writeNonceVersioned(addr accounts.Address, nonce uin
 		return nil
 	}
 	prev := base.Nonce
-	if vw, ok := sdb.versionedWrites.GetNonce(addr); ok {
-		prev = vw.Val
-	}
 	// Keep an already-materialized stateObject's so.data in step so the
 	// so.data-based commit paths (genesis FinalizeTx, RPC) stay correct. We
 	// don't materialize one that isn't present — that's the whole point.
 	if so, ok := sdb.stateObjects[addr]; ok {
 		prev = so.data.Nonce
 		so.setNonce(nonce)
+	}
+	// The tx's own nonce cell is authoritative for the journal prev: it records
+	// every prior same-tx write, whereas so.data can lag if the object was
+	// materialized after those writes. Prefer it over so.data and base.
+	if vw, ok := sdb.versionedWrites.GetNonce(addr); ok {
+		prev = vw.Val
 	}
 	sdb.journal.append(nonceChange{account: addr, prev: prev, wasCommited: wasCommited})
 	if sdb.tracingHooks != nil {
@@ -1812,6 +1833,10 @@ func (sdb *IntraBlockState) stateObjectForAccount(addr accounts.Address, account
 }
 
 func (sdb *IntraBlockState) getStateObject(addr accounts.Address, recordRead bool) (*stateObject, error) {
+	// A cached object is returned without re-reading the versionMap. This is safe
+	// only because the materializing versioned flows keep so.data in step with the
+	// cells on every write (the setters mirror recordWrite*); the noMaterialize
+	// path never populates this cache, so it can't serve a stale object there.
 	if so, ok := sdb.stateObjects[addr]; ok {
 		return so, nil
 	}
