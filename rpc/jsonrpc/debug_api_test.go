@@ -45,6 +45,7 @@ import (
 	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/db/state/statecfg"
 	"github.com/erigontech/erigon/execution/builder"
+	"github.com/erigontech/erigon/execution/chain"
 	chainspec "github.com/erigontech/erigon/execution/chain/spec"
 	"github.com/erigontech/erigon/execution/execmodule"
 	"github.com/erigontech/erigon/execution/stagedsync/stages"
@@ -90,7 +91,7 @@ func TestTraceBlockByNumber(t *testing.T) {
 	}
 	m, _, _ := rpcdaemontest.CreateTestExecModule(t)
 	stateCache := kvcache.New(kvcache.DefaultCoherentConfig)
-	baseApi := NewBaseApi(nil, stateCache, m.BlockReader, false, rpccfg.DefaultEvmCallTimeout, m.Engine, m.Dirs, nil, 0, 0)
+	baseApi := NewBaseApi(nil, stateCache, m.BlockReader, false, rpccfg.DefaultEvmCallTimeout, m.Engine, m.Dirs, nil, 0, 0, 0)
 	ethApi := newEthApiForTest(baseApi, m.DB, nil, nil)
 	api := NewPrivateDebugAPI(baseApi, m.DB, nil, 0, false)
 	for _, tt := range debugTraceTransactionTests {
@@ -297,6 +298,67 @@ func TestTraceErrorPathsWriteNoStream(t *testing.T) {
 		require.NoError(t, s.Flush())
 		require.Empty(t, buf.Bytes(), "stream must be empty on AssembleTracer error so handler omits result field")
 	})
+}
+
+func (c *baseFeeTestChain) debugAPI() *DebugAPIImpl {
+	return NewPrivateDebugAPI(newBaseApiForTest(c.m), c.m.DB, nil, 0, false)
+}
+
+// callDebugTraceCall invokes debug_traceCall with the given args and
+// BlockOverrides, and returns the call's return data.
+func callDebugTraceCall(t *testing.T, api *DebugAPIImpl, args ethapi.CallArgs, overrides *ethapi.BlockOverrides) string {
+	t.Helper()
+
+	var buf bytes.Buffer
+	s := jsonstream.New(jsoniter.NewStream(jsoniter.ConfigDefault, &buf, 4096))
+	err := api.TraceCall(context.Background(), args, rpc.BlockNumberOrHashWithNumber(rpc.LatestBlockNumber), &tracersConfig.TraceConfig{
+		BlockOverrides: overrides,
+	}, s)
+	require.NoError(t, err)
+	require.NoError(t, s.Flush())
+
+	var er ethapi.ExecutionResult
+	require.NoError(t, json.Unmarshal(buf.Bytes(), &er))
+	return er.ReturnValue
+}
+
+func TestDebugTraceCallBlockOverridesBaseFeeAffectsGasPrice(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow test")
+	}
+
+	c := newBaseFeeTestChain(t, chain.AllProtocolChanges)
+	contractAddr := c.deployOpcodeContract(t, opGasprice)
+
+	args := ethapi.CallArgs{
+		From:                 &c.bankAddress,
+		To:                   &contractAddr,
+		Gas:                  newUint64(100_000),
+		MaxFeePerGas:         (*hexutil.Big)(big.NewInt(100)),
+		MaxPriorityFeePerGas: (*hexutil.Big)(big.NewInt(2)),
+	}
+	returnValue := callDebugTraceCall(t, c.debugAPI(), args, &ethapi.BlockOverrides{
+		BaseFeePerGas: (*hexutil.Big)(big.NewInt(10)),
+	})
+	// effective gas price = BaseFeePerGas(10) + MaxPriorityFeePerGas(2) = 12 = 0xc
+	require.Equal(t, "0x000000000000000000000000000000000000000000000000000000000000000c", returnValue)
+}
+
+func TestDebugTraceCallBlockOverridesOtherFieldsAffectOpcodes(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow test")
+	}
+
+	for _, tc := range blockOverrideOpcodeCases() {
+		t.Run(tc.name, func(t *testing.T) {
+			c := newBaseFeeTestChain(t, chain.AllProtocolChanges)
+			contractAddr := c.deployOpcodeContract(t, tc.opcode)
+
+			args := ethapi.CallArgs{From: &c.bankAddress, To: &contractAddr}
+			returnValue := callDebugTraceCall(t, c.debugAPI(), args, tc.override)
+			require.Equal(t, hexutil.Bytes(tc.expected).String(), returnValue)
+		})
+	}
 }
 
 // TestTxResultFieldStreamLazy verifies the lazy-write semantics of LazyFieldStream
@@ -970,7 +1032,7 @@ func TestGetRawTransaction(t *testing.T) {
 		t.Error("TestSentry doesn't have enough blocks for this test")
 	}
 	var testedOnce = false
-	for i := uint64(0); i < number; i++ {
+	for i := range number {
 		tx, err := m.DB.BeginRo(ctx)
 		require.NoError(err)
 		defer tx.Rollback()
@@ -991,6 +1053,40 @@ func TestGetRawTransaction(t *testing.T) {
 		}
 	}
 	require.True(testedOnce, "Test flow didn't touch the target flow")
+}
+
+func TestGetRawReceipts(t *testing.T) {
+	m, _, _ := rpcdaemontest.CreateTestExecModule(t)
+	api := NewPrivateDebugAPI(newBaseApiForTest(m), m.DB, nil, 5000000, false)
+	ctx := context.Background()
+
+	require := require.New(t)
+	tx, err := m.DB.BeginTemporalRo(ctx)
+	require.NoError(err)
+	defer tx.Rollback()
+	number := *rawdb.ReadCurrentBlockNumber(tx)
+
+	testedNonEmpty := false
+	for i := uint64(0); i <= number; i++ {
+		block, err := api.blockByNumberWithSenders(ctx, tx, i)
+		require.NoError(err)
+		receipts, err := api.getReceipts(ctx, tx, block)
+		require.NoError(err)
+		expected := make([]hexutil.Bytes, len(receipts))
+		for j, receipt := range receipts {
+			b, err := receipt.MarshalBinary()
+			require.NoError(err)
+			expected[j] = b
+		}
+
+		raw, err := api.GetRawReceipts(ctx, rpc.BlockNumberOrHashWithNumber(rpc.BlockNumber(i)))
+		require.NoError(err)
+		require.Equal(expected, raw)
+		if len(raw) > 0 {
+			testedNonEmpty = true
+		}
+	}
+	require.True(testedNonEmpty, "test chain has no receipts")
 }
 
 func TestExecutionWitness(t *testing.T) {

@@ -7,6 +7,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"io"
 	"runtime"
 	"sync"
 	"sync/atomic"
@@ -43,12 +44,6 @@ type sd interface {
 	// read), tagged with source.
 	MergeMetrics(source kvmetrics.Source, wm *kvmetrics.DomainMetrics)
 	StepSize() uint64
-	Trace() bool
-	CommitmentCapture() bool
-
-	// ProbeReadLayers samples sd.mem, parent.mem and tx-direct (MDBX) for one
-	// key — BranchCache divergence-detection probe. Read-only.
-	ProbeReadLayers(domain kv.Domain, tx kv.TemporalTx, key []byte) (mem, parentMem, mdbx []byte, memOk, parentOk bool)
 
 	// Metrics exposes the per-SD DomainMetrics so callers can read
 	// per-domain (cache, db, file) read counters. Used by the
@@ -64,7 +59,7 @@ type SharedDomainsCommitmentContext struct {
 	patriciaTrie  commitment.Trie
 	variant       commitment.TrieVariant // selected trie engine, for the [commitment] log (updates.Mode() is ModeParallel for both parallel and streaming)
 	justRestored  atomic.Bool            // set to true when commitment trie was just restored from snapshot
-	trace         bool
+	traceW        io.Writer
 	stateReader   StateReader
 	paraTrieDB    kv.TemporalRoDB // DB used for para trie and/or parallel trie warmup
 	// warmupBase holds the construction-time portion of the per-call WarmupConfig.
@@ -79,6 +74,11 @@ type SharedDomainsCommitmentContext struct {
 	deferCommitmentUpdates bool
 	// pendingUpdate stores a single deferred branch update to be flushed at the next ComputeCommitment call.
 	pendingUpdate *commitment.PendingCommitmentUpdate
+
+	// pendingVariant holds a parallel/streaming trie selection that waits for
+	// EnableParaTrieDB: those variants need the DB-backed TrieContextFactory.
+	pendingVariant commitment.TrieVariant
+	pendingCfg     commitment.TrieConfig
 }
 
 // SetStateReader can be used to set a custom state reader (otherwise the default one is set in SharedDomainsCommitmentContext.trieContext).
@@ -94,6 +94,30 @@ func (sdc *SharedDomainsCommitmentContext) StateReader() StateReader {
 
 func (sdc *SharedDomainsCommitmentContext) EnableParaTrieDB(db kv.TemporalRoDB) {
 	sdc.paraTrieDB = db
+	if sdc.pendingVariant == "" {
+		return
+	}
+	if sdc.updates.Size() != 0 {
+		panic("EnableParaTrieDB after touches: keys collected on the sequential buffer would be dropped")
+	}
+	prev, ok := sdc.patriciaTrie.(*commitment.HexPatriciaHashed)
+	if !ok {
+		panic("pending trie upgrade expects the sequential trie")
+	}
+	cfg := sdc.pendingCfg
+	cfg.Variant = sdc.pendingVariant
+	sdc.updates.Close()
+	sdc.patriciaTrie, sdc.updates = commitment.InitializeTrieAndUpdates(commitment.ModeDirect, sdc.tmpDir, cfg)
+	if ppht, ok := sdc.patriciaTrie.(*commitment.ParallelPatriciaHashed); ok {
+		// State may already be restored (SeekCommitment can run before the DB
+		// is wired); adopting the trie carries it over losslessly.
+		ppht.AdoptRootTrie(prev)
+	}
+	sdc.variant = sdc.pendingVariant
+	sdc.pendingVariant = ""
+	if sdc.traceW != nil {
+		sdc.patriciaTrie.SetTraceWriter(sdc.traceW)
+	}
 }
 
 // EnableTrieWarmup enables parallel warmup of MDBX page cache during commitment.
@@ -170,14 +194,11 @@ func (sdc *SharedDomainsCommitmentContext) SetCustomHistoryStateReader(stateRead
 	sdc.SetStateReader(stateReader)
 }
 
-func (sdc *SharedDomainsCommitmentContext) SetTrace(trace bool) {
-	sdc.trace = trace
-	sdc.patriciaTrie.SetTrace(trace)
-}
-
-// SetCapture enables/disables trie operation capture for diagnosis.
-func (sdc *SharedDomainsCommitmentContext) SetCapture(capture []string) {
-	sdc.patriciaTrie.SetCapture(capture)
+func (sdc *SharedDomainsCommitmentContext) SetTraceWriter(w io.Writer) {
+	// Wrap once so the main and per-worker TrieContexts share one mutex-guarded
+	// writer: concurrent workers trace branch reads/writes without racing.
+	sdc.traceW = commitment.NewSyncWriter(w)
+	sdc.patriciaTrie.SetTraceWriter(sdc.traceW)
 }
 
 // GetUpdates returns the current updates buffer. Used by the commitment
@@ -204,11 +225,21 @@ func NewSharedDomainsCommitmentContext(sd sd, mode commitment.Mode, tmpDir strin
 	ctx := &SharedDomainsCommitmentContext{
 		sharedDomains: sd,
 		tmpDir:        tmpDir,
-		variant:       variant,
+		variant:       commitment.VariantHexPatriciaTrie,
 		warmupBase: commitment.WarmupConfig{
 			Enabled:    cfg.EnableTrieWarmup,
 			NumWorkers: cfg.WarmupNumWorkersOrDefault(),
 		},
+	}
+	// The parallel and streaming tries need a per-worker TrieContextFactory that
+	// only DB-backed consumers can provide (via EnableParaTrieDB). Start on the
+	// sequential trie and upgrade when the DB arrives, so context holders that
+	// never wire one (RPC, integrity, tests) keep working under a global variant
+	// selection.
+	if variant == commitment.VariantParallelHexPatricia || variant == commitment.VariantStreamingHexPatricia {
+		ctx.pendingVariant = variant
+		cfg.Variant = commitment.VariantHexPatriciaTrie
+		ctx.pendingCfg = cfg
 	}
 	ctx.patriciaTrie, ctx.updates = commitment.InitializeTrieAndUpdates(mode, tmpDir, cfg)
 	return ctx
@@ -225,6 +256,7 @@ func (sdc *SharedDomainsCommitmentContext) trieContext(tx kv.TemporalTx, blockNu
 		stepSize: sdc.sharedDomains.StepSize(),
 		txNum:    txNum,
 		blockNum: blockNum,
+		traceW:   sdc.traceW,
 	}
 	if sdc.stateReader != nil {
 		mainTtx.stateReader = sdc.stateReader.CloneForWorker(readCtx, tx)
@@ -246,13 +278,10 @@ func (sdc *SharedDomainsCommitmentContext) Reset() {
 	}
 }
 
-func (sdc *SharedDomainsCommitmentContext) GetCapture(truncate bool) []string {
-	return sdc.patriciaTrie.GetCapture(truncate)
-}
-
 func (sdc *SharedDomainsCommitmentContext) ClearRam() {
 	sdc.updates.Reset()
 	sdc.Reset()
+	sdc.stateReader = nil
 }
 
 func (sdc *SharedDomainsCommitmentContext) KeysCount() uint64 {
@@ -313,11 +342,7 @@ func (sdc *SharedDomainsCommitmentContext) WitnessNodes(ctx context.Context, pro
 	if err != nil {
 		return nil, nil, err
 	}
-	witnessTrie, err := trie.RLPDecode(full)
-	if err != nil {
-		return nil, nil, fmt.Errorf("decode witness nodes: %w", err)
-	}
-	lean, err := witnessTrie.WitnessNodesForKeys(provedKeys)
+	lean, err := trie.WitnessNodesForKeysFromNodes(full, provedKeys)
 	if err != nil {
 		return nil, nil, fmt.Errorf("prune witness nodes: %w", err)
 	}
@@ -348,6 +373,35 @@ func (sdc *SharedDomainsCommitmentContext) Witness(ctx context.Context, codeRead
 		}
 	}
 	return proofTrie, rootHash, nil
+}
+
+// WitnessLean builds the proof trie from the lean (pruned) witness node set — the
+// strict-verifier form debug_executionWitness emits — and re-attaches codeReads. Use
+// it when a single witness is serialized whole (eth_getWitness op-stream); the full
+// superset Witness() returns is for consumers that do their own per-key selection.
+// The returned nodes are the raw lean set (root first, no code attached), suitable for
+// feeding a node-set stateless verifier directly.
+func (sdc *SharedDomainsCommitmentContext) WitnessLean(ctx context.Context, codeReads map[common.Hash]witnesstypes.CodeWithHash, logPrefix string, produceExclusionProofs bool) (proofTrie *trie.Trie, nodes [][]byte, rootHash []byte, err error) {
+	nodes, rootHash, err = sdc.WitnessNodes(ctx, produceExclusionProofs, logPrefix)
+	if err != nil {
+		return nil, nil, nil, err
+	}
+	proofTrie, err = trie.RLPDecode(nodes)
+	if err != nil {
+		return nil, nil, nil, fmt.Errorf("decode witness nodes: %w", err)
+	}
+	for addrHash, codeWithHash := range codeReads {
+		if len(codeWithHash.Code) == 0 {
+			continue
+		}
+		if acc, present := proofTrie.GetAccount(addrHash[:]); !present || acc == nil {
+			continue
+		}
+		if err := proofTrie.UpdateAccountCode(addrHash[:], trie.CodeNode(codeWithHash.Code)); err != nil {
+			return nil, nil, nil, fmt.Errorf("attach witness code for %x: %w", addrHash, err)
+		}
+	}
+	return proofTrie, nodes, rootHash, nil
 }
 
 // SetCollapseTracer sets a callback that will be invoked when a node collapse occurs
@@ -396,20 +450,16 @@ func (sdc *SharedDomainsCommitmentContext) ComputeCommitment(ctx context.Context
 		}
 		log.Debug("[commitment] processed", "block", blockNum, "txNum", txNum, "keys", common.PrettyCounter(updateCount), "keys/s", common.PrettyCounter(keysPerSec), "mode", sdc.variant, "bufmode", sdc.updates.Mode(), "spent", took, "rootHash", hex.EncodeToString(rootHash))
 	}()
+	// Re-apply the trace writer before any trie operations (including the early-return
+	// RootHash below); GenerateWitness clears it, so it must be restored on each call.
+	sdc.patriciaTrie.SetTraceWriter(sdc.traceW)
+
 	if updateCount == 0 {
 		rootHash, err = sdc.patriciaTrie.RootHash()
 		return rootHash, err
 	}
 
 	// data accessing functions should be set when domain is opened/shared context updated
-
-	sdc.patriciaTrie.SetTrace(sdc.trace)
-	sdc.patriciaTrie.SetTraceDomain(sdc.sharedDomains.Trace())
-	if sdc.sharedDomains.CommitmentCapture() {
-		if sdc.patriciaTrie.GetCapture(false) == nil {
-			sdc.patriciaTrie.SetCapture([]string{})
-		}
-	}
 
 	// Per-ComputeCommitment metrics accumulator for the main (root-fold) reads.
 	// The fold is single-goroutine, so this lock-free accumulator is owned
@@ -494,12 +544,29 @@ func (sdc *SharedDomainsCommitmentContext) ComputeCommitment(ctx context.Context
 		warmupConfig.LogPrefix = logPrefix
 		switch trie := sdc.patriciaTrie.(type) {
 		case *commitment.ParallelPatriciaHashed:
+			// The parallel fold workers compute the root, so they must read the same
+			// file generation the main tx was built against: pin it and open worker
+			// txns from that pin. Otherwise a worker could pin a newer generation and
+			// read one domain (e.g. code) inconsistent with another (e.g. accounts).
+			var workerPin kv.TemporalFilesPin
+			if p, ok := tx.(filesPinner); ok {
+				if wp := p.Pin(); wp != nil {
+					workerPin = wp
+					defer workerPin.Close()
+				}
+			}
+			if workerPin == nil {
+				log.Warn("[commitment] parallel commitment without a pinned file snapshot; worker reads not generation-consistent", "logPrefix", logPrefix)
+			}
 			// Each worker writes its branch updates through a private collector
 			// so concurrent PutBranch calls never race; collectors are drained
 			// after Process and merged into the main writer below.
-			warmupConfig.CtxFactory, drainCollectors = sdc.concurrentTrieContextFactory(ctx, sdc.paraTrieDB, txNum)
+			warmupConfig.CtxFactory, drainCollectors = sdc.concurrentTrieContextFactory(ctx, sdc.paraTrieDB, workerPin, txNum)
 			trie.SetTrieContextFactory(warmupConfig.CtxFactory)
 		default:
+			// Serial: this factory only serves page-cache warmup, which does not
+			// compute the root, so its reads need no generation pin. (Streaming is
+			// a *ParallelPatriciaHashed and takes the pinned branch above.)
 			warmupConfig.CtxFactory = sdc.trieContextFactory(ctx, sdc.paraTrieDB, txNum)
 		}
 	}
@@ -580,6 +647,23 @@ func (sdc *SharedDomainsCommitmentContext) ComputeCommitment(ctx context.Context
 	return rootHash, err
 }
 
+// filesPinner is the optional capability of a temporal tx to pin its visible
+// file generation (see kv.TemporalFilesPin).
+type filesPinner interface {
+	Pin() kv.TemporalFilesPin
+}
+
+// beginWorkerRo opens a per-worker read tx for parallel/warmup commitment reads,
+// bound to the pinned file snapshot when one is available so all workers observe
+// the main tx's generation. Falls back to an independent snapshot when the
+// backend can't pin files.
+func beginWorkerRo(ctx context.Context, db kv.TemporalRoDB, pin kv.TemporalFilesPin) (kv.TemporalTx, error) {
+	if pin != nil {
+		return pin.BeginTemporalRo(ctx)
+	}
+	return db.BeginTemporalRo(ctx)
+}
+
 func (sdc *SharedDomainsCommitmentContext) trieContextFactory(ctx context.Context, db kv.TemporalRoDB, txNum uint64) commitment.TrieContextFactory {
 	// avoid races like this
 	stepSize := sdc.sharedDomains.StepSize()
@@ -601,6 +685,7 @@ func (sdc *SharedDomainsCommitmentContext) trieContextFactory(ctx context.Contex
 			putter:   sdc.sharedDomains.AsPutDel(roTx),
 			stepSize: stepSize,
 			txNum:    txNum,
+			traceW:   sdc.traceW,
 		}
 		if sdc.stateReader != nil {
 			warmupCtx.stateReader = sdc.stateReader.CloneForWorker(workerCtx, roTx)
@@ -618,13 +703,13 @@ func (sdc *SharedDomainsCommitmentContext) trieContextFactory(ctx context.Contex
 // concurrentTrieContextFactory is like trieContextFactory but also creates a per-goroutine
 // etl.Collector for each context so that PutBranch writes are isolated (no shared writer race).
 // Returns the factory and a drain function that collects all created collectors.
-func (sdc *SharedDomainsCommitmentContext) concurrentTrieContextFactory(ctx context.Context, db kv.TemporalRoDB, txNum uint64) (commitment.TrieContextFactory, func() []*etl.Collector) {
+func (sdc *SharedDomainsCommitmentContext) concurrentTrieContextFactory(ctx context.Context, db kv.TemporalRoDB, pin kv.TemporalFilesPin, txNum uint64) (commitment.TrieContextFactory, func() []*etl.Collector) {
 	stepSize := sdc.sharedDomains.StepSize()
 	var mu sync.Mutex
 	var collectors []*etl.Collector
 
 	factory := func() (commitment.PatriciaContext, func()) {
-		roTx, err := db.BeginTemporalRo(ctx) //nolint:gocritic
+		roTx, err := beginWorkerRo(ctx, db, pin) //nolint:gocritic
 		if err != nil {
 			return &errorTrieContext{err: err}, func() {}
 		}
@@ -647,6 +732,7 @@ func (sdc *SharedDomainsCommitmentContext) concurrentTrieContextFactory(ctx cont
 			stepSize:       stepSize,
 			txNum:          txNum,
 			localCollector: collector,
+			traceW:         sdc.traceW,
 		}
 		if sdc.stateReader != nil {
 			warmupCtx.stateReader = sdc.stateReader.CloneForWorker(workerCtx, roTx)
@@ -862,7 +948,7 @@ func (sdc *SharedDomainsCommitmentContext) restorePatriciaState(value []byte) (u
 		return 0, 0, fmt.Errorf("failed restore state : %w", err)
 	}
 	sdc.justRestored.Store(true) // to prevent double reset
-	if sdc.trace {
+	if sdc.traceW != nil {
 		rootHash, err := hext.RootHash()
 		if err != nil {
 			return 0, 0, fmt.Errorf("failed to get root hash after state restore: %w", err)
@@ -879,7 +965,7 @@ type TrieContext struct {
 	blockNum uint64
 
 	stepSize       uint64
-	trace          bool
+	traceW         io.Writer // nil = disabled; traces branch reads/writes (see [SDC] lines)
 	stateReader    StateReader
 	localCollector *etl.Collector // per-goroutine collector for concurrent PutBranch
 }
@@ -900,6 +986,9 @@ func (sdc *TrieContext) Branch(pref []byte) ([]byte, kv.Step, error) {
 	// underlying state cache / getter aliases shared storage that another goroutine
 	// (concurrent commitment workers) can recycle. Own the bytes at the trie-context
 	// boundary so all downstream consumers are safe.
+	if sdc.traceW != nil {
+		fmt.Fprintf(sdc.traceW, "[SDC] Branch read %x => %x\n", pref, enc)
+	}
 	return common.Copy(enc), step, nil
 }
 
@@ -907,8 +996,8 @@ func (sdc *TrieContext) PutBranch(prefix []byte, data []byte, prevData []byte) e
 	if sdc.stateReader.WithHistory() { // do not store branches if explicitly operate on history
 		return nil
 	}
-	if sdc.trace {
-		fmt.Printf("[SDC] PutBranch: %x: %x\n", prefix, data)
+	if sdc.traceW != nil {
+		fmt.Fprintf(sdc.traceW, "[SDC] PutBranch %x: %x\n", prefix, data)
 	}
 	if sdc.localCollector != nil {
 		return sdc.localCollector.Collect(prefix, data)

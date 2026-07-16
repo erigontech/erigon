@@ -18,6 +18,7 @@ package cache
 
 import (
 	"bytes"
+	"sync"
 	"testing"
 
 	"github.com/c2h5oh/datasize"
@@ -25,6 +26,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/db/kv"
 )
 
@@ -273,8 +275,7 @@ func TestCodeCache_CodeDeduplication(t *testing.T) {
 
 func TestCodeCache_AddrCapacityLimit(t *testing.T) {
 	// addrToHash is an LRU keyed by 20-byte address. Verify eviction is
-	// LRU rather than no-op-when-full — fresh-address workloads must
-	// warm up (geth's lru.Cache pattern, mirroring core/state/database_code.go).
+	// LRU rather than no-op-when-full so fresh-address workloads warm up.
 	// makeAddr / makeCode wrap at 256, so we generate addrs/codes from
 	// a wider 16-bit space directly.
 	wideAddr := func(i int) []byte {
@@ -288,7 +289,7 @@ func TestCodeCache_AddrCapacityLimit(t *testing.T) {
 	}
 
 	c := NewCodeCache(1024*1024, 1024*28) // 1MB code, ~1024 addr LRU entries
-	for i := 0; i < 1100; i++ {
+	for i := range 1100 {
 		c.Put(wideAddr(i), wideCode(i), 0)
 	}
 
@@ -306,9 +307,10 @@ func TestCodeCache_AddrCapacityLimit(t *testing.T) {
 	assert.True(t, ok, "most recent entry should remain")
 	assert.Equal(t, wideCode(1099), v)
 
-	// hashToCode stores all 1100 distinct codes (content-addressed,
-	// independent of addr LRU eviction).
-	assert.Equal(t, 1100, c.CodeLen())
+	// hashToCode now LRU-evicts at its own entry cap (codeCapacityB /
+	// avgCodeEntryBytes), so it holds far fewer than the 1100 distinct codes
+	// rather than growing unbounded.
+	assert.Less(t, c.CodeLen(), 1100)
 
 	// Updating an existing addr re-writes the entry (LRU promotes to MRU).
 	c.Put(wideAddr(1099), wideCode(4242), 0)
@@ -318,23 +320,25 @@ func TestCodeCache_AddrCapacityLimit(t *testing.T) {
 }
 
 func TestCodeCache_CodeCapacityLimit(t *testing.T) {
-	// Each code entry is 8 (hash) + 3 (code bytes) = 11 bytes
-	// Set code capacity to 25 bytes - enough for 2 entries but not 3
+	// Tiny byte budget → a 1-entry code layer cap. Successive distinct codes
+	// LRU-evict the coldest rather than freezing the layer.
 	c := NewCodeCache(25, 1024*1024) // 25 bytes code, 1MB addr
 
-	// Fill code capacity
 	c.Put(makeAddr(1), makeCode(1), 0)
 	c.Put(makeAddr(2), makeCode(2), 0)
-	assert.Equal(t, 2, c.CodeLen())
-
-	// Try to add more code - addr mapping added, but code not stored
 	c.Put(makeAddr(3), makeCode(3), 0)
-	assert.Equal(t, 3, c.Len())     // addr mapping added
-	assert.Equal(t, 2, c.CodeLen()) // code not added (at capacity)
 
-	// Get for addr3 should fail (code not in cache)
-	_, ok := c.Get(makeAddr(3))
-	assert.False(t, ok)
+	// Addr LRU keeps all three mappings (1MB); the code layer holds only the
+	// most-recent code(s) after eviction.
+	assert.Equal(t, 3, c.Len())
+	assert.LessOrEqual(t, c.CodeLen(), 1)
+
+	// Newest code is retrievable; the coldest was evicted from the code layer.
+	v, ok := c.Get(makeAddr(3))
+	assert.True(t, ok)
+	assert.Equal(t, makeCode(3), v)
+	_, ok = c.Get(makeAddr(1))
+	assert.False(t, ok, "coldest code should have been evicted")
 }
 
 func TestCodeCache_Delete(t *testing.T) {
@@ -362,7 +366,7 @@ func TestCodeCache_Clear(t *testing.T) {
 	c.Clear()
 	assert.Equal(t, 0, c.Len())
 	// Clear hard-resets every layer: unwound/cleared code must not remain
-	// discoverable (#21752), so the content layer is dropped too.
+	// discoverable, so the content layer is dropped too.
 	assert.Equal(t, 0, c.CodeLen())
 }
 
@@ -392,7 +396,7 @@ func TestCodeCache_GetMissingCode(t *testing.T) {
 	c.Put(addr, code, 0)
 
 	// Clear the code cache but keep addr mapping
-	c.hashToCode.Clear()
+	c.hashToCode.Purge()
 	c.codeSize.Store(0)
 
 	// Get should fail at code lookup stage
@@ -575,7 +579,7 @@ func TestDomainCache_ConcurrentAccess(t *testing.T) {
 
 	// Writer goroutine
 	go func() {
-		for i := 0; i < 100; i++ {
+		for i := range 100 {
 			c.Put(makeAddr(i), makeValue(i), 0)
 		}
 		done <- true
@@ -583,7 +587,7 @@ func TestDomainCache_ConcurrentAccess(t *testing.T) {
 
 	// Reader goroutine
 	go func() {
-		for i := 0; i < 100; i++ {
+		for i := range 100 {
 			c.Get(makeAddr(i))
 		}
 		done <- true
@@ -600,7 +604,7 @@ func TestCodeCache_ConcurrentAccess(t *testing.T) {
 
 	// Writer goroutine
 	go func() {
-		for i := 0; i < 100; i++ {
+		for i := range 100 {
 			c.Put(makeAddr(i), makeCode(i), 0)
 		}
 		done <- true
@@ -608,7 +612,7 @@ func TestCodeCache_ConcurrentAccess(t *testing.T) {
 
 	// Reader goroutine
 	go func() {
-		for i := 0; i < 100; i++ {
+		for i := range 100 {
 			c.Get(makeAddr(i))
 		}
 		done <- true
@@ -770,4 +774,110 @@ func TestUnwind_FloorOnlyMovesDown(t *testing.T) {
 
 	_, ok := c.Get(k)
 	assert.False(t, ok, "deeper unwind's floor must not be raised by a later shallower one")
+}
+
+func TestDomainCache_PutIfAbsent(t *testing.T) {
+	c := NewDomainCacheMode(1*datasize.KB, ModeEvictLRU)
+	addr := makeAddr(1)
+	fresh := []byte("fresh")
+	stale := []byte("stale")
+
+	// Absent → inserts.
+	c.PutIfAbsent(addr, stale, 10)
+	v, ok := c.Get(addr)
+	require.True(t, ok)
+	assert.Equal(t, stale, v)
+
+	// Live entry → left untouched.
+	c.Put(addr, fresh, 20)
+	c.PutIfAbsent(addr, stale, 10)
+	v, ok = c.Get(addr)
+	require.True(t, ok)
+	assert.Equal(t, fresh, v, "PutIfAbsent must not replace a live entry")
+
+	// Entry below the unwind floor survives the unwind and still blocks PutIfAbsent.
+	low := makeAddr(2)
+	c.Put(low, fresh, 3)
+	c.Unwind(5)
+	c.PutIfAbsent(low, stale, 4)
+	v, ok = c.Get(low)
+	require.True(t, ok)
+	assert.Equal(t, fresh, v)
+
+	// Stale entry (at/above the floor, superseded epoch) → replaced.
+	c.PutIfAbsent(addr, stale, 10) // addr's entry was stamped txNum 20 >= floor 5
+	v, ok = c.Get(addr)
+	require.True(t, ok)
+	assert.Equal(t, stale, v, "PutIfAbsent must replace a stale entry")
+}
+
+func TestCodeCache_PutIfAbsentKeepsLiveAddrBinding(t *testing.T) {
+	cc := NewCodeCache(1*datasize.MB, 1*datasize.MB)
+	addr := makeAddr(1)
+	fresh := []byte{0xaa, 1, 2, 3}
+	stale := []byte{0xbb, 4, 5, 6}
+
+	cc.PutIfAbsent(addr, stale, 10)
+	v, ok := cc.Get(addr)
+	require.True(t, ok)
+	assert.Equal(t, stale, v)
+
+	cc.Put(addr, fresh, 20)
+	cc.PutIfAbsent(addr, stale, 10)
+	v, ok = cc.Get(addr)
+	require.True(t, ok)
+	assert.Equal(t, fresh, v, "PutIfAbsent must not rebind a live addr entry")
+
+	// After an unwind marks the binding stale, PutIfAbsent may rebind.
+	cc.Unwind(5)
+	cc.PutIfAbsent(addr, stale, 4)
+	v, ok = cc.Get(addr)
+	require.True(t, ok)
+	assert.Equal(t, stale, v)
+}
+
+func TestCodeCache_PutWithCodeHashIfAbsent(t *testing.T) {
+	cc := NewCodeCache(1*datasize.MB, 1*datasize.MB)
+	addr := makeAddr(1)
+	fresh := []byte{0xaa, 1, 2, 3}
+	stale := []byte{0xbb, 4, 5, 6}
+	freshHash := crypto.Keccak256(fresh)
+	staleHash := crypto.Keccak256(stale)
+
+	cc.PutWithCodeHash(addr, fresh, freshHash, 20)
+	cc.PutWithCodeHashIfAbsent(addr, stale, staleHash, 10)
+
+	v, ok := cc.Get(addr)
+	require.True(t, ok)
+	assert.Equal(t, fresh, v, "addr must stay bound to the fresher code")
+
+	// The content-addressed layers are per-key-immutable and still populated.
+	v, ok = cc.GetByCodeHash(staleHash)
+	require.True(t, ok)
+	assert.Equal(t, stale, v)
+	size, ok := cc.GetCodeSizeByCodeHash(staleHash)
+	require.True(t, ok)
+	assert.Equal(t, len(stale), size)
+}
+
+// A conditional put must be atomic w.r.t. a concurrent unconditional Put of
+// the same key: without a shared critical section the conditional writer can
+// check (absent), lose the CPU to the authoritative writer's insert, then
+// clobber it — the prefetch-vs-flush staleness this cache guards against.
+func TestDomainCache_PutIfAbsentAtomicWithPut(t *testing.T) {
+	c := NewDomainCacheMode(1*datasize.MB, ModeEvictLRU)
+	addr := makeAddr(1)
+	fresh := []byte("fresh")
+	stale := []byte("stale")
+	for round := range 20000 {
+		c.Delete(addr)
+		var wg sync.WaitGroup
+		wg.Add(2)
+		go func() { defer wg.Done(); c.Put(addr, fresh, 20) }()
+		go func() { defer wg.Done(); c.PutIfAbsent(addr, stale, 10) }()
+		wg.Wait()
+		v, ok := c.Get(addr)
+		require.True(t, ok)
+		require.Equal(t, fresh, v, "round %d: PutIfAbsent raced past a concurrent Put", round)
+	}
 }

@@ -150,7 +150,7 @@ func TestLightCollectorNoncePreservationCrossBlock(t *testing.T) {
 	require.NoError(t, err)
 
 	// TX 2-5: A receives transfers (balance-only, nonce unchanged from block origin=10)
-	for i := 0; i < 4; i++ {
+	for i := range 4 {
 		lc := state.NewLightCollector()
 		err = lc.UpdateAccountData(addr, blockOrigin,
 			&accounts.Account{Nonce: 10, Balance: *uint256.NewInt(uint64(4800 + (i+1)*100))})
@@ -388,4 +388,41 @@ func TestLightCollectorStorageUnchangedSlot(t *testing.T) {
 	v2, _, err := domains.GetLatest(kv.StorageDomain, tx, composite2)
 	require.NoError(t, err)
 	require.Equal(t, uint256.NewInt(42).Bytes(), v2, "changed slot should be 42")
+}
+
+// TestApplyVersionedWritesClearsCodeDomain pins that the parallel apply path
+// clears the CodeDomain when a tx clears an account's code, mirroring the serial
+// MakeWriteSet path. Regression: gating the code write on a non-nil code slice
+// skipped clears (empty code has nil bytes), leaving stale code in the domain
+// inconsistent with the emptied account codeHash.
+func TestApplyVersionedWritesClearsCodeDomain(t *testing.T) {
+	if testing.Short() {
+		t.Skip("requires mdbx")
+	}
+
+	tx, domains := setup2CacheTest(t)
+	lgr := log.New()
+	rs := state.NewStateV3Buffered(state.NewStateV3(domains, false, lgr))
+
+	addr := accounts.InternAddress(common.HexToAddress("0xC0DE"))
+	addrVal := addr.Value()
+	code := []byte{0x60, 0x00, 0x60, 0x00, 0xf3}
+	codeHash := accounts.NewCode(code).Hash
+
+	seed := accounts.Account{Nonce: 1, Balance: *uint256.NewInt(1), CodeHash: codeHash}
+	require.NoError(t, domains.DomainPut(kv.AccountsDomain, tx, addrVal[:], accounts.SerialiseV3(&seed), 0, nil))
+	require.NoError(t, domains.DomainPut(kv.CodeDomain, tx, addrVal[:], code, 0, nil))
+
+	lc := state.NewLightCollector()
+	original := &accounts.Account{Nonce: 1, Balance: *uint256.NewInt(1), CodeHash: codeHash}
+	cleared := &accounts.Account{Nonce: 1, Balance: *uint256.NewInt(1), CodeHash: accounts.EmptyCodeHash}
+	require.NoError(t, lc.UpdateAccountData(addr, original, cleared))
+	require.NoError(t, lc.UpdateAccountCode(addr, 1, accounts.EmptyCodeHash, nil))
+	writes := lc.TakeWrites()
+
+	require.NoError(t, rs.ApplyStateWrites(context.Background(), tx, 1, 100, writes, nil, &chain.Rules{}, nil))
+
+	got, _, err := domains.GetLatest(kv.CodeDomain, tx, addrVal[:])
+	require.NoError(t, err)
+	require.Empty(t, got, "clearing code must clear the CodeDomain in the parallel apply path")
 }

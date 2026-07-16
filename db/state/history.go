@@ -125,21 +125,21 @@ func (h *History) openHashMapAccessor(fPath string) (*recsplit.Index, error) {
 // It's ok if some files was open earlier.
 // If some file already open: noop.
 // If some file already open but not in provided list: close and remove from `files` field.
-func (h *History) openList(idxFiles, histNames, accessorFiles []string) error {
-	if err := h.InvertedIndex.openList(idxFiles, accessorFiles); err != nil {
+func (h *History) openList(ctx context.Context, idxFiles, histNames, accessorFiles []string) error {
+	if err := h.InvertedIndex.openList(ctx, idxFiles, accessorFiles); err != nil {
 		return err
 	}
 
 	h.closeWhatNotInList(histNames)
 	h.scanDirtyFiles(histNames)
-	if err := h.openDirtyFiles(histNames, accessorFiles); err != nil {
+	if err := h.openDirtyFiles(ctx, histNames, accessorFiles); err != nil {
 		return fmt.Errorf("History(%s).openList: %w", h.FilenameBase, err)
 	}
 	return nil
 }
 
-func (h *History) openFolder(scanDirsRes *ScanDirsResult) error {
-	return h.openList(scanDirsRes.iiFiles, scanDirsRes.historyFiles, scanDirsRes.accessorFiles)
+func (h *History) openFolder(ctx context.Context, scanDirsRes *ScanDirsResult) error {
+	return h.openList(ctx, scanDirsRes.iiFiles, scanDirsRes.historyFiles, scanDirsRes.accessorFiles)
 }
 
 func (h *History) scanDirtyFiles(fileNames []string) {
@@ -225,10 +225,18 @@ func (h *History) buildVI(ctx context.Context, historyIdxPath string, hist, efHi
 	var histKey []byte
 	var valOffset uint64
 
-	defer hist.MadvSequential().DisableReadAhead()
-	defer efHist.MadvSequential().DisableReadAhead()
+	histView, err := hist.OpenSequentialView(true)
+	if err != nil {
+		return err
+	}
+	defer histView.Close()
+	efHistView, err := efHist.OpenSequentialView(true)
+	if err != nil {
+		return err
+	}
+	defer efHistView.Close()
 
-	iiReader := h.InvertedIndex.dataReader(efHist)
+	iiReader := seg.NewReader(efHistView.MakeGetter(), h.InvertedIndex.Compression)
 
 	var keyBuf, valBuf []byte
 	cnt := uint64(0)
@@ -243,7 +251,7 @@ func (h *History) buildVI(ctx context.Context, historyIdxPath string, hist, efHi
 		}
 	}
 
-	histReader := h.dataReader(hist)
+	histReader := seg.NewReader(histView.MakeGetter(), h.Compression)
 
 	_, fName := filepath.Split(historyIdxPath)
 	p := ps.AddNew(fName, uint64(efHist.Count())/2)
@@ -344,13 +352,13 @@ func (h *History) BuildMissedAccessors(ctx context.Context, g *errgroup.Group, p
 	}
 }
 
-func (h *History) Scan(toTxNum uint64) error {
+func (h *History) Scan(ctx context.Context, toTxNum uint64) error {
 	scanResult, err := scanDirs(h.dirs)
 	if err != nil {
 		return err
 	}
 
-	if err := h.openFolder(scanResult); err != nil {
+	if err := h.openFolder(ctx, scanResult); err != nil {
 		return err
 	}
 
@@ -804,7 +812,7 @@ func (h *History) buildFiles(ctx context.Context, step kv.Step, collation Histor
 		return HistoryFiles{}, fmt.Errorf("open %s .ef history decompressor: %w", h.FilenameBase, err)
 	}
 	{
-		if err := h.InvertedIndex.buildMapAccessor(ctx, step, step+1, h.InvertedIndex.dataReader(efHistoryDecomp), ps); err != nil {
+		if err := h.InvertedIndex.buildMapAccessor(ctx, step, step+1, efHistoryDecomp, ps); err != nil {
 			return HistoryFiles{}, fmt.Errorf("build %s .ef history idx: %w", h.FilenameBase, err)
 		}
 		if efHistoryIdx, err = h.InvertedIndex.openHashMapAccessor(h.InvertedIndex.efAccessorNewFilePath(step, step+1)); err != nil {
@@ -897,19 +905,16 @@ type HistoryRoTx struct {
 	h   *History
 	iit *InvertedIndexRoTx
 
-	files             visibleFiles // have no garbage (canDelete=true, overlaps, etc...)
-	getters           []*seg.Reader
-	readers           []*recsplit.IndexReader
-	stepSize          uint64
-	stepsInFrozenFile uint64
-
-	trace bool
+	files    visibleFiles // have no garbage (canDelete=true, overlaps, etc...)
+	getters  []*seg.Reader
+	readers  []*recsplit.IndexReader
+	stepSize uint64
 
 	valsC    kv.Cursor
 	valsCDup kv.CursorDupSort
 
-	_bufTs           []byte
-	snappyReadBuffer []byte
+	_bufTs              []byte
+	blockCompressionBuf []byte
 }
 
 func (h *History) beginForTests() *HistoryRoTx {
@@ -926,13 +931,18 @@ func (h *History) BeginFilesRoForDebug() *HistoryRoTx {
 }
 
 func (h *History) beginFilesRo(files visibleFiles, iv *iiVisible) *HistoryRoTx {
-	return &HistoryRoTx{
-		h:                 h,
-		iit:               h.InvertedIndex.beginFilesRo(iv),
-		files:             files,
-		stepSize:          h.stepSize,
-		stepsInFrozenFile: h.stepsInFrozenFile,
-		trace:             false,
+	ht := &HistoryRoTx{}
+	h.initFilesRo(ht, &InvertedIndexRoTx{}, files, iv)
+	return ht
+}
+
+func (h *History) initFilesRo(ht *HistoryRoTx, iit *InvertedIndexRoTx, files visibleFiles, iv *iiVisible) {
+	h.InvertedIndex.initFilesRo(iit, iv)
+	*ht = HistoryRoTx{
+		h:        h,
+		iit:      iit,
+		files:    files,
+		stepSize: h.stepSize,
 	}
 }
 
@@ -1180,7 +1190,7 @@ func (ht *HistoryRoTx) historySeekInFiles(key []byte, txNum uint64) ([]byte, boo
 	}
 
 	if compressedPageValuesCount > 1 {
-		v, ht.snappyReadBuffer = seg.GetFromPage(historyKey, v, ht.snappyReadBuffer, true)
+		v, ht.blockCompressionBuf = seg.GetFromPage(historyKey, v, ht.blockCompressionBuf, true)
 	}
 	return v, true, nil
 }
@@ -1498,37 +1508,6 @@ func (ht *HistoryRoTx) HistoryDump(fromTxNum, toTxNum int, keyToDump *[]byte, du
 
 				dumpTo(key, txNum, val)
 			}
-		}
-	}
-
-	return nil
-}
-
-// CompactRange rebuilds the history files within the specified transaction range by performing a forced self-merge.
-// If the range contains existing static files, the method collects all files belonging to that span and merges them.
-func (ht *HistoryRoTx) CompactRange(ctx context.Context, fromTxNum, toTxNum uint64) error {
-	if len(ht.iit.files) == 0 {
-		return nil
-	}
-
-	mergeRange := NewHistoryRanges(
-		*NewMergeRange("", true, fromTxNum, toTxNum),
-		*NewMergeRange("", true, fromTxNum, toTxNum),
-	)
-
-	efFiles, vFiles, err := ht.staticFilesInRange(mergeRange)
-	if err != nil {
-		return err
-	}
-
-	for i := 0; i < len(efFiles); i++ {
-		mergeRange = NewHistoryRanges(
-			*NewMergeRange("", true, vFiles[i].startTxNum, vFiles[i].endTxNum),
-			*NewMergeRange("", true, efFiles[i].startTxNum, efFiles[i].endTxNum),
-		)
-
-		if err := ht.deduplicateFiles(ctx, []*FilesItem{efFiles[i]}, []*FilesItem{vFiles[i]}, mergeRange, background.NewProgressSet()); err != nil {
-			return err
 		}
 	}
 

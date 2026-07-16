@@ -19,12 +19,12 @@ import (
 	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/db/dbservices"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/kvcache"
 	"github.com/erigontech/erigon/db/kv/rawdbv3"
 	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/db/rawdb/rawtemporaldb"
-	"github.com/erigontech/erigon/db/services"
 	"github.com/erigontech/erigon/db/state/execctx"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/commitment/commitmentdb"
@@ -57,7 +57,7 @@ type Generator struct {
 	receiptCacheTrace  bool
 	evmTimeout         time.Duration
 
-	blockReader services.FullBlockReader
+	blockReader dbservices.FullBlockReader
 	txNumReader rawdbv3.TxNumsReader
 	engine      rules.EngineReader
 
@@ -80,7 +80,7 @@ var (
 	receiptsExecConcurrency = dbg.EnvInt("R_EXEC_CONCURRENCY", max(1, runtime.GOMAXPROCS(0)/2))
 )
 
-func NewGenerator(dirs datadir.Dirs, blockReader services.FullBlockReader, engine rules.EngineReader, stateCache kvcache.Cache, evmTimeout time.Duration, filters ...*rpchelper.Filters) *Generator {
+func NewGenerator(dirs datadir.Dirs, blockReader dbservices.FullBlockReader, engine rules.EngineReader, stateCache kvcache.Cache, evmTimeout time.Duration, filters ...*rpchelper.Filters) *Generator {
 	receiptsCache, err := lru.New[common.Hash, types.Receipts](receiptsCacheLimit) //TODO: is handling both of them a good idea though...?
 	if err != nil {
 		panic(err)
@@ -356,7 +356,7 @@ func (g *Generator) GetReceipt(ctx context.Context, cfg *chain.Config, tx kv.Tem
 			}()
 
 			// re-run previous txs of the blocks
-			for txnIndex := 0; txnIndex < index; txnIndex++ {
+			for txnIndex := range index {
 				currTxn := postState.Txns[txnIndex]
 
 				genEnv.ibs.SetTxContext(blockNum, txnIndex)
@@ -632,7 +632,7 @@ func (g *Generator) GetReceipts(ctx context.Context, cfg *chain.Config, tx kv.Te
 	// Hence, we need commitment history to correctly compute the `root` field for pre-Byzantium receipts
 	if dbg.AssertEnabled && (opts.CommitmentHistoryEnabled || cfg.IsByzantium(blockNum)) {
 		computedReceiptsRoot := types.DeriveSha(receipts)
-		blockReceiptsRoot := block.Header().ReceiptHash
+		blockReceiptsRoot := block.ReceiptHash()
 		if computedReceiptsRoot != blockReceiptsRoot {
 			panic(fmt.Sprintf("assert: computedReceiptsRoot=%s, blockReceiptsRoot=%s", computedReceiptsRoot.Hex(), blockReceiptsRoot.Hex()))
 		}

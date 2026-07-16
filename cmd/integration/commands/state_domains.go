@@ -71,7 +71,7 @@ var readDomains = &cobra.Command{
 	Args:      cobra.ArbitraryArgs,
 	Run: func(cmd *cobra.Command, args []string) {
 		logger := debug.SetupCobra(cmd, "integration")
-		ctx, _ := common.RootContext()
+		ctx := cmd.Context()
 		cfg := &nodecfg.DefaultConfig
 		utils.SetNodeConfigCobra(cmd, cfg)
 		ethConfig := &ethconfig.Defaults
@@ -85,7 +85,7 @@ var readDomains = &cobra.Command{
 
 		var readFromDomain string
 		var addrs [][]byte
-		for i := 0; i < len(args); i++ {
+		for i := range args {
 			if i == 0 {
 				switch s := strings.ToLower(args[i]); s {
 				case "account", "storage", "code", "commitment":
@@ -105,7 +105,7 @@ var readDomains = &cobra.Command{
 		}
 
 		dirs := datadir.New(datadirCli)
-		chainDb, err := openDB(dbCfg(dbcfg.ChainDB, dirs.Chaindata), true, chain, logger)
+		chainDb, err := openDB(ctx, dbCfg(dbcfg.ChainDB, dirs.Chaindata), true, chain, logger)
 		if err != nil {
 			logger.Error("Opening DB", "error", err)
 			return

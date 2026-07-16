@@ -489,7 +489,7 @@ func (s *Merge) GetTransferFunc() evmtypes.TransferFunc {
 }
 
 func (s *Merge) GetPostApplyMessageFunc() evmtypes.PostApplyMessageFunc {
-	return misc.LogSelfDestructedAccounts // EIP-7708
+	return s.eth1Engine.GetPostApplyMessageFunc()
 }
 
 func (s *Merge) ValidateBlockPostExecution(chainConfig *chain.Config, header *types.Header,

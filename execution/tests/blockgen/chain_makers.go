@@ -392,14 +392,28 @@ func InitPraguePreDeploys(db kv.TemporalRwDB, config *chain.Config, logger log.L
 	}
 	stateWriter := state.NewWriter(domains.AsPutDel(tx), nil, latestTxNum)
 
-	stateWriter.UpdateAccountData(withdrawalAddr, &accounts.Account{}, &accounts.Account{
+	err = stateWriter.UpdateAccountData(withdrawalAddr, &accounts.Account{}, &accounts.Account{
 		CodeHash: withdrawalRequestCodeHash,
+		Nonce:    1,
 	})
-	stateWriter.UpdateAccountCode(withdrawalAddr, 0, withdrawalRequestCodeHash, withdrawalRequestCode)
-	stateWriter.UpdateAccountData(consolidationAddr, &accounts.Account{}, &accounts.Account{
+	if err != nil {
+		return err
+	}
+	err = stateWriter.UpdateAccountCode(withdrawalAddr, 0, withdrawalRequestCodeHash, withdrawalRequestCode)
+	if err != nil {
+		return err
+	}
+	err = stateWriter.UpdateAccountData(consolidationAddr, &accounts.Account{}, &accounts.Account{
 		CodeHash: consolidationRequestCodeHash,
+		Nonce:    1,
 	})
-	stateWriter.UpdateAccountCode(consolidationAddr, 0, consolidationRequestCodeHash, consolidationRequestCode)
+	if err != nil {
+		return err
+	}
+	err = stateWriter.UpdateAccountCode(consolidationAddr, 0, consolidationRequestCodeHash, consolidationRequestCode)
+	if err != nil {
+		return err
+	}
 
 	return domains.Commit(ctx, tx)
 }
@@ -427,14 +441,28 @@ func InitAmsterdamPreDeploys(db kv.TemporalRwDB, config *chain.Config, logger lo
 	}
 	stateWriter := state.NewWriter(domains.AsPutDel(tx), nil, latestTxNum)
 
-	stateWriter.UpdateAccountData(builderDepositAddr, &accounts.Account{}, &accounts.Account{
+	err = stateWriter.UpdateAccountData(builderDepositAddr, &accounts.Account{}, &accounts.Account{
 		CodeHash: builderDepositRequestCodeHash,
+		Nonce:    1,
 	})
-	stateWriter.UpdateAccountCode(builderDepositAddr, 0, builderDepositRequestCodeHash, builderDepositRequestCode)
-	stateWriter.UpdateAccountData(builderExitAddr, &accounts.Account{}, &accounts.Account{
+	if err != nil {
+		return err
+	}
+	err = stateWriter.UpdateAccountCode(builderDepositAddr, 0, builderDepositRequestCodeHash, builderDepositRequestCode)
+	if err != nil {
+		return err
+	}
+	err = stateWriter.UpdateAccountData(builderExitAddr, &accounts.Account{}, &accounts.Account{
 		CodeHash: builderExitRequestCodeHash,
+		Nonce:    1,
 	})
-	stateWriter.UpdateAccountCode(builderExitAddr, 0, builderExitRequestCodeHash, builderExitRequestCode)
+	if err != nil {
+		return err
+	}
+	err = stateWriter.UpdateAccountCode(builderExitAddr, 0, builderExitRequestCodeHash, builderExitRequestCode)
+	if err != nil {
+		return err
+	}
 
 	return domains.Commit(ctx, tx)
 }
@@ -517,11 +545,10 @@ func GenerateChain(config *chain.Config, parent *types.Block, engine rules.Engin
 		if chainreader.Config().IsShanghai(parent.Time()) {
 			b.withdrawals = []*types.Withdrawal{}
 		}
-		if chainreader.Config().IsAmsterdam(parent.Time()) && !chainreader.Config().IsEIPDisabled(7928) {
+		b.header = makeHeader(chainreader, parent, ibs, b.engine)
+		if chainreader.Config().IsAmsterdam(b.header.Time) && !chainreader.Config().IsEIPDisabled(7928) {
 			b.blockIO = &state.VersionedIO{}
 		}
-
-		b.header = makeHeader(chainreader, parent, ibs, b.engine)
 		// Mutate the state and block according to any hard-fork specs
 		if daoBlock := config.DAOForkBlock; daoBlock != nil {
 			if b.header.Number.Uint64() >= *daoBlock && b.header.Number.Uint64() < *daoBlock+misc.DAOForkExtraRange {
@@ -613,7 +640,6 @@ func GenerateChain(config *chain.Config, parent *types.Block, engine rules.Engin
 			var bal types.BlockAccessList
 			var balBytes []byte
 			if config.IsAmsterdam(b.header.Time) && !config.IsEIPDisabled(7928) {
-				b.blockIO.SetEIP8246(config.IsAmsterdam(b.header.Time) && !config.IsEIPDisabled(8246))
 				bal = b.blockIO.AsBlockAccessList()
 				balHash := bal.Hash()
 				b.header.BlockAccessListHash = &balHash
@@ -637,15 +663,13 @@ func GenerateChain(config *chain.Config, parent *types.Block, engine rules.Engin
 	}
 
 	blockAccessLists := make([][]byte, n)
-	for i := 0; i < n; i++ {
+	for i := range n {
 		ibs := state.New(stateReader)
 		if dbg.TraceBlock(uint64(i)) {
 			ibs.SetTrace(true)
-			domains.SetTrace(true, false)
 		}
 		block, receipt, balBytes, err := genblock(i, parent, ibs, stateReader, stateWriter)
 		ibs.SetTrace(false)
-		domains.SetTrace(false, false)
 		if err != nil {
 			return nil, fmt.Errorf("generating block %d: %w", i, err)
 		}

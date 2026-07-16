@@ -23,6 +23,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/c2h5oh/datasize"
@@ -89,7 +90,7 @@ func generateKV(tb testing.TB, tmp string, keySize, valueSize, keyCount int, log
 	collector := etl.NewCollector(btindex.BtreeLogPrefix+" genCompress", tb.TempDir(), etl.NewSortableBuffer(bufSize), logger)
 	defer collector.Close()
 
-	for i := 0; i < keyCount; i++ {
+	for i := range keyCount {
 		key := make([]byte, keySize)
 		n, err := rnd.Read(key)
 		require.Equal(tb, keySize, n)
@@ -150,6 +151,61 @@ func testDbAndAggregatorv3(tb testing.TB, stepSize uint64) (kv.RwDB, *Aggregator
 	return db, agg
 }
 
+// TestReferencesInCommitmentBranchesConcurrent exercises the lock guarding the runtime-mutable
+// commitment flag against the reload-writes-while-merge-reads race; meaningful under -race.
+func TestReferencesInCommitmentBranchesConcurrent(t *testing.T) {
+	t.Parallel()
+	_, agg := testDbAndAggregatorv3(t, 1)
+
+	const iters = 2000
+	var wg sync.WaitGroup
+	wg.Add(2)
+	go func() {
+		defer wg.Done()
+		for i := range iters {
+			agg.applyReferencesInCommitmentBranches(i%2 == 0)
+		}
+	}()
+	go func() {
+		defer wg.Done()
+		for range iters {
+			_ = agg.referencesInCommitmentBranches()
+		}
+	}()
+	wg.Wait()
+}
+
+// TestFilesAmountConcurrent exercises FilesAmount against concurrent dirtyFiles
+// mutation as done by background file integration; meaningful under -race.
+func TestFilesAmountConcurrent(t *testing.T) {
+	t.Parallel()
+	_, agg := testDbAndAggregatorv3(t, 1)
+
+	d := agg.d[kv.AccountsDomain]
+	const iters = 2000
+	var wg sync.WaitGroup
+	wg.Add(2)
+	go func() {
+		defer wg.Done()
+		for i := range iters {
+			item := &FilesItem{startTxNum: uint64(i), endTxNum: uint64(i + 1)}
+			agg.dirtyFilesLock.Lock()
+			d.dirtyFiles.Set(item)
+			agg.dirtyFilesLock.Unlock()
+			agg.dirtyFilesLock.Lock()
+			d.dirtyFiles.Delete(item)
+			agg.dirtyFilesLock.Unlock()
+		}
+	}()
+	go func() {
+		defer wg.Done()
+		for range iters {
+			_ = agg.FilesAmount()
+		}
+	}()
+	wg.Wait()
+}
+
 // generate test data for table tests, containing n; n < 20 keys of length 20 bytes and values of length <= 16 bytes
 func generateInputData(tb testing.TB, keySize, valueSize, keyCount int) ([][]byte, [][]byte) {
 	tb.Helper()
@@ -159,7 +215,7 @@ func generateInputData(tb testing.TB, keySize, valueSize, keyCount int) ([][]byt
 	keys := make([][]byte, keyCount)
 
 	bk, bv := make([]byte, keySize), make([]byte, valueSize)
-	for i := 0; i < keyCount; i++ {
+	for i := range keyCount {
 		n, err := rnd.Read(bk)
 		require.Equal(tb, keySize, n)
 		require.NoError(tb, err)
@@ -491,34 +547,6 @@ func generateCommitmentHistoryAndIndexFiles(t *testing.T, dirs datadir.Dirs, ran
 	populateFiles2(t, dirs, idxRepo, ranges)
 }
 
-// TestAggregator_CommittedTxNumGuard verifies the stepFullyCommitted predicate
-// used by buildFilesInBackground: a step S should only be collated when
-// committedTxNum+1 >= firstTxNum(S+1), meaning all txNums in step S have been
-// committed to the DB. ComputeCommitment writes the last txNum of the block
-// (e.g. firstTxNum(S+1)-1 when the step boundary aligns with a block), so
-// the +1 avoids an off-by-one that would delay collation unnecessarily.
-func TestAggregator_CommittedTxNumGuard(t *testing.T) {
-	t.Parallel()
-	stepSize := uint64(100)
-
-	// Step 5 covers txNums [500, 600). firstTxNum(6) = 600.
-	assert.False(t, stepFullyCommitted(550, 5, stepSize),
-		"guard should block: committed txNum is mid-step")
-	assert.True(t, stepFullyCommitted(0, 5, stepSize),
-		"guard should be bypassed when committedTxNum is 0 (no commitment)")
-	assert.False(t, stepFullyCommitted(598, 5, stepSize),
-		"guard should block: committed txNum is 1 before last txNum of step")
-
-	// committedTxNum = 599 = lastTxNumOfStep(5) = firstTxNum(6)-1
-	// This is the value ComputeCommitment writes at the step boundary.
-	assert.True(t, stepFullyCommitted(599, 5, stepSize),
-		"guard should allow: committed txNum is last txNum of the step")
-	assert.True(t, stepFullyCommitted(600, 5, stepSize),
-		"guard should allow: committed txNum is past the step")
-	assert.True(t, stepFullyCommitted(1000, 5, stepSize),
-		"guard should allow: committed txNum is well past the step")
-}
-
 // TestAggregator_BuildFiles_GapRefuses verifies that buildFilesInBackground
 // refuses to aggregate when MDBX's earliest history entry lies strictly above
 // the next step to build AND snapshot files already cover the earlier range.
@@ -600,7 +628,7 @@ func TestAggregator_CommitmentHistoryOnlyMerge(t *testing.T) {
 	// v2.0-storage.0-0.kv was not found".
 	stepSize := uint64(10)
 	_, agg := testDbAndAggregatorv3(t, stepSize)
-	agg.ForTestReplaceKeysInValues(kv.CommitmentDomain, true)
+	agg.ForTestReferencesInCommitmentBranches(kv.CommitmentDomain, true)
 	dirs := agg.Dirs()
 
 	// Accounts/storage/code: all files merged {0,2}, no further merge needed.
@@ -631,6 +659,113 @@ func TestAggregator_CommitmentHistoryOnlyMerge(t *testing.T) {
 		assert.NotContains(t, err.Error(), "failed to create commitment value transformer",
 			"transformer must not be called when values.needMerge=false")
 	}
+}
+
+// TestCommitmentMergeInputsReferenced covers the resolved-inputs predicate that gates merge
+// transformer creation. With the write flag off, this predicate alone decides whether the merge
+// expands referenced inputs (creating the transformer) or takes the plain fast path (no transformer).
+func TestCommitmentMergeInputsReferenced(t *testing.T) {
+	t.Parallel()
+	const stepSize = uint64(10)
+	fi := func(fromStep, toStep uint64, v version.Version) *FilesItem {
+		return &FilesItem{startTxNum: fromStep * stepSize, endTxNum: toStep * stepSize, version: v}
+	}
+	cases := []struct {
+		name   string
+		inputs []*FilesItem
+		want   bool
+	}{
+		{"v2.0 at threshold is referenced", []*FilesItem{fi(0, 2, version.V2_0)}, true},
+		{"v1.0 at threshold is referenced", []*FilesItem{fi(0, 2, version.V1_0)}, true},
+		{"v2.1 at threshold is referenced", []*FilesItem{fi(0, 2, version.V2_1)}, true},
+		{"v2.0 below threshold is plain", []*FilesItem{fi(0, 1, version.V2_0)}, false},
+		{"v2.2 is plain", []*FilesItem{fi(0, 2, version.V2_2)}, false},
+		{"empty inputs", nil, false},
+		{"nil entries skipped", []*FilesItem{nil}, false},
+		{"any referenced input wins", []*FilesItem{fi(0, 2, version.V2_1), fi(2, 4, version.V2_0)}, true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			require.Equal(t, tc.want, commitmentMergeInputsReferenced(tc.inputs, stepSize))
+		})
+	}
+}
+
+// TestCommitmentMergeNeedsTransform covers the barrier gate: the commitment merge blocks on the
+// account/storage merges only when it needs the merged files — to expand referenced inputs or to
+// re-shorten the output. Plain inputs merged without re-shortening (flag off, or flag on below
+// threshold) need neither and must not block.
+func TestCommitmentMergeNeedsTransform(t *testing.T) {
+	t.Parallel()
+	const stepSize = uint64(10)
+	in := func(v version.Version) []*FilesItem {
+		return []*FilesItem{{startTxNum: 0, endTxNum: 2 * stepSize, version: v}}
+	}
+	const fromAbove, toAbove = uint64(0), uint64(20) // 2 steps -> threshold reached
+	const fromBelow, toBelow = uint64(0), uint64(10) // 1 step  -> below threshold
+	cases := []struct {
+		name        string
+		inputs      []*FilesItem
+		refsEnabled bool
+		from, to    uint64
+		want        bool
+	}{
+		{"plain inputs, flag off -> no transform, no block", in(version.V2_2), false, fromAbove, toAbove, false},
+		{"plain inputs, flag on, below threshold -> no transform, no block", in(version.V2_2), true, fromBelow, toBelow, false},
+		{"plain inputs, flag on, at threshold -> reshorten, block", in(version.V2_2), true, fromAbove, toAbove, true},
+		{"referenced input, flag off -> expand, block", in(version.V2_0), false, fromAbove, toAbove, true},
+		{"referenced input, flag on -> block", in(version.V2_0), true, fromAbove, toAbove, true},
+		{"no inputs -> no transform", nil, true, fromBelow, toBelow, false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			require.Equal(t, tc.want, commitmentMergeNeedsTransform(tc.inputs, tc.refsEnabled, stepSize, tc.from, tc.to))
+		})
+	}
+}
+
+// TestCommitmentVisibleFilesReferenced covers the planning-time over-approximation that gates the
+// range-alignment hold. It reads each file's version through the visible-files layer and must
+// report referencing independently of the live write flag (set off here on purpose).
+func TestCommitmentVisibleFilesReferenced(t *testing.T) {
+	check := func(t *testing.T, ver version.Version, want bool) {
+		t.Helper()
+		stepSize := uint64(10)
+		_, agg := testDbAndAggregatorv3(t, stepSize)
+		agg.ForTestReferencesInCommitmentBranches(kv.CommitmentDomain, false)
+		dirs := agg.Dirs()
+		ranges := []testFileRange{{0, 2}}
+		generateAccountsFile(t, dirs, ranges)
+		generateStorageFile(t, dirs, ranges)
+		generateCodeFile(t, dirs, ranges)
+		generateCommitmentFile(t, dirs, ranges)
+		require.NoError(t, agg.OpenFolder())
+
+		// Drive the verdict by version+range: set the version directly on the dirty FilesItem
+		// (visibleFile.Version reads it live through src), independent of the generated file name.
+		var found int
+		agg.d[kv.CommitmentDomain].dirtyFiles.Scan(func(it *FilesItem) bool {
+			it.version = ver
+			found++
+			return true
+		})
+		require.Positive(t, found, "setup must produce a dirty commitment file")
+
+		aggTx := agg.BeginFilesRo()
+		got := aggTx.commitmentVisibleFilesReferenced()
+		aggTx.Close()
+		require.Equal(t, want, got)
+	}
+
+	t.Run("v2.0 at-threshold file reports referencing with flag off", func(t *testing.T) {
+		check(t, version.V2_0, true)
+	})
+	t.Run("v2.1 at-threshold file reports referencing with flag off", func(t *testing.T) {
+		check(t, version.V2_1, true)
+	})
+	t.Run("v2.2 file does not report referencing", func(t *testing.T) {
+		check(t, version.V2_2, false)
+	})
 }
 
 func setupAggSnapRepo(t *testing.T, dirs datadir.Dirs, genRepo func(stepSize uint64, dirs datadir.Dirs) (name string, schema SnapNameSchema)) *SnapshotRepo {

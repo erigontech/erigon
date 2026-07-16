@@ -185,7 +185,7 @@ func (s *notificationTestService) SomeSubscription(ctx context.Context, n, val i
 	// events might be send before the response for the *_subscribe method.
 	subscription := notifier.CreateSubscription()
 	go func() {
-		for i := 0; i < n; i++ {
+		for i := range n {
 			if err := notifier.Notify(subscription.ID, val+i); err != nil {
 				return
 			}

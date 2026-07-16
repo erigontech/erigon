@@ -20,12 +20,14 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"math/bits"
 	"runtime"
 	"sync"
 	"sync/atomic"
 
 	"golang.org/x/sync/errgroup"
+	"golang.org/x/sync/semaphore"
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/db/kv"
@@ -101,10 +103,10 @@ type StreamingCommitter struct {
 	rootPresent bool
 	rootValid   bool
 
-	trace bool
+	traceW io.Writer
 }
 
-func (sc *StreamingCommitter) SetTrace(b bool) { sc.trace = b }
+func (sc *StreamingCommitter) SetTraceWriter(w io.Writer) { sc.traceW = NewSyncWriter(w) }
 
 // NewStreamingCommitter constructs a StreamingCommitter ready to accept touches.
 func NewStreamingCommitter(ctxFactory TrieContextFactory, accountKeyLen int16, cfg TrieConfig) *StreamingCommitter {
@@ -325,7 +327,7 @@ func (sc *StreamingCommitter) newBaseTrie() (*HexPatriciaHashed, func()) {
 	base := NewHexPatriciaHashed(sc.accountKeyLen, nil, sc.cfg)
 	bctx, bclean := sc.trieCtxFactory()
 	base.ResetContext(bctx)
-	base.SetTrace(sc.trace)
+	base.SetTraceWriter(sc.traceW)
 	base.branchEncoder.setDeferUpdates(true)
 	base.SetLeaveDeferredForCaller(true)
 	return base, func() {
@@ -365,6 +367,7 @@ func (sc *StreamingCommitter) buildBase(ctx context.Context) (*HexPatriciaHashed
 			return nil, nil, fmt.Errorf("StreamingCommitter: unfold root: %w", err)
 		}
 	}
+	seedRootBase(base)
 	return base, cleanup, nil
 }
 
@@ -521,7 +524,11 @@ func (sc *StreamingCommitter) markQueued(s *splitState, nib byte) {
 func (sc *StreamingCommitter) foldKeys(nib byte, keys []touchedKey) (cell, []*DeferredBranchUpdate, bool, error) {
 	w := sc.workerPool.Get().(*HexPatriciaHashed)
 	w.mountTo(sc.base, int(nib))
-	w.SetTrace(sc.trace)
+	if sc.traceW != nil {
+		w.SetTraceWriter(tracePrefix(sc.traceW, fmt.Sprintf("[fold %x] ", nib)))
+	} else {
+		w.SetTraceWriter(nil)
+	}
 	rctx, cleanup := sc.trieCtxFactory()
 	if cleanup != nil {
 		defer cleanup()
@@ -617,8 +624,9 @@ func (o *overlayContext) Storage(plainKey []byte) (*Update, error) { return o.ba
 // base, recording which slots were folded; it never applies or merges.
 func (sc *StreamingCommitter) foldPresentSplits(ctx context.Context, base *HexPatriciaHashed, root *prefixNode) ([16]bool, error) {
 	var present [16]bool
+	foldSem := newFoldSem()
 	g, gctx := errgroup.WithContext(ctx)
-	g.SetLimit(sc.numWorkers)
+	g.SetLimit(min(sc.numWorkers, maxFoldConcurrency()))
 
 	childIdx := 0
 	for bm := root.bitmap; bm != 0; {
@@ -640,7 +648,7 @@ func (sc *StreamingCommitter) foldPresentSplits(ctx context.Context, base *HexPa
 			continue
 		}
 		ch := child
-		g.Go(func() error { return sc.foldSplit(gctx, base, s, ch) })
+		g.Go(func() error { return sc.foldSplit(gctx, foldSem, base, s, ch) })
 		childIdx++
 		bm &^= uint16(1) << nib
 	}
@@ -670,21 +678,14 @@ func (sc *StreamingCommitter) foldDirtySplits(ctx context.Context) error {
 	return err
 }
 
-// stitchSplitCells drops each folded split cell into the base row at its
-// top-nibble slot, stripping the leading extension nibble of a hash-only
-// sub-branch (the slot implies it) while leaving a leaf's key tail intact.
+// stitchSplitCells drops each folded split cell into the base row at its top-nibble slot;
+// foldMounted already returns cells excluding the mount nibble, so they are stitched verbatim.
 func stitchSplitCells(base *HexPatriciaHashed, cells *[16]cell, present *[16]bool) {
 	for nib := range 16 {
 		if !present[nib] {
 			continue
 		}
 		c := cells[nib]
-		if c.extLen > 0 && c.accountAddrLen == 0 && c.storageAddrLen == 0 {
-			c.extLen--
-			copy(c.extension[:], c.extension[1:])
-			c.hashedExtLen -= 2
-			copy(c.hashedExtension[:], c.hashedExtension[2:])
-		}
 		base.touchMap[0] |= uint16(1) << nib
 		if !c.IsEmpty() {
 			base.afterMap[0] |= uint16(1) << nib
@@ -699,11 +700,15 @@ func stitchSplitCells(base *HexPatriciaHashed, cells *[16]cell, present *[16]boo
 // foldSplit re-folds one top-nibble subtree on a worker mounted at the unfolded
 // base, to the split cell rather than the root, replacing the split's cell and
 // deferred set.
-func (sc *StreamingCommitter) foldSplit(ctx context.Context, base *HexPatriciaHashed, s *splitState, child *prefixNode) error {
+func (sc *StreamingCommitter) foldSplit(ctx context.Context, foldSem *semaphore.Weighted, base *HexPatriciaHashed, s *splitState, child *prefixNode) error {
 	ni := s.prefix[0]
 	w := sc.workerPool.Get().(*HexPatriciaHashed)
 	w.mountTo(base, int(ni))
-	w.SetTrace(sc.trace)
+	if sc.traceW != nil {
+		w.SetTraceWriter(tracePrefix(sc.traceW, fmt.Sprintf("[split %x] ", ni)))
+	} else {
+		w.SetTraceWriter(nil)
+	}
 	wctx, cleanup := sc.trieCtxFactory()
 	if cleanup != nil {
 		defer cleanup()
@@ -716,8 +721,8 @@ func (sc *StreamingCommitter) foldSplit(ctx context.Context, base *HexPatriciaHa
 	path := make([]byte, 0, 144)
 	path = append(path, ni)
 	path = append(path, child.ext...)
-	deepStorageRoot := func(n *prefixNode, pth []byte) (common.Hash, error) {
-		sr, err := foldStorageRoot(ctx, sc.numWorkers, sc.newStorageWorker, &pu, n, pth)
+	deepStorageRoot := func(n *prefixNode, pth []byte, accountFresh bool) (cell, error) {
+		sr, err := foldStorageRoot(ctx, foldSem, sc.newStorageWorker, &pu, n, pth, accountFresh)
 		if err == nil {
 			sc.deepLocalFolds.Add(1)
 		}
@@ -765,7 +770,7 @@ func (sc *StreamingCommitter) DeepLocalFolds() uint64 { return sc.deepLocalFolds
 // newStorageWorker sources a concurrent-storage-fold worker; disjoint subtree
 // prefixes keep a mid-fold self-flush from racing another fold's writes.
 func (sc *StreamingCommitter) newStorageWorker() (*HexPatriciaHashed, func()) {
-	return newDeferredStorageWorker(&sc.workerPool, sc.trieCtxFactory, sc.trace)
+	return newDeferredStorageWorker(&sc.workerPool, sc.trieCtxFactory, sc.traceW)
 }
 
 // dropSplitDeferred returns every split's staged deferred branch updates to the pool.
@@ -830,9 +835,7 @@ func applyDeferredGuarded(ctx PatriciaContext, deferred []*DeferredBranchUpdate,
 		return err
 	}
 
-	encoder := workerEncoderPool.Get().(*BranchEncoder)
 	merger := workerMergerPool.Get().(*BranchMerger)
-	defer workerEncoderPool.Put(encoder)
 	defer workerMergerPool.Put(merger)
 
 	applied := make(map[string][]byte, len(deferred))
@@ -850,7 +853,7 @@ func applyDeferredGuarded(ctx PatriciaContext, deferred []*DeferredBranchUpdate,
 			}
 			upd.prev = common.Copy(prev)
 		}
-		if err := encodeDeferredUpdate(upd, encoder, merger); err != nil {
+		if err := mergeDeferredUpdate(upd, merger); err != nil {
 			return err
 		}
 		if upd.encoded == nil {

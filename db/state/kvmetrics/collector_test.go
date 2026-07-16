@@ -19,12 +19,12 @@ func TestCollectorConcurrentSendAndDrain(t *testing.T) {
 	const producers = 8
 	const perProducer = 500
 	var pwg sync.WaitGroup
-	for p := 0; p < producers; p++ {
+	for p := range producers {
 		pwg.Add(1)
 		go func(p int) {
 			defer pwg.Done()
 			src := Source(p % int(sourceCount))
-			for i := 0; i < perProducer; i++ {
+			for range perProducer {
 				m := NewDomainMetrics()
 				m.UpdateCacheReads(kv.AccountsDomain, time.Now())
 				m.UpdateDbReads(kv.StorageDomain, time.Now())
@@ -37,7 +37,7 @@ func TestCollectorConcurrentSendAndDrain(t *testing.T) {
 	swg.Add(1)
 	go func() {
 		defer swg.Done()
-		for i := 0; i < 50; i++ {
+		for range 50 {
 			_ = c.Snapshot()
 		}
 	}()
@@ -63,7 +63,7 @@ func TestCollectorTrySendNeverBlocks(t *testing.T) {
 	var falses int64
 	done := make(chan struct{})
 	go func() {
-		for i := 0; i < collectorBufferSize*3; i++ {
+		for range collectorBufferSize * 3 {
 			if !c.TrySend(SourceExec, NewDomainMetrics()) {
 				falses++
 			}
@@ -90,7 +90,7 @@ func TestCollectorFoldsBySource(t *testing.T) {
 
 	const n = 1000
 	want := int64(n)
-	for i := 0; i < n; i++ {
+	for range n {
 		m := NewDomainMetrics()
 		m.UpdateCacheReads(kv.AccountsDomain, time.Now())
 		c.Send(SourceExec, m)

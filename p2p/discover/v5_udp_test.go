@@ -49,7 +49,7 @@ func TestUDPv5_lookupE2E(t *testing.T) {
 
 	const N = 5
 	var nodes []*UDPv5
-	for i := 0; i < N; i++ {
+	for range N {
 		var cfg Config
 		if len(nodes) > 0 {
 			bn := nodes[0].Self()
@@ -898,7 +898,7 @@ type testCodecFrame struct {
 	Packet  rlp.RawValue
 }
 
-func (c *testCodec) Encode(toID enode.ID, addr string, p v5wire.Packet, _ *v5wire.Whoareyou) ([]byte, v5wire.Nonce, error) {
+func (c *testCodec) Encode(toID enode.ID, addr netip.AddrPort, p v5wire.Packet, _ *v5wire.Whoareyou) ([]byte, v5wire.Nonce, error) {
 
 	if wp, ok := p.(*v5wire.Whoareyou); ok && len(wp.ChallengeData) > 0 {
 		// To match the behavior of v5wire.Codec, we return the cached encoding of
@@ -927,11 +927,11 @@ func (c *testCodec) Encode(toID enode.ID, addr string, p v5wire.Packet, _ *v5wir
 	return frame, authTag, err
 }
 
-func (c *testCodec) CurrentChallenge(id enode.ID, addr string) *v5wire.Whoareyou {
+func (c *testCodec) CurrentChallenge(id enode.ID, addr netip.AddrPort) *v5wire.Whoareyou {
 	return c.sentChallenges[id]
 }
 
-func (c *testCodec) Decode(input []byte, addr string) (enode.ID, *enode.Node, v5wire.Packet, error) {
+func (c *testCodec) Decode(input []byte, addr netip.AddrPort) (enode.ID, *enode.Node, v5wire.Packet, error) {
 	frame, p, err := c.decodeFrame(input)
 	if err != nil {
 		return enode.ID{}, nil, nil, err
@@ -939,7 +939,7 @@ func (c *testCodec) Decode(input []byte, addr string) (enode.ID, *enode.Node, v5
 	return frame.NodeID, nil, p, nil
 }
 
-func (c *testCodec) SessionNode(id enode.ID, addr string) *enode.Node {
+func (c *testCodec) SessionNode(id enode.ID, addr netip.AddrPort) *enode.Node {
 	return c.test.nodesByID[id].Node()
 }
 
@@ -1003,7 +1003,7 @@ func (test *udpV5Test) packetInFrom(key *ecdsa.PrivateKey, addr netip.AddrPort, 
 
 	ln := test.getNode(key, addr)
 	codec := &testCodec{test: test, id: ln.ID()}
-	enc, _, err := codec.Encode(test.udp.Self().ID(), addr.String(), packet, nil)
+	enc, _, err := codec.Encode(test.udp.Self().ID(), addr, packet, nil)
 	if err != nil {
 		test.t.Errorf("%s encode error: %v", packet.Name(), err)
 	}

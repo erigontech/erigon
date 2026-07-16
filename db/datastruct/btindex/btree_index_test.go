@@ -31,6 +31,7 @@ import (
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/background"
 	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/db/bufiopool"
 	"github.com/erigontech/erigon/db/recsplit/eliasfano32"
 	"github.com/erigontech/erigon/db/seg"
 	"github.com/erigontech/erigon/db/state/statecfg"
@@ -112,14 +113,14 @@ func Test_BtreeIndex_Seek(t *testing.T) {
 
 	c, err := bt.Seek(getter, nil)
 	require.NoError(t, err)
-	for i := 0; i < len(keys); i++ {
+	for i := range keys {
 		k := c.Key()
 		require.Equal(t, keys[i], k)
 		c.Next()
 	}
 	c.Close()
 
-	for i := 0; i < len(keys); i++ {
+	for i := range keys {
 		cur, err := bt.Seek(getter, keys[i])
 		require.NoErrorf(t, err, "i=%d", i)
 		require.Equalf(t, keys[i], cur.key, "i=%d", i)
@@ -172,7 +173,7 @@ func Test_BtreeIndex_Build(t *testing.T) {
 	c, err := bt.Seek(getter, nil)
 	require.NoError(t, err)
 	require.NotNil(t, c)
-	for i := 0; i < len(keys); i++ {
+	for i := range keys {
 		k := c.Key()
 		if !bytes.Equal(keys[i], k) {
 			fmt.Printf("\tinvalid, want %x\n", keys[i])
@@ -181,7 +182,7 @@ func Test_BtreeIndex_Build(t *testing.T) {
 	}
 	c.Close()
 
-	for i := 0; i < 10000; i++ {
+	for i := range 10000 {
 		c, err := bt.Seek(getter, keys[i])
 		require.NoError(t, err)
 		require.Equal(t, keys[i], c.Key())
@@ -205,8 +206,8 @@ func writeV0Index(tb testing.TB, dataPath, indexPath string, compressed seg.File
 	f, err := os.Create(indexPath)
 	require.NoError(tb, err)
 	defer f.Close()
-	w := getBufioWriter(f)
-	defer putBufioWriter(w)
+	w := bufiopool.Writer(f)
+	defer bufiopool.PutWriter(w)
 
 	if count > 0 {
 		ef := eliasfano32.NewEliasFano(count, uint64(r.Size()))

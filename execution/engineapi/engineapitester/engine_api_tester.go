@@ -24,6 +24,7 @@ import (
 	"math/big"
 	"net"
 	"path"
+	"slices"
 	"sync"
 	"testing"
 	"time"
@@ -132,10 +133,8 @@ func DefaultEngineApiTesterGenesis() (*types.Genesis, *ecdsa.PrivateKey, error) 
 				Balance: new(big.Int),
 			},
 			chainConfig.GetBuilderDepositContract().Value(): {
-				Code: misc.BuilderDepositRequestCode,
-				Storage: map[common.Hash]common.Hash{
-					common.Hash{}: common.HexToHash("0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"),
-				},
+				Code:    misc.BuilderDepositRequestCode,
+				Storage: make(map[common.Hash]common.Hash),
 				Balance: new(big.Int),
 				Nonce:   1,
 			},
@@ -181,8 +180,8 @@ type cleanupHandle struct {
 func (h *cleanupHandle) close() error {
 	h.once.Do(func() {
 		var errs []error
-		for i := len(h.cleanups) - 1; i >= 0; i-- {
-			err := h.cleanups[i]()
+		for _, cleanup := range slices.Backward(h.cleanups) {
+			err := cleanup()
 			if err != nil {
 				errs = append(errs, err)
 			}
@@ -252,6 +251,7 @@ func InitialiseEngineApiTester(ctx context.Context, args EngineApiTesterInitArgs
 		Enabled:                  true,
 		HttpServerEnabled:        true,
 		WebsocketEnabled:         true,
+		HttpCompression:          true,
 		HttpListenAddress:        "127.0.0.1",
 		HttpPort:                 jsonRpcPort,
 		HttpListener:             jsonRpcListener,
@@ -295,6 +295,10 @@ func InitialiseEngineApiTester(ctx context.Context, args EngineApiTesterInitArgs
 	txPoolConfig := txpoolcfg.DefaultConfig
 	txPoolConfig.DBDir = dirs.TxPool
 	txPoolConfig.Disable = args.DisableTxPool
+	// Without a limit the txpool DB reserves 1TB of VA, which cannot fit below
+	// the Go race-mode heap window on darwin and starves arena reservation
+	// ("too many address space collisions for -race mode").
+	txPoolConfig.MdbxDBSizeLimit = mdbxDBSizeLimit
 	syncDefault := ethconfig.Defaults.Sync
 	syncDefault.ParallelStateFlushing = false
 	ethConfig := ethconfig.Config{

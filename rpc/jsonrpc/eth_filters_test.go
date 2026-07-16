@@ -18,6 +18,7 @@ package jsonrpc
 
 import (
 	"math/rand"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -41,7 +42,37 @@ import (
 )
 
 func newBaseApiWithFiltersForTest(f *rpchelper.Filters, stateCache *kvcache.Coherent, m *execmoduletester.ExecModuleTester) *BaseAPI {
-	return NewBaseApi(f, stateCache, m.BlockReader, false, rpccfg.DefaultEvmCallTimeout, m.Engine, m.Dirs, nil, 0, 0)
+	return NewBaseApi(f, stateCache, m.BlockReader, false, rpccfg.DefaultEvmCallTimeout, m.Engine, m.Dirs, nil, 0, 0, 0)
+}
+
+func TestSubscriptionsRequireFiltersAndNotifier(t *testing.T) {
+	m := execmoduletester.New(t)
+	ctx, conn := rpcdaemontest.CreateTestGrpcConn(t, m)
+	mining := txpoolproto.NewMiningClient(conn)
+	ff := rpchelper.New(ctx, rpchelper.DefaultFiltersConfig, nil, nil, mining, func() {}, m.Log, nil)
+	stateCache := kvcache.New(kvcache.DefaultCoherentConfig)
+
+	apis := map[string]*APIImpl{
+		"withFilters": newEthApiForTest(newBaseApiWithFiltersForTest(ff, stateCache, m), m.DB, nil, nil),
+		"nilFilters":  newEthApiForTest(newBaseApiForTest(m), m.DB, nil, nil),
+	}
+	for apiName, api := range apis {
+		// ctx carries no rpc notifier, so every subscription method must refuse
+		subscriptions := map[string]func() (*rpc.Subscription, error){
+			"newHeads":                       func() (*rpc.Subscription, error) { return api.NewHeads(ctx) },
+			"newPendingTransactions":         func() (*rpc.Subscription, error) { return api.NewPendingTransactions(ctx, nil) },
+			"newPendingTransactionsWithBody": func() (*rpc.Subscription, error) { return api.NewPendingTransactionsWithBody(ctx) },
+			"logs":                           func() (*rpc.Subscription, error) { return api.Logs(ctx, filters.FilterCriteria{}) },
+			"transactionReceipts": func() (*rpc.Subscription, error) {
+				return api.TransactionReceipts(ctx, filters.ReceiptsFilterCriteria{})
+			},
+		}
+		for name, subscribe := range subscriptions {
+			sub, err := subscribe()
+			require.ErrorIs(t, err, rpc.ErrNotificationsUnsupported, "%s/%s", apiName, name)
+			require.Equal(t, &rpc.Subscription{}, sub, "%s/%s", apiName, name)
+		}
+	}
 }
 
 func TestNewFilters(t *testing.T) {
@@ -86,7 +117,7 @@ func TestLogsSubscribeAndUnsubscribe_WithoutConcurrentMapIssue(t *testing.T) {
 
 	// generate some random topics
 	topics := make([][]common.Hash, 0)
-	for i := 0; i < 10; i++ {
+	for range 10 {
 		bytes := make([]byte, length.Hash)
 		rand.Read(bytes)
 		toAdd := []common.Hash{common.BytesToHash(bytes)}
@@ -95,7 +126,7 @@ func TestLogsSubscribeAndUnsubscribe_WithoutConcurrentMapIssue(t *testing.T) {
 
 	// generate some addresses
 	addresses := make([]common.Address, 0)
-	for i := 0; i < 10; i++ {
+	for range 10 {
 		bytes := make([]byte, length.Addr)
 		rand.Read(bytes)
 		addresses = append(addresses, common.BytesToAddress(bytes))
@@ -110,10 +141,10 @@ func TestLogsSubscribeAndUnsubscribe_WithoutConcurrentMapIssue(t *testing.T) {
 
 	// make a lot of subscriptions
 	wg := sync.WaitGroup{}
-	for i := 0; i < 1000; i++ {
+	for i := range 1000 {
 		wg.Add(1)
 		go func(idx int) {
-			_, id := ff.SubscribeLogs(32, crit)
+			_, id, _ := ff.SubscribeLogs(32, crit, "")
 			defer func() {
 				time.Sleep(100 * time.Nanosecond)
 				ff.UnsubscribeLogs(id)
@@ -211,6 +242,38 @@ func TestNewPendingTransactionIncludesFrom(t *testing.T) {
 
 	rpcTx := newRPCPendingTransaction(tx, nil, nil)
 	require.Equal(t, m.Address, rpcTx.From)
+}
+
+func TestPendingTxsFilterChangesReturnsAllBatches(t *testing.T) {
+	m := execmoduletester.New(t)
+	ctx, conn := rpcdaemontest.CreateTestGrpcConn(t, m)
+	mining := txpoolproto.NewMiningClient(conn)
+	ff := rpchelper.New(ctx, rpchelper.DefaultFiltersConfig, nil, nil, mining, func() {}, m.Log, nil)
+	stateCache := kvcache.New(kvcache.DefaultCoherentConfig)
+	api := newEthApiForTest(newBaseApiWithFiltersForTest(ff, stateCache, m), m.DB, nil, nil)
+
+	ptf, err := api.NewPendingTransactionFilter(ctx)
+	require.NoError(t, err)
+	id := rpchelper.PendingTxsSubID(strings.TrimPrefix(ptf, "0x"))
+
+	signer := types.LatestSignerForChainID(m.ChainConfig.ChainID)
+	makeTx := func(nonce uint64) types.Transaction {
+		tx, err := types.SignTx(
+			types.NewTransaction(nonce, m.Address, uint256.NewInt(1), params.TxGas, uint256.NewInt(1), nil),
+			*signer,
+			m.Key,
+		)
+		require.NoError(t, err)
+		return tx
+	}
+	tx0, tx1, tx2 := makeTx(0), makeTx(1), makeTx(2)
+
+	ff.AddPendingTxs(id, []types.Transaction{tx0, tx1})
+	ff.AddPendingTxs(id, []types.Transaction{tx2})
+
+	changes, err := api.GetFilterChanges(ctx, ptf)
+	require.NoError(t, err)
+	require.Equal(t, []any{tx0.Hash(), tx1.Hash(), tx2.Hash()}, changes)
 }
 
 func TestGetFilterChangesReturnsFilterNotFoundForUnknownID(t *testing.T) {
