@@ -20,6 +20,7 @@ import (
 	"context"
 	"fmt"
 	"reflect"
+	"slices"
 	"sync"
 )
 
@@ -181,14 +182,7 @@ WAIT:
 		mux.pending = nil
 		var active []reflect.SelectCase
 		for _, a := range mux.active {
-			var remove bool
-			for _, r := range mux.pendingRemove {
-				if a.Chan == r {
-					remove = true
-					break
-				}
-			}
-
+			remove := slices.Contains(mux.pendingRemove, a.Chan)
 			if !remove {
 				active = append(active, a)
 			} else {
