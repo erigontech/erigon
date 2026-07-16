@@ -17,6 +17,7 @@
 package main
 
 import (
+	"cmp"
 	"context"
 	"encoding/json"
 	"errors"
@@ -25,7 +26,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"runtime/pprof"
-	"sort"
+	"slices"
 	"strings"
 	"sync"
 
@@ -206,7 +207,7 @@ func engineXTestCmd(ctx context.Context, cliCtx *cli.Command) error {
 		results = append(results, r)
 	}
 
-	sort.Slice(results, func(i, j int) bool { return results[i].Name < results[j].Name })
+	slices.SortFunc(results, func(a, b testResult) int { return cmp.Compare(a.Name, b.Name) })
 
 	report(cliCtx, results)
 	if timeIt {
@@ -224,8 +225,8 @@ func printTimings(results []testResult) {
 			timed = append(timed, r)
 		}
 	}
-	sort.Slice(timed, func(i, j int) bool {
-		return timed[i].Stats.Time > timed[j].Stats.Time
+	slices.SortFunc(timed, func(a, b testResult) int {
+		return cmp.Compare(b.Stats.Time, a.Stats.Time)
 	})
 	fmt.Fprintln(os.Stderr)
 	fmt.Fprintln(os.Stderr, "=== test timings (descending) ===")

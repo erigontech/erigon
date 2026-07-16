@@ -22,7 +22,7 @@ import (
 	"errors"
 	"fmt"
 	"math"
-	"sort"
+	"slices"
 	"time"
 
 	"github.com/erigontech/erigon/cl/cltypes"
@@ -684,9 +684,7 @@ func (b *CachingBeaconState) GetIndexedPayloadAttestation(payloadAttestation *cl
 			indices = append(indices, index)
 		}
 	}
-	sort.SliceStable(indices, func(i, j int) bool {
-		return indices[i] < indices[j]
-	})
+	slices.Sort(indices)
 
 	return &cltypes.IndexedPayloadAttestation{
 		AttestingIndices: solid.NewRawUint64List(len(indices), indices),

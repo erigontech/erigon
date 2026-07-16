@@ -17,11 +17,12 @@
 package kv
 
 import (
+	"cmp"
 	"context"
 	"encoding/binary"
 	"errors"
 	"maps"
-	"sort"
+	"slices"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -342,8 +343,8 @@ func (d *DomainDiff) GetDiffSet() (keysToValue []DomainEntryDiff) {
 		d.prevValsSlice[i].Value = v
 		i++
 	}
-	sort.Slice(d.prevValsSlice, func(i, j int) bool {
-		return d.prevValsSlice[i].Key < d.prevValsSlice[j].Key
+	slices.SortFunc(d.prevValsSlice, func(a, b DomainEntryDiff) int {
+		return cmp.Compare(a.Key, b.Key)
 	})
 	return d.prevValsSlice
 }

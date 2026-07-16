@@ -24,7 +24,7 @@ import (
 	"io"
 	"mime"
 	"net/http"
-	"sort"
+	"slices"
 	"strconv"
 
 	"github.com/erigontech/erigon/cl/beacon/beaconhttp"
@@ -404,22 +404,31 @@ func aggregatePayloadAttestationMessages(
 		})
 	}
 
-	sort.Slice(candidates, func(i, j int) bool {
-		if candidates[i].weight != candidates[j].weight {
-			return candidates[i].weight > candidates[j].weight
+	slices.SortFunc(candidates, func(a, b candidate) int {
+		less := func(x, y candidate) bool {
+			if x.weight != y.weight {
+				return x.weight > y.weight
+			}
+			left := x.attestation.Data
+			right := y.attestation.Data
+			if left.Slot != right.Slot {
+				return left.Slot < right.Slot
+			}
+			if cmp := bytes.Compare(left.BeaconBlockRoot[:], right.BeaconBlockRoot[:]); cmp != 0 {
+				return cmp < 0
+			}
+			if left.PayloadPresent != right.PayloadPresent {
+				return left.PayloadPresent
+			}
+			return left.BlobDataAvailable && !right.BlobDataAvailable
 		}
-		left := candidates[i].attestation.Data
-		right := candidates[j].attestation.Data
-		if left.Slot != right.Slot {
-			return left.Slot < right.Slot
+		if less(a, b) {
+			return -1
 		}
-		if cmp := bytes.Compare(left.BeaconBlockRoot[:], right.BeaconBlockRoot[:]); cmp != 0 {
-			return cmp < 0
+		if less(b, a) {
+			return 1
 		}
-		if left.PayloadPresent != right.PayloadPresent {
-			return left.PayloadPresent
-		}
-		return left.BlobDataAvailable && !right.BlobDataAvailable
+		return 0
 	})
 	for i := 0; i < len(candidates) && result.Len() < int(cfg.MaxPayloadAttestations); i++ {
 		result.Append(candidates[i].attestation)

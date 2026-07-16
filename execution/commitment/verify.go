@@ -18,6 +18,7 @@ package commitment
 
 import (
 	"fmt"
+	"strings"
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/empty"
@@ -142,11 +143,13 @@ func VerifyBranchHashes(
 	}
 
 	if len(mismatches) > 0 {
-		msg := fmt.Sprintf("hash verification failed with %d mismatch(es) at branchKey=%x:", len(mismatches), branchKey)
+		var sb strings.Builder
+		sb.WriteString(fmt.Sprintf("hash verification failed with %d mismatch(es) at branchKey=%x:", len(mismatches), branchKey))
 		for _, m := range mismatches {
-			msg += "\n  " + m
+			sb.WriteString("\n  ")
+			sb.WriteString(m)
 		}
-		return fmt.Errorf("%s", msg)
+		return fmt.Errorf("%s", sb.String())
 	}
 	return nil
 }
