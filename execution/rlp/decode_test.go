@@ -269,7 +269,8 @@ func TestStreamRaw(t *testing.T) {
 }
 
 // TestStreamViewBytes pins the aliasing contract that separates ViewBytes from
-// Bytes: on a bytes-backed stream the result must share memory with the input.
+// Bytes: for an RLP string on a bytes-backed stream the result must share memory
+// with the input. Single-byte values are exempt, see TestStreamViewBytesSingleByte.
 func TestStreamViewBytes(t *testing.T) {
 	input := unhex("8401020304")
 
@@ -287,6 +288,24 @@ func TestStreamViewBytes(t *testing.T) {
 	}
 	if cap(b) != len(b) {
 		t.Fatalf("view cap %d must be clamped to len %d so appends cannot scribble the input", cap(b), len(b))
+	}
+	if s.Remaining() != 0 {
+		t.Fatalf("stream not advanced past the value: %d bytes remaining", s.Remaining())
+	}
+}
+
+// TestStreamViewBytesSingleByte pins the exception to the aliasing contract: a
+// single-byte value is encoded as its own type tag, so there is no separate content
+// in the input to alias and ViewBytes must allocate, exactly as Bytes does.
+func TestStreamViewBytesSingleByte(t *testing.T) {
+	s := NewBytesStream(unhex("05"))
+	defer PutStream(s)
+	b, err := s.ViewBytes()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(b, []byte{0x05}) {
+		t.Fatalf("content mismatch: got %x, want 05", b)
 	}
 	if s.Remaining() != 0 {
 		t.Fatalf("stream not advanced past the value: %d bytes remaining", s.Remaining())

@@ -708,8 +708,9 @@ func (s *Stream) Bytes() ([]byte, error) {
 	}
 }
 
-// ViewBytes is Bytes, zero-copy when the stream reads from a byte slice.
-// The result aliases the input, so callers must not retain it.
+// ViewBytes is Bytes, zero-copy for RLP strings when the stream reads from a byte
+// slice; those results alias the input, so callers must not retain them. Single-byte
+// values are not in the input verbatim and still allocate, as in Bytes.
 func (s *Stream) ViewBytes() ([]byte, error) {
 	sr, bytesBacked := s.r.(*sliceReader)
 	if !bytesBacked {
