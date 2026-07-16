@@ -26,6 +26,7 @@ import (
 	"io"
 	"math/bits"
 	"runtime"
+	"slices"
 	"sort"
 	"strings"
 	"sync"
@@ -3097,8 +3098,8 @@ func HexTrieStateToString(enc []byte) (string, error) {
 	printAfterMap := func(sb *strings.Builder, name string, list []uint16, depths []int16, existedBefore []bool) {
 		fmt.Fprintf(sb, "\t::%s::\n\n", name)
 		lastNonZero := 0
-		for i := len(list) - 1; i >= 0; i-- {
-			if list[i] != 0 {
+		for i, l := range slices.Backward(list) {
+			if l != 0 {
 				lastNonZero = i
 				break
 			}

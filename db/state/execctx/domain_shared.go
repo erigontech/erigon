@@ -21,7 +21,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"math"
 	"runtime"
 	"sync"
 	"sync/atomic"
@@ -1056,18 +1055,6 @@ func (sd *SharedDomains) Commit(ctx context.Context, tx kv.RwTx, validate ...fun
 	return nil
 }
 
-// DetachBranchCache makes this SharedDomains ignore the aggregator-scope
-// BranchCache: commitment branch reads go straight to sd.mem/overlay/MDBX and
-// no read populates the shared cache. Used for fork-validation SDs, which read
-// transient fork state — sharing the canonical BranchCache let them read stale
-// committed branches (wrong trie root → INVALID payload) and pollute the cache
-// with fork-transient branches. Only sd.branchCache (the read/populate path,
-// domain_shared GetLatest) is consulted, so nil-ing it fully detaches; the
-// canonical SDs keep their warm cache.
-func (sd *SharedDomains) DetachBranchCache() {
-	sd.branchCache = nil
-}
-
 // TemporalDomain satisfaction. Collects no read metrics — see
 // temporalGetter.GetLatest for why there is no process-wide accumulator.
 func (sd *SharedDomains) GetLatest(domain kv.Domain, tx kv.TemporalTx, k []byte) (v []byte, step kv.Step, err error) {
@@ -1081,6 +1068,16 @@ func (sd *SharedDomains) GetLatest(domain kv.Domain, tx kv.TemporalTx, k []byte)
 // for readers that hold the SD directly (e.g. the committer's asOfStateReader).
 func (sd *SharedDomains) GetLatestContext(ctx context.Context, domain kv.Domain, tx kv.TemporalTx, k []byte) (v []byte, step kv.Step, err error) {
 	return sd.getLatestMetered(domain, tx, k, kvmetrics.MetricsFromContext(ctx))
+}
+
+// servableUnderBound gates a cached entry against an in-flight unwind's
+// per-key maxStep: a hit above the bound would diverge from the bounded read
+// the cache-disabled path takes (the epoch floor usually drops such entries
+// already; the gate keeps the two paths identical regardless). Callers convert
+// their unit first — the StateCache stamps txNums (divide by step size), the
+// BranchCache stores step indices (no divide).
+func servableUnderBound(cStep, maxStep kv.Step) bool {
+	return cStep <= maxStep
 }
 
 // getLatestMetered is the read implementation. wm is the caller's lock-free
@@ -1101,7 +1098,7 @@ func (sd *SharedDomains) getLatestMetered(domain kv.Domain, tx kv.TemporalTx, k 
 			wm = sd.reqMetrics
 		}
 	}
-	maxStep := kv.Step(math.MaxUint64)
+	maxStep := kv.NoStepBound
 
 	// Check mem batch first - it has the current transaction's uncommitted state.
 	// No need to populate stateCache here — mem is checked first on every read,
@@ -1112,7 +1109,7 @@ func (sd *SharedDomains) getLatestMetered(domain kv.Domain, tx kv.TemporalTx, k 
 		}
 		return v, step, nil
 	} else {
-		if step > 0 {
+		if step < maxStep {
 			maxStep = step
 		}
 	}
@@ -1125,7 +1122,7 @@ func (sd *SharedDomains) getLatestMetered(domain kv.Domain, tx kv.TemporalTx, k 
 			}
 			return v, step, nil
 		} else {
-			if step > 0 && step < maxStep {
+			if step < maxStep {
 				maxStep = step
 			}
 		}
@@ -1145,16 +1142,11 @@ func (sd *SharedDomains) getLatestMetered(domain kv.Domain, tx kv.TemporalTx, k 
 	// that haven't been flushed to DB yet. Early return keeps correctness AND performance.
 	if sd.stateCache != nil {
 		v, cTxNum, ok := sd.stateCache.GetWithTxNum(domain, k)
+		// The cache stamps txNums — divide to get the step the entry reflects.
+		// An empty value is stamped with the domain's progress at fill time, so
+		// its cStep is progress-derived, not the step of any deletion.
 		cStep := kv.Step(cTxNum / sd.StepSize())
-		// Respect maxStep, mirroring the BranchCache gate below. sd.mem /
-		// sd.parent.mem lowered maxStep above when an in-flight unwind re-bound
-		// this key to an earlier step (the per-key unwindChangeset signal). A
-		// cached entry from a higher step would diverge from the (maxStep-bounded)
-		// DB read the cache-disabled path takes, so treat it as a miss and fall
-		// through; the Put below refreshes it. For direct domains the (txNum,epoch)
-		// floor in Get usually already drops such entries — this keeps the two
-		// read paths identical regardless.
-		if ok && cStep > maxStep {
+		if ok && !servableUnderBound(cStep, maxStep) {
 			ok = false
 		}
 		if dbg.KVReadLevelledMetrics {
@@ -1165,7 +1157,11 @@ func (sd *SharedDomains) getLatestMetered(domain kv.Domain, tx kv.TemporalTx, k 
 			}
 		}
 		if ok {
-			if dbg.AssertStateCache {
+			// The divergence assert is skipped while the mem overlay bounds this
+			// key (in-flight unwind): MDBX still holds the not-yet-deleted dying
+			// rows inside the bound, so the "authoritative" read can return
+			// dead-fork bytes and blame the cache for a legitimate hit.
+			if dbg.AssertStateCache && maxStep == kv.NoStepBound {
 				// Fetch authoritative value from the backing tx and panic on any divergence.
 				// sd.mem and sd.parent.mem were already checked above and missed, so the
 				// backing tx is the single source of truth for this key at this point.
@@ -1199,18 +1195,11 @@ func (sd *SharedDomains) getLatestMetered(domain kv.Domain, tx kv.TemporalTx, k 
 	// with a newer MDBX state.
 	if domain == kv.CommitmentDomain && sd.branchCache != nil {
 		if cv, cStepU64, ok := sd.branchCache.Get(k); ok {
-			// Respect maxStep. sd.mem / sd.parent.mem lowered maxStep above when an
-			// unwound key reports its restored step via unwindChangeset (the per-key
-			// in-mem unwind signal). The cache's global epoch/floor is coarser than
-			// that per-key signal, so a cached entry below the floor can still belong
-			// to a step the unwind re-bound away. Serving it then diverges from the
-			// (maxStep-bounded) DB read the cache-disabled path takes. Fall through to
-			// the bounded read in that case; the Put below refreshes the entry.
 			// Get returns the on-disk step index directly — do NOT divide by
 			// StepSize (that double-division collapsed cStep to ~0, defeating the
 			// gate).
 			cStep := kv.Step(cStepU64)
-			if cStep <= maxStep {
+			if servableUnderBound(cStep, maxStep) {
 				return cv, cStep, nil
 			}
 		}
@@ -1387,11 +1376,11 @@ func (sd *SharedDomains) codeHashForAddr(tx kv.TemporalTx, addr []byte, txNum ui
 	// on flush. Route mem-first; the LRU is a committed-state layer that may only
 	// answer once mem has missed.
 	if v, _, ok := sd.mem.GetLatest(kv.AccountsDomain, addr); ok {
-		return decodeAccountCodeHash(v)
+		return accounts.DeserialiseV3CodeHash(v)
 	}
 	if sd.parent != nil {
 		if v, _, ok := sd.parent.mem.GetLatest(kv.AccountsDomain, addr); ok {
-			return decodeAccountCodeHash(v)
+			return accounts.DeserialiseV3CodeHash(v)
 		}
 	}
 
@@ -1412,14 +1401,14 @@ func (sd *SharedDomains) codeHashForAddr(tx kv.TemporalTx, addr []byte, txNum ui
 	resolve := func() []byte {
 		if sd.stateCache != nil {
 			if v, ok := sd.stateCache.Get(kv.AccountsDomain, addr); ok {
-				return decodeAccountCodeHash(v)
+				return accounts.DeserialiseV3CodeHash(v)
 			}
 		}
 		v, _, err := tx.GetLatest(kv.AccountsDomain, addr)
 		if err != nil || len(v) == 0 {
 			return nil
 		}
-		return decodeAccountCodeHash(v)
+		return accounts.DeserialiseV3CodeHash(v)
 	}
 
 	h := resolve()
@@ -1437,28 +1426,6 @@ func (sd *SharedDomains) codeHashForAddr(tx kv.TemporalTx, addr []byte, txNum ui
 		}
 	}
 	return h
-}
-
-// decodeAccountCodeHash extracts the codeHash from an account's encoded
-// (DecodeForStorage) bytes. Returns nil on decode error or when the account
-// has no code (empty codeHash).
-func decodeAccountCodeHash(enc []byte) []byte {
-	if len(enc) == 0 {
-		return nil
-	}
-	var acc accounts.Account
-	// AccountsDomain values are SerialiseV3-encoded, so they must be decoded
-	// with DeserialiseV3. DecodeForStorage is the legacy MDBX bitmask format
-	// with an incompatible binary layout; applied to V3 bytes it silently
-	// misparses and leaves CodeHash empty.
-	if err := accounts.DeserialiseV3(&acc, enc); err != nil {
-		return nil
-	}
-	if acc.CodeHash.IsEmpty() {
-		return nil
-	}
-	h := acc.CodeHash.Value()
-	return h[:]
 }
 
 func (sd *SharedDomains) Metrics() *kvmetrics.DomainMetrics {
