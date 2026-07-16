@@ -24,10 +24,8 @@ import (
 	"fmt"
 	"sync/atomic"
 
-	keccak "github.com/erigontech/fastkeccak"
 	"github.com/holiman/uint256"
 
-	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/execution/chain"
@@ -93,9 +91,6 @@ type EVM struct {
 	callNewAccountCharged bool
 	// optional overridden set of precompiled contracts
 	precompiles PrecompiledContracts
-
-	hasher    keccak.KeccakState // Keccak256 hasher instance shared across opcodes
-	hasherBuf common.Hash        // Keccak256 hasher result array shared across opcodes
 
 	readOnly   bool   // Whether to throw on stateful modifications
 	returnData []byte // Last CALL's return data for subsequent reuse
