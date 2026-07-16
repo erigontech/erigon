@@ -44,6 +44,10 @@ var (
 	ErrInvalidTxType        = errors.New("transaction type not valid in this context")
 	ErrTxTypeNotSupported   = errors.New("transaction type not supported")
 	errTrailingBytes        = errors.New("trailing bytes after rlp encoded transaction")
+	// errShortTxnRLP is the sentinel form of the "short input" that
+	// UnmarshalTransactionFromBinary reports: well-formed RLP that is too small to
+	// hold a transaction. Neither package has an error for it.
+	errShortTxnRLP = errors.New("short rlp encoded transaction")
 )
 
 // Transaction types.
@@ -272,6 +276,50 @@ func UnmarshalTransactionFromBinary(data []byte, blobTxnsAreWrappedWithBlobs boo
 		return nil, errTrailingBytes
 	}
 	return t, nil
+}
+
+// TxnHashFromRLP returns the hash of a transaction stored by
+// rawdb.WriteTransactions, without decoding it.
+//
+// A transaction hashes its canonical (EIP-2718) form, which the stored RLP
+// already contains verbatim: legacy transactions are stored as the canonical
+// list itself, typed ones as that canonical form wrapped in an RLP string.
+// Errors match what DecodeTransaction returns for the same input, so that
+// swapping in this function does not change what callers see.
+func TxnHashFromRLP(txnRlp []byte) (common.Hash, error) {
+	if len(txnRlp) == 0 {
+		return common.Hash{}, io.EOF
+	}
+	kind, content, rest, err := rlp.Split(txnRlp)
+	if err != nil {
+		return common.Hash{}, err
+	}
+	if len(rest) != 0 {
+		return common.Hash{}, errTrailingBytes
+	}
+	// Turn down RLP that is well formed but cannot hold a transaction, which the
+	// decode this replaces also rejected. Hashing it would index a hash of data
+	// that is not a transaction.
+	switch kind {
+	case rlp.List:
+		if len(content) == 0 {
+			return common.Hash{}, rlp.EOL
+		}
+		return libcrypto.Keccak256Hash(txnRlp), nil
+	case rlp.String:
+		if len(content) == 0 {
+			return common.Hash{}, rlp.EOL
+		}
+		if len(content) == 1 { // a type prefix with no payload
+			return common.Hash{}, errShortTxnRLP
+		}
+		return libcrypto.Keccak256Hash(content), nil
+	case rlp.Byte:
+		// A bare byte holds neither a legacy list nor a type prefix plus payload.
+		return common.Hash{}, errShortTxnRLP
+	default:
+		return common.Hash{}, rlp.ErrExpectedString
+	}
 }
 
 // Removes everything but the payload body from blob tx and prepends 0x3 at the beginning - no copy

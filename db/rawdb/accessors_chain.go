@@ -540,7 +540,7 @@ func CanonicalTransactionHashes(db kv.Getter, txnID uint64, amount uint32) ([]co
 	if err := db.ForAmount(kv.EthTx, hexutil.EncodeTs(txnID), amount, func(k, v []byte) error {
 		h, err := types.TxnHashFromRLP(v)
 		if err != nil {
-			return err
+			return fmt.Errorf("txn %d of %d, txnID %d: %w", i, amount, txnID+uint64(i), err)
 		}
 		hashes[i] = h
 		i++

@@ -745,20 +745,29 @@ func (r *BlockReader) TxnHashes(ctx context.Context, tx kv.Getter, hash common.H
 		if tx == nil {
 			return nil, nil
 		}
-		return rawdb.ReadBodyTxnHashes(tx, hash, blockHeight)
+		hashes, err := rawdb.ReadBodyTxnHashes(tx, hash, blockHeight)
+		if err != nil {
+			return nil, err
+		}
+		if hashes != nil {
+			return hashes, nil
+		}
+		// not in the db, so fall through to the files, as BodyWithTransactions does
 	}
 
-	seg, ok, release := r.viewSingleFile(tx, snaptype2.Bodies, blockHeight)
+	// One view for both segments: the txn ids read from the bodies file must be
+	// looked up in a transactions file of the same generation.
+	view, release := r.view(tx)
+	defer release()
+
+	seg, ok := view.Segment(snaptype2.Bodies, blockHeight)
 	if !ok {
 		return nil, nil
 	}
-	defer release()
-
 	body, baseTxnID, txCount, buf, err := r.bodyFromSnapshot(blockHeight, seg, nil)
 	if err != nil {
 		return nil, err
 	}
-	release()
 	if body == nil {
 		return nil, nil
 	}
@@ -766,12 +775,10 @@ func (r *BlockReader) TxnHashes(ctx context.Context, tx kv.Getter, hash common.H
 		return []common.Hash{}, nil
 	}
 
-	txnSeg, ok, release := r.viewSingleFile(tx, snaptype2.Transactions, blockHeight)
+	txnSeg, ok := view.Segment(snaptype2.Transactions, blockHeight)
 	if !ok {
 		return nil, nil
 	}
-	defer release()
-
 	return r.txnHashesFromSnapshot(baseTxnID, txCount, txnSeg, buf)
 }
 
@@ -1236,7 +1243,7 @@ func (r *BlockReader) txnHashesFromSnapshot(baseTxnID uint64, txCount uint32, tx
 			return nil, fmt.Errorf("segment %s has too short record: len(buf)=%d < 21", txsSeg.Src().FileName(), len(buf))
 		}
 		if hashes[i], err = types.TxnHashFromRLP(buf[1+20:]); err != nil {
-			return nil, err
+			return nil, fmt.Errorf("txn %d of %d, txnID %d, %s: %w", i, txCount, baseTxnID+uint64(i), txsSeg.Src().FileName(), err)
 		}
 	}
 
