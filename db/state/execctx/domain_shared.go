@@ -141,8 +141,9 @@ type SharedDomains struct {
 	// behind sd.mem and sd.parent.mem in the read chain (consulted only after
 	// both miss, before the aggTx files/MDBX read), so writers' in-flight
 	// bytes always mask the cache and cross-SD pollution is impossible.
-	// May be nil for test setups whose AggTx doesn't implement
-	// commitment.BranchCacheProvider.
+	// nil for SDs constructed with WithoutBranchCache (snapshot readers that
+	// must not touch the shared cache) and for test setups whose AggTx
+	// doesn't implement commitment.BranchCacheProvider.
 	branchCache *commitment.BranchCache
 
 	// collector is the process-level KV-read metrics collector (aggregator
