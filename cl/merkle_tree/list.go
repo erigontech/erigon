@@ -18,6 +18,7 @@ package merkle_tree
 
 import (
 	"math/bits"
+	"slices"
 
 	"github.com/prysmaticlabs/gohashtree"
 
@@ -97,8 +98,8 @@ func parseBitlist(dst, buf []byte) ([]byte, uint64) {
 	dst[len(dst)-1] &^= uint8(1 << msb)
 
 	newLen := len(dst)
-	for i := len(dst) - 1; i >= 0; i-- {
-		if dst[i] != 0x00 {
+	for i, d := range slices.Backward(dst) {
+		if d != 0x00 {
 			break
 		}
 		newLen = i

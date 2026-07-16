@@ -682,7 +682,7 @@ func (c *component) Name() string {
 		if c.provider != nil {
 			return fmt.Sprintf("%T(%p)", c, c)
 		}
-		return reflect.TypeOf(c).String()
+		return reflect.TypeFor[*component]().String()
 	}
 
 	return c.id.String()
