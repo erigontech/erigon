@@ -519,7 +519,7 @@ type TemporalDebugTx interface {
 
 	DomainProgress(domain Domain) (txNum uint64)
 	// DomainVisibleEnd returns the domain's exact exclusive frontier used for
-	// cache-fill admission. ok is false without history.
+	// cache-fill admission. ok is false when an exact frontier is unavailable.
 	DomainVisibleEnd(domain Domain) (visibleEnd uint64, ok bool)
 	IIProgress(name InvertedIdx) (txNum uint64)
 	StepSize() uint64

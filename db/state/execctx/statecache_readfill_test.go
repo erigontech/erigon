@@ -208,10 +208,9 @@ func TestReadFill_DoesNotClobberLiveEntry(t *testing.T) {
 	require.Equal(t, v3, got, "read-fill must not clobber the live entry")
 }
 
-// Negative results (missing account) must be stamped with the domain's
-// progress at observation time, not a synthetic step-0 bound that survives
-// every unwind.
-func TestReadFill_NegativeStampedWithProgress(t *testing.T) {
+// A negative reflects transactions below the snapshot's exclusive frontier,
+// so its unwind stamp is the last included txNum.
+func TestReadFill_NegativeUsesLastVisibleTxNum(t *testing.T) {
 	t.Parallel()
 
 	const stepSize = uint64(16)
@@ -237,6 +236,9 @@ func TestReadFill_NegativeStampedWithProgress(t *testing.T) {
 	roTx, err := db.BeginTemporalRo(ctx)
 	require.NoError(t, err)
 	defer roTx.Rollback()
+	visibleEnd, ok := roTx.Debug().DomainVisibleEnd(kv.AccountsDomain)
+	require.True(t, ok)
+	require.NotZero(t, visibleEnd)
 	sd2, err := execctx.NewSharedDomains(ctx, roTx, log.New())
 	require.NoError(t, err)
 	defer sd2.Close()
@@ -247,12 +249,14 @@ func TestReadFill_NegativeStampedWithProgress(t *testing.T) {
 	v, _, err := sd2.GetLatest(kv.AccountsDomain, roTx, missing)
 	require.NoError(t, err)
 	require.Empty(t, v)
-	_, ok := sc.Get(kv.AccountsDomain, missing)
+	_, ok = sc.Get(kv.AccountsDomain, missing)
 	require.True(t, ok, "the negative result must be cached")
 
-	// The domain's progress is 100 (the committed write), so any unwind at or
-	// below it must drop the negative instead of letting it outlive the fact.
-	sc.Unwind(50)
+	sc.Unwind(visibleEnd)
 	_, ok = sc.Get(kv.AccountsDomain, missing)
-	require.False(t, ok, "a negative observed at progress 100 must not survive an unwind to 50")
+	require.True(t, ok, "an unwind starting after the snapshot must preserve the negative")
+
+	sc.Unwind(visibleEnd - 1)
+	_, ok = sc.Get(kv.AccountsDomain, missing)
+	require.False(t, ok, "an unwind of the snapshot's last included txNum must invalidate the negative")
 }

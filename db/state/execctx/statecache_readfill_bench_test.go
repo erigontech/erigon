@@ -49,22 +49,22 @@ func benchSeedDb(b *testing.B) kv.TemporalRwDB {
 	return db
 }
 
-// BenchmarkDomainProgress isolates the negative-stamp source: one
+// BenchmarkDomainVisibleEnd isolates the fill-admission frontier lookup: one
 // files.EndTxNum read plus an MDBX LastKey on the domain's keys table.
-func BenchmarkDomainProgress(b *testing.B) {
+func BenchmarkDomainVisibleEnd(b *testing.B) {
 	db := benchSeedDb(b)
 	roTx, err := db.BeginTemporalRo(b.Context())
 	require.NoError(b, err)
 	defer roTx.Rollback()
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		_ = roTx.Debug().DomainProgress(kv.AccountsDomain)
+		_, _ = roTx.Debug().DomainVisibleEnd(kv.AccountsDomain)
 	}
 }
 
 // benchColdNegativeReads drives the full cold-negative SD read: the whole
-// miss stack, plus — when a cache is wired — the progress stamp and the
-// if-absent fill.
+// miss stack, plus — when a cache is wired — the exact-frontier lookup and
+// freshness-checked fill.
 func benchColdNegativeReads(b *testing.B, withCache bool) {
 	db := benchSeedDb(b)
 	ctx := b.Context()
