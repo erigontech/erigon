@@ -22,6 +22,7 @@ import (
 	"errors"
 	"fmt"
 	"maps"
+	"slices"
 	"sort"
 	"strings"
 	"sync"
@@ -864,11 +865,11 @@ func (sd *TemporalMemBatch) flushDiffSet(_ context.Context, tx kv.RwTx) error {
 func (sd *TemporalMemBatch) flushWriters(ctx context.Context, tx kv.RwTx) error {
 	aggTx := AggTx(tx)
 	for _, ws := range sd.pastDomainWriters {
-		for i := len(ws) - 1; i >= 0; i-- {
-			if err := ws[i].Flush(ctx, tx); err != nil {
+		for _, w := range slices.Backward(ws) {
+			if err := w.Flush(ctx, tx); err != nil {
 				return err
 			}
-			ws[i].Close()
+			w.Close()
 		}
 	}
 	for di, w := range sd.domainWriters {
@@ -881,11 +882,11 @@ func (sd *TemporalMemBatch) flushWriters(ctx context.Context, tx kv.RwTx) error 
 		aggTx.d[di].closeValsCursor() //TODO: why?
 		w.Close()
 	}
-	for i := len(sd.pastIIWriters) - 1; i >= 0; i-- {
-		if err := sd.pastIIWriters[i].Flush(ctx, tx); err != nil {
+	for _, writer := range slices.Backward(sd.pastIIWriters) {
+		if err := writer.Flush(ctx, tx); err != nil {
 			return err
 		}
-		sd.pastIIWriters[i].close()
+		writer.close()
 	}
 	for _, w := range sd.iiWriters {
 		if w == nil {
