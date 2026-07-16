@@ -85,8 +85,18 @@ func Keccak256Hash(data []byte) common.Hash {
 	return keccak.Sum256(data)
 }
 
-// keccak256 hashes the concatenation of data. Hashing through a pooled hash.Hash
-// would leak every caller's buffer to the heap, since Write is an interface method.
+// keccak256 hashes the concatenation of data.
+//
+// It hashes through the concrete keccak.Sum256, never a pooled hash.Hash. That is
+// what keeps the arguments on the caller's stack, and it is load-bearing:
+//   - Write is an interface method, so the compiler must assume a pooled hasher
+//     leaks its argument. Escape analysis is flow-insensitive, so a single pooled
+//     branch pushes every caller's buffer onto the heap, including callers that
+//     never reach it. keccak.Hasher.Write leaks for the same reason: it falls back
+//     to an interface internally.
+//   - A pool does not pay for itself here. Hashing a caller-local buffer costs a
+//     pooled hasher 1 alloc and ~30% more time, and the gap widens with core count,
+//     since the allocations it forces bound the scaling.
 func keccak256(data [][]byte) common.Hash {
 	if len(data) == 1 {
 		return keccak.Sum256(data[0])

@@ -111,16 +111,16 @@ func TestSha256Repeatable(t *testing.T) {
 		if got := utils.Sha256(a, b); got != first {
 			t.Fatalf("Sha256 not repeatable: %x != %x", got, first)
 		}
-		utils.Sha256(bytesOfLen(500, 9), bytesOfLen(500, 8)) // dirty the pooled hasher
+		utils.Sha256(bytesOfLen(500, 9), bytesOfLen(500, 8)) // dirty the pooled join buffer
 	}
 }
 
-// The pooled path still allocates its digest through the hash.Hash interface. No
-// caller reaches it today, so pin that it stays the exception rather than spreading.
-func TestSha256StreamedPathAllocs(t *testing.T) {
+// Joins too large for the stack buffer take the pooled scratch buffer, which keeps
+// them allocation-free too.
+func TestSha256JoinedPathAllocFree(t *testing.T) {
 	big, extra := bytesOfLen(4096, 7), bytesOfLen(32, 8)
-	if n := testing.AllocsPerRun(200, func() { utils.Sha256(big, extra) }); n != 1 {
-		t.Errorf("Sha256(4096B, 32B) allocs = %v, want 1 (pooled path)", n)
+	if n := testing.AllocsPerRun(200, func() { utils.Sha256(big, extra) }); n != 0 {
+		t.Errorf("Sha256(4096B, 32B) allocs = %v, want 0 (pooled join buffer)", n)
 	}
 }
 

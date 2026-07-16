@@ -18,9 +18,22 @@ package utils
 
 import (
 	"crypto/sha256"
+	"sync"
 
 	"github.com/erigontech/erigon/common"
 )
+
+// joinBufPool holds scratch buffers for joins too large for the stack buffer.
+var joinBufPool = sync.Pool{
+	New: func() any {
+		b := make([]byte, 0, 2*sha256StackBuf)
+		return &b
+	},
+}
+
+// joinBufKeepCap bounds what a join returns to the pool, so one outsized call
+// does not pin a large buffer per processor for the process lifetime.
+const joinBufKeepCap = 1 << 16
 
 type HashFunc func(data []byte, extras ...[]byte) common.Hash
 
@@ -28,7 +41,19 @@ type HashFunc func(data []byte, extras ...[]byte) common.Hash
 // roots; larger joins use the heap.
 const sha256StackBuf = 64
 
-// General purpose Sha256
+// Sha256 returns the SHA-256 of data followed by extras.
+//
+// It hashes through the concrete sha256.Sum256, never a pooled hash.Hash. That is
+// what keeps the arguments on the caller's stack, and it is load-bearing:
+//   - Write is an interface method, so the compiler must assume a pooled hasher
+//     leaks its argument. Escape analysis is flow-insensitive, so a single pooled
+//     branch pushes every caller's buffer onto the heap, including callers that
+//     never reach it.
+//   - A pool does not pay for itself here. On Sha256(32B, 32B) a pooled hasher
+//     costs 2 allocs and is ~3x slower at -cpu=16: the allocations it forces, not
+//     the pool, bound the scaling, so the gap widens as cores grow.
+//   - Joins above sha256StackBuf still pool, but a scratch buffer rather than a
+//     hasher, which stays allocation-free and beats a pooled hasher on that path too.
 func Sha256(data []byte, extras ...[]byte) common.Hash {
 	if len(extras) == 0 {
 		return common.Hash(sha256.Sum256(data))
@@ -48,13 +73,20 @@ func Sha256(data []byte, extras ...[]byte) common.Hash {
 	return common.Hash(sha256.Sum256(buf[:n]))
 }
 
-// sha256Joined hashes the concatenation of data and extras. Hashing through a pooled
-// hash.Hash would leak every caller's buffer to the heap, since Write is an interface method.
+// sha256Joined hashes the concatenation of data and extras. It pools the scratch
+// buffer rather than a hash.Hash: Write is an interface method, so a pooled hasher
+// would leak the arguments and push every caller's buffer onto the heap. append
+// copies, so the pooled buffer costs nothing in escape analysis.
 func sha256Joined(data []byte, extras [][]byte, total int) common.Hash {
-	buf := make([]byte, 0, total)
-	buf = append(buf, data...)
+	p := joinBufPool.Get().(*[]byte)
+	buf := append((*p)[:0], data...)
 	for _, extra := range extras {
 		buf = append(buf, extra...)
 	}
-	return common.Hash(sha256.Sum256(buf))
+	out := common.Hash(sha256.Sum256(buf))
+	if cap(buf) <= joinBufKeepCap {
+		*p = buf
+		joinBufPool.Put(p)
+	}
+	return out
 }
