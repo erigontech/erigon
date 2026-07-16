@@ -17,6 +17,7 @@
 package accounts
 
 import (
+	"bytes"
 	"testing"
 
 	"github.com/holiman/uint256"
@@ -74,6 +75,85 @@ func TestEmptyAccount_BufferStrangeBehaviour(t *testing.T) {
 	}
 
 	isIncarnationEqual(t, a.Incarnation, decodedAcc.Incarnation)
+}
+
+func TestDeserialiseV3CodeHash(t *testing.T) {
+	t.Parallel()
+	balances := []uint256.Int{{}, *uint256.NewInt(1), *uint256.NewInt(1e18), *new(uint256.Int).Lsh(uint256.NewInt(1), 200)}
+	nonces := []uint64{0, 1, 255, 1 << 40}
+	codeHashes := []CodeHash{EmptyCodeHash, InternCodeHash(common.BytesToHash(crypto.Keccak256([]byte{1, 2, 3})))}
+	incarnations := []uint64{0, 7}
+
+	for _, nonce := range nonces {
+		for i := range balances {
+			for _, ch := range codeHashes {
+				for _, inc := range incarnations {
+					a := Account{Nonce: nonce, Balance: balances[i], CodeHash: ch, Incarnation: inc}
+					enc := SerialiseV3(&a)
+
+					var full Account
+					if err := DeserialiseV3(&full, enc); err != nil {
+						t.Fatal(err)
+					}
+					got := DeserialiseV3CodeHash(enc)
+					if full.CodeHash.IsEmpty() {
+						if got != nil {
+							t.Fatalf("empty codeHash must extract as nil, got %x (acc %+v)", got, a)
+						}
+					} else {
+						want := full.CodeHash.Value()
+						if !bytes.Equal(got, want[:]) {
+							t.Fatalf("extracted %x, want %x (acc %+v)", got, want, a)
+						}
+					}
+				}
+			}
+		}
+	}
+}
+
+func TestDeserialiseV3CodeHashMalformed(t *testing.T) {
+	t.Parallel()
+	a := Account{
+		Nonce:       255,
+		Balance:     *uint256.NewInt(1e18),
+		CodeHash:    InternCodeHash(common.BytesToHash(crypto.Keccak256([]byte{1, 2, 3}))),
+		Incarnation: 4,
+	}
+	enc := SerialiseV3(&a)
+	// [1+nonce][1+balance][1+codeHash]... — the codeHash field is complete at:
+	codeHashEnd := 1 + int(enc[0]) + 1
+	codeHashEnd += int(enc[codeHashEnd-1]) + 1
+	codeHashEnd += int(enc[codeHashEnd-1])
+	// Any truncation cutting into (or before) the codeHash must yield nil,
+	// never an out-of-bounds read; beyond it the codeHash is extractable.
+	for cut := 0; cut <= len(enc); cut++ {
+		got := DeserialiseV3CodeHash(enc[:cut])
+		if cut < codeHashEnd && got != nil {
+			t.Fatalf("cut=%d (codeHash complete at %d): expected nil, got %x", cut, codeHashEnd, got)
+		}
+		if cut >= codeHashEnd && got == nil {
+			t.Fatalf("cut=%d (codeHash complete at %d): expected hash, got nil", cut, codeHashEnd)
+		}
+	}
+	if got := DeserialiseV3CodeHash(nil); got != nil {
+		t.Fatalf("nil input: expected nil, got %x", got)
+	}
+	// A record claiming a non-32-byte codeHash is malformed for extraction.
+	odd := append([]byte{0, 0, 31}, make([]byte, 31)...)
+	if got := DeserialiseV3CodeHash(odd); got != nil {
+		t.Fatalf("non-32-byte codeHash field: expected nil, got %x", got)
+	}
+	// Non-canonical records spelling out the no-code sentinels (canonical
+	// SerialiseV3 writes length 0 instead) must extract as nil, matching
+	// CodeHash.IsEmpty.
+	for _, sentinel := range [][]byte{make([]byte, 32), empty.CodeHash[:]} {
+		rec := append([]byte{0, 0, 32}, sentinel...)
+		rec = append(rec, 0)
+		if got := DeserialiseV3CodeHash(rec); got != nil {
+			t.Fatalf("sentinel codeHash %x: expected nil, got %x", sentinel, got)
+		}
+	}
 }
 
 func TestAccountEncodeWithCode(t *testing.T) {
