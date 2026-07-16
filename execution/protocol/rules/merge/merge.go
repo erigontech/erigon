@@ -476,7 +476,6 @@ func (s *Merge) Initialize(config *chain.Config, chain rules.ChainHeaderReader, 
 			return err
 		}
 	}
-
 	return nil
 }
 
