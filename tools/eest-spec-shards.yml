@@ -166,5 +166,4 @@
   run: 'fork_Amsterdam'
 - shard: zkevm-witness-race
   workers: 8
-  # TODO: reduce to 0 (glamsterdam-devnet-6 EIPs WIP)
-  max-allowed-failures: 446
+  max-allowed-failures: 0

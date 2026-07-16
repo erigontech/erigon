@@ -34,6 +34,8 @@ jobs:
     steps:
     - name: Check out repository
       uses: actions/checkout@v7
+      with:
+        persist-credentials: false
 
     - name: Clean Erigon Build Directory
       run: |
