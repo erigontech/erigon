@@ -384,22 +384,24 @@ func (e *ExecModule) canonicalHash(ctx context.Context, tx kv.Tx, blockNumber ui
 	return canonical, nil
 }
 
-// drainReadAhead blocks until any in-flight block-assembly warmup finishes.
-// warmBody is fire-and-forget and populates the shared state/branch caches; if
-// it is still running when an unwind bumps the cache epoch, it can Put a
-// pre-unwind (dead-fork) value stamped with the post-unwind epoch — IsStale then
-// returns false and the stale value is served as canonical (wrong root). A
-// laggard Put can likewise land after a flush's cache-apply and pin the
-// pre-flush snapshot. Call before any unwind epoch-bump or flush cache-apply.
-func (e *ExecModule) drainReadAhead() {
+// drainReadAhead blocks until any in-flight block-assembly warmup finishes,
+// reporting whether it fully drained — false only when the module context is
+// cancelled (shutdown). warmBody is fire-and-forget and populates the shared
+// state/branch caches; if it is still running when an unwind bumps the cache
+// epoch, it can Put a pre-unwind (dead-fork) value stamped with the post-unwind
+// epoch — IsStale then returns false and the stale value is served as canonical
+// (wrong root). A laggard Put can likewise land after a flush's cache-apply and
+// pin the pre-flush snapshot. Call before any unwind epoch-bump or flush
+// cache-apply, and do not proceed to them on false.
+func (e *ExecModule) drainReadAhead() bool {
 	if e.readAheader == nil {
-		return
+		return true
 	}
 	ctx := e.bacgroundCtx
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	e.readAheader.WaitForWarmup(ctx)
+	return e.readAheader.WaitForWarmup(ctx)
 }
 
 func (e *ExecModule) unwindToCommonCanonical(sd *execctx.SharedDomains, tx kv.TemporalRwTx, header *types.Header) error {
@@ -430,7 +432,9 @@ func (e *ExecModule) unwindToCommonCanonical(sd *execctx.SharedDomains, tx kv.Te
 		return err
 	}
 
-	e.drainReadAhead()
+	if !e.drainReadAhead() {
+		return fmt.Errorf("read-ahead drain interrupted before unwind: %w", e.bacgroundCtx.Err())
+	}
 	if err := e.pipelineExecutor.UnwindTo(unwindPoint, stagedsync.ExecUnwind, tx); err != nil {
 		return err
 	}
@@ -689,6 +693,19 @@ func (e *ExecModule) Start(ctx context.Context, hook *stageloop.Hook) {
 		return
 	}
 	defer e.semaphore.Release(1)
+
+	// Engine servers are live before Start, so an early payload validation may
+	// already have warmed the state cache with pre-catchup state. Frozen-block
+	// processing advances state without touching the cache (its SDs are not
+	// wired to it), so such entries would be served stale afterwards — drain
+	// any in-flight warmup and clear before it runs. An interrupted drain
+	// means shutdown: return rather than Clear under a live warmup.
+	if !e.drainReadAhead() {
+		return
+	}
+	if e.stateCache != nil {
+		e.stateCache.Clear()
+	}
 
 	if err := e.pipelineExecutor.ProcessFrozenBlocks(ctx, hook, e.onlySnapDownloadOnStart); err != nil {
 		if !errors.Is(err, context.Canceled) {

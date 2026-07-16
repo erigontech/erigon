@@ -361,6 +361,22 @@ func (c *CodeCache) putCode(addr []byte, code []byte, keyHash [32]byte, txNum ui
 		&c.coh, &c.codeSize, 8, &c.putStripes[uint8(codeID)])
 }
 
+// ContainsLive reports whether addr resolves to live code bytes through the
+// addr→code binding, without touching hit/miss counters or LRU recency.
+// Prefetchers probe it to skip the keccak+copy work of preparing a conditional
+// put that a live binding would no-op; advisory only.
+func (c *CodeCache) ContainsLive(addr []byte) bool {
+	vID, ok := c.addrToHash.Peek(common.BytesToAddress(addr))
+	if !ok || c.isStale(vID.txNum, vID.epoch) {
+		return false
+	}
+	ce, ok := c.hashToCode.Peek(vID.addrID)
+	if !ok || len(ce.code) == 0 || c.isStale(ce.txNum, ce.epoch) {
+		return false
+	}
+	return vID.codeHash == ([32]byte{}) || ce.keyHash == vID.codeHash
+}
+
 // GetAddrCodeHash returns the Ethereum codeHash for addr if cached. Lets
 // SharedDomains.codeHashForAddr skip a cold AccountsDomain read when the
 // EVM-known codeHash is already known. Eviction is LRU; freshly seen addrs
