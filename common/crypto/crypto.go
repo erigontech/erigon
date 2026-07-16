@@ -95,7 +95,7 @@ func Sha256(data []byte, extras ...[]byte) common.Hash {
 	for _, extra := range extras {
 		total += len(extra)
 	}
-	if total > joinStackBuf { // slow-path heap-allocation
+	if total > joinStackBuf { // slow-path: pooled join buffer
 		return sha256Joined(data, extras)
 	}
 	// fast-path stack-allocation
@@ -149,7 +149,7 @@ func keccak256Hash(data [][]byte) common.Hash {
 	for _, b := range data {
 		total += len(b)
 	}
-	if total > joinStackBuf { // slow-path heap-allocation
+	if total > joinStackBuf { // slow-path: pooled join buffer
 		return keccak256Joined(data)
 	}
 	// fast-path stack-allocation
