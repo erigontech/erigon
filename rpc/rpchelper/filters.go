@@ -1079,9 +1079,12 @@ func (ff *Filters) LatestSD() *execctx.SharedDomains {
 
 // WithOverlay returns a read view backed by the latest block overlay if one
 // is available, otherwise returns the given tx unchanged. The read view uses
-// the overlay's in-memory data for table lookups, falling back to the caller's tx
-// for data not in the overlay.
+// the overlay's in-memory data for table lookups, falling back to the caller's
+// tx for data not in the overlay.
 // Safe to call on a nil receiver.
+//
+// The view stays readable if the publisher closes the SD concurrently (see
+// MemoryMutation.newReadViewMut); it must not outlive the caller's tx.
 func (ff *Filters) WithOverlay(tx kv.Tx) kv.Tx {
 	if ff == nil {
 		return tx
@@ -1098,6 +1101,8 @@ func (ff *Filters) WithOverlay(tx kv.Tx) kv.Tx {
 
 // WithTemporalOverlay is like WithOverlay but returns kv.TemporalTx directly,
 // avoiding repeated type assertions at callsites that need temporal access.
+// The same concurrent-close safety property as WithOverlay applies (see the
+// concurrency note there).
 func (ff *Filters) WithTemporalOverlay(tx kv.TemporalTx) kv.TemporalTx {
 	if ff == nil {
 		return tx

@@ -814,6 +814,11 @@ func (sd *SharedDomains) IteratePrefix(domain kv.Domain, prefix []byte, roTx kv.
 	return sd.mem.IteratePrefix(domain, prefix, roTx, it)
 }
 
+// Close releases this SD's in-memory state. Idempotent.
+//
+// Safe to call while readers still hold block-overlay views: the overlay's
+// memStore backing keeps their data alive (see MemoryMutation.newReadViewMut),
+// and sd.mem is never exposed to those views.
 func (sd *SharedDomains) Close() {
 	if sd.sdCtx == nil { //idempotency
 		return
