@@ -358,7 +358,13 @@ func (c *Coherent) getFromCache(k []byte, id uint64, domain kv.Domain) (*Element
 }
 func (c *Coherent) Get(k []byte, tx kv.TemporalTx, id uint64) (v []byte, err error) {
 	//TODO: Get must accept from user Domain parameter
-	it, r := c.getFromCache(k, id, kv.AccountsDomain)
+	var it *Element
+	var r *CoherentRoot
+	// A zero budget retains nothing: skip the lookup and its global lock;
+	// leaving r nil also skips the add below.
+	if c.cfg.CacheSize != 0 {
+		it, r = c.getFromCache(k, id, kv.AccountsDomain)
+	}
 
 	if it != nil {
 		c.hits.Inc()
@@ -390,7 +396,12 @@ func (c *Coherent) Get(k []byte, tx kv.TemporalTx, id uint64) (v []byte, err err
 }
 
 func (c *Coherent) GetCode(k []byte, tx kv.TemporalTx, id uint64) (v []byte, err error) {
-	it, r := c.getFromCache(k, id, kv.CodeDomain)
+	var it *Element
+	var r *CoherentRoot
+	// see Get
+	if c.cfg.CodeCacheSize != 0 {
+		it, r = c.getFromCache(k, id, kv.CodeDomain)
+	}
 
 	if it != nil {
 		c.codeHits.Inc()
@@ -431,7 +442,8 @@ func (c *Coherent) add(k, v []byte, r *CoherentRoot, id uint64) *Element {
 	// Non-latest roots bypass eviction accounting, so growing them would be
 	// unbounded (e.g. with no state-change stream feeding OnNewBlock); the
 	// caller's tx read is authoritative for its snapshot, skip caching.
-	if c.latestStateVersionID != id {
+	// A zero budget would evict the entry immediately — also skip.
+	if c.latestStateVersionID != id || c.cfg.CacheSize == 0 {
 		return it
 	}
 	replaced, _ := r.cache.Set(it)
@@ -450,7 +462,7 @@ func (c *Coherent) add(k, v []byte, r *CoherentRoot, id uint64) *Element {
 func (c *Coherent) addCode(k, v []byte, r *CoherentRoot, id uint64) *Element {
 	it := &Element{K: k, V: v}
 	// see add
-	if c.latestStateVersionID != id {
+	if c.latestStateVersionID != id || c.cfg.CodeCacheSize == 0 {
 		return it
 	}
 	replaced, _ := r.codeCache.Set(it)

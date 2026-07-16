@@ -404,6 +404,93 @@ func TestNonLatestViewReadsAreNotCached(t *testing.T) {
 	require.NoError(err)
 }
 
+// A zero budget must never retain entries — batch-fed or read-through, even at
+// the latest version — and reads must resolve on the caller's tx snapshot,
+// never on announced batch data.
+func TestZeroBudgetRetainsNothing(t *testing.T) {
+	require, ctx := require.New(t), t.Context()
+	cfg := DefaultCoherentConfig
+	cfg.CacheSize = 0
+	cfg.CodeCacheSize = 0
+	cfg.NewBlockWait = 0
+	c := New(cfg)
+
+	db := temporaltest.NewTestDB(t, datadir.New(t.TempDir()))
+	addr, loc := [20]byte{1}, [32]byte{2}
+	committedAcc := accounts.Account{Nonce: 1, Balance: *uint256.NewInt(11), CodeHash: accounts.EmptyCodeHash}
+	committedAccEnc := accounts.SerialiseV3(&committedAcc)
+	committedCode := []byte{0x60, 0x01}
+	committedSlot := []byte{7}
+	storageKey := append(addr[:], loc[:]...)
+
+	err := db.UpdateTemporal(ctx, func(tx kv.TemporalRwTx) error {
+		d, err := execctx.NewSharedDomains(ctx, tx, log.New())
+		if err != nil {
+			return err
+		}
+		defer d.Close()
+		if err := d.DomainPut(kv.AccountsDomain, tx, addr[:], committedAccEnc, 0, nil); err != nil {
+			return err
+		}
+		if err := d.DomainPut(kv.CodeDomain, tx, addr[:], committedCode, 0, nil); err != nil {
+			return err
+		}
+		if err := d.DomainPut(kv.StorageDomain, tx, storageKey, committedSlot, 0, nil); err != nil {
+			return err
+		}
+		return d.Flush(ctx, tx)
+	})
+	require.NoError(err)
+
+	err = db.ViewTemporal(ctx, func(tx kv.TemporalTx) error {
+		stateVersion, err := tx.ReadSequence(string(kv.PlainStateVersion))
+		require.NoError(err)
+
+		announcedAcc := committedAcc
+		announcedAcc.Nonce = 2
+		c.OnNewBlock(&remoteproto.StateChangeBatch{
+			StateVersionId: stateVersion,
+			ChangeBatch: []*remoteproto.StateChange{{
+				Direction: remoteproto.Direction_FORWARD,
+				Changes: []*remoteproto.AccountChange{{
+					Action:  remoteproto.Action_UPSERT_CODE,
+					Address: gointerfaces.ConvertAddressToH160(addr),
+					Data:    accounts.SerialiseV3(&announcedAcc),
+					Code:    []byte{0x60, 0x02},
+					StorageChanges: []*remoteproto.StorageChange{{
+						Location: gointerfaces.ConvertHashToH256(loc),
+						Data:     []byte{42},
+					}},
+				}},
+			}},
+		})
+
+		cacheView, err := c.View(ctx, tx)
+		require.NoError(err)
+		view := cacheView.(*CoherentView)
+		require.Equal(c.latestStateVersionID, view.stateVersionID)
+
+		v, err := c.Get(addr[:], tx, view.stateVersionID)
+		require.NoError(err)
+		require.Equal(committedAccEnc, v)
+
+		v, err = c.Get(storageKey, tx, view.stateVersionID)
+		require.NoError(err)
+		require.Equal(committedSlot, v)
+
+		code, err := c.GetCode(addr[:], tx, view.stateVersionID)
+		require.NoError(err)
+		require.Equal(committedCode, code)
+
+		require.Zero(c.roots[view.stateVersionID].cache.Len())
+		require.Zero(c.roots[view.stateVersionID].codeCache.Len())
+		require.Zero(c.stateEvict.Len())
+		require.Zero(c.codeEvict.Len())
+		return nil
+	})
+	require.NoError(err)
+}
+
 func TestAPI(t *testing.T) {
 	require := require.New(t)
 
