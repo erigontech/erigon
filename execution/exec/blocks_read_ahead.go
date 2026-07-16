@@ -106,7 +106,10 @@ func (cpg *cachePopulatingGetter) GetLatest(name kv.Domain, k []byte) ([]byte, k
 		} else {
 			txNum := (uint64(step)+1)*cpg.stepSize - 1
 			if len(v) == 0 {
-				txNum = snapshotEnd
+				txNum = 0
+				if snapshotEnd > 0 {
+					txNum = snapshotEnd - 1
+				}
 			}
 			cpg.sc.PutIfFresh(name, k, v, txNum, snapshotEnd)
 		}

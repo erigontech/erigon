@@ -111,6 +111,63 @@ func TestTransientAccountDeleteDoesNotBlockUnrelatedCodeFill(t *testing.T) {
 	require.Equal(t, code, cached)
 }
 
+func TestSharedDomainsNegativeCacheEntryUsesLastVisibleTxNum(t *testing.T) {
+	const stepSize = uint64(16)
+	ctx := t.Context()
+	db := newTestDb(t, stepSize)
+
+	presentKey := make([]byte, 20)
+	presentKey[0] = 0xaa
+	missingKey := make([]byte, 20)
+	missingKey[0] = 0xbb
+	account := accounts.SerialiseV3(&accounts.Account{
+		Nonce:   1,
+		Balance: *uint256.NewInt(1),
+	})
+
+	seedTx, err := db.BeginTemporalRw(ctx)
+	require.NoError(t, err)
+	defer seedTx.Rollback()
+	seedDomains, err := execctx.NewSharedDomains(ctx, seedTx, log.New())
+	require.NoError(t, err)
+	defer seedDomains.Close()
+	seedDomains.SetTxNum(10)
+	require.NoError(t, seedDomains.DomainPut(kv.AccountsDomain, seedTx, presentKey, account, 10, nil))
+	require.NoError(t, seedDomains.Commit(ctx, seedTx))
+	seedDomains.Close()
+
+	budget := 1 * datasize.MB
+	stateCache := cache.NewStateCache(budget, budget, budget, budget)
+	t.Cleanup(stateCache.Close)
+
+	readTx, err := db.BeginTemporalRo(ctx)
+	require.NoError(t, err)
+	defer readTx.Rollback()
+	visibleEnd, ok := readTx.Debug().DomainVisibleEnd(kv.AccountsDomain)
+	require.True(t, ok)
+	require.NotZero(t, visibleEnd)
+
+	readDomains, err := execctx.NewSharedDomains(ctx, readTx, log.New())
+	require.NoError(t, err)
+	defer readDomains.Close()
+	readDomains.SetStateCacheForTest(stateCache)
+	got, _, err := readDomains.GetLatest(kv.AccountsDomain, readTx, missingKey)
+	require.NoError(t, err)
+	require.Empty(t, got)
+
+	cached, ok := stateCache.Get(kv.AccountsDomain, missingKey)
+	require.True(t, ok)
+	require.Empty(t, cached)
+
+	stateCache.Unwind(visibleEnd)
+	_, ok = stateCache.Get(kv.AccountsDomain, missingKey)
+	require.True(t, ok, "a negative observed before the unwind floor must remain cached")
+
+	stateCache.Unwind(visibleEnd - 1)
+	_, ok = stateCache.Get(kv.AccountsDomain, missingKey)
+	require.False(t, ok, "a negative observed at the unwind floor must be invalidated")
+}
+
 func testEmbeddedRPCCacheViewDoesNotResurrectDeletedValue(t *testing.T, domain kv.Domain) {
 	t.Helper()
 	const stepSize = uint64(16)

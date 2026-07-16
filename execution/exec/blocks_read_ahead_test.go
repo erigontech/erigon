@@ -124,21 +124,26 @@ func TestCachePopulatingGetterWarmsColdKeys(t *testing.T) {
 	require.Empty(t, got)
 }
 
-func TestCachePopulatingGetterNegativeDropsOnUnwind(t *testing.T) {
+func TestCachePopulatingGetterNegativeUsesLastVisibleTxNum(t *testing.T) {
+	const visibleEnd = uint64(10_000_001)
 	key := []byte("\x11\x22\x33\x44\x55\x66\x77\x88\x99\xaa\xbb\xcc\xdd\xee\xff\x00\x11\x22\x33\x44")
 	sc := newTestStateCache()
 	cpg := &cachePopulatingGetter{
 		g: stubTemporalGetter{v: nil}, sc: sc, stepSize: 1_562_500,
-		visibleEnd: func(kv.Domain) (uint64, bool) { return 10_000_001, true },
+		visibleEnd: func(kv.Domain) (uint64, bool) { return visibleEnd, true },
 	}
 	_, _, err := cpg.GetLatest(kv.AccountsDomain, key)
 	require.NoError(t, err)
 	_, ok := sc.Get(kv.AccountsDomain, key)
 	require.True(t, ok)
 
-	sc.Unwind(5_000_000)
+	sc.Unwind(visibleEnd)
 	_, ok = sc.Get(kv.AccountsDomain, key)
-	require.False(t, ok, "a negative observed at txNum 10M must not survive an unwind to 5M")
+	require.True(t, ok, "a negative observed before the unwind floor must remain cached")
+
+	sc.Unwind(visibleEnd - 1)
+	_, ok = sc.Get(kv.AccountsDomain, key)
+	require.False(t, ok, "a negative observed at the unwind floor must be invalidated")
 }
 
 func TestCachePopulatingGetterNilVisibleEndNeverFills(t *testing.T) {

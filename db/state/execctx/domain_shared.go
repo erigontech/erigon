@@ -1242,7 +1242,10 @@ func (sd *SharedDomains) getLatestMetered(domain kv.Domain, tx kv.TemporalTx, k 
 				}
 			} else {
 				if len(v) == 0 {
-					readTxNum = snapshotEnd
+					readTxNum = 0
+					if snapshotEnd > 0 {
+						readTxNum = snapshotEnd - 1
+					}
 				}
 				sd.stateCache.PutIfFresh(domain, k, v, readTxNum, snapshotEnd)
 			}
