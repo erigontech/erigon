@@ -49,13 +49,14 @@ func benchSeedDb(b *testing.B) kv.TemporalRwDB {
 	return db
 }
 
-// BenchmarkDomainVisibleEnd isolates the fill-admission frontier lookup: one
-// files.EndTxNum read plus an MDBX LastKey on the domain's keys table.
+// BenchmarkDomainVisibleEnd isolates the transaction-local cached frontier
+// lookup used by repeated cache fills.
 func BenchmarkDomainVisibleEnd(b *testing.B) {
 	db := benchSeedDb(b)
 	roTx, err := db.BeginTemporalRo(b.Context())
 	require.NoError(b, err)
 	defer roTx.Rollback()
+	_, _ = roTx.Debug().DomainVisibleEnd(kv.AccountsDomain)
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		_, _ = roTx.Debug().DomainVisibleEnd(kv.AccountsDomain)

@@ -268,11 +268,18 @@ type tx struct {
 type Tx struct {
 	kv.Tx
 	tx
+	visibleEnds [kv.DomainLen]domainVisibleEnd
 }
 
 type RwTx struct {
 	kv.RwTx
 	tx
+}
+
+type domainVisibleEnd struct {
+	once sync.Once
+	end  uint64
+	ok   bool
 }
 
 func (tx *tx) ForceReopenUnderlyingFilesTx() {
@@ -734,7 +741,11 @@ func (tx *RwTx) DomainProgress(domain kv.Domain) uint64 {
 	return tx.aggtx.DomainProgress(domain, tx.RwTx)
 }
 func (tx *Tx) DomainVisibleEnd(domain kv.Domain) (uint64, bool) {
-	return tx.aggtx.DomainVisibleEnd(domain, tx.Tx)
+	visibleEnd := &tx.visibleEnds[domain]
+	visibleEnd.once.Do(func() {
+		visibleEnd.end, visibleEnd.ok = tx.aggtx.DomainVisibleEnd(domain, tx.Tx)
+	})
+	return visibleEnd.end, visibleEnd.ok
 }
 func (tx *RwTx) DomainVisibleEnd(domain kv.Domain) (uint64, bool) {
 	return tx.aggtx.DomainVisibleEnd(domain, tx.RwTx)
