@@ -48,8 +48,9 @@ func TestFilesPin_PinsSourceGeneration(t *testing.T) {
 	genV1 := src.visible
 	require.Same(t, agg.visible.Load(), genV1, "src pins the current generation")
 
-	// Publish a newer generation while src stays open.
-	gen([]testFileRange{{0, 1}, {1, 2}})
+	// Publish a newer generation while src stays open — only add the {1,2} step;
+	// rewriting {0,1} would rename over the file src holds open, which Windows denies.
+	gen([]testFileRange{{1, 2}})
 	genV2 := agg.visible.Load()
 	require.NotSame(t, genV1, genV2, "OpenFolder must publish a newer visible generation")
 
