@@ -711,7 +711,7 @@ func (b BaseTxnID) LastSystemTx(txAmount uint32) uint64 { return b.U64() + uint6
 // this structure does rlp decode only for
 // "tx related" data
 //
-// must use `rlp.DecodeBytesPartial` to decode
+// must use `DecodeRLPBytes` to decode
 type BodyOnlyTxn struct {
 	BaseTxnID BaseTxnID
 	TxCount   uint32
@@ -735,8 +735,9 @@ func (b *BodyOnlyTxn) DecodeRLP(s *rlp.Stream) error {
 	return nil
 }
 
-// DecodeRLPBytes skips the reflect-based decoder that rlp.DecodeBytesPartial needs to
-// reach DecodeRLP, which costs more than the decode itself.
+// DecodeRLPBytes reads only the leading txn fields, so rlp.DecodeBytes would reject
+// the unread tail. Going through DecodeRLP directly also skips a reflect dispatch
+// that costs more than the decode itself.
 func (b *BodyOnlyTxn) DecodeRLPBytes(buf []byte) error {
 	s := rlp.NewBytesStream(buf)
 	defer rlp.PutStream(s)
@@ -999,11 +1000,9 @@ func (bfs *BodyForStorage) DecodeRLP(s *rlp.Stream) error {
 		return err
 	}
 	bfs.BaseTxnID, bfs.TxCount = BaseTxnID(baseTxnID), txCount
-	// decode Uncles
 	if err := decodeUncles(&bfs.Uncles, s); err != nil {
 		return err
 	}
-	// decode Withdrawals
 	bfs.Withdrawals = []*Withdrawal{}
 	if err := decodeWithdrawals(&bfs.Withdrawals, s); err != nil {
 		return err
