@@ -636,12 +636,19 @@ type HasSpaceDirty interface {
 	SpaceDirty() (uint64, uint64, error)
 }
 
-// HasDeleteRange deletes all keys in [from, to) (to==nil deletes through the
-// last key) and returns the number removed. mdbx implements it as a native bulk
-// B-tree cut — far faster than per-key deletion; other backends may emulate it
-// by iterating, so hot-path callers should prefer the mdbx-backed tx.
+// HasDeleteRange deletes a contiguous key range and returns the number removed.
+// mdbx implements these as a native bulk B-tree cut — far faster than per-key
+// deletion; other backends may emulate them by iterating, so hot-path callers
+// should prefer the mdbx-backed tx. On DupSort tables the count is (key,value)
+// pairs, and a key is removed with all of its values.
 type HasDeleteRange interface {
+	// DeleteRange removes keys in [from, to). from==nil starts at the first key,
+	// to==nil deletes through the last key.
 	DeleteRange(table string, from, to []byte) (uint64, error)
+	// DeleteBefore removes every key < to. to==nil clears the whole table.
+	DeleteBefore(table string, to []byte) (uint64, error)
+	// DeleteAfter removes every key >= from. from==nil clears the whole table.
+	DeleteAfter(table string, from []byte) (uint64, error)
 }
 
 // BucketMigrator used for buckets migration, don't use it in usual app code

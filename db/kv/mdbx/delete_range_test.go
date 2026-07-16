@@ -150,6 +150,108 @@ func TestChunkedDeleteRangeCoversAllKeys(t *testing.T) {
 	require.Zero(t, countTable(t, db))
 }
 
+func TestMdbxDeleteBefore(t *testing.T) {
+	deleteBefore := func(t *testing.T, db kv.RwDB, to []byte) uint64 {
+		var n uint64
+		require.NoError(t, db.Update(t.Context(), func(tx kv.RwTx) error {
+			var err error
+			n, err = tx.(kv.HasDeleteRange).DeleteBefore(deleteRangeTable, to)
+			return err
+		}))
+		return n
+	}
+
+	t.Run("deletes keys < to, keeps to", func(t *testing.T) {
+		db := newFilledDB(t, 1000)
+		require.EqualValues(t, 300, deleteBefore(t, db, u64tob(300)))
+		require.EqualValues(t, 700, countTable(t, db))
+		require.NoError(t, db.View(t.Context(), func(tx kv.Tx) error {
+			has := func(i uint64) bool { v, _ := tx.GetOne(deleteRangeTable, u64tob(i)); return v != nil }
+			require.False(t, has(299)) // just below the bound: gone
+			require.True(t, has(300))  // exclusive upper bound: kept
+			return nil
+		}))
+	})
+
+	t.Run("to==nil clears the whole table", func(t *testing.T) {
+		db := newFilledDB(t, 1000)
+		require.EqualValues(t, 1000, deleteBefore(t, db, nil))
+		require.Zero(t, countTable(t, db))
+	})
+
+	t.Run("to==first key deletes nothing", func(t *testing.T) {
+		db := newFilledDB(t, 1000)
+		require.Zero(t, deleteBefore(t, db, u64tob(0)))
+		require.EqualValues(t, 1000, countTable(t, db))
+	})
+
+	t.Run("to past the last key clears the whole table", func(t *testing.T) {
+		db := newFilledDB(t, 1000)
+		require.EqualValues(t, 1000, deleteBefore(t, db, u64tob(5000)))
+		require.Zero(t, countTable(t, db))
+	})
+
+	t.Run("dupsort counts (key,value) pairs", func(t *testing.T) {
+		const keys, dups = 1000, 8
+		db := newFilledDupSortDB(t, keys, dups)
+		require.NoError(t, db.Update(t.Context(), func(tx kv.RwTx) error {
+			n, err := tx.(kv.HasDeleteRange).DeleteBefore(deleteRangeTable, u64tob(200))
+			require.NoError(t, err)
+			require.EqualValues(t, 200*dups, n)
+			return nil
+		}))
+		require.EqualValues(t, (keys-200)*dups, countTable(t, db))
+	})
+}
+
+func TestMdbxDeleteAfter(t *testing.T) {
+	deleteAfter := func(t *testing.T, db kv.RwDB, from []byte) uint64 {
+		var n uint64
+		require.NoError(t, db.Update(t.Context(), func(tx kv.RwTx) error {
+			var err error
+			n, err = tx.(kv.HasDeleteRange).DeleteAfter(deleteRangeTable, from)
+			return err
+		}))
+		return n
+	}
+
+	t.Run("deletes keys >= from, keeps below", func(t *testing.T) {
+		db := newFilledDB(t, 1000)
+		require.EqualValues(t, 300, deleteAfter(t, db, u64tob(700)))
+		require.EqualValues(t, 700, countTable(t, db))
+		require.NoError(t, db.View(t.Context(), func(tx kv.Tx) error {
+			has := func(i uint64) bool { v, _ := tx.GetOne(deleteRangeTable, u64tob(i)); return v != nil }
+			require.True(t, has(699))  // just below the bound: kept
+			require.False(t, has(700)) // inclusive lower bound: gone
+			return nil
+		}))
+	})
+
+	t.Run("from==nil clears the whole table", func(t *testing.T) {
+		db := newFilledDB(t, 1000)
+		require.EqualValues(t, 1000, deleteAfter(t, db, nil))
+		require.Zero(t, countTable(t, db))
+	})
+
+	t.Run("from past the last key deletes nothing", func(t *testing.T) {
+		db := newFilledDB(t, 1000)
+		require.Zero(t, deleteAfter(t, db, u64tob(5000)))
+		require.EqualValues(t, 1000, countTable(t, db))
+	})
+
+	t.Run("dupsort counts (key,value) pairs", func(t *testing.T) {
+		const keys, dups = 1000, 8
+		db := newFilledDupSortDB(t, keys, dups)
+		require.NoError(t, db.Update(t.Context(), func(tx kv.RwTx) error {
+			n, err := tx.(kv.HasDeleteRange).DeleteAfter(deleteRangeTable, u64tob(700))
+			require.NoError(t, err)
+			require.EqualValues(t, 300*dups, n)
+			return nil
+		}))
+		require.EqualValues(t, 700*dups, countTable(t, db))
+	})
+}
+
 func newFilledDupSortDB(t *testing.T, keys, dupsPerKey int) kv.RwDB {
 	t.Helper()
 	db := New(dbcfg.ChainDB, log.New()).InMem(t, t.TempDir()).WriteMap(true).WithTableCfg(func(_ kv.TableCfg) kv.TableCfg {

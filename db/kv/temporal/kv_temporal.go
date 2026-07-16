@@ -373,6 +373,20 @@ func (tx *RwTx) DeleteRange(table string, from, to []byte) (uint64, error) {
 	return 0, fmt.Errorf("DeleteRange not supported by %T", tx.RwTx)
 }
 
+func (tx *RwTx) DeleteBefore(table string, to []byte) (uint64, error) {
+	if dr, ok := tx.RwTx.(kv.HasDeleteRange); ok {
+		return dr.DeleteBefore(table, to)
+	}
+	return 0, fmt.Errorf("DeleteBefore not supported by %T", tx.RwTx)
+}
+
+func (tx *RwTx) DeleteAfter(table string, from []byte) (uint64, error) {
+	if dr, ok := tx.RwTx.(kv.HasDeleteRange); ok {
+		return dr.DeleteAfter(table, from)
+	}
+	return 0, fmt.Errorf("DeleteAfter not supported by %T", tx.RwTx)
+}
+
 func (tx *RwTx) LockDBInRam() error {
 	if mdbxTx, ok := tx.RwTx.(*mdbx.MdbxTx); ok {
 		return mdbxTx.LockDBInRam()

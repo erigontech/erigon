@@ -19,6 +19,7 @@ package membatchwithdb
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"sync"
 	"time"
@@ -37,6 +38,9 @@ import (
 )
 
 var _ kv.TemporalRwTx = &MemoryMutation{}
+var _ kv.HasDeleteRange = &MemoryMutation{}
+
+var errStopIteration = errors.New("stop")
 
 type MemoryMutation struct {
 	// mu protects concurrent access to the mutation's maps and backing tx.
@@ -555,6 +559,42 @@ func (m *MemoryMutation) Delete(table string, k []byte) error {
 	}
 	t[string(k)] = struct{}{}
 	return m.memTx.Delete(table, k)
+}
+
+// DeleteRange removes keys in [from, to) and returns the number of entries
+// removed. Unlike the mdbx backends it cannot cut the B-tree: the overlay sits
+// on an immutable read-only tx, so keys living there are removed by recording a
+// tombstone over the merged view.
+func (m *MemoryMutation) DeleteRange(table string, from, to []byte) (uint64, error) {
+	var deleted uint64
+	var keys [][]byte
+	err := m.ForEach(table, from, func(k, _ []byte) error {
+		if to != nil && bytes.Compare(k, to) >= 0 {
+			return errStopIteration
+		}
+		if len(keys) == 0 || !bytes.Equal(keys[len(keys)-1], k) {
+			keys = append(keys, common.Copy(k))
+		}
+		deleted++
+		return nil
+	})
+	if err != nil && !errors.Is(err, errStopIteration) {
+		return 0, err
+	}
+	for _, k := range keys {
+		if err := m.Delete(table, k); err != nil {
+			return 0, err
+		}
+	}
+	return deleted, nil
+}
+
+func (m *MemoryMutation) DeleteBefore(table string, to []byte) (uint64, error) {
+	return m.DeleteRange(table, nil, to)
+}
+
+func (m *MemoryMutation) DeleteAfter(table string, from []byte) (uint64, error) {
+	return m.DeleteRange(table, from, nil)
 }
 
 func (m *MemoryMutation) deleteDup(table string, k, v []byte) {

@@ -869,6 +869,10 @@ func PruneBlocks(tx kv.RwTx, blockTo uint64, blocksDeleteLimit int) (deleted int
 
 	var b *types.BodyForStorage
 
+	// EthTx is keyed by txnID (assigned at body-insertion time, so a fork body at
+	// an old height can land anywhere in txnID space), not by block number, so it
+	// can't be cut as a block-key range: delete its per-block spans while scanning
+	// bodies. The block-number-keyed tables are cut as whole ranges below.
 	for k, _, err := c.Current(); k != nil; k, _, err = c.Next() {
 		if err != nil {
 			return deleted, err
@@ -894,32 +898,23 @@ func PruneBlocks(tx kv.RwTx, blockTo uint64, blocksDeleteLimit int) (deleted int
 				}
 			}
 		}
-		// Copying k because otherwise the same memory will be reused
-		// for the next key and Delete below will end up deleting 1 more record than required
-		kCopy := common.Copy(k)
-		if err = tx.Delete(kv.Senders, kCopy); err != nil {
-			return deleted, err
-		}
-		if err = tx.Delete(kv.BlockBody, kCopy); err != nil {
-			return deleted, err
-		}
-		if err = tx.Delete(kv.BlockAccessList, kCopy); err != nil {
-			return deleted, err
-		}
-		if err = tx.Delete(kv.Headers, kCopy); err != nil {
-			return deleted, err
-		}
-
 		deleted++
+	}
+	c.Close() // release the read cursor before range-deleting the same table
+
+	from, to := hexutil.EncodeTs(blockFrom), hexutil.EncodeTs(stopAtBlock)
+	for _, table := range []string{kv.Senders, kv.BlockBody, kv.BlockAccessList, kv.Headers} {
+		if _, err = kv.DeleteRange(tx, table, from, to); err != nil {
+			return deleted, err
+		}
 	}
 
 	return deleted, nil
 }
 
 func TruncateCanonicalChain(ctx context.Context, db kv.RwTx, from uint64) error {
-	return db.ForEach(kv.HeaderCanonical, hexutil.EncodeTs(from), func(k, _ []byte) error {
-		return db.Delete(kv.HeaderCanonical, k)
-	})
+	_, err := kv.DeleteRange(db, kv.HeaderCanonical, hexutil.EncodeTs(from), nil)
+	return err
 }
 
 // TruncateBlocks - delete block >= blockFrom
@@ -931,7 +926,11 @@ func TruncateBlocks(ctx context.Context, tx kv.RwTx, blockFrom uint64) error {
 	if blockFrom < 1 { //protect genesis
 		blockFrom = 1
 	}
-	return tx.ForEach(kv.Headers, hexutil.EncodeTs(blockFrom), func(k, v []byte) error {
+	// EthTx is keyed by txnID (assigned at body-insertion time), not by block
+	// number, so it can't be cut as a block-key range: delete its per-block spans
+	// while scanning bodies. The block-number-keyed tables are cut as whole ranges
+	// below.
+	if err := tx.ForEach(kv.Headers, hexutil.EncodeTs(blockFrom), func(k, v []byte) error {
 		b, err := ReadBodyForStorageByKey(tx, k)
 		if err != nil {
 			return err
@@ -945,31 +944,26 @@ func TruncateBlocks(ctx context.Context, tx kv.RwTx, blockFrom uint64) error {
 				}
 			}
 		}
-		// Copying k because otherwise the same memory will be reused
-		// for the next key and Delete below will end up deleting 1 more record than required
-		kCopy := common.Copy(k)
-		if err := tx.Delete(kv.Senders, kCopy); err != nil {
-			return err
-		}
-		if err := tx.Delete(kv.BlockBody, kCopy); err != nil {
-			return err
-		}
-		if err := tx.Delete(kv.BlockAccessList, kCopy); err != nil {
-			return err
-		}
-		if err := tx.Delete(kv.Headers, kCopy); err != nil {
-			return err
-		}
 
 		select {
 		case <-ctx.Done():
 			return ctx.Err()
 		case <-logEvery.C:
-			log.Info("TruncateBlocks", "block", binary.BigEndian.Uint64(kCopy))
+			log.Info("TruncateBlocks", "block", binary.BigEndian.Uint64(k))
 		default:
 		}
 		return nil
-	})
+	}); err != nil {
+		return err
+	}
+
+	from := hexutil.EncodeTs(blockFrom)
+	for _, table := range []string{kv.Senders, kv.BlockBody, kv.BlockAccessList, kv.Headers} {
+		if _, err := kv.DeleteRange(tx, table, from, nil); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func ReadHeaderByNumber(db kv.Getter, number uint64) *types.Header {
