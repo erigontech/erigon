@@ -33,7 +33,7 @@ var joinBufPool = sync.Pool{
 
 // joinBufKeepCap bounds what a join returns to the pool, so one outsized call
 // does not pin a large buffer per processor for the process lifetime.
-const joinBufKeepCap = 1 << 16
+const joinBufKeepCap = 64 * 1024
 
 type HashFunc func(data []byte, extras ...[]byte) common.Hash
 
