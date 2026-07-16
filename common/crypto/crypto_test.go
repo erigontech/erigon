@@ -82,9 +82,6 @@ func TestKeccak256MatchesReference(t *testing.T) {
 		if got := common.BytesToHash(Keccak256(data)); got != want {
 			t.Fatalf("Keccak256(%d bytes) = %x, want %x", n, got, want)
 		}
-		if got := common.HashData(data); got != want {
-			t.Fatalf("common.HashData(%d bytes) = %x, want %x", n, got, want)
-		}
 	}
 }
 
@@ -114,12 +111,6 @@ func TestKeccak256DoesNotAllocate(t *testing.T) {
 		sinkHash = Keccak256Hash(buf[:])
 	}); n != 0 {
 		t.Errorf("Keccak256Hash allocs = %v, want 0", n)
-	}
-	if n := testing.AllocsPerRun(100, func() {
-		var buf [32]byte
-		sinkHash = common.HashData(buf[:])
-	}); n != 0 {
-		t.Errorf("common.HashData allocs = %v, want 0", n)
 	}
 	// Keccak256 returns a slice, so exactly one alloc: its result, not the caller's buffer.
 	if n := testing.AllocsPerRun(100, func() {

@@ -150,6 +150,6 @@ func generateAcc() (*ecdsa.PrivateKey, common.Address, common.Hash, error) {
 	}
 
 	addr := crypto.PubkeyToAddress(key.PublicKey)
-	hash := common.HashData(addr[:])
+	hash := crypto.Keccak256Hash(addr[:])
 	return key, addr, hash, nil
 }

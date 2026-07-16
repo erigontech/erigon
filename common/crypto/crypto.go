@@ -381,10 +381,20 @@ func PubkeyToAddress(p ecdsa.PublicKey) common.Address {
 	return common.BytesToAddress(Keccak256(pubBytes)[12:])
 }
 
-// NewKeccakState returns a reset KeccakState from the pool shared with the common package.
-func NewKeccakState() keccak.KeccakState { return common.NewKeccakState() }
+var keccakStatePool = sync.Pool{
+	New: func() any {
+		return keccak.NewFastKeccak()
+	},
+}
 
-func ReturnToPool(h keccak.KeccakState) { common.ReturnKeccakState(h) }
+// NewKeccakState returns a reset KeccakState from a shared pool.
+func NewKeccakState() keccak.KeccakState {
+	sha := keccakStatePool.Get().(keccak.KeccakState)
+	sha.Reset()
+	return sha
+}
+
+func ReturnToPool(sha keccak.KeccakState) { keccakStatePool.Put(sha) }
 
 // FinalizeHash finalizes sha and returns a Keccak-256 digest as a value type,
 // avoiding the heap escape that occurs when passing h[:] to an interface Read method.

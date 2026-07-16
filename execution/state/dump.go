@@ -26,6 +26,7 @@ import (
 	"fmt"
 
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/common/empty"
 	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/db/kv"
@@ -227,7 +228,7 @@ func (d *Dumper) DumpToCollector(ctx context.Context, c DumpCollector, excludeCo
 				}
 				loc := k[20:]
 				account.Storage[common.BytesToHash(loc).String()] = common.Bytes2Hex(vs)
-				h := common.HashData(loc)
+				h := crypto.Keccak256Hash(loc)
 				t.Update(h[:], common.Copy(vs))
 			}
 			r.Close()
@@ -236,7 +237,7 @@ func (d *Dumper) DumpToCollector(ctx context.Context, c DumpCollector, excludeCo
 			account.Root = tHash[:]
 		}
 		account.Address = &addr
-		seckey := common.HashData(addr[:])
+		seckey := crypto.Keccak256Hash(addr[:])
 		seckeyBytes := hexutil.Bytes(seckey[:])
 		account.SecureKey = &seckeyBytes
 		c.OnAccount(addr, *account)
