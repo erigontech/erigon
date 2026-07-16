@@ -95,13 +95,13 @@ type StreamingCommitter struct {
 
 	deepLocalFolds atomic.Uint64
 
+	// rootValid gates root promotion: cleared each Process and set only on the
+	// folded path, so the no-touch path leaves the template's prior root untouched.
 	rootCell    cell
 	rootChecked bool
 	rootTouched bool
 	rootPresent bool
-	// rootValid gates root promotion: cleared each Process and set only on the
-	// folded path, so the no-touch path leaves the template's prior root untouched.
-	rootValid bool
+	rootValid   bool
 	// rootSeeded marks the same snapshot as a base seed: a trie whose root row
 	// collapsed to one child has no root branch record on disk, so the carried
 	// root cell is the only way a fresh base can see the existing state.

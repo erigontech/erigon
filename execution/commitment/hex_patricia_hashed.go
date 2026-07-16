@@ -506,12 +506,6 @@ func (cell *cell) fillFromLowerCell(lowCell *cell, lowDepth int16, preExtension 
 			}
 			cell.extLen = lowCell.extLen + 1 + int16(len(preExtension))
 			if cell.accountAddrLen == 0 && cell.storageAddrLen == 0 {
-				// Only a cell without a plain key navigates by its extension, and then these
-				// nibbles are also its unfold path, so hashedExtension must stay in sync (like
-				// foldBranch does) or the cell demands an on-disk branch record that a propagate
-				// fold never writes. A cell holding a plain key navigates by the keccak-derived
-				// path instead, and a storage fold's extension is in the wrong nibble space to
-				// overwrite it with.
 				copy(cell.hashedExtension[:], cell.extension[:cell.extLen])
 				cell.hashedExtLen = cell.extLen
 			}
