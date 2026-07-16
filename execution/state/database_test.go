@@ -1524,7 +1524,7 @@ func TestRecreateAndRewind(t *testing.T) {
 			block.AddTx(txn)
 		case 1:
 			// Calculate the address of the Phoenix and create handle to phoenix contract
-			codeHash := common.HashData(common.FromHex(contracts.PhoenixBin))
+			codeHash := crypto.Keccak256Hash(common.FromHex(contracts.PhoenixBin))
 			phoenixAddress = types.CreateAddress2(reviveAddress, [32]byte{}, accounts.InternCodeHash(codeHash))
 			if phoenix, err = contracts.NewPhoenix(phoenixAddress, contractBackend); err != nil {
 				panic(err)
@@ -1583,7 +1583,7 @@ func TestRecreateAndRewind(t *testing.T) {
 			block.AddTx(txn)
 		case 1:
 			// Calculate the address of the Phoenix and create handle to phoenix contract
-			codeHash := common.HashData(common.FromHex(contracts.PhoenixBin))
+			codeHash := crypto.Keccak256Hash(common.FromHex(contracts.PhoenixBin))
 			phoenixAddress = types.CreateAddress2(reviveAddress, [32]byte{}, accounts.InternCodeHash(codeHash))
 			if phoenix, err = contracts.NewPhoenix(phoenixAddress, contractBackendLonger); err != nil {
 				panic(err)

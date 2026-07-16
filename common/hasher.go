@@ -43,8 +43,3 @@ func ReturnKeccakState(sha keccak.KeccakState) { keccakStatePool.Put(sha) }
 
 func NewHasher() *Hasher           { return &Hasher{Sha: NewKeccakState()} }
 func ReturnHasherToPool(h *Hasher) { ReturnKeccakState(h.Sha) }
-
-// HashData returns the Keccak-256 hash of data.
-func HashData(data []byte) Hash {
-	return keccak.Sum256(data)
-}
