@@ -60,6 +60,7 @@ jobs:
     - name: Clone erigon from ${{ env.ERIGON_BRANCH }} branch
       uses: actions/checkout@v7
       with:
+        persist-credentials: false
         ref: ${{ env.ERIGON_BRANCH }}
         fetch-depth: 1
         path: ${{ github.workspace }}/erigon

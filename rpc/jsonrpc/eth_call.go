@@ -481,7 +481,6 @@ func (api *APIImpl) getProof(ctx context.Context, roTx kv.TemporalTx, address co
 		return nil, err
 	}
 	defer domains.Close()
-	domains.DetachBranchCache()
 	sdCtx := domains.GetCommitmentContext()
 
 	if !isLatest {
