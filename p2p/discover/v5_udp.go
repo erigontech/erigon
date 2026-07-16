@@ -157,12 +157,21 @@ func ListenV5(ctx context.Context, conn UDPConn, ln *enode.LocalNode, cfg Config
 	t.wg.Add(2)
 	go t.readLoop()
 	go t.dispatch()
+	go t.closeOnCtxCancel()
 	return t, nil
+}
+
+// closeOnCtxCancel shuts the transport down when the listen context is cancelled.
+// Not tracked by t.wg: Close waits on that group, and cancels closeCtx on the way
+// in, which is also how this goroutine exits after an explicit Close.
+func (t *UDPv5) closeOnCtxCancel() {
+	<-t.closeCtx.Done()
+	t.Close()
 }
 
 // newUDPv5 creates a UDPv5 transport, but doesn't start any goroutines.
 func newUDPv5(ctx context.Context, conn UDPConn, ln *enode.LocalNode, cfg Config) (*UDPv5, error) {
-	closeCtx, cancelCloseCtx := context.WithCancel(context.Background())
+	closeCtx, cancelCloseCtx := context.WithCancel(ctx)
 	cfg = cfg.withDefaults()
 	t := &UDPv5{
 		// static fields
@@ -192,7 +201,7 @@ func newUDPv5(ctx context.Context, conn UDPConn, ln *enode.LocalNode, cfg Config
 		closeCtx:       closeCtx,
 		cancelCloseCtx: cancelCloseCtx,
 
-		trace: false,
+		trace: cfg.Log.Enabled(ctx, log.LvlTrace),
 	}
 	t.talk = newTalkSystem(t)
 	tab, err := newTable(t, t.db, cfg)

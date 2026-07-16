@@ -21,6 +21,7 @@ package discover
 
 import (
 	"bytes"
+	"context"
 	"crypto/ecdsa"
 	"encoding/binary"
 	"fmt"
@@ -102,6 +103,36 @@ func startLocalhostV5(t *testing.T, cfg Config) *UDPv5 {
 	return udp
 }
 
+// This test checks that cancelling the context passed to ListenV5 shuts the transport
+// down completely, without an explicit Close.
+func TestUDPv5_listenCtxCancel(t *testing.T) {
+	t.Parallel()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	db, _ := enode.OpenDB("")
+	defer db.Close()
+	key := newkey()
+	udp, err := ListenV5(ctx, newpipe(), enode.NewLocalNode(db, key), Config{
+		PrivateKey:   key,
+		Log:          testlog.Logger(t, log.LvlInfo),
+		ValidSchemes: enode.ValidSchemesForTesting,
+		PingInterval: 1000 * time.Hour,
+	})
+	require.NoError(t, err)
+	defer udp.Close()
+
+	cancel()
+
+	// tab.closed is the last thing Close does, so observing it proves the whole
+	// shutdown ran: the socket is closed, readLoop and dispatch have exited, and
+	// the table loop has stopped.
+	select {
+	case <-udp.tab.closed:
+	case <-time.After(5 * time.Second):
+		t.Fatal("cancelling the listen context did not shut the transport down")
+	}
+}
+
 // This test checks that trace logging follows the configured log level.
 func TestUDPv5_traceFollowsLogLevel(t *testing.T) {
 	t.Parallel()
@@ -113,21 +144,21 @@ func TestUDPv5_traceFollowsLogLevel(t *testing.T) {
 		{log.LvlTrace, true},
 		{log.LvlInfo, false},
 	} {
-		db, _ := enode.OpenDB("")
-		key := newkey()
-		udp, err := newUDPv5(t.Context(), newpipe(), enode.NewLocalNode(db, key), Config{
-			PrivateKey:   key,
-			Log:          testlog.Logger(t, tc.level),
-			ValidSchemes: enode.ValidSchemesForTesting,
+		t.Run(tc.level.String(), func(t *testing.T) {
+			db, _ := enode.OpenDB("")
+			defer db.Close()
+			key := newkey()
+			udp, err := ListenV5(t.Context(), newpipe(), enode.NewLocalNode(db, key), Config{
+				PrivateKey:   key,
+				Log:          testlog.Logger(t, tc.level),
+				ValidSchemes: enode.ValidSchemesForTesting,
+				PingInterval: 1000 * time.Hour,
+			})
+			require.NoError(t, err)
+			defer udp.Close()
+
+			require.Equal(t, tc.want, udp.trace)
 		})
-		if err != nil {
-			t.Fatal(err)
-		}
-		if udp.trace != tc.want {
-			t.Errorf("level %v: trace = %v, want %v", tc.level, udp.trace, tc.want)
-		}
-		udp.Close()
-		db.Close()
 	}
 }
 
