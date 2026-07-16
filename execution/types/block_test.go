@@ -346,7 +346,7 @@ func BenchmarkBodyOnlyTxnDecodeRLPBytes(b *testing.B) {
 	}
 }
 
-func BenchmarkBodyForStorageDecodeRLP(b *testing.B) {
+func BenchmarkBodyForStorageDecodeBytes(b *testing.B) {
 	enc := encodedBenchBody(b)
 
 	var out BodyForStorage

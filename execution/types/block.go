@@ -725,11 +725,11 @@ func (b *BodyOnlyTxn) DecodeRLP(s *rlp.Stream) error {
 	}
 	baseTxnID, err := s.Uint64()
 	if err != nil {
-		return err
+		return fmt.Errorf("read BaseTxnID: %w", err)
 	}
 	txCount, err := s.Uint32()
 	if err != nil {
-		return err
+		return fmt.Errorf("read TxCount: %w", err)
 	}
 	b.BaseTxnID, b.TxCount = BaseTxnID(baseTxnID), txCount
 	return nil
@@ -993,11 +993,11 @@ func (bfs *BodyForStorage) DecodeRLP(s *rlp.Stream) error {
 
 	baseTxnID, err := s.Uint64()
 	if err != nil {
-		return err
+		return fmt.Errorf("read BaseTxnID: %w", err)
 	}
 	txCount, err := s.Uint32()
 	if err != nil {
-		return err
+		return fmt.Errorf("read TxCount: %w", err)
 	}
 	bfs.BaseTxnID, bfs.TxCount = BaseTxnID(baseTxnID), txCount
 	if err := decodeUncles(&bfs.Uncles, s); err != nil {
