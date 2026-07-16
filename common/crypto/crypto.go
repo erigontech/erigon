@@ -66,28 +66,55 @@ type EllipticCurve interface {
 	Unmarshal(data []byte) (x, y *big.Int)
 }
 
+// keccakStackBuf bounds the concatenation of a multi-argument call, sized for the
+// two 32-byte inputs such calls join. Longer concatenations are joined on the heap;
+// a lone argument needs no buffer and is hashed at any size.
+const keccakStackBuf = 64
+
+// Keccak256Hash calculates and returns the Keccak256 hash of the input data.
+// Kept to a single argument so it stays within the inlining budget: a variadic
+// signature would need a call to the multi-argument path, which alone exceeds it.
+func Keccak256Hash(data []byte) common.Hash {
+	return keccak.Sum256(data)
+}
+
 // Keccak256 calculates and returns the Keccak256 hash of the input data.
+// Prefer Keccak256Hash where a slice is not required: this allocates its result.
 func Keccak256(data ...[]byte) []byte {
+	h := keccak256(data)
 	b := make([]byte, 32)
-	d := NewKeccakState()
-	for _, b := range data {
-		d.Write(b)
-	}
-	d.Read(b) //nolint:errcheck
-	ReturnToPool(d)
+	copy(b, h[:])
 	return b
 }
 
-// Keccak256Hash calculates and returns the Keccak256 hash of the input data,
-// converting it to an internal Hash data structure.
-func Keccak256Hash(data ...[]byte) common.Hash {
-	d := NewKeccakState()
-	for _, b := range data {
-		d.Write(b)
+// keccak256 hashes the concatenation of data. It hashes through the concrete
+// keccak.Sum256 rather than a pooled hash.Hash because the interface's Write is
+// assumed to leak, which forces every caller's buffer onto the heap.
+func keccak256(data [][]byte) common.Hash {
+	if len(data) == 1 {
+		return keccak.Sum256(data[0])
 	}
-	h := FinalizeHash(d)
-	ReturnToPool(d)
-	return h
+	total := 0
+	for _, b := range data {
+		total += len(b)
+	}
+	if total > keccakStackBuf {
+		return keccak256Joined(data, total)
+	}
+	var buf [keccakStackBuf]byte
+	n := 0
+	for _, b := range data {
+		n += copy(buf[n:], b)
+	}
+	return keccak.Sum256(buf[:n])
+}
+
+func keccak256Joined(data [][]byte, total int) common.Hash {
+	buf := make([]byte, 0, total)
+	for _, b := range data {
+		buf = append(buf, b...)
+	}
+	return keccak.Sum256(buf)
 }
 
 // Keccak512 calculates and returns the Keccak512 hash of the input data.

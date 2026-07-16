@@ -299,11 +299,11 @@ func generateChain(
 			txs = append(txs, txn)
 			balanceStorageKeyPath := computeMappingStorageKey(address1, 1) // balance in slot 1
 			// The trie path for storage is keccak256(address) + keccak256(storage_slot)
-			hashedBalanceKey := crypto.Keccak256(balanceStorageKeyPath[:])
+			hashedBalanceKey := crypto.Keccak256Hash(balanceStorageKeyPath[:])
 
 			sameStoragePrefixAddresses = findAddressesWithMatchingStorageKeyPrefix(balanceStorageKeyPath, 1, 1, 1)
 			sameStorageKeyPath := computeMappingStorageKey(sameStoragePrefixAddresses[0], 1)
-			hashedSiblingKey := crypto.Keccak256(sameStorageKeyPath[:])
+			hashedSiblingKey := crypto.Keccak256Hash(sameStorageKeyPath[:])
 
 			// Assert first nibble of the hashed storage key is the same (trie path)
 			if (hashedSiblingKey[0] >> 4) != (hashedBalanceKey[0] >> 4) {

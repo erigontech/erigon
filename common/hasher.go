@@ -44,19 +44,8 @@ func ReturnKeccakState(sha keccak.KeccakState) { keccakStatePool.Put(sha) }
 func NewHasher() *Hasher           { return &Hasher{Sha: NewKeccakState()} }
 func ReturnHasherToPool(h *Hasher) { ReturnKeccakState(h.Sha) }
 
+// HashData returns the Keccak-256 hash of data. The error is always nil; it is
+// retained so callers need not change.
 func HashData(data []byte) (Hash, error) {
-	sha := NewKeccakState()
-	defer ReturnKeccakState(sha)
-
-	_, err := sha.Write(data)
-	if err != nil {
-		return Hash{}, err
-	}
-
-	var buf Hash
-	_, err = sha.Read(buf[:])
-	if err != nil {
-		return Hash{}, err
-	}
-	return buf, nil
+	return Hash(keccak.Sum256(data)), nil
 }

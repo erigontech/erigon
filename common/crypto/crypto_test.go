@@ -336,30 +336,60 @@ func TestPythonIntegration(t *testing.T) {
 var benchPayload = make([]byte, 500)
 var benchPayload1 = make([]byte, 1)
 
-func BenchmarkHashBytes(b *testing.B) {
-	b.ReportAllocs()
-	for b.Loop() {
-		Keccak256Hash(benchPayload)
-	}
-}
+var sinkHash common.Hash
+var sinkBytes []byte
 
 func BenchmarkKeccak256Hash(b *testing.B) {
-	b.ReportAllocs()
-	for b.Loop() {
-		Keccak256Hash(benchPayload)
-	}
+	b.Run("1", func(b *testing.B) {
+		b.ReportAllocs()
+		for b.Loop() {
+			sinkHash = Keccak256Hash(benchPayload1)
+		}
+	})
+	b.Run("500", func(b *testing.B) {
+		b.ReportAllocs()
+		for b.Loop() {
+			sinkHash = Keccak256Hash(benchPayload)
+		}
+	})
+	// Hashing a caller-local buffer: shows whether Keccak256Hash leaks its
+	// argument and so forces the caller's buffer onto the heap.
+	b.Run("local32", func(b *testing.B) {
+		b.ReportAllocs()
+		for b.Loop() {
+			var buf [32]byte
+			sinkHash = Keccak256Hash(buf[:])
+		}
+	})
 }
 
-func BenchmarkHashBytes1(b *testing.B) {
-	b.ReportAllocs()
-	for b.Loop() {
-		Keccak256Hash(benchPayload1)
-	}
-}
-
-func BenchmarkKeccak256Hash1(b *testing.B) {
-	b.ReportAllocs()
-	for b.Loop() {
-		Keccak256Hash(benchPayload1)
-	}
+func BenchmarkKeccak256(b *testing.B) {
+	b.Run("500", func(b *testing.B) {
+		b.ReportAllocs()
+		for b.Loop() {
+			sinkBytes = Keccak256(benchPayload)
+		}
+	})
+	// The rlpx shape: two 32-byte inputs joined on the stack.
+	b.Run("two32", func(b *testing.B) {
+		b.ReportAllocs()
+		for b.Loop() {
+			var x, y [32]byte
+			sinkBytes = Keccak256(x[:], y[:])
+		}
+	})
+	// A join too large for the stack buffer.
+	b.Run("joined", func(b *testing.B) {
+		b.ReportAllocs()
+		for b.Loop() {
+			sinkBytes = Keccak256(benchPayload, benchPayload)
+		}
+	})
+	b.Run("local32", func(b *testing.B) {
+		b.ReportAllocs()
+		for b.Loop() {
+			var buf [32]byte
+			sinkBytes = Keccak256(buf[:])
+		}
+	})
 }
