@@ -381,10 +381,6 @@ func PubkeyToAddress(p ecdsa.PublicKey) common.Address {
 	return common.BytesToAddress(Keccak256(pubBytes)[12:])
 }
 
-type Hasher struct {
-	Sha keccak.KeccakState
-}
-
 var keccakStatePool = sync.Pool{
 	New: func() any {
 		return keccak.NewFastKeccak()
@@ -399,9 +395,6 @@ func NewKeccakState() keccak.KeccakState {
 }
 
 func ReturnToPool(sha keccak.KeccakState) { keccakStatePool.Put(sha) }
-
-func NewKeccak256Hasher() *Hasher  { return &Hasher{Sha: NewKeccakState()} }
-func ReturnHasherToPool(h *Hasher) { ReturnToPool(h.Sha) }
 
 // FinalizeHash finalizes sha and returns a Keccak-256 digest as a value type,
 // avoiding the heap escape that occurs when passing h[:] to an interface Read method.
