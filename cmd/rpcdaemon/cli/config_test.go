@@ -24,11 +24,20 @@ import (
 	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/require"
 
+	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/db/datadir"
+	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/kv/kvcache"
+	"github.com/erigontech/erigon/db/kv/temporal/temporaltest"
+	"github.com/erigontech/erigon/db/state/execctx"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/protocol/rules/ethash"
 	"github.com/erigontech/erigon/execution/protocol/rules/merge"
 	"github.com/erigontech/erigon/execution/types"
+	"github.com/erigontech/erigon/execution/types/accounts"
+	"github.com/erigontech/erigon/node/gointerfaces"
+	"github.com/erigontech/erigon/node/gointerfaces/remoteproto"
 )
 
 // TestIsWebsocket tests if an incoming websocket upgrade request is detected properly.
@@ -69,4 +78,56 @@ func TestRemoteRulesEngineFinalizeDelegates(t *testing.T) {
 		_, err := e.Finalize(&chain.Config{}, header, nil, nil, nil, nil, nil, nil, false, log.New())
 		require.NoError(t, err)
 	})
+}
+
+func TestZeroBudgetRemoteCachePinsCommittedState(t *testing.T) {
+	cfg := kvcache.DefaultCoherentConfig
+	cfg.CacheSize = 0
+	cfg.CodeCacheSize = 0
+	cache := newRemoteStateCache(cfg)
+
+	db := temporaltest.NewTestDB(t, datadir.New(t.TempDir()))
+	addr := common.Address{1}
+	committedAccount := accounts.Account{Nonce: 1, Balance: *uint256.NewInt(1), CodeHash: accounts.EmptyCodeHash}
+	announcedAccount := committedAccount
+	announcedAccount.Nonce = 2
+	committedData := accounts.SerialiseV3(&committedAccount)
+	announcedData := accounts.SerialiseV3(&announcedAccount)
+
+	require.NoError(t, db.UpdateTemporal(t.Context(), func(tx kv.TemporalRwTx) error {
+		domains, err := execctx.NewSharedDomains(t.Context(), tx, log.New())
+		if err != nil {
+			return err
+		}
+		defer domains.Close()
+		if err := domains.DomainPut(kv.AccountsDomain, tx, addr[:], committedData, 0, nil); err != nil {
+			return err
+		}
+		return domains.Flush(t.Context(), tx)
+	}))
+
+	tx, err := db.BeginTemporalRo(t.Context())
+	require.NoError(t, err)
+	defer tx.Rollback()
+	stateVersion, err := tx.ReadSequence(string(kv.PlainStateVersion))
+	require.NoError(t, err)
+
+	cache.OnNewBlock(&remoteproto.StateChangeBatch{
+		StateVersionId: stateVersion + 1,
+		ChangeBatch: []*remoteproto.StateChange{{
+			Direction: remoteproto.Direction_FORWARD,
+			Changes: []*remoteproto.AccountChange{{
+				Action:  remoteproto.Action_UPSERT,
+				Address: gointerfaces.ConvertAddressToH160(addr),
+				Data:    announcedData,
+			}},
+		}},
+	})
+	require.Zero(t, cache.Len())
+
+	view, err := cache.View(t.Context(), tx)
+	require.NoError(t, err)
+	data, err := view.Get(addr[:])
+	require.NoError(t, err)
+	require.Equal(t, committedData, data)
 }

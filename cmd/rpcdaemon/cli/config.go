@@ -138,7 +138,7 @@ func RootCommand() (*cobra.Command, *httpcfg.HttpCfg) {
 	rootCmd.PersistentFlags().BoolVar(&cfg.GethCompatibility, "rpc.gethcompat", false, "Enables Geth-compatible storage iteration order for debug_storageRangeAt (sorted by keccak256 hash). Disabled by default for performance.")
 	rootCmd.PersistentFlags().StringVar(&cfg.TxPoolApiAddr, "txpool.api.addr", "", "txpool api network address, for example: 127.0.0.1:9090 (default: use value of --private.api.addr)")
 
-	rootCmd.PersistentFlags().StringVar(&stateCacheStr, "state.cache", "0MB", "Amount of data to store in StateCache (enabled if no --datadir set). Set 0 to disable StateCache. Defaults to 0MB RAM")
+	rootCmd.PersistentFlags().StringVar(&stateCacheStr, "state.cache", "0MB", "Amount of data to store in the version-keyed StateCache (an equally-sized code cache is budgeted on top). Set 0 to disable entry retention while preserving snapshot-consistent reads")
 	rootCmd.PersistentFlags().BoolVar(&cfg.GRPCServerEnabled, "grpc", false, "Enable GRPC server")
 	rootCmd.PersistentFlags().StringVar(&cfg.GRPCListenAddress, "grpc.addr", nodecfg.DefaultGRPCHost, "GRPC server listening interface")
 	rootCmd.PersistentFlags().IntVar(&cfg.GRPCPort, "grpc.port", nodecfg.DefaultGRPCPort, "GRPC server listening port")
@@ -242,6 +242,13 @@ type StateChangesClient interface {
 	StateChanges(ctx context.Context, in *remoteproto.StateChangeRequest, opts ...grpc.CallOption) (remoteproto.KV_StateChangesClient, error)
 }
 
+func newRemoteStateCache(cfg kvcache.CoherentConfig) kvcache.Cache {
+	if cfg.CacheSize == 0 && cfg.CodeCacheSize == 0 {
+		cfg.WaitForNewBlock = false
+	}
+	return kvcache.New(cfg)
+}
+
 func subscribeToStateChangesLoop(ctx context.Context, client StateChangesClient, cache kvcache.Cache) {
 	go func() {
 		for {
@@ -334,11 +341,8 @@ func EmbeddedServices(ctx context.Context,
 		// the overlay is always current, has zero memory overhead, and
 		// doesn't need the StateChanges gRPC stream to stay coherent.
 		stateCache = stateCacheCfg.LocalCache
-	} else if stateCacheCfg.CacheSize > 0 {
-		// Remote RPCDaemon: use coherent cache fed by StateChanges stream.
-		stateCache = kvcache.New(stateCacheCfg)
 	} else {
-		stateCache = kvcache.NewSimple()
+		stateCache = newRemoteStateCache(stateCacheCfg)
 	}
 
 	subscribeToStateChangesLoop(ctx, stateDiffClient, stateCache)
@@ -530,7 +534,6 @@ func RemoteServices(ctx context.Context, cfg *httpcfg.HttpCfg, logger log.Logger
 		if err != nil {
 			return nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, err
 		}
-		stateCache = kvcache.NewSimple()
 	}
 	// If DB can't be configured - used PrivateApiAddr as remote DB
 	if db == nil {
@@ -538,13 +541,10 @@ func RemoteServices(ctx context.Context, cfg *httpcfg.HttpCfg, logger log.Logger
 	}
 
 	if !cfg.WithDatadir {
-		if cfg.StateCache.CacheSize > 0 {
-			stateCache = kvcache.New(cfg.StateCache)
-		} else {
-			stateCache = kvcache.NewSimple()
-		}
 		logger.Info("if you run RPCDaemon on same machine with Erigon add --datadir option")
 	}
+
+	stateCache = newRemoteStateCache(cfg.StateCache)
 
 	subscribeToStateChangesLoop(ctx, remoteKvClient, stateCache)
 

@@ -25,7 +25,6 @@ import (
 	"testing"
 	"time"
 
-	keccak "github.com/erigontech/fastkeccak"
 	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/require"
 
@@ -50,7 +49,6 @@ func TestEvictionInUnexpectedOrder(t *testing.T) {
 	c.selectOrCreateRoot(2)
 	require.Len(c.roots, 1)
 	require.Zero(int(c.latestStateVersionID))
-	require.False(c.roots[2].isCanonical)
 
 	c.add([]byte{1}, nil, c.roots[2], 2)
 	require.Zero(c.stateEvict.Len())
@@ -58,7 +56,6 @@ func TestEvictionInUnexpectedOrder(t *testing.T) {
 	c.advanceRoot(2)
 	require.Len(c.roots, 1)
 	require.Equal(2, int(c.latestStateVersionID))
-	require.True(c.roots[2].isCanonical)
 
 	c.add([]byte{1}, nil, c.roots[2], 2)
 	require.Equal(1, c.stateEvict.Len())
@@ -66,7 +63,6 @@ func TestEvictionInUnexpectedOrder(t *testing.T) {
 	c.selectOrCreateRoot(5)
 	require.Len(c.roots, 2)
 	require.Equal(2, int(c.latestStateVersionID))
-	require.False(c.roots[5].isCanonical)
 
 	c.add([]byte{2}, nil, c.roots[5], 5) // not added to evict list
 	require.Equal(1, c.stateEvict.Len())
@@ -76,32 +72,26 @@ func TestEvictionInUnexpectedOrder(t *testing.T) {
 	c.selectOrCreateRoot(6)
 	require.Len(c.roots, 3)
 	require.Equal(2, int(c.latestStateVersionID))
-	require.False(c.roots[6].isCanonical) // parrent exists, but parent has isCanonical=false
 
 	c.advanceRoot(3)
 	require.Len(c.roots, 4)
 	require.Equal(3, int(c.latestStateVersionID))
-	require.True(c.roots[3].isCanonical)
 
 	c.advanceRoot(4)
 	require.Len(c.roots, 5)
 	require.Equal(4, int(c.latestStateVersionID))
-	require.True(c.roots[4].isCanonical)
 
 	c.selectOrCreateRoot(5)
 	require.Len(c.roots, 5)
 	require.Equal(4, int(c.latestStateVersionID))
-	require.False(c.roots[5].isCanonical)
 
 	c.advanceRoot(5)
 	require.Len(c.roots, 5)
 	require.Equal(5, int(c.latestStateVersionID))
-	require.True(c.roots[5].isCanonical)
 
 	c.advanceRoot(100)
 	require.Len(c.roots, 6)
 	require.Equal(100, int(c.latestStateVersionID))
-	require.True(c.roots[100].isCanonical)
 
 	//c.add([]byte{1}, nil, c.roots[2], 2)
 	require.Equal(0, c.latestStateView.cache.Len())
@@ -167,6 +157,338 @@ func TestEviction(t *testing.T) {
 	})
 	require.Equal(c.roots[c.latestStateVersionID].cache.Len(), c.stateEvict.Len())
 	require.Equal(int(cfg.CacheSize.Bytes()), c.stateEvict.Size())
+}
+
+// Canonical roots must start from their own batch only: the state-change
+// producers do not announce every mutation (e.g. account deletions), so
+// entries inherited from the previous root could stay stale forever.
+func TestCanonicalRootsStartFresh(t *testing.T) {
+	require := require.New(t)
+	cfg := DefaultCoherentConfig
+	cfg.NewBlockWait = 0
+	c := New(cfg)
+
+	k1 := [20]byte{1}
+	c.OnNewBlock(&remoteproto.StateChangeBatch{
+		StateVersionId: 2,
+		ChangeBatch: []*remoteproto.StateChange{{
+			Direction: remoteproto.Direction_FORWARD,
+			Changes: []*remoteproto.AccountChange{{
+				Action:  remoteproto.Action_UPSERT,
+				Address: gointerfaces.ConvertAddressToH160(k1),
+				Data:    []byte{1},
+			}},
+		}},
+	})
+	require.Equal(1, c.roots[2].cache.Len())
+
+	c.OnNewBlock(&remoteproto.StateChangeBatch{StateVersionId: 3})
+	require.Zero(c.roots[3].cache.Len())
+}
+
+func TestRetainedRootsShareCacheBudgets(t *testing.T) {
+	require := require.New(t)
+	cfg := DefaultCoherentConfig
+	cfg.CacheSize = 21
+	cfg.CodeCacheSize = 21
+	cfg.NewBlockWait = 0
+	c := New(cfg)
+
+	addVersion := func(version uint64, addr [20]byte) {
+		c.OnNewBlock(&remoteproto.StateChangeBatch{
+			StateVersionId: version,
+			ChangeBatch: []*remoteproto.StateChange{{
+				Direction: remoteproto.Direction_FORWARD,
+				Changes: []*remoteproto.AccountChange{{
+					Action:  remoteproto.Action_UPSERT_CODE,
+					Address: gointerfaces.ConvertAddressToH160(addr),
+					Data:    []byte{byte(version)},
+					Code:    []byte{byte(version)},
+				}},
+			}},
+		})
+	}
+
+	addVersion(1, [20]byte{1})
+	addVersion(2, [20]byte{2})
+	require.Len(c.roots, 2)
+
+	var stateSize, codeSize int
+	for _, root := range c.roots {
+		root.cache.Scan(func(element *Element) bool {
+			stateSize += element.Size()
+			return true
+		})
+		root.codeCache.Scan(func(element *Element) bool {
+			codeSize += element.Size()
+			return true
+		})
+	}
+	require.LessOrEqual(stateSize, int(cfg.CacheSize.Bytes()))
+	require.LessOrEqual(codeSize, int(cfg.CodeCacheSize.Bytes()))
+}
+
+// Batch-fed storage entries must be stored under the key shape readers use:
+// address+location (see state.CachedReader3.ReadAccountStorage).
+func TestOnNewBlockStorageKeysMatchReaders(t *testing.T) {
+	require, ctx := require.New(t), t.Context()
+	cfg := DefaultCoherentConfig
+	cfg.NewBlockWait = 0
+	c := New(cfg)
+	db := temporaltest.NewTestDB(t, datadir.New(t.TempDir()))
+
+	addr, loc := [20]byte{1}, [32]byte{2}
+	c.OnNewBlock(&remoteproto.StateChangeBatch{
+		StateVersionId: 2,
+		ChangeBatch: []*remoteproto.StateChange{{
+			Direction: remoteproto.Direction_FORWARD,
+			Changes: []*remoteproto.AccountChange{{
+				Action:  remoteproto.Action_STORAGE,
+				Address: gointerfaces.ConvertAddressToH160(addr),
+				StorageChanges: []*remoteproto.StorageChange{{
+					Location: gointerfaces.ConvertHashToH256(loc),
+					Data:     []byte{42},
+				}},
+			}},
+		}},
+	})
+
+	err := db.ViewTemporal(ctx, func(tx kv.TemporalTx) error {
+		k := append(addr[:], loc[:]...)
+		v, err := c.Get(k, tx, 2)
+		require.NoError(err)
+		require.Equal([]byte{42}, v)
+		return nil
+	})
+	require.NoError(err)
+}
+
+// Batch-fed code entries must be stored under the key shape readers use:
+// the account address, which is the E3 CodeDomain key
+// (see state.CachedReader3.ReadAccountCode).
+func TestOnNewBlockCodeKeysMatchReaders(t *testing.T) {
+	require, ctx := require.New(t), t.Context()
+	cfg := DefaultCoherentConfig
+	cfg.NewBlockWait = 0
+	c := New(cfg)
+	db := temporaltest.NewTestDB(t, datadir.New(t.TempDir()))
+
+	addr := [20]byte{1}
+	code := []byte{0x60, 0x60}
+	c.OnNewBlock(&remoteproto.StateChangeBatch{
+		StateVersionId: 2,
+		ChangeBatch: []*remoteproto.StateChange{{
+			Direction: remoteproto.Direction_FORWARD,
+			Changes: []*remoteproto.AccountChange{{
+				Action:  remoteproto.Action_CODE,
+				Address: gointerfaces.ConvertAddressToH160(addr),
+				Code:    code,
+			}},
+		}},
+	})
+
+	err := db.ViewTemporal(ctx, func(tx kv.TemporalTx) error {
+		v, err := c.GetCode(addr[:], tx, 2)
+		require.NoError(err)
+		require.Equal(code, v)
+		return nil
+	})
+	require.NoError(err)
+}
+
+// A cache hit on the code domain must refresh the entry's position in the
+// code eviction list — otherwise hot code is evicted in insertion order.
+func TestCodeHitRefreshesCodeEvictLRU(t *testing.T) {
+	require, ctx := require.New(t), t.Context()
+	cfg := DefaultCoherentConfig
+	cfg.NewBlockWait = 0
+	c := New(cfg)
+	db := temporaltest.NewTestDB(t, datadir.New(t.TempDir()))
+
+	addr1, addr2 := [20]byte{1}, [20]byte{2}
+	c.OnNewBlock(&remoteproto.StateChangeBatch{
+		StateVersionId: 2,
+		ChangeBatch: []*remoteproto.StateChange{{
+			Direction: remoteproto.Direction_FORWARD,
+			Changes: []*remoteproto.AccountChange{
+				{Action: remoteproto.Action_CODE, Address: gointerfaces.ConvertAddressToH160(addr1), Code: []byte{1}},
+				{Action: remoteproto.Action_CODE, Address: gointerfaces.ConvertAddressToH160(addr2), Code: []byte{2}},
+			},
+		}},
+	})
+	require.Equal(addr1[:], c.codeEvict.Oldest().K)
+
+	err := db.ViewTemporal(ctx, func(tx kv.TemporalTx) error {
+		_, err := c.GetCode(addr1[:], tx, 2)
+		return err
+	})
+	require.NoError(err)
+	require.Equal(addr2[:], c.codeEvict.Oldest().K)
+}
+
+// A request whose cache view outlives KeepViews state-version advances (e.g. a
+// long eth_call) must fall back to its own tx snapshot, not error out.
+func TestViewSurvivesRootEviction(t *testing.T) {
+	require, ctx := require.New(t), t.Context()
+	cfg := DefaultCoherentConfig
+	cfg.NewBlockWait = 0
+	c := New(cfg)
+
+	db := temporaltest.NewTestDB(t, datadir.New(t.TempDir()))
+	k1 := [20]byte{1}
+
+	err := db.ViewTemporal(ctx, func(tx kv.TemporalTx) error {
+		cacheView, err := c.View(ctx, tx)
+		require.NoError(err)
+		view := cacheView.(*CoherentView)
+
+		for i := uint64(1); i <= cfg.KeepViews+2; i++ {
+			c.OnNewBlock(&remoteproto.StateChangeBatch{StateVersionId: view.stateVersionID + i})
+		}
+		_, rootAlive := c.roots[view.stateVersionID]
+		require.False(rootAlive, "root must be evicted for this test to be meaningful")
+
+		v, err := c.Get(k1[:], tx, view.stateVersionID)
+		require.NoError(err)
+		require.Empty(v)
+
+		code, err := c.GetCode(k1[:], tx, view.stateVersionID)
+		require.NoError(err)
+		require.Empty(code)
+		return nil
+	})
+	require.NoError(err)
+}
+
+// Reads through a view whose version is not the latest (pre-commit window, or
+// no state-change stream at all) bypass eviction accounting, so they must not
+// grow the root either — otherwise memory is unbounded.
+func TestNonLatestViewReadsAreNotCached(t *testing.T) {
+	require, ctx := require.New(t), t.Context()
+	cfg := DefaultCoherentConfig
+	cfg.NewBlockWait = 0
+	c := New(cfg)
+
+	db := temporaltest.NewTestDB(t, datadir.New(t.TempDir()))
+	k1 := [20]byte{1}
+	acc := accounts.Account{Nonce: 1, Balance: *uint256.NewInt(11), CodeHash: accounts.EmptyCodeHash}
+	accEnc := accounts.SerialiseV3(&acc)
+
+	err := db.UpdateTemporal(ctx, func(tx kv.TemporalRwTx) error {
+		d, err := execctx.NewSharedDomains(ctx, tx, log.New())
+		if err != nil {
+			return err
+		}
+		defer d.Close()
+		if err := d.DomainPut(kv.AccountsDomain, tx, k1[:], accEnc, 0, nil); err != nil {
+			return err
+		}
+		return d.Flush(ctx, tx)
+	})
+	require.NoError(err)
+
+	err = db.ViewTemporal(ctx, func(tx kv.TemporalTx) error {
+		cacheView, err := c.View(ctx, tx)
+		require.NoError(err)
+		view := cacheView.(*CoherentView)
+		require.NotEqual(c.latestStateVersionID, view.stateVersionID)
+
+		v, err := c.Get(k1[:], tx, view.stateVersionID)
+		require.NoError(err)
+		require.Equal(accEnc, v)
+
+		require.Zero(c.roots[view.stateVersionID].cache.Len())
+		require.Zero(c.stateEvict.Len())
+		return nil
+	})
+	require.NoError(err)
+}
+
+// A zero budget must never retain entries — batch-fed or read-through, even at
+// the latest version — and reads must resolve on the caller's tx snapshot,
+// never on announced batch data.
+func TestZeroBudgetRetainsNothing(t *testing.T) {
+	require, ctx := require.New(t), t.Context()
+	cfg := DefaultCoherentConfig
+	cfg.CacheSize = 0
+	cfg.CodeCacheSize = 0
+	cfg.NewBlockWait = 0
+	c := New(cfg)
+
+	db := temporaltest.NewTestDB(t, datadir.New(t.TempDir()))
+	addr, loc := [20]byte{1}, [32]byte{2}
+	committedAcc := accounts.Account{Nonce: 1, Balance: *uint256.NewInt(11), CodeHash: accounts.EmptyCodeHash}
+	committedAccEnc := accounts.SerialiseV3(&committedAcc)
+	committedCode := []byte{0x60, 0x01}
+	committedSlot := []byte{7}
+	storageKey := append(addr[:], loc[:]...)
+
+	err := db.UpdateTemporal(ctx, func(tx kv.TemporalRwTx) error {
+		d, err := execctx.NewSharedDomains(ctx, tx, log.New())
+		if err != nil {
+			return err
+		}
+		defer d.Close()
+		if err := d.DomainPut(kv.AccountsDomain, tx, addr[:], committedAccEnc, 0, nil); err != nil {
+			return err
+		}
+		if err := d.DomainPut(kv.CodeDomain, tx, addr[:], committedCode, 0, nil); err != nil {
+			return err
+		}
+		if err := d.DomainPut(kv.StorageDomain, tx, storageKey, committedSlot, 0, nil); err != nil {
+			return err
+		}
+		return d.Flush(ctx, tx)
+	})
+	require.NoError(err)
+
+	err = db.ViewTemporal(ctx, func(tx kv.TemporalTx) error {
+		stateVersion, err := tx.ReadSequence(string(kv.PlainStateVersion))
+		require.NoError(err)
+
+		announcedAcc := committedAcc
+		announcedAcc.Nonce = 2
+		c.OnNewBlock(&remoteproto.StateChangeBatch{
+			StateVersionId: stateVersion,
+			ChangeBatch: []*remoteproto.StateChange{{
+				Direction: remoteproto.Direction_FORWARD,
+				Changes: []*remoteproto.AccountChange{{
+					Action:  remoteproto.Action_UPSERT_CODE,
+					Address: gointerfaces.ConvertAddressToH160(addr),
+					Data:    accounts.SerialiseV3(&announcedAcc),
+					Code:    []byte{0x60, 0x02},
+					StorageChanges: []*remoteproto.StorageChange{{
+						Location: gointerfaces.ConvertHashToH256(loc),
+						Data:     []byte{42},
+					}},
+				}},
+			}},
+		})
+
+		cacheView, err := c.View(ctx, tx)
+		require.NoError(err)
+		view := cacheView.(*CoherentView)
+		require.Equal(c.latestStateVersionID, view.stateVersionID)
+
+		v, err := c.Get(addr[:], tx, view.stateVersionID)
+		require.NoError(err)
+		require.Equal(committedAccEnc, v)
+
+		v, err = c.Get(storageKey, tx, view.stateVersionID)
+		require.NoError(err)
+		require.Equal(committedSlot, v)
+
+		code, err := c.GetCode(addr[:], tx, view.stateVersionID)
+		require.NoError(err)
+		require.Equal(committedCode, code)
+
+		require.Zero(c.roots[view.stateVersionID].cache.Len())
+		require.Zero(c.roots[view.stateVersionID].codeCache.Len())
+		require.Zero(c.stateEvict.Len())
+		require.Zero(c.codeEvict.Len())
+		return nil
+	})
+	require.NoError(err)
 }
 
 func TestAPI(t *testing.T) {
@@ -461,57 +783,6 @@ func TestAPI(t *testing.T) {
 	case <-ctx.Done():
 		t.Error("Test timed out waiting for goroutines to complete")
 	}
-}
-
-func TestOnNewBlockCodeHashKey(t *testing.T) {
-	require := require.New(t)
-	cfg := DefaultCoherentConfig
-	cfg.NewBlockWait = 0
-	c := New(cfg)
-
-	code := []byte{0x01, 0x02, 0x03, 0x04}
-	addr := common.Address{0xAA}
-
-	batch := &remoteproto.StateChangeBatch{
-		StateVersionId: 1,
-		ChangeBatch: []*remoteproto.StateChange{
-			{
-				Direction: remoteproto.Direction_FORWARD,
-				Changes: []*remoteproto.AccountChange{
-					{
-						Action:  remoteproto.Action_CODE,
-						Address: gointerfaces.ConvertAddressToH160(addr),
-						Code:    code,
-					},
-				},
-			},
-		},
-	}
-
-	c.OnNewBlock(batch)
-
-	c.lock.Lock()
-	defer c.lock.Unlock()
-
-	require.NotNil(c.latestStateView)
-	require.Equal(uint64(1), c.latestStateVersionID)
-
-	var elems []*Element
-	c.latestStateView.codeCache.Walk(func(items []*Element) bool {
-		if len(items) > 0 {
-			elems = append(elems, items...)
-		}
-		return true
-	})
-
-	require.Len(elems, 1)
-
-	h := keccak.NewFastKeccak()
-	h.Write(code)
-	expectedKey := h.Sum(nil)
-
-	require.Equal(expectedKey, elems[0].K)
-	require.Equal(code, elems[0].V)
 }
 
 func TestCode(t *testing.T) {

@@ -23,7 +23,6 @@ import (
 	"github.com/holiman/uint256"
 
 	"github.com/erigontech/erigon/common"
-	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/db/dbservices"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/kvcache"
@@ -220,15 +219,7 @@ func CreateLatestCachedStateReader(cache kvcache.CacheView, tx kv.TemporalTx) st
 	return state.NewCachedReader3(cache, tx)
 }
 
-type asOfView interface {
-	GetAsOf(key []byte, ts uint64) (v []byte, ok bool, err error)
-}
-
 func CreateHistoryCachedStateReader(ctx context.Context, cache kvcache.CacheView, tx kv.TemporalTx, blockNumber uint64, txnIndex int, txNumsReader rawdbv3.TxNumsReader) (state.StateReader, error) {
-	asOfView, ok := cache.(asOfView)
-	if !ok {
-		return nil, fmt.Errorf("%T does not implement GetAsOf at: %s", cache, dbg.Stack())
-	}
 	minTxNum, err := txNumsReader.Min(ctx, tx, blockNumber)
 	if err != nil {
 		return nil, err
@@ -238,14 +229,14 @@ func CreateHistoryCachedStateReader(ctx context.Context, cache kvcache.CacheView
 		return nil, fmt.Errorf("%w: block tx: %d, min tx: %d", state.PrunedError, txNum, minHistoryTxNum)
 	}
 	return &cachedHistoryReaderV3{
-		cache:     asOfView,
+		cache:     cache,
 		reader:    state.NewHistoryReaderV3(tx, txNum),
 		composite: make([]byte, 0, len(common.Address{})+len(common.Hash{})),
 	}, nil
 }
 
 type cachedHistoryReaderV3 struct {
-	cache     asOfView
+	cache     kvcache.CacheView
 	reader    *state.HistoryReaderV3
 	composite []byte
 }
