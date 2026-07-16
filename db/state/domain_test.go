@@ -29,6 +29,7 @@ import (
 	"math/rand/v2"
 	"os"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -2945,9 +2946,9 @@ func TestDomainContext_findShortenedKey(t *testing.T) {
 		v, found, st, en, err := domainRoTx.getLatestFromFiles([]byte(key), 0)
 		require.True(t, found)
 		require.NoError(t, err)
-		for i := len(updates) - 1; i >= 0; i-- {
-			if st <= updates[i].txNum && updates[i].txNum < en {
-				require.Equal(t, updates[i].value, v)
+		for _, update := range slices.Backward(updates) {
+			if st <= update.txNum && update.txNum < en {
+				require.Equal(t, update.value, v)
 				break
 			}
 		}

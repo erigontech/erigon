@@ -20,6 +20,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"math"
 	"slices"
 	"strings"
 	"sync"
@@ -435,6 +436,10 @@ type Putter interface {
 // This type represents a step in time across the chain history or an amount of steps.
 type Step uint64
 
+// NoStepBound marks the absence of a per-key step bound: every step is
+// servable. Distinct from a bound at step 0, which admits only step 0.
+const NoStepBound = Step(math.MaxUint64)
+
 // Returns the txNum of the first tx in the step.
 func (s Step) ToTxNum(stepSize uint64) uint64 { return uint64(s) * stepSize }
 
@@ -560,6 +565,9 @@ func WithFlushCallback(domain Domain, cb func(k []byte, v []byte, step Step, txN
 type TemporalMemBatch interface {
 	DomainPut(domain Domain, k string, v []byte, txNum uint64, preval []byte) error
 	DomainDel(domain Domain, k string, txNum uint64, preval []byte) error
+	// GetLatest returns the key's latest in-mem value. On a miss, step carries
+	// the key's in-flight-unwind bound — NoStepBound when none — so callers
+	// can bound their fall-through read.
 	GetLatest(domain Domain, key []byte) (v []byte, step Step, ok bool)
 	GetDiffset(tx RwTx, blockHash common.Hash, blockNumber uint64) ([DomainLen][]DomainEntryDiff, bool, error)
 	Merge(other TemporalMemBatch) error

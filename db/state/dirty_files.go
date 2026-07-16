@@ -23,6 +23,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -784,10 +785,10 @@ func (files visibleFiles) LatestMergedRange(stepSize uint64) MergeRange {
 	if len(files) == 0 {
 		return MergeRange{}
 	}
-	for i := len(files) - 1; i >= 0; i-- {
-		shardSize := (files[i].endTxNum - files[i].startTxNum) / stepSize
+	for _, file := range slices.Backward(files) {
+		shardSize := (file.endTxNum - file.startTxNum) / stepSize
 		if shardSize > 2 {
-			return MergeRange{from: files[i].startTxNum, to: files[i].endTxNum}
+			return MergeRange{from: file.startTxNum, to: file.endTxNum}
 		}
 	}
 	return MergeRange{}
