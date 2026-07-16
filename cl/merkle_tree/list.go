@@ -91,18 +91,20 @@ func packBits(bytes []byte) [][32]byte {
 }
 
 // packBitsInto packs bytes into 32-byte chunks, reusing dst's backing array.
-// The returned slice keeps one spare capacity slot so a subsequent odd-length
-// padding append (MerkleizeVector) reuses it instead of reallocating.
+// It leaves spare capacity beyond the packed length so MerkleizeVector's
+// odd-length padding append reuses the backing array instead of reallocating.
 func packBitsInto(dst [][32]byte, bytes []byte) [][32]byte {
 	n := (len(bytes) + 31) / 32
 	if cap(dst) < n+1 {
-		dst = make([][32]byte, n, n+1)
+		dst = make([][32]byte, n, 2*n+2)
 	} else {
 		dst = dst[:n]
 	}
 	for i := range n {
-		dst[i] = [32]byte{}
 		copy(dst[i][:], bytes[i*32:])
+	}
+	if rem := len(bytes) % 32; rem != 0 {
+		clear(dst[n-1][rem:])
 	}
 	return dst
 }
