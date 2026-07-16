@@ -18,18 +18,20 @@ package utils
 
 import (
 	"crypto/sha256"
+
+	"github.com/erigontech/erigon/common"
 )
 
-type HashFunc func(data []byte, extras ...[]byte) [32]byte
+type HashFunc func(data []byte, extras ...[]byte) common.Hash
 
 // sha256StackBuf sizes the join buffer for the SSZ calls that join two 32-byte
 // roots; larger joins use the heap.
 const sha256StackBuf = 64
 
 // General purpose Sha256
-func Sha256(data []byte, extras ...[]byte) [32]byte {
+func Sha256(data []byte, extras ...[]byte) common.Hash {
 	if len(extras) == 0 {
-		return sha256.Sum256(data)
+		return common.Hash(sha256.Sum256(data))
 	}
 	total := len(data)
 	for _, extra := range extras {
@@ -43,16 +45,16 @@ func Sha256(data []byte, extras ...[]byte) [32]byte {
 	for _, extra := range extras {
 		n += copy(buf[n:], extra)
 	}
-	return sha256.Sum256(buf[:n])
+	return common.Hash(sha256.Sum256(buf[:n]))
 }
 
 // sha256Joined hashes the concatenation of data and extras. Hashing through a pooled
 // hash.Hash would leak every caller's buffer to the heap, since Write is an interface method.
-func sha256Joined(data []byte, extras [][]byte, total int) [32]byte {
+func sha256Joined(data []byte, extras [][]byte, total int) common.Hash {
 	buf := make([]byte, 0, total)
 	buf = append(buf, data...)
 	for _, extra := range extras {
 		buf = append(buf, extra...)
 	}
-	return sha256.Sum256(buf)
+	return common.Hash(sha256.Sum256(buf))
 }
