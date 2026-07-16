@@ -93,6 +93,28 @@ func TestMemoryMutationDeleteRange(t *testing.T) {
 		require.False(t, has(t, batch, "CCAA"))
 	})
 
+	// kv.HasDeleteRange specifies that on DupSort tables the count is (key,value)
+	// pairs and a key goes with all of its values, so the overlay must agree with
+	// the mdbx backends rather than counting distinct keys.
+	t.Run("dupsort counts (key,value) pairs", func(t *testing.T) {
+		_, rwTx := newTestTx(t)
+		require.NoError(t, rwTx.Put(kv.TblAccountIdx, []byte("AAAA"), []byte("v1")))
+		require.NoError(t, rwTx.Put(kv.TblAccountIdx, []byte("AAAA"), []byte("v2")))
+		require.NoError(t, rwTx.Put(kv.TblAccountIdx, []byte("BBBB"), []byte("v1")))
+
+		batch, err := membatchwithdb.NewMemoryBatch(rwTx, "", log.Root())
+		require.NoError(t, err)
+		t.Cleanup(batch.Close)
+
+		n, err := batch.DeleteBefore(kv.TblAccountIdx, []byte("BBBB"))
+		require.NoError(t, err)
+		require.EqualValues(t, 2, n) // AAAA's two values, not one key
+
+		v, err := batch.GetOne(kv.TblAccountIdx, []byte("AAAA"))
+		require.NoError(t, err)
+		require.Nil(t, v) // every value of the key is gone
+	})
+
 	t.Run("nil bounds clear the table", func(t *testing.T) {
 		batch := newBatch(t)
 		n, err := batch.DeleteAfter(kv.HeaderNumber, nil)

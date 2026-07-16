@@ -322,3 +322,49 @@ func TestChunkedDeleteRangeDupSortCoversAllKeys(t *testing.T) {
 	}))
 	require.Zero(t, countTable(t, db))
 }
+
+// noRangeDeleteTx satisfies kv.RwTx (via the embedded nil interface) but not
+// kv.HasDeleteRange, which is what kv.DeleteRange must refuse to work with.
+type noRangeDeleteTx struct{ kv.RwTx }
+
+func TestKVDeleteRange(t *testing.T) {
+	t.Run("panics rather than emulating the cut by iterating", func(t *testing.T) {
+		require.PanicsWithValue(t,
+			"mdbx.noRangeDeleteTx does not implement kv.HasDeleteRange",
+			func() { _, _ = kv.DeleteRange(noRangeDeleteTx{}, deleteRangeTable, nil, nil) })
+	})
+
+	deleteRange := func(t *testing.T, db kv.RwDB, from, to []byte) uint64 {
+		var n uint64
+		require.NoError(t, db.Update(t.Context(), func(tx kv.RwTx) error {
+			var err error
+			n, err = kv.DeleteRange(tx, deleteRangeTable, from, to)
+			return err
+		}))
+		return n
+	}
+
+	t.Run("from==nil routes to DeleteBefore", func(t *testing.T) {
+		db := newFilledDB(t, 1000)
+		require.EqualValues(t, 300, deleteRange(t, db, nil, u64tob(300)))
+		require.EqualValues(t, 700, countTable(t, db))
+	})
+
+	t.Run("to==nil routes to DeleteAfter", func(t *testing.T) {
+		db := newFilledDB(t, 1000)
+		require.EqualValues(t, 300, deleteRange(t, db, u64tob(700), nil))
+		require.EqualValues(t, 700, countTable(t, db))
+	})
+
+	t.Run("both bounds set cut [from, to)", func(t *testing.T) {
+		db := newFilledDB(t, 1000)
+		require.EqualValues(t, 500, deleteRange(t, db, u64tob(200), u64tob(700)))
+		require.EqualValues(t, 500, countTable(t, db))
+	})
+
+	t.Run("both bounds nil clear the table", func(t *testing.T) {
+		db := newFilledDB(t, 1000)
+		require.EqualValues(t, 1000, deleteRange(t, db, nil, nil))
+		require.Zero(t, countTable(t, db))
+	})
+}

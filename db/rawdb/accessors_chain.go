@@ -869,10 +869,8 @@ func PruneBlocks(tx kv.RwTx, blockTo uint64, blocksDeleteLimit int) (deleted int
 
 	var b *types.BodyForStorage
 
-	// EthTx is keyed by txnID (assigned at body-insertion time, so a fork body at
-	// an old height can land anywhere in txnID space), not by block number, so it
-	// can't be cut as a block-key range: delete its per-block spans while scanning
-	// bodies. The block-number-keyed tables are cut as whole ranges below.
+	// EthTx is keyed by txnID, not block number, so it can't be cut as a block
+	// range like the tables below: delete its per-block spans while scanning.
 	for k, _, err := c.Current(); k != nil; k, _, err = c.Next() {
 		if err != nil {
 			return deleted, err
@@ -926,10 +924,8 @@ func TruncateBlocks(ctx context.Context, tx kv.RwTx, blockFrom uint64) error {
 	if blockFrom < 1 { //protect genesis
 		blockFrom = 1
 	}
-	// EthTx is keyed by txnID (assigned at body-insertion time), not by block
-	// number, so it can't be cut as a block-key range: delete its per-block spans
-	// while scanning bodies. The block-number-keyed tables are cut as whole ranges
-	// below.
+	// EthTx is keyed by txnID, not block number, so it can't be cut as a block
+	// range like the tables below: delete its per-block spans while scanning.
 	if err := tx.ForEach(kv.Headers, hexutil.EncodeTs(blockFrom), func(k, v []byte) error {
 		b, err := ReadBodyForStorageByKey(tx, k)
 		if err != nil {
