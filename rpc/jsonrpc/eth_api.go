@@ -178,6 +178,9 @@ type BaseApiConfig struct {
 }
 
 func NewBaseApi(f *rpchelper.Filters, stateCache kvcache.Cache, blockReader dbservices.FullBlockReader, engine rules.Engine, bridgeReader bridgeReader, conf *BaseApiConfig) *BaseAPI {
+	if conf == nil {
+		conf = &BaseApiConfig{}
+	}
 	blocksLRUSize := 128 // ~32Mb
 	// if RPCDaemon deployed as independent process: increase cache sizes
 	if !conf.SingleNodeMode {

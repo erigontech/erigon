@@ -30,6 +30,9 @@ import (
 )
 
 func NewBaseApiConfig(cfg *httpcfg.HttpCfg) *BaseApiConfig {
+	if cfg == nil {
+		return &BaseApiConfig{}
+	}
 	return &BaseApiConfig{
 		SingleNodeMode:    cfg.WithDatadir,
 		EvmCallTimeout:    cfg.EvmCallTimeout,
