@@ -280,7 +280,7 @@ func (sd *TemporalMemBatch) getLatest(domain kv.Domain, key []byte) (v []byte, s
 }
 
 func (sd *TemporalMemBatch) GetAsOf(domain kv.Domain, key []byte, ts uint64) (v []byte, ok bool, err error) {
-	if !sd.inMemHistoryReads {
+	if !sd.inMemHistoryReads && domain != kv.ReceiptDomain {
 		return nil, false, errors.New("GetAsOf called on TemporalMemBatch with inMemHistoryReads disabled")
 	}
 	sd.latestStateLock.RLock()
@@ -339,6 +339,10 @@ func (sd *TemporalMemBatch) GetAsOf(domain kv.Domain, key []byte, ts uint64) (v 
 		}
 	}
 	return unwoundLatest(domain, keyS)
+}
+
+func (sd *TemporalMemBatch) HistorySeek(domain kv.Domain, key []byte, ts uint64) (v []byte, ok bool, err error) {
+	return sd.GetAsOf(domain, key, ts)
 }
 
 func (sd *TemporalMemBatch) SizeEstimate() uint64 {
