@@ -144,16 +144,14 @@ func exceedsLogQueryLimit(crit filters.FilterCriteria, limit int) bool {
 // filters — see rpchelper.GetBlockNumber): callers scan logs through the same tx.
 func (api *BaseAPI) resolveLogsRange(ctx context.Context, tx kv.Tx, crit filters.FilterCriteria, checkFuture bool) (begin, end uint64, err error) {
 	if crit.BlockHash != nil {
-		block, err := api._blockReader.BlockByHash(ctx, tx, *crit.BlockHash)
+		number, err := api._blockReader.HeaderNumber(ctx, tx, *crit.BlockHash)
 		if err != nil {
 			return 0, 0, err
 		}
-		if block == nil {
+		if number == nil {
 			return 0, 0, fmt.Errorf("block not found: %x", *crit.BlockHash)
 		}
-
-		num := block.NumberU64()
-		return num, num, nil
+		return *number, *number, nil
 	}
 
 	latest, _, _, err := rpchelper.GetBlockNumber(ctx, rpc.BlockNumberOrHashWithNumber(rpc.LatestExecutedBlockNumber), tx, api._blockReader, nil)
