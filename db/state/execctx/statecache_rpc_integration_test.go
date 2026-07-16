@@ -23,6 +23,7 @@ import (
 	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/require"
 
+	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/state/execctx"
@@ -42,6 +43,72 @@ func TestEmbeddedRPCCacheViewDoesNotResurrectDeletedStorage(t *testing.T) {
 
 func TestEmbeddedRPCCacheViewDoesNotResurrectDeletedCode(t *testing.T) {
 	testEmbeddedRPCCacheViewDoesNotResurrectDeletedValue(t, kv.CodeDomain)
+}
+
+func TestTransientAccountDeleteDoesNotBlockUnrelatedCodeFill(t *testing.T) {
+	const stepSize = uint64(16)
+	ctx := t.Context()
+	db := newTestDb(t, stepSize)
+
+	contractAddr := make([]byte, 20)
+	contractAddr[0] = 0xaa
+	transientAddr := make([]byte, 20)
+	transientAddr[0] = 0xbb
+	code := []byte{0xcc, 1, 2, 3}
+	account := accounts.SerialiseV3(&accounts.Account{
+		Nonce:    1,
+		Balance:  *uint256.NewInt(1),
+		CodeHash: accounts.InternCodeHash(crypto.Keccak256Hash(code)),
+	})
+
+	seedTx, err := db.BeginTemporalRw(ctx)
+	require.NoError(t, err)
+	defer seedTx.Rollback()
+	seedDomains, err := execctx.NewSharedDomains(ctx, seedTx, log.New())
+	require.NoError(t, err)
+	defer seedDomains.Close()
+	seedDomains.SetTxNum(10)
+	require.NoError(t, seedDomains.DomainPut(kv.AccountsDomain, seedTx, contractAddr, account, 10, nil))
+	require.NoError(t, seedDomains.DomainPut(kv.CodeDomain, seedTx, contractAddr, code, 10, nil))
+	require.NoError(t, seedDomains.Commit(ctx, seedTx))
+	seedDomains.Close()
+
+	budget := 1 * datasize.MB
+	stateCache := cache.NewStateCache(budget, budget, budget, budget)
+	t.Cleanup(stateCache.Close)
+
+	deleteTx, err := db.BeginTemporalRw(ctx)
+	require.NoError(t, err)
+	defer deleteTx.Rollback()
+	deleteDomains, err := execctx.NewSharedDomains(ctx, deleteTx, log.New())
+	require.NoError(t, err)
+	defer deleteDomains.Close()
+	deleteDomains.SetStateCacheForTest(stateCache)
+	deleteDomains.SetTxNum(20)
+	require.NoError(t, deleteDomains.DomainDel(kv.AccountsDomain, deleteTx, transientAddr, 20, nil))
+	require.NoError(t, deleteDomains.Commit(ctx, deleteTx))
+	deleteDomains.Close()
+
+	freshTx, err := db.BeginTemporalRo(ctx)
+	require.NoError(t, err)
+	defer freshTx.Rollback()
+	codeEnd, ok := freshTx.Debug().DomainVisibleEnd(kv.CodeDomain)
+	require.True(t, ok)
+	accountsEnd, ok := freshTx.Debug().DomainVisibleEnd(kv.AccountsDomain)
+	require.True(t, ok)
+	require.Less(t, codeEnd, accountsEnd)
+
+	freshDomains, err := execctx.NewSharedDomains(ctx, freshTx, log.New())
+	require.NoError(t, err)
+	defer freshDomains.Close()
+	freshDomains.SetStateCacheForTest(stateCache)
+	got, _, err := freshDomains.GetLatest(kv.CodeDomain, freshTx, contractAddr)
+	require.NoError(t, err)
+	require.Equal(t, code, got)
+
+	cached, ok := stateCache.Get(kv.CodeDomain, contractAddr)
+	require.True(t, ok, "an account-only deletion must not block unrelated code fills")
+	require.Equal(t, code, cached)
 }
 
 func testEmbeddedRPCCacheViewDoesNotResurrectDeletedValue(t *testing.T, domain kv.Domain) {

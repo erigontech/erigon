@@ -303,9 +303,6 @@ func (c *StateCache) Apply(domain kv.Domain, key, value []byte, txNum uint64) {
 		putOrDelete(cache, key, value, txNum)
 		c.deleteAddrCodeHash(key)
 		if len(value) == 0 {
-			// Deleting an account also invalidates its address-keyed code
-			// state, so the code-domain frontier advances with it.
-			c.noteApplied(kv.CodeDomain, txNum)
 			if codeCache := c.caches[kv.CodeDomain]; codeCache != nil {
 				codeCache.Delete(key)
 			}
