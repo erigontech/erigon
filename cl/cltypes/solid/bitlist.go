@@ -20,6 +20,7 @@ import (
 	"encoding/json"
 	"errors"
 	"math/bits"
+	"slices"
 
 	"github.com/erigontech/erigon/cl/merkle_tree"
 	"github.com/erigontech/erigon/common/clonable"
@@ -222,9 +223,9 @@ func (u *BitList) Bits() int {
 	// The most significant bit is present in the last byte in the array.
 	var last byte
 	var byteLen int
-	for i := len(u.u) - 1; i >= 0; i-- {
-		if u.u[i] != 0 {
-			last = u.u[i]
+	for i, b := range slices.Backward(u.u) {
+		if b != 0 {
+			last = b
 			byteLen = i + 1
 			break
 		}

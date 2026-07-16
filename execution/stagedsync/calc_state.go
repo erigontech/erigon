@@ -3,6 +3,7 @@ package stagedsync
 import (
 	"fmt"
 	"math"
+	"slices"
 
 	"github.com/holiman/uint256"
 
@@ -293,9 +294,9 @@ type hasTxIndex interface{ GetIndex() uint32 }
 // a reverse scan stops at the first in-range element. maxTxIndex == MaxUint32
 // selects the block-end value (the whole block).
 func finalChangeUpTo[T hasTxIndex](changes []T, maxTxIndex uint32) (T, bool) {
-	for i := len(changes) - 1; i >= 0; i-- {
-		if changes[i].GetIndex() <= maxTxIndex {
-			return changes[i], true
+	for _, change := range slices.Backward(changes) {
+		if change.GetIndex() <= maxTxIndex {
+			return change, true
 		}
 	}
 	var zero T
