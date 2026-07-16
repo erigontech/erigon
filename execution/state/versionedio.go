@@ -373,7 +373,7 @@ func (s *ReadSet) Delete(addr accounts.Address) {
 func (s ReadSet) Len() int {
 	n := len(s.address) + len(s.balance) + len(s.nonce) + len(s.incarnation) +
 		len(s.selfDestruct) + len(s.createContract) +
-		len(s.code) + len(s.codeHash) + len(s.codeSize) + len(s.access)
+		len(s.code) + len(s.codeHash) + len(s.codeSize)
 	for _, inner := range s.storage {
 		n += len(inner)
 	}
@@ -2268,8 +2268,12 @@ func (io *VersionedIO) mergeTx(version Version, reads ReadSet, writes *WriteSet)
 	if n > len(io.outputs) {
 		io.outputs = append(io.outputs, make([]*WriteSet, n-len(io.outputs))...)
 	}
-	if reads.Len() > 0 {
-		if io.inputs[idx].readSet.Len() == 0 {
+	// Fold the read set when it carries typed reads OR access-only marks: an
+	// access-only phase has Len()==0 but must still reach io.inputs for the
+	// EIP-7928 BAL. Len() itself stays access-free so the parallel executor's
+	// HasReads/ReadSetIncarnation/ReadCount keep their read-presence semantics.
+	if reads.Len() > 0 || len(reads.access) > 0 {
+		if io.inputs[idx].readSet.Len() == 0 && len(io.inputs[idx].readSet.access) == 0 {
 			// Production call sites merge each tx once into an empty slot; hand the
 			// read set over directly (like RecordReads) instead of deep-copying.
 			io.inputs[idx] = versionedReadSet{version.Incarnation, reads}

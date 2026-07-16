@@ -873,6 +873,22 @@ func (sdb *IntraBlockState) GetDelegatedDesignation(addr accounts.Address) (acco
 	// eip-7702 - for account read recording we don't count this as
 	// it may not result in an actual gas recorded access - if it
 	// is it will be marked via a direct call
+	if sdb.versionMap != nil {
+		// Read through the version-aware CodePath so validation can reject a
+		// speculative execution that raced a prior transaction publishing its
+		// CodeHashPath and CodePath. Going through getCode would also report a
+		// BAL code access for non-delegated code, so use readCode directly and
+		// preserve the existing hook semantics below.
+		code, _, _, err := readCode(sdb, addr, false)
+		if err != nil {
+			return accounts.ZeroAddress, false, err
+		}
+		if delegation, ok := types.ParseDelegation(code); ok {
+			sdb.callCodeAccessHook(addr, code)
+			return delegation, true, nil
+		}
+		return accounts.ZeroAddress, false, nil
+	}
 	stateObject, err := sdb.getStateObject(addr, false)
 	if err != nil {
 		return accounts.ZeroAddress, false, err

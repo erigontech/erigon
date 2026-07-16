@@ -194,3 +194,44 @@ func TestGetDelegatedDesignationParallel_NoMaterialize_OwnWrite(t *testing.T) {
 	assert.Equal(t, target, got)
 	assert.Empty(t, ibs.stateObjects, "GetDelegatedDesignation must not materialize a stateObject")
 }
+
+// TestGetDelegatedDesignation_TracksSplitCodePublish reproduces a narrow
+// optimistic concurrency control (OCC) window where a prior transaction's
+// CodeHashPath is visible before its CodePath. The speculative read must record
+// the missing CodePath so validation rejects it once the delegation bytecode is
+// published.
+func TestGetDelegatedDesignation_TracksSplitCodePublish(t *testing.T) {
+	t.Parallel()
+	authority := accounts.InternAddress([20]byte{0xaa})
+	delegate := accounts.InternAddress([20]byte{0xbb})
+	delegation := accounts.NewCode(types.AddressToDelegation(delegate))
+	domainAccount := accounts.NewAccount()
+	domainAccount.Nonce = 1
+	domainAccount.CodeHash = accounts.EmptyCodeHash
+	reader := &codeReader{addr: authority, account: &domainAccount}
+	vm := NewVersionMap(nil)
+	priorVersion := Version{TxIndex: 0, Incarnation: 0}
+	vm.WriteCodeHash(authority, priorVersion, delegation.Hash, true)
+	ibs := NewWithVersionMap(reader, vm)
+	ibs.SetTxContext(1, 1)
+	ibs.SetVersion(0)
+	hash, err := ibs.GetCodeHash(authority)
+	require.NoError(t, err)
+	require.Equal(t, delegation.Hash, hash)
+	_, delegated, err := ibs.GetDelegatedDesignation(authority)
+	require.NoError(t, err)
+	require.False(t, delegated)
+	reads := ibs.VersionedReads()
+	_, tracked := reads.GetCode(authority)
+	require.True(t, tracked)
+	io := NewVersionedIO(1)
+	io.RecordReads(Version{TxIndex: 1, Incarnation: 0}, reads)
+	vm.WriteCode(authority, priorVersion, delegation, true)
+	validity := vm.ValidateVersion(1, io, func(readVersion, writeVersion Version) VersionValidity {
+		if readVersion == writeVersion {
+			return VersionValid
+		}
+		return VersionInvalid
+	}, false, "")
+	require.Equal(t, VersionInvalid, validity)
+}
