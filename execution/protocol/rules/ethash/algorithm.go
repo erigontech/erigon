@@ -30,8 +30,9 @@ import (
 	"time"
 	"unsafe"
 
-	keccak "github.com/erigontech/fastkeccak"
 	"golang.org/x/crypto/sha3"
+
+	keccak "github.com/erigontech/fastkeccak"
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/crypto"
@@ -137,7 +138,7 @@ func seedHash(block uint64) []byte {
 		return seed
 	}
 
-	h := common.NewHasher()
+	h := crypto.NewKeccak256Hasher()
 
 	for i := 0; i < int(block/epochLength); i++ {
 		h.Sha.Reset()
@@ -153,7 +154,7 @@ func seedHash(block uint64) []byte {
 		}
 	}
 
-	common.ReturnHasherToPool(h)
+	crypto.ReturnHasherToPool(h)
 
 	return seed
 }
