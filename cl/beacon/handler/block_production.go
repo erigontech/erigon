@@ -56,6 +56,7 @@ import (
 	"github.com/erigontech/erigon/cl/utils/bls"
 	"github.com/erigontech/erigon/cl/validator/attestation_producer"
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/common/length"
 	"github.com/erigontech/erigon/common/log/v3"
@@ -1405,7 +1406,7 @@ AttLoop:
 		}
 
 		// Check the validator's withdrawal credentials against the provided message.
-		hashedFrom := utils.Sha256(blsExecutionChange.Message.From[:])
+		hashedFrom := crypto.Sha256(blsExecutionChange.Message.From[:])
 		if !bytes.Equal(hashedFrom[1:], wc[1:]) {
 			continue
 		}

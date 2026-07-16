@@ -130,7 +130,7 @@ Decision point: whether to make BAL fetching a first-class blocking stage or an 
 
 **Bad-peer management** — two distinct penalty tracks layered on top of the per-peer request-rate limits:
 
-1. **Garbage / wrong hash.** Any non-sentinel payload whose `keccak256` does not equal the expected hash → immediate disconnect via `Sentry.PenalizePeer`. Same applies to `0xc0` claims that don't match the empty-BAL hash. No ambiguity: the peer is corrupt or malicious.
+1. **Garbage / wrong hash.** Any non-sentinel payload whose `keccak256Hash` does not equal the expected hash → immediate disconnect via `Sentry.PenalizePeer`. Same applies to `0xc0` claims that don't match the empty-BAL hash. No ambiguity: the peer is corrupt or malicious.
 2. **Silent withholding.** A peer that consistently returns `0x80` for BAL hashes we know to be non-empty is DoS-ing the stream without sending garbage. Maintain a per-peer score that decrements on each confirmed-withholding reply (expected ≠ empty-BAL hash but peer returned `0x80`) and increments on each valid answer; drop and temporarily ban below a threshold (N withholdings in a rolling window, or an absolute ratio — tune against the existing body-fetcher thresholds for parity). Same `Sentry.PenalizePeer` path so the usual peer telemetry and reconnection logic applies.
 
 Unit tests in the fetcher cover: valid full BAL accepted, valid empty BAL (`0xc0`) accepted when expected hash = empty-BAL hash, `0xc0`-with-non-empty-expected → kick, mismatched-hash → kick, and repeated-`0x80`-for-non-empty-expected → ban. Fetcher should emit metrics for each case so the behaviour is observable in production.

@@ -21,7 +21,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/polygon/heimdall/heimdalltest"
 )
@@ -35,7 +34,7 @@ func makeMilestone(start uint64, len uint) *Milestone {
 		Fields: WaypointFields{
 			StartBlock: new(big.Int).SetUint64(start),
 			EndBlock:   new(big.Int).SetUint64(start + uint64(len) - 1),
-			RootHash:   common.BytesToHash(crypto.Keccak256([]byte("ROOT"))),
+			RootHash:   crypto.Keccak256Hash([]byte("ROOT")),
 			Timestamp:  uint64(time.Now().Unix()),
 		},
 	}

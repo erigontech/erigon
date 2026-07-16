@@ -64,14 +64,9 @@ func TestTrieDeleteSubtree_ShortNode_Debug(t *testing.T) {
 	key := []byte{uint8(1)}
 	val := []byte{uint8(1)}
 
-	keyHash, err := common.HashData(key)
-	require.NoError(t, err)
-
-	addrHash1, err := common.HashData(addr1[:])
-	require.NoError(t, err)
-
-	addrHash2, err := common.HashData(addr2[:])
-	require.NoError(t, err)
+	keyHash := common.HashData(key)
+	addrHash1 := common.HashData(addr1[:])
+	addrHash2 := common.HashData(addr2[:])
 
 	key1 := dbutils.GenerateCompositeTrieKey(addrHash1, keyHash)
 	key2 := dbutils.GenerateCompositeTrieKey(addrHash2, keyHash)
@@ -248,7 +243,7 @@ func TestAccountNotRemovedAfterRemovingSubtrieAfterAccount(t *testing.T) {
 	key, err := crypto.GenerateKey()
 	require.NoError(t, err)
 	pubAddr := crypto.PubkeyToAddress(key.PublicKey)
-	addrHash, err := common.HashData(pubAddr[:])
+	addrHash := common.HashData(pubAddr[:])
 	require.NoError(t, err)
 	trie.UpdateAccount(addrHash[:], acc)
 
@@ -256,11 +251,11 @@ func TestAccountNotRemovedAfterRemovingSubtrieAfterAccount(t *testing.T) {
 	require.Equal(t, acc, accRes1)
 
 	val1 := []byte("1")
-	dataKey1, err := common.HashData([]byte("1"))
+	dataKey1 := common.HashData([]byte("1"))
 	require.NoError(t, err)
 
 	val2 := []byte("2")
-	dataKey2, err := common.HashData([]byte("2"))
+	dataKey2 := common.HashData([]byte("2"))
 	require.NoError(t, err)
 
 	trie.Update(dbutils.GenerateCompositeTrieKey(addrHash, dataKey1), val1)

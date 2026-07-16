@@ -14,7 +14,7 @@
 // You should have received a copy of the GNU Lesser General Public License
 // along with Erigon. If not, see <http://www.gnu.org/licenses/>.
 
-package utils_test
+package crypto_test
 
 import (
 	"bytes"
@@ -23,7 +23,7 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/erigontech/erigon/cl/utils"
+	"github.com/erigontech/erigon/common/crypto"
 )
 
 func bytesOfLen(n int, seed byte) []byte {
@@ -57,7 +57,7 @@ func TestSha256EqualsStdlibOfConcat(t *testing.T) {
 				want := sha256.Sum256(concat.Bytes())
 				name := fmt.Sprintf("data=%d/extras=%dx%d", dataLen, nExtras, extraLen)
 				t.Run(name, func(t *testing.T) {
-					if got := utils.Sha256(data, extras...); got != want {
+					if got := crypto.Sha256(data, extras...); got != want {
 						t.Errorf("Sha256 = %x, want %x", got, want)
 					}
 				})
@@ -72,8 +72,8 @@ func TestSha256EqualsStdlibOfConcat(t *testing.T) {
 func TestSha256Concurrent(t *testing.T) {
 	small, smallExtra := bytesOfLen(32, 1), bytesOfLen(32, 2)
 	big, bigExtra := bytesOfLen(500, 3), bytesOfLen(500, 4)
-	wantSmall := utils.Sha256(small, smallExtra)
-	wantBig := utils.Sha256(big, bigExtra)
+	wantSmall := crypto.Sha256(small, smallExtra)
+	wantBig := crypto.Sha256(big, bigExtra)
 
 	var wg sync.WaitGroup
 	for range 8 {
@@ -81,11 +81,11 @@ func TestSha256Concurrent(t *testing.T) {
 		go func() {
 			defer wg.Done()
 			for range 500 {
-				if got := utils.Sha256(small, smallExtra); got != wantSmall {
+				if got := crypto.Sha256(small, smallExtra); got != wantSmall {
 					t.Errorf("stack path = %x, want %x", got, wantSmall)
 					return
 				}
-				if got := utils.Sha256(big, bigExtra); got != wantBig {
+				if got := crypto.Sha256(big, bigExtra); got != wantBig {
 					t.Errorf("pooled path = %x, want %x", got, wantBig)
 					return
 				}
@@ -98,42 +98,42 @@ func TestSha256Concurrent(t *testing.T) {
 // A nil extra must hash the same as no extra at all.
 func TestSha256NilExtra(t *testing.T) {
 	data := bytesOfLen(32, 1)
-	if got, want := utils.Sha256(data, nil), sha256.Sum256(data); got != want {
-		t.Errorf("Sha256(data, nil) = %x, want %x", got, want)
+	if got, want := crypto.Sha256(data, nil), sha256.Sum256(data); got != want {
+		t.Errorf("crypto.Sha256(data, nil) = %x, want %x", got, want)
 	}
 }
 
 // Repeated calls must not leak state between invocations.
 func TestSha256Repeatable(t *testing.T) {
 	a, b := bytesOfLen(32, 2), bytesOfLen(32, 3)
-	first := utils.Sha256(a, b)
+	first := crypto.Sha256(a, b)
 	for range 100 {
-		if got := utils.Sha256(a, b); got != first {
+		if got := crypto.Sha256(a, b); got != first {
 			t.Fatalf("Sha256 not repeatable: %x != %x", got, first)
 		}
-		utils.Sha256(bytesOfLen(500, 9), bytesOfLen(500, 8)) // dirty the pooled hasher
+		crypto.Sha256(bytesOfLen(500, 9), bytesOfLen(500, 8)) // dirty the pooled join buffer
 	}
 }
 
-// The pooled path still allocates its digest through the hash.Hash interface. No
-// caller reaches it today, so pin that it stays the exception rather than spreading.
-func TestSha256StreamedPathAllocs(t *testing.T) {
+// Joins too large for the stack buffer take the pooled scratch buffer, which keeps
+// them allocation-free too.
+func TestSha256JoinedPathAllocFree(t *testing.T) {
 	big, extra := bytesOfLen(4096, 7), bytesOfLen(32, 8)
-	if n := testing.AllocsPerRun(200, func() { utils.Sha256(big, extra) }); n != 1 {
-		t.Errorf("Sha256(4096B, 32B) allocs = %v, want 1 (pooled path)", n)
+	if n := testing.AllocsPerRun(200, func() { crypto.Sha256(big, extra) }); n != 0 {
+		t.Errorf("crypto.Sha256(4096B, 32B) allocs = %v, want 0 (pooled join buffer)", n)
 	}
 }
 
 func TestSha256AllocFree(t *testing.T) {
 	a, b := bytesOfLen(32, 4), bytesOfLen(32, 5)
-	if n := testing.AllocsPerRun(200, func() { utils.Sha256(a, b) }); n != 0 {
-		t.Errorf("Sha256(32B, 32B) allocs = %v, want 0", n)
+	if n := testing.AllocsPerRun(200, func() { crypto.Sha256(a, b) }); n != 0 {
+		t.Errorf("crypto.Sha256(32B, 32B) allocs = %v, want 0", n)
 	}
-	if boundary := bytesOfLen(32, 9); testing.AllocsPerRun(200, func() { utils.Sha256(boundary, boundary) }) != 0 {
+	if boundary := bytesOfLen(32, 9); testing.AllocsPerRun(200, func() { crypto.Sha256(boundary, boundary) }) != 0 {
 		t.Errorf("Sha256 at the 64B boundary must stay on the stack path")
 	}
 	big := bytesOfLen(4096, 6)
-	if n := testing.AllocsPerRun(200, func() { utils.Sha256(big) }); n != 0 {
-		t.Errorf("Sha256(4096B) allocs = %v, want 0", n)
+	if n := testing.AllocsPerRun(200, func() { crypto.Sha256(big) }); n != 0 {
+		t.Errorf("crypto.Sha256(4096B) allocs = %v, want 0", n)
 	}
 }

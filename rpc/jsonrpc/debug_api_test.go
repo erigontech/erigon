@@ -717,7 +717,7 @@ func TestAccountRange(t *testing.T) {
 		require.Len(t, result.Accounts[addr].Storage, 35)
 		require.Equal(t, 1, int(result.Accounts[addr].Nonce))
 		for _, v := range result.Accounts {
-			hashedCode, _ := common.HashData(v.Code)
+			hashedCode := common.HashData(v.Code)
 			require.Equal(t, v.CodeHash.String(), hashedCode.String())
 		}
 	})

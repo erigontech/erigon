@@ -27,8 +27,8 @@ import (
 	"github.com/erigontech/erigon/cl/phase1/core/state"
 	"github.com/erigontech/erigon/cl/phase1/core/state/shuffling"
 	"github.com/erigontech/erigon/cl/spectest/spectest"
-	"github.com/erigontech/erigon/cl/utils"
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/crypto"
 )
 
 type ShufflingCore struct {
@@ -47,7 +47,7 @@ func (b *ShufflingCore) Run(t *testing.T, root fs.FS, c spectest.TestCase) (err 
 	s := state.New(&clparams.MainnetBeaconConfig)
 	preInputs := shuffling.ComputeShuffledIndexPreInputs(s.BeaconConfig(), meta.Seed)
 	for idx, v := range meta.Mapping {
-		shuffledIdx, err := shuffling.ComputeShuffledIndex(s.BeaconConfig(), uint64(idx), uint64(meta.Count), meta.Seed, preInputs, utils.Sha256)
+		shuffledIdx, err := shuffling.ComputeShuffledIndex(s.BeaconConfig(), uint64(idx), uint64(meta.Count), meta.Seed, preInputs, crypto.Sha256)
 		require.NoError(t, err)
 		assert.EqualValues(t, v, shuffledIdx)
 	}

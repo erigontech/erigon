@@ -623,13 +623,11 @@ func (tds *TrieDbState) ReadAccountDataForDebug(address accounts.Address) (*acco
 func (tds *TrieDbState) ReadAccountData(address accounts.Address) (*accounts.Account, error) {
 	var account *accounts.Account
 	addressValue := address.Value()
-	addrHash, err := common.HashData(addressValue[:])
-	if err != nil {
-		return nil, err
-	}
+	addrHash := common.HashData(addressValue[:])
 
 	account, ok := tds.GetAccount(addrHash)
 	if !ok {
+		var err error
 		account, err = tds.StateReader.ReadAccountData(address)
 		if err != nil {
 			return nil, err
@@ -659,10 +657,7 @@ func (tds *TrieDbState) ReadAccountStorage(address accounts.Address, key account
 		}
 	}
 	keyValue := key.Value()
-	seckey, err := common.HashData(keyValue[:])
-	if err != nil {
-		return uint256.Int{}, false, err
-	}
+	seckey := common.HashData(keyValue[:])
 
 	storagePlainKey := dbutils.GenerateStoragePlainKey(addressValue, keyValue)
 
@@ -723,15 +718,12 @@ func (tds *TrieDbState) ReadAccountCode(address accounts.Address) (code []byte, 
 		code, err = tds.StateReader.ReadAccountCode(address)
 	}
 	if tds.resolveReads {
-		addrHash, err1 := common.HashData(addressValue[:])
-		if err1 != nil {
-			return nil, err
-		}
+		addrHash := common.HashData(addressValue[:])
 		tds.currentBuffer.accountReads[addrHash] = address
 		// we have to be careful, because the code might change
 		// during the block executuion, so we are always
 		// storing the latest code hash
-		codeHash := accounts.InternCodeHash(crypto.HashData(code))
+		codeHash := accounts.InternCodeHash(crypto.Keccak256Hash(code))
 		tds.currentBuffer.codeReads[addrHash] = witnesstypes.CodeWithHash{Code: code, CodeHash: codeHash}
 		tds.retainListBuilder.ReadCode(codeHash, code)
 	}
@@ -756,12 +748,9 @@ func (tds *TrieDbState) ReadAccountCodeSize(address accounts.Address) (codeSize 
 			return 0, err
 		}
 
-		codeHash := crypto.HashData(code)
+		codeHash := crypto.Keccak256Hash(code)
 
-		addrHash, err1 := common.HashData(addressValue[:])
-		if err1 != nil {
-			return 0, err1
-		}
+		addrHash := common.HashData(addressValue[:])
 		tds.currentBuffer.accountReads[addrHash] = address
 		// we have to be careful, because the code might change
 		// during the block executuion, so we are always
@@ -827,10 +816,7 @@ func (tsw *TrieStateWriter) UpdateAccountCode(address accounts.Address, incarnat
 		tsw.tds.retainListBuilder.CreateCode(codeHash)
 	}
 	addressValue := address.Value()
-	addrHash, err := common.HashData(addressValue[:])
-	if err != nil {
-		return err
-	}
+	addrHash := common.HashData(addressValue[:])
 	tsw.tds.currentBuffer.codeUpdates[addrHash] = code
 	return nil
 }
@@ -847,10 +833,7 @@ func (tsw *TrieStateWriter) WriteAccountStorage(address accounts.Address, incarn
 	}
 	tsw.tds.currentBuffer.storageIncarnation[addrHash] = incarnation
 	keyValue := key.Value()
-	seckey, err := common.HashData(keyValue[:])
-	if err != nil {
-		return err
-	}
+	seckey := common.HashData(keyValue[:])
 	var storageKey common.StorageKey
 	copy(storageKey[:], dbutils.GenerateCompositeStorageKey(addrHash, incarnation, seckey))
 
