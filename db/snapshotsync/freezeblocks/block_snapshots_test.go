@@ -81,7 +81,8 @@ func TestBlockReaderPrefersTxBlockView(t *testing.T) {
 	require.False(t, okLive, "retired segment must be gone from the live set")
 
 	// ...but a reader using the tx's pinned view still does.
-	_, okTx, relTx := blockReader.viewSingleFile(tx, snaptype2.Transactions, blk)
+	txView, relTx := blockReader.view(tx)
+	_, okTx := txView.Segment(snaptype2.Transactions, blk)
 	relTx()
 	require.True(t, okTx, "reader must resolve the retired segment via the tx's pinned view")
 }
