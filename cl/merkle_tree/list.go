@@ -90,6 +90,23 @@ func packBits(bytes []byte) [][32]byte {
 	return chunks
 }
 
+// packBitsInto packs bytes into 32-byte chunks, reusing dst's backing array.
+// The returned slice keeps one spare capacity slot so a subsequent odd-length
+// padding append (MerkleizeVector) reuses it instead of reallocating.
+func packBitsInto(dst [][32]byte, bytes []byte) [][32]byte {
+	n := (len(bytes) + 31) / 32
+	if cap(dst) < n+1 {
+		dst = make([][32]byte, n, n+1)
+	} else {
+		dst = dst[:n]
+	}
+	for i := range n {
+		dst[i] = [32]byte{}
+		copy(dst[i][:], bytes[i*32:])
+	}
+	return dst
+}
+
 func parseBitlist(dst, buf []byte) ([]byte, uint64) {
 	msb := uint8(bits.Len8(buf[len(buf)-1])) - 1
 	size := uint64(8*(len(buf)-1) + int(msb))
@@ -113,9 +130,8 @@ func TransactionsListRoot(transactions [][]byte) ([32]byte, error) {
 }
 
 func ListObjectSSZRoot[T ssz.HashableSSZ](list []T, limit uint64) ([32]byte, error) {
-	// Allocate a local buffer instead of using the global hasher buffer.
-	// The global mutex (mu2) caused reentrant deadlocks when element.HashSSZ()
-	// itself called ListObjectSSZRoot (e.g., PartialDataColumnSidecar → Header list → PartialDataColumnHeader → KzgCommitments list).
+	// Allocate a local buffer instead of a shared global one: HashSSZ() can call
+	// ListObjectSSZRoot re-entrantly, so a shared buffer under a lock would deadlock.
 	subLeaves := make([][32]byte, len(list))
 	for i, element := range list {
 		subLeaf, err := element.HashSSZ()
