@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"maps"
+	"slices"
 	"sort"
 	"time"
 
@@ -582,8 +583,7 @@ func verifyUnverifiedGloasPayloads(ctx context.Context, cfg *Cfg) {
 	}
 
 	swept := 0
-	for i := len(blocks) - 1; i >= 0; i-- {
-		item := blocks[i]
+	for _, item := range slices.Backward(blocks) {
 		if cfg.forkChoice.IsPayloadVerified(item.root) {
 			continue
 		}
