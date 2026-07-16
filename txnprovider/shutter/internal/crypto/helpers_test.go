@@ -34,3 +34,26 @@ func EnsureGobable(t *testing.T, src, dst any) {
 	require.NoError(t, err)
 	assert.Equal(t, src, dst)
 }
+
+var globalBuf []byte
+
+func BenchmarkAppend(b *testing.B) {
+	data := make([]byte, 32)
+	p := byte(1)
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		globalBuf = append([]byte{p}, data...)
+	}
+}
+
+func BenchmarkMakeCopy(b *testing.B) {
+	data := make([]byte, 32)
+	p := byte(1)
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		buf := make([]byte, 1+len(data))
+		buf[0] = p
+		copy(buf[1:], data)
+		globalBuf = buf
+	}
+}
