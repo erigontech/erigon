@@ -31,6 +31,7 @@ import (
 	"github.com/erigontech/erigon/cl/phase1/core/caches"
 	"github.com/erigontech/erigon/cl/phase1/core/state/shuffling"
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/crypto"
 
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/utils"
@@ -393,7 +394,7 @@ func (b *CachingBeaconState) ComputeNextSyncCommittee() (*solid.SyncCommittee, e
 			activeValidatorCount,
 			seed,
 			preInputs,
-			utils.Sha256,
+			crypto.Sha256,
 		)
 		if err != nil {
 			return nil, err
@@ -407,7 +408,7 @@ func (b *CachingBeaconState) ComputeNextSyncCommittee() (*solid.SyncCommittee, e
 		// random_bytes = hash(seed + uint_to_bytes(i // groupSize)); one hash covers a whole group.
 		if group := i / groupSize; group != cachedGroup {
 			binary.LittleEndian.PutUint64(buf[32:], group)
-			cachedHash = utils.Sha256(buf[:])
+			cachedHash = crypto.Sha256(buf[:])
 			cachedGroup = group
 		}
 		if isElectra {
@@ -605,7 +606,7 @@ func (b *CachingBeaconState) ComputePTC(slot uint64) ([]uint64, error) {
 	slotBytes := make([]byte, 8)
 	binary.LittleEndian.PutUint64(slotBytes, slot)
 	seedInput := append(baseSeed[:], slotBytes...)
-	seed := utils.Sha256(seedInput)
+	seed := crypto.Sha256(seedInput)
 
 	// Concatenate all committees for this slot in order
 	indices := []uint64{}

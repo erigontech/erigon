@@ -26,13 +26,13 @@ import (
 	"github.com/erigontech/erigon/cl/phase1/core/state"
 	"github.com/erigontech/erigon/cl/phase1/core/state/raw"
 	"github.com/erigontech/erigon/cl/phase1/core/state/shuffling"
-	"github.com/erigontech/erigon/cl/utils"
 	"github.com/erigontech/erigon/cl/utils/eth2shuffle"
+	"github.com/erigontech/erigon/common/crypto"
 )
 
 func BenchmarkLambdaShuffledIndex(b *testing.B) {
 	eth2ShuffleHash := func(data []byte) []byte {
-		hashed := utils.Sha256(data)
+		hashed := crypto.Sha256(data)
 		return hashed[:]
 	}
 	seed := [32]byte{2, 35, 6}
@@ -49,7 +49,7 @@ func BenchmarkErigonShuffledIndex(b *testing.B) {
 	preInputs := shuffling.ComputeShuffledIndexPreInputs(s.BeaconConfig(), seed)
 
 	for b.Loop() {
-		shuffling.ComputeShuffledIndex(s.BeaconConfig(), 10, 1000, seed, preInputs, utils.Sha256)
+		shuffling.ComputeShuffledIndex(s.BeaconConfig(), 10, 1000, seed, preInputs, crypto.Sha256)
 	}
 }
 

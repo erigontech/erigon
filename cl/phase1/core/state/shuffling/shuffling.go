@@ -23,9 +23,8 @@ import (
 
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/phase1/core/state/raw"
+	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/common/log/v3"
-
-	"github.com/erigontech/erigon/cl/utils"
 )
 
 func ComputeProposerIndex(b *raw.BeaconState, indices []uint64, seed [32]byte) (uint64, error) {
@@ -43,7 +42,7 @@ func ComputeProposerIndex(b *raw.BeaconState, indices []uint64, seed [32]byte) (
 	input := make([]byte, 40)
 	preInputs := ComputeShuffledIndexPreInputs(b.BeaconConfig(), seed)
 	for {
-		shuffled, err := ComputeShuffledIndex(b.BeaconConfig(), i%total, total, seed, preInputs, utils.Sha256)
+		shuffled, err := ComputeShuffledIndex(b.BeaconConfig(), i%total, total, seed, preInputs, crypto.Sha256)
 		if err != nil {
 			return 0, err
 		}
@@ -53,7 +52,7 @@ func ComputeProposerIndex(b *raw.BeaconState, indices []uint64, seed [32]byte) (
 		}
 		copy(input, seed[:])
 		binary.LittleEndian.PutUint64(input[32:], i/32)
-		randomByte := uint64(utils.Sha256(input)[i%32])
+		randomByte := uint64(crypto.Sha256(input)[i%32])
 		validator, err := b.ValidatorForValidatorIndex(int(candidateIndex))
 		if err != nil {
 			return 0, err
@@ -79,7 +78,7 @@ func computeProposerIndexElectra(b *raw.BeaconState, indices []uint64, seed [32]
 
 	preInputs := ComputeShuffledIndexPreInputs(b.BeaconConfig(), seed)
 	for {
-		shuffled, err := ComputeShuffledIndex(b.BeaconConfig(), i%total, total, seed, preInputs, utils.Sha256)
+		shuffled, err := ComputeShuffledIndex(b.BeaconConfig(), i%total, total, seed, preInputs, crypto.Sha256)
 		if err != nil {
 			return 0, err
 		}
@@ -91,7 +90,7 @@ func computeProposerIndexElectra(b *raw.BeaconState, indices []uint64, seed [32]
 		group := i / 16
 		if group != cachedGroup {
 			binary.LittleEndian.PutUint64(buf[32:], group)
-			cachedHash = utils.Sha256(buf[:])
+			cachedHash = crypto.Sha256(buf[:])
 			cachedGroup = group
 		}
 		offset := (i % 16) * 2
@@ -129,7 +128,7 @@ func ComputeProposerIndices(b *raw.BeaconState, epoch uint64, seed [32]byte, ind
 	for i := uint64(0); i < b.BeaconConfig().SlotsPerEpoch; i++ {
 		// Hash seed + slot to get per-slot seed
 		binary.LittleEndian.PutUint64(input[32:], startSlot+i)
-		slotSeed := utils.Sha256(input)
+		slotSeed := crypto.Sha256(input)
 
 		if clVersion >= clparams.GloasVersion {
 			indicies, err := ComputeBalanceWeightedSelection(b, indices, slotSeed, 1, true)
@@ -213,7 +212,7 @@ func ComputeBalanceWeightedSelection(
 		if shuffleIndices {
 			var err error
 			nextIndex, err = ComputeShuffledIndex(
-				s.BeaconConfig(), nextIndex, total, seed, preInputs, utils.Sha256,
+				s.BeaconConfig(), nextIndex, total, seed, preInputs, crypto.Sha256,
 			)
 			if err != nil {
 				return nil, fmt.Errorf("ComputeBalanceWeightedSelection: %w", err)
@@ -226,7 +225,7 @@ func ComputeBalanceWeightedSelection(
 		group := i / 16
 		if group != cachedGroup {
 			binary.LittleEndian.PutUint64(buf[32:], group)
-			cachedHash = utils.Sha256(buf[:])
+			cachedHash = crypto.Sha256(buf[:])
 			cachedGroup = group
 		}
 		offset := (i % 16) * 2
@@ -266,7 +265,7 @@ func ComputeBalanceWeightedAcceptance(s *raw.BeaconState, index uint64, seed [32
 	var buf [40]byte
 	copy(buf[:32], seed[:])
 	binary.LittleEndian.PutUint64(buf[32:], i/16)
-	randomBytes := utils.Sha256(buf[:])
+	randomBytes := crypto.Sha256(buf[:])
 
 	offset := (i % 16) * 2
 	randomValue := uint64(binary.LittleEndian.Uint16(randomBytes[offset : offset+2]))

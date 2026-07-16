@@ -24,6 +24,7 @@ import (
 	"crypto/ecdsa"
 	"crypto/elliptic"
 	"crypto/rand"
+	"crypto/sha256"
 	"encoding/hex"
 	"errors"
 	"fmt"
@@ -67,14 +68,14 @@ type EllipticCurve interface {
 	Unmarshal(data []byte) (x, y *big.Int)
 }
 
-// keccakStackBuf sizes the join buffer for two 32-byte inputs; larger joins take
-// joinBufPool.
-const keccakStackBuf = 64
+// joinStackBuf sizes the join buffer for the two 32-byte inputs such calls join;
+// larger joins take joinBufPool.
+const joinStackBuf = 64
 
 // joinBufPool holds scratch buffers for joins too large for the stack buffer.
 var joinBufPool = sync.Pool{
 	New: func() any {
-		b := make([]byte, 0, 2*keccakStackBuf)
+		b := make([]byte, 0, 2*joinStackBuf)
 		return &b
 	},
 }
@@ -83,10 +84,52 @@ var joinBufPool = sync.Pool{
 // does not pin a large buffer per processor for the process lifetime.
 const joinBufKeepCap = 64 * 1024
 
+type HashFunc func(data []byte, extras ...[]byte) common.Hash
+
+// Sha256 returns the SHA-256
+func Sha256(data []byte, extras ...[]byte) common.Hash {
+	if len(extras) == 0 { // fast-path
+		return sha256.Sum256(data)
+	}
+	total := len(data)
+	for _, extra := range extras {
+		total += len(extra)
+	}
+	if total > joinStackBuf { // slow-path heap-allocation
+		return sha256Joined(data, extras)
+	}
+	// fast-path stack-allocation
+	var buf [joinStackBuf]byte
+	n := copy(buf[:], data)
+	for _, extra := range extras {
+		n += copy(buf[n:], extra)
+	}
+	return sha256.Sum256(buf[:n])
+}
+
+func sha256Joined(data []byte, extras [][]byte) common.Hash {
+	p := joinBufPool.Get().(*[]byte)
+	buf := append((*p)[:0], data...)
+	for _, extra := range extras {
+		buf = append(buf, extra...)
+	}
+	out := common.Hash(sha256.Sum256(buf))
+	putJoinBuf(p, buf)
+	return out
+}
+
+// putJoinBuf returns a scratch buffer to the pool
+func putJoinBuf(p *[]byte, buf []byte) {
+	if cap(buf) <= joinBufKeepCap {
+		*p = buf
+	}
+	joinBufPool.Put(p)
+}
+
 // Keccak256 calculates and returns the Keccak256 hash of the input data.
 // Prefer Keccak256Hash where a slice is not required: this allocates its result.
 func Keccak256(data ...[]byte) []byte {
-	h := keccak256(data)
+	h := keccak256Hash(data)
 	b := make([]byte, 32)
 	copy(b, h[:])
 	return b
@@ -99,28 +142,20 @@ func Keccak256Hash(data []byte) common.Hash {
 	return keccak.Sum256(data)
 }
 
-// keccak256 hashes the concatenation of data.
-//
-// It hashes through the concrete keccak.Sum256, never a KeccakState. The interface
-// is what costs, not the pooling:
-//   - Write and Read are interface methods, so the compiler must assume they leak.
-//     Since escape analysis is flow-insensitive, one such branch pushes every
-//     caller's buffer onto the heap, including callers that never reach it. The
-//     concrete keccak.Hasher is no escape: its Write falls back to an interface.
-//   - So a KeccakState cannot reach zero allocations however it is pooled: hashing
-//     a caller-local buffer through one costs an alloc and ~30% more time.
-func keccak256(data [][]byte) common.Hash {
-	if len(data) == 1 {
+// keccak256Hash
+func keccak256Hash(data [][]byte) common.Hash {
+	if len(data) == 1 { // fast-path
 		return keccak.Sum256(data[0])
 	}
 	total := 0
 	for _, b := range data {
 		total += len(b)
 	}
-	if total > keccakStackBuf {
+	if total > joinStackBuf { // slow-path heap-allocation
 		return keccak256Joined(data)
 	}
-	var buf [keccakStackBuf]byte
+	// fast-path stack-allocation
+	var buf [joinStackBuf]byte
 	n := 0
 	for _, b := range data {
 		n += copy(buf[n:], b)
@@ -135,13 +170,7 @@ func keccak256Joined(data [][]byte) common.Hash {
 		buf = append(buf, b...)
 	}
 	out := keccak.Sum256(buf)
-	// Keep the grown buffer only while it stays within the cap. Past it, return the
-	// original instead, which append left untouched when it reallocated, rather than
-	// dropping the pool entry.
-	if cap(buf) <= joinBufKeepCap {
-		*p = buf
-	}
-	joinBufPool.Put(p)
+	putJoinBuf(p, buf)
 	return out
 }
 
