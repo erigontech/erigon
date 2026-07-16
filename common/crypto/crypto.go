@@ -135,8 +135,7 @@ func Keccak256(data ...[]byte) []byte {
 	return b
 }
 
-// Keccak256Hash calculates and returns the Keccak256 hash of the input data,
-// converting it to an internal Hash data structure.
+// Keccak256Hash calc Keccak256
 // Single-argument by design: a variadic signature exceeds the inlining budget.
 func Keccak256Hash(data []byte) common.Hash {
 	return keccak.Sum256(data)
