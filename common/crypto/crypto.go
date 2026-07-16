@@ -66,11 +66,6 @@ type EllipticCurve interface {
 	Unmarshal(data []byte) (x, y *big.Int)
 }
 
-// HashData hashes the provided data and returns a 32 byte hash.
-func HashData(data []byte) common.Hash {
-	return keccak.Sum256(data)
-}
-
 // Keccak256 calculates and returns the Keccak256 hash of the input data.
 func Keccak256(data ...[]byte) []byte {
 	b := make([]byte, 32)

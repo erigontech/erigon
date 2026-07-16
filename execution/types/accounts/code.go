@@ -38,7 +38,7 @@ func NewCode(bytes []byte) Code {
 	if len(bytes) == 0 {
 		return EmptyCode
 	}
-	return Code{Hash: InternCodeHash(crypto.HashData(bytes)), Bytes: bytes}
+	return Code{Hash: InternCodeHash(crypto.Keccak256Hash(bytes)), Bytes: bytes}
 }
 
 func (c Code) Len() int      { return len(c.Bytes) }

@@ -731,7 +731,7 @@ func (tds *TrieDbState) ReadAccountCode(address accounts.Address) (code []byte, 
 		// we have to be careful, because the code might change
 		// during the block executuion, so we are always
 		// storing the latest code hash
-		codeHash := accounts.InternCodeHash(crypto.HashData(code))
+		codeHash := accounts.InternCodeHash(crypto.Keccak256Hash(code))
 		tds.currentBuffer.codeReads[addrHash] = witnesstypes.CodeWithHash{Code: code, CodeHash: codeHash}
 		tds.retainListBuilder.ReadCode(codeHash, code)
 	}
@@ -756,7 +756,7 @@ func (tds *TrieDbState) ReadAccountCodeSize(address accounts.Address) (codeSize 
 			return 0, err
 		}
 
-		codeHash := crypto.HashData(code)
+		codeHash := crypto.Keccak256Hash(code)
 
 		addrHash, err1 := common.HashData(addressValue[:])
 		if err1 != nil {
