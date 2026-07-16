@@ -21,6 +21,7 @@ import (
 	"errors"
 	"fmt"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/erigontech/erigon/db/datadir"
@@ -268,7 +269,7 @@ type tx struct {
 type Tx struct {
 	kv.Tx
 	tx
-	visibleEnds [kv.DomainLen]domainVisibleEnd
+	visibleEnds domainVisibleEnds
 }
 
 type RwTx struct {
@@ -276,10 +277,37 @@ type RwTx struct {
 	tx
 }
 
-type domainVisibleEnd struct {
-	once sync.Once
-	end  uint64
-	ok   bool
+type domainVisibleEnds struct {
+	ends  [kv.DomainLen]uint64
+	mu    sync.Mutex
+	state atomic.Uint32
+}
+
+func (v *domainVisibleEnds) get(tx *Tx, domain kv.Domain) (uint64, bool) {
+	bit := uint32(1) << uint32(domain)
+	state := v.state.Load()
+	if state&bit != 0 {
+		return v.ends[domain], state&(bit<<uint32(kv.DomainLen)) != 0
+	}
+	return v.load(tx, domain, bit)
+}
+
+func (v *domainVisibleEnds) load(tx *Tx, domain kv.Domain, bit uint32) (uint64, bool) {
+	v.mu.Lock()
+	defer v.mu.Unlock()
+
+	state := v.state.Load()
+	availableBit := bit << uint32(kv.DomainLen)
+	if state&bit == 0 {
+		end, ok := tx.aggtx.DomainVisibleEnd(domain, tx.Tx)
+		v.ends[domain] = end
+		state |= bit
+		if ok {
+			state |= availableBit
+		}
+		v.state.Store(state)
+	}
+	return v.ends[domain], state&availableBit != 0
 }
 
 func (tx *tx) ForceReopenUnderlyingFilesTx() {
@@ -741,11 +769,7 @@ func (tx *RwTx) DomainProgress(domain kv.Domain) uint64 {
 	return tx.aggtx.DomainProgress(domain, tx.RwTx)
 }
 func (tx *Tx) DomainVisibleEnd(domain kv.Domain) (uint64, bool) {
-	visibleEnd := &tx.visibleEnds[domain]
-	visibleEnd.once.Do(func() {
-		visibleEnd.end, visibleEnd.ok = tx.aggtx.DomainVisibleEnd(domain, tx.Tx)
-	})
-	return visibleEnd.end, visibleEnd.ok
+	return tx.visibleEnds.get(tx, domain)
 }
 func (tx *RwTx) DomainVisibleEnd(domain kv.Domain) (uint64, bool) {
 	return tx.aggtx.DomainVisibleEnd(domain, tx.RwTx)
