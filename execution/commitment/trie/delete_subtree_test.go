@@ -244,7 +244,6 @@ func TestAccountNotRemovedAfterRemovingSubtrieAfterAccount(t *testing.T) {
 	require.NoError(t, err)
 	pubAddr := crypto.PubkeyToAddress(key.PublicKey)
 	addrHash := common.HashData(pubAddr[:])
-	require.NoError(t, err)
 	trie.UpdateAccount(addrHash[:], acc)
 
 	accRes1, _ := trie.GetAccount(addrHash[:])
@@ -252,11 +251,9 @@ func TestAccountNotRemovedAfterRemovingSubtrieAfterAccount(t *testing.T) {
 
 	val1 := []byte("1")
 	dataKey1 := common.HashData([]byte("1"))
-	require.NoError(t, err)
 
 	val2 := []byte("2")
 	dataKey2 := common.HashData([]byte("2"))
-	require.NoError(t, err)
 
 	trie.Update(dbutils.GenerateCompositeTrieKey(addrHash, dataKey1), val1)
 	trie.Update(dbutils.GenerateCompositeTrieKey(addrHash, dataKey2), val2)
