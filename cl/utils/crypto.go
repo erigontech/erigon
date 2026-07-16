@@ -43,17 +43,17 @@ const sha256StackBuf = 64
 
 // Sha256 returns the SHA-256 of data followed by extras.
 //
-// It hashes through the concrete sha256.Sum256, never a pooled hash.Hash. That is
-// what keeps the arguments on the caller's stack, and it is load-bearing:
-//   - Write is an interface method, so the compiler must assume a pooled hasher
-//     leaks its argument. Escape analysis is flow-insensitive, so a single pooled
-//     branch pushes every caller's buffer onto the heap, including callers that
-//     never reach it.
-//   - A pool does not pay for itself here. On Sha256(32B, 32B) a pooled hasher
-//     costs 2 allocs and is ~3x slower at -cpu=16: the allocations it forces, not
-//     the pool, bound the scaling, so the gap widens as cores grow.
-//   - Joins above sha256StackBuf still pool, but a scratch buffer rather than a
-//     hasher, which stays allocation-free and beats a pooled hasher on that path too.
+// It hashes through the concrete sha256.Sum256, never a hash.Hash. The interface is
+// what costs, not the pooling:
+//   - Write and Sum are interface methods, so the compiler must assume they leak.
+//     That alone heap-allocates the digest, and since escape analysis is
+//     flow-insensitive, one such branch also pushes every caller's buffer out,
+//     including callers that never reach it.
+//   - So a hash.Hash cannot reach zero allocations however it is pooled. On
+//     Sha256(32B, 32B) it costs 1-3 allocs and several times the time, and the gap
+//     widens with core count, because those allocations bound the scaling.
+//   - Pooling itself is fine. Joins above sha256StackBuf pool their scratch buffer,
+//     which append copies into, so that path stays allocation-free too.
 func Sha256(data []byte, extras ...[]byte) common.Hash {
 	if len(extras) == 0 {
 		return common.Hash(sha256.Sum256(data))
