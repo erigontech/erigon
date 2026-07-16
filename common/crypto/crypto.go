@@ -30,6 +30,7 @@ import (
 	"io"
 	"math/big"
 	"os"
+	"sync"
 
 	keccak "github.com/erigontech/fastkeccak"
 	"github.com/holiman/uint256"
@@ -66,8 +67,21 @@ type EllipticCurve interface {
 	Unmarshal(data []byte) (x, y *big.Int)
 }
 
-// keccakStackBuf sizes the join buffer for two 32-byte inputs; larger joins use the heap.
+// keccakStackBuf sizes the join buffer for two 32-byte inputs; larger joins take
+// joinBufPool.
 const keccakStackBuf = 64
+
+// joinBufPool holds scratch buffers for joins too large for the stack buffer.
+var joinBufPool = sync.Pool{
+	New: func() any {
+		b := make([]byte, 0, 2*keccakStackBuf)
+		return &b
+	},
+}
+
+// joinBufKeepCap bounds what a join returns to the pool, so one outsized call
+// does not pin a large buffer per processor for the process lifetime.
+const joinBufKeepCap = 64 * 1024
 
 // Keccak256 calculates and returns the Keccak256 hash of the input data.
 // Prefer Keccak256Hash where a slice is not required: this allocates its result.
@@ -104,7 +118,7 @@ func keccak256(data [][]byte) common.Hash {
 		total += len(b)
 	}
 	if total > keccakStackBuf {
-		return keccak256Joined(data, total)
+		return keccak256Joined(data)
 	}
 	var buf [keccakStackBuf]byte
 	n := 0
@@ -114,12 +128,21 @@ func keccak256(data [][]byte) common.Hash {
 	return keccak.Sum256(buf[:n])
 }
 
-func keccak256Joined(data [][]byte, total int) common.Hash {
-	buf := make([]byte, 0, total)
+func keccak256Joined(data [][]byte) common.Hash {
+	p := joinBufPool.Get().(*[]byte)
+	buf := (*p)[:0]
 	for _, b := range data {
 		buf = append(buf, b...)
 	}
-	return keccak.Sum256(buf)
+	out := keccak.Sum256(buf)
+	// Keep the grown buffer only while it stays within the cap. Past it, return the
+	// original instead, which append left untouched when it reallocated, rather than
+	// dropping the pool entry.
+	if cap(buf) <= joinBufKeepCap {
+		*p = buf
+	}
+	joinBufPool.Put(p)
+	return out
 }
 
 // Keccak512 calculates and returns the Keccak512 hash of the input data.

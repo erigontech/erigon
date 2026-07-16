@@ -162,10 +162,6 @@ func storageRangeAtGethCompat(ttx kv.TemporalTx, contractAddress common.Address,
 		}
 		rawKey := k[20:]
 		seckey := common.HashData(rawKey)
-		if err != nil {
-			return StorageRangeResult{}, err
-		}
-
 		// Skip entries with hashed key < start.
 		if hasStart && bytes.Compare(seckey[:], startHash[:]) < 0 {
 			continue

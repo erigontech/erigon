@@ -1522,15 +1522,7 @@ func (s *witnessStateless) ReadAccountStorage(address accounts.Address, key acco
 	keyValue := key.Value()
 
 	addrHash := common.HashData(addr[:])
-	if err != nil {
-		return uint256.Int{}, false, err
-	}
-
 	seckey := common.HashData(keyValue[:])
-	if err != nil {
-		return uint256.Int{}, false, err
-	}
-
 	// Check if storage has been updated in memory
 	if m, ok := s.storageWrites[addr]; ok {
 		if v, ok := m[keyValue]; ok {
@@ -1575,10 +1567,6 @@ func (s *witnessStateless) ReadAccountStorage(address accounts.Address, key acco
 func (s *witnessStateless) ReadAccountCode(address accounts.Address) ([]byte, error) {
 	addr := address.Value()
 	addrHash := common.HashData(addr[:])
-	if err != nil {
-		return nil, err
-	}
-
 	// Check code updates first — look up by the account's code hash (matching UpdateAccountCode key)
 	acc, err := s.ReadAccountData(address)
 	if err != nil {
@@ -1642,10 +1630,6 @@ func (s *witnessStateless) ReadAccountIncarnation(address accounts.Address) (uin
 func (s *witnessStateless) HasStorage(address accounts.Address) (bool, error) {
 	addr := address.Value()
 	addrHash := common.HashData(addr[:])
-	if err != nil {
-		return false, err
-	}
-
 	// Check if account has been deleted
 	if _, ok := s.deleted[addr]; ok {
 		if s.tracing(addr) {
@@ -1704,9 +1688,6 @@ func (s *witnessStateless) UpdateAccountData(address accounts.Address, original,
 func (s *witnessStateless) DeleteAccount(address accounts.Address, original *accounts.Account) error {
 	addr := address.Value()
 	addrHash := common.HashData(addr[:])
-	if err != nil {
-		return err
-	}
 	// Only delete if the account exists in the original state (trie or was previously updated)
 	// Skip deletes for accounts that weren't in the witness - they don't affect the state root
 	accInTrie, isInTrie := s.t.GetAccount(addrHash[:])

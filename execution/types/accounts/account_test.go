@@ -81,7 +81,7 @@ func TestDeserialiseV3CodeHash(t *testing.T) {
 	t.Parallel()
 	balances := []uint256.Int{{}, *uint256.NewInt(1), *uint256.NewInt(1e18), *new(uint256.Int).Lsh(uint256.NewInt(1), 200)}
 	nonces := []uint64{0, 1, 255, 1 << 40}
-	codeHashes := []CodeHash{EmptyCodeHash, InternCodeHash(common.BytesToHash(crypto.Keccak256([]byte{1, 2, 3})))}
+	codeHashes := []CodeHash{EmptyCodeHash, InternCodeHash(crypto.Keccak256Hash([]byte{1, 2, 3}))}
 	incarnations := []uint64{0, 7}
 
 	for _, nonce := range nonces {
@@ -117,7 +117,7 @@ func TestDeserialiseV3CodeHashMalformed(t *testing.T) {
 	a := Account{
 		Nonce:       255,
 		Balance:     *uint256.NewInt(1e18),
-		CodeHash:    InternCodeHash(common.BytesToHash(crypto.Keccak256([]byte{1, 2, 3}))),
+		CodeHash:    InternCodeHash(crypto.Keccak256Hash([]byte{1, 2, 3})),
 		Incarnation: 4,
 	}
 	enc := SerialiseV3(&a)

@@ -84,9 +84,12 @@ func sha256Joined(data []byte, extras [][]byte, total int) common.Hash {
 		buf = append(buf, extra...)
 	}
 	out := common.Hash(sha256.Sum256(buf))
+	// Keep the grown buffer only while it stays within the cap. Past it, return the
+	// original instead, which append left untouched when it reallocated, rather than
+	// dropping the pool entry.
 	if cap(buf) <= joinBufKeepCap {
 		*p = buf
-		joinBufPool.Put(p)
 	}
+	joinBufPool.Put(p)
 	return out
 }
