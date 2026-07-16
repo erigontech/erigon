@@ -312,6 +312,9 @@ func TestStreamViewBytesSingleByte(t *testing.T) {
 	}
 }
 
+// TestStreamViewBytesFallsBackToCopy uses a reader that holds a byte slice but is
+// not the one NewBytesStream installs, which is what decides whether a view is
+// possible: only NewBytesStream is viewable, not "any reader over a slice".
 func TestStreamViewBytesFallsBackToCopy(t *testing.T) {
 	input := unhex("8401020304")
 
@@ -322,6 +325,9 @@ func TestStreamViewBytesFallsBackToCopy(t *testing.T) {
 	}
 	if want := unhex("01020304"); !bytes.Equal(b, want) {
 		t.Fatalf("content mismatch: got %x, want %x", b, want)
+	}
+	if &b[0] == &input[1] {
+		t.Fatal("ViewBytes must copy when the stream is not from NewBytesStream")
 	}
 }
 
