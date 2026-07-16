@@ -524,12 +524,14 @@ func txBlockView(tx kv.Getter) *blocksnapshots.View {
 	return nil
 }
 
+func noop() {}
+
 // viewSingleFile returns the segment of type t covering blockNum, from tx's pinned
 // view when present (no-op release), else a fresh r.sn view the caller releases.
 func (r *BlockReader) viewSingleFile(tx kv.Getter, t snaptype.Type, blockNum uint64) (*snapshotsync.VisibleSegment, bool, func()) {
 	if bv := txBlockView(tx); bv != nil {
 		seg, ok := bv.Segment(t, blockNum)
-		return seg, ok, func() {}
+		return seg, ok, noop
 	}
 	return r.sn.ViewSingleFile(t, blockNum)
 }
@@ -538,7 +540,7 @@ func (r *BlockReader) viewSingleFile(tx kv.Getter, t snaptype.Type, blockNum uin
 // release), else a fresh r.sn view the caller releases.
 func (r *BlockReader) viewType(tx kv.Getter, t snaptype.Type) ([]*snapshotsync.VisibleSegment, func()) {
 	if bv := txBlockView(tx); bv != nil {
-		return bv.Segments(t), func() {}
+		return bv.Segments(t), noop
 	}
 	rotx := r.sn.ViewType(t)
 	return rotx.Segments, rotx.Close
@@ -548,7 +550,7 @@ func (r *BlockReader) viewType(tx kv.Getter, t snaptype.Type) ([]*snapshotsync.V
 // else a fresh r.sn view the caller releases.
 func (r *BlockReader) view(tx kv.Getter) (*blocksnapshots.View, func()) {
 	if bv := txBlockView(tx); bv != nil {
-		return bv, func() {}
+		return bv, noop
 	}
 	v := r.sn.View()
 	return v, v.Close
