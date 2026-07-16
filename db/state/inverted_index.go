@@ -26,6 +26,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"slices"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -413,7 +414,13 @@ func (ii *InvertedIndex) beginForTests() *InvertedIndexRoTx {
 }
 
 func (ii *InvertedIndex) beginFilesRo(iv *iiVisible) *InvertedIndexRoTx {
-	return &InvertedIndexRoTx{
+	iit := &InvertedIndexRoTx{}
+	ii.initFilesRo(iit, iv)
+	return iit
+}
+
+func (ii *InvertedIndex) initFilesRo(iit *InvertedIndexRoTx, iv *iiVisible) {
+	*iit = InvertedIndexRoTx{
 		ii:                ii,
 		visible:           iv,
 		files:             iv.files,
@@ -668,18 +675,18 @@ func (iit *InvertedIndexRoTx) iterateRangeOnFiles(key []byte, startTxNum, endTxN
 		ii:          iit,
 	}
 	if asc {
-		for i := len(iit.files) - 1; i >= 0; i-- {
+		for _, f := range slices.Backward(iit.files) {
 			// [from,to) && from < to
-			if endTxNum >= 0 && int(iit.files[i].startTxNum) >= endTxNum {
+			if endTxNum >= 0 && int(f.startTxNum) >= endTxNum {
 				continue
 			}
-			if startTxNum >= 0 && iit.files[i].endTxNum <= uint64(startTxNum) {
+			if startTxNum >= 0 && f.endTxNum <= uint64(startTxNum) {
 				break
 			}
-			if iit.files[i].src.index.KeyCount() == 0 {
+			if f.src.index.KeyCount() == 0 {
 				continue
 			}
-			it.stack = append(it.stack, iit.files[i])
+			it.stack = append(it.stack, f)
 			it.stack[len(it.stack)-1].getter = it.stack[len(it.stack)-1].src.decompressor.MakeGetter()
 			it.stack[len(it.stack)-1].reader = it.stack[len(it.stack)-1].src.index.Reader()
 			it.hasNext = true

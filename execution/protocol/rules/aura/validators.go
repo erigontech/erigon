@@ -270,9 +270,9 @@ func (s *Multi) correctSet(blockHash common.Hash) (ValidatorSet, bool) {
 func (s *Multi) correctSetByNumber(parentNumber uint64) (uint64, ValidatorSet) {
 	// get correct set by block number, along with block number at which
 	// this set was activated.
-	for i := len(s.sorted) - 1; i >= 0; i-- {
-		if s.sorted[i].num <= parentNumber+1 {
-			return s.sorted[i].num, s.sorted[i].set
+	for _, entry := range slices.Backward(s.sorted) {
+		if entry.num <= parentNumber+1 {
+			return entry.num, entry.set
 		}
 	}
 	panic("constructor validation ensures that there is at least one validator set for block 0; block 0 is less than any uint; qed")
@@ -669,8 +669,8 @@ func (s *ValidatorSafeContract) extractFromEvent(header *types.Header, receipts 
 	// iterate in reverse because only the _last_ change in a given
 	// block actually has any effect.
 	// the contract should only increment the nonce once.
-	for j := len(receipts) - 1; j >= 0; j-- {
-		logs := receipts[j].Logs
+	for _, receipt := range slices.Backward(receipts) {
+		logs := receipt.Logs
 		/*
 			TODO: skipped next bloom check (is it required?)
 					expectedBloom := expected_bloom(&self, header: &Header) -> Bloom {

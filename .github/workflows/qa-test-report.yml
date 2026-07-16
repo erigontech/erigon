@@ -23,6 +23,8 @@ jobs:
     steps:
       - name: Checkout repo
         uses: actions/checkout@v7
+        with:
+          persist-credentials: false
 
       - name: Setup Node 20
         uses: actions/setup-node@v6
