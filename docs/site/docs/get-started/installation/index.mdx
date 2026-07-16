@@ -13,6 +13,7 @@ export const sectionForMethod = {
   'install-source':   'linuxmacos',
   'install-native':   'windows',
   'install-wsl':      'windows',
+  'install-arm':      'ethereum-on-arm',
 };
 
 export const go = (id, e) => {
@@ -79,6 +80,7 @@ To install Erigon, begin by choosing an installation method suited to your opera
   <li><a href="#install-prebuilt" onClick={e => { e.preventDefault(); go('install-prebuilt'); }}><strong>Pre-built Binaries</strong></a> — Fastest way to get started. Download and run a pre-compiled binary for your architecture.</li>
   <li><a href="#install-docker" onClick={e => { e.preventDefault(); go('install-docker'); }}><strong>Docker</strong></a> — Run Erigon in an isolated container. Recommended for most users.</li>
   <li><a href="#install-source" onClick={e => { e.preventDefault(); go('install-source'); }}><strong>Build from Source</strong></a> — Full control over the build. Requires Go, C++ compiler, and CLI experience.</li>
+  <li><a href="#install-arm" onClick={e => { e.preventDefault(); go('install-arm'); }}><strong>Ethereum on ARM</strong></a> — Community image and APT repository for ARM single-board computers (Raspberry Pi, Rock 5B, Orange Pi 5).</li>
 </ul>
 </TabItem>
 <TabItem value="macos" label="macOS">
@@ -550,6 +552,28 @@ The choice of data location directly impacts how you must configure the RPC Daem
 Be aware that the default WSL2 environment uses its own internal IP address, which is distinct from the IP address of your Windows host machine.
 
 If you need to connect to Erigon from an external network (e.g., opening a port on your home router for peering on port `30303`), you must account for this separate WSL2 IP address when configuring NAT on your router. Alternatively consider [Mirrored mode networking](https://learn.microsoft.com/en-us/windows/wsl/networking#mirrored-mode-networking).
+
+</details>
+
+### Ethereum on ARM
+
+<details id="install-arm">
+
+<summary>Ethereum on ARM</summary>
+
+[Ethereum on ARM](https://ethereum-on-arm-documentation.readthedocs.io/) is a community project that provides a custom Linux image for ARM single-board computers (such as Raspberry Pi, Rock 5B, and Orange Pi 5) with an APT repository preconfigured to install and update Ethereum clients — including Erigon — as native system packages.
+
+Once the image is installed, Erigon can be installed and kept up to date with your system's package manager:
+
+```sh
+sudo apt update && sudo apt install erigon
+```
+
+For the full image, supported boards, and setup instructions, see the [Ethereum on ARM documentation](https://ethereum-on-arm-documentation.readthedocs.io/) and the [project on GitHub](https://github.com/diglos/ethereum-on-arm).
+
+:::info
+Ethereum on ARM is maintained independently by the community and is not an official Erigon distribution channel. The Erigon version available through its APT repository may lag behind the latest [GitHub release](https://github.com/erigontech/erigon/releases).
+:::
 
 </details>
 
