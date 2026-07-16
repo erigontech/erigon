@@ -2319,7 +2319,7 @@ Flags for configuring Fork Choice Update behavior.
   * Default: `1s`
 * `--fcu.background.prune`: Enables background pruning after FCU.
   * Default: `true`
-* `--fcu.background.commit`: Enables background flush and commit after FCU.
+* `--fcu.background.commit`: Returns the FCU response before MDBX flush+commit lands (commit runs in background; remote `rpcdaemon` `latest` stays consistent but can lag for the commit duration).
   * Default: `false`
 
 ### Execution
