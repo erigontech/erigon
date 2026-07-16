@@ -45,6 +45,6 @@ func NewHasher() *Hasher           { return &Hasher{Sha: NewKeccakState()} }
 func ReturnHasherToPool(h *Hasher) { ReturnKeccakState(h.Sha) }
 
 // HashData returns the Keccak-256 hash of data. The error is always nil.
-func HashData(data []byte) (Hash, error) {
-	return Hash(keccak.Sum256(data)), nil
+func HashData(data []byte) Hash {
+	return keccak.Sum256(data)
 }

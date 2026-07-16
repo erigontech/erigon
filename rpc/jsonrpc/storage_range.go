@@ -101,10 +101,7 @@ func storageRangeAtErigon(ttx kv.TemporalTx, contractAddress common.Address, sta
 			continue // Skip deleted entries
 		}
 		key := common.BytesToHash(k[20:])
-		seckey, err := common.HashData(k[20:])
-		if err != nil {
-			return StorageRangeResult{}, err
-		}
+		seckey := common.HashData(k[20:])
 		var value uint256.Int
 		value.SetBytes(v)
 		result.Storage[seckey] = StorageEntry{Key: &key, Value: value.Bytes32()}
@@ -164,7 +161,7 @@ func storageRangeAtGethCompat(ttx kv.TemporalTx, contractAddress common.Address,
 			continue
 		}
 		rawKey := k[20:]
-		seckey, err := common.HashData(rawKey)
+		seckey := common.HashData(rawKey)
 		if err != nil {
 			return StorageRangeResult{}, err
 		}
