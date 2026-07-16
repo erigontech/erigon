@@ -20,6 +20,8 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/require"
+
+	"github.com/erigontech/erigon/common/length"
 )
 
 // A storage row that propagates into an account cell must not overwrite that cell's
@@ -33,20 +35,20 @@ func TestFillFromLowerCell_StorageFoldKeepsAccountNavPath(t *testing.T) {
 	t.Parallel()
 
 	// Account cell holding a storage root, carrying the keccak-derived path it navigates by.
-	accountCell := &cell{accountAddrLen: 20, hashLen: 32}
+	accountCell := &cell{accountAddrLen: length.Addr, hashLen: 32}
 	navPath := []byte{0x3, 0xc, 0x1, 0x9, 0xe}
 	copy(accountCell.hashedExtension[:], navPath)
 	accountCell.hashedExtLen = int16(len(navPath))
 
 	// Storage branch one row below the account leaf (depth 65 > 64, no storage plain key).
-	storageBranch := &cell{storageAddrLen: 0, hashLen: 32, extLen: 0}
+	storageBranch := &cell{hashLen: 32}
 
 	accountCell.fillFromLowerCell(storageBranch, 65, nil, 0x7)
 
 	require.Equalf(t, navPath, accountCell.hashedExtension[:accountCell.hashedExtLen],
 		"account cell must keep its account navigation path across a storage propagate fold; "+
 			"got hashedExtLen=%d", accountCell.hashedExtLen)
-	require.EqualValues(t, 20, accountCell.accountAddrLen, "fold must not drop the account plain key")
+	require.EqualValues(t, length.Addr, accountCell.accountAddrLen, "fold must not drop the account plain key")
 	require.EqualValues(t, 1, accountCell.extLen, "storage extension still travels up in extension space")
 }
 
@@ -63,8 +65,25 @@ func TestFillFromLowerCell_AccountBranchSyncsNavPath(t *testing.T) {
 
 	branchCell.fillFromLowerCell(lowBranch, 3, []byte{0x1}, 0x2)
 
-	require.EqualValues(t, branchCell.extLen, branchCell.hashedExtLen,
-		"a branch cell navigates by its extension, so hashedExtension must stay in sync")
-	require.Equal(t, branchCell.extension[:branchCell.extLen],
-		branchCell.hashedExtension[:branchCell.hashedExtLen])
+	// preExtension | nibble | lowCell.extension
+	want := []byte{0x1, 0x2, 0xa, 0xb}
+	require.Equal(t, want, branchCell.extension[:branchCell.extLen])
+	require.Equalf(t, want, branchCell.hashedExtension[:branchCell.hashedExtLen],
+		"a branch cell navigates by its extension, so hashedExtension must stay in sync; got hashedExtLen=%d",
+		branchCell.hashedExtLen)
+}
+
+// A storage-internal branch carries no plain key, so it navigates by its extension and
+// must sync like an account-space branch: the skip is keyed on the plain key, not on depth.
+func TestFillFromLowerCell_StorageBranchSyncsNavPath(t *testing.T) {
+	t.Parallel()
+
+	branchCell := &cell{hashLen: 32}
+	lowBranch := &cell{hashLen: 32, extLen: 1}
+	lowBranch.extension[0] = 0xd
+
+	branchCell.fillFromLowerCell(lowBranch, 70, nil, 0x5)
+
+	require.Equal(t, []byte{0x5, 0xd}, branchCell.hashedExtension[:branchCell.hashedExtLen],
+		"a keyless cell deep in storage still navigates by its extension")
 }

@@ -319,7 +319,10 @@ func (sc *StreamingCommitter) SeedRootFrom(tmpl *HexPatriciaHashed) {
 		sc.releaseBase()
 	}
 	// Splits folded against the previous seed's base are stale; drop their cells and
-	// deferred updates so Process re-folds them against the reseeded base.
+	// deferred updates so Process re-folds them against the reseeded base. Read-lock
+	// trieMu: TouchKey inserts into sc.splits under its write lock, and iterating a
+	// map against a concurrent insert is a fatal runtime error.
+	sc.trieMu.RLock()
 	for _, s := range sc.splits {
 		s.mu.Lock()
 		s.folded = false
@@ -330,6 +333,7 @@ func (sc *StreamingCommitter) SeedRootFrom(tmpl *HexPatriciaHashed) {
 		s.deferred = nil
 		s.mu.Unlock()
 	}
+	sc.trieMu.RUnlock()
 }
 
 // PromoteRootInto copies the most recently folded root cell and flags into tmpl,
