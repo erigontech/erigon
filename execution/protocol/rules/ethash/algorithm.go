@@ -138,23 +138,10 @@ func seedHash(block uint64) []byte {
 		return seed
 	}
 
-	h := crypto.NewKeccak256Hasher()
-
 	for i := 0; i < int(block/epochLength); i++ {
-		h.Sha.Reset()
-		//nolint:errcheck
-		_, writeErr := h.Sha.Write(seed)
-		if writeErr != nil {
-			log.Warn("Failed to write data", "err", writeErr)
-		}
-		//nolint:errcheck
-		_, readErr := h.Sha.Read(seed)
-		if readErr != nil {
-			log.Warn("Failed to read data", "err", readErr)
-		}
+		h := crypto.Keccak256Hash(seed)
+		copy(seed, h[:])
 	}
-
-	crypto.ReturnHasherToPool(h)
 
 	return seed
 }
