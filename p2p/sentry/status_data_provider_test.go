@@ -135,14 +135,14 @@ func TestGetStatusData_ConcurrentCallsCoalesce(t *testing.T) {
 
 	ctx := context.Background()
 	errs := make(chan error, 10)
-	for i := 0; i < 10; i++ {
+	for range 10 {
 		go func() {
 			_, err := p.GetStatusData(ctx)
 			errs <- err
 		}()
 	}
 
-	for i := 0; i < 10; i++ {
+	for range 10 {
 		require.NoError(t, <-errs)
 	}
 }

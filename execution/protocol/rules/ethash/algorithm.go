@@ -227,8 +227,8 @@ func generateCache(dest []uint32, epoch uint64, seed []byte) {
 	temp := *tempRef
 	defer bytes64Pool.Put(tempRef)
 
-	for i := 0; i < cacheRounds; i++ {
-		for j := 0; j < rows; j++ {
+	for range cacheRounds {
+		for j := range rows {
 			var (
 				srcOff = ((j - 1 + rows) % rows) * hashBytes
 				dstOff = j * hashBytes
@@ -265,13 +265,13 @@ func fnv(a, b uint32) uint32 {
 
 // fnvHash mixes in data into mix using the ethash fnv method.
 func fnvHash16(mix []uint32, data []uint32) {
-	for i := 0; i < 16; i++ {
+	for i := range 16 {
 		mix[i] = mix[i]*primeFNV ^ data[i]
 	}
 }
 
 func fnvHash32(mix []uint32, data []uint32) {
-	for i := 0; i < 32; i++ {
+	for i := range 32 {
 		mix[i] = mix[i]*primeFNV ^ data[i]
 	}
 }
@@ -307,11 +307,11 @@ func generateDatasetItem(cache []uint32, index uint32, keccak512 hasher, fn func
 
 	// Convert the mix to uint32s to avoid constant bit shifting
 	intMix := make([]uint32, hashWords)
-	for i := 0; i < len(intMix); i++ {
+	for i := range intMix {
 		intMix[i] = binary.LittleEndian.Uint32(mix[i*4:])
 	}
 	// fnv it with a lot of random cache nodes based on index
-	for i := uint32(0); i < datasetParents; i++ {
+	for i := range uint32(datasetParents) {
 		parent := fnv(index^i, intMix[i%16]) % rows
 		fnvHash16(intMix, cache[parent*hashWords:])
 	}
@@ -356,7 +356,7 @@ func generateDataset(dest []uint32, epoch uint64, cache []uint32) {
 	pend.Add(threads)
 
 	var progress atomic.Uint64
-	for i := 0; i < threads; i++ {
+	for i := range threads {
 		go func(id int) {
 			defer dbg.LogPanic()
 			defer pend.Done()
@@ -413,9 +413,9 @@ func hashimoto(hash []byte, nonce uint64, size uint64, lookup func(index uint32)
 	// Mix in random dataset nodes
 	temp := make([]uint32, len(mix))
 
-	for i := 0; i < loopAccesses; i++ {
+	for i := range loopAccesses {
 		parent := fnv(uint32(i)^seedHead, mix[i%len(mix)]) % rows
-		for j := uint32(0); j < mixBytes/hashBytes; j++ {
+		for j := range uint32(mixBytes / hashBytes) {
 			copy(temp[j*hashWords:], lookup(2*parent+j))
 		}
 		fnvHash32(mix, temp)
@@ -442,7 +442,7 @@ func hashimotoLight(size uint64, cache []uint32, hash []byte, nonce uint64) ([]b
 	lookup := func(index uint32) []uint32 {
 		data := make([]uint32, 16) // 64/4
 		generateDatasetItem(cache, index, keccak512, func(item []byte) {
-			for i := 0; i < len(data); i++ {
+			for i := range data {
 				data[i] = binary.LittleEndian.Uint32(item[i*4:])
 			}
 		})

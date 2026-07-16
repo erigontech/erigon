@@ -1502,7 +1502,7 @@ func makeLog(size int) executionFunc {
 		topics := make([]common.Hash, size)
 		stack := &scope.Stack
 		mStart, mSize := stack.pop(), stack.pop()
-		for i := 0; i < size; i++ {
+		for i := range size {
 			addr := stack.pop()
 			topics[i] = addr.Bytes32()
 		}

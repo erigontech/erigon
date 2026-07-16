@@ -21,6 +21,7 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
+	"slices"
 	"sort"
 
 	lru "github.com/hashicorp/golang-lru/v2"
@@ -649,8 +650,8 @@ func (r *BlockReader) HeaderByHash(ctx context.Context, tx kv.Getter, hash commo
 	defer release()
 
 	buf := make([]byte, 128)
-	for i := len(segments) - 1; i >= 0; i-- {
-		h, err = r.headerFromSnapshotByHash(hash, segments[i], buf)
+	for _, segment := range slices.Backward(segments) {
+		h, err = r.headerFromSnapshotByHash(hash, segment, buf)
 		if err != nil {
 			return nil, err
 		}
@@ -1176,7 +1177,7 @@ func (r *BlockReader) txsFromSnapshot(baseTxnID uint64, txCount uint32, txsSeg *
 	}
 	gg := txsSeg.Src().MakeGetter()
 	gg.Reset(txnOffset)
-	for i := uint32(0); i < txCount; i++ {
+	for i := range txCount {
 		if !gg.HasNext() {
 			return nil, nil, nil
 		}
@@ -1215,11 +1216,8 @@ func (r *BlockReader) txnByID(txnID uint64, sn *snapshotsync.VisibleSegment, buf
 	txn.SetSender(accounts.InternAddress(*(*common.Address)(sender))) // see: https://tip.golang.org/ref/spec#Conversions_from_slice_to_array_pointer
 	return
 }
-
 func (r *BlockReader) txnByHash(txnHash common.Hash, segments []*snapshotsync.VisibleSegment, buf []byte) (types.Transaction, uint64, uint64, bool, error) {
-	for i := len(segments) - 1; i >= 0; i-- {
-		sn := segments[i]
-
+	for _, sn := range slices.Backward(segments) {
 		idxTxnHash := sn.Src().Index(snaptype2.Indexes.TxnHash)
 		idxTxnHash2BlockNum := sn.Src().Index(snaptype2.Indexes.TxnHash2BlockNum)
 

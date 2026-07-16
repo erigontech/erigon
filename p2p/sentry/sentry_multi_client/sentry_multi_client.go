@@ -629,7 +629,7 @@ func (cs *MultiClient) addBlockWitnesses(ctx context.Context, inreq *sentryproto
 		if uint64(len(pages)) != totalPages {
 			// identify missing pages
 			var missingPages []uint64
-			for page := uint64(0); page < totalPages; page++ {
+			for page := range totalPages {
 				if _, exists := pages[page]; !exists {
 					missingPages = append(missingPages, page)
 				}
@@ -703,7 +703,7 @@ func (cs *MultiClient) addBlockWitnesses(ctx context.Context, inreq *sentryproto
 
 		// reconstruct complete witness data by concatenating pages in order
 		var completeWitness []byte
-		for page := uint64(0); page < totalPages; page++ {
+		for page := range totalPages {
 			pageData, exists := pages[page]
 			if !exists {
 				cs.logger.Debug("missing page in witness", "hash", witnessHash, "page", page)

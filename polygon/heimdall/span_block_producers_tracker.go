@@ -198,12 +198,12 @@ func (t *spanBlockProducersTracker) ObserveSpan(ctx context.Context, newSpan *Sp
 	increments := int(spanEndSprintNum - spanStartSprintNum)
 	// sprints to patch in Amoy
 	amoySprintsToPatch := make([]uint64, len(amoyBadBlocks))
-	for i := 0; i < len(amoySprintsToPatch); i++ {
+	for i := range amoySprintsToPatch {
 		amoySprintsToPatch[i] = t.borConfig.CalculateSprintNumber(amoyBadBlocks[i])
 	}
 	var oldProducers *ValidatorSet
 	isAmoyChain := t.chainConfig.ChainID.Uint64() == polygonchain.Amoy.Config.ChainID.Uint64()
-	for i := 0; i < increments; i++ {
+	for i := range increments {
 		sprintNum := spanStartSprintNum + uint64(i) + 1
 		if isAmoyChain && slices.Contains(amoySprintsToPatch, sprintNum) { // on the bad sprint (Amoy)
 			var emptyProducers []*Validator = nil
@@ -283,11 +283,11 @@ func (t *spanBlockProducersTracker) producers(ctx context.Context, blockNum uint
 	increments := int(currentSprintNum - spanStartSprintNum)
 	amoyPatchedSprints := make([]uint64, len(amoyBadBlocks))
 	var oldProducers *ValidatorSet
-	for i := 0; i < len(amoyPatchedSprints); i++ {
+	for i := range amoyPatchedSprints {
 		amoyPatchedSprints[i] = t.borConfig.CalculateSprintNumber(amoyBadBlocks[i])
 	}
 	isAmoyChain := t.chainConfig.ChainID.Uint64() == polygonchain.Amoy.Config.ChainID.Uint64()
-	for i := 0; i < increments; i++ {
+	for i := range increments {
 		sprintNum := spanStartSprintNum + uint64(i) + 1
 		if isAmoyChain && slices.Contains(amoyPatchedSprints, sprintNum) { // on bad sprint
 			var emptyProducers []*Validator = nil

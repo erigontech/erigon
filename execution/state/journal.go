@@ -66,6 +66,7 @@ func (j *journal) release() {
 	journalPool.Put(j)
 }
 func (j *journal) Reset() {
+	clear(j.entries)
 	j.entries = j.entries[:0]
 	clear(j.dirties)
 }

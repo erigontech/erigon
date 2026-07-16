@@ -2254,10 +2254,22 @@ func (sdb *IntraBlockState) CreateAccount(addr accounts.Address, contractCreatio
 	}
 
 	// for newly created accounts these synthetic read/writes are used so that account
-	// creation clashes between trnascations get detected
+	// creation clashes between transactions get detected. Only record the BalancePath
+	// read on the first creation of this account in the tx: a re-creation (e.g. CREATE2
+	// to an address funded and created earlier in the same tx) carries the live
+	// post-transfer balance, and overwriting the first read's pre-tx value with it would
+	// seed a wrong block-access-list baseline and drop the real balance change. But if
+	// that first read was internal (conflict-detection only, so excluded from the block
+	// access list), promote it: without a real read the unchanged balance write has no
+	// baseline and would emit a spurious net-zero balance change.
 	sdb.MarkAddressAccess(addr, true)
 	if sdb.versionMap != nil {
-		sdb.versionedReads.SetBalance(addr, VersionedRead[uint256.Int]{ReadHeader{Source: balSource, Version: balVersion}, newObj.Balance()})
+		if vr, seen := sdb.versionedReads.GetBalance(addr); !seen {
+			sdb.versionedReads.SetBalance(addr, VersionedRead[uint256.Int]{ReadHeader{Source: balSource, Version: balVersion}, newObj.Balance()})
+		} else if vr.internal {
+			vr.internal = false
+			sdb.versionedReads.SetBalance(addr, vr)
+		}
 		sdb.versionedReads.SetIncarnation(addr, VersionedRead[uint64]{ReadHeader{Source: incSource, Version: incVersion}, prevInc})
 	}
 	sdb.recordWriteBalance(addr, newObj.Balance())
@@ -3388,6 +3400,11 @@ func (sdb *IntraBlockState) ApplyVersionedWrites(writes *WriteSet) error {
 				sdb.recordWriteSelfDestruct(addr, false)
 			}
 		case CreateContractPath:
+			// A same-tx self-destruct dominates the creation marker: skip applying
+			// CreateContract so the account is not resurrected as a live contract.
+			if sw, ok := writes.GetSelfDestruct(addr); ok && sw.Val {
+				continue
+			}
 			// Contract creation: set createdContract flag on the stateObject.
 			so, err := sdb.GetOrNewStateObject(addr)
 			if err != nil {

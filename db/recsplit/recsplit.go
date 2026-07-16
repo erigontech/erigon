@@ -484,7 +484,7 @@ func computeGolombRice(m uint16, table []uint32, leafSize, primaryAggrBound, sec
 		k[fanout-1] -= k[i]
 	}
 	sqrtProd := float64(1)
-	for i := uint16(0); i < fanout; i++ {
+	for i := range fanout {
 		sqrtProd *= math.Sqrt(float64(k[i]))
 	}
 	p := math.Sqrt(float64(m)) / (math.Pow(2*math.Pi, (float64(fanout)-1.)/2.0) * sqrtProd)
@@ -493,7 +493,7 @@ func computeGolombRice(m uint16, table []uint32, leafSize, primaryAggrBound, sec
 		panic("golombRiceLength > 0x1F")
 	}
 	table[m] = golombRiceLength << 27
-	for i := uint16(0); i < fanout; i++ {
+	for i := range fanout {
 		golombRiceLength += table[k[i]] & 0xFFFF
 	}
 	if golombRiceLength > 0xFFFF {
@@ -501,7 +501,7 @@ func computeGolombRice(m uint16, table []uint32, leafSize, primaryAggrBound, sec
 	}
 	table[m] |= golombRiceLength // Sum of Golomb-Rice codeslengths in the subtree, stored in the lower 16 bits
 	nodes := uint32(1)
-	for i := uint16(0); i < fanout; i++ {
+	for i := range fanout {
 		nodes += (table[k[i]] >> 16) & 0x7FF
 	}
 	if leafSize >= 3 && nodes > 0x7FF {
@@ -667,7 +667,7 @@ func findSplit(bucket []uint64, salt uint64, fanout, unit uint16, count []uint16
 	c7 := count[7*fanout : 8*fanout : 8*fanout]
 	for {
 		clear(count[:8*fanout])
-		for i := uint16(0); i < m; i++ {
+		for i := range m {
 			key := bucket[i]
 			c0[remap16(remix(key+salt), m)/unit]++
 			c1[remap16(remix(key+salt+1), m)/unit]++
@@ -728,7 +728,7 @@ func findBijection(bucket []uint64, salt uint64) uint64 {
 	fullMask := uint32((1 << m) - 1)
 	for {
 		var mask0, mask1, mask2, mask3, mask4, mask5, mask6, mask7 uint32
-		for i := uint16(0); i < m; i++ {
+		for i := range m {
 			key := bucket[i]
 			// adding `& 31` - it doesn't have runtime overhead, but it tells for compiler that shift can't overflow
 			// and compiler generating less assembly checks: ~10% perf.
@@ -781,7 +781,7 @@ func recsplit(level int, bucket []uint64, offsets []uint64, unary []uint64, rs *
 	m := uint16(len(bucket))
 	if m <= rs.leafSize {
 		salt = findBijection(bucket, salt)
-		for i := uint16(0); i < m; i++ {
+		for i := range m {
 			j := remap16(remix(bucket[i]+salt), m)
 			rs.offsetBuffer[j] = offsets[i]
 		}
@@ -804,7 +804,7 @@ func recsplit(level int, bucket []uint64, offsets []uint64, unary []uint64, rs *
 			count[i] = c
 			c += unit
 		}
-		for i := uint16(0); i < m; i++ {
+		for i := range m {
 			j := remap16(remix(bucket[i]+salt), m) / unit
 			rs.buffer[count[j]] = bucket[i]
 			rs.offsetBuffer[count[j]] = offsets[i]

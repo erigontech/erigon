@@ -117,7 +117,7 @@ Loop:
 	var blockNum uint64
 	for ; i < int(maxTx); i++ {
 		txNum := uint64(i)
-		for accs := 0; accs < 256; accs++ {
+		for accs := range 256 {
 			acc := accounts3.Account{
 				Nonce:       txNum,
 				Balance:     *uint256.NewInt(uint64(i*10e6) + uint64(accs*10e2)),
@@ -283,7 +283,7 @@ func TestNewSharedDomains_StateAheadOfBlocks(t *testing.T) {
 	require.NoError(err)
 
 	addr := make([]byte, length.Addr)
-	for i := uint64(0); i < 4; i++ {
+	for i := range uint64(4) {
 		addr[0] = byte(i)
 		acc := accounts.Account{
 			Nonce:   i,
@@ -367,7 +367,7 @@ func TestSharedDomain_RepeatedUnwindAcrossStepBoundary(t *testing.T) {
 		for bn := from; bn <= to; bn++ {
 			cs := &changeset.StateChangeSet{}
 			doms.SetChangesetAccumulator(cs)
-			for i := 0; i < 8; i++ {
+			for i := range 8 {
 				addr[0] = byte(i)
 				addr[1] = byte(bn)
 				acc := accounts3.Account{Nonce: bn, Balance: *uint256.NewInt(bn*1000 + uint64(i))}
@@ -494,7 +494,7 @@ func TestSharedDomain_MergeUnwindAcrossStepBoundary(t *testing.T) {
 		doms.SetChangesetAccumulator(cs)
 		// Write the same 8 addresses every block so each key accumulates
 		// values at both step 0 and step 1.
-		for i := 0; i < 8; i++ {
+		for i := range 8 {
 			addr[0] = byte(i)
 			acc := accounts3.Account{Nonce: bn, Balance: *uint256.NewInt(bn*1000 + uint64(i))}
 			pv, _, err := doms.GetLatest(kv.AccountsDomain, rwTx, addr)
@@ -652,7 +652,7 @@ func TestSharedDomain_UnwindAcrossStepBoundary(t *testing.T) {
 		cs := &changeset.StateChangeSet{}
 		doms.SetChangesetAccumulator(cs)
 		// Write a handful of account updates so commitment has real branches.
-		for i := 0; i < 8; i++ {
+		for i := range 8 {
 			addr[0] = byte(i)
 			addr[1] = byte(bn)
 			acc := accounts3.Account{Nonce: bn, Balance: *uint256.NewInt(bn*1000 + uint64(i))}
@@ -925,7 +925,7 @@ func TestSharedDomain_StorageIter(t *testing.T) {
 	var blockNum uint64
 	for ; i < int(maxTx); i++ {
 		txNum := uint64(i)
-		for accs := 0; accs < noaccounts; accs++ {
+		for accs := range noaccounts {
 			acc := accounts3.Account{
 				Nonce:       uint64(i),
 				Balance:     *uint256.NewInt(uint64(i*10e6) + uint64(accs*10e2)),
@@ -942,7 +942,7 @@ func TestSharedDomain_StorageIter(t *testing.T) {
 			require.NoError(t, err)
 			binary.BigEndian.PutUint64(l0[16:24], uint64(accs))
 
-			for locs := 0; locs < 1000; locs++ {
+			for locs := range 1000 {
 				binary.BigEndian.PutUint64(l0[24:], uint64(locs))
 				pv, _, err := domains.GetLatest(kv.AccountsDomain, rwTx, append(k0, l0...))
 				require.NoError(t, err)
@@ -994,7 +994,7 @@ func TestSharedDomain_StorageIter(t *testing.T) {
 
 	txNum, _, err := domains.SeekCommitment(ctx, rwTx)
 	require.NoError(t, err)
-	for accs := 0; accs < noaccounts; accs++ {
+	for accs := range noaccounts {
 		k0[0] = byte(accs)
 		pv, _, err := domains.GetLatest(kv.AccountsDomain, rwTx, k0)
 		require.NoError(t, err)
@@ -1084,7 +1084,7 @@ func TestSharedDomain_IteratePrefix(t *testing.T) {
 		return buf
 	}
 	addr := acc(1)
-	for i := uint64(0); i < stepSize; i++ {
+	for i := range stepSize {
 		txNum := i
 		if err = domains.DomainPut(kv.AccountsDomain, rwTx, addr, acc(i), txNum, nil); err != nil {
 			panic(err)
@@ -1529,7 +1529,7 @@ func TestDomainPut_HistoryCorrectness(t *testing.T) {
 			}
 
 			// Execute writes in txNum order
-			for txNum := uint64(0); txNum < totalTxs; txNum++ {
+			for txNum := range totalTxs {
 				if writes[txNum] < 0 {
 					continue
 				}
@@ -1571,7 +1571,7 @@ func TestDomainPut_HistoryCorrectness(t *testing.T) {
 			// (i.e. no duplicate history entries for consecutive identical values).
 			expectedChanges := 0
 			var prevWrittenVal []byte
-			for txNum := uint64(0); txNum < totalTxs; txNum++ {
+			for txNum := range totalTxs {
 				if writes[txNum] < 0 {
 					continue
 				}

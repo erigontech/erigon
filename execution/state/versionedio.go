@@ -857,9 +857,10 @@ func (s *WriteSet) zeroSameTxCreateDestructStorage() {
 // Snapshot returns a frozen typed copy of the recorded writes. The journal keeps
 // the write-set in step with reverts, so every address present is a surviving
 // write — no dirty reconciliation is needed. Under self-destruct only
-// SelfDestruct/Balance/Incarnation/Storage are kept (the BAL needs residual
-// balance, resurrection needs the prior incarnation, and the calculator needs
-// per-slot deletes); Nonce/Code/CodeHash/CodeSize/Address/CreateContract drop.
+// SelfDestruct/Balance/Incarnation/Storage/CreateContract are kept (the BAL needs
+// residual balance, resurrection needs the prior incarnation, the calculator
+// needs per-slot deletes, and fee finalization needs the creation marker);
+// Nonce/Code/CodeHash/CodeSize/Address drop.
 func (s *WriteSet) Snapshot() *WriteSet {
 	out := &WriteSet{}
 
@@ -885,6 +886,13 @@ func (s *WriteSet) Snapshot() *WriteSet {
 				out.SetStorage(addr, k, cloneVW(vw))
 			}
 		}
+		// CreateContract survives self-destruct: fee finalization and the BAL need
+		// the creation marker, and zeroSameTxCreateDestructStorage detects the
+		// create+destruct pair from it. ApplyVersionedWrites skips applying it under
+		// self-destruct, so keeping it here does not resurrect the account.
+		if vw, ok := s.createContract[addr]; ok {
+			out.SetCreateContract(addr, cloneVW(vw))
+		}
 		if !sd {
 			if vw, ok := s.address[addr]; ok {
 				out.SetAddress(addr, cloneVW(vw))
@@ -900,9 +908,6 @@ func (s *WriteSet) Snapshot() *WriteSet {
 			}
 			if vw, ok := s.codeSize[addr]; ok {
 				out.SetCodeSize(addr, cloneVW(vw))
-			}
-			if vw, ok := s.createContract[addr]; ok {
-				out.SetCreateContract(addr, cloneVW(vw))
 			}
 		}
 	}
@@ -2232,7 +2237,7 @@ func (io *VersionedIO) Merge(other *VersionedIO) *VersionedIO {
 	mergedLen := max(io.Len(), other.Len())
 	merged := NewVersionedIO(mergedLen - 1)
 
-	for i := 0; i < mergedLen; i++ {
+	for i := range mergedLen {
 		if i < len(io.inputs) {
 			if i < len(other.inputs) {
 				merged.inputs[i] = io.inputs[i].Merge(other.inputs[i])
@@ -2364,7 +2369,14 @@ func (io *VersionedIO) AsBlockAccessList() types.BlockAccessList {
 			if addr.IsNil() || tr.internal {
 				continue
 			}
-			ensureAccountState(ac, addr)
+			account := ensureAccountState(ac, addr)
+			// A pre-block-empty code hash marks the baseline empty so applyToCode drops a
+			// net-zero same-tx set-then-clear. Only an empty read seen before any code
+			// change is the pre-block value — a later read of an already-cleared delegation
+			// also reads empty and must not poison the baseline into dropping that clear.
+			if tr.Val.IsEmpty() && len(account.code.changes.entries) == 0 {
+				account.initialCodeEmpty = true
+			}
 		}
 		for addr, tr := range rs.codeSize {
 			if addr.IsNil() || tr.internal {
@@ -2416,8 +2428,14 @@ func (io *VersionedIO) AsBlockAccessList() types.BlockAccessList {
 			// codeSize/address) and can't silently miss a future path — the repeat
 			// ensureAccountState is a harmless get-or-create.
 			for addr := range writes.addrs() {
-				if !addr.IsNil() {
-					ensureAccountState(ac, addr)
+				if addr.IsNil() {
+					continue
+				}
+				account := ensureAccountState(ac, addr)
+				// A contract created this block did not exist pre-block, so its pre-block
+				// code is empty; applyToCode uses this to drop a net-zero empty code change.
+				if vw, ok := writes.GetCreateContract(addr); ok && vw.Val {
+					account.initialCodeEmpty = true
 				}
 			}
 		}
@@ -2483,13 +2501,14 @@ type accountState struct {
 	initialBalanceValue     *uint256.Int                        // tracks pre-block balance for net-zero detection
 	storageReadValues       map[accounts.StorageKey]uint256.Int // original read values for net-zero detection
 	nonRevertableUserAccess bool                                // true if a user tx (txIndex >= 0) has non-revertable access
+	initialCodeEmpty        bool                                // pre-block code was empty (created contract or empty-codehash read)
 }
 
 // check pre- and post-values, add to BAL if different
 func (a *accountState) finalize() {
 	applyToBalance(a.balance, a.changes, a.initialBalanceValue)
 	applyToNonce(a.nonce, a.changes)
-	applyToCode(a.code, a.changes)
+	applyToCode(a.code, a.changes, a.initialCodeEmpty)
 }
 
 type fieldTracker[T any] struct {
@@ -2542,8 +2561,18 @@ func newCodeTracker() *fieldTracker[accounts.Code] {
 	return &fieldTracker[accounts.Code]{}
 }
 
-func applyToCode(ct *fieldTracker[accounts.Code], ac *types.AccountChanges) {
+func applyToCode(ct *fieldTracker[accounts.Code], ac *types.AccountChanges, initialCodeEmpty bool) {
+	// A first code change back to empty when pre-block code was already empty
+	// (e.g. an EIP-7702 delegation set then cleared in the same tx) is a net-zero
+	// change and is omitted, matching EELS's post-vs-pre code-hash diff.
+	firstFiltered := false
 	ct.changes.apply(func(idx uint32, value accounts.Code) {
+		if !firstFiltered {
+			firstFiltered = true
+			if initialCodeEmpty && len(value.Bytes) == 0 {
+				return
+			}
+		}
 		ac.CodeChanges = append(ac.CodeChanges, &types.CodeChange{
 			Index:    idx,
 			Bytecode: bytes.Clone(value.Bytes),

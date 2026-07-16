@@ -38,27 +38,31 @@ import (
 	"github.com/erigontech/erigon/execution/types"
 )
 
-// makeBeaconBlock builds a Deneb BeaconBlock whose ExecutionPayload carries the
-// given block number chained onto parent. forkTag seeds header.Extra so two blocks
-// at the same number produce distinct SSZ roots — mimicking competing beacon variants.
-func makeBeaconBlock(t *testing.T, number uint64, forkTag byte, parent common.Hash) *cltypes.BeaconBlock {
-	t.Helper()
+// makeTestHeader builds the minimal Deneb header that survives the collector's
+// encode/decode round trip. ParentBeaconBlockRoot must be non-nil: decodeBlock
+// always reconstructs it from the stored 32-byte parentRoot prefix, so leaving
+// the source header's field nil would produce a different header.Hash() and
+// fail RlpHeader's consistency check.
+func makeTestHeader(number uint64, parent common.Hash, extra []byte) *types.Header {
 	var zero uint64
-	// ParentBeaconBlockRoot must be non-nil: decodeBlock always reconstructs it
-	// from the stored 32-byte parentRoot prefix, so leaving the source header's
-	// field nil would produce a different header.Hash() and fail RlpHeader's
-	// consistency check.
 	zeroHash := common.Hash{}
-	header := &types.Header{
+	return &types.Header{
 		ParentHash:            parent,
 		Number:                *uint256.NewInt(number),
 		BaseFee:               uint256.NewInt(1),
-		Extra:                 []byte{forkTag},
+		Extra:                 extra,
 		BlobGasUsed:           &zero,
 		ExcessBlobGas:         &zero,
 		ParentBeaconBlockRoot: &zeroHash,
 	}
-	block := types.NewBlock(header, nil, nil, nil, []*types.Withdrawal{})
+}
+
+// makeBeaconBlock builds a Deneb BeaconBlock whose ExecutionPayload carries the
+// given block number chained onto parent. forkTag seeds header.Extra so two blocks
+// at the same number produce distinct SSZ roots — mimicking competing beacon variants.
+func makeBeaconBlock(t *testing.T, number uint64, forkTag byte, parent common.Hash, txs ...types.Transaction) *cltypes.BeaconBlock {
+	t.Helper()
+	block := types.NewBlock(makeTestHeader(number, parent, []byte{forkTag}), txs, nil, nil, []*types.Withdrawal{})
 
 	bb := cltypes.NewBeaconBlock(&clparams.MainnetBeaconConfig, clparams.DenebVersion)
 	bb.Body.ExecutionPayload = cltypes.NewEth1BlockFromHeaderAndBody(block.Header(), block.RawBody(), &clparams.MainnetBeaconConfig)
@@ -386,7 +390,7 @@ func TestFlushDrivesFCUPerBatch(t *testing.T) {
 	// (two per-batch + one final after the tail insert).
 	prev := common.Hash{}
 	blocks := make([]*cltypes.BeaconBlock, 7)
-	for i := 0; i < 7; i++ {
+	for i := range 7 {
 		blocks[i] = makeBeaconBlock(t, uint64(i+1), 'a', prev)
 		require.NoError(t, h.collector.AddBlock(blocks[i]))
 		prev = blockHash(blocks[i])
@@ -413,7 +417,7 @@ func TestFlushSingleFCUWhenBelowBatchSize(t *testing.T) {
 
 	prev := common.Hash{}
 	var last *cltypes.BeaconBlock
-	for i := 0; i < 3; i++ {
+	for i := range 3 {
 		b := makeBeaconBlock(t, uint64(i+1), 'a', prev)
 		require.NoError(t, h.collector.AddBlock(b))
 		prev = blockHash(b)

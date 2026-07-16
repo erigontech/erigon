@@ -26,7 +26,7 @@ func TestVersionMap_ConcurrentWriteReadValidate(t *testing.T) {
 	var wg sync.WaitGroup
 	// Writers: each publishes a balance cell for its own tx index, then a few
 	// shared addresses so writers and readers contend on the same entries.
-	for w := 0; w < workers; w++ {
+	for w := range workers {
 		wg.Add(1)
 		go func(txIdx int) {
 			defer wg.Done()
@@ -37,11 +37,11 @@ func TestVersionMap_ConcurrentWriteReadValidate(t *testing.T) {
 		}(w)
 	}
 	// Readers: concurrently read balances across all addresses at varying floors.
-	for r := 0; r < workers; r++ {
+	for r := range workers {
 		wg.Add(1)
 		go func(txIdx int) {
 			defer wg.Done()
-			for i := 0; i < workers; i++ {
+			for i := range workers {
 				vm.ReadBalance(addrs[i], txIdx+workers)
 				vm.ReadNonce(addrs[i], txIdx+workers)
 			}
