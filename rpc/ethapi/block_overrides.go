@@ -98,6 +98,22 @@ func (overrides *BlockOverrides) Override(context *evmtypes.BlockContext) error 
 	return nil
 }
 
+// OverrideBaseFee returns baseFee with BaseFeePerGas applied if set. When the
+// caller passes a nil baseFee (a pre-London block), it stays nil rather than
+// having a base fee introduced. It exists separately from Override because
+// some callers need the overridden base fee before a BlockContext exists to
+// call Override on.
+func (overrides *BlockOverrides) OverrideBaseFee(baseFee *uint256.Int) (*uint256.Int, error) {
+	if overrides == nil || overrides.BaseFeePerGas == nil || baseFee == nil {
+		return baseFee, nil
+	}
+	overridden := new(uint256.Int)
+	if overflow := overridden.SetFromBig(overrides.BaseFeePerGas.ToInt()); overflow {
+		return nil, errors.New("BlockOverrides.BaseFeePerGas uint256 overflow")
+	}
+	return overridden, nil
+}
+
 // OverrideHeader returns a modified copy of header with the overridden fields
 // applied. Used by eth_simulateV1 to build block headers before execution.
 // BeaconRoot and Withdrawals are handled separately by the caller at the

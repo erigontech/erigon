@@ -23,6 +23,7 @@ import (
 	"bytes"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"math/big"
 	"reflect"
 	"testing"
@@ -319,6 +320,95 @@ func BenchmarkEncodeBlock(b *testing.B) {
 		if err := rlp.Encode(benchBuffer, block); err != nil {
 			b.Fatal(err)
 		}
+	}
+}
+
+func encodedBenchBody(b *testing.B) []byte {
+	b.Helper()
+	var buf bytes.Buffer
+	if err := rlp.Encode(&buf, &BodyForStorage{BaseTxnID: BaseTxnID(1234567), TxCount: 250}); err != nil {
+		b.Fatal(err)
+	}
+	return buf.Bytes()
+}
+
+// TestBodyOnlyTxnDecodeRLPBytes pins the contract that makes DecodeRLPBytes exist:
+// it reads the leading txn fields of a full BodyForStorage encoding and tolerates
+// the unread tail, which rlp.DecodeBytes rejects.
+func TestBodyOnlyTxnDecodeRLPBytes(t *testing.T) {
+	t.Parallel()
+	var buf bytes.Buffer
+	if err := rlp.Encode(&buf, &BodyForStorage{BaseTxnID: BaseTxnID(1234567), TxCount: 250}); err != nil {
+		t.Fatal(err)
+	}
+	enc := buf.Bytes()
+
+	var b BodyOnlyTxn
+	if err := b.DecodeRLPBytes(enc); err != nil {
+		t.Fatalf("DecodeRLPBytes: %v", err)
+	}
+	if b.BaseTxnID != BaseTxnID(1234567) || b.TxCount != 250 {
+		t.Fatalf("unexpected decode result: %+v", b)
+	}
+
+	// Tolerating the unread tail - the uncles list here, and withdrawals whenever
+	// they are present - is the whole reason this entrypoint exists: swapping it for
+	// rlp.DecodeBytes would start rejecting every body.
+	if err := rlp.DecodeBytes(enc, &BodyOnlyTxn{}); !errors.Is(err, rlp.ErrMoreThanOneValue) {
+		t.Fatalf("rlp.DecodeBytes must reject the unread tail, got %v", err)
+	}
+}
+
+func TestBodyOnlyTxnDecodeRLPBytesErrors(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name  string
+		input []byte
+	}{
+		{"empty", nil},
+		{"not a list", []byte{0x80}},
+		{"truncated list", []byte{0xC3, 0x82}},
+		{"non-canonical BaseTxnID", []byte{0xC3, 0x82, 0x00, 0x02}},
+		{"BaseTxnID only", []byte{0xC1, 0x01}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			var b BodyOnlyTxn
+			if err := b.DecodeRLPBytes(tt.input); err == nil {
+				t.Fatal("expected an error, got nil")
+			}
+		})
+	}
+}
+
+func BenchmarkBodyOnlyTxnDecodeRLPBytes(b *testing.B) {
+	enc := encodedBenchBody(b)
+
+	var out BodyOnlyTxn
+	b.ReportAllocs()
+	for b.Loop() {
+		if err := out.DecodeRLPBytes(enc); err != nil {
+			b.Fatal(err)
+		}
+	}
+	if out.BaseTxnID != BaseTxnID(1234567) || out.TxCount != 250 {
+		b.Fatalf("unexpected decode result: %+v", out)
+	}
+}
+
+func BenchmarkBodyForStorageDecodeBytes(b *testing.B) {
+	enc := encodedBenchBody(b)
+
+	var out BodyForStorage
+	b.ReportAllocs()
+	for b.Loop() {
+		if err := rlp.DecodeBytes(enc, &out); err != nil {
+			b.Fatal(err)
+		}
+	}
+	if out.BaseTxnID != BaseTxnID(1234567) || out.TxCount != 250 {
+		b.Fatalf("unexpected decode result: %+v", out)
 	}
 }
 

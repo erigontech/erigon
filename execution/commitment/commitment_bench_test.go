@@ -255,10 +255,10 @@ func BenchmarkGetDeferredUpdate(b *testing.B) {
 	var bitmap uint16
 
 	// Fill cells with realistic data
-	for i := 0; i < 16; i++ {
+	for i := range 16 {
 		c := &cells[i]
 		c.hashLen = 32
-		for j := 0; j < 32; j++ {
+		for j := range 32 {
 			c.hash[j] = byte(i*32 + j)
 		}
 
@@ -266,17 +266,17 @@ func BenchmarkGetDeferredUpdate(b *testing.B) {
 		switch i % 4 {
 		case 0: // account cell
 			c.accountAddrLen = 20
-			for j := 0; j < 20; j++ {
+			for j := range 20 {
 				c.accountAddr[j] = byte(i + j)
 			}
 		case 1: // storage cell
 			c.storageAddrLen = 52
-			for j := 0; j < 52; j++ {
+			for j := range 52 {
 				c.storageAddr[j] = byte(i + j)
 			}
 		case 2: // extension cell
 			c.extLen = 10
-			for j := 0; j < 10; j++ {
+			for j := range 10 {
 				c.extension[j] = byte(i + j)
 			}
 		case 3: // hash-only cell
@@ -315,11 +315,11 @@ func BenchmarkGetDeferredUpdate_FewCells(b *testing.B) {
 	for _, i := range []int{0, 5} {
 		c := &cells[i]
 		c.hashLen = 32
-		for j := 0; j < 32; j++ {
+		for j := range 32 {
 			c.hash[j] = byte(i*32 + j)
 		}
 		c.accountAddrLen = 20
-		for j := 0; j < 20; j++ {
+		for j := range 20 {
 			c.accountAddr[j] = byte(i + j)
 		}
 		bitmap |= uint16(1 << i)
@@ -351,7 +351,7 @@ func populateUpdates(b *testing.B, upd *Updates, n int) {
 	b.Helper()
 	key := make([]byte, 20)
 	val := make([]byte, 8)
-	for i := 0; i < n; i++ {
+	for i := range n {
 		binary.BigEndian.PutUint64(key[12:], uint64(i))
 		binary.BigEndian.PutUint64(val, uint64(i+1))
 		upd.TouchPlainKey(string(key), val, upd.TouchStorage)

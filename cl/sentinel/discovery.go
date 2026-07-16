@@ -289,7 +289,7 @@ func (s *Sentinel) getSubnetCoverageWithPeers() (coverage [attestationSubnetCoun
 	}
 
 	// Query GossipSub for actual peers subscribed to each attestation subnet topic
-	for i := 0; i < attestationSubnetCount; i++ {
+	for i := range attestationSubnetCount {
 		topicName := gossip.TopicNameBeaconAttestation(uint64(i))
 		fullTopic := fmt.Sprintf("/eth2/%x/%s/%s", forkDigest, topicName, gossip.SSZSnappyCodec)
 		peers := s.p2p.Pubsub().ListPeers(fullTopic)
@@ -324,7 +324,7 @@ func (s *Sentinel) pruneExcessPeers() {
 
 	// Build a map of peer -> subnets they're subscribed to (from GossipSub)
 	peerToSubnets := make(map[peer.ID][]int)
-	for i := 0; i < attestationSubnetCount; i++ {
+	for i := range attestationSubnetCount {
 		for _, pid := range subnetToPeers[i] {
 			peerToSubnets[pid] = append(peerToSubnets[pid], i)
 		}
@@ -523,7 +523,7 @@ func (s *Sentinel) listenForPeers() {
 
 		peerInfo, _, err := p2p.ConvertToAddrInfo(node)
 		if err != nil {
-			log.Error("[Sentinel] Could not convert to peer info", "err", err)
+			log.Debug("[Sentinel] Could not convert to peer info", "err", err)
 			continue
 		}
 		s.pidToEnr.Store(peerInfo.ID, node)
@@ -561,7 +561,7 @@ func (s *Sentinel) onConnection(_ network.Network, conn network.Conn) {
 				var peerSubnets bitfield.Bitvector64
 				if err := node.Load(enr.WithEntry(s.cfg.NetworkConfig.AttSubnetKey, &peerSubnets)); err == nil && len(peerSubnets) == 8 {
 					coverage := s.getSubnetCoverage()
-					for i := 0; i < attestationSubnetCount; i++ {
+					for i := range attestationSubnetCount {
 						if peerSubnets[i/8]&(1<<(i%8)) != 0 && coverage[i] < minimumPeersPerSubnet {
 							peerHelpsSubnets = true
 							break
@@ -601,7 +601,7 @@ func (s *Sentinel) onConnection(_ network.Network, conn network.Conn) {
 			// Handshake had a transport error AND returned invalid — keep anyway.
 			s.peers.RecordHandshakeFailure(peerId)
 		} else {
-			// we were able to succesfully connect, so add this peer to our pool
+			// we were able to successfully connect, so add this peer to our pool
 			s.peers.AddPeer(peerId)
 
 			log.Trace("[Sentinel] Peer validated and added", "peer", peerId)

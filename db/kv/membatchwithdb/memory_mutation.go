@@ -33,6 +33,7 @@ import (
 	"github.com/erigontech/erigon/db/kv/mdbx"
 	"github.com/erigontech/erigon/db/kv/order"
 	"github.com/erigontech/erigon/db/kv/stream"
+	"github.com/erigontech/erigon/db/snapshotsync/blocksnapshots"
 )
 
 var _ kv.TemporalRwTx = &MemoryMutation{}
@@ -113,6 +114,19 @@ func NewMemoryBatchMDBX(tx kv.TemporalTx, tmpDir string, logger log.Logger) (mm 
 
 func (m *MemoryMutation) UnderlyingTx() kv.TemporalTx {
 	return m.db
+}
+
+// Pin forwards the files-pin capability to the underlying tx: domain reads fall
+// through the overlay to it, so pinning the underlying tx keeps overlay-view
+// reads on the same file generation. Returns nil when the underlying tx can't
+// pin files, letting the caller fall back to an independent snapshot.
+func (m *MemoryMutation) Pin() kv.TemporalFilesPin {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	if p, ok := m.db.(interface{ Pin() kv.TemporalFilesPin }); ok {
+		return p.Pin()
+	}
+	return nil
 }
 
 func (m *MemoryMutation) UpdateTxn(tx kv.TemporalTx) {
@@ -576,6 +590,17 @@ func (m *MemoryMutation) BucketSize(bucket string) (uint64, error) {
 	return m.memTx.BucketSize(bucket)
 }
 
+type HasBlockFilesRoTx interface {
+	BlockFilesRoTx() *blocksnapshots.View
+}
+
+func (m *MemoryMutation) BlockFilesRoTx() *blocksnapshots.View {
+	if p, ok := m.db.(HasBlockFilesRoTx); ok {
+		return p.BlockFilesRoTx()
+	}
+	return nil
+}
+
 func (m *MemoryMutation) Count(bucket string) (uint64, error) {
 	panic("not implemented")
 }
@@ -977,20 +1002,6 @@ func (m *MemoryMutation) Debug() kv.TemporalDebugTx {
 	return m.db.Debug()
 }
 
-func (m *MemoryMutation) AggForkablesTx(id kv.ForkableId) any {
-	if m.db == nil {
-		return nil
-	}
-	return m.db.AggForkablesTx(id)
-}
-
-func (m *MemoryMutation) Unmarked(id kv.ForkableId) kv.UnmarkedTx {
-	if m.db == nil {
-		return nil
-	}
-	return m.db.Unmarked(id)
-}
-
 func (m *MemoryMutation) DomainPut(domain kv.Domain, k, v []byte, txNum uint64, prevVal []byte) error {
 	panic("implement me pls. or use SharedDomains")
 }
@@ -1001,16 +1012,6 @@ func (m *MemoryMutation) DomainDel(domain kv.Domain, k []byte, txNum uint64, pre
 
 func (m *MemoryMutation) DomainDelPrefix(domain kv.Domain, prefix []byte, txNum uint64) error {
 	panic("implement me pls. or use SharedDomains")
-}
-
-func (m *MemoryMutation) UnmarkedRw(id kv.ForkableId) kv.UnmarkedRwTx {
-	if m.db == nil {
-		return nil
-	}
-	if rwTx, ok := m.db.(kv.TemporalRwTx); ok {
-		return rwTx.UnmarkedRw(id)
-	}
-	return nil // overlay backed by RO tx
 }
 
 func (m *MemoryMutation) PruneSmallBatches(ctx context.Context, timeout time.Duration) (haveMore bool, err error) {
@@ -1139,12 +1140,6 @@ func (v *OverlayTemporalReadView) Debug() kv.TemporalDebugTx {
 }
 func (v *OverlayTemporalReadView) AggTx() any {
 	return v.temporalTx.AggTx()
-}
-func (v *OverlayTemporalReadView) AggForkablesTx(id kv.ForkableId) any {
-	return v.temporalTx.AggForkablesTx(id)
-}
-func (v *OverlayTemporalReadView) Unmarked(id kv.ForkableId) kv.UnmarkedTx {
-	return v.temporalTx.Unmarked(id)
 }
 func (v *OverlayTemporalReadView) FreezeInfo() kv.FreezeInfo {
 	return v.temporalTx.FreezeInfo()

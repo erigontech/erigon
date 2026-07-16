@@ -38,7 +38,7 @@ func whaleSurvivorCorpus(keepWholeNibble bool) (pk [][]byte, upds []Update, k2 [
 	addr, _, _, _, pk, upds, groups = whaleByNibble(30_000)
 
 	surv := -1
-	for x := 0; x < 16; x++ {
+	for x := range 16 {
 		if len(groups[x]) >= 2 {
 			surv = x
 			break
@@ -49,7 +49,7 @@ func whaleSurvivorCorpus(keepWholeNibble bool) (pk [][]byte, upds []Update, k2 [
 	u2 = []Update{{Flags: BalanceUpdate | NonceUpdate}}
 	u2[0].Balance.SetUint64(99)
 	u2[0].Nonce = 7
-	for x := 0; x < 16; x++ {
+	for x := range 16 {
 		for i, kv := range groups[x] {
 			if x == surv && (keepWholeNibble || i == 0) {
 				continue // keep the survivor(s)
@@ -75,7 +75,7 @@ func TestDeepFold_InjectedRootClearsStaleStorage(t *testing.T) {
 	require.True(t, hph.root.loaded.storage(), "precondition: root is flagged storage-loaded")
 
 	acct := common.HexToAddress("0x1234567890abcdef1234567890abcdef12345678")
-	setAccountStorageRoot(hph, KeyToHexNibbleHash(acct[:]), common.HexToHash("0x1234"))
+	setAccountStorageRoot(hph, KeyToHexNibbleHash(acct[:]), cell{hash: common.HexToHash("0x1234"), hashLen: 32})
 
 	require.Zerof(t, hph.root.storageAddrLen,
 		"injecting a storage root must clear the stale storage plain key (got len=%d)", hph.root.storageAddrLen)
@@ -98,7 +98,7 @@ func TestDeepFold_InjectedStorageRootWins(t *testing.T) {
 
 	clean := NewHexPatriciaHashed(length.Addr, NewMockState(t), DefaultTrieConfig())
 	clean.updateCell(acct[:], accHashed, &accUpd)
-	setAccountStorageRoot(clean, accHashed, injectedSR)
+	setAccountStorageRoot(clean, accHashed, cell{hash: injectedSR, hashLen: 32})
 	cleanHash, err := clean.computeCellHash(&clean.root, 0, nil)
 	require.NoError(t, err)
 
@@ -107,12 +107,55 @@ func TestDeepFold_InjectedStorageRootWins(t *testing.T) {
 	stale := NewHexPatriciaHashed(length.Addr, NewMockState(t), DefaultTrieConfig())
 	addStorageToCell(&stale.root, staleAddr, staleLoc, []byte{0xAA, 0xBB, 0xCC, 0xDD})
 	stale.updateCell(acct[:], accHashed, &accUpd)
-	setAccountStorageRoot(stale, accHashed, injectedSR)
+	setAccountStorageRoot(stale, accHashed, cell{hash: injectedSR, hashLen: 32})
 	staleHash, err := stale.computeCellHash(&stale.root, 0, nil)
 	require.NoError(t, err)
 
 	require.Equal(t, cleanHash, staleHash,
 		"account hash must be driven by the injected storage root, not a stale storage slot")
+}
+
+// A whale that deep-folds to a single-child storage root (extension) in one block and to a hash-only
+// root (multi-child or empty) in the next reuses the same account cell. The hash-only injection must
+// clear the extension the single-child collapse left, or computeCellHash hashes extension(oldExt, sr)
+// instead of sr and produces a wrong account/state root.
+func TestDeepFold_HashOnlyRootClearsStaleExtension(t *testing.T) {
+	t.Parallel()
+
+	acct := common.HexToAddress("0x1234567890abcdef1234567890abcdef12345678")
+	accHashed := KeyToHexNibbleHash(acct[:])
+	accUpd := Update{Flags: BalanceUpdate | NonceUpdate}
+	accUpd.Balance.SetUint64(1_000_000)
+	accUpd.Nonce = 3
+
+	var singleChildSR cell
+	singleChildSR.hash = common.HexToHash("0x1111111111111111111111111111111111111111111111111111111111111111")
+	singleChildSR.hashLen = 32
+	singleChildSR.extLen = 3
+	singleChildSR.extension[0], singleChildSR.extension[1], singleChildSR.extension[2] = 0x0a, 0x0b, 0x0c
+
+	var multiSR cell
+	multiSR.hash = common.HexToHash("0x2222222222222222222222222222222222222222222222222222222222222222")
+	multiSR.hashLen = 32
+
+	reused := NewHexPatriciaHashed(length.Addr, NewMockState(t), DefaultTrieConfig())
+	reused.updateCell(acct[:], accHashed, &accUpd)
+	setAccountStorageRoot(reused, accHashed, singleChildSR)
+	require.NotZero(t, reused.root.extLen, "single-child collapse must set the storage extension")
+	setAccountStorageRoot(reused, accHashed, multiSR)
+	require.Zerof(t, reused.root.extLen,
+		"a hash-only storage root must clear the prior single-child extension (got len=%d)", reused.root.extLen)
+	reusedHash, err := reused.computeCellHash(&reused.root, 0, nil)
+	require.NoError(t, err)
+
+	clean := NewHexPatriciaHashed(length.Addr, NewMockState(t), DefaultTrieConfig())
+	clean.updateCell(acct[:], accHashed, &accUpd)
+	setAccountStorageRoot(clean, accHashed, multiSR)
+	cleanHash, err := clean.computeCellHash(&clean.root, 0, nil)
+	require.NoError(t, err)
+
+	require.Equal(t, cleanHash, reusedHash,
+		"a reused cell's stale storage extension must not change the account hash")
 }
 
 type engineBatch struct {
@@ -148,7 +191,7 @@ func TestStreaming_ExtensionToppedMountSplit(t *testing.T) {
 	seed := NewUpdateBuilder()
 	seed.Balance(addrHex(a), 10)
 	seed.Balance(addrHex(b), 20)
-	for n := 0; n < 16; n++ {
+	for n := range 16 {
 		if n == 7 {
 			continue
 		}

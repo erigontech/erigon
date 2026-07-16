@@ -60,20 +60,20 @@ func TestTrieReader_IntegrationWithRealData(t *testing.T) {
 
 	// Generate deterministic account keys (plain 20-byte addresses).
 	accountKeys := make([][]byte, numAccounts)
-	for i := 0; i < numAccounts; i++ {
+	for i := range numAccounts {
 		accountKeys[i] = makeTestAccountAddr(uint64(i))
 	}
 
 	// Generate deterministic storage keys (20-byte addr + 32-byte slot).
 	storageKeys := make([][]byte, numStorage)
-	for i := 0; i < numStorage; i++ {
+	for i := range numStorage {
 		storageKeys[i] = makeTestStorageKey(uint64(i), 1)
 	}
 
 	var blockNum uint64
-	for txNum := uint64(0); txNum < totalTxs; txNum++ {
+	for txNum := range totalTxs {
 		// Write accounts.
-		for i := 0; i < numAccounts; i++ {
+		for i := range numAccounts {
 			acc := accounts.Account{
 				Nonce:    txNum,
 				Balance:  *uint256.NewInt(txNum * 1000),
@@ -84,7 +84,7 @@ func TestTrieReader_IntegrationWithRealData(t *testing.T) {
 		}
 
 		// Write storage.
-		for i := 0; i < numStorage; i++ {
+		for i := range numStorage {
 			var val [32]byte
 			val[31] = byte(txNum + 1)
 			require.NoError(t, domains.DomainPut(kv.StorageDomain, rwTx, storageKeys[i], val[:], txNum, nil))

@@ -156,6 +156,11 @@ const (
 	TblCodeHistoryVals = "CodeHistoryVals"
 	TblCodeIdx         = "CodeIdx"
 
+	// TblCodeCache holds decompressed contract code keyed by keccak(code), the
+	// persistent backing tier for the in-memory code cache so reads skip the
+	// CodeDomain decompression across restarts. Immutable (content-addressed).
+	TblCodeCache = "CodeCache"
+
 	TblCommitmentVals        = "CommitmentVals"
 	TblCommitmentHistoryKeys = "CommitmentHistoryKeys"
 	TblCommitmentHistoryVals = "CommitmentHistoryVals"
@@ -274,6 +279,7 @@ const (
 	// End GLOAS
 
 	StatesProcessingProgress = "StatesProcessingProgress"
+	StatesPruneProgress      = "StatesPruneProgress" // table name => slot
 
 	//Diagnostics tables
 	DiagSystemInfo = "DiagSystemInfo"
@@ -289,6 +295,7 @@ var (
 	PruneHistory           = []byte("pruneHistory")
 	PruneBlocks            = []byte("pruneBlocks")
 	PruneCommitmentHistory = []byte("pruneCommitmentHistory")
+	PruneReceipts          = []byte("pruneReceipts")
 
 	DBSchemaVersionKey = []byte("dbVersion")
 	GenesisKey         = []byte("genesis")
@@ -363,6 +370,7 @@ var ChaindataTables = []string{
 	TblCodeHistoryKeys,
 	TblCodeHistoryVals,
 	TblCodeIdx,
+	TblCodeCache,
 
 	TblCommitmentVals,
 	TblCommitmentHistoryKeys,
@@ -424,6 +432,7 @@ var ChaindataTables = []string{
 	RandaoMixes,
 	Proposers,
 	StatesProcessingProgress,
+	StatesPruneProgress,
 	InactivityScores,
 	NextSyncCommittee,
 	CurrentSyncCommittee,
@@ -841,13 +850,6 @@ func String2Domain(in string) (Domain, error) {
 		return RCacheDomain, nil
 	default:
 		return Domain(MaxUint16), fmt.Errorf("unknown name: %s", in)
-	}
-}
-
-func String2Forkable(in string) (ForkableId, error) {
-	switch in {
-	default:
-		return ForkableId(MaxUint16), fmt.Errorf("unknown forkable name: %s", in)
 	}
 }
 

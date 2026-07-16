@@ -25,6 +25,8 @@ jobs:
     steps:
     - name: Check out repository
       uses: actions/checkout@v7
+      with:
+        persist-credentials: false
 
     - name: Clean Erigon Build & Data Directories
       run: |
@@ -85,12 +87,12 @@ jobs:
         python3 $ERIGON_QA_PATH/test_system/qa-tests/uploads/upload_test_results.py \
           --repo erigon \
           --commit $(git rev-parse HEAD) \
-          --branch ${{ github.ref_name }} \
+          --branch "$GITHUB_REF_NAME" \
           --test_name snap-download \
           --chain $CHAIN \
-          --runner ${{ runner.name }} \
+          --runner "$RUNNER_NAME" \
           --outcome $TEST_RESULT \
-          --result_file ${{ github.workspace }}/result-$CHAIN.json
+          --result_file "$GITHUB_WORKSPACE/result-$CHAIN.json"
 
     - name: Upload test results
       if: steps.test_step.outputs.test_executed == 'true'

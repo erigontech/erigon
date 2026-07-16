@@ -428,7 +428,7 @@ func TestTimeComplexity(t *testing.T) {
 	// for 1000000 read and write with no dependency at different memory location
 	mvh1 := NewVersionMap(nil)
 
-	for i := 0; i < 1000000; i++ {
+	for i := range 1000000 {
 		ap1 := getAddress(i)
 		writeFor(mvh1, ap1, AddressPath, accounts.NilKey, Version{0, 0, i, 1}, valueFor(AddressPath, i, 1), true)
 		readFor(mvh1, ap1, AddressPath, accounts.NilKey, i)
@@ -438,7 +438,7 @@ func TestTimeComplexity(t *testing.T) {
 	mvh2 := NewVersionMap(nil)
 	ap2 := getAddress(2)
 
-	for i := 0; i < 1000000; i++ {
+	for i := range 1000000 {
 		writeFor(mvh2, ap2, AddressPath, accounts.NilKey, Version{0, 0, i, 1}, valueFor(AddressPath, i, 1), true)
 		readFor(mvh2, ap2, AddressPath, accounts.NilKey, i)
 	}
@@ -453,7 +453,7 @@ func TestWriteTimeSameLocationDifferentTxnIdx(t *testing.T) {
 	mvh1 := NewVersionMap(nil)
 	ap1 := getAddress(1)
 
-	for i := 0; i < 1000000; i++ {
+	for i := range 1000000 {
 		writeFor(mvh1, ap1, AddressPath, accounts.NilKey, Version{0, 0, i, 1}, valueFor(AddressPath, i, 1), true)
 	}
 }
@@ -464,7 +464,7 @@ func TestWriteTimeSameLocationSameTxnIdx(t *testing.T) {
 	mvh1 := NewVersionMap(nil)
 	ap1 := getAddress(1)
 
-	for i := 0; i < 1000000; i++ {
+	for i := range 1000000 {
 		writeFor(mvh1, ap1, AddressPath, accounts.NilKey, Version{0, 0, 1, i}, valueFor(AddressPath, i, 1), true)
 	}
 }
@@ -477,7 +477,7 @@ func TestWriteTimeDifferentLocation(t *testing.T) {
 
 	mvh1 := NewVersionMap(nil)
 
-	for i := 0; i < 1000000; i++ {
+	for i := range 1000000 {
 		ap1 := getAddress(i)
 		writeFor(mvh1, ap1, AddressPath, accounts.NilKey, Version{0, 0, i, 1}, valueFor(AddressPath, i, 1), true)
 	}
@@ -491,7 +491,7 @@ func TestReadTimeSameLocation(t *testing.T) {
 
 	writeFor(mvh1, ap1, AddressPath, accounts.NilKey, Version{0, 0, 1, 1}, valueFor(AddressPath, 1, 1), true)
 
-	for i := 0; i < 1000000; i++ {
+	for range 1000000 {
 		readFor(mvh1, ap1, AddressPath, accounts.NilKey, 2)
 	}
 }
@@ -725,7 +725,7 @@ func TestBALPrePop_SameSenderTxs_NoConflicts(t *testing.T) {
 	vm := NewVersionMap(nil)
 	vm.HasBAL = true
 
-	for i := 0; i < numTxs; i++ {
+	for i := range numTxs {
 		writeFor(vm, sender, BalancePath, accounts.NilKey, Version{TxIndex: i, Incarnation: 0}, *uint256.NewInt(uint64(1000 - i)), true)
 		writeFor(vm, sender, NoncePath, accounts.NilKey, Version{TxIndex: i, Incarnation: 0}, uint64(i+1), true)
 		writeFor(vm, coinbase, BalancePath, accounts.NilKey, Version{TxIndex: i, Incarnation: 0}, *uint256.NewInt(uint64((i + 1) * 50)), true)
@@ -739,7 +739,7 @@ func TestBALPrePop_SameSenderTxs_NoConflicts(t *testing.T) {
 	}
 
 	io := NewVersionedIO(numTxs)
-	for txIdx := 0; txIdx < numTxs; txIdx++ {
+	for txIdx := range numTxs {
 		rs := ReadSet{}
 		rs.SetAddress(sender, VersionedRead[AccountView]{ReadHeader: ReadHeader{Source: StorageRead, Version: UnknownVersion}})
 		balVal, balRes, _ := readFor(vm, sender, BalancePath, accounts.NilKey, txIdx)
@@ -755,7 +755,7 @@ func TestBALPrePop_SameSenderTxs_NoConflicts(t *testing.T) {
 		io.RecordReads(Version{TxIndex: txIdx, Incarnation: 0}, rs)
 	}
 
-	for txIdx := 0; txIdx < numTxs; txIdx++ {
+	for txIdx := range numTxs {
 		valid := vm.ValidateVersion(txIdx, io, checkVersionEqual, false, "")
 		require.Equal(t, VersionValid, valid,
 			"tx %d: BAL-pre-populated reads should validate without conflicts; got %s", txIdx, valid)
@@ -785,7 +785,7 @@ func TestNoBAL_SameSenderTxs_DetectsConflicts(t *testing.T) {
 	origBalance := *uint256.NewInt(1_000_000)
 	origNonce := uint64(42)
 	io := NewVersionedIO(numTxs)
-	for txIdx := 0; txIdx < numTxs; txIdx++ {
+	for txIdx := range numTxs {
 		rs := ReadSet{}
 		rs.SetBalance(sender, VersionedRead[uint256.Int]{ReadHeader: ReadHeader{Source: StorageRead, Version: UnknownVersion}, Val: origBalance})
 		rs.SetNonce(sender, VersionedRead[uint64]{ReadHeader: ReadHeader{Source: StorageRead, Version: UnknownVersion}, Val: origNonce})

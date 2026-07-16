@@ -156,7 +156,7 @@ func bindKeyBroadcastContract(address common.Address, caller bind.ContractCaller
 // sets the output to result. The result type might be a single field for simple
 // returns, a slice of interfaces for anonymous returns and a struct for named
 // returns.
-func (_KeyBroadcastContract *KeyBroadcastContractRaw) Call(opts *bind.CallOpts, result *[]interface{}, method string, params ...interface{}) error {
+func (_KeyBroadcastContract *KeyBroadcastContractRaw) Call(opts *bind.CallOpts, result *[]any, method string, params ...any) error {
 	return _KeyBroadcastContract.Contract.KeyBroadcastContractCaller.contract.Call(opts, result, method, params...)
 }
 
@@ -167,7 +167,7 @@ func (_KeyBroadcastContract *KeyBroadcastContractRaw) Transfer(opts *bind.Transa
 }
 
 // Transact invokes the (paid) contract method with params as input values.
-func (_KeyBroadcastContract *KeyBroadcastContractRaw) Transact(opts *bind.TransactOpts, method string, params ...interface{}) (types.Transaction, error) {
+func (_KeyBroadcastContract *KeyBroadcastContractRaw) Transact(opts *bind.TransactOpts, method string, params ...any) (types.Transaction, error) {
 	return _KeyBroadcastContract.Contract.KeyBroadcastContractTransactor.contract.Transact(opts, method, params...)
 }
 
@@ -175,7 +175,7 @@ func (_KeyBroadcastContract *KeyBroadcastContractRaw) Transact(opts *bind.Transa
 // sets the output to result. The result type might be a single field for simple
 // returns, a slice of interfaces for anonymous returns and a struct for named
 // returns.
-func (_KeyBroadcastContract *KeyBroadcastContractCallerRaw) Call(opts *bind.CallOpts, result *[]interface{}, method string, params ...interface{}) error {
+func (_KeyBroadcastContract *KeyBroadcastContractCallerRaw) Call(opts *bind.CallOpts, result *[]any, method string, params ...any) error {
 	return _KeyBroadcastContract.Contract.contract.Call(opts, result, method, params...)
 }
 
@@ -186,7 +186,7 @@ func (_KeyBroadcastContract *KeyBroadcastContractTransactorRaw) Transfer(opts *b
 }
 
 // Transact invokes the (paid) contract method with params as input values.
-func (_KeyBroadcastContract *KeyBroadcastContractTransactorRaw) Transact(opts *bind.TransactOpts, method string, params ...interface{}) (types.Transaction, error) {
+func (_KeyBroadcastContract *KeyBroadcastContractTransactorRaw) Transact(opts *bind.TransactOpts, method string, params ...any) (types.Transaction, error) {
 	return _KeyBroadcastContract.Contract.contract.Transact(opts, method, params...)
 }
 
@@ -194,7 +194,7 @@ func (_KeyBroadcastContract *KeyBroadcastContractTransactorRaw) Transact(opts *b
 //
 // Solidity: function getEonKey(uint64 eon) view returns(bytes)
 func (_KeyBroadcastContract *KeyBroadcastContractCaller) GetEonKey(opts *bind.CallOpts, eon uint64) ([]byte, error) {
-	var out []interface{}
+	var out []any
 	err := _KeyBroadcastContract.contract.Call(opts, &out, "getEonKey", eon)
 
 	if err != nil {

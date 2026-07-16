@@ -1909,6 +1909,7 @@ func (t *Updates) hashSortDirectInMem(ctx context.Context, warmuper *Warmuper, f
 func (t *Updates) HashSort(ctx context.Context, warmuper *Warmuper, fn func(hk, pk []byte, update *Update) error) error {
 	switch t.mode {
 	case ModeDirect:
+		cnt := len(t.keys)
 		clear(t.keys)
 		if t.etl == nil {
 			return t.hashSortDirectInMem(ctx, warmuper, fn)
@@ -1921,7 +1922,7 @@ func (t *Updates) HashSort(ctx context.Context, warmuper *Warmuper, fn func(hk, 
 			}
 		}
 		// Pre-size the arena so a mid-batch grow can't reallocate and invalidate live sub-slices (≤180 B/key, 192 with headroom).
-		t.arenaEnsureCap(hashSortBatchSize * 192)
+		t.arenaEnsureCap(min(cnt, hashSortBatchSize) * 192)
 		t.arenas[t.curArena] = t.arenas[t.curArena][:0]
 		var prevKey []byte
 
@@ -1997,7 +1998,7 @@ func (t *Updates) HashSort(ctx context.Context, warmuper *Warmuper, fn func(hk, 
 				return err
 			}
 		}
-		t.arenaEnsureCap(hashSortBatchSize * 144)
+		t.arenaEnsureCap(min(t.tree.Len(), hashSortBatchSize) * 144)
 		t.arenas[t.curArena] = t.arenas[t.curArena][:0]
 		var prevKey []byte
 		var processErr error

@@ -115,6 +115,12 @@ type Config struct {
 	// (Optional) EIP-7251: Increase the MAX_EFFECTIVE_BALANCE
 	ConsolidationRequestContract *common.Address `json:"consolidationRequestContractAddress,omitempty"`
 
+	// (Optional) EIP-8282: The Builder Deposit Addresses
+	BuilderDepositContract *common.Address `json:"builderDepositContractAddress,omitempty"`
+
+	// (Optional) EIP-8282: The Builder Exit Addresses
+	BuilderExitContract *common.Address `json:"builderExitContractAddress,omitempty"`
+
 	DefaultBlockGasLimit *uint64 `json:"defaultBlockGasLimit,omitempty"`
 
 	// Various rules engines
@@ -263,6 +269,11 @@ type L2Config interface {
 	// Name returns the short identifier of the L2 stack (e.g. used to select
 	// a registered rules engine).
 	Name() string
+
+	// ResolveRules lets an L2 stack finalize the per-block Rules after the
+	// standard fork resolution: set L2Version and flip any EVM-fork booleans
+	// that the L2 gates on its own version ladder instead of L1 time/number.
+	ResolveRules(l2Version, blockNum, blockTime uint64, rules *Rules)
 }
 
 func timestampToTime(unixSec uint64) *time.Time {
@@ -567,6 +578,10 @@ func (c *Config) SecondsPerSlot() uint64 {
 
 func (c *Config) SystemContracts(time uint64) map[string]accounts.Address {
 	contracts := map[string]accounts.Address{}
+	if c.IsAmsterdam(time) {
+		contracts["BUILDER_DEPOSIT_CONTRACT_ADDRESS"] = c.GetBuilderDepositContract()
+		contracts["BUILDER_EXIT_CONTRACT_ADDRESS"] = c.GetBuilderExitContract()
+	}
 	if c.IsCancun(time) {
 		contracts["BEACON_ROOTS_ADDRESS"] = params.BeaconRootsAddress
 	}
@@ -597,6 +612,24 @@ func (c *Config) GetConsolidationRequestContract() accounts.Address {
 	return params.ConsolidationRequestAddress
 }
 
+// GetBuilderDepositContract returns the configured EIP-8282 builder deposit contract address,
+// falling back to the default if not set in the chain config.
+func (c *Config) GetBuilderDepositContract() accounts.Address {
+	if c.BuilderDepositContract != nil {
+		return accounts.InternAddress(*c.BuilderDepositContract)
+	}
+	return params.BuilderDepositAddress
+}
+
+// GetBuilderExitContract returns the configured EIP-8282 builder exit contract address,
+// falling back to the default if not set in the chain config.
+func (c *Config) GetBuilderExitContract() accounts.Address {
+	if c.BuilderExitContract != nil {
+		return accounts.InternAddress(*c.BuilderExitContract)
+	}
+	return params.BuilderExitAddress
+}
+
 // CheckCompatible checks whether scheduled fork transitions have been imported
 // with a mismatching chain configuration.
 func (c *Config) CheckCompatible(newcfg *Config, height uint64) *ConfigCompatError {
@@ -619,12 +652,13 @@ type forkBlockNumber struct {
 	name        string
 	blockNumber *uint64
 	optional    bool // if true, the fork may be nil and next fork is still allowed
+	outOfOrder  bool // if true, the fork is exempt from the ordering check (one-off fork, e.g. DAO)
 }
 
 func (c *Config) forkBlockNumbers() []forkBlockNumber {
 	return []forkBlockNumber{
 		{name: "homesteadBlock", blockNumber: c.HomesteadBlock},
-		{name: "daoForkBlock", blockNumber: c.DAOForkBlock, optional: true},
+		{name: "daoForkBlock", blockNumber: c.DAOForkBlock, optional: true, outOfOrder: true},
 		{name: "eip150Block", blockNumber: c.TangerineWhistleBlock},
 		{name: "eip155Block", blockNumber: c.SpuriousDragonBlock},
 		{name: "byzantiumBlock", blockNumber: c.ByzantiumBlock},
@@ -649,7 +683,7 @@ func (c *Config) CheckConfigForkOrder() error {
 	var lastFork forkBlockNumber
 
 	for _, fork := range c.forkBlockNumbers() {
-		if lastFork.name != "" {
+		if lastFork.name != "" && !fork.outOfOrder {
 			// Next one must be higher number
 			if lastFork.blockNumber == nil && fork.blockNumber != nil {
 				return fmt.Errorf("unsupported fork ordering: %v not enabled, but %v enabled at %v",
@@ -663,7 +697,7 @@ func (c *Config) CheckConfigForkOrder() error {
 			}
 			// If it was optional and not set, then ignore it
 		}
-		if !fork.optional || fork.blockNumber != nil {
+		if (!fork.optional || fork.blockNumber != nil) && !fork.outOfOrder {
 			lastFork = fork
 		}
 	}
@@ -829,6 +863,11 @@ type Rules struct {
 	IsPrague, IsOsaka, IsAmsterdam                    bool
 	DisabledEIPs                                      []int
 	IsAura                                            bool
+
+	// L2Version is the L2 stack's own upgrade version (e.g. an ArbOS-style
+	// version ladder), resolved per block by the chain's L2Config oracle.
+	// Zero for L1 chains.
+	L2Version uint64
 }
 
 // IsEIPDisabled returns true if the given EIP number has been disabled for this chain.

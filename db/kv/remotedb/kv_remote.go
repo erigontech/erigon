@@ -192,7 +192,6 @@ func (db *DB) Debug() kv.TemporalDebugDB                           { return kv.T
 func (db *DB) NewMemBatch(ioMetrics any) kv.TemporalMemBatch       { panic("not implemented") }
 func (db *DB) DomainTables(domain ...kv.Domain) []string           { panic("not implemented") }
 func (db *DB) InvertedIdxTables(domain ...kv.InvertedIdx) []string { panic("not implemented") }
-func (db *DB) ForkableTables(domain ...kv.ForkableId) []string     { panic("not implemented") }
 func (db *DB) ReloadFiles() error                                  { panic("not implemented") }
 func (db *DB) BuildMissedAccessors(_ context.Context, _ int) error { panic("not implemented") }
 func (db *DB) EnableReadAhead() kv.TemporalDebugDB                 { panic("not implemented") }
@@ -248,7 +247,6 @@ func (tx *tx) NewMemBatch(ioMetrics any) kv.TemporalMemBatch { panic("not implem
 func (tx *tx) AggTx() any                                  { panic("not implemented") }
 func (tx *tx) Debug() kv.TemporalDebugTx                   { return kv.TemporalDebugTx(tx) }
 func (tx *tx) FreezeInfo() kv.FreezeInfo                   { panic("not implemented") }
-func (tx *tx) AllForkableIds() (ids []kv.ForkableId)       { panic("not implemented") }
 func (tx *tx) StepsInFiles(entitySet ...kv.Domain) kv.Step { panic("not implemented") }
 func (tx *tx) Retire(ctx context.Context, cutoffs kv.RetireCutoffs) (int, error) {
 	return 0, errors.New("remote db provider doesn't support .Retire method")
@@ -419,14 +417,6 @@ func (tx *tx) Cursor(bucket string) (kv.Cursor, error) {
 
 func (tx *tx) ListTables() ([]string, error) {
 	return nil, errors.New("function ListTables is not implemented for remoteTx")
-}
-
-func (tx *tx) Unmarked(id kv.ForkableId) kv.UnmarkedTx {
-	panic("not implemented")
-}
-
-func (tx *tx) AggForkablesTx(id kv.ForkableId) any {
-	panic("not implemented")
 }
 
 // func (c *remoteCursor) Put(k []byte, v []byte) error            { panic("not supported") }

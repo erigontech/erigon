@@ -132,7 +132,7 @@ func handShake[T StatusPacket](
 
 	t := time.NewTimer(timeout)
 	defer t.Stop()
-	for i := 0; i < 2; i++ {
+	for range 2 {
 		select {
 		case err := <-errChan:
 			if err != nil {
