@@ -70,23 +70,20 @@ func (bra *BlockReadAheader) SetPublishedSD(provider func() *execctx.SharedDomai
 	bra.publishedSD = provider
 }
 
-// warmView opens a per-goroutine read view for prefetching. With a published SD
-// it reads through it — in-flight tip state, and the SD's own read-fill warms the
-// process-global cache (cache population stays an SD concern). Without one it
-// reads the raw tx and does not populate the cache. A throwaway per-worker
-// metrics accumulator keeps concurrent workers off the SD's shared request
-// metrics.
+// warmView opens a per-goroutine read view for prefetching. A prefetch is a
+// fire-and-forget warmer, so it takes a plain (uncoordinated) RO snapshot — no
+// foreground-mutex traffic on the tip path. With a published SD it reads through
+// it (in-flight tip state, and the SD's own read-fill warms the process-global
+// cache); without one it reads the raw tx and populates nothing. A throwaway
+// per-worker metrics accumulator keeps concurrent workers off the SD's shared
+// request metrics.
 func warmView(ctx context.Context, tdb kv.TemporalRoDB, sd *execctx.SharedDomains) (kv.TemporalTx, kv.TemporalGetter, error) {
-	if sd != nil {
-		ttx, err := sd.BeginCoordinatedRo(ctx, tdb) //nolint:gocritic // tx is returned to the caller, which defers Rollback
-		if err != nil {
-			return nil, nil, err
-		}
-		return ttx, sd.AsGetterMetered(ttx, kvmetrics.NewDomainMetrics()), nil
-	}
 	ttx, err := tdb.BeginTemporalRo(ctx) //nolint:gocritic // tx is returned to the caller, which defers Rollback
 	if err != nil {
 		return nil, nil, err
+	}
+	if sd != nil {
+		return ttx, sd.AsGetterMetered(ttx, kvmetrics.NewDomainMetrics()), nil
 	}
 	return ttx, ttx, nil
 }
@@ -150,9 +147,9 @@ func (bra *BlockReadAheader) warmBody(ctx context.Context, db kv.RoDB, header *t
 		return
 	}
 	// Capture the published tip leaf once; all workers share it (concurrent reads
-	// are safe on the stable published SD) and each opens its own coordinated tx.
-	// SetHead drains in-flight warmup before closing generations, so the captured
-	// leaf can't be closed out from under a worker.
+	// are safe on the stable published SD) and each opens its own read tx. SetHead
+	// drains in-flight warmup before closing generations, so the captured leaf
+	// can't be closed out from under a worker.
 	var sd *execctx.SharedDomains
 	if bra.publishedSD != nil {
 		sd = bra.publishedSD()
