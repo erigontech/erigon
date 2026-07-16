@@ -281,6 +281,7 @@ func (sdc *SharedDomainsCommitmentContext) Reset() {
 func (sdc *SharedDomainsCommitmentContext) ClearRam() {
 	sdc.updates.Reset()
 	sdc.Reset()
+	sdc.stateReader = nil
 }
 
 func (sdc *SharedDomainsCommitmentContext) KeysCount() uint64 {
