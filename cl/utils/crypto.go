@@ -18,21 +18,12 @@ package utils
 
 import (
 	"crypto/sha256"
-	"hash"
-	"sync"
 )
 
 type HashFunc func(data []byte, extras ...[]byte) [32]byte
 
-var hasherPool = sync.Pool{
-	New: func() any {
-		return sha256.New()
-	},
-}
-
-// sha256StackBuf bounds the concatenation of data+extras, sized for the SSZ calls
-// that join two 32-byte roots. Longer concatenations go to the pooled hasher
-// instead; a lone data argument needs no buffer and is hashed at any size.
+// sha256StackBuf sizes the join buffer for the SSZ calls that join two 32-byte
+// roots; larger joins use the heap.
 const sha256StackBuf = 64
 
 // General purpose Sha256
@@ -45,7 +36,7 @@ func Sha256(data []byte, extras ...[]byte) [32]byte {
 		total += len(extra)
 	}
 	if total > sha256StackBuf {
-		return sha256Streamed(data, extras...)
+		return sha256Joined(data, extras, total)
 	}
 	var buf [sha256StackBuf]byte
 	n := copy(buf[:], data)
@@ -55,21 +46,13 @@ func Sha256(data []byte, extras ...[]byte) [32]byte {
 	return sha256.Sum256(buf[:n])
 }
 
-// sha256Streamed hashes inputs too large for Sha256's stack buffer.
-func sha256Streamed(data []byte, extras ...[]byte) [32]byte {
-	h, ok := hasherPool.Get().(hash.Hash)
-	if !ok {
-		h = sha256.New()
-	}
-	defer hasherPool.Put(h)
-	h.Reset()
-
-	var b [32]byte
-
-	h.Write(data)
+// sha256Joined hashes the concatenation of data and extras. Hashing through a pooled
+// hash.Hash would leak every caller's buffer to the heap, since Write is an interface method.
+func sha256Joined(data []byte, extras [][]byte, total int) [32]byte {
+	buf := make([]byte, 0, total)
+	buf = append(buf, data...)
 	for _, extra := range extras {
-		h.Write(extra)
+		buf = append(buf, extra...)
 	}
-	h.Sum(b[:0])
-	return b
+	return sha256.Sum256(buf)
 }
