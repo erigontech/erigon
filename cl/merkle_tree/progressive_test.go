@@ -17,6 +17,7 @@
 package merkle_tree_test
 
 import (
+	"crypto/sha256"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -60,6 +61,98 @@ func TestMerkleizeProgressiveReferenceVectors(t *testing.T) {
 			require.Equal(t, original, chunks, "input chunks must not be modified")
 		})
 	}
+}
+
+func TestMixInActiveFieldsReferenceVectors(t *testing.T) {
+	// EIP-7495 is pinned here to ethereum/EIPs revision
+	// c81d843b3f8aa839fe42911c5b6e501c7d2940a3. The expected roots were
+	// generated with ethereum/remerkleable's ProgressiveContainer backing at
+	// 2f0baeef0082d4278acaef7d822deb7009d7db7e. EIP-7807 revision
+	// 75d7bc2c20a91ec017d147f400d6bbf767843e2c defines ExecutionPayload with
+	// active_fields=[1] * 18.
+	var root [32]byte
+	for i := range root {
+		root[i] = byte(i)
+	}
+
+	minimumPacked := [32]byte{0x01}
+
+	executionPayloadFields := make([]bool, 18)
+	for i := range executionPayloadFields {
+		executionPayloadFields[i] = true
+	}
+	executionPayloadPacked := [32]byte{0xff, 0xff, 0x03}
+
+	sparseFields := make([]bool, 18)
+	for _, i := range []int{0, 7, 8, 17} {
+		sparseFields[i] = true
+	}
+	sparsePacked := [32]byte{0x81, 0x01, 0x02}
+
+	boundaryFields := make([]bool, 256)
+	boundaryFields[255] = true
+	var boundaryPacked [32]byte
+	boundaryPacked[31] = 0x80
+
+	tests := []struct {
+		name         string
+		activeFields []bool
+		packed       [32]byte
+		expected     string
+	}{
+		{
+			name:         "minimum legal active fields",
+			activeFields: []bool{true},
+			packed:       minimumPacked,
+			expected:     "0xe987b42bd50123fe7764ebae4f4155beebd99b9ede2613a632484aa090e270df",
+		},
+		{
+			name:         "EIP-7807 ExecutionPayload fields",
+			activeFields: executionPayloadFields,
+			packed:       executionPayloadPacked,
+			expected:     "0xe8db024fb74db97de963cb6aa6e34ae26ed3c45b245fbff7c7ef9109e24eaccc",
+		},
+		{
+			name:         "sparse fields use little-endian bit order",
+			activeFields: sparseFields,
+			packed:       sparsePacked,
+			expected:     "0x68ef7766df9e31c60ea4cab1200dc2789a965957f087b321217c1fa3e0846d75",
+		},
+		{
+			name:         "256-bit boundary",
+			activeFields: boundaryFields,
+			packed:       boundaryPacked,
+			expected:     "0x21e35a7be0be70b70c352ff4940961f9e2492e4d5af1ed164c83c66259efb9d0",
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			mixed, err := merkle_tree.MixInActiveFields(root, test.activeFields)
+			require.NoError(t, err)
+			require.Equal(t, [32]byte(common.HexToHash(test.expected)), mixed)
+
+			var input [64]byte
+			copy(input[:32], root[:])
+			copy(input[32:], test.packed[:])
+			require.Equal(t, sha256.Sum256(input[:]), mixed, "packed active fields differ")
+		})
+	}
+}
+
+func TestMixInActiveFieldsRejectsMoreThan256Bits(t *testing.T) {
+	mixed, err := merkle_tree.MixInActiveFields([32]byte{}, make([]bool, 257))
+	require.EqualError(t, err, "active fields exceed 256 bits")
+	require.Zero(t, mixed)
+}
+
+func TestMixInActiveFieldsDoesNotModifyRoot(t *testing.T) {
+	root := [32]byte{0x42, 0x43, 0x44}
+	original := root
+
+	_, err := merkle_tree.MixInActiveFields(root, []bool{true, false, true})
+	require.NoError(t, err)
+	require.Equal(t, original, root)
 }
 
 func progressiveTestChunks(count int) [][32]byte {

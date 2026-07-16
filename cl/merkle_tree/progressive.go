@@ -30,6 +30,23 @@ func MerkleizeProgressive(chunks [][32]byte) ([32]byte, error) {
 	return merkleizeProgressive(chunks, 1)
 }
 
+// MixInActiveFields computes the EIP-7495 active-fields mix-in. Bit i is
+// packed into bit i%8 of byte i/8 in a zero-padded 32-byte chunk.
+func MixInActiveFields(root [32]byte, activeFields []bool) ([32]byte, error) {
+	if len(activeFields) > 256 {
+		return [32]byte{}, errors.New("active fields exceed 256 bits")
+	}
+
+	var packed [32]byte
+	for i, active := range activeFields {
+		if active {
+			packed[i/8] |= 1 << (uint(i) % 8)
+		}
+	}
+
+	return utils.Sha256(root[:], packed[:]), nil
+}
+
 func merkleizeProgressive(chunks [][32]byte, numLeaves uint64) ([32]byte, error) {
 	if len(chunks) == 0 {
 		return [32]byte{}, nil
