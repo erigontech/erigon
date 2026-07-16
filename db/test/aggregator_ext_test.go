@@ -513,7 +513,7 @@ func TestAggregatorV3_PruneSmallBatches(t *testing.T) {
 	require.NoError(t, err)
 	defer buildTx.Rollback()
 
-	for i := 0; i < 10; i++ {
+	for range 10 {
 		_, err = buildTx.PruneSmallBatches(t.Context(), time.Second*3)
 		require.NoError(t, err)
 	}
@@ -843,7 +843,7 @@ func generateSharedDomainsUpdatesForTx(t *testing.T, domains *execctx.SharedDoma
 	const maxStorageKeys = 10
 	usedKeys := make(map[string]struct{}, keysCount)
 
-	for j := uint64(0); j < keysCount; j++ {
+	for range keysCount {
 		key, existed := getKey()
 
 		r := rnd.IntN(101)
@@ -914,7 +914,7 @@ func generateSharedDomainsUpdatesForTx(t *testing.T, domains *execctx.SharedDoma
 			sk := make([]byte, length.Hash+length.Addr)
 			copy(sk, key)
 
-			for i := 0; i < maxStorageKeys; i++ {
+			for range maxStorageKeys {
 				loc := generateRandomKeyBytes(rnd, 32)
 				copy(sk[length.Addr:], loc)
 				usedKeys[string(sk)] = struct{}{}

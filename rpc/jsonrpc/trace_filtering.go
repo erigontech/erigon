@@ -1008,7 +1008,7 @@ func (api *TraceAPIImpl) doCallBlockParallel(
 	var errOnce sync.Once
 	var firstErr error
 
-	for i := 0; i < numWorkers; i++ {
+	for range numWorkers {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()

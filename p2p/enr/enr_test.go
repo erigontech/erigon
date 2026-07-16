@@ -290,7 +290,7 @@ func TestSignEncodeAndDecodeRandom(t *testing.T) {
 
 	// random key/value pairs for testing
 	pairs := map[string]uint32{}
-	for i := 0; i < 10; i++ {
+	for range 10 {
 		key := randomString(7)
 		value := rnd.Uint32()
 		pairs[key] = value

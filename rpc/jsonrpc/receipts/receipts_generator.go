@@ -356,7 +356,7 @@ func (g *Generator) GetReceipt(ctx context.Context, cfg *chain.Config, tx kv.Tem
 			}()
 
 			// re-run previous txs of the blocks
-			for txnIndex := 0; txnIndex < index; txnIndex++ {
+			for txnIndex := range index {
 				currTxn := postState.Txns[txnIndex]
 
 				genEnv.ibs.SetTxContext(blockNum, txnIndex)

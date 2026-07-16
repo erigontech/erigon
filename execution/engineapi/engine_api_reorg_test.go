@@ -320,7 +320,7 @@ func TestNewPayloadShouldReturnValidWhenSideChainGoingBackIsLtMaxReorgDepth(t *t
 	})
 	eatCanonical.Run(t, func(ctx context.Context, t *testing.T, eatCanonical engineapitester.EngineApiTester) {
 		// build the canonical chain up to canonicalChainLen
-		for i := 0; i < canonicalChainLen; i++ {
+		for range canonicalChainLen {
 			txn, err := eatCanonical.Transactor.SubmitSimpleTransfer(eatCanonical.CoinbaseKey, receiver1, big.NewInt(1))
 			require.NoError(t, err)
 			clPayload, err := eatCanonical.MockCl.BuildCanonicalBlock(ctx)

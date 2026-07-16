@@ -611,7 +611,7 @@ func (b *CachingBeaconState) ComputePTC(slot uint64) ([]uint64, error) {
 	// Concatenate all committees for this slot in order
 	indices := []uint64{}
 	committeesPerSlot := b.CommitteeCount(epoch)
-	for i := uint64(0); i < committeesPerSlot; i++ {
+	for i := range committeesPerSlot {
 		committee, err := b.GetBeaconCommitee(slot, i)
 		if err != nil {
 			return nil, err
@@ -651,7 +651,7 @@ func (b *CachingBeaconState) InitializePtcWindow() error {
 	for epochOffset := uint64(0); epochOffset < 1+cfg.MinSeedLookahead; epochOffset++ {
 		epoch := currentEpoch + epochOffset
 		epochStartSlot := epoch * slotsPerEpoch
-		for i := uint64(0); i < slotsPerEpoch; i++ {
+		for i := range slotsPerEpoch {
 			slot := epochStartSlot + i
 			ptc, err := b.ComputePTC(slot)
 			if err != nil {

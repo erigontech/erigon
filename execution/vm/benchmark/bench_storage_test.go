@@ -18,7 +18,7 @@ func BenchmarkSLOADCold(b *testing.B) {
 		// Build code: for each slot i, PUSH i, SLOAD, POP
 		p := program.New()
 		slots := make(map[uint256.Int]uint256.Int, n)
-		for i := 0; i < n; i++ {
+		for i := range n {
 			key := uint256.NewInt(uint64(i))
 			slots[*key] = *uint256.NewInt(0xDEAD)
 			p.Push(i).Op(vm.SLOAD, vm.POP)
@@ -49,7 +49,7 @@ func BenchmarkSLOADWarm(b *testing.B) {
 		// Build code: JUMPDEST, for each slot: PUSH i, SLOAD, POP, then JUMP back
 		p, lbl := program.New().Jumpdest()
 		slots := make(map[uint256.Int]uint256.Int, n)
-		for i := 0; i < n; i++ {
+		for i := range n {
 			key := uint256.NewInt(uint64(i))
 			slots[*key] = *uint256.NewInt(0xDEAD)
 			p.Push(i).Op(vm.SLOAD, vm.POP)
@@ -78,7 +78,7 @@ func BenchmarkSSTORE(b *testing.B) {
 		// Write to slot 0..N, each costs 20k gas. Linear code, no loop (each slot fresh).
 		const n = 100
 		p := program.New()
-		for i := 0; i < n; i++ {
+		for i := range n {
 			p.Sstore(i, 0xBEEF)
 		}
 		code := p.Op(vm.STOP).Bytes()
@@ -99,7 +99,7 @@ func BenchmarkSSTORE(b *testing.B) {
 		const n = 100
 		p := program.New()
 		slots := make(map[uint256.Int]uint256.Int, n)
-		for i := 0; i < n; i++ {
+		for i := range n {
 			key := uint256.NewInt(uint64(i))
 			slots[*key] = *uint256.NewInt(1000) // pre-existing value
 			p.Sstore(i, 2000)                   // overwrite
@@ -123,7 +123,7 @@ func BenchmarkSSTORE(b *testing.B) {
 		const n = 100
 		p := program.New()
 		slots := make(map[uint256.Int]uint256.Int, n)
-		for i := 0; i < n; i++ {
+		for i := range n {
 			key := uint256.NewInt(uint64(i))
 			slots[*key] = *uint256.NewInt(1000)
 			p.Sstore(i, 0) // clear
@@ -148,10 +148,10 @@ func BenchmarkTransientStorage(b *testing.B) {
 	for _, n := range []int{10, 100, 500} {
 		// Loop: TSTORE N slots then TLOAD them all
 		p, lbl := program.New().Jumpdest()
-		for i := 0; i < n; i++ {
+		for i := range n {
 			p.Tstore(i, 0xCAFE)
 		}
-		for i := 0; i < n; i++ {
+		for i := range n {
 			p.Push(i).Op(vm.TLOAD, vm.POP)
 		}
 		code := p.Jump(lbl).Bytes()
@@ -175,7 +175,7 @@ func BenchmarkStorageDiversity(b *testing.B) {
 		// Pre-populate N slots, then read them all in one call
 		p := program.New()
 		slots := make(map[uint256.Int]uint256.Int, n)
-		for i := 0; i < n; i++ {
+		for i := range n {
 			key := uint256.NewInt(uint64(i + 1000)) // offset to avoid slot 0
 			slots[*key] = *uint256.NewInt(uint64(i * 100))
 			p.Push(i+1000).Op(vm.SLOAD, vm.POP)

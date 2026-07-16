@@ -102,7 +102,7 @@ func BenchmarkDescendant1(b *testing.B) {
 func BenchmarkDescendant2(b *testing.B) {
 	lg := New()
 	lg.SetHandler(DiscardHandler())
-	for i := 0; i < 2; i++ {
+	for range 2 {
 		lg = lg.New()
 	}
 	for b.Loop() {
@@ -113,7 +113,7 @@ func BenchmarkDescendant2(b *testing.B) {
 func BenchmarkDescendant4(b *testing.B) {
 	lg := New()
 	lg.SetHandler(DiscardHandler())
-	for i := 0; i < 4; i++ {
+	for range 4 {
 		lg = lg.New()
 	}
 	for b.Loop() {
@@ -124,7 +124,7 @@ func BenchmarkDescendant4(b *testing.B) {
 func BenchmarkDescendant8(b *testing.B) {
 	lg := New()
 	lg.SetHandler(DiscardHandler())
-	for i := 0; i < 8; i++ {
+	for range 8 {
 		lg = lg.New()
 	}
 	for b.Loop() {
@@ -163,7 +163,7 @@ func TestStreamHandlerNoContention(t *testing.T) {
 		start := time.Now()
 		var wg sync.WaitGroup
 		wg.Add(goroutines)
-		for i := 0; i < goroutines; i++ {
+		for range goroutines {
 			go func() {
 				defer wg.Done()
 				lg.Info("msg")
@@ -240,7 +240,7 @@ func TestStreamHandlerNoConcurrencyOverhead(t *testing.T) {
 
 	var workers sync.WaitGroup
 	workers.Add(goroutines)
-	for i := 0; i < goroutines; i++ {
+	for range goroutines {
 		go func() {
 			defer workers.Done()
 			for range start {
@@ -251,10 +251,10 @@ func TestStreamHandlerNoConcurrencyOverhead(t *testing.T) {
 	}
 
 	concurrent := testing.AllocsPerRun(100, func() {
-		for i := 0; i < goroutines; i++ {
+		for range goroutines {
 			start <- struct{}{}
 		}
-		for i := 0; i < goroutines; i++ {
+		for range goroutines {
 			<-done
 		}
 	})

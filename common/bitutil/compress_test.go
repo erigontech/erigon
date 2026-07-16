@@ -178,7 +178,7 @@ func benchmarkEncoding(b *testing.B, bytes int, fill float64) {
 	data := make([]byte, bytes)
 	bits := int(float64(bytes) * 8 * fill)
 
-	for i := 0; i < bits; i++ {
+	for range bits {
 		idx := random.Int63() % int64(len(data))
 		bit := uint(random.Int63() % 8)
 		data[idx] |= 1 << bit

@@ -83,6 +83,7 @@ jobs:
       - name: Checkout custom actions
         uses: actions/checkout@v7
         with:
+          persist-credentials: false
           fetch-depth: 1
 
       - uses: ./.github/actions/setup-erigon

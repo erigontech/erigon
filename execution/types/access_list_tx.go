@@ -144,7 +144,7 @@ func accessListSize(al AccessList) int {
 }
 
 func encodeAccessList(al AccessList, w io.Writer, b []byte) error {
-	for i := 0; i < len(al); i++ {
+	for i := range al {
 		tupleLen := 21
 		// Each storage key takes 33 bytes
 		storageLen := 33 * len(al[i].StorageKeys)

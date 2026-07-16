@@ -308,7 +308,7 @@ func (f *ForkChoiceStore) isHeadWeakWith(root common.Hash, checkpointState *chec
 	if lenIndicies > 0 {
 		committeesPerSlot := checkpointState.committeeCount(epoch, lenIndicies)
 		count := committeesPerSlot * f.beaconCfg.SlotsPerEpoch
-		for ci := uint64(0); ci < committeesPerSlot; ci++ {
+		for ci := range committeesPerSlot {
 			index := (headSlot%f.beaconCfg.SlotsPerEpoch)*committeesPerSlot + ci
 			start := (lenIndicies * index) / count
 			end := (lenIndicies * (index + 1)) / count

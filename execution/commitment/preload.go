@@ -131,7 +131,7 @@ func (p *ContractTrunkPreload) Run(
 			continue
 		}
 		bitmap := binary.BigEndian.Uint16(v[2:4])
-		for n := 0; n < 16; n++ {
+		for n := range 16 {
 			if bitmap&(1<<uint(n)) == 0 {
 				continue
 			}

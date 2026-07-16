@@ -21,6 +21,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"slices"
 
 	"github.com/holiman/uint256"
 
@@ -201,7 +202,7 @@ func (e *ExecModule) GetBodiesByRange(ctx context.Context, start, count uint64) 
 	defer cleanup()
 
 	bodies := make([]*types.RawBody, 0, count)
-	for i := uint64(0); i < count; i++ {
+	for i := range count {
 		hash, err := e.canonicalHash(ctx, tx, start+i)
 		if err != nil {
 			return nil, fmt.Errorf("ethereumExecutionModule.GetBodiesByRange: ReadCanonicalHash error %w", err)
@@ -226,8 +227,8 @@ func (e *ExecModule) GetBodiesByRange(ctx context.Context, start, count uint64) 
 	}
 	// Remove trailing nil values as per spec
 	// See point 4 in https://github.com/ethereum/execution-apis/blob/main/src/engine/shanghai.md#specification-4
-	for i := len(bodies) - 1; i >= 0; i-- {
-		if bodies[i] == nil {
+	for i, body := range slices.Backward(bodies) {
+		if body == nil {
 			bodies = bodies[:i]
 		} else {
 			break
@@ -295,7 +296,7 @@ func (e *ExecModule) GetPayloadBodiesByRange(ctx context.Context, start, count u
 	defer cleanup()
 
 	bodies := make([]*PayloadBody, 0, count)
-	for i := uint64(0); i < count; i++ {
+	for i := range count {
 		blockNum := start + i
 		hash, err := e.canonicalHash(ctx, tx, blockNum)
 		if err != nil {
@@ -336,8 +337,8 @@ func (e *ExecModule) GetPayloadBodiesByRange(ctx context.Context, start, count u
 		})
 	}
 	// Remove trailing nil values
-	for i := len(bodies) - 1; i >= 0; i-- {
-		if bodies[i] == nil {
+	for i, body := range slices.Backward(bodies) {
+		if body == nil {
 			bodies = bodies[:i]
 		} else {
 			break

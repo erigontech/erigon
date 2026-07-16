@@ -142,7 +142,7 @@ func newGetBlobsTestPool(tb testing.TB, numAccounts int) (*TxPool, context.Conte
 	acc := accounts3.Account{Nonce: 0, Balance: *uint256.NewInt(1 * common.Ether), CodeHash: accounts3.EmptyCodeHash, Incarnation: 1}
 	v := accounts3.SerialiseV3(&acc)
 	var addr [20]byte
-	for i := 0; i < numAccounts; i++ {
+	for i := range numAccounts {
 		addr[0] = uint8(i + 1)
 		change.ChangeBatch[0].Changes = append(change.ChangeBatch[0].Changes, &remoteproto.AccountChange{
 			Action:  remoteproto.Action_UPSERT,

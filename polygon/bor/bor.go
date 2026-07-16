@@ -1181,7 +1181,7 @@ func (c *Bor) GetRootHash(ctx context.Context, tx kv.Tx, start, end uint64) (str
 
 func ComputeHeadersRootHash(blockHeaders []*types.Header) ([]byte, error) {
 	headers := make([][32]byte, NextPowerOfTwo(uint64(len(blockHeaders))))
-	for i := 0; i < len(blockHeaders); i++ {
+	for i := range blockHeaders {
 		blockHeader := blockHeaders[i]
 		header := crypto.Keccak256(AppendBytes32(
 			blockHeader.Number.Bytes(),
