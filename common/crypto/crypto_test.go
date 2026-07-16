@@ -88,8 +88,7 @@ func TestKeccak256MatchesReference(t *testing.T) {
 	}
 }
 
-// Keccak256 joins its arguments: below the stack buffer on the stack, above it on
-// the heap. Both must agree with streaming the same parts through the reference.
+// Covers both join paths: on the stack below keccakStackBuf, on the heap above it.
 func TestKeccak256JoinsArgs(t *testing.T) {
 	if got, want := common.BytesToHash(Keccak256()), refKeccak256(); got != want {
 		t.Fatalf("Keccak256() = %x, want %x", got, want)
@@ -427,8 +426,7 @@ func BenchmarkKeccak256Hash(b *testing.B) {
 			sinkHash = Keccak256Hash(benchPayload)
 		}
 	})
-	// Hashing a caller-local buffer: shows whether Keccak256Hash leaks its
-	// argument and so forces the caller's buffer onto the heap.
+	// A caller-local buffer: it must not escape to the heap.
 	b.Run("local32", func(b *testing.B) {
 		b.ReportAllocs()
 		for b.Loop() {

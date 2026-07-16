@@ -66,17 +66,8 @@ type EllipticCurve interface {
 	Unmarshal(data []byte) (x, y *big.Int)
 }
 
-// keccakStackBuf bounds the concatenation of a multi-argument call, sized for the
-// two 32-byte inputs such calls join. Longer concatenations are joined on the heap;
-// a lone argument needs no buffer and is hashed at any size.
+// keccakStackBuf sizes the join buffer for two 32-byte inputs; larger joins use the heap.
 const keccakStackBuf = 64
-
-// Keccak256Hash calculates and returns the Keccak256 hash of the input data.
-// Kept to a single argument so it stays within the inlining budget: a variadic
-// signature would need a call to the multi-argument path, which alone exceeds it.
-func Keccak256Hash(data []byte) common.Hash {
-	return keccak.Sum256(data)
-}
 
 // Keccak256 calculates and returns the Keccak256 hash of the input data.
 // Prefer Keccak256Hash where a slice is not required: this allocates its result.
@@ -87,9 +78,15 @@ func Keccak256(data ...[]byte) []byte {
 	return b
 }
 
-// keccak256 hashes the concatenation of data. It hashes through the concrete
-// keccak.Sum256 rather than a pooled hash.Hash because the interface's Write is
-// assumed to leak, which forces every caller's buffer onto the heap.
+// Keccak256Hash calculates and returns the Keccak256 hash of the input data,
+// converting it to an internal Hash data structure.
+// Single-argument by design: a variadic signature exceeds the inlining budget.
+func Keccak256Hash(data []byte) common.Hash {
+	return keccak.Sum256(data)
+}
+
+// keccak256 hashes the concatenation of data. Hashing through a pooled hash.Hash
+// would leak every caller's buffer to the heap, since Write is an interface method.
 func keccak256(data [][]byte) common.Hash {
 	if len(data) == 1 {
 		return keccak.Sum256(data[0])
