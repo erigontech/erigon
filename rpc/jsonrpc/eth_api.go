@@ -402,7 +402,8 @@ func (api *BaseAPI) headerByHash(ctx context.Context, hash common.Hash, tx kv.Tx
 		}
 	}
 
-	number, err := api._blockReader.HeaderNumber(ctx, tx, hash)
+	overlayTx := api.filters.WithOverlay(tx)
+	number, err := api._blockReader.HeaderNumber(ctx, overlayTx, hash)
 	if err != nil {
 		return nil, err
 	}
@@ -410,7 +411,7 @@ func (api *BaseAPI) headerByHash(ctx context.Context, hash common.Hash, tx kv.Tx
 	if number == nil {
 		return nil, nil
 	}
-	return api._blockReader.Header(ctx, tx, hash, *number)
+	return api._blockReader.Header(ctx, overlayTx, hash, *number)
 }
 
 // checks the pruning state to see if we would hold information about this

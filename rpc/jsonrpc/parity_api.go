@@ -73,7 +73,12 @@ func (api *ParityAPIImpl) ListStorageKeys(ctx context.Context, account common.Ad
 		return nil, errors.New("acc not found")
 	}
 
+	// Committed view: bn must match the state version the RangeAsOf scan
+	// below can see (the overlay exposes block tables, not domain data).
 	bn := rawdb.ReadCurrentBlockNumber(tx)
+	if bn == nil {
+		return nil, errors.New("current block number not found")
+	}
 	minTxNum, err := api._txNumReader.Min(ctx, tx, *bn)
 	if err != nil {
 		return nil, err

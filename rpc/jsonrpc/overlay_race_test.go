@@ -19,6 +19,7 @@ package jsonrpc
 import (
 	"bytes"
 	"context"
+	"fmt"
 	"strconv"
 	"testing"
 
@@ -29,6 +30,8 @@ import (
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/hexutil"
+	"github.com/erigontech/erigon/db/dbservices"
+	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/kvcache"
 	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/db/state/execctx"
@@ -41,6 +44,7 @@ import (
 	"github.com/erigontech/erigon/node/gointerfaces/txpoolproto"
 	"github.com/erigontech/erigon/node/shards"
 	"github.com/erigontech/erigon/rpc"
+	"github.com/erigontech/erigon/rpc/filters"
 	"github.com/erigontech/erigon/rpc/rpchelper"
 )
 
@@ -59,6 +63,11 @@ const (
 // misc.CalcBaseFee leaves BaseFee unchanged, making overlayRaceBaseFee a
 // reliable, deterministic fingerprint for "the code read the overlay head".
 func newOverlayAheadTestAPI(t *testing.T) (base *BaseAPI, m *execmoduletester.ExecModuleTester, overlayHeader *types.Header) {
+	base, m, overlayHeader, _ = newOverlayAheadTestAPIWithEvents(t)
+	return base, m, overlayHeader
+}
+
+func newOverlayAheadTestAPIWithEvents(t *testing.T) (base *BaseAPI, m *execmoduletester.ExecModuleTester, overlayHeader *types.Header, events *shards.Events) {
 	t.Helper()
 
 	var cfg chain.Config
@@ -98,15 +107,44 @@ func newOverlayAheadTestAPI(t *testing.T) (base *BaseAPI, m *execmoduletester.Ex
 	// enough for the reader paths under test to resolve this header as current.
 	require.NoError(t, rawdb.WriteHeader(overlay, overlayHeader))
 	require.NoError(t, rawdb.WriteHeadHeaderHash(overlay, hash))
+	rawdb.WriteForkchoiceHead(overlay, hash)
 	require.NoError(t, rawdb.WriteCanonicalHash(overlay, hash, overlayNumber))
 	require.NoError(t, rawdb.WriteBody(overlay, hash, overlayNumber, &types.Body{}))
 
-	events := shards.NewEvents()
+	events = shards.NewEvents()
 	events.PublishOverlay(doms)
 	filters := rpchelper.New(ctx, rpchelper.DefaultFiltersConfig, nil, nil, nil, func() {}, m.Log, events)
 	stateCache := kvcache.New(kvcache.DefaultCoherentConfig)
 	base = newBaseApiWithFiltersForTest(filters, stateCache, m)
 
+	return base, m, overlayHeader, events
+}
+
+type unpublishOverlayBlockReader struct {
+	dbservices.FullBlockReader
+	events      *shards.Events
+	blockNumber uint64
+}
+
+func (r *unpublishOverlayBlockReader) CanonicalHash(ctx context.Context, tx kv.Getter, blockNum uint64) (common.Hash, bool, error) {
+	hash, ok, err := r.FullBlockReader.CanonicalHash(ctx, tx, blockNum)
+	if err == nil && ok && blockNum == r.blockNumber {
+		r.events.PublishOverlay(nil)
+	}
+	return hash, ok, err
+}
+
+func newOverlayUnpublishTestAPI(t *testing.T) (*BaseAPI, *execmoduletester.ExecModuleTester, *types.Header) {
+	t.Helper()
+	base, m, overlayHeader, events := newOverlayAheadTestAPIWithEvents(t)
+	overlay := events.LatestSD().BlockOverlay()
+	txn := signOverlayRaceTestTx(t, m, 1)
+	require.NoError(t, rawdb.WriteBody(overlay, overlayHeader.Hash(), overlayHeader.Number.Uint64(), &types.Body{Transactions: []types.Transaction{txn}}))
+	base._blockReader = &unpublishOverlayBlockReader{
+		FullBlockReader: base._blockReader,
+		events:          events,
+		blockNumber:     overlayHeader.Number.Uint64(),
+	}
 	return base, m, overlayHeader
 }
 
@@ -209,6 +247,82 @@ func TestTxPoolContent_UsesOverlayHead(t *testing.T) {
 	require.NotNil(t, got)
 	require.Equal(t, overlayHeader.BaseFee.ToBig(), got.GasPrice.ToInt(),
 		"pending tx gas price must be derived from the overlay head's base fee, not the stale MDBX head")
+}
+
+// TestGetBlockTransactionCountByHash_SeesOverlayHead pins that the by-hash
+// count resolves the overlay head exactly like its by-number twin: the same
+// in-flight block must be visible through both, not null through one of them.
+func TestGetBlockTransactionCountByHash_SeesOverlayHead(t *testing.T) {
+	t.Parallel()
+	base, m, overlayHeader := newOverlayAheadTestAPI(t)
+	api := newEthApiForTest(base, m.DB, nil, nil)
+
+	byNumber, err := api.GetBlockTransactionCountByNumber(m.Ctx, rpc.BlockNumber(overlayHeader.Number.Uint64()))
+	require.NoError(t, err)
+	require.NotNil(t, byNumber)
+
+	byHash, err := api.GetBlockTransactionCountByHash(m.Ctx, overlayHeader.Hash())
+	require.NoError(t, err)
+	require.NotNil(t, byHash, "by-hash count must see the overlay head the by-number count sees")
+	require.Equal(t, *byNumber, *byHash)
+}
+
+func TestGetBlockTransactionCountByNumber_PinsOverlayView(t *testing.T) {
+	t.Parallel()
+	base, m, overlayHeader := newOverlayUnpublishTestAPI(t)
+	api := newEthApiForTest(base, m.DB, nil, nil)
+
+	count, err := api.GetBlockTransactionCountByNumber(m.Ctx, rpc.BlockNumber(overlayHeader.Number.Uint64()))
+	require.NoError(t, err)
+	require.NotNil(t, count)
+	require.Equal(t, hexutil.Uint(1), *count)
+}
+
+func TestGetBlockTransactionCountByHash_PinsOverlayView(t *testing.T) {
+	t.Parallel()
+	base, m, overlayHeader := newOverlayUnpublishTestAPI(t)
+	api := newEthApiForTest(base, m.DB, nil, nil)
+
+	count, err := api.GetBlockTransactionCountByHash(m.Ctx, overlayHeader.Hash())
+	require.NoError(t, err)
+	require.NotNil(t, count)
+	require.Equal(t, hexutil.Uint(1), *count)
+}
+
+func TestGetRawHeader_PinsOverlayView(t *testing.T) {
+	t.Parallel()
+	base, m, overlayHeader := newOverlayUnpublishTestAPI(t)
+	api := NewPrivateDebugAPI(base, m.DB, nil, 0, false)
+
+	header, err := api.GetRawHeader(m.Ctx, rpc.BlockNumberOrHashWithNumber(rpc.BlockNumber(overlayHeader.Number.Uint64())))
+	require.NoError(t, err)
+	require.NotNil(t, header)
+}
+
+// TestDebugAccountAt_OverlayHeadHash_CommittedView pins that debug_accountAt
+// resolves the block hash on the committed view: its GetAsOf history reads can
+// only see committed data, so an overlay-published head must read as an
+// unknown block (null) — not resolve to a header whose canonical-hash check
+// then fails.
+func TestDebugAccountAt_OverlayHeadHash_CommittedView(t *testing.T) {
+	t.Parallel()
+	base, m, overlayHeader := newOverlayAheadTestAPI(t)
+	api := NewPrivateDebugAPI(base, m.DB, nil, 0, false)
+
+	result, err := api.AccountAt(m.Ctx, overlayHeader.Hash(), 0, m.Address)
+	require.NoError(t, err, "an in-flight (uncommitted) head hash must read as unknown, not error")
+	require.Nil(t, result)
+}
+
+func TestGetLogsBlockHashUsesCommittedView(t *testing.T) {
+	t.Parallel()
+	base, m, overlayHeader := newOverlayAheadTestAPI(t)
+	api := newEthApiForTest(base, m.DB, nil, nil)
+	hash := overlayHeader.Hash()
+
+	logs, err := api.GetLogs(m.Ctx, filters.FilterCriteria{BlockHash: &hash})
+	require.EqualError(t, err, fmt.Sprintf("block not found: %x", hash))
+	require.Nil(t, logs)
 }
 
 // TestTxPoolContentFrom_UsesOverlayHead pins that txpool_contentFrom reads the

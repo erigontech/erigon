@@ -555,6 +555,7 @@ func getBeginEnd(ctx context.Context, tx kv.Tx, api *OverlayAPIImpl, crit filter
 		return 0, 0, fmt.Errorf("end (%d) < begin (%d)", end, begin)
 	}
 	if end > roaring.MaxUint32 {
+		// Committed view: must agree with the scan.
 		latest, err := rpchelper.GetLatestBlockNumber(tx)
 		if err != nil {
 			return 0, 0, err

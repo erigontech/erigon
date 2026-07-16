@@ -106,7 +106,9 @@ func (api *DebugAPIImpl) SetHead(ctx context.Context, number hexutil.Uint64) err
 	}
 	defer tx.Rollback()
 
-	currentHead, err := rpchelper.GetLatestBlockNumber(tx)
+	// Overlay-aware head, so setHead(N) isn't rejected as future while N's
+	// commit is still in flight.
+	currentHead, err := rpchelper.GetLatestBlockNumber(api.filters.WithOverlay(tx))
 	if err != nil {
 		return err
 	}
@@ -137,7 +139,9 @@ func (api *DebugAPIImpl) StorageRangeAt(ctx context.Context, blockHash common.Ha
 	}
 
 	blockNrOrHash := rpc.BlockNumberOrHashWithHash(blockHash, true)
-	blockNumber, _, _, err := rpchelper.GetCanonicalBlockNumber(ctx, blockNrOrHash, tx, api._blockReader, api.filters)
+	// nil filters: resolve on the committed view — the storage-range scan reads
+	// temporal data through the same plain tx (see rpchelper.GetBlockNumber).
+	blockNumber, _, _, err := rpchelper.GetCanonicalBlockNumber(ctx, blockNrOrHash, tx, api._blockReader, nil)
 	if err != nil {
 		if errors.As(err, &rpc.BlockNotFoundErr{}) {
 			return StorageRangeResult{}, nil
@@ -232,7 +236,9 @@ func (api *DebugAPIImpl) AccountRange(ctx context.Context, blockNrOrHash rpc.Blo
 		}
 
 	} else if _, ok := blockNrOrHash.Hash(); ok {
-		bn, _, _, err2 := rpchelper.GetCanonicalBlockNumber(ctx, blockNrOrHash, tx, api._blockReader, api.filters)
+		// nil filters: resolve on the committed view — the dumper reads temporal
+		// data through the same plain tx (see rpchelper.GetBlockNumber).
+		bn, _, _, err2 := rpchelper.GetCanonicalBlockNumber(ctx, blockNrOrHash, tx, api._blockReader, nil)
 		if err2 != nil {
 			return state.IteratorDump{}, err2
 		}
@@ -556,31 +562,33 @@ func (api *DebugAPIImpl) AccountAt(ctx context.Context, blockHash common.Hash, t
 	}
 	defer tx.Rollback()
 
-	header, err := api.headerByHash(ctx, blockHash, tx)
+	// Committed view: the canonical-hash check and GetAsOf reads below use the
+	// same plain tx (an overlay-resolved head would have no committed history).
+	blockNumber, err := api._blockReader.HeaderNumber(ctx, tx, blockHash)
 	if err != nil {
-		return &AccountResult{}, err
+		return nil, err
 	}
-	if header == nil {
+	if blockNumber == nil {
 		return nil, nil // not error, see https://github.com/erigontech/erigon/issues/1645
 	}
-	canonicalHash, ok, err := api._blockReader.CanonicalHash(ctx, tx, header.Number.Uint64())
+	canonicalHash, ok, err := api._blockReader.CanonicalHash(ctx, tx, *blockNumber)
 	if err != nil {
 		return nil, err
 	}
 	if !ok {
-		return nil, fmt.Errorf("canonical hash not found %d", header.Number.Uint64())
+		return nil, fmt.Errorf("canonical hash not found %d", *blockNumber)
 	}
 	isCanonical := canonicalHash == blockHash
 	if !isCanonical {
 		return nil, errors.New("block hash is not canonical")
 	}
 
-	err = api.BaseAPI.checkPruneHistory(ctx, tx, header.Number.Uint64())
+	err = api.BaseAPI.checkPruneHistory(ctx, tx, *blockNumber)
 	if err != nil {
 		return nil, err
 	}
 
-	minTxNum, err := api._txNumReader.Min(ctx, tx, header.Number.Uint64())
+	minTxNum, err := api._txNumReader.Min(ctx, tx, *blockNumber)
 	if err != nil {
 		return nil, err
 	}
@@ -619,19 +627,25 @@ type AccountResult struct {
 
 // GetRawHeader implements debug_getRawHeader - returns a an RLP-encoded header, given a block number or hash
 func (api *DebugAPIImpl) GetRawHeader(ctx context.Context, blockNrOrHash rpc.BlockNumberOrHash) (hexutil.Bytes, error) {
+	if number, ok := blockNrOrHash.Number(); ok && number == rpc.PendingBlockNumber {
+		if block := api.pendingBlock(); block != nil {
+			return rlp.EncodeToBytes(block.Header())
+		}
+	}
 	tx, err := api.db.BeginTemporalRo(ctx)
 	if err != nil {
 		return nil, err
 	}
 	defer tx.Rollback()
-	n, h, _, err := rpchelper.GetBlockNumber(ctx, blockNrOrHash, tx, api._blockReader, api.filters)
+	overlayTx := api.filters.WithOverlay(tx)
+	n, h, _, err := rpchelper.GetBlockNumber(ctx, blockNrOrHash, overlayTx, api._blockReader, nil)
 	if err != nil {
 		if errors.As(err, &rpc.BlockNotFoundErr{}) {
 			return nil, nil // waiting for spec: not error, see Geth and https://github.com/erigontech/erigon/issues/1645
 		}
 		return nil, err
 	}
-	header, err := api._blockReader.Header(ctx, tx, h, n)
+	header, err := api._blockReader.Header(ctx, overlayTx, h, n)
 	if err != nil {
 		return nil, err
 	}
