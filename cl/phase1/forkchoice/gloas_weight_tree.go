@@ -17,6 +17,8 @@
 package forkchoice
 
 import (
+	"slices"
+
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
 	"github.com/erigontech/erigon/common"
@@ -226,10 +228,7 @@ func growGloasContributions(applied []gloasVoteContribution, size int) []gloasVo
 	if len(applied) >= size {
 		return applied
 	}
-	nextCap := cap(applied) * 2
-	if nextCap < size {
-		nextCap = size
-	}
+	nextCap := max(cap(applied)*2, size)
 	next := make([]gloasVoteContribution, size, nextCap)
 	copy(next, applied)
 	return next
@@ -360,8 +359,7 @@ func (t *gloasWeightTree) recompute(root common.Hash) {
 			}
 			t.weightSeen[item.root] = struct{}{}
 			t.weightStack = append(t.weightStack, gloasWeightStackItem{root: item.root, visited: true})
-			for i := len(node.children) - 1; i >= 0; i-- {
-				child := node.children[i]
+			for _, child := range slices.Backward(node.children) {
 				if _, ok := t.weightSeen[child]; ok {
 					continue
 				}

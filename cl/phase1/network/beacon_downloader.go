@@ -457,7 +457,7 @@ func fetchBlocksFromBeaconAPI(ctx context.Context, baseURL string, startSlot, co
 	sem := make(chan struct{}, 8) // limit concurrent requests
 	var wg sync.WaitGroup
 
-	for i := uint64(0); i < count; i++ {
+	for i := range count {
 		slot := startSlot + i
 		idx := i
 		wg.Add(1)

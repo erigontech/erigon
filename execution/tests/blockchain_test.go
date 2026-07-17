@@ -326,11 +326,11 @@ func TestReorgShortBlocks(t *testing.T) {
 func testReorgShort(t *testing.T) {
 	t.Parallel()
 	long := make([]int64, 96)
-	for i := 0; i < len(long); i++ {
+	for i := range long {
 		long[i] = 60
 	}
 	short := make([]int64, len(long)-1)
-	for i := 0; i < len(short); i++ {
+	for i := range short {
 		short[i] = -9
 	}
 	testReorg(t, long, short, 12746192)
@@ -1168,7 +1168,7 @@ func TestBlockchainHeaderchainReorgConsistency(t *testing.T) {
 
 	// Generate a bunch of fork blocks, each side forking from the canonical chain
 	forks := make([]*blockgen.ChainPack, chain.Length())
-	for i := 0; i < len(forks); i++ {
+	for i := range forks {
 		fork, err := blockgen.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, i+1, func(j int, b *blockgen.BlockGen) {
 			if j == i {
 				b.SetCoinbase(common.Address{2})

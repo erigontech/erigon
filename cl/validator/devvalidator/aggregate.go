@@ -64,7 +64,7 @@ func (s *Service) submitAggregateAndProof(
 		Message:   msg,
 		Signature: aggregatorSig,
 	}
-	if err := s.client.post(ctx, "/eth/v1/validator/aggregate_and_proofs", []interface{}{signed}); err != nil {
+	if err := s.client.post(ctx, "/eth/v1/validator/aggregate_and_proofs", []any{signed}); err != nil {
 		s.logger.Debug("[dev-validator] aggregate submit failed", "slot", slot, "err", err)
 	}
 }

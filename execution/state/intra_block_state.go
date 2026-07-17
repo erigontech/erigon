@@ -140,12 +140,8 @@ func (aa AccessSet) Merge(other AccessSet) AccessSet {
 		return aa
 	}
 	dst := make(AccessSet, len(aa)+len(other))
-	for addr, opt := range aa {
-		dst[addr] = opt
-	}
-	for addr, opt := range other {
-		dst[addr] = opt
-	}
+	maps.Copy(dst, aa)
+	maps.Copy(dst, other)
 	return dst
 }
 
@@ -201,6 +197,12 @@ type IntraBlockState struct {
 	codeReadCount       int64
 	version             int
 	dep                 int
+
+	// eip8246 pins whether SELFDESTRUCT preserves the account (EIP-8246 removes
+	// the balance burn). Set per-tx from the block rules in Prepare; under it a
+	// SelfDestructPath=true account must read as a live, balance-preserving,
+	// empty-code account rather than a destroyed one.
+	eip8246 bool
 }
 
 // Create a new state from a given trie
@@ -737,6 +739,22 @@ func (sdb *IntraBlockState) GetCodeHash(addr accounts.Address) (accounts.CodeHas
 	}
 
 	hash, _, _, err := readCodeHash(sdb, addr)
+	if err != nil {
+		return accounts.NilCodeHash, err
+	}
+	if sdb.eip8246 && hash == accounts.NilCodeHash {
+		// A prior tx's EIP-8246 SELFDESTRUCT leaves an existing empty-code
+		// account, but its CodeHashPath is dropped from the version map, so
+		// recover the codehash from the reconstructed account (EmptyCodeHash),
+		// distinguishing it from a genuinely absent account (NilCodeHash).
+		acc, _, _, err := sdb.getVersionedAccount(addr, false)
+		if err != nil {
+			return accounts.NilCodeHash, err
+		}
+		if acc != nil {
+			return acc.CodeHash, nil
+		}
+	}
 	return hash, err
 }
 
@@ -775,6 +793,22 @@ func (sdb *IntraBlockState) GetDelegatedDesignation(addr accounts.Address) (acco
 	// eip-7702 - for account read recording we don't count this as
 	// it may not result in an actual gas recorded access - if it
 	// is it will be marked via a direct call
+	if sdb.versionMap != nil {
+		// Read through the version-aware CodePath so validation can reject a
+		// speculative execution that raced a prior transaction publishing its
+		// CodeHashPath and CodePath. Going through getCode would also report a
+		// BAL code access for non-delegated code, so use readCode directly and
+		// preserve the existing hook semantics below.
+		code, _, _, err := readCode(sdb, addr, false)
+		if err != nil {
+			return accounts.ZeroAddress, false, err
+		}
+		if delegation, ok := types.ParseDelegation(code); ok {
+			sdb.callCodeAccessHook(addr, code)
+			return delegation, true, nil
+		}
+		return accounts.ZeroAddress, false, nil
+	}
 	stateObject, err := sdb.getStateObject(addr, false)
 	if err != nil {
 		return accounts.ZeroAddress, false, err
@@ -939,6 +973,37 @@ func (sdb *IntraBlockState) TouchAccount(addr accounts.Address) error {
 	return nil
 }
 
+// eip8246PreservedAccount reconstructs the live account a prior tx left behind
+// when EIP-8246 removed the SELFDESTRUCT burn: the balance survives, code and
+// nonce are cleared at destruction, and any later per-field map writes overlay
+// the reconstruction so account-level reads agree with the field-level ones.
+// Returns nil when the balance was moved out, leaving an empty account that
+// EIP-161 removes.
+func (sdb *IntraBlockState) eip8246PreservedAccount(addr accounts.Address) (*accounts.Account, error) {
+	bal, _, _, err := readBalance(sdb, addr)
+	if err != nil {
+		return nil, err
+	}
+	if bal.IsZero() {
+		return nil, nil
+	}
+	acc := accounts.NewAccount()
+	acc.Balance = bal
+	nonce, _, _, err := readNonce(sdb, addr)
+	if err != nil {
+		return nil, err
+	}
+	acc.Nonce = nonce
+	codeHash, _, _, err := readCodeHash(sdb, addr)
+	if err != nil {
+		return nil, err
+	}
+	if codeHash != accounts.NilCodeHash && !codeHash.IsZero() {
+		acc.CodeHash = codeHash
+	}
+	return &acc, nil
+}
+
 func (sdb *IntraBlockState) getVersionedAccount(addr accounts.Address, readStorage bool) (*accounts.Account, ReadSource, Version, error) {
 	if sdb.versionMap == nil {
 		return nil, UnknownSource, UnknownVersion, nil
@@ -948,6 +1013,34 @@ func (sdb *IntraBlockState) getVersionedAccount(addr accounts.Address, readStora
 
 	if err != nil {
 		return nil, UnknownSource, UnknownVersion, err
+	}
+
+	// EIP-8246: a prior tx's SELFDESTRUCT preserves the account (balance kept,
+	// code/nonce cleared) rather than destroying it. AddressPath reads zero
+	// under SD, so reconstruct the surviving account from the version map here,
+	// covering both committed and in-block-created accounts — unless a later tx
+	// re-created it, in which case fall through to the normal read.
+	if sdb.eip8246 && readAccount == nil {
+		if destructed, sdRes, ok := sdb.versionMap.ReadSelfDestruct(addr, sdb.txIndex); ok && sdRes.Status() == MVReadResultDone && destructed {
+			destructTxIndex := sdRes.DepIdx()
+			// Only a genuine re-creation (a later CreateAccount, which writes
+			// AddressPath) skips reconstruction. Later Balance/Nonce/CodeHash
+			// writes are updates to the still-preserved account, not a revival:
+			// reconstruct it and let eip8246PreservedAccount overlay the latest
+			// balance, nonce and code hash, so e.g. an account funded after its
+			// SELFDESTRUCT still reads as existing — matching serial.
+			revived := false
+			if hi, ok := sdb.versionMap.LatestTxIndex(addr, AddressPath, accounts.NilKey, sdb.txIndex-1); ok && hi > destructTxIndex {
+				revived = true
+			}
+			if !revived {
+				preserved, err := sdb.eip8246PreservedAccount(addr)
+				if err != nil {
+					return nil, StorageRead, UnknownVersion, err
+				}
+				return preserved, MapRead, Version{TxIndex: destructTxIndex}, nil
+			}
+		}
 	}
 
 	if readAccount == nil {
@@ -1346,12 +1439,14 @@ func (sdb *IntraBlockState) GetIncarnation(addr accounts.Address) (uint64, error
 	return incarnation, err
 }
 
-// Selfdestruct marks the given account as suicided.
-// This clears the account balance.
+// Selfdestruct marks the given account as suicided. When preserveBalance is
+// false the account balance is burned (pre-EIP-6780/6780 behaviour); when true
+// the balance is left untouched (EIP-8246) and only cleared at finalization if
+// the account ends up empty.
 //
 // The account's state object is still available until the state is committed,
 // getStateObject will return a non-nil account after Suicide.
-func (sdb *IntraBlockState) Selfdestruct(addr accounts.Address) (bool, error) {
+func (sdb *IntraBlockState) Selfdestruct(addr accounts.Address, preserveBalance bool) (bool, error) {
 	if dbg.TraceTransactionIO && (sdb.trace || dbg.TraceAccount(addr.Handle())) {
 		fmt.Printf("%d (%d.%d) SelfDestruct %x\n", sdb.blockNum, sdb.txIndex, sdb.version, addr)
 	}
@@ -1370,17 +1465,19 @@ func (sdb *IntraBlockState) Selfdestruct(addr accounts.Address) (bool, error) {
 		wasCommited: !sdb.hasWrite(addr, SelfDestructPath, accounts.NilKey),
 	})
 
-	if sdb.tracingHooks != nil && sdb.tracingHooks.OnBalanceChange != nil && !prevBalance.IsZero() {
+	if !preserveBalance && sdb.tracingHooks != nil && sdb.tracingHooks.OnBalanceChange != nil && !prevBalance.IsZero() {
 		sdb.tracingHooks.OnBalanceChange(addr, prevBalance, zeroBalance, tracing.BalanceDecreaseSelfdestruct)
 	}
 
 	stateObject.markSelfdestructed()
 	stateObject.createdContract = false
-	stateObject.data.Balance.Clear()
 
 	sdb.recordWriteIncarnation(addr, stateObject.data.Incarnation)
 	sdb.recordWriteSelfDestruct(addr, stateObject.selfdestructed)
-	sdb.recordWriteBalance(addr, uint256.Int{})
+	if !preserveBalance {
+		stateObject.data.Balance.Clear()
+		sdb.recordWriteBalance(addr, uint256.Int{})
+	}
 
 	// NOTE: we intentionally do NOT versionWritten(StoragePath, key, 0) for the
 	// dirty slots here. Pre-Cancun (and for CALL-based SELFDESTRUCT generally)
@@ -1844,10 +1941,22 @@ func (sdb *IntraBlockState) CreateAccount(addr accounts.Address, contractCreatio
 	}
 
 	// for newly created accounts these synthetic read/writes are used so that account
-	// creation clashes between trnascations get detected
+	// creation clashes between transactions get detected. Only record the BalancePath
+	// read on the first creation of this account in the tx: a re-creation (e.g. CREATE2
+	// to an address funded and created earlier in the same tx) carries the live
+	// post-transfer balance, and overwriting the first read's pre-tx value with it would
+	// seed a wrong block-access-list baseline and drop the real balance change. But if
+	// that first read was internal (conflict-detection only, so excluded from the block
+	// access list), promote it: without a real read the unchanged balance write has no
+	// baseline and would emit a spurious net-zero balance change.
 	sdb.MarkAddressAccess(addr, true)
 	if sdb.versionMap != nil {
-		sdb.versionedReads.SetBalance(addr, VersionedRead[uint256.Int]{ReadHeader{Source: balSource, Version: balVersion}, newObj.Balance()})
+		if vr, seen := sdb.versionedReads.GetBalance(addr); !seen {
+			sdb.versionedReads.SetBalance(addr, VersionedRead[uint256.Int]{ReadHeader{Source: balSource, Version: balVersion}, newObj.Balance()})
+		} else if vr.internal {
+			vr.internal = false
+			sdb.versionedReads.SetBalance(addr, vr)
+		}
 		sdb.versionedReads.SetIncarnation(addr, VersionedRead[uint64]{ReadHeader{Source: incSource, Version: incVersion}, prevInc})
 	}
 	sdb.recordWriteBalance(addr, newObj.Balance())
@@ -1908,9 +2017,12 @@ func EIP161EmptyRemoval(eip161Enabled, isAura bool, addr accounts.Address) bool 
 	return eip161Enabled && (!isAura || addr != params.SystemAddress)
 }
 
-func updateAccount(eip161Enabled bool, isAura bool, stateWriter StateWriter, addr accounts.Address, stateObject *stateObject, isDirty bool, trace bool, tracingHooks *tracing.Hooks, useBlockOrigin bool) error {
+func updateAccount(eip161Enabled bool, isAura bool, stateWriter StateWriter, addr accounts.Address, stateObject *stateObject, isDirty bool, trace bool, tracingHooks *tracing.Hooks, useBlockOrigin bool, eip8246 bool) error {
 	emptyRemoval := EIP161EmptyRemoval(eip161Enabled, isAura, addr) && stateObject.data.Empty()
-	if stateObject.selfdestructed || (isDirty && emptyRemoval) {
+	// EIP-8246: a self-destructed account that still holds a balance is reset to
+	// a balance-only account (nonce 0, empty code, empty storage) not deleted.
+	sdPreserveBalance := eip8246 && stateObject.selfdestructed && !stateObject.data.Balance.IsZero()
+	if (stateObject.selfdestructed && !sdPreserveBalance) || (isDirty && emptyRemoval) {
 		balance := stateObject.Balance()
 		if tracingHooks != nil && tracingHooks.OnBalanceChange != nil && !(&balance).IsZero() && stateObject.selfdestructed {
 			tracingHooks.OnBalanceChange(stateObject.address, balance, uint256.Int{}, tracing.BalanceDecreaseSelfdestructBurn)
@@ -1925,7 +2037,24 @@ func updateAccount(eip161Enabled bool, isAura bool, stateWriter StateWriter, add
 		}
 		stateObject.deleted = true
 	}
-	if isDirty && (stateObject.createdContract || !stateObject.selfdestructed) && !emptyRemoval {
+	if sdPreserveBalance {
+		stateObject.data.Nonce = 0
+		stateObject.data.CodeHash = accounts.EmptyCodeHash
+		stateObject.data.Incarnation = 0
+		stateObject.code = accounts.Code{}
+		stateObject.deleted = false
+		// Supersede Selfdestruct's pre-destruct IncarnationPath: extraction keeps
+		// incarnation for self-destructed accounts (unlike nonce/code/codeHash,
+		// which the extraction filter drops), and a later CREATE2 must see the
+		// persisted balance-only record's 0 in every execution mode.
+		stateObject.db.recordWriteIncarnation(addr, 0)
+		if err := stateWriter.CreateContract(addr); err != nil {
+			return err
+		}
+		if err := stateWriter.UpdateAccountData(addr, &stateObject.original, &stateObject.data); err != nil {
+			return err
+		}
+	} else if isDirty && (stateObject.createdContract || !stateObject.selfdestructed) && !emptyRemoval {
 		stateObject.deleted = false
 		// Write any contract code associated with the state object; dirtyCode is
 		// set only when code actually changed, so a clear-to-empty must still
@@ -1998,7 +2127,7 @@ func (sdb *IntraBlockState) FinalizeTx(chainRules *chain.Rules, stateWriter Stat
 			continue
 		}
 
-		if err := updateAccount(chainRules.IsEIP161Enabled(), chainRules.IsAura, stateWriter, addr, so, true, sdb.trace, sdb.tracingHooks, false); err != nil {
+		if err := updateAccount(chainRules.IsEIP161Enabled(), chainRules.IsAura, stateWriter, addr, so, true, sdb.trace, sdb.tracingHooks, false, chainRules.IsAmsterdam); err != nil {
 			return err
 		}
 
@@ -2015,30 +2144,25 @@ func (sdb *IntraBlockState) FinalizeTx(chainRules *chain.Rules, stateWriter Stat
 			}
 		}
 
+		// EIP-8246: a balance-preserving SELFDESTRUCT leaves the account alive
+		// (balance kept, code/nonce/storage cleared). The block assembler reuses
+		// one IBS across txs without Reset, so replace the destroyed object with
+		// a clean balance-only one — done after the storage/BAL cleanup above,
+		// which still needs the selfdestructed marker. Otherwise a later tx's
+		// CREATE2 at this address sees a stale selfdestructed flag and drops the
+		// preserved balance, building an invalid block.
+		if so.selfdestructed && !so.deleted {
+			preserved := accounts.NewAccount()
+			preserved.Balance = so.data.Balance
+			sdb.stateObjects[addr] = newObject(sdb, addr, &preserved, &preserved)
+		}
+
 		so.newlyCreated = false
 		sdb.stateObjectsDirty[addr] = struct{}{}
 	}
 	// Invalidate journal because reverting across transactions is not allowed.
 	sdb.clearJournalAndRefund()
 	return nil
-}
-
-// GetRemovedAccountsWithBalance returns a list of accounts scheduled for
-// removal which still have positive balance. The purpose of this function is
-// to handle a corner case of EIP-7708 where a self-destructed account might
-// still receive funds between sending/burning its previous balance and actual
-// removal. In this case the burning of these remaining balances still need to
-// be logged.
-// Specification EIP-7708: https://eips.ethereum.org/EIPS/eip-7708
-func (sdb *IntraBlockState) GetRemovedAccountsWithBalance() (list []evmtypes.AddressAndBalance) {
-	for addr := range sdb.journal.dirties {
-		if obj, exist := sdb.stateObjects[addr]; exist && obj.selfdestructed {
-			if balance := obj.Balance(); !balance.IsZero() {
-				list = append(list, evmtypes.AddressAndBalance{Address: obj.address.Value(), Balance: balance})
-			}
-		}
-	}
-	return list
 }
 
 func (sdb *IntraBlockState) SoftFinalise() {
@@ -2093,7 +2217,7 @@ func (sdb *IntraBlockState) CommitOverrideDirtyAccounts(chainRules *chain.Rules,
 		if !exists || so.deleted {
 			continue
 		}
-		if err := updateAccount(false, chainRules.IsAura, stateWriter, addr, so, true, sdb.trace, sdb.tracingHooks, true); err != nil {
+		if err := updateAccount(false, chainRules.IsAura, stateWriter, addr, so, true, sdb.trace, sdb.tracingHooks, true, chainRules.IsAmsterdam); err != nil {
 			return err
 		}
 	}
@@ -2135,7 +2259,7 @@ func (sdb *IntraBlockState) MakeWriteSet(chainRules *chain.Rules, stateWriter St
 		if dbg.TraceTransactionIO && (sdb.trace || dbg.TraceAccount(addr.Handle())) {
 			fmt.Printf("%d (%d.%d) Update Account %x\n", sdb.blockNum, sdb.txIndex, sdb.version, addr)
 		}
-		if err := updateAccount(chainRules.IsEIP161Enabled(), chainRules.IsAura, stateWriter, addr, stateObject, isDirty, sdb.trace, sdb.tracingHooks, true); err != nil {
+		if err := updateAccount(chainRules.IsEIP161Enabled(), chainRules.IsAura, stateWriter, addr, stateObject, isDirty, sdb.trace, sdb.tracingHooks, true, chainRules.IsAmsterdam); err != nil {
 			return err
 		}
 		// Per EIP-6780 + EIP-7928: a SELFDESTRUCT against a SAME-TX created
@@ -2232,6 +2356,7 @@ func (sdb *IntraBlockState) Prepare(rules *chain.Rules, sender, coinbase account
 	if dbg.TraceTransactionIO && (sdb.trace || dbg.TraceAccount(sender.Handle()) || !dst.IsNil() && dbg.TraceAccount(dst.Handle())) {
 		fmt.Printf("%d (%d.%d) ibs.Prepare: sender: %x, coinbase: %x, dest: %x, %x, %v, %v, %v\n", sdb.blockNum, sdb.txIndex, sdb.version, sender, coinbase, dst, precompiles, list, rules, authorities)
 	}
+	sdb.eip8246 = rules.IsAmsterdam
 	if rules.IsBerlin {
 		// Clear out any leftover from previous executions
 		sdb.accessList.Reset()
@@ -2369,9 +2494,7 @@ func (sdb *IntraBlockState) AccessedAddresses() AccessSet {
 		return nil
 	}
 	out := make(AccessSet, len(sdb.addressAccess))
-	for addr, opts := range sdb.addressAccess {
-		out[addr] = opts
-	}
+	maps.Copy(out, sdb.addressAccess)
 	sdb.recordAccess = false
 	sdb.addressAccess = nil
 	return out
@@ -2737,9 +2860,9 @@ func (sdb *IntraBlockState) ResetVersionedReads() {
 // VersionedWrites returns a frozen typed snapshot of this tx's writes. With
 // checkDirty, a non-dirty address's writes are dropped (and deleted from the
 // version map). Under self-destruct only SelfDestruct/Balance/Incarnation/
-// Storage are kept (the BAL needs residual balance, resurrection needs the
-// prior incarnation, and the calculator needs per-slot deletes); Nonce/Code/
-// CodeHash/CodeSize/Address/CreateContract are dropped.
+// Storage/CreateContract are kept (the BAL needs residual balance,
+// resurrection needs the prior incarnation, and fee finalization needs the
+// creation marker); Nonce/Code/CodeHash/CodeSize/Address are dropped.
 func (sdb *IntraBlockState) VersionedWrites(checkDirty bool) *WriteSet {
 	src := &sdb.versionedWrites
 	out := &WriteSet{}
@@ -2773,6 +2896,9 @@ func (sdb *IntraBlockState) VersionedWrites(checkDirty bool) *WriteSet {
 				out.SetStorage(addr, k, cloneVW(vw))
 			}
 		}
+		if vw, ok := src.createContract[addr]; ok {
+			out.SetCreateContract(addr, cloneVW(vw))
+		}
 		if !sd {
 			if vw, ok := src.address[addr]; ok {
 				out.SetAddress(addr, cloneVW(vw))
@@ -2788,9 +2914,6 @@ func (sdb *IntraBlockState) VersionedWrites(checkDirty bool) *WriteSet {
 			}
 			if vw, ok := src.codeSize[addr]; ok {
 				out.SetCodeSize(addr, cloneVW(vw))
-			}
-			if vw, ok := src.createContract[addr]; ok {
-				out.SetCreateContract(addr, cloneVW(vw))
 			}
 		}
 	}
@@ -2923,16 +3046,13 @@ func (sdb *IntraBlockState) ApplyVersionedWrites(writes *WriteSet) error {
 			}
 			if vw.Val {
 				// Ensure the state object exists before calling Selfdestruct.
-				// For newly-created accounts (e.g. coinbase born via CREATE in the
-				// same transaction, with no pre-block DB entry), getStateObject
-				// returns nil and Selfdestruct silently no-ops.  This matters for
-				// the EIP-7708 finalize IBS: without a stateObject, the account will
-				// not be marked as selfdestructed and GetRemovedAccountsWithBalance
-				// will miss it, omitting the residual-balance burn log.
+				// For newly-created accounts (with no pre-block DB entry)
+				// getStateObject returns nil and Selfdestruct silently no-ops, so
+				// materialize the object first to keep the selfdestructed marking.
 				if _, err := sdb.GetOrNewStateObject(addr); err != nil {
 					return err
 				}
-				if _, err := sdb.Selfdestruct(addr); err != nil {
+				if _, err := sdb.Selfdestruct(addr, true); err != nil {
 					return err
 				}
 			} else {
@@ -2954,6 +3074,9 @@ func (sdb *IntraBlockState) ApplyVersionedWrites(writes *WriteSet) error {
 				sdb.recordWriteSelfDestruct(addr, false)
 			}
 		case CreateContractPath:
+			if sw, ok := writes.GetSelfDestruct(addr); ok && sw.Val {
+				continue
+			}
 			// Contract creation: set createdContract flag on the stateObject.
 			so, err := sdb.GetOrNewStateObject(addr)
 			if err != nil {

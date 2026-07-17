@@ -74,6 +74,11 @@ type SharedDomainsCommitmentContext struct {
 	deferCommitmentUpdates bool
 	// pendingUpdate stores a single deferred branch update to be flushed at the next ComputeCommitment call.
 	pendingUpdate *commitment.PendingCommitmentUpdate
+
+	// pendingVariant holds a parallel/streaming trie selection that waits for
+	// EnableParaTrieDB: those variants need the DB-backed TrieContextFactory.
+	pendingVariant commitment.TrieVariant
+	pendingCfg     commitment.TrieConfig
 }
 
 // SetStateReader can be used to set a custom state reader (otherwise the default one is set in SharedDomainsCommitmentContext.trieContext).
@@ -89,6 +94,30 @@ func (sdc *SharedDomainsCommitmentContext) StateReader() StateReader {
 
 func (sdc *SharedDomainsCommitmentContext) EnableParaTrieDB(db kv.TemporalRoDB) {
 	sdc.paraTrieDB = db
+	if sdc.pendingVariant == "" {
+		return
+	}
+	if sdc.updates.Size() != 0 {
+		panic("EnableParaTrieDB after touches: keys collected on the sequential buffer would be dropped")
+	}
+	prev, ok := sdc.patriciaTrie.(*commitment.HexPatriciaHashed)
+	if !ok {
+		panic("pending trie upgrade expects the sequential trie")
+	}
+	cfg := sdc.pendingCfg
+	cfg.Variant = sdc.pendingVariant
+	sdc.updates.Close()
+	sdc.patriciaTrie, sdc.updates = commitment.InitializeTrieAndUpdates(commitment.ModeDirect, sdc.tmpDir, cfg)
+	if ppht, ok := sdc.patriciaTrie.(*commitment.ParallelPatriciaHashed); ok {
+		// State may already be restored (SeekCommitment can run before the DB
+		// is wired); adopting the trie carries it over losslessly.
+		ppht.AdoptRootTrie(prev)
+	}
+	sdc.variant = sdc.pendingVariant
+	sdc.pendingVariant = ""
+	if sdc.traceW != nil {
+		sdc.patriciaTrie.SetTraceWriter(sdc.traceW)
+	}
 }
 
 // EnableTrieWarmup enables parallel warmup of MDBX page cache during commitment.
@@ -196,11 +225,21 @@ func NewSharedDomainsCommitmentContext(sd sd, mode commitment.Mode, tmpDir strin
 	ctx := &SharedDomainsCommitmentContext{
 		sharedDomains: sd,
 		tmpDir:        tmpDir,
-		variant:       variant,
+		variant:       commitment.VariantHexPatriciaTrie,
 		warmupBase: commitment.WarmupConfig{
 			Enabled:    cfg.EnableTrieWarmup,
 			NumWorkers: cfg.WarmupNumWorkersOrDefault(),
 		},
+	}
+	// The parallel and streaming tries need a per-worker TrieContextFactory that
+	// only DB-backed consumers can provide (via EnableParaTrieDB). Start on the
+	// sequential trie and upgrade when the DB arrives, so context holders that
+	// never wire one (RPC, integrity, tests) keep working under a global variant
+	// selection.
+	if variant == commitment.VariantParallelHexPatricia || variant == commitment.VariantStreamingHexPatricia {
+		ctx.pendingVariant = variant
+		cfg.Variant = commitment.VariantHexPatriciaTrie
+		ctx.pendingCfg = cfg
 	}
 	ctx.patriciaTrie, ctx.updates = commitment.InitializeTrieAndUpdates(mode, tmpDir, cfg)
 	return ctx
@@ -242,6 +281,7 @@ func (sdc *SharedDomainsCommitmentContext) Reset() {
 func (sdc *SharedDomainsCommitmentContext) ClearRam() {
 	sdc.updates.Reset()
 	sdc.Reset()
+	sdc.stateReader = nil
 }
 
 func (sdc *SharedDomainsCommitmentContext) KeysCount() uint64 {
@@ -504,12 +544,29 @@ func (sdc *SharedDomainsCommitmentContext) ComputeCommitment(ctx context.Context
 		warmupConfig.LogPrefix = logPrefix
 		switch trie := sdc.patriciaTrie.(type) {
 		case *commitment.ParallelPatriciaHashed:
+			// The parallel fold workers compute the root, so they must read the same
+			// file generation the main tx was built against: pin it and open worker
+			// txns from that pin. Otherwise a worker could pin a newer generation and
+			// read one domain (e.g. code) inconsistent with another (e.g. accounts).
+			var workerPin kv.TemporalFilesPin
+			if p, ok := tx.(filesPinner); ok {
+				if wp := p.Pin(); wp != nil {
+					workerPin = wp
+					defer workerPin.Close()
+				}
+			}
+			if workerPin == nil {
+				log.Warn("[commitment] parallel commitment without a pinned file snapshot; worker reads not generation-consistent", "logPrefix", logPrefix)
+			}
 			// Each worker writes its branch updates through a private collector
 			// so concurrent PutBranch calls never race; collectors are drained
 			// after Process and merged into the main writer below.
-			warmupConfig.CtxFactory, drainCollectors = sdc.concurrentTrieContextFactory(ctx, sdc.paraTrieDB, txNum)
+			warmupConfig.CtxFactory, drainCollectors = sdc.concurrentTrieContextFactory(ctx, sdc.paraTrieDB, workerPin, txNum)
 			trie.SetTrieContextFactory(warmupConfig.CtxFactory)
 		default:
+			// Serial: this factory only serves page-cache warmup, which does not
+			// compute the root, so its reads need no generation pin. (Streaming is
+			// a *ParallelPatriciaHashed and takes the pinned branch above.)
 			warmupConfig.CtxFactory = sdc.trieContextFactory(ctx, sdc.paraTrieDB, txNum)
 		}
 	}
@@ -590,6 +647,23 @@ func (sdc *SharedDomainsCommitmentContext) ComputeCommitment(ctx context.Context
 	return rootHash, err
 }
 
+// filesPinner is the optional capability of a temporal tx to pin its visible
+// file generation (see kv.TemporalFilesPin).
+type filesPinner interface {
+	Pin() kv.TemporalFilesPin
+}
+
+// beginWorkerRo opens a per-worker read tx for parallel/warmup commitment reads,
+// bound to the pinned file snapshot when one is available so all workers observe
+// the main tx's generation. Falls back to an independent snapshot when the
+// backend can't pin files.
+func beginWorkerRo(ctx context.Context, db kv.TemporalRoDB, pin kv.TemporalFilesPin) (kv.TemporalTx, error) {
+	if pin != nil {
+		return pin.BeginTemporalRo(ctx)
+	}
+	return db.BeginTemporalRo(ctx)
+}
+
 func (sdc *SharedDomainsCommitmentContext) trieContextFactory(ctx context.Context, db kv.TemporalRoDB, txNum uint64) commitment.TrieContextFactory {
 	// avoid races like this
 	stepSize := sdc.sharedDomains.StepSize()
@@ -629,13 +703,13 @@ func (sdc *SharedDomainsCommitmentContext) trieContextFactory(ctx context.Contex
 // concurrentTrieContextFactory is like trieContextFactory but also creates a per-goroutine
 // etl.Collector for each context so that PutBranch writes are isolated (no shared writer race).
 // Returns the factory and a drain function that collects all created collectors.
-func (sdc *SharedDomainsCommitmentContext) concurrentTrieContextFactory(ctx context.Context, db kv.TemporalRoDB, txNum uint64) (commitment.TrieContextFactory, func() []*etl.Collector) {
+func (sdc *SharedDomainsCommitmentContext) concurrentTrieContextFactory(ctx context.Context, db kv.TemporalRoDB, pin kv.TemporalFilesPin, txNum uint64) (commitment.TrieContextFactory, func() []*etl.Collector) {
 	stepSize := sdc.sharedDomains.StepSize()
 	var mu sync.Mutex
 	var collectors []*etl.Collector
 
 	factory := func() (commitment.PatriciaContext, func()) {
-		roTx, err := db.BeginTemporalRo(ctx) //nolint:gocritic
+		roTx, err := beginWorkerRo(ctx, db, pin) //nolint:gocritic
 		if err != nil {
 			return &errorTrieContext{err: err}, func() {}
 		}

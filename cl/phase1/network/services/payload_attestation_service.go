@@ -24,6 +24,8 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/libp2p/go-libp2p/core/peer"
+
 	"github.com/erigontech/erigon/cl/beacon/beaconevents"
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
@@ -33,7 +35,6 @@ import (
 	"github.com/erigontech/erigon/cl/utils/eth_clock"
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/log/v3"
-	"github.com/libp2p/go-libp2p/core/peer"
 )
 
 // seenPayloadAttestationKey tracks seen attestations per (slot, validatorIndex).
@@ -47,6 +48,7 @@ type seenPayloadAttestationKey struct {
 type pendingPayloadAttestationKey struct {
 	blockRoot      common.Hash
 	validatorIndex uint64
+	messageRoot    common.Hash
 }
 
 // pendingPayloadAttestationJob represents a pending attestation waiting for its block.
@@ -158,7 +160,7 @@ func (s *payloadAttestationService) ProcessMessage(ctx context.Context, _ *uint6
 		log.Trace("Queued payload attestation for later processing",
 			"blockRoot", blockRoot,
 			"validatorIndex", validatorIndex)
-		return nil
+		return fmt.Errorf("%w: %w: block not available", ErrIgnore, ErrAttestationQueued)
 	}
 	// [IGNORE] The block referenced by data.beacon_block_root is at data.slot.
 	if blockHeader.Slot != slot {
@@ -201,10 +203,7 @@ func (s *payloadAttestationService) queuePendingAttestation(blockRoot common.Has
 		return
 	}
 
-	key := pendingPayloadAttestationKey{
-		blockRoot:      blockRoot,
-		validatorIndex: msg.ValidatorIndex,
-	}
+	key := pendingPayloadAttestationKeyFor(blockRoot, msg)
 
 	if _, loaded := s.pendingAttestations.LoadOrStore(key, &pendingPayloadAttestationJob{
 		msg:          msg,
@@ -215,6 +214,15 @@ func (s *payloadAttestationService) queuePendingAttestation(blockRoot common.Has
 		s.pendingCond.L.Lock()
 		s.pendingCond.Signal()
 		s.pendingCond.L.Unlock()
+	}
+}
+
+func pendingPayloadAttestationKeyFor(blockRoot common.Hash, msg *cltypes.PayloadAttestationMessage) pendingPayloadAttestationKey {
+	root, _ := msg.HashSSZ()
+	return pendingPayloadAttestationKey{
+		blockRoot:      blockRoot,
+		validatorIndex: msg.ValidatorIndex,
+		messageRoot:    common.Hash(root),
 	}
 }
 

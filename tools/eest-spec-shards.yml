@@ -17,6 +17,15 @@
 #   max-allowed-failures  (required) — failure budget; bump only with a comment
 #                                      explaining why and a tracking issue.
 #   exec3-parallel        (optional, default false) — pins ERIGON_EXEC3_PARALLEL.
+#   no-ramdisk            (optional, default false) — true keeps the shard's
+#                                      datadirs on disk instead of a RAM-backed
+#                                      tmpfs. The benchmark shards use a few
+#                                      long-lived datadirs (up to ~7GB at 150M),
+#                                      so tmpfs buys no wall time there and its
+#                                      bytes compete with the evm process for
+#                                      the runner's RAM. Opt-in-true on purpose:
+#                                      a false-valued key is invisible to jq's
+#                                      // default and to GitHub's loose ==.
 #   run                   (optional) — blocktest --run fork regex for race shards.
 #                                      Read by run-eest-spec-test.sh (to filter the
 #                                      run) and tools/check-eest-shard-coverage.sh
@@ -51,52 +60,69 @@
 - shard: enginextests-benchmark-1m-sequential
   workers: 1
   max-allowed-failures: 0
+  no-ramdisk: true
 - shard: enginextests-benchmark-1m-parallel
   workers: 1
   max-allowed-failures: 0
   exec3-parallel: true
+  no-ramdisk: true
 - shard: enginextests-benchmark-5m-sequential
   workers: 1
   max-allowed-failures: 0
+  no-ramdisk: true
 - shard: enginextests-benchmark-5m-parallel
   workers: 1
   max-allowed-failures: 0
   exec3-parallel: true
+  no-ramdisk: true
 - shard: enginextests-benchmark-10m-sequential
   workers: 1
   max-allowed-failures: 0
+  no-ramdisk: true
 - shard: enginextests-benchmark-10m-parallel
   workers: 1
   max-allowed-failures: 0
   exec3-parallel: true
+  no-ramdisk: true
 - shard: enginextests-benchmark-30m-sequential
   workers: 1
   max-allowed-failures: 0
+  no-ramdisk: true
 - shard: enginextests-benchmark-30m-parallel
   workers: 1
   max-allowed-failures: 0
   exec3-parallel: true
+  no-ramdisk: true
 - shard: enginextests-benchmark-60m-sequential
   workers: 1
   max-allowed-failures: 0
+  no-ramdisk: true
 - shard: enginextests-benchmark-60m-parallel
   workers: 1
   max-allowed-failures: 0
   exec3-parallel: true
+  no-ramdisk: true
 - shard: enginextests-benchmark-100m-sequential
   workers: 1
   max-allowed-failures: 0
+  no-ramdisk: true
 - shard: enginextests-benchmark-100m-parallel
   workers: 1
   max-allowed-failures: 0
   exec3-parallel: true
+  no-ramdisk: true
 - shard: enginextests-benchmark-150m-sequential
   workers: 1
   max-allowed-failures: 0
+  no-ramdisk: true
 - shard: enginextests-benchmark-150m-parallel
   workers: 1
   max-allowed-failures: 0
   exec3-parallel: true
+  no-ramdisk: true
+- shard: zkevm-witness
+  workers: 8
+  max-allowed-failures: 0
 - shard: blocktests-stable-race-pre-cancun-sequential
   workers: 12
   max-allowed-failures: 0

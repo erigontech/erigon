@@ -53,7 +53,7 @@ import (
 	"github.com/erigontech/erigon/db/config3"
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/datastruct/btindex"
-	"github.com/erigontech/erigon/db/downloader"
+	"github.com/erigontech/erigon/db/dbservices"
 	"github.com/erigontech/erigon/db/downloader/webseeds"
 	"github.com/erigontech/erigon/db/etl"
 	"github.com/erigontech/erigon/db/fromdb"
@@ -69,6 +69,8 @@ import (
 	"github.com/erigontech/erigon/db/recsplit"
 	"github.com/erigontech/erigon/db/seg"
 	"github.com/erigontech/erigon/db/snapshotsync"
+	"github.com/erigontech/erigon/db/snapshotsync/blocksnapshots"
+	"github.com/erigontech/erigon/db/snapshotsync/caplinsnapschema"
 	"github.com/erigontech/erigon/db/snapshotsync/freezeblocks"
 	"github.com/erigontech/erigon/db/snaptype"
 	"github.com/erigontech/erigon/db/snaptype2"
@@ -1347,7 +1349,7 @@ func doRollbackSnapshotsToBlock(ctx context.Context, blockNum uint64, prompt boo
 		return err
 	}
 	defer clean()
-	db, err := temporal.New(chainDB, agg)
+	db, err := temporal.New(chainDB, agg, res.BlockSnaps)
 	if err != nil {
 		return err
 	}
@@ -1609,14 +1611,13 @@ func doIntegrity(ctx context.Context, cliCtx *cli.Command) error {
 	defer blockRetire.MadvNormal().DisableReadAhead()
 	defer agg.MadvNormal().DisableReadAhead()
 
-	db, err := temporal.New(chainDB, agg)
+	blockReader, _ := blockRetire.IO()
+	heimdallStore, _ := blockRetire.BorStore()
+	db, err := temporal.New(chainDB, agg, res.BlockSnaps)
 	if err != nil {
 		return err
 	}
 	defer db.Close()
-
-	blockReader, _ := blockRetire.IO()
-	heimdallStore, _ := blockRetire.BorStore()
 
 	var commitmentHistoryEnabled bool
 	if err := chainDB.View(ctx, func(tx kv.Tx) error {
@@ -1813,7 +1814,7 @@ func doCheckCommitmentHistAtBlk(ctx context.Context, cliCtx *cli.Command, logger
 	defer clean()
 	defer blockRetire.MadvNormal().DisableReadAhead()
 	defer agg.MadvNormal().DisableReadAhead()
-	db, err := temporal.New(chainDB, agg)
+	db, err := temporal.New(chainDB, agg, res.BlockSnaps)
 	if err != nil {
 		return err
 	}
@@ -1838,7 +1839,7 @@ func doCheckStateRootByHistory(ctx context.Context, cliCtx *cli.Command, logger 
 		return err
 	}
 	defer clean()
-	db, err := temporal.New(chainDB, agg)
+	db, err := temporal.New(chainDB, agg, res.BlockSnaps)
 	if err != nil {
 		return err
 	}
@@ -1883,7 +1884,7 @@ func doCheckRCacheRootAtBlk(ctx context.Context, cliCtx *cli.Command, logger log
 	blockRetire, agg := res.BlockRetire, res.Aggregator
 	defer blockRetire.MadvNormal().DisableReadAhead()
 	defer agg.MadvNormal().DisableReadAhead()
-	db, err := temporal.New(chainDB, agg)
+	db, err := temporal.New(chainDB, agg, res.BlockSnaps)
 	if err != nil {
 		return err
 	}
@@ -1911,7 +1912,7 @@ func doCheckRCacheRootAtBlkRange(ctx context.Context, cliCtx *cli.Command, logge
 	blockRetire, agg := res.BlockRetire, res.Aggregator
 	defer blockRetire.MadvNormal().DisableReadAhead()
 	defer agg.MadvNormal().DisableReadAhead()
-	db, err := temporal.New(chainDB, agg)
+	db, err := temporal.New(chainDB, agg, res.BlockSnaps)
 	if err != nil {
 		return err
 	}
@@ -1965,7 +1966,7 @@ func doVerifyState(ctx context.Context, cliCtx *cli.Command, logger log.Logger) 
 	agg := openAgg(ctx, dirs, chainDB, logger)
 	defer agg.Close()
 	defer agg.MadvNormal().DisableReadAhead()
-	db, err := temporal.New(chainDB, agg)
+	db, err := temporal.New(chainDB, agg, nil)
 	if err != nil {
 		return err
 	}
@@ -1994,7 +1995,7 @@ func doVerifyHistory(ctx context.Context, cliCtx *cli.Command, logger log.Logger
 	blockReader := freezeblocks.NewBlockReader(snaps.BlockSnaps, snaps.BorSnaps)
 
 	agg := snaps.Aggregator
-	db, err := temporal.New(chainDB, agg)
+	db, err := temporal.New(chainDB, agg, snaps.BlockSnaps)
 	if err != nil {
 		return err
 	}
@@ -2076,7 +2077,7 @@ func CheckBorChain(chainName string) bool {
 
 func checkIfCaplinSnapshotsPublishable(dirs datadir.Dirs, emptyOk bool) error {
 	stateSnapTypes := snapshotsync.MakeCaplinStateSnapshotsTypes(nil)
-	caplinSchema := snapshotsync.NewCaplinSchema(dirs, 1000, stateSnapTypes)
+	caplinSchema := caplinsnapschema.NewCaplinSchema(dirs, 1000, stateSnapTypes)
 
 	//to := int64(-1)
 	for _, snapt := range snaptype.CaplinSnapshotTypes {
@@ -2342,7 +2343,7 @@ func checkStateSnapshotFiles(dirs datadir.Dirs, persistReceiptCache, commitmentH
 		if err != nil {
 			return fmt.Errorf("%w: failed to replace version in %s: %v", ErrSnapParseFilename, res.Name(), err)
 		}
-		for snapType := kv.Domain(0); snapType < kv.DomainLen; snapType++ {
+		for snapType := range kv.DomainLen {
 			// skip rcache check if this datadir doesn't produce it
 			if snapType == kv.RCacheDomain && !persistReceiptCache {
 				continue
@@ -2677,7 +2678,7 @@ func doBlkTxNum(ctx context.Context, cliCtx *cli.Command) error {
 	}
 	defer clean()
 
-	db, err := temporal.New(chainDB, agg)
+	db, err := temporal.New(chainDB, agg, res.BlockSnaps)
 	if err != nil {
 		return err
 	}
@@ -2953,7 +2954,7 @@ func doIndicesCommand(ctx context.Context, cliCtx *cli.Command, dirs datadir.Dir
 		return err
 	}
 
-	temporalDb, err := temporal.New(chainDB, agg)
+	temporalDb, err := temporal.New(chainDB, agg, res.BlockSnaps)
 	if err != nil {
 		return err
 	}
@@ -2979,7 +2980,7 @@ func lsDatadir(ctx context.Context, dirs datadir.Dirs, logger log.Logger) error 
 
 	cfg := ethconfig.NewSnapCfg(false, true, true, chainName)
 
-	blockSnaps := freezeblocks.NewRoSnapshots(cfg, dirs.Snap, logger)
+	blockSnaps := blocksnapshots.NewRoSnapshots(cfg, dirs.Snap, logger)
 	if err := blockSnaps.OpenFolder(); err != nil {
 		return err
 	}
@@ -3028,7 +3029,7 @@ func tryOpenChaindata(ctx context.Context, dirs datadir.Dirs, logger log.Logger)
 }
 
 type OpenSnapsResult struct {
-	BlockSnaps       *freezeblocks.RoSnapshots
+	BlockSnaps       *blocksnapshots.RoSnapshots
 	BorSnaps         *heimdall.RoSnapshots
 	CaplinSnaps      *freezeblocks.CaplinSnapshots
 	CaplinStateSnaps *snapshotsync.CaplinStateSnapshots
@@ -3047,7 +3048,7 @@ func openSnaps(ctx context.Context, cfg ethconfig.BlocksFreezing, dirs datadir.D
 
 	chainConfig := fromdb.ChainConfig(chainDB)
 
-	res.BlockSnaps = freezeblocks.NewRoSnapshots(cfg, dirs.Snap, logger)
+	res.BlockSnaps = blocksnapshots.NewRoSnapshots(cfg, dirs.Snap, logger)
 	if err = res.BlockSnaps.OpenFolder(); err != nil {
 		return
 	}
@@ -3465,7 +3466,7 @@ func doRetireCommand(ctx context.Context, cliCtx *cli.Command, dirs datadir.Dirs
 		blocksInSnapshots = min(blocksInSnapshots, blockReader.FrozenBorBlocks(false))
 	}
 	logger.Info("retiring blocks", "from", blocksInSnapshots, "to", to)
-	if err := br.RetireBlocks(ctx, blocksInSnapshots, to, log.LvlInfo, downloader.NoopSeederClient{}, nil); err != nil {
+	if err := br.BuildFiles(ctx, blocksInSnapshots, to, log.LvlInfo, dbservices.NoopSeederClient{}, nil); err != nil {
 		return err
 	}
 
@@ -3496,7 +3497,7 @@ func doRetireCommand(ctx context.Context, cliCtx *cli.Command, dirs datadir.Dirs
 
 	logger.Info("Pruning has ended", "deleted blocks", allDeletedBlocks)
 
-	db, err = temporal.New(db, agg)
+	db, err = temporal.New(db, agg, res.BlockSnaps)
 	if err != nil {
 		return err
 	}

@@ -33,8 +33,14 @@ import (
 // pre-commits its full configured capacity — the same demand-growth the state
 // caches use — reused across the CodeCache's content and size layers.
 //
-// A write racing a resize may land in the LRU about to be replaced and be
-// dropped; that is a benign cache miss (the value is re-read from the DB).
+// Generation swaps (maybeGrow, Purge) are not fenced against writers — safe
+// only for content-addressed layers, where a key's payload never changes: a
+// write lost in a retired generation is a benign miss, and an entry whose
+// removal a racing copy undid serves correct bytes until its stale stamp
+// drops it on the next read. Do not reuse for mutable-per-key values — those
+// need GenericCache's fenced swap. The onEvict-maintained counters are
+// approximate across grow windows (a lost write is counted but never
+// evicted; a raced removal can subtract twice).
 type growLRU[V any] struct {
 	cur      atomic.Pointer[freelru.ShardedLRU[uint64, V]]
 	onEvict  func(uint64, V)
@@ -53,19 +59,10 @@ func newGrowLRU[V any](maxBytes datasize.ByteSize, avgBytes uint32, onEvict func
 	if avgBytes == 0 {
 		avgBytes = avgBytesPerEntry
 	}
-	maxCap := uint32(uint64(maxBytes) / uint64(avgBytes))
-	if maxCap < 1 {
-		maxCap = 1
-	}
-	if maxCap > 1<<24 {
-		maxCap = 1 << 24
-	}
+	maxCap := min(max(uint32(uint64(maxBytes)/uint64(avgBytes)), 1), 1<<24)
 	// Start small (bounded by the ceiling); the floor is on the start size, not
 	// the ceiling — a tiny configured budget yields a tiny, still-evicting cap.
-	start := uint32(genericCacheStartCapacity)
-	if start > maxCap {
-		start = maxCap
-	}
+	start := min(uint32(genericCacheStartCapacity), maxCap)
 	g := &growLRU[V]{onEvict: onEvict, avgBytes: int64(avgBytes), startCap: start, maxCap: maxCap}
 	g.curCap.Store(start)
 	g.reserved = int64(start) * g.avgBytes
@@ -104,10 +101,7 @@ func (g *growLRU[V]) maybeGrow() {
 	if curCap >= g.maxCap || old.Len() < int(curCap) {
 		return
 	}
-	newCap := curCap * genericCacheGrowFactor
-	if newCap > g.maxCap {
-		newCap = g.maxCap
-	}
+	newCap := min(curCap*genericCacheGrowFactor, g.maxCap)
 	delta := int64(newCap-curCap) * g.avgBytes
 	if !cachebudget.Global.Reserve(delta) {
 		return

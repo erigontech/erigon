@@ -42,6 +42,7 @@ import (
 	"github.com/erigontech/erigon/common/dir"
 	"github.com/erigontech/erigon/common/estimate"
 	"github.com/erigontech/erigon/common/log/v3"
+	_ "github.com/erigontech/erigon/common/race"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/dbcfg"
 	"github.com/erigontech/erigon/db/kv/order"
@@ -177,6 +178,12 @@ func (opts MdbxOpts) InMem(tb testing.TB, tmpDir string) MdbxOpts {
 	opts.dirtySpace = uint64(16 * datasize.MB)
 	if tb != nil {
 		opts.dirtySpace = uint64(2 * datasize.MB)
+		// Parallel unit tests pile 16GB VA reservations into the Go race heap
+		// window ("too many address space collisions for -race mode"); cap them.
+		// Benchmarks run sequentially and can need the full map.
+		if _, isBench := tb.(*testing.B); !isBench {
+			opts.mapSize = 1 * datasize.GB
+		}
 	}
 	opts.shrinkThreshold = 0 // disable
 	opts.pageSize = 4096
@@ -1500,6 +1507,14 @@ func (tx *MdbxTx) DBSize() (uint64, error) {
 		return 0, err
 	}
 	return info.Geo.Current, err
+}
+
+func (db *MdbxKV) DBSize() (uint64, error) {
+	info, err := db.env.Info(nil)
+	if err != nil {
+		return 0, err
+	}
+	return info.Geo.Current, nil
 }
 
 func (tx *MdbxTx) RwCursor(bucket string) (kv.RwCursor, error) {

@@ -201,10 +201,7 @@ func (c *AdaptivePinController) OnBlockComplete(ctx context.Context, txNum uint6
 			delete(misses, hash)
 			if state.queueRemaining() > 0 && state.usedBytes() < c.cfg.PerContractMaxBudgetBytes {
 				remaining := c.cfg.PerContractMaxBudgetBytes - state.usedBytes()
-				step := c.cfg.ExtensionBudgetBytes
-				if step > remaining {
-					step = remaining
-				}
+				step := min(c.cfg.ExtensionBudgetBytes, remaining)
 				if err := c.runExtensionLocked(ctx, state, txNum, step, parallelResolve, reader, provider); err != nil {
 					c.warnf("[adaptive-pin] extend failed", "hash", hex.EncodeToString(hash[:]), "err", err)
 				} else {
@@ -376,7 +373,7 @@ func pickPromotionCandidates(misses map[[32]byte]uint64, threshold uint64, maxN 
 		}
 	}
 	if len(pool) > maxN {
-		for i := 0; i < maxN; i++ {
+		for i := range maxN {
 			best := i
 			for j := i + 1; j < len(pool); j++ {
 				if pool[j].n > pool[best].n {

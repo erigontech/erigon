@@ -26,6 +26,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/length"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/datadir"
@@ -37,9 +38,11 @@ import (
 	dbstate "github.com/erigontech/erigon/db/state"
 	"github.com/erigontech/erigon/db/state/changeset"
 	"github.com/erigontech/erigon/db/state/execctx"
+	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/commitment"
 	"github.com/erigontech/erigon/execution/commitment/commitmentdb"
 	"github.com/erigontech/erigon/execution/state"
+	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/accounts"
 )
 
@@ -67,7 +70,7 @@ func TestHandleMessage_StepBoundaryCheckpointMidBlock(t *testing.T) {
 
 	in := make(chan applyResult, 64)
 	out := make(chan commitmentResult, 64)
-	cc, err := newCommitmentCalculator(ctx, doms, db, "test", logger, false, 1<<62, in, out)
+	cc, err := newCommitmentCalculator(ctx, ctx, doms, db, &chain.Config{}, "test", logger, false, 1<<62, in, nil, out)
 	require.NoError(t, err)
 
 	// Block 1: txNums 1..10, fully before the step-0 edge (txNum 15).
@@ -97,6 +100,7 @@ func TestHandleMessage_StepBoundaryCheckpointMidBlock(t *testing.T) {
 		cc.handleMessage(ctx, &txResult{
 			blockNum: blockNum,
 			txNum:    txNum,
+			rules:    &chain.Rules{},
 			writes:   nonceBalanceWrites(addr, txNum, bal),
 		})
 	}
@@ -143,7 +147,7 @@ func TestHandleMessage_StepCheckpointInPerBlockMode(t *testing.T) {
 	in := make(chan applyResult, 64)
 	out := make(chan commitmentResult, 64)
 	// forcePerBlockCompute=true => snapshot-producer mode (per-block at every block).
-	cc, err := newCommitmentCalculator(ctx, doms, db, "test", logger, true, 1<<62, in, out)
+	cc, err := newCommitmentCalculator(ctx, ctx, doms, db, &chain.Config{}, "test", logger, true, 1<<62, in, nil, out)
 	require.NoError(t, err)
 
 	const block1End = uint64(10)
@@ -161,6 +165,7 @@ func TestHandleMessage_StepCheckpointInPerBlockMode(t *testing.T) {
 		cc.handleMessage(ctx, &txResult{
 			blockNum: blockNum,
 			txNum:    txNum,
+			rules:    &chain.Rules{},
 			writes:   nonceBalanceWrites(addr, txNum, bal),
 		})
 	}
@@ -201,7 +206,7 @@ func TestHandleMessage_PartialBlockComputeFailureNotSwallowed(t *testing.T) {
 	in := make(chan applyResult, 64)
 	out := make(chan commitmentResult, 64)
 	// forcePerBlockCompute=true routes the first partial block to computeWithoutCheck.
-	cc, err := newCommitmentCalculator(ctx, doms, db, "test", logger, true, 1<<62, in, out)
+	cc, err := newCommitmentCalculator(ctx, ctx, doms, db, &chain.Config{}, "test", logger, true, 1<<62, in, nil, out)
 	require.NoError(t, err)
 	defer cc.Stop()
 
@@ -215,6 +220,7 @@ func TestHandleMessage_PartialBlockComputeFailureNotSwallowed(t *testing.T) {
 		buf := accounts.SerialiseV3(&acc)
 		require.NoError(t, doms.DomainPut(kv.AccountsDomain, tx, addrBytes, buf, txNum, nil))
 		cc.handleMessage(ctx, &txResult{
+			rules:    &chain.Rules{},
 			blockNum: 1,
 			txNum:    txNum,
 			writes:   nonceBalanceWrites(addr, txNum, bal),
@@ -285,7 +291,7 @@ func runBlockEndingOnStepEdge(t *testing.T, edgeTxHasWrites bool) stepEdgeOutcom
 	// forcePerBlockCompute=false + huge perBlockFrom => pure batch mode: the
 	// blockResult never triggers a per-block compute, so the only thing that can
 	// checkpoint the step edge is the step-boundary hook.
-	cc, err := newCommitmentCalculator(ctx, doms, db, "test", logger, false, 1<<62, in, out)
+	cc, err := newCommitmentCalculator(ctx, ctx, doms, db, &chain.Config{}, "test", logger, false, 1<<62, in, nil, out)
 	require.NoError(t, err)
 
 	rnd := rand.New(rand.NewSource(42))
@@ -301,7 +307,7 @@ func runBlockEndingOnStepEdge(t *testing.T, edgeTxHasWrites bool) stepEdgeOutcom
 			require.NoError(t, doms.DomainPut(kv.AccountsDomain, tx, addrBytes, buf, txNum, nil))
 			writes = nonceBalanceWrites(addr, txNum, bal)
 		}
-		cc.handleMessage(ctx, &txResult{blockNum: 1, txNum: txNum, writes: writes})
+		cc.handleMessage(ctx, &txResult{blockNum: 1, txNum: txNum, rules: &chain.Rules{}, writes: writes})
 	}
 
 	for txNum := uint64(1); txNum < edgeTxNum; txNum++ {
@@ -380,7 +386,7 @@ func TestHandleMessage_StepBoundaryDoesNotPolluteLiveChangeset(t *testing.T) {
 
 	in := make(chan applyResult, 64)
 	out := make(chan commitmentResult, 64)
-	cc, err := newCommitmentCalculator(ctx, doms, db, "test", logger, false, 1<<62, in, out)
+	cc, err := newCommitmentCalculator(ctx, ctx, doms, db, &chain.Config{}, "test", logger, false, 1<<62, in, nil, out)
 	require.NoError(t, err)
 	defer cc.Stop()
 
@@ -395,6 +401,7 @@ func TestHandleMessage_StepBoundaryDoesNotPolluteLiveChangeset(t *testing.T) {
 		buf := accounts.SerialiseV3(&acc)
 		require.NoError(t, doms.DomainPut(kv.AccountsDomain, tx, addrBytes, buf, txNum, nil))
 		cc.handleMessage(ctx, &txResult{
+			rules:    &chain.Rules{},
 			blockNum: 1,
 			txNum:    txNum,
 			writes:   nonceBalanceWrites(addr, txNum, bal),
@@ -439,7 +446,7 @@ func TestHandleMessage_StepBoundaryRecordsIntoOwnChangesetInWindow(t *testing.T)
 	out := make(chan commitmentResult, 64)
 	// perBlockFrom=1 => block 1 is in-window, so it routes through the hash-aware
 	// wrap (ownsChangeset(1)=true) rather than the isolated path.
-	cc, err := newCommitmentCalculator(ctx, doms, db, "test", logger, false, 1, in, out)
+	cc, err := newCommitmentCalculator(ctx, ctx, doms, db, &chain.Config{}, "test", logger, false, 1, in, nil, out)
 	require.NoError(t, err)
 	defer cc.Stop()
 
@@ -454,6 +461,7 @@ func TestHandleMessage_StepBoundaryRecordsIntoOwnChangesetInWindow(t *testing.T)
 		buf := accounts.SerialiseV3(&acc)
 		require.NoError(t, doms.DomainPut(kv.AccountsDomain, tx, addrBytes, buf, txNum, nil))
 		cc.handleMessage(ctx, &txResult{
+			rules:     &chain.Rules{},
 			blockNum:  1,
 			blockHash: blockHash,
 			txNum:     txNum,
@@ -484,7 +492,7 @@ func TestHandleMessage_PreWindowPerBlockComputeDoesNotPolluteLiveChangeset(t *te
 	out := make(chan commitmentResult, 64)
 	// forcePerBlockCompute=true + perBlockFrom=5 => block 1 is pre-window yet
 	// still computes per-block.
-	cc, err := newCommitmentCalculator(ctx, doms, db, "test", logger, true, 5, in, out)
+	cc, err := newCommitmentCalculator(ctx, ctx, doms, db, &chain.Config{}, "test", logger, true, 5, in, nil, out)
 	require.NoError(t, err)
 	defer cc.Stop()
 
@@ -498,6 +506,7 @@ func TestHandleMessage_PreWindowPerBlockComputeDoesNotPolluteLiveChangeset(t *te
 		buf := accounts.SerialiseV3(&acc)
 		require.NoError(t, doms.DomainPut(kv.AccountsDomain, tx, addrBytes, buf, txNum, nil))
 		cc.handleMessage(ctx, &txResult{
+			rules:    &chain.Rules{},
 			blockNum: 1,
 			txNum:    txNum,
 			writes:   nonceBalanceWrites(addr, txNum, bal),
@@ -542,7 +551,7 @@ func setupStepTest(t *testing.T) (kv.TemporalRwDB, kv.TemporalRwTx, *execctx.Sha
 	require.NoError(t, err)
 	t.Cleanup(agg.Close)
 
-	db, err := temporal.New(rawDb, agg)
+	db, err := temporal.New(rawDb, agg, nil)
 	require.NoError(t, err)
 
 	tx, err := db.BeginTemporalRw(ctx) //nolint:gocritic
@@ -553,4 +562,132 @@ func setupStepTest(t *testing.T) (kv.TemporalRwDB, kv.TemporalRwTx, *execctx.Sha
 	require.NoError(t, err)
 	t.Cleanup(doms.Close)
 	return db, tx, doms
+}
+
+// TestFold_StepBoundaryCheckpointMidBlock pins the batch-end-in-BAL behaviour:
+// a BAL-driven fold of a block straddling an unfrozen step edge must leave a
+// commitment checkpoint at that edge (as of the edge txNum), so the step's
+// commitment .kv stays consistent with its account/storage .kv — the same
+// invariant the incremental path holds, now met by the fold itself rather than
+// by dropping the block to the incremental path.
+func TestFold_StepBoundaryCheckpointMidBlock(t *testing.T) {
+	defer func(p bool) { dbg.BALDrivenCommitment = p }(dbg.BALDrivenCommitment)
+	defer func(p bool) { dbg.IgnoreBAL = p }(dbg.IgnoreBAL)
+	dbg.BALDrivenCommitment = true
+	dbg.IgnoreBAL = false
+
+	ctx := context.Background()
+	logger := log.New()
+	const firstTxNum = uint64(11) // block 2 starts at 11 (block 1 was txNums 1..10)
+	const lastTxNum = uint64(20)
+	const edgeTxNum = uint64(15) // (txNum+1)%16 == 0, interior to [11,20]
+
+	db, tx, doms := setupStepTest(t)
+
+	in := make(chan applyResult, 64)
+	out := make(chan commitmentResult, 64)
+	cc, err := newCommitmentCalculator(ctx, ctx, doms, db, &chain.Config{}, "test", logger, false, 1<<62, in, nil, out)
+	require.NoError(t, err)
+	defer cc.Stop()
+	// Make block 2 the batch's first block so the fold gate opens with no prior
+	// blockResult, and the fold runs synchronously from handleBlockRequest.
+	cc.hasFirstBlock = true
+	cc.firstBlockNum = 2
+
+	rnd := rand.New(rand.NewSource(42))
+	accountValues := map[string][]byte{}
+	var bList types.BlockAccessList
+	for txNum := firstTxNum; txNum <= lastTxNum; txNum++ {
+		addrBytes := make([]byte, length.Addr)
+		rnd.Read(addrBytes)
+		balV := *uint256.NewInt(txNum * 1000)
+		acc := accounts.Account{Nonce: txNum, Balance: balV, CodeHash: accounts.EmptyCodeHash}
+		buf := accounts.SerialiseV3(&acc)
+		require.NoError(t, doms.DomainPut(kv.AccountsDomain, tx, addrBytes, buf, txNum, nil))
+		if txNum <= edgeTxNum {
+			accountValues[string(addrBytes)] = buf
+		}
+		idx := uint32(txNum - firstTxNum) // BAL index == txNum - firstTxNum
+		bList = append(bList, &types.AccountChanges{
+			Address:        accounts.InternAddress([20]byte(addrBytes)),
+			BalanceChanges: []*types.BalanceChange{{Index: idx, Value: balV}},
+			NonceChanges:   []*types.NonceChange{{Index: idx, Value: txNum}},
+		})
+	}
+
+	// Drive the fold. The block-end stateRoot is a dummy: the step checkpoints are
+	// written before the block-end root check, so a mismatch there still exercises
+	// the mid-block checkpoint under test (we assert on the checkpoint, not on the
+	// fold verifying the block-end root).
+	cc.handleBlockRequest(ctx, &blockRequest{
+		blockNum:   2,
+		firstTxNum: firstTxNum,
+		lastTxNum:  lastTxNum,
+		stateRoot:  common.Hash{0xde, 0xad},
+		bal:        bList,
+	})
+
+	require.NoError(t, doms.Flush(ctx, tx))
+
+	// As of just past the edge, the latest commitment checkpoint must be the one
+	// the fold wrote at the step edge — not the pre-block-2 checkpoint. Without
+	// foldStepCheckpoints the fold would write only the block-end (txNum 20)
+	// checkpoint and this as-of read would miss the edge.
+	blob, ok, err := doms.GetAsOf(kv.CommitmentDomain, commitmentdb.KeyCommitmentState, edgeTxNum+1)
+	require.NoError(t, err)
+	require.True(t, ok)
+	require.GreaterOrEqual(t, len(blob), 16)
+	gotTx, gotBlock := commitmentdb.DecodeTxBlockNums(blob)
+	require.Equal(t, edgeTxNum, gotTx, "fold must checkpoint commitment at the mid-block step edge (txNum 15)")
+	require.Equal(t, uint64(2), gotBlock, "the checkpoint sits inside the straddling block 2")
+
+	requireBranchesConsistentWithAccounts(t, doms, tx, accountValues)
+}
+
+// feedBlock1Shadow builds a calculator, feeds block 1's n writes (seed 42) into
+// cc.state, marks the block folded-ahead with balRoots[1]=balRoot, then delivers
+// blockResult(1) with BAL_SHADOW_COMPUTE on so shadowCrossCheck recomputes the
+// incremental root and cross-checks it against balRoot. Returns the published result.
+func feedBlock1Shadow(t *testing.T, n uint64, balRoot []byte) commitmentResult {
+	t.Helper()
+	defer func(p bool) { dbg.BALShadowCompute = p }(dbg.BALShadowCompute)
+	defer func(p bool) { dbg.BALDrivenCommitment = p }(dbg.BALDrivenCommitment)
+	dbg.BALShadowCompute = true
+	dbg.BALDrivenCommitment = true
+
+	ctx := context.Background()
+	db, _, doms := setupStepTest(t)
+	in := make(chan applyResult, 64)
+	out := make(chan commitmentResult, 64)
+	cc, err := newCommitmentCalculator(ctx, ctx, doms, db, &chain.Config{}, "shadow", log.New(), false, 1<<62, in, nil, out)
+	require.NoError(t, err)
+
+	rnd := rand.New(rand.NewSource(42))
+	for txNum := uint64(1); txNum <= n; txNum++ {
+		addrBytes := make([]byte, length.Addr)
+		rnd.Read(addrBytes)
+		addr := accounts.InternAddress([20]byte(addrBytes))
+		cc.handleMessage(ctx, &txResult{rules: &chain.Rules{}, blockNum: 1, txNum: txNum, writes: nonceBalanceWrites(addr, txNum, *uint256.NewInt(txNum * 1000))})
+	}
+	cc.foldedAhead[1] = true
+	cc.balRoots[1] = balRoot
+
+	cc.handleMessage(ctx, &blockResult{BlockNum: 1, BlockHash: common.Hash{0x01}, lastTxNum: n})
+	cc.Stop()
+	select {
+	case res := <-out:
+		return res
+	default:
+		t.Fatal("shadowCrossCheck published no result")
+		return commitmentResult{}
+	}
+}
+
+// TestShadowCrossCheck_Mismatch pins the safety path: a folded block whose
+// recorded balRoot disagrees with the incremental recompute must fail the block
+// with ErrWrongTrieRoot rather than publish silently.
+func TestShadowCrossCheck_Mismatch(t *testing.T) {
+	res := feedBlock1Shadow(t, 4, bytes.Repeat([]byte{0xEE}, 32))
+	require.Error(t, res.err, "a divergent folded root must fail the block")
+	require.ErrorIs(t, res.err, ErrWrongTrieRoot, "shadow mismatch must surface as ErrWrongTrieRoot")
 }

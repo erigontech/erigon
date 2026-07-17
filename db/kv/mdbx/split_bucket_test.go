@@ -35,7 +35,7 @@ import (
 // clustered shape that byte interpolation over the first 32 bytes can't split.
 func clusteredKey(i int) []byte {
 	k := make([]byte, 36)
-	for j := 0; j < 32; j++ {
+	for j := range 32 {
 		k[j] = 0xCC
 	}
 	binary.BigEndian.PutUint32(k[32:], uint32(i))
@@ -53,7 +53,7 @@ func TestSplitBucketByCount(t *testing.T) {
 		c, err := tx.RwCursor(table)
 		require.NoError(t, err)
 		defer c.Close()
-		for i := 0; i < n; i++ {
+		for i := range n {
 			require.NoError(t, c.Append(clusteredKey(i), []byte{1}))
 		}
 		return nil
@@ -103,9 +103,9 @@ func TestSplitBucketByCountDupSort(t *testing.T) {
 		require.NoError(t, err)
 		defer c.Close()
 		key, val := make([]byte, 8), make([]byte, 8)
-		for i := 0; i < keys; i++ {
+		for i := range keys {
 			binary.BigEndian.PutUint64(key, uint64(i))
-			for j := 0; j < dupsPerKey; j++ {
+			for j := range dupsPerKey {
 				binary.BigEndian.PutUint64(val, uint64(j))
 				require.NoError(t, c.AppendDup(key, val))
 			}
@@ -155,7 +155,7 @@ func TestSplitBucketByCountFewerPositions(t *testing.T) {
 		require.NoError(t, err)
 		defer c.Close()
 		k := make([]byte, 8)
-		for i := 0; i < n; i++ {
+		for i := range n {
 			binary.BigEndian.PutUint64(k, uint64(i))
 			require.NoError(t, c.Append(k, []byte{1}))
 		}
@@ -193,7 +193,7 @@ func TestSplitBucketByCountDupSortSkew(t *testing.T) {
 		require.NoError(t, err)
 		defer c.Close()
 		key, val := make([]byte, 8), make([]byte, 8)
-		for d := 0; d < hotDups; d++ { // key 0 is hot: many dups
+		for d := range hotDups { // key 0 is hot: many dups
 			binary.BigEndian.PutUint64(val, uint64(d))
 			require.NoError(t, c.AppendDup(key, val))
 		}

@@ -99,7 +99,13 @@ func (p *ParallelPatriciaHashed) TakeDeferredUpdates() []*DeferredBranchUpdate {
 	return d
 }
 
-// RootTrie exposes the configuration template only; it must not be used as live root state.
+// AdoptRootTrie replaces the template with a trie that already carries state
+// (e.g. restored before the variant upgrade); the previous trie must not be used after.
+func (p *ParallelPatriciaHashed) AdoptRootTrie(root *HexPatriciaHashed) {
+	p.template = root
+}
+
+// RootTrie returns the template trie, which carries the live root state.
 func (p *ParallelPatriciaHashed) RootTrie() *HexPatriciaHashed {
 	return p.template
 }
@@ -191,7 +197,7 @@ type prefixWriter struct {
 func (pw *prefixWriter) Write(p []byte) (int, error) {
 	buf := make([]byte, 0, len(p)+len(pw.prefix)*2)
 	buf = append(buf, pw.prefix...)
-	for i := 0; i < len(p); i++ {
+	for i := range p {
 		buf = append(buf, p[i])
 		if p[i] == '\n' && i != len(p)-1 { // re-tag interior lines, not a trailing newline
 			buf = append(buf, pw.prefix...)
@@ -259,9 +265,6 @@ func (p *ParallelPatriciaHashed) RootHash() ([]byte, error) {
 
 // processStreaming delegates Process to the attached StreamingCommitter and republishes the root.
 func (p *ParallelPatriciaHashed) processStreaming(ctx context.Context) ([]byte, error) {
-	// The template root is the restore target of SetState, so it seeds the committer's base;
-	// PromoteRootInto below keeps the two in sync after every fold.
-	p.streaming.SeedRootFrom(p.template)
 	rh, err := p.streaming.Process(ctx)
 	if err != nil {
 		return nil, err
