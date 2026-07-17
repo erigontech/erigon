@@ -23,12 +23,12 @@ Minimising surprise, these pieces are reusable as-is:
 
 | Piece | Location | Notes |
 |---|---|---|
-| Header field `BlockAccessListHash *common.Hash` | [execution/types/block.go:110](execution/types/block.go#L110) | Already RLP-encoded conditionally after `RequestsHash` ([:164–170, :316–321](execution/types/block.go#L164)) |
-| BAL type + `Hash()` method computing `keccak256(rlp.encode(bal))` | [execution/types/block_access_list.go:827](execution/types/block_access_list.go#L827) | Matches EIP-8159 hash definition exactly |
-| BAL rawdb sidecar storage | [db/rawdb/accessors_chain.go:597–612](db/rawdb/accessors_chain.go#L597) — `ReadBlockAccessListBytes` / `WriteBlockAccessListBytes`, table `kv.BlockAccessList` | Already RLP bytes on disk — exactly what we send on the wire |
-| Amsterdam fork gate | [execution/chain/chain_config.go:401–403](execution/chain/chain_config.go#L401) — `IsAmsterdam(time)` | No new fork constant needed |
-| Known-empty BAL hash constant | [common/empty/empty_hashes.go:49–50](common/empty/empty_hashes.go#L49) | Reusable for validation of empty-list BALs |
-| BAL creation on execute | [execution/stagedsync/bal_create.go](execution/stagedsync/bal_create.go) — `CreateBAL`, `ProcessBAL` | Attaches hash validation against `header.BlockAccessListHash` post-Amsterdam |
+| Header field `BlockAccessListHash *common.Hash` | [execution/types/block.go:110](../../execution/types/block.go#L110) | Already RLP-encoded conditionally after `RequestsHash` ([:164–170, :316–321](../../execution/types/block.go#L164)) |
+| BAL type + `Hash()` method computing `keccak256(rlp.encode(bal))` | [execution/types/block_access_list.go:827](../../execution/types/block_access_list.go#L827) | Matches EIP-8159 hash definition exactly |
+| BAL rawdb sidecar storage | [db/rawdb/accessors_chain.go:597–612](../../db/rawdb/accessors_chain.go#L597) — `ReadBlockAccessListBytes` / `WriteBlockAccessListBytes`, table `kv.BlockAccessList` | Already RLP bytes on disk — exactly what we send on the wire |
+| Amsterdam fork gate | [execution/chain/chain_config.go:401–403](../../execution/chain/chain_config.go#L401) — `IsAmsterdam(time)` | No new fork constant needed |
+| Known-empty BAL hash constant | [common/empty/empty_hashes.go:49–50](../../common/empty/empty_hashes.go#L49) | Reusable for validation of empty-list BALs |
+| BAL creation on execute | [execution/stagedsync/bal_create.go](../../execution/stagedsync/bal_create.go) — `CreateBAL`, `ProcessBAL` | Attaches hash validation against `header.BlockAccessListHash` post-Amsterdam |
 | Protocol plumbing precedent | `eth/68 → eth/69 → eth/70` upgrades (see below) | Same pattern to replicate |
 
 The networking additions are the only new code.
@@ -37,14 +37,14 @@ The networking additions are the only new code.
 
 ### Phase 1 — Wire protocol constants + protobuf enum
 
-- [p2p/protocols/eth/protocol.go:37](p2p/protocols/eth/protocol.go#L37): add `ETH71` to `ProtocolToString`, set `ProtocolLengths[ETH71] = 20` (17 → 18 → 18 → 20 to accommodate the 2 new codes).
-- [node/direct/sentry_client.go:35–37](node/direct/sentry_client.go#L35): add `ETH71 = 71`.
-- [p2p/protocols/eth/protocol.go:53–71](p2p/protocols/eth/protocol.go#L53): add message-code constants:
+- [p2p/protocols/eth/protocol.go:37](../../p2p/protocols/eth/protocol.go#L37): add `ETH71` to `ProtocolToString`, set `ProtocolLengths[ETH71] = 20` (17 → 18 → 18 → 20 to accommodate the 2 new codes).
+- [node/direct/sentry_client.go:35–37](../../node/direct/sentry_client.go#L35): add `ETH71 = 71`.
+- [p2p/protocols/eth/protocol.go:53–71](../../p2p/protocols/eth/protocol.go#L53): add message-code constants:
   ```go
   GetBlockAccessListsMsg = 0x12
   BlockAccessListsMsg    = 0x13
   ```
-- [node/interfaces/p2psentry/sentry.proto:73](node/interfaces/p2psentry/sentry.proto#L73): add `GET_BLOCK_ACCESS_LISTS_71 = 42; BLOCK_ACCESS_LISTS_71 = 43;`. Regenerate bindings (`make gen`).
+- [node/interfaces/p2psentry/sentry.proto:73](../../node/interfaces/p2psentry/sentry.proto#L73): add `GET_BLOCK_ACCESS_LISTS_71 = 42; BLOCK_ACCESS_LISTS_71 = 43;`. Regenerate bindings (`make gen`).
 - Unit: lint + build. No functional change yet.
 
 ### Phase 2 — Packet types + RLP
@@ -72,7 +72,7 @@ Matches the eth/66 request-id-wrapped envelope used for BlockBodies. We don't wr
 
 Add `ToProto` / `FromProto` entries for `ETH71` in the same file (big switch tables at :73 and :122) covering all existing eth/70 codes plus the two new ones.
 
-Round-trip serialization test in [p2p/protocols/eth/protocol_test.go](p2p/protocols/eth/protocol_test.go) following the `TestGetBlockHeadersDataEncodeDecode` pattern.
+Round-trip serialization test in [p2p/protocols/eth/protocol_test.go](../../p2p/protocols/eth/protocol_test.go) following the `TestGetBlockHeadersDataEncodeDecode` pattern.
 
 ### Phase 3 — Answer handler (server side)
 
@@ -99,7 +99,7 @@ Unit tests in `handlers_test.go`: seed rawdb with a BAL for one hash, leave anot
 
 ### Phase 4 — Sentry dispatch + subscriber plumbing
 
-- [p2p/sentry/sentry_grpc_server.go:450–540](p2p/sentry/sentry_grpc_server.go#L450): extend the inbound switch with:
+- [p2p/sentry/sentry_grpc_server.go:450–540](../../p2p/sentry/sentry_grpc_server.go#L450): extend the inbound switch with:
   ```go
   case eth.GetBlockAccessListsMsg:
       send(eth.ToProto[protocolVersion][msg.Code], peerID, msgBytes)
@@ -107,7 +107,7 @@ Unit tests in `handlers_test.go`: seed rawdb with a BAL for one hash, leave anot
       send(eth.ToProto[protocolVersion][msg.Code], peerID, msgBytes)
   ```
   Same fan-out pattern as `GetBlockBodiesMsg` / `BlockBodiesMsg`.
-- [p2p/sentry/libsentry/protocol.go:25–94](p2p/sentry/libsentry/protocol.go#L25): add `ETH71` to `ethProtocolsByVersion`, extend the per-protocol `ProtoIds` whitelist with the two new MessageIds.
+- [p2p/sentry/libsentry/protocol.go:25–94](../../p2p/sentry/libsentry/protocol.go#L25): add `ETH71` to `ethProtocolsByVersion`, extend the per-protocol `ProtoIds` whitelist with the two new MessageIds.
 - Negotiation: `MinProtocol(GET_BLOCK_ACCESS_LISTS_71)` must return `ETH71` so only eth/71 peers are queried.
 
 ### Phase 5 — Consumer side: BAL fetcher for sync
@@ -125,7 +125,7 @@ Decision point: whether to make BAL fetching a first-class blocking stage or an 
 **Three-way decode** (per EIP-8159 post ethereum/EIPs#11553 — earlier drafts used `0xc0` as the "unavailable" sentinel which collided with a genuinely empty BAL):
 
 - `0x80` (empty RLP string) means *"peer does not have this BAL"*. Unambiguous.
-- `0xc0` (empty RLP list) means *"block genuinely has an empty BAL"*. Accepted only when `expected_hash == empty.BlockAccessListHash` (the keccak256 of the empty RLP list, `0x1dcc4de8...`; already exported at [common/empty/empty_hashes.go:49](common/empty/empty_hashes.go#L49)). A `0xc0` claim with any other expected hash is a hash-mismatch → kick the peer.
+- `0xc0` (empty RLP list) means *"block genuinely has an empty BAL"*. Accepted only when `expected_hash == empty.BlockAccessListHash` (the keccak256 of the empty RLP list, `0x1dcc4de8...`; already exported at [common/empty/empty_hashes.go:49](../../common/empty/empty_hashes.go#L49)). A `0xc0` claim with any other expected hash is a hash-mismatch → kick the peer.
 - Anything else must hash to `expected_hash` or the peer is kicked.
 
 **Bad-peer management** — two distinct penalty tracks layered on top of the per-peer request-rate limits:
