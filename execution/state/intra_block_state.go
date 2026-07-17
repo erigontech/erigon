@@ -1071,7 +1071,6 @@ func (sdb *IntraBlockState) getVersionedAccount(addr accounts.Address, readStora
 				return nil, StorageRead, UnknownVersion, nil
 			}
 		}
-
 		account, accSource, accVersion, err := sdb.refreshVersionedAccount(addr, readAccount, source, version)
 		if err == nil && account != nil {
 			// readAccount above recorded a nil map-read marker; the DB resolved
@@ -1622,7 +1621,6 @@ func (sdb *IntraBlockState) getStateObject(addr accounts.Address, recordRead boo
 				// already bails on a destructed floor, and refreshSelfDestruct
 				// would record a racing SD read the BAL cannot resolve.
 				destructed, _, _, err := refreshSelfDestruct(sdb, addr)
-
 				if destructed || err != nil {
 					so := stateObjectPool.Get().(*stateObject)
 					so.db = sdb

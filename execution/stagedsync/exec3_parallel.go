@@ -2289,8 +2289,13 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 				// failing error is then returned by the branch above. (Some
 				// re-execution is wasted here — bounded and marginal.)
 				if dbg.TraceReexec {
-					fmt.Printf("ABORT-ERR blk=%d tx=%d inc=%d origin=%v\n",
-						be.blockNum, res.Version().TxIndex, res.Version().Incarnation, execErr.OriginError)
+					fmt.Printf(
+						"ABORT-ERR blk=%d tx=%d inc=%d origin=%v\n",
+						be.blockNum,
+						res.Version().TxIndex,
+						res.Version().Incarnation,
+						execErr.OriginError,
+					)
 				}
 				be.execTasks.clearInProgress(tx)
 				be.execTasks.pushDeferred(tx)
@@ -2301,8 +2306,13 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 				// Dependency abort: re-execute against the named blocker.
 				dependency := execErr.DependencyTxIndex + 1
 				if dbg.TraceReexec {
-					fmt.Printf("ABORT-DEP blk=%d tx=%d inc=%d dep=%d\n",
-						be.blockNum, res.Version().TxIndex, res.Version().Incarnation, execErr.DependencyTxIndex)
+					fmt.Printf(
+						"ABORT-DEP blk=%d tx=%d inc=%d dep=%d\n",
+						be.blockNum,
+						res.Version().TxIndex,
+						res.Version().Incarnation,
+						execErr.DependencyTxIndex,
+					)
 				}
 
 				l := len(be.estimateDeps[tx])
@@ -2369,8 +2379,14 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 				}
 			}
 			if dbg.TraceReexec {
-				fmt.Printf("REEXEC-RESULT blk=%d tx=%d inc=%d writeChange=%v deleted=%d\n",
-					be.blockNum, txVersion.TxIndex, txVersion.Incarnation, hasWriteChange, deletedWrites)
+				fmt.Printf(
+					"REEXEC-RESULT blk=%d tx=%d inc=%d writeChange=%v deleted=%d\n",
+					be.blockNum,
+					txVersion.TxIndex,
+					txVersion.Incarnation,
+					hasWriteChange,
+					deletedWrites,
+				)
 			}
 
 			be.blockIO.RecordWrites(txVersion, res.TxOut)
@@ -2488,8 +2504,13 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 		valid := validity == state.VersionValid
 
 		if dbg.TraceReexec && valid && cntInvalid > 0 {
-			fmt.Printf("FLUSH-EST blk=%d tx=%d inc=%d batchInvalid=%d\n",
-				be.blockNum, txVersion.TxIndex, txVersion.Incarnation, cntInvalid)
+			fmt.Printf(
+				"FLUSH-EST blk=%d tx=%d inc=%d batchInvalid=%d\n",
+				be.blockNum,
+				txVersion.TxIndex,
+				txVersion.Incarnation,
+				cntInvalid,
+			)
 		}
 		be.versionMap.SetTrace(trace)
 		writeSet := be.blockIO.WriteSet(txVersion.TxIndex)
@@ -2651,8 +2672,14 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 			be.execFailed[tx]++
 
 			if dbg.TraceReexec {
-				fmt.Printf("INVALID blk=%d tx=%d inc=%d failed=%d aborted=%d\n",
-					be.blockNum, txVersion.TxIndex, txVersion.Incarnation, be.execFailed[tx], be.execAborted[tx])
+				fmt.Printf(
+					"INVALID blk=%d tx=%d inc=%d failed=%d aborted=%d\n",
+					be.blockNum,
+					txVersion.TxIndex,
+					txVersion.Incarnation,
+					be.execFailed[tx],
+					be.execAborted[tx],
+				)
 			}
 			if dbg.TraceTransactionIO && be.txIncarnations[tx] > 1 {
 				fmt.Println(be.blockNum, "FAILED", tx, be.txIncarnations[tx], "failed", be.execFailed[tx], "aborted", be.execAborted[tx])

@@ -166,7 +166,49 @@ func TestFetchAcrossPeers(t *testing.T) {
 			[]PeerId{*PeerIdFromUint64(1), *PeerIdFromUint64(2)}, 8, fetch)
 		require.Empty(t, out)
 	})
-
+	t.Run("covers the whole batch when peers truncate to a response-size prefix", func(t *testing.T) {
+		var hashes []common.Hash
+		var prefixReqs []BALRequest
+		for i := byte(1); i <= 7; i++ {
+			h := common.BytesToHash([]byte{i})
+			hashes = append(hashes, h)
+			prefixReqs = append(prefixReqs, BALRequest{Hash: h})
+		}
+		fetch := func(_ context.Context, rs []BALRequest, _ *PeerId) map[common.Hash][]byte {
+			out := map[common.Hash][]byte{}
+			for _, r := range rs[:min(2, len(rs))] {
+				out[r.Hash] = []byte{0xaa}
+			}
+			return out
+		}
+		out := fetchAcrossPeers(
+			context.Background(),
+			prefixReqs,
+			[]PeerId{*PeerIdFromUint64(1), *PeerIdFromUint64(2)},
+			8,
+			fetch,
+		)
+		require.Len(t, out, 7)
+		for _, h := range hashes {
+			require.Contains(t, out, h)
+		}
+	})
+	t.Run("stops when no peer makes progress", func(t *testing.T) {
+		var calls atomic.Int32
+		fetch := func(_ context.Context, _ []BALRequest, _ *PeerId) map[common.Hash][]byte {
+			calls.Add(1)
+			return map[common.Hash][]byte{h0: {0xaa}}
+		}
+		out := fetchAcrossPeers(
+			context.Background(),
+			reqs,
+			[]PeerId{*PeerIdFromUint64(1), *PeerIdFromUint64(2)},
+			8,
+			fetch,
+		)
+		require.Len(t, out, 1)
+		require.LessOrEqual(t, calls.Load(), int32(4))
+	})
 	t.Run("honours the parallelism limit", func(t *testing.T) {
 		var live, peak atomic.Int32
 		fetch := func(_ context.Context, _ []BALRequest, _ *PeerId) map[common.Hash][]byte {

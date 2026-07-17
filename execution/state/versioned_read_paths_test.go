@@ -590,7 +590,6 @@ func TestVersionedRead_D1_WriteSetHitWithStaleReadSetPanics(t *testing.T) {
 		ReadHeader: ReadHeader{Source: MapRead, Version: Version{TxIndex: 1, Incarnation: 0}},
 		Val:        *uint256.NewInt(99),
 	})
-
 	defer func() {
 		r := recover()
 		require.NotNil(t, r, "must panic when writeSet hit conflicts with stale readSet at versionMap Done")

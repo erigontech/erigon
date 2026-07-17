@@ -1759,12 +1759,11 @@ func TestNextResult_NilVsEmptyRecordForkAware(t *testing.T) {
 			}
 			_, err := be.nextResult(context.Background(), pe, txResult, roTx)
 			require.NoError(t, err)
-			require.Equal(t, tc.wantInvalid, be.cntValidationFail,
-				"validation verdict must follow EIP-161 activation")
+			require.Equal(t, tc.wantInvalid, be.cntValidationFail)
 			if tc.wantInvalid == 0 {
-				require.NotNil(t, be.finalizedResults[0], "valid result must finalize")
+				require.NotNil(t, be.finalizedResults[0])
 			} else {
-				require.Nil(t, be.finalizedResults[0], "invalid result must be re-scheduled, not finalized")
+				require.Nil(t, be.finalizedResults[0])
 			}
 		})
 	}

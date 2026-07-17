@@ -149,7 +149,7 @@ func (s *IntraBlockState) readValueUnchanged(addr accounts.Address, path Account
 			prAcc = pr.Val.Account()
 		}
 		if prAcc.Empty() && r.mapAddressVal.Empty() {
-			return true
+			return !s.versionMap.accountLiveAt(addr, s.txIndex)
 		}
 		return prAcc != nil && r.mapAddressVal != nil
 	case BalancePath:
@@ -314,10 +314,18 @@ func versionedReadCore(s *IntraBlockState, addr accounts.Address, path AccountPa
 							s.dep = hdr.Version.TxIndex
 						}
 						if dbg.TraceReexec {
-							fmt.Printf("DEP-WR blk=%d tx=%d inc=%d %x %s pr=(%d.%d) cur=(%d.%d)\n",
-								s.blockNum, s.txIndex, s.version, addr, AccountKey{path, key},
-								prHeader.Version.TxIndex, prHeader.Version.Incarnation,
-								hdr.Version.TxIndex, hdr.Version.Incarnation)
+							fmt.Printf(
+								"DEP-WR blk=%d tx=%d inc=%d %x %s pr=(%d.%d) cur=(%d.%d)\n",
+								s.blockNum,
+								s.txIndex,
+								s.version,
+								addr,
+								AccountKey{path, key},
+								prHeader.Version.TxIndex,
+								prHeader.Version.Incarnation,
+								hdr.Version.TxIndex,
+								hdr.Version.Incarnation,
+							)
 						}
 						if dbg.TraceTransactionIO && (s.trace || dbg.TraceAccount(addr.Handle())) {
 							fmt.Printf("%d (%d.%d) WR DEP (%d.%d)!=(%d.%d) %x %s\n",
@@ -371,20 +379,48 @@ func versionedReadCore(s *IntraBlockState, addr accounts.Address, path AccountPa
 				s.dep = hdr.Version.TxIndex
 			}
 			if dbg.TraceReexec {
-				fmt.Printf("DEP-RD blk=%d tx=%d inc=%d %x %s pr=(%d.%d,src=%s) cur=(%d.%d)\n",
-					s.blockNum, s.txIndex, s.version, addr, AccountKey{path, key},
-					prHeader.Version.TxIndex, prHeader.Version.Incarnation, prHeader.Source,
-					hdr.Version.TxIndex, hdr.Version.Incarnation)
+				fmt.Printf(
+					"DEP-RD blk=%d tx=%d inc=%d %x %s pr=(%d.%d,src=%s) cur=(%d.%d)\n",
+					s.blockNum,
+					s.txIndex,
+					s.version,
+					addr,
+					AccountKey{path, key},
+					prHeader.Version.TxIndex,
+					prHeader.Version.Incarnation,
+					prHeader.Source,
+					hdr.Version.TxIndex,
+					hdr.Version.Incarnation,
+				)
 				if path == AddressPath {
-					_, balRes, balOK := s.versionMap.ReadBalance(addr, s.txIndex)
-					_, nonRes, nonOK := s.versionMap.ReadNonce(addr, s.txIndex)
+					balV, balRes, balOK := s.versionMap.ReadBalance(addr, s.txIndex)
+					nonV, nonRes, nonOK := s.versionMap.ReadNonce(addr, s.txIndex)
 					sdV, sdRes, sdOK := s.versionMap.ReadSelfDestruct(addr, s.txIndex)
 					pr, prOK := s.versionedReads.GetAddress(addr)
 					prNil := !prOK || pr.Val == nil || pr.Val.Account() == nil
-					fmt.Printf("DEP-RD-CTX %x prNil=%v mapValNil=%v bal=(ok=%v,idx=%d,st=%d) nonce=(ok=%v,idx=%d,st=%d) sd=(ok=%v,v=%v,idx=%d,st=%d)\n",
-						addr, prNil, r.mapAddressVal == nil,
-						balOK, balRes.DepIdx(), balRes.Status(), nonOK, nonRes.DepIdx(), nonRes.Status(),
-						sdOK, sdV, sdRes.DepIdx(), sdRes.Status())
+					mapValEmpty := true
+					if r.mapAddressVal != nil {
+						mapValEmpty = r.mapAddressVal.Empty()
+					}
+					fmt.Printf(
+						"DEP-RD-CTX %x prNil=%v mapValNil=%v mapValEmpty=%v bal=(ok=%v,v=%v,idx=%d,st=%d) nonce=(ok=%v,v=%d,idx=%d,st=%d) sd=(ok=%v,v=%v,idx=%d,st=%d)\n",
+						addr,
+						prNil,
+						r.mapAddressVal == nil,
+						mapValEmpty,
+						balOK,
+						&balV,
+						balRes.DepIdx(),
+						balRes.Status(),
+						nonOK,
+						nonV,
+						nonRes.DepIdx(),
+						nonRes.Status(),
+						sdOK,
+						sdV,
+						sdRes.DepIdx(),
+						sdRes.Status(),
+					)
 				}
 			}
 			if dbg.TraceTransactionIO && (s.trace || dbg.TraceAccount(addr.Handle())) {
@@ -415,9 +451,16 @@ func versionedReadCore(s *IntraBlockState, addr accounts.Address, path AccountPa
 
 	case MVReadResultDependency:
 		if dbg.TraceReexec {
-			fmt.Printf("DEP-MP blk=%d tx=%d inc=%d %x %s dep=(%d.%d)\n",
-				s.blockNum, s.txIndex, s.version, addr, AccountKey{path, key},
-				res.DepIdx(), res.Incarnation())
+			fmt.Printf(
+				"DEP-MP blk=%d tx=%d inc=%d %x %s dep=(%d.%d)\n",
+				s.blockNum,
+				s.txIndex,
+				s.version,
+				addr,
+				AccountKey{path, key},
+				res.DepIdx(),
+				res.Incarnation(),
+			)
 		}
 		if dbg.TraceTransactionIO && (s.trace || dbg.TraceAccount(addr.Handle())) {
 			fmt.Printf("%d (%d.%d) MP DEP (%d.%d) %x %s\n",

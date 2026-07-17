@@ -99,10 +99,39 @@ func (f *balFetcher) Fetch(ctx context.Context, reqs []BALRequest, peerId *PeerI
 // unit-testable without the network.
 type peerFetchFunc func(ctx context.Context, reqs []BALRequest, peerId *PeerId) map[common.Hash][]byte
 
-// fetchAcrossPeers fetches reqs from up to maxParallel peers concurrently and merges
-// their validated results, keeping the first correct BAL per block and cancelling the
-// remaining peers once every req is covered.
+// fetchAcrossPeers fetches reqs from up to maxParallel peers concurrently and
+// merges their validated results, keeping the first correct BAL per block.
+// Peers truncate responses to the eth softResponseLimit, so a single request
+// for a large batch only ever covers a prefix — after each peer sweep the
+// uncovered remainder is re-requested until everything is covered or a full
+// sweep makes no progress.
 func fetchAcrossPeers(ctx context.Context, reqs []BALRequest, peerIds []PeerId, maxParallel int, fetch peerFetchFunc) map[common.Hash][]byte {
+	out := make(map[common.Hash][]byte, len(reqs))
+	remaining := reqs
+	for len(remaining) > 0 && ctx.Err() == nil {
+		got := sweepPeersForBALs(ctx, remaining, peerIds, maxParallel, fetch)
+		for hash, bal := range got {
+			if _, ok := out[hash]; !ok {
+				out[hash] = bal
+			}
+		}
+		next := make([]BALRequest, 0, len(remaining))
+		for _, r := range remaining {
+			if _, ok := out[r.Hash]; !ok {
+				next = append(next, r)
+			}
+		}
+		if len(next) == len(remaining) {
+			break
+		}
+		remaining = next
+	}
+	return out
+}
+
+// sweepPeersForBALs queries up to maxParallel peers concurrently for reqs and
+// merges first-valid-wins, cancelling the rest once every req is covered.
+func sweepPeersForBALs(ctx context.Context, reqs []BALRequest, peerIds []PeerId, maxParallel int, fetch peerFetchFunc) map[common.Hash][]byte {
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 	var (

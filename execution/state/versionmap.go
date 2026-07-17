@@ -195,37 +195,64 @@ func (vm *VersionMap) StorageKeys(addr accounts.Address) []accounts.StorageKey {
 func (vm *VersionMap) WriteChanges(changes []*types.AccountChanges) {
 	for _, accountChanges := range changes {
 		if dbg.TraceBALFeed {
-			fmt.Printf("BAL-ACCT %x storage=%d balance=%d nonce=%d code=%d reads=%d\n",
-				accountChanges.Address, len(accountChanges.StorageChanges), len(accountChanges.BalanceChanges),
-				len(accountChanges.NonceChanges), len(accountChanges.CodeChanges), len(accountChanges.StorageReads))
+			fmt.Printf(
+				"BAL-ACCT %x storage=%d balance=%d nonce=%d code=%d reads=%d\n",
+				accountChanges.Address,
+				len(accountChanges.StorageChanges),
+				len(accountChanges.BalanceChanges),
+				len(accountChanges.NonceChanges),
+				len(accountChanges.CodeChanges),
+				len(accountChanges.StorageReads),
+			)
 		}
 		for _, storageChanges := range accountChanges.StorageChanges {
 			for _, change := range storageChanges.Changes {
 				if dbg.TraceBALFeed {
-					fmt.Printf("BAL-CELL %x storage[%x] balIdx=%d cell=%d val=%s\n",
-						accountChanges.Address, storageChanges.Slot, change.Index, int(change.Index)-1, change.Value.Hex())
+					fmt.Printf(
+						"BAL-CELL %x storage[%x] balIdx=%d cell=%d val=%s\n",
+						accountChanges.Address,
+						storageChanges.Slot,
+						change.Index,
+						int(change.Index)-1,
+						change.Value.Hex(),
+					)
 				}
 				vm.WriteStorage(accountChanges.Address, storageChanges.Slot, Version{TxIndex: int(change.Index) - 1}, change.Value, true)
 			}
 		}
 		for _, balanceChange := range accountChanges.BalanceChanges {
 			if dbg.TraceBALFeed {
-				fmt.Printf("BAL-CELL %x balance balIdx=%d cell=%d val=%v\n",
-					accountChanges.Address, balanceChange.Index, int(balanceChange.Index)-1, &balanceChange.Value)
+				fmt.Printf(
+					"BAL-CELL %x balance balIdx=%d cell=%d val=%v\n",
+					accountChanges.Address,
+					balanceChange.Index,
+					int(balanceChange.Index)-1,
+					&balanceChange.Value,
+				)
 			}
 			vm.WriteBalance(accountChanges.Address, Version{TxIndex: int(balanceChange.Index) - 1}, balanceChange.Value, true)
 		}
 		for _, nonceChange := range accountChanges.NonceChanges {
 			if dbg.TraceBALFeed {
-				fmt.Printf("BAL-CELL %x nonce balIdx=%d cell=%d val=%d\n",
-					accountChanges.Address, nonceChange.Index, int(nonceChange.Index)-1, nonceChange.Value)
+				fmt.Printf(
+					"BAL-CELL %x nonce balIdx=%d cell=%d val=%d\n",
+					accountChanges.Address,
+					nonceChange.Index,
+					int(nonceChange.Index)-1,
+					nonceChange.Value,
+				)
 			}
 			vm.WriteNonce(accountChanges.Address, Version{TxIndex: int(nonceChange.Index) - 1}, nonceChange.Value, true)
 		}
 		for _, codeChange := range accountChanges.CodeChanges {
 			if dbg.TraceBALFeed {
-				fmt.Printf("BAL-CELL %x code balIdx=%d cell=%d len=%d\n",
-					accountChanges.Address, codeChange.Index, int(codeChange.Index)-1, len(codeChange.Bytecode))
+				fmt.Printf(
+					"BAL-CELL %x code balIdx=%d cell=%d len=%d\n",
+					accountChanges.Address,
+					codeChange.Index,
+					int(codeChange.Index)-1,
+					len(codeChange.Bytecode),
+				)
 			}
 			vm.WriteCode(accountChanges.Address, Version{TxIndex: int(codeChange.Index) - 1}, accounts.NewCode(codeChange.Bytecode), true)
 		}
@@ -861,9 +888,21 @@ func validateRead[T any](vm *VersionMap, txIndex int, addr accounts.Address, pat
 	matchesLive := func() bool { return ok && eq(readVal, live) }
 	valid := vm.validateReadImpl(txIndex, addr, path, key, source, version, rr, matchesLive, checkVersion, traceInvalid, tracePrefix, false)
 	if dbg.TraceReexec && valid == VersionInvalid {
-		fmt.Printf("VINV tx=%d %x %s src=%s rv=(%d.%d) cell=(%d.%d,st=%d) readVal=%v live=%v liveOK=%v\n",
-			txIndex, addr, AccountKey{path, key}, source, version.TxIndex, version.Incarnation,
-			rr.depIdx, rr.incarnation, rr.Status(), readVal, live, ok)
+		fmt.Printf(
+			"VINV tx=%d %x %s src=%s rv=(%d.%d) cell=(%d.%d,st=%d) readVal=%v live=%v liveOK=%v\n",
+			txIndex,
+			addr,
+			AccountKey{path, key},
+			source,
+			version.TxIndex,
+			version.Incarnation,
+			rr.depIdx,
+			rr.incarnation,
+			rr.Status(),
+			readVal,
+			live,
+			ok,
+		)
 	}
 	return valid
 }
@@ -903,15 +942,38 @@ func eqCodeHash(a, b accounts.CodeHash) bool {
 // The AddressPath record tiebreakers are existence-only: the record's version
 // churns as workers re-stamp it, but each sub-field (balance/nonce/codeHash)
 // is recorded and validated as its own read. Under EIP-161 a nil read is
-// additionally equivalent to an empty record — a dead account is
-// EVM-indistinguishable from a non-existent one. Before EIP-161 that does not
-// hold (existing-empty accounts persist and CALL charges new-account gas on
-// non-existence only), so the strict form applies there.
-func eqAccountDead(a, b *accounts.Account) bool {
-	if a.Empty() && b.Empty() {
+// additionally equivalent to a dead account — EVM-indistinguishable from a
+// non-existent one. Before EIP-161 that does not hold (existing-empty accounts
+// persist and CALL charges new-account gas on non-existence only), so the
+// strict form applies there.
+//
+// The record cell is a creation-time snapshot: an account created empty and
+// funded afterwards keeps an empty-shaped record next to a non-zero sub-field
+// cell, so deadness must be assembled from the sub-field floors too.
+func (vm *VersionMap) eqAccountDead(txIdx int, addr accounts.Address, a *accounts.Account, b *accounts.Account) bool {
+	if a.Empty() && b.Empty() && !vm.accountLiveAt(addr, txIdx) {
 		return true
 	}
 	return a != nil && b != nil
+}
+
+// accountLiveAt reports whether any sub-field cell below txIdx makes the
+// account EIP-161-non-empty. Estimate cells cannot prove death and count as
+// live (fail-safe: the reader re-executes).
+func (vm *VersionMap) accountLiveAt(addr accounts.Address, txIdx int) bool {
+	if bal, rr, ok := vm.ReadBalance(addr, txIdx); ok && (rr.Status() != MVReadResultDone || !bal.IsZero()) {
+		return true
+	}
+	if nonce, rr, ok := vm.ReadNonce(addr, txIdx); ok && (rr.Status() != MVReadResultDone || nonce != 0) {
+		return true
+	}
+	if ch, rr, ok := vm.ReadCodeHash(addr, txIdx); ok && (rr.Status() != MVReadResultDone || !(ch.IsEmpty() || ch.IsZero())) {
+		return true
+	}
+	if c, rr, ok := vm.ReadCode(addr, txIdx); ok && (rr.Status() != MVReadResultDone || len(c.Bytes) > 0) {
+		return true
+	}
+	return false
 }
 
 func eqAccountStrict(a, b *accounts.Account) bool {
@@ -1050,11 +1112,21 @@ func (vm *VersionMap) validateReadImpl(txIndex int, addr accounts.Address, path 
 	}
 
 	if dbg.TraceReexec && valid == VersionInvalid && invReason != "" {
-		fmt.Printf("VINV-R tx=%d %x %s src=%s reason=%s recursive=%v rv=(%d.%d) cell=(%d.%d,st=%d)\n",
-			txIndex, addr, AccountKey{path, key}, source, invReason, recursive,
-			version.TxIndex, version.Incarnation, rr.depIdx, rr.incarnation, rr.Status())
+		fmt.Printf(
+			"VINV-R tx=%d %x %s src=%s reason=%s recursive=%v rv=(%d.%d) cell=(%d.%d,st=%d)\n",
+			txIndex,
+			addr,
+			AccountKey{path, key},
+			source,
+			invReason,
+			recursive,
+			version.TxIndex,
+			version.Incarnation,
+			rr.depIdx,
+			rr.incarnation,
+			rr.Status(),
+		)
 	}
-
 	if vm.trace || (traceInvalid && valid == VersionInvalid) {
 		if len(tracePrefix) > 0 {
 			tracePrefix = tracePrefix + "  RD"
@@ -1084,10 +1156,6 @@ func (vm *VersionMap) validateReadImpl(txIndex int, addr accounts.Address, path 
 func (vm *VersionMap) ValidateVersion(txIdx int, lastIO *VersionedIO, checkVersion func(readVersion, writeVersion Version) VersionValidity, eip161 bool, traceInvalid bool, tracePrefix string) (valid VersionValidity) {
 	rs := lastIO.ReadSet(txIdx)
 	valid = VersionValid
-	eqAccount := eqAccountStrict
-	if eip161 {
-		eqAccount = eqAccountDead
-	}
 	// ok checks one validity result, latching valid; ok==false stops the scan.
 	ok := func(v VersionValidity) bool { valid = v; return v == VersionValid }
 	// noValueRead validates a path whose recorded value carries no tiebreaker
@@ -1101,10 +1169,17 @@ func (vm *VersionMap) ValidateVersion(txIdx int, lastIO *VersionedIO, checkVersi
 	// Value paths go through the generic validateRead so the recorded value stays
 	// typed (never boxed) and the single typed read supplies both status and the
 	// tiebreaker value.
+	var deadAddr accounts.Address
+	eqAccountDead := func(x *accounts.Account, y *accounts.Account) bool { return vm.eqAccountDead(txIdx, deadAddr, x, y) }
 	for a, tr := range rs.address {
 		var rv *accounts.Account
 		if tr.Val != nil {
 			rv = tr.Val.Account()
+		}
+		eqAccount := eqAccountStrict
+		if eip161 {
+			deadAddr = a
+			eqAccount = eqAccountDead
 		}
 		if !ok(validateRead(vm, txIdx, a, AddressPath, accounts.NilKey, tr.Source, tr.Version, rv, liveAddress, eqAccount, checkVersion, traceInvalid, tracePrefix)) {
 			return

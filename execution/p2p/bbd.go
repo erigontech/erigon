@@ -25,7 +25,6 @@ import (
 	"golang.org/x/sync/errgroup"
 
 	"github.com/erigontech/erigon/common"
-	"github.com/erigontech/erigon/common/empty"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/common/math"
 	"github.com/erigontech/erigon/db/etl"
@@ -521,7 +520,7 @@ func (bbd *BackwardBlockDownloader) downloadBlocksForHeaders(
 				if bbd.balFetcher != nil {
 					reqs := balRequestsForHeaders(headerBatch)
 					batchEg.Go(func() error {
-						balsResponse = bbd.balFetcher.Fetch(ctx, reqs, &peerId, peers.peersExcept(peerId), config.bodiesBatchFetchTimeout)
+						balsResponse = bbd.balFetcher.Fetch(ctx, reqs, &peerId, peers.peersExcept(peerId), config.balsBatchFetchTimeout)
 						return nil
 					})
 				}
@@ -576,6 +575,18 @@ func (bbd *BackwardBlockDownloader) downloadBlocksForHeaders(
 							"toHash", headerBatch[len(headerBatch)-1].Hash(),
 							"got", len(balsResponse),
 						)
+					}
+					if bbd.balFetcher != nil {
+						if want := len(balRequestsForHeaders(headerBatch)); len(balsResponse) < want {
+							bbd.logger.Debug(
+								"[backward-block-downloader] BALs download miss for batch",
+								"fromNum", headerBatch[0].Number.Uint64(),
+								"toNum", headerBatch[len(headerBatch)-1].Number.Uint64(),
+								"got", len(balsResponse),
+								"want", want,
+								"peerId", peerId.String(),
+							)
+						}
 					}
 				}
 				return nil
@@ -633,7 +644,7 @@ func (bbd *BackwardBlockDownloader) downloadBlocksForHeaders(
 func balRequestsForHeaders(headers []*types.Header) []BALRequest {
 	reqs := make([]BALRequest, 0, len(headers))
 	for _, header := range headers {
-		if header.BlockAccessListHash == nil || *header.BlockAccessListHash == empty.BlockAccessListHash {
+		if !header.HasBAL() {
 			continue
 		}
 		reqs = append(reqs, BALRequest{
