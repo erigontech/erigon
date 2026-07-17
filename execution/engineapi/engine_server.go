@@ -241,10 +241,9 @@ func (s *EngineServer) validatePayloadAttributesPostFCU(version clparams.StateVe
 	if version >= clparams.GloasVersion && payloadAttributes.SlotNumber == nil {
 		return &engine_helpers.InvalidPayloadAttributesErr // SlotNumber required for Glamsterdam (EIP-7843)
 	}
-	// TargetGasLimit is not in bal-devnet-7 spec, only in glamsterdam-devnet-4+
-	//if version >= clparams.GloasVersion && payloadAttributes.TargetGasLimit == nil {
-	//	return &engine_helpers.InvalidPayloadAttributesErr // TargetGasLimit required for V4 attrs
-	//}
+	if version >= clparams.GloasVersion && payloadAttributes.TargetGasLimit == nil {
+		return &engine_helpers.InvalidPayloadAttributesErr // TargetGasLimit required for V4 attrs
+	}
 	if version < clparams.GloasVersion && payloadAttributes.SlotNumber != nil {
 		return &engine_helpers.InvalidPayloadAttributesErr // pre-V4 attrs MUST NOT carry slotNumber
 	}
