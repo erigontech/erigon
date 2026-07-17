@@ -124,3 +124,29 @@ func TestMemoryMutationDeleteRange(t *testing.T) {
 		require.False(t, has(t, batch, "CCAA"))
 	})
 }
+
+// A pure-DupSort table's merged cursor filters deletions through deletedDups,
+// while GetOne/Has consult deletedEntries. A range delete has to satisfy both,
+// or the key stays visible to iteration after being "deleted".
+func TestMemoryMutationDeleteRangeDupSortIteration(t *testing.T) {
+	_, rwTx := newTestTx(t)
+	for _, v := range []string{"v1", "v2"} {
+		require.NoError(t, rwTx.Put(kv.TblAccountIdx, []byte("AAAA"), []byte(v)))
+	}
+	require.NoError(t, rwTx.Put(kv.TblAccountIdx, []byte("BBBB"), []byte("v1")))
+
+	batch, err := membatchwithdb.NewMemoryBatch(rwTx, "", log.Root())
+	require.NoError(t, err)
+	t.Cleanup(batch.Close)
+
+	n, err := batch.DeleteBefore(kv.TblAccountIdx, []byte("BBBB"))
+	require.NoError(t, err)
+	require.EqualValues(t, 2, n)
+
+	var seen []string
+	require.NoError(t, batch.ForEach(kv.TblAccountIdx, nil, func(k, v []byte) error {
+		seen = append(seen, string(k)+"/"+string(v))
+		return nil
+	}))
+	require.Equal(t, []string{"BBBB/v1"}, seen) // AAAA must be gone from iteration too
+}

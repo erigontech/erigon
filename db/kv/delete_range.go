@@ -18,11 +18,11 @@ package kv
 
 import "fmt"
 
-// DeleteRange removes keys in [from, to) from table and returns the number
-// deleted. from==nil starts at the first key; to==nil deletes through the last
-// key. It picks the cheapest native bulk range-delete the bounds allow, so tx
-// must implement HasDeleteRange; emulating it by iterating would silently turn
-// a B-tree cut into a full per-key scan.
+// DeleteRange removes keys in [from, to) from table and returns the number of
+// entries deleted. from==nil starts at the first key; to==nil deletes through
+// the last key. It picks the cheapest native bulk range-delete the bounds allow,
+// so tx must implement HasDeleteRange; emulating it by iterating would silently
+// turn a B-tree cut into a full per-key scan.
 func DeleteRange(tx RwTx, table string, from, to []byte) (uint64, error) {
 	dr, ok := tx.(HasDeleteRange)
 	if !ok {
