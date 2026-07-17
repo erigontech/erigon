@@ -1803,14 +1803,20 @@ func (c *MdbxCursorPseudoDupSort) DeleteCurrentDuplicates() error {
 }
 
 func (c *MdbxCursorPseudoDupSort) DeleteCurrentMultiValBefore(v []byte) (uint64, error) {
-	_, cur, err := c.Current()
+	k, cur, err := c.Current()
 	if err != nil || cur == nil {
 		return 0, err
 	}
 	if v != nil && bytes.Compare(cur, v) >= 0 {
 		return 0, nil
 	}
+	k = bytes.Clone(k)
 	if err := c.DeleteCurrent(); err != nil {
+		return 0, fmt.Errorf("label: %s,in DeleteCurrentMultiValBefore: %w", c.label, err)
+	}
+	// The key held its only value, so it is gone and the cursor owes the caller an
+	// unpositioned state; DeleteCurrent instead leaves it on the next record.
+	if _, _, err := c.SeekExact(k); err != nil {
 		return 0, fmt.Errorf("label: %s,in DeleteCurrentMultiValBefore: %w", c.label, err)
 	}
 	return 1, nil

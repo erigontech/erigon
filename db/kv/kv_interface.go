@@ -326,6 +326,8 @@ type PseudoDupSortRwCursor interface { // For both DupSort and usual cursors (us
 	LastDup() ([]byte, error)           // LastDup - position at last data item of current key
 
 	CountDuplicates() (uint64, error) // CountDuplicates - number of duplicates for the current key
+
+	DeleteCurrentMultiValBefore(v []byte) (uint64, error) // see RwCursorDupSort for the contract
 }
 
 // RwCursorPseudoDupSort wraps any RwCursor to satisfy PseudoDupSortRwCursor
@@ -356,14 +358,20 @@ func (c *RwCursorPseudoDupSort) DeleteCurrentDuplicates() error {
 	return c.DeleteCurrent()
 }
 func (c *RwCursorPseudoDupSort) DeleteCurrentMultiValBefore(v []byte) (uint64, error) {
-	_, cur, err := c.Current()
+	k, cur, err := c.Current()
 	if err != nil || cur == nil {
 		return 0, err
 	}
 	if v != nil && bytes.Compare(cur, v) >= 0 {
 		return 0, nil
 	}
+	k = bytes.Clone(k)
 	if err := c.DeleteCurrent(); err != nil {
+		return 0, err
+	}
+	// The key held its only value, so it is gone and the cursor owes the caller an
+	// unpositioned state; DeleteCurrent instead leaves it on the next record.
+	if _, _, err := c.SeekExact(k); err != nil {
 		return 0, err
 	}
 	return 1, nil

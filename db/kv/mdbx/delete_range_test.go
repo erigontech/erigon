@@ -447,3 +447,68 @@ func TestMdbxDeleteCurrentMultiValBefore(t *testing.T) {
 		require.EqualValues(t, keys*dups, countTable(t, db))
 	})
 }
+
+// Pseudo-dupsort keys hold exactly one value, so deleting it removes the key and
+// the cursor must end up unpositioned. DeleteCurrent alone doesn't get there: it
+// leaves the cursor referring to the next record.
+func TestPseudoDupSortDeleteCurrentMultiValBefore(t *testing.T) {
+	// newFilledDB stores value []byte{1} under keys 0..n-1, so a bound of {2} is
+	// above the stored value and a bound of {1} is equal to it.
+	run := func(t *testing.T, wrap func(kv.RwCursor) kv.PseudoDupSortRwCursor) {
+		t.Helper()
+
+		t.Run("deletes the value and leaves the cursor unpositioned", func(t *testing.T) {
+			db := newFilledDB(t, 10)
+			require.NoError(t, db.Update(t.Context(), func(tx kv.RwTx) error {
+				rc, err := tx.RwCursor(deleteRangeTable)
+				require.NoError(t, err)
+				defer rc.Close()
+				c := wrap(rc)
+
+				k, _, err := c.SeekExact(u64tob(5))
+				require.NoError(t, err)
+				require.NotNil(t, k)
+
+				n, err := c.DeleteCurrentMultiValBefore([]byte{2})
+				require.NoError(t, err)
+				require.EqualValues(t, 1, n)
+
+				k, _, err = c.Current()
+				require.NoError(t, err)
+				require.Nil(t, k) // must not have drifted onto key 6
+				return nil
+			}))
+			require.EqualValues(t, 9, countTable(t, db))
+		})
+
+		t.Run("keeps a value at or above the bound", func(t *testing.T) {
+			db := newFilledDB(t, 10)
+			require.NoError(t, db.Update(t.Context(), func(tx kv.RwTx) error {
+				rc, err := tx.RwCursor(deleteRangeTable)
+				require.NoError(t, err)
+				defer rc.Close()
+				c := wrap(rc)
+
+				_, _, err = c.SeekExact(u64tob(5))
+				require.NoError(t, err)
+
+				n, err := c.DeleteCurrentMultiValBefore([]byte{1}) // equal to the value: kept
+				require.NoError(t, err)
+				require.Zero(t, n)
+				return nil
+			}))
+			require.EqualValues(t, 10, countTable(t, db))
+		})
+	}
+
+	t.Run("MdbxCursorPseudoDupSort", func(t *testing.T) {
+		run(t, func(rc kv.RwCursor) kv.PseudoDupSortRwCursor {
+			return &MdbxCursorPseudoDupSort{MdbxCursor: rc.(*MdbxCursor)}
+		})
+	})
+	t.Run("kv.RwCursorPseudoDupSort", func(t *testing.T) {
+		run(t, func(rc kv.RwCursor) kv.PseudoDupSortRwCursor {
+			return &kv.RwCursorPseudoDupSort{RwCursor: rc}
+		})
+	})
+}
