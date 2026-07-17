@@ -33,24 +33,28 @@ jobs:
           # pre-allocation groups can be scheduled across forks.
           - sim: consume-enginex
             sim-limit: ""
+            sim-parallelism: 6
             shard: stable
             fixtures-tarball: eest_stable
             max-failures: 0
             exec_mode: serial
           - sim: consume-enginex
             sim-limit: ""
+            sim-parallelism: 6
             shard: stable
             fixtures-tarball: eest_stable
             max-failures: 0
             exec_mode: parallel
           - sim: consume-rlp
             sim-limit: ".*(eip2930_access_list|eip4844_blobs).*" # all tests take too long
+            sim-parallelism: 12
             shard: rlp
             fixtures-tarball: eest_stable
             max-failures: 0
             exec_mode: serial
           - sim: consume-rlp
             sim-limit: ".*(eip2930_access_list|eip4844_blobs).*"
+            sim-parallelism: 12
             shard: rlp
             fixtures-tarball: eest_stable
             max-failures: 0
@@ -58,6 +62,7 @@ jobs:
           # Glamsterdam devnet: BAL EIPs against devnet fixtures
           - sim: consume-engine
             sim-limit: ".*(2780|7708|7778|7843|7928|7954|7976|7981|7997|8024|8037|8038|8246|8282).*"
+            sim-parallelism: 12
             shard: glamsterdam-devnet
             fixtures-tarball: eest_devnet
             extra-hive-flags: "--sim.loglevel=3 --client.checktimelimit=300s"
@@ -156,7 +161,6 @@ jobs:
             done
           }
           retry 3 go get . >> buildlogs.log
-          git apply ../erigon-full/.github/workflows/patches/hive-widen-ephemeral-ports.patch
           # Point hive's default (prebuilt-image) erigon client at the image we
           # built locally above, instead of cloning erigon inside the builder.
           sed -i "s|^ARG baseimage=erigontech/erigon$|ARG baseimage=hive/erigon|" clients/erigon/Dockerfile
@@ -233,7 +237,7 @@ jobs:
               sim_limit_args+=(--sim.limit="${2}" --sim.limit.exact=false)
             fi
             while true; do
-              ./hive -docker.output -docker.auth --sim ethereum/eels/"${1}" "${sim_limit_args[@]}" --sim.parallelism=12 --client erigon --docker.nocache=true --sim.buildarg fixtures="$fixtures_url" ${branch_arg} ${{ matrix.extra-hive-flags }} 2>&1 | tee output.log || true
+              ./hive -docker.output -docker.auth --sim ethereum/eels/"${1}" "${sim_limit_args[@]}" --sim.parallelism=${{ matrix.sim-parallelism }} --client erigon --docker.nocache=true --sim.buildarg fixtures="$fixtures_url" ${branch_arg} ${{ matrix.extra-hive-flags }} 2>&1 | tee output.log || true
               status_line=$(tail -2 output.log | head -1 | sed -r "s/\x1B\[[0-9;]*[a-zA-Z]//g")
               suites=$(echo "$status_line" | sed -n 's/.*suites=\([0-9]*\).*/\1/p')
               if [ -z "$suites" ]; then
