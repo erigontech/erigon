@@ -126,7 +126,10 @@ func openDB(opts kv2.MdbxOpts, applyMigrations bool, chain string, logger log.Lo
 			rawDBExcl := opts.Exclusive(true).MustOpen()
 			rawDBExcl, err = migrator.Apply(rawDBExcl, migrationsDB, datadirCli, "", logger)
 			if err != nil {
-				rawDBExcl.Close()
+				// A wipe migration that fails to reopen returns no handle at all.
+				if rawDBExcl != nil {
+					rawDBExcl.Close()
+				}
 				return nil, err
 			}
 			// Release the exclusive lock here, not on function exit: the accede-mode
