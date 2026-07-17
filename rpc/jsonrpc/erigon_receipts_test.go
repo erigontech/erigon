@@ -21,6 +21,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"math/big"
+	"slices"
 	"testing"
 
 	"github.com/holiman/uint256"
@@ -83,10 +84,10 @@ func TestErigonGetLatestLogs(t *testing.T) {
 	expectedLogs, _ := api.GetLogs(m.Ctx, filters.FilterCriteria{FromBlock: big.NewInt(0), ToBlock: big.NewInt(rpc.LatestBlockNumber.Int64())})
 
 	expectedErigonLogs := make(types.ErigonLogs, 0)
-	for i := len(expectedLogs) - 1; i >= 0; i-- {
+	for _, expectedLog := range slices.Backward(expectedLogs) {
 		expectedErigonLogs = append(expectedErigonLogs, &types.ErigonLog{
-			Log:       expectedLogs[i].Log,
-			Timestamp: expectedLogs[i].Timestamp,
+			Log:       expectedLog.Log,
+			Timestamp: expectedLog.Timestamp,
 		})
 	}
 	actual, err := api.GetLatestLogs(m.Ctx, filters.FilterCriteria{FromBlock: big.NewInt(0), ToBlock: big.NewInt(rpc.LatestBlockNumber.Int64())}, filters.LogFilterOptions{
@@ -123,10 +124,10 @@ func TestErigonGetLatestLogsIgnoreTopics(t *testing.T) {
 	expectedLogs, _ := api.GetLogs(m.Ctx, filters.FilterCriteria{FromBlock: big.NewInt(0), ToBlock: big.NewInt(rpc.LatestBlockNumber.Int64())})
 
 	expectedErigonLogs := make([]*types.ErigonLog, 0)
-	for i := len(expectedLogs) - 1; i >= 0; i-- {
+	for _, expectedLog := range slices.Backward(expectedLogs) {
 		expectedErigonLogs = append(expectedErigonLogs, &types.ErigonLog{
-			Log:       expectedLogs[i].Log,
-			Timestamp: expectedLogs[i].Timestamp,
+			Log:       expectedLog.Log,
+			Timestamp: expectedLog.Timestamp,
 		})
 	}
 
