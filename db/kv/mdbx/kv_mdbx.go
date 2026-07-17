@@ -1802,6 +1802,20 @@ func (c *MdbxCursorPseudoDupSort) DeleteCurrentDuplicates() error {
 	return nil
 }
 
+func (c *MdbxCursorPseudoDupSort) DeleteCurrentMultiValBefore(v []byte) (uint64, error) {
+	_, cur, err := c.Current()
+	if err != nil || cur == nil {
+		return 0, err
+	}
+	if v != nil && bytes.Compare(cur, v) >= 0 {
+		return 0, nil
+	}
+	if err := c.DeleteCurrent(); err != nil {
+		return 0, fmt.Errorf("label: %s,in DeleteCurrentMultiValBefore: %w", c.label, err)
+	}
+	return 1, nil
+}
+
 // CountDuplicates returns the number of duplicates for the current key. See mdb_cursor_count
 func (c *MdbxCursorPseudoDupSort) CountDuplicates() (uint64, error) {
 	return 1, nil
@@ -1961,6 +1975,43 @@ func (c *MdbxDupSortCursor) DeleteCurrentDuplicates() error {
 		return fmt.Errorf("label: %s,in DeleteCurrentDuplicates: %w", c.label, err)
 	}
 	return nil
+}
+
+// DeleteCurrentMultiValBefore removes the current key's values below v using
+// mdbx's native bunch-delete, which cuts whole dup subtrees at once.
+func (c *MdbxDupSortCursor) DeleteCurrentMultiValBefore(v []byte) (uint64, error) {
+	k, _, err := c.Current()
+	if err != nil {
+		return 0, err
+	}
+	if k == nil {
+		return 0, nil
+	}
+	k = bytes.Clone(k) // seeking below may invalidate the page k points into
+
+	if v != nil {
+		vv, err := c.SeekBothRange(k, v) // smallest value >= v within the key
+		if err != nil {
+			return 0, err
+		}
+		if vv != nil { // every value before this position is < v
+			return c.c.RangeDel(mdbx.DeleteCurrentMultiValBeforeExcluding)
+		}
+	}
+
+	// v==nil, or the key holds no value >= v: all of its values are < v. A failed
+	// SeekBothRange leaves the cursor unpositioned, so re-seek before cutting.
+	kk, _, err := c.SeekExact(k)
+	if err != nil {
+		return 0, err
+	}
+	if kk == nil {
+		return 0, nil
+	}
+	if _, err := c.LastDup(); err != nil {
+		return 0, err
+	}
+	return c.c.RangeDel(mdbx.DeleteCurrentMultiValBeforeIncluding)
 }
 
 // CountDuplicates returns the number of duplicates for the current key. See mdb_cursor_count

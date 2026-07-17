@@ -17,6 +17,7 @@
 package kv
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -306,6 +307,12 @@ type RwCursorDupSort interface {
 	DeleteCurrentDuplicates() error       // DeleteCurrentDuplicates - deletes all values of the current key
 	DeleteExact(k1, k2 []byte) error      // DeleteExact - delete 1 value from given key
 	AppendDup(key, value []byte) error    // AppendDup - same as Append, but for sorted dup data
+
+	// DeleteCurrentMultiValBefore removes the current key's values below v and
+	// returns how many went. v==nil removes all of them. The cursor must be
+	// positioned on a key; it is left positioned on that key. mdbx does this as a
+	// native bunch-delete, so prefer it over walking dups one by one.
+	DeleteCurrentMultiValBefore(v []byte) (uint64, error)
 }
 
 type PseudoDupSortRwCursor interface { // For both DupSort and usual cursors (usual imitates functionality of ds)
@@ -346,6 +353,19 @@ func (c *RwCursorPseudoDupSort) LastDup() ([]byte, error) {
 }
 func (c *RwCursorPseudoDupSort) DeleteCurrentDuplicates() error {
 	return c.DeleteCurrent()
+}
+func (c *RwCursorPseudoDupSort) DeleteCurrentMultiValBefore(v []byte) (uint64, error) {
+	_, cur, err := c.Current()
+	if err != nil || cur == nil {
+		return 0, err
+	}
+	if v != nil && bytes.Compare(cur, v) >= 0 {
+		return 0, nil
+	}
+	if err := c.DeleteCurrent(); err != nil {
+		return 0, err
+	}
+	return 1, nil
 }
 func (c *RwCursorPseudoDupSort) CountDuplicates() (uint64, error) {
 	return 1, nil
