@@ -311,8 +311,9 @@ type RwCursorDupSort interface {
 
 	// DeleteCurrentMultiValBefore removes the current key's values below v and
 	// returns how many went. v==nil removes all of them. The cursor must be
-	// positioned on a key; it is left positioned on that key. mdbx does this as a
-	// native bunch-delete, so prefer it over walking dups one by one.
+	// positioned on a key; it stays on that key, or is left unpositioned when no
+	// value survives, since a key with no values is itself gone. mdbx does this as
+	// a native bunch-delete, so prefer it over walking dups one by one.
 	DeleteCurrentMultiValBefore(v []byte) (uint64, error)
 }
 

@@ -781,6 +781,17 @@ func (c *memStoreCursor) DeleteCurrentMultiValBefore(v []byte) (uint64, error) {
 	for _, e := range doomed {
 		c.table.tree.Delete(e)
 	}
+
+	// The cursor may have been sitting on one of the deleted values: re-anchor it
+	// on the key's first survivor, or invalidate it once the key is gone.
+	iter = c.table.tree.Iter()
+	c.valid = iter.Seek(memEntry{k: key}) && bytes.Equal(iter.Item().k, key)
+	if c.valid {
+		c.current = iter.Item()
+	} else {
+		c.current = memEntry{}
+	}
+	iter.Release()
 	return uint64(len(doomed)), nil
 }
 

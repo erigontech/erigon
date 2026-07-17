@@ -821,8 +821,15 @@ func TestMemStore_DupSortDeleteCurrentMultiValBefore(t *testing.T) {
 	require.NoError(t, err)
 	assert.EqualValues(t, 2, n) // val1, val2
 
+	// the cursor sat on val1, which is now gone: it must re-anchor on the key's
+	// first survivor rather than keep pointing at a deleted entry
+	k, v, err := c.Current()
+	require.NoError(t, err)
+	assert.Equal(t, []byte("key1"), k)
+	assert.Equal(t, []byte("val3"), v)
+
 	// key1 keeps val3 only; key2 is untouched
-	k, v, err := c.First()
+	k, v, err = c.First()
 	require.NoError(t, err)
 	assert.Equal(t, []byte("key1"), k)
 	assert.Equal(t, []byte("val3"), v)
