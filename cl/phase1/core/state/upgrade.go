@@ -17,8 +17,9 @@
 package state
 
 import (
+	"cmp"
 	"fmt"
-	"sort"
+	"slices"
 
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
@@ -200,14 +201,12 @@ func (b *CachingBeaconState) UpgradeToElectra() error {
 		return true
 	})
 	// sort
-	sort.Slice(validators, func(i, j int) bool {
-		vi, vj := validators[i].validator, validators[j].validator
-		if vi.ActivationEligibilityEpoch() == vj.ActivationEligibilityEpoch() {
-			//  If eligibility epochs are equal, compare indices
-			return validators[i].index < validators[j].index
+	slices.SortFunc(validators, func(a, b tempValidator) int {
+		ae, be := a.validator.ActivationEligibilityEpoch(), b.validator.ActivationEligibilityEpoch()
+		if ae == be {
+			return cmp.Compare(a.index, b.index)
 		}
-		// Otherwise, sort by activationEligibilityEpoch
-		return vi.ActivationEligibilityEpoch() < vj.ActivationEligibilityEpoch()
+		return cmp.Compare(ae, be)
 	})
 
 	for _, v := range validators {

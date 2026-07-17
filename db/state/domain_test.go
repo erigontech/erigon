@@ -18,6 +18,7 @@ package state
 
 import (
 	"bytes"
+	"cmp"
 	"context"
 	"encoding/binary"
 	"encoding/hex"
@@ -30,7 +31,6 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
-	"sort"
 	"strconv"
 	"strings"
 	"testing"
@@ -1780,7 +1780,7 @@ func generateUpdates(r *rndGen, totalTx, keyTxsLimit uint64) []upd {
 		updates = append(updates, up)
 		usedTxNums[txNum] = true
 	}
-	sort.Slice(updates, func(i, j int) bool { return updates[i].txNum < updates[j].txNum })
+	slices.SortFunc(updates, func(a, b upd) int { return cmp.Compare(a.txNum, b.txNum) })
 
 	return updates
 }
