@@ -202,22 +202,18 @@ func (c *StateCache) GetAddrCodeHash(addr []byte) ([32]byte, bool) {
 	return cc.GetAddrCodeHash(addr)
 }
 
-func (c *StateCache) putAddrCodeHash(addr []byte, h [32]byte, txNum uint64) {
+// PutAddrCodeHashIfFresh conditionally fills a mapping from a current account snapshot.
+func (c *StateCache) PutAddrCodeHashIfFresh(addr []byte, h [32]byte, txNum, snapshotEnd uint64) {
 	cc, ok := c.caches[kv.CodeDomain].(*CodeCache)
 	if !ok {
 		return
 	}
-	cc.PutAddrCodeHash(addr, h, txNum)
-}
-
-// PutAddrCodeHashIfFresh conditionally fills a mapping from a current account snapshot.
-func (c *StateCache) PutAddrCodeHashIfFresh(addr []byte, h [32]byte, txNum, snapshotEnd uint64) {
 	c.admissionMu.RLock()
 	defer c.admissionMu.RUnlock()
 	if snapshotEnd < c.appliedEnd[kv.AccountsDomain] {
 		return
 	}
-	c.putAddrCodeHash(addr, h, txNum)
+	cc.PutAddrCodeHash(addr, h, txNum)
 }
 
 func (c *StateCache) deleteAddrCodeHash(addr []byte) {
