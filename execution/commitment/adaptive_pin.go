@@ -40,11 +40,11 @@ type AdaptivePinControllerConfig struct {
 func DefaultAdaptivePinControllerConfig() AdaptivePinControllerConfig {
 	return AdaptivePinControllerConfig{
 		PromoteThresholdMisses:    100,
-		MaxPromotedContracts:      8,
+		MaxPromotedContracts:      4,
 		DemoteCooldownBlocks:      5,
-		InitialViewBudgetBytes:    4 << 20,
-		ExtensionBudgetBytes:      8 << 20,
-		PerContractMaxBudgetBytes: 64 << 20,
+		InitialViewBudgetBytes:    4 * 1024 * 1024,
+		ExtensionBudgetBytes:      8 * 1024 * 1024,
+		PerContractMaxBudgetBytes: 32 * 1024 * 1024,
 	}
 }
 
