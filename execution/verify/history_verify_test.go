@@ -51,6 +51,7 @@ func TestHistoryVerification_SimpleBlocks(t *testing.T) {
 		execmoduletester.WithKey(key),
 		execmoduletester.WithStepSize(stepSize),
 		execmoduletester.WithoutExperimentalBAL(),
+		execmoduletester.WithAmsterdamBuilderContracts(),
 	)
 	ctx := context.Background()
 	logger := log.New()
@@ -137,6 +138,7 @@ func TestHistoryVerification_WithUserTransactions(t *testing.T) {
 		execmoduletester.WithKey(key),
 		execmoduletester.WithStepSize(stepSize),
 		execmoduletester.WithoutExperimentalBAL(),
+		execmoduletester.WithAmsterdamBuilderContracts(),
 	)
 	ctx := context.Background()
 	logger := log.New()
