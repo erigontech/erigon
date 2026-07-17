@@ -62,3 +62,49 @@ func benchmarkDrain(b *testing.B, leafDepth, stepBudget int) {
 
 func BenchmarkPreloadDrain_d67(b *testing.B) { benchmarkDrain(b, 67, 1<<20) }
 func BenchmarkPreloadDrain_d68(b *testing.B) { benchmarkDrain(b, 68, 2<<20) }
+
+// randomFrontier builds n unsorted pathKeys with distinct deep (depth-69) nibble
+// paths under the contract root, so the sort has real work to do.
+func randomFrontier(hash []byte, n int) []pathKey {
+	root := hexNibbles(hash) // 64 nibbles
+	f := make([]pathKey, n)
+	seed := uint64(88172645463325252)
+	for i := range f {
+		path := make([]byte, 69)
+		copy(path, root)
+		for d := 64; d < 69; d++ {
+			seed ^= seed << 13
+			seed ^= seed >> 7
+			seed ^= seed << 17
+			path[d] = byte(seed & 0x0f)
+		}
+		f[i] = toPathKey(path)
+	}
+	return f
+}
+
+// benchmarkSortPartition isolates sortAndPartitionFrontier (the per-wave sort +
+// db/file split) at frontier size n — the production hot spot (~1M entries).
+func benchmarkSortPartition(b *testing.B, n int) {
+	hash := make([]byte, 32)
+	for i := range hash {
+		hash[i] = 0x42
+	}
+	base := randomFrontier(hash, n)
+	dbBranches := map[string][]byte{} // all file misses
+	p, err := NewContractTrunkPreloadParallel(hash)
+	if err != nil {
+		b.Fatal(err)
+	}
+	b.ReportAllocs()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		b.StopTimer()
+		p.frontier = append(p.frontier[:0], base...) // fresh unsorted copy each iter
+		b.StartTimer()
+		p.sortAndPartitionFrontier(dbBranches)
+	}
+}
+
+func BenchmarkSortAndPartitionFrontier_65k(b *testing.B) { benchmarkSortPartition(b, 65536) }
+func BenchmarkSortAndPartitionFrontier_1M(b *testing.B)  { benchmarkSortPartition(b, 1<<20) }
