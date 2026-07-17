@@ -74,7 +74,8 @@ type ContractTrunkPreloadParallel struct {
 	contractHash    []byte
 	frontier        []pathKey // paths to process at depth = nextDepth
 	pendingChildren []pathKey // accumulated children of pinned items at depth = nextDepth+1
-	nextDepth       int       // depth of the next wave (starts at 64)
+
+	nextDepth       int // depth of the next wave (starts at 64)
 	pinnedPrefixes  [][]byte
 	pinned          int
 	usedBytes       int
@@ -84,6 +85,13 @@ type ContractTrunkPreloadParallel struct {
 	// later unwind below that point evicts them via the BranchCache floor (a
 	// txN=0 pin would escape it and be served stale after a deep unwind).
 	pinTxNum uint64
+
+	// Reusable per-wave partition scratch. Contents are copied into the next
+	// frontier before the buffers are reused, so retaining the grown backing
+	// across Run calls avoids re-allocating them for every budget-limited step.
+	scratchDbHits   []pathKey
+	scratchDbVals   [][]byte
+	scratchFileMiss []pathKey
 }
 
 // NewContractTrunkPreloadParallel seeds a preload at depth 64 (storage subtree root).
@@ -99,6 +107,32 @@ func NewContractTrunkPreloadParallel(contractHash []byte) (*ContractTrunkPreload
 		nextDepth:       64,
 		maxDepthReached: 64,
 	}, nil
+}
+
+// sortAndPartitionFrontier sorts the frontier ascending by key, then splits it
+// into DB-shadowed hits (with values and total cost) and file misses. Returned
+// slices alias reusable scratch and are valid until the next call. Kept as its
+// own method so profiles attribute the sort + partition cost here, not to Run.
+func (p *ContractTrunkPreloadParallel) sortAndPartitionFrontier(dbBranches map[string][]byte) (dbHits []pathKey, dbVals [][]byte, fileMiss []pathKey, dbHitsBytes int) {
+	t := time.Now()
+	slices.SortFunc(p.frontier, func(a, b pathKey) int { return bytes.Compare(a.key, b.key) })
+
+	dbHits = p.scratchDbHits[:0]
+	dbVals = p.scratchDbVals[:0]
+	fileMiss = p.scratchFileMiss[:0]
+	for i := range p.frontier {
+		pk := &p.frontier[i]
+		if v, ok := dbBranches[string(pk.key)]; ok {
+			dbHits = append(dbHits, *pk)
+			dbVals = append(dbVals, v)
+			dbHitsBytes += estimatedEntryCost(pk.key, v)
+		} else {
+			fileMiss = append(fileMiss, *pk)
+		}
+	}
+	p.scratchDbHits, p.scratchDbVals, p.scratchFileMiss = dbHits, dbVals, fileMiss
+	log.Warn("[dbg] sortAndPartitionFrontier", "l", len(p.frontier), "took", time.Since(t))
+	return dbHits, dbVals, fileMiss, dbHitsBytes
 }
 
 // Run advances the wave-BFS until stepBudgetBytes is exhausted, the frontier
@@ -167,24 +201,7 @@ func (p *ContractTrunkPreloadParallel) Run(
 
 	for !budgetHit && p.nextDepth <= maxStorageTrunkDepth && len(p.frontier) > 0 {
 		depth := p.nextDepth
-		// Ascending key order so the file-batch partition is contiguous-in-file.
-		t := time.Now()
-		slices.SortFunc(p.frontier, func(a, b pathKey) int { return bytes.Compare(a.key, b.key) })
-		log.Warn("[dbg] sort", "l", len(p.frontier), "took", time.Since(t))
-
-		var dbHits []pathKey
-		var dbVals [][]byte
-		var fileMiss []pathKey
-		dbHitsBytes := 0
-		for _, pk := range p.frontier {
-			if v, ok := dbBranches[string(pk.key)]; ok {
-				dbHits = append(dbHits, pk)
-				dbVals = append(dbVals, v)
-				dbHitsBytes += estimatedEntryCost(pk.key, v)
-			} else {
-				fileMiss = append(fileMiss, pk)
-			}
-		}
+		dbHits, dbVals, fileMiss, dbHitsBytes := p.sortAndPartitionFrontier(dbBranches)
 
 		// Cap the file fetch by what the budget can absorb after dbHits.
 		var fileMissDeferred []pathKey
