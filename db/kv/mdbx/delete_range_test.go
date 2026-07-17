@@ -368,3 +368,82 @@ func TestKVDeleteRange(t *testing.T) {
 		require.Zero(t, countTable(t, db))
 	})
 }
+
+func TestMdbxDeleteCurrentMultiValBefore(t *testing.T) {
+	const keys, dups = 100, 8 // key i holds values 0..7
+
+	deleteBefore := func(t *testing.T, db kv.RwDB, key uint64, v []byte) uint64 {
+		t.Helper()
+		var n uint64
+		require.NoError(t, db.Update(t.Context(), func(tx kv.RwTx) error {
+			c, err := tx.RwCursorDupSort(deleteRangeTable)
+			if err != nil {
+				return err
+			}
+			defer c.Close()
+			k, _, err := c.SeekExact(u64tob(key))
+			require.NoError(t, err)
+			require.NotNil(t, k)
+			n, err = c.DeleteCurrentMultiValBefore(v)
+			return err
+		}))
+		return n
+	}
+
+	countDupsOf := func(t *testing.T, db kv.RwDB, key uint64) uint64 {
+		t.Helper()
+		var n uint64
+		require.NoError(t, db.View(t.Context(), func(tx kv.Tx) error {
+			c, err := tx.CursorDupSort(deleteRangeTable)
+			require.NoError(t, err)
+			defer c.Close()
+			k, _, err := c.SeekExact(u64tob(key))
+			require.NoError(t, err)
+			if k == nil {
+				return nil
+			}
+			n, err = c.CountDuplicates()
+			return err
+		}))
+		return n
+	}
+
+	t.Run("cuts values < v of the current key, leaves neighbours alone", func(t *testing.T) {
+		db := newFilledDupSortDB(t, keys, dups)
+		require.EqualValues(t, 3, deleteBefore(t, db, 5, u64tob(3))) // values 0,1,2
+		require.EqualValues(t, keys*dups-3, countTable(t, db))
+		require.EqualValues(t, dups-3, countDupsOf(t, db, 5))
+		require.EqualValues(t, dups, countDupsOf(t, db, 4)) // neighbouring keys untouched
+		require.EqualValues(t, dups, countDupsOf(t, db, 6))
+
+		require.NoError(t, db.View(t.Context(), func(tx kv.Tx) error {
+			c, err := tx.CursorDupSort(deleteRangeTable)
+			require.NoError(t, err)
+			defer c.Close()
+			v, err := c.SeekBothRange(u64tob(5), u64tob(0))
+			require.NoError(t, err)
+			require.Equal(t, u64tob(3), v) // exclusive bound survives, and is now first
+			return nil
+		}))
+	})
+
+	t.Run("v==nil removes every value of the key", func(t *testing.T) {
+		db := newFilledDupSortDB(t, keys, dups)
+		require.EqualValues(t, dups, deleteBefore(t, db, 5, nil))
+		require.Zero(t, countDupsOf(t, db, 5))
+		require.EqualValues(t, keys*dups-dups, countTable(t, db))
+	})
+
+	t.Run("v past the last value removes every value of the key", func(t *testing.T) {
+		db := newFilledDupSortDB(t, keys, dups)
+		require.EqualValues(t, dups, deleteBefore(t, db, 5, u64tob(999)))
+		require.Zero(t, countDupsOf(t, db, 5))
+		require.EqualValues(t, dups, countDupsOf(t, db, 4))
+	})
+
+	t.Run("v==first value deletes nothing", func(t *testing.T) {
+		db := newFilledDupSortDB(t, keys, dups)
+		require.Zero(t, deleteBefore(t, db, 5, u64tob(0)))
+		require.EqualValues(t, keys*dups, countTable(t, db))
+	})
+}

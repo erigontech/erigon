@@ -800,3 +800,39 @@ func TestMemStore_ConcurrentDupSort(t *testing.T) {
 
 	wg.Wait()
 }
+
+func TestMemStore_DupSortDeleteCurrentMultiValBefore(t *testing.T) {
+	s := newMemStore()
+	table := kv.TblAccountVals
+
+	for _, v := range []string{"val1", "val2", "val3"} {
+		require.NoError(t, s.Put(table, []byte("key1"), []byte(v)))
+	}
+	require.NoError(t, s.Put(table, []byte("key2"), []byte("val1")))
+
+	c := s.newCursor(table)
+	defer c.Close()
+
+	k, _, err := c.SeekExact([]byte("key1"))
+	require.NoError(t, err)
+	require.NotNil(t, k)
+
+	n, err := c.DeleteCurrentMultiValBefore([]byte("val3"))
+	require.NoError(t, err)
+	assert.EqualValues(t, 2, n) // val1, val2
+
+	// key1 keeps val3 only; key2 is untouched
+	k, v, err := c.First()
+	require.NoError(t, err)
+	assert.Equal(t, []byte("key1"), k)
+	assert.Equal(t, []byte("val3"), v)
+
+	k, v, err = c.Next()
+	require.NoError(t, err)
+	assert.Equal(t, []byte("key2"), k)
+	assert.Equal(t, []byte("val1"), v)
+
+	k, _, err = c.Next()
+	require.NoError(t, err)
+	assert.Nil(t, k)
+}
