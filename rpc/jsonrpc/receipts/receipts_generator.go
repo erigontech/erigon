@@ -211,6 +211,7 @@ type PostStateInfo struct {
 }
 
 func (g *Generator) GetReceipt(ctx context.Context, cfg *chain.Config, tx kv.TemporalTx, header *types.Header, txn types.Transaction, index int, txNum uint64, postState *PostStateInfo) (_ *types.Receipt, err error) {
+	tx = g.filters.WithTemporalOverlay(tx)
 	blockHash := header.Hash()
 	blockNum := header.Number.Uint64()
 	txnHash := txn.Hash()
@@ -450,6 +451,7 @@ func (g *Generator) GetReceipt(ctx context.Context, cfg *chain.Config, tx kv.Tem
 }
 
 func (g *Generator) GetReceipts(ctx context.Context, cfg *chain.Config, tx kv.TemporalTx, block *types.Block, opts eth.ReceiptsOpts) (_ types.Receipts, err error) {
+	tx = g.filters.WithTemporalOverlay(tx)
 	blockHash := block.Hash()
 	blockNum := block.NumberU64()
 
@@ -680,6 +682,7 @@ func (g *Generator) assertEqualReceipts(fromExecution, fromDB *types.Receipt) {
 }
 
 func (g *Generator) GetReceiptsGasUsed(ctx context.Context, tx kv.TemporalTx, block *types.Block, txNumsReader rawdbv3.TxNumsReader) (types.Receipts, error) {
+	tx = g.filters.WithTemporalOverlay(tx)
 	if receipts, ok := g.receiptsCache.Get(block.Hash()); ok {
 		return receipts, nil
 	}
