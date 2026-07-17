@@ -1699,7 +1699,7 @@ func (sdb *IntraBlockState) getStateObject(addr accounts.Address, recordRead boo
 		// optimisation in SetCode to incorrectly delete code writes when
 		// clearing a delegation that was set by a prior transaction in the
 		// same block.
-		codeHash := accounts.InternCodeHash(crypto.HashData(code))
+		codeHash := accounts.InternCodeHash(crypto.Keccak256Hash(code))
 		obj.code = accounts.Code{Hash: codeHash, Bytes: code}
 		if codeHash != obj.data.CodeHash {
 			obj.data.CodeHash = codeHash
@@ -2363,7 +2363,7 @@ func (sdb *IntraBlockState) Prepare(rules *chain.Rules, sender, coinbase account
 		al := &sdb.accessList
 
 		al.AddAddress(sender)
-		if !rules.IsAmsterdam && !dst.IsNil() {
+		if !dst.IsNil() {
 			al.AddAddress(dst)
 			// If it's a create-tx, the destination will be added inside evm.create
 		}
