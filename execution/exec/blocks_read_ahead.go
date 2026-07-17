@@ -79,7 +79,7 @@ func (bra *BlockReadAheader) SetStateCache(sc *cache.StateCache) {
 //
 // Code reads also populate the content-addressed and size-cache layers.
 type cachePopulatingGetter struct {
-	g          kv.TemporalGetter
+	kv.TemporalGetter
 	sc         *cache.StateCache
 	stepSize   uint64 // for the read txNum upper bound (last txNum of the read's step)
 	visibleEnd func(kv.Domain) (uint64, bool)
@@ -90,11 +90,11 @@ func readAheadGetter(ttx kv.TemporalTx, sc *cache.StateCache) kv.TemporalGetter 
 		return ttx
 	}
 	debug := ttx.Debug()
-	return &cachePopulatingGetter{g: ttx, sc: sc, stepSize: debug.StepSize(), visibleEnd: debug.DomainVisibleEnd}
+	return &cachePopulatingGetter{TemporalGetter: ttx, sc: sc, stepSize: debug.StepSize(), visibleEnd: debug.DomainVisibleEnd}
 }
 
 func (cpg *cachePopulatingGetter) GetLatest(name kv.Domain, k []byte) ([]byte, kv.Step, error) {
-	v, step, err := cpg.g.GetLatest(name, k)
+	v, step, err := cpg.TemporalGetter.GetLatest(name, k)
 	if err == nil && cpg.sc != nil && cpg.visibleEnd != nil {
 		if snapshotEnd, ok := cpg.visibleEnd(name); ok {
 			readTxNum := (uint64(step)+1)*cpg.stepSize - 1
@@ -102,14 +102,6 @@ func (cpg *cachePopulatingGetter) GetLatest(name kv.Domain, k []byte) ([]byte, k
 		}
 	}
 	return v, step, err
-}
-
-func (cpg *cachePopulatingGetter) HasPrefix(name kv.Domain, prefix []byte) ([]byte, []byte, bool, error) {
-	return cpg.g.HasPrefix(name, prefix)
-}
-
-func (cpg *cachePopulatingGetter) StepsInFiles(entitySet ...kv.Domain) kv.Step {
-	return cpg.g.StepsInFiles(entitySet...)
 }
 
 func (bra *BlockReadAheader) AddHeaderAndBody(ctx context.Context, db kv.RoDB, header *types.Header, body *types.Body) {
