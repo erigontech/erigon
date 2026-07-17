@@ -23,10 +23,10 @@ import (
 	"fmt"
 	"math"
 
-	keccak "github.com/erigontech/fastkeccak"
 	"github.com/holiman/uint256"
 
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/execution/protocol/misc"
@@ -361,17 +361,8 @@ func opKeccak256(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error
 	offset, size := scope.Stack.pop(), scope.Stack.peek()
 	data := scope.Memory.GetPtr(offset.Uint64(), size.Uint64())
 
-	if evm.hasher == nil {
-		evm.hasher = keccak.NewFastKeccak()
-	} else {
-		evm.hasher.Reset()
-	}
-	evm.hasher.Write(data)
-	if _, err := evm.hasher.Read(evm.hasherBuf[:]); err != nil {
-		panic(err)
-	}
-
-	size.SetBytes(evm.hasherBuf[:])
+	hash := crypto.Keccak256Hash(data)
+	size.SetBytes(hash[:])
 	return pc, nil, nil
 }
 
