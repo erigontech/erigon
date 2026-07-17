@@ -85,15 +85,12 @@ type cachePopulatingGetter struct {
 	visibleEnd func(kv.Domain) (uint64, bool)
 }
 
-func newCachePopulatingGetter(ttx kv.TemporalTx, sc *cache.StateCache) *cachePopulatingGetter {
-	return &cachePopulatingGetter{g: ttx, sc: sc, stepSize: ttx.Debug().StepSize(), visibleEnd: ttx.Debug().DomainVisibleEnd}
-}
-
 func readAheadGetter(ttx kv.TemporalTx, sc *cache.StateCache) kv.TemporalGetter {
 	if sc == nil {
 		return ttx
 	}
-	return newCachePopulatingGetter(ttx, sc)
+	debug := ttx.Debug()
+	return &cachePopulatingGetter{g: ttx, sc: sc, stepSize: debug.StepSize(), visibleEnd: debug.DomainVisibleEnd}
 }
 
 func (cpg *cachePopulatingGetter) GetLatest(name kv.Domain, k []byte) ([]byte, kv.Step, error) {
