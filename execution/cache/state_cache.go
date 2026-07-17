@@ -154,19 +154,11 @@ func (c *StateCache) GetCodeByHash(codeHash []byte) ([]byte, bool) {
 // codeHash-keyed codeHashToCode layer. Callers should prefer this over Put when they
 // have the codeHash from the account record — avoids a redundant keccak.
 func (c *StateCache) PutCodeWithHash(addr, code, codeHash []byte, txNum uint64) {
-	c.putCodeWithHash(addr, code, codeHash, txNum, true)
-}
-
-func (c *StateCache) putCodeWithHash(addr, code, codeHash []byte, txNum uint64, overwrite bool) {
 	cc, ok := c.caches[kv.CodeDomain].(*CodeCache)
 	if !ok {
 		return
 	}
-	if overwrite {
-		cc.PutWithCodeHash(addr, common.Copy(code), codeHash, txNum)
-	} else {
-		cc.PutWithCodeHashIfAbsent(addr, common.Copy(code), codeHash, txNum)
-	}
+	cc.PutWithCodeHash(addr, common.Copy(code), codeHash, txNum)
 }
 
 // GetCodeSizeByHash returns the size of code by its Ethereum codeHash
@@ -250,7 +242,9 @@ func (c *StateCache) FillIfFresh(domain kv.Domain, key []byte, value []byte, rea
 	}
 
 	if domain == kv.CodeDomain {
-		c.putCodeWithHash(key, value, codeHash, readTxNum, false)
+		if codeCache, ok := cache.(*CodeCache); ok {
+			codeCache.PutWithCodeHashIfAbsent(key, common.Copy(value), codeHash, readTxNum)
+		}
 		return
 	}
 	if len(value) == 0 {
