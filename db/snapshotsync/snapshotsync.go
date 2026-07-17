@@ -279,7 +279,7 @@ func getMaxStepRangeInSnapshots(preverified snapcfg.Preverified) (uint64, error)
 			continue
 		}
 		name := strings.TrimPrefix(p.Name, "domain/")
-		versionString := strings.Split(name, "-")[0]
+		versionString, _, _ := strings.Cut(name, "-")
 		name = strings.TrimPrefix(name, versionString)
 
 		rangeString := strings.Split(name, ".")[1]

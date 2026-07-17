@@ -83,9 +83,9 @@ func (f *ForwardBeaconDownloader) SetHTTPFallbackURL(checkpointSyncURL string) {
 	if checkpointSyncURL == "" {
 		return
 	}
-	idx := strings.Index(checkpointSyncURL, "/eth/")
-	if idx >= 0 {
-		f.httpFallbackURL = checkpointSyncURL[:idx]
+	before, _, found := strings.Cut(checkpointSyncURL, "/eth/")
+	if found {
+		f.httpFallbackURL = before
 	} else {
 		// Accept bare base URL (no /eth/ path).
 		f.httpFallbackURL = strings.TrimRight(checkpointSyncURL, "/")
