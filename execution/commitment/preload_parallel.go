@@ -73,7 +73,8 @@ type ContractTrunkPreloadParallel struct {
 	contractHash    []byte
 	frontier        []pathKey // paths to process at depth = nextDepth
 	pendingChildren []pathKey // accumulated children of pinned items at depth = nextDepth+1
-	nextDepth       int       // depth of the next wave (starts at 64)
+
+	nextDepth       int // depth of the next wave (starts at 64)
 	pinnedPrefixes  [][]byte
 	pinned          int
 	usedBytes       int
@@ -83,6 +84,13 @@ type ContractTrunkPreloadParallel struct {
 	// later unwind below that point evicts them via the BranchCache floor (a
 	// txN=0 pin would escape it and be served stale after a deep unwind).
 	pinTxNum uint64
+
+	// Reusable per-wave partition scratch. Contents are copied into the next
+	// frontier before the buffers are reused, so retaining the grown backing
+	// across Run calls avoids re-allocating them for every budget-limited step.
+	scratchDbHits   []pathKey
+	scratchDbVals   [][]byte
+	scratchFileMiss []pathKey
 }
 
 // NewContractTrunkPreloadParallel seeds a preload at depth 64 (storage subtree root).
@@ -98,6 +106,30 @@ func NewContractTrunkPreloadParallel(contractHash []byte) (*ContractTrunkPreload
 		nextDepth:       64,
 		maxDepthReached: 64,
 	}, nil
+}
+
+// sortAndPartitionFrontier sorts the frontier ascending by key, then splits it
+// into DB-shadowed hits (with values and total cost) and file misses. Returned
+// slices alias reusable scratch and are valid until the next call. Kept as its
+// own method so profiles attribute the sort + partition cost here, not to Run.
+func (p *ContractTrunkPreloadParallel) sortAndPartitionFrontier(dbBranches map[string][]byte) (dbHits []pathKey, dbVals [][]byte, fileMiss []pathKey, dbHitsBytes int) {
+	slices.SortFunc(p.frontier, func(a, b pathKey) int { return bytes.Compare(a.key, b.key) })
+
+	dbHits = p.scratchDbHits[:0]
+	dbVals = p.scratchDbVals[:0]
+	fileMiss = p.scratchFileMiss[:0]
+	for i := range p.frontier {
+		pk := &p.frontier[i]
+		if v, ok := dbBranches[string(pk.key)]; ok {
+			dbHits = append(dbHits, *pk)
+			dbVals = append(dbVals, v)
+			dbHitsBytes += estimatedEntryCost(pk.key, v)
+		} else {
+			fileMiss = append(fileMiss, *pk)
+		}
+	}
+	p.scratchDbHits, p.scratchDbVals, p.scratchFileMiss = dbHits, dbVals, fileMiss
+	return dbHits, dbVals, fileMiss, dbHitsBytes
 }
 
 // Run advances the wave-BFS until stepBudgetBytes is exhausted, the frontier
@@ -166,22 +198,7 @@ func (p *ContractTrunkPreloadParallel) Run(
 
 	for !budgetHit && p.nextDepth <= maxStorageTrunkDepth && len(p.frontier) > 0 {
 		depth := p.nextDepth
-		// Ascending key order so the file-batch partition is contiguous-in-file.
-		slices.SortFunc(p.frontier, func(a, b pathKey) int { return bytes.Compare(a.key, b.key) })
-
-		var dbHits []pathKey
-		var dbVals [][]byte
-		var fileMiss []pathKey
-		dbHitsBytes := 0
-		for _, pk := range p.frontier {
-			if v, ok := dbBranches[string(pk.key)]; ok {
-				dbHits = append(dbHits, pk)
-				dbVals = append(dbVals, v)
-				dbHitsBytes += estimatedEntryCost(pk.key, v)
-			} else {
-				fileMiss = append(fileMiss, pk)
-			}
-		}
+		dbHits, dbVals, fileMiss, dbHitsBytes := p.sortAndPartitionFrontier(dbBranches)
 
 		// Cap the file fetch by what the budget can absorb after dbHits.
 		var fileMissDeferred []pathKey
@@ -254,16 +271,16 @@ func (p *ContractTrunkPreloadParallel) Run(
 	queueEmpty = (len(p.frontier) == 0 && len(p.pendingChildren) == 0) || p.nextDepth > maxStorageTrunkDepth
 	if logger != nil && (chunkPinned > 0 || queueEmpty) {
 		logger.Info("[trunk-preload-parallel] step",
-			"contract_hash", fmt.Sprintf("%x", p.contractHash),
 			"step_budget_mb", stepBudgetBytes/(1<<20),
-			"used_mb_total", p.usedBytes/(1<<20),
+			"used_mb", p.usedBytes/(1<<20),
 			"pinned_this_step", chunkPinned,
-			"pinned_total", p.pinned,
-			"db_hits_total", p.dbHitsPinned,
+			"pinned", p.pinned,
+			"db_hist", p.dbHitsPinned,
 			"max_depth_reached", p.maxDepthReached,
 			"queue_empty", queueEmpty,
 			"next_depth", p.nextDepth,
-			"frontier_size", len(p.frontier))
+			"frontier_size", len(p.frontier),
+			"contract_hash", fmt.Sprintf("%x", p.contractHash))
 	}
 	return chunkPinned, queueEmpty, nil
 }
