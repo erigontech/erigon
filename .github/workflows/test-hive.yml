@@ -19,6 +19,7 @@ jobs:
       && !contains(github.event.pull_request.labels.*.name, 'skip-uncaching')) }}
     runs-on:
       group: hive
+    timeout-minutes: 60
     strategy:
       # In merge_group: cancel sibling shards on first failure so ci-gate's
       # `needs` reach terminal state quickly and the broken PR can be evicted.
@@ -68,11 +69,11 @@ jobs:
             exec_mode: parallel
           - sim: ethereum/rpc-compat
             sim-limit: ".*"
-            max-allowed-failures: 7
+            max-allowed-failures: 0
             exec_mode: serial
           - sim: ethereum/rpc-compat
             sim-limit: ".*"
-            max-allowed-failures: 7
+            max-allowed-failures: 0
             exec_mode: parallel
           - sim: devp2p
             sim-limit: eth
@@ -89,6 +90,7 @@ jobs:
         uses: actions/checkout@v7
         with:
           path: erigon-full
+          persist-credentials: false
 
       - name: Read pinned versions
         id: hive-version
@@ -103,6 +105,7 @@ jobs:
           # version hive and update periodically/on-demand to prevent upstream changes in Hive affecting us with red CI
           ref: ${{ steps.hive-version.outputs.ref }}
           path: hive
+          persist-credentials: false
 
       - name: Setup go env and cache
         uses: actions/setup-go@v6

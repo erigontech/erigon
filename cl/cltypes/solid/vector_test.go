@@ -116,7 +116,7 @@ func TestVectorSSZ_Clear(t *testing.T) {
 	vec.Clear()
 
 	// Verify all values are reset to zero
-	for i := 0; i < size; i++ {
+	for i := range size {
 		retrieved := vec.Get(i)
 		assert.Equal(t, uint64(0), retrieved.Epoch)
 		assert.Equal(t, common.Hash{}, retrieved.Root)
@@ -141,7 +141,7 @@ func TestVectorSSZ_CopyTo(t *testing.T) {
 	vec1.CopyTo(vec2)
 
 	// Verify values are copied
-	for i := 0; i < 2; i++ {
+	for i := range 2 {
 		assert.Equal(t, vec1.Get(i).Epoch, vec2.Get(i).Epoch)
 		assert.Equal(t, vec1.Get(i).Root, vec2.Get(i).Root)
 	}
@@ -163,7 +163,7 @@ func TestVectorSSZ_Range(t *testing.T) {
 	vec := NewVectorSSZ[*Checkpoint](size)
 
 	// Set some values
-	for i := 0; i < size; i++ {
+	for i := range size {
 		cp := &Checkpoint{
 			Epoch: uint64(i * 100),
 			Root:  common.HexToHash(fmt.Sprintf("0x%d", i)),
@@ -196,7 +196,7 @@ func TestVectorSSZ_EncodeDecodeSSZ(t *testing.T) {
 	vec := NewVectorSSZ[*Checkpoint](size)
 
 	// Set some values
-	for i := 0; i < size; i++ {
+	for i := range size {
 		cp := &Checkpoint{
 			Epoch: uint64(i * 100),
 			Root:  common.HexToHash(fmt.Sprintf("0x%d", i)),
@@ -215,7 +215,7 @@ func TestVectorSSZ_EncodeDecodeSSZ(t *testing.T) {
 	require.NoError(t, err)
 
 	// Verify decoded values match original
-	for i := 0; i < size; i++ {
+	for i := range size {
 		original := vec.Get(i)
 		decoded := vec2.Get(i)
 		assert.Equal(t, original.Epoch, decoded.Epoch)
@@ -449,7 +449,7 @@ func TestVectorSSZ_DynamicElements_Clear(t *testing.T) {
 	vec.Clear()
 
 	// All items should be reset to freshly cloned empty attestations
-	for i := 0; i < size; i++ {
+	for i := range size {
 		retrieved := vec.Get(i)
 		assert.NotNil(t, retrieved)
 		// After Clear, items are freshly cloned (Clone() returns &Attestation{})
@@ -465,7 +465,7 @@ func TestVectorSSZ_DynamicElements_Range(t *testing.T) {
 	vec := NewVectorSSZ[*Attestation](size)
 
 	// Set items
-	for i := 0; i < size; i++ {
+	for i := range size {
 		vec.Set(i, newTestAttestation(uint64(i*100), uint64(i), 10))
 	}
 

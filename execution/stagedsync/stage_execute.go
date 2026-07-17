@@ -31,13 +31,13 @@ import (
 	"github.com/erigontech/erigon/common/length"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/datadir"
+	"github.com/erigontech/erigon/db/dbservices"
 	"github.com/erigontech/erigon/db/etl"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/prune"
 	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/db/rawdb/rawdbhelpers"
 	"github.com/erigontech/erigon/db/rawdb/rawtemporaldb"
-	"github.com/erigontech/erigon/db/services"
 	"github.com/erigontech/erigon/db/state"
 	"github.com/erigontech/erigon/db/state/changeset"
 	"github.com/erigontech/erigon/db/state/execctx"
@@ -70,7 +70,7 @@ type ExecuteBlockCfg struct {
 	vmConfig      *vm.Config
 	badBlockHalt  bool
 	stateStream   bool
-	blockReader   services.FullBlockReader
+	blockReader   dbservices.FullBlockReader
 	author        accounts.Address
 	// last valid number of the stage
 
@@ -95,7 +95,7 @@ func StageExecuteBlocksCfg(
 	badBlockHalt bool,
 
 	dirs datadir.Dirs,
-	blockReader services.FullBlockReader,
+	blockReader dbservices.FullBlockReader,
 	genesis *types.Genesis,
 	syncCfg ethconfig.Sync,
 	experimentalBAL bool,
@@ -132,7 +132,7 @@ func (cfg ExecuteBlockCfg) ChainConfig() *chain.Config { return cfg.chainConfig 
 func (cfg ExecuteBlockCfg) IsExperimentalBAL() bool { return cfg.experimentalBAL }
 
 // BlockReader returns the block reader.
-func (cfg ExecuteBlockCfg) BlockReader() services.FullBlockReader { return cfg.blockReader }
+func (cfg ExecuteBlockCfg) BlockReader() dbservices.FullBlockReader { return cfg.blockReader }
 
 // DirsDataDir returns the data directory path.
 func (cfg ExecuteBlockCfg) DirsDataDir() string { return cfg.dirs.DataDir }
@@ -150,7 +150,7 @@ var ErrTooDeepUnwind = errors.New("too deep unwind")
 // findExecutedDiffsetAtHeight returns the diffset of the block executed at currentBlock.
 // When no canonical hash is recorded at that height (e.g. the block is no longer canonical
 // after a reorg) it falls back to the stored header.
-func findExecutedDiffsetAtHeight(ctx context.Context, rwTx kv.TemporalRwTx, br services.FullBlockReader, doms *execctx.SharedDomains, currentBlock uint64) (diffSet [kv.DomainLen][]kv.DomainEntryDiff, executedHash common.Hash, found bool, err error) {
+func findExecutedDiffsetAtHeight(ctx context.Context, rwTx kv.TemporalRwTx, br dbservices.FullBlockReader, doms *execctx.SharedDomains, currentBlock uint64) (diffSet [kv.DomainLen][]kv.DomainEntryDiff, executedHash common.Hash, found bool, err error) {
 	executedHash, ok, err := br.CanonicalHash(ctx, rwTx, currentBlock)
 	if err != nil {
 		return diffSet, common.Hash{}, false, err
@@ -244,7 +244,7 @@ func unwindExec3State(ctx context.Context,
 		//TODO: This is broken - becuase it does not handle the way value changes
 		// for previous steps are represented - they will pass nil values here
 		// which will look like a delete (12/11/25 - I've not fixed this as it has
-		// been here for a while and I'm not sure what if anything recieves these
+		// been here for a while and I'm not sure what if anything receives these
 		// changes at what it does with them)
 		if len(k) == length.Addr {
 			if len(v) > 0 {
@@ -476,7 +476,7 @@ func UnwindExecutionStage(u *UnwindState, s *StageState, doms *execctx.SharedDom
 	return nil
 }
 
-func PruneExecutionStage(ctx context.Context, s *PruneState, tx kv.RwTx, cfg ExecuteBlockCfg, timeout time.Duration, logger log.Logger) (err error) {
+func PruneExecutionStage(ctx context.Context, s *PruneState, tx kv.TemporalRwTx, cfg ExecuteBlockCfg, timeout time.Duration, logger log.Logger) (err error) {
 	if dbg.NoPrune() {
 		return s.Done(tx)
 	}
@@ -500,10 +500,7 @@ func PruneExecutionStage(ctx context.Context, s *PruneState, tx kv.RwTx, cfg Exe
 		if agg, ok := hasAgg.Agg().(*state.Aggregator); ok && agg != nil {
 			// Each 100 prunable steps adds 200ms. 1000-step backlog -> +2s.
 			extra := time.Duration(agg.MaxPrunableStepsBacklog()/100) * 200 * time.Millisecond
-			stagePruneTimeout = baseTimeout + extra
-			if stagePruneTimeout > maxTimeout {
-				stagePruneTimeout = maxTimeout
-			}
+			stagePruneTimeout = min(baseTimeout+extra, maxTimeout)
 		}
 	}
 	if timeout > 0 && timeout > stagePruneTimeout {
@@ -584,24 +581,23 @@ func PruneExecutionStage(ctx context.Context, s *PruneState, tx kv.RwTx, cfg Exe
 		}
 	}
 
-	agg := cfg.db.(state.HasAgg).Agg().(*state.Aggregator)
-	mxExecStepsInDB.Set(rawdbhelpers.IdxStepsCountV3(tx, agg.StepSize()) * 100)
+	mxExecStepsInDB.Set(rawdbhelpers.IdxStepsCountV3(tx, tx.Debug().StepSize()) * 100)
 
-	cutoffStep, cutoffOk, err := historyRetireCutoffStep(ctx, tx, cfg.blockReader, cfg.prune, agg.StepSize(), s.ForwardProgress)
+	cutoffs, err := historyRetireCutoffs(ctx, tx, cfg.blockReader, cfg.prune, s.ForwardProgress)
 	if err != nil {
 		return err
 	}
-	if cutoffOk {
+	if !cutoffs.IsNoop() {
 		if pruneTimeout := remainingPruneTimeout(); pruneTimeout > 0 {
-			logger.Debug(fmt.Sprintf("[%s] history file retirement cutoff", s.LogPrefix()), "cutoffStep", cutoffStep, "willRetire", cutoffOk)
-			if _, err := agg.RetireOldHistoryFiles(ctx, cutoffStep); err != nil {
+			logger.Debug(fmt.Sprintf("[%s] history file retirement", s.LogPrefix()), "cutoffs", cutoffs.String(tx.Debug().StepSize()))
+			if _, err := tx.Debug().Retire(ctx, cutoffs); err != nil {
 				return err
 			}
 		}
 	}
 
 	if pruneTimeout := remainingPruneTimeout(); pruneTimeout > 0 {
-		if _, err := tx.(kv.TemporalRwTx).PruneSmallBatches(ctx, pruneTimeout); err != nil {
+		if _, err := tx.PruneSmallBatches(ctx, pruneTimeout); err != nil {
 			return err
 		}
 	}
@@ -619,21 +615,48 @@ func PruneExecutionStage(ctx context.Context, s *PruneState, tx kv.RwTx, cfg Exe
 	return nil
 }
 
-// historyRetireCutoffStep converts the History retention distance into a step
-// boundary for RetireOldHistoryFiles. ok is false when there's nothing to
-// retire yet.
-func historyRetireCutoffStep(ctx context.Context, tx kv.Tx, blockReader services.FullBlockReader, pm prune.Mode, stepSize, forwardProgress uint64) (cutoffStep kv.Step, ok bool, err error) {
-	if !pm.History.Enabled() {
-		return 0, false, nil
-	}
-	cutoffBlock := pm.History.PruneTo(forwardProgress)
-	if cutoffBlock == 0 {
-		return 0, false, nil
-	}
-	cutoffTxNum, err := blockReader.TxnumReader().Min(ctx, tx, cutoffBlock)
+// historyRetireCutoffs maps the prune mode to per-domain retirement cutoffs, in
+// txNum — the aggregator floors each to its file step. CommitmentDomain uses its
+// own --prune.commitment-history.distance window; RCacheDomain follows the
+// general history window by default, or its own --prune.receipts.distance
+// window when set (keep-all retires nothing).
+func historyRetireCutoffs(ctx context.Context, tx kv.Tx, blockReader dbservices.FullBlockReader, pm prune.Mode, forwardProgress uint64) (cutoffs kv.RetireCutoffs, err error) {
+	historyTxNum, err := blockAmountRetireCutoffTxNum(ctx, tx, blockReader, pm.History, forwardProgress)
 	if err != nil {
-		return 0, false, err
+		return kv.RetireCutoffs{}, err
 	}
-	cutoffStep = kv.Step(cutoffTxNum / stepSize)
-	return cutoffStep, cutoffStep > 0, nil
+	commitmentTxNum, err := blockAmountRetireCutoffTxNum(ctx, tx, blockReader, pm.CommitmentHistoryAmount(), forwardProgress)
+	if err != nil {
+		return kv.RetireCutoffs{}, err
+	}
+	rcacheTxNum := historyTxNum
+	switch receipts := pm.ReceiptsAmount(); {
+	case receipts == prune.KeepAllReceiptsPruneMode:
+		rcacheTxNum = 0 // explicit keep-all overrides the follow-history default
+	case receipts.Enabled():
+		rcacheTxNum, err = blockAmountRetireCutoffTxNum(ctx, tx, blockReader, receipts, forwardProgress)
+		if err != nil {
+			return kv.RetireCutoffs{}, err
+		}
+	}
+	return kv.RetireCutoffs{
+		Default: historyTxNum,
+		PerDomain: map[kv.Domain]uint64{
+			kv.CommitmentDomain: commitmentTxNum,
+			kv.RCacheDomain:     rcacheTxNum,
+		},
+	}, nil
+}
+
+// blockAmountRetireCutoffTxNum resolves a retention window to the txNum below
+// which frozen files may be retired; 0 means retire nothing.
+func blockAmountRetireCutoffTxNum(ctx context.Context, tx kv.Tx, blockReader dbservices.FullBlockReader, ba prune.BlockAmount, forwardProgress uint64) (uint64, error) {
+	if ba == nil || !ba.Enabled() {
+		return 0, nil
+	}
+	cutoffBlock := ba.PruneTo(forwardProgress)
+	if cutoffBlock == 0 {
+		return 0, nil
+	}
+	return blockReader.TxnumReader().Min(ctx, tx, cutoffBlock)
 }

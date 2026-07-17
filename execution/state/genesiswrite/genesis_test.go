@@ -48,7 +48,6 @@ import (
 	"github.com/erigontech/erigon/execution/tests/testutil"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/accounts"
-	"github.com/erigontech/erigon/node/ethconfig"
 	"github.com/erigontech/erigon/rpc/rpchelper"
 )
 
@@ -326,10 +325,7 @@ func TestSetupGenesis(t *testing.T) {
 			tmpdir := t.TempDir()
 			dirs := datadir.New(tmpdir)
 			db := temporaltest.NewTestDB(t, dirs)
-			//cc := tool.ChainConfigFromDB(db)
-			freezingCfg := ethconfig.Defaults.Snapshot
-			//freezingCfg.ChainName = cc.ChainName //TODO: nil-pointer?
-			blockReader := freezeblocks.NewBlockReader(freezeblocks.NewRoSnapshots(freezingCfg, dirs.Snap, log.New()), nil)
+			blockReader := freezeblocks.NewBlockReader(db.(freezeblocks.HasBlockFiles).DebugBlockFiles(), nil)
 			config, genesis, err := test.fn(t, db, tmpdir)
 			// Check the return values.
 			if !reflect.DeepEqual(err, test.wantErr) {

@@ -159,7 +159,6 @@ func Test_HexPatriciaHashed_UniqueRepresentation2(t *testing.T) {
 
 	msOne := NewMockState(t)
 	msTwo := NewMockState(t)
-	ctx := context.Background()
 
 	plainKeys, updates := NewUpdateBuilder().
 		Balance("71562b71999873db5b286df957af199ec94617f7", 999860099).
@@ -172,42 +171,8 @@ func Test_HexPatriciaHashed_UniqueRepresentation2(t *testing.T) {
 	trieOne := NewHexPatriciaHashed(length.Addr, msOne, DefaultTrieConfig())
 	trieTwo := NewHexPatriciaHashed(length.Addr, msTwo, DefaultTrieConfig())
 
-	//trieOne.SetTraceWriter(os.Stderr)
-	//trieTwo.SetTraceWriter(os.Stderr)
-
-	var rSeq, rBatch []byte
-	{
-		fmt.Printf("1. Trie sequential update (%d updates)\n", len(updates))
-		for i := 0; i < len(updates); i++ {
-			err := msOne.applyPlainUpdates(plainKeys[i:i+1], updates[i:i+1])
-			require.NoError(t, err)
-
-			updsOne := WrapKeyUpdates(t, ModeDirect, KeyToHexNibbleHash, plainKeys[i:i+1], updates[i:i+1])
-
-			sequentialRoot, err := trieOne.Process(ctx, updsOne, "", nil, WarmupConfig{})
-			require.NoError(t, err)
-
-			t.Logf("sequential root @%d hash %x\n", i, sequentialRoot)
-			rSeq = common.Copy(sequentialRoot)
-
-			updsOne.Close()
-		}
-	}
-	{
-		err := msTwo.applyPlainUpdates(plainKeys, updates)
-		require.NoError(t, err)
-
-		updsTwo := WrapKeyUpdates(t, ModeDirect, KeyToHexNibbleHash, plainKeys, updates)
-
-		fmt.Printf("\n2. Trie batch update (%d updates)\n", len(updates))
-		rh, err := trieTwo.Process(ctx, updsTwo, "", nil, WarmupConfig{})
-		require.NoError(t, err)
-		t.Logf("batch of %d root hash %x\n", len(updates), rh)
-
-		updsTwo.Close()
-
-		rBatch = common.Copy(rh)
-	}
+	rSeq := processSeq(t, msOne, trieOne, plainKeys, updates)
+	rBatch := processBatch(t, msTwo, trieTwo, plainKeys, updates)
 	require.Equal(t, rSeq, rBatch, "sequential and batch root should match")
 
 	plainKeys, updates = NewUpdateBuilder().
@@ -217,44 +182,13 @@ func Test_HexPatriciaHashed_UniqueRepresentation2(t *testing.T) {
 		Balance("0000000000000000000000000000000000000000", 3000000000000138901).
 		Build()
 
-	{
-		fmt.Printf("\n3. Trie follow-up update (%d updates)\n", len(updates))
-		for i := 0; i < len(updates); i++ {
-			err := msOne.applyPlainUpdates(plainKeys[i:i+1], updates[i:i+1])
-			require.NoError(t, err)
-
-			updsOne := WrapKeyUpdates(t, ModeDirect, KeyToHexNibbleHash, plainKeys[i:i+1], updates[i:i+1])
-
-			sequentialRoot, err := trieOne.Process(ctx, updsOne, "", nil, WarmupConfig{})
-			require.NoError(t, err)
-
-			t.Logf("sequential root @%d hash %x\n", i, sequentialRoot)
-			rSeq = common.Copy(sequentialRoot)
-
-			updsOne.Close()
-		}
-	}
-	{
-		fmt.Printf("\n2. Trie batch update (%d updates)\n", len(updates))
-		err := msTwo.applyPlainUpdates(plainKeys, updates)
-		require.NoError(t, err)
-
-		updsTwo := WrapKeyUpdates(t, ModeDirect, KeyToHexNibbleHash, plainKeys, updates)
-
-		rh, err := trieTwo.Process(ctx, updsTwo, "", nil, WarmupConfig{})
-		require.NoError(t, err)
-		t.Logf("batch of %d root hash %x\n", len(updates), rh)
-
-		rBatch = common.Copy(rh)
-		updsTwo.Close()
-	}
+	rSeq = processSeq(t, msOne, trieOne, plainKeys, updates)
+	rBatch = processBatch(t, msTwo, trieTwo, plainKeys, updates)
 	require.Equal(t, rBatch, rSeq, "sequential and batch root should match")
 }
 
 func Test_HexPatriciaHashed_BrokenUniqueRepr(t *testing.T) {
 	t.Parallel()
-
-	ctx := context.Background()
 
 	uniqTest := func(t *testing.T, sortHashedKeys bool, trace bool) {
 		t.Helper()
@@ -262,27 +196,7 @@ func Test_HexPatriciaHashed_BrokenUniqueRepr(t *testing.T) {
 		stateSeq := NewMockState(t)
 		stateBatch := NewMockState(t)
 
-		plainKeys, updates := NewUpdateBuilder().
-			Balance("68ee6c0e9cdc73b2b2d52dbd79f19d24fe25e2f9", 4).
-			Balance("18f4dcf2d94402019d5b00f71d5f9d02e4f70e40", 900234).
-			Balance("8e5476fc5990638a4fb0b5fd3f61bb4b5c5f395e", 1233).
-			Storage("8e5476fc5990638a4fb0b5fd3f61bb4b5c5f395e", "24f3a02dc65eda502dbf75919e795458413d3c45b38bb35b51235432707900ed", "0401").
-			Balance("27456647f49ba65e220e86cba9abfc4fc1587b81", 065606).
-			Balance("b13363d527cdc18173c54ac5d4a54af05dbec22e", 4*1e17).
-			Balance("d995768ab23a0a333eb9584df006da740e66f0aa", 5).
-			Balance("eabf041afbb6c6059fbd25eab0d3202db84e842d", 6).
-			Balance("93fe03620e4d70ea39ab6e8c0e04dd0d83e041f2", 7).
-			Balance("ba7a3b7b095d3370c022ca655c790f0c0ead66f5", 100000).
-			Storage("ba7a3b7b095d3370c022ca655c790f0c0ead66f5", "0fa41642c48ecf8f2059c275353ce4fee173b3a8ce5480f040c4d2901603d14e", "050505").
-			Balance("a8f8d73af90eee32dc9729ce8d5bb762f30d21a4", 9*1e16).
-			Storage("93fe03620e4d70ea39ab6e8c0e04dd0d83e041f2", "de3fea338c95ca16954e80eb603cd81a261ed6e2b10a03d0c86cf953fe8769a4", "060606").
-			Balance("14c4d3bba7f5009599257d3701785d34c7f2aa27", 6*1e18).
-			Nonce("18f4dcf2d94402019d5b00f71d5f9d02e4f70e40", 169356).
-			Storage("a8f8d73af90eee32dc9729ce8d5bb762f30d21a4", "9f49fdd48601f00df18ebc29b1264e27d09cf7cbd514fe8af173e534db038033", "8989").
-			Storage("68ee6c0e9cdc73b2b2d52dbd79f19d24fe25e2f9", "d1664244ae1a8a05f8f1d41e45548fbb7aa54609b985d6439ee5fd9bb0da619f", "9898").
-			Balance("68ee6c0e9cdc73b2b2d52dbd79f19d24fe25e2f9", 4).
-			Storage("8e5476fc5990638a4fb0b5fd3f61bb4b5c5f395e", "24f3a02dc65eda502dbf75919e795458413d3c45b38bb35b51235432707900ed", "0401").
-			Build()
+		plainKeys, updates := fixtureBrokenUniqueRepr().Build()
 
 		keyLen := int16(20)
 		trieSequential := NewHexPatriciaHashed(keyLen, stateSeq, DefaultTrieConfig())
@@ -297,38 +211,8 @@ func Test_HexPatriciaHashed_BrokenUniqueRepr(t *testing.T) {
 			trieBatch.SetTraceWriter(os.Stderr)
 		}
 
-		var rSeq, rBatch []byte
-		{
-			fmt.Printf("1. Trie sequential update (%d updates)\n", len(updates))
-			for i := 0; i < len(updates); i++ {
-				err := stateSeq.applyPlainUpdates(plainKeys[i:i+1], updates[i:i+1])
-				require.NoError(t, err)
-
-				updsOne := WrapKeyUpdates(t, ModeDirect, KeyToHexNibbleHash, plainKeys[i:i+1], updates[i:i+1])
-
-				sequentialRoot, err := trieSequential.Process(ctx, updsOne, "", nil, WarmupConfig{})
-				require.NoError(t, err)
-
-				t.Logf("sequential root @%d hash %x\n", i, sequentialRoot)
-				rSeq = common.Copy(sequentialRoot)
-
-				updsOne.Close()
-			}
-		}
-		{
-			fmt.Printf("\n2. Trie batch update (%d updates)\n", len(updates))
-			err := stateBatch.applyPlainUpdates(plainKeys, updates)
-			require.NoError(t, err)
-
-			updsTwo := WrapKeyUpdates(t, ModeDirect, KeyToHexNibbleHash, plainKeys, updates)
-
-			rh, err := trieBatch.Process(ctx, updsTwo, "", nil, WarmupConfig{})
-			require.NoError(t, err)
-			t.Logf("batch of %d root hash %x\n", len(updates), rh)
-
-			rBatch = common.Copy(rh)
-			updsTwo.Close()
-		}
+		rSeq := processSeq(t, stateSeq, trieSequential, plainKeys, updates)
+		rBatch := processBatch(t, stateBatch, trieBatch, plainKeys, updates)
 		require.Equal(t, rBatch, rSeq, "sequential and batch root should match")
 	}
 
@@ -344,31 +228,10 @@ func Test_HexPatriciaHashed_BrokenUniqueRepr(t *testing.T) {
 }
 
 func Test_HexPatriciaHashed_UniqueRepresentation(t *testing.T) {
-	ctx := context.Background()
 	stateSeq := NewMockState(t)
 	stateBatch := NewMockState(t)
 
-	plainKeys, updates := NewUpdateBuilder().
-		Balance("68ee6c0e9cdc73b2b2d52dbd79f19d24fe25e2f9", 4).
-		Balance("18f4dcf2d94402019d5b00f71d5f9d02e4f70e40", 900234).
-		Balance("8e5476fc5990638a4fb0b5fd3f61bb4b5c5f395e", 1233).
-		Storage("8e5476fc5990638a4fb0b5fd3f61bb4b5c5f395e", "24f3a02dc65eda502dbf75919e795458413d3c45b38bb35b51235432707900ed", "0401").
-		Balance("27456647f49ba65e220e86cba9abfc4fc1587b81", 065606).
-		Balance("b13363d527cdc18173c54ac5d4a54af05dbec22e", 4*1e17).
-		Balance("d995768ab23a0a333eb9584df006da740e66f0aa", 5).
-		Balance("eabf041afbb6c6059fbd25eab0d3202db84e842d", 6).
-		Balance("8e5476fc5990638a4fb0b5fd3f61bb4b5c5f395e", 1237).
-		Balance("93fe03620e4d70ea39ab6e8c0e04dd0d83e041f2", 7).
-		Balance("ba7a3b7b095d3370c022ca655c790f0c0ead66f5", 5*1e17).
-		Storage("ba7a3b7b095d3370c022ca655c790f0c0ead66f5", "0fa41642c48ecf8f2059c275353ce4fee173b3a8ce5480f040c4d2901603d14e", "050505").
-		CodeHash("ba7a3b7b095d3370c022ca655c790f0c0ead66f5", "24f3a02dc65eda502dbf75919e795458413d3c45b38bb35b51235432707900ed").
-		Balance("a8f8d73af90eee32dc9729ce8d5bb762f30d21a4", 9*1e16).
-		Storage("93fe03620e4d70ea39ab6e8c0e04dd0d83e041f2", "de3fea338c95ca16954e80eb603cd81a261ed6e2b10a03d0c86cf953fe8769a4", "060606").
-		Balance("14c4d3bba7f5009599257d3701785d34c7f2aa27", 6*1e18).
-		Nonce("18f4dcf2d94402019d5b00f71d5f9d02e4f70e40", 169356).
-		Storage("a8f8d73af90eee32dc9729ce8d5bb762f30d21a4", "9f49fdd48601f00df18ebc29b1264e27d09cf7cbd514fe8af173e534db038033", "8989").
-		Storage("68ee6c0e9cdc73b2b2d52dbd79f19d24fe25e2f9", "d1664244ae1a8a05f8f1d41e45548fbb7aa54609b985d6439ee5fd9bb0da619f", "9898").
-		Build()
+	plainKeys, updates := fixtureBaseWithCode().Build()
 
 	trieSequential := NewHexPatriciaHashed(length.Addr, stateSeq, DefaultTrieConfig())
 	//trieSequential.SetTraceWriter(os.Stderr)
@@ -380,38 +243,8 @@ func Test_HexPatriciaHashed_UniqueRepresentation(t *testing.T) {
 	// trieSequential.SetTraceWriter(os.Stderr)
 	// trieBatch.SetTraceWriter(os.Stderr)
 
-	var rSeq, rBatch []byte
-	{
-		fmt.Printf("1. Trie sequential update (%d updates)\n", len(updates))
-		for i := 0; i < len(updates); i++ {
-			err := stateSeq.applyPlainUpdates(plainKeys[i:i+1], updates[i:i+1])
-			require.NoError(t, err)
-
-			updsOne := WrapKeyUpdates(t, ModeDirect, KeyToHexNibbleHash, plainKeys[i:i+1], updates[i:i+1])
-
-			sequentialRoot, err := trieSequential.Process(ctx, updsOne, "", nil, WarmupConfig{})
-			require.NoError(t, err)
-
-			t.Logf("sequential root @%d hash %x\n", i, sequentialRoot)
-			rSeq = common.Copy(sequentialRoot)
-
-			updsOne.Close()
-		}
-	}
-	{
-		fmt.Printf("\n2. Trie batch update (%d updates)\n", len(updates))
-		err := stateBatch.applyPlainUpdates(plainKeys, updates)
-		require.NoError(t, err)
-
-		updsTwo := WrapKeyUpdates(t, ModeDirect, KeyToHexNibbleHash, plainKeys, updates)
-
-		rh, err := trieBatch.Process(ctx, updsTwo, "", nil, WarmupConfig{})
-		require.NoError(t, err)
-		t.Logf("batch of %d root hash %x\n", len(updates), rh)
-
-		rBatch = common.Copy(rh)
-		updsTwo.Close()
-	}
+	rSeq := processSeq(t, stateSeq, trieSequential, plainKeys, updates)
+	rBatch := processBatch(t, stateBatch, trieBatch, plainKeys, updates)
 	require.Equal(t, rBatch, rSeq, "sequential and batch root should match")
 }
 
@@ -420,27 +253,7 @@ func Test_HexPatriciaHashed_DeferredBranchUpdates(t *testing.T) {
 	stateNormal := NewMockState(t)
 	stateDeferred := NewMockState(t)
 
-	plainKeys, updates := NewUpdateBuilder().
-		Balance("68ee6c0e9cdc73b2b2d52dbd79f19d24fe25e2f9", 4).
-		Balance("18f4dcf2d94402019d5b00f71d5f9d02e4f70e40", 900234).
-		Balance("8e5476fc5990638a4fb0b5fd3f61bb4b5c5f395e", 1233).
-		Storage("8e5476fc5990638a4fb0b5fd3f61bb4b5c5f395e", "24f3a02dc65eda502dbf75919e795458413d3c45b38bb35b51235432707900ed", "0401").
-		Balance("27456647f49ba65e220e86cba9abfc4fc1587b81", 065606).
-		Balance("b13363d527cdc18173c54ac5d4a54af05dbec22e", 4*1e17).
-		Balance("d995768ab23a0a333eb9584df006da740e66f0aa", 5).
-		Balance("eabf041afbb6c6059fbd25eab0d3202db84e842d", 6).
-		Balance("8e5476fc5990638a4fb0b5fd3f61bb4b5c5f395e", 1237).
-		Balance("93fe03620e4d70ea39ab6e8c0e04dd0d83e041f2", 7).
-		Balance("ba7a3b7b095d3370c022ca655c790f0c0ead66f5", 5*1e17).
-		Storage("ba7a3b7b095d3370c022ca655c790f0c0ead66f5", "0fa41642c48ecf8f2059c275353ce4fee173b3a8ce5480f040c4d2901603d14e", "050505").
-		CodeHash("ba7a3b7b095d3370c022ca655c790f0c0ead66f5", "24f3a02dc65eda502dbf75919e795458413d3c45b38bb35b51235432707900ed").
-		Balance("a8f8d73af90eee32dc9729ce8d5bb762f30d21a4", 9*1e16).
-		Storage("93fe03620e4d70ea39ab6e8c0e04dd0d83e041f2", "de3fea338c95ca16954e80eb603cd81a261ed6e2b10a03d0c86cf953fe8769a4", "060606").
-		Balance("14c4d3bba7f5009599257d3701785d34c7f2aa27", 6*1e18).
-		Nonce("18f4dcf2d94402019d5b00f71d5f9d02e4f70e40", 169356).
-		Storage("a8f8d73af90eee32dc9729ce8d5bb762f30d21a4", "9f49fdd48601f00df18ebc29b1264e27d09cf7cbd514fe8af173e534db038033", "8989").
-		Storage("68ee6c0e9cdc73b2b2d52dbd79f19d24fe25e2f9", "d1664244ae1a8a05f8f1d41e45548fbb7aa54609b985d6439ee5fd9bb0da619f", "9898").
-		Build()
+	plainKeys, updates := fixtureBaseWithCode().Build()
 
 	normalCfg := DefaultTrieConfig()
 	normalCfg.DeferBranchUpdates = false
@@ -656,16 +469,16 @@ func Test_HexPatriciaHashed_StateEncode(t *testing.T) {
 	s.RootTouched = true
 	s.RootChecked = true
 
-	for i := 0; i < len(s.Depths); i++ {
+	for i := range len(s.Depths) {
 		s.Depths[i] = int16(rnd.Intn(256))
 	}
-	for i := 0; i < len(s.TouchMap); i++ {
+	for i := range len(s.TouchMap) {
 		s.TouchMap[i] = uint16(rnd.Intn(1<<16 - 1))
 	}
-	for i := 0; i < len(s.AfterMap); i++ {
+	for i := range len(s.AfterMap) {
 		s.AfterMap[i] = uint16(rnd.Intn(1<<16 - 1))
 	}
-	for i := 0; i < len(s.BranchBefore); i++ {
+	for i := range len(s.BranchBefore) {
 		if rnd.Intn(100) > 49 {
 			s.BranchBefore[i] = true
 		}
@@ -975,25 +788,7 @@ func Test_HexPatriciaHashed_ProcessUpdates_UniqueRepresentation_AfterStateRestor
 	stateSeq := NewMockState(t)
 	stateBatch := NewMockState(t)
 
-	plainKeys, updates := NewUpdateBuilder().
-		Balance("68ee6c0e9cdc73b2b2d52dbd79f19d24fe25e2f9", 4).
-		Balance("18f4dcf2d94402019d5b00f71d5f9d02e4f70e40", 900234).
-		Balance("8e5476fc5990638a4fb0b5fd3f61bb4b5c5f395e", 1233).
-		Storage("8e5476fc5990638a4fb0b5fd3f61bb4b5c5f395e", "24f3a02dc65eda502dbf75919e795458413d3c45b38bb35b51235432707900ed", "0401").
-		Balance("27456647f49ba65e220e86cba9abfc4fc1587b81", 065606).
-		Balance("b13363d527cdc18173c54ac5d4a54af05dbec22e", 4*1e17).
-		Balance("d995768ab23a0a333eb9584df006da740e66f0aa", 5).
-		Balance("eabf041afbb6c6059fbd25eab0d3202db84e842d", 6).
-		Balance("93fe03620e4d70ea39ab6e8c0e04dd0d83e041f2", 7).
-		Balance("ba7a3b7b095d3370c022ca655c790f0c0ead66f5", 5*1e17).
-		Storage("ba7a3b7b095d3370c022ca655c790f0c0ead66f5", "0fa41642c48ecf8f2059c275353ce4fee173b3a8ce5480f040c4d2901603d14e", "050505").
-		Balance("a8f8d73af90eee32dc9729ce8d5bb762f30d21a4", 9*1e16).
-		Storage("93fe03620e4d70ea39ab6e8c0e04dd0d83e041f2", "de3fea338c95ca16954e80eb603cd81a261ed6e2b10a03d0c86cf953fe8769a4", "060606").
-		Balance("14c4d3bba7f5009599257d3701785d34c7f2aa27", 6*1e18).
-		Nonce("18f4dcf2d94402019d5b00f71d5f9d02e4f70e40", 169356).
-		Storage("a8f8d73af90eee32dc9729ce8d5bb762f30d21a4", "9f49fdd48601f00df18ebc29b1264e27d09cf7cbd514fe8af173e534db038033", "8989").
-		Storage("68ee6c0e9cdc73b2b2d52dbd79f19d24fe25e2f9", "d1664244ae1a8a05f8f1d41e45548fbb7aa54609b985d6439ee5fd9bb0da619f", "9898").
-		Build()
+	plainKeys, updates := fixtureBaseAccounts().Build()
 
 	trieSequential := NewHexPatriciaHashed(length.Addr, stateSeq, DefaultTrieConfig())
 	trieBatch := NewHexPatriciaHashed(length.Addr, stateBatch, DefaultTrieConfig())
@@ -1352,7 +1147,7 @@ func TestCell_fillFromFields(t *testing.T) {
 	require.Equal(t, bm, am)
 	require.Equal(t, bm, tm)
 
-	for i := 0; i < len(decRow); i++ {
+	for i := range len(decRow) {
 		t.Logf("cell %d\n", i)
 		first, second := row[i], decRow[i]
 		// after decoding extension == hashedExtension, dhk will be derived from extension
@@ -1369,22 +1164,6 @@ func TestCell_fillFromFields(t *testing.T) {
 		require.Equal(t, first.extension[:first.extLen], second.extension[:second.extLen])
 		require.Equal(t, first.stateHash[:first.stateHashLen], second.stateHash[:second.stateHashLen])
 	}
-}
-
-func cellMustEqual(tb testing.TB, first, second *cell) {
-	tb.Helper()
-	require.Equal(tb, first.hashedExtLen, second.hashedExtLen)
-	require.Equal(tb, first.hashedExtension[:first.hashedExtLen], second.hashedExtension[:second.hashedExtLen])
-	require.Equal(tb, first.hashLen, second.hashLen)
-	require.Equal(tb, first.hash[:first.hashLen], second.hash[:second.hashLen])
-	require.Equal(tb, first.accountAddrLen, second.accountAddrLen)
-	require.Equal(tb, first.storageAddrLen, second.storageAddrLen)
-	require.Equal(tb, first.accountAddr[:], second.accountAddr[:])
-	require.Equal(tb, first.storageAddr[:], second.storageAddr[:])
-	require.Equal(tb, first.extension[:first.extLen], second.extension[:second.extLen])
-	require.Equal(tb, first.stateHash[:first.stateHashLen], second.stateHash[:second.stateHashLen])
-
-	// encode doesn't code Nonce, Balance, CodeHash and Storage, Delete fields
 }
 
 func Test_HexPatriciaHashed_hashRow(t *testing.T) {
@@ -1451,7 +1230,7 @@ func Test_HexPatriciaHashed_hashRow(t *testing.T) {
 	}
 
 	// Verify cellEncodeData for absent nibbles are zero-valued
-	for nibble := 0; nibble < 16; nibble++ {
+	for nibble := range 16 {
 		if nibble == 1 || nibble == 5 || nibble == 10 {
 			continue
 		}
@@ -1479,7 +1258,7 @@ func Test_HexPatriciaHashed_hashRow_allEmpty(t *testing.T) {
 	require.NoError(t, err)
 
 	// All cellEncodeData should be zero
-	for nibble := 0; nibble < 16; nibble++ {
+	for nibble := range 16 {
 		require.Equal(t, int16(0), cellData[nibble].hashLen)
 	}
 

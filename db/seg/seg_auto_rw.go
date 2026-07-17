@@ -191,7 +191,7 @@ func DetectCompressType(getter *Getter) (compressed FileCompression) {
 			}
 		}()
 		getter.Reset(0)
-		for i := 0; i < 100; i++ {
+		for range 100 {
 			if getter.HasNext() {
 				_, _ = getter.SkipUncompressed()
 			}
@@ -209,7 +209,7 @@ func DetectCompressType(getter *Getter) (compressed FileCompression) {
 			}
 		}()
 		getter.Reset(0)
-		for i := 0; i < 100; i++ {
+		for range 100 {
 			if getter.HasNext() {
 				_, _ = getter.Skip()
 			}

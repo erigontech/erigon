@@ -18,7 +18,6 @@ package commitment
 
 import (
 	"bytes"
-	"context"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -78,7 +77,6 @@ func Test_witness_capture(t *testing.T) {
 // commitment root. memoizationOff forces every node to be re-hashed so the capture is
 // complete.
 func Test_WitnessTracer_CapturedNodesReconstructRoot(t *testing.T) {
-	ctx := context.Background()
 	ms := NewMockState(t)
 	hph := NewHexPatriciaHashed(length.Addr, ms, DefaultTrieConfig())
 	hph.SetTraceWriter(nil)
@@ -89,7 +87,7 @@ func Test_WitnessTracer_CapturedNodesReconstructRoot(t *testing.T) {
 	for i, a := range extAccts {
 		builder.Balance(common.Bytes2Hex(a), uint64(i+1))
 	}
-	for i := 0; i < 16; i++ {
+	for i := range 16 {
 		a, _ := generateKeyWithHashedPrefix(nil, length.Addr)
 		builder.Balance(common.Bytes2Hex(a), uint64(100+i))
 	}
@@ -100,14 +98,10 @@ func Test_WitnessTracer_CapturedNodesReconstructRoot(t *testing.T) {
 	}
 
 	plainKeys, updates := builder.Build()
-	require.NoError(t, ms.applyPlainUpdates(plainKeys, updates))
-	toProcess := WrapKeyUpdates(t, ModeDirect, KeyToHexNibbleHash, plainKeys, updates)
-	defer toProcess.Close()
 
 	c := newWitnessNodeSet()
 	hph.witness.tracer = c
-	root, err := hph.Process(ctx, toProcess, "", nil, WarmupConfig{})
-	require.NoError(t, err)
+	root := processBatch(t, ms, hph, plainKeys, updates)
 	require.NotEmpty(t, c.byHash, "tracer must capture nodes")
 
 	nodeSet, err := c.nodes(root)

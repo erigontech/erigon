@@ -10,7 +10,7 @@ import (
 
 func BenchmarkSortedAllocKeys(b *testing.B) {
 	alloc := make(types.GenesisAlloc)
-	for i := 0; i < 1000000; i++ {
+	for i := range 1000000 {
 		addr := common.BytesToAddress([]byte{byte(i), byte(i >> 8), byte(i >> 16)})
 		alloc[addr] = types.GenesisAccount{
 			Balance: big.NewInt(1000000),

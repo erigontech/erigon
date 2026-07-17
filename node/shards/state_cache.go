@@ -391,13 +391,13 @@ func id(a any) uint8 {
 func NewStateCache(degree int, limit datasize.ByteSize) *StateCache {
 	var sc StateCache
 	sc.limit = limit
-	for i := 0; i < len(sc.readWrites); i++ {
+	for i := range len(sc.readWrites) {
 		sc.readWrites[i] = btree.New(degree)
 	}
-	for i := 0; i < len(sc.writes); i++ {
+	for i := range len(sc.writes) {
 		sc.writes[i] = btree.New(degree)
 	}
-	for i := 0; i < len(sc.readQueue); i++ {
+	for i := range len(sc.readQueue) {
 		heap.Init(&sc.readQueue[i])
 	}
 	return &sc
@@ -554,7 +554,7 @@ func (sc *StateCache) setRead(item CacheItem, absent bool) {
 }
 
 func (sc *StateCache) readQueuesLen() (res int) {
-	for i := 0; i < len(sc.readQueue); i++ {
+	for i := range len(sc.readQueue) {
 		res += sc.readQueue[i].Len()
 	}
 	return
@@ -853,7 +853,7 @@ func (sc *StateCache) SetCodeDelete(address []byte, incarnation uint64) {
 
 func (sc *StateCache) PrepareWrites() [5]*btree.BTree {
 	var writes [5]*btree.BTree
-	for i := 0; i < len(sc.writes); i++ {
+	for i := range len(sc.writes) {
 		sc.writes[i].Ascend(func(i btree.Item) bool {
 			writeItem := i.(CacheWriteItem)
 			cacheItem := writeItem.GetCacheItem()
@@ -881,7 +881,7 @@ func WalkWrites(
 	codeDelete func(address []byte, incarnation uint64) error,
 ) error {
 	var err error
-	for i := 0; i < len(writes); i++ {
+	for i := range len(writes) {
 		writes[i].Ascend(func(i btree.Item) bool {
 			switch it := i.(type) {
 			case *AccountWriteItem:
@@ -923,7 +923,7 @@ func WalkWrites(
 }
 
 func (sc *StateCache) TurnWritesToReads(writes [5]*btree.BTree) {
-	for i := 0; i < len(writes); i++ {
+	for i := range len(writes) {
 		readQueue := &sc.readQueue[i]
 		writes[i].Ascend(func(it btree.Item) bool {
 			cacheWriteItem := it.(CacheWriteItem)
@@ -938,13 +938,13 @@ func (sc *StateCache) TurnWritesToReads(writes [5]*btree.BTree) {
 }
 
 func (sc *StateCache) TotalCount() (res int) {
-	for i := 0; i < len(sc.readWrites); i++ {
+	for i := range len(sc.readWrites) {
 		res += sc.readWrites[i].Len()
 	}
 	return
 }
 func (sc *StateCache) WriteCount() (res int) {
-	for i := 0; i < len(sc.readWrites); i++ {
+	for i := range len(sc.readWrites) {
 		res += sc.writes[i].Len()
 	}
 	return

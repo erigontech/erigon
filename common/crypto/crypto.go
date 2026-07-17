@@ -30,7 +30,6 @@ import (
 	"io"
 	"math/big"
 	"os"
-	"sync"
 
 	keccak "github.com/erigontech/fastkeccak"
 	"github.com/holiman/uint256"
@@ -303,20 +302,10 @@ func PubkeyToAddress(p ecdsa.PublicKey) common.Address {
 	return common.BytesToAddress(Keccak256(pubBytes)[12:])
 }
 
-// hasherPool holds LegacyKeccak hashers.
-var hasherPool = sync.Pool{
-	New: func() any {
-		return keccak.NewFastKeccak()
-	},
-}
+// NewKeccakState returns a reset KeccakState from the pool shared with the common package.
+func NewKeccakState() keccak.KeccakState { return common.NewKeccakState() }
 
-// NewKeccakState creates a new KeccakState
-func NewKeccakState() keccak.KeccakState {
-	h := hasherPool.Get().(keccak.KeccakState)
-	h.Reset()
-	return h
-}
-func ReturnToPool(h keccak.KeccakState) { hasherPool.Put(h) }
+func ReturnToPool(h keccak.KeccakState) { common.ReturnKeccakState(h) }
 
 // FinalizeHash finalizes sha and returns a Keccak-256 digest as a value type,
 // avoiding the heap escape that occurs when passing h[:] to an interface Read method.

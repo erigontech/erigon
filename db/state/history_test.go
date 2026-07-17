@@ -297,7 +297,7 @@ func TestHistoryCollationBuild(t *testing.T) {
 		var vi int
 		for i := 0; i < len(keyWords); i++ {
 			ints := intArrs[i]
-			for j := 0; j < len(ints); j++ {
+			for j := range ints {
 				var txKey [8]byte
 				binary.BigEndian.PutUint64(txKey[:], ints[j])
 				offset, ok := r.Lookup2(txKey[:], []byte(keyWords[i]))
@@ -597,7 +597,7 @@ func TestHistoryCanPrune(t *testing.T) {
 			maxTxInSnaps := hc.files.EndTxNum()
 			require.Equal(t, (stepsTotal-stepKeepInDB)*16, maxTxInSnaps)
 
-			for i := uint64(0); i < stepsTotal; i++ {
+			for i := range stepsTotal {
 				cp, untilTx := hc.canPruneUntil(rwTx, h.stepSize*(i+1))
 				require.GreaterOrEqual(t, h.stepSize*(stepsTotal-stepKeepInDB), untilTx)
 				if i >= stepsTotal-stepKeepInDB {
@@ -633,7 +633,7 @@ func TestHistoryCanPrune(t *testing.T) {
 		hc := h.beginForTests()
 		defer hc.Close()
 
-		for i := uint64(0); i < stepsTotal; i++ {
+		for i := range stepsTotal {
 			t.Logf("step %d, until %d", i, (i+1)*h.stepSize)
 
 			cp, untilTx := hc.canPruneUntil(rwTx, (i+1)*h.stepSize)
@@ -848,7 +848,7 @@ func filledHistoryValues(tb testing.TB, largeValues bool, values map[string][]up
 		var flusher flusher
 		var keyFlushCount = 0
 		for key, upds := range values {
-			for i := 0; i < len(upds); i++ {
+			for i := range upds {
 				err := writer.AddPrevValue([]byte(key), upds[i].txNum, upds[i].value)
 				require.NoError(tb, err)
 			}
@@ -1329,7 +1329,7 @@ func TestHistoryScanFiles(t *testing.T) {
 		// Recreate domain and re-scan the files
 		scanDirsRes, err := scanDirs(h.dirs)
 		require.NoError(err)
-		require.NoError(h.openFolder(scanDirsRes))
+		require.NoError(h.openFolder(t.Context(), scanDirsRes))
 		// Check the history
 		checkHistoryHistory(t, h, txs)
 	}
@@ -1908,7 +1908,7 @@ func TestHistory_OpenFolder(t *testing.T) {
 
 	scanDirsRes, err := scanDirs(h.dirs)
 	require.NoError(t, err)
-	err = h.openFolder(scanDirsRes)
+	err = h.openFolder(t.Context(), scanDirsRes)
 	require.NoError(t, err)
 	h.Close()
 }

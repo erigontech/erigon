@@ -35,7 +35,7 @@ import (
 // int representation. All ethash methods work with ints to avoid constant byte to
 // int conversions as well as to handle both little and big endian systems.
 func prepare(dest []uint32, src []byte) {
-	for i := 0; i < len(dest); i++ {
+	for i := range dest {
 		dest[i] = binary.LittleEndian.Uint32(src[i*4:])
 	}
 }

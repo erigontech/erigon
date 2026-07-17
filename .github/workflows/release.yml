@@ -96,6 +96,7 @@ jobs:
       - name: Checkout git repository ${{ env.APP_REPO }} reference ${{ inputs.checkout_ref }}
         uses: actions/checkout@v7
         with:
+          persist-credentials: false
           repository: ${{ env.APP_REPO }}
           fetch-depth: 0
           ref: ${{ inputs.checkout_ref }}
@@ -202,7 +203,7 @@ jobs:
           password: ${{ secrets.DOCKERHUB_PUSH_TOKEN }}
 
       - name: Set up QEMU
-        uses: docker/setup-qemu-action@06116385d9baf250c9f4dcb4858b16962ea869c3  ## v4.1.0
+        uses: docker/setup-qemu-action@96fe6ef7f33517b61c61be40b68a1882f3264fb8  ## v4.2.0
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@4d04d5d9486b7bd6fa91e7baf45bbb4f8b9deedd  ## v4.0.0
@@ -212,6 +213,8 @@ jobs:
           RELEASE_VERSION: ${{ inputs.release_version }}
           DOCKER_URL: ${{ env.DOCKERHUB_REPOSITORY_DEV }}
           CHECKOUT_REF: ${{ inputs.checkout_ref }}
+          COMMIT_ID: ${{ steps.getCommitId.outputs.commit-id }}
+          SHORT_COMMIT_ID: ${{ steps.getCommitId.outputs.short-commit-id }}
         run: |
           cd erigon;
           docker buildx build \
@@ -227,8 +230,8 @@ jobs:
             --label org.opencontainers.image.documentation="https://docs.erigon.tech/" \
             --label org.opencontainers.image.source="https://github.com/erigontech/erigon" \
             --label org.opencontainers.image.version=${RELEASE_VERSION} \
-            --label org.opencontainers.image.revision=${{ steps.getCommitId.outputs.commit-id }} \
-            --label org.opencontainers.image.vcs-ref-short=${{ steps.getCommitId.outputs.short-commit-id }} \
+            --label org.opencontainers.image.revision="${COMMIT_ID}" \
+            --label org.opencontainers.image.vcs-ref-short="${SHORT_COMMIT_ID}" \
             --label org.opencontainers.image.vendor="${{ github.repository_owner }}" \
             --label org.opencontainers.image.description="${{ env.LABEL_DESCRIPTION }}" \
             --label org.opencontainers.image.base.name="${{ env.TARGET_BASE_IMAGE }}" \
@@ -364,6 +367,7 @@ jobs:
       - name: Fast checkout git repository erigontech/erigon-qa
         uses: actions/checkout@v7
         with:
+          persist-credentials: false
           token: ${{ secrets.ORG_GITHUB_ERIGONTECH_ERIGON_QA_READ }}
           repository: erigontech/erigon-qa
           fetch-depth: 1
@@ -561,6 +565,7 @@ jobs:
     - name: Fast checkout just ${{ env.DOCKERFILE_PATH }} from git repository ${{ env.APP_REPO }}
       uses: actions/checkout@v7
       with:
+        persist-credentials: false
         repository: ${{ env.APP_REPO }}
         sparse-checkout: ${{ env.DOCKERFILE_PATH }}
         sparse-checkout-cone-mode: false
@@ -580,15 +585,15 @@ jobs:
         DOCKER_URL_TMP: ${{ env.DOCKERHUB_REPOSITORY_DEV }}
         PUBLISH_LATEST_TAG: ${{ inputs.publish_latest_tag }}
       run: |
-        echo Publishing docker image: 
-        skopeo copy --multi-arch all docker://${{ env.DOCKER_URL_TMP }}:${RELEASE_VERSION} docker://${{ env.DOCKER_URL }}:${RELEASE_VERSION}
+        echo Publishing docker image:
+        skopeo copy --multi-arch all "docker://${DOCKER_URL_TMP}:${RELEASE_VERSION}" "docker://${DOCKER_URL}:${RELEASE_VERSION}"
         if [ "x${PUBLISH_LATEST_TAG}" == "xtrue" ]; then
           echo Publishing latest tag:
-          skopeo copy --multi-arch all docker://${{ env.DOCKER_URL_TMP }}:${RELEASE_VERSION} docker://${{ env.DOCKER_URL }}:latest
+          skopeo copy --multi-arch all "docker://${DOCKER_URL_TMP}:${RELEASE_VERSION}" "docker://${DOCKER_URL}:latest"
         fi
         echo -n "Deleting temporary image: "
         set +e
-        skopeo delete docker://${{ env.DOCKER_URL_TMP }}:${RELEASE_VERSION}
+        skopeo delete "docker://${DOCKER_URL_TMP}:${RELEASE_VERSION}"
         SKOPEO_DELETE_EXIT=$?
         set -e
         if [ $SKOPEO_DELETE_EXIT -ne 0 ]; then
@@ -684,7 +689,8 @@ jobs:
 
     - name: Checkout git repository ${{ env.APP_REPO }} at release commit
       if: ${{ inputs.perform_release && inputs.release_version != '' }}
-      uses: actions/checkout@v7
+      # Token must persist: the next step pushes the release tag with it.
+      uses: actions/checkout@v7 # zizmor: ignore[artipacked]
       with:
         repository: ${{ env.APP_REPO }}
         fetch-depth: 1
@@ -710,6 +716,7 @@ jobs:
         GH_REPO: ${{ github.repository }}
         RELEASE_VERSION: ${{ inputs.release_version }}
         DOCKER_TAGS: "${{ env.DOCKERHUB_REPOSITORY }}:${{ inputs.release_version }}"
+        TARGET_COMMIT: ${{ needs.build-release.outputs.commit-id }}
       run: |
         cd dist
         for archive in *.tar; do gzip $archive; echo "Artifact $archive compressed"; done
@@ -743,7 +750,7 @@ jobs:
           echo "  cd dist"
           echo "  gh release create \\"
           echo "    --repo ${{ env.APP_REPO }} \\"
-          echo "    --target ${{ needs.build-release.outputs.commit-id }} \\"
+          echo "    --target ${TARGET_COMMIT} \\"
           echo "    --draft=true \\"
           echo "    --title \"${RELEASE_VERSION}\" \\"
           echo "    \"${RELEASE_VERSION}\" \\"
@@ -786,7 +793,8 @@ jobs:
           repositories: "erigon"
 
       - name: Checkout git repository ${{ env.APP_REPO }} reference ${{ inputs.checkout_ref }}
-        uses: actions/checkout@v7
+        # Token must persist: the next step deletes the release tag with it.
+        uses: actions/checkout@v7 # zizmor: ignore[artipacked]
         with:
           repository: ${{ env.APP_REPO }}
           fetch-depth: 0

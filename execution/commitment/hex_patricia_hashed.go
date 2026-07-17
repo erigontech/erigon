@@ -26,6 +26,7 @@ import (
 	"io"
 	"math/bits"
 	"runtime"
+	"slices"
 	"sort"
 	"strings"
 	"sync"
@@ -140,6 +141,7 @@ type HexPatriciaHashed struct {
 	ctx           PatriciaContext
 	hashAuxBuffer [128]byte     // buffer to compute cell hash or write hash-related things
 	cellHashBuf   common.Hash   // shared scratch buffer for hashKey calls (avoids per-cell allocation)
+	leafHashBuf   [33]byte      // shared scratch for leaf hash prefixing (avoids per-leaf escape)
 	auxBuffer     *bytes.Buffer // auxiliary buffer used during branch updates encoding
 	branchEncoder *BranchEncoder
 
@@ -167,7 +169,12 @@ type HexPatriciaHashed struct {
 	//processing metrics
 	metrics       *Metrics
 	depthsToTxNum [129]uint64 // endTxNum of file with branch data for that depth
-	hadToLoadL    map[uint64]skipStat
+
+	// lastUpdateCellWasEmpty reports whether the most recent updateCell stamped a key
+	// into an empty cell — i.e. the key is absent from the pre-state trie, so nothing
+	// can exist on disk beneath it.
+	lastUpdateCellWasEmpty bool
+	hadToLoadL             map[uint64]skipStat
 }
 
 // Clones current trie state to allow concurrent processing.
@@ -756,13 +763,12 @@ func (hph *HexPatriciaHashed) completeLeafHash(buf []byte, compactLen int, key [
 	if canEmbed {
 		buf = hph.auxBuffer.Bytes()
 	} else {
-		var hashBuf [33]byte
-		hashBuf[0] = 0x80 + length.Hash
-		if _, err := hph.keccak.Read(hashBuf[1:]); err != nil {
+		hph.leafHashBuf[0] = 0x80 + length.Hash
+		if _, err := hph.keccak.Read(hph.leafHashBuf[1:]); err != nil {
 			return nil, err
 		}
-		buf = append(buf, hashBuf[:]...)
-		hph.witness.emitLeaf(hashBuf[1:])
+		buf = append(buf, hph.leafHashBuf[:]...)
+		hph.witness.emitLeaf(hph.leafHashBuf[1:])
 	}
 	return buf, nil
 }
@@ -1324,7 +1330,7 @@ func (hph *HexPatriciaHashed) PrintGrid() {
 	fmt.Printf("GRID:\n")
 	for row := 0; row < hph.activeRows; row++ {
 		fmt.Printf("row %d depth %d:\n", row, hph.depths[row])
-		for col := 0; col < 16; col++ {
+		for col := range 16 {
 			cell := &hph.grid[row][col]
 			if cell.hashedExtLen > 0 || cell.accountAddrLen > 0 {
 				var cellHash []byte
@@ -1513,7 +1519,7 @@ func (hph *HexPatriciaHashed) unfold(hashedKey []byte, unfolding int16) error {
 		hph.currentKeyLen++
 	}
 	row := hph.activeRows
-	for i := 0; i < 16; i++ {
+	for i := range 16 {
 		hph.grid[row][i].reset()
 	}
 	hph.touchMap[row], hph.afterMap[row], hph.branchBefore[row] = 0, 0, false
@@ -2110,7 +2116,7 @@ func (hph *HexPatriciaHashed) detectCollapseBeforeDelete(hashedKey []byte) {
 
 	// Find the sibling nibble (the other set bit in afterMap)
 	siblingNibble := -1
-	for i := 0; i < 16; i++ {
+	for i := range 16 {
 		if hph.afterMap[parentRow]&(1<<i) != 0 && i != deleteNibble {
 			siblingNibble = i
 			break
@@ -2173,6 +2179,7 @@ func (hph *HexPatriciaHashed) updateCell(plainKey, hashedKey []byte, u *Update) 
 		}
 
 		hph.deleteCell(hashedKey)
+		hph.lastUpdateCellWasEmpty = false
 		return nil
 	}
 
@@ -2193,6 +2200,7 @@ func (hph *HexPatriciaHashed) updateCell(plainKey, hashedKey []byte, u *Update) 
 			fmt.Fprintf(hph.traceW, "updateCell setting (%d, %x, depth=%d)\n", row, nibble, depth)
 		}
 	}
+	hph.lastUpdateCellWasEmpty = cell.IsEmpty()
 	if cell.hashedExtLen == 0 {
 		copy(cell.hashedExtension[:], hashedKey[depth:])
 		cell.hashedExtLen = int16(len(hashedKey)) - depth
@@ -2748,7 +2756,7 @@ func (s *state) Encode(buf []byte) ([]byte, error) {
 		return nil, fmt.Errorf("encode root: %w", err)
 	}
 	d := make([]byte, len(s.Depths))
-	for i := 0; i < len(s.Depths); i++ {
+	for i := range len(s.Depths) {
 		d[i] = byte(s.Depths[i])
 	}
 	if n, err := ee.Write(d); err != nil || n != len(s.Depths) {
@@ -2762,7 +2770,7 @@ func (s *state) Encode(buf []byte) ([]byte, error) {
 	}
 
 	var before1, before2 uint64
-	for i := 0; i < 64; i++ {
+	for i := range 64 {
 		if s.BranchBefore[i] {
 			before1 |= 1 << i
 		}
@@ -2810,7 +2818,7 @@ func (s *state) Decode(buf []byte) error {
 	if err := binary.Read(aux, binary.BigEndian, &d); err != nil {
 		return fmt.Errorf("depths: %w", err)
 	}
-	for i := 0; i < len(s.Depths); i++ {
+	for i := range len(s.Depths) {
 		s.Depths[i] = int16(d[i])
 	}
 	if err := binary.Read(aux, binary.BigEndian, &s.TouchMap); err != nil {
@@ -2827,7 +2835,7 @@ func (s *state) Decode(buf []byte) error {
 		return fmt.Errorf("branchBefore2: %w", err)
 	}
 
-	for i := 0; i < 64; i++ {
+	for i := range 64 {
 		if branch1&(1<<i) != 0 {
 			s.BranchBefore[i] = true
 		}
@@ -2976,7 +2984,7 @@ func (hph *HexPatriciaHashed) SetState(buf []byte) error {
 		hph.rootPresent = false
 		hph.activeRows = 0
 
-		for i := 0; i < len(hph.depths); i++ {
+		for i := range len(hph.depths) {
 			hph.depths[i] = 0
 			hph.branchBefore[i] = false
 			hph.touchMap[i] = 0
@@ -3090,8 +3098,8 @@ func HexTrieStateToString(enc []byte) (string, error) {
 	printAfterMap := func(sb *strings.Builder, name string, list []uint16, depths []int16, existedBefore []bool) {
 		fmt.Fprintf(sb, "\t::%s::\n\n", name)
 		lastNonZero := 0
-		for i := len(list) - 1; i >= 0; i-- {
-			if list[i] != 0 {
+		for i, l := range slices.Backward(list) {
+			if l != 0 {
 				lastNonZero = i
 				break
 			}

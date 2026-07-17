@@ -123,7 +123,7 @@ func TestIndexLookup(t *testing.T) {
 			t.Fatal(err)
 		}
 		defer rs.Close()
-		for i := 0; i < 100; i++ {
+		for i := range 100 {
 			if err = rs.AddKey(fmt.Appendf(nil, "key %d", i), uint64(i*17)); err != nil {
 				t.Fatal(err)
 			}
@@ -133,7 +133,7 @@ func TestIndexLookup(t *testing.T) {
 		}
 		idx := MustOpen(indexFile)
 		defer idx.Close()
-		for i := 0; i < 100; i++ {
+		for i := range 100 {
 			reader := NewIndexReader(idx)
 			offset, ok := reader.Lookup(fmt.Appendf(nil, "key %d", i))
 			assert.True(t, ok)
@@ -348,7 +348,7 @@ func BenchmarkBuild(b *testing.B) {
 
 	// Pre-allocate all keys outside the benchmark loop
 	keys := make([][]byte, KeysN)
-	for j := 0; j < KeysN; j++ {
+	for j := range KeysN {
 		keys[j] = fmt.Appendf(nil, "key %d", j)
 	}
 	b.ResetTimer()
@@ -367,7 +367,7 @@ func BenchmarkBuild(b *testing.B) {
 		if err != nil {
 			b.Fatal(err)
 		}
-		for j := 0; j < KeysN; j++ {
+		for j := range KeysN {
 			if err = rs.AddKey(keys[j], uint64(j*17)); err != nil {
 				b.Fatal(err)
 			}
@@ -389,7 +389,7 @@ func BenchmarkAddKeyAndBuild(b *testing.B) {
 	const KeysN = 1_000_000
 
 	keys := make([][]byte, KeysN)
-	for j := 0; j < KeysN; j++ {
+	for j := range KeysN {
 		keys[j] = fmt.Appendf(nil, "key %d", j)
 	}
 
@@ -416,7 +416,7 @@ func BenchmarkAddKeyAndBuild(b *testing.B) {
 					b.Fatal(err)
 				}
 				b.StartTimer()
-				for j := 0; j < KeysN; j++ {
+				for j := range KeysN {
 					if err = rs.AddKey(keys[j], uint64(j*17)); err != nil {
 						b.Fatal(err)
 					}
@@ -445,7 +445,7 @@ func TestTwoLayerIndex(t *testing.T) {
 			t.Fatal(err)
 		}
 		defer rs.Close()
-		for i := 0; i < N; i++ {
+		for i := range N {
 			if err = rs.AddKey(fmt.Appendf(nil, "key %d", i), uint64(i*17)); err != nil {
 				t.Fatal(err)
 			}
@@ -456,7 +456,7 @@ func TestTwoLayerIndex(t *testing.T) {
 
 		idx := MustOpen(indexFile)
 		defer idx.Close()
-		for i := 0; i < N; i++ {
+		for i := range N {
 			reader := NewIndexReader(idx)
 			e, _ := reader.Lookup(fmt.Appendf(nil, "key %d", i))
 			if e != uint64(i) {
@@ -516,7 +516,7 @@ func TestIndexLookupParallel(t *testing.T) {
 				t.Fatal(err)
 			}
 			defer rs.Close()
-			for i := 0; i < N; i++ {
+			for i := range N {
 				if err = rs.AddKey(fmt.Appendf(nil, "key %d", i), uint64(i*17)); err != nil {
 					t.Fatal(err)
 				}
@@ -526,7 +526,7 @@ func TestIndexLookupParallel(t *testing.T) {
 			}
 			idx := MustOpen(indexFile)
 			defer idx.Close()
-			for i := 0; i < N; i++ {
+			for i := range N {
 				reader := NewIndexReader(idx)
 				offset, ok := reader.Lookup(fmt.Appendf(nil, "key %d", i))
 				assert.True(t, ok)
@@ -604,7 +604,7 @@ func BenchmarkBuildParallel(b *testing.B) {
 	const KeysN = 1_000_000
 
 	keys := make([][]byte, KeysN)
-	for j := 0; j < KeysN; j++ {
+	for j := range KeysN {
 		keys[j] = fmt.Appendf(nil, "key %d", j)
 	}
 
@@ -627,7 +627,7 @@ func BenchmarkBuildParallel(b *testing.B) {
 				if err != nil {
 					b.Fatal(err)
 				}
-				for j := 0; j < KeysN; j++ {
+				for j := range KeysN {
 					if err = rs.AddKey(keys[j], uint64(j*17)); err != nil {
 						b.Fatal(err)
 					}

@@ -83,6 +83,7 @@ jobs:
       - name: Checkout custom actions
         uses: actions/checkout@v7
         with:
+          persist-credentials: false
           fetch-depth: 1
 
       - uses: ./.github/actions/setup-erigon
@@ -104,8 +105,9 @@ jobs:
       - name: Fuzz ${{ matrix.fn }}
         env:
           FUZZTIME: ${{ inputs.fuzztime || '120s' }}
+          ERIGON_BUILD: ${{ steps.erigon.outputs.build }}
         run: |
-          mkdir -p "${{ steps.erigon.outputs.build }}/fuzz"
+          mkdir -p "$ERIGON_BUILD/fuzz"
           echo "::group::go test -fuzz ${{ matrix.fn }} (./${{ matrix.pkg }}, ${FUZZTIME})"
           go test "./${{ matrix.pkg }}/" -run '^$' -fuzz "^${{ matrix.fn }}$" -fuzztime "${FUZZTIME}"
           echo "::endgroup::"

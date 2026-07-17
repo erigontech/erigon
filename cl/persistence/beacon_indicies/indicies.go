@@ -29,16 +29,10 @@ import (
 	"github.com/erigontech/erigon/cl/persistence/base_encoding"
 	"github.com/erigontech/erigon/cl/persistence/format/snapshot_format"
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/pool"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/dbutils"
 )
-
-// make a buffer pool
-var bufferPool = &sync.Pool{
-	New: func() any {
-		return new(bytes.Buffer)
-	},
-}
 
 // make a zstd writer pool
 var zstdWriterPool = &sync.Pool{
@@ -350,17 +344,16 @@ func WriteBeaconBlock(ctx context.Context, tx kv.RwTx, block *cltypes.SignedBeac
 		return err
 	}
 	// take a buffer and encoder
-	buf := bufferPool.Get().(*bytes.Buffer)
-	defer bufferPool.Put(buf)
+	buf := pool.GetBuffer()
+	defer pool.PutBuffer(buf)
 	encoder := zstdWriterPool.Get().(*zstd.Encoder)
 	defer putWriter(encoder)
-	buf.Reset()
 	encoder.Reset(buf)
 	_, err = snapshot_format.WriteBlockForSnapshot(encoder, block, nil)
 	if err != nil {
 		return err
 	}
-	if err := encoder.Flush(); err != nil {
+	if err := encoder.Close(); err != nil {
 		return err
 	}
 	if err := tx.Put(kv.BeaconBlocks, dbutils.BlockBodyKey(block.Block.Slot, blockRoot), common.Copy(buf.Bytes())); err != nil {

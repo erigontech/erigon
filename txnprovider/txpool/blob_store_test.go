@@ -65,7 +65,7 @@ func TestGetBlobsConcurrentReadWrite(t *testing.T) {
 	var wg sync.WaitGroup
 	var stop atomic.Bool
 
-	for w := 0; w < 4; w++ {
+	for w := range 4 {
 		wg.Add(1)
 		go func(seed int) {
 			defer wg.Done()
@@ -80,7 +80,7 @@ func TestGetBlobsConcurrentReadWrite(t *testing.T) {
 		}(w)
 	}
 
-	for r := 0; r < 4; r++ {
+	for range 4 {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
@@ -93,7 +93,7 @@ func TestGetBlobsConcurrentReadWrite(t *testing.T) {
 		}()
 	}
 
-	for i := 0; i < 5000; i++ {
+	for range 5000 {
 		_ = pool.GetBlobs(hashes)
 	}
 	stop.Store(true)

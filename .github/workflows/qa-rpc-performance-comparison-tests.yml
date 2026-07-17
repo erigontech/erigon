@@ -73,21 +73,28 @@ jobs:
 
       - name: Print configuration (for logs)
         shell: bash
+        env:
+          RUN_ID: ${{ steps.vars.outputs.run_id }}
+          NETWORK: ${{ steps.vars.outputs.network }}
+          RUN_GETH: ${{ steps.vars.outputs.run_geth }}
         run: |
           set -euo pipefail
-          echo "Run ID:             ${{ steps.vars.outputs.run_id }}"
-          echo "Network:            ${{ steps.vars.outputs.network }}"
+          echo "Run ID:             $RUN_ID"
+          echo "Network:            $NETWORK"
           echo "Run Erigon:         true"
-          echo "Run Geth:           ${{ steps.vars.outputs.run_geth }}"
+          echo "Run Geth:           $RUN_GETH"
 
       - name: Prepare Redis database
         if: steps.vars.outputs.run_geth == 'true'
         shell: bash
         working-directory: ${{ env.ERIGON_QA_PATH }}/test_system/qa-tests/rpc-tests
+        env:
+          RUN_ID: ${{ steps.vars.outputs.run_id }}
+          NETWORK: ${{ steps.vars.outputs.network }}
         run: |
           set -euo pipefail
-          python3 coordinated_start.py --client "erigon" --run-id "${{ steps.vars.outputs.run_id }}" --chain "${{ steps.vars.outputs.network }}" --signal-creation
-          python3 coordinated_start.py --client "geth" --run-id "${{ steps.vars.outputs.run_id }}" --chain "${{ steps.vars.outputs.network }}" --signal-creation
+          python3 coordinated_start.py --client "erigon" --run-id "$RUN_ID" --chain "$NETWORK" --signal-creation
+          python3 coordinated_start.py --client "geth" --run-id "$RUN_ID" --chain "$NETWORK" --signal-creation
 
   test:
     name: Benchmark Latest ${{ matrix.client }}
@@ -116,9 +123,9 @@ jobs:
       - name: Set reference data dir based on branch
         run: |
           # For pull_request events base_ref is the target branch name; for push/dispatch parse from ref.
-          BRANCH="${{ github.base_ref }}"
+          BRANCH="$GITHUB_BASE_REF"
           if [ -z "$BRANCH" ]; then
-            BRANCH="${{ github.ref }}"
+            BRANCH="$GITHUB_REF"
             BRANCH="${BRANCH#refs/heads/}"
           fi
           if [[ "$BRANCH" == release/* ]]; then
@@ -134,6 +141,7 @@ jobs:
         if: matrix.client == 'erigon'
         uses: actions/checkout@v7
         with:
+          persist-credentials: false
           submodules: recursive
           fetch-depth: "0"
           filter: blob:none
@@ -148,10 +156,12 @@ jobs:
 
       - name: Checkout RPC Tests Repository
         if: matrix.client == 'erigon' || needs.setup.outputs.run_geth == 'true'
+        env:
+          RUNNER_WS: ${{ runner.workspace }}
         run: |
-          rm -rf ${{runner.workspace}}/rpc-tests
-          git -c advice.detachedHead=false clone --depth 1 --branch main https://github.com/erigontech/rpc-tests ${{runner.workspace}}/rpc-tests
-          cd ${{runner.workspace}}/rpc-tests
+          rm -rf "$RUNNER_WS/rpc-tests"
+          git -c advice.detachedHead=false clone --depth 1 --branch main https://github.com/erigontech/rpc-tests "$RUNNER_WS/rpc-tests"
+          cd "$RUNNER_WS/rpc-tests"
 
       - name: Clean Erigon Build Directory
         if: matrix.client == 'erigon'
@@ -263,13 +273,15 @@ jobs:
       - name: Run RPC Performance Tests
         id: test_step
         if: matrix.client == 'erigon' || needs.setup.outputs.run_geth == 'true'
+        env:
+          RUNNER_WS: ${{ runner.workspace }}
         run: |
           set +e # Disable exit on error
-          
+
           failed_test=0
-          
-          if [ "${{ matrix.client }}" == "erigon" ]; then
-            commit=$(git -C ${{runner.workspace}}/erigon rev-parse --short HEAD)
+
+          if [ "$CLIENT" == "erigon" ]; then
+            commit=$(git -C "$RUNNER_WS/erigon" rev-parse --short HEAD)
           else
             commit=$(git -C $GETH_INSTALL_DIR rev-parse --short HEAD)
           fi
@@ -285,12 +297,12 @@ jobs:
           mkdir -p $bin_past_test_dir
 
           # Define result_dir (same for all run_perf calls since workspace and network are constant)
-          result_dir=${{runner.workspace}}/rpc-tests/perf/reports/$CHAIN
+          result_dir="$RUNNER_WS/rpc-tests/perf/reports/$CHAIN"
           mkdir -p $result_dir
           echo "result_dir=$result_dir" >> $GITHUB_ENV
 
           # Initialize output log file in perf dir (moved to result_dir after all tests)
-          output_log=${{runner.workspace}}/rpc-tests/perf/output.log
+          output_log="$RUNNER_WS/rpc-tests/perf/output.log"
           > $output_log
           
           run_perf () {
@@ -360,7 +372,7 @@ jobs:
             echo "Save test result on DB"
 
             if [ "$client" == "erigon" ]; then
-              branch_name=${{ github.ref_name }}
+              branch_name="$GITHUB_REF_NAME"
               commit_hash=$(git -C $workspace/erigon rev-parse HEAD)
             else
               branch_name="release"
@@ -380,7 +392,7 @@ jobs:
               --commit $commit_hash \
               --test_name rpc-performance-test-latest${{ (matrix.client == 'erigon' && github.event.inputs.exec_mode == 'parallel' && '-parallel') || (matrix.client == 'erigon' && github.event.inputs.exec_mode == 'serial' && '-serial') || '' }}-$method \
               --chain $CHAIN \
-              --runner ${{ runner.name }} \
+              --runner "$RUNNER_NAME" \
               --db_version $db_version \
               --outcome $outcome \
               --result_file $result_dir/$result_file
@@ -401,9 +413,9 @@ jobs:
           # Launch the RPC performance test runner
 
           #run_perf <workspace> <chain> <method> <pattern> <load-sequence> <client>
-          #run_perf ${{runner.workspace}} $CHAIN eth_call stress_test_eth_call_001_latest 1:1,100:30,1000:20,10000:20,20000:20 $CLIENT
-          run_perf ${{runner.workspace}} $CHAIN eth_call stress_test_eth_call_002_latest 1:1,100:30,1000:20,10000:20,20000:20 $CLIENT
-          #run_perf ${{runner.workspace}} $CHAIN eth_getProof stress_test_eth_getProof_001_latest 1:1,100:30,1000:20,10000:20,20000:20 $CLIENT
+          #run_perf "$RUNNER_WS" $CHAIN eth_call stress_test_eth_call_001_latest 1:1,100:30,1000:20,10000:20,20000:20 $CLIENT
+          run_perf "$RUNNER_WS" $CHAIN eth_call stress_test_eth_call_002_latest 1:1,100:30,1000:20,10000:20,20000:20 $CLIENT
+          #run_perf "$RUNNER_WS" $CHAIN eth_getProof stress_test_eth_getProof_001_latest 1:1,100:30,1000:20,10000:20,20000:20 $CLIENT
           
           # Move output.log to result_dir after all tests
           mv $output_log $result_dir/
@@ -424,28 +436,31 @@ jobs:
 
       - name: Generate Summary
         if: always() && steps.test_step.outputs.test_executed == 'true'
+        env:
+          WORKFLOW: ${{ github.workflow }}
+          TEST_RESULT: ${{ steps.test_step.outputs.TEST_RESULT }}
         run: |
-          SUMMARY_FILE="${{ env.result_dir }}/summary.md"
-          LOG_FILE="${{ env.result_dir }}/output.log"
+          SUMMARY_FILE="$result_dir/summary.md"
+          LOG_FILE="$result_dir/output.log"
 
-          cat << 'EOF' > $SUMMARY_FILE
-          # ${{ github.workflow }} Report
+          {
+            echo "# $WORKFLOW Report"
+            echo
+            echo "## Test Configuration"
+            echo "- **Chain:** $CHAIN"
+            echo "- **Client:** $CLIENT"
+            echo "- **Result:** $TEST_RESULT"
+            echo
+            echo "## Test Output"
+            echo '```'
+          } > "$SUMMARY_FILE"
 
-          ## Test Configuration
-          - **Chain:** ${{ env.CHAIN }}
-          - **Client:** ${{ matrix.client }}
-          - **Result:** ${{ steps.test_step.outputs.TEST_RESULT }}
+          cat "$LOG_FILE" >> "$SUMMARY_FILE"
 
-          ## Test Output
-          ```
-          EOF
+          echo '```' >> "$SUMMARY_FILE"
 
-          cat $LOG_FILE >> $SUMMARY_FILE
-
-          echo '```' >> $SUMMARY_FILE
-
-          cat $SUMMARY_FILE
-          cat $SUMMARY_FILE >> $GITHUB_STEP_SUMMARY
+          cat "$SUMMARY_FILE"
+          cat "$SUMMARY_FILE" >> "$GITHUB_STEP_SUMMARY"
 
       - name: Upload test results
         if: (matrix.client == 'erigon' || needs.setup.outputs.run_geth == 'true') && steps.test_step.outputs.test_executed == 'true'

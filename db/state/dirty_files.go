@@ -17,11 +17,13 @@
 package state
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -102,8 +104,8 @@ func (df *DirtyFiles) EndTxNumMax() uint64 {
 	return 0
 }
 
-// updateMinimax: callers use 0 as "not set yet".
-func (df *DirtyFiles) updateMinimax(current uint64) uint64 {
+// endTxNumMinimax: callers use 0 as "not set yet".
+func (df *DirtyFiles) endTxNumMinimax(current uint64) uint64 {
 	if max, ok := df.Max(); ok {
 		if current == 0 {
 			return max.endTxNum
@@ -124,8 +126,8 @@ type FilesItem struct {
 	version  version.Version
 	refcount atomic.Int32
 
-	// Deprecated: only the not-yet-migrated forkable subsystem still uses this (with
-	// refcount); the aggregator reclaims via aggregatorVisible generations (retired + refcnt).
+	// Used by the SnapshotRepo mark-and-sweep reclamation path (with refcount); the
+	// aggregator instead reclaims via aggregatorVisible generations (retired + refcnt).
 	canDelete atomic.Bool
 }
 
@@ -372,10 +374,16 @@ func retire(dirtyFiles *DirtyFiles, outs []*FilesItem, filenameBase string, reas
 	}
 }
 
-func (d *Domain) openDirtyFiles(dirEntries []string) (err error) {
+func (d *Domain) openDirtyFiles(ctx context.Context, dirEntries []string) (err error) {
 	var invalidFileItems []*FilesItem
 	iter := d.dirtyFiles.Iter()
 	for ok := iter.First(); ok; ok = iter.Next() {
+		select {
+		case <-ctx.Done():
+			iter.Release()
+			return ctx.Err()
+		default:
+		}
 		item := iter.Item()
 		fromStep, toStep := item.StepRange(d.stepSize)
 		if item.decompressor == nil {
@@ -466,10 +474,16 @@ func (d *Domain) openDirtyFiles(dirEntries []string) (err error) {
 	return nil
 }
 
-func (h *History) openDirtyFiles(dataEntries, accessorEntries []string) error {
+func (h *History) openDirtyFiles(ctx context.Context, dataEntries, accessorEntries []string) error {
 	var invalidFileItems []*FilesItem
 	iter := h.dirtyFiles.Iter()
 	for ok := iter.First(); ok; ok = iter.Next() {
+		select {
+		case <-ctx.Done():
+			iter.Release()
+			return ctx.Err()
+		default:
+		}
 		item := iter.Item()
 		fromStep, toStep := item.StepRange(h.stepSize)
 		if item.decompressor == nil {
@@ -539,10 +553,16 @@ func (h *History) openDirtyFiles(dataEntries, accessorEntries []string) error {
 	return nil
 }
 
-func (ii *InvertedIndex) openDirtyFiles(dataEntries, accessorEntries []string) error {
+func (ii *InvertedIndex) openDirtyFiles(ctx context.Context, dataEntries, accessorEntries []string) error {
 	var invalidFileItems []*FilesItem
 	iter := ii.dirtyFiles.Iter()
 	for ok := iter.First(); ok; ok = iter.Next() {
+		select {
+		case <-ctx.Done():
+			iter.Release()
+			return ctx.Err()
+		default:
+		}
 		item := iter.Item()
 		fromStep, toStep := item.StepRange(ii.stepSize)
 		if item.decompressor == nil {
@@ -765,10 +785,10 @@ func (files visibleFiles) LatestMergedRange(stepSize uint64) MergeRange {
 	if len(files) == 0 {
 		return MergeRange{}
 	}
-	for i := len(files) - 1; i >= 0; i-- {
-		shardSize := (files[i].endTxNum - files[i].startTxNum) / stepSize
+	for _, file := range slices.Backward(files) {
+		shardSize := (file.endTxNum - file.startTxNum) / stepSize
 		if shardSize > 2 {
-			return MergeRange{from: files[i].startTxNum, to: files[i].endTxNum}
+			return MergeRange{from: file.startTxNum, to: file.endTxNum}
 		}
 	}
 	return MergeRange{}

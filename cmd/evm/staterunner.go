@@ -28,7 +28,7 @@ import (
 	"regexp"
 	"sync"
 
-	"github.com/urfave/cli/v2"
+	"github.com/urfave/cli/v3"
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/dir"
@@ -61,7 +61,7 @@ var stateTestCommand = cli.Command{
 	},
 }
 
-func stateTestCmd(ctx *cli.Context) error {
+func stateTestCmd(_ context.Context, ctx *cli.Command) error {
 	machineFriendlyOutput := ctx.Bool(MachineFlag.Name)
 	if machineFriendlyOutput {
 		log.Root().SetHandler(log.DiscardHandler())
@@ -114,7 +114,7 @@ func stateTestCmd(ctx *cli.Context) error {
 	return nil
 }
 
-func runStateTestsParallel(ctx *cli.Context, cfg vm.Config, files []string, workers uint64) ([]testResult, error) {
+func runStateTestsParallel(ctx *cli.Command, cfg vm.Config, files []string, workers uint64) ([]testResult, error) {
 	if workers == 1 {
 		results := make([]testResult, 0, len(files)*4) // pre-allocate
 		for _, fname := range files {
@@ -142,7 +142,7 @@ func runStateTestsParallel(ctx *cli.Context, cfg vm.Config, files []string, work
 	}
 	close(fileCh)
 
-	for w := uint64(0); w < workers; w++ {
+	for range workers {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
@@ -177,7 +177,7 @@ func runStateTestsParallel(ctx *cli.Context, cfg vm.Config, files []string, work
 }
 
 // runStateTest loads the state-test given by fname, and executes the test.
-func runStateTest(ctx *cli.Context, cfg vm.Config, fname string) ([]testResult, error) {
+func runStateTest(ctx *cli.Command, cfg vm.Config, fname string) ([]testResult, error) {
 	src, err := os.ReadFile(fname)
 	if err != nil {
 		return nil, err

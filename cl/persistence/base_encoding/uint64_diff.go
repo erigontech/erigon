@@ -43,22 +43,9 @@ func putComp(v *zstd.Encoder) {
 	compressorPool.Put(v)
 }
 
-var bufferPool = sync.Pool{
-	New: func() any {
-		return &bytes.Buffer{}
-	},
-}
-
 var plainUint64BufferPool = sync.Pool{
 	New: func() any {
 		b := make([]uint64, 1028)
-		return &b
-	},
-}
-
-var plainBytesBufferPool = sync.Pool{
-	New: func() any {
-		b := make([]byte, 1028)
 		return &b
 	},
 }
@@ -208,21 +195,15 @@ func ComputeCompressedSerializedEffectiveBalancesDiff(w io.Writer, old, new []by
 func ApplyCompressedSerializedUint64ListDiff(in, out []byte, diff []byte, reverse bool) ([]byte, error) {
 	out = out[:0]
 
-	buffer := bufferPool.Get().(*bytes.Buffer)
-	defer bufferPool.Put(buffer)
-	buffer.Reset()
-
-	if _, err := buffer.Write(diff); err != nil {
-		return nil, err
-	}
+	reader := bytes.NewReader(diff)
 
 	var length uint32
-	if err := binary.Read(buffer, binary.BigEndian, &length); err != nil {
+	if err := binary.Read(reader, binary.BigEndian, &length); err != nil {
 		return nil, err
 	}
 	var entry repeatedPatternEntry
 
-	decompressor, err := zstd.NewReader(buffer)
+	decompressor, err := zstd.NewReader(reader)
 	if err != nil {
 		return nil, err
 	}
@@ -307,19 +288,13 @@ func ApplyCompressedSerializedValidatorListDiff(in, out []byte, diff []byte, rev
 	}
 	out = out[:len(in)]
 
-	buffer := bufferPool.Get().(*bytes.Buffer)
-	defer bufferPool.Put(buffer)
-	buffer.Reset()
-
-	if _, err := buffer.Write(diff); err != nil {
-		return nil, err
-	}
+	reader := bytes.NewReader(diff)
 
 	currValidator := make([]byte, 121)
 
 	for {
 		var index uint32
-		if err := binary.Read(buffer, binary.BigEndian, &index); err != nil {
+		if err := binary.Read(reader, binary.BigEndian, &index); err != nil {
 			if errors.Is(err, io.EOF) {
 				break
 			}
@@ -328,7 +303,7 @@ func ApplyCompressedSerializedValidatorListDiff(in, out []byte, diff []byte, rev
 		if index == 1<<31 {
 			break
 		}
-		n, err := io.ReadFull(buffer, currValidator)
+		n, err := io.ReadFull(reader, currValidator)
 		if err != nil && !errors.Is(err, io.EOF) {
 			return nil, err
 		}
@@ -342,7 +317,7 @@ func ApplyCompressedSerializedValidatorListDiff(in, out []byte, diff []byte, rev
 		copy(out[index*121:], currValidator)
 	}
 	for {
-		n, err := io.ReadFull(buffer, currValidator)
+		n, err := io.ReadFull(reader, currValidator)
 		if err != nil && !errors.Is(err, io.EOF) {
 			return nil, err
 		}

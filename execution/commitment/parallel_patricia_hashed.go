@@ -99,7 +99,13 @@ func (p *ParallelPatriciaHashed) TakeDeferredUpdates() []*DeferredBranchUpdate {
 	return d
 }
 
-// RootTrie exposes the configuration template only; it must not be used as live root state.
+// AdoptRootTrie replaces the template with a trie that already carries state
+// (e.g. restored before the variant upgrade); the previous trie must not be used after.
+func (p *ParallelPatriciaHashed) AdoptRootTrie(root *HexPatriciaHashed) {
+	p.template = root
+}
+
+// RootTrie returns the template trie, which carries the live root state.
 func (p *ParallelPatriciaHashed) RootTrie() *HexPatriciaHashed {
 	return p.template
 }
@@ -191,7 +197,7 @@ type prefixWriter struct {
 func (pw *prefixWriter) Write(p []byte) (int, error) {
 	buf := make([]byte, 0, len(p)+len(pw.prefix)*2)
 	buf = append(buf, pw.prefix...)
-	for i := 0; i < len(p); i++ {
+	for i := range p {
 		buf = append(buf, p[i])
 		if p[i] == '\n' && i != len(p)-1 { // re-tag interior lines, not a trailing newline
 			buf = append(buf, pw.prefix...)
@@ -294,17 +300,23 @@ func (p *ParallelPatriciaHashed) Process(
 
 	p.rootHash.Store(nil)
 
-	if p.streaming != nil {
-		return p.processStreaming(ctx)
-	}
-
 	pu := updates.parallel
 	if pu.trie == nil || pu.trie.root == nil || pu.trie.root.subtreeCount == 0 {
+		// A consumed (or never-touched) collection must return the carried root; folding
+		// an empty streaming base would publish the empty-trie root instead.
 		rh, rerr := p.template.RootHash()
 		if rerr != nil {
 			return nil, rerr
 		}
 		return rh, nil
+	}
+
+	if p.streaming != nil {
+		rh, sErr := p.processStreaming(ctx)
+		if sErr == nil {
+			updates.consumeParallel()
+		}
+		return rh, sErr
 	}
 
 	rh, mErr := p.processMounted(ctx, updates)
@@ -326,6 +338,8 @@ func (p *ParallelPatriciaHashed) Process(
 	} else if aErr := p.applyDeferredUpdates(pu); aErr != nil {
 		return nil, aErr
 	}
+
+	updates.consumeParallel()
 
 	out := make([]byte, len(rh))
 	copy(out, rh)

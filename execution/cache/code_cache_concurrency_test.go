@@ -17,6 +17,7 @@
 package cache
 
 import (
+	"encoding/binary"
 	"sync"
 	"testing"
 
@@ -24,6 +25,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/common/crypto"
+	"github.com/erigontech/erigon/common/maphash"
 )
 
 // TestCodeCache_ConcurrentPutSameCode_NoSizeDrift guards against the size
@@ -34,7 +36,7 @@ import (
 // goroutine that actually inserts accounts the size, so the counters must equal
 // exactly one entry regardless of how many concurrent Puts raced.
 func TestCodeCache_ConcurrentPutSameCode_NoSizeDrift(t *testing.T) {
-	cc := NewCodeCache(64*datasize.MB, 16*datasize.MB)
+	cc := closeOnCleanup(t, NewCodeCache(64*datasize.MB, 16*datasize.MB))
 
 	addr := make([]byte, 20)
 	addr[0] = 0xab
@@ -44,7 +46,7 @@ func TestCodeCache_ConcurrentPutSameCode_NoSizeDrift(t *testing.T) {
 	const workers = 64
 	var wg sync.WaitGroup
 	wg.Add(workers)
-	for i := 0; i < workers; i++ {
+	for range workers {
 		go func() {
 			defer wg.Done()
 			cc.PutWithCodeHash(addr, code, codeHash, 1)
@@ -68,7 +70,7 @@ func TestCodeCache_ConcurrentPutSameCode_NoSizeDrift(t *testing.T) {
 // an entry whose stored keyHash differs from the requested codeHash is treated
 // as a miss, so a 64-bit maphash collision can never serve the wrong code.
 func TestCodeCache_ByteCheckRejectsForeignKeyHash(t *testing.T) {
-	cc := NewCodeCache(64*datasize.MB, 16*datasize.MB)
+	cc := closeOnCleanup(t, NewCodeCache(64*datasize.MB, 16*datasize.MB))
 
 	code := []byte("contract A bytecode")
 	realHash := crypto.Keccak256(code)
@@ -83,27 +85,25 @@ func TestCodeCache_ByteCheckRejectsForeignKeyHash(t *testing.T) {
 	foreign := make([]byte, 32)
 	copy(foreign, realHash)
 	foreign[0] ^= 0xff // different 32-byte key
-	cc.codeHashToCode.Set(foreign, codeEntry{code: code, keyHash: hash32(realHash), txNum: 1, epoch: cc.coh.Epoch()})
+	cc.codeHashToCode.Add(maphash.Hash(foreign), codeEntry{code: code, keyHash: hash32(realHash), txNum: 1, epoch: cc.coh.Epoch()})
 
 	// The stored entry's keyHash is realHash, not foreign — Get must reject it.
 	_, ok = cc.GetByCodeHash(foreign)
 	require.False(t, ok, "byte-check must reject an entry whose keyHash differs from the requested codeHash")
 }
 
-// TestCodeCache_ConcurrentDistinctPuts_RespectCap exercises the back-out branch
-// of the shared insert path: many workers Put distinct codes whose combined size
-// far exceeds the byte cap. Each insert that races past the cap must subtract its
-// own cost and drop its entry, so after the dust settles the byte counters never
-// exceed the cap and stay non-negative — the bound holds under concurrency, not
-// just serial inserts.
+// TestCodeCache_ConcurrentDistinctPuts_RespectCap drives many workers putting
+// distinct codes whose combined size far exceeds a tiny cap. The freelru layer
+// evicts the coldest entries to stay within its entry cap (no freeze), and the
+// OnEvict-maintained byte counter must never drift negative under concurrency.
 func TestCodeCache_ConcurrentDistinctPuts_RespectCap(t *testing.T) {
 	const codeCap = 4 * datasize.KB
-	cc := NewCodeCache(codeCap, 16*datasize.MB)
+	cc := closeOnCleanup(t, NewCodeCache(codeCap, 16*datasize.MB))
 
 	const workers = 128
 	var wg sync.WaitGroup
 	wg.Add(workers)
-	for i := 0; i < workers; i++ {
+	for i := range workers {
 		go func(n int) {
 			defer wg.Done()
 			code := make([]byte, 256)
@@ -113,23 +113,25 @@ func TestCodeCache_ConcurrentDistinctPuts_RespectCap(t *testing.T) {
 	}
 	wg.Wait()
 
-	require.LessOrEqual(t, cc.codeHashCodeSize.Load(), int64(codeCap),
-		"codeHashToCode must never exceed the byte cap after concurrent distinct Puts")
+	// The entry cap (codeCap/avgCodeEntryBytes) is the hard bound; residency
+	// settled far below the 128 distinct puts rather than freezing at the first.
+	require.Less(t, cc.codeHashToCode.Len(), workers,
+		"freelru must evict to its entry cap, not hold all 128 distinct codes")
 	require.GreaterOrEqual(t, cc.codeHashCodeSize.Load(), int64(0),
-		"codeHashToCode size must stay non-negative (no double back-out)")
+		"byte counter must stay non-negative (OnEvict accounting must not double-subtract)")
 }
 
 // Same atomicity requirement for the addr→code binding: a concurrent
 // authoritative Put must win over a conditional prefetch put in every
 // interleaving.
 func TestCodeCache_PutIfAbsentAtomicWithPut(t *testing.T) {
-	cc := NewCodeCache(64*datasize.MB, 16*datasize.MB)
+	cc := closeOnCleanup(t, NewCodeCache(64*datasize.MB, 16*datasize.MB))
 	addr := make([]byte, 20)
 	addr[0] = 0xcd
 	fresh := []byte{0xaa, 1, 2, 3}
 	stale := []byte{0xbb, 4, 5, 6}
-	for round := 0; round < 20000; round++ {
-		cc.Delete(addr)
+	for round := range 20000 {
+		binary.BigEndian.PutUint64(addr[1:], uint64(round))
 		var wg sync.WaitGroup
 		wg.Add(2)
 		go func() { defer wg.Done(); cc.Put(addr, fresh, 20) }()
