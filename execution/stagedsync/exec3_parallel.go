@@ -185,26 +185,11 @@ func stopCauseOf(ctx context.Context) (*stopCause, bool) {
 	return nil, false
 }
 
-// ensureChangesetAccumulator makes pe.currentChangeSet point at a fresh,
-// block-specific StateChangeSet before any of blockNum's sd.mem writes are
-// applied. Idempotent. Exec-loop only — it mutates SharedDomains.mem via
-// SetChangesetAccumulator, which must be single-writer (see the comment on
-// currentChangeSet).
-func (pe *parallelExecutor) ensureChangesetAccumulator(blockNum uint64) {
-	if blockNum < pe.changesetWindowStart || blockNum == 0 || blockNum > pe.maxBlockNum {
-		return
-	}
-	if pe.currentChangeSet != nil && pe.currentChangeSetBlock == blockNum {
-		return
-	}
-	// A previous block's accumulator is normally saved+cleared at its
-	// blockResult; if one is still installed here for a different block the
-	// rotation was missed — overwrite (the previous block's changeset was
-	// already saved at its blockResult, so nothing is lost).
-	pe.currentChangeSet = &changeset.StateChangeSet{}
-	pe.currentChangeSetBlock = blockNum
-	pe.domains().SetChangesetAccumulator(pe.currentChangeSet)
-}
+// ensureChangesetAccumulator is a no-op: the commitment calculator is the sole
+// producer of each owned block's changeset — it reconstructs account/storage/code
+// diffs result-locally, installs its own changeset for the commitment compute, and
+// saves it. Exec installs no shared accumulator and records no changeset diffs.
+func (pe *parallelExecutor) ensureChangesetAccumulator(blockNum uint64) {}
 
 // clearChangesetAccumulator detaches the current changeset accumulator after
 // its block's changeset has been saved. Exec-loop only.

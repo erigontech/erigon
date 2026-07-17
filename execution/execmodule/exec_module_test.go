@@ -2699,6 +2699,67 @@ func runBALFoldAheadChangeset(t *testing.T, foldAhead, shadow bool) balFoldResul
 	return res
 }
 
+// TestBALFoldAheadFiresOnTipValidateChain pins the goal of the changeset-ownership
+// refactor: a single chain-tip newPayload (ValidateChain) must fold its commitment
+// from the BAL. It fails today because ownsChangeset forces the tip onto the
+// incremental path; it passes once the changeset is produced result-locally by the
+// commitment calculator and the ownsChangeset fold gate is removed.
+func TestBALFoldAheadFiresOnTipValidateChain(t *testing.T) {
+	defer func(prev bool) { dbg.BALDrivenCommitment = prev }(dbg.BALDrivenCommitment)
+	defer func(prev bool) { dbg.IgnoreBAL = prev }(dbg.IgnoreBAL)
+	dbg.BALDrivenCommitment = true
+	dbg.IgnoreBAL = false
+
+	const chainLen = 6
+	ctx := t.Context()
+	privKey, err := crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f291")
+	require.NoError(t, err)
+	senderAddr := crypto.PubkeyToAddress(privKey.PublicKey)
+	m := execmoduletester.New(t,
+		execmoduletester.WithKey(privKey),
+		execmoduletester.WithGenesisSpec(&types.Genesis{
+			Config: chain.AllProtocolChanges,
+			Alloc:  types.GenesisAlloc{senderAddr: {Balance: big.NewInt(1 * common.Ether)}},
+		}),
+		execmoduletester.WithExperimentalBAL(),
+		execmoduletester.WithAlwaysGenerateChangesets(false),
+	)
+	canonical, err := blockgen.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, chainLen,
+		func(i int, b *blockgen.BlockGen) {
+			tx, txErr := types.SignTx(
+				types.NewTransaction(uint64(i), senderAddr, uint256.NewInt(1_000), 50000, uint256.NewInt(10_000_000_000), nil),
+				*types.LatestSignerForChainID(nil), privKey,
+			)
+			require.NoError(t, txErr)
+			b.AddTx(tx)
+		}, m.PublishedSD())
+	require.NoError(t, err)
+
+	// Commit all but the tip so the tip is a single-block newPayload whose parent is
+	// already committed — the fold baseline comes from the prior cycle.
+	for i := range chainLen - 1 {
+		_, err := insertBlocksWithBAL(ctx, m.ExecModule, canonical.Blocks[i:i+1], canonical.BlockAccessLists[i:i+1])
+		require.NoError(t, err)
+		_, err = validateChain(ctx, m.ExecModule, canonical.Blocks[i].Header())
+		require.NoError(t, err)
+		_, err = updateForkChoice(ctx, m.ExecModule, canonical.Blocks[i].Header())
+		require.NoError(t, err)
+	}
+	m.ExecModule.WaitCommitsDrained()
+
+	tip := canonical.TopBlock
+	_, err = insertBlocksWithBAL(ctx, m.ExecModule, []*types.Block{tip}, canonical.BlockAccessLists[chainLen-1:])
+	require.NoError(t, err)
+
+	stagedsync.ResetFoldsAheadForTest()
+	vr, err := validateChain(ctx, m.ExecModule, tip.Header())
+	require.NoError(t, err)
+	require.Equal(t, execmodule.ExecutionStatusSuccess, vr.ValidationStatus)
+
+	require.Positive(t, stagedsync.FoldsAheadPerformedForTest(),
+		"tip newPayload (ValidateChain) must fold its commitment from the BAL")
+}
+
 // A forkchoice head at height 0 that is not the genesis (e.g. a block carrying a
 // corrupted number) must be rejected, not treated as a genesis reset.
 func TestUpdateForkChoiceToNonGenesisBlockAtHeightZero(t *testing.T) {
