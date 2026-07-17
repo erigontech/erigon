@@ -432,13 +432,6 @@ func (st *TxnExecutor) ApplyFrame() (*evmtypes.ExecutionResult, error) {
 	isEIP3860 := vmConfig.HasEip3860(rules)
 	accessTuples := slices.Clone[types.AccessList](msg.AccessList())
 
-	// Check whether the init code size has been exceeded.
-	if contractCreation {
-		if err := vm.CheckMaxInitCodeSize(uint64(len(st.data)), isEIP3860, rules.IsAmsterdam); err != nil {
-			return nil, err
-		}
-	}
-
 	var overflow bool
 	st.intrinsicGas, overflow = st.calcIntrinsicGas()
 	if overflow {
@@ -451,6 +444,11 @@ func (st *TxnExecutor) ApplyFrame() (*evmtypes.ExecutionResult, error) {
 	if st.msg.Gas() < intrinsicGasSum {
 		return nil, fmt.Errorf("%w: have %d, want regular %d + state %d = %d",
 			ErrIntrinsicGas, st.msg.Gas(), st.intrinsicGas.RegularGas, st.intrinsicGas.StateGas, intrinsicGasSum)
+	}
+	if contractCreation {
+		if err := vm.CheckMaxInitCodeSize(uint64(len(st.data)), isEIP3860, rules.IsAmsterdam); err != nil {
+			return nil, err
+		}
 	}
 
 	// set code tx — verifyAuthorities mutates state (SetCode/SetNonce), so it
