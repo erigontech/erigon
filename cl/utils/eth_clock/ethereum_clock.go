@@ -17,11 +17,11 @@
 package eth_clock
 
 import (
+	"cmp"
 	"encoding/binary"
 	"fmt"
 	"math"
 	"slices"
-	"sort"
 	"time"
 
 	"github.com/erigontech/erigon/cl/clparams"
@@ -64,11 +64,11 @@ func forkList(schedule map[common.Bytes4]clparams.VersionScheduleEntry) (f []for
 	for version, entry := range schedule {
 		f = append(f, forkNode{epoch: entry.Epoch, version: version, stateVersion: entry.StateVersion})
 	}
-	sort.Slice(f, func(i, j int) bool {
-		if f[i].epoch == f[j].epoch {
-			return f[i].stateVersion < f[j].stateVersion
+	slices.SortFunc(f, func(a, b forkNode) int {
+		if a.epoch == b.epoch {
+			return cmp.Compare(a.stateVersion, b.stateVersion)
 		}
-		return f[i].epoch < f[j].epoch
+		return cmp.Compare(a.epoch, b.epoch)
 	})
 	return
 }
