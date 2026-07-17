@@ -863,3 +863,18 @@ func TestBlockRawBodyFromBinaryTxsMatchesEncoded(t *testing.T) {
 			"txType=%d: cached RawBody tx bytes must equal the rlp.EncodeToBytes form", txType)
 	}
 }
+
+// TestBodyDecodeRejectsEmptyStringTx pins that an empty-string element
+// (0x80) in the transactions list is rejected, not dropped as if it were
+// the list terminator.
+func TestBodyDecodeRejectsEmptyStringTx(t *testing.T) {
+	validTx := append([]byte{0xc9}, bytes.Repeat([]byte{0x80}, 9)...) // legacy tx: list of 9 zero fields
+	raw := RawBody{Transactions: [][]byte{validTx, {0x80}}}
+
+	buf := bytes.NewBuffer(nil)
+	require.NoError(t, raw.EncodeRLP(buf))
+
+	var b Body
+	err := rlp.DecodeBytes(buf.Bytes(), &b)
+	require.Error(t, err, "must reject an empty-string element in the transactions list")
+}
