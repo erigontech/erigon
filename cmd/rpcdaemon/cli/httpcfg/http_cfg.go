@@ -34,10 +34,13 @@ func DefaultDBReadConcurrency() int {
 	return min(max(10, runtime.GOMAXPROCS(-1)*64), 9_000)
 }
 
+// execPermanentReadTxs counts parallel exec's long-lived read txs beyond the
+// worker count: the extra pool worker and the apply-loop tx.
+const execPermanentReadTxs = 2
+
 // dbReadTxsReserved is read-tx headroom kept above parallel exec's permanent
-// holders (the execWorkers+1 pool txs plus the apply-loop tx). Without it a
-// transient commitment/RPC reader can take the last slot a blocked permanent
-// holder needs, deadlocking the pipeline.
+// holders. Without it a transient commitment/RPC reader can take the last slot
+// a blocked permanent holder needs, deadlocking the pipeline.
 const dbReadTxsReserved = 16
 
 // RoTxsLimit sizes the MDBX read-tx semaphore, flooring it at the parallel-exec
@@ -48,7 +51,7 @@ func RoTxsLimit(dbReadConcurrency, execWorkers int) int64 {
 	if dbReadConcurrency > 0 {
 		limit = dbReadConcurrency
 	}
-	return int64(max(limit, execWorkers+1+dbReadTxsReserved))
+	return int64(max(limit, execWorkers+execPermanentReadTxs+dbReadTxsReserved))
 }
 
 type HttpCfg struct {

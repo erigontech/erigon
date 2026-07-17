@@ -23,17 +23,18 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestDefaultDBReadConcurrency(t *testing.T) {
+func TestReadTxLimitCoversExecReaders(t *testing.T) {
 	t.Parallel()
-	// Parallel execution runs up to NumCPU workers, each holding a long-lived
-	// read tx; fewer semaphore slots than workers deadlocks the exec pipeline.
-	require.Greater(t, DefaultDBReadConcurrency(), runtime.NumCPU())
+	// The limit must exceed parallel exec's permanent read txs (see
+	// execPermanentReadTxs) even when GOMAXPROCS is set below NumCPU and
+	// shrinks the derived default.
+	require.Greater(t, RoTxsLimit(0, runtime.NumCPU()), int64(runtime.NumCPU()+execPermanentReadTxs))
 }
 
 func TestRoTxsLimit(t *testing.T) {
 	t.Parallel()
 	defaultLimit := int64(DefaultDBReadConcurrency())
-	floor := func(workers int) int64 { return int64(workers + 1 + dbReadTxsReserved) }
+	floor := func(workers int) int64 { return int64(workers + execPermanentReadTxs + dbReadTxsReserved) }
 	for _, tc := range []struct {
 		name         string
 		cfg, workers int
