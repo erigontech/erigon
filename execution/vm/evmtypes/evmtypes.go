@@ -62,7 +62,6 @@ type TxContext struct {
 	TxHash     common.Hash
 	Origin     accounts.Address // Provides information for ORIGIN
 	GasPrice   uint256.Int      // Provides information for GASPRICE
-	BlobFee    uint256.Int      // The fee for blobs(blobGas * blobGasPrice) incurred in the txn
 	BlobHashes []common.Hash    // Provides versioned blob hashes for BLOBHASH
 }
 

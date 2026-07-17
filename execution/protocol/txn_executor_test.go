@@ -27,6 +27,7 @@ import (
 	"github.com/erigontech/erigon/execution/protocol/misc"
 	"github.com/erigontech/erigon/execution/protocol/params"
 	"github.com/erigontech/erigon/execution/state"
+	"github.com/erigontech/erigon/execution/tracing"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/accounts"
 	"github.com/erigontech/erigon/execution/vm"
@@ -58,6 +59,12 @@ func newSimpleTransferMsg(from, to accounts.Address, gas uint64, checkGas bool) 
 		nil,   // maxFeePerBlobGas
 	)
 }
+
+type nilBlobFeeCapMessage struct {
+	*types.Message
+}
+
+func (nilBlobFeeCapMessage) MaxFeePerBlobGas() *uint256.Int { return nil }
 
 // TestEIP7825_GasPoolPreservedOnReject verifies that when a transaction is
 // rejected by the EIP-7825 gas limit cap, the block gas pool is NOT depleted.
@@ -132,6 +139,91 @@ func TestEIP7825_GasPoolPreservedOnReject(t *testing.T) {
 		require.Less(t, gp.Gas(), poolAfterReject,
 			"second tx must succeed and debit the gas pool")
 	})
+}
+
+// TestIntrinsicGasReject_NoStateMutation pins that a transaction rejected for
+// insufficient intrinsic gas — exercised here via the EIP-7623 calldata floor —
+// leaves the sender nonce and balance untouched, matching the execution-spec
+// ordering that validates intrinsic gas before any state mutation.
+func TestIntrinsicGasReject_NoStateMutation(t *testing.T) {
+	t.Parallel()
+
+	const (
+		blockGasLimit = 30_000_000
+		// 100 zero-byte calldata: regular intrinsic = 21000 + 100*4 = 21400;
+		// EIP-7623 floor = 21000 + 100*10 = 22000. A gas limit between the two
+		// clears the regular intrinsic check but fails the floor check.
+		gasLimit = 21404
+	)
+
+	sender := accounts.InternAddress(common.HexToAddress("0x1111111111111111111111111111111111111111"))
+	recipient := accounts.InternAddress(common.HexToAddress("0x2222222222222222222222222222222222222222"))
+	cfg := chain.TestChainOsakaConfig // Prague active (EIP-7623 floor), Amsterdam inactive
+
+	ibs := state.New(state.NewNoopReader())
+	initialBalance := uint256.NewInt(1_000_000_000_000_000_000)
+	require.NoError(t, ibs.AddBalance(sender, *initialBalance, tracing.BalanceChangeUnspecified))
+
+	evm := newTestEVM(ibs, cfg, blockGasLimit)
+	gasPrice := uint256.NewInt(1_000_000_000)
+	msg := types.NewMessage(
+		sender, recipient, 0, uint256.NewInt(0), gasLimit,
+		gasPrice, gasPrice, gasPrice,
+		make([]byte, 100), nil,
+		false, // checkNonce
+		false, // checkTransaction
+		true,  // checkGas
+		false, // isFree
+		nil,   // maxFeePerBlobGas
+	)
+	gp := new(GasPool).AddGas(blockGasLimit)
+
+	_, err := NewTxnExecutor(evm, msg, gp).Execute(true, false)
+	require.ErrorIs(t, err, ErrIntrinsicGas, "tx below the EIP-7623 floor must be rejected")
+
+	nonce, err := ibs.GetNonce(sender)
+	require.NoError(t, err)
+	require.Zero(t, nonce, "sender nonce must not be incremented when the tx is rejected for intrinsic gas")
+
+	balance, err := ibs.GetBalance(sender)
+	require.NoError(t, err)
+	require.Equal(t, *initialBalance, balance, "sender balance must not be debited when the tx is rejected for intrinsic gas")
+}
+
+// TestPreCheck_InsufficientFundsBeforeIntrinsicGas pins that a transaction
+// failing both the affordability check and the intrinsic-gas check reports
+// insufficient funds first, matching geth — so eth_call/eth_callMany error
+// messages stay geth-compatible. Mirrors rpc-tests eth_callMany/test_04: a
+// contract creation (nil recipient) with gas 21000 < 53000 intrinsic, whose
+// sender also can't afford gas*price + value.
+func TestPreCheck_InsufficientFundsBeforeIntrinsicGas(t *testing.T) {
+	t.Parallel()
+
+	const blockGasLimit = 30_000_000
+
+	sender := accounts.InternAddress(common.HexToAddress("0x1111111111111111111111111111111111111111"))
+	cfg := chain.TestChainOsakaConfig
+
+	ibs := state.New(state.NewNoopReader())
+	require.NoError(t, ibs.AddBalance(sender, *uint256.NewInt(5120), tracing.BalanceChangeUnspecified))
+
+	evm := newTestEVM(ibs, cfg, blockGasLimit)
+	gasPrice := uint256.NewInt(20)
+	msg := types.NewMessage(
+		sender, accounts.NilAddress, 0, uint256.NewInt(366), 21000,
+		gasPrice, gasPrice, gasPrice,
+		nil, nil,
+		false, // checkNonce
+		false, // checkTransaction
+		true,  // checkGas
+		false, // isFree
+		nil,   // maxFeePerBlobGas
+	)
+	gp := new(GasPool).AddGas(blockGasLimit)
+
+	_, err := NewTxnExecutor(evm, msg, gp).Execute(true, false)
+	require.ErrorIs(t, err, ErrInsufficientFunds, "insufficient funds must take precedence over intrinsic gas")
+	require.NotErrorIs(t, err, ErrIntrinsicGas)
 }
 
 // TestEIP8037_GasPoolTracksRegularAndStateIndependently verifies that the
@@ -268,31 +360,221 @@ func TestPreCheckErrorOrdering_GasBeforeFeeCap(t *testing.T) {
 
 	t.Run("CheckBlockGasInclusion rejects regular contribution > regular pool", func(t *testing.T) {
 		gp := new(GasPool).AddGas(blockGasLimit)
-		require.ErrorIs(t, CheckBlockGasInclusion(gp, blockGasLimit+1, 0), ErrGasLimitReached)
+		require.ErrorIs(t, CheckBlockGasInclusion(gp, blockGasLimit+1, 0, 0), ErrGasLimitReached)
 	})
 
 	t.Run("CheckBlockGasInclusion accepts contribution <= reservoirs", func(t *testing.T) {
 		gp := new(GasPool).AddGas(blockGasLimit)
-		require.NoError(t, CheckBlockGasInclusion(gp, blockGasLimit, 0))
-		require.NoError(t, CheckBlockGasInclusion(gp, blockGasLimit-1, 0))
+		require.NoError(t, CheckBlockGasInclusion(gp, blockGasLimit, 0, 0))
+		require.NoError(t, CheckBlockGasInclusion(gp, blockGasLimit-1, 0, 0))
 	})
 
 	t.Run("CheckBlockGasInclusion is a no-op for nil gp", func(t *testing.T) {
-		require.NoError(t, CheckBlockGasInclusion(nil, blockGasLimit*1000, blockGasLimit*1000))
+		require.NoError(t, CheckBlockGasInclusion(nil, blockGasLimit*1000, blockGasLimit*1000, blockGasLimit*1000))
 	})
 
 	t.Run("CheckBlockGasInclusion rejects state contribution > state pool", func(t *testing.T) {
 		gp := NewGasPool(100_000, 0)
-		require.ErrorIs(t, CheckBlockGasInclusion(gp, 50_000, 200_000), ErrGasLimitReached)
+		require.ErrorIs(t, CheckBlockGasInclusion(gp, 50_000, 200_000, 0), ErrGasLimitReached)
 	})
 
 	t.Run("CheckBlockGasInclusion rejects regular contribution > regular pool (Amsterdam shape)", func(t *testing.T) {
 		gp := NewGasPool(100_000, 0)
-		require.ErrorIs(t, CheckBlockGasInclusion(gp, 200_000, 50_000), ErrGasLimitReached)
+		require.ErrorIs(t, CheckBlockGasInclusion(gp, 200_000, 50_000, 0), ErrGasLimitReached)
 	})
 
 	t.Run("CheckBlockGasInclusion accepts when both contributions fit", func(t *testing.T) {
 		gp := NewGasPool(100_000, 0)
-		require.NoError(t, CheckBlockGasInclusion(gp, 50_000, 80_000))
+		require.NoError(t, CheckBlockGasInclusion(gp, 50_000, 80_000, 0))
 	})
+
+	t.Run("CheckBlockGasInclusion rejects blob gas > blob pool", func(t *testing.T) {
+		gp := NewGasPool(100_000, params.GasPerBlob) // budget for one blob
+		require.ErrorIs(t, CheckBlockGasInclusion(gp, 50_000, 50_000, 2*params.GasPerBlob), ErrBlobGasLimitReached)
+		require.NoError(t, CheckBlockGasInclusion(gp, 50_000, 50_000, params.GasPerBlob))
+	})
+}
+
+// TestBlobGasPreservedOnReject verifies that a transaction rejected before it is
+// applied does not deplete the block blob-gas pool: blob gas is reserved in
+// buyGas, which runs only after preCheck's validation passes.
+func TestBlobGasPreservedOnReject(t *testing.T) {
+	t.Parallel()
+
+	const (
+		blockGasLimit = 30_000_000
+		blockBlobGas  = 6 * params.GasPerBlob
+		txBlobGas     = 2 * params.GasPerBlob // two blob hashes
+	)
+
+	sender := accounts.InternAddress(common.HexToAddress("0x1111111111111111111111111111111111111111"))
+	recipient := accounts.InternAddress(common.HexToAddress("0x2222222222222222222222222222222222222222"))
+	cfg := chain.TestChainOsakaConfig // Cancun active -> blob path
+
+	newBlobMsg := func(gas uint64) *types.Message {
+		m := types.NewMessage(
+			sender, recipient, 0, uint256.NewInt(0), gas,
+			uint256.NewInt(0), uint256.NewInt(0), uint256.NewInt(0),
+			nil, nil,
+			false, false, true, false,
+			uint256.NewInt(1), // maxFeePerBlobGas
+		)
+		m.SetBlobVersionedHashes(make([]common.Hash, 2))
+		return m
+	}
+
+	t.Run("rejected tx preserves blob pool", func(t *testing.T) {
+		// Sender has no balance, so the blob fee makes the tx unaffordable and it
+		// is rejected before blob gas is reserved.
+		ibs := state.New(state.NewNoopReader())
+		evm := newTestEVM(ibs, cfg, blockGasLimit)
+		gp := new(GasPool).AddGas(blockGasLimit).AddBlobGas(blockBlobGas)
+
+		_, err := NewTxnExecutor(evm, newBlobMsg(100_000), gp).Execute(true, false)
+
+		require.ErrorIs(t, err, ErrInsufficientFunds)
+		require.Equal(t, uint64(blockBlobGas), gp.BlobGas(),
+			"blob-gas pool must be unchanged after a rejected tx")
+	})
+
+	t.Run("valid blob tx consumes blob pool", func(t *testing.T) {
+		ibs := state.New(state.NewNoopReader())
+		require.NoError(t, ibs.AddBalance(sender, *uint256.NewInt(1_000_000_000_000_000_000), tracing.BalanceChangeUnspecified))
+		evm := newTestEVM(ibs, cfg, blockGasLimit)
+		gp := new(GasPool).AddGas(blockGasLimit).AddBlobGas(blockBlobGas)
+
+		_, err := NewTxnExecutor(evm, newBlobMsg(100_000), gp).Execute(true, false)
+
+		require.NoError(t, err)
+		require.Equal(t, uint64(blockBlobGas-txBlobGas), gp.BlobGas(),
+			"a valid blob tx must consume its blob gas from the pool")
+	})
+}
+
+func TestPreCheck_NilMaxFeePerBlobGas(t *testing.T) {
+	t.Parallel()
+
+	const blockGasLimit = 30_000_000
+
+	sender := accounts.InternAddress(common.HexToAddress("0x1111111111111111111111111111111111111111"))
+	recipient := accounts.InternAddress(common.HexToAddress("0x2222222222222222222222222222222222222222"))
+	blockCtx := evmtypes.BlockContext{
+		CanTransfer: CanTransfer,
+		Transfer:    misc.Transfer,
+		GasLimit:    blockGasLimit,
+		BaseFee:     *uint256.NewInt(1),
+		BlobBaseFee: *uint256.NewInt(1),
+	}
+	evm := vm.NewEVM(blockCtx, evmtypes.TxContext{}, state.New(state.NewNoopReader()), chain.TestChainOsakaConfig, vm.Config{})
+	msg := types.NewMessage(
+		sender, recipient, 0, uint256.NewInt(0), 100_000,
+		uint256.NewInt(1), uint256.NewInt(1), uint256.NewInt(1),
+		nil, nil,
+		false, false, true, false, nil,
+	)
+	msg.SetBlobVersionedHashes([]common.Hash{{1}})
+	gp := new(GasPool).AddGas(blockGasLimit).AddBlobGas(params.GasPerBlob)
+
+	_, err := NewTxnExecutor(evm, nilBlobFeeCapMessage{msg}, gp).Execute(true, false)
+	require.ErrorIs(t, err, ErrMaxFeePerBlobGas)
+}
+
+// TestApplyFrame_IntrinsicGasBeforeAuthorities pins that ApplyFrame validates
+// intrinsic gas before verifyAuthorities mutates state. On a pre-Prague config
+// verifyAuthorities rejects a non-nil authorization list with a distinct error,
+// so reaching ErrIntrinsicGas proves the gas check runs first.
+func TestApplyFrame_IntrinsicGasBeforeAuthorities(t *testing.T) {
+	t.Parallel()
+
+	sender := accounts.InternAddress(common.HexToAddress("0x1111111111111111111111111111111111111111"))
+	recipient := accounts.InternAddress(common.HexToAddress("0x2222222222222222222222222222222222222222"))
+	cfg := chain.TestChainBerlinConfig // pre-Prague
+
+	ibs := state.New(state.NewNoopReader())
+	evm := newTestEVM(ibs, cfg, 30_000_000)
+	msg := newSimpleTransferMsg(sender, recipient, 1000 /* below intrinsic */, true)
+	msg.SetAuthorizations([]types.Authorization{{}})
+
+	gp := new(GasPool).AddGas(30_000_000)
+	_, err := NewTxnExecutor(evm, msg, gp).ApplyFrame()
+
+	require.ErrorIs(t, err, ErrIntrinsicGas)
+}
+
+// TestType4Prereq_NoStateMutationOnReject pins that a SetCode (EIP-7702)
+// transaction rejected for a deterministic prerequisite — here, a type-4 tx
+// before Prague — takes precedence over affordability and intrinsic-gas checks
+// and leaves the sender's nonce and balance untouched.
+func TestType4Prereq_NoStateMutationOnReject(t *testing.T) {
+	t.Parallel()
+
+	sender := accounts.InternAddress(common.HexToAddress("0x1111111111111111111111111111111111111111"))
+	recipient := accounts.InternAddress(common.HexToAddress("0x2222222222222222222222222222222222222222"))
+	cfg := chain.TestChainBerlinConfig // pre-Prague: type-4 not allowed
+
+	ibs := state.New(state.NewNoopReader())
+	initialBalance := uint256.NewInt(1)
+	require.NoError(t, ibs.AddBalance(sender, *initialBalance, tracing.BalanceChangeUnspecified))
+
+	evm := newTestEVM(ibs, cfg, 30_000_000)
+	gasPrice := uint256.NewInt(1_000_000_000)
+	msg := types.NewMessage(
+		sender, recipient, 0, uint256.NewInt(0), 1_000,
+		gasPrice, gasPrice, gasPrice,
+		nil, nil,
+		false, false, true, false, nil,
+	)
+	msg.SetAuthorizations([]types.Authorization{{}})
+
+	gp := new(GasPool).AddGas(30_000_000)
+	_, err := NewTxnExecutor(evm, msg, gp).Execute(true, false)
+	require.EqualError(t, err, "SetCode transaction not allowed before Prague fork")
+
+	nonce, nErr := ibs.GetNonce(sender)
+	require.NoError(t, nErr)
+	require.Zero(t, nonce, "nonce must be untouched on a type-4 prerequisite rejection")
+
+	bal, bErr := ibs.GetBalance(sender)
+	require.NoError(t, bErr)
+	require.Equal(t, *initialBalance, bal, "balance must be untouched on a type-4 prerequisite rejection")
+}
+
+// TestMaxInitCodeSizeReject_NoStateMutation pins that a contract-creation
+// transaction rejected for oversized initcode (EIP-3860) — with enough gas to
+// clear the intrinsic check — leaves the sender's nonce and balance untouched,
+// because preCheck validates the initcode size before buying gas.
+func TestMaxInitCodeSizeReject_NoStateMutation(t *testing.T) {
+	t.Parallel()
+
+	const blockGasLimit = 30_000_000
+
+	sender := accounts.InternAddress(common.HexToAddress("0x1111111111111111111111111111111111111111"))
+	cfg := chain.TestChainOsakaConfig // Shanghai active -> EIP-3860 initcode limit
+
+	ibs := state.New(state.NewNoopReader())
+	initialBalance := uint256.NewInt(1_000_000_000_000_000_000)
+	require.NoError(t, ibs.AddBalance(sender, *initialBalance, tracing.BalanceChangeUnspecified))
+
+	evm := newTestEVM(ibs, cfg, blockGasLimit)
+	gasPrice := uint256.NewInt(1)
+	// One byte over the EIP-3860 limit, with ample gas to clear intrinsic gas.
+	initcode := make([]byte, params.MaxInitCodeSize+1)
+	msg := types.NewMessage(
+		sender, accounts.NilAddress, 0, uint256.NewInt(0), 1_000_000,
+		gasPrice, gasPrice, gasPrice,
+		initcode, nil,
+		false, false, true, false, nil,
+	)
+	gp := new(GasPool).AddGas(blockGasLimit)
+
+	_, err := NewTxnExecutor(evm, msg, gp).Execute(true, false)
+	require.ErrorIs(t, err, vm.ErrMaxInitCodeSizeExceeded)
+
+	nonce, nErr := ibs.GetNonce(sender)
+	require.NoError(t, nErr)
+	require.Zero(t, nonce, "nonce must be untouched on an oversized-initcode rejection")
+
+	bal, bErr := ibs.GetBalance(sender)
+	require.NoError(t, bErr)
+	require.Equal(t, *initialBalance, bal, "balance must be untouched on an oversized-initcode rejection")
 }
