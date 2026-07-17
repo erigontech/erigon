@@ -365,7 +365,14 @@ func (m *memoryMutationCursor) DeleteCurrentMultiValBefore(v []byte) (uint64, er
 			return 0, err
 		}
 	}
-	if _, _, err := m.SeekExact(key); err != nil { // leave the cursor on the key
+	// dv is the first value the scan left alive. Without survivors the key is gone
+	// and the cursor must end up unpositioned — SeekExact can't express that, since
+	// it seeks via Seek and would land on the next key.
+	if dv == nil {
+		m.currentPair, m.currentDbEntry, m.currentMemEntry = cursorEntry{}, cursorEntry{}, cursorEntry{}
+		return uint64(len(doomed)), nil
+	}
+	if _, _, err := m.SeekExact(key); err != nil {
 		return 0, err
 	}
 	return uint64(len(doomed)), nil
