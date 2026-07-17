@@ -19,7 +19,7 @@ package state
 import (
 	"bytes"
 	"path/filepath"
-	"sort"
+	"slices"
 	"testing"
 
 	"github.com/c2h5oh/datasize"
@@ -52,7 +52,7 @@ func TestArchiveWriter(t *testing.T) {
 	for k := range td {
 		keys = append(keys, []byte(k))
 	}
-	sort.Slice(keys, func(i, j int) bool { return bytes.Compare(keys[i], keys[j]) < 0 })
+	slices.SortFunc(keys, bytes.Compare)
 
 	writeLatest := func(tb testing.TB, w *seg.Writer, td map[string][]upd) {
 		tb.Helper()
