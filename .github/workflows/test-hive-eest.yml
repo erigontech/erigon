@@ -29,57 +29,17 @@ jobs:
         # entries spawn separate `hive` group runners and run concurrently —
         # wall-clock unchanged, runner-minutes doubled.
         include:
-          # consume-enginex: split by fork for parallelism (~50k tests total).
-          # Engine API tests only exist from Paris (The Merge) onwards; the
-          # osaka shard also carries the BPO fork-transition fixtures.
-          # Pattern format: "<suite-regex>/<test-regex>" — the leading ".*/""
-          # matches the suite name (eest/consume-enginex) while the remainder
-          # filters individual pytest test IDs by fork parameter.
+          # Run all stable consume-enginex tests in one worker pool so
+          # pre-allocation groups can be scheduled across forks.
           - sim: consume-enginex
-            sim-limit: ".*/.*fork_(Paris|Shanghai)"
-            shard: paris+shanghai
+            sim-limit: ""
+            shard: stable
             fixtures-tarball: eest_stable
             max-failures: 0
             exec_mode: serial
           - sim: consume-enginex
-            sim-limit: ".*/.*fork_(Paris|Shanghai)"
-            shard: paris+shanghai
-            fixtures-tarball: eest_stable
-            max-failures: 0
-            exec_mode: parallel
-          - sim: consume-enginex
-            sim-limit: ".*/.*fork_Cancun"
-            shard: cancun
-            fixtures-tarball: eest_stable
-            max-failures: 0
-            exec_mode: serial
-          - sim: consume-enginex
-            sim-limit: ".*/.*fork_Cancun"
-            shard: cancun
-            fixtures-tarball: eest_stable
-            max-failures: 0
-            exec_mode: parallel
-          - sim: consume-enginex
-            sim-limit: ".*/.*fork_Prague"
-            shard: prague
-            fixtures-tarball: eest_stable
-            max-failures: 0
-            exec_mode: serial
-          - sim: consume-enginex
-            sim-limit: ".*/.*fork_Prague"
-            shard: prague
-            fixtures-tarball: eest_stable
-            max-failures: 0
-            exec_mode: parallel
-          - sim: consume-enginex
-            sim-limit: ".*/.*fork_(Osaka|BPO)"
-            shard: osaka
-            fixtures-tarball: eest_stable
-            max-failures: 0
-            exec_mode: serial
-          - sim: consume-enginex
-            sim-limit: ".*/.*fork_(Osaka|BPO)"
-            shard: osaka
+            sim-limit: ""
+            shard: stable
             fixtures-tarball: eest_stable
             max-failures: 0
             exec_mode: parallel
@@ -196,6 +156,7 @@ jobs:
             done
           }
           retry 3 go get . >> buildlogs.log
+          git apply ../erigon-full/.github/workflows/patches/hive-widen-ephemeral-ports.patch
           # Point hive's default (prebuilt-image) erigon client at the image we
           # built locally above, instead of cloning erigon inside the builder.
           sed -i "s|^ARG baseimage=erigontech/erigon$|ARG baseimage=hive/erigon|" clients/erigon/Dockerfile
@@ -267,8 +228,12 @@ jobs:
             # Retry only on the "too few tests parsed" signal (a transient
             # image-build/registry/clone failure); a completed run is judged on its first result.
             local attempt=1 max_attempts=3
+            local sim_limit_args=()
+            if [ -n "${2}" ]; then
+              sim_limit_args+=(--sim.limit="${2}" --sim.limit.exact=false)
+            fi
             while true; do
-              ./hive -docker.output -docker.auth --sim ethereum/eels/"${1}" --sim.limit="${2}" --sim.parallelism=12 --client erigon --docker.nocache=true --sim.limit.exact=false --sim.buildarg fixtures="$fixtures_url" ${branch_arg} ${{ matrix.extra-hive-flags }} 2>&1 | tee output.log || true
+              ./hive -docker.output -docker.auth --sim ethereum/eels/"${1}" "${sim_limit_args[@]}" --sim.parallelism=12 --client erigon --docker.nocache=true --sim.buildarg fixtures="$fixtures_url" ${branch_arg} ${{ matrix.extra-hive-flags }} 2>&1 | tee output.log || true
               status_line=$(tail -2 output.log | head -1 | sed -r "s/\x1B\[[0-9;]*[a-zA-Z]//g")
               suites=$(echo "$status_line" | sed -n 's/.*suites=\([0-9]*\).*/\1/p')
               if [ -z "$suites" ]; then
