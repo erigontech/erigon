@@ -343,9 +343,7 @@ func (c *StateCache) Clear() {
 			cache.Clear()
 		}
 	}
-	for i := range c.appliedEnd {
-		c.appliedEnd[i] = 0
-	}
+	c.appliedEnd = [kv.DomainLen]uint64{}
 }
 
 // Close releases every sub-cache's slot in the shared memory envelope so later
