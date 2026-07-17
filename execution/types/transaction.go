@@ -285,8 +285,8 @@ func UnmarshalTransactionFromBinary(data []byte, blobTxnsAreWrappedWithBlobs boo
 // A transaction hashes its canonical (EIP-2718) form, which the stored RLP
 // already contains verbatim: legacy transactions are stored as the canonical
 // list itself, typed ones as that canonical form wrapped in an RLP string.
-// Errors match what DecodeTransaction returns for the same input, so that
-// swapping in this function does not change what callers see.
+// Input that DecodeTransaction turns down is turned down here too, so swapping
+// in this function does not widen what callers accept.
 func TxnHashFromRLP(txnRlp []byte) (common.Hash, error) {
 	if len(txnRlp) == 0 {
 		return common.Hash{}, io.EOF
@@ -303,15 +303,12 @@ func TxnHashFromRLP(txnRlp []byte) (common.Hash, error) {
 	// that is not a transaction.
 	switch kind {
 	case rlp.List:
-		if len(content) == 0 {
-			return common.Hash{}, rlp.EOL
+		if len(content) == 0 { // a legacy txn carries nine fields, not none
+			return common.Hash{}, errShortTxnRLP
 		}
 		return libcrypto.Keccak256Hash(txnRlp), nil
 	case rlp.String:
-		if len(content) == 0 {
-			return common.Hash{}, rlp.EOL
-		}
-		if len(content) == 1 { // a type prefix with no payload
+		if len(content) <= 1 { // an envelope with no type prefix, or none past it
 			return common.Hash{}, errShortTxnRLP
 		}
 		return libcrypto.Keccak256Hash(content), nil

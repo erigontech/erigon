@@ -912,14 +912,14 @@ func TestTxnHashFromRLPErrors(t *testing.T) {
 		{"empty", nil, io.EOF},
 		{"bare byte", []byte{0x01}, errShortTxnRLP},
 		{"truncated string", []byte{0x84, 0x01}, nil},
-		{"empty string", []byte{0x80}, rlp.EOL},
+		{"empty string", []byte{0x80}, errShortTxnRLP},
 		{"trailing bytes", append(bytes.Clone(legacy), 0xFF), errTrailingBytes},
 		// A 1-byte string holding a byte < 0x80 is non-canonical RLP, so rlp.Split
 		// turns it down before the envelope guards below are reached.
 		{"non-canonical envelope", []byte{0x81, 0x02}, rlp.ErrCanonSize},
 		// Inputs that are well-formed RLP but cannot be a transaction. The decode
 		// this replaces rejected them, so hashing them would index corrupt data.
-		{"empty list", []byte{0xC0}, rlp.EOL},
+		{"empty list", []byte{0xC0}, errShortTxnRLP},
 		{"type byte only", []byte{0x81, 0x80}, errShortTxnRLP},
 	}
 	for _, tt := range tests {
@@ -949,24 +949,13 @@ func TestTxnHashFromRLPRejectsWhatDecodeRejects(t *testing.T) {
 	}
 }
 
-// TestTxnHashFromRLPErrorsMatchDecode pins the claim that swapping DecodeTransaction
-// for TxnHashFromRLP does not change what callers see: wherever the decode path
-// reports a sentinel, this reports the same one rather than a new error of its own.
-func TestTxnHashFromRLPErrorsMatchDecode(t *testing.T) {
-	tests := []struct {
-		input    []byte
-		sentinel error
-	}{
-		{nil, io.EOF},
-		{[]byte{0xC0}, rlp.EOL},
-		{[]byte{0x80}, rlp.EOL},
-	}
-	for _, tt := range tests {
-		if _, err := DecodeTransaction(tt.input); !errors.Is(err, tt.sentinel) {
-			t.Fatalf("premise broken: DecodeTransaction(%x) = %v, want %v", tt.input, err, tt.sentinel)
-		}
-		if _, err := TxnHashFromRLP(tt.input); !errors.Is(err, tt.sentinel) {
-			t.Fatalf("TxnHashFromRLP(%x) = %v, want %v to match DecodeTransaction", tt.input, err, tt.sentinel)
+// TestTxnHashFromRLPNeverReportsEOL pins that malformed input is turned down with a
+// real error. checkErrListEnd reads a bare rlp.EOL as a clean end of list, so
+// reporting one here would let a caller drop the element instead of rejecting it.
+func TestTxnHashFromRLPNeverReportsEOL(t *testing.T) {
+	for _, input := range [][]byte{nil, {0x01}, {0x80}, {0xC0}, {0x81, 0x80}, {0x84, 0x01}} {
+		if _, err := TxnHashFromRLP(input); err == rlp.EOL { //nolint:errorlint // a bare EOL is what checkErrListEnd matches
+			t.Errorf("TxnHashFromRLP(%x) reported a bare rlp.EOL", input)
 		}
 	}
 }
