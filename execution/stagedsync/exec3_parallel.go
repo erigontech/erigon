@@ -25,7 +25,6 @@ import (
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/rawdb/rawtemporaldb"
 	dbstate "github.com/erigontech/erigon/db/state"
-	"github.com/erigontech/erigon/db/state/changeset"
 	"github.com/erigontech/erigon/diagnostics/metrics"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/commitment"
@@ -113,25 +112,11 @@ type parallelExecutor struct {
 	// accumulator for txpool state-diff notifications; set before execLoop
 	// starts so that AuRa system-call nonce changes are emitted per block.
 	accumulator *shards.Accumulator
-	// changesetAccumulator state owned by the exec loop. Accessing or mutating
-	// this is the exec loop's responsibility — putting it here (rather than on
-	// the apply-loop side) ensures all sd.mem mutations originate from a single
-	// goroutine and avoids the data race between SetChangesetAccumulator
-	// (apply loop) and ApplyStateWrites (exec loop, via SysCallContract for
-	// block-end system calls) on SharedDomains.mem.
-	// changesetWindowStart is the first block of the batch that must capture
-	// a changeset (see changesetWindowStart in exec3.go); blocks below it run
-	// without an accumulator.
+	// changesetWindowStart is the first block of the batch that owns a changeset
+	// (see changesetWindowStart in exec3.go); it bounds the calculator's per-block
+	// compute + fold window. Changeset production itself lives in the commitment
+	// calculator, which reconstructs and saves each owned block's changeset.
 	changesetWindowStart uint64
-	currentChangeSet     *changeset.StateChangeSet
-	// currentChangeSetBlock is the block number currentChangeSet belongs to
-	// (0 == none). Tracked so ensureChangesetAccumulator can be a no-op when the
-	// accumulator is already installed for the block whose writes are about to
-	// be applied — making changeset capture robust against blocks scheduled out
-	// of band (e.g. processRequest scheduling the first block of a new request
-	// after the blockExecutors map went empty mid-batch, with no preceding
-	// blockResult to trigger the install at the rotation site below).
-	currentChangeSetBlock uint64
 }
 
 // stopKind classifies why the executor was asked to stop. It maps directly
@@ -183,20 +168,6 @@ func stopCauseOf(ctx context.Context) (*stopCause, bool) {
 		return s, true
 	}
 	return nil, false
-}
-
-// ensureChangesetAccumulator is a no-op: the commitment calculator is the sole
-// producer of each owned block's changeset — it reconstructs account/storage/code
-// diffs result-locally, installs its own changeset for the commitment compute, and
-// saves it. Exec installs no shared accumulator and records no changeset diffs.
-func (pe *parallelExecutor) ensureChangesetAccumulator(blockNum uint64) {}
-
-// clearChangesetAccumulator detaches the current changeset accumulator after
-// its block's changeset has been saved. Exec-loop only.
-func (pe *parallelExecutor) clearChangesetAccumulator() {
-	pe.domains().SetChangesetAccumulator(nil)
-	pe.currentChangeSet = nil
-	pe.currentChangeSetBlock = 0
 }
 
 func (pe *parallelExecutor) exec(ctx context.Context, execStage *StageState, u Unwinder,
@@ -307,14 +278,10 @@ func (pe *parallelExecutor) execImpl(ctx context.Context, execStage *StageState,
 	pe.commitResultsCh = commitResults
 	pe.maxBlockNum = maxBlockNum
 
-	// Configure changeset capture and seed the initial accumulator BEFORE
-	// the exec loop / executeBlocks goroutines start touching sd.mem. The
-	// exec loop owns all subsequent SetChangesetAccumulator transitions
-	// (per-block save/clear/install) so apply-loop and exec-loop sd.mem
-	// writes never race on SharedDomains.mem.
+	// The changeset window bounds which blocks the commitment calculator computes
+	// per-block and folds; the calculator produces and saves their changesets.
 	pe.changesetWindowStart = changesetWindowStart(pe.cfg.syncCfg.AlwaysGenerateChangesets,
 		pe.cfg.syncCfg.MaxReorgDepth, pe.cfg.blockReader.FrozenBlocks(), startBlockNum, maxBlockNum)
-	pe.ensureChangesetAccumulator(startBlockNum)
 
 	// Start the commitment calculator. It mirrors serial's per-block gate
 	// (exec3_serial.go: `if !dbg.BatchCommitments || shouldGenerateChangesets
@@ -370,11 +337,6 @@ func (pe *parallelExecutor) execImpl(ctx context.Context, execStage *StageState,
 			return fmt.Errorf("apply loop: open roTx: %w", err)
 		}
 		defer applyRoTx.Rollback()
-
-		// pe.changesetWindowStart and pe.currentChangeSet were set up
-		// before pe.run/executeBlocks launched their goroutines (above the
-		// calculator.Start call). Per-block accumulator save/clear/install
-		// transitions are driven from the exec loop's blockResult handler.
 
 		// appliedBlocks tracks blockNums that completed full apply-loop
 		// processing (including post-block validation). Used at exit to
@@ -1131,32 +1093,6 @@ func (pe *parallelExecutor) execLoop(ctx context.Context) (err error) {
 					pe.blockExecMetrics.Duration.Add(time.Since(blockExecutor.execStarted))
 					pe.blockExecMetrics.BlockCount.Add(1)
 				}
-				// Snapshot the just-completed block's changeset BEFORE sending the
-				// blockResult, so that the commitment calculator (which consumes
-				// blockResults on a separate goroutine) can find this block's
-				// saved changeset via GetChangesetByBlockNum at compute time.
-				// In per-block compute mode (changeset window), the
-				// calculator switches the accumulator to this saved CS for the
-				// duration of ComputeCommitment (committer.go:computeWithBlockAccumulator)
-				// so branch writes land in block N's CS rather than whatever the
-				// exec loop has installed as current. If we saved AFTER sendResult,
-				// the calculator could race ahead and look up an unsaved CS,
-				// causing branch deltas to leak into the next block's CS and
-				// produce wrong-trie-root chains on subsequent reorg-driven
-				// re-execution (see TestRecreateAndRewind reproducer). Clearing
-				// the live accumulator and the local pointer must still happen
-				// here (in the exec loop) so the rotation-to-next-block install
-				// at line 893-895 is serialized with the exec loop's other
-				// sd.mem writes (system calls, finalize, ApplyStateWrites for
-				// the next block).
-				// Belt-and-braces: an empty block (no tx-results reaching
-				// processResults) may not have triggered the install — create
-				// its (empty) accumulator so it gets saved like every other block.
-				pe.ensureChangesetAccumulator(blockResult.BlockNum)
-				if pe.currentChangeSet != nil {
-					pe.domains().SavePastChangesetAccumulator(blockResult.BlockHash, blockResult.BlockNum, pe.currentChangeSet)
-				}
-
 				// Decide the stop BEFORE sending. A terminal stop publishes the
 				// stopCause on the shared context before blockResult(M) crosses the
 				// channel, so the calculator holds the coalesce block M by the time
@@ -1203,7 +1139,6 @@ func (pe *parallelExecutor) execLoop(ctx context.Context) (err error) {
 				if err := blockExecutor.sendResult(ctx, blockResult, terminal); err != nil {
 					return err
 				}
-				pe.clearChangesetAccumulator()
 
 				// Block-validity rejection: the apply loop consumes blockResult and
 				// returns its Err; the calculator skips the commitment compute. Exit
@@ -1239,11 +1174,6 @@ func (pe *parallelExecutor) execLoop(ctx context.Context) (err error) {
 			pe.RUnlock()
 
 			if ok {
-				// Fast-path install of the next block's changeset accumulator,
-				// still in the exec loop (single-writer). If the next block's
-				// executor isn't in the map yet this is a no-op; processResults
-				// then installs it lazily on the block's first apply.
-				pe.ensureChangesetAccumulator(blockExecutor.blockNum)
 				pe.onBlockStart(ctx, blockExecutor.blockNum, blockExecutor.blockHash)
 				blockExecutor.execStarted = time.Now()
 				blockExecutor.scheduleExecution(ctx, pe)
@@ -1611,11 +1541,6 @@ func (pe *parallelExecutor) processResults(ctx context.Context, applyTx kv.Tempo
 		if !ok {
 			return nil, fmt.Errorf("unknown block: %d", txResult.Version().BlockNum)
 		}
-
-		// Ensure this block's changeset accumulator is installed before its
-		// writes are applied — covers blocks scheduled out of band (with no
-		// preceding blockResult to trigger the fast-path install above).
-		pe.ensureChangesetAccumulator(txResult.Version().BlockNum)
 
 		blockResult, err = blockExecutor.nextResult(ctx, pe, txResult, applyTx)
 
