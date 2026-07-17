@@ -11,8 +11,7 @@ concurrency:
 
 jobs:
   test-hive-eest:
-    runs-on:
-      group: hive
+    runs-on: ${{ matrix.sim == 'consume-enginex' && 'ubuntu-latest' || fromJSON('{"group":"hive"}') }}
     timeout-minutes: 60
     name: test-hive-eest (${{ matrix.shard }}, ${{ matrix.exec_mode }})
     strategy:
@@ -26,7 +25,7 @@ jobs:
         # Each shard runs twice — once with serial exec
         # (ERIGON_EXEC3_PARALLEL=false) and once with parallel — so
         # divergence between the two paths is caught on the PR. Matrix
-        # entries spawn separate `hive` group runners and run concurrently —
+        # entries spawn separate runners and run concurrently —
         # wall-clock unchanged, runner-minutes doubled.
         include:
           # consume-enginex: split by fork for parallelism (~50k tests total).
@@ -268,7 +267,7 @@ jobs:
             # image-build/registry/clone failure); a completed run is judged on its first result.
             local attempt=1 max_attempts=3
             while true; do
-              ./hive -docker.output -docker.auth --sim ethereum/eels/"${1}" --sim.limit="${2}" --sim.parallelism=12 --client erigon --docker.nocache=true --sim.limit.exact=false --sim.buildarg fixtures="$fixtures_url" ${branch_arg} ${{ matrix.extra-hive-flags }} 2>&1 | tee output.log || true
+              ./hive -docker.output -docker.auth --sim ethereum/eels/"${1}" --sim.limit="${2}" --sim.parallelism=${{ matrix.sim == 'consume-enginex' && 4 || 12 }} --client erigon --docker.nocache=true --sim.limit.exact=false --sim.buildarg fixtures="$fixtures_url" ${branch_arg} ${{ matrix.extra-hive-flags }} 2>&1 | tee output.log || true
               status_line=$(tail -2 output.log | head -1 | sed -r "s/\x1B\[[0-9;]*[a-zA-Z]//g")
               suites=$(echo "$status_line" | sed -n 's/.*suites=\([0-9]*\).*/\1/p')
               if [ -z "$suites" ]; then
