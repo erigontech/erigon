@@ -380,7 +380,7 @@ func (s *EngineServer) newPayload(ctx context.Context, req *engine_types.Executi
 			}
 			return nil, &rpc.InvalidParamsError{Message: fmt.Sprintf("undecodable blockAccessList: %v", err)}
 		}
-		hash := crypto.HashData(bal)
+		hash := crypto.Keccak256Hash(bal)
 		header.BlockAccessListHash = &hash
 		blockAccessListBytes = bal
 		if req.SlotNumber != nil {

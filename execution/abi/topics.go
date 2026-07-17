@@ -72,9 +72,9 @@ func MakeTopics(query ...[]any) ([][]common.Hash, error) {
 				blob := new(big.Int).SetUint64(rule).Bytes()
 				copy(topic[length.Hash-len(blob):], blob)
 			case string:
-				topic = crypto.HashData([]byte(rule))
+				topic = crypto.Keccak256Hash([]byte(rule))
 			case []byte:
-				topic = crypto.HashData(rule)
+				topic = crypto.Keccak256Hash(rule)
 
 			default:
 				// todo(rjl493456442) according solidity documentation, indexed event
