@@ -366,7 +366,12 @@ func TestSuggestTipCap_SparseBlocks(t *testing.T) {
 		Alloc:  types.GenesisAlloc{addr: {Balance: big.NewInt(math.MaxInt64)}},
 	}
 	signer := types.LatestSigner(gspec.Config)
-	m := execmoduletester.New(t, execmoduletester.WithGenesisSpec(gspec), execmoduletester.WithKey(key))
+	m := execmoduletester.New(
+		t,
+		execmoduletester.WithGenesisSpec(gspec),
+		execmoduletester.WithKey(key),
+		execmoduletester.WithAmsterdamBuilderContracts(),
+	)
 
 	// 10 blocks: only the last one (index 9) has a transaction; all others are empty.
 	const totalBlocks = 10
@@ -414,7 +419,11 @@ func TestSuggestTipCap_AllEmptyBlocks(t *testing.T) {
 	}
 
 	gspec := &types.Genesis{Config: chain.AllProtocolChanges}
-	m := execmoduletester.New(t, execmoduletester.WithGenesisSpec(gspec))
+	m := execmoduletester.New(
+		t,
+		execmoduletester.WithGenesisSpec(gspec),
+		execmoduletester.WithAmsterdamBuilderContracts(),
+	)
 
 	const totalBlocks = 5
 	ch, err := blockgen.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, totalBlocks, func(_ int, b *blockgen.BlockGen) {

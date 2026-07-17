@@ -281,6 +281,7 @@ func createDumpTestKV(t *testing.T, chainConfig *chain.Config, chainSize int) *e
 		execmoduletester.WithGenesisSpec(gspec),
 		execmoduletester.WithKey(key),
 		execmoduletester.WithPruneMode(prune.DefaultMode),
+		execmoduletester.WithAmsterdamBuilderContracts(),
 	)
 
 	// Generate testing blocks
