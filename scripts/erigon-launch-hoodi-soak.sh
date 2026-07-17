@@ -13,6 +13,16 @@ CHECKPOINT_URL="${CHECKPOINT_URL:-https://checkpoint-sync.hoodi.ethpandaops.io}"
 
 export USE_STATE_CACHE=false
 
+# ERIGON_MERGE_MIN_AGE_STEPS delays merges of newly-built files until
+# they're N steps behind the current frontier. This is the same knob
+# chain.toml publishers use to give peers time to download per-step
+# files before those files get consolidated into wider merged files.
+# For the soak: N=6 gives >30 min per-step-file lifetime on hoodi, so
+# Phase 3.5 reliably finds a width==1 commitment .kv for regime 3.
+# See docs/plans/20260504-v2-operational-guide.md § Delayed merge for
+# peer propagation.
+export ERIGON_MERGE_MIN_AGE_STEPS="${ERIGON_MERGE_MIN_AGE_STEPS:-6}"
+
 exec "$BIN" \
   --datadir="$DATADIR" \
   --chain=hoodi --prune.mode=minimal \
