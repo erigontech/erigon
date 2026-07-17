@@ -40,10 +40,13 @@ for {
 ```
 
 Load-then-increment isn't atomic, so it re-checks that the bundle is still current
-after incrementing. Invariant this buys: a bundle only accrues refs while current;
-once superseded its refcount only falls → a clean drain watermark. A reader only
-ever uses a bundle it observed as current, and a current bundle's files are never
-in any `retired` set.
+after incrementing. A superseded bundle can still be incremented transiently — the
+loop mis-pins one whenever a publish lands between the load and the add — so the
+refcount is not monotonically falling once superseded. What the re-check buys is
+that such a mis-pin is always released before the bundle is used: a reader only
+ever *uses* a bundle it observed as current, and a current bundle's files are never
+in any `retired` set. The drain watermark holds because a mis-pin is dropped, not
+because the count cannot rise.
 
 ## Retire a file — remove from `dirtyFiles`, publish a new generation
 
@@ -105,12 +108,16 @@ reader's bundle no longer contains the retired file. The actual unlink is
       │ reclaim oldest-first while rc==0 && head!=current:
       │   delete head.retired; oldestVisible = head.next; repeat
       ▼
-   closeFilesAndRemove(f1,f2)   ← single owner, out of dirtyFilesLock
+   closeFilesAndRemove(f1,f2)   ← single owner; under dirtyFilesLock on the writer
+                                  publish path, after unlocking on reader-close
 ```
 
 ## Invariants
 
 1. Files in a bundle's `retired` set are never in the current bundle's visible set.
-2. A bundle's `refcnt` only rises while current; only falls after it's superseded.
-3. A given `FilesItem` reaches `closeFilesAndRemove` from exactly one place (the
-   reclaimer) — no double-free, no per-file `canDelete`/`refcount` needed.
+2. A superseded bundle can still be mis-pinned, but never used: every mis-pin is
+   released before the bundle is read from.
+3. A `FilesItem` retired from `dirtyFiles` through this path reaches
+   `closeFilesAndRemove` only from the reclaimer — no double-free, no per-file
+   `canDelete`/`refcount` needed. Files that were never published (merge temp
+   output) are removed by their producer and never enter a `retired` set.
