@@ -33,6 +33,7 @@ import (
 	"github.com/erigontech/erigon/cl/phase1/execution_client/block_collector"
 	"github.com/erigontech/erigon/cl/phase1/forkchoice"
 	"github.com/erigontech/erigon/cl/phase1/network"
+	"github.com/erigontech/erigon/cl/utils"
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
@@ -98,6 +99,19 @@ func elBackfillFinished(slot, elBlock, destinationSlot, destinationBlock uint64)
 		return true
 	}
 	return false
+}
+
+// clampProgress derives (processed, total) for a backwards download, guarding the
+// unsigned subtractions against underflow when the floor and current counters
+// drift past the frozen highestBlockSeen. total grows to at least processed so a
+// backfill continuing below the floor estimate keeps advancing while the display
+// stays within 100%.
+func clampProgress(highestBlockSeen, floor, current uint64) (processed, total uint64) {
+	current = min(current, highestBlockSeen)
+	floor = min(floor, highestBlockSeen)
+	processed = highestBlockSeen - current
+	total = max(highestBlockSeen-floor, processed)
+	return
 }
 
 // SpawnStageBeaconsForward spawn the beacon forward stage
@@ -343,26 +357,16 @@ func SpawnStageHistoryDownload(cfg StageHistoryReconstructionCfg, ctx context.Co
 				logger.Debug(logMsg, logArgs...)
 
 				if !isDownloadingForBeacon {
-					// Genesis block (0) is never collected, so the lowest reachable
-					// EL block number is 1. Clamp to avoid an off-by-one that makes
-					// progress stall at N-1/N.
-					effectiveLowest := max(lowestBlockToReach, 1)
-					toprocess := highestBlockSeen - effectiveLowest
-					processed := highestBlockSeen - uint64(currEth1Progress.Load())
-					remaining := float64(toprocess - processed)
+					// Genesis block (0) is never collected, so the lowest reachable EL block is 1.
+					processed, toprocess := clampProgress(highestBlockSeen, max(lowestBlockToReach, 1), uint64(currEth1Progress.Load()))
 					log.Info("Downloading Execution History", "progress",
 						fmt.Sprintf("%d/%d", processed, toprocess),
-						"ETA", (time.Duration(remaining/speed) * time.Second).String(),
+						"ETA", utils.ETA(toprocess-processed, speed),
 						"blk/sec", fmt.Sprintf("%.1f", speed))
 				} else {
-					// Beacon history downloads backward; lowestBlockToReach (the CL
-					// snapshot boundary) is only an estimate of the floor — a full or
-					// archive backfill keeps going below it toward genesis. Clamp the
-					// total to the work done so the X/Y display never runs past 100%.
-					beaconDone := highestBlockSeen - currProgress
-					beaconTotal := max(highestBlockSeen-lowestBlockToReach, beaconDone)
+					processed, toprocess := clampProgress(highestBlockSeen, lowestBlockToReach, currProgress)
 					log.Info("Downloading Beacon History", "progress",
-						fmt.Sprintf("%d/%d", beaconDone, beaconTotal),
+						fmt.Sprintf("%d/%d", processed, toprocess),
 						"blk/sec", fmt.Sprintf("%.1f", speed))
 				}
 				// More UX-friendly logging

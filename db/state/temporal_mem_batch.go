@@ -22,6 +22,7 @@ import (
 	"errors"
 	"fmt"
 	"maps"
+	"slices"
 	"sort"
 	"strings"
 	"sync"
@@ -255,7 +256,11 @@ func (sd *TemporalMemBatch) getLatest(domain kv.Domain, key []byte) (v []byte, s
 			}
 		}
 
-		return nil, 0, false
+		// kv.NoStepBound distinguishes "no in-flight unwind bounds this key"
+		// from a bound at step 0 (a delete-shape entry above whose keyStep is
+		// 0), so young chains — whose whole state lives in step 0 — still get
+		// the per-key signal.
+		return nil, kv.NoStepBound, false
 	}
 
 	keyS := common.ToStringZeroCopy(key)
@@ -279,7 +284,7 @@ func (sd *TemporalMemBatch) getLatest(domain kv.Domain, key []byte) (v []byte, s
 }
 
 func (sd *TemporalMemBatch) GetAsOf(domain kv.Domain, key []byte, ts uint64) (v []byte, ok bool, err error) {
-	if !sd.inMemHistoryReads {
+	if !sd.inMemHistoryReads && domain != kv.ReceiptDomain {
 		return nil, false, errors.New("GetAsOf called on TemporalMemBatch with inMemHistoryReads disabled")
 	}
 	sd.latestStateLock.RLock()
@@ -338,6 +343,10 @@ func (sd *TemporalMemBatch) GetAsOf(domain kv.Domain, key []byte, ts uint64) (v 
 		}
 	}
 	return unwoundLatest(domain, keyS)
+}
+
+func (sd *TemporalMemBatch) HistorySeek(domain kv.Domain, key []byte, ts uint64) (v []byte, ok bool, err error) {
+	return sd.GetAsOf(domain, key, ts)
 }
 
 func (sd *TemporalMemBatch) SizeEstimate() uint64 {
@@ -864,11 +873,11 @@ func (sd *TemporalMemBatch) flushDiffSet(_ context.Context, tx kv.RwTx) error {
 func (sd *TemporalMemBatch) flushWriters(ctx context.Context, tx kv.RwTx) error {
 	aggTx := AggTx(tx)
 	for _, ws := range sd.pastDomainWriters {
-		for i := len(ws) - 1; i >= 0; i-- {
-			if err := ws[i].Flush(ctx, tx); err != nil {
+		for _, w := range slices.Backward(ws) {
+			if err := w.Flush(ctx, tx); err != nil {
 				return err
 			}
-			ws[i].Close()
+			w.Close()
 		}
 	}
 	for di, w := range sd.domainWriters {
@@ -881,11 +890,11 @@ func (sd *TemporalMemBatch) flushWriters(ctx context.Context, tx kv.RwTx) error 
 		aggTx.d[di].closeValsCursor() //TODO: why?
 		w.Close()
 	}
-	for i := len(sd.pastIIWriters) - 1; i >= 0; i-- {
-		if err := sd.pastIIWriters[i].Flush(ctx, tx); err != nil {
+	for _, writer := range slices.Backward(sd.pastIIWriters) {
+		if err := writer.Flush(ctx, tx); err != nil {
 			return err
 		}
-		sd.pastIIWriters[i].close()
+		writer.close()
 	}
 	for _, w := range sd.iiWriters {
 		if w == nil {

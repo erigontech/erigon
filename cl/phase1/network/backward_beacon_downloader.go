@@ -23,6 +23,7 @@ import (
 	"io"
 	"math"
 	"net/http"
+	"slices"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -297,12 +298,11 @@ func (b *BackwardBeaconDownloader) processResponses(ctx context.Context, respons
 	// when a retry causes the same batch to be re-fetched.
 	advanced := false
 	matched := false
-	for i := len(responses) - 1; i >= 0; i-- {
+	for _, block := range slices.Backward(responses) {
 		if b.finished.Load() {
 			return nil
 		}
 
-		block := responses[i]
 		blockRoot, err := block.Block.HashSSZ()
 		if err != nil {
 			log.Debug("Could not compute block root", "err", err)
@@ -313,7 +313,6 @@ func (b *BackwardBeaconDownloader) processResponses(ctx context.Context, respons
 			log.Trace("[BackwardBeaconDownloader] root mismatch", "slot", block.Block.Slot, "got", common.Hash(blockRoot), "expected", b.expectedRoot)
 			continue
 		}
-		log.Debug("[BackwardBeaconDownloader] block matched", "slot", block.Block.Slot, "root", common.Hash(blockRoot))
 		matched = true
 
 		var envelope *cltypes.SignedExecutionPayloadEnvelope
