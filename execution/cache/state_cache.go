@@ -259,7 +259,7 @@ func (c *StateCache) FillIfFresh(domain kv.Domain, key []byte, value []byte, rea
 			readTxNum = snapshotEnd - 1
 		}
 	}
-	c.put(domain, key, value, readTxNum, false)
+	cache.PutIfAbsent(key, common.Copy(value), readTxNum)
 }
 
 func (c *StateCache) put(domain kv.Domain, key []byte, value []byte, txNum uint64, overwrite bool) {
