@@ -2,6 +2,7 @@ package temporal
 
 import (
 	"encoding/binary"
+	"sync"
 	"testing"
 	"time"
 
@@ -255,6 +256,70 @@ func TestTemporalTx_PinsBlockFilesView(t *testing.T) {
 	require.NoError(t, err)
 	defer roTx2.Rollback()
 	require.NotNil(t, roTx2.(*Tx).blocktx)
+}
+
+// DomainVisibleEnd's memo serves repeat readers lock-free while first loads
+// run under the memo mutex. Fresh txs each round make the two paths
+// interleave across goroutines; results must stay stable (run with -race).
+func TestTemporalTx_DomainVisibleEndConcurrent(t *testing.T) {
+	t.Parallel()
+	ctx := t.Context()
+
+	mdbxDb := memdb.NewTestDB(t, dbcfg.ChainDB)
+	dirs := datadir.New(t.TempDir())
+	agg := state.NewTest(dirs).StepSize(1).MustOpen(ctx, mdbxDb)
+	defer agg.Close()
+	temporalDb, err := New(mdbxDb, agg, nil)
+	require.NoError(t, err)
+	defer temporalDb.Close()
+
+	acc := common.HexToAddress("0x1234567890123456789012345678901234567890")
+	slot := common.HexToHash("0x0000000000000000000000000000000000000000000000000000000000000001")
+	storageK := append(append([]byte{}, acc[:]...), slot[:]...)
+
+	rwTtx, err := temporalDb.BeginTemporalRw(ctx)
+	require.NoError(t, err)
+	defer rwTtx.Rollback()
+	sd, err := execctx.NewSharedDomains(ctx, rwTtx, log.Root())
+	require.NoError(t, err)
+	defer sd.Close()
+	require.NoError(t, sd.DomainPut(kv.StorageDomain, rwTtx, storageK, []byte{1}, 1, nil))
+	require.NoError(t, sd.Flush(ctx, rwTtx))
+	require.NoError(t, rwTtx.Commit())
+
+	var expectedEnd [kv.DomainLen]uint64
+	var expectedOk [kv.DomainLen]bool
+	baseTtx, err := temporalDb.BeginTemporalRo(ctx)
+	require.NoError(t, err)
+	defer baseTtx.Rollback()
+	for d := range kv.DomainLen {
+		expectedEnd[d], expectedOk[d] = baseTtx.Debug().DomainVisibleEnd(d)
+	}
+	baseTtx.Rollback()
+	require.Equal(t, uint64(2), expectedEnd[kv.StorageDomain])
+	require.True(t, expectedOk[kv.StorageDomain])
+
+	for range 25 {
+		require.NoError(t, temporalDb.ViewTemporal(ctx, func(roTtx kv.TemporalTx) error {
+			var wg sync.WaitGroup
+			for range 8 {
+				wg.Add(1)
+				go func() {
+					defer wg.Done()
+					for range 4 {
+						for d := range kv.DomainLen {
+							end, ok := roTtx.Debug().DomainVisibleEnd(d)
+							if end != expectedEnd[d] || ok != expectedOk[d] {
+								t.Errorf("domain %v: got (%d, %t), want (%d, %t)", d, end, ok, expectedEnd[d], expectedOk[d])
+							}
+						}
+					}
+				}()
+			}
+			wg.Wait()
+			return nil
+		}))
+	}
 }
 
 // A read-only temporal tx memoizes DomainVisibleEnd, while
