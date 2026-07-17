@@ -921,6 +921,9 @@ func TestTxnHashFromRLPErrors(t *testing.T) {
 		// this replaces rejected them, so hashing them would index corrupt data.
 		{"empty list", []byte{0xC0}, errShortTxnRLP},
 		{"type byte only", []byte{0x81, 0x80}, errShortTxnRLP},
+		{"envelope holding a legacy list", []byte{0x82, 0xF8, 0x00}, ErrInvalidTxType},
+		{"envelope type byte >= 0x80", []byte{0x82, 0x80, 0x00}, ErrInvalidTxType},
+		{"unregistered envelope type", []byte{0x82, 0x7F, 0x00}, ErrTxTypeNotSupported},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -939,12 +942,32 @@ func TestTxnHashFromRLPErrors(t *testing.T) {
 // path they stand in for: TxnHashFromRLP must not accept an input DecodeTransaction
 // turns down.
 func TestTxnHashFromRLPRejectsWhatDecodeRejects(t *testing.T) {
-	for _, input := range [][]byte{{0xC0}, {0x81, 0x80}, {0x81, 0x02}, {0x80}, {0x01}} {
+	for _, input := range [][]byte{
+		{0xC0}, {0x81, 0x80}, {0x81, 0x02}, {0x80}, {0x01},
+		{0x82, 0xF8, 0x00}, {0x82, 0x80, 0x00}, {0x82, 0x7F, 0x00},
+	} {
 		if _, err := DecodeTransaction(input); err == nil {
 			t.Fatalf("DecodeTransaction(%x) unexpectedly succeeded; guard premise is wrong", input)
 		}
 		if _, err := TxnHashFromRLP(input); err == nil {
 			t.Fatalf("TxnHashFromRLP(%x) accepted an input DecodeTransaction rejects", input)
+		}
+	}
+}
+
+// TestTxnHashFromRLPMirrorsTypeByteCheck pins the envelope type byte to the decode's
+// across every value one can hold, so a type the decode turns down is never hashed and
+// indexed under it. The payload is deliberately junk: a type the decode accepts fails on
+// the payload instead, which this skips.
+func TestTxnHashFromRLPMirrorsTypeByteCheck(t *testing.T) {
+	for b := 0; b <= 0xFF; b++ {
+		envelope := []byte{0x82, byte(b), 0x00} // rlp string holding [type, payload]
+		_, decErr := DecodeTransaction(envelope)
+		if !errors.Is(decErr, ErrInvalidTxType) && !errors.Is(decErr, ErrTxTypeNotSupported) {
+			continue
+		}
+		if _, err := TxnHashFromRLP(envelope); err == nil {
+			t.Errorf("type byte %#02x: DecodeTransaction reports %q, TxnHashFromRLP accepts it", b, decErr)
 		}
 	}
 }
