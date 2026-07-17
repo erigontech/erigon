@@ -1,7 +1,7 @@
 # A Common File Format for Blockchain State History
 
 Proposal: standardize a small set of **immutable, content-addressable files** carrying a blockchain's state history.
-Clients distribute them p2p and derive every other data structure locally.
+Clients distribute them P2P and derive every other data structure locally.
 
 ---
 
@@ -23,7 +23,7 @@ Everything is an append-only **stream of updates**:
 | Headers/Bodies | blockNum | blockNum | header/body          |
 
 - **Creation** = insert empty value
-- **Deletion** = insert tombstone to LatestState and "last value" to History
+- **Deletion** = insert tombstone into LatestState and "last value" to History
 - Stream is source of truth. Everything else — indexes, blooms, btrees — is a **derivable projection**
 
 ## 2. The queries
@@ -135,14 +135,14 @@ Clients derive their own format of Latest State from "The History".
 
 ### Limitations
 
-Large values: can create
+Large values:
 
-- Old `Latest State` can't be pruned in this schema. It means can't store vals in `.ef`. No problem: can create new file
-  type `.lv` sharded as `.ef` - `account.8-16.lv`
+- Old `Latest State` can't be pruned in this schema, so the values can't live in `.ef`. No problem: create a new
+  file type `.lv`, sharded as `.ef` - `account.8-16.lv`
 - But still "never-pruning and never-compaction" `.lv` files - is the Cost. But it's cold-storage (probably even RPC
   will not touch it).
-- Does "no `.lv` pruning" - means users will have incentive to delete it?
-- Does "no `.lv` pruning" - means attack-vector of bloating?
+- Does "no `.lv` pruning" mean users will have an incentive to delete it?
+- Does "no `.lv` pruning" open an attack vector of bloating?
 
 ### Latest State derived format ideas
 
@@ -150,7 +150,7 @@ Large values: can create
 - store it in db or files
 - read-amplification-driven or write-amp
 
-## Erigon's far plans (not related to State Spec)
+## Erigon's future plans (not related to State Spec)
 
 - **Shard `.kv` into ~1g**: to reduce Write-amplification (and amount of free space needed) of Merge
 - **Shard history by Gas or GB's, not blocks/txNums** Bloatnet produced wildly unequal shards. Required manual Erigon

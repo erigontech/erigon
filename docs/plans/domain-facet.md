@@ -58,8 +58,8 @@ OMG! `EAVT` is it an append-only stream of facts - which can be Specified and Di
 
 ----
 
-.kv must auto-split to 64mb shards. It will reduce write-amplification of Merge (can merge limited amount of shards at a
-time). bloom-filter can be per-shard.
+.kv must auto-split to 64MB shards. It will reduce write-amplification of Merge (can merge limited amount of shards at a
+time). Bloom filter can be per-shard.
 
 The logical stream is a table with three columns:
 
@@ -75,7 +75,7 @@ Erigon stores it decomposed:
 Important notice:
 
 - .kv - immutable. new files shadow old (by keys). merge (like in LSM)
-- .ev and .v - immutable. no-shadow. Concatenation - not really a `merge`
+- .ef and .v - immutable. no-shadow. Concatenation - not really a `merge`
 - mutable part stored in `mdbx` (can be any db, or in-mem)
 
 What we don't have:
@@ -85,7 +85,6 @@ What we don't have:
 - .kv files are sharded by `txNum` - maybe need shard by `gas` for better equality (Bloatnet produced huge
   transactions - which required manually reconfiguring Erigon to throw data from DB to files earlier). Maybe it means that
   Ethereum `FullImmutabilityThreshold` must be measured in `Gas` instead of Blocks/Slots
--
 
 ## !Alex's IDEA!
 
