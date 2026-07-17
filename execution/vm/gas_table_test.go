@@ -30,6 +30,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/datadir"
@@ -43,9 +44,11 @@ import (
 	"github.com/erigontech/erigon/execution/state"
 	"github.com/erigontech/erigon/execution/tests/testutil"
 	"github.com/erigontech/erigon/execution/tracing"
+	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/accounts"
 	"github.com/erigontech/erigon/execution/vm"
 	"github.com/erigontech/erigon/execution/vm/evmtypes"
+	"github.com/erigontech/erigon/execution/vm/program"
 	"github.com/erigontech/erigon/rpc/rpchelper"
 )
 
@@ -319,6 +322,56 @@ func TestCallNewAccountSpillBefore63of64(t *testing.T) {
 			require.True(t, exists, "callee account must have been created")
 		})
 	}
+}
+
+func TestCreate2OntoExistingAccountSkipsNewAccountCharge(t *testing.T) {
+	t.Parallel()
+
+	tx, sd := testTemporalTxSD(t)
+	txNum, _, err := sd.SeekCommitment(t.Context(), tx)
+	require.NoError(t, err)
+
+	r, w := state.NewReaderV3(sd.AsGetter(tx)), state.NewWriter(sd.AsPutDel(tx), nil, txNum)
+	s := state.New(r)
+
+	initCode := program.New().Push(0).Push(400_000).Op(vm.MSTORE).Return(0, 0).Bytes()
+	salt := uint256.NewInt(0)
+	factoryAddress := common.HexToAddress("0xfac0")
+	factory := accounts.InternAddress(factoryAddress)
+	target := accounts.InternAddress(types.CreateAddress2(factoryAddress, salt.Bytes32(), accounts.InternCodeHash(crypto.HashData(initCode))))
+
+	factoryCode := program.New().Create2(initCode, salt).Push(0).Op(vm.MSTORE).Return(0, 32).Bytes()
+	s.CreateAccount(factory, true)
+	s.SetCode(factory, factoryCode, tracing.CodeChangeUnspecified)
+	s.CreateAccount(target, false)
+	s.AddBalance(target, *uint256.NewInt(1), tracing.BalanceChangeUnspecified)
+
+	vmctx := evmtypes.BlockContext{
+		CanTransfer: func(evmtypes.IntraBlockState, accounts.Address, uint256.Int) (bool, error) { return true, nil },
+		Transfer: func(evmtypes.IntraBlockState, accounts.Address, accounts.Address, uint256.Int, bool, *chain.Rules) error {
+			return nil
+		},
+	}
+	_ = s.CommitBlock(vmctx.Rules(chain.AllProtocolChanges), w)
+	var enteredCreateGas, forwardedCreateGas uint64
+	hooks := &tracing.Hooks{
+		OnEnter: func(_ int, typ byte, _, _ accounts.Address, _ bool, _ []byte, gas uint64, _ uint256.Int, _ []byte) {
+			if vm.OpCode(typ) == vm.CREATE2 {
+				enteredCreateGas = gas
+			}
+		},
+		OnGasChange: func(old, new uint64, reason tracing.GasChangeReason) {
+			if reason == tracing.GasChangeCallContractCreation2 {
+				forwardedCreateGas = old - new
+			}
+		},
+	}
+	vmenv := vm.NewEVM(vmctx, evmtypes.TxContext{}, s, chain.AllProtocolChanges, vm.Config{Tracer: hooks})
+
+	ret, _, _, err := vmenv.Call(accounts.ZeroAddress, factory, nil, mdgas.MdGas{Regular: 500_000}, uint256.Int{}, false)
+	require.NoError(t, err)
+	require.Equal(t, target.Value(), common.BytesToAddress(ret))
+	require.Equal(t, forwardedCreateGas, enteredCreateGas)
 }
 
 var createGasTests = []struct {

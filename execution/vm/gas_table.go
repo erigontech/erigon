@@ -370,9 +370,6 @@ func gasCreateEip3860(evm *EVM, callContext *CallContext, availableGas mdgas.MdG
 	if overflow {
 		return mdgas.MdGas{}, ErrGasUintOverflow
 	}
-	if evm.ChainRules().IsAmsterdam {
-		gas.State = params.StateGasNewAccount
-	}
 	return gas, nil
 }
 
@@ -397,9 +394,6 @@ func gasCreate2Eip3860(evm *EVM, callContext *CallContext, availableGas mdgas.Md
 	gas.Regular, overflow = math.SafeAdd(gas.Regular, wordGas)
 	if overflow {
 		return mdgas.MdGas{}, ErrGasUintOverflow
-	}
-	if evm.ChainRules().IsAmsterdam {
-		gas.State = params.StateGasNewAccount
 	}
 	return gas, nil
 }

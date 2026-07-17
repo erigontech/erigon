@@ -1016,20 +1016,25 @@ func opCreate2(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) 
 
 // execCreate is the shared implementation for opCreate (salt == nil) and opCreate2 (salt != nil).
 func execCreate(pc uint64, evm *EVM, scope *CallContext, value uint256.Int, input []byte, salt *uint256.Int) (uint64, []byte, error) {
-	gas := scope.Gas()
-	if evm.ChainRules().IsTangerineWhistle {
-		gas.Regular -= gas.Regular / 64
-	}
-
-	gasChangeReason := tracing.GasChangeCallContractCreation
+	codeAndHash := &codeAndHash{code: input}
+	typ := CREATE
+	var address accounts.Address
 	if salt != nil {
-		gasChangeReason = tracing.GasChangeCallContractCreation2
+		typ = CREATE2
+		address = accounts.InternAddress(types.CreateAddress2(scope.Contract.Address().Value(), salt.Bytes32(), codeAndHash.Hash()))
+	} else {
+		nonce, err := evm.intraBlockState.GetNonce(scope.Contract.Address())
+		if err != nil {
+			return pc, nil, fmt.Errorf("%w: %w", ErrIntraBlockStateFailed, err)
+		}
+		address = accounts.InternAddress(types.CreateAddress(scope.Contract.Address().Value(), nonce))
 	}
-	scope.useGas(gas.Regular, evm.Config().Tracer, gasChangeReason)
-	scope.stateGas = 0 // pass reservoir to child via callGas; restoreChildGas returns it
 
-	res, addr, returnGas, childGasUsage, wasBalanceOnly, suberr := evm.Create(scope.Contract.Address(), input, gas, value, salt, false)
+	res, addr, _, _, _, parentOutOfGas, suberr := evm.create(scope.Contract.Address(), codeAndHash, scope.Gas(), value, address, typ, true, false, scope)
 	scope.Contract.selfBalanceCached = false
+	if parentOutOfGas {
+		return pc, nil, ErrOutOfGas
+	}
 
 	// Push item on the stack based on the returned error. If the ruleset is
 	// homestead we must check for CodeStoreOutOfGasError (homestead only
@@ -1046,28 +1051,6 @@ func execCreate(pc uint64, evm *EVM, scope *CallContext, value uint256.Int, inpu
 		result.SetBytes(addrVal[:])
 	}
 	scope.Stack.push(result)
-
-	scope.restoreChildGas(returnGas, evm.config.Tracer)
-
-	if evm.chainRules.IsAmsterdam {
-		if suberr != nil {
-			// EIP-8037: child CREATE failed, so no account was created — refill
-			// the NEW_ACCOUNT the parent charged at CREATE entry. The child's
-			// own reservoir was already merged back via restoreChildGas above.
-			scope.refillStateGas(params.StateGasNewAccount)
-		} else {
-			// EIP-8037: child success — its net state-gas usage is already
-			// captured via the leftover reservoir merged by restoreChildGas
-			// above; fold in only its spilled portion so an ancestor revert
-			// refills from the right pool.
-			scope.stateGasSpill += childGasUsage.StateSpill
-			if wasBalanceOnly {
-				// Target already existed and was non-empty: no new account
-				// leaf created, so refill the unconditional NEW_ACCOUNT charge.
-				scope.refillStateGas(params.StateGasNewAccount)
-			}
-		}
-	}
 
 	if suberr == ErrExecutionReverted {
 		evm.returnData = res // set REVERT data to return data buffer
