@@ -16,14 +16,6 @@ rules:
       - test-kurtosis-assertoor.yml
       - test-kurtosis-gloas.yml
 
-  # create-github-app-token steps scope `repositories:` but not per-permission
-  # scopes, so the app token inherits blanket installation permissions.
-  # Scoping these down is a release-pipeline change; tracked in #21132.
-  github-app:
-    ignore:
-      - release.yml
-      - update-disk-sizes.yml
-
   # Workflows missing explicit permissions: blocks — needs a cleanup pass
   # to add least-privilege permissions to each workflow; tracked in #21132.
   excessive-permissions:
