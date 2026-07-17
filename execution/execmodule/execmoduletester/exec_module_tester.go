@@ -59,6 +59,7 @@ import (
 	"github.com/erigontech/erigon/execution/exec"
 	"github.com/erigontech/erigon/execution/execmodule"
 	"github.com/erigontech/erigon/execution/execmodule/chainreader"
+	"github.com/erigontech/erigon/execution/protocol/misc"
 	"github.com/erigontech/erigon/execution/protocol/rules"
 	"github.com/erigontech/erigon/execution/protocol/rules/ethash"
 	"github.com/erigontech/erigon/execution/protocol/rules/merge"
@@ -337,6 +338,12 @@ func WithChainConfig(cfg *chain.Config) Option {
 	}
 }
 
+func WithAmsterdamBuilderContracts() Option {
+	return func(opts *options) {
+		opts.amsterdamBuilderContracts = true
+	}
+}
+
 func WithFcuBackgroundCommit() Option {
 	return func(opts *options) {
 		opts.fcuBackgroundCommit = true
@@ -375,20 +382,21 @@ func WithSentryProtocol(protocol uint) Option {
 }
 
 type options struct {
-	stepSize                 *uint64
-	experimentalBAL          bool
-	genesis                  *types.Genesis
-	chainConfig              *chain.Config
-	key                      *ecdsa.PrivateKey
-	engine                   rules.Engine
-	pruneMode                *prune.Mode
-	withTxPool               bool
-	enableDomains            []kv.Domain
-	fcuBackgroundCommit      bool
-	fcuBackgroundPrune       bool
-	alwaysGenerateChangesets *bool
-	maxReorgDepth            *uint64
-	sentryProtocol           uint
+	stepSize                  *uint64
+	experimentalBAL           bool
+	genesis                   *types.Genesis
+	chainConfig               *chain.Config
+	key                       *ecdsa.PrivateKey
+	engine                    rules.Engine
+	pruneMode                 *prune.Mode
+	withTxPool                bool
+	enableDomains             []kv.Domain
+	fcuBackgroundCommit       bool
+	fcuBackgroundPrune        bool
+	alwaysGenerateChangesets  *bool
+	maxReorgDepth             *uint64
+	sentryProtocol            uint
+	amsterdamBuilderContracts bool
 }
 
 func applyOptions(opts []Option) options {
@@ -413,6 +421,12 @@ func applyOptions(opts []Option) options {
 				address: {Balance: big.NewInt(1 * common.Ether)},
 			},
 		}
+		if opt.genesis.Config.IsAmsterdam(opt.genesis.Timestamp) {
+			addAmsterdamBuilderContracts(opt.genesis)
+		}
+	}
+	if opt.amsterdamBuilderContracts {
+		addAmsterdamBuilderContracts(opt.genesis)
 	}
 	// engine depends on genesis
 	if opt.engine == nil {
@@ -426,6 +440,17 @@ func applyOptions(opts []Option) options {
 		}
 	}
 	return opt
+}
+
+func addAmsterdamBuilderContracts(genesis *types.Genesis) {
+	if genesis.Config.AmsterdamTime == nil {
+		return
+	}
+	if genesis.Alloc == nil {
+		genesis.Alloc = types.GenesisAlloc{}
+	}
+	genesis.Alloc[genesis.Config.GetBuilderDepositContract().Value()] = types.GenesisAccount{Balance: new(big.Int), Code: misc.BuilderDepositRequestCode, Nonce: 1}
+	genesis.Alloc[genesis.Config.GetBuilderExitContract().Value()] = types.GenesisAccount{Balance: new(big.Int), Code: misc.BuilderExitRequestCode, Nonce: 1}
 }
 
 // New creates an ExecModuleTester. When called with no options, it uses
