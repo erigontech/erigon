@@ -256,7 +256,11 @@ func (sd *TemporalMemBatch) getLatest(domain kv.Domain, key []byte) (v []byte, s
 			}
 		}
 
-		return nil, 0, false
+		// kv.NoStepBound distinguishes "no in-flight unwind bounds this key"
+		// from a bound at step 0 (a delete-shape entry above whose keyStep is
+		// 0), so young chains — whose whole state lives in step 0 — still get
+		// the per-key signal.
+		return nil, kv.NoStepBound, false
 	}
 
 	keyS := common.ToStringZeroCopy(key)
