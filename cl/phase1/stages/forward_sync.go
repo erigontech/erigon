@@ -19,6 +19,7 @@ import (
 	"github.com/erigontech/erigon/cl/phase1/execution_client"
 	"github.com/erigontech/erigon/cl/phase1/forkchoice"
 	network2 "github.com/erigontech/erigon/cl/phase1/network"
+	"github.com/erigontech/erigon/cl/utils"
 	"github.com/erigontech/erigon/cl/utils/bls"
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/hexutil"
@@ -265,6 +266,20 @@ func processDownloadedBlockBatches(ctx context.Context, logger log.Logger, cfg *
 	return
 }
 
+// forwardSyncProgress returns the slots still to sync and the observed sync rate
+// in slots/sec. currentSlot can overshoot chainTipSlot and dip below prevProgress
+// on reorgs, so both differences are clamped to keep the unsigned math from
+// underflowing.
+func forwardSyncProgress(chainTipSlot, currentSlot, prevProgress uint64, secsPerLog int) (slotsRemaining uint64, ratePerSec float64) {
+	if chainTipSlot > currentSlot {
+		slotsRemaining = chainTipSlot - currentSlot
+	}
+	if currentSlot > prevProgress && secsPerLog > 0 {
+		ratePerSec = float64(currentSlot-prevProgress) / float64(secsPerLog)
+	}
+	return
+}
+
 // forwardSync (MAIN ROUTINE FOR ForwardSync) performs the forward synchronization of beacon blocks.
 func forwardSync(ctx context.Context, logger log.Logger, cfg *Cfg, args Args) error {
 	var (
@@ -370,18 +385,15 @@ func forwardSync(ctx context.Context, logger log.Logger, cfg *Cfg, args Args) er
 			return ctx.Err()
 		case <-logTicker.C:
 			// Log progress at regular intervals
-			progressMade := chainTipSlot - currentSlot.Load()
-			distFromChainTip := time.Duration(progressMade*cfg.beaconCfg.SecondsPerSlot) * time.Second
-			timeProgress := currentSlot.Load() - prevProgress
-			estimatedTimeRemaining := 999 * time.Hour
-			if timeProgress > 0 {
-				estimatedTimeRemaining = time.Duration(float64(progressMade)/(float64(currentSlot.Load()-prevProgress)/float64(secsPerLog))) * time.Second
-			}
-			if distFromChainTip < 0 || estimatedTimeRemaining < 0 {
-				continue
-			}
-			prevProgress = currentSlot.Load()
-			logger.Info("[Caplin] Forward Sync", "progress", currentSlot.Load(), "distance-from-chain-tip", distFromChainTip, "estimated-time-remaining", estimatedTimeRemaining)
+			cur := currentSlot.Load()
+			slotsRemaining, ratePerSec := forwardSyncProgress(chainTipSlot, cur, prevProgress, secsPerLog)
+			prevProgress = cur
+			// distance-from-chain-tip is the ETA at the chain's own production rate
+			// (one slot per SecondsPerSlot), which also saturates instead of overflowing.
+			chainRatePerSec := 1.0 / float64(cfg.beaconCfg.SecondsPerSlot)
+			logger.Info("[Caplin] Forward Sync", "progress", cur,
+				"distance-from-chain-tip", utils.ETA(slotsRemaining, chainRatePerSec),
+				"estimated-time-remaining", utils.ETA(slotsRemaining, ratePerSec))
 		default:
 		}
 	}

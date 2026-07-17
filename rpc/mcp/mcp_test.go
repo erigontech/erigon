@@ -200,7 +200,7 @@ func TestServeSSEHandlerWired(t *testing.T) {
 	client := &http.Client{Timeout: 2 * time.Second}
 	var resp *http.Response
 	var err error
-	for i := 0; i < 100; i++ {
+	for range 100 {
 		resp, err = client.Get("http://" + addr + "/sse")
 		if err == nil {
 			break

@@ -186,8 +186,7 @@ Examples:
   integration commitment branch --datadir /path/to/datadir --prefix 0a1b --txnum 1000000
   integration commitment branch --datadir /path/to/datadir  # reads root (empty prefix)`,
 	Run: func(cmd *cobra.Command, args []string) {
-		logger := debug.SetupCobra(cmd, "integration")
-		ctx := cmd.Context()
+		logger, ctx := debug.SetupCobra(cmd, "integration"), cmd.Context()
 
 		prefix, err := commitment.PrefixStringToNibbles(branchPrefixFlag)
 		if err != nil {
@@ -196,7 +195,7 @@ Examples:
 		}
 
 		dirs := datadir.New(datadirCli)
-		chainDb, err := openDB(dbCfg(dbcfg.ChainDB, dirs.Chaindata), true, chain, logger)
+		chainDb, err := openDB(ctx, dbCfg(dbcfg.ChainDB, dirs.Chaindata), true, chain, logger)
 		if err != nil {
 			logger.Error("Opening DB", "error", err)
 			return
@@ -268,8 +267,8 @@ var cmdCommitmentRebuild = &cobra.Command{
 	Use:   "rebuild",
 	Short: "",
 	Run: func(cmd *cobra.Command, args []string) {
-		logger := debug.SetupCobra(cmd, "integration")
-		db, err := openDB(dbCfg(dbcfg.ChainDB, chaindata), true, chain, logger)
+		logger, ctx := debug.SetupCobra(cmd, "integration"), cmd.Context()
+		db, err := openDB(ctx, dbCfg(dbcfg.ChainDB, chaindata), true, chain, logger)
 		if err != nil {
 			logger.Error("Opening DB", "error", err)
 			return
@@ -417,8 +416,8 @@ var cmdCommitmentPrint = &cobra.Command{
 	Use:   "print",
 	Short: "",
 	Run: func(cmd *cobra.Command, args []string) {
-		logger := debug.SetupCobra(cmd, "integration")
-		db, err := openDB(dbCfg(dbcfg.ChainDB, chaindata), true, chain, logger)
+		logger, ctx := debug.SetupCobra(cmd, "integration"), cmd.Context()
+		db, err := openDB(ctx, dbCfg(dbcfg.ChainDB, chaindata), true, chain, logger)
 		if err != nil {
 			logger.Error("Opening DB", "error", err)
 			return
@@ -507,7 +506,7 @@ Examples:
   integration commitment convert --continue --datadir /path/to/datadir --chain mainnet --squeeze=true --nibbles.v2=true
   integration commitment convert --restore --datadir /path/to/datadir --chain mainnet`,
 	Run: func(cmd *cobra.Command, args []string) {
-		logger := debug.SetupCobra(cmd, "integration")
+		logger, ctx := debug.SetupCobra(cmd, "integration"), cmd.Context()
 		if convertRestore && (cmd.Flags().Changed("squeeze") || cmd.Flags().Changed("nibbles.v2")) {
 			logger.Error("--restore is mutually exclusive with --squeeze/--nibbles.v2")
 			return
@@ -530,7 +529,7 @@ Examples:
 			return
 		}
 
-		db, err := openDB(dbCfg(dbcfg.ChainDB, chaindata), true, chain, logger)
+		db, err := openDB(ctx, dbCfg(dbcfg.ChainDB, chaindata), true, chain, logger)
 		if err != nil {
 			logger.Error("Opening DB", "error", err)
 			return
@@ -662,7 +661,7 @@ func benchLookup(ctx context.Context, logger log.Logger) error {
 	rng := rand.New(rand.NewSource(seed))
 
 	dirs := datadir.New(datadirCli)
-	chainDb, err := openDB(dbCfg(dbcfg.ChainDB, dirs.Chaindata), true, chain, logger)
+	chainDb, err := openDB(ctx, dbCfg(dbcfg.ChainDB, dirs.Chaindata), true, chain, logger)
 	if err != nil {
 		return fmt.Errorf("opening DB: %w", err)
 	}
@@ -788,7 +787,7 @@ func benchHistoryLookup(ctx context.Context, logger log.Logger) error {
 	rng := rand.New(rand.NewSource(seed))
 
 	dirs := datadir.New(datadirCli)
-	chainDb, err := openDB(dbCfg(dbcfg.ChainDB, dirs.Chaindata), true, chain, logger)
+	chainDb, err := openDB(ctx, dbCfg(dbcfg.ChainDB, dirs.Chaindata), true, chain, logger)
 	if err != nil {
 		return fmt.Errorf("opening DB: %w", err)
 	}
@@ -895,7 +894,7 @@ func benchSnapshotsHistoryLookup(ctx context.Context, tx kv.TemporalTx, historyF
 
 		// Generate random sample of txnums within this file's range
 		sampledTxNums := make([]uint64, sampleCount)
-		for i := 0; i < sampleCount; i++ {
+		for i := range sampleCount {
 			// Generate random txnum in [startTxNum, endTxNum)
 			sampledTxNums[i] = startTxNum + uint64(rng.Int63n(int64(txnumRange)))
 		}
@@ -988,7 +987,7 @@ func benchMdbxHistoryLookup(ctx context.Context, tx kv.TemporalTx, compactKey []
 
 	// Generate random txnums in [minTxNum, maxTxNum)
 	sampledTxNums := make([]uint64, sampleCount)
-	for i := 0; i < sampleCount; i++ {
+	for i := range sampleCount {
 		sampledTxNums[i] = minTxNum + uint64(rng.Int63n(int64(txnumRange)))
 	}
 

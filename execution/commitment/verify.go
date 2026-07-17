@@ -58,7 +58,7 @@ func VerifyBranchHashes(
 
 	var mismatches []string
 
-	for nibble := 0; nibble < 16; nibble++ {
+	for nibble := range 16 {
 		c := row[nibble]
 		if c == nil {
 			continue

@@ -33,7 +33,7 @@ func BenchmarkGetBlobs(b *testing.B) {
 	realHashes := addTestBlobTxn(b, pool, ctx, 1, 0)
 
 	query := append([]common.Hash{}, realHashes...)
-	for i := 0; i < 4; i++ {
+	for i := range 4 {
 		query = append(query, common.Hash{0xff, byte(i)})
 	}
 	got := pool.GetBlobs(query)
@@ -54,7 +54,7 @@ func BenchmarkGetBlobs(b *testing.B) {
 		var wg sync.WaitGroup
 		var writerCounter uint64
 		writers := max(2, runtime.GOMAXPROCS(0)-1)
-		for w := 0; w < writers; w++ {
+		for range writers {
 			wg.Add(1)
 			go func() {
 				defer wg.Done()
@@ -65,7 +65,7 @@ func BenchmarkGetBlobs(b *testing.B) {
 					default:
 					}
 					pool.lock.Lock()
-					for i := 0; i < writerCriticalSectionWork; i++ {
+					for range writerCriticalSectionWork {
 						writerCounter++
 					}
 					pool.lock.Unlock()

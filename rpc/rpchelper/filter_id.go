@@ -34,15 +34,15 @@ type (
 	ReceiptsSubID     SubscriptionID
 )
 
-var globalSubscriptionId uint64
+var globalSubscriptionId atomic.Uint64
 
 func generateSubscriptionID() SubscriptionID {
 	id := [16]byte{}
 	sb := new(strings.Builder)
 	hex := hex.NewEncoder(sb)
-	binary.LittleEndian.PutUint64(id[:], atomic.AddUint64(&globalSubscriptionId, 1))
+	binary.LittleEndian.PutUint64(id[:], globalSubscriptionId.Add(1))
 	// try 4 times to generate an id
-	for i := 0; i < 4; i++ {
+	for range 4 {
 		_, err := rand.Read(id[8:])
 		if err == nil {
 			break

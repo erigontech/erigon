@@ -14,7 +14,7 @@
 // You should have received a copy of the GNU Lesser General Public License
 // along with Erigon. If not, see <http://www.gnu.org/licenses/>.
 
-package services
+package dbservices
 
 import (
 	"context"
@@ -22,13 +22,13 @@ import (
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/log/v3"
-	"github.com/erigontech/erigon/db/downloader"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/rawdbv3"
 	"github.com/erigontech/erigon/db/snaptype"
 	"github.com/erigontech/erigon/execution/rlp"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/node/ethconfig"
+	"github.com/erigontech/erigon/node/gointerfaces/downloaderproto"
 )
 
 type BlockReader interface {
@@ -99,7 +99,6 @@ type FullBlockReader interface {
 
 	FrozenBlocks() uint64
 	FrozenBorBlocks(align bool) uint64
-	FrozenFiles() (list []string)
 	FreezingCfg() ethconfig.BlocksFreezing
 	CanPruneTo(currentBlockInDB uint64) (canPruneBlocksTo uint64)
 
@@ -121,7 +120,7 @@ type BlockRetire interface {
 		minBlockNum uint64,
 		maxBlockNum uint64,
 		lvl log.Lvl,
-		seeder downloader.SeederClient,
+		seeder SeederClient,
 		onFinishRetire func() error,
 		onDone func()) bool
 	BuildMissedIndicesIfNeed(ctx context.Context, logPrefix string, notifier DBEventNotifier) error
@@ -153,3 +152,27 @@ type DownloadRequest struct {
 	Path        string
 	TorrentHash string
 }
+
+// Seed and Delete methods, used by pruning and block retiring.
+type SeederClient interface {
+	// Seed generated file. Downloader will hash.
+	Seed(_ context.Context, paths []string) error
+	// Remove files from the Downloader.
+	Delete(_ context.Context, paths []string) error
+}
+
+// Full Client also allowing blocking on downloads. Simplified interface rather than using GRPC directly.
+type DownloaderClient interface {
+	SeederClient
+	// Request files be downloaded. Returns when the download is complete. Downloader seeds. Note
+	// that we have dbservices.DownloadRequest per path, but haven't yet incorporated the download
+	// "target name" into the API here.
+	Download(context.Context, *downloaderproto.DownloadRequest) error
+}
+
+// A Seeder client that does nothing when delete or seed is requested, a common configuration pattern.
+type NoopSeederClient struct{}
+
+func (NoopSeederClient) Seed(context.Context, []string) error { return nil }
+
+func (NoopSeederClient) Delete(context.Context, []string) error { return nil }

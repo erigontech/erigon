@@ -545,11 +545,10 @@ func GenerateChain(config *chain.Config, parent *types.Block, engine rules.Engin
 		if chainreader.Config().IsShanghai(parent.Time()) {
 			b.withdrawals = []*types.Withdrawal{}
 		}
-		if chainreader.Config().IsAmsterdam(parent.Time()) && !chainreader.Config().IsEIPDisabled(7928) {
+		b.header = makeHeader(chainreader, parent, ibs, b.engine)
+		if chainreader.Config().IsAmsterdam(b.header.Time) && !chainreader.Config().IsEIPDisabled(7928) {
 			b.blockIO = &state.VersionedIO{}
 		}
-
-		b.header = makeHeader(chainreader, parent, ibs, b.engine)
 		// Mutate the state and block according to any hard-fork specs
 		if daoBlock := config.DAOForkBlock; daoBlock != nil {
 			if b.header.Number.Uint64() >= *daoBlock && b.header.Number.Uint64() < *daoBlock+misc.DAOForkExtraRange {
@@ -664,7 +663,7 @@ func GenerateChain(config *chain.Config, parent *types.Block, engine rules.Engin
 	}
 
 	blockAccessLists := make([][]byte, n)
-	for i := 0; i < n; i++ {
+	for i := range n {
 		ibs := state.New(stateReader)
 		if dbg.TraceBlock(uint64(i)) {
 			ibs.SetTrace(true)

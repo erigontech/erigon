@@ -33,9 +33,15 @@ import (
 	"github.com/erigontech/erigon/db/kv/mdbx"
 	"github.com/erigontech/erigon/db/kv/order"
 	"github.com/erigontech/erigon/db/kv/stream"
+	"github.com/erigontech/erigon/db/snapshotsync/blocksnapshots"
 )
 
 var _ kv.TemporalRwTx = &MemoryMutation{}
+
+type DomainReader interface {
+	GetAsOf(name kv.Domain, k []byte, ts uint64) ([]byte, bool, error)
+	HistorySeek(name kv.Domain, k []byte, ts uint64) ([]byte, bool, error)
+}
 
 type MemoryMutation struct {
 	// mu protects concurrent access to the mutation's maps and backing tx.
@@ -52,6 +58,7 @@ type MemoryMutation struct {
 	clearedTables    map[string]struct{}
 	db               kv.TemporalTx
 	statelessCursors map[string]kv.RwCursor
+	DomainReader     DomainReader
 }
 
 // NewMemoryBatch creates a pure Go in-memory batch with no OS-thread affinity.
@@ -589,6 +596,17 @@ func (m *MemoryMutation) BucketSize(bucket string) (uint64, error) {
 	return m.memTx.BucketSize(bucket)
 }
 
+type HasBlockFilesRoTx interface {
+	BlockFilesRoTx() *blocksnapshots.View
+}
+
+func (m *MemoryMutation) BlockFilesRoTx() *blocksnapshots.View {
+	if p, ok := m.db.(HasBlockFilesRoTx); ok {
+		return p.BlockFilesRoTx()
+	}
+	return nil
+}
+
 func (m *MemoryMutation) Count(bucket string) (uint64, error) {
 	panic("not implemented")
 }
@@ -926,6 +944,11 @@ func (m *MemoryMutation) GetLatest(name kv.Domain, k []byte) (v []byte, step kv.
 }
 
 func (m *MemoryMutation) GetAsOf(name kv.Domain, k []byte, ts uint64) (v []byte, ok bool, err error) {
+	if m.DomainReader != nil {
+		if val, ok, err := m.DomainReader.GetAsOf(name, k, ts); err == nil && ok {
+			return val, ok, nil
+		}
+	}
 	if m.db == nil {
 		return nil, false, fmt.Errorf("MemoryMutation: domain read requires backing tx (detached overlay)")
 	}
@@ -954,6 +977,11 @@ func (m *MemoryMutation) RangeAsOf(name kv.Domain, fromKey, toKey []byte, ts uin
 }
 
 func (m *MemoryMutation) HistorySeek(name kv.Domain, k []byte, ts uint64) (v []byte, ok bool, err error) {
+	if m.DomainReader != nil {
+		if val, ok, err := m.DomainReader.HistorySeek(name, k, ts); err == nil && ok {
+			return val, ok, nil
+		}
+	}
 	if m.db == nil {
 		return nil, false, fmt.Errorf("MemoryMutation: history read requires backing tx (detached overlay)")
 	}
@@ -1050,6 +1078,7 @@ func (m *MemoryMutation) newReadViewMut(tx kv.Tx) *MemoryMutation {
 		deletedDups:    m.deletedDups,
 		clearedTables:  m.clearedTables,
 		db:             dbTx,
+		DomainReader:   m.DomainReader,
 	}
 }
 
@@ -1102,33 +1131,57 @@ func (v *OverlayTemporalReadView) Apply(_ context.Context, f func(tx kv.Tx) erro
 func (v *OverlayTemporalReadView) GetLatest(name kv.Domain, k []byte) ([]byte, kv.Step, error) {
 	return v.temporalTx.GetLatest(name, k)
 }
+
 func (v *OverlayTemporalReadView) HasPrefix(name kv.Domain, prefix []byte) ([]byte, []byte, bool, error) {
 	return v.temporalTx.HasPrefix(name, prefix)
 }
+
 func (v *OverlayTemporalReadView) StepsInFiles(entitySet ...kv.Domain) kv.Step {
 	return v.temporalTx.StepsInFiles(entitySet...)
 }
+
 func (v *OverlayTemporalReadView) GetAsOf(name kv.Domain, k []byte, ts uint64) ([]byte, bool, error) {
+	// Check DomainReader independently — this method shadows MemoryMutation.GetAsOf
+	// and falls through to v.temporalTx (not m.db), so the embedded check never fires.
+	if v.MemoryMutation != nil && v.MemoryMutation.DomainReader != nil {
+		if val, ok, err := v.MemoryMutation.DomainReader.GetAsOf(name, k, ts); err == nil && ok {
+			return val, ok, nil
+		}
+	}
 	return v.temporalTx.GetAsOf(name, k, ts)
 }
+
 func (v *OverlayTemporalReadView) RangeAsOf(name kv.Domain, fromKey, toKey []byte, ts uint64, asc order.By, limit int) (stream.KV, error) {
 	return v.temporalTx.RangeAsOf(name, fromKey, toKey, ts, asc, limit)
 }
+
 func (v *OverlayTemporalReadView) IndexRange(name kv.InvertedIdx, k []byte, fromTs, toTs int, asc order.By, limit int) (stream.U64, error) {
 	return v.temporalTx.IndexRange(name, k, fromTs, toTs, asc, limit)
 }
+
 func (v *OverlayTemporalReadView) HistorySeek(name kv.Domain, k []byte, ts uint64) ([]byte, bool, error) {
+	// Check DomainReader independently — this method shadows MemoryMutation.HistorySeek
+	// and falls through to v.temporalTx (not m.db), so the embedded check never fires.
+	if v.MemoryMutation != nil && v.MemoryMutation.DomainReader != nil {
+		if val, ok, err := v.MemoryMutation.DomainReader.HistorySeek(name, k, ts); err == nil && ok {
+			return val, ok, nil
+		}
+	}
 	return v.temporalTx.HistorySeek(name, k, ts)
 }
+
 func (v *OverlayTemporalReadView) HistoryRange(name kv.Domain, fromTs, toTs int, asc order.By, limit int) (stream.KV, error) {
 	return v.temporalTx.HistoryRange(name, fromTs, toTs, asc, limit)
 }
+
 func (v *OverlayTemporalReadView) Debug() kv.TemporalDebugTx {
 	return v.temporalTx.Debug()
 }
+
 func (v *OverlayTemporalReadView) AggTx() any {
 	return v.temporalTx.AggTx()
 }
+
 func (v *OverlayTemporalReadView) FreezeInfo() kv.FreezeInfo {
 	return v.temporalTx.FreezeInfo()
 }

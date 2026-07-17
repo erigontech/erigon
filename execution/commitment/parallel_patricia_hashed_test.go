@@ -757,9 +757,9 @@ func genWideNested(t testing.TB) (keys [][]byte, upds []Update) {
 		upds = append(upds, u)
 		seed++
 	}
-	for top := byte(0); top < 8; top++ {
-		for s := byte(0); s < 4; s++ {
-			for u := byte(0); u < 2; u++ {
+	for top := range byte(8) {
+		for s := range byte(4) {
+			for u := range byte(2) {
 				add([]byte{top, s, u})
 				add([]byte{top, s, u})
 				add([]byte{top, s, u, 0x0})
@@ -774,7 +774,7 @@ func genWideNested(t testing.TB) (keys [][]byte, upds []Update) {
 func genAccountsWithNestedStorage(t testing.TB, nAccounts int) (keys [][]byte, upds []Update) {
 	t.Helper()
 	seed := uint64(1000)
-	for a := 0; a < nAccounts; a++ {
+	for a := range nAccounts {
 		addr := findAddrForNibbles(t, []byte{byte(a & 0x7)}, seed)
 		seed++
 		var au Update
@@ -810,7 +810,7 @@ func genAccountsWithNestedStorage(t testing.TB, nAccounts int) (keys [][]byte, u
 
 // uncontrolled keccak distribution, the production-like counterpart to the forked generators
 func genRandomAccountsStorage(nAcc int) (keys [][]byte, upds []Update) {
-	for a := 0; a < nAcc; a++ {
+	for a := range nAcc {
 		var addr [20]byte
 		binary.BigEndian.PutUint64(addr[0:8], uint64(a)*2654435761+1)
 		binary.BigEndian.PutUint64(addr[12:20], uint64(a)*40503+7)

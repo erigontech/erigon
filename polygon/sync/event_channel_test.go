@@ -64,6 +64,14 @@ func TestEventChannel(t *testing.T) {
 			ctx, cancel := context.WithCancel(t.Context())
 			defer cancel()
 			ch := NewEventChannel[string](2)
+
+			// Fill past capacity before Run starts consuming: a consumer that takes
+			// event1 off the queue first leaves the queue below capacity, so event1 is
+			// never evicted and arrives instead of event2.
+			ch.PushEvent("event1")
+			ch.PushEvent("event2")
+			ch.PushEvent("event3")
+
 			eg := errgroup.Group{}
 			eg.Go(func() error {
 				return ch.Run(ctx)
@@ -72,10 +80,6 @@ func TestEventChannel(t *testing.T) {
 				err := eg.Wait()
 				require.ErrorIs(t, err, context.Canceled)
 			})
-
-			ch.PushEvent("event1")
-			ch.PushEvent("event2")
-			ch.PushEvent("event3")
 
 			events := ch.Events()
 			require.Equal(t, "event2", <-events)
