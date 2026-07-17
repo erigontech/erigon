@@ -9,7 +9,6 @@ on:
   # zizmor: ignore[dangerous-triggers] no checkout of triggering run's head; BASE_BRANCH is pinned to release/3.5 for workflow_run events
   workflow_run:
     workflows:
-      - "QA - Sync from scratch"
       - "QA - Sync from scratch (minimal node)"
       - "QA - Sync from scratch (full node)"
     types:
