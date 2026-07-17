@@ -1,12 +1,13 @@
 package downloader
 
 import (
+	"cmp"
 	"context"
 	"encoding/hex"
 	"fmt"
 	"os"
 	"path/filepath"
-	"sort"
+	"slices"
 	"strings"
 
 	"github.com/anacrolix/torrent/metainfo"
@@ -69,8 +70,8 @@ func GenerateChainToml(snapDir string) ([]byte, error) {
 	}
 
 	// Sort by name for deterministic output.
-	sort.Slice(items, func(i, j int) bool {
-		return items[i].name < items[j].name
+	slices.SortFunc(items, func(a, b entry) int {
+		return cmp.Compare(a.name, b.name)
 	})
 
 	// Build TOML output manually for exact control over formatting and determinism.
