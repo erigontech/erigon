@@ -1085,7 +1085,7 @@ func TestFinalizeTxSimple_BurntFeeWriteStampsWorkerIncarnation(t *testing.T) {
 		"calcFees stamps burnt write at worker incarnation (no +1 bump under post-#21387 architecture)")
 }
 
-// --- normalizeWriteSet tests ---
+// --- Normalize tests ---
 // These test the new function that replaces resolveStorageWrites.
 // Input is blockIO.WriteSet(txIndex) — raw versionWritten output.
 // Output should match what serial MakeWriteSet produces.
@@ -1411,7 +1411,7 @@ func TestNormalizeWriteSet_NewAccount(t *testing.T) {
 // An account with Balance=0, Nonce=0, empty CodeHash should be DELETED
 // (not written as a regular account with zero values). Serial's IBS
 // detects empty accounts via EIP-161 and calls DeleteAccount.
-// normalizeWriteSet must produce a SelfDestructPath=true entry (or omit
+// Normalize must produce a SelfDestructPath=true entry (or omit
 // the account entirely) so the trie deletes the cell.
 func TestNormalizeWriteSet_EmptyAccountRemoval(t *testing.T) {
 	vm := state.NewVersionMap(nil)
@@ -1469,7 +1469,7 @@ func TestNormalizeWriteSet_EmptyAccountRemoval(t *testing.T) {
 
 // Case 10b: AuRa retains its SystemAddress (0xff…fe) even when empty.
 // The reference AuRa implementation exempts the SystemAddress from EIP-161
-// empty-account removal, so normalizeWriteSet must not turn it into a delete on
+// empty-account removal, so Normalize must not turn it into a delete on
 // an AuRa chain — while a non-AuRa chain still removes it like any other empty
 // account.
 func TestNormalizeWriteSet_AuraSystemAddressRetained(t *testing.T) {
@@ -1509,7 +1509,7 @@ func TestNormalizeWriteSet_AuraSystemAddressRetained(t *testing.T) {
 		"non-AuRa chain removes an empty account, including the system address")
 }
 
-// Pins that normalizeWriteSet recovers CodePath alongside CodeHashPath for a
+// Pins that Normalize recovers CodePath alongside CodeHashPath for a
 // 7702 designator, so an account is never left with a codeHash but no code.
 func TestNormalizeWriteSet_CodePathTravelsWithCodeHash(t *testing.T) {
 	vm := state.NewVersionMap(nil)
@@ -1595,7 +1595,7 @@ func TestNormalizeWriteSet_CodePathRecoveredFromStateReader(t *testing.T) {
 	assert.Equal(t, designator, gotCode.Val.Bytes, "recovered code is the committed designator")
 }
 
-// Characterization tests below pin normalizeWriteSet branches that were only
+// Characterization tests below pin Normalize branches that were only
 // covered end-to-end (execmodule), ahead of a planned loop-rationalization
 // refactor. They assert current behavior; a refactor must keep them green.
 

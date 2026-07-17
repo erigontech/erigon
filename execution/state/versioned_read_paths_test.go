@@ -498,7 +498,7 @@ func TestVersionedRead_C3_RevivalViaCodeHash(t *testing.T) {
 // when the readSet already records a different Version than the current
 // versionMap value at MapRead, versionedRead panics with ErrDependency so
 // the executor knows to re-execute. Captured via recover().
-func TestVersionedRead_E2_MapReadDifferentVersionPanics(t *testing.T) {
+func TestVersionedRead_E2_StaleMapReadCaughtAtCommit(t *testing.T) {
 	t.Parallel()
 	_, tx, domains := NewTestRwTx(t)
 	mvhm := NewVersionMap(nil)

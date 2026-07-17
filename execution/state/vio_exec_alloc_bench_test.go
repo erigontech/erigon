@@ -34,10 +34,7 @@ var (
 )
 
 // BenchmarkVersionMapRead_Typed measures the typed ReadXxx primitives, which
-// return T directly with no interface box. The boxed Read().Value() arm was
-// removed when the generic any-boxed VersionMap.Read API was deleted. Run:
-//
-//	go test ./execution/state/ -run=^$ -bench=BenchmarkVersionMapRead_Typed -benchmem
+// return T directly with no interface box.
 func BenchmarkVersionMapRead_Typed(b *testing.B) {
 	mvhm := NewVersionMap(nil)
 	addr := accounts.InternAddress([20]byte{0x01})
@@ -83,9 +80,7 @@ func BenchmarkVersionMapRead_Typed(b *testing.B) {
 // prior "transactions", resetting per iteration to model the per-tx read
 // boundary the parallel executor enforces. allocs/op here is the per-tx
 // read-side garbage the typed-vio model aims to drive to zero; the non-storage
-// paths currently box via ReadResult.Value() any. Run:
-//
-//	go test ./execution/state/ -run=^$ -bench=BenchmarkVersionedExecReads -benchmem
+// paths currently box via ReadResult.Value() any.
 func BenchmarkVersionedExecReads(b *testing.B) {
 	_, tx, domains := NewTestRwTx(b)
 	mvhm := NewVersionMap(nil)

@@ -1704,7 +1704,7 @@ func (sdb *IntraBlockState) Selfdestruct(addr accounts.Address, preserveBalance 
 	// before the stateObject, so a spurious StoragePath=0 here would make those
 	// reads return 0 (wrong gas: SSTORE_SET vs dirty-update, and wrong value).
 	// The parallel commitment calculator gets the per-slot DELETE entries from
-	// normalizeWriteSet's SD cascade (sdStorageSlots = vm.StorageKeys ∪
+	// Normalize's SD cascade (sdStorageSlots = vm.StorageKeys ∪
 	// domainStorageKeys), so they don't need to be emitted here.
 
 	return true, nil
@@ -2227,13 +2227,6 @@ func (sdb *IntraBlockState) CreateAccount(addr accounts.Address, contractCreatio
 		carryBalance = b
 	}
 	newObj := sdb.createObject(addr, previous)
-	if previous != nil && previous.selfdestructed {
-		// resetObjectChange.dirtied() returns false, so without this the
-		// parallel worker's MakeWriteSet drops the resurrect write. Confined to
-		// CreateAccount — the GetOrNewStateObject AddBalance path must NOT mark
-		// dirty here.
-		sdb.journal.dirty(addr)
-	}
 	if carryBalanceValid {
 		newObj.data.Balance.Set(&carryBalance)
 	}
@@ -2243,7 +2236,7 @@ func (sdb *IntraBlockState) CreateAccount(addr accounts.Address, contractCreatio
 		newObj.createdContract = true
 		newObj.data.Incarnation = prevInc + 1
 		// Record contract creation in the versioned writes so that
-		// normalizeWriteSet knows this address was created (prevents
+		// Normalize knows this address was created (prevents
 		// empty account deletion for newly deployed contracts).
 		sdb.recordWriteCreateContract(addr, true)
 		if dbg.TraceTransactionIO && (sdb.trace || dbg.TraceAccount(addr.Handle())) {
@@ -2397,7 +2390,7 @@ func updateAccount(eip161Enabled bool, isAura bool, stateWriter StateWriter, add
 		// Note: in parallel mode, individual setters (AddBalance, SetNonce)
 		// call versionWritten for their specific field. Fields not modified
 		// by the TX (e.g., CodeHash when only balance changed) are NOT in
-		// the versionMap's WriteSet. The normalizeWriteSet function handles
+		// the versionMap's WriteSet. The Normalize function handles
 		// this by reading missing account fields from the stateReader.
 	}
 	return nil

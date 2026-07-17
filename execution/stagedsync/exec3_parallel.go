@@ -1970,7 +1970,7 @@ func (result *execResult) calcFees(
 	// nil pre-state must not short-circuit to empty=true: a worker may
 	// have already bumped Nonce or set CodeHash, and EIP-161 emptiness
 	// must respect those writes — otherwise SelfDestructPath is emitted
-	// and normalizeWriteSet's sdSet filter drops them.
+	// and Normalize's sdSet filter drops them.
 	coinbaseEmptyPre := (coinbaseAcc == nil || coinbaseAcc.Balance.IsZero()) &&
 		coinbaseNonce == 0 && coinbaseEmptyCodeHash && !coinbaseHasCodeHashWrite
 	emitCoinbase := newCoinbaseBalance != oldCoinbaseBalance ||
@@ -2792,7 +2792,7 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 				{
 					// Build clean write set from versionMap WriteSet — not CollectorWrites.
 					// The WriteSet has the raw versionWritten output from the validated
-					// incarnation. normalizeWriteSet filters no-ops, stale incarnations,
+					// incarnation. Normalize filters no-ops, stale incarnations,
 					// and resolves account values from the versionMap.
 					resultIncarnation := txResult.Version().Incarnation
 					rawWrites := be.blockIO.WriteSet(txVersion.TxIndex)
@@ -3059,7 +3059,7 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 				}
 
 				// Commit finalize writes from the versionMap write-set (ivw), the
-				// same normalizeWriteSet path regular txs use, rather than from
+				// same Normalize path regular txs use, rather than from
 				// so.data via MakeWriteSet. This keeps the parallel commit sourced
 				// solely from versionedWrites so the write-path stateObject is
 				// redundant.

@@ -31,7 +31,7 @@ import (
 // The split is only observable for a StorageRead-sourced read — a cold read
 // that saw no VersionMap entry at execution time but now collides with a
 // concurrent worker's Done flush. For a MapRead the tiebreaker is bypassed
-// (validateReadImpl:894 uses checkVersion for every path), so there is no
+// (validateReadImpl uses checkVersion for every path), so there is no
 // asymmetry among map reads. In the StorageRead collision (no BAL): a CodeHash
 // read whose value still matches survives via the tiebreaker, while the
 // co-written Code/CodeSize reads invalidate. The divergence is benign — the hash

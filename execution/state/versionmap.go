@@ -185,7 +185,7 @@ func (vm *VersionMap) SetTrace(trace bool) {
 }
 
 // StorageKeys returns every storage slot key recorded for addr. Used by
-// normalizeWriteSet to emit synthetic delete entries for every slot of a
+// Normalize to emit synthetic delete entries for every slot of a
 // selfdestructed contract, matching DomainDelPrefix behaviour from the
 // sequential path.
 func (vm *VersionMap) StorageKeys(addr accounts.Address) []accounts.StorageKey {

@@ -437,7 +437,7 @@ func TestBlockStateCacheDeleteAccount_RecreateThenDeleteRecords(t *testing.T) {
 // spurious zero writes made same-tx re-reads return 0 — wrong gas
 // (SSTORE_SET vs dirty-update, +19900) and a wrong written value
 // (EEST cancun/eip6780_selfdestruct/* under EXEC3_PARALLEL). The calc now
-// gets per-slot DELETEs from normalizeWriteSet's SD cascade instead.
+// gets per-slot DELETEs from Normalize's SD cascade instead.
 func TestSelfDestructKeepsDirtyStorageReadableSameTx(t *testing.T) {
 	addr := accounts.InternAddress([20]byte{0xAA})
 	slot0 := accounts.InternKey([32]byte{0x00})

@@ -597,6 +597,9 @@ func TestIBSVersionedWrites_SelfdestructRetainsBalanceDropsOtherPaths(t *testing
 	ibs := NewWithVersionMap(&minimalStateReader{}, NewVersionMap(nil))
 	ibs.SetTxContext(1, 0)
 
+	// Create the contract in the same tx — CreateContractPath must survive the
+	// selfdestruct write-set filter (kept under SD).
+	require.NoError(t, ibs.CreateAccount(addr, true))
 	// Establish nonce and code before selfdestruct — these should be dropped.
 	require.NoError(t, ibs.SetNonce(addr, 5, tracing.NonceChangeUnspecified))
 	require.NoError(t, ibs.SetCode(addr, []byte{0x60, 0x00}, tracing.CodeChangeUnspecified))
@@ -625,6 +628,7 @@ func TestIBSVersionedWrites_SelfdestructRetainsBalanceDropsOtherPaths(t *testing
 	require.True(t, pathSet[SelfDestructPath], "SelfDestructPath must be retained")
 	require.True(t, pathSet[IncarnationPath], "IncarnationPath must be retained")
 	require.True(t, pathSet[BalancePath], "BalancePath (non-zero residual) must be retained")
+	require.True(t, pathSet[CreateContractPath], "CreateContractPath must be retained")
 
 	// Dropped paths — selfdestruct resets nonce and code, so they must not appear.
 	require.False(t, pathSet[NoncePath], "NoncePath must be dropped after selfdestruct")
