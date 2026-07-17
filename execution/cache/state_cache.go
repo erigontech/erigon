@@ -300,9 +300,7 @@ func (c *StateCache) Apply(domain kv.Domain, key, value []byte, txNum uint64) {
 		putOrDelete(cache, key, value, txNum)
 		c.deleteAddrCodeHash(key)
 		if len(value) == 0 {
-			if codeCache := c.caches[kv.CodeDomain]; codeCache != nil {
-				codeCache.Delete(key)
-			}
+			c.Delete(kv.CodeDomain, key)
 		}
 	case kv.CodeDomain:
 		if len(value) == 0 {
