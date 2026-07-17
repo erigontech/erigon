@@ -143,7 +143,7 @@ func TestAAHashMatchesMarshalBinary(t *testing.T) {
 		if err := tx.MarshalBinary(&buf); err != nil {
 			t.Fatalf("MarshalBinary: %v", err)
 		}
-		if got, want := tx.Hash(), crypto.HashData(buf.Bytes()); got != want {
+		if got, want := tx.Hash(), crypto.Keccak256Hash(buf.Bytes()); got != want {
 			t.Fatalf("AA Hash %x != keccak(MarshalBinary) %x", got, want)
 		}
 	}

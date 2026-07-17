@@ -1803,3 +1803,60 @@ func TestSharedDomain_TouchChangedKeysFromHistory(t *testing.T) {
 		require.Equal(t, expectedRootHash, rootHash)
 	}
 }
+
+func TestBlockOverlay_DomainReadsRegression(t *testing.T) {
+	ctx := context.Background()
+	stepSize := uint64(10)
+	db := newTestDb(t, stepSize)
+
+	tx, err := db.BeginTemporalRw(ctx)
+	require.NoError(t, err)
+	defer tx.Rollback()
+
+	sd, err := execctx.NewSharedDomains(ctx, tx, log.New())
+	require.NoError(t, err)
+	defer sd.Close()
+
+	err = sd.InitBlockOverlay(tx, t.TempDir())
+	require.NoError(t, err)
+
+	txNum := uint64(42)
+	key := []byte("some-test-key")
+	value := []byte("some-test-value")
+
+	// Put value into a domain (e.g. ReceiptDomain) in sd
+	err = sd.DomainPut(kv.ReceiptDomain, tx, key, value, txNum, nil)
+	require.NoError(t, err)
+
+	// --- Production path: overlay.NewReadView returns *MemoryMutation ---
+	// This is the path exercised by Filters.WithTemporalOverlay and
+	// Filters.WithOverlay in the RPC layer.
+	overlay := sd.BlockOverlay()
+	require.NotNil(t, overlay)
+	readViewTx := overlay.NewReadView(tx)
+	require.NotNil(t, readViewTx)
+
+	gotVal, ok, err := readViewTx.GetAsOf(kv.ReceiptDomain, key, txNum+1)
+	require.NoError(t, err)
+	require.True(t, ok, "NewReadView (*MemoryMutation) GetAsOf must find in-memory receipt data")
+	require.Equal(t, value, gotVal)
+
+	gotValHist, ok, err := readViewTx.HistorySeek(kv.ReceiptDomain, key, txNum+1)
+	require.NoError(t, err)
+	require.True(t, ok, "NewReadView (*MemoryMutation) HistorySeek must find in-memory receipt data")
+	require.Equal(t, value, gotValHist)
+
+	// --- Secondary path: overlay.NewTemporalReadView returns *OverlayTemporalReadView ---
+	overlayTx := sd.BlockOverlayTemporalTx(tx)
+	require.NotNil(t, overlayTx)
+
+	gotVal2, ok, err := overlayTx.GetAsOf(kv.ReceiptDomain, key, txNum+1)
+	require.NoError(t, err)
+	require.True(t, ok, "NewTemporalReadView GetAsOf must find in-memory receipt data")
+	require.Equal(t, value, gotVal2)
+
+	gotValHist2, ok, err := overlayTx.HistorySeek(kv.ReceiptDomain, key, txNum+1)
+	require.NoError(t, err)
+	require.True(t, ok, "NewTemporalReadView HistorySeek must find in-memory receipt data")
+	require.Equal(t, value, gotValHist2)
+}

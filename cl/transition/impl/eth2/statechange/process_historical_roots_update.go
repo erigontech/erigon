@@ -22,7 +22,7 @@ import (
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/monitor"
 	"github.com/erigontech/erigon/cl/phase1/core/state"
-	"github.com/erigontech/erigon/cl/utils"
+	"github.com/erigontech/erigon/common/crypto"
 )
 
 // ProcessHistoricalRootsUpdate updates the historical root data structure by computing a new historical root batch when it is time to do so.
@@ -55,7 +55,7 @@ func ProcessHistoricalRootsUpdate(s abstract.BeaconState) error {
 			StateSummaryRoot: stateRootsLeaf,
 		})
 	} else {
-		historicalRoot := utils.Sha256(blockRootsLeaf[:], stateRootsLeaf[:])
+		historicalRoot := crypto.Sha256(blockRootsLeaf[:], stateRootsLeaf[:])
 		s.AddHistoricalRoot(historicalRoot)
 	}
 

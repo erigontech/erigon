@@ -17,10 +17,11 @@
 package handler
 
 import (
+	"cmp"
 	"encoding/json"
 	"fmt"
 	"net/http"
-	"sort"
+	"slices"
 	"strconv"
 
 	"github.com/erigontech/erigon/cl/beacon/beaconhttp"
@@ -120,8 +121,8 @@ func (a *ApiHandler) liveness(w http.ResponseWriter, r *http.Request) (*beaconht
 	for _, v := range liveSet {
 		resp = append(resp, v)
 	}
-	sort.Slice(resp, func(i, j int) bool {
-		return resp[i].Index < resp[j].Index
+	slices.SortFunc(resp, func(a, b *live) int {
+		return cmp.Compare(a.Index, b.Index)
 	})
 
 	return newBeaconResponse(resp), nil

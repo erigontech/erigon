@@ -4,6 +4,8 @@ import (
 	"math"
 	"testing"
 
+	"github.com/stretchr/testify/require"
+
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
@@ -12,7 +14,7 @@ import (
 	"github.com/erigontech/erigon/cl/utils"
 	"github.com/erigontech/erigon/cl/utils/bls"
 	"github.com/erigontech/erigon/common"
-	"github.com/stretchr/testify/require"
+	"github.com/erigontech/erigon/common/crypto"
 )
 
 // TestIsBuilderWithdrawalCredential_0x03 verifies that withdrawal credentials
@@ -392,7 +394,7 @@ func makeValidBuilderDeposit(t *testing.T, cfg *clparams.BeaconChainConfig) (
 	)
 	require.NoError(t, err)
 
-	signingRoot := utils.Sha256(msgHash[:], domain)
+	signingRoot := crypto.Sha256(msgHash[:], domain)
 
 	sigObj := privKey.Sign(signingRoot[:])
 	copy(signature[:], sigObj.Bytes())
