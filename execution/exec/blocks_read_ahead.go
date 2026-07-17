@@ -92,12 +92,10 @@ func newCachePopulatingGetter(ttx kv.TemporalTx, sc *cache.StateCache) *cachePop
 func (cpg *cachePopulatingGetter) GetLatest(name kv.Domain, k []byte) ([]byte, kv.Step, error) {
 	v, step, err := cpg.g.GetLatest(name, k)
 	if err == nil && cpg.sc != nil && cpg.visibleEnd != nil {
-		snapshotEnd, ok := cpg.visibleEnd(name)
-		if !ok {
-			return v, step, nil
+		if snapshotEnd, ok := cpg.visibleEnd(name); ok {
+			readTxNum := (uint64(step)+1)*cpg.stepSize - 1
+			cpg.sc.FillIfFresh(name, k, v, readTxNum, snapshotEnd)
 		}
-		readTxNum := (uint64(step)+1)*cpg.stepSize - 1
-		cpg.sc.FillIfFresh(name, k, v, readTxNum, snapshotEnd)
 	}
 	return v, step, err
 }
