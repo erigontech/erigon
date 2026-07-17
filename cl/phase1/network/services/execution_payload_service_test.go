@@ -37,9 +37,7 @@ import (
 func setupExecutionPayloadService(t *testing.T) (ExecutionPayloadService, *mock_services.ForkChoiceStorageMock) {
 	cfg := &clparams.MainnetBeaconConfig
 	forkchoiceMock := mock_services.NewForkChoiceStorageMock(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	t.Cleanup(cancel)
-	service := NewExecutionPayloadService(ctx, forkchoiceMock, cfg, beaconevents.NewEventEmitter())
+	service := NewExecutionPayloadService(t.Context(), forkchoiceMock, cfg, beaconevents.NewEventEmitter())
 	return service, forkchoiceMock
 }
 
@@ -203,8 +201,7 @@ func TestExecutionPayloadServiceDifferentBuildersSameBlock(t *testing.T) {
 func TestExecutionPayloadServicePendingEnvelopeExpiry(t *testing.T) {
 	cfg := &clparams.MainnetBeaconConfig
 	forkchoiceMock := mock_services.NewForkChoiceStorageMock(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 
 	// Create service directly to access internals
 	impl := &executionPayloadService{
@@ -244,8 +241,7 @@ func TestExecutionPayloadServicePendingEnvelopeExpiry(t *testing.T) {
 func TestExecutionPayloadServicePendingEnvelopeProcessing(t *testing.T) {
 	cfg := &clparams.MainnetBeaconConfig
 	forkchoiceMock := mock_services.NewForkChoiceStorageMock(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 
 	// Create service directly to access internals
 	impl := &executionPayloadService{
@@ -298,8 +294,7 @@ func TestExecutionPayloadServicePendingEnvelopeProcessing(t *testing.T) {
 func TestExecutionPayloadServiceMultiplePendingForSameBlock(t *testing.T) {
 	cfg := &clparams.MainnetBeaconConfig
 	forkchoiceMock := mock_services.NewForkChoiceStorageMock(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 
 	impl := &executionPayloadService{
 		forkchoiceStore: forkchoiceMock,

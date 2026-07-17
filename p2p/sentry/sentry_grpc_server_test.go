@@ -1416,8 +1416,7 @@ func TestGrpcServer_FindPeerByMinBlock_FiltersVersion(t *testing.T) {
 // replay pass inside PeerEvents only emits Connect events for peers
 // whose negotiated eth version matches this sentry's ethVersion.
 func TestGrpcServer_PeerEvents_ReplayFiltersByVersion(t *testing.T) {
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 
 	ss := &GrpcServer{
 		ctx:          ctx,
