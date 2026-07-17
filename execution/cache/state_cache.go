@@ -17,7 +17,6 @@
 package cache
 
 import (
-	"bytes"
 	"math"
 	"strings"
 	"sync"
@@ -29,7 +28,6 @@ import (
 	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
-	"github.com/erigontech/erigon/execution/commitment/commitmentdb"
 )
 
 const (
@@ -271,9 +269,6 @@ func (c *StateCache) FillIfFresh(domain kv.Domain, key []byte, value []byte, rea
 func (c *StateCache) put(domain kv.Domain, key []byte, value []byte, txNum uint64, overwrite bool) {
 	cache := c.caches[domain]
 	if cache == nil {
-		return
-	}
-	if domain == kv.CommitmentDomain && bytes.Equal(key, commitmentdb.KeyCommitmentState) {
 		return
 	}
 	if overwrite {
