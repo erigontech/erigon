@@ -159,16 +159,6 @@ func (c *StateCache) PutCodeWithHash(addr, code, codeHash []byte, txNum uint64) 
 	c.putCodeWithHash(addr, code, codeHash, txNum, true)
 }
 
-// PutCodeWithHashIfFresh conditionally fills code from a current snapshot.
-func (c *StateCache) PutCodeWithHashIfFresh(addr, code, codeHash []byte, txNum, snapshotEnd uint64) {
-	c.admissionMu.RLock()
-	defer c.admissionMu.RUnlock()
-	if snapshotEnd < c.appliedEnd[kv.CodeDomain] {
-		return
-	}
-	c.putCodeWithHash(addr, code, codeHash, txNum, false)
-}
-
 func (c *StateCache) putCodeWithHash(addr, code, codeHash []byte, txNum uint64, overwrite bool) {
 	cc, ok := c.caches[kv.CodeDomain].(*CodeCache)
 	if !ok {
@@ -246,14 +236,36 @@ func (c *StateCache) Put(domain kv.Domain, key []byte, value []byte, txNum uint6
 	c.put(domain, key, value, txNum, true)
 }
 
-// PutIfFresh conditionally fills a domain from a current snapshot.
-func (c *StateCache) PutIfFresh(domain kv.Domain, key []byte, value []byte, txNum, snapshotEnd uint64) {
+// FillIfFresh conditionally inserts a snapshot read without replacing an
+// authoritative entry. Negative values use the snapshot's last visible txNum.
+func (c *StateCache) FillIfFresh(domain kv.Domain, key []byte, value []byte, readTxNum, snapshotEnd uint64) {
+	cache := c.caches[domain]
+	if cache == nil || (domain == kv.CodeDomain && len(value) == 0) {
+		return
+	}
+
+	var codeHash []byte
+	if domain == kv.CodeDomain {
+		codeHash = crypto.Keccak256(value)
+	}
+
 	c.admissionMu.RLock()
 	defer c.admissionMu.RUnlock()
 	if snapshotEnd < c.appliedEnd[domain] {
 		return
 	}
-	c.put(domain, key, value, txNum, false)
+
+	if domain == kv.CodeDomain {
+		c.putCodeWithHash(key, value, codeHash, readTxNum, false)
+		return
+	}
+	if len(value) == 0 {
+		readTxNum = 0
+		if snapshotEnd > 0 {
+			readTxNum = snapshotEnd - 1
+		}
+	}
+	c.put(domain, key, value, readTxNum, false)
 }
 
 func (c *StateCache) put(domain kv.Domain, key []byte, value []byte, txNum uint64, overwrite bool) {

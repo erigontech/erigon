@@ -1224,19 +1224,7 @@ func (sd *SharedDomains) getLatestMetered(domain kv.Domain, tx kv.TemporalTx, k 
 	if sd.stateCache != nil && sd.stateCache.GetCache(domain) != nil {
 		if snapshotEnd, ok := tx.Debug().DomainVisibleEnd(domain); ok {
 			readTxNum := (uint64(step)+1)*sd.StepSize() - 1
-			if domain == kv.CodeDomain {
-				if len(v) > 0 {
-					sd.stateCache.PutCodeWithHashIfFresh(k, v, crypto.Keccak256(v), readTxNum, snapshotEnd)
-				}
-			} else {
-				if len(v) == 0 {
-					readTxNum = 0
-					if snapshotEnd > 0 {
-						readTxNum = snapshotEnd - 1
-					}
-				}
-				sd.stateCache.PutIfFresh(domain, k, v, readTxNum, snapshotEnd)
-			}
+			sd.stateCache.FillIfFresh(domain, k, v, readTxNum, snapshotEnd)
 		}
 	}
 	// Only cache a branch when the read's txN is known: a txN=0 entry would

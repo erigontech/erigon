@@ -921,7 +921,7 @@ func TestStateCache_StaleSnapshotCannotFillAfterDelete(t *testing.T) {
 	_, ok := sc.Get(kv.AccountsDomain, key)
 	require.False(t, ok, "an authoritative deletion must physically remove the entry")
 
-	sc.PutIfFresh(kv.AccountsDomain, key, stale, 10, 11)
+	sc.FillIfFresh(kv.AccountsDomain, key, stale, 10, 11)
 	_, ok = sc.Get(kv.AccountsDomain, key)
 	require.False(t, ok, "a snapshot older than the deletion must not fill afterward")
 }
@@ -935,12 +935,12 @@ func TestStateCache_FileEndSnapshotCannotFillAtAppliedTx(t *testing.T) {
 	stale := makeValue(1)
 	sc.Apply(kv.AccountsDomain, key, nil, 100)
 
-	sc.PutIfFresh(kv.AccountsDomain, key, stale, 99, 100)
+	sc.FillIfFresh(kv.AccountsDomain, key, stale, 99, 100)
 	_, ok := sc.Get(kv.AccountsDomain, key)
 	require.False(t, ok, "a [0,100) snapshot does not contain the applied tx 100")
 
 	fresh := makeValue(2)
-	sc.PutIfFresh(kv.AccountsDomain, key, fresh, 100, 101)
+	sc.FillIfFresh(kv.AccountsDomain, key, fresh, 100, 101)
 	got, ok := sc.Get(kv.AccountsDomain, key)
 	require.True(t, ok)
 	require.Equal(t, fresh, got)
@@ -967,7 +967,7 @@ func TestStateCache_ApplyDeleteAtomicWithFill(t *testing.T) {
 		}()
 		go func() {
 			defer wg.Done()
-			sc.PutIfFresh(kv.AccountsDomain, key, value, appliedTxNum, snapshotEnd)
+			sc.FillIfFresh(kv.AccountsDomain, key, value, appliedTxNum, snapshotEnd)
 		}()
 		wg.Wait()
 

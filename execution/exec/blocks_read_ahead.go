@@ -10,7 +10,6 @@ import (
 	"golang.org/x/sync/errgroup"
 
 	"github.com/erigontech/erigon/common"
-	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/length"
 	"github.com/erigontech/erigon/common/log/v3"
@@ -78,9 +77,7 @@ func (bra *BlockReadAheader) SetStateCache(sc *cache.StateCache) {
 // that SharedDomains.GetLatest consults — eliminating the file-accessor
 // stack cost on the EVM's first touch of any prefetched address.
 //
-// For the CodeDomain the wrapper also populates the codeHashToCode
-// (codeHash→bytes) + size-cache layers via PutCodeWithHashIfFresh, keyed by
-// the code's own keccak hash so every cached pair is self-consistent.
+// Code reads also populate the content-addressed and size-cache layers.
 type cachePopulatingGetter struct {
 	g          kv.TemporalGetter
 	sc         *cache.StateCache
@@ -99,20 +96,8 @@ func (cpg *cachePopulatingGetter) GetLatest(name kv.Domain, k []byte) ([]byte, k
 		if !ok {
 			return v, step, nil
 		}
-		if name == kv.CodeDomain {
-			if len(v) > 0 {
-				cpg.sc.PutCodeWithHashIfFresh(k, v, crypto.Keccak256(v), (uint64(step)+1)*cpg.stepSize-1, snapshotEnd)
-			}
-		} else {
-			txNum := (uint64(step)+1)*cpg.stepSize - 1
-			if len(v) == 0 {
-				txNum = 0
-				if snapshotEnd > 0 {
-					txNum = snapshotEnd - 1
-				}
-			}
-			cpg.sc.PutIfFresh(name, k, v, txNum, snapshotEnd)
-		}
+		readTxNum := (uint64(step)+1)*cpg.stepSize - 1
+		cpg.sc.FillIfFresh(name, k, v, readTxNum, snapshotEnd)
 	}
 	return v, step, err
 }

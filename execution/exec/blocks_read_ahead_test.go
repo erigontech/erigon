@@ -113,6 +113,9 @@ func TestCachePopulatingGetterWarmsColdKeys(t *testing.T) {
 	got, ok := sc.Get(kv.CodeDomain, key)
 	require.True(t, ok)
 	require.Equal(t, code, got)
+	got, ok = sc.GetCodeByHash(crypto.Keccak256(code))
+	require.True(t, ok)
+	require.Equal(t, code, got)
 
 	// Negative results (missing account, empty slot) are cached as nil hits.
 	sc = newTestStateCache()
