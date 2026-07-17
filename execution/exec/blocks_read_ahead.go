@@ -89,6 +89,13 @@ func newCachePopulatingGetter(ttx kv.TemporalTx, sc *cache.StateCache) *cachePop
 	return &cachePopulatingGetter{g: ttx, sc: sc, stepSize: ttx.Debug().StepSize(), visibleEnd: ttx.Debug().DomainVisibleEnd}
 }
 
+func readAheadGetter(ttx kv.TemporalTx, sc *cache.StateCache) kv.TemporalGetter {
+	if sc == nil {
+		return ttx
+	}
+	return newCachePopulatingGetter(ttx, sc)
+}
+
 func (cpg *cachePopulatingGetter) GetLatest(name kv.Domain, k []byte) ([]byte, kv.Step, error) {
 	v, step, err := cpg.g.GetLatest(name, k)
 	if err == nil && cpg.sc != nil && cpg.visibleEnd != nil {
@@ -212,11 +219,7 @@ func (bra *BlockReadAheader) warmBody(ctx context.Context, db kv.RoDB, header *t
 				if !ok {
 					return nil
 				}
-				var getter kv.TemporalGetter = ttx
-				if bra.stateCache != nil {
-					getter = newCachePopulatingGetter(ttx, bra.stateCache)
-				}
-				stateReader := state.NewReaderV3(getter)
+				stateReader := state.NewReaderV3(readAheadGetter(ttx, bra.stateCache))
 
 				for idx := workerStart; idx < workerEnd; idx++ {
 					select {
@@ -282,11 +285,7 @@ func (bra *BlockReadAheader) warmBody(ctx context.Context, db kv.RoDB, header *t
 			if !ok {
 				return nil
 			}
-			var getter kv.TemporalGetter = ttx
-			if bra.stateCache != nil {
-				getter = newCachePopulatingGetter(ttx, bra.stateCache)
-			}
-			stateReader := state.NewReaderV3(getter)
+			stateReader := state.NewReaderV3(readAheadGetter(ttx, bra.stateCache))
 
 			for txIdx := workerStart; txIdx < workerEnd; txIdx++ {
 				select {
