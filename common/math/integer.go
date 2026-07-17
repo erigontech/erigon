@@ -131,5 +131,5 @@ func NextPowerOfTwo(n uint64) uint64 {
 	if n <= 1 {
 		return 1
 	}
-	return 1 << bits.Len64(n-1)
+	return uint64(1) << bits.Len64(n-1)
 }
