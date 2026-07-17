@@ -570,6 +570,27 @@ func pruneBlockSnapshots(ctx context.Context, cfg SnapshotsCfg, logger log.Logge
 // highest state files until the state view no longer extends beyond the block
 // snapshots. Without this, SeekCommitment can return a block number past what
 // TxNums covers, causing "behind commitment" errors.
+// hasCommitmentData reports whether execution has written commitment data.
+// TblCommitmentKeys (DupSort) is written by every execution flush including
+// deletions; TblCommitmentVals would miss pure-deletion runs.
+func hasCommitmentData(ctx context.Context, db kv.RoDB) (bool, error) {
+	roTx, err := db.BeginRo(ctx)
+	if err != nil {
+		return false, err
+	}
+	defer roTx.Rollback()
+	cursor, err := roTx.Cursor(kv.TblCommitmentKeys)
+	if err != nil {
+		return false, err
+	}
+	defer cursor.Close()
+	k, _, err := cursor.First()
+	if err != nil {
+		return false, err
+	}
+	return k != nil, nil
+}
+
 func alignStateToBlockSnapshots(ctx context.Context, agg *state.Aggregator, cfg SnapshotsCfg, logPrefix string, logger log.Logger) error {
 	frozenBlocks := cfg.blockReader.FrozenBlocks()
 	if frozenBlocks == 0 {
@@ -581,20 +602,14 @@ func alignStateToBlockSnapshots(ctx context.Context, agg *state.Aggregator, cfg 
 	// previously executed past any snapshot misalignment.
 	// Re-running alignment on restart would remove snapshot files that
 	// the downloader re-downloaded, cascading until all state is gone.
-	if roTx, err := cfg.db.BeginRo(ctx); err == nil {
-		// Check if the commitment domain keys table has any entries.
-		// TblCommitmentKeys (DupSort) is written by every execution flush including
-		// deletions; TblCommitmentVals would miss pure-deletion runs.
-		if cursor, cErr := roTx.Cursor(kv.TblCommitmentKeys); cErr == nil {
-			k, _, _ := cursor.First()
-			cursor.Close()
-			roTx.Rollback()
-			if k != nil {
-				return nil // execution has run — skip alignment
-			}
-		} else {
-			roTx.Rollback()
-		}
+	executed, err := hasCommitmentData(ctx, cfg.db)
+	if err != nil {
+		// Aligning when we shouldn't deletes snapshot files, so an unreadable
+		// commitment table must not be treated as "never executed".
+		return err
+	}
+	if executed {
+		return nil // execution has run — skip alignment
 	}
 
 	dirs := cfg.dirs
@@ -718,7 +733,14 @@ func removeStateFilesFromStep(dirs datadir.Dirs, startStep uint64, logger log.Lo
 				continue
 			}
 			res.count++
-			res.names = append(res.names, e.Name())
+			// The seeder keys torrents by path relative to the snapshots root, so a
+			// state file has to be named e.g. "domain/<file>", not just "<file>".
+			name, relErr := filepath.Rel(dirs.Snap, path)
+			if relErr != nil {
+				logger.Warn(fmt.Sprintf("[%s] failed to relativise state file", logPrefix), "file", path, "err", relErr)
+				continue
+			}
+			res.names = append(res.names, name)
 		}
 	}
 	return res

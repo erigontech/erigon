@@ -129,7 +129,9 @@ func openDB(opts kv2.MdbxOpts, applyMigrations bool, chain string, logger log.Lo
 				rawDBExcl.Close()
 				return nil, err
 			}
-			defer rawDBExcl.Close()
+			// Release the exclusive lock here, not on function exit: the accede-mode
+			// open below would otherwise contend with this handle.
+			rawDBExcl.Close()
 		}
 	}
 
