@@ -917,3 +917,13 @@ func TestBodyDecodeRejectsEmptyStringTx(t *testing.T) {
 	err := rlp.DecodeBytes(buf.Bytes(), &b)
 	require.Error(t, err, "must reject an empty-string element in the transactions list")
 }
+
+func TestBodyDecodeRejectsWrappedLegacyTransaction(t *testing.T) {
+	t.Parallel()
+	bodyRLP, err := hex.DecodeString("f868f865b863f86103018207d094b94f5374fce5edbc8e2a8697c15331677e6ebf0b0a8255441ca098ff921201554726367d2be8c804a7ff89ccf285ebc57dff8ae4c44b9c19ac4aa08887321be575c8095f789dd4c743dfe42c1820f9231f98a962b210e3ac2452a3c0")
+	require.NoError(t, err)
+
+	var body Body
+	err = rlp.DecodeBytes(bodyRLP, &body)
+	require.ErrorIs(t, err, ErrInvalidTxType)
+}
