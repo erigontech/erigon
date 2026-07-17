@@ -127,6 +127,11 @@ func (p *ContractTrunkPreloadParallel) sortAndPartitionFrontier(dbBranches map[s
 		}
 	}
 	p.scratchDbHits, p.scratchDbVals, p.scratchFileMiss = dbHits, dbVals, fileMiss
+	// Drop references in the reused tail so a large earlier wave doesn't pin its
+	// path/key bytes (and stale dbBranches values) alive across Run calls.
+	clear(dbHits[len(dbHits):cap(dbHits)])
+	clear(dbVals[len(dbVals):cap(dbVals)])
+	clear(fileMiss[len(fileMiss):cap(fileMiss)])
 	return dbHits, dbVals, fileMiss, dbHitsBytes
 }
 
@@ -255,8 +260,9 @@ func (p *ContractTrunkPreloadParallel) Run(
 		}
 
 		if len(fileMissDeferred) > 0 {
-			// Defensive: !budgetHit should mean no truncation. Re-queue at current depth.
-			p.frontier = fileMissDeferred
+			// Defensive: !budgetHit should mean no truncation. Clone out of the
+			// scratch-aliased slice so the next wave's partition can't overwrite it.
+			p.frontier = slices.Clone(fileMissDeferred)
 		} else {
 			p.frontier = p.pendingChildren
 			p.pendingChildren = nil
@@ -271,7 +277,7 @@ func (p *ContractTrunkPreloadParallel) Run(
 			"used_mb", p.usedBytes/(1<<20),
 			"pinned_this_step", chunkPinned,
 			"pinned", p.pinned,
-			"db_hist", p.dbHitsPinned,
+			"db_hits", p.dbHitsPinned,
 			"max_depth_reached", p.maxDepthReached,
 			"queue_empty", queueEmpty,
 			"next_depth", p.nextDepth,

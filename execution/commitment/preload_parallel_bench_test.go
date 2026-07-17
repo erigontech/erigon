@@ -63,8 +63,8 @@ func benchmarkDrain(b *testing.B, leafDepth, stepBudget int) {
 func BenchmarkPreloadDrain_d67(b *testing.B) { benchmarkDrain(b, 67, 1_000_000) }
 func BenchmarkPreloadDrain_d68(b *testing.B) { benchmarkDrain(b, 68, 2_000_000) }
 
-// randomFrontier builds n unsorted pathKeys with distinct deep (depth-69) nibble
-// paths under the contract root, so the sort has real work to do.
+// randomFrontier builds n unsorted pathKeys with pseudo-random deep (depth-69)
+// nibble paths under the contract root, so the sort has real work to do.
 func randomFrontier(hash []byte, n int) []pathKey {
 	root := hexNibbles(hash) // 64 nibbles
 	f := make([]pathKey, n)
