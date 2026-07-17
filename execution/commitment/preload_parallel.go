@@ -23,6 +23,7 @@ import (
 	"slices"
 	"time"
 
+	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/execution/commitment/nibbles"
 )
@@ -53,10 +54,8 @@ type pathKey struct {
 }
 
 func toPathKey(path []byte) pathKey {
-	k := nibbles.HexToCompact(path)
-	kc := make([]byte, len(k))
-	copy(kc, k) // HexToCompact result may alias a reused buffer
-	return pathKey{path: path, key: kc}
+	// HexToCompact result may alias a reused buffer, so copy it.
+	return pathKey{path: path, key: common.Copy(nibbles.HexToCompact(path))}
 }
 
 // ContractTrunkPreloadParallel is the wave-BFS analogue of ContractTrunkPreload.
@@ -99,8 +98,7 @@ func NewContractTrunkPreloadParallel(contractHash []byte) (*ContractTrunkPreload
 	if len(contractHash) != 32 {
 		return nil, fmt.Errorf("NewContractTrunkPreloadParallel: contractHash must be 32 bytes, got %d", len(contractHash))
 	}
-	contractHashCopy := make([]byte, len(contractHash))
-	copy(contractHashCopy, contractHash)
+	contractHashCopy := common.Copy(contractHash)
 	return &ContractTrunkPreloadParallel{
 		contractHash:    contractHashCopy,
 		frontier:        []pathKey{toPathKey(ContractNibbles(contractHashCopy))},
@@ -131,6 +129,11 @@ func (p *ContractTrunkPreloadParallel) sortAndPartitionFrontier(dbBranches map[s
 		}
 	}
 	p.scratchDbHits, p.scratchDbVals, p.scratchFileMiss = dbHits, dbVals, fileMiss
+	// Drop references in the reused tail so a large earlier wave doesn't pin its
+	// path/key bytes (and stale dbBranches values) alive across Run calls.
+	clear(dbHits[len(dbHits):cap(dbHits)])
+	clear(dbVals[len(dbVals):cap(dbVals)])
+	clear(fileMiss[len(fileMiss):cap(fileMiss)])
 	log.Warn("[dbg] sortAndPartitionFrontier", "l", len(p.frontier), "took", time.Since(t))
 	return dbHits, dbVals, fileMiss, dbHitsBytes
 }
@@ -171,9 +174,7 @@ func (p *ContractTrunkPreloadParallel) Run(
 		// floor drops a preloaded pin before the cStep<=maxStep gate is consulted,
 		// so leaving step unset only keeps that gate trivially true for live pins.
 		cache.PinEntry(pk.key, v, 0, p.pinTxNum)
-		kc := make([]byte, len(pk.key))
-		copy(kc, pk.key)
-		p.pinnedPrefixes = append(p.pinnedPrefixes, kc)
+		p.pinnedPrefixes = append(p.pinnedPrefixes, common.Copy(pk.key))
 		p.usedBytes += cost
 		p.pinned++
 		chunkPinned++
@@ -262,8 +263,9 @@ func (p *ContractTrunkPreloadParallel) Run(
 		}
 
 		if len(fileMissDeferred) > 0 {
-			// Defensive: !budgetHit should mean no truncation. Re-queue at current depth.
-			p.frontier = fileMissDeferred
+			// Defensive: !budgetHit should mean no truncation. Clone out of the
+			// scratch-aliased slice so the next wave's partition can't overwrite it.
+			p.frontier = slices.Clone(fileMissDeferred)
 		} else {
 			p.frontier = p.pendingChildren
 			p.pendingChildren = nil
@@ -278,7 +280,7 @@ func (p *ContractTrunkPreloadParallel) Run(
 			"used_mb", p.usedBytes/(1<<20),
 			"pinned_this_step", chunkPinned,
 			"pinned", p.pinned,
-			"db_hist", p.dbHitsPinned,
+			"db_hits", p.dbHitsPinned,
 			"max_depth_reached", p.maxDepthReached,
 			"queue_empty", queueEmpty,
 			"next_depth", p.nextDepth,
