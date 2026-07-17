@@ -127,12 +127,25 @@ func (p *ContractTrunkPreloadParallel) sortAndPartitionFrontier(dbBranches map[s
 		}
 	}
 	p.scratchDbHits, p.scratchDbVals, p.scratchFileMiss = dbHits, dbVals, fileMiss
-	// Drop references in the reused tail so a large earlier wave doesn't pin its
-	// path/key bytes (and stale dbBranches values) alive across Run calls.
+	// Drop references in the reused tail so a larger earlier wave doesn't pin its
+	// path/key bytes (and stale dbBranches values) alive behind a shorter one.
 	clear(dbHits[len(dbHits):cap(dbHits)])
 	clear(dbVals[len(dbVals):cap(dbVals)])
 	clear(fileMiss[len(fileMiss):cap(fileMiss)])
 	return dbHits, dbVals, fileMiss, dbHitsBytes
+}
+
+// releaseScratch drops the last wave's key/value references while keeping the
+// grown capacity, so an idle preloader between Run calls retains buffers but not
+// a frontier's worth of per-entry allocations. Callers must have copied anything
+// they keep (p.frontier) out of the scratch-aliased slices first.
+func (p *ContractTrunkPreloadParallel) releaseScratch() {
+	clear(p.scratchDbHits)
+	clear(p.scratchDbVals)
+	clear(p.scratchFileMiss)
+	p.scratchDbHits = p.scratchDbHits[:0]
+	p.scratchDbVals = p.scratchDbVals[:0]
+	p.scratchFileMiss = p.scratchFileMiss[:0]
 }
 
 // Run advances the wave-BFS until stepBudgetBytes is exhausted, the frontier
@@ -154,6 +167,7 @@ func (p *ContractTrunkPreloadParallel) Run(
 	if stepBudgetBytes <= 0 {
 		return 0, len(p.frontier) == 0, nil
 	}
+	defer p.releaseScratch()
 
 	stepCap := p.usedBytes + stepBudgetBytes
 	chunkPinned := 0
