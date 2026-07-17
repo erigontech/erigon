@@ -60,8 +60,8 @@ func benchmarkDrain(b *testing.B, leafDepth, stepBudget int) {
 	}
 }
 
-func BenchmarkPreloadDrain_d67(b *testing.B) { benchmarkDrain(b, 67, 1<<20) }
-func BenchmarkPreloadDrain_d68(b *testing.B) { benchmarkDrain(b, 68, 2<<20) }
+func BenchmarkPreloadDrain_d67(b *testing.B) { benchmarkDrain(b, 67, 1_000_000) }
+func BenchmarkPreloadDrain_d68(b *testing.B) { benchmarkDrain(b, 68, 2_000_000) }
 
 // randomFrontier builds n unsorted pathKeys with distinct deep (depth-69) nibble
 // paths under the contract root, so the sort has real work to do.
@@ -106,5 +106,11 @@ func benchmarkSortPartition(b *testing.B, n int) {
 	}
 }
 
-func BenchmarkSortAndPartitionFrontier_65k(b *testing.B) { benchmarkSortPartition(b, 65536) }
-func BenchmarkSortAndPartitionFrontier_1M(b *testing.B)  { benchmarkSortPartition(b, 1<<20) }
+func BenchmarkSortAndPartitionFrontier_65k(b *testing.B) { benchmarkSortPartition(b, 65_000) }
+
+func BenchmarkSortAndPartitionFrontier_1M(b *testing.B) {
+	if testing.Short() {
+		b.Skip("long-running: ~1M-entry frontier setup + sort")
+	}
+	benchmarkSortPartition(b, 1_000_000)
+}
