@@ -172,7 +172,11 @@ func chainWithWithdrawal(t *testing.T, withdrawalAddr common.Address, withdrawal
 		Config: chain.AllProtocolChanges,
 		Alloc:  types.GenesisAlloc{withdrawalAddr: {Balance: bankFunds}},
 	}
-	m := execmoduletester.New(t, execmoduletester.WithGenesisSpec(gspec))
+	m := execmoduletester.New(
+		t,
+		execmoduletester.WithGenesisSpec(gspec),
+		execmoduletester.WithAmsterdamBuilderContracts(),
+	)
 	generated, err := blockgen.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 1, func(_ int, b *blockgen.BlockGen) {
 		b.AddWithdrawal(&types.Withdrawal{
 			Index:     0,
@@ -307,7 +311,11 @@ func TestReplayBlockTransactionsMultiWithdrawalSameAddr(t *testing.T) {
 		Config: chain.AllProtocolChanges,
 		Alloc:  types.GenesisAlloc{withdrawalAddr: {Balance: testBankFunds()}},
 	}
-	m := execmoduletester.New(t, execmoduletester.WithGenesisSpec(gspec))
+	m := execmoduletester.New(
+		t,
+		execmoduletester.WithGenesisSpec(gspec),
+		execmoduletester.WithAmsterdamBuilderContracts(),
+	)
 	generated, err := blockgen.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 1, func(_ int, b *blockgen.BlockGen) {
 		b.AddWithdrawal(&types.Withdrawal{Index: 0, Validator: 42, Address: withdrawalAddr, Amount: wd1Gwei})
 		b.AddWithdrawal(&types.Withdrawal{Index: 1, Validator: 43, Address: withdrawalAddr, Amount: wd2Gwei})
@@ -354,7 +362,11 @@ func TestReplayBlockTransactionsWithdrawalNewAddress(t *testing.T) {
 	// Address intentionally absent from genesis alloc.
 	newAddr := common.HexToAddress("0xaaaabbbbccccddddeeeeffffaaaabbbbccccdddd")
 	gspec := &types.Genesis{Config: chain.AllProtocolChanges}
-	m := execmoduletester.New(t, execmoduletester.WithGenesisSpec(gspec))
+	m := execmoduletester.New(
+		t,
+		execmoduletester.WithGenesisSpec(gspec),
+		execmoduletester.WithAmsterdamBuilderContracts(),
+	)
 	generated, err := blockgen.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 1, func(_ int, b *blockgen.BlockGen) {
 		b.AddWithdrawal(&types.Withdrawal{Index: 0, Validator: 42, Address: newAddr, Amount: withdrawalGwei})
 	})
@@ -398,7 +410,11 @@ func TestReplayBlockTransactionsMultiWithdrawalNewAddress(t *testing.T) {
 	)
 	newAddr := common.HexToAddress("0x1111222233334444555566667777888899990000")
 	gspec := &types.Genesis{Config: chain.AllProtocolChanges}
-	m := execmoduletester.New(t, execmoduletester.WithGenesisSpec(gspec))
+	m := execmoduletester.New(
+		t,
+		execmoduletester.WithGenesisSpec(gspec),
+		execmoduletester.WithAmsterdamBuilderContracts(),
+	)
 	generated, err := blockgen.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 1, func(_ int, b *blockgen.BlockGen) {
 		b.AddWithdrawal(&types.Withdrawal{Index: 0, Validator: 1, Address: newAddr, Amount: wd1Gwei})
 		b.AddWithdrawal(&types.Withdrawal{Index: 1, Validator: 2, Address: newAddr, Amount: wd2Gwei})

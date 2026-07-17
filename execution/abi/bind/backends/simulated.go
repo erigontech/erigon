@@ -103,7 +103,12 @@ func NewSimulatedBackendWithConfig(t *testing.T, alloc types.GenesisAlloc, confi
 		engine = ethash.NewFaker()
 	}
 	//SimulatedBackend - it's remote blockchain node. This is reason why it has own `MockSentry` and own `DB` (even if external unit-test have one already)
-	m := execmoduletester.New(t, execmoduletester.WithGenesisSpec(&genesis), execmoduletester.WithEngine(engine))
+	m := execmoduletester.New(
+		t,
+		execmoduletester.WithGenesisSpec(&genesis),
+		execmoduletester.WithEngine(engine),
+		execmoduletester.WithAmsterdamBuilderContracts(),
+	)
 
 	backend := &SimulatedBackend{
 		m:            m,

@@ -102,8 +102,7 @@ jobs:
             fixtures-tarball: eest_devnet
             extra-hive-flags: "--sim.loglevel=3 --client.checktimelimit=300s"
             erigon-extra-flags: "--experimental.bal"
-            # TODO: reduce to 0 as tests-glamsterdam-devnet@v7.2.0 support lands.
-            max-failures: 3
+            max-failures: 0
             exec_mode: parallel
     steps:
       - name: Clean docker system
