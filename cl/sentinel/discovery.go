@@ -17,10 +17,11 @@
 package sentinel
 
 import (
+	"cmp"
 	"context"
 	"errors"
 	"fmt"
-	"sort"
+	"slices"
 	"time"
 
 	"github.com/OffchainLabs/go-bitfield"
@@ -227,8 +228,8 @@ func (s *Sentinel) proactiveSubnetPeerSearch() {
 			}
 
 			// Sort by wanted count descending (subnets needing most peers first, i.e., 0-peer subnets)
-			sort.Slice(underserved, func(i, j int) bool {
-				return underserved[i].wanted > underserved[j].wanted
+			slices.SortFunc(underserved, func(a, b subnetSearchState) int {
+				return cmp.Compare(b.wanted, a.wanted)
 			})
 
 			// Extract just the subnet indices for logging
@@ -352,18 +353,16 @@ func (s *Sentinel) pruneExcessPeers() {
 
 	// Sort peers by "removability" (most removable first)
 	// Priority: peers with no critical subnets, then by fewest covered subnets
-	sort.Slice(peerInfos, func(i, j int) bool {
-		// Critical peers (covering unique subnets) should never be removed
-		iCritical := len(peerInfos[i].criticalSubnets) > 0
-		jCritical := len(peerInfos[j].criticalSubnets) > 0
-
-		if iCritical != jCritical {
-			return !iCritical // Non-critical peers first (more removable)
+	slices.SortFunc(peerInfos, func(a, b peerSubnetInfo) int {
+		aCritical := len(a.criticalSubnets) > 0
+		bCritical := len(b.criticalSubnets) > 0
+		if aCritical != bCritical {
+			if !aCritical {
+				return -1
+			}
+			return 1
 		}
-
-		// Among non-critical peers, prefer removing those covering fewer subnets
-		// (they provide less value)
-		return peerInfos[i].subnetsCount < peerInfos[j].subnetsCount
+		return cmp.Compare(a.subnetsCount, b.subnetsCount)
 	})
 
 	// Remove peers, but re-check coverage after each removal
