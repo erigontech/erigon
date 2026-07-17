@@ -27,6 +27,9 @@ import (
 // branch state, so the read must be the authoritative latest (DB then files) —
 // a files-only read pins stale data whenever the newest value is still in the DB.
 // The TemporalGetter parameter enforces that: files-only reads are not reachable.
+// Empty values (deletion tombstones) resolve to nil like absent keys: the branch
+// cache never stores tombstones, and unpinned prefixes fall through to the
+// authoritative read anyway.
 func pinBranchResolver(ttx kv.TemporalGetter) commitment.BatchBranchResolver {
 	return func(keys [][]byte) ([][]byte, error) {
 		vals := make([][]byte, len(keys))
