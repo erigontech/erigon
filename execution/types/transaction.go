@@ -177,8 +177,8 @@ func DecodeRLPTransaction(s *rlp.Stream, blobTxnsAreWrappedWithBlobs bool) (Tran
 		if b, err = s.ViewBytes(); err != nil {
 			return nil, err
 		}
-		if len(b) == 0 {
-			return nil, rlp.EOL
+		if len(b) > 0 && b[0] >= rlp.SingleByteThreshold {
+			return nil, ErrInvalidTxType
 		}
 		if txn, err = UnmarshalTransactionFromBinary(b, blobTxnsAreWrappedWithBlobs); err != nil {
 			return nil, err
