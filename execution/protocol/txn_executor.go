@@ -454,7 +454,10 @@ func (st *TxnExecutor) ApplyFrame() (*evmtypes.ExecutionResult, error) {
 	// set code tx — verifyAuthorities mutates state (SetCode/SetNonce), so it
 	// runs only after the gas checks above, leaving a rejected frame untouched.
 	auths := msg.Authorizations()
-	verifiedAuthorities, stateIgasRefill, err := st.verifyAuthorities(auths, contractCreation, rules.ChainID.String())
+	if err := checkSetCodeAuthorizations(auths, contractCreation, rules.IsPrague); err != nil {
+		return nil, err
+	}
+	verifiedAuthorities, stateIgasRefill, err := st.verifyAuthorities(auths, rules.ChainID.String())
 	if err != nil {
 		return nil, err
 	}
@@ -572,7 +575,7 @@ func (st *TxnExecutor) Execute(refunds bool, gasBailout bool) (result *evmtypes.
 		st.state.SetNonce(msg.From(), nonce+1, tracing.NonceChangeEoACall)
 	}
 
-	verifiedAuthorities, stateIgasRefill, err := st.verifyAuthorities(auths, contractCreation, rules.ChainID.String())
+	verifiedAuthorities, stateIgasRefill, err := st.verifyAuthorities(auths, rules.ChainID.String())
 	if err != nil {
 		return nil, err
 	}
@@ -754,12 +757,9 @@ func checkSetCodeAuthorizations(auths []types.Authorization, contractCreation, i
 	return nil
 }
 
-func (st *TxnExecutor) verifyAuthorities(auths []types.Authorization, contractCreation bool, chainID string) ([]accounts.Address, uint64, error) {
+func (st *TxnExecutor) verifyAuthorities(auths []types.Authorization, chainID string) ([]accounts.Address, uint64, error) {
 	var stateIgasRefill uint64
 	verifiedAuthorities := make([]accounts.Address, 0)
-	if err := checkSetCodeAuthorizations(auths, contractCreation, st.evm.ChainRules().IsPrague); err != nil {
-		return nil, stateIgasRefill, err
-	}
 	if auths != nil {
 		isAmsterdam := st.evm.ChainRules().IsAmsterdam
 		preTxDelegates := make(map[accounts.Address]bool)
