@@ -20,9 +20,9 @@ import (
 	"encoding/json"
 
 	"github.com/erigontech/erigon/cl/merkle_tree"
-	"github.com/erigontech/erigon/cl/utils"
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/clonable"
+	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/common/ssz"
 )
 
@@ -234,7 +234,7 @@ func (v *ValidatorSet) HashSSZ() ([32]byte, error) {
 	}
 	lengthRoot := merkle_tree.Uint64Root(uint64(v.l))
 	coreRoot := v.MerkleTree.ComputeRoot()
-	return utils.Sha256(coreRoot[:], lengthRoot[:]), nil
+	return crypto.Sha256(coreRoot[:], lengthRoot[:]), nil
 }
 
 func (v *ValidatorSet) Set(idx int, val Validator) {
