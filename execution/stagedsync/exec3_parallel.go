@@ -721,11 +721,8 @@ func (pe *parallelExecutor) execImpl(ctx context.Context, execStage *StageState,
 						deliberateCancel()
 					}
 
-					// SavePastChangesetAccumulator + SetChangesetAccumulator(nil) +
-					// rotation-to-next-block accumulator are all driven by the exec
-					// loop now (see execLoop's blockResult handling), so the apply
-					// loop must NOT touch SharedDomains.mem here. Doing so used to
-					// race with the exec loop's ApplyStateWrites for the next block.
+					// The apply loop must NOT touch SharedDomains.mem here — it would
+					// race the exec loop's ApplyStateWrites for the next block.
 
 					if dbg.StopAfterBlock > 0 && applyResult.BlockNum == dbg.StopAfterBlock {
 						pe.logger.Warn(fmt.Sprintf("[%s] STOP_AFTER_BLOCK reached, exiting without commit (debug mode)", pe.logPrefix), "block", applyResult.BlockNum)

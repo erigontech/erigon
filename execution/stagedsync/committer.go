@@ -92,9 +92,8 @@ type commitmentCalculator struct {
 
 	// csPending buffers the current owned block's per-tx writes (new values); at
 	// settled compute time they are replayed to reconstruct the account/storage/code
-	// changeset result-locally and its prevs resolved. csBuilderBlock is the block
-	// being buffered. Only active under ASSERT_CHANGESET_RECONSTRUCT (build-alongside
-	// byte comparison against exec's shared accumulator).
+	// changeset result-locally with prevs resolved. csBuilderBlock is the block
+	// being buffered.
 	csPending      []csWrite
 	csBuilderBlock uint64
 	prevReader     *asOfPrevReader
@@ -871,30 +870,13 @@ func (cc *commitmentCalculator) publish(ctx context.Context, r commitmentResult)
 	}
 }
 
-// computeWithBlockAccumulator runs ComputeCommitment with the changeset
-// accumulator switched to block N's saved changeset (looked up by hash) so
-// that any branch writes during compute (mid-process inline flushes from
-// `pendingPrefixes` collisions, plus the [state] write at end via
-// encodeAndStoreCommitmentState) land in block N's CS rather than whatever
-// the exec loop has installed as current.
-//
-// IMPORTANT: hash-aware lookup is mandatory here. pastChangesAccumulator
-// can hold multiple changesets per block number after a fork-bounce
-// (canonical block 1 + forks[i] block 1 with different hashes), and a
-// number-only GetChangesetByBlockNum returns the first match in
-// non-deterministic map iteration order. That non-determinism caused the
-// calculator's [state] write for canonical block 1 to land in the fork's
-// block 1 CS during the TestBlockchainHeaderchainReorgConsistency
-// reproducer, leaving canonical block 1's CS without [state] and producing
-// off-by-one wrong-trie-root chains on the next iteration's re-execution.
-//
-// If block N's CS hasn't been saved yet it falls through to the live
-// accumulator, which — because the lookup is under changesetMu — is still N's
-// own (the apply loop can't rotate it while the lock is held).
-//
-// Also annotates the pending deferred update (set inside ComputeCommitment
-// when defer mode is on) with the block's hash, so the next call's
-// FlushPendingUpdates uses the same hash-aware routing.
+// computeWithBlockAccumulator computes an owned block's commitment against its
+// own result-local changeset. The block's changeset must be looked up by hash,
+// not number: after a fork-bounce pastChangesAccumulator holds multiple
+// changesets per block number, and a number-only lookup could route this block's
+// branch writes into a sibling fork's changeset — producing wrong-trie-root
+// chains on the next re-execution. It also stamps the pending deferred update
+// with the block hash so the next call's FlushPendingUpdates routes the same way.
 func (cc *commitmentCalculator) computeWithBlockAccumulator(ctx context.Context, t commitTarget) ([]byte, error) {
 	defer func() {
 		// Stamp the pending update (if any was set during ComputeCommitment)
@@ -906,25 +888,15 @@ func (cc *commitmentCalculator) computeWithBlockAccumulator(ctx context.Context,
 		}
 	}()
 
-	// Look up cs AND compute under changesetMu: reading cs before the lock races
-	// the apply loop's SavePastChangesetAccumulator + accumulator rotation, which
-	// would route this block's [state] write into the next block's changeset. The
-	// lock is required even on the cs==nil path — the internal FlushPendingUpdates
-	// mutates the same global accumulator pointer.
-	// Calc-owned changeset: the calculator is the sole producer of an owned block's
-	// changeset. It reuses the block's saved changeset across the block's multiple
-	// computes — a fold records the commitment branch deltas (Diffs[3]) ahead of the
-	// tx-result stream, then step-edge checkpoints and the block-end compute add more
-	// — so those deltas accumulate rather than being lost. The account/storage/code
-	// diffs (0..2) are filled from the buffered per-tx writes once they are ready
-	// (finalized at the block boundary via finalizeFoldedChangeset for a folded
-	// block); a not-yet-ready csPending just leaves them for that later fill.
-	//
-	// The swap is LOAD-BEARING under changesetMu (held above): it mutates the global
-	// current-accumulator pointer that the deferred branch writes (flushed inside
-	// ComputeCommitmentLocked → FlushPendingUpdatesLocked) and the end-of-compute
-	// [state] marker also touch, serializing against the apply goroutine. Inside the
-	// lock the *Locked variants are required — the public ones re-acquire the mutex.
+	// Reuse the block's saved changeset across its multiple computes so a fold's
+	// commitment branch deltas (Diffs[3], recorded ahead of the tx-result stream)
+	// accumulate with the step-edge and block-end computes instead of being lost;
+	// account/storage/code diffs (0..2) are filled once the buffered writes are
+	// ready (later via finalizeFoldedChangeset for a folded block). The swap and
+	// save run under changesetMu — the swap mutates the global accumulator pointer
+	// that the deferred branch flush and end-of-compute marker also touch,
+	// serializing against the apply goroutine; the *Locked variants avoid
+	// re-acquiring the mutex.
 	cc.doms.LockChangesetAccumulator()
 	defer cc.doms.UnlockChangesetAccumulator()
 	cs := cc.doms.GetChangesetByHash(t.blockNum, t.blockHash)
