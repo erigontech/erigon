@@ -21,13 +21,10 @@ each. Facets (columns) grow with query algebra, which is bounded and stable. Com
 LogTopic-style data required a whole parallel type (InvertedIdx) with its own enum, its own RoTx array, its own *
 Progress method.
 
-★ Insight ─────────────────────────────────────
-
-- The entity/accessor/facet distinction is the same one B-tree databases settled on decades ago: table (entity) / index
-  (accessor) / access method (facet). Postgres has had the same ~5 access methods (heap, btree, hash, GIN, GiST) for 25
-  years while tables and indexes multiplied without bound. If your "new facet" wouldn't justify its own
-  merge+prune+visibility implementation, it was an accessor or an entity all along.                             
-  ─────────────────────────────────────────────────
+> **Insight.** The entity/accessor/facet distinction is the same one B-tree databases settled on decades ago: table
+> (entity) / index (accessor) / access method (facet). Postgres has had the same ~5 access methods (heap, btree, hash,
+> GIN, GiST) for 25 years while tables and indexes multiplied without bound. If your "new facet" wouldn't justify its own
+> merge+prune+visibility implementation, it was an accessor or an entity all along.
 
 -------
 
@@ -37,44 +34,24 @@ Yes — this pattern recurs under different names.
 
 The closest matches, and what each one validates about the design:
 
-```text
-┌───────────────────┬───────────┬───────────────────────────────────────┬────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┐
-│ System │ "Entity"  │               "Facets"                │ What it validates │
-├───────────────────┼───────────┼───────────────────────────────────────┼────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┤
-│ Lucene / │ │ postings (≈II), doc-values (≈Latest │ The facet mask: Lucene's FieldType flags (indexed?, docValues?,
-stored?) are literally Cfg[e].facets — per-field choice of which projections to │ │ Elasticsearch │ field │ columnar),
-stored fields, points │ materialize from one document stream. Its immutable segments + background merge + refcounted
-per-segment readers are also uncannily close to │ │ │ │ │ visibleFiles/RoTx. │
-├───────────────────┼───────────┼───────────────────────────────────────┼────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┤
-│ Datomic │ attribute │ EAVT / AEVT / AVET / VAET indexes │ The frozen column count: one append-only log of (entity,
-attr, value, tx) facts, projected into exactly four fixed covering indexes — fixed for │ │ │ │ │ 15+ years while schemas
-grew unbounded. Also ships db.asOf (t) — your GetAsOf as a first-class API. │
-├───────────────────┼───────────┼───────────────────────────────────────┼────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┤
-│ ClickHouse │ table │ MergeTree projections (alt sort │ The facet vs accessor distinction: a PROJECTION gets its own
-immutable parts maintained through insert/merge (facet — own lifecycle); a skip-index │ │ │ │ orders, own parts) vs
-skip-indexes │ is derived metadata inside an existing part (accessor). Same fork as .v files vs .kvi. │
-├───────────────────┼───────────┼───────────────────────────────────────┼────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┤
-│ InfluxDB │ series │ TSM ((key, time) → value ≈ History) + │ Two fixed file classes with independent compaction over
-one write stream — facet planes with per-facet merge rules. │ │ │ │ TSI (tag → series ≈ II)              │ │
-├───────────────────┼───────────┼───────────────────────────────────────┼────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┤
-│ Event sourcing / │ stream │ read-model projections │ The founding principle: the update stream is the truth; every
-queryable structure is a derivable, rebuildable projection. Your "facets carry zero │ │ CQRS │ │ │ new information" rule
-is this, verbatim. │
-└───────────────────┴───────────┴───────────────────────────────────────┴────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┘
-```
+| System | "Entity" | "Facets" | What it validates |
+|---|---|---|---|
+| Lucene / Elasticsearch | field | postings (≈II), doc-values (≈Latest columnar), stored fields, points | The facet mask: Lucene's FieldType flags (indexed?, docValues?, stored?) are literally `Cfg[e].facets` — per-field choice of which projections to materialize from one document stream. Its immutable segments + background merge + refcounted per-segment readers are also uncannily close to `visibleFiles`/`RoTx`. |
+| Datomic | attribute | EAVT / AEVT / AVET / VAET indexes | The frozen column count: one append-only log of (entity, attr, value, tx) facts, projected into exactly four fixed covering indexes — fixed for 15+ years while schemas grew unbounded. Also ships `db.asOf(t)` — your `GetAsOf` as a first-class API. |
+| ClickHouse | table | MergeTree projections (alt sort orders, own parts) vs skip-indexes | The facet vs accessor distinction: a PROJECTION gets its own immutable parts maintained through insert/merge (facet — own lifecycle); a skip-index is derived metadata inside an existing part (accessor). Same fork as `.v` files vs `.kvi`. |
+| InfluxDB | series | TSM ((key, time) → value ≈ History) + TSI (tag → series ≈ II) | Two fixed file classes with independent compaction over one write stream — facet planes with per-facet merge rules. |
+| Event sourcing / CQRS | stream | read-model projections | The founding principle: the update stream is the truth; every queryable structure is a derivable, rebuildable projection. Your "facets carry zero new information" rule is this, verbatim. |
 
 None of them call it "entity + facet", but the architecture — one identity axis that grows with the product, one small
 frozen set of projection kinds, a per-identity mask saying which projections exist — is the standard endpoint for
 log-structured storage engines. Erigon would not be inventing a shape; it would be converging on one.
 
-★ Insight ─────────────────────────────────────
+> **Insight.** The strongest single precedent is Lucene, because it also solved your other problem the same way: an
+> IndexReader doesn't allocate an object per field — it holds per-facet planes (terms, docValues, storedFields) that you
+> address by field name/number. Field = row index, structure = column. Twenty years of production says the addressing
+> model holds up.
 
-- The strongest single precedent is Lucene, because it also solved your other problem the same way: an IndexReader
-  doesn't allocate an object per field — it holds per-facet planes (terms, docValues, storedFields) that you address by
-  field name/number. Field = row index, structure = column. Twenty years of production says the addressing model holds
-  up. ─────────────────────────────────────────────────
-
-------- 
+-------
 
 OMG! `EAVT` is it an append-only stream of facts - which can be Specified and Distributed over Blockchain clients
 (immutable append-only files). And all other files will be a "Derivable, Rebuildable projection"??
