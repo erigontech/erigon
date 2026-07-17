@@ -18,6 +18,7 @@ package state
 
 import (
 	"bytes"
+	"cmp"
 	"context"
 	"encoding/binary"
 	"encoding/hex"
@@ -29,7 +30,7 @@ import (
 	"math/rand/v2"
 	"os"
 	"path/filepath"
-	"sort"
+	"slices"
 	"strconv"
 	"strings"
 	"testing"
@@ -1779,7 +1780,7 @@ func generateUpdates(r *rndGen, totalTx, keyTxsLimit uint64) []upd {
 		updates = append(updates, up)
 		usedTxNums[txNum] = true
 	}
-	sort.Slice(updates, func(i, j int) bool { return updates[i].txNum < updates[j].txNum })
+	slices.SortFunc(updates, func(a, b upd) int { return cmp.Compare(a.txNum, b.txNum) })
 
 	return updates
 }
@@ -2945,9 +2946,9 @@ func TestDomainContext_findShortenedKey(t *testing.T) {
 		v, found, st, en, err := domainRoTx.getLatestFromFiles([]byte(key), 0)
 		require.True(t, found)
 		require.NoError(t, err)
-		for i := len(updates) - 1; i >= 0; i-- {
-			if st <= updates[i].txNum && updates[i].txNum < en {
-				require.Equal(t, updates[i].value, v)
+		for _, update := range slices.Backward(updates) {
+			if st <= update.txNum && update.txNum < en {
+				require.Equal(t, update.value, v)
 				break
 			}
 		}

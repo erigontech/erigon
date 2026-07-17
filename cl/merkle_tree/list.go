@@ -18,10 +18,11 @@ package merkle_tree
 
 import (
 	"math/bits"
+	"slices"
 
 	"github.com/prysmaticlabs/gohashtree"
 
-	"github.com/erigontech/erigon/cl/utils"
+	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/common/ssz"
 )
 
@@ -64,7 +65,7 @@ func BitlistRootWithLimit(bits []byte, limit uint64) ([32]byte, error) {
 	}
 
 	lengthRoot := Uint64Root(size)
-	return utils.Sha256(base[:], lengthRoot[:]), nil
+	return crypto.Sha256(base[:], lengthRoot[:]), nil
 }
 
 func BitvectorRootWithLimit(bits []byte, limit uint64) ([32]byte, error) {
@@ -97,8 +98,8 @@ func parseBitlist(dst, buf []byte) ([]byte, uint64) {
 	dst[len(dst)-1] &^= uint8(1 << msb)
 
 	newLen := len(dst)
-	for i := len(dst) - 1; i >= 0; i-- {
-		if dst[i] != 0x00 {
+	for i, d := range slices.Backward(dst) {
+		if d != 0x00 {
 			break
 		}
 		newLen = i
@@ -128,5 +129,5 @@ func ListObjectSSZRoot[T ssz.HashableSSZ](list []T, limit uint64) ([32]byte, err
 		return [32]byte{}, err
 	}
 	lenLeaf := Uint64Root(uint64(len(list)))
-	return utils.Sha256(vectorLeaf[:], lenLeaf[:]), nil
+	return crypto.Sha256(vectorLeaf[:], lenLeaf[:]), nil
 }

@@ -214,9 +214,9 @@ func (n *Node) stopServices(running []Lifecycle) error {
 
 	// Stop running lifecycles in reverse order.
 	failure := &StopError{Services: make(map[reflect.Type]error)}
-	for i := len(running) - 1; i >= 0; i-- {
-		if err := running[i].Stop(); err != nil {
-			failure.Services[reflect.TypeOf(running[i])] = err
+	for _, r := range slices.Backward(running) {
+		if err := r.Stop(); err != nil {
+			failure.Services[reflect.TypeOf(r)] = err
 		}
 	}
 

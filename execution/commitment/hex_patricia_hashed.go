@@ -18,6 +18,7 @@ package commitment
 
 import (
 	"bytes"
+	"cmp"
 	"context"
 	"encoding/binary"
 	"encoding/hex"
@@ -26,7 +27,7 @@ import (
 	"io"
 	"math/bits"
 	"runtime"
-	"sort"
+	"slices"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -2618,7 +2619,7 @@ func (hph *HexPatriciaHashed) Process(ctx context.Context, updates *Updates, log
 		for k := range hph.hadToLoadL {
 			ends = append(ends, k)
 		}
-		sort.Slice(ends, func(i, j int) bool { return ends[i] > ends[j] })
+		slices.SortFunc(ends, func(a, b uint64) int { return cmp.Compare(b, a) })
 		var Li int
 		for _, k := range ends {
 			v := hph.hadToLoadL[k]
@@ -3097,8 +3098,8 @@ func HexTrieStateToString(enc []byte) (string, error) {
 	printAfterMap := func(sb *strings.Builder, name string, list []uint16, depths []int16, existedBefore []bool) {
 		fmt.Fprintf(sb, "\t::%s::\n\n", name)
 		lastNonZero := 0
-		for i := len(list) - 1; i >= 0; i-- {
-			if list[i] != 0 {
+		for i, l := range slices.Backward(list) {
+			if l != 0 {
 				lastNonZero = i
 				break
 			}

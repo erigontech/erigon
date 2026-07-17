@@ -22,7 +22,7 @@ import (
 	"encoding/binary"
 	"math/bits"
 	"math/rand"
-	"sort"
+	"slices"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -689,8 +689,8 @@ func TestUpdates_TouchPlainKey(t *testing.T) {
 	for _, v := range uniqUpds {
 		sortedUniqUpds = append(sortedUniqUpds, v)
 	}
-	sort.Slice(sortedUniqUpds, func(i, j int) bool {
-		return bytes.Compare(sortedUniqUpds[i].key, sortedUniqUpds[j].key) < 0
+	slices.SortFunc(sortedUniqUpds, func(a, b tc) int {
+		return bytes.Compare(a.key, b.key)
 	})
 
 	sz := utUpdate.Size()

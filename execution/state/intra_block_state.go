@@ -793,6 +793,22 @@ func (sdb *IntraBlockState) GetDelegatedDesignation(addr accounts.Address) (acco
 	// eip-7702 - for account read recording we don't count this as
 	// it may not result in an actual gas recorded access - if it
 	// is it will be marked via a direct call
+	if sdb.versionMap != nil {
+		// Read through the version-aware CodePath so validation can reject a
+		// speculative execution that raced a prior transaction publishing its
+		// CodeHashPath and CodePath. Going through getCode would also report a
+		// BAL code access for non-delegated code, so use readCode directly and
+		// preserve the existing hook semantics below.
+		code, _, _, err := readCode(sdb, addr, false)
+		if err != nil {
+			return accounts.ZeroAddress, false, err
+		}
+		if delegation, ok := types.ParseDelegation(code); ok {
+			sdb.callCodeAccessHook(addr, code)
+			return delegation, true, nil
+		}
+		return accounts.ZeroAddress, false, nil
+	}
 	stateObject, err := sdb.getStateObject(addr, false)
 	if err != nil {
 		return accounts.ZeroAddress, false, err
@@ -1683,7 +1699,7 @@ func (sdb *IntraBlockState) getStateObject(addr accounts.Address, recordRead boo
 		// optimisation in SetCode to incorrectly delete code writes when
 		// clearing a delegation that was set by a prior transaction in the
 		// same block.
-		codeHash := accounts.InternCodeHash(crypto.HashData(code))
+		codeHash := accounts.InternCodeHash(crypto.Keccak256Hash(code))
 		obj.code = accounts.Code{Hash: codeHash, Bytes: code}
 		if codeHash != obj.data.CodeHash {
 			obj.data.CodeHash = codeHash
@@ -2844,9 +2860,9 @@ func (sdb *IntraBlockState) ResetVersionedReads() {
 // VersionedWrites returns a frozen typed snapshot of this tx's writes. With
 // checkDirty, a non-dirty address's writes are dropped (and deleted from the
 // version map). Under self-destruct only SelfDestruct/Balance/Incarnation/
-// Storage are kept (the BAL needs residual balance, resurrection needs the
-// prior incarnation, and the calculator needs per-slot deletes); Nonce/Code/
-// CodeHash/CodeSize/Address/CreateContract are dropped.
+// Storage/CreateContract are kept (the BAL needs residual balance,
+// resurrection needs the prior incarnation, and fee finalization needs the
+// creation marker); Nonce/Code/CodeHash/CodeSize/Address are dropped.
 func (sdb *IntraBlockState) VersionedWrites(checkDirty bool) *WriteSet {
 	src := &sdb.versionedWrites
 	out := &WriteSet{}
@@ -2880,6 +2896,9 @@ func (sdb *IntraBlockState) VersionedWrites(checkDirty bool) *WriteSet {
 				out.SetStorage(addr, k, cloneVW(vw))
 			}
 		}
+		if vw, ok := src.createContract[addr]; ok {
+			out.SetCreateContract(addr, cloneVW(vw))
+		}
 		if !sd {
 			if vw, ok := src.address[addr]; ok {
 				out.SetAddress(addr, cloneVW(vw))
@@ -2895,9 +2914,6 @@ func (sdb *IntraBlockState) VersionedWrites(checkDirty bool) *WriteSet {
 			}
 			if vw, ok := src.codeSize[addr]; ok {
 				out.SetCodeSize(addr, cloneVW(vw))
-			}
-			if vw, ok := src.createContract[addr]; ok {
-				out.SetCreateContract(addr, cloneVW(vw))
 			}
 		}
 	}
@@ -3058,6 +3074,9 @@ func (sdb *IntraBlockState) ApplyVersionedWrites(writes *WriteSet) error {
 				sdb.recordWriteSelfDestruct(addr, false)
 			}
 		case CreateContractPath:
+			if sw, ok := writes.GetSelfDestruct(addr); ok && sw.Val {
+				continue
+			}
 			// Contract creation: set createdContract flag on the stateObject.
 			so, err := sdb.GetOrNewStateObject(addr)
 			if err != nil {
