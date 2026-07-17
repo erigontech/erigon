@@ -22,7 +22,7 @@ import (
 
 	"github.com/prysmaticlabs/gohashtree"
 
-	"github.com/erigontech/erigon/cl/utils"
+	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/common/ssz"
 )
 
@@ -65,7 +65,7 @@ func BitlistRootWithLimit(bits []byte, limit uint64) ([32]byte, error) {
 	}
 
 	lengthRoot := Uint64Root(size)
-	return utils.Sha256(base[:], lengthRoot[:]), nil
+	return crypto.Sha256(base[:], lengthRoot[:]), nil
 }
 
 func BitvectorRootWithLimit(bits []byte, limit uint64) ([32]byte, error) {
@@ -129,5 +129,5 @@ func ListObjectSSZRoot[T ssz.HashableSSZ](list []T, limit uint64) ([32]byte, err
 		return [32]byte{}, err
 	}
 	lenLeaf := Uint64Root(uint64(len(list)))
-	return utils.Sha256(vectorLeaf[:], lenLeaf[:]), nil
+	return crypto.Sha256(vectorLeaf[:], lenLeaf[:]), nil
 }

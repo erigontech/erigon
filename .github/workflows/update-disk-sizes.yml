@@ -110,6 +110,8 @@ jobs:
           client-id: ${{ vars.RELEASE_BOT_APP_ID }}
           private-key: ${{ secrets.RELEASE_BOT_APP_KEY }}
           repositories: "erigon"
+          permission-contents: write
+          permission-pull-requests: write
 
       - name: Checkout base branch
         uses: actions/checkout@v7

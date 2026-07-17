@@ -1,10 +1,11 @@
 package commitment
 
 import (
+	"cmp"
 	"encoding/csv"
 	"fmt"
 	"os"
-	"sort"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -327,7 +328,7 @@ func (m *Metrics) CollectFileDepthStats(endTxNumStats map[uint64]skipStat) {
 		ends = append(ends, k)
 	}
 	// sort by file endTxNum
-	sort.Slice(ends, func(i, j int) bool { return ends[i] > ends[j] })
+	slices.SortFunc(ends, func(a, b uint64) int { return cmp.Compare(b, a) })
 	for i := 0; i < 5 && i < len(ends); i++ {
 		// get stats for specific file depth
 		v := endTxNumStats[ends[i]]

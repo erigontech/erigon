@@ -18,6 +18,7 @@ package commitment
 
 import (
 	"bytes"
+	"cmp"
 	"context"
 	"encoding/binary"
 	"encoding/hex"
@@ -27,7 +28,6 @@ import (
 	"math/bits"
 	"runtime"
 	"slices"
-	"sort"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -2631,7 +2631,7 @@ func (hph *HexPatriciaHashed) Process(ctx context.Context, updates *Updates, log
 		for k := range hph.hadToLoadL {
 			ends = append(ends, k)
 		}
-		sort.Slice(ends, func(i, j int) bool { return ends[i] > ends[j] })
+		slices.SortFunc(ends, func(a, b uint64) int { return cmp.Compare(b, a) })
 		var Li int
 		for _, k := range ends {
 			v := hph.hadToLoadL[k]
