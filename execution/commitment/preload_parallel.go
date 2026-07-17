@@ -21,6 +21,7 @@ import (
 	"encoding/binary"
 	"fmt"
 	"slices"
+	"time"
 
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/execution/commitment/nibbles"
@@ -167,7 +168,9 @@ func (p *ContractTrunkPreloadParallel) Run(
 	for !budgetHit && p.nextDepth <= maxStorageTrunkDepth && len(p.frontier) > 0 {
 		depth := p.nextDepth
 		// Ascending key order so the file-batch partition is contiguous-in-file.
+		t := time.Now()
 		slices.SortFunc(p.frontier, func(a, b pathKey) int { return bytes.Compare(a.key, b.key) })
+		log.Warn("[dbg] sort", "l", len(p.frontier), "took", time.Since(t))
 
 		var dbHits []pathKey
 		var dbVals [][]byte
