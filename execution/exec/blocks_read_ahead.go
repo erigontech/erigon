@@ -285,10 +285,8 @@ func (bra *BlockReadAheader) warmBody(ctx context.Context, db kv.RoDB, header *t
 				return nil
 			}
 			var getter kv.TemporalGetter = ttx
-			var cpg *cachePopulatingGetter
 			if bra.stateCache != nil {
-				cpg = newCachePopulatingGetter(ttx, bra.stateCache)
-				getter = cpg
+				getter = newCachePopulatingGetter(ttx, bra.stateCache)
 			}
 			stateReader := state.NewReaderV3(getter)
 
