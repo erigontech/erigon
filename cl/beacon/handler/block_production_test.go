@@ -319,7 +319,7 @@ func TestCaplinBlockProductionWithWithdrawalRequest(t *testing.T) {
 		m.ExecModule,
 		time.Hour,
 	)
-	engine, err := execution_client.NewExecutionClientDirect(chainRW, nil)
+	engine, err := execution_client.NewExecutionClientDirect(chainRW, nil, nil)
 	require.NoError(t, err)
 
 	// Set up handler with Electra test data (provides validator set, RANDAO, etc.)
@@ -417,7 +417,7 @@ func TestCaplinBlockProductionGlamsterdamSlotNumber(t *testing.T) {
 		m.ExecModule,
 		time.Hour,
 	)
-	engine, err := execution_client.NewExecutionClientDirect(chainRW, nil)
+	engine, err := execution_client.NewExecutionClientDirect(chainRW, nil, nil)
 	require.NoError(t, err)
 
 	// Wrap the real engine with a spy to capture PayloadAttributes.

@@ -114,9 +114,12 @@ func (api *DebugAPIImpl) SetHead(ctx context.Context, number hexutil.Uint64) err
 		return fmt.Errorf("block number %d is in the future: current head is %d", blockNum, currentHead)
 	}
 
-	if err := api.BaseAPI.checkPruneHistory(ctx, tx, blockNum); err != nil {
-		return err
-	}
+	// No checkPruneHistory gate here: the backend's SetHead routes deep
+	// unwinds through the mode-B path, which sources the walked history
+	// from preverified files on demand (Provider.Unwind's
+	// ensureHistoryForUnwindWalk) — MDBX-pruned range is not a
+	// showstopper. WS-window and gap-past-snapshot-tip constraints are
+	// enforced downstream in execmodule.setHead.
 
 	tx.Rollback() // release read tx before the backend opens write tx
 

@@ -29,6 +29,8 @@ import (
 	"github.com/erigontech/erigon/cl/monitor"
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/hexutil"
+	"github.com/erigontech/erigon/db/kv/rawdbv3"
+	"github.com/erigontech/erigon/execution/engineapi/engine_block_downloader"
 	"github.com/erigontech/erigon/execution/engineapi/engine_types"
 	"github.com/erigontech/erigon/execution/execmodule"
 	"github.com/erigontech/erigon/execution/execmodule/chainreader"
@@ -41,15 +43,25 @@ import (
 
 const reorgTooDeepDepth = 3
 
-type ExecutionClientDirect struct {
-	chainRW chainreader.ChainReaderWriterEth1
-	txpool  txpoolproto.TxpoolClient
+// gapDownloader is the surface ExecutionClientDirect needs from
+// engine_block_downloader.EngineBlockDownloader to catch-up on
+// FCU-observed body gaps. Kept minimal so the direct client stays
+// testable without wiring the full downloader.
+type gapDownloader interface {
+	StartDownloading(hashToDownload common.Hash, chainTip *types.Block, trigger engine_block_downloader.Trigger) bool
 }
 
-func NewExecutionClientDirect(chainRW chainreader.ChainReaderWriterEth1, txpool txpoolproto.TxpoolClient) (*ExecutionClientDirect, error) {
+type ExecutionClientDirect struct {
+	chainRW       chainreader.ChainReaderWriterEth1
+	txpool        txpoolproto.TxpoolClient
+	blockDownload gapDownloader
+}
+
+func NewExecutionClientDirect(chainRW chainreader.ChainReaderWriterEth1, txpool txpoolproto.TxpoolClient, blockDownload gapDownloader) (*ExecutionClientDirect, error) {
 	return &ExecutionClientDirect{
-		chainRW: chainRW,
-		txpool:  txpool,
+		chainRW:       chainRW,
+		txpool:        txpool,
+		blockDownload: blockDownload,
 	}, nil
 }
 
@@ -124,6 +136,21 @@ func (cc *ExecutionClientDirect) NewPayload(
 func (cc *ExecutionClientDirect) ForkChoiceUpdate(ctx context.Context, finalized, safe, head common.Hash, attr *engine_types.PayloadAttributes, _ clparams.StateVersion) ([]byte, error) {
 	status, _, _, err := cc.chainRW.UpdateForkChoice(ctx, head, safe, finalized)
 	if err != nil {
+		// FCU target lives past a range whose bodies (and therefore
+		// canonical txnums) aren't on disk yet — typical at fresh-sync
+		// when snapshot tip trails Caplin's post-checkpoint head, or
+		// after mode-B unwind when the CL still tracks the forward
+		// chain. Trigger a catch-up backward download and let Caplin
+		// retry once bodies are inserted. Without this trigger the
+		// direct-mode FCU wedges: UpdateForkChoice keeps returning the
+		// same gap error and nothing else drives the block downloader.
+		// The RPC path (engine_server.HandleForkChoiceStateInternal)
+		// has parallel handling; keep the two in step when either side
+		// changes.
+		var gap rawdbv3.ErrTxNumsAppendWithGap
+		if errors.As(err, &gap) && cc.blockDownload != nil {
+			cc.blockDownload.StartDownloading(head, nil, engine_block_downloader.FcuTrigger)
+		}
 		return nil, fmt.Errorf("execution Client RPC failed to retrieve ForkChoiceUpdate response, err: %w", err)
 	}
 	if status == execmodule.ExecutionStatusInvalidForkchoice {

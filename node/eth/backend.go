@@ -1725,7 +1725,23 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 
 	var executionEngine executionclient.ExecutionEngine
 
-	executionEngine, err = executionclient.NewExecutionClientDirect(chainreader.NewChainReaderEth1(chainConfig, backend.execModule, config.FcuTimeout), txPoolRpcClient)
+	// Single EngineBlockDownloader shared by both the direct
+	// (single-process Caplin) FCU path and the external RPC path.
+	// The direct path uses it to catch-up when Caplin's FCU target
+	// runs past a range whose bodies aren't on disk yet (fresh-sync
+	// snapshot-tip trail, post-mode-B unwind).
+	engineBlockDownloader := engine_block_downloader.NewEngineBlockDownloader(
+		ctx,
+		logger,
+		backend.execModule,
+		blockReader,
+		backend.chainDB,
+		chainConfig,
+		config.Sync,
+		bbd,
+	)
+
+	executionEngine, err = executionclient.NewExecutionClientDirect(chainreader.NewChainReaderEth1(chainConfig, backend.execModule, config.FcuTimeout), txPoolRpcClient, engineBlockDownloader)
 	if err != nil {
 		return nil, err
 	}
@@ -1734,16 +1750,7 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 		logger,
 		chainConfig,
 		backend.execModule,
-		engine_block_downloader.NewEngineBlockDownloader(
-			ctx,
-			logger,
-			backend.execModule,
-			blockReader,
-			backend.chainDB,
-			chainConfig,
-			config.Sync,
-			bbd,
-		),
+		engineBlockDownloader,
 		config.InternalCL && !config.CaplinConfig.EnableEngineAPI, // If the chain supports the engine API, then we should not make the server fail.
 		config.InternalCL, // Suppress "no CL" warning when any embedded CL is active.
 		config.Builder.EnabledPOS,
