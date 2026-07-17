@@ -4,8 +4,9 @@ How the state aggregator decides when an on-disk snapshot file (`.kv/.v/.ef` +
 accessors) can be physically deleted, while readers may still be using it. This is
 the mechanism merged by PR #21397; the design rationale is in
 [20260525-lockfree-file-reclamation-spec.md](20260525-lockfree-file-reclamation-spec.md).
-`FilesItem.frozen` was removed (#22126); `FilesItem.canDelete`/`refcount` remain
-only for the not-yet-migrated forkable subsystem and are irrelevant here.
+`FilesItem.frozen` was removed (#22126); `FilesItem.canDelete`/`refcount` are still
+live, but for the SnapshotRepo mark-and-sweep path, not this one — the aggregator
+reclaims via `aggregatorVisible` generations and never consults them.
 
 ## The model: reference-count the *visible generation*, not each file
 
