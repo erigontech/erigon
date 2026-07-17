@@ -95,7 +95,7 @@ func readAheadGetter(ttx kv.TemporalTx, sc *cache.StateCache) kv.TemporalGetter 
 
 func (cpg *cachePopulatingGetter) GetLatest(name kv.Domain, k []byte) ([]byte, kv.Step, error) {
 	v, step, err := cpg.TemporalGetter.GetLatest(name, k)
-	if err == nil && cpg.sc != nil && cpg.visibleEnd != nil {
+	if err == nil && cpg.visibleEnd != nil {
 		if snapshotEnd, ok := cpg.visibleEnd(name); ok {
 			readTxNum := (uint64(step)+1)*cpg.stepSize - 1
 			cpg.sc.FillIfFresh(name, k, v, readTxNum, snapshotEnd)
