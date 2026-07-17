@@ -5,7 +5,7 @@ import (
 	"encoding/binary"
 	"io"
 	"maps"
-	"sort"
+	"slices"
 	"sync"
 	"sync/atomic"
 
@@ -287,8 +287,8 @@ func (tds *TrieDbState) buildPlainStorageReads() ([][]byte, [][]byte) {
 	}
 
 	// Sort indices based on accountAddresses
-	sort.SliceStable(indices, func(i, j int) bool {
-		return bytes.Compare(storagePlainKeys[indices[i]], storagePlainKeys[indices[j]]) < 0
+	slices.SortStableFunc(indices, func(a, b int) int {
+		return bytes.Compare(storagePlainKeys[a], storagePlainKeys[b])
 	})
 
 	// Apply the sorted order to accountAddresses and accountAddressHashes
@@ -396,8 +396,8 @@ func (tds *TrieDbState) buildAccountAddressReads() ([][]byte, [][]byte) {
 	}
 
 	// Sort indices based on accountAddresses
-	sort.SliceStable(indices, func(i, j int) bool {
-		return bytes.Compare(accountAddresses[indices[i]], accountAddresses[indices[j]]) < 0
+	slices.SortStableFunc(indices, func(a, b int) int {
+		return bytes.Compare(accountAddresses[a], accountAddresses[b])
 	})
 
 	// Apply the sorted order to accountAddresses and accountAddressHashes
