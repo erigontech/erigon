@@ -283,7 +283,10 @@ func TestMethodInvoke_MultiArgSliceParams(t *testing.T) {
 
 func TestMethodInvoke_InvalidJSON(t *testing.T) {
 	inv := Method[struct{ X int }, int]{fn: func(_ context.Context, p struct{ X int }) (int, error) { return p.X, nil }}
-	_, err := inv.invoke(t.Context(), json.RawMessage(`{bad json}`))
+
+	// A malformed *array*: object form short-circuits on the array-form check
+	// (covered by TestMethodInvoke_Params) and never reaches the unmarshal.
+	_, err := inv.invoke(t.Context(), json.RawMessage(`[bad json]`))
 	require.Error(t, err)
 	var ipErr *InvalidParamsError
 	assert.True(t, errors.As(err, &ipErr))
