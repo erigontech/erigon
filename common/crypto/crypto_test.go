@@ -35,6 +35,7 @@ import (
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/hexutil"
+	"github.com/erigontech/erigon/common/race"
 	"github.com/erigontech/erigon/common/u256"
 )
 
@@ -120,12 +121,16 @@ func TestKeccak256DoesNotAllocate(t *testing.T) {
 		t.Errorf("Keccak256(two 32-byte args) allocs = %v, want 1", n)
 	}
 	// Joins too large for the stack buffer take the pooled scratch buffer, so they
-	// allocate the result and nothing more.
-	big1, big2 := keccakTestData(500, 0), keccakTestData(500, 1)
-	if n := testing.AllocsPerRun(100, func() {
-		sinkBytes = Keccak256(big1, big2)
-	}); n != 1 {
-		t.Errorf("Keccak256(500B, 500B) allocs = %v, want 1 (pooled join buffer)", n)
+	// allocate the result and nothing more. sync.Pool deliberately drops values under
+	// the race detector, so the pooled path always allocates there and can't be measured.
+	//goland:noinspection GoBoolExpressions
+	if !race.Enabled {
+		big1, big2 := keccakTestData(500, 0), keccakTestData(500, 1)
+		if n := testing.AllocsPerRun(100, func() {
+			sinkBytes = Keccak256(big1, big2)
+		}); n != 1 {
+			t.Errorf("Keccak256(500B, 500B) allocs = %v, want 1 (pooled join buffer)", n)
+		}
 	}
 }
 
