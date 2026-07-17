@@ -185,4 +185,3 @@ func TestMemoryMutationCursorDeleteCurrentMultiValBefore(t *testing.T) {
 	}))
 	require.Equal(t, []string{"AAAA/v3", "BBBB/v1"}, survived)
 }
-
