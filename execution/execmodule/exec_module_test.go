@@ -2748,7 +2748,12 @@ func TestBALFoldAheadFiresOnTipValidateChain(t *testing.T) {
 	m.ExecModule.WaitCommitsDrained()
 
 	tip := canonical.TopBlock
-	_, err = insertBlocksWithBAL(ctx, m.ExecModule, []*types.Block{tip}, canonical.BlockAccessLists[chainLen-1:])
+	tipBAL := canonical.BlockAccessLists[chainLen-1]
+	// The tip payload must carry a BAL — that is the precondition that lets its
+	// commitment be folded in parallel with execution instead of computed
+	// incrementally from the per-tx result stream.
+	require.NotEmpty(t, tipBAL, "tip newPayload must carry a BAL")
+	_, err = insertBlocksWithBAL(ctx, m.ExecModule, []*types.Block{tip}, [][]byte{tipBAL})
 	require.NoError(t, err)
 
 	stagedsync.ResetFoldsAheadForTest()
@@ -2756,6 +2761,8 @@ func TestBALFoldAheadFiresOnTipValidateChain(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, execmodule.ExecutionStatusSuccess, vr.ValidationStatus)
 
+	// With a BAL present, the tip's commitment is folded from it (in parallel with
+	// exec) rather than computed on the incremental path.
 	require.Positive(t, stagedsync.FoldsAheadPerformedForTest(),
 		"tip newPayload (ValidateChain) must fold its commitment from the BAL")
 }
