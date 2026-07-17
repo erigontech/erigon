@@ -184,9 +184,9 @@ func lowestHeadersNum(headers []*types.Header) (uint64, bool) {
 		return 0, false
 	}
 
-	slices.SortFunc(headers, func(a, b *types.Header) int {
+	lowest := slices.MinFunc(headers, func(a, b *types.Header) int {
 		return cmp.Compare(a.Number.Uint64(), b.Number.Uint64())
 	})
 
-	return headers[0].Number.Uint64(), true
+	return lowest.Number.Uint64(), true
 }

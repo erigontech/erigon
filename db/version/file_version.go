@@ -240,13 +240,7 @@ func FindFilesWithVersionsByPattern(pattern string) (string, Version, bool, erro
 			_, fName2 := filepath.Split(b)
 			version2, _ := ParseVersion(fName2)
 
-			if version1.Less(version2) {
-				return -1
-			}
-			if version2.Less(version1) {
-				return 1
-			}
-			return 0
+			return version1.Cmp(version2)
 		})
 		_, fName := filepath.Split(matches[len(matches)-1])
 		ver, _ := ParseVersion(fName)

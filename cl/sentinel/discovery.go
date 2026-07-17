@@ -354,21 +354,15 @@ func (s *Sentinel) pruneExcessPeers() {
 	// Sort peers by "removability" (most removable first)
 	// Priority: peers with no critical subnets, then by fewest covered subnets
 	slices.SortFunc(peerInfos, func(a, b peerSubnetInfo) int {
-		less := func(x, y peerSubnetInfo) bool {
-			xCritical := len(x.criticalSubnets) > 0
-			yCritical := len(y.criticalSubnets) > 0
-			if xCritical != yCritical {
-				return !xCritical
+		aCritical := len(a.criticalSubnets) > 0
+		bCritical := len(b.criticalSubnets) > 0
+		if aCritical != bCritical {
+			if !aCritical {
+				return -1
 			}
-			return x.subnetsCount < y.subnetsCount
-		}
-		if less(a, b) {
-			return -1
-		}
-		if less(b, a) {
 			return 1
 		}
-		return 0
+		return cmp.Compare(a.subnetsCount, b.subnetsCount)
 	})
 
 	// Remove peers, but re-check coverage after each removal

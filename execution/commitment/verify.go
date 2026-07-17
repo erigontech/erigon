@@ -17,6 +17,7 @@
 package commitment
 
 import (
+	"errors"
 	"fmt"
 	"strings"
 
@@ -144,12 +145,12 @@ func VerifyBranchHashes(
 
 	if len(mismatches) > 0 {
 		var sb strings.Builder
-		sb.WriteString(fmt.Sprintf("hash verification failed with %d mismatch(es) at branchKey=%x:", len(mismatches), branchKey))
+		fmt.Fprintf(&sb, "hash verification failed with %d mismatch(es) at branchKey=%x:", len(mismatches), branchKey)
 		for _, m := range mismatches {
 			sb.WriteString("\n  ")
 			sb.WriteString(m)
 		}
-		return fmt.Errorf("%s", sb.String())
+		return errors.New(sb.String())
 	}
 	return nil
 }

@@ -18,6 +18,7 @@ package handler
 
 import (
 	"bytes"
+	"cmp"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -405,27 +406,27 @@ func aggregatePayloadAttestationMessages(
 	}
 
 	slices.SortFunc(candidates, func(a, b candidate) int {
-		less := func(x, y candidate) bool {
-			if x.weight != y.weight {
-				return x.weight > y.weight
-			}
-			left := x.attestation.Data
-			right := y.attestation.Data
-			if left.Slot != right.Slot {
-				return left.Slot < right.Slot
-			}
-			if cmp := bytes.Compare(left.BeaconBlockRoot[:], right.BeaconBlockRoot[:]); cmp != 0 {
-				return cmp < 0
-			}
-			if left.PayloadPresent != right.PayloadPresent {
-				return left.PayloadPresent
-			}
-			return left.BlobDataAvailable && !right.BlobDataAvailable
+		if a.weight != b.weight {
+			return cmp.Compare(b.weight, a.weight)
 		}
-		if less(a, b) {
-			return -1
+		left := a.attestation.Data
+		right := b.attestation.Data
+		if left.Slot != right.Slot {
+			return cmp.Compare(left.Slot, right.Slot)
 		}
-		if less(b, a) {
+		if c := bytes.Compare(left.BeaconBlockRoot[:], right.BeaconBlockRoot[:]); c != 0 {
+			return c
+		}
+		if left.PayloadPresent != right.PayloadPresent {
+			if left.PayloadPresent {
+				return -1
+			}
+			return 1
+		}
+		if left.BlobDataAvailable != right.BlobDataAvailable {
+			if left.BlobDataAvailable {
+				return -1
+			}
 			return 1
 		}
 		return 0
