@@ -229,11 +229,8 @@ func (c *Coherent) advanceRoot(stateVersionID uint64) (r *CoherentRoot) {
 		c.roots[stateVersionID] = r
 	}
 
-	// No carry-over from the previous canonical root: the state-change
-	// producers don't announce every mutation (account deletions, code on
-	// unwind — https://github.com/erigontech/erigon/issues/22276), so
-	// inherited entries could stay stale forever. Fresh roots bound any
-	// producer gap to one version.
+	// No carry-over from the previous canonical root — producers don't
+	// announce every mutation; see the type comment.
 	for _, root := range c.roots {
 		root.cache.Clear()
 		root.codeCache.Clear()
