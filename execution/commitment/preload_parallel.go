@@ -20,7 +20,7 @@ import (
 	"bytes"
 	"encoding/binary"
 	"fmt"
-	"sort"
+	"slices"
 
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/execution/commitment/nibbles"
@@ -167,7 +167,7 @@ func (p *ContractTrunkPreloadParallel) Run(
 	for !budgetHit && p.nextDepth <= maxStorageTrunkDepth && len(p.frontier) > 0 {
 		depth := p.nextDepth
 		// Ascending key order so the file-batch partition is contiguous-in-file.
-		sort.Slice(p.frontier, func(i, j int) bool { return bytes.Compare(p.frontier[i].key, p.frontier[j].key) < 0 })
+		slices.SortFunc(p.frontier, func(a, b pathKey) int { return bytes.Compare(a.key, b.key) })
 
 		var dbHits []pathKey
 		var dbVals [][]byte
@@ -254,16 +254,16 @@ func (p *ContractTrunkPreloadParallel) Run(
 	queueEmpty = (len(p.frontier) == 0 && len(p.pendingChildren) == 0) || p.nextDepth > maxStorageTrunkDepth
 	if logger != nil && (chunkPinned > 0 || queueEmpty) {
 		logger.Info("[trunk-preload-parallel] step",
-			"contract_hash", fmt.Sprintf("%x", p.contractHash),
 			"step_budget_mb", stepBudgetBytes/(1<<20),
-			"used_mb_total", p.usedBytes/(1<<20),
+			"used_mb", p.usedBytes/(1<<20),
 			"pinned_this_step", chunkPinned,
-			"pinned_total", p.pinned,
-			"db_hits_total", p.dbHitsPinned,
+			"pinned", p.pinned,
+			"db_hist", p.dbHitsPinned,
 			"max_depth_reached", p.maxDepthReached,
 			"queue_empty", queueEmpty,
 			"next_depth", p.nextDepth,
-			"frontier_size", len(p.frontier))
+			"frontier_size", len(p.frontier),
+			"contract_hash", fmt.Sprintf("%x", p.contractHash))
 	}
 	return chunkPinned, queueEmpty, nil
 }
