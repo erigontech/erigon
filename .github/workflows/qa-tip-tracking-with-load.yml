@@ -79,6 +79,8 @@ jobs:
     - name: Check out Erigon repository
       if: matrix.client == 'erigon'
       uses: actions/checkout@v7
+      with:
+        persist-credentials: false
 
     - name: Checkout RPC Tests Repository & Install Requirements
       if: matrix.client == 'erigon' || (matrix.client == 'geth' && github.event.inputs.run_geth == 'true')

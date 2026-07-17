@@ -43,7 +43,6 @@ import (
 	"github.com/erigontech/erigon/db/seg"
 	"github.com/erigontech/erigon/db/snapcfg"
 	"github.com/erigontech/erigon/db/snaptype"
-	"github.com/erigontech/erigon/db/snaptype2"
 	"github.com/erigontech/erigon/db/version"
 	"github.com/erigontech/erigon/diagnostics/diaglib"
 	"github.com/erigontech/erigon/execution/chain"
@@ -465,8 +464,8 @@ func (s VisibleSegments) BeginRo() *RoTx {
 
 type RoTx struct {
 	Segments VisibleSegments
-	// release drops the pin for a standalone RoTx (ViewType/ViewSingleFile). nil for the
-	// per-type children inside a View, whose single pin is dropped by View.Close.
+	// release drops the pin for a standalone RoTx (ViewType/ViewSingleFile); nil when the
+	// caller pins the generation itself (caplin's views).
 	release func()
 }
 
@@ -493,6 +492,10 @@ type BaseRoSnapshots struct {
 
 	types []snaptype.Type //immutable
 	enums []snaptype.Enum //immutable
+
+	// baseSegType is the type Ranges reports against — each collection picks the one whose
+	// ranges stand for its coverage. Immutable.
+	baseSegType snaptype.Type
 
 	dirtyLock sync.RWMutex // guards `dirty` and the generation chain (oldestVisible/next/retired)
 	dirty     DirtyFiles   // ordered map `type.Enum()` -> DirtySegments
@@ -560,11 +563,11 @@ type snapshotVisible struct {
 //   - all snapshots of given blocks range must exist - to make this blocks range available
 //   - gaps are not allowed
 //   - segment have [from:to) semantic
-func NewBaseRoSnapshots(cfg ethconfig.BlocksFreezing, snapDir string, types []snaptype.Type, alignMin bool, logger log.Logger) *BaseRoSnapshots {
-	return newRoSnapshots(cfg, snapDir, types, alignMin, logger)
+func NewBaseRoSnapshots(cfg ethconfig.BlocksFreezing, snapDir string, types []snaptype.Type, baseSegType snaptype.Type, alignMin bool, logger log.Logger) *BaseRoSnapshots {
+	return newRoSnapshots(cfg, snapDir, types, baseSegType, alignMin, logger)
 }
 
-func newRoSnapshots(cfg ethconfig.BlocksFreezing, snapDir string, types []snaptype.Type, alignMin bool, logger log.Logger) *BaseRoSnapshots {
+func newRoSnapshots(cfg ethconfig.BlocksFreezing, snapDir string, types []snaptype.Type, baseSegType snaptype.Type, alignMin bool, logger log.Logger) *BaseRoSnapshots {
 	if cfg.ChainName == "" {
 		log.Debug("[dbg] newRoSnapshots created with empty ChainName", "stack", dbg.Stack())
 	}
@@ -572,9 +575,15 @@ func newRoSnapshots(cfg ethconfig.BlocksFreezing, snapDir string, types []snapty
 	for i, t := range types {
 		enums[i] = t.Enum()
 	}
+	if baseSegType == nil {
+		panic("baseSegType is nil")
+	}
+	if !slices.Contains(enums, baseSegType.Enum()) {
+		panic(fmt.Sprintf("baseSegType %s is not in types", baseSegType.Name()))
+	}
 	snCfg := snapcfg.KnownCfgOrDevnet(cfg.ChainName)
 	s := &BaseRoSnapshots{dir: snapDir, cfg: cfg, snCfg: snCfg, logger: logger,
-		types: types, enums: enums,
+		types: types, enums: enums, baseSegType: baseSegType,
 		dirty:             make(DirtyFiles, snaptype.MaxEnum),
 		alignMin:          alignMin,
 		operators:         map[snaptype.Enum]*retireOperators{},
@@ -713,7 +722,7 @@ func (s *BaseRoSnapshots) DisableReadAhead() *BaseRoSnapshots {
 	defer v.Close()
 
 	for _, t := range s.enums {
-		for _, sn := range v.segments[t].Segments {
+		for _, sn := range v.segments[t] {
 			sn.src.DisableReadAhead()
 		}
 	}
@@ -725,7 +734,7 @@ func (s *BaseRoSnapshots) EnableReadAhead() *BaseRoSnapshots {
 	defer v.Close()
 
 	for _, t := range s.enums {
-		for _, sn := range v.segments[t].Segments {
+		for _, sn := range v.segments[t] {
 			sn.src.MadvSequential()
 		}
 	}
@@ -737,7 +746,7 @@ func (s *BaseRoSnapshots) MadvNormal() *BaseRoSnapshots {
 	defer v.Close()
 
 	for _, t := range s.enums {
-		for _, sn := range v.segments[t].Segments {
+		for _, sn := range v.segments[t] {
 			sn.src.MadvNormal()
 		}
 	}
@@ -990,7 +999,7 @@ func (s *BaseRoSnapshots) Ls() {
 
 	var stats seg.Stats
 	for _, t := range s.enums {
-		for _, sn := range view.segments[t].Segments {
+		for _, sn := range view.segments[t] {
 			if sn.src == nil || sn.src.Decompressor == nil {
 				continue
 			}
@@ -1006,7 +1015,7 @@ func (s *BaseRoSnapshots) Files() (list []string) {
 	view := s.View()
 	defer view.Close()
 	for _, t := range s.enums {
-		for _, seg := range view.segments[t].Segments {
+		for _, seg := range view.segments[t] {
 			list = append(list, seg.src.FileName())
 		}
 	}
@@ -1642,36 +1651,24 @@ func (s *BaseRoSnapshots) buildMissedIndices(logPrefix string, ctx context.Conte
 	}
 }
 
+// View pins one whole generation of files for its entire life: a tx passes through
+// many methods and can't predict which types get read, so every type stays readable
+// until Close drops the single pin.
 type View struct {
-	s           *BaseRoSnapshots
-	visible     *snapshotVisible // the pinned generation; released once by Close
-	segments    [snaptype.MaxEnum]*RoTx
-	baseSegType snaptype.Type
+	s *BaseRoSnapshots
+	*snapshotVisible
 }
 
 func (s *BaseRoSnapshots) View() *View {
-	v := s.acquireVisible()
-	view := &View{s: s, visible: v, baseSegType: snaptype2.Transactions} // Transactions is the last segment to be processed, so it's the most reliable.
-	for _, t := range s.enums {
-		view.segments[t] = v.segments[t].BeginRo() // non-owning children; the View owns the single pin
-	}
-	return view
+	return &View{s: s, snapshotVisible: s.acquireVisible()}
 }
 
 func (v *View) Close() {
 	if v == nil || v.s == nil {
 		return
 	}
-	v.s.releaseVisible(v.visible)
+	v.s.releaseVisible(v.snapshotVisible)
 	v.s = nil
-}
-
-// WithBaseSegType returns a shallow copy sharing the same single pin; only the copy is
-// Closed, so the pin stays balanced. It must not re-acquire — that would leak a pin.
-func (s *View) WithBaseSegType(t snaptype.Type) *View {
-	v := *s
-	v.baseSegType = t
-	return &v
 }
 
 var noop = func() {}
@@ -1697,11 +1694,11 @@ func (s *BaseRoSnapshots) ViewSingleFile(t snaptype.Type, blockNum uint64) (segm
 }
 
 func (v *View) Segments(t snaptype.Type) VisibleSegments {
-	return v.segments[t.Enum()].Segments
+	return v.segments[t.Enum()]
 }
 
 func (v *View) Segment(t snaptype.Type, blockNum uint64) (*VisibleSegment, bool) {
-	for _, seg := range v.segments[t.Enum()].Segments {
+	for _, seg := range v.segments[t.Enum()] {
 		if !(blockNum >= seg.from && blockNum < seg.to) {
 			continue
 		}
@@ -1712,7 +1709,7 @@ func (v *View) Segment(t snaptype.Type, blockNum uint64) (*VisibleSegment, bool)
 
 func (v *View) Ranges(align bool) (ranges []Range) {
 	if !align {
-		for _, sn := range v.Segments(v.baseSegType) {
+		for _, sn := range v.Segments(v.s.baseSegType) {
 			ranges = append(ranges, sn.Range)
 		}
 
@@ -1740,7 +1737,7 @@ func (v *View) Ranges(align bool) (ranges []Range) {
 		}
 	}
 
-	for _, sn := range v.Segments(v.baseSegType) {
+	for _, sn := range v.Segments(v.s.baseSegType) {
 		if alignedRangeTo != nil && sn.Range.to > *alignedRangeTo {
 			continue
 		}
