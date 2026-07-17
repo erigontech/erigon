@@ -370,9 +370,7 @@ func (c *StateCache) Unwind(unwindToTxNum uint64) {
 		}
 	}
 	for i := range c.appliedEnd {
-		if c.appliedEnd[i] > unwindToTxNum {
-			c.appliedEnd[i] = unwindToTxNum
-		}
+		c.appliedEnd[i] = min(c.appliedEnd[i], unwindToTxNum)
 	}
 }
 
