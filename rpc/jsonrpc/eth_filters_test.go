@@ -37,14 +37,13 @@ import (
 	"github.com/erigontech/erigon/node/gointerfaces/txpoolproto"
 	"github.com/erigontech/erigon/rpc"
 	"github.com/erigontech/erigon/rpc/filters"
-	"github.com/erigontech/erigon/rpc/rpccfg"
 	"github.com/erigontech/erigon/rpc/rpchelper"
 )
 
 func newBaseApiWithFiltersForTest(f *rpchelper.Filters, _ *kvcache.Coherent, m *execmoduletester.ExecModuleTester) *BaseAPI {
 	// Use the SD-wired state cache so reads observe the in-flight tip under
 	// background commit, not a plain coherent cache fed by stale notifications.
-	return NewBaseApi(f, m.StateCache, m.BlockReader, false, rpccfg.DefaultEvmCallTimeout, m.Engine, m.Dirs, nil, 0, 0, 0)
+	return NewBaseApi(f, m.StateCache, m.BlockReader, m.Engine, nil, &BaseApiConfig{Dirs: m.Dirs})
 }
 
 func TestSubscriptionsRequireFiltersAndNotifier(t *testing.T) {

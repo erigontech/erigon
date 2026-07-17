@@ -18,6 +18,7 @@ package state
 
 import (
 	"bytes"
+	"cmp"
 	"context"
 	"encoding/binary"
 	"errors"
@@ -295,7 +296,7 @@ func (sd *TemporalMemBatch) getLatest(domain kv.Domain, key []byte) (v []byte, s
 }
 
 func (sd *TemporalMemBatch) GetAsOf(domain kv.Domain, key []byte, ts uint64) (v []byte, ok bool, err error) {
-	if !sd.inMemHistoryReads {
+	if !sd.inMemHistoryReads && domain != kv.ReceiptDomain {
 		return nil, false, errors.New("GetAsOf called on TemporalMemBatch with inMemHistoryReads disabled")
 	}
 	sd.latestStateLock.RLock()
@@ -420,11 +421,11 @@ func (sd *TemporalMemBatch) memRangeAsOf(domain kv.Domain, fromKey, toKey []byte
 	return pairs
 }
 
-// HistorySeek returns the in-memory historical value of key as of ts: the value
-// just before the first recorded change at or after ts. ok is true when the key
-// has such a change in memory; a creation event yields (non-nil empty, true).
-// Returns (nil, false) when ts is past all in-memory changes so the caller can
-// fall back to committed history.
+// HistorySeek returns the in-memory value in effect at ts: the value of the last
+// recorded change with txNum < ts. ok is true when the key has in-memory history;
+// a ts at or before the first change yields the empty creation-event marker
+// (non-nil empty, true). Returns (nil, false) only when the key has no in-memory
+// history, so the caller can fall back to committed history.
 func (sd *TemporalMemBatch) HistorySeek(domain kv.Domain, key []byte, ts uint64) ([]byte, bool, error) {
 	if !sd.inMemHistoryReads {
 		return nil, false, nil
@@ -438,13 +439,13 @@ func (sd *TemporalMemBatch) HistorySeek(domain kv.Domain, key []byte, ts uint64)
 	} else {
 		entries = sd.domains[domain][ks]
 	}
-	for i := range entries {
-		if entries[i].txNum >= ts {
-			if i == 0 {
-				return []byte{}, true, nil
-			}
-			return entries[i-1].data, true, nil
+	for _, e := range slices.Backward(entries) {
+		if e.txNum < ts {
+			return e.data, true, nil
 		}
+	}
+	if len(entries) > 0 {
+		return []byte{}, true, nil
 	}
 	return nil, false, nil
 }
@@ -1128,8 +1129,8 @@ func (sd *TemporalMemBatch) Merge(o kv.TemporalMemBatch) error {
 func (sd *TemporalMemBatch) flushLocked(ctx context.Context, tx kv.RwTx) error {
 	if sd.unwindChangesetRaw != nil {
 		for domain := range sd.unwindChangesetRaw {
-			sort.Slice(sd.unwindChangesetRaw[domain], func(i, j int) bool {
-				return sd.unwindChangesetRaw[domain][i].Key < sd.unwindChangesetRaw[domain][j].Key
+			slices.SortFunc(sd.unwindChangesetRaw[domain], func(a, b kv.DomainEntryDiff) int {
+				return cmp.Compare(a.Key, b.Key)
 			})
 		}
 		if err := tx.(kv.TemporalRwTx).Unwind(ctx, sd.unwindToTxNum, sd.unwindChangesetRaw); err != nil {

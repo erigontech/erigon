@@ -1,12 +1,13 @@
 package commitment
 
 import (
+	"cmp"
 	"context"
 	"fmt"
 	"io"
 	"math/bits"
 	"os"
-	"sort"
+	"slices"
 	"time"
 
 	"golang.org/x/sync/errgroup"
@@ -229,7 +230,7 @@ func printMountTiming(tStart, tUnfolded, tWorkers time.Time, buildDur, foldDur *
 			maxSum, maxSumNib = sum, nib
 		}
 	}
-	sort.Slice(stats, func(i, j int) bool { return stats[i].sum > stats[j].sum })
+	slices.SortFunc(stats, func(a, b wstat) int { return cmp.Compare(b.sum, a.sum) })
 	fmt.Printf("\n[CMT_TIMING] baseUnfold=%v workerWall=%v rootFold=%v | criticalWorker=nib %x sum=%v (build=%v fold=%v)\n",
 		tUnfolded.Sub(tStart), tWorkers.Sub(tUnfolded), time.Since(tWorkers), maxSumNib, maxSum, stats[0].build, stats[0].fold)
 	fmt.Printf("[CMT_TIMING] sum(maxBuild=%v maxFold=%v) = ideal critical path if build & fold each split perfectly across nibbles\n", maxBuild, maxFold)

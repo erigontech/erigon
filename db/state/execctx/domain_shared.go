@@ -774,12 +774,15 @@ func (sd *SharedDomains) InitBlockOverlay(tx kv.TemporalTx, tmpDir string) error
 	if err != nil {
 		return fmt.Errorf("init block overlay: %w", err)
 	}
+	overlay.DomainReader = sd
 	sd.blockOverlay.Store(overlay)
 	return nil
 }
+
 func (sd *SharedDomains) GetCommitmentCtx() *commitmentdb.SharedDomainsCommitmentContext {
 	return sd.sdCtx
 }
+
 func (sd *SharedDomains) Logger() log.Logger { return sd.logger }
 
 // SetStateCache hands this SD the process-global state cache to manage.
@@ -1044,21 +1047,7 @@ func (sd *SharedDomains) Commit(ctx context.Context, tx kv.RwTx, validate ...fun
 				return v, uint64(step), len(v) > 0, nil
 			}
 			factory := func() (commitment.BatchBranchResolver, func(), error) {
-				resolve := func(keys [][]byte) ([][]byte, error) {
-					d := ttx.Debug()
-					vals := make([][]byte, len(keys))
-					for i, k := range keys {
-						v, found, _, _, err := d.GetLatestFromFiles(kv.CommitmentDomain, k, 0)
-						if err != nil {
-							return nil, err
-						}
-						if found {
-							vals[i] = common.Copy(v)
-						}
-					}
-					return vals, nil
-				}
-				return resolve, nil, nil
+				return pinBranchResolver(ttx), nil, nil
 			}
 			provider := func(contractHash []byte) map[string][]byte {
 				m := map[string][]byte{}

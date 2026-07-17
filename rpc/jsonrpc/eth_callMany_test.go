@@ -45,7 +45,6 @@ import (
 	"github.com/erigontech/erigon/rpc/ethapi"
 	"github.com/erigontech/erigon/rpc/jsonrpc/contracts"
 	"github.com/erigontech/erigon/rpc/jsonstream"
-	"github.com/erigontech/erigon/rpc/rpccfg"
 )
 
 // Pins that an EVM stored after the deadline has already fired is still cancelled.
@@ -148,7 +147,7 @@ func TestCallMany(t *testing.T) {
 
 	db := contractBackend.DB()
 	engine := contractBackend.Engine()
-	api := newEthApiForTest(NewBaseApi(nil, stateCache, contractBackend.BlockReader(), false, rpccfg.DefaultEvmCallTimeout, engine, datadir.New(t.TempDir()), nil, 0, 0, 0), db, nil, nil)
+	api := newEthApiForTest(NewBaseApi(nil, stateCache, contractBackend.BlockReader(), engine, nil, &BaseApiConfig{Dirs: datadir.New(t.TempDir())}), db, nil, nil)
 
 	callArgAddr1 := ethapi.CallArgs{From: &address, To: &tokenAddr, Nonce: &nonce,
 		MaxPriorityFeePerGas: (*hexutil.Big)(big.NewInt(1e9)),
