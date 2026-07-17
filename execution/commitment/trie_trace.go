@@ -152,8 +152,8 @@ func (tt *TrieTrace) Save(path string) error {
 // ErrorTracePath inserts the ".error" suffix before the file extension.
 // For example, "trace.toml" becomes "trace.error.toml".
 func ErrorTracePath(path string) string {
-	if strings.HasSuffix(path, ".toml") {
-		return strings.TrimSuffix(path, ".toml") + ErrorTraceSuffix + ".toml"
+	if before, found := strings.CutSuffix(path, ".toml"); found {
+		return before + ErrorTraceSuffix + ".toml"
 	}
 	return path + ErrorTraceSuffix
 }
