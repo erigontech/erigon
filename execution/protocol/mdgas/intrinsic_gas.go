@@ -79,7 +79,6 @@ func CalcIntrinsicGas(args IntrinsicGasCalcArgs) (IntrinsicGasCalcResult, bool) 
 		result.RegularGas = params.TxBaseEIP2780
 		if args.IsContractCreation {
 			result.RegularGas += params.CreateAccessEIP2780
-			result.StateGas = params.StateGasNewAccount
 			if args.HasValue {
 				result.RegularGas += params.TransferLogCostEIP2780
 			}
@@ -97,7 +96,7 @@ func CalcIntrinsicGas(args IntrinsicGasCalcArgs) (IntrinsicGasCalcResult, bool) 
 		result.RegularGas = params.TxGas
 	}
 	if args.IsEIP2780 {
-		result.FloorGasCost = params.TxBaseEIP2780
+		result.FloorGasCost = result.RegularGas
 	} else {
 		result.FloorGasCost = params.TxGas
 	}
@@ -270,7 +269,11 @@ func CalcIntrinsicGas(args IntrinsicGasCalcArgs) (IntrinsicGasCalcResult, bool) 
 
 	// Add the cost of authorizations
 	if args.IsEIP8037 {
-		regularCost, overflow := math.SafeMul(args.AuthorizationsLen, params.PerAuthRegularCostEIP8038)
+		perAuthRegularCost := params.PerAuthRegularCostEIP8038
+		if args.IsEIP2780 {
+			perAuthRegularCost = params.RegularPerAuthBaseCostEIP8038
+		}
+		regularCost, overflow := math.SafeMul(args.AuthorizationsLen, perAuthRegularCost)
 		if overflow {
 			return IntrinsicGasCalcResult{}, true
 		}
@@ -278,13 +281,15 @@ func CalcIntrinsicGas(args IntrinsicGasCalcArgs) (IntrinsicGasCalcResult, bool) 
 		if overflow {
 			return IntrinsicGasCalcResult{}, true
 		}
-		authCost, overflow := math.SafeMul(args.AuthorizationsLen, params.StateGasNewAccountAndAuth)
-		if overflow {
-			return IntrinsicGasCalcResult{}, true
-		}
-		result.StateGas, overflow = math.SafeAdd(result.StateGas, authCost)
-		if overflow {
-			return IntrinsicGasCalcResult{}, true
+		if !args.IsEIP2780 {
+			authCost, overflow := math.SafeMul(args.AuthorizationsLen, params.StateGasNewAccountAndAuth)
+			if overflow {
+				return IntrinsicGasCalcResult{}, true
+			}
+			result.StateGas, overflow = math.SafeAdd(result.StateGas, authCost)
+			if overflow {
+				return IntrinsicGasCalcResult{}, true
+			}
 		}
 	} else {
 		authCost, overflow := math.SafeMul(args.AuthorizationsLen, params.PerEmptyAccountCost)

@@ -362,13 +362,11 @@ func TestEIP2780IntrinsicGas(t *testing.T) {
 		"creation zero value": {
 			creation:        true,
 			expectedRegular: params.TxBaseEIP2780 + params.CreateAccessEIP2780,
-			expectedState:   params.StateGasNewAccount,
 		},
 		"creation non-zero value": {
 			creation:        true,
 			hasValue:        true,
 			expectedRegular: params.TxBaseEIP2780 + params.CreateAccessEIP2780 + params.TransferLogCostEIP2780,
-			expectedState:   params.StateGasNewAccount,
 		},
 	}
 	for name, c := range cases {
@@ -389,9 +387,43 @@ func TestEIP2780IntrinsicGas(t *testing.T) {
 			assert.False(t, overflow)
 			assert.Equal(t, c.expectedRegular, result.RegularGas, "RegularGas mismatch")
 			assert.Equal(t, c.expectedState, result.StateGas, "StateGas mismatch")
-			assert.Equal(t, params.TxBaseEIP2780, result.FloorGasCost, "FloorGasCost base mismatch")
+			assert.Equal(t, c.expectedRegular, result.FloorGasCost, "FloorGasCost base mismatch")
 		})
 	}
+}
+
+func TestEIP2780ContractCreationStateGasIsRuntime(t *testing.T) {
+	result, overflow := CalcIntrinsicGas(IntrinsicGasCalcArgs{
+		IsContractCreation: true,
+		IsEIP2:             true,
+		IsEIP2028:          true,
+		IsEIP3860:          true,
+		IsEIP7623:          true,
+		IsEIP7976:          true,
+		IsEIP7981:          true,
+		IsEIP8037:          true,
+		IsEIP2780:          true,
+	})
+	assert.False(t, overflow)
+	assert.Zero(t, result.StateGas)
+	assert.Equal(t, params.TxBaseEIP2780+params.CreateAccessEIP2780, result.FloorGasCost)
+}
+
+func TestEIP2780AuthorizationStateGasIsRuntime(t *testing.T) {
+	result, overflow := CalcIntrinsicGas(IntrinsicGasCalcArgs{
+		AuthorizationsLen: 2,
+		IsEIP2:            true,
+		IsEIP2028:         true,
+		IsEIP7623:         true,
+		IsEIP7976:         true,
+		IsEIP7981:         true,
+		IsEIP8037:         true,
+		IsEIP2780:         true,
+	})
+	assert.False(t, overflow)
+	assert.Equal(t, params.TxBaseEIP2780+params.ColdAccountAccessEIP2780+2*params.RegularPerAuthBaseCostEIP8038, result.RegularGas)
+	assert.Zero(t, result.StateGas)
+	assert.Equal(t, params.TxBaseEIP2780+params.ColdAccountAccessEIP2780, result.FloorGasCost)
 }
 
 // TestEIP8038IntrinsicGas isolates the EIP-8038 intrinsic contributions: access-list

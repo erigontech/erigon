@@ -238,11 +238,14 @@ func (evm *EVM) chargeTopLevelFrameGas(gasRemaining mdgas.MdGas, addr accounts.A
 			return gasRemaining, topLvlFrameStateGas, topLvlFrameStateGasSpill, fmt.Errorf("%w: %w", ErrIntraBlockStateFailed, err)
 		}
 		if isDelegated {
-			cold := coldAccountAccessCost(evm.chainRules)
-			if gasRemaining.Regular < cold {
+			accessCost := params.WarmStorageReadCostEIP2929
+			if !evm.intraBlockState.AddressInAccessList(dd) {
+				accessCost = coldAccountAccessCost(evm.chainRules)
+			}
+			if gasRemaining.Regular < accessCost {
 				return gasRemaining, topLvlFrameStateGas, topLvlFrameStateGasSpill, ErrOutOfGas
 			}
-			gasRemaining.Regular -= cold
+			gasRemaining.Regular -= accessCost
 			evm.intraBlockState.AddAddressToAccessList(dd)
 		}
 	}
@@ -274,7 +277,8 @@ func (evm *EVM) call(typ OpCode, caller accounts.Address, callerAddress accounts
 
 	p, isPrecompile := evm.precompile(addr)
 	var code []byte
-	if !isPrecompile {
+	deferCodeResolution := !isPrecompile && depth == 0 && evm.chainRules.IsAmsterdam && typ == CALL
+	if !isPrecompile && !deferCodeResolution {
 		code, err = evm.intraBlockState.ResolveCode(addr)
 		if err != nil {
 			return nil, mdgas.MdGas{}, mdgas.MdGasUsage{}, fmt.Errorf("%w: %w", ErrIntraBlockStateFailed, err)
@@ -282,11 +286,22 @@ func (evm *EVM) call(typ OpCode, caller accounts.Address, callerAddress accounts
 	}
 
 	// Invoke tracer hooks that signal entering/exiting a call frame
+	captureStarted := false
 	if evm.Config().Tracer != nil {
-		evm.captureBegin(depth, typ, caller, addr, isPrecompile, input, gas, value, code)
 		defer func(startGas mdgas.MdGas) {
-			evm.captureEnd(depth, typ, startGas, gasRemaining, ret, err)
+			if captureStarted {
+				evm.captureEnd(depth, typ, startGas, gasRemaining, ret, err)
+			}
 		}(gas)
+	}
+	captureFrame := func() {
+		if evm.Config().Tracer != nil {
+			evm.captureBegin(depth, typ, caller, addr, isPrecompile, input, gas, value, code)
+			captureStarted = true
+		}
+	}
+	if !deferCodeResolution {
+		captureFrame()
 	}
 
 	// BAL: record address access even if call fails due to gas/call depth/insufficient balance
@@ -380,8 +395,20 @@ func (evm *EVM) call(typ OpCode, caller accounts.Address, callerAddress accounts
 	var topLvlFrameStateGasSpill uint64
 	if depth == 0 && evm.chainRules.IsAmsterdam && typ == CALL && err == nil {
 		gasRemaining, topLvlFrameStateGas, topLvlFrameStateGasSpill, err = evm.chargeTopLevelFrameGas(gasRemaining, addr, topLevelNewAccount, isPrecompile)
+		if errors.Is(err, ErrOutOfGas) {
+			err = ErrPreExecutionOutOfGas
+		}
 		if err != nil && !errors.Is(err, ErrOutOfGas) {
 			return nil, mdgas.MdGas{}, mdgas.MdGasUsage{}, err
+		}
+	}
+	if deferCodeResolution {
+		if err == nil {
+			code, err = evm.intraBlockState.ResolveCode(addr)
+		}
+		captureFrame()
+		if err != nil && !errors.Is(err, ErrOutOfGas) {
+			return nil, mdgas.MdGas{}, mdgas.MdGasUsage{}, fmt.Errorf("%w: %w", ErrIntraBlockStateFailed, err)
 		}
 	}
 
@@ -526,14 +553,6 @@ func (evm *EVM) create(caller accounts.Address, codeAndHash *codeAndHash, gas md
 			gasUsed.State = 0
 		}
 		gasUsed.Regular = deriveFrameRegularGasUsed(inputTotal, gasRemaining.Total(), gasUsed.State)
-		// depth-0 create refills the intrinsic NEW_ACCOUNT (nothing created on error, no new leaf when account existed with balance only populated)
-		if depth == 0 && evm.chainRules.IsAmsterdam {
-			if err != nil {
-				gasUsed.State = -int64(params.StateGasNewAccount)
-			} else if wasBalanceOnly {
-				gasUsed.State -= int64(params.StateGasNewAccount)
-			}
-		}
 	}()
 
 	if evm.Config().Tracer != nil {
@@ -612,6 +631,20 @@ func (evm *EVM) create(caller accounts.Address, codeAndHash *codeAndHash, gas md
 		}
 		wasBalanceOnly = !empty
 	}
+	var topLevelStateGasSpill uint64
+	if depth == 0 && evm.chainRules.IsAmsterdam && !wasBalanceOnly {
+		charged, spill, ok := useMdGas(gasRemaining, params.StateGasNewAccount, mdgas.StateGas, evm.Config().Tracer, tracing.GasChangeIgnored)
+		if !ok {
+			if evm.config.Tracer != nil && evm.config.Tracer.OnGasChange != nil {
+				evm.config.Tracer.OnGasChange(gasRemaining.Regular, 0, tracing.GasChangeCallFailedExecution)
+			}
+			gasRemaining = mdgas.MdGas{State: gas.State}
+			err = ErrPreExecutionOutOfGas
+			return nil, accounts.NilAddress, gasRemaining, mdgas.MdGasUsage{}, wasBalanceOnly, err
+		}
+		gasRemaining = charged
+		topLevelStateGasSpill = spill
+	}
 	// Create a new account on the state
 	snapshot := evm.intraBlockState.PushSnapshot()
 	defer evm.intraBlockState.PopSnapshot(snapshot)
@@ -638,7 +671,11 @@ func (evm *EVM) create(caller accounts.Address, codeAndHash *codeAndHash, gas md
 		return nil, address, gasRemaining, mdgas.MdGasUsage{}, wasBalanceOnly, nil
 	}
 
-	ret, gasRemaining, gasUsed, err = evm.Run(contract, gas, nil, false)
+	ret, gasRemaining, gasUsed, err = evm.Run(contract, gasRemaining, nil, false)
+	if depth == 0 && evm.chainRules.IsAmsterdam && !wasBalanceOnly {
+		gasUsed.State += int64(params.StateGasNewAccount)
+		gasUsed.StateSpill += topLevelStateGasSpill
+	}
 
 	// EIP-170: Contract code size limit
 	if err == nil {
