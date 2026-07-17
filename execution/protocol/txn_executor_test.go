@@ -60,6 +60,12 @@ func newSimpleTransferMsg(from, to accounts.Address, gas uint64, checkGas bool) 
 	)
 }
 
+type nilBlobFeeCapMessage struct {
+	*types.Message
+}
+
+func (nilBlobFeeCapMessage) MaxFeePerBlobGas() *uint256.Int { return nil }
+
 // TestEIP7825_GasPoolPreservedOnReject verifies that when a transaction is
 // rejected by the EIP-7825 gas limit cap, the block gas pool is NOT depleted.
 //
@@ -443,6 +449,34 @@ func TestBlobGasPreservedOnReject(t *testing.T) {
 		require.Equal(t, uint64(blockBlobGas-txBlobGas), gp.BlobGas(),
 			"a valid blob tx must consume its blob gas from the pool")
 	})
+}
+
+func TestPreCheck_NilMaxFeePerBlobGas(t *testing.T) {
+	t.Parallel()
+
+	const blockGasLimit = 30_000_000
+
+	sender := accounts.InternAddress(common.HexToAddress("0x1111111111111111111111111111111111111111"))
+	recipient := accounts.InternAddress(common.HexToAddress("0x2222222222222222222222222222222222222222"))
+	blockCtx := evmtypes.BlockContext{
+		CanTransfer: CanTransfer,
+		Transfer:    misc.Transfer,
+		GasLimit:    blockGasLimit,
+		BaseFee:     *uint256.NewInt(1),
+		BlobBaseFee: *uint256.NewInt(1),
+	}
+	evm := vm.NewEVM(blockCtx, evmtypes.TxContext{}, state.New(state.NewNoopReader()), chain.TestChainOsakaConfig, vm.Config{})
+	msg := types.NewMessage(
+		sender, recipient, 0, uint256.NewInt(0), 100_000,
+		uint256.NewInt(1), uint256.NewInt(1), uint256.NewInt(1),
+		nil, nil,
+		false, false, true, false, nil,
+	)
+	msg.SetBlobVersionedHashes([]common.Hash{{1}})
+	gp := new(GasPool).AddGas(blockGasLimit).AddBlobGas(params.GasPerBlob)
+
+	_, err := NewTxnExecutor(evm, nilBlobFeeCapMessage{msg}, gp).Execute(true, false)
+	require.ErrorIs(t, err, ErrMaxFeePerBlobGas)
 }
 
 // TestApplyFrame_IntrinsicGasBeforeAuthorities pins that ApplyFrame validates
