@@ -230,8 +230,8 @@ var snapshotCommand = cli.Command{
 		},
 		{
 			Name: "upgrade-seg-headers",
-			Action: func(c *cli.Context) error {
-				logger, err := debug.SetupSimple(c, true)
+			Action: func(ctx context.Context, c *cli.Command) error {
+				logger, err := debug.SetupSimple(ctx, c, true /* root logger */)
 				if err != nil {
 					return err
 				}
