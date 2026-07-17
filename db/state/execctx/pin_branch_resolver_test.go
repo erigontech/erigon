@@ -47,13 +47,14 @@ func (f *fakeTemporalGetter) StepsInFiles(...kv.Domain) kv.Step { return 0 }
 func TestPinBranchResolver_ReturnsAuthoritativeLatest(t *testing.T) {
 	t.Parallel()
 	latest := []byte("branch-latest")
-	getter := &fakeTemporalGetter{vals: map[string][]byte{"\x0a\x0b": latest}}
+	getter := &fakeTemporalGetter{vals: map[string][]byte{"\x0a\x0b": latest, "\x0d": {}}}
 	resolve := pinBranchResolver(getter)
-	vals, err := resolve([][]byte{[]byte{0x0a, 0x0b}, []byte{0x0c}})
+	vals, err := resolve([][]byte{[]byte{0x0a, 0x0b}, []byte{0x0c}, []byte{0x0d}})
 	require.NoError(t, err)
-	require.Len(t, vals, 2)
+	require.Len(t, vals, 3)
 	require.Equal(t, latest, vals[0])
 	require.Nil(t, vals[1], "absent keys must resolve to nil so the preload skips pinning them")
+	require.Nil(t, vals[2], "deletion tombstones (empty values) must also resolve to nil — the cache never stores tombstones")
 	latest[0] = 'X'
 	require.Equal(t, []byte("branch-latest"), vals[0], "resolved values must be copies, detached from the getter's buffer")
 }
