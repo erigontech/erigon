@@ -6,7 +6,8 @@ commitment-history download bounding).
 ## Flag surface: `--history.<domain>=<retention>`
 
 One flag per domain; the value carries both on/off and the window. In `config.toml`
-each domain is a scalar leaf under one `[history]` table:
+each domain is a key under one `[history]` table — a scalar for the forms below,
+or a sub-table where the window needs a named field (`domainB.from`):
 
 ```toml
 [history]

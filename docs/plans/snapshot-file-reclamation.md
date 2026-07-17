@@ -52,13 +52,14 @@ A file leaves the visible set when it's removed from `dirtyFiles`. Producers:
 - **retention** — `RetireOldHistoryFiles` (aged history/index below the cutoff),
 - **dedup / squeeze** replacements.
 
-Each collects the removed `*FilesItem`s and calls the single publish point
-`recalcVisibleFiles(retired)` (under `dirtyFilesLock`), which:
+Each collects the removed `*FilesItem`s, tells the downloader to stop seeding
+them with `a.onFilesDelete(names)` — the producer does this itself, ahead of any
+unlink — and then calls the single publish point `recalcVisibleFiles(retired)`
+(under `dirtyFilesLock`), which:
 1. builds a fresh bundle from the current `dirtyFiles`,
 2. attaches `retired` to the **outgoing** (current-at-removal) bundle,
 3. `a.visible.Store(next)` — new readers no longer see the retired files,
-4. fires `a.onFilesDelete(names)` **before** any unlink so the downloader stops
-   seeding, then opportunistically reclaims.
+4. opportunistically reclaims.
 
 Physical deletion is deferred: readers still holding the outgoing (or older)
 generation keep its `refcnt > 0`.
@@ -73,7 +74,8 @@ if v.refcnt.Add(-1) == 0 { a.reclaimRetired() }
 
 `reclaimRetiredLocked` walks the chain from `oldestVisible` while
 `refcnt == 0 && head != current`, collects each drained bundle's `retired` files,
-advances `oldestVisible`, and unlinks them out of lock:
+advances `oldestVisible`, and hands the list back for its caller to remove —
+`reclaimRetired` drops `dirtyFilesLock` first, the writer path already holds it:
 
 ```go
 for h := a.oldestVisible; h != cur && h.refcnt.Load() == 0; h = h.next {
