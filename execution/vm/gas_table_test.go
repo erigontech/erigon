@@ -252,6 +252,78 @@ func TestEIP8038SStore(t *testing.T) {
 	}
 }
 
+func TestEIP7928SStoreReadRequiresAffordableAccess(t *testing.T) {
+	tests := []struct {
+		name       string
+		gas        uint64
+		expectRead bool
+	}{
+		{"stipend plus one", params.SstoreSentryGasEIP2200 + 1, false},
+		{"cold access minus one", params.ColdStorageAccessCostEIP8038 - 1, false},
+		{"cold access", params.ColdStorageAccessCostEIP8038, true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			versionMap := state.NewVersionMap(nil)
+			reader := state.NewVersionedStateReader(0, state.ReadSet{}, versionMap, state.NewNoopReader())
+			statedb := state.NewWithVersionMap(reader, versionMap)
+			statedb.SetTxContext(1, 0)
+			contract := accounts.InternAddress(common.HexToAddress("0x1000"))
+			slot := accounts.InternKey(common.HexToHash("0x01"))
+			statedb.CreateAccount(contract, true)
+			require.NoError(t, statedb.SetCode(contract, hexutil.MustDecode("0x6001600155"), tracing.CodeChangeUnspecified))
+			statedb.ResetVersionedIO()
+			blockCtx := evmtypes.BlockContext{
+				CanTransfer: func(evmtypes.IntraBlockState, accounts.Address, uint256.Int) (bool, error) {
+					return true, nil
+				},
+				Transfer: func(evmtypes.IntraBlockState, accounts.Address, accounts.Address, uint256.Int, bool, *chain.Rules) error {
+					return nil
+				},
+			}
+			vmenv := vm.NewEVM(blockCtx, evmtypes.TxContext{}, statedb, chain.AllProtocolChanges, vm.Config{})
+			rules := vmenv.ChainRules()
+			require.NoError(t, statedb.Prepare(rules, accounts.ZeroAddress, accounts.ZeroAddress, contract, vm.ActivePrecompiles(rules), nil, nil))
+			_, _, _, err := vmenv.Call(
+				accounts.ZeroAddress,
+				contract,
+				nil,
+				mdgas.MdGas{Regular: 2*push1 + tt.gas},
+				uint256.Int{},
+				false,
+			)
+			require.ErrorIs(t, err, vm.ErrOutOfGas)
+			reads := statedb.VersionedReads()
+			_, read := reads.GetStorage(contract, slot)
+			require.Equal(t, tt.expectRead, read)
+		})
+	}
+}
+
+func TestEIP7928SystemCallReadsAbsentTarget(t *testing.T) {
+	versionMap := state.NewVersionMap(nil)
+	reader := state.NewVersionedStateReader(0, state.ReadSet{}, versionMap, state.NewNoopReader())
+	statedb := state.NewWithVersionMap(reader, versionMap)
+	statedb.SetTxContext(1, -1)
+	target := accounts.InternAddress(common.HexToAddress("0x1000"))
+	vmenv := vm.NewEVM(evmtypes.BlockContext{}, evmtypes.TxContext{}, statedb, chain.AllProtocolChanges, vm.Config{})
+	_, _, _, err := vmenv.Call(
+		params.SystemAddress,
+		target,
+		nil,
+		mdgas.MdGas{Regular: math.MaxUint64, State: params.StateGasSystemMaxSstores},
+		uint256.Int{},
+		false,
+	)
+	require.NoError(t, err)
+	reads := statedb.VersionedReads()
+	_, read := reads.GetCode(target)
+	require.True(t, read)
+	exists, err := statedb.Exist(target)
+	require.NoError(t, err)
+	require.False(t, exists)
+}
+
 // TestCallNewAccountSpillBefore63of64 pins the EIP-8037 charge order for a value
 // CALL to a dead account: the NEW_ACCOUNT state charge (spilling into regular gas
 // when the reservoir can't cover it) is applied before the 63/64 child allowance,
