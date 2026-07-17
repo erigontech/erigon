@@ -16,6 +16,8 @@
 
 package seg
 
+import "fmt"
+
 type FileCompression uint8
 
 const (
@@ -27,14 +29,15 @@ const (
 const (
 	FileCompressionFormatV0 = uint8(0)
 	FileCompressionFormatV1 = uint8(1)
+	FileCompressionFormatV2 = uint8(2)
 )
 
 type FeatureFlag uint8
 
 const (
-	PageLevelCompressionEnabled FeatureFlag = 1 << iota // 0b001
-	KeyCompressionEnabled                               // 0b010
-	ValCompressionEnabled                               // 0b100
+	PageLevelCompressionEnabled    FeatureFlag = 0b1
+	WordLevelKeyCompressionEnabled FeatureFlag = 0b10
+	WordLevelValCompressionEnabled FeatureFlag = 0b100
 )
 
 type FeatureFlagBitmask uint8
@@ -48,8 +51,18 @@ func (m *FeatureFlagBitmask) Set(flag FeatureFlag) {
 }
 
 func ParseFileCompression(s string) (FileCompression, error) {
-	// Implementation would be here
-	return CompressNone, nil
+	switch s {
+	case "", "none":
+		return CompressNone, nil
+	case "k", "keys":
+		return CompressKeys, nil
+	case "v", "vals":
+		return CompressVals, nil
+	case "kv", "keys+vals":
+		return CompressKeys | CompressVals, nil
+	default:
+		return CompressNone, fmt.Errorf("unknown file compression %q (want: none, k|keys, v|vals, kv|keys+vals)", s)
+	}
 }
 
 func (c FileCompression) Has(flag FileCompression) bool {
@@ -57,7 +70,16 @@ func (c FileCompression) Has(flag FileCompression) bool {
 }
 
 func (c FileCompression) String() string {
-	return "none" // Simplified implementation
+	if c.Has(CompressKeys) && c.Has(CompressVals) {
+		return "keys+vals"
+	}
+	if c.Has(CompressKeys) {
+		return "keys"
+	}
+	if c.Has(CompressVals) {
+		return "vals"
+	}
+	return "none"
 }
 
 type ReaderI interface {

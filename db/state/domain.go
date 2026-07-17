@@ -751,7 +751,7 @@ func (d *Domain) collateETL(ctx context.Context, stepFrom, stepTo kv.Step, wal *
 	// Compress files only in `merge` which ok to be slow.
 	//comp := seg.NewWriter(coll.valuesComp, seg.CompressNone) //
 	compress := seg.CompressNone
-	if stepTo-stepFrom > DomainMinStepsToCompress {
+	if stepTo-stepFrom >= DomainMinStepsToCompress {
 		compress = d.Compression
 	}
 	comp := seg.NewWriter(coll.valuesComp, compress)

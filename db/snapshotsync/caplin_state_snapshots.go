@@ -702,6 +702,11 @@ func dumpCaplinState(ctx context.Context, snapName string, kvGetter KeyValueGett
 		return err
 	}
 	defer sn.Close()
+	compression := seg.CompressKeys | seg.CompressVals
+	if !compress {
+		compression = seg.CompressNone
+	}
+	w := seg.NewWriter(sn, compression)
 
 	// block_roots/state_roots are written every slot; an empty entry means the DB
 	// range isn't fully reconstructed. Freezing it writes a blank word that then
@@ -726,14 +731,8 @@ func dumpCaplinState(ctx context.Context, snapName string, kvGetter KeyValueGett
 		if i%20_000 == 0 {
 			logger.Log(lvl, "Dumping "+snapName, "progress", i)
 		}
-		if compress {
-			if err := sn.AddWord(dump); err != nil {
-				return err
-			}
-		} else {
-			if err := sn.AddUncompressedWord(dump); err != nil {
-				return err
-			}
+		if _, err := w.Write(dump); err != nil {
+			return err
 		}
 	}
 	if sn.Count() != int(blocksPerFile) {

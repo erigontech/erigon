@@ -1,32 +1,32 @@
 accounts:
     domain:
         bt:
-            current: v2.0
+            current: v2.1
             min: v1.0
         kv:
-            current: v2.0
+            current: v2.1
             min: v1.0
         kvei:
-            current: v1.2
+            current: v1.3
             min: v1.0
     hist:
         v:
-            current: v2.0
+            current: v2.1
             min: v1.0
         vi:
-            current: v1.2
+            current: v1.3
             min: v1.0
     ii:
         ef:
-            current: v3.0
+            current: v3.1
             min: v1.0
         efi:
-            current: v2.1
+            current: v2.2
             min: v1.0
 bodies:
     block:
         idx:
-            current: v2.0
+            current: v2.1
             min: v1.0
         seg:
             current: v1.1
@@ -34,27 +34,27 @@ bodies:
 code:
     domain:
         bt:
-            current: v2.0
+            current: v2.1
             min: v1.0
         kv:
-            current: v2.0
+            current: v2.1
             min: v1.0
         kvei:
-            current: v1.2
+            current: v1.3
             min: v1.0
     hist:
         v:
-            current: v2.0
+            current: v2.1
             min: v1.0
         vi:
-            current: v1.1
+            current: v1.2
             min: v1.0
     ii:
         ef:
-            current: v3.0
+            current: v3.1
             min: v1.0
         efi:
-            current: v2.0
+            current: v2.1
             min: v1.0
 commitment:
     domain:
@@ -62,26 +62,26 @@ commitment:
             current: v2.2
             min: v1.0
         kvi:
-            current: v2.1
+            current: v2.2
             min: v1.0
     hist:
         v:
-            current: v2.0
+            current: v2.1
             min: v1.0
         vi:
-            current: v1.1
+            current: v1.2
             min: v1.0
     ii:
         ef:
-            current: v3.0
+            current: v3.1
             min: v1.0
         efi:
-            current: v2.0
+            current: v2.1
             min: v1.0
 headers:
     block:
         idx:
-            current: v2.0
+            current: v2.1
             min: v1.0
         seg:
             current: v1.1
@@ -89,18 +89,18 @@ headers:
 logaddrs:
     ii:
         ef:
-            current: v3.0
+            current: v3.1
             min: v1.0
         efi:
-            current: v2.1
+            current: v2.2
             min: v1.0
 logtopics:
     ii:
         ef:
-            current: v3.0
+            current: v3.1
             min: v1.0
         efi:
-            current: v2.1
+            current: v2.2
             min: v1.0
 rcache:
     domain:
@@ -108,92 +108,92 @@ rcache:
             current: v3.1
             min: v1.0
         kvi:
-            current: v2.0
+            current: v2.1
             min: v1.0
     hist:
         v:
             current: v3.1
             min: v1.0
         vi:
-            current: v1.1
+            current: v1.2
             min: v1.0
     ii:
         ef:
-            current: v3.0
+            current: v3.1
             min: v1.0
         efi:
-            current: v2.0
+            current: v2.1
             min: v1.0
 receipt:
     domain:
         bt:
-            current: v2.0
+            current: v2.1
             min: v1.0
         kv:
-            current: v3.0
+            current: v3.1
+            min: v1.0
+        kvei:
+            current: v1.4
+            min: v1.0
+    hist:
+        v:
+            current: v3.1
+            min: v1.0
+        vi:
+            current: v1.3
+            min: v1.0
+    ii:
+        ef:
+            current: v3.1
+            min: v1.0
+        efi:
+            current: v2.2
+            min: v1.0
+storage:
+    domain:
+        bt:
+            current: v2.1
+            min: v1.0
+        kv:
+            current: v2.1
             min: v1.0
         kvei:
             current: v1.3
             min: v1.0
     hist:
         v:
-            current: v3.0
+            current: v2.1
             min: v1.0
         vi:
             current: v1.2
             min: v1.0
     ii:
         ef:
-            current: v3.0
+            current: v3.1
             min: v1.0
         efi:
             current: v2.1
-            min: v1.0
-storage:
-    domain:
-        bt:
-            current: v2.0
-            min: v1.0
-        kv:
-            current: v2.0
-            min: v1.0
-        kvei:
-            current: v1.2
-            min: v1.0
-    hist:
-        v:
-            current: v2.0
-            min: v1.0
-        vi:
-            current: v1.1
-            min: v1.0
-    ii:
-        ef:
-            current: v3.0
-            min: v1.0
-        efi:
-            current: v2.0
             min: v1.0
 tracesfrom:
     ii:
         ef:
-            current: v3.0
+            current: v3.1
             min: v1.0
         efi:
-            current: v2.1
+            current: v2.2
             min: v1.0
 tracesto:
     ii:
         ef:
-            current: v3.0
+            current: v3.1
             min: v1.0
         efi:
-            current: v2.1
+            current: v2.2
             min: v1.0
 transactions:
     block:
         idx:
-            current: v2.0
+            current: v2.1
             min: v1.0
         seg:
             current: v1.1
@@ -201,5 +201,5 @@ transactions:
 transactiontoblock:
     block:
         idx:
-            current: v2.0
+            current: v2.1
             min: v1.0

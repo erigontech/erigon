@@ -65,6 +65,7 @@ import (
 	"github.com/erigontech/erigon/db/kv/mdbx"
 	"github.com/erigontech/erigon/db/kv/rawdbv3"
 	"github.com/erigontech/erigon/db/kv/temporal"
+	"github.com/erigontech/erigon/db/migrations"
 	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/db/rawdb/blockio"
 	"github.com/erigontech/erigon/db/recsplit"
@@ -224,6 +225,25 @@ var snapshotCommand = cli.Command{
 				return doRemoveOverlap(ctx, c, dirs)
 			},
 			Usage: "remove overlaps from e3 files",
+			Flags: joinFlags([]cli.Flag{
+				&utils.DataDirFlag,
+			}),
+		},
+		{
+			Name: "upgrade-seg-headers",
+			Action: func(ctx context.Context, c *cli.Command) error {
+				logger, err := debug.SetupSimple(ctx, c, true /* root logger */)
+				if err != nil {
+					return err
+				}
+				dirs, l, err := datadir.New(c.String(utils.DataDirFlag.Name)).MustFlock()
+				if err != nil {
+					return err
+				}
+				defer l.Unlock()
+				return migrations.UpgradeSegHeadersV2(dirs, logger)
+			},
+			Usage: "Patch all V1 snapshot files to V2 header format (sets word-level compression bits). Run once after upgrading to the version that introduced this format.",
 			Flags: joinFlags([]cli.Flag{
 				&utils.DataDirFlag,
 			}),
@@ -3185,6 +3205,7 @@ func doCompress(ctx context.Context, cliCtx *cli.Command) error {
 
 	src := bufio.NewReaderSize(os.Stdin, int(128*datasize.MB))
 	srcF := cliCtx.String("from")
+	var totalWords int
 	if srcF != "" {
 		decompressor, err := seg.NewDecompressor(srcF)
 		if err != nil {
@@ -3192,7 +3213,8 @@ func doCompress(ctx context.Context, cliCtx *cli.Command) error {
 		}
 		defer decompressor.Close()
 		defer decompressor.MadvSequential().DisableReadAhead()
-		log.Info("[compress] from", "from", srcF)
+		totalWords = decompressor.Count()
+		log.Info("[compress] from", "from", srcF, "words", totalWords)
 
 		var cleanup func()
 		src, cleanup = seg.Decompressor2bufio(decompressor)
@@ -3235,8 +3257,19 @@ func doCompress(ctx context.Context, cliCtx *cli.Command) error {
 	var snappyBuf, unSnappyBuf []byte
 	var concatBuf []byte
 	concatI := 0
+	var wordI int
+	logEvery := time.NewTicker(5 * time.Second)
+	defer logEvery.Stop()
 
 	if err := seg.Bufio2compressor(ctx, src, w, func(word []byte) ([]byte, error) {
+		if totalWords > 0 {
+			wordI++
+			select {
+			case <-logEvery.C:
+				logger.Info("[compress] reading", "file", filepath.Base(srcF), "words", fmt.Sprintf("%d/%d", wordI, totalWords), "progress", fmt.Sprintf("%.1f%%", 100*float64(wordI)/float64(totalWords)))
+			default:
+			}
+		}
 		if justPrint {
 			fmt.Printf("%x\n\n", word)
 			return nil, nil
@@ -3262,6 +3295,9 @@ func doCompress(ctx context.Context, cliCtx *cli.Command) error {
 		return word, nil
 	}); err != nil {
 		return err
+	}
+	if totalWords > 0 {
+		logger.Info("[compress] building dictionary", "file", filepath.Base(srcF), "words", wordI)
 	}
 	if err := c.Compress(); err != nil {
 		return err
@@ -3318,6 +3354,7 @@ func doUnmerge(ctx context.Context, cliCtx *cli.Command, dirs datadir.Dirs) erro
 
 	blockFrom, blockTo := info.From, info.To
 	var compressor *seg.Compressor
+	var unmergeWriter *seg.Writer
 	compresCfg := seg.DefaultCfg
 	workers := estimate.CompressSnapshot.Workers()
 	compresCfg.Workers = workers
@@ -3338,10 +3375,11 @@ func doUnmerge(ctx context.Context, cliCtx *cli.Command, dirs datadir.Dirs) erro
 				if err != nil {
 					return err
 				}
+				unmergeWriter = seg.NewWriter(compressor, seg.CompressNone)
 			}
 
 			word, _ = g.Next(word[:0])
-			if err := compressor.AddUncompressedWord(word); err != nil {
+			if _, err := unmergeWriter.Write(word); err != nil {
 				return err
 			}
 			blockFrom++
@@ -3375,10 +3413,11 @@ func doUnmerge(ctx context.Context, cliCtx *cli.Command, dirs datadir.Dirs) erro
 			if err != nil {
 				return err
 			}
+			unmergeWriter = seg.NewWriter(compressor, seg.CompressNone)
 
 			for g.HasNext() && expectedCount > 0 {
 				word, _ = g.Next(word[:0])
-				if err := compressor.AddUncompressedWord(word); err != nil {
+				if _, err := unmergeWriter.Write(word); err != nil {
 					return err
 				}
 				expectedCount--
