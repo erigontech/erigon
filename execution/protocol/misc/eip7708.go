@@ -63,7 +63,7 @@ func Transfer(db evmtypes.IntraBlockState, sender, recipient accounts.Address, a
 	if err != nil {
 		return err
 	}
-	if rules.IsAmsterdam && rules.IsEIPEnabled(7708) && !amount.IsZero() && sender != recipient { // EIP-7708
+	if rules.IsAmsterdam && !rules.IsEIPDisabled(7708) && !amount.IsZero() && sender != recipient { // EIP-7708
 		db.AddLog(EthTransferLog(sender.Value(), recipient.Value(), amount))
 	}
 	return nil

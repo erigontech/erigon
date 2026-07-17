@@ -574,6 +574,40 @@ func (vm *VersionMap) AnyDoneSelfDestructEquals(addr accounts.Address, txIdxLimi
 	return found
 }
 
+// FindDoneSelfDestructInRange returns the version of the highest Done
+// SelfDestruct write with lo <= TxIdx < hi whose value == target, if any.
+// Read-side mirror of AnyDoneSelfDestructEquals: it finds an in-block
+// SELFDESTRUCT even when a later revival (SelfDestruct=false) hides it from
+// latest-only ReadSelfDestruct.
+func (vm *VersionMap) FindDoneSelfDestructInRange(addr accounts.Address, lo, hi int, target bool) (Version, bool) {
+	if vm == nil || hi <= lo {
+		return Version{}, false
+	}
+	e := vm.load(addr)
+	if e == nil {
+		return Version{}, false
+	}
+	e.mu.RLock()
+	defer e.mu.RUnlock()
+	if e.SelfDestruct == nil {
+		return Version{}, false
+	}
+	var ver Version
+	found := false
+	e.SelfDestruct.Descend(hi-1, func(k int, v *WriteCell[bool]) bool {
+		if k < lo {
+			return false
+		}
+		if v.flag == FlagDone && v.Value == target {
+			ver = Version{TxIndex: k, Incarnation: v.incarnation}
+			found = true
+			return false
+		}
+		return true
+	})
+	return ver, found
+}
+
 // FlushVersionedWrites atomically flushes all writes to the version map
 // under a single lock acquisition. This prevents concurrent readers from
 // observing a partially-flushed state (e.g. seeing an AddressPath write

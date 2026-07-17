@@ -390,7 +390,7 @@ func (s *Merge) verifyHeader(chain rules.ChainHeaderReader, header, parent *type
 			// TODO: No Slot Error Yet - Treat it as optional for hive testing
 			//return rules.ErrMissingSlotNumber
 		}
-		if chain.Config().IsEIPEnabled(7928) {
+		if !chain.Config().IsEIPDisabled(7928) {
 			if header.BlockAccessListHash == nil {
 				return rules.ErrMissingBlockAccessListHash
 			}

@@ -485,6 +485,26 @@ func versionedReadCore(s *IntraBlockState, addr accounts.Address, path AccountPa
 				return
 			}
 		}
+		// A Done storage cell written before an in-block SELFDESTRUCT is stale:
+		// the destruct wipes the slot and a recreate leaves it unwritten, so a
+		// later read must see zero. Latest-only ReadSelfDestruct misses this when
+		// a revival (SelfDestruct=false) sits above the wiping write, so scan the
+		// [cellIdx, txIdx) range for a Done SelfDestruct=true. Incarnation alone
+		// is insufficient: a pure CREATE bumps incarnation without wiping storage.
+		if path == StoragePath {
+			if sdVer, ok := s.versionMap.FindDoneSelfDestructInRange(addr, hdr.Version.TxIndex, s.txIndex, true); ok {
+				if !commited {
+					s.versionedReads.SetSelfDestruct(addr, VersionedRead[bool]{
+						ReadHeader: ReadHeader{Source: MapRead, Version: sdVer},
+						Val:        true,
+					})
+				}
+				r.outcome = outcomeReturnZero
+				r.source = MapRead
+				r.version = sdVer
+				return
+			}
+		}
 		r.outcome = outcomeMapDone
 		r.hdr = hdr
 		r.recordVR = true
