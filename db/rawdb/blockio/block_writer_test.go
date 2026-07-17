@@ -18,13 +18,16 @@ package blockio
 
 import (
 	"context"
+	"encoding/binary"
 	"testing"
 	"time"
 
 	"github.com/stretchr/testify/require"
 
+	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/dbcfg"
+	"github.com/erigontech/erigon/db/kv/dbutils"
 	"github.com/erigontech/erigon/db/kv/memdb"
 )
 
@@ -39,6 +42,9 @@ func TestTruncateBodiesInsideOpenWriteTx(t *testing.T) {
 	require.NoError(t, db.Update(ctx, func(tx kv.RwTx) error {
 		for i := byte(1); i <= 5; i++ {
 			if err := tx.Put(kv.EthTx, []byte{0, 0, 0, 0, 0, 0, 0, i}, []byte{i}); err != nil {
+				return err
+			}
+			if err := tx.Put(kv.BlockBody, dbutils.BlockBodyKey(uint64(i), common.Hash{i}), []byte{i}); err != nil {
 				return err
 			}
 		}
@@ -59,6 +65,13 @@ func TestTruncateBodiesInsideOpenWriteTx(t *testing.T) {
 	}
 
 	require.NoError(t, db.View(ctx, func(tx kv.Tx) error {
+		var bodies []uint64
+		require.NoError(t, tx.ForEach(kv.BlockBody, nil, func(k, _ []byte) error {
+			bodies = append(bodies, binary.BigEndian.Uint64(k))
+			return nil
+		}))
+		require.Equal(t, []uint64{1}, bodies) // from==2: bodies below it survive the cut
+
 		ethTxCount, err := tx.Count(kv.EthTx)
 		require.NoError(t, err)
 		require.Zero(t, ethTxCount)
