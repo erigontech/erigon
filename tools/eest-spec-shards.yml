@@ -38,6 +38,7 @@
   max-allowed-failures: 0
 - shard: statetests-devnet
   workers: 12
+  # TODO: reduce to 0 as tests-glamsterdam-devnet@v7.2.0 support lands.
   max-allowed-failures: 1925
 - shard: blocktests-stable-sequential
   workers: 12
