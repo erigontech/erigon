@@ -1205,7 +1205,7 @@ func (tx *MdbxTx) ClearTable(bucket string) error {
 
 // DeleteRange removes keys in [from, to) using mdbx's native bulk range-delete,
 // which cuts whole pages and branches out of the B-tree at once. to==nil deletes
-// through the last key. Returns the number of keys removed.
+// through the last key. Returns the number of entries removed.
 func (tx *MdbxTx) DeleteRange(table string, from, to []byte) (uint64, error) {
 	beginC, err := tx.RwCursor(table)
 	if err != nil {
@@ -1245,7 +1245,7 @@ func (tx *MdbxTx) DeleteRange(table string, from, to []byte) (uint64, error) {
 
 // DeleteBefore removes every key < to (to==nil clears the whole table) using
 // mdbx's native bunch-delete, which cuts whole pages and branches out of the
-// B-tree at once. Returns the number of keys removed.
+// B-tree at once. Returns the number of entries removed.
 func (tx *MdbxTx) DeleteBefore(table string, to []byte) (uint64, error) {
 	c, err := tx.RwCursor(table)
 	if err != nil {
@@ -1275,7 +1275,7 @@ func (tx *MdbxTx) DeleteBefore(table string, to []byte) (uint64, error) {
 
 // DeleteAfter removes every key >= from (from==nil clears the whole table) using
 // mdbx's native bunch-delete, which cuts whole pages and branches out of the
-// B-tree at once. Returns the number of keys removed.
+// B-tree at once. Returns the number of entries removed.
 func (tx *MdbxTx) DeleteAfter(table string, from []byte) (uint64, error) {
 	c, err := tx.RwCursor(table)
 	if err != nil {
