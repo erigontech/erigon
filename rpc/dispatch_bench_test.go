@@ -285,8 +285,8 @@ func BenchmarkDispatchUnit_Typed_WithParams(b *testing.B) {
 
 type benchNoParamService struct{}
 
-func (benchNoParamService) BlockNumber(_ context.Context) (uint64, error) {
-	return benchEthBlockNumber(context.Background())
+func (benchNoParamService) BlockNumber(ctx context.Context) (uint64, error) {
+	return benchEthBlockNumber(ctx)
 }
 
 type benchGetBalanceService struct{}
