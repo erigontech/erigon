@@ -10,9 +10,10 @@ package commitment
 
 import (
 	"bytes"
+	"cmp"
 	"encoding/binary"
 	"errors"
-	"sort"
+	"slices"
 	"testing"
 
 	"github.com/erigontech/erigon/execution/commitment/nibbles"
@@ -137,11 +138,11 @@ func breadthFirstOrder(tree syntheticTree, exclude map[string]bool) []string {
 		copy(kc, k)
 		pks = append(pks, pk{path: p, key: kc})
 	}
-	sort.Slice(pks, func(i, j int) bool {
-		if len(pks[i].path) != len(pks[j].path) {
-			return len(pks[i].path) < len(pks[j].path)
+	slices.SortFunc(pks, func(a, b pk) int {
+		if len(a.path) != len(b.path) {
+			return cmp.Compare(len(a.path), len(b.path))
 		}
-		return bytes.Compare(pks[i].key, pks[j].key) < 0
+		return bytes.Compare(a.key, b.key)
 	})
 	out := make([]string, len(pks))
 	for i := range pks {

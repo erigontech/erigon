@@ -17,9 +17,10 @@
 package p2p
 
 import (
+	"cmp"
 	"context"
 	"encoding/binary"
-	"sort"
+	"slices"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -378,12 +379,10 @@ func (ptt *peerTrackerTest) run(f func(ctx context.Context, t *testing.T)) {
 // by using PeerIdFromUint64 and so uint64 value is sorted in first 8 bytes. Sorting is needed since
 // ListPeersMayHaveBlockNum returns peer ids from a map and order is non-deterministic.
 func sortPeerIdsAssumingUints(peerIds []*PeerId) {
-	sort.Slice(peerIds, func(i, j int) bool {
-		bytesI := peerIds[i][:8]
-		bytesJ := peerIds[j][:8]
-		numI := binary.BigEndian.Uint64(bytesI)
-		numJ := binary.BigEndian.Uint64(bytesJ)
-		return numI < numJ
+	slices.SortFunc(peerIds, func(a, b *PeerId) int {
+		numA := binary.BigEndian.Uint64((*a)[:8])
+		numB := binary.BigEndian.Uint64((*b)[:8])
+		return cmp.Compare(numA, numB)
 	})
 }
 

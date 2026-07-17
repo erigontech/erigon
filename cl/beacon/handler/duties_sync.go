@@ -17,10 +17,11 @@
 package handler
 
 import (
+	"cmp"
 	"encoding/json"
 	"fmt"
 	"net/http"
-	"sort"
+	"slices"
 	"strconv"
 
 	"github.com/erigontech/erigon/cl/beacon/beaconhttp"
@@ -136,8 +137,8 @@ func (a *ApiHandler) getSyncDuties(w http.ResponseWriter, r *http.Request) (*bea
 		}
 		duties = append(duties, duty)
 	}
-	sort.Slice(duties, func(i, j int) bool {
-		return duties[i].ValidatorIndex < duties[j].ValidatorIndex
+	slices.SortFunc(duties, func(a, b *syncDutyResponse) int {
+		return cmp.Compare(a.ValidatorIndex, b.ValidatorIndex)
 	})
 
 	return newBeaconResponse(duties).WithOptimistic(a.forkchoiceStore.IsHeadOptimistic()), nil
