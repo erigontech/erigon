@@ -34,9 +34,15 @@ func DefaultDBReadConcurrency() int {
 	return min(max(10, runtime.GOMAXPROCS(-1)*64), 9_000)
 }
 
-// execPermanentReadTxs counts parallel exec's long-lived read txs beyond the
-// worker count: the extra pool worker and the apply-loop tx.
-const execPermanentReadTxs = 2
+// execPermanentReadTxs counts the long-lived read txs a parallel batch always
+// holds beyond the worker count: the extra pool worker, the exec-loop and
+// apply-loop txs, the block-loader tx and the commitment-calculator tx.
+const execPermanentReadTxs = 5
+
+// execReadAheadTxs counts the block read-ahead txs held on non-initial applying
+// cycles — the steady tip-following mode — so they are counted with the fixed
+// holders rather than eating into the reserve.
+const execReadAheadTxs = 2
 
 // dbReadTxsReserved is read-tx headroom kept above parallel exec's permanent
 // holders. Without it a transient commitment/RPC reader can take the last slot
@@ -51,7 +57,7 @@ func RoTxsLimit(dbReadConcurrency, execWorkers int) int64 {
 	if dbReadConcurrency > 0 {
 		limit = dbReadConcurrency
 	}
-	return int64(max(limit, execWorkers+execPermanentReadTxs+dbReadTxsReserved))
+	return int64(max(limit, execWorkers+execPermanentReadTxs+execReadAheadTxs+dbReadTxsReserved))
 }
 
 type HttpCfg struct {

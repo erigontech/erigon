@@ -25,16 +25,18 @@ import (
 
 func TestReadTxLimitCoversExecReaders(t *testing.T) {
 	t.Parallel()
-	// The limit must exceed parallel exec's permanent read txs (see
-	// execPermanentReadTxs) even when GOMAXPROCS is set below NumCPU and
-	// shrinks the derived default.
-	require.Greater(t, RoTxsLimit(0, runtime.NumCPU()), int64(runtime.NumCPU()+execPermanentReadTxs))
+	// The limit must exceed every long-lived read tx a parallel batch holds
+	// (see execPermanentReadTxs and execReadAheadTxs) even when GOMAXPROCS is
+	// set below NumCPU and shrinks the derived default.
+	require.Greater(t, RoTxsLimit(0, runtime.NumCPU()), int64(runtime.NumCPU()+execPermanentReadTxs+execReadAheadTxs))
 }
 
 func TestRoTxsLimit(t *testing.T) {
 	t.Parallel()
 	defaultLimit := int64(DefaultDBReadConcurrency())
-	floor := func(workers int) int64 { return int64(workers + execPermanentReadTxs + dbReadTxsReserved) }
+	floor := func(workers int) int64 {
+		return int64(workers + execPermanentReadTxs + execReadAheadTxs + dbReadTxsReserved)
+	}
 	for _, tc := range []struct {
 		name         string
 		cfg, workers int
@@ -43,7 +45,8 @@ func TestRoTxsLimit(t *testing.T) {
 		{"default passes through when above floor", 0, 4, defaultLimit},
 		{"high explicit value passes through", 5000, 8, 5000},
 		{"low explicit value raised to floor", 8, 64, floor(64)},
-		{"explicit value equal to worker count raised", 8, 8, floor(8)},
+		// pins the census: 8 workers + 5 fixed holders + 2 read-ahead + 16 reserve
+		{"explicit value equal to worker count raised", 8, 8, 31},
 		{"default floored below worker count", 0, int(defaultLimit) + 1, floor(int(defaultLimit) + 1)},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
