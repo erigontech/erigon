@@ -103,7 +103,7 @@ jobs:
             extra-hive-flags: "--sim.loglevel=3 --client.checktimelimit=300s"
             erigon-extra-flags: "--experimental.bal"
             # TODO: reduce to 0 as tests-glamsterdam-devnet@v7.2.0 support lands.
-            max-failures: 3532
+            max-failures: 597
             exec_mode: parallel
     steps:
       - name: Clean docker system

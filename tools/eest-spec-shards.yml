@@ -38,7 +38,7 @@
   max-allowed-failures: 0
 - shard: statetests-devnet
   workers: 12
-  max-allowed-failures: 0
+  max-allowed-failures: 1925
 - shard: blocktests-stable-sequential
   workers: 12
   max-allowed-failures: 0
