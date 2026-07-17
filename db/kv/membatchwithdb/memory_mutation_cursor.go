@@ -329,6 +329,48 @@ func (m *memoryMutationCursor) DeleteCurrentDuplicates() error {
 	return nil
 }
 
+// DeleteCurrentMultiValBefore walks the merged dups of the current key and
+// tombstones those below v: the overlay sits on an immutable read-only tx, so it
+// has no B-tree to cut the way the mdbx backends do.
+func (m *memoryMutationCursor) DeleteCurrentMultiValBefore(v []byte) (uint64, error) {
+	k, _, err := m.Current()
+	if err != nil {
+		return 0, err
+	}
+	if k == nil {
+		return 0, nil
+	}
+	key := common.Copy(k)
+
+	var doomed [][]byte
+	dv, err := m.SeekBothRange(key, nil)
+	if err != nil {
+		return 0, err
+	}
+	for dv != nil {
+		if v != nil && bytes.Compare(dv, v) >= 0 {
+			break
+		}
+		doomed = append(doomed, common.Copy(dv))
+		if _, dv, err = m.NextDup(); err != nil {
+			return 0, err
+		}
+	}
+
+	for _, val := range doomed {
+		// A tombstone only hides the underlying tx's copy; a value written into the
+		// overlay has to be dropped from it as well.
+		m.mutation.deleteDup(m.table, key, val)
+		if err := m.memCursor.DeleteExact(key, val); err != nil {
+			return 0, err
+		}
+	}
+	if _, _, err := m.SeekExact(key); err != nil { // leave the cursor on the key
+		return 0, err
+	}
+	return uint64(len(doomed)), nil
+}
+
 // Seek move pointer to a key at a certain position.
 func (m *memoryMutationCursor) SeekBothRange(key, value []byte) ([]byte, error) {
 	if m.isTableCleared() {

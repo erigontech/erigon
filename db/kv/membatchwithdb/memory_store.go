@@ -755,6 +755,46 @@ func (c *memStoreCursor) DeleteCurrentDuplicates() error {
 	return c.store.Delete(c.bucket, c.current.k)
 }
 
+func (c *memStoreCursor) DeleteCurrentMultiValBefore(v []byte) (uint64, error) {
+	if !c.valid {
+		return 0, nil
+	}
+	key := common.Copy(c.current.k)
+
+	c.store.mu.Lock()
+	defer c.store.mu.Unlock()
+
+	var doomed []memEntry
+	iter := c.table.tree.Iter()
+	for ok := iter.Seek(memEntry{k: key}); ok; ok = iter.Next() {
+		e := iter.Item()
+		if !bytes.Equal(e.k, key) {
+			break
+		}
+		if v != nil && bytes.Compare(e.v, v) >= 0 {
+			break
+		}
+		doomed = append(doomed, e)
+	}
+	iter.Release()
+
+	for _, e := range doomed {
+		c.table.tree.Delete(e)
+	}
+
+	// The cursor may have been sitting on one of the deleted values: re-anchor it
+	// on the key's first survivor, or invalidate it once the key is gone.
+	iter = c.table.tree.Iter()
+	c.valid = iter.Seek(memEntry{k: key}) && bytes.Equal(iter.Item().k, key)
+	if c.valid {
+		c.current = iter.Item()
+	} else {
+		c.current = memEntry{}
+	}
+	iter.Release()
+	return uint64(len(doomed)), nil
+}
+
 func (c *memStoreCursor) PutNoDupData(key, value []byte) error { panic("PutNoDupData not implemented") }
 func (c *memStoreCursor) PutCurrent(key, value []byte) error   { panic("PutCurrent not implemented") }
 
