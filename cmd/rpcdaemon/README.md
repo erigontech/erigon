@@ -310,6 +310,7 @@ The following table shows the current implementation status of Erigon's RPC daem
 | eth_sendTransaction                        | -       | not yet implemented                                   |
 | eth_sign                                   | No      | deprecated                                            |
 | eth_signTransaction                        | -       | not yet implemented                                   |
+| eth_fillTransaction                        | Yes     | Blob sidecar generation (KZG commitments/proofs from raw blobs) not yet supported |
 |                                            |         |                                                       |
 | eth_getProof                               | Yes     | Limited to last 100000 blocks                         |
 |                                            |         |                                                       |
@@ -351,6 +352,9 @@ The following table shows the current implementation status of Erigon's RPC daem
 | engine_getBlobsV1                          | Yes     |                                                       |
 | engine_getBlobsV2                          | Yes     | Added in Fusaka                                       |
 | engine_getBlobsV3                          | Yes     | Added with BPO3                                       |
+|                                            |         |                                                       |
+| testing_buildBlockV1                       | Yes     | Testing environments only, disabled by default        |
+| testing_commitBlockV1                      | Yes     | Testing environments only, disabled by default        |
 |                                            |         |                                                       |
 | debug_accountRange                         | Yes     |                                                       |
 | debug_accountAt                            | Yes     |                                                       |

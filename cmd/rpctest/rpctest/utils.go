@@ -24,6 +24,7 @@ import (
 	"io"
 	"net/http"
 	"os"
+	"slices"
 	"strings"
 
 	"github.com/valyala/fastjson"
@@ -38,8 +39,8 @@ import (
 func openWriters(recordFileName, errorFileName string) (rec, errs *bufio.Writer, cleanup func(), err error) {
 	var closers []func()
 	cleanup = func() {
-		for i := len(closers) - 1; i >= 0; i-- {
-			closers[i]()
+		for _, closer := range slices.Backward(closers) {
+			closer()
 		}
 	}
 	if errorFileName != "" {

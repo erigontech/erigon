@@ -1,6 +1,8 @@
 package state_test
 
 import (
+	"bytes"
+	"context"
 	"crypto/sha256"
 	"encoding/binary"
 	"fmt"
@@ -28,6 +30,7 @@ import (
 	"github.com/erigontech/erigon/db/kv/mdbx"
 	"github.com/erigontech/erigon/db/kv/rawdbv3"
 	"github.com/erigontech/erigon/db/kv/temporal"
+	"github.com/erigontech/erigon/db/seg"
 	"github.com/erigontech/erigon/db/state"
 	"github.com/erigontech/erigon/db/state/changeset"
 	"github.com/erigontech/erigon/db/state/execctx"
@@ -74,7 +77,7 @@ func generateInputData(tb testing.TB, keySize, valueSize, keyCount int) ([][]byt
 	keys := make([][]byte, keyCount)
 
 	bk, bv := make([]byte, keySize), make([]byte, valueSize)
-	for i := 0; i < keyCount; i++ {
+	for i := range keyCount {
 		n, err := rnd.Read(bk)
 		require.Equal(tb, keySize, n)
 		require.NoError(tb, err)
@@ -119,7 +122,7 @@ func testDbAndAggregatorForLargeData(tb testing.TB, aggStep uint64, persistentDi
 	agg := testAgg(tb, db, dirs, aggStep, logger)
 	err := agg.OpenFolder()
 	require.NoError(tb, err)
-	tdb, err := temporal.New(db, agg)
+	tdb, err := temporal.New(db, agg, nil)
 	require.NoError(tb, err)
 	tb.Cleanup(tdb.Close)
 	return tdb, agg, dirs
@@ -135,7 +138,7 @@ func testDbAndAggregatorv3(tb testing.TB, aggStep uint64) (kv.TemporalRwDB, *sta
 	agg := testAgg(tb, db, dirs, aggStep, logger)
 	err := agg.OpenFolder()
 	require.NoError(tb, err)
-	tdb, err := temporal.New(db, agg)
+	tdb, err := temporal.New(db, agg, nil)
 	require.NoError(tb, err)
 	tb.Cleanup(tdb.Close)
 	return tdb, agg
@@ -152,7 +155,7 @@ func testAgg(tb testing.TB, db kv.RwDB, dirs datadir.Dirs, aggStep uint64, logge
 func testDbAggregatorWithNoFiles(tb testing.TB, txCount int, cfg *testAggConfig) (kv.TemporalRwDB, *state.Aggregator) {
 	tb.Helper()
 	db, agg := testDbAndAggregatorv3(tb, cfg.stepSize)
-	agg.ForTestReplaceKeysInValues(kv.CommitmentDomain, !cfg.disableCommitmentBranchTransform)
+	agg.ForTestReferencesInCommitmentBranches(kv.CommitmentDomain, !cfg.disableCommitmentBranchTransform)
 
 	ctx := tb.Context()
 
@@ -171,10 +174,10 @@ func testDbAggregatorWithNoFiles(tb testing.TB, txCount int, cfg *testAggConfig)
 	tb.Logf("keys %d vals %d\n", len(keys), len(vals))
 
 	var txNum, blockNum uint64
-	for i := 0; i < len(vals); i++ {
+	for i := range vals {
 		txNum = uint64(i)
 
-		for j := 0; j < len(keys); j++ {
+		for j := range keys {
 			acc := accounts.Account{
 				Nonce:       uint64(i),
 				Balance:     *uint256.NewInt(uint64(i * 100_000)),
@@ -227,7 +230,7 @@ func TestAggregator_SqueezeCommitment(t *testing.T) {
 	domains.Close()
 
 	// now do the squeeze
-	agg.ForTestReplaceKeysInValues(kv.CommitmentDomain, true)
+	agg.ForTestReferencesInCommitmentBranches(kv.CommitmentDomain, true)
 	err = state.SqueezeCommitmentFiles(t.Context(), state.AggTx(rwTx), log.New())
 	require.NoError(t, err)
 
@@ -263,6 +266,81 @@ func TestAggregator_SqueezeCommitment(t *testing.T) {
 	require.NotEqual(t, empty.RootHash[:], root)
 }
 
+// TestExpandShortenedKeysInBranch_ReadPath drives the read path through squeezed commitment files
+// and asserts that the returned BranchData has plain keys (20-byte account, 52-byte storage),
+// and validates. This exercises ExpandShortenedKeysInBranch via the public read-path API
+// (DebugGetLatestFromFiles → replaceShortenedKeysInBranch → ExpandShortenedKeysInBranch).
+func TestExpandShortenedKeysInBranch_ReadPath(t *testing.T) {
+	if testing.Short() {
+		t.Skip()
+	}
+
+	cfgd := &testAggConfig{stepSize: 10, disableCommitmentBranchTransform: false}
+	db, agg := testDbAggregatorWithFiles(t, cfgd)
+	_ = agg
+
+	rwTx, err := db.BeginTemporalRw(context.Background())
+	require.NoError(t, err)
+	defer rwTx.Rollback()
+
+	at := state.AggTx(rwTx)
+
+	// Walk every commitment file. For each non-state key, read latest from files —
+	// the returned value goes through replaceShortenedKeysInBranch → ExpandShortenedKeysInBranch.
+	// Any embedded plain-key field must be exactly 20 bytes (account) or 52 bytes (addr+slot).
+	totalChecked := 0
+	for _, vf := range at.Files(kv.CommitmentDomain) {
+		decomp, err := seg.NewDecompressor(vf.Fullpath())
+		require.NoError(t, err)
+		defer decomp.Close()
+		reader := seg.NewReader(decomp.MakeGetter(), agg.Cfg(kv.CommitmentDomain).Compression)
+		reader.Reset(0)
+
+		for reader.HasNext() {
+			k, _ := reader.Next(nil)
+			require.True(t, reader.HasNext(), "value missing for key in %s", vf.Fullpath())
+			_, _ = reader.Next(nil)
+
+			if bytes.Equal(k, commitmentdb.KeyCommitmentState) {
+				continue
+			}
+
+			// Read via the read path; for commitment domain this expands shortened keys.
+			v, ok, _, _, err := at.DebugGetLatestFromFiles(kv.CommitmentDomain, k, math.MaxUint64)
+			require.NoError(t, err)
+			if !ok {
+				continue
+			}
+			require.NotEmpty(t, v)
+
+			expanded := commitment.BranchData(v)
+			require.NoError(t, expanded.Validate(k),
+				"expanded BranchData failed Validate for key %x in %s", k, vf.Fullpath())
+
+			// Walk embedded plain-key fields and assert each is full-length.
+			_, err = expanded.ReplacePlainKeys(nil, func(key []byte, isStorage bool) ([]byte, error) {
+				if isStorage {
+					require.Equal(t, length.Addr+length.Hash, len(key),
+						"expanded storage key length %d (expected %d) for branch %x in %s",
+						len(key), length.Addr+length.Hash, k, vf.Fullpath())
+				} else {
+					require.Equal(t, length.Addr, len(key),
+						"expanded account key length %d (expected %d) for branch %x in %s",
+						len(key), length.Addr, k, vf.Fullpath())
+				}
+				return nil, nil
+			})
+			require.NoError(t, err)
+			totalChecked++
+		}
+
+		if totalChecked > 0 {
+			break // one file with at least one non-state branch is enough
+		}
+	}
+	require.Greater(t, totalChecked, 0, "no non-state branches found across squeezed commitment files")
+}
+
 func TestAggregator_RebuildCommitmentBasedOnFiles(t *testing.T) {
 	if testing.Short() {
 		t.Skip()
@@ -296,7 +374,7 @@ func TestAggregator_RebuildCommitmentBasedOnFiles(t *testing.T) {
 	}
 
 	agg = testAgg(t, db, agg.Dirs(), agg.StepSize(), log.New())
-	db, err := temporal.New(db, agg)
+	db, err := temporal.New(db, agg, nil)
 	require.NoError(t, err)
 	defer db.Close()
 
@@ -373,7 +451,7 @@ func makeCodeValue(idx uint64) []byte {
 	binary.BigEndian.PutUint64(buf[1:], idx)
 	h := sha256.Sum256(buf[:])
 	// Fill code with hash-derived bytes, repeating as needed
-	for i := 0; i < size; i++ {
+	for i := range size {
 		code[i] = h[i%len(h)]
 	}
 	return code
@@ -382,13 +460,13 @@ func makeCodeValue(idx uint64) []byte {
 func TestMakeAccountAddr_NibbleDistribution(t *testing.T) {
 	nibbles := make(map[byte]int, 16)
 	const count = 1000
-	for i := uint64(0); i < count; i++ {
+	for i := range uint64(count) {
 		addr := makeAccountAddr(i)
 		firstNibble := addr[0] >> 4
 		nibbles[firstNibble]++
 	}
 	// All 16 nibble values must be present
-	for n := byte(0); n < 16; n++ {
+	for n := range byte(16) {
 		require.Positive(t, nibbles[n], "missing first nibble %x in %d generated keys", n, count)
 	}
 	t.Logf("nibble distribution over %d keys: %v", count, nibbles)
@@ -503,7 +581,7 @@ func aggregatorV3_RestartOnDatadir(t *testing.T, rc runCfg) {
 	defer anotherAgg.Close()
 	require.NoError(t, anotherAgg.OpenFolder())
 
-	db, err = temporal.New(db, anotherAgg) // to set aggregator in the db
+	db, err = temporal.New(db, anotherAgg, nil) // to set aggregator in the db
 	require.NoError(t, err)
 	defer db.Close()
 
@@ -595,7 +673,7 @@ func TestGenerateCommitmentRebuildData(t *testing.T) {
 	t.Logf("Keys: accounts=%d storage=%d code=%d total=%d", numAccounts, totalStorage, totalCode, totalKeys)
 
 	db, agg, dirs := testDbAndAggregatorForLargeData(t, stepSize, persistentDir)
-	agg.ForTestReplaceKeysInValues(kv.CommitmentDomain, false)
+	agg.ForTestReferencesInCommitmentBranches(kv.CommitmentDomain, false)
 
 	ctx := t.Context()
 
@@ -632,7 +710,7 @@ func TestGenerateCommitmentRebuildData(t *testing.T) {
 		lastRoot    []byte
 	)
 
-	for txNum := uint64(0); txNum < totalTxs; txNum++ {
+	for txNum := range totalTxs {
 		// Write accounts batch
 		for i := uint64(0); i < accPerTx && accIdx < numAccounts; i++ {
 			addr := makeAccountAddr(accIdx)
@@ -671,7 +749,7 @@ func TestGenerateCommitmentRebuildData(t *testing.T) {
 			require.NoError(t, err)
 
 			// Update account with real code hash
-			codeHash := accounts.InternCodeHash(common.BytesToHash(crypto.Keccak256(code)))
+			codeHash := accounts.InternCodeHash(crypto.Keccak256Hash(code))
 			acc := accounts.Account{
 				Nonce:       txNum,
 				Balance:     *uint256.NewInt(txNum * 1000),

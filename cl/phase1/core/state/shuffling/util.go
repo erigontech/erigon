@@ -21,12 +21,12 @@ import (
 	"fmt"
 
 	"github.com/erigontech/erigon/cl/clparams"
-	"github.com/erigontech/erigon/cl/utils"
 	"github.com/erigontech/erigon/cl/utils/eth2shuffle"
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/crypto"
 )
 
-func ComputeShuffledIndex(conf *clparams.BeaconChainConfig, ind, ind_count uint64, seed [32]byte, preInputs [][32]byte, hashFunc utils.HashFunc) (uint64, error) {
+func ComputeShuffledIndex(conf *clparams.BeaconChainConfig, ind, ind_count uint64, seed [32]byte, preInputs [][32]byte, hashFunc crypto.HashFunc) (uint64, error) {
 	if ind >= ind_count {
 		return 0, fmt.Errorf("index=%d must be less than the index count=%d", ind, ind_count)
 	}
@@ -61,8 +61,11 @@ func ComputeShuffledIndex(conf *clparams.BeaconChainConfig, ind, ind_count uint6
 
 func ComputeShuffledIndexPreInputs(conf *clparams.BeaconChainConfig, seed [32]byte) [][32]byte {
 	ret := make([][32]byte, conf.ShuffleRoundCount)
+	var buf [33]byte
+	copy(buf[:32], seed[:])
 	for i := range ret {
-		ret[i] = utils.Sha256(append(seed[:], byte(i)))
+		buf[32] = byte(i)
+		ret[i] = crypto.Sha256(buf[:])
 	}
 	return ret
 }
@@ -72,16 +75,16 @@ func GetSeed(beaconConfig *clparams.BeaconChainConfig, mix common.Hash, epoch ui
 	binary.LittleEndian.PutUint64(epochByteArray, epoch)
 	input := append(domain[:], epochByteArray...)
 	input = append(input, mix[:]...)
-	return utils.Sha256(input)
+	return crypto.Sha256(input)
 }
 
 func ComputeShuffledIndicies(beaconConfig *clparams.BeaconChainConfig, mix common.Hash, out, indicies []uint64, slot uint64) []uint64 {
 	copy(out, indicies)
-	hashFunc := utils.OptimizedSha256NotThreadSafe()
 	epoch := slot / beaconConfig.SlotsPerEpoch
 	seed := GetSeed(beaconConfig, mix, epoch, beaconConfig.DomainBeaconAttester)
+	var hashed common.Hash
 	eth2ShuffleHashFunc := func(data []byte) []byte {
-		hashed := hashFunc(data)
+		hashed = crypto.Sha256(data)
 		return hashed[:]
 	}
 	eth2shuffle.UnshuffleList(eth2ShuffleHashFunc, out, uint8(beaconConfig.ShuffleRoundCount), seed)

@@ -84,7 +84,7 @@ func TestKeybytesHex(t *testing.T) {
 func TestHexCompactRoundtrip(t *testing.T) {
 	rng := rand.New(rand.NewSource(42))
 
-	for i := 0; i < 1000; i++ {
+	for i := range 1000 {
 		// random length 0..64
 		l := rng.Intn(65)
 		hex := make([]byte, l)

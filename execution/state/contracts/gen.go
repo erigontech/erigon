@@ -45,3 +45,12 @@ package contracts
 //go:generate solc --allow-paths ., --abi --bin --overwrite --optimize -o build proxyfactory.sol
 //go:generate abigen -abi build/Proxy.abi -bin build/Proxy.bin -pkg contracts -type proxy -out ./gen_proxy.go
 //go:generate abigen -abi build/ProxyFactory.abi -bin build/ProxyFactory.bin -pkg contracts -type proxyFactory -out ./gen_proxyfactory.go
+
+// statechurn.sol
+//go:generate solc --allow-paths ., --abi --bin --overwrite --optimize -o build statechurn.sol
+//go:generate abigen -abi build/StateChurn.abi -bin build/StateChurn.bin -pkg contracts -type stateChurn -out ./gen_statechurn.go
+
+// selfdestructfactory.sol
+//go:generate solc --allow-paths ., --abi --bin --overwrite --optimize -o build selfdestructfactory.sol
+//go:generate abigen -abi build/SelfDestructInConstructor.abi -bin build/SelfDestructInConstructor.bin -pkg contracts -type selfDestructInConstructor -out ./gen_selfdestructinconstructor.go
+//go:generate abigen -abi build/SelfDestructFactory.abi -bin build/SelfDestructFactory.bin -pkg contracts -type selfDestructFactory -out ./gen_selfdestructfactory.go

@@ -17,10 +17,8 @@
 package btindex
 
 import (
-	"bufio"
 	"errors"
 	"fmt"
-	"io"
 	"os"
 	"path"
 	"path/filepath"
@@ -28,7 +26,6 @@ import (
 	"time"
 	"unsafe"
 
-	"github.com/c2h5oh/datasize"
 	"github.com/edsrzf/mmap-go"
 
 	"github.com/erigontech/erigon/common/background"
@@ -36,6 +33,7 @@ import (
 	"github.com/erigontech/erigon/common/dir"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/common/murmur3"
+	"github.com/erigontech/erigon/db/bufiopool"
 	"github.com/erigontech/erigon/db/datastruct/existence"
 	"github.com/erigontech/erigon/db/recsplit/eliasfano32"
 	"github.com/erigontech/erigon/db/seg"
@@ -226,7 +224,7 @@ func NewBtIndexWriter(args BtIndexWriterArgs, logger log.Logger) (_ *BtIndexWrit
 	if btw.indexF, err = dir.CreateTemp(args.IndexFile); err != nil {
 		return nil, fmt.Errorf("create temp index file for %s: %w", args.IndexFile, err)
 	}
-	btw.writer = &countingWriter{w: getBufioWriter(btw.indexF)}
+	btw.writer = &countingWriter{w: bufiopool.Writer(btw.indexF)}
 
 	if args.KeyCount > 0 {
 		if args.M == 0 {
@@ -352,7 +350,7 @@ func (btw *BtIndexWriter) closeTemps() {
 
 func (btw *BtIndexWriter) Close() {
 	if btw.writer != nil {
-		putBufioWriter(btw.writer.w)
+		bufiopool.PutWriter(btw.writer.w)
 		btw.writer = nil
 	}
 	if btw.indexF != nil { // non-nil means Build didn't rename it: drop the partial .tmp
@@ -512,15 +510,20 @@ func OpenBtreeIndexWithDecompressor(indexPath string, M uint64, kvGetter *seg.Re
 	}
 	idx.data = idx.m[:idx.size]
 
-	var nodes []Node
+	var nodeOfftEF *eliasfano32.EliasFano
+	var keysBlob []byte
+	var nodeStride uint64
 	switch idx.data[0] {
 	case btFirstByteLegacy: // legacy [EF][nodesCount][di-nodes]
 		var pos int
 		idx.ef, pos = eliasfano32.ReadEliasFano(idx.data)
 		if len(idx.data[pos:]) > 0 {
-			nodes, _, err = decodeListNodesV0(idx.data[pos:])
-			if err != nil {
+			keysBlob = idx.data[pos:]
+			if nodeOfftEF, nodeStride, _, err = decodeListNodesV0(keysBlob); err != nil {
 				return nil, err
+			}
+			if nodeStride == 0 { // <2 nodes: only di=0 exists, stride is irrelevant
+				nodeStride = M
 			}
 		}
 	case btFirstByteUseFooter: // footer-based layout: [leadingByte][nodes][EF][footer][anchor]
@@ -544,8 +547,10 @@ func OpenBtreeIndexWithDecompressor(indexPath string, M uint64, kvGetter *seg.Re
 		if footer.Meta.KeysCount > 0 {
 			nodesCount = (footer.Meta.KeysCount-1)/M + 1
 		}
+		keysBlob = idx.data[1:]
+		nodeStride = M
 		var nodesEnd int
-		if nodes, nodesEnd, err = decodeNodes(idx.data[1:], nodesCount, M); err != nil {
+		if nodeOfftEF, nodesEnd, err = decodeNodes(keysBlob, nodesCount); err != nil {
 			return nil, err
 		}
 		if footer.Meta.EfOffset != uint64(alignUp(1+nodesEnd, btEFAlign)) { // cross-check ef_offset against the decoded nodes
@@ -566,10 +571,10 @@ func OpenBtreeIndexWithDecompressor(indexPath string, M uint64, kvGetter *seg.Re
 
 	defer kvGetter.MadvNormal().DisableReadAhead()
 
-	if len(nodes) == 0 {
+	if nodeOfftEF == nil {
 		idx.bplus = NewBpsTree(kvGetter, idx.ef, M, idx.dataLookup)
 	} else {
-		idx.bplus = NewBpsTreeWithNodes(kvGetter, idx.ef, M, idx.dataLookup, nodes)
+		idx.bplus = NewBpsTreeWithNodes(kvGetter, idx.ef, M, idx.dataLookup, keysBlob, nodeOfftEF, nodeStride)
 	}
 	idx.bplus.cursorGetter = idx.newCursor
 
@@ -717,19 +722,3 @@ func (b *BtIndex) OrdinalLookup(getter *seg.Reader, i uint64) *Cursor {
 
 func (b *BtIndex) Offsets() *eliasfano32.EliasFano { return b.bplus.Offsets() }
 func (b *BtIndex) Distances() (map[int]int, error) { return b.bplus.Distances() }
-
-// Erigon doesn't create tons of bufio readers/writers, but it has tons of
-// parallel small unit-tests which each create many small files and bufio
-// readers/writers — pooling avoids the allocation pressure in that scenario.
-var bufioWriterPool = sync.Pool{New: func() any { return bufio.NewWriterSize(nil, int(512*datasize.KB)) }}
-
-func getBufioWriter(w io.Writer) *bufio.Writer {
-	bw := bufioWriterPool.Get().(*bufio.Writer)
-	bw.Reset(w)
-	return bw
-}
-
-// Reset(nil) before Put is required: without it the pool entry retains a
-// reference to the underlying io.Writer/io.Reader, keeping it alive until the
-// next GC cycle or until the entry is reused — whichever comes first.
-func putBufioWriter(w *bufio.Writer) { w.Reset(nil); bufioWriterPool.Put(w) }

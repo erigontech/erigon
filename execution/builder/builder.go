@@ -23,8 +23,8 @@ import (
 
 	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/db/dbservices"
 	"github.com/erigontech/erigon/db/kv"
-	"github.com/erigontech/erigon/db/services"
 	"github.com/erigontech/erigon/db/state/execctx"
 	"github.com/erigontech/erigon/execution/builder/buildercfg"
 	"github.com/erigontech/erigon/execution/chain"
@@ -51,7 +51,7 @@ type Builder struct {
 	builderCfg            *buildercfg.BuilderConfig
 	chainConfig           *chain.Config
 	engine                rules.Engine
-	blockReader           services.FullBlockReader
+	blockReader           dbservices.FullBlockReader
 	executeBlockCfg       stagedsync.ExecuteBlockCfg
 	notifier              stagedsync.ChainEventNotifier
 	vmConfig              *vm.Config
@@ -69,7 +69,7 @@ func NewBuilder(
 	builderCfg *buildercfg.BuilderConfig,
 	chainConfig *chain.Config,
 	engine rules.Engine,
-	blockReader services.FullBlockReader,
+	blockReader dbservices.FullBlockReader,
 	executeBlockCfg stagedsync.ExecuteBlockCfg,
 	notifier stagedsync.ChainEventNotifier,
 	vmConfig *vm.Config,
@@ -154,6 +154,11 @@ func (b *Builder) Build(param *Parameters, interrupt *atomic.Bool) (result *type
 	if parentSD != nil {
 		sd.SetParent(parentSD)
 	}
+
+	// Wire the parallel commitment trie's context factory. Values still resolve
+	// through the sd/parent mem-batch overlay chain; b.db only backs the fresh
+	// per-worker readers. Mirrors exec3; no-op for the sequential trie.
+	sd.EnableParaTrieDB(b.db)
 
 	executionAt, err := stages.GetStageProgress(compositeTx, stages.Execution)
 	if err != nil {

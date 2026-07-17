@@ -46,16 +46,15 @@ import (
 	"testing"
 
 	lru "github.com/hashicorp/golang-lru/v2"
-	uint256 "github.com/holiman/uint256"
+	"github.com/holiman/uint256"
 
 	"github.com/erigontech/erigon/common"
-	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv/dbcfg"
 	"github.com/erigontech/erigon/db/kv/memdb"
+	"github.com/erigontech/erigon/db/kv/temporal/temporaltest"
 	"github.com/erigontech/erigon/db/rawdb"
-	"github.com/erigontech/erigon/execution/chain/networkname"
 	"github.com/erigontech/erigon/execution/types"
-	"github.com/erigontech/erigon/node/ethconfig"
 )
 
 const benchBlockCount = 1_000
@@ -104,7 +103,7 @@ func BenchmarkCanonicalHash_MDBXLookup(b *testing.B) {
 		b.Fatal(err)
 	}
 	defer rwTx.Rollback() //nolint:gocritic
-	for i := uint64(0); i < benchBlockCount; i++ {
+	for i := range uint64(benchBlockCount) {
 		if err := rawdb.WriteCanonicalHash(rwTx, realisticHeader(i).Hash(), i); err != nil {
 			b.Fatal(err)
 		}
@@ -138,7 +137,7 @@ func BenchmarkCanonicalHash_MDBXLookup(b *testing.B) {
 // RLP decode from the memory-mapped snapshot file), which is not measured here.
 func BenchmarkCanonicalHash_HeaderHash_Realistic(b *testing.B) {
 	headers := make([]*types.Header, benchBlockCount)
-	for i := uint64(0); i < benchBlockCount; i++ {
+	for i := range uint64(benchBlockCount) {
 		headers[i] = realisticHeader(i)
 	}
 	b.ResetTimer()
@@ -158,7 +157,7 @@ func BenchmarkCanonicalHash_LRUCacheHit(b *testing.B) {
 	if err != nil {
 		b.Fatal(err)
 	}
-	for i := uint64(0); i < benchBlockCount; i++ {
+	for i := range uint64(benchBlockCount) {
 		cache.Add(i, realisticHeader(i).Hash())
 	}
 
@@ -194,14 +193,8 @@ func BenchmarkCanonicalHash_RealSnapshot(b *testing.B) {
 		b.Skipf("snapshot dir not accessible: %v", err)
 	}
 
-	logger := log.New()
-	cfg := ethconfig.Defaults.Snapshot
-	cfg.ChainName = networkname.Mainnet
-	snapshots := NewRoSnapshots(cfg, snapDir, logger)
-	if err := snapshots.OpenFolder(); err != nil {
-		b.Fatal(err)
-	}
-	defer snapshots.Close()
+	db := temporaltest.NewTestDB(b, datadir.New(b.TempDir()))
+	snapshots := db.(HasBlockFiles).DebugBlockFiles()
 
 	available := snapshots.BlocksAvailable()
 	if available == 0 {
@@ -211,7 +204,6 @@ func BenchmarkCanonicalHash_RealSnapshot(b *testing.B) {
 	blockReader := NewBlockReader(snapshots, nil)
 
 	// Use an empty memdb so every lookup misses the DB and falls through to snapshots.
-	db := memdb.NewTestDB(b, dbcfg.ChainDB)
 	tx, err := db.BeginRo(context.Background())
 	if err != nil {
 		b.Fatal(err)
@@ -260,14 +252,8 @@ func BenchmarkCanonicalHash_RealSnapshot_MainEquivalent(b *testing.B) {
 		b.Skipf("snapshot dir not accessible: %v", err)
 	}
 
-	logger := log.New()
-	cfg := ethconfig.Defaults.Snapshot
-	cfg.ChainName = networkname.Mainnet
-	snapshots := NewRoSnapshots(cfg, snapDir, logger)
-	if err := snapshots.OpenFolder(); err != nil {
-		b.Fatal(err)
-	}
-	defer snapshots.Close()
+	db := temporaltest.NewTestDB(b, datadir.New(b.TempDir()))
+	snapshots := db.(HasBlockFiles).DebugBlockFiles()
 
 	available := snapshots.BlocksAvailable()
 	if available == 0 {
@@ -276,7 +262,6 @@ func BenchmarkCanonicalHash_RealSnapshot_MainEquivalent(b *testing.B) {
 
 	blockReader := NewBlockReader(snapshots, nil)
 
-	db := memdb.NewTestDB(b, dbcfg.ChainDB)
 	ctx := context.Background()
 	tx, err := db.BeginRo(ctx)
 	if err != nil {
@@ -328,14 +313,8 @@ func BenchmarkCanonicalHash_RealSnapshot_Cold(b *testing.B) {
 		b.Skipf("snapshot dir not accessible: %v", err)
 	}
 
-	logger := log.New()
-	cfg := ethconfig.Defaults.Snapshot
-	cfg.ChainName = networkname.Mainnet
-	snapshots := NewRoSnapshots(cfg, snapDir, logger)
-	if err := snapshots.OpenFolder(); err != nil {
-		b.Fatal(err)
-	}
-	defer snapshots.Close()
+	db := temporaltest.NewTestDB(b, datadir.New(b.TempDir()))
+	snapshots := db.(HasBlockFiles).DebugBlockFiles()
 
 	available := snapshots.BlocksAvailable()
 	if available == 0 {
@@ -344,7 +323,6 @@ func BenchmarkCanonicalHash_RealSnapshot_Cold(b *testing.B) {
 
 	blockReader := NewBlockReader(snapshots, nil)
 
-	db := memdb.NewTestDB(b, dbcfg.ChainDB)
 	tx, err := db.BeginRo(context.Background())
 	if err != nil {
 		b.Fatal(err)

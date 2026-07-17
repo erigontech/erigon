@@ -27,10 +27,10 @@ import (
 	"github.com/holiman/uint256"
 
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/db/dbservices"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/kvcache"
 	"github.com/erigontech/erigon/db/kv/rawdbv3"
-	"github.com/erigontech/erigon/db/services"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/protocol"
 	"github.com/erigontech/erigon/execution/protocol/rules"
@@ -56,7 +56,7 @@ type BlockGetter interface {
 
 // ComputeBlockContext returns the execution environment of a certain block.
 func ComputeBlockContext(ctx context.Context, engine rules.EngineReader, header *types.Header, cfg *chain.Config,
-	headerReader services.HeaderReader, stateCache kvcache.Cache, txNumsReader rawdbv3.TxNumsReader, dbtx kv.TemporalTx,
+	headerReader dbservices.HeaderReader, stateCache kvcache.Cache, txNumsReader rawdbv3.TxNumsReader, dbtx kv.TemporalTx,
 	txIndex int) (*state.IntraBlockState, evmtypes.BlockContext, state.StateReader, *chain.Rules, *types.Signer, error) {
 	var reader state.StateReader
 	if stateCache != nil {
@@ -126,7 +126,6 @@ func TraceTx(
 ) (gasUsed uint64, err error) {
 	tracer, streaming, cancel, err := AssembleTracer(ctx, config, txCtx.TxHash, blockNumber, blockHash, txnIndex, stream, callTimeout)
 	if err != nil {
-		stream.WriteNil()
 		return 0, err
 	}
 
@@ -235,9 +234,6 @@ func ExecuteTraceTx(
 
 	result, err := execCb(evm, refunds)
 	if err != nil {
-		if !streaming {
-			stream.WriteNil()
-		}
 		return fmt.Errorf("tracing failed: %w", err)
 	}
 
@@ -262,13 +258,11 @@ func ExecuteTraceTx(
 	} else {
 		r, err := tracer.GetResult()
 		if err != nil {
-			stream.WriteNil()
 			return err
 		}
 
 		_, err = stream.Write(r)
 		if err != nil {
-			stream.WriteNil()
 			return err
 		}
 	}

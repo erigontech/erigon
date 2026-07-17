@@ -20,7 +20,7 @@ import (
 	"bytes"
 	"errors"
 	"math/rand"
-	"sort"
+	"slices"
 	"time"
 
 	"github.com/erigontech/erigon/cl/clparams"
@@ -57,13 +57,12 @@ func (f *ForkChoiceStore) computeVotes(justifiedCheckpoint solid.Checkpoint, che
 	// make an rng generator
 	gen := rand.New(rand.NewSource(time.Now().UnixNano()))
 	if auxilliaryState != nil {
-		startIdx := 0
-		step := 1
-		if f.probabilisticHeadGetter {
-			startIdx = gen.Intn(sampleBasis)
-			step = sampleBasis + gen.Intn(sampleFactor)
+		count := f.latestMessages.latestMessagesCount()
+		if validatorCount := auxilliaryState.ValidatorSet().Length(); validatorCount < count {
+			count = validatorCount
 		}
-		for validatorIndex := startIdx; validatorIndex < f.latestMessages.latestMessagesCount(); validatorIndex += step {
+		startIdx, step := voteSampleBounds(count, f.probabilisticHeadGetter, gen)
+		for validatorIndex := startIdx; validatorIndex < count; validatorIndex += step {
 			message, _ := f.latestMessages.get(validatorIndex)
 			v := auxilliaryState.ValidatorSet().Get(validatorIndex)
 			if !v.Active(justifiedCheckpoint.Epoch) || v.Slashed() {
@@ -81,20 +80,11 @@ func (f *ForkChoiceStore) computeVotes(justifiedCheckpoint solid.Checkpoint, che
 		}
 	} else {
 		for validatorIndex := 0; validatorIndex < f.latestMessages.latestMessagesCount(); validatorIndex++ {
-			message, _ := f.latestMessages.get(validatorIndex)
-			if message == (LatestMessage{}) {
+			message, balance, ok := f.countableVote(checkpointState, validatorIndex)
+			if !ok {
 				continue
 			}
-			if !readFromBitset(checkpointState.actives, validatorIndex) || readFromBitset(checkpointState.slasheds, validatorIndex) {
-				continue
-			}
-			if _, hasLatestMessage := f.getLatestMessage(uint64(validatorIndex)); !hasLatestMessage {
-				continue
-			}
-			if f.isUnequivocating(uint64(validatorIndex)) {
-				continue
-			}
-			votes[message.Root] += checkpointState.balances[validatorIndex]
+			votes[message.Root] += balance
 		}
 		boostRoot := f.proposerBoostRoot.Load().(common.Hash)
 		if boostRoot != (common.Hash{}) {
@@ -106,13 +96,22 @@ func (f *ForkChoiceStore) computeVotes(justifiedCheckpoint solid.Checkpoint, che
 	return votes
 }
 
+func voteSampleBounds(count int, probabilistic bool, gen *rand.Rand) (int, int) {
+	if !probabilistic || count == 0 {
+		return 0, 1
+	}
+	startLimit := min(count, sampleBasis)
+	return gen.Intn(startLimit), sampleBasis + gen.Intn(sampleFactor)
+}
+
 // GetHead returns the head of the fork choice store.
 // Dispatches to GLOAS or pre-GLOAS implementation based on current epoch.
 func (f *ForkChoiceStore) GetHead(auxilliaryState *state.CachingBeaconState) (common.Hash, uint64, error) {
 	f.mu.RLock()
 	if f.headHash != (common.Hash{}) {
+		headHash, headSlot := f.headHash, f.headSlot
 		f.mu.RUnlock()
-		return f.headHash, f.headSlot, nil
+		return headHash, headSlot, nil
 	}
 	f.mu.RUnlock()
 
@@ -192,7 +191,7 @@ func (f *ForkChoiceStore) computeHeadGloas(justifiedCheckpoint solid.Checkpoint,
 		PayloadStatus: cltypes.PayloadStatusPending,
 	}
 
-	ws := f.headWeightStore(cs)
+	ws := f.gloasWeightTree.prepare(justifiedCheckpoint, cs)
 
 	for {
 		children := f.getNodeChildren(head, blocks)
@@ -295,10 +294,8 @@ func (f *ForkChoiceStore) getHead(auxilliaryState *state.CachingBeaconState) (co
 			continue
 		}
 		// Sort children by lexigographical order
-		sort.Slice(children, func(i, j int) bool {
-			childA := children[i]
-			childB := children[j]
-			return bytes.Compare(childA[:], childB[:]) < 0
+		slices.SortFunc(children, func(a, b common.Hash) int {
+			return bytes.Compare(a[:], b[:])
 		})
 		// After sorting is done determine best fit.
 		f.headHash = children[0]

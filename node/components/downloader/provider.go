@@ -22,7 +22,7 @@
 //   - Local: in-process torrent client (default)
 //   - Remote: connects to external downloader via gRPC
 //
-// Consumers access it through the downloader.Client interface, which abstracts
+// Consumers access it through the dbservices.DownloaderClient interface, which abstracts
 // both modes behind Download/Seed/Delete operations.
 package downloader
 
@@ -33,11 +33,12 @@ import (
 
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/datadir"
+	"github.com/erigontech/erigon/db/dbservices"
 	dl "github.com/erigontech/erigon/db/downloader"
 	"github.com/erigontech/erigon/db/downloader/downloadercfg"
 	"github.com/erigontech/erigon/db/downloader/downloadergrpc"
 	"github.com/erigontech/erigon/node/ethconfig"
-	downloaderproto "github.com/erigontech/erigon/node/gointerfaces/downloaderproto"
+	"github.com/erigontech/erigon/node/gointerfaces/downloaderproto"
 )
 
 // Provider holds the Downloader's runtime state. It implements the component
@@ -46,8 +47,8 @@ import (
 // After Initialize, the Client field is ready for consumers to use.
 type Provider struct {
 	// Public fields — accessible by consumers via the component dependency graph.
-	Downloader *dl.Downloader // nil when using external downloader
-	Client     dl.Client      // always set after Initialize (local or remote)
+	Downloader *dl.Downloader              // nil when using external downloader
+	Client     dbservices.DownloaderClient // always set after Initialize (local or remote)
 
 	// Configuration
 	cfg         *downloadercfg.Cfg
@@ -138,6 +139,18 @@ func (p *Provider) initDownloader(ctx context.Context) (downloaderproto.Download
 	d.InitBackgroundLogger(true)
 
 	return dl.DirectGrpcServerClient(bittorrentServer), nil
+}
+
+// AddTorrentsFromDisk adds completed on-disk torrents via the local downloader.
+// It is a no-op returning (0, nil) when no local downloader is present — a remote
+// or disabled downloader, or one already closed during shutdown. Guards against
+// the shutdown race where this fires after Close() has nil'd p.Downloader.
+func (p *Provider) AddTorrentsFromDisk(ctx context.Context) (incompleteTorrents int, err error) {
+	d := p.Downloader
+	if d == nil {
+		return 0, nil
+	}
+	return d.AddTorrentsFromDisk(ctx)
 }
 
 // Close shuts down the downloader. Safe to call multiple times.

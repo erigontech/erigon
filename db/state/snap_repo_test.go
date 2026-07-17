@@ -161,7 +161,7 @@ func TestIntegrateDirtyFile(t *testing.T) {
 	err := repo.OpenFolder()
 	require.NoError(t, err)
 
-	filesItem := newFilesItemWithSnapConfig(0, 1024, repo.cfg)
+	filesItem := newFilesItem(0, 1024)
 	filename, _ := repo.schema.DataFile(version.V1_0, 0, 1024)
 	comp, err := seg.NewCompressor(t.Context(), t.Name(), filename, dirs.Tmp, seg.DefaultCfg, log.LvlDebug, log.New())
 	require.NoError(t, err)
@@ -495,7 +495,7 @@ func TestRecalcVisibleFilesAfterMerge(t *testing.T) {
 		items := repo.FilesInRange(mr, vf) // vf passed should ideally from rotx, but doesn't matter here
 		require.Len(t, items, nFilesInRange)
 
-		merged := newFilesItemWithSnapConfig(mr.from, mr.to, repo.cfg)
+		merged := newFilesItem(mr.from, mr.to)
 		repo.IntegrateDirtyFile(merged)
 		dirEntries, err := filesFromDir(repo.schema.DataDirectory())
 		require.NoError(t, err)
@@ -540,15 +540,6 @@ func TestRecalcVisibleFilesAfterMerge(t *testing.T) {
 
 	//0-1....12-13, 13-15, 15-16 => 0-16
 	testFn([]testFileRange{{0, 1}, {1, 2}, {2, 3}, {3, 4}, {4, 5}, {5, 6}, {6, 7}, {7, 8}, {8, 9}, {9, 10}, {10, 11}, {11, 12}, {12, 13}, {13, 15}, {15, 16}}, true, 15, 1, 1)
-}
-
-func TestSegMetadata_Marshal_UM(t *testing.T) {
-	metadata := NumMetadata{First: Num(89), Last: Num(120), Count: 28}
-	data, err := metadata.Marshal()
-	require.NoError(t, err)
-	metadata2 := NumMetadata{}
-	require.NoError(t, metadata2.Unmarshal(data))
-	require.Equal(t, metadata, metadata2)
 }
 
 // /////////////////////////////////////// helpers and utils

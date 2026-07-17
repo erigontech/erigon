@@ -17,6 +17,7 @@
 package main
 
 import (
+	"cmp"
 	"context"
 	"encoding/json"
 	"errors"
@@ -25,12 +26,12 @@ import (
 	"path/filepath"
 	"regexp"
 	"runtime/pprof"
-	"sort"
+	"slices"
 	"strings"
 	"sync"
 
 	"github.com/felixge/fgprof"
-	"github.com/urfave/cli/v2"
+	"github.com/urfave/cli/v3"
 
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/execution/engineapi/engineapitester"
@@ -85,7 +86,7 @@ type engineXGroupKey struct {
 	hash engineapitester.PreAllocHash
 }
 
-func engineXTestCmd(cliCtx *cli.Context) error {
+func engineXTestCmd(ctx context.Context, cliCtx *cli.Command) error {
 	if cliCtx.Int(VerbosityFlag.Name) > 0 {
 		log.Root().SetHandler(log.LvlFilterHandler(log.Lvl(cliCtx.Int(VerbosityFlag.Name)), log.StderrHandler))
 	} else {
@@ -117,7 +118,7 @@ func engineXTestCmd(cliCtx *cli.Context) error {
 		return fmt.Errorf("--pprof.cpu/--fgprof require --workers=1 (got %d)", workers)
 	}
 
-	ctx, cancel := context.WithCancel(cliCtx.Context)
+	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 
 	groups, totalTests, err := loadEngineXGroups(path, re)
@@ -206,7 +207,7 @@ func engineXTestCmd(cliCtx *cli.Context) error {
 		results = append(results, r)
 	}
 
-	sort.Slice(results, func(i, j int) bool { return results[i].Name < results[j].Name })
+	slices.SortFunc(results, func(a, b testResult) int { return cmp.Compare(a.Name, b.Name) })
 
 	report(cliCtx, results)
 	if timeIt {
@@ -224,8 +225,8 @@ func printTimings(results []testResult) {
 			timed = append(timed, r)
 		}
 	}
-	sort.Slice(timed, func(i, j int) bool {
-		return timed[i].Stats.Time > timed[j].Stats.Time
+	slices.SortFunc(timed, func(a, b testResult) int {
+		return cmp.Compare(b.Stats.Time, a.Stats.Time)
 	})
 	fmt.Fprintln(os.Stderr)
 	fmt.Fprintln(os.Stderr, "=== test timings (descending) ===")
@@ -277,7 +278,7 @@ func loadEngineXGroups(path string, re *regexp.Regexp) (map[engineXGroupKey][]en
 // isUnderPreAlloc reports whether any directory component of p is named
 // "pre_alloc" — those are pre-allocation inputs, not test fixtures.
 func isUnderPreAlloc(p string) bool {
-	for _, c := range strings.Split(filepath.ToSlash(p), "/") {
+	for c := range strings.SplitSeq(filepath.ToSlash(p), "/") {
 		if c == "pre_alloc" {
 			return true
 		}

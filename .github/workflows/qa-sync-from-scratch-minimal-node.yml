@@ -30,7 +30,9 @@ jobs:
 
     steps:
       - name: Check out repository
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
 
       - name: Clean Erigon Build & Data Directories
         run: |
@@ -88,12 +90,12 @@ jobs:
           python3 $ERIGON_QA_PATH/test_system/qa-tests/uploads/upload_test_results.py \
             --repo erigon \
             --commit $(git rev-parse HEAD) \
-            --branch ${{ github.ref_name }} \
+            --branch "$GITHUB_REF_NAME" \
             --test_name sync-from-scratch-minimal-node \
             --chain $CHAIN \
-            --runner ${{ runner.name }} \
+            --runner "$RUNNER_NAME" \
             --outcome $TEST_RESULT \
-            --result_file ${{ github.workspace }}/result-$CHAIN.json
+            --result_file "$GITHUB_WORKSPACE/result-$CHAIN.json"
 
       - name: Upload test results
         if: ${{ always() && steps.test_step.outputs.test_executed == 'true' }}
@@ -117,6 +119,25 @@ jobs:
         with:
           name: fd-leak-analysis-${{ env.CHAIN }}
           path: ${{ github.workspace }}/fd-leak-analysis-${{ env.CHAIN }}.md
+
+      - name: Measure disk usage
+        if: ${{ always() && steps.test_step.outputs.test_executed == 'true' }}
+        run: |
+          set -euo pipefail
+          # Erigon has stopped by now. Drop the external-sort scratch dir so we
+          # report the durable on-disk footprint, not the transient sync peak.
+          rm -rf "$ERIGON_DATA_DIR/temp"
+          # du -sB1 = actual disk blocks used, in bytes (NOT --apparent-size).
+          BYTES=$(du -sB1 "$ERIGON_DATA_DIR" | awk '{print $1}')
+          echo "Disk usage for $CHAIN minimal: ${BYTES} bytes"
+          echo "$BYTES" > "$GITHUB_WORKSPACE/disk-usage-$CHAIN-minimal.txt"
+
+      - name: Upload disk usage
+        if: ${{ always() && steps.test_step.outputs.test_executed == 'true' }}
+        uses: actions/upload-artifact@v7
+        with:
+          name: disk-usage-${{ env.CHAIN }}-minimal
+          path: ${{ github.workspace }}/disk-usage-${{ env.CHAIN }}-minimal.txt
 
       - name: Clean up Erigon data directory
         if: always()

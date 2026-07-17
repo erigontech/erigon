@@ -23,6 +23,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"maps"
 	"math"
 	"sync"
 	"sync/atomic"
@@ -36,8 +37,8 @@ import (
 	"github.com/holiman/uint256"
 
 	"github.com/erigontech/erigon/common"
-	"github.com/erigontech/erigon/common/assert"
 	libkzg "github.com/erigontech/erigon/common/crypto/kzg"
+	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/common/u256"
@@ -175,6 +176,8 @@ type TxPool struct {
 	senderLastActivity   map[uint64]uint64 // senderID → block of last on-chain state change
 	avgBlockTimeMs       atomic.Int64      // EWMA of block-to-block wall-clock interval (ms); default 12 000
 	lastBlockTimestampMs atomic.Int64      // unix-ms timestamp of the last processed block
+
+	hasUnprocessedRemoteTxns atomic.Bool // lock-free way to check if pool needs to flush buffered remote txs
 }
 
 type ValidateAA interface {
@@ -416,7 +419,7 @@ func (p *TxPool) OnNewBlock(ctx context.Context, stateChanges *remoteproto.State
 		return err
 	}
 
-	if assert.Enable {
+	if dbg.AssertEnabled {
 		for _, txn := range unwindTxns.Txns {
 			if txn.SenderID == 0 {
 				panic("onNewBlock.unwindTxns: senderID can't be zero")
@@ -463,15 +466,17 @@ func (p *TxPool) OnNewBlock(ctx context.Context, stateChanges *remoteproto.State
 }
 
 func (p *TxPool) processRemoteTxns(ctx context.Context) (err error) {
+	if !p.Started() {
+		return errors.New("txpool not started yet")
+	}
+	if !p.hasUnprocessedRemoteTxns.Load() {
+		return nil
+	}
 	defer func() {
 		if r := recover(); r != nil {
 			err = fmt.Errorf("panic: %v\n%s", r, stack.Trace().String())
 		}
 	}()
-
-	if !p.Started() {
-		return errors.New("txpool not started yet")
-	}
 
 	defer processBatchTxnsTimer.ObserveDuration(time.Now())
 	coreDB, cache := p.chainDB()
@@ -490,6 +495,7 @@ func (p *TxPool) processRemoteTxns(ctx context.Context) (err error) {
 
 	l := len(p.unprocessedRemoteTxns.Txns)
 	if l == 0 {
+		p.hasUnprocessedRemoteTxns.Store(false)
 		return nil
 	}
 
@@ -537,6 +543,7 @@ func (p *TxPool) processRemoteTxns(ctx context.Context) (err error) {
 	}
 
 	p.unprocessedRemoteTxns.Resize(0)
+	p.hasUnprocessedRemoteTxns.Store(false)
 	p.unprocessedRemotePeers = p.unprocessedRemotePeers[:0]
 	p.unprocessedRemoteByHash = map[string]int{}
 
@@ -810,6 +817,7 @@ func (p *TxPool) best(ctx context.Context, n int, txns *TxnsRlp, onTopOf uint64,
 		// this stage
 		isAATxn := mt.TxnSlot.TxType() == types.AccountAbstractionTxType
 		authorizationLen := uint64(len(mt.TxnSlot.Txn.GetAuthorizations()))
+		to := mt.TxnSlot.Txn.GetTo()
 		intrinsicGasResult, _ := mdgas.CalcIntrinsicGas(mdgas.IntrinsicGasCalcArgs{
 			Data:               make([]byte, mt.TxnSlot.GetDataLen()),
 			DataNonZeroLen:     uint64(mt.TxnSlot.GetDataNonZeroLen()),
@@ -817,6 +825,8 @@ func (p *TxPool) best(ctx context.Context, n int, txns *TxnsRlp, onTopOf uint64,
 			AccessListLen:      uint64(mt.TxnSlot.GetAccessListAddrCount()),
 			StorageKeysLen:     uint64(mt.TxnSlot.GetAccessListStorCount()),
 			IsContractCreation: mt.TxnSlot.IsCreation(),
+			IsSelfTransfer:     to != nil && *to == sender,
+			HasValue:           !mt.TxnSlot.GetValue().IsZero(),
 			IsEIP2:             true,
 			IsEIP2028:          true,
 			IsEIP3860:          isEIP3860,
@@ -824,6 +834,7 @@ func (p *TxPool) best(ctx context.Context, n int, txns *TxnsRlp, onTopOf uint64,
 			IsEIP7976:          isAmsterdam,
 			IsEIP7981:          isAmsterdam,
 			IsEIP8037:          isAmsterdam,
+			IsEIP2780:          isAmsterdam,
 			IsAATxn:            isAATxn,
 		})
 		intrinsicRegularGas := intrinsicGasResult.RegularGas
@@ -946,6 +957,7 @@ func (p *TxPool) AddRemoteTxns(_ context.Context, newTxns TxnSlots, peerID PeerI
 		p.unprocessedRemoteTxns.Append(txn, newTxns.Senders.At(i), false)
 		p.unprocessedRemotePeers = append(p.unprocessedRemotePeers, src)
 	}
+	p.hasUnprocessedRemoteTxns.Store(len(p.unprocessedRemoteTxns.Txns) > 0)
 }
 
 func toBlobs(_blobs [][]byte) []*goethkzg.Blob {
@@ -1006,6 +1018,8 @@ func (p *TxPool) validateTx(txn *TxnSlot, isLocal bool, stateCache kvcache.Cache
 	}
 
 	isAATxn := txn.TxType() == types.AccountAbstractionTxType
+	txnSender, senderOk := txn.Txn.GetSender()
+	to := txn.Txn.GetTo()
 	intrinsicGasResult, overflow := mdgas.CalcIntrinsicGas(mdgas.IntrinsicGasCalcArgs{
 		Data:               make([]byte, txn.GetDataLen()),
 		DataNonZeroLen:     uint64(txn.GetDataNonZeroLen()),
@@ -1013,6 +1027,8 @@ func (p *TxPool) validateTx(txn *TxnSlot, isLocal bool, stateCache kvcache.Cache
 		AccessListLen:      uint64(txn.GetAccessListAddrCount()),
 		StorageKeysLen:     uint64(txn.GetAccessListStorCount()),
 		IsContractCreation: txn.IsCreation(),
+		IsSelfTransfer:     senderOk && to != nil && txnSender.Value() == *to,
+		HasValue:           !txn.GetValue().IsZero(),
 		IsEIP2:             true,
 		IsEIP2028:          true,
 		IsEIP3860:          isEIP3860,
@@ -1020,6 +1036,7 @@ func (p *TxPool) validateTx(txn *TxnSlot, isLocal bool, stateCache kvcache.Cache
 		IsEIP7976:          isAmsterdam,
 		IsEIP7981:          isAmsterdam,
 		IsEIP8037:          isAmsterdam,
+		IsEIP2780:          isAmsterdam,
 		IsAATxn:            isAATxn,
 	})
 	gas := mdgas.MdGas{
@@ -1139,7 +1156,7 @@ func (p *TxPool) validateBlobTxn(txn *TxnSlot, isLocal bool) txpoolcfg.DiscardRe
 		}
 	}
 
-	for i := 0; i < len(commitments); i++ {
+	for i := range commitments {
 		if libkzg.KZGToVersionedHash(commitments[i]) != libkzg.VersionedHash(blobHashes[i]) {
 			return txpoolcfg.BlobHashCheckFail
 		}
@@ -1494,7 +1511,7 @@ func (p *TxPool) chainDB() (kv.TemporalRoDB, kvcache.Cache) {
 
 func (p *TxPool) addTxns(blockNum uint64, cacheView kvcache.CacheView, senders *sendersBatch,
 	newTxns TxnSlots, pendingBaseFee, pendingBlobFee, blockGasLimit uint64, collect bool, logger log.Logger) (Announcements, []txpoolcfg.DiscardReason, error) {
-	if assert.Enable {
+	if dbg.AssertEnabled {
 		for _, txn := range newTxns.Txns {
 			if txn.SenderID == 0 {
 				panic("senderID can't be zero")
@@ -1559,7 +1576,7 @@ func (p *TxPool) addTxns(blockNum uint64, cacheView kvcache.CacheView, senders *
 // TODO: Looks like a copy of the above
 func (p *TxPool) addTxnsOnNewBlock(blockNum uint64, cacheView kvcache.CacheView, stateChanges *remoteproto.StateChangeBatch,
 	senders *sendersBatch, newTxns TxnSlots, pendingBaseFee uint64, blockGasLimit uint64, logger log.Logger) (Announcements, error) {
-	if assert.Enable {
+	if dbg.AssertEnabled {
 		for _, txn := range newTxns.Txns {
 			if txn.SenderID == 0 {
 				panic("senderID can't be zero")
@@ -1784,7 +1801,7 @@ func (p *TxPool) addLocked(mt *metaTxn, announcements *Announcements) txpoolcfg.
 	p.byHash[hashStr] = mt
 
 	if replaced := p.all.replaceOrInsert(mt, p.logger); replaced != nil {
-		if assert.Enable {
+		if dbg.AssertEnabled {
 			panic("must never happen")
 		}
 	}
@@ -1917,9 +1934,7 @@ func (p *TxPool) sweepDormantQueued(ctx context.Context, currentBlock uint64, lo
 
 		// Snapshot the map for DB persistence while still holding the lock.
 		snapshot = make(map[uint64]uint64, len(p.senderLastActivity))
-		for k, v := range p.senderLastActivity {
-			snapshot[k] = v
-		}
+		maps.Copy(snapshot, p.senderLastActivity)
 	}()
 
 	if evictedSenders > 0 {
@@ -1979,15 +1994,10 @@ func (p *TxPool) nextDormancySweepInterval(backoff *float64, lastEvicted, queued
 		*backoff = 1.0
 	}
 
-	interval := time.Duration(float64(base) * pressure * *backoff)
-
 	// Clamp to [30 s, 10 min].
-	if interval < 30*time.Second {
-		interval = 30 * time.Second
-	}
-	if interval > 10*time.Minute {
-		interval = 10 * time.Minute
-	}
+	interval := time.Duration(float64(base) * pressure * *backoff)
+	interval = max(interval, 30*time.Second)
+	interval = min(interval, 10*time.Minute)
 	return interval
 }
 
@@ -2352,7 +2362,7 @@ func (p *TxPool) Run(ctx context.Context) error {
 			}
 		case announcements := <-p.newPendingTxns:
 			go func() {
-				for i := 0; i < 16; i++ { // drain more events from channel, then merge and dedup them
+				for range 16 { // drain more events from channel, then merge and dedup them
 					select {
 					case a := <-p.newPendingTxns:
 						announcements.AppendOther(a)

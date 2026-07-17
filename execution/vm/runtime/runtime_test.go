@@ -167,7 +167,7 @@ func BenchmarkCall(b *testing.B) {
 	tmpdir := b.TempDir()
 
 	for b.Loop() {
-		for j := 0; j < 400; j++ {
+		for range 400 {
 			_, _, _ = Execute(code, cpurchase, cfg, tmpdir)
 			_, _, _ = Execute(code, creceived, cfg, tmpdir)
 			_, _, _ = Execute(code, refund, cfg, tmpdir)
@@ -203,6 +203,7 @@ func benchmarkEVM_Create(b *testing.B, code string) {
 			HomesteadBlock:        common.NewUint64(0),
 			ByzantiumBlock:        common.NewUint64(0),
 			ConstantinopleBlock:   common.NewUint64(0),
+			PetersburgBlock:       common.NewUint64(0),
 			TangerineWhistleBlock: common.NewUint64(0),
 			SpuriousDragonBlock:   common.NewUint64(0),
 		},
@@ -684,7 +685,7 @@ func BenchmarkEVM_SWAP1(b *testing.B) {
 			byte(vm.PUSH0), // PUSH0
 			byte(vm.PUSH0), // PUSH0
 		}
-		for i := uint64(0); i < n; i++ {
+		for range n {
 			contract = append(contract, byte(vm.SWAP1))
 		}
 		return contract
@@ -730,7 +731,7 @@ func TestCreate2CollisionWithEIP7702Delegation(t *testing.T) {
 	// Compute the CREATE2 target address: keccak256(0xff ++ factory ++ salt ++ keccak256(initcode))[12:]
 	salt := uint256.NewInt(0)
 	factoryAddr := common.HexToAddress("0xfac0")
-	create2Addr := types.CreateAddress2(factoryAddr, salt.Bytes32(), accounts.InternCodeHash(crypto.HashData(initcode)))
+	create2Addr := types.CreateAddress2(factoryAddr, salt.Bytes32(), accounts.InternCodeHash(crypto.Keccak256Hash(initcode)))
 	delegatedAddr := accounts.InternAddress(create2Addr)
 
 	// Set an EIP-7702 delegation on the target address (points to some arbitrary empty account).
@@ -900,7 +901,7 @@ func TestGasTracingNoUnderflowOnStateGas(t *testing.T) {
 //   - SYSTEM_ADDRESS was touched and exists after the call (positive check on the
 //     caller-side empty-account creation for Gnosis/AuRa; see PR 5645, Issue 18276).
 //   - SYSTEM_ADDRESS remains an empty account after the call.
-//   - SYSTEM_ADDRESS is absent from the BAL produced by the call's TxIO.
+//   - SYSTEM_ADDRESS is absent from the BAL produced by the call's tx IO.
 //   - No balance-change tracer events fire for SYSTEM_ADDRESS as a result of
 //     the zero-value transfer path.
 func TestSystemCallZeroValueSkipsTransferChecks(t *testing.T) {
@@ -979,7 +980,9 @@ func TestSystemCallZeroValueSkipsTransferChecks(t *testing.T) {
 
 	// The call-level BAL must not include SYSTEM_ADDRESS when the syscall only
 	// performs the sender-side touch and no actual account access.
-	bal := statedb.TxIO().AsBlockAccessList()
+	var io state.VersionedIO
+	statedb.MergeTxIOInto(&io)
+	bal := io.AsBlockAccessList()
 	for _, accountChanges := range bal {
 		require.NotEqual(t, systemAddr, accountChanges.Address,
 			"SYSTEM_ADDRESS should be absent from the BAL after a zero-value syscall")

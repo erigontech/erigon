@@ -49,7 +49,11 @@ func FuzzSingleEliasFano(f *testing.F) {
 		for _, c := range keys {
 			ef.AddOffset(c)
 		}
-		ef.Build()
+		// Reject sequences beyond the 32-bit jump capacity (unreachable at fuzz
+		// sizes) instead of panicking, mirroring eliasfano16.
+		if !ef.build() {
+			return
+		}
 
 		// Try to read from ef
 		for i := range keys {
@@ -137,15 +141,17 @@ func FuzzDoubleEliasFano(f *testing.F) {
 		for _, c := range cumKeys {
 			ef1.AddOffset(c)
 		}
-		ef1.Build()
 		ef2 := NewEliasFano(uint64(numBuckets+1), position[numBuckets])
 		for _, p := range position {
 			ef2.AddOffset(p)
 		}
-		ef2.Build()
-		ef.Build(cumKeys, position)
+		// Reject sequences beyond the 32-bit jump capacity (unreachable at fuzz
+		// sizes) instead of panicking, mirroring eliasfano16.
+		if !ef1.build() || !ef2.build() || !ef.build(cumKeys, position) {
+			return
+		}
 		// Try to read from ef
-		for bucket := 0; bucket < numBuckets; bucket++ {
+		for bucket := range numBuckets {
 			cumKey, bitPos := ef.Get2(uint64(bucket))
 			if cumKey != cumKeys[bucket] {
 				t.Fatalf("bucket %d: cumKey from EF = %d, expected %d", bucket, cumKey, cumKeys[bucket])
@@ -162,7 +168,7 @@ func FuzzDoubleEliasFano(f *testing.F) {
 				t.Fatalf("bucket %d: position from EF2 = %d, expected %d", bucket, bitPos, position[bucket])
 			}
 		}
-		for bucket := 0; bucket < numBuckets; bucket++ {
+		for bucket := range numBuckets {
 			cumKey, cumKeysNext, bitPos := ef.Get3(uint64(bucket))
 			if cumKey != cumKeys[bucket] {
 				t.Fatalf("bucket %d: cumKey from EF = %d, expected %d", bucket, cumKey, cumKeys[bucket])

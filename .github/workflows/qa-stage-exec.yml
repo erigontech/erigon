@@ -62,13 +62,15 @@ jobs:
 
     steps:
     - name: Check out repository
-      uses: actions/checkout@v6
+      uses: actions/checkout@v7
+      with:
+        persist-credentials: false
 
     - name: Set reference data dir based on branch
       run: |
-        BRANCH="${{ github.base_ref }}"
+        BRANCH="$GITHUB_BASE_REF"
         if [ -z "$BRANCH" ]; then
-          BRANCH="${{ github.ref }}"
+          BRANCH="$GITHUB_REF"
           BRANCH="${BRANCH#refs/heads/}"
         fi
         REF_DIR="/opt/erigon-versions/reference-version/datadir"
@@ -133,6 +135,9 @@ jobs:
       if: ${{ always() && steps.test_step.outputs.test_executed == 'true' }}
       env:
         TEST_RESULT: ${{ steps.test_step.outputs.TEST_RESULT }}
+        TEST_NAME: ${{ matrix.test_name }}
+        MODE_NAME: ${{ matrix.mode_name }}
+        EXEC_MODE: ${{ matrix.exec_mode }}
       run: |
         db_version=$(python3 $ERIGON_QA_PATH/test_system/qa-tests/uploads/prod_info.py $ERIGON_REFERENCE_DATA_DIR/../production.ini production erigon_repo_commit)
         if [ -z "$db_version" ]; then
@@ -142,13 +147,13 @@ jobs:
         python3 $ERIGON_QA_PATH/test_system/qa-tests/uploads/upload_test_results.py \
           --repo erigon \
           --commit $(git rev-parse HEAD) \
-          --branch ${{ github.ref_name }} \
-          --test_name ${{ matrix.test_name }} \
+          --branch "$GITHUB_REF_NAME" \
+          --test_name "$TEST_NAME" \
           --chain $CHAIN \
-          --runner ${{ runner.name }} \
+          --runner "$RUNNER_NAME" \
           --db_version $db_version \
           --outcome $TEST_RESULT \
-          --result_file ${{ github.workspace }}/result-$CHAIN-${{ matrix.mode_name }}-${{ matrix.exec_mode }}.json
+          --result_file "$GITHUB_WORKSPACE/result-$CHAIN-$MODE_NAME-$EXEC_MODE.json"
 
     - name: Upload test results
       if: ${{ always() && steps.test_step.outputs.test_executed == 'true' }}

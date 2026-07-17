@@ -711,7 +711,7 @@ func (b BaseTxnID) LastSystemTx(txAmount uint32) uint64 { return b.U64() + uint6
 // this structure does rlp decode only for
 // "tx related" data
 //
-// must use `rlp.DecodeBytesPartial` to decode
+// decode from bytes with `DecodeRLPBytes`, not `rlp.DecodeBytes`
 type BodyOnlyTxn struct {
 	BaseTxnID BaseTxnID
 	TxCount   uint32
@@ -723,15 +723,25 @@ func (b *BodyOnlyTxn) DecodeRLP(s *rlp.Stream) error {
 	if err != nil {
 		return err
 	}
-	// decode BaseTxId
-	if err = s.Decode(&b.BaseTxnID); err != nil {
-		return err
+	baseTxnID, err := s.Uint64()
+	if err != nil {
+		return fmt.Errorf("read BaseTxnID: %w", err)
 	}
-	// decode TxCount
-	if err = s.Decode(&b.TxCount); err != nil {
-		return err
+	txCount, err := s.Uint32()
+	if err != nil {
+		return fmt.Errorf("read TxCount: %w", err)
 	}
+	b.BaseTxnID, b.TxCount = BaseTxnID(baseTxnID), txCount
 	return nil
+}
+
+// DecodeRLPBytes reads only the leading txn fields, so rlp.DecodeBytes would reject
+// the unread tail. Going through DecodeRLP directly also skips a reflect dispatch
+// that costs more than the decode itself.
+func (b *BodyOnlyTxn) DecodeRLPBytes(buf []byte) error {
+	s := rlp.NewBytesStream(buf)
+	defer rlp.PutStream(s)
+	return b.DecodeRLP(s)
 }
 
 type BodyForStorage struct {
@@ -981,19 +991,18 @@ func (bfs *BodyForStorage) DecodeRLP(s *rlp.Stream) error {
 		return err
 	}
 
-	// decode BaseTxId
-	if err = s.Decode(&bfs.BaseTxnID); err != nil {
-		return err
+	baseTxnID, err := s.Uint64()
+	if err != nil {
+		return fmt.Errorf("read BaseTxnID: %w", err)
 	}
-	// decode TxCount
-	if err = s.Decode(&bfs.TxCount); err != nil {
-		return err
+	txCount, err := s.Uint32()
+	if err != nil {
+		return fmt.Errorf("read TxCount: %w", err)
 	}
-	// decode Uncles
+	bfs.BaseTxnID, bfs.TxCount = BaseTxnID(baseTxnID), txCount
 	if err := decodeUncles(&bfs.Uncles, s); err != nil {
 		return err
 	}
-	// decode Withdrawals
 	bfs.Withdrawals = []*Withdrawal{}
 	if err := decodeWithdrawals(&bfs.Withdrawals, s); err != nil {
 		return err
@@ -1654,7 +1663,10 @@ func decodeWithdrawals(appendList *[]*Withdrawal, s *rlp.Stream) error {
 }
 
 func checkErrListEnd(s *rlp.Stream, err error) error {
-	if !errors.Is(err, rlp.EOL) {
+	// Match the bare EOL sentinel only. A wrapped EOL (e.g. a nested decoder
+	// returning fmt.Errorf("...: %w", rlp.EOL) on malformed input) is a real
+	// error and must propagate, not be treated as a clean end-of-list.
+	if err != rlp.EOL {
 		return err
 	}
 	if err = s.ListEnd(); err != nil {

@@ -50,7 +50,7 @@ func Test_DeleteLatestStateSnaps(t *testing.T) {
 	b := bundle{}
 	for _, dc := range []statecfg.DomainCfg{statecfg.Schema.AccountsDomain, statecfg.Schema.StorageDomain, statecfg.Schema.CodeDomain, statecfg.Schema.ReceiptDomain} {
 		b.domain, b.history, b.ii = state.SnapSchemaFromDomainCfg(dc, dirs, 10)
-		for i := 0; i < 10; i++ {
+		for i := range 10 {
 			createFiles(t, dirs, i*10, (i+1)*10, &b)
 		}
 	}
@@ -79,7 +79,7 @@ func Test_DeleteLatestStateSnaps_DomainWithLargeRange(t *testing.T) {
 	dc := statecfg.Schema.ReceiptDomain
 	b.domain, b.history, _ = state.SnapSchemaFromDomainCfg(dc, dirs, 10)
 
-	for i := 0; i < 9; i++ {
+	for i := range 9 {
 		createSchemaFiles(t, b.history, i*10, (i+1)*10)
 	}
 	createSchemaFiles(t, b.domain, 0, 100)
@@ -98,7 +98,7 @@ func Test_DeleteLatestStateSnaps_DomainAndHistorySameEnd(t *testing.T) {
 	dc := statecfg.Schema.ReceiptDomain
 	b.domain, b.history, _ = state.SnapSchemaFromDomainCfg(dc, dirs, 10)
 
-	for i := 0; i < 4; i++ {
+	for i := range 4 {
 		createSchemaFiles(t, b.history, i*10, (i+1)*10)
 	}
 	createSchemaFiles(t, b.domain, 0, 40)
@@ -171,7 +171,7 @@ func Test_DeleteStateSnaps_RemovesTmpFiles(t *testing.T) {
 	b := bundle{}
 	dc := statecfg.Schema.ReceiptDomain
 	b.domain, b.history, b.ii = state.SnapSchemaFromDomainCfg(dc, dirs, 10)
-	for i := 0; i < 3; i++ {
+	for i := range 3 {
 		createFiles(t, dirs, i*10, (i+1)*10, &b)
 	}
 
@@ -181,9 +181,6 @@ func Test_DeleteStateSnaps_RemovesTmpFiles(t *testing.T) {
 		f.Close()
 	}
 
-	// SnapForkable is not auto-created by datadir.New, so create it manually
-	require.NoError(t, os.MkdirAll(dirs.SnapForkable, 0755))
-
 	// Create .tmp files in all snapshot directories (matching patterns from issue #18789)
 	tmpFiles := []string{
 		filepath.Join(dirs.Snap, "v1.1-headers.0-500.seg.123456.tmp"),
@@ -192,7 +189,6 @@ func Test_DeleteStateSnaps_RemovesTmpFiles(t *testing.T) {
 		filepath.Join(dirs.SnapIdx, "v1.1-storage.8256-8288.bt.209594880.tmp"),
 		filepath.Join(dirs.SnapAccessors, "v2.0-commitment.8256-8272.kvi.3646922560.existence.tmp"),
 		filepath.Join(dirs.SnapCaplin, "v1.0-beaconblocks.0-100.seg.999999.tmp"),
-		filepath.Join(dirs.SnapForkable, "v1.0-forkable.0-100.kv.111111.tmp"),
 	}
 	for _, tf := range tmpFiles {
 		touchFile(tf)
@@ -216,7 +212,7 @@ func Test_DeleteStateSnaps_DryRunKeepsTmpFiles(t *testing.T) {
 	b := bundle{}
 	dc := statecfg.Schema.ReceiptDomain
 	b.domain, b.history, b.ii = state.SnapSchemaFromDomainCfg(dc, dirs, 10)
-	for i := 0; i < 3; i++ {
+	for i := range 3 {
 		createFiles(t, dirs, i*10, (i+1)*10, &b)
 	}
 
@@ -1172,7 +1168,7 @@ func TestDUFormatJSON_EmptyResult(t *testing.T) {
 	err := duFormatJSON(&buf, result)
 	require.NoError(t, err)
 
-	var decoded map[string]interface{}
+	var decoded map[string]any
 	err = json.Unmarshal(buf.Bytes(), &decoded)
 	require.NoError(t, err)
 	require.Equal(t, "unknown", decoded["chain"])
@@ -1426,4 +1422,55 @@ func Test_DeleteBlockSnaps_NoBlockFilesSweepsTmp(t *testing.T) {
 	require.NoError(t, err)
 
 	confirmDoesntExist(t, tmp)
+}
+
+func Test_removeAccessorsForRebuild(t *testing.T) {
+	dirs := datadir.New(t.TempDir())
+
+	touch := func(path string) {
+		f, err := os.OpenFile(path, os.O_RDONLY|os.O_CREATE, 0644)
+		require.NoError(t, err)
+		require.NoError(t, f.Close())
+	}
+
+	accessors := []string{
+		filepath.Join(dirs.Snap, "v1.0-headers.0-500.idx"),
+		filepath.Join(dirs.SnapCaplin, "v1.0-beaconstate.0-100.idx"),
+		filepath.Join(dirs.SnapAccessors, "v1.0-accounts.0-64.vi"),
+		filepath.Join(dirs.SnapAccessors, "v1.0-accounts.0-64.efi"),
+		filepath.Join(dirs.SnapDomain, "v1.0-accounts.0-64.kvi"),
+		filepath.Join(dirs.SnapDomain, "v1.0-accounts.0-64.bt"),
+		filepath.Join(dirs.SnapDomain, "v1.0-accounts.0-64.kvei"),
+	}
+	dataFiles := []string{
+		filepath.Join(dirs.Snap, "v1.0-headers.0-500.seg"),
+		filepath.Join(dirs.SnapCaplin, "v1.0-beaconstate.0-100.seg"),
+		filepath.Join(dirs.SnapIdx, "v1.0-accounts.0-64.ef"),
+		filepath.Join(dirs.SnapHistory, "v1.0-accounts.0-64.v"),
+		filepath.Join(dirs.SnapDomain, "v1.0-accounts.0-64.kv"),
+	}
+	for _, f := range accessors {
+		touch(f)
+		touch(f + ".torrent")
+	}
+	for _, f := range dataFiles {
+		touch(f)
+	}
+
+	orphanTorrent := filepath.Join(dirs.SnapDomain, "v1.0-storage.0-64.kvi.torrent")
+	touch(orphanTorrent)
+	dataTorrent := filepath.Join(dirs.Snap, "v1.0-headers.0-500.seg.torrent")
+	touch(dataTorrent)
+
+	require.NoError(t, removeAccessorsForRebuild(dirs, log.New()))
+
+	for _, f := range accessors {
+		confirmDoesntExist(t, f)
+		confirmDoesntExist(t, f+".torrent")
+	}
+	confirmDoesntExist(t, orphanTorrent)
+	for _, f := range dataFiles {
+		confirmExist(t, f)
+	}
+	confirmExist(t, dataTorrent)
 }

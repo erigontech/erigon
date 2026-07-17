@@ -31,6 +31,7 @@ import (
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/background"
 	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/db/bufiopool"
 	"github.com/erigontech/erigon/db/recsplit/eliasfano32"
 	"github.com/erigontech/erigon/db/seg"
 	"github.com/erigontech/erigon/db/state/statecfg"
@@ -112,14 +113,14 @@ func Test_BtreeIndex_Seek(t *testing.T) {
 
 	c, err := bt.Seek(getter, nil)
 	require.NoError(t, err)
-	for i := 0; i < len(keys); i++ {
+	for i := range keys {
 		k := c.Key()
 		require.Equal(t, keys[i], k)
 		c.Next()
 	}
 	c.Close()
 
-	for i := 0; i < len(keys); i++ {
+	for i := range keys {
 		cur, err := bt.Seek(getter, keys[i])
 		require.NoErrorf(t, err, "i=%d", i)
 		require.Equalf(t, keys[i], cur.key, "i=%d", i)
@@ -172,7 +173,7 @@ func Test_BtreeIndex_Build(t *testing.T) {
 	c, err := bt.Seek(getter, nil)
 	require.NoError(t, err)
 	require.NotNil(t, c)
-	for i := 0; i < len(keys); i++ {
+	for i := range keys {
 		k := c.Key()
 		if !bytes.Equal(keys[i], k) {
 			fmt.Printf("\tinvalid, want %x\n", keys[i])
@@ -181,7 +182,7 @@ func Test_BtreeIndex_Build(t *testing.T) {
 	}
 	c.Close()
 
-	for i := 0; i < 10000; i++ {
+	for i := range 10000 {
 		c, err := bt.Seek(getter, keys[i])
 		require.NoError(t, err)
 		require.Equal(t, keys[i], c.Key())
@@ -205,19 +206,23 @@ func writeV0Index(tb testing.TB, dataPath, indexPath string, compressed seg.File
 	f, err := os.Create(indexPath)
 	require.NoError(tb, err)
 	defer f.Close()
-	w := getBufioWriter(f)
-	defer putBufioWriter(w)
+	w := bufiopool.Writer(f)
+	defer bufiopool.PutWriter(w)
 
 	if count > 0 {
 		ef := eliasfano32.NewEliasFano(count, uint64(r.Size()))
-		var nodes []Node
+		type v0node struct {
+			key []byte
+			di  uint64
+		}
+		var nodes []v0node
 		var key []byte
 		var pos, di uint64
 		for r.HasNext() {
 			key, _ = r.Next(key[:0])
 			ef.AddOffset(pos)
 			if di%m == 0 {
-				nodes = append(nodes, Node{key: common.Copy(key), di: di})
+				nodes = append(nodes, v0node{key: common.Copy(key), di: di})
 			}
 			di++
 			pos, _ = r.Skip()
@@ -283,6 +288,86 @@ func Test_BtreeIndex_V0_V2_Read(t *testing.T) {
 			}
 		})
 	}
+}
+
+// A v0 file stores di on disk; the reader recovers the node stride from it, so
+// opening with a different M than it was written with (e.g. a changed BT_M) must
+// still resolve every key.
+func Test_BtreeIndex_V0_M_Mismatch(t *testing.T) {
+	t.Parallel()
+	tmp := t.TempDir()
+	logger := log.New()
+	const writeM, openM = uint64(32), uint64(256)
+	keyCount := 500
+	compressFlags := seg.CompressKeys | seg.CompressVals
+
+	dataPath := generateKV(t, tmp, 52, 180, keyCount, logger, compressFlags)
+	keys, err := pivotKeysFromKV(dataPath)
+	require.NoError(t, err)
+
+	v0Path := filepath.Join(tmp, "v0.bt")
+	writeV0Index(t, dataPath, v0Path, compressFlags, writeM)
+
+	kv, bt, err := OpenBtreeIndexAndDataFile(v0Path, dataPath, openM, compressFlags, false)
+	require.NoError(t, err)
+	defer bt.Close()
+	defer kv.Close()
+
+	getter := seg.NewReader(kv.MakeGetter(), compressFlags)
+	for i := range keys {
+		cur, err := bt.Seek(getter, keys[i])
+		require.NoErrorf(t, err, "i=%d", i)
+		require.Equalf(t, keys[i], cur.Key(), "seek i=%d", i)
+		cur.Close()
+	}
+}
+
+// Seeking a key greater than the last must return (nil, nil) even when the last
+// cached pivot is the last key (KeysCount % M == 1), where bs() returns an
+// insertion point == KeysCount.
+func TestBtIndex_SeekBeyondLast(t *testing.T) {
+	t.Parallel()
+	tmp := t.TempDir()
+	logger := log.New()
+	const M = uint64(8)
+	const keyCount = 17 // 17 % 8 == 1 -> last pivot di == last key
+	compress := seg.CompressNone
+
+	kvPath := generateKV(t, tmp, 20, 10, keyCount, logger, compress)
+	keys, err := pivotKeysFromKV(kvPath)
+	require.NoError(t, err)
+
+	indexPath := strings.TrimSuffix(kvPath, ".kv") + "_m8.bt"
+	func() {
+		decomp, err := seg.NewDecompressor(kvPath)
+		require.NoError(t, err)
+		defer decomp.Close()
+		iw, err := NewBtIndexWriter(BtIndexWriterArgs{IndexFile: indexPath, TmpDir: tmp, M: M, KeyCount: uint64(decomp.Count() / 2), MaxOffset: uint64(decomp.Size())}, logger)
+		require.NoError(t, err)
+		defer iw.Close()
+		r := seg.NewReader(decomp.MakeGetter(), compress)
+		r.Reset(0)
+		var pos uint64
+		for r.HasNext() {
+			key, _ := r.Next(nil)
+			require.NoError(t, iw.AddKey(key, pos))
+			pos, _ = r.Skip()
+		}
+		iw.DisableFsync()
+		require.NoError(t, iw.Build())
+	}()
+
+	kv, bt, err := OpenBtreeIndexAndDataFile(indexPath, kvPath, M, compress, false)
+	require.NoError(t, err)
+	defer bt.Close()
+	defer kv.Close()
+	require.EqualValues(t, keyCount, bt.KeyCount())
+
+	getter := seg.NewReader(kv.MakeGetter(), compress)
+	beyond := append(append([]byte{}, keys[len(keys)-1]...), 0xff)
+	cur, err := bt.Seek(getter, beyond)
+	require.NoError(t, err)
+	require.Nil(t, cur, "seek beyond last key must return (nil, nil)")
 }
 
 func TestFooter_EncodeDecodeRoundTrip(t *testing.T) {
@@ -372,7 +457,7 @@ func Test_BtreeIndex_V2_EfOffset(t *testing.T) {
 
 	// ...and equal the position the reader would otherwise derive from the nodes section (which starts after the leading byte).
 	nodesCount := (footer.Meta.KeysCount + footer.Meta.M - 1) / footer.Meta.M
-	_, nodesEnd, err := decodeNodes(data[1:], nodesCount, footer.Meta.M)
+	_, nodesEnd, err := decodeNodes(data[1:], nodesCount)
 	require.NoError(t, err)
 	require.EqualValues(t, alignUp(1+nodesEnd, btEFAlign), footer.Meta.EfOffset)
 }
@@ -590,12 +675,12 @@ func TestNewBtIndex(t *testing.T) {
 	require.NotNil(t, kv)
 	require.NotNil(t, bt)
 	bplus := bt.bplus
-	require.GreaterOrEqual(t, len(bplus.mx), keyCount/int(DefaultBtreeM))
-	require.LessOrEqual(t, len(bplus.mx), keyCount/int(DefaultBtreeM)+2)
+	require.GreaterOrEqual(t, bplus.numNodes(), keyCount/int(DefaultBtreeM))
+	require.LessOrEqual(t, bplus.numNodes(), keyCount/int(DefaultBtreeM)+2)
 
-	for i := 1; i < len(bt.bplus.mx); i++ {
-		require.NotZero(t, bt.bplus.mx[i].di)
-		require.NotEmpty(t, bt.bplus.mx[i].key)
+	for i := 1; i < bplus.numNodes(); i++ {
+		require.NotZero(t, bplus.nodeDi(i))
+		require.NotEmpty(t, bplus.nodeKey(i))
 	}
 }
 
@@ -687,19 +772,57 @@ func TestDecodeNodes(t *testing.T) {
 			buf.Write(hdr[:])
 			buf.Write(k)
 		}
-		got, n, err := decodeNodes(buf.Bytes(), uint64(len(keys)), M)
+		got, n, err := decodeNodes(buf.Bytes(), uint64(len(keys)))
 		require.NoError(t, err)
 		require.Equal(t, buf.Len(), n)
-		require.Len(t, got, len(keys))
+		if len(keys) == 0 {
+			require.Nil(t, got)
+			continue
+		}
+		require.EqualValues(t, len(keys), got.Count())
+		bp := &BpsTree{keysBlob: buf.Bytes(), nodeOfftEF: got, nodeStride: M}
 		for i := range keys {
-			require.Equal(t, uint64(i)*M, got[i].di) // di recomputed, not stored
-			require.True(t, bytes.Equal(keys[i], got[i].key))
+			require.Equal(t, uint64(i)*M, bp.nodeDi(i)) // di recomputed, not stored
+			require.True(t, bytes.Equal(keys[i], bp.nodeKey(i)))
 		}
 	}
 }
 
+func TestDecodeListNodesV0_Validation(t *testing.T) {
+	build := func(dis ...uint64) []byte {
+		var buf bytes.Buffer
+		var u8 [8]byte
+		var u2 [2]byte
+		binary.BigEndian.PutUint64(u8[:], uint64(len(dis)))
+		buf.Write(u8[:])
+		for _, di := range dis {
+			binary.BigEndian.PutUint64(u8[:], di)
+			buf.Write(u8[:])
+			binary.BigEndian.PutUint16(u2[:], 1)
+			buf.Write(u2[:])
+			buf.WriteByte('k')
+		}
+		return buf.Bytes()
+	}
+
+	off, stride, _, err := decodeListNodesV0(build(0, 32, 64, 96))
+	require.NoError(t, err)
+	require.Equal(t, uint64(32), stride)
+	require.EqualValues(t, 4, off.Count())
+
+	// di0==0 is required, so stride=di1 can't underflow; corrupt progressions are rejected
+	for name, dis := range map[string][]uint64{
+		"first di != 0":      {8, 40},
+		"zero stride":        {0, 0},
+		"broken progression": {0, 32, 999},
+	} {
+		_, _, _, err := decodeListNodesV0(build(dis...))
+		require.Errorf(t, err, "expected error for %q", name)
+	}
+}
+
 func TestNodeEncode_NoAlloc(t *testing.T) {
-	node := Node{di: 42, key: []byte("some-key")}
+	node := Node{key: []byte("some-key")}
 	var headerBuf [10]byte
 	allocs := testing.AllocsPerRun(1000, func() {
 		if err := node.Encode(io.Discard, headerBuf[:]); err != nil {

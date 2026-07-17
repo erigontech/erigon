@@ -81,8 +81,9 @@ jobs:
           - { name: txpool-onnewblocks,         pkg: txnprovider/txpool,             fn: FuzzOnNewBlocks }
     steps:
       - name: Checkout custom actions
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
         with:
+          persist-credentials: false
           fetch-depth: 1
 
       - uses: ./.github/actions/setup-erigon
@@ -94,7 +95,7 @@ jobs:
       # inputs the previous run discovered. Restored AFTER setup-erigon (which
       # caches all of GOCACHE), so this dedicated entry wins for $GOCACHE/fuzz.
       - name: Restore fuzz corpus
-        uses: actions/cache@v5
+        uses: actions/cache@v6
         with:
           path: ${{ steps.erigon.outputs.build }}/fuzz
           key: fuzz-corpus-${{ matrix.name }}-${{ github.run_id }}
@@ -104,8 +105,9 @@ jobs:
       - name: Fuzz ${{ matrix.fn }}
         env:
           FUZZTIME: ${{ inputs.fuzztime || '120s' }}
+          ERIGON_BUILD: ${{ steps.erigon.outputs.build }}
         run: |
-          mkdir -p "${{ steps.erigon.outputs.build }}/fuzz"
+          mkdir -p "$ERIGON_BUILD/fuzz"
           echo "::group::go test -fuzz ${{ matrix.fn }} (./${{ matrix.pkg }}, ${FUZZTIME})"
           go test "./${{ matrix.pkg }}/" -run '^$' -fuzz "^${{ matrix.fn }}$" -fuzztime "${FUZZTIME}"
           echo "::endgroup::"

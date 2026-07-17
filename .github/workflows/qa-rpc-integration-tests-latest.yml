@@ -60,7 +60,23 @@ jobs:
 
     steps:
       - name: Check out repository
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - name: Set up job-scoped build temp dir
+        run: |
+          # Confine build temp (Go work dirs + cgo/gcc cc* files) to one job-scoped dir
+          # outside the checkout, so it can be removed wholesale when the job exits.
+          BUILD_TMP="${RUNNER_TEMP}/erigon-build-tmp-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          # Drop leftovers from a previously cancelled run (this runner builds serially).
+          find "${RUNNER_TEMP}" -maxdepth 1 -name 'erigon-build-tmp-*' -exec rm -rf {} + 2>/dev/null || true
+          mkdir -p "${BUILD_TMP}"
+          {
+            echo "BUILD_TMP=${BUILD_TMP}"
+            echo "TMPDIR=${BUILD_TMP}"
+            echo "GOTMPDIR=${BUILD_TMP}"
+          } >> "${GITHUB_ENV}"
 
       - name: Read RPC version
         run: |
@@ -70,9 +86,9 @@ jobs:
       - name: Set reference data dir based on branch
         run: |
           # For pull_request events base_ref is the target branch name; for push/dispatch parse from ref.
-          BRANCH="${{ github.base_ref }}"
+          BRANCH="$GITHUB_BASE_REF"
           if [ -z "$BRANCH" ]; then
-            BRANCH="${{ github.ref }}"
+            BRANCH="$GITHUB_REF"
             BRANCH="${BRANCH#refs/heads/}"
           fi
           if [[ "$BRANCH" == release/* ]]; then
@@ -171,8 +187,10 @@ jobs:
 
       - name: Run RPC Integration Tests
         id: test_step
+        env:
+          RUNNER_WS: ${{ runner.workspace }}
         run: |
-          commit=$(git -C ${{runner.workspace}}/erigon rev-parse --short HEAD)
+          commit=$(git -C "$RUNNER_WS/erigon" rev-parse --short HEAD)
           TEST_RESULT_DIR="$RPC_PAST_TEST_DIR/mainnet_$(date +%Y%m%d_%H%M%S)_integration_${commit}_http"
           echo "TEST_RESULT_DIR=$TEST_RESULT_DIR" >> $GITHUB_ENV
 
@@ -182,10 +200,10 @@ jobs:
             echo "Force response dump is enabled"
           fi
 
-          chmod +x ${{ runner.workspace }}/erigon/.github/workflows/scripts/run_rpc_tests_ethereum_latest.sh
+          chmod +x "$RUNNER_WS/erigon/.github/workflows/scripts/run_rpc_tests_ethereum_latest.sh"
 
           set +e # Disable exit on error for test run
-          ${{ runner.workspace }}/erigon/.github/workflows/scripts/run_rpc_tests_ethereum_latest.sh ${{ runner.workspace }} $TEST_RESULT_DIR $REFERENCE_SYSTEM_HOST_ADDRESS $DUMP_RESPONSE
+          "$RUNNER_WS/erigon/.github/workflows/scripts/run_rpc_tests_ethereum_latest.sh" "$RUNNER_WS" $TEST_RESULT_DIR $REFERENCE_SYSTEM_HOST_ADDRESS $DUMP_RESPONSE
           test_exit_status=$? # Capture test runner script exit status
           set -e # Re-enable exit on error after test run
 
@@ -202,27 +220,33 @@ jobs:
 
       - name: Generate Summary
         if: always() && steps.test_step.outputs.test_executed == 'true'
+        env:
+          WORKFLOW: ${{ github.workflow }}
+          TEST_RESULT: ${{ steps.test_step.outputs.TEST_RESULT }}
         run: |
-          SUMMARY_FILE="${{ env.TEST_RESULT_DIR }}/summary.md"
-          LOG_FILE="${{ env.TEST_RESULT_DIR }}/output.log"
+          SUMMARY_FILE="$TEST_RESULT_DIR/summary.md"
+          LOG_FILE="$TEST_RESULT_DIR/output.log"
 
-          cat << 'EOF' > $SUMMARY_FILE
-          # ${{ github.workflow }} Report
+          {
+            echo "# $WORKFLOW Report"
+            echo ""
+            echo "## Test Configuration"
+            echo "- **Chain:** $CHAIN"
+            echo "- **Result:** $TEST_RESULT"
+            echo ""
+            echo "## Test Output"
+            echo '```'
+            grep -E "Attempt [0-9]|Latest batch|failed:|sync on latest block" "$LOG_FILE" || echo "(none)"
+            echo '```'
+            echo ""
+            echo "## Final Statistics"
+            echo '```'
+            grep "Number of" "$LOG_FILE" | tail -5
+            echo '```'
+          } > "$SUMMARY_FILE"
 
-          ## Test Configuration
-          - **Chain:** ${{ env.CHAIN }}
-          - **Result:** ${{ steps.test_step.outputs.TEST_RESULT }}
-
-          ## Test Output
-          ```
-          EOF
-
-          cat $LOG_FILE >> $SUMMARY_FILE
-
-          echo '```' >> $SUMMARY_FILE
-
-          cat $SUMMARY_FILE
-          cat $SUMMARY_FILE >> $GITHUB_STEP_SUMMARY
+          cat "$SUMMARY_FILE"
+          cat "$SUMMARY_FILE" >> "$GITHUB_STEP_SUMMARY"
 
       - name: Stop Erigon
         if: always()
@@ -262,10 +286,10 @@ jobs:
           python3 $ERIGON_QA_PATH/test_system/qa-tests/uploads/upload_test_results.py \
             --repo erigon \
             --commit $(git rev-parse HEAD) \
-            --branch ${{ github.ref_name }} \
+            --branch "$GITHUB_REF_NAME" \
             --test_name rpc-integration-tests-latest${{ matrix.exec_mode == 'parallel' && '-parallel' || '' }} \
             --chain $CHAIN \
-            --runner ${{ runner.name }} \
+            --runner "$RUNNER_NAME" \
             --db_version $db_version \
             --outcome $TEST_RESULT \
             --result_file $TEST_RESULT_DIR/results/test_report.json
@@ -284,8 +308,10 @@ jobs:
 
       - name: Action to check failure condition
         if: failure()
+        env:
+          TEST_EXECUTED: ${{ steps.test_step.outputs.test_executed }}
         run: |
-          if [ "${{ steps.test_step.outputs.test_executed }}" != "true" ]; then
+          if [ "$TEST_EXECUTED" != "true" ]; then
             echo "::error::Test not executed, workflow failed for infrastructure reasons"
           fi
           exit 1
@@ -293,3 +319,16 @@ jobs:
       - name: Action for Success
         if: steps.test_step.outputs.TEST_RESULT == 'success'
         run: echo "::notice::Tests completed successfully"
+
+      - name: Clean up job-scoped build temp dir
+        if: always()
+        run: |
+          # Only delete a path of the exact shape we created under RUNNER_TEMP; never a bare/empty var.
+          case "${BUILD_TMP}" in
+            "${RUNNER_TEMP}/erigon-build-tmp-"*)
+              rm -rf -- "${BUILD_TMP}"
+              ;;
+            *)
+              echo "Skipping cleanup: BUILD_TMP='${BUILD_TMP:-}' is empty or unexpected"
+              ;;
+          esac
