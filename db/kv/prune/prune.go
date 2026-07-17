@@ -283,17 +283,14 @@ func TableScanningPrune(
 		}
 	}
 
-	// dupBound returns the dup value below which every value of a key has a txNum
-	// smaller than the given one. Only PrefixVal stores dups as txNum||val, i.e.
-	// sorted by txNum; the other modes can't express a txNum cut as a byte bound,
-	// so they get nil and keep walking dups one by one.
-	dupBound := func(txNum uint64) []byte {
-		if mode != PrefixValStorageMode {
-			return nil
-		}
-		b := make([]byte, 8)
-		binary.BigEndian.PutUint64(b, txNum)
-		return b
+	// dupBound is the dup value below which every value of a key has txNum < txTo.
+	// Only PrefixVal stores dups as txNum||val, i.e. sorted by txNum; the other
+	// modes can't express a txNum cut as a byte bound, so they leave it nil and
+	// keep walking dups one by one.
+	var dupBound []byte
+	if mode == PrefixValStorageMode {
+		dupBound = make([]byte, 8)
+		binary.BigEndian.PutUint64(dupBound, txTo)
 	}
 
 	lastVal, err := tableScanningPrune(ctx, stat, filenameBase, txFrom, txTo, txNumGetter, dupBound, valDelCursor, keysCursor, asserts, throttling, logEvery, logger, prevStat.ValueProgress, prevStat.LastPrunedValue)
@@ -318,7 +315,7 @@ func tableScanningPrune(
 	filenameBase string,
 	txFrom, txTo uint64,
 	txNumGetter func(key, val []byte) uint64,
-	dupBound func(txNum uint64) []byte,
+	dupBound []byte,
 	valDelCursor kv.PseudoDupSortRwCursor,
 	keysCursor kv.RwCursorDupSort,
 	asserts bool,
@@ -400,9 +397,9 @@ func tableScanningPrune(
 		// those below txTo, a prefix mdbx cuts in one bunch-delete. Keys holding
 		// older dups to preserve, and modes whose dups aren't sorted by txNum, fall
 		// through to the scan below.
-		if bound := dupBound(txTo); bound != nil && firstIsOldest && minTxNum >= txFrom {
+		if dupBound != nil && firstIsOldest && minTxNum >= txFrom {
 			if dupCursor, ok := valDelCursor.(kv.CursorDupSort); ok {
-				firstSurvivor, err := dupCursor.SeekBothRange(val, bound)
+				firstSurvivor, err := dupCursor.SeekBothRange(val, dupBound)
 				if err != nil {
 					return nil, fmt.Errorf("seek prune bound %s: %w", filenameBase, err)
 				}
@@ -415,7 +412,7 @@ func tableScanningPrune(
 					}
 					if lastDoomed != nil {
 						maxDeleted := txNumGetter(val, lastDoomed)
-						deleted, err := valDelCursor.DeleteCurrentMultiValBefore(bound)
+						deleted, err := valDelCursor.DeleteCurrentMultiValBefore(dupBound)
 						if err != nil {
 							return nil, fmt.Errorf("cut dups below txTo %s: %w", filenameBase, err)
 						}
