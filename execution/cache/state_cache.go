@@ -219,7 +219,11 @@ func (c *StateCache) deleteAddrCodeHash(addr []byte) {
 // Put stores data for the given domain and key, stamped with the txNum the
 // value reflects (for txNum/epoch unwind invalidation).
 func (c *StateCache) Put(domain kv.Domain, key []byte, value []byte, txNum uint64) {
-	c.put(domain, key, value, txNum, true)
+	cache := c.caches[domain]
+	if cache == nil {
+		return
+	}
+	cache.Put(key, common.Copy(value), txNum)
 }
 
 // FillIfFresh conditionally inserts a snapshot read without replacing an
@@ -254,18 +258,6 @@ func (c *StateCache) FillIfFresh(domain kv.Domain, key []byte, value []byte, rea
 		}
 	}
 	cache.PutIfAbsent(key, common.Copy(value), readTxNum)
-}
-
-func (c *StateCache) put(domain kv.Domain, key []byte, value []byte, txNum uint64, overwrite bool) {
-	cache := c.caches[domain]
-	if cache == nil {
-		return
-	}
-	if overwrite {
-		cache.Put(key, common.Copy(value), txNum)
-	} else {
-		cache.PutIfAbsent(key, common.Copy(value), txNum)
-	}
 }
 
 // Delete removes the data for the given domain and key.
