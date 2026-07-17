@@ -570,12 +570,22 @@ func (a *Aggregator) Unwind(txN uint64) {
 
 func (a *Aggregator) OpenFolder() error {
 	a.dirtyFilesLock.Lock()
-	defer a.dirtyFilesLock.Unlock()
 	if err := a.reloadSalt(); err != nil {
+		a.dirtyFilesLock.Unlock()
 		return err
 	}
 	if err := a.openFolder(); err != nil {
+		a.dirtyFilesLock.Unlock()
 		return fmt.Errorf("OpenFolder: %w", err)
+	}
+	a.dirtyFilesLock.Unlock()
+
+	// Propagate the visible file set so Inventory reflects on-disk
+	// reality: files that arrived via the downloader are visible in the
+	// aggregator but invisible to Inventory without this notification.
+	files := a.Files()
+	if len(files) > 0 && a.onFilesChange != nil {
+		a.onFilesChange(files)
 	}
 	return nil
 }
@@ -1354,7 +1364,19 @@ func (a *Aggregator) mergeLoop(ctx context.Context) (err error) {
 	}
 
 	for {
-		somethingMerged, err := a.mergeLoopStep(ctx, a.EndTxNumMinimax())
+		// Delayed-merge: files within MergeMinAgeSteps of the frontier
+		// are excluded from merge candidates so peers have time to
+		// download them before consolidation.
+		maxEnd := a.EndTxNumMinimax()
+		if minAgeSteps := uint64(dbg.MergeMinAgeSteps); minAgeSteps > 0 {
+			clamp := minAgeSteps * a.StepSize()
+			if maxEnd > clamp {
+				maxEnd -= clamp
+			} else {
+				maxEnd = 0
+			}
+		}
+		somethingMerged, err := a.mergeLoopStep(ctx, maxEnd)
 		if err != nil {
 			return err
 		}

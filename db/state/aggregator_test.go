@@ -646,6 +646,108 @@ func TestAggregator_NotifyOnFilesChange_CarriesBuiltFileNames(t *testing.T) {
 		got)
 }
 
+// TestAggregator_OpenFolder_NotifiesForFilesLandedByDownloader pins
+// the disk-rescan-notifies-Inventory contract: without a
+// NotifyOnFilesChange fire from OpenFolder, downloader-landed files
+// are visible in the aggregator but invisible to Inventory, and
+// mode-B unwind's cleanup path silently skips them.
+func TestAggregator_OpenFolder_NotifiesForFilesLandedByDownloader(t *testing.T) {
+	t.Parallel()
+	const stepSize = uint64(10)
+	_, agg := testDbAndAggregatorv3(t, stepSize)
+
+	// Simulate the downloader landing preverified files while OpenFolder
+	// hasn't fired yet. Files exist on disk; aggregator is unaware.
+	dirs := agg.Dirs()
+	generateAccountsFile(t, dirs, []testFileRange{{0, 1}})
+	generateStorageFile(t, dirs, []testFileRange{{0, 1}})
+	generateCodeFile(t, dirs, []testFileRange{{0, 1}})
+	generateCommitmentFile(t, dirs, []testFileRange{{0, 1}})
+
+	var got [][]string
+	agg.OnFilesChange(func(names []string) {
+		got = append(got, append([]string(nil), names...))
+	}, nil)
+
+	require.NoError(t, agg.OpenFolder())
+
+	// At least one notification must fire with non-empty names, and
+	// those names must include each domain's .kv so Inventory can
+	// register them.
+	var haveNotification bool
+	var sawAccountsKV, sawStorageKV, sawCodeKV, sawCommitmentKV bool
+	for _, batch := range got {
+		if len(batch) > 0 {
+			haveNotification = true
+		}
+		for _, n := range batch {
+			if strings.Contains(n, "-accounts.0-1.kv") {
+				sawAccountsKV = true
+			}
+			if strings.Contains(n, "-storage.0-1.kv") {
+				sawStorageKV = true
+			}
+			if strings.Contains(n, "-code.0-1.kv") {
+				sawCodeKV = true
+			}
+			if strings.Contains(n, "-commitment.0-1.kv") {
+				sawCommitmentKV = true
+			}
+		}
+	}
+	require.True(t, haveNotification,
+		"OpenFolder did not fire OnFilesChange with any file names — preverified downloads would stay invisible to Inventory; got batches=%v",
+		got)
+	require.True(t, sawAccountsKV, "OpenFolder notification missing accounts .kv; got batches=%v", got)
+	require.True(t, sawStorageKV, "OpenFolder notification missing storage .kv; got batches=%v", got)
+	require.True(t, sawCodeKV, "OpenFolder notification missing code .kv; got batches=%v", got)
+	require.True(t, sawCommitmentKV, "OpenFolder notification missing commitment .kv; got batches=%v", got)
+}
+
+// TestAggregator_Files_ReflectsOnDiskAfterOpenFolder pins the other
+// half of the bootstrap contract: after OpenFolder rescans disk, the
+// aggregator's visible-file set (Files()) must include every domain
+// .kv on disk. This is the source Provider construction reads via
+// addBootstrapFile (provider.go:785) to seed Inventory on restart
+// against an existing datadir. Without this, the restart-scenario is
+// silently broken and the "unwind cleanup didn't run" surface repeats.
+func TestAggregator_Files_ReflectsOnDiskAfterOpenFolder(t *testing.T) {
+	t.Parallel()
+	const stepSize = uint64(10)
+	_, agg := testDbAndAggregatorv3(t, stepSize)
+	dirs := agg.Dirs()
+
+	// Seed disk BEFORE OpenFolder — mirrors "Provider constructed against
+	// existing datadir, aggregator has not scanned yet".
+	generateAccountsFile(t, dirs, []testFileRange{{0, 1}})
+	generateStorageFile(t, dirs, []testFileRange{{0, 1}})
+	generateCodeFile(t, dirs, []testFileRange{{0, 1}})
+	generateCommitmentFile(t, dirs, []testFileRange{{0, 1}})
+
+	require.NoError(t, agg.OpenFolder())
+
+	files := agg.Files()
+	var sawAccounts, sawStorage, sawCode, sawCommitment bool
+	for _, p := range files {
+		if strings.Contains(p, "-accounts.0-1.kv") {
+			sawAccounts = true
+		}
+		if strings.Contains(p, "-storage.0-1.kv") {
+			sawStorage = true
+		}
+		if strings.Contains(p, "-code.0-1.kv") {
+			sawCode = true
+		}
+		if strings.Contains(p, "-commitment.0-1.kv") {
+			sawCommitment = true
+		}
+	}
+	require.True(t, sawAccounts, "Aggregator.Files() missing accounts .kv after OpenFolder; got %v", files)
+	require.True(t, sawStorage, "Aggregator.Files() missing storage .kv after OpenFolder; got %v", files)
+	require.True(t, sawCode, "Aggregator.Files() missing code .kv after OpenFolder; got %v", files)
+	require.True(t, sawCommitment, "Aggregator.Files() missing commitment .kv after OpenFolder; got %v", files)
+}
+
 // TestAggregator_BuildFiles_EmptyStepOK verifies the corollary: on a fresh
 // datadir (no pre-existing snapshot files) where MDBX happens to have no
 // history at step 0 but does at a later step, the aggregator is allowed to

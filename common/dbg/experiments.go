@@ -91,6 +91,13 @@ var (
 
 	MergeThrottleMs = EnvInt("ERIGON_MERGE_THROTTLE_MS", 0)
 
+	// MergeMinAgeSteps — files within this many steps of the aggregator
+	// frontier are excluded from merge candidates. The chain.toml
+	// publication mode uses this to give peers (N-step * chain-cadence)
+	// time to download files before consolidation. 0 = immediate merge
+	// (default).
+	MergeMinAgeSteps = EnvInt("ERIGON_MERGE_MIN_AGE_STEPS", 0)
+
 	TraceAccounts         = EnvStrings("TRACE_ACCOUNTS", ",", nil)
 	TraceStateKeys        = EnvStrings("TRACE_STATE_KEYS", ",", nil)
 	TraceInstructions     = EnvBool("TRACE_INSTRUCTIONS", false)

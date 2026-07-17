@@ -40,6 +40,40 @@ the full preverified set or a meaningfully complete coherent set
 (no internal step gaps that downstream consumers would hit).
 Archive mode is the safe default for bootstrap publishers.
 
+### Delayed merge for peer propagation
+
+For any node publishing files (a bootstrap publisher, or any V2 node
+whose retire output others rely on), immediate merge of a newly-built
+per-step `.kv` file into a wider merged file is a hazard: peers
+mid-download of the per-step file see the file disappear underneath
+them and must restart against the merged file. On networks with slow
+peers or large step-files, that thrash prevents propagation entirely.
+
+The aggregator supports a step-based merge delay: a file is not
+eligible for merge until it has aged `N` steps behind the current
+frontier (max endTxNum across the visible set).
+
+- **Knob**: `ERIGON_MERGE_MIN_AGE_STEPS=<N>` (env var; 0 = immediate
+  merge, current default).
+- **Semantics**: `mergeLoopStep` is called with a ceiling of
+  `EndTxNumMinimax - N * stepSize`. Files with `endTxNum` above that
+  ceiling are excluded from merge candidates. As the chain advances
+  and the frontier moves forward, files ripen past the threshold and
+  become mergeable.
+- **Sizing guidance**: set N to cover the p95 peer-download window
+  for a per-step file. On hoodi each step is ~5-10 min of chain
+  time, so `N=2` gives ~10-20 min propagation; `N=6` gives ~30-60 min.
+- **Interaction with `--exec.no-merge`**: `--exec.no-merge`
+  disables ALL merges (diagnostic). `ERIGON_MERGE_MIN_AGE_STEPS`
+  delays merges of newly-built files while still allowing old files
+  to consolidate — that's what a publisher wants.
+- **Interaction with unwind**: mode-B unwind still gates merges via
+  `SetUnwindInProgress(true)` regardless of the age threshold.
+
+The soak harness uses this knob to hold per-step files on disk long
+enough for regime 3 (target lands in a per-step commitment `.kv`) to
+be reachable — the same mechanism serves publication and test.
+
 ### Regular V2 node
 
 Any other node. Uses chain.toml from peers (typically the bootstrap
