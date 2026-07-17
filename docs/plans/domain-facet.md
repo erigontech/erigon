@@ -1,9 +1,9 @@
-│                                                                                                                                                                                                                                
-└─ A genuinely new PROJECTION of (key, ts, value), needed by
-several                                                                                                                                                             
-entities, requiring its own file class + merge/prune
-rules?                                                                                                                                                                   
-→ new FACET (new column). Expect this ~never.
+```text
+│
+└─ A genuinely new PROJECTION of (key, ts, value), needed by several
+   entities, requiring its own file class + merge/prune rules?
+   → new FACET (new column). Expect this ~never.
+```
 
 "How many facets do I need?" — three, and the count is essentially frozen. Here's the argument for why: facets are
 projections of a 3-column relation, and there are only a handful of useful ones. The candidates people usually propose
@@ -31,12 +31,13 @@ Progress method.
 
 -------
 
-Is there existing databases which have similar design? (domain+facets)
+Are there existing databases with a similar design? (domain+facets)
 
-yes, this pattern recurs under different names
+Yes — this pattern recurs under different names.
 
 The closest matches, and what each one validates about the design:
 
+```text
 ┌───────────────────┬───────────┬───────────────────────────────────────┬────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┐
 │ System │ "Entity"  │               "Facets"                │ What it validates │
 ├───────────────────┼───────────┼───────────────────────────────────────┼────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┤
@@ -60,6 +61,7 @@ one write stream — facet planes with per-facet merge rules. │ │ │ │ TS
 queryable structure is a derivable, rebuildable projection. Your "facets carry zero │ │ CQRS │ │ │ new information" rule
 is this, verbatim. │
 └───────────────────┴───────────┴───────────────────────────────────────┴────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┘
+```
 
 None of them call it "entity + facet", but the architecture — one identity axis that grows with the product, one small
 frozen set of projection kinds, a per-identity mask saying which projections exist — is the standard endpoint for
@@ -101,10 +103,10 @@ Important notice:
 
 What we don't have:
 
-- .kv files are not sharded and not equal (Bloatned produced huge files)
+- .kv files are not sharded and not equal (Bloatnet produced huge files)
 - .kv files don't have `LSM-like compaction` for reproducibility of files and for content-addressable-hashes-stability
 - .kv files are sharded by `txNum` - maybe need shard by `gas` for better equality (Bloatnet produced huge
-  transactions - which required manual re-configure Erigon to throw data from DB to files earlier). Maybe it means that
+  transactions - which required manually reconfiguring Erigon to throw data from DB to files earlier). Maybe it means that
   Ethereum `FullImmutabilityThreshold` must be measured in `Gas` instead of Blocks/Slots
 -
 
@@ -121,9 +123,8 @@ Add LatestValues into .ef file. So format: `(key, latestValue, txNums)`.
     - Problem 3: old `.kv` are big (`>> RAM`) and cold. And data in `.kv` colocated by "update_time" (old files store
       keys which was updated that time) + "alphabet" (inside file). Theoretically `.kv` can be lazy-built driven by
       `read-amplification` (or AI).
-    - Problem 4: "Latest State" is most-sensetive part of any Erigon Client - agree on common format here will be
-      impossible. Removing "Latest State" from picture - make it derivable from History. Increasing "State Spec" project
-      success-change.
+    - Problem 4: "Latest State" is most sensitive part of any Erigon Client - agree on common format here will be
+      impossible. Removing "Latest State" from picture - make it derivable from History. Increasing the "State Spec" project's chance of success.
     - Problem 5: (AI suggested) "How to verify files?" - Chunk N's latestValue (K) must equal chunk N+1's first
       pre-value of K in .v. The duplication you're paying for is a cross-chunk consistency check a verifier gets for
       free — and it chains with BAL post-values per block.

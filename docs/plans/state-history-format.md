@@ -90,10 +90,10 @@ latest:   ◄──────── account.0-16.kv ────────�
   Value (`.kv`) — so `{Latest State .kv} + {history after X}` is self-sufficient ("suffix-closure")
 - **It's small**: History doesn't store copy of Latest State. Block Execution on Chain Tip doesn't read History.
 - **Seed-what-you-use**: Same files used by serving RPC requests and initial Syncing/Seeding. No re-packing, no
-  double-space, no tar-balls. This is very important property! Because Users/Operators have reason to keep history -
-  because they using it. Without this property - rational operators delete the network copy.
-- **We made seeding cheap**: BitTorrent has nice feature "any HTTP Server can be a Peer". Means "S3/R2 bucket + CDN" can
-  support Network. It's way cheaper than have server with running Erigon.
+  double-space, no tar-balls. This is a very important property! Operators have a reason to keep history — because they
+  use it. Without it, a rational operator deletes their copy of the network.
+- **We made seeding cheap**: BitTorrent has a nice feature: "any HTTP Server can be a Peer". It means an "S3/R2 bucket + CDN"
+  can support the network — far cheaper than running a server with Erigon on it.
 
 ### 3.3 Problems
 
@@ -108,8 +108,8 @@ of every client; no two teams will agree on generic layout.
 
 **P4 — How to verify files?** by content-only (not just checksum files)
 
-**P5 — Unclear which hash store on chain** Adding disk-format to Spec: means freeze it forever. Even if we do - which
-files to hash? Or maybe which data to hash?
+**P5 — Unclear which hash to store on chain** Adding a disk format to the Spec means freezing it forever. And even if
+we do: which files do we hash? Or maybe which data?
 
 ## 4. Proposal: put latest values into .ef file and exclude .kv from Spec
 
@@ -122,7 +122,7 @@ history:  account.0-8.ef    account.8-16.ef       (key, latestValue, {ts})
                                                   account.8-16.ef carries state@16
                                                   for keys changed in [8,16)
 
-Clients: to derive their own format of Latest State from "The History" 
+Clients derive their own format of Latest State from "The History".
 ```
 
 | Problem              | After                                                                                                                                                                                              |
