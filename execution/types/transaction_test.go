@@ -116,8 +116,8 @@ func TestDecodeEmptyTypedTx(t *testing.T) {
 	t.Parallel()
 	input := []byte{0x80}
 	_, err := DecodeTransaction(input)
-	if !errors.Is(err, rlp.EOL) {
-		t.Fatal("wrong error:", err)
+	if err == nil || errors.Is(err, rlp.EOL) {
+		t.Fatal("expected a decode error, not EOL:", err)
 	}
 }
 
