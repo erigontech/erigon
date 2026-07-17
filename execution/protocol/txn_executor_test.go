@@ -469,8 +469,8 @@ func TestApplyFrame_IntrinsicGasBeforeAuthorities(t *testing.T) {
 
 // TestType4Prereq_NoStateMutationOnReject pins that a SetCode (EIP-7702)
 // transaction rejected for a deterministic prerequisite — here, a type-4 tx
-// before Prague — leaves the sender's nonce and balance untouched, because
-// preCheck validates those prerequisites before buying gas.
+// before Prague — takes precedence over affordability and intrinsic-gas checks
+// and leaves the sender's nonce and balance untouched.
 func TestType4Prereq_NoStateMutationOnReject(t *testing.T) {
 	t.Parallel()
 
@@ -479,13 +479,13 @@ func TestType4Prereq_NoStateMutationOnReject(t *testing.T) {
 	cfg := chain.TestChainBerlinConfig // pre-Prague: type-4 not allowed
 
 	ibs := state.New(state.NewNoopReader())
-	initialBalance := uint256.NewInt(1_000_000_000_000_000_000)
+	initialBalance := uint256.NewInt(1)
 	require.NoError(t, ibs.AddBalance(sender, *initialBalance, tracing.BalanceChangeUnspecified))
 
 	evm := newTestEVM(ibs, cfg, 30_000_000)
 	gasPrice := uint256.NewInt(1_000_000_000)
 	msg := types.NewMessage(
-		sender, recipient, 0, uint256.NewInt(0), 100_000,
+		sender, recipient, 0, uint256.NewInt(0), 1_000,
 		gasPrice, gasPrice, gasPrice,
 		nil, nil,
 		false, false, true, false, nil,
@@ -494,7 +494,7 @@ func TestType4Prereq_NoStateMutationOnReject(t *testing.T) {
 
 	gp := new(GasPool).AddGas(30_000_000)
 	_, err := NewTxnExecutor(evm, msg, gp).Execute(true, false)
-	require.Error(t, err)
+	require.EqualError(t, err, "SetCode transaction not allowed before Prague fork")
 
 	nonce, nErr := ibs.GetNonce(sender)
 	require.NoError(t, nErr)
