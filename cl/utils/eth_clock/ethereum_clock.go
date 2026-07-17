@@ -17,16 +17,17 @@
 package eth_clock
 
 import (
+	"cmp"
 	"encoding/binary"
 	"fmt"
 	"math"
 	"slices"
-	"sort"
 	"time"
 
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/utils"
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/crypto"
 )
 
 var maximumClockDisparity = 500 * time.Millisecond
@@ -63,11 +64,11 @@ func forkList(schedule map[common.Bytes4]clparams.VersionScheduleEntry) (f []for
 	for version, entry := range schedule {
 		f = append(f, forkNode{epoch: entry.Epoch, version: version, stateVersion: entry.StateVersion})
 	}
-	sort.Slice(f, func(i, j int) bool {
-		if f[i].epoch == f[j].epoch {
-			return f[i].stateVersion < f[j].stateVersion
+	slices.SortFunc(f, func(a, b forkNode) int {
+		if a.epoch == b.epoch {
+			return cmp.Compare(a.stateVersion, b.stateVersion)
 		}
-		return f[i].epoch < f[j].epoch
+		return cmp.Compare(a.epoch, b.epoch)
 	})
 	return
 }
@@ -262,7 +263,7 @@ func (t *ethereumClockImpl) xorDigestWithBlobParams(digest *common.Bytes4, epoch
 	blobParamsBytes := make([]byte, 16)
 	binary.LittleEndian.PutUint64(blobParamsBytes[:8], blobParams.Epoch)
 	binary.LittleEndian.PutUint64(blobParamsBytes[8:], blobParams.MaxBlobsPerBlock)
-	blobParamsHash := utils.Sha256(blobParamsBytes)
+	blobParamsHash := crypto.Sha256(blobParamsBytes)
 	for i := range 4 {
 		digest[i] ^= blobParamsHash[i]
 	}
@@ -299,5 +300,5 @@ func (t *ethereumClockImpl) GenesisTime() uint64 {
 func computeForkDataRoot(version [4]byte, genesisValidatorsRoot common.Hash) common.Hash {
 	var currentVersion32 common.Hash
 	copy(currentVersion32[:], version[:])
-	return utils.Sha256(currentVersion32[:], genesisValidatorsRoot[:])
+	return crypto.Sha256(currentVersion32[:], genesisValidatorsRoot[:])
 }

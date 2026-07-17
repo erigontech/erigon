@@ -21,8 +21,8 @@ import (
 
 	"github.com/prysmaticlabs/gohashtree"
 
-	"github.com/erigontech/erigon/cl/utils"
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/crypto"
 )
 
 var globalHasher *merkleHasher
@@ -99,7 +99,7 @@ func (m *merkleHasher) transactionsListRoot(transactions [][]byte) ([32]byte, er
 		}
 
 		lengthRoot := Uint64Root(transactionLength)
-		leaves[i] = utils.Sha256(transactionsBaseRoot[:], lengthRoot[:])
+		leaves[i] = crypto.Sha256(transactionsBaseRoot[:], lengthRoot[:])
 	}
 	transactionsBaseRoot, err := MerkleizeVector(leaves, 1048576)
 	if err != nil {
@@ -108,5 +108,5 @@ func (m *merkleHasher) transactionsListRoot(transactions [][]byte) ([32]byte, er
 
 	countRoot := Uint64Root(txCount)
 
-	return utils.Sha256(transactionsBaseRoot[:], countRoot[:]), nil
+	return crypto.Sha256(transactionsBaseRoot[:], countRoot[:]), nil
 }
