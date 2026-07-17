@@ -38,7 +38,7 @@
   max-allowed-failures: 0
 - shard: statetests-devnet
   workers: 12
-  max-allowed-failures: 1925
+  max-allowed-failures: 252
 - shard: blocktests-stable-sequential
   workers: 12
   max-allowed-failures: 0
@@ -49,7 +49,7 @@
 - shard: blocktests-devnet
   workers: 12
   # TODO: reduce to 0 as tests-glamsterdam-devnet@v7.2.0 support lands.
-  max-allowed-failures: 2242
+  max-allowed-failures: 375
   exec3-parallel: true
 - shard: enginextests-stable-sequential
   workers: 8
@@ -124,7 +124,7 @@
 - shard: zkevm-witness
   workers: 8
   # TODO: reduce to 0 as tests-zkevm@v0.6.2 support lands.
-  max-allowed-failures: 2246
+  max-allowed-failures: 375
 - shard: blocktests-stable-race-pre-cancun-sequential
   workers: 12
   max-allowed-failures: 0
@@ -164,10 +164,10 @@
 - shard: blocktests-devnet-race-amsterdam
   workers: 12
   # TODO: reduce to 0 as tests-glamsterdam-devnet@v7.2.0 support lands.
-  max-allowed-failures: 2242
+  max-allowed-failures: 375
   exec3-parallel: true
   run: 'fork_Amsterdam'
 - shard: zkevm-witness-race
   workers: 8
   # TODO: reduce to 0 as tests-zkevm@v0.6.2 support lands.
-  max-allowed-failures: 2246
+  max-allowed-failures: 375

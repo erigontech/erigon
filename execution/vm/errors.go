@@ -31,6 +31,7 @@ var (
 	// as opposed to from a JUMPSUB instruction
 	ErrInvalidSubroutineEntry   = errors.New("invalid subroutine entry")
 	ErrOutOfGas                 = errors.New("out of gas")
+	ErrPreExecutionOutOfGas     = fmt.Errorf("pre-execution: %w", ErrOutOfGas)
 	ErrCodeStoreOutOfGas        = errors.New("contract creation code storage out of gas")
 	ErrDepth                    = errors.New("max call depth exceeded")
 	ErrInsufficientBalance      = errors.New("insufficient balance for transfer")
