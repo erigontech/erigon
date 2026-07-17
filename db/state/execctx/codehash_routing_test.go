@@ -76,9 +76,6 @@ func TestCodeHashForAddr_InBatchAccountWinsOverStaleLRU(t *testing.T) {
 // interleaved between the read and the fill would leave a mapping derived from
 // the pre-apply record.
 func TestCodeHashForAddr_CacheSourcedRecordDoesNotSeedMapping(t *testing.T) {
-	if testing.Short() {
-		t.Skip()
-	}
 	t.Parallel()
 
 	ctx := t.Context()
@@ -128,9 +125,6 @@ func TestCodeHashForAddr_CacheSourcedRecordDoesNotSeedMapping(t *testing.T) {
 // A record read from the tx snapshot (accounts-cache miss) is exactly what the
 // admission gate vouches for, so it still seeds the mapping.
 func TestCodeHashForAddr_SnapshotSourcedRecordSeedsMapping(t *testing.T) {
-	if testing.Short() {
-		t.Skip()
-	}
 	t.Parallel()
 
 	ctx := t.Context()
