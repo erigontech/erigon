@@ -548,7 +548,7 @@ func GenerateChain(config *chain.Config, parent *types.Block, engine rules.Engin
 		// blockIO carries the per-phase write-sets: it feeds both the Amsterdam
 		// BAL and the versioned write-set commit, so create it for any versioned
 		// block, not only Amsterdam.
-		if versionMap != nil || (chainreader.Config().IsAmsterdam(b.header.Time) && !chainreader.Config().IsEIPDisabled(7928)) {
+		if versionMap != nil || (chainreader.Config().IsEIPEnabled(7928, b.header.Time)) {
 			b.blockIO = &state.VersionedIO{}
 		}
 		// Mutate the state and block according to any hard-fork specs
@@ -678,7 +678,7 @@ func GenerateChain(config *chain.Config, parent *types.Block, engine rules.Engin
 
 			var bal types.BlockAccessList
 			var balBytes []byte
-			if config.IsAmsterdam(b.header.Time) && !config.IsEIPDisabled(7928) {
+			if config.IsEIPEnabled(7928, b.header.Time) {
 				bal = b.blockIO.AsBlockAccessList()
 				balHash := bal.Hash()
 				b.header.BlockAccessListHash = &balHash

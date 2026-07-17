@@ -543,7 +543,7 @@ func GenesisWithoutStateToBlock(g *types.Genesis) (head *types.Header, withdrawa
 	}
 
 	if g.Config != nil && g.Config.IsAmsterdam(g.Timestamp) {
-		if !g.Config.IsEIPDisabled(7928) {
+		if g.Config.IsEIPEnabled(7928, g.Timestamp) {
 			if g.BlockAccessListHash != nil {
 				head.BlockAccessListHash = g.BlockAccessListHash
 			} else {
