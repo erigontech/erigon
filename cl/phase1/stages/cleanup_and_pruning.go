@@ -11,7 +11,11 @@ import (
 // cleanupAndPruning cleans up the database and prunes old data.
 func cleanupAndPruning(ctx context.Context, logger log.Logger, cfg *Cfg, args Args) error {
 	t := time.Now()
-	defer func() { log.Warn("[dbg] cleanupAndPruning", "took", time.Since(t)) }()
+	defer func() {
+		if took := time.Since(t); took > 1*time.Second {
+			log.Warn("[dbg] cleanupAndPruning", "took", took)
+		}
+	}()
 	tx, err := cfg.indiciesDB.BeginRw(ctx)
 	if err != nil {
 		return err
