@@ -283,6 +283,9 @@ type domainVisibleEnds struct {
 	state atomic.Uint32
 }
 
+// state packs a loaded and an available bit per domain — compile-time capacity check.
+var _ [32 - 2*int(kv.DomainLen)]struct{}
+
 func (v *domainVisibleEnds) get(tx *Tx, domain kv.Domain) (uint64, bool) {
 	bit := uint32(1) << uint32(domain)
 	state := v.state.Load()
