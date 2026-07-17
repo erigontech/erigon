@@ -24,6 +24,7 @@ import (
 	"testing"
 
 	"github.com/erigontech/erigon/common/crypto"
+	"github.com/erigontech/erigon/common/race"
 )
 
 func bytesOfLen(n int, seed byte) []byte {
@@ -118,6 +119,12 @@ func TestSha256Repeatable(t *testing.T) {
 // Joins too large for the stack buffer take the pooled scratch buffer, which keeps
 // them allocation-free too.
 func TestSha256JoinedPathAllocFree(t *testing.T) {
+	// sync.Pool deliberately drops values under the race detector, so the pooled path
+	// always allocates there and can't be measured.
+	//goland:noinspection GoBoolExpressions
+	if race.Enabled {
+		t.Skip("sync.Pool does not pool under -race")
+	}
 	big, extra := bytesOfLen(4096, 7), bytesOfLen(32, 8)
 	if n := testing.AllocsPerRun(200, func() { crypto.Sha256(big, extra) }); n != 0 {
 		t.Errorf("crypto.Sha256(4096B, 32B) allocs = %v, want 0 (pooled join buffer)", n)
