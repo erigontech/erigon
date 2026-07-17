@@ -84,7 +84,6 @@ func NewEVMBlockContext(header *types.Header, blockHashFunc func(n uint64) (comm
 		postApplyMessageFunc = engine.GetPostApplyMessageFunc()
 	} else {
 		transferFunc = misc.Transfer
-		postApplyMessageFunc = misc.LogSelfDestructedAccounts
 	}
 
 	var slotNumber uint64

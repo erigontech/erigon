@@ -20,7 +20,7 @@ import (
 	"bytes"
 	"encoding/binary"
 	"fmt"
-	"sort"
+	"slices"
 
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/execution/commitment/nibbles"
@@ -151,7 +151,7 @@ func (p *ContractTrunkPreloadParallel) Run(
 		}
 		if len(v) >= 4 { // 2-byte touchMap || 2-byte afterMap || per-child data
 			bitmap := binary.BigEndian.Uint16(v[2:4])
-			for n := 0; n < 16; n++ {
+			for n := range 16 {
 				if bitmap&(1<<uint(n)) == 0 {
 					continue
 				}
@@ -167,7 +167,7 @@ func (p *ContractTrunkPreloadParallel) Run(
 	for !budgetHit && p.nextDepth <= maxStorageTrunkDepth && len(p.frontier) > 0 {
 		depth := p.nextDepth
 		// Ascending key order so the file-batch partition is contiguous-in-file.
-		sort.Slice(p.frontier, func(i, j int) bool { return bytes.Compare(p.frontier[i].key, p.frontier[j].key) < 0 })
+		slices.SortFunc(p.frontier, func(a, b pathKey) int { return bytes.Compare(a.key, b.key) })
 
 		var dbHits []pathKey
 		var dbVals [][]byte

@@ -17,10 +17,11 @@
 package commitment
 
 import (
+	"cmp"
 	"encoding/hex"
 	"fmt"
 	"os"
-	"sort"
+	"slices"
 	"strings"
 
 	toml "github.com/pelletier/go-toml/v2"
@@ -110,8 +111,8 @@ func BuildTrieTrace(rc *RecordingContext, inputKeys map[string]struct{}, trieSta
 	}
 
 	// Sort updates by plain key for deterministic output.
-	sort.Slice(tt.Updates, func(i, j int) bool {
-		return tt.Updates[i].PlainKey < tt.Updates[j].PlainKey
+	slices.SortFunc(tt.Updates, func(a, b TraceKeyUpdate) int {
+		return cmp.Compare(a.PlainKey, b.PlainKey)
 	})
 
 	// Include PutBranch writes if any were recorded.

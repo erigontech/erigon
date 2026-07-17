@@ -42,7 +42,7 @@ func TestDeepFold_SingleSlotCollapseThenDeepReexpand(t *testing.T) {
 	a := hex.EncodeToString(addr)
 
 	survNib := -1
-	for x := 0; x < 16; x++ {
+	for x := range 16 {
 		if len(groups[x]) >= 1 {
 			survNib = x
 			break
@@ -63,7 +63,7 @@ func TestDeepFold_SingleSlotCollapseThenDeepReexpand(t *testing.T) {
 	wu2[0].Nonce = 7
 	deleted := 0
 	kept := false
-	for x := 0; x < 16; x++ {
+	for x := range 16 {
 		for _, kv := range groups[x] {
 			if !kept {
 				kept = true // survivor slot, in survNib

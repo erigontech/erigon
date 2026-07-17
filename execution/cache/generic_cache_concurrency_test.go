@@ -37,17 +37,17 @@ import (
 // -race, this must stay clean.
 func TestGenericCache_ConcurrentPutAcrossGrow(t *testing.T) {
 	// Budget well above the start size (1024 slots) so maybeGrow fires repeatedly.
-	c := NewGenericCache[[]byte](64*datasize.MB, func(v []byte) int { return len(v) }, ModeEvictLRU)
+	c := closeOnCleanup(t, NewGenericCache[[]byte](64*datasize.MB, func(v []byte) int { return len(v) }, ModeEvictLRU))
 
 	const workers = 8
 	const perWorker = 20_000
 	var wg sync.WaitGroup
-	for w := 0; w < workers; w++ {
+	for w := range workers {
 		wg.Add(1)
 		go func(base int) {
 			defer wg.Done()
 			key := make([]byte, 8)
-			for i := 0; i < perWorker; i++ {
+			for i := range perWorker {
 				binary.BigEndian.PutUint64(key, uint64(base*perWorker+i))
 				c.Put(key, []byte{byte(i)}, uint64(i))
 				c.Get(key)
@@ -69,7 +69,7 @@ func TestGenericCache_PutNotLostAcrossGrow(t *testing.T) {
 		binary.BigEndian.PutUint64(b, n)
 		return b
 	}
-	for round := 0; round < 50; round++ {
+	for round := range 50 {
 		c := NewGenericCache[[]byte](64*datasize.MB, func(v []byte) int { return len(v) }, ModeEvictLRU)
 		hot := []byte("hot-key")
 		c.Put(hot, value(0), 1)
@@ -118,7 +118,7 @@ func TestGenericCache_PutNotLostAcrossGrow(t *testing.T) {
 		// Cross the grow threshold so maybeGrow swaps the generation while the
 		// hot-key writer runs.
 		key := make([]byte, 8)
-		for i := 0; i < 3*genericCacheStartCapacity; i++ {
+		for i := range 3 * genericCacheStartCapacity {
 			binary.BigEndian.PutUint64(key, uint64(1+i))
 			c.Put(key, []byte{1}, 1)
 		}
@@ -145,10 +145,10 @@ func TestGenericCache_PutNotLostAcrossGrow(t *testing.T) {
 func TestGenericCache_PutIfAbsentDefersAcrossGrow(t *testing.T) {
 	fresh := []byte("fresh-value")
 	stale := []byte("stale-value")
-	for round := 0; round < 100; round++ {
+	for round := range 100 {
 		c := NewGenericCache[[]byte](64*datasize.MB, func(v []byte) int { return len(v) }, ModeEvictLRU)
 		key := make([]byte, 8)
-		for i := 0; i < 256; i++ {
+		for i := range 256 {
 			binary.BigEndian.PutUint64(key, uint64(1+i))
 			c.Put(key, []byte{1}, 1)
 		}
@@ -216,7 +216,7 @@ func TestGenericCache_ModeNoOpAdmissionAtomicWithUpdate(t *testing.T) {
 	v := []byte("valuevalu") // entry size 20+9+24 = 53: the budget fits exactly one entry
 	c := newGenericCacheEntries(datasize.ByteSize(53), 8, func(v []byte) int { return len(v) }, ModeNoOp)
 	c.Put(a, v, 1)
-	for round := 0; round < 200000; round++ {
+	for round := range 200000 {
 		var wg sync.WaitGroup
 		wg.Add(2)
 		go func() { defer wg.Done(); c.Put(a, v, 2) }()
@@ -298,7 +298,7 @@ func TestGenericCache_CapacityEvictionAtomicWithPut_NoSizeDrift(t *testing.T) {
 		}
 	}
 	v := []byte("value-one")
-	for round := 0; round < 100000; round++ {
+	for range 100000 {
 		c.Put(b, v, 10)
 		var wg sync.WaitGroup
 		wg.Add(2)
@@ -346,6 +346,58 @@ func TestGenericCache_ClearRacingPut_EpochAlias(t *testing.T) {
 	require.False(t, ok, "entry at txNum 200 outlived an unwind to 150: its pre-Clear epoch stamp aliases the live epoch")
 }
 
+// A reader that captures a dead (unwind-invalidated) entry from the retiring
+// generation must not have it revalidated by Clear's coherence re-init:
+// judged against the post-Init state (fresh epoch, lifted floor), the entry
+// passes IsStale and dead-fork state is served. Coherence is snapshotted
+// before the generation load, so an old-generation entry is always judged by
+// coherence that still carries the unwind.
+//
+// The reader gates on the fence reaching the key's stripe — the last one the
+// sweep locks — so its Get lands next to the Init that follows.
+func TestGenericCache_ClearRacingGet_DeadEntryStaysDead(t *testing.T) {
+	var key []byte
+	for i := 0; ; i++ {
+		k := make([]byte, 8)
+		binary.BigEndian.PutUint64(k, uint64(i))
+		if maphash.Hash(k)&(putStripeCount-1) == putStripeCount-1 {
+			key = k
+			break
+		}
+	}
+	dead := []byte("dead-fork-value")
+	c := NewDomainCacheMode(1*datasize.MB, ModeEvictLRU)
+	defer c.Close()
+	for round := range 2000 {
+		c.Put(key, dead, 200)
+		c.Unwind(150) // the entry is dead-fork state; it must never be served again
+		var served atomic.Bool
+		var wg sync.WaitGroup
+		wg.Add(2)
+		go func() { defer wg.Done(); c.Clear() }()
+		go func() {
+			defer wg.Done()
+			mu := &c.putStripes[putStripeCount-1]
+			for range 1 << 16 {
+				if mu.TryLock() {
+					mu.Unlock()
+					continue
+				}
+				break
+			}
+			for range 4 {
+				if _, ok := c.Get(key); ok {
+					served.Store(true)
+					return
+				}
+			}
+		}()
+		wg.Wait()
+		require.False(t, served.Load(),
+			"round %d: Clear revalidated an unwind-invalidated entry for a concurrent reader", round)
+	}
+}
+
 // The evictions counter must carry capacity evictions only. Routing
 // intentional removals through it — decrement-compensated or netted against a
 // removal counter at print time — races a concurrent stats reset: the swap
@@ -373,7 +425,7 @@ func TestGenericCache_StatsResetAtomicWithDelete_NoPhantomEvictions(t *testing.T
 		}
 	}()
 	total := uint64(0)
-	for i := 0; i < 1_000_000; i++ {
+	for range 1_000_000 {
 		total += c.evictions.Swap(0)
 	}
 	close(stop)

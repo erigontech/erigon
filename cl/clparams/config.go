@@ -17,13 +17,14 @@
 package clparams
 
 import (
+	"cmp"
 	"encoding/hex"
 	"errors"
 	"fmt"
 	"math"
 	mathrand "math/rand"
 	"os"
-	"sort"
+	"slices"
 	"time"
 
 	"gopkg.in/yaml.v3"
@@ -728,8 +729,7 @@ type BeaconChainConfig struct {
 // GetBlobParameters returns the blob parameters at a given epoch
 func (b *BeaconChainConfig) GetBlobParameters(epoch uint64) BlobParameters {
 	// Iterate through schedule in desc order
-	for i := len(b.BlobSchedule) - 1; i >= 0; i-- {
-		entry := b.BlobSchedule[i]
+	for _, entry := range slices.Backward(b.BlobSchedule) {
 		if epoch >= entry.Epoch {
 			return entry
 		}
@@ -832,8 +832,8 @@ func (b *BeaconChainConfig) AttestationDueMs(gloas bool) uint64 {
 func (b *BeaconChainConfig) InitializeForkSchedule() {
 	b.ForkVersionSchedule = configForkSchedule(b)
 	// sort blob schedule by epoch in ascending order
-	sort.Slice(b.BlobSchedule, func(i, j int) bool {
-		return b.BlobSchedule[i].Epoch < b.BlobSchedule[j].Epoch
+	slices.SortFunc(b.BlobSchedule, func(a, b BlobParameters) int {
+		return cmp.Compare(a.Epoch, b.Epoch)
 	})
 }
 

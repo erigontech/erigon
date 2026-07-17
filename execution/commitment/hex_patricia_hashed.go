@@ -18,6 +18,7 @@ package commitment
 
 import (
 	"bytes"
+	"cmp"
 	"context"
 	"encoding/binary"
 	"encoding/hex"
@@ -26,7 +27,7 @@ import (
 	"io"
 	"math/bits"
 	"runtime"
-	"sort"
+	"slices"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -1329,7 +1330,7 @@ func (hph *HexPatriciaHashed) PrintGrid() {
 	fmt.Printf("GRID:\n")
 	for row := 0; row < hph.activeRows; row++ {
 		fmt.Printf("row %d depth %d:\n", row, hph.depths[row])
-		for col := 0; col < 16; col++ {
+		for col := range 16 {
 			cell := &hph.grid[row][col]
 			if cell.hashedExtLen > 0 || cell.accountAddrLen > 0 {
 				var cellHash []byte
@@ -1518,7 +1519,7 @@ func (hph *HexPatriciaHashed) unfold(hashedKey []byte, unfolding int16) error {
 		hph.currentKeyLen++
 	}
 	row := hph.activeRows
-	for i := 0; i < 16; i++ {
+	for i := range 16 {
 		hph.grid[row][i].reset()
 	}
 	hph.touchMap[row], hph.afterMap[row], hph.branchBefore[row] = 0, 0, false
@@ -2115,7 +2116,7 @@ func (hph *HexPatriciaHashed) detectCollapseBeforeDelete(hashedKey []byte) {
 
 	// Find the sibling nibble (the other set bit in afterMap)
 	siblingNibble := -1
-	for i := 0; i < 16; i++ {
+	for i := range 16 {
 		if hph.afterMap[parentRow]&(1<<i) != 0 && i != deleteNibble {
 			siblingNibble = i
 			break
@@ -2618,7 +2619,7 @@ func (hph *HexPatriciaHashed) Process(ctx context.Context, updates *Updates, log
 		for k := range hph.hadToLoadL {
 			ends = append(ends, k)
 		}
-		sort.Slice(ends, func(i, j int) bool { return ends[i] > ends[j] })
+		slices.SortFunc(ends, func(a, b uint64) int { return cmp.Compare(b, a) })
 		var Li int
 		for _, k := range ends {
 			v := hph.hadToLoadL[k]
@@ -2755,7 +2756,7 @@ func (s *state) Encode(buf []byte) ([]byte, error) {
 		return nil, fmt.Errorf("encode root: %w", err)
 	}
 	d := make([]byte, len(s.Depths))
-	for i := 0; i < len(s.Depths); i++ {
+	for i := range len(s.Depths) {
 		d[i] = byte(s.Depths[i])
 	}
 	if n, err := ee.Write(d); err != nil || n != len(s.Depths) {
@@ -2769,7 +2770,7 @@ func (s *state) Encode(buf []byte) ([]byte, error) {
 	}
 
 	var before1, before2 uint64
-	for i := 0; i < 64; i++ {
+	for i := range 64 {
 		if s.BranchBefore[i] {
 			before1 |= 1 << i
 		}
@@ -2817,7 +2818,7 @@ func (s *state) Decode(buf []byte) error {
 	if err := binary.Read(aux, binary.BigEndian, &d); err != nil {
 		return fmt.Errorf("depths: %w", err)
 	}
-	for i := 0; i < len(s.Depths); i++ {
+	for i := range len(s.Depths) {
 		s.Depths[i] = int16(d[i])
 	}
 	if err := binary.Read(aux, binary.BigEndian, &s.TouchMap); err != nil {
@@ -2834,7 +2835,7 @@ func (s *state) Decode(buf []byte) error {
 		return fmt.Errorf("branchBefore2: %w", err)
 	}
 
-	for i := 0; i < 64; i++ {
+	for i := range 64 {
 		if branch1&(1<<i) != 0 {
 			s.BranchBefore[i] = true
 		}
@@ -2983,7 +2984,7 @@ func (hph *HexPatriciaHashed) SetState(buf []byte) error {
 		hph.rootPresent = false
 		hph.activeRows = 0
 
-		for i := 0; i < len(hph.depths); i++ {
+		for i := range len(hph.depths) {
 			hph.depths[i] = 0
 			hph.branchBefore[i] = false
 			hph.touchMap[i] = 0
@@ -3097,8 +3098,8 @@ func HexTrieStateToString(enc []byte) (string, error) {
 	printAfterMap := func(sb *strings.Builder, name string, list []uint16, depths []int16, existedBefore []bool) {
 		fmt.Fprintf(sb, "\t::%s::\n\n", name)
 		lastNonZero := 0
-		for i := len(list) - 1; i >= 0; i-- {
-			if list[i] != 0 {
+		for i, l := range slices.Backward(list) {
+			if l != 0 {
 				lastNonZero = i
 				break
 			}

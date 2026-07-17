@@ -21,6 +21,7 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
+	"slices"
 	"sort"
 
 	lru "github.com/hashicorp/golang-lru/v2"
@@ -29,12 +30,12 @@ import (
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/db/dbservices"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/dbutils"
 	"github.com/erigontech/erigon/db/kv/rawdbv3"
 	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/db/recsplit"
-	"github.com/erigontech/erigon/db/services"
 	"github.com/erigontech/erigon/db/snapshotsync"
 	"github.com/erigontech/erigon/db/snapshotsync/blocksnapshots"
 	"github.com/erigontech/erigon/db/snaptype"
@@ -137,12 +138,12 @@ func (r *RemoteBlockReader) HeaderByNumber(ctx context.Context, tx kv.Getter, bl
 	}
 	return block.Header(), nil
 }
-func (r *RemoteBlockReader) Snapshots() services.BlockSnapshots    { panic("not implemented") }
-func (r *RemoteBlockReader) BorSnapshots() services.BlockSnapshots { panic("not implemented") }
-func (r *RemoteBlockReader) AllTypes() []snaptype.Type             { panic("not implemented") }
-func (r *RemoteBlockReader) FrozenBlocks() uint64                  { panic("not supported") }
-func (r *RemoteBlockReader) FrozenBorBlocks(align bool) uint64     { panic("not supported") }
-func (r *RemoteBlockReader) FreezingCfg() ethconfig.BlocksFreezing { panic("not supported") }
+func (r *RemoteBlockReader) Snapshots() dbservices.BlockSnapshots    { panic("not implemented") }
+func (r *RemoteBlockReader) BorSnapshots() dbservices.BlockSnapshots { panic("not implemented") }
+func (r *RemoteBlockReader) AllTypes() []snaptype.Type               { panic("not implemented") }
+func (r *RemoteBlockReader) FrozenBlocks() uint64                    { panic("not supported") }
+func (r *RemoteBlockReader) FrozenBorBlocks(align bool) uint64       { panic("not supported") }
+func (r *RemoteBlockReader) FreezingCfg() ethconfig.BlocksFreezing   { panic("not supported") }
 
 func (r *RemoteBlockReader) HeaderByHash(ctx context.Context, tx kv.Getter, hash common.Hash) (*types.Header, error) {
 	blockNum, err := r.HeaderNumber(ctx, tx, hash)
@@ -182,7 +183,7 @@ func (r *RemoteBlockReader) BlockForTxNum(ctx context.Context, tx kv.Tx, txnNum 
 	return reply.BlockNumber, reply.Present, nil
 }
 
-var _ services.FullBlockReader = &RemoteBlockReader{}
+var _ dbservices.FullBlockReader = &RemoteBlockReader{}
 
 func NewRemoteBlockReader(client remoteproto.ETHBACKENDClient) *RemoteBlockReader {
 	br := &RemoteBlockReader{
@@ -374,7 +375,7 @@ type BlockReader struct {
 var headerByNumCacheSize = dbg.EnvInt("RPC_HEADER_BY_NUM_LRU", 1_000)
 var canonicalHashCacheSize = dbg.EnvInt("RPC_CANONICAL_HASH_LRU", 10_000)
 
-func NewBlockReader(snapshots services.BlockSnapshots, borSnapshots services.BlockSnapshots) *BlockReader {
+func NewBlockReader(snapshots dbservices.BlockSnapshots, borSnapshots dbservices.BlockSnapshots) *BlockReader {
 	borSn, _ := borSnapshots.(*heimdall.RoSnapshots)
 	sn, _ := snapshots.(*blocksnapshots.RoSnapshots)
 	br := &BlockReader{sn: sn, borSn: borSn}
@@ -387,8 +388,8 @@ func NewBlockReader(snapshots services.BlockSnapshots, borSnapshots services.Blo
 func (r *BlockReader) CanPruneTo(currentBlockInDB uint64) uint64 {
 	return CanDeleteTo(currentBlockInDB, r.sn.BlocksAvailable())
 }
-func (r *BlockReader) Snapshots() services.BlockSnapshots { return r.sn }
-func (r *BlockReader) BorSnapshots() services.BlockSnapshots {
+func (r *BlockReader) Snapshots() dbservices.BlockSnapshots { return r.sn }
+func (r *BlockReader) BorSnapshots() dbservices.BlockSnapshots {
 	if r.borSn != nil {
 		return r.borSn
 	}
@@ -649,8 +650,8 @@ func (r *BlockReader) HeaderByHash(ctx context.Context, tx kv.Getter, hash commo
 	defer release()
 
 	buf := make([]byte, 128)
-	for i := len(segments) - 1; i >= 0; i-- {
-		h, err = r.headerFromSnapshotByHash(hash, segments[i], buf)
+	for _, segment := range slices.Backward(segments) {
+		h, err = r.headerFromSnapshotByHash(hash, segment, buf)
 		if err != nil {
 			return nil, err
 		}
@@ -1116,7 +1117,7 @@ func BodyForTxnFromSnapshot(blockHeight uint64, sn *snapshotsync.VisibleSegment,
 		return nil, buf, nil
 	}
 	b := &types.BodyOnlyTxn{}
-	if err := rlp.DecodeBytesPartial(buf, b); err != nil {
+	if err := b.DecodeRLPBytes(buf); err != nil {
 		return nil, buf, err
 	}
 
@@ -1176,7 +1177,7 @@ func (r *BlockReader) txsFromSnapshot(baseTxnID uint64, txCount uint32, txsSeg *
 	}
 	gg := txsSeg.Src().MakeGetter()
 	gg.Reset(txnOffset)
-	for i := uint32(0); i < txCount; i++ {
+	for i := range txCount {
 		if !gg.HasNext() {
 			return nil, nil, nil
 		}
@@ -1215,11 +1216,8 @@ func (r *BlockReader) txnByID(txnID uint64, sn *snapshotsync.VisibleSegment, buf
 	txn.SetSender(accounts.InternAddress(*(*common.Address)(sender))) // see: https://tip.golang.org/ref/spec#Conversions_from_slice_to_array_pointer
 	return
 }
-
 func (r *BlockReader) txnByHash(txnHash common.Hash, segments []*snapshotsync.VisibleSegment, buf []byte) (types.Transaction, uint64, uint64, bool, error) {
-	for i := len(segments) - 1; i >= 0; i-- {
-		sn := segments[i]
-
+	for _, sn := range slices.Backward(segments) {
 		idxTxnHash := sn.Src().Index(snaptype2.Indexes.TxnHash)
 		idxTxnHash2BlockNum := sn.Src().Index(snaptype2.Indexes.TxnHash2BlockNum)
 
@@ -1357,7 +1355,7 @@ func (r *BlockReader) IterateFrozenBodies(tx kv.Getter, f func(blockNum, baseTxN
 		var b types.BodyOnlyTxn
 		for g.HasNext() {
 			buf, _ = g.Next(buf[:0])
-			if err := rlp.DecodeBytesPartial(buf, &b); err != nil {
+			if err := b.DecodeRLPBytes(buf); err != nil {
 				return err
 			}
 			if err := f(blockNum, b.BaseTxnID.U64(), uint64(b.TxCount)); err != nil {
@@ -1549,7 +1547,7 @@ func (r *BlockReader) BlockForTxNum(ctx context.Context, tx kv.Tx, txnNum uint64
 	return r.TxnumReader().FindBlockNum(ctx, tx, txnNum)
 }
 
-func TxBlockIndexFromBlockReader(r services.FullBlockReader) rawdbv3.TxBlockIndex {
+func TxBlockIndexFromBlockReader(r dbservices.FullBlockReader) rawdbv3.TxBlockIndex {
 	return &txBlockIndexWithBlockReader{
 		r:     r,
 		cache: NewBlockTxNumLookupCache(20),
@@ -1557,7 +1555,7 @@ func TxBlockIndexFromBlockReader(r services.FullBlockReader) rawdbv3.TxBlockInde
 }
 
 type txBlockIndexWithBlockReader struct {
-	r     services.FullBlockReader
+	r     dbservices.FullBlockReader
 	cache *BlockTxNumLookupCache
 }
 

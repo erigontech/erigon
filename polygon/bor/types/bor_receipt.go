@@ -39,7 +39,7 @@ func ComputeBorTxHash(blockNumber uint64, blockHash common.Hash) common.Hash {
 	txKeyPlain = append(txKeyPlain, BorTxKeyPrefix...)
 	txKeyPlain = append(txKeyPlain, BorReceiptKey(blockNumber)...)
 	txKeyPlain = append(txKeyPlain, blockHash[:]...)
-	return common.BytesToHash(crypto.Keccak256(txKeyPlain))
+	return crypto.Keccak256Hash(txKeyPlain)
 }
 
 // NewBorTransaction create new bor transaction for bor receipt
@@ -60,7 +60,7 @@ func DeriveFieldsForBorReceipt(receipt *types.Receipt, blockHash common.Hash, bl
 	receipt.BlockNumber = uint256.NewInt(blockNumber)
 
 	logIndex := 0
-	for i := 0; i < len(receipts); i++ {
+	for i := range receipts {
 		logIndex += len(receipts[i].Logs)
 	}
 

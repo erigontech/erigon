@@ -96,6 +96,7 @@ jobs:
       - name: Checkout git repository ${{ env.APP_REPO }} reference ${{ inputs.checkout_ref }}
         uses: actions/checkout@v7
         with:
+          persist-credentials: false
           repository: ${{ env.APP_REPO }}
           fetch-depth: 0
           ref: ${{ inputs.checkout_ref }}
@@ -366,6 +367,7 @@ jobs:
       - name: Fast checkout git repository erigontech/erigon-qa
         uses: actions/checkout@v7
         with:
+          persist-credentials: false
           token: ${{ secrets.ORG_GITHUB_ERIGONTECH_ERIGON_QA_READ }}
           repository: erigontech/erigon-qa
           fetch-depth: 1
@@ -563,6 +565,7 @@ jobs:
     - name: Fast checkout just ${{ env.DOCKERFILE_PATH }} from git repository ${{ env.APP_REPO }}
       uses: actions/checkout@v7
       with:
+        persist-credentials: false
         repository: ${{ env.APP_REPO }}
         sparse-checkout: ${{ env.DOCKERFILE_PATH }}
         sparse-checkout-cone-mode: false
@@ -622,6 +625,7 @@ jobs:
         client-id: ${{ vars.RELEASE_BOT_APP_ID }}
         private-key: ${{ secrets.RELEASE_BOT_APP_KEY }}
         repositories: "erigon"
+        permission-contents: write
 
     - name: Download linux/arm64 artifact
       uses: actions/download-artifact@v8
@@ -686,7 +690,8 @@ jobs:
 
     - name: Checkout git repository ${{ env.APP_REPO }} at release commit
       if: ${{ inputs.perform_release && inputs.release_version != '' }}
-      uses: actions/checkout@v7
+      # Token must persist: the next step pushes the release tag with it.
+      uses: actions/checkout@v7 # zizmor: ignore[artipacked]
       with:
         repository: ${{ env.APP_REPO }}
         fetch-depth: 1
@@ -787,9 +792,11 @@ jobs:
           client-id: ${{ vars.RELEASE_BOT_APP_ID }}
           private-key: ${{ secrets.RELEASE_BOT_APP_KEY }}
           repositories: "erigon"
+          permission-contents: write
 
       - name: Checkout git repository ${{ env.APP_REPO }} reference ${{ inputs.checkout_ref }}
-        uses: actions/checkout@v7
+        # Token must persist: the next step deletes the release tag with it.
+        uses: actions/checkout@v7 # zizmor: ignore[artipacked]
         with:
           repository: ${{ env.APP_REPO }}
           fetch-depth: 0

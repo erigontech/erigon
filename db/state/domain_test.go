@@ -18,6 +18,7 @@ package state
 
 import (
 	"bytes"
+	"cmp"
 	"context"
 	"encoding/binary"
 	"encoding/hex"
@@ -29,7 +30,7 @@ import (
 	"math/rand/v2"
 	"os"
 	"path/filepath"
-	"sort"
+	"slices"
 	"strconv"
 	"strings"
 	"testing"
@@ -1048,7 +1049,7 @@ func TestDomain_Delete(t *testing.T) {
 	defer writer.Close()
 
 	// Put on even txNum, delete on odd txNum
-	for txNum := uint64(0); txNum < uint64(1000); txNum++ {
+	for txNum := range uint64(1000) {
 		original, _, _, err := domainRoTx.GetLatest([]byte("key1"), tx)
 		require.NoError(err)
 		if txNum%2 == 0 {
@@ -1066,7 +1067,7 @@ func TestDomain_Delete(t *testing.T) {
 	// Check the history
 	domainRoTx = d.beginForTests()
 	defer domainRoTx.Close()
-	for txNum := uint64(0); txNum < 1000; txNum++ {
+	for txNum := range uint64(1000) {
 		label := fmt.Sprintf("txNum=%d", txNum)
 		//val, ok, err := domainRoTx.GetLatestBeforeTxNum([]byte("key1"), txNum+1, tx)
 		//require.NoError(err)
@@ -1150,7 +1151,7 @@ func TestDomain_Prune_AfterAllWrites(t *testing.T) {
 	var k, v [8]byte
 
 	for txNum := uint64(1); txNum <= txCount; txNum++ {
-		for keyNum := uint64(0); keyNum < keyCount; keyNum++ {
+		for keyNum := range keyCount {
 			step := txNum / dom.stepSize
 			frozenFileNum := step / 32
 			if frozenFileNum < maxFrozenFiles { // frozen data
@@ -1582,7 +1583,7 @@ func TestDomainContext_getFromFiles(t *testing.T) {
 
 	defer func(t time.Time) { fmt.Printf("domain_test.go:1217: %s\n", time.Since(t)) }(time.Now())
 	var prev []byte
-	for i = 0; i < len(vals); i++ {
+	for i = range vals {
 
 		for j := 0; j < len(keys); j++ {
 			acc := accounts3.Account{
@@ -1648,7 +1649,7 @@ func TestDomainContext_getFromFiles(t *testing.T) {
 		var i int
 
 		beforeTx := d.stepSize
-		for i = 0; i < len(bufs); i++ {
+		for i = range bufs {
 			ks, _ := hex.DecodeString(key)
 			val, _, err := domainRoTx.GetAsOf(ks, beforeTx, tx)
 			require.NoError(t, err)
@@ -1691,7 +1692,7 @@ func filledDomainFixedSize(t *testing.T, keysCount, txCount, aggStep uint64, log
 	for txNum := uint64(1); txNum <= txCount; txNum++ {
 		step := txNum / d.stepSize
 		frozenFileNum := step / 32
-		for keyNum := uint64(0); keyNum < keysCount; keyNum++ {
+		for keyNum := range keysCount {
 			if frozenFileNum < maxFrozenFiles { // frozen data
 				allowInsert := (keyNum == 0 && frozenFileNum == 0) ||
 					(keyNum == 1 && (frozenFileNum == 1 || frozenFileNum == 2)) ||
@@ -1767,7 +1768,7 @@ func generateUpdates(r *rndGen, totalTx, keyTxsLimit uint64) []upd {
 	updates := make([]upd, 0)
 	usedTxNums := make(map[uint64]bool)
 
-	for i := uint64(0); i < keyTxsLimit; i++ {
+	for i := range keyTxsLimit {
 		txNum := generateRandomTxNum(r, totalTx, usedTxNums)
 		up := upd{txNum: txNum, value: []byte{}}
 
@@ -1779,7 +1780,7 @@ func generateUpdates(r *rndGen, totalTx, keyTxsLimit uint64) []upd {
 		updates = append(updates, up)
 		usedTxNums[txNum] = true
 	}
-	sort.Slice(updates, func(i, j int) bool { return updates[i].txNum < updates[j].txNum })
+	slices.SortFunc(updates, func(a, b upd) int { return cmp.Compare(a.txNum, b.txNum) })
 
 	return updates
 }
@@ -1825,7 +1826,7 @@ func TestDomain_GetAfterAggregation(t *testing.T) {
 	data := generateTestData(t, keySize1, keySize2, totalTx, keyTxsLimit, keyLimit)
 	for key, updates := range data {
 		pv := []byte{}
-		for i := 0; i < len(updates); i++ {
+		for i := range updates {
 			if i > 0 {
 				pv = updates[i-1].value
 			}
@@ -1904,7 +1905,7 @@ func TestDomainRange(t *testing.T) {
 
 	for key, updates := range data {
 		pv := []byte{}
-		for i := 0; i < len(updates); i++ {
+		for i := range updates {
 			if i > 0 {
 				pv = updates[i-1].value
 			}
@@ -2017,7 +2018,7 @@ func TestDomain_CanScanPruneAfterAggregation(t *testing.T) {
 	data := generateTestData(t, keySize1, keySize2, totalTx, keyTxsLimit, keyLimit)
 	for key, updates := range data {
 		p := []byte{}
-		for i := 0; i < len(updates); i++ {
+		for i := range updates {
 			writer.PutWithPrev([]byte(key), updates[i].value, updates[i].txNum, p)
 			p = common.Copy(updates[i].value)
 		}
@@ -2118,7 +2119,7 @@ func TestDomain_PruneAfterAggregation(t *testing.T) {
 	data := generateTestData(t, keySize1, keySize2, totalTx, keyTxsLimit, keyLimit)
 	for key, updates := range data {
 		p := []byte{}
-		for i := 0; i < len(updates); i++ {
+		for i := range updates {
 			writer.PutWithPrev([]byte(key), updates[i].value, updates[i].txNum, p)
 			p = common.Copy(updates[i].value)
 		}
@@ -2266,7 +2267,7 @@ func TestDomain_PruneProgress(t *testing.T) {
 	// No segment files are built, so history CanPrune returns false and
 	// history.Prune is a no-op, letting us test domain values prune in isolation.
 	var k, v [8]byte
-	for keyNum := uint64(0); keyNum < keyCount; keyNum++ {
+	for keyNum := range uint64(keyCount) {
 		binary.BigEndian.PutUint64(k[:], keyNum)
 		binary.BigEndian.PutUint64(v[:], keyNum) // distinct value per key
 		err = writer.PutWithPrev(k[:], v[:], 1, nil)
@@ -2383,7 +2384,7 @@ func TestDomain_PruneRollingCursorProgress(t *testing.T) {
 		defer w.Close()
 		txNum := uint64(step)*stepSize + 1 // first txNum of the step
 		var k, v [8]byte
-		for keyNum := uint64(0); keyNum < keyCount; keyNum++ {
+		for keyNum := range uint64(keyCount) {
 			binary.BigEndian.PutUint64(k[:], keyNum)
 			binary.BigEndian.PutUint64(v[:], txNum+keyNum)
 			require.NoError(t, w.PutWithPrev(k[:], v[:], txNum, nil))
@@ -2488,7 +2489,7 @@ func TestDomain_Unwind(t *testing.T) {
 		defer writer.Close()
 		var preval1, preval2, preval3, preval4 []byte
 
-		for i := uint64(0); i < maxTx; i++ {
+		for i := range maxTx {
 			writer.diff = &kv.DomainDiff{}
 			if i%3 == 0 && i > 0 { // once in 3 txn Put key3 -> value3.i and skip other keys update
 				if i%12 == 0 { // once in 12 txn delete key3 before update
@@ -2904,7 +2905,7 @@ func TestDomainContext_findShortenedKey(t *testing.T) {
 	data := generateTestData(t, keySize1, keySize2, totalTx, keyTxsLimit, keyLimit)
 	for key, updates := range data {
 		p := []byte{}
-		for i := 0; i < len(updates); i++ {
+		for i := range updates {
 			writer.PutWithPrev([]byte(key), updates[i].value, updates[i].txNum, p)
 			p = common.Copy(updates[i].value)
 		}
@@ -2945,9 +2946,9 @@ func TestDomainContext_findShortenedKey(t *testing.T) {
 		v, found, st, en, err := domainRoTx.getLatestFromFiles([]byte(key), 0)
 		require.True(t, found)
 		require.NoError(t, err)
-		for i := len(updates) - 1; i >= 0; i-- {
-			if st <= updates[i].txNum && updates[i].txNum < en {
-				require.Equal(t, updates[i].value, v)
+		for _, update := range slices.Backward(updates) {
+			if st <= update.txNum && update.txNum < en {
+				require.Equal(t, update.value, v)
 				break
 			}
 		}

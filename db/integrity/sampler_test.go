@@ -23,7 +23,7 @@ import (
 
 func TestSampler_CanSkip_FullSample(t *testing.T) {
 	s := NewSampler(42, 1.0)
-	for i := 0; i < 1000; i++ {
+	for range 1000 {
 		if s.CanSkip() {
 			t.Fatal("CanSkip() returned true with sampleRatio=1.0")
 		}
@@ -34,7 +34,7 @@ func TestSampler_CanSkip_ZeroSample(t *testing.T) {
 	s := NewSampler(42, 0.0)
 	skipped := 0
 	const n = 1000
-	for i := 0; i < n; i++ {
+	for range n {
 		if s.CanSkip() {
 			skipped++
 		}
@@ -51,7 +51,7 @@ func TestSampler_CanSkip_SampleRate(t *testing.T) {
 	const n = 100_000
 	s := NewSampler(seed, ratio)
 	kept := 0
-	for i := 0; i < n; i++ {
+	for range n {
 		if !s.CanSkip() {
 			kept++
 		}
@@ -65,7 +65,7 @@ func TestSampler_CanSkip_SampleRate(t *testing.T) {
 func TestSampler_CanSkip_Reproducible(t *testing.T) {
 	s1 := NewSampler(7, 0.5)
 	s2 := NewSampler(7, 0.5)
-	for i := 0; i < 20; i++ {
+	for i := range 20 {
 		a, b := s1.CanSkip(), s2.CanSkip()
 		if a != b {
 			t.Fatalf("same seed produced different result at index %d", i)

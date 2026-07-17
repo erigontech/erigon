@@ -640,7 +640,7 @@ func TestMemStore_ConcurrentCursors(t *testing.T) {
 					continue
 				}
 
-				for i := 0; i < 5; i++ {
+				for range 5 {
 					k, _, err = c.Next()
 					if err != nil {
 						t.Errorf("Next error: %v", err)

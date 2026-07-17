@@ -43,9 +43,9 @@ import (
 	"github.com/erigontech/erigon/common/length"
 	"github.com/erigontech/erigon/common/log/v3"
 	math2 "github.com/erigontech/erigon/common/math"
+	"github.com/erigontech/erigon/db/dbservices"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/rawdb"
-	"github.com/erigontech/erigon/db/services"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/protocol/misc"
 	"github.com/erigontech/erigon/execution/protocol/params"
@@ -293,7 +293,7 @@ type Bor struct {
 	mutex       sync.Mutex
 	chainConfig *chain.Config     // Chain config
 	config      *borcfg.BorConfig // Rules engine configuration parameters for bor rules
-	blockReader services.FullBlockReader
+	blockReader dbservices.FullBlockReader
 
 	Signatures   *lru.ARCCache[common.Hash, accounts.Address] // Signatures of recent blocks to speed up mining
 	Dependencies *lru.ARCCache[common.Hash, [][]int]
@@ -324,7 +324,7 @@ type signer struct {
 // New creates a Matic Bor rules engine.
 func New(
 	chainConfig *chain.Config,
-	blockReader services.FullBlockReader,
+	blockReader dbservices.FullBlockReader,
 	spanner Spanner,
 	genesisContracts StateReceiver,
 	logger log.Logger,
@@ -377,7 +377,7 @@ func New(
 }
 
 // NewRo is used by the rpcdaemon and tests which need read only access to the provided data services
-func NewRo(chainConfig *chain.Config, blockReader services.FullBlockReader, logger log.Logger) *Bor {
+func NewRo(chainConfig *chain.Config, blockReader dbservices.FullBlockReader, logger log.Logger) *Bor {
 	// get bor config
 	borConfig := chainConfig.Bor.(*borcfg.BorConfig)
 
@@ -1182,18 +1182,14 @@ func (c *Bor) GetRootHash(ctx context.Context, tx kv.Tx, start, end uint64) (str
 
 func ComputeHeadersRootHash(blockHeaders []*types.Header) ([]byte, error) {
 	headers := make([][32]byte, math2.NextPowerOfTwo(uint64(len(blockHeaders))))
-	for i := 0; i < len(blockHeaders); i++ {
+	for i := range blockHeaders {
 		blockHeader := blockHeaders[i]
-		header := crypto.Keccak256(AppendBytes32(
+		headers[i] = crypto.Keccak256Hash(AppendBytes32(
 			blockHeader.Number.Bytes(),
 			new(big.Int).SetUint64(blockHeader.Time).Bytes(),
 			blockHeader.TxHash[:],
 			blockHeader.ReceiptHash[:],
 		))
-
-		var arr [32]byte
-		copy(arr[:], header)
-		headers[i] = arr
 	}
 	tree := merkle.NewTreeWithOpts(merkle.TreeOptions{EnableHashSorting: false, DisableHashLeaves: true})
 	if err := tree.Generate(Convert(headers), keccak.NewFastKeccak()); err != nil {

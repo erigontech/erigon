@@ -18,6 +18,7 @@ package cache
 
 import (
 	"bytes"
+	"encoding/binary"
 	"sync"
 	"testing"
 
@@ -31,6 +32,12 @@ import (
 )
 
 // Test helpers
+func closeOnCleanup[T interface{ Close() }](tb testing.TB, c T) T {
+	tb.Helper()
+	tb.Cleanup(c.Close)
+	return c
+}
+
 func makeAddr(i int) []byte {
 	addr := make([]byte, 20)
 	addr[19] = byte(i)
@@ -56,7 +63,7 @@ func makeValue(i int) []byte {
 // =============================================================================
 
 func TestDomainCache_NewWithByteCapacity(t *testing.T) {
-	c := NewDomainCacheMode(1*datasize.MB, ModeEvictLRU) // 1MB
+	c := closeOnCleanup(t, NewDomainCacheMode(1*datasize.MB, ModeEvictLRU)) // 1MB
 	require.NotNil(t, c)
 	assert.Equal(t, 0, c.Len())
 	assert.Equal(t, int64(0), c.SizeBytes())
@@ -64,7 +71,7 @@ func TestDomainCache_NewWithByteCapacity(t *testing.T) {
 }
 
 func TestDomainCache_GetPut(t *testing.T) {
-	c := NewDomainCacheMode(100, ModeEvictLRU)
+	c := closeOnCleanup(t, NewDomainCacheMode(100, ModeEvictLRU))
 
 	addr := makeAddr(1)
 	value := makeValue(1)
@@ -83,7 +90,7 @@ func TestDomainCache_GetPut(t *testing.T) {
 }
 
 func TestDomainCache_PutUpdateValue(t *testing.T) {
-	c := NewDomainCacheMode(100, ModeEvictLRU)
+	c := closeOnCleanup(t, NewDomainCacheMode(100, ModeEvictLRU))
 
 	addr := makeAddr(1)
 	value1 := []byte{1, 2, 3, 4, 5, 6, 7, 8} // 8 bytes
@@ -104,7 +111,7 @@ func TestDomainCache_PutCapacityLimit_NoOpMode(t *testing.T) {
 	// full, new keys are silently dropped. Counted via the dropped metric.
 	// Entry overhead is 20 (addr key) + 3 (value) + 24 = 47 bytes per entry.
 	// Two entries take 94 bytes; cap at 100 leaves no room for a third.
-	c := NewDomainCacheMode(100, ModeNoOp)
+	c := closeOnCleanup(t, NewDomainCacheMode(100, ModeNoOp))
 
 	c.Put(makeAddr(1), makeValue(1), 0)
 	c.Put(makeAddr(2), makeValue(2), 0)
@@ -155,7 +162,7 @@ func TestDomainCache_PutEvictsWhenFull_EvictMode(t *testing.T) {
 }
 
 func TestDomainCache_Delete(t *testing.T) {
-	c := NewDomainCacheMode(100, ModeEvictLRU)
+	c := closeOnCleanup(t, NewDomainCacheMode(100, ModeEvictLRU))
 
 	addr := makeAddr(1)
 	c.Put(addr, makeValue(1), 0)
@@ -169,7 +176,7 @@ func TestDomainCache_Delete(t *testing.T) {
 }
 
 func TestDomainCache_Clear(t *testing.T) {
-	c := NewDomainCacheMode(100, ModeEvictLRU)
+	c := closeOnCleanup(t, NewDomainCacheMode(100, ModeEvictLRU))
 
 	c.Put(makeAddr(1), makeValue(1), 0)
 	c.Put(makeAddr(2), makeValue(2), 0)
@@ -180,7 +187,7 @@ func TestDomainCache_Clear(t *testing.T) {
 }
 
 func TestDomainCache_PrintStatsAndReset(t *testing.T) {
-	c := NewDomainCacheMode(100, ModeEvictLRU)
+	c := closeOnCleanup(t, NewDomainCacheMode(100, ModeEvictLRU))
 
 	// Generate some hits and misses
 	c.Put(makeAddr(1), makeValue(1), 0)
@@ -196,7 +203,7 @@ func TestDomainCache_PrintStatsAndReset(t *testing.T) {
 }
 
 func TestDomainCache_PrintStatsAndReset_NoOps(t *testing.T) {
-	c := NewDomainCacheMode(100, ModeEvictLRU)
+	c := closeOnCleanup(t, NewDomainCacheMode(100, ModeEvictLRU))
 	// No operations - should handle zero total gracefully
 	c.PrintStatsAndReset("test")
 }
@@ -210,14 +217,14 @@ func TestDomainCache_ImplementsInterface(t *testing.T) {
 // =============================================================================
 
 func TestCodeCache_NewDefaultCodeCache(t *testing.T) {
-	c := NewDefaultCodeCache()
+	c := closeOnCleanup(t, NewDefaultCodeCache())
 	require.NotNil(t, c)
 	assert.Equal(t, 0, c.Len())
 	assert.Equal(t, 0, c.CodeLen())
 }
 
 func TestCodeCache_GetPut(t *testing.T) {
-	c := NewCodeCache(100, 200)
+	c := closeOnCleanup(t, NewCodeCache(100, 200))
 
 	addr := makeAddr(1)
 	code := makeCode(1)
@@ -237,7 +244,7 @@ func TestCodeCache_GetPut(t *testing.T) {
 }
 
 func TestCodeCache_PutEmptyCode(t *testing.T) {
-	c := NewCodeCache(100, 200)
+	c := closeOnCleanup(t, NewCodeCache(100, 200))
 
 	addr := makeAddr(1)
 	c.Put(addr, []byte{}, 0)
@@ -248,7 +255,7 @@ func TestCodeCache_PutEmptyCode(t *testing.T) {
 }
 
 func TestCodeCache_CodeDeduplication(t *testing.T) {
-	c := NewCodeCache(100, 200)
+	c := closeOnCleanup(t, NewCodeCache(100, 200))
 
 	code := makeCode(1)
 	addr1 := makeAddr(1)
@@ -288,8 +295,8 @@ func TestCodeCache_AddrCapacityLimit(t *testing.T) {
 		return []byte{0x60, byte(i >> 8), byte(i)}
 	}
 
-	c := NewCodeCache(1024*1024, 1024*28) // 1MB code, ~1024 addr LRU entries
-	for i := 0; i < 1100; i++ {
+	c := closeOnCleanup(t, NewCodeCache(1024*1024, 1024*28)) // 1MB code, ~1024 addr LRU entries
+	for i := range 1100 {
 		c.Put(wideAddr(i), wideCode(i), 0)
 	}
 
@@ -322,7 +329,7 @@ func TestCodeCache_AddrCapacityLimit(t *testing.T) {
 func TestCodeCache_CodeCapacityLimit(t *testing.T) {
 	// Tiny byte budget → a 1-entry code layer cap. Successive distinct codes
 	// LRU-evict the coldest rather than freezing the layer.
-	c := NewCodeCache(25, 1024*1024) // 25 bytes code, 1MB addr
+	c := closeOnCleanup(t, NewCodeCache(25, 1024*1024)) // 25 bytes code, 1MB addr
 
 	c.Put(makeAddr(1), makeCode(1), 0)
 	c.Put(makeAddr(2), makeCode(2), 0)
@@ -342,7 +349,7 @@ func TestCodeCache_CodeCapacityLimit(t *testing.T) {
 }
 
 func TestCodeCache_Delete(t *testing.T) {
-	c := NewCodeCache(100, 200)
+	c := closeOnCleanup(t, NewCodeCache(100, 200))
 
 	addr := makeAddr(1)
 	code := makeCode(1)
@@ -358,7 +365,7 @@ func TestCodeCache_Delete(t *testing.T) {
 }
 
 func TestCodeCache_Clear(t *testing.T) {
-	c := NewCodeCache(100, 200)
+	c := closeOnCleanup(t, NewCodeCache(100, 200))
 
 	c.Put(makeAddr(1), makeCode(1), 0)
 	c.Put(makeAddr(2), makeCode(2), 0)
@@ -371,7 +378,7 @@ func TestCodeCache_Clear(t *testing.T) {
 }
 
 func TestCodeCache_PrintStatsAndReset(t *testing.T) {
-	c := NewCodeCache(100, 200)
+	c := closeOnCleanup(t, NewCodeCache(100, 200))
 
 	c.Put(makeAddr(1), makeCode(1), 0)
 	c.Get(makeAddr(1)) // hit
@@ -382,13 +389,13 @@ func TestCodeCache_PrintStatsAndReset(t *testing.T) {
 }
 
 func TestCodeCache_PrintStatsAndReset_NoOps(t *testing.T) {
-	c := NewCodeCache(100, 200)
+	c := closeOnCleanup(t, NewCodeCache(100, 200))
 	// No operations - should handle zero total gracefully
 	c.PrintStatsAndReset()
 }
 
 func TestCodeCache_GetMissingCode(t *testing.T) {
-	c := NewCodeCache(1024*1024, 1024*1024) // 1MB each
+	c := closeOnCleanup(t, NewCodeCache(1024*1024, 1024*1024)) // 1MB each
 
 	// Manually set addr mapping without code (simulates capacity limit scenario)
 	addr := makeAddr(1)
@@ -413,7 +420,7 @@ func TestCodeCache_ImplementsInterface(t *testing.T) {
 // =============================================================================
 
 func TestStateCache_NewStateCache(t *testing.T) {
-	c := NewStateCache(10, 20, 30, 40)
+	c := closeOnCleanup(t, NewStateCache(10, 20, 30, 40))
 	require.NotNil(t, c)
 
 	// Account, Storage, Code, Commitment should be initialized
@@ -427,7 +434,7 @@ func TestStateCache_NewStateCache(t *testing.T) {
 }
 
 func TestStateCache_NewDefaultStateCache(t *testing.T) {
-	c := NewDefaultStateCache()
+	c := closeOnCleanup(t, NewDefaultStateCache())
 	require.NotNil(t, c)
 
 	assert.NotNil(t, c.GetCache(kv.AccountsDomain))
@@ -436,7 +443,7 @@ func TestStateCache_NewDefaultStateCache(t *testing.T) {
 }
 
 func TestStateCache_GetPut_Account(t *testing.T) {
-	c := NewStateCache(100, 100, 100, 100)
+	c := closeOnCleanup(t, NewStateCache(100, 100, 100, 100))
 
 	addr := makeAddr(1)
 	value := makeValue(1)
@@ -454,7 +461,7 @@ func TestStateCache_GetPut_Account(t *testing.T) {
 }
 
 func TestStateCache_GetPut_Storage(t *testing.T) {
-	c := NewStateCache(100, 100, 100, 100)
+	c := closeOnCleanup(t, NewStateCache(100, 100, 100, 100))
 
 	key := make([]byte, 52) // addr(20) + slot(32)
 	copy(key, makeAddr(1))
@@ -468,7 +475,7 @@ func TestStateCache_GetPut_Storage(t *testing.T) {
 }
 
 func TestStateCache_GetPut_Code(t *testing.T) {
-	c := NewStateCache(1*datasize.MB, 1*datasize.MB, 1*datasize.MB, 1*datasize.MB)
+	c := closeOnCleanup(t, NewStateCache(1*datasize.MB, 1*datasize.MB, 1*datasize.MB, 1*datasize.MB))
 
 	addr := makeAddr(1)
 	code := makeCode(1)
@@ -480,7 +487,7 @@ func TestStateCache_GetPut_Code(t *testing.T) {
 }
 
 func TestStateCache_GetPut_UnsupportedDomain(t *testing.T) {
-	c := NewStateCache(100, 100, 100, 100)
+	c := closeOnCleanup(t, NewStateCache(100, 100, 100, 100))
 
 	// ReceiptDomain is not supported
 	c.Put(kv.ReceiptDomain, makeAddr(1), makeValue(1), 0)
@@ -490,7 +497,7 @@ func TestStateCache_GetPut_UnsupportedDomain(t *testing.T) {
 }
 
 func TestStateCache_Delete(t *testing.T) {
-	c := NewStateCache(100, 100, 100, 100)
+	c := closeOnCleanup(t, NewStateCache(100, 100, 100, 100))
 
 	addr := makeAddr(1)
 	c.Put(kv.AccountsDomain, addr, makeValue(1), 0)
@@ -504,7 +511,7 @@ func TestStateCache_Delete(t *testing.T) {
 // caches deleted keys via Put(key, nil); if Get treats that as "not found",
 // the caller unnecessarily falls through to the DB on every read.
 func TestStateCache_PutEmpty_ThenGet_IsCacheHit(t *testing.T) {
-	c := NewStateCache(100, 100, 100, 100)
+	c := closeOnCleanup(t, NewStateCache(100, 100, 100, 100))
 
 	key := make([]byte, 52) // addr(20) + slot(32)
 	key[0] = 0x1d
@@ -519,7 +526,7 @@ func TestStateCache_PutEmpty_ThenGet_IsCacheHit(t *testing.T) {
 
 // Same test for []byte{} (zero-length but non-nil).
 func TestStateCache_PutEmptySlice_ThenGet_IsCacheHit(t *testing.T) {
-	c := NewStateCache(100, 100, 100, 100)
+	c := closeOnCleanup(t, NewStateCache(100, 100, 100, 100))
 
 	key := make([]byte, 52)
 	key[0] = 0x1d
@@ -533,14 +540,14 @@ func TestStateCache_PutEmptySlice_ThenGet_IsCacheHit(t *testing.T) {
 }
 
 func TestStateCache_Delete_UnsupportedDomain(t *testing.T) {
-	c := NewStateCache(100, 100, 100, 100)
+	c := closeOnCleanup(t, NewStateCache(100, 100, 100, 100))
 
 	// Should not panic
 	c.Delete(kv.ReceiptDomain, makeAddr(1))
 }
 
 func TestStateCache_Clear(t *testing.T) {
-	c := NewStateCache(100, 100, 100, 100)
+	c := closeOnCleanup(t, NewStateCache(100, 100, 100, 100))
 
 	c.Put(kv.AccountsDomain, makeAddr(1), makeValue(1), 0)
 	c.Put(kv.StorageDomain, makeAddr(2), makeValue(2), 0)
@@ -558,7 +565,7 @@ func TestStateCache_Clear(t *testing.T) {
 }
 
 func TestStateCache_GetCache_OutOfBounds(t *testing.T) {
-	c := NewStateCache(100, 100, 100, 100)
+	c := closeOnCleanup(t, NewStateCache(100, 100, 100, 100))
 
 	// Domain >= DomainLen should return nil
 	cache := c.GetCache(kv.DomainLen)
@@ -573,13 +580,13 @@ func TestStateCache_GetCache_OutOfBounds(t *testing.T) {
 // =============================================================================
 
 func TestDomainCache_ConcurrentAccess(t *testing.T) {
-	c := NewDomainCacheMode(10000, ModeEvictLRU)
+	c := closeOnCleanup(t, NewDomainCacheMode(10000, ModeEvictLRU))
 
 	done := make(chan bool)
 
 	// Writer goroutine
 	go func() {
-		for i := 0; i < 100; i++ {
+		for i := range 100 {
 			c.Put(makeAddr(i), makeValue(i), 0)
 		}
 		done <- true
@@ -587,7 +594,7 @@ func TestDomainCache_ConcurrentAccess(t *testing.T) {
 
 	// Reader goroutine
 	go func() {
-		for i := 0; i < 100; i++ {
+		for i := range 100 {
 			c.Get(makeAddr(i))
 		}
 		done <- true
@@ -598,13 +605,13 @@ func TestDomainCache_ConcurrentAccess(t *testing.T) {
 }
 
 func TestCodeCache_ConcurrentAccess(t *testing.T) {
-	c := NewCodeCache(1000, 1000)
+	c := closeOnCleanup(t, NewCodeCache(1000, 1000))
 
 	done := make(chan bool)
 
 	// Writer goroutine
 	go func() {
-		for i := 0; i < 100; i++ {
+		for i := range 100 {
 			c.Put(makeAddr(i), makeCode(i), 0)
 		}
 		done <- true
@@ -612,7 +619,7 @@ func TestCodeCache_ConcurrentAccess(t *testing.T) {
 
 	// Reader goroutine
 	go func() {
-		for i := 0; i < 100; i++ {
+		for i := range 100 {
 			c.Get(makeAddr(i))
 		}
 		done <- true
@@ -627,7 +634,7 @@ func TestCodeCache_ConcurrentAccess(t *testing.T) {
 // =============================================================================
 
 func TestStateCache_DomainIsolation(t *testing.T) {
-	c := NewStateCache(1*datasize.MB, 1*datasize.MB, 1*datasize.MB, 1*datasize.MB)
+	c := closeOnCleanup(t, NewStateCache(1*datasize.MB, 1*datasize.MB, 1*datasize.MB, 1*datasize.MB))
 
 	addr := makeAddr(1)
 	accountData := []byte("account")
@@ -688,7 +695,7 @@ func makeDiffKey(baseKey []byte, step uint64) string {
 // Entries stamped at/below the unwind point survive (warm hot set kept); entries
 // above it from the now-dead epoch are dropped lazily on read.
 func TestUnwind_KeepsBelowFloor_EvictsAbove(t *testing.T) {
-	c := NewDomainCacheMode(1*datasize.MB, ModeEvictLRU)
+	c := closeOnCleanup(t, NewDomainCacheMode(1*datasize.MB, ModeEvictLRU))
 	below := makeAddr(1)
 	above := makeAddr(2)
 	c.Put(below, makeValue(1), 50)  // predates the unwind
@@ -709,7 +716,7 @@ func TestUnwind_KeepsBelowFloor_EvictsAbove(t *testing.T) {
 // so an entry stamped at exactly that txNum is dead-fork state and must be
 // evicted — the drop rule is txNum >= floor, not txNum > floor.
 func TestUnwind_EvictsEntryAtFloor(t *testing.T) {
-	c := NewDomainCacheMode(1*datasize.MB, ModeEvictLRU)
+	c := closeOnCleanup(t, NewDomainCacheMode(1*datasize.MB, ModeEvictLRU))
 	atFloor := makeAddr(1)
 	belowFloor := makeAddr(2)
 	c.Put(atFloor, makeValue(1), 100)   // first txNum of the first unwound block
@@ -729,7 +736,7 @@ func TestUnwind_EvictsEntryAtFloor(t *testing.T) {
 // SAME txNum as the dead fork's write. The epoch — not the txNum — distinguishes
 // them, so the dead entry reads stale and the re-written one reads valid.
 func TestUnwind_ReusedTxNumDisambiguatedByEpoch(t *testing.T) {
-	c := NewDomainCacheMode(1*datasize.MB, ModeEvictLRU)
+	c := closeOnCleanup(t, NewDomainCacheMode(1*datasize.MB, ModeEvictLRU))
 	k := makeAddr(1)
 	c.Put(k, makeValue(1), 150) // dead fork, epoch 0
 
@@ -748,7 +755,7 @@ func TestUnwind_ReusedTxNumDisambiguatedByEpoch(t *testing.T) {
 // dead epoch above the floor and reads stale no matter how far execution
 // advances afterwards (there is no rising high-water mark to re-validate it).
 func TestUnwind_StragglerNeverResurrects(t *testing.T) {
-	c := NewDomainCacheMode(1*datasize.MB, ModeEvictLRU)
+	c := closeOnCleanup(t, NewDomainCacheMode(1*datasize.MB, ModeEvictLRU))
 	straggler := makeAddr(1)
 	c.Put(straggler, makeValue(1), 150) // epoch 0
 
@@ -765,7 +772,7 @@ func TestUnwind_StragglerNeverResurrects(t *testing.T) {
 // A second, shallower unwind must not resurrect entries a deeper earlier unwind
 // invalidated (floor only moves down).
 func TestUnwind_FloorOnlyMovesDown(t *testing.T) {
-	c := NewDomainCacheMode(1*datasize.MB, ModeEvictLRU)
+	c := closeOnCleanup(t, NewDomainCacheMode(1*datasize.MB, ModeEvictLRU))
 	k := makeAddr(1)
 	c.Put(k, makeValue(1), 70) // epoch 0
 
@@ -777,7 +784,7 @@ func TestUnwind_FloorOnlyMovesDown(t *testing.T) {
 }
 
 func TestDomainCache_PutIfAbsent(t *testing.T) {
-	c := NewDomainCacheMode(1*datasize.KB, ModeEvictLRU)
+	c := closeOnCleanup(t, NewDomainCacheMode(1*datasize.KB, ModeEvictLRU))
 	addr := makeAddr(1)
 	fresh := []byte("fresh")
 	stale := []byte("stale")
@@ -812,7 +819,7 @@ func TestDomainCache_PutIfAbsent(t *testing.T) {
 }
 
 func TestCodeCache_PutIfAbsentKeepsLiveAddrBinding(t *testing.T) {
-	cc := NewCodeCache(1*datasize.MB, 1*datasize.MB)
+	cc := closeOnCleanup(t, NewCodeCache(1*datasize.MB, 1*datasize.MB))
 	addr := makeAddr(1)
 	fresh := []byte{0xaa, 1, 2, 3}
 	stale := []byte{0xbb, 4, 5, 6}
@@ -837,7 +844,7 @@ func TestCodeCache_PutIfAbsentKeepsLiveAddrBinding(t *testing.T) {
 }
 
 func TestCodeCache_PutWithCodeHashIfAbsent(t *testing.T) {
-	cc := NewCodeCache(1*datasize.MB, 1*datasize.MB)
+	cc := closeOnCleanup(t, NewCodeCache(1*datasize.MB, 1*datasize.MB))
 	addr := makeAddr(1)
 	fresh := []byte{0xaa, 1, 2, 3}
 	stale := []byte{0xbb, 4, 5, 6}
@@ -865,11 +872,14 @@ func TestCodeCache_PutWithCodeHashIfAbsent(t *testing.T) {
 // check (absent), lose the CPU to the authoritative writer's insert, then
 // clobber it — the prefetch-vs-flush staleness this cache guards against.
 func TestDomainCache_PutIfAbsentAtomicWithPut(t *testing.T) {
-	c := NewDomainCacheMode(1*datasize.MB, ModeEvictLRU)
+	c := closeOnCleanup(t, NewDomainCacheMode(1*datasize.MB, ModeEvictLRU))
 	fresh := []byte("fresh")
 	stale := []byte("stale")
-	for round := 0; round < 20000; round++ {
-		addr := makeAddr(round)
+	addr := make([]byte, 20)
+	for round := range 20000 {
+		// Full-width round: the race only has teeth on a never-seen key, and
+		// makeAddr would truncate it to a byte.
+		binary.BigEndian.PutUint64(addr[1:], uint64(round))
 		var wg sync.WaitGroup
 		wg.Add(2)
 		go func() { defer wg.Done(); c.Put(addr, fresh, 20) }()
@@ -886,11 +896,11 @@ func TestDomainCache_PutIfAbsentAtomicWithPut(t *testing.T) {
 // put's update delta subtracts it again unless the two writers share the
 // key's stripe.
 func TestDomainCache_DeleteAtomicWithPut_NoSizeDrift(t *testing.T) {
-	c := NewDomainCacheMode(1*datasize.MB, ModeEvictLRU)
+	c := closeOnCleanup(t, NewDomainCacheMode(1*datasize.MB, ModeEvictLRU))
 	addr := makeAddr(1)
 	v1 := []byte("value-one")
 	v2 := []byte("value-two")
-	for round := 0; round < 20000; round++ {
+	for round := range 20000 {
 		c.Put(addr, v1, 10)
 		var wg sync.WaitGroup
 		wg.Add(2)
@@ -907,12 +917,12 @@ func TestDomainCache_DeleteAtomicWithPut_NoSizeDrift(t *testing.T) {
 // entry's size. Exactly one live entry remains after every round, so drift
 // shows as a size mismatch.
 func TestDomainCache_StaleDropAtomicWithPut_NoSizeDrift(t *testing.T) {
-	c := NewDomainCacheMode(1*datasize.MB, ModeEvictLRU)
+	c := closeOnCleanup(t, NewDomainCacheMode(1*datasize.MB, ModeEvictLRU))
 	addr := makeAddr(1)
 	v1 := []byte("value-one")
 	v2 := []byte("value-two")
 	wantSize := int64(len(addr) + len(v1) + 24)
-	for round := 0; round < 20000; round++ {
+	for round := range 20000 {
 		c.Put(addr, v1, 10)
 		c.Unwind(5)
 		var wg sync.WaitGroup
@@ -929,11 +939,11 @@ func TestDomainCache_StaleDropAtomicWithPut_NoSizeDrift(t *testing.T) {
 // lands its entry where no reader sees it and adds the entry's size after
 // Clear zeroed the counter — inflating SizeBytes for an invisible entry.
 func TestDomainCache_ClearAtomicWithPut_NoSizeDrift(t *testing.T) {
-	c := NewDomainCacheMode(1*datasize.MB, ModeEvictLRU)
+	c := closeOnCleanup(t, NewDomainCacheMode(1*datasize.MB, ModeEvictLRU))
 	addr := makeAddr(1)
 	v1 := []byte("value-one")
 	entrySize := int64(len(addr) + len(v1) + 24)
-	for round := 0; round < 20000; round++ {
+	for round := range 20000 {
 		var wg sync.WaitGroup
 		wg.Add(2)
 		go func() { defer wg.Done(); c.Put(addr, v1, 10) }()

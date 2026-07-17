@@ -1,11 +1,12 @@
 package stages
 
 import (
+	"cmp"
 	"context"
 	"errors"
 	"fmt"
 	"maps"
-	"sort"
+	"slices"
 	"time"
 
 	"github.com/erigontech/erigon/cl/clparams"
@@ -134,8 +135,8 @@ func fetchBlocksFromReqResp(ctx context.Context, cfg *Cfg, from uint64, count ui
 		return nil, nil
 	}
 
-	sort.Slice(blocks, func(i, j int) bool {
-		return blocks[i].Block.Slot < blocks[j].Block.Slot
+	slices.SortFunc(blocks, func(a, b *cltypes.SignedBeaconBlock) int {
+		return cmp.Compare(a.Block.Slot, b.Block.Slot)
 	})
 
 	// Return the blocks and the peer ID wrapped in a PeeredObject
@@ -582,8 +583,7 @@ func verifyUnverifiedGloasPayloads(ctx context.Context, cfg *Cfg) {
 	}
 
 	swept := 0
-	for i := len(blocks) - 1; i >= 0; i-- {
-		item := blocks[i]
+	for _, item := range slices.Backward(blocks) {
 		if cfg.forkChoice.IsPayloadVerified(item.root) {
 			continue
 		}
