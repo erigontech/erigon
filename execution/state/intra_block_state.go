@@ -2617,6 +2617,13 @@ func (sdb *IntraBlockState) MergeTxIOInto(io *VersionedIO) {
 // recording), so without this a later tx would not observe an earlier tx's state
 // — the versionMap is the cross-tx carrier, matching how the parallel executor
 // persists each committed tx before the next reads it.
+// FlushWritesToVersionMap publishes this tx's writes to the version map on the
+// block-builder path. It flushes the RAW versionedWrites, not the SD-filtered
+// FinalizedWrites() the parallel worker flushes — so a builder map may carry a
+// same-index AddressPath + SelfDestruct=true pair the executor never produces.
+// Safe under the strict-`>` gate in versionedReadCore and the committed
+// fallback; a consumer leaning on the AccountLifecycle `>=` arm must account for
+// it (or this should be unified onto FinalizedWrites()).
 func (sdb *IntraBlockState) FlushWritesToVersionMap() {
 	if sdb.versionMap == nil {
 		return
