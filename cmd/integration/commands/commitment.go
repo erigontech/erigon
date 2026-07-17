@@ -110,7 +110,7 @@ func init() {
 	withReset(cmdCommitmentRebuild)
 	withSqueeze(cmdCommitmentRebuild)
 	withBlock(cmdCommitmentRebuild)
-	withConcurrentCommitment(cmdCommitmentRebuild)
+	withExperimentalCommitment(cmdCommitmentRebuild)
 	withUnwind(cmdCommitmentRebuild)
 	withPruneTo(cmdCommitmentRebuild)
 	withIntegrityChecks(cmdCommitmentRebuild)
@@ -128,10 +128,17 @@ func init() {
 	withConfig(cmdCommitmentPrint)
 	commitmentCmd.AddCommand(cmdCommitmentPrint)
 
+	// commitment convert
+	withChain(cmdCommitmentConvert)
+	withDataDir(cmdCommitmentConvert)
+	withConfig(cmdCommitmentConvert)
+	withConvertFlags(cmdCommitmentConvert)
+	commitmentCmd.AddCommand(cmdCommitmentConvert)
+
 	// commitment visualize
 	cmdCommitmentVisualize.Flags().StringVar(&visualizeOutputDir, "output", "", "existing directory to store output HTML. By default, same as commitment files")
 	cmdCommitmentVisualize.Flags().IntVarP(&visualizeConcurrency, "concurrency", "j", 4, "amount of concurrently processed files")
-	cmdCommitmentVisualize.Flags().StringVar(&visualizeTrieVariant, "trie", "hex", "commitment trie variant (values are hex and bin)")
+	cmdCommitmentVisualize.Flags().StringVar(&visualizeTrieVariant, "trie", "hex", "commitment trie variant (values are hex and parallel)")
 	cmdCommitmentVisualize.Flags().StringVar(&visualizeCompression, "compression", "none", "compression type (none, k, v, kv)")
 	cmdCommitmentVisualize.Flags().BoolVar(&visualizePrintState, "state", false, "print state of file")
 	cmdCommitmentVisualize.Flags().IntVar(&visualizeDepth, "depth", 0, "depth of the prefixes to analyze")
@@ -179,8 +186,7 @@ Examples:
   integration commitment branch --datadir /path/to/datadir --prefix 0a1b --txnum 1000000
   integration commitment branch --datadir /path/to/datadir  # reads root (empty prefix)`,
 	Run: func(cmd *cobra.Command, args []string) {
-		logger := debug.SetupCobra(cmd, "integration")
-		ctx, _ := common.RootContext()
+		logger, ctx := debug.SetupCobra(cmd, "integration"), cmd.Context()
 
 		prefix, err := commitment.PrefixStringToNibbles(branchPrefixFlag)
 		if err != nil {
@@ -189,7 +195,7 @@ Examples:
 		}
 
 		dirs := datadir.New(datadirCli)
-		chainDb, err := openDB(dbCfg(dbcfg.ChainDB, dirs.Chaindata), true, chain, logger)
+		chainDb, err := openDB(ctx, dbCfg(dbcfg.ChainDB, dirs.Chaindata), true, chain, logger)
 		if err != nil {
 			logger.Error("Opening DB", "error", err)
 			return
@@ -261,8 +267,8 @@ var cmdCommitmentRebuild = &cobra.Command{
 	Use:   "rebuild",
 	Short: "",
 	Run: func(cmd *cobra.Command, args []string) {
-		logger := debug.SetupCobra(cmd, "integration")
-		db, err := openDB(dbCfg(dbcfg.ChainDB, chaindata), true, chain, logger)
+		logger, ctx := debug.SetupCobra(cmd, "integration"), cmd.Context()
+		db, err := openDB(ctx, dbCfg(dbcfg.ChainDB, chaindata), true, chain, logger)
 		if err != nil {
 			logger.Error("Opening DB", "error", err)
 			return
@@ -387,7 +393,7 @@ func commitmentRebuild(db kv.TemporalRwDB, ctx context.Context, logger log.Logge
 	}
 
 	blockSnapBuildSema := semaphore.NewWeighted(int64(runtime.NumCPU()))
-	agg.ForTestReplaceKeysInValues(kv.CommitmentDomain, false)
+	agg.ForTestReferencesInCommitmentBranches(kv.CommitmentDomain, false)
 	agg.SetSnapshotBuildSema(blockSnapBuildSema)
 	agg.SetErigondbDomainStepsInFrozenFile(config3.UnboundedDomainMerge)
 	agg.PresetOfflineMerge()
@@ -410,8 +416,8 @@ var cmdCommitmentPrint = &cobra.Command{
 	Use:   "print",
 	Short: "",
 	Run: func(cmd *cobra.Command, args []string) {
-		logger := debug.SetupCobra(cmd, "integration")
-		db, err := openDB(dbCfg(dbcfg.ChainDB, chaindata), true, chain, logger)
+		logger, ctx := debug.SetupCobra(cmd, "integration"), cmd.Context()
+		db, err := openDB(ctx, dbCfg(dbcfg.ChainDB, chaindata), true, chain, logger)
 		if err != nil {
 			logger.Error("Opening DB", "error", err)
 			return
@@ -467,6 +473,100 @@ func printCommitment(db kv.TemporalRwDB, ctx context.Context, logger log.Logger)
 	return nil
 }
 
+// integration commitment convert
+var cmdCommitmentConvert = &cobra.Command{
+	Use:   "convert",
+	Short: "Re-encode commitment domain .kv files between squeeze and key-encoding states",
+	Long: `Offline converter that re-encodes existing commitment domain .kv files
+between two independent axes: value squeeze state and key encoding (V1/V2).
+
+Both flags default false. Flag value is the target state, not direction; the
+tool detects the current state of each file and converts only what is needed.
+Files already in the target state on disk under <datadir>/snapshots/domain/
+are skipped.
+
+Originals are preserved at <datadir>/snapshots/backup/domains/ for revert.
+
+--restore is a sibling mode that moves the originals back into place and
+removes the converted files. It is mutually exclusive with --squeeze and
+--nibbles.v2.
+
+--continue resumes a prior interrupted run, re-using complete shards left
+in <datadir>/snap/rebuild/domain/ and re-doing the rest. The operator MUST
+pass the same --squeeze and --nibbles.v2 values used in the original run; a
+mismatch silently produces mixed-encoding output. Without --continue, a
+mid-run crash discards any in-progress work in snap/rebuild/domain/ and
+Phase 1 restarts from scratch. --continue is mutually exclusive with
+--restore.
+
+Examples:
+  integration commitment convert --datadir /path/to/datadir --chain mainnet
+  integration commitment convert --datadir /path/to/datadir --chain mainnet --squeeze=true
+  integration commitment convert --datadir /path/to/datadir --chain mainnet --squeeze=true --nibbles.v2=true
+  integration commitment convert --continue --datadir /path/to/datadir --chain mainnet --squeeze=true --nibbles.v2=true
+  integration commitment convert --restore --datadir /path/to/datadir --chain mainnet`,
+	Run: func(cmd *cobra.Command, args []string) {
+		logger, ctx := debug.SetupCobra(cmd, "integration"), cmd.Context()
+		if convertRestore && (cmd.Flags().Changed("squeeze") || cmd.Flags().Changed("nibbles.v2")) {
+			logger.Error("--restore is mutually exclusive with --squeeze/--nibbles.v2")
+			return
+		}
+		if convertRestore && convertContinue {
+			logger.Error("--continue is mutually exclusive with --restore")
+			return
+		}
+		if convertRestore {
+			// Restore is a filesystem-only operation. Dispatch before openDB so
+			// recovery still works when the on-disk state is broken enough that
+			// MDBX/aggregator/snapshots can't open — which is exactly when
+			// --restore is most needed.
+			dirs := datadir.New(datadirCli)
+			if err := dbstate.RestoreCommitmentFiles(cmd.Context(), dirs, logger); err != nil {
+				if !errors.Is(err, context.Canceled) {
+					logger.Error(err.Error())
+				}
+			}
+			return
+		}
+
+		db, err := openDB(ctx, dbCfg(dbcfg.ChainDB, chaindata), true, chain, logger)
+		if err != nil {
+			logger.Error("Opening DB", "error", err)
+			return
+		}
+		defer db.Close()
+
+		opts := dbstate.ConvertOpts{
+			TargetSqueeze:   convertSqueeze,
+			TargetNibblesV2: convertNibblesV2,
+			Continue:        convertContinue,
+		}
+		if err := commitmentConvert(db, cmd.Context(), logger, opts); err != nil {
+			if !errors.Is(err, context.Canceled) {
+				logger.Error(err.Error())
+			}
+			return
+		}
+	},
+}
+
+func commitmentConvert(db kv.TemporalRwDB, ctx context.Context, logger log.Logger, opts dbstate.ConvertOpts) error {
+	agg := db.(dbstate.HasAgg).Agg().(*dbstate.Aggregator)
+	agg.PresetOfflineMerge()
+	agg.SetSnapshotBuildSema(semaphore.NewWeighted(int64(runtime.NumCPU())))
+	agg.DisableAllDependencies()
+	defer agg.MadvNormal().DisableReadAhead()
+
+	acRo := agg.BeginFilesRo()
+	defer acRo.Close()
+	// Don't defer acRo.MadvNormal().DisableReadAhead(): ConvertCommitmentFiles
+	// calls agg.ReloadFiles() in Phase 5 which closes the decompressors acRo
+	// references. The deferred Close itself is safe (refcount decrement +
+	// nil-guarded closeFiles), but MadvNormal would dereference freed mmap.
+
+	return dbstate.ConvertCommitmentFiles(ctx, acRo, opts, logger)
+}
+
 // integration commitment visualize
 var cmdCommitmentVisualize = &cobra.Command{
 	Use:   "visualize [files...]",
@@ -498,7 +598,7 @@ Examples:
   integration commitment bench-lookup --datadir /path/to/datadir --seed 12345`,
 	Run: func(cmd *cobra.Command, args []string) {
 		logger := debug.SetupCobra(cmd, "integration")
-		ctx, _ := common.RootContext()
+		ctx := cmd.Context()
 
 		if err := benchLookup(ctx, logger); err != nil {
 			if !errors.Is(err, context.Canceled) {
@@ -522,7 +622,7 @@ Examples:
   integration commitment bench-history-lookup --datadir /path/to/datadir --prefix aa --seed 12345`,
 	Run: func(cmd *cobra.Command, args []string) {
 		logger := debug.SetupCobra(cmd, "integration")
-		ctx, _ := common.RootContext()
+		ctx := cmd.Context()
 
 		if err := benchHistoryLookup(ctx, logger); err != nil {
 			if !errors.Is(err, context.Canceled) {
@@ -561,7 +661,7 @@ func benchLookup(ctx context.Context, logger log.Logger) error {
 	rng := rand.New(rand.NewSource(seed))
 
 	dirs := datadir.New(datadirCli)
-	chainDb, err := openDB(dbCfg(dbcfg.ChainDB, dirs.Chaindata), true, chain, logger)
+	chainDb, err := openDB(ctx, dbCfg(dbcfg.ChainDB, dirs.Chaindata), true, chain, logger)
 	if err != nil {
 		return fmt.Errorf("opening DB: %w", err)
 	}
@@ -687,7 +787,7 @@ func benchHistoryLookup(ctx context.Context, logger log.Logger) error {
 	rng := rand.New(rand.NewSource(seed))
 
 	dirs := datadir.New(datadirCli)
-	chainDb, err := openDB(dbCfg(dbcfg.ChainDB, dirs.Chaindata), true, chain, logger)
+	chainDb, err := openDB(ctx, dbCfg(dbcfg.ChainDB, dirs.Chaindata), true, chain, logger)
 	if err != nil {
 		return fmt.Errorf("opening DB: %w", err)
 	}
@@ -794,7 +894,7 @@ func benchSnapshotsHistoryLookup(ctx context.Context, tx kv.TemporalTx, historyF
 
 		// Generate random sample of txnums within this file's range
 		sampledTxNums := make([]uint64, sampleCount)
-		for i := 0; i < sampleCount; i++ {
+		for i := range sampleCount {
 			// Generate random txnum in [startTxNum, endTxNum)
 			sampledTxNums[i] = startTxNum + uint64(rng.Int63n(int64(txnumRange)))
 		}
@@ -887,7 +987,7 @@ func benchMdbxHistoryLookup(ctx context.Context, tx kv.TemporalTx, compactKey []
 
 	// Generate random txnums in [minTxNum, maxTxNum)
 	sampledTxNums := make([]uint64, sampleCount)
-	for i := 0; i < sampleCount; i++ {
+	for i := range sampleCount {
 		sampledTxNums[i] = minTxNum + uint64(rng.Int63n(int64(txnumRange)))
 	}
 

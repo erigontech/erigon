@@ -24,6 +24,8 @@ import (
 	"sync"
 	"time"
 
+	"github.com/libp2p/go-libp2p/core/peer"
+
 	"github.com/erigontech/erigon/cl/beacon/synced_data"
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
@@ -36,13 +38,12 @@ import (
 	"github.com/erigontech/erigon/cl/phase1/core/state/lru"
 	"github.com/erigontech/erigon/cl/phase1/forkchoice"
 	"github.com/erigontech/erigon/cl/pool"
-	"github.com/erigontech/erigon/cl/utils"
 	"github.com/erigontech/erigon/cl/utils/bls"
 	"github.com/erigontech/erigon/cl/validator/validator_params"
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/node/gointerfaces/sentinelproto"
-	"github.com/libp2p/go-libp2p/core/peer"
 )
 
 // SignedAggregateAndProofData is passed to SignedAggregateAndProof service. The service does the signature verification
@@ -220,23 +221,15 @@ func (a *aggregateAndProofServiceImpl) ProcessMessage(
 	if err := a.syncedDataManager.ViewHeadState(func(headState *state.CachingBeaconState) error {
 		// If our head state is too far from the aggregate's epoch, committee
 		// computations will use a stale RANDAO mix and produce wrong results.
-		// Allow current and previous epoch per spec: compute_epoch_at_slot(slot)
-		// in (get_previous_epoch(state), get_current_epoch(state)).
 		// Note: uses epoch (from slot), not target.Epoch, so malformed messages
 		// with wrong target.Epoch still reach the reject check below.
-		headEpoch := state.Epoch(headState)
-		if epoch != headEpoch && epoch != state.PreviousEpoch(headState) {
-			return fmt.Errorf("head epoch %d too far from aggregate epoch %d: %w",
-				headEpoch, epoch, ErrIgnore)
-		}
 		// [IGNORE] the epoch of aggregate.data.slot is either the current or previous epoch
 		// When the head state lags behind (solo validator / genesis start), use the
 		// highest seen slot to widen the accepted epoch window.
-		highestSeenEpoch := a.forkchoiceStore.HighestSeen() / a.beaconCfg.SlotsPerEpoch
-		prevEpoch := state.PreviousEpoch(headState)
-		currEpoch := max(state.Epoch(headState), highestSeenEpoch)
+		highestSeen := a.forkchoiceStore.HighestSeen()
+		prevEpoch, currEpoch := validationEpochRange(headState, highestSeen, highestSeen, a.beaconCfg.SlotsPerEpoch)
 		if epoch < prevEpoch || epoch > currEpoch {
-			return fmt.Errorf("%w: epoch is not in previous or current epoch: %d (prev=%d, curr=%d)", ErrIgnore, epoch, prevEpoch, currEpoch)
+			return fmt.Errorf("%w: epoch outside validation range: %d (prev=%d, curr=%d)", ErrIgnore, epoch, prevEpoch, currEpoch)
 		}
 
 		// [REJECT] The committee index is within the expected range -- i.e. index < get_committee_count_per_slot(state, aggregate.data.target.epoch).
@@ -271,18 +264,9 @@ func (a *aggregateAndProofServiceImpl) ProcessMessage(
 				return errors.New("invalid committee_index in aggregate and proof: must be 0 when block.slot == aggregate.data.slot")
 			}
 
-			// [New in GLOAS] When index=1 (payload-present attestation), the execution
-			// payload envelope for the block must have been received and validated.
-			// Spec conditions:
-			//   [IGNORE] The signed execution payload envelope has been seen.
-			//   [REJECT] The signed execution payload envelope has been validated (processed by forkchoice).
-			// In our implementation, HasEnvelope returns true only after OnExecutionPayload
-			// has successfully processed and persisted the envelope, so it implies both
-			// "seen" and "validated". We use IGNORE disposition here because the envelope
-			// may simply not have arrived yet (timing issue, not a protocol violation).
 			if aggregate.Data.CommitteeIndex == 1 {
-				if !a.forkchoiceStore.HasEnvelope(aggregateData.BeaconBlockRoot) {
-					return fmt.Errorf("%w: execution payload envelope not seen/validated for block %v", ErrIgnore, aggregateData.BeaconBlockRoot)
+				if !a.forkchoiceStore.IsPayloadVerified(aggregateData.BeaconBlockRoot) {
+					return unverifiedGloasPayloadError(a.forkchoiceStore, aggregateData.BeaconBlockRoot)
 				}
 			}
 		}
@@ -432,7 +416,8 @@ func AggregateAndProofSignature(
 	if err != nil {
 		return nil, nil, nil, err
 	}
-	signingRoot := utils.Sha256(merkle_tree.Uint64Root(slot).Bytes(), domain)
+	slotRoot := merkle_tree.Uint64Root(slot)
+	signingRoot := crypto.Sha256(slotRoot[:], domain)
 	return aggregate.SelectionProof[:], signingRoot[:], publicKey[:], nil
 }
 

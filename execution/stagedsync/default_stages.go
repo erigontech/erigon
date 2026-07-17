@@ -59,10 +59,7 @@ func DefaultStages(
 			ID:          stages.Headers,
 			Description: "Download headers",
 			Forward: func(badBlockUnwind bool, s *StageState, u Unwinder, sd *execctx.SharedDomains, tx kv.TemporalRwTx, logger log.Logger) error {
-				if badBlockUnwind {
-					return nil
-				}
-				return SpawnStageHeaders(s, u, ctx, tx, headers, logger)
+				return nil
 			},
 			Unwind: func(u *UnwindState, s *StageState, sd *execctx.SharedDomains, tx kv.TemporalRwTx, logger log.Logger) error {
 				return HeadersUnwind(ctx, u, s, tx, headers)
@@ -88,7 +85,7 @@ func DefaultStages(
 			ID:          stages.Bodies,
 			Description: "Download block bodies",
 			Forward: func(badBlockUnwind bool, s *StageState, u Unwinder, sd *execctx.SharedDomains, tx kv.TemporalRwTx, logger log.Logger) error {
-				return BodiesForward(s, u, ctx, tx, bodies, logger)
+				return nil
 			},
 			Unwind: func(u *UnwindState, s *StageState, sd *execctx.SharedDomains, tx kv.TemporalRwTx, logger log.Logger) error {
 				return UnwindBodiesStage(u, tx, bodies)
@@ -121,7 +118,7 @@ func DefaultStages(
 				return UnwindExecutionStage(u, s, sd, tx, ctx, exec, logger)
 			},
 			Prune: func(ctx context.Context, p *PruneState, tx kv.RwTx, timeout time.Duration, logger log.Logger) error {
-				return PruneExecutionStage(ctx, p, tx, exec, timeout, logger)
+				return PruneExecutionStage(ctx, p, tx.(kv.TemporalRwTx), exec, timeout, logger)
 			},
 		},
 		//{
@@ -225,7 +222,7 @@ func PipelineStages(ctx context.Context, snapshots SnapshotsCfg, blockHashCfg Bl
 				return UnwindExecutionStage(u, s, sd, tx, ctx, exec, logger)
 			},
 			Prune: func(ctx context.Context, p *PruneState, tx kv.RwTx, timeout time.Duration, logger log.Logger) error {
-				return PruneExecutionStage(ctx, p, tx, exec, timeout, logger)
+				return PruneExecutionStage(ctx, p, tx.(kv.TemporalRwTx), exec, timeout, logger)
 			},
 		},
 	}

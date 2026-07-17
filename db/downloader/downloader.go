@@ -884,6 +884,8 @@ func (d *Downloader) decDownloadRequests() {
 // Returns all torrents, with names, because if a Torrent info isn't available, we can't just yank
 // the name from there.
 func (d *Downloader) allActiveSnapshots() (ret []snapshot) {
+	d.lock.RLock()
+	defer d.lock.RUnlock()
 	for name, t := range d.torrentsByName {
 		ret = append(ret, snapshot{
 			Name:     name,
@@ -1304,6 +1306,11 @@ func (d *Downloader) addCompleteTorrent(
 		err = fmt.Errorf("loading metainfo from disk: %w", err)
 		return
 	}
+	// Hold d.lock only for the torrentsByName mutation, like the download add paths do,
+	// so it cannot race allActiveSnapshots' iteration (which holds only RLock). This is
+	// the sole caller path that reaches addTorrent without the caller already holding it.
+	d.lock.Lock()
+	defer d.lock.Unlock()
 	return d.addCompleteTorrentFromMetainfo(name, mi)
 }
 
@@ -1501,8 +1508,8 @@ func (d *Downloader) logSyncStats(startTime time.Time, stats AggStats, target st
 	}
 
 	addCtx(
-		"time-left", calculateTime(remainingBytes, stats.CompletionRate),
-		"time-elapsed", time.Since(startTime).Truncate(time.Second).String(),
+		"eta", calculateTime(remainingBytes, stats.CompletionRate),
+		"elapsed", time.Since(startTime).Truncate(time.Second).String(),
 	)
 
 	d.logStatsInner(log.LvlInfo, stats, fmt.Sprintf("Syncing %v", target), logCtx, true)
@@ -1533,7 +1540,7 @@ func (d *Downloader) logStatsInner(
 		}
 	}
 	addCtx(
-		"file-metadata", fmt.Sprintf("%d/%d", stats.MetadataReady, stats.NumTorrents),
+		"metadata", fmt.Sprintf("%d/%d", stats.MetadataReady, stats.NumTorrents),
 		"files", fmt.Sprintf(
 			"%d/%d",
 			// For now it's 1:1 files:torrents.
@@ -1543,7 +1550,7 @@ func (d *Downloader) logStatsInner(
 		"data", func() string {
 			if haveAllMetadata {
 				return fmt.Sprintf(
-					"%.2f%% - %s/%s",
+					"%.2f%%,%s/%s",
 					percentDone,
 					common.ByteCount(bytesDone),
 					common.ByteCount(stats.BytesTotal),

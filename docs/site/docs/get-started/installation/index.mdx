@@ -13,6 +13,7 @@ export const sectionForMethod = {
   'install-source':   'linuxmacos',
   'install-native':   'windows',
   'install-wsl':      'windows',
+  'install-arm':      'ethereum-on-arm',
 };
 
 export const go = (id, e) => {
@@ -79,6 +80,7 @@ To install Erigon, begin by choosing an installation method suited to your opera
   <li><a href="#install-prebuilt" onClick={e => { e.preventDefault(); go('install-prebuilt'); }}><strong>Pre-built Binaries</strong></a> — Fastest way to get started. Download and run a pre-compiled binary for your architecture.</li>
   <li><a href="#install-docker" onClick={e => { e.preventDefault(); go('install-docker'); }}><strong>Docker</strong></a> — Run Erigon in an isolated container. Recommended for most users.</li>
   <li><a href="#install-source" onClick={e => { e.preventDefault(); go('install-source'); }}><strong>Build from Source</strong></a> — Full control over the build. Requires Go, C++ compiler, and CLI experience.</li>
+  <li><a href="#install-arm" onClick={e => { e.preventDefault(); go('install-arm'); }}><strong>Ethereum on ARM</strong></a> — Community image and APT repository for ARM single-board computers (Raspberry Pi, Rock 5B, Orange Pi 5).</li>
 </ul>
 </TabItem>
 <TabItem value="macos" label="macOS">
@@ -165,7 +167,7 @@ docker run -it erigontech/erigon:v{ERIGON_VERSION} --chain=hoodi --prune.mode=mi
 * `-v` connects a folder on your computer to the container (must have authorization)
 * `-it` lets you see what's happening and interact with Erigon
 * `--chain=hoodi` specifies which [network](/fundamentals/supported-networks) to sync
-* `--prune.mode=minimal` tells Erigon to use minimal [Sync Mode](/fundamentals/sync-modes)
+* `--prune.mode=minimal` tells Erigon to use minimal [Pruning Mode](/fundamentals/pruning-modes)
 * `--datadir` tells Erigon where to store data inside the container
 
 </details>
@@ -318,7 +320,7 @@ The basic Erigon configuration is suitable for most users who simply want to run
 
 First, clone the Erigon repository (you do not need to specify a branch):
 
-```
+```text
 git clone https://github.com/erigontech/erigon.git
 cd erigon
 ```
@@ -492,7 +494,7 @@ You can use the same command to build other binaries such as `RPCDaemon`, `TxPoo
 
 To make Erigon executable from anywhere from your terminal repeat step 1.5 and add Erigon executable path
 
-```
+```text
 C:\Users\your-user\erigon.\build\bin\
 ```
 
@@ -529,12 +531,12 @@ The location of your Erigon data directory (`datadir`) is the most crucial facto
 
 | **Data Location**                                                         | **Performance & Configuration**                                                                                                                                                                                                                                                                                                                                                                                                                                  |
 | ------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Recommended: Native Linux Filesystem (e.g., in your Linux home directory) | Optimal Performance. Erigon runs without restrictions, and the embedded RPC daemon works efficiently.                                                                                                                                                                                                                                                                                                                                                            |
+| Recommended: Native Linux Filesystem (e.g., in your Linux home directory) | Optimal Performance. Erigon runs without restrictions, and the embedded RPC Daemon works efficiently.                                                                                                                                                                                                                                                                                                                                                            |
 | Avoid: Mounted Windows Partitions (e.g., `/mnt/c/`, `/mnt/d/`)            | Performance is reduced as the native Windows drives are mounted using DrvFS (a slower network file system). This affects MDBX database access, and complicates filesystem operations that expect unix-like behaviour. Setting [`automount.options=metadata`](https://learn.microsoft.com/en-us/windows/wsl/wsl-config#automount-options) in `/etc/wsl.conf` in your distribution is recommended, but not required. Note that Docker on Windows is also affected. |
 
 **RPC Daemon Configuration**
 
-The choice of data location directly impacts how you must configure the RPC daemon:
+The choice of data location directly impacts how you must configure the RPC Daemon:
 
 | **Scenario**                                  | **RPC Daemon Requirement**                                                               |
 | --------------------------------------------- | ---------------------------------------------------------------------------------------- |
@@ -542,7 +544,7 @@ The choice of data location directly impacts how you must configure the RPC daem
 | Data on Mounted Windows Partition             | The `rpcdaemon` must be configured as a remote DB even when running on the same machine. |
 
 :::warning
-⚠️ Warning: The remote DB RPC daemon is an experimental feature, is not recommended, and is extremely slow. Always aim to use the embedded RPC daemon by keeping your data on the native Linux filesystem.
+⚠️ Warning: The remote DB RPC Daemon is an experimental feature, is not recommended, and is extremely slow. Always aim to use the embedded RPC Daemon by keeping your data on the native Linux filesystem.
 :::
 
 **Networking Notes**
@@ -550,6 +552,28 @@ The choice of data location directly impacts how you must configure the RPC daem
 Be aware that the default WSL2 environment uses its own internal IP address, which is distinct from the IP address of your Windows host machine.
 
 If you need to connect to Erigon from an external network (e.g., opening a port on your home router for peering on port `30303`), you must account for this separate WSL2 IP address when configuring NAT on your router. Alternatively consider [Mirrored mode networking](https://learn.microsoft.com/en-us/windows/wsl/networking#mirrored-mode-networking).
+
+</details>
+
+### Ethereum on ARM
+
+<details id="install-arm">
+
+<summary>Install with APT on ARM boards</summary>
+
+[Ethereum on ARM](https://ethereum-on-arm-documentation.readthedocs.io/) is a community project that provides a custom Linux image for ARM single-board computers (such as Raspberry Pi, Rock 5B, and Orange Pi 5) with an APT repository preconfigured to install and update Ethereum clients — including Erigon — as native system packages.
+
+Once the image is installed, Erigon can be installed and kept up to date with your system's package manager:
+
+```sh
+sudo apt update && sudo apt install erigon
+```
+
+For the full image, supported boards, and setup instructions, see the [Ethereum on ARM documentation](https://ethereum-on-arm-documentation.readthedocs.io/) and the [project on GitHub](https://github.com/diglos/ethereum-on-arm).
+
+:::info
+Ethereum on ARM is maintained independently by the community and is not an official Erigon distribution channel. The Erigon version available through its APT repository may lag behind the latest [GitHub release](https://github.com/erigontech/erigon/releases).
+:::
 
 </details>
 

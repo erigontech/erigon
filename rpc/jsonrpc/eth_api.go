@@ -33,13 +33,14 @@ import (
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/common/math"
 	"github.com/erigontech/erigon/db/datadir"
+	"github.com/erigontech/erigon/db/dbservices"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/kvcache"
 	"github.com/erigontech/erigon/db/kv/kvcfg"
 	"github.com/erigontech/erigon/db/kv/prune"
 	"github.com/erigontech/erigon/db/kv/rawdbv3"
 	"github.com/erigontech/erigon/db/rawdb"
-	"github.com/erigontech/erigon/db/services"
+	"github.com/erigontech/erigon/execution/bal"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/protocol/misc"
 	"github.com/erigontech/erigon/execution/protocol/rules"
@@ -53,6 +54,7 @@ import (
 	"github.com/erigontech/erigon/rpc/filters"
 	"github.com/erigontech/erigon/rpc/gasprice"
 	"github.com/erigontech/erigon/rpc/jsonrpc/receipts"
+	"github.com/erigontech/erigon/rpc/rpccfg"
 	"github.com/erigontech/erigon/rpc/rpchelper"
 )
 
@@ -97,11 +99,11 @@ type EthAPI interface {
 
 	// Account related (see ./eth_accounts.go)
 	Accounts(ctx context.Context) ([]common.Address, error)
-	GetBalance(ctx context.Context, address common.Address, blockNrOrHash rpc.BlockNumberOrHash) (*hexutil.Big, error)
-	GetTransactionCount(ctx context.Context, address common.Address, blockNrOrHash rpc.BlockNumberOrHash) (*hexutil.Uint64, error)
-	GetStorageAt(ctx context.Context, address common.Address, index string, blockNrOrHash rpc.BlockNumberOrHash) (string, error)
-	GetStorageValues(ctx context.Context, requests map[common.Address][]common.Hash, blockNrOrHash rpc.BlockNumberOrHash) (map[common.Address][]hexutil.Bytes, error)
-	GetCode(ctx context.Context, address common.Address, blockNrOrHash rpc.BlockNumberOrHash) (hexutil.Bytes, error)
+	GetBalance(ctx context.Context, address common.Address, blockNrOrHash *rpc.BlockNumberOrHash) (*hexutil.Big, error)
+	GetTransactionCount(ctx context.Context, address common.Address, blockNrOrHash *rpc.BlockNumberOrHash) (*hexutil.Uint64, error)
+	GetStorageAt(ctx context.Context, address common.Address, index string, blockNrOrHash *rpc.BlockNumberOrHash) (string, error)
+	GetStorageValues(ctx context.Context, requests map[common.Address][]common.Hash, blockNrOrHash *rpc.BlockNumberOrHash) (map[common.Address][]hexutil.Bytes, error)
+	GetCode(ctx context.Context, address common.Address, blockNrOrHash *rpc.BlockNumberOrHash) (hexutil.Bytes, error)
 
 	// System related (see ./eth_system.go)
 	BlockNumber(ctx context.Context) (hexutil.Uint64, error)
@@ -109,6 +111,8 @@ type EthAPI interface {
 	ChainId(ctx context.Context) (hexutil.Uint64, error) /* called eth_protocolVersion elsewhere */
 	ProtocolVersion(_ context.Context) (hexutil.Uint, error)
 	GasPrice(_ context.Context) (*hexutil.Big, error)
+	BaseFee(ctx context.Context) (*hexutil.Big, error)
+	BlobBaseFee(ctx context.Context) (*hexutil.Big, error)
 	Config(ctx context.Context, timeArg *hexutil.Uint64) (*EthConfigResp, error)
 	Capabilities(ctx context.Context) (*CapabilitiesResult, error)
 
@@ -123,7 +127,8 @@ type EthAPI interface {
 	SendTransaction(_ context.Context, txObject any) (common.Hash, error)
 	Sign(ctx context.Context, _ common.Address, _ hexutil.Bytes) (hexutil.Bytes, error)
 	SignTransaction(_ context.Context, txObject any) (common.Hash, error)
-	GetProof(ctx context.Context, address common.Address, storageKeys []hexutil.Bytes, blockNr rpc.BlockNumberOrHash) (*accounts.AccProofResult, error)
+	FillTransaction(ctx context.Context, args ethapi.CallArgs) (*ethapi.SignTransactionResult, error)
+	GetProof(ctx context.Context, address common.Address, storageKeys []hexutil.Bytes, blockNr *rpc.BlockNumberOrHash) (*accounts.AccProofResult, error)
 	CreateAccessList(ctx context.Context, args ethapi.CallArgs, blockNrOrHash *rpc.BlockNumberOrHash, overrides *ethapi2.StateOverrides, optimizeGas *bool) (*accessListResult, error)
 
 	// Mining related (see ./eth_mining.go)
@@ -146,9 +151,9 @@ type BaseAPI struct {
 	_pruneMode                atomic.Pointer[prune.Mode]
 	_commitmentHistoryEnabled atomic.Pointer[bool]
 
-	_blockReader services.FullBlockReader
+	_blockReader dbservices.FullBlockReader
 	_txNumReader rawdbv3.TxNumsReader
-	_txnReader   services.TxnReader
+	_txnReader   dbservices.TxnReader
 	_engine      rules.EngineReader
 
 	bridgeReader bridgeReader
@@ -156,22 +161,39 @@ type BaseAPI struct {
 	evmCallTimeout      time.Duration
 	blockRangeLimit     int
 	getLogsMaxResults   int
+	logQueryLimit       int
 	dirs                datadir.Dirs
 	receiptsGenerator   *receipts.Generator
 	borReceiptGenerator *receipts.BorGenerator
+	balRegenerator      *bal.Regenerator
 }
 
-func NewBaseApi(f *rpchelper.Filters, stateCache kvcache.Cache, blockReader services.FullBlockReader, singleNodeMode bool, evmCallTimeout time.Duration, engine rules.EngineReader, dirs datadir.Dirs, bridgeReader bridgeReader, rangeLimit int, getLogsMaxResults int) *BaseAPI {
-	var (
-		blocksLRUSize = 128 // ~32Mb
-	)
+type BaseApiConfig struct {
+	SingleNodeMode    bool
+	EvmCallTimeout    time.Duration // 0 → rpccfg.DefaultEvmCallTimeout
+	Dirs              datadir.Dirs
+	BlockRangeLimit   int
+	GetLogsMaxResults int
+	LogQueryLimit     int
+}
+
+func NewBaseApi(f *rpchelper.Filters, stateCache kvcache.Cache, blockReader dbservices.FullBlockReader, engine rules.Engine, bridgeReader bridgeReader, conf *BaseApiConfig) *BaseAPI {
+	if conf == nil {
+		conf = &BaseApiConfig{}
+	}
+	blocksLRUSize := 128 // ~32Mb
 	// if RPCDaemon deployed as independent process: increase cache sizes
-	if !singleNodeMode {
+	if !conf.SingleNodeMode {
 		blocksLRUSize *= 5
 	}
 	blocksLRU, err := lru.New[common.Hash, *types.Block](blocksLRUSize)
 	if err != nil {
 		panic(err)
+	}
+
+	evmCallTimeout := conf.EvmCallTimeout
+	if evmCallTimeout == 0 {
+		evmCallTimeout = rpccfg.DefaultEvmCallTimeout
 	}
 
 	return &BaseAPI{
@@ -183,12 +205,14 @@ func NewBaseApi(f *rpchelper.Filters, stateCache kvcache.Cache, blockReader serv
 		_txNumReader:        blockReader.TxnumReader(),
 		evmCallTimeout:      evmCallTimeout,
 		_engine:             engine,
-		receiptsGenerator:   receipts.NewGenerator(dirs, blockReader, engine, stateCache, evmCallTimeout, f),
+		receiptsGenerator:   receipts.NewGenerator(conf.Dirs, blockReader, engine, stateCache, evmCallTimeout, f),
 		borReceiptGenerator: receipts.NewBorGenerator(blockReader, engine, stateCache, f),
-		dirs:                dirs,
+		balRegenerator:      bal.NewRegenerator(blockReader, engine, log.Root()),
+		dirs:                conf.Dirs,
 		bridgeReader:        bridgeReader,
-		blockRangeLimit:     rangeLimit,
-		getLogsMaxResults:   getLogsMaxResults,
+		blockRangeLimit:     conf.BlockRangeLimit,
+		getLogsMaxResults:   conf.GetLogsMaxResults,
+		logQueryLimit:       conf.LogQueryLimit,
 	}
 }
 
@@ -234,6 +258,44 @@ func (api *BaseAPI) engine() rules.EngineReader {
 func (api *BaseAPI) txnLookup(ctx context.Context, tx kv.Tx, txnHash common.Hash) (blockNum uint64, txNum uint64, ok bool, err error) {
 	overlayTx := api.filters.WithOverlay(tx)
 	return api._txnReader.TxnLookup(ctx, overlayTx, txnHash)
+}
+
+func (api *BaseAPI) txnLookupWithBorFallback(ctx context.Context, tx kv.Tx, txnHash common.Hash, chainConfig *chain.Config) (blockNum uint64, txNum uint64, isBorStateSyncTxn bool, ok bool, err error) {
+	blockNum, txNum, ok, err = api.txnLookup(ctx, tx, txnHash)
+	if err != nil {
+		return 0, 0, false, false, err
+	}
+	if ok {
+		return blockNum, txNum, false, true, nil
+	}
+	if chainConfig.Bor == nil {
+		return 0, 0, false, false, nil
+	}
+	blockNum, ok, err = api.bridgeReader.EventTxnLookup(ctx, txnHash)
+	if err != nil {
+		return 0, 0, false, false, err
+	}
+	if !ok {
+		return 0, 0, false, false, nil
+	}
+	return blockNum, txNum, true, true, nil
+}
+
+// txnIndexInBlock derives the in-block txn index from a global txNum. Bor state sync
+// txns are not part of the block body, so they yield the -1 sentinel and the consistency
+// check is skipped (their txNum comes from a missed lookup).
+func (api *BaseAPI) txnIndexInBlock(ctx context.Context, tx kv.Tx, blockNum, txNum uint64, isBorStateSyncTxn bool) (int, error) {
+	txNumMin, err := api._txNumReader.Min(ctx, tx, blockNum)
+	if err != nil {
+		return 0, err
+	}
+	if isBorStateSyncTxn {
+		return -1, nil
+	}
+	if txNumMin+1 > txNum {
+		return 0, fmt.Errorf("uint underflow txnums error txNum: %d, txNumMin: %d, blockNum: %d", txNum, txNumMin, blockNum)
+	}
+	return int(txNum - txNumMin - 1), nil
 }
 
 func (api *BaseAPI) blockByNumberWithSenders(ctx context.Context, tx kv.Tx, number uint64) (*types.Block, error) {
@@ -298,7 +360,7 @@ func (api *BaseAPI) blockWithSenders(ctx context.Context, tx kv.Tx, hash common.
 func (api *BaseAPI) headerNumberByHash(ctx context.Context, tx kv.Tx, hash common.Hash) (uint64, error) {
 	if api.blocksLRU != nil {
 		if it, ok := api.blocksLRU.Get(hash); ok && it != nil {
-			return it.Header().Number.Uint64(), nil
+			return it.NumberU64(), nil
 		}
 	}
 	number, err := api._blockReader.HeaderNumber(ctx, tx, hash)
@@ -321,7 +383,7 @@ func (api *BaseAPI) headerByNumberOrHash(ctx context.Context, tx kv.Tx, blockNrO
 	}
 	if api.blocksLRU != nil {
 		if it, ok := api.blocksLRU.Get(hash); ok && it != nil {
-			return it.Header(), isLatest, nil
+			return it.HeaderNoCopy(), isLatest, nil
 		}
 	}
 
@@ -342,7 +404,7 @@ func (api *BaseAPI) headerByNumber(ctx context.Context, number rpc.BlockNumber, 
 
 	if api.blocksLRU != nil {
 		if it, ok := api.blocksLRU.Get(h); ok && it != nil {
-			return it.Header(), nil
+			return it.HeaderNoCopy(), nil
 		}
 	}
 	overlayTx := api.filters.WithOverlay(tx)
@@ -352,7 +414,7 @@ func (api *BaseAPI) headerByNumber(ctx context.Context, number rpc.BlockNumber, 
 func (api *BaseAPI) headerByHash(ctx context.Context, hash common.Hash, tx kv.Tx) (*types.Header, error) {
 	if api.blocksLRU != nil {
 		if it, ok := api.blocksLRU.Get(hash); ok && it != nil {
-			return it.Header(), nil
+			return it.HeaderNoCopy(), nil
 		}
 	}
 
@@ -404,7 +466,7 @@ func (api *BaseAPI) checkPruneField(tx kv.Tx, block uint64, field func(*prune.Mo
 }
 
 // checkReceiptsAvailable checks if receipts are available for the given block.
-// In case --persist.receipts which makes all historical receipts available even when state history is pruned.
+// In case --prune.include-receipts which makes all historical receipts available even when state history is pruned.
 func (api *BaseAPI) checkReceiptsAvailable(ctx context.Context, tx kv.Tx, block uint64) error {
 	persistReceipts, err := kvcfg.PersistReceipts.Enabled(tx)
 	if err != nil {
@@ -548,8 +610,7 @@ type GasPriceCache struct {
 
 func NewGasPriceCache() *GasPriceCache {
 	return &GasPriceCache{
-		latestPrice: uint256.NewInt(0),
-		latestHash:  common.Hash{},
+		latestPrice: uint256.NewInt(common.GWei / 1000),
 	}
 }
 

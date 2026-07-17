@@ -11,7 +11,11 @@ defaults:
 jobs:
   tests-mac-linux:
     strategy:
-      fail-fast: false
+      # In merge_group: cancel sibling shards on first failure so ci-gate's
+      # `needs` reach terminal state quickly and the broken PR can be evicted.
+      # In PR runs: keep all shards going so authors see the full failure
+      # picture across every shard.
+      fail-fast: ${{ github.event_name == 'merge_group' }}
       matrix:
         os:
           - ubuntu-24.04
@@ -35,6 +39,7 @@ jobs:
             skip_execution_tests: 'true'
     name: tests-mac-linux (${{ matrix.os }}, ${{ matrix.exec_mode }})
     runs-on: ${{ matrix.os }}
+    timeout-minutes: 60
 
     steps:
       - name: Declare runners
@@ -43,17 +48,22 @@ jobs:
           echo "This workflow is being executed by this runner: $RUNNER_NAME"
 
       - name: Checkout custom actions
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
         with:
           fetch-depth: 1
+          persist-credentials: false
 
       - uses: ./.github/actions/setup-erigon
         id: erigon
         with:
           submodules: true
-          lfs: tests
           cleanup-space: true
           ramdisk: true
+          cache-namespace: test-all-erigon
+          # Go's test cache can't see ERIGON_EXEC3_PARALLEL (read at package
+          # init), so serial and parallel results only stay mode-pure if each
+          # exec mode keeps its own cache lineage.
+          build-cache-extra-key: ${{ matrix.exec_mode }}
 
       - name: Run all tests on ${{ matrix.os }} (${{ matrix.exec_mode }} exec)
         env:

@@ -441,7 +441,7 @@ func TestRecoverSignerFromRLP_ValidData(t *testing.T) {
 	hash := crypto.Keccak256Hash(hashData)
 
 	// Sign the hash
-	sig, err := crypto.Sign(hash.Bytes(), privateKey)
+	sig, err := crypto.Sign(hash[:], privateKey)
 	require.NoError(t, err)
 
 	// Separate signature components
@@ -1014,7 +1014,7 @@ func TestSetCodeTxnValidationWithLargeAuthorizationValues(t *testing.T) {
 	coreDB := temporaltest.NewTestDB(t, datadir.New(t.TempDir()))
 	cfg := txpoolcfg.DefaultConfig
 	var chainConfig chain.Config
-	copier.Copy(&chainConfig, testforks.Forks["Prague"])
+	require.NoError(t, copier.CopyWithOption(&chainConfig, testforks.Forks["Prague"], copier.Option{DeepCopy: true}))
 	chainConfig.ChainID = maxUint256
 	cache := kvcache.NewSimple()
 	logger := log.New()
@@ -1357,7 +1357,7 @@ func makeWrappedBlobTxnRlpWithCellProofs(t *testing.T, chainID *uint256.Int, blo
 	}
 
 	kzgCtx := kzg.Ctx()
-	for i := 0; i < blobCount; i++ {
+	for i := range blobCount {
 		for j := range wrapper.Blobs[i] {
 			wrapper.Blobs[i][j] = byte(i + 1)
 		}
@@ -1536,7 +1536,7 @@ func TestBlobSlots(t *testing.T) {
 	}
 	v := accounts3.SerialiseV3(&acc)
 
-	for i := 0; i < 11; i++ {
+	for i := range 11 {
 		addr[0] = uint8(i + 1)
 		change.ChangeBatch[0].Changes = append(change.ChangeBatch[0].Changes, &remoteproto.AccountChange{
 			Action:  remoteproto.Action_UPSERT,
@@ -1752,7 +1752,7 @@ func TestGetBlobs(t *testing.T) {
 	}
 	v := accounts3.SerialiseV3(&acc)
 
-	for i := 0; i < 11; i++ {
+	for i := range 11 {
 		addr[0] = uint8(i + 1)
 		change.ChangeBatch[0].Changes = append(change.ChangeBatch[0].Changes, &remoteproto.AccountChange{
 			Action:  remoteproto.Action_UPSERT,
@@ -1910,7 +1910,7 @@ func BenchmarkProcessRemoteTxns(b *testing.B) {
 	}
 
 	// Create 100 test accounts with 1 ETH balance each
-	for i := 0; i < 100; i++ {
+	for i := range 100 {
 		var addr [20]byte
 		addr[0] = uint8(i + 1)
 		acc := accounts3.Account{
@@ -2090,7 +2090,7 @@ func TestZombieQueuedEviction(t *testing.T) {
 
 		// Add consecutive txns: nonces 5, 6, 7, ..., 5+MaxNonceGap+5 = 20
 		count := int(cfg2.MaxNonceGap + 5 + 1)
-		for i := 0; i < count; i++ {
+		for i := range count {
 			txnSlots.Txns = nil
 			txnSlots.Senders = txnSlots.Senders[:0]
 			txnSlots.IsLocal = txnSlots.IsLocal[:0]

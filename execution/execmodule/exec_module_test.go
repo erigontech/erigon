@@ -26,6 +26,7 @@ import (
 	"errors"
 	"fmt"
 	"math/big"
+	"sort"
 	"testing"
 	"time"
 
@@ -35,20 +36,25 @@ import (
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/crypto"
+	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/generics"
 	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/kv/rawdbv3"
 	"github.com/erigontech/erigon/db/rawdb"
+	"github.com/erigontech/erigon/db/state/changeset"
 	"github.com/erigontech/erigon/execution/builder"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/commitment/commitmentdb"
 	"github.com/erigontech/erigon/execution/execmodule"
 	"github.com/erigontech/erigon/execution/execmodule/chainreader"
 	"github.com/erigontech/erigon/execution/execmodule/execmoduletester"
-	"github.com/erigontech/erigon/execution/protocol/misc"
 	"github.com/erigontech/erigon/execution/protocol/params"
+	"github.com/erigontech/erigon/execution/stagedsync"
+	"github.com/erigontech/erigon/execution/stagedsync/stages"
 	"github.com/erigontech/erigon/execution/state/contracts"
 	"github.com/erigontech/erigon/execution/tests/blockgen"
 	"github.com/erigontech/erigon/execution/types"
+	"github.com/erigontech/erigon/execution/types/accounts"
 	"github.com/erigontech/erigon/node/gointerfaces/txpoolproto"
 )
 
@@ -178,6 +184,324 @@ func TestValidateChainAndUpdateForkChoiceWithSideForksThatGoBackAndForwardInHeig
 	require.NoError(t, err)
 }
 
+// TestValidateForkPayloadOffNonTipCanonicalBlockWithCache exercises the
+// unwind/fork-payload caching path in ExecModule.ValidateChain. A fork that
+// branches off a NON-tip canonical block forces validateChain to
+// unwindToCommonCanonical (unwinding only the canonical blocks above the branch
+// point), chain the validation SharedDomains to e.currentContext so the unwound
+// blocks' diffsets are reachable via the parent link, and mask the BranchCache
+// with the resulting unwind set. If any of that is wrong the re-executed fork
+// produces a wrong trie root, so a Success validation status is the correctness
+// assertion. The existing side-fork test only branches at genesis (full unwind);
+// this covers the partial-unwind round trip the ValidateChain parent-link
+// comment guards.
+func TestValidateForkPayloadOffNonTipCanonicalBlockWithCache(t *testing.T) {
+	privKey, err := crypto.GenerateKey()
+	require.NoError(t, err)
+	senderAddr := crypto.PubkeyToAddress(privKey.PublicKey)
+	genesis := &types.Genesis{
+		Config: chain.AllProtocolChanges,
+		Alloc: types.GenesisAlloc{
+			senderAddr: {Balance: new(big.Int).Exp(big.NewInt(10), big.NewInt(18), nil)},
+		},
+	}
+	m := execmoduletester.New(t, execmoduletester.WithGenesisSpec(genesis), execmoduletester.WithKey(privKey))
+	to := common.Address{0xaa}
+	baseFee := m.Genesis.BaseFee().Uint64()
+	mkTx := func(nonce, amount uint64) types.Transaction {
+		tx, err := types.SignTx(
+			types.NewTransaction(nonce, to, uint256.NewInt(amount), 50000, uint256.NewInt(baseFee), nil),
+			*types.LatestSignerForChainID(nil),
+			privKey,
+		)
+		require.NoError(t, err)
+		return tx
+	}
+
+	// blockgen reads the latest committed DB state, so each segment must be
+	// generated while the chain head sits at its intended parent. Build and
+	// finalize the shared prefix genesis → 1 → 2 first (nonces 0,1), each block
+	// carrying a state-touching txn so the BranchCache + commitment hold real
+	// entries. After this the head is block 2.
+	prefix, err := blockgen.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 2, func(i int, b *blockgen.BlockGen) {
+		b.AddTx(mkTx(uint64(i), 1_000))
+	})
+	require.NoError(t, err)
+	require.NoError(t, insertValidateAndUfc1By1(t.Context(), m.ExecModule, prefix.Blocks))
+	block2 := prefix.Blocks[1]
+
+	// With the head at block 2 (signer nonce 2), generate both continuations off
+	// block 2 before inserting either: the canonical tip (block 3, nonce 2) and a
+	// longer fork (blocks 3',4' at nonces 2,3) that branches off the same non-tip
+	// block 2.
+	canonicalTip, err := blockgen.GenerateChain(m.ChainConfig, block2, m.Engine, m.DB, 1, func(i int, b *blockgen.BlockGen) {
+		b.AddTx(mkTx(2, 1_000))
+	})
+	require.NoError(t, err)
+	fork, err := blockgen.GenerateChain(m.ChainConfig, block2, m.Engine, m.DB, 2, func(i int, b *blockgen.BlockGen) {
+		b.AddTx(mkTx(uint64(2+i), 2_000))
+	})
+	require.NoError(t, err)
+
+	// Finalize the canonical tip (head → block 3).
+	require.NoError(t, insertValidateAndUfc1By1(t.Context(), m.ExecModule, canonicalTip.Blocks))
+
+	// Validating fork.Blocks[0] (height 3, parent = block 2) must unwind canonical
+	// block 3 back to block 2; fork.Blocks[1] then head-extends and the FCU reorgs
+	// onto the longer fork.
+	require.NoError(t, insertValidateAndUfc1By1(t.Context(), m.ExecModule, fork.Blocks))
+
+	// Reorg back onto the original canonical block 3 (same common ancestor,
+	// block 2) to exercise the BranchCache masking in the other direction:
+	// unwind the fork blocks and re-validate canonical block 3 off block 2.
+	require.NoError(t, insertValidateAndUfc1By1(t.Context(), m.ExecModule, canonicalTip.Blocks))
+}
+
+// Regression for PR #21415: when state's commitBlock is ahead of TxNums.Last
+// (e.g. after a snapshot/state misalignment + chaindata wipe), an FCU to a
+// block beyond the canonical tip must not be rejected as ReorgTooDeep.
+// The forkchoice should detect that unwindTarget equals the canonical tip,
+// skip the unwind path, write the new canonicals, and let AppendCanonicalTxNums
+// re-extend TxNums past commitBlock.
+func TestUpdateForkChoiceRecoversWhenStateAheadOfTxNums(t *testing.T) {
+	ctx := t.Context()
+	privKey, err := crypto.GenerateKey()
+	require.NoError(t, err)
+	senderAddr := crypto.PubkeyToAddress(privKey.PublicKey)
+	genesis := &types.Genesis{
+		Config: chain.AllProtocolChanges,
+		Alloc: types.GenesisAlloc{
+			senderAddr: {Balance: new(big.Int).Exp(big.NewInt(10), big.NewInt(18), nil)},
+		},
+	}
+	m := execmoduletester.New(t, execmoduletester.WithGenesisSpec(genesis), execmoduletester.WithKey(privKey))
+	chainPack, err := blockgen.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 10, func(i int, b *blockgen.BlockGen) {
+		tx, err := types.SignTx(
+			types.NewTransaction(uint64(i), senderAddr, uint256.NewInt(1_000), 50000, uint256.NewInt(m.Genesis.BaseFee().Uint64()), nil),
+			*types.LatestSignerForChainID(nil),
+			privKey,
+		)
+		require.NoError(t, err)
+		b.AddTx(tx)
+	})
+	require.NoError(t, err)
+	require.Len(t, chainPack.Blocks, 10)
+
+	// Drive the full chain in (insert + validate + UFC). State commitBlock and
+	// TxNums.Last are now both at block 10.
+	require.NoError(t, insertValidateAndUfc1By1(ctx, m.ExecModule, chainPack.Blocks))
+
+	const truncateTo uint64 = 5
+	// Simulate the post-OtterSync state where chaindata's canonical+TxNums only
+	// extend to a frozen tip but the snapshot/state files commit to a later
+	// block. We truncate canonical+TxNums down to block 5 while leaving the
+	// commitment domain at block 10, and clear the changeset table (which a
+	// chaindata wipe would empty). With no changesets, CanUnwindToBlockNum
+	// falls back to the commitment block (10) — so an unwind to block 5 looks
+	// "too deep" and the pre-fix code rejects the FCU as ReorgTooDeep.
+	var commitBlock uint64
+	require.NoError(t, m.DB.UpdateTemporal(ctx, func(tx kv.TemporalRwTx) error {
+		v, _, err := tx.GetLatest(kv.CommitmentDomain, commitmentdb.KeyCommitmentState)
+		require.NoError(t, err)
+		require.GreaterOrEqual(t, len(v), 16)
+		commitBlock = binary.BigEndian.Uint64(v[8:16])
+		require.NoError(t, rawdbv3.TxNums.Truncate(tx, truncateTo+1))
+		require.NoError(t, rawdb.TruncateCanonicalHash(tx, truncateTo+1, false))
+		require.NoError(t, tx.ClearTable(kv.ChangeSets3))
+		return nil
+	}))
+	require.Equal(t, uint64(10), commitBlock, "commitBlock should be at block 10 after the initial chain")
+	require.NoError(t, m.DB.ViewTemporal(ctx, func(tx kv.TemporalTx) error {
+		lastBlock, _, err := rawdbv3.TxNums.Last(tx)
+		require.NoError(t, err)
+		require.Equal(t, truncateTo, lastBlock, "canonical/TxNums must be truncated below commitBlock to set up the misalignment")
+		return nil
+	}))
+
+	// FCU on the same chain's tip (block 10). Walk-back finds canonical ancestor
+	// at the truncated tip (block 5), unwindTarget = 5 = lastCanonicalBlock,
+	// so the no-unwind branch fires. The handler then writes canonical entries
+	// for blocks 6..10 and AppendCanonicalTxNums re-extends TxNums.
+	//
+	// Because the domain was ahead of blocks when the FCU started, the handler
+	// returns ExecutionStatusTooFarAway ("domain ahead of blocks") rather than
+	// ReorgTooDeep — a signal the CL (Caplin/Astrid/EngineServer) knows how to
+	// handle by inserting the missing canonical blocks and retrying.
+	res, err := updateForkChoice(ctx, m.ExecModule, chainPack.Blocks[len(chainPack.Blocks)-1].Header())
+	require.NoError(t, err)
+	require.NotEqual(t, execmodule.ExecutionStatusReorgTooDeep, res.Status, "must not be rejected as ReorgTooDeep")
+	require.Equal(t, execmodule.ExecutionStatusTooFarAway, res.Status, "should signal domain-ahead-of-blocks so the CL retries")
+
+	// After the FCU, TxNums must have caught up to (or past) commitBlock so
+	// the next NewSharedDomains() will not return ErrBehindCommitment.
+	require.NoError(t, m.DB.ViewTemporal(ctx, func(tx kv.TemporalTx) error {
+		lastBlock, _, err := rawdbv3.TxNums.Last(tx)
+		require.NoError(t, err)
+		require.GreaterOrEqual(t, lastBlock, commitBlock, "TxNums.Last must have caught up to commitBlock")
+		return nil
+	}))
+}
+
+// Companion to TestUpdateForkChoiceRecoversWhenStateAheadOfTxNums that also
+// exercises forward execution: state lags the chain tip (executed to block 10,
+// chain extends to 15). The first FCU repairs the canonical/TxNums index and
+// signals TooFarAway; the second FCU then drives execution forward 10 -> 15.
+// The committed state at block 10 stays in the domain tables (the base for
+// forward execution) — only the index tables are truncated.
+func TestUpdateForkChoiceForwardExecutesAfterStateAheadRecovery(t *testing.T) {
+	ctx := t.Context()
+	privKey, err := crypto.GenerateKey()
+	require.NoError(t, err)
+	senderAddr := crypto.PubkeyToAddress(privKey.PublicKey)
+	genesis := &types.Genesis{
+		Config: chain.AllProtocolChanges,
+		Alloc: types.GenesisAlloc{
+			senderAddr: {Balance: new(big.Int).Exp(big.NewInt(10), big.NewInt(18), nil)},
+		},
+	}
+	m := execmoduletester.New(t, execmoduletester.WithGenesisSpec(genesis), execmoduletester.WithKey(privKey))
+	chainPack, err := blockgen.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 15, func(i int, b *blockgen.BlockGen) {
+		tx, err := types.SignTx(
+			types.NewTransaction(uint64(i), senderAddr, uint256.NewInt(1_000), 50000, uint256.NewInt(m.Genesis.BaseFee().Uint64()), nil),
+			*types.LatestSignerForChainID(nil),
+			privKey,
+		)
+		require.NoError(t, err)
+		b.AddTx(tx)
+	})
+	require.NoError(t, err)
+	require.Len(t, chainPack.Blocks, 15)
+
+	// Execute only the first 10 blocks: state/commitBlock/execProgress at 10.
+	require.NoError(t, insertValidateAndUfc1By1(ctx, m.ExecModule, chainPack.Blocks[:10]))
+	// Insert headers/bodies for 11..15 so the forkchoice walk-back can traverse
+	// them, but do not UFC — they are neither canonical nor executed yet.
+	insRes, err := insertBlocks(ctx, m.ExecModule, chainPack.Blocks[10:])
+	require.NoError(t, err)
+	require.Equal(t, execmodule.ExecutionStatusSuccess, insRes)
+
+	const truncateTo uint64 = 5
+	var commitBlock uint64
+	require.NoError(t, m.DB.UpdateTemporal(ctx, func(tx kv.TemporalRwTx) error {
+		v, _, err := tx.GetLatest(kv.CommitmentDomain, commitmentdb.KeyCommitmentState)
+		require.NoError(t, err)
+		require.GreaterOrEqual(t, len(v), 16)
+		commitBlock = binary.BigEndian.Uint64(v[8:16])
+		require.NoError(t, rawdbv3.TxNums.Truncate(tx, truncateTo+1))
+		require.NoError(t, rawdb.TruncateCanonicalHash(tx, truncateTo+1, false))
+		require.NoError(t, tx.ClearTable(kv.ChangeSets3))
+		return nil
+	}))
+	require.Equal(t, uint64(10), commitBlock)
+
+	tip := chainPack.Blocks[len(chainPack.Blocks)-1].Header()
+
+	// First FCU to the tip (block 15). Index is repaired (canonical + TxNums
+	// extended to 15) and, since the domain was behind, we get TooFarAway.
+	res, err := updateForkChoice(ctx, m.ExecModule, tip)
+	require.NoError(t, err)
+	require.Equal(t, execmodule.ExecutionStatusTooFarAway, res.Status, "first FCU should repair index and signal domain-ahead")
+	var execProgAfter1 uint64
+	require.NoError(t, m.DB.ViewTemporal(ctx, func(tx kv.TemporalTx) error {
+		lastBlock, _, err := rawdbv3.TxNums.Last(tx)
+		require.NoError(t, err)
+		require.Equal(t, uint64(15), lastBlock, "TxNums must be re-extended to the tip")
+		execProgAfter1, err = stages.GetStageProgress(tx, stages.Execution)
+		require.NoError(t, err)
+		return nil
+	}))
+	require.Equal(t, commitBlock, execProgAfter1, "execution should not have advanced yet (state still at commitBlock)")
+
+	// Second FCU to the same tip: domain is no longer ahead (TxNums caught up),
+	// so execution is driven forward from commitBlock to the tip.
+	res2, err := updateForkChoice(ctx, m.ExecModule, tip)
+	require.NoError(t, err)
+	require.Equal(t, execmodule.ExecutionStatusSuccess, res2.Status, "second FCU should execute forward to the tip")
+	require.NoError(t, m.DB.ViewTemporal(ctx, func(tx kv.TemporalTx) error {
+		execProg, err := stages.GetStageProgress(tx, stages.Execution)
+		require.NoError(t, err)
+		require.Equal(t, uint64(15), execProg, "execution must have advanced to the tip")
+		return nil
+	}))
+}
+
+// Exercises the hive engine-cancun "Re-Org Back into Canonical Chain" scenario:
+// after producing each block N>5 the CL re-orgs the head back to block 5 and
+// then forward to N, re-applying blocks 6..N. With background prune enabled
+// (the node default) the prune runs on the shared pipeline sync, and before the
+// fix it could race the next FCU's RunLoop, skip the execution stage and leave
+// the head behind ("Invalid chain after execution"). Run under -race.
+func TestReorgBackAndForwardIntoCanonicalChain(t *testing.T) {
+	modes := []struct {
+		name string
+		opt  execmoduletester.Option
+	}{
+		{name: "fg-prune"},
+		// bg-prune matches the hive erigon default (FcuBackgroundPrune=true): the
+		// background prune shares the pipeline sync with the next FCU's RunLoop.
+		// bg-commit hands the semaphore to its goroutine the same way; in both
+		// modes the handoff must not overlap the FCU goroutine's cleanup.
+		{name: "bg-prune", opt: execmoduletester.WithFcuBackgroundPrune()},
+		{name: "bg-commit", opt: execmoduletester.WithFcuBackgroundCommit()},
+	}
+	for _, mode := range modes {
+		opts := []execmoduletester.Option{execmoduletester.WithGenesisSpec(&types.Genesis{Config: chain.AllProtocolChanges})}
+		if mode.opt != nil {
+			opts = append(opts, mode.opt)
+		}
+		t.Run(mode.name, func(t *testing.T) {
+			ctx := t.Context()
+			m := execmoduletester.New(t, opts...)
+
+			const chainLen = 9
+			const reorgBackTo = 5
+			chainPack, err := blockgen.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, chainLen, func(i int, b *blockgen.BlockGen) {})
+			require.NoError(t, err)
+			require.Len(t, chainPack.Blocks, chainLen)
+
+			headerAt := func(n uint64) *types.Header { return chainPack.Blocks[n-1].Header() }
+
+			for n := uint64(1); n <= chainLen; n++ {
+				// Insert the block only when it is "produced" (as newPayload would):
+				// later blocks must not exist in the DB during the earlier re-orgs.
+				insRes, err := insertBlocks(ctx, m.ExecModule, chainPack.Blocks[n-1:n])
+				require.NoError(t, err)
+				require.Equalf(t, execmodule.ExecutionStatusSuccess, insRes, "insert block %d", n)
+
+				h := headerAt(n)
+				vr, err := validateChain(ctx, m.ExecModule, h)
+				require.NoError(t, err)
+				require.Equalf(t, execmodule.ExecutionStatusSuccess, vr.ValidationStatus, "validate block %d", n)
+				ur, err := updateForkChoice(ctx, m.ExecModule, h)
+				require.NoError(t, err)
+				require.Equalf(t, execmodule.ExecutionStatusSuccess, ur.Status, "fcu to canonical block %d", n)
+
+				if n <= reorgBackTo {
+					continue
+				}
+				// Re-org the head back down to block 5.
+				back, err := updateForkChoice(ctx, m.ExecModule, headerAt(reorgBackTo))
+				require.NoError(t, err)
+				require.Equalf(t, execmodule.ExecutionStatusSuccess, back.Status, "re-org back to block %d (cycle at %d)", reorgBackTo, n)
+
+				// Re-org the head forward back into the canonical chain (block n).
+				fwd, err := updateForkChoice(ctx, m.ExecModule, h)
+				require.NoError(t, err)
+				require.Equalf(t, execmodule.ExecutionStatusSuccess, fwd.Status, "re-org forward back to canonical block %d", n)
+				require.Equalf(t, h.Hash(), fwd.LatestValidHash, "forward re-org should make block %d the head", n)
+			}
+
+			// Let the last FCU's commit and prune (foreground or background)
+			// settle before reading the committed head.
+			m.ExecModule.WaitIdle(ctx)
+			require.NoError(t, m.DB.ViewTemporal(ctx, func(tx kv.TemporalTx) error {
+				require.Equal(t, headerAt(chainLen).Hash(), rawdb.ReadHeadBlockHash(tx), "head must be at canonical tip")
+				return nil
+			}))
+		})
+	}
+}
+
 func addTwoTxnsToPool(ctx context.Context, startingNonce uint64, t *testing.T, m *execmoduletester.ExecModuleTester, txpool txpoolproto.TxpoolServer, baseFee uint64) {
 	tx2, err := types.SignTx(types.NewTransaction(startingNonce, common.Address{1}, uint256.NewInt(10_000), params.TxGas, uint256.NewInt(baseFee), nil), *types.LatestSignerForChainID(m.ChainConfig.ChainID), m.Key)
 	require.NoError(t, err)
@@ -227,7 +551,7 @@ func TestAssembleBlock(t *testing.T) {
 	require.NoError(t, err)
 	payloadId, err := assembleBlock(ctx, exec, &builder.Parameters{
 		ParentHash:            chainPack.TopBlock.Hash(),
-		Timestamp:             chainPack.TopBlock.Header().Time + 1,
+		Timestamp:             chainPack.TopBlock.Time() + 1,
 		PrevRandao:            chainPack.TopBlock.Header().MixDigest,
 		SuggestedFeeRecipient: common.Address{1},
 		Withdrawals:           make([]*types.Withdrawal, 0),
@@ -269,7 +593,7 @@ func TestAssembleBlockWithFreshlyAddedTxns(t *testing.T) {
 	require.NoError(t, err)
 	payloadId, err := assembleBlock(ctx, exec, &builder.Parameters{
 		ParentHash:            chainPack.TopBlock.Hash(),
-		Timestamp:             chainPack.TopBlock.Header().Time + 1,
+		Timestamp:             chainPack.TopBlock.Time() + 1,
 		PrevRandao:            chainPack.TopBlock.Header().MixDigest,
 		SuggestedFeeRecipient: common.Address{1},
 		Withdrawals:           make([]*types.Withdrawal, 0),
@@ -292,9 +616,20 @@ func TestAssembleBlockWithFreshlyAddedTxns(t *testing.T) {
 }
 
 func insertBlocks(ctx context.Context, exec *execmodule.ExecModule, blocks []*types.Block) (execmodule.ExecutionStatus, error) {
+	return insertBlocksWithBAL(ctx, exec, blocks, nil)
+}
+
+// insertBlocksWithBAL inserts blocks, attaching the parallel per-block BAL bytes
+// (as blockgen's ChainPack.BlockAccessLists carries them) onto each RawBlock so
+// the BAL reaches the DB — GenerateChain sets the header's BlockAccessListHash
+// but not the block's BlockAccessList field. bals may be nil.
+func insertBlocksWithBAL(ctx context.Context, exec *execmodule.ExecModule, blocks []*types.Block, bals [][]byte) (execmodule.ExecutionStatus, error) {
 	rawBlocks := make([]*types.RawBlock, len(blocks))
 	for i, b := range blocks {
 		rawBlocks[i] = &types.RawBlock{Header: b.HeaderNoCopy(), Body: b.RawBody()}
+		if i < len(bals) {
+			rawBlocks[i].BlockAccessList = bals[i]
+		}
 	}
 	return retryBusy(ctx, func() (execmodule.ExecutionStatus, bool, error) {
 		status, err := exec.InsertBlocks(ctx, rawBlocks)
@@ -348,6 +683,15 @@ func insertValidateAndUfc1By1(ctx context.Context, exec *execmodule.ExecModule, 
 		}
 		if ur.Status != execmodule.ExecutionStatusSuccess {
 			return fmt.Errorf("unexpected updateForkChoice status: %s", ur.Status)
+		}
+	}
+	// UpdateForkChoice returns before the background flush+commit finishes
+	// (per #21444). The next semaphore-acquiring op blocks until the prior
+	// FCU's commit defers complete — so do one more idempotent FCU for the
+	// last block to ensure commitBlock has settled before the caller reads it.
+	if len(blocks) > 0 {
+		if _, err := updateForkChoice(ctx, exec, blocks[len(blocks)-1].Header()); err != nil {
+			return err
 		}
 	}
 	return nil
@@ -422,7 +766,7 @@ func TestAssembleEmptyBlock(t *testing.T) {
 	// Don't add any txns to pool — assemble empty block.
 	payloadId, err := assembleBlock(ctx, exec, &builder.Parameters{
 		ParentHash:            chainPack.TopBlock.Hash(),
-		Timestamp:             chainPack.TopBlock.Header().Time + 1,
+		Timestamp:             chainPack.TopBlock.Time() + 1,
 		PrevRandao:            chainPack.TopBlock.Header().MixDigest,
 		SuggestedFeeRecipient: common.Address{1},
 		Withdrawals:           make([]*types.Withdrawal, 0),
@@ -462,7 +806,7 @@ func TestAssembleBlockWithStateVerification(t *testing.T) {
 
 	payloadId, err := assembleBlock(ctx, exec, &builder.Parameters{
 		ParentHash:            chainPack.TopBlock.Hash(),
-		Timestamp:             chainPack.TopBlock.Header().Time + 1,
+		Timestamp:             chainPack.TopBlock.Time() + 1,
 		PrevRandao:            chainPack.TopBlock.Header().MixDigest,
 		SuggestedFeeRecipient: common.Address{1},
 		Withdrawals:           make([]*types.Withdrawal, 0),
@@ -485,7 +829,7 @@ func TestAssembleBlockWithStateVerification(t *testing.T) {
 	addTwoTxnsToPool(ctx, 3, t, m, txpool, baseFee)
 	payloadId2, err := assembleBlock(ctx, exec, &builder.Parameters{
 		ParentHash:            block.Hash(),
-		Timestamp:             block.Header().Time + 1,
+		Timestamp:             block.Time() + 1,
 		PrevRandao:            block.Header().MixDigest,
 		SuggestedFeeRecipient: common.Address{1},
 		Withdrawals:           make([]*types.Withdrawal, 0),
@@ -541,7 +885,7 @@ func TestAssembleBlockWithContractCreation(t *testing.T) {
 	// Assemble block.
 	payloadId, err := assembleBlock(ctx, exec, &builder.Parameters{
 		ParentHash:            chainPack.TopBlock.Hash(),
-		Timestamp:             chainPack.TopBlock.Header().Time + 1,
+		Timestamp:             chainPack.TopBlock.Time() + 1,
 		PrevRandao:            chainPack.TopBlock.Header().MixDigest,
 		SuggestedFeeRecipient: common.Address{1},
 		Withdrawals:           make([]*types.Withdrawal, 0),
@@ -612,7 +956,7 @@ func TestAssembleBlockGasOverflow(t *testing.T) {
 	// Assemble block 2 — should be gas-limited.
 	payloadId, err := assembleBlock(ctx, exec, &builder.Parameters{
 		ParentHash:            chainPack.TopBlock.Hash(),
-		Timestamp:             chainPack.TopBlock.Header().Time + 1,
+		Timestamp:             chainPack.TopBlock.Time() + 1,
 		PrevRandao:            chainPack.TopBlock.Header().MixDigest,
 		SuggestedFeeRecipient: common.Address{1},
 		Withdrawals:           make([]*types.Withdrawal, 0),
@@ -706,7 +1050,7 @@ func TestAssembleBlockMixedTxTypes(t *testing.T) {
 	// Assemble block.
 	payloadId, err := assembleBlock(ctx, exec, &builder.Parameters{
 		ParentHash:            chainPack.TopBlock.Hash(),
-		Timestamp:             chainPack.TopBlock.Header().Time + 1,
+		Timestamp:             chainPack.TopBlock.Time() + 1,
 		PrevRandao:            chainPack.TopBlock.Header().MixDigest,
 		SuggestedFeeRecipient: common.Address{1},
 		Withdrawals:           make([]*types.Withdrawal, 0),
@@ -798,7 +1142,7 @@ func TestAssembleBlockWithWithdrawalRequest(t *testing.T) {
 	beaconRoot := randomHash()
 	payloadId, err := assembleBlock(ctx, exec, &builder.Parameters{
 		ParentHash:            chainPack.TopBlock.Hash(),
-		Timestamp:             chainPack.TopBlock.Header().Time + 1,
+		Timestamp:             chainPack.TopBlock.Time() + 1,
 		PrevRandao:            randomHash(),
 		SuggestedFeeRecipient: common.Address{1},
 		Withdrawals:           make([]*types.Withdrawal, 0),
@@ -898,7 +1242,7 @@ func TestAssembleBlockAmsterdamForkTransition(t *testing.T) {
 	// Build 3 pre-Amsterdam blocks via the builder (timestamps 1, 2, 3).
 	topBlock := m.Genesis
 	baseFee := topBlock.BaseFee().Uint64()
-	for i := 0; i < 3; i++ {
+	for i := range 3 {
 		nonce := uint64(i)
 		tx, txErr := types.SignTx(
 			types.NewTransaction(nonce, common.Address{1}, uint256.NewInt(10_000), params.TxGas, uint256.NewInt(baseFee), nil),
@@ -911,7 +1255,7 @@ func TestAssembleBlockAmsterdamForkTransition(t *testing.T) {
 		require.NoError(t, addErr)
 		require.Equal(t, "success", r.Errors[0])
 
-		ts := topBlock.Header().Time + 1
+		ts := topBlock.Time() + 1
 		require.Less(t, ts, amsterdamTime) // still pre-Amsterdam
 		var prevRandao, beaconRoot common.Hash
 		_, _ = rand.Read(prevRandao[:])
@@ -936,7 +1280,7 @@ func TestAssembleBlockAmsterdamForkTransition(t *testing.T) {
 		baseFee = block.BaseFee().Uint64()
 	}
 
-	require.Less(t, topBlock.Header().Time, amsterdamTime, "pre-Amsterdam blocks should have timestamp < amsterdamTime")
+	require.Less(t, topBlock.Time(), amsterdamTime, "pre-Amsterdam blocks should have timestamp < amsterdamTime")
 
 	// Add a contract deployment tx to the pool — exercises state gas (EIP-8037)
 	// more than simple EOA transfers.
@@ -983,12 +1327,127 @@ func TestAssembleBlockAmsterdamForkTransition(t *testing.T) {
 	block, err := getAssembledBlock(ctx, exec, payloadId)
 	require.NoError(t, err)
 	require.NotNil(t, block, "first Amsterdam block should be built successfully")
-	require.True(t, cfg.IsAmsterdam(block.Header().Time), "block should be an Amsterdam block")
+	require.True(t, cfg.IsAmsterdam(block.Time()), "block should be an Amsterdam block")
 	require.GreaterOrEqual(t, len(block.Transactions()), 1, "block should contain txpool txns")
 
 	// Insert, validate, and update fork choice.
 	err = insertValidateAndUfc1By1(ctx, exec, []*types.Block{block})
 	require.NoError(t, err)
+}
+
+// TestGetPayloadBodiesRegenerateBlockAccessLists verifies the payload-bodies
+// getters serve stored BALs as-is and, once the stored rows are pruned (kept
+// only for the reorg window), regenerate them by re-execution —
+// engine_getPayloadBodiesBy*V2 must serve BALs for the weak subjectivity period.
+func TestGetPayloadBodiesRegenerateBlockAccessLists(t *testing.T) {
+	t.Parallel()
+	ctx := t.Context()
+	privKey, err := crypto.GenerateKey()
+	require.NoError(t, err)
+	senderAddr := crypto.PubkeyToAddress(privKey.PublicKey)
+	genesis := &types.Genesis{
+		Config: chain.AllProtocolChanges,
+		Alloc: types.GenesisAlloc{
+			senderAddr: {Balance: new(big.Int).Exp(big.NewInt(10), big.NewInt(18), nil)},
+		},
+	}
+	m := execmoduletester.New(t, execmoduletester.WithGenesisSpec(genesis), execmoduletester.WithKey(privKey))
+	signer := types.LatestSignerForChainID(m.ChainConfig.ChainID)
+	baseFee := uint256.NewInt(m.Genesis.BaseFee().Uint64())
+	chainPack, err := blockgen.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 2, func(i int, b *blockgen.BlockGen) {
+		txn, err := types.SignTx(types.NewTransaction(uint64(i), common.Address{1}, uint256.NewInt(10_000), 50_000, baseFee, nil), *signer, privKey)
+		require.NoError(t, err)
+		b.AddTx(txn)
+	})
+	require.NoError(t, err)
+	err = m.InsertChain(chainPack)
+	require.NoError(t, err)
+	hashes := []common.Hash{chainPack.Blocks[0].Hash(), chainPack.Blocks[1].Hash()}
+	stored, err := m.ExecModule.GetPayloadBodiesByHash(ctx, hashes)
+	require.NoError(t, err)
+	require.Len(t, stored, 2)
+	for i, pb := range stored {
+		require.NotNil(t, pb)
+		require.Equal(t, chainPack.BlockAccessLists[i], pb.BlockAccessList, "stored block %d", i+1)
+	}
+	err = m.DB.Update(ctx, func(tx kv.RwTx) error {
+		return tx.ForEach(kv.BlockAccessList, nil, func(k, _ []byte) error {
+			return tx.Delete(kv.BlockAccessList, k)
+		})
+	})
+	require.NoError(t, err)
+	err = m.DB.View(ctx, func(tx kv.Tx) error {
+		count, err := tx.Count(kv.BlockAccessList)
+		require.NoError(t, err)
+		require.Zero(t, count, "stored BALs should be fully pruned")
+		return nil
+	})
+	require.NoError(t, err)
+	byHash, err := m.ExecModule.GetPayloadBodiesByHash(ctx, hashes)
+	require.NoError(t, err)
+	require.Len(t, byHash, 2)
+	for i, pb := range byHash {
+		require.NotNil(t, pb)
+		require.Equal(t, chainPack.BlockAccessLists[i], pb.BlockAccessList, "byHash block %d", i+1)
+	}
+	byRange, err := m.ExecModule.GetPayloadBodiesByRange(ctx, 1, 2)
+	require.NoError(t, err)
+	require.Len(t, byRange, 2)
+	for i, pb := range byRange {
+		require.NotNil(t, pb)
+		require.Equal(t, chainPack.BlockAccessLists[i], pb.BlockAccessList, "byRange block %d", i+1)
+	}
+}
+
+// TestGetPayloadBodiesNonCanonicalBlockAccessList verifies that payload-bodies
+// requests for non-canonical blocks degrade the blockAccessList to null instead
+// of failing the batch: BALs can only be re-derived from canonical state.
+func TestGetPayloadBodiesNonCanonicalBlockAccessList(t *testing.T) {
+	t.Parallel()
+	ctx := t.Context()
+	privKeyA, err := crypto.GenerateKey()
+	require.NoError(t, err)
+	privKeyB, err := crypto.GenerateKey()
+	require.NoError(t, err)
+	addrA := crypto.PubkeyToAddress(privKeyA.PublicKey)
+	addrB := crypto.PubkeyToAddress(privKeyB.PublicKey)
+	genesis := &types.Genesis{
+		Config: chain.AllProtocolChanges,
+		Alloc: types.GenesisAlloc{
+			addrA: {Balance: new(big.Int).Exp(big.NewInt(10), big.NewInt(18), nil)},
+			addrB: {Balance: new(big.Int).Exp(big.NewInt(10), big.NewInt(18), nil)},
+		},
+	}
+	m := execmoduletester.New(t, execmoduletester.WithGenesisSpec(genesis), execmoduletester.WithKey(privKeyA))
+	signer := types.LatestSignerForChainID(m.ChainConfig.ChainID)
+	baseFee := uint256.NewInt(m.Genesis.BaseFee().Uint64())
+	canonical, err := blockgen.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 2, func(i int, b *blockgen.BlockGen) {
+		txn, err := types.SignTx(types.NewTransaction(uint64(i), common.Address{1}, uint256.NewInt(10_000), 50_000, baseFee, nil), *signer, privKeyA)
+		require.NoError(t, err)
+		b.AddTx(txn)
+	})
+	require.NoError(t, err)
+	fork, err := blockgen.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 2, func(i int, b *blockgen.BlockGen) {
+		txn, err := types.SignTx(types.NewTransaction(uint64(i), common.Address{2}, uint256.NewInt(20_000), 50_000, baseFee, nil), *signer, privKeyB)
+		require.NoError(t, err)
+		b.AddTx(txn)
+	})
+	require.NoError(t, err)
+	require.NotEqual(t, canonical.Blocks[0].Hash(), fork.Blocks[0].Hash())
+	err = m.InsertChain(canonical)
+	require.NoError(t, err)
+	// Insert the fork blocks without a fork choice update so they stay
+	// non-canonical, with no stored BAL sidecar.
+	insertRes, err := insertBlocks(ctx, m.ExecModule, fork.Blocks)
+	require.NoError(t, err)
+	require.Equal(t, execmodule.ExecutionStatusSuccess, insertRes)
+	byHash, err := m.ExecModule.GetPayloadBodiesByHash(ctx, []common.Hash{fork.Blocks[0].Hash(), fork.Blocks[1].Hash()})
+	require.NoError(t, err)
+	require.Len(t, byHash, 2)
+	for i, pb := range byHash {
+		require.NotNil(t, pb)
+		require.Nil(t, pb.BlockAccessList, "fork block %d", i+1)
+	}
 }
 
 // TestNotificationDispatchForegroundCommit verifies that after FCU returns
@@ -1171,7 +1630,7 @@ func TestAssembleBlockStateGasLimit(t *testing.T) {
 	parentBeaconBlockRoot := randomHash()
 	payloadId, err := assembleBlock(ctx, exec, &builder.Parameters{
 		ParentHash:            chainPack.TopBlock.Hash(),
-		Timestamp:             chainPack.TopBlock.Header().Time + 1,
+		Timestamp:             chainPack.TopBlock.Time() + 1,
 		PrevRandao:            randomHash(),
 		SuggestedFeeRecipient: common.Address{1},
 		Withdrawals:           make([]*types.Withdrawal, 0),
@@ -1282,7 +1741,7 @@ func TestAssembleBlockStateGasLimitSSTORE(t *testing.T) {
 	parentBeaconBlockRoot := randomHash()
 	payloadId, err := assembleBlock(ctx, exec, &builder.Parameters{
 		ParentHash:            chainPack.TopBlock.Hash(),
-		Timestamp:             chainPack.TopBlock.Header().Time + 1,
+		Timestamp:             chainPack.TopBlock.Time() + 1,
 		PrevRandao:            randomHash(),
 		SuggestedFeeRecipient: common.Address{1},
 		Withdrawals:           make([]*types.Withdrawal, 0),
@@ -1404,7 +1863,7 @@ func TestAssembleBlockGasPoolSnapshotRestoreBug(t *testing.T) {
 	parentBeaconBlockRoot := randomHash()
 	payloadId, err := assembleBlock(ctx, exec, &builder.Parameters{
 		ParentHash:            chainPack.TopBlock.Hash(),
-		Timestamp:             chainPack.TopBlock.Header().Time + 1,
+		Timestamp:             chainPack.TopBlock.Time() + 1,
 		PrevRandao:            randomHash(),
 		SuggestedFeeRecipient: common.Address{1},
 		Withdrawals:           make([]*types.Withdrawal, 0),
@@ -1536,7 +1995,7 @@ func TestAssembleBlockGasPoolMultiBatchInitBug(t *testing.T) {
 	parentBeaconBlockRoot := randomHash()
 	payloadId, err := assembleBlock(ctx, exec, &builder.Parameters{
 		ParentHash:            chainPack.TopBlock.Hash(),
-		Timestamp:             chainPack.TopBlock.Header().Time + 1,
+		Timestamp:             chainPack.TopBlock.Time() + 1,
 		PrevRandao:            randomHash(),
 		SuggestedFeeRecipient: common.Address{1},
 		Withdrawals:           make([]*types.Withdrawal, 0),
@@ -1554,14 +2013,15 @@ func TestAssembleBlockGasPoolMultiBatchInitBug(t *testing.T) {
 	require.NoError(t, insertValidateAndUfc1By1(ctx, exec, []*types.Block{block}))
 }
 
-func TestEIP7708BurnLogWhenCoinbaseSelfDestructs(t *testing.T) {
-	// Regression test for https://github.com/erigontech/erigon/issues/19951
+func TestEIP8246NoBurnLogWhenCoinbaseSelfDestructs(t *testing.T) {
+	// Regression test for https://github.com/erigontech/erigon/issues/19951.
 	//
-	// When the coinbase is a contract that self-destructs during execution,
-	// EIP-7708 requires a Burn log for the residual balance (priority fee)
-	// credited after the SELFDESTRUCT. Post-EIP-6780 SELFDESTRUCT only
-	// deletes contracts created in the same transaction, so we CREATE a
-	// contract at the pre-computed coinbase address whose init code
+	// A contract self-destructs at the coinbase address and is then credited the
+	// priority fee at finalization. EIP-8246 removes the SELFDESTRUCT burn, so the
+	// coinbase is preserved holding that residual balance and no EIP-7708 Burn log
+	// is emitted (pre-8246 the residual was burned and logged). Post-EIP-6780
+	// SELFDESTRUCT only deletes contracts created in the same transaction, so we
+	// CREATE a contract at the pre-computed coinbase address whose init code
 	// immediately SELFDESTRUCTs to the caller.
 	ctx := t.Context()
 	privKey, err := crypto.GenerateKey()
@@ -1606,43 +2066,566 @@ func TestEIP7708BurnLogWhenCoinbaseSelfDestructs(t *testing.T) {
 	})
 	require.NoError(t, err)
 
-	// Verify the receipt contains an EIP-7708 Burn log.
 	require.Len(t, chainPack.Receipts[0], 1)
 	receipt := chainPack.Receipts[0][0]
 	require.Equal(t, types.ReceiptStatusSuccessful, receipt.Status)
 	require.Greater(t, receipt.GasUsed, uint64(0))
 
-	var burnLog *types.Log
-	var burnCount, transferCount int
-	for _, log := range receipt.Logs {
-		if log.Address != params.SystemAddress.Value() || len(log.Topics) < 2 {
-			continue
-		}
-		switch log.Topics[0] {
-		case misc.EthBurnLogEvent:
-			burnLog = log
-			burnCount++
-		case misc.EthTransferLogEvent:
-			transferCount++
-		}
-	}
-	require.Equal(t, 1, burnCount, "expected exactly one EIP-7708 Burn log")
-	require.Equal(t, 0, transferCount, "no Transfer log expected for zero-value CREATE")
-	require.Equal(t, coinbaseAddr.Hash(), burnLog.Topics[1],
-		"burn log should reference the coinbase address")
-
-	// Burnt amount = priority fee = gasUsed × effectiveTip.
-	// Use the actual block baseFee (EIP-1559 adjusts it from genesis).
-	blockBaseFee := chainPack.Headers[0].BaseFee.Uint64()
-	expectedBurn := new(uint256.Int).Mul(
-		uint256.NewInt(receipt.GasUsed),
-		uint256.NewInt(gasPrice-blockBaseFee),
-	)
-	burnBytes := expectedBurn.Bytes32()
-	require.Equal(t, burnBytes[:], []byte(burnLog.Data),
-		"burn amount should equal the priority fee credited to coinbase")
-
 	// Insert + validate + FCU proves the state root is computed correctly.
 	err = insertValidateAndUfc1By1(ctx, m.ExecModule, chainPack.Blocks)
 	require.NoError(t, err)
+
+	// EIP-8246 preserves the self-destructed coinbase: the priority fee
+	// credited at finalization is retained (pre-8246 the account was deleted
+	// and the fee burned), and the record is balance-only — nonce, code hash
+	// and storage cleared.
+	err = m.DB.ViewTemporal(ctx, func(tx kv.TemporalTx) error {
+		enc, _, err := tx.GetLatest(kv.AccountsDomain, coinbaseAddr[:])
+		if err != nil {
+			return err
+		}
+		require.NotEmpty(t, enc, "the self-destructed coinbase must be preserved, not deleted")
+		var acc accounts.Account
+		require.NoError(t, accounts.DeserialiseV3(&acc, enc))
+		require.False(t, acc.Balance.IsZero(), "the credited priority fee must not be burned")
+		expected := accounts.NewAccount()
+		expected.Balance = acc.Balance
+		require.Equal(t, accounts.SerialiseV3(&expected), enc,
+			"the preserved coinbase must be a balance-only record")
+		return nil
+	})
+	require.NoError(t, err)
+}
+
+// TestInsertBlocksWithBatchedFCU drives the Caplin persistent_block_collector
+// pattern: InsertBlocks(batch) → ForkChoiceUpdate(last block of batch),
+// repeated for each batch. Verifies parent TD continuity across batches —
+// the "parent's total difficulty not found" failure mode the collector
+// comment warns about does not actually occur on the catch-up path.
+func TestInsertBlocksWithBatchedFCU(t *testing.T) {
+	ctx := t.Context()
+	privKey, err := crypto.GenerateKey()
+	require.NoError(t, err)
+	senderAddr := crypto.PubkeyToAddress(privKey.PublicKey)
+	genesis := &types.Genesis{
+		Config: chain.AllProtocolChanges,
+		Alloc: types.GenesisAlloc{
+			senderAddr: {Balance: new(big.Int).Exp(big.NewInt(10), big.NewInt(18), nil)},
+		},
+	}
+	m := execmoduletester.New(t, execmoduletester.WithGenesisSpec(genesis), execmoduletester.WithKey(privKey))
+
+	const totalBlocks = 30
+	const batchSize = 10
+
+	chainPack, err := blockgen.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, totalBlocks, func(i int, b *blockgen.BlockGen) {
+		tx, err := types.SignTx(
+			types.NewTransaction(uint64(i), senderAddr, uint256.NewInt(1_000), 50000, uint256.NewInt(m.Genesis.BaseFee().Uint64()), nil),
+			*types.LatestSignerForChainID(nil),
+			privKey,
+		)
+		require.NoError(t, err)
+		b.AddTx(tx)
+	})
+	require.NoError(t, err)
+	require.Len(t, chainPack.Blocks, totalBlocks)
+
+	for start := 0; start < totalBlocks; start += batchSize {
+		end := start + batchSize
+		batch := chainPack.Blocks[start:end]
+
+		insRes, err := insertBlocks(ctx, m.ExecModule, batch)
+		require.NoError(t, err, "batch [%d..%d] InsertBlocks", start+1, end)
+		require.Equal(t, execmodule.ExecutionStatusSuccess, insRes)
+
+		last := batch[len(batch)-1].Header()
+		fcuRes, err := updateForkChoice(ctx, m.ExecModule, last)
+		require.NoError(t, err, "batch [%d..%d] FCU on block %d", start+1, end, last.Number.Uint64())
+		require.Equal(t, execmodule.ExecutionStatusSuccess, fcuRes.Status,
+			"FCU on block %d should succeed; validationError=%q", last.Number.Uint64(), fcuRes.ValidationError)
+
+		// After each batch's FCU, TxNums + execution must have advanced to
+		// the batch tip. The next batch's first block reads its parent's TD
+		// from this committed state.
+		require.NoError(t, m.DB.ViewTemporal(ctx, func(tx kv.TemporalTx) error {
+			lastTxNumBlock, _, err := rawdbv3.TxNums.Last(tx)
+			require.NoError(t, err)
+			require.Equal(t, last.Number.Uint64(), lastTxNumBlock, "TxNums.Last after batch ending at %d", last.Number.Uint64())
+
+			execProg, err := stages.GetStageProgress(tx, stages.Execution)
+			require.NoError(t, err)
+			require.Equal(t, last.Number.Uint64(), execProg, "Execution stage progress after batch ending at %d", last.Number.Uint64())
+
+			// First block of the just-inserted batch should have a readable TD
+			// (asserts the rawdb.WriteTd in InsertBlocks made it to DB).
+			firstOfBatch := batch[0].HeaderNoCopy()
+			td, err := rawdb.ReadTd(tx, firstOfBatch.Hash(), firstOfBatch.Number.Uint64())
+			require.NoError(t, err)
+			require.NotNil(t, td, "TD for block %d must be readable across the batch boundary", firstOfBatch.Number.Uint64())
+			return nil
+		}))
+	}
+}
+
+// runBatchedFCUBadBlockRecovery is the shared body for the foreground- and
+// background-commit variants of the bad-block recovery test. Both FCU
+// cleanup branches — local SD close (foreground) and the additional
+// currentContext reset (background) — must leave the next InsertBlocks+FCU
+// cycle able to recover.
+func runBatchedFCUBadBlockRecovery(t *testing.T, bgCommit bool) {
+	ctx := t.Context()
+	privKey, err := crypto.GenerateKey()
+	require.NoError(t, err)
+	senderAddr := crypto.PubkeyToAddress(privKey.PublicKey)
+	genesis := &types.Genesis{
+		Config: chain.AllProtocolChanges,
+		Alloc: types.GenesisAlloc{
+			senderAddr: {Balance: new(big.Int).Exp(big.NewInt(10), big.NewInt(18), nil)},
+		},
+	}
+	opts := []execmoduletester.Option{
+		execmoduletester.WithGenesisSpec(genesis),
+		execmoduletester.WithKey(privKey),
+	}
+	if bgCommit {
+		opts = append(opts, execmoduletester.WithFcuBackgroundCommit())
+	}
+	m := execmoduletester.New(t, opts...)
+
+	// Under background commit, a commit (including the genesis InsertBlocks inside
+	// New) lands asynchronously after the call returns. These polls let DB reads
+	// wait for the commit goroutine; both return immediately under foreground
+	// commit. Transient read errors are treated as "not ready yet" and retried.
+	waitForGenesis := func() {
+		require.Eventually(t, func() bool {
+			var funded bool
+			err := m.DB.ViewTemporal(ctx, func(tx kv.TemporalTx) error {
+				v, _, err := tx.GetLatest(kv.AccountsDomain, senderAddr[:])
+				if err != nil {
+					return err
+				}
+				funded = len(v) > 0
+				return nil
+			})
+			return err == nil && funded
+		}, 15*time.Second, 10*time.Millisecond, "genesis commit did not land")
+	}
+	waitForBlock := func(blockNum uint64) {
+		require.Eventually(t, func() bool {
+			var done bool
+			err := m.DB.ViewTemporal(ctx, func(tx kv.TemporalTx) error {
+				last, _, err := rawdbv3.TxNums.Last(tx)
+				if err != nil {
+					return err
+				}
+				done = last >= blockNum
+				return nil
+			})
+			return err == nil && done
+		}, 15*time.Second, 10*time.Millisecond, "commit of block %d did not land", blockNum)
+	}
+	// Genesis must be committed before GenerateChain reads its state.
+	waitForGenesis()
+
+	// Build a 6-block chain. First 5 are committed normally; block 6 is the
+	// recovery target.
+	chainPack, err := blockgen.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 6, func(i int, b *blockgen.BlockGen) {
+		tx, err := types.SignTx(
+			types.NewTransaction(uint64(i), senderAddr, uint256.NewInt(1_000), 50000, uint256.NewInt(m.Genesis.BaseFee().Uint64()), nil),
+			*types.LatestSignerForChainID(nil),
+			privKey,
+		)
+		require.NoError(t, err)
+		b.AddTx(tx)
+	})
+	require.NoError(t, err)
+	require.Len(t, chainPack.Blocks, 6)
+
+	// Phase 1: insert + FCU blocks 1..5 normally so state is at 5.
+	insRes, err := insertBlocks(ctx, m.ExecModule, chainPack.Blocks[:5])
+	require.NoError(t, err)
+	require.Equal(t, execmodule.ExecutionStatusSuccess, insRes)
+	res, err := updateForkChoice(ctx, m.ExecModule, chainPack.Blocks[4].Header())
+	require.NoError(t, err)
+	require.Equal(t, execmodule.ExecutionStatusSuccess, res.Status)
+	waitForBlock(5)
+
+	// Phase 2: forge a "bad block 6" sharing the canonical parent (block 5's
+	// hash) but with a corrupted state root. InsertBlocks accepts it
+	// (header-write only); FCU on it triggers execution which computes the
+	// real post-state root, finds the mismatch and returns BadBlock.
+	goodHeader6 := chainPack.Blocks[5].HeaderNoCopy()
+	badHeader6 := types.CopyHeader(goodHeader6)
+	badHeader6.Root = common.HexToHash("0xdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef")
+	badBlock6 := types.NewBlockFromNetwork(badHeader6, &types.Body{
+		Transactions: chainPack.Blocks[5].Transactions(),
+		Uncles:       chainPack.Blocks[5].Uncles(),
+		Withdrawals:  chainPack.Blocks[5].Withdrawals(),
+	})
+
+	badRes, err := insertBlocks(ctx, m.ExecModule, []*types.Block{badBlock6})
+	require.NoError(t, err)
+	require.Equal(t, execmodule.ExecutionStatusSuccess, badRes, "InsertBlocks writes the header without validating state root")
+
+	fcuBad, err := updateForkChoice(ctx, m.ExecModule, badBlock6.Header())
+	require.NoError(t, err)
+	require.Equal(t, execmodule.ExecutionStatusBadBlock, fcuBad.Status,
+		"FCU on the bad block must return BadBlock (state-root mismatch); got %s validationError=%q", fcuBad.Status, fcuBad.ValidationError)
+
+	// Phase 3: recovery — insert the real block 6 and FCU on it. This must
+	// succeed even though the bad-block FCU just closed the local
+	// SharedDomains. The persistent e.currentContext is either still
+	// pointing to the prior SD (foreground) or has been nil'd (background);
+	// both paths must let the next InsertBlocks re-initialize the overlay
+	// cleanly.
+	recoverIns, err := insertBlocks(ctx, m.ExecModule, []*types.Block{chainPack.Blocks[5]})
+	require.NoError(t, err, "InsertBlocks of the good block after a bad-block FCU must not error")
+	require.Equal(t, execmodule.ExecutionStatusSuccess, recoverIns)
+
+	recoverFcu, err := updateForkChoice(ctx, m.ExecModule, chainPack.Blocks[5].Header())
+	require.NoError(t, err)
+	require.Equal(t, execmodule.ExecutionStatusSuccess, recoverFcu.Status,
+		"FCU on the good block after recovery must succeed; validationError=%q", recoverFcu.ValidationError)
+	waitForBlock(6)
+
+	// State must be at the good block 6 — TxNums.Last and Execution progress
+	// both at 6, parent TD readable.
+	require.NoError(t, m.DB.ViewTemporal(ctx, func(tx kv.TemporalTx) error {
+		lastTxNumBlock, _, err := rawdbv3.TxNums.Last(tx)
+		require.NoError(t, err)
+		require.Equal(t, uint64(6), lastTxNumBlock)
+
+		execProg, err := stages.GetStageProgress(tx, stages.Execution)
+		require.NoError(t, err)
+		require.Equal(t, uint64(6), execProg)
+
+		td, err := rawdb.ReadTd(tx, chainPack.Blocks[5].Hash(), 6)
+		require.NoError(t, err)
+		require.NotNil(t, td)
+		return nil
+	}))
+}
+
+// TestInsertBlocksWithBatchedFCU_BadBlockRecovery_Foreground covers the
+// foreground-commit cleanup path: a bad-block FCU closes the local
+// SharedDomains while the persistent currentContext remains, and the next
+// InsertBlocks must re-initialize the overlay on top of it.
+func TestInsertBlocksWithBatchedFCU_BadBlockRecovery_Foreground(t *testing.T) {
+	runBatchedFCUBadBlockRecovery(t, false)
+}
+
+// TestInsertBlocksWithBatchedFCU_BadBlockRecovery_Background covers the
+// background-commit cleanup path, where the bad-block FCU additionally resets
+// currentContext. Commits land asynchronously, so the shared body polls
+// committed state before asserting (see waitForGenesis/waitForBlock).
+func TestInsertBlocksWithBatchedFCU_BadBlockRecovery_Background(t *testing.T) {
+	runBatchedFCUBadBlockRecovery(t, true)
+}
+
+// transferGen returns a deterministic per-block tx generator: identical
+// inputs produce identical blocks, which lets tests build forks that share
+// a prefix with the canonical chain (requires a pre-Cancun config — Cancun+
+// blocks get a random ParentBeaconBlockRoot in blockgen).
+func transferGen(t *testing.T, key *ecdsa.PrivateKey, to common.Address, amount uint64) func(int, *blockgen.BlockGen) {
+	return func(i int, b *blockgen.BlockGen) {
+		tx, err := types.SignTx(
+			types.NewTransaction(uint64(i), to, uint256.NewInt(amount), 50000, uint256.NewInt(1), nil),
+			*types.LatestSignerForChainID(nil),
+			key,
+		)
+		require.NoError(t, err)
+		b.AddTx(tx)
+	}
+}
+
+// A batch longer than MaxReorgDepth must still produce changesets for the
+// last MaxReorgDepth blocks, otherwise no reorg of any depth is possible
+// after the batch.
+func TestLargeBatchExecGeneratesChangesetsForReorgWindow(t *testing.T) {
+	ctx := t.Context()
+	privKey, err := crypto.GenerateKey()
+	require.NoError(t, err)
+	senderAddr := crypto.PubkeyToAddress(privKey.PublicKey)
+	m := execmoduletester.New(t,
+		execmoduletester.WithKey(privKey),
+		execmoduletester.WithAlwaysGenerateChangesets(false),
+	)
+
+	maxReorgDepth := m.Cfg().Sync.MaxReorgDepth
+	chainLen := int(maxReorgDepth) + 14
+
+	chainPack, err := blockgen.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, chainLen,
+		transferGen(t, privKey, senderAddr, 1_000))
+	require.NoError(t, err)
+
+	insRes, err := insertBlocks(ctx, m.ExecModule, chainPack.Blocks)
+	require.NoError(t, err)
+	require.Equal(t, execmodule.ExecutionStatusSuccess, insRes)
+	fcuRes, err := updateForkChoice(ctx, m.ExecModule, chainPack.TopBlock.Header())
+	require.NoError(t, err)
+	require.Equal(t, execmodule.ExecutionStatusSuccess, fcuRes.Status)
+
+	require.NoError(t, m.DB.ViewTemporal(ctx, func(tx kv.TemporalTx) error {
+		lowest, err := changeset.ReadLowestUnwindableBlock(tx)
+		require.NoError(t, err)
+		require.Equal(t, uint64(chainLen)-maxReorgDepth, lowest,
+			"changesets must cover the last MaxReorgDepth blocks of the batch")
+		return nil
+	}))
+}
+
+// After a single batch execution longer than MaxReorgDepth, an FCU onto a
+// fork branching a few blocks below the tip must unwind and re-execute
+// instead of failing with ReorgTooDeep.
+func TestUpdateForkChoiceShallowReorgAfterLargeBatchExec(t *testing.T) {
+	ctx := t.Context()
+	privKey, err := crypto.GenerateKey()
+	require.NoError(t, err)
+	senderAddr := crypto.PubkeyToAddress(privKey.PublicKey)
+	m := execmoduletester.New(t,
+		execmoduletester.WithKey(privKey),
+		execmoduletester.WithAlwaysGenerateChangesets(false),
+	)
+
+	maxReorgDepth := m.Cfg().Sync.MaxReorgDepth
+	chainLen := int(maxReorgDepth) + 14
+	const reorgDepth = 4
+	divergeFrom := chainLen - reorgDepth
+
+	canonical, err := blockgen.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, chainLen,
+		transferGen(t, privKey, senderAddr, 1_000))
+	require.NoError(t, err)
+	fork, err := blockgen.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, chainLen,
+		func(i int, b *blockgen.BlockGen) {
+			amount := uint64(1_000)
+			if i >= divergeFrom {
+				amount = 2_000
+			}
+			transferGen(t, privKey, senderAddr, amount)(i, b)
+		})
+	require.NoError(t, err)
+	require.Equal(t, canonical.Blocks[divergeFrom-1].Hash(), fork.Blocks[divergeFrom-1].Hash())
+	require.NotEqual(t, canonical.Blocks[divergeFrom].Hash(), fork.Blocks[divergeFrom].Hash())
+
+	insRes, err := insertBlocks(ctx, m.ExecModule, canonical.Blocks)
+	require.NoError(t, err)
+	require.Equal(t, execmodule.ExecutionStatusSuccess, insRes)
+	fcuRes, err := updateForkChoice(ctx, m.ExecModule, canonical.TopBlock.Header())
+	require.NoError(t, err)
+	require.Equal(t, execmodule.ExecutionStatusSuccess, fcuRes.Status)
+
+	insRes, err = insertBlocks(ctx, m.ExecModule, fork.Blocks[divergeFrom:])
+	require.NoError(t, err)
+	require.Equal(t, execmodule.ExecutionStatusSuccess, insRes)
+	fcuRes, err = updateForkChoice(ctx, m.ExecModule, fork.TopBlock.Header())
+	require.NoError(t, err)
+	require.Equal(t, execmodule.ExecutionStatusSuccess, fcuRes.Status,
+		"shallow reorg of %d blocks after a %d-block batch must succeed; status=%s validationError=%q",
+		reorgDepth, chainLen, fcuRes.Status, fcuRes.ValidationError)
+
+	require.NoError(t, m.DB.ViewTemporal(ctx, func(tx kv.TemporalTx) error {
+		execProg, err := stages.GetStageProgress(tx, stages.Execution)
+		require.NoError(t, err)
+		require.Equal(t, uint64(chainLen), execProg)
+		require.Equal(t, fork.TopBlock.Hash(), rawdb.ReadHeadBlockHash(tx))
+		return nil
+	}))
+}
+
+// TestBALDrivenFoldAheadChangesetIntegrity guards against the fold misrouting a
+// block's commitment branch deltas into the wrong block's changeset. The BAL
+// fold computes a pre-window block ahead of its blockResult; if it recorded its
+// deferred branch writes into a later window block's changeset (instead of
+// isolated), that window block's saved diffset would gain entries it must not
+// have, and a later unwind would restore a wrong trie root.
+//
+// The batch uses a mid-batch changeset window (MaxReorgDepth places windowStart
+// inside the batch) so early blocks fold ahead (pre-window, isolated) while the
+// later window blocks keep per-block changesets. The check is differential and
+// per-key: the window blocks' CommitmentDomain diffsets must be byte-identical
+// whether the earlier blocks were folded (fold-on) or computed incrementally
+// (fold-off). A leak would show up as extra/changed entries under fold-on — the
+// vacuous NotEmpty check the previous version used could not see that. It also
+// asserts the fold path actually engaged (a real fold count) so a silent
+// degrade-to-incremental can't make the differential pass trivially.
+//
+// (An end-to-end divergent-fork reorg would be a stronger check, but blockgen
+// randomises ParentBeaconBlockRoot per block, so under Amsterdam — required for
+// BALs — two chains can't share a prefix and a mid-chain parent has no state.)
+func TestBALDrivenFoldAheadChangesetIntegrity(t *testing.T) {
+	off := runBALFoldAheadChangeset(t, false, false)
+	on := runBALFoldAheadChangeset(t, true, false)
+
+	require.Zero(t, off.folds, "fold-off must not fold any block")
+	require.Positive(t, on.folds, "fold-on must actually fold the pre-window blocks (else the differential is vacuous)")
+	// Compare the SET OF KEYS each window block's commitment changeset touched,
+	// not the raw diff bytes: per-block folds and a merged batch transition
+	// legitimately encode the same branches differently (step references), so
+	// byte-equality is too strict. But the set of branches a window block's own
+	// compute touches is fixed by the post-pre-window trie shape — a fold that
+	// leaked a pre-window block's deltas into a window block's changeset would
+	// add keys that block never touched, so the key sets must match.
+	require.Equal(t, off.windowCommitmentKeys, on.windowCommitmentKeys,
+		"a window block's commitment-changeset key set differs between incremental and "+
+			"fold-ahead — the fold misrouted a pre-window block's branch deltas into a "+
+			"window block's changeset")
+}
+
+// TestBALShadowCompute_MatchesIncremental exercises BAL_SHADOW_COMPUTE's success
+// path end-to-end: with fold-ahead AND shadow cross-check on, every folded block
+// is recomputed incrementally and the two roots must agree. runBALFoldAheadChangeset
+// asserts the batch validates cleanly, so a shadow mismatch would fail the block
+// with ErrWrongTrieRoot; a clean run with folds>0 proves the match path ran.
+func TestBALShadowCompute_MatchesIncremental(t *testing.T) {
+	res := runBALFoldAheadChangeset(t, true, true)
+	require.Positive(t, res.folds, "the fold must have run so shadow cross-check exercised the match path")
+}
+
+type balFoldResult struct {
+	// windowCommitmentKeys maps each window block number to the sorted set of
+	// CommitmentDomain changeset keys (branch prefixes) it touched — compared
+	// across modes to catch a fold misrouting deltas into the wrong block.
+	windowCommitmentKeys map[uint64][]string
+	folds                int64
+}
+
+func runBALFoldAheadChangeset(t *testing.T, foldAhead, shadow bool) balFoldResult {
+	defer func(prev bool) { dbg.BALDrivenCommitment = prev }(dbg.BALDrivenCommitment)
+	defer func(prev bool) { dbg.IgnoreBAL = prev }(dbg.IgnoreBAL)
+	defer func(prev bool) { dbg.BALShadowCompute = prev }(dbg.BALShadowCompute)
+	dbg.BALDrivenCommitment = foldAhead
+	dbg.IgnoreBAL = false
+	dbg.BALShadowCompute = shadow
+	stagedsync.ResetFoldsAheadForTest()
+
+	const chainLen = 12
+	// maxReorgDepth places the changeset window at maxBlock-depth = 12-4 = 8, so
+	// blocks 1..7 are pre-window (fold candidates) and 8..12 own changesets.
+	const maxReorgDepth = 4
+	const windowStart = chainLen - maxReorgDepth
+
+	ctx := t.Context()
+	// Deterministic key: fold-off and fold-on must execute the identical chain
+	// (same sender → same trie branches) so the only difference between the two
+	// runs is fold-ahead vs incremental. A random key would give each run a
+	// different address and thus different branch keys, making the cross-mode
+	// changeset comparison meaningless (and flaky).
+	privKey, err := crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f291")
+	require.NoError(t, err)
+	senderAddr := crypto.PubkeyToAddress(privKey.PublicKey)
+	m := execmoduletester.New(t,
+		execmoduletester.WithKey(privKey),
+		execmoduletester.WithGenesisSpec(&types.Genesis{
+			Config: chain.AllProtocolChanges, // Amsterdam-at-0 → every block carries a BAL
+			Alloc:  types.GenesisAlloc{senderAddr: {Balance: big.NewInt(1 * common.Ether)}},
+		}),
+		execmoduletester.WithExperimentalBAL(),
+		execmoduletester.WithAlwaysGenerateChangesets(false),
+		execmoduletester.WithMaxReorgDepth(maxReorgDepth),
+	)
+
+	// AllProtocolChanges is post-London, so txs need a fee cap above the base fee
+	// (transferGen's 1-wei price is only valid on the pre-London default).
+	canonical, err := blockgen.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, chainLen,
+		func(i int, b *blockgen.BlockGen) {
+			tx, txErr := types.SignTx(
+				types.NewTransaction(uint64(i), senderAddr, uint256.NewInt(1_000), 50000, uint256.NewInt(10_000_000_000), nil),
+				*types.LatestSignerForChainID(nil), privKey,
+			)
+			require.NoError(t, txErr)
+			b.AddTx(tx)
+		})
+	require.NoError(t, err)
+
+	insRes, err := insertBlocksWithBAL(ctx, m.ExecModule, canonical.Blocks, canonical.BlockAccessLists)
+	require.NoError(t, err)
+	require.Equal(t, execmodule.ExecutionStatusSuccess, insRes)
+	fcuRes, err := updateForkChoice(ctx, m.ExecModule, canonical.TopBlock.Header())
+	require.NoError(t, err)
+	require.Equal(t, execmodule.ExecutionStatusSuccess, fcuRes.Status,
+		"batch with fold-ahead=%v must execute cleanly; validationError=%q", foldAhead, fcuRes.ValidationError)
+
+	m.ExecModule.WaitIdle(ctx)
+
+	res := balFoldResult{
+		windowCommitmentKeys: map[uint64][]string{},
+		folds:                stagedsync.FoldsAheadPerformedForTest(),
+	}
+	require.NoError(t, m.DB.ViewTemporal(ctx, func(tx kv.TemporalTx) error {
+		// Confirm blocks carry BALs (checked on the tip, which is inside the
+		// window and so not pruned — pre-window BAL sidecars are pruned beyond
+		// MaxReorgDepth, but the fold reads them in-memory during execution, and
+		// on.folds asserts the fold path actually engaged).
+		balBytes, err := rawdb.ReadBlockAccessListBytes(tx, canonical.TopBlock.Hash(), canonical.TopBlock.NumberU64())
+		require.NoError(t, err)
+		require.NotEmpty(t, balBytes, "blocks must carry a BAL so BAL-driven fold-ahead actually engages")
+
+		// Window blocks own per-block changesets; capture their CommitmentDomain
+		// deltas for the cross-mode differential.
+		for _, blk := range canonical.Blocks {
+			if blk.NumberU64() < windowStart {
+				continue
+			}
+			diffs, ok, err := changeset.ReadDiffSet(tx, blk.NumberU64(), blk.Hash())
+			require.NoError(t, err)
+			require.Truef(t, ok, "window block %d must have a saved diffset", blk.NumberU64())
+			require.NotEmptyf(t, diffs[kv.CommitmentDomain],
+				"window block %d changeset is missing CommitmentDomain deltas (fold-ahead=%v)",
+				blk.NumberU64(), foldAhead)
+			keys := make([]string, 0, len(diffs[kv.CommitmentDomain]))
+			for _, d := range diffs[kv.CommitmentDomain] {
+				keys = append(keys, d.Key)
+			}
+			sort.Strings(keys)
+			res.windowCommitmentKeys[blk.NumberU64()] = keys
+		}
+		return nil
+	}))
+
+	// End-to-end: FCU back into the window unwinds using those changesets, then
+	// FCU forward re-executes. If the fold-built state were wrong, the unwind
+	// restores a bad root and the forward re-exec fails.
+	const reorgBackTo = chainLen - 2 // within the window (>= windowStart)
+	back, err := updateForkChoice(ctx, m.ExecModule, canonical.Blocks[reorgBackTo-1].Header())
+	require.NoError(t, err)
+	require.Equal(t, execmodule.ExecutionStatusSuccess, back.Status, "reorg back must succeed")
+	m.ExecModule.WaitIdle(ctx)
+	require.NoError(t, m.DB.ViewTemporal(ctx, func(tx kv.TemporalTx) error {
+		execProg, err := stages.GetStageProgress(tx, stages.Execution)
+		require.NoError(t, err)
+		require.Equal(t, uint64(reorgBackTo), execProg, "FCU back must unwind execution (consuming the window changesets)")
+		return nil
+	}))
+
+	fwd, err := updateForkChoice(ctx, m.ExecModule, canonical.TopBlock.Header())
+	require.NoError(t, err)
+	require.Equal(t, execmodule.ExecutionStatusSuccess, fwd.Status,
+		"forward re-exec after unwind must reach the correct root (fold-ahead=%v); validationError=%q",
+		foldAhead, fwd.ValidationError)
+	m.ExecModule.WaitIdle(ctx)
+	require.NoError(t, m.DB.ViewTemporal(ctx, func(tx kv.TemporalTx) error {
+		execProg, err := stages.GetStageProgress(tx, stages.Execution)
+		require.NoError(t, err)
+		require.Equal(t, uint64(chainLen), execProg)
+		require.Equal(t, canonical.TopBlock.Hash(), rawdb.ReadHeadBlockHash(tx))
+		return nil
+	}))
+	return res
+}
+
+// A forkchoice head at height 0 that is not the genesis (e.g. a block carrying a
+// corrupted number) must be rejected, not treated as a genesis reset.
+func TestUpdateForkChoiceToNonGenesisBlockAtHeightZero(t *testing.T) {
+	ctx := t.Context()
+	m := execmoduletester.New(t, execmoduletester.WithGenesisSpec(&types.Genesis{Config: chain.AllProtocolChanges}))
+	fakeHeader := m.Genesis.Header()
+	fakeHeader.Extra = []byte("not the genesis")
+	fakeBlock := types.NewBlockWithHeader(fakeHeader)
+	require.NotEqual(t, m.Genesis.Hash(), fakeBlock.Hash())
+	insRes, err := insertBlocks(ctx, m.ExecModule, []*types.Block{fakeBlock})
+	require.NoError(t, err)
+	require.Equal(t, execmodule.ExecutionStatusSuccess, insRes)
+	fcu, err := updateForkChoice(ctx, m.ExecModule, fakeBlock.Header())
+	require.NoError(t, err)
+	require.Equal(t, execmodule.ExecutionStatusBadBlock, fcu.Status)
 }

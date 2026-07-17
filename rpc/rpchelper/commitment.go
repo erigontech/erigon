@@ -82,7 +82,7 @@ func (r *CommitmentReplay) ComputeCustomCommitmentFromStateHistory(
 	}
 	defer agg.Close()
 
-	tdb, err := temporal.New(db, agg)
+	tdb, err := temporal.New(db, agg, nil)
 	if err != nil {
 		return nil, err
 	}
@@ -94,12 +94,11 @@ func (r *CommitmentReplay) ComputeCustomCommitmentFromStateHistory(
 	}
 	defer ttx.Rollback()
 
-	tsd, err := execctx.NewSharedDomains(ctx, ttx, r.logger)
+	tsd, err := execctx.NewSharedDomains(ctx, ttx, r.logger, execctx.WithoutDeferredBranchUpdates(), execctx.WithSequentialCommitment())
 	if err != nil {
 		return nil, err
 	}
 	defer tsd.Close()
-	tsd.GetCommitmentContext().SetDeferBranchUpdates(false)
 
 	// We must compute genesis commitment from scratch because there's no history for block 0
 	genesis, err := rawdb.ReadGenesis(tx)

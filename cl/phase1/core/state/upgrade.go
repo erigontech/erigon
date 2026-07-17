@@ -17,8 +17,9 @@
 package state
 
 import (
+	"cmp"
 	"fmt"
-	"sort"
+	"slices"
 
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
@@ -200,14 +201,12 @@ func (b *CachingBeaconState) UpgradeToElectra() error {
 		return true
 	})
 	// sort
-	sort.Slice(validators, func(i, j int) bool {
-		vi, vj := validators[i].validator, validators[j].validator
-		if vi.ActivationEligibilityEpoch() == vj.ActivationEligibilityEpoch() {
-			//  If eligibility epochs are equal, compare indices
-			return validators[i].index < validators[j].index
+	slices.SortFunc(validators, func(a, b tempValidator) int {
+		ae, be := a.validator.ActivationEligibilityEpoch(), b.validator.ActivationEligibilityEpoch()
+		if ae == be {
+			return cmp.Compare(a.index, b.index)
 		}
-		// Otherwise, sort by activationEligibilityEpoch
-		return vi.ActivationEligibilityEpoch() < vj.ActivationEligibilityEpoch()
+		return cmp.Compare(ae, be)
 	})
 
 	for _, v := range validators {
@@ -269,7 +268,7 @@ func (b *CachingBeaconState) UpgradeToFulu() error {
 		if err != nil {
 			return err
 		}
-		for j := 0; j < len(proposerIndices); j++ {
+		for j := range proposerIndices {
 			lookahead.Set(i*int(b.BeaconConfig().SlotsPerEpoch)+j, proposerIndices[j])
 		}
 	}
@@ -297,7 +296,7 @@ func (b *CachingBeaconState) UpgradeToGloas() error {
 	// Replace latest_execution_payload_header with latest_execution_payload_bid
 	// The bid contains only the block_hash from the previous header
 	// Compute the execution_requests_root for an empty ExecutionRequests
-	emptyRequests := cltypes.NewExecutionRequests(cfg)
+	emptyRequests := cltypes.NewExecutionRequestsWithVersion(cfg, clparams.GloasVersion)
 	emptyRequestsRoot, err := emptyRequests.HashSSZ()
 	if err != nil {
 		return fmt.Errorf("UpgradeToGloas: failed to hash empty execution requests: %w", err)
@@ -312,7 +311,7 @@ func (b *CachingBeaconState) UpgradeToGloas() error {
 		BlobKzgCommitments:    *solid.NewStaticListSSZ[*cltypes.KZGCommitment](cltypes.MaxBlobsCommittmentsPerBlock, 48),
 		ExecutionRequestsRoot: emptyRequestsRoot,
 		PrevRandao:            common.Hash{},
-		GasLimit:              0,
+		GasLimit:              b.LatestExecutionPayloadHeader().GasLimit,
 		ParentBlockRoot:       common.Hash{},
 	}
 	b.SetLatestExecutionPayloadBid(bid)
@@ -395,30 +394,23 @@ func (b *CachingBeaconState) onboardBuildersFromPendingDeposits() error {
 			continue
 		}
 
-		// Check if pubkey is associated with an existing builder or has builder credentials
-		// Note: builders list may be mutated by apply_deposit_for_builder, so we check each iteration
 		isExistingBuilder := IsBuilderPubkey(b, deposit.PubKey)
 		hasBuilderCredentials := IsBuilderWithdrawalCredential(deposit.WithdrawalCredentials, cfg)
 
-		if isExistingBuilder || hasBuilderCredentials {
-			// Apply deposit for builder
-			ApplyDepositForBuilder(b, deposit.PubKey, deposit.WithdrawalCredentials, deposit.Amount, deposit.Signature, deposit.Slot)
-			continue
+		if !isExistingBuilder {
+			if !hasBuilderCredentials {
+				newPendingDeposits.Append(deposit)
+				continue
+			}
+			if IsPendingValidator(cfg, newPendingDeposits, deposit.PubKey) {
+				newPendingDeposits.Append(deposit)
+				continue
+			}
 		}
 
-		// For new validator deposits with valid signature, track pubkey and keep in pending
-		// Deposits with invalid signatures are dropped
-		valid, err := IsValidDepositSignature(cfg, deposit.PubKey, deposit.WithdrawalCredentials, deposit.Amount, deposit.Signature)
-		if err != nil {
-			log.Debug("Error validating deposit signature during upgrade", "err", err)
-			continue
+		if err := ApplyDepositForBuilder(b, deposit.PubKey, deposit.WithdrawalCredentials, deposit.Amount, deposit.Signature, deposit.Slot); err != nil {
+			return err
 		}
-		if valid {
-			// Track this pubkey so subsequent builder deposits for same pubkey stay pending
-			validatorPubkeys[deposit.PubKey] = struct{}{}
-			newPendingDeposits.Append(deposit)
-		}
-		// Invalid signature deposits are dropped (they would fail in apply_pending_deposit anyway)
 	}
 
 	b.SetPendingDeposits(newPendingDeposits)

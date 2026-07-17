@@ -11,11 +11,13 @@ defaults:
 jobs:
   check:
     runs-on: ubuntu-24.04
+    timeout-minutes: 60
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 0
           filter: blob:none
+          persist-credentials: false
 
       - name: Check for large files in PR
         env:

@@ -17,13 +17,14 @@
 package clparams
 
 import (
+	"cmp"
 	"encoding/hex"
 	"errors"
 	"fmt"
 	"math"
 	mathrand "math/rand"
 	"os"
-	"sort"
+	"slices"
 	"time"
 
 	"gopkg.in/yaml.v3"
@@ -35,6 +36,7 @@ import (
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/execution/chain/networkname"
 	chainspec "github.com/erigontech/erigon/execution/chain/spec"
+	executiontypes "github.com/erigontech/erigon/execution/types"
 )
 
 var LatestStateFileName = "latest.ssz_snappy"
@@ -118,6 +120,9 @@ const (
 	MaxChunkSize   uint64        = 15 * 1024 * 1024
 	ReqTimeout     time.Duration = 5 * time.Second
 	RespTimeout    time.Duration = 10 * time.Second
+	// ExecutionPayload transactions bounds from consensus specs.
+	MaxBytesPerTransactionDefault    uint64 = 1 << 30
+	MaxTransactionsPerPayloadDefault uint64 = 1 << 20
 )
 
 const (
@@ -404,6 +409,15 @@ func (b *BeaconChainConfig) MinSlotsForBlobsSidecarsRequest() uint64 {
 	return b.MinEpochsForBlobSidecarsRequests * b.SlotsPerEpoch
 }
 
+// MaxRequestPayloadsLimit falls back to MAX_REQUEST_BLOCKS_DENEB for configs
+// predating MAX_REQUEST_PAYLOADS.
+func (b *BeaconChainConfig) MaxRequestPayloadsLimit() uint64 {
+	if b.MaxRequestPayloads != 0 {
+		return b.MaxRequestPayloads
+	}
+	return b.MaxRequestBlocksDeneb
+}
+
 type ConfigDurationSec time.Duration
 
 func (d *ConfigDurationSec) MarshalJSON() ([]byte, error) {
@@ -479,6 +493,7 @@ type BeaconChainConfig struct {
 	MaxRequestBlobSidecarsElectra    uint64     `yaml:"MAX_REQUEST_BLOB_SIDECARS_ELECTRA" spec:"true" json:"MAX_REQUEST_BLOB_SIDECARS_ELECTRA,string"`         // MaxRequestBlobSidecarsElectra defines the maximum number of blob sidecars to request in Electra.
 	MaxRequestBlocks                 uint64     `yaml:"MAX_REQUEST_BLOCKS" spec:"true" json:"MAX_REQUEST_BLOCKS,string"`                                       // Maximum number of blocks in a single request
 	MaxRequestBlocksDeneb            uint64     `yaml:"MAX_REQUEST_BLOCKS_DENEB" spec:"true" json:"MAX_REQUEST_BLOCKS_DENEB,string"`                           // Maximum number of blocks in a single request
+	MaxRequestPayloads               uint64     `yaml:"MAX_REQUEST_PAYLOADS" spec:"true" json:"MAX_REQUEST_PAYLOADS,string"`                                   // Maximum number of execution payload envelopes in a single request
 	MaxTransactionsPerPayload        uint64     `yaml:"MAX_TRANSACTIONS_PER_PAYLOAD" spec:"true" json:"MAX_TRANSACTIONS_PER_PAYLOAD,string"`                   // MaxTransactionsPerPayload defines the maximum number of transactions in a single payload.
 	SubnetsPerNode                   uint64     `yaml:"SUBNETS_PER_NODE" spec:"true" json:"SUBNETS_PER_NODE,string"`                                           // SubnetsPerNode defines the number of subnets a node can subscribe to.
 	VersionedHashVersionKzg          ConfigByte `yaml:"VERSIONED_HASH_VERSION_KZG" spec:"true" json:"VERSIONED_HASH_VERSION_KZG"`                              // VersionedHashVersionKzg is the version of the versioned hash used in KZG commitments.
@@ -569,6 +584,7 @@ type BeaconChainConfig struct {
 	DomainBeaconBuilder               common.Bytes4 `json:"-"`                                                                                              // DomainBeaconBuilder defines the BLS signature domain for beacon builder.
 	DomainPtcAttester                 common.Bytes4 `json:"-"`                                                                                              // DomainPtcAttester defines the BLS signature domain for proto-danksharding attestation verification.
 	DomainProposerPreferences         common.Bytes4 `json:"-"`                                                                                              // DomainProposerPreferences defines the BLS signature domain for proposer preferences.
+	DomainBuilderDeposit              common.Bytes4 `json:"-"`                                                                                              // DomainBuilderDeposit defines the BLS signature domain for builder deposits.
 
 	// Slasher constants.
 	PruneSlasherStoragePeriod uint64 `json:"-"` // PruneSlasherStoragePeriod defines the time period expressed in number of epochs were proof of stake network should prune attestation and block header store.
@@ -667,6 +683,8 @@ type BeaconChainConfig struct {
 	MaxDepositRequestsPerPayload          uint64 `yaml:"MAX_DEPOSIT_REQUESTS_PER_PAYLOAD" spec:"true" json:"MAX_DEPOSIT_REQUESTS_PER_PAYLOAD,string"`                     // MaxDepositRequestsPerPayload defines the maximum number of deposit requests in a block.
 	MaxWithdrawalRequestsPerPayload       uint64 `yaml:"MAX_WITHDRAWAL_REQUESTS_PER_PAYLOAD" spec:"true" json:"MAX_WITHDRAWAL_REQUESTS_PER_PAYLOAD,string"`               // MaxWithdrawalRequestsPerPayload defines the maximum number of withdrawal requests in a block.
 	MaxConsolidationRequestsPerPayload    uint64 `yaml:"MAX_CONSOLIDATION_REQUESTS_PER_PAYLOAD" spec:"true" json:"MAX_CONSOLIDATION_REQUESTS_PER_PAYLOAD,string"`         // MaxConsolidationRequestsPerPayload defines the maximum number of consolidation requests in a block.
+	MaxBuilderDepositRequestsPerPayload   uint64 `yaml:"MAX_BUILDER_DEPOSIT_REQUESTS_PER_PAYLOAD" spec:"true" json:"MAX_BUILDER_DEPOSIT_REQUESTS_PER_PAYLOAD,string"`     // MaxBuilderDepositRequestsPerPayload defines the maximum number of builder deposit requests in a block.
+	MaxBuilderExitRequestsPerPayload      uint64 `yaml:"MAX_BUILDER_EXIT_REQUESTS_PER_PAYLOAD" spec:"true" json:"MAX_BUILDER_EXIT_REQUESTS_PER_PAYLOAD,string"`           // MaxBuilderExitRequestsPerPayload defines the maximum number of builder exit requests in a block.
 	MinSlashingPenaltyQuotientElectra     uint64 `yaml:"MIN_SLASHING_PENALTY_QUOTIENT_ELECTRA" spec:"true" json:"MIN_SLASHING_PENALTY_QUOTIENT_ELECTRA,string"`           // MinSlashingPenaltyQuotientElectra for slashing penalties post Electra hard fork.
 	WhistleBlowerRewardQuotientElectra    uint64 `yaml:"WHISTLEBLOWER_REWARD_QUOTIENT_ELECTRA" spec:"true" json:"WHISTLEBLOWER_REWARD_QUOTIENT_ELECTRA,string"`           // WhistleBlowerRewardQuotientElectra is used to calculate whistle blower reward post Electra hard fork.
 	MaxPendingPartialsPerWithdrawalsSweep uint64 `yaml:"MAX_PENDING_PARTIALS_PER_WITHDRAWALS_SWEEP" spec:"true" json:"MAX_PENDING_PARTIALS_PER_WITHDRAWALS_SWEEP,string"` // MaxPendingPartialsPerWithdrawalsSweep bounds the size of the sweep searching for pending partials per slot.
@@ -684,6 +702,9 @@ type BeaconChainConfig struct {
 	DepositRequestType             ConfigByte `yaml:"DEPOSIT_REQUEST_TYPE" spec:"true" json:"DEPOSIT_REQUEST_TYPE"`                                    // DepositRequestType is the type for deposit requests.
 	WithdrawalRequestType          ConfigByte `yaml:"WITHDRAWAL_REQUEST_TYPE" spec:"true" json:"WITHDRAWAL_REQUEST_TYPE"`                              // WithdrawalRequestType is the type for withdrawal requests.
 	ConsolidationRequestType       ConfigByte `yaml:"CONSOLIDATION_REQUEST_TYPE" spec:"true" json:"CONSOLIDATION_REQUEST_TYPE"`                        // ConsolidationRequestType is the type for consolidation requests.
+	BuilderDepositRequestType      ConfigByte `yaml:"BUILDER_DEPOSIT_REQUEST_TYPE" spec:"true" json:"BUILDER_DEPOSIT_REQUEST_TYPE"`                    // BuilderDepositRequestType is the type for builder deposit requests.
+	BuilderExitRequestType         ConfigByte `yaml:"BUILDER_EXIT_REQUEST_TYPE" spec:"true" json:"BUILDER_EXIT_REQUEST_TYPE"`                          // BuilderExitRequestType is the type for builder exit requests.
+	PayloadBuilderVersion          uint8      `yaml:"PAYLOAD_BUILDER_VERSION" spec:"true" json:"PAYLOAD_BUILDER_VERSION,string"`                       // PayloadBuilderVersion is the version for execution payload builders.
 
 	// EIP7892 - Blob Schedule
 	BlobSchedule []BlobParameters `yaml:"BLOB_SCHEDULE" spec:"true" json:"BLOB_SCHEDULE"` // Schedule of blob limits per epoch
@@ -692,22 +713,23 @@ type BeaconChainConfig struct {
 	BalancePerAdditionalCustodyGroup uint64 `yaml:"BALANCE_PER_ADDITIONAL_CUSTODY_GROUP" spec:"true" json:"BALANCE_PER_ADDITIONAL_CUSTODY_GROUP,string"` // BalancePerAdditionalCustodyGroup defines the balance required per additional custody group.
 
 	// Gloas
-	ChurnLimitQuotientGloas         uint64     `yaml:"CHURN_LIMIT_QUOTIENT_GLOAS" spec:"true" json:"CHURN_LIMIT_QUOTIENT_GLOAS,string"`                 // ChurnLimitQuotientGloas replaces ChurnLimitQuotient for balance churn calculation in GLOAS+.
-	ConsolidationChurnLimitQuotient uint64     `yaml:"CONSOLIDATION_CHURN_LIMIT_QUOTIENT" spec:"true" json:"CONSOLIDATION_CHURN_LIMIT_QUOTIENT,string"` // ConsolidationChurnLimitQuotient is the independent quotient for consolidation churn in GLOAS+.
-	BuilderWithdrawalPrefix         ConfigByte `yaml:"-" json:"-"`
-	PtcSize                         uint64     `yaml:"PTC_SIZE" spec:"true" json:"PTC_SIZE,string"`                                                     // PtcSize is the number of validators in the Payload Timeliness Committee (preset: 512 mainnet, 16 minimal).
-	MaxPayloadAttestations          uint64     `yaml:"MAX_PAYLOAD_ATTESTATIONS" spec:"true" json:"MAX_PAYLOAD_ATTESTATIONS,string"`                     // MaxPayloadAttestations defines the maximum number of payload attestations in a block.
-	BuilderRegistryLimit            uint64     `yaml:"BUILDER_REGISTRY_LIMIT" spec:"true" json:"BUILDER_REGISTRY_LIMIT,string"`                         // BuilderRegistryLimit defines the upper bound of builders can participate in eth2.
-	BuilderPendingWithdrawalsLimit  uint64     `yaml:"BUILDER_PENDING_WITHDRAWALS_LIMIT" spec:"true" json:"BUILDER_PENDING_WITHDRAWALS_LIMIT,string"`   // BuilderPendingWithdrawalsLimit defines the maximum number of pending withdrawals for builders.
-	MaxBuildersPerWithdrawalsSweep  uint64     `yaml:"MAX_BUILDERS_PER_WITHDRAWALS_SWEEP" spec:"true" json:"MAX_BUILDERS_PER_WITHDRAWALS_SWEEP,string"` // MaxBuildersPerWithdrawalsSweep bounds the size of the sweep searching for builder withdrawals per slot.
-	MinBuilderWithdrawabilityDelay  uint64     `yaml:"MIN_BUILDER_WITHDRAWABILITY_DELAY" spec:"true" json:"MIN_BUILDER_WITHDRAWABILITY_DELAY,string"`   // MinBuilderWithdrawabilityDelay is the shortest amount of time a builder has to wait to withdraw.
+	ChurnLimitQuotientGloas              uint64     `yaml:"CHURN_LIMIT_QUOTIENT_GLOAS" spec:"true" json:"CHURN_LIMIT_QUOTIENT_GLOAS,string"`                                 // ChurnLimitQuotientGloas replaces ChurnLimitQuotient for balance churn calculation in GLOAS+.
+	ConsolidationChurnLimitQuotient      uint64     `yaml:"CONSOLIDATION_CHURN_LIMIT_QUOTIENT" spec:"true" json:"CONSOLIDATION_CHURN_LIMIT_QUOTIENT,string"`                 // ConsolidationChurnLimitQuotient is the independent quotient for consolidation churn in GLOAS+.
+	MaxPerEpochActivationChurnLimitGloas uint64     `yaml:"MAX_PER_EPOCH_ACTIVATION_CHURN_LIMIT_GLOAS" spec:"true" json:"MAX_PER_EPOCH_ACTIVATION_CHURN_LIMIT_GLOAS,string"` // MaxPerEpochActivationChurnLimitGloas caps activation churn per epoch in GLOAS+ (EIP8061).
+	BuilderWithdrawalPrefix              ConfigByte `yaml:"-" json:"-"`
+	PayloadDueBps                        uint64     `yaml:"PAYLOAD_DUE_BPS" spec:"true" json:"PAYLOAD_DUE_BPS,string"`
+	PtcSize                              uint64     `yaml:"PTC_SIZE" spec:"true" json:"PTC_SIZE,string"`                                                     // PtcSize is the number of validators in the Payload Timeliness Committee (preset: 512 mainnet, 16 minimal).
+	MaxPayloadAttestations               uint64     `yaml:"MAX_PAYLOAD_ATTESTATIONS" spec:"true" json:"MAX_PAYLOAD_ATTESTATIONS,string"`                     // MaxPayloadAttestations defines the maximum number of payload attestations in a block.
+	BuilderRegistryLimit                 uint64     `yaml:"BUILDER_REGISTRY_LIMIT" spec:"true" json:"BUILDER_REGISTRY_LIMIT,string"`                         // BuilderRegistryLimit defines the upper bound of builders can participate in eth2.
+	BuilderPendingWithdrawalsLimit       uint64     `yaml:"BUILDER_PENDING_WITHDRAWALS_LIMIT" spec:"true" json:"BUILDER_PENDING_WITHDRAWALS_LIMIT,string"`   // BuilderPendingWithdrawalsLimit defines the maximum number of pending withdrawals for builders.
+	MaxBuildersPerWithdrawalsSweep       uint64     `yaml:"MAX_BUILDERS_PER_WITHDRAWALS_SWEEP" spec:"true" json:"MAX_BUILDERS_PER_WITHDRAWALS_SWEEP,string"` // MaxBuildersPerWithdrawalsSweep bounds the size of the sweep searching for builder withdrawals per slot.
+	MinBuilderWithdrawabilityDelay       uint64     `yaml:"MIN_BUILDER_WITHDRAWABILITY_DELAY" spec:"true" json:"MIN_BUILDER_WITHDRAWABILITY_DELAY,string"`   // MinBuilderWithdrawabilityDelay is the shortest amount of time a builder has to wait to withdraw.
 }
 
 // GetBlobParameters returns the blob parameters at a given epoch
 func (b *BeaconChainConfig) GetBlobParameters(epoch uint64) BlobParameters {
 	// Iterate through schedule in desc order
-	for i := len(b.BlobSchedule) - 1; i >= 0; i-- {
-		entry := b.BlobSchedule[i]
+	for _, entry := range slices.Backward(b.BlobSchedule) {
 		if epoch >= entry.Epoch {
 			return entry
 		}
@@ -739,6 +761,34 @@ func (b *BeaconChainConfig) SyncCommitteeAggregationBitsSize() int {
 	return int(b.SyncCommitteeSize) / int(b.SyncCommitteeSubnetCount) / 8
 }
 
+func (b *BeaconChainConfig) ValidateExecutionRequestTypeConstants() error {
+	expected := []struct {
+		name string
+		got  ConfigByte
+		want byte
+		fork uint64
+	}{
+		{name: "DEPOSIT_REQUEST_TYPE", got: b.DepositRequestType, want: executiontypes.DepositRequestType, fork: b.ElectraForkEpoch},
+		{name: "WITHDRAWAL_REQUEST_TYPE", got: b.WithdrawalRequestType, want: executiontypes.WithdrawalRequestType, fork: b.ElectraForkEpoch},
+		{name: "CONSOLIDATION_REQUEST_TYPE", got: b.ConsolidationRequestType, want: executiontypes.ConsolidationRequestType, fork: b.ElectraForkEpoch},
+		{name: "BUILDER_DEPOSIT_REQUEST_TYPE", got: b.BuilderDepositRequestType, want: executiontypes.BuilderDepositRequestType, fork: b.GloasForkEpoch},
+		{name: "BUILDER_EXIT_REQUEST_TYPE", got: b.BuilderExitRequestType, want: executiontypes.BuilderExitRequestType, fork: b.GloasForkEpoch},
+	}
+	for _, item := range expected {
+		active := item.fork != b.FarFutureEpoch
+		if item.fork == b.ElectraForkEpoch && b.GloasForkEpoch != b.FarFutureEpoch {
+			active = true
+		}
+		if !active {
+			continue
+		}
+		if byte(item.got) != item.want {
+			return fmt.Errorf("%s mismatch: beacon config has %#x, execution layer uses %#x", item.name, byte(item.got), item.want)
+		}
+	}
+	return nil
+}
+
 func (b *BeaconChainConfig) RoundSlotToVotePeriod(slot uint64) uint64 {
 	p := b.SlotsPerEpoch * b.EpochsPerEth1VotingPeriod
 	return slot - (slot % p)
@@ -764,12 +814,26 @@ func (b *BeaconChainConfig) GetCurrentStateVersion(epoch uint64) StateVersion {
 	return stateVersion
 }
 
+// AttestationDueMs returns the attestation deadline in milliseconds from slot start.
+func (b *BeaconChainConfig) AttestationDueMs(gloas bool) uint64 {
+	if b == nil || b.SecondsPerSlot == 0 {
+		return 0
+	}
+	if gloas {
+		return b.SecondsPerSlot * AttestationDueBpsGloas / (BpsFactor / 1000)
+	}
+	if b.IntervalsPerSlot == 0 {
+		return 0
+	}
+	return b.SecondsPerSlot * 1000 / b.IntervalsPerSlot
+}
+
 // InitializeForkSchedule initializes the schedules forks baked into the config.
 func (b *BeaconChainConfig) InitializeForkSchedule() {
 	b.ForkVersionSchedule = configForkSchedule(b)
 	// sort blob schedule by epoch in ascending order
-	sort.Slice(b.BlobSchedule, func(i, j int) bool {
-		return b.BlobSchedule[i].Epoch < b.BlobSchedule[j].Epoch
+	slices.SortFunc(b.BlobSchedule, func(a, b BlobParameters) int {
+		return cmp.Compare(a.Epoch, b.Epoch)
 	})
 }
 
@@ -818,13 +882,14 @@ var MainnetBeaconConfig BeaconChainConfig = BeaconChainConfig{
 	HysteresisUpwardMultiplier:       5,
 	MinEpochsForBlobSidecarsRequests: 4096,
 	FieldElementsPerBlob:             4096,
-	MaxBytesPerTransaction:           1073741824, // 1GB
+	MaxBytesPerTransaction:           MaxBytesPerTransactionDefault,
 	MaxExtraDataBytes:                32,
 	MaxRequestBlobSidecars:           768,
 	MaxRequestBlobSidecarsElectra:    1152, // MAX_REQUEST_BLOCKS_DENEB * MAX_BLOBS_PER_BLOCK_ELECTRA
 	MaxRequestBlocks:                 1024,
 	MaxRequestBlocksDeneb:            128,
-	MaxTransactionsPerPayload:        1048576,
+	MaxRequestPayloads:               128,
+	MaxTransactionsPerPayload:        MaxTransactionsPerPayloadDefault,
 	SubnetsPerNode:                   2,
 	VersionedHashVersionKzg:          ConfigByte(1),
 
@@ -919,6 +984,7 @@ var MainnetBeaconConfig BeaconChainConfig = BeaconChainConfig{
 	DomainBeaconBuilder:               utils.Uint32ToBytes4(0x0B000000),
 	DomainPtcAttester:                 utils.Uint32ToBytes4(0x0C000000),
 	DomainProposerPreferences:         utils.Uint32ToBytes4(0x0D000000),
+	DomainBuilderDeposit:              utils.Uint32ToBytes4(0x0E000000),
 
 	// Prysm constants.
 	ConfigName: "mainnet",
@@ -1015,6 +1081,8 @@ var MainnetBeaconConfig BeaconChainConfig = BeaconChainConfig{
 	MaxDepositRequestsPerPayload:          8192,
 	MaxWithdrawalRequestsPerPayload:       16,
 	MaxConsolidationRequestsPerPayload:    2,
+	MaxBuilderDepositRequestsPerPayload:   256,
+	MaxBuilderExitRequestsPerPayload:      16,
 	MinSlashingPenaltyQuotientElectra:     4096,
 	WhistleBlowerRewardQuotientElectra:    4096,
 	MaxPendingPartialsPerWithdrawalsSweep: 8,
@@ -1031,6 +1099,9 @@ var MainnetBeaconConfig BeaconChainConfig = BeaconChainConfig{
 	DepositRequestType:             0x00,
 	WithdrawalRequestType:          0x01,
 	ConsolidationRequestType:       0x02,
+	BuilderDepositRequestType:      0x03,
+	BuilderExitRequestType:         0x04,
+	PayloadBuilderVersion:          0,
 
 	// Fulu
 	ValidatorCustodyRequirement:      8,
@@ -1041,15 +1112,17 @@ var MainnetBeaconConfig BeaconChainConfig = BeaconChainConfig{
 	},
 
 	// Gloas
-	ChurnLimitQuotientGloas:         1 << 15,
-	ConsolidationChurnLimitQuotient: 1 << 16,
-	BuilderWithdrawalPrefix:         0x03,
-	PtcSize:                         512,
-	MaxPayloadAttestations:          4,
-	BuilderRegistryLimit:            1 << 40,
-	BuilderPendingWithdrawalsLimit:  1 << 20,
-	MaxBuildersPerWithdrawalsSweep:  1 << 14,
-	MinBuilderWithdrawabilityDelay:  64,
+	ChurnLimitQuotientGloas:              1 << 15,
+	ConsolidationChurnLimitQuotient:      1 << 16,
+	MaxPerEpochActivationChurnLimitGloas: 256_000_000_000,
+	BuilderWithdrawalPrefix:              0x03,
+	PayloadDueBps:                        7500,
+	PtcSize:                              512,
+	MaxPayloadAttestations:               4,
+	BuilderRegistryLimit:                 1 << 40,
+	BuilderPendingWithdrawalsLimit:       1 << 20,
+	MaxBuildersPerWithdrawalsSweep:       1 << 14,
+	MinBuilderWithdrawabilityDelay:       8192,
 }
 
 func mainnetConfig() BeaconChainConfig {
@@ -1081,7 +1154,32 @@ func CustomConfig(configFile string) (BeaconChainConfig, NetworkConfig, error) {
 	if err := yaml.Unmarshal(b, &beaconCfg); err != nil {
 		return BeaconChainConfig{}, NetworkConfig{}, err
 	}
+
+	// Forks absent from a custom config are unscheduled (far-future), as in other
+	// clients, rather than inheriting the mainnet base config's finite epochs.
+	var rawCfg map[string]any
+	if err := yaml.Unmarshal(b, &rawCfg); err != nil {
+		return BeaconChainConfig{}, NetworkConfig{}, err
+	}
+	forkEpochs := map[string]*uint64{
+		"ALTAIR_FORK_EPOCH":    &beaconCfg.AltairForkEpoch,
+		"BELLATRIX_FORK_EPOCH": &beaconCfg.BellatrixForkEpoch,
+		"CAPELLA_FORK_EPOCH":   &beaconCfg.CapellaForkEpoch,
+		"DENEB_FORK_EPOCH":     &beaconCfg.DenebForkEpoch,
+		"ELECTRA_FORK_EPOCH":   &beaconCfg.ElectraForkEpoch,
+		"FULU_FORK_EPOCH":      &beaconCfg.FuluForkEpoch,
+		"GLOAS_FORK_EPOCH":     &beaconCfg.GloasForkEpoch,
+	}
+	for key, epoch := range forkEpochs {
+		if _, ok := rawCfg[key]; !ok {
+			*epoch = math.MaxUint64
+		}
+	}
+
 	beaconCfg.InitializeForkSchedule()
+	if err := beaconCfg.ValidateExecutionRequestTypeConstants(); err != nil {
+		return BeaconChainConfig{}, NetworkConfig{}, err
+	}
 
 	// setup network config
 	if err := yaml.Unmarshal(b, &networkConfig); err != nil {
@@ -1483,6 +1581,16 @@ func (b *BeaconChainConfig) MaxBlobsPerBlockByVersion(v StateVersion) uint64 {
 		return b.MaxBlobsPerBlockElectra
 	}
 	panic("invalid version")
+}
+
+// MaxBlobsPerBlockUpperBound returns the largest blobs-per-block limit across every fork
+// and BPO schedule entry, so it safely upper-bounds the blob count of any block.
+func (b *BeaconChainConfig) MaxBlobsPerBlockUpperBound() uint64 {
+	m := max(b.MaxBlobsPerBlock, b.MaxBlobsPerBlockElectra)
+	for _, p := range b.BlobSchedule {
+		m = max(m, p.MaxBlobsPerBlock)
+	}
+	return m
 }
 
 func (b *BeaconChainConfig) MaxRequestBlobSidecarsByVersion(v StateVersion) int {

@@ -1,0 +1,182 @@
+name: Fuzz
+
+# Active (mutation) fuzzing of Erigon's native Go fuzzers. This is intentionally
+# NOT part of the CI gate: seed-corpus regression already runs inside
+# `go test ./...` (test-all-erigon), and adding mutation fuzzing to the gate
+# would make it flaky (a newly found crash would red unrelated PRs).
+#
+# It complements OSS-Fuzz (google/oss-fuzz projects/erigon): it runs today
+# before that integration is live, and it also covers the txnprovider/txpool
+# targets that link MDBX — these need no sanitizer toolchain under native
+# `go test -fuzz`, so they run here even while deferred upstream.
+#
+# A scheduled failure opens/updates a tracking issue (label `nightly-fuzz`) and,
+# if the `DISCORD_WEBHOOK` secret is configured, posts a Discord alert. Per repo
+# policy a fuzz crash must be investigated and fixed — never skipped.
+
+on:
+  schedule:
+    - cron: '0 3 * * *'   # nightly 03:00 UTC (runs on the default branch)
+  workflow_dispatch:
+    inputs:
+      fuzztime:
+        description: 'Duration per fuzz target (Go duration, e.g. 120s, 30m, 1h)'
+        required: false
+        default: '120s'
+  workflow_call:
+    inputs:
+      fuzztime:
+        required: false
+        type: string
+        default: '120s'
+
+defaults:
+  run:
+    shell: bash
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+  issues: write   # notify job opens/updates the tracking issue
+
+jobs:
+  fuzz:
+    # Don't run the nightly schedule on forks.
+    if: github.repository == 'erigontech/erigon' || github.event_name != 'schedule'
+    # GitHub-hosted standard runner — free with unlimited minutes on this public
+    # repo. (Self-hosted/larger runners are the only ones that would cost money.)
+    runs-on: ubuntu-latest
+    # Generous backstop so a long manual `fuzztime` (e.g. up to ~1h) is not
+    # killed; the nightly default (120s) finishes in a few minutes.
+    timeout-minutes: 70
+    strategy:
+      fail-fast: false   # one crashing target must not cancel the others
+      matrix:
+        include:
+          - { name: bitutil-encoder,            pkg: common/bitutil,                 fn: FuzzEncoder }
+          - { name: bitutil-decoder,            pkg: common/bitutil,                 fn: FuzzDecoder }
+          - { name: fusefilter-reader,          pkg: db/datastruct/fusefilter,       fn: FuzzReaderOnBytes }
+          - { name: fusefilter-reader-sharded,  pkg: db/datastruct/fusefilter,       fn: FuzzReaderShardedOnBytes }
+          - { name: fusefilter-writer,          pkg: db/datastruct/fusefilter,       fn: FuzzWriterRoundTrip }
+          - { name: ef16-single,                pkg: db/recsplit/eliasfano16,        fn: FuzzSingleEliasFano }
+          - { name: ef16-double,                pkg: db/recsplit/eliasfano16,        fn: FuzzDoubleEliasFano }
+          - { name: ef32-single,                pkg: db/recsplit/eliasfano32,        fn: FuzzSingleEliasFano }
+          - { name: ef32-double,                pkg: db/recsplit/eliasfano32,        fn: FuzzDoubleEliasFano }
+          - { name: recsplit,                   pkg: db/recsplit,                    fn: FuzzRecSplit }
+          - { name: seg-compress,               pkg: db/seg,                         fn: FuzzCompress }
+          - { name: seg-decompress-match,       pkg: db/seg,                         fn: FuzzDecompressMatch }
+          - { name: patricia,                   pkg: db/seg/patricia,                fn: FuzzPatricia }
+          - { name: patricia-longest-match,     pkg: db/seg/patricia,                fn: FuzzLongestMatch }
+          - { name: abi,                        pkg: execution/abi,                  fn: FuzzABI }
+          - { name: nibbles-hexcompact,         pkg: execution/commitment/nibbles,   fn: FuzzHexCompactRoundtrip }
+          - { name: rlp,                        pkg: execution/types,                fn: FuzzRLP }
+          - { name: precompiles,                pkg: execution/vm,                   fn: FuzzPrecompiledContracts }
+          - { name: vm-runtime,                 pkg: execution/vm/runtime,           fn: FuzzVmRuntime }
+          - { name: txpool-parsetx,             pkg: txnprovider/txpool,             fn: FuzzParseTx }
+          - { name: txpool-pooledtxns66,        pkg: txnprovider/txpool,             fn: FuzzPooledTransactions66 }
+          - { name: txpool-getpooledtxns66,     pkg: txnprovider/txpool,             fn: FuzzGetPooledTransactions66 }
+          - { name: txpool-onnewblocks,         pkg: txnprovider/txpool,             fn: FuzzOnNewBlocks }
+    steps:
+      - name: Checkout custom actions
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+          fetch-depth: 1
+
+      - uses: ./.github/actions/setup-erigon
+        id: erigon
+        with:
+          build-cache-extra-key: fuzz-${{ matrix.name }}
+
+      # Per-target corpus, persisted across runs so each night builds on the
+      # inputs the previous run discovered. Restored AFTER setup-erigon (which
+      # caches all of GOCACHE), so this dedicated entry wins for $GOCACHE/fuzz.
+      - name: Restore fuzz corpus
+        uses: actions/cache@v6
+        with:
+          path: ${{ steps.erigon.outputs.build }}/fuzz
+          key: fuzz-corpus-${{ matrix.name }}-${{ github.run_id }}
+          restore-keys: |
+            fuzz-corpus-${{ matrix.name }}-
+
+      - name: Fuzz ${{ matrix.fn }}
+        env:
+          FUZZTIME: ${{ inputs.fuzztime || '120s' }}
+          ERIGON_BUILD: ${{ steps.erigon.outputs.build }}
+        run: |
+          mkdir -p "$ERIGON_BUILD/fuzz"
+          echo "::group::go test -fuzz ${{ matrix.fn }} (./${{ matrix.pkg }}, ${FUZZTIME})"
+          go test "./${{ matrix.pkg }}/" -run '^$' -fuzz "^${{ matrix.fn }}$" -fuzztime "${FUZZTIME}"
+          echo "::endgroup::"
+
+      # On a crash, `go test` writes the minimized reproducing input to
+      # <pkg>/testdata/fuzz/<Fn>/. Upload it so the failure is replayable.
+      - name: Upload crash reproducer
+        if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: fuzz-crash-${{ matrix.name }}
+          path: ${{ matrix.pkg }}/testdata/fuzz/${{ matrix.fn }}/
+          if-no-files-found: ignore
+
+      - uses: ./.github/actions/cleanup-erigon
+        if: always()
+
+  notify:
+    needs: [fuzz]
+    # Only alert on scheduled failures: manual/dispatch runs are watched by
+    # whoever triggered them. `always()` lets this run despite `fuzz` failing.
+    if: ${{ always() && needs.fuzz.result == 'failure' && github.event_name == 'schedule' }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Open or update tracking issue
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          gh label create nightly-fuzz --color B60205 \
+            --description "Crash found by the nightly fuzz workflow" --force --repo "$REPO" || true
+
+          body=$(cat <<EOF
+          The nightly **Fuzz** workflow found one or more crashing inputs.
+
+          - Run: ${RUN_URL}
+          - The red matrix legs on that run show which targets crashed.
+          - Each crash's minimized reproducer is attached to the run as an
+            artifact named \`fuzz-crash-<target>\`.
+
+          Per repo policy a fuzz crash must be **investigated and fixed**, not
+          skipped. To reproduce locally, drop the reproducer file into the
+          target package's \`testdata/fuzz/<FuzzName>/\` and run
+          \`go test ./<pkg> -run <FuzzName>\`.
+          EOF
+          )
+
+          num=$(gh issue list --repo "$REPO" --label nightly-fuzz --state open \
+            --json number --jq '.[0].number')
+          if [ -n "$num" ]; then
+            gh issue comment "$num" --repo "$REPO" --body "$body"
+            echo "Updated existing tracking issue #${num}"
+          else
+            gh issue create --repo "$REPO" --label nightly-fuzz \
+              --title "Nightly fuzz crash(es) detected" --body "$body"
+          fi
+
+      - name: Notify Discord
+        env:
+          DISCORD_WEBHOOK: ${{ secrets.DISCORD_WEBHOOK }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          if [ -z "${DISCORD_WEBHOOK:-}" ]; then
+            echo "DISCORD_WEBHOOK not set — skipping Discord notification."
+            exit 0
+          fi
+          msg=":x: **Nightly fuzz failure** — one or more targets crashed.\nRun: ${RUN_URL}\nReproducers are uploaded as \`fuzz-crash-*\` artifacts; a tracking issue (label \`nightly-fuzz\`) was opened/updated."
+          payload=$(printf '{"content": "%s"}' "$msg")
+          curl -sS -f -H "Content-Type: application/json" -d "$payload" "$DISCORD_WEBHOOK" \
+            && echo "Discord notified." \
+            || echo "::warning::Discord notification failed (webhook unreachable or invalid)."

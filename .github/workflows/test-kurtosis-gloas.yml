@@ -3,8 +3,35 @@ name: Kurtosis GLOAS Tests
 env:
   DOCKERHUB_REPOSITORY: "erigontech/erigon"
   APP_REPO: "erigontech/erigon"
-  LIGHTHOUSE_IMAGE: "sigp/lighthouse:v7.0.1"
-  ASSERTOOR_IMAGE: "ethpandaops/assertoor:v0.0.17"
+  # ASSERTOOR_IMAGE and GENESIS_GENERATOR_IMAGE are loaded at job start from the
+  # gloas-*.io files (single source of truth) by the "Load image versions" step, so
+  # the cache can't drift from what kurtosis runs. Mutable lighthouse/prysm devnet
+  # client images are pulled live (not cached) to avoid serving a stale client.
+  # Kurtosis CLI pinned so its infra images (engine/core/files-artifacts-expander
+  # are tagged with the CLI version) can be cached too. The vector and fluent-bit
+  # tags are dictated by the Kurtosis release — sync them when bumping (see
+  # logs_aggregator_functions and logs_collector_functions consts in
+  # kurtosis-tech/kurtosis).
+  KURTOSIS_VERSION: "1.15.2"
+  KURTOSIS_VECTOR_IMAGE: "timberio/vector:0.45.0-debian"
+  KURTOSIS_FLUENTBIT_IMAGE: "fluent/fluent-bit:4.0.0"
+  # Engine-bootstrap helpers (logs-aggregator healthcheck, reverse proxy,
+  # volume init) — also dictated by the Kurtosis release; sync when bumping.
+  # curl-jq is untagged upstream, so the cache intentionally serves the
+  # `latest` digest from the last warm rather than tracking live `latest`.
+  # Without these cached, `kurtosis engine start` still needs Docker Hub and
+  # dies on registry outages despite all the caching above.
+  KURTOSIS_CURL_JQ_IMAGE: "badouralix/curl-jq:latest"
+  KURTOSIS_TRAEFIK_IMAGE: "traefik:2.10.6"
+  KURTOSIS_ALPINE_IMAGE: "alpine:3.17"
+  # BuildKit image booted by docker/setup-buildx-action (pinned via driver-opts).
+  # Cached and pre-loaded so buildx can fall back to the local copy when its
+  # Docker Hub pull fails.
+  BUILDKIT_IMAGE: "moby/buildkit:v0.30.0"
+  # eth2-val-tools is the validator-keystore generator pulled during `kurtosis run`;
+  # it publishes only :latest, so the cache serves the `latest` digest from the last
+  # warm rather than tracking live `latest`.
+  ETH2_VAL_TOOLS_IMAGE: "protolambda/eth2-val-tools:latest"
 
 on:
   pull_request:
@@ -17,6 +44,12 @@ on:
       - synchronize
       - ready_for_review
   workflow_dispatch:
+  workflow_call:
+    inputs:
+      cl-images-only:
+        description: "Only warm the third-party CL/kurtosis image cache; skip the tests"
+        type: boolean
+        default: false
 
 concurrency:
   group: >-
@@ -31,9 +64,131 @@ permissions:
   contents: read
 
 jobs:
+  # Warms the docker-cl-* and docker-buildkit-* caches on the default branch
+  # (where this workflow's PR runs restore them) via a dedicated workflow on a
+  # paths filter + daily schedule — the caches only change when the pinned
+  # image versions in this file change. lookup-only makes it a no-op when the
+  # cache already exists.
+  warm-third-party-images:
+    if: ${{ inputs.cl-images-only }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Conditional Docker Login
+        if: |
+          github.repository == 'erigontech/erigon' &&
+          github.actor != 'dependabot[bot]' &&
+          !github.event.pull_request.head.repo.fork
+        continue-on-error: true
+        uses: docker/login-action@v4
+        with:
+          username: ${{ secrets.DOCKERHUB_PULL_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_PULL_TOKEN }}
+
+      - name: Checkout kurtosis .io files
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+          sparse-checkout: .github/workflows/kurtosis
+
+      - name: Load image versions from the .io files (single source of truth)
+        run: |
+          io=.github/workflows/kurtosis/gloas-caplin-mixed.io
+          assertoor=$(yq -e '.assertoor_params.image' "$io")
+          genesis=$(yq -e '.ethereum_genesis_generator_params.image' "$io")
+          # One cache (keyed off $io) is shared by every gloas suite, so all
+          # gloas-*.io must pin the same assertoor + genesis — fail if any diverges.
+          for f in .github/workflows/kurtosis/gloas-*.io; do
+            [ "$(yq -e '.assertoor_params.image' "$f")" = "$assertoor" ] \
+              && [ "$(yq -e '.ethereum_genesis_generator_params.image' "$f")" = "$genesis" ] \
+              || { echo "::error::$f disagrees with $io on the assertoor/genesis image; reconcile them or extend the gloas cache key"; exit 1; }
+          done
+          {
+            echo "ASSERTOOR_IMAGE=$assertoor"
+            echo "GENESIS_GENERATOR_IMAGE=$genesis"
+          } >> "$GITHUB_ENV"
+
+      - name: Check whether third-party containers are already cached
+        id: cache-cl-images
+        uses: actions/cache/restore@v6
+        with:
+          path: /tmp/docker-cache
+          key: docker-cl-${{ env.ASSERTOOR_IMAGE }}-kurtosis-${{ env.KURTOSIS_VERSION }}-${{ env.KURTOSIS_VECTOR_IMAGE }}-${{ env.KURTOSIS_FLUENTBIT_IMAGE }}-${{ env.KURTOSIS_CURL_JQ_IMAGE }}-${{ env.KURTOSIS_TRAEFIK_IMAGE }}-${{ env.KURTOSIS_ALPINE_IMAGE }}-${{ env.GENESIS_GENERATOR_IMAGE }}-${{ env.ETH2_VAL_TOOLS_IMAGE }}
+          lookup-only: true
+
+      - name: Pull third-party containers
+        if: steps.cache-cl-images.outputs.cache-hit != 'true'
+        run: |
+          mkdir -p /tmp/docker-cache
+          pull() {
+            for n in 1 2 3; do
+              if docker pull "$1"; then return 0; fi
+              echo "docker pull $1 failed (attempt $n of 3)"
+              sleep $((10 * n))
+            done
+            return 1
+          }
+          pull "${ASSERTOOR_IMAGE}"
+          pull "kurtosistech/engine:${KURTOSIS_VERSION}"
+          pull "kurtosistech/core:${KURTOSIS_VERSION}"
+          pull "kurtosistech/files-artifacts-expander:${KURTOSIS_VERSION}"
+          pull "${KURTOSIS_VECTOR_IMAGE}"
+          pull "${KURTOSIS_FLUENTBIT_IMAGE}"
+          pull "${KURTOSIS_CURL_JQ_IMAGE}"
+          pull "${KURTOSIS_TRAEFIK_IMAGE}"
+          pull "${KURTOSIS_ALPINE_IMAGE}"
+          pull "${GENESIS_GENERATOR_IMAGE}"
+          pull "${ETH2_VAL_TOOLS_IMAGE}"
+          docker save "${ASSERTOOR_IMAGE}" -o /tmp/docker-cache/assertoor.tar
+          docker save "kurtosistech/engine:${KURTOSIS_VERSION}" -o /tmp/docker-cache/kurtosis-engine.tar
+          docker save "kurtosistech/core:${KURTOSIS_VERSION}" -o /tmp/docker-cache/kurtosis-core.tar
+          docker save "kurtosistech/files-artifacts-expander:${KURTOSIS_VERSION}" -o /tmp/docker-cache/kurtosis-expander.tar
+          docker save "${KURTOSIS_VECTOR_IMAGE}" -o /tmp/docker-cache/vector.tar
+          docker save "${KURTOSIS_FLUENTBIT_IMAGE}" -o /tmp/docker-cache/fluentbit.tar
+          docker save "${KURTOSIS_CURL_JQ_IMAGE}" -o /tmp/docker-cache/curl-jq.tar
+          docker save "${KURTOSIS_TRAEFIK_IMAGE}" -o /tmp/docker-cache/traefik.tar
+          docker save "${KURTOSIS_ALPINE_IMAGE}" -o /tmp/docker-cache/alpine.tar
+          docker save "${GENESIS_GENERATOR_IMAGE}" -o /tmp/docker-cache/genesis-generator.tar
+          docker save "${ETH2_VAL_TOOLS_IMAGE}" -o /tmp/docker-cache/eth2-val-tools.tar
+
+      - name: Save third-party containers to cache
+        if: steps.cache-cl-images.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v6
+        with:
+          path: /tmp/docker-cache
+          key: docker-cl-${{ env.ASSERTOOR_IMAGE }}-kurtosis-${{ env.KURTOSIS_VERSION }}-${{ env.KURTOSIS_VECTOR_IMAGE }}-${{ env.KURTOSIS_FLUENTBIT_IMAGE }}-${{ env.KURTOSIS_CURL_JQ_IMAGE }}-${{ env.KURTOSIS_TRAEFIK_IMAGE }}-${{ env.KURTOSIS_ALPINE_IMAGE }}-${{ env.GENESIS_GENERATOR_IMAGE }}-${{ env.ETH2_VAL_TOOLS_IMAGE }}
+      - name: Check whether buildkit image is already cached
+        id: cache-buildkit-image
+        uses: actions/cache/restore@v6
+        with:
+          path: /tmp/docker-cache-buildkit
+          key: docker-buildkit-${{ env.BUILDKIT_IMAGE }}
+          lookup-only: true
+
+      - name: Pull buildkit image
+        if: steps.cache-buildkit-image.outputs.cache-hit != 'true'
+        run: |
+          mkdir -p /tmp/docker-cache-buildkit
+          pull() {
+            for n in 1 2 3; do
+              if docker pull "$1"; then return 0; fi
+              echo "docker pull $1 failed (attempt $n of 3)"
+              sleep $((10 * n))
+            done
+            return 1
+          }
+          pull "${BUILDKIT_IMAGE}"
+          docker save "${BUILDKIT_IMAGE}" -o /tmp/docker-cache-buildkit/buildkit.tar
+
+      - name: Save buildkit image to cache
+        if: steps.cache-buildkit-image.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v6
+        with:
+          path: /tmp/docker-cache-buildkit
+          key: docker-buildkit-${{ env.BUILDKIT_IMAGE }}
+
   gloas_test:
     name: gloas_${{ matrix.suite }}_test
-    if: ${{ !github.event.pull_request.draft }}
+    if: ${{ !inputs.cl-images-only && !github.event.pull_request.draft }}
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
@@ -50,7 +205,26 @@ jobs:
 
     steps:
       - name: Fast checkout git repository
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - name: Load image versions from the .io files (single source of truth)
+        run: |
+          io=.github/workflows/kurtosis/gloas-caplin-mixed.io
+          assertoor=$(yq -e '.assertoor_params.image' "$io")
+          genesis=$(yq -e '.ethereum_genesis_generator_params.image' "$io")
+          # One cache (keyed off $io) is shared by every gloas suite, so all
+          # gloas-*.io must pin the same assertoor + genesis — fail if any diverges.
+          for f in .github/workflows/kurtosis/gloas-*.io; do
+            [ "$(yq -e '.assertoor_params.image' "$f")" = "$assertoor" ] \
+              && [ "$(yq -e '.ethereum_genesis_generator_params.image' "$f")" = "$genesis" ] \
+              || { echo "::error::$f disagrees with $io on the assertoor/genesis image; reconcile them or extend the gloas cache key"; exit 1; }
+          done
+          {
+            echo "ASSERTOOR_IMAGE=$assertoor"
+            echo "GENESIS_GENERATOR_IMAGE=$genesis"
+          } >> "$GITHUB_ENV"
 
       - name: Conditional Docker Login
         if: |
@@ -63,39 +237,146 @@ jobs:
           username: ${{ secrets.DOCKERHUB_PULL_USERNAME }}
           password: ${{ secrets.DOCKERHUB_PULL_TOKEN }}
 
+      - name: Restore cached buildkit image
+        id: cache-buildkit-image
+        uses: actions/cache/restore@v6
+        with:
+          path: /tmp/docker-cache-buildkit
+          key: docker-buildkit-${{ env.BUILDKIT_IMAGE }}
+
+      - name: Load cached buildkit image into daemon
+        if: steps.cache-buildkit-image.outputs.cache-hit == 'true'
+        run: docker load -i /tmp/docker-cache-buildkit/buildkit.tar
+
+      # Best-effort: buildx pulls the image itself during bootstrap; this step
+      # only seeds the cache that future runs fall back on.
+      - name: Pull buildkit image for cache
+        id: pull-buildkit-image
+        if: steps.cache-buildkit-image.outputs.cache-hit != 'true'
+        continue-on-error: true
+        run: |
+          pull() {
+            for n in 1 2 3; do
+              if docker pull "$1"; then return 0; fi
+              echo "docker pull $1 failed (attempt $n of 3)"
+              sleep $((10 * n))
+            done
+            return 1
+          }
+          pull "${BUILDKIT_IMAGE}"
+          mkdir -p /tmp/docker-cache-buildkit
+          docker save "${BUILDKIT_IMAGE}" -o /tmp/docker-cache-buildkit/buildkit.tar
+
+      - name: Save buildkit image to cache
+        if: steps.cache-buildkit-image.outputs.cache-hit != 'true' && steps.pull-buildkit-image.outcome == 'success' && github.event_name != 'pull_request'
+        uses: actions/cache/save@v6
+        with:
+          path: /tmp/docker-cache-buildkit
+          key: docker-buildkit-${{ env.BUILDKIT_IMAGE }}
+
+      # setup-buildx boots BuildKit by pulling the pinned image from Docker Hub,
+      # falling back to the pre-loaded local copy when the registry is down.
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v4
+        with:
+          driver-opts: image=${{ env.BUILDKIT_IMAGE }}
 
       - name: Restore cached third-party containers
         id: cache-cl-images
-        uses: actions/cache/restore@v5
+        uses: actions/cache/restore@v6
         with:
           path: /tmp/docker-cache
-          key: docker-cl-${{ env.LIGHTHOUSE_IMAGE }}-${{ env.ASSERTOOR_IMAGE }}
-
+          key: docker-cl-${{ env.ASSERTOOR_IMAGE }}-kurtosis-${{ env.KURTOSIS_VERSION }}-${{ env.KURTOSIS_VECTOR_IMAGE }}-${{ env.KURTOSIS_FLUENTBIT_IMAGE }}-${{ env.KURTOSIS_CURL_JQ_IMAGE }}-${{ env.KURTOSIS_TRAEFIK_IMAGE }}-${{ env.KURTOSIS_ALPINE_IMAGE }}-${{ env.GENESIS_GENERATOR_IMAGE }}-${{ env.ETH2_VAL_TOOLS_IMAGE }}
       - name: Load cached containers into daemon
         if: steps.cache-cl-images.outputs.cache-hit == 'true'
         run: |
-          docker load -i /tmp/docker-cache/lighthouse.tar
           docker load -i /tmp/docker-cache/assertoor.tar
+          docker load -i /tmp/docker-cache/kurtosis-engine.tar
+          docker load -i /tmp/docker-cache/kurtosis-core.tar
+          docker load -i /tmp/docker-cache/kurtosis-expander.tar
+          docker load -i /tmp/docker-cache/vector.tar
+          docker load -i /tmp/docker-cache/fluentbit.tar
+          docker load -i /tmp/docker-cache/curl-jq.tar
+          docker load -i /tmp/docker-cache/traefik.tar
+          docker load -i /tmp/docker-cache/alpine.tar
+          docker load -i /tmp/docker-cache/genesis-generator.tar
+          docker load -i /tmp/docker-cache/eth2-val-tools.tar
 
       - name: Pull third-party containers and save to cache
         if: steps.cache-cl-images.outputs.cache-hit != 'true'
         run: |
           mkdir -p /tmp/docker-cache
-          docker pull ${{ env.LIGHTHOUSE_IMAGE }}
-          docker pull ${{ env.ASSERTOOR_IMAGE }}
-          docker save ${{ env.LIGHTHOUSE_IMAGE }} -o /tmp/docker-cache/lighthouse.tar
-          docker save ${{ env.ASSERTOOR_IMAGE }}   -o /tmp/docker-cache/assertoor.tar
+          pull() {
+            for n in 1 2 3; do
+              if docker pull "$1"; then return 0; fi
+              echo "docker pull $1 failed (attempt $n of 3)"
+              sleep $((10 * n))
+            done
+            return 1
+          }
+          pull "${ASSERTOOR_IMAGE}"
+          pull "kurtosistech/engine:${KURTOSIS_VERSION}"
+          pull "kurtosistech/core:${KURTOSIS_VERSION}"
+          pull "kurtosistech/files-artifacts-expander:${KURTOSIS_VERSION}"
+          pull "${KURTOSIS_VECTOR_IMAGE}"
+          pull "${KURTOSIS_FLUENTBIT_IMAGE}"
+          pull "${KURTOSIS_CURL_JQ_IMAGE}"
+          pull "${KURTOSIS_TRAEFIK_IMAGE}"
+          pull "${KURTOSIS_ALPINE_IMAGE}"
+          pull "${GENESIS_GENERATOR_IMAGE}"
+          pull "${ETH2_VAL_TOOLS_IMAGE}"
+          docker save "${ASSERTOOR_IMAGE}" -o /tmp/docker-cache/assertoor.tar
+          docker save "kurtosistech/engine:${KURTOSIS_VERSION}" -o /tmp/docker-cache/kurtosis-engine.tar
+          docker save "kurtosistech/core:${KURTOSIS_VERSION}" -o /tmp/docker-cache/kurtosis-core.tar
+          docker save "kurtosistech/files-artifacts-expander:${KURTOSIS_VERSION}" -o /tmp/docker-cache/kurtosis-expander.tar
+          docker save "${KURTOSIS_VECTOR_IMAGE}" -o /tmp/docker-cache/vector.tar
+          docker save "${KURTOSIS_FLUENTBIT_IMAGE}" -o /tmp/docker-cache/fluentbit.tar
+          docker save "${KURTOSIS_CURL_JQ_IMAGE}" -o /tmp/docker-cache/curl-jq.tar
+          docker save "${KURTOSIS_TRAEFIK_IMAGE}" -o /tmp/docker-cache/traefik.tar
+          docker save "${KURTOSIS_ALPINE_IMAGE}" -o /tmp/docker-cache/alpine.tar
+          docker save "${GENESIS_GENERATOR_IMAGE}" -o /tmp/docker-cache/genesis-generator.tar
+          docker save "${ETH2_VAL_TOOLS_IMAGE}" -o /tmp/docker-cache/eth2-val-tools.tar
 
       - name: Save third-party containers to cache
         if: steps.cache-cl-images.outputs.cache-hit != 'true' && github.event_name != 'pull_request'
-        uses: actions/cache/save@v5
+        uses: actions/cache/save@v6
         with:
           path: /tmp/docker-cache
-          key: docker-cl-${{ env.LIGHTHOUSE_IMAGE }}-${{ env.ASSERTOOR_IMAGE }}
+          key: docker-cl-${{ env.ASSERTOOR_IMAGE }}-kurtosis-${{ env.KURTOSIS_VERSION }}-${{ env.KURTOSIS_VECTOR_IMAGE }}-${{ env.KURTOSIS_FLUENTBIT_IMAGE }}-${{ env.KURTOSIS_CURL_JQ_IMAGE }}-${{ env.KURTOSIS_TRAEFIK_IMAGE }}-${{ env.KURTOSIS_ALPINE_IMAGE }}-${{ env.GENESIS_GENERATOR_IMAGE }}-${{ env.ETH2_VAL_TOOLS_IMAGE }}
+      - name: Install Kurtosis CLI and start engine
+        # The engine otherwise bootstraps inside `kurtosis run`, mid-action,
+        # where a registry blip fails the whole test step. Start it here from
+        # the pre-loaded images, with cheap retries.
+        run: |
+          echo "deb [trusted=yes] https://apt.fury.io/kurtosis-tech/ /" | sudo tee /etc/apt/sources.list.d/kurtosis.list
+          sudo apt-get update
+          sudo apt-get install -y kurtosis-cli=${KURTOSIS_VERSION}
+          kurtosis analytics disable
+          for n in 1 2 3; do
+            if kurtosis engine start; then exit 0; fi
+            echo "kurtosis engine start failed (attempt $n of 3)"
+            kurtosis engine stop || true
+            sleep $((10 * n))
+          done
+          exit 1
 
       - name: Build erigon Docker image (with BuildKit layer cache)
+        id: build_erigon_image
+        continue-on-error: true
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          load: true
+          tags: test/erigon:current
+          build-args: |
+            BINARIES=erigon caplin
+          cache-from: type=gha,scope=kurtosis-erigon-build
+          cache-to: type=gha,mode=max,scope=kurtosis-erigon-build
+
+      # docker/build-push-action has no retry input; retry once so a transient
+      # Docker Hub / GHA-cache failure doesn't fail an otherwise-good build.
+      - name: Retry erigon Docker image build on transient failure
+        if: steps.build_erigon_image.outcome == 'failure'
         uses: docker/build-push-action@v6
         with:
           context: .
@@ -110,6 +391,7 @@ jobs:
         timeout-minutes: ${{ matrix.test_timeout_minutes }}
         uses: ethpandaops/kurtosis-assertoor-github-action@v1
         with:
+            kurtosis_version: "${{ env.KURTOSIS_VERSION }}"
             enclave_name: "kurtosis-${{ matrix.suite }}-${{ github.run_id }}"
             ethereum_package_url: "github.com/ethpandaops/ethereum-package"
             ethereum_package_args: "${{ matrix.package_args }}"

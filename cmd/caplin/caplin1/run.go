@@ -71,7 +71,7 @@ import (
 	"github.com/erigontech/erigon/common/dir"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/datadir"
-	"github.com/erigontech/erigon/db/downloader"
+	"github.com/erigontech/erigon/db/dbservices"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/dbcfg"
 	"github.com/erigontech/erigon/db/kv/mdbx"
@@ -182,7 +182,7 @@ func upgradeGenesisState(s *state.CachingBeaconState, from, to clparams.StateVer
 
 func RunCaplinService(ctx context.Context, engine execution_client.ExecutionEngine, config clparams.CaplinConfig,
 	dirs datadir.Dirs, eth1Getter snapshot_format.ExecutionBlockReaderByNumber,
-	snDownloader downloader.Client, creds credentials.TransportCredentials, snBuildSema *semaphore.Weighted) error {
+	snDownloader dbservices.DownloaderClient, creds credentials.TransportCredentials, snBuildSema *semaphore.Weighted) error {
 
 	var networkConfig *clparams.NetworkConfig
 	var beaconConfig *clparams.BeaconChainConfig
@@ -360,7 +360,7 @@ func RunCaplinService(ctx context.Context, engine execution_client.ExecutionEngi
 	pksRegistry := public_keys_registry.NewHeadViewPublicKeysRegistry(syncedDataManager)
 	validatorParameters := validator_params.NewValidatorParams()
 	forkChoice, err := forkchoice.NewForkChoiceStore(
-		ethClock, state, engine, pool, fork_graph.NewForkGraphDisk(state, syncedDataManager, fcuFs, config.BeaconAPIRouter, emitters),
+		ethClock, state, engine, pool, fork_graph.NewForkGraphDisk(state, syncedDataManager, fcuFs, config.BeaconAPIRouter),
 		emitters, syncedDataManager, blobStorage, pksRegistry, validatorParameters, doLMDSampling, indexDB)
 	if err != nil {
 		logger.Error("Could not create forkchoice", "err", err)
@@ -409,7 +409,7 @@ func RunCaplinService(ctx context.Context, engine execution_client.ExecutionEngi
 	}
 	peerDasState := peerdasstate.NewPeerDasState(beaconConfig, networkConfig)
 	columnStorage := blob_storage.NewDataColumnStore(afero.NewBasePathFs(afero.NewOsFs(), dirs.CaplinColumnData), pruneBlobDistance, beaconConfig, ethClock, emitters)
-	sentinel, localNode, err := service.StartSentinelService(&sentinel.SentinelConfig{
+	sentinel, localNode, err := service.StartSentinelService(ctx, &sentinel.SentinelConfig{
 		P2PConfig: clp2p.P2PConfig{
 			IpAddr:             config.CaplinDiscoveryAddr,
 			Port:               int(config.CaplinDiscoveryPort),
@@ -594,7 +594,7 @@ func RunCaplinService(ctx context.Context, engine execution_client.ExecutionEngi
 			syncedDataManager,
 			statesReader,
 			sentinel,
-			version.GitTag,
+			version.NodeVersion(),
 			&config.BeaconAPIRouter,
 			emitters,
 			blobStorage,

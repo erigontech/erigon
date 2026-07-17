@@ -1,23 +1,29 @@
 package stages
 
 import (
+	"cmp"
 	"context"
 	"errors"
 	"fmt"
-	"sort"
+	"slices"
 	"sync/atomic"
 	"time"
 
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
+	"github.com/erigontech/erigon/cl/fork"
 	"github.com/erigontech/erigon/cl/persistence/beacon_indicies"
 	"github.com/erigontech/erigon/cl/persistence/blob_storage"
 	"github.com/erigontech/erigon/cl/phase1/core/checkpoint_sync"
 	"github.com/erigontech/erigon/cl/phase1/core/state"
+	"github.com/erigontech/erigon/cl/phase1/execution_client"
 	"github.com/erigontech/erigon/cl/phase1/forkchoice"
 	network2 "github.com/erigontech/erigon/cl/phase1/network"
+	"github.com/erigontech/erigon/cl/utils"
+	"github.com/erigontech/erigon/cl/utils/bls"
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
 )
@@ -121,8 +127,8 @@ func downloadAndProcessEip4844DA(ctx context.Context, logger log.Logger, cfg *Cf
 // It returns the new highest block processed and an error if any.
 func processDownloadedBlockBatches(ctx context.Context, logger log.Logger, cfg *Cfg, highestBlockProcessed uint64, shouldInsert bool, blocks []*cltypes.SignedBeaconBlock, envelopes map[common.Hash]*cltypes.SignedExecutionPayloadEnvelope) (newHighestBlockProcessed uint64, err error) {
 	// Pre-process the block batch to ensure that the blocks are sorted by slot in ascending order
-	sort.Slice(blocks, func(i, j int) bool {
-		return blocks[i].Block.Slot < blocks[j].Block.Slot
+	slices.SortFunc(blocks, func(a, b *cltypes.SignedBeaconBlock) int {
+		return cmp.Compare(a.Block.Slot, b.Block.Slot)
 	})
 
 	var blockRoot common.Hash
@@ -261,6 +267,20 @@ func processDownloadedBlockBatches(ctx context.Context, logger log.Logger, cfg *
 	return
 }
 
+// forwardSyncProgress returns the slots still to sync and the observed sync rate
+// in slots/sec. currentSlot can overshoot chainTipSlot and dip below prevProgress
+// on reorgs, so both differences are clamped to keep the unsigned math from
+// underflowing.
+func forwardSyncProgress(chainTipSlot, currentSlot, prevProgress uint64, secsPerLog int) (slotsRemaining uint64, ratePerSec float64) {
+	if chainTipSlot > currentSlot {
+		slotsRemaining = chainTipSlot - currentSlot
+	}
+	if currentSlot > prevProgress && secsPerLog > 0 {
+		ratePerSec = float64(currentSlot-prevProgress) / float64(secsPerLog)
+	}
+	return
+}
+
 // forwardSync (MAIN ROUTINE FOR ForwardSync) performs the forward synchronization of beacon blocks.
 func forwardSync(ctx context.Context, logger log.Logger, cfg *Cfg, args Args) error {
 	var (
@@ -366,18 +386,15 @@ func forwardSync(ctx context.Context, logger log.Logger, cfg *Cfg, args Args) er
 			return ctx.Err()
 		case <-logTicker.C:
 			// Log progress at regular intervals
-			progressMade := chainTipSlot - currentSlot.Load()
-			distFromChainTip := time.Duration(progressMade*cfg.beaconCfg.SecondsPerSlot) * time.Second
-			timeProgress := currentSlot.Load() - prevProgress
-			estimatedTimeRemaining := 999 * time.Hour
-			if timeProgress > 0 {
-				estimatedTimeRemaining = time.Duration(float64(progressMade)/(float64(currentSlot.Load()-prevProgress)/float64(secsPerLog))) * time.Second
-			}
-			if distFromChainTip < 0 || estimatedTimeRemaining < 0 {
-				continue
-			}
-			prevProgress = currentSlot.Load()
-			logger.Info("[Caplin] Forward Sync", "progress", currentSlot.Load(), "distance-from-chain-tip", distFromChainTip, "estimated-time-remaining", estimatedTimeRemaining)
+			cur := currentSlot.Load()
+			slotsRemaining, ratePerSec := forwardSyncProgress(chainTipSlot, cur, prevProgress, secsPerLog)
+			prevProgress = cur
+			// distance-from-chain-tip is the ETA at the chain's own production rate
+			// (one slot per SecondsPerSlot), which also saturates instead of overflowing.
+			chainRatePerSec := 1.0 / float64(cfg.beaconCfg.SecondsPerSlot)
+			logger.Info("[Caplin] Forward Sync", "progress", cur,
+				"distance-from-chain-tip", utils.ETA(slotsRemaining, chainRatePerSec),
+				"estimated-time-remaining", utils.ETA(slotsRemaining, ratePerSec))
 		default:
 		}
 	}
@@ -415,8 +432,9 @@ func ensureAnchorEnvelopeOnce(ctx context.Context, cfg *Cfg) error {
 		return nil // Pre-GLOAS anchor, nothing to do
 	}
 
+	anchorRoot := cfg.forkChoice.AnchorRoot()
 	// Find the anchor block root via the header stored in the fork graph
-	anchorHeader, ok := cfg.forkChoice.GetHeader(cfg.forkChoice.FinalizedCheckpoint().Root)
+	anchorHeader, ok := cfg.forkChoice.GetHeader(anchorRoot)
 	if !ok {
 		// Try to find by iterating — the anchor root should be the finalized root
 		log.Debug("[ensureAnchorEnvelopeOnce] anchor header not found, skipping")
@@ -425,9 +443,8 @@ func ensureAnchorEnvelopeOnce(ctx context.Context, cfg *Cfg) error {
 	_ = anchorHeader
 
 	// Get anchor block root from state
-	anchorRoot := cfg.forkChoice.FinalizedCheckpoint().Root
-	if cfg.forkChoice.HasEnvelope(anchorRoot) {
-		return nil // Already have it
+	if cfg.forkChoice.IsPayloadVerified(anchorRoot) {
+		return nil
 	}
 
 	// Optimistically fetch the anchor envelope. If the anchor was EMPTY, the envelope
@@ -448,24 +465,34 @@ func ensureAnchorEnvelopeOnce(ctx context.Context, cfg *Cfg) error {
 		"anchorSlot", anchorSlot, "anchorRoot", common.Hash(anchorRoot),
 		"bidBlockHash", bid.BlockHash)
 
-	// Try HTTP API first (checkpoint sync endpoint), then fall back to P2P.
-	// HTTP is more reliable on devnets with few peers.
 	var env *cltypes.SignedExecutionPayloadEnvelope
-	if httpEnv := checkpoint_sync.FetchFinalizedEnvelope(ctx, cfg.beaconCfg, cfg.caplinConfig); httpEnv != nil {
-		log.Info("[Caplin] Anchor envelope fetched via HTTP checkpoint sync", "anchorSlot", anchorSlot)
-		env = httpEnv
-	} else {
-		// Fall back to P2P
-		log.Info("[Caplin] HTTP envelope fetch returned nil, trying P2P...", "anchorSlot", anchorSlot)
-		envMap, err := network2.RequestEnvelopesFrantically(ctx, cfg.rpc, [][32]byte{anchorRoot})
+	if cfg.forkChoice.HasEnvelope(anchorRoot) {
+		env, err = cfg.forkChoice.ReadEnvelopeFromDisk(anchorRoot)
 		if err != nil {
-			return fmt.Errorf("failed to request anchor envelope: %w", err)
+			return fmt.Errorf("failed to read anchor envelope: %w", err)
 		}
-		env = envMap[common.Hash(anchorRoot)]
+	} else {
+		// Try HTTP API first (checkpoint sync endpoint), then fall back to P2P.
+		// HTTP is more reliable on devnets with few peers.
+		if httpEnv := checkpoint_sync.FetchFinalizedEnvelope(ctx, cfg.beaconCfg, cfg.caplinConfig); httpEnv != nil {
+			log.Info("[Caplin] Anchor envelope fetched via HTTP checkpoint sync", "anchorSlot", anchorSlot)
+			env = httpEnv
+		} else {
+			// Fall back to P2P
+			log.Info("[Caplin] HTTP envelope fetch returned nil, trying P2P...", "anchorSlot", anchorSlot)
+			envMap, err := network2.RequestEnvelopesFrantically(ctx, cfg.rpc, [][32]byte{anchorRoot})
+			if err != nil {
+				return fmt.Errorf("failed to request anchor envelope: %w", err)
+			}
+			env = envMap[common.Hash(anchorRoot)]
+		}
 	}
 	if env == nil {
 		log.Info("[Caplin] Anchor envelope not received (block may be EMPTY)", "anchorSlot", anchorSlot)
 		return nil // Not fatal — if EMPTY, envelope doesn't exist
+	}
+	if err := validateAnchorEnvelope(cfg.beaconCfg, anchorState, anchorRoot, bid, env); err != nil {
+		return fmt.Errorf("invalid anchor envelope: %w", err)
 	}
 
 	// Use StoreAnchorEnvelope instead of OnExecutionPayload because the checkpoint
@@ -475,8 +502,147 @@ func ensureAnchorEnvelopeOnce(ctx context.Context, cfg *Cfg) error {
 	if err := cfg.forkChoice.StoreAnchorEnvelope(anchorRoot, env); err != nil {
 		return fmt.Errorf("failed to store anchor envelope: %w", err)
 	}
+	if err := validateAnchorPayloadIfLocalEL(ctx, cfg, anchorRoot, bid, env); err != nil {
+		return err
+	}
 
 	log.Info("[Caplin] Anchor envelope stored successfully (checkpoint sync)",
 		"anchorSlot", anchorSlot, "anchorRoot", common.Hash(anchorRoot))
 	return nil
+}
+
+func validateAnchorPayloadIfLocalEL(ctx context.Context, cfg *Cfg, anchorRoot common.Hash, bid *cltypes.ExecutionPayloadBid, env *cltypes.SignedExecutionPayloadEnvelope) error {
+	if !canRetryGloasPayloads(cfg) {
+		return nil
+	}
+	status, err := validateAnchorPayloadWithEL(ctx, cfg, bid, env)
+	if err != nil {
+		log.Warn("[Caplin] Anchor envelope EL validation failed", "anchorRoot", anchorRoot, "status", status, "err", err)
+	}
+	switch status {
+	case execution_client.PayloadStatusValidated:
+		cfg.forkChoice.MarkPayloadVerified(anchorRoot, env.Message.Payload.BlockHash)
+	case execution_client.PayloadStatusInvalidated:
+		cfg.forkChoice.MarkPayloadInvalid(anchorRoot, env.Message.Payload.BlockHash)
+		return fmt.Errorf("anchor execution payload invalidated by EL")
+	}
+	return nil
+}
+
+func validateAnchorEnvelope(beaconCfg *clparams.BeaconChainConfig, anchorState *state.CachingBeaconState, anchorRoot common.Hash, bid *cltypes.ExecutionPayloadBid, env *cltypes.SignedExecutionPayloadEnvelope) error {
+	if bid == nil {
+		return errors.New("nil execution payload bid")
+	}
+	if env == nil || env.Message == nil || env.Message.Payload == nil {
+		return errors.New("nil execution payload envelope")
+	}
+	envelope := env.Message
+	payload := envelope.Payload
+	if envelope.BeaconBlockRoot != anchorRoot {
+		return fmt.Errorf("beacon block root mismatch: envelope=%v anchor=%v", envelope.BeaconBlockRoot, anchorRoot)
+	}
+	if envelope.ParentBeaconBlockRoot != bid.ParentBlockRoot {
+		return fmt.Errorf("parent beacon block root mismatch: envelope=%v bid=%v", envelope.ParentBeaconBlockRoot, bid.ParentBlockRoot)
+	}
+	if envelope.BuilderIndex != bid.BuilderIndex {
+		return fmt.Errorf("builder index mismatch: envelope=%d bid=%d", envelope.BuilderIndex, bid.BuilderIndex)
+	}
+	if payload.BlockHash != bid.BlockHash {
+		return fmt.Errorf("block hash mismatch: envelope=%v bid=%v", payload.BlockHash, bid.BlockHash)
+	}
+	if payload.ParentHash != bid.ParentBlockHash {
+		return fmt.Errorf("parent block hash mismatch: envelope=%v bid=%v", payload.ParentHash, bid.ParentBlockHash)
+	}
+	if payload.PrevRandao != bid.PrevRandao {
+		return fmt.Errorf("prev randao mismatch: envelope=%v bid=%v", payload.PrevRandao, bid.PrevRandao)
+	}
+	if payload.FeeRecipient != bid.FeeRecipient {
+		return fmt.Errorf("fee recipient mismatch: envelope=%v bid=%v", payload.FeeRecipient, bid.FeeRecipient)
+	}
+	if payload.GasLimit != bid.GasLimit {
+		return fmt.Errorf("gas limit mismatch: envelope=%d bid=%d", payload.GasLimit, bid.GasLimit)
+	}
+	if payload.SlotNumber != bid.Slot {
+		return fmt.Errorf("slot mismatch: envelope=%d bid=%d", payload.SlotNumber, bid.Slot)
+	}
+	if envelope.ExecutionRequests == nil {
+		return errors.New("nil execution requests")
+	}
+	requestsRoot, err := envelope.ExecutionRequests.HashSSZ()
+	if err != nil {
+		return fmt.Errorf("execution requests root: %w", err)
+	}
+	if requestsRoot != bid.ExecutionRequestsRoot {
+		return fmt.Errorf("execution requests root mismatch: envelope=%v bid=%v", requestsRoot, bid.ExecutionRequestsRoot)
+	}
+	requestsHash := cltypes.ComputeExecutionRequestHash(cltypes.GetExecutionRequestsList(beaconCfg, envelope.ExecutionRequests))
+	header, err := payload.RlpHeader(&envelope.ParentBeaconBlockRoot, requestsHash)
+	if err != nil {
+		return fmt.Errorf("payload header: %w", err)
+	}
+	if header.Hash() != payload.BlockHash {
+		return fmt.Errorf("payload block hash mismatch: header=%v payload=%v", header.Hash(), payload.BlockHash)
+	}
+	if err := verifyAnchorEnvelopeSignature(beaconCfg, anchorState, env, bid.Slot); err != nil {
+		return err
+	}
+	return nil
+}
+
+func verifyAnchorEnvelopeSignature(beaconCfg *clparams.BeaconChainConfig, anchorState *state.CachingBeaconState, env *cltypes.SignedExecutionPayloadEnvelope, slot uint64) error {
+	var pk [48]byte
+	if env.Message.BuilderIndex == clparams.BuilderIndexSelfBuild {
+		proposerIndex := anchorState.LatestBlockHeader().ProposerIndex
+		validator, err := anchorState.ValidatorForValidatorIndex(int(proposerIndex))
+		if err != nil {
+			return fmt.Errorf("proposer validator: %w", err)
+		}
+		pk = validator.PublicKey()
+	} else {
+		builders := anchorState.GetBuilders()
+		if builders == nil {
+			return errors.New("builders not found")
+		}
+		if env.Message.BuilderIndex >= uint64(builders.Len()) {
+			return fmt.Errorf("builder index %d out of range", env.Message.BuilderIndex)
+		}
+		builder := builders.Get(int(env.Message.BuilderIndex))
+		if builder == nil {
+			return errors.New("builder not found")
+		}
+		pk = builder.Pubkey
+	}
+	epoch := state.GetEpochAtSlot(beaconCfg, slot)
+	domain, err := anchorState.GetDomain(beaconCfg.DomainBeaconBuilder, epoch)
+	if err != nil {
+		return fmt.Errorf("builder domain: %w", err)
+	}
+	signingRoot, err := fork.ComputeSigningRoot(env.Message, domain)
+	if err != nil {
+		return fmt.Errorf("builder signing root: %w", err)
+	}
+	valid, err := bls.Verify(env.Signature[:], signingRoot[:], pk[:])
+	if err != nil {
+		return fmt.Errorf("builder signature: %w", err)
+	}
+	if !valid {
+		return errors.New("invalid builder signature")
+	}
+	return nil
+}
+
+func validateAnchorPayloadWithEL(ctx context.Context, cfg *Cfg, bid *cltypes.ExecutionPayloadBid, env *cltypes.SignedExecutionPayloadEnvelope) (execution_client.PayloadStatus, error) {
+	versionedHashes, executionRequestsList, err := buildAnchorNewPayloadArgs(cfg.beaconCfg, bid, env)
+	if err != nil {
+		return execution_client.PayloadStatusNone, err
+	}
+	return cfg.executionClient.NewPayload(ctx, env.Message.Payload, &bid.ParentBlockRoot, versionedHashes, executionRequestsList)
+}
+
+func buildAnchorNewPayloadArgs(beaconCfg *clparams.BeaconChainConfig, bid *cltypes.ExecutionPayloadBid, env *cltypes.SignedExecutionPayloadEnvelope) ([]common.Hash, []hexutil.Bytes, error) {
+	versionedHashes, err := gloasVersionedHashes(&bid.BlobKzgCommitments)
+	if err != nil {
+		return nil, nil, err
+	}
+	return versionedHashes, gloasExecutionRequestsList(beaconCfg, env.Message.ExecutionRequests), nil
 }

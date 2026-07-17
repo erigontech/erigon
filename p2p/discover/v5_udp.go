@@ -58,18 +58,18 @@ type codecV5 interface {
 	// encoded. If the 'challenge' parameter is non-nil, the packet is encoded as a
 	// handshake message packet. Otherwise, the packet will be encoded as an ordinary
 	// message packet.
-	Encode(id enode.ID, addr string, p v5wire.Packet, challenge *v5wire.Whoareyou) ([]byte, v5wire.Nonce, error)
+	Encode(id enode.ID, addr netip.AddrPort, p v5wire.Packet, challenge *v5wire.Whoareyou) ([]byte, v5wire.Nonce, error)
 
 	// Decode decodes a packet. It returns a *v5wire.Unknown packet if decryption fails.
 	// The *enode.Node return value is non-nil when the input contains a handshake response.
-	Decode(b []byte, addr string) (enode.ID, *enode.Node, v5wire.Packet, error)
+	Decode(b []byte, addr netip.AddrPort) (enode.ID, *enode.Node, v5wire.Packet, error)
 
 	// CurrentChallenge returns the most recent WHOAREYOU challenge that was encoded to given node.
 	// This will return a non-nil value if there is an active handshake attempt with the node, and nil otherwise.
-	CurrentChallenge(id enode.ID, addr string) *v5wire.Whoareyou
+	CurrentChallenge(id enode.ID, addr netip.AddrPort) *v5wire.Whoareyou
 
 	// SessionNode returns a node that has completed the handshake.
-	SessionNode(id enode.ID, addr string) *enode.Node
+	SessionNode(id enode.ID, addr netip.AddrPort) *enode.Node
 }
 
 // UDPv5 is the implementation of protocol version 5.
@@ -87,7 +87,7 @@ type UDPv5 struct {
 	respTimeout  time.Duration
 
 	// misc buffers used during message handling
-	logcontext []interface{}
+	logcontext []any
 
 	// talkreq handler registry
 	talk *talkSystem
@@ -112,6 +112,8 @@ type UDPv5 struct {
 	closeCtx       context.Context
 	cancelCloseCtx context.CancelFunc
 	wg             sync.WaitGroup
+
+	trace bool
 }
 
 type sendRequest struct {
@@ -146,8 +148,8 @@ type callTimeout struct {
 }
 
 // ListenV5 listens on the given connection.
-func ListenV5(conn UDPConn, ln *enode.LocalNode, cfg Config) (*UDPv5, error) {
-	t, err := newUDPv5(conn, ln, cfg)
+func ListenV5(ctx context.Context, conn UDPConn, ln *enode.LocalNode, cfg Config) (*UDPv5, error) {
+	t, err := newUDPv5(ctx, conn, ln, cfg)
 	if err != nil {
 		return nil, err
 	}
@@ -155,12 +157,21 @@ func ListenV5(conn UDPConn, ln *enode.LocalNode, cfg Config) (*UDPv5, error) {
 	t.wg.Add(2)
 	go t.readLoop()
 	go t.dispatch()
+	go t.closeOnCtxCancel()
 	return t, nil
 }
 
+// closeOnCtxCancel shuts the transport down when the listen context is cancelled.
+// Not tracked by t.wg: Close waits on that group, and cancels closeCtx on the way
+// in, which is also how this goroutine exits after an explicit Close.
+func (t *UDPv5) closeOnCtxCancel() {
+	<-t.closeCtx.Done()
+	t.Close()
+}
+
 // newUDPv5 creates a UDPv5 transport, but doesn't start any goroutines.
-func newUDPv5(conn UDPConn, ln *enode.LocalNode, cfg Config) (*UDPv5, error) {
-	closeCtx, cancelCloseCtx := context.WithCancel(context.Background())
+func newUDPv5(ctx context.Context, conn UDPConn, ln *enode.LocalNode, cfg Config) (*UDPv5, error) {
+	closeCtx, cancelCloseCtx := context.WithCancel(ctx)
 	cfg = cfg.withDefaults()
 	t := &UDPv5{
 		// static fields
@@ -189,6 +200,8 @@ func newUDPv5(conn UDPConn, ln *enode.LocalNode, cfg Config) (*UDPv5, error) {
 		// shutdown
 		closeCtx:       closeCtx,
 		cancelCloseCtx: cancelCloseCtx,
+
+		trace: cfg.Log.Enabled(ctx, log.LvlTrace),
 	}
 	t.talk = newTalkSystem(t)
 	tab, err := newTable(t, t.db, cfg)
@@ -467,7 +480,7 @@ func (t *UDPv5) waitForNodes(c *callV5, distances []uint) ([]*enode.Node, error)
 			if total == -1 {
 				total = min(int(response.RespCount), totalNodesResponseLimit)
 			}
-			if received++; received == total {
+			if received++; received >= total {
 				return nodes, nil
 			}
 		case err := <-c.err:
@@ -686,21 +699,27 @@ func (t *UDPv5) sendFromAnotherThread(toID enode.ID, toAddr netip.AddrPort, pack
 	}
 }
 
+// packetLogContext fills the shared log buffer with the packet's log fields.
+func (t *UDPv5) packetLogContext(id enode.ID, addr netip.AddrPort, packet v5wire.Packet) []any {
+	t.logcontext = append(t.logcontext[:0], "id", id, "addr", addr)
+	t.logcontext = packet.AppendLogInfo(t.logcontext)
+	return t.logcontext
+}
+
 // send sends a packet to the given node.
 func (t *UDPv5) send(toID enode.ID, toAddr netip.AddrPort, packet v5wire.Packet, c *v5wire.Whoareyou) (v5wire.Nonce, error) {
-	addr := toAddr.String()
-	t.logcontext = append(t.logcontext[:0], "id", toID, "addr", addr)
-	t.logcontext = packet.AppendLogInfo(t.logcontext)
-
-	enc, nonce, err := t.codec.Encode(toID, addr, packet, c)
+	enc, nonce, err := t.codec.Encode(toID, toAddr, packet, c)
 	if err != nil {
-		t.logcontext = append(t.logcontext, "err", err)
+		t.logcontext = append(t.packetLogContext(toID, toAddr, packet), "err", err)
 		t.log.Warn("[p2p] >> "+packet.Name(), t.logcontext...)
 		return nonce, err
 	}
 
 	_, err = t.conn.WriteToUDPAddrPort(enc, toAddr)
-	t.log.Trace("[p2p] >> "+packet.Name(), t.logcontext...)
+
+	if t.trace {
+		t.log.Trace("[p2p] >> "+packet.Name(), t.packetLogContext(toID, toAddr, packet)...)
+	}
 	return nonce, err
 }
 
@@ -742,29 +761,27 @@ func (t *UDPv5) dispatchReadPacket(from netip.AddrPort, content []byte) bool {
 
 // handlePacket decodes and processes an incoming packet from the network.
 func (t *UDPv5) handlePacket(rawpacket []byte, fromAddr netip.AddrPort) error {
-	addr := fromAddr.String()
-	fromID, fromNode, packet, err := t.codec.Decode(rawpacket, addr)
+	fromID, fromNode, packet, err := t.codec.Decode(rawpacket, fromAddr)
 	if err != nil {
 		if t.unhandled != nil && v5wire.IsInvalidHeader(err) {
 			// The packet seems unrelated to discv5, send it to the next protocol.
-			// t.log.Trace("Unhandled discv5 packet", "id", fromID, "addr", addr, "err", err)
 			up := ReadPacket{Data: make([]byte, len(rawpacket)), Addr: fromAddr}
 			copy(up.Data, rawpacket)
 			t.unhandled <- up
 			return nil
 		}
-		t.log.Trace("[p2p] Bad discv5 packet", "id", fromID, "addr", addr, "err", err)
+		if t.trace {
+			t.log.Trace("[p2p] Bad discv5 packet", "id", fromID, "addr", fromAddr, "err", err)
+		}
 		return err
 	}
 	if fromNode != nil {
 		// Handshake succeeded, add to table.
 		t.tab.addInboundNode(fromNode)
 	}
-	if packet.Kind() != v5wire.WhoareyouPacket {
+	if t.trace && packet.Kind() != v5wire.WhoareyouPacket {
 		// WHOAREYOU logged separately to report errors.
-		t.logcontext = append(t.logcontext[:0], "id", fromID, "addr", addr)
-		t.logcontext = packet.AppendLogInfo(t.logcontext)
-		t.log.Trace("[p2p] << "+packet.Name(), t.logcontext...)
+		t.log.Trace("[p2p] << "+packet.Name(), t.packetLogContext(fromID, fromAddr, packet)...)
 	}
 	t.handle(packet, fromID, fromAddr)
 	return nil
@@ -774,15 +791,21 @@ func (t *UDPv5) handlePacket(rawpacket []byte, fromAddr netip.AddrPort) error {
 func (t *UDPv5) handleCallResponse(fromID enode.ID, fromAddr netip.AddrPort, p v5wire.Packet) bool {
 	ac := t.activeCallByNode[fromID]
 	if ac == nil || !bytes.Equal(p.RequestID(), ac.reqid) {
-		t.log.Trace(fmt.Sprintf("[p2p] Unsolicited/late %s response", p.Name()), "id", fromID, "addr", fromAddr)
+		if t.trace {
+			t.log.Trace("[p2p] Unsolicited/late response", "type", p.Name(), "id", fromID, "addr", fromAddr)
+		}
 		return false
 	}
 	if fromAddr != ac.addr {
-		t.log.Trace(fmt.Sprintf("[p2p] %s from wrong endpoint", p.Name()), "id", fromID, "addr", fromAddr)
+		if t.trace {
+			t.log.Trace("[p2p] Response from wrong endpoint", "type", p.Name(), "id", fromID, "addr", fromAddr)
+		}
 		return false
 	}
 	if p.Kind() != ac.responseType {
-		t.log.Trace(fmt.Sprintf("[p2p] Wrong discv5 response type %s", p.Name()), "id", fromID, "addr", fromAddr)
+		if t.trace {
+			t.log.Trace("[p2p] Wrong discv5 response type", "type", p.Name(), "id", fromID, "addr", fromAddr)
+		}
 		return false
 	}
 	t.startResponseTimeout(ac)
@@ -833,14 +856,16 @@ func (t *UDPv5) handle(p v5wire.Packet, fromID enode.ID, fromAddr netip.AddrPort
 
 // handleUnknown initiates a handshake by responding with WHOAREYOU.
 func (t *UDPv5) handleUnknown(p *v5wire.Unknown, fromID enode.ID, fromAddr netip.AddrPort) {
-	currentChallenge := t.codec.CurrentChallenge(fromID, fromAddr.String())
+	currentChallenge := t.codec.CurrentChallenge(fromID, fromAddr)
 	if currentChallenge != nil {
 		// This case happens when the sender issues multiple concurrent requests.
 		// Since we only support one in-progress handshake at a time, we need to tell
 		// them which handshake attempt they need to complete. We tell them to use the
 		// existing handshake attempt since the response to that one might still be in
 		// transit.
-		t.log.Trace("[p2p] Repeating discv5 handshake challenge", "id", fromID, "addr", fromAddr)
+		if t.trace {
+			t.log.Trace("[p2p] Repeating discv5 handshake challenge", "id", fromID, "addr", fromAddr)
+		}
 		t.sendResponse(fromID, fromAddr, currentChallenge)
 		return
 	}
@@ -864,18 +889,24 @@ var (
 func (t *UDPv5) handleWhoareyou(p *v5wire.Whoareyou, fromID enode.ID, fromAddr netip.AddrPort) {
 	c, err := t.matchWithCall(fromID, p.Nonce)
 	if err != nil {
-		t.log.Trace("[p2p] Invalid "+p.Name(), "addr", fromAddr, "err", err)
+		if t.trace {
+			t.log.Trace("[p2p] Invalid "+p.Name(), "addr", fromAddr, "err", err)
+		}
 		return
 	}
 
 	if c.node == nil {
 		// Can't perform handshake because we don't have the ENR.
-		t.log.Trace("[p2p] Can't handle "+p.Name(), "addr", fromAddr, "err", "call has no ENR")
+		if t.trace {
+			t.log.Trace("[p2p] Can't handle "+p.Name(), "addr", fromAddr, "err", "call has no ENR")
+		}
 		c.err <- errors.New("remote wants handshake, but call has no ENR")
 		return
 	}
 	// Resend the call that was answered by WHOAREYOU.
-	t.log.Trace("[p2p] << "+p.Name(), "id", c.node.ID(), "addr", fromAddr)
+	if t.trace {
+		t.log.Trace("[p2p] << "+p.Name(), "id", c.node.ID(), "addr", fromAddr)
+	}
 	c.handshakeCount++
 	c.challenge = p
 	p.Node = c.node

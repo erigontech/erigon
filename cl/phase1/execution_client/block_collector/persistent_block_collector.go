@@ -23,6 +23,7 @@ import (
 	"sync"
 
 	"github.com/c2h5oh/datasize"
+	"github.com/golang/snappy"
 
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
@@ -30,12 +31,19 @@ import (
 	"github.com/erigontech/erigon/cl/utils"
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/dir"
+	"github.com/erigontech/erigon/common/hexutil"
+	"github.com/erigontech/erigon/common/length"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/dbcfg"
 	"github.com/erigontech/erigon/db/kv/mdbx"
 	"github.com/erigontech/erigon/execution/types"
 )
+
+// Flush drops the whole database directory only when the file has grown past
+// this size; smaller databases are cleared in place so chain-tip flushes don't
+// recreate the directory on every block.
+var dropDBSizeThreshold = uint64(1 * datasize.GB)
 
 // PersistentBlockCollector stores downloaded blocks to an MDBX database
 // so they survive restarts. The database is cleared after successful loading.
@@ -47,6 +55,9 @@ type PersistentBlockCollector struct {
 	engine         execution_client.ExecutionEngine
 
 	mu sync.Mutex
+	// encodeBlock scratch buffers; guarded by mu.
+	encodeBlockBuf   []byte
+	blockCompressBuf []byte
 }
 
 func openPersistentDB(ctx context.Context, logger log.Logger, persistDir string) (kv.RwDB, error) {
@@ -102,22 +113,14 @@ func (p *PersistentBlockCollector) AddBlock(block *cltypes.BeaconBlock) error {
 		return fmt.Errorf("database not initialized")
 	}
 
-	// Encode the block
 	payload := block.Body.ExecutionPayload
-	encodedBlock, err := encodeBlock(payload, block.ParentRoot, block.Body.GetExecutionRequestsList())
+	encodedBlock, err := p.encodeBlock(payload, block.ParentRoot, block.Body.GetExecutionRequestsList())
 	if err != nil {
 		return fmt.Errorf("failed to encode block: %w", err)
 	}
 
-	// Create key for sorting (block number + hash)
-	key, err := payloadKey(payload)
-	if err != nil {
-		return fmt.Errorf("failed to create payload key: %w", err)
-	}
-
-	// Store in database (skip if already exists)
 	return p.db.Update(context.Background(), func(tx kv.RwTx) error {
-		return tx.Put(kv.Headers, key, encodedBlock)
+		return tx.Put(kv.Headers, payloadKey(payload), encodedBlock)
 	})
 }
 
@@ -133,19 +136,55 @@ func (p *PersistentBlockCollector) AddGloasBlock(block *cltypes.BeaconBlock, env
 
 	payload := envelope.Message.Payload
 	executionRequestsList := cltypes.GetExecutionRequestsList(p.beaconChainCfg, envelope.Message.ExecutionRequests)
-	encodedBlock, err := encodeBlock(payload, block.ParentRoot, executionRequestsList)
+	encodedBlock, err := p.encodeBlock(payload, block.ParentRoot, executionRequestsList)
 	if err != nil {
 		return fmt.Errorf("failed to encode gloas block: %w", err)
 	}
 
-	key, err := payloadKey(payload)
-	if err != nil {
-		return fmt.Errorf("failed to create payload key: %w", err)
-	}
-
 	return p.db.Update(context.Background(), func(tx kv.RwTx) error {
-		return tx.Put(kv.Headers, key, encodedBlock)
+		return tx.Put(kv.Headers, payloadKey(payload), encodedBlock)
 	})
+}
+
+// Stored-value prefix: version byte + beacon parent root; Electra+ values also
+// embed the execution-requests hash. decodeBlock parses the same layout.
+const (
+	blockPrefixLen        = 1 + length.Hash
+	electraBlockPrefixLen = blockPrefixLen + length.Hash
+)
+
+// encodeBlock serializes the block value: snappy(version + parentRoot +
+// [requestsHash +] SSZ(payload)). The result aliases p.blockCompressBuf and is
+// valid only until the next call, so callers must copy it or fully consume it
+// before encoding again. Callers must hold p.mu.
+func (p *PersistentBlockCollector) encodeBlock(payload *cltypes.Eth1Block, parentRoot common.Hash, executionRequestsList []hexutil.Bytes) ([]byte, error) {
+	p.encodeBlockBuf = append(p.encodeBlockBuf[:0], byte(payload.Version()))
+	p.encodeBlockBuf = append(p.encodeBlockBuf, parentRoot[:]...)
+	if payload.Version() >= clparams.ElectraVersion {
+		requestsHash := cltypes.ComputeExecutionRequestHash(executionRequestsList)
+		p.encodeBlockBuf = append(p.encodeBlockBuf, requestsHash[:]...)
+	}
+	encoded, err := payload.EncodeSSZ(p.encodeBlockBuf)
+	if err != nil {
+		return nil, fmt.Errorf("error encoding execution payload during download: %w", err)
+	}
+	p.encodeBlockBuf = encoded
+
+	p.blockCompressBuf = snappy.Encode(p.blockCompressBuf[:cap(p.blockCompressBuf)], p.encodeBlockBuf)
+	return p.blockCompressBuf, nil
+}
+
+// AddBlock bursts end at Flush; dropping outlier-sized scratch there keeps one
+// huge payload from staying resident for the collector's lifetime.
+const maxRetainedScratchCap = int(datasize.MB)
+
+func (p *PersistentBlockCollector) releaseOversizedScratch() {
+	if cap(p.encodeBlockBuf) > maxRetainedScratchCap {
+		p.encodeBlockBuf = nil
+	}
+	if cap(p.blockCompressBuf) > maxRetainedScratchCap {
+		p.blockCompressBuf = nil
+	}
 }
 
 // Flush loads all collected blocks into the execution engine and clears the database.
@@ -159,12 +198,14 @@ func (p *PersistentBlockCollector) AddGloasBlock(block *cltypes.BeaconBlock, env
 func (p *PersistentBlockCollector) Flush(ctx context.Context) error {
 	p.mu.Lock()
 	defer p.mu.Unlock()
+	defer p.releaseOversizedScratch()
 
 	if p.db == nil {
 		return fmt.Errorf("database not initialized")
 	}
 
 	blocksBatch := []*types.Block{}
+	balByHash := map[common.Hash][]byte{}
 	inserted := uint64(0)
 	var lastInsertedBlock *types.Block
 
@@ -173,6 +214,7 @@ func (p *PersistentBlockCollector) Flush(ctx context.Context) error {
 	var pendingHeight uint64
 	var lastCommittedHeight uint64
 	gapDetected := false
+	hasRows := false
 
 	// resolvePending picks the variant from `pending` whose BlockHash matches
 	// next.ParentHash. With one variant (no ambiguity) or next == nil (end of
@@ -204,8 +246,9 @@ func (p *PersistentBlockCollector) Flush(ctx context.Context) error {
 			if err != nil {
 				return err
 			}
+			hasRows = true
 
-			block, err := p.decodeBlock(v)
+			block, bal, err := p.decodeBlock(v)
 			if err != nil {
 				p.logger.Warn("[BlockCollector] Failed to decode block", "key", common.Bytes2Hex(k), "err", err)
 				continue
@@ -215,6 +258,9 @@ func (p *PersistentBlockCollector) Flush(ctx context.Context) error {
 			}
 			if block.NumberU64() < minInsertableBlockNumber {
 				continue
+			}
+			if len(bal) > 0 {
+				balByHash[block.Hash()] = bal
 			}
 
 			// Another variant at the current height: buffer it for look-ahead resolution.
@@ -251,8 +297,16 @@ func (p *PersistentBlockCollector) Flush(ctx context.Context) error {
 				blocksBatch = append(blocksBatch, resolved)
 				lastCommittedHeight = pendingHeight
 				if len(blocksBatch) >= batchSize {
-					if err := p.insertBatch(ctx, blocksBatch, &inserted, &lastInsertedBlock); err != nil {
+					if err := p.insertBatch(ctx, blocksBatch, balByHash, &inserted, &lastInsertedBlock); err != nil {
 						return err
+					}
+					// Drive FCU after each batch so execution + prune can drain
+					// BlockTransaction as InsertBlocks proceeds. Without this,
+					// the entire backfill (potentially 100k+ blocks → 20+ GB
+					// of tx data) accumulates in chaindata before any drain
+					// can occur.
+					if lastInsertedBlock != nil {
+						p.doForkChoiceUpdate(ctx, lastInsertedBlock)
 					}
 					blocksBatch = []*types.Block{}
 				}
@@ -285,15 +339,11 @@ func (p *PersistentBlockCollector) Flush(ctx context.Context) error {
 
 	// Insert remaining blocks
 	if len(blocksBatch) > 0 {
-		if err := p.insertBatch(ctx, blocksBatch, &inserted, &lastInsertedBlock); err != nil {
+		if err := p.insertBatch(ctx, blocksBatch, balByHash, &inserted, &lastInsertedBlock); err != nil {
 			return err
 		}
 	}
 
-	// Trigger a single ForkChoiceUpdate after all batches are flushed.
-	// Calling FCU inside insertBatch between batches destroys the EL's
-	// in-memory overlay that accumulates TDs across batches, causing
-	// "parent's total difficulty not found" on the next InsertBlocks call.
 	if lastInsertedBlock != nil {
 		p.doForkChoiceUpdate(ctx, lastInsertedBlock)
 	}
@@ -301,14 +351,8 @@ func (p *PersistentBlockCollector) Flush(ctx context.Context) error {
 	if gapDetected {
 		// Prune only rows the caller is done with; rows past the gap stay so a
 		// future re-download of the missing range unblocks the next Flush.
-		// Use a non-cancelable context: if ctx was cancelled the caller cares
-		// about stopping, but skipping cleanup would leave already-inserted
-		// rows in place and the next Flush would re-read and re-insert them.
-		cutoff := minInsertableBlockNumber
-		if lastCommittedHeight+1 > cutoff {
-			cutoff = lastCommittedHeight + 1
-		}
-		if err := p.db.Update(context.Background(), func(tx kv.RwTx) error {
+		cutoff := max(lastCommittedHeight+1, minInsertableBlockNumber)
+		if err := p.db.Update(ctx, func(tx kv.RwTx) error {
 			cursor, err := tx.RwCursor(kv.Headers)
 			if err != nil {
 				return err
@@ -319,7 +363,7 @@ func (p *PersistentBlockCollector) Flush(ctx context.Context) error {
 					return err
 				}
 				if len(k) < 8 {
-					// Defensive: payloadKey always produces 40-byte keys.
+					// Defensive: payloadKey always produces 8-byte keys.
 					continue
 				}
 				if binary.BigEndian.Uint64(k[:8]) >= cutoff {
@@ -336,7 +380,19 @@ func (p *PersistentBlockCollector) Flush(ctx context.Context) error {
 		return nil
 	}
 
-	// No gap: drop the whole DB — cheaper than walking keys.
+	if !hasRows {
+		return nil
+	}
+
+	if p.dbSize() <= dropDBSizeThreshold {
+		if err := p.db.Update(ctx, func(tx kv.RwTx) error {
+			return tx.ClearTable(kv.Headers)
+		}); err != nil {
+			p.logger.Warn("[BlockCollector] Failed to clear consumed blocks", "err", err)
+		}
+		return nil
+	}
+
 	p.db.Close()
 
 	if err := dir.RemoveAll(p.persistDir); err != nil {
@@ -354,57 +410,97 @@ func (p *PersistentBlockCollector) Flush(ctx context.Context) error {
 	return nil
 }
 
-func (p *PersistentBlockCollector) decodeBlock(v []byte) (*types.Block, error) {
+// dbSize returns the current database file size, or 0 when unavailable —
+// which routes cleanup to the safe clear-in-place path.
+func (p *PersistentBlockCollector) dbSize() uint64 {
+	sizer, ok := p.db.(interface{ DBSize() (uint64, error) })
+	if !ok {
+		return 0
+	}
+	size, err := sizer.DBSize()
+	if err != nil {
+		p.logger.Warn("[BlockCollector] Failed to read database size", "err", err)
+		return 0
+	}
+	return size
+}
+
+func (p *PersistentBlockCollector) decodeBlock(v []byte) (*types.Block, []byte, error) {
 	if len(v) == 0 {
-		return nil, nil
+		return nil, nil, nil
 	}
 
 	v, err := utils.DecompressSnappy(v, false)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
+	}
+	if len(v) < blockPrefixLen {
+		return nil, nil, fmt.Errorf("persistent block value too short: have %d, want at least %d", len(v), blockPrefixLen)
 	}
 
 	version := clparams.StateVersion(v[0])
-	parentRoot := common.BytesToHash(v[1:33])
+	parentRoot := common.BytesToHash(v[1:blockPrefixLen])
 	requestsHash := common.Hash{}
 
 	if version >= clparams.ElectraVersion {
-		requestsHash = common.BytesToHash(v[33:65])
-		v = v[65:]
+		if len(v) < electraBlockPrefixLen {
+			return nil, nil, fmt.Errorf("persistent block value too short for execution requests: have %d, want at least %d", len(v), electraBlockPrefixLen)
+		}
+		requestsHash = common.BytesToHash(v[blockPrefixLen:electraBlockPrefixLen])
+		v = v[electraBlockPrefixLen:]
 	} else {
-		v = v[33:]
+		v = v[blockPrefixLen:]
 	}
 
 	executionPayload := cltypes.NewEth1Block(version, p.beaconChainCfg)
 	if err := executionPayload.DecodeSSZ(v, int(version)); err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 
 	body := executionPayload.Body()
 	txs, err := types.DecodeTransactions(body.Transactions)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 
 	// Skip genesis block
 	if executionPayload.BlockNumber == 0 {
-		return nil, nil
+		return nil, nil, nil
 	}
 
 	header, err := executionPayload.RlpHeader(&parentRoot, requestsHash)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 
-	return types.NewBlockFromStorage(executionPayload.BlockHash, header, txs, nil, body.Withdrawals), nil
+	// The Gloas execution payload envelope carries the raw EIP-7928 BAL bytes, so
+	// hand them to InsertBlocks to persist the BAL without re-deriving it.
+	var bal []byte
+	if executionPayload.BlockAccessList != nil {
+		bal = executionPayload.BlockAccessList.Bytes()
+	}
+
+	return types.NewBlockFromStorageWithBinaryTxs(executionPayload.BlockHash, header, txs, body.Transactions, nil, body.Withdrawals), bal, nil
 }
 
-func (p *PersistentBlockCollector) insertBatch(ctx context.Context, blocksBatch []*types.Block, inserted *uint64, lastInserted **types.Block) error {
+func (p *PersistentBlockCollector) insertBatch(ctx context.Context, blocksBatch []*types.Block, balByHash map[common.Hash][]byte, inserted *uint64, lastInserted **types.Block) error {
 	p.logger.Info("[BlockCollector] Inserting blocks",
 		"from", blocksBatch[0].NumberU64(),
 		"to", blocksBatch[len(blocksBatch)-1].NumberU64())
 
-	if err := p.engine.InsertBlocks(ctx, blocksBatch, true); err != nil {
+	var bals [][]byte
+	for i, b := range blocksBatch {
+		bal, ok := balByHash[b.Hash()]
+		if !ok {
+			continue
+		}
+		if bals == nil {
+			bals = make([][]byte, len(blocksBatch))
+		}
+		bals[i] = bal
+	}
+
+	if err := p.engine.InsertBlocks(ctx, blocksBatch, bals); err != nil {
 		p.logger.Warn("[BlockCollector] Failed to insert blocks", "err", err)
 		return err
 	}

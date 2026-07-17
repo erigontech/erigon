@@ -25,6 +25,7 @@ import (
 	"maps"
 	"math/big"
 	"os"
+	"slices"
 	"strings"
 
 	"github.com/holiman/uint256"
@@ -71,7 +72,7 @@ type StructLog struct {
 	Op            vm.OpCode                   `json:"op"`
 	Gas           uint64                      `json:"gas"`
 	GasCost       uint64                      `json:"gasCost"`
-	Memory        []byte                      `json:"memory"`
+	Memory        []byte                      `json:"memory,omitempty"`
 	MemorySize    int                         `json:"memSize"`
 	Stack         []*big.Int                  `json:"stack"`
 	ReturnData    []byte                      `json:"returnData"`
@@ -346,8 +347,8 @@ func WriteTrace(writer io.Writer, logs []StructLog) {
 
 		if len(log.Stack) > 0 {
 			fmt.Fprintln(writer, "Stack:")
-			for i := len(log.Stack) - 1; i >= 0; i-- {
-				fmt.Fprintf(writer, "%08d  %x\n", len(log.Stack)-i-1, math.PaddedBigBytes(log.Stack[i], 32))
+			for i, val := range slices.Backward(log.Stack) {
+				fmt.Fprintf(writer, "%08d  %x\n", len(log.Stack)-i-1, math.PaddedBigBytes(val, 32))
 			}
 		}
 		if len(log.Memory) > 0 {

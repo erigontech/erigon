@@ -44,9 +44,10 @@ import (
 
 // ---------------------------------------------------------------------------
 // Minimal stub implementing execmodule.ExecutionModule for unit tests.
-// Only the methods called by BuildBlockV1 (GetHeader, AssembleBlock,
-// GetAssembledBlock) are wired to configurable closures; everything else
-// is a no-op that satisfies the interface.
+// The methods called by BuildBlockV1 and CommitBlockV1 (GetHeader,
+// AssembleBlock, GetAssembledBlock, CurrentHeader, InsertBlocks,
+// ValidateChain, UpdateForkChoice, GetForkChoice) are wired to configurable
+// closures; everything else is a no-op that satisfies the interface.
 // ---------------------------------------------------------------------------
 
 type stubExecutionModule struct {
@@ -54,6 +55,10 @@ type stubExecutionModule struct {
 	assembleBlockFunc     func(ctx context.Context, params *builder.Parameters) (execmodule.AssembleBlockResult, error)
 	getAssembledBlockFunc func(ctx context.Context, payloadID uint64) (execmodule.AssembledBlockResult, error)
 	getForkChoiceFunc     func(ctx context.Context) (execmodule.ForkChoiceState, error)
+	currentHeaderFunc     func(ctx context.Context) (*types.Header, error)
+	insertBlocksFunc      func(ctx context.Context, blocks []*types.RawBlock) (execmodule.ExecutionStatus, error)
+	validateChainFunc     func(ctx context.Context, blockHash common.Hash, blockNumber uint64) (execmodule.ValidationResult, error)
+	updateForkChoiceFunc  func(ctx context.Context, headHash, safeHash, finalizedHash common.Hash) (execmodule.ForkChoiceResult, error)
 }
 
 var _ execmodule.ExecutionModule = (*stubExecutionModule)(nil)
@@ -81,13 +86,22 @@ func (s *stubExecutionModule) GetAssembledBlock(ctx context.Context, payloadID u
 
 // --- No-op implementations for the rest of the interface ---
 
-func (s *stubExecutionModule) InsertBlocks(_ context.Context, _ []*types.RawBlock) (execmodule.ExecutionStatus, error) {
+func (s *stubExecutionModule) InsertBlocks(ctx context.Context, blocks []*types.RawBlock) (execmodule.ExecutionStatus, error) {
+	if s.insertBlocksFunc != nil {
+		return s.insertBlocksFunc(ctx, blocks)
+	}
 	return execmodule.ExecutionStatusSuccess, nil
 }
-func (s *stubExecutionModule) ValidateChain(_ context.Context, _ common.Hash, _ uint64) (execmodule.ValidationResult, error) {
+func (s *stubExecutionModule) ValidateChain(ctx context.Context, blockHash common.Hash, blockNumber uint64) (execmodule.ValidationResult, error) {
+	if s.validateChainFunc != nil {
+		return s.validateChainFunc(ctx, blockHash, blockNumber)
+	}
 	return execmodule.ValidationResult{}, nil
 }
-func (s *stubExecutionModule) UpdateForkChoice(_ context.Context, _, _, _ common.Hash) (execmodule.ForkChoiceResult, error) {
+func (s *stubExecutionModule) UpdateForkChoice(ctx context.Context, headHash, safeHash, finalizedHash common.Hash) (execmodule.ForkChoiceResult, error) {
+	if s.updateForkChoiceFunc != nil {
+		return s.updateForkChoiceFunc(ctx, headHash, safeHash, finalizedHash)
+	}
 	return execmodule.ForkChoiceResult{}, nil
 }
 func (s *stubExecutionModule) GetForkChoice(ctx context.Context) (execmodule.ForkChoiceState, error) {
@@ -96,7 +110,10 @@ func (s *stubExecutionModule) GetForkChoice(ctx context.Context) (execmodule.For
 	}
 	return execmodule.ForkChoiceState{}, nil
 }
-func (s *stubExecutionModule) CurrentHeader(_ context.Context) (*types.Header, error) {
+func (s *stubExecutionModule) CurrentHeader(ctx context.Context) (*types.Header, error) {
+	if s.currentHeaderFunc != nil {
+		return s.currentHeaderFunc(ctx)
+	}
 	return nil, nil
 }
 func (s *stubExecutionModule) GetBody(_ context.Context, _ *common.Hash, _ *uint64) (*types.RawBody, error) {
@@ -186,6 +203,14 @@ func preCancunChainConfig() *chain.Config {
 	return cfg
 }
 
+// preAmsterdamChainConfig returns a chain config where Osaka is active but
+// Amsterdam (Glamsterdam) is NOT activated.
+func preAmsterdamChainConfig() *chain.Config {
+	cfg := allForksChainConfig()
+	cfg.AmsterdamTime = nil
+	return cfg
+}
+
 // makeParentHeader builds a minimal types.Header with the given timestamp.
 // The returned header can be hashed via .Hash() to get a stable parent hash.
 func makeParentHeader(timestamp uint64) *types.Header {
@@ -220,16 +245,20 @@ func getHeaderReturning(expectedHash common.Hash, hdr *types.Header) func(ctx co
 	}
 }
 
-// validPayloadAttrs returns payload attributes valid for a post-Cancun chain
-// with timestamp greater than parentTimestamp.
+// validPayloadAttrs returns payload attributes valid for an all-forks chain
+// (including Glamsterdam) with timestamp greater than parentTimestamp.
 func validPayloadAttrs(parentTimestamp uint64) *engine_types.PayloadAttributes {
 	beaconRoot := common.Hash{0xbe, 0xac}
+	slotNumber := hexutil.Uint64(1)
+	targetGasLimit := hexutil.Uint64(30_000_000)
 	return &engine_types.PayloadAttributes{
 		Timestamp:             hexutil.Uint64(parentTimestamp + 1),
 		PrevRandao:            common.Hash{0xaa},
 		SuggestedFeeRecipient: common.HexToAddress("0x1111111111111111111111111111111111111111"),
 		Withdrawals:           make([]*types.Withdrawal, 0),
 		ParentBeaconBlockRoot: &beaconRoot,
+		SlotNumber:            &slotNumber,
+		TargetGasLimit:        &targetGasLimit,
 	}
 }
 
@@ -245,6 +274,7 @@ func newTestingAPI(cfg *chain.Config, stub *stubExecutionModule) TestingAPI {
 		false, // proposing
 		true,  // consuming
 		nil,   // txPool
+		nil,   // blobGetter
 		0,     // fcuTimeout
 		0,     // maxReorgDepth
 	)
@@ -404,6 +434,21 @@ func TestBuildBlockV1(t *testing.T) {
 		assert.Contains(t, rpcErr.Message, "payload timestamp must be greater than parent")
 	})
 
+	t.Run("extraData longer than 32 bytes", func(t *testing.T) {
+		t.Parallel()
+		stub := &stubExecutionModule{
+			getHeaderFunc: getHeaderReturning(parentHash, parentHdr),
+		}
+		api := newTestingAPI(allForksChainConfig(), stub)
+		tooLong := hexutil.Bytes(make([]byte, 33))
+		resp, err := api.BuildBlockV1(context.Background(), parentHash, validPayloadAttrs(parentTimestamp), nil, &tooLong)
+		require.Nil(t, resp)
+		require.Error(t, err)
+		var rpcErr *rpc.InvalidParamsError
+		require.ErrorAs(t, err, &rpcErr)
+		assert.Contains(t, rpcErr.Message, "extraData")
+	})
+
 	t.Run("missing parentBeaconBlockRoot for Cancun+", func(t *testing.T) {
 		t.Parallel()
 		stub := &stubExecutionModule{
@@ -435,6 +480,71 @@ func TestBuildBlockV1(t *testing.T) {
 		var rpcErr *rpc.InvalidParamsError
 		require.ErrorAs(t, err, &rpcErr)
 		assert.Contains(t, rpcErr.Message, "parentBeaconBlockRoot not supported before Cancun")
+	})
+
+	t.Run("missing slotNumber for Glamsterdam+", func(t *testing.T) {
+		t.Parallel()
+		stub := &stubExecutionModule{
+			getHeaderFunc: getHeaderReturning(parentHash, parentHdr),
+		}
+		api := newTestingAPI(allForksChainConfig(), stub)
+		attrs := validPayloadAttrs(parentTimestamp)
+		attrs.SlotNumber = nil // required for Glamsterdam+
+		resp, err := api.BuildBlockV1(context.Background(), parentHash, attrs, nil, nil)
+		require.Nil(t, resp)
+		require.Error(t, err)
+		var rpcErr *rpc.InvalidParamsError
+		require.ErrorAs(t, err, &rpcErr)
+		assert.Contains(t, rpcErr.Message, "slotNumber required for Glamsterdam")
+	})
+
+	t.Run("missing targetGasLimit for Glamsterdam+", func(t *testing.T) {
+		t.Parallel()
+		stub := &stubExecutionModule{
+			getHeaderFunc: getHeaderReturning(parentHash, parentHdr),
+		}
+		api := newTestingAPI(allForksChainConfig(), stub)
+		attrs := validPayloadAttrs(parentTimestamp)
+		attrs.TargetGasLimit = nil // required for Glamsterdam+
+		resp, err := api.BuildBlockV1(context.Background(), parentHash, attrs, nil, nil)
+		require.Nil(t, resp)
+		require.Error(t, err)
+		var rpcErr *rpc.InvalidParamsError
+		require.ErrorAs(t, err, &rpcErr)
+		assert.Contains(t, rpcErr.Message, "targetGasLimit required for Glamsterdam")
+	})
+
+	t.Run("unexpected targetGasLimit pre-Glamsterdam", func(t *testing.T) {
+		t.Parallel()
+		stub := &stubExecutionModule{
+			getHeaderFunc: getHeaderReturning(parentHash, parentHdr),
+		}
+		api := newTestingAPI(preAmsterdamChainConfig(), stub)
+		attrs := validPayloadAttrs(parentTimestamp)
+		attrs.SlotNumber = nil
+		// attrs already has TargetGasLimit set, which is invalid pre-Glamsterdam.
+		resp, err := api.BuildBlockV1(context.Background(), parentHash, attrs, nil, nil)
+		require.Nil(t, resp)
+		require.Error(t, err)
+		var rpcErr *rpc.InvalidParamsError
+		require.ErrorAs(t, err, &rpcErr)
+		assert.Contains(t, rpcErr.Message, "targetGasLimit not supported before Glamsterdam")
+	})
+
+	t.Run("unexpected slotNumber pre-Glamsterdam", func(t *testing.T) {
+		t.Parallel()
+		stub := &stubExecutionModule{
+			getHeaderFunc: getHeaderReturning(parentHash, parentHdr),
+		}
+		api := newTestingAPI(preAmsterdamChainConfig(), stub)
+		attrs := validPayloadAttrs(parentTimestamp)
+		attrs.TargetGasLimit = nil
+		resp, err := api.BuildBlockV1(context.Background(), parentHash, attrs, nil, nil)
+		require.Nil(t, resp)
+		require.Error(t, err)
+		var rpcErr *rpc.InvalidParamsError
+		require.ErrorAs(t, err, &rpcErr)
+		assert.Contains(t, rpcErr.Message, "slotNumber not supported before Glamsterdam")
 	})
 
 	// These two tests exercise the waitForResponse busy-polling loop.
@@ -537,15 +647,17 @@ func TestBuildBlockV1(t *testing.T) {
 		assert.Equal(t, "12345", resp.BlockValue.ToInt().String())
 	})
 
-	t.Run("happy path with extraData override", func(t *testing.T) {
+	t.Run("extraData forwarded to the block builder", func(t *testing.T) {
 		t.Parallel()
+		var captured *builder.Parameters
 		stub := &stubExecutionModule{
 			getHeaderFunc: getHeaderReturning(parentHash, parentHdr),
-			assembleBlockFunc: func(_ context.Context, _ *builder.Parameters) (execmodule.AssembleBlockResult, error) {
+			assembleBlockFunc: func(_ context.Context, params *builder.Parameters) (execmodule.AssembleBlockResult, error) {
+				captured = params
 				return execmodule.AssembleBlockResult{PayloadID: 1, Busy: false}, nil
 			},
 			getAssembledBlockFunc: func(_ context.Context, _ uint64) (execmodule.AssembledBlockResult, error) {
-				blk := makeAssembledBlock(common.Hash{0x01}, parentHash, common.Hash{}, 101, parentTimestamp+1, []byte("original"), 30_000_000, 0, 0, 0)
+				blk := makeAssembledBlock(common.Hash{0x01}, parentHash, common.Hash{}, 101, parentTimestamp+1, []byte("overridden-extra"), 30_000_000, 0, 0, 0)
 				return execmodule.AssembledBlockResult{
 					Block:      blk,
 					BlockValue: uint256.NewInt(0),
@@ -558,7 +670,31 @@ func TestBuildBlockV1(t *testing.T) {
 		resp, err := api.BuildBlockV1(context.Background(), parentHash, validPayloadAttrs(parentTimestamp), nil, &overrideData)
 		require.NoError(t, err)
 		require.NotNil(t, resp)
+		require.NotNil(t, captured)
+		assert.Equal(t, []byte("overridden-extra"), captured.ExtraData)
 		assert.Equal(t, hexutil.Bytes("overridden-extra"), resp.ExecutionPayload.ExtraData)
+	})
+
+	t.Run("nil extraData builds with empty extra data", func(t *testing.T) {
+		t.Parallel()
+		var captured *builder.Parameters
+		stub := &stubExecutionModule{
+			getHeaderFunc: getHeaderReturning(parentHash, parentHdr),
+			assembleBlockFunc: func(_ context.Context, params *builder.Parameters) (execmodule.AssembleBlockResult, error) {
+				captured = params
+				return execmodule.AssembleBlockResult{PayloadID: 1, Busy: false}, nil
+			},
+			getAssembledBlockFunc: func(_ context.Context, _ uint64) (execmodule.AssembledBlockResult, error) {
+				blk := makeAssembledBlock(common.Hash{0x01}, parentHash, common.Hash{}, 101, parentTimestamp+1, []byte{}, 30_000_000, 0, 0, 0)
+				return execmodule.AssembledBlockResult{Block: blk, BlockValue: uint256.NewInt(0), Busy: false}, nil
+			},
+		}
+		api := newTestingAPI(allForksChainConfig(), stub)
+		_, err := api.BuildBlockV1(context.Background(), parentHash, validPayloadAttrs(parentTimestamp), nil, nil)
+		require.NoError(t, err)
+		require.NotNil(t, captured)
+		require.NotNil(t, captured.ExtraData, "nil extraData must force empty extra data, not the builder's configured default")
+		assert.Empty(t, captured.ExtraData)
 	})
 
 	t.Run("missing withdrawals for Shanghai", func(t *testing.T) {
@@ -772,6 +908,8 @@ func TestBuildBlockV1AssembleParamsVersion(t *testing.T) {
 	t.Run("Cancun: ParentBeaconBlockRoot and Withdrawals propagated", func(t *testing.T) {
 		t.Parallel()
 		beaconRoot := common.Hash{0xbe, 0xef}
+		slotNum := hexutil.Uint64(1)
+		tgl := hexutil.Uint64(30_000_000)
 		withdrawals := []*types.Withdrawal{{Index: 1, Validator: 2, Address: common.Address{0x33}, Amount: 100}}
 		attrs := &engine_types.PayloadAttributes{
 			Timestamp:             hexutil.Uint64(parentTimestamp + 1),
@@ -779,6 +917,8 @@ func TestBuildBlockV1AssembleParamsVersion(t *testing.T) {
 			SuggestedFeeRecipient: common.HexToAddress("0x1111111111111111111111111111111111111111"),
 			Withdrawals:           withdrawals,
 			ParentBeaconBlockRoot: &beaconRoot,
+			SlotNumber:            &slotNum,
+			TargetGasLimit:        &tgl,
 		}
 		var captured *builder.Parameters
 		stub := &stubExecutionModule{
@@ -913,6 +1053,7 @@ func TestForkchoiceUpdatedV2PayloadAttributesWithdrawalsValidation(t *testing.T)
 			false,
 			true,
 			nil,
+			nil,
 			0,
 			0,
 		)
@@ -951,6 +1092,7 @@ func TestForkchoiceUpdatedV2PayloadAttributesWithdrawalsValidation(t *testing.T)
 			false,
 			false,
 			true,
+			nil,
 			nil,
 			0,
 			0,
@@ -997,6 +1139,7 @@ func TestForkchoiceUpdatedV2ValidatesAttributesWhenSyncing(t *testing.T) {
 		false,
 		true,
 		nil,
+		nil,
 		0,
 		0,
 	)
@@ -1029,8 +1172,8 @@ func TestForkchoiceUpdatedV3DefersAttributesValidationWhenSyncing(t *testing.T) 
 		SafeBlockHash:      common.Hash{0x2},
 		FinalizedBlockHash: common.Hash{0x3},
 	}
-	stub := &stubExecutionModule{} // GetForkChoice/GetHeaderByHash stubs -> SYNCING
-	cfg := allForksChainConfig()
+	stub := &stubExecutionModule{}   // GetForkChoice/GetHeaderByHash stubs -> SYNCING
+	cfg := preAmsterdamChainConfig() // V3 is the correct FCU version pre-Amsterdam
 	srv := NewEngineServer(
 		log.New(),
 		cfg,
@@ -1042,6 +1185,7 @@ func TestForkchoiceUpdatedV3DefersAttributesValidationWhenSyncing(t *testing.T) 
 		false,
 		false,
 		true,
+		nil,
 		nil,
 		0,
 		0,
@@ -1074,7 +1218,7 @@ func TestForkchoiceUpdatedV3RejectsMissingBeaconRootWhenValid(t *testing.T) {
 	}
 	srv := NewEngineServer(
 		log.New(),
-		allForksChainConfig(),
+		preAmsterdamChainConfig(), // V3 is the correct FCU version pre-Amsterdam
 		&stubExecutionModule{
 			getForkChoiceFunc: func(_ context.Context) (execmodule.ForkChoiceState, error) {
 				return execmodule.ForkChoiceState{
@@ -1090,6 +1234,7 @@ func TestForkchoiceUpdatedV3RejectsMissingBeaconRootWhenValid(t *testing.T) {
 		false,
 		true,
 		nil,
+		nil,
 		0,
 		0,
 	)
@@ -1104,6 +1249,105 @@ func TestForkchoiceUpdatedV3RejectsMissingBeaconRootWhenValid(t *testing.T) {
 	require.Nil(t, resp)
 	require.Error(t, err)
 	require.Equal(t, -38003, err.(rpc.Error).ErrorCode())
+}
+
+// ---------------------------------------------------------------------------
+// validatePayloadAttributes Pre/Post FCU — Amsterdam/Gloas version gate tests
+// ---------------------------------------------------------------------------
+
+func TestValidatePayloadAttributesPreFCU_AmsterdamGate(t *testing.T) {
+	t.Parallel()
+
+	t.Run("V3 at Amsterdam timestamp rejected", func(t *testing.T) {
+		t.Parallel()
+		srv := NewEngineServer(log.New(), allForksChainConfig(), &stubExecutionModule{}, nil, false, false, false, true, nil, nil, 0, 0)
+		attrs := &engine_types.PayloadAttributes{
+			Timestamp:             hexutil.Uint64(100), // Amsterdam active at ts=0
+			ParentBeaconBlockRoot: &common.Hash{},
+			Withdrawals:           make([]*types.Withdrawal, 0),
+		}
+		err := srv.validatePayloadAttributesPreFCU(clparams.FuluVersion, attrs)
+		require.Error(t, err)
+		var unsupported *rpc.UnsupportedForkError
+		require.ErrorAs(t, err, &unsupported)
+	})
+
+	t.Run("V3 at pre-Amsterdam timestamp allowed", func(t *testing.T) {
+		t.Parallel()
+		srv := NewEngineServer(log.New(), preAmsterdamChainConfig(), &stubExecutionModule{}, nil, false, false, false, true, nil, nil, 0, 0)
+		attrs := &engine_types.PayloadAttributes{
+			Timestamp:             hexutil.Uint64(100),
+			ParentBeaconBlockRoot: &common.Hash{},
+			Withdrawals:           make([]*types.Withdrawal, 0),
+		}
+		err := srv.validatePayloadAttributesPreFCU(clparams.FuluVersion, attrs)
+		require.NoError(t, err)
+	})
+}
+
+func TestValidatePayloadAttributesPostFCU_AmsterdamGate(t *testing.T) {
+	t.Parallel()
+
+	t.Run("V4 at pre-Amsterdam timestamp rejected", func(t *testing.T) {
+		t.Parallel()
+		srv := NewEngineServer(log.New(), preAmsterdamChainConfig(), &stubExecutionModule{}, nil, false, false, false, true, nil, nil, 0, 0)
+		slotNumber := hexutil.Uint64(1)
+		targetGasLimit := hexutil.Uint64(30_000_000)
+		attrs := &engine_types.PayloadAttributes{
+			Timestamp:             hexutil.Uint64(100),
+			ParentBeaconBlockRoot: &common.Hash{},
+			Withdrawals:           make([]*types.Withdrawal, 0),
+			SlotNumber:            &slotNumber,
+			TargetGasLimit:        &targetGasLimit,
+		}
+		err := srv.validatePayloadAttributesPostFCU(clparams.GloasVersion, attrs)
+		require.Error(t, err)
+		var unsupported *rpc.UnsupportedForkError
+		require.ErrorAs(t, err, &unsupported)
+	})
+
+	t.Run("V4 at Amsterdam timestamp allowed", func(t *testing.T) {
+		t.Parallel()
+		srv := NewEngineServer(log.New(), allForksChainConfig(), &stubExecutionModule{}, nil, false, false, false, true, nil, nil, 0, 0)
+		slotNumber := hexutil.Uint64(1)
+		targetGasLimit := hexutil.Uint64(30_000_000)
+		attrs := &engine_types.PayloadAttributes{
+			Timestamp:             hexutil.Uint64(100),
+			ParentBeaconBlockRoot: &common.Hash{},
+			Withdrawals:           make([]*types.Withdrawal, 0),
+			SlotNumber:            &slotNumber,
+			TargetGasLimit:        &targetGasLimit,
+		}
+		err := srv.validatePayloadAttributesPostFCU(clparams.GloasVersion, attrs)
+		require.NoError(t, err)
+	})
+
+	t.Run("pre-V4 with SlotNumber rejected", func(t *testing.T) {
+		t.Parallel()
+		srv := NewEngineServer(log.New(), preAmsterdamChainConfig(), &stubExecutionModule{}, nil, false, false, false, true, nil, nil, 0, 0)
+		slotNumber := hexutil.Uint64(1)
+		attrs := &engine_types.PayloadAttributes{
+			Timestamp:             hexutil.Uint64(100),
+			ParentBeaconBlockRoot: &common.Hash{},
+			Withdrawals:           make([]*types.Withdrawal, 0),
+			SlotNumber:            &slotNumber,
+		}
+		err := srv.validatePayloadAttributesPostFCU(clparams.FuluVersion, attrs)
+		require.Error(t, err)
+		require.Equal(t, -38003, err.(rpc.Error).ErrorCode())
+	})
+
+	t.Run("pre-V4 without SlotNumber allowed", func(t *testing.T) {
+		t.Parallel()
+		srv := NewEngineServer(log.New(), preAmsterdamChainConfig(), &stubExecutionModule{}, nil, false, false, false, true, nil, nil, 0, 0)
+		attrs := &engine_types.PayloadAttributes{
+			Timestamp:             hexutil.Uint64(100),
+			ParentBeaconBlockRoot: &common.Hash{},
+			Withdrawals:           make([]*types.Withdrawal, 0),
+		}
+		err := srv.validatePayloadAttributesPostFCU(clparams.FuluVersion, attrs)
+		require.NoError(t, err)
+	})
 }
 
 func ptrUint64(v uint64) *uint64 {

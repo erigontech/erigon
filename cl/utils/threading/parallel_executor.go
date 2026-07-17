@@ -56,7 +56,7 @@ func ParallellForLoop(numWorkers int, from, to int, f func(int) error) error {
 	// divide the work into numWorkers parts
 	size := (to - from) / numWorkers
 	wp := ParallelExecutor{}
-	for i := 0; i < numWorkers; i++ {
+	for i := range numWorkers {
 		start := from + i*size
 		end := start + size
 		if i == numWorkers-1 {

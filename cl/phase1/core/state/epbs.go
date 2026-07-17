@@ -3,6 +3,7 @@ package state
 import (
 	"errors"
 	"fmt"
+	"math"
 
 	"github.com/erigontech/erigon/cl/abstract"
 	"github.com/erigontech/erigon/cl/clparams"
@@ -12,6 +13,7 @@ import (
 	"github.com/erigontech/erigon/cl/utils"
 	"github.com/erigontech/erigon/cl/utils/bls"
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/common/log/v3"
 )
 
@@ -43,7 +45,7 @@ func IsActiveBuilder(state abstract.BeaconState, builderIndex uint64) bool {
 		log.Debug("builders is nil")
 		return false
 	}
-	if int(builderIndex) >= builders.Len() {
+	if builderIndex >= uint64(builders.Len()) {
 		return false
 	}
 	builder := builders.Get(int(builderIndex))
@@ -120,7 +122,7 @@ func CanBuilderCoverBid(s abstract.BeaconState, builderIndex uint64, bidAmount u
 		log.Debug("builders is nil")
 		return false
 	}
-	if int(builderIndex) >= builders.Len() {
+	if builderIndex >= uint64(builders.Len()) {
 		return false
 	}
 	builder := builders.Get(int(builderIndex))
@@ -131,11 +133,27 @@ func CanBuilderCoverBid(s abstract.BeaconState, builderIndex uint64, bidAmount u
 
 	builderBalance := builder.Balance
 	pendingWithdrawalsAmount := GetPendingBalanceToWithdrawForBuilder(s, builderIndex)
+	if pendingWithdrawalsAmount > math.MaxUint64-s.BeaconConfig().MinDepositAmount {
+		return false
+	}
 	minBalance := s.BeaconConfig().MinDepositAmount + pendingWithdrawalsAmount
 	if builderBalance < minBalance {
 		return false
 	}
 	return builderBalance-minBalance >= bidAmount
+}
+
+func GetProposerDependentRoot(s abstract.BeaconState, epoch uint64) (common.Hash, error) {
+	cfg := s.BeaconConfig()
+	if epoch < cfg.MinSeedLookahead {
+		return common.Hash{}, fmt.Errorf("proposer dependent root epoch %d before min seed lookahead %d", epoch, cfg.MinSeedLookahead)
+	}
+	dependentEpoch := epoch - cfg.MinSeedLookahead
+	if dependentEpoch == 0 {
+		return common.Hash{}, fmt.Errorf("proposer dependent root slot underflow for epoch %d", epoch)
+	}
+	dependentSlot := dependentEpoch*cfg.SlotsPerEpoch - 1
+	return s.GetBlockRootAtSlot(dependentSlot)
 }
 
 // GetPendingBalanceToWithdrawForBuilder returns the total pending balance to withdraw for a builder.
@@ -150,6 +168,10 @@ func GetPendingBalanceToWithdrawForBuilder(s abstract.BeaconState, builderIndex 
 	if pendingWithdrawals != nil {
 		pendingWithdrawals.Range(func(_ int, withdrawal *cltypes.BuilderPendingWithdrawal, _ int) bool {
 			if withdrawal != nil && withdrawal.BuilderIndex == builderIndex {
+				if withdrawal.Amount > math.MaxUint64-total {
+					total = math.MaxUint64
+					return false
+				}
 				total += withdrawal.Amount
 			}
 			return true
@@ -163,6 +185,10 @@ func GetPendingBalanceToWithdrawForBuilder(s abstract.BeaconState, builderIndex 
 	if pendingPayments != nil {
 		pendingPayments.Range(func(_ int, payment *cltypes.BuilderPendingPayment, _ int) bool {
 			if payment != nil && payment.Withdrawal != nil && payment.Withdrawal.BuilderIndex == builderIndex {
+				if payment.Withdrawal.Amount > math.MaxUint64-total {
+					total = math.MaxUint64
+					return false
+				}
 				total += payment.Withdrawal.Amount
 			}
 			return true
@@ -174,24 +200,24 @@ func GetPendingBalanceToWithdrawForBuilder(s abstract.BeaconState, builderIndex 
 	return total
 }
 
-// IsPendingValidator returns true if there's a pending deposit for the given pubkey
-// with a valid signature. This is used to prevent builder deposits from being applied
-// when there's already a valid pending validator deposit for the same pubkey.
+// IsPendingValidator returns true if any pending deposit in the list matches
+// the given pubkey AND has a valid deposit signature.
 // [New in Gloas:EIP7732]
-func IsPendingValidator(s abstract.BeaconState, pubkey common.Bytes48) bool {
-	pendingDeposits := s.GetPendingDeposits()
+func IsPendingValidator(cfg *clparams.BeaconChainConfig, pendingDeposits *solid.ListSSZ[*solid.PendingDeposit], pubkey common.Bytes48) bool {
 	if pendingDeposits == nil {
 		return false
 	}
-	cfg := s.BeaconConfig()
 	for i := 0; i < pendingDeposits.Len(); i++ {
-		deposit := pendingDeposits.Get(i)
-		if deposit.PubKey != pubkey {
+		d := pendingDeposits.Get(i)
+		if d.PubKey != pubkey {
 			continue
 		}
-		// Check if this pending deposit has a valid signature
-		valid, err := IsValidDepositSignature(cfg, deposit.PubKey, deposit.WithdrawalCredentials, deposit.Amount, deposit.Signature)
-		if err == nil && valid {
+		valid, err := IsValidDepositSignature(cfg, d.PubKey, d.WithdrawalCredentials, d.Amount, d.Signature)
+		if err != nil {
+			log.Debug("IsValidDepositSignature failed", "pubkey", d.PubKey, "err", err)
+			continue
+		}
+		if valid {
 			return true
 		}
 	}
@@ -206,42 +232,43 @@ func IsBuilderPubkey(s abstract.BeaconState, pubkey common.Bytes48) bool {
 		return false
 	}
 	for i := 0; i < builders.Len(); i++ {
-		if builders.Get(i).Pubkey == pubkey {
+		builder := builders.Get(i)
+		if builder != nil && builder.Pubkey == pubkey {
 			return true
 		}
 	}
 	return false
 }
 
-// IsValidDepositSignature validates a builder deposit signature.
-// [New in Gloas:EIP7732]
+// IsValidDepositSignature validates a validator deposit signature.
 func IsValidDepositSignature(cfg *clparams.BeaconChainConfig, pubkey common.Bytes48, withdrawalCredentials common.Hash, amount uint64, signature common.Bytes96) (bool, error) {
-	// Compute domain for deposit (agnostic domain using genesis fork version)
+	return isValidDepositSignatureForDomain(cfg, cfg.DomainDeposit, pubkey, withdrawalCredentials, amount, signature)
+}
+
+func IsValidBuilderDepositSignature(cfg *clparams.BeaconChainConfig, request *solid.BuilderDepositRequest) (bool, error) {
+	return isValidDepositSignatureForDomain(cfg, cfg.DomainBuilderDeposit, request.PubKey, request.WithdrawalCredentials, request.Amount, request.Signature)
+}
+
+func isValidDepositSignatureForDomain(cfg *clparams.BeaconChainConfig, domainType [4]byte, pubkey common.Bytes48, withdrawalCredentials common.Hash, amount uint64, signature common.Bytes96) (bool, error) {
 	domain, err := fork.ComputeDomain(
-		cfg.DomainDeposit[:],
+		domainType[:],
 		utils.Uint32ToBytes4(uint32(cfg.GenesisForkVersion)),
 		[32]byte{},
 	)
 	if err != nil {
 		return false, err
 	}
-
-	// Create deposit data for hashing
 	depositData := &cltypes.DepositData{
 		PubKey:                pubkey,
 		WithdrawalCredentials: withdrawalCredentials,
 		Amount:                amount,
 		Signature:             signature,
 	}
-
 	depositMessageRoot, err := depositData.MessageHash()
 	if err != nil {
 		return false, err
 	}
-
-	signedRoot := utils.Sha256(depositMessageRoot[:], domain)
-
-	// Verify BLS signature
+	signedRoot := crypto.Sha256(depositMessageRoot[:], domain)
 	valid, err := bls.Verify(signature[:], signedRoot[:], pubkey[:])
 	if err != nil {
 		return false, err
@@ -261,7 +288,7 @@ func GetIndexForNewBuilder(s abstract.BeaconState) uint64 {
 	epoch := GetEpochAtSlot(s.BeaconConfig(), s.Slot())
 	for i := 0; i < builders.Len(); i++ {
 		builder := builders.Get(i)
-		if builder.WithdrawableEpoch <= epoch && builder.Balance == 0 {
+		if builder != nil && builder.WithdrawableEpoch <= epoch && builder.Balance == 0 {
 			return uint64(i)
 		}
 	}
@@ -269,41 +296,47 @@ func GetIndexForNewBuilder(s abstract.BeaconState) uint64 {
 }
 
 // AddBuilderToRegistry adds a new builder to the registry.
-// [New in Gloas:EIP7732]
-func AddBuilderToRegistry(s abstract.BeaconState, pubkey common.Bytes48, withdrawalCredentials common.Hash, amount uint64, slot uint64) {
+func AddBuilderToRegistry(s abstract.BeaconState, pubkey common.Bytes48, version uint8, executionAddress common.Address, amount uint64, slot uint64) error {
 	cfg := s.BeaconConfig()
+	builders := s.GetBuilders()
+	if builders == nil {
+		return errors.New("builder registry unavailable")
+	}
 	index := GetIndexForNewBuilder(s)
+	if index >= cfg.BuilderRegistryLimit {
+		return fmt.Errorf("builder registry full: index %d >= limit %d", index, cfg.BuilderRegistryLimit)
+	}
 
 	builder := &cltypes.Builder{
 		Pubkey:            pubkey,
-		Version:           withdrawalCredentials[0],
-		ExecutionAddress:  common.BytesToAddress(withdrawalCredentials[12:]),
+		Version:           version,
+		ExecutionAddress:  executionAddress,
 		Balance:           amount,
 		DepositEpoch:      GetEpochAtSlot(cfg, slot),
 		WithdrawableEpoch: cfg.FarFutureEpoch,
 	}
 
-	builders := s.GetBuilders()
 	if int(index) < builders.Len() {
 		builders.Set(int(index), builder)
 	} else {
 		builders.Append(builder)
 	}
 	s.SetBuilders(builders)
+	return nil
 }
 
-// ApplyDepositForBuilder processes a builder deposit.
+// ApplyDepositForBuilder processes a fork-onboarding builder deposit.
 // If the pubkey is new and signature is valid, registers a new builder.
 // If the pubkey already exists, increases the builder's balance.
-// [New in Gloas:EIP7732]
-func ApplyDepositForBuilder(s abstract.BeaconState, pubkey common.Bytes48, withdrawalCredentials common.Hash, amount uint64, signature common.Bytes96, slot uint64) {
+func ApplyDepositForBuilder(s abstract.BeaconState, pubkey common.Bytes48, withdrawalCredentials common.Hash, amount uint64, signature common.Bytes96, slot uint64) error {
 	builders := s.GetBuilders()
 
 	// Check if pubkey already exists in builders
 	builderIndex := -1
 	if builders != nil {
 		for i := 0; i < builders.Len(); i++ {
-			if builders.Get(i).Pubkey == pubkey {
+			builder := builders.Get(i)
+			if builder != nil && builder.Pubkey == pubkey {
 				builderIndex = i
 				break
 			}
@@ -314,19 +347,76 @@ func ApplyDepositForBuilder(s abstract.BeaconState, pubkey common.Bytes48, withd
 		// New builder: verify deposit signature (proof of possession)
 		valid, err := IsValidDepositSignature(s.BeaconConfig(), pubkey, withdrawalCredentials, amount, signature)
 		if err != nil {
-			return
+			log.Debug("invalid builder deposit signature", "err", err)
+			return nil
 		}
 		if valid {
-			AddBuilderToRegistry(s, pubkey, withdrawalCredentials, amount, slot)
+			return AddBuilderToRegistry(
+				s,
+				pubkey,
+				s.BeaconConfig().PayloadBuilderVersion,
+				common.BytesToAddress(withdrawalCredentials[12:]),
+				amount,
+				slot,
+			)
 		}
 	} else {
-		// Existing builder: increase balance
-		// Copy-on-write: create a new Builder to avoid mutating a shared pointer
-		// (ShallowCopy shares *Builder pointers across state copies).
 		builder := builders.Get(builderIndex)
+		if builder == nil {
+			return nil
+		}
 		newBuilder := *builder
+		if amount > math.MaxUint64-newBuilder.Balance {
+			return fmt.Errorf("builder balance overflow: %d + %d", newBuilder.Balance, amount)
+		}
 		newBuilder.Balance += amount
 		builders.Set(builderIndex, &newBuilder)
 		s.SetBuilders(builders)
 	}
+	return nil
+}
+
+func ApplyBuilderDepositRequest(s abstract.BeaconState, request *solid.BuilderDepositRequest) error {
+	builders := s.GetBuilders()
+	builderIndex := -1
+	if builders != nil {
+		for i := 0; i < builders.Len(); i++ {
+			builder := builders.Get(i)
+			if builder != nil && builder.Pubkey == request.PubKey {
+				builderIndex = i
+				break
+			}
+		}
+	}
+
+	if builderIndex == -1 {
+		valid, err := IsValidBuilderDepositSignature(s.BeaconConfig(), request)
+		if err != nil || !valid {
+			return nil
+		}
+		return AddBuilderToRegistry(
+			s,
+			request.PubKey,
+			request.WithdrawalCredentials[0],
+			common.BytesToAddress(request.WithdrawalCredentials[12:]),
+			request.Amount,
+			s.Slot(),
+		)
+	}
+
+	builder := builders.Get(builderIndex)
+	if builder == nil {
+		return nil
+	}
+	newBuilder := *builder
+	if newBuilder.WithdrawableEpoch != s.BeaconConfig().FarFutureEpoch {
+		newBuilder.WithdrawableEpoch = GetEpochAtSlot(s.BeaconConfig(), s.Slot()) + s.BeaconConfig().MinBuilderWithdrawabilityDelay
+	}
+	if request.Amount > math.MaxUint64-newBuilder.Balance {
+		return fmt.Errorf("builder balance overflow: %d + %d", newBuilder.Balance, request.Amount)
+	}
+	newBuilder.Balance += request.Amount
+	builders.Set(builderIndex, &newBuilder)
+	s.SetBuilders(builders)
+	return nil
 }

@@ -24,6 +24,7 @@ import (
 	"github.com/holiman/uint256"
 
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/order"
 )
@@ -84,8 +85,8 @@ func storageRangeAt(ttx kv.TemporalTx, contractAddress common.Address, start []b
 func storageRangeAtErigon(ttx kv.TemporalTx, contractAddress common.Address, start []byte, txNum uint64, maxResult int) (StorageRangeResult, error) {
 	result := StorageRangeResult{Storage: storageMap{}}
 
-	fromKey := append(common.Copy(contractAddress.Bytes()), start...)
-	toKey, _ := kv.NextSubtree(contractAddress.Bytes())
+	fromKey := append(common.Copy(contractAddress[:]), start...)
+	toKey, _ := kv.NextSubtree(contractAddress[:])
 
 	r, err := ttx.RangeAsOf(kv.StorageDomain, fromKey, toKey, txNum, order.Asc, kv.Unlim) //no limit because need skip empty records
 	if err != nil {
@@ -101,10 +102,7 @@ func storageRangeAtErigon(ttx kv.TemporalTx, contractAddress common.Address, sta
 			continue // Skip deleted entries
 		}
 		key := common.BytesToHash(k[20:])
-		seckey, err := common.HashData(k[20:])
-		if err != nil {
-			return StorageRangeResult{}, err
-		}
+		seckey := crypto.Keccak256Hash(k[20:])
 		var value uint256.Int
 		value.SetBytes(v)
 		result.Storage[seckey] = StorageEntry{Key: &key, Value: value.Bytes32()}
@@ -137,7 +135,7 @@ func storageRangeAtGethCompat(ttx kv.TemporalTx, contractAddress common.Address,
 
 	// Always scan all storage for this contract — we need to sort by hashed key
 	// to match Geth's trie-based iteration order.
-	fromKey := common.Copy(contractAddress.Bytes())
+	fromKey := common.Copy(contractAddress[:])
 	toKey, _ := kv.NextSubtree(fromKey)
 
 	r, err := ttx.RangeAsOf(kv.StorageDomain, fromKey, toKey, txNum, order.Asc, kv.Unlim)
@@ -164,11 +162,7 @@ func storageRangeAtGethCompat(ttx kv.TemporalTx, contractAddress common.Address,
 			continue
 		}
 		rawKey := k[20:]
-		seckey, err := common.HashData(rawKey)
-		if err != nil {
-			return StorageRangeResult{}, err
-		}
-
+		seckey := crypto.Keccak256Hash(rawKey)
 		// Skip entries with hashed key < start.
 		if hasStart && bytes.Compare(seckey[:], startHash[:]) < 0 {
 			continue

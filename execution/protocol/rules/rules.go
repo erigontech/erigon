@@ -21,9 +21,12 @@
 package rules
 
 import (
+	"fmt"
+
 	"github.com/holiman/uint256"
 
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/state"
@@ -134,6 +137,10 @@ type EngineReader interface {
 
 	GetPostApplyMessageFunc() evmtypes.PostApplyMessageFunc
 
+	ValidateBlockPostExecution(chainConfig *chain.Config, header *types.Header,
+		gasUsed, blobGasUsed uint64, checkReceipts, checkBloom bool,
+		receipts types.Receipts, txns types.Transactions, logger log.Logger) error
+
 	// Close terminates any background threads, DB's etc maintained by the rules engine.
 	Close() error
 }
@@ -189,6 +196,51 @@ type EngineWriter interface {
 
 	// APIs returns the RPC APIs this rules engine provides.
 	APIs(chain ChainHeaderReader) []rpc.API
+}
+
+var alwaysSkipReceiptCheck = dbg.EnvBool("EXEC_SKIP_RECEIPT_CHECK", false)
+
+func DefaultBlockPostValidation(chainConfig *chain.Config, header *types.Header,
+	gasUsed, blobGasUsed uint64, checkReceipts, checkBloom bool,
+	receipts types.Receipts, txns types.Transactions, logger log.Logger) error {
+	if gasUsed != header.GasUsed {
+		logger.Warn("gas used mismatch", "block", header.Number.Uint64(), "header", header.GasUsed, "execution", gasUsed,
+			"diff", int64(gasUsed)-int64(header.GasUsed), "txCount", len(txns), "receiptCount", len(receipts))
+		return fmt.Errorf("gas used by execution: %d, in header: %d, headerNum=%d, %x",
+			gasUsed, header.GasUsed, header.Number.Uint64(), header.Hash())
+	}
+
+	if header.BlobGasUsed != nil && blobGasUsed != *header.BlobGasUsed {
+		return fmt.Errorf("blobGasUsed by execution: %d, in header: %d, headerNum=%d, %x",
+			blobGasUsed, *header.BlobGasUsed, header.Number.Uint64(), header.Hash())
+	}
+
+	var bloom types.Bloom
+	bloomFromReceipts := checkReceipts && checkBloom && !alwaysSkipReceiptCheck
+	if checkReceipts && !alwaysSkipReceiptCheck {
+		for _, r := range receipts {
+			r.Bloom = types.CreateBloom(types.Receipts{r})
+			if bloomFromReceipts {
+				bloom.Or(&r.Bloom)
+			}
+		}
+		receiptHash := types.DeriveSha(receipts)
+		if receiptHash != header.ReceiptHash {
+			return fmt.Errorf("receiptHash mismatch: %x != %x, headerNum=%d, %x",
+				receiptHash, header.ReceiptHash, header.Number.Uint64(), header.Hash())
+		}
+	}
+
+	if checkBloom && !alwaysSkipReceiptCheck {
+		if !bloomFromReceipts {
+			bloom = types.CreateBloom(receipts)
+		}
+		if bloom != header.Bloom {
+			return fmt.Errorf("invalid bloom (remote: %x  local: %x)", header.Bloom, bloom)
+		}
+	}
+
+	return nil
 }
 
 // PoW is a rules engine based on proof-of-work.

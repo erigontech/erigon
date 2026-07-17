@@ -23,18 +23,12 @@ import (
 	"bytes"
 	"fmt"
 	"io"
-	"sync"
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/execution/commitment/trie"
 	"github.com/erigontech/erigon/execution/rlp"
 )
-
-// encodeBufferPool holds temporary encoder buffers for DeriveSha and TX encoding.
-var encodeBufferPool = sync.Pool{
-	New: func() any { return new(bytes.Buffer) },
-}
 
 type DerivableList interface {
 	Len() int
@@ -167,7 +161,7 @@ func intsize(i uint) (size int) {
 }
 
 func RawRlpHash(rawRlpData rlp.RawValue) common.Hash {
-	return crypto.HashData(rawRlpData)
+	return crypto.Keccak256Hash(rawRlpData)
 }
 
 func RlpHash(x any) common.Hash {
@@ -194,11 +188,33 @@ func init() {
 // given interface. It's used for typed transactions.
 func prefixedRlpHash(prefix byte, x any) common.Hash {
 	sha := crypto.NewKeccakState()
+	defer crypto.ReturnToPool(sha)
 	sha.Write(prefixSlices[prefix]) //nolint:errcheck
 	if err := rlp.Encode(sha, x); err != nil {
 		panic(err)
 	}
-	h := crypto.FinalizeHash(sha)
-	crypto.ReturnToPool(sha)
-	return h
+	return crypto.FinalizeHash(sha)
+}
+
+// rlpPayloadHash hashes keccak256 of whatever encode writes, using a pooled
+// hasher and scratch buffer so callers avoid the reflection-based RlpHash.
+func rlpPayloadHash(encode func(w io.Writer, buf []byte) error) common.Hash {
+	sha := crypto.NewKeccakState()
+	defer crypto.ReturnToPool(sha)
+	buf := rlp.NewEncodingBuf()
+	defer buf.Release()
+	if err := encode(sha, buf[:]); err != nil {
+		panic(err)
+	}
+	return crypto.FinalizeHash(sha)
+}
+
+// prefixedPayloadHash hashes keccak256(prefix || payload) for typed transactions.
+func prefixedPayloadHash(prefix byte, encode func(w io.Writer, buf []byte) error) common.Hash {
+	return rlpPayloadHash(func(w io.Writer, buf []byte) error {
+		if _, err := w.Write(prefixSlices[prefix]); err != nil {
+			return err
+		}
+		return encode(w, buf)
+	})
 }

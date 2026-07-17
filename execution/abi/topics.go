@@ -72,9 +72,9 @@ func MakeTopics(query ...[]any) ([][]common.Hash, error) {
 				blob := new(big.Int).SetUint64(rule).Bytes()
 				copy(topic[length.Hash-len(blob):], blob)
 			case string:
-				topic = crypto.HashData([]byte(rule))
+				topic = crypto.Keccak256Hash([]byte(rule))
 			case []byte:
-				topic = crypto.HashData(rule)
+				topic = crypto.Keccak256Hash(rule)
 
 			default:
 				// todo(rjl493456442) according solidity documentation, indexed event
@@ -110,7 +110,7 @@ func genIntType(rule int64, size uint) []byte {
 		// extended to length.Hash bytes.
 		topic = [length.Hash]byte{255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255}
 	}
-	for i := uint(0); i < size; i++ {
+	for i := range size {
 		topic[length.Hash-i-1] = byte(rule >> (i * 8))
 	}
 	return topic[:]
@@ -182,14 +182,14 @@ func parseTopicWithSetter(fields Arguments, topics []common.Hash, setter func(Ar
 			reconstr = topics[i]
 		case FunctionTy:
 			if garbage := binary.BigEndian.Uint64(topics[i][0:8]); garbage != 0 {
-				return fmt.Errorf("bind: got improperly encoded function type, got %v", topics[i].Bytes())
+				return fmt.Errorf("bind: got improperly encoded function type, got %v", topics[i][:])
 			}
 			var tmp [24]byte
 			copy(tmp[:], topics[i][8:32])
 			reconstr = tmp
 		default:
 			var err error
-			reconstr, err = toGoType(0, arg.Type, topics[i].Bytes())
+			reconstr, err = toGoType(0, arg.Type, topics[i][:])
 			if err != nil {
 				return err
 			}

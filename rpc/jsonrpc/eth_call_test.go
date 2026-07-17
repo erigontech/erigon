@@ -151,6 +151,37 @@ func TestEstimateGasBlockOverridesBlobBaseFeeSkipsZeroBlobFeeCap(t *testing.T) {
 	require.NoError(t, err)
 }
 
+// TestEstimateGasEIP2780SubTxGasTransfers verifies that eth_estimateGas returns
+// the true EIP-2780 cost for transfers that are cheaper than the legacy 21000,
+// rather than clamping up to it: a self-transfer costs only TX_BASE (12000), and
+// a zero-value no-data call to a distinct existing account costs TX_BASE +
+// COLD_ACCOUNT_ACCESS (15000).
+func TestEstimateGasEIP2780SubTxGasTransfers(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow test")
+	}
+
+	m, bankAddr, _, receiverAddr := chainWithDeployedContractAndConfig(t, chain.AllProtocolChanges)
+	api := newTestEthAPIWithFilters(t, m)
+
+	// Self-transfer: TX_BASE only (12000), not clamped up to the legacy 21000.
+	selfGas, err := api.EstimateGas(context.Background(), &ethapi.CallArgs{
+		From: &bankAddr,
+		To:   &bankAddr,
+	}, nil, nil, nil)
+	require.NoError(t, err)
+	require.Equal(t, hexutil.Uint64(12_000), selfGas)
+
+	// Zero-value no-data call to a distinct existing account: TX_BASE +
+	// COLD_ACCOUNT_ACCESS (15000).
+	distinctGas, err := api.EstimateGas(context.Background(), &ethapi.CallArgs{
+		From: &bankAddr,
+		To:   &receiverAddr,
+	}, nil, nil, nil)
+	require.NoError(t, err)
+	require.Equal(t, hexutil.Uint64(15_000), distinctGas)
+}
+
 func TestEthCallBlockOverridesBaseFeeAffectsGasPrice(t *testing.T) {
 	if testing.Short() {
 		t.Skip("slow test")
@@ -265,7 +296,7 @@ func TestGetProof(t *testing.T) {
 	key := func(b byte) hexutil.Bytes {
 		result := common.Hash{}
 		result[31] = b
-		return result.Bytes()
+		return result[:]
 	}
 	_ = bankAddr
 
@@ -357,7 +388,7 @@ func TestGetProof(t *testing.T) {
 				context.Background(),
 				tt.addr,
 				tt.storageKeys,
-				rpc.BlockNumberOrHashWithNumber(rpc.BlockNumber(tt.blockNum)),
+				bnhPtr(rpc.BlockNumberOrHashWithNumber(rpc.BlockNumber(tt.blockNum))),
 			)
 			if tt.expectedErr != "" {
 				require.EqualError(t, err, tt.expectedErr)
@@ -418,7 +449,7 @@ func TestGetBlockByTimestampLatestTime(t *testing.T) {
 		}
 	}
 
-	block, err := api.GetBlockByTimestamp(ctx, rpc.Timestamp(latestBlock.Header().Time), false)
+	block, err := api.GetBlockByTimestamp(ctx, rpc.Timestamp(latestBlock.Time()), false)
 	require.NoError(t, err)
 
 	require.Equal(t, response["timestamp"], block["timestamp"])
@@ -446,7 +477,7 @@ func TestGetBlockByTimestampOldestTime(t *testing.T) {
 		}
 	}
 
-	block, err := api.GetBlockByTimestamp(ctx, rpc.Timestamp(oldestBlock.Header().Time), false)
+	block, err := api.GetBlockByTimestamp(ctx, rpc.Timestamp(oldestBlock.Time()), false)
 	require.NoError(t, err)
 
 	require.Equal(t, response["timestamp"], block["timestamp"])
@@ -474,7 +505,7 @@ func TestGetBlockByTimeHigherThanLatestBlock(t *testing.T) {
 		}
 	}
 
-	block, err := api.GetBlockByTimestamp(ctx, rpc.Timestamp(latestBlock.Header().Time+999999999999), false)
+	block, err := api.GetBlockByTimestamp(ctx, rpc.Timestamp(latestBlock.Time()+999999999999), false)
 	require.NoError(t, err)
 
 	require.Equal(t, response["timestamp"], block["timestamp"])
@@ -508,7 +539,7 @@ func TestGetBlockByTimeMiddle(t *testing.T) {
 		}
 	}
 
-	block, err := api.GetBlockByTimestamp(ctx, rpc.Timestamp(middleBlock.Header().Time), false)
+	block, err := api.GetBlockByTimestamp(ctx, rpc.Timestamp(middleBlock.Time()), false)
 	require.NoError(t, err)
 	require.Equal(t, response["timestamp"], block["timestamp"])
 	require.Equal(t, response["hash"], block["hash"])
@@ -536,7 +567,7 @@ func TestGetBlockByTimestamp(t *testing.T) {
 		}
 	}
 
-	block, err := api.GetBlockByTimestamp(ctx, rpc.Timestamp(pickedBlock.Header().Time), false)
+	block, err := api.GetBlockByTimestamp(ctx, rpc.Timestamp(pickedBlock.Time()), false)
 	require.NoError(t, err)
 
 	require.Equal(t, response["timestamp"], block["timestamp"])
@@ -623,7 +654,7 @@ func generatePseudoRandomECDSAKeyPairs(rand io.Reader, n int) ([]*ecdsa.PrivateK
 	privateKeys := make([]*ecdsa.PrivateKey, n)
 	publicKeys := make([]*ecdsa.PublicKey, n)
 	var err error
-	for i := 0; i < n; i++ {
+	for i := range n {
 		privateKeys[i], err = generatePseudoRandomECDSAKey(rand)
 		if err != nil {
 			return nil, nil, err
@@ -638,6 +669,34 @@ func chainWithDeployedContract(t *testing.T) (*execmoduletester.ExecModuleTester
 	return chainWithDeployedContractAndConfig(t, chain.TestChainBerlinConfig)
 }
 
+// fundedBankGenesis returns a fresh ExecModuleTester whose genesis funds a
+// bank account keyed by a fixed, well-known private key, under cfg.
+func fundedBankGenesis(t *testing.T, cfg *chain.Config) (m *execmoduletester.ExecModuleTester, bankKey *ecdsa.PrivateKey, bankAddress common.Address) {
+	t.Helper()
+
+	bankKey, err := crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f291")
+	require.NoError(t, err)
+	bankAddress = crypto.PubkeyToAddress(bankKey.PublicKey)
+
+	bankFunds, ok := new(big.Int).SetString("100000000000000000000", 10)
+	require.True(t, ok)
+
+	chainConfig := new(chain.Config)
+	require.NoError(t, copier.CopyWithOption(chainConfig, cfg, copier.Option{DeepCopy: true}))
+	gspec := &types.Genesis{
+		Config: chainConfig,
+		Alloc:  types.GenesisAlloc{bankAddress: {Balance: bankFunds}},
+	}
+	if cfg.AmsterdamTime != nil {
+		// EIP-2780 account-creating transfers cost 204600 (incl. 183600 NEW_ACCOUNT
+		// state gas); MPT-filler blocks need the larger budget.
+		gspec.GasLimit = 60_000_000
+	}
+
+	m = execmoduletester.New(t, execmoduletester.WithGenesisSpec(gspec), execmoduletester.WithKey(bankKey))
+	return m, bankKey, bankAddress
+}
+
 func chainWithDeployedContractAndConfig(t *testing.T, cfg *chain.Config) (*execmoduletester.ExecModuleTester, common.Address, common.Address, common.Address) {
 	t.Helper()
 
@@ -648,29 +707,24 @@ func chainWithDeployedContractAndConfig(t *testing.T, cfg *chain.Config) (*execm
 		signer          = types.LatestSignerForChainID(nil)
 		txFeeCap        = uint256.NewInt(1_000_000_000_000)
 		contract        = hexutil.MustDecode(contractHexString)
-		chainConfig     = new(chain.Config)
 	)
-	bankKey, err := crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f291")
-	require.NoError(t, err)
+	m, bankKey, bankAddress := fundedBankGenesis(t, cfg)
+
 	receiverKey, err := crypto.HexToECDSA("a71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f292")
 	require.NoError(t, err)
-
-	bankAddress := crypto.PubkeyToAddress(bankKey.PublicKey)
 	receiverAddress := crypto.PubkeyToAddress(receiverKey.PublicKey)
 
-	bankFunds, ok := new(big.Int).SetString("100000000000000000000", 10)
-	require.True(t, ok)
-	require.NoError(t, copier.CopyWithOption(chainConfig, cfg, copier.Option{DeepCopy: true}))
-	gspec := &types.Genesis{
-		Config: chainConfig,
-		Alloc:  types.GenesisAlloc{bankAddress: {Balance: bankFunds}},
-		//Alloc:  types.GenesisAlloc{bankAddress: {Balance: bankFunds, Storage: map[common.Hash]common.Hash{crypto.Keccak256Hash([]byte{0x1}): crypto.Keccak256Hash([]byte{0xf})}}}, // TODO (antonis19)
+	transferGasLimit := uint64(21000)
+	if cfg.AmsterdamTime != nil {
+		// A value transfer that creates the recipient costs 21000 (value-transfer
+		// intrinsic) + 183600 (EIP-2780 NEW_ACCOUNT state gas) = 204600;
+		// fundedBankGenesis budgets the matching block gas under Amsterdam.
+		transferGasLimit = 204_600
 	}
 	// accounts to fill up MPT
 	_, fillerPublicKeys, err := generatePseudoRandomECDSAKeyPairs(rng, nFillerAccounts)
 	require.NoError(t, err)
 
-	m := execmoduletester.New(t, execmoduletester.WithGenesisSpec(gspec), execmoduletester.WithKey(bankKey))
 	db := m.DB
 
 	var contractAddr common.Address
@@ -713,7 +767,7 @@ func chainWithDeployedContractAndConfig(t *testing.T, cfg *chain.Config) (*execm
 					CommonTx: types.CommonTx{
 						Nonce:    nonce,
 						To:       &fillerAddress,
-						GasLimit: 21000,
+						GasLimit: transferGasLimit,
 						Value:    *uint256.MustFromBig(transferAmount),
 					},
 					GasPrice: *txFeeCap,
@@ -745,7 +799,7 @@ func chainWithDeployedContractAndConfig(t *testing.T, cfg *chain.Config) (*execm
 					CommonTx: types.CommonTx{
 						Nonce:    nonce,
 						To:       &fillerAddress,
-						GasLimit: 21000,
+						GasLimit: transferGasLimit,
 						Value:    *uint256.MustFromBig(transferAmount),
 					},
 					GasPrice: *txFeeCap,
@@ -761,7 +815,7 @@ func chainWithDeployedContractAndConfig(t *testing.T, cfg *chain.Config) (*execm
 				CommonTx: types.CommonTx{
 					Nonce:    nonce,
 					To:       &receiverAddress,
-					GasLimit: 21000,
+					GasLimit: transferGasLimit,
 					Value:    *uint256.MustFromBig(transferAmount),
 				},
 				GasPrice: *txFeeCap,
@@ -797,6 +851,22 @@ func chainWithDeployedContractAndConfig(t *testing.T, cfg *chain.Config) (*execm
 	exist, err = st.Exist(accounts.InternAddress(contractAddr))
 	require.NoError(t, err)
 	assert.True(t, exist, "Contract should exist at block #2")
+
+	// Confirm the filler transfers actually created their accounts: an
+	// under-budgeted transfer silently OOGs (failed receipt, no panic) and leaves
+	// the MPT unpopulated, which would defeat the point of the fillers.
+	stateReader, err = rpchelper.CreateHistoryStateReader(ctx, tx, 6, 0, rawdbv3.TxNums)
+	require.NoError(t, err)
+	st = state.New(stateReader)
+	createdFillers := 0
+	for _, pk := range fillerPublicKeys {
+		exist, err := st.Exist(accounts.InternAddress(crypto.PubkeyToAddress(*pk)))
+		require.NoError(t, err)
+		if exist {
+			createdFillers++
+		}
+	}
+	require.Equal(t, nFillerAccounts, createdFillers, "all filler transfers should have created their accounts")
 
 	return m, bankAddress, contractAddr, receiverAddress
 }

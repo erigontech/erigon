@@ -273,7 +273,7 @@ func opBlobHash(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error)
 	idx := scope.Stack.peek()
 	if idx.LtUint64(uint64(len(evm.BlobHashes))) {
 		hash := evm.BlobHashes[idx.Uint64()]
-		idx.SetBytes(hash.Bytes())
+		idx.SetBytes(hash[:])
 	} else {
 		idx.Clear()
 	}
@@ -387,7 +387,13 @@ func enable7843(jt *JumpTable) {
 // enable8037 applies EIP-8037 (State Creation Gas Cost Increase)
 func enable8037(jt *JumpTable) {
 	jt[CREATE].constantGas = params.CreateGasEIP8037
-	jt[CREATE].dynamicGas = gasCreateEip8037
 	jt[CREATE2].constantGas = params.Create2GasEIP8037
-	jt[CREATE2].dynamicGas = gasCreate2Eip8037
+}
+
+// enable8038 applies EIP-8038 (State-access gas cost update)
+func enable8038(jt *JumpTable) {
+	jt[EXTCODESIZE].constantGas = params.ExtCodeWarmAccessGasEIP8038
+	jt[EXTCODECOPY].constantGas = params.ExtCodeWarmAccessGasEIP8038
+	jt[CREATE].constantGas = params.CreateAccessEIP8038
+	jt[CREATE2].constantGas = params.CreateAccessEIP8038
 }

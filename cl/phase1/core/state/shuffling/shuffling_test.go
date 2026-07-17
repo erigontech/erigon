@@ -26,14 +26,13 @@ import (
 	"github.com/erigontech/erigon/cl/phase1/core/state"
 	"github.com/erigontech/erigon/cl/phase1/core/state/raw"
 	"github.com/erigontech/erigon/cl/phase1/core/state/shuffling"
-	"github.com/erigontech/erigon/cl/utils"
 	"github.com/erigontech/erigon/cl/utils/eth2shuffle"
+	"github.com/erigontech/erigon/common/crypto"
 )
 
 func BenchmarkLambdaShuffledIndex(b *testing.B) {
-	keccakOptimized := utils.OptimizedSha256NotThreadSafe()
 	eth2ShuffleHash := func(data []byte) []byte {
-		hashed := keccakOptimized(data)
+		hashed := crypto.Sha256(data)
 		return hashed[:]
 	}
 	seed := [32]byte{2, 35, 6}
@@ -46,13 +45,11 @@ func BenchmarkLambdaShuffledIndex(b *testing.B) {
 // Faster by ~40%, the effects of it will be felt mostly on computation of the proposer index.
 func BenchmarkErigonShuffledIndex(b *testing.B) {
 	s := state.New(&clparams.MainnetBeaconConfig)
-	keccakOptimized := utils.OptimizedSha256NotThreadSafe()
-
 	seed := [32]byte{2, 35, 6}
 	preInputs := shuffling.ComputeShuffledIndexPreInputs(s.BeaconConfig(), seed)
 
 	for b.Loop() {
-		shuffling.ComputeShuffledIndex(s.BeaconConfig(), 10, 1000, seed, preInputs, keccakOptimized)
+		shuffling.ComputeShuffledIndex(s.BeaconConfig(), 10, 1000, seed, preInputs, crypto.Sha256)
 	}
 }
 
@@ -61,4 +58,34 @@ func TestShuffling(t *testing.T) {
 	idx, err := shuffling.ComputeProposerIndex(s, []uint64{1, 2, 3, 4, 5, 6, 7, 8}, [32]byte{1})
 	require.NoError(t, err)
 	require.Equal(t, uint64(2), idx)
+}
+
+func TestComputeProposerIndexFuluAllowsSlashedValidators(t *testing.T) {
+	s := raw.GetTestState()
+	s.SetVersion(clparams.FuluVersion)
+	require.NoError(t, s.SetValidatorSlashed(1, true))
+
+	idx, err := shuffling.ComputeProposerIndex(s, []uint64{1}, [32]byte{1})
+	require.NoError(t, err)
+	require.Equal(t, uint64(1), idx)
+}
+
+func TestComputeUnslashedBalanceWeightedProposerIndexFiltersSlashedValidators(t *testing.T) {
+	s := raw.GetTestState()
+	s.SetVersion(clparams.GloasVersion)
+	require.NoError(t, s.SetValidatorSlashed(1, true))
+
+	idx, err := shuffling.ComputeUnslashedBalanceWeightedProposerIndex(s, []uint64{1, 2}, [32]byte{1})
+	require.NoError(t, err)
+	require.Equal(t, uint64(2), idx)
+}
+
+func TestComputeUnslashedBalanceWeightedSelectionFiltersSlashedValidators(t *testing.T) {
+	s := raw.GetTestState()
+	s.SetVersion(clparams.GloasVersion)
+	require.NoError(t, s.SetValidatorSlashed(1, true))
+
+	indices, err := shuffling.ComputeUnslashedBalanceWeightedSelection(s, []uint64{1, 2}, [32]byte{1}, 4, true)
+	require.NoError(t, err)
+	require.Equal(t, []uint64{2, 2, 2, 2}, indices)
 }

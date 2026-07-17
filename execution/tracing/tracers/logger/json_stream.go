@@ -202,15 +202,12 @@ func (l *JsonStreamLogger) OnOpcode(pc uint64, typ byte, gas, cost uint64, scope
 		}
 		l.stream.WriteArrayEnd()
 	}
-	if l.cfg.EnableMemory {
+	if l.cfg.EnableMemory && len(memory) > 0 {
 		l.stream.WriteMore()
 		l.stream.WriteObjectField("memory")
 		l.stream.WriteArrayStart()
 		for i := 0; i < len(memory); i += 32 {
-			end := i + 32
-			if end > len(memory) {
-				end = len(memory)
-			}
+			end := min(i+32, len(memory))
 			if i > 0 {
 				l.stream.WriteMore()
 			}

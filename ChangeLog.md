@@ -1,12 +1,172 @@
-# Changelog
+# Erigon v3.6.0 — Upstream Underbelly — TBD
 
-## [3.5.0] – TBD
+### Breaking Changes
+
+#### `--prune.include-receipts`: historical receipts cache now off by default in all prune modes
+
+The historical ("fat") receipts cache is no longer enabled by default on non-archive nodes. Previously
+`--prune.include-receipts` (formerly `--persist.receipts`, still accepted as an alias) defaulted on for every prune mode
+except `archive`; it now defaults off everywhere. The consensus layer was the consumer that justified retaining these
+receipts on pruned nodes, and it no longer needs them ([#21617](https://github.com/erigontech/erigon/issues/21617)).
+
+**What changed:**
+
+| `--prune.mode` | Before | After |
+|---|---|---|
+| `archive` | off | off |
+| `full` | on | off |
+| `blocks` | on | off |
+| `minimal` | on | off |
+
+Receipts and logs stay available within a node's retention window regardless: without the cache they are re-executed on
+demand from state history, so `eth_getLogs` and `eth_getBlockReceipts` keep working, at higher latency. For `full` and
+`minimal` nodes the availability window is unchanged (receipts follow the state-history window either way). For `blocks`
+nodes the cache previously made receipts and logs queryable back to genesis; without it they follow the state-history
+window (last 262,144 blocks) — pass `--prune.include-receipts` if you rely on full-range `eth_getLogs`.
+
+**Migration:** existing datadirs are unaffected — the receipts-cache setting is recorded at datadir creation and the
+stored value wins, so a node already syncing with the cache keeps it. Such a node now logs a startup notice that
+`--prune.include-receipts` differs from the value stored in the datadir; pass `--prune.include-receipts` explicitly to
+silence it. Only newly-created `full`/`minimal`/`blocks` datadirs start without the cache; pass
+`--prune.include-receipts` on a fresh datadir to opt back in.
+
+(#22296) — by @yperbasis
+
+---
+
+#### CLI: receipts and commitment-history pruning flags moved under `--prune.*`
+
+The receipt cache and commitment history now share the `--prune.*` naming used by the rest of the pruning flags. All
+former names keep working as aliases, and stored datadir settings are unaffected.
+
+- `--persist.receipts` → `--prune.include-receipts` (alias: `--persist.receipts`, `--experiment.persist.receipts.v2`).
+- New `--prune.receipts.distance` (alias: `--persist.receipts.distance`) bounds how far back the receipt cache is kept:
+  a block count, `keep-all`, or empty/`0` (default) to follow the state-history window. Requires
+  `--prune.include-receipts`. Snapshots older than the window are skipped at download time.
+- `--prune.commitment-history.distance` now also accepts `keep-all` (in addition to a block count); empty or `0` still
+  keeps everything.
+
+(#22349) — by @AskAlexSharov
+
+---
+
+#### JSON-RPC: block-number strings must use the `0x` hex format
+
+Quoted decimal strings (e.g., `"3"`) are no longer accepted as block-number
+parameters; use the canonical hex form (e.g., `"0x3"`) instead. Bare JSON
+integers (`3`) and named tags (`"latest"`, `"earliest"`, `"pending"`,
+`"safe"`, `"finalized"`) are unchanged.
+
+**What changed:**
+
+| Input | Before | After |
+|---|---|---|
+| `"3"` (quoted decimal) | accepted | rejected with `-32602` |
+| `"0x3"` (hex string) | accepted | accepted |
+| `3` (bare integer) | accepted | accepted |
+
+**Migration:** replace any quoted decimal block number with its `0x`
+equivalent — e.g., `"3"` → `"0x3"`, `"1000000"` → `"0xf4240"`.
+
+---
+
+#### `eth_simulateV1`: base fee too low error code corrected to `-38012`
+
+Aligns Erigon with the `eth_simulateV1` error code specification ([NethermindEth/nethermind#11412](https://github.com/NethermindEth/nethermind/issues/11412)).
+
+**What changed:**
+
+| Aspect | Before | After |
+|---|---|---|
+| `ErrFeeCapTooLow` error code | `-32602` (generic "Invalid params") | `-38012` (spec-mandated "baseFeePerGas is too low") |
+
+**Migration:**
+
+- If your tooling matches on error code `-32602` to detect base-fee-too-low conditions in `eth_simulateV1` responses, update it to match `-38012` instead.
+
+---
+
+#### JSON-RPC: idle polling filters are evicted after 5 minutes
+
+Filters created with `eth_newFilter`, `eth_newBlockFilter`, and `eth_newPendingTransactionFilter` are now evicted when not polled for 5 minutes, matching geth's stale-filter deadline. Previously they lived — and kept buffering data — until `eth_uninstallFilter` or a restart.
+
+**What changed:**
+
+| Aspect | Before | After |
+|---|---|---|
+| Idle polling filter | kept until uninstalled or restart | evicted after 5 minutes without a poll |
+| `eth_getFilterChanges` / `eth_getFilterLogs` on an evicted id | — | `filter not found` |
+
+**Migration:** poll more often than the timeout, or recreate the filter when `filter not found` is returned (as with geth). Tune with `--rpc.subscription.filters.timeout`; set it to 0 to restore the previous keep-forever behavior. (#22261 by @onelapahead)
+
+### Added
+
+#### CLI & Operations
+
+- `--prune.distance.blocks` now accepts readable policy names — `keep-post-merge` and `keep-all` — instead of the raw `MaxUint64`-based magic numbers (`18446744073709551615` / `18446744073709551614`); `--prune.distance` likewise accepts `keep-all`. Numeric values still work (#22119) — by @yperbasis
+- `--rpc.subscription.filters.timeout` — deadline for evicting idle RPC polling filters (default 5m; 0 disables). New `subscriptions_active` gauge and `subscriptions_created_total` / `subscriptions_unsubscribed_total` / `subscriptions_reaped_total` counters track the filter lifecycle (#22261) — by @onelapahead
+
+---
+
+# Erigon v3.5.2 — Tidal Tails — 2026-07-13
+
+v3.5.2 is a bugfix release recommended for all users, and especially for anyone running 3.5.1 — it fixes a sync-halting trie-root regression introduced there (#22399). It is a drop-in upgrade from 3.5.1 — no re-sync required.
+
+**Bugfixes**
+
+- db/state: clear the StateCache on `SharedDomains` unwind below the reorg window (#22402) by @Sahil-4555 — after the v3.5.1 changeset-isolation backport, a block that failed execution within the reorg window did a disk-noop overlay unwind that left dirty, uncommitted writes in the state cache; on the next run execution read those stale values instead of the database, producing a deterministic trie-root mismatch that halted sync. Closes #22399.
+- rpc, node: fix the nil-pointer panic in the gzip batch flush race (#22383) by @lupin012 — a gzipped JSON-RPC batch with two or more streamable methods invoked the shared gzip-streaming flush hook concurrently from per-call goroutines; `gzipResponseWriter.Flush` is not concurrency-safe, so the calls raced on the underlying gzip writer and could dereference a nil flate compressor, crashing the node. Closes #22334.
+
+**Full Changelog**: https://github.com/erigontech/erigon/compare/v3.5.1...v3.5.2
+
+---
+
+# Erigon v3.5.1 — Tidal Tails — 2026-07-10
+
+v3.5.1 is a bugfix release recommended for all users. It is a drop-in upgrade from 3.5.0 — no re-sync required.
+
+**Bugfixes**
+
+- execution/stagedsync: fix parallel-execution commitment consistency at step boundaries (#22111, #22135, #22147, #22094) by @awskii, @sudeepdino008 — a block straddling a step boundary left that step's commitment inconsistent with the account/storage/code domains, so published snapshots could mis-serve state-read RPCs (`eth_getProof`, `debug_executionWitness`) and, on a later run, wedge the Execution stage in a zero-progress loop with nothing logged. Closes #21992, #22101.
+- execution/stagedsync: fix log index reset and missing WebSocket notifications in parallel execution (#22155) by @Sahil-4555 — restores `logs` / `newHeads` subscription notifications and correct log indexing when executing in parallel.
+- execution/stagedsync: fix pruning in `stage_custom_trace` (#22052) by @sudeepdino008 — regenerated domains were never pruned and accumulated unbounded in the DB. Closes #22013.
+- cl/persistence: fix caplin historical state reconstruction loop at the Bellatrix transition (#22370) by @Sahil-4555 — a Caplin node could stop advancing at the Merge (Bellatrix) slot; pre-Merge blocks carry an all-zero execution payload header, and reconstruction now detects the zero block hash and skips the EL transaction lookup. Closes #22337.
+- cl/phase1/forkchoice: replace latestMessagesStore interning with a flat per-validator slice (#22355) by @lystopad — the prune scan walked the whole message map on every update and stalled `GetHead` past the attestation deadline. Closes #22351.
+- cl/antiquary: commit reconstructed state in bounded batches (#22348) by @awskii — committing up to 30 minutes of replayed beacon state in a single MDBX transaction could overflow libmdbx and crash on large (100+ GB) archive databases.
+- cl: bound caplin archive blob-column backfill so it can't wedge on Fulu (#22318) by @awskii — prevents an archive node from getting stuck while backfilling blob (data-column) sidecars.
+- cl, db/snapshotsync: caplin snapshot correctness — don't freeze empty block/state roots (#22323) and remove overlapping state snapshots on retire (#22317) by @awskii.
+- cl: allow boundary attestations while head state lags (#22251) by @domiwei — fixes attestation validation at epoch boundaries when the wall-clock slot has advanced but the head state briefly lags behind.
+- rpc/jsonrpc: gate `debug_executionWitness` on `keys[]` completeness and keep preimages for in-block-deleted accounts (#22320) by @awskii — avoids returning an incomplete witness.
+- rpc: remove the state-history check from block-data-only endpoints (#22073) by @Sahil-4555 — endpoints that only need block data no longer error on nodes pruned below the requested block's state history.
+- cmd/utils: allow snapshot reset on upgraded datadirs by restricting the table config (#22291) by @Sahil-4555 — snapshot reset failed to resolve the chain name on upgraded datadirs. Closes #22275.
+
+**Improvements**
+
+- execution: disable gzip compression for the Engine API (#22369) by @taratorio — removes compression overhead on `engine_*` responses, lowering `engine_getPayload` / `getBlobs` latency.
+- p2p: re-resolve the STUN external IP at runtime (#22188) by @lystopad — with `--nat=stun`, a node whose public IP changes while running now re-resolves and re-advertises it instead of keeping the stale startup value.
+- db/version: relax the minor-version check in `Supports` (#22205) by @sudeepdino008 — a newer, backward-readable minor version within a supported major is now accepted, so the binary won't refuse newer minor-versioned files.
+
+**Full Changelog**: https://github.com/erigontech/erigon/compare/v3.5.0...v3.5.1
+
+---
+
+# Erigon v3.5.0 — Tidal Tails — 2026-06-26
+
+Erigon 3.5.0 is a major release headlined by **parallel block execution becoming the default** and **initial support for Ethereum's upcoming Glamsterdam hardfork**. It is a drop-in upgrade for 3.4.x users — no re-sync required; existing datadirs upgrade their prune configuration automatically (see Breaking Changes).
+
+### Key Features
+
+- **Parallel block execution, on by default.** Erigon now executes EVM transactions across multiple cores by default, using the Block-STM (software transactional memory) design pioneered by Aptos: transactions run optimistically in parallel and are re-validated against a multi-version state, re-executing only on conflict (#21591 by @mh0lt, closes #17630). Revert to serial with `EXEC3_PARALLEL=false` or `--exec.serial`.
+- **Glamsterdam devnet support.** Initial implementation of Ethereum's next hardfork: Block-Level Access Lists (EIP-7928), enshrined Proposer-Builder Separation / "Gloas" (EIP-7732) in Caplin, gas repricings (EIP-8037, EIP-7976, EIP-7981), larger contracts (EIP-7954), transfer logs (EIP-7708), and the `eth/71` Block Access List wire protocol (EIP-8159). **Devnet/testing only — not scheduled on mainnet or any public testnet.**
+- **`debug_executionWitness`.** Stateless execution-witness generation (EIP-7928/8025) with reth-compatible output, for zkEVM and stateless clients (#20205 by @antonis19, #21629 by @awskii).
+- **More aggressive history pruning by default.** `--prune.mode=full` now follows the EIP-8252 reorg-retention window (~36 days / 262,144 blocks) — see Breaking Changes.
+- **GraphQL API revival.** Broad resolver coverage restored — queries, logs, `call`, `sendRawTransaction`, `estimateGas`, `gasPrice`, storage, and EIP-4844 fields.
 
 ### Breaking Changes
 
 #### `--prune.mode=full`: EIP-8252 retention window replaces pre-merge history-expiry
 
-Full mode now retains state and block data for the last `262,144` blocks (~36.4 days), matching [EIP-8252](https://github.com/ethereum/EIPs/pull/11601)'s `REORG_RETENTION_WINDOW` — the inactivity-leak-bounded non-finality window across which an EL must be able to reconstruct state to handle any reorg without external sync. Previously full mode pruned only pre-merge block data ([EIP-4444](https://eips.ethereum.org/EIPS/eip-4444) history-expiry) and kept the last 100,000 blocks of state history.
+Full mode now retains state and block data for the last `262,144` blocks (~36.4 days), matching [EIP-8252](https://github.com/ethereum/EIPs/pull/11601)'s `REORG_RETENTION_WINDOW` ([#21342](https://github.com/erigontech/erigon/pull/21342)). Previously full mode pruned only pre-merge block data ([EIP-4444](https://eips.ethereum.org/EIPS/eip-4444) history-expiry) and kept the last 100,000 blocks of state history.
 
 **What changed:**
 
@@ -15,17 +175,21 @@ Full mode now retains state and block data for the last `262,144` blocks (~36.4 
 | State history retention | last 100,000 blocks | last 262,144 blocks |
 | Block data retention | pre-merge pruned, all post-merge kept (EIP-4444) | last 262,144 blocks |
 
-`--prune.mode=blocks` keeps the same shape (all block data retained) but its `History` retention also bumps from 100,000 to 262,144 blocks. `--prune.mode=minimal` is unchanged — both `Blocks` and `History` retain the 100,000-block window, deliberately sub-EIP-8252 for disk-constrained operators. See [#21342](https://github.com/erigontech/erigon/pull/21342) for details.
+**Migration:** existing datadirs upgrade automatically and silently. To keep the old "retain all post-merge block data" behavior, set `--prune.distance.blocks=18446744073709551615`.
 
-**Migration:** existing datadirs upgrade automatically. The prune-config guard now accepts finite distance changes on `History`/`Blocks` in either direction, plus either-direction transitions between a finite Distance and the `KeepPostMergeBlocksPruneMode` chain-history-expiry sentinel on `Blocks` (so the upgrade is silent, and operators can revert with `--prune.distance.blocks=18446744073709551615` even after the auto-upgrade has rewritten the persisted value). Operators who want to keep the old "retain all post-merge block data" behavior can switch to `--prune.mode=blocks` or pass the override flag.
+Note: physical deletion of frozen snapshot files is not implemented yet (see [#21306](https://github.com/erigontech/erigon/issues/21306)), so existing on-disk historical blocks persist for now, though the new cutoff is already recorded at the config level.
 
-Note: physical deletion of frozen `.seg` files is gated by [#21306](https://github.com/erigontech/erigon/issues/21306); existing on-disk segments persist until that lands. The config-level transition is still recorded so the new cutoff takes effect once the deletion path exists.
+_In practice, this means only freshly synced `full` nodes will have a reduced disk footprint._
+
+#### `--prune.mode=blocks`: state history retention bumped to 262,144 blocks
+
+`--prune.mode=blocks` keeps the same shape as before (all block data retained), but its state history retention also bumps from 100,000 to 262,144 blocks. `--prune.mode=minimal` is unchanged — both block and state history retain the 100,000-block window, deliberately sub-EIP-8252 for disk-constrained operators. See [#21342](https://github.com/erigontech/erigon/pull/21342) for details.
 
 ---
 
 #### Single p2p listener: `--p2p.allowed-ports` removed, all eth versions multiplex on `--port`
 
-Erigon now opens a single TCP listener on `--port` (default 30303) carrying every configured eth protocol version, instead of one listener per protocol on 30303/30304/30305. This fixes a discovery-DHT race that left inbound peers stuck at a fraction of `--maxpeers` for multi-protocol deployments — per-protocol Servers each signed an ENR under the same Node ID, and only the highest-`seq` one survived in the DHT, so peers dialed the wrong listener (#21335).
+Erigon now opens a single TCP listener on `--port` (default 30303) carrying every configured eth protocol version, instead of one listener per protocol on 30303/30304/30305. This fixes a discovery-DHT race that left inbound peers stuck at a fraction of `--maxpeers` for multi-protocol deployments: per-protocol ENRs collided under one Node ID, so only one survived in the DHT and peers dialed the wrong listener (#21335).
 
 **What changed:**
 
@@ -59,31 +223,146 @@ Aligns Erigon with the execution-apis specification ([ethereum/execution-apis#76
 | Memory in trace | `disableMemory` (default: included) | `enableMemory` (default: excluded) |
 | Return data in trace | `disableReturnData` (default: included) | `enableReturnData` (default: excluded) |
 
-The change is **twofold**:
-1. The JSON key is renamed (`disable*` → `enable*`).
-2. The default value is inverted: previously memory and return data were **included** by default (opt-out model); now they are **excluded** by default (opt-in model), matching the spec and Geth.
+Both the key and its default changed: `disable*` → `enable*`, and memory and return data are now **excluded** unless explicitly enabled — matching the spec and Geth.
 
-**Migration:**
+**Migration:** memory and return data are now excluded by default. To include them, add the new opt-in key (omit it to keep the default):
 
-```jsonc
-// Before — disable memory explicitly
-{ "disableMemory": true }
-
-// After — enable memory explicitly
-{ "enableMemory": true }
-
-// Before — memory included by default (no flag needed)
-{}
-
-// After — must opt in
-{ "enableMemory": true }
-```
+- Memory: `{ "enableMemory": true }`
+- Return data: `{ "enableReturnData": true }`
 
 Affected RPC methods: `debug_traceTransaction`, `debug_traceBlockByHash`, `debug_traceBlockByNumber`, `debug_traceCall`.
 
 ---
 
-## [3.4.2] "Splashing Saga" – 2026-05-22
+#### Clique PoA consensus engine removed
+
+The legacy Clique proof-of-authority engine has been removed (#20532 by @yperbasis). `--chain=dev` now runs on an embedded proof-of-stake consensus instead of Clique (#20451 by @mh0lt), matching how all live networks operate post-Merge. Networks or tooling that still depended on Clique are no longer supported.
+
+---
+
+#### Silkworm integration removed
+
+The optional Silkworm C++ execution-backend integration and its `--silkworm.*` flags have been removed (#19662 by @canepat). Erigon uses its native Go execution engine exclusively.
+
+---
+
+### Glamsterdam (Devnet Support)
+
+3.5.0 adds an initial implementation of Ethereum's next hardfork — **Glamsterdam** (consensus-layer "Gloas" + execution-layer "Amsterdam") — for devnet testing and validation. **It is not scheduled on mainnet or any public testnet**, and these code paths are inert on production networks until an activation time is configured.
+
+- **EIP-7928 — Block-Level Access Lists (BAL):** records every account and storage slot a block touches, enabling deterministic parallel validation. Full builder, validator, and strict-validation support (#19627, #19656, #20602, #20776), plus the `eth_getBlockAccessList` RPC method (#19929) — by @mh0lt, @yperbasis, @Sahil-4555
+- **EIP-7732 — Enshrined Proposer-Builder Separation (ePBS / "Gloas"):** implemented in Caplin — execution-payload envelope, PTC, and builder payments (#18956) — with follow-up audit and fork-choice fixes (#21248, #21228) — by @domiwei
+- **Gas repricings:** EIP-8037 State Creation Gas Cost Increase (#19596), EIP-7976 calldata floor cost (#20613), EIP-7981 access-list cost (#20671) — by @taratorio
+- **EIP-7954 — Increase Maximum Contract Size** (#19624) — by @yperbasis
+- **EIP-7843 — slot-number opcode (`SLOTNUM`)**, wired into Caplin block production and `engine_forkchoiceUpdatedV4` (#20175) — by @yperbasis
+- **Networking:** `eth/71` Block Access List exchange (EIP-8159, #20793, #20794, #20795) — by @mh0lt
+
+### Added
+
+#### RPC
+
+- `debug_executionWitness`: generate stateless execution witnesses (EIP-7928/8025), with `legacy` and `canonical` output modes — the `legacy` format is reth-compatible — for zkEVM and stateless clients (#20205, #21371, #21518, #21629) — by @antonis19, @lupin012, @awskii
+- `eth_capabilities`: report the set of supported RPC methods (#20951) — by @lupin012
+- `debug_setHead`: rewind the chain head (#19577) — by @canepat
+- **GraphQL** substantially revived — transaction, logs, `call`, `sendRawTransaction`, `estimateGas`, `gasPrice`, and storage resolvers, plus EIP-4844 fields (#20389, #20916, #21219, #21379, #21060) — by @lupin012
+- `testing_` namespace exposed via `--http.api` for engine/spec test harnesses (#20482) — by @lupin012
+- `eth_simulateV1`: per-call gas and result limits (#20232) — by @Sahil-4555
+
+#### CLI & Operations
+
+- `--exec.no-prune` (disable all DB pruning), `--exec.serial` (force single-threaded execution), and `--exec.*` executor-tuning flags (#20915, #20853, #20797) — by @mh0lt
+- `seg du` (snapshot disk-usage analysis, #20104) and `seg rm-blocks` (remove latest block snapshots, #20554) — by @awskii, @sudeepdino008
+
+### Changed
+
+#### RPC
+
+- WebSocket transport rewritten on `coder/websocket`, with overload protection, clean close frames, and bounded write timeouts (#20097, #20446, #20788, #20923) — by @lystopad, @lupin012, @Sahil-4555
+- Admission control: uniform `503` responses under load (#20303); optional response compression via libdeflate (#20665) — by @lupin012
+- Geth compatibility: `debug_traceTransaction` index format (#20210), `trace_rawTransaction` (#20448), `debug_accountRange` (#20057), null `v,r,s` for unsigned transactions (#21321) — by @lupin012
+- Performance: faster `eth_getLogs` (#20561), `trace_block` (#20182), `eth_gasPrice` (#19678), canonical-hash cache (#19173); `engine_getPayload` ~2.4× and `getBlobs` ~10× faster (#21615, #21606) — by @lupin012, @taratorio
+- `trace_*` returns an explicit error when an unsupported custom tracer is supplied (#21544) — by @lupin012
+
+#### Networking & P2P
+
+- New `eth/70` wire protocol: partial block receipt lists (EIP-7975, #19755) — by @yperbasis
+- All eth protocol versions now multiplex on a single TCP listener (see Breaking Changes, #21335) — by @lystopad
+- Peer hygiene / DoS hardening: cap and rate-limit inbound `NewBlockHashes` (#21557), enforce the 4096-hash limit on `NewPooledTransactionHashes` (#20577), drop peers failing blob KZG verification (#21421), and bound fan-out stream buffers (#20783) — by @yperbasis
+- Skip chain-specific bootnodes on genesis-hash mismatch (#19807); honour an explicitly empty `--bootnodes` (#20630) — by @yperbasis
+
+#### TxPool
+
+- Proactive dormancy-based eviction of stale queued transactions (#19862) — by @lystopad
+- Transaction parsing migrated onto the shared `execution/types` transaction types (#19757); malformed EIP-7702 authorization tuples are now tolerated rather than rejected wholesale (#20809) — by @yperbasis
+
+#### Caplin (Consensus Layer)
+
+- Unified Engine API client for standalone mode (#20035) — by @mh0lt
+- Fork-choice and ENR-stability fixes — recovery from a post-Gloas fork-choice stall and a persistent node key for stable ENR across restarts (#21228, #21276) — by @domiwei
+- Block production: give the EL builder a build window before stopping it, fixing near-empty proposed blocks (~0–2% gas) on otherwise-healthy validators (#21990) — by @lystopad
+
+#### Storage & Performance
+
+- Off-heap Elias-Fano index building (#20640) and parallel commitment computation (#20805) — by @AskAlexSharov, @mh0lt
+- Transient-storage zero-write fast path (#20568) and opcode-scoped intern cache to eliminate duplicate `unique.Make()` (#20552) — by @Sahil-4555, @AskAlexSharov
+
+### Removed
+
+- Clique PoA engine (#20532 by @yperbasis) and Silkworm integration (#19662 by @canepat) — see Breaking Changes.
+- Unused `hack` (#20412), `state` (#20420), and `diag` (#21351) helper binaries — by @awskii, @AskAlexSharov
+
+### Security
+
+- `--ethstats` credentials are redacted from the startup command log (#20890) — by @MysticRyuujin
+- DoS-resistance limits on inbound P2P message volume (#20577, #21557) and bounded RPC/stream buffers (#20446, #20783) — by @yperbasis, @lupin012
+
+**Full Changelog**: https://github.com/erigontech/erigon/compare/v3.4.4...v3.5.0
+
+---
+
+# Erigon v3.4.4 — Splashing Saga — 2026-06-18
+
+v3.4.4 is a bugfix release recommended for all users.
+
+**Bugfixes**
+
+- execution/stagedsync: prune in-RAM overlay when execution unwind is a no-op (#21824, #21847) by @JkLondon  — third fix for the post-reorg `gas used mismatch`.
+- caplin: serialize uint64 beacon API fields as JSON strings (#21805) by @BitWonka - Per the beacon-APIs spec, Uint64/Gwei fields must be serialized as JSON strings. Several Caplin response types were emitting them as JSON numbers, breaking spec-compliant clients. Fixes #20562.
+
+**Full Changelog**: https://github.com/erigontech/erigon/compare/v3.4.3...v3.4.4
+
+---
+
+# Erigon v3.4.3 — Splashing Saga — 2026-06-02
+
+v3.4.3 is a bugfix release recommended for all users.
+
+**Bugfixes**
+
+- db/state: prune `TemporalMemBatch` overlay entries past the unwind point (#21538) by @JkLondon — second
+  fix for the post-reorg `gas used mismatch` / state-leak some users still hit on v3.4.2. After a tip reorg
+  a stale read in the in-memory overlay could return a write made *inside* the unwound `txNum` range,
+  flipping an `SSTORE` from cold to warm gas pricing. Complements the #21157 diffset fix shipped in v3.4.2.
+- rpc: match Geth semantics in `debug_getModifiedAccountsByHash` / `debug_getModifiedAccountsByNumber`
+  (#21507) by @lupin012 — corrects the block-range convention (exclusive start), now also reports contracts
+  whose storage changed without an account change, and excludes touched-but-unchanged precompiles and
+  self-destructed accounts.
+- node/cli: register `--rpc.logs.maxresults` in `DefaultFlags` so it takes effect via the CLI (#21389) by
+  @lupin012 — the limit was documented in 3.4.0 but never wired into the flag set, so setting it on the
+  command line had no effect; it now applies.
+
+**Improvements**
+
+- execution/p2p, execution/engineapi: fail-fast `engine_newPayload` backward download when the gap exceeds
+  the reorg limit (#21502) by @yperbasis — when a payload's parent is more than `MaxReorgDepth` blocks from
+  the local head, the download short-circuits instead of fetching a header batch every slot, and logs the
+  expected gap at INFO instead of WARN. The gap is still closed by the following fork-choice update.
+
+**Full Changelog**: https://github.com/erigontech/erigon/compare/v3.4.2...v3.4.3
+
+---
+
+# Erigon v3.4.2 — Splashing Saga — 2026-05-22
 
 v3.4.2 is a bugfix release recommended for all users.
 
@@ -106,7 +385,7 @@ v3.4.2 is a bugfix release recommended for all users.
 
 ---
 
-## [3.4.1] "Splashing Saga" – 2026-05-11
+# Erigon v3.4.1 — Splashing Saga — 2026-05-11
 
 **Bugfixes**
 
@@ -116,7 +395,7 @@ v3.4.2 is a bugfix release recommended for all users.
 
 ---
 
-## [3.4.0] "Splashing Saga" – 2026-04-28
+# Erigon v3.4.0 — Splashing Saga — 2026-04-28
 
 Erigon 3.4.0 is a major update for node operators and validators, focused on stability, performance, and
 efficiency at ChainTip. It is a drop-in upgrade for 3.3.x users — no data migration or re-sync required.
@@ -240,7 +519,7 @@ efficiency at ChainTip. It is a drop-in upgrade for 3.3.x users — no data migr
 
 ---
 
-## [3.3.10] "Rocky Romp" – 2026-03-27
+# Erigon v3.3.10 — Rocky Romp — 2026-03-27
 
 This release schedules Fusaka on **Gnosis Chain mainnet** at **Tue 14 April 2026, 12:06:20 UTC** and
 thus is **mandatory for all Gnosis users**. It is also recommended for all users in general.
@@ -259,7 +538,7 @@ thus is **mandatory for all Gnosis users**. It is also recommended for all users
 
 ---
 
-## [3.3.9] "Rocky Romp" – 2026-03-09
+# Erigon v3.3.9 — Rocky Romp — 2026-03-09
 
 This release schedules Fusaka on Chiado on **Mon 16 March 2026, 09:33:00 UTC** and thus is mandatory
 for all Chiado users.
@@ -277,7 +556,7 @@ for all Chiado users.
 
 ---
 
-## [3.3.8] "Rocky Romp" – 2026-02-20
+# Erigon v3.3.8 — Rocky Romp — 2026-02-20
 
 **Changes**
 
@@ -304,7 +583,7 @@ for all Chiado users.
 
 ---
 
-## [3.3.7] "Rocky Romp" – 2026-01-30
+# Erigon v3.3.7 — Rocky Romp — 2026-01-30
 
 P2P stability. Prune performance.
 
@@ -322,7 +601,7 @@ P2P stability. Prune performance.
 
 ---
 
-## [3.3.4] "Rocky Romp" – 2026-01-23
+# Erigon v3.3.4 — Rocky Romp — 2026-01-23
 
 v3.3.4 is a bugfix release recommended for all users.
 
@@ -339,7 +618,7 @@ v3.3.4 is a bugfix release recommended for all users.
 
 ---
 
-## [3.3.3] "Rocky Romp" – 2026-01-14
+# Erigon v3.3.3 — Rocky Romp — 2026-01-14
 
 v3.3.3 is a bugfix release recommended for all users.
 
@@ -359,7 +638,7 @@ v3.3.3 is a bugfix release recommended for all users.
 
 ---
 
-## [3.3.2] "Rocky Romp" – 2025-12-13
+# Erigon v3.3.2 — Rocky Romp — 2025-12-13
 
 Gnosis hardfork support.
 
@@ -375,7 +654,7 @@ Gnosis hardfork support.
 
 ---
 
-## [3.3.1] "Rocky Romp" – 2025-12-07
+# Erigon v3.3.1 — Rocky Romp — 2025-12-07
 
 - We have new Docs and HelpCenter: https://docs.erigon.tech/
 - Support of historical `eth_getProof` (https://github.com/erigontech/erigon/issues/12984). It requires
@@ -401,7 +680,7 @@ Gnosis hardfork support.
 
 ---
 
-## [3.3.0] – 2025-11-27
+# Erigon v3.3.0 — Rocky Romp — 2025-11-27
 
 ### Added
 
@@ -458,7 +737,7 @@ Gnosis hardfork support.
 
 ---
 
-## [3.2.3] "Quirky Quests" – 2025-11-25
+# Erigon v3.2.3 — Quirky Quests — 2025-11-25
 
 **Changes**
 
@@ -468,7 +747,7 @@ Gnosis hardfork support.
 
 ---
 
-## [3.2.2] "Quirky Quests" – 2025-11-03
+# Erigon v3.2.2 — Quirky Quests — 2025-11-03
 
 v3.2.2 schedules Fusaka on Ethereum mainnet on December 3, 2025 at 09:49:11pm UTC. Thus it is a mandatory update for all Ethereum mainnet users.
 
@@ -481,7 +760,7 @@ v3.2.2 schedules Fusaka on Ethereum mainnet on December 3, 2025 at 09:49:11pm UT
 
 ---
 
-## [3.2.1] "Quirky Quests" – 2025-10-20
+# Erigon v3.2.1 — Quirky Quests — 2025-10-20
 
 v3.2.1 is a bugfix release recommended for all users, especially validators.
 
@@ -502,7 +781,7 @@ v3.2.1 is a bugfix release recommended for all users, especially validators.
 
 ---
 
-## [3.2.0] "Quirky Quests" – 2025-10-02
+# Erigon v3.2.0 — Quirky Quests — 2025-10-02
 
 Erigon 3.2.0 has a complete implementation of [Fusaka](https://eips.ethereum.org/EIPS/eip-7607) and schedules it on the
 test nets (#17197):
@@ -539,7 +818,3 @@ test nets (#17197):
 - RPC: impl admin_RemovePeer (#16292) by @lupin012
 
 **Full Changelog**: https://github.com/erigontech/erigon/compare/v3.1.0...v3.2.0
- 
------
-
-File following Keep a Changelog spec: https://keepachangelog.com/en/1.1.0/

@@ -3,90 +3,123 @@ package mcp
 import (
 	"context"
 	"fmt"
+	"reflect"
 
 	"github.com/mark3labs/mcp-go/mcp"
+	"github.com/mark3labs/mcp-go/server"
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/rpc"
 )
 
-// registerResources registers all MCP resources
-func (e *ErigonMCPServer) registerResources() {
+// resourceHandlerSet holds one handler per resource shared by the embedded and
+// standalone servers.
+type resourceHandlerSet struct {
+	nodeInfo            server.ResourceHandlerFunc
+	chainConfig         server.ResourceHandlerFunc
+	recentBlocks        server.ResourceHandlerFunc
+	networkStatus       server.ResourceHandlerFunc
+	gasInfo             server.ResourceHandlerFunc
+	addressSummary      server.ResourceTemplateHandlerFunc
+	blockSummary        server.ResourceTemplateHandlerFunc
+	transactionAnalysis server.ResourceTemplateHandlerFunc
+}
+
+func registerResources(srv *server.MCPServer, h resourceHandlerSet) {
+	hv := reflect.ValueOf(h)
+	for i := range hv.NumField() {
+		if hv.Field(i).IsNil() {
+			panic(fmt.Sprintf("mcp: missing resource handler %s", hv.Type().Field(i).Name))
+		}
+	}
+
 	// Static resources
-	e.mcpServer.AddResource(
+	srv.AddResource(
 		mcp.NewResource("erigon://node/info",
 			"node info",
 			mcp.WithResourceDescription("Get node information and capabilities"),
 			mcp.WithMIMEType("application/json"),
 		),
-		e.handleResourceNodeInfo,
+		h.nodeInfo,
 	)
 
-	e.mcpServer.AddResource(
+	srv.AddResource(
 		mcp.NewResource("erigon://chain/config",
 			"chain config",
 			mcp.WithResourceDescription("Get chain configuration"),
 			mcp.WithMIMEType("application/json"),
 		),
-		e.handleResourceChainConfig,
+		h.chainConfig,
 	)
 
-	// Dynamic resources
-	e.mcpServer.AddResource(
+	srv.AddResource(
 		mcp.NewResource("erigon://blocks/recent",
 			"recent blocks",
 			mcp.WithResourceDescription("Get recent blocks (default: last 10)"),
 			mcp.WithMIMEType("application/json"),
 		),
-		e.handleResourceRecentBlocks,
+		h.recentBlocks,
 	)
 
-	e.mcpServer.AddResource(
+	srv.AddResource(
 		mcp.NewResource("erigon://network/status",
 			"network status",
 			mcp.WithResourceDescription("Get network sync status and peer info"),
 			mcp.WithMIMEType("application/json"),
 		),
-		e.handleResourceNetworkStatus,
+		h.networkStatus,
 	)
 
-	e.mcpServer.AddResource(
+	srv.AddResource(
 		mcp.NewResource("erigon://gas/current",
 			"gas current",
 			mcp.WithResourceDescription("Get current gas price information"),
 			mcp.WithMIMEType("application/json"),
 		),
-		e.handleResourceGasInfo,
+		h.gasInfo,
 	)
 
 	// Resource templates (with parameters)
-	e.mcpServer.AddResourceTemplate(
+	srv.AddResourceTemplate(
 		mcp.NewResourceTemplate("erigon://address/{address}/summary",
 			"address summary",
 			mcp.WithTemplateDescription("Get address summary (balance, nonce, code)"),
 			mcp.WithTemplateMIMEType("application/json"),
 		),
-		e.handleResourceAddressSummary,
+		h.addressSummary,
 	)
 
-	e.mcpServer.AddResourceTemplate(
+	srv.AddResourceTemplate(
 		mcp.NewResourceTemplate("erigon://block/{number}/summary",
 			"block summary",
 			mcp.WithTemplateDescription("Get block summary"),
 			mcp.WithTemplateMIMEType("application/json"),
 		),
-		e.handleResourceBlockSummary,
+		h.blockSummary,
 	)
 
-	e.mcpServer.AddResourceTemplate(
+	srv.AddResourceTemplate(
 		mcp.NewResourceTemplate("erigon://transaction/{hash}/analysis",
 			"transaction analysis",
 			mcp.WithTemplateDescription("Get transaction analysis"),
 			mcp.WithTemplateMIMEType("application/json"),
 		),
-		e.handleResourceTransactionAnalysis,
+		h.transactionAnalysis,
 	)
+}
+
+func (e *ErigonMCPServer) resourceHandlers() resourceHandlerSet {
+	return resourceHandlerSet{
+		nodeInfo:            e.handleResourceNodeInfo,
+		chainConfig:         e.handleResourceChainConfig,
+		recentBlocks:        e.handleResourceRecentBlocks,
+		networkStatus:       e.handleResourceNetworkStatus,
+		gasInfo:             e.handleResourceGasInfo,
+		addressSummary:      e.handleResourceAddressSummary,
+		blockSummary:        e.handleResourceBlockSummary,
+		transactionAnalysis: e.handleResourceTransactionAnalysis,
+	}
 }
 
 // Resource handlers
@@ -132,7 +165,7 @@ func (e *ErigonMCPServer) handleResourceRecentBlocks(ctx context.Context, req mc
 	}
 
 	blocks := make([]any, 0, 10)
-	for i := 0; i < 10; i++ {
+	for i := range 10 {
 		blockNum := currentBlock - hexutil.Uint64(i)
 		block, err := e.ethAPI.GetBlockByNumber(ctx, rpc.BlockNumber(blockNum), false)
 		if err != nil || block == nil {
@@ -158,10 +191,15 @@ func (e *ErigonMCPServer) handleResourceNetworkStatus(ctx context.Context, req m
 
 	currentBlock, _ := e.ethAPI.BlockNumber(ctx)
 
+	syncing, err := e.ethAPI.Syncing(ctx)
+	if err != nil || syncing == nil {
+		syncing = false
+	}
+
 	status := map[string]any{
 		"node_info":     nodeInfo,
 		"current_block": currentBlock,
-		"syncing":       false, // Would check actual sync status
+		"syncing":       syncing,
 	}
 
 	return []mcp.ResourceContents{
@@ -200,13 +238,15 @@ func (e *ErigonMCPServer) handleResourceGasInfo(ctx context.Context, req mcp.Rea
 
 // Resource template handlers
 func (e *ErigonMCPServer) handleResourceAddressSummary(ctx context.Context, req mcp.ReadResourceRequest) ([]mcp.ResourceContents, error) {
-	// Extract address from URI
-	// This is a simplified example - you'd need proper URI parsing
-	address := req.Params.URI // Would extract {address} parameter
+	address := extractURIParam(req.Params.URI, "erigon://address/", "/summary")
+	if address == "" {
+		return nil, fmt.Errorf("missing address parameter in URI: %s", req.Params.URI)
+	}
 
-	balance, _ := e.ethAPI.GetBalance(ctx, common.HexToAddress(address), rpc.BlockNumberOrHashWithNumber(rpc.LatestBlockNumber))
-	nonce, _ := e.ethAPI.GetTransactionCount(ctx, common.HexToAddress(address), rpc.BlockNumberOrHashWithNumber(rpc.LatestBlockNumber))
-	code, _ := e.ethAPI.GetCode(ctx, common.HexToAddress(address), rpc.BlockNumberOrHashWithNumber(rpc.LatestBlockNumber))
+	latest := rpc.BlockNumberOrHashWithNumber(rpc.LatestBlockNumber)
+	balance, _ := e.ethAPI.GetBalance(ctx, common.HexToAddress(address), &latest)
+	nonce, _ := e.ethAPI.GetTransactionCount(ctx, common.HexToAddress(address), &latest)
+	code, _ := e.ethAPI.GetCode(ctx, common.HexToAddress(address), &latest)
 
 	summary := map[string]any{
 		"address":     address,
@@ -225,9 +265,10 @@ func (e *ErigonMCPServer) handleResourceAddressSummary(ctx context.Context, req 
 }
 
 func (e *ErigonMCPServer) handleResourceBlockSummary(ctx context.Context, req mcp.ReadResourceRequest) ([]mcp.ResourceContents, error) {
-	// Extract block number from URI
-	// Simplified - needs proper parsing
-	blockNumStr := req.Params.URI
+	blockNumStr := extractURIParam(req.Params.URI, "erigon://block/", "/summary")
+	if blockNumStr == "" {
+		return nil, fmt.Errorf("missing block number parameter in URI: %s", req.Params.URI)
+	}
 
 	blockNum, err := parseBlockNumber(blockNumStr)
 	if err != nil {
@@ -249,16 +290,28 @@ func (e *ErigonMCPServer) handleResourceBlockSummary(ctx context.Context, req mc
 }
 
 func (e *ErigonMCPServer) handleResourceTransactionAnalysis(ctx context.Context, req mcp.ReadResourceRequest) ([]mcp.ResourceContents, error) {
-	// Extract tx hash from URI
-	txHash := req.Params.URI
+	txHash := extractURIParam(req.Params.URI, "erigon://transaction/", "/analysis")
+	if txHash == "" {
+		return nil, fmt.Errorf("missing transaction hash parameter in URI: %s", req.Params.URI)
+	}
 
-	tx, _ := e.ethAPI.GetTransactionByHash(ctx, common.HexToHash(txHash))
-	receipt, _ := e.ethAPI.GetTransactionReceipt(ctx, common.HexToHash(txHash))
+	hash := common.HexToHash(txHash)
+	tx, _ := e.ethAPI.GetTransactionByHash(ctx, hash)
+	receipt, _ := e.ethAPI.GetTransactionReceipt(ctx, hash)
+
+	status := "unknown"
+	if receiptStatus, ok := receipt["status"].(hexutil.Uint64); ok {
+		if receiptStatus == 0 {
+			status = "reverted"
+		} else {
+			status = "success"
+		}
+	}
 
 	analysis := map[string]any{
 		"transaction": tx,
 		"receipt":     receipt,
-		"status":      "success", // Would check receipt status
+		"status":      status,
 	}
 
 	return []mcp.ResourceContents{

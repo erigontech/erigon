@@ -16,13 +16,17 @@ type DomainCfg struct {
 	ValuesTable string    // bucket to store domain values; key -> inverted_step + values (Dupsort)
 	LargeValues bool
 
-	// replaceKeysInValues allows to replace commitment branch values with shorter keys.
-	// for commitment domain only
-	ReplaceKeysInValues bool
+	// Write shortened key references in commitment branch values; commitment domain only.
+	ReferencesInCommitmentBranches bool
+
+	ExistenceFilter ExistenceFilterMode
 
 	BuildAccessorsWorkers int // parallel workers for building .kvi accessors (recsplit)
 
 	FileVersion DomainVersionTypes
+
+	// KVWriteVersion derives the version stamped on a new .kv file from live config; nil => DataKV.Current.
+	KVWriteVersion func(*DomainCfg) version.Version
 }
 
 func (d DomainCfg) Tables() []string {
@@ -109,19 +113,6 @@ func (ii InvIdxCfg) GetVersions() VersionTypes {
 	return VersionTypes{
 		II: &ii.FileVersion,
 	}
-}
-
-type ForkableCfg struct {
-	Name string
-
-	canonicalTbl           string // for marked structures
-	ValsTbl                string
-	updateCanonical        bool
-	pruneFrom              kv.Num
-	Accessors              Accessors
-	Compression            seg.FileCompression
-	ValuesOnCompressedPage int // when collating .v files: concat 16 values and snappy them
-	Enabled                bool
 }
 
 type DomainVersionTypes struct {

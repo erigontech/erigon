@@ -22,7 +22,6 @@ import (
 	"math"
 	"strings"
 	"sync"
-	"time"
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/dbg"
@@ -350,7 +349,7 @@ func WriteDiffSet(tx kv.RwTx, blockNumber uint64, blockHash common.Hash, diffSet
 	binary.BigEndian.PutUint64(key, blockNumber)
 	copy(key[8:], blockHash[:])
 
-	for i := 0; i < chunkCount; i++ {
+	for i := range chunkCount {
 		start := i * DiffChunkLen
 		end := min((i+1)*DiffChunkLen, len(keys))
 		binary.BigEndian.PutUint64(key[40:], uint64(i))
@@ -395,7 +394,7 @@ func ReadDiffSet(tx kv.Tx, blockNumber uint64, blockHash common.Hash) ([kv.Domai
 
 	key := make([]byte, 48)
 	val := make([]byte, 0, DiffChunkLen*chunkCount)
-	for i := uint64(0); i < chunkCount; i++ {
+	for i := range chunkCount {
 		binary.BigEndian.PutUint64(key, blockNumber)
 		copy(key[8:], blockHash[:])
 		binary.BigEndian.PutUint64(key[40:], i)
@@ -447,78 +446,4 @@ func ReadLowestUnwindableBlock(tx kv.Tx) (uint64, error) {
 	}
 	return blockNumber, nil
 
-}
-
-type DomainIOMetrics struct {
-	CacheReadCount    int64
-	CacheReadDuration time.Duration
-	CacheGetCount     int64
-	CachePutCount     int64
-	CacheGetSize      int
-	CacheGetKeySize   int
-	CacheGetValueSize int
-	CachePutSize      int
-	CachePutKeySize   int
-	CachePutValueSize int
-	DbReadCount       int64
-	DbReadDuration    time.Duration
-	FileReadCount     int64
-	FileReadDuration  time.Duration
-}
-
-type DomainMetrics struct {
-	sync.RWMutex
-	DomainIOMetrics
-	Domains map[kv.Domain]*DomainIOMetrics
-}
-
-func (dm *DomainMetrics) UpdateCacheReads(domain kv.Domain, start time.Time) {
-	dm.Lock()
-	defer dm.Unlock()
-	dm.CacheReadCount++
-	readDuration := time.Since(start)
-	dm.CacheReadDuration += readDuration
-	if d, ok := dm.Domains[domain]; ok {
-		d.CacheReadCount++
-		d.CacheReadDuration += readDuration
-	} else {
-		dm.Domains[domain] = &DomainIOMetrics{
-			CacheReadCount:    1,
-			CacheReadDuration: readDuration,
-		}
-	}
-}
-
-func (dm *DomainMetrics) UpdateDbReads(domain kv.Domain, start time.Time) {
-	dm.Lock()
-	defer dm.Unlock()
-	dm.DbReadCount++
-	readDuration := time.Since(start)
-	dm.DbReadDuration += readDuration
-	if d, ok := dm.Domains[domain]; ok {
-		d.DbReadCount++
-		d.DbReadDuration += readDuration
-	} else {
-		dm.Domains[domain] = &DomainIOMetrics{
-			DbReadCount:    1,
-			DbReadDuration: readDuration,
-		}
-	}
-}
-
-func (dm *DomainMetrics) UpdateFileReads(domain kv.Domain, start time.Time) {
-	dm.Lock()
-	defer dm.Unlock()
-	dm.FileReadCount++
-	readDuration := time.Since(start)
-	dm.FileReadDuration += readDuration
-	if d, ok := dm.Domains[domain]; ok {
-		d.FileReadCount++
-		d.FileReadDuration += readDuration
-	} else {
-		dm.Domains[domain] = &DomainIOMetrics{
-			FileReadCount:    1,
-			FileReadDuration: readDuration,
-		}
-	}
 }

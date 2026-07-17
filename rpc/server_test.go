@@ -22,12 +22,13 @@ package rpc
 import (
 	"bufio"
 	"bytes"
+	"cmp"
 	"encoding/json"
 	"io"
 	"net"
 	"os"
 	"path/filepath"
-	"sort"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -54,7 +55,7 @@ func TestServerRegisterName(t *testing.T) {
 		t.Fatalf("Expected service calc to be registered")
 	}
 
-	wantCallbacks := 11
+	wantCallbacks := 12
 	if len(svc.callbacks) != wantCallbacks {
 		t.Errorf("Expected %d callbacks for service 'service', got %d", wantCallbacks, len(svc.callbacks))
 	}
@@ -121,8 +122,8 @@ func runTestScript(t *testing.T, file string, logger log.Logger) {
 			sent = strings.TrimRight(sent, "\r\n")
 			msgs, batch, _ := parseMessage(json.RawMessage(sent))
 			if batch {
-				sort.Slice(msgs, func(i, j int) bool {
-					return string(msgs[i].ID) < string(msgs[j].ID)
+				slices.SortFunc(msgs, func(a, b *jsonrpcMessage) int {
+					return cmp.Compare(string(a.ID), string(b.ID))
 				})
 				b, err := json.Marshal(msgs)
 				if err != nil {
@@ -130,8 +131,8 @@ func runTestScript(t *testing.T, file string, logger log.Logger) {
 				}
 				sent = string(b)
 				msgs, _, _ = parseMessage(json.RawMessage(want))
-				sort.Slice(msgs, func(i, j int) bool {
-					return string(msgs[i].ID) < string(msgs[j].ID)
+				slices.SortFunc(msgs, func(a, b *jsonrpcMessage) int {
+					return cmp.Compare(string(a.ID), string(b.ID))
 				})
 				b, err = json.Marshal(msgs)
 				if err != nil {
@@ -167,7 +168,7 @@ func TestServerShortLivedConn(t *testing.T) {
 		wantResp = `{"jsonrpc":"2.0","id":1,"result":{"nftest":"1.0","rpc":"1.0","test":"1.0"}}` + "\n"
 		deadline = time.Now().Add(10 * time.Second)
 	)
-	for i := 0; i < 20; i++ {
+	for range 20 {
 		conn, err := net.Dial("tcp", listener.Addr().String())
 		if err != nil {
 			t.Fatal("can't dial:", err)

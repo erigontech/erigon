@@ -19,15 +19,29 @@ package jsonrpc
 import (
 	"github.com/erigontech/erigon/cmd/rpcdaemon/cli/httpcfg"
 	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/db/dbservices"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/kvcache"
-	"github.com/erigontech/erigon/db/services"
 	"github.com/erigontech/erigon/execution/protocol/rules"
 	"github.com/erigontech/erigon/node/gointerfaces/txpoolproto"
 	"github.com/erigontech/erigon/polygon/bor"
 	"github.com/erigontech/erigon/rpc"
 	"github.com/erigontech/erigon/rpc/rpchelper"
 )
+
+func NewBaseApiConfig(cfg *httpcfg.HttpCfg) *BaseApiConfig {
+	if cfg == nil {
+		return &BaseApiConfig{}
+	}
+	return &BaseApiConfig{
+		SingleNodeMode:    cfg.WithDatadir,
+		EvmCallTimeout:    cfg.EvmCallTimeout,
+		Dirs:              cfg.Dirs,
+		BlockRangeLimit:   cfg.BlockRangeLimit,
+		GetLogsMaxResults: cfg.GetLogsMaxResults,
+		LogQueryLimit:     cfg.LogQueryLimit,
+	}
+}
 
 func NewEthApiConfig(cfg *httpcfg.HttpCfg) *EthApiConfig {
 	return &EthApiConfig{
@@ -45,11 +59,11 @@ func NewEthApiConfig(cfg *httpcfg.HttpCfg) *EthApiConfig {
 // APIList describes the list of available RPC apis
 func APIList(db kv.TemporalRoDB, eth rpchelper.ApiBackend, txPool txpoolproto.TxpoolClient, mining txpoolproto.MiningClient,
 	filters *rpchelper.Filters, stateCache kvcache.Cache,
-	blockReader services.FullBlockReader, cfg *httpcfg.HttpCfg, engine rules.EngineReader,
+	blockReader dbservices.FullBlockReader, cfg *httpcfg.HttpCfg, engine rules.Engine,
 	logger log.Logger, bridgeReader bridgeReader, spanProducersReader spanProducersReader,
 	testingEntry *rpc.API,
 ) (list []rpc.API) {
-	base := NewBaseApi(filters, stateCache, blockReader, cfg.WithDatadir, cfg.EvmCallTimeout, engine, cfg.Dirs, bridgeReader, cfg.BlockRangeLimit, cfg.GetLogsMaxResults)
+	base := NewBaseApi(filters, stateCache, blockReader, engine, bridgeReader, NewBaseApiConfig(cfg))
 	ethImpl := NewEthAPI(base, db, eth, txPool, mining, NewEthApiConfig(cfg), logger)
 	erigonImpl := NewErigonAPI(base, db, eth)
 	txpoolImpl := NewTxPoolAPI(base, db, txPool)
@@ -78,7 +92,7 @@ func APIList(db kv.TemporalRoDB, eth rpchelper.ApiBackend, txPool txpoolproto.Tx
 
 	otsImpl := NewOtterscanAPI(base, db, cfg.OtsMaxPageSize)
 	internalImpl := NewInternalAPI(base, db)
-	gqlImpl := NewGraphQLAPI(base, db, ethImpl, cfg.Gascap, cfg.ReturnDataLimit)
+	gqlImpl := NewGraphQLAPI(base, db, ethImpl, txPool, cfg.Gascap, cfg.ReturnDataLimit)
 	overlayImpl := NewOverlayAPI(base, db, cfg.Gascap, cfg.OverlayGetLogsTimeout, cfg.OverlayReplayBlockTimeout, otsImpl)
 
 	if cfg.GraphQLEnabled {

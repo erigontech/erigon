@@ -29,14 +29,14 @@ import (
 	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/datadir"
+	"github.com/erigontech/erigon/db/dbservices"
 	"github.com/erigontech/erigon/db/integrity"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/backup"
 	"github.com/erigontech/erigon/db/kv/kvcfg"
 	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/db/rawdb/rawtemporaldb"
-	"github.com/erigontech/erigon/db/services"
-	"github.com/erigontech/erigon/db/snapshotsync/freezeblocks"
+	"github.com/erigontech/erigon/db/snapshotsync/blocksnapshots"
 	dbstate "github.com/erigontech/erigon/db/state"
 	"github.com/erigontech/erigon/db/state/execctx"
 	"github.com/erigontech/erigon/execution/chain"
@@ -87,7 +87,7 @@ func NewProduce(produceList []string) Produce {
 	return produce
 }
 
-func StageCustomTraceCfg(produce []string, db kv.TemporalRwDB, dirs datadir.Dirs, br services.FullBlockReader,
+func StageCustomTraceCfg(produce []string, db kv.TemporalRwDB, dirs datadir.Dirs, br dbservices.FullBlockReader,
 	cc *chain.Config, engine rules.Engine,
 	genesis *types.Genesis, syncCfg ethconfig.Sync) CustomTraceCfg {
 	execArgs := &exec.ExecArgs{
@@ -109,7 +109,7 @@ func StageCustomTraceCfg(produce []string, db kv.TemporalRwDB, dirs datadir.Dirs
 func SpawnCustomTrace(cfg CustomTraceCfg, ctx context.Context, logger log.Logger) error {
 	if cfg.Produce.RCacheDomain {
 		if err := cfg.db.View(context.Background(), func(tx kv.Tx) error {
-			return kvcfg.PersistReceipts.MustBeEnabled(tx, "you must enable `--persist.receipts` flag in db. remove chaindata and start erigon with this flag")
+			return kvcfg.PersistReceipts.MustBeEnabled(tx, "you must enable `--prune.include-receipts` flag in db. remove chaindata and start erigon with this flag")
 		}); err != nil {
 			panic(err)
 		}
@@ -149,7 +149,7 @@ func SpawnCustomTrace(cfg CustomTraceCfg, ctx context.Context, logger log.Logger
 	}
 	endBlock = execProgress
 
-	defer cfg.ExecArgs.BlockReader.Snapshots().(*freezeblocks.RoSnapshots).MadvNormal().DisableReadAhead()
+	defer cfg.ExecArgs.BlockReader.Snapshots().(*blocksnapshots.RoSnapshots).MadvNormal().DisableReadAhead()
 	//defer tx.(dbstate.HasAggTx).AggTx().(*dbstate.AggregatorRoTx).MadvNormal().DisableReadAhead()
 
 	log.Info("SpawnCustomTrace", "startBlock", startBlock, "endBlock", endBlock)
@@ -237,22 +237,15 @@ func customTraceBatchProduce(ctx context.Context, produce Produce, cfg *exec.Exe
 			return err
 		}
 
-		if err := doms.Flush(ctx, tx); err != nil {
-			return err
-		}
-
-		//asserts
-		if produce.ReceiptDomain {
-			if err = AssertReceipts(ctx, cfg, db, fromBlock, toBlock); err != nil {
-				return err
+		// Commit runs the validate hook after flush, before the commit, so the
+		// asserts + SeekCommitment see the flushed state on tx exactly as the
+		// prior Flush-then-commit shape did.
+		if err := doms.Commit(ctx, tx, func(tx kv.RwTx) error {
+			if produce.ReceiptDomain {
+				return AssertReceipts(ctx, cfg, db, fromBlock, toBlock)
 			}
-		}
-
-		lastTxNum, _, err = doms.SeekCommitment(ctx, tx)
-		if err != nil {
-			return err
-		}
-		if err := tx.Commit(); err != nil {
+			return nil
+		}); err != nil {
 			return err
 		}
 
@@ -262,6 +255,14 @@ func customTraceBatchProduce(ctx context.Context, produce Produce, cfg *exec.Exe
 	var fromStep, toStep kv.Step
 	if err := db.ViewTemporal(ctx, func(tx kv.TemporalTx) error {
 		fromStep = firstStepNotInFiles(tx, produce)
+		// toStep must reflect what this batch actually re-derived, not the commitment
+		// frontier: when rebuilding a subset of domains, commitment can be ahead, which
+		// would build empty files past the domain's data and desync pruning.
+		var err error
+		lastTxNum, err = cfg.BlockReader.TxnumReader().Max(ctx, tx, toBlock-1)
+		if err != nil {
+			return err
+		}
 		if lastTxNum/agg.StepSize() > 0 {
 			toStep = kv.Step(lastTxNum / agg.StepSize())
 		}
@@ -500,8 +501,16 @@ func StageCustomTraceReset(ctx context.Context, db kv.TemporalRwDB, produce Prod
 	if produce.TraceTo {
 		tables = append(tables, db.Debug().InvertedIdxTables(kv.TracesToIdx)...)
 	}
-	if err := backup.ClearTables(ctx, tx, tables...); err != nil {
+	if err := backup.ClearTables(ctx, db, tx, tables...); err != nil {
 		return err
+	}
+	// Clearing the data tables alone is not enough: the prune-progress bookmark in
+	// TblPruningValsProg survives and would make the post-rebuild prune short-circuit
+	// (prs.TxTo >= txTo && Done), so the re-written history never gets pruned.
+	for _, table := range tables {
+		if err := dbstate.InvalidatePruneProgress(tx, table); err != nil {
+			return err
+		}
 	}
 	return tx.Commit()
 }

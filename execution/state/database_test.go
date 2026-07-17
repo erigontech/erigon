@@ -61,6 +61,7 @@ func TestCreate2Revive(t *testing.T) {
 				SpuriousDragonBlock:   common.NewUint64(1),
 				ByzantiumBlock:        common.NewUint64(1),
 				ConstantinopleBlock:   common.NewUint64(1),
+				PetersburgBlock:       common.NewUint64(1),
 			},
 			Alloc: types.GenesisAlloc{
 				address.Value(): types.GenesisAccount{Balance: funds},
@@ -245,6 +246,7 @@ func TestCreate2Polymorth(t *testing.T) {
 				SpuriousDragonBlock:   common.NewUint64(1),
 				ByzantiumBlock:        common.NewUint64(1),
 				ConstantinopleBlock:   common.NewUint64(1),
+				PetersburgBlock:       common.NewUint64(1),
 			},
 			Alloc: types.GenesisAlloc{
 				address.Value(): types.GenesisAccount{Balance: funds},
@@ -509,6 +511,7 @@ func TestReorgOverSelfDestruct(t *testing.T) {
 				SpuriousDragonBlock:   common.NewUint64(1),
 				ByzantiumBlock:        common.NewUint64(1),
 				ConstantinopleBlock:   common.NewUint64(1),
+				PetersburgBlock:       common.NewUint64(1),
 			},
 			Alloc: types.GenesisAlloc{
 				address.Value(): types.GenesisAccount{Balance: funds},
@@ -672,6 +675,7 @@ func TestReorgOverStateChange(t *testing.T) {
 				SpuriousDragonBlock:   common.NewUint64(1),
 				ByzantiumBlock:        common.NewUint64(1),
 				ConstantinopleBlock:   common.NewUint64(1),
+				PetersburgBlock:       common.NewUint64(1),
 			},
 			Alloc: types.GenesisAlloc{
 				address.Value(): {Balance: funds},
@@ -836,6 +840,7 @@ func TestCreateOnExistingStorage(t *testing.T) {
 				SpuriousDragonBlock:   common.NewUint64(1),
 				ByzantiumBlock:        common.NewUint64(1),
 				ConstantinopleBlock:   common.NewUint64(1),
+				PetersburgBlock:       common.NewUint64(1),
 			},
 			Alloc: types.GenesisAlloc{
 				address.Value(): {Balance: funds},
@@ -1519,10 +1524,7 @@ func TestRecreateAndRewind(t *testing.T) {
 			block.AddTx(txn)
 		case 1:
 			// Calculate the address of the Phoenix and create handle to phoenix contract
-			var codeHash common.Hash
-			if codeHash, err = common.HashData(common.FromHex(contracts.PhoenixBin)); err != nil {
-				panic(err)
-			}
+			codeHash := crypto.Keccak256Hash(common.FromHex(contracts.PhoenixBin))
 			phoenixAddress = types.CreateAddress2(reviveAddress, [32]byte{}, accounts.InternCodeHash(codeHash))
 			if phoenix, err = contracts.NewPhoenix(phoenixAddress, contractBackend); err != nil {
 				panic(err)
@@ -1581,10 +1583,7 @@ func TestRecreateAndRewind(t *testing.T) {
 			block.AddTx(txn)
 		case 1:
 			// Calculate the address of the Phoenix and create handle to phoenix contract
-			var codeHash common.Hash
-			if codeHash, err = common.HashData(common.FromHex(contracts.PhoenixBin)); err != nil {
-				panic(err)
-			}
+			codeHash := crypto.Keccak256Hash(common.FromHex(contracts.PhoenixBin))
 			phoenixAddress = types.CreateAddress2(reviveAddress, [32]byte{}, accounts.InternCodeHash(codeHash))
 			if phoenix, err = contracts.NewPhoenix(phoenixAddress, contractBackendLonger); err != nil {
 				panic(err)
@@ -1706,6 +1705,7 @@ func TestTxLookupUnwind(t *testing.T) {
 				SpuriousDragonBlock:   common.NewUint64(1),
 				ByzantiumBlock:        common.NewUint64(1),
 				ConstantinopleBlock:   common.NewUint64(1),
+				PetersburgBlock:       common.NewUint64(1),
 			},
 			Alloc: types.GenesisAlloc{
 				address.Value(): types.GenesisAccount{Balance: funds},

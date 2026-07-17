@@ -63,7 +63,7 @@ func DefaultBlockGasLimitByChain(chainConfig *chain.Config) uint64 {
 // FullNodeGPO contains default gasprice oracle settings for full node.
 var FullNodeGPO = gaspricecfg.Config{
 	Blocks:           20,
-	Default:          uint256.NewInt(0),
+	Default:          uint256.NewInt(common.GWei / 1000),
 	Percentile:       60,
 	MaxHeaderHistory: 0,
 	MaxBlockHistory:  0,
@@ -155,6 +155,10 @@ type BlocksFreezing struct {
 	DisableDownloadE3 bool // disable download state snapshots
 	DownloaderAddr    string
 	ChainName         string
+	// ChainTomlURL, when non-empty, overrides the default R2/GitHub fetch of
+	// the preverified chain.toml with a direct HTTP GET to this URL. Local
+	// preverified.toml in the datadir still takes precedence.
+	ChainTomlURL string
 	// ManifestReady is closed when P2P manifest discovery completes.
 	// Set by the backend when P2PManifest is enabled. Nil otherwise.
 	ManifestReady <-chan struct{}
@@ -184,6 +188,12 @@ func NewSnapCfg(keepBlocks, produceE2, produceE3 bool, chainName string) BlocksF
 // Config contains configuration options for ETH protocol.
 type Config struct {
 	Sync
+
+	// StateCacheBudget, when > 0, overrides the per-domain state-cache byte
+	// budget the ExecModule allocates. Test harnesses that build one ExecModule
+	// per fixture set this small to avoid the full production cache each time;
+	// 0 means the production default.
+	StateCacheBudget datasize.ByteSize
 
 	// The genesis block, which is inserted if the database is empty.
 	// If nil, the Ethereum main net block is used.
@@ -276,11 +286,25 @@ type Config struct {
 	// directly as the cap in steps.
 	ErigondbDomainStepsInFrozenFile *uint64 `toml:",omitempty"`
 
+	// CommitmentPlainValues overrides the references_in_commitment_branches value written into a
+	// freshly created erigondb.toml (true => plain keys => references=false); nil = unset.
+	CommitmentPlainValues *bool `toml:",omitempty"`
+
 	// WarmupKzgCtxOnInit, when true, eagerly initialises the KZG trusted setup
 	// in the background on startup so the first block doesn't pay the ~2s init
 	// cost. Tests that don't need the trusted setup loaded leave this false
 	// to avoid the extra work.
 	WarmupKzgCtxOnInit bool
+}
+
+// CommitmentRefsFirstStart maps CommitmentPlainValues to a first-start
+// references_in_commitment_branches override (nil = use the config default).
+func (c *Config) CommitmentRefsFirstStart() *bool {
+	if c.CommitmentPlainValues == nil {
+		return nil
+	}
+	refs := !*c.CommitmentPlainValues
+	return &refs
 }
 
 type Sync struct {
@@ -295,11 +319,12 @@ type Sync struct {
 	LoopBlockLimit             uint
 	ParallelStateFlushing      bool
 
-	ChaosMonkey                      bool
-	AlwaysGenerateChangesets         bool
-	MaxReorgDepth                    uint64
-	KeepExecutionProofs              bool
-	ExperimentalConcurrentCommitment bool
-	PersistReceiptsCacheV2           bool
-	SnapshotDownloadToBlock          uint64 // exclusive [0,toBlock)
+	ChaosMonkey                     bool
+	AlwaysGenerateChangesets        bool
+	MaxReorgDepth                   uint64
+	KeepExecutionProofs             bool
+	ExperimentalParallelCommitment  bool
+	ExperimentalStreamingCommitment bool
+	PersistReceiptsCacheV2          bool
+	SnapshotDownloadToBlock         uint64 // exclusive [0,toBlock)
 }

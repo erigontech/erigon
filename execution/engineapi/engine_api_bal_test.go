@@ -29,9 +29,11 @@ import (
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/common/dbg"
+	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/common/testlog"
 	"github.com/erigontech/erigon/execution/abi/bind"
+	enginetypes "github.com/erigontech/erigon/execution/engineapi/engine_types"
 	"github.com/erigontech/erigon/execution/engineapi/engineapitester"
 	"github.com/erigontech/erigon/execution/protocol/params"
 	stateContracts "github.com/erigontech/erigon/execution/state/contracts"
@@ -136,11 +138,11 @@ func TestEngineApiGeneratedPayloadIncludesBlockAccessList(t *testing.T) {
 		err = eat.TxnInclusionVerifier.VerifyTxnsInclusion(ctx, payload.ExecutionPayload, txn.Hash())
 		require.NoError(t, err)
 
-		balBytes := payload.ExecutionPayload.BlockAccessList
-		require.NotNil(t, balBytes)
-		require.NotEmpty(t, balBytes)
+		balPtr := payload.ExecutionPayload.BlockAccessList
+		require.NotNil(t, balPtr)
+		require.NotEmpty(t, *balPtr)
 
-		bal, err := types.DecodeBlockAccessListBytes(balBytes)
+		bal, err := types.DecodeBlockAccessListBytes(*balPtr)
 		require.NoError(t, err)
 		require.NoError(t, bal.Validate())
 		require.NotEmpty(t, bal)
@@ -307,6 +309,88 @@ func TestEngineApiBALStorageWrites(t *testing.T) {
 		require.NotNilf(t, senderChanges, "missing sender account changes\n%s", bal.DebugString())
 		require.NotNil(t, findBalanceChange(senderChanges, balIndex), "missing sender balance change")
 		require.NotNil(t, findNonceChange(senderChanges, balIndex), "missing sender nonce change")
+	})
+}
+
+// TestEngineApiBALStorageNoOpWriteOmitted exercises the EIP-7928 no-op rule
+// end-to-end through the parallel executor: a write storing the value a slot
+// already holds must not appear in storage_changes. The contract does
+// SSTORE(0,2);SSTORE(0,1) so the final write is recorded even though it equals
+// the slot's prior value — a plain same-value SSTORE would be skipped before
+// reaching the access list. Called twice in one block, the second call is a
+// no-op whose write must be excluded.
+func TestEngineApiBALStorageNoOpWriteOmitted(t *testing.T) {
+	if !dbg.Exec3Parallel {
+		t.Skip("requires parallel exec")
+	}
+	ctx := t.Context()
+	logger := testlog.Logger(t, log.LvlDebug)
+	eat, err := engineapitester.DefaultEngineApiTester(ctx, logger, t.TempDir())
+	require.NoError(t, err)
+	t.Cleanup(func() {
+		err := eat.Close()
+		require.NoError(t, err)
+	})
+	eat.Run(t, func(ctx context.Context, t *testing.T, eat engineapitester.EngineApiTester) {
+		signer := types.LatestSignerForChainID(eat.ChainConfig.ChainID)
+		coinbaseAddr := crypto.PubkeyToAddress(eat.CoinbaseKey.PublicKey)
+		gasPrice, err := eat.RpcApiClient.GasPrice()
+		require.NoError(t, err)
+		gasPriceU256, overflow := uint256.FromBig(gasPrice)
+		require.False(t, overflow)
+
+		// init: 600b600c600039600b6000f3   -> return the 11-byte runtime
+		// code: 6002600055 6001600055 00   -> SSTORE(0,2); SSTORE(0,1); STOP
+		initCode := common.FromHex("600b600c600039600b6000f36002600055600160005500")
+
+		signTx := func(nonce uint64, to *common.Address, data []byte, gas uint64) types.Transaction {
+			tx, err := types.SignTx(&types.LegacyTx{
+				CommonTx: types.CommonTx{Nonce: nonce, GasLimit: gas, To: to, Value: uint256.Int{}, Data: data},
+				GasPrice: *gasPriceU256,
+			}, *signer, eat.CoinbaseKey)
+			require.NoError(t, err)
+			return tx
+		}
+
+		// Block 1: deploy the contract.
+		deployNonce, err := eat.RpcApiClient.GetTransactionCount(coinbaseAddr, rpc.PendingBlock)
+		require.NoError(t, err)
+		deployTx := signTx(deployNonce.Uint64(), nil, initCode, 1_000_000)
+		_, err = eat.RpcApiClient.SendTransaction(deployTx)
+		require.NoError(t, err)
+		_, err = eat.MockCl.BuildCanonicalBlock(ctx)
+		require.NoError(t, err)
+
+		contractAddr := types.CreateAddress(coinbaseAddr, deployNonce.Uint64())
+		code, err := eat.RpcApiClient.GetCode(contractAddr, rpc.LatestBlock)
+		require.NoError(t, err)
+		require.NotEmpty(t, code, "contract must be deployed")
+
+		// Block 2: two calls to the contract in the same block. Same sender, so
+		// they execute in nonce order — fully deterministic, no scheduling race.
+		callNonce, err := eat.RpcApiClient.GetTransactionCount(coinbaseAddr, rpc.PendingBlock)
+		require.NoError(t, err)
+		firstCall := signTx(callNonce.Uint64(), &contractAddr, nil, 1_000_000)
+		secondCall := signTx(callNonce.Uint64()+1, &contractAddr, nil, 1_000_000)
+		_, err = eat.RpcApiClient.SendTransaction(firstCall)
+		require.NoError(t, err)
+		_, err = eat.RpcApiClient.SendTransaction(secondCall)
+		require.NoError(t, err)
+
+		// A node accepts its own BAL, so the block stays VALID even without the
+		// fix (assembler and parallel validator compute the same wrong BAL); the
+		// storage_changes assertion below is what catches the leaked no-op write.
+		payload, err := eat.MockCl.BuildCanonicalBlock(ctx)
+		require.NoError(t, err)
+		require.NoError(t, eat.TxnInclusionVerifier.VerifyTxnsInclusion(ctx, payload.ExecutionPayload, firstCall.Hash(), secondCall.Hash()))
+
+		bal := decodeAndValidateBAL(t, payload)
+		cc := findAccountChanges(bal, accounts.InternAddress(contractAddr))
+		require.NotNilf(t, cc, "contract must appear in BAL\n%s", bal.DebugString())
+		require.Lenf(t, cc.StorageChanges, 1, "contract writes exactly one slot\n%s", bal.DebugString())
+		require.Lenf(t, cc.StorageChanges[0].Changes, 1,
+			"slot 0 must record only the first call's real change (0->1); the second call leaves the value unchanged, so the no-op write must not appear in storage_changes\n%s",
+			bal.DebugString())
 	})
 }
 
@@ -621,7 +705,7 @@ func TestEngineApiBALParallelConsistencyStress(t *testing.T) {
 		_, err = eat.MockCl.BuildCanonicalBlock(ctx)
 		require.NoError(t, err, "block 1 (deploy shared Changer) must build cleanly")
 
-		for blockIdx := 0; blockIdx < numBlocks; blockIdx++ {
+		for blockIdx := range numBlocks {
 			// Each sender does one simple transfer (fully independent state).
 			for i, key := range senderKeys {
 				// Distinct receiver per (sender, block) to avoid nonce/collision.
@@ -814,13 +898,189 @@ func TestEngineApiBALSelfDestruct(t *testing.T) {
 	})
 }
 
+// TestEngineApiBALIncludesSystemAddressOnSelfdestructToItWithZeroBalance asserts
+// the EIP-7928 rule that a zero-value SELFDESTRUCT to SystemAddress is still
+// recorded in the BAL: the SELFDESTRUCT is itself the state access that
+// satisfies the SystemAddress carve-out, so the entry survives even with no
+// value transferred and every change-set empty.
+func TestEngineApiBALIncludesSystemAddressOnSelfdestructToItWithZeroBalance(t *testing.T) {
+	if !dbg.Exec3Parallel {
+		t.Skip("requires parallel exec")
+	}
+	ctx := t.Context()
+	logger := testlog.Logger(t, log.LvlDebug)
+
+	senderKey, err := crypto.GenerateKey()
+	require.NoError(t, err)
+	eat := newSelfdestructBALTester(ctx, t, logger, crypto.PubkeyToAddress(senderKey.PublicKey))
+	require.True(t, eat.ChainConfig.IsAmsterdam(0), "Amsterdam must be active for EIP-7928")
+
+	eat.Run(t, func(ctx context.Context, t *testing.T, eat engineapitester.EngineApiTester) {
+		initCode := pushAddrSelfdestruct(params.SystemAddress.Value())
+		createTx := signCreateTx(t, eat, senderKey, uint256.Int{}, initCode)
+		_, err := eat.RpcApiClient.SendTransaction(createTx)
+		require.NoError(t, err)
+
+		payload, err := eat.MockCl.BuildCanonicalBlock(ctx)
+		require.NoError(t, err)
+		require.NoError(t, eat.TxnInclusionVerifier.VerifyTxnsInclusion(ctx, payload.ExecutionPayload, createTx.Hash()))
+
+		// The init code runs SELFDESTRUCT before returning any deploy bytes,
+		// so the CREATE still succeeds and deploys no code.
+		receipt, err := eat.RpcApiClient.GetTransactionReceipt(ctx, createTx.Hash())
+		require.NoError(t, err)
+		require.Equal(t, types.ReceiptStatusSuccessful, receipt.Status,
+			"SELFDESTRUCT-in-init-code CREATE tx should succeed")
+
+		bal := decodeAndValidateBAL(t, payload)
+
+		sysEntry := findAccountChanges(bal, params.SystemAddress)
+		require.NotNilf(t, sysEntry,
+			"BAL must include a SystemAddress entry: EIP-7928 records SELFDESTRUCT as an access on the beneficiary even when no value is transferred, and the SystemAddress carve-out is satisfied because the SELFDESTRUCT is the access itself\n%s",
+			bal.DebugString())
+
+		require.Empty(t, sysEntry.StorageChanges, "SystemAddress entry should have no storage changes")
+		require.Empty(t, sysEntry.StorageReads, "SystemAddress entry should have no storage reads")
+		require.Empty(t, sysEntry.BalanceChanges, "SystemAddress entry should have no balance changes (zero transfer)")
+		require.Empty(t, sysEntry.NonceChanges, "SystemAddress entry should have no nonce changes")
+		require.Empty(t, sysEntry.CodeChanges, "SystemAddress entry should have no code changes")
+	})
+}
+
+// TestEngineApiBALIncludesSystemAddressOnSelfdestructToItWithNonZeroBalance
+// guards the non-zero variant: the SystemAddress beneficiary records a balance
+// change in addition to the access already recorded by the SELFDESTRUCT.
+func TestEngineApiBALIncludesSystemAddressOnSelfdestructToItWithNonZeroBalance(t *testing.T) {
+	if !dbg.Exec3Parallel {
+		t.Skip("requires parallel exec")
+	}
+	ctx := t.Context()
+	logger := testlog.Logger(t, log.LvlDebug)
+
+	senderKey, err := crypto.GenerateKey()
+	require.NoError(t, err)
+	eat := newSelfdestructBALTester(ctx, t, logger, crypto.PubkeyToAddress(senderKey.PublicKey))
+
+	eat.Run(t, func(ctx context.Context, t *testing.T, eat engineapitester.EngineApiTester) {
+		// Same init code as the zero-balance test, but the CREATE tx sends
+		// 1 wei to the new contract so its balance is non-zero at SELFDESTRUCT.
+		initCode := pushAddrSelfdestruct(params.SystemAddress.Value())
+		createTx := signCreateTx(t, eat, senderKey, *uint256.NewInt(1), initCode)
+		_, err := eat.RpcApiClient.SendTransaction(createTx)
+		require.NoError(t, err)
+
+		payload, err := eat.MockCl.BuildCanonicalBlock(ctx)
+		require.NoError(t, err)
+		require.NoError(t, eat.TxnInclusionVerifier.VerifyTxnsInclusion(ctx, payload.ExecutionPayload, createTx.Hash()))
+
+		receipt, err := eat.RpcApiClient.GetTransactionReceipt(ctx, createTx.Hash())
+		require.NoError(t, err)
+		require.Equal(t, types.ReceiptStatusSuccessful, receipt.Status)
+
+		bal := decodeAndValidateBAL(t, payload)
+
+		sysEntry := findAccountChanges(bal, params.SystemAddress)
+		require.NotNilf(t, sysEntry, "BAL must include SystemAddress entry on non-zero-balance SELFDESTRUCT to it\n%s", bal.DebugString())
+		require.NotEmptyf(t, sysEntry.BalanceChanges,
+			"BAL must record a balance change on the SystemAddress beneficiary when SELFDESTRUCT transfers non-zero value to it\n%s", bal.DebugString())
+	})
+}
+
+// TestEngineApiBALIncludesOrdinaryBeneficiaryOnSelfdestructWithZeroBalance
+// guards that ordinary EOA beneficiaries (where the SystemAddress carve-out
+// does not apply) still appear in the BAL on a zero-balance SELFDESTRUCT.
+func TestEngineApiBALIncludesOrdinaryBeneficiaryOnSelfdestructWithZeroBalance(t *testing.T) {
+	if !dbg.Exec3Parallel {
+		t.Skip("requires parallel exec")
+	}
+	ctx := t.Context()
+	logger := testlog.Logger(t, log.LvlDebug)
+
+	senderKey, err := crypto.GenerateKey()
+	require.NoError(t, err)
+	eat := newSelfdestructBALTester(ctx, t, logger, crypto.PubkeyToAddress(senderKey.PublicKey))
+
+	// An arbitrary non-SystemAddress beneficiary EOA, distinct from the
+	// sender / coinbase / system contracts so it is identifiable in the BAL.
+	beneficiary := common.HexToAddress("0x00000000000000000000000000000000000000aa")
+
+	eat.Run(t, func(ctx context.Context, t *testing.T, eat engineapitester.EngineApiTester) {
+		initCode := pushAddrSelfdestruct(beneficiary)
+		createTx := signCreateTx(t, eat, senderKey, uint256.Int{}, initCode)
+		_, err := eat.RpcApiClient.SendTransaction(createTx)
+		require.NoError(t, err)
+
+		payload, err := eat.MockCl.BuildCanonicalBlock(ctx)
+		require.NoError(t, err)
+		require.NoError(t, eat.TxnInclusionVerifier.VerifyTxnsInclusion(ctx, payload.ExecutionPayload, createTx.Hash()))
+
+		receipt, err := eat.RpcApiClient.GetTransactionReceipt(ctx, createTx.Hash())
+		require.NoError(t, err)
+		require.Equal(t, types.ReceiptStatusSuccessful, receipt.Status)
+
+		bal := decodeAndValidateBAL(t, payload)
+		require.NotNilf(t, findAccountChanges(bal, accounts.InternAddress(beneficiary)),
+			"ordinary EOA beneficiary must appear in BAL on SELFDESTRUCT-to-it\n%s", bal.DebugString())
+	})
+}
+
+// newSelfdestructBALTester brings up an engine API tester whose genesis funds
+// senderAddr, used by the SELFDESTRUCT-beneficiary BAL tests below.
+func newSelfdestructBALTester(ctx context.Context, t *testing.T, logger log.Logger, senderAddr common.Address) engineapitester.EngineApiTester {
+	t.Helper()
+	genesis, coinbaseKey, err := engineapitester.DefaultEngineApiTesterGenesis()
+	require.NoError(t, err)
+	genesis.Alloc[senderAddr] = types.GenesisAccount{
+		Balance: new(big.Int).Exp(big.NewInt(10), big.NewInt(20), nil), // 100 ETH
+	}
+	eat, err := engineapitester.InitialiseEngineApiTester(ctx, engineapitester.EngineApiTesterInitArgs{
+		Logger:      logger,
+		DataDir:     t.TempDir(),
+		Genesis:     genesis,
+		CoinbaseKey: coinbaseKey,
+	})
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, eat.Close()) })
+	return eat
+}
+
+// signCreateTx builds and signs a CREATE (To==nil) legacy transaction carrying
+// initCode, using the sender's current pending nonce and the node's gas price.
+func signCreateTx(t *testing.T, eat engineapitester.EngineApiTester, key *ecdsa.PrivateKey, value uint256.Int, initCode []byte) types.Transaction {
+	t.Helper()
+	signer := types.LatestSignerForChainID(eat.ChainConfig.ChainID)
+	addr := crypto.PubkeyToAddress(key.PublicKey)
+	nonce, err := eat.RpcApiClient.GetTransactionCount(addr, rpc.PendingBlock)
+	require.NoError(t, err)
+	gasPrice, err := eat.RpcApiClient.GasPrice()
+	require.NoError(t, err)
+	gasPriceU256, overflow := uint256.FromBig(gasPrice)
+	require.False(t, overflow, "gas price overflows uint256")
+	tx, err := types.SignTx(&types.LegacyTx{
+		CommonTx: types.CommonTx{Nonce: nonce.Uint64(), GasLimit: 1_000_000, To: nil, Value: value, Data: initCode},
+		GasPrice: *gasPriceU256,
+	}, *signer, key)
+	require.NoError(t, err)
+	return tx
+}
+
+// pushAddrSelfdestruct returns init code that pushes addr and runs SELFDESTRUCT:
+// PUSH20 <addr>; SELFDESTRUCT  (0x73 || 20 bytes || 0xff).
+func pushAddrSelfdestruct(addr common.Address) []byte {
+	out := make([]byte, 0, 22)
+	out = append(out, 0x73)
+	out = append(out, addr[:]...)
+	out = append(out, 0xff)
+	return out
+}
+
 func decodeAndValidateBAL(t *testing.T, payload *engineapitester.MockClPayload) types.BlockAccessList {
 	t.Helper()
-	balBytes := payload.ExecutionPayload.BlockAccessList
-	require.NotNil(t, balBytes)
-	require.NotEmpty(t, balBytes)
+	balPtr := payload.ExecutionPayload.BlockAccessList
+	require.NotNil(t, balPtr)
+	require.NotEmpty(t, *balPtr)
 
-	bal, err := types.DecodeBlockAccessListBytes(balBytes)
+	bal, err := types.DecodeBlockAccessListBytes(*balPtr)
 	require.NoError(t, err)
 	require.NoError(t, bal.Validate())
 	require.NotEmpty(t, bal)
@@ -882,4 +1142,61 @@ func findStorageChange(sc *types.SlotChanges, index uint32) *types.StorageChange
 		}
 	}
 	return nil
+}
+
+// TestEngineApiNewPayloadBALMalformedVsInvalid pins the EIP-7928 newPayload
+// error split: a blockAccessList param that is not decodable RLP is a
+// malformed request (-32602 invalid params), while a decodable one that
+// violates EIP-7928 ordering rules is an invalid block ({status: INVALID}).
+func TestEngineApiNewPayloadBALMalformedVsInvalid(t *testing.T) {
+	if !dbg.Exec3Parallel {
+		t.Skip("requires parallel exec")
+	}
+	ctx := t.Context()
+	logger := testlog.Logger(t, log.LvlDebug)
+	eat, err := engineapitester.DefaultEngineApiTester(ctx, logger, t.TempDir())
+	require.NoError(t, err)
+	t.Cleanup(func() {
+		err := eat.Close()
+		require.NoError(t, err)
+	})
+	receiver := common.HexToAddress("0x333")
+	eat.Run(t, func(ctx context.Context, t *testing.T, eat engineapitester.EngineApiTester) {
+		_, err := eat.Transactor.SubmitSimpleTransfer(eat.CoinbaseKey, receiver, big.NewInt(1))
+		require.NoError(t, err)
+		payload, err := eat.MockCl.BuildCanonicalBlock(ctx)
+		require.NoError(t, err)
+		executionRequests := payload.ExecutionRequests
+		if executionRequests == nil {
+			executionRequests = []hexutil.Bytes{}
+		}
+		sendWithBAL := func(bal hexutil.Bytes) (*enginetypes.PayloadStatus, error) {
+			elPayload := *payload.ExecutionPayload
+			elPayload.BlockAccessList = &bal
+			return eat.EngineApiClient.NewPayloadV5(ctx, &elPayload, []common.Hash{}, payload.ParentBeaconBlockRoot, executionRequests)
+		}
+		for name, malformed := range map[string]hexutil.Bytes{
+			"empty byte string": {},
+			"string not list":   {0x80},
+			"truncated list":    {0xc1},
+		} {
+			_, err := sendWithBAL(malformed)
+			require.Errorf(t, err, "%s: expected invalid-params error", name)
+			var rpcErr rpc.Error
+			require.ErrorAsf(t, err, &rpcErr, "%s: expected rpc error, got: %v", name, err)
+			require.Equalf(t, -32602, rpcErr.ErrorCode(), "%s: %v", name, err)
+		}
+		account := append([]byte{0xda, 0x94}, make([]byte, 20)...)
+		account = append(account, 0xc0, 0xc0, 0xc0, 0xc0, 0xc0)
+		duplicateAccounts := make([]byte, 0, 1+2*len(account))
+		duplicateAccounts = append(duplicateAccounts, 0xc0+byte(2*len(account)))
+		duplicateAccounts = append(duplicateAccounts, account...)
+		duplicateAccounts = append(duplicateAccounts, account...)
+		status, err := sendWithBAL(duplicateAccounts)
+		require.NoError(t, err)
+		require.Equal(t, enginetypes.InvalidStatus, status.Status)
+		require.NotNil(t, status.ValidationError)
+		require.ErrorContains(t, status.ValidationError.Error(), "access list",
+			"INVALID must originate from block-access-list validation, not e.g. a block-hash mismatch")
+	})
 }

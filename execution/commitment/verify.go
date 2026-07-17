@@ -17,7 +17,9 @@
 package commitment
 
 import (
+	"errors"
 	"fmt"
+	"strings"
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/empty"
@@ -58,7 +60,7 @@ func VerifyBranchHashes(
 
 	var mismatches []string
 
-	for nibble := 0; nibble < 16; nibble++ {
+	for nibble := range 16 {
 		c := row[nibble]
 		if c == nil {
 			continue
@@ -117,8 +119,9 @@ func VerifyBranchHashes(
 		c.stateHashLen = 0
 
 		// Create a fresh HexPatriciaHashed for each cell to avoid any shared state issues.
-		hph := NewHexPatriciaHashed(length.Addr, nil)
-		hph.memoizationOff = true
+		verifyCfg := DefaultTrieConfig()
+		verifyCfg.MemoizationOff = true
+		hph := NewHexPatriciaHashed(length.Addr, nil, verifyCfg)
 
 		computed, err := hph.computeCellHash(c, depth, nil)
 		if err != nil {
@@ -141,11 +144,13 @@ func VerifyBranchHashes(
 	}
 
 	if len(mismatches) > 0 {
-		msg := fmt.Sprintf("hash verification failed with %d mismatch(es) at branchKey=%x:", len(mismatches), branchKey)
+		var sb strings.Builder
+		fmt.Fprintf(&sb, "hash verification failed with %d mismatch(es) at branchKey=%x:", len(mismatches), branchKey)
 		for _, m := range mismatches {
-			msg += "\n  " + m
+			sb.WriteString("\n  ")
+			sb.WriteString(m)
 		}
-		return fmt.Errorf("%s", msg)
+		return errors.New(sb.String())
 	}
 	return nil
 }

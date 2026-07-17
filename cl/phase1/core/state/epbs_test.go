@@ -1,7 +1,10 @@
 package state_test
 
 import (
+	"math"
 	"testing"
+
+	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
@@ -11,7 +14,7 @@ import (
 	"github.com/erigontech/erigon/cl/utils"
 	"github.com/erigontech/erigon/cl/utils/bls"
 	"github.com/erigontech/erigon/common"
-	"github.com/stretchr/testify/require"
+	"github.com/erigontech/erigon/common/crypto"
 )
 
 // TestIsBuilderWithdrawalCredential_0x03 verifies that withdrawal credentials
@@ -21,7 +24,8 @@ func TestIsBuilderWithdrawalCredential_0x03(t *testing.T) {
 
 	var creds common.Hash
 	creds[0] = 0x03
-	copy(creds[12:], common.HexToAddress("0xdeadbeef").Bytes())
+	addr := common.HexToAddress("0xdeadbeef")
+	copy(creds[12:], addr[:])
 
 	require.True(t, state2.IsBuilderWithdrawalCredential(creds, &cfg),
 		"0x03 prefix must be recognised as builder withdrawal credential")
@@ -38,6 +42,35 @@ func TestIsBuilderWithdrawalCredential_NotBuilder(t *testing.T) {
 		require.False(t, state2.IsBuilderWithdrawalCredential(creds, &cfg),
 			"prefix 0x%02x must NOT be classified as builder credential", prefix)
 	}
+}
+
+func TestGetProposerDependentRoot(t *testing.T) {
+	cfg := clparams.MainnetBeaconConfig
+	cfg.SlotsPerEpoch = 32
+	cfg.SlotsPerHistoricalRoot = 8192
+	cfg.MinSeedLookahead = 1
+	s := state2.New(&cfg)
+	s.SetSlot(100)
+	want := common.Hash{0x42}
+	s.SetBlockRootAt(63, want)
+
+	got, err := state2.GetProposerDependentRoot(s, 3)
+	require.NoError(t, err)
+	require.Equal(t, want, got)
+}
+
+func TestGetProposerDependentRootRejectsUnderflow(t *testing.T) {
+	cfg := clparams.MainnetBeaconConfig
+	cfg.SlotsPerEpoch = 32
+	cfg.MinSeedLookahead = 1
+	s := state2.New(&cfg)
+	s.SetSlot(100)
+
+	_, err := state2.GetProposerDependentRoot(s, 0)
+	require.Error(t, err)
+
+	_, err = state2.GetProposerDependentRoot(s, 1)
+	require.Error(t, err)
 }
 
 // TestApplyDepositForBuilder_NewBuilder_WithValidSignature verifies that a
@@ -60,7 +93,7 @@ func TestApplyDepositForBuilder_NewBuilder_WithValidSignature(t *testing.T) {
 	require.True(t, state2.IsBuilderWithdrawalCredential(creds, &cfg))
 
 	slot := uint64(100)
-	state2.ApplyDepositForBuilder(s, pubkey, creds, amount, sig, slot)
+	require.NoError(t, state2.ApplyDepositForBuilder(s, pubkey, creds, amount, sig, slot))
 
 	// Post-condition: builder was added.
 	newBuilders := s.GetBuilders()
@@ -68,7 +101,7 @@ func TestApplyDepositForBuilder_NewBuilder_WithValidSignature(t *testing.T) {
 
 	b := newBuilders.Get(0)
 	require.Equal(t, pubkey, b.Pubkey)
-	require.Equal(t, byte(0x03), b.Version, "builder Version must match creds[0]")
+	require.Equal(t, cfg.PayloadBuilderVersion, b.Version)
 	require.Equal(t, common.BytesToAddress(creds[12:]), b.ExecutionAddress)
 	require.Equal(t, amount, b.Balance)
 }
@@ -96,11 +129,65 @@ func TestApplyDepositForBuilder_TopUp(t *testing.T) {
 
 	topUpAmount := uint64(2e9)
 	// Signature is not checked for existing builders — zero sig is fine.
-	state2.ApplyDepositForBuilder(s, pubkey, creds, topUpAmount, common.Bytes96{}, 200)
+	require.NoError(t, state2.ApplyDepositForBuilder(s, pubkey, creds, topUpAmount, common.Bytes96{}, 200))
 
 	updatedBuilders := s.GetBuilders()
 	require.Equal(t, 1, updatedBuilders.Len(), "no new builder should be created on top-up")
 	require.Equal(t, uint64(1e9)+topUpAmount, updatedBuilders.Get(0).Balance)
+}
+
+func TestApplyDepositForBuilderTopUpSkipsNilBuilderEntries(t *testing.T) {
+	cfg := clparams.MainnetBeaconConfig
+
+	s := state2.New(&cfg)
+	builders := solid.NewStaticListSSZ[*cltypes.Builder](64, 73)
+
+	pubkey, creds, _, _ := makeValidBuilderDeposit(t, &cfg)
+	builders.Append(nil)
+	builders.Append(&cltypes.Builder{
+		Pubkey:            pubkey,
+		Version:           creds[0],
+		Balance:           1e9,
+		WithdrawableEpoch: cfg.FarFutureEpoch,
+	})
+	s.SetBuilders(builders)
+
+	require.NoError(t, state2.ApplyDepositForBuilder(s, pubkey, creds, 2e9, common.Bytes96{}, 200))
+
+	require.Nil(t, s.GetBuilders().Get(0))
+	require.Equal(t, uint64(3e9), s.GetBuilders().Get(1).Balance)
+}
+
+func TestApplyDepositForBuilderNewBuilderSkipsNilBuilderEntries(t *testing.T) {
+	cfg := clparams.MainnetBeaconConfig
+
+	s := state2.New(&cfg)
+	builders := solid.NewStaticListSSZ[*cltypes.Builder](64, 73)
+	builders.Append(nil)
+	s.SetBuilders(builders)
+
+	pubkey, creds, amount, sig := makeValidBuilderDeposit(t, &cfg)
+
+	require.NoError(t, state2.ApplyDepositForBuilder(s, pubkey, creds, amount, sig, 200))
+
+	require.Nil(t, s.GetBuilders().Get(0))
+	require.Equal(t, 2, s.GetBuilders().Len())
+	require.Equal(t, pubkey, s.GetBuilders().Get(1).Pubkey)
+	require.Equal(t, amount, s.GetBuilders().Get(1).Balance)
+}
+
+func TestIsBuilderPubkeySkipsNilBuilderEntries(t *testing.T) {
+	cfg := clparams.MainnetBeaconConfig
+
+	s := state2.New(&cfg)
+	builders := solid.NewStaticListSSZ[*cltypes.Builder](64, 73)
+	pubkey := common.Bytes48{0x11}
+	builders.Append(nil)
+	builders.Append(&cltypes.Builder{Pubkey: pubkey})
+	s.SetBuilders(builders)
+
+	require.True(t, state2.IsBuilderPubkey(s, pubkey))
+	require.False(t, state2.IsBuilderPubkey(s, common.Bytes48{0x22}))
 }
 
 // TestApplyDepositForBuilder_InvalidSignature_Ignored verifies that a new
@@ -119,10 +206,149 @@ func TestApplyDepositForBuilder_InvalidSignature_Ignored(t *testing.T) {
 	pubkey[0] = 0xAA
 	creds[0] = 0x03
 
-	state2.ApplyDepositForBuilder(s, pubkey, creds, 1e9, common.Bytes96{}, 0)
+	require.NoError(t, state2.ApplyDepositForBuilder(s, pubkey, creds, 1e9, common.Bytes96{}, 0))
 
 	require.Equal(t, 0, s.GetBuilders().Len(),
 		"invalid signature should prevent builder registration")
+}
+
+func TestApplyBuilderDepositRequestRejectsValidatorDepositSignature(t *testing.T) {
+	cfg := clparams.MainnetBeaconConfig
+	s := state2.New(&cfg)
+	s.SetBuilders(solid.NewStaticListSSZ[*cltypes.Builder](64, 73))
+
+	pubkey, creds, amount, sig := makeValidBuilderDeposit(t, &cfg)
+	require.NoError(t, state2.ApplyBuilderDepositRequest(s, &solid.BuilderDepositRequest{
+		PubKey:                pubkey,
+		WithdrawalCredentials: creds,
+		Amount:                amount,
+		Signature:             sig,
+	}))
+
+	require.Equal(t, 0, s.GetBuilders().Len())
+}
+
+func TestAddBuilderToRegistryRejectsFullRegistry(t *testing.T) {
+	cfg := clparams.MainnetBeaconConfig
+	cfg.BuilderRegistryLimit = 1
+	s := state2.New(&cfg)
+	builders := solid.NewStaticListSSZ[*cltypes.Builder](int(cfg.BuilderRegistryLimit), new(cltypes.Builder).EncodingSizeSSZ())
+	builders.Append(&cltypes.Builder{
+		Pubkey:            common.Bytes48{0x11},
+		Version:           cfg.PayloadBuilderVersion,
+		Balance:           1,
+		WithdrawableEpoch: cfg.FarFutureEpoch,
+	})
+	s.SetBuilders(builders)
+
+	err := state2.AddBuilderToRegistry(s, common.Bytes48{0x22}, cfg.PayloadBuilderVersion, common.Address{0x33}, 1, s.Slot())
+
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "builder registry full")
+	require.Equal(t, 1, s.GetBuilders().Len())
+	require.Equal(t, common.Bytes48{0x11}, s.GetBuilders().Get(0).Pubkey)
+}
+
+func TestApplyBuilderDepositRequestTopUpSweptExitedBuilderResetsWithdrawableEpoch(t *testing.T) {
+	cfg := clparams.MainnetBeaconConfig
+	s := state2.New(&cfg)
+	s.SetSlot(cfg.SlotsPerEpoch * 10)
+	builders := solid.NewStaticListSSZ[*cltypes.Builder](64, 73)
+	pubkey := common.Bytes48{0x11}
+	builders.Append(&cltypes.Builder{
+		Pubkey:            pubkey,
+		Version:           cfg.PayloadBuilderVersion,
+		Balance:           0,
+		WithdrawableEpoch: 1,
+	})
+	s.SetBuilders(builders)
+
+	require.NoError(t, state2.ApplyBuilderDepositRequest(s, &solid.BuilderDepositRequest{
+		PubKey: pubkey,
+		Amount: 25,
+	}))
+
+	builder := s.GetBuilders().Get(0)
+	require.Equal(t, uint64(25), builder.Balance)
+	require.Equal(t, uint64(10)+cfg.MinBuilderWithdrawabilityDelay, builder.WithdrawableEpoch)
+}
+
+func TestApplyBuilderDepositRequestTopUpUnsweptExitedBuilderResetsWithdrawableEpoch(t *testing.T) {
+	cfg := clparams.MainnetBeaconConfig
+	s := state2.New(&cfg)
+	s.SetSlot(cfg.SlotsPerEpoch * 10)
+	builders := solid.NewStaticListSSZ[*cltypes.Builder](64, 73)
+	pubkey := common.Bytes48{0x11}
+	builders.Append(&cltypes.Builder{
+		Pubkey:            pubkey,
+		Version:           cfg.PayloadBuilderVersion,
+		Balance:           10,
+		WithdrawableEpoch: 1,
+	})
+	s.SetBuilders(builders)
+
+	require.NoError(t, state2.ApplyBuilderDepositRequest(s, &solid.BuilderDepositRequest{
+		PubKey: pubkey,
+		Amount: 25,
+	}))
+
+	builder := s.GetBuilders().Get(0)
+	require.Equal(t, uint64(35), builder.Balance)
+	require.Equal(t, uint64(10)+cfg.MinBuilderWithdrawabilityDelay, builder.WithdrawableEpoch)
+}
+
+func TestBuilderHelpersRejectHugeIndex(t *testing.T) {
+	cfg := clparams.MainnetBeaconConfig
+	s := state2.New(&cfg)
+	builders := solid.NewStaticListSSZ[*cltypes.Builder](64, 73)
+	builders.Append(&cltypes.Builder{
+		Balance:           cfg.MinDepositAmount,
+		WithdrawableEpoch: cfg.FarFutureEpoch,
+	})
+	s.SetBuilders(builders)
+
+	require.False(t, state2.IsActiveBuilder(s, math.MaxUint64))
+	require.False(t, state2.CanBuilderCoverBid(s, math.MaxUint64, 1))
+}
+
+func TestApplyBuilderDepositRequestDoesNotOverflowBalance(t *testing.T) {
+	cfg := clparams.MainnetBeaconConfig
+	s := state2.New(&cfg)
+	builders := solid.NewStaticListSSZ[*cltypes.Builder](64, 73)
+	pubkey := common.Bytes48{0x11}
+	builders.Append(&cltypes.Builder{
+		Pubkey:            pubkey,
+		Version:           cfg.PayloadBuilderVersion,
+		Balance:           math.MaxUint64,
+		WithdrawableEpoch: cfg.FarFutureEpoch,
+	})
+	s.SetBuilders(builders)
+
+	err := state2.ApplyBuilderDepositRequest(s, &solid.BuilderDepositRequest{
+		PubKey: pubkey,
+		Amount: 1,
+	})
+
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "builder balance overflow")
+	require.Equal(t, uint64(math.MaxUint64), s.GetBuilders().Get(0).Balance)
+}
+
+func TestCanBuilderCoverBidRejectsPendingBalanceOverflow(t *testing.T) {
+	cfg := clparams.MainnetBeaconConfig
+	s := state2.New(&cfg)
+	builders := solid.NewStaticListSSZ[*cltypes.Builder](64, 73)
+	builders.Append(&cltypes.Builder{
+		Balance:           math.MaxUint64,
+		WithdrawableEpoch: cfg.FarFutureEpoch,
+	})
+	s.SetBuilders(builders)
+	withdrawals := solid.NewStaticListSSZ[*cltypes.BuilderPendingWithdrawal](64, new(cltypes.BuilderPendingWithdrawal).EncodingSizeSSZ())
+	withdrawals.Append(&cltypes.BuilderPendingWithdrawal{BuilderIndex: 0, Amount: math.MaxUint64})
+	withdrawals.Append(&cltypes.BuilderPendingWithdrawal{BuilderIndex: 0, Amount: 1})
+	s.SetBuilderPendingWithdrawals(withdrawals)
+
+	require.False(t, state2.CanBuilderCoverBid(s, 0, 1))
 }
 
 // ---------------------------------------------------------------------------
@@ -147,7 +373,7 @@ func makeValidBuilderDeposit(t *testing.T, cfg *clparams.BeaconChainConfig) (
 
 	// Build withdrawal credentials: 0x03 + 11 zero bytes + 20-byte address.
 	withdrawalCredentials[0] = byte(cfg.BuilderWithdrawalPrefix)
-	copy(withdrawalCredentials[12:], feeRecipient.Bytes())
+	copy(withdrawalCredentials[12:], feeRecipient[:])
 
 	amount = cfg.MinDepositAmount // 1e9 Gwei
 
@@ -168,7 +394,7 @@ func makeValidBuilderDeposit(t *testing.T, cfg *clparams.BeaconChainConfig) (
 	)
 	require.NoError(t, err)
 
-	signingRoot := utils.Sha256(msgHash[:], domain)
+	signingRoot := crypto.Sha256(msgHash[:], domain)
 
 	sigObj := privKey.Sign(signingRoot[:])
 	copy(signature[:], sigObj.Bytes())

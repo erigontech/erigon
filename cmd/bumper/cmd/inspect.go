@@ -74,6 +74,9 @@ func getNames(s *statecfg.SchemaGen) (res map[string]string, domains []string) {
 	res = make(map[string]string)
 	for _, f := range fields {
 		name, ftype := parseName(f.Name)
+		if ftype == "" {
+			continue
+		}
 		res[name] = ftype
 		domains = append(domains, name)
 	}

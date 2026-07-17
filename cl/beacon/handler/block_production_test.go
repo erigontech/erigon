@@ -19,6 +19,10 @@ package handler
 import (
 	"bytes"
 	"context"
+	"errors"
+	"math/big"
+	"net/http"
+	"net/http/httptest"
 	"testing"
 	"time"
 
@@ -39,7 +43,225 @@ import (
 	"github.com/erigontech/erigon/execution/tests/blockgen"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/node/gointerfaces/txpoolproto"
+	"github.com/erigontech/erigon/node/gointerfaces/typesproto"
 )
+
+func TestBlockBuilderWindowPreGloas(t *testing.T) {
+	cfg := &clparams.BeaconChainConfig{
+		SecondsPerSlot:   12,
+		IntervalsPerSlot: 3,
+	}
+	slotStart := time.Unix(100, 0)
+	now := slotStart
+
+	window := computeBlockBuilderWindow(now, slotStart, cfg, clparams.ElectraVersion)
+
+	// Attestation deadline is 4s; polling stops a quarter of it (1s) earlier, at 3s.
+	require.Equal(t, slotStart.Add(3*time.Second).Add(-minPayloadPollingWindow), window.firstGetAt)
+	require.Equal(t, slotStart.Add(3*time.Second), window.pollUntil)
+}
+
+func TestBlockBuilderWindowGloas(t *testing.T) {
+	cfg := &clparams.BeaconChainConfig{
+		SecondsPerSlot:   12,
+		IntervalsPerSlot: 3,
+	}
+	slotStart := time.Unix(100, 0)
+	now := slotStart
+
+	window := computeBlockBuilderWindow(now, slotStart, cfg, clparams.GloasVersion)
+
+	// Attestation deadline is 3s; polling stops a quarter of it (750ms) earlier, at 2.25s.
+	require.Equal(t, slotStart.Add(2250*time.Millisecond).Add(-minPayloadPollingWindow), window.firstGetAt)
+	require.Equal(t, slotStart.Add(2250*time.Millisecond), window.pollUntil)
+}
+
+func TestPublishBlindedBlocksRejectsGloas(t *testing.T) {
+	_, _, _, _, _, h, _, _, _, _ := setupTestingHandler(t, clparams.ElectraVersion, log.Root(), true)
+	req := httptest.NewRequest(http.MethodPost, "/eth/v2/beacon/blinded_blocks", bytes.NewReader(nil))
+	req.Header.Set("Eth-Consensus-Version", clparams.GloasVersion.String())
+
+	_, err := h.publishBlindedBlocks(httptest.NewRecorder(), req, 2)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), cltypes.ErrGloasCannotBlind.Error())
+}
+
+func TestBlockBuilderWindowLateStartKeepsPublicationMargin(t *testing.T) {
+	cfg := &clparams.BeaconChainConfig{
+		SecondsPerSlot:   12,
+		IntervalsPerSlot: 3,
+	}
+	slotStart := time.Unix(100, 0)
+	now := slotStart.Add(2950 * time.Millisecond)
+
+	window := computeBlockBuilderWindow(now, slotStart, cfg, clparams.ElectraVersion)
+
+	// A late request clamps the first poll up to now but still stops at 3s, preserving the margin.
+	require.Equal(t, now, window.firstGetAt)
+	require.Equal(t, slotStart.Add(3*time.Second), window.pollUntil)
+}
+
+func TestBlockBuilderWindowLateRequestGrabsImmediately(t *testing.T) {
+	cfg := &clparams.BeaconChainConfig{
+		SecondsPerSlot:   12,
+		IntervalsPerSlot: 3,
+	}
+	slotStart := time.Unix(100, 0)
+	now := slotStart.Add(5 * time.Second)
+
+	window := computeBlockBuilderWindow(now, slotStart, cfg, clparams.GloasVersion)
+
+	require.Equal(t, now, window.firstGetAt)
+	require.Equal(t, now, window.pollUntil)
+}
+
+func TestBlockBuilderWindowReservesPublicationMargin(t *testing.T) {
+	cfg := &clparams.BeaconChainConfig{
+		SecondsPerSlot:   12,
+		IntervalsPerSlot: 3,
+	}
+	slotStart := time.Unix(100, 0)
+
+	for _, tc := range []struct {
+		name          string
+		version       clparams.StateVersion
+		deadline      time.Duration
+		wantPollUntil time.Duration
+	}{
+		{"pre-gloas", clparams.ElectraVersion, 4 * time.Second, 3 * time.Second},
+		{"gloas", clparams.GloasVersion, 3 * time.Second, 2250 * time.Millisecond},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			window := computeBlockBuilderWindow(slotStart, slotStart, cfg, tc.version)
+			require.Equal(t, slotStart.Add(tc.wantPollUntil), window.pollUntil)
+			require.True(t, window.pollUntil.Before(slotStart.Add(tc.deadline)),
+				"polling must stop before the attestation deadline to leave publication margin")
+		})
+	}
+}
+
+func TestShouldRetryGetPayloadStopsAtDeadline(t *testing.T) {
+	deadline := time.Unix(100, 0)
+
+	require.True(t, shouldRetryGetPayload(deadline.Add(-time.Nanosecond), deadline))
+	require.False(t, shouldRetryGetPayload(deadline, deadline))
+	require.False(t, shouldRetryGetPayload(deadline.Add(time.Nanosecond), deadline))
+}
+
+func TestPollAssembledPayloadReturnsReadyPayload(t *testing.T) {
+	now := time.Now()
+	window := blockBuilderWindow{firstGetAt: now.Add(-time.Millisecond), pollUntil: now.Add(time.Second)}
+	want := &cltypes.Eth1Block{}
+	calls := 0
+	payload, _, _, _, ok := pollAssembledPayload(context.Background(), window, time.Millisecond,
+		func() (*cltypes.Eth1Block, *engine_types.BlobsBundle, *typesproto.RequestsBundle, *big.Int, error) {
+			calls++
+			return want, nil, nil, nil, nil
+		})
+	require.True(t, ok)
+	require.Same(t, want, payload)
+	require.Equal(t, 1, calls)
+}
+
+func TestPollAssembledPayloadRetriesWhileBusy(t *testing.T) {
+	now := time.Now()
+	window := blockBuilderWindow{firstGetAt: now, pollUntil: now.Add(time.Second)}
+	want := &cltypes.Eth1Block{}
+	calls := 0
+	payload, _, _, _, ok := pollAssembledPayload(context.Background(), window, time.Millisecond,
+		func() (*cltypes.Eth1Block, *engine_types.BlobsBundle, *typesproto.RequestsBundle, *big.Int, error) {
+			calls++
+			if calls < 3 {
+				return nil, nil, nil, nil, nil
+			}
+			return want, nil, nil, nil, nil
+		})
+	require.True(t, ok)
+	require.Same(t, want, payload)
+	require.Equal(t, 3, calls)
+}
+
+func TestPollAssembledPayloadRetriesOnError(t *testing.T) {
+	now := time.Now()
+	window := blockBuilderWindow{firstGetAt: now, pollUntil: now.Add(time.Second)}
+	want := &cltypes.Eth1Block{}
+	calls := 0
+	payload, _, _, _, ok := pollAssembledPayload(context.Background(), window, time.Millisecond,
+		func() (*cltypes.Eth1Block, *engine_types.BlobsBundle, *typesproto.RequestsBundle, *big.Int, error) {
+			calls++
+			if calls == 1 {
+				return nil, nil, nil, nil, errors.New("EL busy")
+			}
+			return want, nil, nil, nil, nil
+		})
+	require.True(t, ok)
+	require.Same(t, want, payload)
+	require.Equal(t, 2, calls)
+}
+
+func TestPollAssembledPayloadStopsAtDeadline(t *testing.T) {
+	now := time.Now()
+	window := blockBuilderWindow{firstGetAt: now, pollUntil: now.Add(50 * time.Millisecond)}
+	calls := 0
+	payload, _, _, _, ok := pollAssembledPayload(context.Background(), window, time.Millisecond,
+		func() (*cltypes.Eth1Block, *engine_types.BlobsBundle, *typesproto.RequestsBundle, *big.Int, error) {
+			calls++
+			return nil, nil, nil, nil, nil
+		})
+	require.False(t, ok)
+	require.Nil(t, payload)
+	require.NotZero(t, calls)
+}
+
+func TestPollAssembledPayloadLateRequestGrabsOnce(t *testing.T) {
+	past := time.Now().Add(-time.Second)
+	window := blockBuilderWindow{firstGetAt: past, pollUntil: past}
+	calls := 0
+	_, _, _, _, ok := pollAssembledPayload(context.Background(), window, time.Millisecond,
+		func() (*cltypes.Eth1Block, *engine_types.BlobsBundle, *typesproto.RequestsBundle, *big.Int, error) {
+			calls++
+			return nil, nil, nil, nil, nil
+		})
+	require.False(t, ok)
+	require.Equal(t, 1, calls)
+}
+
+func TestPollAssembledPayloadReturnsOnContextCancel(t *testing.T) {
+	now := time.Now()
+	window := blockBuilderWindow{firstGetAt: now.Add(time.Hour), pollUntil: now.Add(time.Hour)}
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	calls := 0
+	_, _, _, _, ok := pollAssembledPayload(ctx, window, time.Millisecond,
+		func() (*cltypes.Eth1Block, *engine_types.BlobsBundle, *typesproto.RequestsBundle, *big.Int, error) {
+			calls++
+			return nil, nil, nil, nil, nil
+		})
+	require.False(t, ok)
+	require.Zero(t, calls)
+}
+
+func TestSetupHeaderResponseForBlockProductionGloasPayloadIncluded(t *testing.T) {
+	h := &ApiHandler{}
+	rr := httptest.NewRecorder()
+
+	h.setupHeaderReponseForBlockProduction(rr, clparams.GloasVersion, false, true, 123, 456)
+
+	require.Equal(t, "gloas", rr.Header().Get("Eth-Consensus-Version"))
+	require.Equal(t, "123", rr.Header().Get("Eth-Execution-Payload-Value"))
+	require.Equal(t, "456", rr.Header().Get("Eth-Consensus-Block-Value"))
+	require.Equal(t, "false", rr.Header().Get("Eth-Execution-Payload-Blinded"))
+	require.Equal(t, "true", rr.Header().Get("Eth-Execution-Payload-Included"))
+}
+
+func TestSetupHeaderResponseForBlockProductionPreGloasOmitsPayloadIncluded(t *testing.T) {
+	h := &ApiHandler{}
+	rr := httptest.NewRecorder()
+
+	h.setupHeaderReponseForBlockProduction(rr, clparams.ElectraVersion, false, true, 123, 456)
+
+	require.Empty(t, rr.Header().Get("Eth-Execution-Payload-Included"))
+}
 
 // TestCaplinBlockProductionWithWithdrawalRequest tests Caplin's produceBeaconBody
 // against a real Erigon execution layer. A withdrawal request transaction is
@@ -234,8 +456,8 @@ func TestCaplinBlockProductionGlamsterdamSlotNumber(t *testing.T) {
 	postState.SetLatestExecutionPayloadHeader(elHeader)
 	// GLOAS uses GetLatestBlockHash() instead of LatestExecutionPayloadHeader().BlockHash
 	postState.SetLatestBlockHash(elHead.Hash())
-	// GLOAS deferred payload: set LatestExecutionPayloadBid so that HasEnvelope &&
-	// ShouldExtendPayload (both returning true in the mock) select bid.BlockHash as the EL head.
+	// GLOAS deferred payload: set LatestExecutionPayloadBid so that GetHeadPayloadStatus()==FULL &&
+	// ShouldBuildOnFull (both returning true in the mock) select bid.BlockHash as the EL head.
 	postState.SetLatestExecutionPayloadBid(&cltypes.ExecutionPayloadBid{
 		BlockHash:       elHead.Hash(),
 		ParentBlockHash: elHead.Hash(),
@@ -252,11 +474,11 @@ func TestCaplinBlockProductionGlamsterdamSlotNumber(t *testing.T) {
 	baseBlockRoot, err := baseBlock.HashSSZ()
 	require.NoError(t, err)
 
-	// GLOAS deferred payload: the mock returns HasEnvelope=true and ShouldExtendPayload=true,
+	// GLOAS deferred payload: the mock returns GetHeadPayloadStatus=FULL and ShouldBuildOnFull=true,
 	// so block production expects an envelope on disk. Provide one with empty ExecutionRequests.
 	fcu.Envelopes[baseBlockRoot] = &cltypes.SignedExecutionPayloadEnvelope{
 		Message: &cltypes.ExecutionPayloadEnvelope{
-			ExecutionRequests: &cltypes.ExecutionRequests{},
+			ExecutionRequests: cltypes.NewExecutionRequestsWithVersion(h.beaconChainCfg, clparams.GloasVersion),
 		},
 	}
 

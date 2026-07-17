@@ -58,8 +58,9 @@ jobs:
       DASHBOARDS_GIT_CONFIG: ${{ secrets.DASHBOARDS_GIT_CONFIG }}
     steps:
     - name: Clone erigon from ${{ env.ERIGON_BRANCH }} branch
-      uses: actions/checkout@v6
+      uses: actions/checkout@v7
       with:
+        persist-credentials: false
         ref: ${{ env.ERIGON_BRANCH }}
         fetch-depth: 1
         path: ${{ github.workspace }}/erigon
@@ -100,15 +101,17 @@ jobs:
 
       - name: Bye ${{ github.actor }}
         if: always()
+        env:
+          ACTOR: ${{ github.actor }}
         run: |
-          set +x 
+          set +x
           if [ "${{ needs.preparation.result }}" == "success" ] && [ "${{ needs.backup_dashboard.result }}" == "success" ]; then
             echo -e "${{ env.YELLOW }} --------------------------------------------------------------------------------------------------------------------- ${{ env.NOCOLOUR }}"       
-            echo -e "${{ env.YELLOW }}         *** It was a true pleasure to serve you ${{ github.actor }}, SEE YOU NEXT TIME!                               ${{ env.NOCOLOUR }}"      
+            echo -e "${{ env.YELLOW }}         *** It was a true pleasure to serve you $ACTOR, SEE YOU NEXT TIME!                               ${{ env.NOCOLOUR }}"      
             echo -e "${{ env.YELLOW }} --------------------------------------------------------------------------------------------------------------------- ${{ env.NOCOLOUR }}"       
           else
             echo -e "${{ env.RED }} --------------------------------------------------------------------------------------------------------------------- ${{ env.RED }}"       
-            echo -e "${{ env.RED }}         *** Sorry ${{ github.actor }}, it seems there was an error this time: just fix it and COME BACK!              ${{ env.RED }}"      
+            echo -e "${{ env.RED }}         *** Sorry $ACTOR, it seems there was an error this time: just fix it and COME BACK!              ${{ env.RED }}"      
             echo -e "${{ env.RED }} --------------------------------------------------------------------------------------------------------------------- ${{ env.RED }}"       
           fi
           

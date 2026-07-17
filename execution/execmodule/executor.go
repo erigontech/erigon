@@ -24,8 +24,8 @@ import (
 	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/consensuschain"
+	"github.com/erigontech/erigon/db/dbservices"
 	"github.com/erigontech/erigon/db/kv"
-	"github.com/erigontech/erigon/db/services"
 	dbstate "github.com/erigontech/erigon/db/state"
 	"github.com/erigontech/erigon/db/state/execctx"
 	"github.com/erigontech/erigon/execution/chain"
@@ -43,7 +43,7 @@ import (
 type PipelineExecutor struct {
 	sync                    *stagedsync.Sync
 	db                      kv.TemporalRwDB
-	blockReader             services.FullBlockReader
+	blockReader             dbservices.FullBlockReader
 	chainConfig             *chain.Config
 	engine                  rules.Engine
 	validationSync          *stagedsync.Sync
@@ -60,7 +60,7 @@ type PipelineExecutor struct {
 func NewPipelineExecutor(
 	sync *stagedsync.Sync,
 	db kv.TemporalRwDB,
-	blockReader services.FullBlockReader,
+	blockReader dbservices.FullBlockReader,
 	chainConfig *chain.Config,
 	engine rules.Engine,
 	validationSync *stagedsync.Sync,
@@ -115,13 +115,8 @@ func (pe *PipelineExecutor) RunPrune(ctx context.Context, tx kv.RwTx, initialCyc
 	return pe.sync.RunPrune(ctx, tx, initialCycle, timeout)
 }
 
-// CommitCycleFn is called after PruneFn to persist the iteration's writes
-// and refresh the loop's tx. Implementations typically open a fresh RwTx,
-// flush+clear the SharedDomains into it, commit, and re-open the read-side
-// tx. hasMore tells the impl whether another iteration follows — useful to
-// skip refreshing the tx on the final iter. May return (nil, nil) to leave
-// the loop's tx unchanged.
-type CommitCycleFn func(ctx context.Context, hasMore bool, sd *execctx.SharedDomains) (kv.TemporalRwTx, error)
+// Commits sd and, if another iteration follows, returns a fresh tx+SD to run it on; (nil,nil,nil) leaves the loop unchanged.
+type CommitCycleFn func(ctx context.Context, hasMore bool, sd *execctx.SharedDomains) (kv.TemporalRwTx, *execctx.SharedDomains, error)
 
 // PruneFn replaces the in-loop pe.sync.RunPrune call. It is called after
 // pe.sync.Run and before CommitCycle. Implementations typically close the
@@ -142,35 +137,44 @@ type RunLoopConfig struct {
 
 // RunLoop runs sync.Run → PruneFn → ShouldBreak → CommitCycle in a hasMore loop.
 // Exits when Run returns hasMore=false, ShouldBreak returns true, or on error.
-func (pe *PipelineExecutor) RunLoop(ctx context.Context, sd *execctx.SharedDomains, tx kv.TemporalRwTx, cfg RunLoopConfig) (kv.TemporalRwTx, error) {
+// Returns the final tx and operational SD, owned by the caller (commit if CommitCycle didn't, then close). Intermediate SDs are closed here.
+func (pe *PipelineExecutor) RunLoop(ctx context.Context, sd *execctx.SharedDomains, tx kv.TemporalRwTx, cfg RunLoopConfig) (kv.TemporalRwTx, *execctx.SharedDomains, error) {
 	stop := false
 	for hasMore := true; hasMore && !stop; {
 		var err error
 		hasMore, err = pe.sync.Run(sd, tx, cfg.InitialCycle, cfg.FirstCycle)
 		if err != nil {
-			return tx, err
+			return tx, sd, err
 		}
 
 		if err := cfg.PruneFn(ctx, cfg.InitialCycle, tx, sd); err != nil {
-			return tx, err
+			return tx, sd, err
 		}
 
 		if cfg.ShouldBreak != nil {
 			stop, err = cfg.ShouldBreak(tx)
 			if err != nil {
-				return tx, err
+				return tx, sd, err
 			}
 		}
 
-		newTx, err := cfg.CommitCycle(ctx, hasMore, sd)
+		newTx, newSD, err := cfg.CommitCycle(ctx, hasMore, sd)
 		if err != nil {
-			return tx, err
+			return tx, sd, err
 		}
 		if newTx != nil {
 			tx = newTx
 		}
+		// CommitCycle committed sd and handed back a fresh one for the next
+		// iteration: close the spent SD and continue on the fresh one. The exit
+		// SD (newSD == nil) is returned for the caller to finalize, never closed
+		// here.
+		if newSD != nil {
+			sd.Close()
+			sd = newSD
+		}
 	}
-	return tx, nil
+	return tx, sd, nil
 }
 
 // ProcessFrozenBlocks runs the pipeline over snapshot blocks at startup.
@@ -203,7 +207,7 @@ func (pe *PipelineExecutor) ProcessFrozenBlocks(ctx context.Context, hook *stage
 	if err != nil {
 		return err
 	}
-	defer doms.Close()
+	defer func() { doms.Close() }() // RunLoop rotates doms; close whichever is current at exit
 	doms.SetInMemHistoryReads(inMemHistoryReads)
 
 	var finishStageBeforeSync uint64
@@ -217,18 +221,15 @@ func (pe *PipelineExecutor) ProcessFrozenBlocks(ctx context.Context, hook *stage
 		}
 	}
 
-	tx, err = pe.RunLoop(ctx, doms, tx, RunLoopConfig{
+	tx, doms, err = pe.RunLoop(ctx, doms, tx, RunLoopConfig{
 		InitialCycle: true,
 		PruneFn: func(ctx context.Context, initialCycle bool, rwtx kv.TemporalRwTx, sd *execctx.SharedDomains) error {
 			return pe.sync.RunPrune(ctx, rwtx, initialCycle, 0)
 		},
-		CommitCycle: func(ctx context.Context, hasMore bool, sd *execctx.SharedDomains) (kv.TemporalRwTx, error) {
-			if err := sd.Flush(ctx, tx); err != nil {
-				return nil, fmt.Errorf("ProcessFrozenBlocks: flush: %w", err)
-			}
-			sd.ClearRam(true)
-			if err := tx.Commit(); err != nil {
-				return nil, err
+		CommitCycle: func(ctx context.Context, hasMore bool, sd *execctx.SharedDomains) (kv.TemporalRwTx, *execctx.SharedDomains, error) {
+			// The spent SD is closed by RunLoop; a fresh one opens for the next cycle.
+			if err := sd.Commit(ctx, tx); err != nil {
+				return nil, nil, fmt.Errorf("ProcessFrozenBlocks: flush+commit: %w", err)
 			}
 			// Prune runs via PruneFn (sync.RunPrune); kick file building so
 			// snapshot files advance as PFB processes frozen blocks.
@@ -239,14 +240,19 @@ func (pe *PipelineExecutor) ProcessFrozenBlocks(ctx context.Context, hook *stage
 			}
 			// Last iter: skip BeginTemporalRw — no next iter will use it.
 			if !hasMore {
-				return nil, nil
+				return nil, nil, nil
 			}
 			newTx, err := pe.db.BeginTemporalRw(ctx) //nolint:gocritic
 			if err != nil {
-				return nil, err
+				return nil, nil, err
 			}
 			tx = newTx
-			return newTx, nil
+			newSD, err := execctx.NewSharedDomains(ctx, newTx, pe.logger)
+			if err != nil {
+				return nil, nil, err
+			}
+			newSD.SetInMemHistoryReads(inMemHistoryReads)
+			return newTx, newSD, nil
 		},
 		ShouldBreak: func(curTx kv.TemporalRwTx) (bool, error) {
 			if pe.blockReader.FrozenBlocks() > 0 {

@@ -82,14 +82,14 @@ func (cc *ExecutionClientDirect) NewPayload(
 		return PayloadStatusInvalidated, err
 	}
 
-	startInsertBlockAndWait := time.Now()
-	if err := cc.chainRW.InsertBlockAndWait(ctx, types.NewBlockFromStorage(payload.BlockHash, header, txs, nil, body.Withdrawals)); err != nil {
+	startInsertBlock := time.Now()
+	if err := cc.chainRW.InsertBlock(ctx, types.NewBlockFromStorageWithBinaryTxs(payload.BlockHash, header, txs, body.Transactions, nil, body.Withdrawals), nil); err != nil {
 		if errors.Is(err, types.ErrBlockExceedsMaxRlpSize) {
 			return PayloadStatusInvalidated, err
 		}
 		return PayloadStatusNone, err
 	}
-	monitor.ObserveExecutionClientInsertingBlocks(startInsertBlockAndWait)
+	monitor.ObserveExecutionClientInsertingBlocks(startInsertBlock)
 
 	headHeader := cc.chainRW.CurrentHeader(ctx)
 	if headHeader == nil || header.Number.Uint64() > headHeader.Number.Uint64()+1 {
@@ -140,7 +140,7 @@ func (cc *ExecutionClientDirect) ForkChoiceUpdate(ctx context.Context, finalized
 	// where the CL and EL share the same process.
 	idBytes := make([]byte, 8)
 	var id uint64
-	for attempt := 0; attempt < 30; attempt++ {
+	for range 30 {
 		id, err = cc.chainRW.AssembleBlock(head, attr)
 		if err == nil {
 			break
@@ -158,15 +158,12 @@ func (cc *ExecutionClientDirect) SupportInsertion() bool {
 	return true
 }
 
-func (cc *ExecutionClientDirect) InsertBlocks(ctx context.Context, blocks []*types.Block, wait bool) error {
-	if wait {
-		return cc.chainRW.InsertBlocksAndWait(ctx, blocks)
-	}
-	return cc.chainRW.InsertBlocks(ctx, blocks)
+func (cc *ExecutionClientDirect) InsertBlocks(ctx context.Context, blocks []*types.Block, bals [][]byte) error {
+	return cc.chainRW.InsertBlocks(ctx, blocks, bals)
 }
 
-func (cc *ExecutionClientDirect) InsertBlock(ctx context.Context, blk *types.Block) error {
-	return cc.chainRW.InsertBlockAndWait(ctx, blk)
+func (cc *ExecutionClientDirect) InsertBlock(ctx context.Context, blk *types.Block, bal []byte) error {
+	return cc.chainRW.InsertBlock(ctx, blk, bal)
 }
 
 func (cc *ExecutionClientDirect) CurrentHeader(ctx context.Context) (*types.Header, error) {
@@ -233,4 +230,9 @@ func (cc *ExecutionClientDirect) GetBlobs(ctx context.Context, versionedHashes [
 		proofs[i] = bwp.Proofs
 	}
 	return blobs, proofs, nil
+}
+
+// In direct mode the execution layer is the in-process Erigon node, so report it directly.
+func (cc *ExecutionClientDirect) GetClientVersionV1(_ context.Context, _ *engine_types.ClientVersionV1) ([]engine_types.ClientVersionV1, error) {
+	return []engine_types.ClientVersionV1{engine_types.LocalClientVersionV1()}, nil
 }

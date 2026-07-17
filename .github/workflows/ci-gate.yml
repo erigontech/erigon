@@ -2,11 +2,6 @@ name: CI Gate
 
 on:
   pull_request:
-    branches:
-      - main
-      - 'release/**'
-      - performance
-      - performance-stable
     types:
       - opened
       - reopened
@@ -18,6 +13,8 @@ on:
 concurrency:
   # For PRs: one run per branch; new push cancels the old run.
   # For push/merge_group/workflow_dispatch: unique per run so runs never cancel each other.
+  # merge_group orphans from queue reshuffles are cancelled by
+  # cancel-orphaned-merge-queue-runs.yml when the ephemeral branch is deleted.
   group: >-
     ${{
       github.event_name == 'pull_request' &&
@@ -28,11 +25,14 @@ concurrency:
 
 # actions: write lets merge-queue runs call `gh run cancel` on a leaf
 # failure so the gate doesn't stall waiting for still-running siblings.
+# pull-requests: write lets the gate call the `dequeuePullRequest` GraphQL
+# mutation on its own merge-group PR when a required check actually fails,
+# since GitHub does not auto-remove UNMERGEABLE entries from the queue.
 # Reusable leaves inherit these from the caller.
 permissions:
   actions: write
   contents: read
-  pull-requests: read
+  pull-requests: write
 
 jobs:
   # Fast path: detect whether any non-docs files changed.
@@ -43,6 +43,7 @@ jobs:
   # docs/site/** is touched.
   changes:
     runs-on: ubuntu-latest
+    timeout-minutes: 60
     outputs:
       code: ${{ steps.check.outputs.code }}
       docs_site: ${{ steps.check.outputs.docs_site }}
@@ -173,24 +174,65 @@ jobs:
       - repro
       - sonar
     runs-on: ubuntu-latest
+    timeout-minutes: 60
     steps:
+      # cancelled() is only valid in `if:`, so capture it as a step output for
+      # the gate logic below to read.
+      - name: Detect run cancellation
+        id: cancelflag
+        if: cancelled()
+        run: echo "cancelled=true" >> "$GITHUB_OUTPUT"
+
+      - name: Checkout
+        if: always()
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
       - name: Check all required jobs
+        if: always()
         env:
           GH_TOKEN: ${{ github.token }}
+          NEEDS: ${{ toJSON(needs) }}
+          RUN_CANCELLED: ${{ steps.cancelflag.outputs.cancelled }}
+        run: bash .github/workflows/scripts/ci-gate-check.sh
+
+      # GitHub does not auto-remove entries left UNMERGEABLE by a failed check,
+      # so dequeue explicitly; the gate only fails the job on a real failure.
+      - name: Dequeue failed merge-queue PR
+        if: failure() && github.event_name == 'merge_group'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REF: ${{ github.ref_name }}
+          OWNER: ${{ github.repository_owner }}
+          REPO_NAME: ${{ github.event.repository.name }}
         run: |
-          echo '${{ toJSON(needs) }}' > needs.json
-          failed=$(jq -r 'to_entries[] | select(.value.result == "failure" or .value.result == "cancelled") | .key' needs.json)
-          if [ -n "$failed" ]; then
-            echo "The following gate jobs failed or were cancelled:"
-            echo "$failed"
-            jobs=$(gh api "repos/${{ github.repository }}/actions/runs/${{ github.run_id }}/jobs" --paginate) || true
-            # The leaf that fast-cancelled the run is the true root cause; other failed steps may be collateral from that cancellation.
-            root=$(echo "$jobs" | jq -r '.jobs[] | select(any(.steps[]?; .name == "Cancel workflow run on failure" and .conclusion == "success")) | "::error title=CI root cause::" + .name + " — failed step: " + ([.steps[] | select(.conclusion == "failure") | .name] | join("; "))' 2>/dev/null || true)
-            if [ -z "$root" ]; then
-              root=$(echo "$jobs" | jq -r '.jobs[] | select(.name != "ci-gate") | select(any(.steps[]?; .conclusion == "failure")) | "::error title=CI root cause::" + .name + " — failed step: " + ([.steps[] | select(.conclusion == "failure") | .name] | join("; "))' 2>/dev/null || true)
-            fi
-            echo "Root-cause job(s):"
-            echo "$root"
-            exit 1
+          pr_number=$(echo "$REF" | grep -oE 'pr-[0-9]+' | head -1 | cut -d- -f2)
+          if [ -z "$pr_number" ]; then
+            echo "::warning::Could not parse PR number from ref $REF"
+            exit 0
           fi
-          echo "All required jobs passed or were skipped."
+          # $owner/$name/$number/$id in the query strings are GraphQL variables, not shell.
+          # shellcheck disable=SC2016
+          pr_id=$(gh api graphql \
+            -F owner="$OWNER" \
+            -F name="$REPO_NAME" \
+            -F number="$pr_number" \
+            -f query='query($owner: String!, $name: String!, $number: Int!) {
+              repository(owner: $owner, name: $name) {
+                pullRequest(number: $number) { id }
+              }
+            }' --jq '.data.repository.pullRequest.id')
+          if [ -z "$pr_id" ] || [ "$pr_id" = "null" ]; then
+            echo "::warning::Could not resolve PR #$pr_number to a GraphQL node ID"
+            exit 0
+          fi
+          echo "Dequeuing PR #$pr_number ($pr_id) after ci-gate failure"
+          # shellcheck disable=SC2016
+          gh api graphql \
+            -F id="$pr_id" \
+            -f query='mutation($id: ID!) {
+              dequeuePullRequest(input: {id: $id}) {
+                mergeQueueEntry { position }
+              }
+            }' || echo "::warning::dequeuePullRequest mutation failed (already dequeued, or insufficient permissions)"

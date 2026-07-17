@@ -30,6 +30,7 @@ import (
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
 	"github.com/erigontech/erigon/cl/phase1/core/state"
+	"github.com/erigontech/erigon/cl/phase1/execution_client"
 	"github.com/erigontech/erigon/cl/phase1/forkchoice"
 	"github.com/erigontech/erigon/cl/phase1/forkchoice/mock_services"
 	"github.com/erigontech/erigon/cl/pool"
@@ -174,6 +175,73 @@ func TestAggregateAndProofInvalidCommittee(t *testing.T) {
 	fcu.Headers[agg.SignedAggregateAndProof.Message.Aggregate.Data.BeaconBlockRoot] = &cltypes.BeaconBlockHeader{}
 	agg.SignedAggregateAndProof.Message.AggregatorIndex = 12453224
 	require.Error(t, aggService.ProcessMessage(context.Background(), nil, agg))
+}
+
+func TestAggregateAndProofAllowsNextEpochWhenForkchoiceHasSeenIt(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	defer ctrl.Finish()
+
+	agg, s := getAggregateAndProofAndState(t)
+	nextEpochSlot := s.Slot() + clparams.MainnetBeaconConfig.SlotsPerEpoch
+	nextEpoch := nextEpochSlot / clparams.MainnetBeaconConfig.SlotsPerEpoch
+	agg.SignedAggregateAndProof.Message.Aggregate.Data.Slot = nextEpochSlot
+	agg.SignedAggregateAndProof.Message.Aggregate.Data.Source.Epoch = nextEpoch - 1
+	agg.SignedAggregateAndProof.Message.Aggregate.Data.Target.Epoch = nextEpoch
+
+	aggService, sd, fcu := setupAggregateAndProofTest(t)
+	sd.OnHeadState(s)
+	fcu.HighestSeenVal = nextEpochSlot
+	fcu.FinalizedCheckpointVal = s.FinalizedCheckpoint()
+	fcu.Ancestors[s.FinalizedCheckpoint().Epoch*clparams.MainnetBeaconConfig.SlotsPerEpoch] = forkchoice.ForkChoiceNode{Root: s.FinalizedCheckpoint().Root}
+	fcu.Ancestors[nextEpochSlot] = forkchoice.ForkChoiceNode{Root: agg.SignedAggregateAndProof.Message.Aggregate.Data.Target.Root}
+	fcu.Headers[agg.SignedAggregateAndProof.Message.Aggregate.Data.BeaconBlockRoot] = &cltypes.BeaconBlockHeader{}
+	committee, err := s.GetBeaconCommitee(nextEpochSlot, agg.SignedAggregateAndProof.Message.Aggregate.Data.CommitteeIndex)
+	require.NoError(t, err)
+	require.NotEmpty(t, committee)
+	agg.SignedAggregateAndProof.Message.AggregatorIndex = committee[0]
+
+	err = aggService.ProcessMessage(context.Background(), nil, agg)
+	require.NoError(t, err)
+}
+
+func TestAggregateAndProofRejectsNextEpochBeforeForkchoiceHasSeenIt(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	defer ctrl.Finish()
+
+	agg, s := getAggregateAndProofAndState(t)
+	nextEpochSlot := s.Slot() + clparams.MainnetBeaconConfig.SlotsPerEpoch
+	nextEpoch := nextEpochSlot / clparams.MainnetBeaconConfig.SlotsPerEpoch
+	agg.SignedAggregateAndProof.Message.Aggregate.Data.Slot = nextEpochSlot
+	agg.SignedAggregateAndProof.Message.Aggregate.Data.Source.Epoch = nextEpoch - 1
+	agg.SignedAggregateAndProof.Message.Aggregate.Data.Target.Epoch = nextEpoch
+
+	aggService, sd, fcu := setupAggregateAndProofTest(t)
+	sd.OnHeadState(s)
+	fcu.HighestSeenVal = s.Slot()
+
+	err := aggService.ProcessMessage(context.Background(), nil, agg)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "epoch outside validation range")
+}
+
+func TestAggregateAndProofRejectsBeyondNextEpochDespiteForkchoiceHavingSeenIt(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	defer ctrl.Finish()
+
+	agg, s := getAggregateAndProofAndState(t)
+	beyondNextEpochSlot := s.Slot() + 2*clparams.MainnetBeaconConfig.SlotsPerEpoch
+	beyondNextEpoch := beyondNextEpochSlot / clparams.MainnetBeaconConfig.SlotsPerEpoch
+	agg.SignedAggregateAndProof.Message.Aggregate.Data.Slot = beyondNextEpochSlot
+	agg.SignedAggregateAndProof.Message.Aggregate.Data.Source.Epoch = beyondNextEpoch - 1
+	agg.SignedAggregateAndProof.Message.Aggregate.Data.Target.Epoch = beyondNextEpoch
+
+	aggService, sd, fcu := setupAggregateAndProofTest(t)
+	sd.OnHeadState(s)
+	fcu.HighestSeenVal = beyondNextEpochSlot
+
+	err := aggService.ProcessMessage(context.Background(), nil, agg)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "epoch outside validation range")
 }
 
 func TestAggregateAndProofAncestorMissing(t *testing.T) {
@@ -409,6 +477,7 @@ func TestAggregateAndProofGloasAllowIndex1WhenSlotsDiffer(t *testing.T) {
 
 	// Set envelope as seen/validated (required for index=1)
 	fcu.Envelopes[blockRoot] = &cltypes.SignedExecutionPayloadEnvelope{}
+	fcu.VerifiedPayloads = map[common.Hash]bool{blockRoot: true}
 
 	// Should pass (index=1 is allowed when slots differ and envelope exists)
 	err := aggService.ProcessMessage(context.Background(), nil, agg)
@@ -456,7 +525,7 @@ func TestAggregateAndProofGloasAllowIndex0WhenSlotsMatch(t *testing.T) {
 }
 
 // TestAggregateAndProofGloasIgnoreIndex1NoEnvelope tests that GLOAS ignores
-// aggregate.data.index == 1 when the execution payload envelope has NOT been seen.
+// aggregate.data.index == 1 when the execution payload has not been verified.
 func TestAggregateAndProofGloasIgnoreIndex1NoEnvelope(t *testing.T) {
 	ctrl := gomock.NewController(t)
 	defer ctrl.Finish()
@@ -493,7 +562,86 @@ func TestAggregateAndProofGloasIgnoreIndex1NoEnvelope(t *testing.T) {
 	err := aggService.ProcessMessage(context.Background(), nil, agg)
 	require.Error(t, err)
 	require.ErrorIs(t, err, ErrIgnore)
-	require.Contains(t, err.Error(), "execution payload envelope not seen/validated")
+	require.Contains(t, err.Error(), "execution payload not verified")
+}
+
+func TestAggregateAndProofGloasIgnoreIndex1EnvelopeNotVerified(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	defer ctrl.Finish()
+
+	cfg := clparams.MainnetBeaconConfig
+	cfg.AltairForkEpoch = 0
+	cfg.BellatrixForkEpoch = 0
+	cfg.CapellaForkEpoch = 0
+	cfg.DenebForkEpoch = 0
+	cfg.ElectraForkEpoch = 0
+	cfg.FuluForkEpoch = 0
+	cfg.GloasForkEpoch = 0
+
+	agg, s := getAggregateAndProofAndStateForVersion(t, clparams.GloasVersion)
+	agg.SignedAggregateAndProof.Message.Aggregate.Data.CommitteeIndex = 1
+	blockRoot := agg.SignedAggregateAndProof.Message.Aggregate.Data.BeaconBlockRoot
+
+	aggService, sd, fcu := setupAggregateAndProofTestWithConfig(t, &cfg)
+	sd.OnHeadState(s)
+	fcu.FinalizedCheckpointVal = s.FinalizedCheckpoint()
+	fcu.Ancestors[s.FinalizedCheckpoint().Epoch*32] = forkchoice.ForkChoiceNode{Root: s.FinalizedCheckpoint().Root}
+	fcu.Headers[blockRoot] = &cltypes.BeaconBlockHeader{
+		Slot: agg.SignedAggregateAndProof.Message.Aggregate.Data.Slot - 1,
+	}
+	fcu.Envelopes[blockRoot] = &cltypes.SignedExecutionPayloadEnvelope{
+		Message: &cltypes.ExecutionPayloadEnvelope{
+			BeaconBlockRoot: blockRoot,
+			Payload:         &cltypes.Eth1Block{BlockHash: common.HexToHash("0x1234")},
+		},
+	}
+	fcu.VerifiedPayloads = map[common.Hash]bool{blockRoot: false}
+	fcu.ExecutionPayloadStatusMap[common.HexToHash("0x1234")] = execution_client.PayloadStatusInvalidated
+
+	err := aggService.ProcessMessage(context.Background(), nil, agg)
+	require.Error(t, err)
+	require.ErrorIs(t, err, ErrIgnore)
+	require.Contains(t, err.Error(), "execution payload not verified")
+}
+
+func TestAggregateAndProofGloasRejectIndex1InvalidPayload(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	defer ctrl.Finish()
+
+	cfg := clparams.MainnetBeaconConfig
+	cfg.AltairForkEpoch = 0
+	cfg.BellatrixForkEpoch = 0
+	cfg.CapellaForkEpoch = 0
+	cfg.DenebForkEpoch = 0
+	cfg.ElectraForkEpoch = 0
+	cfg.FuluForkEpoch = 0
+	cfg.GloasForkEpoch = 0
+
+	agg, s := getAggregateAndProofAndStateForVersion(t, clparams.GloasVersion)
+	agg.SignedAggregateAndProof.Message.Aggregate.Data.CommitteeIndex = 1
+	blockRoot := agg.SignedAggregateAndProof.Message.Aggregate.Data.BeaconBlockRoot
+	execHash := common.HexToHash("0x1234")
+
+	aggService, sd, fcu := setupAggregateAndProofTestWithConfig(t, &cfg)
+	sd.OnHeadState(s)
+	fcu.FinalizedCheckpointVal = s.FinalizedCheckpoint()
+	fcu.Ancestors[s.FinalizedCheckpoint().Epoch*32] = forkchoice.ForkChoiceNode{Root: s.FinalizedCheckpoint().Root}
+	fcu.Headers[blockRoot] = &cltypes.BeaconBlockHeader{
+		Slot: agg.SignedAggregateAndProof.Message.Aggregate.Data.Slot - 1,
+	}
+	fcu.Envelopes[blockRoot] = &cltypes.SignedExecutionPayloadEnvelope{
+		Message: &cltypes.ExecutionPayloadEnvelope{
+			BeaconBlockRoot: blockRoot,
+			Payload:         &cltypes.Eth1Block{BlockHash: execHash},
+		},
+	}
+	fcu.VerifiedPayloads = map[common.Hash]bool{blockRoot: false}
+	fcu.PayloadStatusByRootMap[blockRoot] = execution_client.PayloadStatusInvalidated
+
+	err := aggService.ProcessMessage(context.Background(), nil, agg)
+	require.Error(t, err)
+	require.NotErrorIs(t, err, ErrIgnore)
+	require.Contains(t, err.Error(), "execution payload is invalid")
 }
 
 // TestAggregateAndProofGloasIndex0NoEnvelopeOk tests that GLOAS does NOT require

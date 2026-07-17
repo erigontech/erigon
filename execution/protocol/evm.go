@@ -84,7 +84,6 @@ func NewEVMBlockContext(header *types.Header, blockHashFunc func(n uint64) (comm
 		postApplyMessageFunc = engine.GetPostApplyMessageFunc()
 	} else {
 		transferFunc = misc.Transfer
-		postApplyMessageFunc = misc.LogSelfDestructedAccounts
 	}
 
 	var slotNumber uint64
@@ -207,10 +206,11 @@ func CanTransfer(db evmtypes.IntraBlockState, addr accounts.Address, amount uint
 	balance, err := db.GetBalance(addr)
 
 	if dbg.TraceTransactionIO && db.Trace() || dbg.TraceAccount(addr.Handle()) {
+		amount := amount   // avoid capture allocation unless we're tracing
 		balance := balance // avoid capture allocation unless we're tracing
 		defer func() {
 			if !can {
-				fmt.Printf("%d (%d.%d) Can't transfer %d from %x: %d\n", db.BlockNumber(), db.TxIndex(), db.Incarnation(), amount, addr, &balance)
+				fmt.Printf("%d (%d.%d) Can't transfer %s from %x: %s\n", db.BlockNumber(), db.TxIndex(), db.Incarnation(), amount.String(), addr, balance.String())
 			}
 		}()
 	}

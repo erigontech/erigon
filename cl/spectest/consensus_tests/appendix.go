@@ -21,6 +21,7 @@ import (
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
 	"github.com/erigontech/erigon/cl/phase1/core/state"
+	"github.com/erigontech/erigon/cl/phase1/forkchoice"
 	"github.com/erigontech/erigon/cl/spectest/spectest"
 )
 
@@ -91,7 +92,9 @@ func init() {
 		WithFn("execution_payload", operationExecutionPayloadHandler).
 		WithFn("execution_payload_bid", operationExecutionPayloadBidHandler).
 		WithFn("payload_attestation", operationPayloadAttestationHandler).
-		WithFn("parent_execution_payload", operationParentExecutionPayloadHandler)
+		WithFn("parent_execution_payload", operationParentExecutionPayloadHandler).
+		WithFn("builder_deposit_request", operationBuilderDepositRequestHandler).
+		WithFn("builder_exit_request", operationBuilderExitRequestHandler)
 	TestFormats.Add("random").
 		With("random", SanityBlocks)
 	TestFormats.Add("rewards").
@@ -182,7 +185,7 @@ func addSszTests() {
 			}, withTestJson())).
 		With("ExecutionRequests", sszStaticTestNewObjectByFunc(
 			func(v clparams.StateVersion) *cltypes.ExecutionRequests {
-				return cltypes.NewExecutionRequests(&clparams.MainnetBeaconConfig)
+				return cltypes.NewExecutionRequestsWithVersion(&clparams.MainnetBeaconConfig, v)
 			}, withTestJson(), runAfterVersion(clparams.ElectraVersion))).
 		With("IndexedAttestation", sszStaticTestNewObjectByFunc(
 			func(v clparams.StateVersion) *cltypes.IndexedAttestation {
@@ -238,6 +241,8 @@ func addSszTests() {
 			Withdrawal: &cltypes.BuilderPendingWithdrawal{},
 		}, runAfterVersion(clparams.GloasVersion))).
 		With("BuilderPendingWithdrawal", sszStaticTestByEmptyObject(&cltypes.BuilderPendingWithdrawal{}, runAfterVersion(clparams.GloasVersion))).
+		With("BuilderDepositRequest", sszStaticTestByEmptyObject(&solid.BuilderDepositRequest{}, runAfterVersion(clparams.GloasVersion))).
+		With("BuilderExitRequest", sszStaticTestByEmptyObject(&solid.BuilderExitRequest{}, runAfterVersion(clparams.GloasVersion))).
 		With("ExecutionPayloadBid", sszStaticTestByEmptyObject(&cltypes.ExecutionPayloadBid{
 			BlobKzgCommitments: *solid.NewStaticListSSZ[*cltypes.KZGCommitment](cltypes.MaxBlobsCommittmentsPerBlock, 48),
 		}, runAfterVersion(clparams.GloasVersion))).
@@ -254,6 +259,7 @@ func addSszTests() {
 		With("PayloadAttestationMessage", sszStaticTestByEmptyObject(&cltypes.PayloadAttestationMessage{
 			Data: &cltypes.PayloadAttestationData{},
 		}, runAfterVersion(clparams.GloasVersion))).
+		With("ForkChoiceNode", sszStaticTestByEmptyObject(&forkchoice.ForkChoiceNode{}, runAfterVersion(clparams.GloasVersion))).
 		With("ProposerPreferences", sszStaticTestByEmptyObject(&cltypes.ProposerPreferences{}, runAfterVersion(clparams.GloasVersion))).
 		With("SignedExecutionPayloadBid", sszStaticTestByEmptyObject(&cltypes.SignedExecutionPayloadBid{
 			Message: &cltypes.ExecutionPayloadBid{
@@ -274,6 +280,5 @@ func addSszTests() {
 		With("ForkData", spectest.UnimplementedHandler).
 		With("HistoricalBatch", spectest.UnimplementedHandler).
 		With("PowBlock", spectest.UnimplementedHandler).
-		With("SigningData", spectest.UnimplementedHandler).
-		With("ForkChoiceNode", spectest.UnimplementedHandler)
+		With("SigningData", spectest.UnimplementedHandler)
 }

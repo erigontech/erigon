@@ -14,12 +14,14 @@ jobs:
   # the test code (tools/test-groups), keeping CI and local runs in sync.
   load-matrix:
     runs-on: ubuntu-latest
+    timeout-minutes: 60
     outputs:
       test-groups: ${{ steps.load.outputs.groups }}
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 1
+          persist-credentials: false
       - id: load
         run: echo "groups=$(./tools/test-groups names)" >> $GITHUB_OUTPUT
 
@@ -36,9 +38,13 @@ jobs:
 
   tests-linux:
     needs: load-matrix
-    timeout-minutes: 90
+    timeout-minutes: 60
     strategy:
-      fail-fast: false
+      # In merge_group: cancel sibling shards on first failure so ci-gate's
+      # `needs` reach terminal state quickly and the broken PR can be evicted.
+      # In PR runs: keep all shards going so authors see the full failure
+      # picture across every shard.
+      fail-fast: ${{ github.event_name == 'merge_group' }}
       matrix:
         os:
           - ubuntu-latest
@@ -59,18 +65,22 @@ jobs:
           echo "This workflow is being executed by this runner: $RUNNER_NAME"
 
       - name: Checkout custom actions
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
         with:
           fetch-depth: 1
+          persist-credentials: false
 
       - uses: ./.github/actions/setup-erigon
         id: erigon
         with:
           submodules: true
-          lfs: tests
           cleanup-space: true
-          build-cache-extra-key: ${{ matrix.test-group }}
+          # Go's test cache can't see ERIGON_EXEC3_PARALLEL (read at package
+          # init), so serial and parallel results only stay mode-pure if each
+          # exec mode keeps its own cache lineage.
+          build-cache-extra-key: ${{ matrix.test-group }}-${{ matrix.exec_mode }}
           ramdisk: true
+          cache-namespace: test-all-erigon-race
 
       - name: Run ${{ matrix.test-group }} tests on ${{ matrix.os }} (${{ matrix.exec_mode }} exec)
         env:
@@ -80,7 +90,8 @@ jobs:
           # in common/dbg/dbg_env.go auto-prepends ERIGON_, so this maps to
           # the EXEC3_PARALLEL flag declared in common/dbg/experiments.go.
           ERIGON_EXEC3_PARALLEL: ${{ matrix.exec_mode == 'parallel' && 'true' || 'false' }}
-        run: make test-group TEST_GROUP=${{ matrix.test-group }} GO_FLAGS="-race -timeout=60m"
+          TEST_GROUP: ${{ matrix.test-group }}
+        run: make test-group TEST_GROUP="$TEST_GROUP" GO_FLAGS="-race -timeout=60m"
 
       - uses: ./.github/actions/cleanup-erigon
         if: always()

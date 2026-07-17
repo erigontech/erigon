@@ -39,7 +39,7 @@ type Version interface {
 	Validate() error
 }
 
-func NewVersion(major interface{}, minor ...uint64) Version {
+func NewVersion(major any, minor ...uint64) Version {
 	var pmajor *uint64
 
 	switch tmajor := major.(type) {

@@ -27,6 +27,7 @@ import (
 	"github.com/holiman/uint256"
 
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/diagnostics/metrics"
 	"github.com/erigontech/erigon/execution/types/accounts"
 )
@@ -147,7 +148,7 @@ type CacheWriteItem interface {
 }
 
 func compare_code_code(i1 *CodeItem, i2 *CodeItem) int {
-	c := bytes.Compare(i1.addrHash.Bytes(), i2.addrHash.Bytes())
+	c := bytes.Compare(i1.addrHash[:], i2.addrHash[:])
 	if c != 0 {
 		return c
 	}
@@ -163,9 +164,9 @@ func compare_code_code(i1 *CodeItem, i2 *CodeItem) int {
 func (r *AccountSeek) Less(than btree.Item) bool {
 	switch i := than.(type) {
 	case *AccountItem:
-		return bytes.Compare(r.seek, i.addrHash.Bytes()) < 0
+		return bytes.Compare(r.seek, i.addrHash[:]) < 0
 	case *AccountWriteItem:
-		return bytes.Compare(r.seek, i.ai.addrHash.Bytes()) < 0
+		return bytes.Compare(r.seek, i.ai.addrHash[:]) < 0
 	default:
 		panic(fmt.Sprintf("unexpected type: %T", than))
 	}
@@ -174,23 +175,23 @@ func (r *AccountSeek) Less(than btree.Item) bool {
 func (r *StorageSeek) Less(than btree.Item) bool {
 	switch i := than.(type) {
 	case *StorageItem:
-		c := bytes.Compare(r.addrHash.Bytes(), i.addrHash.Bytes())
+		c := bytes.Compare(r.addrHash[:], i.addrHash[:])
 		if c != 0 {
 			return c < 0
 		}
 		if r.incarnation < i.incarnation {
 			return true
 		}
-		return bytes.Compare(r.seek, i.locHash.Bytes()) < 0
+		return bytes.Compare(r.seek, i.locHash[:]) < 0
 	case *StorageWriteItem:
-		c := bytes.Compare(r.addrHash.Bytes(), i.si.addrHash.Bytes())
+		c := bytes.Compare(r.addrHash[:], i.si.addrHash[:])
 		if c != 0 {
 			return c < 0
 		}
 		if r.incarnation < i.si.incarnation {
 			return true
 		}
-		return bytes.Compare(r.seek, i.si.locHash.Bytes()) < 0
+		return bytes.Compare(r.seek, i.si.locHash[:]) < 0
 	default:
 		panic(fmt.Sprintf("unexpected type: %T", than))
 	}
@@ -199,11 +200,11 @@ func (r *StorageSeek) Less(than btree.Item) bool {
 func (ai *AccountItem) Less(than btree.Item) bool {
 	switch i := than.(type) {
 	case *AccountItem:
-		return bytes.Compare(ai.addrHash.Bytes(), i.addrHash.Bytes()) < 0
+		return bytes.Compare(ai.addrHash[:], i.addrHash[:]) < 0
 	case *AccountWriteItem:
-		return bytes.Compare(ai.addrHash.Bytes(), i.ai.addrHash.Bytes()) < 0
+		return bytes.Compare(ai.addrHash[:], i.ai.addrHash[:]) < 0
 	case *AccountSeek:
-		return bytes.Compare(ai.addrHash.Bytes(), i.seek) < 0
+		return bytes.Compare(ai.addrHash[:], i.seek) < 0
 	default:
 		panic(fmt.Sprintf("unexpected type: %T", than))
 	}
@@ -244,32 +245,32 @@ func (swi *StorageWriteItem) GetSize() int                { return storageWriteI
 func (si *StorageItem) Less(than btree.Item) bool {
 	switch i := than.(type) {
 	case *StorageItem:
-		c := bytes.Compare(si.addrHash.Bytes(), i.addrHash.Bytes())
+		c := bytes.Compare(si.addrHash[:], i.addrHash[:])
 		if c != 0 {
 			return c < 0
 		}
 		if si.incarnation < i.incarnation {
 			return true
 		}
-		return bytes.Compare(si.locHash.Bytes(), i.locHash.Bytes()) < 0
+		return bytes.Compare(si.locHash[:], i.locHash[:]) < 0
 	case *StorageWriteItem:
-		c := bytes.Compare(si.addrHash.Bytes(), i.si.addrHash.Bytes())
+		c := bytes.Compare(si.addrHash[:], i.si.addrHash[:])
 		if c != 0 {
 			return c < 0
 		}
 		if si.incarnation < i.si.incarnation {
 			return true
 		}
-		return bytes.Compare(si.locHash.Bytes(), i.si.locHash.Bytes()) < 0
+		return bytes.Compare(si.locHash[:], i.si.locHash[:]) < 0
 	case *StorageSeek:
-		c := bytes.Compare(si.addrHash.Bytes(), i.addrHash.Bytes())
+		c := bytes.Compare(si.addrHash[:], i.addrHash[:])
 		if c != 0 {
 			return c < 0
 		}
 		if si.incarnation < i.incarnation {
 			return true
 		}
-		return bytes.Compare(si.locHash.Bytes(), i.seek) < 0
+		return bytes.Compare(si.locHash[:], i.seek) < 0
 	default:
 		panic(fmt.Sprintf("unexpected type: %T", than))
 	}
@@ -300,7 +301,7 @@ func (ci *CodeItem) Less(than btree.Item) bool {
 
 func (cwi *CodeWriteItem) Less(than btree.Item) bool {
 	i := than.(*CodeWriteItem)
-	c := bytes.Compare(cwi.address.Bytes(), i.address.Bytes())
+	c := bytes.Compare(cwi.address[:], i.address[:])
 	if c == 0 {
 		return cwi.ci.incarnation < i.ci.incarnation
 	}
@@ -391,13 +392,13 @@ func id(a any) uint8 {
 func NewStateCache(degree int, limit datasize.ByteSize) *StateCache {
 	var sc StateCache
 	sc.limit = limit
-	for i := 0; i < len(sc.readWrites); i++ {
+	for i := range len(sc.readWrites) {
 		sc.readWrites[i] = btree.New(degree)
 	}
-	for i := 0; i < len(sc.writes); i++ {
+	for i := range len(sc.writes) {
 		sc.writes[i] = btree.New(degree)
 	}
-	for i := 0; i < len(sc.readQueue); i++ {
+	for i := range len(sc.readQueue) {
 		heap.Init(&sc.readQueue[i])
 	}
 	return &sc
@@ -433,12 +434,7 @@ func (sc *StateCache) get(key btree.Item) (CacheItem, bool) {
 func (sc *StateCache) GetAccount(address []byte) (*accounts.Account, bool) {
 	AccRead.Inc()
 	var key AccountItem
-	h := common.NewHasher()
-	defer common.ReturnHasherToPool(h)
-	//nolint:errcheck
-	h.Sha.Write(address)
-	//nolint:errcheck
-	h.Sha.Read(key.addrHash[:])
+	key.addrHash = crypto.Keccak256Hash(address)
 	if item, ok := sc.get(&key); ok {
 		if item != nil {
 			return &item.(*AccountItem).account, true
@@ -453,7 +449,7 @@ func (sc *StateCache) HasAccountWithInPrefix(addrHashPrefix []byte) bool {
 	seek := &AccountSeek{seek: addrHashPrefix}
 	var found bool
 	sc.readWrites[id(seek)].AscendGreaterOrEqual(seek, func(i btree.Item) bool {
-		found = bytes.HasPrefix(i.(*AccountItem).addrHash.Bytes(), addrHashPrefix)
+		found = bytes.HasPrefix(i.(*AccountItem).addrHash[:], addrHashPrefix)
 		return false
 	})
 	return found
@@ -462,12 +458,7 @@ func (sc *StateCache) HasAccountWithInPrefix(addrHashPrefix []byte) bool {
 // GetDeletedAccount attempts to retrieve the last version of account before it was deleted
 func (sc *StateCache) GetDeletedAccount(address []byte) *accounts.Account {
 	key := &AccountItem{}
-	h := common.NewHasher()
-	defer common.ReturnHasherToPool(h)
-	//nolint:errcheck
-	h.Sha.Write(address)
-	//nolint:errcheck
-	h.Sha.Read(key.addrHash[:])
+	key.addrHash = crypto.Keccak256Hash(address)
 	item := sc.readWrites[id(key)].Get(key)
 	if item == nil {
 		return nil
@@ -484,18 +475,9 @@ func (sc *StateCache) GetDeletedAccount(address []byte) *accounts.Account {
 func (sc *StateCache) GetStorage(address []byte, incarnation uint64, location []byte) ([]byte, bool) {
 	StRead.Inc()
 	var key StorageItem
-	h := common.NewHasher()
-	defer common.ReturnHasherToPool(h)
-	//nolint:errcheck
-	h.Sha.Write(address)
-	//nolint:errcheck
-	h.Sha.Read(key.addrHash[:])
+	key.addrHash = crypto.Keccak256Hash(address)
 	key.incarnation = incarnation
-	h.Sha.Reset()
-	//nolint:errcheck
-	h.Sha.Write(location)
-	//nolint:errcheck
-	h.Sha.Read(key.locHash[:])
+	key.locHash = crypto.Keccak256Hash(location)
 	if item, ok := sc.get(&key); ok {
 		if item != nil {
 			return item.(*StorageItem).value.Bytes(), true
@@ -509,12 +491,7 @@ func (sc *StateCache) GetStorage(address []byte, incarnation uint64, location []
 // Second return value is true if such item is found
 func (sc *StateCache) GetCode(address []byte, incarnation uint64) ([]byte, bool) {
 	var key CodeItem
-	h := common.NewHasher()
-	defer common.ReturnHasherToPool(h)
-	//nolint:errcheck
-	h.Sha.Write(address)
-	//nolint:errcheck
-	h.Sha.Read(key.addrHash[:])
+	key.addrHash = crypto.Keccak256Hash(address)
 	key.incarnation = incarnation
 	if item, ok := sc.get(&key); ok {
 		if item != nil {
@@ -554,7 +531,7 @@ func (sc *StateCache) setRead(item CacheItem, absent bool) {
 }
 
 func (sc *StateCache) readQueuesLen() (res int) {
-	for i := 0; i < len(sc.readQueue); i++ {
+	for i := range len(sc.readQueue) {
 		res += sc.readQueue[i].Len()
 	}
 	return
@@ -563,19 +540,14 @@ func (sc *StateCache) readQueuesLen() (res int) {
 // SetAccountRead adds given account to the cache, marking it as a read (not written)
 func (sc *StateCache) SetAccountRead(address []byte, account *accounts.Account) {
 	var ai AccountItem
-	h := common.NewHasher()
-	defer common.ReturnHasherToPool(h)
-	//nolint:errcheck
-	h.Sha.Write(address)
-	//nolint:errcheck
-	h.Sha.Read(ai.addrHash[:])
+	ai.addrHash = crypto.Keccak256Hash(address)
 	ai.account.Copy(account)
 	sc.setRead(&ai, false /* absent */)
 }
 
 func (sc *StateCache) GetAccountByHashedAddress(addrHash common.Hash) (*accounts.Account, bool) {
 	var key AccountItem
-	key.addrHash.SetBytes(addrHash.Bytes())
+	key.addrHash.SetBytes(addrHash[:])
 	if item, ok := sc.get(&key); ok {
 		if item != nil {
 			return &item.(*AccountItem).account, true
@@ -604,12 +576,7 @@ func (sc *StateCache) GetStorageByHashedAddress(addrHash common.Hash, incarnatio
 // SetAccountRead adds given account address to the cache, marking it as a absent
 func (sc *StateCache) SetAccountAbsent(address []byte) {
 	var ai AccountItem
-	h := common.NewHasher()
-	defer common.ReturnHasherToPool(h)
-	//nolint:errcheck
-	h.Sha.Write(address)
-	//nolint:errcheck
-	h.Sha.Read(ai.addrHash[:])
+	ai.addrHash = crypto.Keccak256Hash(address)
 	sc.setRead(&ai, true /* absent */)
 }
 
@@ -684,12 +651,7 @@ func (sc *StateCache) setWrite(item CacheItem, writeItem CacheWriteItem, del boo
 // SetAccountWrite adds given account to the cache, marking it as written (cannot be evicted)
 func (sc *StateCache) SetAccountWrite(address []byte, account *accounts.Account) {
 	var ai AccountItem
-	h := common.NewHasher()
-	defer common.ReturnHasherToPool(h)
-	//nolint:errcheck
-	h.Sha.Write(address)
-	//nolint:errcheck
-	h.Sha.Read(ai.addrHash[:])
+	ai.addrHash = crypto.Keccak256Hash(address)
 	ai.account.Copy(account)
 	var awi AccountWriteItem
 	copy(awi.address[:], address)
@@ -700,12 +662,7 @@ func (sc *StateCache) SetAccountWrite(address []byte, account *accounts.Account)
 // SetAccountDelete is very similar to SetAccountWrite with the difference that there no set value
 func (sc *StateCache) SetAccountDelete(address []byte) {
 	var ai AccountItem
-	h := common.NewHasher()
-	defer common.ReturnHasherToPool(h)
-	//nolint:errcheck
-	h.Sha.Write(address)
-	//nolint:errcheck
-	h.Sha.Read(ai.addrHash[:])
+	ai.addrHash = crypto.Keccak256Hash(address)
 	var awi AccountWriteItem
 	copy(awi.address[:], address)
 	awi.ai = &ai
@@ -714,53 +671,26 @@ func (sc *StateCache) SetAccountDelete(address []byte) {
 
 func (sc *StateCache) SetStorageRead(address []byte, incarnation uint64, location []byte, value []byte) {
 	var si StorageItem
-	h := common.NewHasher()
-	defer common.ReturnHasherToPool(h)
-	//nolint:errcheck
-	h.Sha.Write(address)
-	//nolint:errcheck
-	h.Sha.Read(si.addrHash[:])
+	si.addrHash = crypto.Keccak256Hash(address)
 	si.incarnation = incarnation
-	h.Sha.Reset()
-	//nolint:errcheck
-	h.Sha.Write(location)
-	//nolint:errcheck
-	h.Sha.Read(si.locHash[:])
+	si.locHash = crypto.Keccak256Hash(location)
 	si.value.SetBytes(value)
 	sc.setRead(&si, false /* absent */)
 }
 
 func (sc *StateCache) SetStorageAbsent(address []byte, incarnation uint64, location []byte) {
 	var si StorageItem
-	h := common.NewHasher()
-	defer common.ReturnHasherToPool(h)
-	//nolint:errcheck
-	h.Sha.Write(address)
-	//nolint:errcheck
-	h.Sha.Read(si.addrHash[:])
+	si.addrHash = crypto.Keccak256Hash(address)
 	si.incarnation = incarnation
-	h.Sha.Reset()
-	//nolint:errcheck
-	h.Sha.Write(location)
-	//nolint:errcheck
-	h.Sha.Read(si.locHash[:])
+	si.locHash = crypto.Keccak256Hash(location)
 	sc.setRead(&si, true /* absent */)
 }
 
 func (sc *StateCache) SetStorageWrite(address []byte, incarnation uint64, location []byte, value []byte) {
 	var si StorageItem
-	h := common.NewHasher()
-	defer common.ReturnHasherToPool(h)
-	//nolint:errcheck
-	h.Sha.Write(address)
-	//nolint:errcheck
-	h.Sha.Read(si.addrHash[:])
+	si.addrHash = crypto.Keccak256Hash(address)
 	si.incarnation = incarnation
-	h.Sha.Reset()
-	//nolint:errcheck
-	h.Sha.Write(location)
-	//nolint:errcheck
-	h.Sha.Read(si.locHash[:])
+	si.locHash = crypto.Keccak256Hash(location)
 	si.value.SetBytes(value)
 	var swi StorageWriteItem
 	copy(swi.address[:], address)
@@ -771,18 +701,9 @@ func (sc *StateCache) SetStorageWrite(address []byte, incarnation uint64, locati
 
 func (sc *StateCache) SetStorageDelete(address []byte, incarnation uint64, location []byte) {
 	var si StorageItem
-	h := common.NewHasher()
-	defer common.ReturnHasherToPool(h)
-	//nolint:errcheck
-	h.Sha.Write(address)
-	//nolint:errcheck
-	h.Sha.Read(si.addrHash[:])
+	si.addrHash = crypto.Keccak256Hash(address)
 	si.incarnation = incarnation
-	h.Sha.Reset()
-	//nolint:errcheck
-	h.Sha.Write(location)
-	//nolint:errcheck
-	h.Sha.Read(si.locHash[:])
+	si.locHash = crypto.Keccak256Hash(location)
 	var swi StorageWriteItem
 	copy(swi.address[:], address)
 	copy(swi.location[:], location)
@@ -792,12 +713,7 @@ func (sc *StateCache) SetStorageDelete(address []byte, incarnation uint64, locat
 
 func (sc *StateCache) SetCodeRead(address []byte, incarnation uint64, code []byte) {
 	var ci CodeItem
-	h := common.NewHasher()
-	defer common.ReturnHasherToPool(h)
-	//nolint:errcheck
-	h.Sha.Write(address)
-	//nolint:errcheck
-	h.Sha.Read(ci.addrHash[:])
+	ci.addrHash = crypto.Keccak256Hash(address)
 	ci.incarnation = incarnation
 	ci.code = make([]byte, len(code))
 	copy(ci.code, code)
@@ -806,12 +722,7 @@ func (sc *StateCache) SetCodeRead(address []byte, incarnation uint64, code []byt
 
 func (sc *StateCache) SetCodeAbsent(address []byte, incarnation uint64) {
 	var ci CodeItem
-	h := common.NewHasher()
-	defer common.ReturnHasherToPool(h)
-	//nolint:errcheck
-	h.Sha.Write(address)
-	//nolint:errcheck
-	h.Sha.Read(ci.addrHash[:])
+	ci.addrHash = crypto.Keccak256Hash(address)
 	ci.incarnation = incarnation
 	sc.setRead(&ci, true /* absent */)
 }
@@ -819,12 +730,7 @@ func (sc *StateCache) SetCodeAbsent(address []byte, incarnation uint64) {
 func (sc *StateCache) SetCodeWrite(address []byte, incarnation uint64, code []byte) {
 	// Check if this is going to be modification of the existing entry
 	var ci CodeItem
-	h := common.NewHasher()
-	defer common.ReturnHasherToPool(h)
-	//nolint:errcheck
-	h.Sha.Write(address)
-	//nolint:errcheck
-	h.Sha.Read(ci.addrHash[:])
+	ci.addrHash = crypto.Keccak256Hash(address)
 	ci.incarnation = incarnation
 	ci.code = make([]byte, len(code))
 	copy(ci.code, code)
@@ -837,12 +743,7 @@ func (sc *StateCache) SetCodeWrite(address []byte, incarnation uint64, code []by
 func (sc *StateCache) SetCodeDelete(address []byte, incarnation uint64) {
 	// Check if this is going to be modification of the existing entry
 	var ci CodeItem
-	h := common.NewHasher()
-	defer common.ReturnHasherToPool(h)
-	//nolint:errcheck
-	h.Sha.Write(address)
-	//nolint:errcheck
-	h.Sha.Read(ci.addrHash[:])
+	ci.addrHash = crypto.Keccak256Hash(address)
 	ci.incarnation = incarnation
 	ci.code = nil
 	var cwi CodeWriteItem
@@ -853,7 +754,7 @@ func (sc *StateCache) SetCodeDelete(address []byte, incarnation uint64) {
 
 func (sc *StateCache) PrepareWrites() [5]*btree.BTree {
 	var writes [5]*btree.BTree
-	for i := 0; i < len(sc.writes); i++ {
+	for i := range len(sc.writes) {
 		sc.writes[i].Ascend(func(i btree.Item) bool {
 			writeItem := i.(CacheWriteItem)
 			cacheItem := writeItem.GetCacheItem()
@@ -881,36 +782,36 @@ func WalkWrites(
 	codeDelete func(address []byte, incarnation uint64) error,
 ) error {
 	var err error
-	for i := 0; i < len(writes); i++ {
+	for i := range len(writes) {
 		writes[i].Ascend(func(i btree.Item) bool {
 			switch it := i.(type) {
 			case *AccountWriteItem:
 				if it.ai.flags&AbsentFlag != 0 {
-					if err = accountDelete(it.address.Bytes(), &it.ai.account); err != nil {
+					if err = accountDelete(it.address[:], &it.ai.account); err != nil {
 						return false
 					}
 				} else {
-					if err = accountWrite(it.address.Bytes(), &it.ai.account); err != nil {
+					if err = accountWrite(it.address[:], &it.ai.account); err != nil {
 						return false
 					}
 				}
 			case *StorageWriteItem:
 				if it.si.flags&AbsentFlag != 0 {
-					if err = storageDelete(it.address.Bytes(), it.si.incarnation, it.location.Bytes()); err != nil {
+					if err = storageDelete(it.address[:], it.si.incarnation, it.location[:]); err != nil {
 						return false
 					}
 				} else {
-					if err = storageWrite(it.address.Bytes(), it.si.incarnation, it.location.Bytes(), it.si.value.Bytes()); err != nil {
+					if err = storageWrite(it.address[:], it.si.incarnation, it.location[:], it.si.value.Bytes()); err != nil {
 						return false
 					}
 				}
 			case *CodeWriteItem:
 				if it.ci.flags&AbsentFlag != 0 {
-					if err = codeDelete(it.address.Bytes(), it.ci.incarnation); err != nil {
+					if err = codeDelete(it.address[:], it.ci.incarnation); err != nil {
 						return false
 					}
 				} else {
-					if err = codeWrite(it.address.Bytes(), it.ci.incarnation, it.ci.code); err != nil {
+					if err = codeWrite(it.address[:], it.ci.incarnation, it.ci.code); err != nil {
 						return false
 					}
 				}
@@ -923,7 +824,7 @@ func WalkWrites(
 }
 
 func (sc *StateCache) TurnWritesToReads(writes [5]*btree.BTree) {
-	for i := 0; i < len(writes); i++ {
+	for i := range len(writes) {
 		readQueue := &sc.readQueue[i]
 		writes[i].Ascend(func(it btree.Item) bool {
 			cacheWriteItem := it.(CacheWriteItem)
@@ -938,13 +839,13 @@ func (sc *StateCache) TurnWritesToReads(writes [5]*btree.BTree) {
 }
 
 func (sc *StateCache) TotalCount() (res int) {
-	for i := 0; i < len(sc.readWrites); i++ {
+	for i := range len(sc.readWrites) {
 		res += sc.readWrites[i].Len()
 	}
 	return
 }
 func (sc *StateCache) WriteCount() (res int) {
-	for i := 0; i < len(sc.readWrites); i++ {
+	for i := range len(sc.readWrites) {
 		res += sc.writes[i].Len()
 	}
 	return

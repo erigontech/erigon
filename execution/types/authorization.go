@@ -86,7 +86,7 @@ func RecoverSignerFromRLP(rlp []byte, yParity uint8, r uint256.Int, s uint256.In
 		return nil, errors.New("invalid signature")
 	}
 
-	pubKey, err := crypto.Ecrecover(hash.Bytes(), sig[:])
+	pubKey, err := crypto.Ecrecover(hash[:], sig[:])
 	if err != nil {
 		return nil, err
 	}
@@ -176,7 +176,7 @@ func decodeAuthorizations(auths *[]Authorization, s *rlp.Stream) error {
 }
 
 func encodeAuthorizations(authorizations []Authorization, w io.Writer, b []byte) error {
-	for i := 0; i < len(authorizations); i++ {
+	for i := range authorizations {
 		authLen := authorizationSize(authorizations[i])
 		if err := rlp.EncodeListPrefix(authLen, w, b); err != nil {
 			return err

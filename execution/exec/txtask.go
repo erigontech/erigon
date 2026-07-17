@@ -60,7 +60,7 @@ type Task interface {
 	VersionMap() *state.VersionMap
 	GetBlockStateCache() *state.BlockStateCache
 	VersionedReads(ibs *state.IntraBlockState) state.ReadSet
-	VersionedWrites(ibs *state.IntraBlockState) state.VersionedWrites
+	VersionedWrites(ibs *state.IntraBlockState) *state.WriteSet
 	Reset(evm *vm.EVM, ibs *state.IntraBlockState, callTracer *calltracer.CallTracer) error
 	ResetGasPool(*protocol.GasPool)
 
@@ -106,7 +106,7 @@ type TxResult struct {
 	Err               error
 	Coinbase          accounts.Address
 	TxIn              state.ReadSet
-	TxOut             state.VersionedWrites
+	TxOut             *state.WriteSet
 
 	Receipt *types.Receipt
 	Logs    []*types.Log
@@ -119,7 +119,7 @@ type TxResult struct {
 	// address) produced by MakeWriteSet during worker execution. Used by the
 	// parallel finalize path to skip full IBS reconstruction: fee-calc balance
 	// adjustments are applied directly to these writes.
-	CollectorWrites state.VersionedWrites
+	CollectorWrites *state.WriteSet
 }
 
 func (r *TxResult) compare(other *TxResult) int {
@@ -223,7 +223,6 @@ type TxTask struct {
 	HistoryExecution   bool // use history reader for that txn instead of state reader
 	BalanceIncreaseSet map[accounts.Address]uint256.Int
 
-	Incarnation           int
 	Tracer                *calltracer.CallTracer
 	Hooks                 *tracing.Hooks
 	Config                *chain.Config
@@ -454,7 +453,7 @@ func (t *TxTask) VersionedReads(ibs *state.IntraBlockState) state.ReadSet {
 	return ibs.VersionedReads()
 }
 
-func (t *TxTask) VersionedWrites(ibs *state.IntraBlockState) state.VersionedWrites {
+func (t *TxTask) VersionedWrites(ibs *state.IntraBlockState) *state.WriteSet {
 	return ibs.VersionedWrites(false)
 }
 
@@ -599,13 +598,6 @@ func (txTask *TxTask) Execute(evm *vm.EVM,
 		}()
 
 		if result.Err == nil {
-			// Capture residual-balance selfdestructs before SoftFinalise clears the
-			// journal.  These are accounts selfdestructed in this tx that also received
-			// ETH after the SELFDESTRUCT opcode (EIP-7708 case 2).  SoftFinalise calls
-			// clearJournalAndRefund, so GetRemovedAccountsWithBalance returns nothing
-			// afterwards.
-			result.ExecutionResult.SelfDestructedWithBalance = ibs.GetRemovedAccountsWithBalance()
-
 			// TODO these can be removed - use result instead
 			// Update the state with pending changes
 			ibs.SoftFinalise()
@@ -674,7 +666,7 @@ func (txTask *TxTask) executeAA(aaTxn *types.AccountAbstractionTransaction,
 			result.Err = outerErr
 			return &result
 		}
-		log.Info("✅[aa] validated AA bundle", "len", startIdx-endIdx)
+		log.Info("✅[aa] validated AA bundle", "len", endIdx-startIdx+1)
 
 		result.ValidationResults = validationResults
 	}
@@ -950,6 +942,7 @@ func (q *QueueWithRetry) Release() {
 		<-q.newTasks
 	}
 	// Clear retry heap, keep backing array.
+	clear(q.retires)
 	q.retires = q.retires[:0]
 	q.parked = q.newTasks
 	q.newTasks = nil

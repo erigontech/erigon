@@ -5,19 +5,24 @@
     "size": 1025048557
   },
   "eest_devnet": {
-    "url": "https://github.com/ethereum/execution-specs/releases/download/tests-bal%40v7.2.0/fixtures_bal.tar.gz",
-    "sha256": "fc1d9ae174cdd5db789068839999e6f83666cc79f7dac36e973d7616d9a2e2cf",
-    "size": 611743632,
-    "branch": "devnets/bal/7"
+    "url": "https://github.com/ethereum/execution-specs/releases/download/tests-glamsterdam-devnet%40v6.1.1/fixtures_glamsterdam-devnet.tar.gz",
+    "sha256": "45c1e1489c31aac055f8ccd38bd0f1466aab87d9d61178e9979e79164e4ee02b",
+    "size": 674284009,
+    "branch": "devnets/glamsterdam/6"
   },
   "eest_stable": {
-    "url": "https://github.com/ethereum/execution-spec-tests/releases/download/v5.4.0/fixtures_develop.tar.gz",
-    "sha256": "3e2b02d49fe903eda4fd8caca5cbf0d139c470e97e1de9a85299b1b034f97099",
-    "size": 422845437
+    "url": "https://github.com/ethereum/execution-specs/releases/download/tests%40v20.0.1/fixtures.tar.gz",
+    "sha256": "3586193db06d4d5745d5e90b3c3008c2255a4e19ccd8f11a3ce887aec8c0b17c",
+    "size": 423237039
+  },
+  "eest_zkevm": {
+    "url": "https://github.com/ethereum/execution-specs/releases/download/tests-zkevm%40v0.5.0/fixtures_zkevm.tar.gz",
+    "sha256": "6b5fd6dea77cc5ea51dfdc35b03bdca41875926e17ad26f3ebebf9841038a366",
+    "size": 486272611
   },
   "cl_mainnet": {
-    "url": "https://github.com/ethereum/consensus-specs/releases/download/v1.7.0-alpha.7/mainnet.tar.gz",
-    "sha256": "a96c52b503e1da5305df1c8c09974a2b95a09545cffeea63b440be803059f5d6",
-    "size": 844604385
+    "url": "https://github.com/ethereum/consensus-specs/releases/download/v1.7.0-alpha.11/mainnet.tar.gz",
+    "sha256": "956cc05f9bb2e745ecd04b60fb2bb91679c80ede82e81b489b5d47a9d65eb66b",
+    "size": 851476438
   }
 }

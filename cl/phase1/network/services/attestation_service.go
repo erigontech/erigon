@@ -47,6 +47,18 @@ var (
 	computeCommitteeCountPerSlot = subnets.ComputeCommitteeCountPerSlot
 )
 
+func validationEpochRange(headState *state.CachingBeaconState, highestSeenSlot, currentSlot, slotsPerEpoch uint64) (uint64, uint64) {
+	headEpoch := state.Epoch(headState)
+	currEpoch := headEpoch
+	if currentSlot < highestSeenSlot {
+		currentSlot = highestSeenSlot
+	}
+	if currentSlot/slotsPerEpoch > headEpoch {
+		currEpoch = headEpoch + 1
+	}
+	return state.PreviousEpoch(headState), currEpoch
+}
+
 type attestationService struct {
 	ctx                    context.Context
 	forkchoiceStore        forkchoice.ForkChoiceStorage
@@ -197,11 +209,10 @@ func (s *attestationService) ProcessMessage(ctx context.Context, subnet *uint64,
 	if err := s.syncedDataManager.ViewHeadState(func(headState *state.CachingBeaconState) error {
 		// If our head state is too far from the attestation epoch, committee
 		// computations will use a stale RANDAO mix and produce wrong results.
-		// Allow current and previous epoch (spec permits both).
-		headEpoch := state.Epoch(headState)
-		if attEpoch != headEpoch && attEpoch != state.PreviousEpoch(headState) {
-			return fmt.Errorf("head epoch %d too far from attestation epoch %d: %w",
-				headEpoch, attEpoch, ErrIgnore)
+		prevEpoch, currEpoch := validationEpochRange(headState, s.forkchoiceStore.HighestSeen(), currentSlot, s.beaconCfg.SlotsPerEpoch)
+		if attEpoch < prevEpoch || attEpoch > currEpoch {
+			return fmt.Errorf("head epoch %d too far from attestation epoch %d (prev=%d, curr=%d): %w",
+				state.Epoch(headState), attEpoch, prevEpoch, currEpoch, ErrIgnore)
 		}
 		// [REJECT] The committee index is within the expected range
 		committeeCount := computeCommitteeCountPerSlot(headState, slot, s.beaconCfg.SlotsPerEpoch)
@@ -230,8 +241,8 @@ func (s *attestationService) ProcessMessage(ctx context.Context, subnet *uint64,
 			//[REJECT] The attestation is unaggregated -- that is, it has exactly one participating validator (len([bit for bit in aggregation_bits if bit]) == 1, i.e. exactly 1 bit is set).
 			setBits := 0
 			onBitIndex := 0 // Aggregationbits is []byte, so we need to iterate over all bits.
-			for i := 0; i < len(bits); i++ {
-				for j := 0; j < 8; j++ {
+			for i := range bits {
+				for j := range 8 {
 					if bits[i]&(1<<uint(j)) != 0 {
 						if i*8+j >= len(beaconCommittee) {
 							continue
@@ -304,13 +315,16 @@ func (s *attestationService) ProcessMessage(ctx context.Context, subnet *uint64,
 	blockHeader, ok := s.forkchoiceStore.GetHeader(root)
 	if !ok {
 		//s.scheduleAttestationForLaterProcessing(att)
-		return ErrIgnore
+		return fmt.Errorf("%w: block not seen: %v", ErrIgnore, root)
 	}
 
 	// [New in Gloas] [REJECT] attestation.data.index == 0 if block.slot == attestation.data.slot
 	if clVersion >= clparams.GloasVersion {
 		if blockHeader.Slot == data.Slot && data.CommitteeIndex != 0 {
 			return errors.New("attestation data index must be 0 when block slot equals attestation slot")
+		}
+		if data.CommitteeIndex == 1 && !s.forkchoiceStore.IsPayloadVerified(root) {
+			return unverifiedGloasPayloadError(s.forkchoiceStore, root)
 		}
 	}
 

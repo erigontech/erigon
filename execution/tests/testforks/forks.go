@@ -83,10 +83,12 @@ func init() {
 	c = configCopy(c)
 	c.TangerineWhistleBlock = common.NewUint64(0)
 	Forks["EIP150"] = c
+	Forks["TangerineWhistle"] = c
 
 	c = configCopy(c)
 	c.SpuriousDragonBlock = common.NewUint64(0)
 	Forks["EIP158"] = c
+	Forks["SpuriousDragon"] = c
 
 	c = configCopy(c)
 	c.ByzantiumBlock = common.NewUint64(5)
@@ -237,7 +239,9 @@ func init() {
 
 func configCopy(c *chain.Config) *chain.Config {
 	cpy := new(chain.Config)
-	copier.Copy(cpy, c)
+	if err := copier.CopyWithOption(cpy, c, copier.Option{DeepCopy: true}); err != nil {
+		panic(fmt.Sprintf("testforks: failed to deep-copy chain.Config: %s", err))
+	}
 	return cpy
 }
 

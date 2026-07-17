@@ -103,7 +103,7 @@ func prepareDictMetadata(t testing.TB, multiplier int, hasMetadata bool, metadat
 	defer c.Close()
 	k := bytes.Repeat([]byte("long"), multiplier)
 	v := bytes.Repeat([]byte("word"), multiplier)
-	for i := 0; i < keys; i++ {
+	for i := range keys {
 		if err = c.AddWord(nil); err != nil {
 			panic(err)
 		}
@@ -386,4 +386,41 @@ func TestCompressNoWordPatterns(t *testing.T) {
 	if cs := checksum(file); cs != 1879837905 {
 		t.Errorf("fast-path output differs from main, checksum=%d", cs)
 	}
+}
+
+// The number of superstring windows a file is split into is a property of the data, so it
+// must not depend on SamplingFactor — sampling only selects which windows feed the dict.
+func TestCompressSamplingCoversWholeFile(t *testing.T) {
+	const word = "mykeyabc"
+	const nWords = 5000
+
+	windowCount := func(samplingFactor uint64) uint64 {
+		logger := log.New()
+		tmpDir := t.TempDir()
+		file := filepath.Join(tmpDir, "compressed")
+		cfg := DefaultCfg
+		cfg.MinPatternScore = 1
+		cfg.SamplingFactor = samplingFactor
+		c, err := NewCompressor(t.Context(), t.Name(), file, tmpDir, cfg, log.LvlDebug, logger)
+		require.NoError(t, err)
+		defer c.Close()
+		c.superstringLimit = 1000
+
+		for range nWords {
+			require.NoError(t, c.AddWord([]byte(word)))
+		}
+		count := c.superstringCount
+		require.NoError(t, c.Compress())
+
+		d, err := NewDecompressor(file)
+		require.NoError(t, err)
+		defer d.Close()
+		require.EqualValues(t, nWords, d.Count())
+		return count
+	}
+
+	full := windowCount(1)
+	require.Greater(t, full, uint64(1))
+	require.Equal(t, full, windowCount(4))
+	require.Equal(t, full, windowCount(8))
 }

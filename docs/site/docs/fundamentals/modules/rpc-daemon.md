@@ -7,7 +7,7 @@ sidebar_position: 1
 
 # RPC Daemon
 
-The RPC daemon is a core component of Erigon that implements the [RPC Service](../../interacting-with-erigon/) by processing JSON remote procedure calls (RPCs). It can be deployed in-process (running inside Erigon) or out-of-process (as a standalone service).
+The RPC Daemon is a core component of Erigon that implements the [RPC Service](../../interacting-with-erigon/) by processing JSON remote procedure calls (RPCs). It can be deployed in-process (running inside Erigon) or out-of-process (as a standalone service).
 
 ### RPC Deployment Modes
 
@@ -32,15 +32,15 @@ To interact with the **RPC Service** visit the dedicated page [Interacting with 
 
 ## Command Line Options
 
-When running RPC daemon in Local or Remote deployment mode, use this command to display available options:
+When running RPC Daemon in Local or Remote deployment mode, use this command to display available options:
 
 ```bash
 ./build/bin/rpcdaemon --help
 ```
 
-The `--help` flag listing is reproduced below for your convenience.
+A summary of the available flags is shown below. It is not a verbatim dump — run `rpcdaemon --help` on your build for the authoritative, up-to-date listing (some defaults are host-dependent).
 
-```
+```text
 rpcdaemon is JSON RPC server that connects to Erigon node for remote DB access
 
 Usage:
@@ -48,7 +48,7 @@ Usage:
 
 Flags:
       --datadir string                              path to Erigon working directory
-      --db.read.concurrency int                     Does limit amount of parallel db reads. Default: equal to GOMAXPROCS (or number of CPU) (default 1408)
+      --db.read.concurrency int                     Maximum number of concurrent open DB read transactions (MDBX read-tx semaphore); extra readers wait for a slot, though RPC paths (HTTP/WebSocket) fail fast with an overload response. Default scales as min(max(10, GOMAXPROCS*64), 9000)
       --diagnostics.disabled                        Disable diagnostics
       --diagnostics.endpoint.addr string            Diagnostics HTTP server listening interface (default "127.0.0.1")
       --diagnostics.endpoint.port uint              Diagnostics HTTP server listening port (default 6062)

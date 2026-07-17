@@ -7,6 +7,8 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/erigontech/erigon/common/crypto"
+	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/commitment"
 	"github.com/erigontech/erigon/execution/types/accounts"
 )
@@ -40,13 +42,13 @@ func TestValueTiebreaker_BalancePath(t *testing.T) {
 	balance := uint256.NewInt(1000)
 
 	// Write a balance to the versionMap at txIndex=5
-	vm.Write(addr, BalancePath, accounts.NilKey, Version{TxIndex: 5, Incarnation: 0}, *balance, true)
+	vm.WriteBalance(addr, Version{TxIndex: 5, Incarnation: 0}, *balance, true)
 
 	// Validate a read from txIndex=10 that read the SAME value from storage
 	readVal := *balance // Same value
 
-	valid := vm.validateRead(10, addr, BalancePath, accounts.NilKey, StorageRead, Version{TxIndex: UnknownDep},
-		readVal, // value tiebreaker
+	valid := validateRead(vm, 10, addr, BalancePath, accounts.NilKey, StorageRead, Version{TxIndex: UnknownDep},
+		readVal, liveBalance, eqUint256, // value tiebreaker
 		func(rv, wv Version) VersionValidity { return VersionValid },
 		false, "")
 
@@ -61,13 +63,13 @@ func TestValueTiebreaker_DifferentBalance(t *testing.T) {
 	addr := accounts.InternAddress([20]byte{0x01})
 
 	// Write balance=1000 to versionMap
-	vm.Write(addr, BalancePath, accounts.NilKey, Version{TxIndex: 5, Incarnation: 0}, *uint256.NewInt(1000), true)
+	vm.WriteBalance(addr, Version{TxIndex: 5, Incarnation: 0}, *uint256.NewInt(1000), true)
 
 	// Validate a read that got balance=500 from storage (stale)
 	readVal := *uint256.NewInt(500)
 
-	valid := vm.validateRead(10, addr, BalancePath, accounts.NilKey, StorageRead, Version{TxIndex: UnknownDep},
-		readVal,
+	valid := validateRead(vm, 10, addr, BalancePath, accounts.NilKey, StorageRead, Version{TxIndex: UnknownDep},
+		readVal, liveBalance, eqUint256,
 		func(rv, wv Version) VersionValidity { return VersionValid },
 		false, "")
 
@@ -81,44 +83,21 @@ func TestValueTiebreaker_NoncePath(t *testing.T) {
 	addr := accounts.InternAddress([20]byte{0x02})
 
 	// Write nonce=42 to versionMap
-	vm.Write(addr, NoncePath, accounts.NilKey, Version{TxIndex: 5, Incarnation: 0}, uint64(42), true)
+	vm.WriteNonce(addr, Version{TxIndex: 5, Incarnation: 0}, uint64(42), true)
 
 	// Same nonce from storage → valid
-	valid := vm.validateRead(10, addr, NoncePath, accounts.NilKey, StorageRead, Version{TxIndex: UnknownDep},
-		uint64(42),
+	valid := validateRead(vm, 10, addr, NoncePath, accounts.NilKey, StorageRead, Version{TxIndex: UnknownDep},
+		uint64(42), liveNonce, eqUint64,
 		func(rv, wv Version) VersionValidity { return VersionValid },
 		false, "")
 	assert.Equal(t, VersionValid, valid, "Same nonce should be valid")
 
 	// Different nonce → invalid
-	valid = vm.validateRead(10, addr, NoncePath, accounts.NilKey, StorageRead, Version{TxIndex: UnknownDep},
-		uint64(41),
+	valid = validateRead(vm, 10, addr, NoncePath, accounts.NilKey, StorageRead, Version{TxIndex: UnknownDep},
+		uint64(41), liveNonce, eqUint64,
 		func(rv, wv Version) VersionValidity { return VersionValid },
 		false, "")
 	assert.Equal(t, VersionInvalid, valid, "Different nonce should be invalid")
-}
-
-// TestValuesEqual verifies the valuesEqual helper for all path types.
-func TestValuesEqual(t *testing.T) {
-	// BalancePath
-	b1 := uint256.NewInt(100)
-	b2 := uint256.NewInt(100)
-	b3 := uint256.NewInt(200)
-	assert.True(t, valuesEqual(BalancePath, *b1, *b2), "Same balance should be equal")
-	assert.False(t, valuesEqual(BalancePath, *b1, *b3), "Different balance should not be equal")
-
-	// NoncePath
-	assert.True(t, valuesEqual(NoncePath, uint64(5), uint64(5)), "Same nonce")
-	assert.False(t, valuesEqual(NoncePath, uint64(5), uint64(6)), "Different nonce")
-
-	// IncarnationPath
-	assert.True(t, valuesEqual(IncarnationPath, uint64(1), uint64(1)), "Same incarnation")
-	assert.False(t, valuesEqual(IncarnationPath, uint64(1), uint64(2)), "Different incarnation")
-
-	// Nil values
-	assert.True(t, valuesEqual(BalancePath, nil, nil), "Both nil should be equal")
-	assert.False(t, valuesEqual(BalancePath, *b1, nil), "One nil should not be equal")
-	assert.False(t, valuesEqual(BalancePath, nil, *b1), "One nil should not be equal")
 }
 
 // TestVersionedWriteVersion verifies that VersionedWrite entries at
@@ -131,23 +110,23 @@ func TestVersionedWriteVersion(t *testing.T) {
 	addr := accounts.InternAddress([20]byte{0x03})
 
 	// Write at txIndex=10 with correct Version
-	vm.Write(addr, BalancePath, accounts.NilKey, Version{TxIndex: 10, Incarnation: 1}, *uint256.NewInt(500), true)
+	vm.WriteBalance(addr, Version{TxIndex: 10, Incarnation: 1}, *uint256.NewInt(500), true)
 
 	// Read at txIndex=11 should find txIndex=10
-	rr := vm.Read(addr, BalancePath, accounts.NilKey, 11)
+	_, rr, _ := vm.ReadBalance(addr, 11)
 	assert.Equal(t, MVReadResultDone, rr.Status(), "Should find entry at floor(10)")
 	assert.Equal(t, 10, rr.DepIdx(), "Should be from txIndex 10")
 
 	// Now also write at txIndex=0 (simulates the zero-Version bug)
-	vm.Write(addr, BalancePath, accounts.NilKey, Version{TxIndex: 0, Incarnation: 0}, *uint256.NewInt(999), true)
+	vm.WriteBalance(addr, Version{TxIndex: 0, Incarnation: 0}, *uint256.NewInt(999), true)
 
 	// Read at txIndex=11 should STILL find txIndex=10 (not 0)
-	rr = vm.Read(addr, BalancePath, accounts.NilKey, 11)
+	_, rr, _ = vm.ReadBalance(addr, 11)
 	assert.Equal(t, MVReadResultDone, rr.Status())
 	assert.Equal(t, 10, rr.DepIdx(), "Should find txIndex=10, not txIndex=0")
 
 	// But read at txIndex=1 should find txIndex=0
-	rr = vm.Read(addr, BalancePath, accounts.NilKey, 1)
+	_, rr, _ = vm.ReadBalance(addr, 1)
 	assert.Equal(t, MVReadResultDone, rr.Status())
 	assert.Equal(t, 0, rr.DepIdx(), "Should find txIndex=0 for floor(0)")
 }
@@ -168,6 +147,26 @@ func TestAccessListResetInIBSReset(t *testing.T) {
 
 	// Address should be cold after reset
 	assert.False(t, ibs.AddressInAccessList(testAddr), "Address should be cold after Reset")
+}
+
+// TestAddressAccessResetInIBSReset verifies that IBS.Reset() clears BAL
+// address-access recording. An aborted incarnation never harvests
+// AccessedAddresses, and only regular txs call Prepare (which re-inits
+// recording) — a worker next assigned a system block-start/block-end
+// transaction never calls Prepare, so it would harvest the leftovers into
+// its own block's access list as phantom entries.
+func TestAddressAccessResetInIBSReset(t *testing.T) {
+	ibs := New(nil)
+	sender := accounts.InternAddress([20]byte{0x01})
+	coinbase := accounts.InternAddress([20]byte{0x02})
+	leaked := accounts.InternAddress([20]byte{0x42})
+	// Prepare enables access recording at tx start.
+	require.NoError(t, ibs.Prepare(&chain.Rules{}, sender, coinbase, accounts.NilAddress, nil, nil, nil))
+	ibs.MarkAddressAccess(leaked, false)
+	// Tx aborts: AccessedAddresses is never harvested. The worker resets
+	// the shared IBS before the next task.
+	ibs.Reset()
+	assert.Empty(t, ibs.AccessedAddresses(), "no recorded accesses should survive Reset")
 }
 
 // TestTransientStorageResetInIBSReset verifies that IBS.Reset() clears
@@ -204,19 +203,20 @@ func TestCodeReadFromVersionMap(t *testing.T) {
 	delegationCode := []byte{0xef, 0x01, 0x00, 0x01, 0x02, 0x03, 0x04, 0x05,
 		0x06, 0x07, 0x08, 0x09, 0x0a, 0x0b, 0x0c, 0x0d,
 		0x0e, 0x0f, 0x10, 0x11, 0x12, 0x13, 0x14}
-	vm.Write(addr, CodePath, accounts.NilKey, Version{TxIndex: 5, Incarnation: 0}, delegationCode, true)
+	vm.WriteCode(addr, Version{TxIndex: 5, Incarnation: 0}, accounts.NewCode(delegationCode), true)
 
 	// Read at txIndex=10 should find the code
-	rr := vm.Read(addr, CodePath, accounts.NilKey, 10)
+	code, rr, ok := vm.ReadCode(addr, 10)
 	require.Equal(t, MVReadResultDone, rr.Status(), "Should find CodePath entry")
 
-	code, ok := rr.Value().([]byte)
-	require.True(t, ok, "Value should be []byte")
-	assert.Equal(t, delegationCode, code, "Code should match")
-	assert.Equal(t, byte(0xef), code[0], "Should have EIP-7702 prefix")
+	require.True(t, ok, "Code cell should exist")
+	assert.Equal(t, delegationCode, code.Bytes, "Code should match")
+	assert.Equal(t, byte(0xef), code.Bytes[0], "Should have EIP-7702 prefix")
+	assert.Equal(t, accounts.NewCode(delegationCode).Hash, code.Hash,
+		"hash must survive the versionMap round-trip, not be stripped")
 
 	// Read at txIndex=3 should NOT find it (before the write)
-	rr = vm.Read(addr, CodePath, accounts.NilKey, 3)
+	_, rr, _ = vm.ReadCode(addr, 3)
 	assert.NotEqual(t, MVReadResultDone, rr.Status(), "Should not find code before write txIndex")
 }
 
@@ -226,17 +226,35 @@ func TestCodeReadFromVersionMap(t *testing.T) {
 func TestTouchUpdates_Account(t *testing.T) {
 	addr := accounts.InternAddress([20]byte{0x42})
 
-	writes := VersionedWrites{
-		{Address: addr, Path: BalancePath, Val: *uint256.NewInt(1000)},
-		{Address: addr, Path: NoncePath, Val: uint64(5)},
-		{Address: addr, Path: IncarnationPath, Val: uint64(1)},
-		{Address: addr, Path: CodeHashPath, Val: accounts.InternCodeHash([32]byte{0xaa, 0xbb})},
-	}
+	writes := newWriteSet(
+		&VersionedWrite[uint256.Int]{WriteHeader: WriteHeader{Address: addr, Path: BalancePath}, Val: *uint256.NewInt(1000)},
+		&VersionedWrite[uint64]{WriteHeader: WriteHeader{Address: addr, Path: NoncePath}, Val: uint64(5)},
+		&VersionedWrite[uint64]{WriteHeader: WriteHeader{Address: addr, Path: IncarnationPath}, Val: uint64(1)},
+		&VersionedWrite[accounts.CodeHash]{WriteHeader: WriteHeader{Address: addr, Path: CodeHashPath}, Val: accounts.InternCodeHash([32]byte{0xaa, 0xbb})},
+	)
 
 	updates := commitment.NewUpdates(commitment.ModeUpdate, t.TempDir(), func(k []byte) []byte { return k })
 	writes.TouchUpdates(updates)
 
 	// All 4 fields merge into 1 key (same address)
+	assert.Equal(t, uint64(1), updates.Size(), "Should have 1 merged key for same address")
+}
+
+// TestTouchUpdates_AccountModeParallel: ModeParallel must merge per-field
+// touches of one address additively, like ModeUpdate.
+func TestTouchUpdates_AccountModeParallel(t *testing.T) {
+	addr := accounts.InternAddress([20]byte{0x42})
+
+	writes := newWriteSet(
+		&VersionedWrite[uint256.Int]{WriteHeader: WriteHeader{Address: addr, Path: BalancePath}, Val: *uint256.NewInt(1000)},
+		&VersionedWrite[uint64]{WriteHeader: WriteHeader{Address: addr, Path: NoncePath}, Val: uint64(5)},
+		&VersionedWrite[accounts.CodeHash]{WriteHeader: WriteHeader{Address: addr, Path: CodeHashPath}, Val: accounts.InternCodeHash([32]byte{0xaa, 0xbb})},
+	)
+
+	updates := commitment.NewUpdates(commitment.ModeParallel, t.TempDir(), func(k []byte) []byte { return k })
+	defer updates.Close()
+	writes.TouchUpdates(updates)
+
 	assert.Equal(t, uint64(1), updates.Size(), "Should have 1 merged key for same address")
 }
 
@@ -248,10 +266,10 @@ func TestToTouchKeys_Storage(t *testing.T) {
 	val1 := *uint256.NewInt(42)
 	val2 := *uint256.NewInt(0) // zero = delete
 
-	writes := VersionedWrites{
-		{Address: addr, Path: StoragePath, Key: slot1, Val: val1},
-		{Address: addr, Path: StoragePath, Key: slot2, Val: val2},
-	}
+	writes := newWriteSet(
+		&VersionedWrite[uint256.Int]{WriteHeader: WriteHeader{Address: addr, Path: StoragePath, Key: slot1}, Val: val1},
+		&VersionedWrite[uint256.Int]{WriteHeader: WriteHeader{Address: addr, Path: StoragePath, Key: slot2}, Val: val2},
+	)
 
 	updates := commitment.NewUpdates(commitment.ModeUpdate, t.TempDir(), func(k []byte) []byte { return k })
 	writes.TouchUpdates(updates)
@@ -265,9 +283,9 @@ func TestTouchUpdates_Code(t *testing.T) {
 	addr := accounts.InternAddress([20]byte{0xd2})
 	code := []byte{0xef, 0x01, 0x00, 0x01, 0x02, 0x03}
 
-	writes := VersionedWrites{
-		{Address: addr, Path: CodePath, Val: code},
-	}
+	writes := newWriteSet(
+		&VersionedWrite[accounts.Code]{WriteHeader: WriteHeader{Address: addr, Path: CodePath}, Val: accounts.Code{Hash: accounts.InternCodeHash(crypto.Keccak256Hash(code)), Bytes: code}},
+	)
 
 	updates := commitment.NewUpdates(commitment.ModeUpdate, t.TempDir(), func(k []byte) []byte { return k })
 	writes.TouchUpdates(updates)
@@ -282,16 +300,16 @@ func TestTouchUpdates_MixedBatch(t *testing.T) {
 	addr2 := accounts.InternAddress([20]byte{0x02})
 	slot := accounts.InternKey([32]byte{0x04})
 
-	writes := VersionedWrites{
+	writes := newWriteSet(
 		// Account 1: balance + nonce + code
-		{Address: addr1, Path: BalancePath, Val: *uint256.NewInt(100)},
-		{Address: addr1, Path: NoncePath, Val: uint64(1)},
-		{Address: addr1, Path: IncarnationPath, Val: uint64(0)},
-		{Address: addr1, Path: CodeHashPath, Val: accounts.InternCodeHash([32]byte{})},
-		{Address: addr1, Path: CodePath, Val: []byte{0x60, 0x00}},
+		&VersionedWrite[uint256.Int]{WriteHeader: WriteHeader{Address: addr1, Path: BalancePath}, Val: *uint256.NewInt(100)},
+		&VersionedWrite[uint64]{WriteHeader: WriteHeader{Address: addr1, Path: NoncePath}, Val: uint64(1)},
+		&VersionedWrite[uint64]{WriteHeader: WriteHeader{Address: addr1, Path: IncarnationPath}, Val: uint64(0)},
+		&VersionedWrite[accounts.CodeHash]{WriteHeader: WriteHeader{Address: addr1, Path: CodeHashPath}, Val: accounts.InternCodeHash([32]byte{})},
+		&VersionedWrite[accounts.Code]{WriteHeader: WriteHeader{Address: addr1, Path: CodePath}, Val: accounts.Code{Hash: accounts.InternCodeHash(crypto.Keccak256Hash([]byte{0x60, 0x00})), Bytes: []byte{0x60, 0x00}}},
 		// Account 2: storage write
-		{Address: addr2, Path: StoragePath, Key: slot, Val: *uint256.NewInt(999)},
-	}
+		&VersionedWrite[uint256.Int]{WriteHeader: WriteHeader{Address: addr2, Path: StoragePath, Key: slot}, Val: *uint256.NewInt(999)},
+	)
 
 	updates := commitment.NewUpdates(commitment.ModeUpdate, t.TempDir(), func(k []byte) []byte { return k })
 	writes.TouchUpdates(updates)
@@ -358,6 +376,55 @@ func TestBlockStateCacheWriteAccountUpdatesCurrent(t *testing.T) {
 	assert.Equal(t, enc2, current, "GetCurrentAccount should return the latest write")
 }
 
+// Pins that a second DeleteAccount in the same block is a writeLog no-op —
+// Flush must emit exactly one DomainDel per address (matching serial's IBS
+// short-circuit). Without this dedup the redundant nil-history entry feeds
+// into commitment-cache step keys and produces a non-deterministic state
+// root between parallel-exec nodes validating each other's blocks.
+func TestBlockStateCacheDeleteAccount_IdempotentInBlock(t *testing.T) {
+	cache := NewBlockStateCache()
+	addr := accounts.InternAddress([20]byte{0x77})
+
+	cache.DeleteAccount(addr, 1)
+	cache.DeleteAccount(addr, 2)
+
+	deletes := 0
+	for i := range cache.writeLog {
+		if cache.writeLog[i].kind == bcOpDeleteAccount && cache.writeLog[i].addr == addr {
+			deletes++
+		}
+	}
+	assert.Equal(t, 1, deletes, "second DeleteAccount in the same block must not append a second writeLog entry")
+
+	enc, present := cache.GetCurrentAccount(addr)
+	assert.True(t, present, "current view must still report addr as present-and-empty")
+	assert.Nil(t, enc, "current view value must remain nil")
+}
+
+// Pins the recreate-then-redelete pattern: an intervening WriteAccount
+// resets the dedup so the next DeleteAccount IS recorded — only the
+// "no write in between" duplicate is collapsed.
+func TestBlockStateCacheDeleteAccount_RecreateThenDeleteRecords(t *testing.T) {
+	cache := NewBlockStateCache()
+	addr := accounts.InternAddress([20]byte{0x88})
+
+	acc := accounts.NewAccount()
+	acc.Balance = *uint256.NewInt(1)
+	enc := accounts.SerialiseV3(&acc)
+
+	cache.DeleteAccount(addr, 1)
+	cache.WriteAccount(addr, enc, 2)
+	cache.DeleteAccount(addr, 3)
+
+	deletes := 0
+	for i := range cache.writeLog {
+		if cache.writeLog[i].kind == bcOpDeleteAccount && cache.writeLog[i].addr == addr {
+			deletes++
+		}
+	}
+	assert.Equal(t, 2, deletes, "delete after recreate must be recorded; only no-op duplicates are collapsed")
+}
+
 // TestSelfDestructKeepsDirtyStorageReadableSameTx verifies that after an
 // account self-destructs (versionMap active), a subsequent same-tx GetState
 // still returns the dirty value written before the SELFDESTRUCT. Pre-Cancun
@@ -387,7 +454,7 @@ func TestSelfDestructKeepsDirtyStorageReadableSameTx(t *testing.T) {
 	require.NoError(t, ibs.SetState(addr, slot0, *uint256.NewInt(42)))
 	require.NoError(t, ibs.SetState(addr, slot1, *uint256.NewInt(99)))
 
-	_, err := ibs.Selfdestruct(addr)
+	_, err := ibs.Selfdestruct(addr, false)
 	require.NoError(t, err)
 
 	// After SELFDESTRUCT, same-tx reads must still see the dirty values.
@@ -404,10 +471,12 @@ func TestSelfDestructKeepsDirtyStorageReadableSameTx(t *testing.T) {
 	assert.True(t, destructed)
 
 	// And it must NOT have emitted spurious StoragePath=0 writes.
-	for _, w := range ibs.VersionedWrites(false) {
-		if w.Address == addr && w.Path == StoragePath {
-			v := w.Val.(uint256.Int)
-			assert.False(t, v.IsZero(), "Selfdestruct must not emit StoragePath=0 for slot %x", w.Key.Value())
+	for waddr, slots := range ibs.VersionedWrites(false).Storages() {
+		if waddr != addr {
+			continue
+		}
+		for _, w := range slots {
+			assert.False(t, w.Val.IsZero(), "Selfdestruct must not emit StoragePath=0 for slot %x", w.Key.Value())
 		}
 	}
 }

@@ -24,6 +24,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -388,7 +389,7 @@ func Benchmark_BTree_SeekThenNext(b *testing.B) {
 			prevKey := common.Copy(keys[p])
 			ntimer := time.Duration(0)
 			nextKeys := 5000
-			for j := 0; j < nextKeys; j++ {
+			for range nextKeys {
 				ntime := time.Now()
 
 				if !cur.Next() {
@@ -636,7 +637,7 @@ func generateKV(tb testing.TB, tmp string, keySize, valueSize, keyCount int, log
 	collector := etl.NewCollector(btindex.BtreeLogPrefix+" genCompress", tmp, etl.NewSortableBuffer(bufSize), logger)
 	defer collector.Close()
 
-	for i := 0; i < keyCount; i++ {
+	for i := range keyCount {
 		key := make([]byte, keySize)
 		n, err := rnd.Read(key)
 		require.Equal(tb, keySize, n)
@@ -677,7 +678,7 @@ func generateKV(tb testing.TB, tmp string, keySize, valueSize, keyCount int, log
 
 	IndexFile := filepath.Join(tmp, fmt.Sprintf("%dk.bt", keyCount/1000))
 	r := seg.NewReader(decomp.MakeGetter(), compressFlags)
-	err = btindex.BuildBtreeIndexWithDecompressor(IndexFile, r, ps, tmp, 777, logger, true, statecfg.AccessorBTree|statecfg.AccessorExistence)
+	err = btindex.BuildBtreeIndexWithDecompressor(IndexFile, strings.TrimSuffix(IndexFile, ".bt")+".kvei", r, ps, tmp, 777, logger, true, statecfg.AccessorBTree|statecfg.AccessorExistence)
 	require.NoError(tb, err)
 
 	return compPath
@@ -691,6 +692,6 @@ func buildBtreeIndex(tb testing.TB, dataPath, indexPath string, compressed seg.F
 	defer decomp.Close()
 
 	r := seg.NewReader(decomp.MakeGetter(), compressed)
-	err = btindex.BuildBtreeIndexWithDecompressor(indexPath, r, background.NewProgressSet(), filepath.Dir(indexPath), seed, logger, noFsync, statecfg.AccessorBTree|statecfg.AccessorExistence)
+	err = btindex.BuildBtreeIndexWithDecompressor(indexPath, strings.TrimSuffix(indexPath, ".bt")+".kvei", r, background.NewProgressSet(), filepath.Dir(indexPath), seed, logger, noFsync, statecfg.AccessorBTree|statecfg.AccessorExistence)
 	require.NoError(tb, err)
 }

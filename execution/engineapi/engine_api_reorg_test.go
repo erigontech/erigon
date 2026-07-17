@@ -26,7 +26,6 @@ import (
 
 	"github.com/erigontech/erigon/common/hexutil"
 
-	ethereum "github.com/erigontech/erigon"
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/common/testlog"
@@ -253,14 +252,14 @@ func TestEthGetLogsDoNotGetAffectedAfterNewPayloadOnSideChain(t *testing.T) {
 		latestBlock, err := eat.RpcApiClient.GetBlockByNumber(ctx, rpc.LatestBlockNumber, false)
 		require.NoError(t, err)
 		require.Equal(t, uint64(3), latestBlock.Number.Uint64())
-		logs, err := eat.RpcApiClient.FilterLogs(ctx, ethereum.FilterQuery{BlockHash: &latestBlock.Hash})
+		logs, err := eat.RpcApiClient.FilterLogs(ctx, bind.FilterQuery{BlockHash: &latestBlock.Hash})
 		require.NoError(t, err)
 		require.Len(t, logs, 1)
 		require.Equal(t, hexutil.Uint64(3), logs[0].BlockNumber)
 		// now insert a new payload on the side chain and check the log is still present
 		_, err = eat.MockCl.InsertNewPayload(ctx, b2Side)
 		require.NoError(t, err)
-		logs, err = eat.RpcApiClient.FilterLogs(ctx, ethereum.FilterQuery{BlockHash: &latestBlock.Hash})
+		logs, err = eat.RpcApiClient.FilterLogs(ctx, bind.FilterQuery{BlockHash: &latestBlock.Hash})
 		require.NoError(t, err)
 		require.Len(t, logs, 1)
 		require.Equal(t, hexutil.Uint64(3), logs[0].BlockNumber)
@@ -321,7 +320,7 @@ func TestNewPayloadShouldReturnValidWhenSideChainGoingBackIsLtMaxReorgDepth(t *t
 	})
 	eatCanonical.Run(t, func(ctx context.Context, t *testing.T, eatCanonical engineapitester.EngineApiTester) {
 		// build the canonical chain up to canonicalChainLen
-		for i := 0; i < canonicalChainLen; i++ {
+		for range canonicalChainLen {
 			txn, err := eatCanonical.Transactor.SubmitSimpleTransfer(eatCanonical.CoinbaseKey, receiver1, big.NewInt(1))
 			require.NoError(t, err)
 			clPayload, err := eatCanonical.MockCl.BuildCanonicalBlock(ctx)
@@ -436,5 +435,48 @@ func TestFcuReturnsReorgTooDeepCode38006(t *testing.T) {
 		require.ErrorAs(t, err, &rpcErr)
 		require.Equal(t, -38006, rpcErr.ErrorCode())
 		require.Equal(t, "Too deep reorg", rpcErr.Error())
+	})
+}
+
+// A forkchoiceUpdated that moves the head back to a canonical ancestor (here
+// genesis) must be honored: the enginex consume simulator resets a reused
+// client between tests with FCU(head=genesis), so a client whose head was
+// advanced by the previous test needs this head regression to succeed.
+func TestEngineApiForkchoiceToGenesisRewindsHead(t *testing.T) {
+	ctx := t.Context()
+	logger := testlog.Logger(t, log.LvlDebug)
+	eat, err := engineapitester.DefaultEngineApiTester(ctx, logger, t.TempDir())
+	require.NoError(t, err)
+	t.Cleanup(func() {
+		require.NoError(t, eat.Close())
+	})
+	eat.Run(t, func(ctx context.Context, t *testing.T, eat engineapitester.EngineApiTester) {
+		genesisHash := eat.GenesisBlock.Hash()
+		for range 3 {
+			_, err := eat.MockCl.BuildCanonicalBlock(ctx)
+			require.NoError(t, err)
+		}
+		headBefore, err := eat.RpcApiClient.BlockNumber()
+		require.NoError(t, err)
+		require.Greater(t, headBefore, uint64(0), "head should have advanced")
+
+		fcu := enginetypes.ForkChoiceState{
+			HeadHash:           genesisHash,
+			SafeBlockHash:      genesisHash,
+			FinalizedBlockHash: genesisHash,
+		}
+		var r *enginetypes.ForkChoiceUpdatedResponse
+		if eat.ChainConfig.AmsterdamTime != nil {
+			r, err = eat.EngineApiClient.ForkchoiceUpdatedV4(ctx, &fcu, nil)
+		} else {
+			r, err = eat.EngineApiClient.ForkchoiceUpdatedV3(ctx, &fcu, nil)
+		}
+		require.NoError(t, err)
+		require.Equal(t, enginetypes.ValidStatus, r.PayloadStatus.Status,
+			"FCU(head=genesis) should rewind the head and return VALID")
+
+		headAfter, err := eat.RpcApiClient.BlockNumber()
+		require.NoError(t, err)
+		require.Equal(t, uint64(0), headAfter, "head should have rewound to genesis")
 	})
 }

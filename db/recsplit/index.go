@@ -26,7 +26,6 @@ import (
 	"math/bits"
 	"os"
 	"path/filepath"
-	"sync"
 	"sync/atomic"
 	"time"
 	"unsafe"
@@ -57,10 +56,10 @@ const (
 	//   It makes .seg files "warm" - which is bad because they are big and
 	//      data-locality of touches is bad (and maybe need visit a lot of shards to find key).
 	//   Can add a built-in "existence filter" (like bloom/cuckoo/ribbon/xor-filter/fuse-filter); it will improve
-	//      data-locality - filters are small-enough and existance-chekcs will be co-located on disk.
+	//      data-locality - filters are small-enough and existence-checks will be co-located on disk.
 	//   But there are 2 additional properties we have in our data:
 	//      "keys are known", "keys are hashed" (.idx works on murmur3), ".idx can calc key-number by key".
-	//   It means: if we rely on this properties then we can do better than general-purpose-existance-filter.
+	//   It means: if we rely on this properties then we can do better than general-purpose-existence-filter.
 	//   Seems just an "array of 1-st bytes of key-hashes" is great alternative:
 	//      general-purpose-filter: 9bits/key, 0.3% false-positives, 3 mem access
 	//      first-bytes-array: 8bits/key, 1/256=0.4% false-positives, 1 mem access
@@ -107,7 +106,7 @@ type Index struct {
 	existenceV1        *fusefilter.Reader
 	existenceV2        *fusefilter.ReaderSharded
 
-	readers         *sync.Pool
+	sharedReader    *IndexReader // IndexReader is stateless, so one instance serves all goroutines
 	readAheadRefcnt atomic.Int32 // ref-counter: allow enable/disable read-ahead from goroutines. only when refcnt=0 - disable read-ahead once
 }
 
@@ -163,11 +162,7 @@ func OpenIndex(indexFilePath string) (_ *Index, err error) {
 	//	//}
 	//}
 
-	idx.readers = &sync.Pool{
-		New: func() any {
-			return NewIndexReader(idx)
-		},
-	}
+	idx.sharedReader = NewIndexReader(idx)
 	return idx, nil
 }
 
@@ -222,7 +217,7 @@ func (idx *Index) init() (err error) {
 	startSeedLen := int(idx.data[offset])
 	offset++
 	idx.startSeed = make([]uint64, startSeedLen)
-	for i := 0; i < startSeedLen; i++ {
+	for i := range startSeedLen {
 		idx.startSeed[i] = binary.BigEndian.Uint64(idx.data[offset:])
 		offset += 8
 	}
@@ -287,7 +282,7 @@ func (idx *Index) init() (err error) {
 	golombParamSize := binary.BigEndian.Uint16(idx.data[offset:])
 	offset += 4
 	idx.golombRice = make([]uint32, golombParamSize)
-	for i := uint16(0); i < golombParamSize; i++ {
+	for i := range golombParamSize {
 		if i == 0 {
 			idx.golombRice[i] = (bijMemo[i] << 27) | bijMemo[i]
 		} else if i <= idx.leafSize {
@@ -331,6 +326,19 @@ func (idx *Index) ForceExistenceFilterNormal() {
 	}
 	if idx.dataStructureVersion >= 2 {
 		idx.existenceV2.MadvNormal()
+	}
+}
+func (idx *Index) ForceExistenceFilterRandom() {
+	existanceSupported := idx.dataStructureVersion >= 1 && idx.lessFalsePositives && idx.keyCount > 0
+	if !existanceSupported {
+		return
+	}
+	if idx.dataStructureVersion == 1 {
+		idx.existenceV1.MadvRandom()
+		return
+	}
+	if idx.dataStructureVersion >= 2 {
+		idx.existenceV2.MadvRandom()
 	}
 }
 func (idx *Index) ForceExistenceFilterInRAM() datasize.ByteSize {
@@ -416,14 +424,11 @@ func (idx *Index) KeyCount() uint64 { return idx.keyCount }
 func (idx *Index) LeafSize() uint16 { return idx.leafSize }
 func (idx *Index) BucketSize() int  { return idx.bucketSize }
 
-// Lookup is not thread-safe because it used id.hasher
+// Lookup is safe for concurrent use: it only reads the index's immutable state
 func (idx *Index) Lookup(bucketHash, fingerprint uint64) (uint64, bool) {
 	if idx.keyCount == 0 {
 		_, fName := filepath.Split(idx.filePath)
 		panic("no Lookup should be done when keyCount==0, please use Empty function to guard " + fName)
-	}
-	if idx.keyCount == 1 {
-		return 0, true
 	}
 	if idx.lessFalsePositives {
 		switch idx.dataStructureVersion {
@@ -436,6 +441,12 @@ func (idx *Index) Lookup(bucketHash, fingerprint uint64) (uint64, bool) {
 				return 0, false
 			}
 		}
+	}
+	if idx.keyCount == 1 {
+		if !idx.enums {
+			return binary.BigEndian.Uint64(idx.data[9+idx.bytesPerRec:]) & idx.recMask, true
+		}
+		return 0, true
 	}
 
 	var gr GolombRiceReader
@@ -604,6 +615,6 @@ func (idx *Index) MadvWillNeed() *Index {
 	return idx
 }
 
-func (idx *Index) GetReaderFromPool() *IndexReader {
-	return idx.readers.Get().(*IndexReader)
+func (idx *Index) Reader() *IndexReader {
+	return idx.sharedReader
 }

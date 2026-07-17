@@ -24,6 +24,8 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/libp2p/go-libp2p/core/peer"
+
 	"github.com/erigontech/erigon/cl/beacon/beaconevents"
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
@@ -33,7 +35,6 @@ import (
 	"github.com/erigontech/erigon/cl/utils/eth_clock"
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/log/v3"
-	"github.com/libp2p/go-libp2p/core/peer"
 )
 
 // seenPayloadAttestationKey tracks seen attestations per (slot, validatorIndex).
@@ -47,6 +48,7 @@ type seenPayloadAttestationKey struct {
 type pendingPayloadAttestationKey struct {
 	blockRoot      common.Hash
 	validatorIndex uint64
+	messageRoot    common.Hash
 }
 
 // pendingPayloadAttestationJob represents a pending attestation waiting for its block.
@@ -62,6 +64,7 @@ const (
 	seenPayloadAttestationCacheSize        = 2048
 	pendingPayloadAttestationExpiry        = 30 * time.Second
 	pendingPayloadAttestationCheckInterval = 100 * time.Millisecond
+	maxPendingAttestations                 = 2048
 )
 
 type payloadAttestationService struct {
@@ -150,17 +153,22 @@ func (s *payloadAttestationService) ProcessMessage(ctx context.Context, _ *uint6
 
 	// [IGNORE] The message's block root has been seen (via gossip or non-gossip sources)
 	// A client MAY queue attestation for processing once the block is retrieved.
-	if _, ok := s.forkchoiceStore.GetHeader(blockRoot); !ok {
+	blockHeader, ok := s.forkchoiceStore.GetHeader(blockRoot)
+	if !ok {
 		// Block hasn't arrived yet, queue attestation for later processing
 		s.queuePendingAttestation(blockRoot, msg)
 		log.Trace("Queued payload attestation for later processing",
 			"blockRoot", blockRoot,
 			"validatorIndex", validatorIndex)
-		return nil
+		return fmt.Errorf("%w: %w: block not available", ErrIgnore, ErrAttestationQueued)
+	}
+	// [IGNORE] The block referenced by data.beacon_block_root is at data.slot.
+	if blockHeader.Slot != slot {
+		return fmt.Errorf("%w: payload attestation slot %d does not match referenced block slot %d", ErrIgnore, slot, blockHeader.Slot)
 	}
 
 	// Process through forkchoice which handles:
-	// [IGNORE] block state not found, slot mismatch
+	// [IGNORE] block state not found
 	// [REJECT] validator is not in PTC
 	// [REJECT] signature verification
 	if err := s.forkchoiceStore.OnPayloadAttestationMessage(msg, false); err != nil {
@@ -190,18 +198,31 @@ func (s *payloadAttestationService) ProcessMessage(ctx context.Context, _ *uint6
 
 // queuePendingAttestation adds an attestation to the pending queue for later processing.
 func (s *payloadAttestationService) queuePendingAttestation(blockRoot common.Hash, msg *cltypes.PayloadAttestationMessage) {
-	key := pendingPayloadAttestationKey{
-		blockRoot:      blockRoot,
-		validatorIndex: msg.ValidatorIndex,
+	if s.pendingCount.Add(1) > maxPendingAttestations {
+		s.pendingCount.Add(-1)
+		return
 	}
 
-	// Only add if not already present
+	key := pendingPayloadAttestationKeyFor(blockRoot, msg)
+
 	if _, loaded := s.pendingAttestations.LoadOrStore(key, &pendingPayloadAttestationJob{
 		msg:          msg,
 		creationTime: time.Now(),
-	}); !loaded {
-		s.pendingCount.Add(1)
+	}); loaded {
+		s.pendingCount.Add(-1)
+	} else {
+		s.pendingCond.L.Lock()
 		s.pendingCond.Signal()
+		s.pendingCond.L.Unlock()
+	}
+}
+
+func pendingPayloadAttestationKeyFor(blockRoot common.Hash, msg *cltypes.PayloadAttestationMessage) pendingPayloadAttestationKey {
+	root, _ := msg.HashSSZ()
+	return pendingPayloadAttestationKey{
+		blockRoot:      blockRoot,
+		validatorIndex: msg.ValidatorIndex,
+		messageRoot:    common.Hash(root),
 	}
 }
 
@@ -210,7 +231,9 @@ func (s *payloadAttestationService) loop(ctx context.Context) {
 	// Wake any blocked Wait() on context cancellation to prevent deadlock.
 	go func() {
 		<-ctx.Done()
+		s.pendingCond.L.Lock()
 		s.pendingCond.Broadcast()
+		s.pendingCond.L.Unlock()
 	}()
 
 	for {

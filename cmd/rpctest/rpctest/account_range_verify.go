@@ -88,7 +88,8 @@ func CompareAccountRange(logger log.Logger, erigonURL, gethURL, tmpDataDir, geth
 	f := func(url string, db kv.RwTx) error {
 		i := uint64(0)
 		reqGen := &RequestGenerator{}
-		next := []byte{}
+		var nextAddr common.Address
+		next := nextAddr[:]
 		for {
 			ar := DebugAccountRange{}
 			req := reqGen.accountRange(blockFrom, next, 256)
@@ -109,7 +110,7 @@ func CompareAccountRange(logger log.Logger, erigonURL, gethURL, tmpDataDir, geth
 				if innerErr != nil {
 					return innerErr
 				}
-				err = db.Put(accountDumpBucket, addr.Bytes(), b)
+				err = db.Put(accountDumpBucket, addr[:], b)
 				if err != nil {
 					return err
 				}

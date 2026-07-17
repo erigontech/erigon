@@ -96,7 +96,7 @@ func checkNodes(t *testing.T, nodes []*Node, wantLen int) {
 // within the context's deadline.
 // see: iter_integration_test.go
 func TestFairMixOnce(t *testing.T) {
-	for i := 0; i < 10; i++ {
+	for range 10 {
 		testMixerFairness(t)
 	}
 }
@@ -160,7 +160,6 @@ func TestFairMixEmpty(t *testing.T) {
 
 // This test checks closing a source while Next runs.
 func TestFairMixRemoveSource(t *testing.T) {
-	t.Skip("issue #15019")
 	mix := NewFairMix(1 * time.Second)
 	source := make(blockingIter)
 	mix.AddSource(source)
@@ -233,6 +232,21 @@ func testMixerClose(t *testing.T) {
 	}
 
 	mix.Close() // shouldn't crash
+}
+
+// This test checks that AddSource closes the rejected iterator when the
+// mixer is already closed, so callers racing with Close do not leak resources.
+func TestFairMixAddSourceAfterClose(t *testing.T) {
+	mix := NewFairMix(-1)
+	mix.Close()
+
+	// Mixer is now closed. AddSource must close the rejected iterator
+	// so the caller does not leak it.
+	rejected := &genIter{index: 1}
+	mix.AddSource(rejected)
+	if rejected.Next() {
+		t.Fatal("rejected iterator was not closed by AddSource")
+	}
 }
 
 func idPrefixDistribution(nodes []*Node) map[uint32]int {

@@ -43,11 +43,16 @@ import (
 )
 
 func newBaseApiForTest(m *execmoduletester.ExecModuleTester) *BaseAPI {
-	return NewBaseApi(nil, m.StateCache, m.BlockReader, false, rpccfg.DefaultEvmCallTimeout, m.Engine, m.Dirs, nil, 0, 0)
+	return NewBaseApi(nil, m.StateCache, m.BlockReader, m.Engine, nil, &BaseApiConfig{Dirs: m.Dirs})
 }
 
-func newBaseApiWithLimits(m *execmoduletester.ExecModuleTester, rangeLimit, maxResults int) *BaseAPI {
-	return NewBaseApi(nil, m.StateCache, m.BlockReader, false, rpccfg.DefaultEvmCallTimeout, m.Engine, m.Dirs, nil, rangeLimit, maxResults)
+func newBaseApiWithLimits(m *execmoduletester.ExecModuleTester, rangeLimit, maxResults, logQueryLimit int) *BaseAPI {
+	return NewBaseApi(nil, m.StateCache, m.BlockReader, m.Engine, nil, &BaseApiConfig{
+		Dirs:              m.Dirs,
+		BlockRangeLimit:   rangeLimit,
+		GetLogsMaxResults: maxResults,
+		LogQueryLimit:     logQueryLimit,
+	})
 }
 
 func newEthApiForTest(base *BaseAPI, db kv.TemporalRoDB, txPool txpoolproto.TxpoolClient, mining txpoolproto.MiningClient) *APIImpl {
@@ -62,6 +67,20 @@ func newEthApiForTest(base *BaseAPI, db kv.TemporalRoDB, txPool txpoolproto.Txpo
 		RpcTxSyncMaxTimeout:         1 * time.Minute,
 	}
 	return NewEthAPI(base, db, nil, txPool, mining, cfg, log.New())
+}
+
+func TestNewBaseApiEvmCallTimeout(t *testing.T) {
+	m, _, _ := rpcdaemontest.CreateTestExecModule(t)
+
+	t.Run("zero is normalized to default", func(t *testing.T) {
+		base := NewBaseApi(nil, m.StateCache, m.BlockReader, m.Engine, nil, &BaseApiConfig{Dirs: m.Dirs})
+		assert.Equal(t, rpccfg.DefaultEvmCallTimeout, base.evmCallTimeout)
+	})
+
+	t.Run("explicit value is preserved", func(t *testing.T) {
+		base := NewBaseApi(nil, m.StateCache, m.BlockReader, m.Engine, nil, &BaseApiConfig{Dirs: m.Dirs, EvmCallTimeout: 42 * time.Second})
+		assert.Equal(t, 42*time.Second, base.evmCallTimeout)
+	})
 }
 
 func TestGetBalanceChangesInBlock(t *testing.T) {
@@ -89,7 +108,7 @@ func TestGetBalanceChangesInBlock(t *testing.T) {
 func TestGetTransactionReceipt(t *testing.T) {
 	m, _, _ := rpcdaemontest.CreateTestExecModule(t)
 	stateCache := kvcache.New(kvcache.DefaultCoherentConfig)
-	api := newEthApiForTest(NewBaseApi(nil, stateCache, m.BlockReader, false, rpccfg.DefaultEvmCallTimeout, m.Engine, m.Dirs, nil, 0, 0), m.DB, nil, nil)
+	api := newEthApiForTest(NewBaseApi(nil, stateCache, m.BlockReader, m.Engine, nil, &BaseApiConfig{Dirs: m.Dirs}), m.DB, nil, nil)
 	// Call GetTransactionReceipt for transaction which is not in the database
 	if _, err := api.GetTransactionReceipt(context.Background(), common.Hash{}); err != nil {
 		t.Errorf("calling GetTransactionReceipt with empty hash: %v", err)
@@ -113,7 +132,7 @@ func TestGetStorageAt_ByBlockNumber_WithRequireCanonicalDefault(t *testing.T) {
 	api := newEthApiForTest(newBaseApiForTest(m), m.DB, nil, nil)
 	addr := common.HexToAddress("0x71562b71999873db5b286df957af199ec94617f7")
 
-	result, err := api.GetStorageAt(context.Background(), addr, "0x0", rpc.BlockNumberOrHashWithNumber(0))
+	result, err := api.GetStorageAt(context.Background(), addr, "0x0", bnhPtr(rpc.BlockNumberOrHashWithNumber(0)))
 	if err != nil {
 		t.Errorf("calling GetStorageAt: %v", err)
 	}
@@ -127,7 +146,7 @@ func TestGetStorageAt_ByBlockHash_WithRequireCanonicalDefault(t *testing.T) {
 	api := newEthApiForTest(newBaseApiForTest(m), m.DB, nil, nil)
 	addr := common.HexToAddress("0x71562b71999873db5b286df957af199ec94617f7")
 
-	result, err := api.GetStorageAt(context.Background(), addr, "0x0", rpc.BlockNumberOrHashWithHash(m.Genesis.Hash(), false))
+	result, err := api.GetStorageAt(context.Background(), addr, "0x0", bnhPtr(rpc.BlockNumberOrHashWithHash(m.Genesis.Hash(), false)))
 	if err != nil {
 		t.Errorf("calling GetStorageAt: %v", err)
 	}
@@ -141,7 +160,7 @@ func TestGetStorageAt_ByBlockHash_WithRequireCanonicalTrue(t *testing.T) {
 	api := newEthApiForTest(newBaseApiForTest(m), m.DB, nil, nil)
 	addr := common.HexToAddress("0x71562b71999873db5b286df957af199ec94617f7")
 
-	result, err := api.GetStorageAt(context.Background(), addr, "0x0", rpc.BlockNumberOrHashWithHash(m.Genesis.Hash(), true))
+	result, err := api.GetStorageAt(context.Background(), addr, "0x0", bnhPtr(rpc.BlockNumberOrHashWithHash(m.Genesis.Hash(), true)))
 	if err != nil {
 		t.Errorf("calling GetStorageAt: %v", err)
 	}
@@ -164,7 +183,7 @@ func TestGetStorageAt_ByBlockHash_WithRequireCanonicalDefault_BlockNotFoundError
 	}
 	offChainBlock := offChain.Blocks[0]
 
-	if _, err := api.GetStorageAt(context.Background(), addr, "0x0", rpc.BlockNumberOrHashWithHash(offChainBlock.Hash(), false)); err != nil {
+	if _, err := api.GetStorageAt(context.Background(), addr, "0x0", bnhPtr(rpc.BlockNumberOrHashWithHash(offChainBlock.Hash(), false))); err != nil {
 		if fmt.Sprintf("%v", err) != fmt.Sprintf("block not found: %s", offChainBlock.Hash().String()) {
 			t.Errorf("wrong error: %v", err)
 		}
@@ -185,7 +204,7 @@ func TestGetStorageAt_ByBlockHash_WithRequireCanonicalTrue_BlockNotFoundError(t 
 	}
 	offChainBlock := offChain.Blocks[0]
 
-	if _, err := api.GetStorageAt(context.Background(), addr, "0x0", rpc.BlockNumberOrHashWithHash(offChainBlock.Hash(), true)); err != nil {
+	if _, err := api.GetStorageAt(context.Background(), addr, "0x0", bnhPtr(rpc.BlockNumberOrHashWithHash(offChainBlock.Hash(), true))); err != nil {
 		if fmt.Sprintf("%v", err) != fmt.Sprintf("block not found: %s", offChainBlock.Hash().String()) {
 			t.Errorf("wrong error: %v", err)
 		}
@@ -202,7 +221,7 @@ func TestGetStorageAt_ByBlockHash_WithRequireCanonicalDefault_NonCanonicalBlock(
 
 	orphanedBlock := orphanedChain[0].Blocks[0]
 
-	result, err := api.GetStorageAt(context.Background(), addr, "0x0", rpc.BlockNumberOrHashWithHash(orphanedBlock.Hash(), false))
+	result, err := api.GetStorageAt(context.Background(), addr, "0x0", bnhPtr(rpc.BlockNumberOrHashWithHash(orphanedBlock.Hash(), false)))
 	if err != nil {
 		if fmt.Sprintf("%v", err) != fmt.Sprintf("hash %s is not currently canonical", orphanedBlock.Hash().String()[2:]) {
 			t.Errorf("wrong error: %v", err)
@@ -221,7 +240,7 @@ func TestGetStorageAt_ByBlockHash_WithRequireCanonicalTrue_NonCanonicalBlock(t *
 
 	orphanedBlock := orphanedChain[0].Blocks[0]
 
-	if _, err := api.GetStorageAt(context.Background(), addr, "0x0", rpc.BlockNumberOrHashWithHash(orphanedBlock.Hash(), true)); err != nil {
+	if _, err := api.GetStorageAt(context.Background(), addr, "0x0", bnhPtr(rpc.BlockNumberOrHashWithHash(orphanedBlock.Hash(), true))); err != nil {
 		if fmt.Sprintf("%v", err) != fmt.Sprintf("hash %s is not currently canonical", orphanedBlock.Hash().String()[2:]) {
 			t.Errorf("wrong error: %v", err)
 		}
@@ -302,7 +321,7 @@ func TestGetStorageValues_HappyPath(t *testing.T) {
 
 	result, err := api.GetStorageValues(context.Background(), map[common.Address][]common.Hash{
 		addr1: {slot0, slot1},
-	}, latest)
+	}, &latest)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -329,7 +348,7 @@ func TestGetStorageValues_MultipleAddresses(t *testing.T) {
 		addr2: {slot1, slot2},
 		addr3: {slot0, slot2},
 	}
-	result, err := api.GetStorageValues(context.Background(), request, latest)
+	result, err := api.GetStorageValues(context.Background(), request, &latest)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -356,7 +375,7 @@ func TestGetStorageValues_MissingSlotReturnsZero(t *testing.T) {
 
 	result, err := api.GetStorageValues(context.Background(), map[common.Address][]common.Hash{
 		addr1: {common.HexToHash("0xff")},
-	}, latest)
+	}, &latest)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -371,7 +390,7 @@ func TestGetStorageValues_EmptyRequestReturnsError(t *testing.T) {
 
 	latest := rpc.BlockNumberOrHashWithNumber(rpc.LatestBlockNumber)
 
-	_, err := api.GetStorageValues(context.Background(), map[common.Address][]common.Hash{}, latest)
+	_, err := api.GetStorageValues(context.Background(), map[common.Address][]common.Hash{}, &latest)
 	if err == nil {
 		t.Fatal("expected error for empty request")
 	}
@@ -394,7 +413,7 @@ func TestGetStorageValues_ExceedingSlotLimitReturnsError(t *testing.T) {
 
 	_, err := api.GetStorageValues(context.Background(), map[common.Address][]common.Hash{
 		addr1: tooMany,
-	}, latest)
+	}, &latest)
 	if err == nil {
 		t.Fatal("expected error for exceeding slot limit")
 	}
@@ -411,7 +430,7 @@ func TestGetStorageValues_ByBlockHash_NonCanonicalBlock(t *testing.T) {
 
 	_, err := api.GetStorageValues(context.Background(), map[common.Address][]common.Hash{
 		addr1: {common.Hash{}},
-	}, blockNumberOrHash)
+	}, &blockNumberOrHash)
 	if err != nil {
 		if fmt.Sprintf("%v", err) != fmt.Sprintf("hash %s is not currently canonical", orphanedBlock.Hash().String()[2:]) {
 			t.Errorf("wrong error: %v", err)
@@ -432,7 +451,7 @@ func TestGetStorageValues_ByBlockHash_WithRequireCanonicalTrue_NonCanonicalBlock
 
 	_, err := api.GetStorageValues(context.Background(), map[common.Address][]common.Hash{
 		addr1: {common.Hash{}},
-	}, blockNumberOrHash)
+	}, &blockNumberOrHash)
 	if err != nil {
 		if fmt.Sprintf("%v", err) != fmt.Sprintf("hash %s is not currently canonical", orphanedBlock.Hash().String()[2:]) {
 			t.Errorf("wrong error: %v", err)
@@ -453,8 +472,62 @@ func TestGetStorageValues_PrunedBlockReturnsError(t *testing.T) {
 
 	_, err := api.GetStorageValues(context.Background(), map[common.Address][]common.Hash{
 		addr1: {common.Hash{}},
-	}, blockNumberOrHash)
+	}, &blockNumberOrHash)
 	if err != nil {
 		t.Logf("got expected prune error: %v", err)
 	}
+}
+
+// bnhPtr returns a pointer to a BlockNumberOrHash, for the state methods whose
+// block parameter is now optional (*rpc.BlockNumberOrHash).
+func bnhPtr(b rpc.BlockNumberOrHash) *rpc.BlockNumberOrHash { return &b }
+
+// TestStateMethods_OmittedBlockDefaultsToLatest verifies that an omitted (nil)
+// block selector is treated identically to an explicit "latest" selector for each
+// state method (per execution-apis: the Block parameter is optional, default
+// 'latest'). This exercises the orLatest(nil) path directly.
+func TestStateMethods_OmittedBlockDefaultsToLatest(t *testing.T) {
+	a := assert.New(t)
+	m, _, _ := rpcdaemontest.CreateTestExecModule(t)
+	api := newEthApiForTest(newBaseApiForTest(m), m.DB, nil, nil)
+	ctx := context.Background()
+	addr := common.HexToAddress("0x71562b71999873db5b286df957af199ec94617f7")
+	latest := rpc.BlockNumberOrHashWithNumber(rpc.LatestBlockNumber)
+
+	balNil, err := api.GetBalance(ctx, addr, nil)
+	a.NoError(err)
+	balLatest, err := api.GetBalance(ctx, addr, &latest)
+	a.NoError(err)
+	a.Equal(balLatest, balNil)
+
+	codeNil, err := api.GetCode(ctx, addr, nil)
+	a.NoError(err)
+	codeLatest, err := api.GetCode(ctx, addr, &latest)
+	a.NoError(err)
+	a.Equal(codeLatest, codeNil)
+
+	nonceNil, err := api.GetTransactionCount(ctx, addr, nil)
+	a.NoError(err)
+	nonceLatest, err := api.GetTransactionCount(ctx, addr, &latest)
+	a.NoError(err)
+	a.Equal(nonceLatest, nonceNil)
+
+	storageNil, err := api.GetStorageAt(ctx, addr, "0x0", nil)
+	a.NoError(err)
+	storageLatest, err := api.GetStorageAt(ctx, addr, "0x0", &latest)
+	a.NoError(err)
+	a.Equal(storageLatest, storageNil)
+
+	proofNil, err := api.GetProof(ctx, addr, nil, nil)
+	a.NoError(err)
+	proofLatest, err := api.GetProof(ctx, addr, nil, &latest)
+	a.NoError(err)
+	a.Equal(proofLatest, proofNil)
+
+	req := map[common.Address][]common.Hash{addr: {{}}}
+	svNil, err := api.GetStorageValues(ctx, req, nil)
+	a.NoError(err)
+	svLatest, err := api.GetStorageValues(ctx, req, &latest)
+	a.NoError(err)
+	a.Equal(svLatest, svNil)
 }

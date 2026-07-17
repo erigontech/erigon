@@ -17,13 +17,14 @@
 package network
 
 import (
+	"cmp"
 	"context"
 	"errors"
 	"fmt"
 	"io"
 	"math"
 	"net/http"
-	"sort"
+	"slices"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -213,10 +214,7 @@ func (f *ForwardBeaconDownloader) RequestMore(ctx context.Context) {
 							}
 						}
 
-						backoff := baseInterval * time.Duration(1<<uint(min(failures, 4)))
-						if backoff > 5*time.Second {
-							backoff = 5 * time.Second
-						}
+						backoff := min(baseInterval*time.Duration(1<<uint(min(failures, 4))), 5*time.Second)
 						reqInterval.Reset(backoff)
 						return
 					}
@@ -263,8 +261,8 @@ Process:
 	processBlocks := resp.blocks
 	pid := resp.peerId
 
-	sort.Slice(processBlocks, func(i, j int) bool {
-		return processBlocks[i].Block.Slot < processBlocks[j].Block.Slot
+	slices.SortFunc(processBlocks, func(a, b *cltypes.SignedBeaconBlock) int {
+		return cmp.Compare(a.Block.Slot, b.Block.Slot)
 	})
 
 	// For GLOAS blocks, fetch envelopes only for FULL blocks (whose payload was delivered).
@@ -420,7 +418,7 @@ func (f *ForwardBeaconDownloader) capAtForkBoundary(reqSlot, reqCount uint64) (u
 		}
 		boundaries = append(boundaries, epoch*slotsPerEpoch)
 	}
-	sort.Slice(boundaries, func(i, j int) bool { return boundaries[i] < boundaries[j] })
+	slices.Sort(boundaries)
 
 	endSlot := reqSlot + reqCount
 	for _, boundarySlot := range boundaries {
@@ -460,7 +458,7 @@ func fetchBlocksFromBeaconAPI(ctx context.Context, baseURL string, startSlot, co
 	sem := make(chan struct{}, 8) // limit concurrent requests
 	var wg sync.WaitGroup
 
-	for i := uint64(0); i < count; i++ {
+	for i := range count {
 		slot := startSlot + i
 		idx := i
 		wg.Add(1)
