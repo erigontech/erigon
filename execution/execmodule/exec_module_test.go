@@ -33,6 +33,7 @@ import (
 	"github.com/cenkalti/backoff/v4"
 	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/require"
+	"google.golang.org/grpc"
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/crypto"
@@ -55,6 +56,7 @@ import (
 	"github.com/erigontech/erigon/execution/tests/blockgen"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/accounts"
+	"github.com/erigontech/erigon/node/gointerfaces/remoteproto"
 	"github.com/erigontech/erigon/node/gointerfaces/txpoolproto"
 )
 
@@ -697,6 +699,26 @@ func insertValidateAndUfc1By1(ctx context.Context, exec *execmodule.ExecModule, 
 	return nil
 }
 
+// insertAndUfcBatched inserts all blocks and drives a single FCU to the top,
+// so the whole batch executes under one forkchoice run.
+func insertAndUfcBatched(ctx context.Context, exec *execmodule.ExecModule, blocks []*types.Block) error {
+	ir, err := insertBlocks(ctx, exec, blocks)
+	if err != nil {
+		return err
+	}
+	if ir != execmodule.ExecutionStatusSuccess {
+		return fmt.Errorf("unexpected insertBlocks status: %s", ir)
+	}
+	ur, err := updateForkChoice(ctx, exec, blocks[len(blocks)-1].Header())
+	if err != nil {
+		return err
+	}
+	if ur.Status != execmodule.ExecutionStatusSuccess {
+		return fmt.Errorf("unexpected updateForkChoice status: %s", ur.Status)
+	}
+	return nil
+}
+
 func assembleBlock(ctx context.Context, exec *execmodule.ExecModule, params *builder.Parameters) (uint64, error) {
 	return retryBusy(ctx, func() (uint64, bool, error) {
 		r, err := exec.AssembleBlock(ctx, params)
@@ -1335,6 +1357,68 @@ func TestAssembleBlockAmsterdamForkTransition(t *testing.T) {
 	require.NoError(t, err)
 }
 
+// TestStateChangeVersionMatchesCommitted pins the contract the Coherent kvcache
+// relies on: the StateVersionId announced in a state-change batch equals the
+// PlainStateVersion a committed read tx observes once that batch's commit lands.
+// If they diverge, version-keyed cache roots never match any reader.
+func TestStateChangeVersionMatchesCommitted(t *testing.T) {
+	for _, mode := range []struct {
+		name string
+		opts []execmoduletester.Option
+	}{
+		{name: "fg-commit"},
+		{name: "bg-commit", opts: []execmoduletester.Option{execmoduletester.WithFcuBackgroundCommit()}},
+	} {
+		// 1by1 flushes once per block; batched executes all blocks under one
+		// FCU and crosses the initial-cycle threshold, so mid-FCU CommitCycle
+		// commits bump the version before the single announce.
+		for _, ins := range []struct {
+			name   string
+			blocks int
+			insert func(context.Context, *execmodule.ExecModule, []*types.Block) error
+		}{
+			{name: "1by1", blocks: 3, insert: insertValidateAndUfc1By1},
+			{name: "batched", blocks: 20, insert: insertAndUfcBatched},
+		} {
+			t.Run(mode.name+"/"+ins.name, func(t *testing.T) {
+				ctx := t.Context()
+				m := execmoduletester.New(t, mode.opts...)
+				exec := m.ExecModule
+
+				streamCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
+				defer cancel()
+				stream, err := m.StateChangesClient().StateChanges(streamCtx, &remoteproto.StateChangeRequest{}, grpc.WaitForReady(true))
+				require.NoError(t, err)
+
+				chainPack, err := blockgen.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, ins.blocks, nil)
+				require.NoError(t, err)
+				require.NoError(t, ins.insert(ctx, exec, chainPack.Blocks))
+
+				topBlock := chainPack.TopBlock.NumberU64()
+				var lastAnnounced uint64
+				for found := false; !found; {
+					batch, err := stream.Recv()
+					require.NoError(t, err)
+					for _, cb := range batch.ChangeBatch {
+						if cb.Direction == remoteproto.Direction_FORWARD && cb.BlockHeight == topBlock {
+							lastAnnounced = batch.StateVersionId
+							found = true
+						}
+					}
+				}
+
+				exec.WaitIdle(ctx)
+				var committed uint64
+				require.NoError(t, m.DB.View(ctx, func(tx kv.Tx) error {
+					committed, err = rawdb.GetStateVersion(tx)
+					return err
+				}))
+				require.Equal(t, committed, lastAnnounced, "announced StateVersionId must equal committed PlainStateVersion")
+			})
+		}
+	}
+}
+
 // TestGetPayloadBodiesRegenerateBlockAccessLists verifies the payload-bodies
 // getters serve stored BALs as-is and, once the stored rows are pruned (kept
 // only for the reorg window), regenerate them by re-execution —
@@ -1489,17 +1573,14 @@ func TestNotificationDispatchForegroundCommit(t *testing.T) {
 // commit enabled, notifications are still dispatched before FCU returns,
 // even though the DB commit happens asynchronously.
 //
-// Note: with background commit, subsequent blocks may fail validation
-// because the DB state hasn't caught up yet (the commit is async). This
-// test only processes the genesis → block 1 transition to verify that
-// notification dispatch works correctly in the background commit path.
+// Successive FCUs are correctly serialized via the ExecModule semaphore
+// (see updateForkChoice / runPostForkchoice): the bg goroutine releases
+// the semaphore only after Flush+Commit, so FCU N+1 always reads the
+// committed state of FCU N. This test exercises one genesis → block 1
+// transition; multi-block bg-commit coverage lives in
+// TestReorgBackAndForwardIntoCanonicalChain (bg-commit mode) and
+// TestInsertBlocksWithBatchedFCU_BadBlockRecovery_Background.
 func TestNotificationDispatchBackgroundCommit(t *testing.T) {
-	// Background commit creates a race: FCU N returns before commit finishes,
-	// so FCU N+1 reads stale state from DB. This is the known limitation that
-	// the API-layer "latest head pointer" coordination is designed to solve.
-	// Once that's implemented, remove this skip and verify the full flow.
-	t.Skip("background commit requires API-layer coordination (latest head pointer) to work correctly")
-
 	m := execmoduletester.New(t, execmoduletester.WithFcuBackgroundCommit())
 
 	headerCh, unsub := m.Notifications.Events.AddHeaderSubscription()

@@ -830,6 +830,8 @@ func (emt *ExecModuleTester) EnableLogs() {
 
 func (emt *ExecModuleTester) Cfg() ethconfig.Config { return emt.cfg }
 
+func (emt *ExecModuleTester) StateChangesClient() StateChangesClient { return emt.stateChangesClient }
+
 func (emt *ExecModuleTester) insertPoSBlocks(chain *blockgen.ChainPack) error {
 	wr := chainreader.NewChainReaderEth1(emt.ChainConfig, emt.ExecModule, time.Hour)
 
@@ -867,9 +869,9 @@ func (emt *ExecModuleTester) insertPoSBlocks(chain *blockgen.ChainPack) error {
 		return fmt.Errorf("insertion failed for block %d, code: %s", chain.Blocks[chain.Length()-1].NumberU64(), status.String())
 	}
 
-	// UpdateForkChoice calls commit asyncronously so we need to
-	// wait for confimation that the headers are processed before
-	// returning to the caller
+	// Wait for the state-change dispatcher to fire for all inserted blocks.
+	// This only confirms dispatch — commit completion is ensured separately
+	// (WaitIdle in InsertChain).
 	lastSeenBlock := chain.Headers[0].Number.Uint64()
 
 	for len(insertedBlocks) > 0 {
@@ -902,6 +904,9 @@ func (emt *ExecModuleTester) InsertChain(chain *blockgen.ChainPack) error {
 	if err := emt.insertPoSBlocks(chain); err != nil {
 		return err
 	}
+	// UpdateForkChoice can return before the MDBX commit lands; wait so the
+	// reads below see committed state.
+	emt.ExecModule.WaitIdle(emt.Ctx)
 	roTx, err := emt.DB.BeginRo(emt.Ctx)
 	if err != nil {
 		return err

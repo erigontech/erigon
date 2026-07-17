@@ -20,16 +20,13 @@ import (
 	"bytes"
 
 	"context"
-	"encoding/binary"
 	"fmt"
-	"hash"
 
 	"sync"
 	"sync/atomic"
 	"time"
 
 	"github.com/c2h5oh/datasize"
-	keccak "github.com/erigontech/fastkeccak"
 	btree2 "github.com/tidwall/btree"
 
 	"github.com/erigontech/erigon/common"
@@ -58,6 +55,7 @@ type Cache interface {
 }
 type CacheView interface {
 	Get(k []byte) ([]byte, error)
+	GetAsOf(key []byte, ts uint64) (v []byte, ok bool, err error)
 	GetCode(k []byte) ([]byte, error)
 	HasStorage(address common.Address) (bool, error)
 }
@@ -66,24 +64,19 @@ type CacheView interface {
 // provide "Serializable Isolation Level" semantic: all data form consistent db view at moment
 // when read transaction started, read data are immutable until end of read transaction, reader can't see newer updates
 //
-// Every time a new state change comes, we do the following:
-// - Check that prevBlockHeight and prevBlockHash match what is the top values we have, and if they don't we
-// invalidate the cache, because we missed some messages and cannot consider the cache coherent anymore.
-// - Clone the cache pointer (such that the previous pointer is still accessible, but new one shared the content with it),
-// apply state updates to the cloned cache pointer and save under the new identified made from blockHeight and blockHash.
-// - If there is a conditional variable corresponding to the identifier, remove it from the map and notify conditional
-// variable, waking up the read-only transaction waiting on it.
+// Roots are keyed by PlainStateVersion. OnNewBlock creates the canonical root
+// for the announced version from that batch's changes alone; a reader whose
+// version has no root yet waits up to NewBlockWait for the batch, then
+// proceeds uncached. On a cache miss the reader consults its own transaction
+// and, when its version is the latest known one, inserts the result for other
+// same-version readers.
 //
-// On the other hand, whenever we have a cache miss (by looking at the top cache), we do the following:
-// - Once read the current block height and block hash (canonical) from underlying db transaction
-// - Construct the identifier from the current block height and block hash
-// - Look for the constructed identifier in the cache. If the identifier is found, use the corresponding
-// cache in conjunction with this read-only transaction (it will be consistent with it). If the identifier is
-// not found, it means that the transaction has been committed in Erigon, but the state update has not
-// arrived yet (as shown in the picture on the right). Insert conditional variable for this identifier and wait on
-// it until either cache with the given identifier appears, or timeout (indicating that the cache update
-// mechanism is broken and cache is likely invalidated).
-//
+// A canonical root deliberately does not inherit entries from its predecessor:
+// the state-change producers do not announce every mutation (see
+// https://github.com/erigontech/erigon/issues/22276), so carried entries could
+// go stale with no later batch to correct them. Fresh roots bound any producer
+// gap to one version — and a missed batch only costs cache warmth, never
+// coherency, because the version gap simply leaves that root unfed.
 
 // Pair.Value == nil - is a marker of absense key in db
 
@@ -91,18 +84,7 @@ type CacheView interface {
 // High-level guaranties:
 // - Keys/Values returned by cache are valid/immutable until end of db transaction
 // - CacheView is always coherent with given db transaction -
-//
-// Rules of set view.isCanonical value:
-//   - method View can't parent.Clone() - because parent view is not coherent with current kv.Tx
-//   - only OnNewBlock method may do parent.Clone() and apply StateChanges to create coherent view of kv.Tx
-//   - parent.Clone() can't be called if parent.isCanonical=false
-//   - only OnNewBlock method can set view.isCanonical=true
-//
-// Rules of filling cache.stateEvict:
-//   - changes in Canonical View SHOULD reflect in stateEvict
-//   - changes in Non-Canonical View SHOULD NOT reflect in stateEvict
 type Coherent struct {
-	hasher               hash.Hash
 	codeEvictLen         metrics.Gauge
 	codeKeys             metrics.Gauge
 	keys                 metrics.Gauge
@@ -128,7 +110,6 @@ type CoherentRoot struct {
 	ready           chan struct{} // close when ready
 	readyChanClosed atomic.Bool   // quick check if ready channel is closed
 	closeOnce       sync.Once     // protecting `ready` field from double-close
-	isCanonical     bool
 }
 
 // CoherentView - dumb object, which proxy all requests to Coherent object.
@@ -142,6 +123,7 @@ type CoherentView struct {
 func (c *CoherentView) Get(k []byte) ([]byte, error) {
 	return c.cache.Get(k, c.tx, c.stateVersionID)
 }
+
 func (c *CoherentView) GetAsOf(key []byte, ts uint64) (v []byte, ok bool, err error) {
 	return nil, false, nil
 }
@@ -198,7 +180,6 @@ func New(cfg CoherentConfig) *Coherent {
 		roots:        map[uint64]*CoherentRoot{},
 		stateEvict:   &ThreadSafeEvictionList{l: NewList()},
 		codeEvict:    &ThreadSafeEvictionList{l: NewList()},
-		hasher:       keccak.NewFastKeccak(),
 		cfg:          cfg,
 		miss:         metrics.GetOrCreateCounter(fmt.Sprintf(`cache_total{result="miss",name="%s"}`, cfg.MetricsLabel)),
 		hits:         metrics.GetOrCreateCounter(fmt.Sprintf(`cache_total{result="hit",name="%s"}`, cfg.MetricsLabel)),
@@ -212,6 +193,14 @@ func New(cfg CoherentConfig) *Coherent {
 	}
 }
 
+func newCoherentRoot() *CoherentRoot {
+	return &CoherentRoot{
+		ready:     make(chan struct{}),
+		cache:     btree2.NewBTreeG(Less),
+		codeCache: btree2.NewBTreeG(Less),
+	}
+}
+
 // selectOrCreateRoot - used for usual getting root
 func (c *Coherent) selectOrCreateRoot(versionID uint64) *CoherentRoot {
 	c.lock.Lock()
@@ -221,11 +210,7 @@ func (c *Coherent) selectOrCreateRoot(versionID uint64) *CoherentRoot {
 		return r
 	}
 
-	r = &CoherentRoot{
-		ready:     make(chan struct{}),
-		cache:     btree2.NewBTreeG(Less),
-		codeCache: btree2.NewBTreeG(Less),
-	}
+	r = newCoherentRoot()
 	c.roots[versionID] = r
 	return r
 }
@@ -240,38 +225,21 @@ func (c *Coherent) advanceRoot(stateVersionID uint64) (r *CoherentRoot) {
 	}
 
 	if !rootExists {
-		r = &CoherentRoot{ready: make(chan struct{})}
+		r = newCoherentRoot()
 		c.roots[stateVersionID] = r
 	}
 
-	if prevView, ok := c.roots[stateVersionID-1]; ok && prevView.isCanonical {
-		//log.Info("advance: clone", "from", viewID-1, "to", viewID)
-		r.cache = prevView.cache.Copy()
-		r.codeCache = prevView.codeCache.Copy()
-	} else {
-		c.stateEvict.Init()
-		c.codeEvict.Init()
-		if r.cache == nil {
-			//log.Info("advance: new", "to", viewID)
-			r.cache = btree2.NewBTreeG(Less)
-			r.codeCache = btree2.NewBTreeG(Less)
-		} else {
-			r.cache.Walk(func(items []*Element) bool {
-				for _, i := range items {
-					c.stateEvict.PushFront(i)
-				}
-				return true
-			})
-			r.codeCache.Walk(func(items []*Element) bool {
-				for _, i := range items {
-					c.codeEvict.PushFront(i)
-				}
-				return true
-			})
-		}
+	// No carry-over from the previous canonical root: the state-change
+	// producers don't announce every mutation (account deletions, code on
+	// unwind — https://github.com/erigontech/erigon/issues/22276), so
+	// inherited entries could stay stale forever. Fresh roots bound any
+	// producer gap to one version.
+	for _, root := range c.roots {
+		root.cache.Clear()
+		root.codeCache.Clear()
 	}
-	r.isCanonical = true
-
+	c.stateEvict.Init()
+	c.codeEvict.Init()
 	c.evictRoots()
 	c.latestStateVersionID = stateVersionID
 	c.latestStateView = r
@@ -292,40 +260,31 @@ func (c *Coherent) OnNewBlock(stateChanges *remoteproto.StateChangeBatch) {
 
 	for _, sc := range stateChanges.ChangeBatch {
 		for i := range sc.Changes {
+			// Code and storage keys must match what readers look up: code is
+			// keyed by account address (the E3 CodeDomain key) and storage by
+			// address+location — see state.CachedReader3.
+			addr := gointerfaces.ConvertH160toAddress(sc.Changes[i].Address)
 			switch sc.Changes[i].Action {
 			case remoteproto.Action_UPSERT:
-				addr := gointerfaces.ConvertH160toAddress(sc.Changes[i].Address)
-				v := sc.Changes[i].Data
-				c.add(addr[:], v, r, id)
+				c.add(addr[:], sc.Changes[i].Data, r, id)
 			case remoteproto.Action_UPSERT_CODE:
-				addr := gointerfaces.ConvertH160toAddress(sc.Changes[i].Address)
-				v := sc.Changes[i].Data
-				c.add(addr[:], v, r, id)
-				c.hasher.Reset()
-				c.hasher.Write(sc.Changes[i].Code)
-				k := c.hasher.Sum(nil)
-				c.addCode(k, sc.Changes[i].Code, r, id)
+				c.add(addr[:], sc.Changes[i].Data, r, id)
+				c.addCode(addr[:], sc.Changes[i].Code, r, id)
 			case remoteproto.Action_REMOVE:
-				addr := gointerfaces.ConvertH160toAddress(sc.Changes[i].Address)
 				c.add(addr[:], nil, r, id)
 			case remoteproto.Action_STORAGE:
 				//skip, will check later
 			case remoteproto.Action_CODE:
-				c.hasher.Reset()
-				c.hasher.Write(sc.Changes[i].Code)
-				k := c.hasher.Sum(nil)
-				c.addCode(k, sc.Changes[i].Code, r, id)
+				c.addCode(addr[:], sc.Changes[i].Code, r, id)
 			default:
 				panic("not implemented yet")
 			}
 			if c.cfg.WithStorage && len(sc.Changes[i].StorageChanges) > 0 {
-				addr := gointerfaces.ConvertH160toAddress(sc.Changes[i].Address)
 				for _, change := range sc.Changes[i].StorageChanges {
 					loc := gointerfaces.ConvertH256ToHash(change.Location)
-					k := make([]byte, 20+8+32)
+					k := make([]byte, 20+32)
 					copy(k, addr[:])
-					binary.BigEndian.PutUint64(k[20:], sc.Changes[i].Incarnation)
-					copy(k[20+8:], loc[:])
+					copy(k[20:], loc[:])
 					c.add(k, change.Data, r, id)
 				}
 			}
@@ -367,7 +326,10 @@ func (c *Coherent) View(ctx context.Context, tx kv.TemporalTx) (CacheView, error
 	}
 }
 
-func (c *Coherent) getFromCache(k []byte, id uint64, domain kv.Domain) (*Element, *CoherentRoot, error) {
+// getFromCache returns a nil root when the view's root was already evicted
+// (the view outlived KeepViews version advances): the caller then reads
+// through its own tx snapshot without caching.
+func (c *Coherent) getFromCache(k []byte, id uint64, domain kv.Domain) (*Element, *CoherentRoot) {
 	// using the full lock here rather than RLock as RLock causes a lot of calls to runtime.usleep degrading
 	// performance under load
 	c.lock.Lock()
@@ -375,7 +337,7 @@ func (c *Coherent) getFromCache(k []byte, id uint64, domain kv.Domain) (*Element
 
 	r, ok := c.roots[id]
 	if !ok {
-		return nil, r, fmt.Errorf("too old ViewID: %d, latestStateVersionID=%d", id, c.latestStateVersionID)
+		return nil, nil
 	}
 	isLatest := c.latestStateVersionID == id
 
@@ -386,19 +348,25 @@ func (c *Coherent) getFromCache(k []byte, id uint64, domain kv.Domain) (*Element
 		it, _ = r.cache.Get(&Element{K: k})
 	}
 	if it != nil && isLatest {
-		c.stateEvict.MoveToFront(it)
+		if domain == kv.CodeDomain {
+			c.codeEvict.MoveToFront(it)
+		} else {
+			c.stateEvict.MoveToFront(it)
+		}
 	}
-	return it, r, nil
+	return it, r
 }
 func (c *Coherent) Get(k []byte, tx kv.TemporalTx, id uint64) (v []byte, err error) {
 	//TODO: Get must accept from user Domain parameter
-	it, r, err := c.getFromCache(k, id, kv.AccountsDomain)
-	if err != nil {
-		return nil, err
+	var it *Element
+	var r *CoherentRoot
+	// A zero budget retains nothing: skip the lookup and its global lock;
+	// leaving r nil also skips the add below.
+	if c.cfg.CacheSize != 0 {
+		it, r = c.getFromCache(k, id, kv.AccountsDomain)
 	}
 
 	if it != nil {
-		//fmt.Printf("from cache:  %#x,%x\n", k, it.(*Element).V)
 		c.hits.Inc()
 		return it.V, nil
 	}
@@ -416,7 +384,9 @@ func (c *Coherent) Get(k []byte, tx kv.TemporalTx, id uint64) (v []byte, err err
 	if len(v) == 0 {
 		return v, nil
 	}
-	//fmt.Printf("from db: %#x,%x\n", k, v)
+	if r == nil {
+		return v, nil
+	}
 	c.lock.Lock()
 
 	defer c.lock.Unlock()
@@ -426,13 +396,14 @@ func (c *Coherent) Get(k []byte, tx kv.TemporalTx, id uint64) (v []byte, err err
 }
 
 func (c *Coherent) GetCode(k []byte, tx kv.TemporalTx, id uint64) (v []byte, err error) {
-	it, r, err := c.getFromCache(k, id, kv.CodeDomain)
-	if err != nil {
-		return nil, err
+	var it *Element
+	var r *CoherentRoot
+	// see Get
+	if c.cfg.CodeCacheSize != 0 {
+		it, r = c.getFromCache(k, id, kv.CodeDomain)
 	}
 
 	if it != nil {
-		//fmt.Printf("from cache:  %#x,%x\n", k, it.(*Element).V)
 		c.codeHits.Inc()
 		return it.V, nil
 	}
@@ -442,7 +413,9 @@ func (c *Coherent) GetCode(k []byte, tx kv.TemporalTx, id uint64) (v []byte, err
 	if err != nil {
 		return nil, err
 	}
-	//fmt.Printf("from db: %#x,%x\n", k, v)
+	if r == nil {
+		return v, nil
+	}
 
 	c.lock.Lock()
 	defer c.lock.Unlock()
@@ -466,11 +439,14 @@ func (c *Coherent) removeOldestCode(r *CoherentRoot) {
 func (c *Coherent) add(k, v []byte, r *CoherentRoot, id uint64) *Element {
 	it := &Element{K: k, V: v}
 
-	replaced, _ := r.cache.Set(it)
-	if c.latestStateVersionID != id {
-		//fmt.Printf("add to non-last viewID: %d<%d\n", c.latestViewID, id)
+	// Non-latest roots bypass eviction accounting, so growing them would be
+	// unbounded (e.g. with no state-change stream feeding OnNewBlock); the
+	// caller's tx read is authoritative for its snapshot, skip caching.
+	// A zero budget would evict the entry immediately — also skip.
+	if c.latestStateVersionID != id || c.cfg.CacheSize == 0 {
 		return it
 	}
+	replaced, _ := r.cache.Set(it)
 	if replaced != nil {
 		c.stateEvict.Remove(replaced)
 	}
@@ -485,11 +461,11 @@ func (c *Coherent) add(k, v []byte, r *CoherentRoot, id uint64) *Element {
 }
 func (c *Coherent) addCode(k, v []byte, r *CoherentRoot, id uint64) *Element {
 	it := &Element{K: k, V: v}
-	replaced, _ := r.codeCache.Set(it)
-	if c.latestStateVersionID != id {
-		//fmt.Printf("add to non-last viewID: %d<%d\n", c.latestViewID, id)
+	// see add
+	if c.latestStateVersionID != id || c.cfg.CodeCacheSize == 0 {
 		return it
 	}
+	replaced, _ := r.codeCache.Set(it)
 	if replaced != nil {
 		c.codeEvict.Remove(replaced)
 	}

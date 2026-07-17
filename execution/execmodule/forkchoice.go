@@ -843,6 +843,7 @@ func (e *ExecModule) dispatchNotificationsFromOverlay(sd *execctx.SharedDomains,
 		finishProgressBefore,
 		finishProgressAfter,
 		e.pipelineExecutor.Sync().PrevUnwindPoint(),
+		true, // pre-commit: the overlay's flush+commit runs after this dispatch
 	); err != nil {
 		return err
 	}
