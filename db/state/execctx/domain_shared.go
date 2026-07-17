@@ -1372,31 +1372,37 @@ func (sd *SharedDomains) codeHashForAddr(tx kv.TemporalTx, addr []byte, txNum ui
 		}
 	}
 
-	// Resolve from the committed layers (stateCache → MDBX/files) and populate
-	// the LRU. mem is intentionally not consulted here — it was checked above.
-	resolve := func() []byte {
+	// Resolve from the committed layers (stateCache → MDBX/files). mem is
+	// intentionally not consulted here — it was checked above. fromSnapshot
+	// reports whether the record was read from the tx snapshot.
+	resolve := func() ([]byte, bool) {
 		if sd.stateCache != nil {
 			if v, ok := sd.stateCache.Get(kv.AccountsDomain, addr); ok {
-				return accounts.DeserialiseV3CodeHash(v)
+				return accounts.DeserialiseV3CodeHash(v), false
 			}
 		}
 		v, _, err := tx.GetLatest(kv.AccountsDomain, addr)
-		if err != nil || len(v) == 0 {
-			return nil
+		if err != nil {
+			return nil, false
 		}
-		return accounts.DeserialiseV3CodeHash(v)
+		if len(v) == 0 {
+			return nil, true
+		}
+		return accounts.DeserialiseV3CodeHash(v), true
 	}
 
-	h := resolve()
-	if sd.stateCache != nil {
+	h, fromSnapshot := resolve()
+	if fromSnapshot && sd.stateCache != nil {
 		var fixed [32]byte
 		if len(h) == 32 {
 			copy(fixed[:], h)
 		}
-		// Always populate, including the zero-hash sentinel for misses —
-		// repeat lookups skip the whole resolve() chain. txNum is a
-		// conservative upper bound (>= the resolved account's write txNum), so
-		// the mapping drops on any unwind that reverts that account.
+		// Only a snapshot-sourced record (including the zero-hash sentinel for
+		// misses) may seed the mapping: the admission gate vouches for the tx's
+		// frontier, and a cache-sourced record can lag a just-committed flush,
+		// slipping pre-apply state past the gate. txNum is a conservative upper
+		// bound (>= the resolved account's write txNum), so the mapping drops
+		// on any unwind that reverts that account.
 		if snapshotEnd, ok := tx.Debug().DomainVisibleEnd(kv.AccountsDomain); ok {
 			sd.stateCache.PutAddrCodeHashIfFresh(addr, fixed, txNum, snapshotEnd)
 		}
