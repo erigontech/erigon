@@ -257,6 +257,70 @@ func TestTemporalTx_PinsBlockFilesView(t *testing.T) {
 	require.NotNil(t, roTx2.(*Tx).blocktx)
 }
 
+// A read-only temporal tx memoizes DomainVisibleEnd, while
+// ForceReopenUnderlyingFilesTx swaps in a fresh files view that can extend the
+// frontier — the memo must be re-derived after the swap.
+func TestTemporalTx_ForceReopenRefreshesDomainVisibleEnd(t *testing.T) {
+	t.Parallel()
+	ctx := t.Context()
+
+	mdbxDb := memdb.NewTestDB(t, dbcfg.ChainDB)
+	dirs := datadir.New(t.TempDir())
+	agg := state.NewTest(dirs).StepSize(1).MustOpen(ctx, mdbxDb)
+	defer agg.Close()
+	temporalDb, err := New(mdbxDb, agg, nil)
+	require.NoError(t, err)
+	defer temporalDb.Close()
+
+	acc := common.HexToAddress("0x1234567890123456789012345678901234567890")
+	slot := common.HexToHash("0x0000000000000000000000000000000000000000000000000000000000000001")
+	storageK := append(append([]byte{}, acc[:]...), slot[:]...)
+
+	rwTtx1, err := temporalDb.BeginTemporalRw(ctx)
+	require.NoError(t, err)
+	defer rwTtx1.Rollback()
+	sd, err := execctx.NewSharedDomains(ctx, rwTtx1, log.Root())
+	require.NoError(t, err)
+	defer sd.Close()
+	require.NoError(t, sd.DomainPut(kv.StorageDomain, rwTtx1, storageK, []byte{1}, 1, nil))
+	require.NoError(t, sd.Flush(ctx, rwTtx1))
+	require.NoError(t, rwTtx1.Commit())
+
+	roTtx, err := temporalDb.BeginTemporalRo(ctx)
+	require.NoError(t, err)
+	defer roTtx.Rollback()
+	end, ok := roTtx.Debug().DomainVisibleEnd(kv.StorageDomain)
+	require.True(t, ok)
+	require.Equal(t, uint64(2), end)
+
+	// Write past the RO tx's MVCC view and move the data into files, which are
+	// visible regardless of the DB snapshot.
+	for txNum := uint64(2); txNum <= 3; txNum++ {
+		rwTtx, err := temporalDb.BeginTemporalRw(ctx)
+		require.NoError(t, err)
+		defer rwTtx.Rollback()
+		require.NoError(t, sd.DomainPut(kv.StorageDomain, rwTtx, storageK, []byte{byte(txNum)}, txNum, nil))
+		require.NoError(t, sd.Flush(ctx, rwTtx))
+		require.NoError(t, rwTtx.Commit())
+	}
+	require.NoError(t, agg.BuildFiles(3))
+
+	freshRoTtx, err := temporalDb.BeginTemporalRo(ctx)
+	require.NoError(t, err)
+	defer freshRoTtx.Rollback()
+	filesEnd := freshRoTtx.Debug().TxNumsInFiles(kv.StorageDomain)
+	require.Greater(t, filesEnd, uint64(2), "the new files must extend past the memoized frontier")
+
+	end, ok = roTtx.Debug().DomainVisibleEnd(kv.StorageDomain)
+	require.True(t, ok)
+	require.Equal(t, uint64(2), end, "the pinned files view cannot see the new files before reopen")
+
+	roTtx.(*Tx).ForceReopenUnderlyingFilesTx()
+	end, ok = roTtx.Debug().DomainVisibleEnd(kv.StorageDomain)
+	require.True(t, ok)
+	require.Equal(t, filesEnd, end, "the frontier must reflect the fresh files view after reopen")
+}
+
 func TestTemporalTx_RangeAsOf_StorageDomain(t *testing.T) {
 	t.Parallel()
 	ctx := t.Context()

@@ -310,6 +310,13 @@ func (v *domainVisibleEnds) load(tx *Tx, domain kv.Domain, bit uint32) (uint64, 
 	return v.ends[domain], state&availableBit != 0
 }
 
+// reset takes mu so an in-flight load can't re-store pre-reset bits.
+func (v *domainVisibleEnds) reset() {
+	v.mu.Lock()
+	defer v.mu.Unlock()
+	v.state.Store(0)
+}
+
 func (tx *tx) ForceReopenUnderlyingFilesTx() {
 	if tx.blocktx != nil {
 		tx.blocktx.Close()
@@ -319,6 +326,13 @@ func (tx *tx) ForceReopenUnderlyingFilesTx() {
 		tx.aggtx.Close()
 	}
 	tx.aggtx = tx.Agg().BeginFilesRo()
+}
+
+// ForceReopenUnderlyingFilesTx swaps in a fresh files view, which can extend
+// the visible frontier — drop the memoized ends so they are re-derived.
+func (tx *Tx) ForceReopenUnderlyingFilesTx() {
+	tx.tx.ForceReopenUnderlyingFilesTx()
+	tx.visibleEnds.reset()
 }
 func (tx *tx) FreezeInfo() kv.FreezeInfo { return tx.aggtx }
 
