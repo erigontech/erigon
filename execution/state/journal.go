@@ -38,14 +38,55 @@ var journalPool = sync.Pool{
 	},
 }
 
-// journalEntry is a modification entry in the state change journal that can be
-// reverted on demand.
-type journalEntry interface {
-	// revert undoes the changes introduced by this journal entry.
-	revert(*IntraBlockState) error
+// entryKind discriminates the compact journal entry union below.
+type entryKind uint8
 
-	// dirtied returns the Ethereum address modified by this journal entry.
-	dirtied() (accounts.Address, bool)
+const (
+	kindCreateObject entryKind = iota
+	kindResetObject
+	kindSelfdestruct
+	kindBalance
+	kindBalanceIncrease
+	kindBalanceIncreaseTransfer
+	kindNonce
+	kindStorage
+	kindFakeStorage
+	kindCode
+	kindRefund
+	kindAddLog
+	kindTouch
+	kindAccessListAddAccount
+	kindAccessListAddSlot
+	kindTransientStorage
+)
+
+const (
+	flagCommitted        uint8 = 1 << 0 // the reverted value was already committed to state
+	flagSelfdestructPrev uint8 = 1 << 1 // selfdestructChange: account had already selfdestructed
+)
+
+// journalExtra holds the fields needed only by the infrequent entry kinds, kept
+// out of line so the common entry stays at one machine-friendly 72-byte value
+// with a single (usually nil) pointer for the GC to scan.
+type journalExtra struct {
+	prevObj  *stateObject      // kindResetObject
+	bi       *BalanceIncrease  // kindBalanceIncreaseTransfer
+	prevcode []byte            // kindCode
+	prevhash accounts.CodeHash // kindCode
+}
+
+// journalEntry is a compact tagged union stored inline in journal.entries,
+// replacing the old per-entry heap-boxed interface. Fields are reused across
+// kinds: value holds the reverted uint256, aux the reverted scalar (nonce/refund/
+// log index), flags the booleans, extra only what the infrequent kinds need.
+type journalEntry struct {
+	kind    entryKind
+	flags   uint8
+	account accounts.Address
+	key     accounts.StorageKey
+	value   uint256.Int
+	aux     uint64
+	extra   *journalExtra
 }
 
 // journal contains the list of state modifications applied since the last state
@@ -73,9 +114,9 @@ func (j *journal) Reset() {
 }
 
 // append inserts a new modification entry to the end of the change journal.
-func (j *journal) append(entry journalEntry) {
-	j.entries = append(j.entries, entry)
-	if addr, isditry := entry.dirtied(); isditry {
+func (j *journal) append(e journalEntry) {
+	j.entries = append(j.entries, e)
+	if addr, isDirty := e.dirtied(); isDirty {
 		j.dirties[addr]++
 	}
 }
@@ -94,6 +135,7 @@ func (j *journal) revert(statedb *IntraBlockState, snapshot int) {
 			}
 		}
 	}
+	clear(j.entries[snapshot:]) // release the reverted entries' extra pointers
 	j.entries = j.entries[:snapshot]
 }
 
@@ -109,474 +151,396 @@ func (j *journal) length() int {
 	return len(j.entries)
 }
 
-type (
-	// Changes to the account trie.
-	createObjectChange struct {
-		account accounts.Address
+func commitFlag(wasCommited bool) uint8 {
+	if wasCommited {
+		return flagCommitted
 	}
-	resetObjectChange struct {
-		account accounts.Address
-		prev    *stateObject
-	}
-	selfdestructChange struct {
-		account     accounts.Address
-		prev        bool // whether account had already selfdestructed
-		prevbalance uint256.Int
-		wasCommited bool
-	}
-
-	// Changes to individual accounts.
-	balanceChange struct {
-		account     accounts.Address
-		prev        uint256.Int
-		wasCommited bool
-	}
-	balanceIncrease struct {
-		account  accounts.Address
-		increase uint256.Int
-	}
-	balanceIncreaseTransfer struct {
-		bi *BalanceIncrease
-	}
-	nonceChange struct {
-		account     accounts.Address
-		prev        uint64
-		wasCommited bool
-	}
-	storageChange struct {
-		account     accounts.Address
-		key         accounts.StorageKey
-		prevalue    uint256.Int
-		wasCommited bool
-	}
-	fakeStorageChange struct {
-		account  accounts.Address
-		key      accounts.StorageKey
-		prevalue uint256.Int
-	}
-	codeChange struct {
-		account     accounts.Address
-		prevcode    []byte
-		prevhash    accounts.CodeHash
-		wasCommited bool
-	}
-
-	// Changes to other state values.
-	refundChange struct {
-		prev uint64
-	}
-	addLogChange struct {
-		txIndex int
-	}
-	touchAccount struct {
-		account accounts.Address
-	}
-
-	// Changes to the access list
-	accessListAddAccountChange struct {
-		address accounts.Address
-	}
-	accessListAddSlotChange struct {
-		address accounts.Address
-		slot    accounts.StorageKey
-	}
-
-	transientStorageChange struct {
-		account  accounts.Address
-		key      accounts.StorageKey
-		prevalue uint256.Int
-	}
-)
-
-//type journalEntry2 interface {
-//	createObjectChange | resetObjectChange | selfdestructChange | balanceChange | balanceIncrease | balanceIncreaseTransfer |
-//		nonceChange | storageChange | fakeStorageChange | codeChange |
-//		refundChange | addLogChange | touchAccount | accessListAddAccountChange | accessListAddSlotChange | transientStorageChange
-//}
-
-func (ch createObjectChange) revert(s *IntraBlockState) error {
-	if so, ok := s.stateObjects[ch.account]; ok {
-		so.release()
-	}
-	delete(s.stateObjects, ch.account)
-	delete(s.stateObjectsDirty, ch.account)
-	return nil
+	return 0
 }
 
-func (ch createObjectChange) dirtied() (accounts.Address, bool) {
-	return ch.account, true
+func (je *journalEntry) committed() bool { return je.flags&flagCommitted != 0 }
+
+// --- entry constructors: one per modification kind, appended by the caller ---
+
+func (j *journal) createObjectChange(account accounts.Address) {
+	j.append(journalEntry{kind: kindCreateObject, account: account})
 }
 
-func (ch resetObjectChange) revert(s *IntraBlockState) error {
-	if current, ok := s.stateObjects[ch.account]; ok && current != ch.prev {
-		current.release()
+func (j *journal) resetObjectChange(account accounts.Address, prev *stateObject) {
+	j.append(journalEntry{kind: kindResetObject, account: account, extra: &journalExtra{prevObj: prev}})
+}
+
+func (j *journal) selfdestructChange(account accounts.Address, prev bool, prevbalance uint256.Int, wasCommited bool) {
+	flags := commitFlag(wasCommited)
+	if prev {
+		flags |= flagSelfdestructPrev
 	}
-	s.setStateObject(ch.account, ch.prev)
-	return nil
+	j.append(journalEntry{kind: kindSelfdestruct, account: account, value: prevbalance, flags: flags})
 }
 
-func (ch resetObjectChange) dirtied() (accounts.Address, bool) {
-	// Symmetric with createObjectChange.dirtied: both journal entries
-	// represent the same logical operation (a stateObject was placed at
-	// this address); they differ only in revert behaviour
-	// (createObjectChange.revert deletes; resetObjectChange.revert swaps
-	// back to prev). Dirty tracking must be identical, otherwise the
-	// recreated address is missed from journal.dirties and downstream
-	// consumers (FinalizeTx, MakeWriteSet)
-	// silently skip it.
-	//
-	// Manifests under parallel-exec when tx1 SD's an address and tx2 hits
-	// CreateAccount / GetOrNewStateObject on the same address — the
-	// versionedReadCore-synthesised `previous` is non-nil so createObject's
-	// else-branch is taken; with dirtied() returning false the worker's
-	// MakeWriteSet drops the write for the recreated address and the
-	// receipts / state root diverge from serial. See #21138.
-	return ch.account, true
+func (j *journal) balanceChange(account accounts.Address, prev uint256.Int, wasCommited bool) {
+	j.append(journalEntry{kind: kindBalance, account: account, value: prev, flags: commitFlag(wasCommited)})
 }
 
-func (ch selfdestructChange) revert(s *IntraBlockState) error {
-	obj, err := s.getStateObject(ch.account, false)
-	if err != nil {
-		return err
+func (j *journal) balanceIncrease(account accounts.Address, increase uint256.Int) {
+	j.append(journalEntry{kind: kindBalanceIncrease, account: account, value: increase})
+}
+
+func (j *journal) balanceIncreaseTransfer(bi *BalanceIncrease) {
+	j.append(journalEntry{kind: kindBalanceIncreaseTransfer, extra: &journalExtra{bi: bi}})
+}
+
+func (j *journal) nonceChange(account accounts.Address, prev uint64, wasCommited bool) {
+	j.append(journalEntry{kind: kindNonce, account: account, aux: prev, flags: commitFlag(wasCommited)})
+}
+
+func (j *journal) storageChange(account accounts.Address, key accounts.StorageKey, prevalue uint256.Int, wasCommited bool) {
+	j.append(journalEntry{kind: kindStorage, account: account, key: key, value: prevalue, flags: commitFlag(wasCommited)})
+}
+
+func (j *journal) fakeStorageChange(account accounts.Address, key accounts.StorageKey, prevalue uint256.Int) {
+	j.append(journalEntry{kind: kindFakeStorage, account: account, key: key, value: prevalue})
+}
+
+func (j *journal) codeChange(account accounts.Address, prevcode []byte, prevhash accounts.CodeHash, wasCommited bool) {
+	j.append(journalEntry{kind: kindCode, account: account, flags: commitFlag(wasCommited), extra: &journalExtra{prevcode: prevcode, prevhash: prevhash}})
+}
+
+func (j *journal) refundChange(prev uint64) {
+	j.append(journalEntry{kind: kindRefund, aux: prev})
+}
+
+func (j *journal) addLogChange(txIndex int) {
+	j.append(journalEntry{kind: kindAddLog, aux: uint64(txIndex)})
+}
+
+func (j *journal) touchAccount(account accounts.Address) {
+	j.append(journalEntry{kind: kindTouch, account: account})
+}
+
+func (j *journal) accessListAddAccountChange(address accounts.Address) {
+	j.append(journalEntry{kind: kindAccessListAddAccount, account: address})
+}
+
+func (j *journal) accessListAddSlotChange(address accounts.Address, slot accounts.StorageKey) {
+	j.append(journalEntry{kind: kindAccessListAddSlot, account: address, key: slot})
+}
+
+func (j *journal) transientStorageChange(account accounts.Address, key accounts.StorageKey, prevalue uint256.Int) {
+	j.append(journalEntry{kind: kindTransientStorage, account: account, key: key, value: prevalue})
+}
+
+// dirtied returns the address modified by this entry, or (NilAddress, false) for
+// entries that don't imply a dirty account.
+func (je *journalEntry) dirtied() (accounts.Address, bool) {
+	switch je.kind {
+	case kindBalanceIncreaseTransfer, kindTransientStorage, kindRefund, kindAddLog, kindAccessListAddAccount, kindAccessListAddSlot:
+		return accounts.NilAddress, false
+	default:
+		return je.account, true
 	}
-	if obj != nil {
-		trace := dbg.TraceTransactionIO && (s.trace || dbg.TraceAccount(ch.account.Handle()))
-		var tracePrefix string
-		if trace {
-			tracePrefix = fmt.Sprintf("%d (%d.%d)", s.blockNum, s.txIndex, s.version)
-			fmt.Printf("%s Revert SelfDestruct %x: %v:%d, prev: %v:%d, commited: %v\n", tracePrefix, ch.account, ch.prev, &ch.prevbalance, obj.selfdestructed, &obj.data.Balance, ch.wasCommited)
-		}
-		obj.selfdestructed = ch.prev
-		obj.setBalance(ch.prevbalance)
-
-		if s.versionMap != nil {
-			if ch.wasCommited {
-				if trace {
-					if v, ok := s.versionedWrites.GetSelfDestruct(ch.account); ok {
-						sd := v.Val
-						fmt.Printf("%s WRT Revert %x: %v -> %v\n", tracePrefix, ch.account, sd, ch.prev)
-					}
-					if v, ok := s.versionedWrites.GetBalance(ch.account); ok {
-						val := v.Val
-						fmt.Printf("%s WRT Revert %x: %d -> %d\n", tracePrefix, ch.account, &val, &ch.prevbalance)
-					}
-				}
-				s.versionedWrites.DelBalance(ch.account)
-				s.versionedWrites.DelSelfDestruct(ch.account)
-			} else {
-				if v, ok := s.versionedWrites.GetSelfDestruct(ch.account); ok {
-					if trace {
-						sd := v.Val
-						fmt.Printf("%s WRT Revert %x: %v -> %v\n", tracePrefix, ch.account, sd, ch.prev)
-					}
-					s.versionedWrites.updateSelfDestruct(ch.account, ch.prev)
-				}
-				if v, ok := s.versionedWrites.GetBalance(ch.account); ok {
-					val := v.Val
-					if trace {
-						fmt.Printf("%s WRT Revert %x: %d -> %d\n", tracePrefix, ch.account, &val, &ch.prevbalance)
-					}
-					s.versionedWrites.updateBalance(ch.account, ch.prevbalance)
-				}
-			}
-		}
-	}
-
-	return nil
-}
-
-func (ch selfdestructChange) dirtied() (accounts.Address, bool) {
-	return ch.account, true
 }
 
 var ripemd = accounts.InternAddress(common.HexToAddress("0000000000000000000000000000000000000003"))
 
-func (ch touchAccount) revert(s *IntraBlockState) error {
-	// Do NOT delete versionedReads here.  Even though the touch is being
-	// reverted (e.g. a CREATE that ran out of gas), the read that triggered
-	// the touch already happened — the tx observed the account's state and
-	// branched on it (e.g. Empty() returning true vs false).  Removing the
-	// read-set entry causes ValidateVersion to miss the dependency, allowing
-	// stale reads to pass validation and produce incorrect results.
-	return nil
-}
+// revert undoes the change recorded by this entry.
+func (je *journalEntry) revert(s *IntraBlockState) error {
+	switch je.kind {
+	case kindCreateObject:
+		if so, ok := s.stateObjects[je.account]; ok {
+			so.release()
+		}
+		delete(s.stateObjects, je.account)
+		delete(s.stateObjectsDirty, je.account)
+		return nil
 
-func (ch touchAccount) dirtied() (accounts.Address, bool) { return ch.account, true }
+	case kindResetObject:
+		prev := je.extra.prevObj
+		if current, ok := s.stateObjects[je.account]; ok && current != prev {
+			current.release()
+		}
+		s.setStateObject(je.account, prev)
+		return nil
 
-func (ch balanceChange) revert(s *IntraBlockState) error {
-	obj, err := s.getStateObject(ch.account, false)
-	if err != nil {
-		return err
-	}
-
-	trace := dbg.TraceTransactionIO && (s.trace || dbg.TraceAccount(ch.account.Handle()))
-	var tracePrefix string
-	if trace {
-		tracePrefix = fmt.Sprintf("%d (%d.%d)", s.blockNum, s.txIndex, s.version)
-		fmt.Printf("%s Revert Balance %x: %d, prev: %d, orig: %d, commited: %v\n", tracePrefix, ch.account, &obj.data.Balance, &ch.prev, &obj.original.Balance, ch.wasCommited)
-	}
-	obj.setBalance(ch.prev)
-	if s.versionMap != nil {
-		if ch.wasCommited {
+	case kindSelfdestruct:
+		obj, err := s.getStateObject(je.account, false)
+		if err != nil {
+			return err
+		}
+		if obj != nil {
+			prev := je.flags&flagSelfdestructPrev != 0
+			wasCommited := je.committed()
+			trace := dbg.TraceTransactionIO && (s.trace || dbg.TraceAccount(je.account.Handle()))
+			var tracePrefix string
 			if trace {
-				if v, ok := s.versionedWrites.GetBalance(ch.account); ok {
-					val := v.Val
-					fmt.Printf("%s WRT Revert %x: %d -> %d\n", tracePrefix, ch.account, &val, &ch.prev)
-				}
+				tracePrefix = fmt.Sprintf("%d (%d.%d)", s.blockNum, s.txIndex, s.version)
+				fmt.Printf("%s Revert SelfDestruct %x: %v:%d, prev: %v:%d, commited: %v\n", tracePrefix, je.account, prev, &je.value, obj.selfdestructed, &obj.data.Balance, wasCommited)
 			}
-			s.versionedWrites.DelBalance(ch.account)
-		} else {
-			if v, ok := s.versionedWrites.GetBalance(ch.account); ok {
-				if trace {
-					val := v.Val
-					fmt.Printf("%s WRT Revert %x: %d -> %d\n", tracePrefix, ch.account, &val, &ch.prev)
+			obj.selfdestructed = prev
+			obj.setBalance(je.value)
+
+			if s.versionMap != nil {
+				if wasCommited {
+					if trace {
+						if v, ok := s.versionedWrites.GetSelfDestruct(je.account); ok {
+							sd := v.Val
+							fmt.Printf("%s WRT Revert %x: %v -> %v\n", tracePrefix, je.account, sd, prev)
+						}
+						if v, ok := s.versionedWrites.GetBalance(je.account); ok {
+							val := v.Val
+							fmt.Printf("%s WRT Revert %x: %d -> %d\n", tracePrefix, je.account, &val, &je.value)
+						}
+					}
+					s.versionedWrites.DelBalance(je.account)
+					s.versionedWrites.DelSelfDestruct(je.account)
+				} else {
+					if v, ok := s.versionedWrites.GetSelfDestruct(je.account); ok {
+						if trace {
+							sd := v.Val
+							fmt.Printf("%s WRT Revert %x: %v -> %v\n", tracePrefix, je.account, sd, prev)
+						}
+						s.versionedWrites.updateSelfDestruct(je.account, prev)
+					}
+					if v, ok := s.versionedWrites.GetBalance(je.account); ok {
+						val := v.Val
+						if trace {
+							fmt.Printf("%s WRT Revert %x: %d -> %d\n", tracePrefix, je.account, &val, &je.value)
+						}
+						s.versionedWrites.updateBalance(je.account, je.value)
+					}
 				}
-				s.versionedWrites.updateBalance(ch.account, ch.prev)
 			}
 		}
-	}
+		return nil
 
-	return nil
-}
-
-func (ch balanceChange) dirtied() (accounts.Address, bool) {
-	return ch.account, true
-}
-
-func (ch balanceIncrease) revert(s *IntraBlockState) error {
-	if bi, ok := s.balanceInc[ch.account]; ok {
-		bi.increase.Sub(&bi.increase, &ch.increase)
-		bi.count--
-		if bi.count == 0 {
-			delete(s.balanceInc, ch.account)
+	case kindBalance:
+		obj, err := s.getStateObject(je.account, false)
+		if err != nil {
+			return err
 		}
-	}
-	return nil
-}
-
-func (ch balanceIncrease) dirtied() (accounts.Address, bool) {
-	return ch.account, true
-}
-
-func (ch balanceIncreaseTransfer) dirtied() (accounts.Address, bool) {
-	return accounts.NilAddress, false
-}
-
-func (ch balanceIncreaseTransfer) revert(s *IntraBlockState) error {
-	ch.bi.transferred = false
-	return nil
-}
-func (ch nonceChange) revert(s *IntraBlockState) error {
-	obj, err := s.getStateObject(ch.account, false)
-	if err != nil {
-		return err
-	}
-
-	trace := dbg.TraceTransactionIO && (s.trace || dbg.TraceAccount(ch.account.Handle()))
-	var tracePrefix string
-	if trace {
-		tracePrefix = fmt.Sprintf("%d (%d.%d)", s.blockNum, s.txIndex, s.version)
-		fmt.Printf("%s Revert Nonce %x: %d, prev: %d, orig: %d, commited: %v\n", tracePrefix, ch.account, obj.data.Nonce, ch.prev, obj.original.Nonce, ch.wasCommited)
-	}
-	obj.setNonce(ch.prev)
-	if s.versionMap != nil {
-		if ch.wasCommited {
-			if trace {
-				if v, ok := s.versionedWrites.GetNonce(ch.account); ok {
-					n := v.Val
-					fmt.Printf("%s WRT Revert %x: %d -> %d\n", tracePrefix, ch.account, n, ch.prev)
-				}
-			}
-			s.versionedWrites.DelNonce(ch.account)
-		} else {
-			if v, ok := s.versionedWrites.GetNonce(ch.account); ok {
+		wasCommited := je.committed()
+		trace := dbg.TraceTransactionIO && (s.trace || dbg.TraceAccount(je.account.Handle()))
+		var tracePrefix string
+		if trace {
+			tracePrefix = fmt.Sprintf("%d (%d.%d)", s.blockNum, s.txIndex, s.version)
+			fmt.Printf("%s Revert Balance %x: %d, prev: %d, orig: %d, commited: %v\n", tracePrefix, je.account, &obj.data.Balance, &je.value, &obj.original.Balance, wasCommited)
+		}
+		obj.setBalance(je.value)
+		if s.versionMap != nil {
+			if wasCommited {
 				if trace {
-					n := v.Val
-					fmt.Printf("%s WRT Revert %x: %d -> %d\n", tracePrefix, ch.account, n, ch.prev)
+					if v, ok := s.versionedWrites.GetBalance(je.account); ok {
+						val := v.Val
+						fmt.Printf("%s WRT Revert %x: %d -> %d\n", tracePrefix, je.account, &val, &je.value)
+					}
 				}
-				s.versionedWrites.updateNonce(ch.account, ch.prev)
+				s.versionedWrites.DelBalance(je.account)
+			} else {
+				if v, ok := s.versionedWrites.GetBalance(je.account); ok {
+					if trace {
+						val := v.Val
+						fmt.Printf("%s WRT Revert %x: %d -> %d\n", tracePrefix, je.account, &val, &je.value)
+					}
+					s.versionedWrites.updateBalance(je.account, je.value)
+				}
 			}
 		}
-	}
+		return nil
 
-	return nil
-}
-
-func (ch nonceChange) dirtied() (accounts.Address, bool) {
-	return ch.account, true
-}
-
-func (ch codeChange) revert(s *IntraBlockState) error {
-	obj, err := s.getStateObject(ch.account, false)
-	if err != nil {
-		return err
-	}
-
-	trace := dbg.TraceTransactionIO && (s.trace || dbg.TraceAccount(ch.account.Handle()))
-	var tracePrefix string
-	if trace {
-		tracePrefix = fmt.Sprintf("%d (%d.%d)", s.blockNum, s.txIndex, s.version)
-		_, cs := printCode(obj.code.Bytes)
-		_, ps := printCode(ch.prevcode)
-		fmt.Printf("%s Revert Code %x: %x:%s, prevHash: %x, origHash: %x, prevCode: %s, commited: %v\n", tracePrefix,
-			ch.account, obj.data.CodeHash, cs, ch.prevhash, obj.original.CodeHash, ps, ch.wasCommited)
-	}
-	obj.setCode(accounts.Code{Hash: ch.prevhash, Bytes: ch.prevcode})
-	if s.versionMap != nil {
-		if ch.wasCommited {
-			if trace {
-				if v, ok := s.versionedWrites.GetCodeHash(ch.account); ok {
-					fmt.Printf("%s WRT Revert %x: %x -> %x\n", tracePrefix, ch.account, v.Val, ch.prevhash)
-				}
-				if v, ok := s.versionedWrites.GetCode(ch.account); ok {
-					_, cs := printCode(v.Val.Bytes)
-					_, ps := printCode(ch.prevcode)
-					fmt.Printf("%s WRT Revert %x: %s -> %s\n", tracePrefix, ch.account, cs, ps)
-				}
-			}
-			s.versionedWrites.DelCodeHash(ch.account)
-			s.versionedWrites.DelCode(ch.account)
-			s.versionedWrites.DelCodeSize(ch.account)
-		} else {
-			if v, ok := s.versionedWrites.GetCode(ch.account); ok {
-				if trace {
-					_, cs := printCode(v.Val.Bytes)
-					_, ps := printCode(ch.prevcode)
-					fmt.Printf("%s WRT Revert %x: %s -> %s\n", tracePrefix, ch.account, cs, ps)
-				}
-				s.versionedWrites.updateCode(ch.account, accounts.Code{Hash: ch.prevhash, Bytes: ch.prevcode})
-			}
-			if v, ok := s.versionedWrites.GetCodeHash(ch.account); ok {
-				if trace {
-					h := v.Val
-					fmt.Printf("%s WRT Revert %x: %x -> %x\n", tracePrefix, ch.account, h, ch.prevhash)
-				}
-				s.versionedWrites.updateCodeHash(ch.account, ch.prevhash)
-			}
-			if _, ok := s.versionedWrites.GetCodeSize(ch.account); ok {
-				s.versionedWrites.updateCodeSize(ch.account, len(ch.prevcode))
+	case kindBalanceIncrease:
+		if bi, ok := s.balanceInc[je.account]; ok {
+			bi.increase.Sub(&bi.increase, &je.value)
+			bi.count--
+			if bi.count == 0 {
+				delete(s.balanceInc, je.account)
 			}
 		}
-	}
-	return nil
-}
+		return nil
 
-func (ch codeChange) dirtied() (accounts.Address, bool) {
-	return ch.account, true
-}
+	case kindBalanceIncreaseTransfer:
+		je.extra.bi.transferred = false
+		return nil
 
-func (ch storageChange) revert(s *IntraBlockState) error {
-	obj, err := s.getStateObject(ch.account, false)
-	if err != nil {
-		return err
-	}
-
-	trace := dbg.TraceTransactionIO && (s.trace || dbg.TraceAccount(ch.account.Handle()))
-	var tracePrefix string
-	if trace {
-		tracePrefix = fmt.Sprintf("%d (%d.%d)", s.blockNum, s.txIndex, s.version)
-		val, _ := obj.GetState(ch.key)
-		commited, _ := obj.GetCommittedState(ch.key)
-		fmt.Printf("%s Revert State %x %x: %d, prev: %d, orig: %d, commited: %v\n", tracePrefix, ch.account, ch.key, &val, &ch.prevalue, &commited, ch.wasCommited)
-	}
-	if s.versionMap != nil {
-		if ch.wasCommited {
-			if trace {
-				if v, ok := s.versionedWrites.GetStorage(ch.account, ch.key); ok {
-					val := v.Val
-					fmt.Printf("%s WRT Revert %x: %x: %x -> %x\n", tracePrefix, ch.account, ch.key, &val, &ch.prevalue)
-				}
-			}
-			s.versionedWrites.DelStorage(ch.account, ch.key)
-		} else {
-			if v, ok := s.versionedWrites.GetStorage(ch.account, ch.key); ok {
+	case kindNonce:
+		obj, err := s.getStateObject(je.account, false)
+		if err != nil {
+			return err
+		}
+		wasCommited := je.committed()
+		trace := dbg.TraceTransactionIO && (s.trace || dbg.TraceAccount(je.account.Handle()))
+		var tracePrefix string
+		if trace {
+			tracePrefix = fmt.Sprintf("%d (%d.%d)", s.blockNum, s.txIndex, s.version)
+			fmt.Printf("%s Revert Nonce %x: %d, prev: %d, orig: %d, commited: %v\n", tracePrefix, je.account, obj.data.Nonce, je.aux, obj.original.Nonce, wasCommited)
+		}
+		obj.setNonce(je.aux)
+		if s.versionMap != nil {
+			if wasCommited {
 				if trace {
-					val := v.Val
-					fmt.Printf("%s WRT Revert %x: %x: %d -> %d\n", tracePrefix, ch.account, ch.key, &val, &ch.prevalue)
+					if v, ok := s.versionedWrites.GetNonce(je.account); ok {
+						n := v.Val
+						fmt.Printf("%s WRT Revert %x: %d -> %d\n", tracePrefix, je.account, n, je.aux)
+					}
 				}
-				s.versionedWrites.updateStorage(ch.account, ch.key, ch.prevalue)
+				s.versionedWrites.DelNonce(je.account)
+			} else {
+				if v, ok := s.versionedWrites.GetNonce(je.account); ok {
+					if trace {
+						n := v.Val
+						fmt.Printf("%s WRT Revert %x: %d -> %d\n", tracePrefix, je.account, n, je.aux)
+					}
+					s.versionedWrites.updateNonce(je.account, je.aux)
+				}
 			}
 		}
+		return nil
+
+	case kindCode:
+		obj, err := s.getStateObject(je.account, false)
+		if err != nil {
+			return err
+		}
+		prevcode := je.extra.prevcode
+		prevhash := je.extra.prevhash
+		wasCommited := je.committed()
+		trace := dbg.TraceTransactionIO && (s.trace || dbg.TraceAccount(je.account.Handle()))
+		var tracePrefix string
+		if trace {
+			tracePrefix = fmt.Sprintf("%d (%d.%d)", s.blockNum, s.txIndex, s.version)
+			_, cs := printCode(obj.code.Bytes)
+			_, ps := printCode(prevcode)
+			fmt.Printf("%s Revert Code %x: %x:%s, prevHash: %x, origHash: %x, prevCode: %s, commited: %v\n", tracePrefix,
+				je.account, obj.data.CodeHash, cs, prevhash, obj.original.CodeHash, ps, wasCommited)
+		}
+		obj.setCode(accounts.Code{Hash: prevhash, Bytes: prevcode})
+		if s.versionMap != nil {
+			if wasCommited {
+				if trace {
+					if v, ok := s.versionedWrites.GetCodeHash(je.account); ok {
+						fmt.Printf("%s WRT Revert %x: %x -> %x\n", tracePrefix, je.account, v.Val, prevhash)
+					}
+					if v, ok := s.versionedWrites.GetCode(je.account); ok {
+						_, cs := printCode(v.Val.Bytes)
+						_, ps := printCode(prevcode)
+						fmt.Printf("%s WRT Revert %x: %s -> %s\n", tracePrefix, je.account, cs, ps)
+					}
+				}
+				s.versionedWrites.DelCodeHash(je.account)
+				s.versionedWrites.DelCode(je.account)
+				s.versionedWrites.DelCodeSize(je.account)
+			} else {
+				if v, ok := s.versionedWrites.GetCode(je.account); ok {
+					if trace {
+						_, cs := printCode(v.Val.Bytes)
+						_, ps := printCode(prevcode)
+						fmt.Printf("%s WRT Revert %x: %s -> %s\n", tracePrefix, je.account, cs, ps)
+					}
+					s.versionedWrites.updateCode(je.account, accounts.Code{Hash: prevhash, Bytes: prevcode})
+				}
+				if v, ok := s.versionedWrites.GetCodeHash(je.account); ok {
+					if trace {
+						h := v.Val
+						fmt.Printf("%s WRT Revert %x: %x -> %x\n", tracePrefix, je.account, h, prevhash)
+					}
+					s.versionedWrites.updateCodeHash(je.account, prevhash)
+				}
+				if _, ok := s.versionedWrites.GetCodeSize(je.account); ok {
+					s.versionedWrites.updateCodeSize(je.account, len(prevcode))
+				}
+			}
+		}
+		return nil
+
+	case kindStorage:
+		obj, err := s.getStateObject(je.account, false)
+		if err != nil {
+			return err
+		}
+		wasCommited := je.committed()
+		trace := dbg.TraceTransactionIO && (s.trace || dbg.TraceAccount(je.account.Handle()))
+		var tracePrefix string
+		if trace {
+			tracePrefix = fmt.Sprintf("%d (%d.%d)", s.blockNum, s.txIndex, s.version)
+			val, _ := obj.GetState(je.key)
+			commited, _ := obj.GetCommittedState(je.key)
+			fmt.Printf("%s Revert State %x %x: %d, prev: %d, orig: %d, commited: %v\n", tracePrefix, je.account, je.key, &val, &je.value, &commited, wasCommited)
+		}
+		if s.versionMap != nil {
+			if wasCommited {
+				if trace {
+					if v, ok := s.versionedWrites.GetStorage(je.account, je.key); ok {
+						val := v.Val
+						fmt.Printf("%s WRT Revert %x: %x: %x -> %x\n", tracePrefix, je.account, je.key, &val, &je.value)
+					}
+				}
+				s.versionedWrites.DelStorage(je.account, je.key)
+			} else {
+				if v, ok := s.versionedWrites.GetStorage(je.account, je.key); ok {
+					if trace {
+						val := v.Val
+						fmt.Printf("%s WRT Revert %x: %x: %d -> %d\n", tracePrefix, je.account, je.key, &val, &je.value)
+					}
+					s.versionedWrites.updateStorage(je.account, je.key, je.value)
+				}
+			}
+		}
+		obj.setState(je.key, je.value)
+		return nil
+
+	case kindFakeStorage:
+		obj, err := s.getStateObject(je.account, false)
+		if err != nil {
+			return err
+		}
+		obj.fakeStorage[je.key] = je.value
+		return nil
+
+	case kindTransientStorage:
+		s.setTransientState(je.account, je.key, je.value)
+		return nil
+
+	case kindRefund:
+		s.refund = je.aux
+		return nil
+
+	case kindAddLog:
+		txIndex := int(je.aux)
+		if txIndex+1 >= len(s.logs) {
+			panic(fmt.Sprintf("can't revert log index %v, max: %v", txIndex, len(s.logs)-1))
+		}
+		txnLogs := s.logs[txIndex+1]
+		s.logs[txIndex+1] = txnLogs[:len(txnLogs)-1] // revert 1 log
+		if len(s.logs[txIndex+1]) == 0 {
+			s.logs = s.logs[:len(s.logs)-1] // revert txn
+		}
+		s.logSize--
+		return nil
+
+	case kindTouch:
+		// Do NOT delete versionedReads here.  Even though the touch is being
+		// reverted (e.g. a CREATE that ran out of gas), the read that triggered
+		// the touch already happened — the tx observed the account's state and
+		// branched on it (e.g. Empty() returning true vs false).  Removing the
+		// read-set entry causes ValidateVersion to miss the dependency, allowing
+		// stale reads to pass validation and produce incorrect results.
+		return nil
+
+	case kindAccessListAddAccount:
+		/*
+			One important invariant here, is that whenever a (addr, slot) is added, if the
+			addr is not already present, the add causes two journal entries:
+			- one for the address,
+			- one for the (address,slot)
+			Therefore, when unrolling the change, we can always blindly delete the
+			(addr) at this point, since no storage adds can remain when come upon
+			a single (addr) change.
+		*/
+		s.accessList.DeleteAddress(je.account)
+		return nil
+
+	case kindAccessListAddSlot:
+		s.accessList.DeleteSlot(je.account, je.key)
+		return nil
 	}
-	obj.setState(ch.key, ch.prevalue)
-	return nil
-}
-
-func (ch storageChange) dirtied() (accounts.Address, bool) {
-	return ch.account, true
-}
-
-func (ch fakeStorageChange) revert(s *IntraBlockState) error {
-	obj, err := s.getStateObject(ch.account, false)
-	if err != nil {
-		return err
-	}
-	obj.fakeStorage[ch.key] = ch.prevalue
-	return nil
-}
-
-func (ch fakeStorageChange) dirtied() (accounts.Address, bool) {
-	return ch.account, true
-}
-
-func (ch transientStorageChange) revert(s *IntraBlockState) error {
-	s.setTransientState(ch.account, ch.key, ch.prevalue)
-	return nil
-}
-
-func (ch transientStorageChange) dirtied() (accounts.Address, bool) {
-	return accounts.NilAddress, false
-}
-
-func (ch refundChange) revert(s *IntraBlockState) error {
-	s.refund = ch.prev
-	return nil
-}
-
-func (ch refundChange) dirtied() (accounts.Address, bool) {
-	return accounts.NilAddress, false
-}
-
-func (ch addLogChange) revert(s *IntraBlockState) error {
-	if ch.txIndex+1 >= len(s.logs) {
-		panic(fmt.Sprintf("can't revert log index %v, max: %v", ch.txIndex, len(s.logs)-1))
-	}
-	txnLogs := s.logs[ch.txIndex+1]
-	s.logs[ch.txIndex+1] = txnLogs[:len(txnLogs)-1] // revert 1 log
-	if len(s.logs[ch.txIndex+1]) == 0 {
-		s.logs = s.logs[:len(s.logs)-1] // revert txn
-	}
-	s.logSize--
-	return nil
-}
-
-func (ch addLogChange) dirtied() (accounts.Address, bool) {
-	return accounts.NilAddress, false
-}
-
-func (ch accessListAddAccountChange) revert(s *IntraBlockState) error {
-	/*
-		One important invariant here, is that whenever a (addr, slot) is added, if the
-		addr is not already present, the add causes two journal entries:
-		- one for the address,
-		- one for the (address,slot)
-		Therefore, when unrolling the change, we can always blindly delete the
-		(addr) at this point, since no storage adds can remain when come upon
-		a single (addr) change.
-	*/
-	s.accessList.DeleteAddress(ch.address)
-	return nil
-}
-
-func (ch accessListAddAccountChange) dirtied() (accounts.Address, bool) {
-	return accounts.NilAddress, false
-}
-
-func (ch accessListAddSlotChange) revert(s *IntraBlockState) error {
-	s.accessList.DeleteSlot(ch.address, ch.slot)
-	return nil
-}
-
-func (ch accessListAddSlotChange) dirtied() (accounts.Address, bool) {
-	return accounts.NilAddress, false
+	panic(fmt.Sprintf("revert: unknown journal entry kind %d", je.kind))
 }
