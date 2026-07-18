@@ -43,7 +43,7 @@ jobs:
           python3 docs/site/scripts/generate-llms.py --check
           python3 -m unittest discover docs/site/scripts -v
 
-      - uses: actions/setup-node@v6
+      - uses: actions/setup-node@v7
         if: steps.guard.outputs.present == 'true'
         with:
           node-version: '20.x'
