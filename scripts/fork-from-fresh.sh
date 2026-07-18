@@ -128,7 +128,7 @@ straddlers=$(find "$FORK_DATADIR/snapshots" -maxdepth 1 -name 'v*-headers.seg' 2
     range=$(echo "$name" | grep -oE '^v[0-9.]+-[0-9]+-[0-9]+' | sed -E 's/^v[0-9.]+-//')
     from=$(echo "$range" | cut -d- -f1)
     to=$(echo "$range" | cut -d- -f2)
-    if [[ -n "$from" && -n "$to" && $from -le $CUT_CHUNK && $to -gt $CUT_CHUNK ]]; then
+    if [[ -n "$from" && -n "$to" && $((10#$from)) -le $CUT_CHUNK && $((10#$to)) -gt $CUT_CHUNK ]]; then
         echo "$name"
     fi
 done)

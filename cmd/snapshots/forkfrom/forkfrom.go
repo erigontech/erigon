@@ -38,6 +38,7 @@ import (
 	"github.com/erigontech/erigon/common/log/v3"
 	dl "github.com/erigontech/erigon/db/downloader"
 	"github.com/erigontech/erigon/execution/chain"
+	chainspec "github.com/erigontech/erigon/execution/chain/spec"
 )
 
 // CLI flags. Each flag is one input the operator must supply (or an
@@ -202,12 +203,26 @@ func action(ctx *cli.Context) error {
 		"cut_block_timestamp", cut.CutBlockTimestamp,
 		"source", string(cut.Source))
 
-	// Load the parent's chain.Config.
+	// Load the parent's chain.Config. Prefer the parent datadir's
+	// chain.json (operator-supplied override) — falls back to the
+	// built-in chainspec registry when the datadir has none.
 	parentDatadir := ctx.String(ParentDatadirFlag.Name)
 	parentConfigPath := parentDatadir + "/chain.json"
-	parentConfig, err := loadChainConfig(parentConfigPath)
-	if err != nil {
-		return fmt.Errorf("load parent chain.json: %w", err)
+	var parentConfig *chain.Config
+	if _, statErr := os.Stat(parentConfigPath); statErr == nil {
+		parentConfig, err = loadChainConfig(parentConfigPath)
+		if err != nil {
+			return fmt.Errorf("load parent chain.json: %w", err)
+		}
+	} else if os.IsNotExist(statErr) {
+		spec, specErr := chainspec.ChainSpecByName(cut.ParentChain)
+		if specErr != nil {
+			return fmt.Errorf("parent chain.json absent and parent chain %q not in registry: %w", cut.ParentChain, specErr)
+		}
+		parentConfig = spec.Config
+		logger.Info("[fork-from] parent chain.json absent — using built-in chainspec entry", "chain", cut.ParentChain)
+	} else {
+		return fmt.Errorf("stat parent chain.json: %w", statErr)
 	}
 
 	// Derive the fork's chain.Config.

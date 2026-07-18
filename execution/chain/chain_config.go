@@ -164,7 +164,7 @@ type Config struct {
 	// captured at fork-from time. A fork-follower cross-checks it
 	// against the locally-known genesis for the declared Parent chain
 	// as an early integrity gate on the fork's lineage claim.
-	ParentGenesisHash [32]byte `json:"parentGenesisHash,omitempty"`
+	ParentGenesisHash common.Hash `json:"parentGenesisHash,omitempty"`
 }
 
 // ParentTrustRoot is plain-data describing a single trust root a fork

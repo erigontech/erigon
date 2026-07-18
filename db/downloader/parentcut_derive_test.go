@@ -136,7 +136,7 @@ func TestDeriveForkChainConfig_PopulatesParentGenesisHash(t *testing.T) {
 
 	derived, err := DeriveForkChainConfig(parent, cut, "mainnet-fork-20000000")
 	require.NoError(t, err)
-	require.NotEqual(t, [32]byte{}, derived.ParentGenesisHash,
+	require.NotEqual(t, common.Hash{}, derived.ParentGenesisHash,
 		"registered parent chain must populate ParentGenesisHash from chainspec")
 }
 
@@ -148,7 +148,7 @@ func TestDeriveForkChainConfig_UnknownParentLeavesGenesisZero(t *testing.T) {
 
 	derived, err := DeriveForkChainConfig(parent, cut, "unregistered-fork-20000000")
 	require.NoError(t, err)
-	require.Equal(t, [32]byte{}, derived.ParentGenesisHash,
+	require.Equal(t, common.Hash{}, derived.ParentGenesisHash,
 		"unknown parent leaves derived.ParentGenesisHash zero")
 }
 

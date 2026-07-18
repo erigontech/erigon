@@ -22,6 +22,8 @@ import (
 
 	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/require"
+
+	"github.com/erigontech/erigon/common"
 )
 
 func TestParentTrustRoot_JSONRoundTrip(t *testing.T) {
@@ -116,7 +118,7 @@ func TestConfig_ParentGenesisHash_JSONRoundTrip(t *testing.T) {
 		ChainID:   uint256.NewInt(1),
 		Parent:    "mainnet",
 		CutBlock:  20_000_000,
-		ParentGenesisHash: [32]byte{
+		ParentGenesisHash: common.Hash{
 			0xd4, 0xe5, 0x67, 0x40, 0xf8, 0x76, 0xae, 0xf8,
 			0xc0, 0x10, 0xb8, 0x6a, 0x40, 0xd5, 0xf5, 0x67,
 			0x45, 0xa1, 0x18, 0xd0, 0x90, 0x6a, 0x34, 0xe6,
