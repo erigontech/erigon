@@ -26,18 +26,71 @@ import (
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/snapshotsync"
+	"github.com/erigontech/erigon/db/snapshotsync/blocksnapshots"
+	"github.com/erigontech/erigon/db/snaptype"
 	snaptype2 "github.com/erigontech/erigon/db/snaptype2"
+	"github.com/erigontech/erigon/db/version"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/chain/networkname"
 	"github.com/erigontech/erigon/node/ethconfig"
 )
+
+const testMergeLimit = snaptype.Erigon2MergeLimit
+
+// blockFilesTxStub is a kv.Getter that also exposes a pinned block-files view,
+// like a temporal tx does.
+type blockFilesTxStub struct {
+	kv.Getter
+	view *blocksnapshots.View
+}
+
+func (s blockFilesTxStub) BlockFilesRoTx() *blocksnapshots.View { return s.view }
+
+// TestBlockReaderPrefersTxBlockView proves step 3: when a tx exposes a pinned
+// block-files view, the reader resolves segments through it — even one retired
+// from the live set after the view was pinned. (The temporal tx that supplies
+// this view in production is covered in the follow-up that enables it.)
+func TestBlockReaderPrefersTxBlockView(t *testing.T) {
+	logger := log.New()
+	dir := t.TempDir()
+	cfg := ethconfig.Defaults.Snapshot
+	cfg.ChainName = networkname.Mainnet
+	snapshots := blocksnapshots.NewRoSnapshots(cfg, dir, logger)
+	defer snapshots.Close()
+
+	ver := version.V1_0
+	for _, typ := range snaptype2.BlockSnapshotTypes {
+		createTestSegmentFile(t, 0, testMergeLimit, typ.Enum(), dir, ver, logger)
+		createTestSegmentFile(t, testMergeLimit, 2*testMergeLimit, typ.Enum(), dir, ver, logger)
+	}
+	require.NoError(t, snapshots.OpenFolder())
+
+	blockReader := NewBlockReader(snapshots, nil)
+
+	// Pin a view, then retire the [0, mergeLimit) tx segment from the live set.
+	tx := blockFilesTxStub{view: snapshots.View()}
+	defer tx.view.Close()
+	require.NoError(t, snapshots.Delete(snaptype.SegmentFileName(ver, 0, testMergeLimit, snaptype2.Transactions.Enum())))
+
+	const blk = testMergeLimit / 2 // inside the retired [0, mergeLimit) segment
+
+	// The live set no longer resolves it...
+	_, okLive, relLive := snapshots.BaseRoSnapshots.ViewSingleFile(snaptype2.Transactions, blk)
+	relLive()
+	require.False(t, okLive, "retired segment must be gone from the live set")
+
+	// ...but a reader using the tx's pinned view still does.
+	_, okTx, relTx := blockReader.viewSingleFile(tx, snaptype2.Transactions, blk)
+	relTx()
+	require.True(t, okTx, "reader must resolve the retired segment via the tx's pinned view")
+}
 
 func TestDumpRangeErrorsWhenRangeAlreadyClaimed(t *testing.T) {
 	logger := log.New()
 	dir := t.TempDir()
 	cfg := ethconfig.Defaults.Snapshot
 	cfg.ChainName = networkname.Mainnet
-	snapshots := NewRoSnapshots(cfg, dir, logger)
+	snapshots := blocksnapshots.NewRoSnapshots(cfg, dir, logger)
 	defer snapshots.Close()
 
 	f := snaptype2.Headers.FileInfo(dir, 0, 1000)
@@ -49,7 +102,7 @@ func TestDumpRangeErrorsWhenRangeAlreadyClaimed(t *testing.T) {
 		return 0, errors.New("dumper must not run on a claimed range")
 	}
 
-	_, err := dumpRange(t.Context(), f, dumper, nil, nil, nil, dir, 1, log.LvlInfo, logger, &snapshots.RoSnapshots)
+	_, err := dumpRange(t.Context(), f, dumper, nil, nil, nil, dir, 1, log.LvlInfo, logger, &snapshots.BaseRoSnapshots)
 	require.ErrorIs(t, err, snapshotsync.ErrRangeBuildInProgress)
 	require.False(t, dumperCalled)
 }

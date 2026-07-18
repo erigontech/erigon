@@ -45,6 +45,7 @@ import (
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/chain/networkname"
 	"github.com/erigontech/erigon/execution/engineapi"
+	"github.com/erigontech/erigon/execution/protocol/misc"
 	"github.com/erigontech/erigon/execution/protocol/params"
 	"github.com/erigontech/erigon/execution/protocol/rules/merge"
 	"github.com/erigontech/erigon/execution/state/genesiswrite"
@@ -129,6 +130,18 @@ func DefaultEngineApiTesterGenesis() (*types.Genesis, *ecdsa.PrivateKey, error) 
 				Code:    beaconRootsCode,
 				Nonce:   1,
 				Balance: new(big.Int),
+			},
+			chainConfig.GetBuilderDepositContract().Value(): {
+				Code:    misc.BuilderDepositRequestCode,
+				Storage: make(map[common.Hash]common.Hash),
+				Balance: new(big.Int),
+				Nonce:   1,
+			},
+			chainConfig.GetBuilderExitContract().Value(): {
+				Code:    misc.BuilderExitRequestCode,
+				Storage: make(map[common.Hash]common.Hash),
+				Balance: new(big.Int),
+				Nonce:   1,
 			},
 		},
 	}
@@ -237,6 +250,7 @@ func InitialiseEngineApiTester(ctx context.Context, args EngineApiTesterInitArgs
 		Enabled:                  true,
 		HttpServerEnabled:        true,
 		WebsocketEnabled:         true,
+		HttpCompression:          true,
 		HttpListenAddress:        "127.0.0.1",
 		HttpPort:                 jsonRpcPort,
 		HttpListener:             jsonRpcListener,
@@ -280,6 +294,10 @@ func InitialiseEngineApiTester(ctx context.Context, args EngineApiTesterInitArgs
 	txPoolConfig := txpoolcfg.DefaultConfig
 	txPoolConfig.DBDir = dirs.TxPool
 	txPoolConfig.Disable = args.DisableTxPool
+	// Without a limit the txpool DB reserves 1TB of VA, which cannot fit below
+	// the Go race-mode heap window on darwin and starves arena reservation
+	// ("too many address space collisions for -race mode").
+	txPoolConfig.MdbxDBSizeLimit = mdbxDBSizeLimit
 	syncDefault := ethconfig.Defaults.Sync
 	syncDefault.ParallelStateFlushing = false
 	ethConfig := ethconfig.Config{

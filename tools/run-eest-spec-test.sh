@@ -84,12 +84,12 @@ base=test-fixtures-cache/$fixtures/fixtures
 # adding a shard / tweaking a budget / changing a fork filter is a one-file edit.
 # yq converts YAML→JSON so it can be queried with jq.
 manifest=tools/eest-spec-shards.yml
-shard_row=$(yq -o=json '.' "$manifest" | jq -r --arg s "$shard" '.[] | select(.shard == $s) | "\(.workers)\t\(."max-allowed-failures")\t\(."commitment-parallel" // false)\t\(.run // "")"')
+shard_row=$(yq -o=json '.' "$manifest" | jq -r --arg s "$shard" '.[] | select(.shard == $s) | "\(.workers)\t\(."max-allowed-failures")\t\(."commitment-parallel" // false)\t\(."no-ramdisk" // false)\t\(.run // "")"')
 if [[ -z "$shard_row" ]]; then
 	echo "shard $shard not found in $manifest" >&2
 	exit 2
 fi
-IFS=$'\t' read -r default_workers default_max commitment_parallel run_regex <<<"$shard_row"
+IFS=$'\t' read -r default_workers default_max commitment_parallel shard_no_ramdisk run_regex <<<"$shard_row"
 # Always set ERIGON_COMMITMENT_PARALLEL explicitly (true or false) so the shard's
 # commitment mode is pinned to the manifest, independent of whatever
 # statecfg.ExperimentalParallelCommitment defaults to at runtime. Execution is
@@ -168,7 +168,10 @@ trap cleanup EXIT
 # and never unmounts; CI gets the env var pre-set via the setup-erigon
 # action's ramdisk: true input. Local Linux users can opt in by exporting
 # ERIGON_EXECUTION_TESTS_TMPDIR or TMPDIR=/dev/shm.
-if [[ -z "${ERIGON_EXECUTION_TESTS_TMPDIR:-}" && "$(uname -s)" == "Darwin" ]]; then
+# Shards with no-ramdisk: true in the manifest skip the Darwin auto-ramdisk too:
+# their datadirs are few and long-lived, so tmpfs buys nothing — and the 150m
+# datadir (~7GB) doesn't even fit the default ramdisk size.
+if [[ "$shard_no_ramdisk" != "true" && -z "${ERIGON_EXECUTION_TESTS_TMPDIR:-}" && "$(uname -s)" == "Darwin" ]]; then
 	ramdisk=$(bash tools/create-ramdisk) || true
 	if [[ -n "$ramdisk" ]]; then
 		export ERIGON_EXECUTION_TESTS_TMPDIR="$ramdisk"
