@@ -25,6 +25,7 @@ import (
 
 	"github.com/jinzhu/copier"
 
+	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/execution/chain"
 )
 
@@ -155,21 +156,45 @@ func dropPostCutActivations(cfg *chain.Config, cutBlock uint64, cutTime uint64) 
 	}
 }
 
+// ParentSectionOpts carries the caller-supplied fields ParentSectionFromCut
+// merges with the ParentCut. Kept as a struct to avoid a long positional
+// signature — every field is optional except NetworkID (a fork with
+// NetworkID=0 collides with the parent's p2p network).
+type ParentSectionOpts struct {
+	// NetworkID is the fork's p2p network identity. Distinct from the
+	// parent's chain id (which the fork inherits for EL replay
+	// protection). Must be non-zero.
+	NetworkID uint64
+
+	// ParentGenesisHash is the parent chain's genesis block hash,
+	// captured at fork-from time. Emitted as parent_genesis_hash on
+	// the manifest for the E.2 cross-check.
+	ParentGenesisHash common.Hash
+
+	// ParentForks is the parent chain's activated continuous fork
+	// schedule at cut time. Emitted as [[parent.parent_forks]] on the
+	// manifest for the E.2 fork-ID cross-check. Callers typically
+	// derive this via BuildChainIdentity(parent.Config, ...).
+	ParentForks []ForkActivation
+
+	// CLGenesisValidatorsRoot / CLForkVersion / CLConfigName come from
+	// the fork's CL setup (Phase 2c-CL). Zero values are legal — a
+	// pre-CL-integration fork can emit an EL-only ParentSection.
+	CLGenesisValidatorsRoot [32]byte
+	CLForkVersion           [32]byte
+	CLConfigName            string
+
+	// ValidParentTrustRoots is the operator's accept-set captured at
+	// fork-from time. nil/empty leaves the manifest field omitted; a
+	// fork-follower then falls back to its own --accept-parent-
+	// trust-roots config.
+	ValidParentTrustRoots []chain.ParentTrustRoot
+}
+
 // ParentSectionFromCut populates a manifest [parent] section (the V2
-// schema's ParentSection) from a ParentCut. clGenesisValidatorsRoot
-// and clForkVersion come from the fork's CL setup (Phase 2c-CL); the
-// caller threads them in. clConfigName is optional human-readable
-// (e.g. "msf-0"); empty is fine.
-//
-// network_id is the fork's p2p network identity — distinct from the
-// parent's chain id so the fork's p2p network is distinguishable.
-//
-// validParentTrustRoots is the operator's accept-set captured at
-// fork-from time, propagated from the derived chain.Config. nil/empty
-// is legal (means the operator didn't pin a parent-trust-root set;
-// fork-followers fall back to whatever their own --accept-parent-
-// trust-roots config says). See memory/fork-trust-root-model-2026-05-24.
-func ParentSectionFromCut(cut *ParentCut, networkID uint64, clGenesisValidatorsRoot, clForkVersion [32]byte, clConfigName string, validParentTrustRoots []chain.ParentTrustRoot) (*ParentSection, error) {
+// schema's ParentSection) from a ParentCut plus caller-supplied fields
+// carried in opts.
+func ParentSectionFromCut(cut *ParentCut, opts ParentSectionOpts) (*ParentSection, error) {
 	if cut == nil {
 		return nil, fmt.Errorf("parent-section-from-cut: nil parent-cut")
 	}
@@ -177,6 +202,10 @@ func ParentSectionFromCut(cut *ParentCut, networkID uint64, clGenesisValidatorsR
 		return nil, fmt.Errorf("parent-section-from-cut: invalid parent-cut: %w", err)
 	}
 	cutTxNum := uint64(0) // populated by the caller once it has block→txnum mapping; see Phase 2c-EL follow-on
+	var genesisHex string
+	if (opts.ParentGenesisHash != common.Hash{}) {
+		genesisHex = hexNoPrefix(opts.ParentGenesisHash[:])
+	}
 	return &ParentSection{
 		Chain:                   cut.ParentChain,
 		ManifestHash:            cut.ParentManifestHash,
@@ -184,11 +213,13 @@ func ParentSectionFromCut(cut *ParentCut, networkID uint64, clGenesisValidatorsR
 		CutTxNum:                cutTxNum,
 		CutBlockHash:            cut.CutBlockHash.Hex(),
 		Name:                    "", // populated by caller — same as the fork's ChainName
-		NetworkID:               networkID,
-		CLGenesisValidatorsRoot: hexNoPrefix(clGenesisValidatorsRoot[:]),
-		CLForkVersion:           hexNoPrefix(clForkVersion[:4]),
-		CLConfigName:            clConfigName,
-		ValidParentTrustRoots:   trustRootsToEntries(validParentTrustRoots),
+		NetworkID:               opts.NetworkID,
+		CLGenesisValidatorsRoot: hexNoPrefix(opts.CLGenesisValidatorsRoot[:]),
+		CLForkVersion:           hexNoPrefix(opts.CLForkVersion[:4]),
+		CLConfigName:            opts.CLConfigName,
+		ValidParentTrustRoots:   trustRootsToEntries(opts.ValidParentTrustRoots),
+		ParentGenesisHash:       genesisHex,
+		ParentForks:             opts.ParentForks,
 	}, nil
 }
 

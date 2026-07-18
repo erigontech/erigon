@@ -36,6 +36,18 @@ func hashHex(t *testing.T, s string) common.Hash {
 	return out
 }
 
+func TestExpectedParentIdentityForChain_MainnetReturnsRegistryData(t *testing.T) {
+	got, err := ExpectedParentIdentityForChain("mainnet", 0)
+	require.NoError(t, err)
+	require.NotEqual(t, common.Hash{}, got.GenesisHash, "mainnet genesis must not be zero")
+	require.NotEmpty(t, got.HeightForks, "mainnet has height-based forks")
+}
+
+func TestExpectedParentIdentityForChain_UnknownChainReturnsError(t *testing.T) {
+	_, err := ExpectedParentIdentityForChain("no-such-chain-ever", 0)
+	require.Error(t, err)
+}
+
 func TestValidateParentIdentity_NilSectionIsNoOp(t *testing.T) {
 	require.NoError(t, ValidateParentIdentity(nil, ExpectedParentIdentity{}))
 }

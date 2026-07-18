@@ -102,7 +102,13 @@ func TestParentSectionFromCut_PropagatesTrustRoots(t *testing.T) {
 		{Kind: "enr", Pubkey: []byte{0x03, 0xff}},
 	}
 
-	section, err := ParentSectionFromCut(cut, 23760000, clValidatorsRoot, clForkVersion, "msf-0", trustRoots)
+	section, err := ParentSectionFromCut(cut, ParentSectionOpts{
+		NetworkID:               23760000,
+		CLGenesisValidatorsRoot: clValidatorsRoot,
+		CLForkVersion:           clForkVersion,
+		CLConfigName:            "msf-0",
+		ValidParentTrustRoots:   trustRoots,
+	})
 	require.NoError(t, err)
 	require.NotNil(t, section)
 
@@ -131,8 +137,56 @@ func TestParentSectionFromCut_NilTrustRootsOmitField(t *testing.T) {
 		SourceRef:          "https://mainnet.example/rpc",
 		CapturedAt:         1_700_000_001,
 	}
-	section, err := ParentSectionFromCut(cut, 23760000, [32]byte{}, [32]byte{}, "", nil)
+	section, err := ParentSectionFromCut(cut, ParentSectionOpts{NetworkID: 23760000})
 	require.NoError(t, err)
 	require.Nil(t, section.ValidParentTrustRoots,
 		"nil trust roots → nil field → TOML omits the section")
+}
+
+func TestParentSectionFromCut_PopulatesParentGenesisAndForks(t *testing.T) {
+	cut := &ParentCut{
+		Schema:             1,
+		ParentChain:        "mainnet",
+		ParentChainID:      1,
+		CutBlock:           20_000_000,
+		CutBlockHash:       common.HexToHash("0x1111111111111111111111111111111111111111111111111111111111111111"),
+		CutBlockTimestamp:  1_700_000_000,
+		CutBlockParentHash: common.HexToHash("0x2222222222222222222222222222222222222222222222222222222222222222"),
+		ParentManifestHash: "1234567890abcdef1234567890abcdef12345678",
+		Source:             "file",
+		CapturedAt:         1_700_000_001,
+	}
+	genesis := common.HexToHash("0xd4e56740f876aef8c010b86a40d5f56745a118d0906a34e69aec8c0db1cb8fa3")
+	forks := []ForkActivation{
+		{Name: "Byzantium", Block: 4_370_000},
+		{Name: "ShanghaiTime", Time: 1_681_338_455},
+	}
+	section, err := ParentSectionFromCut(cut, ParentSectionOpts{
+		NetworkID:         23760000,
+		ParentGenesisHash: genesis,
+		ParentForks:       forks,
+	})
+	require.NoError(t, err)
+	require.Equal(t, "d4e56740f876aef8c010b86a40d5f56745a118d0906a34e69aec8c0db1cb8fa3", section.ParentGenesisHash)
+	require.Equal(t, forks, section.ParentForks)
+}
+
+func TestParentSectionFromCut_ZeroGenesisOmitsField(t *testing.T) {
+	// Zero-value ParentGenesisHash produces empty string on the
+	// section, which round-trips as an omitted TOML field.
+	cut := &ParentCut{
+		Schema:             1,
+		ParentChain:        "mainnet",
+		ParentChainID:      1,
+		CutBlock:           20_000_000,
+		CutBlockHash:       common.HexToHash("0x1111111111111111111111111111111111111111111111111111111111111111"),
+		CutBlockTimestamp:  1_700_000_000,
+		CutBlockParentHash: common.HexToHash("0x2222222222222222222222222222222222222222222222222222222222222222"),
+		Source:             "file",
+		CapturedAt:         1_700_000_001,
+	}
+	section, err := ParentSectionFromCut(cut, ParentSectionOpts{NetworkID: 1})
+	require.NoError(t, err)
+	require.Empty(t, section.ParentGenesisHash)
+	require.Empty(t, section.ParentForks)
 }

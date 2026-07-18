@@ -25,6 +25,7 @@ import (
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/length"
+	chainspec "github.com/erigontech/erigon/execution/chain/spec"
 	"github.com/erigontech/erigon/p2p/forkid"
 )
 
@@ -57,6 +58,25 @@ var (
 	ErrParentGenesisHashMalformed = errors.New("parent genesis hash on manifest is not decodable hex")
 	ErrParentForkIDMismatch = errors.New("parent fork ID recomputed from manifest schedule does not match local registry at cut block")
 )
+
+// ExpectedParentIdentityForChain resolves the ExpectedParentIdentity a
+// fork-follower cross-checks against, for a locally-known parent chain
+// name. Reads the chainspec registry for genesis hash + chain.Config,
+// then runs forkid.GatherForks to build the height/time fork arrays.
+// genesisTime is required for GatherForks to place time-forks. Returns
+// chainspec.ErrChainSpecUnknown when the parent chain isn't registered.
+func ExpectedParentIdentityForChain(chainName string, genesisTime uint64) (ExpectedParentIdentity, error) {
+	spec, err := chainspec.ChainSpecByName(chainName)
+	if err != nil {
+		return ExpectedParentIdentity{}, err
+	}
+	heightForks, timeForks := forkid.GatherForks(spec.Config, genesisTime)
+	return ExpectedParentIdentity{
+		GenesisHash: spec.GenesisHash,
+		HeightForks: heightForks,
+		TimeForks:   timeForks,
+	}, nil
+}
 
 // ValidateParentIdentity is the E.2 cross-check: given a fork manifest's
 // ParentSection and the consumer's locally-known identity for the
