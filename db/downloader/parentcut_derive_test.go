@@ -130,6 +130,28 @@ func TestDeriveForkChainConfig_IsDeepCopy(t *testing.T) {
 	*parent.HomesteadBlock = originalHomestead
 }
 
+func TestDeriveForkChainConfig_PopulatesParentGenesisHash(t *testing.T) {
+	parent := parentConfigForDerive()
+	cut := cutForDerive(20_000_000, 1_746_612_311)
+
+	derived, err := DeriveForkChainConfig(parent, cut, "mainnet-fork-20000000")
+	require.NoError(t, err)
+	require.NotEqual(t, [32]byte{}, derived.ParentGenesisHash,
+		"registered parent chain must populate ParentGenesisHash from chainspec")
+}
+
+func TestDeriveForkChainConfig_UnknownParentLeavesGenesisZero(t *testing.T) {
+	parent := parentConfigForDerive()
+	parent.ChainName = "unregistered-testnet"
+	cut := cutForDerive(20_000_000, 1_746_612_311)
+	cut.ParentChain = "unregistered-testnet"
+
+	derived, err := DeriveForkChainConfig(parent, cut, "unregistered-fork-20000000")
+	require.NoError(t, err)
+	require.Equal(t, [32]byte{}, derived.ParentGenesisHash,
+		"unknown parent leaves derived.ParentGenesisHash zero")
+}
+
 func TestDeriveForkChainConfig_TolratesEmptyParentManifestHash(t *testing.T) {
 	parent := parentConfigForDerive()
 	cut := cutForDerive(20_000_000, 1_746_612_311)

@@ -27,6 +27,7 @@ import (
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/execution/chain"
+	chainspec "github.com/erigontech/erigon/execution/chain/spec"
 )
 
 // DeriveForkChainConfig builds a fork's chain.Config from a parent's
@@ -113,6 +114,14 @@ func DeriveForkChainConfig(parent *chain.Config, cut *ParentCut, forkName string
 		}
 		copy(hashBytes[:], decoded)
 		derived.ParentManifestHash = hashBytes
+	}
+
+	// Populate ParentGenesisHash from the local chainspec registry. Unknown
+	// parent (not in the registry) leaves the field zero — the fork can
+	// still boot; consumers that want E.2 cross-check will skip it when
+	// the field is zero. See ValidateParentIdentity.
+	if spec, err := chainspec.ChainSpecByName(cut.ParentChain); err == nil {
+		derived.ParentGenesisHash = spec.GenesisHash
 	}
 
 	return derived, nil
